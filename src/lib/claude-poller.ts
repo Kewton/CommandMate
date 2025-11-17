@@ -8,6 +8,7 @@ import { getDbInstance } from './db-instance';
 import { getMessages, createMessage, getSessionState, updateSessionState } from './db';
 import { createLog } from './log-manager';
 import { broadcastMessage } from './ws-server';
+import { detectPrompt } from './prompt-detector';
 
 /**
  * Polling interval in milliseconds (default: 2 seconds)
@@ -61,8 +62,9 @@ function extractClaudeResponse(
   const separatorPattern = /^─{50,}$/m;
 
   // Check for thinking/processing indicators
-  // Claude shows various animations while thinking: ✻ Herding…, ✻ Canoodling…, ✻ Hyperspacing…, etc.
-  const thinkingPattern = /[✻✽⏺]\s+(Thinking|Osmosing|Herding|Canoodling|Hyperspacing|Honking|Vibing|Scheming|Pondering|Mulling)…/;
+  // Claude shows various animations while thinking: ✻ Herding…, · Choreographing…, ∴ Thinking…, etc.
+  // Match lines that contain: symbol + word + … (with optional additional text like "(esc to interrupt)")
+  const thinkingPattern = /^[✻✽⏺·∴]\s+\w+…/m;
 
   const hasPrompt = promptPattern.test(outputToCheck);
   const hasSeparator = separatorPattern.test(outputToCheck);
@@ -71,11 +73,35 @@ function extractClaudeResponse(
   // Only consider complete if we have prompt + separator AND Claude is NOT thinking
   if (hasPrompt && hasSeparator && !isThinking) {
     // Claude has completed response
-    // Extract the response content (exclude the prompt and separator)
+    // Extract the response content from lastCapturedLine to the separator (not just last 20 lines)
     const responseLines: string[] = [];
-    let foundStart = false;
 
-    for (const line of linesToCheck) {
+    // Handle tmux buffer scrolling: if lastCapturedLine >= totalLines, the buffer has scrolled
+    // In this case, we need to find the response in the current visible buffer
+    let startIndex: number;
+
+    if (lastCapturedLine >= totalLines - 5) {
+      // Buffer may have scrolled - look for the start of the new response
+      // Find the last user input prompt ("> ...") to identify where the response starts
+      let foundUserPrompt = -1;
+      for (let i = totalLines - 1; i >= Math.max(0, totalLines - 50); i--) {
+        // Look for user input line (starts with "> " followed by content)
+        if (/^>\s+\S/.test(lines[i])) {
+          foundUserPrompt = i;
+          break;
+        }
+      }
+
+      // Start extraction from after the user prompt, or from a safe earlier point
+      startIndex = foundUserPrompt >= 0 ? foundUserPrompt + 1 : Math.max(0, totalLines - 40);
+    } else {
+      // Normal case: start from lastCapturedLine
+      startIndex = Math.max(0, lastCapturedLine);
+    }
+
+    for (let i = startIndex; i < totalLines; i++) {
+      const line = lines[i];
+
       // Skip separator lines
       if (/^─{50,}$/.test(line)) {
         continue;
@@ -86,8 +112,13 @@ function extractClaudeResponse(
         break;
       }
 
-      // Skip control characters and status lines
-      if (line.includes('Thinking…') || line.includes('Osmosing…')) {
+      // Skip control characters and status lines (thinking indicators, tips, etc.)
+      if (/^[✻✽⏺·∴]\s+\w+…/.test(line)) {
+        continue;
+      }
+
+      // Skip tip lines and decoration lines
+      if (/^\s*[⎿⏋]\s+Tip:/.test(line) || /^\s*Tip:/.test(line)) {
         continue;
       }
 
@@ -101,6 +132,22 @@ function extractClaudeResponse(
       isComplete: true,
       lineCount: totalLines,
     };
+  }
+
+  // Check if this is an interactive prompt (yes/no or multiple choice)
+  // Interactive prompts don't have the ">" prompt and separator, so we need to detect them separately
+  if (!isThinking) {
+    const fullOutput = lines.join('\n');
+    const promptDetection = detectPrompt(fullOutput);
+
+    if (promptDetection.isPrompt) {
+      // This is an interactive prompt - consider it complete
+      return {
+        response: fullOutput,
+        isComplete: true,
+        lineCount: totalLines,
+      };
+    }
   }
 
   // Response not yet complete
@@ -150,7 +197,40 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
       return false;
     }
 
-    // Response is complete!
+    // Response is complete! Check if it's a prompt
+    const promptDetection = detectPrompt(result.response);
+
+    if (promptDetection.isPrompt) {
+      // This is a prompt - save as prompt message
+      console.log(`✓ Detected prompt for ${worktreeId}:`, promptDetection.promptData?.question);
+
+      const message = createMessage(db, {
+        worktreeId,
+        role: 'claude',
+        content: promptDetection.cleanContent,
+        messageType: 'prompt',
+        promptData: promptDetection.promptData,
+        timestamp: new Date(),
+      });
+
+      // Update session state
+      updateSessionState(db, worktreeId, result.lineCount);
+
+      // Broadcast to WebSocket
+      broadcastMessage('message', {
+        worktreeId,
+        message,
+      });
+
+      console.log(`✓ Saved prompt message for ${worktreeId}`);
+
+      // Stop polling - waiting for user response
+      stopPolling(worktreeId);
+
+      return true;
+    }
+
+    // Normal response (not a prompt)
     console.log(`✓ Detected Claude response for ${worktreeId}`);
 
     // Get the last user message to pair with this response
@@ -173,6 +253,7 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
       worktreeId,
       role: 'claude',
       content: result.response,
+      messageType: 'normal',
       timestamp: new Date(),
     });
 
