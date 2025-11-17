@@ -13,10 +13,13 @@ import { ja } from 'date-fns/locale';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import { PromptMessage } from './PromptMessage';
 
 export interface MessageListProps {
   messages: ChatMessage[];
+  worktreeId: string;
   loading?: boolean;
+  waitingForResponse?: boolean;
 }
 
 /**
@@ -87,16 +90,39 @@ function MessageBubble({ message }: { message: ChatMessage }) {
  *
  * @example
  * ```tsx
- * <MessageList messages={messages} loading={false} />
+ * <MessageList messages={messages} loading={false} waitingForResponse={false} />
  * ```
  */
-export function MessageList({ messages, loading = false }: MessageListProps) {
+export function MessageList({
+  messages,
+  worktreeId,
+  loading = false,
+  waitingForResponse = false,
+}: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  /**
+   * Handle prompt response
+   */
+  const handlePromptResponse = async (messageId: string, answer: string) => {
+    const response = await fetch(`/api/worktrees/${worktreeId}/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId, answer }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to send response');
+    }
+
+    // Message will be updated via WebSocket broadcast
+  };
 
   if (loading) {
     return (
@@ -135,9 +161,41 @@ export function MessageList({ messages, loading = false }: MessageListProps) {
   return (
     <Card padding="lg" className="h-[600px] flex flex-col">
       <div className="flex-1 overflow-y-auto scrollbar-thin">
-        {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
-        ))}
+        {messages.map((message) => {
+          // Render prompt message
+          if (message.messageType === 'prompt') {
+            return (
+              <PromptMessage
+                key={message.id}
+                message={message}
+                worktreeId={worktreeId}
+                onRespond={(answer) => handlePromptResponse(message.id, answer)}
+              />
+            );
+          }
+
+          // Render normal message
+          return <MessageBubble key={message.id} message={message} />;
+        })}
+
+        {/* Show "Waiting for response" indicator */}
+        {waitingForResponse && (
+          <div className="flex justify-start mb-4">
+            <div className="max-w-[80%]">
+              <div className="rounded-lg px-4 py-3 bg-gray-50 border border-gray-200">
+                <div className="flex items-center gap-3">
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  <span className="text-sm text-gray-600">Claudeが応答を生成中...</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
     </Card>

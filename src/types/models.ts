@@ -24,6 +24,69 @@ export interface Worktree {
 export type ChatRole = 'user' | 'claude';
 
 /**
+ * Message type discriminator
+ */
+export type MessageType = 'normal' | 'prompt' | 'prompt_response';
+
+/**
+ * Prompt type discriminator
+ */
+export type PromptType = 'yes_no' | 'multiple_choice' | 'approval' | 'choice' | 'input' | 'continue';
+
+/**
+ * Base prompt data interface
+ */
+export interface BasePromptData {
+  /** Type of prompt */
+  type: PromptType;
+  /** The question being asked */
+  question: string;
+  /** Current status of the prompt */
+  status: 'pending' | 'answered';
+  /** User's answer (if status is 'answered') */
+  answer?: string;
+  /** Timestamp when answered (ISO 8601) */
+  answeredAt?: string;
+}
+
+/**
+ * Yes/No prompt data
+ */
+export interface YesNoPromptData extends BasePromptData {
+  type: 'yes_no';
+  /** Available options (always ['yes', 'no']) */
+  options: ['yes', 'no'];
+  /** Default option if user doesn't respond */
+  defaultOption?: 'yes' | 'no';
+}
+
+/**
+ * Multiple choice option
+ */
+export interface MultipleChoiceOption {
+  /** Option number (e.g., 1, 2, 3) */
+  number: number;
+  /** Option text/label */
+  label: string;
+  /** Whether this is the default option (indicated by ❯) */
+  isDefault?: boolean;
+}
+
+/**
+ * Multiple choice prompt data
+ */
+export interface MultipleChoicePromptData extends BasePromptData {
+  type: 'multiple_choice';
+  /** Available options */
+  options: MultipleChoiceOption[];
+}
+
+/**
+ * Union type for all prompt data types (extensible for future prompt types)
+ */
+export type PromptData = YesNoPromptData | MultipleChoicePromptData;
+
+/**
  * Chat message
  */
 export interface ChatMessage {
@@ -43,6 +106,10 @@ export interface ChatMessage {
   logFileName?: string;
   /** Request ID for tracking (future use) */
   requestId?: string;
+  /** Message type (normal, prompt, etc.) */
+  messageType: MessageType;
+  /** Prompt data (only for prompt messages) */
+  promptData?: PromptData;
 }
 
 /**

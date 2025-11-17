@@ -35,6 +35,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabView>('messages');
+  const [waitingForResponse, setWaitingForResponse] = useState(false);
 
   /**
    * Fetch worktree data
@@ -82,6 +83,8 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
     worktreeIds: [worktreeId],
     onMessage: (message) => {
       if (message.type === 'broadcast' && message.worktreeId === worktreeId) {
+        // Claude response received - clear waiting state
+        setWaitingForResponse(false);
         // Refresh data when updates occur
         fetchMessages();
       }
@@ -92,6 +95,8 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
    * Handle message sent
    */
   const handleMessageSent = () => {
+    // Set waiting state when user sends a message
+    setWaitingForResponse(true);
     fetchMessages();
   };
 
@@ -193,7 +198,12 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
         <div className="lg:col-span-2 space-y-6">
           {activeTab === 'messages' && (
             <>
-              <MessageList messages={messages} loading={false} />
+              <MessageList
+                messages={messages}
+                worktreeId={worktree.id}
+                loading={false}
+                waitingForResponse={waitingForResponse}
+              />
               <Card padding="lg">
                 <CardHeader>
                   <CardTitle>Send Message</CardTitle>

@@ -38,6 +38,8 @@ export function initDatabase(db: Database.Database): void {
       timestamp INTEGER NOT NULL,
       log_file_name TEXT,
       request_id TEXT,
+      message_type TEXT DEFAULT 'normal',
+      prompt_data TEXT,
 
       FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
     );
@@ -52,6 +54,11 @@ export function initDatabase(db: Database.Database): void {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_request_id
     ON chat_messages(request_id);
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_type
+    ON chat_messages(message_type, worktree_id);
   `);
 
   // Create session_states table
@@ -163,8 +170,8 @@ export function createMessage(
 
   const stmt = db.prepare(`
     INSERT INTO chat_messages
-    (id, worktree_id, role, content, summary, timestamp, log_file_name, request_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    (id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -175,7 +182,9 @@ export function createMessage(
     message.summary || null,
     message.timestamp.getTime(),
     message.logFileName || null,
-    message.requestId || null
+    message.requestId || null,
+    message.messageType || 'normal',
+    message.promptData ? JSON.stringify(message.promptData) : null
   );
 
   // Update worktree's updated_at timestamp
@@ -194,7 +203,7 @@ export function getMessages(
   limit: number = 50
 ): ChatMessage[] {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data
     FROM chat_messages
     WHERE worktree_id = ? AND (? IS NULL OR timestamp < ?)
     ORDER BY timestamp ASC
@@ -212,6 +221,8 @@ export function getMessages(
     timestamp: number;
     log_file_name: string | null;
     request_id: string | null;
+    message_type: string | null;
+    prompt_data: string | null;
   }>;
 
   return rows.map((row) => ({
@@ -223,6 +234,8 @@ export function getMessages(
     timestamp: new Date(row.timestamp),
     logFileName: row.log_file_name || undefined,
     requestId: row.request_id || undefined,
+    messageType: (row.message_type as any) || 'normal',
+    promptData: row.prompt_data ? JSON.parse(row.prompt_data) : undefined,
   }));
 }
 
@@ -288,6 +301,67 @@ function updateWorktreeTimestamp(
   `);
 
   stmt.run(timestamp.getTime(), worktreeId);
+}
+
+/**
+ * Get message by ID
+ */
+export function getMessageById(
+  db: Database.Database,
+  messageId: string
+): ChatMessage | null {
+  const stmt = db.prepare(`
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data
+    FROM chat_messages
+    WHERE id = ?
+  `);
+
+  const row = stmt.get(messageId) as {
+    id: string;
+    worktree_id: string;
+    role: string;
+    content: string;
+    summary: string | null;
+    timestamp: number;
+    log_file_name: string | null;
+    request_id: string | null;
+    message_type: string | null;
+    prompt_data: string | null;
+  } | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    worktreeId: row.worktree_id,
+    role: row.role as 'user' | 'claude',
+    content: row.content,
+    summary: row.summary || undefined,
+    timestamp: new Date(row.timestamp),
+    logFileName: row.log_file_name || undefined,
+    requestId: row.request_id || undefined,
+    messageType: (row.message_type as any) || 'normal',
+    promptData: row.prompt_data ? JSON.parse(row.prompt_data) : undefined,
+  };
+}
+
+/**
+ * Update prompt data for a message
+ */
+export function updatePromptData(
+  db: Database.Database,
+  messageId: string,
+  promptData: any
+): void {
+  const stmt = db.prepare(`
+    UPDATE chat_messages
+    SET prompt_data = ?
+    WHERE id = ?
+  `);
+
+  stmt.run(JSON.stringify(promptData), messageId);
 }
 
 /**
