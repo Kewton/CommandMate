@@ -11,3 +11,6 @@ export type { CardProps, CardHeaderProps, CardTitleProps, CardContentProps, Card
 
 export { Badge } from './Badge';
 export type { BadgeProps, BadgeVariant } from './Badge';
+
+export { Modal } from './Modal';
+export type { ModalProps } from './Modal';

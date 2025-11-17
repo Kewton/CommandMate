@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Card } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import { format } from 'date-fns';
@@ -14,6 +14,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { PromptMessage } from './PromptMessage';
+import { FileViewer } from './FileViewer';
 
 export interface MessageListProps {
   messages: ChatMessage[];
@@ -25,9 +26,95 @@ export interface MessageListProps {
 /**
  * Message bubble component
  */
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({
+  message,
+  onFilePathClick
+}: {
+  message: ChatMessage;
+  onFilePathClick: (path: string) => void;
+}) {
   const isUser = message.role === 'user';
   const timestamp = format(new Date(message.timestamp), 'PPp', { locale: ja });
+
+  /**
+   * Detect and linkify file paths in text
+   * Matches patterns like: src/components/Foo.tsx, src/lib/bar.ts:123, etc.
+   */
+  const renderTextWithFileLinks = (text: string): React.ReactNode[] => {
+    // File path pattern: matches common file paths with extensions
+    // Examples: src/components/Foo.tsx, lib/utils.ts, path/to/file.js:123
+    const filePathPattern = /\b([\w\-./]+\/[\w\-./]+\.\w+)(?::(\d+))?/g;
+
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = filePathPattern.exec(text)) !== null) {
+      const fullMatch = match[0];
+      const filePath = match[1];
+
+      // Add text before the match
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index));
+      }
+
+      // Add clickable file link
+      parts.push(
+        <button
+          key={`file-${match.index}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onFilePathClick(filePath);
+          }}
+          className={`underline hover:no-underline font-mono transition-colors break-all inline ${
+            isUser ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-800'
+          }`}
+        >
+          {fullMatch}
+        </button>
+      );
+
+      lastIndex = match.index + fullMatch.length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : [text];
+  };
+
+  /**
+   * Process children recursively to find and linkify file paths
+   */
+  const processChildren = (children: React.ReactNode): React.ReactNode => {
+    if (typeof children === 'string') {
+      const parts = renderTextWithFileLinks(children);
+      return parts.length === 1 && typeof parts[0] === 'string' ? children : <>{parts}</>;
+    }
+
+    if (Array.isArray(children)) {
+      return children.map((child, index) => (
+        <React.Fragment key={index}>{processChildren(child)}</React.Fragment>
+      ));
+    }
+
+    return children;
+  };
+
+  /**
+   * Memoized markdown components to prevent re-renders
+   */
+  const markdownComponents = useMemo(() => ({
+    p: ({ children, ...props }: any) => {
+      if (!isUser) {
+        return <p {...props}>{processChildren(children)}</p>;
+      }
+      return <p {...props}>{children}</p>;
+    }
+  }), [isUser, onFilePathClick]);
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -60,6 +147,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 rehypePlugins={[rehypeHighlight]}
+                components={markdownComponents}
               >
                 {message.content}
               </ReactMarkdown>
@@ -100,11 +188,21 @@ export function MessageList({
   waitingForResponse = false,
 }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [fileViewerOpen, setFileViewerOpen] = useState(false);
+  const [selectedFilePath, setSelectedFilePath] = useState('');
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  /**
+   * Handle file path click
+   */
+  const handleFilePathClick = (path: string) => {
+    setSelectedFilePath(path);
+    setFileViewerOpen(true);
+  };
 
   /**
    * Handle prompt response
@@ -175,7 +273,13 @@ export function MessageList({
           }
 
           // Render normal message
-          return <MessageBubble key={message.id} message={message} />;
+          return (
+            <MessageBubble
+              key={message.id}
+              message={message}
+              onFilePathClick={handleFilePathClick}
+            />
+          );
         })}
 
         {/* Show "Waiting for response" indicator */}
@@ -198,6 +302,14 @@ export function MessageList({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* File Viewer Modal */}
+      <FileViewer
+        isOpen={fileViewerOpen}
+        onClose={() => setFileViewerOpen(false)}
+        worktreeId={worktreeId}
+        filePath={selectedFilePath}
+      />
     </Card>
   );
 }
