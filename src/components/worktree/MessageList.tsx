@@ -5,7 +5,8 @@
 
 'use client';
 
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import { format } from 'date-fns';
@@ -14,7 +15,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { PromptMessage } from './PromptMessage';
-import { FileViewer } from './FileViewer';
 
 export interface MessageListProps {
   messages: ChatMessage[];
@@ -28,9 +28,11 @@ export interface MessageListProps {
  */
 function MessageBubble({
   message,
+  worktreeId,
   onFilePathClick
 }: {
   message: ChatMessage;
+  worktreeId: string;
   onFilePathClick: (path: string) => void;
 }) {
   const isUser = message.role === 'user';
@@ -114,7 +116,7 @@ function MessageBubble({
       }
       return <p {...props}>{children}</p>;
     }
-  }), [isUser, onFilePathClick]);
+  }), [isUser, worktreeId, onFilePathClick]);
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -187,9 +189,8 @@ export function MessageList({
   loading = false,
   waitingForResponse = false,
 }: MessageListProps) {
+  const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [fileViewerOpen, setFileViewerOpen] = useState(false);
-  const [selectedFilePath, setSelectedFilePath] = useState('');
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -197,11 +198,10 @@ export function MessageList({
   }, [messages]);
 
   /**
-   * Handle file path click
+   * Handle file path click - navigate to full screen file viewer
    */
   const handleFilePathClick = (path: string) => {
-    setSelectedFilePath(path);
-    setFileViewerOpen(true);
+    router.push(`/worktrees/${worktreeId}/files/${path}`);
   };
 
   /**
@@ -277,6 +277,7 @@ export function MessageList({
             <MessageBubble
               key={message.id}
               message={message}
+              worktreeId={worktreeId}
               onFilePathClick={handleFilePathClick}
             />
           );
@@ -302,14 +303,6 @@ export function MessageList({
 
         <div ref={messagesEndRef} />
       </div>
-
-      {/* File Viewer Modal */}
-      <FileViewer
-        isOpen={fileViewerOpen}
-        onClose={() => setFileViewerOpen(false)}
-        worktreeId={worktreeId}
-        filePath={selectedFilePath}
-      />
     </Card>
   );
 }
