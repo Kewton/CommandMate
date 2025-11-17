@@ -8,6 +8,9 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card } from '@/components/ui';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 
 interface FileContent {
   path: string;
@@ -25,6 +28,9 @@ export default function FileViewerPage() {
   const [content, setContent] = useState<FileContent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Check if file is markdown
+  const isMarkdown = content?.extension === 'md' || content?.extension === 'markdown';
 
   useEffect(() => {
     const fetchFile = async () => {
@@ -127,12 +133,25 @@ export default function FileViewerPage() {
                 {content.worktreePath}/{content.path}
               </p>
             </div>
-            <div className="p-4 bg-white overflow-x-auto">
-              <pre className="text-sm">
-                <code className={`language-${content.extension}`}>
-                  {content.content}
-                </code>
-              </pre>
+            <div className="p-4 bg-white">
+              {isMarkdown ? (
+                // Markdown rendering
+                <div className="prose prose-sm sm:prose-base max-w-none break-words">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeHighlight]}
+                  >
+                    {content.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                // Code rendering with line wrapping
+                <pre className="text-sm whitespace-pre-wrap break-all">
+                  <code className={`language-${content.extension}`}>
+                    {content.content}
+                  </code>
+                </pre>
+              )}
             </div>
           </Card>
         )}
