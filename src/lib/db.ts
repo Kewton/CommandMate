@@ -197,7 +197,7 @@ export function getMessages(
     SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id
     FROM chat_messages
     WHERE worktree_id = ? AND (? IS NULL OR timestamp < ?)
-    ORDER BY timestamp DESC
+    ORDER BY timestamp ASC
     LIMIT ?
   `);
 

@@ -5,12 +5,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, createMessage, updateSessionState } from '@/lib/db';
-import { capturePane } from '@/lib/tmux';
+import { getWorktreeById, createMessage, updateSessionState, getMessages } from '@/lib/db';
+import { captureClaudeOutput, getSessionName } from '@/lib/claude-session';
+import { createLog } from '@/lib/log-manager';
+import { broadcastMessage } from '@/lib/ws-server';
 
 interface ClaudeDoneRequest {
   worktreeId: string;
-  sessionName: string;
 }
 
 interface ParsedOutput {
@@ -69,13 +70,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!body.sessionName || typeof body.sessionName !== 'string') {
-      return NextResponse.json(
-        { error: 'sessionName is required and must be a string' },
-        { status: 400 }
-      );
-    }
-
     // Check if worktree exists
     const worktree = getWorktreeById(db, body.worktreeId);
     if (!worktree) {
@@ -85,13 +79,42 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Capture tmux pane output
-    const output = await capturePane(body.sessionName, 1000);
+    // Capture Claude output from tmux
+    let output: string;
+    try {
+      output = await captureClaudeOutput(body.worktreeId, 10000);
+    } catch (error: any) {
+      console.error('Failed to capture Claude output:', error);
+      return NextResponse.json(
+        { error: `Failed to capture Claude output: ${error.message}` },
+        { status: 500 }
+      );
+    }
 
     // Parse output to extract log information
     const parsed = parseClaudeOutput(output);
 
-    // Create Claude message
+    // Get the last user message to pair with this response
+    const messages = getMessages(db, body.worktreeId);
+    const lastUserMessage = messages
+      .filter((m) => m.role === 'user')
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+
+    // Create Markdown log file
+    if (lastUserMessage) {
+      try {
+        await createLog(
+          body.worktreeId,
+          lastUserMessage.content,
+          parsed.content
+        );
+      } catch (error) {
+        console.error('Failed to create log file:', error);
+        // Continue even if log creation fails
+      }
+    }
+
+    // Create Claude message in database
     const message = createMessage(db, {
       worktreeId: body.worktreeId,
       role: 'claude',
@@ -102,9 +125,17 @@ export async function POST(request: NextRequest) {
       requestId: parsed.requestId,
     });
 
-    // Update session state (last captured line)
+    // Update session state
     const lineCount = output.split('\n').length;
     updateSessionState(db, body.worktreeId, lineCount);
+
+    // Broadcast message to WebSocket clients
+    broadcastMessage('message', {
+      worktreeId: body.worktreeId,
+      message,
+    });
+
+    console.log(`✓ Processed Claude response for worktree: ${body.worktreeId}`);
 
     return NextResponse.json(
       {

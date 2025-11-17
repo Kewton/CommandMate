@@ -9,6 +9,7 @@ import next from 'next';
 import { setupWebSocket, closeWebSocket } from './src/lib/ws-server';
 import { scanWorktrees, syncWorktreesToDB } from './src/lib/worktrees';
 import { getDbInstance } from './src/lib/db-instance';
+import { stopAllPolling } from './src/lib/claude-poller';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
@@ -65,6 +66,7 @@ app.prepare().then(() => {
   // Graceful shutdown
   process.on('SIGTERM', () => {
     console.log('SIGTERM signal received: closing HTTP server');
+    stopAllPolling();
     server.close(() => {
       console.log('HTTP server closed');
       closeWebSocket();
@@ -75,6 +77,7 @@ app.prepare().then(() => {
 
   process.on('SIGINT', () => {
     console.log('SIGINT signal received: closing HTTP server');
+    stopAllPolling();
     server.close(() => {
       console.log('HTTP server closed');
       closeWebSocket();

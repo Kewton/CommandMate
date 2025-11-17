@@ -199,6 +199,25 @@ export function broadcast(worktreeId: string, data: any): void {
 }
 
 /**
+ * Broadcast message with type to a specific worktree room
+ *
+ * @param type - Message type
+ * @param data - Data to broadcast (should include worktreeId)
+ *
+ * @example
+ * ```typescript
+ * broadcastMessage('message', { worktreeId: 'feature-foo', message: {...} });
+ * ```
+ */
+export function broadcastMessage(type: string, data: any): void {
+  if (data.worktreeId) {
+    handleBroadcast(data.worktreeId, { type, ...data });
+  } else {
+    console.warn('broadcastMessage called without worktreeId');
+  }
+}
+
+/**
  * Close WebSocket server
  * Used for testing and graceful shutdown
  */
