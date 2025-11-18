@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
@@ -28,95 +28,95 @@ export interface MessageListProps {
  */
 function MessageBubble({
   message,
-  worktreeId,
   onFilePathClick
 }: {
   message: ChatMessage;
-  worktreeId: string;
   onFilePathClick: (path: string) => void;
 }) {
   const isUser = message.role === 'user';
   const timestamp = format(new Date(message.timestamp), 'PPp', { locale: ja });
 
   /**
-   * Detect and linkify file paths in text
-   * Matches patterns like: src/components/Foo.tsx, src/lib/bar.ts:123, etc.
-   */
-  const renderTextWithFileLinks = (text: string): React.ReactNode[] => {
-    // File path pattern: matches common file paths with extensions
-    // Examples: src/components/Foo.tsx, lib/utils.ts, path/to/file.js:123
-    const filePathPattern = /\b([\w\-./]+\/[\w\-./]+\.\w+)(?::(\d+))?/g;
-
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-    let match;
-
-    while ((match = filePathPattern.exec(text)) !== null) {
-      const fullMatch = match[0];
-      const filePath = match[1];
-
-      // Add text before the match
-      if (match.index > lastIndex) {
-        parts.push(text.substring(lastIndex, match.index));
-      }
-
-      // Add clickable file link
-      parts.push(
-        <button
-          key={`file-${match.index}`}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onFilePathClick(filePath);
-          }}
-          className={`underline hover:no-underline font-mono transition-colors break-all inline ${
-            isUser ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-800'
-          }`}
-        >
-          {fullMatch}
-        </button>
-      );
-
-      lastIndex = match.index + fullMatch.length;
-    }
-
-    // Add remaining text
-    if (lastIndex < text.length) {
-      parts.push(text.substring(lastIndex));
-    }
-
-    return parts.length > 0 ? parts : [text];
-  };
-
-  /**
-   * Process children recursively to find and linkify file paths
-   */
-  const processChildren = (children: React.ReactNode): React.ReactNode => {
-    if (typeof children === 'string') {
-      const parts = renderTextWithFileLinks(children);
-      return parts.length === 1 && typeof parts[0] === 'string' ? children : <>{parts}</>;
-    }
-
-    if (Array.isArray(children)) {
-      return children.map((child, index) => (
-        <React.Fragment key={index}>{processChildren(child)}</React.Fragment>
-      ));
-    }
-
-    return children;
-  };
-
-  /**
    * Memoized markdown components to prevent re-renders
    */
-  const markdownComponents = useMemo(() => ({
-    p: ({ children, ...props }: any) => {
-      if (!isUser) {
-        return <p {...props}>{processChildren(children)}</p>;
+  const markdownComponents = useMemo(() => {
+    /**
+     * Detect and linkify file paths in text
+     * Matches patterns like: src/components/Foo.tsx, src/lib/bar.ts:123, etc.
+     */
+    const renderTextWithFileLinks = (text: string): React.ReactNode[] => {
+      // File path pattern: matches common file paths with extensions
+      // Examples: src/components/Foo.tsx, lib/utils.ts, path/to/file.js:123
+      const filePathPattern = /\b([\w\-./]+\/[\w\-./]+\.\w+)(?::(\d+))?/g;
+
+      const parts: React.ReactNode[] = [];
+      let lastIndex = 0;
+      let match;
+
+      while ((match = filePathPattern.exec(text)) !== null) {
+        const fullMatch = match[0];
+        const filePath = match[1];
+
+        // Add text before the match
+        if (match.index > lastIndex) {
+          parts.push(text.substring(lastIndex, match.index));
+        }
+
+        // Add clickable file link
+        parts.push(
+          <button
+            key={`file-${match.index}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onFilePathClick(filePath);
+            }}
+            className={`underline hover:no-underline font-mono transition-colors break-all inline ${
+              isUser ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-800'
+            }`}
+          >
+            {fullMatch}
+          </button>
+        );
+
+        lastIndex = match.index + fullMatch.length;
       }
-      return <p {...props}>{children}</p>;
-    }
-  }), [isUser, worktreeId, onFilePathClick]);
+
+      // Add remaining text
+      if (lastIndex < text.length) {
+        parts.push(text.substring(lastIndex));
+      }
+
+      return parts.length > 0 ? parts : [text];
+    };
+
+    /**
+     * Process children recursively to find and linkify file paths
+     */
+    const processChildren = (children: React.ReactNode): React.ReactNode => {
+      if (typeof children === 'string') {
+        const parts = renderTextWithFileLinks(children);
+        return parts.length === 1 && typeof parts[0] === 'string' ? children : <>{parts}</>;
+      }
+
+      if (Array.isArray(children)) {
+        return children.map((child, index) => (
+          <React.Fragment key={index}>{processChildren(child)}</React.Fragment>
+        ));
+      }
+
+      return children;
+    };
+
+    return {
+      p: ({ children, ...props }: any) => {
+        if (!isUser) {
+          return <p {...props}>{processChildren(children)}</p>;
+        }
+        return <p {...props}>{children}</p>;
+      }
+    };
+  }, [isUser, onFilePathClick]);
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -200,9 +200,9 @@ export function MessageList({
   /**
    * Handle file path click - navigate to full screen file viewer
    */
-  const handleFilePathClick = (path: string) => {
+  const handleFilePathClick = useCallback((path: string) => {
     router.push(`/worktrees/${worktreeId}/files/${path}`);
-  };
+  }, [router, worktreeId]);
 
   /**
    * Handle prompt response
@@ -277,7 +277,6 @@ export function MessageList({
             <MessageBubble
               key={message.id}
               message={message}
-              worktreeId={worktreeId}
               onFilePathClick={handleFilePathClick}
             />
           );
