@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, deleteSessionState } from '@/lib/db';
+import { getWorktreeById, deleteSessionState, deleteAllMessages } from '@/lib/db';
 import { getSessionName, isClaudeRunning } from '@/lib/claude-session';
 import { killSession } from '@/lib/tmux';
 import { broadcast } from '@/lib/ws-server';
@@ -53,11 +53,15 @@ export async function POST(
     // Clean up session state (important: reset line count tracking)
     deleteSessionState(db, params.id);
 
+    // Clear all messages for this worktree (log files are preserved)
+    deleteAllMessages(db, params.id);
+
     // Broadcast session status change via WebSocket
     broadcast(params.id, {
       type: 'session_status_changed',
       worktreeId: params.id,
       isRunning: false,
+      messagesCleared: true,
     });
 
     return NextResponse.json(

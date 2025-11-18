@@ -71,17 +71,45 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   }, [worktreeId]);
 
   /**
-   * Initial data fetch
+   * Initial data fetch with log file sync
    */
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
+
+      // Fetch worktree and messages from database
       await Promise.all([fetchWorktree(), fetchMessages()]);
+
+      // Then sync latest Claude message from log file
+      try {
+        const updatedMessages = await worktreeApi.getMessages(worktreeId);
+        const claudeMessages = updatedMessages.filter(m => m.role === 'assistant' && m.logFileName);
+        const latestClaudeMessage = claudeMessages
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+
+        if (latestClaudeMessage?.logFileName) {
+          console.log('[Initial fetch] Syncing latest message from log file:', latestClaudeMessage.logFileName);
+          const logContent = await fetchFromLogFile(latestClaudeMessage.logFileName);
+          if (logContent) {
+            setMessages(prevMessages =>
+              prevMessages.map(msg =>
+                msg.id === latestClaudeMessage.id
+                  ? { ...msg, content: logContent }
+                  : msg
+              )
+            );
+          }
+        }
+      } catch (err) {
+        console.error('[Initial fetch] Error syncing from log file:', err);
+        // Don't show error to user, just log it
+      }
+
       setLoading(false);
     };
 
     fetchData();
-  }, [fetchWorktree, fetchMessages]);
+  }, [fetchWorktree, fetchMessages, worktreeId]);
 
   /**
    * Sync memo and link text when worktree changes
@@ -235,6 +263,14 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
       // Show notification
       setShowNewMessageNotification(true);
       setTimeout(() => setShowNewMessageNotification(false), 3000);
+    } else if (message.data?.type === 'session_status_changed' && message.data.worktreeId === worktreeId) {
+      // Session was killed - check if messages should be cleared
+      if (message.data.messagesCleared) {
+        console.log('[WorktreeDetail] Session killed, clearing messages');
+        setMessages([]);
+        setWaitingForResponse(false);
+        setGeneratingContent('');
+      }
     }
   }, [worktreeId, fetchMessages]);
 
@@ -417,7 +453,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
                 : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
           >
-            Log Files
+            Log
           </button>
           <button
             onClick={() => setActiveTab('info')}

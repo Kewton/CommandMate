@@ -371,6 +371,24 @@ export function getMessages(
 }
 
 /**
+ * Delete all messages for a worktree
+ * Used when killing a session to clear message history
+ * Note: Log files are preserved for historical reference
+ */
+export function deleteAllMessages(
+  db: Database.Database,
+  worktreeId: string
+): void {
+  const stmt = db.prepare(`
+    DELETE FROM chat_messages
+    WHERE worktree_id = ?
+  `);
+
+  stmt.run(worktreeId);
+  console.log(`[deleteAllMessages] Deleted all messages for worktree: ${worktreeId}`);
+}
+
+/**
  * Get session state for a worktree
  */
 export function getSessionState(
