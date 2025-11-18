@@ -12,10 +12,38 @@ export interface Worktree {
   name: string;
   /** Absolute path to worktree directory */
   path: string;
-  /** Summary of last message (for list view) */
+  /** Repository root path (e.g., "/path/to/repo") */
+  repositoryPath: string;
+  /** Repository display name (e.g., "MyProject") */
+  repositoryName: string;
+  /** User memo for this worktree */
+  memo?: string;
+  /** Latest user message content (truncated to ~200 chars) */
+  lastUserMessage?: string;
+  /** Timestamp of latest user message */
+  lastUserMessageAt?: Date;
+  /** Summary of last message (for list view) - DEPRECATED: use lastUserMessage instead */
   lastMessageSummary?: string;
   /** Last updated timestamp */
   updatedAt?: Date;
+}
+
+/**
+ * Repository representation (for Phase 2 multi-repo management)
+ */
+export interface Repository {
+  /** Repository ID (hash of path) */
+  id: string;
+  /** Repository display name */
+  name: string;
+  /** Absolute path to repository root */
+  path: string;
+  /** Whether this repository is enabled for scanning */
+  enabled: boolean;
+  /** Creation timestamp */
+  createdAt: Date;
+  /** Last updated timestamp */
+  updatedAt: Date;
 }
 
 /**

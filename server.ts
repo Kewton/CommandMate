@@ -10,6 +10,7 @@ import { setupWebSocket, closeWebSocket } from './src/lib/ws-server';
 import { scanWorktrees, syncWorktreesToDB } from './src/lib/worktrees';
 import { getDbInstance } from './src/lib/db-instance';
 import { stopAllPolling } from './src/lib/claude-poller';
+import { runMigrations } from './src/lib/db-migrations';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
@@ -37,16 +38,20 @@ app.prepare().then(() => {
 
   // Scan and sync worktrees on startup
   async function initializeWorktrees() {
-    const rootDir = process.env.MCBD_ROOT_DIR;
-    if (!rootDir) {
-      console.warn('Warning: MCBD_ROOT_DIR not set, skipping worktree scan');
-      return;
-    }
-
     try {
+      // Run database migrations first
+      console.log('Running database migrations...');
+      const db = getDbInstance();
+      runMigrations(db);
+
+      const rootDir = process.env.MCBD_ROOT_DIR;
+      if (!rootDir) {
+        console.warn('Warning: MCBD_ROOT_DIR not set, skipping worktree scan');
+        return;
+      }
+
       console.log(`Scanning worktrees in: ${rootDir}`);
       const worktrees = await scanWorktrees(rootDir);
-      const db = getDbInstance();
       syncWorktreesToDB(db, worktrees);
       console.log(`✓ Found and synced ${worktrees.length} worktrees`);
     } catch (error) {

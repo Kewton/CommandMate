@@ -77,7 +77,8 @@ export function initDatabase(db: Database.Database): void {
  */
 export function getWorktrees(db: Database.Database): Worktree[] {
   const stmt = db.prepare(`
-    SELECT id, name, path, last_message_summary, updated_at
+    SELECT id, name, path, repository_path, repository_name, memo,
+           last_user_message, last_user_message_at, last_message_summary, updated_at
     FROM worktrees
     ORDER BY updated_at DESC NULLS LAST
   `);
@@ -86,6 +87,11 @@ export function getWorktrees(db: Database.Database): Worktree[] {
     id: string;
     name: string;
     path: string;
+    repository_path: string | null;
+    repository_name: string | null;
+    memo: string | null;
+    last_user_message: string | null;
+    last_user_message_at: number | null;
     last_message_summary: string | null;
     updated_at: number | null;
   }>;
@@ -94,6 +100,11 @@ export function getWorktrees(db: Database.Database): Worktree[] {
     id: row.id,
     name: row.name,
     path: row.path,
+    repositoryPath: row.repository_path || '',
+    repositoryName: row.repository_name || '',
+    memo: row.memo || undefined,
+    lastUserMessage: row.last_user_message || undefined,
+    lastUserMessageAt: row.last_user_message_at ? new Date(row.last_user_message_at) : undefined,
     lastMessageSummary: row.last_message_summary || undefined,
     updatedAt: row.updated_at ? new Date(row.updated_at) : undefined,
   }));
@@ -107,7 +118,8 @@ export function getWorktreeById(
   id: string
 ): Worktree | null {
   const stmt = db.prepare(`
-    SELECT id, name, path, last_message_summary, updated_at
+    SELECT id, name, path, repository_path, repository_name, memo,
+           last_user_message, last_user_message_at, last_message_summary, updated_at
     FROM worktrees
     WHERE id = ?
   `);
@@ -116,6 +128,11 @@ export function getWorktreeById(
     id: string;
     name: string;
     path: string;
+    repository_path: string | null;
+    repository_name: string | null;
+    memo: string | null;
+    last_user_message: string | null;
+    last_user_message_at: number | null;
     last_message_summary: string | null;
     updated_at: number | null;
   } | undefined;
@@ -128,6 +145,11 @@ export function getWorktreeById(
     id: row.id,
     name: row.name,
     path: row.path,
+    repositoryPath: row.repository_path || '',
+    repositoryName: row.repository_name || '',
+    memo: row.memo || undefined,
+    lastUserMessage: row.last_user_message || undefined,
+    lastUserMessageAt: row.last_user_message_at ? new Date(row.last_user_message_at) : undefined,
     lastMessageSummary: row.last_message_summary || undefined,
     updatedAt: row.updated_at ? new Date(row.updated_at) : undefined,
   };
@@ -141,11 +163,19 @@ export function upsertWorktree(
   worktree: Worktree
 ): void {
   const stmt = db.prepare(`
-    INSERT INTO worktrees (id, name, path, last_message_summary, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO worktrees (
+      id, name, path, repository_path, repository_name, memo,
+      last_user_message, last_user_message_at, last_message_summary, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       path = excluded.path,
+      repository_path = excluded.repository_path,
+      repository_name = excluded.repository_name,
+      memo = excluded.memo,
+      last_user_message = excluded.last_user_message,
+      last_user_message_at = excluded.last_user_message_at,
       last_message_summary = excluded.last_message_summary,
       updated_at = excluded.updated_at
   `);
@@ -154,9 +184,31 @@ export function upsertWorktree(
     worktree.id,
     worktree.name,
     worktree.path,
+    worktree.repositoryPath || null,
+    worktree.repositoryName || null,
+    worktree.memo || null,
+    worktree.lastUserMessage || null,
+    worktree.lastUserMessageAt?.getTime() || null,
     worktree.lastMessageSummary || null,
     worktree.updatedAt?.getTime() || null
   );
+}
+
+/**
+ * Update worktree memo
+ */
+export function updateWorktreeMemo(
+  db: Database.Database,
+  worktreeId: string,
+  memo: string
+): void {
+  const stmt = db.prepare(`
+    UPDATE worktrees
+    SET memo = ?
+    WHERE id = ?
+  `);
+
+  stmt.run(memo || null, worktreeId);
 }
 
 /**
@@ -189,6 +241,11 @@ export function createMessage(
 
   // Update worktree's updated_at timestamp
   updateWorktreeTimestamp(db, message.worktreeId, message.timestamp);
+
+  // If this is a user message, update last_user_message
+  if (message.role === 'user') {
+    updateLastUserMessage(db, message.worktreeId, message.content, message.timestamp);
+  }
 
   return { id, ...message };
 }
@@ -301,6 +358,28 @@ function updateWorktreeTimestamp(
   `);
 
   stmt.run(timestamp.getTime(), worktreeId);
+}
+
+/**
+ * Update worktree's last user message
+ * @private
+ */
+function updateLastUserMessage(
+  db: Database.Database,
+  worktreeId: string,
+  message: string,
+  timestamp: Date
+): void {
+  const stmt = db.prepare(`
+    UPDATE worktrees
+    SET last_user_message = ?,
+        last_user_message_at = ?
+    WHERE id = ?
+  `);
+
+  // Truncate message to 200 characters
+  const truncatedMessage = message.substring(0, 200);
+  stmt.run(truncatedMessage, timestamp.getTime(), worktreeId);
 }
 
 /**
