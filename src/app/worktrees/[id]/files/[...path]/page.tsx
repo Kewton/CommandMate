@@ -133,20 +133,64 @@ export default function FileViewerPage() {
                 {content.worktreePath}/{content.path}
               </p>
             </div>
-            <div className="p-4 bg-white">
+            <div className="p-6 sm:p-8 bg-white">
               {isMarkdown ? (
-                // Markdown rendering
-                <div className="prose prose-sm sm:prose-base max-w-none break-words">
+                // Markdown rendering with GitHub-like styling
+                <div className="prose prose-slate max-w-none prose-headings:font-semibold prose-h1:text-3xl prose-h1:border-b prose-h1:pb-2 prose-h2:text-2xl prose-h2:border-b prose-h2:pb-2 prose-h3:text-xl prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline prose-pre:bg-gray-100 prose-pre:border prose-pre:border-gray-200 prose-code:text-sm prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-img:rounded-lg prose-img:shadow-md">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeHighlight]}
+                    components={{
+                      // Custom components for better rendering
+                      code: ({ node, inline, className, children, ...props }: any) => {
+                        if (inline) {
+                          return (
+                            <code className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+                              {children}
+                            </code>
+                          );
+                        }
+                        return (
+                          <code className={className} {...props}>
+                            {children}
+                          </code>
+                        );
+                      },
+                      pre: ({ children, ...props }: any) => (
+                        <pre className="bg-gray-50 border border-gray-200 rounded-md p-4 overflow-x-auto" {...props}>
+                          {children}
+                        </pre>
+                      ),
+                      table: ({ children, ...props }: any) => (
+                        <div className="overflow-x-auto">
+                          <table className="border-collapse border border-gray-300" {...props}>
+                            {children}
+                          </table>
+                        </div>
+                      ),
+                      th: ({ children, ...props }: any) => (
+                        <th className="border border-gray-300 bg-gray-100 px-4 py-2 text-left font-semibold" {...props}>
+                          {children}
+                        </th>
+                      ),
+                      td: ({ children, ...props }: any) => (
+                        <td className="border border-gray-300 px-4 py-2" {...props}>
+                          {children}
+                        </td>
+                      ),
+                      blockquote: ({ children, ...props }: any) => (
+                        <blockquote className="border-l-4 border-gray-300 pl-4 italic text-gray-700" {...props}>
+                          {children}
+                        </blockquote>
+                      ),
+                    }}
                   >
                     {content.content}
                   </ReactMarkdown>
                 </div>
               ) : (
                 // Code rendering with line wrapping
-                <pre className="text-sm whitespace-pre-wrap break-all">
+                <pre className="bg-gray-50 border border-gray-200 rounded-md p-4 overflow-x-auto text-sm">
                   <code className={`language-${content.extension}`}>
                     {content.content}
                   </code>
