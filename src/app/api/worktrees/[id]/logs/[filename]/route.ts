@@ -6,10 +6,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { validateWorktreePath } from '@/lib/path-validator';
-import { getEnv } from '@/lib/env';
-import fs from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
+
+const LOG_DIR = process.env.MCBD_LOG_DIR || path.join(process.cwd(), 'data', 'logs');
 
 export async function GET(
   request: NextRequest,
@@ -17,7 +17,6 @@ export async function GET(
 ) {
   try {
     const db = getDbInstance();
-    const env = getEnv();
 
     // Check if worktree exists
     const worktree = getWorktreeById(db, params.id);
@@ -28,71 +27,60 @@ export async function GET(
       );
     }
 
-    // Validate worktree path is within root directory
-    try {
-      validateWorktreePath(worktree.path, env.MCBD_ROOT_DIR);
-    } catch (error) {
-      console.error('Worktree path validation failed:', error);
-      return NextResponse.json(
-        { error: 'Invalid worktree path' },
-        { status: 500 }
-      );
-    }
-
     // Validate filename to prevent path traversal attacks
     const filename = params.filename;
 
-    // Only allow .jsonl files
-    if (!filename.endsWith('.jsonl')) {
+    // Only allow .md files and ensure it starts with the worktree ID
+    if (!filename.endsWith('.md') || !filename.startsWith(`${params.id}-`)) {
       return NextResponse.json(
-        { error: 'Invalid filename: must be a .jsonl file' },
+        { error: 'Invalid filename' },
         { status: 400 }
       );
     }
 
-    // Construct logs directory path
-    const logsDir = path.join(worktree.path, '.claude', 'logs');
-
-    // Validate and resolve the file path to prevent path traversal
-    let filePath: string;
-    try {
-      filePath = validateWorktreePath(filename, logsDir);
-    } catch (error) {
+    // Check for path traversal attempts
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
       return NextResponse.json(
         { error: 'Invalid filename: path traversal not allowed' },
         { status: 400 }
       );
     }
 
+    // Construct file path
+    const filePath = path.join(LOG_DIR, filename);
+
     // Verify the file exists
-    if (!fs.existsSync(filePath)) {
+    try {
+      const stat = await fs.stat(filePath);
+
+      if (!stat.isFile()) {
+        return NextResponse.json(
+          { error: `'${filename}' is not a file` },
+          { status: 400 }
+        );
+      }
+
+      // Read file content
+      const content = await fs.readFile(filePath, 'utf-8');
+
       return NextResponse.json(
-        { error: `Log file '${filename}' not found` },
-        { status: 404 }
+        {
+          filename,
+          content,
+          size: stat.size,
+          modifiedAt: stat.mtime.toISOString(),
+        },
+        { status: 200 }
       );
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        return NextResponse.json(
+          { error: `Log file '${filename}' not found` },
+          { status: 404 }
+        );
+      }
+      throw error;
     }
-
-    // Verify it's a file (not a directory)
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile()) {
-      return NextResponse.json(
-        { error: `'${filename}' is not a file` },
-        { status: 400 }
-      );
-    }
-
-    // Read file content
-    const content = fs.readFileSync(filePath, 'utf-8');
-
-    return NextResponse.json(
-      {
-        filename,
-        content,
-        size: stat.size,
-        modifiedAt: stat.mtime.toISOString(),
-      },
-      { status: 200 }
-    );
   } catch (error) {
     console.error('Error reading log file:', error);
     return NextResponse.json(

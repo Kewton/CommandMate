@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, updateWorktreeMemo } from '@/lib/db';
+import { isClaudeRunning } from '@/lib/claude-session';
 
 export async function GET(
   request: NextRequest,
@@ -23,7 +24,13 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(worktree, { status: 200 });
+    // Check session status
+    const isRunning = await isClaudeRunning(params.id);
+
+    return NextResponse.json(
+      { ...worktree, isSessionRunning: isRunning },
+      { status: 200 }
+    );
   } catch (error) {
     console.error('Error fetching worktree:', error);
     return NextResponse.json(
@@ -57,9 +64,13 @@ export async function PATCH(
       updateWorktreeMemo(db, params.id, body.memo);
     }
 
-    // Return updated worktree
+    // Return updated worktree with session status
     const updatedWorktree = getWorktreeById(db, params.id);
-    return NextResponse.json(updatedWorktree, { status: 200 });
+    const isRunning = await isClaudeRunning(params.id);
+    return NextResponse.json(
+      { ...updatedWorktree, isSessionRunning: isRunning },
+      { status: 200 }
+    );
   } catch (error) {
     console.error('Error updating worktree:', error);
     return NextResponse.json(

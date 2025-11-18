@@ -38,16 +38,6 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedRepository, setSelectedRepository] = useState<string | null>(null);
 
-  // WebSocket connection for real-time updates
-  const { status: wsStatus } = useWebSocket({
-    onMessage: (message) => {
-      if (message.type === 'broadcast') {
-        // Refresh worktrees when updates occur
-        fetchWorktrees();
-      }
-    },
-  });
-
   /**
    * Fetch worktrees from API
    */
@@ -64,6 +54,30 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
       setLoading(false);
     }
   }, []);
+
+  /**
+   * Handle WebSocket messages
+   */
+  const handleWebSocketMessage = useCallback((message: any) => {
+    if (message.type === 'broadcast') {
+      // Refresh worktrees when updates occur
+      fetchWorktrees();
+    } else if (message.data?.type === 'session_status_changed') {
+      // Update specific worktree's session status without full refresh
+      setWorktrees((prev) =>
+        prev.map((wt) =>
+          wt.id === message.data.worktreeId
+            ? { ...wt, isSessionRunning: message.data.isRunning }
+            : wt
+        )
+      );
+    }
+  }, [fetchWorktrees]);
+
+  // WebSocket connection for real-time updates
+  const { status: wsStatus } = useWebSocket({
+    onMessage: handleWebSocketMessage,
+  });
 
   // Fetch worktrees on mount
   useEffect(() => {
@@ -292,7 +306,11 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
                 {/* Worktree Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {repoWorktrees.map((worktree) => (
-                    <WorktreeCard key={worktree.id} worktree={worktree} />
+                    <WorktreeCard
+                      key={worktree.id}
+                      worktree={worktree}
+                      onSessionKilled={fetchWorktrees}
+                    />
                   ))}
                 </div>
               </div>

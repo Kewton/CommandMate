@@ -42,7 +42,10 @@ export async function GET(
     // Get messages
     const messages = getMessages(db, params.id, before, limit);
 
-    return NextResponse.json(messages, { status: 200 });
+    // Filter out messages with empty content (defensive programming)
+    const validMessages = messages.filter(m => m.content && m.content.trim() !== '');
+
+    return NextResponse.json(validMessages, { status: 200 });
   } catch (error) {
     console.error('Error fetching messages:', error);
     return NextResponse.json(

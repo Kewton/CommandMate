@@ -21,6 +21,7 @@ export interface MessageListProps {
   worktreeId: string;
   loading?: boolean;
   waitingForResponse?: boolean;
+  generatingContent?: string;
 }
 
 /**
@@ -139,13 +140,13 @@ function MessageBubble({
           </div>
 
           {/* Content */}
-          <div className={`prose prose-sm max-w-none ${isUser ? 'prose-invert' : ''}`}>
+          <div className={`prose prose-sm max-w-none break-words overflow-wrap-anywhere ${isUser ? 'prose-invert' : ''}`}>
             {message.summary && (
               <div className={`text-sm font-medium mb-2 ${isUser ? 'text-blue-50' : 'text-gray-700'}`}>
                 {message.summary}
               </div>
             )}
-            <div className={isUser ? 'text-white' : 'text-gray-900'}>
+            <div className={`break-words overflow-wrap-anywhere ${isUser ? 'text-white' : 'text-gray-900'}`}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 rehypePlugins={[rehypeHighlight]}
@@ -188,14 +189,15 @@ export function MessageList({
   worktreeId,
   loading = false,
   waitingForResponse = false,
+  generatingContent = '',
 }: MessageListProps) {
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive or content is generating
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, generatingContent]);
 
   /**
    * Handle file path click - navigate to full screen file viewer
@@ -257,8 +259,8 @@ export function MessageList({
   }
 
   return (
-    <Card padding="lg" className="h-[600px] flex flex-col">
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
+    <div className="flex-1 overflow-y-auto px-4">
+      <div className="py-4">
         {messages.map((message) => {
           // Render prompt message
           if (message.messageType === 'prompt') {
@@ -282,19 +284,35 @@ export function MessageList({
           );
         })}
 
-        {/* Show "Waiting for response" indicator */}
+        {/* Show "Waiting for response" indicator with generating content */}
         {waitingForResponse && (
           <div className="flex justify-start mb-4">
             <div className="max-w-[80%]">
-              <div className="rounded-lg px-4 py-3 bg-gray-50 border border-gray-200">
-                <div className="flex items-center gap-3">
+              <div className="rounded-lg px-4 py-3 bg-white border border-gray-200">
+                {/* Header with generating indicator */}
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-medium text-gray-500">Claude</span>
                   <div className="flex gap-1">
-                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
-                  <span className="text-sm text-gray-600">Claudeが応答を生成中...</span>
+                  <span className="text-xs text-gray-500">生成中...</span>
                 </div>
+
+                {/* Generating content */}
+                {generatingContent ? (
+                  <div className="prose prose-sm max-w-none break-words overflow-wrap-anywhere text-gray-900">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeHighlight]}
+                    >
+                      {generatingContent}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <span className="text-sm text-gray-600">応答を待機中...</span>
+                )}
               </div>
             </div>
           </div>
@@ -302,6 +320,6 @@ export function MessageList({
 
         <div ref={messagesEndRef} />
       </div>
-    </Card>
+    </div>
   );
 }

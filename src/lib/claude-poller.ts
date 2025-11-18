@@ -233,6 +233,15 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
     // Normal response (not a prompt)
     console.log(`✓ Detected Claude response for ${worktreeId}`);
 
+    // Validate response content is not empty
+    if (!result.response || result.response.trim() === '') {
+      console.warn(`⚠ Empty response detected for ${worktreeId}, skipping save`);
+      // Update session state but don't save the message
+      updateSessionState(db, worktreeId, result.lineCount);
+      stopPolling(worktreeId);
+      return false;
+    }
+
     // Get the last user message to pair with this response
     const messages = getMessages(db, worktreeId);
     const lastUserMessage = messages

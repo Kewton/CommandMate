@@ -5,15 +5,17 @@
 
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
-import { Card, CardHeader, CardTitle, CardContent, Badge } from '@/components/ui';
+import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from '@/components/ui';
 import type { Worktree } from '@/types/models';
 import { formatDistanceToNow } from 'date-fns';
 import { ja } from 'date-fns/locale';
+import { worktreeApi, handleApiError } from '@/lib/api-client';
 
 export interface WorktreeCardProps {
   worktree: Worktree;
+  onSessionKilled?: () => void;
 }
 
 /**
@@ -24,8 +26,9 @@ export interface WorktreeCardProps {
  * <WorktreeCard worktree={worktree} />
  * ```
  */
-export function WorktreeCard({ worktree }: WorktreeCardProps) {
-  const { id, name, path, memo, lastUserMessage, lastUserMessageAt, updatedAt } = worktree;
+export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
+  const { id, name, path, memo, lastUserMessage, lastUserMessageAt, updatedAt, isSessionRunning } = worktree;
+  const [isKilling, setIsKilling] = useState(false);
 
   // Format relative time for last update
   const relativeTime = updatedAt
@@ -40,15 +43,58 @@ export function WorktreeCard({ worktree }: WorktreeCardProps) {
   // Determine if this is the main branch
   const isMain = name === 'main' || name === 'master';
 
+  /**
+   * Handle kill session button click
+   */
+  const handleKillSession = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!confirm(`セッション「${name}」を終了しますか？`)) {
+      return;
+    }
+
+    try {
+      setIsKilling(true);
+      await worktreeApi.killSession(id);
+
+      // Notify parent component
+      if (onSessionKilled) {
+        onSessionKilled();
+      }
+    } catch (err) {
+      const errorMessage = handleApiError(err);
+      alert(`セッションの終了に失敗しました: ${errorMessage}`);
+    } finally {
+      setIsKilling(false);
+    }
+  };
+
   return (
     <Link href={`/worktrees/${id}`} className="block">
       <Card hover padding="lg" className="h-full">
         <CardHeader>
-          <div className="flex items-start justify-between">
-            <CardTitle className="flex items-center gap-2">
+          <div className="flex items-start justify-between gap-2">
+            <CardTitle className="flex items-center gap-2 flex-wrap">
               <span className="truncate">{name}</span>
               {isMain && <Badge variant="info">Main</Badge>}
+              {isSessionRunning && (
+                <Badge variant="success" dot>
+                  セッション実行中
+                </Badge>
+              )}
             </CardTitle>
+            {isSessionRunning && (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={handleKillSession}
+                disabled={isKilling}
+                className="flex-shrink-0"
+              >
+                {isKilling ? '終了中...' : '終了'}
+              </Button>
+            )}
           </div>
         </CardHeader>
 

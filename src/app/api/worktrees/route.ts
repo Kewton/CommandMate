@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktrees, getRepositories } from '@/lib/db';
+import { isClaudeRunning } from '@/lib/claude-session';
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,12 +20,23 @@ export async function GET(request: NextRequest) {
     // Get worktrees (with optional filter)
     const worktrees = getWorktrees(db, repositoryFilter || undefined);
 
+    // Check session status for each worktree
+    const worktreesWithStatus = await Promise.all(
+      worktrees.map(async (worktree) => {
+        const isRunning = await isClaudeRunning(worktree.id);
+        return {
+          ...worktree,
+          isSessionRunning: isRunning,
+        };
+      })
+    );
+
     // Get repository list
     const repositories = getRepositories(db);
 
     return NextResponse.json(
       {
-        worktrees,
+        worktrees: worktreesWithStatus,
         repositories,
       },
       { status: 200 }

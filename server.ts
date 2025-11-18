@@ -17,8 +17,8 @@ import { stopAllPolling } from './src/lib/claude-poller';
 import { runMigrations } from './src/lib/db-migrations';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
-const port = parseInt(process.env.PORT || '3000', 10);
+const hostname = process.env.MCBD_BIND || '0.0.0.0';
+const port = parseInt(process.env.MCBD_PORT || process.env.PORT || '3000', 10);
 
 // Create Next.js app
 const app = next({ dev, hostname, port });

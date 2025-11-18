@@ -26,6 +26,8 @@ export interface Worktree {
   lastMessageSummary?: string;
   /** Last updated timestamp */
   updatedAt?: Date;
+  /** Whether a tmux session is currently running for this worktree */
+  isSessionRunning?: boolean;
 }
 
 /**

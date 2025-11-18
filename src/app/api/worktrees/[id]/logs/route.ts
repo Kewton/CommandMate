@@ -6,14 +6,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import fs from 'fs';
+import { listLogs } from '@/lib/log-manager';
+import fs from 'fs/promises';
 import path from 'path';
-
-interface LogFileInfo {
-  filename: string;
-  size: number;
-  modifiedAt: string;
-}
 
 export async function GET(
   request: NextRequest,
@@ -31,39 +26,26 @@ export async function GET(
       );
     }
 
-    // Construct logs directory path
-    const logsDir = path.join(worktree.path, '.claude', 'logs');
+    // Get log files using log-manager
+    const logPaths = await listLogs(params.id);
 
-    // Check if logs directory exists
-    if (!fs.existsSync(logsDir)) {
-      return NextResponse.json([], { status: 200 });
-    }
-
-    // Read log files
-    const files = fs.readdirSync(logsDir);
-
-    // Filter for .jsonl files and get file info
-    const logFiles: LogFileInfo[] = files
-      .filter((file) => {
-        const filePath = path.join(logsDir, file);
-        const stat = fs.statSync(filePath);
-        return stat.isFile() && file.endsWith('.jsonl');
-      })
-      .map((file) => {
-        const filePath = path.join(logsDir, file);
-        const stat = fs.statSync(filePath);
+    // Extract filenames from full paths and get file info
+    const logFiles = await Promise.all(
+      logPaths.map(async (logPath) => {
+        const filename = path.basename(logPath);
+        const stat = await fs.stat(logPath);
         return {
-          filename: file,
+          filename,
           size: stat.size,
           modifiedAt: stat.mtime.toISOString(),
         };
       })
-      .sort((a, b) => {
-        // Sort by modified time DESC (newest first)
-        return new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime();
-      });
+    );
 
-    return NextResponse.json(logFiles, { status: 200 });
+    // Return just the filenames array (to match the expected API response)
+    const filenames = logFiles.map(f => f.filename);
+
+    return NextResponse.json(filenames, { status: 200 });
   } catch (error) {
     console.error('Error fetching log files:', error);
     return NextResponse.json(

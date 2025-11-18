@@ -5,7 +5,7 @@
 
 import Database from 'better-sqlite3';
 import path from 'path';
-import { initDatabase } from './db';
+import { runMigrations } from './db-migrations';
 
 let dbInstance: Database.Database | null = null;
 
@@ -32,7 +32,7 @@ export function getDbInstance(): Database.Database {
     }
 
     dbInstance = new Database(dbPath);
-    initDatabase(dbInstance);
+    runMigrations(dbInstance);
   }
 
   return dbInstance;

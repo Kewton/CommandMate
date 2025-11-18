@@ -196,8 +196,9 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
     }
   }
 
-  // Must have at least 2 options to be considered a multiple choice prompt
-  if (options.length < 2) {
+  // Must have at least 2 options AND at least one with ❯ indicator to be considered a prompt
+  const hasDefaultIndicator = options.some(opt => opt.isDefault);
+  if (options.length < 2 || !hasDefaultIndicator) {
     return {
       isPrompt: false,
       cleanContent: output.trim(),

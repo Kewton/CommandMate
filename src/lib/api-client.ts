@@ -41,12 +41,22 @@ export class ApiError extends Error {
  */
 async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
   try {
+    // Get auth token from environment variable (exposed via next.config.js)
+    const authToken = process.env.NEXT_PUBLIC_MCBD_AUTH_TOKEN;
+
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    };
+
+    // Add Bearer token if available
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+
     const response = await fetch(url, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -132,6 +142,16 @@ export const worktreeApi = {
     modifiedAt: string;
   }> {
     return fetchApi(`/api/worktrees/${id}/logs/${filename}`);
+  },
+
+  /**
+   * Kill the tmux session for a worktree
+   */
+  async killSession(id: string): Promise<{ success: boolean; message: string }> {
+    return fetchApi<{ success: boolean; message: string }>(
+      `/api/worktrees/${id}/kill-session`,
+      { method: 'POST' }
+    );
   },
 };
 
