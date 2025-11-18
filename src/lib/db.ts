@@ -388,6 +388,22 @@ export function updateSessionState(
 }
 
 /**
+ * Delete session state for a worktree
+ * Called when a session is killed or reset
+ */
+export function deleteSessionState(
+  db: Database.Database,
+  worktreeId: string
+): void {
+  const stmt = db.prepare(`
+    DELETE FROM session_states
+    WHERE worktree_id = ?
+  `);
+
+  stmt.run(worktreeId);
+}
+
+/**
  * Update worktree's updated_at timestamp
  * @private
  */

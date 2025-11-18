@@ -145,19 +145,51 @@ function handleBroadcast(worktreeId: string, data: any): void {
   const room = rooms.get(worktreeId);
   if (!room) return;
 
-  const message = JSON.stringify({
-    type: 'broadcast',
-    worktreeId,
-    data,
-  });
+  try {
+    const message = JSON.stringify({
+      type: 'broadcast',
+      worktreeId,
+      data,
+    });
 
-  room.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
+    let successCount = 0;
+    let errorCount = 0;
+
+    room.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(message);
+          successCount++;
+        } catch (sendError) {
+          errorCount++;
+          console.error(`Error sending WebSocket message to client:`, sendError);
+        }
+      }
+    });
+
+    console.log(`Broadcast to worktree ${worktreeId}: ${successCount}/${room.size} clients (${errorCount} errors)`);
+  } catch (error) {
+    console.error(`Error broadcasting to worktree ${worktreeId}:`, error);
+    // Try to broadcast with sanitized data
+    try {
+      const sanitizedMessage = JSON.stringify({
+        type: 'broadcast',
+        worktreeId,
+        data: { error: 'Message encoding error' },
+      });
+      room.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          try {
+            client.send(sanitizedMessage);
+          } catch (e) {
+            // Silent fail for fallback
+          }
+        }
+      });
+    } catch (fallbackError) {
+      console.error('Failed to send fallback message:', fallbackError);
     }
-  });
-
-  console.log(`Broadcast to worktree ${worktreeId}: ${room.size} clients`);
+  }
 }
 
 /**

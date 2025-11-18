@@ -287,31 +287,61 @@ export function MessageList({
         {/* Show "Waiting for response" indicator with generating content */}
         {waitingForResponse && (
           <div className="flex justify-start mb-4">
-            <div className="max-w-[80%]">
-              <div className="rounded-lg px-4 py-3 bg-white border border-gray-200">
+            <div className="max-w-[80%] w-full">
+              <div className="rounded-lg px-4 py-3 bg-white border border-gray-200 shadow-sm">
                 {/* Header with generating indicator */}
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-3">
                   <span className="text-xs font-medium text-gray-500">Claude</span>
                   <div className="flex gap-1">
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
-                  <span className="text-xs text-gray-500">生成中...</span>
                 </div>
 
-                {/* Generating content */}
+                {/* Progress indicator - fixed at top */}
+                <div className="sticky top-0 bg-white z-10 pb-2 mb-3 border-b border-gray-200">
+                  {/* Stage 1: Waiting */}
+                  <div className={`flex items-center gap-2 mb-2 ${!generatingContent ? 'opacity-100' : 'opacity-50'}`}>
+                    <div className={`w-2 h-2 rounded-full ${!generatingContent ? 'bg-blue-600 animate-pulse' : 'bg-green-500'}`} />
+                    <span className="text-sm font-medium text-gray-700">応答を待機中</span>
+                    {!generatingContent && <span className="text-xs text-gray-500 ml-auto">...</span>}
+                    {generatingContent && <span className="text-xs text-green-600 ml-auto">✓</span>}
+                  </div>
+
+                  {/* Stage 2: Generating */}
+                  {generatingContent && (
+                    <div className="flex items-center gap-2 mb-2 opacity-100">
+                      <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                      <span className="text-sm font-medium text-gray-700">最新状態（生成中）</span>
+                      <span className="text-xs text-gray-500 ml-auto">更新中...</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Generating content area */}
                 {generatingContent ? (
-                  <div className="prose prose-sm max-w-none break-words overflow-wrap-anywhere text-gray-900">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[rehypeHighlight]}
-                    >
-                      {generatingContent}
-                    </ReactMarkdown>
+                  <div className="space-y-3">
+                    {/* Latest content */}
+                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">最新の出力</span>
+                        <span className="text-xs text-gray-400">{new Date().toLocaleTimeString('ja-JP')}</span>
+                      </div>
+                      <div className="prose prose-sm max-w-none break-words overflow-wrap-anywhere text-gray-900">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          rehypePlugins={[rehypeHighlight]}
+                        >
+                          {generatingContent}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
                   </div>
                 ) : (
-                  <span className="text-sm text-gray-600">応答を待機中...</span>
+                  <div className="text-center py-4">
+                    <p className="text-sm text-gray-500">Claudeからの応答を待っています...</p>
+                  </div>
                 )}
               </div>
             </div>

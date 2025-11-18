@@ -62,9 +62,9 @@ function extractClaudeResponse(
   const separatorPattern = /^─{50,}$/m;
 
   // Check for thinking/processing indicators
-  // Claude shows various animations while thinking: ✻ Herding…, · Choreographing…, ∴ Thinking…, etc.
-  // Match lines that contain: symbol + word + … (with optional additional text like "(esc to interrupt)")
-  const thinkingPattern = /^[✻✽⏺·∴]\s+\w+…/m;
+  // Claude shows various animations while thinking: ✻ Herding…, · Choreographing…, ∴ Thinking…, ✢ Doing…, ✳ Cascading…, etc.
+  // Match lines that contain: symbol + word + … OR just the symbol alone
+  const thinkingPattern = /[✻✽⏺·∴✢✳]/m;
 
   const hasPrompt = promptPattern.test(outputToCheck);
   const hasSeparator = separatorPattern.test(outputToCheck);
@@ -113,7 +113,7 @@ function extractClaudeResponse(
       }
 
       // Skip control characters and status lines (thinking indicators, tips, etc.)
-      if (/^[✻✽⏺·∴]\s+\w+…/.test(line)) {
+      if (/[✻✽⏺·∴✢✳]/.test(line)) {
         continue;
       }
 
@@ -126,6 +126,17 @@ function extractClaudeResponse(
     }
 
     const response = responseLines.join('\n').trim();
+
+    // Additional check: ensure response doesn't contain thinking indicators
+    // This prevents saving intermediate states as final responses
+    if (thinkingPattern.test(response)) {
+      console.warn(`[Poller] Response contains thinking indicators, treating as incomplete`);
+      return {
+        response: '',
+        isComplete: false,
+        lineCount: totalLines,
+      };
+    }
 
     return {
       response,
@@ -235,10 +246,10 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
 
     // Validate response content is not empty
     if (!result.response || result.response.trim() === '') {
-      console.warn(`⚠ Empty response detected for ${worktreeId}, skipping save`);
+      console.warn(`⚠ Empty response detected for ${worktreeId}, continuing polling...`);
       // Update session state but don't save the message
+      // Continue polling in case a prompt appears next
       updateSessionState(db, worktreeId, result.lineCount);
-      stopPolling(worktreeId);
       return false;
     }
 

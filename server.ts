@@ -17,12 +17,24 @@ import { stopAllPolling } from './src/lib/claude-poller';
 import { runMigrations } from './src/lib/db-migrations';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = process.env.MCBD_BIND || '0.0.0.0';
+const hostname = process.env.MCBD_BIND || '127.0.0.1';
 const port = parseInt(process.env.MCBD_PORT || process.env.PORT || '3000', 10);
 
 // Create Next.js app
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
+
+// Handle uncaught WebSocket errors
+process.on('uncaughtException', (error: any) => {
+  // Log WebSocket UTF-8 errors but don't crash the server
+  if (error.code === 'WS_ERR_INVALID_UTF8' || error.code === 'WS_ERR_INVALID_CLOSE_CODE') {
+    console.error('WebSocket frame error (non-fatal):', error.message);
+    return;
+  }
+  // For other uncaught exceptions, log and exit
+  console.error('Uncaught exception:', error);
+  process.exit(1);
+});
 
 app.prepare().then(() => {
   // Create HTTP server

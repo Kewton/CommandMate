@@ -5,10 +5,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById } from '@/lib/db';
+import { getWorktreeById, deleteSessionState } from '@/lib/db';
 import { getSessionName, isClaudeRunning } from '@/lib/claude-session';
 import { killSession } from '@/lib/tmux';
 import { broadcast } from '@/lib/ws-server';
+import { stopPolling } from '@/lib/claude-poller';
 
 export async function POST(
   request: NextRequest,
@@ -45,6 +46,12 @@ export async function POST(
         { status: 500 }
       );
     }
+
+    // Stop poller if running
+    stopPolling(params.id);
+
+    // Clean up session state (important: reset line count tracking)
+    deleteSessionState(db, params.id);
 
     // Broadcast session status change via WebSocket
     broadcast(params.id, {

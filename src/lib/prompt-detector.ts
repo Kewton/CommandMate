@@ -166,8 +166,8 @@ export function detectPrompt(output: string): PromptDetectionResult {
 function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
   const lines = output.split('\n');
 
-  // Look for lines that match the pattern: [❯ or spaces] [number]. [text]
-  const optionPattern = /^([❯ ]\s*)?(\d+)\.\s+(.+)$/;
+  // Look for lines that match the pattern: [optional leading spaces] [❯ or spaces] [number]. [text]
+  const optionPattern = /^\s*([❯ ]\s*)?(\d+)\.\s+(.+)$/;
   const options: Array<{ number: number; label: string; isDefault: boolean }> = [];
 
   let questionEndIndex = -1;

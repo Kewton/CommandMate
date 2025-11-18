@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, getSessionState } from '@/lib/db';
 import { captureClaudeOutput, isClaudeRunning } from '@/lib/claude-session';
+import { detectPrompt } from '@/lib/prompt-detector';
 
 export async function GET(
   request: NextRequest,
@@ -54,9 +55,12 @@ export async function GET(
     const lastSection = lines.slice(-20).join('\n');
     const hasPrompt = /^>\s*$/m.test(lastSection);
     const hasSeparator = /^─{50,}$/m.test(lastSection);
-    const isThinking = /^[✻✽⏺·∴]\s+\w+…/m.test(lastSection);
+    const isThinking = /[✻✽⏺·∴✢✳]/m.test(lastSection);
 
-    const isComplete = hasPrompt && hasSeparator && !isThinking;
+    // Check if it's an interactive prompt (yes/no or multiple choice)
+    const promptDetection = detectPrompt(output);
+
+    const isComplete = (hasPrompt && hasSeparator && !isThinking) || promptDetection.isPrompt;
 
     return NextResponse.json({
       isRunning: true,
