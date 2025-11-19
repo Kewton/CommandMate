@@ -179,7 +179,7 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
     const match = line.match(optionPattern);
 
     if (match) {
-      const hasDefault = match[1] && match[1].includes('❯');
+      const hasDefault = Boolean(match[1] && match[1].includes('❯'));
       const number = parseInt(match[2], 10);
       const label = match[3].trim();
 

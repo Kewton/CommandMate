@@ -2,6 +2,8 @@
  * Data models for myCodeBranchDesk
  */
 
+import type { CLIToolType } from '@/lib/cli-tools/types';
+
 /**
  * Worktree representation
  */
@@ -36,6 +38,8 @@ export interface Worktree {
   status?: 'todo' | 'doing' | 'done' | null;
   /** External link URL (e.g., issue tracker, PR, documentation) */
   link?: string;
+  /** CLI tool type (claude, codex, gemini) - defaults to 'claude' */
+  cliToolId?: CLIToolType;
 }
 
 /**
@@ -59,7 +63,7 @@ export interface Repository {
 /**
  * Chat message role
  */
-export type ChatRole = 'user' | 'claude';
+export type ChatRole = 'user' | 'assistant';
 
 /**
  * Message type discriminator
@@ -148,6 +152,8 @@ export interface ChatMessage {
   messageType: MessageType;
   /** Prompt data (only for prompt messages) */
   promptData?: PromptData;
+  /** CLI tool type (claude, codex, gemini) - defaults to 'claude' */
+  cliToolId?: CLIToolType;
 }
 
 /**

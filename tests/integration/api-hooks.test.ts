@@ -6,7 +6,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { POST as claudeDone } from '@/app/api/hooks/claude-done/route';
 import Database from 'better-sqlite3';
-import { initDatabase, upsertWorktree, getMessages, getSessionState } from '@/lib/db';
+import { runMigrations } from '@/lib/db-migrations';
+import { upsertWorktree, getMessages, getSessionState } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
 // Mock the database instance
@@ -42,7 +43,7 @@ describe('POST /api/hooks/claude-done', () => {
 
   beforeEach(async () => {
     db = new Database(':memory:');
-    initDatabase(db);
+    runMigrations(db);
 
     const { setMockDb } = await import('@/lib/db-instance');
     setMockDb(db);

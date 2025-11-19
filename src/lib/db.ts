@@ -18,6 +18,7 @@ type ChatMessageRow = {
   request_id: string | null;
   message_type: string | null;
   prompt_data: string | null;
+  cli_tool_id: string | null;
 };
 
 function mapChatMessage(row: ChatMessageRow): ChatMessage {
@@ -32,6 +33,7 @@ function mapChatMessage(row: ChatMessageRow): ChatMessage {
     requestId: row.request_id || undefined,
     messageType: (row.message_type as any) || 'normal',
     promptData: row.prompt_data ? JSON.parse(row.prompt_data) : undefined,
+    cliToolId: (row.cli_tool_id as 'claude' | 'codex' | 'gemini') || 'claude',
   };
 }
 
@@ -69,6 +71,7 @@ export function initDatabase(db: Database.Database): void {
       request_id TEXT,
       message_type TEXT DEFAULT 'normal',
       prompt_data TEXT,
+      cli_tool_id TEXT DEFAULT 'claude',
 
       FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
     );
@@ -88,6 +91,11 @@ export function initDatabase(db: Database.Database): void {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_type
     ON chat_messages(message_type, worktree_id);
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_cli_tool
+    ON chat_messages(worktree_id, cli_tool_id, timestamp DESC);
   `);
 
   // Create session_states table
@@ -111,7 +119,7 @@ export function getWorktrees(
 ): Worktree[] {
   let query = `
     SELECT id, name, path, repository_path, repository_name, memo,
-           last_user_message, last_user_message_at, last_message_summary, updated_at, favorite, status, link
+           last_user_message, last_user_message_at, last_message_summary, updated_at, favorite, status, link, cli_tool_id
     FROM worktrees
   `;
 
@@ -139,6 +147,7 @@ export function getWorktrees(
     favorite: number | null;
     status: string | null;
     link: string | null;
+    cli_tool_id: string | null;
   }>;
 
   return rows.map((row) => ({
@@ -155,6 +164,7 @@ export function getWorktrees(
     favorite: row.favorite === 1,
     status: (row.status as 'todo' | 'doing' | 'done' | null) || null,
     link: row.link || undefined,
+    cliToolId: (row.cli_tool_id as 'claude' | 'codex' | 'gemini') || 'claude',
   }));
 }
 
@@ -199,7 +209,7 @@ export function getWorktreeById(
 ): Worktree | null {
   const stmt = db.prepare(`
     SELECT id, name, path, repository_path, repository_name, memo,
-           last_user_message, last_user_message_at, last_message_summary, updated_at, favorite, status, link
+           last_user_message, last_user_message_at, last_message_summary, updated_at, favorite, status, link, cli_tool_id
     FROM worktrees
     WHERE id = ?
   `);
@@ -218,6 +228,7 @@ export function getWorktreeById(
     favorite: number | null;
     status: string | null;
     link: string | null;
+    cli_tool_id: string | null;
   } | undefined;
 
   if (!row) {
@@ -238,6 +249,7 @@ export function getWorktreeById(
     favorite: row.favorite === 1,
     status: (row.status as 'todo' | 'doing' | 'done' | null) || null,
     link: row.link || undefined,
+    cliToolId: (row.cli_tool_id as 'claude' | 'codex' | 'gemini') || 'claude',
   };
 }
 
@@ -251,9 +263,9 @@ export function upsertWorktree(
   const stmt = db.prepare(`
     INSERT INTO worktrees (
       id, name, path, repository_path, repository_name, memo,
-      last_user_message, last_user_message_at, last_message_summary, updated_at
+      last_user_message, last_user_message_at, last_message_summary, updated_at, cli_tool_id
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       path = excluded.path,
@@ -263,7 +275,8 @@ export function upsertWorktree(
       last_user_message = excluded.last_user_message,
       last_user_message_at = excluded.last_user_message_at,
       last_message_summary = excluded.last_message_summary,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      cli_tool_id = excluded.cli_tool_id
   `);
 
   stmt.run(
@@ -276,7 +289,8 @@ export function upsertWorktree(
     worktree.lastUserMessage || null,
     worktree.lastUserMessageAt?.getTime() || null,
     worktree.lastMessageSummary || null,
-    worktree.updatedAt?.getTime() || null
+    worktree.updatedAt?.getTime() || null,
+    worktree.cliToolId || 'claude'
   );
 }
 
@@ -325,8 +339,8 @@ export function createMessage(
 
   const stmt = db.prepare(`
     INSERT INTO chat_messages
-    (id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -339,7 +353,8 @@ export function createMessage(
     message.logFileName || null,
     message.requestId || null,
     message.messageType || 'normal',
-    message.promptData ? JSON.stringify(message.promptData) : null
+    message.promptData ? JSON.stringify(message.promptData) : null,
+    message.cliToolId || 'claude'
   );
 
   // Update worktree's updated_at timestamp
@@ -354,25 +369,34 @@ export function createMessage(
 }
 
 /**
- * Get messages for a worktree
+ * Get messages for a worktree, optionally filtered by CLI tool
  */
 export function getMessages(
   db: Database.Database,
   worktreeId: string,
   before?: Date,
-  limit: number = 50
+  limit: number = 50,
+  cliToolId?: 'claude' | 'codex' | 'gemini'
 ): ChatMessage[] {
-  const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data
+  let query = `
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id
     FROM chat_messages
     WHERE worktree_id = ? AND (? IS NULL OR timestamp < ?)
-    ORDER BY timestamp DESC
-    LIMIT ?
-  `);
+  `;
 
-  const beforeTs = before?.getTime() || null;
+  const params: any[] = [worktreeId, before?.getTime() || null, before?.getTime() || null];
 
-  const rows = stmt.all(worktreeId, beforeTs, beforeTs, limit) as ChatMessageRow[];
+  // Add CLI tool filter if specified
+  if (cliToolId) {
+    query += ` AND cli_tool_id = ?`;
+    params.push(cliToolId);
+  }
+
+  query += ` ORDER BY timestamp DESC LIMIT ?`;
+  params.push(limit);
+
+  const stmt = db.prepare(query);
+  const rows = stmt.all(...params) as ChatMessageRow[];
 
   return rows.map(mapChatMessage);
 }
@@ -385,7 +409,7 @@ export function getLastUserMessage(
   worktreeId: string
 ): ChatMessage | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id
     FROM chat_messages
     WHERE worktree_id = ? AND role = 'user'
     ORDER BY timestamp DESC
@@ -406,7 +430,7 @@ export function getLastMessage(
   worktreeId: string
 ): ChatMessage | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id
     FROM chat_messages
     WHERE worktree_id = ?
     ORDER BY timestamp DESC
@@ -545,7 +569,7 @@ export function getMessageById(
   messageId: string
 ): ChatMessage | null {
   const stmt = db.prepare(`
-    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id
     FROM chat_messages
     WHERE id = ?
   `);

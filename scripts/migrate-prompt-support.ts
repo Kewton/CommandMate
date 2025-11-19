@@ -26,8 +26,10 @@ function migrate() {
     console.log(`Database: ${DB_PATH}`);
 
     // Check if columns already exist
-    const tableInfo = db.pragma('table_info(chat_messages)');
-    const columnNames = tableInfo.map((col: any) => col.name);
+    const tableInfo = db.pragma(
+      'table_info(chat_messages)'
+    ) as Array<{ name: string }>;
+    const columnNames = tableInfo.map((col) => col.name);
 
     if (columnNames.includes('message_type')) {
       console.log('⚠️  Migration already applied (message_type column exists)');

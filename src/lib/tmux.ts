@@ -212,7 +212,7 @@ export async function sendKeys(
   const escapedKeys = keys.replace(/'/g, "'\\''");
 
   const command = sendEnter
-    ? `tmux send-keys -t "${sessionName}" '${escapedKeys}' Enter`
+    ? `tmux send-keys -t "${sessionName}" '${escapedKeys}' C-m`
     : `tmux send-keys -t "${sessionName}" '${escapedKeys}'`;
 
   try {

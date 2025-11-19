@@ -13,13 +13,26 @@ import { format } from 'date-fns';
 const LOG_DIR = process.env.MCBD_LOG_DIR || path.join(process.cwd(), 'data', 'logs');
 
 /**
- * Ensure log directory exists
+ * Get log directory for a CLI tool
+ *
+ * @param cliToolId - CLI tool ID (claude, codex, gemini)
+ * @returns Log directory path
  */
-async function ensureLogDirectory(): Promise<void> {
+function getCliToolLogDir(cliToolId: string = 'claude'): string {
+  return path.join(LOG_DIR, cliToolId);
+}
+
+/**
+ * Ensure log directory exists
+ *
+ * @param cliToolId - CLI tool ID (optional, defaults to 'claude')
+ */
+async function ensureLogDirectory(cliToolId: string = 'claude'): Promise<void> {
+  const logDir = getCliToolLogDir(cliToolId);
   try {
-    await fs.access(LOG_DIR);
+    await fs.access(logDir);
   } catch {
-    await fs.mkdir(LOG_DIR, { recursive: true });
+    await fs.mkdir(logDir, { recursive: true });
   }
 }
 
@@ -27,18 +40,20 @@ async function ensureLogDirectory(): Promise<void> {
  * Get log file path for a worktree
  *
  * @param worktreeId - Worktree ID
+ * @param cliToolId - CLI tool ID (claude, codex, gemini)
  * @returns Log file path
  *
  * @example
  * ```typescript
- * getLogFilePath('feature-foo')
- * // => '/path/to/data/logs/feature-foo-2025-01-20.md'
+ * getLogFilePath('feature-foo', 'claude')
+ * // => '/path/to/data/logs/claude/feature-foo-2025-01-20.md'
  * ```
  */
-export function getLogFilePath(worktreeId: string): string {
+export function getLogFilePath(worktreeId: string, cliToolId: string = 'claude'): string {
   const date = format(new Date(), 'yyyy-MM-dd');
   const filename = `${worktreeId}-${date}.md`;
-  return path.join(LOG_DIR, filename);
+  const logDir = getCliToolLogDir(cliToolId);
+  return path.join(logDir, filename);
 }
 
 /**
@@ -47,6 +62,7 @@ export function getLogFilePath(worktreeId: string): string {
  * @param worktreeId - Worktree ID
  * @param userMessage - User's message
  * @param claudeResponse - Claude's response
+ * @param cliToolId - CLI tool ID (claude, codex, gemini)
  * @returns Path to the created log file
  *
  * @example
@@ -54,18 +70,20 @@ export function getLogFilePath(worktreeId: string): string {
  * const logPath = await createLog(
  *   'feature-foo',
  *   'Explain this code',
- *   'This code implements...'
+ *   'This code implements...',
+ *   'claude'
  * );
  * ```
  */
 export async function createLog(
   worktreeId: string,
   userMessage: string,
-  claudeResponse: string
+  claudeResponse: string,
+  cliToolId: string = 'claude'
 ): Promise<string> {
-  await ensureLogDirectory();
+  await ensureLogDirectory(cliToolId);
 
-  const logPath = getLogFilePath(worktreeId);
+  const logPath = getLogFilePath(worktreeId, cliToolId);
   const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
 
   // Check if log file already exists
@@ -74,7 +92,8 @@ export async function createLog(
     logContent = await fs.readFile(logPath, 'utf-8');
   } catch {
     // File doesn't exist, create header
-    logContent = `# Claude Conversation Log: ${worktreeId}\n\n`;
+    const toolName = cliToolId === 'claude' ? 'Claude Code' : cliToolId === 'codex' ? 'Codex CLI' : 'Gemini CLI';
+    logContent = `# ${toolName} Conversation Log: ${worktreeId}\n\n`;
     logContent += `Created: ${timestamp}\n\n`;
     logContent += `---\n\n`;
   }
@@ -83,7 +102,7 @@ export async function createLog(
   logContent += `## Conversation at ${timestamp}\n\n`;
   logContent += `### User\n\n`;
   logContent += `${userMessage}\n\n`;
-  logContent += `### Claude\n\n`;
+  logContent += `### ${cliToolId === 'claude' ? 'Claude' : cliToolId === 'codex' ? 'Codex' : 'Gemini'}\n\n`;
   logContent += `${claudeResponse}\n\n`;
   logContent += `---\n\n`;
 
@@ -97,19 +116,21 @@ export async function createLog(
  *
  * @param worktreeId - Worktree ID
  * @param content - Content to append
+ * @param cliToolId - CLI tool ID (claude, codex, gemini)
  *
  * @example
  * ```typescript
- * await appendToLog('feature-foo', 'Additional notes...');
+ * await appendToLog('feature-foo', 'Additional notes...', 'claude');
  * ```
  */
 export async function appendToLog(
   worktreeId: string,
-  content: string
+  content: string,
+  cliToolId: string = 'claude'
 ): Promise<void> {
-  await ensureLogDirectory();
+  await ensureLogDirectory(cliToolId);
 
-  const logPath = getLogFilePath(worktreeId);
+  const logPath = getLogFilePath(worktreeId, cliToolId);
   const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
 
   let logContent = '';
@@ -117,7 +138,8 @@ export async function appendToLog(
     logContent = await fs.readFile(logPath, 'utf-8');
   } catch {
     // File doesn't exist, create header
-    logContent = `# Claude Conversation Log: ${worktreeId}\n\n`;
+    const toolName = cliToolId === 'claude' ? 'Claude Code' : cliToolId === 'codex' ? 'Codex CLI' : 'Gemini CLI';
+    logContent = `# ${toolName} Conversation Log: ${worktreeId}\n\n`;
     logContent += `Created: ${timestamp}\n\n`;
     logContent += `---\n\n`;
   }
@@ -131,18 +153,19 @@ export async function appendToLog(
  * Read log file content
  *
  * @param worktreeId - Worktree ID
+ * @param cliToolId - CLI tool ID (claude, codex, gemini)
  * @returns Log file content, or null if file doesn't exist
  *
  * @example
  * ```typescript
- * const log = await readLog('feature-foo');
+ * const log = await readLog('feature-foo', 'claude');
  * if (log) {
  *   console.log(log);
  * }
  * ```
  */
-export async function readLog(worktreeId: string): Promise<string | null> {
-  const logPath = getLogFilePath(worktreeId);
+export async function readLog(worktreeId: string, cliToolId: string = 'claude'): Promise<string | null> {
+  const logPath = getLogFilePath(worktreeId, cliToolId);
 
   try {
     return await fs.readFile(logPath, 'utf-8');
@@ -155,29 +178,36 @@ export async function readLog(worktreeId: string): Promise<string | null> {
  * List all log files for a worktree
  *
  * @param worktreeId - Worktree ID
+ * @param cliToolId - CLI tool ID (claude, codex, gemini), or 'all' for all tools
  * @returns Array of log file paths
  *
  * @example
  * ```typescript
- * const logs = await listLogs('feature-foo');
- * // => ['/path/to/feature-foo-2025-01-20.md', '/path/to/feature-foo-2025-01-19.md']
+ * const logs = await listLogs('feature-foo', 'claude');
+ * // => ['/path/to/logs/claude/feature-foo-2025-01-20.md', '/path/to/logs/claude/feature-foo-2025-01-19.md']
  * ```
  */
-export async function listLogs(worktreeId: string): Promise<string[]> {
-  await ensureLogDirectory();
+export async function listLogs(worktreeId: string, cliToolId: string = 'all'): Promise<string[]> {
+  const toolIds = cliToolId === 'all' ? ['claude', 'codex', 'gemini'] : [cliToolId];
+  const allLogFiles: string[] = [];
 
-  try {
-    const files = await fs.readdir(LOG_DIR);
-    const logFiles = files
-      .filter((file) => file.startsWith(`${worktreeId}-`) && file.endsWith('.md'))
-      .map((file) => path.join(LOG_DIR, file))
-      .sort()
-      .reverse(); // Most recent first
+  for (const toolId of toolIds) {
+    await ensureLogDirectory(toolId);
+    const logDir = getCliToolLogDir(toolId);
 
-    return logFiles;
-  } catch {
-    return [];
+    try {
+      const files = await fs.readdir(logDir);
+      const logFiles = files
+        .filter((file) => file.startsWith(`${worktreeId}-`) && file.endsWith('.md'))
+        .map((file) => path.join(logDir, file));
+
+      allLogFiles.push(...logFiles);
+    } catch {
+      // Directory doesn't exist or is not accessible, skip
+    }
   }
+
+  return allLogFiles.sort().reverse(); // Most recent first
 }
 
 /**
@@ -192,30 +222,34 @@ export async function listLogs(worktreeId: string): Promise<string[]> {
  * ```
  */
 export async function cleanupOldLogs(days: number = 30): Promise<number> {
-  await ensureLogDirectory();
+  const toolIds = ['claude', 'codex', 'gemini'];
+  let totalDeletedCount = 0;
 
   const now = new Date();
   const cutoffDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-  try {
-    const files = await fs.readdir(LOG_DIR);
-    let deletedCount = 0;
+  for (const toolId of toolIds) {
+    await ensureLogDirectory(toolId);
+    const logDir = getCliToolLogDir(toolId);
 
-    for (const file of files) {
-      if (!file.endsWith('.md')) continue;
+    try {
+      const files = await fs.readdir(logDir);
 
-      const filePath = path.join(LOG_DIR, file);
-      const stats = await fs.stat(filePath);
+      for (const file of files) {
+        if (!file.endsWith('.md')) continue;
 
-      if (stats.mtime < cutoffDate) {
-        await fs.unlink(filePath);
-        deletedCount++;
+        const filePath = path.join(logDir, file);
+        const stats = await fs.stat(filePath);
+
+        if (stats.mtime < cutoffDate) {
+          await fs.unlink(filePath);
+          totalDeletedCount++;
+        }
       }
+    } catch (error) {
+      console.error(`Error cleaning up old logs for ${toolId}:`, error);
     }
-
-    return deletedCount;
-  } catch (error) {
-    console.error('Error cleaning up old logs:', error);
-    return 0;
   }
+
+  return totalDeletedCount;
 }

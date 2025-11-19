@@ -7,7 +7,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { GET as getWorktrees } from '@/app/api/worktrees/route';
 import { GET as getWorktreeById } from '@/app/api/worktrees/[id]/route';
 import Database from 'better-sqlite3';
-import { initDatabase, upsertWorktree, createMessage } from '@/lib/db';
+import { runMigrations } from '@/lib/db-migrations';
+import { upsertWorktree, createMessage } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
 // Mock the database instance
@@ -39,7 +40,7 @@ describe('GET /api/worktrees', () => {
   beforeEach(async () => {
     // Create in-memory database for testing
     db = new Database(':memory:');
-    initDatabase(db);
+    runMigrations(db);
 
     // Set mock database
     const { setMockDb } = await import('@/lib/db-instance');
@@ -59,7 +60,7 @@ describe('GET /api/worktrees', () => {
     expect(response.status).toBe(200);
 
     const data = await response.json();
-    expect(data).toEqual([]);
+    expect(data).toEqual({ worktrees: [], repositories: [] });
   });
 
   it('should return all worktrees sorted by updatedAt DESC', async () => {
@@ -87,11 +88,11 @@ describe('GET /api/worktrees', () => {
     expect(response.status).toBe(200);
 
     const data = await response.json();
-    expect(data).toHaveLength(2);
+    expect(data.worktrees).toHaveLength(2);
 
     // Should be sorted by updatedAt DESC (newest first)
-    expect(data[0].id).toBe('feature-foo');
-    expect(data[1].id).toBe('main');
+    expect(data.worktrees[0].id).toBe('feature-foo');
+    expect(data.worktrees[1].id).toBe('main');
   });
 
   it('should include lastMessageSummary in response', async () => {
@@ -108,7 +109,7 @@ describe('GET /api/worktrees', () => {
     const response = await getWorktrees(request);
 
     const data = await response.json();
-    expect(data[0].lastMessageSummary).toBe('Last message summary');
+    expect(data.worktrees[0].lastMessageSummary).toBe('Last message summary');
   });
 
   it('should return 500 on database error', async () => {
@@ -130,7 +131,7 @@ describe('GET /api/worktrees/:id', () => {
 
   beforeEach(async () => {
     db = new Database(':memory:');
-    initDatabase(db);
+    runMigrations(db);
 
     const { setMockDb } = await import('@/lib/db-instance');
     setMockDb(db);

@@ -44,14 +44,12 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
     // Get auth token from environment variable (exposed via next.config.js)
     const authToken = process.env.NEXT_PUBLIC_MCBD_AUTH_TOKEN;
 
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    };
+    const headers = new Headers(options?.headers);
+    headers.set('Content-Type', 'application/json');
 
     // Add Bearer token if available
     if (authToken) {
-      headers['Authorization'] = `Bearer ${authToken}`;
+      headers.set('Authorization', `Bearer ${authToken}`);
     }
 
     const response = await fetch(url, {
@@ -139,19 +137,41 @@ export const worktreeApi = {
   },
 
   /**
-   * Get messages for a worktree
+   * Update worktree CLI tool
    */
-  async getMessages(id: string): Promise<ChatMessage[]> {
-    return fetchApi<ChatMessage[]>(`/api/worktrees/${id}/messages`);
+  async updateCliTool(id: string, cliToolId: 'claude' | 'codex' | 'gemini'): Promise<Worktree> {
+    return fetchApi<Worktree>(`/api/worktrees/${id}/cli-tool`, {
+      method: 'PATCH',
+      body: JSON.stringify({ cliToolId }),
+    });
+  },
+
+  /**
+   * Get messages for a worktree, optionally filtered by CLI tool
+   */
+  async getMessages(id: string, cliTool?: 'claude' | 'codex' | 'gemini'): Promise<ChatMessage[]> {
+    const params = new URLSearchParams();
+    if (cliTool) {
+      params.append('cliTool', cliTool);
+    }
+    const url = `/api/worktrees/${id}/messages${params.toString() ? `?${params.toString()}` : ''}`;
+    return fetchApi<ChatMessage[]>(url);
   },
 
   /**
    * Send a message to a worktree
+   * @param id - Worktree ID
+   * @param content - Message content
+   * @param cliToolId - Optional CLI tool ID (claude, codex, gemini)
    */
-  async sendMessage(id: string, content: string): Promise<{ success: boolean }> {
+  async sendMessage(id: string, content: string, cliToolId?: 'claude' | 'codex' | 'gemini'): Promise<{ success: boolean }> {
+    const body: { content: string; cliToolId?: string } = { content };
+    if (cliToolId) {
+      body.cliToolId = cliToolId;
+    }
     return fetchApi<{ success: boolean }>(`/api/worktrees/${id}/send`, {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
     });
   },
 
@@ -176,11 +196,16 @@ export const worktreeApi = {
 
   /**
    * Kill the tmux session for a worktree
+   * @param id - Worktree ID
+   * @param cliToolId - Optional CLI tool ID (claude, codex, gemini). If not specified, uses worktree's default.
    */
-  async killSession(id: string): Promise<{ success: boolean; message: string }> {
+  async killSession(id: string, cliToolId?: 'claude' | 'codex' | 'gemini'): Promise<{ success: boolean; message: string }> {
     return fetchApi<{ success: boolean; message: string }>(
       `/api/worktrees/${id}/kill-session`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        body: cliToolId ? JSON.stringify({ cliToolId }) : undefined,
+      }
     );
   },
 };

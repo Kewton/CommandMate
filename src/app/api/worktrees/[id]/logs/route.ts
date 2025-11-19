@@ -26,16 +26,26 @@ export async function GET(
       );
     }
 
+    // Get query parameter for CLI tool filter
+    const searchParams = request.nextUrl?.searchParams;
+    const cliToolFilter = searchParams?.get('cliTool') || 'all';
+
     // Get log files using log-manager
-    const logPaths = await listLogs(params.id);
+    const logPaths = await listLogs(params.id, cliToolFilter);
 
     // Extract filenames from full paths and get file info
     const logFiles = await Promise.all(
       logPaths.map(async (logPath) => {
         const filename = path.basename(logPath);
         const stat = await fs.stat(logPath);
+
+        // Extract CLI tool from path (e.g., /data/logs/claude/file.md -> claude)
+        const pathParts = logPath.split(path.sep);
+        const cliToolId = pathParts[pathParts.length - 2]; // Directory name before filename
+
         return {
           filename,
+          cliToolId,
           size: stat.size,
           modifiedAt: stat.mtime.toISOString(),
         };
@@ -43,6 +53,7 @@ export async function GET(
     );
 
     // Return just the filenames array (to match the expected API response)
+    // But include CLI tool info for frontend to display
     const filenames = logFiles.map(f => f.filename);
 
     return NextResponse.json(filenames, { status: 200 });

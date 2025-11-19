@@ -15,6 +15,7 @@ import {
   upsertWorktree,
   createMessage,
   getMessages,
+  getLastUserMessage,
   getSessionState,
   updateSessionState,
 } from '@/lib/db';
@@ -262,13 +263,15 @@ describe('Database Operations', () => {
           worktreeId: 'main',
           role: 'user',
           content: 'First',
+          messageType: 'normal',
           timestamp: time1,
         });
 
         createMessage(testDb, {
           worktreeId: 'main',
-          role: 'claude',
+          role: 'assistant',
           content: 'Second',
+          messageType: 'normal',
           timestamp: time2,
         });
 
@@ -276,6 +279,7 @@ describe('Database Operations', () => {
           worktreeId: 'main',
           role: 'user',
           content: 'Third',
+          messageType: 'normal',
           timestamp: time3,
         });
 
@@ -347,6 +351,48 @@ describe('Database Operations', () => {
 
         const messages = getMessages(testDb, 'empty');
         expect(messages).toEqual([]);
+      });
+    });
+
+    describe('getLastUserMessage', () => {
+      it('should return null when no user messages exist', () => {
+        const lastUserMessage = getLastUserMessage(testDb, 'main');
+        expect(lastUserMessage).toBeNull();
+      });
+
+      it('should return the most recent user message only', () => {
+        const first = new Date('2025-01-01T10:00:00Z');
+        const second = new Date('2025-01-01T11:00:00Z');
+
+        createMessage(testDb, {
+          worktreeId: 'main',
+          role: 'user',
+          content: 'First user prompt',
+          messageType: 'normal',
+          timestamp: first,
+        });
+
+        createMessage(testDb, {
+          worktreeId: 'main',
+          role: 'assistant',
+          content: 'Assistant reply',
+          messageType: 'normal',
+          timestamp: new Date('2025-01-01T10:30:00Z'),
+        });
+
+        createMessage(testDb, {
+          worktreeId: 'main',
+          role: 'user',
+          content: 'Second user prompt',
+          messageType: 'normal',
+          timestamp: second,
+        });
+
+        const lastUserMessage = getLastUserMessage(testDb, 'main');
+
+        expect(lastUserMessage).toBeTruthy();
+        expect(lastUserMessage?.content).toBe('Second user prompt');
+        expect(lastUserMessage?.role).toBe('user');
       });
     });
   });

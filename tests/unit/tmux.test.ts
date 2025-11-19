@@ -259,7 +259,7 @@ describe('tmux library', () => {
       expect(result).toBe('output');
       expect(exec).toHaveBeenCalledWith(
         'tmux capture-pane -t "test-session" -p -S -1000 -E -',
-        { timeout: 5000 },
+        { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
         expect.any(Function)
       );
     });
@@ -275,7 +275,7 @@ describe('tmux library', () => {
       expect(result).toBe('output');
       expect(exec).toHaveBeenCalledWith(
         'tmux capture-pane -t "test-session" -p -S -500 -E -',
-        { timeout: 5000 },
+        { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
         expect.any(Function)
       );
     });
@@ -294,7 +294,7 @@ describe('tmux library', () => {
       expect(result).toBe('output');
       expect(exec).toHaveBeenCalledWith(
         'tmux capture-pane -t "test-session" -p -S -10000 -E -1',
-        { timeout: 5000 },
+        { timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
         expect.any(Function)
       );
     });

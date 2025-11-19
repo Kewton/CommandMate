@@ -13,7 +13,7 @@ import {
   syncWorktreesToDB
 } from './src/lib/worktrees';
 import { getDbInstance } from './src/lib/db-instance';
-import { stopAllPolling } from './src/lib/claude-poller';
+import { stopAllPolling } from './src/lib/response-poller';
 import { runMigrations } from './src/lib/db-migrations';
 
 const dev = process.env.NODE_ENV !== 'production';

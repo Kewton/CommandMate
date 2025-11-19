@@ -1,21 +1,18 @@
 /**
  * API Route: POST /api/worktrees/:id/send
- * Sends a user message to Claude for a specific worktree
+ * Sends a user message to a CLI tool (Claude/Codex/Gemini) for a specific worktree
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, createMessage, updateLastUserMessage } from '@/lib/db';
-import {
-  startClaudeSession,
-  isClaudeRunning,
-  sendMessageToClaude,
-  isClaudeInstalled,
-} from '@/lib/claude-session';
-import { startPolling } from '@/lib/claude-poller';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { startPolling } from '@/lib/response-poller';
 
 interface SendMessageRequest {
   content: string;
+  cliToolId?: CLIToolType;  // Optional: override the worktree's default CLI tool
 }
 
 export async function POST(
@@ -45,62 +42,74 @@ export async function POST(
       );
     }
 
-    // Check if Claude CLI is installed
-    const claudeAvailable = await isClaudeInstalled();
-    if (!claudeAvailable) {
+    // Determine which CLI tool to use
+    const cliToolId = body.cliToolId || worktree.cliToolId || 'claude';
+
+    // Validate CLI tool ID
+    const validToolIds: CLIToolType[] = ['claude', 'codex', 'gemini'];
+    if (!validToolIds.includes(cliToolId)) {
       return NextResponse.json(
-        { error: 'Claude CLI is not installed. Please install it first.' },
+        { error: `Invalid CLI tool ID: ${cliToolId}. Must be one of: ${validToolIds.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    // Get CLI tool instance from manager
+    const manager = CLIToolManager.getInstance();
+    const cliTool = manager.getTool(cliToolId);
+
+    // Check if CLI tool is installed
+    const toolAvailable = await cliTool.isInstalled();
+    if (!toolAvailable) {
+      return NextResponse.json(
+        { error: `${cliTool.name} is not installed. Please install it first.` },
         { status: 503 }
       );
     }
 
-    // Check if Claude session is running
-    const running = await isClaudeRunning(params.id);
+    // Check if CLI tool session is running
+    const running = await cliTool.isRunning(params.id);
 
-    // Start Claude session if not running
+    // Start CLI tool session if not running
     if (!running) {
-      const baseUrl = process.env.MCBD_BASE_URL || `http://localhost:${process.env.MCBD_PORT || 3000}`;
-
       try {
-        await startClaudeSession({
-          worktreeId: params.id,
-          worktreePath: worktree.path,
-          baseUrl,
-        });
+        await cliTool.startSession(params.id, worktree.path);
       } catch (error: any) {
-        console.error('Failed to start Claude session:', error);
+        console.error(`Failed to start ${cliTool.name} session:`, error);
         return NextResponse.json(
-          { error: `Failed to start Claude session: ${error.message}` },
+          { error: `Failed to start ${cliTool.name} session: ${error.message}` },
           { status: 500 }
         );
       }
     }
 
-    // Send message to Claude
+    // Send message to CLI tool
     try {
-      await sendMessageToClaude(params.id, body.content);
+      await cliTool.sendMessage(params.id, body.content);
     } catch (error: any) {
-      console.error('Failed to send message to Claude:', error);
+      console.error(`Failed to send message to ${cliTool.name}:`, error);
       return NextResponse.json(
-        { error: `Failed to send message to Claude: ${error.message}` },
+        { error: `Failed to send message to ${cliTool.name}: ${error.message}` },
         { status: 500 }
       );
     }
 
-    // Create user message in database
+    // Create user message in database with CLI tool ID
     const timestamp = new Date();
     const message = createMessage(db, {
       worktreeId: params.id,
       role: 'user',
       content: body.content,
+      messageType: 'normal',
       timestamp,
+      cliToolId,
     });
 
     // Update last user message for worktree
     updateLastUserMessage(db, params.id, body.content, timestamp);
 
-    // Start polling for Claude's response
-    startPolling(params.id);
+    // Start polling for CLI tool's response
+    startPolling(params.id, cliToolId);
 
     return NextResponse.json(message, { status: 201 });
   } catch (error) {

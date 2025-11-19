@@ -22,6 +22,7 @@ export interface MessageListProps {
   loading?: boolean;
   waitingForResponse?: boolean;
   generatingContent?: string;
+  selectedCliTool?: string;
 }
 
 /**
@@ -36,6 +37,20 @@ function MessageBubble({
 }) {
   const isUser = message.role === 'user';
   const timestamp = format(new Date(message.timestamp), 'PPp', { locale: ja });
+
+  // Get CLI tool display name
+  const getToolName = (cliToolId?: string) => {
+    switch (cliToolId) {
+      case 'claude':
+        return 'Claude';
+      case 'codex':
+        return 'Codex';
+      case 'gemini':
+        return 'Gemini';
+      default:
+        return 'Assistant';
+    }
+  };
 
   /**
    * Memoized markdown components to prevent re-renders
@@ -132,7 +147,7 @@ function MessageBubble({
           {/* Header */}
           <div className="flex items-center gap-2 mb-2">
             <span className={`text-xs font-medium ${isUser ? 'text-blue-100' : 'text-gray-500'}`}>
-              {isUser ? 'You' : 'Claude'}
+              {isUser ? 'You' : getToolName(message.cliToolId)}
             </span>
             <span className={`text-xs ${isUser ? 'text-blue-200' : 'text-gray-400'}`}>
               {timestamp}
@@ -190,9 +205,24 @@ export function MessageList({
   loading = false,
   waitingForResponse = false,
   generatingContent = '',
+  selectedCliTool = 'claude',
 }: MessageListProps) {
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Get CLI tool display name
+  const getToolName = (cliToolId?: string) => {
+    switch (cliToolId) {
+      case 'claude':
+        return 'Claude';
+      case 'codex':
+        return 'Codex';
+      case 'gemini':
+        return 'Gemini';
+      default:
+        return 'Assistant';
+    }
+  };
 
   // Auto-scroll to bottom when new messages arrive or content is generating
   useEffect(() => {
@@ -291,7 +321,7 @@ export function MessageList({
               <div className="rounded-lg px-4 py-3 bg-white border border-gray-200 shadow-sm">
                 {/* Header with generating indicator */}
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-xs font-medium text-gray-500">Claude</span>
+                  <span className="text-xs font-medium text-gray-500">{getToolName(selectedCliTool)}</span>
                   <div className="flex gap-1">
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -340,7 +370,7 @@ export function MessageList({
                   </div>
                 ) : (
                   <div className="text-center py-4">
-                    <p className="text-sm text-gray-500">Claudeからの応答を待っています...</p>
+                    <p className="text-sm text-gray-500">応答を待っています...</p>
                   </div>
                 )}
               </div>

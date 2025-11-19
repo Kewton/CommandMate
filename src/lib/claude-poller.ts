@@ -5,10 +5,10 @@
 
 import { captureClaudeOutput, isClaudeRunning } from './claude-session';
 import { getDbInstance } from './db-instance';
-import { getMessages, createMessage, getSessionState, updateSessionState } from './db';
-import { createLog } from './log-manager';
+import { createMessage, getSessionState, updateSessionState, getWorktreeById } from './db';
 import { broadcastMessage } from './ws-server';
 import { detectPrompt } from './prompt-detector';
+import { recordClaudeConversation } from './conversation-logger';
 
 /**
  * Polling interval in milliseconds (default: 2 seconds)
@@ -179,6 +179,16 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
   const db = getDbInstance();
 
   try {
+    // Get worktree to retrieve CLI tool ID
+    const worktree = getWorktreeById(db, worktreeId);
+    if (!worktree) {
+      console.error(`Worktree ${worktreeId} not found, stopping poller`);
+      stopPolling(worktreeId);
+      return false;
+    }
+
+    const cliToolId = worktree.cliToolId || 'claude';
+
     // Check if Claude session is running
     const running = await isClaudeRunning(worktreeId);
     if (!running) {
@@ -222,6 +232,7 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
         messageType: 'prompt',
         promptData: promptDetection.promptData,
         timestamp: new Date(),
+        cliToolId,
       });
 
       // Update session state
@@ -253,19 +264,9 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
       return false;
     }
 
-    // Get the last user message to pair with this response
-    const messages = getMessages(db, worktreeId);
-    const lastUserMessage = messages
-      .filter((m) => m.role === 'user')
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-
-    // Create Markdown log file
-    if (lastUserMessage && result.response) {
-      try {
-        await createLog(worktreeId, lastUserMessage.content, result.response);
-      } catch (error) {
-        console.error('Failed to create log file:', error);
-      }
+    // Create Markdown log file for the conversation pair
+    if (result.response) {
+      await recordClaudeConversation(db, worktreeId, result.response);
     }
 
     // Create Claude message in database
@@ -275,6 +276,7 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
       content: result.response,
       messageType: 'normal',
       timestamp: new Date(),
+      cliToolId,
     });
 
     // Update session state

@@ -4,9 +4,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import path from 'path';
 import { getDbInstance } from '@/lib/db-instance';
 import { scanWorktrees, syncWorktreesToDB } from '@/lib/worktrees';
 import { isPathSafe } from '@/lib/path-validator';
+import { getEnv } from '@/lib/env';
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,16 +23,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Security: Validate path safety
-    if (!isPathSafe(repositoryPath)) {
+    const { MCBD_ROOT_DIR } = getEnv();
+
+    // Security: Validate path safety relative to configured root
+    if (!isPathSafe(repositoryPath, MCBD_ROOT_DIR)) {
       return NextResponse.json(
         { error: 'Invalid or unsafe repository path' },
         { status: 400 }
       );
     }
 
+    const normalizedPath = path.resolve(MCBD_ROOT_DIR, repositoryPath);
+
     // Scan for worktrees
-    const worktrees = await scanWorktrees(repositoryPath);
+    const worktrees = await scanWorktrees(normalizedPath);
 
     if (worktrees.length === 0) {
       return NextResponse.json(

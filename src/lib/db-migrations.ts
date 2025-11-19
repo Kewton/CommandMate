@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 /**
  * Migration definition
@@ -244,6 +244,154 @@ const migrations: Migration[] = [
     down: (db) => {
       // No down migration needed - SQLite doesn't support DROP COLUMN directly
       console.log('No rollback needed for link field');
+    }
+  },
+  {
+    version: 7,
+    name: 'add-cli-tool-id',
+    up: (db) => {
+      // Add cli_tool_id column to worktrees table
+      // Default to 'claude' for backward compatibility
+      db.exec(`
+        ALTER TABLE worktrees ADD COLUMN cli_tool_id TEXT DEFAULT 'claude';
+      `);
+
+      // Create index on cli_tool_id for faster filtering by tool type
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_worktrees_cli_tool
+        ON worktrees(cli_tool_id);
+      `);
+
+      // Update existing worktrees to explicitly set cli_tool_id to 'claude'
+      // This ensures all existing worktrees have a non-null value
+      db.exec(`
+        UPDATE worktrees SET cli_tool_id = 'claude' WHERE cli_tool_id IS NULL;
+      `);
+    },
+    down: (db) => {
+      // Remove the index
+      db.exec(`
+        DROP INDEX IF EXISTS idx_worktrees_cli_tool;
+      `);
+
+      // Note: SQLite doesn't support DROP COLUMN directly
+      // In production, you would need to recreate the table without cli_tool_id
+      console.log('No full rollback for cli_tool_id column (SQLite limitation)');
+    }
+  },
+  {
+    version: 8,
+    name: 'change-role-claude-to-assistant',
+    up: (db) => {
+      // SQLite doesn't support ALTER TABLE MODIFY COLUMN or changing CHECK constraints
+      // We need to recreate the table with the new constraint
+
+      // Create new table with updated role constraint
+      db.exec(`
+        CREATE TABLE chat_messages_new (
+          id TEXT PRIMARY KEY,
+          worktree_id TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+          content TEXT NOT NULL,
+          summary TEXT,
+          timestamp INTEGER NOT NULL,
+          log_file_name TEXT,
+          request_id TEXT,
+          message_type TEXT DEFAULT 'normal',
+          prompt_data TEXT,
+          cli_tool_id TEXT DEFAULT 'claude',
+          FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
+        );
+      `);
+
+      // Copy data from old table, converting 'claude' role to 'assistant'
+      db.exec(`
+        INSERT INTO chat_messages_new
+        SELECT
+          id,
+          worktree_id,
+          CASE WHEN role = 'claude' THEN 'assistant' ELSE role END as role,
+          content,
+          summary,
+          timestamp,
+          log_file_name,
+          request_id,
+          message_type,
+          prompt_data,
+          cli_tool_id
+        FROM chat_messages;
+      `);
+
+      // Drop old table
+      db.exec(`DROP TABLE chat_messages;`);
+
+      // Rename new table to original name
+      db.exec(`ALTER TABLE chat_messages_new RENAME TO chat_messages;`);
+
+      // Recreate indexes
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_worktree
+        ON chat_messages(worktree_id);
+      `);
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp
+        ON chat_messages(timestamp);
+      `);
+
+      console.log('✓ Changed role constraint from "claude" to "assistant"');
+      console.log('✓ Updated existing messages with role="claude" to role="assistant"');
+    },
+    down: (db) => {
+      // Rollback: change 'assistant' back to 'claude'
+      db.exec(`
+        CREATE TABLE chat_messages_new (
+          id TEXT PRIMARY KEY,
+          worktree_id TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('user', 'claude')),
+          content TEXT NOT NULL,
+          summary TEXT,
+          timestamp INTEGER NOT NULL,
+          log_file_name TEXT,
+          request_id TEXT,
+          message_type TEXT DEFAULT 'normal',
+          prompt_data TEXT,
+          cli_tool_id TEXT DEFAULT 'claude',
+          FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
+        );
+      `);
+
+      db.exec(`
+        INSERT INTO chat_messages_new
+        SELECT
+          id,
+          worktree_id,
+          CASE WHEN role = 'assistant' THEN 'claude' ELSE role END as role,
+          content,
+          summary,
+          timestamp,
+          log_file_name,
+          request_id,
+          message_type,
+          prompt_data,
+          cli_tool_id
+        FROM chat_messages;
+      `);
+
+      db.exec(`DROP TABLE chat_messages;`);
+      db.exec(`ALTER TABLE chat_messages_new RENAME TO chat_messages;`);
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_worktree
+        ON chat_messages(worktree_id);
+      `);
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp
+        ON chat_messages(timestamp);
+      `);
+
+      console.log('✓ Rolled back: Changed role constraint from "assistant" to "claude"');
     }
   }
 ];

@@ -27,9 +27,19 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const beforeParam = searchParams.get('before');
     const limitParam = searchParams.get('limit');
+    const cliToolParam = searchParams.get('cliTool');
 
     const before = beforeParam ? new Date(beforeParam) : undefined;
     const limit = limitParam ? parseInt(limitParam, 10) : 50;
+    const cliToolId = cliToolParam as 'claude' | 'codex' | 'gemini' | undefined;
+
+    // Validate CLI tool ID
+    if (cliToolId && !['claude', 'codex', 'gemini'].includes(cliToolId)) {
+      return NextResponse.json(
+        { error: 'Invalid cliTool parameter (must be claude, codex, or gemini)' },
+        { status: 400 }
+      );
+    }
 
     // Validate limit
     if (isNaN(limit) || limit < 1 || limit > 100) {
@@ -39,13 +49,18 @@ export async function GET(
       );
     }
 
-    // Get messages
-    const messages = getMessages(db, params.id, before, limit);
+    // Get messages with optional CLI tool filter
+    const messages = getMessages(db, params.id, before, limit, cliToolId);
 
     // Filter out messages with empty content (defensive programming)
-    const validMessages = messages.filter(m => m.content && m.content.trim() !== '');
+    const validMessages = messages.filter((m) => m.content && m.content.trim() !== '');
 
-    return NextResponse.json(validMessages, { status: 200 });
+    // API consumers expect chronological order, so reverse the DESC query results
+    const chronologicalMessages = [...validMessages].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    return NextResponse.json(chronologicalMessages, { status: 200 });
   } catch (error) {
     console.error('Error fetching messages:', error);
     return NextResponse.json(

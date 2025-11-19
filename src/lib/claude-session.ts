@@ -235,7 +235,7 @@ export async function captureClaudeOutput(
   }
 
   try {
-    return await capturePane(sessionName, { startLine: -lines, endLine: '-' });
+    return await capturePane(sessionName, { startLine: -lines });
   } catch (error: any) {
     throw new Error(`Failed to capture Claude output: ${error.message}`);
   }

@@ -1,13 +1,19 @@
 # myCodeBranchDesk
 
-git worktree ごとに Claude Code / tmux セッションを張り、スマホブラウザからチャット操作できる開発コンパニオンツール。
+git worktree ごとに SWE CLI tool (Claude Code / Codex / Gemini) / tmux セッションを張り、スマホブラウザからチャット操作できる開発コンパニオンツール。
 
-myCodeBranchDesk は、ローカルの git worktree 単位で 1:1 の tmux + Claude CLI セッションを管理し、
+myCodeBranchDesk は、ローカルの git worktree 単位で 1:1 の tmux + SWE CLI セッションを管理し、
 スマホや PC のブラウザから「ブランチごとのチャット UI」として操作できるツールです。
-	•	feature/foo ブランチ用の Claude セッション
-	•	hotfix/bar ブランチ用の Claude セッション
+	•	feature/foo ブランチ用の Claude Code セッション
+	•	hotfix/bar ブランチ用の Codex セッション
+	•	main ブランチ用の Gemini セッション
 
-…といった形で、worktree ごとに独立した「開発用チャットルーム」を持つイメージです。
+…といった形で、worktree ごとに独立した「開発用チャットルーム」を持ち、各ワークツリーで異なるCLI toolを使い分けることができます。
+
+**対応CLI tool:**
+- Claude Code (デフォルト)
+- Codex CLI
+- Gemini CLI
 
 Stop フック（CLAUDE_HOOKS_STOP）を活用した イベント駆動アーキテクチャにより、
 不安定なポーリングを避けつつ、リアルタイムなチャット更新を実現します。
@@ -40,13 +46,19 @@ Stop フック（CLAUDE_HOOKS_STOP）を活用した イベント駆動アーキ
 # Features
 🧠 git worktree aware
 - ルートディレクトリ配下の git worktree を自動検出
-- 1 worktree = 1 tmux session = 1 Claude CLI session のシンプルな対応
+- 1 worktree = 1 tmux session = 1 SWE CLI session のシンプルな対応
+- 🤖 複数の SWE CLI tool サポート (Issue #4で実装)
+- Claude Code (デフォルト)
+- Codex CLI
+- Gemini CLI
+- ワークツリーごとに異なる CLI tool を選択可能
+- Strategy パターンによる拡張可能な設計
 - 📱 スマホ最適なチャット UI
 - 画面A: Worktree 一覧（トーク一覧風）
 - 画面B: チャット画面（ブランチ専用の会話）
 - 画面C: Markdown ログビューア
 - ⚡ Stop フックによる非同期応答
-- Claude 側の完了フックで API を叩き、tmux から出力を取得
+- CLI tool側の完了フックで API を叩き、tmux から出力を取得
 - WebSocket でチャット画面にプッシュ配信し、リアルタイム更新
 - 📝 Markdown ログ保存
 - 各 worktree 配下の .claude_logs/ に詳細な Markdown ログを保存

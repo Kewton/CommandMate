@@ -28,7 +28,7 @@ export interface WorktreeCardProps {
  * ```
  */
 export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: WorktreeCardProps) {
-  const { id, name, memo, lastUserMessage, lastUserMessageAt, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link } = worktree;
+  const { id, name, memo, lastUserMessage, lastUserMessageAt, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, cliToolId } = worktree;
   const [isKilling, setIsKilling] = useState(false);
   const [isFavorite, setIsFavorite] = useState(favorite || false);
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
@@ -161,6 +161,14 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
               </button>
               <span className="truncate">{name}</span>
               {isMain && <Badge variant="info">Main</Badge>}
+              <Badge
+                variant={
+                  cliToolId === 'codex' ? 'warning' : cliToolId === 'gemini' ? 'success' : 'info'
+                }
+                title={`CLI Tool: ${cliToolId === 'claude' ? 'Claude Code' : cliToolId === 'codex' ? 'Codex CLI' : 'Gemini CLI'}`}
+              >
+                {cliToolId === 'claude' ? 'Claude' : cliToolId === 'codex' ? 'Codex' : 'Gemini'}
+              </Badge>
               {isSessionRunning && isWaitingForResponse && (
                 <Badge variant="warning" dot>
                   レスポンス待ち

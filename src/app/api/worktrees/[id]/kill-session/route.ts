@@ -6,10 +6,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, deleteSessionState, deleteAllMessages } from '@/lib/db';
-import { getSessionName, isClaudeRunning } from '@/lib/claude-session';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux';
 import { broadcast } from '@/lib/ws-server';
-import { stopPolling } from '@/lib/claude-poller';
+import { stopPolling } from '@/lib/response-poller';
 
 export async function POST(
   request: NextRequest,
@@ -27,8 +27,32 @@ export async function POST(
       );
     }
 
+    // Get CLI tool ID from request body (optional)
+    let body: { cliToolId?: string } = {};
+    try {
+      body = await request.json();
+    } catch {
+      // No body provided, use worktree's default CLI tool
+    }
+
+    // Determine which CLI tool to use - prioritize request body, then worktree default
+    const cliToolId = body.cliToolId || worktree.cliToolId || 'claude';
+
+    // Validate CLI tool ID
+    const validToolIds = ['claude', 'codex', 'gemini'];
+    if (!validToolIds.includes(cliToolId)) {
+      return NextResponse.json(
+        { error: `Invalid CLI tool ID: ${cliToolId}` },
+        { status: 400 }
+      );
+    }
+
+    // Get CLI tool instance from manager
+    const manager = CLIToolManager.getInstance();
+    const cliTool = manager.getTool(cliToolId as 'claude' | 'codex' | 'gemini');
+
     // Check if session is running
-    const isRunning = await isClaudeRunning(params.id);
+    const isRunning = await cliTool.isRunning(params.id);
     if (!isRunning) {
       return NextResponse.json(
         { error: 'No active session found for this worktree' },
@@ -37,7 +61,7 @@ export async function POST(
     }
 
     // Kill the session
-    const sessionName = getSessionName(params.id);
+    const sessionName = cliTool.getSessionName(params.id);
     const killed = await killSession(sessionName);
 
     if (!killed) {
@@ -48,7 +72,7 @@ export async function POST(
     }
 
     // Stop poller if running
-    stopPolling(params.id);
+    stopPolling(params.id, cliToolId as 'claude' | 'codex' | 'gemini');
 
     // Clean up session state (important: reset line count tracking)
     deleteSessionState(db, params.id);

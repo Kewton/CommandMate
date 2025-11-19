@@ -19,7 +19,7 @@ export interface WorktreeDetailProps {
   worktreeId: string;
 }
 
-type TabView = 'messages' | 'logs' | 'info' | 'memo';
+type TabView = 'claude' | 'codex' | 'gemini' | 'logs' | 'info' | 'memo';
 
 /**
  * Worktree detail page component
@@ -34,12 +34,14 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabView>('messages');
+  const [activeTab, setActiveTab] = useState<TabView>('claude');
   const [waitingForResponse, setWaitingForResponse] = useState(false);
   const [isEditingMemo, setIsEditingMemo] = useState(false);
   const [memoText, setMemoText] = useState('');
   const [isEditingLink, setIsEditingLink] = useState(false);
   const [linkText, setLinkText] = useState('');
+  const [isEditingCliTool, setIsEditingCliTool] = useState(false);
+  const [selectedCliTool, setSelectedCliTool] = useState<'claude' | 'codex' | 'gemini'>('claude');
   const [showNewMessageNotification, setShowNewMessageNotification] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [generatingContent, setGeneratingContent] = useState<string>('');
@@ -58,12 +60,12 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   }, [worktreeId]);
 
   /**
-   * Fetch messages
+   * Fetch messages for the active CLI tool tab
    */
-  const fetchMessages = useCallback(async () => {
+  const fetchMessages = useCallback(async (cliTool?: 'claude' | 'codex' | 'gemini') => {
     try {
       setError(null);
-      const data = await worktreeApi.getMessages(worktreeId);
+      const data = await worktreeApi.getMessages(worktreeId, cliTool);
       setMessages(data);
     } catch (err) {
       setError(handleApiError(err));
@@ -77,13 +79,13 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
     const fetchData = async () => {
       setLoading(true);
 
-      // Fetch worktree and messages from database
-      await Promise.all([fetchWorktree(), fetchMessages()]);
+      // Fetch worktree and messages from database (default: claude)
+      await Promise.all([fetchWorktree(), fetchMessages('claude')]);
 
-      // Then sync latest Claude message from log file
+      // Then sync latest CLI tool message from log file
       try {
         const updatedMessages = await worktreeApi.getMessages(worktreeId);
-        const claudeMessages = updatedMessages.filter(m => m.role === 'claude' && m.logFileName);
+        const claudeMessages = updatedMessages.filter(m => m.role === 'assistant' && m.logFileName);
         const latestClaudeMessage = claudeMessages
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
 
@@ -112,14 +114,24 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   }, [fetchWorktree, fetchMessages, worktreeId]);
 
   /**
-   * Sync memo and link text when worktree changes
+   * Sync memo, link, and CLI tool when worktree changes
    */
   useEffect(() => {
     if (worktree) {
       setMemoText(worktree.memo || '');
       setLinkText(worktree.link || '');
+      setSelectedCliTool(worktree.cliToolId || 'claude');
     }
   }, [worktree]);
+
+  /**
+   * Fetch messages when active tab changes (for CLI tool tabs)
+   */
+  useEffect(() => {
+    if (activeTab === 'claude' || activeTab === 'codex' || activeTab === 'gemini') {
+      fetchMessages(activeTab);
+    }
+  }, [activeTab, fetchMessages]);
 
   /**
    * Save memo
@@ -166,6 +178,28 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   };
 
   /**
+   * Save CLI tool selection
+   */
+  const handleSaveCliTool = async () => {
+    try {
+      setError(null);
+      const updated = await worktreeApi.updateCliTool(worktreeId, selectedCliTool);
+      setWorktree(updated);
+      setIsEditingCliTool(false);
+    } catch (err) {
+      setError(handleApiError(err));
+    }
+  };
+
+  /**
+   * Cancel CLI tool editing
+   */
+  const handleCancelCliTool = () => {
+    setSelectedCliTool(worktree?.cliToolId || 'claude');
+    setIsEditingCliTool(false);
+  };
+
+  /**
    * Fetch latest content from log file
    */
   const fetchFromLogFile = async (logFileName: string): Promise<string | null> => {
@@ -201,8 +235,8 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
       console.log('[handleManualRefresh] Fetched messages from DB:', updatedMessages.length);
       setMessages(updatedMessages);
 
-      // Then, sync the latest Claude message from log file
-      const claudeMessages = updatedMessages.filter(m => m.role === 'claude' && m.logFileName);
+      // Then, sync the latest CLI tool message from log file
+      const claudeMessages = updatedMessages.filter(m => m.role === 'assistant' && m.logFileName);
       console.log('[handleManualRefresh] Claude messages with logFileName:', claudeMessages.length);
 
       const latestClaudeMessage = claudeMessages
@@ -433,17 +467,37 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
       </div>
 
           {/* Tab Navigation */}
-          <div className="mb-0 border-b border-gray-200">
-            <nav className="flex gap-6">
+          <div className="mb-0 border-b border-gray-200 overflow-x-auto">
+            <nav className="flex gap-6 min-w-max">
           <button
-            onClick={() => setActiveTab('messages')}
+            onClick={() => setActiveTab('claude')}
             className={`pb-3 px-4 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'messages'
+              activeTab === 'claude'
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
           >
-            Messages
+            Claude
+          </button>
+          <button
+            onClick={() => setActiveTab('codex')}
+            className={`pb-3 px-4 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'codex'
+                ? 'border-yellow-600 text-yellow-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Codex
+          </button>
+          <button
+            onClick={() => setActiveTab('gemini')}
+            className={`pb-3 px-4 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'gemini'
+                ? 'border-green-600 text-green-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Gemini
           </button>
           <button
             onClick={() => setActiveTab('logs')}
@@ -481,7 +535,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
       </div>
 
       {/* Content */}
-      {activeTab === 'messages' && (
+      {(activeTab === 'claude' || activeTab === 'codex' || activeTab === 'gemini') && (
         <div className="flex-1 flex flex-col w-full max-w-7xl mx-auto relative">
           {/* New Message Notification */}
           {showNewMessageNotification && (
@@ -490,11 +544,11 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
             </div>
           )}
 
-          {/* Manual Refresh Button */}
+          {/* Manual Refresh Button - Moved higher to avoid session kill button */}
           <button
             onClick={handleManualRefresh}
             disabled={isRefreshing}
-            className="absolute bottom-24 right-4 sm:right-6 z-20 bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-full shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="absolute bottom-32 right-4 sm:right-6 z-20 bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-full shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             title="最新のメッセージを取得"
           >
             {isRefreshing ? (
@@ -517,13 +571,39 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
               loading={false}
               waitingForResponse={waitingForResponse}
               generatingContent={generatingContent}
+              selectedCliTool={activeTab === 'claude' || activeTab === 'codex' || activeTab === 'gemini' ? activeTab : 'claude'}
             />
           </div>
 
           {/* Message Input */}
           <div className="sticky bottom-0 flex-shrink-0 w-full bg-gray-50 border-t border-gray-200">
             <div className="px-4 sm:px-6 lg:px-8 pb-4 pt-2">
-              <MessageInput worktreeId={worktreeId} onMessageSent={handleMessageSent} />
+              {/* Session Control */}
+              {worktree?.isSessionRunning && (
+                <div className="mb-3 flex justify-end">
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`${activeTab} のセッションを終了しますか？`)) {
+                        return;
+                      }
+                      try {
+                        await worktreeApi.killSession(worktreeId, activeTab as 'claude' | 'codex' | 'gemini');
+                        fetchWorktree();
+                      } catch (err) {
+                        setError(handleApiError(err));
+                      }
+                    }}
+                    className="px-3 py-1 text-sm rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors"
+                  >
+                    セッション終了
+                  </button>
+                </div>
+              )}
+              <MessageInput
+                worktreeId={worktreeId}
+                onMessageSent={handleMessageSent}
+                cliToolId={activeTab as 'claude' | 'codex' | 'gemini'}
+              />
             </div>
           </div>
         </div>
@@ -546,6 +626,79 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
                 <div>
                   <dt className="text-sm font-medium text-gray-500 mb-2">Path</dt>
                   <dd className="text-base font-mono text-gray-900 break-all">{worktree?.path}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm font-medium text-gray-500 mb-2">
+                    <div className="flex items-center justify-between">
+                      <span>CLI Tool</span>
+                      {!isEditingCliTool && (
+                        <Button variant="ghost" size="sm" onClick={() => setIsEditingCliTool(true)}>
+                          Edit
+                        </Button>
+                      )}
+                    </div>
+                  </dt>
+                  <dd className="text-base font-medium text-gray-900">
+                    {isEditingCliTool ? (
+                      <div className="space-y-3">
+                        <div className="flex flex-col gap-2">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="cliTool"
+                              value="claude"
+                              checked={selectedCliTool === 'claude'}
+                              onChange={(e) => setSelectedCliTool(e.target.value as any)}
+                              className="w-4 h-4 text-blue-600"
+                            />
+                            <span className="text-base">Claude Code</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="cliTool"
+                              value="codex"
+                              checked={selectedCliTool === 'codex'}
+                              onChange={(e) => setSelectedCliTool(e.target.value as any)}
+                              className="w-4 h-4 text-blue-600"
+                            />
+                            <span className="text-base">Codex CLI</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="cliTool"
+                              value="gemini"
+                              checked={selectedCliTool === 'gemini'}
+                              onChange={(e) => setSelectedCliTool(e.target.value as any)}
+                              className="w-4 h-4 text-blue-600"
+                            />
+                            <span className="text-base">Gemini CLI</span>
+                          </label>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="primary" size="sm" onClick={handleSaveCliTool}>
+                            Save
+                          </Button>
+                          <Button variant="secondary" size="sm" onClick={handleCancelCliTool}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Badge variant={
+                          worktree?.cliToolId === 'claude' ? 'info' :
+                          worktree?.cliToolId === 'codex' ? 'warning' :
+                          'success'
+                        }>
+                          {worktree?.cliToolId === 'claude' ? 'Claude Code' :
+                           worktree?.cliToolId === 'codex' ? 'Codex CLI' :
+                           'Gemini CLI'}
+                        </Badge>
+                      </div>
+                    )}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-sm font-medium text-gray-500 mb-2">Messages</dt>

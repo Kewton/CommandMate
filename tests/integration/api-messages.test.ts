@@ -7,7 +7,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { GET as getMessages } from '@/app/api/worktrees/[id]/messages/route';
 import { POST as sendMessage } from '@/app/api/worktrees/[id]/send/route';
 import Database from 'better-sqlite3';
-import { initDatabase, upsertWorktree, createMessage } from '@/lib/db';
+import { runMigrations } from '@/lib/db-migrations';
+import { upsertWorktree, createMessage } from '@/lib/db';
 import type { Worktree, ChatMessage } from '@/types/models';
 
 // Mock the database instance
@@ -38,7 +39,7 @@ describe('GET /api/worktrees/:id/messages', () => {
 
   beforeEach(async () => {
     db = new Database(':memory:');
-    initDatabase(db);
+    runMigrations(db);
 
     const { setMockDb } = await import('@/lib/db-instance');
     setMockDb(db);
@@ -75,13 +76,15 @@ describe('GET /api/worktrees/:id/messages', () => {
       worktreeId: 'test-worktree',
       role: 'user',
       content: 'First message',
+      messageType: 'normal',
       timestamp: new Date('2025-01-17T10:00:00Z'),
     });
 
     const message2 = createMessage(db, {
       worktreeId: 'test-worktree',
-      role: 'claude',
+      role: 'assistant',
       content: 'Second message',
+      messageType: 'normal',
       timestamp: new Date('2025-01-17T11:00:00Z'),
     });
 
@@ -105,6 +108,7 @@ describe('GET /api/worktrees/:id/messages', () => {
       worktreeId: 'test-worktree',
       role: 'user',
       content: 'Message 1',
+      messageType: 'normal',
       timestamp: new Date('2025-01-17T10:00:00Z'),
     });
 
@@ -112,6 +116,7 @@ describe('GET /api/worktrees/:id/messages', () => {
       worktreeId: 'test-worktree',
       role: 'user',
       content: 'Message 2',
+      messageType: 'normal',
       timestamp: new Date('2025-01-17T11:00:00Z'),
     });
 
@@ -119,6 +124,7 @@ describe('GET /api/worktrees/:id/messages', () => {
       worktreeId: 'test-worktree',
       role: 'user',
       content: 'Message 3',
+      messageType: 'normal',
       timestamp: new Date('2025-01-17T12:00:00Z'),
     });
 
@@ -145,6 +151,7 @@ describe('GET /api/worktrees/:id/messages', () => {
         worktreeId: 'test-worktree',
         role: 'user',
         content: `Message ${i}`,
+        messageType: 'normal',
         timestamp: new Date(`2025-01-17T10:0${i}:00Z`),
       });
     }
@@ -190,7 +197,7 @@ describe('POST /api/worktrees/:id/send', () => {
 
   beforeEach(async () => {
     db = new Database(':memory:');
-    initDatabase(db);
+    runMigrations(db);
 
     const { setMockDb } = await import('@/lib/db-instance');
     setMockDb(db);

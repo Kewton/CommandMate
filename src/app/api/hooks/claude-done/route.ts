@@ -5,54 +5,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, createMessage, updateSessionState, getMessages } from '@/lib/db';
-import { captureClaudeOutput, getSessionName } from '@/lib/claude-session';
-import { createLog } from '@/lib/log-manager';
+import { getWorktreeById, createMessage, updateSessionState } from '@/lib/db';
+import { captureClaudeOutput } from '@/lib/claude-session';
 import { broadcastMessage } from '@/lib/ws-server';
+import { parseClaudeOutput } from '@/lib/claude-output';
+import { recordClaudeConversation } from '@/lib/conversation-logger';
 
 interface ClaudeDoneRequest {
   worktreeId: string;
-}
-
-interface ParsedOutput {
-  content: string;
-  summary?: string;
-  logFileName?: string;
-  requestId?: string;
-}
-
-/**
- * Parse tmux output to extract log information
- */
-function parseClaudeOutput(output: string): ParsedOutput {
-  const result: ParsedOutput = {
-    content: output,
-  };
-
-  // Look for log file separator pattern
-  // Format:
-  // ───────────────────────────────────────────────────────────────
-  // 📄 Session log: /path/to/.claude/logs/2025-01-17_10-30-45_abc123.jsonl
-  // Request ID: abc123
-  // Summary: Some summary text
-  // ───────────────────────────────────────────────────────────────
-
-  const logFileMatch = output.match(/📄 Session log: (.+?\/([^\/\s]+\.jsonl))/);
-  if (logFileMatch) {
-    result.logFileName = logFileMatch[2]; // Just the filename
-  }
-
-  const requestIdMatch = output.match(/Request ID: ([^\s\n]+)/);
-  if (requestIdMatch) {
-    result.requestId = requestIdMatch[1];
-  }
-
-  const summaryMatch = output.match(/Summary: (.+?)(?:\n─|$)/s);
-  if (summaryMatch) {
-    result.summary = summaryMatch[1].trim();
-  }
-
-  return result;
 }
 
 export async function POST(request: NextRequest) {
@@ -94,25 +54,8 @@ export async function POST(request: NextRequest) {
     // Parse output to extract log information
     const parsed = parseClaudeOutput(output);
 
-    // Get the last user message to pair with this response
-    const messages = getMessages(db, body.worktreeId);
-    const lastUserMessage = messages
-      .filter((m) => m.role === 'user')
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-
-    // Create Markdown log file
-    if (lastUserMessage) {
-      try {
-        await createLog(
-          body.worktreeId,
-          lastUserMessage.content,
-          parsed.content
-        );
-      } catch (error) {
-        console.error('Failed to create log file:', error);
-        // Continue even if log creation fails
-      }
-    }
+    // Create Markdown log file alongside latest user prompt
+    await recordClaudeConversation(db, body.worktreeId, parsed.content);
 
     // Create Claude message in database
     const message = createMessage(db, {
@@ -123,6 +66,7 @@ export async function POST(request: NextRequest) {
       timestamp: new Date(),
       logFileName: parsed.logFileName,
       requestId: parsed.requestId,
+      messageType: 'normal',
     });
 
     // Update session state

@@ -46,8 +46,15 @@
 ### 1.2 Non-goals
 
 - マルチユーザー SaaS としての動作（あくまでローカル開発者向け）
-- Claude 以外の LLM CLI のサポート（将来拡張は想定）
 - セキュリティ境界を超えたネット越しの公開・マルチテナント運用
+
+### 1.3 実装済み機能
+
+- **複数 CLI ツールのサポート** (Issue #4で実装完了)
+  - Claude Code (デフォルト)
+  - Codex CLI
+  - Gemini CLI
+  - ワークツリーごとに異なるCLIツールを選択可能
 
 ---
 
@@ -323,12 +330,50 @@ tmux セッション / Claude プロセスが落ちた場合
 
 ⸻
 
-## 6. tmux & Claude Integration
+## 6. tmux & CLI Tool Integration
 
 ### 6.1 セッション命名規則
-- セッション名: cw_{worktreeId}
-- 例: cw_main, cw_feature-foo
+- セッション名: `mcbd-{cliToolId}-{worktreeId}`
+- 例:
+  - Claude: `mcbd-claude-feature-foo`
+  - Codex: `mcbd-codex-main`
+  - Gemini: `mcbd-gemini-hotfix-123`
 - 1 worktree に対して 1 セッションを維持する。
+- ※ 旧命名規則 `cw_{worktreeId}` からの移行: Issue #4で実装
+
+### 6.1.5 CLI Tool Abstraction Layer (Issue #4で実装)
+
+**設計パターン:**
+- Strategy パターンによるCLI tool の抽象化
+- `BaseCLITool` 抽象クラスが共通インターフェースを定義:
+  ```typescript
+  abstract class BaseCLITool {
+    abstract id: CLIToolType;
+    abstract name: string;
+    abstract command: string;
+
+    abstract isInstalled(): Promise<boolean>;
+    abstract isRunning(worktreeId: string): Promise<boolean>;
+    abstract startSession(worktreeId: string, worktreePath: string): Promise<void>;
+    abstract sendMessage(worktreeId: string, message: string): Promise<void>;
+    abstract killSession(worktreeId: string): Promise<boolean>;
+    getSessionName(worktreeId: string): string;
+  }
+  ```
+
+**実装クラス:**
+- `ClaudeTool` - Claude Code CLI
+- `CodexTool` - Codex CLI
+- `GeminiTool` - Gemini CLI
+
+**管理:**
+- `CLIToolManager` シングルトンクラスで各ツールインスタンスを管理
+- ワークツリーの `cliToolId` に基づいて適切なツールを取得
+
+**利点:**
+- 新しいCLI toolの追加が容易（`BaseCLITool`を継承するだけ）
+- API層は抽象インターフェースのみに依存、具体的な実装に依存しない
+- 各ツール固有のロジックをカプセル化
 
 ### 6.2 UC-2: 遅延セッション起動フロー
 
@@ -361,8 +406,13 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - テーブル（イメージ）:
 - worktrees:
 - id, name, path, last_message_summary, updated_at
+- **cli_tool_id** (追加: Issue #4) - 使用するCLI tool ('claude' | 'codex' | 'gemini')
+- repository_path, repository_name, memo
+- last_user_message, last_user_message_at
+- favorite, status, link
 - chat_messages:
 - id, worktree_id, role, content, summary, timestamp, log_file_name, request_id
+- message_type, prompt_data
 - session_states:
 - worktree_id, last_captured_line
 
@@ -439,10 +489,25 @@ feature/foo
 
 - ChatMessage.requestId とログ名に埋め込むことで、「どのリクエストの応答か」をより厳密にトレース可能。
 
-### 10.2 マルチ LLM / マルチセッション
-- Claude 以外の CLI（例: openai, lmstudio 等）対応を追加する場合:
-- セッション種別（provider, model）を Worktree または Session に紐付ける。
-- Stop フックの仕様が異なる場合はアダプタ層を設ける。
+### 10.2 マルチ LLM / マルチセッション ✅ 実装済み (Issue #4)
+
+**実装内容:**
+- 複数のCLIツール（Claude Code, Codex CLI, Gemini CLI）に対応
+- ワークツリーごとに `cliToolId` フィールドで使用するCLIツールを管理
+- Strategy パターンによる抽象化:
+  - `BaseCLITool` 抽象クラス
+  - 各ツール固有の実装（`ClaudeTool`, `CodexTool`, `GeminiTool`）
+  - `CLIToolManager` シングルトンでツールインスタンスを管理
+- データベーススキーマ: `worktrees.cli_tool_id` カラム（デフォルト: 'claude'）
+- 対応API:
+  - `POST /api/worktrees/:id/send` - メッセージ送信
+  - `POST /api/worktrees/:id/respond` - プロンプト応答
+  - `POST /api/worktrees/:id/kill-session` - セッション終了
+  - `GET /api/worktrees` - ワークツリー一覧（セッション状態含む）
+
+**将来拡張:**
+- その他のCLI（openai, lmstudio等）を追加する場合は、`BaseCLITool`を継承して実装
+- Stop フックの仕様が異なる場合は各ツールクラス内で対応
 
 ### 10.3 Observability
 - 将来的に:

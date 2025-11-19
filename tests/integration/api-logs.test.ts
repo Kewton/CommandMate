@@ -7,7 +7,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { GET as getLogs } from '@/app/api/worktrees/[id]/logs/route';
 import { GET as getLogFile } from '@/app/api/worktrees/[id]/logs/[filename]/route';
 import Database from 'better-sqlite3';
-import { initDatabase, upsertWorktree } from '@/lib/db';
+import { runMigrations } from '@/lib/db-migrations';
+import { upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 import fs from 'fs';
 import path from 'path';
@@ -50,7 +51,7 @@ describe('GET /api/worktrees/:id/logs', () => {
 
   beforeEach(async () => {
     db = new Database(':memory:');
-    initDatabase(db);
+    runMigrations(db);
 
     const { setMockDb } = await import('@/lib/db-instance');
     setMockDb(db);
@@ -177,7 +178,7 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
 
   beforeEach(async () => {
     db = new Database(':memory:');
-    initDatabase(db);
+    runMigrations(db);
 
     const { setMockDb } = await import('@/lib/db-instance');
     setMockDb(db);

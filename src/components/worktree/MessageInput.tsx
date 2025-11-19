@@ -12,6 +12,7 @@ import { worktreeApi, handleApiError } from '@/lib/api-client';
 export interface MessageInputProps {
   worktreeId: string;
   onMessageSent?: () => void;
+  cliToolId?: 'claude' | 'codex' | 'gemini';
 }
 
 /**
@@ -19,10 +20,10 @@ export interface MessageInputProps {
  *
  * @example
  * ```tsx
- * <MessageInput worktreeId="main" onMessageSent={handleRefresh} />
+ * <MessageInput worktreeId="main" onMessageSent={handleRefresh} cliToolId="claude" />
  * ```
  */
-export function MessageInput({ worktreeId, onMessageSent }: MessageInputProps) {
+export function MessageInput({ worktreeId, onMessageSent, cliToolId }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +61,7 @@ export function MessageInput({ worktreeId, onMessageSent }: MessageInputProps) {
     try {
       setSending(true);
       setError(null);
-      await worktreeApi.sendMessage(worktreeId, message.trim());
+      await worktreeApi.sendMessage(worktreeId, message.trim(), cliToolId);
       setMessage('');
       onMessageSent?.();
     } catch (err) {

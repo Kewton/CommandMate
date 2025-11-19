@@ -46,41 +46,52 @@ export async function GET(
       );
     }
 
-    // Construct file path
-    const filePath = path.join(LOG_DIR, filename);
+    // Try to find file in CLI tool subdirectories (claude, codex, gemini)
+    const cliTools = ['claude', 'codex', 'gemini'];
+    let fileFound = false;
+    let fileContent = '';
+    let fileStat: any = null;
+    let foundCliTool = '';
 
-    // Verify the file exists
-    try {
-      const stat = await fs.stat(filePath);
+    for (const cliTool of cliTools) {
+      const filePath = path.join(LOG_DIR, cliTool, filename);
 
-      if (!stat.isFile()) {
-        return NextResponse.json(
-          { error: `'${filename}' is not a file` },
-          { status: 400 }
-        );
+      try {
+        const stat = await fs.stat(filePath);
+
+        if (stat.isFile()) {
+          // File found
+          fileFound = true;
+          foundCliTool = cliTool;
+          fileStat = stat;
+          fileContent = await fs.readFile(filePath, 'utf-8');
+          break;
+        }
+      } catch (error: any) {
+        if (error.code !== 'ENOENT') {
+          throw error; // Re-throw non-ENOENT errors
+        }
+        // Continue to next CLI tool
       }
-
-      // Read file content
-      const content = await fs.readFile(filePath, 'utf-8');
-
-      return NextResponse.json(
-        {
-          filename,
-          content,
-          size: stat.size,
-          modifiedAt: stat.mtime.toISOString(),
-        },
-        { status: 200 }
-      );
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
-        return NextResponse.json(
-          { error: `Log file '${filename}' not found` },
-          { status: 404 }
-        );
-      }
-      throw error;
     }
+
+    if (!fileFound) {
+      return NextResponse.json(
+        { error: `Log file '${filename}' not found in any CLI tool directory` },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        filename,
+        cliToolId: foundCliTool,
+        content: fileContent,
+        size: fileStat.size,
+        modifiedAt: fileStat.mtime.toISOString(),
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error('Error reading log file:', error);
     return NextResponse.json(

@@ -6,7 +6,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { POST as respondToPrompt } from '@/app/api/worktrees/[id]/respond/route';
 import Database from 'better-sqlite3';
-import { initDatabase, upsertWorktree, createMessage, getMessageById } from '@/lib/db';
+import { runMigrations } from '@/lib/db-migrations';
+import { upsertWorktree, createMessage, getMessageById } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
 // Mock the database instance
@@ -60,7 +61,7 @@ describe('POST /api/worktrees/:id/respond', () => {
 
   beforeEach(async () => {
     db = new Database(':memory:');
-    initDatabase(db);
+    runMigrations(db);
 
     const { setMockDb } = await import('@/lib/db-instance');
     setMockDb(db);
@@ -87,7 +88,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       // Create a prompt message
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Do you want to proceed?',
         messageType: 'prompt',
         promptData: {
@@ -133,7 +134,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       // Create a prompt message
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Do you want to delete this file?',
         messageType: 'prompt',
         promptData: {
@@ -171,7 +172,7 @@ describe('POST /api/worktrees/:id/respond', () => {
 
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Continue?',
         messageType: 'prompt',
         promptData: {
@@ -202,7 +203,7 @@ describe('POST /api/worktrees/:id/respond', () => {
 
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Continue?',
         messageType: 'prompt',
         promptData: {
@@ -233,7 +234,7 @@ describe('POST /api/worktrees/:id/respond', () => {
 
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Continue?',
         messageType: 'prompt',
         promptData: {
@@ -264,7 +265,7 @@ describe('POST /api/worktrees/:id/respond', () => {
 
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Continue?',
         messageType: 'prompt',
         promptData: {
@@ -388,7 +389,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       // Create an already-answered prompt
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Continue?',
         messageType: 'prompt',
         promptData: {
@@ -423,7 +424,7 @@ describe('POST /api/worktrees/:id/respond', () => {
     it('should return 400 if answer is invalid', async () => {
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Continue?',
         messageType: 'prompt',
         promptData: {
@@ -458,7 +459,7 @@ describe('POST /api/worktrees/:id/respond', () => {
     it('should accept "YES" as valid answer', async () => {
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Continue?',
         messageType: 'prompt',
         promptData: {
@@ -491,7 +492,7 @@ describe('POST /api/worktrees/:id/respond', () => {
     it('should accept "Y" as valid answer', async () => {
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
-        role: 'claude',
+        role: 'assistant',
         content: 'Continue?',
         messageType: 'prompt',
         promptData: {

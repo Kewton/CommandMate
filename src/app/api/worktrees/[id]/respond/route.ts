@@ -1,14 +1,14 @@
 /**
  * API Route: POST /api/worktrees/[id]/respond
- * Send response to Claude prompt
+ * Send response to CLI tool prompt (Claude/Codex/Gemini)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getMessageById, updatePromptData } from '@/lib/db';
+import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { sendKeys } from '@/lib/tmux';
-import { getSessionName } from '@/lib/claude-session';
-import { startPolling } from '@/lib/claude-poller';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { startPolling } from '@/lib/response-poller';
 import { getAnswerInput } from '@/lib/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
 
@@ -108,12 +108,29 @@ export async function POST(
 
     updatePromptData(db, messageId, updatedPromptData);
 
-    // Send answer to tmux
-    const sessionName = getSessionName(params.id);
+    // Get worktree to determine CLI tool
+    const worktree = getWorktreeById(db, params.id);
+    if (!worktree) {
+      return NextResponse.json(
+        { error: `Worktree '${params.id}' not found` },
+        { status: 404 }
+      );
+    }
 
+    // Determine which CLI tool to use
+    const cliToolId = worktree.cliToolId || 'claude';
+
+    // Get CLI tool instance from manager
+    const manager = CLIToolManager.getInstance();
+    const cliTool = manager.getTool(cliToolId);
+
+    // Get session name for the CLI tool
+    const sessionName = cliTool.getSessionName(params.id);
+
+    // Send answer to tmux
     try {
       await sendKeys(sessionName, input, true);
-      console.log(`✓ Sent answer '${input}' to ${sessionName}`);
+      console.log(`✓ Sent answer '${input}' to ${sessionName} (${cliTool.name})`);
     } catch (error: any) {
       return NextResponse.json(
         { error: `Failed to send answer to tmux: ${error.message}` },
@@ -132,10 +149,10 @@ export async function POST(
       message: updatedMessage,
     });
 
-    // Resume polling for Claude's next response
-    startPolling(params.id);
+    // Resume polling for CLI tool's next response
+    startPolling(params.id, cliToolId);
 
-    console.log(`✓ Resumed polling for ${params.id}`);
+    console.log(`✓ Resumed polling for ${params.id} (${cliToolId})`);
 
     return NextResponse.json({
       success: true,
