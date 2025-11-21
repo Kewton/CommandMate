@@ -141,6 +141,16 @@ function extractResponse(
   const linesToCheck = lines.slice(startLine);
   const outputToCheck = linesToCheck.join('\n');
 
+  /**
+   * Strip ANSI escape codes from a string for pattern matching
+   * @param str - String with ANSI codes
+   * @returns Clean string without ANSI codes
+   */
+  const stripAnsi = (str: string): string => {
+    // Remove all ANSI escape sequences: \x1b[...m or [...m
+    return str.replace(/\x1b\[[0-9;]*m|\[[0-9;]*m/g, '');
+  };
+
   // Define tool-specific patterns
   let promptPattern: RegExp;
   let separatorPattern: RegExp;
@@ -205,16 +215,20 @@ function extractResponse(
       skipPatterns = [/^─{50,}$/, /^>\s*$/, /[✻✽⏺·∴✢✳]/];
   }
 
-  const hasPrompt = promptPattern.test(outputToCheck);
-  const hasSeparator = separatorPattern.test(outputToCheck);
-  const isThinking = thinkingPattern.test(outputToCheck);
+  // Strip ANSI codes before pattern matching
+  const cleanOutputToCheck = stripAnsi(outputToCheck);
+
+  const hasPrompt = promptPattern.test(cleanOutputToCheck);
+  const hasSeparator = separatorPattern.test(cleanOutputToCheck);
+  const isThinking = thinkingPattern.test(cleanOutputToCheck);
 
   // Debug logging for Gemini and Codex
   if (cliToolId === 'gemini' || cliToolId === 'codex') {
     console.log(`[Poller] ${cliToolId} check - hasPrompt: ${hasPrompt}, hasSeparator: ${hasSeparator}, isThinking: ${isThinking}`);
     const lastLines = linesToCheck.slice(-5);
     lastLines.forEach((line, i) => {
-      console.log(`[Poller] Line ${i}: "${line}"`);
+      const cleanLine = stripAnsi(line);
+      console.log(`[Poller] Line ${i}: "${line}" (clean: "${cleanLine}")`);
     });
   }
 
@@ -245,7 +259,8 @@ function extractResponse(
       const userPromptPattern = cliToolId === 'codex' ? /^›\s+(?!Implement|Find and fix|Type|Summarize)/ : /^>\s+\S/;
 
       for (let i = totalLines - 1; i >= Math.max(0, totalLines - 30); i--) {
-        if (userPromptPattern.test(lines[i])) {
+        const cleanLine = stripAnsi(lines[i]);
+        if (userPromptPattern.test(cleanLine)) {
           foundUserPrompt = i;
           break;  // Found the most recent user prompt (searching backwards)
         }
@@ -265,7 +280,8 @@ function extractResponse(
       // Find the last user input prompt to identify where the response starts
       let foundUserPrompt = -1;
       for (let i = totalLines - 1; i >= Math.max(0, totalLines - 50); i--) {
-        if (/^>\s+\S/.test(lines[i])) {
+        const cleanLine = stripAnsi(lines[i]);
+        if (/^>\s+\S/.test(cleanLine)) {
           foundUserPrompt = i;
           break;
         }
@@ -282,27 +298,28 @@ function extractResponse(
 
     for (let i = startIndex; i < totalLines; i++) {
       const line = lines[i];
+      const cleanLine = stripAnsi(line);
 
       if (cliToolId === 'codex' || cliToolId === 'gemini') {
-        console.log(`[Poller] ${cliToolId} Line ${i}: "${line}"`);
+        console.log(`[Poller] ${cliToolId} Line ${i}: "${line}" (clean: "${cleanLine}")`);
       }
 
       // For Codex: stop at any prompt line (which indicates end of response OR we're already past it)
-      if (cliToolId === 'codex' && /^›\s+/.test(line)) {
-        console.log(`[Poller] Stopping at prompt line ${i}: "${line}"`);
+      if (cliToolId === 'codex' && /^›\s+/.test(cleanLine)) {
+        console.log(`[Poller] Stopping at prompt line ${i}: "${cleanLine}"`);
         endIndex = i;  // Save where we stopped
         break;
       }
 
       // For Gemini: stop at shell prompt (indicates command completion)
-      if (cliToolId === 'gemini' && /^(%|\$|.*@.*[%$#])\s*$/.test(line)) {
-        console.log(`[Poller] Gemini: Stopping at shell prompt line ${i}: "${line}"`);
+      if (cliToolId === 'gemini' && /^(%|\$|.*@.*[%$#])\s*$/.test(cleanLine)) {
+        console.log(`[Poller] Gemini: Stopping at shell prompt line ${i}: "${cleanLine}"`);
         endIndex = i;  // Save where we stopped
         break;
       }
 
-      // Skip lines matching any skip pattern
-      const shouldSkip = skipPatterns.some(pattern => pattern.test(line));
+      // Skip lines matching any skip pattern (check against clean line)
+      const shouldSkip = skipPatterns.some(pattern => pattern.test(cleanLine));
       if (shouldSkip) {
         if (cliToolId === 'codex' || cliToolId === 'gemini') {
           console.log(`[Poller] ${cliToolId}: Skipping line ${i} (matches skip pattern)`);

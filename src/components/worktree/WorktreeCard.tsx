@@ -28,7 +28,7 @@ export interface WorktreeCardProps {
  * ```
  */
 export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: WorktreeCardProps) {
-  const { id, name, memo, lastUserMessage, lastUserMessageAt, lastMessagesByCli, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, cliToolId } = worktree;
+  const { id, name, memo, lastUserMessage, lastUserMessageAt, lastMessagesByCli, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, cliToolId, sessionStatusByCli } = worktree;
   const [isKilling, setIsKilling] = useState(false);
   const [isFavorite, setIsFavorite] = useState(favorite || false);
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
@@ -224,27 +224,60 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
               </div>
             )}
 
-            {/* Last Messages per CLI Tool */}
-            {lastMessagesByCli && (lastMessagesByCli.claude || lastMessagesByCli.codex || lastMessagesByCli.gemini) && (
+            {/* Last Messages per CLI Tool with Status */}
+            {(lastMessagesByCli || sessionStatusByCli) && (
               <div>
-                <p className="text-xs text-gray-500 mb-2">Last Messages</p>
+                <p className="text-xs text-gray-500 mb-2">Last Messages & Status</p>
                 <div className="space-y-1.5">
-                  {lastMessagesByCli.claude && (
+                  {/* Claude */}
+                  {(lastMessagesByCli?.claude || sessionStatusByCli?.claude) && (
                     <div className="flex items-start gap-2">
-                      <Badge variant="info" className="flex-shrink-0 text-xs">Claude</Badge>
-                      <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.claude}</p>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <Badge variant="info" className="text-xs">Claude</Badge>
+                        {sessionStatusByCli?.claude?.isRunning && sessionStatusByCli?.claude?.isWaitingForResponse && (
+                          <Badge variant="warning" dot className="text-xs">待機中</Badge>
+                        )}
+                        {sessionStatusByCli?.claude?.isRunning && !sessionStatusByCli?.claude?.isWaitingForResponse && (
+                          <Badge variant="success" dot className="text-xs">完了</Badge>
+                        )}
+                      </div>
+                      {lastMessagesByCli?.claude && (
+                        <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.claude}</p>
+                      )}
                     </div>
                   )}
-                  {lastMessagesByCli.codex && (
+                  {/* Codex */}
+                  {(lastMessagesByCli?.codex || sessionStatusByCli?.codex) && (
                     <div className="flex items-start gap-2">
-                      <Badge variant="warning" className="flex-shrink-0 text-xs">Codex</Badge>
-                      <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.codex}</p>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <Badge variant="warning" className="text-xs">Codex</Badge>
+                        {sessionStatusByCli?.codex?.isRunning && sessionStatusByCli?.codex?.isWaitingForResponse && (
+                          <Badge variant="warning" dot className="text-xs">待機中</Badge>
+                        )}
+                        {sessionStatusByCli?.codex?.isRunning && !sessionStatusByCli?.codex?.isWaitingForResponse && (
+                          <Badge variant="success" dot className="text-xs">完了</Badge>
+                        )}
+                      </div>
+                      {lastMessagesByCli?.codex && (
+                        <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.codex}</p>
+                      )}
                     </div>
                   )}
-                  {lastMessagesByCli.gemini && (
+                  {/* Gemini */}
+                  {(lastMessagesByCli?.gemini || sessionStatusByCli?.gemini) && (
                     <div className="flex items-start gap-2">
-                      <Badge variant="success" className="flex-shrink-0 text-xs">Gemini</Badge>
-                      <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.gemini}</p>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <Badge variant="success" className="text-xs">Gemini</Badge>
+                        {sessionStatusByCli?.gemini?.isRunning && sessionStatusByCli?.gemini?.isWaitingForResponse && (
+                          <Badge variant="warning" dot className="text-xs">待機中</Badge>
+                        )}
+                        {sessionStatusByCli?.gemini?.isRunning && !sessionStatusByCli?.gemini?.isWaitingForResponse && (
+                          <Badge variant="success" dot className="text-xs">完了</Badge>
+                        )}
+                      </div>
+                      {lastMessagesByCli?.gemini && (
+                        <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.gemini}</p>
+                      )}
                     </div>
                   )}
                 </div>

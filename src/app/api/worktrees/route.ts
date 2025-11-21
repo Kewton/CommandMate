@@ -6,8 +6,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktrees, getRepositories, getLastMessage } from '@/lib/db';
+import { getWorktrees, getRepositories, getMessages } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,28 +23,50 @@ export async function GET(request: NextRequest) {
 
     // Check session status and response status for each worktree
     const manager = CLIToolManager.getInstance();
+    const allCliTools: CLIToolType[] = ['claude', 'codex', 'gemini'];
 
     const worktreesWithStatus = await Promise.all(
       worktrees.map(async (worktree) => {
-        // Determine which CLI tool to use
-        const cliToolId = worktree.cliToolId || 'claude';
-        const cliTool = manager.getTool(cliToolId);
+        // Check status for all CLI tools
+        const sessionStatusByCli: {
+          claude?: { isRunning: boolean; isWaitingForResponse: boolean };
+          codex?: { isRunning: boolean; isWaitingForResponse: boolean };
+          gemini?: { isRunning: boolean; isWaitingForResponse: boolean };
+        } = {};
 
-        // Check if session is running
-        const isRunning = await cliTool.isRunning(worktree.id);
+        let anyRunning = false;
+        let anyWaiting = false;
 
-        // Check if waiting for CLI tool's response
-        // Criteria: session is running AND last message is from user
-        let isWaitingForResponse = false;
-        if (isRunning) {
-          const lastMessage = getLastMessage(db, worktree.id);
-          isWaitingForResponse = lastMessage?.role === 'user';
+        for (const cliToolId of allCliTools) {
+          const cliTool = manager.getTool(cliToolId);
+          const isRunning = await cliTool.isRunning(worktree.id);
+
+          // Check if waiting for this CLI tool's response
+          // Only consider it "waiting" if session is running AND last message is from user
+          let isWaitingForResponse = false;
+          if (isRunning) {
+            const messages = getMessages(db, worktree.id, undefined, 1, cliToolId);
+            // If there are messages and the last one is from user, we're waiting for response
+            // If the last message is from assistant, the response is complete
+            if (messages.length > 0 && messages[0].role === 'user') {
+              isWaitingForResponse = true;
+            }
+          }
+
+          sessionStatusByCli[cliToolId] = {
+            isRunning,
+            isWaitingForResponse,
+          };
+
+          if (isRunning) anyRunning = true;
+          if (isWaitingForResponse) anyWaiting = true;
         }
 
         return {
           ...worktree,
-          isSessionRunning: isRunning,
-          isWaitingForResponse,
+          isSessionRunning: anyRunning,
+          isWaitingForResponse: anyWaiting,
+          sessionStatusByCli,
         };
       })
     );

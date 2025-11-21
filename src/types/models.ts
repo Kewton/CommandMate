@@ -38,6 +38,12 @@ export interface Worktree {
   isSessionRunning?: boolean;
   /** Whether this worktree is waiting for Claude's response */
   isWaitingForResponse?: boolean;
+  /** Session status per CLI tool */
+  sessionStatusByCli?: {
+    claude?: { isRunning: boolean; isWaitingForResponse: boolean };
+    codex?: { isRunning: boolean; isWaitingForResponse: boolean };
+    gemini?: { isRunning: boolean; isWaitingForResponse: boolean };
+  };
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
   /** Worktree status: todo, doing, done, or null if not set */

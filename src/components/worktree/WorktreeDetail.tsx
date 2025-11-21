@@ -50,7 +50,6 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   const [isEditingLink, setIsEditingLink] = useState(false);
   const [linkText, setLinkText] = useState('');
   const [showNewMessageNotification, setShowNewMessageNotification] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [generatingContent, setGeneratingContent] = useState<string>('');
   const [pendingCliTool, setPendingCliTool] = useState<CLIToolType | null>(null);
 
@@ -254,66 +253,6 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   };
 
   /**
-   * Handle manual refresh with log file sync
-   */
-  const handleManualRefresh = async () => {
-    console.log('[handleManualRefresh] Starting manual refresh...');
-    setIsRefreshing(true);
-
-    try {
-      // First, fetch messages from DB for the active CLI tool
-      setError(null);
-      const activeCliTool = resolveActiveCliTool();
-      const updatedMessages = await worktreeApi.getMessages(worktreeId, activeCliTool);
-      console.log('[handleManualRefresh] Fetched messages from DB:', updatedMessages.length);
-      setMessages(updatedMessages);
-
-      // Then, sync the latest CLI tool message from log file
-      const toolMessages = updatedMessages.filter(m => m.cliToolId === activeCliTool && m.logFileName);
-      console.log('[handleManualRefresh] Messages with logFileName for', activeCliTool, ':', toolMessages.length);
-
-      const latestCliMessage = toolMessages
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-
-      if (latestCliMessage?.logFileName) {
-        console.log('[handleManualRefresh] Latest CLI message:', {
-          id: latestCliMessage.id,
-          logFileName: latestCliMessage.logFileName,
-          timestamp: latestCliMessage.timestamp,
-          currentContentLength: latestCliMessage.content.length
-        });
-
-        const logContent = await fetchFromLogFile(latestCliMessage.logFileName);
-        if (logContent) {
-          console.log('[handleManualRefresh] Updating message content');
-          // Update the message content with log file content
-          setMessages(prevMessages =>
-            prevMessages.map(msg =>
-              msg.id === latestCliMessage.id
-                ? { ...msg, content: logContent }
-                : msg
-            )
-          );
-        } else {
-          console.warn('[handleManualRefresh] No log content received');
-        }
-      } else {
-        console.warn('[handleManualRefresh] No latest CLI message with logFileName found');
-      }
-
-      // Show brief notification
-      setShowNewMessageNotification(true);
-      setTimeout(() => setShowNewMessageNotification(false), 2000);
-    } catch (err) {
-      console.error('[handleManualRefresh] Error:', err);
-      setError(handleApiError(err));
-    } finally {
-      setIsRefreshing(false);
-      console.log('[handleManualRefresh] Refresh complete');
-    }
-  };
-
-  /**
    * Memoize worktree IDs array to prevent unnecessary re-renders
    */
   const worktreeIds = React.useMemo(() => [worktreeId], [worktreeId]);
@@ -365,16 +304,16 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   const messageListCliTool = pendingCliTool || (isCliTab(activeTab) ? activeTab : resolveActiveCliTool());
 
   /**
-   * Poll for current tmux output while waiting for response
+   * Poll for current tmux output continuously and refresh messages
    */
   useEffect(() => {
-    if (!waitingForResponse || !pendingCliTool) {
-      setGeneratingContent('');
+    if (!isCliTab(activeTab)) {
       return;
     }
 
     let isMounted = true;
-    const cliToolForPolling = pendingCliTool;
+    const cliToolForPolling = activeTab;
+    let lastMessageCount = messages.length;
 
     const pollCurrentOutput = async () => {
       try {
@@ -388,23 +327,42 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
 
         if (!isMounted) return;
 
+        // Always refresh messages to detect new responses
+        const updatedMessages = await worktreeApi.getMessages(worktreeId, cliToolForPolling);
+        if (updatedMessages.length !== lastMessageCount) {
+          console.log('[Polling] Message count changed:', lastMessageCount, '->', updatedMessages.length);
+          lastMessageCount = updatedMessages.length;
+          setMessages(updatedMessages);
+        }
+
         if (!data.isRunning) {
-          setWaitingForResponse(false);
-          setPendingCliTool(null);
-          setGeneratingContent('');
+          // Session is not running
+          if (waitingForResponse) {
+            setWaitingForResponse(false);
+            setPendingCliTool(null);
+            setGeneratingContent('');
+          }
           return;
         }
 
         if (data.isGenerating) {
-          // Update generating content with new content
+          // Session is running and generating content
+          setWaitingForResponse(true);
+          setPendingCliTool(cliToolForPolling);
           setGeneratingContent(data.content || '');
+        } else {
+          // Session is running but not generating (waiting for user input or complete)
+          if (waitingForResponse) {
+            setWaitingForResponse(false);
+            setPendingCliTool(null);
+            setGeneratingContent('');
+          }
         }
 
         if (data.isComplete) {
           setWaitingForResponse(false);
           setPendingCliTool(null);
           setGeneratingContent('');
-          fetchMessages(cliToolForPolling);
         }
       } catch (err) {
         console.error('Error polling current output:', err);
@@ -414,14 +372,14 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
     // Start polling immediately
     pollCurrentOutput();
 
-    // Then poll every 2.5 seconds
-    const pollInterval = setInterval(pollCurrentOutput, 2500);
+    // Then poll every 1.5 seconds for faster updates
+    const pollInterval = setInterval(pollCurrentOutput, 1500);
 
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
     };
-  }, [waitingForResponse, pendingCliTool, worktreeId, fetchMessages]);
+  }, [activeTab, worktreeId, waitingForResponse, messages.length]);
 
   /**
    * Handle message sent
@@ -598,25 +556,6 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
               <span className="text-sm font-medium">新しいメッセージがあります</span>
             </div>
           )}
-
-          {/* Manual Refresh Button - Moved higher to avoid session kill button */}
-          <button
-            onClick={handleManualRefresh}
-            disabled={isRefreshing}
-            className="absolute bottom-32 right-4 sm:right-6 z-20 bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-full shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            title="最新のメッセージを取得"
-          >
-            {isRefreshing ? (
-              <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            ) : (
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            )}
-          </button>
 
           {/* Message List */}
           <div className="flex-1 w-full">
