@@ -69,18 +69,21 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
   };
 
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
-    if (message.type === 'broadcast') {
-      // Refresh worktrees when updates occur (silent mode)
-      fetchWorktrees(true);
-    } else if (isSessionStatusPayload(message.data)) {
+    if (isSessionStatusPayload(message.data)) {
+      const payload = message.data;
       // Update specific worktree's session status without full refresh
       setWorktrees((prev) =>
         prev.map((wt) =>
-          wt.id === message.data.worktreeId
-            ? { ...wt, isSessionRunning: message.data.isRunning }
+          wt.id === payload.worktreeId
+            ? { ...wt, isSessionRunning: payload.isRunning }
             : wt
         )
       );
+    }
+
+    if (message.type === 'broadcast') {
+      // Refresh worktrees when updates occur (silent mode)
+      fetchWorktrees(true);
     }
   }, [fetchWorktrees]);
 
@@ -210,7 +213,7 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
         </div>
 
         <div className="flex gap-2 w-full sm:w-auto">
-          <Button variant="secondary" size="sm" onClick={fetchWorktrees} disabled={loading}>
+          <Button variant="secondary" size="sm" onClick={() => fetchWorktrees()} disabled={loading}>
             {loading ? 'Loading...' : 'Refresh'}
           </Button>
         </div>

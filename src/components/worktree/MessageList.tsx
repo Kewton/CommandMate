@@ -23,6 +23,8 @@ export interface MessageListProps {
   loading?: boolean;
   waitingForResponse?: boolean;
   generatingContent?: string;
+  realtimeOutput?: string;
+  isThinking?: boolean;
   selectedCliTool?: string;
 }
 
@@ -268,7 +270,7 @@ function MessageBubble({
                             onPromptRespond(message.id, option.number.toString());
                           }
                         }}
-                        disabled={message.promptData.status === 'answered'}
+                        disabled={message.promptData?.status === 'answered'}
                         className={`px-5 py-2.5 rounded-lg transition-all font-medium text-sm shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${
                           selectedTextInputOption === option.number
                             ? 'bg-purple-600 text-white hover:bg-purple-700 ring-2 ring-purple-400 ring-opacity-50'
@@ -291,7 +293,7 @@ function MessageBubble({
                     ))}
 
                     {/* Text input field for selected text input option */}
-                    {selectedTextInputOption !== null && message.promptData.status === 'pending' && (
+                    {selectedTextInputOption !== null && message.promptData?.status === 'pending' && (
                       <div className="w-full mt-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           カスタムメッセージを入力してください:
@@ -362,6 +364,8 @@ export function MessageList({
   loading = false,
   waitingForResponse = false,
   generatingContent = '',
+  realtimeOutput = '',
+  isThinking = false,
   selectedCliTool = 'claude',
 }: MessageListProps) {
   const router = useRouter();
@@ -381,10 +385,17 @@ export function MessageList({
     }
   };
 
-  // Auto-scroll to bottom when new messages arrive or content is generating
+  // Track previous message count to detect new messages
+  const prevMessageCountRef = useRef(messages.length);
+
+  // Auto-scroll to bottom ONLY when new messages arrive (not on realtime output updates)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, generatingContent]);
+    // Only scroll when message count increases (new message added)
+    if (messages.length > prevMessageCountRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length]);
 
   /**
    * Handle file path click - navigate to full screen file viewer
@@ -472,75 +483,99 @@ export function MessageList({
           );
         })}
 
-        {/* Show "Waiting for response" indicator with generating content */}
+        {/* Show realtime output while session is running */}
         {waitingForResponse && (
           <div className="flex justify-start mb-4">
             <div className="w-full">
               <div className="rounded-lg px-4 py-3 bg-white border border-gray-200 shadow-sm">
-                {/* Header with generating indicator */}
+                {/* Header with status indicator */}
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-xs font-medium text-gray-500">{getToolName(selectedCliTool)}</span>
                   <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <div className="w-1.5 h-1.5 bg-green-600 rounded-full animate-pulse" />
                   </div>
+                  <span className="text-xs text-green-600 font-medium">セッション実行中</span>
                 </div>
 
                 {/* Progress indicator - fixed at top */}
                 <div className="sticky top-0 bg-white z-10 pb-2 mb-3 border-b border-gray-200">
-                  {/* Stage 1: Waiting */}
-                  <div className={`flex items-center gap-2 mb-2 ${!generatingContent ? 'opacity-100' : 'opacity-50'}`}>
-                    <div className={`w-2 h-2 rounded-full ${!generatingContent ? 'bg-blue-600 animate-pulse' : 'bg-green-500'}`} />
-                    <span className="text-sm font-medium text-gray-700">応答を待機中</span>
-                    {!generatingContent && <span className="text-xs text-gray-500 ml-auto">...</span>}
-                    {generatingContent && <span className="text-xs text-green-600 ml-auto">✓</span>}
-                  </div>
+                  {/* Thinking indicator */}
+                  {isThinking && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 rounded-full bg-purple-600 animate-pulse" />
+                      <span className="text-sm font-medium text-purple-700">考え中...</span>
+                      <span className="text-xs text-purple-500 ml-auto">思考中</span>
+                    </div>
+                  )}
 
-                  {/* Stage 2: Generating */}
-                  {generatingContent && (
-                    <div className="flex items-center gap-2 mb-2 opacity-100">
-                      <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-                      <span className="text-sm font-medium text-gray-700">最新状態（生成中）</span>
-                      <span className="text-xs text-gray-500 ml-auto">更新中...</span>
+                  {/* Active output indicator */}
+                  {!isThinking && realtimeOutput && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 rounded-full bg-green-600 animate-pulse" />
+                      <span className="text-sm font-medium text-green-700">最新の出力</span>
+                      <span className="text-xs text-green-500 ml-auto">リアルタイム更新</span>
+                    </div>
+                  )}
+
+                  {/* Starting up indicator */}
+                  {!isThinking && !realtimeOutput && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+                      <span className="text-sm font-medium text-gray-700">セッション起動中</span>
+                      <span className="text-xs text-gray-500 ml-auto">...</span>
                     </div>
                   )}
                 </div>
 
-                {/* Generating content area */}
-                {generatingContent ? (
+                {/* Realtime output area */}
+                {realtimeOutput ? (
                   <div className="space-y-3">
                     {/* Latest content */}
-                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="p-3 bg-green-50 rounded-lg border border-green-200">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">最新の出力</span>
-                        <span className="text-xs text-gray-400">{new Date().toLocaleTimeString('ja-JP')}</span>
+                        <span className="text-xs font-semibold text-green-700 uppercase tracking-wide flex items-center gap-1">
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                          </svg>
+                          最新の出力
+                        </span>
+                        <span className="text-xs text-green-500">{new Date().toLocaleTimeString('ja-JP')}</span>
                       </div>
-                      <div className="prose prose-sm max-w-none break-words overflow-wrap-anywhere text-gray-900">
-                        {/\x1b\[[0-9;]*m|\[[0-9;]*m/.test(generatingContent) ? (
+                      <div className="prose prose-sm max-w-none break-words overflow-wrap-anywhere">
+                        {/\x1b\[[0-9;]*m|\[[0-9;]*m/.test(realtimeOutput) ? (
                           <pre
-                            className="whitespace-pre-wrap font-mono text-sm bg-gray-900 text-gray-300 p-4 rounded overflow-x-auto"
+                            className="whitespace-pre-wrap font-mono text-xs bg-gray-900 text-gray-300 p-3 rounded overflow-x-auto max-h-[500px] overflow-y-auto"
                             dangerouslySetInnerHTML={{ __html: new AnsiToHtml({
                               fg: '#d1d5db', // Default text color: gray-300
                               bg: '#1f2937', // Default background: gray-800
                               newline: true,
                               escapeXML: true,
-                            }).toHtml(generatingContent) }}
+                            }).toHtml(realtimeOutput) }}
                           />
                         ) : (
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            rehypePlugins={[rehypeHighlight]}
-                          >
-                            {generatingContent}
-                          </ReactMarkdown>
+                          <div className="text-sm text-gray-800 whitespace-pre-wrap font-mono max-h-[500px] overflow-y-auto">
+                            {realtimeOutput}
+                          </div>
                         )}
                       </div>
                     </div>
                   </div>
+                ) : isThinking ? (
+                  <div className="text-center py-6">
+                    <div className="inline-flex items-center gap-2 text-purple-600">
+                      <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      <p className="text-sm font-medium">Claude が考え中です...</p>
+                    </div>
+                  </div>
                 ) : (
-                  <div className="text-center py-4">
-                    <p className="text-sm text-gray-500">応答を待っています...</p>
+                  <div className="text-center py-6">
+                    <div className="inline-flex items-center gap-2 text-gray-500">
+                      <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+                      <p className="text-sm">セッション起動中...</p>
+                    </div>
                   </div>
                 )}
               </div>

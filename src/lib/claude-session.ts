@@ -21,7 +21,6 @@ const execAsync = promisify(exec);
 export interface ClaudeSessionOptions {
   worktreeId: string;
   worktreePath: string;
-  baseUrl: string;  // MCBD server URL for webhooks
 }
 
 /**
@@ -118,7 +117,7 @@ export async function getClaudeSessionState(
 export async function startClaudeSession(
   options: ClaudeSessionOptions
 ): Promise<void> {
-  const { worktreeId, worktreePath, baseUrl } = options;
+  const { worktreeId, worktreePath } = options;
 
   // Check if Claude is installed
   const claudeAvailable = await isClaudeInstalled();
@@ -142,18 +141,6 @@ export async function startClaudeSession(
       workingDirectory: worktreePath,
       historyLimit: 50000,
     });
-
-    // Set up CLAUDE_HOOKS_STOP environment variable for the Stop hook
-    const hookUrl = `${baseUrl}/api/hooks/claude-done`;
-    const hookData = JSON.stringify({ worktreeId });
-    await sendKeys(
-      sessionName,
-      `export CLAUDE_HOOKS_STOP='curl -X POST -H "Content-Type: application/json" -d '"'"'${hookData}'"'"' ${hookUrl}'`,
-      true
-    );
-
-    // Wait a moment for the export to complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Start Claude CLI in interactive mode using full path
     // (using full path to avoid PATH issues in tmux sessions)

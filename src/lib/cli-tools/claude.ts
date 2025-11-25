@@ -48,13 +48,9 @@ export class ClaudeTool extends BaseCLITool {
    * @param worktreePath - Worktree path
    */
   async startSession(worktreeId: string, worktreePath: string): Promise<void> {
-    // Get base URL from environment or use default
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-
     const options: ClaudeSessionOptions = {
       worktreeId,
       worktreePath,
-      baseUrl,
     };
 
     await startClaudeSession(options);

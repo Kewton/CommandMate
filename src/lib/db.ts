@@ -408,18 +408,43 @@ export function createMessage(
 /**
  * Update the content of an existing message
  */
+interface MessageUpdateOptions {
+  summary?: string;
+  logFileName?: string;
+  requestId?: string;
+}
+
 export function updateMessageContent(
   db: Database.Database,
   messageId: string,
-  content: string
+  content: string,
+  options?: MessageUpdateOptions
 ): void {
+  const assignments: string[] = ['content = ?'];
+  const params: (string | null)[] = [content];
+
+  if (options?.summary !== undefined) {
+    assignments.push('summary = ?');
+    params.push(options.summary ?? null);
+  }
+
+  if (options?.logFileName !== undefined) {
+    assignments.push('log_file_name = ?');
+    params.push(options.logFileName ?? null);
+  }
+
+  if (options?.requestId !== undefined) {
+    assignments.push('request_id = ?');
+    params.push(options.requestId ?? null);
+  }
+
   const stmt = db.prepare(`
     UPDATE chat_messages
-    SET content = ?
+    SET ${assignments.join(', ')}
     WHERE id = ?
   `);
 
-  stmt.run(content, messageId);
+  stmt.run(...params, messageId);
 }
 
 /**
@@ -576,12 +601,13 @@ export function setInProgressMessageId(
   messageId: string | null
 ): void {
   const stmt = db.prepare(`
-    UPDATE session_states
-    SET in_progress_message_id = ?
-    WHERE worktree_id = ? AND cli_tool_id = ?
+    INSERT INTO session_states (worktree_id, cli_tool_id, last_captured_line, in_progress_message_id)
+    VALUES (?, ?, 0, ?)
+    ON CONFLICT(worktree_id, cli_tool_id) DO UPDATE SET
+      in_progress_message_id = excluded.in_progress_message_id
   `);
 
-  stmt.run(messageId, worktreeId, cliToolId);
+  stmt.run(worktreeId, cliToolId, messageId);
 }
 
 /**

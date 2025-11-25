@@ -17,23 +17,25 @@ function isCliTool(value: string | null): value is CLIToolType {
   return !!value && (SUPPORTED_TOOLS as string[]).includes(value);
 }
 
-function detectCompletion(cliToolId: CLIToolType, snippet: string): { complete: boolean; thinking: boolean } {
+/**
+ * Detect if CLI tool is showing "thinking" indicator (spinner)
+ * Note: We no longer try to detect "completion" - just thinking state
+ */
+function detectThinking(cliToolId: CLIToolType, snippet: string): { thinking: boolean } {
   switch (cliToolId) {
     case 'codex': {
-      const hasPrompt = /^›\s+.+/m.test(snippet);
       const isThinking = /•\s*(Planning|Searching|Exploring|Running|Thinking|Working)/m.test(snippet);
-      return { complete: hasPrompt && !isThinking, thinking: isThinking };
+      return { thinking: isThinking };
     }
     case 'gemini': {
-      const hasShellPrompt = /(^|\n)(%|\$|.*@.*[%$#])\s*$/m.test(snippet);
-      return { complete: hasShellPrompt, thinking: false };
+      // Gemini doesn't have a thinking indicator in one-shot mode
+      return { thinking: false };
     }
     case 'claude':
     default: {
-      const hasPrompt = /^>\s*$/m.test(snippet);
-      const hasSeparator = /^─{50,}$/m.test(snippet);
-      const isThinking = /[✻✽⏺·∴✢✳]/m.test(snippet);
-      return { complete: hasPrompt && hasSeparator && !isThinking, thinking: isThinking };
+      // Claude shows various spinner characters when thinking
+      const isThinking = /[✻✽⏺·∴✢✳]\s+\w+…/m.test(snippet);
+      return { thinking: isThinking };
     }
   }
 }
@@ -88,26 +90,38 @@ export async function GET(
     const newLines = lines.slice(Math.max(0, lastCapturedLine));
     const newContent = newLines.join('\n');
 
-    // Check for completion indicators
+    // Check for thinking state (spinner showing)
     const lastSection = lines.slice(-20).join('\n');
-    const { complete, thinking } = detectCompletion(cliToolId, lastSection);
+    const { thinking } = detectThinking(cliToolId, lastSection);
 
     // Check if it's an interactive prompt (yes/no or multiple choice)
     const promptDetection = detectPrompt(output);
 
-    const isComplete = complete || promptDetection.isPrompt;
+    // isComplete is ONLY used for prompt detection (yes/no questions)
+    // We no longer try to detect "normal" response completion
+    const isPromptWaiting = promptDetection.isPrompt;
+
+    // Extract realtime snippet (last 100 lines for better context)
+    const realtimeSnippet = lines.slice(-100).join('\n');
 
     return NextResponse.json({
       isRunning: true,
       cliToolId,
       content: newContent,
       fullOutput: output,
+      realtimeSnippet,
       lineCount: totalLines,
       lastCapturedLine,
-      isComplete,
-      isGenerating: !isComplete && !thinking && lines.length > 0,
+      // isComplete only true for prompts now
+      isComplete: isPromptWaiting,
+      // Always show as generating while session is running (unless prompt waiting)
+      isGenerating: !isPromptWaiting,
+      thinking,
+      thinkingMessage: thinking ? 'Claude is thinking...' : null,
+      // New: indicate if waiting for user prompt
+      isPromptWaiting,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error getting current output:', error);
     return NextResponse.json(
       { error: 'Failed to get current output' },

@@ -52,6 +52,8 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   const [showNewMessageNotification, setShowNewMessageNotification] = useState(false);
   const [generatingContent, setGeneratingContent] = useState<string>('');
   const [pendingCliTool, setPendingCliTool] = useState<CLIToolType | null>(null);
+  const [realtimeOutput, setRealtimeOutput] = useState<string>('');
+  const [isThinking, setIsThinking] = useState<boolean>(false);
 
   const resolveActiveCliTool = useCallback((): CLIToolType => {
     if (isCliTab(activeTab)) {
@@ -60,18 +62,6 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
     return worktree?.cliToolId || 'claude';
   }, [activeTab, worktree?.cliToolId]);
 
-  /**
-   * Fetch worktree data
-   */
-  const fetchWorktree = useCallback(async () => {
-    try {
-      setError(null);
-      const data = await worktreeApi.getById(worktreeId);
-      setWorktree(data);
-    } catch (err) {
-      setError(handleApiError(err));
-    }
-  }, [worktreeId]);
 
   /**
    * Fetch latest content from log file
@@ -213,6 +203,34 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   }, [activeTab, worktreeId, fetchMessages]);
 
   /**
+   * Periodically refresh messages so the user does not need to hit the Refresh button
+   */
+  useEffect(() => {
+    if (!isCliTab(activeTab)) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const pollMessages = async () => {
+      if (!isMounted) {
+        return;
+      }
+      await fetchMessages(activeTab);
+    };
+
+    // Initial refresh (in addition to tab-change fetch) to ensure latest state
+    pollMessages();
+
+    const interval = setInterval(pollMessages, 2000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeTab, fetchMessages]);
+
+  /**
    * Save memo
    */
   const handleSaveMemo = async () => {
@@ -273,6 +291,16 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   };
 
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
+    if (isSessionStatusPayload(message.data) && message.data.worktreeId === worktreeId) {
+      if (message.data.messagesCleared) {
+        console.log('[WorktreeDetail] Session killed, clearing messages');
+        setMessages([]);
+        setWaitingForResponse(false);
+        setPendingCliTool(null);
+        setGeneratingContent('');
+      }
+    }
+
     if (message.type === 'broadcast' && message.worktreeId === worktreeId) {
       setWaitingForResponse(false);
       setPendingCliTool(null);
@@ -286,14 +314,6 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
       fetchMessages(targetCliTool);
       setShowNewMessageNotification(true);
       setTimeout(() => setShowNewMessageNotification(false), 3000);
-    } else if (isSessionStatusPayload(message.data) && message.data.worktreeId === worktreeId) {
-      if (message.data.messagesCleared) {
-        console.log('[WorktreeDetail] Session killed, clearing messages');
-        setMessages([]);
-        setWaitingForResponse(false);
-        setPendingCliTool(null);
-        setGeneratingContent('');
-      }
     }
   }, [worktreeId, activeTab, fetchMessages, resolveActiveCliTool]);
 
@@ -309,6 +329,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
 
   /**
    * Poll for current tmux output continuously and refresh messages
+   * Key change: Always show realtime output while session is running
    */
   useEffect(() => {
     if (!isCliTab(activeTab)) {
@@ -333,40 +354,63 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
 
         // Always refresh messages to detect new responses
         const updatedMessages = await worktreeApi.getMessages(worktreeId, cliToolForPolling);
-        if (updatedMessages.length !== lastMessageCount) {
+        const messageCountChanged = updatedMessages.length !== lastMessageCount;
+
+        if (messageCountChanged) {
           console.log('[Polling] Message count changed:', lastMessageCount, '->', updatedMessages.length);
           lastMessageCount = updatedMessages.length;
           setMessages(updatedMessages);
+
+          // Check if the latest message is an assistant response (not user)
+          // If so, the response is complete - hide realtime output
+          const latestMessage = updatedMessages[updatedMessages.length - 1];
+          if (latestMessage && latestMessage.role === 'assistant') {
+            console.log('[Polling] Assistant response saved, hiding realtime output');
+            setWaitingForResponse(false);
+            setPendingCliTool(null);
+            setGeneratingContent('');
+            setRealtimeOutput('');
+            setIsThinking(false);
+            return;
+          }
         }
 
         if (!data.isRunning) {
-          // Session is not running
-          if (waitingForResponse) {
-            setWaitingForResponse(false);
-            setPendingCliTool(null);
-            setGeneratingContent('');
-          }
-          return;
-        }
-
-        if (data.isGenerating) {
-          // Session is running and generating content
-          setWaitingForResponse(true);
-          setPendingCliTool(cliToolForPolling);
-          setGeneratingContent(data.content || '');
-        } else {
-          // Session is running but not generating (waiting for user input or complete)
-          if (waitingForResponse) {
-            setWaitingForResponse(false);
-            setPendingCliTool(null);
-            setGeneratingContent('');
-          }
-        }
-
-        if (data.isComplete) {
+          // Session is not running - clear all states
           setWaitingForResponse(false);
           setPendingCliTool(null);
           setGeneratingContent('');
+          setRealtimeOutput('');
+          setIsThinking(false);
+          return;
+        }
+
+        // Session IS running AND we're waiting for a response
+        // Show realtime output only if the latest message is from the user
+        const latestMessage = updatedMessages[updatedMessages.length - 1];
+        const isAwaitingResponse = latestMessage && latestMessage.role === 'user';
+
+        if (isAwaitingResponse) {
+          setWaitingForResponse(true);
+          setPendingCliTool(cliToolForPolling);
+          setGeneratingContent(data.content || '');
+          setRealtimeOutput(data.realtimeSnippet || '');
+          setIsThinking(data.thinking || false);
+
+          // Only clear if waiting for user prompt (yes/no question)
+          // This keeps the prompt buttons visible
+          if (data.isPromptWaiting) {
+            // Keep waitingForResponse true so UI shows the prompt
+            // But indicate we're waiting for user input
+            setIsThinking(false);
+          }
+        } else {
+          // Latest message is from assistant - response complete, hide realtime output
+          setWaitingForResponse(false);
+          setPendingCliTool(null);
+          setGeneratingContent('');
+          setRealtimeOutput('');
+          setIsThinking(false);
         }
       } catch (err) {
         console.error('Error polling current output:', err);
@@ -376,14 +420,14 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
     // Start polling immediately
     pollCurrentOutput();
 
-    // Then poll every 1.5 seconds for faster updates
-    const pollInterval = setInterval(pollCurrentOutput, 1500);
+    // Then poll every 1 second for realtime updates
+    const pollInterval = setInterval(pollCurrentOutput, 1000);
 
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
     };
-  }, [activeTab, worktreeId, waitingForResponse, messages.length]);
+  }, [activeTab, worktreeId, messages.length]);
 
   /**
    * Handle message sent
@@ -579,6 +623,8 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
               loading={false}
               waitingForResponse={waitingForResponse}
               generatingContent={generatingContent}
+              realtimeOutput={realtimeOutput}
+              isThinking={isThinking}
               selectedCliTool={messageListCliTool}
             />
           </div>
