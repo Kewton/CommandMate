@@ -43,3 +43,5 @@ db.sqlite
 db.sqlite-journal
 .claude_logs/
 /data/
+/temp/
+.playwright-mcp/
