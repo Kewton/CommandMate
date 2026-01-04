@@ -60,25 +60,26 @@ export async function GET(
       extension,
       worktreePath: worktree.path,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error reading file:', error);
 
     // Handle specific error cases
-    if (error.code === 'EISDIR') {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'EISDIR') {
       return NextResponse.json(
         { error: 'Path is a directory, not a file' },
         { status: 400 }
       );
     }
 
-    if (error.code === 'ENOENT') {
+    if (nodeError.code === 'ENOENT') {
       return NextResponse.json(
         { error: 'File not found' },
         { status: 404 }
       );
     }
 
-    if (error.code === 'EACCES') {
+    if (nodeError.code === 'EACCES') {
       return NextResponse.json(
         { error: 'Permission denied' },
         { status: 403 }

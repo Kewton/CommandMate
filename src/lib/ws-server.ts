@@ -10,7 +10,7 @@ import { IncomingMessage } from 'http';
 interface WebSocketMessage {
   type: 'subscribe' | 'unsubscribe' | 'broadcast';
   worktreeId: string;
-  data?: any;
+  data?: unknown;
 }
 
 interface ClientInfo {
@@ -38,6 +38,7 @@ const rooms = new Map<string, Set<WebSocket>>();
 export function setupWebSocket(server: HTTPServer): void {
   wss = new WebSocketServer({ server });
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     console.log('WebSocket client connected');
 
@@ -53,8 +54,8 @@ export function setupWebSocket(server: HTTPServer): void {
       try {
         const message: WebSocketMessage = JSON.parse(data.toString());
         handleMessage(ws, message);
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
+      } catch (parseError) {
+        console.error('Error parsing WebSocket message:', parseError);
         // Don't close connection on parse error, just log it
       }
     });
@@ -147,7 +148,7 @@ function handleUnsubscribe(ws: WebSocket, worktreeId: string): void {
 /**
  * Broadcast message to all clients in a worktree room
  */
-function handleBroadcast(worktreeId: string, data: any): void {
+function handleBroadcast(worktreeId: string, data: unknown): void {
   const room = rooms.get(worktreeId);
   console.log(`[WS] handleBroadcast called for ${worktreeId}, room size: ${room?.size || 0}`);
   if (!room) {
@@ -182,8 +183,8 @@ function handleBroadcast(worktreeId: string, data: any): void {
     });
 
     console.log(`Broadcast to worktree ${worktreeId}: ${successCount}/${room.size} clients (${errorCount} errors)`);
-  } catch (error) {
-    console.error(`Error broadcasting to worktree ${worktreeId}:`, error);
+  } catch (broadcastError) {
+    console.error(`Error broadcasting to worktree ${worktreeId}:`, broadcastError);
     // Try to broadcast with sanitized data
     try {
       const sanitizedMessage = JSON.stringify({
@@ -195,7 +196,7 @@ function handleBroadcast(worktreeId: string, data: any): void {
         if (client.readyState === WebSocket.OPEN) {
           try {
             client.send(sanitizedMessage);
-          } catch (e) {
+          } catch {
             // Silent fail for fallback
           }
         }
@@ -240,7 +241,7 @@ function handleDisconnect(ws: WebSocket): void {
  * broadcast('feature-foo', { type: 'message', content: 'New message' });
  * ```
  */
-export function broadcast(worktreeId: string, data: any): void {
+export function broadcast(worktreeId: string, data: unknown): void {
   handleBroadcast(worktreeId, data);
 }
 
@@ -255,7 +256,7 @@ export function broadcast(worktreeId: string, data: any): void {
  * broadcastMessage('message', { worktreeId: 'feature-foo', message: {...} });
  * ```
  */
-export function broadcastMessage(type: string, data: any): void {
+export function broadcastMessage(type: string, data: { worktreeId?: string; [key: string]: unknown }): void {
   if (data.worktreeId) {
     handleBroadcast(data.worktreeId, { type, ...data });
   } else {

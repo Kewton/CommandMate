@@ -26,7 +26,7 @@ export abstract class BaseCLITool implements ICLITool {
     try {
       await execAsync(`which ${this.command}`, { timeout: 5000 });
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   }

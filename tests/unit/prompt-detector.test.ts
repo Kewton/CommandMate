@@ -5,6 +5,12 @@
 
 import { describe, it, expect } from 'vitest';
 import { detectPrompt, getAnswerInput } from '@/lib/prompt-detector';
+import type { PromptData, YesNoPromptData } from '@/types/models';
+
+// Type guard for YesNoPromptData
+function isYesNoPrompt(data: PromptData | undefined): data is YesNoPromptData {
+  return data?.type === 'yes_no';
+}
 
 describe('Prompt Detector', () => {
   describe('detectPrompt', () => {
@@ -58,7 +64,7 @@ Would you like to continue? (y/n)
         expect(result.isPrompt).toBe(true);
         expect(result.promptData?.type).toBe('yes_no');
         expect(result.promptData?.question).toBe('Do you want to overwrite the existing file?');
-        expect(result.promptData?.defaultOption).toBe('no');
+        expect(isYesNoPrompt(result.promptData) ? result.promptData.defaultOption : undefined).toBe('no');
       });
 
       it('should detect prompt in longer output', () => {
@@ -72,7 +78,7 @@ Do you want to replace it? [y/N]
 
         expect(result.isPrompt).toBe(true);
         expect(result.promptData?.question).toBe('Do you want to replace it?');
-        expect(result.promptData?.defaultOption).toBe('no');
+        expect(isYesNoPrompt(result.promptData) ? result.promptData.defaultOption : undefined).toBe('no');
       });
     });
 
@@ -84,7 +90,7 @@ Do you want to replace it? [y/N]
         expect(result.isPrompt).toBe(true);
         expect(result.promptData?.type).toBe('yes_no');
         expect(result.promptData?.question).toBe('Install these packages?');
-        expect(result.promptData?.defaultOption).toBe('yes');
+        expect(isYesNoPrompt(result.promptData) ? result.promptData.defaultOption : undefined).toBe('yes');
       });
 
       it('should detect prompt with context', () => {
@@ -102,7 +108,7 @@ Install these packages? [Y/n]
 
         expect(result.isPrompt).toBe(true);
         expect(result.promptData?.question).toBe('Install these packages?');
-        expect(result.promptData?.defaultOption).toBe('yes');
+        expect(isYesNoPrompt(result.promptData) ? result.promptData.defaultOption : undefined).toBe('yes');
       });
     });
 
@@ -265,7 +271,7 @@ Overwrite existing file? [y/N]
         const result = detectPrompt(output);
 
         expect(result.isPrompt).toBe(true);
-        expect(result.promptData?.defaultOption).toBe('no');
+        expect(isYesNoPrompt(result.promptData) ? result.promptData.defaultOption : undefined).toBe('no');
       });
 
       it('should detect destructive operation prompt', () => {
@@ -402,7 +408,7 @@ Are you sure you want to continue? (yes/no)
       const detection = detectPrompt(output);
 
       expect(detection.isPrompt).toBe(true);
-      expect(detection.promptData?.defaultOption).toBe('no');
+      expect(isYesNoPrompt(detection.promptData) ? detection.promptData.defaultOption : undefined).toBe('no');
 
       // Simulate user answering no
       const answer = 'no';

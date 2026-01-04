@@ -11,6 +11,11 @@ import { runMigrations } from '@/lib/db-migrations';
 import { upsertWorktree, createMessage } from '@/lib/db';
 import type { Worktree, ChatMessage } from '@/types/models';
 
+// Declare mock function type
+declare module '@/lib/db-instance' {
+  export function setMockDb(db: Database.Database): void;
+}
+
 // Mock the database instance
 vi.mock('@/lib/db-instance', () => {
   let mockDb: Database.Database | null = null;
@@ -49,6 +54,8 @@ describe('GET /api/worktrees/:id/messages', () => {
       id: 'test-worktree',
       name: 'test',
       path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
     };
     upsertWorktree(db, worktree);
   });
@@ -62,7 +69,7 @@ describe('GET /api/worktrees/:id/messages', () => {
   it('should return empty array when no messages exist', async () => {
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/messages');
     const params = { params: { id: 'test-worktree' } };
-    const response = await getMessages(request, params);
+    const response = await getMessages(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
 
@@ -90,7 +97,7 @@ describe('GET /api/worktrees/:id/messages', () => {
 
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/messages');
     const params = { params: { id: 'test-worktree' } };
-    const response = await getMessages(request, params);
+    const response = await getMessages(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
 
@@ -134,7 +141,7 @@ describe('GET /api/worktrees/:id/messages', () => {
       `http://localhost:3000/api/worktrees/test-worktree/messages?before=${beforeDate}`
     );
     const params = { params: { id: 'test-worktree' } };
-    const response = await getMessages(request, params);
+    const response = await getMessages(request as unknown as import('next/server').NextRequest, params);
 
     const data = await response.json();
 
@@ -160,7 +167,7 @@ describe('GET /api/worktrees/:id/messages', () => {
       'http://localhost:3000/api/worktrees/test-worktree/messages?limit=3'
     );
     const params = { params: { id: 'test-worktree' } };
-    const response = await getMessages(request, params);
+    const response = await getMessages(request as unknown as import('next/server').NextRequest, params);
 
     const data = await response.json();
     expect(data).toHaveLength(3);
@@ -169,7 +176,7 @@ describe('GET /api/worktrees/:id/messages', () => {
   it('should return 404 when worktree not found', async () => {
     const request = new Request('http://localhost:3000/api/worktrees/nonexistent/messages');
     const params = { params: { id: 'nonexistent' } };
-    const response = await getMessages(request, params);
+    const response = await getMessages(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
 
@@ -183,7 +190,7 @@ describe('GET /api/worktrees/:id/messages', () => {
 
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/messages');
     const params = { params: { id: 'test-worktree' } };
-    const response = await getMessages(request, params);
+    const response = await getMessages(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
 
@@ -207,6 +214,8 @@ describe('POST /api/worktrees/:id/send', () => {
       id: 'test-worktree',
       name: 'test',
       path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
     };
     upsertWorktree(db, worktree);
   });
@@ -228,7 +237,7 @@ describe('POST /api/worktrees/:id/send', () => {
       body: JSON.stringify(requestBody),
     });
     const params = { params: { id: 'test-worktree' } };
-    const response = await sendMessage(request, params);
+    const response = await sendMessage(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(201);
 
@@ -247,7 +256,7 @@ describe('POST /api/worktrees/:id/send', () => {
       body: JSON.stringify({}),
     });
     const params = { params: { id: 'test-worktree' } };
-    const response = await sendMessage(request, params);
+    const response = await sendMessage(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
 
@@ -263,7 +272,7 @@ describe('POST /api/worktrees/:id/send', () => {
       body: JSON.stringify({ content: '' }),
     });
     const params = { params: { id: 'test-worktree' } };
-    const response = await sendMessage(request, params);
+    const response = await sendMessage(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
 
@@ -278,7 +287,7 @@ describe('POST /api/worktrees/:id/send', () => {
       body: JSON.stringify({ content: 'Test message' }),
     });
     const params = { params: { id: 'nonexistent' } };
-    const response = await sendMessage(request, params);
+    const response = await sendMessage(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
 
@@ -295,7 +304,7 @@ describe('POST /api/worktrees/:id/send', () => {
       body: JSON.stringify({ content: 'Test message' }),
     });
     const params = { params: { id: 'test-worktree' } };
-    const response = await sendMessage(request, params);
+    const response = await sendMessage(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
 

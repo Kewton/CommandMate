@@ -10,6 +10,11 @@ import { runMigrations } from '@/lib/db-migrations';
 import { upsertWorktree, createMessage, getMessageById } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
+// Declare mock function type
+declare module '@/lib/db-instance' {
+  export function setMockDb(db: Database.Database): void;
+}
+
 // Mock the database instance
 vi.mock('@/lib/db-instance', () => {
   let mockDb: Database.Database | null = null;
@@ -71,6 +76,8 @@ describe('POST /api/worktrees/:id/respond', () => {
       id: 'test-worktree',
       name: 'test',
       path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
     };
     upsertWorktree(db, worktree);
 
@@ -110,7 +117,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 
@@ -156,7 +163,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 
@@ -193,7 +200,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      await respondToPrompt(request, { params: { id: 'test-worktree' } });
+      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
       expect(sendKeys).toHaveBeenCalledWith('mcbd-test-worktree', 'y', true);
     });
@@ -224,7 +231,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      await respondToPrompt(request, { params: { id: 'test-worktree' } });
+      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
       expect(sendKeys).toHaveBeenCalledWith('mcbd-test-worktree', 'n', true);
     });
@@ -255,7 +262,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      await respondToPrompt(request, { params: { id: 'test-worktree' } });
+      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
       expect(startPolling).toHaveBeenCalledWith('test-worktree');
     });
@@ -286,7 +293,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      await respondToPrompt(request, { params: { id: 'test-worktree' } });
+      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
       expect(broadcastMessage).toHaveBeenCalledWith('message_updated', {
         worktreeId: 'test-worktree',
@@ -311,7 +318,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 
@@ -329,7 +336,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 
@@ -348,7 +355,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 
@@ -376,7 +383,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 
@@ -412,7 +419,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 
@@ -445,7 +452,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 
@@ -480,7 +487,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 
@@ -513,7 +520,7 @@ describe('POST /api/worktrees/:id/respond', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, {
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
         params: { id: 'test-worktree' },
       });
 

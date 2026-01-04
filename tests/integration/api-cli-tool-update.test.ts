@@ -10,6 +10,11 @@ import { runMigrations } from '@/lib/db-migrations';
 import { upsertWorktree, getWorktreeById } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
+// Declare mock function type
+declare module '@/lib/db-instance' {
+  export function setMockDb(db: Database.Database): void;
+}
+
 // Mock the database instance
 vi.mock('@/lib/db-instance', () => {
   let mockDb: Database.Database | null = null;
@@ -74,7 +79,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({ cliToolId: 'codex' }),
     });
 
-    const response = await updateCliTool(request, { params: { id: 'test-wt' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'test-wt' } });
     expect(response.status).toBe(200);
 
     const data = await response.json();
@@ -102,7 +107,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({ cliToolId: 'gemini' }),
     });
 
-    const response = await updateCliTool(request, { params: { id: 'test-wt' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'test-wt' } });
     expect(response.status).toBe(200);
 
     const data = await response.json();
@@ -130,7 +135,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({ cliToolId: 'invalid-tool' }),
     });
 
-    const response = await updateCliTool(request, { params: { id: 'test-wt' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'test-wt' } });
     expect(response.status).toBe(400);
 
     const data = await response.json();
@@ -144,7 +149,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({ cliToolId: 'codex' }),
     });
 
-    const response = await updateCliTool(request, { params: { id: 'non-existent' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'non-existent' } });
     expect(response.status).toBe(404);
 
     const data = await response.json();
@@ -168,7 +173,7 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
       body: JSON.stringify({}),
     });
 
-    const response = await updateCliTool(request, { params: { id: 'test-wt' } });
+    const response = await updateCliTool(request as unknown as import('next/server').NextRequest, { params: { id: 'test-wt' } });
     expect(response.status).toBe(400);
 
     const data = await response.json();

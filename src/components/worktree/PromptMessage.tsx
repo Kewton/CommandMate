@@ -12,11 +12,11 @@ import { ja } from 'date-fns/locale';
 
 export interface PromptMessageProps {
   message: ChatMessage;
-  worktreeId: string;
+  worktreeId?: string;
   onRespond: (answer: string) => Promise<void>;
 }
 
-export function PromptMessage({ message, worktreeId, onRespond }: PromptMessageProps) {
+export function PromptMessage({ message, onRespond }: PromptMessageProps) {
   const [responding, setResponding] = useState(false);
   const prompt = message.promptData!;
   const isPending = prompt.status === 'pending';

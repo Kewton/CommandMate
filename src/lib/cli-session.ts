@@ -49,8 +49,9 @@ export async function captureSessionOutput(
 
   try {
     return await capturePane(sessionName, { startLine: -lines });
-  } catch (error: any) {
-    throw new Error(`Failed to capture ${cliTool.name} output: ${error.message}`);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to capture ${cliTool.name} output: ${errorMessage}`);
   }
 }
 

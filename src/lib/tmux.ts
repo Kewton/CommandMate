@@ -46,7 +46,7 @@ export async function isTmuxAvailable(): Promise<boolean> {
   try {
     await execAsync('tmux -V', { timeout: DEFAULT_TIMEOUT });
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -69,7 +69,7 @@ export async function hasSession(sessionName: string): Promise<boolean> {
   try {
     await execAsync(`tmux has-session -t "${sessionName}"`, { timeout: DEFAULT_TIMEOUT });
     return true;
-  } catch (error) {
+  } catch {
     // tmux has-session returns non-zero exit code if session doesn't exist
     return false;
   }
@@ -108,7 +108,7 @@ export async function listSessions(): Promise<TmuxSession[]> {
           attached: attached === '1',
         };
       });
-  } catch (error) {
+  } catch {
     // No sessions exist or tmux not running
     return [];
   }
@@ -182,8 +182,9 @@ export async function createSession(
       `tmux set-option -t "${sessionName}" history-limit ${historyLimit}`,
       { timeout: DEFAULT_TIMEOUT }
     );
-  } catch (error: any) {
-    throw new Error(`Failed to create tmux session: ${error.message}`);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to create tmux session: ${errorMessage}`);
   }
 }
 
@@ -217,8 +218,9 @@ export async function sendKeys(
 
   try {
     await execAsync(command, { timeout: DEFAULT_TIMEOUT });
-  } catch (error: any) {
-    throw new Error(`Failed to send keys to tmux session: ${error.message}`);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to send keys to tmux session: ${errorMessage}`);
   }
 }
 
@@ -288,8 +290,9 @@ export async function capturePane(
       }
     );
     return stdout;
-  } catch (error: any) {
-    throw new Error(`Failed to capture pane: ${error.message}`);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to capture pane: ${errorMessage}`);
   }
 }
 
@@ -313,16 +316,17 @@ export async function killSession(sessionName: string): Promise<boolean> {
       timeout: DEFAULT_TIMEOUT,
     });
     return true;
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     // Session doesn't exist or already killed
     if (
-      error.message?.includes('no server running') ||
-      error.message?.includes("can't find session")
+      errorMessage?.includes('no server running') ||
+      errorMessage?.includes("can't find session")
     ) {
       return false;
     }
     // Re-throw unexpected errors
-    throw new Error(`Failed to kill tmux session: ${error.message}`);
+    throw new Error(`Failed to kill tmux session: ${errorMessage}`);
   }
 }
 

@@ -69,8 +69,9 @@ export class GeminiTool extends BaseCLITool {
       });
 
       console.log(`✓ Started Gemini session: ${sessionName}`);
-    } catch (error: any) {
-      throw new Error(`Failed to start Gemini session: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to start Gemini session: ${errorMessage}`);
     }
   }
 
@@ -101,8 +102,9 @@ export class GeminiTool extends BaseCLITool {
       await sendKeys(sessionName, `echo '${escapedMessage}' | gemini`, true);
 
       console.log(`✓ Sent message to Gemini session: ${sessionName}`);
-    } catch (error: any) {
-      throw new Error(`Failed to send message to Gemini: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to send message to Gemini: ${errorMessage}`);
     }
   }
 
@@ -131,8 +133,9 @@ export class GeminiTool extends BaseCLITool {
       if (killed) {
         console.log(`✓ Stopped Gemini session: ${sessionName}`);
       }
-    } catch (error: any) {
-      console.error(`Error stopping Gemini session: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Error stopping Gemini session: ${errorMessage}`);
       throw error;
     }
   }

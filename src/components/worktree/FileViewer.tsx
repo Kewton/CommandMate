@@ -7,8 +7,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { Modal } from '@/components/ui';
-import ReactMarkdown from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
 
 export interface FileViewerProps {
   isOpen: boolean;
@@ -65,8 +63,8 @@ export function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewer
 
         const data = await response.json();
         setContent(data);
-      } catch (err: any) {
-        setError(err.message || 'Failed to load file');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load file');
       } finally {
         setLoading(false);
       }

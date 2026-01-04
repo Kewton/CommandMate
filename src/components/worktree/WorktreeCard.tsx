@@ -28,7 +28,7 @@ export interface WorktreeCardProps {
  * ```
  */
 export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: WorktreeCardProps) {
-  const { id, name, memo, lastUserMessage, lastUserMessageAt, lastMessagesByCli, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, cliToolId, sessionStatusByCli } = worktree;
+  const { id, name, memo, lastMessagesByCli, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, sessionStatusByCli } = worktree;
   const [isKilling, setIsKilling] = useState(false);
   const [isFavorite, setIsFavorite] = useState(favorite || false);
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
@@ -38,11 +38,6 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
   // Format relative time for last update
   const relativeTime = updatedAt
     ? formatDistanceToNow(new Date(updatedAt), { addSuffix: true, locale: ja })
-    : null;
-
-  // Format relative time for last user message
-  const lastMessageTime = lastUserMessageAt
-    ? formatDistanceToNow(new Date(lastUserMessageAt), { addSuffix: true, locale: ja })
     : null;
 
   // Determine if this is the main branch

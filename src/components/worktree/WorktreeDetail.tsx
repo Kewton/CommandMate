@@ -54,6 +54,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   const [pendingCliTool, setPendingCliTool] = useState<CLIToolType | null>(null);
   const [realtimeOutput, setRealtimeOutput] = useState<string>('');
   const [isThinking, setIsThinking] = useState<boolean>(false);
+  const [wsConnected, setWsConnected] = useState<boolean>(false);
 
   const resolveActiveCliTool = useCallback((): CLIToolType => {
     if (isCliTab(activeTab)) {
@@ -117,9 +118,8 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
         const initialMessages = await worktreeApi.getMessages(worktreeId, initialCliTool);
         setMessages(initialMessages);
 
-        // Then sync latest CLI tool message from log file
-        const updatedMessages = await worktreeApi.getMessages(worktreeId, initialCliTool);
-        const toolMessages = updatedMessages.filter(
+        // Sync latest CLI tool message from log file (removed duplicate API call)
+        const toolMessages = initialMessages.filter(
           m => m.cliToolId === initialCliTool && m.logFileName
         );
         const latestCliMessage = toolMessages
@@ -204,6 +204,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
 
   /**
    * Periodically refresh messages so the user does not need to hit the Refresh button
+   * Uses longer interval when WebSocket is connected (real-time updates available)
    */
   useEffect(() => {
     if (!isCliTab(activeTab)) {
@@ -222,13 +223,16 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
     // Initial refresh (in addition to tab-change fetch) to ensure latest state
     pollMessages();
 
-    const interval = setInterval(pollMessages, 2000);
+    // Use longer polling interval when WebSocket is connected
+    // WebSocket provides real-time updates, so polling is just a fallback
+    const pollingInterval = wsConnected ? 15000 : 5000;
+    const interval = setInterval(pollMessages, pollingInterval);
 
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [activeTab, fetchMessages]);
+  }, [activeTab, fetchMessages, wsConnected]);
 
   /**
    * Save memo
@@ -323,6 +327,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   const { status: wsStatus } = useWebSocket({
     worktreeIds,
     onMessage: handleWebSocketMessage,
+    onStatusChange: (status) => setWsConnected(status === 'connected'),
   });
 
   const messageListCliTool = pendingCliTool || (isCliTab(activeTab) ? activeTab : resolveActiveCliTool());
@@ -330,6 +335,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   /**
    * Poll for current tmux output continuously and refresh messages
    * Key change: Always show realtime output while session is running
+   * Optimized: Uses shorter interval when waiting for response, longer when idle
    */
   useEffect(() => {
     if (!isCliTab(activeTab)) {
@@ -352,29 +358,6 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
 
         if (!isMounted) return;
 
-        // Always refresh messages to detect new responses
-        const updatedMessages = await worktreeApi.getMessages(worktreeId, cliToolForPolling);
-        const messageCountChanged = updatedMessages.length !== lastMessageCount;
-
-        if (messageCountChanged) {
-          console.log('[Polling] Message count changed:', lastMessageCount, '->', updatedMessages.length);
-          lastMessageCount = updatedMessages.length;
-          setMessages(updatedMessages);
-
-          // Check if the latest message is an assistant response (not user)
-          // If so, the response is complete - hide realtime output
-          const latestMessage = updatedMessages[updatedMessages.length - 1];
-          if (latestMessage && latestMessage.role === 'assistant') {
-            console.log('[Polling] Assistant response saved, hiding realtime output');
-            setWaitingForResponse(false);
-            setPendingCliTool(null);
-            setGeneratingContent('');
-            setRealtimeOutput('');
-            setIsThinking(false);
-            return;
-          }
-        }
-
         if (!data.isRunning) {
           // Session is not running - clear all states
           setWaitingForResponse(false);
@@ -385,32 +368,51 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
           return;
         }
 
-        // Session IS running AND we're waiting for a response
-        // Show realtime output only if the latest message is from the user
-        const latestMessage = updatedMessages[updatedMessages.length - 1];
-        const isAwaitingResponse = latestMessage && latestMessage.role === 'user';
+        // Only fetch messages when we detect a state change or new response
+        // This reduces redundant API calls (was calling every poll)
+        if (data.isGenerating || waitingForResponse) {
+          const updatedMessages = await worktreeApi.getMessages(worktreeId, cliToolForPolling);
+          const messageCountChanged = updatedMessages.length !== lastMessageCount;
 
-        if (isAwaitingResponse) {
-          setWaitingForResponse(true);
-          setPendingCliTool(cliToolForPolling);
-          setGeneratingContent(data.content || '');
-          setRealtimeOutput(data.realtimeSnippet || '');
-          setIsThinking(data.thinking || false);
+          if (messageCountChanged) {
+            console.log('[Polling] Message count changed:', lastMessageCount, '->', updatedMessages.length);
+            lastMessageCount = updatedMessages.length;
+            setMessages(updatedMessages);
 
-          // Only clear if waiting for user prompt (yes/no question)
-          // This keeps the prompt buttons visible
-          if (data.isPromptWaiting) {
-            // Keep waitingForResponse true so UI shows the prompt
-            // But indicate we're waiting for user input
+            // Check if the latest message is an assistant response (not user)
+            const latestMessage = updatedMessages[updatedMessages.length - 1];
+            if (latestMessage && latestMessage.role === 'assistant') {
+              console.log('[Polling] Assistant response saved, hiding realtime output');
+              setWaitingForResponse(false);
+              setPendingCliTool(null);
+              setGeneratingContent('');
+              setRealtimeOutput('');
+              setIsThinking(false);
+              return;
+            }
+          }
+
+          // Session IS running AND we're waiting for a response
+          const latestMessage = updatedMessages[updatedMessages.length - 1];
+          const isAwaitingResponse = latestMessage && latestMessage.role === 'user';
+
+          if (isAwaitingResponse) {
+            setWaitingForResponse(true);
+            setPendingCliTool(cliToolForPolling);
+            setGeneratingContent(data.content || '');
+            setRealtimeOutput(data.realtimeSnippet || '');
+            setIsThinking(data.thinking || false);
+
+            if (data.isPromptWaiting) {
+              setIsThinking(false);
+            }
+          } else {
+            setWaitingForResponse(false);
+            setPendingCliTool(null);
+            setGeneratingContent('');
+            setRealtimeOutput('');
             setIsThinking(false);
           }
-        } else {
-          // Latest message is from assistant - response complete, hide realtime output
-          setWaitingForResponse(false);
-          setPendingCliTool(null);
-          setGeneratingContent('');
-          setRealtimeOutput('');
-          setIsThinking(false);
         }
       } catch (err) {
         console.error('Error polling current output:', err);
@@ -420,14 +422,23 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
     // Start polling immediately
     pollCurrentOutput();
 
-    // Then poll every 1 second for realtime updates
-    const pollInterval = setInterval(pollCurrentOutput, 1000);
+    // Dynamic polling interval:
+    // - 2 seconds when waiting for response (need quick updates for realtime display)
+    // - 10 seconds when WebSocket connected and not waiting (WebSocket handles updates)
+    // - 5 seconds otherwise (fallback polling)
+    const getPollingInterval = () => {
+      if (waitingForResponse) return 2000;
+      if (wsConnected) return 10000;
+      return 5000;
+    };
+
+    const pollInterval = setInterval(pollCurrentOutput, getPollingInterval());
 
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
     };
-  }, [activeTab, worktreeId, messages.length]);
+  }, [activeTab, worktreeId, messages.length, waitingForResponse, wsConnected]);
 
   /**
    * Handle message sent

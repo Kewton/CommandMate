@@ -211,6 +211,7 @@ describe('Database Operations', () => {
           worktreeId: 'main',
           role: 'user',
           content: 'Hello Claude',
+          messageType: 'normal',
           timestamp: new Date(),
         });
 
@@ -227,6 +228,7 @@ describe('Database Operations', () => {
             worktreeId: 'nonexistent',
             role: 'user',
             content: 'Hello',
+            messageType: 'normal',
             timestamp: new Date(),
           });
         }).toThrow();
@@ -243,6 +245,7 @@ describe('Database Operations', () => {
           worktreeId: 'main',
           role: 'user',
           content: 'Test',
+          messageType: 'normal',
           timestamp: now,
         });
 
@@ -300,6 +303,7 @@ describe('Database Operations', () => {
           worktreeId: 'main',
           role: 'user',
           content: 'First',
+          messageType: 'normal',
           timestamp: time1,
         });
 
@@ -307,6 +311,7 @@ describe('Database Operations', () => {
           worktreeId: 'main',
           role: 'user',
           content: 'Second',
+          messageType: 'normal',
           timestamp: time2,
         });
 
@@ -314,6 +319,7 @@ describe('Database Operations', () => {
           worktreeId: 'main',
           role: 'user',
           content: 'Third',
+          messageType: 'normal',
           timestamp: time3,
         });
 
@@ -331,6 +337,7 @@ describe('Database Operations', () => {
             worktreeId: 'main',
             role: 'user',
             content: `Message ${i}`,
+            messageType: 'normal',
             timestamp: new Date(),
           });
         }

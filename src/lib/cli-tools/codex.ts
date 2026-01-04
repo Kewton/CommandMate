@@ -82,8 +82,9 @@ export class CodexTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       console.log(`✓ Started Codex session: ${sessionName}`);
-    } catch (error: any) {
-      throw new Error(`Failed to start Codex session: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to start Codex session: ${errorMessage}`);
     }
   }
 
@@ -118,8 +119,9 @@ export class CodexTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       console.log(`✓ Sent message to Codex session: ${sessionName}`);
-    } catch (error: any) {
-      throw new Error(`Failed to send message to Codex: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to send message to Codex: ${errorMessage}`);
     }
   }
 
@@ -148,8 +150,9 @@ export class CodexTool extends BaseCLITool {
       if (killed) {
         console.log(`✓ Stopped Codex session: ${sessionName}`);
       }
-    } catch (error: any) {
-      console.error(`Error stopping Codex session: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Error stopping Codex session: ${errorMessage}`);
       throw error;
     }
   }

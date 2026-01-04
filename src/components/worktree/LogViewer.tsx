@@ -357,7 +357,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
 
             {!loading && searchQuery && matches.length === 0 && fileContent && (
               <div className="text-center py-4 text-sm text-gray-500">
-                No matches found for "{searchQuery}"
+                No matches found for &quot;{searchQuery}&quot;
               </div>
             )}
           </CardContent>

@@ -49,8 +49,8 @@ export default function FileViewerPage() {
 
         const data = await response.json();
         setContent(data);
-      } catch (err: any) {
-        setError(err.message || 'Failed to load file');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load file');
       } finally {
         setLoading(false);
       }
@@ -142,7 +142,7 @@ export default function FileViewerPage() {
                     rehypePlugins={[rehypeHighlight]}
                     components={{
                       // Custom components for better rendering
-                      code: ({ node, inline, className, children, ...props }: any) => {
+                      code: ({ inline, className, children, ...props }: { inline?: boolean; className?: string; children?: React.ReactNode }) => {
                         if (inline) {
                           return (
                             <code className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
@@ -156,30 +156,30 @@ export default function FileViewerPage() {
                           </code>
                         );
                       },
-                      pre: ({ children, ...props }: any) => (
-                        <pre className="bg-gray-50 border border-gray-200 rounded-md p-4 overflow-x-auto" {...props}>
+                      pre: ({ children }: { children?: React.ReactNode }) => (
+                        <pre className="bg-gray-50 border border-gray-200 rounded-md p-4 overflow-x-auto">
                           {children}
                         </pre>
                       ),
-                      table: ({ children, ...props }: any) => (
+                      table: ({ children }: { children?: React.ReactNode }) => (
                         <div className="overflow-x-auto">
-                          <table className="border-collapse border border-gray-300" {...props}>
+                          <table className="border-collapse border border-gray-300">
                             {children}
                           </table>
                         </div>
                       ),
-                      th: ({ children, ...props }: any) => (
-                        <th className="border border-gray-300 bg-gray-100 px-4 py-2 text-left font-semibold" {...props}>
+                      th: ({ children }: { children?: React.ReactNode }) => (
+                        <th className="border border-gray-300 bg-gray-100 px-4 py-2 text-left font-semibold">
                           {children}
                         </th>
                       ),
-                      td: ({ children, ...props }: any) => (
-                        <td className="border border-gray-300 px-4 py-2" {...props}>
+                      td: ({ children }: { children?: React.ReactNode }) => (
+                        <td className="border border-gray-300 px-4 py-2">
                           {children}
                         </td>
                       ),
-                      blockquote: ({ children, ...props }: any) => (
-                        <blockquote className="border-l-4 border-gray-300 pl-4 italic text-gray-700" {...props}>
+                      blockquote: ({ children }: { children?: React.ReactNode }) => (
+                        <blockquote className="border-l-4 border-gray-300 pl-4 italic text-gray-700">
                           {children}
                         </blockquote>
                       ),

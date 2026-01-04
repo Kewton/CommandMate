@@ -3,17 +3,16 @@
  * Bridges browser terminal to tmux sessions
  */
 
-import { WebSocketServer } from 'ws';
-import { IncomingMessage } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import type { Server as HTTPServer, IncomingMessage } from 'http';
 import { spawn } from 'child_process';
-import * as tmux from './tmux';
 import { captureSessionOutput } from './cli-session';
 import type { CLIToolType } from './cli-tools/types';
 
 interface TerminalConnection {
   worktreeId: string;
   cliToolId: string;
-  ws: any;
+  ws: WebSocket;
   tmuxSession: string;
 }
 
@@ -29,7 +28,7 @@ function getSessionName(worktreeId: string, cliToolId: string): string {
 /**
  * Initialize WebSocket server for terminal connections
  */
-export function initTerminalWebSocket(server: any) {
+export function initTerminalWebSocket(server: HTTPServer) {
   const wss = new WebSocketServer({
     server,
     path: '/terminal'
@@ -64,8 +63,8 @@ export function initTerminalWebSocket(server: any) {
     try {
       const output = await captureSessionOutput(worktreeId, cliToolId as CLIToolType);
       ws.send(output);
-    } catch (error) {
-      console.error('Error capturing initial output:', error);
+    } catch (_error) {
+      console.error('Error capturing initial output:', _error);
       ws.send('\x1b[31mError: Failed to capture terminal output\x1b[0m\r\n');
     }
 
@@ -88,10 +87,10 @@ export function initTerminalWebSocket(server: any) {
             // Capture and send back updated output
             setTimeout(async () => {
               try {
-                const output = await captureSessionOutput(worktreeId, cliToolId as any, 100);
+                const output = await captureSessionOutput(worktreeId, cliToolId as CLIToolType, 100);
                 ws.send(output);
-              } catch (error) {
-                console.error('Error capturing output after input:', error);
+              } catch (_error) {
+                console.error('Error capturing output after input:', _error);
               }
             }, 100); // Small delay to allow tmux to process
             break;
@@ -103,10 +102,10 @@ export function initTerminalWebSocket(server: any) {
             // Capture output after command execution
             setTimeout(async () => {
               try {
-                const output = await captureSessionOutput(worktreeId, cliToolId as any, 100);
+                const output = await captureSessionOutput(worktreeId, cliToolId as CLIToolType, 100);
                 ws.send(output);
-              } catch (error) {
-                console.error('Error capturing output after command:', error);
+              } catch (_error) {
+                console.error('Error capturing output after command:', _error);
               }
             }, 200);
             break;
@@ -146,7 +145,7 @@ export function initTerminalWebSocket(server: any) {
           // Capture last few lines for incremental update
           const output = await captureSessionOutput(
             connection.worktreeId,
-            connection.cliToolId as any,
+            connection.cliToolId as CLIToolType,
             10
           );
 
@@ -154,8 +153,8 @@ export function initTerminalWebSocket(server: any) {
           if (output && output.trim()) {
             connection.ws.send(output);
           }
-        } catch (error) {
-          console.error(`Error refreshing terminal ${connectionId}:`, error);
+        } catch (_error) {
+          console.error(`Error refreshing terminal ${connectionId}:`, _error);
         }
       }
     }
@@ -190,6 +189,7 @@ async function sendToTmux(sessionName: string, input: string): Promise<void> {
  * Alternative: Direct PTY approach (without tmux)
  * This creates a direct pseudo-terminal connection
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createDirectTerminal(worktreeId: string, cliToolId: string) {
   const pty = spawn('bash', [], {
     env: {
@@ -210,6 +210,7 @@ export function createDirectTerminal(worktreeId: string, cliToolId: string) {
       pty.stdin.write(data);
     },
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     resize: (cols: number, rows: number) => {
       // PTY resize if needed
       // This would require node-pty for proper implementation

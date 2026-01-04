@@ -50,7 +50,7 @@ export async function GET(
     const cliTools = ['claude', 'codex', 'gemini'];
     let fileFound = false;
     let fileContent = '';
-    let fileStat: any = null;
+    let fileStat: { size: number; mtime: Date } | null = null;
     let foundCliTool = '';
 
     for (const cliTool of cliTools) {
@@ -63,12 +63,13 @@ export async function GET(
           // File found
           fileFound = true;
           foundCliTool = cliTool;
-          fileStat = stat;
+          fileStat = { size: stat.size, mtime: stat.mtime };
           fileContent = await fs.readFile(filePath, 'utf-8');
           break;
         }
-      } catch (error: any) {
-        if (error.code !== 'ENOENT') {
+      } catch (error: unknown) {
+        const nodeError = error as NodeJS.ErrnoException;
+        if (nodeError.code !== 'ENOENT') {
           throw error; // Re-throw non-ENOENT errors
         }
         // Continue to next CLI tool
@@ -87,12 +88,12 @@ export async function GET(
         filename,
         cliToolId: foundCliTool,
         content: fileContent,
-        size: fileStat.size,
-        modifiedAt: fileStat.mtime.toISOString(),
+        size: fileStat!.size,
+        modifiedAt: fileStat!.mtime.toISOString(),
       },
       { status: 200 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error reading log file:', error);
     return NextResponse.json(
       { error: 'Failed to read log file' },

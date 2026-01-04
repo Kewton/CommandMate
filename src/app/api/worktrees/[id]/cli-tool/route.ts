@@ -58,7 +58,7 @@ export async function PATCH(
 
     // Return updated worktree
     return NextResponse.json(updatedWorktree, { status: 200 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error updating CLI tool:', error);
     return NextResponse.json(
       { error: 'Failed to update CLI tool' },

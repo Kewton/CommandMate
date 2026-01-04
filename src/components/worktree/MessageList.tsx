@@ -363,6 +363,7 @@ export function MessageList({
   worktreeId,
   loading = false,
   waitingForResponse = false,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   generatingContent = '',
   realtimeOutput = '',
   isThinking = false,

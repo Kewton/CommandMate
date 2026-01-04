@@ -43,10 +43,11 @@ export async function POST(request: NextRequest) {
     let output: string;
     try {
       output = await captureClaudeOutput(body.worktreeId, 10000);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to capture Claude output:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
-        { error: `Failed to capture Claude output: ${error.message}` },
+        { error: `Failed to capture Claude output: ${errorMessage}` },
         { status: 500 }
       );
     }
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
       },
       { status: 200 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error processing Claude done hook:', error);
     return NextResponse.json(
       { error: 'Failed to process Claude done hook' },

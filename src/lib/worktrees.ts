@@ -9,7 +9,8 @@ import path from 'path';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
 import { upsertWorktree } from './db';
-import { isPathSafe } from './path-validator';
+// isPathSafe is available but not used - using inline path validation instead
+// import { isPathSafe } from './path-validator';
 
 /**
  * Parsed worktree information from git
@@ -183,11 +184,13 @@ export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
 
         return true;
       });
-  } catch (error: any) {
+  } catch (error: unknown) {
     // If not a git repository, return empty array
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorCode = (error as { code?: number }).code;
     if (
-      error.message?.includes('not a git repository') ||
-      error.code === 128
+      errorMessage?.includes('not a git repository') ||
+      errorCode === 128
     ) {
       return [];
     }
@@ -220,8 +223,8 @@ export async function scanMultipleRepositories(
       const worktrees = await scanWorktrees(repoPath);
       allWorktrees.push(...worktrees);
       console.log(`  Found ${worktrees.length} worktree(s)`);
-    } catch (error) {
-      console.error(`Error scanning repository ${repoPath}:`, error);
+    } catch (_error) {
+      console.error(`Error scanning repository ${repoPath}:`, _error);
       // Continue with other repositories even if one fails
     }
   }

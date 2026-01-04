@@ -74,10 +74,11 @@ export async function POST(
     if (!running) {
       try {
         await cliTool.startSession(params.id, worktree.path);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error(`Failed to start ${cliTool.name} session:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
-          { error: `Failed to start ${cliTool.name} session: ${error.message}` },
+          { error: `Failed to start ${cliTool.name} session: ${errorMessage}` },
           { status: 500 }
         );
       }
@@ -86,10 +87,11 @@ export async function POST(
     // Send message to CLI tool
     try {
       await cliTool.sendMessage(params.id, body.content);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`Failed to send message to ${cliTool.name}:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
-        { error: `Failed to send message to ${cliTool.name}: ${error.message}` },
+        { error: `Failed to send message to ${cliTool.name}: ${errorMessage}` },
         { status: 500 }
       );
     }
@@ -118,7 +120,7 @@ export async function POST(
     startPolling(params.id, cliToolId);
 
     return NextResponse.json(message, { status: 201 });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error sending message:', error);
     return NextResponse.json(
       { error: 'Failed to send message' },

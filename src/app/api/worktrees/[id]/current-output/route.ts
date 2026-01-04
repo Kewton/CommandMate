@@ -10,34 +10,12 @@ import { detectPrompt } from '@/lib/prompt-detector';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
+import { detectThinking as detectThinkingState, stripAnsi } from '@/lib/cli-patterns';
 
 const SUPPORTED_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
 
 function isCliTool(value: string | null): value is CLIToolType {
   return !!value && (SUPPORTED_TOOLS as string[]).includes(value);
-}
-
-/**
- * Detect if CLI tool is showing "thinking" indicator (spinner)
- * Note: We no longer try to detect "completion" - just thinking state
- */
-function detectThinking(cliToolId: CLIToolType, snippet: string): { thinking: boolean } {
-  switch (cliToolId) {
-    case 'codex': {
-      const isThinking = /•\s*(Planning|Searching|Exploring|Running|Thinking|Working)/m.test(snippet);
-      return { thinking: isThinking };
-    }
-    case 'gemini': {
-      // Gemini doesn't have a thinking indicator in one-shot mode
-      return { thinking: false };
-    }
-    case 'claude':
-    default: {
-      // Claude shows various spinner characters when thinking
-      const isThinking = /[✻✽⏺·∴✢✳]\s+\w+…/m.test(snippet);
-      return { thinking: isThinking };
-    }
-  }
 }
 
 export async function GET(
@@ -91,8 +69,8 @@ export async function GET(
     const newContent = newLines.join('\n');
 
     // Check for thinking state (spinner showing)
-    const lastSection = lines.slice(-20).join('\n');
-    const { thinking } = detectThinking(cliToolId, lastSection);
+    const lastSection = stripAnsi(lines.slice(-20).join('\n'));
+    const thinking = detectThinkingState(cliToolId, lastSection);
 
     // Check if it's an interactive prompt (yes/no or multiple choice)
     const promptDetection = detectPrompt(output);

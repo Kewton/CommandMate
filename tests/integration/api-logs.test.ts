@@ -13,6 +13,11 @@ import type { Worktree } from '@/types/models';
 import fs from 'fs';
 import path from 'path';
 
+// Declare mock function type
+declare module '@/lib/db-instance' {
+  export function setMockDb(db: Database.Database): void;
+}
+
 // Mock the database instance
 vi.mock('@/lib/db-instance', () => {
   let mockDb: Database.Database | null = null;
@@ -61,6 +66,8 @@ describe('GET /api/worktrees/:id/logs', () => {
       id: 'test-worktree',
       name: 'test',
       path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
     };
     upsertWorktree(db, worktree);
 
@@ -101,7 +108,7 @@ describe('GET /api/worktrees/:id/logs', () => {
 
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/logs');
     const params = { params: { id: 'test-worktree' } };
-    const response = await getLogs(request, params);
+    const response = await getLogs(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
 
@@ -118,7 +125,7 @@ describe('GET /api/worktrees/:id/logs', () => {
 
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/logs');
     const params = { params: { id: 'test-worktree' } };
-    const response = await getLogs(request, params);
+    const response = await getLogs(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
 
@@ -141,7 +148,7 @@ describe('GET /api/worktrees/:id/logs', () => {
 
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/logs');
     const params = { params: { id: 'test-worktree' } };
-    const response = await getLogs(request, params);
+    const response = await getLogs(request as unknown as import('next/server').NextRequest, params);
 
     const data = await response.json();
     expect(data).toHaveLength(1);
@@ -151,7 +158,7 @@ describe('GET /api/worktrees/:id/logs', () => {
   it('should return 404 when worktree not found', async () => {
     const request = new Request('http://localhost:3000/api/worktrees/nonexistent/logs');
     const params = { params: { id: 'nonexistent' } };
-    const response = await getLogs(request, params);
+    const response = await getLogs(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
 
@@ -164,7 +171,7 @@ describe('GET /api/worktrees/:id/logs', () => {
 
     const request = new Request('http://localhost:3000/api/worktrees/test-worktree/logs');
     const params = { params: { id: 'test-worktree' } };
-    const response = await getLogs(request, params);
+    const response = await getLogs(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
 
@@ -188,6 +195,8 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
       id: 'test-worktree',
       name: 'test',
       path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
     };
     upsertWorktree(db, worktree);
 
@@ -226,7 +235,7 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
         filename: '2025-01-17_10-30-45_abc123.jsonl',
       },
     };
-    const response = await getLogFile(request, params);
+    const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
 
@@ -247,7 +256,7 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
         filename: '../../../etc/passwd',
       },
     };
-    const response = await getLogFile(request, params);
+    const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
 
@@ -266,7 +275,7 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
         filename: 'malicious.sh',
       },
     };
-    const response = await getLogFile(request, params);
+    const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(400);
 
@@ -287,7 +296,7 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
         filename: 'nonexistent.jsonl',
       },
     };
-    const response = await getLogFile(request, params);
+    const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
 
@@ -305,7 +314,7 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
         filename: 'test.jsonl',
       },
     };
-    const response = await getLogFile(request, params);
+    const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
 
@@ -325,7 +334,7 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
         filename: 'test.jsonl',
       },
     };
-    const response = await getLogFile(request, params);
+    const response = await getLogFile(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
 

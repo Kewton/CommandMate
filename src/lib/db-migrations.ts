@@ -177,7 +177,7 @@ const migrations: Migration[] = [
         updateStmt.run(repoPath, repoName, wt.id);
       }
     },
-    down: (db) => {
+    down: () => {
       // No down migration needed - this is a data fix
       console.log('No rollback needed for repository path fix');
     }
@@ -225,9 +225,9 @@ const migrations: Migration[] = [
         ON worktrees(status);
       `);
     },
-    down: (db) => {
+    down: (rollbackDb) => {
       // Remove status index
-      db.exec(`
+      rollbackDb.exec(`
         DROP INDEX IF EXISTS idx_worktrees_status;
       `);
     }
@@ -241,7 +241,7 @@ const migrations: Migration[] = [
         ALTER TABLE worktrees ADD COLUMN link TEXT DEFAULT NULL;
       `);
     },
-    down: (db) => {
+    down: () => {
       // No down migration needed - SQLite doesn't support DROP COLUMN directly
       console.log('No rollback needed for link field');
     }
@@ -406,7 +406,7 @@ const migrations: Migration[] = [
 
       console.log('✓ Added in_progress_message_id column to session_states table');
     },
-    down: (db) => {
+    down: () => {
       // Note: SQLite doesn't support DROP COLUMN directly
       // In production, you would need to recreate the table without in_progress_message_id
       console.log('No full rollback for in_progress_message_id column (SQLite limitation)');
@@ -420,7 +420,8 @@ const migrations: Migration[] = [
  * Handles both regular repos (.git directory) and worktrees (.git file)
  */
 function findRepositoryRoot(worktreePath: string): string {
-  const fs = require('fs');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require('fs') as typeof import('fs');
   let currentPath = worktreePath;
 
   // Walk up the directory tree
@@ -465,7 +466,7 @@ export function getCurrentVersion(db: Database.Database): number {
     ).get() as { version: number | null } | undefined;
 
     return result?.version ?? 0;
-  } catch (error) {
+  } catch {
     // Table doesn't exist yet
     return 0;
   }
@@ -529,10 +530,11 @@ export function runMigrations(db: Database.Database): void {
       })();
 
       console.log(`✓ Migration ${migration.version} applied successfully`);
-    } catch (error: any) {
-      console.error(`✗ Migration ${migration.version} failed:`, error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`✗ Migration ${migration.version} failed:`, errorMessage);
       throw new Error(
-        `Migration ${migration.version} (${migration.name}) failed: ${error.message}`
+        `Migration ${migration.version} (${migration.name}) failed: ${errorMessage}`
       );
     }
   }
@@ -586,10 +588,11 @@ export function rollbackMigrations(
       })();
 
       console.log(`✓ Migration ${migration.version} rolled back`);
-    } catch (error: any) {
-      console.error(`✗ Rollback ${migration.version} failed:`, error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`✗ Rollback ${migration.version} failed:`, errorMessage);
       throw new Error(
-        `Rollback of migration ${migration.version} failed: ${error.message}`
+        `Rollback of migration ${migration.version} failed: ${errorMessage}`
       );
     }
   }
@@ -624,7 +627,7 @@ export function getMigrationHistory(db: Database.Database): Array<{
       name: row.name,
       appliedAt: new Date(row.applied_at)
     }));
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -655,8 +658,8 @@ export function validateSchema(db: Database.Database): boolean {
     }
 
     return true;
-  } catch (error) {
-    console.error('Schema validation failed:', error);
+  } catch (schemaError) {
+    console.error('Schema validation failed:', schemaError);
     return false;
   }
 }

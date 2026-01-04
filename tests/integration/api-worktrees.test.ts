@@ -11,6 +11,11 @@ import { runMigrations } from '@/lib/db-migrations';
 import { upsertWorktree, createMessage } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
+// Declare mock function type
+declare module '@/lib/db-instance' {
+  export function setMockDb(db: Database.Database): void;
+}
+
 // Mock the database instance
 vi.mock('@/lib/db-instance', () => {
   let mockDb: Database.Database | null = null;
@@ -55,7 +60,7 @@ describe('GET /api/worktrees', () => {
 
   it('should return empty array when no worktrees exist', async () => {
     const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request);
+    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(200);
 
@@ -69,6 +74,8 @@ describe('GET /api/worktrees', () => {
       id: 'main',
       name: 'main',
       path: '/path/to/main',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
       updatedAt: new Date('2025-01-17T10:00:00Z'),
     };
 
@@ -76,6 +83,8 @@ describe('GET /api/worktrees', () => {
       id: 'feature-foo',
       name: 'feature/foo',
       path: '/path/to/feature-foo',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
       updatedAt: new Date('2025-01-17T11:00:00Z'),
     };
 
@@ -83,7 +92,7 @@ describe('GET /api/worktrees', () => {
     upsertWorktree(db, worktree2);
 
     const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request);
+    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(200);
 
@@ -100,13 +109,15 @@ describe('GET /api/worktrees', () => {
       id: 'test',
       name: 'test',
       path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
       lastMessageSummary: 'Last message summary',
     };
 
     upsertWorktree(db, worktree);
 
     const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request);
+    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
 
     const data = await response.json();
     expect(data.worktrees[0].lastMessageSummary).toBe('Last message summary');
@@ -117,7 +128,7 @@ describe('GET /api/worktrees', () => {
     db.close();
 
     const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request);
+    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(500);
 
@@ -148,13 +159,15 @@ describe('GET /api/worktrees/:id', () => {
       id: 'feature-foo',
       name: 'feature/foo',
       path: '/path/to/feature-foo',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
     };
 
     upsertWorktree(db, worktree);
 
     const request = new Request('http://localhost:3000/api/worktrees/feature-foo');
     const params = { params: { id: 'feature-foo' } };
-    const response = await getWorktreeById(request, params);
+    const response = await getWorktreeById(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(200);
 
@@ -167,7 +180,7 @@ describe('GET /api/worktrees/:id', () => {
   it('should return 404 when worktree not found', async () => {
     const request = new Request('http://localhost:3000/api/worktrees/nonexistent');
     const params = { params: { id: 'nonexistent' } };
-    const response = await getWorktreeById(request, params);
+    const response = await getWorktreeById(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(404);
 
@@ -181,7 +194,7 @@ describe('GET /api/worktrees/:id', () => {
 
     const request = new Request('http://localhost:3000/api/worktrees/test');
     const params = { params: { id: 'test' } };
-    const response = await getWorktreeById(request, params);
+    const response = await getWorktreeById(request as unknown as import('next/server').NextRequest, params);
 
     expect(response.status).toBe(500);
 

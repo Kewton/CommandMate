@@ -103,9 +103,10 @@ export async function POST(
       // For yes/no prompts, use the standard validation
       try {
         input = getAnswerInput(answer, message.promptData.type);
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
-          { error: `Invalid answer: ${error.message}` },
+          { error: `Invalid answer: ${errorMessage}` },
           { status: 400 }
         );
       }
@@ -154,9 +155,10 @@ export async function POST(
       // Send Enter
       await sendKeys(sessionName, '', true);
       console.log(`✓ Sent Enter to ${sessionName}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
-        { error: `Failed to send answer to tmux: ${error.message}` },
+        { error: `Failed to send answer to tmux: ${errorMessage}` },
         { status: 500 }
       );
     }
@@ -181,10 +183,11 @@ export async function POST(
       success: true,
       message: updatedMessage,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to respond to prompt:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: errorMessage },
       { status: 500 }
     );
   }

@@ -10,6 +10,11 @@ import { runMigrations } from '@/lib/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
+// Declare mock function type
+declare module '@/lib/db-instance' {
+  export function setMockDb(db: Database.Database): void;
+}
+
 // Mock the database instance
 vi.mock('@/lib/db-instance', () => {
   let mockDb: Database.Database | null = null;
@@ -104,7 +109,7 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
     upsertWorktree(db, geminiWorktree);
 
     const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request);
+    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(200);
 
@@ -155,7 +160,7 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
     upsertWorktree(db, worktree);
 
     const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request);
+    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(200);
 
@@ -187,7 +192,7 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
     upsertWorktree(db, worktree);
 
     const request = new Request('http://localhost:3000/api/worktrees');
-    const response = await getWorktrees(request);
+    const response = await getWorktrees(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(200);
 

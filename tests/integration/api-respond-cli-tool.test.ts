@@ -25,6 +25,11 @@ vi.mock('@/lib/ws-server', () => ({
   broadcastMessage: vi.fn(),
 }));
 
+// Declare mock function type
+declare module '@/lib/db-instance' {
+  export function setMockDb(db: Database.Database): void;
+}
+
 // Mock the database instance
 vi.mock('@/lib/db-instance', () => {
   let mockDb: Database.Database | null = null;
@@ -108,7 +113,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, { params: { id: 'claude-test' } });
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'claude-test' } });
 
       expect(response.status).toBe(200);
 
@@ -159,7 +164,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, { params: { id: 'codex-test' } });
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'codex-test' } });
 
       expect(response.status).toBe(200);
 
@@ -207,7 +212,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, { params: { id: 'gemini-test' } });
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'gemini-test' } });
 
       expect(response.status).toBe(200);
 
@@ -228,7 +233,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         }),
       });
 
-      const response = await respondToPrompt(request, { params: { id: 'nonexistent' } });
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'nonexistent' } });
 
       expect(response.status).toBe(404);
     });

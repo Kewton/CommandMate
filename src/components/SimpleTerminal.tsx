@@ -141,6 +141,7 @@ export function SimpleTerminal({ worktreeId, cliToolId }: SimpleTerminalProps) {
     const interval = setInterval(captureOutput, 3000);
 
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId, cliToolId]);
 
   return (

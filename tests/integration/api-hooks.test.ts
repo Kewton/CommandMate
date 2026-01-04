@@ -10,6 +10,11 @@ import { runMigrations } from '@/lib/db-migrations';
 import { upsertWorktree, getMessages, getSessionState } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
+// Declare mock function type
+declare module '@/lib/db-instance' {
+  export function setMockDb(db: Database.Database): void;
+}
+
 // Mock the database instance
 vi.mock('@/lib/db-instance', () => {
   let mockDb: Database.Database | null = null;
@@ -53,6 +58,8 @@ describe('POST /api/hooks/claude-done', () => {
       id: 'test-worktree',
       name: 'test',
       path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
     };
     upsertWorktree(db, worktree);
 
@@ -93,7 +100,7 @@ Summary: Implemented the user authentication feature
       body: JSON.stringify(requestBody),
     });
 
-    const response = await claudeDone(request);
+    const response = await claudeDone(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(200);
 
@@ -133,7 +140,7 @@ Summary: Implemented the user authentication feature
       body: JSON.stringify(requestBody),
     });
 
-    const response = await claudeDone(request);
+    const response = await claudeDone(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(200);
 
@@ -163,7 +170,7 @@ Summary: Implemented the user authentication feature
       body: JSON.stringify(requestBody),
     });
 
-    await claudeDone(request);
+    await claudeDone(request as unknown as import('next/server').NextRequest);
 
     const sessionState = getSessionState(db, 'test-worktree');
     expect(sessionState?.lastCapturedLine).toBe(5);
@@ -176,7 +183,7 @@ Summary: Implemented the user authentication feature
       body: JSON.stringify({ sessionName: 'test-session' }),
     });
 
-    const response = await claudeDone(request);
+    const response = await claudeDone(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(400);
 
@@ -192,7 +199,7 @@ Summary: Implemented the user authentication feature
       body: JSON.stringify({ worktreeId: 'test-worktree' }),
     });
 
-    const response = await claudeDone(request);
+    const response = await claudeDone(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(400);
 
@@ -211,7 +218,7 @@ Summary: Implemented the user authentication feature
       }),
     });
 
-    const response = await claudeDone(request);
+    const response = await claudeDone(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(404);
 
@@ -234,7 +241,7 @@ Summary: Implemented the user authentication feature
       }),
     });
 
-    const response = await claudeDone(request);
+    const response = await claudeDone(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(500);
 
@@ -257,7 +264,7 @@ Summary: Implemented the user authentication feature
       }),
     });
 
-    const response = await claudeDone(request);
+    const response = await claudeDone(request as unknown as import('next/server').NextRequest);
 
     expect(response.status).toBe(200);
 

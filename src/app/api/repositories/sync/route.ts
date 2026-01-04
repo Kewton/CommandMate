@@ -3,11 +3,11 @@
  * Re-scans all configured repositories and syncs worktrees to database
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getRepositoryPaths, scanMultipleRepositories, syncWorktreesToDB } from '@/lib/worktrees';
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
     // Get configured repository paths from environment
     const repositoryPaths = getRepositoryPaths();
@@ -39,10 +39,11 @@ export async function POST(request: NextRequest) {
       },
       { status: 200 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error syncing repositories:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to sync repositories';
     return NextResponse.json(
-      { error: error.message || 'Failed to sync repositories' },
+      { error: errorMessage },
       { status: 500 }
     );
   }

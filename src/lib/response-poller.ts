@@ -17,6 +17,7 @@ import { detectPrompt } from './prompt-detector';
 import { recordClaudeConversation } from './conversation-logger';
 import type { CLIToolType } from './cli-tools/types';
 import { parseClaudeOutput } from './claude-output';
+import { getCliToolPatterns, stripAnsi } from './cli-patterns';
 
 /**
  * Polling interval in milliseconds (default: 2 seconds)
@@ -194,84 +195,8 @@ function extractResponse(
   const linesToCheck = lines.slice(startLine);
   const outputToCheck = linesToCheck.join('\n');
 
-  // Define tool-specific patterns
-  let promptPattern: RegExp;
-  let separatorPattern: RegExp;
-  let thinkingPattern: RegExp;
-  let skipPatterns: RegExp[] = [];
-
-  switch (cliToolId) {
-    case 'claude':
-      // Claude shows "> " or "─────" when waiting for input
-      promptPattern = /^>\s*$/m;
-      separatorPattern = /^─{50,}$/m;
-      // Claude shows various animations while thinking: ✻ Herding…, · Choreographing…, ∴ Thinking…, ∴ Thought…, ✢ Doing…, ✳ Cascading…, ✽ Cultivating…, ✶ Recombobulating…, etc.
-      // Pattern must match spinner character followed by text ending with … (ellipsis)
-      // Allow leading whitespace (spinner may be indented) and use a more flexible pattern
-      // Also detect "to interrupt)" which appears after spinner in output
-      thinkingPattern = /[✻✽⏺·∴✢✳✶]\s*\S+…|to interrupt\)/m;
-      skipPatterns = [
-        /^─{50,}$/, // Separator lines
-        /^>\s*$/, // Prompt line
-        /[✻✽⏺·∴✢✳✶]\s*\S+…/, // Thinking indicators (any activity with ellipsis)
-        /^\s*[⎿⏋]\s+Tip:/, // Tip lines
-        /^\s*Tip:/, // Tip lines
-        /^\s*\?\s*for shortcuts/, // Shortcuts hint
-        /to interrupt\)/, // Part of "esc to interrupt" message
-      ];
-      break;
-
-    case 'codex':
-      // Codex uses › (U+203A) for prompt instead of >
-      // Completion is detected by:
-      // 1. A new prompt line (› followed by content or shortcuts hint)
-      // 2. OR a "Worked for" separator (for complex tasks)
-      promptPattern = /^›\s+.+/m;  // › followed by any content (new prompt ready)
-      separatorPattern = /^─.*Worked for.*─+$/m;  // "─ Worked for 2m 20s ────" for complex tasks
-      thinkingPattern = /•\s*(Planning|Searching|Exploring|Running|Thinking|Working)/m;
-      skipPatterns = [
-        /^─.*─+$/,  // Separator lines
-        /^›\s*$/,  // Empty prompt line (waiting for input)
-        /^›\s+(Implement|Find and fix|Type)/,  // New prompt suggestions (not response content)
-        /•\s*(Planning|Searching|Exploring|Running|Thinking)/,  // Activity indicators
-        /^\s*\d+%\s+context left/,  // Context indicator
-        /^\s*for shortcuts$/,  // Shortcuts hint
-        /╭─+╮/,  // Box drawing (top)
-        /╰─+╯/,  // Box drawing (bottom)
-      ];
-      break;
-
-    case 'gemini':
-      // Gemini in non-interactive mode (one-shot execution)
-      // Completion is detected by the return to shell prompt
-      promptPattern = /^(%|\$|.*@.*[%$#])\s*$/m;  // Shell prompt (%, $, or user@host%)
-      separatorPattern = /^gemini\s+--\s+/m;  // Command execution line
-      // Gemini runs and completes immediately, no thinking state
-      thinkingPattern = /(?!)/m;  // Never matches - one-shot execution
-      skipPatterns = [
-        /^gemini\s+--\s+/,  // Command line itself
-        /^(%|\$|.*@.*[%$#])\s*$/,  // Shell prompt lines
-        /^\s*$/,  // Empty lines
-      ];
-      break;
-
-    default:
-      console.warn(`[Poller] Unknown CLI tool: ${cliToolId}, using Claude patterns`);
-      promptPattern = /^>\s*$/m;
-      separatorPattern = /^─{50,}$/m;
-      thinkingPattern = /[✻✽⏺·∴✢✳✶]\s*\S+…|to interrupt\)/m;
-      skipPatterns = [/^─{50,}$/, /^>\s*$/, /[✻✽⏺·∴✢✳✶]\s*\S+…/, /to interrupt\)/];
-  }
-
-  /**
-   * Strip ANSI escape codes from a string for pattern matching
-   * @param str - String with ANSI codes
-   * @returns Clean string without ANSI codes
-   */
-  const stripAnsi = (str: string): string => {
-    // Remove all ANSI escape sequences: \x1b[...m or [...m
-    return str.replace(/\x1b\[[0-9;]*m|\[[0-9;]*m/g, '');
-  };
+  // Get tool-specific patterns from shared module
+  const { promptPattern, separatorPattern, thinkingPattern, skipPatterns } = getCliToolPatterns(cliToolId);
 
   const findRecentUserPromptIndex = (windowSize: number = 60): number => {
     const userPromptPattern = cliToolId === 'codex'
@@ -795,8 +720,9 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     console.log(`[Poller] Continuing to watch for prompts after response...`);
 
     return true;
-  } catch (error: any) {
-    console.error(`Error checking for response (${worktreeId}):`, error.message);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`Error checking for response (${worktreeId}):`, errorMessage);
     return false;
   }
 }
@@ -838,7 +764,7 @@ export function startPolling(worktreeId: string, cliToolId: CLIToolType): void {
     // Check for response
     try {
       await checkForResponse(worktreeId, cliToolId);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`[Poller] Error in checkForResponse:`, error);
     }
   }, POLLING_INTERVAL);

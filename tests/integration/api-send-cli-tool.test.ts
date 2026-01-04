@@ -50,6 +50,11 @@ vi.mock('@/lib/claude-poller', () => ({
   startPolling: vi.fn(),
 }));
 
+// Declare mock function type
+declare module '@/lib/db-instance' {
+  export function setMockDb(db: Database.Database): void;
+}
+
 // Mock the database instance
 vi.mock('@/lib/db-instance', () => {
   let mockDb: Database.Database | null = null;
@@ -113,7 +118,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test message' }),
       });
 
-      const response = await sendMessage(request, { params: { id: 'test-worktree' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
       expect(response.status).toBe(201);
 
@@ -147,7 +152,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test codex message' }),
       });
 
-      const response = await sendMessage(request, { params: { id: 'codex-worktree' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'codex-worktree' } });
 
       expect(response.status).toBe(201);
 
@@ -178,7 +183,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         }),
       });
 
-      const response = await sendMessage(request, { params: { id: 'test-override' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-override' } });
 
       expect(response.status).toBe(201);
     });
@@ -203,7 +208,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         body: JSON.stringify({ content: 'Test gemini message' }),
       });
 
-      const response = await sendMessage(request, { params: { id: 'gemini-worktree' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'gemini-worktree' } });
 
       expect(response.status).toBe(201);
 
@@ -235,7 +240,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
         }),
       });
 
-      const response = await sendMessage(request, { params: { id: 'test-invalid' } });
+      const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: { id: 'test-invalid' } });
 
       expect(response.status).toBe(400);
 
