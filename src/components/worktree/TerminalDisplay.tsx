@@ -7,7 +7,7 @@
 
 'use client';
 
-import React, { useEffect, useCallback, memo } from 'react';
+import React, { useEffect, useMemo, memo } from 'react';
 import { sanitizeTerminalOutput } from '@/lib/sanitize';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
 
@@ -88,38 +88,37 @@ export const TerminalDisplay = memo(function TerminalDisplay({
     }
   }, [sanitizedOutput, autoScroll, scrollRef]);
 
-  // Handle scroll-to-bottom button click
-  const handleScrollToBottomClick = useCallback(() => {
-    scrollToBottom();
-  }, [scrollToBottom]);
-
-  // Compute CSS classes
-  const containerClasses = [
-    // Base terminal styling
-    'terminal',
-    'font-mono',
-    'text-sm',
-    'p-4',
-    'rounded-lg',
-    'overflow-y-auto',
-    'overflow-x-hidden',
-    // Dark theme
-    'bg-gray-900',
-    'text-gray-300',
-    // Border
-    'border',
-    'border-gray-700',
-    // Height
-    'min-h-[200px]',
-    'max-h-[500px]',
-    // Active state
-    isActive ? 'active' : '',
-    isActive ? 'border-blue-500' : '',
-    // Custom classes
-    className,
-  ]
-    .filter(Boolean)
-    .join(' ');
+  // Memoized CSS classes for performance
+  const containerClasses = useMemo(
+    () =>
+      [
+        // Base terminal styling
+        'terminal',
+        'font-mono',
+        'text-sm',
+        'p-4',
+        'rounded-lg',
+        'overflow-y-auto',
+        'overflow-x-hidden',
+        // Dark theme
+        'bg-gray-900',
+        'text-gray-300',
+        // Border
+        'border',
+        'border-gray-700',
+        // Height
+        'min-h-[200px]',
+        'max-h-[500px]',
+        // Active state
+        isActive ? 'active' : '',
+        isActive ? 'border-blue-500' : '',
+        // Custom classes
+        className,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    [isActive, className]
+  );
 
   return (
     <div className="relative">
@@ -144,7 +143,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
       {/* Scroll to bottom button (shown when auto-scroll is disabled) */}
       {!autoScroll && (
         <button
-          onClick={handleScrollToBottomClick}
+          onClick={scrollToBottom}
           className="absolute bottom-4 right-4 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-sm shadow-lg transition-colors"
           aria-label="Scroll to bottom"
         >

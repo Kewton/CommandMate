@@ -67,17 +67,12 @@ export function useIsMobile(options: UseIsMobileOptions = {}): boolean {
     // Update state on mount (for SSR hydration)
     setIsMobile(checkIsMobile());
 
-    /**
-     * Handle window resize events
-     */
     const handleResize = () => {
       setIsMobile(checkIsMobile());
     };
 
-    // Add resize listener
     window.addEventListener('resize', handleResize);
 
-    // Cleanup
     return () => {
       window.removeEventListener('resize', handleResize);
     };
