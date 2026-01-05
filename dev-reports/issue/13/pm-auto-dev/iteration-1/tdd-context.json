@@ -1,0 +1,61 @@
+{
+  "issue_number": 13,
+  "issue_title": "UX改善",
+  "current_phase": "Phase 1: 基盤コンポーネント",
+  "acceptance_criteria": [
+    "画面を4つの論理ブロック（A.ターミナル、B.プロンプト応答、C.ユーザー入力、D.入力履歴）に分割する",
+    "ターミナルは常に最新出力を表示し、ユーザースクロール時は自動追従を一時停止する",
+    "プロンプト応答パネルはClaude Codeからのyes/no/複数選択時のみ表示する",
+    "入力履歴は独立スクロールで過去の会話を確認可能にする"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "1.1",
+      "name": "UI状態型定義",
+      "file": "src/types/ui-state.ts",
+      "description": "UIPhase, TerminalState, PromptState, LayoutState, ErrorState, WorktreeUIState型を定義"
+    },
+    {
+      "id": "1.2",
+      "name": "UIアクション型定義",
+      "file": "src/types/ui-actions.ts",
+      "description": "WorktreeUIAction union type を定義（SET_PHASE, SET_TERMINAL_OUTPUT, SHOW_PROMPT等）"
+    },
+    {
+      "id": "1.3",
+      "name": "useWorktreeUIState フック",
+      "file": "src/hooks/useWorktreeUIState.ts",
+      "description": "useReducerベースの状態管理フック。reducer + action creatorsを実装"
+    },
+    {
+      "id": "1.4",
+      "name": "useTerminalScroll フック",
+      "file": "src/hooks/useTerminalScroll.ts",
+      "description": "ターミナルの自動スクロール制御。ユーザースクロール検出で一時停止"
+    },
+    {
+      "id": "1.5",
+      "name": "useIsMobile フック",
+      "file": "src/hooks/useIsMobile.ts",
+      "description": "画面幅に基づくモバイル検出フック"
+    },
+    {
+      "id": "1.6",
+      "name": "TerminalDisplay コンポーネント",
+      "file": "src/components/worktree/TerminalDisplay.tsx",
+      "description": "ANSI対応ターミナル表示コンポーネント。sanitizeTerminalOutputを使用"
+    }
+  ],
+  "test_files": [
+    "tests/unit/hooks/useWorktreeUIState.test.ts",
+    "tests/unit/hooks/useTerminalScroll.test.ts",
+    "tests/unit/hooks/useIsMobile.test.ts",
+    "tests/unit/components/TerminalDisplay.test.tsx"
+  ],
+  "target_coverage": 80,
+  "design_document": "dev-reports/design/issue-13-ux-improvement-design-policy.md",
+  "existing_implementations": [
+    "src/lib/sanitize.ts (XSSサニタイズ - 実装済み)",
+    "src/components/error/ErrorBoundary.tsx (エラーバウンダリ - 実装済み)"
+  ]
+}

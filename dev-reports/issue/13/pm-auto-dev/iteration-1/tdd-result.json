@@ -1,0 +1,100 @@
+{
+  "status": "success",
+  "phase": "Phase 1",
+  "tasks_completed": [
+    {
+      "id": "1.1",
+      "name": "UI状態型定義",
+      "file": "src/types/ui-state.ts",
+      "description": "UIPhase, TerminalState, PromptState, LayoutState, ErrorState, WorktreeUIState型を定義"
+    },
+    {
+      "id": "1.2",
+      "name": "UIアクション型定義",
+      "file": "src/types/ui-actions.ts",
+      "description": "WorktreeUIAction union type を定義（SET_PHASE, SET_TERMINAL_OUTPUT, SHOW_PROMPT等）"
+    },
+    {
+      "id": "1.3",
+      "name": "useWorktreeUIState フック",
+      "file": "src/hooks/useWorktreeUIState.ts",
+      "testFile": "tests/unit/hooks/useWorktreeUIState.test.ts",
+      "description": "useReducerベースの状態管理フック。reducer + action creatorsを実装",
+      "tests": 30,
+      "coverage": 70.0
+    },
+    {
+      "id": "1.4",
+      "name": "useTerminalScroll フック",
+      "file": "src/hooks/useTerminalScroll.ts",
+      "testFile": "tests/unit/hooks/useTerminalScroll.test.ts",
+      "description": "ターミナルの自動スクロール制御。ユーザースクロール検出で一時停止",
+      "tests": 14,
+      "coverage": 92.85
+    },
+    {
+      "id": "1.5",
+      "name": "useIsMobile フック",
+      "file": "src/hooks/useIsMobile.ts",
+      "testFile": "tests/unit/hooks/useIsMobile.test.ts",
+      "description": "画面幅に基づくモバイル検出フック",
+      "tests": 12,
+      "coverage": 93.33
+    },
+    {
+      "id": "1.6",
+      "name": "TerminalDisplay コンポーネント",
+      "file": "src/components/worktree/TerminalDisplay.tsx",
+      "testFile": "tests/unit/components/TerminalDisplay.test.tsx",
+      "description": "ANSI対応ターミナル表示コンポーネント。sanitizeTerminalOutputを使用",
+      "tests": 28,
+      "coverage": 90.9
+    }
+  ],
+  "tasks_failed": [],
+  "test_results": {
+    "total": 353,
+    "passed": 348,
+    "failed": 0,
+    "skipped": 5
+  },
+  "phase1_test_results": {
+    "total": 84,
+    "passed": 84,
+    "failed": 0,
+    "breakdown": {
+      "useWorktreeUIState.test.ts": 30,
+      "useTerminalScroll.test.ts": 14,
+      "useIsMobile.test.ts": 12,
+      "TerminalDisplay.test.tsx": 28
+    }
+  },
+  "coverage": {
+    "overall": 51.99,
+    "phase1_files": {
+      "useWorktreeUIState.ts": 70.0,
+      "useTerminalScroll.ts": 92.85,
+      "useIsMobile.ts": 93.33,
+      "TerminalDisplay.tsx": 90.9
+    },
+    "phase1_average": 86.77
+  },
+  "lint_errors": 0,
+  "type_errors": 0,
+  "files_created": [
+    "src/types/ui-state.ts",
+    "src/types/ui-actions.ts",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/hooks/useTerminalScroll.ts",
+    "src/hooks/useIsMobile.ts",
+    "src/components/worktree/TerminalDisplay.tsx",
+    "tests/unit/hooks/useWorktreeUIState.test.ts",
+    "tests/unit/hooks/useTerminalScroll.test.ts",
+    "tests/unit/hooks/useIsMobile.test.ts",
+    "tests/unit/components/TerminalDisplay.test.tsx"
+  ],
+  "files_modified": [
+    "tests/setup.ts"
+  ],
+  "message": "Phase 1 基盤コンポーネントのTDD実装完了。全84テストがパス、ESLint/TypeScriptエラー0件、Phase 1ファイル平均カバレッジ86.77%達成。"
+}
