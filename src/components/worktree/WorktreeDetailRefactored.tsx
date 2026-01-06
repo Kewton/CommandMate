@@ -561,7 +561,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   if (!isMobile) {
     return (
       <ErrorBoundary componentName="WorktreeDetailRefactored">
-        <div className="h-full flex flex-col">
+        <div className="h-full flex flex-col relative">
           <div className="flex-1 min-h-0">
             <WorktreeDesktopLayout
               leftPane={
@@ -592,14 +592,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               cliToolId="claude"
             />
           </div>
-          <PromptPanel
-            promptData={state.prompt.data}
-            messageId={state.prompt.messageId}
-            visible={state.prompt.visible}
-            answering={state.prompt.answering}
-            onRespond={handlePromptRespond}
-            onDismiss={handlePromptDismiss}
-          />
+          {/* Prompt Panel - fixed overlay at bottom */}
+          {state.prompt.visible && (
+            <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-2xl px-4">
+              <PromptPanel
+                promptData={state.prompt.data}
+                messageId={state.prompt.messageId}
+                visible={state.prompt.visible}
+                answering={state.prompt.answering}
+                onRespond={handlePromptRespond}
+                onDismiss={handlePromptDismiss}
+              />
+            </div>
+          )}
         </div>
       </ErrorBoundary>
     );
