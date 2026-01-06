@@ -63,6 +63,10 @@ Stop フック（CLAUDE_HOOKS_STOP）を活用した イベント駆動アーキ
 - 📝 Markdown ログ保存
 - 各 worktree 配下の .claude_logs/ に詳細な Markdown ログを保存
 - チャット画面には要約／短縮表示、ログ画面で詳細確認
+- 📐 レスポンシブ UI（Issue #13 で実装）
+- デスクトップ: 2カラム分割レイアウト（リサイズ可能）
+- モバイル: タブベースナビゲーション + ボトムシート
+- 詳細は [UI/UX ガイド](./docs/UI_UX_GUIDE.md) を参照
 - 🧩 Claude Code / SWE Agent フレンドリー
 - 設計書や構成を docs/ 配下に分離
 - SWE エージェント（Claude Code / OpenHands など）にタスクを振りやすい構造
