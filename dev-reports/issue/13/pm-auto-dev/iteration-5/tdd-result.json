@@ -1,0 +1,64 @@
+{
+  "status": "success",
+  "coverage": 74.38,
+  "unit_tests": {
+    "total": 612,
+    "passed": 612,
+    "failed": 0,
+    "skipped": 5
+  },
+  "integration_tests": {
+    "total": 18,
+    "passed": 18,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "build_status": "success",
+  "files_changed": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "tests/integration/worktree-detail-integration.test.tsx"
+  ],
+  "commits": [],
+  "implementation_summary": {
+    "component": "WorktreeDetailRefactored",
+    "description": "Integrated worktree detail component combining all Phase 1-4 components",
+    "features": [
+      "Desktop: 2-column layout with resizable panes (History | Terminal)",
+      "Mobile: Tab navigation with header and bottom tab bar",
+      "Prompt detection and response handling (PromptPanel/MobilePromptSheet)",
+      "useReducer-based state management via useWorktreeUIState",
+      "ErrorBoundary wrapping for fault isolation",
+      "Real-time terminal output with auto-scroll",
+      "Responsive design with useIsMobile hook",
+      "Accessibility support with ARIA attributes"
+    ],
+    "integrated_components": [
+      "useWorktreeUIState",
+      "useIsMobile",
+      "WorktreeDesktopLayout",
+      "TerminalDisplay",
+      "HistoryPane",
+      "PromptPanel",
+      "MobileHeader",
+      "MobileTabBar",
+      "MobilePromptSheet",
+      "ErrorBoundary"
+    ]
+  },
+  "acceptance_criteria_met": [
+    "WorktreeDetailがPhase 1-4の新コンポーネントを統合していること",
+    "デスクトップ表示時に2カラムレイアウトが動作すること",
+    "モバイル表示時にタブナビゲーションが動作すること",
+    "プロンプト表示がデスクトップ/モバイルで適切に動作すること",
+    "パフォーマンス最適化（React.memo、useMemo、useCallback）が適用されていること",
+    "アクセシビリティ（ARIA属性、キーボード操作）が適用されていること",
+    "全テストがパスすること",
+    "ESLint/TypeScriptエラーが0件であること",
+    "ビルドが成功すること"
+  ],
+  "message": "Phase 5 TDD実装完了。WorktreeDetailRefactoredコンポーネントがPhase 1-4のすべてのコンポーネントを統合し、デスクトップ/モバイル両方のレイアウトをサポート。カバレッジ74.38%達成（目標70%以上）。全テストパス。"
+}

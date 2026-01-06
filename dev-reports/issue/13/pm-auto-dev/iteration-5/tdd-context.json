@@ -1,0 +1,55 @@
+{
+  "issue_number": 13,
+  "issue_title": "UX改善",
+  "current_phase": "Phase 5: 最適化・仕上げ",
+  "acceptance_criteria": [
+    "WorktreeDetailがPhase 1-4の新コンポーネントを統合していること",
+    "デスクトップ表示時に2カラムレイアウトが動作すること",
+    "モバイル表示時にタブナビゲーションが動作すること",
+    "プロンプト表示がデスクトップ/モバイルで適切に動作すること",
+    "パフォーマンス最適化（React.memo、useMemo、useCallback）が適用されていること",
+    "アクセシビリティ（ARIA属性、キーボード操作）が適用されていること",
+    "全テストがパスすること",
+    "ESLint/TypeScriptエラーが0件であること",
+    "ビルドが成功すること"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "5.1",
+      "name": "WorktreeDetail統合",
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "description": "Phase 1-4コンポーネントを統合した新しいWorktreeDetail"
+    },
+    {
+      "id": "5.2",
+      "name": "結合テスト",
+      "file": "tests/integration/worktree-detail-integration.test.tsx",
+      "description": "統合後の結合テスト"
+    }
+  ],
+  "test_files": [
+    "tests/integration/worktree-detail-integration.test.tsx"
+  ],
+  "target_coverage": 70,
+  "design_document": "dev-reports/design/issue-13-ux-improvement-design-policy.md",
+  "existing_implementations": [
+    "src/types/ui-state.ts",
+    "src/types/ui-actions.ts",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/hooks/useTerminalScroll.ts",
+    "src/hooks/useIsMobile.ts",
+    "src/hooks/usePromptAnimation.ts",
+    "src/hooks/useSwipeGesture.ts",
+    "src/hooks/useVirtualKeyboard.ts",
+    "src/components/worktree/TerminalDisplay.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/PaneResizer.tsx",
+    "src/components/worktree/WorktreeDesktopLayout.tsx",
+    "src/components/worktree/PromptPanel.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/mobile/MobileHeader.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/components/error/ErrorBoundary.tsx",
+    "src/lib/sanitize.ts"
+  ]
+}

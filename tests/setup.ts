@@ -1,10 +1,21 @@
 // Vitest setup file
 import { beforeAll, afterAll, afterEach } from 'vitest';
+import '@testing-library/jest-dom/vitest';
 
 // グローバルなテスト設定
 
 beforeAll(() => {
   // テスト開始時の初期化処理
+
+  // Mock Element.scrollTo for jsdom (only in browser-like environments)
+  if (typeof Element !== 'undefined' && typeof Element.prototype.scrollTo !== 'function') {
+    Element.prototype.scrollTo = function(options?: ScrollToOptions | number) {
+      if (typeof options === 'object') {
+        this.scrollTop = options.top ?? 0;
+        this.scrollLeft = options.left ?? 0;
+      }
+    };
+  }
 });
 
 afterEach(() => {

@@ -1,0 +1,83 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "AC-1: WorktreeDetailRefactored - 単体テスト",
+      "result": "passed",
+      "evidence": "18 tests passed in tests/unit/components/WorktreeDetailRefactored.test.tsx - covers Props, Desktop Mode, Mobile Mode, Loading State, Error State, State Management, Terminal State, Accessibility"
+    },
+    {
+      "scenario": "AC-2: WorktreeDetail - 結合テスト",
+      "result": "passed",
+      "evidence": "18 tests passed in tests/integration/worktree-detail-integration.test.tsx - covers Desktop Layout, Mobile Layout, Terminal Output, History Messages, Prompt Response, Error Handling, Loading State, Responsive Behavior"
+    },
+    {
+      "scenario": "AC-3: 全体品質 - Lint/Type/Build",
+      "result": "passed",
+      "evidence": "ESLint: No warnings or errors, TypeScript: No errors, Build: Successfully compiled and generated static pages"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "WorktreeDetailRefactoredがPhase 1-4の新コンポーネントを統合していること",
+      "verified": true,
+      "evidence": "Imports verified: useWorktreeUIState, useIsMobile, WorktreeDesktopLayout, TerminalDisplay, HistoryPane, PromptPanel, MobileHeader, MobileTabBar, MobilePromptSheet, ErrorBoundary"
+    },
+    {
+      "criterion": "デスクトップ表示時に2カラムレイアウト（履歴|ターミナル）が動作すること",
+      "verified": true,
+      "evidence": "WorktreeDesktopLayout used with leftPane (HistoryPane) and rightPane (TerminalDisplay), tested in Desktop Layout tests"
+    },
+    {
+      "criterion": "モバイル表示時にタブナビゲーションが動作すること",
+      "verified": true,
+      "evidence": "MobileHeader, MobileTabBar, and MobileContent components render on mobile, tab switching tested in Mobile Layout tests"
+    },
+    {
+      "criterion": "プロンプト表示がデスクトップ/モバイルで適切に動作すること",
+      "verified": true,
+      "evidence": "PromptPanel for desktop, MobilePromptSheet for mobile, tested in 'shows PromptPanel/MobilePromptSheet when prompt is active' tests"
+    },
+    {
+      "criterion": "useReducerベースの状態管理が動作すること",
+      "verified": true,
+      "evidence": "useWorktreeUIState hook uses useReducer (line 237 in src/hooks/useWorktreeUIState.ts), state management tested in State Management tests"
+    },
+    {
+      "criterion": "ErrorBoundaryで各ペインがラップされていること",
+      "verified": true,
+      "evidence": "ErrorBoundary wraps: TerminalDisplay (line 191), HistoryPane (line 202), WorktreeDetailRefactored main (lines 494 and 534)"
+    },
+    {
+      "criterion": "全テストがパスすること",
+      "verified": true,
+      "evidence": "Unit tests: 18/18 passed, Integration tests: 18/18 passed (WorktreeDetailRefactored specific tests)"
+    },
+    {
+      "criterion": "ESLint/TypeScriptエラーが0件であること",
+      "verified": true,
+      "evidence": "ESLint: 'No ESLint warnings or errors', TypeScript: 'tsc --noEmit' completed without errors"
+    },
+    {
+      "criterion": "ビルドが成功すること",
+      "verified": true,
+      "evidence": "npm run build completed successfully, static pages generated, all routes compiled"
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "tests/integration/worktree-detail-integration.test.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useWorktreeUIState.ts"
+  ],
+  "implementation_files": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "summary": {
+    "total_tests": 36,
+    "passed": 36,
+    "failed": 0,
+    "skipped": 0
+  },
+  "message": "すべての受入条件を満たしています。Phase 5最適化・仕上げの実装が正常に完了しました。"
+}

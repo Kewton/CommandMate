@@ -25,15 +25,23 @@ const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
 // Handle uncaught WebSocket errors
-process.on('uncaughtException', (error: any) => {
-  // Log WebSocket errors but don't crash the server
-  if (
+process.on('uncaughtException', (error: Error & { code?: string }) => {
+  // Check for WebSocket-related errors that are non-fatal
+  const isWebSocketError =
     error.code === 'WS_ERR_INVALID_UTF8' ||
     error.code === 'WS_ERR_INVALID_CLOSE_CODE' ||
-    (error instanceof RangeError && error.message?.includes('Invalid WebSocket frame'))
-  ) {
+    error.code === 'WS_ERR_UNEXPECTED_RSV_1' ||
+    (error instanceof RangeError && error.message?.includes('Invalid WebSocket frame')) ||
+    (error.message?.includes('WebSocket') && error.message?.includes('invalid'));
+
+  if (isWebSocketError) {
     // Silently ignore these non-fatal WebSocket frame errors
-    // They occur when browsers send malformed close frames
+    // They commonly occur when mobile browsers send malformed close frames
+    // (e.g., iOS Safari when switching apps or losing connection)
+    if (dev) {
+      // In development, log a brief message instead of full stack trace
+      console.log('[WS] Ignored malformed WebSocket frame from client');
+    }
     return;
   }
   // For other uncaught exceptions, log and exit

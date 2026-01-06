@@ -1,0 +1,56 @@
+{
+  "issue_number": 13,
+  "feature_summary": "UX改善 - Phase 1 基盤コンポーネント",
+  "acceptance_criteria": [
+    "UI状態型（UIPhase, TerminalState, PromptState, LayoutState, ErrorState, WorktreeUIState）が定義されていること",
+    "UIアクション型（WorktreeUIAction）が全アクション（SET_PHASE, SET_TERMINAL_OUTPUT, SHOW_PROMPT, CLEAR_PROMPT等）を網羅していること",
+    "useWorktreeUIStateフックがuseReducerベースで状態管理できること",
+    "useTerminalScrollフックがユーザースクロール検出で自動追従を一時停止できること",
+    "useIsMobileフックが画面幅768px未満でモバイル判定できること",
+    "TerminalDisplayコンポーネントがANSI色対応でターミナル出力を表示できること",
+    "TerminalDisplayがsanitizeTerminalOutputを使用してXSS対策されていること",
+    "全テストがパスすること（84テスト）",
+    "ESLint/TypeScriptエラーが0件であること",
+    "カバレッジが80%以上であること（Phase 1ファイル）"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "useWorktreeUIState - 状態管理",
+      "description": "reducerが全アクションを正しく処理し、状態遷移が正確であること",
+      "test_command": "npm run test:unit -- tests/unit/hooks/useWorktreeUIState.test.ts"
+    },
+    {
+      "id": "AC-2",
+      "name": "useTerminalScroll - 自動スクロール制御",
+      "description": "新しい出力時に自動スクロール、ユーザースクロール時に一時停止",
+      "test_command": "npm run test:unit -- tests/unit/hooks/useTerminalScroll.test.ts"
+    },
+    {
+      "id": "AC-3",
+      "name": "useIsMobile - モバイル検出",
+      "description": "画面幅768px未満でtrueを返す",
+      "test_command": "npm run test:unit -- tests/unit/hooks/useIsMobile.test.ts"
+    },
+    {
+      "id": "AC-4",
+      "name": "TerminalDisplay - 表示とセキュリティ",
+      "description": "ANSI色対応、XSS対策、ローディング表示",
+      "test_command": "npm run test:unit -- tests/unit/components/TerminalDisplay.test.tsx"
+    },
+    {
+      "id": "AC-5",
+      "name": "全体品質 - Lint/Type/Build",
+      "description": "ESLint、TypeScript、ビルドがすべて成功",
+      "test_command": "npm run lint && npx tsc --noEmit && npm run build"
+    }
+  ],
+  "implementation_files": [
+    "src/types/ui-state.ts",
+    "src/types/ui-actions.ts",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/hooks/useTerminalScroll.ts",
+    "src/hooks/useIsMobile.ts",
+    "src/components/worktree/TerminalDisplay.tsx"
+  ]
+}

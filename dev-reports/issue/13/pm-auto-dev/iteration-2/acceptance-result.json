@@ -1,0 +1,124 @@
+{
+  "status": "passed",
+  "issue_number": 13,
+  "feature_summary": "UX改善 - Phase 2 デスクトップレイアウト",
+  "test_cases": [
+    {
+      "scenario": "AC-1: HistoryPane - メッセージ履歴表示",
+      "description": "メッセージ履歴を独立スクロールで表示、ファイルパスクリック対応",
+      "result": "passed",
+      "evidence": "HistoryPane.test.tsx: 20 tests passed - Basic rendering (3), Message styling by role (2), File path click handling (4), Empty state (2), Loading state (2), Independent scrolling (2), Message ordering (1), Edge cases (3), className prop (1)"
+    },
+    {
+      "scenario": "AC-2: PaneResizer - リサイズ機能",
+      "description": "ドラッグとキーボードでペイン幅を調整",
+      "result": "passed",
+      "evidence": "PaneResizer.test.tsx: 26 tests passed - Basic rendering (3), Orientation (3), Cursor styling (2), Drag behavior (6), Visual feedback during drag (1), Keyboard accessibility (5), Styling (3), Touch support (1), Edge cases (2)"
+    },
+    {
+      "scenario": "AC-3: WorktreeDesktopLayout - レイアウト",
+      "description": "2カラムレイアウト、レスポンシブ対応、ErrorBoundary",
+      "result": "passed",
+      "evidence": "WorktreeDesktopLayout.test.tsx: 21 tests passed - Basic rendering (3), Column layout (2), Resizing (3), ErrorBoundary wrapping (2), Responsive behavior (3), Mobile view toggle (1), Accessibility (2), Styling (2), Edge cases (3)"
+    },
+    {
+      "scenario": "AC-4: 全体品質 - Lint/Type/Build",
+      "description": "ESLint、TypeScript、ビルドがすべて成功",
+      "result": "passed",
+      "evidence": "ESLint: No ESLint warnings or errors; TypeScript: tsc --noEmit completed without errors; Build: npm run build completed successfully"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "HistoryPaneコンポーネントがメッセージ履歴を独立スクロールで表示できること",
+      "verified": true,
+      "evidence": "overflow-y-auto class applied, tests confirm independent scrolling"
+    },
+    {
+      "criterion": "HistoryPaneがファイルパスクリック時にコールバックを呼び出すこと",
+      "verified": true,
+      "evidence": "4 tests verify file path detection and callback invocation"
+    },
+    {
+      "criterion": "PaneResizerでドラッグによるペイン幅調整ができること",
+      "verified": true,
+      "evidence": "6 drag behavior tests passed, including delta calculation"
+    },
+    {
+      "criterion": "PaneResizerがキーボード操作に対応していること",
+      "verified": true,
+      "evidence": "5 keyboard accessibility tests passed (ArrowRight, ArrowLeft, ArrowDown, ArrowUp, focusable)"
+    },
+    {
+      "criterion": "WorktreeDesktopLayoutが2カラムグリッドレイアウトで表示できること",
+      "verified": true,
+      "evidence": "desktop-layout testid with flex/grid layout confirmed"
+    },
+    {
+      "criterion": "WorktreeDesktopLayoutがモバイルで1カラム+タブ表示に切り替わること",
+      "verified": true,
+      "evidence": "3 responsive tests passed, mobile-layout renders with tab switching"
+    },
+    {
+      "criterion": "各ペインにErrorBoundaryが設置されていること",
+      "verified": true,
+      "evidence": "2 ErrorBoundary wrapping tests passed, code inspection confirms ErrorBoundary around both panes"
+    },
+    {
+      "criterion": "全テストがパスすること（95テスト）",
+      "verified": true,
+      "evidence": "415 tests passed (5 skipped) - exceeds 95 test requirement"
+    },
+    {
+      "criterion": "ESLint/TypeScriptエラーが0件であること",
+      "verified": true,
+      "evidence": "ESLint: No warnings or errors; TypeScript: tsc --noEmit passed with no output (no errors)"
+    },
+    {
+      "criterion": "カバレッジが70%以上であること（Phase 2ファイル）",
+      "verified": true,
+      "evidence": "HistoryPane.tsx: 96.87% lines, PaneResizer.tsx: 100% lines, WorktreeDesktopLayout.tsx: 91.3% lines, Components/worktree average: 97.63% lines"
+    }
+  ],
+  "test_summary": {
+    "total_tests": 420,
+    "passed": 415,
+    "skipped": 5,
+    "failed": 0,
+    "phase2_component_tests": 67,
+    "test_duration": "~1s"
+  },
+  "coverage_summary": {
+    "historyPane": {
+      "statements": "96.87%",
+      "branches": "90.9%",
+      "functions": "100%",
+      "lines": "96.87%"
+    },
+    "paneResizer": {
+      "statements": "96.87%",
+      "branches": "80%",
+      "functions": "100%",
+      "lines": "100%"
+    },
+    "worktreeDesktopLayout": {
+      "statements": "88%",
+      "branches": "72.22%",
+      "functions": "71.42%",
+      "lines": "91.3%"
+    },
+    "average_lines": "96.06%"
+  },
+  "evidence_files": [
+    "tests/unit/components/HistoryPane.test.tsx",
+    "tests/unit/components/PaneResizer.test.tsx",
+    "tests/unit/components/WorktreeDesktopLayout.test.tsx"
+  ],
+  "implementation_files": [
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/PaneResizer.tsx",
+    "src/components/worktree/WorktreeDesktopLayout.tsx"
+  ],
+  "message": "すべての受入条件を満たしています。Phase 2 デスクトップレイアウトの実装は完了しています。",
+  "timestamp": "2026-01-06T08:15:00Z"
+}

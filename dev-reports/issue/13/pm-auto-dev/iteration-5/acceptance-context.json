@@ -1,0 +1,38 @@
+{
+  "issue_number": 13,
+  "feature_summary": "UX改善 - Phase 5 最適化・仕上げ",
+  "acceptance_criteria": [
+    "WorktreeDetailRefactoredがPhase 1-4の新コンポーネントを統合していること",
+    "デスクトップ表示時に2カラムレイアウト（履歴|ターミナル）が動作すること",
+    "モバイル表示時にタブナビゲーションが動作すること",
+    "プロンプト表示がデスクトップ/モバイルで適切に動作すること",
+    "useReducerベースの状態管理が動作すること",
+    "ErrorBoundaryで各ペインがラップされていること",
+    "全テストがパスすること",
+    "ESLint/TypeScriptエラーが0件であること",
+    "ビルドが成功すること"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "WorktreeDetailRefactored - 単体テスト",
+      "description": "統合コンポーネントの単体テスト",
+      "test_command": "npm run test:unit -- tests/unit/components/WorktreeDetailRefactored.test.tsx"
+    },
+    {
+      "id": "AC-2",
+      "name": "WorktreeDetail - 結合テスト",
+      "description": "デスクトップ/モバイルレイアウト、プロンプト応答の結合テスト",
+      "test_command": "npm run test:integration -- tests/integration/worktree-detail-integration.test.tsx"
+    },
+    {
+      "id": "AC-3",
+      "name": "全体品質 - Lint/Type/Build",
+      "description": "ESLint、TypeScript、ビルドがすべて成功",
+      "test_command": "npm run lint && npx tsc --noEmit && npm run build"
+    }
+  ],
+  "implementation_files": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ]
+}

@@ -73,7 +73,9 @@ export async function GET(
     const thinking = detectThinkingState(cliToolId, lastSection);
 
     // Check if it's an interactive prompt (yes/no or multiple choice)
-    const promptDetection = detectPrompt(output);
+    // Strip ANSI codes before prompt detection for reliable pattern matching
+    const cleanOutput = stripAnsi(output);
+    const promptDetection = detectPrompt(cleanOutput);
 
     // isComplete is ONLY used for prompt detection (yes/no questions)
     // We no longer try to detect "normal" response completion
@@ -96,8 +98,9 @@ export async function GET(
       isGenerating: !isPromptWaiting,
       thinking,
       thinkingMessage: thinking ? 'Claude is thinking...' : null,
-      // New: indicate if waiting for user prompt
+      // Prompt detection results
       isPromptWaiting,
+      promptData: isPromptWaiting ? promptDetection.promptData : null,
     });
   } catch (error: unknown) {
     console.error('Error getting current output:', error);

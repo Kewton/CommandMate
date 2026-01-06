@@ -1,0 +1,47 @@
+{
+  "issue_number": 13,
+  "feature_summary": "UX改善 - Phase 2 デスクトップレイアウト",
+  "acceptance_criteria": [
+    "HistoryPaneコンポーネントがメッセージ履歴を独立スクロールで表示できること",
+    "HistoryPaneがファイルパスクリック時にコールバックを呼び出すこと",
+    "PaneResizerでドラッグによるペイン幅調整ができること",
+    "PaneResizerがキーボード操作に対応していること",
+    "WorktreeDesktopLayoutが2カラムグリッドレイアウトで表示できること",
+    "WorktreeDesktopLayoutがモバイルで1カラム+タブ表示に切り替わること",
+    "各ペインにErrorBoundaryが設置されていること",
+    "全テストがパスすること（95テスト）",
+    "ESLint/TypeScriptエラーが0件であること",
+    "カバレッジが70%以上であること（Phase 2ファイル）"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "HistoryPane - メッセージ履歴表示",
+      "description": "メッセージ履歴を独立スクロールで表示、ファイルパスクリック対応",
+      "test_command": "npm run test:unit -- tests/unit/components/HistoryPane.test.tsx"
+    },
+    {
+      "id": "AC-2",
+      "name": "PaneResizer - リサイズ機能",
+      "description": "ドラッグとキーボードでペイン幅を調整",
+      "test_command": "npm run test:unit -- tests/unit/components/PaneResizer.test.tsx"
+    },
+    {
+      "id": "AC-3",
+      "name": "WorktreeDesktopLayout - レイアウト",
+      "description": "2カラムレイアウト、レスポンシブ対応、ErrorBoundary",
+      "test_command": "npm run test:unit -- tests/unit/components/WorktreeDesktopLayout.test.tsx"
+    },
+    {
+      "id": "AC-4",
+      "name": "全体品質 - Lint/Type/Build",
+      "description": "ESLint、TypeScript、ビルドがすべて成功",
+      "test_command": "npm run lint && npx tsc --noEmit && npm run build"
+    }
+  ],
+  "implementation_files": [
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/PaneResizer.tsx",
+    "src/components/worktree/WorktreeDesktopLayout.tsx"
+  ]
+}

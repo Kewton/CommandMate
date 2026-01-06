@@ -1,0 +1,64 @@
+{
+  "issue_number": 13,
+  "issue_title": "UX改善",
+  "current_phase": "Phase 4: モバイル対応",
+  "acceptance_criteria": [
+    "MobileTabBarコンポーネントがタブ切り替えでビュー変更できること",
+    "MobileHeaderコンポーネントがworktree情報を表示できること",
+    "MobilePromptSheetコンポーネントがボトムシートでプロンプトを表示できること",
+    "useSwipeGestureフックがスワイプジェスチャーを検出できること",
+    "useVirtualKeyboardフックが仮想キーボードの状態を検出できること",
+    "Tailwind Safe Area設定が適用されていること",
+    "全テストがパスすること",
+    "ESLint/TypeScriptエラーが0件であること",
+    "カバレッジが70%以上であること（Phase 4ファイル）"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "4.1",
+      "name": "MobileTabBar コンポーネント",
+      "file": "src/components/mobile/MobileTabBar.tsx",
+      "description": "モバイル用タブバー（terminal/history/logs/info切り替え）"
+    },
+    {
+      "id": "4.2",
+      "name": "MobileHeader コンポーネント",
+      "file": "src/components/mobile/MobileHeader.tsx",
+      "description": "モバイル用ヘッダー（worktree名、ステータス表示）"
+    },
+    {
+      "id": "4.3",
+      "name": "MobilePromptSheet コンポーネント",
+      "file": "src/components/mobile/MobilePromptSheet.tsx",
+      "description": "モバイル用プロンプトボトムシート"
+    },
+    {
+      "id": "4.4",
+      "name": "useSwipeGesture フック",
+      "file": "src/hooks/useSwipeGesture.ts",
+      "description": "スワイプジェスチャー検出フック"
+    },
+    {
+      "id": "4.5",
+      "name": "useVirtualKeyboard フック",
+      "file": "src/hooks/useVirtualKeyboard.ts",
+      "description": "仮想キーボード状態検出フック"
+    }
+  ],
+  "test_files": [
+    "tests/unit/components/mobile/MobileTabBar.test.tsx",
+    "tests/unit/components/mobile/MobileHeader.test.tsx",
+    "tests/unit/components/mobile/MobilePromptSheet.test.tsx",
+    "tests/unit/hooks/useSwipeGesture.test.ts",
+    "tests/unit/hooks/useVirtualKeyboard.test.ts"
+  ],
+  "target_coverage": 70,
+  "design_document": "dev-reports/design/issue-13-ux-improvement-design-policy.md",
+  "existing_implementations": [
+    "src/types/ui-state.ts (Phase 1で実装済み)",
+    "src/hooks/useIsMobile.ts (Phase 1で実装済み)",
+    "src/components/worktree/PromptPanel.tsx (Phase 3で実装済み)",
+    "src/hooks/usePromptAnimation.ts (Phase 3で実装済み)",
+    "src/components/error/ErrorBoundary.tsx (エラーバウンダリ - 実装済み)"
+  ]
+}

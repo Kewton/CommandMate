@@ -1,0 +1,56 @@
+{
+  "issue_number": 13,
+  "issue_title": "UX改善",
+  "current_phase": "Phase 2: デスクトップレイアウト再構成",
+  "acceptance_criteria": [
+    "HistoryPaneコンポーネントがメッセージ履歴を独立スクロールで表示できること",
+    "HistoryPaneがファイルパスクリック時にコールバックを呼び出すこと",
+    "WorktreeDetailがgridレイアウトで2カラム表示できること",
+    "PaneResizerでペイン幅を調整できること",
+    "各ペインにErrorBoundaryが設置されていること",
+    "全テストがパスすること",
+    "ESLint/TypeScriptエラーが0件であること",
+    "カバレッジが70%以上であること（Phase 2ファイル）"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "2.1",
+      "name": "HistoryPane コンポーネント",
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "description": "メッセージ履歴を独立スクロールで表示するコンポーネント"
+    },
+    {
+      "id": "2.2",
+      "name": "PaneResizer コンポーネント",
+      "file": "src/components/worktree/PaneResizer.tsx",
+      "description": "ドラッグでペイン幅を調整するリサイザー"
+    },
+    {
+      "id": "2.3",
+      "name": "WorktreeDesktopLayout コンポーネント",
+      "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+      "description": "2カラムグリッドレイアウトを管理するコンポーネント"
+    }
+  ],
+  "test_files": [
+    "tests/unit/components/HistoryPane.test.tsx",
+    "tests/unit/components/PaneResizer.test.tsx",
+    "tests/unit/components/WorktreeDesktopLayout.test.tsx"
+  ],
+  "target_coverage": 70,
+  "design_document": "dev-reports/design/issue-13-ux-improvement-design-policy.md",
+  "existing_implementations": [
+    "src/types/ui-state.ts (Phase 1で実装済み)",
+    "src/types/ui-actions.ts (Phase 1で実装済み)",
+    "src/hooks/useWorktreeUIState.ts (Phase 1で実装済み)",
+    "src/hooks/useTerminalScroll.ts (Phase 1で実装済み)",
+    "src/hooks/useIsMobile.ts (Phase 1で実装済み)",
+    "src/components/worktree/TerminalDisplay.tsx (Phase 1で実装済み)",
+    "src/lib/sanitize.ts (XSSサニタイズ - 実装済み)",
+    "src/components/error/ErrorBoundary.tsx (エラーバウンダリ - 実装済み)"
+  ],
+  "dependencies": {
+    "ChatMessage": "src/types/models.ts",
+    "PromptData": "src/types/models.ts"
+  }
+}

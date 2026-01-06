@@ -1,0 +1,38 @@
+{
+  "issue_number": 13,
+  "feature_summary": "UX改善 - Phase 3 プロンプト分離",
+  "acceptance_criteria": [
+    "PromptPanelコンポーネントがyes/no/複数選択プロンプトを表示できること",
+    "PromptPanelがプロンプト検出時のみ表示されること",
+    "PromptPanelで回答送信後、適切にコールバックが呼ばれること",
+    "PromptPanelにアニメーション（フェードイン/アウト）が適用されていること",
+    "usePromptAnimationフックがアニメーション状態を正しく管理できること",
+    "全テストがパスすること",
+    "ESLint/TypeScriptエラーが0件であること",
+    "カバレッジが70%以上であること（Phase 3ファイル）"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "PromptPanel - プロンプト表示",
+      "description": "yes/no、複数選択、テキスト入力プロンプトを表示",
+      "test_command": "npm run test:unit -- tests/unit/components/PromptPanel.test.tsx"
+    },
+    {
+      "id": "AC-2",
+      "name": "usePromptAnimation - アニメーション制御",
+      "description": "フェードイン/アウト、アンマウント制御",
+      "test_command": "npm run test:unit -- tests/unit/hooks/usePromptAnimation.test.ts"
+    },
+    {
+      "id": "AC-3",
+      "name": "全体品質 - Lint/Type/Build",
+      "description": "ESLint、TypeScript、ビルドがすべて成功",
+      "test_command": "npm run lint && npx tsc --noEmit && npm run build"
+    }
+  ],
+  "implementation_files": [
+    "src/components/worktree/PromptPanel.tsx",
+    "src/hooks/usePromptAnimation.ts"
+  ]
+}
