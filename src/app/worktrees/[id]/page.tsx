@@ -7,7 +7,7 @@
 
 import { useParams } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
-import { WorktreeDetail } from '@/components/worktree/WorktreeDetail';
+import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
 
 export default function WorktreeDetailPage() {
   const params = useParams();
@@ -15,7 +15,7 @@ export default function WorktreeDetailPage() {
 
   return (
     <MainLayout>
-      <WorktreeDetail worktreeId={worktreeId} />
+      <WorktreeDetailRefactored worktreeId={worktreeId} />
     </MainLayout>
   );
 }
