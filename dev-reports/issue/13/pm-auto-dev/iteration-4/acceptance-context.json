@@ -1,0 +1,62 @@
+{
+  "issue_number": 13,
+  "feature_summary": "UX改善 - Phase 4 モバイル対応",
+  "acceptance_criteria": [
+    "MobileTabBarコンポーネントがタブ切り替えでビュー変更できること",
+    "MobileTabBarが新着通知バッジを表示できること",
+    "MobileHeaderコンポーネントがworktree情報を表示できること",
+    "MobileHeaderがステータスインジケーターを表示できること",
+    "MobilePromptSheetコンポーネントがボトムシートでプロンプトを表示できること",
+    "MobilePromptSheetがスワイプで閉じられること",
+    "useSwipeGestureフックがスワイプジェスチャーを検出できること",
+    "useVirtualKeyboardフックが仮想キーボードの状態を検出できること",
+    "全テストがパスすること",
+    "ESLint/TypeScriptエラーが0件であること",
+    "カバレッジが70%以上であること（Phase 4ファイル）"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "MobileTabBar - タブ切り替え",
+      "description": "タブ切り替え、新着バッジ表示",
+      "test_command": "npm run test:unit -- tests/unit/components/mobile/MobileTabBar.test.tsx"
+    },
+    {
+      "id": "AC-2",
+      "name": "MobileHeader - ヘッダー表示",
+      "description": "Worktree名、ステータスインジケーター表示",
+      "test_command": "npm run test:unit -- tests/unit/components/mobile/MobileHeader.test.tsx"
+    },
+    {
+      "id": "AC-3",
+      "name": "MobilePromptSheet - ボトムシート",
+      "description": "プロンプト表示、スワイプ閉じ",
+      "test_command": "npm run test:unit -- tests/unit/components/mobile/MobilePromptSheet.test.tsx"
+    },
+    {
+      "id": "AC-4",
+      "name": "useSwipeGesture - スワイプ検出",
+      "description": "4方向スワイプ検出",
+      "test_command": "npm run test:unit -- tests/unit/hooks/useSwipeGesture.test.ts"
+    },
+    {
+      "id": "AC-5",
+      "name": "useVirtualKeyboard - キーボード検出",
+      "description": "キーボード表示/非表示、高さ取得",
+      "test_command": "npm run test:unit -- tests/unit/hooks/useVirtualKeyboard.test.ts"
+    },
+    {
+      "id": "AC-6",
+      "name": "全体品質 - Lint/Type/Build",
+      "description": "ESLint、TypeScript、ビルドがすべて成功",
+      "test_command": "npm run lint && npx tsc --noEmit && npm run build"
+    }
+  ],
+  "implementation_files": [
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/mobile/MobileHeader.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/hooks/useSwipeGesture.ts",
+    "src/hooks/useVirtualKeyboard.ts"
+  ]
+}

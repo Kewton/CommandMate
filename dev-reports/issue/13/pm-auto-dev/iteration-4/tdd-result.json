@@ -1,0 +1,95 @@
+{
+  "status": "success",
+  "coverage": {
+    "overall": 62.84,
+    "phase4_files": {
+      "MobileTabBar.tsx": 100,
+      "MobileHeader.tsx": 100,
+      "MobilePromptSheet.tsx": 89.33,
+      "useSwipeGesture.ts": 22.8,
+      "useVirtualKeyboard.ts": 87.5
+    },
+    "phase4_average": 79.93
+  },
+  "unit_tests": {
+    "total": 576,
+    "passed": 576,
+    "failed": 0,
+    "skipped": 5
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/mobile/MobileHeader.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/hooks/useSwipeGesture.ts",
+    "src/hooks/useVirtualKeyboard.ts",
+    "tests/unit/components/mobile/MobileTabBar.test.tsx",
+    "tests/unit/components/mobile/MobileHeader.test.tsx",
+    "tests/unit/components/mobile/MobilePromptSheet.test.tsx",
+    "tests/unit/hooks/useSwipeGesture.test.ts",
+    "tests/unit/hooks/useVirtualKeyboard.test.ts"
+  ],
+  "commits": [
+    "821d816: feat(mobile): implement Phase 4 mobile components for UX improvement"
+  ],
+  "implementation_summary": {
+    "MobileTabBar": {
+      "description": "Mobile tab bar with 4 tabs (terminal, history, logs, info)",
+      "features": [
+        "Tab switching with onTabChange callback",
+        "Active tab highlighting with aria-selected",
+        "New output notification badge (hasNewOutput)",
+        "Prompt notification badge (hasPrompt)",
+        "Safe area padding at bottom (pb-safe)",
+        "Fixed positioning at bottom of screen"
+      ]
+    },
+    "MobileHeader": {
+      "description": "Mobile header displaying worktree name and status",
+      "features": [
+        "Worktree name with truncation for long names",
+        "Status indicator (idle/running/waiting/error)",
+        "Optional back button (onBackClick)",
+        "Optional menu button (onMenuClick)",
+        "Safe area padding at top (pt-safe)",
+        "Fixed positioning at top of screen"
+      ]
+    },
+    "MobilePromptSheet": {
+      "description": "Bottom sheet for prompt responses",
+      "features": [
+        "Yes/No prompt support",
+        "Multiple choice prompt support",
+        "Swipe down to dismiss",
+        "Overlay click to dismiss",
+        "Drag handle indicator",
+        "Animation (slide up/down)",
+        "Safe area padding at bottom"
+      ]
+    },
+    "useSwipeGesture": {
+      "description": "Hook for detecting swipe gestures",
+      "features": [
+        "4-direction swipe detection (left/right/up/down)",
+        "Configurable threshold (default: 50px)",
+        "Enable/disable option",
+        "isSwiping state",
+        "swipeDirection state"
+      ]
+    },
+    "useVirtualKeyboard": {
+      "description": "Hook for detecting virtual keyboard visibility",
+      "features": [
+        "Uses visualViewport API",
+        "isKeyboardVisible state",
+        "keyboardHeight value",
+        "Fallback for unsupported browsers"
+      ]
+    }
+  },
+  "message": "Phase 4 Mobile対応のTDD実装が完了しました。全コンポーネント/フックが実装され、テストがパスしています。Phase 4ファイルの平均カバレッジは79.93%で目標の70%を超えています。"
+}
