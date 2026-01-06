@@ -29,6 +29,7 @@ import { MobileTabBar, type MobileTab } from '@/components/mobile/MobileTabBar';
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { Modal } from '@/components/ui/Modal';
 import type { Worktree, ChatMessage, PromptData } from '@/types/models';
 
 // ============================================================================
@@ -94,6 +95,166 @@ function parseMessageTimestamps(messages: ChatMessage[]): ChatMessage[] {
 // ============================================================================
 // Sub-components
 // ============================================================================
+
+/** Props for DesktopHeader component */
+interface DesktopHeaderProps {
+  worktreeName: string;
+  onBackClick: () => void;
+  onInfoClick: () => void;
+}
+
+/** Desktop header with back button, worktree name, and info button */
+const DesktopHeader = memo(function DesktopHeader({
+  worktreeName,
+  onBackClick,
+  onInfoClick,
+}: DesktopHeaderProps) {
+  return (
+    <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
+      {/* Left: Back button and title */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onBackClick}
+          className="flex items-center gap-1 text-gray-600 hover:text-gray-900 transition-colors"
+          aria-label="Go back to worktree list"
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+          <span className="text-sm font-medium">Back</span>
+        </button>
+        <div className="w-px h-6 bg-gray-300" aria-hidden="true" />
+        <h1 className="text-lg font-semibold text-gray-900 truncate max-w-md">
+          {worktreeName}
+        </h1>
+      </div>
+
+      {/* Right: Info button */}
+      <button
+        type="button"
+        onClick={onInfoClick}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+        aria-label="View worktree information"
+      >
+        <svg
+          className="w-5 h-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+        <span className="text-sm font-medium">Info</span>
+      </button>
+    </div>
+  );
+});
+
+/** Props for InfoModal component */
+interface InfoModalProps {
+  worktree: Worktree | null;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+/** Modal displaying worktree information */
+const InfoModal = memo(function InfoModal({
+  worktree,
+  isOpen,
+  onClose,
+}: InfoModalProps) {
+  if (!worktree) return null;
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Worktree Information" size="md">
+      <div className="space-y-4">
+        {/* Worktree Name */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h2 className="text-sm font-medium text-gray-500 mb-1">Worktree</h2>
+          <p className="text-lg font-semibold text-gray-900">{worktree.name}</p>
+        </div>
+
+        {/* Repository Info */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h2 className="text-sm font-medium text-gray-500 mb-1">Repository</h2>
+          <p className="text-base text-gray-900">{worktree.repositoryName}</p>
+          <p className="text-xs text-gray-500 mt-1 break-all">{worktree.repositoryPath}</p>
+        </div>
+
+        {/* Path */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h2 className="text-sm font-medium text-gray-500 mb-1">Path</h2>
+          <p className="text-sm text-gray-700 break-all font-mono">{worktree.path}</p>
+        </div>
+
+        {/* Status */}
+        {worktree.status && (
+          <div className="bg-gray-50 rounded-lg p-4">
+            <h2 className="text-sm font-medium text-gray-500 mb-1">Status</h2>
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+              worktree.status === 'done' ? 'bg-green-100 text-green-800' :
+              worktree.status === 'doing' ? 'bg-blue-100 text-blue-800' :
+              'bg-gray-100 text-gray-800'
+            }`}>
+              {worktree.status.toUpperCase()}
+            </span>
+          </div>
+        )}
+
+        {/* Memo */}
+        {worktree.memo && (
+          <div className="bg-gray-50 rounded-lg p-4">
+            <h2 className="text-sm font-medium text-gray-500 mb-1">Memo</h2>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap">{worktree.memo}</p>
+          </div>
+        )}
+
+        {/* Link */}
+        {worktree.link && (
+          <div className="bg-gray-50 rounded-lg p-4">
+            <h2 className="text-sm font-medium text-gray-500 mb-1">Link</h2>
+            <a
+              href={worktree.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-blue-600 hover:underline break-all"
+            >
+              {worktree.link}
+            </a>
+          </div>
+        )}
+
+        {/* Last Updated */}
+        {worktree.updatedAt && (
+          <div className="bg-gray-50 rounded-lg p-4">
+            <h2 className="text-sm font-medium text-gray-500 mb-1">Last Updated</h2>
+            <p className="text-sm text-gray-700">
+              {new Date(worktree.updatedAt).toLocaleString()}
+            </p>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+});
 
 /** Loading indicator with spinner and text */
 const LoadingIndicator = memo(function LoadingIndicator() {
@@ -324,6 +485,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [worktree, setWorktree] = useState<Worktree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
 
   // ========================================================================
   // API Fetch Functions
@@ -406,6 +568,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const handleBackClick = useCallback(() => {
     router.push('/');
   }, [router]);
+
+  /** Handle info button click - open info modal */
+  const handleInfoClick = useCallback(() => {
+    setIsInfoModalOpen(true);
+  }, []);
+
+  /** Handle info modal close */
+  const handleInfoModalClose = useCallback(() => {
+    setIsInfoModalOpen(false);
+  }, []);
 
   /** Handle prompt response submission */
   const handlePromptRespond = useCallback(
@@ -562,6 +734,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     return (
       <ErrorBoundary componentName="WorktreeDetailRefactored">
         <div className="h-full flex flex-col relative">
+          {/* Desktop Header with back button and info */}
+          <DesktopHeader
+            worktreeName={worktreeName}
+            onBackClick={handleBackClick}
+            onInfoClick={handleInfoClick}
+          />
           <div className="flex-1 min-h-0">
             <WorktreeDesktopLayout
               leftPane={
@@ -605,6 +783,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               />
             </div>
           )}
+          {/* Info Modal */}
+          <InfoModal
+            worktree={worktree}
+            isOpen={isInfoModalOpen}
+            onClose={handleInfoModalClose}
+          />
         </div>
       </ErrorBoundary>
     );
