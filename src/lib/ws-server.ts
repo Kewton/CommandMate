@@ -38,6 +38,11 @@ const rooms = new Map<string, Set<WebSocket>>();
 export function setupWebSocket(server: HTTPServer): void {
   wss = new WebSocketServer({ server });
 
+  // Handle WebSocket server errors (e.g., invalid frames from clients)
+  wss.on('error', (error) => {
+    console.error('[WS Server] Error:', error.message);
+  });
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     console.log('WebSocket client connected');
@@ -48,6 +53,18 @@ export function setupWebSocket(server: HTTPServer): void {
       worktreeIds: new Set(),
     };
     clients.set(ws, clientInfo);
+
+    // Handle underlying socket errors (catches invalid frame errors earlier)
+    const socket = (ws as unknown as { _socket?: NodeJS.Socket })._socket;
+    if (socket) {
+      socket.on('error', (err: Error & { code?: string }) => {
+        if (err.code === 'WS_ERR_INVALID_CLOSE_CODE' || err.message?.includes('Invalid WebSocket frame')) {
+          // Silently handle mobile browser disconnect issues
+        } else {
+          console.error('[WS Socket] Error:', err.message);
+        }
+      });
+    }
 
     // Handle messages
     ws.on('message', (data: Buffer) => {
@@ -64,13 +81,28 @@ export function setupWebSocket(server: HTTPServer): void {
     ws.on('close', (code, reason) => {
       const clientInfo = clients.get(ws);
       const subscribedWorktrees = clientInfo ? Array.from(clientInfo.worktreeIds) : [];
-      console.log(`[WS] Client disconnected - code: ${code}, reason: ${reason || 'none'}, subscribed to: ${subscribedWorktrees.join(', ') || 'none'}`);
+      // Sanitize reason to avoid logging garbled data from malformed frames
+      let safeReason = 'none';
+      if (reason) {
+        const reasonStr = Buffer.isBuffer(reason) ? reason.toString('utf8') : String(reason);
+        if (reasonStr && /^[\x20-\x7E]*$/.test(reasonStr)) {
+          safeReason = reasonStr;
+        }
+      }
+      console.log(`[WS] Client disconnected - code: ${code}, reason: ${safeReason}, subscribed to: ${subscribedWorktrees.join(', ') || 'none'}`);
       handleDisconnect(ws);
     });
 
-    // Handle errors
-    ws.on('error', (error) => {
-      console.error('WebSocket error:', error);
+    // Handle errors (including invalid close codes from mobile browsers)
+    ws.on('error', (error: Error & { code?: string }) => {
+      // Suppress noisy errors from mobile browser disconnects
+      if (error.code === 'WS_ERR_INVALID_CLOSE_CODE') {
+        console.log('[WS] Client sent invalid close code (likely mobile browser disconnect)');
+      } else {
+        console.error('[WS] WebSocket error:', error.message);
+      }
+      // Clean up the connection
+      handleDisconnect(ws);
     });
   });
 
