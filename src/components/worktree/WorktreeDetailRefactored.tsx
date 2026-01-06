@@ -47,6 +47,7 @@ interface CurrentOutputResponse {
   isPromptWaiting?: boolean;
   promptData?: PromptData;
   content?: string;
+  fullOutput?: string;
   realtimeSnippet?: string;
   thinking?: boolean;
 }
@@ -302,8 +303,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       }
       const data: CurrentOutputResponse = await response.json();
 
-      // Update terminal state
-      actions.setTerminalOutput(data.content ?? '', data.realtimeSnippet ?? '');
+      // Update terminal state - use fullOutput for complete display, fallback to realtimeSnippet
+      // Only clear output if we explicitly have empty fullOutput (session not running returns empty)
+      const terminalOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
+
+      // Only update terminal output if we have content or session is running
+      // This prevents clearing the terminal when polling returns empty during session transitions
+      if (terminalOutput || data.isRunning) {
+        actions.setTerminalOutput(terminalOutput, data.realtimeSnippet ?? '');
+      }
+
       actions.setTerminalActive(data.isRunning ?? false);
       actions.setTerminalThinking(data.thinking ?? false);
 
