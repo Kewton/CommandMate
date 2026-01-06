@@ -45,8 +45,6 @@ export function setupWebSocket(server: HTTPServer): void {
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-    console.log('WebSocket client connected');
-
     // Initialize client info
     const clientInfo: ClientInfo = {
       ws,
@@ -66,28 +64,16 @@ export function setupWebSocket(server: HTTPServer): void {
     });
 
     // Handle disconnection
-    ws.on('close', (code, reason) => {
-      try {
-        const clientInfo = clients.get(ws);
-        const subscribedWorktrees = clientInfo ? Array.from(clientInfo.worktreeIds) : [];
-        // Safely convert reason to string (may be Buffer or undefined)
-        const reasonStr = reason ? (typeof reason === 'string' ? reason : reason.toString('utf8')) : 'none';
-        console.log(`[WS] Client disconnected - code: ${code}, reason: ${reasonStr}, subscribed to: ${subscribedWorktrees.join(', ') || 'none'}`);
-      } catch {
-        console.log(`[WS] Client disconnected - code: ${code}, reason: [parse error]`);
-      }
+    ws.on('close', () => {
       handleDisconnect(ws);
     });
 
     // Handle errors - this catches invalid frame errors from individual clients
     ws.on('error', (error: Error & { code?: string }) => {
-      // Don't log full stack trace for common mobile browser disconnect errors
-      if (error.code === 'WS_ERR_INVALID_CLOSE_CODE') {
-        console.log('[WS] Client sent invalid close frame (common on mobile browsers)');
-      } else {
+      // Silently handle common mobile browser disconnect errors
+      if (error.code !== 'WS_ERR_INVALID_CLOSE_CODE') {
         console.error('[WS] WebSocket error:', error.message || error);
       }
-      // Clean up the connection
       handleDisconnect(ws);
     });
   });
@@ -122,10 +108,7 @@ function handleMessage(ws: WebSocket, message: WebSocketMessage): void {
  */
 function handleSubscribe(ws: WebSocket, worktreeId: string): void {
   const clientInfo = clients.get(ws);
-  if (!clientInfo) {
-    console.log(`[WS] handleSubscribe: clientInfo not found for worktreeId: ${worktreeId}`);
-    return;
-  }
+  if (!clientInfo) return;
 
   // Add worktreeId to client's subscriptions
   clientInfo.worktreeIds.add(worktreeId);
@@ -134,10 +117,7 @@ function handleSubscribe(ws: WebSocket, worktreeId: string): void {
   if (!rooms.has(worktreeId)) {
     rooms.set(worktreeId, new Set());
   }
-  const room = rooms.get(worktreeId)!;
-  room.add(ws);
-
-  console.log(`Client subscribed to worktree: ${worktreeId}, room size: ${room.size}, ws readyState: ${ws.readyState}`);
+  rooms.get(worktreeId)!.add(ws);
 }
 
 /**
@@ -159,8 +139,6 @@ function handleUnsubscribe(ws: WebSocket, worktreeId: string): void {
       rooms.delete(worktreeId);
     }
   }
-
-  console.log(`Client unsubscribed from worktree: ${worktreeId}`);
 }
 
 /**
@@ -168,15 +146,7 @@ function handleUnsubscribe(ws: WebSocket, worktreeId: string): void {
  */
 function handleBroadcast(worktreeId: string, data: unknown): void {
   const room = rooms.get(worktreeId);
-  console.log(`[WS] handleBroadcast called for ${worktreeId}, room size: ${room?.size || 0}`);
-  if (!room) {
-    console.log(`[WS] No room found for ${worktreeId}`);
-    return;
-  }
-  if (room.size === 0) {
-    console.log(`[WS] Room for ${worktreeId} is empty`);
-    return;
-  }
+  if (!room || room.size === 0) return;
 
   try {
     const message = JSON.stringify({
@@ -185,43 +155,17 @@ function handleBroadcast(worktreeId: string, data: unknown): void {
       data,
     });
 
-    let successCount = 0;
-    let errorCount = 0;
-
     room.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         try {
           client.send(message);
-          successCount++;
-        } catch (sendError) {
-          errorCount++;
-          console.error(`Error sending WebSocket message to client:`, sendError);
+        } catch {
+          // Silent fail for individual client errors
         }
       }
     });
-
-    console.log(`Broadcast to worktree ${worktreeId}: ${successCount}/${room.size} clients (${errorCount} errors)`);
   } catch (broadcastError) {
-    console.error(`Error broadcasting to worktree ${worktreeId}:`, broadcastError);
-    // Try to broadcast with sanitized data
-    try {
-      const sanitizedMessage = JSON.stringify({
-        type: 'broadcast',
-        worktreeId,
-        data: { error: 'Message encoding error' },
-      });
-      room.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          try {
-            client.send(sanitizedMessage);
-          } catch {
-            // Silent fail for fallback
-          }
-        }
-      });
-    } catch (fallbackError) {
-      console.error('Failed to send fallback message:', fallbackError);
-    }
+    console.error(`[WS] Broadcast error for ${worktreeId}:`, broadcastError);
   }
 }
 
