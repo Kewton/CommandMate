@@ -7,7 +7,7 @@
 
 import type { ChatMessage, PromptData } from './models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { UIPhase, ErrorState, MobileActivePane } from './ui-state';
+import type { UIPhase, ErrorState, MobileActivePane, LeftPaneTab } from './ui-state';
 
 /**
  * WorktreeUIAction union type
@@ -31,6 +31,7 @@ export type WorktreeUIAction =
   // Layout actions
   | { type: 'SET_LAYOUT_MODE'; mode: 'split' | 'tabs' }
   | { type: 'SET_MOBILE_ACTIVE_PANE'; pane: MobileActivePane }
+  | { type: 'SET_LEFT_PANE_TAB'; tab: LeftPaneTab }
   | { type: 'SET_SPLIT_RATIO'; ratio: number }
 
   // Error actions

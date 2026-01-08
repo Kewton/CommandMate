@@ -29,6 +29,9 @@ import { MobileTabBar, type MobileTab } from '@/components/mobile/MobileTabBar';
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { FileTreeView } from '@/components/worktree/FileTreeView';
+import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/LeftPaneTabSwitcher';
+import { FileViewer } from '@/components/worktree/FileViewer';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
 import type { Worktree, ChatMessage, PromptData } from '@/types/models';
@@ -581,6 +584,7 @@ interface MobileContentProps {
   isTerminalActive: boolean;
   isThinking: boolean;
   onFilePathClick: (path: string) => void;
+  onFileSelect: (path: string) => void;
   onWorktreeUpdate: (updated: Worktree) => void;
 }
 
@@ -594,6 +598,7 @@ const MobileContent = memo(function MobileContent({
   isTerminalActive,
   isThinking,
   onFilePathClick,
+  onFileSelect,
   onWorktreeUpdate,
 }: MobileContentProps) {
   switch (activeTab) {
@@ -615,6 +620,16 @@ const MobileContent = memo(function MobileContent({
             messages={messages}
             worktreeId={worktreeId}
             onFilePathClick={onFilePathClick}
+            className="h-full"
+          />
+        </ErrorBoundary>
+      );
+    case 'files':
+      return (
+        <ErrorBoundary componentName="FileTreeView">
+          <FileTreeView
+            worktreeId={worktreeId}
+            onFileSelect={onFileSelect}
             className="h-full"
           />
         </ErrorBoundary>
@@ -661,6 +676,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+  const [fileViewerPath, setFileViewerPath] = useState<string | null>(null);
 
   // ========================================================================
   // API Fetch Functions
@@ -734,10 +750,28 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Event Handlers
   // ========================================================================
 
-  /** Handle file path click in history pane (placeholder for future implementation) */
+  /** Handle file path click in history pane - opens file viewer */
   const handleFilePathClick = useCallback((path: string) => {
-    console.log('[WorktreeDetailRefactored] File path clicked:', path);
+    setFileViewerPath(path);
   }, []);
+
+  /** Handle file select from FileTreeView - opens file viewer */
+  const handleFileSelect = useCallback((path: string) => {
+    setFileViewerPath(path);
+  }, []);
+
+  /** Handle FileViewer close */
+  const handleFileViewerClose = useCallback(() => {
+    setFileViewerPath(null);
+  }, []);
+
+  /** Handle left pane tab change */
+  const handleLeftPaneTabChange = useCallback(
+    (tab: LeftPaneTab) => {
+      actions.setLeftPaneTab(tab);
+    },
+    [actions]
+  );
 
   /** Handle back button click - navigate to portal */
   const handleBackClick = useCallback(() => {
@@ -887,6 +921,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     [state.layout.mobileActivePane]
   );
 
+  /** Current active tab for desktop left pane */
+  const leftPaneTab = useMemo<LeftPaneTab>(
+    () => state.layout.leftPaneTab,
+    [state.layout.leftPaneTab]
+  );
+
   /** Display name for worktree */
   const worktreeName = worktree?.name ?? DEFAULT_WORKTREE_NAME;
 
@@ -918,11 +958,30 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <div className="flex-1 min-h-0">
             <WorktreeDesktopLayout
               leftPane={
-                <HistoryPane
-                  messages={state.messages}
-                  worktreeId={worktreeId}
-                  onFilePathClick={handleFilePathClick}
-                />
+                <div className="h-full flex flex-col">
+                  <LeftPaneTabSwitcher
+                    activeTab={leftPaneTab}
+                    onTabChange={handleLeftPaneTabChange}
+                  />
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    {leftPaneTab === 'history' ? (
+                      <HistoryPane
+                        messages={state.messages}
+                        worktreeId={worktreeId}
+                        onFilePathClick={handleFilePathClick}
+                        className="h-full"
+                      />
+                    ) : (
+                      <ErrorBoundary componentName="FileTreeView">
+                        <FileTreeView
+                          worktreeId={worktreeId}
+                          onFileSelect={handleFileSelect}
+                          className="h-full"
+                        />
+                      </ErrorBoundary>
+                    )}
+                  </div>
+                </div>
               }
               rightPane={
                 <TerminalDisplay
@@ -965,6 +1024,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onClose={handleInfoModalClose}
             onWorktreeUpdate={setWorktree}
           />
+          {/* File Viewer Modal */}
+          <FileViewer
+            isOpen={fileViewerPath !== null}
+            onClose={handleFileViewerClose}
+            worktreeId={worktreeId}
+            filePath={fileViewerPath ?? ''}
+          />
         </div>
       </ErrorBoundary>
     );
@@ -990,6 +1056,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             isTerminalActive={state.terminal.isActive}
             isThinking={state.terminal.isThinking}
             onFilePathClick={handleFilePathClick}
+            onFileSelect={handleFileSelect}
             onWorktreeUpdate={setWorktree}
           />
         </main>
@@ -1016,6 +1083,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           answering={state.prompt.answering}
           onRespond={handlePromptRespond}
           onDismiss={handlePromptDismiss}
+        />
+
+        {/* File Viewer Modal */}
+        <FileViewer
+          isOpen={fileViewerPath !== null}
+          onClose={handleFileViewerClose}
+          worktreeId={worktreeId}
+          filePath={fileViewerPath ?? ''}
         />
       </div>
     </ErrorBoundary>

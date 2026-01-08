@@ -54,7 +54,12 @@ export interface PromptState {
 /**
  * Mobile tab type for navigation
  */
-export type MobileActivePane = 'history' | 'terminal' | 'logs' | 'info';
+export type MobileActivePane = 'history' | 'terminal' | 'files' | 'logs' | 'info';
+
+/**
+ * Left pane tab type for desktop view
+ */
+export type LeftPaneTab = 'history' | 'files';
 
 /**
  * Layout State
@@ -65,6 +70,8 @@ export interface LayoutState {
   mode: 'split' | 'tabs';
   /** Active pane in mobile tab view */
   mobileActivePane: MobileActivePane;
+  /** Active tab in desktop left pane (history or files) */
+  leftPaneTab: LeftPaneTab;
   /** Split ratio for desktop view (0.0 - 1.0) */
   splitRatio: number;
 }
@@ -133,6 +140,7 @@ export const initialPromptState: PromptState = {
 export const initialLayoutState: LayoutState = {
   mode: 'split',
   mobileActivePane: 'terminal',
+  leftPaneTab: 'history',
   splitRatio: 0.5,
 };
 

@@ -8,7 +8,7 @@
 'use client';
 
 import { useReducer, useMemo } from 'react';
-import type { WorktreeUIState, UIPhase, ErrorState, MobileActivePane } from '@/types/ui-state';
+import type { WorktreeUIState, UIPhase, ErrorState, MobileActivePane, LeftPaneTab } from '@/types/ui-state';
 import type { WorktreeUIAction } from '@/types/ui-actions';
 import type { ChatMessage, PromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -103,6 +103,12 @@ export function worktreeUIReducer(
       return {
         ...state,
         layout: { ...state.layout, splitRatio: action.ratio },
+      };
+
+    case 'SET_LEFT_PANE_TAB':
+      return {
+        ...state,
+        layout: { ...state.layout, leftPaneTab: action.tab },
       };
 
     // Error actions
@@ -201,6 +207,7 @@ export interface WorktreeUIActions {
   sessionEnded: () => void;
   setAutoScroll: (enabled: boolean) => void;
   setMobileActivePane: (pane: MobileActivePane) => void;
+  setLeftPaneTab: (tab: LeftPaneTab) => void;
   setLayoutMode: (mode: 'split' | 'tabs') => void;
   setSplitRatio: (ratio: number) => void;
   setWsConnected: (connected: boolean) => void;
@@ -286,6 +293,9 @@ export function useWorktreeUIState(): {
 
       setMobileActivePane: (pane: MobileActivePane) =>
         dispatch({ type: 'SET_MOBILE_ACTIVE_PANE', pane }),
+
+      setLeftPaneTab: (tab: LeftPaneTab) =>
+        dispatch({ type: 'SET_LEFT_PANE_TAB', tab }),
 
       setLayoutMode: (mode: 'split' | 'tabs') =>
         dispatch({ type: 'SET_LAYOUT_MODE', mode }),

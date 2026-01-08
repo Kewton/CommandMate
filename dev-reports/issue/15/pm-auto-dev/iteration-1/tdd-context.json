@@ -1,0 +1,36 @@
+{
+  "issue_number": 15,
+  "issue_title": "feat: ファイルツリー表示機能の追加",
+  "acceptance_criteria": [
+    "ディレクトリ一覧 API が動作する (GET /api/worktrees/:id/tree, GET /api/worktrees/:id/tree/:path)",
+    "ファイルツリー UI がレスポンシブ対応",
+    "ファイル選択でファイル内容が表示される (FileViewer連携)",
+    "モバイル/デスクトップ両対応 (Filesタブ追加、左ペインタブ切り替え)",
+    "セキュリティ対策 (パストラバーサル防止、.git除外、node_modules遅延読み込み)",
+    "ユニットテスト追加 (カバレッジ80%以上)"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: 型定義の追加 (TreeItem, TreeResponse in src/types/models.ts)",
+    "Task 1.2: ファイルツリービジネスロジック実装 (src/lib/file-tree.ts)",
+    "Task 1.3: ルートディレクトリAPI実装 (src/app/api/worktrees/[id]/tree/route.ts)",
+    "Task 1.4: サブディレクトリAPI実装 (src/app/api/worktrees/[id]/tree/[...path]/route.ts)",
+    "Task 1.5: Phase 1 テスト (unit/lib/file-tree.test.ts, integration/api-file-tree.test.ts)",
+    "Task 2.1: FileTreeView コンポーネント実装 (src/components/worktree/FileTreeView.tsx)",
+    "Task 2.2: アイコン・スタイリング",
+    "Task 2.3: FileViewer連携",
+    "Task 2.4: レスポンシブ対応",
+    "Task 3.1: MobileTab 型・コンポーネント拡張 (MobileTabBar.tsx)",
+    "Task 3.2: WorktreeDetailRefactored モバイル統合",
+    "Task 3.3: デスクトップ版 左ペインタブ実装 (LeftPaneTabSwitcher.tsx)",
+    "Task 3.4: useWorktreeUIState 拡張"
+  ],
+  "target_coverage": 80,
+  "work_plan_path": "dev-reports/issue/15/work-plan.md",
+  "design_policy_path": "dev-reports/feature/15/design-policy.md",
+  "architecture_review_path": "dev-reports/feature/15/architecture-review.md",
+  "dev_server": {
+    "command": "npm run dev -- -p 3001",
+    "port": 3001,
+    "url": "http://localhost:3001"
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "issue_number": 15,
+  "feature_summary": "ファイルツリー表示機能の追加",
+  "acceptance_criteria": [
+    "ディレクトリ一覧 API が動作する (GET /api/worktrees/:id/tree, GET /api/worktrees/:id/tree/:path)",
+    "ファイルツリー UI がレスポンシブ対応",
+    "ファイル選択でファイル内容が表示される (FileViewer連携)",
+    "モバイル/デスクトップ両対応 (Filesタブ追加、左ペインタブ切り替え)",
+    "セキュリティ対策 (パストラバーサル防止、.git除外、node_modules除外)",
+    "ユニットテスト追加 (カバレッジ80%以上)"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "ディレクトリ一覧APIテスト",
+      "description": "GET /api/worktrees/:id/tree でルートディレクトリ一覧が取得できる",
+      "steps": [
+        "有効なworktree IDでAPIを呼び出す",
+        "ステータスコード200が返る",
+        "items配列にファイル/ディレクトリが含まれる",
+        ".gitやnode_modulesが除外されている"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "name": "サブディレクトリAPIテスト",
+      "description": "GET /api/worktrees/:id/tree/:path でサブディレクトリ一覧が取得できる",
+      "steps": [
+        "有効なパスでAPIを呼び出す",
+        "ステータスコード200が返る",
+        "parentPathが正しく設定されている"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "name": "セキュリティテスト - パストラバーサル",
+      "description": "../などのパストラバーサル攻撃が防止される",
+      "steps": [
+        "../を含むパスでAPIを呼び出す",
+        "ステータスコード403が返る"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "name": "モバイルFilesタブ表示",
+      "description": "モバイルでFilesタブが表示され、ファイルツリーが閲覧できる",
+      "steps": [
+        "モバイル画面幅でアプリを表示",
+        "Filesタブをタップ",
+        "FileTreeViewが表示される",
+        "ディレクトリをタップで展開できる"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "name": "デスクトップ左ペインタブ切り替え",
+      "description": "デスクトップでHistory/Filesタブを切り替えできる",
+      "steps": [
+        "デスクトップ画面幅でアプリを表示",
+        "左ペインのFilesタブをクリック",
+        "FileTreeViewが表示される",
+        "Historyタブをクリックで戻れる"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "name": "ファイル選択でFileViewer表示",
+      "description": "ファイルをクリックするとFileViewerモーダルが表示される",
+      "steps": [
+        "FileTreeViewでファイルをクリック",
+        "FileViewerモーダルが開く",
+        "ファイル内容が表示される"
+      ]
+    }
+  ],
+  "dev_server": {
+    "command": "npm run dev -- -p 3001",
+    "port": 3001,
+    "url": "http://localhost:3001"
+  }
+}
