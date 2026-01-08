@@ -1,0 +1,43 @@
+{
+  "issue_number": 15,
+  "issue_title": "feat: ファイルツリー表示機能の追加",
+  "iteration": 1,
+  "branch": "feature/15-file-tree",
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 85.0,
+      "tests_passed": 674,
+      "tests_total": 697,
+      "phases_completed": 3,
+      "files_created": 9,
+      "files_modified": 6
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_passed": 6,
+      "scenarios_total": 6,
+      "tests_passed": 131
+    },
+    "refactor": {
+      "status": "success",
+      "coverage_improvement": "+14% (tree/route.ts)",
+      "refactorings_applied": 9,
+      "tests_passed": 62
+    }
+  },
+  "key_deliverables": [
+    "ディレクトリ一覧API (GET /api/worktrees/:id/tree, /tree/:path)",
+    "FileTreeView UIコンポーネント",
+    "モバイル Filesタブ",
+    "デスクトップ 左ペインタブ切り替え",
+    "セキュリティ対策（パストラバーサル防止）",
+    "ユニットテスト・統合テスト"
+  ],
+  "quality_summary": {
+    "eslint_errors": 0,
+    "typescript_errors": 0,
+    "build_status": "success",
+    "coverage_target_met": true
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "issue_number": 15,
+  "refactor_targets": [
+    "src/lib/file-tree.ts",
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/LeftPaneTabSwitcher.tsx",
+    "src/app/api/worktrees/[id]/tree/route.ts",
+    "src/app/api/worktrees/[id]/tree/[...path]/route.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 85.0,
+    "target_coverage": 88.0,
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "コード重複の削除（tree/route.tsとtree/[...path]/route.tsの共通ロジック抽出）",
+    "tree/route.tsのカバレッジ改善（現在58%→80%以上）",
+    "コンポーネントのメモ化による最適化（memo, useMemo, useCallback）",
+    "エラーハンドリングの統一"
+  ],
+  "constraints": [
+    "既存のテストが全て通ること",
+    "機能的な変更は行わない",
+    "パフォーマンスの改善に注力"
+  ]
+}

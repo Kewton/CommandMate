@@ -183,3 +183,33 @@ export interface WorktreeSessionState {
   /** ID of the message currently being updated (null when no message is in progress) */
   inProgressMessageId?: string | null;
 }
+
+/**
+ * File tree item representation
+ */
+export interface TreeItem {
+  /** File or directory name */
+  name: string;
+  /** Item type: file or directory */
+  type: 'file' | 'directory';
+  /** File size in bytes (files only) */
+  size?: number;
+  /** File extension without dot (files only) */
+  extension?: string;
+  /** Number of items in directory (directories only) */
+  itemCount?: number;
+}
+
+/**
+ * File tree response for directory listing
+ */
+export interface TreeResponse {
+  /** Current directory path (relative to worktree root) */
+  path: string;
+  /** Current directory name */
+  name: string;
+  /** Directory items (files and subdirectories) */
+  items: TreeItem[];
+  /** Parent directory path (null for root) */
+  parentPath: string | null;
+}

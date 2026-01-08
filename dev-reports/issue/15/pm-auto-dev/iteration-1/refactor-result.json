@@ -1,0 +1,58 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": {
+      "file_tree_ts": 94.91,
+      "tree_route_ts": 58.33,
+      "tree_path_route_ts": 95.65
+    },
+    "after_coverage": {
+      "file_tree_ts": 95.52,
+      "tree_route_ts": 72.72,
+      "tree_path_route_ts": 95.83
+    }
+  },
+  "refactorings_applied": [
+    "Extracted parseDirectoryError() helper for consistent error mapping",
+    "Extracted createWorktreeNotFoundError() for standardized 404 responses",
+    "Extracted createAccessDeniedError() for standardized 403 responses",
+    "Extracted decodePathSegment() helper in tree/[...path]/route.ts",
+    "Extracted hasExcludedSegment() helper in tree/[...path]/route.ts",
+    "Added ApiErrorResponse and ApiResult types for type safety",
+    "Refactored tree/route.ts to use helper functions",
+    "Refactored tree/[...path]/route.ts to use helper functions",
+    "Added comprehensive tests for new helper functions"
+  ],
+  "files_changed": [
+    "src/lib/file-tree.ts",
+    "src/app/api/worktrees/[id]/tree/route.ts",
+    "src/app/api/worktrees/[id]/tree/[...path]/route.ts",
+    "tests/unit/lib/file-tree.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "tests": {
+    "passed": true,
+    "unit_tests_passed": 47,
+    "integration_tests_passed": 15,
+    "total_tests": 62
+  },
+  "commits": [
+    "721a8db: refactor(file-tree): extract common API logic and improve test coverage"
+  ],
+  "component_analysis": {
+    "FileTreeView.tsx": {
+      "memoization_status": "already_optimized",
+      "notes": "ChevronIcon, FolderIcon, FileIcon, TreeNode, and FileTreeView are already wrapped with memo. useMemo and useCallback are used appropriately."
+    },
+    "LeftPaneTabSwitcher.tsx": {
+      "memoization_status": "already_optimized",
+      "notes": "HistoryIcon, FilesIcon, and LeftPaneTabSwitcher are already wrapped with memo. useCallback is used appropriately."
+    }
+  },
+  "message": "Refactoring completed successfully. Common API logic extracted into helper functions, improving code maintainability and reducing duplication. Test coverage improved for all target files. Components were already well-optimized with React.memo, useMemo, and useCallback."
+}
