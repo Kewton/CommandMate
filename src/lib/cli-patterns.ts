@@ -32,8 +32,9 @@ export const CODEX_THINKING_PATTERN = /•\s*(Planning|Searching|Exploring|Runni
 
 /**
  * Claude prompt pattern (waiting for input)
+ * Supports both legacy '>' and new '❯' (U+276F) prompt characters
  */
-export const CLAUDE_PROMPT_PATTERN = /^>\s*$/m;
+export const CLAUDE_PROMPT_PATTERN = /^[>❯]\s*$/m;
 
 /**
  * Claude separator pattern
@@ -89,7 +90,7 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
         thinkingPattern: CLAUDE_THINKING_PATTERN,
         skipPatterns: [
           /^─{10,}$/, // Separator lines
-          /^>\s*$/, // Prompt line
+          /^[>❯]\s*$/, // Prompt line (legacy '>' and new '❯')
           CLAUDE_THINKING_PATTERN, // Thinking indicators
           /^\s*[⎿⏋]\s+Tip:/, // Tip lines
           /^\s*Tip:/, // Tip lines

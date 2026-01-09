@@ -47,17 +47,35 @@ function getPollerKey(worktreeId: string, cliToolId: CLIToolType): string {
 }
 
 /**
- * Clean up Claude response by removing shell setup commands and environment exports
+ * Clean up Claude response by removing shell setup commands, environment exports, ANSI codes, and banner
+ * Also extracts only the LATEST response to avoid including conversation history
  *
  * @param response - Raw Claude response
- * @returns Cleaned response
+ * @returns Cleaned response (only the latest response)
  */
 function cleanClaudeResponse(response: string): string {
-  // Split response into lines
-  const lines = response.split('\n');
-  const cleanedLines: string[] = [];
+  // First, strip ANSI escape codes
+  const cleanedResponse = stripAnsi(response);
 
-  // Patterns to remove (Claude-specific setup commands)
+  // Find the LAST user prompt (❯ followed by content) and extract only the response after it
+  // This ensures we only get the latest response, not the entire conversation history
+  const lines = cleanedResponse.split('\n');
+
+  // Find the last user prompt line index
+  let lastUserPromptIndex = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    // User prompt line: ❯ followed by actual content (not empty ❯)
+    if (/^❯\s+\S/.test(lines[i])) {
+      lastUserPromptIndex = i;
+      break;
+    }
+  }
+
+  // Extract lines after the last user prompt
+  const startIndex = lastUserPromptIndex >= 0 ? lastUserPromptIndex + 1 : 0;
+  const responseLines = lines.slice(startIndex);
+
+  // Patterns to remove (Claude-specific setup commands and UI elements)
   const skipPatterns = [
     /CLAUDE_HOOKS_/,  // Any CLAUDE_HOOKS reference
     /\/bin\/claude/,  // Claude binary path (any variant)
@@ -74,10 +92,27 @@ function cleanClaudeResponse(response: string): string {
     /Content-Type/,  // HTTP headers
     /export\s+/,  // Export commands
     /^\s*$/,  // Empty lines
+    // Claude Code banner patterns
+    /^[╭╮╰╯│─\s]+$/,  // Box drawing characters only (with spaces)
+    /[│╭╮╰╯].*[│╭╮╰╯]/,  // Lines with box drawing on both sides (banner rows)
+    /Claude Code v[\d.]+/,  // Version info
+    /Tips for getting started/,  // Tips header
+    /Welcome back/,  // Welcome message
+    /Run \/init to create/,  // Init instruction
+    /Recent activity/,  // Activity header
+    /No recent activity/,  // No activity message
+    /▐▛███▜▌|▝▜█████▛▘|▘▘ ▝▝/,  // ASCII art logo
+    /Opus \d+\.\d+|Claude Max/,  // Model info
+    /\.com's Organization/,  // Organization info
+    /~\/share\/work/,  // Directory path in banner
+    /\?\s*for shortcuts/,  // Shortcuts hint
+    /^─{10,}$/,  // Separator lines
+    /^❯\s*$/,  // Empty prompt lines
   ];
 
-  // Filter out all setup command lines
-  for (const line of lines) {
+  // Filter out UI elements and keep only the response content
+  const cleanedLines: string[] = [];
+  for (const line of responseLines) {
     const shouldSkip = skipPatterns.some(pattern => pattern.test(line));
     if (!shouldSkip && line.trim()) {
       cleanedLines.push(line);
@@ -162,7 +197,14 @@ function extractResponse(
   lastCapturedLine: number,
   cliToolId: CLIToolType
 ): { response: string; isComplete: boolean; lineCount: number } | null {
-  const lines = output.split('\n');
+  // Trim trailing empty lines from the output before processing
+  // This prevents the "last 20 lines" from being all empty due to tmux buffer padding
+  const rawLines = output.split('\n');
+  let trimmedLength = rawLines.length;
+  while (trimmedLength > 0 && rawLines[trimmedLength - 1].trim() === '') {
+    trimmedLength--;
+  }
+  const lines = rawLines.slice(0, trimmedLength);
   const totalLines = lines.length;
 
   const BUFFER_RESET_TOLERANCE = 25;
@@ -187,9 +229,10 @@ function extractResponse(
   const { promptPattern, separatorPattern, thinkingPattern, skipPatterns } = getCliToolPatterns(cliToolId);
 
   const findRecentUserPromptIndex = (windowSize: number = 60): number => {
+    // User prompt pattern: supports legacy '>' and new '❯' for Claude
     const userPromptPattern = cliToolId === 'codex'
       ? /^›\s+(?!Implement|Find and fix|Type|Summarize)/
-      : /^>\s+\S/;
+      : /^[>❯]\s+\S/;
 
     for (let i = totalLines - 1; i >= Math.max(0, totalLines - windowSize); i--) {
       const cleanLine = stripAnsi(lines[i]);
@@ -317,8 +360,8 @@ function extractResponse(
       const hasProjectInit = /^\s*\/Users\/.*$/m.test(cleanResponse) && cleanResponse.split('\n').length < 30;
 
       // Check if this looks like just a startup screen (no actual response content)
-      // A real response would have content AFTER the user's prompt line (> message)
-      const userPromptMatch = cleanResponse.match(/^>\s+(\S.*)$/m);
+      // A real response would have content AFTER the user's prompt line (> or ❯ message)
+      const userPromptMatch = cleanResponse.match(/^[>❯]\s+(\S.*)$/m);
 
       if (userPromptMatch) {
         // Found user prompt - check if there's actual response content after it

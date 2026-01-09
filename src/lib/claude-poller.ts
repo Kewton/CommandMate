@@ -42,7 +42,14 @@ function extractClaudeResponse(
   output: string,
   lastCapturedLine: number
 ): { response: string; isComplete: boolean; lineCount: number } | null {
-  const lines = output.split('\n');
+  // Trim trailing empty lines from the output before processing
+  // This prevents the "last 20 lines" from being all empty due to tmux buffer padding
+  const rawLines = output.split('\n');
+  let trimmedLength = rawLines.length;
+  while (trimmedLength > 0 && rawLines[trimmedLength - 1].trim() === '') {
+    trimmedLength--;
+  }
+  const lines = rawLines.slice(0, trimmedLength);
   const totalLines = lines.length;
 
   // No new output (with buffer to handle newline inconsistencies)
@@ -57,8 +64,9 @@ function extractClaudeResponse(
   const outputToCheck = linesToCheck.join('\n');
 
   // Check if Claude has returned to prompt (indicated by the prompt symbols)
-  // Claude shows "> " or "─────" when waiting for input
-  const promptPattern = /^>\s*$/m;
+  // Claude shows "> " or "❯ " or "─────" when waiting for input
+  // Supports both legacy '>' and new '❯' (U+276F) prompt characters
+  const promptPattern = /^[>❯]\s*$/m;
   const separatorPattern = /^─{50,}$/m;
 
   // Check for thinking/processing indicators
@@ -85,8 +93,8 @@ function extractClaudeResponse(
       // Find the last user input prompt ("> ...") to identify where the response starts
       let foundUserPrompt = -1;
       for (let i = totalLines - 1; i >= Math.max(0, totalLines - 50); i--) {
-        // Look for user input line (starts with "> " followed by content)
-        if (/^>\s+\S/.test(lines[i])) {
+        // Look for user input line (starts with "> " or "❯ " followed by content)
+        if (/^[>❯]\s+\S/.test(lines[i])) {
           foundUserPrompt = i;
           break;
         }
@@ -107,13 +115,16 @@ function extractClaudeResponse(
         continue;
       }
 
-      // Stop at new prompt
-      if (/^>\s*$/.test(line)) {
+      // Stop at new prompt (supports both '>' and '❯')
+      if (/^[>❯]\s*$/.test(line)) {
         break;
       }
 
-      // Skip control characters and status lines (thinking indicators, tips, etc.)
-      if (/[✻✽⏺·∴✢✳]/.test(line)) {
+      // Skip thinking/processing status lines (spinner char + activity text ending with …)
+      // Note: ⏺ is also used as a response marker, so we only skip if it looks like a thinking line
+      // Thinking line example: "✳ UIからジョブ再実行中… (esc to interrupt · 33m 44s · thinking)"
+      // Response line example: "⏺ 何かお手伝いできることはありますか？" (should NOT be skipped)
+      if (/[✻✽·∴✢✳⦿◉●○◌◎⊙⊚⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*\S+…/.test(line) || /to interrupt\)/.test(line)) {
         continue;
       }
 
