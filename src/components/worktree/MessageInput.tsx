@@ -8,6 +8,10 @@
 import React, { useState, FormEvent, useRef, useEffect } from 'react';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { SlashCommandSelector } from './SlashCommandSelector';
+import { useSlashCommands } from '@/hooks/useSlashCommands';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import type { SlashCommand } from '@/types/slash-commands';
 
 export interface MessageInputProps {
   worktreeId: string;
@@ -28,9 +32,15 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId }: MessageIn
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isComposing, setIsComposing] = useState(false);
+  const [showCommandSelector, setShowCommandSelector] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const compositionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const justFinishedComposingRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Hooks for slash command functionality
+  const isMobile = useIsMobile();
+  const { groups } = useSlashCommands();
 
   /**
    * Auto-resize textarea based on content
@@ -101,6 +111,38 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId }: MessageIn
   };
 
   /**
+   * Handle slash command selection
+   */
+  const handleCommandSelect = (command: SlashCommand) => {
+    setMessage(`/${command.name} `);
+    setShowCommandSelector(false);
+    textareaRef.current?.focus();
+  };
+
+  /**
+   * Handle slash command selector cancel
+   */
+  const handleCommandCancel = () => {
+    setShowCommandSelector(false);
+    textareaRef.current?.focus();
+  };
+
+  /**
+   * Handle message input change
+   */
+  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    setMessage(newValue);
+
+    // Show command selector when '/' is typed at the start
+    if (newValue === '/' || (newValue.startsWith('/') && !newValue.includes(' '))) {
+      setShowCommandSelector(true);
+    } else {
+      setShowCommandSelector(false);
+    }
+  };
+
+  /**
    * Handle keyboard shortcuts
    */
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -108,6 +150,13 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId }: MessageIn
     // keyCode 229 indicates IME composition in progress
     const { keyCode } = e.nativeEvent;
     if (keyCode === 229) {
+      return;
+    }
+
+    // Close command selector on Escape
+    if (e.key === 'Escape' && showCommandSelector) {
+      e.preventDefault();
+      handleCommandCancel();
       return;
     }
 
@@ -119,14 +168,15 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId }: MessageIn
 
     // Submit on Enter (but not when Shift is pressed or composing with IME)
     // Shift+Enter allows line breaks
-    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+    // Don't submit when command selector is open
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing && !showCommandSelector) {
       e.preventDefault();
       void submitMessage();
     }
   };
 
   return (
-    <div className="space-y-2">
+    <div ref={containerRef} className="space-y-2 relative">
       {error && (
         <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-800">
           {error}
@@ -134,14 +184,29 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId }: MessageIn
       )}
 
       <form onSubmit={handleSubmit} className="flex items-end gap-2 bg-white border border-gray-300 rounded-lg px-4 py-2 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+        {/* Mobile: Slash command button */}
+        {isMobile && (
+          <button
+            type="button"
+            onClick={() => setShowCommandSelector(true)}
+            className="flex-shrink-0 p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
+            aria-label="Show slash commands"
+            data-testid="mobile-command-button"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+            </svg>
+          </button>
+        )}
+
         <textarea
           ref={textareaRef}
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          onChange={handleMessageChange}
           onKeyDown={handleKeyDown}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
-          placeholder="Type your message... (Shift+Enter for line break)"
+          placeholder={isMobile ? "Type your message..." : "Type your message... (/ for commands, Shift+Enter for line break)"}
           disabled={sending}
           rows={1}
           className="flex-1 outline-none bg-transparent resize-none py-1 overflow-hidden"
@@ -164,6 +229,15 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId }: MessageIn
           )}
         </button>
       </form>
+
+      {/* Slash Command Selector */}
+      <SlashCommandSelector
+        isOpen={showCommandSelector}
+        groups={groups}
+        onSelect={handleCommandSelect}
+        onClose={handleCommandCancel}
+        isMobile={isMobile}
+      />
     </div>
   );
 }
