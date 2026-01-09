@@ -1,0 +1,31 @@
+{
+  "issue_number": 10,
+  "refactor_targets": [
+    "src/lib/slash-commands.ts",
+    "src/hooks/useSlashCommands.ts",
+    "src/components/worktree/SlashCommandList.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 85.0,
+    "tests_passed": 46,
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "MessageInput.tsx への SlashCommandSelector 統合",
+    "'/' キー検知によるセレクター表示トリガー",
+    "モバイル用コマンドボタン追加",
+    "コード品質の確認・改善"
+  ],
+  "integration_task": {
+    "file": "src/components/worktree/MessageInput.tsx",
+    "changes": [
+      "SlashCommandSelector をインポート",
+      "'/' 入力時にセレクター表示",
+      "コマンド選択時にテキストに挿入",
+      "Escape/クリック外でセレクター非表示"
+    ]
+  },
+  "test_port": 3001
+}

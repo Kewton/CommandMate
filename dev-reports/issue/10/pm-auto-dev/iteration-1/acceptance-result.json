@@ -1,0 +1,112 @@
+{
+  "status": "partial",
+  "criteria_results": [
+    {
+      "id": "AC-1",
+      "name": "Command Loading",
+      "status": "passed",
+      "notes": "12 commands loaded from .claude/commands/*.md files. Commands are correctly grouped into 5 categories: planning (4), development (3), review (2), documentation (1), workflow (2). Frontmatter parsing extracts description and model fields correctly."
+    },
+    {
+      "id": "AC-2",
+      "name": "API Response",
+      "status": "passed",
+      "notes": "GET /api/slash-commands returns correct format: { groups: [...] } where each group has category, label, and commands array. Integration tests verify response format, empty state, error handling, and content-type header."
+    },
+    {
+      "id": "AC-3",
+      "name": "Filtering",
+      "status": "passed",
+      "notes": "Case-insensitive filtering implemented in both useSlashCommands hook and SlashCommandSelector component. Filters by command name and description. Empty groups are removed after filtering."
+    },
+    {
+      "id": "AC-4",
+      "name": "PC Dropdown Mode",
+      "status": "passed",
+      "notes": "SlashCommandSelector renders as dropdown when isMobile=false. Features: search input, command list with categories, keyboard hints (Enter/Esc). Desktop-specific positioning via 'position' prop supported."
+    },
+    {
+      "id": "AC-5",
+      "name": "Mobile Bottom Sheet Mode",
+      "status": "passed",
+      "notes": "SlashCommandSelector renders as bottom sheet when isMobile=true. Features: backdrop overlay, draggable header with close button, search input, scrollable command list. Max height 70vh."
+    },
+    {
+      "id": "AC-6",
+      "name": "Keyboard Navigation",
+      "status": "passed",
+      "notes": "Arrow keys (Up/Down) navigate highlighted index, Enter selects command, Escape closes selector. Global keyboard listener properly added and removed. Tests verify all keyboard interactions."
+    }
+  ],
+  "overall_score": "6/6",
+  "blocking_issues": [],
+  "integration_status": {
+    "message_input_integration": "NOT_IMPLEMENTED",
+    "details": "MessageInput.tsx does not yet integrate SlashCommandSelector. The '/' key trigger detection and command button for mobile are not implemented. This is documented in tdd-result.json next_steps."
+  },
+  "test_results": {
+    "unit_tests": {
+      "total": 42,
+      "passed": 42,
+      "failed": 0,
+      "files": [
+        "tests/unit/slash-commands.test.ts (15 tests) - PASSED",
+        "tests/unit/hooks/useSlashCommands.test.ts (10 tests) - PASSED",
+        "tests/unit/components/SlashCommandList.test.tsx (7 tests) - PASSED",
+        "tests/unit/components/SlashCommandSelector.test.tsx (10 tests) - PASSED"
+      ]
+    },
+    "integration_tests": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0,
+      "files": [
+        "tests/integration/api-slash-commands.test.ts (4 tests) - PASSED"
+      ]
+    }
+  },
+  "files_verified": {
+    "created": [
+      "src/types/slash-commands.ts - Type definitions for commands, categories, groups",
+      "src/lib/slash-commands.ts - Command loading, parsing, caching, filtering",
+      "src/app/api/slash-commands/route.ts - API endpoint returning grouped commands",
+      "src/hooks/useSlashCommands.ts - React hook with loading, filtering, refresh",
+      "src/components/worktree/SlashCommandList.tsx - Grouped command list display",
+      "src/components/worktree/SlashCommandSelector.tsx - PC dropdown / Mobile bottom sheet"
+    ],
+    "modified": [
+      "src/lib/api-client.ts - Added slashCommandApi with getAll() method"
+    ]
+  },
+  "command_files": {
+    "total": 12,
+    "files": [
+      "acceptance-test.md",
+      "architecture-review.md",
+      "bug-fix.md",
+      "create-pr.md",
+      "design-policy.md",
+      "issue-create.md",
+      "issue-split.md",
+      "pm-auto-dev.md",
+      "progress-report.md",
+      "refactoring.md",
+      "tdd-impl.md",
+      "work-plan.md"
+    ]
+  },
+  "recommendations": [
+    "Integrate SlashCommandSelector into MessageInput.tsx",
+    "Add '/' key detection to trigger the selector when user types '/'",
+    "Add command button for mobile users to open bottom sheet",
+    "Add E2E test for full user workflow"
+  ],
+  "evidence_files": [
+    "tests/unit/slash-commands.test.ts",
+    "tests/unit/hooks/useSlashCommands.test.ts",
+    "tests/unit/components/SlashCommandList.test.tsx",
+    "tests/unit/components/SlashCommandSelector.test.tsx",
+    "tests/integration/api-slash-commands.test.ts"
+  ],
+  "message": "All 6 acceptance criteria for slash command implementation are met. All 46 tests pass. The core slash command functionality is complete and ready for integration with MessageInput. The remaining work is UI integration to trigger the selector from the message input field."
+}

@@ -1,0 +1,52 @@
+{
+  "issue_number": 10,
+  "feature_summary": "スラッシュコマンド対応 - PC/モバイルでスラッシュコマンドを選択可能にする",
+  "acceptance_criteria": [
+    "PC: メッセージ入力欄で '/' 入力時にコマンド候補がドロップダウン表示される",
+    "PC: キーボードナビゲーション（↑↓Enter Escape）でコマンド選択可能",
+    "モバイル: '/' 入力またはコマンドボタンタップでボトムシート表示",
+    "全12コマンドが正しく表示・選択可能",
+    "コマンド選択時にテキストエリアにコマンドが挿入される",
+    "コマンドのフィルタリング（部分一致検索）が動作する"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "コマンド読み込み",
+      "description": ".claude/commands/*.md から12コマンドが正しく読み込まれる",
+      "expected": "12個のコマンドがカテゴリ別にグループ化されて表示"
+    },
+    {
+      "id": "AC-2",
+      "name": "API レスポンス",
+      "description": "GET /api/slash-commands が正しいフォーマットでレスポンスを返す",
+      "expected": "{ commands: [...], groups: [...] } 形式のJSON"
+    },
+    {
+      "id": "AC-3",
+      "name": "フィルタリング",
+      "description": "検索文字列でコマンドをフィルタリングできる",
+      "expected": "'work' 入力で work-plan がマッチ"
+    },
+    {
+      "id": "AC-4",
+      "name": "PC ドロップダウン表示",
+      "description": "デスクトップでSlashCommandSelectorがドロップダウン形式で表示",
+      "expected": "dropdown モードで表示"
+    },
+    {
+      "id": "AC-5",
+      "name": "モバイル ボトムシート表示",
+      "description": "モバイルでSlashCommandSelectorがボトムシート形式で表示",
+      "expected": "bottom-sheet モードで表示"
+    },
+    {
+      "id": "AC-6",
+      "name": "キーボードナビゲーション",
+      "description": "↑↓キーでコマンド選択、Enterで確定、Escapeでキャンセル",
+      "expected": "キーボード操作が正しく動作"
+    }
+  ],
+  "tdd_result_path": "dev-reports/issue/10/pm-auto-dev/iteration-1/tdd-result.json",
+  "test_port": 3001
+}

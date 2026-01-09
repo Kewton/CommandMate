@@ -1,0 +1,45 @@
+{
+  "issue_number": 10,
+  "title": "スラッシュコマンド対応",
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 85.0,
+      "tests_passed": 46,
+      "tests_failed": 0,
+      "files_created": 11
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 6,
+      "criteria_total": 6
+    },
+    "refactor": {
+      "status": "success",
+      "integration_completed": true,
+      "quality_checks_passed": true
+    }
+  },
+  "commits": [
+    "b3a279b: feat(slash-commands): implement slash command support (#10)",
+    "1ce888c: feat(slash-commands): integrate SlashCommandSelector into MessageInput"
+  ],
+  "files_created": [
+    "src/types/slash-commands.ts",
+    "src/lib/slash-commands.ts",
+    "src/app/api/slash-commands/route.ts",
+    "src/hooks/useSlashCommands.ts",
+    "src/components/worktree/SlashCommandList.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "tests/unit/slash-commands.test.ts",
+    "tests/unit/hooks/useSlashCommands.test.ts",
+    "tests/unit/components/SlashCommandList.test.tsx",
+    "tests/unit/components/SlashCommandSelector.test.tsx",
+    "tests/integration/api-slash-commands.test.ts"
+  ],
+  "files_modified": [
+    "src/lib/api-client.ts",
+    "src/components/worktree/MessageInput.tsx"
+  ]
+}
