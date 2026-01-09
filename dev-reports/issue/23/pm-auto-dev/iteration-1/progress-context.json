@@ -1,0 +1,35 @@
+{
+  "issue_number": 23,
+  "issue_title": "History表示改善",
+  "issue_summary": "ユーザーインプットとAssistantからの回答を1:1の対応関係となるように表示する",
+  "branch": "feature/23-history-display-improvement",
+  "iteration": 1,
+  "phases_completed": [
+    {
+      "phase": "Issue情報収集",
+      "status": "completed",
+      "result_file": null
+    },
+    {
+      "phase": "TDD実装",
+      "status": "completed",
+      "result_file": "dev-reports/issue/23/pm-auto-dev/iteration-1/tdd-result.json"
+    },
+    {
+      "phase": "受入テスト",
+      "status": "completed",
+      "result_file": "dev-reports/issue/23/pm-auto-dev/iteration-1/acceptance-result.json"
+    },
+    {
+      "phase": "リファクタリング",
+      "status": "completed",
+      "result_file": "dev-reports/issue/23/pm-auto-dev/iteration-1/refactor-result.json"
+    }
+  ],
+  "related_documents": {
+    "design_policy": "dev-reports/design/issue-23-history-display-improvement-design-policy.md",
+    "architecture_review": "dev-reports/review/2026-01-09-issue-23-architecture-review.md",
+    "work_plan": "dev-reports/issue/23/work-plan.md"
+  },
+  "output_file": "dev-reports/issue/23/pm-auto-dev/iteration-1/progress-report.md"
+}

@@ -1,0 +1,80 @@
+{
+  "status": "passed",
+  "issue_number": 23,
+  "acceptance_criteria_results": [
+    {
+      "id": "AC1",
+      "description": "ユーザー入力とAssistant回答が1:1でグループ表示される",
+      "status": "passed",
+      "evidence": "ConversationPairCard component renders user message and assistant response(s) together as a single card. Test: 'should render user and assistant messages' in ConversationPairCard.test.tsx passes. Integration test: 'should display messages grouped by conversation pairs' in HistoryPane.integration.test.tsx passes."
+    },
+    {
+      "id": "AC2",
+      "description": "連続するAssistantメッセージが同じグループに表示される",
+      "status": "passed",
+      "evidence": "groupMessagesIntoPairs() correctly accumulates consecutive assistant messages in the assistantMessages array. Tests: 'should handle consecutive assistant messages in same pair' (2 messages), 'should handle multiple consecutive assistant messages' (4 messages), and 'should handle new user message after consecutive assistant messages' in conversation-grouper.test.ts all pass. Integration test: 'should handle consecutive assistant messages' in HistoryPane.integration.test.tsx passes."
+    },
+    {
+      "id": "AC3",
+      "description": "孤立Assistantメッセージ（ユーザー入力なし）が適切に表示される",
+      "status": "passed",
+      "evidence": "Orphan assistant messages display with 'System Message' header and special styling (yellow border). Tests: 'should handle orphan assistant messages at the beginning', 'should group consecutive orphan assistant messages together' in conversation-grouper.test.ts pass. Component tests: 'should render orphan assistant message with special styling', 'should show system message header for orphan pair', 'should have orphan styling' in ConversationPairCard.test.tsx pass. Integration test: 'should handle orphan assistant messages at the beginning' in HistoryPane.integration.test.tsx passes."
+    },
+    {
+      "id": "AC4",
+      "description": "回答待ち状態（pending）が視覚的に分かる",
+      "status": "passed",
+      "evidence": "Pending state shows animated dots with 'Waiting for response...' indicator. PendingIndicator component with data-testid='pending-indicator' renders animated pulse dots. Tests: 'should show pending indicator when assistant messages is empty', 'should show waiting message for pending state', 'should have pending styling' in ConversationPairCard.test.tsx pass. Integration test: 'should display pending conversation when no assistant response' in HistoryPane.integration.test.tsx passes."
+    },
+    {
+      "id": "AC5",
+      "description": "既存のファイルパスクリック機能が維持される",
+      "status": "passed",
+      "evidence": "onFilePathClick callback is correctly passed through HistoryPane -> ConversationPairCard -> MessageContent and triggered when file path is clicked. Tests: 'should call onFilePathClick when file path is clicked', 'should detect multiple file paths' in ConversationPairCard.test.tsx pass. Integration test: 'should maintain file path click functionality in grouped view' in HistoryPane.integration.test.tsx passes."
+    }
+  ],
+  "verification_results": {
+    "unit_tests": {
+      "status": "passed",
+      "details": "All 64 tests specific to Issue #23 pass: conversation-grouper.test.ts (26 tests), useConversationHistory.test.ts (11 tests), ConversationPairCard.test.tsx (18 tests), HistoryPane.integration.test.tsx (9 tests). Note: 3 errors in WorktreeDetailRefactored.test.tsx are pre-existing and unrelated to this implementation (useSlashCommands mock issue from Issue #10)."
+    },
+    "lint": {
+      "status": "passed",
+      "details": "No ESLint warnings or errors"
+    },
+    "type_check": {
+      "status": "passed",
+      "details": "TypeScript compilation successful with no errors (npx tsc --noEmit)"
+    },
+    "build": {
+      "status": "passed",
+      "details": "Production build completed successfully (npm run build). All pages and API routes compiled without errors."
+    }
+  },
+  "overall_assessment": "All acceptance criteria for Issue #23 'History表示改善' have been met. The implementation correctly groups user-assistant messages into conversation pairs with proper handling of consecutive assistant messages, orphan messages, and pending states. File path click functionality is preserved. All 64 related tests pass, and the codebase passes lint, type check, and build verification.",
+  "recommendations": [
+    "Consider fixing the pre-existing test errors in WorktreeDetailRefactored.test.tsx related to useSlashCommands mock (unrelated to this issue)",
+    "The implementation includes expand/collapse functionality for long messages which is a nice enhancement beyond the core requirements"
+  ],
+  "test_summary": {
+    "total_tests": 64,
+    "passed": 64,
+    "failed": 0,
+    "skipped": 0
+  },
+  "files_verified": {
+    "implementation": [
+      "src/types/conversation.ts",
+      "src/lib/conversation-grouper.ts",
+      "src/hooks/useConversationHistory.ts",
+      "src/components/worktree/ConversationPairCard.tsx",
+      "src/components/worktree/HistoryPane.tsx"
+    ],
+    "tests": [
+      "src/lib/__tests__/conversation-grouper.test.ts",
+      "src/hooks/__tests__/useConversationHistory.test.ts",
+      "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+      "src/components/worktree/__tests__/HistoryPane.integration.test.tsx"
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "issue_number": 23,
+  "issue_title": "History表示改善",
+  "issue_summary": "ユーザーインプットとAssistantからの回答を1:1の対応関係となるように表示する。現状はバラバラに表示されている。",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "description": "ユーザー入力とAssistant回答が1:1でグループ表示される",
+      "test_approach": "ConversationPairCard component renders user message and assistant response(s) together"
+    },
+    {
+      "id": "AC2",
+      "description": "連続するAssistantメッセージが同じグループに表示される",
+      "test_approach": "groupMessagesIntoPairs() correctly accumulates consecutive assistant messages"
+    },
+    {
+      "id": "AC3",
+      "description": "孤立Assistantメッセージ（ユーザー入力なし）が適切に表示される",
+      "test_approach": "Orphan assistant messages display with 'System Message' header and special styling"
+    },
+    {
+      "id": "AC4",
+      "description": "回答待ち状態（pending）が視覚的に分かる",
+      "test_approach": "Pending state shows animated dots with 'Waiting for response...' indicator"
+    },
+    {
+      "id": "AC5",
+      "description": "既存のファイルパスクリック機能が維持される",
+      "test_approach": "onFilePathClick callback is correctly passed and triggered"
+    }
+  ],
+  "tdd_result_file": "dev-reports/issue/23/pm-auto-dev/iteration-1/tdd-result.json",
+  "implementation_files": [
+    "src/types/conversation.ts",
+    "src/lib/conversation-grouper.ts",
+    "src/hooks/useConversationHistory.ts",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/HistoryPane.tsx"
+  ],
+  "test_files": [
+    "src/lib/__tests__/conversation-grouper.test.ts",
+    "src/hooks/__tests__/useConversationHistory.test.ts",
+    "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+    "src/components/worktree/__tests__/HistoryPane.integration.test.tsx"
+  ],
+  "verification_commands": {
+    "unit_tests": "npm run test:unit",
+    "lint": "npm run lint",
+    "type_check": "npx tsc --noEmit",
+    "build": "npm run build"
+  }
+}

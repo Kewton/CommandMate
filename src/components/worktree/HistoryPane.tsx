@@ -1,14 +1,17 @@
 /**
  * HistoryPane Component
  *
- * Displays message history with independent scrolling.
+ * Displays message history grouped as conversation pairs.
+ * Each pair shows a user message with its corresponding assistant response(s).
  * Supports file path detection and click handling.
  */
 
 'use client';
 
-import React, { useMemo, useCallback, memo, useState } from 'react';
+import React, { useMemo, useCallback, memo } from 'react';
 import type { ChatMessage } from '@/types/models';
+import { useConversationHistory } from '@/hooks/useConversationHistory';
+import { ConversationPairCard } from './ConversationPairCard';
 
 // ============================================================================
 // Types
@@ -30,221 +33,9 @@ export interface HistoryPaneProps {
   className?: string;
 }
 
-/** Parsed content part type */
-interface ContentPart {
-  type: 'text' | 'path';
-  content: string;
-}
-
-/** Props for internal MessageContent component */
-interface MessageContentProps {
-  content: string;
-  onFilePathClick: (path: string) => void;
-}
-
-/** Props for internal MessageItem component */
-interface MessageItemProps {
-  message: ChatMessage;
-  onFilePathClick: (path: string) => void;
-}
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/**
- * Regular expression to match file paths.
- * Matches paths like /path/to/file.ts, ./relative/path.js, etc.
- */
-const FILE_PATH_REGEX = /(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g;
-
-/** Maximum lines to show in collapsed state */
-const COLLAPSED_MAX_LINES = 3;
-
-/** Maximum characters to show in collapsed state */
-const COLLAPSED_MAX_CHARS = 200;
-
 // ============================================================================
 // Sub-components
 // ============================================================================
-
-/**
- * Parses content string into text and file path parts
- */
-function parseContentParts(content: string): ContentPart[] {
-  const matches = content.match(FILE_PATH_REGEX);
-  if (!matches || matches.length === 0) {
-    return [{ type: 'text', content }];
-  }
-
-  const result: ContentPart[] = [];
-  let lastIndex = 0;
-
-  matches.forEach((match) => {
-    const index = content.indexOf(match, lastIndex);
-    if (index > lastIndex) {
-      result.push({ type: 'text', content: content.slice(lastIndex, index) });
-    }
-    result.push({ type: 'path', content: match });
-    lastIndex = index + match.length;
-  });
-
-  if (lastIndex < content.length) {
-    result.push({ type: 'text', content: content.slice(lastIndex) });
-  }
-
-  return result;
-}
-
-/**
- * Renders message content with clickable file paths.
- * Memoized to prevent unnecessary re-renders.
- */
-const MessageContent = memo(function MessageContent({
-  content,
-  onFilePathClick,
-}: MessageContentProps) {
-  const parts = useMemo(() => parseContentParts(content), [content]);
-
-  const handlePathClick = useCallback(
-    (path: string) => () => onFilePathClick(path),
-    [onFilePathClick]
-  );
-
-  return (
-    <span>
-      {parts.map((part, index) =>
-        part.type === 'path' ? (
-          <button
-            key={index}
-            type="button"
-            onClick={handlePathClick(part.content)}
-            className="text-blue-400 hover:text-blue-300 hover:underline cursor-pointer font-mono text-sm"
-            aria-label={`Open file: ${part.content}`}
-          >
-            {part.content}
-          </button>
-        ) : (
-          <span key={index}>{part.content}</span>
-        )
-      )}
-    </span>
-  );
-});
-
-/**
- * Get truncated content for collapsed view
- */
-function getTruncatedContent(content: string): { text: string; isTruncated: boolean } {
-  const lines = content.split('\n');
-
-  // Check if content exceeds limits
-  if (lines.length <= COLLAPSED_MAX_LINES && content.length <= COLLAPSED_MAX_CHARS) {
-    return { text: content, isTruncated: false };
-  }
-
-  // Truncate by lines first
-  let truncated = lines.slice(0, COLLAPSED_MAX_LINES).join('\n');
-
-  // Then truncate by characters if still too long
-  if (truncated.length > COLLAPSED_MAX_CHARS) {
-    truncated = truncated.slice(0, COLLAPSED_MAX_CHARS);
-  }
-
-  return { text: truncated, isTruncated: true };
-}
-
-/**
- * Single message display component.
- * Memoized to prevent unnecessary re-renders when other messages update.
- * Assistant messages are collapsible by default.
- */
-const MessageItem = memo(function MessageItem({
-  message,
-  onFilePathClick,
-}: MessageItemProps) {
-  const isUser = message.role === 'user';
-  // Assistant messages start collapsed, user messages are always expanded
-  const [isExpanded, setIsExpanded] = useState(isUser);
-
-  const containerClassName = useMemo(
-    () =>
-      `p-3 rounded-lg mb-2 ${
-        isUser
-          ? 'bg-blue-900/30 border-l-4 border-blue-500 ml-4 user'
-          : 'bg-gray-800/50 border-l-4 border-gray-600 mr-4 assistant'
-      }`,
-    [isUser]
-  );
-
-  const labelClassName = useMemo(
-    () => `text-xs font-medium ${isUser ? 'text-blue-400' : 'text-gray-400'}`,
-    [isUser]
-  );
-
-  const formattedTime = useMemo(
-    () => message.timestamp.toLocaleTimeString(),
-    [message.timestamp]
-  );
-
-  // Calculate truncated content for assistant messages
-  const { text: truncatedText, isTruncated } = useMemo(
-    () => (isUser ? { text: message.content, isTruncated: false } : getTruncatedContent(message.content)),
-    [message.content, isUser]
-  );
-
-  const displayContent = isExpanded ? message.content : truncatedText;
-
-  const handleToggle = useCallback(() => {
-    setIsExpanded((prev) => !prev);
-  }, []);
-
-  return (
-    <div data-testid={`message-${message.role}`} className={containerClassName}>
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <span className={labelClassName}>
-            {isUser ? 'You' : 'Assistant'}
-          </span>
-          <span className="text-xs text-gray-500">{formattedTime}</span>
-        </div>
-        {/* Toggle button for assistant messages that are truncatable */}
-        {!isUser && isTruncated && (
-          <button
-            type="button"
-            onClick={handleToggle}
-            className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
-            aria-expanded={isExpanded}
-            aria-label={isExpanded ? 'Collapse message' : 'Expand message'}
-          >
-            <svg
-              className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
-            {isExpanded ? 'Close' : 'Expand'}
-          </button>
-        )}
-      </div>
-      <div className="text-sm text-gray-200 whitespace-pre-wrap break-words">
-        <MessageContent content={displayContent} onFilePathClick={onFilePathClick} />
-        {/* Truncation indicator */}
-        {!isUser && isTruncated && !isExpanded && (
-          <span className="text-gray-500">...</span>
-        )}
-      </div>
-    </div>
-  );
-});
 
 /**
  * Loading indicator component.
@@ -312,9 +103,13 @@ const BASE_CONTAINER_CLASSES = [
 ] as const;
 
 /**
- * HistoryPane component for displaying message history.
+ * HistoryPane component for displaying message history as conversation pairs.
  *
  * Features:
+ * - Groups user and assistant messages into conversation pairs
+ * - Supports consecutive assistant messages in a single pair
+ * - Handles orphan assistant messages (system messages)
+ * - Shows pending state when waiting for response
  * - Independent scrolling
  * - Clickable file paths
  * - Loading and empty states
@@ -341,14 +136,8 @@ export const HistoryPane = memo(function HistoryPane({
   // Using underscore prefix to indicate intentionally unused parameter
   void _worktreeId;
 
-  // Sort messages by timestamp (oldest first)
-  const sortedMessages = useMemo(
-    () =>
-      [...messages].sort(
-        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
-      ),
-    [messages]
-  );
+  // Use conversation history hook for grouping and expand/collapse state
+  const { pairs, isExpanded, toggleExpand } = useConversationHistory(messages);
 
   // Build container class string
   const containerClasses = useMemo(
@@ -362,6 +151,12 @@ export const HistoryPane = memo(function HistoryPane({
     [onFilePathClick]
   );
 
+  // Create toggle handler factory
+  const createToggleHandler = useCallback(
+    (pairId: string) => () => toggleExpand(pairId),
+    [toggleExpand]
+  );
+
   // Render content based on state
   const renderContent = () => {
     if (isLoading) {
@@ -370,11 +165,13 @@ export const HistoryPane = memo(function HistoryPane({
     if (messages.length === 0) {
       return <EmptyState />;
     }
-    return sortedMessages.map((message) => (
-      <MessageItem
-        key={message.id}
-        message={message}
+    return pairs.map((pair) => (
+      <ConversationPairCard
+        key={pair.id}
+        pair={pair}
         onFilePathClick={handleFilePathClick}
+        isExpanded={isExpanded(pair.id)}
+        onToggleExpand={createToggleHandler(pair.id)}
       />
     ));
   };

@@ -1,0 +1,34 @@
+{
+  "issue_number": 23,
+  "issue_title": "History表示改善",
+  "implementation_files": [
+    "src/types/conversation.ts",
+    "src/lib/conversation-grouper.ts",
+    "src/hooks/useConversationHistory.ts",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/HistoryPane.tsx"
+  ],
+  "test_files": [
+    "src/lib/__tests__/conversation-grouper.test.ts",
+    "src/hooks/__tests__/useConversationHistory.test.ts",
+    "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+    "src/components/worktree/__tests__/HistoryPane.integration.test.tsx"
+  ],
+  "refactoring_goals": [
+    "Remove any unused code or imports",
+    "Ensure consistent naming conventions",
+    "Apply SOLID principles where applicable",
+    "Optimize performance if possible",
+    "Ensure code readability"
+  ],
+  "constraints": [
+    "Do not change public interfaces",
+    "Maintain test coverage above 80%",
+    "All existing tests must pass"
+  ],
+  "verification_commands": {
+    "unit_tests": "npm run test:unit",
+    "lint": "npm run lint",
+    "type_check": "npx tsc --noEmit"
+  }
+}

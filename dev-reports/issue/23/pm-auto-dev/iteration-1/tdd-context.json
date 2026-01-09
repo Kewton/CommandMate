@@ -1,0 +1,47 @@
+{
+  "issue_number": 23,
+  "issue_title": "History表示改善",
+  "issue_summary": "ユーザーインプットとAssistantからの回答を1:1の対応関係となるように表示する。現状はバラバラに表示されている。",
+  "acceptance_criteria": [
+    "ユーザー入力とAssistant回答が1:1でグループ表示される",
+    "連続するAssistantメッセージが同じグループに表示される",
+    "孤立Assistantメッセージ（ユーザー入力なし）が適切に表示される",
+    "回答待ち状態（pending）が視覚的に分かる",
+    "既存のファイルパスクリック機能が維持される"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "1.1",
+      "name": "型定義の追加",
+      "file": "src/types/conversation.ts",
+      "description": "ConversationPair, ConversationStatus, ConversationHistory型を定義"
+    },
+    {
+      "id": "1.2",
+      "name": "グルーピングロジック実装",
+      "file": "src/lib/conversation-grouper.ts",
+      "description": "groupMessagesIntoPairs()とヘルパー関数を実装"
+    },
+    {
+      "id": "1.3",
+      "name": "カスタムフック作成",
+      "file": "src/hooks/useConversationHistory.ts",
+      "description": "useConversationHistoryフックを実装"
+    },
+    {
+      "id": "1.4",
+      "name": "ConversationPairCardコンポーネント作成",
+      "file": "src/components/worktree/ConversationPairCard.tsx",
+      "description": "会話ペア表示カードを実装"
+    },
+    {
+      "id": "1.5",
+      "name": "HistoryPane更新",
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "description": "ConversationPairCardを使用するように変更"
+    }
+  ],
+  "target_coverage": 80,
+  "design_policy_file": "dev-reports/design/issue-23-history-display-improvement-design-policy.md",
+  "work_plan_file": "dev-reports/issue/23/work-plan.md"
+}

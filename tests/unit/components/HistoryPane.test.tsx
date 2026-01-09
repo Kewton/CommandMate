@@ -1,7 +1,8 @@
 /**
  * Tests for HistoryPane component
  *
- * Tests the message history display with independent scrolling and file path click handling
+ * Tests the message history display with conversation pair grouping, independent scrolling,
+ * and file path click handling.
  * @vitest-environment jsdom
  */
 
@@ -86,27 +87,10 @@ describe('HistoryPane', () => {
     });
   });
 
-  describe('Message styling by role', () => {
-    it('should apply user role styling', () => {
+  describe('Conversation pair grouping', () => {
+    it('should display messages as conversation pair cards', () => {
       const messages: ChatMessage[] = [
         createTestMessage({ content: 'User message', role: 'user' }),
-      ];
-
-      render(
-        <HistoryPane
-          messages={messages}
-          worktreeId={defaultWorktreeId}
-          onFilePathClick={mockOnFilePathClick}
-        />
-      );
-
-      const messageElement = screen.getByTestId('message-user');
-      expect(messageElement).toBeInTheDocument();
-      expect(messageElement.className).toMatch(/user|blue|right/i);
-    });
-
-    it('should apply assistant role styling', () => {
-      const messages: ChatMessage[] = [
         createTestMessage({ content: 'Assistant message', role: 'assistant' }),
       ];
 
@@ -118,9 +102,28 @@ describe('HistoryPane', () => {
         />
       );
 
-      const messageElement = screen.getByTestId('message-assistant');
-      expect(messageElement).toBeInTheDocument();
-      expect(messageElement.className).toMatch(/assistant|gray|left/i);
+      // New structure uses conversation-pair-card instead of individual message elements
+      const pairCard = screen.getByTestId('conversation-pair-card');
+      expect(pairCard).toBeInTheDocument();
+      // Check for user and assistant labels
+      expect(screen.getByText('You')).toBeInTheDocument();
+      expect(screen.getByText('Assistant')).toBeInTheDocument();
+    });
+
+    it('should show pending indicator for user message without response', () => {
+      const messages: ChatMessage[] = [
+        createTestMessage({ content: 'Waiting for response', role: 'user' }),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId={defaultWorktreeId}
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+
+      expect(screen.getByTestId('pending-indicator')).toBeInTheDocument();
     });
   });
 
@@ -182,7 +185,8 @@ describe('HistoryPane', () => {
 
     it('should not detect non-file paths', () => {
       const messages: ChatMessage[] = [
-        createTestMessage({ content: 'This is just regular text with no paths' }),
+        createTestMessage({ content: 'This is just regular text with no paths', role: 'user' }),
+        createTestMessage({ content: 'And a simple response', role: 'assistant' }),
       ];
 
       render(
@@ -193,7 +197,12 @@ describe('HistoryPane', () => {
         />
       );
 
-      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+      // Only expand/collapse button may be present, no file path buttons
+      const buttons = screen.queryAllByRole('button');
+      const filePathButtons = buttons.filter(btn =>
+        btn.getAttribute('aria-label')?.includes('Open file:')
+      );
+      expect(filePathButtons.length).toBe(0);
     });
   });
 
@@ -207,7 +216,7 @@ describe('HistoryPane', () => {
         />
       );
 
-      expect(screen.getByText(/no messages|empty|履歴がありません/i)).toBeInTheDocument();
+      expect(screen.getByText(/no messages|empty/i)).toBeInTheDocument();
     });
 
     it('should render container even when empty', () => {
@@ -292,15 +301,23 @@ describe('HistoryPane', () => {
       const messages: ChatMessage[] = [
         createTestMessage({
           content: 'First message',
+          role: 'user',
           timestamp: new Date('2024-01-01T10:00:00'),
         }),
         createTestMessage({
+          content: 'First response',
+          role: 'assistant',
+          timestamp: new Date('2024-01-01T10:00:30'),
+        }),
+        createTestMessage({
           content: 'Second message',
+          role: 'user',
           timestamp: new Date('2024-01-01T10:01:00'),
         }),
         createTestMessage({
-          content: 'Third message',
-          timestamp: new Date('2024-01-01T10:02:00'),
+          content: 'Second response',
+          role: 'assistant',
+          timestamp: new Date('2024-01-01T10:01:30'),
         }),
       ];
 
@@ -312,9 +329,16 @@ describe('HistoryPane', () => {
         />
       );
 
-      const messageContents = screen.getAllByTestId(/message-/);
-      expect(messageContents[0]).toHaveTextContent('First message');
-      expect(messageContents[2]).toHaveTextContent('Third message');
+      const pairCards = screen.getAllByTestId('conversation-pair-card');
+      expect(pairCards).toHaveLength(2);
+
+      // Check first pair content
+      expect(pairCards[0]).toHaveTextContent('First message');
+      expect(pairCards[0]).toHaveTextContent('First response');
+
+      // Check second pair content
+      expect(pairCards[1]).toHaveTextContent('Second message');
+      expect(pairCards[1]).toHaveTextContent('Second response');
     });
   });
 
@@ -350,8 +374,16 @@ describe('HistoryPane', () => {
       );
 
       // Should escape HTML and not render as actual HTML
+      // The escaped version should be visible as text
+      expect(screen.getByText('<div>HTML content</div>')).toBeInTheDocument();
+      // The region should not contain raw HTML div tags (should be escaped)
       const region = screen.getByRole('region');
-      expect(region.innerHTML).not.toContain('<div>HTML content</div>');
+      // Check that there's no actual div with HTML content as its only text
+      const htmlDivs = region.querySelectorAll('div');
+      const hasRawHtmlDiv = Array.from(htmlDivs).some(
+        (div) => div.textContent === 'HTML content' && div.children.length === 0
+      );
+      expect(hasRawHtmlDiv).toBe(false);
     });
 
     it('should handle Japanese characters', () => {
