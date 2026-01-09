@@ -1,0 +1,91 @@
+{
+  "issueNumber": 19,
+  "issueTitle": "メモ機能改善",
+  "iteration": 3,
+  "phase": "ui-layer",
+  "scope": "UIコンポーネント、フック、タブ統合",
+  "acceptanceCriteria": [
+    "useAutoSaveフックが300ms debounceで自動保存する",
+    "useAutoSaveフックがonBlurで即時保存する",
+    "MemoCardコンポーネントがメモを表示・編集できる",
+    "MemoAddButtonコンポーネントが追加ボタンを表示し、上限時は非活性になる",
+    "MemoPaneコンポーネントがメモ一覧を表示し、追加・編集・削除ができる",
+    "LeftPaneTabSwitcherにMemoタブが表示される",
+    "MobileTabBarにMemoタブが表示される",
+    "WorktreeDetailRefactoredでMemoペインが正しく表示される"
+  ],
+  "tasks": [
+    {
+      "id": "2.1",
+      "name": "useAutoSaveフック",
+      "file": "src/hooks/useAutoSave.ts",
+      "testFile": "tests/unit/hooks/useAutoSave.test.ts",
+      "testRequired": true,
+      "description": "300ms debounce + onBlur即時保存"
+    },
+    {
+      "id": "2.2",
+      "name": "MemoCardコンポーネント",
+      "file": "src/components/worktree/MemoCard.tsx",
+      "testFile": "tests/unit/components/worktree/MemoCard.test.tsx",
+      "testRequired": true,
+      "description": "メモ表示・編集、削除ボタン、保存中インジケーター"
+    },
+    {
+      "id": "2.3",
+      "name": "MemoAddButtonコンポーネント",
+      "file": "src/components/worktree/MemoAddButton.tsx",
+      "testFile": "tests/unit/components/worktree/MemoAddButton.test.tsx",
+      "testRequired": true,
+      "description": "追加ボタン、残りメモ数表示、上限時非活性"
+    },
+    {
+      "id": "2.4",
+      "name": "MemoPaneコンポーネント",
+      "file": "src/components/worktree/MemoPane.tsx",
+      "testFile": "tests/unit/components/worktree/MemoPane.test.tsx",
+      "testRequired": true,
+      "description": "メモ一覧表示、追加・編集・削除操作"
+    },
+    {
+      "id": "2.5",
+      "name": "LeftPaneTabSwitcher拡張",
+      "file": "src/components/worktree/LeftPaneTabSwitcher.tsx",
+      "testFile": "tests/unit/components/worktree/LeftPaneTabSwitcher.test.tsx",
+      "testRequired": true,
+      "description": "Memoタブ追加"
+    },
+    {
+      "id": "2.6",
+      "name": "MobileTabBar拡張",
+      "file": "src/components/mobile/MobileTabBar.tsx",
+      "testFile": "tests/unit/components/mobile/MobileTabBar.test.tsx",
+      "testRequired": true,
+      "description": "Memoタブ追加"
+    },
+    {
+      "id": "2.7",
+      "name": "WorktreeDetailRefactored統合",
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "testFile": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "testRequired": true,
+      "description": "Memoケース追加（Desktop/Mobile両方）"
+    }
+  ],
+  "relatedFiles": [
+    "src/hooks/useAutoSave.ts",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/MemoAddButton.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/components/worktree/LeftPaneTabSwitcher.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/lib/api-client.ts"
+  ],
+  "designDocument": "dev-reports/design/issue-19-memo-improvement-design-policy.md",
+  "workPlan": "dev-reports/issue/19/work-plan.md",
+  "previousIterations": [
+    "dev-reports/issue/19/pm-auto-dev/iteration-1/tdd-result.json",
+    "dev-reports/issue/19/pm-auto-dev/iteration-2/tdd-result.json"
+  ]
+}

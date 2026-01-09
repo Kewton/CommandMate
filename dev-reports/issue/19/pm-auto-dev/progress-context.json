@@ -1,0 +1,46 @@
+{
+  "issueNumber": 19,
+  "issueTitle": "メモ機能改善",
+  "branch": "feature/19-memo-improvement",
+  "phases": [
+    {
+      "name": "Phase 0: 初期設定",
+      "status": "completed",
+      "description": "ブランチ作成、事前準備（Logsタブ削除）"
+    },
+    {
+      "name": "Phase 1: Issue情報収集",
+      "status": "completed",
+      "description": "Issue要件、設計書、作業計画の確認"
+    },
+    {
+      "name": "Phase 2: TDD実装",
+      "status": "completed",
+      "iterations": [
+        {
+          "name": "Iteration 1: データ層",
+          "resultFile": "iteration-1/tdd-result.json"
+        },
+        {
+          "name": "Iteration 2: API層",
+          "resultFile": "iteration-2/tdd-result.json"
+        },
+        {
+          "name": "Iteration 3: UI層",
+          "resultFile": "iteration-3/tdd-result.json"
+        }
+      ]
+    },
+    {
+      "name": "Phase 3: 受入テスト",
+      "status": "completed",
+      "resultFile": "acceptance-result.json"
+    },
+    {
+      "name": "Phase 4: リファクタリング",
+      "status": "completed",
+      "resultFile": "refactor-result.json"
+    }
+  ],
+  "outputFile": "progress-report.md"
+}
