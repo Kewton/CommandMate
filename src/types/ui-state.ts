@@ -54,7 +54,7 @@ export interface PromptState {
 /**
  * Mobile tab type for navigation
  */
-export type MobileActivePane = 'history' | 'terminal' | 'files' | 'logs' | 'info';
+export type MobileActivePane = 'history' | 'terminal' | 'files' | 'info';
 
 /**
  * Left pane tab type for desktop view

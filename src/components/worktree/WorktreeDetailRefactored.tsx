@@ -634,12 +634,6 @@ const MobileContent = memo(function MobileContent({
           />
         </ErrorBoundary>
       );
-    case 'logs':
-      return (
-        <div className="p-4 text-gray-500 text-center" role="status">
-          Logs view coming soon
-        </div>
-      );
     case 'info':
       return (
         <MobileInfoContent
