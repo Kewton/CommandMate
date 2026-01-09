@@ -864,6 +864,27 @@ export function getMemosByWorktreeId(
 }
 
 /**
+ * Get a memo by ID
+ *
+ * @param db - Database instance
+ * @param memoId - ID of the memo
+ * @returns Memo or null if not found
+ */
+export function getMemoById(
+  db: Database.Database,
+  memoId: string
+): WorktreeMemo | null {
+  const stmt = db.prepare(`
+    SELECT id, worktree_id, title, content, position, created_at, updated_at
+    FROM worktree_memos
+    WHERE id = ?
+  `);
+
+  const row = stmt.get(memoId) as WorktreeMemoRow | undefined;
+  return row ? mapMemoRow(row) : null;
+}
+
+/**
  * Create a new memo for a worktree
  *
  * @param db - Database instance

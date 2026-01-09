@@ -12,6 +12,7 @@ import { upsertWorktree } from '../db';
 // Import functions that we'll implement
 import {
   getMemosByWorktreeId,
+  getMemoById,
   createMemo,
   updateMemo,
   deleteMemo,
@@ -88,6 +89,43 @@ describe('Database Memo Operations', () => {
     it('should return empty array for non-existent worktree', () => {
       const memos = getMemosByWorktreeId(testDb, 'nonexistent');
       expect(memos).toEqual([]);
+    });
+  });
+
+  describe('getMemoById', () => {
+    it('should return memo by id', () => {
+      const created = createMemo(testDb, 'test-worktree', {
+        title: 'Test Memo',
+        content: 'Test content',
+        position: 0,
+      });
+
+      const memo = getMemoById(testDb, created.id);
+
+      expect(memo).not.toBeNull();
+      expect(memo?.id).toBe(created.id);
+      expect(memo?.title).toBe('Test Memo');
+      expect(memo?.content).toBe('Test content');
+      expect(memo?.worktreeId).toBe('test-worktree');
+      expect(memo?.position).toBe(0);
+    });
+
+    it('should return null for non-existent memo', () => {
+      const memo = getMemoById(testDb, 'nonexistent-id');
+      expect(memo).toBeNull();
+    });
+
+    it('should return correct timestamps', () => {
+      const before = Date.now();
+      const created = createMemo(testDb, 'test-worktree', { position: 0 });
+      const after = Date.now();
+
+      const memo = getMemoById(testDb, created.id);
+
+      expect(memo?.createdAt).toBeInstanceOf(Date);
+      expect(memo?.updatedAt).toBeInstanceOf(Date);
+      expect(memo?.createdAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(memo?.createdAt.getTime()).toBeLessThanOrEqual(after);
     });
   });
 
