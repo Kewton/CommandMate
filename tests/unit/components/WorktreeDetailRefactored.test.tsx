@@ -32,6 +32,20 @@ vi.mock('@/hooks/useIsMobile', () => ({
   MOBILE_BREAKPOINT: 768,
 }));
 
+// Mock useSlashCommands hook
+vi.mock('@/hooks/useSlashCommands', () => ({
+  useSlashCommands: () => ({
+    groups: [],
+    filteredGroups: [],
+    allCommands: [],
+    loading: false,
+    error: null,
+    filter: '',
+    setFilter: vi.fn(),
+    refresh: vi.fn(),
+  }),
+}));
+
 // Mock child components to isolate unit tests
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
   WorktreeDesktopLayout: ({ leftPane, rightPane }: { leftPane: React.ReactNode; rightPane: React.ReactNode }) => (
