@@ -169,9 +169,16 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId }: MessageIn
     // Submit on Enter (but not when Shift is pressed or composing with IME)
     // Shift+Enter allows line breaks
     // Don't submit when command selector is open
-    if (e.key === 'Enter' && !e.shiftKey && !isComposing && !showCommandSelector) {
-      e.preventDefault();
-      void submitMessage();
+    if (e.key === 'Enter' && !isComposing && !showCommandSelector) {
+      if (isMobile) {
+        // Mobile: Enter inserts newline (default behavior)
+        return;
+      }
+      // Desktop: Enter submits, Shift+Enter inserts newline
+      if (!e.shiftKey) {
+        e.preventDefault();
+        void submitMessage();
+      }
     }
   };
 
@@ -216,6 +223,7 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId }: MessageIn
           type="submit"
           disabled={!message.trim() || sending}
           className="flex-shrink-0 p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors disabled:text-gray-300 disabled:hover:bg-transparent"
+          aria-label="Send message"
         >
           {sending ? (
             <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
