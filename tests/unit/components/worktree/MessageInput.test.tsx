@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MessageInput } from '../MessageInput';
+import { MessageInput } from '@/components/worktree/MessageInput';
 
 // Mock the API client
 vi.mock('@/lib/api-client', () => ({
