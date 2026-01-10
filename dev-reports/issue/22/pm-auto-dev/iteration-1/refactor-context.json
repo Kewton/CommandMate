@@ -1,0 +1,32 @@
+{
+  "issue_number": 22,
+  "refactor_targets": [
+    "src/types/sidebar.ts",
+    "src/contexts/SidebarContext.tsx",
+    "src/contexts/WorktreeSelectionContext.tsx",
+    "src/hooks/useSidebar.ts",
+    "src/components/layout/AppShell.tsx",
+    "src/components/layout/SidebarToggle.tsx",
+    "src/components/layout/Sidebar.tsx",
+    "src/components/sidebar/BranchListItem.tsx",
+    "src/components/sidebar/BranchStatusIndicator.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 67.85,
+    "target_coverage": 80
+  },
+  "improvement_goals": [
+    "useSidebar.ts のカバレッジを53.84%から80%以上に向上",
+    "AppShell.tsx のカバレッジを74.07%から80%以上に向上",
+    "SidebarToggle.tsx のカバレッジを74.07%から80%以上に向上",
+    "Sidebar.tsx のカバレッジを74.07%から80%以上に向上",
+    "重複コードがあれば削除",
+    "型安全性の向上",
+    "パフォーマンス最適化（memo, useCallback の適切な使用）"
+  ],
+  "constraints": [
+    "既存テストを壊さない",
+    "lint / type-check エラーを増やさない",
+    "受入条件を満たし続ける"
+  ]
+}

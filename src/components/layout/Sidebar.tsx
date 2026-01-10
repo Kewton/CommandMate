@@ -8,6 +8,7 @@
 'use client';
 
 import React, { memo, useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
@@ -26,6 +27,7 @@ import { toBranchItem } from '@/types/sidebar';
  * ```
  */
 export const Sidebar = memo(function Sidebar() {
+  const router = useRouter();
   const { worktrees, selectedWorktreeId, selectWorktree } = useWorktreeSelection();
   const { closeMobileDrawer } = useSidebarContext();
   const [searchQuery, setSearchQuery] = useState('');
@@ -49,6 +51,8 @@ export const Sidebar = memo(function Sidebar() {
   // Handle branch selection
   const handleBranchClick = (branchId: string) => {
     selectWorktree(branchId);
+    // Navigate to the worktree detail page
+    router.push(`/worktrees/${branchId}`);
     // Close mobile drawer when selecting a branch
     closeMobileDrawer();
   };

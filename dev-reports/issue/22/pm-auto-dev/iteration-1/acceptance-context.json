@@ -1,0 +1,94 @@
+{
+  "issue_number": 22,
+  "feature_summary": "マルチタスク強化 - サイドバー基盤構築",
+  "test_port": 3001,
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "description": "サイドバーからブランチを選択可能にする",
+      "verification": [
+        "サイドバーにブランチ一覧が表示される",
+        "ブランチをクリックすると選択状態が変わる",
+        "選択したブランチがハイライト表示される"
+      ]
+    },
+    {
+      "id": "AC2",
+      "description": "サイドバーの表示・非表示を切り替え可能にする",
+      "verification": [
+        "トグルボタンをクリックするとサイドバーが開閉する",
+        "サイドバーの状態がlocalStorageに保存される",
+        "ページリロード後も状態が維持される"
+      ]
+    },
+    {
+      "id": "AC3",
+      "description": "ブランチの状況（応答待ち、応答済み）をサイドバーから確認可能にする",
+      "verification": [
+        "各ブランチにステータスインジケーターが表示される",
+        "idle: グレー、running: 緑、waiting: 黄、generating: 青で表示",
+        "ステータス変更時にアニメーション（pulse）が表示される"
+      ]
+    },
+    {
+      "id": "AC4",
+      "description": "モバイルでもサイドバーを表示可能にする（デフォルト非表示）",
+      "verification": [
+        "モバイル画面ではサイドバーがデフォルトで非表示",
+        "ハンバーガーメニューをタップするとドロワーが表示される",
+        "オーバーレイをタップするとドロワーが閉じる"
+      ]
+    }
+  ],
+  "test_scenarios": [
+    {
+      "id": "TS1",
+      "name": "デスクトップでサイドバー開閉",
+      "steps": [
+        "ブラウザで http://localhost:3001 にアクセス",
+        "サイドバートグルボタンをクリック",
+        "サイドバーが閉じることを確認",
+        "再度トグルボタンをクリック",
+        "サイドバーが開くことを確認"
+      ]
+    },
+    {
+      "id": "TS2",
+      "name": "ブランチ選択",
+      "steps": [
+        "サイドバーのブランチ一覧を確認",
+        "任意のブランチをクリック",
+        "選択したブランチがハイライトされることを確認",
+        "メインコンテンツが選択したブランチに切り替わることを確認"
+      ]
+    },
+    {
+      "id": "TS3",
+      "name": "ステータスインジケーター表示",
+      "steps": [
+        "ブランチ一覧の各項目にステータスドットが表示されていることを確認",
+        "ステータスに応じた色が表示されていることを確認"
+      ]
+    },
+    {
+      "id": "TS4",
+      "name": "localStorage永続化",
+      "steps": [
+        "サイドバーを閉じる",
+        "ページをリロード",
+        "サイドバーが閉じた状態で表示されることを確認"
+      ]
+    }
+  ],
+  "implemented_files": [
+    "src/types/sidebar.ts",
+    "src/contexts/SidebarContext.tsx",
+    "src/contexts/WorktreeSelectionContext.tsx",
+    "src/hooks/useSidebar.ts",
+    "src/components/layout/AppShell.tsx",
+    "src/components/layout/SidebarToggle.tsx",
+    "src/components/layout/Sidebar.tsx",
+    "src/components/sidebar/BranchListItem.tsx",
+    "src/components/sidebar/BranchStatusIndicator.tsx"
+  ]
+}

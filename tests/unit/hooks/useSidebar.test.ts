@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import React from 'react';
-import { useSidebar, SIDEBAR_STORAGE_KEY } from '@/hooks/useSidebar';
+import { useSidebar, SIDEBAR_STORAGE_KEY, getPersistedSidebarState } from '@/hooks/useSidebar';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 
 describe('useSidebar', () => {
@@ -130,6 +130,91 @@ describe('useSidebar', () => {
   describe('SIDEBAR_STORAGE_KEY', () => {
     it('should export storage key constant', () => {
       expect(SIDEBAR_STORAGE_KEY).toBe('sidebar-state');
+    });
+  });
+
+  describe('getPersistedSidebarState', () => {
+    it('should return stored state when valid JSON exists', () => {
+      const storedState = { isOpen: false, width: 350 };
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify(storedState));
+
+      const result = getPersistedSidebarState();
+
+      expect(result).toEqual(storedState);
+    });
+
+    it('should return null when no data exists', () => {
+      localStorage.clear();
+
+      const result = getPersistedSidebarState();
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null for invalid JSON', () => {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, 'not-valid-json');
+
+      const result = getPersistedSidebarState();
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when localStorage throws error', () => {
+      // Mock localStorage.getItem to throw an error
+      const originalGetItem = localStorage.getItem;
+      localStorage.getItem = vi.fn(() => {
+        throw new Error('localStorage unavailable');
+      });
+
+      const result = getPersistedSidebarState();
+
+      expect(result).toBeNull();
+
+      // Restore original
+      localStorage.getItem = originalGetItem;
+    });
+
+    it('should handle empty string in localStorage', () => {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, '');
+
+      const result = getPersistedSidebarState();
+
+      // Empty string should return null since JSON.parse('') throws
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('localStorage persistence edge cases', () => {
+    it('should persist width changes to localStorage', () => {
+      const { result } = renderHook(() => useSidebar(), { wrapper });
+
+      act(() => {
+        result.current.setWidth(400);
+      });
+
+      const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+      expect(stored).toBeTruthy();
+      const parsed = JSON.parse(stored!);
+      expect(parsed.width).toBe(400);
+    });
+
+    it('should handle localStorage.setItem throwing error gracefully', () => {
+      // Mock localStorage.setItem to throw
+      const originalSetItem = localStorage.setItem;
+      localStorage.setItem = vi.fn(() => {
+        throw new Error('localStorage full');
+      });
+
+      // Should not throw when hook tries to persist
+      expect(() => {
+        const { result } = renderHook(() => useSidebar(), { wrapper });
+        act(() => {
+          result.current.toggle();
+        });
+      }).not.toThrow();
+
+      // Restore original
+      localStorage.setItem = originalSetItem;
     });
   });
 });

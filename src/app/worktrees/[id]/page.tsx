@@ -6,16 +6,22 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { MainLayout } from '@/components/layout';
+import { AppShell } from '@/components/layout';
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
+import { SidebarProvider } from '@/contexts/SidebarContext';
+import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 
 export default function WorktreeDetailPage() {
   const params = useParams();
   const worktreeId = params.id as string;
 
   return (
-    <MainLayout>
-      <WorktreeDetailRefactored worktreeId={worktreeId} />
-    </MainLayout>
+    <SidebarProvider>
+      <WorktreeSelectionProvider>
+        <AppShell>
+          <WorktreeDetailRefactored worktreeId={worktreeId} />
+        </AppShell>
+      </WorktreeSelectionProvider>
+    </SidebarProvider>
   );
 }

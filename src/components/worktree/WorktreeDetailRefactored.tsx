@@ -20,6 +20,7 @@ import React, { useEffect, useCallback, useMemo, useState, memo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeDesktopLayout } from '@/components/worktree/WorktreeDesktopLayout';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
@@ -106,18 +107,43 @@ interface DesktopHeaderProps {
   worktreeName: string;
   onBackClick: () => void;
   onInfoClick: () => void;
+  onMenuClick: () => void;
 }
 
-/** Desktop header with back button, worktree name, and info button */
+/** Desktop header with hamburger menu, back button, worktree name, and info button */
 const DesktopHeader = memo(function DesktopHeader({
   worktreeName,
   onBackClick,
   onInfoClick,
+  onMenuClick,
 }: DesktopHeaderProps) {
   return (
     <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
-      {/* Left: Back button and title */}
+      {/* Left: Menu, Back button and title */}
       <div className="flex items-center gap-3">
+        {/* Hamburger menu button */}
+        <button
+          type="button"
+          onClick={onMenuClick}
+          className="p-2 -ml-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+          aria-label="Toggle sidebar"
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 6h16M4 12h16M4 18h16"
+            />
+          </svg>
+        </button>
+        <div className="w-px h-6 bg-gray-300" aria-hidden="true" />
         <button
           type="button"
           onClick={onBackClick}
@@ -673,6 +699,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 }: WorktreeDetailRefactoredProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
+  const { toggle, openMobileDrawer } = useSidebarContext();
   const { state, actions } = useWorktreeUIState();
 
   // Local state for worktree data and loading status
@@ -958,6 +985,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             worktreeName={worktreeName}
             onBackClick={handleBackClick}
             onInfoClick={handleInfoClick}
+            onMenuClick={toggle}
           />
           <div className="flex-1 min-h-0">
             <WorktreeDesktopLayout
@@ -1057,6 +1085,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           worktreeName={worktreeName}
           status={worktreeStatus}
           onBackClick={handleBackClick}
+          onMenuClick={openMobileDrawer}
         />
 
         <main className="flex-1 pt-14 pb-28 overflow-hidden">

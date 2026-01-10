@@ -11,7 +11,6 @@ import React, { memo, type ReactNode } from 'react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { Sidebar } from './Sidebar';
-import { SidebarToggle } from './SidebarToggle';
 
 // ============================================================================
 // Types
@@ -101,9 +100,6 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
           <Sidebar />
         </div>
       </aside>
-
-      {/* Toggle button */}
-      <SidebarToggle />
 
       {/* Main content */}
       <main

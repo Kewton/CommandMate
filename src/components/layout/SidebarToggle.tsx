@@ -40,7 +40,7 @@ export const SidebarToggle = memo(function SidebarToggle() {
         transition-all duration-200
         focus:outline-none focus:ring-2 focus:ring-blue-500
         ${isOpen ? 'left-[284px]' : 'left-2'}
-        top-4
+        top-16
       `}
     >
       <svg

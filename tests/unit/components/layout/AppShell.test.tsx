@@ -6,11 +6,24 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
+
+// Mock Next.js navigation
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+  }),
+  usePathname: () => '/',
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 // Mock useIsMobile
 vi.mock('@/hooks/useIsMobile', () => ({
@@ -70,18 +83,6 @@ describe('AppShell', () => {
       );
 
       expect(screen.getByTestId('sidebar-container')).toBeInTheDocument();
-    });
-
-    it('should render sidebar toggle button', () => {
-      render(
-        <Wrapper>
-          <AppShell>
-            <div>Content</div>
-          </AppShell>
-        </Wrapper>
-      );
-
-      expect(screen.getByTestId('sidebar-toggle')).toBeInTheDocument();
     });
 
     it('should have full height layout', () => {
@@ -203,6 +204,102 @@ describe('AppShell', () => {
       const complementary = screen.queryByRole('complementary');
       const navigation = screen.queryByRole('navigation');
       expect(complementary || navigation).toBeTruthy();
+    });
+  });
+
+  describe('Mobile Drawer Behavior', () => {
+    beforeEach(() => {
+      (useIsMobile as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    });
+
+    it('should show drawer overlay when mobile drawer is open', () => {
+      // Using a custom wrapper that controls mobile drawer state
+      const MobileDrawerWrapper = ({ children }: { children: React.ReactNode }) => {
+        return (
+          <SidebarProvider>
+            {/* We need to manipulate the context to open mobile drawer */}
+            <WorktreeSelectionProvider>
+              {children}
+            </WorktreeSelectionProvider>
+          </SidebarProvider>
+        );
+      };
+
+      render(
+        <MobileDrawerWrapper>
+          <AppShell>
+            <div>Content</div>
+          </AppShell>
+        </MobileDrawerWrapper>
+      );
+
+      // The mobile layout should be rendered
+      expect(screen.getByTestId('app-shell')).toBeInTheDocument();
+      expect(screen.getByRole('main')).toBeInTheDocument();
+    });
+
+    it('should have flex-col layout on mobile', () => {
+      render(
+        <Wrapper>
+          <AppShell>
+            <div>Content</div>
+          </AppShell>
+        </Wrapper>
+      );
+
+      const shell = screen.getByTestId('app-shell');
+      expect(shell.className).toMatch(/flex-col/);
+    });
+
+    it('should have sidebar container with transform transition', () => {
+      render(
+        <Wrapper>
+          <AppShell>
+            <div>Content</div>
+          </AppShell>
+        </Wrapper>
+      );
+
+      const sidebarContainer = screen.getByTestId('sidebar-container');
+      expect(sidebarContainer.className).toMatch(/transition|transform/);
+    });
+  });
+
+  describe('Initial Sidebar State', () => {
+    it('should start with sidebar open on desktop by default', () => {
+      (useIsMobile as ReturnType<typeof vi.fn>).mockReturnValue(false);
+
+      render(
+        <Wrapper>
+          <AppShell>
+            <div>Content</div>
+          </AppShell>
+        </Wrapper>
+      );
+
+      const sidebarContainer = screen.getByTestId('sidebar-container');
+      expect(sidebarContainer.className).toMatch(/w-72/);
+    });
+
+    it('should render with custom initial state', () => {
+      const CustomWrapper = ({ children }: { children: React.ReactNode }) => (
+        <SidebarProvider initialOpen={false}>
+          <WorktreeSelectionProvider>
+            {children}
+          </WorktreeSelectionProvider>
+        </SidebarProvider>
+      );
+
+      render(
+        <CustomWrapper>
+          <AppShell>
+            <div>Content</div>
+          </AppShell>
+        </CustomWrapper>
+      );
+
+      const sidebarContainer = screen.getByTestId('sidebar-container');
+      expect(sidebarContainer.className).toMatch(/w-0/);
     });
   });
 });

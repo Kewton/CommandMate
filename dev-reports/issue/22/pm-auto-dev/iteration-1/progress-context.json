@@ -1,0 +1,65 @@
+{
+  "issue_number": 22,
+  "issue_title": "マルチタスク強化 - サイドバー基盤構築",
+  "iteration": 1,
+  "phases_completed": [
+    {
+      "phase": "Phase 1: Issue情報収集",
+      "status": "completed",
+      "result_file": null
+    },
+    {
+      "phase": "Phase 2: TDD実装",
+      "status": "completed",
+      "result_file": "tdd-result.json"
+    },
+    {
+      "phase": "Phase 3: 受入テスト",
+      "status": "completed",
+      "result_file": "acceptance-result.json"
+    },
+    {
+      "phase": "Phase 4: リファクタリング",
+      "status": "completed",
+      "result_file": "refactor-result.json"
+    }
+  ],
+  "tdd_summary": {
+    "status": "success",
+    "implemented_files_count": 9,
+    "test_files_count": 9,
+    "tests_passed": 928,
+    "tests_failed": 0,
+    "coverage": 67.85
+  },
+  "acceptance_summary": {
+    "status": "passed",
+    "criteria_passed": 4,
+    "criteria_total": 4
+  },
+  "refactor_summary": {
+    "status": "success",
+    "coverage_before": 67.85,
+    "coverage_after": 68.38,
+    "target_coverage": 80,
+    "files_improved": [
+      {"file": "useSidebar.ts", "before": 53.84, "after": 100},
+      {"file": "Sidebar.tsx", "before": 61.11, "after": 100},
+      {"file": "AppShell.tsx", "before": 100, "after": 100},
+      {"file": "SidebarToggle.tsx", "before": 100, "after": 100}
+    ]
+  },
+  "implemented_features": [
+    "サイドバーからブランチを選択可能",
+    "サイドバーの表示・非表示切り替え",
+    "ブランチステータス表示（idle/running/waiting/generating）",
+    "モバイル対応（ドロワー形式）",
+    "localStorage永続化"
+  ],
+  "next_phases": [
+    "Phase 2: MobileDrawer/MobileHeader拡張",
+    "Phase 3: リアルタイム同期（WebSocket）",
+    "Phase 4: キーボードショートカット",
+    "Phase 5: UX改善"
+  ]
+}

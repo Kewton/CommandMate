@@ -6,12 +6,26 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
+
+// Mock Next.js navigation
+const mockPush = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockPush,
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+  }),
+  usePathname: () => '/',
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 // Mock the API client
 vi.mock('@/lib/api-client', () => ({
@@ -62,6 +76,7 @@ const Wrapper = ({ children }: { children: React.ReactNode }) => (
 describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPush.mockClear();
     (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
       worktrees: mockWorktrees,
       repositories: [],
@@ -257,6 +272,195 @@ describe('Sidebar', () => {
       // Should either show empty state or just empty list
       const branchList = screen.queryByTestId('branch-list');
       expect(branchList || screen.getByTestId('sidebar')).toBeInTheDocument();
+    });
+
+    it('should show empty state message when no branches available', async () => {
+      (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
+        worktrees: [],
+        repositories: [],
+      });
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/No branches available/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Branch selection', () => {
+    it('should handle branch click', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+      });
+
+      // Click on a branch
+      const branchItem = screen.getByText('feature/test-1').closest('[data-testid="branch-list-item"]');
+      if (branchItem) {
+        fireEvent.click(branchItem);
+      }
+
+      // Branch should still be visible after click
+      expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+    });
+  });
+
+  describe('Search filtering', () => {
+    it('should filter branches by name', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+      });
+
+      // Type in search input
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: 'test-1' } });
+
+      // Should show only matching branch
+      await waitFor(() => {
+        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+        expect(screen.queryByText('feature/test-2')).not.toBeInTheDocument();
+        expect(screen.queryByText('main')).not.toBeInTheDocument();
+      });
+    });
+
+    it('should filter branches by repository name', async () => {
+      const multiRepoWorktrees: Worktree[] = [
+        ...mockWorktrees,
+        {
+          id: 'other-feature',
+          name: 'feature/other',
+          path: '/path/to/other',
+          repositoryPath: '/path/to/other-repo',
+          repositoryName: 'OtherRepo',
+        },
+      ];
+      (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
+        worktrees: multiRepoWorktrees,
+        repositories: [],
+      });
+
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/other')).toBeInTheDocument();
+      });
+
+      // Type in search input for repository name
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: 'OtherRepo' } });
+
+      // Should show only matching branch
+      await waitFor(() => {
+        expect(screen.getByText('feature/other')).toBeInTheDocument();
+        expect(screen.queryByText('feature/test-1')).not.toBeInTheDocument();
+      });
+    });
+
+    it('should show no branches found when search has no results', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+      });
+
+      // Type in search input with non-matching query
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: 'nonexistent-branch' } });
+
+      // Should show no branches found message
+      await waitFor(() => {
+        expect(screen.getByText(/No branches found/i)).toBeInTheDocument();
+      });
+    });
+
+    it('should clear filter and show all branches', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+      });
+
+      // Type and then clear search input
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: 'test-1' } });
+
+      await waitFor(() => {
+        expect(screen.queryByText('main')).not.toBeInTheDocument();
+      });
+
+      fireEvent.change(searchInput, { target: { value: '' } });
+
+      // Should show all branches again
+      await waitFor(() => {
+        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+        expect(screen.getByText('feature/test-2')).toBeInTheDocument();
+        expect(screen.getByText('main')).toBeInTheDocument();
+      });
+    });
+
+    it('should handle case-insensitive search', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+      });
+
+      // Type in search input with different case
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: 'FEATURE' } });
+
+      // Should show matching branches (case-insensitive)
+      await waitFor(() => {
+        expect(screen.getByText('feature/test-1')).toBeInTheDocument();
+        expect(screen.getByText('feature/test-2')).toBeInTheDocument();
+        expect(screen.queryByText('main')).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Header content', () => {
+    it('should display Branches title', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Branches')).toBeInTheDocument();
+      });
     });
   });
 });
