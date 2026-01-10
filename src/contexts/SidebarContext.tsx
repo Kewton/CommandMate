@@ -14,8 +14,10 @@ import React, {
   useContext,
   useReducer,
   useCallback,
+  useEffect,
   type ReactNode,
 } from 'react';
+import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -23,6 +25,15 @@ import React, {
 
 /** Default sidebar width in pixels (w-72 = 288px) */
 export const DEFAULT_SIDEBAR_WIDTH = 288;
+
+/** LocalStorage key for sort settings */
+export const SIDEBAR_SORT_STORAGE_KEY = 'mcbd-sidebar-sort';
+
+/** Default sort key */
+export const DEFAULT_SORT_KEY: SortKey = 'updatedAt';
+
+/** Default sort direction */
+export const DEFAULT_SORT_DIRECTION: SortDirection = 'desc';
 
 // ============================================================================
 // Types
@@ -36,6 +47,10 @@ interface SidebarState {
   width: number;
   /** Whether mobile drawer is open */
   isMobileDrawerOpen: boolean;
+  /** Current sort key */
+  sortKey: SortKey;
+  /** Current sort direction */
+  sortDirection: SortDirection;
 }
 
 /** Sidebar context value */
@@ -46,6 +61,10 @@ interface SidebarContextValue {
   width: number;
   /** Mobile drawer open state */
   isMobileDrawerOpen: boolean;
+  /** Current sort key */
+  sortKey: SortKey;
+  /** Current sort direction */
+  sortDirection: SortDirection;
   /** Toggle sidebar open/closed */
   toggle: () => void;
   /** Set sidebar width */
@@ -54,6 +73,10 @@ interface SidebarContextValue {
   openMobileDrawer: () => void;
   /** Close mobile drawer */
   closeMobileDrawer: () => void;
+  /** Set sort key */
+  setSortKey: (key: SortKey) => void;
+  /** Set sort direction */
+  setSortDirection: (direction: SortDirection) => void;
 }
 
 /** Sidebar provider props */
@@ -70,7 +93,10 @@ type SidebarAction =
   | { type: 'TOGGLE' }
   | { type: 'SET_WIDTH'; width: number }
   | { type: 'OPEN_MOBILE_DRAWER' }
-  | { type: 'CLOSE_MOBILE_DRAWER' };
+  | { type: 'CLOSE_MOBILE_DRAWER' }
+  | { type: 'SET_SORT_KEY'; sortKey: SortKey }
+  | { type: 'SET_SORT_DIRECTION'; sortDirection: SortDirection }
+  | { type: 'LOAD_SORT_SETTINGS'; sortKey: SortKey; sortDirection: SortDirection };
 
 // ============================================================================
 // Context
@@ -92,6 +118,12 @@ function sidebarReducer(state: SidebarState, action: SidebarAction): SidebarStat
       return { ...state, isMobileDrawerOpen: true };
     case 'CLOSE_MOBILE_DRAWER':
       return { ...state, isMobileDrawerOpen: false };
+    case 'SET_SORT_KEY':
+      return { ...state, sortKey: action.sortKey };
+    case 'SET_SORT_DIRECTION':
+      return { ...state, sortDirection: action.sortDirection };
+    case 'LOAD_SORT_SETTINGS':
+      return { ...state, sortKey: action.sortKey, sortDirection: action.sortDirection };
     default:
       return state;
   }
@@ -124,7 +156,47 @@ export function SidebarProvider({
     isOpen: initialOpen,
     width: initialWidth,
     isMobileDrawerOpen: false,
+    sortKey: DEFAULT_SORT_KEY,
+    sortDirection: DEFAULT_SORT_DIRECTION,
   });
+
+  // Load sort settings from localStorage on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const stored = localStorage.getItem(SIDEBAR_SORT_STORAGE_KEY);
+      if (stored) {
+        const { sortKey, sortDirection } = JSON.parse(stored);
+        if (sortKey && sortDirection) {
+          dispatch({
+            type: 'LOAD_SORT_SETTINGS',
+            sortKey,
+            sortDirection,
+          });
+        }
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
+
+  // Persist sort settings to localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      localStorage.setItem(
+        SIDEBAR_SORT_STORAGE_KEY,
+        JSON.stringify({
+          sortKey: state.sortKey,
+          sortDirection: state.sortDirection,
+        })
+      );
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [state.sortKey, state.sortDirection]);
 
   const toggle = useCallback(() => {
     dispatch({ type: 'TOGGLE' });
@@ -142,14 +214,26 @@ export function SidebarProvider({
     dispatch({ type: 'CLOSE_MOBILE_DRAWER' });
   }, []);
 
+  const setSortKey = useCallback((sortKey: SortKey) => {
+    dispatch({ type: 'SET_SORT_KEY', sortKey });
+  }, []);
+
+  const setSortDirection = useCallback((sortDirection: SortDirection) => {
+    dispatch({ type: 'SET_SORT_DIRECTION', sortDirection });
+  }, []);
+
   const value: SidebarContextValue = {
     isOpen: state.isOpen,
     width: state.width,
     isMobileDrawerOpen: state.isMobileDrawerOpen,
+    sortKey: state.sortKey,
+    sortDirection: state.sortDirection,
     toggle,
     setWidth,
     openMobileDrawer,
     closeMobileDrawer,
+    setSortKey,
+    setSortDirection,
   };
 
   return (

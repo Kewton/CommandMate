@@ -12,7 +12,9 @@ import { useRouter } from 'next/navigation';
 import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import { SortSelector } from '@/components/sidebar/SortSelector';
 import { toBranchItem } from '@/types/sidebar';
+import { sortBranches } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Component
@@ -29,24 +31,27 @@ import { toBranchItem } from '@/types/sidebar';
 export const Sidebar = memo(function Sidebar() {
   const router = useRouter();
   const { worktrees, selectedWorktreeId, selectWorktree } = useWorktreeSelection();
-  const { closeMobileDrawer } = useSidebarContext();
+  const { closeMobileDrawer, sortKey, sortDirection } = useSidebarContext();
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Convert worktrees to sidebar items and filter by search
+  // Convert worktrees to sidebar items, filter by search, and sort
   const filteredBranches = useMemo(() => {
     const items = worktrees.map(toBranchItem);
 
-    if (!searchQuery.trim()) {
-      return items;
+    // Apply search filter
+    let filtered = items;
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = items.filter(
+        (branch) =>
+          branch.name.toLowerCase().includes(query) ||
+          branch.repositoryName.toLowerCase().includes(query)
+      );
     }
 
-    const query = searchQuery.toLowerCase();
-    return items.filter(
-      (branch) =>
-        branch.name.toLowerCase().includes(query) ||
-        branch.repositoryName.toLowerCase().includes(query)
-    );
-  }, [worktrees, searchQuery]);
+    // Apply sorting
+    return sortBranches(filtered, sortKey, sortDirection);
+  }, [worktrees, searchQuery, sortKey, sortDirection]);
 
   // Handle branch selection
   const handleBranchClick = (branchId: string) => {
@@ -69,7 +74,10 @@ export const Sidebar = memo(function Sidebar() {
         data-testid="sidebar-header"
         className="flex-shrink-0 px-4 py-4 border-b border-gray-700"
       >
-        <h2 className="text-lg font-semibold text-white">Branches</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">Branches</h2>
+          <SortSelector />
+        </div>
       </div>
 
       {/* Search */}

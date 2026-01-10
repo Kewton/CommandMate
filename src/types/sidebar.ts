@@ -32,6 +32,8 @@ export interface SidebarBranchItem {
   hasUnread: boolean;
   /** Last activity timestamp */
   lastActivity?: Date;
+  /** User memo for this branch */
+  memo?: string;
 }
 
 /**
@@ -80,5 +82,6 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
     status,
     hasUnread,
     lastActivity: worktree.updatedAt,
+    memo: worktree.memo,
   };
 }

@@ -52,32 +52,47 @@ export const BranchListItem = memo(function BranchListItem({
       onClick={onClick}
       aria-current={isSelected ? 'true' : undefined}
       className={`
-        w-full px-4 py-3 flex items-center gap-3
+        w-full px-4 py-3 flex flex-col gap-1
         hover:bg-gray-800 transition-colors
         focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500
         ${isSelected ? 'bg-gray-700 border-l-2 border-blue-500' : 'border-l-2 border-transparent'}
       `}
     >
-      {/* Status indicator */}
-      <BranchStatusIndicator status={branch.status} />
+      {/* Main row: status, info, unread */}
+      <div className="flex items-center gap-3 w-full">
+        {/* Status indicator */}
+        <BranchStatusIndicator status={branch.status} />
 
-      {/* Branch info */}
-      <div className="flex-1 min-w-0 text-left">
-        <p className="text-sm font-medium text-white truncate">
-          {branch.name}
-        </p>
-        <p className="text-xs text-gray-400 truncate">
-          {branch.repositoryName}
-        </p>
+        {/* Branch info */}
+        <div className="flex-1 min-w-0 text-left">
+          <p className="text-sm font-medium text-white truncate">
+            {branch.name}
+          </p>
+          <p className="text-xs text-gray-400 truncate">
+            {branch.repositoryName}
+          </p>
+        </div>
+
+        {/* Unread indicator */}
+        {branch.hasUnread && (
+          <span
+            data-testid="unread-indicator"
+            className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"
+            aria-label="Has unread messages"
+          />
+        )}
       </div>
 
-      {/* Unread indicator */}
-      {branch.hasUnread && (
-        <span
-          data-testid="unread-indicator"
-          className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"
-          aria-label="Has unread messages"
-        />
+      {/* Memo display (only when selected and memo exists) */}
+      {isSelected && branch.memo && (
+        <div
+          data-testid="branch-memo"
+          className="pl-6 pr-2 mt-1 text-left"
+        >
+          <p className="text-xs text-gray-400 line-clamp-2">
+            {branch.memo}
+          </p>
+        </div>
       )}
     </button>
   );
