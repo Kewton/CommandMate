@@ -3,7 +3,7 @@
  * Type-safe fetch wrapper for backend API calls
  */
 
-import type { Worktree, ChatMessage } from '@/types/models';
+import type { Worktree, ChatMessage, WorktreeMemo } from '@/types/models';
 import type { SlashCommandGroup } from '@/types/slash-commands';
 
 /**
@@ -266,6 +266,94 @@ export const slashCommandApi = {
    */
   async getAll(): Promise<SlashCommandsResponse> {
     return fetchApi<SlashCommandsResponse>('/api/slash-commands');
+  },
+};
+
+/**
+ * Memo API response types
+ */
+export interface MemosResponse {
+  memos: WorktreeMemo[];
+}
+
+export interface MemoResponse {
+  memo: WorktreeMemo;
+}
+
+/**
+ * Memo creation request body
+ */
+export interface CreateMemoRequest {
+  title?: string;
+  content?: string;
+}
+
+/**
+ * Memo update request body
+ */
+export interface UpdateMemoRequest {
+  title?: string;
+  content?: string;
+}
+
+/**
+ * Memo API client
+ * CRUD operations for worktree memos
+ */
+export const memoApi = {
+  /**
+   * Get all memos for a worktree
+   * @param worktreeId - ID of the worktree
+   * @returns List of memos sorted by position
+   */
+  async getAll(worktreeId: string): Promise<WorktreeMemo[]> {
+    const response = await fetchApi<MemosResponse>(`/api/worktrees/${worktreeId}/memos`);
+    return response.memos;
+  },
+
+  /**
+   * Create a new memo for a worktree
+   * @param worktreeId - ID of the worktree
+   * @param data - Memo data (title, content)
+   * @returns Created memo
+   */
+  async create(worktreeId: string, data?: CreateMemoRequest): Promise<WorktreeMemo> {
+    const response = await fetchApi<MemoResponse>(`/api/worktrees/${worktreeId}/memos`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    });
+    return response.memo;
+  },
+
+  /**
+   * Update an existing memo
+   * @param worktreeId - ID of the worktree
+   * @param memoId - ID of the memo to update
+   * @param data - Fields to update (title and/or content)
+   * @returns Updated memo
+   */
+  async update(worktreeId: string, memoId: string, data: UpdateMemoRequest): Promise<WorktreeMemo> {
+    const response = await fetchApi<MemoResponse>(
+      `/api/worktrees/${worktreeId}/memos/${memoId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }
+    );
+    return response.memo;
+  },
+
+  /**
+   * Delete a memo
+   * @param worktreeId - ID of the worktree
+   * @param memoId - ID of the memo to delete
+   * @returns Success status
+   */
+  async delete(worktreeId: string, memoId: string): Promise<{ success: boolean }> {
+    return fetchApi<{ success: boolean }>(
+      `/api/worktrees/${worktreeId}/memos/${memoId}`,
+      { method: 'DELETE' }
+    );
   },
 };
 

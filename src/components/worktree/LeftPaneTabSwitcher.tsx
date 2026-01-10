@@ -16,7 +16,7 @@ import React, { useCallback, memo } from 'react';
 /**
  * Available tabs for the left pane
  */
-export type LeftPaneTab = 'history' | 'files';
+export type LeftPaneTab = 'history' | 'files' | 'memo';
 
 export interface LeftPaneTabSwitcherProps {
   /** Currently active tab */
@@ -75,6 +75,25 @@ const FilesIcon = memo(function FilesIcon() {
   );
 });
 
+const MemoIcon = memo(function MemoIcon() {
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+      />
+    </svg>
+  );
+});
+
 // ============================================================================
 // Tab Configuration
 // ============================================================================
@@ -82,6 +101,7 @@ const FilesIcon = memo(function FilesIcon() {
 const TABS: TabConfig[] = [
   { id: 'history', label: 'History', icon: <HistoryIcon /> },
   { id: 'files', label: 'Files', icon: <FilesIcon /> },
+  { id: 'memo', label: 'Memo', icon: <MemoIcon /> },
 ];
 
 // ============================================================================

@@ -171,6 +171,27 @@ export interface ChatMessage {
 }
 
 /**
+ * Individual memo item for a worktree
+ * Supports up to 5 memos per worktree (position 0-4)
+ */
+export interface WorktreeMemo {
+  /** Unique memo ID (UUID) */
+  id: string;
+  /** Associated worktree ID */
+  worktreeId: string;
+  /** Memo title (max 100 characters) */
+  title: string;
+  /** Memo content (max 10000 characters) */
+  content: string;
+  /** Position in the memo list (0-4) */
+  position: number;
+  /** Creation timestamp */
+  createdAt: Date;
+  /** Last updated timestamp */
+  updatedAt: Date;
+}
+
+/**
  * Worktree session state for tmux capture
  */
 export interface WorktreeSessionState {

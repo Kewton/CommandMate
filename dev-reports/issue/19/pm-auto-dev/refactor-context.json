@@ -1,0 +1,36 @@
+{
+  "issueNumber": 19,
+  "issueTitle": "メモ機能改善",
+  "scope": "Issue #19で追加・変更されたファイルのコード品質改善",
+  "targetFiles": [
+    "src/types/models.ts",
+    "src/types/ui-state.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/db.ts",
+    "src/app/api/worktrees/[id]/memos/route.ts",
+    "src/app/api/worktrees/[id]/memos/[memoId]/route.ts",
+    "src/lib/api-client.ts",
+    "src/hooks/useAutoSave.ts",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/MemoAddButton.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/components/worktree/LeftPaneTabSwitcher.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "refactoringChecklist": [
+    "SOLID原則の遵守確認",
+    "重複コードの排除（DRY）",
+    "命名規則の一貫性",
+    "コメント・ドキュメンテーションの改善",
+    "エラーハンドリングの一貫性",
+    "型定義の厳密性",
+    "コンポーネントの責務分離",
+    "テストカバレッジの確認"
+  ],
+  "constraints": [
+    "機能的な変更は行わない",
+    "既存のテストが引き続きパスすること",
+    "パフォーマンスに悪影響を与えないこと"
+  ]
+}

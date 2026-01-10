@@ -1,0 +1,51 @@
+{
+  "issueNumber": 19,
+  "issueTitle": "メモ機能改善",
+  "iteration": 2,
+  "phase": "api-layer",
+  "scope": "APIエンドポイント、APIクライアント",
+  "acceptanceCriteria": [
+    "GET /api/worktrees/:id/memos がメモ一覧を返す",
+    "POST /api/worktrees/:id/memos が新規メモを作成する",
+    "PUT /api/worktrees/:id/memos/:memoId がメモを更新する",
+    "DELETE /api/worktrees/:id/memos/:memoId がメモを削除する",
+    "存在しないworktreeIdでは404エラーが返る",
+    "メモ数上限（5つ）超過で400エラーが返る",
+    "バリデーションエラーで400エラーが返る",
+    "api-client.tsにmemoApi関数群が追加されている"
+  ],
+  "tasks": [
+    {
+      "id": "1.5",
+      "name": "API GET/POST エンドポイント",
+      "file": "src/app/api/worktrees/[id]/memos/route.ts",
+      "testFile": "tests/integration/api/memos.test.ts",
+      "testRequired": true,
+      "description": "GET: メモ一覧取得, POST: メモ新規作成"
+    },
+    {
+      "id": "1.6",
+      "name": "API PUT/DELETE エンドポイント",
+      "file": "src/app/api/worktrees/[id]/memos/[memoId]/route.ts",
+      "testFile": "tests/integration/api/memos.test.ts",
+      "testRequired": true,
+      "description": "PUT: メモ更新, DELETE: メモ削除"
+    },
+    {
+      "id": "1.7",
+      "name": "APIクライアント拡張",
+      "file": "src/lib/api-client.ts",
+      "testRequired": false,
+      "description": "memoApi オブジェクトの追加（getAll, create, update, delete）"
+    }
+  ],
+  "relatedFiles": [
+    "src/app/api/worktrees/[id]/memos/route.ts",
+    "src/app/api/worktrees/[id]/memos/[memoId]/route.ts",
+    "src/lib/api-client.ts",
+    "src/lib/db.ts"
+  ],
+  "designDocument": "dev-reports/design/issue-19-memo-improvement-design-policy.md",
+  "workPlan": "dev-reports/issue/19/work-plan.md",
+  "previousIteration": "dev-reports/issue/19/pm-auto-dev/iteration-1/tdd-result.json"
+}

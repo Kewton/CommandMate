@@ -1,7 +1,7 @@
 /**
  * Tests for MobileTabBar component
  *
- * Tests the mobile tab bar for switching between terminal, history, logs, and info views
+ * Tests the mobile tab bar for switching between terminal, history, files, and info views
  * @vitest-environment jsdom
  */
 
@@ -31,12 +31,13 @@ describe('MobileTabBar', () => {
       expect(screen.getByTestId('mobile-tab-bar')).toBeInTheDocument();
     });
 
-    it('should render all four tabs', () => {
+    it('should render all five tabs', () => {
       render(<MobileTabBar {...defaultProps} />);
 
       expect(screen.getByRole('tab', { name: /terminal/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: /logs/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /files/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /memo/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /info/i })).toBeInTheDocument();
     });
 
@@ -62,11 +63,11 @@ describe('MobileTabBar', () => {
       expect(historyTab).toHaveAttribute('aria-selected', 'true');
     });
 
-    it('should highlight logs tab when activeTab is logs', () => {
-      render(<MobileTabBar {...defaultProps} activeTab="logs" />);
+    it('should highlight files tab when activeTab is files', () => {
+      render(<MobileTabBar {...defaultProps} activeTab="files" />);
 
-      const logsTab = screen.getByRole('tab', { name: /logs/i });
-      expect(logsTab).toHaveAttribute('aria-selected', 'true');
+      const filesTab = screen.getByRole('tab', { name: /files/i });
+      expect(filesTab).toHaveAttribute('aria-selected', 'true');
     });
 
     it('should highlight info tab when activeTab is info', () => {
@@ -103,13 +104,13 @@ describe('MobileTabBar', () => {
       expect(onTabChange).toHaveBeenCalledWith('history');
     });
 
-    it('should call onTabChange with "logs" when logs tab is clicked', () => {
+    it('should call onTabChange with "files" when files tab is clicked', () => {
       const onTabChange = vi.fn();
       render(<MobileTabBar {...defaultProps} onTabChange={onTabChange} />);
 
-      fireEvent.click(screen.getByRole('tab', { name: /logs/i }));
+      fireEvent.click(screen.getByRole('tab', { name: /files/i }));
 
-      expect(onTabChange).toHaveBeenCalledWith('logs');
+      expect(onTabChange).toHaveBeenCalledWith('files');
     });
 
     it('should call onTabChange with "info" when info tab is clicked', () => {
@@ -240,8 +241,41 @@ describe('MobileTabBar', () => {
 
       expect(screen.getByRole('tab', { name: /terminal/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: /logs/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /files/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /memo/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /info/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('Memo Tab', () => {
+    it('should highlight memo tab when activeTab is memo', () => {
+      render(<MobileTabBar {...defaultProps} activeTab="memo" />);
+
+      const memoTab = screen.getByRole('tab', { name: /memo/i });
+      expect(memoTab).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('should call onTabChange with "memo" when memo tab is clicked', () => {
+      const onTabChange = vi.fn();
+      render(<MobileTabBar {...defaultProps} onTabChange={onTabChange} />);
+
+      fireEvent.click(screen.getByRole('tab', { name: /memo/i }));
+
+      expect(onTabChange).toHaveBeenCalledWith('memo');
+    });
+
+    it('should render memo tab in correct position (after files, before info)', () => {
+      render(<MobileTabBar {...defaultProps} />);
+
+      const tabs = screen.getAllByRole('tab');
+      const tabLabels = tabs.map(tab => tab.textContent?.toLowerCase().trim());
+
+      // Order: terminal, history, files, memo, info
+      expect(tabLabels[0]).toContain('terminal');
+      expect(tabLabels[1]).toContain('history');
+      expect(tabLabels[2]).toContain('files');
+      expect(tabLabels[3]).toContain('memo');
+      expect(tabLabels[4]).toContain('info');
     });
   });
 

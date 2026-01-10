@@ -1,0 +1,109 @@
+{
+  "issueNumber": 19,
+  "issueTitle": "メモ機能改善",
+  "issueUrl": "https://github.com/Kewton/MyCodeBranchDesk/issues/19",
+  "requirements": [
+    "タブからのアクセス性向上: Infoモーダル内でなく、タブから直接メモを編集可能にする",
+    "複数メモ対応: 最大5つのメモをサポート"
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "description": "Desktop: History/Files/Memo タブが表示される",
+      "testType": "unit",
+      "testFiles": ["tests/unit/components/worktree/LeftPaneTabSwitcher.test.tsx"]
+    },
+    {
+      "id": "AC-2",
+      "description": "Desktop: Memoタブをクリックするとメモ一覧が表示される",
+      "testType": "unit",
+      "testFiles": ["tests/unit/components/worktree/MemoPane.test.tsx"]
+    },
+    {
+      "id": "AC-3",
+      "description": "「+ Add Memo」でメモを追加できる",
+      "testType": "unit",
+      "testFiles": ["tests/unit/components/worktree/MemoAddButton.test.tsx", "tests/unit/components/worktree/MemoPane.test.tsx"]
+    },
+    {
+      "id": "AC-4",
+      "description": "メモの内容を編集できる",
+      "testType": "unit",
+      "testFiles": ["tests/unit/components/worktree/MemoCard.test.tsx"]
+    },
+    {
+      "id": "AC-5",
+      "description": "編集内容が自動保存される（300ms debounce）",
+      "testType": "unit",
+      "testFiles": ["tests/unit/hooks/useAutoSave.test.ts"]
+    },
+    {
+      "id": "AC-6",
+      "description": "メモを削除できる",
+      "testType": "unit",
+      "testFiles": ["tests/unit/components/worktree/MemoCard.test.tsx", "tests/unit/components/worktree/MemoPane.test.tsx"]
+    },
+    {
+      "id": "AC-7",
+      "description": "最大5つまでメモを追加できる",
+      "testType": "integration",
+      "testFiles": ["tests/integration/api/memos.test.ts"]
+    },
+    {
+      "id": "AC-8",
+      "description": "5つの場合は追加ボタンが非活性になる",
+      "testType": "unit",
+      "testFiles": ["tests/unit/components/worktree/MemoAddButton.test.tsx"]
+    },
+    {
+      "id": "AC-9",
+      "description": "Mobile: Terminal/History/Files/Memo/Info タブが表示される",
+      "testType": "unit",
+      "testFiles": ["tests/unit/components/mobile/MobileTabBar.test.tsx"]
+    },
+    {
+      "id": "AC-10",
+      "description": "Mobile: Memoタブをタップするとメモ一覧が表示される",
+      "testType": "unit",
+      "testFiles": ["tests/unit/components/worktree/MemoPane.test.tsx"]
+    },
+    {
+      "id": "AC-11",
+      "description": "既存のmemoデータが新テーブルに移行されている",
+      "testType": "unit",
+      "testFiles": ["src/lib/__tests__/db-migrations-v10.test.ts"]
+    }
+  ],
+  "qualityChecks": [
+    {
+      "name": "ESLint",
+      "command": "npm run lint",
+      "expectedResult": "0 errors"
+    },
+    {
+      "name": "TypeScript",
+      "command": "npx tsc --noEmit",
+      "expectedResult": "0 errors"
+    },
+    {
+      "name": "Unit Tests",
+      "command": "npm run test:unit",
+      "expectedResult": "All tests pass"
+    },
+    {
+      "name": "Integration Tests",
+      "command": "npm run test:integration",
+      "expectedResult": "All tests pass"
+    },
+    {
+      "name": "Build",
+      "command": "npm run build",
+      "expectedResult": "Build succeeds"
+    }
+  ],
+  "iterationResults": [
+    "dev-reports/issue/19/pm-auto-dev/iteration-1/tdd-result.json",
+    "dev-reports/issue/19/pm-auto-dev/iteration-2/tdd-result.json",
+    "dev-reports/issue/19/pm-auto-dev/iteration-3/tdd-result.json"
+  ]
+}

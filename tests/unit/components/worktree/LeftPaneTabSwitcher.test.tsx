@@ -19,12 +19,13 @@ describe('LeftPaneTabSwitcher', () => {
   });
 
   describe('Basic rendering', () => {
-    it('should render tab buttons for history and files', () => {
+    it('should render tab buttons for history, files, and memo', () => {
       const onTabChange = vi.fn();
       render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
 
       expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /files/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /memo/i })).toBeInTheDocument();
     });
 
     it('should render with tablist role', () => {
@@ -189,6 +190,35 @@ describe('LeftPaneTabSwitcher', () => {
 
       expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /files/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /memo/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('Memo tab', () => {
+    it('should indicate memo tab as active when activeTab is memo', () => {
+      const onTabChange = vi.fn();
+      render(<LeftPaneTabSwitcher activeTab="memo" onTabChange={onTabChange} />);
+
+      const memoTab = screen.getByRole('tab', { name: /memo/i });
+      expect(memoTab).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('should call onTabChange with "memo" when memo tab is clicked', () => {
+      const onTabChange = vi.fn();
+      render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
+
+      const memoTab = screen.getByRole('tab', { name: /memo/i });
+      fireEvent.click(memoTab);
+
+      expect(onTabChange).toHaveBeenCalledWith('memo');
+    });
+
+    it('should show memo icon', () => {
+      const onTabChange = vi.fn();
+      render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
+
+      const memoTab = screen.getByRole('tab', { name: /memo/i });
+      expect(memoTab.querySelector('svg')).toBeInTheDocument();
     });
   });
 

@@ -1,0 +1,58 @@
+{
+  "issueNumber": 19,
+  "issueTitle": "メモ機能改善",
+  "iteration": 1,
+  "phase": "data-layer",
+  "scope": "型定義、DBマイグレーション、DB操作関数",
+  "acceptanceCriteria": [
+    "WorktreeMemo型が定義されている",
+    "MobileActivePane型に'memo'が追加されている",
+    "LeftPaneTab型に'memo'が追加されている",
+    "worktree_memosテーブルがマイグレーションで作成される",
+    "既存memoデータが新テーブルにマイグレーションされる",
+    "getMemosByWorktreeId関数が正しくメモを取得する",
+    "createMemo関数が正しくメモを作成する",
+    "updateMemo関数が正しくメモを更新する",
+    "deleteMemo関数が正しくメモを削除する"
+  ],
+  "tasks": [
+    {
+      "id": "1.1",
+      "name": "WorktreeMemo型定義",
+      "file": "src/types/models.ts",
+      "testRequired": false,
+      "description": "WorktreeMemoインターフェースを追加"
+    },
+    {
+      "id": "1.2",
+      "name": "UI状態型の拡張",
+      "file": "src/types/ui-state.ts",
+      "testRequired": false,
+      "description": "MobileActivePane, LeftPaneTabに'memo'を追加"
+    },
+    {
+      "id": "1.3",
+      "name": "DBマイグレーション Version 10",
+      "file": "src/lib/db-migrations.ts",
+      "testFile": "src/lib/__tests__/db-migrations-v10.test.ts",
+      "testRequired": true,
+      "description": "worktree_memosテーブル作成、データマイグレーション"
+    },
+    {
+      "id": "1.4",
+      "name": "DB操作関数",
+      "file": "src/lib/db.ts",
+      "testFile": "src/lib/__tests__/db-memo.test.ts",
+      "testRequired": true,
+      "description": "getMemosByWorktreeId, createMemo, updateMemo, deleteMemo, reorderMemos"
+    }
+  ],
+  "relatedFiles": [
+    "src/types/models.ts",
+    "src/types/ui-state.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/db.ts"
+  ],
+  "designDocument": "dev-reports/design/issue-19-memo-improvement-design-policy.md",
+  "workPlan": "dev-reports/issue/19/work-plan.md"
+}

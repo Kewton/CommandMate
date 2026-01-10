@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 /**
  * Migration definition
@@ -411,6 +411,58 @@ const migrations: Migration[] = [
       // In production, you would need to recreate the table without in_progress_message_id
       console.log('No full rollback for in_progress_message_id column (SQLite limitation)');
     }
+  },
+  {
+    version: 10,
+    name: 'add-worktree-memos-table',
+    up: (db) => {
+      // 1. Create worktree_memos table
+      db.exec(`
+        CREATE TABLE worktree_memos (
+          id TEXT PRIMARY KEY,
+          worktree_id TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT 'Memo',
+          content TEXT NOT NULL DEFAULT '',
+          position INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+
+          FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE,
+          UNIQUE(worktree_id, position)
+        );
+      `);
+
+      // 2. Create index on worktree_id and position
+      db.exec(`
+        CREATE INDEX idx_worktree_memos_worktree
+          ON worktree_memos(worktree_id, position);
+      `);
+
+      // 3. Migrate existing memo data from worktrees table
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { randomUUID } = require('crypto') as typeof import('crypto');
+
+      const worktrees = db.prepare(`
+        SELECT id, memo FROM worktrees WHERE memo IS NOT NULL AND memo != ''
+      `).all() as Array<{ id: string; memo: string }>;
+
+      const insertStmt = db.prepare(`
+        INSERT INTO worktree_memos (id, worktree_id, title, content, position, created_at, updated_at)
+        VALUES (?, ?, 'Memo', ?, 0, ?, ?)
+      `);
+
+      const now = Date.now();
+      for (const wt of worktrees) {
+        insertStmt.run(randomUUID(), wt.id, wt.memo, now, now);
+      }
+
+      console.log(`✓ Created worktree_memos table`);
+      console.log(`✓ Migrated ${worktrees.length} existing memos to new table`);
+    },
+    down: (db) => {
+      db.exec('DROP TABLE IF EXISTS worktree_memos');
+      console.log('✓ Dropped worktree_memos table');
+    }
   }
 ];
 
@@ -648,7 +700,7 @@ export function validateSchema(db: Database.Database): boolean {
     `).all() as Array<{ name: string }>;
 
     const tableNames = tables.map(t => t.name);
-    const requiredTables = ['worktrees', 'chat_messages', 'session_states', 'schema_version'];
+    const requiredTables = ['worktrees', 'chat_messages', 'session_states', 'schema_version', 'worktree_memos'];
 
     const missingTables = requiredTables.filter(t => !tableNames.includes(t));
 
