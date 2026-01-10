@@ -1,0 +1,57 @@
+{
+  "issue_number": 33,
+  "issue_title": "codex geminiの文言の削除",
+  "issue_type": "ui_removal",
+  "acceptance_criteria": [
+    "トップページからcodex/gemini表記が削除されている",
+    "詳細ページからcodex/geminiタブが削除されている",
+    "セッション終了確認ダイアログから「Claude/Codex/Gemini」文言が削除されている",
+    "内部ロジック（cli-tools/types.ts等）は将来の再導入に備えて維持",
+    "デッドコードチェック完了（意図的維持以外）",
+    "CIチェック全パス（lint, type-check, test, build）"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "1.1",
+      "name": "WorktreeDetail.tsx修正",
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "changes": [
+        "TabView型定義の変更（codex/gemini削除）",
+        "CLI_TABS配列の変更（claudeのみ）",
+        "タブナビゲーションからCodex/Geminiボタン削除",
+        "直接的な条件分岐の修正（166行目）",
+        "直接的な条件分岐の修正（620行目）"
+      ]
+    },
+    {
+      "id": "1.2",
+      "name": "WorktreeCard.tsx修正",
+      "file": "src/components/worktree/WorktreeCard.tsx",
+      "changes": [
+        "確認ダイアログ文言修正",
+        "Last Messages表示からCodex/Gemini削除"
+      ]
+    },
+    {
+      "id": "2.1",
+      "name": "E2Eテスト修正",
+      "file": "tests/e2e/cli-tool-selection.spec.ts",
+      "changes": [
+        "テストケース1修正（Claudeのみ確認）",
+        "テストケース2〜6削除",
+        "テストケース7修正（Claudeのみ確認）"
+      ]
+    }
+  ],
+  "intentionally_preserved_code": [
+    "cli-tools/types.ts - CLIToolType定義",
+    "cli-tools/codex.ts - Codex CLI実装",
+    "cli-tools/gemini.ts - Gemini CLI実装",
+    "cli-tools/manager.ts - 3ツール登録",
+    "cli-patterns.ts - ツール別パターン",
+    "tests/unit/cli-tools/*.test.ts - 内部ロジックテスト"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-33-codex-gemini-removal-design-policy.md",
+  "work_plan_path": "dev-reports/issue/33/work-plan.md"
+}

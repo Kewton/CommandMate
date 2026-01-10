@@ -1,0 +1,64 @@
+{
+  "status": "passed",
+  "test_results": [
+    {
+      "id": "AC-1",
+      "name": "Top page Codex/Gemini text removal",
+      "status": "passed",
+      "details": "WorktreeCard.tsx (lines 227-244) now only displays Claude section in Last Messages. Codex and Gemini sections have been completely removed from the UI display. Only the Claude badge with status indicators remains."
+    },
+    {
+      "id": "AC-2",
+      "name": "Detail page Codex/Gemini tab removal",
+      "status": "passed",
+      "details": "WorktreeDetail.tsx updated: TabView type (line 28) now only includes 'claude' | 'logs' | 'info' | 'memo'. CLI_TABS array (line 31) only contains 'claude'. isCliTab type guard (line 32) only checks for 'claude'. Tab navigation (lines 555-564) only shows Claude tab button. Codex and Gemini tab buttons completely removed."
+    },
+    {
+      "id": "AC-3",
+      "name": "Confirm dialog text update",
+      "status": "passed",
+      "details": "WorktreeCard.tsx line 54: confirm dialog message changed from containing 'Claude/Codex/Gemini' to simplified text: 'セッションを終了しますか？\\n\\n※全てのメッセージ履歴が削除されます。ログファイルは保持されます。'"
+    },
+    {
+      "id": "AC-4",
+      "name": "Internal logic preservation",
+      "status": "passed",
+      "details": "All internal CLI tool files preserved: types.ts still defines CLIToolType = 'claude' | 'codex' | 'gemini'; codex.ts (CodexTool class) intact with 160 lines; gemini.ts (GeminiTool class) intact with 143 lines; manager.ts registers all 3 tools (claude, codex, gemini) for future re-enablement."
+    },
+    {
+      "id": "AC-5",
+      "name": "E2E test updates",
+      "status": "passed",
+      "details": "cli-tool-selection.spec.ts updated: Test 1 checks Claude badge exists and verifies Codex/Gemini badges are NOT displayed (lines 24-33). Test 2 (mobile responsive) verifies same behavior (lines 44-54). Test 3 (badge color) unchanged. Codex/Gemini selection tests removed."
+    },
+    {
+      "id": "AC-6",
+      "name": "CI checks all passed",
+      "status": "passed",
+      "details": "From TDD result: lint_passed=true, type_check_passed=true, tests_passed=true (994/1000 passed, 6 skipped, 0 failed), build_passed=true. Coverage: 68.87%."
+    }
+  ],
+  "overall_coverage": 100,
+  "issues_found": [],
+  "recommendations": [
+    "Consider adding a configuration flag to easily re-enable Codex/Gemini in the future without code changes",
+    "Document the preserved internal logic in a README or design doc for future maintainers",
+    "Consider adding a feature flag system for toggling CLI tool visibility"
+  ],
+  "verification_summary": {
+    "total_criteria": 6,
+    "passed": 6,
+    "failed": 0,
+    "acceptance_rate": "100%"
+  },
+  "files_verified": [
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/WorktreeCard.tsx",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/WorktreeDetail.tsx",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/cli-tools/types.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/cli-tools/codex.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/cli-tools/gemini.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/cli-tools/manager.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/e2e/cli-tool-selection.spec.ts"
+  ],
+  "completed_at": "2026-01-11T01:15:00Z"
+}

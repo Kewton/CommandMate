@@ -1,0 +1,67 @@
+{
+  "issue_number": 33,
+  "feature_summary": "codex geminiの文言の削除",
+  "acceptance_criteria": [
+    "トップページからcodex/gemini表記が削除されている",
+    "詳細ページからcodex/geminiタブが削除されている",
+    "セッション終了確認ダイアログから「Claude/Codex/Gemini」文言が削除されている",
+    "内部ロジック（cli-tools/types.ts等）は将来の再導入に備えて維持",
+    "デッドコードチェック完了（意図的維持以外）",
+    "CIチェック全パス（lint, type-check, test, build）"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "トップページのCodex/Gemini表記削除確認",
+      "description": "WorktreeCardコンポーネントからCodex/Geminiバッジと Last Messages セクションが削除されていること",
+      "verification_method": "code_review",
+      "files_to_check": ["src/components/worktree/WorktreeCard.tsx"]
+    },
+    {
+      "id": "AC-2",
+      "name": "詳細ページのCodex/Geminiタブ削除確認",
+      "description": "WorktreeDetailコンポーネントからCodex/Geminiタブが削除されていること",
+      "verification_method": "code_review",
+      "files_to_check": ["src/components/worktree/WorktreeDetail.tsx"]
+    },
+    {
+      "id": "AC-3",
+      "name": "確認ダイアログ文言修正確認",
+      "description": "セッション終了確認ダイアログから「Claude/Codex/Gemini」文言が削除されていること",
+      "verification_method": "code_review",
+      "files_to_check": ["src/components/worktree/WorktreeCard.tsx"]
+    },
+    {
+      "id": "AC-4",
+      "name": "内部ロジック維持確認",
+      "description": "cli-tools関連ファイルが変更されていないこと",
+      "verification_method": "file_existence",
+      "files_to_check": [
+        "src/lib/cli-tools/types.ts",
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/cli-tools/gemini.ts",
+        "src/lib/cli-tools/manager.ts"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "name": "E2Eテスト更新確認",
+      "description": "E2EテストがClaudeのみをチェックするよう更新されていること",
+      "verification_method": "code_review",
+      "files_to_check": ["tests/e2e/cli-tool-selection.spec.ts"]
+    },
+    {
+      "id": "AC-6",
+      "name": "CIチェック全パス",
+      "description": "lint, type-check, unit test, buildがすべてパスすること",
+      "verification_method": "command_execution",
+      "commands": [
+        "npm run lint",
+        "npx tsc --noEmit",
+        "npm run test:unit",
+        "npm run build"
+      ]
+    }
+  ],
+  "tdd_result_path": "dev-reports/issue/33/pm-auto-dev/iteration-1/tdd-result.json"
+}

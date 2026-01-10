@@ -1,0 +1,96 @@
+{
+  "status": "success",
+  "dead_code_found": [
+    {
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "line": 31,
+      "type": "unused_variable",
+      "name": "CLI_TABS",
+      "description": "Constant was defined but never used in the component"
+    }
+  ],
+  "dead_code_removed": [
+    {
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "line": 31,
+      "type": "unused_variable",
+      "name": "CLI_TABS",
+      "action": "Removed unused constant declaration"
+    }
+  ],
+  "code_quality_issues": [
+    {
+      "file": "src/components/worktree/WorktreeCard.tsx",
+      "line": 48,
+      "type": "outdated_comment",
+      "description": "Comment referenced Codex and Gemini which are no longer in UI",
+      "action": "Updated comment to reflect Claude-only behavior"
+    }
+  ],
+  "improvements_made": [
+    {
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "change": "Removed unused CLI_TABS constant",
+      "reason": "ESLint error: @typescript-eslint/no-unused-vars"
+    },
+    {
+      "file": "src/components/worktree/WorktreeCard.tsx",
+      "change": "Updated JSDoc comment for handleKillSession",
+      "reason": "Comment accuracy - now reflects Claude-only behavior"
+    }
+  ],
+  "preserved_code_verified": {
+    "files": [
+      "src/lib/cli-tools/types.ts",
+      "src/lib/cli-tools/codex.ts",
+      "src/lib/cli-tools/gemini.ts",
+      "src/lib/cli-tools/manager.ts",
+      "src/lib/cli-patterns.ts"
+    ],
+    "status": "preserved",
+    "reason": "Intentionally maintained for future Codex/Gemini re-introduction"
+  },
+  "api_compatibility_notes": [
+    {
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "lines": [92, 629],
+      "type": "type_annotation",
+      "content": "'claude' | 'codex' | 'gemini'",
+      "status": "preserved",
+      "reason": "Required for API client type compatibility - API still supports all CLI tools"
+    },
+    {
+      "file": "src/components/worktree/LogViewer.tsx",
+      "status": "not_modified",
+      "reason": "Log filter still needed for viewing historical Codex/Gemini log files"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "status": "not_modified",
+      "reason": "CLI tool labels still needed for displaying historical messages"
+    }
+  ],
+  "final_lint_status": "passed",
+  "final_type_check_status": "passed",
+  "test_results": {
+    "total": 1000,
+    "passed": 994,
+    "skipped": 6,
+    "failed": 0
+  },
+  "coverage_metrics": {
+    "statements": 68.02,
+    "branches": 62.85,
+    "functions": 67.53,
+    "lines": 68.87
+  },
+  "recommendations": [
+    "Consider adding unit tests for WorktreeDetail component to improve coverage",
+    "The LogViewer and MessageList components retain Codex/Gemini support for historical data viewing",
+    "API client type annotations are intentionally preserved for backend compatibility"
+  ],
+  "files_modified": [
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/WorktreeDetail.tsx",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/WorktreeCard.tsx"
+  ]
+}

@@ -25,10 +25,10 @@ export interface WorktreeDetailProps {
   worktreeId: string;
 }
 
-type TabView = 'claude' | 'codex' | 'gemini' | 'logs' | 'info' | 'memo';
+type TabView = 'claude' | 'logs' | 'info' | 'memo';
 
-const CLI_TABS: CLIToolType[] = ['claude', 'codex', 'gemini'];
-const isCliTab = (tab: TabView): tab is CLIToolType => CLI_TABS.includes(tab as CLIToolType);
+// Check if tab is a CLI tab (only Claude after Issue #33)
+const isCliTab = (tab: TabView): tab is 'claude' => tab === 'claude';
 
 /**
  * Worktree detail page component
@@ -163,7 +163,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
    * Check current session status when active tab changes
    */
   useEffect(() => {
-    if (activeTab === 'claude' || activeTab === 'codex' || activeTab === 'gemini') {
+    if (isCliTab(activeTab)) {
       fetchMessages(activeTab);
 
       // Check if there's an active session for this CLI tool
@@ -562,26 +562,6 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
             Claude
           </button>
           <button
-            onClick={() => setActiveTab('codex')}
-            className={`pb-3 px-4 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'codex'
-                ? 'border-yellow-600 text-yellow-600'
-                : 'border-transparent text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            Codex
-          </button>
-          <button
-            onClick={() => setActiveTab('gemini')}
-            className={`pb-3 px-4 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'gemini'
-                ? 'border-green-600 text-green-600'
-                : 'border-transparent text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            Gemini
-          </button>
-          <button
             onClick={() => setActiveTab('logs')}
             className={`pb-3 px-4 border-b-2 font-medium text-sm transition-colors ${
               activeTab === 'logs'
@@ -617,7 +597,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
       </div>
 
       {/* Content */}
-      {(activeTab === 'claude' || activeTab === 'codex' || activeTab === 'gemini') && (
+      {isCliTab(activeTab) && (
         <div className="flex-1 flex flex-col w-full max-w-7xl mx-auto relative">
           {/* New Message Notification */}
           {showNewMessageNotification && (

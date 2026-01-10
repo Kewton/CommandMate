@@ -1,0 +1,30 @@
+{
+  "issue_number": 33,
+  "refactor_targets": [
+    "src/components/worktree/WorktreeDetail.tsx",
+    "src/components/worktree/WorktreeCard.tsx",
+    "tests/e2e/cli-tool-selection.spec.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 68.87,
+    "lint_status": "passed",
+    "type_check_status": "passed"
+  },
+  "improvement_goals": [
+    "デッドコードチェック: 変更ファイル内の未使用import/変数を削除",
+    "コード品質確認: 意図しないコード残存がないか確認",
+    "コメント整理: 不要なコメントの削除"
+  ],
+  "intentionally_preserved": {
+    "files": [
+      "src/lib/cli-tools/types.ts",
+      "src/lib/cli-tools/codex.ts",
+      "src/lib/cli-tools/gemini.ts",
+      "src/lib/cli-tools/manager.ts",
+      "src/lib/cli-patterns.ts"
+    ],
+    "reason": "将来のCodex/Gemini再導入に備えて維持"
+  },
+  "acceptance_result_path": "dev-reports/issue/33/pm-auto-dev/iteration-1/acceptance-result.json",
+  "tdd_result_path": "dev-reports/issue/33/pm-auto-dev/iteration-1/tdd-result.json"
+}

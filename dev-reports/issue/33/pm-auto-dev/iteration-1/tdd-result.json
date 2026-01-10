@@ -1,0 +1,70 @@
+{
+  "status": "success",
+  "iteration": 1,
+  "changes_made": [
+    {
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "changes": [
+        "Changed TabView type from 'claude' | 'codex' | 'gemini' | 'logs' | 'info' | 'memo' to 'claude' | 'logs' | 'info' | 'memo'",
+        "Changed CLI_TABS array from ['claude', 'codex', 'gemini'] to ['claude']",
+        "Updated isCliTab type predicate to use 'claude' type guard",
+        "Removed Codex and Gemini tab buttons from tab navigation (lines 564-583)",
+        "Changed direct conditional at line 166 to use isCliTab(activeTab)",
+        "Changed direct conditional at line 620 to use isCliTab(activeTab)"
+      ]
+    },
+    {
+      "file": "src/components/worktree/WorktreeCard.tsx",
+      "changes": [
+        "Changed confirm dialog text from '全てのセッション（Claude/Codex/Gemini）' to 'セッション'",
+        "Removed Codex section from Last Messages display (lines 244-260)",
+        "Removed Gemini section from Last Messages display (lines 261-277)"
+      ]
+    },
+    {
+      "file": "tests/e2e/cli-tool-selection.spec.ts",
+      "changes": [
+        "Modified test case 1: Now checks only for Claude badge and verifies Codex/Gemini are NOT displayed",
+        "Deleted test cases 2-6: CLI tool selection tests (no longer relevant)",
+        "Modified test case 7 (now 2): Mobile responsive test checks only Claude and verifies Codex/Gemini not displayed",
+        "Kept test case 8 (now 3): Badge color test unchanged"
+      ]
+    }
+  ],
+  "tests_passed": true,
+  "lint_passed": true,
+  "type_check_passed": true,
+  "build_passed": true,
+  "coverage": 68.87,
+  "test_summary": {
+    "total": 1000,
+    "passed": 994,
+    "skipped": 6,
+    "failed": 0
+  },
+  "issues_found": [],
+  "preserved_code": [
+    "cli-tools/types.ts - CLIToolType definition preserved",
+    "cli-tools/codex.ts - Codex CLI implementation preserved",
+    "cli-tools/gemini.ts - Gemini CLI implementation preserved",
+    "cli-tools/manager.ts - 3-tool registration preserved",
+    "cli-patterns.ts - Tool-specific patterns preserved",
+    "tests/unit/cli-tools/*.test.ts - Internal logic tests preserved"
+  ],
+  "acceptance_criteria_met": [
+    "Top page: Codex/Gemini text removed from WorktreeCard",
+    "Detail page: Codex/Gemini tabs removed from WorktreeDetail",
+    "Session termination dialog: Claude/Codex/Gemini text removed",
+    "Internal logic (cli-tools/types.ts etc.) preserved for future re-introduction",
+    "Dead code check completed (intentional preservation noted)",
+    "CI checks all passed (lint, type-check, test, build)"
+  ],
+  "next_steps": [
+    "Manual verification: Confirm top page no longer shows Codex/Gemini badges",
+    "Manual verification: Confirm detail page only shows Claude tab",
+    "Manual verification: Confirm session termination dialog shows simplified text",
+    "Commit changes with appropriate message",
+    "Create PR for review"
+  ],
+  "completed_at": "2026-01-11T00:59:00Z"
+}

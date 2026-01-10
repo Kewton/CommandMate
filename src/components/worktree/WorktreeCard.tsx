@@ -45,13 +45,13 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
 
   /**
    * Handle kill session button click
-   * Kills all CLI tool sessions (Claude, Codex, Gemini) for this worktree
+   * Kills the Claude CLI session for this worktree
    */
   const handleKillSession = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!confirm(`「${name}」の全てのセッション（Claude/Codex/Gemini）を終了しますか？\n\n※全てのメッセージ履歴が削除されます。ログファイルは保持されます。`)) {
+    if (!confirm(`「${name}」のセッションを終了しますか？\n\n※全てのメッセージ履歴が削除されます。ログファイルは保持されます。`)) {
       return;
     }
 
@@ -238,40 +238,6 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
                       </div>
                       {lastMessagesByCli?.claude && (
                         <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.claude}</p>
-                      )}
-                    </div>
-                  )}
-                  {/* Codex */}
-                  {(lastMessagesByCli?.codex || sessionStatusByCli?.codex) && (
-                    <div className="flex items-start gap-2">
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <Badge variant="warning" className="text-xs">Codex</Badge>
-                        {sessionStatusByCli?.codex?.isRunning && sessionStatusByCli?.codex?.isWaitingForResponse && (
-                          <Badge variant="warning" dot className="text-xs">待機中</Badge>
-                        )}
-                        {sessionStatusByCli?.codex?.isRunning && !sessionStatusByCli?.codex?.isWaitingForResponse && (
-                          <Badge variant="success" dot className="text-xs">完了</Badge>
-                        )}
-                      </div>
-                      {lastMessagesByCli?.codex && (
-                        <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.codex}</p>
-                      )}
-                    </div>
-                  )}
-                  {/* Gemini */}
-                  {(lastMessagesByCli?.gemini || sessionStatusByCli?.gemini) && (
-                    <div className="flex items-start gap-2">
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <Badge variant="success" className="text-xs">Gemini</Badge>
-                        {sessionStatusByCli?.gemini?.isRunning && sessionStatusByCli?.gemini?.isWaitingForResponse && (
-                          <Badge variant="warning" dot className="text-xs">待機中</Badge>
-                        )}
-                        {sessionStatusByCli?.gemini?.isRunning && !sessionStatusByCli?.gemini?.isWaitingForResponse && (
-                          <Badge variant="success" dot className="text-xs">完了</Badge>
-                        )}
-                      </div>
-                      {lastMessagesByCli?.gemini && (
-                        <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.gemini}</p>
                       )}
                     </div>
                   )}
