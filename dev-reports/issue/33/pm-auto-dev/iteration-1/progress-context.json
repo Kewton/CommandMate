@@ -1,0 +1,74 @@
+{
+  "issue_number": 33,
+  "issue_title": "codex geminiの文言の削除",
+  "iteration": 1,
+  "phases_completed": [
+    {
+      "phase": "TDD Implementation",
+      "status": "success",
+      "result_path": "dev-reports/issue/33/pm-auto-dev/iteration-1/tdd-result.json"
+    },
+    {
+      "phase": "Acceptance Testing",
+      "status": "passed",
+      "result_path": "dev-reports/issue/33/pm-auto-dev/iteration-1/acceptance-result.json"
+    },
+    {
+      "phase": "Refactoring",
+      "status": "success",
+      "result_path": "dev-reports/issue/33/pm-auto-dev/iteration-1/refactor-result.json"
+    }
+  ],
+  "summary": {
+    "feature_description": "トップページと詳細ページからCodex/Gemini表記を削除し、Claude Code専用UIに変更",
+    "approach": "UI非表示アプローチ - 将来のCodex/Gemini再導入に備えて内部ロジックは維持",
+    "files_modified": [
+      "src/components/worktree/WorktreeDetail.tsx",
+      "src/components/worktree/WorktreeCard.tsx",
+      "tests/e2e/cli-tool-selection.spec.ts"
+    ],
+    "files_preserved": [
+      "src/lib/cli-tools/types.ts",
+      "src/lib/cli-tools/codex.ts",
+      "src/lib/cli-tools/gemini.ts",
+      "src/lib/cli-tools/manager.ts",
+      "src/lib/cli-patterns.ts"
+    ]
+  },
+  "quality_metrics": {
+    "lint_status": "passed",
+    "type_check_status": "passed",
+    "build_status": "passed",
+    "test_results": {
+      "total": 1000,
+      "passed": 994,
+      "skipped": 6,
+      "failed": 0
+    },
+    "coverage": {
+      "statements": 68.02,
+      "branches": 62.85,
+      "functions": 67.53,
+      "lines": 68.87
+    }
+  },
+  "acceptance_criteria_results": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "acceptance_rate": "100%"
+  },
+  "dead_code_analysis": {
+    "found": 1,
+    "removed": 1,
+    "intentionally_preserved": 5
+  },
+  "next_steps": [
+    "手動検証: トップページでCodex/Geminiバッジが表示されないことを確認",
+    "手動検証: 詳細ページでClaudeタブのみ表示されることを確認",
+    "手動検証: セッション終了ダイアログの文言確認",
+    "コミット作成",
+    "PR作成"
+  ],
+  "output_path": "dev-reports/issue/33/pm-auto-dev/iteration-1/progress-report.md"
+}
