@@ -45,3 +45,4 @@ db.sqlite-journal
 /data/
 /temp/
 .playwright-mcp/
+logs/
