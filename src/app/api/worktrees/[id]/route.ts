@@ -46,77 +46,52 @@ export async function GET(
       const cliTool = manager.getTool(cliToolId);
       const isRunning = await cliTool.isRunning(params.id);
 
-      // Check status based on messages
-      // - isWaitingForResponse: There's ANY unanswered prompt (not just the last message)
-      // - isProcessing: Last message is from user AND no pending prompts
+      // Check status based on terminal state
+      // - isWaitingForResponse: Interactive prompt (yes/no, multiple choice)
+      // - isProcessing: Thinking indicator visible
       let isWaitingForResponse = false;
       let isProcessing = false;
       if (isRunning) {
-        // Check recent messages (up to 10) for any pending prompt
-        const messages = getMessages(db, params.id, undefined, 10, cliToolId);
+        try {
+          const output = await captureSessionOutput(params.id, cliToolId, 100);
+          const cleanOutput = stripAnsi(output);
 
-        // First, check if there's any pending prompt
-        const hasPendingPrompt = messages.some(
-          msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
-        );
-
-        if (hasPendingPrompt) {
-          // Check if Claude is actually waiting for prompt OR processing
-          // If terminal shows no prompt, Claude has moved on (user answered via terminal)
-          try {
-            const output = await captureSessionOutput(params.id, cliToolId, 100);
-            const cleanOutput = stripAnsi(output);
-            const promptDetection = detectPrompt(cleanOutput);
-
-            if (promptDetection.isPrompt) {
-              // Terminal is actually showing a prompt - waiting for response
-              isWaitingForResponse = true;
-            } else {
-              // Terminal is NOT showing a prompt - Claude is processing
-              // Mark pending prompts as answered since user responded via terminal
-              markPendingPromptsAsAnswered(db, params.id, cliToolId);
-              isProcessing = true;
-            }
-          } catch {
-            // If capture fails, assume waiting for response
+          // Check for interactive prompt (yes/no, multiple choice, etc.)
+          const promptDetection = detectPrompt(cleanOutput);
+          if (promptDetection.isPrompt) {
             isWaitingForResponse = true;
-          }
-        } else if (messages.length > 0) {
-          const lastMessage = messages[0];
-          // "processing" when last message is from user OR prompt was just answered
-          // (Claude is working on the user's request)
-          if (lastMessage.role === 'user' ||
-              (lastMessage.messageType === 'prompt' &&
-               lastMessage.promptData?.status === 'answered')) {
-            // But first check terminal - maybe Claude is showing a prompt that isn't captured yet
-            try {
-              const output = await captureSessionOutput(params.id, cliToolId, 100);
-              const cleanOutput = stripAnsi(output);
-              // Check for prompt in terminal (yes/no, multiple choice, etc.)
-              const promptDetection = detectPrompt(cleanOutput);
-              if (promptDetection.isPrompt) {
-                isWaitingForResponse = true;
-              } else {
-                // Check LAST few lines for input prompt first (takes priority)
-                // This handles case where thinking indicator is in buffer but Claude finished
-                const lastLines = cleanOutput.split('\n').slice(-10).join('\n');
-                const hasInputPrompt = /^[>❯]\s*$/m.test(lastLines);
-                if (hasInputPrompt) {
-                  // Input prompt at end - Claude is ready for new message
-                  // Both isProcessing and isWaitingForResponse stay false → "ready"
-                } else if (detectThinking(cliToolId, lastLines)) {
-                  // Check thinking in last lines only (not entire buffer)
-                  isProcessing = true;
-                } else {
-                  // Neither prompt nor thinking in recent output
-                  isProcessing = true;
-                }
-              }
-            } catch {
-              // If capture fails, assume processing
+          } else {
+            // Check LAST few lines for state detection (filter out empty lines)
+            const nonEmptyLines = cleanOutput.split('\n').filter(line => line.trim() !== '');
+            const lastLines = nonEmptyLines.slice(-15).join('\n');
+            // Check for thinking indicator FIRST (takes priority)
+            // Even if input prompt is visible, thinking indicator means processing
+            if (detectThinking(cliToolId, lastLines)) {
               isProcessing = true;
+            } else {
+              // No thinking indicator - check for input prompt
+              const hasInputPrompt = /^[>❯]\s*$/m.test(lastLines);
+              if (!hasInputPrompt) {
+                // Neither thinking nor input prompt - assume processing
+                isProcessing = true;
+              }
+              // If hasInputPrompt && no thinking → "ready"
             }
           }
+
+          // Clean up stale pending prompts if no prompt is showing
+          if (!promptDetection.isPrompt) {
+            const messages = getMessages(db, params.id, undefined, 10, cliToolId);
+            const hasPendingPrompt = messages.some(
+              msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
+            );
+            if (hasPendingPrompt) {
+              markPendingPromptsAsAnswered(db, params.id, cliToolId);
+            }
+          }
+        } catch {
+          // If capture fails, assume processing
+          isProcessing = true;
         }
       }
 
