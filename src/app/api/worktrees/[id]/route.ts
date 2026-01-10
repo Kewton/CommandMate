@@ -61,17 +61,21 @@ export async function GET(
         );
 
         if (hasPendingPrompt) {
-          // Check if Claude is actually thinking (user answered prompt via terminal)
-          // If thinking is detected, mark prompts as answered and set isProcessing
+          // Check if Claude is actually waiting for prompt OR processing
+          // If terminal shows no prompt, Claude has moved on (user answered via terminal)
           try {
             const output = await captureSessionOutput(params.id, cliToolId, 100);
             const cleanOutput = stripAnsi(output);
-            if (detectThinking(cliToolId, cleanOutput)) {
-              // Claude is thinking - mark pending prompts as answered
+            const promptDetection = detectPrompt(cleanOutput);
+
+            if (promptDetection.isPrompt) {
+              // Terminal is actually showing a prompt - waiting for response
+              isWaitingForResponse = true;
+            } else {
+              // Terminal is NOT showing a prompt - Claude is processing
+              // Mark pending prompts as answered since user responded via terminal
               markPendingPromptsAsAnswered(db, params.id, cliToolId);
               isProcessing = true;
-            } else {
-              isWaitingForResponse = true;
             }
           } catch {
             // If capture fails, assume waiting for response
@@ -92,16 +96,21 @@ export async function GET(
               const promptDetection = detectPrompt(cleanOutput);
               if (promptDetection.isPrompt) {
                 isWaitingForResponse = true;
-              } else if (detectThinking(cliToolId, cleanOutput)) {
-                isProcessing = true;
               } else {
-                // Neither prompt nor thinking - check for input prompt (❯)
-                // If showing input prompt, Claude is ready for new message
-                const hasInputPrompt = /^[>❯]\s*$/m.test(cleanOutput);
-                if (!hasInputPrompt) {
+                // Check LAST few lines for input prompt first (takes priority)
+                // This handles case where thinking indicator is in buffer but Claude finished
+                const lastLines = cleanOutput.split('\n').slice(-10).join('\n');
+                const hasInputPrompt = /^[>❯]\s*$/m.test(lastLines);
+                if (hasInputPrompt) {
+                  // Input prompt at end - Claude is ready for new message
+                  // Both isProcessing and isWaitingForResponse stay false → "ready"
+                } else if (detectThinking(cliToolId, lastLines)) {
+                  // Check thinking in last lines only (not entire buffer)
+                  isProcessing = true;
+                } else {
+                  // Neither prompt nor thinking in recent output
                   isProcessing = true;
                 }
-                // If hasInputPrompt, both isProcessing and isWaitingForResponse stay false → "ready"
               }
             } catch {
               // If capture fails, assume processing

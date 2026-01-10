@@ -18,9 +18,10 @@ export const CLAUDE_SPINNER_CHARS = [
 /**
  * Claude thinking pattern
  * Matches spinner character followed by activity text ending with …
+ * The text can contain spaces (e.g., "Verifying implementation (dead code detection)…")
  */
 export const CLAUDE_THINKING_PATTERN = new RegExp(
-  `[${CLAUDE_SPINNER_CHARS.join('')}]\\s*\\S+…|to interrupt\\)`,
+  `[${CLAUDE_SPINNER_CHARS.join('')}]\\s+.+…|to interrupt\\)`,
   'm'
 );
 
