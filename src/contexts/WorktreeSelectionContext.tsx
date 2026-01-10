@@ -26,7 +26,7 @@ import { worktreeApi } from '@/lib/api-client';
 // ============================================================================
 
 /** Polling interval for worktree status updates (ms) */
-const WORKTREE_POLLING_INTERVAL_MS = 5000;
+const WORKTREE_POLLING_INTERVAL_MS = 2000;
 
 // ============================================================================
 // Types
@@ -164,6 +164,12 @@ export function WorktreeSelectionProvider({ children }: WorktreeSelectionProvide
     dispatch({ type: 'SET_ERROR', error: null });
 
     try {
+      // G6: Mark worktree as viewed when selected (for unread tracking - Issue #31)
+      // Fire and forget - don't wait for this to complete
+      worktreeApi.markAsViewed(id).catch((err) => {
+        console.warn('[WorktreeSelectionContext] Failed to mark as viewed:', err);
+      });
+
       const detail = await worktreeApi.getById(id);
       dispatch({ type: 'SET_WORKTREE_DETAIL', detail });
     } catch (err) {
