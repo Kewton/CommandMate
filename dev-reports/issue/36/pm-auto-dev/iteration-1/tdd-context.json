@@ -1,0 +1,55 @@
+{
+  "issue_number": 36,
+  "title": "UX改善: Yes/No回答時の不要なリロード・スクロールリセットを修正",
+  "acceptance_criteria": [
+    "Yes/No回答後に画面がちらつかない",
+    "Yes/No回答後にスクロール位置が維持される",
+    "全メッセージ再取得ではなく、該当メッセージのみ更新される",
+    "既存のテストがパス"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "task-1.1",
+      "description": "型定義の確認・拡張（isChatPayload型ガードがmessage_updatedに対応しているか確認）",
+      "target_file": "src/hooks/useWebSocket.ts"
+    },
+    {
+      "id": "task-1.2",
+      "description": "handleMessageUpdate関数の実装（エラーハンドリング付き、該当メッセージのみ更新）",
+      "target_file": "src/components/worktree/WorktreeDetail.tsx"
+    },
+    {
+      "id": "task-1.3",
+      "description": "handleNewMessage関数の実装（重複チェック、エラーハンドリング付き）",
+      "target_file": "src/components/worktree/WorktreeDetail.tsx"
+    },
+    {
+      "id": "task-1.4",
+      "description": "handleWebSocketMessageのイベント種類別分岐追加",
+      "target_file": "src/components/worktree/WorktreeDetail.tsx"
+    },
+    {
+      "id": "task-2.1",
+      "description": "Optimistic Updateの実装（handlePromptResponse修正）",
+      "target_file": "src/components/worktree/MessageList.tsx"
+    },
+    {
+      "id": "task-2.2",
+      "description": "onOptimisticUpdate、onOptimisticRollback propsの追加",
+      "target_file": "src/components/worktree/WorktreeDetail.tsx"
+    },
+    {
+      "id": "task-2.3",
+      "description": "MessageBubbleのReact.memo化",
+      "target_file": "src/components/worktree/MessageList.tsx"
+    }
+  ],
+  "target_files": [
+    "src/components/worktree/WorktreeDetail.tsx",
+    "src/components/worktree/MessageList.tsx",
+    "src/hooks/useWebSocket.ts"
+  ],
+  "design_policy_path": "dev-reports/design/issue-36-yes-no-response-ux-design-policy.md",
+  "work_plan_path": "dev-reports/issue/36/work-plan.md",
+  "target_coverage": 80
+}

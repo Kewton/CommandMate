@@ -1,0 +1,39 @@
+{
+  "issue_number": 36,
+  "title": "UX改善: Yes/No回答時の不要なリロード・スクロールリセットを修正",
+  "iteration": 1,
+  "phases_completed": [
+    {
+      "phase": "Issue情報収集",
+      "status": "completed",
+      "summary": "Issue #36の要件と受入条件を収集"
+    },
+    {
+      "phase": "TDD実装",
+      "status": "completed",
+      "result_path": "dev-reports/issue/36/pm-auto-dev/iteration-1/tdd-result.json"
+    },
+    {
+      "phase": "受入テスト",
+      "status": "completed",
+      "result_path": "dev-reports/issue/36/pm-auto-dev/iteration-1/acceptance-result.json"
+    },
+    {
+      "phase": "リファクタリング",
+      "status": "completed",
+      "result_path": "dev-reports/issue/36/pm-auto-dev/iteration-1/refactor-result.json"
+    }
+  ],
+  "acceptance_criteria": [
+    "Yes/No回答後に画面がちらつかない",
+    "Yes/No回答後にスクロール位置が維持される",
+    "全メッセージ再取得ではなく、該当メッセージのみ更新される",
+    "既存のテストがパス"
+  ],
+  "related_documents": [
+    "dev-reports/design/issue-36-yes-no-response-ux-design-policy.md",
+    "dev-reports/review/20260111-205214-architecture-review-issue-36.md",
+    "dev-reports/issue/36/work-plan.md"
+  ],
+  "output_path": "dev-reports/issue/36/pm-auto-dev/iteration-1/progress-report.md"
+}

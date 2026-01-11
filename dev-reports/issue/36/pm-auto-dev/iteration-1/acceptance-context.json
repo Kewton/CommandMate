@@ -1,0 +1,55 @@
+{
+  "issue_number": 36,
+  "feature_summary": "UX改善: Yes/No回答時の不要なリロード・スクロールリセットを修正",
+  "acceptance_criteria": [
+    "Yes/No回答後に画面がちらつかない",
+    "Yes/No回答後にスクロール位置が維持される",
+    "全メッセージ再取得ではなく、該当メッセージのみ更新される",
+    "既存のテストがパス"
+  ],
+  "test_scenarios": [
+    {
+      "id": "scenario-1",
+      "name": "Yes/No回答時のUI即時更新",
+      "description": "Yes/Noボタンをクリックすると、API応答を待たずに即座にUIが更新される",
+      "verification": "handlePromptResponse内でOptimistic Updateが実装されている"
+    },
+    {
+      "id": "scenario-2",
+      "name": "スクロール位置の維持",
+      "description": "message_updatedイベント受信時、スクロール位置がリセットされない",
+      "verification": "handleMessageUpdateがprev.map()で該当メッセージのみ更新し、messages.lengthが変化しない"
+    },
+    {
+      "id": "scenario-3",
+      "name": "差分更新（message_updated）",
+      "description": "WebSocketのmessage_updatedイベントで該当メッセージのみ更新される",
+      "verification": "handleWebSocketMessageがイベントタイプを判定し、handleMessageUpdateを呼び出す"
+    },
+    {
+      "id": "scenario-4",
+      "name": "差分更新（message）",
+      "description": "WebSocketのmessageイベントで新規メッセージのみ追加される",
+      "verification": "handleNewMessageが重複チェック付きで末尾に追加する"
+    },
+    {
+      "id": "scenario-5",
+      "name": "API失敗時のロールバック",
+      "description": "Optimistic Update後にAPIが失敗した場合、元の状態にロールバックされる",
+      "verification": "onOptimisticRollbackが呼び出され、元のmessages配列に戻る"
+    },
+    {
+      "id": "scenario-6",
+      "name": "MessageBubbleのメモ化",
+      "description": "メッセージ更新時、変更のないMessageBubbleは再レンダリングされない",
+      "verification": "React.memoのカスタム比較関数がid, content, promptData.status, promptData.answerを比較"
+    },
+    {
+      "id": "scenario-7",
+      "name": "既存テストの通過",
+      "description": "すべての既存ユニットテストがパスする",
+      "verification": "npm run test:unit が成功"
+    }
+  ],
+  "tdd_result_path": "dev-reports/issue/36/pm-auto-dev/iteration-1/tdd-result.json"
+}

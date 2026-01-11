@@ -1,0 +1,47 @@
+{
+  "issue_number": 36,
+  "title": "UX改善: Yes/No回答時の不要なリロード・スクロールリセットを修正",
+  "current_coverage": 68.36,
+  "target_coverage": 80,
+  "files_to_review": [
+    "src/components/worktree/WorktreeDetail.tsx",
+    "src/components/worktree/MessageList.tsx",
+    "src/hooks/useWebSocket.ts"
+  ],
+  "improvement_goals": [
+    {
+      "id": "goal-1",
+      "type": "code_quality",
+      "description": "ハンドラ関数の命名とコメントの一貫性確認",
+      "target_files": ["src/components/worktree/WorktreeDetail.tsx"]
+    },
+    {
+      "id": "goal-2",
+      "type": "code_quality",
+      "description": "エラーハンドリングパターンの統一（console.warn vs console.error）",
+      "target_files": ["src/components/worktree/WorktreeDetail.tsx", "src/components/worktree/MessageList.tsx"]
+    },
+    {
+      "id": "goal-3",
+      "type": "maintainability",
+      "description": "MessageBubbleのカスタム比較関数を別ファイルに抽出可能か検討",
+      "target_files": ["src/components/worktree/MessageList.tsx"]
+    },
+    {
+      "id": "goal-4",
+      "type": "test_coverage",
+      "description": "カバレッジ向上のため、エッジケーステストの追加を検討",
+      "target_files": [
+        "tests/unit/components/worktree/WorktreeDetailWebSocket.test.tsx",
+        "tests/unit/components/worktree/MessageListOptimistic.test.tsx"
+      ]
+    }
+  ],
+  "constraints": [
+    "既存のテストが全てパスすること",
+    "機能的な変更を加えないこと",
+    "過度な抽象化を避けること"
+  ],
+  "tdd_result_path": "dev-reports/issue/36/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/36/pm-auto-dev/iteration-1/acceptance-result.json"
+}

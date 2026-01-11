@@ -1,0 +1,112 @@
+{
+  "status": "passed",
+  "acceptance_criteria": [
+    {
+      "criteria": "Yes/No回答後に画面がちらつかない",
+      "status": "passed",
+      "evidence": "Optimistic Updateが実装されている（MessageList.tsx:handlePromptResponse）。ユーザーがYes/Noをクリックすると、API応答を待たずに即座にUIが更新される。onOptimisticUpdateコールバックでWorktreeDetailの状態が即時更新される。"
+    },
+    {
+      "criteria": "Yes/No回答後にスクロール位置が維持される",
+      "status": "passed",
+      "evidence": "handleMessageUpdate関数（WorktreeDetail.tsx:302-316）はprevMessages.map()で該当メッセージのみを更新し、配列長を変更しない。MessageListのuseEffect（行414-421）はmessages.lengthの増加時のみスクロールするため、message_updatedイベントでスクロールリセットは発生しない。"
+    },
+    {
+      "criteria": "全メッセージ再取得ではなく、該当メッセージのみ更新される",
+      "status": "passed",
+      "evidence": "WebSocket message_updatedイベント（WorktreeDetail.tsx:384-389）はhandleMessageUpdateを呼び出し、setMessages内でprev.map()により該当メッセージのみ更新する。fetchMessages()は呼び出されない。"
+    },
+    {
+      "criteria": "既存のテストがパス",
+      "status": "passed",
+      "evidence": "npm run test:unit 実行結果: 1022 passed, 6 skipped（全て既知のスキップ）。ESLint: No warnings or errors。TypeScript: コンパイルエラーなし。"
+    }
+  ],
+  "test_scenarios": [
+    {
+      "id": "scenario-1",
+      "name": "Yes/No回答時のUI即時更新",
+      "status": "passed",
+      "notes": "handlePromptResponse関数（MessageList.tsx:434-486）でOptimistic Updateが実装されている。optimisticMessageを作成し、onOptimisticUpdate経由でWorktreeDetailのsetMessagesが呼び出される。APIエラー時はonOptimisticRollbackで元の状態にロールバック。"
+    },
+    {
+      "id": "scenario-2",
+      "name": "スクロール位置の維持",
+      "status": "passed",
+      "notes": "handleMessageUpdate（WorktreeDetail.tsx:302-316）はprevMessages.map()で配列長を維持。MessageListのスクロール制御（行414-421）はmessages.length増加時のみ発火。message_updatedでは配列長が変化しないため、スクロールリセットなし。"
+    },
+    {
+      "id": "scenario-3",
+      "name": "差分更新（message_updated）",
+      "status": "passed",
+      "notes": "handleWebSocketMessage（WorktreeDetail.tsx:367-418）がpayload.type === 'message_updated'を判定し、handleMessageUpdate(payload.message)を呼び出す。テスト: WorktreeDetailWebSocket.test.tsx:184-218"
+    },
+    {
+      "id": "scenario-4",
+      "name": "差分更新（message）",
+      "status": "passed",
+      "notes": "handleWebSocketMessage（WorktreeDetail.tsx:394-401）がpayload.type === 'message'を判定し、handleNewMessage(payload.message)を呼び出す。handleNewMessage（行323-343）は重複チェック付きで末尾に追加。テスト: WorktreeDetailWebSocket.test.tsx:220-254"
+    },
+    {
+      "id": "scenario-5",
+      "name": "API失敗時のロールバック",
+      "status": "passed",
+      "notes": "handlePromptResponse（MessageList.tsx:461-486）のcatchブロックでonOptimisticRollback(originalMessages)が呼び出される。originalMessagesは関数冒頭で保存済み。テスト: MessageListOptimistic.test.tsx:98-139"
+    },
+    {
+      "id": "scenario-6",
+      "name": "MessageBubbleのメモ化",
+      "status": "passed",
+      "notes": "MessageBubbleはReact.memoでラップ（MessageList.tsx:49-371）。カスタム比較関数（行362-370）がid, content, promptData.status, promptData.answerを比較。テスト: MessageListOptimistic.test.tsx:181-382"
+    },
+    {
+      "id": "scenario-7",
+      "name": "既存テストの通過",
+      "status": "passed",
+      "notes": "npm run test:unit: 1022 passed, 6 skipped。Issue #36用テストファイル（WorktreeDetailWebSocket.test.tsx: 13テスト, MessageListOptimistic.test.tsx: 10テスト）全てパス。"
+    }
+  ],
+  "test_execution": {
+    "unit_tests": {
+      "passed": 1022,
+      "failed": 0,
+      "skipped": 6
+    },
+    "lint": "passed",
+    "type_check": "passed"
+  },
+  "implementation_details": {
+    "files_modified": [
+      {
+        "file": "src/components/worktree/WorktreeDetail.tsx",
+        "changes": [
+          "handleMessageUpdate関数: 単一メッセージ更新（行302-316）",
+          "handleNewMessage関数: 重複チェック付き新規追加（行323-343）",
+          "handleOptimisticUpdate関数: UI即時更新（行349-356）",
+          "handleOptimisticRollback関数: ロールバック処理（行362-365）",
+          "handleWebSocketMessage: message_updated/messageイベント分岐（行367-418）"
+        ]
+      },
+      {
+        "file": "src/components/worktree/MessageList.tsx",
+        "changes": [
+          "MessageListProps: onOptimisticUpdate, onOptimisticRollback追加（行29-32）",
+          "MessageBubble: React.memoでメモ化（行49-371）",
+          "handlePromptResponse: Optimistic Update実装（行434-486）"
+        ]
+      },
+      {
+        "file": "src/hooks/useWebSocket.ts",
+        "changes": [
+          "ChatBroadcastPayload: type 'message' | 'message_updated'対応（行21-24）"
+        ]
+      }
+    ],
+    "test_files_added": [
+      "tests/unit/components/worktree/WorktreeDetailWebSocket.test.tsx (13 tests)",
+      "tests/unit/components/worktree/MessageListOptimistic.test.tsx (10 tests)"
+    ]
+  },
+  "overall_notes": "Issue #36の全ての受入条件が満たされています。Yes/No回答時のUXが大幅に改善され、Optimistic Updateにより即座にUIが更新されます。WebSocketのmessage_updatedイベントで差分更新が行われ、スクロール位置が維持されます。API失敗時はロールバック機能により元の状態に戻ります。MessageBubbleのメモ化により不要な再レンダリングが防止されます。全てのユニットテスト（1022件）がパスし、ESLintとTypeScriptの検証も成功しました。",
+  "message": "すべての受入条件を満たしています"
+}
