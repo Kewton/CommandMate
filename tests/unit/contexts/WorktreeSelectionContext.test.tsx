@@ -11,6 +11,7 @@ import React from 'react';
 import {
   WorktreeSelectionProvider,
   useWorktreeSelection,
+  getPollingInterval,
 } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
 
@@ -254,6 +255,41 @@ describe('WorktreeSelectionContext', () => {
       await waitFor(() => {
         expect(screen.getByTestId('isLoadingDetail').textContent).toBe('false');
       });
+    });
+  });
+
+  describe('getPollingInterval', () => {
+    it('should return 2000ms when any worktree is processing', () => {
+      const worktrees = [
+        { id: '1', name: 'test1', path: '/test1', repositoryPath: '/repo', repositoryName: 'Repo', isProcessing: true, isSessionRunning: true },
+        { id: '2', name: 'test2', path: '/test2', repositoryPath: '/repo', repositoryName: 'Repo', isProcessing: false, isSessionRunning: false },
+      ] as Worktree[];
+      expect(getPollingInterval(worktrees)).toBe(2000);
+    });
+
+    it('should return 2000ms when any worktree is waiting for response', () => {
+      const worktrees = [
+        { id: '1', name: 'test1', path: '/test1', repositoryPath: '/repo', repositoryName: 'Repo', isWaitingForResponse: true, isSessionRunning: true },
+      ] as Worktree[];
+      expect(getPollingInterval(worktrees)).toBe(2000);
+    });
+
+    it('should return 5000ms when session is running but not processing', () => {
+      const worktrees = [
+        { id: '1', name: 'test1', path: '/test1', repositoryPath: '/repo', repositoryName: 'Repo', isProcessing: false, isSessionRunning: true },
+      ] as Worktree[];
+      expect(getPollingInterval(worktrees)).toBe(5000);
+    });
+
+    it('should return 10000ms when all worktrees are idle', () => {
+      const worktrees = [
+        { id: '1', name: 'test1', path: '/test1', repositoryPath: '/repo', repositoryName: 'Repo', isProcessing: false, isSessionRunning: false },
+      ] as Worktree[];
+      expect(getPollingInterval(worktrees)).toBe(10000);
+    });
+
+    it('should return 10000ms when worktrees array is empty', () => {
+      expect(getPollingInterval([])).toBe(10000);
     });
   });
 });

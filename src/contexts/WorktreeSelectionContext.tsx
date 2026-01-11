@@ -25,8 +25,46 @@ import { worktreeApi } from '@/lib/api-client';
 // Constants
 // ============================================================================
 
-/** Polling interval for worktree status updates (ms) */
-const WORKTREE_POLLING_INTERVAL_MS = 2000;
+/** Polling intervals for worktree status updates based on activity state */
+export const POLLING_INTERVALS = {
+  /** When any worktree is processing or waiting for response */
+  PROCESSING: 2000,
+  /** When session is running but not actively processing */
+  SESSION_RUNNING: 5000,
+  /** When all worktrees are idle */
+  IDLE: 10000,
+} as const;
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Determines the appropriate polling interval based on worktree states.
+ *
+ * Priority:
+ * 1. PROCESSING (2s) - If any worktree is processing or waiting for response
+ * 2. SESSION_RUNNING (5s) - If any session is running but not processing
+ * 3. IDLE (10s) - All worktrees are idle
+ *
+ * @param worktrees - Array of worktrees to check
+ * @returns Polling interval in milliseconds
+ */
+export function getPollingInterval(worktrees: Worktree[]): number {
+  const hasActiveProcessing = worktrees.some(wt =>
+    wt.isProcessing || wt.isWaitingForResponse
+  );
+  if (hasActiveProcessing) {
+    return POLLING_INTERVALS.PROCESSING;
+  }
+
+  const hasRunningSession = worktrees.some(wt => wt.isSessionRunning);
+  if (hasRunningSession) {
+    return POLLING_INTERVALS.SESSION_RUNNING;
+  }
+
+  return POLLING_INTERVALS.IDLE;
+}
 
 // ============================================================================
 // Types
@@ -190,20 +228,43 @@ export function WorktreeSelectionProvider({ children }: WorktreeSelectionProvide
     fetchWorktrees();
   }, [fetchWorktrees]);
 
-  // Polling for worktree status updates
+  // Dynamic polling for worktree status updates
+  // Uses setTimeout for adaptive polling intervals based on worktree activity
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      // Silent refresh (don't show loading state during polling)
-      worktreeApi.getAll()
-        .then((response) => {
-          dispatch({ type: 'SET_WORKTREES', worktrees: response.worktrees });
-        })
-        .catch((err) => {
-          console.error('[WorktreeSelectionContext] Polling error:', err);
-        });
-    }, WORKTREE_POLLING_INTERVAL_MS);
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isMounted = true;
 
-    return () => clearInterval(intervalId);
+    const poll = async () => {
+      if (!isMounted) return;
+
+      try {
+        // Silent refresh (don't show loading state during polling)
+        const response = await worktreeApi.getAll();
+        dispatch({ type: 'SET_WORKTREES', worktrees: response.worktrees });
+
+        // Schedule next poll with dynamic interval based on current worktree states
+        const nextInterval = getPollingInterval(response.worktrees);
+        if (isMounted) {
+          timeoutId = setTimeout(poll, nextInterval);
+        }
+      } catch (err) {
+        console.error('[WorktreeSelectionContext] Polling error:', err);
+        // On error, retry with SESSION_RUNNING interval
+        if (isMounted) {
+          timeoutId = setTimeout(poll, POLLING_INTERVALS.SESSION_RUNNING);
+        }
+      }
+    };
+
+    // Start polling immediately
+    poll();
+
+    return () => {
+      isMounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
   }, []);
 
   const value: WorktreeSelectionContextValue = {
