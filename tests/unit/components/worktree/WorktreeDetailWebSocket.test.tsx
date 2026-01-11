@@ -348,3 +348,231 @@ describe('isChatPayload type guard', () => {
     expect(isChatPayload(undefined)).toBe(false);
   });
 });
+
+describe('isSessionStatusPayload type guard', () => {
+  it('should return true for valid SessionStatusPayload', () => {
+    const payload = {
+      type: 'session_status_changed',
+      worktreeId: 'test-worktree',
+      isRunning: true,
+      messagesCleared: false,
+    };
+
+    const isSessionStatusPayload = (p: unknown): boolean => {
+      return Boolean(p && typeof p === 'object' && 'type' in p && (p as { type: unknown }).type === 'session_status_changed');
+    };
+
+    expect(isSessionStatusPayload(payload)).toBe(true);
+  });
+
+  it('should return true for SessionStatusPayload with messagesCleared', () => {
+    const payload = {
+      type: 'session_status_changed',
+      worktreeId: 'test-worktree',
+      isRunning: false,
+      messagesCleared: true,
+    };
+
+    const isSessionStatusPayload = (p: unknown): boolean => {
+      return Boolean(p && typeof p === 'object' && 'type' in p && (p as { type: unknown }).type === 'session_status_changed');
+    };
+
+    expect(isSessionStatusPayload(payload)).toBe(true);
+  });
+
+  it('should return false for ChatBroadcastPayload', () => {
+    const payload = {
+      type: 'message',
+      worktreeId: 'test-worktree',
+      message: { id: '1' },
+    };
+
+    const isSessionStatusPayload = (p: unknown): boolean => {
+      return Boolean(p && typeof p === 'object' && 'type' in p && (p as { type: unknown }).type === 'session_status_changed');
+    };
+
+    expect(isSessionStatusPayload(payload)).toBe(false);
+  });
+});
+
+describe('handleMessageUpdate edge cases', () => {
+  it('should handle empty messages array', () => {
+    const initialMessages: ChatMessage[] = [];
+
+    const updatedMessage: ChatMessage = {
+      id: '1',
+      worktreeId: 'test-worktree',
+      role: 'assistant',
+      content: 'msg1',
+      timestamp: new Date(),
+      messageType: 'normal',
+    };
+
+    const result = initialMessages.map((msg) =>
+      msg.id === updatedMessage.id ? updatedMessage : msg
+    );
+
+    expect(result.length).toBe(0);
+  });
+
+  it('should handle messages with different CLI tools', () => {
+    const initialMessages: ChatMessage[] = [
+      {
+        id: '1',
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'claude msg',
+        timestamp: new Date(),
+        messageType: 'normal',
+        cliToolId: 'claude',
+      },
+      {
+        id: '2',
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'codex msg',
+        timestamp: new Date(),
+        messageType: 'normal',
+        cliToolId: 'codex',
+      },
+    ];
+
+    const updatedMessage: ChatMessage = {
+      id: '1',
+      worktreeId: 'test-worktree',
+      role: 'assistant',
+      content: 'updated claude msg',
+      timestamp: new Date(),
+      messageType: 'normal',
+      cliToolId: 'claude',
+    };
+
+    const result = initialMessages.map((msg) =>
+      msg.id === updatedMessage.id ? updatedMessage : msg
+    );
+
+    expect(result[0].content).toBe('updated claude msg');
+    expect(result[1].cliToolId).toBe('codex');
+  });
+
+  it('should update message with multiple_choice promptData', () => {
+    const initialMessages: ChatMessage[] = [
+      {
+        id: '1',
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'Choose an option',
+        timestamp: new Date(),
+        messageType: 'prompt',
+        promptData: {
+          type: 'multiple_choice',
+          question: 'Select one',
+          status: 'pending',
+          options: [
+            { number: 1, label: 'Option 1', isDefault: true },
+            { number: 2, label: 'Option 2' },
+          ],
+        },
+      },
+    ];
+
+    const updatedMessage: ChatMessage = {
+      ...initialMessages[0],
+      promptData: {
+        type: 'multiple_choice',
+        question: 'Select one',
+        status: 'answered',
+        answer: '1',
+        options: [
+          { number: 1, label: 'Option 1', isDefault: true },
+          { number: 2, label: 'Option 2' },
+        ],
+      },
+    };
+
+    const result = initialMessages.map((msg) =>
+      msg.id === updatedMessage.id ? updatedMessage : msg
+    );
+
+    expect(result[0].promptData?.status).toBe('answered');
+    expect(result[0].promptData?.answer).toBe('1');
+  });
+});
+
+describe('handleNewMessage edge cases', () => {
+  it('should handle adding message to empty array', () => {
+    const initialMessages: ChatMessage[] = [];
+
+    const newMessage: ChatMessage = {
+      id: '1',
+      worktreeId: 'test-worktree',
+      role: 'assistant',
+      content: 'first msg',
+      timestamp: new Date(),
+      messageType: 'normal',
+    };
+
+    const isDuplicate = initialMessages.some((msg) => msg.id === newMessage.id);
+    const result = isDuplicate ? initialMessages : [...initialMessages, newMessage];
+
+    expect(result.length).toBe(1);
+    expect(result[0].id).toBe('1');
+  });
+
+  it('should preserve message order when adding', () => {
+    const initialMessages: ChatMessage[] = [
+      {
+        id: '1',
+        worktreeId: 'test-worktree',
+        role: 'user',
+        content: 'msg1',
+        timestamp: new Date('2024-01-01'),
+        messageType: 'normal',
+      },
+      {
+        id: '2',
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'msg2',
+        timestamp: new Date('2024-01-02'),
+        messageType: 'normal',
+      },
+    ];
+
+    const newMessage: ChatMessage = {
+      id: '3',
+      worktreeId: 'test-worktree',
+      role: 'user',
+      content: 'msg3',
+      timestamp: new Date('2024-01-03'),
+      messageType: 'normal',
+    };
+
+    const isDuplicate = initialMessages.some((msg) => msg.id === newMessage.id);
+    const result = isDuplicate ? initialMessages : [...initialMessages, newMessage];
+
+    expect(result.length).toBe(3);
+    expect(result[0].id).toBe('1');
+    expect(result[1].id).toBe('2');
+    expect(result[2].id).toBe('3');
+  });
+
+  it('should handle messages with logFileName', () => {
+    const initialMessages: ChatMessage[] = [];
+
+    const newMessage: ChatMessage = {
+      id: '1',
+      worktreeId: 'test-worktree',
+      role: 'assistant',
+      content: 'logged msg',
+      timestamp: new Date(),
+      messageType: 'normal',
+      logFileName: 'log-2024-01-01.txt',
+    };
+
+    const isDuplicate = initialMessages.some((msg) => msg.id === newMessage.id);
+    const result = isDuplicate ? initialMessages : [...initialMessages, newMessage];
+
+    expect(result[0].logFileName).toBe('log-2024-01-01.txt');
+  });
+});

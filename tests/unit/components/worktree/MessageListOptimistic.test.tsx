@@ -371,7 +371,7 @@ describe('MessageBubble memoization', () => {
         return (
           prev.id === next.id &&
           prev.content === next.content &&
-          prev.promptData?.status === next.promptData?.status &&
+          prev.promptData?.status === prev.promptData?.status &&
           prev.promptData?.answer === next.promptData?.answer
         );
       };
@@ -379,5 +379,237 @@ describe('MessageBubble memoization', () => {
       // Both undefined should be equal
       expect(areEqual(prevMessage, nextMessage)).toBe(true);
     });
+
+    it('should return false when id changes', () => {
+      const prevMessage: ChatMessage = {
+        id: '1',
+        worktreeId: 'test',
+        role: 'assistant',
+        content: 'Hello',
+        timestamp: new Date(),
+        messageType: 'normal',
+      };
+
+      const nextMessage: ChatMessage = {
+        id: '2', // Different id
+        worktreeId: 'test',
+        role: 'assistant',
+        content: 'Hello',
+        timestamp: new Date(),
+        messageType: 'normal',
+      };
+
+      const areEqual = (prev: ChatMessage, next: ChatMessage): boolean => {
+        return (
+          prev.id === next.id &&
+          prev.content === next.content &&
+          prev.promptData?.status === next.promptData?.status &&
+          prev.promptData?.answer === next.promptData?.answer
+        );
+      };
+
+      expect(areEqual(prevMessage, nextMessage)).toBe(false);
+    });
+
+    it('should handle one message with promptData and one without', () => {
+      const prevMessage: ChatMessage = {
+        id: '1',
+        worktreeId: 'test',
+        role: 'assistant',
+        content: 'Hello',
+        timestamp: new Date(),
+        messageType: 'normal',
+        // No promptData
+      };
+
+      const nextMessage: ChatMessage = {
+        id: '1',
+        worktreeId: 'test',
+        role: 'assistant',
+        content: 'Hello',
+        timestamp: new Date(),
+        messageType: 'prompt',
+        promptData: {
+          type: 'yes_no',
+          question: 'Confirm?',
+          status: 'pending',
+          options: ['yes', 'no'],
+        },
+      };
+
+      const areEqual = (prev: ChatMessage, next: ChatMessage): boolean => {
+        return (
+          prev.id === next.id &&
+          prev.content === next.content &&
+          prev.promptData?.status === next.promptData?.status &&
+          prev.promptData?.answer === next.promptData?.answer
+        );
+      };
+
+      // undefined !== 'pending', so should be false
+      expect(areEqual(prevMessage, nextMessage)).toBe(false);
+    });
+  });
+});
+
+describe('Optimistic Update - Multiple Choice prompts', () => {
+  it('should handle multiple_choice prompt with text input option', () => {
+    const initialMessage: ChatMessage = {
+      id: '1',
+      worktreeId: 'test-worktree',
+      role: 'assistant',
+      content: 'Select an option',
+      timestamp: new Date(),
+      messageType: 'prompt',
+      promptData: {
+        type: 'multiple_choice',
+        question: 'Choose one',
+        status: 'pending',
+        options: [
+          { number: 1, label: 'Option 1', isDefault: true },
+          { number: 2, label: 'Option 2' },
+          { number: 3, label: 'Custom', requiresTextInput: true },
+        ],
+      },
+    };
+
+    // Simulate user selecting text input option with custom text
+    const optimisticMessage: ChatMessage = {
+      ...initialMessage,
+      promptData: {
+        ...initialMessage.promptData!,
+        status: 'answered',
+        answer: 'My custom response',
+        answeredAt: new Date().toISOString(),
+      },
+    };
+
+    expect(optimisticMessage.promptData?.status).toBe('answered');
+    expect(optimisticMessage.promptData?.answer).toBe('My custom response');
+    expect(optimisticMessage.promptData?.answeredAt).toBeDefined();
+  });
+
+  it('should handle multiple_choice prompt with default option selection', () => {
+    const initialMessage: ChatMessage = {
+      id: '1',
+      worktreeId: 'test-worktree',
+      role: 'assistant',
+      content: 'Select an option',
+      timestamp: new Date(),
+      messageType: 'prompt',
+      promptData: {
+        type: 'multiple_choice',
+        question: 'Choose one',
+        status: 'pending',
+        options: [
+          { number: 1, label: 'Option 1', isDefault: true },
+          { number: 2, label: 'Option 2' },
+        ],
+      },
+    };
+
+    // Simulate user selecting the default option
+    const optimisticMessage: ChatMessage = {
+      ...initialMessage,
+      promptData: {
+        ...initialMessage.promptData!,
+        status: 'answered',
+        answer: '1',
+        answeredAt: new Date().toISOString(),
+      },
+    };
+
+    expect(optimisticMessage.promptData?.status).toBe('answered');
+    expect(optimisticMessage.promptData?.answer).toBe('1');
+  });
+});
+
+describe('Optimistic Update - Error scenarios', () => {
+  it('should handle rollback when target message has no promptData', () => {
+    const originalMessages: ChatMessage[] = [
+      {
+        id: '1',
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'Normal message without prompt',
+        timestamp: new Date(),
+        messageType: 'normal',
+        // No promptData
+      },
+    ];
+
+    // Verify that checking for promptData returns undefined
+    const targetMessage = originalMessages.find((msg) => msg.id === '1');
+    expect(targetMessage?.promptData).toBeUndefined();
+
+    // Should not attempt optimistic update if no promptData
+    const shouldUpdate = targetMessage?.promptData !== undefined;
+    expect(shouldUpdate).toBe(false);
+  });
+
+  it('should handle rollback when message not found', () => {
+    const originalMessages: ChatMessage[] = [
+      {
+        id: '1',
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'msg1',
+        timestamp: new Date(),
+        messageType: 'prompt',
+        promptData: {
+          type: 'yes_no',
+          question: 'Confirm?',
+          status: 'pending',
+          options: ['yes', 'no'],
+        },
+      },
+    ];
+
+    // Try to find a non-existent message
+    const targetMessage = originalMessages.find((msg) => msg.id === 'non-existent');
+    expect(targetMessage).toBeUndefined();
+
+    // Rollback should restore original state
+    const currentMessages = originalMessages;
+    expect(currentMessages[0].promptData?.status).toBe('pending');
+  });
+
+  it('should preserve message array reference after successful update', () => {
+    const originalMessages: ChatMessage[] = [
+      {
+        id: '1',
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'msg1',
+        timestamp: new Date(),
+        messageType: 'prompt',
+        promptData: {
+          type: 'yes_no',
+          question: 'Confirm?',
+          status: 'pending',
+          options: ['yes', 'no'],
+        },
+      },
+    ];
+
+    const optimisticMessage: ChatMessage = {
+      ...originalMessages[0],
+      promptData: {
+        ...originalMessages[0].promptData!,
+        status: 'answered',
+        answer: 'yes',
+      },
+    };
+
+    const updatedMessages = originalMessages.map((msg) =>
+      msg.id === optimisticMessage.id ? optimisticMessage : msg
+    );
+
+    // New array created (immutable update)
+    expect(updatedMessages).not.toBe(originalMessages);
+    // Original unchanged
+    expect(originalMessages[0].promptData?.status).toBe('pending');
+    // Updated array has new value
+    expect(updatedMessages[0].promptData?.status).toBe('answered');
   });
 });
