@@ -1,0 +1,58 @@
+{
+  "issue_number": 41,
+  "issue_title": "ステータス管理のログ強化: 構造化ログ + ログレベル制御",
+  "iteration": 1,
+  "phases_completed": [
+    {
+      "phase": 1,
+      "name": "Issue情報収集",
+      "status": "completed"
+    },
+    {
+      "phase": 2,
+      "name": "TDD実装",
+      "status": "completed",
+      "result_file": "dev-reports/issue/41/pm-auto-dev/iteration-1/tdd-result.json"
+    },
+    {
+      "phase": 3,
+      "name": "受入テスト",
+      "status": "completed",
+      "result_file": "dev-reports/issue/41/pm-auto-dev/iteration-1/acceptance-result.json"
+    },
+    {
+      "phase": 4,
+      "name": "リファクタリング",
+      "status": "completed",
+      "result_file": "dev-reports/issue/41/pm-auto-dev/iteration-1/refactor-result.json"
+    }
+  ],
+  "overall_status": "success",
+  "metrics": {
+    "tests_total": 25,
+    "tests_passed": 25,
+    "tests_failed": 0,
+    "coverage": 87.09,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "files_created": [
+    "src/lib/logger.ts",
+    "tests/unit/logger.test.ts"
+  ],
+  "files_modified": [
+    "src/lib/env.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/cli-session.ts",
+    ".env.example"
+  ],
+  "acceptance_criteria_met": 10,
+  "acceptance_criteria_total": 10,
+  "design_documents": [
+    "dev-reports/design/issue41-structured-logging-design-policy.md",
+    "dev-reports/review/2026-01-12-issue41-architecture-review.md",
+    "dev-reports/issue/41/work-plan.md"
+  ],
+  "output_file": "dev-reports/issue/41/pm-auto-dev/iteration-1/progress-report.md"
+}

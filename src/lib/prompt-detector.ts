@@ -163,7 +163,23 @@ export function detectPrompt(output: string): PromptDetectionResult {
 }
 
 /**
+ * Text input patterns for multiple choice options
+ * Options matching these patterns require additional text input from the user
+ */
+const TEXT_INPUT_PATTERNS: RegExp[] = [
+  /type\s+here/i,
+  /tell\s+(me|claude)/i,
+  /enter\s+/i,
+  /custom/i,
+  /differently/i,
+];
+
+/**
  * Detect multiple choice prompts (numbered list with ❯ indicator)
+ *
+ * This function scans the output from bottom to top looking for numbered options
+ * with a selection indicator (❯). It requires at least 2 options and a default
+ * indicator to be considered a valid prompt.
  *
  * Example:
  * Do you want to proceed?
@@ -171,8 +187,8 @@ export function detectPrompt(output: string): PromptDetectionResult {
  *   2. No
  *   3. Cancel
  *
- * @param output - The tmux output to analyze
- * @returns Detection result
+ * @param output - The tmux output to analyze (typically captured from tmux pane)
+ * @returns Detection result with prompt data if a valid multiple choice prompt is found
  */
 function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
   const lines = output.split('\n');
@@ -248,27 +264,14 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
     question = 'Please select an option:';
   }
 
-  // Detect if any option requires text input
-  // Patterns that indicate text input is needed:
-  // - "Type here to tell Claude..."
-  // - "Tell me what to do differently"
-  // - "Enter custom..."
-  const textInputPatterns = [
-    /type\s+here/i,
-    /tell\s+(me|claude)/i,
-    /enter\s+/i,
-    /custom/i,
-    /differently/i,
-  ];
-
   return {
     isPrompt: true,
     promptData: {
       type: 'multiple_choice',
       question: question.trim(),
       options: options.map(opt => {
-        // Check if this option requires text input
-        const requiresTextInput = textInputPatterns.some(pattern =>
+        // Check if this option requires text input using module-level patterns
+        const requiresTextInput = TEXT_INPUT_PATTERNS.some(pattern =>
           pattern.test(opt.label)
         );
 

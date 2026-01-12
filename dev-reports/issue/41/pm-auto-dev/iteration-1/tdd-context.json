@@ -1,0 +1,90 @@
+{
+  "issue_number": 41,
+  "issue_title": "ステータス管理のログ強化: 構造化ログ + ログレベル制御",
+  "acceptance_criteria": [
+    "src/lib/logger.ts が作成されている",
+    "環境変数 MCBD_LOG_LEVEL でログレベル制御可能",
+    "環境変数 MCBD_LOG_FORMAT で出力形式選択可能",
+    "機密情報フィルタリング（sanitize関数）が実装されている [MF-1]",
+    "Server/Client ログ分離が実装されている [MF-2]",
+    "env.ts にログ設定が統合されている [SF-1]",
+    "リクエストID生成が実装されている [SF-2]",
+    "主要モジュール（優先度：高）にログが追加されている",
+    "単体テストが追加されている",
+    ".env.example に設定方法が記載されている"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "1.1",
+      "name": "ロガー型定義",
+      "file": "src/lib/logger.ts",
+      "description": "LogLevel, LogEntry, LoggerContext, Logger インターフェース定義"
+    },
+    {
+      "id": "1.2",
+      "name": "機密情報フィルタリング実装 [MF-1]",
+      "file": "src/lib/logger.ts",
+      "description": "sanitize関数でBearer トークン、パスワード等をマスク"
+    },
+    {
+      "id": "1.3",
+      "name": "Server/Client ログ分離実装 [MF-2]",
+      "file": "src/lib/logger.ts",
+      "description": "isServer, shouldLogOnClient 関数"
+    },
+    {
+      "id": "1.4",
+      "name": "リクエストID生成実装 [SF-2]",
+      "file": "src/lib/logger.ts",
+      "description": "generateRequestId 関数（UUID v4形式）"
+    },
+    {
+      "id": "1.5",
+      "name": "ログ出力・フォーマット実装",
+      "file": "src/lib/logger.ts",
+      "description": "createLogger, log, formatLogEntry 関数"
+    },
+    {
+      "id": "1.6",
+      "name": "env.ts 統合 [SF-1]",
+      "file": "src/lib/env.ts",
+      "description": "getLogConfig 関数追加"
+    },
+    {
+      "id": "1.7",
+      "name": "環境変数ドキュメント",
+      "file": ".env.example",
+      "description": "MCBD_LOG_LEVEL, MCBD_LOG_FORMAT 追加"
+    },
+    {
+      "id": "2.1",
+      "name": "prompt-detector.ts ログ追加",
+      "file": "src/lib/prompt-detector.ts",
+      "description": "detectPrompt 関数にログ追加"
+    },
+    {
+      "id": "2.2",
+      "name": "cli-patterns.ts ログ追加",
+      "file": "src/lib/cli-patterns.ts",
+      "description": "detectThinking 関数にログ追加"
+    },
+    {
+      "id": "2.3",
+      "name": "cli-session.ts ログ追加",
+      "file": "src/lib/cli-session.ts",
+      "description": "captureSessionOutput 関数にログ追加"
+    },
+    {
+      "id": "4.1",
+      "name": "単体テスト作成",
+      "file": "tests/unit/logger.test.ts",
+      "description": "基本機能、サニタイズ、リクエストIDのテスト"
+    }
+  ],
+  "target_coverage": 80,
+  "design_documents": [
+    "dev-reports/design/issue41-structured-logging-design-policy.md",
+    "dev-reports/review/2026-01-12-issue41-architecture-review.md",
+    "dev-reports/issue/41/work-plan.md"
+  ]
+}

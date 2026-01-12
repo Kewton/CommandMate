@@ -1,0 +1,95 @@
+{
+  "issue_number": 41,
+  "feature_summary": "ステータス管理のログ強化: 構造化ログ + ログレベル制御",
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "description": "src/lib/logger.ts が作成されている",
+      "verification": "ファイル存在確認"
+    },
+    {
+      "id": "AC-2",
+      "description": "環境変数 MCBD_LOG_LEVEL でログレベル制御可能",
+      "verification": "環境変数設定でdebugログがフィルタリングされることを確認"
+    },
+    {
+      "id": "AC-3",
+      "description": "環境変数 MCBD_LOG_FORMAT で出力形式選択可能",
+      "verification": "json/text 形式の切り替えを確認"
+    },
+    {
+      "id": "AC-4",
+      "description": "機密情報フィルタリング（sanitize関数）が実装されている [MF-1]",
+      "verification": "Bearer トークン、パスワード等がマスクされることを確認"
+    },
+    {
+      "id": "AC-5",
+      "description": "Server/Client ログ分離が実装されている [MF-2]",
+      "verification": "isServer() 関数の存在とロジック確認"
+    },
+    {
+      "id": "AC-6",
+      "description": "env.ts にログ設定が統合されている [SF-1]",
+      "verification": "getLogConfig() 関数の存在確認"
+    },
+    {
+      "id": "AC-7",
+      "description": "リクエストID生成が実装されている [SF-2]",
+      "verification": "generateRequestId() 関数がUUID形式を返すことを確認"
+    },
+    {
+      "id": "AC-8",
+      "description": "主要モジュール（優先度：高）にログが追加されている",
+      "verification": "prompt-detector.ts, cli-patterns.ts, cli-session.ts にロガー使用を確認"
+    },
+    {
+      "id": "AC-9",
+      "description": "単体テストが追加されている",
+      "verification": "tests/unit/logger.test.ts が存在し、全テストパス"
+    },
+    {
+      "id": "AC-10",
+      "description": ".env.example に設定方法が記載されている",
+      "verification": "MCBD_LOG_LEVEL, MCBD_LOG_FORMAT の記載確認"
+    }
+  ],
+  "test_scenarios": [
+    {
+      "id": "TS-1",
+      "name": "ロガー基本機能テスト",
+      "steps": [
+        "createLogger() でロガーを作成",
+        "debug, info, warn, error メソッドが使用可能",
+        "withContext() でコンテキスト追加可能"
+      ]
+    },
+    {
+      "id": "TS-2",
+      "name": "ログレベル制御テスト",
+      "steps": [
+        "MCBD_LOG_LEVEL=warn に設定",
+        "debug, info ログが出力されないことを確認",
+        "warn, error ログが出力されることを確認"
+      ]
+    },
+    {
+      "id": "TS-3",
+      "name": "機密情報マスキングテスト",
+      "steps": [
+        "Bearer トークンを含むデータをログ出力",
+        "出力に [REDACTED] が含まれることを確認",
+        "元のトークンが含まれないことを確認"
+      ]
+    },
+    {
+      "id": "TS-4",
+      "name": "ビルド・静的解析テスト",
+      "steps": [
+        "npm run lint でエラー0件",
+        "npx tsc --noEmit で型エラー0件",
+        "npm run build で成功"
+      ]
+    }
+  ],
+  "tdd_result_file": "dev-reports/issue/41/pm-auto-dev/iteration-1/tdd-result.json"
+}

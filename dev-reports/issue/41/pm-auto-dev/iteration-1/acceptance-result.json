@@ -1,0 +1,105 @@
+{
+  "status": "passed",
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "description": "src/lib/logger.ts が作成されている",
+      "status": "passed",
+      "evidence": "File exists at /Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/logger.ts (305 lines)"
+    },
+    {
+      "id": "AC-2",
+      "description": "環境変数 MCBD_LOG_LEVEL でログレベル制御可能",
+      "status": "passed",
+      "evidence": "5 tests passed: 'Log level filtering' - debug/info filtered when level is warn, warn/error logs allowed, all logs allowed when level is debug"
+    },
+    {
+      "id": "AC-3",
+      "description": "環境変数 MCBD_LOG_FORMAT で出力形式選択可能",
+      "status": "passed",
+      "evidence": "2 tests passed: 'Log format' - JSON format when MCBD_LOG_FORMAT=json, text format by default"
+    },
+    {
+      "id": "AC-4",
+      "description": "機密情報フィルタリング（sanitize関数）が実装されている [MF-1]",
+      "status": "passed",
+      "evidence": "7 tests passed: '[MF-1] Sanitization' - Bearer tokens, passwords, MCBD_AUTH_TOKEN, nested data, secret key fields, arrays, Authorization headers all redacted"
+    },
+    {
+      "id": "AC-5",
+      "description": "Server/Client ログ分離が実装されている [MF-2]",
+      "status": "passed",
+      "evidence": "isServer() function exists at line 133 (typeof window === 'undefined'), shouldLogOnClient() at line 141 (only logs in development)"
+    },
+    {
+      "id": "AC-6",
+      "description": "env.ts にログ設定が統合されている [SF-1]",
+      "status": "passed",
+      "evidence": "getLogConfig() function exists in src/lib/env.ts (lines 44-55) returning LogConfig with level and format"
+    },
+    {
+      "id": "AC-7",
+      "description": "リクエストID生成が実装されている [SF-2]",
+      "status": "passed",
+      "evidence": "4 tests passed: '[SF-2] generateRequestId' - returns UUID-like string, generates unique IDs, valid UUID v4 format with correct variant bits"
+    },
+    {
+      "id": "AC-8",
+      "description": "主要モジュール（優先度：高）にログが追加されている",
+      "status": "passed",
+      "evidence": "Logger imported and used in: prompt-detector.ts (lines 7-9, 45, 58-62, 158), cli-patterns.ts (lines 7-9, 67-68, 86-87), cli-session.ts (lines 9-11, 43-44, 53, 61-64, 69)"
+    },
+    {
+      "id": "AC-9",
+      "description": "単体テストが追加されている",
+      "status": "passed",
+      "evidence": "tests/unit/logger.test.ts exists with 25 tests, all passed (Test Files: 1 passed, Tests: 25 passed)"
+    },
+    {
+      "id": "AC-10",
+      "description": ".env.example に設定方法が記載されている",
+      "status": "passed",
+      "evidence": ".env.example contains Logging section (lines 38-50) with MCBD_LOG_LEVEL=debug and MCBD_LOG_FORMAT=text documented"
+    }
+  ],
+  "test_scenarios": [
+    {
+      "id": "TS-1",
+      "name": "ロガー基本機能テスト",
+      "status": "passed",
+      "details": "createLogger returns logger with debug, info, warn, error, withContext methods"
+    },
+    {
+      "id": "TS-2",
+      "name": "ログレベル制御テスト",
+      "status": "passed",
+      "details": "MCBD_LOG_LEVEL=warn filters debug/info logs, allows warn/error logs"
+    },
+    {
+      "id": "TS-3",
+      "name": "機密情報マスキングテスト",
+      "status": "passed",
+      "details": "Bearer tokens, passwords, secrets, API keys redacted with [REDACTED]"
+    },
+    {
+      "id": "TS-4",
+      "name": "ビルド・静的解析テスト",
+      "status": "passed",
+      "details": "npm run lint: No ESLint warnings or errors, npx tsc --noEmit: 0 errors, npm run build: success"
+    }
+  ],
+  "build_verification": {
+    "lint": "passed",
+    "typecheck": "passed",
+    "build": "passed"
+  },
+  "test_results": {
+    "unit_tests": {
+      "total": 25,
+      "passed": 25,
+      "failed": 0,
+      "file": "tests/unit/logger.test.ts"
+    }
+  },
+  "summary": "All 10 acceptance criteria passed. Implementation includes: (1) logger.ts with structured logging, (2) log level control via MCBD_LOG_LEVEL, (3) log format control via MCBD_LOG_FORMAT (json/text), (4) [MF-1] sensitive data filtering (sanitize function), (5) [MF-2] server/client log separation, (6) [SF-1] env.ts integration with getLogConfig(), (7) [SF-2] request ID generation (UUID v4), (8) logging added to priority high modules (prompt-detector, cli-patterns, cli-session), (9) 25 unit tests all passing, (10) .env.example updated. Build verification passed: ESLint 0 errors, TypeScript 0 errors, Next.js build successful."
+}
