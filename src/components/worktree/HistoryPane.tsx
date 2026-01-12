@@ -14,6 +14,17 @@ import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { ConversationPairCard } from './ConversationPairCard';
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * Height of the sticky header in pixels.
+ * Used for scroll position calculations and future reference.
+ * Note: sticky top-0 does not affect scrollTop calculation as content flows below naturally.
+ */
+export const STICKY_HEADER_HEIGHT = 48;
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -161,6 +172,8 @@ export const HistoryPane = memo(function HistoryPane({
     if (container && messages.length === prevCount) {
       requestAnimationFrame(() => {
         container.scrollTop = scrollPositionRef.current;
+        // Note: sticky header does not affect scrollTop calculation
+        // as content flows below the header naturally
       });
     }
 

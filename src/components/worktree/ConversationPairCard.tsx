@@ -237,7 +237,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
           </span>
         )}
       </div>
-      <div className="text-sm text-gray-200 whitespace-pre-wrap break-words">
+      <div className="text-sm text-gray-200 whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden">
         <MessageContent content={displayContent} onFilePathClick={onFilePathClick} />
         {!isExpanded && isTruncated && (
           <span className="text-gray-500">...</span>
