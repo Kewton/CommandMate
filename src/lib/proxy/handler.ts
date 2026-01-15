@@ -5,12 +5,18 @@
  * Provides HTTP and WebSocket proxy functionality using native fetch.
  * WebSocket support is limited in Next.js Route Handlers, so we return
  * an appropriate error response for WebSocket upgrade requests.
+ *
+ * @module lib/proxy/handler
  */
 
 import type { ExternalApp } from '@/types/external-apps';
-
-/** Request timeout in milliseconds */
-const REQUEST_TIMEOUT = 30000;
+import {
+  PROXY_TIMEOUT,
+  HOP_BY_HOP_REQUEST_HEADERS,
+  HOP_BY_HOP_RESPONSE_HEADERS,
+  PROXY_STATUS_CODES,
+  PROXY_ERROR_MESSAGES,
+} from './config';
 
 /**
  * Check if a request is a WebSocket upgrade request
@@ -56,16 +62,8 @@ export async function proxyHttp(
   const headers = new Headers();
   request.headers.forEach((value, key) => {
     const lowerKey = key.toLowerCase();
-    // Skip hop-by-hop headers
-    if (
-      lowerKey !== 'host' &&
-      lowerKey !== 'connection' &&
-      lowerKey !== 'keep-alive' &&
-      lowerKey !== 'transfer-encoding' &&
-      lowerKey !== 'te' &&
-      lowerKey !== 'trailer' &&
-      lowerKey !== 'upgrade'
-    ) {
+    // Skip hop-by-hop headers (connection-specific headers that should not be forwarded)
+    if (!HOP_BY_HOP_REQUEST_HEADERS.includes(lowerKey as typeof HOP_BY_HOP_REQUEST_HEADERS[number])) {
       headers.set(key, value);
     }
   });
@@ -73,7 +71,7 @@ export async function proxyHttp(
   try {
     // Create abort controller for timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+    const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT.DEFAULT_MS);
 
     const response = await fetch(upstreamUrl, {
       method: request.method,
@@ -86,16 +84,12 @@ export async function proxyHttp(
 
     clearTimeout(timeoutId);
 
-    // Clone response headers
+    // Clone response headers, removing hop-by-hop headers
     const responseHeaders = new Headers();
     response.headers.forEach((value, key) => {
       const lowerKey = key.toLowerCase();
-      // Skip hop-by-hop headers
-      if (
-        lowerKey !== 'transfer-encoding' &&
-        lowerKey !== 'connection' &&
-        lowerKey !== 'keep-alive'
-      ) {
+      // Skip hop-by-hop headers (connection-specific headers that should not be forwarded)
+      if (!HOP_BY_HOP_RESPONSE_HEADERS.includes(lowerKey as typeof HOP_BY_HOP_RESPONSE_HEADERS[number])) {
         responseHeaders.set(key, value);
       }
     });
@@ -107,29 +101,29 @@ export async function proxyHttp(
     });
   } catch (error) {
     if (error instanceof Error) {
-      // Check for timeout
+      // Check for timeout (AbortError from AbortController or TimeoutError)
       if (error.name === 'AbortError' || error.name === 'TimeoutError') {
         return new Response(
           JSON.stringify({
             error: 'Gateway Timeout',
-            message: 'The upstream server did not respond in time',
+            message: PROXY_ERROR_MESSAGES.GATEWAY_TIMEOUT,
           }),
           {
-            status: 504,
+            status: PROXY_STATUS_CODES.GATEWAY_TIMEOUT,
             headers: { 'Content-Type': 'application/json' },
           }
         );
       }
     }
 
-    // Connection refused or other errors
+    // Connection refused or other network errors
     return new Response(
       JSON.stringify({
         error: 'Bad Gateway',
-        message: 'Unable to connect to upstream server',
+        message: PROXY_ERROR_MESSAGES.BAD_GATEWAY,
       }),
       {
-        status: 502,
+        status: PROXY_STATUS_CODES.BAD_GATEWAY,
         headers: { 'Content-Type': 'application/json' },
       }
     );
@@ -153,15 +147,17 @@ export async function proxyWebSocket(
   path: string
 ): Promise<Response> {
   // Next.js Route Handlers cannot handle WebSocket upgrades
-  // Return a 426 response with instructions
+  // Return a 426 response with instructions for direct WebSocket connection
+  const directWsUrl = `ws://${app.targetHost}:${app.targetPort}/proxy/${app.pathPrefix}${path}`;
+
   return new Response(
     JSON.stringify({
       error: 'Upgrade Required',
-      message: `WebSocket connections to ${app.pathPrefix} are not supported through the proxy Route Handler. Configure your WebSocket client to connect directly to ws://${app.targetHost}:${app.targetPort}${path}`,
-      directUrl: `ws://${app.targetHost}:${app.targetPort}/proxy/${app.pathPrefix}${path}`,
+      message: `${PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED}. Configure your WebSocket client to connect directly to ${directWsUrl}`,
+      directUrl: directWsUrl,
     }),
     {
-      status: 426,
+      status: PROXY_STATUS_CODES.UPGRADE_REQUIRED,
       headers: {
         'Content-Type': 'application/json',
         'Upgrade': 'websocket',

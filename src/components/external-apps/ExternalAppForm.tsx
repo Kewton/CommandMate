@@ -2,12 +2,21 @@
  * ExternalAppForm Component
  * Form for creating and editing external apps (in modal)
  * Issue #42: Proxy routing for multiple frontend applications
+ *
+ * @module components/external-apps/ExternalAppForm
  */
 
 'use client';
 
 import { useState, useEffect } from 'react';
 import { Button, Modal } from '@/components/ui';
+import {
+  validateFormData,
+  VALID_APP_TYPES,
+  APP_TYPE_LABELS,
+  PORT_CONSTRAINTS,
+  type FormValidationErrors,
+} from '@/lib/external-apps/validation';
 import type {
   ExternalApp,
   ExternalAppType,
@@ -15,6 +24,9 @@ import type {
   UpdateExternalAppInput,
 } from '@/types/external-apps';
 
+/**
+ * Props for ExternalAppForm component
+ */
 export interface ExternalAppFormProps {
   /** Whether the modal is open */
   isOpen: boolean;
@@ -27,65 +39,15 @@ export interface ExternalAppFormProps {
 }
 
 /**
- * Validation errors type
+ * App type options for the select dropdown
+ * Generated from shared validation constants
  */
-interface ValidationErrors {
-  displayName?: string;
-  name?: string;
-  pathPrefix?: string;
-  targetPort?: string;
-  appType?: string;
-}
-
-/**
- * Validate the form data
- */
-function validateForm(
-  data: Partial<CreateExternalAppInput>,
-  isEdit: boolean
-): ValidationErrors {
-  const errors: ValidationErrors = {};
-
-  if (!data.displayName?.trim()) {
-    errors.displayName = 'Display name is required';
-  }
-
-  if (!isEdit) {
-    if (!data.name?.trim()) {
-      errors.name = 'Identifier name is required';
-    } else if (!/^[a-zA-Z0-9-]+$/.test(data.name)) {
-      errors.name = 'Only alphanumeric characters and hyphens are allowed';
-    }
-
-    if (!data.pathPrefix?.trim()) {
-      errors.pathPrefix = 'Path prefix is required';
-    } else if (!/^[a-zA-Z0-9-]+$/.test(data.pathPrefix)) {
-      errors.pathPrefix = 'Only alphanumeric characters and hyphens are allowed';
-    }
-  }
-
-  if (!data.targetPort) {
-    errors.targetPort = 'Port number is required';
-  } else if (data.targetPort < 1024 || data.targetPort > 65535) {
-    errors.targetPort = 'Port must be between 1024 and 65535';
-  }
-
-  if (!data.appType) {
-    errors.appType = 'App type is required';
-  }
-
-  return errors;
-}
-
-/**
- * App type options
- */
-const appTypeOptions: { value: ExternalAppType; label: string }[] = [
-  { value: 'sveltekit', label: 'SvelteKit' },
-  { value: 'streamlit', label: 'Streamlit' },
-  { value: 'nextjs', label: 'Next.js' },
-  { value: 'other', label: 'Other' },
-];
+const appTypeOptions: { value: ExternalAppType; label: string }[] = VALID_APP_TYPES.map(
+  (type) => ({
+    value: type,
+    label: APP_TYPE_LABELS[type],
+  })
+);
 
 /**
  * ExternalAppForm component
@@ -120,7 +82,7 @@ export function ExternalAppForm({
   const [enabled, setEnabled] = useState(true);
 
   // UI state
-  const [errors, setErrors] = useState<ValidationErrors>({});
+  const [errors, setErrors] = useState<FormValidationErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -156,17 +118,16 @@ export function ExternalAppForm({
     e.preventDefault();
     setSubmitError(null);
 
-    const formData: Partial<CreateExternalAppInput> = {
-      displayName,
-      name,
-      pathPrefix,
-      targetPort: targetPort || undefined,
-      appType: appType || undefined,
-      websocketEnabled,
-      description: description || undefined,
-    };
-
-    const validationErrors = validateForm(formData, isEdit);
+    const validationErrors = validateFormData(
+      {
+        displayName,
+        name,
+        pathPrefix,
+        targetPort,
+        appType,
+      },
+      isEdit
+    );
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
@@ -336,12 +297,12 @@ export function ExternalAppForm({
             }
             className={`input w-full font-mono ${errors.targetPort ? 'border-red-500' : ''}`}
             placeholder="5173"
-            min={1024}
-            max={65535}
+            min={PORT_CONSTRAINTS.MIN}
+            max={PORT_CONSTRAINTS.MAX}
             disabled={isSubmitting}
           />
           <p className="mt-1 text-xs text-gray-500">
-            Target port (1024-65535)
+            Target port ({PORT_CONSTRAINTS.MIN}-{PORT_CONSTRAINTS.MAX})
           </p>
           {errors.targetPort && (
             <p className="mt-1 text-xs text-red-500">{errors.targetPort}</p>

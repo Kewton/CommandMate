@@ -4,6 +4,8 @@
  *
  * GET /api/external-apps - List all external apps
  * POST /api/external-apps - Create a new external app
+ *
+ * @module api/external-apps
  */
 
 import { NextResponse } from 'next/server';
@@ -14,81 +16,11 @@ import {
   getExternalAppByPathPrefix,
 } from '@/lib/external-apps/db';
 import { getExternalAppCache } from '@/lib/external-apps/cache';
-import type { CreateExternalAppInput, ExternalAppType } from '@/types/external-apps';
+import { validateCreateInput } from '@/lib/external-apps/validation';
+import type { CreateExternalAppInput } from '@/types/external-apps';
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
-
-/** Valid port range */
-const MIN_PORT = 1024;
-const MAX_PORT = 65535;
-
-/** Valid hosts */
-const VALID_HOSTS = ['localhost', '127.0.0.1'];
-
-/** Valid path prefix pattern (alphanumeric and hyphens only) */
-const PATH_PREFIX_PATTERN = /^[a-zA-Z0-9-]+$/;
-
-/** Valid app types */
-const VALID_APP_TYPES: ExternalAppType[] = ['sveltekit', 'streamlit', 'nextjs', 'other'];
-
-/**
- * Validation error response type
- */
-interface ValidationError {
-  field: string;
-  message: string;
-}
-
-/**
- * Validate create input
- */
-function validateCreateInput(input: unknown): ValidationError[] {
-  const errors: ValidationError[] = [];
-
-  if (!input || typeof input !== 'object') {
-    errors.push({ field: 'body', message: 'Request body is required' });
-    return errors;
-  }
-
-  const data = input as Record<string, unknown>;
-
-  // Required fields
-  if (!data.name || typeof data.name !== 'string') {
-    errors.push({ field: 'name', message: 'name is required and must be a string' });
-  }
-
-  if (!data.displayName || typeof data.displayName !== 'string') {
-    errors.push({ field: 'displayName', message: 'displayName is required and must be a string' });
-  }
-
-  if (!data.pathPrefix || typeof data.pathPrefix !== 'string') {
-    errors.push({ field: 'pathPrefix', message: 'pathPrefix is required and must be a string' });
-  } else if (!PATH_PREFIX_PATTERN.test(data.pathPrefix as string)) {
-    errors.push({ field: 'pathPrefix', message: 'pathPrefix must contain only alphanumeric characters and hyphens' });
-  }
-
-  if (data.targetPort === undefined || typeof data.targetPort !== 'number') {
-    errors.push({ field: 'targetPort', message: 'targetPort is required and must be a number' });
-  } else if (data.targetPort < MIN_PORT || data.targetPort > MAX_PORT) {
-    errors.push({ field: 'targetPort', message: `targetPort must be between ${MIN_PORT} and ${MAX_PORT}` });
-  }
-
-  if (!data.appType || typeof data.appType !== 'string') {
-    errors.push({ field: 'appType', message: 'appType is required and must be a string' });
-  } else if (!VALID_APP_TYPES.includes(data.appType as ExternalAppType)) {
-    errors.push({ field: 'appType', message: `appType must be one of: ${VALID_APP_TYPES.join(', ')}` });
-  }
-
-  // Optional fields validation
-  if (data.targetHost !== undefined && typeof data.targetHost === 'string') {
-    if (!VALID_HOSTS.includes(data.targetHost)) {
-      errors.push({ field: 'targetHost', message: `targetHost must be one of: ${VALID_HOSTS.join(', ')}` });
-    }
-  }
-
-  return errors;
-}
 
 /**
  * GET /api/external-apps
