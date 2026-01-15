@@ -1,0 +1,19 @@
+{
+  "issue_number": 53,
+  "title": "fix: Assistant応答の保存ロジックを「次のユーザー入力まで」方式に変更",
+  "acceptance_criteria": [
+    "ユーザーが連続でメッセージを送信しても、各userメッセージに対応するassistantメッセージが保存される",
+    "履歴表示で「Waiting for response」が不適切に表示されない",
+    "既存のリアルタイム表示（current-output API）は維持される",
+    "単体テストが追加されている"
+  ],
+  "test_files": [
+    "__tests__/lib/assistant-response-saver.test.ts"
+  ],
+  "implementation_files": [
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/response-poller.ts",
+    "src/app/api/worktrees/[id]/send/route.ts"
+  ],
+  "tdd_result_path": "dev-reports/issue/53/pm-auto-dev/iteration-1/tdd-result.json"
+}

@@ -54,7 +54,7 @@ function getPollerKey(worktreeId: string, cliToolId: CLIToolType): string {
  * @param response - Raw Claude response
  * @returns Cleaned response (only the latest response)
  */
-function cleanClaudeResponse(response: string): string {
+export function cleanClaudeResponse(response: string): string {
   // First, strip ANSI escape codes
   const cleanedResponse = stripAnsi(response);
 
@@ -130,7 +130,7 @@ function cleanClaudeResponse(response: string): string {
  * @param response - Raw Gemini response
  * @returns Cleaned response
  */
-function cleanGeminiResponse(response: string): string {
+export function cleanGeminiResponse(response: string): string {
   // Split response into lines
   const lines = response.split('\n');
   const cleanedLines: string[] = [];
@@ -551,6 +551,13 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       return false;
     }
 
+    // Additional duplicate prevention: check if savePendingAssistantResponse
+    // already saved this content by comparing line counts
+    if (result.lineCount <= lastCapturedLine) {
+      console.log(`[checkForResponse] Already saved up to line ${lastCapturedLine}, skipping (result: ${result.lineCount})`);
+      return false;
+    }
+
     // Response is complete! Check if it's a prompt
     const promptDetection = detectPrompt(result.response);
 
@@ -612,6 +619,14 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId);
     if (answeredCount > 0) {
       console.log(`Marked ${answeredCount} pending prompt(s) as answered for ${worktreeId}`);
+    }
+
+    // Race condition prevention: re-check session state before saving
+    // savePendingAssistantResponse may have already saved this content concurrently
+    const currentSessionState = getSessionState(db, worktreeId, cliToolId);
+    if (currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
+      console.log(`[checkForResponse] Race condition detected, skipping save (result: ${result.lineCount}, current: ${currentSessionState.lastCapturedLine})`);
+      return false;
     }
 
     // Create new CLI tool message in database
