@@ -40,7 +40,7 @@ export function ExternalAppsManager() {
         throw new Error('Failed to fetch external apps');
       }
       const data = await response.json();
-      setApps(data);
+      setApps(data.apps || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
