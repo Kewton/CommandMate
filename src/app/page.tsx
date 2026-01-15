@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { AppShell } from '@/components/layout';
 import { WorktreeList } from '@/components/worktree';
 import { RepositoryManager } from '@/components/repository';
+import { ExternalAppsManager } from '@/components/external-apps';
 
 export default function Home() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -30,6 +31,11 @@ export default function Home() {
 
         {/* Worktree List */}
         <WorktreeList key={refreshTrigger} />
+
+        {/* External Apps Management */}
+        <div className="mt-8">
+          <ExternalAppsManager />
+        </div>
       </div>
     </AppShell>
   );

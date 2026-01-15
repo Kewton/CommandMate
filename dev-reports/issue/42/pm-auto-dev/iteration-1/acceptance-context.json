@@ -1,0 +1,76 @@
+{
+  "issue_number": 42,
+  "feature_summary": "複数フロントエンドアプリへのパスベースルーティング",
+  "acceptance_criteria": [
+    "MyCodeBranchDeskトップページに「外部アプリ」セクションが表示される",
+    "外部アプリの登録機能（名前、パスプレフィックス、ポート番号）が動作する",
+    "登録済みアプリの一覧表示・編集・削除機能が動作する",
+    "/proxy/{pathPrefix}/* でプロキシ転送が動作する",
+    "振り分け先の変更を再起動なしで反映できる"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "外部アプリセクション表示",
+      "steps": [
+        "トップページにアクセス",
+        "「外部アプリ」セクションが表示されることを確認"
+      ],
+      "expected": "セクションヘッダーと追加ボタンが表示される"
+    },
+    {
+      "id": "AC-2",
+      "name": "外部アプリ登録",
+      "steps": [
+        "追加ボタンをクリック",
+        "フォームに情報を入力（displayName, name, pathPrefix, targetPort, appType）",
+        "登録ボタンをクリック"
+      ],
+      "expected": "アプリが登録され、一覧に表示される"
+    },
+    {
+      "id": "AC-3",
+      "name": "外部アプリ編集",
+      "steps": [
+        "登録済みアプリの設定ボタンをクリック",
+        "ポート番号を変更",
+        "保存ボタンをクリック"
+      ],
+      "expected": "変更が保存され、一覧に反映される"
+    },
+    {
+      "id": "AC-4",
+      "name": "外部アプリ削除",
+      "steps": [
+        "登録済みアプリの削除ボタンをクリック",
+        "確認ダイアログでOKをクリック"
+      ],
+      "expected": "アプリが削除され、一覧から消える"
+    },
+    {
+      "id": "AC-5",
+      "name": "プロキシ転送（HTTPリクエスト）",
+      "steps": [
+        "外部アプリを登録",
+        "/proxy/{pathPrefix}/ にアクセス"
+      ],
+      "expected": "上流アプリにリクエストが転送される"
+    },
+    {
+      "id": "AC-6",
+      "name": "動的設定変更",
+      "steps": [
+        "外部アプリを登録",
+        "ポート番号を変更",
+        "/proxy/{pathPrefix}/ にアクセス"
+      ],
+      "expected": "再起動なしで新しいポートに転送される"
+    }
+  ],
+  "verification_commands": {
+    "lint": "npm run lint",
+    "typecheck": "npx tsc --noEmit",
+    "unit_test": "npm run test:unit",
+    "build": "npm run build"
+  }
+}

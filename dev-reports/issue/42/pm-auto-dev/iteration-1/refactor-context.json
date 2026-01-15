@@ -1,0 +1,40 @@
+{
+  "issue_number": 42,
+  "refactor_targets": [
+    "src/lib/external-apps/db.ts",
+    "src/lib/external-apps/cache.ts",
+    "src/lib/proxy/handler.ts",
+    "src/app/proxy/[...path]/route.ts",
+    "src/app/api/external-apps/route.ts",
+    "src/components/external-apps/ExternalAppsManager.tsx",
+    "src/components/external-apps/ExternalAppForm.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 85.0
+  },
+  "improvement_goals": [
+    "重複コードの削除",
+    "エラーハンドリングの統一",
+    "型安全性の向上",
+    "コメント/JSDocの追加",
+    "マジックナンバーの定数化"
+  ],
+  "review_points": [
+    {
+      "file": "src/lib/external-apps/db.ts",
+      "check": "DBエラーハンドリングの一貫性"
+    },
+    {
+      "file": "src/lib/proxy/handler.ts",
+      "check": "タイムアウト・リトライ設定の定数化"
+    },
+    {
+      "file": "src/app/proxy/[...path]/route.ts",
+      "check": "HTTPメソッドごとの重複コード削減"
+    },
+    {
+      "file": "src/components/external-apps/ExternalAppForm.tsx",
+      "check": "バリデーションロジックの共通化"
+    }
+  ]
+}
