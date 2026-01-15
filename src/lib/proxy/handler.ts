@@ -37,10 +37,9 @@ export function isWebSocketUpgrade(request: Request): boolean {
  * @returns The full upstream URL
  */
 export function buildUpstreamUrl(app: ExternalApp, path: string): string {
-  // Maintain the full path including /proxy/{pathPrefix}
-  // This is because the upstream app is expected to be configured with basePath
-  const fullPath = `/proxy/${app.pathPrefix}${path}`;
-  return `http://${app.targetHost}:${app.targetPort}${fullPath}`;
+  // Strip the path prefix and forward to the upstream app's root
+  // This allows upstream apps to work without special basePath configuration
+  return `http://${app.targetHost}:${app.targetPort}${path}`;
 }
 
 /**
@@ -148,7 +147,7 @@ export async function proxyWebSocket(
 ): Promise<Response> {
   // Next.js Route Handlers cannot handle WebSocket upgrades
   // Return a 426 response with instructions for direct WebSocket connection
-  const directWsUrl = `ws://${app.targetHost}:${app.targetPort}/proxy/${app.pathPrefix}${path}`;
+  const directWsUrl = `ws://${app.targetHost}:${app.targetPort}${path}`;
 
   return new Response(
     JSON.stringify({

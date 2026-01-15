@@ -201,7 +201,7 @@ export function SlashCommandSelector({
             groups={filteredGroups}
             onSelect={handleSelect}
             highlightedIndex={highlightedIndex}
-            className="flex-1 overflow-y-auto"
+            className="flex-1 overflow-y-auto pb-20"
           />
         </div>
       </>

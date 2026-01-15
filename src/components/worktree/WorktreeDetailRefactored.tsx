@@ -1206,7 +1206,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </main>
 
         {/* Message Input - fixed above tab bar */}
-        <div className="fixed bottom-16 left-0 right-0 border-t border-gray-200 bg-white p-2 z-50">
+        <div className="fixed bottom-16 left-0 right-0 border-t border-gray-200 bg-white p-2 z-30">
           <MessageInput
             worktreeId={worktreeId}
             onMessageSent={handleMessageSent}
