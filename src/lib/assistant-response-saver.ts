@@ -5,6 +5,12 @@
  * This module implements the "next user input trigger" pattern:
  * When a user sends a new message, we first capture and save any pending
  * assistant response from the CLI tool (Claude/Codex/Gemini).
+ *
+ * Key responsibilities:
+ * - Capture CLI output since last saved position
+ * - Clean and validate the response based on CLI tool type
+ * - Save as assistant message with proper timestamp ordering
+ * - Update session state to prevent duplicate saves
  */
 
 import Database from 'better-sqlite3';
@@ -18,6 +24,17 @@ import { broadcastMessage } from './ws-server';
 import { cleanClaudeResponse, cleanGeminiResponse } from './response-poller';
 import type { CLIToolType } from './cli-tools/types';
 import type { ChatMessage } from '@/types/models';
+
+/**
+ * Default buffer size for capturing CLI session output (in lines)
+ */
+const SESSION_OUTPUT_BUFFER_SIZE = 10000;
+
+/**
+ * Time offset (in milliseconds) for assistant message timestamp
+ * Ensures assistant response appears before user message in chronological order
+ */
+const ASSISTANT_TIMESTAMP_OFFSET_MS = 1;
 
 /**
  * Clean CLI tool response based on tool type
@@ -69,7 +86,7 @@ export async function savePendingAssistantResponse(
     // 2. Capture current tmux output
     let output: string;
     try {
-      output = await captureSessionOutput(worktreeId, cliToolId, 10000);
+      output = await captureSessionOutput(worktreeId, cliToolId, SESSION_OUTPUT_BUFFER_SIZE);
     } catch {
       // Session not running or capture failed - return null without error
       console.log(`[savePendingAssistantResponse] Failed to capture session output for ${worktreeId}`);
@@ -84,7 +101,7 @@ export async function savePendingAssistantResponse(
     const lines = output.split('\n');
     const currentLineCount = lines.length;
 
-    // MUST FIX #1: Prevent duplicate saves when no new output
+    // Prevent duplicate saves when no new output has been added
     if (currentLineCount <= lastCapturedLine) {
       console.log(
         `[savePendingAssistantResponse] No new output (current: ${currentLineCount}, last: ${lastCapturedLine})`
@@ -109,9 +126,9 @@ export async function savePendingAssistantResponse(
       return null;
     }
 
-    // MUST FIX #2: Set assistant timestamp 1ms before user message
-    // This ensures correct chronological order in conversation history
-    const assistantTimestamp = new Date(userMessageTimestamp.getTime() - 1);
+    // Set assistant timestamp before user message to ensure correct chronological order
+    // This is critical for proper conversation history display
+    const assistantTimestamp = new Date(userMessageTimestamp.getTime() - ASSISTANT_TIMESTAMP_OFFSET_MS);
 
     // 7. Save to database
     const message = createMessage(db, {

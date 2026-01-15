@@ -1,6 +1,16 @@
 /**
  * API Route: POST /api/worktrees/:id/send
  * Sends a user message to a CLI tool (Claude/Codex/Gemini) for a specific worktree
+ *
+ * Flow:
+ * 1. Validate worktree exists
+ * 2. Validate request body (content required)
+ * 3. Validate CLI tool (defaults to claude)
+ * 4. Ensure CLI tool session is running
+ * 5. Save pending assistant response (Issue #53)
+ * 6. Send message to CLI tool
+ * 7. Create user message in database
+ * 8. Start polling for response
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -11,9 +21,22 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 
+/** Supported CLI tool IDs */
+const VALID_CLI_TOOL_IDS: CLIToolType[] = ['claude', 'codex', 'gemini'];
+
+/** Default CLI tool when not specified */
+const DEFAULT_CLI_TOOL: CLIToolType = 'claude';
+
 interface SendMessageRequest {
   content: string;
   cliToolId?: CLIToolType;  // Optional: override the worktree's default CLI tool
+}
+
+/**
+ * Extract error message from unknown error type
+ */
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown error';
 }
 
 export async function POST(
@@ -43,14 +66,13 @@ export async function POST(
       );
     }
 
-    // Determine which CLI tool to use
-    const cliToolId = body.cliToolId || worktree.cliToolId || 'claude';
+    // Determine which CLI tool to use (priority: request > worktree setting > default)
+    const cliToolId = body.cliToolId || worktree.cliToolId || DEFAULT_CLI_TOOL;
 
     // Validate CLI tool ID
-    const validToolIds: CLIToolType[] = ['claude', 'codex', 'gemini'];
-    if (!validToolIds.includes(cliToolId)) {
+    if (!VALID_CLI_TOOL_IDS.includes(cliToolId)) {
       return NextResponse.json(
-        { error: `Invalid CLI tool ID: ${cliToolId}. Must be one of: ${validToolIds.join(', ')}` },
+        { error: `Invalid CLI tool ID: ${cliToolId}. Must be one of: ${VALID_CLI_TOOL_IDS.join(', ')}` },
         { status: 400 }
       );
     }
@@ -77,9 +99,8 @@ export async function POST(
         await cliTool.startSession(params.id, worktree.path);
       } catch (error: unknown) {
         console.error(`Failed to start ${cliTool.name} session:`, error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
-          { error: `Failed to start ${cliTool.name} session: ${errorMessage}` },
+          { error: `Failed to start ${cliTool.name} session: ${getErrorMessage(error)}` },
           { status: 500 }
         );
       }
@@ -89,7 +110,7 @@ export async function POST(
     // This ensures timestamp ordering: assistantResponse < userMessage
     const userMessageTimestamp = new Date();
 
-    // [Issue #53] Save any pending assistant response before new user message
+    // Save any pending assistant response before sending the new user message
     // This captures the CLI tool's response to the previous user message
     try {
       await savePendingAssistantResponse(db, params.id, cliToolId, userMessageTimestamp);
@@ -103,9 +124,8 @@ export async function POST(
       await cliTool.sendMessage(params.id, body.content);
     } catch (error: unknown) {
       console.error(`Failed to send message to ${cliTool.name}:`, error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
-        { error: `Failed to send message to ${cliTool.name}: ${errorMessage}` },
+        { error: `Failed to send message to ${cliTool.name}: ${getErrorMessage(error)}` },
         { status: 500 }
       );
     }

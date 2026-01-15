@@ -551,8 +551,8 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       return false;
     }
 
-    // [Issue #53] Additional duplicate prevention: check if savePendingAssistantResponse
-    // already saved this content by re-checking session state
+    // Additional duplicate prevention: check if savePendingAssistantResponse
+    // already saved this content by comparing line counts
     if (result.lineCount <= lastCapturedLine) {
       console.log(`[checkForResponse] Already saved up to line ${lastCapturedLine}, skipping (result: ${result.lineCount})`);
       return false;
@@ -621,8 +621,8 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       console.log(`Marked ${answeredCount} pending prompt(s) as answered for ${worktreeId}`);
     }
 
-    // [Issue #53] Race condition prevention: re-check session state before saving
-    // savePendingAssistantResponse may have already saved this content
+    // Race condition prevention: re-check session state before saving
+    // savePendingAssistantResponse may have already saved this content concurrently
     const currentSessionState = getSessionState(db, worktreeId, cliToolId);
     if (currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
       console.log(`[checkForResponse] Race condition detected, skipping save (result: ${result.lineCount}, current: ${currentSessionState.lastCapturedLine})`);
