@@ -22,19 +22,108 @@ import {
 } from './db';
 import { broadcastMessage } from './ws-server';
 import { cleanClaudeResponse, cleanGeminiResponse } from './response-poller';
+import { stripAnsi } from './cli-patterns';
 import type { CLIToolType } from './cli-tools/types';
 import type { ChatMessage } from '@/types/models';
 
 /**
- * Default buffer size for capturing CLI session output (in lines)
+ * Skip patterns for Claude-specific UI elements
+ * Used by extractAssistantResponseBeforeLastPrompt to filter out non-response content
+ * @remarks These patterns are specific to the "before prompt" extraction logic
+ * and differ from cli-patterns.ts skipPatterns which are for "after prompt" extraction
  */
-const SESSION_OUTPUT_BUFFER_SIZE = 10000;
+const CLAUDE_SKIP_PATTERNS: readonly RegExp[] = [
+  /^[╭╮╰╯│─\s]+$/,  // Box drawing characters
+  /Claude Code v[\d.]+/,  // Version info
+  /^─{10,}$/,  // Separator lines
+  /^❯\s*$/,  // Empty prompt lines
+  /^\s*$/,  // Empty lines
+  /CLAUDE_HOOKS_/,
+  /\/bin\/claude/,
+  /@.*\s+%/,
+  /localhost/,
+  /:3000/,
+  /curl.*POST/,
+  /export\s+/,
+  /Tips for getting started/,
+  /Welcome back/,
+  /\?\s*for shortcuts/,
+];
+
+/**
+ * Extract assistant response BEFORE the last user prompt
+ *
+ * This is the key fix for Issue #54 Problem 4:
+ * - cleanClaudeResponse() extracts AFTER the last prompt (for response-poller)
+ * - This function extracts BEFORE the last prompt (for savePendingAssistantResponse)
+ *
+ * Scenario:
+ * tmuxバッファの状態（ユーザーがメッセージBを送信した時点）:
+ * ─────────────────────────────────────
+ * ❯ メッセージA（前回のユーザー入力）
+ * [前回のassistant応答 - 保存したい内容]
+ * ───
+ * ❯ メッセージB（今回のユーザー入力）  ← 最後のプロンプト
+ * [Claude処理中...]
+ * ─────────────────────────────────────
+ *
+ * We want to extract the content BEFORE ❯ メッセージB
+ *
+ * @param output - Raw tmux output (new lines since last capture)
+ * @param cliToolId - CLI tool ID
+ * @returns Cleaned assistant response content
+ */
+export function extractAssistantResponseBeforeLastPrompt(
+  output: string,
+  cliToolId: CLIToolType
+): string {
+  if (!output || output.trim() === '') {
+    return '';
+  }
+
+  if (cliToolId !== 'claude') {
+    // For non-Claude tools, use simple trimming
+    return output.trim();
+  }
+
+  const cleanOutput = stripAnsi(output);
+  const lines = cleanOutput.split('\n');
+
+  // Find the LAST user prompt (the new message that triggered this save)
+  // User prompt pattern: ❯ followed by actual content
+  let lastUserPromptIndex = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^❯\s+\S/.test(lines[i])) {
+      lastUserPromptIndex = i;
+      break;
+    }
+  }
+
+  // Extract lines BEFORE the last user prompt
+  const responseLines = lines.slice(0, lastUserPromptIndex);
+
+  // Filter out UI elements
+  const cleanedLines = responseLines.filter(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    return !CLAUDE_SKIP_PATTERNS.some(pattern => pattern.test(trimmed));
+  });
+
+  return cleanedLines.join('\n').trim();
+}
+
+/**
+ * Default buffer size for capturing CLI session output (in lines)
+ * @constant
+ */
+const SESSION_OUTPUT_BUFFER_SIZE: number = 10000;
 
 /**
  * Time offset (in milliseconds) for assistant message timestamp
  * Ensures assistant response appears before user message in chronological order
+ * @constant
  */
-const ASSISTANT_TIMESTAMP_OFFSET_MS = 1;
+const ASSISTANT_TIMESTAMP_OFFSET_MS: number = 1;
 
 /**
  * Clean CLI tool response based on tool type
@@ -114,7 +203,13 @@ export async function savePendingAssistantResponse(
     const newOutput = newLines.join('\n');
 
     // 5. Clean the response
-    const cleanedResponse = cleanCliResponse(newOutput, cliToolId);
+    // Issue #54 FIX: For Claude, use extractAssistantResponseBeforeLastPrompt
+    // to extract content BEFORE the last user prompt (not after it)
+    // This fixes the issue where assistant responses were not being saved
+    // when user sends a new message
+    const cleanedResponse = cliToolId === 'claude'
+      ? extractAssistantResponseBeforeLastPrompt(newOutput, cliToolId)
+      : cleanCliResponse(newOutput, cliToolId);
 
     // 6. Check if cleaned response is empty
     if (!cleanedResponse || cleanedResponse.trim() === '') {
