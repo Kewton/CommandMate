@@ -157,8 +157,10 @@ describe('HTTP Proxy Handler', () => {
 
       await proxyHttp(request, mockApp, '/nested/page?query=1');
 
+      // buildUpstreamUrl strips the proxy prefix and forwards to upstream's root
+      // This allows upstream apps to work without special basePath configuration
       expect(global.fetch).toHaveBeenCalledWith(
-        'http://127.0.0.1:5173/proxy/app-svelte/nested/page?query=1',
+        'http://127.0.0.1:5173/nested/page?query=1',
         expect.any(Object)
       );
     });
@@ -225,6 +227,9 @@ describe('HTTP Proxy Handler', () => {
   });
 
   describe('buildUpstreamUrl', () => {
+    // buildUpstreamUrl strips the proxy prefix and forwards to upstream's root
+    // This allows upstream apps to work without special basePath configuration
+
     it('should build URL with host and port', async () => {
       const { buildUpstreamUrl } = await import('@/lib/proxy/handler');
 
@@ -236,7 +241,8 @@ describe('HTTP Proxy Handler', () => {
 
       const url = buildUpstreamUrl(mockApp, '/page');
 
-      expect(url).toBe('http://localhost:5173/proxy/app-svelte/page');
+      // Path is forwarded directly to upstream without proxy prefix
+      expect(url).toBe('http://localhost:5173/page');
     });
 
     it('should handle paths with query strings', async () => {
@@ -250,7 +256,8 @@ describe('HTTP Proxy Handler', () => {
 
       const url = buildUpstreamUrl(mockApp, '/api?key=value&other=123');
 
-      expect(url).toBe('http://127.0.0.1:8501/proxy/streamlit/api?key=value&other=123');
+      // Query strings are preserved, proxy prefix is stripped
+      expect(url).toBe('http://127.0.0.1:8501/api?key=value&other=123');
     });
 
     it('should handle root path', async () => {
@@ -264,7 +271,8 @@ describe('HTTP Proxy Handler', () => {
 
       const url = buildUpstreamUrl(mockApp, '/');
 
-      expect(url).toBe('http://localhost:3001/proxy/app-next2/');
+      // Root path is forwarded as-is
+      expect(url).toBe('http://localhost:3001/');
     });
   });
 });
