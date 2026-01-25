@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { handleApiError } from '@/lib/api-client';
+import { filterCommandGroups } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 
 /**
@@ -110,24 +111,10 @@ export function useSlashCommands(worktreeId?: string): UseSlashCommandsResult {
 
   /**
    * Filtered groups based on current filter
+   * Uses shared filterCommandGroups utility (DRY principle)
    */
   const filteredGroups = useMemo(() => {
-    if (!filter.trim()) {
-      return groups;
-    }
-
-    const lowerFilter = filter.toLowerCase();
-
-    return groups
-      .map((group) => ({
-        ...group,
-        commands: group.commands.filter((cmd) => {
-          const nameMatch = cmd.name.toLowerCase().includes(lowerFilter);
-          const descMatch = cmd.description.toLowerCase().includes(lowerFilter);
-          return nameMatch || descMatch;
-        }),
-      }))
-      .filter((group) => group.commands.length > 0);
+    return filterCommandGroups(groups, filter);
   }, [groups, filter]);
 
   /**

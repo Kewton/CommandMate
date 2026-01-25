@@ -3,6 +3,9 @@
  *
  * Merges standard commands with worktree-specific commands.
  * Implements SF-1: Worktree commands take priority over standard commands.
+ *
+ * This module provides shared utilities for grouping and filtering commands,
+ * following DRY principle by centralizing category ordering and grouping logic.
  */
 
 import type { SlashCommand, SlashCommandGroup, SlashCommandCategory } from '@/types/slash-commands';
@@ -11,8 +14,12 @@ import { CATEGORY_LABELS } from '@/types/slash-commands';
 /**
  * Category order for merged command groups
  * Custom worktree commands appear first, then standard commands
+ *
+ * @remarks
+ * This is the single source of truth for category ordering.
+ * All grouping functions should use this order.
  */
-const CATEGORY_ORDER: SlashCommandCategory[] = [
+export const CATEGORY_ORDER: SlashCommandCategory[] = [
   // Custom categories first
   'planning',
   'development',
@@ -125,4 +132,36 @@ export function mergeCommandGroups(
  */
 export function countCommands(groups: SlashCommandGroup[]): number {
   return groups.reduce((total, group) => total + group.commands.length, 0);
+}
+
+/**
+ * Filter command groups by search query
+ *
+ * DRY: Shared filtering logic used by both useSlashCommands hook
+ * and SlashCommandSelector component.
+ *
+ * @param groups - Array of SlashCommandGroup objects
+ * @param query - Search query string
+ * @returns Filtered groups containing only matching commands
+ */
+export function filterCommandGroups(
+  groups: SlashCommandGroup[],
+  query: string
+): SlashCommandGroup[] {
+  if (!query.trim()) {
+    return groups;
+  }
+
+  const lowerQuery = query.toLowerCase();
+
+  return groups
+    .map((group) => ({
+      ...group,
+      commands: group.commands.filter((cmd) => {
+        const nameMatch = cmd.name.toLowerCase().includes(lowerQuery);
+        const descMatch = cmd.description.toLowerCase().includes(lowerQuery);
+        return nameMatch || descMatch;
+      }),
+    }))
+    .filter((group) => group.commands.length > 0);
 }

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { mergeCommandGroups, groupByCategory } from '@/lib/command-merger';
+import { mergeCommandGroups, groupByCategory, filterCommandGroups } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 
 describe('mergeCommandGroups', () => {
@@ -182,5 +182,96 @@ describe('groupByCategory', () => {
   it('should handle empty commands array', () => {
     const groups = groupByCategory([]);
     expect(groups).toEqual([]);
+  });
+});
+
+describe('filterCommandGroups', () => {
+  const testGroups: SlashCommandGroup[] = [
+    {
+      category: 'standard-session',
+      label: 'Standard (Session)',
+      commands: [
+        {
+          name: 'clear',
+          description: 'Clear conversation history',
+          category: 'standard-session',
+          isStandard: true,
+          source: 'standard',
+          filePath: '',
+        },
+        {
+          name: 'compact',
+          description: 'Compact context to reduce token usage',
+          category: 'standard-session',
+          isStandard: true,
+          source: 'standard',
+          filePath: '',
+        },
+      ],
+    },
+    {
+      category: 'planning',
+      label: 'Planning',
+      commands: [
+        {
+          name: 'work-plan',
+          description: 'Create work plan for Issue',
+          category: 'planning',
+          source: 'worktree',
+          filePath: '.claude/commands/work-plan.md',
+        },
+      ],
+    },
+  ];
+
+  it('should return all groups when query is empty', () => {
+    const result = filterCommandGroups(testGroups, '');
+    expect(result).toEqual(testGroups);
+  });
+
+  it('should return all groups when query is whitespace only', () => {
+    const result = filterCommandGroups(testGroups, '   ');
+    expect(result).toEqual(testGroups);
+  });
+
+  it('should filter commands by name', () => {
+    const result = filterCommandGroups(testGroups, 'clear');
+    expect(result.length).toBe(1);
+    expect(result[0].commands.length).toBe(1);
+    expect(result[0].commands[0].name).toBe('clear');
+  });
+
+  it('should filter commands by description', () => {
+    const result = filterCommandGroups(testGroups, 'token');
+    expect(result.length).toBe(1);
+    expect(result[0].commands.length).toBe(1);
+    expect(result[0].commands[0].name).toBe('compact');
+  });
+
+  it('should be case-insensitive', () => {
+    const resultLower = filterCommandGroups(testGroups, 'clear');
+    const resultUpper = filterCommandGroups(testGroups, 'CLEAR');
+    const resultMixed = filterCommandGroups(testGroups, 'ClEaR');
+
+    expect(resultLower).toEqual(resultUpper);
+    expect(resultLower).toEqual(resultMixed);
+  });
+
+  it('should remove groups with no matching commands', () => {
+    const result = filterCommandGroups(testGroups, 'work-plan');
+    expect(result.length).toBe(1);
+    expect(result[0].category).toBe('planning');
+  });
+
+  it('should return empty array when no commands match', () => {
+    const result = filterCommandGroups(testGroups, 'nonexistent');
+    expect(result).toEqual([]);
+  });
+
+  it('should match partial strings', () => {
+    const result = filterCommandGroups(testGroups, 'conv');
+    expect(result.length).toBe(1);
+    expect(result[0].commands.length).toBe(1);
+    expect(result[0].commands[0].name).toBe('clear');
   });
 });

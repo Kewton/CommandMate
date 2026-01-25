@@ -9,6 +9,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import { filterCommandGroups } from '@/lib/command-merger';
 import { SlashCommandList } from './SlashCommandList';
 
 export interface SlashCommandSelectorProps {
@@ -57,24 +58,9 @@ export function SlashCommandSelector({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Filter groups based on search
+  // Filter groups based on search (uses shared utility - DRY principle)
   const filteredGroups = useMemo(() => {
-    if (!filter.trim()) {
-      return groups;
-    }
-
-    const lowerFilter = filter.toLowerCase();
-
-    return groups
-      .map((group) => ({
-        ...group,
-        commands: group.commands.filter((cmd) => {
-          const nameMatch = cmd.name.toLowerCase().includes(lowerFilter);
-          const descMatch = cmd.description.toLowerCase().includes(lowerFilter);
-          return nameMatch || descMatch;
-        }),
-      }))
-      .filter((group) => group.commands.length > 0);
+    return filterCommandGroups(groups, filter);
   }, [groups, filter]);
 
   // Flat list for keyboard navigation

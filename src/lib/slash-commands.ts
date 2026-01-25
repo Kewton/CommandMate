@@ -13,10 +13,8 @@ import type {
   SlashCommandCategory,
   SlashCommandGroup,
 } from '@/types/slash-commands';
-import {
-  CATEGORY_LABELS,
-  COMMAND_CATEGORIES,
-} from '@/types/slash-commands';
+import { COMMAND_CATEGORIES } from '@/types/slash-commands';
+import { groupByCategory } from '@/lib/command-merger';
 
 /**
  * Cache for loaded commands
@@ -98,6 +96,9 @@ export async function loadSlashCommands(basePath?: string): Promise<SlashCommand
 /**
  * Get commands grouped by category
  *
+ * Uses shared groupByCategory utility from command-merger module (DRY principle).
+ * The CATEGORY_ORDER in command-merger.ts ensures proper ordering.
+ *
  * @param basePath - Optional base path for loading worktree-specific commands
  * @returns Promise resolving to array of SlashCommandGroup objects
  */
@@ -108,39 +109,8 @@ export async function getSlashCommandGroups(basePath?: string): Promise<SlashCom
     ? await loadSlashCommands(basePath)
     : commandsCache || (await loadSlashCommands());
 
-  // Group by category
-  const groupMap = new Map<SlashCommandCategory, SlashCommand[]>();
-
-  for (const command of commands) {
-    const existing = groupMap.get(command.category) || [];
-    existing.push(command);
-    groupMap.set(command.category, existing);
-  }
-
-  // Convert to array with labels
-  const groups: SlashCommandGroup[] = [];
-
-  // Define category order
-  const categoryOrder: SlashCommandCategory[] = [
-    'planning',
-    'development',
-    'review',
-    'documentation',
-    'workflow',
-  ];
-
-  for (const category of categoryOrder) {
-    const commands = groupMap.get(category);
-    if (commands && commands.length > 0) {
-      groups.push({
-        category,
-        label: CATEGORY_LABELS[category],
-        commands,
-      });
-    }
-  }
-
-  return groups;
+  // Use shared groupByCategory utility (DRY principle)
+  return groupByCategory(commands);
 }
 
 /**

@@ -7,8 +7,8 @@
  * Reference: https://www.gradually.ai/en/claude-code-commands/
  */
 
-import type { SlashCommand, SlashCommandGroup, SlashCommandCategory } from '@/types/slash-commands';
-import { CATEGORY_LABELS } from '@/types/slash-commands';
+import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import { groupByCategory } from '@/lib/command-merger';
 
 /**
  * Standard Claude Code commands
@@ -167,46 +167,15 @@ export const FREQUENTLY_USED: string[] = [
 ];
 
 /**
- * Category order for standard commands
- */
-const STANDARD_CATEGORY_ORDER: SlashCommandCategory[] = [
-  'standard-session',
-  'standard-config',
-  'standard-monitor',
-  'standard-git',
-  'standard-util',
-];
-
-/**
  * Get standard commands grouped by category
+ *
+ * Uses shared groupByCategory utility from command-merger module (DRY principle).
+ * The CATEGORY_ORDER in command-merger.ts ensures proper ordering.
  *
  * @returns Array of SlashCommandGroup objects for standard commands
  */
 export function getStandardCommandGroups(): SlashCommandGroup[] {
-  // Group commands by category
-  const groupMap = new Map<SlashCommandCategory, SlashCommand[]>();
-
-  for (const command of STANDARD_COMMANDS) {
-    const existing = groupMap.get(command.category) || [];
-    existing.push(command);
-    groupMap.set(command.category, existing);
-  }
-
-  // Convert to array with labels in specified order
-  const groups: SlashCommandGroup[] = [];
-
-  for (const category of STANDARD_CATEGORY_ORDER) {
-    const commands = groupMap.get(category);
-    if (commands && commands.length > 0) {
-      groups.push({
-        category,
-        label: CATEGORY_LABELS[category],
-        commands,
-      });
-    }
-  }
-
-  return groups;
+  return groupByCategory(STANDARD_COMMANDS);
 }
 
 /**
