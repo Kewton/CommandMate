@@ -5,6 +5,59 @@
 
 import path from 'path';
 
+// ============================================================
+// [SF-1] Log Configuration
+// ============================================================
+
+/**
+ * Log level type (defined here to avoid circular dependency with logger.ts)
+ */
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+/**
+ * Log configuration
+ */
+export interface LogConfig {
+  level: LogLevel;
+  format: 'json' | 'text';
+}
+
+/**
+ * Validate log level
+ */
+function isValidLogLevel(level: string | undefined): level is LogLevel {
+  return level !== undefined && ['debug', 'info', 'warn', 'error'].includes(level);
+}
+
+/**
+ * Get log configuration
+ *
+ * @returns Log configuration with level and format
+ *
+ * @example
+ * ```typescript
+ * const config = getLogConfig();
+ * console.log(config.level); // 'debug' in development, 'info' in production
+ * console.log(config.format); // 'text' or 'json'
+ * ```
+ */
+export function getLogConfig(): LogConfig {
+  const levelEnv = process.env.MCBD_LOG_LEVEL?.toLowerCase();
+  const formatEnv = process.env.MCBD_LOG_FORMAT?.toLowerCase();
+
+  // Default: debug in development, info in production
+  const defaultLevel: LogLevel = process.env.NODE_ENV === 'production' ? 'info' : 'debug';
+
+  return {
+    level: isValidLogLevel(levelEnv) ? levelEnv : defaultLevel,
+    format: formatEnv === 'json' ? 'json' : 'text',
+  };
+}
+
+// ============================================================
+// Environment Configuration
+// ============================================================
+
 export interface Env {
   /** Root directory for worktree scanning */
   MCBD_ROOT_DIR: string;

@@ -215,4 +215,86 @@ describe('SlashCommandSelector', () => {
       expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('Free input mode (Issue #56)', () => {
+    const mockOnFreeInput = vi.fn();
+
+    beforeEach(() => {
+      mockOnFreeInput.mockClear();
+    });
+
+    it('should render free input button when onFreeInput is provided', () => {
+      render(
+        <SlashCommandSelector
+          isOpen={true}
+          groups={mockGroups}
+          onSelect={mockOnSelect}
+          onClose={mockOnClose}
+          onFreeInput={mockOnFreeInput}
+        />
+      );
+
+      expect(screen.getByTestId('free-input-button')).toBeInTheDocument();
+    });
+
+    it('should not render free input button when onFreeInput is not provided', () => {
+      render(
+        <SlashCommandSelector
+          isOpen={true}
+          groups={mockGroups}
+          onSelect={mockOnSelect}
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(screen.queryByTestId('free-input-button')).not.toBeInTheDocument();
+    });
+
+    it('should call onFreeInput when free input button is clicked', () => {
+      render(
+        <SlashCommandSelector
+          isOpen={true}
+          groups={mockGroups}
+          onSelect={mockOnSelect}
+          onClose={mockOnClose}
+          onFreeInput={mockOnFreeInput}
+        />
+      );
+
+      const freeInputButton = screen.getByTestId('free-input-button');
+      fireEvent.click(freeInputButton);
+
+      expect(mockOnFreeInput).toHaveBeenCalledTimes(1);
+    });
+
+    it('should render free input button on mobile', () => {
+      render(
+        <SlashCommandSelector
+          isOpen={true}
+          groups={mockGroups}
+          onSelect={mockOnSelect}
+          onClose={mockOnClose}
+          onFreeInput={mockOnFreeInput}
+          isMobile={true}
+        />
+      );
+
+      expect(screen.getByTestId('free-input-button')).toBeInTheDocument();
+    });
+
+    it('should render free input button on desktop', () => {
+      render(
+        <SlashCommandSelector
+          isOpen={true}
+          groups={mockGroups}
+          onSelect={mockOnSelect}
+          onClose={mockOnClose}
+          onFreeInput={mockOnFreeInput}
+          isMobile={false}
+        />
+      );
+
+      expect(screen.getByTestId('free-input-button')).toBeInTheDocument();
+    });
+  });
 });

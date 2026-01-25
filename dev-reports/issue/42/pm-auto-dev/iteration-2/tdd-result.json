@@ -1,0 +1,105 @@
+{
+  "status": "success",
+  "phases_completed": [1, 2, 3, 4],
+  "coverage": {
+    "overall": 92.97,
+    "by_module": {
+      "lib/proxy": {
+        "statements": 97.05,
+        "branches": 88.46,
+        "functions": 88.88
+      },
+      "lib/external-apps": {
+        "statements": 88.88,
+        "branches": 80.0,
+        "functions": 94.73
+      },
+      "api/external-apps": {
+        "statements": 81.35
+      }
+    },
+    "note": "UI components excluded from coverage (E2E test coverage)"
+  },
+  "unit_tests": {
+    "total": 94,
+    "passed": 94,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0,
+    "build_status": "success"
+  },
+  "implemented_files": [
+    "src/components/external-apps/ExternalAppsManager.tsx",
+    "src/components/external-apps/ExternalAppCard.tsx",
+    "src/components/external-apps/ExternalAppForm.tsx",
+    "src/components/external-apps/ExternalAppStatus.tsx",
+    "src/components/external-apps/index.ts",
+    "src/app/page.tsx (modified)"
+  ],
+  "commits": [
+    "2257c1a: feat(issue42): implement UI components for external apps management (Phase 4)"
+  ],
+  "message": "Phase 4 UI implementation complete. All 4 UI components implemented and integrated into top page.",
+  "details": {
+    "phase4_ui": {
+      "ExternalAppsManager": {
+        "file": "src/components/external-apps/ExternalAppsManager.tsx",
+        "features": [
+          "External apps section for top page",
+          "App list display in card grid",
+          "Add button opens modal",
+          "Auto-refresh every 60 seconds",
+          "Loading, error, empty states"
+        ]
+      },
+      "ExternalAppCard": {
+        "file": "src/components/external-apps/ExternalAppCard.tsx",
+        "features": [
+          "Display app info (name, port, type)",
+          "Status indicator (Running/Stopped)",
+          "Open button (opens /proxy/{pathPrefix}/)",
+          "Settings button (opens edit modal)",
+          "Delete button (with confirmation)"
+        ]
+      },
+      "ExternalAppStatus": {
+        "file": "src/components/external-apps/ExternalAppStatus.tsx",
+        "features": [
+          "Health check API polling",
+          "Green dot for Running",
+          "Gray dot for Stopped",
+          "Optional response time display",
+          "Compact mode support"
+        ]
+      },
+      "ExternalAppForm": {
+        "file": "src/components/external-apps/ExternalAppForm.tsx",
+        "features": [
+          "Create/Edit form in modal",
+          "Field validation (displayName, name, pathPrefix, targetPort, appType)",
+          "Port range validation (1024-65535)",
+          "Path prefix pattern validation",
+          "WebSocket toggle",
+          "Enable/Disable toggle (edit mode)"
+        ]
+      },
+      "top_page_integration": {
+        "file": "src/app/page.tsx",
+        "changes": [
+          "Import ExternalAppsManager",
+          "Add ExternalAppsManager below WorktreeList"
+        ]
+      }
+    }
+  },
+  "ui_patterns": {
+    "data_fetching": "useEffect + fetch with polling (60s)",
+    "styling": "Tailwind CSS",
+    "components": "Existing UI components (Button, Card, Modal, Badge)",
+    "reference": "RepositoryManager component pattern"
+  },
+  "errors": [],
+  "timestamp": "2026-01-15T14:30:00Z"
+}

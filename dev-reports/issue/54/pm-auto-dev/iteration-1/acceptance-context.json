@@ -1,0 +1,59 @@
+{
+  "issue_number": 54,
+  "feature_summary": "セッション状態管理の改善 - レースコンディションの解消とAssistant応答保存ロジックの修正",
+  "acceptance_criteria": [
+    "AC1: 処理中は正しくステータスが「running」と表示される",
+    "AC2: yes/no応答が正しく動作する",
+    "AC3: Assistant履歴が正しく更新される（最新の応答が表示される）",
+    "AC4: Assistant応答がDBに正しく保存される",
+    "AC5: セッション切り替え時に状態がリセットされる"
+  ],
+  "test_scenarios": [
+    {
+      "id": "S1",
+      "name": "extractAssistantResponseBeforeLastPrompt機能テスト",
+      "description": "最後のユーザープロンプト以前のAssistant応答を正しく抽出する",
+      "criteria": ["AC4"],
+      "test_type": "unit",
+      "expected_behavior": "❯ メッセージA と ❯ メッセージB の間にあるAssistant応答を抽出"
+    },
+    {
+      "id": "S2",
+      "name": "status-detector機能テスト",
+      "description": "セッションステータスを正しく検出する",
+      "criteria": ["AC1", "AC2"],
+      "test_type": "unit",
+      "expected_behavior": "入力プロンプト→ready、思考中→running、対話プロンプト→waiting"
+    },
+    {
+      "id": "S3",
+      "name": "message-sync機能テスト",
+      "description": "メッセージの重複排除、ソート、上限維持が正しく動作する",
+      "criteria": ["AC3"],
+      "test_type": "unit",
+      "expected_behavior": "重複排除、タイムスタンプ順ソート、MAX_MESSAGES(200)上限維持"
+    },
+    {
+      "id": "S4",
+      "name": "Issue #54修正検証",
+      "description": "Issue #54の根本原因（保存ロジック）が修正されている",
+      "criteria": ["AC4"],
+      "test_type": "unit",
+      "expected_behavior": "extractAssistantResponseBeforeLastPromptがcleanClaudeResponseと異なるロジックで動作"
+    },
+    {
+      "id": "S5",
+      "name": "後方互換性テスト",
+      "description": "既存のcleanClaudeResponse()が変更されていない",
+      "criteria": ["AC3", "AC4"],
+      "test_type": "unit",
+      "expected_behavior": "response-pollerは引き続き正常動作"
+    }
+  ],
+  "verification_commands": [
+    "npm run test:unit -- --reporter=verbose",
+    "npm run lint",
+    "npx tsc --noEmit"
+  ],
+  "tdd_result_file": "dev-reports/issue/54/pm-auto-dev/iteration-1/tdd-result.json"
+}

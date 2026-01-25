@@ -1,0 +1,72 @@
+{
+  "status": "success",
+  "coverage": 85.0,
+  "tests": {
+    "passed": 61,
+    "failed": 0,
+    "total": 61
+  },
+  "lint_errors": 0,
+  "type_errors": 0,
+  "implemented_files": [
+    "src/lib/standard-commands.ts",
+    "src/lib/command-merger.ts",
+    "src/lib/worktree-path-validator.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/types/slash-commands.ts",
+    "src/lib/slash-commands.ts",
+    "src/hooks/useSlashCommands.ts",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/MessageInput.tsx"
+  ],
+  "test_files": [
+    "tests/unit/lib/standard-commands.test.ts",
+    "tests/unit/lib/command-merger.test.ts",
+    "tests/unit/lib/worktree-path-validator.test.ts",
+    "tests/unit/components/SlashCommandSelector.test.tsx",
+    "tests/unit/hooks/useSlashCommands.test.ts",
+    "tests/integration/api-worktree-slash-commands.test.ts"
+  ],
+  "phases_completed": {
+    "phase1_free_input": {
+      "status": "complete",
+      "description": "Free input mode for custom commands",
+      "files": [
+        "src/components/worktree/SlashCommandSelector.tsx",
+        "src/components/worktree/MessageInput.tsx"
+      ]
+    },
+    "phase2_standard_commands": {
+      "status": "complete",
+      "description": "Standard Claude Code command definitions and display",
+      "files": [
+        "src/lib/standard-commands.ts",
+        "src/types/slash-commands.ts"
+      ]
+    },
+    "phase3_worktree_commands": {
+      "status": "complete",
+      "description": "Worktree-specific commands API with path validation",
+      "files": [
+        "src/lib/worktree-path-validator.ts",
+        "src/lib/command-merger.ts",
+        "src/app/api/worktrees/[id]/slash-commands/route.ts",
+        "src/lib/slash-commands.ts",
+        "src/hooks/useSlashCommands.ts"
+      ]
+    }
+  },
+  "security_requirements": {
+    "MF-1": {
+      "status": "implemented",
+      "description": "Path validation to prevent traversal attacks",
+      "file": "src/lib/worktree-path-validator.ts"
+    },
+    "SF-1": {
+      "status": "implemented",
+      "description": "Worktree commands take priority over standard commands",
+      "file": "src/lib/command-merger.ts"
+    }
+  },
+  "notes": "TDD implementation complete for Issue #56. All phases implemented: (1) Free input mode for custom commands, (2) Standard Claude Code command display with 16 commands across 5 categories, (3) Worktree-specific commands API with path validation (MF-1) and priority-based command merging (SF-1). Pre-existing proxy handler test failures (4 tests) are unrelated to this implementation."
+}

@@ -1,0 +1,140 @@
+{
+  "status": "passed",
+  "issue_number": 53,
+  "title": "fix: Assistant応答の保存ロジックを「次のユーザー入力まで」方式に変更",
+  "test_cases": [
+    {
+      "scenario": "cleanCliResponse - Claude response cleaning",
+      "result": "passed",
+      "evidence": "3 tests passed: should clean Claude response by stripping ANSI and filtering skip patterns, should filter out Claude setup commands, should handle empty response"
+    },
+    {
+      "scenario": "cleanCliResponse - Gemini response cleaning",
+      "result": "passed",
+      "evidence": "1 test passed: should clean Gemini response by extracting content after marker"
+    },
+    {
+      "scenario": "cleanCliResponse - Codex response handling",
+      "result": "passed",
+      "evidence": "1 test passed: should return response as-is for codex (no special cleaning)"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - Save when new output exists",
+      "result": "passed",
+      "evidence": "Test passed: should save assistant response when new output exists after lastCapturedLine"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - Skip when no new output",
+      "result": "passed",
+      "evidence": "Test passed: should return null when no new output exists (currentLineCount <= lastCapturedLine)"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - Handle empty cleaned response",
+      "result": "passed",
+      "evidence": "Test passed: should return null when cleaned response is empty"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - Timestamp ordering",
+      "result": "passed",
+      "evidence": "Test passed: should set assistant timestamp 1ms before user message timestamp"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - Session state update",
+      "result": "passed",
+      "evidence": "Test passed: should update session state lastCapturedLine after saving"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - WebSocket broadcast",
+      "result": "passed",
+      "evidence": "Test passed: should broadcast message via WebSocket after saving"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - Error handling",
+      "result": "passed",
+      "evidence": "Test passed: should return null and not throw when captureSessionOutput fails"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - Missing session state",
+      "result": "passed",
+      "evidence": "Test passed: should handle missing session state (lastCapturedLine defaults to 0)"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - Gemini CLI tool support",
+      "result": "passed",
+      "evidence": "Test passed: should work with gemini CLI tool"
+    },
+    {
+      "scenario": "savePendingAssistantResponse - Codex CLI tool support",
+      "result": "passed",
+      "evidence": "Test passed: should work with codex CLI tool"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "ユーザーが連続でメッセージを送信しても、各userメッセージに対応するassistantメッセージが保存される",
+      "verified": true,
+      "evidence": "savePendingAssistantResponse function is called before new user message in send API route (src/app/api/worktrees/[id]/send/route.ts:94-99). The function captures and saves any pending assistant response before the new user message is sent. Tests verify: (1) new output after lastCapturedLine is saved, (2) no duplicate saves when lineCount <= lastCapturedLine"
+    },
+    {
+      "criterion": "履歴表示で「Waiting for response」が不適切に表示されない",
+      "verified": true,
+      "evidence": "Assistant timestamp is set 1ms before user message timestamp (src/lib/assistant-response-saver.ts:114). This ensures chronological ordering in conversation history. Session state lastCapturedLine is updated after saving (src/lib/assistant-response-saver.ts:127), preventing duplicate detection by response-poller. Race condition prevention added to response-poller.ts (lines 556-559, 624-630)"
+    },
+    {
+      "criterion": "既存のリアルタイム表示（current-output API）は維持される",
+      "verified": true,
+      "evidence": "src/app/api/worktrees/[id]/current-output/route.ts is unchanged and continues to provide realtime output via captureSessionOutput. The API returns isRunning, content, fullOutput, realtimeSnippet, isGenerating, thinking, isPromptWaiting states"
+    },
+    {
+      "criterion": "単体テストが追加されている",
+      "verified": true,
+      "evidence": "15 unit tests added in src/lib/__tests__/assistant-response-saver.test.ts. Tests cover: cleanCliResponse (5 tests for claude/gemini/codex), savePendingAssistantResponse (10 tests covering save scenarios, duplicate prevention, timestamp ordering, error handling, multi-CLI tool support)"
+    }
+  ],
+  "static_analysis": {
+    "typescript_check": {
+      "status": "passed",
+      "command": "npx tsc --noEmit",
+      "evidence": "No TypeScript errors"
+    },
+    "eslint_check": {
+      "status": "passed",
+      "command": "npm run lint",
+      "evidence": "No ESLint warnings or errors"
+    },
+    "build_check": {
+      "status": "passed",
+      "command": "npm run build",
+      "evidence": "Build completed successfully - all routes generated"
+    }
+  },
+  "unit_test_summary": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "test_file": "src/lib/__tests__/assistant-response-saver.test.ts"
+  },
+  "implementation_files": {
+    "new_files": [
+      "src/lib/assistant-response-saver.ts"
+    ],
+    "modified_files": [
+      "src/lib/response-poller.ts",
+      "src/app/api/worktrees/[id]/send/route.ts"
+    ],
+    "test_files": [
+      "src/lib/__tests__/assistant-response-saver.test.ts"
+    ]
+  },
+  "notes": {
+    "unrelated_test_failures": "4 tests in tests/unit/proxy/handler.test.ts failed, but these are unrelated to Issue #53. They appear to be pre-existing issues with proxy URL construction tests (buildUpstreamUrl expects /proxy/app-name/ prefix but receives direct path)."
+  },
+  "evidence_files": [
+    "src/lib/__tests__/assistant-response-saver.test.ts",
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/response-poller.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts"
+  ],
+  "message": "すべての受入条件を満たしています。Issue #53の実装は正常に完了しました。"
+}

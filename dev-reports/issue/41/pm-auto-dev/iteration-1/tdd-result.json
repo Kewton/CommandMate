@@ -1,0 +1,56 @@
+{
+  "status": "success",
+  "tests": {
+    "total": 25,
+    "passed": 25,
+    "failed": 0
+  },
+  "coverage": 87.09,
+  "lint_errors": 0,
+  "type_errors": 0,
+  "files_created": [
+    "src/lib/logger.ts",
+    "tests/unit/logger.test.ts"
+  ],
+  "files_modified": [
+    "src/lib/env.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/cli-session.ts",
+    ".env.example"
+  ],
+  "implementation_summary": {
+    "core_features": [
+      "[MF-1] Sensitive data filtering (sanitize function) - Redacts Bearer tokens, passwords, secrets, API keys, auth tokens",
+      "[MF-2] Server/Client log separation - Server outputs structured logs, client only logs in development",
+      "[SF-1] Log configuration in env.ts - getLogConfig() function added",
+      "[SF-2] Request ID generation - generateRequestId() for UUID v4 format"
+    ],
+    "logging_added_to": [
+      "prompt-detector.ts - detectPrompt function with debug and info logs",
+      "cli-patterns.ts - detectThinking function with debug logs",
+      "cli-session.ts - captureSessionOutput function with debug and error logs"
+    ],
+    "test_coverage": {
+      "createLogger": "Returns logger with debug, info, warn, error methods",
+      "log_level_filtering": "Respects MCBD_LOG_LEVEL environment variable",
+      "log_format": "JSON and text format support via MCBD_LOG_FORMAT",
+      "withContext": "Adds context (worktreeId, cliToolId, requestId) to log entries",
+      "sanitization": "Redacts sensitive data (Bearer tokens, passwords, secrets, keys, auth)",
+      "generateRequestId": "Generates unique UUID v4 format IDs"
+    }
+  },
+  "acceptance_criteria_met": [
+    "src/lib/logger.ts created",
+    "Environment variable MCBD_LOG_LEVEL controls log level",
+    "Environment variable MCBD_LOG_FORMAT controls output format",
+    "Sensitive data filtering (sanitize function) implemented [MF-1]",
+    "Server/Client log separation implemented [MF-2]",
+    "Log configuration integrated in env.ts [SF-1]",
+    "Request ID generation implemented [SF-2]",
+    "Logging added to priority high modules (prompt-detector, cli-patterns, cli-session)",
+    "Unit tests added",
+    ".env.example updated with logging configuration"
+  ],
+  "message": "TDD implementation completed successfully. All 25 tests pass with 87.09% coverage on logger.ts. ESLint and TypeScript checks pass with 0 errors."
+}

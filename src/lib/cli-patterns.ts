@@ -4,6 +4,9 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
+import { createLogger } from './logger';
+
+const logger = createLogger('cli-patterns');
 
 /**
  * Claude CLI spinner characters (expanded set)
@@ -61,17 +64,27 @@ export const GEMINI_PROMPT_PATTERN = /^(%|\$|.*@.*[%$#])\s*$/m;
  * Detect if CLI tool is showing "thinking" indicator
  */
 export function detectThinking(cliToolId: CLIToolType, content: string): boolean {
+  const log = logger.withContext({ cliToolId });
+  log.debug('detectThinking:check', { contentLength: content.length });
+
+  let result: boolean;
   switch (cliToolId) {
     case 'claude':
-      return CLAUDE_THINKING_PATTERN.test(content);
+      result = CLAUDE_THINKING_PATTERN.test(content);
+      break;
     case 'codex':
-      return CODEX_THINKING_PATTERN.test(content);
+      result = CODEX_THINKING_PATTERN.test(content);
+      break;
     case 'gemini':
       // Gemini doesn't have a thinking indicator in one-shot mode
-      return false;
+      result = false;
+      break;
     default:
-      return CLAUDE_THINKING_PATTERN.test(content);
+      result = CLAUDE_THINKING_PATTERN.test(content);
   }
+
+  log.debug('detectThinking:result', { isThinking: result });
+  return result;
 }
 
 /**

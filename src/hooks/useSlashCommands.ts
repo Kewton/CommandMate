@@ -7,7 +7,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { slashCommandApi, handleApiError } from '@/lib/api-client';
+import { handleApiError } from '@/lib/api-client';
+import { filterCommandGroups } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 
 /**
@@ -35,6 +36,7 @@ export interface UseSlashCommandsResult {
 /**
  * Hook for loading and filtering slash commands
  *
+ * @param worktreeId - Optional worktree ID for loading worktree-specific commands (Issue #56)
  * @returns UseSlashCommandsResult with commands data and controls
  *
  * @example
@@ -59,7 +61,7 @@ export interface UseSlashCommandsResult {
  * }
  * ```
  */
-export function useSlashCommands(): UseSlashCommandsResult {
+export function useSlashCommands(worktreeId?: string): UseSlashCommandsResult {
   const [groups, setGroups] = useState<SlashCommandGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,20 +69,31 @@ export function useSlashCommands(): UseSlashCommandsResult {
 
   /**
    * Fetch commands from API
+   * If worktreeId is provided, fetches worktree-specific commands (Issue #56)
    */
   const fetchCommands = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await slashCommandApi.getAll();
-      setGroups(response.groups);
+
+      // Use worktree-specific API if worktreeId is provided
+      const endpoint = worktreeId
+        ? `/api/worktrees/${worktreeId}/slash-commands`
+        : '/api/slash-commands';
+
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      const data = await response.json();
+      setGroups(data.groups);
     } catch (err) {
       setError(handleApiError(err));
       setGroups([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [worktreeId]);
 
   /**
    * Load commands on mount
@@ -98,24 +111,10 @@ export function useSlashCommands(): UseSlashCommandsResult {
 
   /**
    * Filtered groups based on current filter
+   * Uses shared filterCommandGroups utility (DRY principle)
    */
   const filteredGroups = useMemo(() => {
-    if (!filter.trim()) {
-      return groups;
-    }
-
-    const lowerFilter = filter.toLowerCase();
-
-    return groups
-      .map((group) => ({
-        ...group,
-        commands: group.commands.filter((cmd) => {
-          const nameMatch = cmd.name.toLowerCase().includes(lowerFilter);
-          const descMatch = cmd.description.toLowerCase().includes(lowerFilter);
-          return nameMatch || descMatch;
-        }),
-      }))
-      .filter((group) => group.commands.length > 0);
+    return filterCommandGroups(groups, filter);
   }, [groups, filter]);
 
   /**

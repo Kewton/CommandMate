@@ -1020,13 +1020,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       : IDLE_POLLING_INTERVAL_MS;
 
     const pollData = async () => {
-      await Promise.all([fetchCurrentOutput(), fetchWorktree()]);
+      await Promise.all([fetchCurrentOutput(), fetchWorktree(), fetchMessages()]);
     };
 
     const intervalId = setInterval(pollData, pollingInterval);
 
     return () => clearInterval(intervalId);
-  }, [loading, error, fetchCurrentOutput, fetchWorktree, state.terminal.isActive]);
+  }, [loading, error, fetchCurrentOutput, fetchWorktree, fetchMessages, state.terminal.isActive]);
 
   /** Sync layout mode with viewport size */
   useEffect(() => {
@@ -1143,6 +1143,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               worktreeId={worktreeId}
               onMessageSent={handleMessageSent}
               cliToolId="claude"
+              isSessionRunning={state.terminal.isActive}
             />
           </div>
           {/* Prompt Panel - fixed overlay at bottom */}
@@ -1205,11 +1206,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </main>
 
         {/* Message Input - fixed above tab bar */}
-        <div className="fixed bottom-16 left-0 right-0 border-t border-gray-200 bg-white p-2 z-10">
+        <div className="fixed bottom-16 left-0 right-0 border-t border-gray-200 bg-white p-2 z-30">
           <MessageInput
             worktreeId={worktreeId}
             onMessageSent={handleMessageSent}
             cliToolId="claude"
+            isSessionRunning={state.terminal.isActive}
           />
         </div>
 

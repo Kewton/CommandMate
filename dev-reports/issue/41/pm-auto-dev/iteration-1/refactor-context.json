@@ -1,0 +1,28 @@
+{
+  "issue_number": 41,
+  "refactor_targets": [
+    "src/lib/logger.ts",
+    "src/lib/env.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/cli-session.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 87.09,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性向上",
+    "重複コードの削除（あれば）",
+    "ドキュメンテーションの充実",
+    "エッジケースの考慮"
+  ],
+  "constraints": [
+    "既存のテストをすべてパスさせること",
+    "カバレッジを下げないこと",
+    "公開APIの変更は避けること"
+  ],
+  "tdd_result_file": "dev-reports/issue/41/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_file": "dev-reports/issue/41/pm-auto-dev/iteration-1/acceptance-result.json"
+}

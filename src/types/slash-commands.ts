@@ -12,7 +12,18 @@ export type SlashCommandCategory =
   | 'development'
   | 'review'
   | 'documentation'
-  | 'workflow';
+  | 'workflow'
+  // Standard command categories (Issue #56)
+  | 'standard-session'
+  | 'standard-config'
+  | 'standard-monitor'
+  | 'standard-git'
+  | 'standard-util';
+
+/**
+ * Command source type (Issue #56)
+ */
+export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree';
 
 /**
  * Slash command definition
@@ -28,6 +39,10 @@ export interface SlashCommand {
   model?: string;
   /** Path to the command file */
   filePath: string;
+  /** Whether this is a standard Claude Code command (Issue #56) */
+  isStandard?: boolean;
+  /** Command source: standard, mcbd, or worktree (Issue #56) */
+  source?: SlashCommandSource;
 }
 
 /**
@@ -51,6 +66,12 @@ export const CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
   review: 'Review',
   documentation: 'Documentation',
   workflow: 'Workflow',
+  // Standard command category labels (Issue #56)
+  'standard-session': 'Standard (Session)',
+  'standard-config': 'Standard (Config)',
+  'standard-monitor': 'Standard (Monitor)',
+  'standard-git': 'Standard (Git)',
+  'standard-util': 'Standard (Utility)',
 };
 
 /**

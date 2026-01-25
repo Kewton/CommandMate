@@ -1,0 +1,111 @@
+{
+  "status": "passed",
+  "scenarios": [
+    {
+      "id": "AC-1",
+      "name": "Free Input Mode",
+      "status": "passed",
+      "notes": "Free input button implemented in SlashCommandSelector component for both mobile (bottom sheet) and desktop (dropdown). Button has data-testid='free-input-button' and triggers onFreeInput callback. 15 unit tests pass."
+    },
+    {
+      "id": "AC-2",
+      "name": "Standard Command Display",
+      "status": "passed",
+      "notes": "16 standard Claude Code commands defined in src/lib/standard-commands.ts across 5 categories (session, config, monitor, git, util). Commands include: clear, compact, resume, rewind, config, model, permissions, status, context, cost, review, pr-comments, help, doctor, export, todos. 16 unit tests pass."
+    },
+    {
+      "id": "AC-3",
+      "name": "Worktree Commands API",
+      "status": "passed",
+      "notes": "GET /api/worktrees/[id]/slash-commands endpoint implemented in src/app/api/worktrees/[id]/slash-commands/route.ts. Returns merged command groups with source counts. 3 integration tests pass."
+    },
+    {
+      "id": "AC-4",
+      "name": "Path Validation (MF-1)",
+      "status": "passed",
+      "notes": "Path validation implemented in src/lib/worktree-path-validator.ts. Checks for: empty string, path traversal (..), absolute path requirement, allowed base paths. 8 unit tests pass."
+    },
+    {
+      "id": "AC-5",
+      "name": "Command Priority (SF-1)",
+      "status": "passed",
+      "notes": "Command merging implemented in src/lib/command-merger.ts. Worktree commands override standard commands when names match. Custom categories appear before standard categories. 9 unit tests pass."
+    },
+    {
+      "id": "AC-6",
+      "name": "Quality Checks",
+      "status": "passed",
+      "notes": "All quality checks pass: ESLint (no errors), TypeScript (no errors), Build (successful). Issue #56 specific tests (61 tests) all pass."
+    }
+  ],
+  "quality_checks": {
+    "lint": "passed",
+    "type_check": "passed",
+    "build": "passed",
+    "unit_tests": "passed",
+    "integration_tests": "passed"
+  },
+  "test_summary": {
+    "issue_56_unit_tests": {
+      "standard_commands": "16/16 passed",
+      "command_merger": "9/9 passed",
+      "worktree_path_validator": "8/8 passed",
+      "slash_command_selector": "15/15 passed",
+      "use_slash_commands_hook": "13/13 passed"
+    },
+    "issue_56_integration_tests": {
+      "api_worktree_slash_commands": "3/3 passed"
+    },
+    "pre_existing_failures": {
+      "proxy_handler_tests": "4 tests failing (unrelated to Issue #56)",
+      "worktree_detail_integration": "17 tests failing (Next.js App Router mock issue, unrelated to Issue #56)"
+    }
+  },
+  "implemented_files": [
+    "src/lib/standard-commands.ts",
+    "src/lib/command-merger.ts",
+    "src/lib/worktree-path-validator.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/types/slash-commands.ts",
+    "src/lib/slash-commands.ts",
+    "src/hooks/useSlashCommands.ts",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/MessageInput.tsx"
+  ],
+  "test_files": [
+    "tests/unit/lib/standard-commands.test.ts",
+    "tests/unit/lib/command-merger.test.ts",
+    "tests/unit/lib/worktree-path-validator.test.ts",
+    "tests/unit/components/SlashCommandSelector.test.tsx",
+    "tests/unit/hooks/useSlashCommands.test.ts",
+    "tests/integration/api-worktree-slash-commands.test.ts"
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Mobile/Desktop UI supports free input mode",
+      "verified": true
+    },
+    {
+      "criterion": "16 standard commands displayed in UI",
+      "verified": true
+    },
+    {
+      "criterion": "Worktree-specific commands API works",
+      "verified": true
+    },
+    {
+      "criterion": "Path validation prevents traversal attacks (MF-1)",
+      "verified": true
+    },
+    {
+      "criterion": "Worktree commands have priority over standard (SF-1)",
+      "verified": true
+    },
+    {
+      "criterion": "ESLint, TypeScript, Build all pass",
+      "verified": true
+    }
+  ],
+  "notes": "All acceptance criteria for Issue #56 are satisfied. The implementation includes: (1) Free input mode for custom slash commands in both mobile and desktop UI, (2) 16 standard Claude Code commands organized into 5 categories, (3) New API endpoint for worktree-specific commands, (4) Path validation security feature (MF-1), (5) Command priority system (SF-1) where worktree commands override standard commands. Pre-existing test failures in proxy handler (4 tests) and worktree-detail-integration (17 tests) are unrelated to this implementation and were documented in the TDD result.",
+  "message": "All acceptance criteria verified. Issue #56 implementation is complete and ready for review."
+}

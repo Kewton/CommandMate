@@ -1,4 +1,12 @@
-# myCodeBranchDesk
+# MyCodeBranchDesk
+
+**Vibe Coder のための並行開発プラットフォーム**
+
+> 仕事も、育児も、家事も。その隙間で、コードを紡ぐ。
+
+📖 **[コンセプト詳細 (docs/concept.md)](./docs/concept.md)** — このツールが解決する課題と目指す世界
+
+---
 
 git worktree ごとに SWE CLI tool (Claude Code / Codex / Gemini) / tmux セッションを張り、スマホブラウザからチャット操作できる開発コンパニオンツール。
 

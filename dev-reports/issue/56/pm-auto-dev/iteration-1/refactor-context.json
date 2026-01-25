@@ -1,0 +1,29 @@
+{
+  "issue_number": 56,
+  "tdd_result": "dev-reports/issue/56/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result": "dev-reports/issue/56/pm-auto-dev/iteration-1/acceptance-result.json",
+  "implemented_files": [
+    "src/lib/standard-commands.ts",
+    "src/lib/command-merger.ts",
+    "src/lib/worktree-path-validator.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/types/slash-commands.ts",
+    "src/lib/slash-commands.ts",
+    "src/hooks/useSlashCommands.ts",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/MessageInput.tsx"
+  ],
+  "refactoring_focus": [
+    "SOLID原則の適用確認",
+    "重複コードの除去",
+    "型安全性の向上",
+    "コードの可読性改善",
+    "テストカバレッジの確認"
+  ],
+  "quality_requirements": {
+    "lint": "エラー0件",
+    "type_check": "型エラー0件",
+    "unit_test": "全テストパス",
+    "build": "成功"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "issue_number": 53,
+  "title": "fix: Assistant応答の保存ロジックを「次のユーザー入力まで」方式に変更",
+  "target_files": [
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/response-poller.ts",
+    "src/app/api/worktrees/[id]/send/route.ts"
+  ],
+  "refactoring_goals": [
+    "SOLID原則の遵守確認",
+    "コード重複の排除",
+    "命名規則の統一",
+    "エラーハンドリングの改善"
+  ],
+  "test_file": "__tests__/lib/assistant-response-saver.test.ts",
+  "tdd_result_path": "dev-reports/issue/53/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/53/pm-auto-dev/iteration-1/acceptance-result.json"
+}

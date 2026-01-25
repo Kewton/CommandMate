@@ -1,0 +1,58 @@
+{
+  "issue_number": 56,
+  "issue_title": "claude code標準搭載のスラッシュコマンドを利用出来るようにする",
+  "acceptance_criteria": [
+    "モバイルUIで自由入力が可能であること",
+    "標準コマンド（/clear, /compact等）がUIに表示されること",
+    "対象worktreeのコマンドがUIに表示されること",
+    "新しい標準コマンドに自動対応できること（自由入力で対応可能）",
+    "パスバリデーションが実装されていること（MF-1）",
+    "コマンド優先順位が明確であること（SF-1: worktree優先）"
+  ],
+  "implementation_tasks": [
+    {
+      "phase": 1,
+      "name": "自由入力モード",
+      "tasks": [
+        "SlashCommandSelector.tsx に自由入力ボタン追加",
+        "MessageInput.tsx に自由入力コールバック実装",
+        "単体テスト追加"
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "標準コマンド表示",
+      "tasks": [
+        "standard-commands.ts 作成（16個の主要コマンド定義）",
+        "slash-commands.ts 型定義拡張",
+        "slash-commands.ts ローダー改修",
+        "SlashCommandList.tsx UI改修",
+        "単体テスト追加"
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "Worktree固有コマンド",
+      "tasks": [
+        "path-validator.ts 作成（MF-1: パスバリデーション）",
+        "command-merger.ts 作成（SF-1: コマンドマージ）",
+        "api/worktrees/[id]/slash-commands/route.ts 作成",
+        "slash-commands.ts basePath対応",
+        "useSlashCommands.ts Hook改修",
+        "結合テスト追加"
+      ]
+    }
+  ],
+  "target_coverage": 80,
+  "quality_requirements": {
+    "lint": "エラー0件",
+    "type_check": "型エラー0件",
+    "unit_test": "全テストパス",
+    "build": "成功"
+  },
+  "design_documents": {
+    "design_policy": "dev-reports/design/issue-56-design-policy.md",
+    "architecture_review": "dev-reports/review/20260125-132343-architecture-review.md",
+    "work_plan": "dev-reports/issue/56/work-plan.md"
+  }
+}

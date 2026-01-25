@@ -10,11 +10,12 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
 import type { SlashCommandGroup } from '@/types/slash-commands';
 
-// Mock the API client
+// Mock fetch
+const mockFetch = vi.fn();
+global.fetch = mockFetch;
+
+// Mock the API client for handleApiError
 vi.mock('@/lib/api-client', () => ({
-  slashCommandApi: {
-    getAll: vi.fn(),
-  },
   handleApiError: vi.fn((error) => error.message || 'Unknown error'),
 }));
 
@@ -56,6 +57,7 @@ describe('useSlashCommands', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetch.mockReset();
   });
 
   afterEach(() => {
@@ -64,10 +66,8 @@ describe('useSlashCommands', () => {
 
   describe('Initial state', () => {
     it('should return loading true initially', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockImplementation(
-        () => new Promise(() => {}) // Never resolves
-      );
+      // Never resolving fetch
+      mockFetch.mockImplementation(() => new Promise(() => {}));
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -79,8 +79,10 @@ describe('useSlashCommands', () => {
 
   describe('Loading commands', () => {
     it('should load commands on mount', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockResolvedValue({ groups: mockGroups });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -90,11 +92,11 @@ describe('useSlashCommands', () => {
 
       expect(result.current.groups).toEqual(mockGroups);
       expect(result.current.error).toBeNull();
+      expect(mockFetch).toHaveBeenCalledWith('/api/slash-commands');
     });
 
     it('should handle API errors', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockRejectedValue(new Error('Network error'));
+      mockFetch.mockRejectedValue(new Error('Network error'));
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -105,12 +107,62 @@ describe('useSlashCommands', () => {
       expect(result.current.error).toBe('Network error');
       expect(result.current.groups).toEqual([]);
     });
+
+    it('should handle non-ok response', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+      });
+
+      const { result } = renderHook(() => useSlashCommands());
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.error).toBe('HTTP error 500');
+      expect(result.current.groups).toEqual([]);
+    });
+  });
+
+  describe('Worktree-specific commands (Issue #56)', () => {
+    it('should use worktree-specific API when worktreeId is provided', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
+
+      const { result } = renderHook(() => useSlashCommands('worktree-123'));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/worktrees/worktree-123/slash-commands');
+    });
+
+    it('should use default API when worktreeId is not provided', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
+
+      const { result } = renderHook(() => useSlashCommands());
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/slash-commands');
+    });
   });
 
   describe('Filtering', () => {
     it('should filter commands by query', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockResolvedValue({ groups: mockGroups });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -130,8 +182,10 @@ describe('useSlashCommands', () => {
     });
 
     it('should return all commands with empty filter', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockResolvedValue({ groups: mockGroups });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -147,8 +201,10 @@ describe('useSlashCommands', () => {
     });
 
     it('should be case-insensitive when filtering', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockResolvedValue({ groups: mockGroups });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -165,8 +221,10 @@ describe('useSlashCommands', () => {
     });
 
     it('should filter by description as well', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockResolvedValue({ groups: mockGroups });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -183,8 +241,10 @@ describe('useSlashCommands', () => {
     });
 
     it('should remove empty groups after filtering', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockResolvedValue({ groups: mockGroups });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -204,8 +264,10 @@ describe('useSlashCommands', () => {
 
   describe('Flat commands list', () => {
     it('should provide flat list of all commands', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockResolvedValue({ groups: mockGroups });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -221,8 +283,10 @@ describe('useSlashCommands', () => {
 
   describe('Refresh', () => {
     it('should provide refresh function', async () => {
-      const { slashCommandApi } = await import('@/lib/api-client');
-      vi.mocked(slashCommandApi.getAll).mockResolvedValue({ groups: mockGroups });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ groups: mockGroups }),
+      });
 
       const { result } = renderHook(() => useSlashCommands());
 
@@ -237,8 +301,8 @@ describe('useSlashCommands', () => {
         result.current.refresh();
       });
 
-      // Should have called getAll again
-      expect(slashCommandApi.getAll).toHaveBeenCalledTimes(2);
+      // Should have called fetch again
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
 });

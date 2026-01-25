@@ -34,6 +34,7 @@ describe('CLITool Types', () => {
       sendMessage: async () => {},
       killSession: async () => {},
       getSessionName: () => 'test-session',
+      interrupt: async () => {},
     };
 
     expect(mockTool.id).toBe('claude');

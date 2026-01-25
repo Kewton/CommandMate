@@ -13,10 +13,8 @@ import type {
   SlashCommandCategory,
   SlashCommandGroup,
 } from '@/types/slash-commands';
-import {
-  CATEGORY_LABELS,
-  COMMAND_CATEGORIES,
-} from '@/types/slash-commands';
+import { COMMAND_CATEGORIES } from '@/types/slash-commands';
+import { groupByCategory } from '@/lib/command-merger';
 
 /**
  * Cache for loaded commands
@@ -25,10 +23,13 @@ let commandsCache: SlashCommand[] | null = null;
 
 /**
  * Get the commands directory path
+ *
+ * @param basePath - Optional base path. If not provided, uses process.cwd()
  */
-function getCommandsDir(): string {
-  // Use process.cwd() to get the project root
-  return path.join(process.cwd(), '.claude', 'commands');
+function getCommandsDir(basePath?: string): string {
+  // Use provided basePath or default to process.cwd()
+  const root = basePath || process.cwd();
+  return path.join(root, '.claude', 'commands');
 }
 
 /**
@@ -58,10 +59,11 @@ function parseCommandFile(filePath: string): SlashCommand | null {
 /**
  * Load all slash commands from .claude/commands/*.md
  *
+ * @param basePath - Optional base path. If not provided, uses process.cwd()
  * @returns Promise resolving to array of SlashCommand objects
  */
-export async function loadSlashCommands(): Promise<SlashCommand[]> {
-  const commandsDir = getCommandsDir();
+export async function loadSlashCommands(basePath?: string): Promise<SlashCommand[]> {
+  const commandsDir = getCommandsDir(basePath);
 
   // Check if directory exists
   if (!fs.existsSync(commandsDir)) {
@@ -94,44 +96,21 @@ export async function loadSlashCommands(): Promise<SlashCommand[]> {
 /**
  * Get commands grouped by category
  *
+ * Uses shared groupByCategory utility from command-merger module (DRY principle).
+ * The CATEGORY_ORDER in command-merger.ts ensures proper ordering.
+ *
+ * @param basePath - Optional base path for loading worktree-specific commands
  * @returns Promise resolving to array of SlashCommandGroup objects
  */
-export async function getSlashCommandGroups(): Promise<SlashCommandGroup[]> {
-  const commands = commandsCache || (await loadSlashCommands());
+export async function getSlashCommandGroups(basePath?: string): Promise<SlashCommandGroup[]> {
+  // If basePath is provided, always load fresh (for worktree-specific commands)
+  // Otherwise, use cache for MCBD commands
+  const commands = basePath
+    ? await loadSlashCommands(basePath)
+    : commandsCache || (await loadSlashCommands());
 
-  // Group by category
-  const groupMap = new Map<SlashCommandCategory, SlashCommand[]>();
-
-  for (const command of commands) {
-    const existing = groupMap.get(command.category) || [];
-    existing.push(command);
-    groupMap.set(command.category, existing);
-  }
-
-  // Convert to array with labels
-  const groups: SlashCommandGroup[] = [];
-
-  // Define category order
-  const categoryOrder: SlashCommandCategory[] = [
-    'planning',
-    'development',
-    'review',
-    'documentation',
-    'workflow',
-  ];
-
-  for (const category of categoryOrder) {
-    const commands = groupMap.get(category);
-    if (commands && commands.length > 0) {
-      groups.push({
-        category,
-        label: CATEGORY_LABELS[category],
-        commands,
-      });
-    }
-  }
-
-  return groups;
+  // Use shared groupByCategory utility (DRY principle)
+  return groupByCategory(commands);
 }
 
 /**

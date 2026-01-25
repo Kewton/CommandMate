@@ -6,6 +6,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { ICLITool, CLIToolType } from './types';
+import { sendSpecialKey } from '../tmux';
 
 const execAsync = promisify(exec);
 
@@ -47,4 +48,15 @@ export abstract class BaseCLITool implements ICLITool {
   abstract startSession(worktreeId: string, worktreePath: string): Promise<void>;
   abstract sendMessage(worktreeId: string, message: string): Promise<void>;
   abstract killSession(worktreeId: string): Promise<void>;
+
+  /**
+   * Interrupt processing by sending Escape key
+   * Default implementation: send Escape key to tmux session
+   *
+   * @param worktreeId - Worktree ID
+   */
+  async interrupt(worktreeId: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId);
+    await sendSpecialKey(sessionName, 'Escape');
+  }
 }

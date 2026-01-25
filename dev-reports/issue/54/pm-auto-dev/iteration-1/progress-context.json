@@ -1,0 +1,84 @@
+{
+  "issue_number": 54,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 85.0,
+      "tests_passed": 56,
+      "tests_failed": 0,
+      "files_created": [
+        "src/lib/status-detector.ts",
+        "src/lib/message-sync.ts",
+        "src/lib/__tests__/status-detector.test.ts",
+        "src/lib/__tests__/message-sync.test.ts"
+      ],
+      "files_modified": [
+        "src/lib/assistant-response-saver.ts",
+        "src/lib/__tests__/assistant-response-saver.test.ts"
+      ],
+      "key_implementations": [
+        "extractAssistantResponseBeforeLastPrompt() - 最後のプロンプト以前のAssistant応答を抽出",
+        "detectSessionStatus() - セッションステータス検出（信頼度付き）",
+        "mergeMessages() - メッセージマージ（重複排除、ソート、上限維持）",
+        "楽観的UI更新ユーティリティ（add/confirm/remove）"
+      ]
+    },
+    "acceptance": {
+      "status": "partial",
+      "criteria_passed": 4,
+      "criteria_total": 5,
+      "details": {
+        "AC1": "passed - 処理中ステータス検出",
+        "AC2": "passed - yes/no応答検出",
+        "AC3": "passed - 履歴更新（mergeMessages）",
+        "AC4": "passed - DB保存（extractAssistantResponseBeforeLastPrompt）",
+        "AC5": "pending_integration - セッション切替時の状態リセット（フロントエンド統合待ち）"
+      }
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": 5,
+      "type_improvements": [
+        "readonly modifier追加",
+        "as const assertion追加",
+        "explicit type annotations追加"
+      ],
+      "jsdoc_improvements": [
+        "@constant タグ追加",
+        "@remarks タグ追加"
+      ],
+      "solid_compliance": {
+        "single_responsibility": true,
+        "open_closed": true,
+        "interface_segregation": true,
+        "dependency_inversion": true
+      }
+    }
+  },
+  "quality_metrics": {
+    "lint_errors": 0,
+    "type_errors": 0,
+    "test_coverage": 85.0,
+    "tests_passed": 56
+  },
+  "commits": [
+    "ab247fb: refactor(issue54): improve code quality and type annotations"
+  ],
+  "next_steps": [
+    "status-detector.tsをAPI routes（worktrees/route.ts, worktrees/[id]/route.ts）に統合",
+    "message-sync.tsをWorktreeDetailRefactored.tsxに統合（楽観的UI更新）",
+    "useWorktreeUIState.tsにReducerアクション追加（MERGE_MESSAGES, ADD_OPTIMISTIC等）",
+    "セッション切替時の状態リセット実装（AC5対応）",
+    "WebSocket統合（フォールバック付き）",
+    "/api/worktrees/[id]/send レスポンス拡張（assistantMessage追加）",
+    "/api/worktrees/[id]/messages afterパラメータ対応",
+    "E2Eテスト追加"
+  ],
+  "blockers": [],
+  "result_files": {
+    "tdd": "dev-reports/issue/54/pm-auto-dev/iteration-1/tdd-result.json",
+    "acceptance": "dev-reports/issue/54/pm-auto-dev/iteration-1/acceptance-result.json",
+    "refactor": "dev-reports/issue/54/pm-auto-dev/iteration-1/refactor-result.json"
+  }
+}

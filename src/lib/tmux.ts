@@ -355,3 +355,40 @@ export async function ensureSession(
     await createSession(sessionName, cwd);
   }
 }
+
+/**
+ * Special key type for tmux send-keys
+ */
+export type SpecialKey = 'Escape' | 'C-c' | 'C-d';
+
+/**
+ * Send a special key to a tmux session
+ *
+ * @param sessionName - Target session name
+ * @param key - Special key to send (Escape, C-c, C-d)
+ *
+ * @throws {Error} If session doesn't exist or command fails
+ *
+ * @example
+ * ```typescript
+ * // Send Escape key to interrupt CLI processing
+ * await sendSpecialKey('my-session', 'Escape');
+ *
+ * // Send Ctrl+C for SIGINT
+ * await sendSpecialKey('my-session', 'C-c');
+ * ```
+ */
+export async function sendSpecialKey(
+  sessionName: string,
+  key: SpecialKey
+): Promise<void> {
+  try {
+    await execAsync(
+      `tmux send-keys -t "${sessionName}" ${key}`,
+      { timeout: DEFAULT_TIMEOUT }
+    );
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to send special key: ${errorMessage}`);
+  }
+}

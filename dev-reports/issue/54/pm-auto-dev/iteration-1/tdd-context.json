@@ -1,0 +1,78 @@
+{
+  "issue_number": 54,
+  "title": "セッション状態管理の改善",
+  "acceptance_criteria": [
+    "処理中は正しくステータスが「running」と表示される",
+    "yes/no応答が正しく動作する",
+    "Assistant履歴が正しく更新される（最新の応答が表示される）",
+    "Assistant応答がDBに正しく保存される",
+    "セッション切り替え時に状態がリセットされる"
+  ],
+  "implementation_tasks": [
+    {
+      "task_id": "1.1",
+      "description": "extractAssistantResponseBeforeLastPrompt()関数の実装",
+      "file": "src/lib/assistant-response-saver.ts",
+      "test_file": "src/lib/__tests__/assistant-response-saver.test.ts"
+    },
+    {
+      "task_id": "1.2",
+      "description": "savePendingAssistantResponse()の修正",
+      "file": "src/lib/assistant-response-saver.ts",
+      "test_file": "src/lib/__tests__/assistant-response-saver.test.ts"
+    },
+    {
+      "task_id": "2.1",
+      "description": "status-detector.tsの新規作成",
+      "file": "src/lib/status-detector.ts",
+      "test_file": "src/lib/__tests__/status-detector.test.ts"
+    },
+    {
+      "task_id": "3.1",
+      "description": "message-sync.tsの新規作成",
+      "file": "src/lib/message-sync.ts",
+      "test_file": "src/lib/__tests__/message-sync.test.ts"
+    }
+  ],
+  "target_coverage": 80,
+  "design_documents": [
+    "dev-reports/design/issue54-session-state-management-design-policy.md",
+    "dev-reports/review/20260116-issue54-architecture-review.md",
+    "dev-reports/issue/54/work-plan.md"
+  ],
+  "key_functions": {
+    "extractAssistantResponseBeforeLastPrompt": {
+      "description": "最後のユーザープロンプト以前の内容を抽出する",
+      "input": "tmux出力文字列, CLIツールID",
+      "output": "クリーンなAssistant応答文字列",
+      "test_cases": [
+        "正常ケース: プロンプト以前の応答を抽出",
+        "プロンプトなし: 全内容を返す",
+        "空入力: 空文字列を返す",
+        "連続プロンプト: 空文字列を返す",
+        "スキップパターン除去: バナー等をフィルタリング"
+      ]
+    },
+    "detectSessionStatus": {
+      "description": "セッションステータスを検出",
+      "input": "tmux出力, CLIツールID, 最終出力タイムスタンプ",
+      "output": "SessionStatus, confidence, reason",
+      "test_cases": [
+        "入力プロンプト検出: ready",
+        "思考インジケーター検出: running",
+        "対話型プロンプト検出: waiting",
+        "出力経過時間チェック: 5秒以上でready(low)"
+      ]
+    },
+    "mergeMessages": {
+      "description": "メッセージをマージ（重複排除、ソート、上限維持）",
+      "input": "既存メッセージ配列, 新規メッセージ配列, 上限数",
+      "output": "マージされたメッセージ配列",
+      "test_cases": [
+        "重複排除: 同じIDは追加しない",
+        "ソート: タイムスタンプ順",
+        "上限維持: MAX_MESSAGES超えたら古いものを削除"
+      ]
+    }
+  }
+}

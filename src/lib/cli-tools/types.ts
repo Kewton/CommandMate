@@ -59,6 +59,12 @@ export interface ICLITool {
    * @returns セッション名
    */
   getSessionName(worktreeId: string): string;
+
+  /**
+   * 処理を中断（Escapeキー送信）
+   * @param worktreeId - Worktree ID
+   */
+  interrupt(worktreeId: string): Promise<void>;
 }
 
 /**

@@ -1,0 +1,57 @@
+{
+  "issue_number": 42,
+  "title": "複数フロントエンドアプリへのパスベースルーティング",
+  "acceptance_criteria": [
+    "MyCodeBranchDeskトップページに「外部アプリ」セクションを追加",
+    "外部アプリの登録機能（名前、パスプレフィックス、ポート番号）を実装",
+    "登録済みアプリの一覧表示・編集・削除機能を実装",
+    "/proxy/app-svelte/... でSvelteKitが表示できる",
+    "/proxy/app-next2/... で別Nextが表示できる",
+    "/proxy/app-streamlit/... でStreamlitが安定して表示できる（WS含む）",
+    "振り分け先の変更を再起動なしで反映できる"
+  ],
+  "implementation_tasks": [
+    {
+      "phase": 1,
+      "name": "基盤実装",
+      "tasks": [
+        "型定義作成: src/types/external-apps.ts",
+        "インターフェース定義: src/lib/external-apps/interfaces.ts",
+        "DBスキーマ追加（v12マイグレーション）: src/lib/db-migrations.ts",
+        "DB操作関数実装: src/lib/external-apps/db.ts",
+        "キャッシュ層実装: src/lib/external-apps/cache.ts"
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "プロキシ実装",
+      "tasks": [
+        "プロキシログ実装: src/lib/proxy/logger.ts",
+        "HTTPプロキシハンドラー: src/lib/proxy/handler.ts",
+        "プロキシRoute Handler: src/app/proxy/[...path]/route.ts"
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "管理API実装",
+      "tasks": [
+        "CRUD API: src/app/api/external-apps/route.ts",
+        "詳細API: src/app/api/external-apps/[id]/route.ts",
+        "ヘルスチェックAPI: src/app/api/external-apps/[id]/health/route.ts"
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "UI実装",
+      "tasks": [
+        "ExternalAppsManager: src/components/external-apps/ExternalAppsManager.tsx",
+        "ExternalAppCard: src/components/external-apps/ExternalAppCard.tsx",
+        "ExternalAppForm: src/components/external-apps/ExternalAppForm.tsx",
+        "トップページ統合: src/app/page.tsx"
+      ]
+    }
+  ],
+  "target_coverage": 80,
+  "design_doc": "dev-reports/design/issue42-proxy-routing-design-policy.md",
+  "work_plan": "dev-reports/issue/42/work-plan.md"
+}

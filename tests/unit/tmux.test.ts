@@ -11,6 +11,7 @@ import {
   listSessions,
   createSession,
   sendKeys,
+  sendSpecialKey,
   capturePane,
   killSession,
   ensureSession,
@@ -394,6 +395,64 @@ describe('tmux library', () => {
         'tmux has-session -t "test-session"',
         { timeout: 5000 },
         expect.any(Function)
+      );
+    });
+  });
+
+  describe('sendSpecialKey', () => {
+    it('should send Escape key to session', async () => {
+      vi.mocked(exec).mockImplementation((cmd, options, callback: any) => {
+        callback(null, { stdout: '', stderr: '' });
+        return {} as any;
+      });
+
+      await sendSpecialKey('test-session', 'Escape');
+
+      expect(exec).toHaveBeenCalledWith(
+        'tmux send-keys -t "test-session" Escape',
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('should send Ctrl+C key to session', async () => {
+      vi.mocked(exec).mockImplementation((cmd, options, callback: any) => {
+        callback(null, { stdout: '', stderr: '' });
+        return {} as any;
+      });
+
+      await sendSpecialKey('test-session', 'C-c');
+
+      expect(exec).toHaveBeenCalledWith(
+        'tmux send-keys -t "test-session" C-c',
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('should send Ctrl+D key to session', async () => {
+      vi.mocked(exec).mockImplementation((cmd, options, callback: any) => {
+        callback(null, { stdout: '', stderr: '' });
+        return {} as any;
+      });
+
+      await sendSpecialKey('test-session', 'C-d');
+
+      expect(exec).toHaveBeenCalledWith(
+        'tmux send-keys -t "test-session" C-d',
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('should throw error if session does not exist', async () => {
+      vi.mocked(exec).mockImplementation((cmd, options, callback: any) => {
+        callback(new Error('session not found'), { stdout: '', stderr: '' });
+        return {} as any;
+      });
+
+      await expect(sendSpecialKey('test-session', 'Escape')).rejects.toThrow(
+        'Failed to send special key'
       );
     });
   });

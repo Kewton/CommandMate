@@ -1,0 +1,51 @@
+{
+  "issue_number": 56,
+  "feature_summary": "Claude Code標準スラッシュコマンドを利用出来るようにする",
+  "acceptance_criteria": [
+    "モバイルUIで自由入力が可能であること",
+    "標準コマンド（/clear, /compact等）がUIに表示されること",
+    "対象worktreeのコマンドがUIに表示されること",
+    "新しい標準コマンドに自動対応できること（自由入力で対応可能）",
+    "パスバリデーションが実装されていること（MF-1）",
+    "コマンド優先順位が明確であること（SF-1: worktree優先）"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "自由入力モード",
+      "description": "モバイル・デスクトップ両方で自由入力ボタンが表示され、クリックでテキストエリアにフォーカスが移動し '/' がプリセットされる",
+      "verification": "unit_test"
+    },
+    {
+      "id": "AC-2",
+      "name": "標準コマンド表示",
+      "description": "standard-commands.tsに定義された16個の標準コマンドがUIに表示される",
+      "verification": "unit_test"
+    },
+    {
+      "id": "AC-3",
+      "name": "Worktree固有コマンドAPI",
+      "description": "GET /api/worktrees/{id}/slash-commands でworktree固有のコマンドが取得できる",
+      "verification": "integration_test"
+    },
+    {
+      "id": "AC-4",
+      "name": "パスバリデーション（MF-1）",
+      "description": "パストラバーサル攻撃を防止するバリデーションが機能する",
+      "verification": "unit_test"
+    },
+    {
+      "id": "AC-5",
+      "name": "コマンド優先順位（SF-1）",
+      "description": "worktreeコマンドが標準コマンドより優先される",
+      "verification": "unit_test"
+    },
+    {
+      "id": "AC-6",
+      "name": "品質チェック",
+      "description": "ESLint, TypeScript, Build が全てパスする",
+      "verification": "ci_check"
+    }
+  ],
+  "tdd_result": "dev-reports/issue/56/pm-auto-dev/iteration-1/tdd-result.json"
+}

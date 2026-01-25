@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 11;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 /**
  * Migration definition
@@ -487,6 +487,60 @@ const migrations: Migration[] = [
       console.log('✓ Dropped idx_chat_messages_assistant_latest index');
       // Note: SQLite doesn't support DROP COLUMN directly
     }
+  },
+  {
+    version: 12,
+    name: 'add-external-apps-table',
+    up: (db) => {
+      // Issue #42: Create external_apps table for proxy routing
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS external_apps (
+          id TEXT PRIMARY KEY,
+
+          -- Basic info
+          name TEXT NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          description TEXT,
+
+          -- Routing config
+          path_prefix TEXT NOT NULL UNIQUE,
+          target_port INTEGER NOT NULL,
+          target_host TEXT DEFAULT 'localhost',
+
+          -- App type
+          app_type TEXT NOT NULL CHECK(app_type IN ('sveltekit', 'streamlit', 'nextjs', 'other')),
+
+          -- WebSocket config
+          websocket_enabled INTEGER DEFAULT 0,
+          websocket_path_pattern TEXT,
+
+          -- Status
+          enabled INTEGER DEFAULT 1,
+
+          -- Metadata
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+
+      // Create indexes for performance
+      db.exec(`
+        CREATE INDEX idx_external_apps_path_prefix ON external_apps(path_prefix);
+      `);
+
+      db.exec(`
+        CREATE INDEX idx_external_apps_enabled ON external_apps(enabled);
+      `);
+
+      console.log('✓ Created external_apps table');
+      console.log('✓ Created indexes for external_apps');
+    },
+    down: (db) => {
+      db.exec('DROP INDEX IF EXISTS idx_external_apps_enabled');
+      db.exec('DROP INDEX IF EXISTS idx_external_apps_path_prefix');
+      db.exec('DROP TABLE IF EXISTS external_apps');
+      console.log('✓ Dropped external_apps table and indexes');
+    }
   }
 ];
 
@@ -724,7 +778,7 @@ export function validateSchema(db: Database.Database): boolean {
     `).all() as Array<{ name: string }>;
 
     const tableNames = tables.map(t => t.name);
-    const requiredTables = ['worktrees', 'chat_messages', 'session_states', 'schema_version', 'worktree_memos'];
+    const requiredTables = ['worktrees', 'chat_messages', 'session_states', 'schema_version', 'worktree_memos', 'external_apps'];
 
     const missingTables = requiredTables.filter(t => !tableNames.includes(t));
 

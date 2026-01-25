@@ -1,0 +1,72 @@
+{
+  "status": "success",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/__tests__/assistant-response-saver.test.ts",
+    "src/lib/response-poller.ts",
+    "src/app/api/worktrees/[id]/send/route.ts"
+  ],
+  "commits": [
+    "14ee4ca: fix(issue53): implement assistant response save on next user input"
+  ],
+  "tasks_completed": [
+    {
+      "id": "1.1",
+      "description": "Export cleanClaudeResponse and cleanGeminiResponse from response-poller.ts",
+      "status": "completed"
+    },
+    {
+      "id": "1.2",
+      "description": "Create assistant-response-saver.ts with savePendingAssistantResponse function",
+      "status": "completed"
+    },
+    {
+      "id": "2.1",
+      "description": "Integrate savePendingAssistantResponse into send API route",
+      "status": "completed"
+    },
+    {
+      "id": "3.1",
+      "description": "Add duplicate save prevention to response-poller.ts",
+      "status": "completed"
+    }
+  ],
+  "test_summary": {
+    "cleanCliResponse": {
+      "claude": [
+        "should clean Claude response by stripping ANSI and filtering skip patterns",
+        "should filter out Claude setup commands",
+        "should handle empty response"
+      ],
+      "gemini": [
+        "should clean Gemini response by extracting content after marker"
+      ],
+      "codex": [
+        "should return response as-is for codex (no special cleaning)"
+      ]
+    },
+    "savePendingAssistantResponse": [
+      "should save assistant response when new output exists after lastCapturedLine",
+      "should return null when no new output exists (currentLineCount <= lastCapturedLine)",
+      "should return null when cleaned response is empty",
+      "should set assistant timestamp 1ms before user message timestamp",
+      "should update session state lastCapturedLine after saving",
+      "should broadcast message via WebSocket after saving",
+      "should return null and not throw when captureSessionOutput fails",
+      "should handle missing session state (lastCapturedLine defaults to 0)",
+      "should work with gemini CLI tool",
+      "should work with codex CLI tool"
+    ]
+  },
+  "message": "TDD implementation complete. All 4 tasks implemented and tested. 15 unit tests passing. Build successful."
+}

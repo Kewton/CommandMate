@@ -1,0 +1,36 @@
+{
+  "issue_number": 54,
+  "refactor_targets": [
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/message-sync.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 85.0,
+    "test_count": 56,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "コードの重複削除（SKIP_PATTERNSの共通化を検討）",
+    "JSDocコメントの追加",
+    "エラーハンドリングの改善",
+    "型定義の厳密化"
+  ],
+  "code_quality_checks": [
+    "ESLint警告の解消",
+    "TypeScript strict modeでの型エラー解消",
+    "未使用インポートの削除",
+    "一貫したエラーハンドリングパターン"
+  ],
+  "constraints": [
+    "cleanClaudeResponse()は変更しない",
+    "後方互換性を維持",
+    "テストを壊さない",
+    "カバレッジを下げない"
+  ],
+  "previous_results": {
+    "tdd_result": "dev-reports/issue/54/pm-auto-dev/iteration-1/tdd-result.json",
+    "acceptance_result": "dev-reports/issue/54/pm-auto-dev/iteration-1/acceptance-result.json"
+  }
+}

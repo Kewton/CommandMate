@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 /**
  * Default mobile breakpoint (768px - matches Tailwind's md breakpoint)
@@ -50,21 +50,19 @@ export interface UseIsMobileOptions {
 export function useIsMobile(options: UseIsMobileOptions = {}): boolean {
   const { breakpoint = MOBILE_BREAKPOINT } = options;
 
-  /**
-   * Check if current window width is below breakpoint
-   */
-  const checkIsMobile = useCallback((): boolean => {
-    if (typeof window === 'undefined') {
-      // SSR: default to false (desktop)
-      return false;
-    }
-    return window.innerWidth < breakpoint;
-  }, [breakpoint]);
-
-  const [isMobile, setIsMobile] = useState<boolean>(checkIsMobile);
+  // IMPORTANT: Always start with false to match SSR and avoid hydration mismatch
+  // The actual mobile detection happens in useEffect after hydration
+  const [isMobile, setIsMobile] = useState<boolean>(false);
 
   useEffect(() => {
-    // Update state on mount (for SSR hydration)
+    /**
+     * Check if current window width is below breakpoint
+     */
+    const checkIsMobile = (): boolean => {
+      return window.innerWidth < breakpoint;
+    };
+
+    // Update state on mount (after hydration is complete)
     setIsMobile(checkIsMobile());
 
     const handleResize = () => {
@@ -76,7 +74,7 @@ export function useIsMobile(options: UseIsMobileOptions = {}): boolean {
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [checkIsMobile]);
+  }, [breakpoint]);
 
   return isMobile;
 }
