@@ -1,0 +1,126 @@
+{
+  "status": "passed",
+  "scenarios": [
+    {
+      "id": "AC-1",
+      "name": "Buffer shrink detection test",
+      "status": "passed",
+      "details": "Test 'should detect shrink when buffer significantly smaller (1993 -> 608)' passed. detectBufferReset() correctly returns { bufferReset: true, reason: 'shrink' } when buffer shrinks from 1993 to 608 lines. Integration test 'should save response when buffer shrinks significantly (1993 -> 608 lines)' also passed."
+    },
+    {
+      "id": "AC-2",
+      "name": "Session restart detection test",
+      "status": "passed",
+      "details": "Test 'should detect restart when session restarted (500 -> 30)' passed. detectBufferReset() correctly detects session restart when lastCapturedLine=500 and currentLineCount=30. Integration test 'should save response when session restarts (500 -> 30 lines)' also passed."
+    },
+    {
+      "id": "AC-3",
+      "name": "Normal duplicate prevention maintained",
+      "status": "passed",
+      "details": "Test 'should skip when currentLineCount equals lastCapturedLine (no change)' passed. When currentLineCount (100) equals lastCapturedLine (100), the function correctly returns null and does not save duplicate responses."
+    },
+    {
+      "id": "AC-4",
+      "name": "Log output verification",
+      "status": "passed",
+      "details": "Log output exists in assistant-response-saver.ts at line 252: console.log(`[savePendingAssistantResponse] Buffer reset detected (${reason}): current=${currentLineCount}, last=${lastCapturedLine}`). The log includes the reason (shrink/restart) as required."
+    },
+    {
+      "id": "AC-5",
+      "name": "All unit tests pass",
+      "status": "passed",
+      "details": "npm run test:unit completed successfully. Test Files: 70 passed (70). Tests: 1310 passed, 6 skipped (1316). The assistant-response-saver.test.ts contains 49 tests for the module."
+    },
+    {
+      "id": "AC-6",
+      "name": "Static analysis pass",
+      "status": "passed",
+      "details": "npm run lint: No ESLint warnings or errors. npx tsc --noEmit: No TypeScript errors. All static analysis checks passed with 0 errors."
+    },
+    {
+      "id": "AC-7",
+      "name": "Branch switching scenario test",
+      "status": "passed",
+      "details": "Test 'should save response on branch switch scenario (1000 -> 200 lines)' passed. When switching branches causes buffer shrink from 1000 to 200 lines, the function correctly detects this as a buffer reset and saves the response in the new branch context."
+    }
+  ],
+  "test_cases": [
+    {
+      "scenario": "detectBufferReset unit tests",
+      "result": "passed",
+      "evidence": "23 tests in 'detectBufferReset' describe block all passed including buffer shrink detection, session restart detection, and edge cases"
+    },
+    {
+      "scenario": "savePendingAssistantResponse integration tests",
+      "result": "passed",
+      "evidence": "8 integration tests in 'buffer reset detection' describe block all passed covering shrink, restart, boundary cases, and branch switching"
+    },
+    {
+      "scenario": "ESLint",
+      "result": "passed",
+      "evidence": "No ESLint warnings or errors"
+    },
+    {
+      "scenario": "TypeScript",
+      "result": "passed",
+      "evidence": "npx tsc --noEmit completed with no errors"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Buffer shrink detection (1993->608 lines) saves assistant response correctly",
+      "verified": true
+    },
+    {
+      "criterion": "Session restart detection (500->30 lines) saves assistant response correctly",
+      "verified": true
+    },
+    {
+      "criterion": "Normal duplicate prevention (currentLineCount <= lastCapturedLine) is maintained",
+      "verified": true
+    },
+    {
+      "criterion": "Buffer reset detection logs output with reason (shrink/restart)",
+      "verified": true
+    },
+    {
+      "criterion": "All existing tests pass (1310 tests)",
+      "verified": true
+    },
+    {
+      "criterion": "ESLint and TypeScript pass with 0 errors",
+      "verified": true
+    },
+    {
+      "criterion": "Branch switching scenario is handled correctly",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/__tests__/assistant-response-saver.test.ts"
+  ],
+  "implementation_summary": {
+    "files_modified": [
+      "src/lib/assistant-response-saver.ts",
+      "src/lib/__tests__/assistant-response-saver.test.ts"
+    ],
+    "key_functions": [
+      {
+        "name": "detectBufferReset",
+        "description": "Detects buffer reset (shrink or session restart) by comparing currentLineCount with lastCapturedLine",
+        "location": "src/lib/assistant-response-saver.ts:144-173"
+      },
+      {
+        "name": "savePendingAssistantResponse",
+        "description": "Updated to use detectBufferReset() and reset effective lastCapturedLine to 0 when buffer reset is detected",
+        "location": "src/lib/assistant-response-saver.ts:218-323"
+      }
+    ],
+    "constants": {
+      "BUFFER_RESET_TOLERANCE": 25,
+      "SESSION_RESTART_THRESHOLD": 50
+    }
+  },
+  "message": "All 7 acceptance criteria verified. Issue #59 buffer reset detection logic has been implemented correctly. The detectBufferReset() function detects two scenarios: (1) buffer shrink when currentLineCount is significantly smaller than lastCapturedLine with BUFFER_RESET_TOLERANCE=25, and (2) session restart when lastCapturedLine > 50 and currentLineCount < 50. All tests pass and static analysis is clean."
+}

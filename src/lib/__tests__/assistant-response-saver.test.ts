@@ -15,6 +15,7 @@ import {
   savePendingAssistantResponse,
   cleanCliResponse,
   extractAssistantResponseBeforeLastPrompt,
+  detectBufferReset,
 } from '../assistant-response-saver';
 
 // Mock cli-session module
@@ -223,6 +224,120 @@ Assistant response
         const result = extractAssistantResponseBeforeLastPrompt(output, 'gemini');
 
         expect(result).toBe('Gemini response content');
+      });
+    });
+  });
+
+  /**
+   * Issue #59: detectBufferReset unit tests
+   *
+   * Direct tests for the buffer reset detection function
+   */
+  describe('detectBufferReset', () => {
+    describe('buffer shrink detection', () => {
+      it('should detect shrink when buffer significantly smaller (1993 -> 608)', () => {
+        const result = detectBufferReset(608, 1993);
+        expect(result.bufferReset).toBe(true);
+        expect(result.reason).toBe('shrink');
+      });
+
+      it('should detect shrink when buffer smaller (1000 -> 200)', () => {
+        const result = detectBufferReset(200, 1000);
+        expect(result.bufferReset).toBe(true);
+        expect(result.reason).toBe('shrink');
+      });
+
+      it('should NOT detect shrink when within tolerance (50 -> 30)', () => {
+        // lastCapturedLine (50) > 25 (tolerance)
+        // BUT: (30 + 25) = 55 is NOT < 50
+        const result = detectBufferReset(30, 50);
+        expect(result.bufferReset).toBe(false);
+        expect(result.reason).toBeNull();
+      });
+
+      it('should NOT detect shrink when lastCapturedLine <= tolerance', () => {
+        // lastCapturedLine (20) is not > 25 (tolerance)
+        const result = detectBufferReset(5, 20);
+        expect(result.bufferReset).toBe(false);
+        expect(result.reason).toBeNull();
+      });
+    });
+
+    describe('session restart detection', () => {
+      it('should detect restart when session restarted (500 -> 30)', () => {
+        // Note: Since both shrink and restart conditions are met here,
+        // shrink takes priority (checked first)
+        const result = detectBufferReset(30, 500);
+        expect(result.bufferReset).toBe(true);
+        // Shrink: (30 + 25) = 55 < 500 AND lastCapturedLine (500) > 25
+        expect(result.reason).toBe('shrink');
+      });
+
+      it('should detect restart at boundary (55 -> 30)', () => {
+        // lastCapturedLine (55) > 50 AND currentLineCount (30) < 50
+        // But shrink also applies: (30 + 25) = 55 NOT < 55 (strict <)
+        // So this triggers restart, not shrink
+        const result = detectBufferReset(30, 55);
+        expect(result.bufferReset).toBe(true);
+        expect(result.reason).toBe('restart');
+      });
+
+      it('should NOT detect restart when lastCapturedLine <= 50', () => {
+        // lastCapturedLine (50) is NOT > 50
+        const result = detectBufferReset(30, 50);
+        expect(result.bufferReset).toBe(false);
+        expect(result.reason).toBeNull();
+      });
+
+      it('should NOT detect restart when currentLineCount >= 50 and no shrink', () => {
+        // currentLineCount (50) is NOT < 50 for restart
+        // But shrink applies: (50 + 25) = 75 < 100 AND lastCapturedLine (100) > 25
+        const result = detectBufferReset(50, 100);
+        expect(result.bufferReset).toBe(true);
+        expect(result.reason).toBe('shrink');
+      });
+
+      it('should NOT detect restart when both conditions fail', () => {
+        // currentLineCount (51) is NOT < 50
+        // shrink: (51 + 25) = 76 which is NOT < 76
+        const result = detectBufferReset(51, 76);
+        expect(result.bufferReset).toBe(false);
+        expect(result.reason).toBeNull();
+      });
+    });
+
+    describe('edge cases', () => {
+      it('should NOT detect reset when currentLineCount = 0 (empty buffer)', () => {
+        const result = detectBufferReset(0, 100);
+        expect(result.bufferReset).toBe(false);
+        expect(result.reason).toBeNull();
+      });
+
+      it('should NOT detect reset when lastCapturedLine = 0 (initial state)', () => {
+        const result = detectBufferReset(100, 0);
+        expect(result.bufferReset).toBe(false);
+        expect(result.reason).toBeNull();
+      });
+
+      it('should NOT detect reset when both are 0', () => {
+        const result = detectBufferReset(0, 0);
+        expect(result.bufferReset).toBe(false);
+        expect(result.reason).toBeNull();
+      });
+
+      it('should NOT detect reset when currentLineCount > lastCapturedLine (normal growth)', () => {
+        const result = detectBufferReset(200, 100);
+        expect(result.bufferReset).toBe(false);
+        expect(result.reason).toBeNull();
+      });
+
+      it('should prioritize shrink over restart when both conditions match', () => {
+        // Both conditions could match: 30 < 50 (restart) AND (30+25) < 100 (shrink)
+        // lastCapturedLine=100 > 25 (tolerance) and > 50
+        const result = detectBufferReset(30, 100);
+        expect(result.bufferReset).toBe(true);
+        // Shrink check comes first in the code
+        expect(result.reason).toBe('shrink');
       });
     });
   });
@@ -580,6 +695,234 @@ This content should be captured
       // Assert
       expect(result).not.toBeNull();
       expect(result?.cliToolId).toBe('codex');
+    });
+
+    /**
+     * Issue #59: Buffer Reset Detection Tests
+     *
+     * These tests verify the buffer reset detection logic for scenarios where:
+     * 1. Buffer shrinks (e.g., 1993 lines -> 608 lines) - session restart/scrollback cleared
+     * 2. Session restart (e.g., 500 lines -> 30 lines) - CLI tool restarted
+     *
+     * Without this fix, the condition `currentLineCount <= lastCapturedLine` would
+     * incorrectly skip saving the response when the buffer has been reset.
+     */
+    describe('buffer reset detection', () => {
+      it('should save response when buffer shrinks significantly (1993 -> 608 lines)', async () => {
+        // Setup: lastCapturedLine = 1993, but buffer was reset/cleared
+        updateSessionState(testDb, 'test-worktree', 'claude', 1993);
+
+        // Create output with 608 lines (buffer shrunk from 1993)
+        const outputLines = [];
+        for (let i = 0; i < 607; i++) {
+          outputLines.push(`Line ${i}`);
+        }
+        outputLines.push('Valid assistant response after buffer reset');
+        const mockOutput = outputLines.join('\n');
+
+        mockCaptureSessionOutput.mockResolvedValue(mockOutput);
+
+        const userTimestamp = new Date();
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'claude',
+          userTimestamp
+        );
+
+        // Assert: should detect buffer reset and save response
+        expect(result).not.toBeNull();
+        expect(result?.role).toBe('assistant');
+
+        // Verify session state was updated to current line count
+        const sessionState = getSessionState(testDb, 'test-worktree', 'claude');
+        expect(sessionState?.lastCapturedLine).toBe(608);
+      });
+
+      it('should save response when session restarts (500 -> 30 lines)', async () => {
+        // Setup: lastCapturedLine = 500, session was restarted
+        updateSessionState(testDb, 'test-worktree', 'claude', 500);
+
+        // Create output with 30 lines (session restarted)
+        const outputLines = [];
+        for (let i = 0; i < 29; i++) {
+          outputLines.push(`Line ${i}`);
+        }
+        outputLines.push('Response after session restart');
+        const mockOutput = outputLines.join('\n');
+
+        mockCaptureSessionOutput.mockResolvedValue(mockOutput);
+
+        const userTimestamp = new Date();
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'claude',
+          userTimestamp
+        );
+
+        // Assert: should detect session restart and save response
+        expect(result).not.toBeNull();
+        expect(result?.role).toBe('assistant');
+        expect(result?.content).toContain('Response after session restart');
+      });
+
+      it('should skip when currentLineCount equals lastCapturedLine (no change)', async () => {
+        // Setup: Normal duplicate prevention case
+        updateSessionState(testDb, 'test-worktree', 'claude', 100);
+
+        // Create output with exactly 100 lines (no new output)
+        const outputLines = [];
+        for (let i = 0; i < 100; i++) {
+          outputLines.push(`Line ${i}`);
+        }
+        const mockOutput = outputLines.join('\n');
+
+        mockCaptureSessionOutput.mockResolvedValue(mockOutput);
+
+        const userTimestamp = new Date();
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'claude',
+          userTimestamp
+        );
+
+        // Assert: should skip (no change)
+        expect(result).toBeNull();
+      });
+
+      it('should NOT detect buffer reset when within tolerance (50 -> 30 lines)', async () => {
+        // Setup: lastCapturedLine = 50, current = 30
+        // Difference is 20, but lastCapturedLine is not > 50 for session restart
+        // and (30 + 25) >= 50 for buffer shrink check
+        updateSessionState(testDb, 'test-worktree', 'claude', 50);
+
+        // Create output with 30 lines
+        const outputLines = [];
+        for (let i = 0; i < 30; i++) {
+          outputLines.push(`Line ${i}`);
+        }
+        const mockOutput = outputLines.join('\n');
+
+        mockCaptureSessionOutput.mockResolvedValue(mockOutput);
+
+        const userTimestamp = new Date();
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'claude',
+          userTimestamp
+        );
+
+        // Assert: should skip (within tolerance, not a buffer reset)
+        expect(result).toBeNull();
+      });
+
+      it('should NOT detect buffer reset at boundary (55 -> 30 lines)', async () => {
+        // Setup: Boundary case - lastCapturedLine = 55, current = 30
+        // For shrink check: (30 + 25) = 55, which is NOT < 55 (need strict <)
+        // For restart check: lastCapturedLine (55) > 50 but currentLineCount (30) < 50
+        // This WILL trigger session restart detection
+        updateSessionState(testDb, 'test-worktree', 'claude', 55);
+
+        // Create output with 30 lines
+        const outputLines = [];
+        for (let i = 0; i < 29; i++) {
+          outputLines.push(`Line ${i}`);
+        }
+        outputLines.push('Content at boundary');
+        const mockOutput = outputLines.join('\n');
+
+        mockCaptureSessionOutput.mockResolvedValue(mockOutput);
+
+        const userTimestamp = new Date();
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'claude',
+          userTimestamp
+        );
+
+        // Assert: should detect session restart (lastCapturedLine > 50, currentLineCount < 50)
+        expect(result).not.toBeNull();
+        expect(result?.content).toContain('Content at boundary');
+      });
+
+      it('should handle initial execution (lastCapturedLine = 0)', async () => {
+        // Setup: First run, no previous session state
+        // Don't set session state (defaults to 0)
+
+        // Create output with 100 lines
+        const outputLines = [];
+        for (let i = 0; i < 99; i++) {
+          outputLines.push(`Line ${i}`);
+        }
+        outputLines.push('Initial response content');
+        const mockOutput = outputLines.join('\n');
+
+        mockCaptureSessionOutput.mockResolvedValue(mockOutput);
+
+        const userTimestamp = new Date();
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'claude',
+          userTimestamp
+        );
+
+        // Assert: should save normally (not a buffer reset, just initial state)
+        expect(result).not.toBeNull();
+        expect(result?.role).toBe('assistant');
+      });
+
+      it('should handle empty buffer (currentLineCount = 0)', async () => {
+        // Setup: lastCapturedLine = 100, but buffer is now empty
+        updateSessionState(testDb, 'test-worktree', 'claude', 100);
+
+        // Empty output
+        const mockOutput = '';
+
+        mockCaptureSessionOutput.mockResolvedValue(mockOutput);
+
+        const userTimestamp = new Date();
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'claude',
+          userTimestamp
+        );
+
+        // Assert: should skip (empty buffer)
+        expect(result).toBeNull();
+      });
+
+      it('should save response on branch switch scenario (1000 -> 200 lines)', async () => {
+        // Setup: Simulates switching branches where buffer is different
+        updateSessionState(testDb, 'test-worktree', 'claude', 1000);
+
+        // Create output with 200 lines (different branch context)
+        const outputLines = [];
+        for (let i = 0; i < 199; i++) {
+          outputLines.push(`Branch context line ${i}`);
+        }
+        outputLines.push('Response in new branch context');
+        const mockOutput = outputLines.join('\n');
+
+        mockCaptureSessionOutput.mockResolvedValue(mockOutput);
+
+        const userTimestamp = new Date();
+        const result = await savePendingAssistantResponse(
+          testDb,
+          'test-worktree',
+          'claude',
+          userTimestamp
+        );
+
+        // Assert: should detect buffer reset and save response
+        expect(result).not.toBeNull();
+        expect(result?.content).toContain('Response in new branch context');
+      });
     });
   });
 });

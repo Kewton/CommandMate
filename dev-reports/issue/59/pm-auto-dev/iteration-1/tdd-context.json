@@ -1,0 +1,84 @@
+{
+  "issue_number": 59,
+  "title": "assistant-response-saver.tsにバッファリセット検出ロジックがなく、応答が保存されないケースがある",
+  "acceptance_criteria": [
+    "バッファ縮小時（例: 1993行→608行）にassistant応答が正しく保存される",
+    "セッション再起動時（例: 500行→30行）にassistant応答が正しく保存される",
+    "通常の重複防止ロジック（currentLineCount <= lastCapturedLine）が維持される",
+    "バッファリセット検出時に適切なログが出力される",
+    "既存のテストが全てパスする"
+  ],
+  "implementation_tasks": [
+    "BUFFER_RESET_TOLERANCE定数（25）を定義する",
+    "detectBufferReset()関数を実装する（bufferShrank, sessionRestarted条件）",
+    "savePendingAssistantResponse()にバッファリセット検出を統合する",
+    "effectiveLastCapturedLine計算ロジックを追加する",
+    "ログメッセージにリセット理由（shrink/restart）を含める"
+  ],
+  "test_cases": [
+    {
+      "name": "バッファ縮小ケース",
+      "lastCapturedLine": 1993,
+      "currentLineCount": 608,
+      "expectedBufferReset": true,
+      "expectedResult": "応答保存"
+    },
+    {
+      "name": "セッション再起動ケース",
+      "lastCapturedLine": 500,
+      "currentLineCount": 30,
+      "expectedBufferReset": true,
+      "expectedResult": "応答保存"
+    },
+    {
+      "name": "通常の重複防止ケース",
+      "lastCapturedLine": 100,
+      "currentLineCount": 100,
+      "expectedBufferReset": false,
+      "expectedResult": "スキップ"
+    },
+    {
+      "name": "境界値ケース（tolerance内）",
+      "lastCapturedLine": 50,
+      "currentLineCount": 30,
+      "expectedBufferReset": false,
+      "expectedResult": "スキップ"
+    },
+    {
+      "name": "境界値ケース（toleranceちょうど）",
+      "lastCapturedLine": 55,
+      "currentLineCount": 30,
+      "expectedBufferReset": false,
+      "expectedResult": "スキップ"
+    },
+    {
+      "name": "初回実行ケース",
+      "lastCapturedLine": 0,
+      "currentLineCount": 100,
+      "expectedBufferReset": false,
+      "expectedResult": "応答保存"
+    },
+    {
+      "name": "空バッファケース",
+      "lastCapturedLine": 100,
+      "currentLineCount": 0,
+      "expectedBufferReset": false,
+      "expectedResult": "スキップ"
+    },
+    {
+      "name": "ブランチ切り替えシナリオ",
+      "lastCapturedLine": 1000,
+      "currentLineCount": 200,
+      "expectedBufferReset": true,
+      "expectedResult": "応答保存"
+    }
+  ],
+  "target_files": [
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/__tests__/assistant-response-saver.test.ts"
+  ],
+  "reference_files": [
+    "src/lib/response-poller.ts"
+  ],
+  "target_coverage": 80
+}

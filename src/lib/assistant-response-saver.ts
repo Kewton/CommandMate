@@ -119,6 +119,60 @@ export function extractAssistantResponseBeforeLastPrompt(
 const SESSION_OUTPUT_BUFFER_SIZE: number = 10000;
 
 /**
+ * Tolerance for detecting buffer reset (in lines)
+ * If the buffer shrinks by more than this amount, we consider it a buffer reset
+ * @constant
+ */
+const BUFFER_RESET_TOLERANCE: number = 25;
+
+/**
+ * Detect if the tmux buffer has been reset (cleared or session restarted)
+ *
+ * This handles two scenarios:
+ * 1. Buffer shrink: When the current line count is significantly smaller than
+ *    lastCapturedLine (e.g., 1993 -> 608 lines after scrollback cleared)
+ * 2. Session restart: When a CLI session is restarted and the buffer is much
+ *    smaller (e.g., 500 -> 30 lines)
+ *
+ * Without this detection, the condition `currentLineCount <= lastCapturedLine`
+ * would incorrectly skip saving responses after buffer resets.
+ *
+ * @param currentLineCount - Current number of lines in the buffer
+ * @param lastCapturedLine - Last captured line position from session state
+ * @returns Object with bufferReset boolean and reason (shrink/restart/null)
+ */
+export function detectBufferReset(
+  currentLineCount: number,
+  lastCapturedLine: number
+): { bufferReset: boolean; reason: 'shrink' | 'restart' | null } {
+  // Condition 1: Buffer shrink detection
+  // The buffer has shrunk significantly if:
+  // - currentLineCount > 0 (buffer is not empty)
+  // - lastCapturedLine > BUFFER_RESET_TOLERANCE (we had significant content before)
+  // - (currentLineCount + BUFFER_RESET_TOLERANCE) < lastCapturedLine (significant shrink)
+  const bufferShrank = currentLineCount > 0
+    && lastCapturedLine > BUFFER_RESET_TOLERANCE
+    && (currentLineCount + BUFFER_RESET_TOLERANCE) < lastCapturedLine;
+
+  // Condition 2: Session restart detection
+  // The session was restarted if:
+  // - currentLineCount > 0 (buffer is not empty)
+  // - lastCapturedLine > 50 (we had meaningful content before)
+  // - currentLineCount < 50 (buffer is now very small, typical of fresh session)
+  const sessionRestarted = currentLineCount > 0
+    && lastCapturedLine > 50
+    && currentLineCount < 50;
+
+  if (bufferShrank) {
+    return { bufferReset: true, reason: 'shrink' };
+  }
+  if (sessionRestarted) {
+    return { bufferReset: true, reason: 'restart' };
+  }
+  return { bufferReset: false, reason: null };
+}
+
+/**
  * Time offset (in milliseconds) for assistant message timestamp
  * Ensures assistant response appears before user message in chronological order
  * @constant
@@ -186,23 +240,38 @@ export async function savePendingAssistantResponse(
       return null;
     }
 
-    // 3. Calculate current line count and check for new output
+    // 3. Calculate current line count
     const lines = output.split('\n');
     const currentLineCount = lines.length;
 
+    // 4. Detect buffer reset (Issue #59 fix)
+    const { bufferReset, reason } = detectBufferReset(currentLineCount, lastCapturedLine);
+
+    if (bufferReset) {
+      console.log(
+        `[savePendingAssistantResponse] Buffer reset detected (${reason}): ` +
+        `current=${currentLineCount}, last=${lastCapturedLine}`
+      );
+    }
+
+    // 5. Determine effective last captured line
+    // If buffer was reset, start from the beginning (0)
+    const effectiveLastCapturedLine = bufferReset ? 0 : lastCapturedLine;
+
+    // 6. Check for new output (using effective position)
     // Prevent duplicate saves when no new output has been added
-    if (currentLineCount <= lastCapturedLine) {
+    if (!bufferReset && currentLineCount <= lastCapturedLine) {
       console.log(
         `[savePendingAssistantResponse] No new output (current: ${currentLineCount}, last: ${lastCapturedLine})`
       );
       return null;
     }
 
-    // 4. Extract new lines since last capture
-    const newLines = lines.slice(lastCapturedLine);
+    // 7. Extract new lines since effective last capture position
+    const newLines = lines.slice(effectiveLastCapturedLine);
     const newOutput = newLines.join('\n');
 
-    // 5. Clean the response
+    // 8. Clean the response
     // Issue #54 FIX: For Claude, use extractAssistantResponseBeforeLastPrompt
     // to extract content BEFORE the last user prompt (not after it)
     // This fixes the issue where assistant responses were not being saved
@@ -211,7 +280,7 @@ export async function savePendingAssistantResponse(
       ? extractAssistantResponseBeforeLastPrompt(newOutput, cliToolId)
       : cleanCliResponse(newOutput, cliToolId);
 
-    // 6. Check if cleaned response is empty
+    // 9. Check if cleaned response is empty
     if (!cleanedResponse || cleanedResponse.trim() === '') {
       // Output exists but cleaned to empty - update position but don't save
       updateSessionState(db, worktreeId, cliToolId, currentLineCount);
@@ -225,7 +294,7 @@ export async function savePendingAssistantResponse(
     // This is critical for proper conversation history display
     const assistantTimestamp = new Date(userMessageTimestamp.getTime() - ASSISTANT_TIMESTAMP_OFFSET_MS);
 
-    // 7. Save to database
+    // 10. Save to database
     const message = createMessage(db, {
       worktreeId,
       role: 'assistant',
@@ -235,10 +304,10 @@ export async function savePendingAssistantResponse(
       cliToolId,
     });
 
-    // 8. Update session state with new position
+    // 11. Update session state with new position
     updateSessionState(db, worktreeId, cliToolId, currentLineCount);
 
-    // 9. Broadcast to WebSocket clients
+    // 12. Broadcast to WebSocket clients
     broadcastMessage('message', { worktreeId, message });
 
     console.log(

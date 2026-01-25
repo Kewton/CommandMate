@@ -1,0 +1,27 @@
+{
+  "issue_number": 59,
+  "refactor_targets": [
+    "src/lib/assistant-response-saver.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 95.65,
+    "test_count": 49,
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "detectBufferReset関数がexportされているか確認（将来の共通化に備える）",
+    "JSDocコメントが適切に記載されているか確認",
+    "ログメッセージの一貫性確認",
+    "定数の命名規則確認（BUFFER_RESET_TOLERANCE）"
+  ],
+  "constraints": [
+    "既存のテストが全てパスすること",
+    "カバレッジを維持すること（80%以上）",
+    "静的解析エラー0件を維持すること"
+  ],
+  "future_improvements": [
+    "次スプリントでbuffer-utils.tsへの共通化を予定",
+    "response-poller.tsとのコード重複解消"
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "issue_number": 59,
+  "feature_summary": "assistant-response-saver.tsにバッファリセット検出ロジックを追加",
+  "acceptance_criteria": [
+    "バッファ縮小時（例: 1993行→608行）にassistant応答が正しく保存される",
+    "セッション再起動時（例: 500行→30行）にassistant応答が正しく保存される",
+    "通常の重複防止ロジック（currentLineCount <= lastCapturedLine）が維持される",
+    "バッファリセット検出時に適切なログが出力される",
+    "既存のテストが全てパスする"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "バッファ縮小時の応答保存",
+      "description": "lastCapturedLine=1993, currentLineCount=608の場合、バッファリセットを検出し応答を保存する",
+      "verification": "単体テスト should detect buffer shrink がパスすること"
+    },
+    {
+      "id": "AC-2",
+      "name": "セッション再起動時の応答保存",
+      "description": "lastCapturedLine=500, currentLineCount=30の場合、セッション再起動を検出し応答を保存する",
+      "verification": "単体テスト should detect session restart がパスすること"
+    },
+    {
+      "id": "AC-3",
+      "name": "通常の重複防止維持",
+      "description": "lastCapturedLine=100, currentLineCount=100の場合、スキップすること",
+      "verification": "単体テスト should skip when no new output がパスすること"
+    },
+    {
+      "id": "AC-4",
+      "name": "ログ出力確認",
+      "description": "バッファリセット検出時にreason（shrink/restart）を含むログが出力される",
+      "verification": "実装コードにログ出力が含まれていること"
+    },
+    {
+      "id": "AC-5",
+      "name": "既存テスト全パス",
+      "description": "npm run test:unit で全テストがパスすること",
+      "verification": "テスト実行結果"
+    },
+    {
+      "id": "AC-6",
+      "name": "静的解析パス",
+      "description": "ESLint, TypeScriptエラーが0件であること",
+      "verification": "npm run lint && npx tsc --noEmit"
+    },
+    {
+      "id": "AC-7",
+      "name": "ブランチ切り替えシナリオ対応",
+      "description": "複数ブランチを頻繁に切り替える際のバッファ縮小にも対応できること",
+      "verification": "単体テスト should handle branch switching scenario がパスすること"
+    }
+  ],
+  "tdd_result_file": "dev-reports/issue/59/pm-auto-dev/iteration-1/tdd-result.json"
+}

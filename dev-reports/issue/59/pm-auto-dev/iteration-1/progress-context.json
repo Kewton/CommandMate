@@ -1,0 +1,60 @@
+{
+  "issue_number": 59,
+  "issue_title": "assistant-response-saver.tsにバッファリセット検出ロジックがなく、応答が保存されないケースがある",
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 95.65,
+      "tests_passed": 49,
+      "tests_failed": 0,
+      "files_modified": [
+        "src/lib/assistant-response-saver.ts",
+        "src/lib/__tests__/assistant-response-saver.test.ts"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_passed": 7,
+      "scenarios_failed": 0,
+      "key_verifications": [
+        "バッファ縮小検出（1993→608行）",
+        "セッション再起動検出（500→30行）",
+        "重複防止ロジック維持",
+        "ログ出力確認",
+        "既存テスト全パス（1310件）",
+        "静的解析パス",
+        "ブランチ切り替えシナリオ対応"
+      ]
+    },
+    "refactor": {
+      "status": "success",
+      "changes_made": [],
+      "quality_confirmed": true,
+      "future_improvements_identified": [
+        "buffer-utils.tsへの共通化（次スプリント）",
+        "response-poller.tsのリファクタリング"
+      ]
+    }
+  },
+  "quality_metrics": {
+    "coverage": 95.65,
+    "eslint_errors": 0,
+    "typescript_errors": 0,
+    "total_tests_passed": 1310,
+    "total_tests_skipped": 6,
+    "total_tests_failed": 0
+  },
+  "implementation_summary": {
+    "key_changes": [
+      "BUFFER_RESET_TOLERANCE定数（25）を追加",
+      "detectBufferReset()関数を実装（export済み）",
+      "savePendingAssistantResponse()にバッファリセット検出を統合",
+      "effectiveLastCapturedLine計算ロジックを追加",
+      "23件のdetectBufferReset単体テストを追加",
+      "8件のバッファリセット統合テストを追加"
+    ],
+    "problem_solved": "tmuxバッファリセット時（縮小/セッション再起動）にassistant応答が保存されない問題を解決",
+    "related_issue_addressed": "ブランチ頻繁切り替え時の履歴未登録問題も改善される見込み"
+  }
+}
