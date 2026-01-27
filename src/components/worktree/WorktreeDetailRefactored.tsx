@@ -1238,7 +1238,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onMenuClick={openMobileDrawer}
         />
 
-        <main className="flex-1 pt-14 pb-28 overflow-hidden">
+        <div className="fixed top-14 inset-x-0 z-30">
+          <AutoYesToggle
+            enabled={autoYesEnabled}
+            expiresAt={autoYesExpiresAt}
+            onToggle={handleAutoYesToggle}
+            lastAutoResponse={lastAutoResponse}
+          />
+        </div>
+
+        <main className="flex-1 pt-[5.25rem] pb-28 overflow-hidden">
           <MobileContent
             activeTab={activeTab}
             worktreeId={worktreeId}
@@ -1270,13 +1279,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           hasPrompt={state.prompt.visible}
         />
 
-        <MobilePromptSheet
-          promptData={state.prompt.data}
-          visible={state.prompt.visible}
-          answering={state.prompt.answering}
-          onRespond={handlePromptRespond}
-          onDismiss={handlePromptDismiss}
-        />
+        {!autoYesEnabled && (
+          <MobilePromptSheet
+            promptData={state.prompt.data}
+            visible={state.prompt.visible}
+            answering={state.prompt.answering}
+            onRespond={handlePromptRespond}
+            onDismiss={handlePromptDismiss}
+          />
+        )}
 
         {/* File Viewer Modal */}
         <FileViewer
