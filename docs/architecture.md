@@ -536,7 +536,60 @@ feature/foo
 
 詳細は [ステータスインジケーター](./features/sidebar-status-indicator.md) を参照。
 
-### 10.4 Observability
+### 10.4 リポジトリ削除機能 ✅ 実装済み (Issue #69)
+
+**実装内容:**
+- 登録済みリポジトリを削除するAPIエンドポイントとUI
+- 関連するworktree、セッション、ポーリングを一括クリーンアップ
+- Facadeパターンによるセッション停止処理の一元化
+
+**対応API:**
+- `DELETE /api/repositories` - リポジトリ削除（リクエストボディで `repositoryPath` を指定）
+
+**リクエスト/レスポンス:**
+```json
+// Request
+{ "repositoryPath": "/path/to/repository" }
+
+// Response (200 OK)
+{
+  "success": true,
+  "deletedWorktreeCount": 3,
+  "warnings": []
+}
+```
+
+**エラーレスポンス:**
+| ステータス | 条件 |
+|-----------|------|
+| 400 | `repositoryPath` 未指定 |
+| 404 | リポジトリが存在しない |
+
+**削除処理フロー:**
+1. リポジトリに属する全worktree IDを取得
+2. 各worktreeのtmuxセッションをkill（失敗してもwarningsに記録して続行）
+3. response-poller / claude-pollerを停止
+4. WebSocket購読状態をクリーンアップ
+5. DBからworktreeレコードをCASCADE削除
+6. `repository_deleted` イベントをbroadcast
+
+**段階的エラーハンドリング:**
+- セッションkill失敗時もDB削除は継続
+- 失敗情報は `warnings` 配列で返却
+
+**UI実装:**
+- リポジトリフィルターチップにホバー時削除ボタン（×）表示
+- 確認ダイアログで「delete」入力必須
+- `WORKTREE_REPOS` 環境変数設定リポジトリに警告アイコン（⚠️）表示
+
+**関連ファイル:**
+- `src/lib/session-cleanup.ts` - セッション/ポーラー停止のFacade
+- `src/app/api/repositories/route.ts` - DELETEエンドポイント
+- `src/lib/db.ts` - `getWorktreeIdsByRepository()`, `deleteRepositoryWorktrees()`
+- `src/lib/ws-server.ts` - `cleanupRooms()`
+- `src/components/worktree/WorktreeList.tsx` - 削除UI
+
+### 10.5 Observability
 - 将来的に:
 - 応答時間（latency）の計測
 - エラー率
