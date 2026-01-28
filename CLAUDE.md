@@ -118,7 +118,11 @@ src/
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/session-cleanup.ts` | セッション/ポーラー停止の一元管理（Facade パターン） |
+| `src/lib/url-normalizer.ts` | Git URL正規化（重複検出用） |
+| `src/lib/clone-manager.ts` | クローン処理管理（DBベース排他制御） |
+| `src/lib/db-repository.ts` | リポジトリDB操作関数群 |
 | `src/types/sidebar.ts` | サイドバーステータス判定 |
+| `src/types/clone.ts` | クローン関連型定義（CloneJob, CloneError等） |
 
 ---
 
@@ -219,6 +223,17 @@ npm run db:reset      # DBリセット
 ---
 
 ## 最近の実装機能
+
+### Issue #71: クローンURL登録機能
+- **クローンAPI**: `POST /api/repositories/clone` エンドポイント（非同期ジョブ）
+- **ジョブ状態API**: `GET /api/repositories/clone/[jobId]` でポーリング
+- **URL正規化**: HTTPS/SSH URL を正規化し重複登録を防止 (`url-normalizer.ts`)
+- **DBスキーマ**: `repositories` テーブル（Migration #14）で独立管理
+- **排他制御**: 同一URLの同時クローン防止（DBベース）
+- **UIモード切替**: ローカルパス / クローンURL タブ切替
+- **worktrees自動登録**: クローン完了時に自動でworktreesテーブルに登録
+- **セキュリティ**: パストラバーサル対策（カスタムパス検証）
+- 詳細: [設計書](./dev-reports/design/issue-71-clone-url-registration-design-policy.md)
 
 ### Issue #69: リポジトリ削除機能
 - **削除API**: `DELETE /api/repositories` エンドポイント

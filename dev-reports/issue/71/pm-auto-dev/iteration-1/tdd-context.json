@@ -1,0 +1,41 @@
+{
+  "issue_number": 71,
+  "title": "feat: リポジトリ登録時にクローンURLを指定して登録可能にする",
+  "acceptance_criteria": [
+    "P0-1: HTTPS URLでクローン・登録できる",
+    "P0-2: 既存ディレクトリ衝突時にエラーメッセージが表示される",
+    "P0-3: URL形式のバリデーションが行われる",
+    "P0-4: クローン元URLがDBに保存される",
+    "P0-5: 同一URLの重複登録が防止される（URL正規化による同一判定含む）",
+    "P1-1: SSH URLでクローン・登録できる",
+    "P1-2: 認証失敗時に適切なエラーが表示される",
+    "P1-3: 環境変数管理リポジトリとDB管理リポジトリが区別される",
+    "P1-4: worktreesテーブルがrepositoriesテーブルを外部キー参照する構造に移行される",
+    "P1-5: クローンジョブの永続化によりサーバー再起動後もジョブ状態が保持される"
+  ],
+  "implementation_tasks": [
+    "Task 1: DBスキーマ変更 - repositoriesテーブルとclone_jobsテーブル新規作成 (Migration #14)",
+    "Task 2: URL正規化ロジック実装 (src/lib/url-normalizer.ts)",
+    "Task 3: エラー型定義 (src/types/errors.ts, src/types/clone.ts)",
+    "Task 4: クローン処理管理ロジック (src/lib/clone-manager.ts)",
+    "Task 5: APIエンドポイント実装 - POST /api/repositories/clone",
+    "Task 6: APIエンドポイント実装 - GET /api/repositories/clone/[jobId]",
+    "Task 7: 既存データ移行ロジック (worktrees → repositories)",
+    "Task 8: worktreesテーブル構造変更 (Migration #15)",
+    "Task 9: 環境変数管理リポジトリ同期ロジック (src/lib/repository-sync.ts)",
+    "Task 10: UIコンポーネント拡張 - URL入力フォーム追加"
+  ],
+  "target_coverage": 80,
+  "existing_patterns": {
+    "db_operations": "関数ベース (getWorktrees(db) 形式)",
+    "migrations": "version + up/down関数方式",
+    "api_client": "repositoryApi オブジェクト形式",
+    "error_handling": "Facade パターン (session-cleanup.ts)"
+  },
+  "related_files": {
+    "db": ["src/lib/db.ts", "src/lib/db-migrations.ts", "src/lib/db-instance.ts"],
+    "api": ["src/app/api/repositories/route.ts", "src/app/api/repositories/scan/route.ts", "src/app/api/repositories/sync/route.ts"],
+    "ui": ["src/components/repository/RepositoryManager.tsx"],
+    "types": ["src/types/models.ts"]
+  }
+}

@@ -148,6 +148,16 @@ describe('UrlNormalizer', () => {
     it('should extract repo name from ssh:// URL', () => {
       expect(normalizer.extractRepoName('ssh://git@github.com/user/my-repo.git')).toBe('my-repo');
     });
+
+    it('should return empty string for invalid URL', () => {
+      expect(normalizer.extractRepoName('invalid-url')).toBe('');
+    });
+
+    it('should handle URL without path (returns host as fallback)', () => {
+      // Current behavior: returns the last segment of the URL path
+      // For "https://github.com", the last segment is "github.com"
+      expect(normalizer.extractRepoName('https://github.com')).toBe('github.com');
+    });
   });
 
   describe('getUrlType', () => {

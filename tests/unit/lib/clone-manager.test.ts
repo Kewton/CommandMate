@@ -193,6 +193,59 @@ describe('CloneManager', () => {
       expect(result.error?.category).toBe('validation');
       expect(result.error?.code).toBe('CLONE_IN_PROGRESS');
     });
+
+    it('should reject when target directory already exists', async () => {
+      const { existsSync } = await import('fs');
+      vi.mocked(existsSync).mockReturnValueOnce(true);
+
+      const result = await cloneManager.startCloneJob('https://github.com/test/newrepo.git');
+
+      expect(result.success).toBe(false);
+      expect(result.error?.category).toBe('filesystem');
+      expect(result.error?.code).toBe('DIRECTORY_EXISTS');
+    });
+
+    it('should use custom target path if provided (within basePath)', async () => {
+      const { existsSync } = await import('fs');
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      // Custom path must be within basePath (/tmp/repos)
+      const customPath = '/tmp/repos/custom/target/path';
+      const result = await cloneManager.startCloneJob(
+        'https://github.com/test/custompath.git',
+        customPath
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.jobId).toBeDefined();
+
+      // Verify the job was created with custom path
+      const job = getCloneJob(db, result.jobId!);
+      expect(job?.targetPath).toBe(customPath);
+    });
+
+    it('should reject custom target path outside basePath (path traversal protection)', async () => {
+      const result = await cloneManager.startCloneJob(
+        'https://github.com/test/custompath.git',
+        '/etc/passwd/../evil'
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_TARGET_PATH');
+    });
+
+    it('should return jobId for active clone when rejecting', async () => {
+      const existingJob = createCloneJob(db, {
+        cloneUrl: 'https://github.com/test/activeclone.git',
+        normalizedCloneUrl: 'https://github.com/test/activeclone',
+        targetPath: '/path/to/clone',
+      });
+
+      const result = await cloneManager.startCloneJob('https://github.com/test/activeclone.git');
+
+      expect(result.success).toBe(false);
+      expect(result.jobId).toBe(existingJob.id);
+    });
   });
 
   describe('getCloneJobStatus', () => {
@@ -253,6 +306,43 @@ describe('CloneManager', () => {
       expect(path).toBe('/custom/base/my-repo');
     });
   });
+
+  describe('cancelCloneJob', () => {
+    it('should return false for non-existent job', () => {
+      const result = cloneManager.cancelCloneJob('non-existent-id');
+
+      expect(result).toBe(false);
+    });
+
+    it('should cancel pending job', () => {
+      const job = createCloneJob(db, {
+        cloneUrl: 'https://github.com/test/repo.git',
+        normalizedCloneUrl: 'https://github.com/test/repo',
+        targetPath: '/path/to/clone',
+      });
+
+      const result = cloneManager.cancelCloneJob(job.id);
+
+      expect(result).toBe(true);
+
+      // Verify job status changed
+      const updated = getCloneJob(db, job.id);
+      expect(updated?.status).toBe('cancelled');
+    });
+
+    it('should not cancel completed job', () => {
+      const job = createCloneJob(db, {
+        cloneUrl: 'https://github.com/test/repo.git',
+        normalizedCloneUrl: 'https://github.com/test/repo',
+        targetPath: '/path/to/clone',
+      });
+      updateCloneJob(db, job.id, { status: 'completed' });
+
+      const result = cloneManager.cancelCloneJob(job.id);
+
+      expect(result).toBe(false);
+    });
+  });
 });
 
 describe('CloneManagerError', () => {
@@ -282,5 +372,124 @@ describe('CloneManagerError', () => {
     });
 
     expect(error).toBeInstanceOf(Error);
+  });
+});
+
+describe('CloneManager - parseGitProgress', () => {
+  let db: Database.Database;
+  let cloneManager: CloneManager;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db);
+    cloneManager = new CloneManager(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('should parse "Receiving objects" progress', () => {
+    const output = 'Receiving objects:  42% (123/456), 1.23 MiB | 2.34 MiB/s';
+    const progress = cloneManager.parseGitProgress(output);
+    expect(progress).toBe(42);
+  });
+
+  it('should parse "Resolving deltas" progress', () => {
+    const output = 'Resolving deltas:  75% (100/133)';
+    const progress = cloneManager.parseGitProgress(output);
+    expect(progress).toBe(75);
+  });
+
+  it('should return null for non-progress output', () => {
+    const output = 'Cloning into some-repo...';
+    const progress = cloneManager.parseGitProgress(output);
+    expect(progress).toBeNull();
+  });
+
+  it('should return null for empty output', () => {
+    const progress = cloneManager.parseGitProgress('');
+    expect(progress).toBeNull();
+  });
+});
+
+describe('CloneManager - parseGitError', () => {
+  let db: Database.Database;
+  let cloneManager: CloneManager;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db);
+    cloneManager = new CloneManager(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('should detect authentication failed error', () => {
+    const stderr = 'fatal: Authentication failed for https://github.com/repo.git';
+    const error = cloneManager.parseGitError(stderr, 128);
+
+    expect(error.category).toBe('auth');
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).toContain('Authentication failed');
+  });
+
+  it('should detect permission denied error', () => {
+    const stderr = 'Permission denied (publickey).';
+    const error = cloneManager.parseGitError(stderr, 128);
+
+    expect(error.category).toBe('auth');
+    expect(error.code).toBe('AUTH_FAILED');
+  });
+
+  it('should detect could not read from remote repository error', () => {
+    const stderr = 'fatal: Could not read from remote repository.';
+    const error = cloneManager.parseGitError(stderr, 128);
+
+    expect(error.category).toBe('auth');
+    expect(error.code).toBe('AUTH_FAILED');
+  });
+
+  it('should detect could not resolve host error', () => {
+    const stderr = 'fatal: unable to access: Could not resolve host: github.com';
+    const error = cloneManager.parseGitError(stderr, 128);
+
+    expect(error.category).toBe('network');
+    expect(error.code).toBe('NETWORK_ERROR');
+    expect(error.message).toContain('Network error');
+  });
+
+  it('should detect connection refused error', () => {
+    const stderr = 'fatal: Connection refused';
+    const error = cloneManager.parseGitError(stderr, 128);
+
+    expect(error.category).toBe('network');
+    expect(error.code).toBe('NETWORK_ERROR');
+  });
+
+  it('should detect network is unreachable error', () => {
+    const stderr = 'fatal: Network is unreachable';
+    const error = cloneManager.parseGitError(stderr, 128);
+
+    expect(error.category).toBe('network');
+    expect(error.code).toBe('NETWORK_ERROR');
+  });
+
+  it('should return generic git error for unknown errors', () => {
+    const stderr = 'fatal: repository not found';
+    const error = cloneManager.parseGitError(stderr, 128);
+
+    expect(error.category).toBe('git');
+    expect(error.code).toBe('GIT_ERROR');
+    expect(error.message).toContain('exit code 128');
+  });
+
+  it('should truncate long error messages', () => {
+    const longStderr = 'x'.repeat(500);
+    const error = cloneManager.parseGitError(longStderr, 1);
+
+    expect(error.message.length).toBeLessThan(300);
   });
 });

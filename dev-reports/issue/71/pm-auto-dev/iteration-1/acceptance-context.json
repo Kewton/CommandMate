@@ -1,0 +1,89 @@
+{
+  "issue_number": 71,
+  "feature_summary": "リポジトリ登録時にクローンURLを指定して登録可能にする",
+  "acceptance_criteria": [
+    {
+      "id": "P0-1",
+      "criteria": "HTTPS URLでクローン・登録できる",
+      "priority": "P0",
+      "test_scenarios": [
+        "有効なHTTPS URLを入力してクローンが開始される",
+        "クローン完了後にrepositories テーブルにレコードが作成される",
+        ".git サフィックスありでもなしでも動作する"
+      ]
+    },
+    {
+      "id": "P0-2",
+      "criteria": "既存ディレクトリ衝突時にエラーメッセージが表示される",
+      "priority": "P0",
+      "test_scenarios": [
+        "同名ディレクトリが存在する場合にDIRECTORY_EXISTSエラーが返される",
+        "エラーメッセージがUIに表示される"
+      ]
+    },
+    {
+      "id": "P0-3",
+      "criteria": "URL形式のバリデーションが行われる",
+      "priority": "P0",
+      "test_scenarios": [
+        "不正な形式のURLでINVALID_URLエラーが返される",
+        "空文字列でエラーが返される",
+        "HTTPSでもSSHでもない形式でエラーが返される"
+      ]
+    },
+    {
+      "id": "P0-4",
+      "criteria": "クローン元URLがDBに保存される",
+      "priority": "P0",
+      "test_scenarios": [
+        "クローン成功後にrepositories.clone_urlに元のURLが保存される",
+        "repositories.normalized_clone_urlに正規化URLが保存される"
+      ]
+    },
+    {
+      "id": "P0-5",
+      "criteria": "同一URLの重複登録が防止される（URL正規化による同一判定含む）",
+      "priority": "P0",
+      "test_scenarios": [
+        "同じ正規化URLを持つリポジトリが既に登録済みの場合にDUPLICATE_CLONE_URLエラー",
+        ".gitあり/なしの同一リポジトリで重複検出",
+        "大文字/小文字の違いでも重複検出"
+      ]
+    },
+    {
+      "id": "P1-1",
+      "criteria": "SSH URLでクローン・登録できる",
+      "priority": "P1",
+      "test_scenarios": [
+        "git@github.com:user/repo.git 形式でクローンが開始される",
+        "SSH URLでもrepositories テーブルにレコードが作成される"
+      ]
+    },
+    {
+      "id": "P1-2",
+      "criteria": "認証失敗時に適切なエラーが表示される",
+      "priority": "P1",
+      "test_scenarios": [
+        "認証失敗時にAUTH_FAILEDエラーが返される",
+        "SSH鍵が見つからない場合にSSH_KEY_NOT_FOUNDエラーが返される"
+      ]
+    },
+    {
+      "id": "P1-3",
+      "criteria": "環境変数管理リポジトリとDB管理リポジトリが区別される",
+      "priority": "P1",
+      "test_scenarios": [
+        "is_env_managedフラグで区別される",
+        "UIでアイコン/バッジ区別表示（将来対応）"
+      ]
+    }
+  ],
+  "test_environment": {
+    "unit_tests": "Vitest",
+    "integration_tests": "Vitest (tests/integration/)",
+    "mock_requirements": [
+      "git clone コマンドのモック",
+      "ファイルシステム操作のモック"
+    ]
+  }
+}

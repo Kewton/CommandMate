@@ -12,6 +12,7 @@ import {
   getRepositoryById,
   getRepositoryByPath,
   updateRepository,
+  getAllRepositories,
   createCloneJob,
   updateCloneJob,
   getCloneJob,
@@ -76,6 +77,17 @@ describe('Repository DB Operations', () => {
       });
 
       expect(repo.isEnvManaged).toBe(true);
+    });
+
+    it('should create a disabled repository', () => {
+      const repo = createRepository(db, {
+        name: 'disabled-repo',
+        path: '/path/to/disabled-repo',
+        cloneSource: 'local',
+        enabled: false,
+      });
+
+      expect(repo.enabled).toBe(false);
     });
 
     it('should throw error for duplicate path', () => {
@@ -205,6 +217,74 @@ describe('Repository DB Operations', () => {
       const updated = getRepositoryById(db, repo.id);
       expect(updated!.name).toBe('new-name');
     });
+
+    it('should update cloneUrl and normalizedCloneUrl', () => {
+      const repo = createRepository(db, {
+        name: 'test-repo',
+        path: '/path/to/test-repo',
+        cloneSource: 'local',
+      });
+
+      updateRepository(db, repo.id, {
+        cloneUrl: 'https://github.com/user/repo.git',
+        normalizedCloneUrl: 'https://github.com/user/repo',
+      });
+
+      const updated = getRepositoryById(db, repo.id);
+      expect(updated!.cloneUrl).toBe('https://github.com/user/repo.git');
+      expect(updated!.normalizedCloneUrl).toBe('https://github.com/user/repo');
+    });
+
+    it('should allow setting cloneUrl to empty string', () => {
+      const repo = createRepository(db, {
+        name: 'test-repo',
+        path: '/path/to/test-repo',
+        cloneUrl: 'https://github.com/user/repo.git',
+        normalizedCloneUrl: 'https://github.com/user/repo',
+        cloneSource: 'https',
+      });
+
+      updateRepository(db, repo.id, {
+        cloneUrl: '',
+        normalizedCloneUrl: '',
+      });
+
+      const updated = getRepositoryById(db, repo.id);
+      expect(updated!.cloneUrl).toBeUndefined();
+      expect(updated!.normalizedCloneUrl).toBeUndefined();
+    });
+  });
+
+  describe('getAllRepositories', () => {
+    it('should return all repositories sorted by name', () => {
+      createRepository(db, {
+        name: 'zebra-repo',
+        path: '/path/to/zebra',
+        cloneSource: 'local',
+      });
+      createRepository(db, {
+        name: 'alpha-repo',
+        path: '/path/to/alpha',
+        cloneSource: 'local',
+      });
+      createRepository(db, {
+        name: 'beta-repo',
+        path: '/path/to/beta',
+        cloneSource: 'local',
+      });
+
+      const repos = getAllRepositories(db);
+
+      expect(repos).toHaveLength(3);
+      expect(repos[0].name).toBe('alpha-repo');
+      expect(repos[1].name).toBe('beta-repo');
+      expect(repos[2].name).toBe('zebra-repo');
+    });
+
+    it('should return empty array when no repositories exist', () => {
+      const repos = getAllRepositories(db);
+      expect(repos).toHaveLength(0);
+    });
   });
 });
 
@@ -260,6 +340,20 @@ describe('Clone Job DB Operations', () => {
   });
 
   describe('updateCloneJob', () => {
+    it('should do nothing when no updates provided', () => {
+      const job = createCloneJob(db, {
+        cloneUrl: 'https://github.com/test/repo.git',
+        normalizedCloneUrl: 'https://github.com/test/repo',
+        targetPath: '/path/to/clone',
+      });
+
+      // Call update with empty object - should not throw
+      updateCloneJob(db, job.id, {});
+
+      const updated = getCloneJob(db, job.id);
+      expect(updated!.status).toBe('pending');
+    });
+
     it('should update job status to running', () => {
       const job = createCloneJob(db, {
         cloneUrl: 'https://github.com/test/repo.git',

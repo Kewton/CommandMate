@@ -1,0 +1,30 @@
+{
+  "issue_number": 71,
+  "refactor_targets": [
+    "src/lib/clone-manager.ts",
+    "src/lib/url-normalizer.ts",
+    "src/lib/db-repository.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "src/components/repository/RepositoryManager.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": {
+      "overall": 56.22,
+      "clone_manager": 52.67,
+      "url_normalizer": 93.61,
+      "db_repository": 90.58
+    }
+  },
+  "improvement_goals": [
+    "clone-manager.ts のカバレッジを70%以上に向上",
+    "コードの重複削除",
+    "エラーハンドリングの一貫性確保",
+    "TypeScript型の厳密化",
+    "不要なconsole.logの削除"
+  ],
+  "patterns_to_apply": [
+    "Single Responsibility Principle - 関数の責務を明確化",
+    "DRY - 重複コードの共通化",
+    "Fail Fast - 早期リターンでネストを減らす"
+  ]
+}

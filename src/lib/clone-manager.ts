@@ -15,6 +15,7 @@ import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { UrlNormalizer } from './url-normalizer';
+import { isPathSafe } from './path-validator';
 import {
   createCloneJob as dbCreateCloneJob,
   getCloneJob,
@@ -25,6 +26,7 @@ import {
   type CloneJobDB,
   type Repository,
 } from './db-repository';
+import { scanWorktrees, syncWorktreesToDB } from './worktrees';
 import type { CloneError, CloneErrorCategory, CloneJobStatus } from '@/types/clone';
 
 /**
@@ -129,6 +131,13 @@ const ERROR_DEFINITIONS: Record<string, CloneError> = {
     message: 'Target directory already exists',
     recoverable: true,
     suggestedAction: 'Choose a different directory or remove the existing one',
+  },
+  INVALID_TARGET_PATH: {
+    category: 'validation',
+    code: 'INVALID_TARGET_PATH',
+    message: 'Target path is invalid or outside allowed directory',
+    recoverable: true,
+    suggestedAction: 'Use a path within the configured base directory',
   },
   AUTH_FAILED: {
     category: 'auth',
@@ -290,6 +299,17 @@ export class CloneManager {
     // 4. Determine target path
     const targetPath = customTargetPath || this.getTargetPath(repoName);
 
+    // 4.1. Validate target path (prevent path traversal)
+    if (customTargetPath && !isPathSafe(customTargetPath, this.config.basePath!)) {
+      return {
+        success: false,
+        error: {
+          ...ERROR_DEFINITIONS.INVALID_TARGET_PATH,
+          message: `Target path must be within ${this.config.basePath}`,
+        },
+      };
+    }
+
     // 5. Check if directory exists
     if (existsSync(targetPath)) {
       return {
@@ -378,13 +398,13 @@ export class CloneManager {
       }, this.config.timeout);
 
       // Handle process exit
-      gitProcess.on('close', (code) => {
+      gitProcess.on('close', async (code) => {
         clearTimeout(timeout);
         this.activeProcesses.delete(jobId);
 
         if (code === 0) {
-          // Success - create repository record
-          this.onCloneSuccess(jobId, cloneUrl, targetPath);
+          // Success - create repository record and scan worktrees
+          await this.onCloneSuccess(jobId, cloneUrl, targetPath);
           resolve();
         } else {
           // Failure - parse error
@@ -429,7 +449,7 @@ export class CloneManager {
   /**
    * Handle successful clone
    */
-  private onCloneSuccess(jobId: string, cloneUrl: string, targetPath: string): void {
+  private async onCloneSuccess(jobId: string, cloneUrl: string, targetPath: string): Promise<void> {
     const job = getCloneJob(this.db, jobId);
     if (!job) return;
 
@@ -446,6 +466,18 @@ export class CloneManager {
       cloneSource: cloneSource as 'local' | 'https' | 'ssh',
     });
 
+    // Scan and register worktrees
+    try {
+      const worktrees = await scanWorktrees(targetPath);
+      if (worktrees.length > 0) {
+        syncWorktreesToDB(this.db, worktrees);
+        console.log(`[CloneManager] Registered ${worktrees.length} worktree(s) for ${targetPath}`);
+      }
+    } catch (error) {
+      console.error(`[CloneManager] Failed to scan worktrees for ${targetPath}:`, error);
+      // Continue even if worktree scan fails - the repository is still registered
+    }
+
     // Update job as completed
     updateCloneJob(this.db, jobId, {
       status: 'completed',
@@ -460,20 +492,19 @@ export class CloneManager {
    *
    * Git outputs progress like:
    * "Receiving objects:  42% (123/456), 1.23 MiB | 2.34 MiB/s"
+   *
+   * @param output - Git stderr output containing progress info
+   * @returns Percentage (0-100) or null if no progress found
    */
-  private parseGitProgress(output: string): number | null {
-    // Match percentage patterns
-    const patterns = [
-      /Receiving objects:\s+(\d+)%/,
-      /Resolving deltas:\s+(\d+)%/,
-      /Cloning into.*?(\d+)%/,
-    ];
+  parseGitProgress(output: string): number | null {
+    // Combined regex pattern for all progress formats
+    const progressMatch = output.match(
+      /(?:Receiving objects|Resolving deltas|Cloning into[^:]*?):\s*(\d+)%/
+    );
 
-    for (const pattern of patterns) {
-      const match = output.match(pattern);
-      if (match) {
-        return parseInt(match[1], 10);
-      }
+    if (progressMatch) {
+      const progress = parseInt(progressMatch[1], 10);
+      return isNaN(progress) ? null : progress;
     }
 
     return null;
@@ -481,38 +512,52 @@ export class CloneManager {
 
   /**
    * Parse git error from stderr
+   *
+   * Categorizes git errors into auth, network, or generic git errors
+   * with truncated error messages for display.
+   *
+   * @param stderr - Git stderr output
+   * @param exitCode - Git process exit code
+   * @returns Categorized CloneError object
    */
-  private parseGitError(stderr: string, exitCode: number | null): CloneError {
+  parseGitError(stderr: string, exitCode: number | null): CloneError {
     const lowerStderr = stderr.toLowerCase();
+    const truncatedStderr = stderr.substring(0, 200);
 
-    // Authentication errors
-    if (
-      lowerStderr.includes('authentication failed') ||
-      lowerStderr.includes('permission denied') ||
-      lowerStderr.includes('could not read from remote repository')
-    ) {
+    // Authentication error patterns
+    const authPatterns = [
+      'authentication failed',
+      'permission denied',
+      'could not read from remote repository',
+    ];
+
+    // Network error patterns
+    const networkPatterns = [
+      'could not resolve host',
+      'connection refused',
+      'network is unreachable',
+    ];
+
+    // Check authentication errors (early return)
+    if (authPatterns.some((pattern) => lowerStderr.includes(pattern))) {
       return {
         ...ERROR_DEFINITIONS.AUTH_FAILED,
-        message: `Authentication failed: ${stderr.substring(0, 200)}`,
+        message: `Authentication failed: ${truncatedStderr}`,
       };
     }
 
-    // Network errors
-    if (
-      lowerStderr.includes('could not resolve host') ||
-      lowerStderr.includes('connection refused') ||
-      lowerStderr.includes('network is unreachable')
-    ) {
+    // Check network errors (early return)
+    if (networkPatterns.some((pattern) => lowerStderr.includes(pattern))) {
       return {
         ...ERROR_DEFINITIONS.NETWORK_ERROR,
-        message: `Network error: ${stderr.substring(0, 200)}`,
+        message: `Network error: ${truncatedStderr}`,
       };
     }
 
-    // Default to generic git error
+    // Default: generic git error
     return {
       ...ERROR_DEFINITIONS.GIT_ERROR,
-      message: `Git clone failed (exit code ${exitCode}): ${stderr.substring(0, 200)}`,
+      message: `Git clone failed (exit code ${exitCode}): ${truncatedStderr}`,
     };
   }
 

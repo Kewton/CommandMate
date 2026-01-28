@@ -1,0 +1,54 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": {
+      "overall": 56.22,
+      "clone_manager": 36.60,
+      "url_normalizer": 93.61,
+      "db_repository": 90.58
+    },
+    "after_coverage": {
+      "overall": 70.70,
+      "clone_manager": 69.82,
+      "url_normalizer": 95.74,
+      "db_repository": 100.00
+    }
+  },
+  "refactorings_applied": [
+    "parseGitProgress: Combined multiple regex patterns into single optimized pattern",
+    "parseGitError: Applied early return pattern with extracted constants for error patterns",
+    "Made parseGitProgress and parseGitError public for testability",
+    "Added comprehensive test coverage for edge cases",
+    "Added tests for startCloneJob directory existence check",
+    "Added tests for cancelCloneJob functionality",
+    "Added tests for custom target path",
+    "Added tests for getAllRepositories",
+    "Added tests for createRepository with disabled flag",
+    "Added tests for updateCloneJob with empty updates"
+  ],
+  "files_changed": [
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/clone-manager.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/lib/clone-manager.test.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/lib/url-normalizer.test.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/db-repository-clone.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "test_results": {
+    "total_tests": 1474,
+    "passed": 1474,
+    "failed": 0,
+    "skipped": 6
+  },
+  "coverage_improvements": {
+    "clone_manager": "+33.22%",
+    "url_normalizer": "+2.13%",
+    "db_repository": "+9.42%"
+  },
+  "notes": "clone-manager.tsのカバレッジは目標の70%に非常に近い69.82%を達成。残りのカバーされていない行は主にexecuteClone内のgitプロセス実行部分（spawn, timeout, error handling）で、実際のgitプロセスを必要とするため単体テストでのカバーは困難。db-repository.tsは100%カバレッジを達成。url-normalizer.tsは95.74%で良好。",
+  "message": "リファクタリング完了。コード品質と保守性が向上し、テストカバレッジが大幅に改善されました。"
+}
