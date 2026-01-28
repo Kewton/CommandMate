@@ -1,0 +1,25 @@
+{
+  "issue_number": 61,
+  "acceptance_criteria": [
+    "ワークツリー詳細画面のターミナル上部にauto yesトグルが表示される",
+    "トグルONでyes/no確認に自動でyesが送信される",
+    "トグルONで複数選択肢プロンプトにデフォルト（または先頭）が自動選択される",
+    "自動応答は既存の /api/worktrees/[id]/prompt-response API経由で行われる",
+    "ONから1時間後に自動でOFFになる",
+    "ON中はカウントダウンで残り時間が表示される",
+    "auto yes状態はサーバーサイドで管理され、複数タブ間で一貫する",
+    "サーバー再起動でOFF状態にリセットされる"
+  ],
+  "implementation_tasks": [
+    "src/lib/auto-yes-manager.ts: サーバーサイドインメモリMap状態管理（AutoYesState、ON/OFF切替、期限切れチェック）",
+    "src/lib/auto-yes-resolver.ts: 自動応答ルール解決（yes/no→'y'、複数選択→デフォルトor先頭、テキスト入力→null）",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts: GET/POST API（バリデーション、worktree存在確認）",
+    "src/app/api/worktrees/[id]/current-output/route.ts: レスポンスにautoYes状態を付加",
+    "src/types/models.ts: CurrentOutputResponse型定義追加",
+    "src/hooks/useAutoYes.ts: auto yes判定・自動応答・二重応答防止カスタムフック",
+    "src/components/worktree/AutoYesToggle.tsx: トグルUIコンポーネント（カウントダウン・通知表示）",
+    "src/components/worktree/WorktreeDetailRefactored.tsx: useAutoYesフック呼出、AutoYesToggle配置"
+  ],
+  "target_coverage": 80,
+  "design_policy_file": "dev-reports/design/issue-61-auto-yes-mode-design-policy.md"
+}

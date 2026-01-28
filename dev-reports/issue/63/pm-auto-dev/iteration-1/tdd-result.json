@@ -1,0 +1,27 @@
+{
+  "status": "success",
+  "issue_number": 63,
+  "iteration": 1,
+  "tests": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "test_files": [
+      "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+      "tests/unit/components/worktree/AutoYesToggle.test.tsx"
+    ]
+  },
+  "quality_checks": {
+    "eslint": "pass",
+    "typescript": "pass"
+  },
+  "files_created": [
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx"
+  ],
+  "files_modified": [
+    "src/components/worktree/AutoYesToggle.tsx"
+  ],
+  "summary": "Implemented confirmation dialog for auto-yes mode toggle. When toggling OFF->ON, a confirmation dialog with warning message, risk explanation, and disclaimer is shown. ON->OFF operates directly without dialog. All 13 tests pass, no lint or type errors."
+}

@@ -1,0 +1,32 @@
+{
+  "issue_number": 63,
+  "feature_summary": "auto yesモードON時に警告・免責ダイアログを表示し、同意後に有効化する",
+  "acceptance_criteria": [
+    "auto yesトグルをONにすると確認ダイアログが表示される",
+    "OFFにする操作ではダイアログが表示されず即座にOFFになる",
+    "ダイアログに警告メッセージ（機能説明・リスク説明）が表示される",
+    "ダイアログに免責事項が表示される",
+    "「同意して有効化」でモードがONになる",
+    "「キャンセル」でモードがOFFのまま維持される",
+    "モードをONにするたびに毎回ダイアログが表示される（同意は記憶しない）",
+    "モバイルレイアウトでもダイアログが適切に表示される",
+    "既存のauto yesモード機能（自動応答・タイムアウト等）に影響がない",
+    "ダイアログは既存のModalコンポーネントを利用している"
+  ],
+  "test_scenarios": [
+    "シナリオ1: OFF状態でトグルクリック→ダイアログ表示→同意ボタンクリック→モードON",
+    "シナリオ2: OFF状態でトグルクリック→ダイアログ表示→キャンセルボタンクリック→モードOFFのまま",
+    "シナリオ3: ON状態でトグルクリック→ダイアログなしで即座にOFF",
+    "シナリオ4: ダイアログ内の警告テキスト・免責テキストが正しく表示されている",
+    "シナリオ5: ダイアログが既存Modalコンポーネントを使用している",
+    "シナリオ6: 同意→OFF→再度ONで再びダイアログが表示される（記憶しない）"
+  ],
+  "source_files": [
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx"
+  ],
+  "test_files": [
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx"
+  ]
+}

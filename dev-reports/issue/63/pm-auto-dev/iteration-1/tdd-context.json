@@ -1,0 +1,34 @@
+{
+  "issue_number": 63,
+  "issue_title": "auto yes モードにてオン時警告メッセージ",
+  "acceptance_criteria": [
+    "auto yesトグルをONにすると確認ダイアログが表示される",
+    "OFFにする操作ではダイアログが表示されず即座にOFFになる",
+    "ダイアログに警告メッセージ（機能説明・リスク説明）が表示される",
+    "ダイアログに免責事項が表示される",
+    "「同意して有効化」でモードがONになる",
+    "「キャンセル」でモードがOFFのまま維持される",
+    "モードをONにするたびに毎回ダイアログが表示される（同意は記憶しない）",
+    "モバイルレイアウトでもダイアログが適切に表示される",
+    "既存のauto yesモード機能（自動応答・タイムアウト等）に影響がない",
+    "ダイアログは既存のModalコンポーネントを利用している"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: AutoYesConfirmDialog コンポーネント新規作成 (src/components/worktree/AutoYesConfirmDialog.tsx) - 既存Modal(size=sm, showCloseButton=true)を利用、警告メッセージ・免責事項・ボタン配置",
+    "Task 1.2: AutoYesToggle にダイアログ統合 (src/components/worktree/AutoYesToggle.tsx) - showConfirmDialog state追加、handleToggle分岐(ON→ダイアログ、OFF→直接実行)、handleConfirm/handleCancelコールバック",
+    "Task 2.1: AutoYesConfirmDialog 単体テスト (tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx)",
+    "Task 2.2: AutoYesToggle 単体テスト (tests/unit/components/worktree/AutoYesToggle.test.tsx)"
+  ],
+  "design_decisions": {
+    "dialog_state_management": "AutoYesToggle内部でダイアログ状態管理（親コンポーネント変更不要）",
+    "modal_usage": "既存Modal(size=sm, showCloseButton=true)を利用",
+    "consent_memory": "毎回表示（同意記憶なし）",
+    "backdrop_click": "キャンセル扱い"
+  },
+  "style_guidelines": {
+    "disclaimer_block": "bg-yellow-50 border-l-4 border-yellow-400 p-3",
+    "confirm_button": "bg-yellow-600 hover:bg-yellow-700 text-white",
+    "cancel_button": "bg-gray-200 hover:bg-gray-300 text-gray-700"
+  },
+  "target_coverage": 80
+}

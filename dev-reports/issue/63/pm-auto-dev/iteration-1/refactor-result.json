@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "changes_made": false,
+  "summary": "No refactoring needed. Both components are well-structured and follow SOLID/KISS/DRY/YAGNI principles.",
+  "analysis": {
+    "AutoYesConfirmDialog.tsx": {
+      "issues_found": 0,
+      "notes": "Single responsibility, clean props interface, proper accessibility via Modal component, no unused imports."
+    },
+    "AutoYesToggle.tsx": {
+      "issues_found": 0,
+      "notes": "Proper use of memo, useCallback, aria-checked/aria-label attributes, clean separation of concerns with formatTimeRemaining helper, no code duplication."
+    }
+  },
+  "quality_metrics": {
+    "tests_passed": 1293,
+    "tests_skipped": 6,
+    "lint_errors": 0,
+    "type_errors": 0
+  }
+}

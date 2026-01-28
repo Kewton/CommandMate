@@ -1,0 +1,120 @@
+{
+  "issue_number": 61,
+  "iteration": 1,
+  "timestamp": "2026-01-28T00:15:00Z",
+  "overall_result": "PASS",
+  "quality_checks": {
+    "unit_tests": {
+      "result": "PASS",
+      "details": "71 test files passed, 1280 tests passed, 6 skipped"
+    },
+    "lint": {
+      "result": "PASS",
+      "details": "No ESLint warnings or errors"
+    },
+    "type_check": {
+      "result": "PASS",
+      "details": "tsc --noEmit completed with no errors"
+    }
+  },
+  "acceptance_criteria_results": [
+    {
+      "criterion": "ワークツリー詳細画面のターミナル上部にauto yesトグルが表示される",
+      "result": "PASS",
+      "evidence": "AutoYesToggle component rendered at line 1191 of WorktreeDetailRefactored.tsx, positioned above terminal output with border-b styling"
+    },
+    {
+      "criterion": "トグルONでyes/no確認に自動でyesが送信される",
+      "result": "PASS",
+      "evidence": "auto-yes-resolver.ts returns 'y' for yes_no type; useAutoYes hook calls prompt-response API with the answer"
+    },
+    {
+      "criterion": "トグルONで複数選択肢プロンプトにデフォルト（または先頭）が自動選択される",
+      "result": "PASS",
+      "evidence": "auto-yes-resolver.ts finds default option via isDefault, falls back to first option, returns option number as string"
+    },
+    {
+      "criterion": "自動応答は既存の /api/worktrees/[id]/prompt-response API経由で行われる",
+      "result": "PASS",
+      "evidence": "useAutoYes hook (line 68) calls fetch('/api/worktrees/${worktreeId}/prompt-response', ...)"
+    },
+    {
+      "criterion": "ONから1時間後に自動でOFFになる",
+      "result": "PASS",
+      "evidence": "auto-yes-manager.ts: AUTO_YES_TIMEOUT_MS = 3600000, getAutoYesState auto-disables when expired"
+    },
+    {
+      "criterion": "ON中はカウントダウンで残り時間が表示される",
+      "result": "PASS",
+      "evidence": "AutoYesToggle.tsx: formatTimeRemaining function displays MM:SS, updated every 1 second via setInterval"
+    },
+    {
+      "criterion": "auto yes状態はサーバーサイドで管理され、複数タブ間で一貫する",
+      "result": "PASS",
+      "evidence": "auto-yes-manager.ts uses module-level Map; API route GET/POST endpoints provide consistent state; current-output API includes autoYes state in response"
+    },
+    {
+      "criterion": "サーバー再起動でOFF状態にリセットされる",
+      "result": "PASS",
+      "evidence": "In-memory Map (autoYesStates) in auto-yes-manager.ts is cleared on server restart by design - no persistence layer"
+    }
+  ],
+  "test_scenario_results": [
+    {
+      "scenario": "シナリオ1: AutoYesToggleコンポーネントがターミナル上部に表示されること",
+      "result": "PASS",
+      "evidence": "Component exists at src/components/worktree/AutoYesToggle.tsx, imported and rendered in WorktreeDetailRefactored.tsx line 1191"
+    },
+    {
+      "scenario": "シナリオ2: auto-yes-resolver がyes/noプロンプトに 'y' を返すこと",
+      "result": "PASS",
+      "evidence": "Unit test file tests/unit/lib/auto-yes-resolver.test.ts passes (8 tests)"
+    },
+    {
+      "scenario": "シナリオ3: auto-yes-resolver が複数選択肢でデフォルトオプション番号を返すこと",
+      "result": "PASS",
+      "evidence": "Covered by auto-yes-resolver.test.ts; resolver finds isDefault option or falls back to first"
+    },
+    {
+      "scenario": "シナリオ4: auto-yes-resolver がテキスト入力必要な選択肢でnullを返すこと",
+      "result": "PASS",
+      "evidence": "Covered by auto-yes-resolver.test.ts; resolver returns null when target.requiresTextInput is true"
+    },
+    {
+      "scenario": "シナリオ5: useAutoYesフックがprompt-response APIを呼び出すこと",
+      "result": "PASS",
+      "evidence": "useAutoYes.ts line 68 calls /api/worktrees/${worktreeId}/prompt-response with POST method"
+    },
+    {
+      "scenario": "シナリオ6: auto-yes-manager が1時間後に期限切れになること",
+      "result": "PASS",
+      "evidence": "Unit test file tests/unit/lib/auto-yes-manager.test.ts passes; manager uses 3600000ms timeout"
+    },
+    {
+      "scenario": "シナリオ7: auto-yes API (GET/POST) が正しく状態を管理すること",
+      "result": "PASS",
+      "evidence": "API route at src/app/api/worktrees/[id]/auto-yes/route.ts implements GET/POST with proper validation and 404 handling"
+    },
+    {
+      "scenario": "シナリオ8: current-output APIレスポンスにautoYes状態が含まれること",
+      "result": "PASS",
+      "evidence": "current-output/route.ts includes autoYes object with enabled and expiresAt fields (lines 93, 113-115)"
+    },
+    {
+      "scenario": "シナリオ9: サーバーサイドのインメモリMapで状態管理されること（DB不使用）",
+      "result": "PASS",
+      "evidence": "auto-yes-manager.ts uses 'const autoYesStates = new Map<string, AutoYesState>()' - no database imports or operations"
+    }
+  ],
+  "files_verified": [
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/lib/auto-yes-resolver.test.ts"
+  ]
+}

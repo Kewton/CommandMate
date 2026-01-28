@@ -37,6 +37,8 @@ import { FileViewer } from '@/components/worktree/FileViewer';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
+import { useAutoYes } from '@/hooks/useAutoYes';
+import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import type { Worktree, ChatMessage, PromptData } from '@/types/models';
 
 // ============================================================================
@@ -59,6 +61,10 @@ interface CurrentOutputResponse {
   fullOutput?: string;
   realtimeSnippet?: string;
   thinking?: boolean;
+  autoYes?: {
+    enabled: boolean;
+    expiresAt: number | null;
+  };
 }
 
 // ============================================================================
@@ -796,6 +802,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [error, setError] = useState<string | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [fileViewerPath, setFileViewerPath] = useState<string | null>(null);
+  const [autoYesEnabled, setAutoYesEnabled] = useState(false);
+  const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
 
   // Track if initial load has completed to prevent re-triggering
   const initialLoadCompletedRef = useRef(false);
@@ -862,6 +870,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         actions.showPrompt(data.promptData, `prompt-${Date.now()}`);
       } else if (!data.isPromptWaiting && state.prompt.visible) {
         actions.clearPrompt();
+      }
+
+      // Update auto-yes state from server
+      if (data.autoYes) {
+        setAutoYesEnabled(data.autoYes.enabled);
+        setAutoYesExpiresAt(data.autoYes.expiresAt);
       }
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
@@ -965,6 +979,33 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     },
     [fetchMessages, fetchCurrentOutput]
   );
+
+  /** Handle auto-yes toggle */
+  const handleAutoYesToggle = useCallback(async (enabled: boolean): Promise<void> => {
+    try {
+      const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAutoYesEnabled(data.enabled);
+        setAutoYesExpiresAt(data.expiresAt);
+      }
+    } catch (err) {
+      console.error('[WorktreeDetailRefactored] Error toggling auto-yes:', err);
+    }
+  }, [worktreeId]);
+
+  // Auto-yes hook
+  const { lastAutoResponse } = useAutoYes({
+    worktreeId,
+    cliTool: 'claude',
+    isPromptWaiting: state.prompt.visible,
+    promptData: state.prompt.data,
+    autoYesEnabled,
+  });
 
   /** Retry loading all data after error */
   const handleRetry = useCallback(async (): Promise<void> => {
@@ -1146,8 +1187,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               isSessionRunning={state.terminal.isActive}
             />
           </div>
+          {/* Auto Yes Toggle */}
+          <AutoYesToggle
+            enabled={autoYesEnabled}
+            expiresAt={autoYesExpiresAt}
+            onToggle={handleAutoYesToggle}
+            lastAutoResponse={lastAutoResponse}
+          />
           {/* Prompt Panel - fixed overlay at bottom */}
-          {state.prompt.visible && (
+          {state.prompt.visible && !autoYesEnabled && (
             <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-2xl px-4">
               <PromptPanel
                 promptData={state.prompt.data}
@@ -1190,7 +1238,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onMenuClick={openMobileDrawer}
         />
 
-        <main className="flex-1 pt-14 pb-28 overflow-hidden">
+        <div className="fixed top-14 inset-x-0 z-30">
+          <AutoYesToggle
+            enabled={autoYesEnabled}
+            expiresAt={autoYesExpiresAt}
+            onToggle={handleAutoYesToggle}
+            lastAutoResponse={lastAutoResponse}
+          />
+        </div>
+
+        <main
+          className="flex-1 pt-[6.25rem] pb-32 overflow-hidden"
+          style={{ paddingBottom: 'calc(8rem + env(safe-area-inset-bottom, 0px))' }}
+        >
           <MobileContent
             activeTab={activeTab}
             worktreeId={worktreeId}
@@ -1206,7 +1266,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </main>
 
         {/* Message Input - fixed above tab bar */}
-        <div className="fixed bottom-16 left-0 right-0 border-t border-gray-200 bg-white p-2 z-30">
+        <div
+          className="fixed left-0 right-0 border-t border-gray-200 bg-white p-2 z-30"
+          style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom, 0px))' }}
+        >
           <MessageInput
             worktreeId={worktreeId}
             onMessageSent={handleMessageSent}
@@ -1222,13 +1285,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           hasPrompt={state.prompt.visible}
         />
 
-        <MobilePromptSheet
-          promptData={state.prompt.data}
-          visible={state.prompt.visible}
-          answering={state.prompt.answering}
-          onRespond={handlePromptRespond}
-          onDismiss={handlePromptDismiss}
-        />
+        {!autoYesEnabled && (
+          <MobilePromptSheet
+            promptData={state.prompt.data}
+            visible={state.prompt.visible}
+            answering={state.prompt.answering}
+            onRespond={handlePromptRespond}
+            onDismiss={handlePromptDismiss}
+          />
+        )}
 
         {/* File Viewer Modal */}
         <FileViewer

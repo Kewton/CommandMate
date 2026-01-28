@@ -11,6 +11,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectThinking as detectThinkingState, stripAnsi } from '@/lib/cli-patterns';
+import { getAutoYesState } from '@/lib/auto-yes-manager';
 
 const SUPPORTED_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
 
@@ -88,6 +89,9 @@ export async function GET(
     // Extract realtime snippet (last 100 lines for better context)
     const realtimeSnippet = lines.slice(-100).join('\n');
 
+    // Get auto-yes state
+    const autoYesState = getAutoYesState(params.id);
+
     return NextResponse.json({
       isRunning: true,
       cliToolId,
@@ -105,6 +109,11 @@ export async function GET(
       // Prompt detection results
       isPromptWaiting,
       promptData: isPromptWaiting ? promptDetection.promptData : null,
+      // Auto-yes state
+      autoYes: {
+        enabled: autoYesState?.enabled ?? false,
+        expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
+      },
     });
   } catch (error: unknown) {
     console.error('Error getting current output:', error);

@@ -1,0 +1,28 @@
+{
+  "status": "success",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 19,
+    "passed": 19,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/lib/auto-yes-resolver.test.ts"
+  ],
+  "commits": [
+    "5dd03cf: feat(issue61): implement auto-yes mode for worktree prompts"
+  ],
+  "message": "TDD implementation complete. 19 new tests (11 manager + 8 resolver), all 1280 tests passing. Zero ESLint/TypeScript errors."
+}

@@ -50,8 +50,12 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
-      textarea.style.height = 'auto';
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+      if (!message) {
+        textarea.style.height = '24px';
+      } else {
+        textarea.style.height = 'auto';
+        textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+      }
     }
   }, [message]);
 

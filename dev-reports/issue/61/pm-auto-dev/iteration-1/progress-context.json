@@ -1,0 +1,28 @@
+{
+  "issue_number": 61,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_passed": 1280,
+      "tests_total": 1280,
+      "new_tests": 19,
+      "lint_errors": 0,
+      "type_errors": 0
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 8,
+      "criteria_total": 8,
+      "scenarios_passed": 9,
+      "scenarios_total": 9
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "DRY: auto-yes API routeにヘルパー関数抽出",
+        "YAGNI: AutoYesToggleから未使用prop削除"
+      ]
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "issue_number": 61,
+  "feature_summary": "auto yesモードの追加 - ワークツリー単位でCLIプロンプトに自動応答",
+  "acceptance_criteria": [
+    "ワークツリー詳細画面のターミナル上部にauto yesトグルが表示される",
+    "トグルONでyes/no確認に自動でyesが送信される",
+    "トグルONで複数選択肢プロンプトにデフォルト（または先頭）が自動選択される",
+    "自動応答は既存の /api/worktrees/[id]/prompt-response API経由で行われる",
+    "ONから1時間後に自動でOFFになる",
+    "ON中はカウントダウンで残り時間が表示される",
+    "auto yes状態はサーバーサイドで管理され、複数タブ間で一貫する",
+    "サーバー再起動でOFF状態にリセットされる"
+  ],
+  "test_scenarios": [
+    "シナリオ1: AutoYesToggleコンポーネントがターミナル上部に表示されること",
+    "シナリオ2: auto-yes-resolver がyes/noプロンプトに 'y' を返すこと",
+    "シナリオ3: auto-yes-resolver が複数選択肢でデフォルトオプション番号を返すこと",
+    "シナリオ4: auto-yes-resolver がテキスト入力必要な選択肢でnullを返すこと",
+    "シナリオ5: useAutoYesフックがprompt-response APIを呼び出すこと",
+    "シナリオ6: auto-yes-manager が1時間後に期限切れになること",
+    "シナリオ7: auto-yes API (GET/POST) が正しく状態を管理すること",
+    "シナリオ8: current-output APIレスポンスにautoYes状態が含まれること",
+    "シナリオ9: サーバーサイドのインメモリMapで状態管理されること（DB不使用）"
+  ]
+}
