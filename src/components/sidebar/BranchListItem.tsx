@@ -83,14 +83,14 @@ export const BranchListItem = memo(function BranchListItem({
         )}
       </div>
 
-      {/* Memo display (shown for all branches with memo) */}
-      {branch.memo && (
+      {/* Description display (shown for all branches with description) */}
+      {branch.description && (
         <div
-          data-testid="branch-memo"
+          data-testid="branch-description"
           className="pl-6 pr-2 mt-1 text-left"
         >
           <p className="text-xs text-gray-400 line-clamp-2">
-            {branch.memo}
+            {branch.description}
           </p>
         </div>
       )}

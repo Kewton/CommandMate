@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
 
 /**
  * Migration definition
@@ -540,6 +540,24 @@ const migrations: Migration[] = [
       db.exec('DROP INDEX IF EXISTS idx_external_apps_path_prefix');
       db.exec('DROP TABLE IF EXISTS external_apps');
       console.log('✓ Dropped external_apps table and indexes');
+    }
+  },
+  {
+    version: 13,
+    name: 'rename-worktree-memo-to-description',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE worktrees RENAME COLUMN memo TO description;
+      `);
+
+      console.log('✓ Renamed worktrees.memo column to description');
+    },
+    down: (db) => {
+      db.exec(`
+        ALTER TABLE worktrees RENAME COLUMN description TO memo;
+      `);
+
+      console.log('✓ Rolled back: Renamed worktrees.description column back to memo');
     }
   }
 ];

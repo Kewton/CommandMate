@@ -183,7 +183,7 @@ export function getWorktrees(
 ): Worktree[] {
   let query = `
     SELECT
-      w.id, w.name, w.path, w.repository_path, w.repository_name, w.memo,
+      w.id, w.name, w.path, w.repository_path, w.repository_name, w.description,
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
       (SELECT MAX(timestamp) FROM chat_messages
@@ -207,7 +207,7 @@ export function getWorktrees(
     path: string;
     repository_path: string | null;
     repository_name: string | null;
-    memo: string | null;
+    description: string | null;
     last_user_message: string | null;
     last_user_message_at: number | null;
     last_message_summary: string | null;
@@ -233,7 +233,7 @@ export function getWorktrees(
       path: row.path,
       repositoryPath: row.repository_path || '',
       repositoryName: row.repository_name || '',
-      memo: row.memo || undefined,
+      description: row.description || undefined,
       lastUserMessage: row.last_user_message || undefined,
       lastUserMessageAt: row.last_user_message_at ? new Date(row.last_user_message_at) : undefined,
       lastMessageSummary: row.last_message_summary || undefined,
@@ -291,7 +291,7 @@ export function getWorktreeById(
 ): Worktree | null {
   const stmt = db.prepare(`
     SELECT
-      w.id, w.name, w.path, w.repository_path, w.repository_name, w.memo,
+      w.id, w.name, w.path, w.repository_path, w.repository_name, w.description,
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
       (SELECT MAX(timestamp) FROM chat_messages
@@ -306,7 +306,7 @@ export function getWorktreeById(
     path: string;
     repository_path: string | null;
     repository_name: string | null;
-    memo: string | null;
+    description: string | null;
     last_user_message: string | null;
     last_user_message_at: number | null;
     last_message_summary: string | null;
@@ -329,7 +329,7 @@ export function getWorktreeById(
     path: row.path,
     repositoryPath: row.repository_path || '',
     repositoryName: row.repository_name || '',
-    memo: row.memo || undefined,
+    description: row.description || undefined,
     lastUserMessage: row.last_user_message || undefined,
     lastUserMessageAt: row.last_user_message_at ? new Date(row.last_user_message_at) : undefined,
     lastMessageSummary: row.last_message_summary || undefined,
@@ -356,7 +356,7 @@ export function upsertWorktree(
 
   const stmt = db.prepare(`
     INSERT INTO worktrees (
-      id, name, path, repository_path, repository_name, memo,
+      id, name, path, repository_path, repository_name, description,
       last_user_message, last_user_message_at, last_message_summary, updated_at, cli_tool_id
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -365,7 +365,7 @@ export function upsertWorktree(
       path = excluded.path,
       repository_path = excluded.repository_path,
       repository_name = excluded.repository_name,
-      memo = COALESCE(excluded.memo, worktrees.memo),
+      description = COALESCE(excluded.description, worktrees.description),
       last_user_message = COALESCE(excluded.last_user_message, worktrees.last_user_message),
       last_user_message_at = COALESCE(excluded.last_user_message_at, worktrees.last_user_message_at),
       last_message_summary = COALESCE(excluded.last_message_summary, worktrees.last_message_summary),
@@ -379,7 +379,7 @@ export function upsertWorktree(
     worktree.path,
     worktree.repositoryPath || null,
     worktree.repositoryName || null,
-    worktree.memo || null,
+    worktree.description || null,
     worktree.lastUserMessage || null,
     worktree.lastUserMessageAt?.getTime() || null,
     worktree.lastMessageSummary || null,
@@ -389,20 +389,20 @@ export function upsertWorktree(
 }
 
 /**
- * Update worktree memo
+ * Update worktree description
  */
-export function updateWorktreeMemo(
+export function updateWorktreeDescription(
   db: Database.Database,
   worktreeId: string,
-  memo: string
+  description: string
 ): void {
   const stmt = db.prepare(`
     UPDATE worktrees
-    SET memo = ?
+    SET description = ?
     WHERE id = ?
   `);
 
-  stmt.run(memo || null, worktreeId);
+  stmt.run(description || null, worktreeId);
 }
 
 /**

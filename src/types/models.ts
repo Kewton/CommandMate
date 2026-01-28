@@ -18,8 +18,8 @@ export interface Worktree {
   repositoryPath: string;
   /** Repository display name (e.g., "MyProject") */
   repositoryName: string;
-  /** User memo for this worktree */
-  memo?: string;
+  /** User description for this worktree */
+  description?: string;
   /** Latest user message content (truncated to ~200 chars) */
   lastUserMessage?: string;
   /** Timestamp of latest user message */

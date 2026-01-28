@@ -1,0 +1,19 @@
+{
+  "issue_number": 44,
+  "refactor_targets": [
+    "src/lib/db.ts",
+    "src/lib/db-migrations.ts",
+    "src/components/worktree/WorktreeDetail.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "lint_passed": true,
+    "tsc_passed": true
+  },
+  "improvement_goals": [
+    "変更箇所の一貫性確認",
+    "不要なコードの削除",
+    "命名の一貫性確認"
+  ]
+}

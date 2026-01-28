@@ -101,12 +101,12 @@ export const worktreeApi = {
   },
 
   /**
-   * Update worktree memo
+   * Update worktree description
    */
-  async updateMemo(id: string, memo: string): Promise<Worktree> {
+  async updateDescription(id: string, description: string): Promise<Worktree> {
     return fetchApi<Worktree>(`/api/worktrees/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ memo }),
+      body: JSON.stringify({ description }),
     });
   },
 

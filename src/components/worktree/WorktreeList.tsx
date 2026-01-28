@@ -137,7 +137,7 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
           wt.path.toLowerCase().includes(query) ||
           wt.repositoryName.toLowerCase().includes(query) ||
           wt.lastMessageSummary?.toLowerCase().includes(query) ||
-          wt.memo?.toLowerCase().includes(query)
+          wt.description?.toLowerCase().includes(query)
       );
     }
 

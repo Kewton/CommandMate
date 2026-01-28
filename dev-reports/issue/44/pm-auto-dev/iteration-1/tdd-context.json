@@ -1,0 +1,38 @@
+{
+  "issue_number": 44,
+  "title": "メモ機能の命名変更",
+  "acceptance_criteria": [
+    "ブランチ管理用メモのUI表示が 'Description' になっている",
+    "作業支援用メモのUI表示が 'Memo' のままである",
+    "DBマイグレーション(v13)で既存データが正常に移行される",
+    "React の memo() 関数が正常に動作している",
+    "npm run lint パス",
+    "npx tsc --noEmit パス",
+    "npm run test:unit パス",
+    "npm run build パス"
+  ],
+  "implementation_tasks": [
+    "DB層: CURRENT_SCHEMA_VERSION を 12 → 13 に更新",
+    "DB層: v13マイグレーション追加 (ALTER TABLE worktrees RENAME COLUMN memo TO description)",
+    "DB層: db.ts SELECT文の w.memo → w.description",
+    "DB層: db.ts 行型定義・マッピング修正",
+    "DB層: upsertWorktree 内の memo 参照修正",
+    "DB層: updateWorktreeMemo() → updateWorktreeDescription() 関数名変更",
+    "型定義: src/types/models.ts Worktree.memo → Worktree.description",
+    "型定義: src/types/sidebar.ts SidebarBranchItem.memo → SidebarBranchItem.description",
+    "API層: route.ts の import と body 修正",
+    "API層: api-client.ts の updateMemo() → updateDescription() 変更",
+    "UIコンポーネント: WorktreeCard.tsx memo → description",
+    "UIコンポーネント: WorktreeDetail.tsx タブID・state・handler・ラベル変更",
+    "UIコンポーネント: WorktreeDetailRefactored.tsx 3コンポーネント変更",
+    "UIコンポーネント: BranchListItem.tsx branch.memo → branch.description",
+    "テスト: db-memo.test.ts 修正",
+    "テスト: memos.test.ts 修正"
+  ],
+  "target_coverage": 80,
+  "caution": [
+    "React memo() 関数との名前衝突に注意",
+    "MemoPane / MemoCard / MemoAddButton は変更しない（作業支援用メモ）",
+    "WorktreeDetail.tsx の React.useMemo(284行) は変更しない"
+  ]
+}

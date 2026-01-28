@@ -1,12 +1,12 @@
 /**
  * API Route: /api/worktrees/:id
  * GET: Returns a specific worktree by ID
- * PATCH: Updates worktree properties (e.g., memo)
+ * PATCH: Updates worktree properties (e.g., description, link, favorite, status)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, updateWorktreeMemo, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
+import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
@@ -144,9 +144,9 @@ export async function PATCH(
     // Parse request body
     const body = await request.json();
 
-    // Update memo if provided
-    if ('memo' in body) {
-      updateWorktreeMemo(db, params.id, body.memo);
+    // Update description if provided
+    if ('description' in body) {
+      updateWorktreeDescription(db, params.id, body.description);
     }
 
     // Update link if provided

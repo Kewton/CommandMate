@@ -401,7 +401,7 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - worktrees:
 - id, name, path, last_message_summary, updated_at
 - **cli_tool_id** (追加: Issue #4) - 使用するCLI tool ('claude' | 'codex' | 'gemini')
-- repository_path, repository_name, memo
+- repository_path, repository_name, description
 - last_user_message, last_user_message_at
 - favorite, status, link
 - chat_messages:

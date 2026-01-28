@@ -1,0 +1,21 @@
+{
+  "issue_number": 44,
+  "feature_summary": "メモ機能の命名変更（memo → description）",
+  "acceptance_criteria": [
+    "ブランチ管理用メモのUI表示が 'Description' になっている",
+    "作業支援用メモのUI表示が 'Memo' のままである",
+    "DBマイグレーション(v13)で既存データが正常に移行される",
+    "React の memo() 関数が正常に動作している",
+    "npm run lint パス",
+    "npx tsc --noEmit パス",
+    "npm run test:unit パス",
+    "npm run build パス"
+  ],
+  "test_scenarios": [
+    "シナリオ1: UIコンポーネントで 'Description' ラベルが使用されている",
+    "シナリオ2: MemoPane/MemoCard等の作業支援用メモは 'Memo' のまま",
+    "シナリオ3: DBマイグレーションv13でRENAME COLUMNが正しく定義されている",
+    "シナリオ4: React memo()関数が import されて正常に使用されている",
+    "シナリオ5: 静的解析・テスト・ビルドがすべてパス"
+  ]
+}

@@ -138,7 +138,7 @@ function parseMessageTimestamps(messages: ChatMessage[]): ChatMessage[] {
 interface DesktopHeaderProps {
   worktreeName: string;
   repositoryName: string;
-  memo?: string;
+  description?: string;
   status: WorktreeStatus;
   onBackClick: () => void;
   onInfoClick: () => void;
@@ -151,18 +151,18 @@ interface DesktopHeaderProps {
 const DesktopHeader = memo(function DesktopHeader({
   worktreeName,
   repositoryName,
-  memo: worktreeMemo,
+  description: worktreeDescription,
   status,
   onBackClick,
   onInfoClick,
   onMenuClick,
 }: DesktopHeaderProps) {
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
-  // Truncate memo to 50 characters
-  const truncatedMemo = worktreeMemo
-    ? worktreeMemo.length > 50
-      ? `${worktreeMemo.substring(0, 50)}...`
-      : worktreeMemo
+  // Truncate description to 50 characters
+  const truncatedDescription = worktreeDescription
+    ? worktreeDescription.length > 50
+      ? `${worktreeDescription.substring(0, 50)}...`
+      : worktreeDescription
     : null;
 
   return (
@@ -237,12 +237,12 @@ const DesktopHeader = memo(function DesktopHeader({
             <h1 className="text-lg font-semibold text-gray-900 truncate max-w-[200px] leading-tight">
               {worktreeName}
             </h1>
-            {truncatedMemo && (
+            {truncatedDescription && (
               <span
                 className="text-sm text-gray-500 truncate max-w-md"
-                title={worktreeMemo}
+                title={worktreeDescription}
               >
-                {truncatedMemo}
+                {truncatedDescription}
               </span>
             )}
           </div>
@@ -287,49 +287,49 @@ interface InfoModalProps {
   onWorktreeUpdate: (updated: Worktree) => void;
 }
 
-/** Modal displaying worktree information with memo editing */
+/** Modal displaying worktree information with description editing */
 const InfoModal = memo(function InfoModal({
   worktree,
   isOpen,
   onClose,
   onWorktreeUpdate,
 }: InfoModalProps) {
-  const [isEditingMemo, setIsEditingMemo] = useState(false);
-  const [memoText, setMemoText] = useState('');
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [descriptionText, setDescriptionText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   // Track previous isOpen state to detect modal opening
   const prevIsOpenRef = useRef(isOpen);
 
-  // Only sync memo text when modal opens (not on every worktree poll)
+  // Only sync description text when modal opens (not on every worktree poll)
   useEffect(() => {
     const wasOpened = isOpen && !prevIsOpenRef.current;
     prevIsOpenRef.current = isOpen;
 
-    // Only reset memo text when modal first opens, not during editing
+    // Only reset description text when modal first opens, not during editing
     if (wasOpened && worktree) {
-      setMemoText(worktree.memo || '');
-      setIsEditingMemo(false);
+      setDescriptionText(worktree.description || '');
+      setIsEditingDescription(false);
     }
   }, [worktree, isOpen]);
 
-  const handleSaveMemo = useCallback(async () => {
+  const handleSaveDescription = useCallback(async () => {
     if (!worktree) return;
     setIsSaving(true);
     try {
-      const updated = await worktreeApi.updateMemo(worktree.id, memoText);
+      const updated = await worktreeApi.updateDescription(worktree.id, descriptionText);
       onWorktreeUpdate(updated);
-      setIsEditingMemo(false);
+      setIsEditingDescription(false);
     } catch (err) {
-      console.error('Failed to save memo:', err);
+      console.error('Failed to save description:', err);
     } finally {
       setIsSaving(false);
     }
-  }, [worktree, memoText, onWorktreeUpdate]);
+  }, [worktree, descriptionText, onWorktreeUpdate]);
 
-  const handleCancelMemo = useCallback(() => {
-    setMemoText(worktree?.memo || '');
-    setIsEditingMemo(false);
+  const handleCancelDescription = useCallback(() => {
+    setDescriptionText(worktree?.description || '');
+    setIsEditingDescription(false);
   }, [worktree]);
 
   if (!worktree) return null;
@@ -370,25 +370,25 @@ const InfoModal = memo(function InfoModal({
           </div>
         )}
 
-        {/* Memo - Editable */}
+        {/* Description - Editable */}
         <div className="bg-gray-50 rounded-lg p-4">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-medium text-gray-500">Memo</h2>
-            {!isEditingMemo && (
+            <h2 className="text-sm font-medium text-gray-500">Description</h2>
+            {!isEditingDescription && (
               <button
                 type="button"
-                onClick={() => setIsEditingMemo(true)}
+                onClick={() => setIsEditingDescription(true)}
                 className="text-sm text-blue-600 hover:text-blue-800"
               >
                 Edit
               </button>
             )}
           </div>
-          {isEditingMemo ? (
+          {isEditingDescription ? (
             <div className="space-y-3">
               <textarea
-                value={memoText}
-                onChange={(e) => setMemoText(e.target.value)}
+                value={descriptionText}
+                onChange={(e) => setDescriptionText(e.target.value)}
                 placeholder="Add notes about this branch..."
                 className="w-full min-h-[150px] p-3 border border-gray-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 autoFocus
@@ -396,7 +396,7 @@ const InfoModal = memo(function InfoModal({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={handleSaveMemo}
+                  onClick={handleSaveDescription}
                   disabled={isSaving}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
                 >
@@ -404,7 +404,7 @@ const InfoModal = memo(function InfoModal({
                 </button>
                 <button
                   type="button"
-                  onClick={handleCancelMemo}
+                  onClick={handleCancelDescription}
                   disabled={isSaving}
                   className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 text-sm font-medium"
                 >
@@ -414,10 +414,10 @@ const InfoModal = memo(function InfoModal({
             </div>
           ) : (
             <div className="min-h-[50px]">
-              {worktree.memo ? (
-                <p className="text-sm text-gray-700 whitespace-pre-wrap">{worktree.memo}</p>
+              {worktree.description ? (
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{worktree.description}</p>
               ) : (
-                <p className="text-sm text-gray-400 italic">No memo added yet</p>
+                <p className="text-sm text-gray-400 italic">No description added yet</p>
               )}
             </div>
           )}
@@ -529,46 +529,46 @@ interface MobileInfoContentProps {
   onWorktreeUpdate: (updated: Worktree) => void;
 }
 
-/** Mobile Info tab content with memo editing */
+/** Mobile Info tab content with description editing */
 const MobileInfoContent = memo(function MobileInfoContent({
   worktree,
   onWorktreeUpdate,
 }: MobileInfoContentProps) {
-  const [isEditingMemo, setIsEditingMemo] = useState(false);
-  const [memoText, setMemoText] = useState('');
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [descriptionText, setDescriptionText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   // Track previous worktree ID to detect worktree changes
   const prevWorktreeIdRef = useRef(worktree?.id);
 
-  // Only sync memo text when worktree changes (not during editing due to polling)
+  // Only sync description text when worktree changes (not during editing due to polling)
   useEffect(() => {
     const worktreeChanged = worktree?.id !== prevWorktreeIdRef.current;
     prevWorktreeIdRef.current = worktree?.id;
 
-    // Only reset memo text when worktree changes, not during editing
-    if (worktreeChanged && worktree && !isEditingMemo) {
-      setMemoText(worktree.memo || '');
+    // Only reset description text when worktree changes, not during editing
+    if (worktreeChanged && worktree && !isEditingDescription) {
+      setDescriptionText(worktree.description || '');
     }
-  }, [worktree, isEditingMemo]);
+  }, [worktree, isEditingDescription]);
 
-  const handleSaveMemo = useCallback(async () => {
+  const handleSaveDescription = useCallback(async () => {
     if (!worktree) return;
     setIsSaving(true);
     try {
-      const updated = await worktreeApi.updateMemo(worktree.id, memoText);
+      const updated = await worktreeApi.updateDescription(worktree.id, descriptionText);
       onWorktreeUpdate(updated);
-      setIsEditingMemo(false);
+      setIsEditingDescription(false);
     } catch (err) {
-      console.error('Failed to save memo:', err);
+      console.error('Failed to save description:', err);
     } finally {
       setIsSaving(false);
     }
-  }, [worktree, memoText, onWorktreeUpdate]);
+  }, [worktree, descriptionText, onWorktreeUpdate]);
 
-  const handleCancelMemo = useCallback(() => {
-    setMemoText(worktree?.memo || '');
-    setIsEditingMemo(false);
+  const handleCancelDescription = useCallback(() => {
+    setDescriptionText(worktree?.description || '');
+    setIsEditingDescription(false);
   }, [worktree]);
 
   if (!worktree) {
@@ -614,25 +614,25 @@ const MobileInfoContent = memo(function MobileInfoContent({
         </div>
       )}
 
-      {/* Memo - Editable */}
+      {/* Description - Editable */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-gray-500">Memo</h2>
-          {!isEditingMemo && (
+          <h2 className="text-sm font-medium text-gray-500">Description</h2>
+          {!isEditingDescription && (
             <button
               type="button"
-              onClick={() => setIsEditingMemo(true)}
+              onClick={() => setIsEditingDescription(true)}
               className="text-sm text-blue-600 hover:text-blue-800"
             >
               Edit
             </button>
           )}
         </div>
-        {isEditingMemo ? (
+        {isEditingDescription ? (
           <div className="space-y-3">
             <textarea
-              value={memoText}
-              onChange={(e) => setMemoText(e.target.value)}
+              value={descriptionText}
+              onChange={(e) => setDescriptionText(e.target.value)}
               placeholder="Add notes about this branch..."
               className="w-full min-h-[150px] p-3 border border-gray-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               autoFocus
@@ -640,7 +640,7 @@ const MobileInfoContent = memo(function MobileInfoContent({
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={handleSaveMemo}
+                onClick={handleSaveDescription}
                 disabled={isSaving}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
               >
@@ -648,7 +648,7 @@ const MobileInfoContent = memo(function MobileInfoContent({
               </button>
               <button
                 type="button"
-                onClick={handleCancelMemo}
+                onClick={handleCancelDescription}
                 disabled={isSaving}
                 className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 text-sm font-medium"
               >
@@ -658,10 +658,10 @@ const MobileInfoContent = memo(function MobileInfoContent({
           </div>
         ) : (
           <div className="min-h-[50px]">
-            {worktree.memo ? (
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{worktree.memo}</p>
+            {worktree.description ? (
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{worktree.description}</p>
             ) : (
-              <p className="text-sm text-gray-400 italic">No memo added yet</p>
+              <p className="text-sm text-gray-400 italic">No description added yet</p>
             )}
           </div>
         )}
@@ -1122,7 +1122,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <DesktopHeader
             worktreeName={worktreeName}
             repositoryName={worktree?.repositoryName ?? 'Unknown'}
-            memo={worktree?.memo}
+            description={worktree?.description}
             status={worktreeStatus}
             onBackClick={handleBackClick}
             onInfoClick={handleInfoClick}

@@ -28,7 +28,7 @@ export interface WorktreeCardProps {
  * ```
  */
 export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: WorktreeCardProps) {
-  const { id, name, memo, lastMessagesByCli, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, sessionStatusByCli } = worktree;
+  const { id, name, description, lastMessagesByCli, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, sessionStatusByCli } = worktree;
   const [isKilling, setIsKilling] = useState(false);
   const [isFavorite, setIsFavorite] = useState(favorite || false);
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
@@ -184,11 +184,11 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
 
         <CardContent>
           <div className="space-y-3">
-            {/* Memo */}
-            {memo && (
+            {/* Description */}
+            {description && (
               <div>
-                <p className="text-xs text-gray-500 mb-1">Memo</p>
-                <p className="text-sm text-gray-700 line-clamp-2 whitespace-pre-wrap">{memo}</p>
+                <p className="text-xs text-gray-500 mb-1">Description</p>
+                <p className="text-sm text-gray-700 line-clamp-2 whitespace-pre-wrap">{description}</p>
               </div>
             )}
 

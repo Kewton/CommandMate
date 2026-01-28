@@ -25,7 +25,7 @@ export interface WorktreeDetailProps {
   worktreeId: string;
 }
 
-type TabView = 'claude' | 'logs' | 'info' | 'memo';
+type TabView = 'claude' | 'logs' | 'info' | 'description';
 
 // Check if tab is a CLI tab (only Claude after Issue #33)
 const isCliTab = (tab: TabView): tab is 'claude' => tab === 'claude';
@@ -45,8 +45,8 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabView>('claude');
   const [waitingForResponse, setWaitingForResponse] = useState(false);
-  const [isEditingMemo, setIsEditingMemo] = useState(false);
-  const [memoText, setMemoText] = useState('');
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [descriptionText, setDescriptionText] = useState('');
   const [isEditingLink, setIsEditingLink] = useState(false);
   const [linkText, setLinkText] = useState('');
   const [showNewMessageNotification, setShowNewMessageNotification] = useState(false);
@@ -154,7 +154,7 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
    */
   useEffect(() => {
     if (worktree) {
-      setMemoText(worktree.memo || '');
+      setDescriptionText(worktree.description || '');
       setLinkText(worktree.link || '');
     }
   }, [worktree]);
@@ -237,23 +237,23 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
   /**
    * Save memo
    */
-  const handleSaveMemo = async () => {
+  const handleSaveDescription = async () => {
     try {
       setError(null);
-      const updated = await worktreeApi.updateMemo(worktreeId, memoText);
+      const updated = await worktreeApi.updateDescription(worktreeId, descriptionText);
       setWorktree(updated);
-      setIsEditingMemo(false);
+      setIsEditingDescription(false);
     } catch (err) {
       setError(handleApiError(err));
     }
   };
 
   /**
-   * Cancel memo edit
+   * Cancel description edit
    */
-  const handleCancelMemo = () => {
-    setMemoText(worktree?.memo || '');
-    setIsEditingMemo(false);
+  const handleCancelDescription = () => {
+    setDescriptionText(worktree?.description || '');
+    setIsEditingDescription(false);
   };
 
   /**
@@ -678,14 +678,14 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
             Information
           </button>
           <button
-            onClick={() => setActiveTab('memo')}
+            onClick={() => setActiveTab('description')}
             className={`pb-3 px-4 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'memo'
+              activeTab === 'description'
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
           >
-            Memo
+            Description
           </button>
             </nav>
           </div>
@@ -758,45 +758,45 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
           </Card>
         )}
 
-        {activeTab === 'memo' && (
+        {activeTab === 'description' && (
           <div className="space-y-6">
-            {/* Memo Section */}
+            {/* Description Section */}
             <Card padding="lg">
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>Memo</CardTitle>
-                  {!isEditingMemo && (
-                    <Button variant="ghost" size="sm" onClick={() => setIsEditingMemo(true)}>
+                  <CardTitle>Description</CardTitle>
+                  {!isEditingDescription && (
+                    <Button variant="ghost" size="sm" onClick={() => setIsEditingDescription(true)}>
                       Edit
                     </Button>
                   )}
                 </div>
               </CardHeader>
               <CardContent>
-                {isEditingMemo ? (
+                {isEditingDescription ? (
                   <div className="space-y-3">
                     <textarea
-                      value={memoText}
-                      onChange={(e) => setMemoText(e.target.value)}
+                      value={descriptionText}
+                      onChange={(e) => setDescriptionText(e.target.value)}
                       placeholder="Add notes about this branch..."
                       className="input w-full min-h-[300px] resize-y"
                       autoFocus
                     />
                     <div className="flex gap-2">
-                      <Button variant="primary" size="sm" onClick={handleSaveMemo}>
+                      <Button variant="primary" size="sm" onClick={handleSaveDescription}>
                         Save
                       </Button>
-                      <Button variant="secondary" size="sm" onClick={handleCancelMemo}>
+                      <Button variant="secondary" size="sm" onClick={handleCancelDescription}>
                         Cancel
                       </Button>
                     </div>
                   </div>
                 ) : (
                   <div className="min-h-[200px] max-w-none">
-                    {worktree?.memo ? (
-                      <p className="text-base text-gray-700 whitespace-pre-wrap leading-relaxed">{worktree.memo}</p>
+                    {worktree?.description ? (
+                      <p className="text-base text-gray-700 whitespace-pre-wrap leading-relaxed">{worktree.description}</p>
                     ) : (
-                      <p className="text-base text-gray-400 italic">No memo added yet</p>
+                      <p className="text-base text-gray-400 italic">No description added yet</p>
                     )}
                   </div>
                 )}
