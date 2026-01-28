@@ -36,10 +36,11 @@ export function AutoYesConfirmDialog({
       <div className="space-y-4">
         <div className="text-sm text-gray-700">
           <p className="font-medium mb-2">機能説明</p>
-          <p>
-            Auto Yesモードを有効にすると、CLIツールからの確認プロンプトに対して
-            自動的に「Yes」と応答します。
-          </p>
+          <ul className="list-disc list-inside space-y-1">
+            <li>yes/no確認 → 自動で「yes」を送信</li>
+            <li>複数選択肢 → デフォルトまたは先頭の選択肢を自動選択</li>
+          </ul>
+          <p className="mt-1">1時間後に自動でOFFになります。</p>
         </div>
 
         <div className="text-sm text-gray-700">

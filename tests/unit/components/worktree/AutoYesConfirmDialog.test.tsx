@@ -37,7 +37,7 @@ describe('AutoYesConfirmDialog', () => {
     it('should display warning text about the feature', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
       expect(screen.getByText('機能説明')).toBeDefined();
-      expect(screen.getByText(/自動的に「Yes」と応答します/)).toBeDefined();
+      expect(screen.getByText(/自動で「yes」を送信/)).toBeDefined();
     });
 
     it('should display risk explanation', () => {
