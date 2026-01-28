@@ -102,4 +102,4 @@ A: 現時点では個人利用を想定しています。複数人での同時�
 
 ## License
 
-[MIT License](./LICENSE) - Copyright (c) 2025 Kota Maeno
+[MIT License](./LICENSE) - Copyright (c) 2025 Kewton
