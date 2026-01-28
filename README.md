@@ -70,8 +70,8 @@ npm start
 **Q: どこまでローカルで動く？**
 A: アプリ本体・DB・セッションはすべてローカルで完結します。外部通信は Claude CLI 自体の API 呼び出しのみです。
 
-**Q: Cloudflare 依存は何？**
-A: 外出先からアクセスしたい場合に Cloudflare Tunnel を利用できます。必須ではありません。
+**Q: 外出先からスマホでアクセスするには？**
+A: Cloudflare Tunnel などのトンネリングサービスを活用することで利用できます。室内であればローカル PC と同じ Wi-Fi に接続するだけでスマホから利用可能です。
 
 **Q: Claude Code の権限はどうなる？**
 A: Claude Code 自体の権限設定がそのまま適用されます。本ツールが権限を拡張することはありません。詳しくは [Trust & Safety](./docs/TRUST_AND_SAFETY.md) を参照してください。
