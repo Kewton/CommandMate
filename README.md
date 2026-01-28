@@ -33,9 +33,9 @@ Claude Code での開発経験があり、本業の傍らで個人開発を続�
 
 ### ワークツリー詳細画面（チャット・ターミナル）
 
-| PC表示 | スマホ表示 |
-|--------|-----------|
-| ![PC - ワークツリー詳細](./docs/images/screenshot-worktree-desktop.png) | ![スマホ - ワークツリー詳細](./docs/images/screenshot-worktree-mobile.png) |
+| PC表示 | スマホ（History） | スマホ（Terminal） |
+|--------|-------------------|-------------------|
+| ![PC - ワークツリー詳細](./docs/images/screenshot-worktree-desktop.png) | ![スマホ - History](./docs/images/screenshot-worktree-mobile.png) | ![スマホ - Terminal](./docs/images/screenshot-worktree-mobile-terminal.png) |
 
 ### トップ画面（スマホ）
 
