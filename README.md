@@ -7,7 +7,7 @@
 
 ## これは何か
 
-Git worktree ごとに Claude Code / Codex / Gemini CLI セッションを管理し、ブラウザから指示を送れる開発コンパニオンツールです。
+Git worktree ごとに Claude Code セッションを管理し、ブラウザから指示を送れる開発コンパニオンツールです。
 
 通勤中・育児中・昼休み――メールに返信する感覚で「次の指示」を出し、個人開発を前に進められます。
 
@@ -28,7 +28,7 @@ Claude Code での開発経験があり、本業の傍らで個人開発を続�
 - **Markdownログビューア** — Claude の詳細出力をMarkdownで閲覧
 - **ファイルビュー** — ワークツリー内のファイルをブラウザから確認
 - **Auto Yes モード** — 確認ダイアログ付きで自動承認を制御
-- **マルチCLIツール対応** — Claude Code / Codex CLI / Gemini CLI を切替可能
+- **Claude Code 特化** — Claude Code セッションの管理に最適化
 - **レスポンシブUI** — デスクトップは2カラム、モバイルはタブベースで最適表示
 
 ![スマホ表示](./docs/images/screenshot-mobile.png)
@@ -71,8 +71,8 @@ A: Claude Code 自体の権限設定がそのまま適用されます。本ツ�
 **Q: Windows で使える？**
 A: 現時点では非対応です。tmux に依存しているため macOS / Linux が必要です。WSL2 上での動作は未検証です。
 
-**Q: Codex CLI / Gemini CLI はどこまで動く？**
-A: 基本的なセッション管理と指示送信は対応しています。ただし Stop フック等の一部機能は CLI ツールの対応状況に依存します。
+**Q: Claude Code 以外の CLI ツールに対応している？**
+A: 現時点では Claude Code のみ対応しています。
 
 **Q: 複数人で使える？**
 A: 現時点では個人利用を想定しています。複数人での同時利用は未対応です。

@@ -50,11 +50,9 @@
 
 ### 1.3 実装済み機能
 
-- **複数 CLI ツールのサポート** (Issue #4で実装完了)
-  - Claude Code (デフォルト)
-  - Codex CLI
-  - Gemini CLI
-  - ワークツリーごとに異なるCLIツールを選択可能
+- **CLI ツールのサポート** (Issue #4で実装完了)
+  - Claude Code 対応
+  - Strategy パターンによる拡張可能な設計
 
 ---
 
@@ -95,7 +93,7 @@ graph TD
     end
 
     subgraph Next["Next.js / Node.js Application"]
-        App[Next.js UI (App Router)]
+        App["Next.js UI (App Router)"]
         API_Send[/POST /api/worktrees/:id/send/]
         API_WT[/GET /api/worktrees/ .../]
         API_Hook[/POST /api/hooks/claude-done/]
@@ -112,7 +110,7 @@ graph TD
     end
 
     subgraph FS["Local Filesystem"]
-        Logs[.claude_logs/ (Markdownログ)]
+        Logs[".claude_logs/ (Markdownログ)"]
     end
 
     UI_A --> App
@@ -336,8 +334,6 @@ tmux セッション / Claude プロセスが落ちた場合
 - セッション名: `mcbd-{cliToolId}-{worktreeId}`
 - 例:
   - Claude: `mcbd-claude-feature-foo`
-  - Codex: `mcbd-codex-main`
-  - Gemini: `mcbd-gemini-hotfix-123`
 - 1 worktree に対して 1 セッションを維持する。
 - ※ 旧命名規則 `cw_{worktreeId}` からの移行: Issue #4で実装
 
@@ -363,8 +359,6 @@ tmux セッション / Claude プロセスが落ちた場合
 
 **実装クラス:**
 - `ClaudeTool` - Claude Code CLI
-- `CodexTool` - Codex CLI
-- `GeminiTool` - Gemini CLI
 
 **管理:**
 - `CLIToolManager` シングルトンクラスで各ツールインスタンスを管理
@@ -492,11 +486,11 @@ feature/foo
 ### 10.2 マルチ LLM / マルチセッション ✅ 実装済み (Issue #4)
 
 **実装内容:**
-- 複数のCLIツール（Claude Code, Codex CLI, Gemini CLI）に対応
+- Claude Code に対応
 - ワークツリーごとに `cliToolId` フィールドで使用するCLIツールを管理
 - Strategy パターンによる抽象化:
   - `BaseCLITool` 抽象クラス
-  - 各ツール固有の実装（`ClaudeTool`, `CodexTool`, `GeminiTool`）
+  - `ClaudeTool` 実装クラス
   - `CLIToolManager` シングルトンでツールインスタンスを管理
 - データベーススキーマ: `worktrees.cli_tool_id` カラム（デフォルト: 'claude'）
 - 対応API:

@@ -23,7 +23,7 @@ labels: bug
 - OS:
 - Node.js:
 - ブラウザ:
-- CLI ツール: Claude Code / Codex / Gemini
+- CLI ツール: Claude Code
 
 ## スクリーンショット（任意）
 
