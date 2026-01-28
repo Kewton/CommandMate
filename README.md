@@ -31,6 +31,14 @@ Claude Code での開発経験があり、本業の傍らで個人開発を続�
 - **Claude Code 特化** — Claude Code セッションの管理に最適化
 - **レスポンシブUI** — デスクトップは2カラム、モバイルはタブベースで最適表示
 
+### ワークツリー詳細画面（チャット・ターミナル）
+
+| PC表示 | スマホ表示 |
+|--------|-----------|
+| ![PC - ワークツリー詳細](./docs/images/screenshot-worktree-desktop.png) | ![スマホ - ワークツリー詳細](./docs/images/screenshot-worktree-mobile.png) |
+
+### トップ画面（スマホ）
+
 ![スマホ表示](./docs/images/screenshot-mobile.png)
 
 ## Quick Start
