@@ -117,6 +117,7 @@ src/
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
+| `src/lib/session-cleanup.ts` | セッション/ポーラー停止の一元管理（Facade パターン） |
 | `src/types/sidebar.ts` | サイドバーステータス判定 |
 
 ---
@@ -218,6 +219,14 @@ npm run db:reset      # DBリセット
 ---
 
 ## 最近の実装機能
+
+### Issue #69: リポジトリ削除機能
+- **削除API**: `DELETE /api/repositories` エンドポイント
+- **セッションクリーンアップ**: Facadeパターンでポーラー停止を一元管理 (`session-cleanup.ts`)
+- **段階的エラーハンドリング**: セッションkill失敗時もDB削除は続行
+- **確認ダイアログ**: `delete`入力による誤削除防止
+- **環境変数警告**: `WORKTREE_REPOS`設定リポジトリに警告表示
+- 詳細: [設計書](./dev-reports/design/issue-69-repository-delete-design-policy.md)
 
 ### Issue #31: サイドバーのUX改善
 - **リアルタイムステータス検出**: ターミナル出力を直接解析

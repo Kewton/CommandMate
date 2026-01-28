@@ -1,0 +1,69 @@
+{
+  "status": "success",
+  "coverage": 91.42,
+  "unit_tests": {
+    "total": 1315,
+    "passed": 1315,
+    "failed": 0
+  },
+  "integration_tests": {
+    "total": 9,
+    "passed": 9,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/db.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/ws-server.ts",
+    "src/app/api/repositories/route.ts",
+    "src/lib/api-client.ts",
+    "src/components/worktree/WorktreeList.tsx",
+    "tests/unit/db-repository-delete.test.ts",
+    "tests/unit/session-cleanup.test.ts",
+    "tests/unit/ws-server-cleanup.test.ts",
+    "tests/integration/api-repository-delete.test.ts"
+  ],
+  "commits": [
+    "79a2407: feat(repository): add repository delete functionality (#69)"
+  ],
+  "implementation_summary": {
+    "phase1_infrastructure": {
+      "db_functions": [
+        "getWorktreeIdsByRepository() - Retrieves all worktree IDs for a repository path",
+        "deleteRepositoryWorktrees() - Deletes all worktrees with CASCADE"
+      ],
+      "session_cleanup": "Facade pattern implementation unifying response-poller and claude-poller cleanup",
+      "ws_server": "cleanupRooms() function for WebSocket room cleanup"
+    },
+    "phase2_api": {
+      "endpoint": "DELETE /api/repositories",
+      "features": [
+        "Request body validation (repositoryPath required)",
+        "404 for non-existent repositories",
+        "Staged error handling (session cleanup errors become warnings)",
+        "WebSocket broadcast for repository_deleted event",
+        "Detailed logging per design document"
+      ],
+      "api_client": "repositoryApi.delete() method added"
+    },
+    "phase3_ui": {
+      "delete_button": "Hover-visible delete button on repository filter chips",
+      "confirmation_dialog": "prompt() requiring 'delete' text input",
+      "env_warning": "Warning indicator for WORKTREE_REPOS-configured repositories",
+      "loading_state": "Visual feedback during deletion"
+    }
+  },
+  "design_compliance": {
+    "facade_pattern": true,
+    "staged_error_handling": true,
+    "cascade_delete": true,
+    "delete_confirmation_input": true,
+    "env_var_warning": true,
+    "logging": true
+  },
+  "message": "TDD implementation completed. Issue #69 repository delete functionality implemented with all tests passing. Coverage for session-cleanup.ts: 91.42%. All static analysis checks passed."
+}

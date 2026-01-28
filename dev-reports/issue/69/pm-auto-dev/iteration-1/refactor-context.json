@@ -1,0 +1,29 @@
+{
+  "issue_number": 69,
+  "refactor_targets": [
+    "src/lib/session-cleanup.ts",
+    "src/app/api/repositories/route.ts",
+    "src/components/worktree/WorktreeList.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 91.42,
+    "unit_tests_passed": 1315,
+    "integration_tests_passed": 9,
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "コードの重複がないか確認",
+    "エラーハンドリングの一貫性確認",
+    "ログメッセージの統一性確認",
+    "型定義の適切性確認",
+    "コメント・ドキュメントの充実"
+  ],
+  "design_patterns_to_verify": [
+    "Facadeパターン（session-cleanup.ts）",
+    "段階的エラーハンドリング（API route）",
+    "DI（killSessionFn引数）"
+  ],
+  "tdd_result_file": "dev-reports/issue/69/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_file": "dev-reports/issue/69/pm-auto-dev/iteration-1/acceptance-result.json"
+}

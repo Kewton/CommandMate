@@ -1,0 +1,162 @@
+{
+  "status": "passed",
+  "scenarios": [
+    {
+      "id": "AC-01",
+      "name": "API正常削除",
+      "status": "passed",
+      "evidence": "Integration test 'should delete all worktrees for the repository' passed. Test verifies DELETE /api/repositories returns 200 with correct deletedWorktreeCount and deletedWorktreeIds. Implementation in src/app/api/repositories/route.ts lines 55-160."
+    },
+    {
+      "id": "AC-02",
+      "name": "存在しないリポジトリ削除",
+      "status": "passed",
+      "evidence": "Integration test 'should return 404 if repository has no worktrees' passed. Test verifies non-existent repositoryPath returns 404 with error 'Repository not found'. Implementation in route.ts lines 73-78."
+    },
+    {
+      "id": "AC-03",
+      "name": "バリデーションエラー",
+      "status": "passed",
+      "evidence": "Integration test 'should return 400 if repositoryPath is missing' passed. Test verifies empty body returns 400 with error 'repositoryPath is required'. Implementation in route.ts lines 61-66."
+    },
+    {
+      "id": "AC-04",
+      "name": "段階的エラーハンドリング",
+      "status": "passed",
+      "evidence": "Integration test 'should include warnings in response when cleanup has errors' passed. Test verifies session cleanup errors are returned as warnings while DB deletion still succeeds. Implementation uses Facade pattern in src/lib/session-cleanup.ts with cleanupMultipleWorktrees() function."
+    },
+    {
+      "id": "AC-05",
+      "name": "CASCADE削除確認",
+      "status": "passed",
+      "evidence": "Integration test 'should cascade delete chat messages' passed. Unit tests confirm CASCADE delete for chat_messages, session_states, and worktree_memos tables. Implementation in src/lib/db.ts deleteRepositoryWorktrees() function, using SQLite foreign key constraints."
+    },
+    {
+      "id": "AC-06",
+      "name": "UI削除ボタン表示",
+      "status": "passed",
+      "evidence": "Code review verified. WorktreeList.tsx lines 308-336 implement hover-visible delete button ('x') with CSS class 'opacity-0 group-hover:opacity-100'. Button is positioned inside repository filter chip with proper event propagation handling."
+    },
+    {
+      "id": "AC-07",
+      "name": "確認ダイアログ",
+      "status": "passed",
+      "evidence": "Code review verified. WorktreeList.tsx handleDeleteRepository() function (lines 216-262) uses prompt() dialog requiring user to type 'delete' to confirm. Input validation at line 242: if (input !== 'delete') return."
+    },
+    {
+      "id": "AC-08",
+      "name": "環境変数警告表示",
+      "status": "passed",
+      "evidence": "Code review verified. WorktreeList.tsx isInEnvVar() function (lines 19-25) checks NEXT_PUBLIC_WORKTREE_REPOS environment variable. Warning indicator '!' with amber color displayed at lines 317-320 for configured repositories. Confirmation dialog includes additional warning message for env-configured repos (lines 229-234)."
+    }
+  ],
+  "test_cases": [
+    {
+      "scenario": "should return 400 if repositoryPath is missing",
+      "result": "passed",
+      "evidence": "Integration test passed in tests/integration/api-repository-delete.test.ts"
+    },
+    {
+      "scenario": "should return 404 if repository has no worktrees",
+      "result": "passed",
+      "evidence": "Integration test passed in tests/integration/api-repository-delete.test.ts"
+    },
+    {
+      "scenario": "should delete all worktrees for the repository",
+      "result": "passed",
+      "evidence": "Integration test passed in tests/integration/api-repository-delete.test.ts"
+    },
+    {
+      "scenario": "should not delete worktrees from other repositories",
+      "result": "passed",
+      "evidence": "Integration test passed in tests/integration/api-repository-delete.test.ts"
+    },
+    {
+      "scenario": "should call session cleanup for all worktrees",
+      "result": "passed",
+      "evidence": "Integration test passed in tests/integration/api-repository-delete.test.ts"
+    },
+    {
+      "scenario": "should call cleanupRooms with worktree IDs",
+      "result": "passed",
+      "evidence": "Integration test passed in tests/integration/api-repository-delete.test.ts"
+    },
+    {
+      "scenario": "should broadcast repository_deleted message",
+      "result": "passed",
+      "evidence": "Integration test passed in tests/integration/api-repository-delete.test.ts"
+    },
+    {
+      "scenario": "should include warnings in response when cleanup has errors",
+      "result": "passed",
+      "evidence": "Integration test passed in tests/integration/api-repository-delete.test.ts"
+    },
+    {
+      "scenario": "should cascade delete chat messages",
+      "result": "passed",
+      "evidence": "Integration test passed in tests/integration/api-repository-delete.test.ts"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "リポジトリ削除用APIエンドポイント（DELETE /api/repositories）が動作すること",
+      "verified": true
+    },
+    {
+      "criterion": "削除前に全worktreeのtmuxセッションがkillされること",
+      "verified": true
+    },
+    {
+      "criterion": "ポーリング処理（response-poller + claude-poller）が停止すること",
+      "verified": true
+    },
+    {
+      "criterion": "WebSocket購読状態がクリーンアップされること",
+      "verified": true
+    },
+    {
+      "criterion": "段階的エラーハンドリングが機能すること（セッションkill失敗時もDB削除は成功）",
+      "verified": true
+    },
+    {
+      "criterion": "UI上にリポジトリ削除ボタンが表示されること",
+      "verified": true
+    },
+    {
+      "criterion": "確認ダイアログで「delete」入力確認が表示されること",
+      "verified": true
+    },
+    {
+      "criterion": "関連するworktreeデータがCASCADE削除されること",
+      "verified": true
+    },
+    {
+      "criterion": "環境変数設定リポジトリに警告アイコンが表示されること",
+      "verified": true
+    }
+  ],
+  "summary": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0
+  },
+  "evidence_files": [
+    "tests/integration/api-repository-delete.test.ts",
+    "tests/unit/db-repository-delete.test.ts",
+    "tests/unit/session-cleanup.test.ts",
+    "tests/unit/ws-server-cleanup.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "implementation_files_verified": [
+    "src/app/api/repositories/route.ts",
+    "src/lib/db.ts (getWorktreeIdsByRepository, deleteRepositoryWorktrees)",
+    "src/lib/session-cleanup.ts (Facade pattern)",
+    "src/lib/ws-server.ts (cleanupRooms)",
+    "src/lib/api-client.ts (repositoryApi.delete)",
+    "src/components/worktree/WorktreeList.tsx (UI components)"
+  ],
+  "message": "All acceptance criteria verified. Issue #69 repository delete functionality is fully implemented and tested. Integration tests pass (9/9), unit tests pass (1315/1315), ESLint and TypeScript checks pass."
+}

@@ -1,0 +1,97 @@
+{
+  "issue_number": 69,
+  "feature_summary": "登録済みリポジトリの削除機能",
+  "acceptance_criteria": [
+    "リポジトリ削除用APIエンドポイント（DELETE /api/repositories）が動作すること",
+    "削除前に全worktreeのtmuxセッションがkillされること",
+    "ポーリング処理（response-poller + claude-poller）が停止すること",
+    "WebSocket購読状態がクリーンアップされること",
+    "段階的エラーハンドリングが機能すること（セッションkill失敗時もDB削除は成功）",
+    "UI上にリポジトリ削除ボタンが表示されること",
+    "確認ダイアログで「delete」入力確認が表示されること",
+    "関連するworktreeデータがCASCADE削除されること",
+    "環境変数設定リポジトリに警告アイコンが表示されること"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-01",
+      "name": "API正常削除",
+      "description": "DELETE /api/repositories が正常に動作し、リポジトリが削除される",
+      "steps": [
+        "repositoryPathを含むJSONボディでDELETE /api/repositoriesを呼び出す",
+        "200レスポンスが返される",
+        "deletedWorktreeCountが正しい値を返す"
+      ]
+    },
+    {
+      "id": "AC-02",
+      "name": "存在しないリポジトリ削除",
+      "description": "存在しないリポジトリパスで404エラーが返される",
+      "steps": [
+        "存在しないrepositoryPathでDELETE /api/repositoriesを呼び出す",
+        "404レスポンスが返される"
+      ]
+    },
+    {
+      "id": "AC-03",
+      "name": "バリデーションエラー",
+      "description": "repositoryPath未指定で400エラーが返される",
+      "steps": [
+        "空のボディまたはrepositoryPath無しでDELETE /api/repositoriesを呼び出す",
+        "400レスポンスが返される"
+      ]
+    },
+    {
+      "id": "AC-04",
+      "name": "段階的エラーハンドリング",
+      "description": "セッションkill失敗時もDB削除は成功し、warningsが返される",
+      "steps": [
+        "セッションが存在しない状態でリポジトリ削除を実行",
+        "200レスポンスが返される",
+        "warningsにエラー情報が含まれる（または空）"
+      ]
+    },
+    {
+      "id": "AC-05",
+      "name": "CASCADE削除確認",
+      "description": "worktree削除時に関連データ（chat_messages, session_states, worktree_memos）が自動削除される",
+      "steps": [
+        "worktreeに関連データがある状態でリポジトリ削除を実行",
+        "worktreeレコードが削除される",
+        "関連テーブルのレコードも削除される"
+      ]
+    },
+    {
+      "id": "AC-06",
+      "name": "UI削除ボタン表示",
+      "description": "リポジトリフィルターにホバー時削除ボタンが表示される",
+      "steps": [
+        "WorktreeListコンポーネントを表示",
+        "リポジトリフィルターボタンにホバー",
+        "削除ボタン（×）が表示される"
+      ]
+    },
+    {
+      "id": "AC-07",
+      "name": "確認ダイアログ",
+      "description": "削除前に「delete」入力確認ダイアログが表示される",
+      "steps": [
+        "削除ボタンをクリック",
+        "確認ダイアログが表示される",
+        "「delete」以外の入力では削除が実行されない",
+        "「delete」入力で削除が実行される"
+      ]
+    },
+    {
+      "id": "AC-08",
+      "name": "環境変数警告表示",
+      "description": "WORKTREE_REPOS環境変数に設定されたリポジトリに警告アイコンが表示される",
+      "steps": [
+        "WORKTREE_REPOS環境変数にリポジトリパスを設定",
+        "WorktreeListコンポーネントを表示",
+        "該当リポジトリに警告アイコン（⚠️）が表示される"
+      ]
+    }
+  ],
+  "tdd_result_file": "dev-reports/issue/69/pm-auto-dev/iteration-1/tdd-result.json"
+}

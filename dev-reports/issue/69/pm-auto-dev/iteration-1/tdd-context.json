@@ -1,0 +1,85 @@
+{
+  "issue_number": 69,
+  "title": "feat: 登録済みリポジトリの削除機能を追加",
+  "acceptance_criteria": [
+    "リポジトリ削除用APIエンドポイント（DELETE /api/repositories）が動作すること",
+    "削除前に全worktreeのtmuxセッションがkillされること",
+    "ポーリング処理（response-poller + claude-poller）が停止すること",
+    "WebSocket購読状態がクリーンアップされること",
+    "段階的エラーハンドリングが機能すること（セッションkill失敗時もDB削除は成功）",
+    "UI上にリポジトリ削除ボタンが表示されること",
+    "確認ダイアログで「delete」入力確認が表示されること",
+    "関連するworktreeデータがCASCADE削除されること",
+    "環境変数設定リポジトリに警告アイコンが表示されること"
+  ],
+  "implementation_tasks": [
+    {
+      "task": "Task 1.1: DB関数追加",
+      "file": "src/lib/db.ts",
+      "details": [
+        "getWorktreeIdsByRepository() 関数追加",
+        "deleteRepositoryWorktrees() 関数追加"
+      ]
+    },
+    {
+      "task": "Task 1.2: セッションクリーンアップユーティリティ新規作成",
+      "file": "src/lib/session-cleanup.ts",
+      "details": [
+        "WorktreeCleanupResult インターフェース定義",
+        "cleanupWorktreeSessions() 関数実装",
+        "cleanupMultipleWorktrees() 関数実装",
+        "ログ出力実装"
+      ]
+    },
+    {
+      "task": "Task 1.3: WebSocketサーバーにcleanupRooms追加",
+      "file": "src/lib/ws-server.ts",
+      "details": [
+        "cleanupRooms(worktreeIds: string[]) 関数追加"
+      ]
+    },
+    {
+      "task": "Task 2.1: リポジトリ削除APIエンドポイント",
+      "file": "src/app/api/repositories/route.ts",
+      "details": [
+        "DELETEハンドラ実装",
+        "リクエストバリデーション",
+        "段階的エラーハンドリング",
+        "WebSocket削除通知",
+        "ログ出力"
+      ]
+    },
+    {
+      "task": "Task 2.2: APIクライアント修正",
+      "file": "src/lib/api-client.ts",
+      "details": [
+        "repositoryApi.delete() メソッド追加",
+        "DeleteRepositoryResponse 型定義追加"
+      ]
+    },
+    {
+      "task": "Task 3.1: WorktreeList削除UI実装",
+      "file": "src/components/worktree/WorktreeList.tsx",
+      "details": [
+        "削除アイコン追加（ホバー時表示）",
+        "環境変数チェック関数実装",
+        "環境変数警告アイコン表示",
+        "確認ダイアログ実装（delete入力確認）",
+        "削除API呼び出し",
+        "削除後のUI更新"
+      ]
+    }
+  ],
+  "target_coverage": 80,
+  "design_documents": [
+    "dev-reports/design/issue-69-repository-delete-design-policy.md",
+    "dev-reports/review/2026-01-28-issue-69-architecture-review.md",
+    "dev-reports/issue/69/work-plan.md"
+  ],
+  "reference_files": [
+    "src/app/api/worktrees/[id]/kill-session/route.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/claude-poller.ts",
+    "src/lib/cli-tools/types.ts"
+  ]
+}
