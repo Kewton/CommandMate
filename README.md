@@ -1,412 +1,97 @@
 # MyCodeBranchDesk
 
-**Vibe Coder のための並行開発プラットフォーム**
+> 「入力待ちを見逃さない、開発の相棒。」
+> 「軽量。その場で完結。Claude Codeを、どこからでも動かす。」
 
-> 仕事も、育児も、家事も。その隙間で、コードを紡ぐ。
+![PC表示](./docs/images/screenshot-desktop.png)
 
-📖 **[コンセプト詳細 (docs/concept.md)](./docs/concept.md)** — このツールが解決する課題と目指す世界
+## これは何か
 
----
+Git worktree ごとに Claude Code / Codex / Gemini CLI セッションを管理し、ブラウザから指示を送れる開発コンパニオンツールです。
 
-git worktree ごとに SWE CLI tool (Claude Code / Codex / Gemini) / tmux セッションを張り、スマホブラウザからチャット操作できる開発コンパニオンツール。
+通勤中・育児中・昼休み――メールに返信する感覚で「次の指示」を出し、個人開発を前に進められます。
 
-myCodeBranchDesk は、ローカルの git worktree 単位で 1:1 の tmux + SWE CLI セッションを管理し、
-スマホや PC のブラウザから「ブランチごとのチャット UI」として操作できるツールです。
-	•	feature/foo ブランチ用の Claude Code セッション
-	•	hotfix/bar ブランチ用の Codex セッション
-	•	main ブランチ用の Gemini セッション
+## 何ではないか
 
-…といった形で、worktree ごとに独立した「開発用チャットルーム」を持ち、各ワークツリーで異なるCLI toolを使い分けることができます。
+- ターミナルの代替ではありません。Claude Code を**補完**するツールです
+- CLI の全機能を再現するものではなく、「入力待ち/未確認を見逃さず、すぐ指示を出す」ことに特化しています
 
-**対応CLI tool:**
-- Claude Code (デフォルト)
-- Codex CLI
-- Gemini CLI
+## 想定ユーザー
 
-Stop フック（CLAUDE_HOOKS_STOP）を活用した イベント駆動アーキテクチャにより、
-不安定なポーリングを避けつつ、リアルタイムなチャット更新を実現します。
+Claude Code での開発経験があり、本業の傍らで個人開発を続けたい方。
 
-⸻
+## 主な機能
 
-# Table of Contents
-- Features￼
-- Architecture Overview￼
-- Requirements
-- Installation￼
-- Configuration￼
-- Usage￼
-    1. 起動￼
-    1. 画面a-worktree-一覧￼
-    1. 画面b-チャット￼
-    1. 画面c-ログビューア￼
-- How it works (簡易フロー)￼
-- Project Structure￼
-- Development￼
-- Lint & Format￼
-- Tests￼
-- Roadmap￼
-- Contributing￼
-- License￼
-- For SWE Agents (Claude Code / OpenHands etc.)￼
+- **入力待ち/未確認検知** — サイドバーでリアルタイムにステータス表示（idle/ready/running/waiting）
+- **ブラウザから指示送信** — スマホ・PCどちらからでもチャットUIで操作
+- **チャット履歴・メモ** — ブランチごとの会話履歴を保持、メモ機能付き
+- **Markdownログビューア** — Claude の詳細出力をMarkdownで閲覧
+- **ファイルビュー** — ワークツリー内のファイルをブラウザから確認
+- **Auto Yes モード** — 確認ダイアログ付きで自動承認を制御
+- **マルチCLIツール対応** — Claude Code / Codex CLI / Gemini CLI を切替可能
+- **レスポンシブUI** — デスクトップは2カラム、モバイルはタブベースで最適表示
 
-⸻
+![スマホ表示](./docs/images/screenshot-mobile.png)
 
-# Features
-🧠 git worktree aware
-- ルートディレクトリ配下の git worktree を自動検出
-- 1 worktree = 1 tmux session = 1 SWE CLI session のシンプルな対応
-- 🤖 複数の SWE CLI tool サポート (Issue #4で実装)
-- Claude Code (デフォルト)
-- Codex CLI
-- Gemini CLI
-- ワークツリーごとに異なる CLI tool を選択可能
-- Strategy パターンによる拡張可能な設計
-- 📱 スマホ最適なチャット UI
-- 画面A: Worktree 一覧（トーク一覧風）
-- 画面B: チャット画面（ブランチ専用の会話）
-- 画面C: Markdown ログビューア
-- ⚡ Stop フックによる非同期応答
-- CLI tool側の完了フックで API を叩き、tmux から出力を取得
-- WebSocket でチャット画面にプッシュ配信し、リアルタイム更新
-- 📝 Markdown ログ保存
-- 各 worktree 配下の .claude_logs/ に詳細な Markdown ログを保存
-- チャット画面には要約／短縮表示、ログ画面で詳細確認
-- 📐 レスポンシブ UI（Issue #13 で実装）
-- デスクトップ: 2カラム分割レイアウト（リサイズ可能）
-- モバイル: タブベースナビゲーション + ボトムシート
-- 詳細は [UI/UX ガイド](./docs/UI_UX_GUIDE.md) を参照
-- 🎯 リアルタイムステータス検出（Issue #31 で実装）
-- ターミナル出力を直接解析してClaude状態を検出
-- ステータス: idle（グレー）/ ready（緑）/ running（スピナー）/ waiting（黄）
-- 2秒間隔でサイドバーを自動更新
-- 詳細は [ステータスインジケーター](./docs/features/sidebar-status-indicator.md) を参照
-- 🧩 Claude Code / SWE Agent フレンドリー
-- 設計書や構成を docs/ 配下に分離
-- SWE エージェント（Claude Code / OpenHands など）にタスクを振りやすい構造
-→ 詳細は docs/swe-agents.md￼ を参照
+## Quick Start
 
-⸻
+### 前提条件
 
-# Architecture Overview
+- macOS / Linux（tmux 依存のため Windows は非対応）
+- Node.js v20+、git、tmux
+- Claude CLI（CLAUDE_HOOKS_STOP 対応）
 
-大まかな構成は次のとおりです。
-- フロントエンド: Next.js (App Router) / TypeScript
-- バックエンド: Next.js API Routes (Node.js)
-- 永続化:
-- SQLite (db.sqlite) — Worktree / ChatMessage 管理
-- ローカル FS — .claude_logs/*.md（詳細ログ）
-- セッション管理:
-- tmux — cw_{worktreeId} というセッション名で管理
-- Claude CLI — CLAUDE_HOOKS_STOP に Stop フックを設定して起動
-- 通信:
-- HTTP API — send, hook, logs, worktrees 取得
-- WebSocket — チャットメッセージのリアルタイム配信
-
-より詳しいアーキテクチャ図やシーケンスは
-docs/architecture.md￼（予定）にまとめます。
-
-⸻
-
-# Requirements
-- OS: macOS / Linux
-（tmux / Claude CLI が動作するローカル開発環境を想定）
-- Node.js: v20 以降を推奨
-- git + git worktree
-- tmux
-- Claude CLI (Claude Code)
-- CLAUDE_HOOKS_STOP が利用可能であること
-
-⸻
-
-# Installation
+### セットアップ
 
 ```bash
-# 1. Clone this repository
-git clone https://github.com/your-account/myCodeBranchDesk.git
-cd myCodeBranchDesk
-
-# 2. Install dependencies
+git clone https://github.com/Kewton/MyCodeBranchDesk.git
+cd MyCodeBranchDesk
 npm install
-# or
-pnpm install
-# or
-yarn install
-
-# 3. (optional) Build for production
-npm run build
-```
-
-⸻
-
-# Configuration
-
-myCodeBranchDesk は、環境変数または .env ファイルで設定します。
-
-環境変数
-
-代表的な環境変数は次の通りです。
-
-```bash
-MCBD_ROOT_DIR=/Users/you/work/my-monorepo
-MCBD_PORT=3000
-MCBD_BIND=127.0.0.1
-MCBD_AUTH_TOKEN=your-local-token
-```
-
-- MCBD_ROOT_DIR<br>
-git worktree を管理している ルートディレクトリ
-例: モノレポのルート
-- MCBD_PORT<br>
-Web アプリのポート（デフォルト: 3000）
-- MCBD_BIND<br>
-バインドアドレス
-- デフォルト: 127.0.0.1（ローカルホストのみ）
-- スマホから LAN 経由でアクセスしたい場合: 0.0.0.0 を指定し、MCBD_AUTH_TOKEN を必ず設定してください。
-- MCBD_AUTH_TOKEN
-MCBD_BIND=0.0.0.0 の場合に 必須。
-Web UI / API アクセス時に Authorization: Bearer <token> で検証します。
-
-.env ファイル例
-
-```bash
-MCBD_ROOT_DIR=/Users/you/work/my-monorepo
-MCBD_PORT=3000
-MCBD_BIND=0.0.0.0
-MCBD_AUTH_TOKEN=local-dev-only-token
-
-※ .env 自体はリポジトリにコミットしないでください（.gitignore 推奨）。
-```
-
-⸻
-
-# Usage
-
-1. 起動
-
-**開発モード**（PC のみ推奨）:
-
-```bash
-npm run dev
-```
-
-**本番モード**（モバイルアクセス推奨）:
-
-```bash
+cp .env.example .env   # MCBD_ROOT_DIR を編集
+npm run db:init
 npm run build
 npm start
 ```
 
-> **重要**: モバイルデバイスからアクセスする場合は、**本番モード**（`npm run build && npm start`）を推奨します。
-> 開発モードでは Next.js の HMR (Hot Module Replacement) WebSocket がモバイルブラウザの
-> 不正なクローズフレームでエラーログを出力することがあります（動作には影響しません）。
+ブラウザで http://localhost:3000 にアクセスしてください。
 
-ブラウザから以下にアクセスします。
-- PC から: http://localhost:3000
-- スマホ（同一 LAN）から: http://<your-pc-ip>:3000
-※ MCBD_BIND=0.0.0.0 が必要です。
+スマホから利用する場合は `.env` で `MCBD_BIND=0.0.0.0` と `MCBD_AUTH_TOKEN` を設定し、同一LAN内から `http://<PCのIP>:3000` にアクセスします。
 
-⸻
+## FAQ
 
-2. 画面A: Worktree 一覧
-- MCBD_ROOT_DIR 配下の git worktree を検出し、一覧表示します。
-- 各 worktree 行には:
-- ブランチ名 (main, feature/foo など)
-- 最後のメッセージ要約
-- 最終更新日時（相対表示：例「5分前」）
-- デフォルトでは 最終更新日時の新しい順 に並びます。
+**Q: どこまでローカルで動く？**
+A: アプリ本体・DB・セッションはすべてローカルで完結します。外部通信は Claude CLI 自体の API 呼び出しのみです。
 
-⸻
+**Q: Cloudflare 依存は何？**
+A: 外出先からアクセスしたい場合に Cloudflare Tunnel を利用できます。必須ではありません。
 
-3. 画面B: チャット
-- Worktree をタップすると、そのブランチ専用のチャット画面に遷移します。
-- ヘッダー:
-- Worktree 名（ブランチ名）
-- 戻るボタン（Worktree 一覧へ）
-- ログ画面へのボタン（画面Cへ）
-- フッター:
-- メッセージ入力欄
-- [送信] ボタン
+**Q: Claude Code の権限はどうなる？**
+A: Claude Code 自体の権限設定がそのまま適用されます。本ツールが権限を拡張することはありません。詳しくは [Trust & Safety](./docs/TRUST_AND_SAFETY.md) を参照してください。
 
-送信〜応答表示の流れ
-1.	入力欄に Claude への指示を入力し、[送信] を押す
-1.	UI は即座に「自分のメッセージ」＋「送信中…」バブルを表示（非同期）
-1.	Claude CLI 側で処理が完了すると Stop フックが発火し、バックエンドを経由して応答が WebSocket でプッシュされる
-1.	UI は「送信中…」バブルを実際の応答メッセージに差し替える
+**Q: Windows で使える？**
+A: 現時点では非対応です。tmux に依存しているため macOS / Linux が必要です。WSL2 上での動作は未検証です。
 
-エラー / タイムアウト
-- 送信 API がエラーの場合
-- 「送信に失敗しました」といったエラーバブルを表示します。
-- 一定時間（例: 120 秒）以内に Stop フックが来ない場合
-- 「応答の取得に時間がかかっています。ログ画面から状況を確認できます。」等の警告を表示することを想定しています（実装状況に依存）。
+**Q: Codex CLI / Gemini CLI はどこまで動く？**
+A: 基本的なセッション管理と指示送信は対応しています。ただし Stop フック等の一部機能は CLI ツールの対応状況に依存します。
 
-⸻
+**Q: 複数人で使える？**
+A: 現時点では個人利用を想定しています。複数人での同時利用は未対応です。
 
-4. 画面C: ログビューア
-- チャット画面の [ログ] ボタンから遷移します。
-- 対象 worktree の .claude_logs/ 配下にある Markdown ファイル一覧を表示します。
-- ログ名をタップすると、Markdown がレンダリングされ、Claude の詳細な出力や実行ログを確認できます。
+## ドキュメント
 
-⸻
+| ドキュメント | 説明 |
+|-------------|------|
+| [コンセプト](./docs/concept.md) | ビジョンと解決する課題 |
+| [アーキテクチャ](./docs/architecture.md) | システム設計 |
+| [デプロイガイド](./docs/DEPLOYMENT.md) | 本番環境構築手順 |
+| [UI/UXガイド](./docs/UI_UX_GUIDE.md) | UI実装の詳細 |
+| [クイックスタート](./docs/user-guide/quick-start.md) | Claude Codeコマンドの使い方 |
+| [Trust & Safety](./docs/TRUST_AND_SAFETY.md) | セキュリティと権限の考え方 |
 
-How it works (簡易フロー)
-1.	ユーザーがブラウザ UI からメッセージ送信
-→ POST /api/worktrees/:id/send
-1.	バックエンドが該当 worktree 用の tmux セッションを確認
-    - 無い場合：
-    - tmux new-session -d -s cw_{worktreeId} -c {worktreePath}
-    - CLAUDE_HOOKS_STOP を設定し、claude CLI を起動
-1.	tmux send-keys でメッセージを Claude CLI に送信
-1. Claude CLI が処理を完了し、Stop フックが発火
-→ curl により POST /api/hooks/claude-done をコール
-1. Hook API が tmux capture-pane で scrollback 全体を取得し、
-前回取得位置との差分だけを「新規出力」として切り出す
-1. 差分を Markdown ログとして保存し、ChatMessage として DB に保存
-1. WebSocket 経由でブラウザに新しい ChatMessage を配信
-1. UI が「送信中…」バブルを実際の応答メッセージに置き換える
+## Contributing
 
-⸻
+バグ報告・機能提案・ドキュメント改善を歓迎します。詳しくは [CONTRIBUTING.md](./CONTRIBUTING.md) を参照してください。
 
-# Project Structure
+## License
 
-（実装イメージ。実際の構成は今後の開発で調整される可能性があります）
-
-```bash
-myCodeBranchDesk/
-├─ src/
-│  ├─ app/                      # Next.js App Router
-│  │  ├─ page.tsx               # 画面A: Worktree一覧
-│  │  ├─ worktrees/
-│  │  │  ├─ [id]/page.tsx       # 画面B: チャット
-│  │  │  ├─ [id]/logs/page.tsx  # 画面C: ログビューア
-│  ├─ api/                      # API Routes
-│  │  ├─ worktrees/route.ts                     # GET /api/worktrees
-│  │  ├─ worktrees/[id]/send/route.ts           # POST /api/worktrees/:id/send
-│  │  ├─ worktrees/[id]/messages/route.ts       # GET /api/worktrees/:id/messages
-│  │  ├─ worktrees/[id]/logs/route.ts           # GET /api/worktrees/:id/logs
-│  │  ├─ hooks/claude-done/route.ts             # POST /api/hooks/claude-done
-│  ├─ lib/
-│  │  ├─ tmux.ts                # tmux ラッパー (new-session, send-keys, capture-pane ...)
-│  │  ├─ worktrees.ts           # git worktree のスキャンと Worktree モデル管理
-│  │  ├─ db.ts                  # SQLite 接続
-│  │  ├─ ws-server.ts           # WebSocket サーバ／room 管理
-│  ├─ types/
-│  │  ├─ models.ts              # Worktree / ChatMessage / SessionState 型定義
-├─ docs/
-│  ├─ architecture.md           # アーキテクチャ詳細（予定）
-│  ├─ swe-agents.md             # SWEエージェント向けガイド
-├─ LICENSE
-├─ README.md
-└─ package.json
-```
-
-⸻
-
-# Development
-
-Lint & Format
-
-利用するツールに応じて変わりますが、基本的なコマンド例:
-
-```bash
-npm run lint
-npm run format
-
-（ESLint / Prettier を使う想定）
-
-# Tests
-
-包括的なテストスイートを用意しています:
-
-```bash
-# ユニットテスト
-npm run test:unit
-
-# 統合テスト
-npm run test:integration
-
-# E2Eテスト（Playwright）
-npm run test:e2e
-
-# 全テスト
-npm test
-
-# カバレッジ付きテスト
-npm run test:coverage
-```
-
-**テスト構成**:
-- **ユニットテスト (988件)**: データベース、ワークツリー管理、認証、パスバリデーション、コンポーネント、ステータス検出
-- **統合テスト**: API エンドポイント、WebSocket 通信
-- **E2Eテスト**: ブラウザ自動化テスト（Chromium + Mobile Safari）
-
-**総テスト数**: 988件以上
-
-詳細なテスト戦略については [テストドキュメント](./docs/testing.md) を参照してください
-
-⸻
-
-# Roadmap
-
-今後検討している改善・拡張の方向性（例）:
-- SSE 対応（WebSocket の代替／併用）
-- マルチ LLM 対応（Claude 以外の CLI 実行）
-- ログの自動ローテーション／クリーンアップ CLI
-- チャット履歴の検索・フィルタ機能
-- mySwiftAgent / myAgentDesk との統合
-- 設定 UI（MCBD_ROOT_DIR などをブラウザ側で簡単に変更）
-
-Issue / PR での提案も歓迎です。
-
-⸻
-
-# Contributing
-
-歓迎します 🙌
-- バグ報告
-- ドキュメント改善
-- 新機能提案・実装
-
-をいただける場合は、以下の流れを推奨します。
-1.	Issue を立てて背景や課題・提案内容を簡単に共有
-1.	必要に応じてディスカッション後、PR を作成
-1.	PR テンプレがある場合はそれに従ってください
-
-コントリビュートに関する詳細なガイドラインは
-CONTRIBUTING.md（今後追加予定）を参照してください。
-
-⸻
-
-# License
-
-This project is licensed under the MIT License.
-
-Copyright (c) 2025 Kota Maeno
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the “Software”), to deal
-in the Software without restriction, including without limitation the rights  
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell      
-copies of the Software, and to permit persons to whom the Software is          
-furnished to do so, subject to the following conditions:                       
-
-The above copyright notice and this permission notice shall be included in all 
-copies or substantial portions of the Software.                                
-
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR     
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,       
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE    
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER         
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,  
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE  
-SOFTWARE.
-
-詳しくは LICENSE￼ を参照してください。
-
-# For SWE Agents (Claude Code / OpenHands etc.)
-
-Claude Code や OpenHands のような SWE エージェントから
-このリポジトリを扱うためのガイドラインは docs/swe-agents.md￼ にまとめています。
-- リポジトリ構造
-- 守るべき前提（1 worktree = 1 tmux session 等）
-- 典型的なタスク例
-- 初期プロンプトの例
+[MIT License](./LICENSE) - Copyright (c) 2025 Kota Maeno
