@@ -225,6 +225,16 @@ export const worktreeApi = {
 };
 
 /**
+ * Delete repository response type
+ */
+export interface DeleteRepositoryResponse {
+  success: boolean;
+  deletedWorktreeCount: number;
+  deletedWorktreeIds: string[];
+  warnings?: string[];
+}
+
+/**
  * Repository API client
  */
 export const repositoryApi = {
@@ -256,6 +266,20 @@ export const repositoryApi = {
   }> {
     return fetchApi('/api/repositories/sync', {
       method: 'POST',
+    });
+  },
+
+  /**
+   * Delete a repository and all its worktrees
+   * Issue #69: Repository delete feature
+   *
+   * @param repositoryPath - Path of the repository to delete
+   * @returns Delete result with count and any warnings
+   */
+  async delete(repositoryPath: string): Promise<DeleteRepositoryResponse> {
+    return fetchApi<DeleteRepositoryResponse>('/api/repositories', {
+      method: 'DELETE',
+      body: JSON.stringify({ repositoryPath }),
     });
   },
 };

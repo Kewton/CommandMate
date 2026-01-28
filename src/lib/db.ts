@@ -1138,3 +1138,47 @@ export function reorderMemos(
     });
   })();
 }
+
+// ============================================================
+// Repository Delete Operations (Issue #69)
+// ============================================================
+
+/**
+ * Get all worktree IDs for a given repository path
+ *
+ * @param db - Database instance
+ * @param repositoryPath - Path of the repository
+ * @returns Array of worktree IDs
+ */
+export function getWorktreeIdsByRepository(
+  db: Database.Database,
+  repositoryPath: string
+): string[] {
+  const stmt = db.prepare(`
+    SELECT id FROM worktrees WHERE repository_path = ?
+  `);
+
+  const rows = stmt.all(repositoryPath) as Array<{ id: string }>;
+  return rows.map(r => r.id);
+}
+
+/**
+ * Delete all worktrees for a given repository path
+ * Related data (chat_messages, session_states, worktree_memos) will be
+ * automatically deleted via CASCADE foreign key constraints.
+ *
+ * @param db - Database instance
+ * @param repositoryPath - Path of the repository to delete
+ * @returns Object containing the count of deleted worktrees
+ */
+export function deleteRepositoryWorktrees(
+  db: Database.Database,
+  repositoryPath: string
+): { deletedCount: number } {
+  const stmt = db.prepare(`
+    DELETE FROM worktrees WHERE repository_path = ?
+  `);
+
+  const result = stmt.run(repositoryPath);
+  return { deletedCount: result.changes };
+}

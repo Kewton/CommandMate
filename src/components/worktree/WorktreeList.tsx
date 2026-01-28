@@ -8,9 +8,21 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { WorktreeCard } from './WorktreeCard';
 import { Button, Badge } from '@/components/ui';
-import { worktreeApi, handleApiError, type RepositorySummary } from '@/lib/api-client';
+import { worktreeApi, repositoryApi, handleApiError, type RepositorySummary } from '@/lib/api-client';
 import { useWebSocket, type WebSocketMessage, type SessionStatusPayload, type BroadcastPayload } from '@/hooks/useWebSocket';
 import type { Worktree } from '@/types/models';
+
+/**
+ * Check if a repository path is configured in WORKTREE_REPOS environment variable
+ * This is used to show a warning icon for repositories that will be re-registered on Sync All
+ */
+function isInEnvVar(repositoryPath: string): boolean {
+  // Environment variable is exposed via next.config.js as NEXT_PUBLIC_WORKTREE_REPOS
+  const envRepos = process.env.NEXT_PUBLIC_WORKTREE_REPOS;
+  if (!envRepos) return false;
+  const envPaths = envRepos.split(',').map(p => p.trim());
+  return envPaths.includes(repositoryPath);
+}
 
 export type SortOption = 'name' | 'updated' | 'favorite';
 export type SortDirection = 'asc' | 'desc';
@@ -38,6 +50,7 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedRepository, setSelectedRepository] = useState<string | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<'todo' | 'doing' | 'done' | 'unset' | null>(null);
+  const [deletingRepository, setDeletingRepository] = useState<string | null>(null);
 
   /**
    * Fetch worktrees from API
@@ -196,6 +209,58 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
     }
   };
 
+  /**
+   * Handle repository deletion
+   * Shows a confirmation dialog requiring 'delete' input
+   */
+  const handleDeleteRepository = async (repositoryPath: string, repositoryName: string) => {
+    const worktreeCount = repositories.find(r => r.path === repositoryPath)?.worktreeCount || 0;
+    const isEnvConfigured = isInEnvVar(repositoryPath);
+
+    let confirmMessage = `Delete repository "${repositoryName}"?
+
+This will delete:
+- ${worktreeCount} worktree(s)
+- Related chat history
+- Related memos
+
+* Log files will be preserved`;
+
+    if (isEnvConfigured) {
+      confirmMessage += `
+
+WARNING: This repository is configured in environment variable (WORKTREE_REPOS).
+It will be re-registered when you run "Sync All".
+To permanently remove it, also update the environment variable.`;
+    }
+
+    confirmMessage += `
+
+Type "delete" to confirm:`;
+
+    const input = prompt(confirmMessage);
+    if (input !== 'delete') {
+      return; // Cancelled or wrong input
+    }
+
+    setDeletingRepository(repositoryPath);
+    try {
+      await repositoryApi.delete(repositoryPath);
+
+      // Clear selection if deleted repository was selected
+      if (selectedRepository === repositoryPath) {
+        setSelectedRepository(null);
+      }
+
+      // Refresh worktree list
+      await fetchWorktrees();
+    } catch (err) {
+      setError(handleApiError(err));
+    } finally {
+      setDeletingRepository(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header with Badges and Refresh */}
@@ -241,14 +306,32 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
             All ({worktrees.length})
           </Button>
           {repositories.map((repo) => (
-            <Button
-              key={repo.path}
-              variant={selectedRepository === repo.path ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setSelectedRepository(repo.path)}
-            >
-              {repo.name} ({repo.worktreeCount})
-            </Button>
+            <div key={repo.path} className="relative group inline-flex items-center">
+              <Button
+                variant={selectedRepository === repo.path ? 'primary' : 'ghost'}
+                size="sm"
+                onClick={() => setSelectedRepository(repo.path)}
+                className="pr-6"
+              >
+                {repo.name} ({repo.worktreeCount})
+                {isInEnvVar(repo.path) && (
+                  <span title="Configured in environment variable" className="ml-1 text-amber-500">
+                    !
+                  </span>
+                )}
+              </Button>
+              <button
+                className="absolute right-1 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity px-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteRepository(repo.path, repo.name);
+                }}
+                disabled={deletingRepository === repo.path}
+                title="Delete repository"
+              >
+                {deletingRepository === repo.path ? '...' : 'x'}
+              </button>
+            </div>
           ))}
         </div>
       )}

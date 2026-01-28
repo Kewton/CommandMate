@@ -310,6 +310,35 @@ export function broadcastMessage(type: string, data: { worktreeId?: string; [key
 }
 
 /**
+ * Clean up WebSocket rooms for deleted worktrees
+ * Removes rooms from the rooms map (clients will naturally disconnect or resubscribe)
+ *
+ * @param worktreeIds - Array of worktree IDs to clean up
+ *
+ * @example
+ * ```typescript
+ * cleanupRooms(['wt-1', 'wt-2', 'wt-3']);
+ * ```
+ */
+export function cleanupRooms(worktreeIds: string[]): void {
+  for (const worktreeId of worktreeIds) {
+    const room = rooms.get(worktreeId);
+    if (room) {
+      // Unsubscribe all clients from this room
+      room.forEach((ws) => {
+        const clientInfo = clients.get(ws);
+        if (clientInfo) {
+          clientInfo.worktreeIds.delete(worktreeId);
+        }
+      });
+      // Delete the room
+      rooms.delete(worktreeId);
+      console.log(`[WS] Cleaned up room for worktree: ${worktreeId}`);
+    }
+  }
+}
+
+/**
  * Close WebSocket server
  * Used for testing and graceful shutdown
  */
