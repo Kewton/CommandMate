@@ -210,7 +210,8 @@ npm run db:reset      # DBリセット
 | `/issue-split` | Issue分割計画 |
 | `/architecture-review` | アーキテクチャレビュー（サブエージェント対応） |
 | `/apply-review` | レビュー指摘事項の実装反映 |
-| `/multi-stage-review` | 4段階レビュー（通常→整合性→影響分析→セキュリティ） |
+| `/multi-stage-design-review` | 設計書の4段階レビュー（通常→整合性→影響分析→セキュリティ） |
+| `/multi-stage-issue-review` | Issueの多段階レビュー（通常→影響範囲）×2回 |
 | `/design-policy` | 設計方針策定 |
 
 ### 利用可能なエージェント
@@ -224,6 +225,8 @@ npm run db:reset      # DBリセット
 | `refactoring-agent` | リファクタリング |
 | `architecture-review-agent` | アーキテクチャレビュー |
 | `apply-review-agent` | レビュー指摘反映 |
+| `issue-review-agent` | Issue内容レビュー |
+| `apply-issue-review-agent` | Issueレビュー結果反映 |
 
 ---
 
