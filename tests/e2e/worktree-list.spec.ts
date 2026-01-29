@@ -11,10 +11,9 @@ test.describe('Worktree List Page', () => {
     await page.goto('/');
   });
 
-  // TODO: Issue #77 で /CommandMate/i に更新後、skip 解除
-  test.skip('should display page header and title', async ({ page }) => {
+  test('should display page header and title', async ({ page }) => {
     // Check for main heading
-    await expect(page.getByRole('heading', { name: /MyCodeBranchDesk/i, level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /CommandMate/i, level: 1 })).toBeVisible();
 
     // Check for subtitle
     await expect(page.getByText(/Git worktree management/i)).toBeVisible();
@@ -81,18 +80,17 @@ test.describe('Worktree List Page', () => {
     await expect(header).toBeVisible();
   });
 
-  // TODO: Issue #77 で /CommandMate/i に更新後、skip 解除
-  test.skip('should be responsive', async ({ page }) => {
+  test('should be responsive', async ({ page }) => {
     // Check mobile viewport
     await page.setViewportSize({ width: 375, height: 667 });
-    await expect(page.getByRole('heading', { name: /MyCodeBranchDesk/i, level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /CommandMate/i, level: 1 })).toBeVisible();
 
     // Check desktop viewport
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await expect(page.getByRole('heading', { name: /MyCodeBranchDesk/i, level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /CommandMate/i, level: 1 })).toBeVisible();
   });
 
-  // TODO: Footer未実装のためスキップ。Issue #77 で対応検討
+  // TODO: Footer未実装のためスキップ
   test.skip('should display footer', async ({ page }) => {
     // Scroll to bottom
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
@@ -100,6 +98,6 @@ test.describe('Worktree List Page', () => {
     // Check for footer
     const footer = page.locator('footer');
     await expect(footer).toBeVisible();
-    await expect(footer).toContainText(/MyCodeBranchDesk/i);
+    await expect(footer).toContainText(/CommandMate/i);
   });
 });

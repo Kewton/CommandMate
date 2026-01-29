@@ -133,19 +133,19 @@ export function getLogConfig(): LogConfig {
 
 export interface Env {
   /** Root directory for worktree scanning */
-  MCBD_ROOT_DIR: string;
+  CM_ROOT_DIR: string;
 
   /** Server port */
-  MCBD_PORT: number;
+  CM_PORT: number;
 
   /** Bind address (127.0.0.1 or 0.0.0.0) */
-  MCBD_BIND: string;
+  CM_BIND: string;
 
   /** Authentication token (optional for localhost) */
-  MCBD_AUTH_TOKEN?: string;
+  CM_AUTH_TOKEN?: string;
 
   /** Database file path */
-  DATABASE_PATH: string;
+  CM_DB_PATH: string;
 }
 
 /**
@@ -157,7 +157,7 @@ export interface Env {
  * @example
  * ```typescript
  * const env = getEnv();
- * console.log(`Root directory: ${env.MCBD_ROOT_DIR}`);
+ * console.log(`Root directory: ${env.CM_ROOT_DIR}`);
  * ```
  */
 export function getEnv(): Env {
@@ -189,11 +189,11 @@ export function getEnv(): Env {
   }
 
   return {
-    MCBD_ROOT_DIR: path.resolve(rootDir),
-    MCBD_PORT: port,
-    MCBD_BIND: bind,
-    MCBD_AUTH_TOKEN: authToken,
-    DATABASE_PATH: path.resolve(databasePath),
+    CM_ROOT_DIR: path.resolve(rootDir),
+    CM_PORT: port,
+    CM_BIND: bind,
+    CM_AUTH_TOKEN: authToken,
+    CM_DB_PATH: path.resolve(databasePath),
   };
 }
 
@@ -223,5 +223,5 @@ export function validateEnv(): { valid: boolean; errors: string[] } {
  */
 export function isAuthRequired(): boolean {
   const env = getEnv();
-  return env.MCBD_BIND === '0.0.0.0';
+  return env.CM_BIND === '0.0.0.0';
 }

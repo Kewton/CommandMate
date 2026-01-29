@@ -1,13 +1,13 @@
 #!/bin/bash
 #
-# MyCodeBranchDesk - Production Setup Script
+# CommandMate - Production Setup Script
 # This script helps set up the production environment
 #
 
 set -e
 
 echo "=================================="
-echo "MyCodeBranchDesk Production Setup"
+echo "CommandMate Production Setup"
 echo "=================================="
 echo ""
 
@@ -29,9 +29,9 @@ if [ ! -f .env ]; then
     echo "✓ .env file created"
     echo ""
     echo "IMPORTANT: Please edit .env and configure the following:"
-    echo "  - MCBD_ROOT_DIR: Path to your worktrees directory"
-    echo "  - MCBD_AUTH_TOKEN: Generate with: openssl rand -hex 32"
-    echo "  - DATABASE_PATH: Path to your production database"
+    echo "  - CM_ROOT_DIR: Path to your worktrees directory"
+    echo "  - CM_AUTH_TOKEN: Generate with: openssl rand -hex 32"
+    echo "  - CM_DB_PATH: Path to your production database"
     echo ""
     read -p "Press Enter to continue after editing .env..."
   else

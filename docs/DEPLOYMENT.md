@@ -47,15 +47,17 @@ cp .env.production.example .env
 `.env` ファイルを編集して、以下の値を設定します：
 
 ```env
-MCBD_ROOT_DIR=/path/to/your/worktrees
-MCBD_PORT=3000
-MCBD_BIND=0.0.0.0
-MCBD_AUTH_TOKEN=$(openssl rand -hex 32)
-DATABASE_PATH=/path/to/production/data/db.sqlite
+CM_ROOT_DIR=/path/to/your/worktrees
+CM_PORT=3000
+CM_BIND=0.0.0.0
+CM_AUTH_TOKEN=$(openssl rand -hex 32)
+CM_DB_PATH=/path/to/production/data/cm.db
 NODE_ENV=production
 ```
 
-**重要**: `MCBD_AUTH_TOKEN` は必ず安全なランダム値を設定してください。
+**重要**: `CM_AUTH_TOKEN` は必ず安全なランダム値を設定してください。
+
+> **Note**: 旧名称の環境変数（`MCBD_*`）も後方互換性のためサポートされていますが、新名称（`CM_*`）の使用を推奨します。
 
 ### 4. データベースの初期化
 
@@ -75,16 +77,20 @@ npm run build
 
 | 変数名 | 説明 | 例 |
 |--------|------|-----|
-| `MCBD_ROOT_DIR` | ワークツリーのルートディレクトリ | `/home/user/projects` |
-| `MCBD_BIND` | バインドアドレス（本番は `0.0.0.0`） | `0.0.0.0` |
-| `MCBD_AUTH_TOKEN` | API認証トークン（本番必須） | `abc123...` |
+| `CM_ROOT_DIR` | ワークツリーのルートディレクトリ | `/home/user/projects` |
+| `CM_BIND` | バインドアドレス（本番は `0.0.0.0`） | `0.0.0.0` |
+| `CM_AUTH_TOKEN` | API認証トークン（本番必須） | `abc123...` |
 
 ### オプション変数
 
 | 変数名 | 説明 | デフォルト |
 |--------|------|-----------|
-| `MCBD_PORT` | サーバーポート | `3000` |
-| `DATABASE_PATH` | SQLiteデータベースのパス | `./data/db.sqlite` |
+| `CM_PORT` | サーバーポート | `3000` |
+| `CM_DB_PATH` | SQLiteデータベースのパス | `./data/cm.db` |
+| `CM_LOG_LEVEL` | ログレベル | `info` |
+| `CM_LOG_FORMAT` | ログフォーマット | `json` |
+
+> **Note**: 旧名称（`MCBD_*`）も後方互換性のためサポートされています。詳細は `.env.example` を参照してください。
 
 ## ビルドとデプロイ
 

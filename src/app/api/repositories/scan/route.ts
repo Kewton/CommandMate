@@ -23,17 +23,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { MCBD_ROOT_DIR } = getEnv();
+    const { CM_ROOT_DIR } = getEnv();
 
     // Security: Validate path safety relative to configured root
-    if (!isPathSafe(repositoryPath, MCBD_ROOT_DIR)) {
+    if (!isPathSafe(repositoryPath, CM_ROOT_DIR)) {
       return NextResponse.json(
         { error: 'Invalid or unsafe repository path' },
         { status: 400 }
       );
     }
 
-    const normalizedPath = path.resolve(MCBD_ROOT_DIR, repositoryPath);
+    const normalizedPath = path.resolve(CM_ROOT_DIR, repositoryPath);
 
     // Scan for worktrees
     const worktrees = await scanWorktrees(normalizedPath);

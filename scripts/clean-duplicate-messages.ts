@@ -8,7 +8,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const dbPath = path.join(process.cwd(), 'data', 'mcbd.db');
+const dbPath = path.join(process.cwd(), 'data', 'cm.db');
 const db = new Database(dbPath);
 
 interface MessageRow {

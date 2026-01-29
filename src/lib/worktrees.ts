@@ -106,7 +106,7 @@ export function parseWorktreeOutput(output: string): ParsedWorktree[] {
 
 /**
  * Get repository paths from environment variables
- * Supports both WORKTREE_REPOS (comma-separated) and MCBD_ROOT_DIR (single path)
+ * Supports both WORKTREE_REPOS (comma-separated) and CM_ROOT_DIR (single path)
  *
  * @returns Array of repository root paths
  *
@@ -115,7 +115,7 @@ export function parseWorktreeOutput(output: string): ParsedWorktree[] {
  * // WORKTREE_REPOS="/path/to/repo1,/path/to/repo2"
  * getRepositoryPaths(); // => ['/path/to/repo1', '/path/to/repo2']
  *
- * // MCBD_ROOT_DIR="/path/to/repo"
+ * // CM_ROOT_DIR="/path/to/repo"
  * getRepositoryPaths(); // => ['/path/to/repo']
  * ```
  */

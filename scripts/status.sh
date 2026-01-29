@@ -1,13 +1,13 @@
 #!/bin/bash
 #
-# MyCodeBranchDesk - Status Script
+# CommandMate - Status Script
 # Shows application status and health
 #
 
-APP_NAME="mycodebranch-desk"
+APP_NAME="commandmate"
 
-echo "MyCodeBranchDesk Status"
-echo "======================="
+echo "CommandMate Status"
+echo "=================="
 echo ""
 
 # Check PM2 status
@@ -23,7 +23,8 @@ if command -v pm2 &> /dev/null; then
 fi
 
 # Check port
-PORT=${MCBD_PORT:-3000}
+# Support both CM_PORT and legacy MCBD_PORT
+PORT=${CM_PORT:-${MCBD_PORT:-3000}}
 if lsof -ti:$PORT &> /dev/null; then
   PID=$(lsof -ti:$PORT)
   echo "Process:"

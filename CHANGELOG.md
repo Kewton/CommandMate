@@ -12,7 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - UI titles and headers now display "CommandMate"
 - Documentation updated with new branding terminology
 - Removed "chat" terminology that caused confusion (now uses "Message/Console/History")
-- E2E tests for title validation are temporarily skipped (will be updated in #77)
+- **BREAKING**: package.json name changed from `mycodebranch-desk` to `commandmate` (Issue #77)
+- **BREAKING**: Env interface properties renamed from `MCBD_*` to `CM_*` (Issue #77)
+  - `MCBD_ROOT_DIR` -> `CM_ROOT_DIR`
+  - `MCBD_PORT` -> `CM_PORT`
+  - `MCBD_BIND` -> `CM_BIND`
+  - `MCBD_AUTH_TOKEN` -> `CM_AUTH_TOKEN`
+  - `DATABASE_PATH` -> `CM_DB_PATH`
+- .env.example updated to use CM_* environment variables as primary (Issue #77)
+- All shell scripts updated to use CommandMate branding and CM_* variables (Issue #77)
+- E2E tests updated to test for CommandMate heading (Issue #77)
 
 ### Added
 - Environment variable fallback support for backwards compatibility (Issue #76)

@@ -24,8 +24,8 @@ describe('Authentication Middleware', () => {
 
   describe('localhost binding (127.0.0.1)', () => {
     beforeEach(() => {
-      process.env.MCBD_BIND = '127.0.0.1';
-      process.env.MCBD_AUTH_TOKEN = 'test-token';
+      process.env.CM_BIND = '127.0.0.1';
+      process.env.CM_AUTH_TOKEN = 'test-token';
     });
 
     it('should allow requests without authentication', () => {
@@ -63,8 +63,8 @@ describe('Authentication Middleware', () => {
 
   describe('public binding (0.0.0.0)', () => {
     beforeEach(() => {
-      process.env.MCBD_BIND = '0.0.0.0';
-      process.env.MCBD_AUTH_TOKEN = 'test-token';
+      process.env.CM_BIND = '0.0.0.0';
+      process.env.CM_AUTH_TOKEN = 'test-token';
     });
 
     it('should reject requests without Authorization header', () => {
@@ -129,8 +129,8 @@ describe('Authentication Middleware', () => {
 
   describe('non-API routes', () => {
     beforeEach(() => {
-      process.env.MCBD_BIND = '0.0.0.0';
-      process.env.MCBD_AUTH_TOKEN = 'test-token';
+      process.env.CM_BIND = '0.0.0.0';
+      process.env.CM_AUTH_TOKEN = 'test-token';
     });
 
     it('should not check auth for non-API routes', () => {
@@ -151,9 +151,9 @@ describe('Authentication Middleware', () => {
   });
 
   describe('missing configuration', () => {
-    it('should default to localhost if MCBD_BIND not set', () => {
-      delete process.env.MCBD_BIND;
-      process.env.MCBD_AUTH_TOKEN = 'test-token';
+    it('should default to localhost if CM_BIND not set', () => {
+      delete process.env.CM_BIND;
+      process.env.CM_AUTH_TOKEN = 'test-token';
 
       const request = new NextRequest('http://localhost:3000/api/worktrees');
 
@@ -163,9 +163,9 @@ describe('Authentication Middleware', () => {
       expect(response).toBeUndefined();
     });
 
-    it('should reject if MCBD_BIND=0.0.0.0 but no token configured', () => {
-      process.env.MCBD_BIND = '0.0.0.0';
-      delete process.env.MCBD_AUTH_TOKEN;
+    it('should reject if CM_BIND=0.0.0.0 but no token configured', () => {
+      process.env.CM_BIND = '0.0.0.0';
+      delete process.env.CM_AUTH_TOKEN;
 
       const request = new NextRequest('http://localhost:3000/api/worktrees', {
         headers: {

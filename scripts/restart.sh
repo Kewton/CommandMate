@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# MyCodeBranchDesk - Restart Script
+# CommandMate - Restart Script
 # Restarts the application
 #
 
-APP_NAME="mycodebranch-desk"
+APP_NAME="commandmate"
 
-echo "Restarting MyCodeBranchDesk..."
+echo "Restarting CommandMate..."
 
 if command -v pm2 &> /dev/null; then
   if pm2 list | grep -q "$APP_NAME"; then

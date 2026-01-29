@@ -10,7 +10,7 @@ import path from 'path';
 import fs from 'fs';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_PATH = path.join(DATA_DIR, 'mcbd.db');
+const DB_PATH = path.join(DATA_DIR, 'cm.db');
 
 function migrate() {
   // Ensure data directory exists

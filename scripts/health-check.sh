@@ -1,16 +1,17 @@
 #!/bin/bash
 #
-# MyCodeBranchDesk - Health Check Script
+# CommandMate - Health Check Script
 # Comprehensive health check for monitoring systems
 #
 
 set -e
 
-PORT=${MCBD_PORT:-3000}
+# Support both CM_PORT and legacy MCBD_PORT
+PORT=${CM_PORT:-${MCBD_PORT:-3000}}
 HEALTH_URL="http://localhost:$PORT/"
 EXIT_CODE=0
 
-echo "MyCodeBranchDesk Health Check"
+echo "CommandMate Health Check"
 echo "=============================="
 echo ""
 

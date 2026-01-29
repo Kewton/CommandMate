@@ -12,7 +12,7 @@ import { getWorktreeById } from '../src/lib/db';
 import { getEnvByKey } from '../src/lib/env';
 
 // Issue #76: Environment variable fallback support
-const DB_PATH = getEnvByKey('CM_DB_PATH') || path.join(process.cwd(), 'data', 'mcbd.db');
+const DB_PATH = getEnvByKey('CM_DB_PATH') || path.join(process.cwd(), 'data', 'cm.db');
 
 function runMigration() {
   console.log('[migrate-cli-tool-id] Starting migration...');

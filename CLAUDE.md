@@ -229,6 +229,16 @@ npm run db:reset      # DBリセット
 
 ## 最近の実装機能
 
+### Issue #77: 設定・コード内の名称置換（CommandMateリネーム Phase 3）
+- **設定ファイル更新**: `.env.example`を新名称（CM_*）に更新、旧名称はコメントアウトで残存
+- **package.json変更**: `name`を`mycodebranch-desk`から`commandmate`に変更
+- **Env interface更新**: `src/lib/env.ts`のプロパティ名を`CM_*`に統一
+- **シェルスクリプト更新**: 10ファイルをCommandMateブランディングとフォールバック対応
+- **TypeScriptスクリプト更新**: 5ファイルのDBパスを`cm.db`に変更
+- **テストコード修正**: 環境変数参照を`CM_*`に更新、E2Eテストのスキップ解除
+- **CHANGELOG更新**: 破壊的変更を記録
+- 詳細: [設計書](./dev-reports/design/issue-77-rename-phase3-design-policy.md)
+
 ### Issue #76: 環境変数フォールバック（CommandMateリネーム Phase 1）
 - **フォールバック機能**: 新名称`CM_*`と旧名称`MCBD_*`の両方をサポート
 - **対象環境変数**: 8種類（ROOT_DIR, PORT, BIND, AUTH_TOKEN, LOG_LEVEL, LOG_FORMAT, LOG_DIR, DB_PATH）

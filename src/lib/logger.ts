@@ -1,5 +1,5 @@
 /**
- * Structured logging utility for MyCodeBranchDesk
+ * Structured logging utility for CommandMate
  *
  * Issue #41: Structured logging + log level control
  *

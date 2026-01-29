@@ -14,8 +14,8 @@ describe('Logger', () => {
 
   beforeEach(() => {
     // Reset environment variables
-    delete process.env.MCBD_LOG_LEVEL;
-    delete process.env.MCBD_LOG_FORMAT;
+    delete process.env.CM_LOG_LEVEL;
+    delete process.env.CM_LOG_FORMAT;
 
     // Mock console methods
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -46,7 +46,7 @@ describe('Logger', () => {
     });
 
     it('should create logger with module name', () => {
-      process.env.MCBD_LOG_LEVEL = 'debug';
+      process.env.CM_LOG_LEVEL = 'debug';
       const logger = createLogger('test-module');
       logger.info('test-action');
 
@@ -58,7 +58,7 @@ describe('Logger', () => {
 
   describe('Log level filtering', () => {
     it('should respect log level - debug logs filtered when level is warn', () => {
-      process.env.MCBD_LOG_LEVEL = 'warn';
+      process.env.CM_LOG_LEVEL = 'warn';
       const consoleSpy = vi.spyOn(console, 'log');
 
       const logger = createLogger('test');
@@ -68,7 +68,7 @@ describe('Logger', () => {
     });
 
     it('should respect log level - info logs filtered when level is warn', () => {
-      process.env.MCBD_LOG_LEVEL = 'warn';
+      process.env.CM_LOG_LEVEL = 'warn';
       const consoleSpy = vi.spyOn(console, 'log');
 
       const logger = createLogger('test');
@@ -78,7 +78,7 @@ describe('Logger', () => {
     });
 
     it('should allow warn logs when level is warn', () => {
-      process.env.MCBD_LOG_LEVEL = 'warn';
+      process.env.CM_LOG_LEVEL = 'warn';
       const consoleSpy = vi.spyOn(console, 'warn');
 
       const logger = createLogger('test');
@@ -88,7 +88,7 @@ describe('Logger', () => {
     });
 
     it('should allow error logs when level is warn', () => {
-      process.env.MCBD_LOG_LEVEL = 'warn';
+      process.env.CM_LOG_LEVEL = 'warn';
       const consoleSpy = vi.spyOn(console, 'error');
 
       const logger = createLogger('test');
@@ -98,7 +98,7 @@ describe('Logger', () => {
     });
 
     it('should allow all logs when level is debug', () => {
-      process.env.MCBD_LOG_LEVEL = 'debug';
+      process.env.CM_LOG_LEVEL = 'debug';
 
       const logger = createLogger('test');
       logger.debug('test-debug');
@@ -113,9 +113,9 @@ describe('Logger', () => {
   });
 
   describe('Log format', () => {
-    it('should output JSON format when MCBD_LOG_FORMAT=json', () => {
-      process.env.MCBD_LOG_FORMAT = 'json';
-      process.env.MCBD_LOG_LEVEL = 'debug';
+    it('should output JSON format when CM_LOG_FORMAT=json', () => {
+      process.env.CM_LOG_FORMAT = 'json';
+      process.env.CM_LOG_LEVEL = 'debug';
       const consoleSpy = vi.spyOn(console, 'log');
 
       const logger = createLogger('test');
@@ -132,7 +132,7 @@ describe('Logger', () => {
     });
 
     it('should output text format by default', () => {
-      process.env.MCBD_LOG_LEVEL = 'debug';
+      process.env.CM_LOG_LEVEL = 'debug';
       const consoleSpy = vi.spyOn(console, 'log');
 
       const logger = createLogger('test');
@@ -147,8 +147,8 @@ describe('Logger', () => {
 
   describe('withContext', () => {
     it('should add context to log entries', () => {
-      process.env.MCBD_LOG_FORMAT = 'json';
-      process.env.MCBD_LOG_LEVEL = 'debug';
+      process.env.CM_LOG_FORMAT = 'json';
+      process.env.CM_LOG_LEVEL = 'debug';
       const consoleSpy = vi.spyOn(console, 'log');
 
       const logger = createLogger('test');
@@ -168,8 +168,8 @@ describe('Logger', () => {
     });
 
     it('should merge context when chained', () => {
-      process.env.MCBD_LOG_FORMAT = 'json';
-      process.env.MCBD_LOG_LEVEL = 'debug';
+      process.env.CM_LOG_FORMAT = 'json';
+      process.env.CM_LOG_LEVEL = 'debug';
       const consoleSpy = vi.spyOn(console, 'log');
 
       const logger = createLogger('test');
@@ -185,7 +185,7 @@ describe('Logger', () => {
     });
 
     it('should include context in text format', () => {
-      process.env.MCBD_LOG_LEVEL = 'debug';
+      process.env.CM_LOG_LEVEL = 'debug';
       const consoleSpy = vi.spyOn(console, 'log');
 
       const logger = createLogger('test');
@@ -206,8 +206,8 @@ describe('Logger', () => {
 
   describe('[MF-1] Sanitization - sensitive data filtering', () => {
     beforeEach(() => {
-      process.env.MCBD_LOG_FORMAT = 'json';
-      process.env.MCBD_LOG_LEVEL = 'debug';
+      process.env.CM_LOG_FORMAT = 'json';
+      process.env.CM_LOG_LEVEL = 'debug';
     });
 
     it('should redact Bearer tokens in log data', () => {
@@ -356,8 +356,8 @@ describe('Logger', () => {
 
   describe('Log entry structure', () => {
     beforeEach(() => {
-      process.env.MCBD_LOG_FORMAT = 'json';
-      process.env.MCBD_LOG_LEVEL = 'debug';
+      process.env.CM_LOG_FORMAT = 'json';
+      process.env.CM_LOG_LEVEL = 'debug';
     });
 
     it('should include timestamp in log entries', () => {

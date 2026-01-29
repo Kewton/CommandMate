@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# MyCodeBranchDesk - Stop Script
+# CommandMate - Stop Script
 # Stops the application
 #
 
-APP_NAME="mycodebranch-desk"
+APP_NAME="commandmate"
 
-echo "Stopping MyCodeBranchDesk..."
+echo "Stopping CommandMate..."
 
 if command -v pm2 &> /dev/null; then
   if pm2 list | grep -q "$APP_NAME"; then
@@ -17,7 +17,8 @@ if command -v pm2 &> /dev/null; then
   fi
 else
   # If not using PM2, try to find and kill the process
-  PORT=${MCBD_PORT:-3000}
+  # Support both CM_PORT and legacy MCBD_PORT
+  PORT=${CM_PORT:-${MCBD_PORT:-3000}}
   PID=$(lsof -ti:$PORT 2>/dev/null || true)
 
   if [ -n "$PID" ]; then

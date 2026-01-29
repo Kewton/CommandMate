@@ -1,14 +1,14 @@
 #!/bin/bash
 #
-# MyCodeBranchDesk - Start Script
+# CommandMate - Start Script
 # Starts the application using PM2 or direct npm start
 #
 
 set -e
 
-APP_NAME="mycodebranch-desk"
+APP_NAME="commandmate"
 
-echo "Starting MyCodeBranchDesk..."
+echo "Starting CommandMate..."
 
 # Check if PM2 is available
 if command -v pm2 &> /dev/null; then

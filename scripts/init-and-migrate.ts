@@ -8,7 +8,7 @@ import fs from 'fs';
 import { initDatabase } from '../src/lib/db';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_PATH = path.join(DATA_DIR, 'mcbd.db');
+const DB_PATH = path.join(DATA_DIR, 'cm.db');
 
 function main() {
   // Ensure data directory exists

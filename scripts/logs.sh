@@ -1,10 +1,10 @@
 #!/bin/bash
 #
-# MyCodeBranchDesk - Logs Script
+# CommandMate - Logs Script
 # View application logs
 #
 
-APP_NAME="mycodebranch-desk"
+APP_NAME="commandmate"
 
 # Check if using PM2
 if command -v pm2 &> /dev/null; then
@@ -17,10 +17,10 @@ if command -v pm2 &> /dev/null; then
 fi
 
 # Check if using systemd
-if systemctl is-active --quiet mycodebranch-desk 2>/dev/null; then
+if systemctl is-active --quiet commandmate 2>/dev/null; then
   echo "Showing systemd logs (Ctrl+C to exit)..."
   echo ""
-  sudo journalctl -u mycodebranch-desk -f
+  sudo journalctl -u commandmate -f
   exit 0
 fi
 

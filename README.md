@@ -57,7 +57,7 @@ Claude Code での開発経験があり、本業の傍らで個人開発を続�
 git clone https://github.com/Kewton/MyCodeBranchDesk.git
 cd MyCodeBranchDesk
 npm install
-cp .env.example .env   # MCBD_ROOT_DIR を編集
+cp .env.example .env   # CM_ROOT_DIR を編集
 npm run db:init
 npm run build
 npm start
@@ -65,7 +65,9 @@ npm start
 
 ブラウザで http://localhost:3000 にアクセスしてください。
 
-スマホから利用する場合は `.env` で `MCBD_BIND=0.0.0.0` と `MCBD_AUTH_TOKEN` を設定し、同一LAN内から `http://<PCのIP>:3000` にアクセスします。
+スマホから利用する場合は `.env` で `CM_BIND=0.0.0.0` と `CM_AUTH_TOKEN` を設定し、同一LAN内から `http://<PCのIP>:3000` にアクセスします。
+
+> **Note**: 旧名称の環境変数（`MCBD_*`）も後方互換性のためサポートされていますが、新名称（`CM_*`）の使用を推奨します。
 
 ## FAQ
 

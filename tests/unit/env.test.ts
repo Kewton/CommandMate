@@ -166,8 +166,8 @@ describe('getEnv with fallback', () => {
 
     const env = getEnv();
 
-    expect(env.MCBD_ROOT_DIR).toBe('/test/path');
-    expect(env.MCBD_PORT).toBe(4000);
+    expect(env.CM_ROOT_DIR).toBe('/test/path');
+    expect(env.CM_PORT).toBe(4000);
     expect(console.warn).not.toHaveBeenCalled();
   });
 
@@ -178,8 +178,8 @@ describe('getEnv with fallback', () => {
 
     const env = getEnv();
 
-    expect(env.MCBD_ROOT_DIR).toBe('/test/path');
-    expect(env.MCBD_PORT).toBe(4000);
+    expect(env.CM_ROOT_DIR).toBe('/test/path');
+    expect(env.CM_PORT).toBe(4000);
     expect(console.warn).toHaveBeenCalled();
   });
 });
