@@ -24,8 +24,10 @@ AI コーディングアシスタント（Claude Code など）の登場によ�
 CommandMate は、これらの課題に対する私たちの答えです：
 
 ```
-🚀 並行開発 × 📱 モバイルアクセス = ∞ 生産性
+🚀 並行開発 × 📱 モバイルアクセス × 📦 1つのアプリで完結 = ∞ 生産性
 ```
+
+複数のツールを行き来する必要はありません。**ブラウザ1つで、指示出し・実行確認・履歴管理がすべて完結**します。
 
 ---
 
@@ -158,9 +160,9 @@ cd CommandMate
 npm install
 
 # 設定（.env）
-MCBD_ROOT_DIR=/path/to/your/repos
-MCBD_BIND=0.0.0.0
-MCBD_AUTH_TOKEN=your-secret-token
+CM_ROOT_DIR=/path/to/your/repos
+CM_BIND=0.0.0.0
+CM_AUTH_TOKEN=your-secret-token
 
 # 起動
 npm run build && npm start

@@ -180,7 +180,7 @@ issue-split.mdの末尾に作成されたGitHub Issueのリンクを追記しま
 ================================================================================
 
 親Issue: #<親Issue番号> <Feature名>
-  https://github.com/Kewton/MyCodeBranchDesk/issues/<親Issue番号>
+  https://github.com/Kewton/CommandMate/issues/<親Issue番号>
 
 作成された子Issue: <総Issue数>個
 
@@ -188,7 +188,7 @@ issue-split.mdの末尾に作成されたGitHub Issueのリンクを追記しま
 Phase 1: <Phase名>（並列可）
 --------------------------------------------------------------------------------
   #<子Issue番号>: Issue #<親Issue番号>-<連番>: <タイトル>（<見積>）
-    https://github.com/Kewton/MyCodeBranchDesk/issues/<子Issue番号>
+    https://github.com/Kewton/CommandMate/issues/<子Issue番号>
     📌 並列実行可能: #<子Issue番号>
     🚧 Blocks: #<子Issue番号>, #<子Issue番号>
 
