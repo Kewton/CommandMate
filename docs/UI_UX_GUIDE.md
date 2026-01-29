@@ -288,5 +288,6 @@ src/hooks/
 ## 関連ドキュメント
 
 - [README.md](../README.md) - プロジェクト概要
+- [Webアプリ操作ガイド](./user-guide/webapp-guide.md) - 初めてのユーザー向け操作手順書
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - デプロイメントガイド
 - [architecture.md](./architecture.md) - アーキテクチャ詳細

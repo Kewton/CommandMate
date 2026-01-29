@@ -98,6 +98,7 @@ A: 現時点では個人利用を想定しています。複数人での同時�
 | [デプロイガイド](./docs/DEPLOYMENT.md) | 本番環境構築手順 |
 | [移行ガイド](./docs/migration-to-commandmate.md) | MyCodeBranchDesk からの移行手順 |
 | [UI/UXガイド](./docs/UI_UX_GUIDE.md) | UI実装の詳細 |
+| [Webアプリ操作ガイド](./docs/user-guide/webapp-guide.md) | Webアプリの基本操作 |
 | [クイックスタート](./docs/user-guide/quick-start.md) | Claude Codeコマンドの使い方 |
 | [Trust & Safety](./docs/TRUST_AND_SAFETY.md) | セキュリティと権限の考え方 |
 
