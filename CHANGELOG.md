@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **BREAKING**: GitHub repository renamed from `Kewton/MyCodeBranchDesk` to `Kewton/CommandMate` (Issue #80)
+- All documentation links updated to new repository URL (Issue #80)
 - Project branding updated from MyCodeBranchDesk to CommandMate (Issue #75)
 - UI titles and headers now display "CommandMate"
 - Documentation updated with new branding terminology

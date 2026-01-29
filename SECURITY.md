@@ -6,7 +6,7 @@
 
 以下の方法で報告をお願いします:
 
-- GitHub の [Security Advisories](https://github.com/Kewton/MyCodeBranchDesk/security/advisories) から非公開で報告
+- GitHub の [Security Advisories](https://github.com/Kewton/CommandMate/security/advisories) から非公開で報告
 - または、リポジトリオーナーに直接連絡
 
 ## 報告に含めてほしい情報

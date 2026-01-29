@@ -5,10 +5,10 @@ CommandMate への貢献を歓迎します。
 ## 開発環境のセットアップ
 
 ```bash
-git clone https://github.com/Kewton/MyCodeBranchDesk.git
-cd MyCodeBranchDesk
+git clone https://github.com/Kewton/CommandMate.git
+cd CommandMate
 npm install
-cp .env.example .env   # MCBD_ROOT_DIR を設定
+cp .env.example .env   # CM_ROOT_DIR を設定
 npm run db:init
 npm run dev
 ```

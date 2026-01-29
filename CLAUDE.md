@@ -9,7 +9,7 @@
 ### 基本情報
 - **プロジェクト名**: CommandMate
 - **説明**: Git worktree管理とClaude CLI/tmuxセッション統合ツール
-- **リポジトリ**: https://github.com/Kewton/MyCodeBranchDesk
+- **リポジトリ**: https://github.com/Kewton/CommandMate
 
 ### 技術スタック
 | カテゴリ | 技術 |

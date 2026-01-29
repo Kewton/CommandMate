@@ -54,8 +54,8 @@ Claude Code での開発経験があり、本業の傍らで個人開発を続�
 ### セットアップ
 
 ```bash
-git clone https://github.com/Kewton/MyCodeBranchDesk.git
-cd MyCodeBranchDesk
+git clone https://github.com/Kewton/CommandMate.git
+cd CommandMate
 npm install
 cp .env.example .env   # CM_ROOT_DIR を編集
 npm run db:init
