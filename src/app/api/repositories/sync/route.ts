@@ -14,7 +14,7 @@ export async function POST() {
 
     if (repositoryPaths.length === 0) {
       return NextResponse.json(
-        { error: 'No repositories configured. Please set WORKTREE_REPOS or MCBD_ROOT_DIR environment variable.' },
+        { error: 'No repositories configured. Please set WORKTREE_REPOS or CM_ROOT_DIR (MCBD_ROOT_DIR) environment variable.' },
         { status: 400 }
       );
     }

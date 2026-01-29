@@ -113,6 +113,7 @@ src/
 
 | モジュール | 説明 |
 |-----------|------|
+| `src/lib/env.ts` | 環境変数取得・フォールバック処理 |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック |
@@ -223,6 +224,16 @@ npm run db:reset      # DBリセット
 ---
 
 ## 最近の実装機能
+
+### Issue #76: 環境変数フォールバック（CommandMateリネーム Phase 1）
+- **フォールバック機能**: 新名称`CM_*`と旧名称`MCBD_*`の両方をサポート
+- **対象環境変数**: 8種類（ROOT_DIR, PORT, BIND, AUTH_TOKEN, LOG_LEVEL, LOG_FORMAT, LOG_DIR, DB_PATH）
+- **クライアント側**: `NEXT_PUBLIC_CM_AUTH_TOKEN` / `NEXT_PUBLIC_MCBD_AUTH_TOKEN`のフォールバック
+- **Deprecation警告**: 旧名称使用時にログ出力（同一キー1回のみ）
+- **セキュリティ**: `CM_AUTH_TOKEN`マスキングパターンを`logger.ts`に追加
+- **コアモジュール**: `src/lib/env.ts`に`getEnvWithFallback()`, `getEnvByKey()`関数追加
+- **CHANGELOG**: Keep a Changelogフォーマットで新規作成
+- 詳細: [設計書](./dev-reports/design/issue-76-env-fallback-design-policy.md)
 
 ### Issue #71: クローンURL登録機能
 - **クローンAPI**: `POST /api/repositories/clone` エンドポイント（非同期ジョブ）

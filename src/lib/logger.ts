@@ -79,7 +79,9 @@ const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /(password|passwd|pwd)[=:]\s*\S+/gi, replacement: '$1=[REDACTED]' },
   // Token/secret related
   { pattern: /(token|secret|api_key|apikey|auth)[=:]\s*\S+/gi, replacement: '$1=[REDACTED]' },
-  // MCBD_AUTH_TOKEN
+  // CM_AUTH_TOKEN (new name - Issue #76)
+  { pattern: /CM_AUTH_TOKEN=\S+/gi, replacement: 'CM_AUTH_TOKEN=[REDACTED]' },
+  // MCBD_AUTH_TOKEN (legacy name)
   { pattern: /MCBD_AUTH_TOKEN=\S+/gi, replacement: 'MCBD_AUTH_TOKEN=[REDACTED]' },
   // Authorization header
   { pattern: /Authorization:\s*\S+/gi, replacement: 'Authorization: [REDACTED]' },

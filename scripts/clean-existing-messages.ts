@@ -5,9 +5,10 @@
 
 import Database from 'better-sqlite3';
 import path from 'path';
+import { getEnvByKey } from '../src/lib/env';
 
-// Database path
-const DB_PATH = process.env.MCBD_DB_PATH || path.join(process.cwd(), 'data', 'db.sqlite');
+// Database path (Issue #76: Environment variable fallback support)
+const DB_PATH = getEnvByKey('CM_DB_PATH') || path.join(process.cwd(), 'data', 'db.sqlite');
 
 /**
  * Clean up Claude response by removing shell setup commands

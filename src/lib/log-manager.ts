@@ -6,11 +6,12 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { format } from 'date-fns';
+import { getEnvByKey } from './env';
 
 /**
- * Log directory configuration
+ * Log directory configuration (with fallback support - Issue #76)
  */
-const LOG_DIR = process.env.MCBD_LOG_DIR || path.join(process.cwd(), 'data', 'logs');
+const LOG_DIR = getEnvByKey('CM_LOG_DIR') || path.join(process.cwd(), 'data', 'logs');
 
 /**
  * Get log directory for a CLI tool

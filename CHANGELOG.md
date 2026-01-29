@@ -1,0 +1,37 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- Environment variable fallback support for backwards compatibility (Issue #76)
+  - New `CM_*` prefix supported alongside legacy `MCBD_*` prefix
+  - Deprecation warnings logged when legacy names are used (once per key)
+  - All 8 environment variables support fallback:
+    - `CM_ROOT_DIR` / `MCBD_ROOT_DIR`
+    - `CM_PORT` / `MCBD_PORT`
+    - `CM_BIND` / `MCBD_BIND`
+    - `CM_AUTH_TOKEN` / `MCBD_AUTH_TOKEN`
+    - `CM_LOG_LEVEL` / `MCBD_LOG_LEVEL`
+    - `CM_LOG_FORMAT` / `MCBD_LOG_FORMAT`
+    - `CM_LOG_DIR` / `MCBD_LOG_DIR`
+    - `CM_DB_PATH` / `MCBD_DB_PATH`
+  - Client-side fallback for `NEXT_PUBLIC_CM_AUTH_TOKEN` / `NEXT_PUBLIC_MCBD_AUTH_TOKEN`
+- `CM_AUTH_TOKEN` masking pattern in logger for security
+- Unit tests for environment variable fallback functionality
+
+### Deprecated
+- `MCBD_*` environment variables - use `CM_*` instead (will be removed in next major version)
+  - `MCBD_ROOT_DIR` -> `CM_ROOT_DIR`
+  - `MCBD_PORT` -> `CM_PORT`
+  - `MCBD_BIND` -> `CM_BIND`
+  - `MCBD_AUTH_TOKEN` -> `CM_AUTH_TOKEN`
+  - `MCBD_LOG_LEVEL` -> `CM_LOG_LEVEL`
+  - `MCBD_LOG_FORMAT` -> `CM_LOG_FORMAT`
+  - `MCBD_LOG_DIR` -> `CM_LOG_DIR`
+  - `MCBD_DB_PATH` -> `CM_DB_PATH`
+- `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`

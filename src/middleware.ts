@@ -1,16 +1,19 @@
 /**
  * Next.js Middleware for API Authentication
  * Protects API routes with Bearer token authentication when running on public interfaces
+ *
+ * Issue #76: Environment variable fallback support
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getEnvWithFallback } from './lib/env';
 
 /**
  * Authentication middleware
  *
  * Behavior:
- * - MCBD_BIND=127.0.0.1 or localhost: No authentication required (development)
- * - MCBD_BIND=0.0.0.0: Bearer token authentication required (production)
+ * - CM_BIND=127.0.0.1 or localhost: No authentication required (development)
+ * - CM_BIND=0.0.0.0: Bearer token authentication required (production)
  *
  * @param request - The incoming request
  * @returns NextResponse for rejected requests, undefined to continue
@@ -21,8 +24,8 @@ export function middleware(request: NextRequest) {
     return;
   }
 
-  // Get bind address from environment
-  const bind = process.env.MCBD_BIND || '127.0.0.1';
+  // Get bind address from environment (with fallback)
+  const bind = getEnvWithFallback('CM_BIND', 'MCBD_BIND') || '127.0.0.1';
 
   // Localhost binding: authentication is optional
   if (bind === '127.0.0.1' || bind === 'localhost') {
@@ -31,7 +34,7 @@ export function middleware(request: NextRequest) {
 
   // Public binding (0.0.0.0): authentication is required
   if (bind === '0.0.0.0') {
-    const authToken = process.env.MCBD_AUTH_TOKEN;
+    const authToken = getEnvWithFallback('CM_AUTH_TOKEN', 'MCBD_AUTH_TOKEN');
 
     // Server misconfiguration: public binding without token
     if (!authToken) {

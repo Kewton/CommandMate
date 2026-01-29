@@ -9,8 +9,7 @@ import path from 'path';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
 import { upsertWorktree } from './db';
-// isPathSafe is available but not used - using inline path validation instead
-// import { isPathSafe } from './path-validator';
+import { getEnvByKey } from './env';
 
 /**
  * Parsed worktree information from git
@@ -130,10 +129,10 @@ export function getRepositoryPaths(): string[] {
       .filter(p => p.length > 0);
   }
 
-  // Fallback to MCBD_ROOT_DIR for backward compatibility
-  const mcbdRootDir = process.env.MCBD_ROOT_DIR;
-  if (mcbdRootDir && mcbdRootDir.trim()) {
-    return [mcbdRootDir.trim()];
+  // Fallback to CM_ROOT_DIR / MCBD_ROOT_DIR (Issue #76: env fallback support)
+  const rootDir = getEnvByKey('CM_ROOT_DIR');
+  if (rootDir && rootDir.trim()) {
+    return [rootDir.trim()];
   }
 
   return [];

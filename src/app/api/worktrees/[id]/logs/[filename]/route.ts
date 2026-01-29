@@ -6,10 +6,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
+import { getEnvByKey } from '@/lib/env';
 import fs from 'fs/promises';
 import path from 'path';
 
-const LOG_DIR = process.env.MCBD_LOG_DIR || path.join(process.cwd(), 'data', 'logs');
+// Issue #76: Environment variable fallback support
+const LOG_DIR = getEnvByKey('CM_LOG_DIR') || path.join(process.cwd(), 'data', 'logs');
 
 export async function GET(
   request: NextRequest,

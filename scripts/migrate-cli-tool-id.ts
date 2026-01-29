@@ -9,8 +9,10 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { getDbInstance } from '../src/lib/db-instance';
 import { getWorktreeById } from '../src/lib/db';
+import { getEnvByKey } from '../src/lib/env';
 
-const DB_PATH = process.env.MCBD_DB_PATH || path.join(process.cwd(), 'data', 'mcbd.db');
+// Issue #76: Environment variable fallback support
+const DB_PATH = getEnvByKey('CM_DB_PATH') || path.join(process.cwd(), 'data', 'mcbd.db');
 
 function runMigration() {
   console.log('[migrate-cli-tool-id] Starting migration...');
