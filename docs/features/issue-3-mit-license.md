@@ -1,7 +1,7 @@
 # Issue #3: MITライセンスの適用
 
 ## 概要
-MyCodeBranchDeskをMITライセンスの下でオープンソースプロジェクトとして公開する。
+CommandMateをMITライセンスの下でオープンソースプロジェクトとして公開する。
 
 ## 目的
 - プロジェクトの利用条件を明確にする
@@ -62,12 +62,12 @@ SOFTWARE.
   {
     "repository": {
       "type": "git",
-      "url": "git+https://github.com/Kewton/MyCodeBranchDesk.git"
+      "url": "git+https://github.com/Kewton/CommandMate.git"
     },
     "bugs": {
-      "url": "https://github.com/Kewton/MyCodeBranchDesk/issues"
+      "url": "https://github.com/Kewton/CommandMate/issues"
     },
-    "homepage": "https://github.com/Kewton/MyCodeBranchDesk#readme"
+    "homepage": "https://github.com/Kewton/CommandMate#readme"
   }
   ```
 
@@ -229,12 +229,12 @@ SOFTWARE.
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Kewton/MyCodeBranchDesk.git"
+    "url": "git+https://github.com/Kewton/CommandMate.git"
   },
   "bugs": {
-    "url": "https://github.com/Kewton/MyCodeBranchDesk/issues"
+    "url": "https://github.com/Kewton/CommandMate/issues"
   },
-  "homepage": "https://github.com/Kewton/MyCodeBranchDesk#readme"
+  "homepage": "https://github.com/Kewton/CommandMate#readme"
 }
 ```
 
@@ -261,7 +261,7 @@ feat: add MIT License to project (Issue #3)
 - Add License section to README.md
 - Ensure all dependencies are MIT-compatible
 
-This makes MyCodeBranchDesk officially an open-source project
+This makes CommandMate officially an open-source project
 under the permissive MIT License, allowing free use, modification,
 and distribution while maintaining copyright notices.
 

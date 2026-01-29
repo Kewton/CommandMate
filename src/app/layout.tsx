@@ -3,7 +3,7 @@ import { AppProviders } from '@/components/providers/AppProviders';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'myCodeBranchDesk',
+  title: 'CommandMate',
   description: 'Git worktree management with Claude CLI and tmux sessions',
 };
 

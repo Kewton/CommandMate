@@ -1,6 +1,6 @@
 # Contributing
 
-MyCodeBranchDesk への貢献を歓迎します。
+CommandMate への貢献を歓迎します。
 
 ## 開発環境のセットアップ
 

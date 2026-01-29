@@ -1,4 +1,4 @@
-# MyCodeBranchDesk - Concept
+# CommandMate - Concept
 
 ## Vibe Coder のための並行開発プラットフォーム
 
@@ -21,7 +21,7 @@ AI コーディングアシスタント（Claude Code など）の登場によ�
 
 ### 私たちの答え
 
-MyCodeBranchDesk は、これらの課題に対する私たちの答えです：
+CommandMate は、これらの課題に対する私たちの答えです：
 
 ```
 🚀 並行開発 × 📱 モバイルアクセス = ∞ 生産性
@@ -48,7 +48,7 @@ bugfix/login-error      →  Claude Code セッション C
 
 ### 2. スマートフォンからの開発
 
-**PC がなくても開発を進められる**。これが MyCodeBranchDesk の核心です。
+**PC がなくても開発を進められる**。これが CommandMate の核心です。
 
 - 通勤電車の中で PR レビューの指示を出す
 - 子どもが寝ている間にバグ修正を依頼する
@@ -71,7 +71,7 @@ AI の応答を待つ必要はありません。
 
 ## 対象ユーザー
 
-MyCodeBranchDesk は、以下のような方に最適です：
+CommandMate は、以下のような方に最適です：
 
 ### 👨‍👩‍👧‍👦 子育て中のエンジニア
 
@@ -110,7 +110,7 @@ MyCodeBranchDesk は、以下のような方に最適です：
        (2時間の集中時間が必要)
 ```
 
-### After: MyCodeBranchDesk スタイル
+### After: CommandMate スタイル
 
 ```
 [通勤] [仕事] [昼休] [仕事] [帰宅] [家事] [育児] [就寝前]
@@ -153,8 +153,8 @@ MyCodeBranchDesk は、以下のような方に最適です：
 
 ```bash
 # インストール
-git clone https://github.com/Kewton/MyCodeBranchDesk.git
-cd MyCodeBranchDesk
+git clone https://github.com/Kewton/CommandMate.git
+cd CommandMate
 npm install
 
 # 設定（.env）
@@ -185,7 +185,7 @@ MIT License
 
 > **「開発は、人生の一部であって、人生のすべてではない。」**
 
-MyCodeBranchDesk は、開発と生活の調和を実現するためのツールです。
+CommandMate は、開発と生活の調和を実現するためのツールです。
 
 仕事があっても、家族がいても、趣味があっても。
 その全てを大切にしながら、自分のペースで開発を続けられる。

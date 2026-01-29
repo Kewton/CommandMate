@@ -1,4 +1,4 @@
-# MyCodeBranchDesk プロダクション環境チェックリスト
+# CommandMate プロダクション環境チェックリスト
 
 本番環境にデプロイする前に、このチェックリストを確認してください。
 
@@ -303,7 +303,7 @@
 問題が発生した場合：
 
 1. [トラブルシューティングガイド](./DEPLOYMENT.md#トラブルシューティング)を確認
-2. [GitHub Issues](https://github.com/kewton/MyCodeBranchDesk/issues) で報告
+2. [GitHub Issues](https://github.com/kewton/CommandMate/issues) で報告
 3. ログファイルを添付して質問
 
 ---

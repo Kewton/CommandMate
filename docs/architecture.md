@@ -1,10 +1,10 @@
 # docs/architecture.md
 
-# myCodeBranchDesk Architecture
+# CommandMate Architecture
 
 > git worktree ごとに Claude Code / tmux セッションを張り、スマホブラウザからチャット操作できる開発コンパニオンツールのアーキテクチャ設計書。
 
-このドキュメントは **myCodeBranchDesk** の技術アーキテクチャを定義します。
+このドキュメントは **CommandMate** の技術アーキテクチャを定義します。
 
 - どのようなプロセス／コンポーネントで構成されるか
 - どのように Claude CLI / tmux / Web UI が連携するか
@@ -16,7 +16,7 @@
 
 ## 0. Scope & Notation
 
-- 対象: `myCodeBranchDesk` アプリケーション全体
+- 対象: `CommandMate` アプリケーション全体
   - Next.js (App Router) ベースの Web UI
   - Node.js API / WebSocket サーバ
   - tmux + Claude CLI セッション管理
@@ -419,7 +419,7 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 
 - 中身イメージ:
 ```
-# myCodeBranchDesk Log
+# CommandMate Log
 
 ## Worktree
 feature/foo

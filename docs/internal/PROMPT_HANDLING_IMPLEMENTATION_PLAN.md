@@ -1,6 +1,6 @@
 # Claude Prompt Handling Implementation Plan
 
-**Project**: MyCodeBranchDesk
+**Project**: CommandMate
 **Feature**: Interactive Prompt Support (yes/no confirmations)
 **Approach**: Structured Prompt Message Type (案3)
 **Date**: 2025-11-17

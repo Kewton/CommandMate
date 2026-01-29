@@ -1,6 +1,6 @@
 # Phase 5-7 実装計画書
 
-MyCodeBranchDesk の tmux/Claude CLI 統合機能の詳細実装計画。
+CommandMate の tmux/Claude CLI 統合機能の詳細実装計画。
 
 ## 📋 目次
 3. [Phase 6: Claude CLI 統合](#phase-6-claude-cli-統合)

@@ -1,8 +1,8 @@
-# myCodeBranchDesk Requirements & Design
+# CommandMate Requirements & Design
 
 > git worktree ごとに Claude Code / tmux セッションを張り、スマホブラウザからチャット操作できる開発コンパニオンツールの「要求・要件・設計方針」をまとめたドキュメント。
 
-- プロダクト名称: **myCodeBranchDesk**
+- プロダクト名称: **CommandMate**
 - バージョン: v2.1 要求・要件・設計方針
 - 対象範囲:
   - スマホ/PC ブラウザから操作する Web UI
@@ -28,7 +28,7 @@
 
 ### 1.1 UX 観点の要求
 
-1. 開発者は **スマホブラウザ** や PC ブラウザから myCodeBranchDesk を開き、
+1. 開発者は **スマホブラウザ** や PC ブラウザから CommandMate を開き、
    - git worktree 単位で Claude CLI セッションにアクセスできること。
 
 2. [画面A: Worktree 一覧] にて、
@@ -213,7 +213,7 @@ export CLAUDE_HOOKS_STOP="${HOOK_COMMAND}"
 - LAN 公開などで MCBD_BIND=0.0.0.0 とする場合、
 - MCBD_AUTH_TOKEN を必須とし、すべての Web UI / API / WebSocket でトークン認証を行う。
 - HTTPS / TLS については、
-- myCodeBranchDesk 自身は HTTP のままとし、
+- CommandMate 自身は HTTP のままとし、
 - 必要に応じて前段のリバースプロキシ（Caddy / nginx / Traefik 等）で終端する想定とする。
 
 ⸻

@@ -7,7 +7,7 @@
 ## プロジェクト概要
 
 ### 基本情報
-- **プロジェクト名**: MyCodeBranchDesk
+- **プロジェクト名**: CommandMate
 - **説明**: Git worktree管理とClaude CLI/tmuxセッション統合ツール
 - **リポジトリ**: https://github.com/Kewton/MyCodeBranchDesk
 
@@ -208,7 +208,9 @@ npm run db:reset      # DBリセット
 | `/acceptance-test` | 受け入れテスト |
 | `/issue-create` | Issue一括作成 |
 | `/issue-split` | Issue分割計画 |
-| `/architecture-review` | アーキテクチャレビュー |
+| `/architecture-review` | アーキテクチャレビュー（サブエージェント対応） |
+| `/apply-review` | レビュー指摘事項の実装反映 |
+| `/multi-stage-review` | 4段階レビュー（通常→整合性→影響分析→セキュリティ） |
 | `/design-policy` | 設計方針策定 |
 
 ### 利用可能なエージェント
@@ -220,6 +222,8 @@ npm run db:reset      # DBリセット
 | `investigation-agent` | バグ調査専門 |
 | `acceptance-test-agent` | 受入テスト |
 | `refactoring-agent` | リファクタリング |
+| `architecture-review-agent` | アーキテクチャレビュー |
+| `apply-review-agent` | レビュー指摘反映 |
 
 ---
 

@@ -1,12 +1,12 @@
 # Trust & Safety
 
-MyCodeBranchDesk のセキュリティモデルと安全な利用方法について説明します。
+CommandMate のセキュリティモデルと安全な利用方法について説明します。
 
 ## セキュリティモデル
 
 ### ローカル実行が前提
 
-MyCodeBranchDesk はローカルマシン上で動作します。
+CommandMate はローカルマシン上で動作します。
 
 - アプリケーション本体、SQLite データベース、tmux セッションはすべてローカルで完結
 - 外部への通信は Claude CLI 自体の API 呼び出しのみ

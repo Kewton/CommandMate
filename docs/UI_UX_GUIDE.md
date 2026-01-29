@@ -1,6 +1,6 @@
-# MyCodeBranchDesk UI/UX ガイド
+# CommandMate UI/UX ガイド
 
-本ドキュメントは、MyCodeBranchDesk の現在の UI/UX 実装について説明します。
+本ドキュメントは、CommandMate の現在の UI/UX 実装について説明します。
 
 ## 目次
 
@@ -15,7 +15,7 @@
 
 ## 概要
 
-MyCodeBranchDesk は、デスクトップとモバイルの両方に最適化されたレスポンシブ UI を提供します。
+CommandMate は、デスクトップとモバイルの両方に最適化されたレスポンシブ UI を提供します。
 
 | 画面 | レイアウト | 特徴 |
 |------|-----------|------|

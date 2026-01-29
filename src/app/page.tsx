@@ -18,7 +18,7 @@ export default function Home() {
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
         <div className="mb-8">
-          <h1 className="mb-2">MyCodeBranchDesk</h1>
+          <h1 className="mb-2">CommandMate</h1>
           <p className="text-lg text-gray-600">
             Git worktree management with Claude CLI and tmux sessions
           </p>

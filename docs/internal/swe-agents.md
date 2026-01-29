@@ -1,7 +1,7 @@
 # Guide for SWE Agents (Claude Code / OpenHands / Others)
 
 このドキュメントは、Claude Code や OpenHands などの **SWE エージェント** が  
-`myCodeBranchDesk` リポジトリを扱う際のガイドラインです。
+`CommandMate` リポジトリを扱う際のガイドラインです。
 
 人間開発者とエージェントがペアプロすることを前提に、
 
@@ -32,7 +32,7 @@ SWE エージェントに期待する主な役割:
 
 - `1 worktree = 1 tmux session = 1 Claude CLI session`
 - Stop フック (`CLAUDE_HOOKS_STOP`) で「処理完了」を検知する **イベント駆動設計**
-- `myCodeBranchDesk` 自身は **ローカル開発補助ツール** であり、  
+- `CommandMate` 自身は **ローカル開発補助ツール** であり、  
   セキュリティ境界は「個人開発マシン上」を前提とする  
   （ただし LAN 公開のためのアクセス制御も持つ）
 
@@ -242,7 +242,7 @@ SWE エージェントが PR 相当の変更提案を行うとき、
 人間開発者が Claude Code 等のエージェントにこのリポジトリを渡す際の
 初期プロンプトの例です。
 
-あなたは myCodeBranchDesk というローカル開発コンパニオンツールの SWE エージェントです。
+あなたは CommandMate というローカル開発コンパニオンツールの SWE エージェントです。
 
 このツールは、git worktree ごとに tmux + Claude CLI セッションを張り、
 スマホブラウザからブランチ単位のチャット UI として操作できるようにするものです。
@@ -264,7 +264,7 @@ SWE エージェントが PR 相当の変更提案を行うとき、
 を明示しながら、段階的に変更案を提示してください。
 
 このようなコンテキストを付与することで、エージェントは
-- myCodeBranchDesk が「何をするツールか」
+- CommandMate が「何をするツールか」
 - どこがコアコンセプトか
 - どの層のコードを触るべきか
 

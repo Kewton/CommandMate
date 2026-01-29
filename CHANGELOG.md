@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Project branding updated from MyCodeBranchDesk to CommandMate (Issue #75)
+- UI titles and headers now display "CommandMate"
+- Documentation updated with new branding terminology
+- Removed "chat" terminology that caused confusion (now uses "Message/Console/History")
+- E2E tests for title validation are temporarily skipped (will be updated in #77)
+
 ### Added
 - Environment variable fallback support for backwards compatibility (Issue #76)
   - New `CM_*` prefix supported alongside legacy `MCBD_*` prefix

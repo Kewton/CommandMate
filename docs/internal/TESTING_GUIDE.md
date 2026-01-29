@@ -1,6 +1,6 @@
-# MyCodeBranchDesk 動作確認ガイド
+# CommandMate 動作確認ガイド
 
-このガイドでは、MyCodeBranchDesk の動作確認方法を説明します。
+このガイドでは、CommandMate の動作確認方法を説明します。
 
 ## 📋 目次
 
@@ -247,7 +247,7 @@ http://localhost:3000
 以下を確認します：
 
 - [ ] ページヘッダーが表示される
-- [ ] "MyCodeBranchDesk" というタイトルが表示される
+- [ ] "CommandMate" というタイトルが表示される
 - [ ] Worktree の一覧が表示される（データがある場合）
 - [ ] 検索ボックスが表示される
 - [ ] ソートボタン（Name、Updated、Path）が表示される
@@ -452,4 +452,4 @@ du -h data/db.sqlite
 
 ---
 
-問題が発生した場合は、[GitHub Issues](https://github.com/kewton/MyCodeBranchDesk/issues) で報告してください。
+問題が発生した場合は、[GitHub Issues](https://github.com/kewton/CommandMate/issues) で報告してください。

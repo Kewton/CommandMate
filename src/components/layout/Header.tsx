@@ -20,7 +20,7 @@ export interface HeaderProps {
  * <Header title="MyCodeBranchDesk" />
  * ```
  */
-export function Header({ title = 'MyCodeBranchDesk' }: HeaderProps) {
+export function Header({ title = 'CommandMate' }: HeaderProps) {
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
       <div className="container-custom">

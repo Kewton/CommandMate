@@ -1,6 +1,6 @@
 # クイックスタートガイド
 
-MyCodeBranchDeskでClaude Codeのスラッシュコマンドとエージェントを使った開発フローを始めましょう。
+CommandMateでClaude Codeのスラッシュコマンドとエージェントを使った開発フローを始めましょう。
 
 ---
 
