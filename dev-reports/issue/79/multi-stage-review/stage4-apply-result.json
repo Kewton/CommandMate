@@ -1,0 +1,28 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "apply_status": "completed",
+  "must_fix_applied": [],
+  "should_fix_applied": [
+    {
+      "id": "SF-S4-1",
+      "status": "applied",
+      "description": "systemdサービスファイルでの認証トークン管理の推奨事項（EnvironmentFile=、systemd-creds）を追加"
+    },
+    {
+      "id": "SF-S4-2",
+      "status": "applied",
+      "description": "v2.0.0以降の旧名称使用時の動作（デフォルト値へのフォールバック）を明記"
+    }
+  ],
+  "changes_made": [
+    "セクション3.2: systemdサービス移行手順に認証トークンの安全な管理方法（EnvironmentFile=、systemd-creds）の推奨事項を追加",
+    "セクション6.2: v2.0.0以降の動作を追記し、旧名称使用時の挙動を明確化",
+    "レビュー履歴: Stage 4レビュー結果を追記"
+  ],
+  "owasp_compliance_summary": {
+    "pass": ["A01", "A04", "A05", "A07", "A08", "A09"],
+    "n_a": ["A02", "A03", "A06", "A10"]
+  },
+  "timestamp": "2026-01-29"
+}

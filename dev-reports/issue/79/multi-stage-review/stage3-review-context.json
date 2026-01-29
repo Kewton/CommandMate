@@ -1,0 +1,22 @@
+{
+  "issue_number": 79,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "review_criteria": {
+    "scope_analysis": "変更の影響範囲が適切に特定されているか",
+    "dependency_impact": "依存関係への影響が考慮されているか",
+    "user_impact": "ユーザーへの影響が適切に文書化されているか",
+    "rollback_strategy": "ロールバック戦略が適切か"
+  },
+  "change_scope": {
+    "new_files": ["docs/migration-to-commandmate.md"],
+    "modified_files": ["CHANGELOG.md"],
+    "no_code_changes": true
+  },
+  "dependencies": {
+    "upstream": ["Issue #76", "Issue #75", "Issue #77"],
+    "downstream": ["Issue #80 (GitHub repo rename)"]
+  }
+}

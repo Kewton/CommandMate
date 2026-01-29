@@ -1,0 +1,25 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "apply_status": "completed",
+  "must_fix_applied": [],
+  "should_fix_applied": [
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "description": "README.mdへの移行ガイドへのリンク追加を対象ファイル一覧とチェックリストに追加"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "description": "Issue #80完了後の更新箇所チェックリストをセクション10.1に追加"
+    }
+  ],
+  "changes_made": [
+    "セクション4: 対象ファイル一覧にREADME.md更新（推奨）を追加",
+    "セクション7: Step 2.5としてREADME.md更新タスクを追加",
+    "セクション10.1: Issue #80完了後の更新箇所チェックリストを新規追加",
+    "レビュー履歴: Stage 3レビュー結果を追記"
+  ],
+  "timestamp": "2026-01-29"
+}

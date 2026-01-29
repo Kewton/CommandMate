@@ -1,0 +1,9 @@
+{
+  "issue_number": 79,
+  "refactor_targets": [],
+  "quality_metrics": {
+    "note": "ドキュメント作成のみのため、コードリファクタリングは該当なし"
+  },
+  "improvement_goals": [],
+  "skip_reason": "Issue #79 はドキュメント作成のみでコード変更がないため、リファクタリングフェーズをスキップ"
+}

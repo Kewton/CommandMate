@@ -1,0 +1,36 @@
+{
+  "issue_number": 79,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_result_path": "dev-reports/issue/79/multi-stage-review/stage2-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "must_fix_items": [
+    {
+      "id": "MF-1",
+      "category": "Issue要件との整合性",
+      "description": "CHANGELOG.md追記前の重複確認手順を追加",
+      "action": "Section 3.4に事前確認手順と重複チェックの注記を追加"
+    }
+  ],
+  "should_fix_items": [
+    {
+      "id": "SF-1",
+      "category": "設計書内の一貫性",
+      "description": "環境変数数の内訳を明確化",
+      "action": "Section 2.2にサーバー側8種（ENV_MAPPING）+ クライアント側1種 = 計9種と明記"
+    },
+    {
+      "id": "SF-2",
+      "category": "関連設計書との整合性",
+      "description": "systemdサービス名の前提に注記追加",
+      "action": "Section 3.2に環境依存の注記を追加"
+    },
+    {
+      "id": "SF-3",
+      "category": "Issue要件との整合性",
+      "description": "サポート終了予定の明確化",
+      "action": "Section 6.2に現行バージョンとフォールバック期間を追記"
+    }
+  ],
+  "output_file": "dev-reports/issue/79/multi-stage-review/stage2-apply-result.json"
+}

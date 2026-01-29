@@ -1,0 +1,96 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "issue_number": 79,
+  "review_date": "2026-01-29",
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "overall_status": "approved",
+  "owasp_compliance": {
+    "A01_Broken_Access_Control": {
+      "status": "pass",
+      "notes": "設計方針書は認証トークン（CM_AUTH_TOKEN）の移行手順を適切に記載。env.tsの実装では、bind=0.0.0.0時の認証必須チェックが実装済み。移行ガイドでも「認証が必須な状況を明記」と記載されている。"
+    },
+    "A02_Cryptographic_Failures": {
+      "status": "n/a",
+      "notes": "移行ガイドはドキュメントのみであり、暗号化処理の変更は含まれない。認証トークンの保存・伝送方法に変更なし。"
+    },
+    "A03_Injection": {
+      "status": "n/a",
+      "notes": "ドキュメント作成のみ。コード変更なし。systemdコマンド例はユーザーが手動実行するものであり、自動実行されるコードではない。"
+    },
+    "A04_Insecure_Design": {
+      "status": "pass",
+      "notes": "フォールバック機能による後方互換性は適切に設計されている。新旧両方の環境変数をサポートしつつ、Deprecation警告で移行を促す設計は妥当。サポート終了予定（v2.0.0）も明記されている。"
+    },
+    "A05_Security_Misconfiguration": {
+      "status": "pass",
+      "notes": "移行ガイドで認証トークンの例示に「your-secret-token」プレースホルダーを使用することが明記されている。実際の認証トークン値がドキュメントに含まれるリスクを回避している。"
+    },
+    "A06_Vulnerable_and_Outdated_Components": {
+      "status": "n/a",
+      "notes": "ドキュメント作成のみ。依存パッケージの追加・更新なし。"
+    },
+    "A07_Identification_and_Authentication_Failures": {
+      "status": "pass",
+      "notes": "CM_AUTH_TOKEN / MCBD_AUTH_TOKENの移行手順が明確。クライアント側認証トークン（NEXT_PUBLIC_*）も含めた全9種類の環境変数が網羅されている。"
+    },
+    "A08_Software_and_Data_Integrity_Failures": {
+      "status": "pass",
+      "notes": "ロールバック計画が明記されており、問題発生時の復旧手順が提供されている。git revertまたは手動ファイル復元の2つの方法が記載されている。"
+    },
+    "A09_Security_Logging_and_Monitoring_Failures": {
+      "status": "pass",
+      "notes": "logger.tsで認証トークン（CM_AUTH_TOKEN, MCBD_AUTH_TOKEN）のマスキングパターンが実装済み。設計方針書でも「CM_AUTH_TOKENはログにマスキングされることを明記」と記載。Deprecation警告の出力についても「同一キー1回のみ」の制限でログ汚染を防止。"
+    },
+    "A10_Server_Side_Request_Forgery": {
+      "status": "n/a",
+      "notes": "ドキュメント作成のみ。サーバーサイドリクエスト処理の変更なし。"
+    }
+  },
+  "must_fix": [],
+  "should_fix": [
+    {
+      "id": "SF-S4-1",
+      "severity": "low",
+      "category": "ドキュメント明確化",
+      "description": "systemdサービス移行手順で環境変数をサービスファイル内に直接記述する例があるが、認証トークンをsystemdサービスファイルに直接記述するのはセキュリティ上推奨されない",
+      "recommendation": "移行ガイドにて、認証トークンはEnvironmentFile=で外部ファイルから読み込むか、systemd-credsを使用することを推奨する注記を追加"
+    },
+    {
+      "id": "SF-S4-2",
+      "severity": "low",
+      "category": "ドキュメント明確化",
+      "description": "後方互換サポート終了後（v2.0.0以降）に旧名称MCBD_*を使用し続けた場合の動作が明確でない",
+      "recommendation": "移行ガイドにて、v2.0.0以降は旧名称が完全に無視され、アプリケーションがデフォルト値にフォールバックすることを明記"
+    }
+  ],
+  "good_practices": [
+    {
+      "id": "GP-S4-1",
+      "description": "認証トークンのプレースホルダー使用",
+      "details": "ドキュメント例示で「your-secret-token」を使用し、実際のトークン値の漏洩リスクを回避している"
+    },
+    {
+      "id": "GP-S4-2",
+      "description": "ログにおける認証トークンのマスキング",
+      "details": "logger.tsでCM_AUTH_TOKEN/MCBD_AUTH_TOKENのマスキングパターンが実装されており、ログへのトークン漏洩を防止"
+    },
+    {
+      "id": "GP-S4-3",
+      "description": "公開バインド時の認証必須チェック",
+      "details": "env.tsでbind=0.0.0.0時にCM_AUTH_TOKENが必須であることをバリデーションしており、移行後もこのセキュリティ制約が維持される"
+    },
+    {
+      "id": "GP-S4-4",
+      "description": "Deprecation警告の出力制御",
+      "details": "同一キーに対する警告は1回のみ出力される設計で、ログ汚染や情報過多を防止"
+    },
+    {
+      "id": "GP-S4-5",
+      "description": "環境変数マッピングのSingle Source of Truth",
+      "details": "ENV_MAPPINGをsrc/lib/env.tsで一元管理し、ドキュメントはこれを参照する方針。実装とドキュメントの乖離を防止"
+    }
+  ],
+  "summary": "Issue #79の設計方針書はセキュリティの観点から適切に設計されている。ドキュメント作成のみでコード変更がないため、OWASP Top 10の多くの項目は該当しない。認証トークンの取り扱いについては、プレースホルダーの使用、ログマスキング、公開バインド時の認証必須チェックなど、適切なセキュリティ対策が維持されている。Should Fix項目として、systemdサービスファイルでの認証トークン管理方法の推奨事項追加と、後方互換サポート終了後の動作明確化の2点を提案するが、いずれもドキュメントの明確化レベルであり、セキュリティ上のブロッキング問題ではない。"
+}

@@ -1,0 +1,54 @@
+{
+  "status": "passed",
+  "issue_number": 79,
+  "iteration": 1,
+  "test_results": {
+    "AC-1": {
+      "description": "移行ガイド（docs/migration-to-commandmate.md）が整備されている",
+      "status": "passed",
+      "evidence": "ファイルが存在し、全セクションが記載"
+    },
+    "AC-2": {
+      "description": "全9種類の環境変数マッピングが記載されている",
+      "status": "passed",
+      "evidence": "9種類のユニークな環境変数が18行にわたり記載"
+    },
+    "AC-3": {
+      "description": "既存環境の移行手順が具体的に記載されている",
+      "status": "passed",
+      "evidence": "sedコマンドによる一括置換、手動編集の両方を記載"
+    },
+    "AC-4": {
+      "description": "systemdサービス移行手順が記載されている",
+      "status": "passed",
+      "evidence": "5ステップの詳細手順とセキュリティ推奨事項を記載"
+    },
+    "AC-5": {
+      "description": ".claude/settings.local.json の更新手順が記載されている",
+      "status": "passed",
+      "evidence": "更新が必要なケース/不要なケースの両方を記載"
+    },
+    "AC-6": {
+      "description": "フォールバック期間が明記されている",
+      "status": "passed",
+      "evidence": "v2.0.0でサポート終了予定と明記"
+    },
+    "AC-7": {
+      "description": "CHANGELOG.md が最終整理されている",
+      "status": "passed",
+      "evidence": "Addedセクションに移行ガイド追加を記載"
+    },
+    "AC-8": {
+      "description": "全テストがパスする",
+      "status": "passed",
+      "evidence": "Unit: 1491/1491 passed, Lint: No errors, TSC: No errors"
+    }
+  },
+  "summary": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "pass_rate": "100%"
+  },
+  "timestamp": "2026-01-29"
+}

@@ -1,0 +1,22 @@
+{
+  "issue_number": 79,
+  "title": "Phase 4: 移行ガイド・リリース準備 (CommandMate リネーム)",
+  "acceptance_criteria": [
+    "移行ガイド（docs/migration-to-commandmate.md）が整備されている",
+    "全9種類の環境変数マッピングが記載されている",
+    "既存環境の移行手順が具体的に記載されている",
+    "systemdサービス移行手順が記載されている",
+    ".claude/settings.local.json の更新手順が記載されている",
+    "フォールバック期間が明記されている",
+    "CHANGELOG.md が最終整理されている",
+    "全テストがパスする"
+  ],
+  "implementation_tasks": [
+    "docs/migration-to-commandmate.md を新規作成",
+    "CHANGELOG.md に移行ガイド追加を記載",
+    "README.md に移行ガイドへのリンク追加（推奨）"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "notes": "本Issueはドキュメント作成のみ。コード変更なし。"
+}

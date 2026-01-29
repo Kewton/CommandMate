@@ -1,0 +1,22 @@
+{
+  "issue_number": 79,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "review_criteria": {
+    "SOLID": "Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion",
+    "KISS": "Keep It Simple, Stupid - 不必要な複雑性を避ける",
+    "YAGNI": "You Aren't Gonna Need It - 不要な機能を追加しない",
+    "DRY": "Don't Repeat Yourself - 重複を避ける"
+  },
+  "issue_summary": "Phase 4: 移行ガイド・リリース準備 (CommandMate リネーム)",
+  "scope": [
+    "移行ドキュメント作成 (docs/migration-to-commandmate.md)",
+    "全13種類の環境変数マッピング",
+    "既存環境の移行手順",
+    "systemdサービス移行手順",
+    "Claude Code設定の更新手順",
+    "CHANGELOG.md最終整理"
+  ]
+}

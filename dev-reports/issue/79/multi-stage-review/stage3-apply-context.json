@@ -1,0 +1,23 @@
+{
+  "issue_number": 79,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_result_path": "dev-reports/issue/79/multi-stage-review/stage3-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "must_fix_items": [],
+  "should_fix_items": [
+    {
+      "id": "SF-1",
+      "category": "ドキュメント整合性",
+      "description": "README.mdへの移行ガイドへのリンク追加",
+      "action": "対象ファイル一覧とチェックリストに追加"
+    },
+    {
+      "id": "SF-2",
+      "category": "下流依存への影響",
+      "description": "Issue #80完了後の更新箇所リストの追加",
+      "action": "セクション10.1に具体的な更新箇所チェックリストを追加"
+    }
+  ],
+  "output_file": "dev-reports/issue/79/multi-stage-review/stage3-apply-result.json"
+}

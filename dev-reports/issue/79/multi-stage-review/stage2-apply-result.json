@@ -1,0 +1,38 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "apply_status": "completed",
+  "must_fix_applied": [
+    {
+      "id": "MF-1",
+      "status": "applied",
+      "description": "CHANGELOG.md更新手順に事前確認（重複チェック）を追加"
+    }
+  ],
+  "should_fix_applied": [
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "description": "環境変数数の内訳を明確化（サーバー側8種+クライアント側1種=計9種）"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "description": "systemdサービス移行手順に環境依存の注記を追加"
+    },
+    {
+      "id": "SF-3",
+      "status": "applied",
+      "description": "後方互換サポート終了予定に現行バージョンとフォールバック期間を追記"
+    }
+  ],
+  "changes_made": [
+    "セクション2.2: 環境変数内訳を明確化（8種+1種=9種）",
+    "セクション3.2: systemdサービス名の環境依存に関する注記を追加",
+    "セクション3.4: CHANGELOG.md更新手順を「更新手順」に改名し、事前確認手順を追加",
+    "セクション6.2: 現行バージョン（Unreleased）とフォールバック期間を追記",
+    "セクション7 Step 2: CHANGELOG.md更新に重複チェックを追加",
+    "レビュー履歴: Stage 2レビュー結果を追記"
+  ],
+  "timestamp": "2026-01-29"
+}

@@ -1,0 +1,41 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "apply_status": "completed",
+  "must_fix_applied": [
+    {
+      "id": "MF-1",
+      "status": "applied",
+      "description": "クローン関連設定（4種）を削除し、環境変数総数を9種類に修正"
+    }
+  ],
+  "should_fix_applied": [
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "description": "Claude Code設定更新手順に「変更不要な場合」を明記"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "description": "ENV_MAPPINGをSingle Source of Truthとして参照するよう明記"
+    },
+    {
+      "id": "SF-3",
+      "status": "applied",
+      "description": "後方互換サポート終了予定を次のメジャーバージョン（v2.0.0）と明記"
+    }
+  ],
+  "changes_made": [
+    "セクション2.2: クローン関連設定（4種）を削除",
+    "セクション2.2: 環境変数総数を13種類から9種類に修正",
+    "セクション2.2: ENV_MAPPINGをSingle Source of Truthとして参照する旨を追記",
+    "セクション3.3: Claude Code設定更新が不要なケースを明記",
+    "セクション5.1: 環境変数の網羅性を9種類に修正",
+    "セクション6.2: 後方互換サポート終了予定（v2.0.0）を追記",
+    "セクション7: 環境変数マッピング表を9種類に修正",
+    "セクション8: 受け入れ条件を9種類に修正",
+    "レビュー履歴: Stage 1レビュー結果を追記"
+  ],
+  "timestamp": "2026-01-29"
+}

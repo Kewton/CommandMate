@@ -1,0 +1,28 @@
+{
+  "issue_number": 79,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "review_criteria": {
+    "OWASP_Top_10": [
+      "A01: Broken Access Control",
+      "A02: Cryptographic Failures",
+      "A03: Injection",
+      "A04: Insecure Design",
+      "A05: Security Misconfiguration",
+      "A06: Vulnerable and Outdated Components",
+      "A07: Identification and Authentication Failures",
+      "A08: Software and Data Integrity Failures",
+      "A09: Security Logging and Monitoring Failures",
+      "A10: Server-Side Request Forgery (SSRF)"
+    ]
+  },
+  "security_considerations": {
+    "sensitive_data": [
+      "CM_AUTH_TOKEN / MCBD_AUTH_TOKEN",
+      "NEXT_PUBLIC_CM_AUTH_TOKEN / NEXT_PUBLIC_MCBD_AUTH_TOKEN"
+    ],
+    "document_scope": "移行ガイドはドキュメントのみでコード変更なし"
+  }
+}

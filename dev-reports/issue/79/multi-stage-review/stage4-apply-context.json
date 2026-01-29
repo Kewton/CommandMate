@@ -1,0 +1,23 @@
+{
+  "issue_number": 79,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_result_path": "dev-reports/issue/79/multi-stage-review/stage4-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "must_fix_items": [],
+  "should_fix_items": [
+    {
+      "id": "SF-S4-1",
+      "category": "ドキュメント明確化",
+      "description": "systemdサービスファイルでの認証トークン管理の推奨事項",
+      "action": "セクション3.2にEnvironmentFile=やsystemd-credsの使用を推奨する注記を追加"
+    },
+    {
+      "id": "SF-S4-2",
+      "category": "ドキュメント明確化",
+      "description": "v2.0.0以降の旧名称使用時の動作を明確化",
+      "action": "セクション6.2にv2.0.0以降の動作（デフォルト値へのフォールバック）を明記"
+    }
+  ],
+  "output_file": "dev-reports/issue/79/multi-stage-review/stage4-apply-result.json"
+}

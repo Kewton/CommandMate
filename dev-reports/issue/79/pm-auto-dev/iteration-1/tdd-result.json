@@ -1,0 +1,46 @@
+{
+  "status": "success",
+  "issue_number": 79,
+  "iteration": 1,
+  "implementation_summary": {
+    "new_files": [
+      "docs/migration-to-commandmate.md"
+    ],
+    "modified_files": [
+      "CHANGELOG.md",
+      "README.md"
+    ]
+  },
+  "coverage": {
+    "note": "ドキュメント作成のみのため、コードカバレッジは該当なし",
+    "existing_coverage_maintained": true
+  },
+  "test_results": {
+    "unit_tests": "既存テストは全てパス（1491/1491）",
+    "lint": "エラーなし",
+    "typescript": "コンパイルエラーなし"
+  },
+  "implementation_details": {
+    "migration_guide": {
+      "path": "docs/migration-to-commandmate.md",
+      "sections": [
+        "概要",
+        "環境変数の変更（9種類）",
+        "移行手順（4ステップ）",
+        "systemdサービスの移行",
+        "Claude Code設定の更新",
+        "後方互換サポート",
+        "トラブルシューティング"
+      ]
+    },
+    "changelog_update": {
+      "section": "Added",
+      "content": "Migration guide追加を記載"
+    },
+    "readme_update": {
+      "section": "ドキュメント",
+      "content": "移行ガイドへのリンク追加"
+    }
+  },
+  "timestamp": "2026-01-29"
+}

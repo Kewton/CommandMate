@@ -1,0 +1,149 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "overall_status": "approved",
+  "review_date": "2026-01-29",
+  "issue_number": 79,
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "must_fix": [],
+  "should_fix": [
+    {
+      "id": "SF-1",
+      "severity": "Low",
+      "category": "ドキュメント整合性",
+      "title": "README.mdへの移行ガイドへのリンク追加",
+      "description": "docs/migration-to-commandmate.md を新規作成するが、README.md からのリンクがないため発見性が低い",
+      "recommendation": "README.md の関連ドキュメントセクションに移行ガイドへのリンクを追加することを推奨",
+      "impact": "新規ユーザーが移行ガイドを見つけにくい可能性",
+      "current": "README.mdに移行ガイドへの言及なし",
+      "expected": "README.mdの適切な箇所に `docs/migration-to-commandmate.md` へのリンク"
+    },
+    {
+      "id": "SF-2",
+      "severity": "Low",
+      "category": "下流依存への影響",
+      "title": "Issue #80完了後の更新手順の明文化",
+      "description": "設計書セクション10でGitHub URL更新について言及しているが、具体的な更新箇所リストがない",
+      "recommendation": "移行ガイド内でリポジトリ名変更後に更新が必要な箇所（clone URL、git remote）を明示的にリストアップ",
+      "impact": "Issue #80完了後の作業漏れリスク",
+      "current": "「#80完了後に新URLへ更新すること」のみ記載",
+      "expected": "更新が必要な具体的箇所のチェックリスト"
+    }
+  ],
+  "good_practices": [
+    {
+      "id": "GP-1",
+      "title": "上流Issueとの依存関係が明確",
+      "description": "Issue #76, #75, #77の完了を前提条件として明記し、各Issueの設計書へのリンクを提供"
+    },
+    {
+      "id": "GP-2",
+      "title": "ENV_MAPPINGをSingle Source of Truthとして参照",
+      "description": "環境変数マッピングの正式定義を `src/lib/env.ts` に委譲し、移行ガイドでは参照のみとすることでDRY原則を維持"
+    },
+    {
+      "id": "GP-3",
+      "title": "フォールバック期間とサポート終了予定の明記",
+      "description": "セクション6.2で「次のメジャーバージョン（v2.0.0）でサポート終了」と具体的なマイルストーンを提示"
+    },
+    {
+      "id": "GP-4",
+      "title": "下流Issue #80への影響を考慮",
+      "description": "GitHub URLの更新は#80完了後に実施することを明記し、段階的移行を考慮"
+    },
+    {
+      "id": "GP-5",
+      "title": "ドキュメントのみの変更でロールバックが容易",
+      "description": "コード変更なしのため、git revertまたはファイル削除で即座にロールバック可能"
+    },
+    {
+      "id": "GP-6",
+      "title": "CHANGELOG.md重複チェック手順の明記",
+      "description": "セクション3.4で既存の[Unreleased]セクションとの重複確認を義務付け"
+    },
+    {
+      "id": "GP-7",
+      "title": "既存ユーザーへの影響を多面的にカバー",
+      "description": "環境変数、Git remote、systemdサービス、Docker、Claude Code設定など複数の移行シナリオを網羅"
+    },
+    {
+      "id": "GP-8",
+      "title": "セキュリティ考慮事項の文書化",
+      "description": "認証トークンのプレースホルダー使用、マスキング、本番環境での注意点を明記"
+    }
+  ],
+  "scope_analysis": {
+    "status": "adequate",
+    "findings": [
+      {
+        "aspect": "変更ファイル数",
+        "assessment": "適切",
+        "detail": "新規1ファイル（docs/migration-to-commandmate.md）+ 更新1ファイル（CHANGELOG.md）で最小限"
+      },
+      {
+        "aspect": "コード変更",
+        "assessment": "適切",
+        "detail": "コード変更なし（no_code_changes: true）のため影響範囲が限定的"
+      },
+      {
+        "aspect": "テスト影響",
+        "assessment": "適切",
+        "detail": "ドキュメント検証（Markdown lint、リンク整合性）のみで既存テストへの影響なし"
+      }
+    ]
+  },
+  "dependency_impact": {
+    "status": "well_managed",
+    "upstream": {
+      "issues": ["#76", "#75", "#77"],
+      "assessment": "適切に依存関係を文書化。全上流Issueが完了済みであることを前提条件として明記",
+      "concerns": []
+    },
+    "downstream": {
+      "issues": ["#80"],
+      "assessment": "GitHub URL更新は#80完了後に実施と明記。段階的移行アプローチが適切",
+      "concerns": [
+        "移行ガイド内の具体的な更新箇所リストがあるとより良い（SF-2として記録）"
+      ]
+    }
+  },
+  "user_impact": {
+    "status": "well_documented",
+    "findings": [
+      {
+        "user_type": "新規ユーザー",
+        "impact": "低",
+        "detail": "CM_* 環境変数での新規セットアップが可能"
+      },
+      {
+        "user_type": "既存ユーザー（環境変数移行前）",
+        "impact": "低",
+        "detail": "フォールバック機能により MCBD_* で継続動作。Deprecation警告で移行を促進"
+      },
+      {
+        "user_type": "既存ユーザー（systemd運用）",
+        "impact": "中",
+        "detail": "サービス名変更の手順が詳細に記載されている（セクション3.2）"
+      },
+      {
+        "user_type": "既存ユーザー（Docker運用）",
+        "impact": "中",
+        "detail": "環境変数の更新手順が記載されている（セクション2.1）"
+      }
+    ],
+    "migration_path": {
+      "documented": true,
+      "clarity": "high",
+      "detail": "環境変数マッピング表（全9種類）、具体的なコマンド例、トラブルシューティングを提供"
+    }
+  },
+  "rollback_strategy": {
+    "status": "adequate",
+    "method": "git revert または ファイル削除",
+    "complexity": "low",
+    "detail": "セクション11でロールバック手順を明記。ドキュメントのみの変更のため即座に実行可能",
+    "concerns": []
+  },
+  "summary": "Issue #79の設計方針書は影響範囲の観点から適切に設計されている。上流Issue（#76, #75, #77）との依存関係が明確に文書化され、下流Issue #80への配慮も含まれている。コード変更がないため影響範囲が限定的であり、ロールバックも容易。既存ユーザーへの影響は移行ガイドで詳細に文書化されている。軽微な改善点として、README.mdへのリンク追加とIssue #80完了後の更新箇所の明文化を推奨するが、これらは必須ではない。総合評価として「承認」とする。"
+}

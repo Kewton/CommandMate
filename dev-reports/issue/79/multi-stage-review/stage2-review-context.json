@@ -1,0 +1,26 @@
+{
+  "issue_number": 79,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "review_criteria": {
+    "issue_requirements": "Issue要件との整合性確認",
+    "design_doc_consistency": "設計書内の一貫性",
+    "related_docs": "関連設計書（#76, #75, #77）との整合性"
+  },
+  "issue_requirements": {
+    "migration_guide": "docs/migration-to-commandmate.md を新規作成",
+    "env_mapping": "全環境変数マッピング記載",
+    "migration_steps": "既存環境の移行手順",
+    "systemd_migration": "systemdサービス移行手順",
+    "claude_settings": ".claude/settings.local.json の更新手順",
+    "fallback_period": "フォールバック期間の明記",
+    "changelog": "CHANGELOG.md最終整理"
+  },
+  "related_design_docs": [
+    "dev-reports/design/issue-76-env-fallback-design-policy.md",
+    "dev-reports/design/issue-75-design-policy.md",
+    "dev-reports/design/issue-77-rename-phase3-design-policy.md"
+  ]
+}

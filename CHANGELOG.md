@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - E2E tests updated to test for CommandMate heading (Issue #77)
 
 ### Added
+- Migration guide for existing users (`docs/migration-to-commandmate.md`) (Issue #79)
+  - Complete environment variable mapping (9 variables)
+  - systemd service migration instructions
+  - Claude Code settings update instructions
+  - Docker environment migration guide
+  - Troubleshooting section
 - Environment variable fallback support for backwards compatibility (Issue #76)
   - New `CM_*` prefix supported alongside legacy `MCBD_*` prefix
   - Deprecation warnings logged when legacy names are used (once per key)

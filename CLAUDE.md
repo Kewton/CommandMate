@@ -289,6 +289,7 @@ npm run db:reset      # DBリセット
 
 - [README.md](./README.md) - プロジェクト概要
 - [アーキテクチャ](./docs/architecture.md) - システム設計
+- [移行ガイド](./docs/migration-to-commandmate.md) - MyCodeBranchDesk からの移行手順
 - [クイックスタートガイド](./docs/user-guide/quick-start.md) - 5分で始める開発フロー
 - [コマンド利用ガイド](./docs/user-guide/commands-guide.md) - コマンドの詳細
 - [エージェント利用ガイド](./docs/user-guide/agents-guide.md) - エージェントの詳細

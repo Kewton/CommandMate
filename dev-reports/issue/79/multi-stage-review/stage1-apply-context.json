@@ -1,0 +1,36 @@
+{
+  "issue_number": 79,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_result_path": "dev-reports/issue/79/multi-stage-review/stage1-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-79-migration-guide-design-policy.md",
+  "must_fix_items": [
+    {
+      "id": "MF-1",
+      "category": "正確性・DRY原則",
+      "description": "クローン関連設定（CM_BASE_URL等）は実装されていないため削除",
+      "action": "セクション2.2から「クローン関連設定（4種）」を削除し、環境変数総数を9種類に修正"
+    }
+  ],
+  "should_fix_items": [
+    {
+      "id": "SF-1",
+      "category": "KISS原則",
+      "description": "Claude Code設定更新手順に「変更不要な場合」を明記",
+      "action": "ディレクトリ名変更を行わない場合は設定更新不要と明記"
+    },
+    {
+      "id": "SF-2",
+      "category": "DRY原則",
+      "description": "ENV_MAPPINGをSingle Source of Truthとして参照するよう明記",
+      "action": "設計書に記載"
+    },
+    {
+      "id": "SF-3",
+      "category": "明確性",
+      "description": "後方互換サポート終了予定の具体的な時期を明記",
+      "action": "次のメジャーバージョン（v2.0.0）での削除予定を明記"
+    }
+  ],
+  "output_file": "dev-reports/issue/79/multi-stage-review/stage1-apply-result.json"
+}

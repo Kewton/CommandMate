@@ -1,0 +1,81 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "overall_status": "conditionally_approved",
+  "must_fix": [
+    {
+      "id": "MF-1",
+      "category": "Issue要件との整合性",
+      "severity": "High",
+      "title": "CHANGELOG.md追記内容の不足",
+      "description": "Issue #79設計書ではCHANGELOG.mdの追記内容として「Migration guide追加」のみ記載されているが、Issue #79の要件である「CHANGELOG.md最終整理」の観点から、既存のCHANGELOG.mdの内容確認と整理が必要。現在のCHANGELOGにはIssue #76, #75, #77の変更が記録済みであり、Issue #79では移行ガイドの追加記載のみが適切だが、設計書には既存CHANGELOGとの整合性確認手順が含まれていない。",
+      "location": "設計書 Section 3.4 / Section 7 Step 2",
+      "suggestion": "CHANGELOG.md追記前に既存内容との重複確認手順を追加。既にAddedセクションに記載済みの項目と重複しないよう注意書きを追加。"
+    }
+  ],
+  "should_fix": [
+    {
+      "id": "SF-1",
+      "category": "設計書内の一貫性",
+      "severity": "Medium",
+      "title": "環境変数数の不整合（9種 vs 8種+1種）",
+      "description": "設計書Section 2.1では「全9種類（サーバー8種 + クライアント1種）」と記載しているが、Section 2.2の表ではクライアント設定を別枠として記載している。Issue #76設計書ではサーバー側は8種（ENV_MAPPING）、クライアント側は1種と明確に分離されている。記載方法は正確だが、「全9種類」という表現と実際のENV_MAPPINGの8種類との関係が混乱を招く可能性がある。",
+      "location": "設計書 Section 2.1, 2.2, 5.1, 7 Step 1",
+      "suggestion": "「サーバー側8種類（ENV_MAPPINGで定義）+ クライアント側1種類 = 計9種類」と明記し、ENV_MAPPINGには8種類のみ含まれることを補足する。"
+    },
+    {
+      "id": "SF-2",
+      "category": "関連設計書との整合性",
+      "severity": "Medium",
+      "title": "systemdサービス名の前提確認不足",
+      "description": "設計書Section 3.2のsystemdサービス移行手順では旧サービス名を`mycodebranch-desk.service`としているが、Issue #77設計書（Section 3.4）ではAPP_NAME=commandmateへの更新のみ記載されており、実際のsystemdサービス名の現状が不明確。移行ガイドでは既存ユーザーの環境に依存する情報のため、「既存のサービス名に応じて読み替えてください」などの注記が必要。",
+      "location": "設計書 Section 3.2",
+      "suggestion": "systemdサービス移行手順に「サービス名は環境によって異なる場合があります。既存のサービスファイル名に合わせて読み替えてください」という注記を追加。"
+    },
+    {
+      "id": "SF-3",
+      "category": "Issue要件との整合性",
+      "severity": "Low",
+      "title": "サポート終了予定バージョンの明記",
+      "description": "設計書Section 6.2で「次のメジャーバージョン（v2.0.0）でサポート終了」と記載されているが、現在のバージョンが明記されていない。CHANGELOG.mdにも現在のリリースバージョンが記載されていないため、ユーザーにとってサポート終了時期が不明確。",
+      "location": "設計書 Section 6.2",
+      "suggestion": "移行ガイド作成時に「現在のバージョンはUnreleased（開発版）であり、正式リリース後のv2.0.0でMCBD_*のサポートを終了予定」と明記する。または、フォールバック期間を「正式リリースから1メジャーバージョン」と表現する。"
+    }
+  ],
+  "good_practices": [
+    {
+      "id": "GP-1",
+      "category": "Issue要件との整合性",
+      "description": "Issue #79の要件である「移行ドキュメント作成」「既存環境の移行手順」「systemdサービス移行手順」「Claude Code設定更新手順」「後方互換サポートの文書化」がすべて設計書に明確に記載されている。"
+    },
+    {
+      "id": "GP-2",
+      "category": "関連設計書との整合性",
+      "description": "Issue #76設計書のENV_MAPPING定義（8種類）との整合性が保たれており、フォールバック機能の説明も正確。「src/lib/env.tsのENV_MAPPINGをSingle Source of Truthとする」という記載は優れた設計判断。"
+    },
+    {
+      "id": "GP-3",
+      "category": "設計書内の一貫性",
+      "description": "受け入れ条件（Section 8）と実装チェックリスト（Section 7）が整合しており、すべての受け入れ条件に対応するチェック項目が存在する。"
+    },
+    {
+      "id": "GP-4",
+      "category": "関連設計書との整合性",
+      "description": "Issue #77設計書で実装された「Envインターフェースの新名称（CM_*）」が正しく反映されており、実装コード（src/lib/env.ts）とも一致している。"
+    },
+    {
+      "id": "GP-5",
+      "category": "Issue要件との整合性",
+      "description": "Stage 1レビューで指摘された「クローン関連設定4種の削除」が正しく反映されており、環境変数数が13種から9種に修正されている。"
+    },
+    {
+      "id": "GP-6",
+      "category": "設計書内の一貫性",
+      "description": "GitHub URL変更（#80）への対応方針がSection 10に明記されており、現時点では旧URLを使用し、#80完了後に更新するという段階的アプローチが適切。"
+    }
+  ],
+  "summary": "Issue #79の設計方針書は、Issue要件、関連設計書（#76, #75, #77）、実装コードとの整合性が概ね確保されている。必須改善項目1件（CHANGELOG.md追記内容の重複確認手順）、推奨改善項目3件を特定した。特に、ENV_MAPPINGをSingle Source of Truthとする設計判断、Stage 1レビュー指摘事項の反映、段階的なURL更新方針などは適切な設計である。条件付き承認とし、MF-1の対応後に実装可能。",
+  "reviewer": "Claude Opus 4.5 (architecture-review-agent)",
+  "reviewed_at": "2026-01-29T00:00:00Z"
+}
