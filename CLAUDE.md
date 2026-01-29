@@ -210,7 +210,7 @@ npm run db:reset      # DBリセット
 | `/issue-split` | Issue分割計画 |
 | `/architecture-review` | アーキテクチャレビュー（サブエージェント対応） |
 | `/apply-review` | レビュー指摘事項の実装反映 |
-| `/multi-stage-review` | 4段階レビュー（通常→整合性→影響分析→セキュリティ） |
+| `/multi-stage-design-review` | 設計書の4段階レビュー（通常→整合性→影響分析→セキュリティ） |
 | `/multi-stage-issue-review` | Issueの多段階レビュー（通常→影響範囲）×2回 |
 | `/design-policy` | 設計方針策定 |
 
