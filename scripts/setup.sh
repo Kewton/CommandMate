@@ -38,11 +38,9 @@ Description:
     1. Run preflight checks (dependencies)
     2. Install npm dependencies
     3. Configure environment (.env)
-    4. Initialize database
-    5. Build application
+    4. Initialize database, build, and start application
 
-After setup, start the application with:
-    ./scripts/build-and-start.sh --daemon
+After setup, the application will be running in the background.
 
 EOF
 }
@@ -100,7 +98,7 @@ echo -e "${GREEN}✓${NC} Dependencies installed"
 echo ""
 
 # Step 3: Environment configuration
-echo "Step 3/5: Configuring environment..."
+echo "Step 3/4: Configuring environment..."
 if [ ! -f .env ]; then
     echo "No .env file found. Starting interactive setup..."
     echo ""
@@ -115,48 +113,22 @@ else
 fi
 echo ""
 
-# Step 4: Create data directory and initialize database
-echo "Step 4/5: Initializing database..."
-mkdir -p data
-chmod 755 data
-npm run db:init
-echo -e "${GREEN}✓${NC} Database initialized"
+# Step 4: Build and start
+echo "Step 4/4: Building and starting application..."
+./scripts/build-and-start.sh --daemon
 echo ""
 
-# Step 5: Build application
-echo "Step 5/5: Building application..."
-npm run build
-echo -e "${GREEN}✓${NC} Application built"
-echo ""
-
-# Check if PM2 is installed
+# Final message
 echo "=================================="
 echo "Setup complete!"
 echo "=================================="
 echo ""
-
-if command -v pm2 &> /dev/null; then
-    echo -e "${GREEN}✓${NC} PM2 is installed"
-    echo ""
-    echo "To start the application:"
-    echo "  ./scripts/build-and-start.sh --daemon"
-    echo ""
-    echo "Or with PM2:"
-    echo "  ./scripts/start.sh"
-else
-    echo "! PM2 is not installed (optional)"
-    echo ""
-    echo "To start the application:"
-    echo "  ./scripts/build-and-start.sh --daemon"
-    echo ""
-    echo "Or install PM2 for process management:"
-    echo "  npm install -g pm2"
-    echo "  ./scripts/start.sh"
-fi
-
+echo "The application is now running in the background."
 echo ""
-echo "Other useful commands:"
+echo "Useful commands:"
 echo "  ./scripts/status.sh        - Check application status"
 echo "  ./scripts/health-check.sh  - Run health checks"
 echo "  ./scripts/logs.sh          - View application logs"
+echo "  ./scripts/stop-server.sh   - Stop the server"
+echo "  ./scripts/restart.sh       - Restart the server"
 echo ""

@@ -19,10 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Help option (`-h`/`--help`)
 
 ### Changed
-- `scripts/setup.sh` now uses preflight-check.sh and setup-env.sh (Issue #92)
+- `scripts/build-and-start.sh` now includes database initialization (Issue #92)
+  - Creates data directory
+  - Runs `npm run db:init` before build
+  - Help option (`-h`/`--help`)
+- `scripts/setup.sh` now uses preflight-check.sh, setup-env.sh, and build-and-start.sh (Issue #92)
   - Integrated dependency checking
   - Interactive environment configuration
-  - Streamlined 5-step setup process
+  - Streamlined 4-step setup process (preflight → npm install → env → build & start)
+  - Application starts automatically after setup
 - `.env.production.example` updated to use CM_* variables (Issue #92)
   - Migrated from MCBD_* to CM_* format
   - Added logging configuration options

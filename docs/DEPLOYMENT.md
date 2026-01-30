@@ -35,16 +35,14 @@
 ```bash
 git clone https://github.com/kewton/CommandMate.git
 cd CommandMate
-./scripts/setup.sh                    # 依存チェック、環境設定、ビルドを自動実行
-./scripts/build-and-start.sh --daemon # バックグラウンドで起動
+./scripts/setup.sh  # 依存チェック、環境設定、ビルド、起動まで自動実行
 ```
 
 `setup.sh` は以下を自動実行します：
 1. 依存関係のチェック（`preflight-check.sh`）
 2. npm 依存関係のインストール
 3. 対話式環境設定（`setup-env.sh`）
-4. データベース初期化
-5. アプリケーションビルド
+4. データベース初期化、ビルド、起動（`build-and-start.sh --daemon`）
 
 ### 手動セットアップ
 

@@ -58,8 +58,7 @@ Claude Code での開発経験があり、本業の傍らで個人開発を続�
 ```bash
 git clone https://github.com/Kewton/CommandMate.git
 cd CommandMate
-./scripts/setup.sh                    # 依存チェック、環境設定、ビルドを自動実行
-./scripts/build-and-start.sh --daemon # バックグラウンドで起動
+./scripts/setup.sh  # 依存チェック、環境設定、ビルド、起動まで自動実行
 ```
 
 ブラウザで http://localhost:3000 にアクセスしてください。
