@@ -29,6 +29,26 @@
 }
 
 @layer components {
+  /* Markdown code block styles - Fix Typography/highlight.js conflict */
+  .prose pre {
+    @apply bg-transparent p-0 border-0;
+  }
+
+  .prose pre code.hljs {
+    @apply rounded-md;
+    padding: 1rem;
+  }
+
+  /* Inline code styling (not in pre blocks) */
+  .prose :not(pre) > code {
+    @apply bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono;
+  }
+
+  .prose :not(pre) > code::before,
+  .prose :not(pre) > code::after {
+    content: none;
+  }
+
   /* Card component base */
   .card {
     @apply bg-white rounded-lg border border-gray-200 shadow-sm;

@@ -29,6 +29,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/github-dark.css';
 import { Save, X, Columns, FileText, Eye, AlertTriangle, Maximize2, Minimize2 } from 'lucide-react';
 import { debounce } from '@/lib/utils';
 import { ToastContainer, useToast } from '@/components/common/Toast';

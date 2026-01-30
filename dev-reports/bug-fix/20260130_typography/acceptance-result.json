@@ -1,0 +1,30 @@
+{
+  "bug_id": "20260130_typography",
+  "test_date": "2026-01-30T23:12:00+09:00",
+  "status": "ready_for_manual_verification",
+  "automated_checks": {
+    "build": "PASS",
+    "unit_tests": "PASS (1899 tests)",
+    "lint": "PASS",
+    "typescript": "PASS"
+  },
+  "changes_made": [
+    {
+      "file": "package.json",
+      "change": "@tailwindcss/typography を devDependencies に追加"
+    },
+    {
+      "file": "tailwind.config.js",
+      "change": "plugins 配列に require('@tailwindcss/typography') を追加"
+    }
+  ],
+  "manual_verification_items": [
+    "コードブロック（```code```）が正しくスタイリングされる",
+    "番号付きリスト（1. 2. 3.）が正しく表示される",
+    "箇条書きリスト（- item）が正しく表示される",
+    "見出し（# ## ###）が正しく表示される",
+    "引用（> quote）が正しく表示される",
+    "インラインコード（`code`）が正しく表示される"
+  ],
+  "server_url": "http://localhost:3000"
+}

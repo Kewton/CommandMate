@@ -1,0 +1,25 @@
+{
+  "bug_id": "20260130_typography",
+  "bug_description": "@tailwindcss/typography プラグイン未インストールによるマークダウンプレビューのスタイル欠落",
+  "root_cause": "MarkdownEditor.tsx で使用している prose クラスは @tailwindcss/typography プラグインが提供するもの。プラグインが未インストールのためスタイルが適用されない",
+  "selected_action": {
+    "title": "Option 1: Typography プラグインのインストール",
+    "steps": [
+      "1. @tailwindcss/typography を devDependencies にインストール",
+      "2. tailwind.config.js の plugins 配列にプラグインを追加",
+      "3. ビルド確認",
+      "4. マークダウンプレビュー表示確認"
+    ]
+  },
+  "files_to_modify": [
+    "package.json",
+    "tailwind.config.js"
+  ],
+  "definition_of_done": [
+    "コードブロックが正しくスタイリングされる",
+    "番号付きリスト（ol/li）が正しく表示される",
+    "見出し、引用、テーブル等も正しく表示される",
+    "ビルドが成功する",
+    "既存テストがパスする"
+  ]
+}
