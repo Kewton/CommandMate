@@ -137,7 +137,10 @@ src/
 | `src/config/z-index.ts` | z-index値の一元管理 |
 | `src/config/uploadable-extensions.ts` | アップロード可能拡張子・MIMEタイプ・マジックバイト検証 |
 | `src/config/image-extensions.ts` | 画像ファイル拡張子・マジックバイト・SVG XSS検証 |
+| `src/config/mermaid-config.ts` | mermaid設定定数（securityLevel='strict'） |
 | `src/components/worktree/ImageViewer.tsx` | 画像表示コンポーネント |
+| `src/components/worktree/MermaidDiagram.tsx` | mermaidダイアグラム描画コンポーネント |
+| `src/components/worktree/MermaidCodeBlock.tsx` | mermaidコードブロックラッパー |
 
 ---
 
@@ -252,6 +255,26 @@ npm run db:reset      # DBリセット
 ---
 
 ## 最近の実装機能
+
+### Issue #100: Mermaidダイアグラム描画機能
+- **ダイアグラム描画**: マークダウンプレビューでmermaidコードブロックをSVGダイアグラムとして描画
+- **対応ダイアグラム**: フローチャート、シーケンス図、ER図、ガントチャート、状態遷移図など（mermaid.js対応全種）
+- **セキュリティ対策**:
+  - `securityLevel='strict'`設定（XSS防止）
+  - mermaid内部DOMPurifyによるサニタイズ
+  - scriptタグ・イベントハンドラ・危険なURLスキーム除去
+  - securityLevel検証フェイルセーフ機構
+  - Issue #95 SVG XSS対策との整合性確保
+- **SSR対応**: `next/dynamic`による遅延読み込み（`ssr: false`）
+- **エラーハンドリング**: 構文エラー時のエラーメッセージ表示（UIクラッシュ防止）
+- **ローディングUI**: Loader2スピナー付き
+- **主要コンポーネント**:
+  - `src/config/mermaid-config.ts` - mermaid設定定数（securityLevel, startOnLoad, theme）
+  - `src/components/worktree/MermaidDiagram.tsx` - mermaid描画コンポーネント
+  - `src/components/worktree/MermaidCodeBlock.tsx` - コードブロックラッパー（動的import）
+  - `src/components/worktree/MarkdownEditor.tsx` - ReactMarkdown components prop統合
+- **テスト**: XSS回帰テスト、セキュリティ設定検証テスト、Issue #95整合性テスト
+- 詳細: [設計書](./dev-reports/design/issue-100-mermaid-diagram-design-policy.md)
 
 ### Issue #95: 画像ファイルビューワ
 - **画像表示**: FileTreeViewで選択した画像ファイルをビューワ領域に表示
