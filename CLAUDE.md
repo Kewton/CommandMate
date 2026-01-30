@@ -214,6 +214,13 @@ npm run db:reset      # DBリセット
 | `/multi-stage-issue-review` | Issueの多段階レビュー（通常→影響範囲）×2回 |
 | `/design-policy` | 設計方針策定 |
 
+### 利用可能なスキル
+
+| スキル | 説明 |
+|--------|------|
+| `/release` | バージョンアップ、CHANGELOG更新、Gitタグ作成、GitHub Releases作成を自動化 |
+| `/rebuild` | サーバーをリビルドして再起動 |
+
 ### 利用可能なエージェント
 
 | エージェント | 説明 |

@@ -13,6 +13,13 @@ CommandMateで使用できるスラッシュコマンドの詳細ガイドです
 | `/progress-report` | 進捗報告書作成 | 高 |
 | `/tdd-impl` | TDD実装 | 高 |
 
+## スキル一覧
+
+| スキル | 説明 |
+|--------|------|
+| `/release` | バージョンアップ、CHANGELOG更新、Gitタグ作成を自動化 |
+| `/rebuild` | サーバーをリビルドして再起動 |
+
 ---
 
 ## /work-plan
@@ -267,7 +274,58 @@ TDD実装完了
 
 ---
 
-## コマンドファイルの場所
+## 利用可能なスキル
+
+スキルはコマンドより軽量で、特定の操作を自動化することに特化しています。
+
+### /release
+
+バージョンアップを自動化するスキルです。
+
+#### 使用方法
+
+```bash
+/release patch      # パッチバージョンアップ (0.1.0 → 0.1.1)
+/release minor      # マイナーバージョンアップ (0.1.0 → 0.2.0)
+/release major      # メジャーバージョンアップ (0.1.0 → v1.0.0)
+/release 1.0.0      # 直接バージョン指定
+```
+
+#### 実行内容
+
+1. 事前チェック（mainブランチ確認、未コミット変更確認）
+2. 現在バージョン取得（package.json）
+3. 新バージョン計算
+4. package.json更新
+5. package-lock.json更新
+6. CHANGELOG.md更新
+7. コミット作成
+8. Gitタグ作成・プッシュ
+9. GitHub Releases作成
+
+#### エラーケース
+
+| エラー | 対処 |
+|--------|------|
+| 未コミットの変更がある | コミットまたはスタッシュ |
+| タグが既に存在する | 別バージョンを指定 |
+| [Unreleased]が空 | 警告表示、続行確認 |
+
+詳細: [リリースガイド](../release-guide.md)
+
+### /rebuild
+
+サーバーをリビルドして再起動するスキルです。
+
+#### 使用方法
+
+```bash
+/rebuild
+```
+
+---
+
+## コマンド・スキルファイルの場所
 
 ```
 .claude/
@@ -276,6 +334,15 @@ TDD実装完了
 │   ├── create-pr.md
 │   ├── progress-report.md
 │   └── tdd-impl.md
+├── skills/
+│   ├── release/
+│   │   ├── SKILL.md
+│   │   ├── templates/
+│   │   │   └── changelog-entry.md
+│   │   └── examples/
+│   │       └── release-example.md
+│   └── rebuild/
+│       └── SKILL.md
 ├── agents/
 │   ├── tdd-impl-agent.md
 │   └── progress-report-agent.md
