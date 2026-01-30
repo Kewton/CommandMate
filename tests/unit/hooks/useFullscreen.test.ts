@@ -33,7 +33,7 @@ describe('useFullscreen', () => {
       configurable: true,
     });
 
-    document.exitFullscreen = mockExitFullscreen;
+    document.exitFullscreen = mockExitFullscreen as unknown as () => Promise<void>;
   });
 
   afterEach(() => {
