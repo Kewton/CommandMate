@@ -58,15 +58,34 @@ const ERROR_CODE_TO_HTTP_STATUS: Record<string, number> = {
 
 /**
  * Helper function to create error response with appropriate HTTP status
+ * [DRY-002] Simplified overload to accept FileOperationResult directly
  */
 function createUploadErrorResponse(
   code: string,
   message: string,
+  defaultStatus?: number
+): NextResponse;
+function createUploadErrorResponse(
+  result: { error?: { code: string; message: string } }
+): NextResponse;
+function createUploadErrorResponse(
+  codeOrResult: string | { error?: { code: string; message: string } },
+  message?: string,
   defaultStatus: number = 500
 ): NextResponse {
+  if (typeof codeOrResult === 'string') {
+    const status = ERROR_CODE_TO_HTTP_STATUS[codeOrResult] ?? defaultStatus;
+    return NextResponse.json(
+      { success: false, error: { code: codeOrResult, message } },
+      { status }
+    );
+  }
+  // Handle FileOperationResult
+  const code = codeOrResult.error?.code ?? 'INTERNAL_ERROR';
+  const msg = codeOrResult.error?.message ?? 'Unknown error';
   const status = ERROR_CODE_TO_HTTP_STATUS[code] ?? defaultStatus;
   return NextResponse.json(
-    { success: false, error: { code, message } },
+    { success: false, error: { code, message: msg } },
     { status }
   );
 }
@@ -119,20 +138,12 @@ export async function POST(
     // 1. Extension validation (whitelist)
     const ext = extname(filename).toLowerCase();
     if (!isUploadableExtension(ext)) {
-      const errorResult = createErrorResult('INVALID_EXTENSION');
-      return createUploadErrorResponse(
-        errorResult.error!.code,
-        errorResult.error!.message
-      );
+      return createUploadErrorResponse(createErrorResult('INVALID_EXTENSION'));
     }
 
     // 2. MIME type validation
     if (!validateMimeType(ext, mimeType)) {
-      const errorResult = createErrorResult('INVALID_MIME_TYPE');
-      return createUploadErrorResponse(
-        errorResult.error!.code,
-        errorResult.error!.message
-      );
+      return createUploadErrorResponse(createErrorResult('INVALID_MIME_TYPE'));
     }
 
     // 3. Get file content as buffer
@@ -141,53 +152,33 @@ export async function POST(
 
     // 4. Magic bytes validation [SEC-001]
     if (!validateMagicBytes(ext, buffer)) {
-      const errorResult = createErrorResult('INVALID_MAGIC_BYTES');
-      return createUploadErrorResponse(
-        errorResult.error!.code,
-        errorResult.error!.message
-      );
+      return createUploadErrorResponse(createErrorResult('INVALID_MAGIC_BYTES'));
     }
 
     // 5. File size validation
     const maxSize = getMaxFileSize(ext);
     if (fileSize > maxSize) {
-      const errorResult = createErrorResult('FILE_TOO_LARGE');
-      return createUploadErrorResponse(
-        errorResult.error!.code,
-        errorResult.error!.message
-      );
+      return createUploadErrorResponse(createErrorResult('FILE_TOO_LARGE'));
     }
 
     // 6. Filename validation [SEC-004]
     const nameValidation = isValidNewName(filename, { forUpload: true });
     if (!nameValidation.valid) {
-      const errorResult = createErrorResult('INVALID_FILENAME');
-      return createUploadErrorResponse(
-        errorResult.error!.code,
-        errorResult.error!.message
-      );
+      return createUploadErrorResponse(createErrorResult('INVALID_FILENAME'));
     }
 
     // 7. Structured file content validation [SEC-006, SEC-007]
     if (ext === '.yaml' || ext === '.yml') {
       const content = buffer.toString('utf-8');
       if (!isYamlSafe(content)) {
-        const errorResult = createErrorResult('INVALID_FILE_CONTENT');
-        return createUploadErrorResponse(
-          errorResult.error!.code,
-          errorResult.error!.message
-        );
+        return createUploadErrorResponse(createErrorResult('INVALID_FILE_CONTENT'));
       }
     }
 
     if (ext === '.json') {
       const content = buffer.toString('utf-8');
       if (!isJsonValid(content)) {
-        const errorResult = createErrorResult('INVALID_FILE_CONTENT');
-        return createUploadErrorResponse(
-          errorResult.error!.code,
-          errorResult.error!.message
-        );
+        return createUploadErrorResponse(createErrorResult('INVALID_FILE_CONTENT'));
       }
     }
 
@@ -198,10 +189,7 @@ export async function POST(
     const writeResult = await writeBinaryFile(worktree.path, relativePath, buffer);
 
     if (!writeResult.success) {
-      return createUploadErrorResponse(
-        writeResult.error?.code || 'INTERNAL_ERROR',
-        writeResult.error?.message || 'Failed to upload file'
-      );
+      return createUploadErrorResponse(writeResult);
     }
 
     // 10. Return success response

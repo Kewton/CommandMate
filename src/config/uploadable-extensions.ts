@@ -144,6 +144,18 @@ export function isUploadableExtension(extension: string): boolean {
 }
 
 /**
+ * Get validator for a given extension
+ * [DRY-001] Centralized validator lookup to avoid repetition
+ *
+ * @param extension - File extension (e.g., '.png')
+ * @returns The validator for the extension, or undefined if not found
+ */
+function getValidator(extension: string): UploadableExtensionValidator | undefined {
+  const normalizedExt = extension.toLowerCase();
+  return UPLOADABLE_EXTENSION_VALIDATORS.find((v) => v.extension === normalizedExt);
+}
+
+/**
  * Validate MIME type for a given extension
  *
  * @param extension - File extension (e.g., '.png')
@@ -151,10 +163,7 @@ export function isUploadableExtension(extension: string): boolean {
  * @returns True if the MIME type is allowed for this extension
  */
 export function validateMimeType(extension: string, mimeType: string): boolean {
-  const normalizedExt = extension.toLowerCase();
-  const validator = UPLOADABLE_EXTENSION_VALIDATORS.find(
-    (v) => v.extension === normalizedExt
-  );
+  const validator = getValidator(extension);
   return validator?.allowedMimeTypes.includes(mimeType) ?? false;
 }
 
@@ -167,10 +176,7 @@ export function validateMimeType(extension: string, mimeType: string): boolean {
  * @returns True if magic bytes match, or if no magic bytes defined for this extension
  */
 export function validateMagicBytes(extension: string, buffer: Buffer): boolean {
-  const normalizedExt = extension.toLowerCase();
-  const validator = UPLOADABLE_EXTENSION_VALIDATORS.find(
-    (v) => v.extension === normalizedExt
-  );
+  const validator = getValidator(extension);
 
   // No magic bytes defined (text files) - skip validation
   if (!validator?.magicBytes || validator.magicBytes.length === 0) {
@@ -194,10 +200,7 @@ export function validateMagicBytes(extension: string, buffer: Buffer): boolean {
  * @returns Maximum file size in bytes, or DEFAULT_MAX_FILE_SIZE if not found
  */
 export function getMaxFileSize(extension: string): number {
-  const normalizedExt = extension.toLowerCase();
-  const validator = UPLOADABLE_EXTENSION_VALIDATORS.find(
-    (v) => v.extension === normalizedExt
-  );
+  const validator = getValidator(extension);
   return validator?.maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
 }
 
