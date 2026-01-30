@@ -34,6 +34,8 @@ import { MessageInput } from '@/components/worktree/MessageInput';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/LeftPaneTabSwitcher';
 import { FileViewer } from '@/components/worktree/FileViewer';
+import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
+import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
@@ -802,6 +804,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [error, setError] = useState<string | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [fileViewerPath, setFileViewerPath] = useState<string | null>(null);
+  const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
   const [autoYesEnabled, setAutoYesEnabled] = useState(false);
   const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
 
@@ -891,14 +894,38 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setFileViewerPath(path);
   }, []);
 
-  /** Handle file select from FileTreeView - opens file viewer */
+  /**
+   * Handle file select from FileTreeView
+   * Opens MarkdownEditor for .md files, FileViewer for others
+   * [Stage 3 SF-004] Separate editorFilePath state to avoid FileViewer conflict
+   */
   const handleFileSelect = useCallback((path: string) => {
-    setFileViewerPath(path);
+    const extension = path.split('.').pop()?.toLowerCase();
+    const extWithDot = extension ? `.${extension}` : '';
+
+    if (EDITABLE_EXTENSIONS.includes(extWithDot)) {
+      // Open in MarkdownEditor
+      setEditorFilePath(path);
+    } else {
+      // Open in FileViewer
+      setFileViewerPath(path);
+    }
   }, []);
 
   /** Handle FileViewer close */
   const handleFileViewerClose = useCallback(() => {
     setFileViewerPath(null);
+  }, []);
+
+  /** Handle MarkdownEditor close */
+  const handleEditorClose = useCallback(() => {
+    setEditorFilePath(null);
+  }, []);
+
+  /** Handle file save in editor - can refresh tree if needed */
+  const handleEditorSave = useCallback((savedPath: string) => {
+    // File was saved - could trigger tree refresh here if needed
+    console.log('[WorktreeDetailRefactored] File saved:', savedPath);
   }, []);
 
   /** Handle left pane tab change */
@@ -1221,6 +1248,24 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             worktreeId={worktreeId}
             filePath={fileViewerPath ?? ''}
           />
+          {/* Markdown Editor Modal */}
+          {editorFilePath && (
+            <Modal
+              isOpen={true}
+              onClose={handleEditorClose}
+              title={editorFilePath.split('/').pop() || 'Editor'}
+              size="full"
+            >
+              <div className="h-[80vh]">
+                <MarkdownEditor
+                  worktreeId={worktreeId}
+                  filePath={editorFilePath}
+                  onClose={handleEditorClose}
+                  onSave={handleEditorSave}
+                />
+              </div>
+            </Modal>
+          )}
         </div>
       </ErrorBoundary>
     );
@@ -1302,6 +1347,24 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           worktreeId={worktreeId}
           filePath={fileViewerPath ?? ''}
         />
+        {/* Markdown Editor Modal (Mobile) */}
+        {editorFilePath && (
+          <Modal
+            isOpen={true}
+            onClose={handleEditorClose}
+            title={editorFilePath.split('/').pop() || 'Editor'}
+            size="full"
+          >
+            <div className="h-[80vh]">
+              <MarkdownEditor
+                worktreeId={worktreeId}
+                filePath={editorFilePath}
+                onClose={handleEditorClose}
+                onSave={handleEditorSave}
+              />
+            </div>
+          </Modal>
+        )}
       </div>
     </ErrorBoundary>
   );

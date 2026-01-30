@@ -9,6 +9,7 @@
  * - Caching of loaded directory contents
  * - File/folder icons with expand/collapse chevrons
  * - File selection callback for integration with FileViewer
+ * - Right-click context menu for file operations [Phase 4]
  * - Keyboard navigation support
  * - Responsive design with touch-friendly targets
  */
@@ -17,6 +18,8 @@
 
 import React, { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import type { TreeItem, TreeResponse } from '@/types/models';
+import { useContextMenu } from '@/hooks/useContextMenu';
+import { ContextMenu } from '@/components/worktree/ContextMenu';
 
 // ============================================================================
 // Types
@@ -27,6 +30,14 @@ export interface FileTreeViewProps {
   worktreeId: string;
   /** Callback when a file is selected */
   onFileSelect?: (filePath: string) => void;
+  /** Callback when new file should be created */
+  onNewFile?: (parentPath: string) => void;
+  /** Callback when new directory should be created */
+  onNewDirectory?: (parentPath: string) => void;
+  /** Callback when item should be renamed */
+  onRename?: (path: string) => void;
+  /** Callback when item should be deleted */
+  onDelete?: (path: string) => void;
   /** Additional CSS classes */
   className?: string;
 }
@@ -41,6 +52,7 @@ interface TreeNodeProps {
   onToggle: (path: string) => void;
   onFileSelect?: (filePath: string) => void;
   onLoadChildren: (path: string) => Promise<void>;
+  onContextMenu?: (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void;
 }
 
 // ============================================================================
@@ -178,6 +190,7 @@ const TreeNode = memo(function TreeNode({
   onToggle,
   onFileSelect,
   onLoadChildren,
+  onContextMenu,
 }: TreeNodeProps) {
   const [loading, setLoading] = useState(false);
   const fullPath = path ? `${path}/${item.name}` : item.name;
@@ -208,6 +221,13 @@ const TreeNode = memo(function TreeNode({
     [handleClick]
   );
 
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      onContextMenu?.(e, fullPath, isDirectory ? 'directory' : 'file');
+    },
+    [fullPath, isDirectory, onContextMenu]
+  );
+
   const indentStyle = getIndentStyle(depth);
 
   return (
@@ -222,6 +242,7 @@ const TreeNode = memo(function TreeNode({
         style={indentStyle}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
+        onContextMenu={handleContextMenu}
       >
         {/* Chevron for directories */}
         {isDirectory ? (
@@ -269,6 +290,7 @@ const TreeNode = memo(function TreeNode({
               onToggle={onToggle}
               onFileSelect={onFileSelect}
               onLoadChildren={onLoadChildren}
+              onContextMenu={onContextMenu}
             />
           ))}
         </div>
@@ -289,6 +311,9 @@ const TreeNode = memo(function TreeNode({
  * <FileTreeView
  *   worktreeId="feature-123"
  *   onFileSelect={(path) => openFile(path)}
+ *   onNewFile={(path) => createNewFile(path)}
+ *   onRename={(path) => renameFile(path)}
+ *   onDelete={(path) => deleteFile(path)}
  *   className="h-full"
  * />
  * ```
@@ -296,6 +321,10 @@ const TreeNode = memo(function TreeNode({
 export const FileTreeView = memo(function FileTreeView({
   worktreeId,
   onFileSelect,
+  onNewFile,
+  onNewDirectory,
+  onRename,
+  onDelete,
   className = '',
 }: FileTreeViewProps) {
   const [loading, setLoading] = useState(true);
@@ -303,6 +332,9 @@ export const FileTreeView = memo(function FileTreeView({
   const [rootItems, setRootItems] = useState<TreeItem[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [cache] = useState<Map<string, TreeItem[]>>(() => new Map());
+
+  // Context menu state (separated for rendering optimization)
+  const { menuState, openMenu, closeMenu } = useContextMenu();
 
   /**
    * Fetch directory contents from API
@@ -455,8 +487,22 @@ export const FileTreeView = memo(function FileTreeView({
           onToggle={handleToggle}
           onFileSelect={onFileSelect}
           onLoadChildren={loadChildren}
+          onContextMenu={openMenu}
         />
       ))}
+
+      {/* Context Menu */}
+      <ContextMenu
+        isOpen={menuState.isOpen}
+        position={menuState.position}
+        targetPath={menuState.targetPath}
+        targetType={menuState.targetType}
+        onClose={closeMenu}
+        onNewFile={onNewFile}
+        onNewDirectory={onNewDirectory}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
     </div>
   );
 });
