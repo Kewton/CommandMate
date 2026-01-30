@@ -1,0 +1,25 @@
+{
+  "issue_number": 75,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "title": "Phase 2: ドキュメント・UI表示の変更 (CommandMate リネーム)",
+  "scope": "ドキュメントとUI表示のみの変更、コードの破壊的変更なし",
+  "target_files": [
+    "README.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
+    "docs/**/*.md",
+    "src/app/page.tsx",
+    "src/app/layout.tsx",
+    "src/components/layout/Header.tsx",
+    "tests/e2e/worktree-list.spec.ts"
+  ],
+  "review_criteria": [
+    "SOLID原則: 単一責任、変更の局所化",
+    "KISS原則: シンプルな変更",
+    "YAGNI原則: 必要最小限の変更",
+    "DRY原則: 重複のない変更"
+  ]
+}

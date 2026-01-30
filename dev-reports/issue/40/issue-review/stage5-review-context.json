@@ -1,0 +1,14 @@
+{
+  "issue_number": 40,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "previous_stages": ["stage1", "stage2", "stage3", "stage4"],
+  "previous_review": "dev-reports/issue/40/issue-review/stage1-review-result.json",
+  "user_context": {
+    "target_version": "v0.1.0",
+    "scope": "セマンティックバージョニング導入のみ",
+    "note": "β版としてv0.1.0でのリリースを目指している"
+  }
+}

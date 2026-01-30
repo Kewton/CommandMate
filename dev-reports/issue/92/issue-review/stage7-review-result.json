@@ -1,0 +1,206 @@
+{
+  "stage": 7,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_date": "2026-01-30",
+  "previous_findings_status": [
+    {
+      "id": "MF-1 (Stage3)",
+      "original_issue": "docs/internal/PRODUCTION_CHECKLIST.md が更新対象から漏れている",
+      "status": "verified",
+      "verification_notes": "Issue本文の「影響を受けるファイル」テーブルと「ドキュメント更新」セクションの必須更新リストに PRODUCTION_CHECKLIST.md が追加されている。受け入れ条件にも「PRODUCTION_CHECKLIST.md が CM_* 形式に更新されている」が含まれている。"
+    },
+    {
+      "id": "SF-1 (Stage3)",
+      "original_issue": "新規スクリプトのテスト方針が明記されていない",
+      "status": "verified",
+      "verification_notes": "「テスト方針」セクションが追加され、手動テスト項目（preflight-check.sh 7項目、setup-env.sh 5項目、setup.sh 2項目）と自動テストの将来検討事項が記載されている。"
+    },
+    {
+      "id": "SF-2 (Stage3)",
+      "original_issue": "既存ユーザーへの移行パスが明示されていない",
+      "status": "verified",
+      "verification_notes": "「既存ユーザー向け移行ガイド」セクションが追加され、3つの移行オプション（そのまま使用/新規生成/手動置換）、バックアップ手順、注意事項が詳細に記載されている。"
+    },
+    {
+      "id": "SF-3 (Stage3)",
+      "original_issue": "openssl コマンドの依存が事前チェックに含まれていない",
+      "status": "verified",
+      "verification_notes": "preflight-check.sh のチェック項目テーブルに openssl が「必須」として追加され、出力例にも openssl バージョン表示が含まれている。トークン生成方式セクションに Note で必須方針が明確化されている。"
+    },
+    {
+      "id": "NTH-1 (Stage3)",
+      "original_issue": "docs/migration-to-commandmate.md への影響が未検討",
+      "status": "verified",
+      "verification_notes": "「ドキュメント更新」セクションの「推奨更新」サブセクションに migration-to-commandmate.md が追加されている。"
+    }
+  ],
+  "new_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-NEW-1",
+        "category": "影響ファイル",
+        "description": "README.md の Quick Start セクションで参照している .env.example ファイルは既に CM_* 形式に更新済みだが、Issue 本文では .env.production.example のみ更新対象として記載されている。.env.example は Issue #76 で既に更新済みのため整合性は保たれているが、Issue の「影響を受けるファイル」セクションに .env.example は更新不要である旨を明記すると親切",
+        "location": "影響を受けるファイル テーブル",
+        "recommendation": "注釈として「.env.example は Issue #76 で CM_* 形式に更新済みのため、本 Issue での変更は不要」を追加することを検討",
+        "evidence": ".env.example (line 1-65) は既に CM_* 形式で記述されており、Legacy 環境変数はコメントアウトで記載。一方 .env.production.example (line 1-45) は MCBD_* 形式のまま",
+        "impact_level": "informational"
+      },
+      {
+        "id": "NTH-NEW-2",
+        "category": "テスト影響",
+        "description": "手動テスト項目に「既存 .env がある場合にバックアップが作成されることを確認」があるが、バックアップファイル名の形式（.env.backup.{timestamp}）が「バックアップ動作」セクションと一致していることを明示的に確認する項目がない",
+        "location": "テスト方針 > setup-env.sh セクション",
+        "recommendation": "テスト項目を「既存 .env がある場合にバックアップが .env.backup.{timestamp} 形式で作成されることを確認」のように具体的なファイル名形式を含めることを検討",
+        "evidence": "バックアップ動作セクションでは `.env.backup.{timestamp}` と明記されているが、テスト項目では「バックアップが作成される」のみ",
+        "impact_level": "informational"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "files_affected": {
+      "verified": [
+        {
+          "file": "scripts/preflight-check.sh",
+          "type": "new",
+          "status": "unchanged",
+          "notes": "新規作成。必須依存チェック（Node.js, npm, tmux, git, openssl）と Claude CLI の警告付きチェック"
+        },
+        {
+          "file": "scripts/setup-env.sh",
+          "type": "new",
+          "status": "unchanged",
+          "notes": "新規作成。対話式 .env 生成。バックアップ動作が明確化済み"
+        },
+        {
+          "file": "scripts/setup.sh",
+          "type": "modify",
+          "status": "unchanged",
+          "notes": "変更。新スクリプト統合フロー + 環境変数案内メッセージの CM_* 整合性確認。現在のコード (line 32-34) は既に CM_* 形式"
+        },
+        {
+          "file": ".env.production.example",
+          "type": "modify",
+          "status": "unchanged",
+          "notes": "変更。MCBD_* から CM_* への更新が必要。現在 MCBD_* 形式のまま"
+        },
+        {
+          "file": "README.md",
+          "type": "modify",
+          "status": "unchanged",
+          "notes": "変更。Quick Start セクションの簡素化。現在は cp .env.example .env を参照"
+        },
+        {
+          "file": "docs/DEPLOYMENT.md",
+          "type": "modify",
+          "status": "clarified",
+          "notes": "変更。Stage 6 で更新内容が具体化済み（セットアップ手順を新スクリプト使用フローに更新、cp .env.production.example .env を setup-env.sh に変更）"
+        },
+        {
+          "file": "docs/internal/PRODUCTION_CHECKLIST.md",
+          "type": "modify",
+          "status": "unchanged",
+          "notes": "変更。MCBD_* 参照 (line 10-12, 85-86, 266) を CM_* に更新"
+        }
+      ],
+      "additional_considerations": [
+        {
+          "file": ".env.example",
+          "type": "no_change_needed",
+          "notes": "Issue #76 で既に CM_* 形式に更新済み。本 Issue での変更は不要"
+        },
+        {
+          "file": "scripts/stop.sh",
+          "type": "no_change_needed",
+          "notes": "既にフォールバック対応済み (line 20-21: CM_PORT と MCBD_PORT 両対応)"
+        },
+        {
+          "file": "scripts/health-check.sh",
+          "type": "no_change_needed",
+          "notes": "既にフォールバック対応済み (line 9-10)"
+        },
+        {
+          "file": "scripts/status.sh",
+          "type": "no_change_needed",
+          "notes": "既にフォールバック対応済み (line 26-27)"
+        }
+      ]
+    },
+    "features_affected": [
+      {
+        "feature": "初期セットアップフロー",
+        "impact": "major",
+        "notes": "setup.sh が preflight-check.sh と setup-env.sh を呼び出す新フローに変更"
+      },
+      {
+        "feature": "環境変数設定",
+        "impact": "major",
+        "notes": "対話式 .env 生成により手動編集の負担軽減"
+      },
+      {
+        "feature": "依存関係チェック",
+        "impact": "new",
+        "notes": "preflight-check.sh で Node.js/npm/tmux/git/openssl/Claude CLI をチェック"
+      },
+      {
+        "feature": "本番環境デプロイ",
+        "impact": "minor",
+        "notes": "DEPLOYMENT.md と PRODUCTION_CHECKLIST.md の更新により手順が変更"
+      }
+    ],
+    "backward_compatibility": {
+      "status": "fully_addressed",
+      "details": [
+        "既存の MCBD_* 環境変数はフォールバック機能でサポート継続（Issue #76）",
+        "既存ユーザー向け移行ガイドが Issue 内に追加済み",
+        "3つの移行オプション（そのまま使用/新規生成/手動置換）を提示",
+        "setup-env.sh は既存 .env を自動バックアップしてから新規生成"
+      ],
+      "remaining_concerns": []
+    },
+    "test_requirements": {
+      "status": "fully_addressed",
+      "manual_tests": [
+        "preflight-check.sh: 7項目（各依存の存在/不在チェック、Claude CLI警告動作）",
+        "setup-env.sh: 5項目（対話式入力、デフォルト値、バックアップ、新規生成、トークン自動生成）",
+        "setup.sh: 2項目（クリーン環境E2E、既存.env環境フロー）"
+      ],
+      "automated_tests": "将来検討事項として shellcheck と CI/CD 統合が記載済み",
+      "remaining_concerns": []
+    },
+    "documentation_requirements": {
+      "status": "fully_addressed",
+      "must_update": [
+        "README.md - Quick Start セクション",
+        "docs/DEPLOYMENT.md - セットアップ手順を新スクリプト使用に変更",
+        "docs/internal/PRODUCTION_CHECKLIST.md - MCBD_* を CM_* に更新"
+      ],
+      "should_update": [
+        "docs/migration-to-commandmate.md - 新スクリプトの使用方法追加",
+        "CHANGELOG.md - 変更点記録"
+      ],
+      "remaining_concerns": []
+    }
+  },
+  "cross_reference_verification": {
+    "env_ts_mapping": {
+      "status": "consistent",
+      "notes": "src/lib/env.ts の ENV_MAPPING (line 20-29) と Issue の環境変数一覧が完全に一致"
+    },
+    "existing_scripts_fallback": {
+      "status": "consistent",
+      "notes": "stop.sh, health-check.sh, status.sh は既に CM_PORT/MCBD_PORT フォールバック対応済み"
+    },
+    "setup_sh_messages": {
+      "status": "consistent",
+      "notes": "現在の setup.sh (line 32-34) は既に CM_* 形式で案内メッセージを出力"
+    },
+    "deployment_md": {
+      "status": "consistent",
+      "notes": "docs/DEPLOYMENT.md (line 49-56) は既に CM_* 形式で記載。cp .env.production.example .env (line 43-45) は Issue で更新予定"
+    }
+  },
+  "summary": "Stage 7（2回目影響範囲レビュー）を完了。Stage 3 の全指摘事項（MF-1, SF-1〜SF-3, NTH-1）が適切に反映されていることを検証済み。新たな影響範囲の懸念は検出されなかった。Nice to Have として情報提供レベルの提案2件（.env.example の更新不要明記、バックアップファイル名形式のテスト項目具体化）を記録したが、いずれも実装に影響しない補足的な内容である。影響を受けるファイル7件（新規2、変更5）、影響を受ける機能4件は全て適切にカバーされている。後方互換性、テスト要件、ドキュメント要件は全て対処済みであり、Issue #92 は影響範囲の観点から実装準備が完了した状態と評価する。"
+}

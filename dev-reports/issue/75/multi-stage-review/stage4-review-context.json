@@ -1,0 +1,32 @@
+{
+  "issue_number": 75,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "title": "Phase 2: ドキュメント・UI表示の変更 (CommandMate リネーム)",
+  "scope": "ドキュメントとUI表示のみの変更、コードの破壊的変更なし",
+  "change_summary": {
+    "documents": [
+      "README.md",
+      "CLAUDE.md",
+      "CONTRIBUTING.md",
+      "CHANGELOG.md",
+      "docs/**/*.md"
+    ],
+    "ui_components": [
+      "src/app/page.tsx",
+      "src/app/layout.tsx",
+      "src/components/layout/Header.tsx"
+    ],
+    "tests": [
+      "tests/e2e/worktree-list.spec.ts"
+    ]
+  },
+  "review_criteria": [
+    "OWASP Top 10 準拠確認",
+    "認証・認可への影響",
+    "入力バリデーションへの影響",
+    "機密情報の露出リスク",
+    "セキュリティドキュメントの整合性"
+  ]
+}

@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
 
 // Mock next/navigation
@@ -137,10 +137,28 @@ vi.mock('@/components/error/ErrorBoundary', () => ({
 }));
 
 vi.mock('@/components/worktree/FileTreeView', () => ({
-  FileTreeView: ({ worktreeId, onFileSelect }: { worktreeId: string; onFileSelect: (path: string) => void }) => (
+  FileTreeView: ({
+    worktreeId,
+    onFileSelect,
+    onNewFile,
+    onNewDirectory,
+    onRename,
+    onDelete,
+  }: {
+    worktreeId: string;
+    onFileSelect?: (path: string) => void;
+    onNewFile?: (parentPath: string) => void;
+    onNewDirectory?: (parentPath: string) => void;
+    onRename?: (path: string) => void;
+    onDelete?: (path: string) => void;
+  }) => (
     <div data-testid="file-tree-view">
       <span data-testid="file-tree-worktree-id">{worktreeId}</span>
-      <button onClick={() => onFileSelect('/test/file.ts')}>Select File</button>
+      <button onClick={() => onFileSelect?.('/test/file.ts')}>Select File</button>
+      <button data-testid="new-file-btn" onClick={() => onNewFile?.('src')}>New File</button>
+      <button data-testid="new-dir-btn" onClick={() => onNewDirectory?.('src')}>New Directory</button>
+      <button data-testid="rename-btn" onClick={() => onRename?.('src/test.ts')}>Rename</button>
+      <button data-testid="delete-btn" onClick={() => onDelete?.('src/test.ts')}>Delete</button>
     </div>
   ),
 }));
@@ -492,6 +510,287 @@ describe('WorktreeDetailRefactored', () => {
       await waitFor(() => {
         expect(screen.getByRole('region', { name: /message history/i })).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('File Operations Handlers', () => {
+    beforeEach(() => {
+      mockIsMobile.mockReturnValue(false);
+      // Mock window.prompt and window.confirm
+      vi.spyOn(window, 'prompt').mockImplementation(() => 'newfile.md');
+      vi.spyOn(window, 'confirm').mockImplementation(() => true);
+      vi.spyOn(window, 'alert').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('passes onNewFile handler to FileTreeView', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Wait for component to load and switch to files tab
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      // Switch to files tab
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      // Click the new file button
+      const newFileBtn = screen.getByTestId('new-file-btn');
+      fireEvent.click(newFileBtn);
+
+      // Verify that prompt was called
+      expect(window.prompt).toHaveBeenCalledWith('Enter file name (e.g., document.md):');
+    });
+
+    it('calls POST API when creating a new file', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      const newFileBtn = screen.getByTestId('new-file-btn');
+      fireEvent.click(newFileBtn);
+
+      await waitFor(() => {
+        const createCall = mockFetch.mock.calls.find(
+          (call) => call[0].includes('/files/') && call[1]?.method === 'POST'
+        );
+        expect(createCall).toBeDefined();
+        if (createCall) {
+          expect(createCall[1].body).toContain('"type":"file"');
+        }
+      });
+    });
+
+    it('passes onNewDirectory handler to FileTreeView', async () => {
+      vi.spyOn(window, 'prompt').mockImplementation(() => 'newdir');
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      const newDirBtn = screen.getByTestId('new-dir-btn');
+      fireEvent.click(newDirBtn);
+
+      expect(window.prompt).toHaveBeenCalledWith('Enter directory name:');
+    });
+
+    it('calls POST API when creating a new directory', async () => {
+      vi.spyOn(window, 'prompt').mockImplementation(() => 'newdir');
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      const newDirBtn = screen.getByTestId('new-dir-btn');
+      fireEvent.click(newDirBtn);
+
+      await waitFor(() => {
+        const createCall = mockFetch.mock.calls.find(
+          (call) => call[0].includes('/files/') && call[1]?.method === 'POST'
+        );
+        expect(createCall).toBeDefined();
+        if (createCall) {
+          expect(createCall[1].body).toContain('"type":"directory"');
+        }
+      });
+    });
+
+    it('passes onRename handler to FileTreeView', async () => {
+      vi.spyOn(window, 'prompt').mockImplementation(() => 'renamed.ts');
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      const renameBtn = screen.getByTestId('rename-btn');
+      fireEvent.click(renameBtn);
+
+      expect(window.prompt).toHaveBeenCalledWith('Enter new name:', 'test.ts');
+    });
+
+    it('calls PATCH API when renaming a file', async () => {
+      vi.spyOn(window, 'prompt').mockImplementation(() => 'renamed.ts');
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      const renameBtn = screen.getByTestId('rename-btn');
+      fireEvent.click(renameBtn);
+
+      await waitFor(() => {
+        const renameCall = mockFetch.mock.calls.find(
+          (call) => call[0].includes('/files/') && call[1]?.method === 'PATCH'
+        );
+        expect(renameCall).toBeDefined();
+        if (renameCall) {
+          expect(renameCall[1].body).toContain('"action":"rename"');
+          expect(renameCall[1].body).toContain('"newName":"renamed.ts"');
+        }
+      });
+    });
+
+    it('passes onDelete handler to FileTreeView', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      const deleteBtn = screen.getByTestId('delete-btn');
+      fireEvent.click(deleteBtn);
+
+      expect(window.confirm).toHaveBeenCalledWith('"test.ts" を削除しますか？');
+    });
+
+    it('calls DELETE API when deleting a file', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      const deleteBtn = screen.getByTestId('delete-btn');
+      fireEvent.click(deleteBtn);
+
+      await waitFor(() => {
+        const deleteCall = mockFetch.mock.calls.find(
+          (call) => call[0].includes('/files/') && call[1]?.method === 'DELETE'
+        );
+        expect(deleteCall).toBeDefined();
+        if (deleteCall) {
+          expect(deleteCall[0]).toContain('recursive=true');
+        }
+      });
+    });
+
+    it('does not call API when user cancels prompt', async () => {
+      vi.spyOn(window, 'prompt').mockImplementation(() => null);
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      // Clear previous fetch calls
+      mockFetch.mockClear();
+
+      const newFileBtn = screen.getByTestId('new-file-btn');
+      fireEvent.click(newFileBtn);
+
+      // Wait a bit to ensure no API call is made
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const createCall = mockFetch.mock.calls.find(
+        (call) => call[0].includes('/files/') && call[1]?.method === 'POST'
+      );
+      expect(createCall).toBeUndefined();
+    });
+
+    it('does not call DELETE API when user cancels confirmation', async () => {
+      vi.spyOn(window, 'confirm').mockImplementation(() => false);
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      // Clear previous fetch calls
+      mockFetch.mockClear();
+
+      const deleteBtn = screen.getByTestId('delete-btn');
+      fireEvent.click(deleteBtn);
+
+      // Wait a bit to ensure no API call is made
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const deleteCall = mockFetch.mock.calls.find(
+        (call) => call[0].includes('/files/') && call[1]?.method === 'DELETE'
+      );
+      expect(deleteCall).toBeUndefined();
     });
   });
 });

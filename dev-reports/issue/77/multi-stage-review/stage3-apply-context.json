@@ -1,0 +1,9 @@
+{
+  "issue_number": 77,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_result_path": "dev-reports/issue/77/multi-stage-review/stage3-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+  "status": "already_applied",
+  "notes": "設計方針書のセクション11.3にShould Fix 1件（SF-1: CM_AUTH_TOKENリダクションテスト）が既に記録済み。セクション4.3にテストコード例も記載されている。"
+}

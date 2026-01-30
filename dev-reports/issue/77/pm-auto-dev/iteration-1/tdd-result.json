@@ -1,0 +1,46 @@
+{
+  "status": "success",
+  "coverage": 80.0,
+  "unit_tests": {
+    "total": 1497,
+    "passed": 1491,
+    "failed": 0,
+    "skipped": 6
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    ".env.example",
+    "CHANGELOG.md",
+    "package.json",
+    "src/lib/env.ts",
+    "src/lib/logger.ts",
+    "src/lib/worktrees.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "scripts/health-check.sh",
+    "scripts/logs.sh",
+    "scripts/restart.sh",
+    "scripts/setup.sh",
+    "scripts/start.sh",
+    "scripts/status.sh",
+    "scripts/stop.sh",
+    "scripts/init-and-migrate.ts",
+    "scripts/migrate-prompt-support.ts",
+    "scripts/clean-duplicate-messages.ts",
+    "scripts/migrate-cli-tool-id.ts",
+    "tests/unit/middleware.test.ts",
+    "tests/unit/logger.test.ts",
+    "tests/unit/env.test.ts",
+    "tests/e2e/worktree-list.spec.ts"
+  ],
+  "commits": [],
+  "message": "TDD実装完了。Phase 3: 設定・コード内の名称置換を実施。\n\n変更内容:\n1. .env.example: 新名称(CM_*)を推奨として更新、旧名称はコメントアウトで残存\n2. package.json: nameを'commandmate'に変更\n3. src/lib/env.ts: Env interfaceのプロパティ名をCM_*に更新\n4. scripts/*.sh (9ファイル): CommandMateブランディングとCM_*環境変数に更新\n5. scripts/*.ts (4ファイル): データベースパスをcm.dbに更新\n6. tests/: MCBD_*からCM_*に環境変数参照を更新\n7. tests/e2e/worktree-list.spec.ts: test.skip()を解除、CommandMateヘッダー検証に更新\n8. CHANGELOG.md: 破壊的変更を記録\n\n注意:\n- スクリーンショット差し替え(5ファイル)は手動作業が必要\n- フォールバック機能は#76で実装済みのため維持\n- E2Eテストは手動実行が必要(開発サーバー起動必須)",
+  "notes": [
+    "スクリーンショット差し替えは手動作業が必要(docs/images/配下の5ファイル)",
+    "E2Eテストはnpm run test:e2eで別途確認必要",
+    "Integration testsの一部失敗はNext.js App Routerモックの既存問題"
+  ]
+}

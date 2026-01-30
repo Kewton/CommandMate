@@ -1,0 +1,51 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 40,
+  "apply_date": "2026-01-30",
+  "applied_items": [
+    {
+      "id": "SF-1",
+      "category": "完全性",
+      "action": "GitHub Releases作成を「任意」から「推奨」に変更",
+      "changes": [
+        "受け入れ条件の「GitHub Releases ページにリリースが作成されている（任意）」を「（推奨）」に変更",
+        "v0.1.0スコープセクションに「4. GitHub Releases の作成（推奨）」を新規追加",
+        "発見可能性向上とCHANGELOGとの対応明確化のメリットを明記"
+      ]
+    },
+    {
+      "id": "SF-2",
+      "category": "移行考慮",
+      "action": "CHANGELOG.md更新手順の具体化",
+      "changes": [
+        "Keep a Changelog形式に従うことを明記",
+        "[0.1.0] - YYYY-MM-DD形式の具体的な記載例を追加",
+        "リリース日のフォーマット（YYYY-MM-DD）を明記",
+        "セクション構成（### Added, ### Changed, ### Fixed等）の説明を追加"
+      ]
+    },
+    {
+      "id": "NTH-2",
+      "category": "完全性",
+      "action": "package-lock.jsonへの影響について言及を追加",
+      "changes": [
+        "package.json更新手順に「npm install を実行して package-lock.json も自動更新する」を追加",
+        "受け入れ条件に「package-lock.json の version フィールドも 0.1.0 に更新されている」を追加"
+      ]
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "NTH-1",
+      "category": "ドキュメント更新",
+      "reason": "移行ガイド（docs/migration-to-commandmate.md）との整合性確保は本Issueのスコープ外。将来のバージョニングマイルストーン（v1.0.0, v2.0.0）の定義は別Issueで対応が適切。"
+    }
+  ],
+  "summary": {
+    "total_items": 4,
+    "applied_count": 3,
+    "skipped_count": 1
+  },
+  "updated_issue_body": "## 概要\n\n現在はバージョン管理されていないため、セマンティックバージョニングを導入したい。\n\n## v0.1.0 スコープ（本Issue対象）\n\n本Issueでは以下のみを対象とする（最小限のセマンティックバージョニング導入）:\n\n1. **package.json のバージョン更新**\n   - 現在の `\"version\": \"1.0.0\"` を `\"version\": \"0.1.0\"` に変更\n   - 注意: 正式リリース前のため1.0.0からのダウングレードとなる\n   - `npm install` を実行して `package-lock.json` も自動更新する\n\n2. **Git タグの作成**\n   - 命名規則: `v` プレフィックス付き（例: `v0.1.0`）\n   - `git tag v0.1.0` でタグを作成\n\n3. **CHANGELOG.md の更新**\n   - Keep a Changelog形式に従って更新\n   - `[Unreleased]` セクションの内容を `[0.1.0] - YYYY-MM-DD` セクションに移動\n   - リリース日を `YYYY-MM-DD` 形式で記載（例: `[0.1.0] - 2026-01-30`）\n   - セクション構成: `## [0.1.0] - YYYY-MM-DD` の下に `### Added`, `### Changed`, `### Fixed` 等のサブセクションを配置\n\n4. **GitHub Releases の作成（推奨）**\n   - GitHub Releasesを作成することで発見可能性が向上し、CHANGELOGとの対応が明確になる\n   - タグ `v0.1.0` に対応するリリースを作成\n   - リリースノートにはCHANGELOGの該当バージョンの内容を記載\n\n## 受け入れ条件\n\n- [ ] package.json の version フィールドが `0.1.0` に設定されている\n- [ ] package-lock.json の version フィールドも `0.1.0` に更新されている\n- [ ] Git タグ `v0.1.0` が作成されている\n- [ ] CHANGELOG.md に `[0.1.0] - YYYY-MM-DD` セクションが追加されている\n- [ ] GitHub Releases ページにリリースが作成されている（推奨）\n\n## タグ命名規則\n\n本プロジェクトでは `v` プレフィックス付きのタグ形式を採用する:\n- 形式: `v<major>.<minor>.<patch>`\n- 例: `v0.1.0`, `v1.0.0`, `v1.2.3`\n\n---\n\n## 将来構想（本Issueスコープ外）\n\n> 注意: 以下は将来的に検討する内容であり、本Issueの作業範囲には含まれません。\n> 現在のブランチ戦略は `main ← feature/*, fix/*, hotfix/*` です（CLAUDE.md参照）。\n\n### リリースブランチフローの導入検討\n\n将来的にプロジェクトが成熟した段階で、以下のようなリリースフローの導入を検討:\n\n1. **開発フェーズ** (develop -> feature -> develop)\n   - バージョン番号は変更しない（例: 1.1.0-SNAPSHOT）\n   - 機能実装完了後、リリース準備へ\n\n2. **リリース準備** (develop -> release/vX.Y.Z)\n   - develop から release ブランチを作成\n   - バージョン番号の確定、ドキュメント更新、最終バグ修正のみ\n\n3. **リリース** (release -> main & develop)\n   - main へマージし、Git タグを作成\n   - develop へもマージしてバージョン番号を反映\n\n### CI/CD による自動採番\n\n- main へのマージ時に CI ツールが自動でバージョンを計算・付与\n- メリット: 手動での書き換えミスがない\n- デメリット: ビルド成果物とソースコード上のバージョン表記に乖離が生じる可能性\n\n### Git Worktree を活用したクリーン環境の切り出し\n\n現在作業中のディレクトリはそのままで、main ブランチや特定の tag のみを別のクリーンなディレクトリにチェックアウトしてビルドするスクリプトの実装。"
+}

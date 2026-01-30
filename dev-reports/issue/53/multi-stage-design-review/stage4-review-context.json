@@ -1,0 +1,14 @@
+{
+  "issue_number": 53,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue53-assistant-response-save-design-policy.md",
+  "review_criteria": [
+    "OWASP Top 10準拠",
+    "入力検証",
+    "認証・認可",
+    "データ保護",
+    "ログ・監査"
+  ]
+}

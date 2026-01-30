@@ -1,0 +1,26 @@
+{
+  "issue_number": 75,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "title": "Phase 2: ドキュメント・UI表示の変更 (CommandMate リネーム)",
+  "scope": "ドキュメントとUI表示のみの変更、コードの破壊的変更なし",
+  "acceptance_criteria": [
+    "#76 が完了していること（本Issue着手の前提条件）",
+    "README/ドキュメントから MyCodeBranchDesk が消えている",
+    "「チャットアプリ」誤解につながる表現が除去されている",
+    "UI上の表示が CommandMate に統一されている",
+    "ドキュメント内の環境変数説明が新名称（CM_*）で記載されている",
+    "CHANGELOG.md が更新されている",
+    "ビルドが成功する（npm run build）",
+    "lint エラーがない（npm run lint）",
+    "E2Eテストのタイトル検証が適切にスキップされている（#77 で解除予定）"
+  ],
+  "design_doc_path": "N/A - Issue本体の受け入れ条件を基準とする",
+  "review_criteria": [
+    "Issue本体の受け入れ条件との整合性",
+    "実施内容（1-1〜1-5）との整合性",
+    "対象ファイルと関連ファイル一覧の整合性",
+    "対象外（#77で実施）との境界明確化"
+  ]
+}

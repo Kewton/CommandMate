@@ -1,0 +1,79 @@
+{"body":"## 概要
+
+Assistant（Claude CLI）の応答履歴が保存されないバグを修正する。現在の「完了判定」方式から「次のユーザー入力まで」方式に変更する。
+
+## 関連Issue
+
+- #51 assistantの履歴がうまく取得できていない
+
+## 現状の問題
+
+### 症状
+- 連続するuserメッセージがDBに存在し、間にassistantメッセージがない
+- 履歴表示で「Waiting for response」が古いメッセージに対して表示される
+
+### 根本原因
+
+`src/app/api/worktrees/[id]/send/route.ts` の113-120行目:
+
+```typescript
+// ユーザーメッセージ送信時
+const message = createMessage(db, { role: 'user', ... });  // 即座に保存
+
+// セッション状態をリセット
+updateSessionState(db, params.id, cliToolId, 0);           // lastCapturedLine = 0
+clearInProgressMessageId(db, params.id, cliToolId);
+
+// 新しいポーリング開始（既存ポーラー停止）
+startPolling(params.id, cliToolId);
+```
+
+**問題**: 
+1. userメッセージは即座に保存される
+2. Assistant応答はポーリングによる「完了判定」を待って非同期に保存
+3. 完了判定前にユーザーが次のメッセージを送信すると、セッション状態がリセットされ、前のAssistant応答の追跡が失われる
+
+## 解決策
+
+### 新しいアプローチ: 「次のユーザー入力まで」方式
+
+```
+ユーザーメッセージA送信 → 即座に保存
+      ↓
+Claude CLIが処理...
+      ↓
+ユーザーメッセージB送信時:
+  1. メッセージA以降の出力をAssistant応答として保存
+  2. ユーザーメッセージB保存
+```
+
+### メリット
+- 完了判定（セパレータ/プロンプト検出）の複雑さを回避
+- Assistant応答が確実に保存される
+- ロジックがシンプル
+
+### 考慮点
+- 最後のメッセージへの応答は、次のユーザー入力がないと保存されない
+  - 対策: セッション終了時、一定時間経過後に保存
+
+## 実装方針
+
+### 変更対象ファイル
+- `src/app/api/worktrees/[id]/send/route.ts`
+- `src/lib/response-poller.ts`（必要に応じて）
+
+### 実装手順
+1. `send/route.ts` で新しいユーザーメッセージ送信前に:
+   - 前回のユーザーメッセージ以降のtmux出力をキャプチャ
+   - クリーニングしてAssistant応答として保存
+   - 新しいユーザーメッセージを保存
+
+2. 最後のメッセージへの応答保存:
+   - 一定時間経過後（または完了判定成功時）に保存する仕組みを維持
+
+## 受け入れ条件
+
+- [ ] ユーザーが連続でメッセージを送信しても、各userメッセージに対応するassistantメッセージが保存される
+- [ ] 履歴表示で「Waiting for response」が不適切に表示されない
+- [ ] 既存のリアルタイム表示（current-output API）は維持される
+- [ ] 単体テストが追加されている","title":"fix: Assistant応答の保存ロジックを「次のユーザー入力まで」方式に変更"}

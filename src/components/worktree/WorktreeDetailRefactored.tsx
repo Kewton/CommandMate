@@ -709,6 +709,10 @@ interface MobileContentProps {
   onFilePathClick: (path: string) => void;
   onFileSelect: (path: string) => void;
   onWorktreeUpdate: (updated: Worktree) => void;
+  onNewFile: (parentPath: string) => void;
+  onNewDirectory: (parentPath: string) => void;
+  onRename: (path: string) => void;
+  onDelete: (path: string) => void;
 }
 
 /** Renders content based on active mobile tab */
@@ -723,6 +727,10 @@ const MobileContent = memo(function MobileContent({
   onFilePathClick,
   onFileSelect,
   onWorktreeUpdate,
+  onNewFile,
+  onNewDirectory,
+  onRename,
+  onDelete,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -753,6 +761,10 @@ const MobileContent = memo(function MobileContent({
           <FileTreeView
             worktreeId={worktreeId}
             onFileSelect={onFileSelect}
+            onNewFile={onNewFile}
+            onNewDirectory={onNewDirectory}
+            onRename={onRename}
+            onDelete={onDelete}
             className="h-full"
           />
         </ErrorBoundary>
@@ -1025,6 +1037,115 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
   }, [worktreeId]);
 
+  // ========================================================================
+  // File Operation Handlers (for FileTreeView context menu)
+  // ========================================================================
+
+  /** Handle new file creation in FileTreeView */
+  const handleNewFile = useCallback(async (parentPath: string) => {
+    const fileName = window.prompt('Enter file name (e.g., document.md):');
+    if (!fileName) return;
+
+    // Add .md extension if not present
+    const finalName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
+    const newPath = parentPath ? `${parentPath}/${finalName}` : finalName;
+
+    try {
+      const response = await fetch(
+        `/api/worktrees/${worktreeId}/files/${encodeURIComponent(newPath)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'file', content: '' }),
+        }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to create file');
+      }
+      // File created successfully - FileTreeView will refresh on next poll
+    } catch (err) {
+      console.error('[WorktreeDetailRefactored] Failed to create file:', err);
+      window.alert('ファイルの作成に失敗しました');
+    }
+  }, [worktreeId]);
+
+  /** Handle new directory creation in FileTreeView */
+  const handleNewDirectory = useCallback(async (parentPath: string) => {
+    const dirName = window.prompt('Enter directory name:');
+    if (!dirName) return;
+
+    const newPath = parentPath ? `${parentPath}/${dirName}` : dirName;
+
+    try {
+      const response = await fetch(
+        `/api/worktrees/${worktreeId}/files/${encodeURIComponent(newPath)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'directory' }),
+        }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to create directory');
+      }
+      // Directory created successfully - FileTreeView will refresh on next poll
+    } catch (err) {
+      console.error('[WorktreeDetailRefactored] Failed to create directory:', err);
+      window.alert('ディレクトリの作成に失敗しました');
+    }
+  }, [worktreeId]);
+
+  /** Handle file/directory rename in FileTreeView */
+  const handleRename = useCallback(async (path: string) => {
+    const currentName = path.split('/').pop() || '';
+    const newName = window.prompt('Enter new name:', currentName);
+    if (!newName || newName === currentName) return;
+
+    try {
+      const response = await fetch(
+        `/api/worktrees/${worktreeId}/files/${encodeURIComponent(path)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'rename', newName }),
+        }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to rename');
+      }
+      // Renamed successfully - FileTreeView will refresh on next poll
+    } catch (err) {
+      console.error('[WorktreeDetailRefactored] Failed to rename:', err);
+      window.alert('リネームに失敗しました');
+    }
+  }, [worktreeId]);
+
+  /** Handle file/directory delete in FileTreeView */
+  const handleDelete = useCallback(async (path: string) => {
+    const name = path.split('/').pop() || path;
+    if (!window.confirm(`"${name}" を削除しますか？`)) return;
+
+    try {
+      const response = await fetch(
+        `/api/worktrees/${worktreeId}/files/${encodeURIComponent(path)}?recursive=true`,
+        {
+          method: 'DELETE',
+        }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to delete');
+      }
+      // Deleted successfully - close editor if the deleted file was open
+      if (editorFilePath === path || editorFilePath?.startsWith(`${path}/`)) {
+        setEditorFilePath(null);
+      }
+      // FileTreeView will refresh on next poll
+    } catch (err) {
+      console.error('[WorktreeDetailRefactored] Failed to delete:', err);
+      window.alert('削除に失敗しました');
+    }
+  }, [worktreeId, editorFilePath]);
+
   // Auto-yes hook
   const { lastAutoResponse } = useAutoYes({
     worktreeId,
@@ -1177,6 +1298,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                         <FileTreeView
                           worktreeId={worktreeId}
                           onFileSelect={handleFileSelect}
+                          onNewFile={handleNewFile}
+                          onNewDirectory={handleNewDirectory}
+                          onRename={handleRename}
+                          onDelete={handleDelete}
                           className="h-full"
                         />
                       </ErrorBoundary>
@@ -1307,6 +1432,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onFilePathClick={handleFilePathClick}
             onFileSelect={handleFileSelect}
             onWorktreeUpdate={setWorktree}
+            onNewFile={handleNewFile}
+            onNewDirectory={handleNewDirectory}
+            onRename={handleRename}
+            onDelete={handleDelete}
           />
         </main>
 

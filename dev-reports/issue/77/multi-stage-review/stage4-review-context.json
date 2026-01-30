@@ -1,0 +1,14 @@
+{
+  "issue_number": 77,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+  "review_criteria": [
+    "OWASP Top 10準拠",
+    "認証トークンの適切な処理",
+    "機密情報のマスキング",
+    "環境変数の安全な取り扱い",
+    "ログ出力におけるセキュリティ"
+  ]
+}

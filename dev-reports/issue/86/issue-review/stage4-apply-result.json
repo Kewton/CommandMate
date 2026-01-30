@@ -1,0 +1,62 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 86,
+  "apply_date": "2026-01-30",
+  "applied_items": [
+    {
+      "id": "MF-1",
+      "category": "must_fix",
+      "status": "applied",
+      "change_summary": "受け入れ条件にドキュメント更新セクションを追加。docs/user-guide/commands-guide.mdへのreleaseスキル説明追加を明記し、agents-guide.mdは更新不要であることを明記"
+    },
+    {
+      "id": "SF-1",
+      "category": "should_fix",
+      "status": "applied",
+      "change_summary": "リリーススキルの作成セクションにNote追加。既存rebuildスキルとの構造の違い（templates/examplesサブディレクトリ追加）の理由を説明"
+    },
+    {
+      "id": "SF-2",
+      "category": "should_fix",
+      "status": "applied",
+      "change_summary": "実行内容の手順4を「npm install --package-lock-only」に変更"
+    },
+    {
+      "id": "SF-3",
+      "category": "should_fix",
+      "status": "applied",
+      "change_summary": "Issue冒頭に「スキルとコマンドの違い」セクションを新規追加。両者の用途・ディレクトリ・呼び出し方の違いを表形式で説明"
+    },
+    {
+      "id": "NTH-1",
+      "category": "nice_to_have",
+      "status": "applied",
+      "change_summary": "実行内容の手順8にGitHub Releases作成の具体的なghコマンド例（gh release create）を追加"
+    },
+    {
+      "id": "NTH-3",
+      "category": "nice_to_have",
+      "status": "applied",
+      "change_summary": "受け入れ条件セクションに「リリース完了後の確認コマンド例」を追加（git tag -l, git describe, gh release list, gh release view）"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "NTH-2",
+      "category": "nice_to_have",
+      "status": "skipped",
+      "reason": "CHANGELOG.mdの比較リンク更新の具体例は既にリリース手順書の作成セクションに記載済み（[v0.2.0]: https://github.com/.../compare/v0.1.0...v0.2.0）"
+    }
+  ],
+  "summary": {
+    "total_items": 7,
+    "applied_count": 6,
+    "skipped_count": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/86"
+  },
+  "updated_issue_body": "## 概要\n\nIssue #40（セマンティックバージョニング導入）の完了後、継続的なバージョンアップを効率的に行うため、リリース手順書の作成とClaude Code Skillsによる自動化を実施する。\n\n## 背景\n\n- Issue #40でv0.1.0のセマンティックバージョニングが導入される\n- 今後のメジャー/マイナー/パッチバージョンアップを標準化したい\n- 手動操作を最小限にし、Claude Codeから簡単にリリースできるようにしたい\n\n## スキルとコマンドの違い\n\n本プロジェクトには2種類のClaude Code拡張機能があります:\n\n| 種類 | ディレクトリ | 用途 | 呼び出し方 |\n|------|-------------|------|-----------|\n| **スキル** | `.claude/skills/` | 特定タスクの自動化（ビルド、リリース等） | `/skill-name` |\n| **コマンド** | `.claude/commands/` | ワークフロー・レビュー等の複合タスク | `/command-name` |\n\n本Issueでは**スキル**（`.claude/skills/release/`）を作成します。スキルはコマンドより軽量で、特定の操作を自動化することに特化しています。\n\n## スコープ\n\n### 1. リリース手順書の作成\n\n**ファイル**: `docs/release-guide.md`\n\n以下の内容を含む：\n- セマンティックバージョニングの判断基準（MAJOR/MINOR/PATCH）\n- バージョンアップ手順（step-by-step）\n- CHANGELOG更新ルール（Keep a Changelog形式）\n  - `[Unreleased]`セクションの内容を新バージョンセクションに移動\n  - 日付フォーマット: `YYYY-MM-DD`形式\n  - 比較リンクの更新: `[v0.2.0]: https://github.com/.../compare/v0.1.0...v0.2.0`\n- Gitタグ作成・プッシュ手順\n- GitHub Releases作成手順\n- npm versionコマンドの使用方法（オプション）\n- ロールバック手順（タグ削除、GitHub Release削除等）は将来の拡張として検討\n\n### 2. リリーススキルの作成\n\n**ディレクトリ**: `.claude/skills/release/`\n\n| ファイル | 説明 |\n|---------|------|\n| `SKILL.md` | メイン指示（フロントマター + 手順） |\n| `templates/changelog-entry.md` | CHANGELOGエントリのテンプレート |\n| `examples/release-example.md` | リリース実行例 |\n\n> **Note**: 既存の`.claude/skills/rebuild/`はSKILL.mdのみのシンプル構造ですが、本スキルではテンプレートや実行例を含むため`templates/`と`examples/`サブディレクトリを追加します。これは今後のスキル拡張の参考構造となります。\n\n**スキル仕様**:\n\n> **Note**: Claude Code Skillsでは、スキル（`.claude/skills/`）もスラッシュコマンドとして呼び出し可能です。  \n> 公式ドキュメント: 「カスタムスラッシュコマンドはスキルにマージされました」\n\n```yaml\n---\nname: release\ndescription: Create a new release with version bump, CHANGELOG update, Git tag, and GitHub Release\ndisable-model-invocation: true  # ユーザーのみが呼び出し可能（公式ドキュメントで確認済み）\nallowed-tools: Bash, Read, Edit, Write\nargument-hint: [version-type] (major|minor|patch) or [version] (e.g., 1.2.3)\n---\n```\n\n> **オプション説明**:\n> - `disable-model-invocation`: `true`に設定すると、ユーザーのスラッシュコマンドからのみ呼び出し可能。AIによる自動呼び出しを防止\n> - `argument-hint`: スラッシュコマンド実行時にユーザーに表示される引数のヒント\n\n**使用例**:\n```bash\n/release patch      # v0.1.0 → v0.1.1\n/release minor      # v0.1.0 → v0.2.0\n/release major      # v0.1.0 → v1.0.0\n/release 1.0.0      # 直接バージョン指定\n```\n\n**実行内容**:\n1. 現在のバージョンを取得（package.json）\n2. 新バージョンを計算\n3. package.json更新\n4. package-lock.json更新（`npm install --package-lock-only`を使用）\n5. CHANGELOG.md更新（[Unreleased] → [新バージョン]）\n   - 日付フォーマット: YYYY-MM-DD\n   - 比較リンクの更新\n6. コミット作成\n7. Gitタグ作成・プッシュ\n8. GitHub Releases作成（ghコマンド使用）\n   ```bash\n   gh release create v{version} --title \"v{version}\" --notes-file RELEASE_NOTES.md\n   # または CHANGELOG.mdから抽出したノートを使用\n   gh release create v{version} --title \"v{version}\" --generate-notes\n   ```\n\n**エラーハンドリング**:\n\nリリーススキルは以下のエラーケースを検出し、適切に対応します:\n\n| エラーケース | 対応 |\n|-------------|------|\n| 未コミットの変更がある | エラー表示し、コミットまたはスタッシュを促す |\n| リモートとの差分がある | `git pull`を促す、または強制続行オプションを提供 |\n| タグが既に存在する | エラー表示し、別バージョンの指定を促す |\n| CHANGELOG.mdが存在しない | 新規作成するか、エラーとして中断 |\n| [Unreleased]セクションが空 | 警告を表示し、続行するか確認 |\n\n## ブランチ戦略\n\n### リリース時のブランチ運用\n\n本プロジェクトのブランチ戦略（CLAUDE.md参照）:\n- **main**: 本番ブランチ（PRマージのみ）\n- **feature/\\*, fix/\\*, hotfix/\\***: 作業ブランチ\n\n**リリース実行ブランチ**:\n- リリーススキルは**mainブランチ**で実行することを推奨\n- リリース前にすべてのPRがmainにマージされていることを確認\n\n**developブランチが存在する場合**:\n- developブランチが存在する場合は、リリース前にmainにマージする\n- タグはmainブランチにのみ作成\n\n## 受け入れ条件\n\n### 成果物\n- [ ] `docs/release-guide.md` が作成されている\n- [ ] `.claude/skills/release/SKILL.md` が作成されている\n- [ ] `.claude/skills/release/templates/changelog-entry.md` が作成されている\n- [ ] `.claude/skills/release/examples/release-example.md` が作成されている\n- [ ] CLAUDE.mdにスキルの説明が追加されている\n\n### ドキュメント更新\n- [ ] `docs/user-guide/commands-guide.md` にreleaseスキルの説明を追加（スキルセクションとして）\n  - ※ 本ファイルはコマンド中心だが、スキルも併記して利用者の利便性を向上\n- [ ] `docs/user-guide/agents-guide.md` の更新は不要（スキルはエージェントではないため）\n\n### 動作検証\n- [ ] `/release patch` でパッチバージョンアップが実行できる\n  - [ ] package.jsonのversionが更新されている\n  - [ ] package-lock.jsonのversionが更新されている\n  - [ ] CHANGELOG.mdの[Unreleased]が新バージョンセクションに変換されている\n  - [ ] Gitタグが作成されている\n- [ ] `/release minor` でマイナーバージョンアップが実行できる\n  - [ ] 上記と同様の検証\n- [ ] `/release major` でメジャーバージョンアップが実行できる\n  - [ ] 上記と同様の検証\n- [ ] GitHub Releasesが作成されている（手動または自動）\n\n### エラー処理検証\n- [ ] 未コミット変更がある場合にエラーメッセージが表示される\n- [ ] 既存タグを指定した場合にエラーメッセージが表示される\n\n### リリース完了後の確認コマンド例\n```bash\n# タグ一覧の確認\ngit tag -l\n\n# 最新タグの確認\ngit describe --tags --abbrev=0\n\n# GitHub Releasesの確認\ngh release list\n\n# 特定リリースの詳細確認\ngh release view v{version}\n```\n\n## 依存関係\n\n- Issue #40（セマンティックバージョニング導入）の完了が前提\n\n## 将来の拡張（スコープ外）\n\n以下の機能は本Issueのスコープ外とし、将来の拡張として検討:\n- pre-releaseバージョン（alpha, beta, rc）のサポート\n- ロールバック手順の自動化\n- `/create-pr`コマンドとの連携（developからmainへのマージPR自動作成）\n\n## 参考\n\n- [Claude Code Skills ドキュメント](https://code.claude.com/docs/ja/skills)\n- [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/)\n- [Semantic Versioning](https://semver.org/lang/ja/)\n\n---\n\n## レビュー履歴\n\n### Stage 3 影響範囲レビュー (2026-01-30)\n- MF-1: ドキュメント更新対象を受け入れ条件に明記\n- SF-1: templates/examplesサブディレクトリの追加理由を明記\n- SF-2: npm install --package-lock-onlyオプションの使用を明記\n- SF-3: スキルとコマンドの違いを冒頭に追加\n- NTH-1: GitHub Releases作成の具体的なコマンド例を追加\n- NTH-3: リリース完了後の確認コマンド例を追加"
+}

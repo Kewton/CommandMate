@@ -1,0 +1,145 @@
+{
+  "issue_number": 76,
+  "title": "Phase 1: 環境変数フォールバック実装 + CHANGELOG作成 (CommandMate リネーム)",
+  "acceptance_criteria": [
+    "新環境変数名（CM_*）で正常に動作する",
+    "旧環境変数名（MCBD_*）でも正常に動作する（フォールバック）",
+    "旧名称使用時にdeprecation warningがログ出力される",
+    "同一キーへの警告は1回のみ出力される",
+    "全8種類の環境変数がフォールバック対応されている",
+    "NEXT_PUBLIC_MCBD_AUTH_TOKENのフォールバック対応が実装されている",
+    "CM_AUTH_TOKENがlogger.tsでマスキング対象に追加されている",
+    "sync/route.tsのエラーメッセージに新名称が追加されている",
+    "フォールバック機能のユニットテストが追加されている",
+    "CHANGELOG.mdが新規作成されている",
+    "TypeScriptコンパイルエラーなし",
+    "既存テストがすべてパスする"
+  ],
+  "implementation_tasks": [
+    {
+      "phase": 1,
+      "task": "env.ts コア実装",
+      "files": ["src/lib/env.ts"],
+      "details": [
+        "ENV_MAPPING定数を追加（8種類の環境変数マッピング）",
+        "warnedKeys Setを追加（警告重複防止用）",
+        "resetWarnedKeys()関数を追加（テスト用）",
+        "getEnvWithFallback()関数を実装",
+        "getEnvByKey()型安全版関数を実装",
+        "getLogConfig()をフォールバック対応に更新",
+        "getEnv()をフォールバック対応に更新"
+      ]
+    },
+    {
+      "phase": 2,
+      "task": "middleware.ts更新",
+      "files": ["src/middleware.ts"],
+      "details": [
+        "相対パスでgetEnvWithFallbackをインポート",
+        "MCBD_BIND参照をフォールバック対応",
+        "MCBD_AUTH_TOKEN参照をフォールバック対応"
+      ]
+    },
+    {
+      "phase": 2,
+      "task": "logger.tsマスキング更新",
+      "files": ["src/lib/logger.ts"],
+      "details": [
+        "CM_AUTH_TOKENマスキングパターンを追加"
+      ]
+    },
+    {
+      "phase": 3,
+      "task": "worktrees.ts更新",
+      "files": ["src/lib/worktrees.ts"],
+      "details": [
+        "getEnvByKeyをインポート",
+        "MCBD_ROOT_DIR参照をフォールバック対応"
+      ]
+    },
+    {
+      "phase": 3,
+      "task": "log-manager.ts更新",
+      "files": ["src/lib/log-manager.ts"],
+      "details": [
+        "getEnvByKeyをインポート",
+        "MCBD_LOG_DIR参照をフォールバック対応"
+      ]
+    },
+    {
+      "phase": 3,
+      "task": "api-client.ts更新",
+      "files": ["src/lib/api-client.ts"],
+      "details": [
+        "clientAuthTokenWarnedフラグを追加",
+        "NEXT_PUBLIC_CM_AUTH_TOKENへのフォールバック実装",
+        "警告重複防止ロジックを追加"
+      ]
+    },
+    {
+      "phase": 4,
+      "task": "sync/route.ts更新",
+      "files": ["src/app/api/repositories/sync/route.ts"],
+      "details": [
+        "エラーメッセージに新名称CM_ROOT_DIR (MCBD_ROOT_DIR)を追加"
+      ]
+    },
+    {
+      "phase": 4,
+      "task": "logs/[filename]/route.ts更新",
+      "files": ["src/app/api/worktrees/[id]/logs/[filename]/route.ts"],
+      "details": [
+        "getEnvByKeyをインポート",
+        "MCBD_LOG_DIR参照をフォールバック対応"
+      ]
+    },
+    {
+      "phase": 5,
+      "task": "テスト実装",
+      "files": ["tests/unit/env.test.ts"],
+      "details": [
+        "新名称のみ設定時の動作テスト",
+        "旧名称のみ設定時のフォールバック動作テスト",
+        "両方設定時に新名称が優先されるテスト",
+        "両方未設定時のundefined返却テスト",
+        "空文字列が有効値として扱われるテスト",
+        "警告重複防止のテスト",
+        "resetWarnedKeysのテスト",
+        "ENV_MAPPINGの網羅性テスト"
+      ]
+    },
+    {
+      "phase": 6,
+      "task": "スクリプト更新",
+      "files": ["scripts/migrate-cli-tool-id.ts", "scripts/clean-existing-messages.ts"],
+      "details": [
+        "MCBD_DB_PATH参照をフォールバック対応"
+      ]
+    },
+    {
+      "phase": 6,
+      "task": "CHANGELOG新規作成",
+      "files": ["CHANGELOG.md"],
+      "details": [
+        "Keep a Changelogフォーマットで新規作成",
+        "[Unreleased]セクションに本Issue変更を記載"
+      ]
+    }
+  ],
+  "env_mapping": {
+    "CM_ROOT_DIR": "MCBD_ROOT_DIR",
+    "CM_PORT": "MCBD_PORT",
+    "CM_BIND": "MCBD_BIND",
+    "CM_AUTH_TOKEN": "MCBD_AUTH_TOKEN",
+    "CM_LOG_LEVEL": "MCBD_LOG_LEVEL",
+    "CM_LOG_FORMAT": "MCBD_LOG_FORMAT",
+    "CM_LOG_DIR": "MCBD_LOG_DIR",
+    "CM_DB_PATH": "MCBD_DB_PATH"
+  },
+  "client_env_mapping": {
+    "NEXT_PUBLIC_CM_AUTH_TOKEN": "NEXT_PUBLIC_MCBD_AUTH_TOKEN"
+  },
+  "target_coverage": 80,
+  "design_doc": "dev-reports/design/issue-76-env-fallback-design-policy.md",
+  "work_plan": "dev-reports/issue/76/work-plan.md"
+}

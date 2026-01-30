@@ -1,0 +1,150 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 70,
+  "review_date": "2026-01-30",
+  "impact_analysis": {
+    "new_files": [
+      "docs/user-guide/webapp-guide.md"
+    ],
+    "modified_files": [
+      "README.md"
+    ],
+    "potentially_affected_screenshots": [
+      "docs/images/screenshot-desktop.png",
+      "docs/images/screenshot-mobile.png",
+      "docs/images/screenshot-worktree-desktop.png",
+      "docs/images/screenshot-worktree-mobile.png",
+      "docs/images/screenshot-worktree-mobile-terminal.png"
+    ],
+    "related_docs": [
+      "docs/UI_UX_GUIDE.md",
+      "docs/features/sidebar-status-indicator.md",
+      "docs/concept.md",
+      "docs/DEPLOYMENT.md",
+      "docs/user-guide/quick-start.md",
+      "docs/user-guide/commands-guide.md",
+      "docs/user-guide/agents-guide.md"
+    ],
+    "user_impact": "新規ユーザーにとってWebアプリの基本操作を習得するためのドキュメントが追加される。既存ユーザーへの破壊的変更はなし。README.mdのドキュメントテーブルに新ガイドへのリンクが追加されることで、ドキュメント全体の発見性が向上する。",
+    "related_issues": [
+      {
+        "issue_number": 69,
+        "relationship": "参照",
+        "description": "リポジトリ削除機能の操作手順を新ガイドに含める必要がある"
+      },
+      {
+        "issue_number": 71,
+        "relationship": "参照",
+        "description": "クローンURL登録機能の操作手順を新ガイドに含める必要がある"
+      },
+      {
+        "issue_number": 31,
+        "relationship": "参照",
+        "description": "ステータスインジケーター機能の説明を新ガイドに含める"
+      },
+      {
+        "issue_number": 61,
+        "relationship": "参照",
+        "description": "Auto Yesモードの操作手順を新ガイドに含める必要がある"
+      },
+      {
+        "issue_number": 64,
+        "relationship": "関連",
+        "description": "OSS公開準備で整備されたドキュメントとの整合性を確保する必要がある"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "ドキュメント更新",
+        "issue": "README.mdのドキュメントテーブル更新がIssue本文の備考セクションに明記されているが、チェックリストの受け入れ条件として明確化されていない",
+        "location": "作成するドキュメント/備考セクション",
+        "recommendation": "「Issue完了時にREADME.mdのドキュメントテーブルに新ガイドを追加」を、受け入れ条件として明記するか、別チェックリスト項目として追加する",
+        "evidence": "README.mdのドキュメントテーブル（92-102行目）には現在6つのドキュメントがリストされており、新ガイド追加により7つになる"
+      },
+      {
+        "id": "SF-2",
+        "category": "既存ドキュメントとの関連性",
+        "issue": "新ガイドとUI_UX_GUIDE.mdの間のクロスリファレンスが明確に定義されていない",
+        "location": "作成するドキュメント全体",
+        "recommendation": "新ガイドからUI_UX_GUIDE.mdへの参照リンクを含めること、またUI_UX_GUIDE.mdの「関連ドキュメント」セクション（288-293行目）に新ガイドへのリンクを追加することを検討",
+        "evidence": "UI_UX_GUIDE.mdは画面構成やコンポーネントの技術詳細を記載しており、操作ガイドと補完関係にある"
+      },
+      {
+        "id": "SF-3",
+        "category": "影響範囲の明確化",
+        "issue": "スクリーンショットの追加撮影について「必要に応じて追加撮影」とあるが、新規撮影が必要な場合のファイル命名規則が不明確",
+        "location": "備考セクション",
+        "recommendation": "新規スクリーンショットを追加する場合は既存の命名規則（screenshot-*.png）に従うことを明記。また、docs/images/ディレクトリへの追加ファイル一覧を事前に検討する",
+        "evidence": "docs/images/には現在5つのスクリーンショットが存在（screenshot-desktop.png, screenshot-mobile.png等）"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント構造",
+        "issue": "docs/concept.mdにも基本的な使い方への導線がある（159-173行目）が、新ガイドとの関係性が考慮されていない",
+        "location": "concept.md との関連",
+        "recommendation": "concept.mdの「始め方」セクションから新しいwebapp-guide.mdへの参照を追加することで、ユーザーの導線を改善できる",
+        "evidence": "concept.mdはコンセプト説明後に簡単なセットアップ手順を記載しており、詳細な操作ガイドへのリンクがあると親切"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント構造",
+        "issue": "CLAUDE.mdの「関連ドキュメント」セクションにも新ガイドの追加を検討すべき",
+        "location": "CLAUDE.md との関連",
+        "recommendation": "CLAUDE.mdの関連ドキュメントセクションに新ガイドへのリンクを追加することで、開発者がユーザー向けドキュメントを把握しやすくなる",
+        "evidence": "CLAUDE.mdには「関連ドキュメント」セクション（README.md、アーキテクチャ等）が既に存在"
+      },
+      {
+        "id": "NTH-3",
+        "category": "機能範囲",
+        "issue": "docs/features/sidebar-status-indicator.mdとの関連性が考慮されていない",
+        "location": "ステータスインジケーターの説明",
+        "recommendation": "新ガイドでステータスインジケーターを説明する際、詳細はsidebar-status-indicator.mdを参照するよう誘導することで、ドキュメントの重複を避けられる",
+        "evidence": "sidebar-status-indicator.mdには各ステータス（idle/ready/running/waiting/generating）の詳細な説明がある"
+      },
+      {
+        "id": "NTH-4",
+        "category": "ユーザーガイド構造",
+        "issue": "docs/user-guide/配下は現在Claude Codeコマンド・エージェント向けのガイドで統一されているが、Webアプリ操作ガイドを追加することでガイドの種類が混在する",
+        "location": "docs/user-guide/ディレクトリ構造",
+        "recommendation": "将来的にガイドが増えた場合を考慮し、READMEやインデックスファイルでガイドの種類を明確に分類することを検討（現時点では1ファイル追加のみなので必須ではない）",
+        "evidence": "現在のuser-guide/: quick-start.md, commands-guide.md, agents-guide.md, workflow-examples.md（すべてClaude Code関連）"
+      }
+    ]
+  },
+  "summary": "Issue #70は新規ドキュメント（docs/user-guide/webapp-guide.md）の作成が主な変更で、破壊的変更はない。影響を受けるファイルはREADME.mdのドキュメントテーブル更新と、既存スクリーンショットの活用（必要に応じて追加）。関連する既存ドキュメント（UI_UX_GUIDE.md、sidebar-status-indicator.md、concept.md）との相互参照を考慮することで、ドキュメント全体の整合性と発見性が向上する。関連IssueとしてはIssue #69（削除機能）、#71（クローン機能）、#31（ステータスインジケーター）、#61（Auto Yesモード）の機能が新ガイドに含まれるべき内容として参照される。",
+  "code_references": [],
+  "doc_references": [
+    {
+      "file": "README.md",
+      "relevance": "ドキュメントテーブル更新が必要（92-102行目）",
+      "action": "update"
+    },
+    {
+      "file": "docs/UI_UX_GUIDE.md",
+      "relevance": "新ガイドと補完関係。関連ドキュメントセクション更新を検討",
+      "action": "optional_update"
+    },
+    {
+      "file": "docs/features/sidebar-status-indicator.md",
+      "relevance": "ステータス説明の詳細として参照リンクを含める",
+      "action": "reference"
+    },
+    {
+      "file": "docs/concept.md",
+      "relevance": "始め方セクションから新ガイドへの導線追加を検討",
+      "action": "optional_update"
+    },
+    {
+      "file": "docs/images/screenshot-*.png",
+      "relevance": "既存スクリーンショット活用、必要に応じて追加",
+      "action": "reference_or_add"
+    }
+  ]
+}

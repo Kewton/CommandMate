@@ -1,0 +1,182 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "issue_number": 53,
+  "review_date": "2026-01-30",
+  "status": "CLOSED",
+  "impact_analysis": {
+    "direct_impact": [
+      {
+        "file": "src/app/api/worktrees/[id]/send/route.ts",
+        "change_type": "modified",
+        "description": "savePendingAssistantResponse関数の呼び出しを追加。ユーザーメッセージ送信前に前回のAssistant応答を保存する新しいロジックを実装"
+      },
+      {
+        "file": "src/lib/assistant-response-saver.ts",
+        "change_type": "new",
+        "description": "新規作成。savePendingAssistantResponse、extractAssistantResponseBeforeLastPrompt、detectBufferReset、cleanCliResponse関数を実装"
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "change_type": "modified",
+        "description": "重複保存防止のための競合状態検出ロジックを追加。savePendingAssistantResponseとの並行実行時の整合性確保"
+      },
+      {
+        "file": "src/lib/__tests__/assistant-response-saver.test.ts",
+        "change_type": "new",
+        "description": "新規作成。savePendingAssistantResponse、extractAssistantResponseBeforeLastPrompt、detectBufferReset、cleanCliResponseの単体テストを実装"
+      }
+    ],
+    "indirect_impact": [
+      {
+        "file": "src/lib/db.ts",
+        "reason": "createMessage、updateSessionState、getSessionState、clearInProgressMessageIdなどのDB関数を使用。既存インターフェースに変更なし",
+        "risk_level": "low"
+      },
+      {
+        "file": "src/lib/cli-session.ts",
+        "reason": "captureSessionOutput関数を使用。assistant-response-saverからの新規依存が追加されるが、インターフェース変更なし",
+        "risk_level": "low"
+      },
+      {
+        "file": "src/lib/ws-server.ts",
+        "reason": "broadcastMessage関数を使用。既存インターフェースに変更なし",
+        "risk_level": "low"
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "reason": "stripAnsi関数を使用。既存インターフェースに変更なし",
+        "risk_level": "low"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/respond/route.ts",
+        "reason": "startPolling関数を使用。Issue #53の変更後もポーリング動作に影響なし",
+        "risk_level": "low"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/start-polling/route.ts",
+        "reason": "startPolling関数を使用。Issue #53の変更後もポーリング動作に影響なし",
+        "risk_level": "low"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/kill-session/route.ts",
+        "reason": "stopPolling関数を使用。Issue #53の変更後もポーリング停止動作に影響なし",
+        "risk_level": "low"
+      }
+    ],
+    "api_changes": [
+      {
+        "endpoint": "POST /api/worktrees/:id/send",
+        "change": "内部ロジック変更のみ。APIインターフェース（リクエスト/レスポンス形式）に変更なし",
+        "breaking": false
+      }
+    ],
+    "database_changes": [
+      {
+        "table": "chat_messages",
+        "change": "新規レコード作成のタイミングが変更。ユーザーメッセージ送信時にAssistant応答も保存される可能性がある",
+        "migration_required": false
+      },
+      {
+        "table": "session_states",
+        "change": "lastCapturedLineの更新タイミングが変更。savePendingAssistantResponse内で更新される",
+        "migration_required": false
+      }
+    ],
+    "breaking_changes": []
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "regression",
+        "issue": "response-pollerとの競合状態に関する追加テストが推奨される",
+        "location": "src/lib/__tests__/assistant-response-saver.test.ts",
+        "recommendation": "savePendingAssistantResponseとcheckForResponseが並行実行された場合の重複保存防止をテストするインテグレーションテストの追加を検討",
+        "evidence": "response-poller.ts内のコメントで競合状態への対策が記載されているが、統合テストでの検証が見当たらない"
+      },
+      {
+        "id": "SF-2",
+        "category": "impact_scope",
+        "issue": "最後のメッセージへの応答保存のタイミングに関する記載が不十分",
+        "location": "Issue本文「考慮点」セクション",
+        "recommendation": "Issue本文に記載された「最後のメッセージへの応答は、次のユーザー入力がないと保存されない」の対策として、response-pollerによる完了検出で保存される仕組みが実装されていることを明記する",
+        "evidence": "response-poller.tsのcheckForResponse関数が完了検出時に保存を行う既存の仕組みが維持されているが、Issue本文の実装方針では明示されていない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "impact_scope",
+        "issue": "Issue #54、#59への関連リンクがIssue本文に追加されると良い",
+        "location": "Issue本文",
+        "recommendation": "Issue #54（extractAssistantResponseBeforeLastPromptの追加対応）、Issue #59（バッファリセット検出の追加対応）への参照リンクを追加することで、変更履歴の追跡が容易になる"
+      },
+      {
+        "id": "NTH-2",
+        "category": "performance",
+        "issue": "バッファキャプチャのサイズ（10000行）がパフォーマンスに影響する可能性",
+        "location": "src/lib/assistant-response-saver.ts:119",
+        "recommendation": "SESSION_OUTPUT_BUFFER_SIZEの値（10000行）が大きいセッションで性能に影響する可能性を考慮し、必要に応じてチューニング可能にすることを検討"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "overall_risk": "low",
+    "rationale": "変更は主にsend/route.tsとassistant-response-saver.ts（新規）に限定されており、既存APIインターフェースやDBスキーマへの変更がない。response-pollerとの競合状態も適切に処理されている。Issue #54、#59で追加の修正が行われ、エッジケースへの対応も充実している",
+    "mitigation": [
+      "既存の単体テストで主要なシナリオがカバーされている",
+      "競合状態の検出ロジックがresponse-poller.ts内に実装済み",
+      "バッファリセット検出によりセッション再起動時のエッジケースも対応済み"
+    ]
+  },
+  "test_coverage": {
+    "unit_tests": [
+      {
+        "file": "src/lib/__tests__/assistant-response-saver.test.ts",
+        "coverage": "savePendingAssistantResponse、extractAssistantResponseBeforeLastPrompt、detectBufferReset、cleanCliResponse",
+        "scenarios": [
+          "新規出力がある場合の保存",
+          "新規出力がない場合のスキップ",
+          "クリーン後の応答が空の場合のスキップ",
+          "タイムスタンプの順序保証",
+          "セッション状態の更新",
+          "WebSocketブロードキャスト",
+          "captureSessionOutput失敗時の例外処理",
+          "セッション状態がない場合のデフォルト動作",
+          "Issue #54修正: 最後のプロンプト前の応答抽出",
+          "Issue #59修正: バッファリセット検出"
+        ]
+      }
+    ],
+    "integration_tests": [],
+    "e2e_tests": []
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "relevance": "主要変更対象のAPIハンドラー",
+      "lines": "22, 109-120, 147"
+    },
+    {
+      "file": "src/lib/assistant-response-saver.ts",
+      "relevance": "新規作成モジュール（Issue #53の核心実装）",
+      "lines": "全体"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "競合状態検出ロジックの追加",
+      "lines": "544-554, 617-624"
+    }
+  ],
+  "doc_references": [],
+  "summary": {
+    "total_findings": 4,
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2,
+    "overall_assessment": "Issue #53は適切に実装されており、影響範囲は限定的です。主要な変更はsend/route.tsとassistant-response-saver.ts（新規）に集中しており、既存のAPIインターフェースやDBスキーマに破壊的変更がありません。Issue #54、#59での追加修正により、エッジケース（プロンプト前の応答抽出、バッファリセット検出）にも対応済みです。リスクレベルは低と評価しますが、競合状態のインテグレーションテスト追加を推奨します。"
+  }
+}

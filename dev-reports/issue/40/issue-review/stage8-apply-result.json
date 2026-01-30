@@ -1,0 +1,19 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 40,
+  "apply_date": "2026-01-30",
+  "applied_items": [],
+  "skipped_items": [
+    {
+      "id": "NTH-1",
+      "reason": "Nice to Haveのため対応スキップ。package-lock.jsonのnameフィールドはnpm install実行時に自動更新されるため、Issue本文への追記は不要。"
+    }
+  ],
+  "summary": {
+    "total_items": 1,
+    "applied_count": 0,
+    "skipped_count": 1
+  },
+  "note": "Stage 7で指摘された1件はNice to Haveのためスキップ。Issueの更新は不要。"
+}

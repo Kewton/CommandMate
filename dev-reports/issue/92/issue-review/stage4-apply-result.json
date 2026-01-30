@@ -1,0 +1,93 @@
+{
+  "stage": 4,
+  "apply_date": "2026-01-30",
+  "applied_findings": [
+    {
+      "id": "MF-1",
+      "category": "影響ファイル",
+      "status": "applied",
+      "changes": [
+        "docs/internal/PRODUCTION_CHECKLIST.md を「ドキュメント更新」セクションの必須更新リストに追加",
+        "「影響を受けるファイル」テーブルに PRODUCTION_CHECKLIST.md を追加",
+        "受け入れ条件に PRODUCTION_CHECKLIST.md の更新確認項目を追加"
+      ]
+    },
+    {
+      "id": "SF-1",
+      "category": "テスト範囲",
+      "status": "applied",
+      "changes": [
+        "「テスト方針」セクションを新規追加",
+        "preflight-check.sh の手動テスト項目（7項目）を追加",
+        "setup-env.sh の手動テスト項目（4項目）を追加",
+        "setup.sh の統合テスト項目（2項目）を追加",
+        "自動テストの将来的な検討事項を追加"
+      ]
+    },
+    {
+      "id": "SF-2",
+      "category": "後方互換性",
+      "status": "applied",
+      "changes": [
+        "「既存ユーザー向け移行ガイド」セクションを新規追加",
+        "既存 .env のバックアップ手順を記載",
+        "3つの移行オプション（そのまま使用/新規生成/手動置換）を提示",
+        "フォールバック機能との関連性を明記",
+        "受け入れ条件に移行手順のドキュメント記載確認を追加"
+      ]
+    },
+    {
+      "id": "SF-3",
+      "category": "依存関係",
+      "status": "applied",
+      "changes": [
+        "preflight-check.sh のチェック項目テーブルに openssl を追加",
+        "出力例に openssl のバージョン表示を追加",
+        "setup-env.sh のトークン生成方式に代替手段の検討を注記",
+        "手動テスト項目に openssl 未インストール時の動作確認を追加",
+        "受け入れ条件に openssl チェックを明記"
+      ]
+    },
+    {
+      "id": "NTH-1",
+      "category": "ドキュメント影響",
+      "status": "applied",
+      "changes": [
+        "「ドキュメント更新」セクションに「推奨更新」サブセクションを追加",
+        "migration-to-commandmate.md を推奨更新リストに追加"
+      ]
+    },
+    {
+      "id": "NTH-2",
+      "category": "影響ファイル",
+      "status": "not_applied",
+      "reason": "webapp-guide.md との連携は本Issueのスコープ外と判断。セットアップ完了後の操作ガイドへのリンクは別途検討"
+    },
+    {
+      "id": "NTH-3",
+      "category": "テスト範囲",
+      "status": "applied",
+      "changes": [
+        "自動テストセクションにshellcheckとCIパイプライン統合を将来的な検討事項として追加"
+      ]
+    }
+  ],
+  "issue_changes_summary": {
+    "sections_added": [
+      "既存ユーザー向け移行ガイド",
+      "テスト方針",
+      "影響を受けるファイル（テーブル形式）"
+    ],
+    "sections_modified": [
+      "preflight-check.sh - openssl チェック追加",
+      "ドキュメント更新 - 必須/推奨の分類追加",
+      "受け入れ条件 - 6項目追加/修正"
+    ],
+    "acceptance_criteria_changes": [
+      "openssl チェックを必須依存に追加",
+      "PRODUCTION_CHECKLIST.md の更新確認を追加",
+      "移行手順ドキュメントの記載確認を追加"
+    ]
+  },
+  "summary": "Stage 3 影響範囲レビューの指摘事項を Issue #92 に反映完了。Must Fix 1件（PRODUCTION_CHECKLIST.md の追加）、Should Fix 3件（テスト方針、移行ガイド、openssl依存）、Nice to Have 2件（migration-to-commandmate.md、CI検討）を反映。NTH-2（webapp-guide.md）はスコープ外として見送り。Issue本文に「テスト方針」「既存ユーザー向け移行ガイド」「影響を受けるファイル」セクションを新規追加し、受け入れ条件を6項目追加・修正した。"
+}

@@ -1,0 +1,14 @@
+{
+  "issue_number": 77,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_doc_path": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+  "review_criteria": [
+    "変更の波及効果",
+    "外部依存への影響",
+    "後方互換性の維持",
+    "テストカバレッジ",
+    "ロールバック計画の妥当性"
+  ]
+}

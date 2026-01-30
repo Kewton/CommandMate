@@ -1,0 +1,13 @@
+{
+  "issue_number": 53,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_doc_path": "dev-reports/design/issue53-assistant-response-save-design-policy.md",
+  "review_criteria": [
+    "設計書と実装の整合性",
+    "API仕様の一致",
+    "データモデルの一致",
+    "処理フローの一致"
+  ]
+}

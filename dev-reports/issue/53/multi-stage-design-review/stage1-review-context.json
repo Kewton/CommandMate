@@ -1,0 +1,13 @@
+{
+  "issue_number": 53,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_doc_path": "dev-reports/design/issue53-assistant-response-save-design-policy.md",
+  "review_criteria": [
+    "SOLID原則準拠",
+    "KISS原則準拠",
+    "YAGNI原則準拠",
+    "DRY原則準拠"
+  ]
+}

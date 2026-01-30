@@ -1,0 +1,11 @@
+{
+  "issue_number": 86,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "dependency": {
+    "issue_40": "completed",
+    "note": "Issue #40（セマンティックバージョニング導入）は完了済み。v0.1.0がリリースされている。"
+  }
+}

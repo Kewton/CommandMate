@@ -1,0 +1,91 @@
+{
+  "stage": 1,
+  "focus_area": "通常",
+  "review_date": "2026-01-30",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "description": ".env.production.example が旧名称(MCBD_*)のみ使用しているが、IssueではCM_*を前提とした setup-env.sh を提案している",
+        "location": "Issueの「2. scripts/setup-env.sh」セクション",
+        "recommendation": ".env.production.example の更新も実装内容に含めるか、setup-env.sh で CM_* を使用し、.env.production.example は別途更新するタスクとして明記すべき"
+      },
+      {
+        "id": "MF-2",
+        "category": "整合性",
+        "description": "現在の setup.sh は .env.production.example からコピーするが、Issueでは .env.example からコピーするフローを前提としている",
+        "location": "Issueの「現状の課題」セクションの記述 'cp .env.example .env'",
+        "recommendation": "現在の setup.sh (line 27) は .env.production.example を使用している。Issue内の現状記述を正確に修正するか、setup.sh のどちらのファイルを使うか明確化すべき"
+      },
+      {
+        "id": "MF-3",
+        "category": "完全性",
+        "description": "Claude CLI の必須/任意の判断基準が不明確。現状アプリはClaude CLIが無いとコア機能が動作しないが、チェック結果は「任意（警告のみ）」となっている",
+        "location": "Issueの「1. scripts/preflight-check.sh」セクションの表",
+        "recommendation": "Claude CLI 無しで動作可能な範囲を明確化するか、「必須だが後からインストール可能」といった表現に変更を検討"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "整合性",
+        "description": "Node.jsバージョンのチェック条件が20「以上」だが、現在のsetup.shでは「20未満でエラー」となっており、同じ意味だが表現に差異がある",
+        "location": "Issueの表「Node.js: バージョン20以上」",
+        "recommendation": "統一のため「Node.js 20.x 以上」や「v20+」など既存ドキュメント（README.md, DEPLOYMENT.md）と表現を揃える"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "description": "setup-env.sh で CM_LOG_DIR が環境変数として言及されていないが、env.ts の ENV_MAPPING では定義されている",
+        "location": "Issueの「2. scripts/setup-env.sh」セクション",
+        "recommendation": "ログ関連の設定（CM_LOG_LEVEL, CM_LOG_FORMAT, CM_LOG_DIR）も対話式で設定できるか、スキップ可能な高度な設定として言及を検討"
+      },
+      {
+        "id": "SF-3",
+        "category": "明確性",
+        "description": "「目標のフロー」では npm install が最初だが、「3. setup.sh の拡張」では preflight-check.sh の後に npm install となっている",
+        "location": "Issue全体のフロー説明",
+        "recommendation": "どちらが正しいフローか統一する。依存チェックを先に行う方が論理的なので、「目標のフロー」側を修正推奨"
+      },
+      {
+        "id": "SF-4",
+        "category": "整合性",
+        "description": "build-and-start.sh は既に --daemon オプションをサポートしているが、Issueでは新規機能のように記載されている",
+        "location": "Issueの「目標のフロー」セクション",
+        "recommendation": "--daemon オプションは既存機能であることを明記し、新規実装ではないことを明確化"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "description": "preflight-check.sh の出力例でバージョン表示形式が示されているが、各コマンドのバージョン取得方法（例: node -v, tmux -V）の詳細仕様がない",
+        "location": "Issueの「1. scripts/preflight-check.sh」セクションの出力例",
+        "recommendation": "実装の参考として、各ツールのバージョン取得コマンドを実装詳細として追加"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "description": "setup-env.sh でトークン自動生成時の方式（openssl rand -hex 32 など）が出力例には示されているが、明示的な仕様として記載されていない",
+        "location": "Issueの「2. scripts/setup-env.sh」セクション",
+        "recommendation": "トークン生成方式を実装詳細として明記"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "description": "受け入れ条件に「エラーハンドリング」や「既存.envのバックアップ」に関する条件がない",
+        "location": "Issueの「受け入れ条件」セクション",
+        "recommendation": "「既存.envがある場合のバックアップ」「preflight-check失敗時の分かりやすいエラーメッセージ」などの条件追加を検討"
+      },
+      {
+        "id": "NTH-4",
+        "category": "明確性",
+        "description": "スクリプトの言語（bash）やPOSIX互換性の要件が明記されていない",
+        "location": "Issue全体",
+        "recommendation": "#!/bin/bash を使用し、bash 4.0+ 互換を想定などの仕様追加を検討"
+      }
+    ]
+  },
+  "summary": "Issue #92 は全体的に明確で実装可能な内容だが、既存コード・ドキュメントとの整合性に3点の要修正事項がある。特に .env.production.example の扱い、Claude CLI の必須性判断、setup.sh の現在の動作との差異について明確化が必要。また、既存の build-and-start.sh が既に --daemon をサポートしている点など、4点の改善推奨事項と4点の任意改善提案がある。"
+}

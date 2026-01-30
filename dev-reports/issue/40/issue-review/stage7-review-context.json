@@ -1,0 +1,14 @@
+{
+  "issue_number": 40,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "previous_stages": ["stage1", "stage2", "stage3", "stage4", "stage5", "stage6"],
+  "previous_review": "dev-reports/issue/40/issue-review/stage3-review-result.json",
+  "user_context": {
+    "target_version": "v0.1.0",
+    "scope": "セマンティックバージョニング導入のみ",
+    "note": "β版としてv0.1.0でのリリースを目指している"
+  }
+}

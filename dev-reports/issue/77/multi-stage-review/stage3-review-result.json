@@ -1,0 +1,171 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "issue_number": 77,
+  "review_date": "2026-01-29",
+  "status": "completed",
+  "summary": "設計書の影響分析は概ね適切だが、追加で考慮すべき波及効果と外部依存が確認された。テストカバレッジについてはCM_AUTH_TOKENリダクションテストの追加が推奨される。ロールバック計画は実行可能と判断される。",
+  "must_fix": [],
+  "should_fix": [
+    {
+      "id": "SF-1",
+      "category": "テストカバレッジ",
+      "severity": "Low",
+      "description": "logger.test.tsにCM_AUTH_TOKENリダクションテストが未実装",
+      "current_state": "MCBD_AUTH_TOKENのリダクションテストのみ存在（L241-251）。CM_AUTH_TOKENパターンはlogger.tsに追加済み（L83）だがテストが不足",
+      "recommendation": "設計書Section 4.3に記載のCM_AUTH_TOKENリダクションテストを追加",
+      "file": "tests/unit/logger.test.ts",
+      "impact": "Low - 機能は既に実装済み、テストによる品質保証の強化"
+    }
+  ],
+  "good_practices": [
+    {
+      "id": "GP-1",
+      "category": "後方互換性",
+      "description": "Issue #76で実装されたフォールバック機構を適切に活用",
+      "detail": "env.tsのgetEnvWithFallback/getEnvByKey関数により、新旧両方の環境変数名をサポート。deprecation警告も実装済み"
+    },
+    {
+      "id": "GP-2",
+      "category": "影響分析の網羅性",
+      "description": "設計書Section 5で破壊的変更と非破壊的変更を明確に区別",
+      "detail": "Envインターフェース変更、package.json name変更の影響を正しく評価。フォールバック継続サポートによる移行パスを明示"
+    },
+    {
+      "id": "GP-3",
+      "category": "外部依存の評価",
+      "description": "PM2とsystemdへの影響を正しく評価し移行手順を記載",
+      "detail": "Section 5.3でPM2のAPP_NAME変更、systemdのサービス名変更に対する移行手順を明示"
+    },
+    {
+      "id": "GP-4",
+      "category": "セキュリティ対応",
+      "description": "CM_AUTH_TOKEN/MCBD_AUTH_TOKEN両方のマスキングパターンを実装済み",
+      "detail": "logger.ts L82-85で新旧両方のトークン名をREDACTED処理"
+    },
+    {
+      "id": "GP-5",
+      "category": "テスト戦略",
+      "description": "設計書Section 4でフォールバックテスト追加を計画",
+      "detail": "middleware.test.tsで新名称テストとレガシー名称フォールバックテストの両方を計画"
+    }
+  ],
+  "impact_analysis": {
+    "wave_effects": {
+      "status": "Adequate",
+      "details": [
+        {
+          "area": "Envインターフェース変更",
+          "affected_files": [
+            "src/app/api/repositories/scan/route.ts (getEnv().MCBD_ROOT_DIR参照)"
+          ],
+          "coverage": "設計書で認識済み、変更対象に含まれている"
+        },
+        {
+          "area": "server.tsの直接環境変数参照",
+          "affected_files": [
+            "server.ts (process.env.MCBD_BIND, process.env.MCBD_PORT)"
+          ],
+          "coverage": "設計書MF-2でgetEnvByKey使用への変更を計画"
+        },
+        {
+          "area": "シェルスクリプトのAPP_NAME",
+          "affected_files": [
+            "scripts/start.sh",
+            "scripts/logs.sh",
+            "scripts/restart.sh",
+            "scripts/stop.sh (設計書に未記載だが影響あり)"
+          ],
+          "coverage": "stop.shは設計書に未記載だが、APP_NAMEを参照しているため影響あり。ただしMCBD_PORT環境変数参照はフォールバック対象外のため影響は限定的"
+        }
+      ]
+    },
+    "external_dependencies": {
+      "status": "Adequate",
+      "details": [
+        {
+          "dependency": "PM2",
+          "impact": "APP_NAME変更により既存のpm2プロセスとの互換性が失われる",
+          "migration_path": "pm2 delete mycodebranch-desk && pm2 start - 設計書Section 5.3に記載"
+        },
+        {
+          "dependency": "systemd",
+          "impact": "サービス名変更が必要",
+          "migration_path": "ユニットファイル更新 - 設計書Section 5.3に記載"
+        }
+      ]
+    },
+    "backward_compatibility": {
+      "status": "Good",
+      "details": [
+        {
+          "feature": "環境変数フォールバック",
+          "implementation": "getEnvWithFallback/getEnvByKey関数で新旧両方をサポート",
+          "deprecation_warning": "旧名称使用時にconsole.warnでdeprecation警告を出力"
+        },
+        {
+          "feature": "クライアント側フォールバック",
+          "implementation": "api-client.tsでNEXT_PUBLIC_CM_AUTH_TOKEN/NEXT_PUBLIC_MCBD_AUTH_TOKENの両方をサポート"
+        }
+      ]
+    },
+    "test_coverage": {
+      "status": "Needs Improvement",
+      "details": [
+        {
+          "test_file": "tests/unit/logger.test.ts",
+          "gap": "CM_AUTH_TOKENリダクションテストが未実装",
+          "recommendation": "SF-1として設計書Section 4.3のテストコードを追加"
+        },
+        {
+          "test_file": "tests/unit/middleware.test.ts",
+          "gap": "現在MCBD_*のみ使用、CM_*とフォールバックテストが必要",
+          "recommendation": "設計書Section 4.1の通りdescribeブロックを追加"
+        },
+        {
+          "test_file": "tests/e2e/worktree-list.spec.ts",
+          "gap": "MyCodeBranchDesk -> CommandMate更新、skip解除が必要",
+          "recommendation": "設計書Section 4.4の通り更新"
+        }
+      ]
+    },
+    "rollback_plan": {
+      "status": "Executable",
+      "details": [
+        {
+          "method": "git revert",
+          "feasibility": "可能 - 単一コミットまたは複数コミットのrevertで対応可能"
+        },
+        {
+          "method": "フォールバック継続運用",
+          "feasibility": "可能 - 既存のMCBD_*環境変数は引き続き動作"
+        }
+      ],
+      "risks": [
+        {
+          "risk": "PM2/systemdの設定が更新済みの場合、ロールバック後に再設定が必要",
+          "mitigation": "ロールバック手順にPM2/systemd再設定を含める"
+        }
+      ]
+    }
+  },
+  "additional_findings": [
+    {
+      "id": "AF-1",
+      "category": "設計書整合性",
+      "description": "scripts/stop.shが設計書の変更対象に含まれていない",
+      "detail": "stop.shもAPP_NAMEを使用しているが、設計書Section 3.1の対象ファイルに記載がない。ただしMCBD_PORT参照は環境変数フォールバック対象外のため、別途対応が必要な可能性がある",
+      "recommendation": "scripts/stop.shも変更対象に追加を検討"
+    }
+  ],
+  "metrics": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "good_practices_count": 5,
+    "breaking_changes_count": 2,
+    "affected_files_count": 19
+  },
+  "overall_status": "Pass",
+  "reviewer": "architecture-review-agent"
+}

@@ -1,0 +1,157 @@
+{
+  "issue_number": 75,
+  "stage": 1,
+  "focus_area": "設計原則",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "C-001",
+        "category": "DRY",
+        "description": "プロジェクト名「MyCodeBranchDesk」は多数のファイルに散在しているため、定数ファイルを作成して一元管理することを検討してください。ただし、Phase 2（ドキュメント・UI表示のみ）の範囲では単純な文字列置換で十分です。",
+        "files": [
+          "src/app/page.tsx",
+          "src/app/layout.tsx",
+          "src/components/layout/Header.tsx"
+        ],
+        "recommendation": "将来的にリネーム作業が再発した場合に備え、src/config/app-constants.tsなどに APP_NAME を定義し、UIコンポーネントはそこから参照する形への移行を検討"
+      },
+      {
+        "id": "C-002",
+        "category": "KISS",
+        "description": "E2Eテストファイル（worktree-list.spec.ts）には /MyCodeBranchDesk/i という正規表現による検証が5箇所あります。一時スキップよりも、データ属性（data-testid）を使用したテスト設計への移行を検討してください。",
+        "files": [
+          "tests/e2e/worktree-list.spec.ts"
+        ],
+        "recommendation": "テスト対象要素には data-testid を使用し、表示文字列への依存を減らすことで、今後のリネームに強いテストコードになります"
+      }
+    ]
+  },
+  "design_principles": {
+    "solid": "pass",
+    "kiss": "pass",
+    "yagni": "pass",
+    "dry": "pass"
+  },
+  "reviewed_files": [
+    {
+      "path": "README.md",
+      "occurrences": 8,
+      "risk": "low",
+      "notes": "ユーザー向けドキュメント。単純な文字列置換で対応可能。git clone URLはリポジトリ名変更がない限り維持"
+    },
+    {
+      "path": "CLAUDE.md",
+      "occurrences": 5,
+      "risk": "low",
+      "notes": "開発者向けガイドライン。プロジェクト概要セクションとリポジトリURLを変更"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "occurrences": 3,
+      "risk": "low",
+      "notes": "コントリビューションガイド。タイトルとgit cloneコマンドを変更"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "occurrences": 0,
+      "risk": "none",
+      "notes": "プロジェクト名の直接記載なし。変更不要"
+    },
+    {
+      "path": "docs/architecture.md",
+      "occurrences": 9,
+      "risk": "low",
+      "notes": "アーキテクチャドキュメント。大文字・小文字の表記揺れあり（myCodeBranchDesk, MyCodeBranchDesk）。統一推奨"
+    },
+    {
+      "path": "docs/concept.md",
+      "occurrences": 7,
+      "risk": "low",
+      "notes": "コンセプトドキュメント。git cloneコマンドを含む"
+    },
+    {
+      "path": "docs/DEPLOYMENT.md",
+      "occurrences": 12,
+      "risk": "low",
+      "notes": "デプロイガイド。pm2/systemd設定例にプロジェクト名を含む。環境変数MCBDは別Issue(#76)で対応済み"
+    },
+    {
+      "path": "docs/TRUST_AND_SAFETY.md",
+      "occurrences": 3,
+      "risk": "low",
+      "notes": "セキュリティドキュメント。単純置換で対応可能"
+    },
+    {
+      "path": "docs/UI_UX_GUIDE.md",
+      "occurrences": 3,
+      "risk": "low",
+      "notes": "UI/UXガイド。単純置換で対応可能"
+    },
+    {
+      "path": "docs/user-guide/quick-start.md",
+      "occurrences": 1,
+      "risk": "low",
+      "notes": "クイックスタートガイド。タイトルのみ"
+    },
+    {
+      "path": "docs/user-guide/commands-guide.md",
+      "occurrences": 1,
+      "risk": "low",
+      "notes": "コマンドガイド。タイトルのみ"
+    },
+    {
+      "path": "docs/user-guide/agents-guide.md",
+      "occurrences": 1,
+      "risk": "low",
+      "notes": "エージェントガイド。タイトルのみ"
+    },
+    {
+      "path": "docs/user-guide/workflow-examples.md",
+      "occurrences": 1,
+      "risk": "low",
+      "notes": "ワークフロー例。タイトルのみ"
+    },
+    {
+      "path": "docs/features/sidebar-status-indicator.md",
+      "occurrences": 0,
+      "risk": "none",
+      "notes": "プロジェクト名の記載なし。変更不要"
+    },
+    {
+      "path": "src/app/page.tsx",
+      "occurrences": 1,
+      "risk": "low",
+      "notes": "h1タイトル表示。UI表示文字列のみの変更"
+    },
+    {
+      "path": "src/app/layout.tsx",
+      "occurrences": 1,
+      "risk": "low",
+      "notes": "HTMLタイトルとdescription。metadataオブジェクトの変更のみ"
+    },
+    {
+      "path": "src/components/layout/Header.tsx",
+      "occurrences": 4,
+      "risk": "low",
+      "notes": "ヘッダーコンポーネント。デフォルトプロパティ値、JSDocコメント、GitHubリンクhref（リポジトリ名変更がない場合は維持）"
+    },
+    {
+      "path": "tests/e2e/worktree-list.spec.ts",
+      "occurrences": 5,
+      "risk": "medium",
+      "notes": "E2Eテスト。正規表現によるUI文字列検証があるため、一時スキップまたはテスト更新が必要"
+    }
+  ],
+  "summary": "Issue #75（CommandMateリネーム Phase 2）の設計原則レビューを完了しました。\n\n【評価結果】\n本変更は設計原則（SOLID, KISS, YAGNI, DRY）に適合しています。\n\n【SOLID原則】\n- 単一責任: 各ファイルの変更範囲は表示文字列のみに限定されており、ロジック変更を伴わない\n- 開放閉鎖: 既存のコンポーネント構造を維持したまま、表示値のみを変更\n- 変更の局所化: ドキュメントとUI表示文字列に限定された変更範囲\n\n【KISS原則】\n- 単純な文字列置換で完結する変更内容\n- 複雑なリファクタリングを伴わない\n\n【YAGNI原則】\n- Phase 2として必要最小限の変更（ドキュメント・UI表示のみ）\n- コード構造やAPIの変更を含まない適切なスコープ設定\n\n【DRY原則】\n- 現状、プロジェクト名は各ファイルにハードコードされているが、Phase 2の範囲では許容される\n- 将来的には定数化を検討（C-001として記載）\n\n【E2Eテストについて】\n- worktree-list.spec.tsには「MyCodeBranchDesk」を正規表現で検証するテストが5件存在\n- 一時スキップまたはテスト更新で対応可能\n- 長期的にはdata-testidを使用したテスト設計への移行を推奨（C-002）\n\n【リスク評価】\n- 変更対象ファイル: 17ファイル（うち変更不要2ファイル）\n- リスクレベル: 低（表示文字列のみの変更のため、機能への影響なし）\n- 環境変数のリネーム（MCBD_* -> CM_*）はIssue #76で既に対応済み\n\n【承認理由】\nドキュメントとUI表示文字列のみを対象とした変更であり、設計原則に違反する箇所は見当たりません。変更範囲が適切に限定されており、リスクも低いため、承認とします。",
+  "review_metadata": {
+    "reviewer": "architecture-review-agent",
+    "review_date": "2026-01-29",
+    "review_duration_minutes": 15,
+    "total_files_reviewed": 18,
+    "total_occurrences": 65
+  }
+}

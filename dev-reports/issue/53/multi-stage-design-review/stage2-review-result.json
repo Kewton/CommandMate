@@ -1,0 +1,144 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "issue_number": 53,
+  "review_date": "2026-01-30",
+  "design_doc_path": "dev-reports/design/issue53-assistant-response-save-design-policy.md",
+  "consistency_checks": [
+    {
+      "item": "新規ファイル assistant-response-saver.ts",
+      "design_spec": "セクション6.2: src/lib/assistant-response-saver.ts [NEW] - Assistant応答保存ロジックの集約",
+      "implementation": "src/lib/assistant-response-saver.ts が作成されている。savePendingAssistantResponse(), cleanCliResponse(), extractAssistantResponseBeforeLastPrompt(), detectBufferReset() 関数を含む",
+      "status": "match",
+      "notes": "設計書通りに新規ファイルが作成され、責務分離が達成されている"
+    },
+    {
+      "item": "savePendingAssistantResponse 関数シグネチャ",
+      "design_spec": "セクション5.2: savePendingAssistantResponse(db: Database.Database, worktreeId: string, cliToolId: CLIToolType, userMessageTimestamp: Date): Promise<ChatMessage | null>",
+      "implementation": "実装のシグネチャ: savePendingAssistantResponse(db: Database.Database, worktreeId: string, cliToolId: CLIToolType, userMessageTimestamp: Date): Promise<ChatMessage | null>",
+      "status": "match",
+      "notes": "関数シグネチャは設計書と完全に一致"
+    },
+    {
+      "item": "重複保存防止ロジック (MUST FIX #1)",
+      "design_spec": "セクション5.2: currentLineCount <= lastCapturedLine の場合はスキップ",
+      "implementation": "assistant-response-saver.ts L263-268: if (!bufferReset && currentLineCount <= lastCapturedLine) でチェック。response-poller.ts L544-553: result.lineCount <= lastCapturedLine でチェック、L620-624: Race condition prevention で再チェック",
+      "status": "match",
+      "notes": "両方のモジュールで重複保存防止が実装されている。設計書のMUST FIX #1要件を満たす"
+    },
+    {
+      "item": "タイムスタンプ整合性 (MUST FIX #2)",
+      "design_spec": "セクション5.2: userMessageTimestamp.getTime() - 1 (1ms前に設定)",
+      "implementation": "assistant-response-saver.ts L180: ASSISTANT_TIMESTAMP_OFFSET_MS = 1、L295: new Date(userMessageTimestamp.getTime() - ASSISTANT_TIMESTAMP_OFFSET_MS)",
+      "status": "match",
+      "notes": "定数化されており、設計書の1ms前設定を正確に実装"
+    },
+    {
+      "item": "send/route.ts の処理フロー",
+      "design_spec": "セクション5.3: 1) タイムスタンプ先行生成 2) savePendingAssistantResponse呼び出し 3) userメッセージ保存 4) セッション状態更新 5) ポーリング開始",
+      "implementation": "route.ts: L111タイムスタンプ生成 -> L116 savePendingAssistantResponse -> L135 createMessage(user) -> L148 clearInProgressMessageId -> L152 startPolling",
+      "status": "partial",
+      "notes": "設計書では updateSessionState(currentLineCount) を明示していたが、実装では savePendingAssistantResponse 内で状態更新を行い、route.ts では clearInProgressMessageId のみ呼び出し。ロジック上は問題なし"
+    },
+    {
+      "item": "cleanCliResponse 関数",
+      "design_spec": "セクション5.2: switch文でcliToolIdに応じてcleanClaudeResponse/cleanGeminiResponse/cleanCodexResponseを呼び分け",
+      "implementation": "assistant-response-saver.ts L189-201: switch文で claude->cleanClaudeResponse, gemini->cleanGeminiResponse, codex->output.trim() を実装",
+      "status": "match",
+      "notes": "設計書通りの構造。codexは専用関数なしでtrim()のみ（設計書ではcleanCodexResponseと記載されていたが、実装上は不要と判断されたと思われる）"
+    },
+    {
+      "item": "エラーハンドリング方針",
+      "design_spec": "セクション7.2: try-catch でログ出力のみ、例外は伝播させない、nullを返す",
+      "implementation": "assistant-response-saver.ts L318-321: catch(error) で console.error + return null。route.ts L115-120: savePendingAssistantResponse のエラーをキャッチし、userメッセージ保存は継続",
+      "status": "match",
+      "notes": "設計書のエラーハンドリング方針を正確に実装"
+    },
+    {
+      "item": "response-poller.ts の重複保存防止",
+      "design_spec": "セクション8.2 方式A: checkForResponse内でresult.lineCount <= lastCapturedLineをチェック、さらにrace condition対策として保存前に再チェック",
+      "implementation": "response-poller.ts L544-553: lineCount <= lastCapturedLine チェック、L620-624: 保存前にgetSessionStateで再取得してチェック",
+      "status": "match",
+      "notes": "設計書のMUST FIX #1とrace condition対策が両方実装されている"
+    },
+    {
+      "item": "WebSocket配信",
+      "design_spec": "セクション5.2: broadcastMessage('message', { worktreeId, message })",
+      "implementation": "assistant-response-saver.ts L311: broadcastMessage('message', { worktreeId, message })",
+      "status": "match",
+      "notes": "設計書通りにWebSocket配信を実装"
+    },
+    {
+      "item": "データモデル (SESSION_STATE)",
+      "design_spec": "セクション4.1-4.2: session_statesテーブルのlast_captured_line, in_progress_message_idを使用",
+      "implementation": "getSessionState, updateSessionState, clearInProgressMessageId 関数で操作。assistant-response-saver.tsでは lastCapturedLine を参照・更新",
+      "status": "match",
+      "notes": "既存のデータモデルを設計書通りに活用"
+    },
+    {
+      "item": "バッファリセット検出",
+      "design_spec": "セクション10.3: tmuxバッファがリセットされた場合も正しく動作する（エッジケース）",
+      "implementation": "assistant-response-saver.ts L144-173: detectBufferReset() 関数で shrink/restart の2パターンを検出。L247-259で bufferReset 時は effectiveLastCapturedLine = 0 として全バッファを処理",
+      "status": "match",
+      "notes": "設計書のエッジケース要件を超えた堅牢な実装。Issue #59の修正として追加された"
+    },
+    {
+      "item": "Claude専用の応答抽出ロジック",
+      "design_spec": "設計書では cleanClaudeResponse() の使用を想定",
+      "implementation": "assistant-response-saver.ts L276-281: Claude用に extractAssistantResponseBeforeLastPrompt() を使用（Issue #54対応）。他ツールは cleanCliResponse() を使用",
+      "status": "partial",
+      "notes": "Issue #54で発見された問題への対応として、Claude用に専用の抽出ロジックが追加された。設計書には記載なし（後続Issue）"
+    },
+    {
+      "item": "ポーリング維持（方式A）",
+      "design_spec": "セクション8.3: 方式Aを採用、既存ポーリング機構を補助的に維持",
+      "implementation": "response-poller.ts: 従来のポーリング機構がそのまま動作。startPolling/stopPolling は変更なく維持",
+      "status": "match",
+      "notes": "設計書の方式A採用が実現されている"
+    },
+    {
+      "item": "セッション状態リセット方針の変更",
+      "design_spec": "セクション5.1: 変更前はupdateSessionState(0)でリセット、変更後はリセットしない",
+      "implementation": "route.ts: updateSessionState() の直接呼び出しは削除。savePendingAssistantResponse内とclearInProgressMessageIdで管理",
+      "status": "match",
+      "notes": "設計書の「リセットしない」方針を実現"
+    }
+  ],
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "item": "SF-1: cleanCodexResponse関数の未実装",
+        "description": "設計書セクション5.2ではcleanCodexResponse()の呼び出しを想定しているが、実装ではoutput.trim()のみ。機能的には問題ないが、設計書との不整合がある",
+        "recommendation": "設計書を更新してcodexの簡易処理を明記するか、将来的にcleanCodexResponse()関数を追加することを検討",
+        "priority": "低"
+      },
+      {
+        "item": "SF-2: Issue #54対応の設計書反映",
+        "description": "extractAssistantResponseBeforeLastPrompt() 関数はIssue #54で追加されたが、Issue #53の設計書には反映されていない。実装が設計書を上回っている状態",
+        "recommendation": "設計書のセクション5.2またはセクション14に追記し、Claude専用ロジックの存在を明記",
+        "priority": "低"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "item": "NH-1: send/route.tsの処理フロー詳細化",
+        "description": "設計書ではセッション状態更新をroute.ts内で明示的に行う想定だったが、実装ではsavePendingAssistantResponse内に委譲。コード構造としては良好だが、設計書との軽微な差異がある",
+        "recommendation": "設計書のセクション5.3を実装に合わせて更新し、状態管理の責務分担を明確化"
+      },
+      {
+        "item": "NH-2: detectBufferReset関数の設計書追記",
+        "description": "Issue #59で追加されたバッファリセット検出ロジックは堅牢だが、Issue #53の設計書には含まれていない",
+        "recommendation": "設計書セクション10にバッファリセット検出の設計詳細を追記"
+      }
+    ]
+  },
+  "summary": {
+    "total_checks": 14,
+    "matches": 11,
+    "partials": 2,
+    "mismatches": 0,
+    "overall_assessment": "設計と実装の整合性は良好。主要な設計項目（savePendingAssistantResponse関数、重複保存防止、タイムスタンプ整合性、エラーハンドリング）は全て設計書通りに実装されている。2件のpartialは、後続Issue（#54, #59）で追加された改善が設計書に反映されていないことによるもので、実装品質は設計書を上回っている。must_fix項目は0件であり、本Issueは正しく完了している。"
+  }
+}

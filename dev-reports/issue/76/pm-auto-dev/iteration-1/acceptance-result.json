@@ -1,0 +1,88 @@
+{
+  "status": "passed",
+  "scenarios": [
+    {
+      "id": "AC-1",
+      "name": "新名称のみで動作確認",
+      "status": "passed",
+      "evidence": "tests/unit/env.test.tsのテスト 'should return new key value when only new key is set' が通過。CM_ROOT_DIR=/new/path を設定した場合、getEnvWithFallbackは警告なしで '/new/path' を返すことを確認。"
+    },
+    {
+      "id": "AC-2",
+      "name": "旧名称フォールバック確認",
+      "status": "passed",
+      "evidence": "tests/unit/env.test.tsのテスト 'should fallback to old key value and warn when only old key is set' が通過。MCBD_ROOT_DIRのみ設定時に値が返され、console.warnで '[DEPRECATED] MCBD_ROOT_DIR is deprecated, use CM_ROOT_DIR instead' が出力されることを確認。"
+    },
+    {
+      "id": "AC-3",
+      "name": "優先順位確認",
+      "status": "passed",
+      "evidence": "tests/unit/env.test.tsのテスト 'should prioritize new key when both are set' が通過。CM_ROOT_DIR=/new/path と MCBD_ROOT_DIR=/old/path を両方設定した場合、新名称の値 '/new/path' が優先されることを確認。"
+    },
+    {
+      "id": "AC-4",
+      "name": "警告重複防止確認",
+      "status": "passed",
+      "evidence": "tests/unit/env.test.tsのテスト 'should only warn once for same key across multiple calls' が通過。getEnvWithFallback()を3回呼び出しても、console.warnは1回のみ呼び出されることを確認。warnedKeys Setによる重複防止機構が正常動作。"
+    },
+    {
+      "id": "AC-5",
+      "name": "ENV_MAPPING網羅性確認",
+      "status": "passed",
+      "evidence": "src/lib/env.tsのENV_MAPPINGに8種類の環境変数がマッピングされていることを確認: CM_ROOT_DIR, CM_PORT, CM_BIND, CM_AUTH_TOKEN, CM_LOG_LEVEL, CM_LOG_FORMAT, CM_LOG_DIR, CM_DB_PATH。tests/unit/env.test.tsの 'should have exactly 8 environment variable mappings' テストも通過。"
+    },
+    {
+      "id": "AC-6",
+      "name": "クライアント側フォールバック確認",
+      "status": "passed",
+      "evidence": "src/lib/api-client.tsのfetchApi関数(行54-65)でNEXT_PUBLIC_CM_AUTH_TOKEN / NEXT_PUBLIC_MCBD_AUTH_TOKENのフォールバックが実装されていることを確認。clientAuthTokenWarned変数による重複警告防止も実装済み。"
+    },
+    {
+      "id": "AC-7",
+      "name": "マスキングパターン確認",
+      "status": "passed",
+      "evidence": "src/lib/logger.tsのSENSITIVE_PATTERNS配列(行82-85)にCM_AUTH_TOKENとMCBD_AUTH_TOKENの両方のマスキングパターンが追加されていることを確認。{ pattern: /CM_AUTH_TOKEN=\\S+/gi, replacement: 'CM_AUTH_TOKEN=[REDACTED]' }"
+    },
+    {
+      "id": "AC-8",
+      "name": "エラーメッセージ確認",
+      "status": "passed",
+      "evidence": "src/app/api/repositories/sync/route.ts(行17)のエラーメッセージに 'CM_ROOT_DIR (MCBD_ROOT_DIR)' が記載されていることを確認: 'No repositories configured. Please set WORKTREE_REPOS or CM_ROOT_DIR (MCBD_ROOT_DIR) environment variable.'"
+    },
+    {
+      "id": "AC-9",
+      "name": "テストファイル存在確認",
+      "status": "passed",
+      "evidence": "tests/unit/env.test.tsが存在し、248行のフォールバック機能テストが実装されていることを確認。describe('getEnvWithFallback'), describe('getEnvByKey'), describe('resetWarnedKeys'), describe('getEnv with fallback'), describe('getLogConfig with fallback'), describe('ENV_MAPPING')の6つのテストスイートを含む。"
+    },
+    {
+      "id": "AC-10",
+      "name": "CHANGELOG確認",
+      "status": "passed",
+      "evidence": "CHANGELOG.mdが存在し、Keep a Changelogフォーマット(v1.1.0)で作成されていることを確認。[Unreleased]セクションにAddedとDeprecatedサブセクションがあり、Issue #76の環境変数フォールバック機能の変更が記載されている。"
+    },
+    {
+      "id": "AC-11",
+      "name": "静的解析確認",
+      "status": "passed",
+      "evidence": "npx tsc --noEmit: エラー0件で正常終了。npm run lint: 'No ESLint warnings or errors' で正常終了。TypeScriptコンパイルエラーとESLintエラーがないことを確認。"
+    },
+    {
+      "id": "AC-12",
+      "name": "テスト実行確認",
+      "status": "passed",
+      "evidence": "npm run test:unit: 83ファイル、1491テストが全て通過 (6件はスキップ)。tests/unit/env.test.tsを含む全テストがパス。実行時間: 3.52秒。"
+    }
+  ],
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0
+  },
+  "metadata": {
+    "issue_number": 76,
+    "iteration": 1,
+    "timestamp": "2026-01-29T17:10:30Z",
+    "agent": "acceptance-test-agent"
+  }
+}

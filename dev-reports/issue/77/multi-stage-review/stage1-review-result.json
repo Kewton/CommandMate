@@ -1,0 +1,140 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "issue_number": 77,
+  "review_date": "2026-01-29",
+  "status": "completed",
+  "summary": "Issue #77 Phase 3設計方針書に対する設計原則(SOLID/KISS/YAGNI/DRY)レビューを実施。全体的に設計原則への準拠度は高いが、実装整合性に関してMust Fix 3件、Should Fix 4件を特定。特にEnvインターフェースの旧名称残存、server.tsのフォールバック未使用、テストの旧名称使用が重要な修正対象。設計書の内容自体は明確で実装可能性も高い。",
+  "must_fix": [
+    {
+      "id": "MF-1",
+      "severity": "High",
+      "category": "DRY/一貫性",
+      "title": "Env型インターフェースのプロパティ名が旧名称のまま残存",
+      "description": "src/lib/env.ts (L134-149) のEnvインターフェースがMCBD_ROOT_DIR, MCBD_PORT, MCBD_BIND, MCBD_AUTH_TOKENを使用。設計書Section 3.2では変更後としてCM_*を指定しているが未対応。これはDRY原則違反であり、新旧名称の混在により保守性が低下する。",
+      "location": "src/lib/env.ts:134-149",
+      "current_state": "interface Env { MCBD_ROOT_DIR: string; MCBD_PORT: number; MCBD_BIND: string; MCBD_AUTH_TOKEN?: string; DATABASE_PATH: string; }",
+      "expected_state": "interface Env { CM_ROOT_DIR: string; CM_PORT: number; CM_BIND: string; CM_AUTH_TOKEN?: string; DATABASE_PATH: string; }",
+      "recommendation": "設計書Section 3.2に従い、Envインターフェースのプロパティ名をCM_*に変更。getEnv()の戻り値(L191-197)とisAuthRequired()関数(L226-227)のenv.MCBD_BIND参照も同時に更新が必要。"
+    },
+    {
+      "id": "MF-2",
+      "severity": "High",
+      "category": "一貫性/フォールバック活用",
+      "title": "server.tsがgetEnvByKey()フォールバック機能を未使用",
+      "description": "server.ts (L43-44) が直接process.env.MCBD_BIND, process.env.MCBD_PORTを参照。Issue #76で実装されたgetEnvByKey()を活用しておらず、設計書Section 3.3の変更内容と矛盾。フォールバック機能の恩恵を受けられない。",
+      "location": "server.ts:43-44",
+      "current_state": "const hostname = process.env.MCBD_BIND || '127.0.0.1'; const port = parseInt(process.env.MCBD_PORT || process.env.PORT || '3000', 10);",
+      "expected_state": "import { getEnvByKey } from './src/lib/env'; const hostname = getEnvByKey('CM_BIND') || '127.0.0.1'; const port = parseInt(getEnvByKey('CM_PORT') || process.env.PORT || '3000', 10);",
+      "recommendation": "設計書Section 3.3に従い、server.tsでgetEnvByKey()をインポートし、フォールバック対応を実装する。"
+    },
+    {
+      "id": "MF-3",
+      "severity": "High",
+      "category": "テスト品質/一貫性",
+      "title": "middleware.test.tsが全て旧名称(MCBD_*)を使用",
+      "description": "tests/unit/middleware.test.tsの全テストケースでprocess.env.MCBD_BIND, process.env.MCBD_AUTH_TOKENを使用。新名称(CM_*)のテストとフォールバック動作確認テストが不足しており、設計書Section 4.1のテスト戦略と整合していない。",
+      "location": "tests/unit/middleware.test.ts:27-28, 66-67, 131-132, 154, 166-167",
+      "current_state": "全テストケースでprocess.env.MCBD_BIND, process.env.MCBD_AUTH_TOKENを使用",
+      "expected_state": "新名称(CM_*)を使用したテストケース + レガシー名称(MCBD_*)フォールバックテストを追加",
+      "recommendation": "設計書Section 4.1に従い、既存テストを新名称(CM_*)に更新し、describe('legacy naming fallback (MCBD_*)')ブロックを新設してフォールバック動作確認テストを追加。"
+    }
+  ],
+  "should_fix": [
+    {
+      "id": "SF-1",
+      "severity": "Medium",
+      "category": "KISS",
+      "title": "シェルスクリプトのAPP_NAMEと名称が旧名称のまま",
+      "description": "scripts/start.sh, logs.sh, restart.shでAPP_NAME='mycodebranch-desk'とコメント'MyCodeBranchDesk'が残存。設計書Section 3.4, 7.4では更新が必要とされている。スクリプト内部での参照のため直接的な機能影響は限定的。",
+      "location": "scripts/start.sh:9, scripts/logs.sh:7, scripts/restart.sh:7",
+      "recommendation": "設計書Section 3.4に従い、APP_NAME='commandmate'に更新、コメントも'CommandMate'に変更。logs.shのsystemdサービス名参照(L20)も確認が必要。"
+    },
+    {
+      "id": "SF-2",
+      "severity": "Medium",
+      "category": "一貫性",
+      "title": ".env.exampleが旧名称(MCBD_*)のみを使用",
+      "description": ".env.exampleが全てMCBD_*環境変数とMyCodeBranchDeskコメントを使用。設計書Section 3.5の更新内容(CM_*への移行、deprecation警告コメント追加)と整合していない。新規セットアップユーザーに混乱を招く可能性。",
+      "location": ".env.example:1-51",
+      "recommendation": "設計書Section 3.5に従い、.env.exampleを全面的にCM_*環境変数に更新し、ヘッダーを'CommandMate Environment Configuration'に変更、末尾にdeprecation情報コメントを追加する。"
+    },
+    {
+      "id": "SF-3",
+      "severity": "Medium",
+      "category": "DRY",
+      "title": "worktrees.tsコメント内の旧名称参照",
+      "description": "src/lib/worktrees.ts L109のコメントとL132のdocstring例に'MCBD_ROOT_DIR'参照。コード自体はgetEnvByKey('CM_ROOT_DIR')でフォールバック対応済みだが、コメント/ドキュメントの不整合がある。",
+      "location": "src/lib/worktrees.ts:109, 117-119",
+      "recommendation": "L109のコメントは両方サポートを明示しているため現状維持可。L117-119のdocstring例の'MCBD_ROOT_DIR'をCM_ROOT_DIRに更新するか、フォールバック対応を明記。"
+    },
+    {
+      "id": "SF-4",
+      "severity": "Low",
+      "category": "一貫性",
+      "title": "logger.tsのモジュールコメントが旧名称",
+      "description": "src/lib/logger.ts L2のモジュールコメント'Structured logging utility for MyCodeBranchDesk'が旧名称。機能には影響しないが、ブランディング統一の観点から更新が望ましい。",
+      "location": "src/lib/logger.ts:2",
+      "current_state": "Structured logging utility for MyCodeBranchDesk",
+      "expected_state": "Structured logging utility for CommandMate",
+      "recommendation": "モジュールコメントを'CommandMate'に更新する。"
+    }
+  ],
+  "good_practices": [
+    "env.tsのフォールバック機構(getEnvWithFallback, getEnvByKey)がSingle Responsibility Principleに準拠し、明確な責務分離を実現している",
+    "ENV_MAPPINGが'as const'で型安全に定義されており、TypeScriptの型推論を最大限活用している(SOLID-Interface Segregation)",
+    "warnedKeysセットによる重複警告防止(L37, L61-64)はKISS原則に沿ったシンプルな実装",
+    "logger.tsのSENSITIVE_PATTERNS(L75-90)でCM_AUTH_TOKEN, MCBD_AUTH_TOKEN両方のマスキングパターンを定義しており、後方互換性を考慮した設計",
+    "getLogConfig()がenv.ts(L117-128)に集約されており、ログ設定の一元管理によりDRY原則を遵守",
+    "resetWarnedKeys()関数(L42-44)がテスト専用として分離されており、Open/Closed Principleに準拠"
+  ],
+  "design_principle_evaluation": {
+    "SOLID": {
+      "status": "Mostly Compliant",
+      "score": "4/5",
+      "details": {
+        "SRP": "Good - env.ts, logger.ts各モジュールが明確な単一責任を持つ",
+        "OCP": "Good - ENV_MAPPINGによる拡張ポイントが適切",
+        "LSP": "N/A - 継承構造なし",
+        "ISP": "Needs Work - Envインターフェースの新旧混在が問題",
+        "DIP": "Good - 具体的な環境変数アクセスがgetEnvByKey抽象に依存"
+      }
+    },
+    "KISS": {
+      "status": "Compliant",
+      "score": "5/5",
+      "notes": "フォールバック機構がシンプルかつ明確。過度な抽象化を避けている。warnedKeysによる重複警告防止も最小限の実装。"
+    },
+    "YAGNI": {
+      "status": "Compliant",
+      "score": "5/5",
+      "notes": "必要最小限の変更に留まっており、将来の仮想要件に対する過剰実装は見られない。フォールバック機能は現実の移行要件に基づく。"
+    },
+    "DRY": {
+      "status": "Needs Improvement",
+      "score": "3/5",
+      "notes": "MF-1, MF-2, MF-3で指摘の通り、新旧名称の混在によりコードの重複的な状態が発生。統一が必要。ただしENV_MAPPINGによる定義集約は良好。"
+    }
+  },
+  "implementation_feasibility": {
+    "status": "High",
+    "risk_level": "Low",
+    "notes": "設計書の変更内容は全て実装可能。既存のフォールバック機構を活用するため、リスクは低い。破壊的変更はEnvインターフェースのプロパティ名変更のみで、getEnv()使用箇所の更新が必要だが影響範囲は限定的。",
+    "estimated_effort": "2-4時間"
+  },
+  "overall_status": "Needs Work",
+  "recommendation_summary": "Must Fix 3件を優先的に対応することで、設計原則準拠度が大幅に向上する。特にMF-1(Envインターフェース)とMF-2(server.tsフォールバック)は相互に関連しており、同時に対応することを推奨。Should Fix 4件は品質向上のため順次対応が望ましい。",
+  "metrics": {
+    "must_fix_count": 3,
+    "should_fix_count": 4,
+    "good_practices_count": 6,
+    "design_principle_scores": {
+      "SOLID": "4/5",
+      "KISS": "5/5",
+      "YAGNI": "5/5",
+      "DRY": "3/5"
+    }
+  },
+  "next_action": "Must Fix 3件(MF-1, MF-2, MF-3)の対応を優先実施し、その後Should Fix 4件を順次対応"
+}

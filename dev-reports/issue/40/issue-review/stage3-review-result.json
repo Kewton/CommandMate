@@ -1,0 +1,75 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 40,
+  "review_date": "2026-01-30",
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "file": "package.json",
+        "change_type": "modify",
+        "description": "versionフィールドを \"1.0.0\" から \"0.1.0\" に変更"
+      },
+      {
+        "file": "package-lock.json",
+        "change_type": "modify",
+        "description": "package.json変更に伴い自動更新（npm installで再生成）"
+      },
+      {
+        "file": "CHANGELOG.md",
+        "change_type": "modify",
+        "description": "[Unreleased]セクションを[0.1.0]に移動し、リリース日を追記"
+      }
+    ],
+    "ci_cd_impact": "影響なし - 現在のCI/CD（.github/workflows/ci-pr.yml）にはバージョン参照やタグベースの処理がないため、変更は不要。将来的にリリースワークフローを追加する場合は別Issueで対応が必要。",
+    "documentation_impact": "軽微 - docs/features/issue-3-mit-license.mdにバージョン例として\"0.1.0\"の記載があるが、これは設計ドキュメントであり本番影響はない。README.mdやCLAUDE.mdにはバージョン番号の直接記載がないため更新不要。",
+    "user_impact": "軽微 - バージョンダウングレード（1.0.0 -> 0.1.0）だが、npm installでpackage.jsonを参照している場合は再インストール時に違和感を与える可能性がある。ただし、private: trueのため公開パッケージとしての依存関係はなく、実質的な影響は最小限。",
+    "breaking_changes": []
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "GitHub Releasesの作成手順が受け入れ条件では「任意」となっているが、タグだけでなくGitHub Releasesを作成することを推奨",
+        "location": "受け入れ条件セクション",
+        "recommendation": "GitHub Releasesは発見可能性とCHANGELOGとの対応を明確にするため、任意ではなく推奨または必須とすることを検討",
+        "evidence": "GitHub Releases ページにリリースが作成されている（任意）と記載"
+      },
+      {
+        "id": "SF-2",
+        "category": "移行考慮",
+        "issue": "CHANGELOG.mdの更新手順が具体的に記載されていない",
+        "location": "v0.1.0 スコープセクション",
+        "recommendation": "Keep a Changelog形式に従い、[Unreleased]から[0.1.0] - YYYY-MM-DD形式への移行手順を明記することを推奨",
+        "evidence": "「[Unreleased]セクションの内容を[0.1.0]セクションに移動」とあるが、日付形式やセクション構成の詳細がない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "docs/migration-to-commandmate.mdにv2.0.0でのサポート終了予定が記載されているが、今回v0.1.0からのバージョニング開始であることとの関係を明確化",
+        "location": "関連ドキュメント",
+        "recommendation": "将来構想としてv1.0.0とv2.0.0のマイルストーンを明記し、移行ガイドとの整合性を確保",
+        "evidence": "docs/migration-to-commandmate.md:233 - 「次のメジャーバージョン（v2.0.0）でサポート終了」と記載"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "既存のpackage-lock.jsonへの影響について言及がない",
+        "location": "v0.1.0 スコープセクション",
+        "recommendation": "package.jsonのversion変更後、npm installでpackage-lock.jsonが自動更新されることを明記",
+        "evidence": "package-lock.json:3にも\"version\": \"1.0.0\"が存在"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "overall_assessment": "Issue #40は最小限のセマンティックバージョニング導入として適切にスコープが絞られています。変更対象ファイル（package.json, CHANGELOG.md, Gitタグ）は明確で、既存コードへの影響は軽微です。CI/CDワークフローにはバージョン依存の処理がないため変更不要です。破壊的変更もありません。推奨事項として、GitHub Releases作成を任意ではなく推奨とすること、およびCHANGELOG更新の具体的な手順を明記することで、実装時の曖昧さを減らせます。全体として、このIssueは実装可能な状態にあり、影響範囲も適切に限定されています。"
+}

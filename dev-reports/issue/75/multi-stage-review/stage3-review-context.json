@@ -1,0 +1,32 @@
+{
+  "issue_number": 75,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "title": "Phase 2: ドキュメント・UI表示の変更 (CommandMate リネーム)",
+  "scope": "ドキュメントとUI表示のみの変更、コードの破壊的変更なし",
+  "change_summary": {
+    "documents": [
+      "README.md",
+      "CLAUDE.md",
+      "CONTRIBUTING.md",
+      "CHANGELOG.md",
+      "docs/**/*.md"
+    ],
+    "ui_components": [
+      "src/app/page.tsx",
+      "src/app/layout.tsx",
+      "src/components/layout/Header.tsx"
+    ],
+    "tests": [
+      "tests/e2e/worktree-list.spec.ts"
+    ]
+  },
+  "review_criteria": [
+    "他コンポーネントへの波及効果",
+    "テストへの影響",
+    "ビルドへの影響",
+    "ユーザー体験への影響",
+    "SEOへの影響（タイトル変更）"
+  ]
+}

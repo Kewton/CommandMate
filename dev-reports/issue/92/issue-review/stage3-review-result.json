@@ -1,0 +1,195 @@
+{
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "review_date": "2026-01-30",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "docs/internal/PRODUCTION_CHECKLIST.md が旧名称 MCBD_* を使用しており、更新対象から漏れている",
+        "location": "実装内容セクション（ドキュメント更新）",
+        "recommendation": "PRODUCTION_CHECKLIST.md も更新対象ドキュメントに追加すべき",
+        "evidence": "PRODUCTION_CHECKLIST.md には MCBD_ROOT_DIR, MCBD_BIND, MCBD_AUTH_TOKEN などの旧名称が残っている（lines 10-12, 85-86, 266）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "新規スクリプトのテスト方針が明記されていない",
+        "location": "受け入れ条件セクション",
+        "recommendation": "preflight-check.sh, setup-env.sh の手動テスト手順、または自動テストスクリプトの作成を検討事項として追加",
+        "evidence": "受け入れ条件には動作確認が含まれるが、具体的なテスト手順（例：依存が無い環境でのpreflight-check.shの動作確認）が未記載"
+      },
+      {
+        "id": "SF-2",
+        "category": "後方互換性",
+        "issue": "既存の setup.sh を使用しているユーザーへの移行パスが明示されていない",
+        "location": "Issue全体",
+        "recommendation": "既存ユーザーが新しいセットアップフローに移行する際の手順を明記。既存の .env が CM_* 形式でない場合の対応を含める",
+        "evidence": "setup.sh は破壊的に変更される予定だが、既存ユーザー（特に MCBD_* 形式の .env を使用中のユーザー）への影響が考慮されていない"
+      },
+      {
+        "id": "SF-3",
+        "category": "依存関係",
+        "issue": "openssl コマンドの依存が事前チェック項目に含まれていない",
+        "location": "preflight-check.sh の実装内容",
+        "recommendation": "setup-env.sh でトークン生成に openssl を使用するため、preflight-check.sh で openssl の存在チェックを追加するか、代替手段（/dev/urandom など）を検討",
+        "evidence": "setup-env.sh は openssl rand -hex 32 でトークン生成するが、openssl が無い環境での動作が未考慮"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント影響",
+        "issue": "docs/migration-to-commandmate.md への影響が未検討",
+        "location": "実装内容セクション",
+        "recommendation": "移行ガイドに新しいセットアップスクリプトの使用方法を追加することを検討",
+        "evidence": "migration-to-commandmate.md は MCBD_* から CM_* への移行を説明するドキュメントであり、新スクリプトとの関連性がある"
+      },
+      {
+        "id": "NTH-2",
+        "category": "影響ファイル",
+        "issue": "docs/user-guide/webapp-guide.md への影響が未検討",
+        "location": "実装内容セクション",
+        "recommendation": "Webアプリ操作ガイドに初期セットアップへのリンクを追加することを検討",
+        "evidence": "README.md の関連ドキュメントには webapp-guide.md が含まれているが、セットアップ手順との連携が未検討"
+      },
+      {
+        "id": "NTH-3",
+        "category": "テスト範囲",
+        "issue": "CI/CD パイプラインでのスクリプト検証が未考慮",
+        "location": "受け入れ条件セクション",
+        "recommendation": "シェルスクリプトの構文チェック（shellcheck）やスモークテストをCIに追加することを将来的に検討",
+        "evidence": "新規追加されるスクリプトに対するCIレベルでの品質保証が未定義"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "files_affected": [
+      {
+        "file": "scripts/preflight-check.sh",
+        "type": "new",
+        "description": "新規作成：依存チェックスクリプト"
+      },
+      {
+        "file": "scripts/setup-env.sh",
+        "type": "new",
+        "description": "新規作成：対話式環境変数設定スクリプト"
+      },
+      {
+        "file": "scripts/setup.sh",
+        "type": "modify",
+        "description": "既存ファイル変更：新スクリプトの統合フロー"
+      },
+      {
+        "file": ".env.production.example",
+        "type": "modify",
+        "description": "既存ファイル変更：MCBD_* から CM_* への更新"
+      },
+      {
+        "file": "README.md",
+        "type": "modify",
+        "description": "既存ファイル変更：Quick Start セクションの簡素化"
+      },
+      {
+        "file": "docs/DEPLOYMENT.md",
+        "type": "modify",
+        "description": "既存ファイル変更：新スクリプトの使用方法追記"
+      },
+      {
+        "file": "docs/internal/PRODUCTION_CHECKLIST.md",
+        "type": "should_update",
+        "description": "更新推奨：MCBD_* 参照を CM_* に更新"
+      }
+    ],
+    "features_affected": [
+      "初期セットアップフロー",
+      "環境変数設定",
+      "依存関係チェック",
+      "本番環境デプロイ"
+    ],
+    "backward_compatibility": {
+      "status": "partial_concern",
+      "details": [
+        "既存の MCBD_* 環境変数はフォールバックでサポートされる（Issue #76）",
+        "setup.sh の動作が変更されるため、既存のデプロイスクリプトや自動化に影響の可能性",
+        ".env.production.example を直接参照している外部スクリプトがあれば影響を受ける"
+      ],
+      "mitigation": "ドキュメントに移行手順を明記し、変更点を CHANGELOG に記録することで対応可能"
+    },
+    "test_requirements": {
+      "manual_tests": [
+        "preflight-check.sh: 各依存が存在する/しない環境での動作確認",
+        "setup-env.sh: 対話式入力の動作確認、既存 .env のバックアップ確認",
+        "setup.sh: 統合フローの E2E 確認"
+      ],
+      "automated_tests": [
+        "シェルスクリプトの構文チェック（shellcheck）",
+        "スクリプトのヘルプオプション出力確認"
+      ],
+      "ci_considerations": "新規スクリプトのシンタックスチェックをCIに追加することを推奨"
+    },
+    "documentation_requirements": {
+      "must_update": [
+        "README.md - Quick Start セクション",
+        "docs/DEPLOYMENT.md - セットアップ手順"
+      ],
+      "should_update": [
+        "docs/internal/PRODUCTION_CHECKLIST.md - 環境変数名の更新",
+        ".env.production.example - CM_* 形式への更新"
+      ],
+      "nice_to_update": [
+        "docs/migration-to-commandmate.md - 新スクリプトとの連携",
+        "CHANGELOG.md - 変更点の記録"
+      ]
+    }
+  },
+  "code_references": [
+    {
+      "file": "scripts/setup.sh",
+      "lines": "27-28",
+      "relevance": "現在の .env.production.example からのコピー処理"
+    },
+    {
+      "file": "scripts/build-and-start.sh",
+      "lines": "25",
+      "relevance": "既存の --daemon オプション実装"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "lines": "20-29",
+      "relevance": "ENV_MAPPING による CM_* と MCBD_* のフォールバック定義"
+    },
+    {
+      "file": ".env.production.example",
+      "lines": "1-45",
+      "relevance": "現在の MCBD_* 形式の環境変数定義"
+    },
+    {
+      "file": "docs/internal/PRODUCTION_CHECKLIST.md",
+      "lines": "10-12, 85-86",
+      "relevance": "MCBD_* 環境変数への参照（更新漏れの可能性）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/DEPLOYMENT.md",
+      "relevance": "セットアップ手順の記述、更新必須"
+    },
+    {
+      "file": "docs/internal/PRODUCTION_CHECKLIST.md",
+      "relevance": "本番チェックリスト、MCBD_* 参照あり"
+    },
+    {
+      "file": "README.md",
+      "relevance": "Quick Start セクション、更新必須"
+    },
+    {
+      "file": "docs/migration-to-commandmate.md",
+      "relevance": "移行ガイド、新スクリプトとの連携検討"
+    }
+  ],
+  "summary": "Issue #92 の影響範囲レビューを実施。主な指摘事項: (1) docs/internal/PRODUCTION_CHECKLIST.md が更新対象から漏れている（Must Fix）、(2) 新規スクリプトのテスト方針が未定義、(3) 既存ユーザーへの移行パスが不明確、(4) openssl 依存が事前チェックに含まれていない。影響を受けるファイルは7ファイル（新規2、変更4、更新推奨1）。後方互換性はフォールバック機能により部分的に担保されるが、setup.sh の動作変更について移行手順の明記が推奨される。"
+}

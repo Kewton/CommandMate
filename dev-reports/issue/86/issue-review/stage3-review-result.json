@@ -1,0 +1,177 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 86,
+  "review_date": "2026-01-30",
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "path": "docs/release-guide.md",
+        "change_type": "新規作成",
+        "description": "リリース手順書の新規作成"
+      },
+      {
+        "path": ".claude/skills/release/SKILL.md",
+        "change_type": "新規作成",
+        "description": "リリーススキルのメイン指示ファイル"
+      },
+      {
+        "path": ".claude/skills/release/templates/changelog-entry.md",
+        "change_type": "新規作成",
+        "description": "CHANGELOGエントリのテンプレート"
+      },
+      {
+        "path": ".claude/skills/release/examples/release-example.md",
+        "change_type": "新規作成",
+        "description": "リリース実行例"
+      },
+      {
+        "path": "CLAUDE.md",
+        "change_type": "更新",
+        "description": "利用可能なスキル一覧にreleaseスキルを追加"
+      },
+      {
+        "path": "package.json",
+        "change_type": "影響対象（参照のみ）",
+        "description": "version取得・更新の対象"
+      },
+      {
+        "path": "CHANGELOG.md",
+        "change_type": "影響対象（参照のみ）",
+        "description": "[Unreleased]セクションの更新対象"
+      },
+      {
+        "path": "docs/user-guide/commands-guide.md",
+        "change_type": "更新推奨",
+        "description": "スキル一覧の記載追加を検討"
+      },
+      {
+        "path": "docs/user-guide/agents-guide.md",
+        "change_type": "影響確認",
+        "description": "スキルとエージェントの違いを明確化する必要があるか確認"
+      }
+    ],
+    "dependency_analysis": {
+      "internal_dependencies": [
+        "Issue #40（セマンティックバージョニング導入）- CLOSED: 完了済み",
+        "Keep a Changelog形式のCHANGELOG.mdが存在: 確認済み",
+        "package.jsonにversion: 0.1.0が存在: 確認済み"
+      ],
+      "external_dependencies": [
+        "gh CLI（GitHub Releases作成に使用）",
+        "npm version コマンド（オプション）",
+        "git コマンド（タグ作成・プッシュ）"
+      ]
+    },
+    "ci_cd_impact": "直接的な影響なし。GitHub Actionsワークフロー（ci-pr.yml）への変更は不要。ただし、将来的にリリース自動化のワークフロー追加を検討する余地あり。",
+    "documentation_impact": "CLAUDE.mdへのスキル説明追加が必須。docs/user-guide/commands-guide.mdやagents-guide.mdへのスキル説明追加を検討。README.mdへの影響は軽微（直接的な記載追加は不要だが、ドキュメントリンク構成の確認が望ましい）。",
+    "user_impact": "新機能追加のため既存ユーザーへの破壊的変更なし。/releaseコマンドが新たに利用可能になる。"
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "完全性",
+        "issue": "ドキュメント更新対象の明示的記載がない",
+        "location": "## 受け入れ条件 セクション",
+        "recommendation": "CLAUDE.md以外のドキュメント更新要否（docs/user-guide/commands-guide.md等）を明確に記載する",
+        "evidence": "受け入れ条件にはCLAUDE.mdへの追加のみ記載されているが、commands-guide.mdやagents-guide.mdとの整合性確認が必要"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "整合性",
+        "issue": "既存のrebuildスキルとの構造整合性",
+        "location": "## 2. リリーススキルの作成 セクション",
+        "recommendation": "既存の.claude/skills/rebuild/SKILL.mdの構造（フロントマター形式）と整合するスキル構造を明示",
+        "evidence": "既存rebuildスキルはtemplatesやexamplesサブディレクトリを持たない。新スキルで追加するtemplates/examples構造の妥当性を確認"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "issue": "npm version未使用時のpackage-lock.json更新方法",
+        "location": "## 実行内容 セクション",
+        "recommendation": "package.json更新後のnpm install実行について、--package-lock-onlyオプションの使用を検討",
+        "evidence": "手順4で「npm installでpackage-lock.json更新」とあるが、依存関係が変わらないならnpm install --package-lock-onlyで十分"
+      },
+      {
+        "id": "SF-3",
+        "category": "影響範囲",
+        "issue": "スキルとコマンドの関係性の明確化",
+        "location": "Issue全体",
+        "recommendation": "スキル（.claude/skills/）とコマンド（.claude/commands/）の違い、および本Issueで作成するのがスキルであることをドキュメントで明確化",
+        "evidence": "プロジェクトには両方の仕組みが存在するが、その使い分けがユーザーに分かりにくい可能性がある"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "拡張性",
+        "issue": "GitHub Releases自動作成の詳細手順",
+        "location": "## 実行内容 セクション",
+        "recommendation": "GitHub Releases作成がghコマンド使用なのか、手動なのかを明確化し、具体的なコマンド例を追加",
+        "evidence": "手順8に「GitHub Releases作成（推奨）」とあるが、具体的な実行コマンドが不明"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "CHANGELOG.mdの比較リンク更新の具体例",
+        "location": "## 1. リリース手順書の作成 セクション",
+        "recommendation": "比較リンクの更新例をIssue内に記載（例: [v0.2.0]: https://github.com/.../compare/v0.1.0...v0.2.0）",
+        "evidence": "Keep a Changelog形式では末尾の比較リンクセクションも更新が必要だが、具体的なフォーマットが本文には記載なし（CHANGELOGセクション内には記載あり）"
+      },
+      {
+        "id": "NTH-3",
+        "category": "ユーザビリティ",
+        "issue": "スキル実行後の確認手順",
+        "location": "## 受け入れ条件 セクション",
+        "recommendation": "リリース完了後の確認コマンド例（git tag -l, gh release list等）を追加",
+        "evidence": "動作検証項目はあるが、ユーザーが手動で確認するためのコマンド例がない"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3
+  },
+  "code_references": [
+    {
+      "file": ".claude/skills/rebuild/SKILL.md",
+      "relevance": "既存スキルの構造参照"
+    },
+    {
+      "file": "package.json",
+      "relevance": "バージョン管理対象ファイル"
+    },
+    {
+      "file": "CHANGELOG.md",
+      "relevance": "リリース時更新対象ファイル"
+    },
+    {
+      "file": ".github/workflows/ci-pr.yml",
+      "relevance": "CI/CD影響確認"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "スキル一覧更新対象"
+    },
+    {
+      "file": "docs/user-guide/commands-guide.md",
+      "relevance": "スキル説明追加検討対象"
+    },
+    {
+      "file": "docs/user-guide/agents-guide.md",
+      "relevance": "スキルとエージェントの違い明確化の参照"
+    },
+    {
+      "file": "README.md",
+      "relevance": "プロジェクト概要との整合性確認"
+    }
+  ],
+  "overall_assessment": "Issue #86は、Issue #40（セマンティックバージョニング導入）の完了を前提とした継続的なリリース自動化の取り組みとして、技術的に妥当な内容です。依存関係（Issue #40）は既にCLOSED状態であり、package.jsonとCHANGELOG.mdの基盤も整っています。主な改善点は、ドキュメント更新範囲の明確化（CLAUDE.md以外のuser-guideドキュメントへの影響）と、既存のrebuildスキルとの構造整合性の確認です。CI/CDへの直接的な影響はなく、既存ユーザーへの破壊的変更もないため、実装リスクは低いと評価します。"
+}

@@ -1,0 +1,49 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 40,
+  "apply_date": "2026-01-30",
+  "applied_items": [
+    {
+      "id": "MF-1",
+      "status": "applied",
+      "action_taken": "ブランチ戦略の記載を「将来構想（本Issueスコープ外）」セクションに移動し、現在のブランチ戦略（main ← feature/*, fix/*, hotfix/*）がCLAUDE.mdで定義されている旨を注記として追加"
+    },
+    {
+      "id": "MF-2",
+      "status": "applied",
+      "action_taken": "v0.1.0スコープセクションにpackage.jsonのバージョン変更を明記。現在の1.0.0から0.1.0へのダウングレードであることを注意書きとして追加"
+    },
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "action_taken": "「受け入れ条件」セクションをチェックリスト形式で追加。package.json更新、Gitタグ作成、CHANGELOG更新、GitHub Releases作成（任意）の4項目を明記"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "action_taken": "v0.1.0スコープにCHANGELOG.mdの更新を明示的に追加。[Unreleased]セクションを[0.1.0]に移動する旨を記載"
+    },
+    {
+      "id": "SF-3",
+      "status": "applied",
+      "action_taken": "「タグ命名規則」セクションを新設し、vプレフィックス付きの形式（v<major>.<minor>.<patch>）を採用することを明記。具体例も追加"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "NTH-1",
+      "reason": "将来構想の内容は別Issueとして分割せず、「将来構想（本Issueスコープ外）」セクションとしてIssue内に残存。スコープ外であることを明示したため、作業範囲の誤解は回避可能"
+    },
+    {
+      "id": "NTH-2",
+      "reason": "GitHub Releasesの作成は受け入れ条件に「任意」として追加済み。詳細な活用方法の記載は将来的な検討事項として省略"
+    }
+  ],
+  "summary": {
+    "total_items": 7,
+    "applied_count": 5,
+    "skipped_count": 2
+  },
+  "updated_issue_body": "## 概要\n\n現在はバージョン管理されていないため、セマンティックバージョニングを導入したい。\n\n## v0.1.0 スコープ（本Issue対象）\n\n本Issueでは以下のみを対象とする（最小限のセマンティックバージョニング導入）:\n\n1. **package.json のバージョン更新**\n   - 現在の `\"version\": \"1.0.0\"` を `\"version\": \"0.1.0\"` に変更\n   - 注意: 正式リリース前のため1.0.0からのダウングレードとなる\n\n2. **Git タグの作成**\n   - 命名規則: `v` プレフィックス付き（例: `v0.1.0`）\n   - `git tag v0.1.0` でタグを作成\n\n3. **CHANGELOG.md の更新**\n   - `[Unreleased]` セクションの内容を `[0.1.0]` セクションに移動\n   - リリース日を記載\n\n## 受け入れ条件\n\n- [ ] package.json の version フィールドが `0.1.0` に設定されている\n- [ ] Git タグ `v0.1.0` が作成されている\n- [ ] CHANGELOG.md に `[0.1.0]` セクションが追加されている\n- [ ] GitHub Releases ページにリリースが作成されている（任意）\n\n## タグ命名規則\n\n本プロジェクトでは `v` プレフィックス付きのタグ形式を採用する:\n- 形式: `v<major>.<minor>.<patch>`\n- 例: `v0.1.0`, `v1.0.0`, `v1.2.3`\n\n---\n\n## 将来構想（本Issueスコープ外）\n\n> 注意: 以下は将来的に検討する内容であり、本Issueの作業範囲には含まれません。\n> 現在のブランチ戦略は `main ← feature/*, fix/*, hotfix/*` です（CLAUDE.md参照）。\n\n### リリースブランチフローの導入検討\n\n将来的にプロジェクトが成熟した段階で、以下のようなリリースフローの導入を検討:\n\n1. **開発フェーズ** (develop -> feature -> develop)\n   - バージョン番号は変更しない（例: 1.1.0-SNAPSHOT）\n   - 機能実装完了後、リリース準備へ\n\n2. **リリース準備** (develop -> release/vX.Y.Z)\n   - develop から release ブランチを作成\n   - バージョン番号の確定、ドキュメント更新、最終バグ修正のみ\n\n3. **リリース** (release -> main & develop)\n   - main へマージし、Git タグを作成\n   - develop へもマージしてバージョン番号を反映\n\n### CI/CD による自動採番\n\n- main へのマージ時に CI ツールが自動でバージョンを計算・付与\n- メリット: 手動での書き換えミスがない\n- デメリット: ビルド成果物とソースコード上のバージョン表記に乖離が生じる可能性\n\n### Git Worktree を活用したクリーン環境の切り出し\n\n現在作業中のディレクトリはそのままで、main ブランチや特定の tag のみを別のクリーンなディレクトリにチェックアウトしてビルドするスクリプトの実装。"
+}

@@ -1,0 +1,17 @@
+{
+  "issue_number": 77,
+  "refactor_targets": [
+    "src/lib/env.ts",
+    "src/lib/logger.ts",
+    "scripts/*.sh",
+    "scripts/*.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "コード品質の維持（エラーなし状態を確認）",
+    "重複コードの削除（該当なしを確認）",
+    "一貫性のあるネーミング（CM_*への統一を確認）"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "issue_number": 53,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_doc_path": "dev-reports/design/issue53-assistant-response-save-design-policy.md",
+  "review_criteria": [
+    "変更の波及効果",
+    "依存関係の影響",
+    "API消費者への影響",
+    "パフォーマンスへの影響"
+  ]
+}

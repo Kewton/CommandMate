@@ -1,0 +1,9 @@
+{
+  "issue_number": 77,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_result_path": "dev-reports/issue/77/multi-stage-review/stage1-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+  "status": "already_applied",
+  "notes": "設計方針書のセクション11.1にMust Fix 3件、Should Fix 4件が既に記録済み。セクション3.1の対象ファイル表にもレビューIDが紐付けられている。"
+}

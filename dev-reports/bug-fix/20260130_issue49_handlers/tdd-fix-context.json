@@ -1,0 +1,31 @@
+{
+  "bug_id": "20260130_issue49_handlers",
+  "bug_description": "WorktreeDetailRefactored.tsxでFileTreeViewに必要なコールバック関数（onNewFile, onNewDirectory, onRename, onDelete）が渡されていないため、右クリックメニューのファイル/ディレクトリ操作が機能しない",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "ファイル操作ハンドラーの実装",
+      "description": "handleNewFile, handleNewDirectory, handleRename, handleDeleteの4つのハンドラー関数を実装",
+      "files_to_modify": ["src/components/worktree/WorktreeDetailRefactored.tsx"],
+      "implementation_details": [
+        "handleNewFile: prompt()でファイル名入力 → POST /api/worktrees/:id/files/:path 呼び出し → ファイルツリー更新",
+        "handleNewDirectory: prompt()でディレクトリ名入力 → POST API呼び出し → ファイルツリー更新",
+        "handleRename: prompt()で新名前入力 → PATCH API呼び出し → ファイルツリー更新",
+        "handleDelete: confirm()で確認 → DELETE API呼び出し → ファイルツリー更新"
+      ]
+    },
+    {
+      "action_id": "2",
+      "title": "FileTreeViewへのprops追加",
+      "description": "実装したハンドラーをFileTreeViewコンポーネントに渡す",
+      "files_to_modify": ["src/components/worktree/WorktreeDetailRefactored.tsx"],
+      "locations": ["Line 753-758 (renderLeftPaneContent)", "Line 1177-1181 (Desktop layout)"]
+    }
+  ],
+  "api_endpoints": {
+    "create": "POST /api/worktrees/:id/files/:path with body {type: 'file'|'directory', content?: string}",
+    "rename": "PATCH /api/worktrees/:id/files/:path with body {action: 'rename', newName: string}",
+    "delete": "DELETE /api/worktrees/:id/files/:path?recursive=true"
+  },
+  "target_coverage": 80
+}

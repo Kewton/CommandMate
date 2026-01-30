@@ -1,0 +1,15 @@
+{
+  "issue_number": 77,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_doc_path": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+  "review_criteria": [
+    "SOLID原則準拠",
+    "KISS原則準拠",
+    "YAGNI原則準拠",
+    "DRY原則準拠",
+    "設計の明確性",
+    "実装可能性"
+  ]
+}

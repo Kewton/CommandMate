@@ -1,0 +1,24 @@
+{
+  "issue_number": 76,
+  "refactor_targets": [
+    "src/lib/env.ts",
+    "src/middleware.ts",
+    "src/lib/worktrees.ts",
+    "src/lib/log-manager.ts",
+    "src/lib/api-client.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 70.07
+  },
+  "improvement_goals": [
+    "コードの一貫性を確認",
+    "不要なコメントの削除",
+    "エラーハンドリングの確認",
+    "型安全性の確認"
+  ],
+  "constraints": [
+    "既存の動作を変更しない",
+    "テストが引き続きパスすること",
+    "後方互換性を維持すること"
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 70,
+  "apply_date": "2026-01-30",
+  "applied_items": [
+    {
+      "finding_id": "SF-1",
+      "status": "applied",
+      "changes_made": "ステータスインジケーターの説明に「generating」を追加し、「idle/ready/running/waiting/generating」と完全なリストに修正"
+    },
+    {
+      "finding_id": "SF-2",
+      "status": "applied",
+      "changes_made": "現状セクションでUI_UX_GUIDE.mdを「技術者向けのUI実装仕様書」と明記し、新ガイドとの棲み分けを明確化。参照リンク含める方針も追記"
+    },
+    {
+      "finding_id": "SF-3",
+      "status": "applied",
+      "changes_made": "「コミュニケーション機能」セクションに「Auto Yes モードの使い方」項目を追加"
+    },
+    {
+      "finding_id": "SF-4",
+      "status": "applied",
+      "changes_made": "「ステータス・ログ」セクションに「Markdownログビューアの使い方」項目を追加"
+    },
+    {
+      "finding_id": "SF-5",
+      "status": "applied",
+      "changes_made": "「リポジトリの登録（スキャン）方法」を「リポジトリの登録方法（ローカルスキャン / URLクローン）」に修正し、両方の登録方法を明記"
+    },
+    {
+      "finding_id": "NTH-1",
+      "status": "applied",
+      "changes_made": "ファイル名を「app-usage-guide.md（仮）」から「webapp-guide.md」に変更し、既存の命名規則に合わせた正式名に決定"
+    },
+    {
+      "finding_id": "NTH-2",
+      "status": "applied",
+      "changes_made": "備考セクションに「Issue完了時に README.md のドキュメントテーブルに新ガイドを追加すること」を追記"
+    },
+    {
+      "finding_id": "NTH-3",
+      "status": "applied",
+      "changes_made": "「チャット履歴の確認方法」を「チャット履歴の確認方法（History Pane / History タブ）」に修正し、具体的な記載に変更"
+    },
+    {
+      "finding_id": "NTH-4",
+      "status": "applied",
+      "changes_made": "「基本操作」セクションに「リポジトリの削除方法」項目を追加"
+    },
+    {
+      "finding_id": "NTH-5",
+      "status": "applied",
+      "changes_made": "備考セクションを「既存の docs/images/ 配下のスクリーンショット（screenshot-desktop.png等）を活用し、必要に応じて追加撮影する」に修正"
+    }
+  ],
+  "skipped_items": [],
+  "summary": "Stage 1レビューの全指摘事項（should_fix: 5件、nice_to_have: 5件、計10件）を全て反映完了。主な変更点: (1) UI_UX_GUIDE.mdとの棲み分けを明確化、(2) ステータスインジケーターに「generating」を追加、(3) Auto Yesモード・Markdownログビューア・リポジトリ削除機能をチェックリストに追加、(4) リポジトリ登録方法を両方式（ローカルスキャン/URLクローン）明記、(5) ファイル名を正式名「webapp-guide.md」に決定、(6) チェックリストをカテゴリ別（基本操作/コミュニケーション機能/ステータス・ログ/その他）に整理、(7) README.mdドキュメントテーブル更新をタスクとして明記"
+}

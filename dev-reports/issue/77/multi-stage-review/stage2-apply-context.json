@@ -1,0 +1,9 @@
+{
+  "issue_number": 77,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_result_path": "dev-reports/issue/77/multi-stage-review/stage2-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+  "status": "already_applied",
+  "notes": "設計方針書のセクション11.2にMust Fix 3件、Should Fix 1件が既に記録済み。セクション3.1の対象ファイル表にもStage 2で特定された項目(scripts/*.sh, E2Eテスト, Header.tsx)が含まれている。"
+}

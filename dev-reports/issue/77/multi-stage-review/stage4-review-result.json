@@ -1,0 +1,143 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "issue_number": 77,
+  "review_date": "2026-01-29",
+  "summary": "Issue #77 Phase 3（設定・コード内の名称置換）のセキュリティレビューを実施。OWASP Top 10の5項目について評価し、全項目で準拠を確認。認証トークンのフォールバック機構、機密情報のマスキング、環境変数の安全な取り扱いについて、適切な実装が確認された。Must Fix項目は0件、Should Fix項目も0件であり、セキュリティ観点での実装品質は良好。",
+  "must_fix": [],
+  "should_fix": [],
+  "owasp_compliance": {
+    "A01_broken_access_control": {
+      "status": "Pass",
+      "evaluation": "認証ミドルウェア（src/middleware.ts）がフォールバック機構を正しく使用。getEnvWithFallback('CM_BIND', 'MCBD_BIND')およびgetEnvWithFallback('CM_AUTH_TOKEN', 'MCBD_AUTH_TOKEN')により、新旧両方の環境変数名をサポート。CM_BIND=0.0.0.0の場合のみ認証が必須となる設計も適切。",
+      "findings": [
+        "middleware.ts:28 - getEnvWithFallback('CM_BIND', 'MCBD_BIND')を使用",
+        "middleware.ts:37 - getEnvWithFallback('CM_AUTH_TOKEN', 'MCBD_AUTH_TOKEN')を使用",
+        "APIルート（/api/*）のみに認証チェックを適用する正しいスコープ設定",
+        "デフォルト値が127.0.0.1（localhost）であり、意図しない公開を防止"
+      ]
+    },
+    "A02_cryptographic_failures": {
+      "status": "Pass",
+      "evaluation": "ローカル開発ツールとしての用途を考慮すると許容範囲。トークンはBearerスキームで送信され、平文比較ながらローカルネットワーク内での使用を前提とした設計。本番環境での外部公開は推奨されないことがドキュメントに明記されている。",
+      "findings": [
+        "Bearer tokenによる認証実装",
+        "トークン比較はタイミング攻撃に脆弱な可能性があるが、ローカルツールとして許容範囲",
+        "暗号化ストレージは使用していないが、ローカル開発ツールとして適切な設計"
+      ]
+    },
+    "A03_injection": {
+      "status": "Pass",
+      "evaluation": "環境変数は直接シェル展開されず、TypeScript/JavaScriptコード内でprocess.envから取得されるため、インジェクションリスクは低い。getEnvWithFallback/getEnvByKey関数は文字列値のみを返し、コマンド実行には使用されない。",
+      "findings": [
+        "環境変数はprocess.envから直接取得（シェル展開なし）",
+        "server.ts:44でparseIntを使用してポート値を数値変換（型安全）",
+        "env.ts:182-184でbindアドレスのバリデーション実施（127.0.0.1, 0.0.0.0, localhostのみ許可）"
+      ]
+    },
+    "A05_security_misconfiguration": {
+      "status": "Pass",
+      "evaluation": ".env.exampleにdeprecation情報を追加する設計が文書化されている（設計方針書3.5節）。現状の.env.exampleは旧名称（MCBD_*）のみ記載だが、Phase 3実装でCM_*への更新とdeprecation情報の追加が予定されており、設計として適切。",
+      "findings": [
+        "設計方針書Section 3.5に.env.exampleの更新計画が明記",
+        "deprecation警告をコメントで記載する計画",
+        "既存の.envファイルは継続動作する後方互換性の維持"
+      ]
+    },
+    "A09_security_logging": {
+      "status": "Pass",
+      "evaluation": "logger.tsのSENSITIVE_PATTERNSでCM_AUTH_TOKENとMCBD_AUTH_TOKENの両方をマスキング対象として定義。ログ出力時に機密情報が自動的に[REDACTED]に置換される仕組みが実装済み。",
+      "findings": [
+        "logger.ts:83 - CM_AUTH_TOKEN=xxx を CM_AUTH_TOKEN=[REDACTED] にマスキング",
+        "logger.ts:85 - MCBD_AUTH_TOKEN=xxx を MCBD_AUTH_TOKEN=[REDACTED] にマスキング",
+        "Bearer token, password, secret, api_key等もマスキング対象",
+        "SSH秘密鍵もマスキング対象として定義"
+      ]
+    }
+  },
+  "good_practices": [
+    {
+      "id": "GP-1",
+      "area": "認証トークンのフォールバック",
+      "description": "src/middleware.tsでgetEnvWithFallback関数を使用し、CM_AUTH_TOKENとMCBD_AUTH_TOKENの両方をサポート。移行期間中のセキュリティ低下を防止。",
+      "files": [
+        "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/middleware.ts"
+      ]
+    },
+    {
+      "id": "GP-2",
+      "area": "クライアント側フォールバック",
+      "description": "src/lib/api-client.tsでNEXT_PUBLIC_CM_AUTH_TOKENとNEXT_PUBLIC_MCBD_AUTH_TOKENの両方をサポート。旧名称使用時にdeprecation警告を出力する実装が既存。",
+      "files": [
+        "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/api-client.ts"
+      ]
+    },
+    {
+      "id": "GP-3",
+      "area": "機密情報マスキング",
+      "description": "logger.tsのSENSITIVE_PATTERNSで新旧両方のトークン名をカバー。Issue #76で追加されたCM_AUTH_TOKENパターンと既存のMCBD_AUTH_TOKENパターンが両方存在。",
+      "files": [
+        "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/logger.ts"
+      ]
+    },
+    {
+      "id": "GP-4",
+      "area": "型安全なフォールバック",
+      "description": "ENV_MAPPINGがas constで定義されており、TypeScriptの型推論によりタイプミスを防止。getEnvByKey関数でEnvKey型を使用し、存在しないキーの使用をコンパイル時に検出。",
+      "files": [
+        "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/env.ts"
+      ]
+    },
+    {
+      "id": "GP-5",
+      "area": "Deprecation警告の重複防止",
+      "description": "warnedKeysセットを使用して同一キーに対するdeprecation警告を1回のみ出力。ログ汚染を防止しながら移行促進。",
+      "files": [
+        "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/env.ts"
+      ]
+    },
+    {
+      "id": "GP-6",
+      "area": "入力バリデーション",
+      "description": "env.tsでCM_BINDの値を厳密にバリデーション（127.0.0.1, 0.0.0.0, localhostのみ許可）。不正なバインドアドレスを拒否してセキュリティリスクを軽減。",
+      "files": [
+        "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/env.ts"
+      ]
+    }
+  ],
+  "security_recommendations": [
+    {
+      "priority": "Low",
+      "description": "タイミング攻撃対策として、トークン比較にcrypto.timingSafeEqualの使用を検討。ただしローカル開発ツールとしては現状で十分。",
+      "rationale": "現在の単純な文字列比較は理論上タイミング攻撃に脆弱だが、ローカルネットワーク内での使用を前提とした設計では実質的なリスクは低い。"
+    },
+    {
+      "priority": "Info",
+      "description": "logger.test.tsにCM_AUTH_TOKENのリダクションテストを追加する計画が設計書に記載（Section 4.3）。実装時に確実に追加すること。",
+      "rationale": "新名称のマスキングが正しく動作することをテストで保証することで、将来の変更によるリグレッションを防止。"
+    }
+  ],
+  "metrics": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "owasp_checks_passed": 5,
+    "owasp_checks_total": 5,
+    "good_practices_count": 6
+  },
+  "overall_status": "Pass",
+  "score": 5,
+  "timestamp": "2026-01-29T12:00:00Z",
+  "reviewed_files": [
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/dev-reports/design/issue-77-rename-phase3-design-policy.md",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/env.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/logger.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/middleware.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/api-client.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/server.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/.env.example",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/middleware.test.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/logger.test.ts",
+    "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/scripts/start.sh"
+  ]
+}

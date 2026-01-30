@@ -1,0 +1,47 @@
+{
+  "status": "success",
+  "bug_id": "20260130_issue49_handlers",
+  "coverage": 82.0,
+  "unit_tests": {
+    "total": 1672,
+    "passed": 1672,
+    "failed": 0,
+    "new_tests_added": 10
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "changes_summary": {
+    "handlers_added": [
+      "handleNewFile - Creates new file via POST /api/worktrees/:id/files/:path",
+      "handleNewDirectory - Creates new directory via POST /api/worktrees/:id/files/:path",
+      "handleRename - Renames file/directory via PATCH /api/worktrees/:id/files/:path",
+      "handleDelete - Deletes file/directory via DELETE /api/worktrees/:id/files/:path"
+    ],
+    "components_updated": [
+      "MobileContentProps interface - Added onNewFile, onNewDirectory, onRename, onDelete props",
+      "MobileContent component - Passes file operation handlers to FileTreeView",
+      "Desktop FileTreeView - Now receives all file operation handlers",
+      "Mobile FileTreeView (via MobileContent) - Now receives all file operation handlers"
+    ],
+    "test_coverage": [
+      "Test: passes onNewFile handler to FileTreeView",
+      "Test: calls POST API when creating a new file",
+      "Test: passes onNewDirectory handler to FileTreeView",
+      "Test: calls POST API when creating a new directory",
+      "Test: passes onRename handler to FileTreeView",
+      "Test: calls PATCH API when renaming a file",
+      "Test: passes onDelete handler to FileTreeView",
+      "Test: calls DELETE API when deleting a file",
+      "Test: does not call API when user cancels prompt",
+      "Test: does not call DELETE API when user cancels confirmation"
+    ]
+  },
+  "commits": [],
+  "message": "Bug fix completed. FileTreeView now receives all file operation handlers (onNewFile, onNewDirectory, onRename, onDelete) in both desktop and mobile views. Right-click context menu operations are now functional."
+}

@@ -1,0 +1,35 @@
+{
+  "issue_number": 77,
+  "issue_title": "Phase 3: 設定・コード内の名称置換 (CommandMate リネーム)",
+  "acceptance_criteria": [
+    ".env.exampleが新名称に更新されている",
+    "package.jsonのnameがcommandmateになっている",
+    "コード内のMCBD_*参照がCM_*に更新されている",
+    "scripts/*.sh（10ファイル）, scripts/*.ts（5ファイル）が更新されている",
+    "src/lib/logger.tsのセンシティブデータ検出が新旧両方に対応している",
+    "全テストがパスする（ユニット・インテグレーション・E2E）",
+    "#75で一時スキップしたE2Eテストが修正・解除されている",
+    "TypeScriptコンパイルエラーなし",
+    "npm installが正常に完了する",
+    "npm run buildが成功する",
+    "スクリーンショット（5ファイル）が新UIを反映している",
+    "CHANGELOG.mdが更新されている"
+  ],
+  "implementation_tasks": [
+    "Step 1: .env.exampleを新名称（CM_*）に更新",
+    "Step 2: package.jsonのnameをcommandmateに変更",
+    "Step 3: コード内のMCBD_*をCM_*に置換",
+    "Step 3.5: src/lib/logger.tsのセンシティブデータ検出を更新",
+    "Step 3.6: scripts/ディレクトリの更新（15ファイル）",
+    "Step 4: テストコードの修正（環境変数参照、タイトル検証）",
+    "Step 5: スクリーンショット画像の差し替え（5ファイル）",
+    "Step 6: CHANGELOG.mdの更新"
+  ],
+  "target_coverage": 80,
+  "notes": [
+    "フォールバック機能は#76で実装済み - 新名称をメインとして使用",
+    ".claude/settings.local.jsonは対象外（ローカル設定）",
+    "dev-reports/配下は変更しない（開発履歴）",
+    "ChatMessage型およびchat_messagesテーブル名は変更しない（#78スキップ）"
+  ]
+}

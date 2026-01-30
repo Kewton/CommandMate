@@ -1,0 +1,74 @@
+{
+  "stage": 2,
+  "apply_date": "2026-01-30",
+  "applied_findings": [
+    {
+      "id": "MF-1",
+      "status": "applied",
+      "action_taken": ".env.production.example の更新を実装内容セクション 4 として追加。また、現状の課題セクションに .env.production.example が MCBD_* 形式のみであることを明記"
+    },
+    {
+      "id": "MF-2",
+      "status": "applied",
+      "action_taken": "現状の課題セクションのコマンド例を 'cp .env.production.example .env' に修正。setup.sh が .env.production.example を使用している事実をNoteで明記"
+    },
+    {
+      "id": "MF-3",
+      "status": "applied",
+      "action_taken": "Claude CLI の表記を「必須（後からインストール可）」に変更。Noteで「コア機能に必要だがインストール後に追加可能」と明確化。出力例も「コア機能を使うには後でインストールが必要」に更新"
+    },
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "action_taken": "Node.jsのチェック内容を「v20+」という簡潔な表記に統一"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "action_taken": "setup-env.sh の対応環境変数一覧に CM_LOG_LEVEL, CM_LOG_FORMAT, CM_LOG_DIR を追加。対話例に「高度な設定（スキップ可能）」セクションを追加"
+    },
+    {
+      "id": "SF-3",
+      "status": "applied",
+      "action_taken": "目標のフローを修正し、preflight-check.sh を npm install より前に配置（依存チェックを先に行う論理的なフロー）"
+    },
+    {
+      "id": "SF-4",
+      "status": "applied",
+      "action_taken": "目標のフローに「既存の --daemon オプションを使用」とNote追加。関連セクションにも「--daemon オプション既存」と明記"
+    },
+    {
+      "id": "NTH-1",
+      "status": "applied",
+      "action_taken": "preflight-check.sh の表に「備考」列を追加し、各ツールのバージョン取得コマンド（node -v, npm -v, tmux -V, git --version, claude --version）を記載"
+    },
+    {
+      "id": "NTH-2",
+      "status": "applied",
+      "action_taken": "setup-env.sh セクションに「トークン生成方式: openssl rand -hex 32」を明記。対話例にも「(openssl rand -hex 32 で生成)」を追加"
+    },
+    {
+      "id": "NTH-3",
+      "status": "applied",
+      "action_taken": "受け入れ条件に「setup-env.sh が既存.envのバックアップを作成する」「preflight-check失敗時に分かりやすいエラーメッセージを表示する」を追加。スクリプト仕様にもバックアップ機能を明記"
+    },
+    {
+      "id": "NTH-4",
+      "status": "applied",
+      "action_taken": "preflight-check.sh と setup-env.sh の両方に「スクリプト仕様」セクションを追加し、#!/bin/bash と bash 4.0+ 互換を明記"
+    }
+  ],
+  "summary": {
+    "total_findings": 11,
+    "applied": 11,
+    "skipped": 0,
+    "must_fix_applied": 3,
+    "should_fix_applied": 4,
+    "nice_to_have_applied": 4
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/92"
+  },
+  "changes_summary": "全11件の指摘事項を反映。主な変更点: (1) .env.production.example の CM_* 形式への更新タスクを追加、(2) setup.sh が .env.production.example を使用している現状を正確に記述、(3) Claude CLI の必須性を「必須（後からインストール可）」に明確化、(4) 目標フローを論理的な順序（preflight-check.sh -> npm install）に修正、(5) --daemon オプションが既存機能であることを明記、(6) ログ関連環境変数を高度な設定として追加、(7) 各ツールのバージョン取得コマンドを表に追加、(8) トークン生成方式を明記、(9) バックアップ機能とエラーハンドリングを受け入れ条件に追加、(10) スクリプトのbash互換性仕様を追加"
+}

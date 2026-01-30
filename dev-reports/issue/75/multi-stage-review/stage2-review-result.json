@@ -1,0 +1,176 @@
+{
+  "issue_number": 75,
+  "stage": 2,
+  "focus_area": "整合性",
+  "status": "needs_revision",
+  "score": 2,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "category": "Critical Dependency",
+        "description": "Issue #76 が OPEN 状態のため、本 Issue #75 は着手前提条件を満たしていない",
+        "details": "受け入れ条件の第1項『#76 が完了していること（本Issue着手の前提条件）』が達成されていない。Issue #76 の state は OPEN であり、Phase 1 の環境変数フォールバック実装が完了していない。本 Issue は #76 完了まで着手不可。",
+        "impact": "blocking",
+        "recommendation": "Issue #76 の実装完了を待つ。#76 は CHANGELOG.md の作成と環境変数フォールバック機能の実装を含むため、#75 はこれ以降の実施"
+      },
+      {
+        "id": "MF-002",
+        "category": "Implementation vs Acceptance Gap",
+        "description": "受け入れ条件「ドキュメント内の環境変数説明が新名称（CM_*）で記載されている」と実装内容の間にギャップがある",
+        "details": "現在のドキュメント（docs/architecture.md, docs/concept.md など）には MCBD_* 環境変数が記載されている。Issue #75 の実施内容では『環境変数の説明を新名称（`CM_*`）で記載』と指示されているが、Issue #75 の対象外に『環境変数参照の変更 → #77』と明記されている。矛盾がある。\n\n実際の受け入れ条件によれば、本 Issue で環境変数名を CM_* に変更する必要があるが、対象外に #77 を指定している。",
+        "impact": "critical",
+        "recommendation": "Issue 本体の説明を確認し、以下いずれかを明確にすべき：\n1) 環境変数名の変更は本Issue（#75）で実施するのか、次Issue（#77）で実施するのか\n2) 受け入れ条件の『新名称（CM_*）で記載』をコードレベル変更ではなく、ドキュメント上の説明テキストのみに限定するのか"
+      },
+      {
+        "id": "MF-003",
+        "category": "Implementation Status",
+        "description": "README.md、UI表示文字列、docs配下のドキュメントがまだ実装されていない",
+        "details": "実装状況の確認：\n- README.md：タイトル『MyCodeBranchDesk』のまま未更新\n- page.tsx：h1 タイトルが『MyCodeBranchDesk』のまま\n- layout.tsx：metadata.title が『myCodeBranchDesk』のまま\n- Header.tsx：デフォルト title が『MyCodeBranchDesk』のまま\n- docs配下：53 件の『MyCodeBranchDesk』出現が未置換\n- README.md：『チャットUI』『チャット履歴』『チャット・ターミナル』表現が未修正\n- E2E テスト：test.skip() が適用されていない（5 件のテストが /MyCodeBranchDesk/i で検証中）",
+        "impact": "critical",
+        "recommendation": "Issue #76 完了後に、以下を実装：\n1) README.md 全面リライト\n2) docs/ 配下全ドキュメント置換\n3) UI表示文字列変更（page.tsx, layout.tsx, Header.tsx）\n4) CHANGELOG.md 追記\n5) E2E テストの一時スキップ適用"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "Scope Clarity",
+        "description": "対象外ファイル一覧が不明確",
+        "details": "Issue 本体の『対象外（後続Issueで実施）』には以下が記載：\n- 環境変数参照の変更 → #77\n- 型名・関数名・変数名の変更 → #77\n- package.json の name 変更 → #77\n- .env.example の更新 → #77\n- テストコードの修正 → #77\n- スクリーンショット画像の差し替え → #77\n\nただし『環境変数参照の変更』と『受け入れ条件の新名称（CM_*）記載』は矛盾している（MF-002 参照）",
+        "impact": "medium",
+        "recommendation": "Issue 本体の対象外リストと受け入れ条件を整合させ、明確に：\n- ドキュメント内のコード例における環境変数名は MCBD_* のまま保持するのか\n- それとも CM_* に置換するのか"
+      },
+      {
+        "id": "SF-002",
+        "category": "Acceptance Criteria Alignment",
+        "description": "受け入れ条件と実施内容で【Quick Start のディレクトリ名変更】の扱いが不明確",
+        "details": "実施内容 1-1 では『Quick Start の clone URL / ディレクトリ名を更新：`cd MyCodeBranchDesk` → `cd commandmate`』と指示されている。\n\nただし『リポジトリ URL はリポジトリ名変更がない限り維持』という Stage 1 レビューの指摘がある。\n\nGitHub リポジトリ名が MyCodeBranchDesk のままであれば、clone 後のディレクトリ自動名は MyCodeBranchDesk となり、手動で commandmate にリネームすることになるが、これは実用的か明確でない。",
+        "impact": "medium",
+        "recommendation": "以下を確認・明確化すべき：\n1) GitHub リポジトリ名は変更されるのか（現在は Kewton/MyCodeBranchDesk）\n2) clone URL 自体を変更するのか、clone 後のディレクトリ名を手動でリネームする想定か"
+      },
+      {
+        "id": "SF-003",
+        "category": "File Coverage",
+        "description": "関連ファイル一覧の漏れの可能性",
+        "details": "Issue 本体の『関連ファイル』セクションには CODE_OF_CONDUCT.md が記載されているが、Stage 1 レビューの『reviewed_files』には含まれていない。\n\nCODE_OF_CONDUCT.md 内に『MyCodeBranchDesk』が含まれている可能性があるが、Stage 1 レビューで検討されていない。",
+        "impact": "low",
+        "recommendation": "CODE_OF_CONDUCT.md 内を確認し、『MyCodeBranchDesk』の出現有無を確認。必要に応じて Stage 1 reviewed_files に追加し、スコア再評価"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "category": "Terminology Consistency",
+        "description": "README.md のリライト内容における『Message UI』『Console out』『History』の定義が具体的でない",
+        "details": "実施内容 1-1 では『「これは何か」：Message-in / Console-out / History を1文で定義』と指示されているが、各用語の正確な定義や UI 要素との対応関係が不明確。\n\nStage 1 レビューの 'Consider' でもテスト設計への移行が推奨されており、テスト対象要素に data-testid を使用する場合、これらの用語の正確な定義が重要。",
+        "impact": "low",
+        "recommendation": "README.md リライト時に、以下を明確に定義：\n- Message UI: ブラウザから指示を送信する UI 要素（テキスト入力フォーム）\n- Console out: Claude の出力・実行結果を表示する領域\n- History: 会話・実行履歴の記録画面\n\nこれらの定義をドキュメント内に記載し、今後のテスト設計と UI アクセシビリティの向上に活用"
+      },
+      {
+        "id": "C-002",
+        "category": "DRY Principle",
+        "description": "プロジェクト名の定数化検討（Stage 1 での指摘を反映）",
+        "details": "Stage 1 レビューの 'Consider' に『src/config/app-constants.ts などに APP_NAME を定義し、UI コンポーネントはそこから参照する形への移行を検討』とある。\n\nUI 表示文字列の一元管理により、将来のリネーム作業がより簡単になる。",
+        "impact": "low",
+        "recommendation": "Phase 2（本 Issue）ではスコープ外だが、Phase 3 以降の構造改善検討課題として記録。\n\nUI コンポーネント：\n- src/app/page.tsx の h1\n- src/app/layout.tsx の metadata\n- src/components/layout/Header.tsx のデフォルト title\n\nこれらを `src/config/app-constants.ts` から参照するよう改善できる。"
+      }
+    ]
+  },
+  "consistency_check": {
+    "acceptance_vs_implementation": "fail",
+    "details_acceptance": "受け入れ条件は9項目（#76完了、MyCodeBranchDesk削除、チャット表現削除、UI統一、環境変数新名称、CHANGELOG更新、ビルド成功、lint成功、E2Eテストスキップ）を要求",
+    "details_implementation": "現状、基本的な実装がまったく開始されていない。README、UI表示文字列、ドキュメント、E2Eテストスキップなど、すべてが未実装。さらに #76 が前提条件として OPEN 状態のため、実装開始不可",
+    "gap_reason": "Issue #76 の完了を待つ必要があり、本 Issue #75 はまだ着手段階にない"
+  },
+  "target_vs_excluded": {
+    "status": "fail",
+    "details": "対象と対象外の境界が不明確。特に『環境変数参照の変更 → #77』と『受け入れ条件の新名称（CM_*）で記載』の間に矛盾。\n\n対象：\n- ドキュメント内のプロジェクト名置換（MyCodeBranchDesk → CommandMate）\n- UI表示文字列変更\n- CHANGELOG.md 追記\n- E2Eテスト一時スキップ\n\n対象外（#77）：\n- 環境変数参照の変更\n- 型名・関数名・変数名の変更\n- package.json の name 変更\n\n問題点：\n- ドキュメント内のコード例における環境変数名（MCBD_* vs CM_*）の扱いが不明確\n- 受け入れ条件『環境変数説明が新名称（CM_*）で記載』と矛盾する可能性"
+  },
+  "file_coverage": {
+    "status": "needs_verification",
+    "details": "Stage 1 レビューで 18 ファイルが reviewed_files に含まれているが、CODE_OF_CONDUCT.md が漏れている可能性がある。\n\nレビュー対象ファイル（Stage 1）：\n- README.md ✓\n- CLAUDE.md ✓\n- CONTRIBUTING.md ✓\n- docs/architecture.md ✓\n- docs/concept.md ✓\n- docs/DEPLOYMENT.md ✓\n- docs/TRUST_AND_SAFETY.md ✓\n- docs/UI_UX_GUIDE.md ✓\n- docs/user-guide/*.md ✓\n- docs/features/*.md ✓\n- src/app/page.tsx ✓\n- src/app/layout.tsx ✓\n- src/components/layout/Header.tsx ✓\n- tests/e2e/worktree-list.spec.ts ✓\n\n未確認：\n- CODE_OF_CONDUCT.md（Issue 本体に記載あり）\n- docs/internal/*.md（必要に応じて）",
+    "recommendation": "CODE_OF_CONDUCT.md を確認し、『MyCodeBranchDesk』が含まれている場合は対象ファイルリストに追加"
+  },
+  "dependency_clarity": {
+    "status": "fail",
+    "details": "依存関係が明確でない。Issue #75 と Issue #76、Issue #77 の間の関係性が曖昧。\n\n公式の依存関係：\n- Issue #75 ← Issue #76 必須（「前提Issue」）\n- Issue #77 ← Issue #75 完了後（「後続Issue」）\n\n問題点：\n1) Issue #76 が OPEN のため、本 Issue は実装開始前\n2) Issue #77 の実施内容が Issue #75 と重複する可能性（環境変数参照）\n3) Issue #75 内での対象外が Issue #77 を指す一方、受け入れ条件が Issue #75 での実施を要求（矛盾）",
+    "recommendation": "以下を明確化すべき：\n1) Issue #76 の完了予定日\n2) Issue #75 と Issue #77 の『環境変数参照の変更』の正確な分担\n3) ドキュメント内のコード例における環境変数名の置換は #75 か #77 か"
+  },
+  "gap_analysis": [
+    {
+      "area": "依存関係（Critical）",
+      "expected": "Issue #76 が CLOSED（完了）",
+      "actual": "Issue #76 は OPEN（実装中）",
+      "gap": "本 Issue の前提条件が未充足",
+      "recommendation": "Issue #76 の完了を待つ。それまでは本 Issue は planning/draft 段階にとどめる"
+    },
+    {
+      "area": "環境変数参照の扱い（Critical）",
+      "expected": "ドキュメント内の環境変数説明が新名称（CM_*）で記載されている",
+      "actual": "docs/architecture.md, docs/concept.md などに MCBD_* が記載されたまま。対象外に『環境変数参照の変更 → #77』と明記",
+      "gap": "受け入れ条件と対象外指定に矛盾あり",
+      "recommendation": "Issue 本体を修正し、以下いずれかを明確化：\n1) 環境変数名の変更は #75 で実施する場合：対象外から『環境変数参照』を削除\n2) 環境変数名の変更は #77 で実施する場合：受け入れ条件を修正し『ドキュメント内のコード例は MCBD_* のままでよい』と記載"
+    },
+    {
+      "area": "ドキュメント内のチャット表現削除（High）",
+      "expected": "README.md から『チャットUI』『チャット履歴』『チャット・ターミナル画面』の表現が削除され、『メッセージUI』『実行履歴』『Message/Console/History 画面』に置換",
+      "actual": "README.md に以下が残存：\n- 『ブラウザから指示送信』の説明で『チャットUIで操作』\n- 『チャット履歴・メモ』\n- 『ワークツリー詳細画面（チャット・ターミナル）』",
+      "gap": "受け入れ条件『「チャットアプリ」誤解につながる表現が除去されている』に不適合",
+      "recommendation": "実施内容 1-1 で指示される用語置換を実施：\n- チャットUI → メッセージUI\n- チャット履歴 → 実行履歴\n- チャット・ターミナル画面 → Message / Console / History 画面"
+    },
+    {
+      "area": "UI表示文字列の変更（High）",
+      "expected": "page.tsx, layout.tsx, Header.tsx の表示文字列が『CommandMate』に統一",
+      "actual": "すべて『MyCodeBranchDesk』のまま未更新",
+      "gap": "受け入れ条件『UI上の表示が CommandMate に統一されている』に不適合",
+      "recommendation": "以下を更新：\n- src/app/page.tsx line 21: h1 タイトル\n- src/app/layout.tsx line 6: metadata.title\n- src/components/layout/Header.tsx line 23: デフォルト title プロパティ"
+    },
+    {
+      "area": "docs配下のドキュメント置換（High）",
+      "expected": "docs/ 配下の全ドキュメント内『MyCodeBranchDesk』が『CommandMate』に置換される（53 件）",
+      "actual": "docs/concept.md, docs/architecture.md などに 53 件のまま残存",
+      "gap": "受け入れ条件『README/ドキュメントから MyCodeBranchDesk が消えている』に不適合",
+      "recommendation": "実施内容 1-2 の全 docs ファイルを置換。特に以下のファイルで出現が多い：\n- docs/concept.md: 多数\n- docs/architecture.md: myCodeBranchDesk との表記揺れ\n- docs/DEPLOYMENT.md: 設定例を含む"
+    },
+    {
+      "area": "E2Eテストの一時スキップ（High）",
+      "expected": "tests/e2e/worktree-list.spec.ts の『MyCodeBranchDesk』検証テストが test.skip() で一時スキップされている",
+      "actual": "test.skip() が適用されていない。5 件のテストが /MyCodeBranchDesk/i で検証中",
+      "gap": "受け入れ条件『E2Eテストのタイトル検証が適切にスキップされている』に不適合",
+      "recommendation": "E2E テストの該当箇所に test.skip() を適用。PR 説明に『E2E テストは #77 で修正予定のため一時スキップ』と記載"
+    },
+    {
+      "area": "CHANGELOG.md の更新（Medium）",
+      "expected": "CHANGELOG.md の [Unreleased] セクションに Issue #75 の変更内容が追記されている",
+      "actual": "CHANGELOG.md は Issue #76 の内容のみ記載。Issue #75 の『### Changed』エントリがない",
+      "gap": "受け入れ条件『CHANGELOG.md が更新されている』に不適合",
+      "recommendation": "実施内容 1-4 に従い、[Unreleased] セクションに以下を追加：\n```markdown\n### Changed\n- Project name updated from MyCodeBranchDesk to CommandMate\n- UI titles and headers now display \"CommandMate\"\n- Documentation updated with new branding and terminology\n```"
+    },
+    {
+      "area": "Quick Start のディレクトリ名変更（Low）",
+      "expected": "README.md の Quick Start セクションで `cd MyCodeBranchDesk` → `cd commandmate` に変更",
+      "actual": "README.md line 58 に `cd MyCodeBranchDesk` が記載されたまま",
+      "gap": "実施内容 1-1 の指示に未実装",
+      "recommendation": "GitHub リポジトリ名の変更状況を確認した上で、以下いずれか実施：\n1) リポジトリ名が Kewton/MyCodeBranchDesk のままなら、`cd commandmate` への手動リネーム指示に変更\n2) リポジトリ名が Kewton/commandmate に変更される場合は、clone URL と cd コマンド両方を変更"
+    },
+    {
+      "area": "コード例における環境変数名（Low）",
+      "expected": "README.md, docs/concept.md などのコード例で MCBD_* が CM_* に変更されている",
+      "actual": "README.md line 60: `cp .env.example .env   # MCBD_ROOT_DIR を編集`\ndocs/concept.md: `MCBD_ROOT_DIR=/path/to/your/repos` など複数出現",
+      "gap": "対象外指定『環境変数参照の変更 → #77』との矛盾の可能性",
+      "recommendation": "Issue 本体で明確化：\n- ドキュメント内のコード例も本 Issue で更新するのか、#77 で更新するのか\n- 実施内容 1-1 の『環境変数の説明を新名称（CM_*）で記載』と対象外『環境変数参照 → #77』の関係を明確化"
+    }
+  ],
+  "summary": "Issue #75（CommandMate リネーム Phase 2）の整合性レビュー（Stage 2）結果：\n\n【総合評価】needs_revision (スコア: 2/5)\n\n【重大な問題】\n1. **前提条件の未充足**: Issue #76 が OPEN のため、本 Issue #75 は着手前提条件を満たしていない。これは blocking issue であり、#76 完了まで実装開始不可。\n\n2. **環境変数参照の矛盾**: 受け入れ条件『ドキュメント内の環境変数説明が新名称（CM_*）で記載されている』と、対象外『環境変数参照の変更 → #77』の間に明らかな矛盾がある。ドキュメント内のコード例における環境変数名（MCBD_* vs CM_*）の扱いが不明確。\n\n3. **実装状況**: README.md、UI表示文字列（page.tsx, layout.tsx, Header.tsx）、docs配下のドキュメント（53 件）、E2Eテストスキップなど、基本的な実装がまったく開始されていない。\n\n4. **対象外指定の曖昧性**: 対象と対象外の境界が不明確。特に『環境変数参照』『型名・関数名・変数名』の扱いについて、ドキュメント内のコード例との関係性が明確でない。\n\n【推奨アクション】\n1. Issue #76 の完了を待つ（critical）\n2. Issue #75 本体を修正し、環境変数参照の扱いを明確化（critical）\n3. Issue #76 完了後に、順次実装を開始\n4. E2Eテストの一時スキップを適用\n5. CODE_OF_CONDUCT.md を確認し、漏れがないか検証\n\n【Stage 1（設計原則レビュー）との関係】\nStage 1 では「承認」（スコア 5/5）と評価されたが、これは設計原則（SOLID, KISS, YAGNI, DRY）のレベルでの評価。Stage 2 の「整合性レビュー」では、実装内容と受け入れ条件の整合性、対象・対象外の境界明確化、依存関係の明確化を検証するものであり、Stage 1 と異なる観点。\n\nStage 1 での「承認」は妥当だが、Stage 2 での「needs_revision」は、Issue 仕様自体の矛盾と前提条件未充足に基づくもの。",
+  "review_metadata": {
+    "reviewer": "architecture-review-agent",
+    "review_date": "2026-01-29",
+    "review_duration_minutes": 25,
+    "total_files_reviewed": 20,
+    "files_with_issues": 16,
+    "critical_issues": 3,
+    "high_priority_issues": 5,
+    "medium_priority_issues": 2,
+    "low_priority_issues": 2
+  }
+}

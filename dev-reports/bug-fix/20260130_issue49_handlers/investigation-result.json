@@ -1,0 +1,36 @@
+{
+  "bug_id": "20260130_issue49_handlers",
+  "investigation_date": "2026-01-30",
+  "status": "completed",
+  "root_cause": {
+    "summary": "WorktreeDetailRefactored.tsxでFileTreeViewに必要なコールバック関数が渡されていない",
+    "details": "ContextMenuコンポーネントは正しく実装されているが、WorktreeDetailRefactored.tsxでFileTreeViewを使用する際にonNewFile, onNewDirectory, onRename, onDeleteのpropsが渡されていないため、右クリックメニューの操作が機能しない",
+    "affected_files": [
+      "src/components/worktree/WorktreeDetailRefactored.tsx"
+    ],
+    "evidence": [
+      "Line 753-758: FileTreeView呼び出しにonNewFile等のpropsがない",
+      "Line 1177-1181: モバイル版も同様"
+    ]
+  },
+  "severity": "high",
+  "impact_scope": "マークダウンエディタのファイル/ディレクトリ作成・リネーム・削除機能が全く動作しない",
+  "recommended_actions": [
+    {
+      "action_id": "1",
+      "priority": "high",
+      "title": "ファイル操作ハンドラーの実装",
+      "description": "handleNewFile, handleNewDirectory, handleRename, handleDeleteの4つのハンドラー関数を実装し、FileTreeViewに渡す",
+      "files_to_modify": ["src/components/worktree/WorktreeDetailRefactored.tsx"],
+      "estimated_lines": 150
+    },
+    {
+      "action_id": "2",
+      "priority": "medium",
+      "title": "入力ダイアログの実装",
+      "description": "ファイル名・ディレクトリ名の入力用ダイアログコンポーネントを追加",
+      "files_to_modify": ["src/components/worktree/WorktreeDetailRefactored.tsx"],
+      "estimated_lines": 50
+    }
+  ]
+}

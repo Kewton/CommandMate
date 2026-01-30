@@ -1,0 +1,119 @@
+{
+  "issue_number": 75,
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "status": "needs_revision",
+  "score": 2,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "category": "Dependency",
+        "description": "前提条件の継続的な未充足",
+        "details": "Issue #76（環境変数フォールバック）が OPEN 状態。CHANGELOG.md の実装内容が確定していないため、完全な影響分析ができない。",
+        "impact": "blocking",
+        "recommendation": "Issue #76 の完了を待つ"
+      },
+      {
+        "id": "MF-002",
+        "category": "Test Impact",
+        "description": "E2Eテスト失敗確定",
+        "details": "tests/e2e/worktree-list.spec.ts の5件のテストが確実に失敗する。CI/CD パイプラインをブロックする可能性が高い。",
+        "impact": "critical",
+        "recommendation": "test.skip() 適用またはテスト条件を /CommandMate/i に更新"
+      },
+      {
+        "id": "MF-003",
+        "category": "Implementation Gap",
+        "description": "Footer コンポーネントの実装不明確",
+        "details": "E2E テストで footer の存在を検証しているが、実装が見つからない。Issue #75 で footer を新規実装するのかスキップするのか不明。",
+        "impact": "high",
+        "recommendation": "実装方針の明確化が必須"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "SEO",
+        "description": "SEOへの影響対策",
+        "details": "ページタイトル変更により、検索ランキングが一時的に低下する可能性（1-2週間）。",
+        "impact": "medium",
+        "recommendation": "Google Search Console で現在ランキングを記録、変更後に再クロール要求"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "category": "User Experience",
+        "description": "ドキュメント統一性の確保",
+        "details": "ドキュメント内のコード例（clone, cd, env vars）の一貫性確認が重要。",
+        "impact": "medium",
+        "recommendation": "docs/ 配下の全参照を一覧化し、統一的に更新"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "component_dependencies": [
+      {
+        "changed_file": "src/app/page.tsx",
+        "dependent_files": ["tests/e2e/worktree-list.spec.ts"],
+        "impact_level": "high",
+        "notes": "h1タイトル変更により E2E テスト 5件が失敗確定"
+      },
+      {
+        "changed_file": "src/app/layout.tsx",
+        "dependent_files": ["Google Search Console", "SEO/SNS"],
+        "impact_level": "medium",
+        "notes": "metadata.title 変更により SEO ランキング一時低下"
+      },
+      {
+        "changed_file": "src/components/layout/Header.tsx",
+        "dependent_files": [],
+        "impact_level": "low",
+        "notes": "現在は使用されていない"
+      },
+      {
+        "changed_file": "docs/**/*.md",
+        "dependent_files": ["Quick Start", "Config Examples"],
+        "impact_level": "medium",
+        "notes": "53件の出現。セットアップ失敗リスクあり"
+      }
+    ],
+    "test_impact": {
+      "unit_tests": "none",
+      "integration_tests": "affected",
+      "e2e_tests": "broken",
+      "affected_test_files": ["tests/e2e/worktree-list.spec.ts"],
+      "failing_assertions": 5,
+      "ci_cd_blocking": true
+    },
+    "build_impact": "warning",
+    "user_experience_impact": "positive",
+    "seo_impact": "negative"
+  },
+  "ripple_effects": [
+    {
+      "source": "src/app/page.tsx (h1)",
+      "targets": ["tests/e2e/worktree-list.spec.ts × 5"],
+      "effect": "E2Eテスト失敗",
+      "severity": "high"
+    },
+    {
+      "source": "src/app/layout.tsx (metadata)",
+      "targets": ["SEO/SNS"],
+      "effect": "検索ランキング一時低下",
+      "severity": "medium"
+    },
+    {
+      "source": "docs/**/*.md",
+      "targets": ["Quick Start", "ユーザーセットアップ"],
+      "effect": "不整合によるセットアップ失敗リスク",
+      "severity": "medium"
+    }
+  ],
+  "summary": "Issue #75の影響分析レビュー結果：needs_revision (スコア: 2/5)。E2Eテスト5件の失敗が確定、SEO一時低下、ドキュメント統一性への注意が必要。",
+  "review_metadata": {
+    "reviewer": "architecture-review-agent",
+    "review_date": "2026-01-29"
+  }
+}

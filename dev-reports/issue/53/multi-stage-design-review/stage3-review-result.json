@@ -1,0 +1,255 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "issue_number": 53,
+  "review_date": "2026-01-30",
+  "design_doc_path": "dev-reports/design/issue53-assistant-response-save-design-policy.md",
+  "impact_analysis": {
+    "direct_impact": [
+      {
+        "file": "src/lib/assistant-response-saver.ts",
+        "change_type": "新規作成",
+        "description": "Assistant応答保存ロジックの集約モジュール。savePendingAssistantResponse(), cleanCliResponse(), extractAssistantResponseBeforeLastPrompt(), detectBufferReset()関数を実装。",
+        "risk_level": "high",
+        "rationale": "新規モジュールとして中核的なビジネスロジックを担当。メッセージ保存の信頼性に直接影響。"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/send/route.ts",
+        "change_type": "修正",
+        "description": "POST送信処理に savePendingAssistantResponse() 呼び出しを追加。タイムスタンプ生成順序の変更。",
+        "risk_level": "high",
+        "rationale": "メインのメッセージ送信エンドポイント。変更は全てのユーザー操作に影響。"
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "change_type": "修正",
+        "description": "重複保存防止ロジック追加。lastCapturedLineチェックとRace condition対策。",
+        "risk_level": "medium",
+        "rationale": "既存モジュールへの追加変更。補助的役割に変更されるが、最後のメッセージ保存機能は維持。"
+      }
+    ],
+    "indirect_impact": [
+      {
+        "file": "src/lib/db.ts",
+        "change_type": "依存（変更なし）",
+        "description": "createMessage(), getSessionState(), updateSessionState()関数が使用される。スキーマ変更なし。",
+        "risk_level": "low",
+        "rationale": "既存のDB操作関数を再利用。新たな変更は不要。"
+      },
+      {
+        "file": "src/lib/cli-session.ts",
+        "change_type": "依存（変更なし）",
+        "description": "captureSessionOutput()関数がassistant-response-saver.tsから呼び出される。",
+        "risk_level": "low",
+        "rationale": "既存関数の利用。変更不要。"
+      },
+      {
+        "file": "src/lib/ws-server.ts",
+        "change_type": "依存（変更なし）",
+        "description": "broadcastMessage()関数がWebSocket配信に使用される。",
+        "risk_level": "low",
+        "rationale": "既存関数の利用。変更不要。"
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "change_type": "依存（変更なし）",
+        "description": "stripAnsi()関数がANSIコード除去に使用される。",
+        "risk_level": "low",
+        "rationale": "既存関数の利用。変更不要。"
+      },
+      {
+        "file": "src/types/models.ts",
+        "change_type": "依存（変更なし）",
+        "description": "ChatMessage型が使用される。",
+        "risk_level": "low",
+        "rationale": "既存型定義の利用。変更不要。"
+      },
+      {
+        "file": "フロントエンドコンポーネント全般",
+        "change_type": "間接影響（変更なし）",
+        "description": "会話履歴表示がより正確になる（assistantメッセージが適切に保存されるため）。",
+        "risk_level": "low",
+        "rationale": "UIの変更は不要。データ品質向上による恩恵。"
+      }
+    ],
+    "api_impact": [
+      {
+        "endpoint": "POST /api/worktrees/:id/send",
+        "breaking_change": false,
+        "description": "内部処理フローの変更のみ。APIレスポンス形式は維持。",
+        "backward_compatible": true
+      },
+      {
+        "endpoint": "GET /api/worktrees/:id/messages",
+        "breaking_change": false,
+        "description": "変更なし。ただしassistantメッセージがより多く保存されるため、返却データ量が増加する可能性。",
+        "backward_compatible": true
+      }
+    ],
+    "database_impact": [
+      {
+        "table": "chat_messages",
+        "change_type": "データ量増加",
+        "schema_change": false,
+        "migration_needed": false,
+        "description": "Assistant応答が確実に保存されるようになるため、assistantロールのメッセージ数が増加。"
+      },
+      {
+        "table": "session_states",
+        "change_type": "用途変更（スキーマ変更なし）",
+        "schema_change": false,
+        "migration_needed": false,
+        "description": "last_captured_lineフィールドの役割が「ポーリング位置追跡」から「前回保存位置の記録」に変更。in_progress_message_idは補助的利用に。"
+      }
+    ],
+    "performance_impact": [
+      {
+        "area": "メッセージ送信処理",
+        "impact_type": "latency_increase",
+        "severity": "low",
+        "description": "send APIでsavePendingAssistantResponse()を同期的に呼び出すため、tmuxキャプチャ処理（約10ms-50ms）が追加される。",
+        "mitigation": "tmuxキャプチャは既存のポーリングでも実行されており、実質的な影響は軽微。"
+      },
+      {
+        "area": "重複保存チェック",
+        "impact_type": "cpu_overhead",
+        "severity": "negligible",
+        "description": "savePendingAssistantResponseとcheckForResponseの両方で重複チェックが実行される。",
+        "mitigation": "チェック自体は単純な数値比較のみで、パフォーマンス影響は無視できるレベル。"
+      },
+      {
+        "area": "DBストレージ",
+        "impact_type": "storage_increase",
+        "severity": "low",
+        "description": "Assistant応答の保存が確実になるため、chat_messagesテーブルのレコード数が増加。",
+        "mitigation": "正常な動作であり、問題ではない。長期的にはメッセージ削除/アーカイブ機能の検討が必要。"
+      }
+    ]
+  },
+  "design_doc_coverage": {
+    "impact_section_exists": true,
+    "section_location": "セクション9: 変更影響範囲",
+    "completeness": "complete",
+    "gaps": [],
+    "strengths": [
+      "変更対象ファイルが明確にリストアップされている（セクション9.1）",
+      "影響度（高/低）が各ファイルに対して評価されている",
+      "影響を受けないファイルも明示的に記載されている（セクション9.2）",
+      "後続Issue（#54, #59）での改善事項が設計書に反映済み"
+    ],
+    "additional_findings": [
+      "フロントエンドへの間接影響（UIの変更不要だがデータ品質向上）は設計書に未記載だが、暗黙的に理解可能",
+      "パフォーマンス影響の定量的評価は設計書になかったが、実装レビューで軽微であることを確認"
+    ]
+  },
+  "risk_assessment": {
+    "overall_risk": "low",
+    "identified_risks": [
+      {
+        "id": "R1",
+        "risk_type": "technical",
+        "description": "savePendingAssistantResponseとcheckForResponseの間でRace conditionが発生する可能性",
+        "likelihood": "low",
+        "impact": "low",
+        "mitigation_status": "mitigated",
+        "mitigation": "設計書セクション8.4で明示的に対策。実装でもre-checkロジックが導入されている。"
+      },
+      {
+        "id": "R2",
+        "risk_type": "technical",
+        "description": "バッファリセット検出の閾値（BUFFER_RESET_TOLERANCE = 25）が不適切な場合、誤検出の可能性",
+        "likelihood": "low",
+        "impact": "medium",
+        "mitigation_status": "mitigated",
+        "mitigation": "Issue #59でテストケースを追加。境界値テストで動作を検証済み。"
+      },
+      {
+        "id": "R3",
+        "risk_type": "technical",
+        "description": "タイムスタンプ1ms調整による時系列順序問題（同一ミリ秒内での複数操作）",
+        "likelihood": "very_low",
+        "impact": "low",
+        "mitigation_status": "accepted",
+        "mitigation": "設計書で「現状のユースケースでは1msの差で十分」と判断。将来的にシーケンス番号導入を検討可能。"
+      },
+      {
+        "id": "R4",
+        "risk_type": "operational",
+        "description": "Assistant応答保存増加によるDB容量増大",
+        "likelihood": "medium",
+        "impact": "low",
+        "mitigation_status": "accepted",
+        "mitigation": "正常動作の結果であり問題ではない。長期的な容量管理は別途検討。"
+      }
+    ],
+    "mitigations": [
+      {
+        "risk_id": "R1",
+        "mitigation": "response-poller.tsで保存前に再度lastCapturedLineをチェックし、競合を検出時はスキップ",
+        "effectiveness": "high"
+      },
+      {
+        "risk_id": "R2",
+        "mitigation": "detectBufferReset()関数で shrink と restart の2つの検出条件を実装。テストカバレッジ確保。",
+        "effectiveness": "high"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "documentation",
+        "title": "パフォーマンス影響の定量的評価を設計書に追記",
+        "description": "設計書のセクション9に、パフォーマンス影響（tmuxキャプチャによるlatency増加、DB容量増加）の定量的評価を追記することを推奨。",
+        "location": "dev-reports/design/issue53-assistant-response-save-design-policy.md セクション9",
+        "priority": "medium",
+        "effort": "low"
+      },
+      {
+        "id": "SF-2",
+        "category": "documentation",
+        "title": "フロントエンドへの間接影響を明記",
+        "description": "設計書のセクション9.2「影響を受けないファイル」に、フロントエンドがUIの変更なしにデータ品質向上の恩恵を受けることを明記することを推奨。",
+        "location": "dev-reports/design/issue53-assistant-response-save-design-policy.md セクション9.2",
+        "priority": "low",
+        "effort": "low"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NH-1",
+        "category": "future_consideration",
+        "title": "メッセージアーカイブ/削除機能の検討",
+        "description": "Assistant応答の保存が確実になることでDB容量が長期的に増加する。将来的にメッセージのアーカイブまたは古いメッセージの自動削除機能を検討。",
+        "priority": "low"
+      },
+      {
+        "id": "NH-2",
+        "category": "monitoring",
+        "title": "重複保存検出のメトリクス収集",
+        "description": "Race conditionによるスキップ発生頻度をログから分析できるよう、将来的にメトリクス収集を検討。現在はconsole.logでのみ記録。",
+        "priority": "low"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2,
+    "overall_assessment": "設計書の影響範囲分析は適切かつ網羅的。直接変更対象3ファイル、間接影響6ファイル以上を正確に特定。APIの後方互換性は維持され、DBスキーマ変更も不要。パフォーマンス影響は軽微。リスクは全て適切に特定・軽減されている。設計原則レビュー（Stage 1）および整合性レビュー（Stage 2）の結果も設計書に反映済みであり、影響分析の観点からも承認可能な状態。"
+  },
+  "approval_status": "approved",
+  "reviewed_files": [
+    "dev-reports/design/issue53-assistant-response-save-design-policy.md",
+    "src/lib/assistant-response-saver.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/db.ts",
+    "src/lib/__tests__/assistant-response-saver.test.ts"
+  ],
+  "timestamp": "2026-01-30T12:00:00Z"
+}

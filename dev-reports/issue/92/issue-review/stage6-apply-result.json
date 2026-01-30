@@ -1,0 +1,37 @@
+{
+  "stage": 6,
+  "apply_date": "2026-01-30",
+  "applied_findings": [
+    {
+      "id": "SF-NEW-1",
+      "category": "整合性",
+      "original_recommendation": "「影響を受けるファイル」テーブルの scripts/setup.sh の説明に「環境変数案内メッセージの CM_* 形式への整合性確認」を追加",
+      "applied_change": "「影響を受けるファイル」テーブルの scripts/setup.sh 行の説明を「新スクリプトの統合フロー、環境変数案内メッセージの CM_* 形式への整合性確認」に更新"
+    },
+    {
+      "id": "SF-NEW-2",
+      "category": "完全性",
+      "original_recommendation": "openssl が必須の場合は代替手段の検討注記を削除するか、代替手段を具体的に定義する。または openssl を「必須」として扱い、未インストール時はエラーとする方針を明確化",
+      "applied_change": "「トークン生成方式」セクションに Note を追加し、openssl は必須依存として扱い、preflight-check.sh で事前チェックすることで setup-env.sh 実行時には openssl が利用可能であることが保証される旨を明確化。「代替手段を検討」の曖昧な記述を削除"
+    },
+    {
+      "id": "NTH-NEW-1",
+      "category": "明確性",
+      "original_recommendation": "「既存 .env をバックアップ後、対話式で新規 .env を生成」のように動作を明確化",
+      "applied_change": "setup-env.sh セクションに「バックアップ動作」サブセクションを追加し、「既存 .env がある場合、まずバックアップを作成後、対話式で新規 .env を生成（既存ファイルは編集せず新規作成）」と明確化。受け入れ条件も「バックアップ作成後、新規 .env を生成する」に更新。テスト方針にも確認項目を追加"
+    },
+    {
+      "id": "NTH-NEW-2",
+      "category": "整合性",
+      "original_recommendation": "DEPLOYMENT.md の変更内容として「セットアップ手順を新スクリプト（preflight-check.sh, setup-env.sh）を使用するフローに更新」と具体的に記載",
+      "applied_change": "「ドキュメント更新」セクションの docs/DEPLOYMENT.md 説明を「セットアップ手順を新スクリプト（preflight-check.sh, setup-env.sh）を使用するフローに更新。現在の cp .env.production.example .env 手順を setup-env.sh 使用に変更」に具体化。「影響を受けるファイル」テーブルも同様に更新"
+    }
+  ],
+  "additional_changes": [
+    {
+      "location": "Issue先頭Note",
+      "change": "更新日付とレビューステージを「Stage 5 (2回目通常レビュー)」に更新"
+    }
+  ],
+  "summary": "Stage 5 (2回目通常レビュー) で検出された新規指摘事項4件（Should Fix 2件、Nice to Have 2件）を全て Issue #92 に反映した。主な変更点: (1) setup.sh の環境変数案内メッセージ整合性確認を影響ファイルに追記、(2) openssl の必須方針を明確化し曖昧な代替手段記述を削除、(3) setup-env.sh のバックアップ動作（バックアップ後に新規生成）を明確化、(4) DEPLOYMENT.md の更新内容を具体的に記載。これにより Issue #92 は実装準備が完了した状態となった。"
+}

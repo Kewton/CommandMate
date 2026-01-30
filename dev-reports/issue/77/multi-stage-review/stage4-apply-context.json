@@ -1,0 +1,9 @@
+{
+  "issue_number": 77,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_result_path": "dev-reports/issue/77/multi-stage-review/stage4-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+  "status": "already_applied",
+  "notes": "設計方針書のセクション6にOWASP Top 10準拠確認表、セクション11.4に結果が既に記録済み。Must Fix 0件、Should Fix 0件。"
+}

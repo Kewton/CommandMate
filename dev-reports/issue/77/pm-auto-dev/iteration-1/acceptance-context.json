@@ -1,0 +1,30 @@
+{
+  "issue_number": 77,
+  "feature_summary": "Phase 3: 設定・コード内の名称置換 (CommandMate リネーム)",
+  "acceptance_criteria": [
+    ".env.exampleが新名称に更新されている",
+    "package.jsonのnameがcommandmateになっている",
+    "コード内のMCBD_*参照がCM_*に更新されている",
+    "scripts/*.sh（10ファイル）, scripts/*.ts（5ファイル）が更新されている",
+    "src/lib/logger.tsのセンシティブデータ検出が新旧両方に対応している",
+    "全テストがパスする（ユニット・インテグレーション・E2E）",
+    "#75で一時スキップしたE2Eテストが修正・解除されている",
+    "TypeScriptコンパイルエラーなし",
+    "npm installが正常に完了する",
+    "npm run buildが成功する",
+    "スクリーンショット（5ファイル）が新UIを反映している",
+    "CHANGELOG.mdが更新されている"
+  ],
+  "test_scenarios": [
+    "シナリオ1: .env.exampleにCM_*環境変数が推奨として記載されている",
+    "シナリオ2: package.jsonのnameが'commandmate'になっている",
+    "シナリオ3: src/lib/env.tsのEnv interfaceがCM_*プロパティを使用している",
+    "シナリオ4: scripts/配下の全ファイルがCM_*またはフォールバック対応している",
+    "シナリオ5: logger.tsがCM_AUTH_TOKENとMCBD_AUTH_TOKEN両方をマスキングする",
+    "シナリオ6: npm run test:unitが全テストパス",
+    "シナリオ7: tests/e2e/worktree-list.spec.tsのtest.skip()が解除されている",
+    "シナリオ8: npx tsc --noEmitがエラーなし",
+    "シナリオ9: npm run buildが成功",
+    "シナリオ10: CHANGELOG.mdに破壊的変更が記録されている"
+  ]
+}

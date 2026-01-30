@@ -1,0 +1,125 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 86,
+  "review_date": "2026-01-30",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "技術的正確性",
+        "issue": "Claude Code Skillsのフロントマター仕様に`disable-model-invocation`オプションは存在しない可能性がある",
+        "location": "## 2. リリーススキルの作成 > スキル仕様",
+        "recommendation": "Claude Code Skills公式ドキュメントで`disable-model-invocation`オプションの存在を確認し、存在しない場合は削除する。既存スキル（.claude/skills/rebuild/SKILL.md）では使用されていない",
+        "evidence": "既存のSKILL.md（rebuild）にはname, description, allowed-toolsのみが使用されている。Claude Code Skills公式ドキュメントで確認が必要"
+      },
+      {
+        "id": "MF-2",
+        "category": "整合性",
+        "issue": "スキルとコマンドの混同がある。本プロジェクトでは`.claude/commands/`配下がスラッシュコマンド、`.claude/skills/`配下がスキル",
+        "location": "## 2. リリーススキルの作成",
+        "recommendation": "リリース機能をスキルとして実装するのか、コマンドとして実装するのかを明確にする。使用例の`/release`はスラッシュコマンド形式だが、配置先は`.claude/skills/`",
+        "evidence": "CLAUDE.mdの「利用可能なコマンド」セクションでは/create-pr等が.claude/commands/配下にあり、.claude/skills/はrebuildスキルのみ存在"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "CHANGELOG更新の具体的な手順が不足している",
+        "location": "## スコープ > 1. リリース手順書の作成",
+        "recommendation": "CHANGELOGの[Unreleased]セクションから[新バージョン]セクションへの変換ルール、日付フォーマット（YYYY-MM-DD）、比較リンクの更新方法を明記する",
+        "evidence": "現在のCHANGELOG.mdはKeep a Changelog形式を採用しており、[Unreleased]セクションの扱いが重要"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "developブランチの扱いが明確でない",
+        "location": "## 補足情報",
+        "recommendation": "リリース時にdevelopブランチが存在する場合の扱い（mainとdevelopの両方にタグを打つのか、mainのみか等）を明確にする",
+        "evidence": "補足情報に「developブランチも存在する」と記載があるが、リリースフローでの扱いが未定義"
+      },
+      {
+        "id": "SF-3",
+        "category": "技術的妥当性",
+        "issue": "スキル仕様のargument-hintフォーマットがClaude Code Skillsの正式仕様か不明",
+        "location": "## 2. リリーススキルの作成 > スキル仕様",
+        "recommendation": "argument-hintオプションの存在と正確なフォーマットをClaude Code Skills公式ドキュメントで確認する",
+        "evidence": "既存スキル（rebuild）にはargument-hintが使用されていない"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "エラーハンドリングのシナリオが記載されていない",
+        "location": "## スコープ > 2. リリーススキルの作成",
+        "recommendation": "以下のエラーケースの処理方法を追加: (1)未コミットの変更がある場合、(2)リモートとの差分がある場合、(3)タグが既に存在する場合、(4)CIが失敗した場合",
+        "evidence": "実行内容には正常系のフローのみ記載"
+      },
+      {
+        "id": "SF-5",
+        "category": "整合性",
+        "issue": "受け入れ条件にスキルの動作検証方法が不足",
+        "location": "## 受け入れ条件",
+        "recommendation": "スキル実行後の検証項目を追加: (1)package.jsonのversion更新確認、(2)CHANGELOG.mdの更新確認、(3)Gitタグ作成確認、(4)GitHub Releases作成確認",
+        "evidence": "受け入れ条件は「実行できる」のみで、実行結果の検証条件が不明確"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "pre-releaseバージョン（alpha, beta, rc）の扱いが未定義",
+        "location": "## スコープ",
+        "recommendation": "将来的にpre-releaseバージョン（例: 1.0.0-alpha.1）をサポートする場合の拡張ポイントを記載",
+        "evidence": "セマンティックバージョニングではpre-releaseが正式サポートされている"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "ロールバック手順が未記載",
+        "location": "## スコープ > 1. リリース手順書の作成",
+        "recommendation": "リリース後に問題が発覚した場合のロールバック手順（タグ削除、GitHub Release削除等）をリリース手順書に含めることを検討",
+        "evidence": "リリース手順書の内容一覧にロールバックが含まれていない"
+      },
+      {
+        "id": "NTH-3",
+        "category": "整合性",
+        "issue": "既存の/create-prコマンドとの連携が未検討",
+        "location": "## スコープ",
+        "recommendation": "リリース作業後にPR作成が必要な場合（例: developからmainへのマージPR）の連携フローを検討",
+        "evidence": "CLAUDE.mdには/create-prコマンドが既に存在"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 10,
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/.claude/skills/rebuild/SKILL.md",
+      "relevance": "既存スキルの実装例。フロントマター仕様の参照用"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/.claude/commands/create-pr.md",
+      "relevance": "既存コマンドの実装例。フロントマター仕様の参照用"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/package.json",
+      "relevance": "現在のバージョン(0.1.0)の確認"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/CHANGELOG.md",
+      "relevance": "Keep a Changelog形式の実装確認"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/CLAUDE.md",
+      "relevance": "プロジェクトのコマンド・エージェント一覧。スキル追加時の更新対象"
+    }
+  ],
+  "overall_assessment": "Issue #86は全体的に良く整理されており、リリース作業の標準化という目的は明確です。ただし、Claude Code Skillsの仕様に関して未確認のオプション（disable-model-invocation, argument-hint）が含まれており、技術的正確性の確認が必要です。また、本プロジェクトではスキル（.claude/skills/）とコマンド（.claude/commands/）が区別されていますが、Issueではスキルとして配置しつつ/release形式での呼び出しを想定しており、この点の整合性を確認する必要があります。エラーハンドリングやdevelopブランチの扱いなど、運用上の詳細も補完することで、より実用的なリリースフローが構築できるでしょう。"
+}

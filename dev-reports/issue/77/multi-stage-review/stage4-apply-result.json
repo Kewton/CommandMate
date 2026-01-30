@@ -1,0 +1,30 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "apply_date": "2026-01-29",
+  "status": "completed",
+  "summary": "Stage 4の指摘事項は設計方針書に既に反映済み。Must Fix 0件、Should Fix 0件のため追加対応なし。",
+  "applied_items": [],
+  "owasp_compliance": {
+    "A01_broken_access_control": "Pass",
+    "A02_cryptographic_failures": "Pass",
+    "A03_injection": "Pass",
+    "A05_security_misconfiguration": "Pass",
+    "A09_security_logging": "Pass"
+  },
+  "design_policy_updates": {
+    "file": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+    "sections_verified": [
+      "6.1 OWASP Top 10 準拠確認",
+      "6.2 認証トークンのマスキング",
+      "11.4 Stage 4: セキュリティレビュー"
+    ]
+  },
+  "metrics": {
+    "must_fix_applied": 0,
+    "must_fix_total": 0,
+    "should_fix_applied": 0,
+    "should_fix_total": 0,
+    "owasp_score": "5/5"
+  }
+}

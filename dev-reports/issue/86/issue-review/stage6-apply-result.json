@@ -1,0 +1,59 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 86,
+  "apply_date": "2026-01-30",
+  "applied_items": [
+    {
+      "id": "SF-1",
+      "category": "整合性",
+      "original_issue": "既存スキル（rebuild）とフロントマター形式に差異がある",
+      "action": "「フロントマター形式について」の注記を追加し、スキルごとに必要なオプションが異なることを明記",
+      "location": "## 2. リリーススキルの作成 > スキル仕様"
+    },
+    {
+      "id": "SF-2",
+      "category": "完全性",
+      "original_issue": "受け入れ条件のエラー処理検証項目に「[Unreleased]セクションが空の場合」が不足",
+      "action": "「[Unreleased]セクションが空の場合に警告メッセージが表示される」を受け入れ条件のエラー処理検証に追加",
+      "location": "## 受け入れ条件 > エラー処理検証"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "NTH-1",
+      "category": "完全性",
+      "original_issue": "CLAUDE.mdへの追記形式が未指定",
+      "reason": "実装時に決定する内容のためスキップ"
+    },
+    {
+      "id": "NTH-2",
+      "category": "明確性",
+      "original_issue": "templates/changelog-entry.mdの内容が未定義",
+      "reason": "実装時に詳細化する内容のためスキップ"
+    }
+  ],
+  "summary": {
+    "total_items": 4,
+    "applied_count": 2,
+    "skipped_count": 2
+  },
+  "changes_made": [
+    {
+      "section": "スキル仕様",
+      "change_type": "addition",
+      "description": "「フロントマター形式について」の注記を追加。既存rebuildスキルとの形式差異を説明し、スキルごとに適切なオプションを選択するよう記載"
+    },
+    {
+      "section": "受け入れ条件 > エラー処理検証",
+      "change_type": "addition",
+      "description": "「[Unreleased]セクションが空の場合に警告メッセージが表示される」チェックボックスを追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "change_type": "addition",
+      "description": "Stage 5レビューの対応内容を履歴に追加"
+    }
+  ],
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/86"
+}

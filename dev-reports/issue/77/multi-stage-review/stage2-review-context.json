@@ -1,0 +1,14 @@
+{
+  "issue_number": 77,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_doc_path": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+  "review_criteria": [
+    "設計書と実装の整合性",
+    "Issue要件との整合性",
+    "既存ドキュメントとの整合性",
+    "依存Issue(#76)との整合性"
+  ],
+  "related_issues": [76, 75, 74]
+}

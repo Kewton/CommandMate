@@ -1,0 +1,17 @@
+{
+  "issue_number": 70,
+  "feature_summary": "Webアプリ基本操作ガイドを作成",
+  "acceptance_criteria": [
+    "docs/user-guide/webapp-guide.md が作成され、上記の全セクションが記載されている",
+    "既存スクリーンショット（docs/images/screenshot-*.png）を活用している",
+    "デスクトップ・モバイル両方のUIについて説明がある",
+    "README.md のドキュメントテーブルに新ガイドへのリンクが追加されている",
+    "新ガイドから UI_UX_GUIDE.md への参照リンクが含まれている"
+  ],
+  "test_scenarios": [
+    "シナリオ1: webapp-guide.md が存在し、全セクションが記載されているか確認",
+    "シナリオ2: スクリーンショットへの参照リンクが正しいか確認",
+    "シナリオ3: デスクトップ・モバイル両方の説明があるか確認",
+    "シナリオ4: UI_UX_GUIDE.md への参照リンクが含まれているか確認"
+  ]
+}

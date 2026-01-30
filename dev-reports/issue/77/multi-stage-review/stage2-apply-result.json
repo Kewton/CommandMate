@@ -1,0 +1,49 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "apply_date": "2026-01-29",
+  "status": "completed",
+  "summary": "Stage 2の指摘事項は設計方針書に既に反映済み",
+  "applied_items": [
+    {
+      "id": "MF-1",
+      "status": "applied",
+      "target": "Section 3.1, 3.4 シェルスクリプト更新",
+      "details": "scripts/start.sh, logs.sh, restart.sh の更新内容を記載済み"
+    },
+    {
+      "id": "MF-2",
+      "status": "applied",
+      "target": "Section 3.1, 4.4 E2Eテスト更新",
+      "details": "worktree-list.spec.ts の更新コード例を記載済み"
+    },
+    {
+      "id": "MF-3",
+      "status": "applied",
+      "target": "Section 3.1 Header.tsx JSDocコメント更新",
+      "details": "Stage2 MF-3として対象ファイル表に記載済み"
+    },
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "target": "Section 3.2 Note",
+      "details": "Issue #76設計書との意図的な差異を明記済み"
+    }
+  ],
+  "design_policy_updates": {
+    "file": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+    "sections_updated": [
+      "3.1 対象ファイルと変更内容 - Stage2 MF追加",
+      "3.2 Envインターフェース変更 - Noteとして意図的差異を明記",
+      "3.4 シェルスクリプト更新",
+      "4.4 E2Eテスト更新",
+      "11.2 Stage 2: 整合性レビュー"
+    ]
+  },
+  "metrics": {
+    "must_fix_applied": 3,
+    "must_fix_total": 3,
+    "should_fix_applied": 1,
+    "should_fix_total": 1
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 40,
+  "apply_date": "2026-01-30",
+  "applied_items": [],
+  "skipped_items": [
+    {
+      "id": "SF-1",
+      "reason": "既にIssue本文に「`npm install` を実行して `package-lock.json` も自動更新する」と記載済み。受け入れ条件にもpackage-lock.jsonの確認項目が含まれている。追加対応不要。"
+    },
+    {
+      "id": "NTH-1",
+      "reason": "Nice to Haveのため対応スキップ。CHANGELOGセクション構成は「セクション構成: `## [0.1.0] - YYYY-MM-DD` の下に `### Added`, `### Changed`, `### Fixed` 等のサブセクションを配置」として既に記載されている。"
+    }
+  ],
+  "summary": {
+    "total_items": 2,
+    "applied_count": 0,
+    "skipped_count": 2
+  },
+  "note": "Stage 5で指摘された2件は、いずれも既にIssue本文に記載済みまたはNice to Haveのためスキップ。Issueの更新は不要。"
+}

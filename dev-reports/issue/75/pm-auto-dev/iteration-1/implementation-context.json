@@ -1,0 +1,75 @@
+{
+  "issue_number": 75,
+  "title": "Phase 2: ドキュメント・UI表示の変更 (CommandMate リネーム)",
+  "type": "documentation_and_ui_update",
+  "acceptance_criteria": [
+    "#76 が完了していること（完了済み）",
+    "README/ドキュメントから MyCodeBranchDesk が消えている",
+    "「チャットアプリ」誤解につながる表現が除去されている",
+    "UI上の表示が CommandMate に統一されている",
+    "CHANGELOG.md が更新されている",
+    "ビルドが成功する（npm run build）",
+    "lint エラーがない（npm run lint）",
+    "E2Eテストのタイトル検証が適切にスキップされている"
+  ],
+  "implementation_tasks": {
+    "phase1_documents": [
+      "README.md",
+      "CLAUDE.md",
+      "CONTRIBUTING.md",
+      "CODE_OF_CONDUCT.md",
+      "docs/architecture.md",
+      "docs/concept.md",
+      "docs/DEPLOYMENT.md",
+      "docs/TRUST_AND_SAFETY.md",
+      "docs/UI_UX_GUIDE.md",
+      "docs/user-guide/quick-start.md",
+      "docs/user-guide/commands-guide.md",
+      "docs/user-guide/agents-guide.md",
+      "docs/user-guide/workflow-examples.md",
+      "docs/features/*.md",
+      "docs/internal/*.md"
+    ],
+    "phase2_ui_components": [
+      {
+        "file": "src/app/page.tsx",
+        "line": 21,
+        "change": "h1 title: MyCodeBranchDesk → CommandMate"
+      },
+      {
+        "file": "src/app/layout.tsx",
+        "line": 6,
+        "change": "metadata.title: myCodeBranchDesk → CommandMate"
+      },
+      {
+        "file": "src/components/layout/Header.tsx",
+        "line": 23,
+        "change": "default title: MyCodeBranchDesk → CommandMate"
+      }
+    ],
+    "phase3_e2e_test": {
+      "file": "tests/e2e/worktree-list.spec.ts",
+      "action": "Apply test.skip() to 5 tests that validate MyCodeBranchDesk title"
+    },
+    "phase4_changelog": {
+      "file": "CHANGELOG.md",
+      "action": "Add entry under [Unreleased] for branding update"
+    }
+  },
+  "design_decisions": {
+    "env_var_handling": "Keep MCBD_* in code examples (update in #77)",
+    "clone_command": "Keep 'cd MyCodeBranchDesk' (repo name unchanged)",
+    "footer": "No Footer component exists, skip related E2E test"
+  },
+  "replacements": {
+    "project_name": {
+      "from": ["MyCodeBranchDesk", "myCodeBranchDesk", "mycodebranch-desk"],
+      "to": ["CommandMate", "CommandMate", "commandmate"]
+    },
+    "chat_terminology": {
+      "チャットUI": "メッセージUI",
+      "チャット履歴": "実行履歴",
+      "チャット・ターミナル画面": "Message / Console / History 画面"
+    }
+  }
+}

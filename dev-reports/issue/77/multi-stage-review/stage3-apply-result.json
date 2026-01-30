@@ -1,0 +1,37 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "apply_date": "2026-01-29",
+  "status": "completed",
+  "summary": "Stage 3の指摘事項は設計方針書に既に反映済み",
+  "applied_items": [
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "target": "Section 3.1, 4.3 logger.test.ts CM_AUTH_TOKENリダクションテスト",
+      "details": "対象ファイル表に追加済み、テストコード例も記載済み"
+    }
+  ],
+  "additional_findings": [
+    {
+      "id": "AF-1",
+      "description": "scripts/stop.sh が設計書の変更対象に含まれていない",
+      "status": "acknowledged",
+      "notes": "stop.shはAPP_NAMEを使用しているが、MCBD_PORT参照は環境変数フォールバック対象外のため別途検討が必要"
+    }
+  ],
+  "design_policy_updates": {
+    "file": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+    "sections_updated": [
+      "3.1 対象ファイルと変更内容 - Stage3 SF-1追加",
+      "4.3 logger.test.ts CM_AUTH_TOKEN リダクションテスト",
+      "11.3 Stage 3: 影響分析レビュー"
+    ]
+  },
+  "metrics": {
+    "must_fix_applied": 0,
+    "must_fix_total": 0,
+    "should_fix_applied": 1,
+    "should_fix_total": 1
+  }
+}

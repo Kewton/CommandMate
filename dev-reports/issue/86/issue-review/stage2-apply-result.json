@@ -1,0 +1,80 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 86,
+  "apply_date": "2026-01-30",
+  "applied_items": [
+    {
+      "id": "MF-1",
+      "category": "must_fix",
+      "status": "applied",
+      "change_summary": "スキル仕様のdisable-model-invocationオプションに「公式ドキュメントで確認済み」のコメントを追記し、オプション説明セクションを追加"
+    },
+    {
+      "id": "MF-2",
+      "category": "must_fix",
+      "status": "applied",
+      "change_summary": "スキル仕様セクションにNoteを追加: Claude Code Skillsではスキルもスラッシュコマンドとして呼び出し可能であることを明記。公式ドキュメントの「カスタムスラッシュコマンドはスキルにマージされました」を引用"
+    },
+    {
+      "id": "SF-1",
+      "category": "should_fix",
+      "status": "applied",
+      "change_summary": "CHANGELOG更新ルールに具体的な手順を追加: [Unreleased]セクションの移動方法、日付フォーマット（YYYY-MM-DD）、比較リンクの更新例を明記"
+    },
+    {
+      "id": "SF-2",
+      "category": "should_fix",
+      "status": "applied",
+      "change_summary": "新セクション「ブランチ戦略」を追加: リリース実行ブランチはmainを推奨、developブランチがある場合はリリース前にmainにマージ、タグはmainのみに作成することを明記"
+    },
+    {
+      "id": "SF-3",
+      "category": "should_fix",
+      "status": "applied",
+      "change_summary": "argument-hintオプションの説明を「オプション説明」セクションに追加: スラッシュコマンド実行時にユーザーに表示される引数のヒントであることを明記"
+    },
+    {
+      "id": "SF-4",
+      "category": "should_fix",
+      "status": "applied",
+      "change_summary": "新セクション「エラーハンドリング」を追加: 未コミット変更、リモートとの差分、既存タグ、CHANGELOG.md不在、[Unreleased]空の5つのエラーケースと対応を表形式で記載"
+    },
+    {
+      "id": "SF-5",
+      "category": "should_fix",
+      "status": "applied",
+      "change_summary": "受け入れ条件を「成果物」「動作検証」「エラー処理検証」の3セクションに再構成。各バージョンアップの検証項目にpackage.json更新確認、CHANGELOG.md更新確認、Gitタグ作成確認を追加"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "NTH-1",
+      "category": "nice_to_have",
+      "status": "skipped",
+      "reason": "「将来の拡張（スコープ外）」セクションに言及として追加済み。本Issueのスコープ外として扱う"
+    },
+    {
+      "id": "NTH-2",
+      "category": "nice_to_have",
+      "status": "skipped",
+      "reason": "「将来の拡張（スコープ外）」セクションに言及として追加済み。リリース手順書には検討項目として記載"
+    },
+    {
+      "id": "NTH-3",
+      "category": "nice_to_have",
+      "status": "skipped",
+      "reason": "「将来の拡張（スコープ外）」セクションに言及として追加済み。将来の拡張として記載"
+    }
+  ],
+  "summary": {
+    "total_items": 10,
+    "applied_count": 7,
+    "skipped_count": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/86"
+  },
+  "updated_issue_body": "## 概要\n\nIssue #40（セマンティックバージョニング導入）の完了後、継続的なバージョンアップを効率的に行うため、リリース手順書の作成とClaude Code Skillsによる自動化を実施する。\n\n## 背景\n\n- Issue #40でv0.1.0のセマンティックバージョニングが導入される\n- 今後のメジャー/マイナー/パッチバージョンアップを標準化したい\n- 手動操作を最小限にし、Claude Codeから簡単にリリースできるようにしたい\n\n## スコープ\n\n### 1. リリース手順書の作成\n\n**ファイル**: `docs/release-guide.md`\n\n以下の内容を含む：\n- セマンティックバージョニングの判断基準（MAJOR/MINOR/PATCH）\n- バージョンアップ手順（step-by-step）\n- CHANGELOG更新ルール（Keep a Changelog形式）\n  - `[Unreleased]`セクションの内容を新バージョンセクションに移動\n  - 日付フォーマット: `YYYY-MM-DD`形式\n  - 比較リンクの更新: `[v0.2.0]: https://github.com/.../compare/v0.1.0...v0.2.0`\n- Gitタグ作成・プッシュ手順\n- GitHub Releases作成手順\n- npm versionコマンドの使用方法（オプション）\n- ロールバック手順（タグ削除、GitHub Release削除等）は将来の拡張として検討\n\n### 2. リリーススキルの作成\n\n**ディレクトリ**: `.claude/skills/release/`\n\n| ファイル | 説明 |\n|---------|------|\n| `SKILL.md` | メイン指示（フロントマター + 手順） |\n| `templates/changelog-entry.md` | CHANGELOGエントリのテンプレート |\n| `examples/release-example.md` | リリース実行例 |\n\n**スキル仕様**:\n\n> **Note**: Claude Code Skillsでは、スキル（`.claude/skills/`）もスラッシュコマンドとして呼び出し可能です。  \n> 公式ドキュメント: 「カスタムスラッシュコマンドはスキルにマージされました」\n\n```yaml\n---\nname: release\ndescription: Create a new release with version bump, CHANGELOG update, Git tag, and GitHub Release\ndisable-model-invocation: true  # ユーザーのみが呼び出し可能（公式ドキュメントで確認済み）\nallowed-tools: Bash, Read, Edit, Write\nargument-hint: [version-type] (major|minor|patch) or [version] (e.g., 1.2.3)\n---\n```\n\n> **オプション説明**:\n> - `disable-model-invocation`: `true`に設定すると、ユーザーのスラッシュコマンドからのみ呼び出し可能。AIによる自動呼び出しを防止\n> - `argument-hint`: スラッシュコマンド実行時にユーザーに表示される引数のヒント\n\n**使用例**:\n```bash\n/release patch      # v0.1.0 → v0.1.1\n/release minor      # v0.1.0 → v0.2.0\n/release major      # v0.1.0 → v1.0.0\n/release 1.0.0      # 直接バージョン指定\n```\n\n**実行内容**:\n1. 現在のバージョンを取得（package.json）\n2. 新バージョンを計算\n3. package.json更新\n4. npm installでpackage-lock.json更新\n5. CHANGELOG.md更新（[Unreleased] → [新バージョン]）\n   - 日付フォーマット: YYYY-MM-DD\n   - 比較リンクの更新\n6. コミット作成\n7. Gitタグ作成・プッシュ\n8. GitHub Releases作成（推奨）\n\n**エラーハンドリング**:\n\nリリーススキルは以下のエラーケースを検出し、適切に対応します:\n\n| エラーケース | 対応 |\n|-------------|------|\n| 未コミットの変更がある | エラー表示し、コミットまたはスタッシュを促す |\n| リモートとの差分がある | `git pull`を促す、または強制続行オプションを提供 |\n| タグが既に存在する | エラー表示し、別バージョンの指定を促す |\n| CHANGELOG.mdが存在しない | 新規作成するか、エラーとして中断 |\n| [Unreleased]セクションが空 | 警告を表示し、続行するか確認 |\n\n## ブランチ戦略\n\n### リリース時のブランチ運用\n\n本プロジェクトのブランチ戦略（CLAUDE.md参照）:\n- **main**: 本番ブランチ（PRマージのみ）\n- **feature/\\*, fix/\\*, hotfix/\\***: 作業ブランチ\n\n**リリース実行ブランチ**:\n- リリーススキルは**mainブランチ**で実行することを推奨\n- リリース前にすべてのPRがmainにマージされていることを確認\n\n**developブランチが存在する場合**:\n- developブランチが存在する場合は、リリース前にmainにマージする\n- タグはmainブランチにのみ作成\n\n## 受け入れ条件\n\n### 成果物\n- [ ] `docs/release-guide.md` が作成されている\n- [ ] `.claude/skills/release/SKILL.md` が作成されている\n- [ ] CLAUDE.mdにスキルの説明が追加されている\n\n### 動作検証\n- [ ] `/release patch` でパッチバージョンアップが実行できる\n  - [ ] package.jsonのversionが更新されている\n  - [ ] CHANGELOG.mdの[Unreleased]が新バージョンセクションに変換されている\n  - [ ] Gitタグが作成されている\n- [ ] `/release minor` でマイナーバージョンアップが実行できる\n  - [ ] 上記と同様の検証\n- [ ] `/release major` でメジャーバージョンアップが実行できる\n  - [ ] 上記と同様の検証\n- [ ] GitHub Releasesが作成されている（手動または自動）\n\n### エラー処理検証\n- [ ] 未コミット変更がある場合にエラーメッセージが表示される\n- [ ] 既存タグを指定した場合にエラーメッセージが表示される\n\n## 依存関係\n\n- Issue #40（セマンティックバージョニング導入）の完了が前提\n\n## 将来の拡張（スコープ外）\n\n以下の機能は本Issueのスコープ外とし、将来の拡張として検討:\n- pre-releaseバージョン（alpha, beta, rc）のサポート\n- ロールバック手順の自動化\n- `/create-pr`コマンドとの連携（developからmainへのマージPR自動作成）\n\n## 参考\n\n- [Claude Code Skills ドキュメント](https://code.claude.com/docs/ja/skills)\n- [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/)\n- [Semantic Versioning](https://semver.org/lang/ja/)"
+}

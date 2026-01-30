@@ -1,0 +1,69 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "apply_date": "2026-01-29",
+  "status": "completed",
+  "summary": "Stage 1の指摘事項は設計方針書に既に反映済み",
+  "applied_items": [
+    {
+      "id": "MF-1",
+      "status": "applied",
+      "target": "Section 3.2 Envインターフェース変更",
+      "details": "変更前/変更後の具体的なコード例を記載済み"
+    },
+    {
+      "id": "MF-2",
+      "status": "applied",
+      "target": "Section 3.3 server.ts フォールバック対応",
+      "details": "getEnvByKey()使用への変更内容を記載済み"
+    },
+    {
+      "id": "MF-3",
+      "status": "applied",
+      "target": "Section 4.1 middleware.test.ts 更新方針",
+      "details": "新名称テスト+フォールバックテストのコード例を記載済み"
+    },
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "target": "Section 3.4 シェルスクリプト更新",
+      "details": "APP_NAME、コメント更新の指針を記載済み"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "target": "Section 3.5 .env.example 更新",
+      "details": "CM_*環境変数とdeprecation情報の具体例を記載済み"
+    },
+    {
+      "id": "SF-3",
+      "status": "applied",
+      "target": "Section 3.1 対象ファイル表",
+      "details": "worktrees.tsのコメント更新をレビューIDと共に記載済み"
+    },
+    {
+      "id": "SF-4",
+      "status": "applied",
+      "target": "Section 3.1 対象ファイル表",
+      "details": "logger.tsのモジュールコメント更新をレビューIDと共に記載済み"
+    }
+  ],
+  "design_policy_updates": {
+    "file": "dev-reports/design/issue-77-rename-phase3-design-policy.md",
+    "sections_updated": [
+      "3.1 対象ファイルと変更内容 - レビューID追加",
+      "3.2 Envインターフェース変更",
+      "3.3 server.ts フォールバック対応",
+      "3.4 シェルスクリプト更新",
+      "3.5 .env.example 更新",
+      "4.1 middleware.test.ts 更新方針",
+      "11.1 Stage 1: 通常レビュー（設計原則）"
+    ]
+  },
+  "metrics": {
+    "must_fix_applied": 3,
+    "must_fix_total": 3,
+    "should_fix_applied": 4,
+    "should_fix_total": 4
+  }
+}

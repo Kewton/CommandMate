@@ -1,0 +1,132 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "issue_number": 77,
+  "review_date": "2026-01-29",
+  "status": "completed",
+  "summary": "Issue #77 Phase 3設計方針書に対する整合性レビューを実施。Stage 1で指摘された全項目(MF-3件, SF-4件)が設計書Section 3.1の対象ファイル一覧に正しく反映されていることを確認。現行コードベースと設計書の比較において、未実装のMust Fix 3件とShould Fix 1件を特定。特にシェルスクリプト(scripts/*.sh)の更新、E2Eテスト更新、Header.tsx JSDocコメント更新が実装待ち。Issue #76設計書との整合性は意図的な差異(Envインターフェース変更)として設計書に明記されており問題なし。",
+  "must_fix": [
+    {
+      "id": "MF-1",
+      "severity": "High",
+      "category": "Issue要件との整合性",
+      "title": "シェルスクリプト(scripts/*.sh)の名称が未更新",
+      "description": "scripts/start.sh, logs.sh, restart.shにおいて、APP_NAME='mycodebranch-desk'およびコメント'MyCodeBranchDesk'が旧名称のまま残存。設計書Section 3.1, 3.4, 7.4で更新対象として明記されているが、現行コードでは未更新。",
+      "location": "scripts/start.sh:3,9-11, scripts/logs.sh:3,7,20,23, scripts/restart.sh:3,7,9",
+      "current_state": {
+        "start.sh": "APP_NAME='mycodebranch-desk', コメント 'MyCodeBranchDesk - Start Script'",
+        "logs.sh": "APP_NAME='mycodebranch-desk', コメント 'MyCodeBranchDesk - Logs Script', systemdサービス名 'mycodebranch-desk'",
+        "restart.sh": "APP_NAME='mycodebranch-desk', コメント 'MyCodeBranchDesk - Restart Script'"
+      },
+      "expected_state": {
+        "start.sh": "APP_NAME='commandmate', コメント 'CommandMate Start Script'",
+        "logs.sh": "APP_NAME='commandmate', コメント 'CommandMate Log Viewer', systemdサービス名 'commandmate'",
+        "restart.sh": "APP_NAME='commandmate', コメント 'CommandMate Restart Script'"
+      },
+      "design_doc_reference": "設計書 Section 3.1(対象ファイル一覧), Section 3.4(シェルスクリプト更新), Section 7.4(実装チェックリスト)",
+      "recommendation": "設計書Section 3.4に従い、3つのシェルスクリプト全てでAPP_NAME, コメント, systemdサービス名を更新する。"
+    },
+    {
+      "id": "MF-2",
+      "severity": "High",
+      "category": "Issue要件との整合性",
+      "title": "E2Eテスト(worktree-list.spec.ts)の旧名称が未更新",
+      "description": "tests/e2e/worktree-list.spec.tsにおいて、テストケースで'MyCodeBranchDesk'を検索する正規表現が残存。設計書Section 3.1, 4.4, 7.5で更新対象として明記。TODOコメントで'Issue #77で更新後、skip解除'と記載されており、Phase 3実装時の対応が必要。",
+      "location": "tests/e2e/worktree-list.spec.ts:14-21, 84-93, 96-104",
+      "current_state": "page.getByRole('heading', { name: /MyCodeBranchDesk/i }) + test.skip状態",
+      "expected_state": "page.getByRole('heading', { name: /CommandMate/i }) + test.skip解除",
+      "design_doc_reference": "設計書 Section 3.1(対象ファイル一覧), Section 4.4(E2Eテスト更新), Section 7.5(実装チェックリスト)",
+      "recommendation": "設計書Section 4.4に従い、正規表現を/CommandMate/iに更新し、test.skip()をtest()に変更してテストを有効化する。"
+    },
+    {
+      "id": "MF-3",
+      "severity": "Medium",
+      "category": "Issue要件との整合性",
+      "title": "Header.tsx JSDocコメントの旧名称が未更新",
+      "description": "src/components/layout/Header.tsxのJSDocコメント(L20-21)に'MyCodeBranchDesk'が残存。UIのtitle propsはdefault値が'CommandMate'に更新済みだが、ドキュメントコメントの例が旧名称のまま。設計書Section 3.1で更新対象として明記。",
+      "location": "src/components/layout/Header.tsx:20-21",
+      "current_state": "@example <Header title=\"MyCodeBranchDesk\" />",
+      "expected_state": "@example <Header title=\"CommandMate\" />",
+      "design_doc_reference": "設計書 Section 3.1(対象ファイル一覧), Section 7.3(コメント・ドキュメント更新)",
+      "recommendation": "JSDoc @exampleのtitle値を'CommandMate'に更新する。"
+    }
+  ],
+  "should_fix": [
+    {
+      "id": "SF-1",
+      "severity": "Medium",
+      "category": "設計書間の整合性",
+      "title": "Issue #76設計書との意図的な差異(Envインターフェース)が明記済み",
+      "description": "Issue #76設計書 Section 4.2では'インターフェースは変更なし'と記載されているが、Issue #77設計書 Section 3.2ではEnvインターフェースをCM_*に変更する設計。設計書Section 3.2にNoteとして意図的な設計変更である旨が明記されており、整合性の問題はない。",
+      "location": "Issue #76設計書 Section 4.2 vs Issue #77設計書 Section 3.2",
+      "current_state": "Issue #77設計書Section 3.2に意図的な設計変更である旨が明記済み",
+      "design_doc_reference": "Issue #76設計書 Section 4.2, Issue #77設計書 Section 3.2",
+      "recommendation": "現状で問題なし。実装時にEnvインターフェース変更に伴うgetEnv()使用箇所の更新漏れに注意。"
+    }
+  ],
+  "good_practices": [
+    "Stage 1レビュー指摘事項(MF-3件, SF-4件)が設計書Section 3.1の対象ファイル一覧に全て反映されている",
+    "設計書Section 1.5にレビュー履歴表が整備されており、全Stageの結果が記録されている",
+    "Issue #76設計書との意図的な差異がSection 3.2のNoteで明確に説明されている",
+    "設計書Section 7(実装チェックリスト)が詳細で、未実装項目の追跡が容易",
+    "設計書Section 11(レビュー指摘事項サマリー)で全Stageの指摘を一覧化しており、対応状況の確認が容易",
+    "worktrees.ts L132のコメントが'Issue #76: env fallback support'として更新履歴を明記している",
+    "logger.ts L82-85でCM_AUTH_TOKEN, MCBD_AUTH_TOKEN両方のマスキングパターンが実装済み"
+  ],
+  "consistency_evaluation": {
+    "design_vs_implementation": {
+      "status": "Partially Aligned",
+      "score": "3/5",
+      "details": {
+        "env.ts": "フォールバック機構実装済み、Envインターフェースは旧名称(Phase 3対象)",
+        "server.ts": "フォールバック未使用(Phase 3対象)",
+        "scripts/*.sh": "未更新(Phase 3対象)",
+        "Header.tsx": "title default値更新済み、JSDocコメント未更新(Phase 3対象)",
+        "E2Eテスト": "TODOコメント付きでskip状態(Phase 3対象)"
+      }
+    },
+    "design_vs_issue_requirements": {
+      "status": "Aligned",
+      "score": "5/5",
+      "notes": "Issue #77の要件(設定・コード内の名称置換)に対して設計書が適切にスコープを定義。破壊的変更の明示、フォールバック活用設計、実装チェックリストが充実。"
+    },
+    "design_vs_existing_docs": {
+      "status": "Aligned",
+      "score": "5/5",
+      "notes": "CLAUDE.mdにIssue #76の情報が記載済み。README.mdはIssue #75でCommandMateに更新済み。設計書の変更スコープと既存ドキュメントの整合性は問題なし。"
+    },
+    "design_vs_dependent_issues": {
+      "status": "Aligned with Notes",
+      "score": "4/5",
+      "notes": "Issue #76設計書との差異(Envインターフェース変更)は意図的であり、設計書に明記されている。Phase間の移行計画が明確。"
+    }
+  },
+  "stage1_followup": {
+    "mf_items_reflected": true,
+    "sf_items_reflected": true,
+    "details": {
+      "MF-1_env_interface": "設計書Section 3.1, 3.2に反映済み",
+      "MF-2_server_ts": "設計書Section 3.1, 3.3に反映済み",
+      "MF-3_middleware_test": "設計書Section 3.1, 4.1に反映済み",
+      "SF-1_scripts": "設計書Section 3.1, 3.4, 7.4に反映済み",
+      "SF-2_env_example": "設計書Section 3.1, 3.5に反映済み",
+      "SF-3_worktrees_comment": "設計書Section 3.1に反映済み",
+      "SF-4_logger_comment": "設計書Section 3.1に反映済み"
+    }
+  },
+  "overall_status": "Needs Work",
+  "recommendation_summary": "設計書自体はStage 1の指摘事項を正しく反映しており、Issue #76設計書との整合性も明確に説明されている。現行コードベースでは設計書に記載された変更の一部がまだ実装されていない。Must Fix 3件(シェルスクリプト更新、E2Eテスト更新、Header.tsx JSDocコメント更新)は全てPhase 3実装時に対応が必要。",
+  "metrics": {
+    "must_fix_count": 3,
+    "should_fix_count": 1,
+    "good_practices_count": 7,
+    "consistency_scores": {
+      "design_vs_implementation": "3/5",
+      "design_vs_issue_requirements": "5/5",
+      "design_vs_existing_docs": "5/5",
+      "design_vs_dependent_issues": "4/5"
+    }
+  },
+  "next_action": "Phase 3実装時にMust Fix 3件(MF-1, MF-2, MF-3)の対応を実施"
+}

@@ -1,0 +1,12 @@
+{
+  "issue_number": 40,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "user_context": {
+    "target_version": "v0.1.0",
+    "scope": "セマンティックバージョニング導入のみ（package.jsonへのバージョン記載とGitタグ付け）",
+    "note": "β版としてv0.1.0でのリリースを目指している"
+  }
+}

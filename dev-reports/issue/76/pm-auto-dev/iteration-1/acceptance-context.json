@@ -1,0 +1,123 @@
+{
+  "issue_number": 76,
+  "feature_summary": "環境変数フォールバック実装 + CHANGELOG作成",
+  "acceptance_criteria": [
+    "新環境変数名（CM_*）で正常に動作する",
+    "旧環境変数名（MCBD_*）でも正常に動作する（フォールバック）",
+    "旧名称使用時にdeprecation warningがログ出力される",
+    "同一キーへの警告は1回のみ出力される",
+    "全8種類の環境変数がフォールバック対応されている",
+    "NEXT_PUBLIC_MCBD_AUTH_TOKENのフォールバック対応が実装されている",
+    "CM_AUTH_TOKENがlogger.tsでマスキング対象に追加されている",
+    "sync/route.tsのエラーメッセージに新名称が追加されている",
+    "フォールバック機能のユニットテストが追加されている",
+    "CHANGELOG.mdが新規作成されている",
+    "TypeScriptコンパイルエラーなし",
+    "既存テストがすべてパスする"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-1",
+      "name": "新名称のみで動作確認",
+      "steps": [
+        "CM_ROOT_DIR=/test/pathを設定",
+        "getEnv()を呼び出す",
+        "MCBD_ROOT_DIRに正しい値が設定されていることを確認"
+      ],
+      "expected": "警告なしで正常動作"
+    },
+    {
+      "id": "AC-2",
+      "name": "旧名称フォールバック確認",
+      "steps": [
+        "MCBD_ROOT_DIR=/test/pathを設定（CM_ROOT_DIRは未設定）",
+        "getEnv()を呼び出す",
+        "console.warnが呼び出されることを確認"
+      ],
+      "expected": "フォールバックで動作し、deprecation警告が出力される"
+    },
+    {
+      "id": "AC-3",
+      "name": "優先順位確認",
+      "steps": [
+        "CM_ROOT_DIR=/new/pathとMCBD_ROOT_DIR=/old/pathを両方設定",
+        "getEnv()を呼び出す"
+      ],
+      "expected": "新名称の値(/new/path)が使用される"
+    },
+    {
+      "id": "AC-4",
+      "name": "警告重複防止確認",
+      "steps": [
+        "MCBD_ROOT_DIRを設定",
+        "getEnvWithFallback()を3回呼び出す"
+      ],
+      "expected": "警告は1回のみ出力される"
+    },
+    {
+      "id": "AC-5",
+      "name": "ENV_MAPPING網羅性確認",
+      "steps": [
+        "ENV_MAPPINGの内容を確認"
+      ],
+      "expected": "8種類の環境変数がマッピングされている"
+    },
+    {
+      "id": "AC-6",
+      "name": "クライアント側フォールバック確認",
+      "steps": [
+        "api-client.tsのfetchApi関数を確認"
+      ],
+      "expected": "NEXT_PUBLIC_CM_AUTH_TOKEN / NEXT_PUBLIC_MCBD_AUTH_TOKENのフォールバックが実装されている"
+    },
+    {
+      "id": "AC-7",
+      "name": "マスキングパターン確認",
+      "steps": [
+        "logger.tsのSENSITIVE_PATTERNSを確認"
+      ],
+      "expected": "CM_AUTH_TOKENパターンが追加されている"
+    },
+    {
+      "id": "AC-8",
+      "name": "エラーメッセージ確認",
+      "steps": [
+        "sync/route.tsのエラーメッセージを確認"
+      ],
+      "expected": "CM_ROOT_DIR (MCBD_ROOT_DIR)が記載されている"
+    },
+    {
+      "id": "AC-9",
+      "name": "テストファイル存在確認",
+      "steps": [
+        "tests/unit/env.test.tsの存在と内容を確認"
+      ],
+      "expected": "フォールバック機能のテストが実装されている"
+    },
+    {
+      "id": "AC-10",
+      "name": "CHANGELOG確認",
+      "steps": [
+        "CHANGELOG.mdの存在と内容を確認"
+      ],
+      "expected": "Keep a Changelogフォーマットで作成されている"
+    },
+    {
+      "id": "AC-11",
+      "name": "静的解析確認",
+      "steps": [
+        "npx tsc --noEmitを実行",
+        "npm run lintを実行"
+      ],
+      "expected": "エラー0件"
+    },
+    {
+      "id": "AC-12",
+      "name": "テスト実行確認",
+      "steps": [
+        "npm run test:unitを実行"
+      ],
+      "expected": "全テストパス"
+    }
+  ]
+}
