@@ -1,25 +1,26 @@
 /**
  * FileViewer Component
  * Displays file contents in a modal with syntax highlighting
+ * Supports both text files and image files
+ *
+ * Image file handling flow:
+ * 1. API returns isImage: true for image files
+ * 2. FileViewer detects isImage flag
+ * 3. ImageViewer component renders the Base64 data URI
  */
 
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import { Modal } from '@/components/ui';
+import { FileContent } from '@/types/models';
+import { ImageViewer } from './ImageViewer';
 
 export interface FileViewerProps {
   isOpen: boolean;
   onClose: () => void;
   worktreeId: string;
   filePath: string;
-}
-
-interface FileContent {
-  path: string;
-  content: string;
-  extension: string;
-  worktreePath: string;
 }
 
 /**
@@ -116,13 +117,23 @@ export function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewer
                 {content.worktreePath}/{content.path}
               </p>
             </div>
-            <div className="p-4">
-              <pre className="text-sm overflow-x-auto">
-                <code className={`language-${content.extension}`}>
-                  {content.content}
-                </code>
-              </pre>
-            </div>
+            {/* Image file: render with ImageViewer */}
+            {content.isImage ? (
+              <ImageViewer
+                src={content.content}
+                alt={content.path}
+                mimeType={content.mimeType}
+              />
+            ) : (
+              /* Text file: render with syntax highlighting */
+              <div className="p-4">
+                <pre className="text-sm overflow-x-auto">
+                  <code className={`language-${content.extension}`}>
+                    {content.content}
+                  </code>
+                </pre>
+              </div>
+            )}
           </div>
         )}
       </div>

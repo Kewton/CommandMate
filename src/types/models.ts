@@ -240,3 +240,29 @@ export interface TreeResponse {
   /** Parent directory path (null for root) */
   parentPath: string | null;
 }
+
+/**
+ * File content representation
+ * [MF-001] Does not include 'success' field - API response is a wrapper
+ * that returns { success: true, ...FileContent }
+ */
+export interface FileContent {
+  /** File path relative to worktree root */
+  path: string;
+  /** File content (text or Base64 data URI for images) */
+  content: string;
+  /** File extension without dot (e.g., 'md', 'png') */
+  extension: string;
+  /** Worktree root path */
+  worktreePath: string;
+  /** Whether the file is an image (optional, for image files) */
+  isImage?: boolean;
+  /** MIME type (optional, for image files) */
+  mimeType?: string;
+}
+
+/**
+ * API response type for file content (success wrapper)
+ * [MF-001] Explicit wrapper type for API responses
+ */
+export type FileContentResponse = { success: true } & FileContent;
