@@ -1,0 +1,119 @@
+{
+  "issue_number": 99,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-01-30",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2,
+    "previous_findings_resolved": 7
+  },
+  "previous_review_verification": {
+    "stage1_findings": {
+      "SF-001_localStorage_key": {
+        "status": "resolved",
+        "evidence": "Issue now explicitly defines `commandmate:md-editor-maximized` key for maximized state. LOCAL_STORAGE_KEYS constant is specified for centralized key management."
+      },
+      "SF-002_fullscreen_api_fallback": {
+        "status": "resolved",
+        "evidence": "Issue explicitly states 'Fullscreen API非対応時（iOS Safari等）は、CSS固定ポジション（`position: fixed` + `z-index: 9999` + `inset: 0`）によるモーダル表示にフォールバック'"
+      },
+      "SF-003_paneresizer_relationship": {
+        "status": "resolved",
+        "evidence": "Issue clearly states '既存の`src/components/worktree/PaneResizer.tsx`を**再利用**する' with specific extension requirements and backward compatibility requirements documented"
+      },
+      "SF-004_issue49_state_management": {
+        "status": "resolved",
+        "evidence": "Issue contains detailed '状態管理の拡張方針' section explaining that isMaximized is independent from ViewMode, with EditorLayoutState type definition provided"
+      }
+    },
+    "stage3_findings": {
+      "MF-001_localstorage_conflict": {
+        "status": "resolved",
+        "evidence": "Issue now includes LOCAL_STORAGE_KEYS constant definition and specifies centralized key management in src/types/markdown-editor.ts"
+      },
+      "MF-002_paneresizer_backward_compat": {
+        "status": "resolved",
+        "evidence": "Issue includes explicit backward compatibility requirements: 'all new props (onDoubleClick, minRatio等) as optional', 'default values for existing call sites', 'verify with WorktreeDesktopLayout'"
+      }
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "整合性",
+        "issue": "既存MarkdownEditor.tsxとの状態管理方針の具体的な統合手順が不明確",
+        "location": "## 技術的考慮事項 > 状態管理の拡張方針",
+        "recommendation": "現在のMarkdownEditor.tsxはviewMode状態を既に持っている（L89）。新しいEditorLayoutState型への移行方針を明確にする。具体的には:(1)既存のviewMode状態をEditorLayoutStateに包含するか、(2)isMaximizedとsplitRatioを別の状態として追加するかを明記",
+        "evidence": "既存MarkdownEditor.tsxでは`const [viewMode, setViewMode] = useState<ViewMode>(...)`で状態管理。Issue記載のEditorLayoutState型との統合手順（リファクタリング or 段階的追加）が不明"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "完全性",
+        "issue": "useFullscreenフックの具体的なAPI仕様が未定義",
+        "location": "## 影響ファイル一覧 > 新規ファイル",
+        "recommendation": "useFullscreen.tsフックの戻り値型と主要関数（enterFullscreen, exitFullscreen, isFullscreenSupported）を定義する。特にフォールバック時の挙動（CSSモーダルの状態管理）を明確にする",
+        "evidence": "新規ファイル一覧にuseFullscreen.ts（80行）が記載されているが、API仕様の詳細がない"
+      },
+      {
+        "id": "NTH-002",
+        "category": "技術的妥当性",
+        "issue": "orientationchange検出の実装方針が未定義",
+        "location": "## 機能要件 > 2. Split Viewの表示領域リサイズ > モバイル",
+        "recommendation": "横向き/縦向きの切替検出方法を明記する。useIsMobileフックにorientation検出を追加するか、新規useOrientationフックを作成するかを決定する",
+        "evidence": "既存useIsMobile.tsはwindow.innerWidthのみを使用。screen.orientation APIまたはmatchMedia('(orientation: portrait)')の使用方針が未定義"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "既存実装との整合性確認。L89でviewMode状態を管理中。EditorLayoutStateへの移行が必要"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "relevance": "既存型定義。LOCAL_STORAGE_KEY定数が既に存在（L177）。LOCAL_STORAGE_KEYSへの移行が必要"
+    },
+    {
+      "file": "src/components/worktree/PaneResizer.tsx",
+      "relevance": "拡張対象。255行の既存実装。onDoubleClick, minRatio props追加が必要"
+    },
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "再利用対象。orientation検出の追加可能性を検討"
+    },
+    {
+      "file": "src/hooks/useSwipeGesture.ts",
+      "relevance": "再利用対象。onSwipeDownコールバックのAPI確認済み（L27）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-49-markdown-editor-design-policy.md",
+      "relevance": "Issue #49設計書。既存設計との整合性を確認"
+    }
+  ],
+  "overall_assessment": {
+    "completeness": "A-",
+    "technical_feasibility": "A",
+    "consistency": "A-",
+    "clarity": "A",
+    "mobile_ux": "A-",
+    "acceptance_criteria": "A",
+    "testability": "A"
+  },
+  "stage1_comparison": {
+    "completeness": "B+ -> A-",
+    "technical_feasibility": "A- -> A",
+    "consistency": "B -> A-",
+    "clarity": "B+ -> A",
+    "mobile_ux": "B+ -> A-"
+  },
+  "recommendation": "Issue #99は前回のStage 1レビュー指摘事項（SF-001〜SF-004）を全て適切に反映しており、大幅に改善されている。Stage 3の影響範囲レビュー指摘事項（MF-001, MF-002）も反映済み。残りの指摘はShould Fix 1件とNice to Have 2件のみであり、いずれも実装時に対応可能な範囲。Issueは実装可能な状態にある。"
+}

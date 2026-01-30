@@ -1,0 +1,50 @@
+{
+  "issue_number": 99,
+  "stage": 1,
+  "stage_name": "設計原則レビュー指摘対応",
+  "apply_date": "2026-01-30",
+  "design_doc_path": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+  "status": "completed",
+  "applied_findings": [
+    {
+      "id": "SF-001",
+      "principle": "SOLID (Single Responsibility)",
+      "title": "MarkdownEditor.tsxの責務集中",
+      "action_taken": "セクション12.2「将来の改善候補」にMaximizableContainer抽出の検討条件と設計方針を追記。YAGNI原則に従い現段階では実装せず、必要になった時点で抽出する方針を明記。",
+      "sections_updated": [
+        "12. 設計上の決定事項とトレードオフ",
+        "12.2 将来の改善候補（新規追加）"
+      ]
+    },
+    {
+      "id": "SF-003",
+      "principle": "SOLID (Open/Closed)",
+      "title": "PaneResizerへの新規props追加方法",
+      "action_taken": "onRatioChangeを設計から削除。セクション5.2 PaneResizer拡張を更新し、比率計算はMarkdownEditor側で実施する設計に変更。セクション5.1のコード例も更新し、ピクセル→比率変換のロジックをMarkdownEditor内に記載。WorktreeDesktopLayoutと同じパターンを維持することを明記。",
+      "sections_updated": [
+        "5.1 MarkdownEditor拡張",
+        "5.2 PaneResizer拡張",
+        "12.1 採用した設計"
+      ]
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_changes": {
+    "sections_added": [
+      "12.2 将来の改善候補",
+      "13. レビュー履歴 > Stage 1: 設計原則レビュー"
+    ],
+    "sections_modified": [
+      "5.1 MarkdownEditor拡張（onResizeコールバック内で比率計算を実施）",
+      "5.2 PaneResizer拡張（onRatioChange削除、設計判断コメント追加）",
+      "12.1 採用した設計（比率計算の設計決定を追加）",
+      "12.2 → 12.3 代替案との比較（セクション番号更新）"
+    ]
+  },
+  "reviewer": "apply-review-agent",
+  "notes": [
+    "SF-002（キーボードショートカット処理の複雑化）は対応指示になかったため未対応",
+    "nice_to_have項目（NH-001〜NH-004）は対応指示になかったため未対応",
+    "ソースコードは変更していない（設計書のみ更新）"
+  ]
+}

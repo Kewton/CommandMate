@@ -1,0 +1,171 @@
+{
+  "issue_number": 99,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則 (SOLID/KISS/YAGNI/DRY)",
+  "review_date": "2026-01-30",
+  "design_doc_path": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+  "overall_assessment": {
+    "status": "approved_with_recommendations",
+    "summary": "設計方針は全体として健全であり、既存コードの再利用を適切に考慮している。いくつかの改善点があるが、設計原則に大きく違反する問題はない。",
+    "principle_scores": {
+      "SOLID": 4,
+      "KISS": 3,
+      "YAGNI": 4,
+      "DRY": 5
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "SOLID (Single Responsibility)",
+        "title": "MarkdownEditor.tsxの責務集中",
+        "description": "MarkdownEditor.tsxは既に多くの責務を持っており（コンテンツ管理、プレビュー、保存、トースト表示等）、ここに最大化状態管理、リサイズ状態管理、キーボードショートカットを追加すると、単一責務原則に反する可能性がある。",
+        "location": "セクション5.1 MarkdownEditor拡張",
+        "current_code_reference": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/MarkdownEditor.tsx",
+        "recommendation": "最大化機能を独自のラッパーコンポーネント（例: MaximizableContainer）として抽出し、MarkdownEditorをラップする形式を検討する。これにより、最大化機能を他のコンポーネントでも再利用可能になる。",
+        "impact": "中",
+        "effort": "中"
+      },
+      {
+        "id": "SF-002",
+        "principle": "KISS (Keep It Simple)",
+        "title": "キーボードショートカット処理の複雑化",
+        "description": "既存のhandleKeyDownコールバックに新しい最大化ショートカット（Ctrl+Shift+F）を追加する設計だが、ショートカットごとにif文が増え、可読性が低下する可能性がある。",
+        "location": "セクション5.1のuseEffect内キーボードショートカット部分",
+        "current_code_reference": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/MarkdownEditor.tsx:233-242",
+        "recommendation": "キーボードショートカットを管理する専用のカスタムフック（useKeyboardShortcuts）を作成し、ショートカット定義を宣言的に管理することを検討する。",
+        "impact": "低",
+        "effort": "低"
+      },
+      {
+        "id": "SF-003",
+        "principle": "SOLID (Open/Closed)",
+        "title": "PaneResizerへの新規propsの追加方法",
+        "description": "PaneResizerにonDoubleClick、minRatio、onRatioChangeを追加する設計は後方互換性を維持しているが、現在のPaneResizerのonResizeはピクセル単位のdeltaを返すのに対し、新規のonRatioChangeは比率を期待する。この2つのインターフェースの混在が混乱を招く可能性がある。",
+        "location": "セクション5.2 PaneResizer拡張",
+        "current_code_reference": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/PaneResizer.tsx:23-31",
+        "recommendation": "onRatioChangeは削除し、比率計算はMarkdownEditor側で行う設計を維持する。WorktreeDesktopLayoutと同じパターン（ピクセル→比率変換を呼び出し側で実行）を採用することで一貫性を保つ。",
+        "impact": "低",
+        "effort": "低"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NH-001",
+        "principle": "DRY",
+        "title": "localStorage永続化パターンの統一",
+        "description": "useLocalStorageState.tsの新規作成は良い設計だが、既存のMarkdownEditor.tsxではhandleViewModeChange内で直接localStorageを操作している。この既存実装も新しいフックに移行することで、一貫性が向上する。",
+        "location": "セクション4.1 型定義、既存実装: MarkdownEditor.tsx:208-213",
+        "recommendation": "Phase 2で既存のviewMode永続化ロジックをuseLocalStorageStateフックに置き換える。",
+        "impact": "低",
+        "effort": "低"
+      },
+      {
+        "id": "NH-002",
+        "principle": "YAGNI",
+        "title": "z-index設定ファイルの必要性検討",
+        "description": "z-index.tsの新規作成は将来の拡張性に配慮した設計だが、現時点で最大化エディタのz-indexのみが必要。過度な事前設計の可能性がある。",
+        "location": "セクション4.2 z-index設定",
+        "recommendation": "現段階ではMarkdownEditor.tsx内で直接z-indexを定義し、他コンポーネントでz-index管理が必要になった時点でz-index.tsを導入する方針でも良い。ただし、先行して作成することの害は小さいため、現設計のままでも許容可能。",
+        "impact": "低",
+        "effort": "低"
+      },
+      {
+        "id": "NH-003",
+        "principle": "KISS",
+        "title": "Fullscreen APIフォールバックの複雑さ",
+        "description": "Fullscreen API + CSSフォールバックの二重実装は複雑性を増す。モバイルでFullscreen APIが失敗した場合のUXが曖昧。",
+        "location": "セクション3.2 Fullscreen APIフォールバック戦略",
+        "recommendation": "CSS固定ポジションのみを使用し、Fullscreen APIは使用しない設計も検討可能。設計書でも「CSS固定ポジション優先」と記載があり、実質的にFullscreen APIが必須かどうか再評価することを推奨。",
+        "impact": "中",
+        "effort": "中"
+      },
+      {
+        "id": "NH-004",
+        "principle": "DRY",
+        "title": "モバイルタブUIの既存パターンとの整合",
+        "description": "モバイルタブUI（セクション5.3）の実装パターンは、WorktreeDesktopLayout.tsxのMobileLayoutコンポーネントと類似している。",
+        "location": "セクション5.3 モバイルタブUI",
+        "current_code_reference": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/WorktreeDesktopLayout.tsx:85-147",
+        "recommendation": "将来的に共通のタブ切替コンポーネントを抽出することを検討。現段階では類似実装で進めて問題ないが、3箇所以上で同パターンが出現した場合は共通化を検討する。",
+        "impact": "低",
+        "effort": "中"
+      }
+    ]
+  },
+  "positive_observations": [
+    {
+      "id": "PO-001",
+      "principle": "DRY",
+      "description": "既存のPaneResizerコンポーネントを拡張して再利用する設計は適切。新規リサイズコンポーネントを作成せず、既存の実装を活用している。"
+    },
+    {
+      "id": "PO-002",
+      "principle": "DRY",
+      "description": "useIsMobile、useSwipeGesture、useVirtualKeyboardの既存フックを活用する設計は良い。これらのフックは十分にテストされており、再利用することでコード品質が向上する。"
+    },
+    {
+      "id": "PO-003",
+      "principle": "YAGNI",
+      "description": "スコープ外の明確な定義（マークダウン構文拡張、新ファイル形式対応、自動保存機能）があり、不要な機能の実装を防いでいる。"
+    },
+    {
+      "id": "PO-004",
+      "principle": "SOLID (Liskov Substitution)",
+      "description": "PaneResizerの拡張propsがすべてオプショナルで設計されており、既存の使用箇所（WorktreeDesktopLayout）に影響を与えない後方互換性を確保している。"
+    },
+    {
+      "id": "PO-005",
+      "principle": "KISS",
+      "description": "状態永続化にlocalStorageを選択した点は適切。バックエンドAPIを使わずシンプルに実装できる。"
+    },
+    {
+      "id": "PO-006",
+      "principle": "SOLID (Interface Segregation)",
+      "description": "EditorLayoutState型が必要最小限のプロパティ（viewMode、isMaximized、splitRatio）のみを含んでおり、適切に分離されている。"
+    }
+  ],
+  "consistency_check": {
+    "existing_code_compatibility": {
+      "status": "compatible",
+      "notes": [
+        "PaneResizerの拡張は後方互換性を維持",
+        "MarkdownEditorの内部状態追加は外部インターフェースに影響なし",
+        "markdown-editor.tsの型定義追加は既存定義を破壊しない"
+      ]
+    },
+    "pattern_consistency": {
+      "status": "mostly_consistent",
+      "notes": [
+        "localStorage使用パターンは既存と一致（LOCAL_STORAGE_KEY定数使用）",
+        "フック活用パターンは既存と一致",
+        "タブUIパターンはWorktreeDesktopLayoutと類似しており一貫性あり"
+      ],
+      "concerns": [
+        "新規useEffect内でのキーボードショートカット処理は、既存のhandleKeyDownパターンと異なる場所に配置される可能性"
+      ]
+    }
+  },
+  "state_management_review": {
+    "approach": "Component-level useState",
+    "assessment": "適切",
+    "details": [
+      "isMaximized: boolean状態はMarkdownEditor内で完結し、Context不要",
+      "splitRatio: number状態はMarkdownEditor内で完結し、localStorage永続化のみ必要",
+      "状態をオブジェクトで一括管理せず個別管理する決定は、既存コードへの影響最小化という観点で妥当"
+    ],
+    "potential_issues": [
+      "将来的に状態が増えた場合、useReducerへの移行を検討する必要が出る可能性"
+    ]
+  },
+  "recommendations_summary": [
+    "SF-001: 最大化機能の独立コンポーネント化を検討（必須ではないが推奨）",
+    "SF-003: onRatioChangeの削除を検討し、比率計算はMarkdownEditor側で実施",
+    "既存localStorage永続化ロジックの新フックへの移行をPhase 2で実施"
+  ],
+  "reviewer": "architecture-review-agent",
+  "review_version": "1.0"
+}

@@ -1,0 +1,444 @@
+{
+  "review_type": "impact_analysis",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 99,
+  "design_doc_path": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+  "review_date": "2026-01-30",
+  "result": "approved_with_recommendations",
+  "impact_score": "B+",
+  "summary": {
+    "total_findings": 12,
+    "major_findings": 1,
+    "medium_findings": 5,
+    "low_findings": 6
+  },
+  "impact_assessment": {
+    "affected_components": {
+      "high_impact": [
+        {
+          "file": "src/components/worktree/MarkdownEditor.tsx",
+          "current_lines": 481,
+          "estimated_change": "大規模（+100-150行）",
+          "impact_description": "最大化状態、splitRatio状態、キーボードショートカット、swipeGestureの統合が必要",
+          "breaking_changes": false,
+          "risk": "high"
+        }
+      ],
+      "medium_impact": [
+        {
+          "file": "src/components/worktree/PaneResizer.tsx",
+          "current_lines": 255,
+          "estimated_change": "拡張（+20-30行）",
+          "impact_description": "onDoubleClick、minRatio propsの追加。後方互換性維持が必要",
+          "breaking_changes": false,
+          "risk": "medium"
+        },
+        {
+          "file": "src/types/markdown-editor.ts",
+          "current_lines": 193,
+          "estimated_change": "追加（+30行）",
+          "impact_description": "EditorLayoutState型、新規定数の追加",
+          "breaking_changes": false,
+          "risk": "low"
+        }
+      ],
+      "low_impact": [
+        {
+          "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+          "current_lines": 286,
+          "estimated_change": "変更なし（動作確認のみ）",
+          "impact_description": "PaneResizerの後方互換性確認が必要",
+          "breaking_changes": false,
+          "risk": "low"
+        }
+      ]
+    },
+    "new_files": [
+      {
+        "file": "src/hooks/useFullscreen.ts",
+        "estimated_lines": 80,
+        "dependencies": ["React", "window.fullscreen API"],
+        "risk": "low"
+      },
+      {
+        "file": "src/hooks/useLocalStorageState.ts",
+        "estimated_lines": 50,
+        "dependencies": ["React", "localStorage API"],
+        "risk": "low"
+      },
+      {
+        "file": "src/config/z-index.ts",
+        "estimated_lines": 20,
+        "dependencies": [],
+        "risk": "low"
+      },
+      {
+        "file": "tests/e2e/markdown-editor-mobile.spec.ts",
+        "estimated_lines": 150,
+        "dependencies": ["Playwright"],
+        "risk": "low"
+      }
+    ],
+    "test_files_impact": [
+      {
+        "file": "tests/unit/components/MarkdownEditor.test.tsx",
+        "current_lines": 645,
+        "required_additions": [
+          "最大化状態のテスト",
+          "キーボードショートカット（Ctrl+Shift+F）のテスト",
+          "ESCキーでの最大化解除テスト",
+          "splitRatio変更のテスト",
+          "localStorage永続化テスト（splitRatio、maximized）"
+        ],
+        "estimated_new_tests": 12
+      },
+      {
+        "file": "tests/unit/components/PaneResizer.test.tsx",
+        "current_lines": 285,
+        "required_additions": [
+          "onDoubleClick propのテスト",
+          "minRatio propのテスト",
+          "後方互換性テスト（既存propsのみでの動作）"
+        ],
+        "estimated_new_tests": 5
+      },
+      {
+        "file": "tests/e2e/markdown-editor.spec.ts",
+        "current_lines": 381,
+        "required_additions": [
+          "最大化ボタンクリックテスト",
+          "ESCで最大化解除テスト",
+          "リサイズ操作テスト",
+          "リロード後の状態復元テスト"
+        ],
+        "estimated_new_tests": 8
+      }
+    ],
+    "hooks_impact": [
+      {
+        "hook": "useSwipeGesture",
+        "file": "src/hooks/useSwipeGesture.ts",
+        "current_usage": "未使用（MarkdownEditor内）",
+        "new_usage": "最大化状態からスワイプダウンで解除",
+        "api_compatibility": "設計書の使用例は実際のAPI（refベース）と整合済み",
+        "impact": "追加使用のみ、既存コードへの影響なし"
+      },
+      {
+        "hook": "useIsMobile",
+        "file": "src/hooks/useIsMobile.ts",
+        "current_usage": "未使用（MarkdownEditor内）",
+        "new_usage": "モバイル判定（タブUI表示、リサイズ非表示）",
+        "api_compatibility": "完全互換",
+        "impact": "追加使用のみ、既存コードへの影響なし"
+      },
+      {
+        "hook": "useVirtualKeyboard",
+        "file": "src/hooks/useVirtualKeyboard.ts",
+        "current_usage": "未使用（MarkdownEditor内）",
+        "new_usage": "モバイル最大化時のキーボード対応",
+        "api_compatibility": "完全互換",
+        "impact": "追加使用のみ、既存コードへの影響なし"
+      }
+    ],
+    "css_styling_impact": [
+      {
+        "category": "z-index",
+        "current_state": "各コンポーネントで個別定義（z-30, z-40, z-50）",
+        "proposed_change": "z-index.ts で一元管理、MAXIMIZED_EDITOR: 9999",
+        "affected_components": [
+          "MobilePromptSheet.tsx (z-50)",
+          "MobileHeader.tsx (z-40)",
+          "MobileTabBar.tsx (z-40)",
+          "Modal.tsx (z-50)",
+          "Header.tsx (z-50)",
+          "AppShell.tsx (z-40, z-50)",
+          "ContextMenu.tsx (z-50)",
+          "SlashCommandSelector.tsx (z-40, z-50)",
+          "WorktreeDetailRefactored.tsx (z-30, z-50)",
+          "Toast.tsx (z-50)"
+        ],
+        "recommendation": "z-index.tsの新規作成は良い設計。ただし既存コンポーネントのz-index値との競合確認が必要。MAXIMIZED_EDITOR: 9999は他の全てより高いため問題なし"
+      },
+      {
+        "category": "fixed positioning",
+        "current_state": "最大化機能なし",
+        "proposed_change": "最大化時に fixed inset-0 z-[9999]",
+        "potential_issues": [
+          "iOS SafariでのCSS position: fixed の挙動（仮想キーボード表示時）",
+          "スクロール位置のリセット"
+        ],
+        "recommendation": "useVirtualKeyboardの使用計画は適切"
+      }
+    ],
+    "performance_impact": [
+      {
+        "area": "リサイズ操作",
+        "concern": "mousemoveイベントの頻繁な発火",
+        "mitigation": "requestAnimationFrameでのスロットリング（設計書に記載済み）",
+        "risk": "low"
+      },
+      {
+        "area": "プレビュー更新",
+        "concern": "リサイズ中の不要な再レンダリング",
+        "mitigation": "既存debounce(300ms)の継続使用 + リサイズ中一時停止の設計",
+        "risk": "low"
+      },
+      {
+        "area": "localStorage読み書き",
+        "concern": "初期化時のブロッキング",
+        "mitigation": "同期APIのため微小な影響のみ",
+        "risk": "low"
+      }
+    ],
+    "mobile_specific_impact": [
+      {
+        "feature": "タブUI（縦向き）",
+        "devices": "スマートフォン（縦画面）",
+        "impact": "新規UIパターンの追加",
+        "testing_required": "iOS Safari、Chrome for Android"
+      },
+      {
+        "feature": "スワイプジェスチャー",
+        "devices": "タッチデバイス全般",
+        "impact": "既存useSwipeGestureフックの活用",
+        "testing_required": "スワイプ感度、誤操作防止"
+      },
+      {
+        "feature": "タッチリサイズ",
+        "devices": "タブレット（横画面）",
+        "impact": "PaneResizerの既存タッチサポートを活用",
+        "testing_required": "タッチ操作の精度"
+      }
+    ]
+  },
+  "findings": {
+    "major": [
+      {
+        "id": "IA-001",
+        "severity": "high",
+        "category": "影響ファイル一覧",
+        "title": "新規フックのテストファイルが影響ファイル一覧に未記載",
+        "description": "設計書の影響ファイル一覧(10.1, 10.2)に新規作成するuseFullscreen.ts、useLocalStorageState.tsの単体テストファイルが記載されていない",
+        "affected_files": [
+          "tests/unit/hooks/useFullscreen.test.ts（未記載）",
+          "tests/unit/hooks/useLocalStorageState.test.ts（未記載）"
+        ],
+        "recommendation": "10.2新規作成に以下を追加: tests/unit/hooks/useFullscreen.test.ts (推定50行), tests/unit/hooks/useLocalStorageState.test.ts (推定40行)",
+        "status": "open"
+      }
+    ],
+    "medium": [
+      {
+        "id": "IA-002",
+        "severity": "medium",
+        "category": "z-index管理",
+        "title": "既存z-indexとの一元化計画が不明確",
+        "description": "z-index.tsを新規作成するが、既存コンポーネント(Modal, Toast, ContextMenu等)のz-index値を将来的に統合する計画が不明",
+        "affected_files": [
+          "src/components/ui/Modal.tsx",
+          "src/components/common/Toast.tsx",
+          "src/components/worktree/ContextMenu.tsx"
+        ],
+        "recommendation": "Issue #99のスコープ外として明記するか、将来のリファクタリング計画を設計上の決定事項に追記",
+        "status": "open"
+      },
+      {
+        "id": "IA-003",
+        "severity": "medium",
+        "category": "テスト戦略",
+        "title": "後方互換性テストの明示が必要",
+        "description": "PaneResizerの拡張が後方互換性を維持することを確認するテストが9.1単体テストに明示されていない",
+        "affected_files": [
+          "tests/unit/components/PaneResizer.test.tsx"
+        ],
+        "recommendation": "9.1単体テストのPaneResizerテストケースに「既存propsのみでの動作確認（後方互換性）」を追加",
+        "status": "open"
+      },
+      {
+        "id": "IA-004",
+        "severity": "medium",
+        "category": "VIEW_MODE_STRATEGIESとの整合性",
+        "title": "splitモード時のVIEW_MODE_STRATEGIES.split使用箇所の明確化",
+        "description": "設計書ではsplitモード時にsplitRatioで動的幅を設定すると記載されているが、VIEW_MODE_STRATEGIES.splitのshowEditor/showPreview値は引き続き使用されるか不明確",
+        "affected_files": [
+          "src/components/worktree/MarkdownEditor.tsx",
+          "src/types/markdown-editor.ts"
+        ],
+        "recommendation": "splitモード時もshowEditor/showPreviewはVIEW_MODE_STRATEGIESから取得し、幅のみsplitRatioで動的に設定することを明記",
+        "status": "open"
+      },
+      {
+        "id": "IA-005",
+        "severity": "medium",
+        "category": "エラーハンドリング",
+        "title": "Fullscreen API失敗時のエラーハンドリング",
+        "description": "useFullscreenのrequestFullscreenが失敗した場合（権限拒否等）のエラー処理が設計に含まれていない",
+        "affected_files": [
+          "src/hooks/useFullscreen.ts"
+        ],
+        "recommendation": "try-catchでエラーを捕捉し、fallbackModeをtrueに設定する処理を設計に追加",
+        "status": "open"
+      }
+    ],
+    "low": [
+      {
+        "id": "IA-006",
+        "severity": "low",
+        "category": "コンポーネント依存",
+        "title": "containerRef追加の影響",
+        "description": "MarkdownEditorにcontainerRefを追加してsplitRatio計算に使用する設計だが、現在のMarkdownEditorにはcontainerRefが存在しない",
+        "affected_files": [
+          "src/components/worktree/MarkdownEditor.tsx"
+        ],
+        "recommendation": "実装時にuseRefでcontainerRefを追加し、最外側divにアタッチする必要がある",
+        "status": "info"
+      },
+      {
+        "id": "IA-007",
+        "severity": "low",
+        "category": "ドキュメント",
+        "title": "CLAUDE.md更新の詳細が未定義",
+        "description": "Phase 4でCLAUDE.mdを更新する計画だが、どのセクションに何を追記するかが未定義",
+        "affected_files": [
+          "CLAUDE.md"
+        ],
+        "recommendation": "「最近の実装機能」セクションにIssue #99の機能概要を追記することを明記",
+        "status": "info"
+      },
+      {
+        "id": "IA-008",
+        "severity": "low",
+        "category": "アクセシビリティ",
+        "title": "最大化ボタンのaria属性",
+        "description": "設計書のToolbar内onMaximizeボタンにaria-label、aria-expanded等のアクセシビリティ属性が考慮されていない",
+        "affected_files": [
+          "src/components/worktree/MarkdownEditor.tsx"
+        ],
+        "recommendation": "実装時にaria-label=\"Maximize editor\", aria-expanded={isMaximized}を追加",
+        "status": "info"
+      },
+      {
+        "id": "IA-009",
+        "severity": "low",
+        "category": "既存テスト",
+        "title": "既存E2Eテストへの影響確認",
+        "description": "現在のE2Eテスト(markdown-editor.spec.ts)がUI変更後も動作することを確認する必要がある",
+        "affected_files": [
+          "tests/e2e/markdown-editor.spec.ts"
+        ],
+        "recommendation": "既存テストのセレクタ（data-testid）が変更されないことを確認し、変更がある場合はテスト更新を計画",
+        "status": "info"
+      },
+      {
+        "id": "IA-010",
+        "severity": "low",
+        "category": "ブラウザ互換性",
+        "title": "Fullscreen APIのブラウザサポート",
+        "description": "webkitRequestFullscreenはSafari 16.4以降でprefixなしでサポートされているが、古いSafariではフォールバックが必要",
+        "affected_files": [
+          "src/hooks/useFullscreen.ts"
+        ],
+        "recommendation": "設計書にブラウザサポート範囲（Safari 12+等）を明記",
+        "status": "info"
+      },
+      {
+        "id": "IA-011",
+        "severity": "low",
+        "category": "状態初期化",
+        "title": "localStorage読み込み時のSSR考慮",
+        "description": "useLocalStorageStateでlocalStorageにアクセスする際、SSR時にwindowが未定義となる可能性がある",
+        "affected_files": [
+          "src/hooks/useLocalStorageState.ts"
+        ],
+        "recommendation": "typeof window !== 'undefined'のチェックを実装に含める（既存のgetInitialViewModeと同様のパターン）",
+        "status": "info"
+      }
+    ]
+  },
+  "positive_findings": [
+    {
+      "id": "PF-001",
+      "category": "後方互換性",
+      "title": "PaneResizerの後方互換設計",
+      "description": "新規props（onDoubleClick, minRatio）がすべてオプショナルで、既存の使用箇所（WorktreeDesktopLayout）に影響を与えない設計"
+    },
+    {
+      "id": "PF-002",
+      "category": "一貫性",
+      "title": "WorktreeDesktopLayoutとのパターン統一",
+      "description": "ピクセル→比率変換をMarkdownEditor側で行う設計は、WorktreeDesktopLayoutの既存パターンと一致しており、コードベースの一貫性が維持される"
+    },
+    {
+      "id": "PF-003",
+      "category": "再利用性",
+      "title": "既存フックの有効活用",
+      "description": "useIsMobile, useSwipeGesture, useVirtualKeyboardの再利用計画により、新規コード量を最小限に抑えている"
+    },
+    {
+      "id": "PF-004",
+      "category": "テスト計画",
+      "title": "包括的なテスト戦略",
+      "description": "単体テスト、E2Eテスト（デスクトップ/モバイル）の計画が明確で、主要機能のカバレッジが確保されている"
+    },
+    {
+      "id": "PF-005",
+      "category": "パフォーマンス",
+      "title": "リサイズ最適化の考慮",
+      "description": "requestAnimationFrameによるスロットリング、リサイズ中のプレビュー更新一時停止など、パフォーマンスへの配慮が設計に含まれている"
+    },
+    {
+      "id": "PF-006",
+      "category": "セキュリティ",
+      "title": "セキュリティ設計の継承",
+      "description": "既存のXSS対策（rehype-sanitize）を最大化モードでも維持する設計"
+    }
+  ],
+  "verification_checklist": {
+    "affected_files_completeness": {
+      "status": "partial",
+      "missing_items": [
+        "tests/unit/hooks/useFullscreen.test.ts",
+        "tests/unit/hooks/useLocalStorageState.test.ts"
+      ]
+    },
+    "risk_assessment_accuracy": {
+      "status": "good",
+      "comment": "MarkdownEditor.tsx: 高リスク、PaneResizer.tsx: 中リスクの評価は適切"
+    },
+    "breaking_changes_identification": {
+      "status": "good",
+      "comment": "PaneResizerの後方互換性が維持され、既存使用箇所への影響なし"
+    },
+    "test_coverage_plan": {
+      "status": "partial",
+      "missing_items": [
+        "新規フックの単体テスト",
+        "PaneResizerの後方互換性テスト"
+      ]
+    }
+  },
+  "recommendations": [
+    {
+      "priority": "high",
+      "action": "影響ファイル一覧(10.2)に新規フックのテストファイルを追加",
+      "rationale": "テスト戦略の完全性確保"
+    },
+    {
+      "priority": "medium",
+      "action": "9.1単体テストにPaneResizerの後方互換性テストケースを追加",
+      "rationale": "WorktreeDesktopLayoutへの影響がないことを保証"
+    },
+    {
+      "priority": "medium",
+      "action": "Fullscreen API失敗時のエラーハンドリングを設計に追加",
+      "rationale": "ブラウザ権限拒否等の例外ケースへの対応"
+    },
+    {
+      "priority": "low",
+      "action": "z-index一元化の将来計画をドキュメント化",
+      "rationale": "技術的負債の管理"
+    }
+  ],
+  "conclusion": "設計書の影響範囲分析は概ね適切であり、主要な影響ファイル、リスク評価、後方互換性の考慮が含まれている。新規フックのテストファイルの追記と、いくつかの詳細な考慮事項（エラーハンドリング、後方互換性テスト）を補足することで、より堅牢な実装計画となる。"
+}

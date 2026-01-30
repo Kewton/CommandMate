@@ -1,0 +1,180 @@
+{
+  "review_type": "consistency",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 99,
+  "design_doc_path": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+  "review_date": "2026-01-30",
+  "reviewer": "architecture-review-agent",
+  "overall_result": "approved_with_recommendations",
+  "summary": {
+    "total_findings": 8,
+    "critical": 0,
+    "high": 1,
+    "medium": 3,
+    "low": 4,
+    "consistency_score": "B+",
+    "confidence": "high"
+  },
+  "findings": [
+    {
+      "id": "CS-001",
+      "severity": "high",
+      "category": "type_definition_consistency",
+      "title": "LOCAL_STORAGE_KEYS定数名の不整合",
+      "description": "設計書ではLOCAL_STORAGE_KEYSオブジェクト（VIEW_MODE, SPLIT_RATIO, MAXIMIZED）を定義しているが、既存のmarkdown-editor.tsではLOCAL_STORAGE_KEY（単数形）として単一の文字列を定義している。命名規則と構造が異なる。",
+      "design_doc_reference": "セクション4.1 型定義",
+      "existing_code_reference": "src/types/markdown-editor.ts:177",
+      "recommendation": "既存のLOCAL_STORAGE_KEYを維持しつつ、新規キーを同じ命名規則で追加する（例: LOCAL_STORAGE_KEY_SPLIT_RATIO, LOCAL_STORAGE_KEY_MAXIMIZED）、または設計書を既存パターンに合わせて修正する"
+    },
+    {
+      "id": "CS-002",
+      "severity": "medium",
+      "category": "hook_api_consistency",
+      "title": "useSwipeGestureフックのAPI使用方法の不整合",
+      "description": "設計書ではonSwipeDownを直接プロパティとして取得する記述があるが、実際のuseSwipeGestureはrefベースの実装で、戻り値は{ref, isSwiping, swipeDirection, resetSwipeDirection}オブジェクトである。コールバック関数はoptionsで渡す形式。",
+      "design_doc_reference": "セクション5.1 MarkdownEditor拡張（187-190行目）",
+      "existing_code_reference": "src/hooks/useSwipeGesture.ts:37-46",
+      "recommendation": "設計書のコード例を実際のAPIに合わせて修正。正しい使用例: const { ref } = useSwipeGesture({ onSwipeDown: () => setIsMaximized(false) });"
+    },
+    {
+      "id": "CS-003",
+      "severity": "medium",
+      "category": "pane_resizer_interface",
+      "title": "PaneResizerのonDoubleClickがAPIに未定義",
+      "description": "設計書ではPaneResizerにonDoubleClick propを追加する計画だが、現在のPaneResizerPropsにはonDoubleClickが定義されていない。設計書では「後方互換性維持」と記載されているが、実装時には新規propとして追加が必要。",
+      "design_doc_reference": "セクション5.2 PaneResizer拡張",
+      "existing_code_reference": "src/components/worktree/PaneResizer.tsx:23-30",
+      "recommendation": "PaneResizerPropsインターフェースにonDoubleClick?: () => void を追加する実装計画は適切。設計書の「後方互換性維持」の記述は正確。"
+    },
+    {
+      "id": "CS-004",
+      "severity": "medium",
+      "category": "resize_implementation_pattern",
+      "title": "リサイズ処理パターンの整合性確認",
+      "description": "設計書のSF-003対応でピクセル→比率変換をMarkdownEditor側で実施する方針は、WorktreeDesktopLayoutの既存パターンと一致している。設計書の方針は既存コードと整合。",
+      "design_doc_reference": "セクション5.1 MarkdownEditor拡張（219-226行目）",
+      "existing_code_reference": "src/components/worktree/WorktreeDesktopLayout.tsx:246-264",
+      "recommendation": "WorktreeDesktopLayoutと同様のパターン（containerRef.current.offsetWidthまたはclientWidthを使用してピクセル→比率変換）を採用することで一貫性が保たれる。設計方針は適切。",
+      "status": "positive_finding"
+    },
+    {
+      "id": "CS-005",
+      "severity": "low",
+      "category": "existing_implementation_gap",
+      "title": "MarkdownEditorに未実装の機能が設計書に記載",
+      "description": "現在のMarkdownEditor.tsxにはsplitRatio状態、isMaximized状態、PaneResizerコンポーネントの使用がない。これらはIssue #99で新規追加予定であり、設計書の「新規状態（追加）」記述と整合している。",
+      "design_doc_reference": "セクション5.1 MarkdownEditor拡張",
+      "existing_code_reference": "src/components/worktree/MarkdownEditor.tsx",
+      "recommendation": "設計書の新規追加部分の記述は明確。実装時にはMarkdownEditor.tsxの大幅な変更が必要となることを認識。",
+      "status": "expected_gap"
+    },
+    {
+      "id": "CS-006",
+      "severity": "low",
+      "category": "hook_dependency",
+      "title": "useFullscreen, useLocalStorageStateフックは新規作成",
+      "description": "設計書で参照されているuseFullscreen.ts、useLocalStorageState.tsは現在存在しない。設計書のセクション10.2で新規作成ファイルとして明記されており、整合している。",
+      "design_doc_reference": "セクション2.1 システム構成図、セクション10.2",
+      "existing_code_reference": "src/hooks/（該当ファイル未存在）",
+      "recommendation": "設計書通りPhase 1で新規作成予定。特に問題なし。",
+      "status": "expected_new_file"
+    },
+    {
+      "id": "CS-007",
+      "severity": "low",
+      "category": "view_mode_strategy",
+      "title": "ViewModeStrategyの拡張可能性",
+      "description": "既存のVIEW_MODE_STRATEGIES定数（split, editor, preview）は固定幅（w-1/2）を使用している。設計書のリサイズ機能ではsplitRatioで動的な幅を設定するため、strategyオブジェクトの使用方法が変更される。",
+      "design_doc_reference": "セクション5.1 MarkdownEditor拡張",
+      "existing_code_reference": "src/types/markdown-editor.ts:33-52",
+      "recommendation": "splitモード時はstrategyのeditorWidth/previewWidthを使用せず、splitRatioに基づいて動的にスタイルを設定する実装が必要。設計書のコード例（218-230行目）はこの方針を反映している。"
+    },
+    {
+      "id": "CS-008",
+      "severity": "low",
+      "category": "issue_49_pattern_consistency",
+      "title": "Issue #49設計書との一貫性",
+      "description": "Issue #99設計書はIssue #49設計書の構造・フォーマットを踏襲しており、セクション構成、設計パターン、セキュリティ対策の記述方法が一致している。関連Issue参照も明記されている。",
+      "design_doc_reference": "セクション1.4 関連Issue",
+      "existing_code_reference": "dev-reports/design/issue-49-markdown-editor-design-policy.md",
+      "recommendation": "設計書のフォーマット一貫性は良好。",
+      "status": "positive_finding"
+    }
+  ],
+  "positive_findings": [
+    {
+      "id": "PF-001",
+      "category": "existing_hook_reuse",
+      "title": "既存フック（useIsMobile, useSwipeGesture, useVirtualKeyboard）の再利用",
+      "description": "設計書で参照されている3つのフックは全て存在し、APIドキュメントも整備されている。設計書の使用計画は適切。"
+    },
+    {
+      "id": "PF-002",
+      "category": "pane_resizer_consistency",
+      "title": "PaneResizerのonResize APIの一貫性",
+      "description": "設計書でPaneResizerのonResizeがピクセル単位のdeltaを返す設計は、既存実装と完全に一致している。WorktreeDesktopLayoutとの整合性も確保。"
+    },
+    {
+      "id": "PF-003",
+      "category": "type_definition_structure",
+      "title": "EditorLayoutState型の設計",
+      "description": "設計書で提案されているEditorLayoutState型（viewMode, isMaximized, splitRatio）は既存のViewMode型を再利用しており、型定義の一貫性が保たれている。"
+    },
+    {
+      "id": "PF-004",
+      "category": "z_index_management",
+      "title": "z-index一元管理の設計",
+      "description": "新規作成予定のsrc/config/z-index.tsによるz-index一元管理は、将来の拡張性を考慮した良い設計。既存コードではz-indexが分散しているため、この改善は有益。"
+    }
+  ],
+  "consistency_checklist": {
+    "type_definitions": {
+      "status": "partial",
+      "notes": "ViewMode型は一致。LOCAL_STORAGE_KEYS命名に軽微な不整合あり（CS-001）"
+    },
+    "hook_apis": {
+      "status": "partial",
+      "notes": "useSwipeGestureのAPI使用例に不整合あり（CS-002）。useIsMobile, useVirtualKeyboardは問題なし"
+    },
+    "component_interfaces": {
+      "status": "good",
+      "notes": "PaneResizerの拡張方針は後方互換性を維持。既存propsは変更なし"
+    },
+    "design_patterns": {
+      "status": "good",
+      "notes": "WorktreeDesktopLayoutのリサイズパターンとの一貫性が確保されている"
+    },
+    "naming_conventions": {
+      "status": "good",
+      "notes": "ファイル名、関数名、型名は既存の命名規則に従っている"
+    }
+  },
+  "recommendations": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "finding_ref": "CS-001",
+        "description": "LOCAL_STORAGE_KEYS定数の命名を既存パターンに合わせるか、設計書を修正する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "finding_ref": "CS-002",
+        "description": "設計書のuseSwipeGesture使用例を実際のAPIに合わせて修正"
+      },
+      {
+        "id": "SF-002",
+        "finding_ref": "CS-007",
+        "description": "splitモード時のVIEW_MODE_STRATEGIES使用方法について、動的幅設定との関係を設計書に明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "description": "z-index.tsの設計をプロジェクト全体のスタイル管理方針として文書化"
+      }
+    ]
+  }
+}

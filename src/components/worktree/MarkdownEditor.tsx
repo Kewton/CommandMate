@@ -9,6 +9,9 @@
  * - Large file warning (>500KB)
  * - XSS protection via rehype-sanitize [SEC-MF-001]
  * - LocalStorage persistence for view mode
+ * - Maximize/fullscreen mode (Ctrl/Cmd+Shift+F, ESC to exit)
+ * - Resizable split view with PaneResizer
+ * - Mobile-responsive with tab switching UI
  *
  * @module components/worktree/MarkdownEditor
  */
@@ -26,16 +29,35 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
-import { Save, X, Columns, FileText, Eye, AlertTriangle } from 'lucide-react';
+import { Save, X, Columns, FileText, Eye, AlertTriangle, Maximize2, Minimize2 } from 'lucide-react';
 import { debounce } from '@/lib/utils';
 import { ToastContainer, useToast } from '@/components/common/Toast';
+import { PaneResizer } from '@/components/worktree/PaneResizer';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { useFullscreen } from '@/hooks/useFullscreen';
+import { useLocalStorageState } from '@/hooks/useLocalStorageState';
+import { useSwipeGesture } from '@/hooks/useSwipeGesture';
+import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
+import { Z_INDEX } from '@/config/z-index';
 import type { EditorProps, ViewMode } from '@/types/markdown-editor';
 import {
   VIEW_MODE_STRATEGIES,
   LOCAL_STORAGE_KEY,
+  LOCAL_STORAGE_KEY_SPLIT_RATIO,
+  LOCAL_STORAGE_KEY_MAXIMIZED,
   PREVIEW_DEBOUNCE_MS,
   FILE_SIZE_LIMITS,
+  DEFAULT_SPLIT_RATIO,
+  MIN_SPLIT_RATIO,
+  MAX_SPLIT_RATIO,
+  isValidSplitRatio,
+  isValidBoolean,
 } from '@/types/markdown-editor';
+
+/**
+ * Mobile tab type for portrait mode
+ */
+type MobileTab = 'editor' | 'preview';
 
 /**
  * Validate and parse view mode from storage
@@ -94,16 +116,69 @@ export function MarkdownEditor({
   const [error, setError] = useState<string | null>(null);
   const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
 
+  // Mobile tab state (for portrait mode)
+  const [mobileTab, setMobileTab] = useState<MobileTab>('editor');
+
   // Toast hook
   const { toasts, showToast, removeToast } = useToast();
 
   // Refs
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const beforeUnloadRef = useRef<((e: BeforeUnloadEvent) => void) | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const contentAreaRef = useRef<HTMLDivElement>(null);
+
+  // Mobile detection
+  const isMobile = useIsMobile();
+
+  // Virtual keyboard detection (for mobile)
+  const { isKeyboardVisible, keyboardHeight } = useVirtualKeyboard();
+
+  // Fullscreen/maximize state with localStorage persistence
+  const { value: isMaximizedPersisted, setValue: setMaximizedPersisted } = useLocalStorageState({
+    key: LOCAL_STORAGE_KEY_MAXIMIZED,
+    defaultValue: false,
+    validate: isValidBoolean,
+  });
+
+  // Fullscreen hook
+  const {
+    isFullscreen: isMaximized,
+    isFallbackMode,
+    enterFullscreen,
+    exitFullscreen,
+    toggleFullscreen,
+  } = useFullscreen({
+    elementRef: containerRef,
+    onEnter: () => setMaximizedPersisted(true),
+    onExit: () => setMaximizedPersisted(false),
+  });
+
+  // Split ratio state with localStorage persistence
+  const { value: splitRatio, setValue: setSplitRatio } = useLocalStorageState({
+    key: LOCAL_STORAGE_KEY_SPLIT_RATIO,
+    defaultValue: DEFAULT_SPLIT_RATIO,
+    validate: isValidSplitRatio,
+  });
+
+  // Swipe gesture for exiting maximized mode (mobile)
+  const { ref: swipeRef } = useSwipeGesture({
+    onSwipeDown: () => {
+      if (isMaximized) {
+        exitFullscreen();
+      }
+    },
+    threshold: 100,
+    enabled: isMaximized && isMobile,
+  });
 
   // Computed state
   const isDirty = content !== originalContent;
   const strategy = VIEW_MODE_STRATEGIES[viewMode];
+
+  // In mobile portrait mode with split view, use tab switching
+  const isMobilePortrait = isMobile && typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
+  const showMobileTabs = isMobilePortrait && viewMode === 'split';
 
   /**
    * Debounced preview update
@@ -228,6 +303,35 @@ export function MarkdownEditor({
   }, [isDirty, onClose]);
 
   /**
+   * Handle resize from PaneResizer (delta in pixels)
+   */
+  const handleResize = useCallback(
+    (delta: number) => {
+      if (!contentAreaRef.current) return;
+
+      const containerWidth = contentAreaRef.current.offsetWidth;
+      if (containerWidth === 0) return;
+
+      // Convert pixel delta to ratio delta
+      const ratioDelta = delta / containerWidth;
+
+      // Update split ratio with bounds checking
+      setSplitRatio((prev) => {
+        const newRatio = prev + ratioDelta;
+        return Math.max(MIN_SPLIT_RATIO, Math.min(MAX_SPLIT_RATIO, newRatio));
+      });
+    },
+    [setSplitRatio]
+  );
+
+  /**
+   * Reset split ratio to 50:50 on double-click
+   */
+  const handleResetRatio = useCallback(() => {
+    setSplitRatio(DEFAULT_SPLIT_RATIO);
+  }, [setSplitRatio]);
+
+  /**
    * Handle keyboard shortcuts
    */
   const handleKeyDown = useCallback(
@@ -236,10 +340,50 @@ export function MarkdownEditor({
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         saveContent();
+        return;
+      }
+
+      // Ctrl+Shift+F or Cmd+Shift+F to toggle maximize
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      }
+
+      // ESC to exit maximized mode
+      if (e.key === 'Escape' && isMaximized) {
+        e.preventDefault();
+        exitFullscreen();
+        return;
       }
     },
-    [saveContent]
+    [saveContent, toggleFullscreen, exitFullscreen, isMaximized]
   );
+
+  // Global ESC key handler for maximized mode
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isMaximized) {
+        e.preventDefault();
+        exitFullscreen();
+      }
+    };
+
+    if (isMaximized) {
+      document.addEventListener('keydown', handleGlobalKeyDown);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [isMaximized, exitFullscreen]);
+
+  // Restore maximized state from localStorage on mount
+  useEffect(() => {
+    if (isMaximizedPersisted && !isMaximized) {
+      enterFullscreen();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load content on mount
   useEffect(() => {
@@ -271,6 +415,50 @@ export function MarkdownEditor({
       }
     };
   }, [isDirty]);
+
+  // Calculate container classes for maximized state
+  const containerClasses = useMemo(() => {
+    const base = 'flex flex-col bg-white';
+
+    if (isMaximized && isFallbackMode) {
+      // CSS fallback for fullscreen (iOS Safari, etc.)
+      return `${base} fixed inset-0`;
+    }
+
+    return `${base} h-full`;
+  }, [isMaximized, isFallbackMode]);
+
+  // Calculate container style for z-index when maximized
+  const containerStyle = useMemo(() => {
+    if (isMaximized && isFallbackMode) {
+      return { zIndex: Z_INDEX.MAXIMIZED_EDITOR };
+    }
+    return undefined;
+  }, [isMaximized, isFallbackMode]);
+
+  // Calculate editor width style for split view with custom ratio
+  const editorWidthStyle = useMemo(() => {
+    if (viewMode === 'split' && !showMobileTabs) {
+      return { width: `${splitRatio * 100}%`, flexShrink: 0 };
+    }
+    return undefined;
+  }, [viewMode, splitRatio, showMobileTabs]);
+
+  // Calculate preview width style for split view with custom ratio
+  const previewWidthStyle = useMemo(() => {
+    if (viewMode === 'split' && !showMobileTabs) {
+      return { width: `${(1 - splitRatio) * 100}%`, flexShrink: 0 };
+    }
+    return undefined;
+  }, [viewMode, splitRatio, showMobileTabs]);
+
+  // Adjust content area height for virtual keyboard
+  const contentAreaStyle = useMemo(() => {
+    if (isKeyboardVisible && keyboardHeight > 0) {
+      return { paddingBottom: keyboardHeight };
+    }
+    return undefined;
+  }, [isKeyboardVisible, keyboardHeight]);
 
   // Render loading state
   if (isLoading) {
@@ -312,20 +500,26 @@ export function MarkdownEditor({
 
   return (
     <div
+      ref={(el) => {
+        // Merge refs for containerRef and swipeRef
+        (containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+        (swipeRef as React.MutableRefObject<HTMLElement | null>).current = el;
+      }}
       data-testid="markdown-editor"
-      className="flex flex-col h-full bg-white"
+      className={containerClasses}
+      style={containerStyle}
       onKeyDown={handleKeyDown}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50">
         {/* File path and dirty indicator */}
-        <div className="flex items-center gap-2">
-          <FileText className="h-4 w-4 text-gray-500" />
-          <span className="text-sm font-medium text-gray-700">{filePath}</span>
+        <div className="flex items-center gap-2 min-w-0 flex-shrink">
+          <FileText className="h-4 w-4 text-gray-500 flex-shrink-0" />
+          <span className="text-sm font-medium text-gray-700 truncate">{filePath}</span>
           {isDirty && (
             <span
               data-testid="dirty-indicator"
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800"
+              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 flex-shrink-0"
             >
               Unsaved
             </span>
@@ -333,49 +527,66 @@ export function MarkdownEditor({
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-2">
-          {/* View mode buttons */}
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-            <button
-              data-testid="view-mode-split"
-              aria-pressed={viewMode === 'split'}
-              onClick={() => handleViewModeChange('split')}
-              className={`p-1.5 rounded ${
-                viewMode === 'split'
-                  ? 'bg-white shadow-sm text-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              title="Split view"
-            >
-              <Columns className="h-4 w-4" />
-            </button>
-            <button
-              data-testid="view-mode-editor"
-              aria-pressed={viewMode === 'editor'}
-              onClick={() => handleViewModeChange('editor')}
-              className={`p-1.5 rounded ${
-                viewMode === 'editor'
-                  ? 'bg-white shadow-sm text-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              title="Editor only"
-            >
-              <FileText className="h-4 w-4" />
-            </button>
-            <button
-              data-testid="view-mode-preview"
-              aria-pressed={viewMode === 'preview'}
-              onClick={() => handleViewModeChange('preview')}
-              className={`p-1.5 rounded ${
-                viewMode === 'preview'
-                  ? 'bg-white shadow-sm text-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              title="Preview only"
-            >
-              <Eye className="h-4 w-4" />
-            </button>
-          </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* View mode buttons - hide on mobile portrait with split mode */}
+          {!showMobileTabs && (
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+              <button
+                data-testid="view-mode-split"
+                aria-pressed={viewMode === 'split'}
+                onClick={() => handleViewModeChange('split')}
+                className={`p-1.5 rounded ${
+                  viewMode === 'split'
+                    ? 'bg-white shadow-sm text-blue-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                title="Split view"
+              >
+                <Columns className="h-4 w-4" />
+              </button>
+              <button
+                data-testid="view-mode-editor"
+                aria-pressed={viewMode === 'editor'}
+                onClick={() => handleViewModeChange('editor')}
+                className={`p-1.5 rounded ${
+                  viewMode === 'editor'
+                    ? 'bg-white shadow-sm text-blue-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                title="Editor only"
+              >
+                <FileText className="h-4 w-4" />
+              </button>
+              <button
+                data-testid="view-mode-preview"
+                aria-pressed={viewMode === 'preview'}
+                onClick={() => handleViewModeChange('preview')}
+                className={`p-1.5 rounded ${
+                  viewMode === 'preview'
+                    ? 'bg-white shadow-sm text-blue-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                title="Preview only"
+              >
+                <Eye className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Maximize button */}
+          <button
+            data-testid="maximize-button"
+            onClick={toggleFullscreen}
+            className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+            title={isMaximized ? 'Exit fullscreen (ESC)' : 'Enter fullscreen (Ctrl+Shift+F)'}
+            aria-pressed={isMaximized}
+          >
+            {isMaximized ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
+          </button>
 
           {/* Save button */}
           <button
@@ -406,6 +617,16 @@ export function MarkdownEditor({
         </div>
       </div>
 
+      {/* ESC hint when maximized */}
+      {isMaximized && (
+        <div
+          data-testid="maximize-hint"
+          className="flex items-center justify-center px-4 py-1 bg-gray-800 text-gray-300 text-xs"
+        >
+          Press ESC to exit fullscreen {isMobile && '(or swipe down)'}
+        </div>
+      )}
+
       {/* Large file warning */}
       {showLargeFileWarning && (
         <div
@@ -423,54 +644,144 @@ export function MarkdownEditor({
         </div>
       )}
 
-      {/* Main content area */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Editor */}
-        <div
-          data-testid="markdown-editor-container"
-          className={`flex flex-col overflow-hidden transition-all duration-200 ${strategy.editorWidth} ${
-            !strategy.showEditor ? 'hidden' : ''
-          }`}
-        >
-          <textarea
-            ref={textareaRef}
-            data-testid="markdown-editor-textarea"
-            value={content}
-            onChange={handleContentChange}
-            onKeyDown={handleKeyDown}
-            className="flex-1 p-4 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
-            placeholder="Start typing markdown..."
-            spellCheck={false}
-          />
+      {/* Mobile tab bar (portrait mode with split view) */}
+      {showMobileTabs && (
+        <div className="flex border-b border-gray-200">
+          <button
+            data-testid="mobile-tab-editor"
+            onClick={() => setMobileTab('editor')}
+            className={`flex-1 py-2 text-sm font-medium ${
+              mobileTab === 'editor'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-500'
+            }`}
+          >
+            <FileText className="h-4 w-4 inline-block mr-1" />
+            Editor
+          </button>
+          <button
+            data-testid="mobile-tab-preview"
+            onClick={() => setMobileTab('preview')}
+            className={`flex-1 py-2 text-sm font-medium ${
+              mobileTab === 'preview'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-500'
+            }`}
+          >
+            <Eye className="h-4 w-4 inline-block mr-1" />
+            Preview
+          </button>
         </div>
+      )}
 
-        {/* Divider */}
-        {strategy.showEditor && strategy.showPreview && (
-          <div className="w-px bg-gray-200" />
+      {/* Main content area */}
+      <div
+        ref={contentAreaRef}
+        className="flex flex-1 overflow-hidden"
+        style={contentAreaStyle}
+      >
+        {/* Editor */}
+        {showMobileTabs ? (
+          // Mobile portrait: show based on tab
+          mobileTab === 'editor' && (
+            <div
+              data-testid="markdown-editor-container"
+              className="flex flex-col overflow-hidden w-full"
+            >
+              <textarea
+                ref={textareaRef}
+                data-testid="markdown-editor-textarea"
+                value={content}
+                onChange={handleContentChange}
+                onKeyDown={handleKeyDown}
+                className="flex-1 p-4 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
+                placeholder="Start typing markdown..."
+                spellCheck={false}
+              />
+            </div>
+          )
+        ) : (
+          // Desktop or mobile landscape: normal layout
+          <div
+            data-testid="markdown-editor-container"
+            className={`flex flex-col overflow-hidden transition-all duration-200 ${
+              !strategy.showEditor ? 'hidden' : ''
+            }`}
+            style={viewMode === 'split' ? editorWidthStyle : { width: strategy.showEditor ? '100%' : '0%' }}
+          >
+            <textarea
+              ref={textareaRef}
+              data-testid="markdown-editor-textarea"
+              value={content}
+              onChange={handleContentChange}
+              onKeyDown={handleKeyDown}
+              className="flex-1 p-4 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
+              placeholder="Start typing markdown..."
+              spellCheck={false}
+            />
+          </div>
+        )}
+
+        {/* Resizer (only in split mode, not on mobile portrait) */}
+        {viewMode === 'split' && strategy.showEditor && strategy.showPreview && !showMobileTabs && (
+          <PaneResizer
+            onResize={handleResize}
+            onDoubleClick={handleResetRatio}
+            orientation="horizontal"
+            ariaValueNow={Math.round(splitRatio * 100)}
+            minRatio={MIN_SPLIT_RATIO}
+          />
         )}
 
         {/* Preview */}
-        <div
-          data-testid="markdown-preview-container"
-          className={`flex flex-col overflow-hidden transition-all duration-200 ${strategy.previewWidth} ${
-            !strategy.showPreview ? 'hidden' : ''
-          }`}
-        >
-          <div
-            data-testid="markdown-preview"
-            className="flex-1 p-4 overflow-y-auto prose prose-sm max-w-none"
-          >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[
-                rehypeSanitize, // [SEC-MF-001] XSS protection
-                rehypeHighlight,
-              ]}
+        {showMobileTabs ? (
+          // Mobile portrait: show based on tab
+          mobileTab === 'preview' && (
+            <div
+              data-testid="markdown-preview-container"
+              className="flex flex-col overflow-hidden w-full"
             >
-              {previewContent}
-            </ReactMarkdown>
+              <div
+                data-testid="markdown-preview"
+                className="flex-1 p-4 overflow-y-auto prose prose-sm max-w-none"
+              >
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[
+                    rehypeSanitize, // [SEC-MF-001] XSS protection
+                    rehypeHighlight,
+                  ]}
+                >
+                  {previewContent}
+                </ReactMarkdown>
+              </div>
+            </div>
+          )
+        ) : (
+          // Desktop or mobile landscape: normal layout
+          <div
+            data-testid="markdown-preview-container"
+            className={`flex flex-col overflow-hidden transition-all duration-200 ${
+              !strategy.showPreview ? 'hidden' : ''
+            }`}
+            style={viewMode === 'split' ? previewWidthStyle : { width: strategy.showPreview ? '100%' : '0%' }}
+          >
+            <div
+              data-testid="markdown-preview"
+              className="flex-1 p-4 overflow-y-auto prose prose-sm max-w-none"
+            >
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[
+                  rehypeSanitize, // [SEC-MF-001] XSS protection
+                  rehypeHighlight,
+                ]}
+              >
+                {previewContent}
+              </ReactMarkdown>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Toast notifications */}

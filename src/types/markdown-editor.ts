@@ -177,6 +177,16 @@ export interface ContextMenuState {
 export const LOCAL_STORAGE_KEY = 'commandmate:md-editor-view-mode';
 
 /**
+ * Local storage key for split ratio persistence
+ */
+export const LOCAL_STORAGE_KEY_SPLIT_RATIO = 'commandmate:md-editor-split-ratio';
+
+/**
+ * Local storage key for maximized state persistence
+ */
+export const LOCAL_STORAGE_KEY_MAXIMIZED = 'commandmate:md-editor-maximized';
+
+/**
  * Default debounce delay for preview updates (in milliseconds)
  */
 export const PREVIEW_DEBOUNCE_MS = 300;
@@ -190,3 +200,57 @@ export const FILE_SIZE_LIMITS = {
   /** Maximum file size (1MB) */
   MAX_SIZE: 1024 * 1024,
 } as const;
+
+/**
+ * Default split ratio (50:50)
+ */
+export const DEFAULT_SPLIT_RATIO = 0.5;
+
+/**
+ * Minimum split ratio (10%)
+ */
+export const MIN_SPLIT_RATIO = 0.1;
+
+/**
+ * Maximum split ratio (90%)
+ */
+export const MAX_SPLIT_RATIO = 0.9;
+
+/**
+ * Editor layout state for managing display modes
+ */
+export interface EditorLayoutState {
+  /** Current view mode */
+  viewMode: ViewMode;
+  /** Whether the editor is maximized (fullscreen) */
+  isMaximized: boolean;
+  /** Split ratio for split view (0.0-1.0, representing editor width percentage) */
+  splitRatio: number;
+}
+
+/**
+ * Default editor layout state
+ */
+export const DEFAULT_LAYOUT_STATE: EditorLayoutState = {
+  viewMode: 'split',
+  isMaximized: false,
+  splitRatio: DEFAULT_SPLIT_RATIO,
+};
+
+/**
+ * Validate split ratio value
+ * @param value - Value to validate
+ * @returns true if valid split ratio (0.1-0.9)
+ */
+export function isValidSplitRatio(value: unknown): value is number {
+  return typeof value === 'number' && value >= MIN_SPLIT_RATIO && value <= MAX_SPLIT_RATIO;
+}
+
+/**
+ * Validate boolean value from localStorage
+ * @param value - Value to validate
+ * @returns true if valid boolean
+ */
+export function isValidBoolean(value: unknown): value is boolean {
+  return typeof value === 'boolean';
+}

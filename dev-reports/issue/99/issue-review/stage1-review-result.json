@@ -1,0 +1,119 @@
+{
+  "issue_number": 99,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "review_date": "2026-01-30",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "明確性",
+        "issue": "最大化表示時のlocalStorage保存キー名が未定義",
+        "location": "## 機能要件 > 1. 最大化表示機能",
+        "recommendation": "リサイズ位置のlocalStorageキー（受け入れ条件に記載）と同様に、最大化状態の保存キー名を明示的に定義する。例: `commandmate:md-editor-maximized`",
+        "evidence": "受け入れ条件に「リサイズ位置がlocalStorageに保存・復元される」とあるが、最大化状態の保存については言及なし。一貫性のため最大化状態も保存するか否かを明確にすべき。"
+      },
+      {
+        "id": "SF-002",
+        "category": "技術的妥当性",
+        "issue": "Fullscreen APIのブラウザサポートとフォールバック戦略が未定義",
+        "location": "## 機能要件 > 1. 最大化表示機能 > モバイル",
+        "recommendation": "Fullscreen APIのブラウザサポート状況（Safari iOS制限など）を考慮し、フォールバック戦略を明記する。例: Fullscreen API非対応時はCSS固定ポジション（position: fixed + z-index）でモーダル表示",
+        "evidence": "技術的考慮事項では「CSS `position: fixed` + `z-index` / Fullscreen API」と両方記載されているが、モバイルセクションでは「フルスクリーンAPIを活用した没入型編集モード」のみ記載。iOS Safari等での制限を考慮すると、フォールバックの明確化が必要。"
+      },
+      {
+        "id": "SF-003",
+        "category": "整合性",
+        "issue": "既存PaneResizerコンポーネントとの関係性が不明確",
+        "location": "## 機能要件 > 2. Split Viewの表示領域リサイズ",
+        "recommendation": "既存の`PaneResizer.tsx`を再利用するか、新規実装するかを明確にする。再利用する場合はprops設計の変更点を、新規実装する場合はPaneResizerとの設計方針の違いを記載する。",
+        "evidence": "プロジェクトには既に`src/components/worktree/PaneResizer.tsx`が存在し、ドラッグリサイズ、タッチ対応、キーボードナビゲーション、アクセシビリティ属性を実装済み。Issue #99の設計と重複する機能が多い。"
+      },
+      {
+        "id": "SF-004",
+        "category": "整合性",
+        "issue": "Issue #49 設計書との状態管理方針の不整合",
+        "location": "## 技術的考慮事項 > 状態管理",
+        "recommendation": "Issue #49の設計書では`VIEW_MODE_STRATEGIES`パターンを使用。新しい最大化状態やリサイズ比率を既存の`viewMode`とどう統合するか、型定義の拡張方針を明記する。",
+        "evidence": "Issue #49 設計書（issue-49-markdown-editor-design-policy.md）では`ViewMode = 'split' | 'editor' | 'preview'`と`VIEW_MODE_STRATEGIES`が定義済み。最大化状態は別の状態として管理するのか、ViewModeを拡張するのかが不明確。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "完全性",
+        "issue": "リサイズハンドルのホバー/アクティブ時のビジュアルフィードバックの詳細が不足",
+        "location": "## 機能要件 > 2. Split Viewの表示領域リサイズ > デスクトップ",
+        "recommendation": "既存PaneResizerの視覚フィードバック（ホバー時の幅変化、ドラッグ中の色変化）を参照し、MarkdownEditor用のリサイズハンドルのスタイル仕様を追加する。",
+        "evidence": "PaneResizer.tsxでは`hover:bg-blue-500`、`hover:w-2`、dragging時に`bg-blue-500`等の詳細なスタイルが定義されている。Issue #99では「幅4-6px」「ホバー時にカーソル変更」のみで、色や遷移の詳細が不足。"
+      },
+      {
+        "id": "NTH-002",
+        "category": "完全性",
+        "issue": "既存フックの再利用可能性が未検討",
+        "location": "## 技術的考慮事項",
+        "recommendation": "既存フック（useIsMobile, useSwipeGesture, useVirtualKeyboard）の再利用を検討し、実装方針に明記する。",
+        "evidence": "プロジェクトには`useIsMobile`（モバイル判定）、`useSwipeGesture`（スワイプ検出）、`useVirtualKeyboard`（キーボード検出）が既に存在。これらを活用することで実装コストを削減できる可能性がある。"
+      },
+      {
+        "id": "NTH-003",
+        "category": "完全性",
+        "issue": "E2Eテストのモバイルビューポートサイズが未定義",
+        "location": "## 受け入れ条件 > テスト",
+        "recommendation": "テストで使用するモバイルビューポートサイズ（例: iPhone 14: 390x844, iPad: 768x1024等）を明記する。",
+        "evidence": "受け入れ条件に「モバイルビューポートでのE2Eテストが追加されている」とあるが、具体的なビューポートサイズや縦向き/横向きの両方をテストするかが不明。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "既存のマークダウンエディタ実装。拡張対象のベースコンポーネント。"
+    },
+    {
+      "file": "src/components/worktree/PaneResizer.tsx",
+      "relevance": "既存のリサイズコンポーネント。再利用または設計参照の候補。"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "relevance": "既存の型定義。ViewMode, VIEW_MODE_STRATEGIES等の拡張が必要。"
+    },
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "モバイル判定フック。モバイルレイアウト切替に再利用可能。"
+    },
+    {
+      "file": "src/hooks/useSwipeGesture.ts",
+      "relevance": "スワイプジェスチャー検出フック。最大化解除のスワイプ操作に再利用可能。"
+    },
+    {
+      "file": "src/hooks/useVirtualKeyboard.ts",
+      "relevance": "仮想キーボード検出フック。キーボード表示時のレイアウト調整に再利用可能。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-49-markdown-editor-design-policy.md",
+      "relevance": "Issue #49 設計書。既存の設計パターンとの整合性確認に必要。"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトガイドライン。コーディング規約との整合性確認。"
+    }
+  ],
+  "overall_assessment": {
+    "completeness": "B+",
+    "technical_feasibility": "A-",
+    "consistency": "B",
+    "clarity": "B+",
+    "mobile_ux": "B+"
+  },
+  "recommendation": "Issueは全体的によく書かれており、機能要件・UI設計・技術的考慮事項が詳細に記載されている。ただし、既存コンポーネント（PaneResizer）やフック（useIsMobile, useSwipeGesture, useVirtualKeyboard）との関係性、Issue #49設計書との状態管理の整合性について明確化が必要。また、Fullscreen APIのフォールバック戦略を追加することで、モバイル実装の技術的リスクを軽減できる。"
+}

@@ -1,0 +1,7 @@
+{
+  "issue_number": 99,
+  "review_result_path": "dev-reports/issue/99/multi-stage-design-review/stage3-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応"
+}

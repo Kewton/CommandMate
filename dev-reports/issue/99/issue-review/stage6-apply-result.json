@@ -1,0 +1,58 @@
+{
+  "issue_number": 99,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-01-30",
+  "review_result_path": "dev-reports/issue/99/issue-review/stage5-review-result.json",
+  "applied_items": [
+    {
+      "id": "SF-001",
+      "category": "整合性",
+      "priority": "should_fix",
+      "status": "applied",
+      "issue": "既存MarkdownEditor.tsxとの状態管理方針の具体的な統合手順が不明確",
+      "action_taken": "「状態管理の拡張方針」セクションに「viewModeからEditorLayoutStateへの移行手順」サブセクションを追加。段階的追加方式を採用し、既存viewModeはそのまま維持しつつisMaximizedとsplitRatioを個別のstate hookとして追加する方針を明記。コード例と理由も記載。",
+      "location_in_issue": "## 技術的考慮事項 > 状態管理の拡張方針 > viewModeからEditorLayoutStateへの移行手順"
+    }
+  ],
+  "skipped_items": [],
+  "nice_to_have_items": [
+    {
+      "id": "NTH-001",
+      "category": "完全性",
+      "issue": "useFullscreenフックの具体的なAPI仕様が未定義",
+      "status": "deferred_to_implementation",
+      "reason": "実装時に詳細API設計を行う。Issue #49の設計書と同様のアプローチ"
+    },
+    {
+      "id": "NTH-002",
+      "category": "技術的妥当性",
+      "issue": "orientationchange検出の実装方針が未定義",
+      "status": "deferred_to_implementation",
+      "reason": "実装時に既存useIsMobileフックの拡張または新規フック作成を検討"
+    }
+  ],
+  "issue_update": {
+    "status": "success",
+    "url": "https://github.com/Kewton/CommandMate/issues/99",
+    "sections_modified": [
+      "技術的考慮事項 > 状態管理の拡張方針",
+      "レビュー履歴"
+    ]
+  },
+  "review_history_entry": {
+    "stage": "Stage 5 通常レビュー 2回目",
+    "date": "2026-01-30",
+    "items": [
+      "SF-001: viewModeからEditorLayoutStateへの移行手順を「状態管理の拡張方針」セクションに追加（段階的追加方式を明記）"
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "must_fix": 0,
+    "should_fix_applied": 1,
+    "should_fix_skipped": 0,
+    "nice_to_have_deferred": 2
+  }
+}

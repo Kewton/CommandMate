@@ -1,0 +1,61 @@
+{
+  "issue_number": 99,
+  "issue_title": "マークダウンエディタの表示機能改善",
+  "iteration": 1,
+  "work_plan_path": "dev-reports/issue/99/work-plan.md",
+  "design_policy_path": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+  "target_tasks": [
+    {
+      "task_id": "1.1",
+      "description": "型定義拡張 - EditorLayoutState型、LOCAL_STORAGE_KEY_*定数追加",
+      "file": "src/types/markdown-editor.ts"
+    },
+    {
+      "task_id": "1.2",
+      "description": "z-index設定ファイル作成",
+      "file": "src/config/z-index.ts"
+    },
+    {
+      "task_id": "1.3",
+      "description": "useFullscreenフック作成",
+      "file": "src/hooks/useFullscreen.ts"
+    },
+    {
+      "task_id": "1.4",
+      "description": "useLocalStorageStateフック作成",
+      "file": "src/hooks/useLocalStorageState.ts"
+    },
+    {
+      "task_id": "2.1",
+      "description": "PaneResizer拡張 - onDoubleClick, minRatio props追加",
+      "file": "src/components/worktree/PaneResizer.tsx"
+    },
+    {
+      "task_id": "2.2",
+      "description": "MarkdownEditor最大化機能追加",
+      "file": "src/components/worktree/MarkdownEditor.tsx"
+    },
+    {
+      "task_id": "2.3",
+      "description": "MarkdownEditorリサイズ機能追加",
+      "file": "src/components/worktree/MarkdownEditor.tsx"
+    },
+    {
+      "task_id": "2.4",
+      "description": "MarkdownEditorモバイル対応",
+      "file": "src/components/worktree/MarkdownEditor.tsx"
+    }
+  ],
+  "test_files": {
+    "unit": [
+      "tests/unit/hooks/useFullscreen.test.ts",
+      "tests/unit/hooks/useLocalStorageState.test.ts",
+      "tests/unit/components/PaneResizer.test.tsx",
+      "tests/unit/components/MarkdownEditor.test.tsx"
+    ],
+    "e2e": [
+      "tests/e2e/markdown-editor.spec.ts",
+      "tests/e2e/markdown-editor-mobile.spec.ts"
+    ]
+  }
+}

@@ -241,6 +241,71 @@ describe('PaneResizer', () => {
     });
   });
 
+  describe('Double click support', () => {
+    it('should call onDoubleClick when double-clicked', () => {
+      const mockOnDoubleClick = vi.fn();
+      render(
+        <PaneResizer
+          onResize={mockOnResize}
+          onDoubleClick={mockOnDoubleClick}
+        />
+      );
+      const separator = screen.getByRole('separator');
+
+      fireEvent.doubleClick(separator);
+
+      expect(mockOnDoubleClick).toHaveBeenCalled();
+    });
+
+    it('should not throw when onDoubleClick is not provided', () => {
+      render(<PaneResizer onResize={mockOnResize} />);
+      const separator = screen.getByRole('separator');
+
+      // Should not throw
+      expect(() => fireEvent.doubleClick(separator)).not.toThrow();
+    });
+  });
+
+  describe('Backward compatibility', () => {
+    it('should work without optional onDoubleClick prop', () => {
+      // This test ensures backward compatibility
+      render(<PaneResizer onResize={mockOnResize} />);
+      const separator = screen.getByRole('separator');
+
+      expect(separator).toBeInTheDocument();
+
+      // Drag should still work
+      fireEvent.mouseDown(separator, { clientX: 100, clientY: 50 });
+      fireEvent.mouseMove(document, { clientX: 150, clientY: 50 });
+      fireEvent.mouseUp(document);
+
+      expect(mockOnResize).toHaveBeenCalled();
+    });
+
+    it('should work without optional minRatio prop', () => {
+      // This test ensures backward compatibility
+      render(<PaneResizer onResize={mockOnResize} />);
+      const separator = screen.getByRole('separator');
+
+      expect(separator).toBeInTheDocument();
+    });
+
+    it('should accept minRatio prop without changing behavior', () => {
+      // minRatio is informational only - parent must enforce
+      render(<PaneResizer onResize={mockOnResize} minRatio={0.2} />);
+      const separator = screen.getByRole('separator');
+
+      expect(separator).toBeInTheDocument();
+
+      // Drag should still work normally
+      fireEvent.mouseDown(separator, { clientX: 100, clientY: 50 });
+      fireEvent.mouseMove(document, { clientX: 150, clientY: 50 });
+      fireEvent.mouseUp(document);
+
+      expect(mockOnResize).toHaveBeenCalledWith(50);
+    });
+  });
+
   describe('Edge cases', () => {
     it('should not call onResize if not dragging', () => {
       render(<PaneResizer onResize={mockOnResize} />);

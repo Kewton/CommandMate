@@ -1,0 +1,270 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "issue_number": 99,
+  "review_date": "2026-01-30",
+  "previous_review_verification": {
+    "stage3_must_fix_status": [
+      {
+        "id": "MF-001",
+        "original_issue": "localStorageキー競合リスク",
+        "status": "RESOLVED",
+        "verification": "Issue本文に「localStorageキーは`src/types/markdown-editor.ts`のLOCAL_STORAGE_KEYS定数で一元管理されている」が受け入れ条件として追加。技術的考慮事項セクションにLOCAL_STORAGE_KEYS定数の具体的な定義例も記載済み"
+      },
+      {
+        "id": "MF-002",
+        "original_issue": "PaneResizer拡張の破壊的変更リスク",
+        "status": "RESOLVED",
+        "verification": "Issue本文の「既存コンポーネントとの関係」セクションに後方互換性要件が詳細に追加。「全ての新規props（onDoubleClick, minRatio等）はoptionalとして定義すること」「既存使用箇所（WorktreeDesktopLayout等）で動作検証を行うこと」と明記。受け入れ条件にも「PaneResizerの新規propsは全てoptionalで、既存使用箇所に影響を与えない」追加済み"
+      }
+    ],
+    "stage3_should_fix_status": [
+      {
+        "id": "SF-001",
+        "original_issue": "z-index競合リスク",
+        "status": "RESOLVED",
+        "verification": "技術的考慮事項に「z-index競合対策」セクションが追加。src/config/z-index.tsの新規作成を推奨として記載。影響ファイル一覧にも新規ファイルとして追加済み"
+      },
+      {
+        "id": "SF-002",
+        "original_issue": "useSwipeGestureのAPI使用方法",
+        "status": "RESOLVED",
+        "verification": "「再利用可能な既存フック」セクションにuseSwipeGestureの注意事項「onSwipeDownはコールバック引数として渡す」と明記済み"
+      },
+      {
+        "id": "SF-003",
+        "original_issue": "テスト影響範囲の明記",
+        "status": "RESOLVED",
+        "verification": "受け入れ条件のテストセクションに具体的なテストファイル名（MarkdownEditor.test.tsx, PaneResizer.test.tsx）が明記。影響ファイル一覧セクションにも詳細な変更内容を記載"
+      },
+      {
+        "id": "SF-004",
+        "original_issue": "モバイルE2Eテストの考慮不足",
+        "status": "RESOLVED",
+        "verification": "新規ファイル一覧にmarkdown-editor-mobile.spec.ts（150行目安）が追加。受け入れ条件に「モバイルビューポートでのE2Eテストが追加されている」と明記"
+      },
+      {
+        "id": "SF-005",
+        "original_issue": "EditorLayoutState型の関係性複雑化",
+        "status": "RESOLVED",
+        "verification": "Stage 5で「viewModeからEditorLayoutStateへの移行手順」が追加され、段階的追加方式による移行方針が明確化。既存viewModeはそのまま維持し、新規状態を個別に追加する方針が明記"
+      }
+    ],
+    "stage3_nice_to_have_status": [
+      {
+        "id": "NTH-001",
+        "original_issue": "requestAnimationFrameの実装方針不明確",
+        "status": "NOT_ADDRESSED",
+        "note": "Nice to Haveのため対応必須ではない。実装時に設計書で補完可能"
+      },
+      {
+        "id": "NTH-002",
+        "original_issue": "キーボードショートカット競合確認",
+        "status": "NOT_ADDRESSED",
+        "note": "Nice to Haveのため対応必須ではない。実装時に確認可能"
+      },
+      {
+        "id": "NTH-003",
+        "original_issue": "CLAUDE.md更新範囲",
+        "status": "NOT_ADDRESSED",
+        "note": "Nice to Haveのため対応必須ではない。実装完了時に対応"
+      }
+    ]
+  },
+  "current_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "ドキュメント完全性",
+        "issue": "playwright.config.tsに既にMobile Safariプロジェクトが存在するが、Issueではplaywright.config.tsへの変更が影響ファイル一覧に含まれていない",
+        "location": "影響ファイル一覧セクション",
+        "evidence": "playwright.config.tsのL23-25に「Mobile Safari」プロジェクト（iPhone 13デバイス）が既に設定済み。モバイルE2Eテスト追加時にplaywright.config.tsの変更は不要の可能性が高いが、明示的な確認記載があるとより良い",
+        "recommendation": "影響ファイル一覧の「既存ファイル（変更なし・再利用）」セクションにplaywright.config.ts（既存のMobile Safariプロジェクトを活用）を追加することを検討"
+      }
+    ]
+  },
+  "impact_summary_verification": {
+    "affected_files_accuracy": {
+      "status": "ACCURATE",
+      "verification_details": [
+        {
+          "file": "src/components/worktree/MarkdownEditor.tsx",
+          "stage3_lines": 481,
+          "current_lines": 480,
+          "delta": -1,
+          "assessment": "誤差1行以内で正確"
+        },
+        {
+          "file": "src/components/worktree/PaneResizer.tsx",
+          "stage3_lines": 255,
+          "current_lines": 254,
+          "delta": -1,
+          "assessment": "誤差1行以内で正確"
+        },
+        {
+          "file": "src/types/markdown-editor.ts",
+          "stage3_lines": 193,
+          "current_lines": 192,
+          "delta": -1,
+          "assessment": "誤差1行以内で正確"
+        },
+        {
+          "file": "tests/unit/components/MarkdownEditor.test.tsx",
+          "stage3_lines": 646,
+          "current_lines": 645,
+          "delta": -1,
+          "assessment": "誤差1行以内で正確"
+        },
+        {
+          "file": "tests/unit/components/PaneResizer.test.tsx",
+          "stage3_lines": 285,
+          "current_lines": 284,
+          "delta": -1,
+          "assessment": "誤差1行以内で正確"
+        },
+        {
+          "file": "tests/e2e/markdown-editor.spec.ts",
+          "stage3_lines": 382,
+          "current_lines": 381,
+          "delta": -1,
+          "assessment": "誤差1行以内で正確"
+        }
+      ]
+    },
+    "pane_resizer_usage_verification": {
+      "status": "ACCURATE",
+      "existing_usages": [
+        {
+          "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+          "line": 189,
+          "usage": "<PaneResizer onResize={onResize} orientation=\"horizontal\" ariaValueNow={leftWidth} />",
+          "props_used": ["onResize", "orientation", "ariaValueNow"],
+          "impact_assessment": "新規props（onDoubleClick, minRatio）がoptionalであれば影響なし"
+        }
+      ],
+      "conclusion": "Issue記載の既存使用箇所（WorktreeDesktopLayout）は正確。後方互換性要件に従えば破壊的変更なし"
+    },
+    "existing_hooks_verification": {
+      "status": "ACCURATE",
+      "hooks": [
+        {
+          "file": "src/hooks/useIsMobile.ts",
+          "exists": true,
+          "lines": 81,
+          "stage3_estimate": 81,
+          "assessment": "正確"
+        },
+        {
+          "file": "src/hooks/useSwipeGesture.ts",
+          "exists": true,
+          "lines": 205,
+          "stage3_estimate": 205,
+          "api_verified": "onSwipeDown callback引数対応確認済み（L27: onSwipeDown?: () => void）",
+          "assessment": "正確"
+        },
+        {
+          "file": "src/hooks/useVirtualKeyboard.ts",
+          "exists": true,
+          "lines": 105,
+          "stage3_estimate": 105,
+          "assessment": "正確"
+        }
+      ]
+    },
+    "new_files_verification": {
+      "status": "REASONABLE",
+      "proposed_files": [
+        {
+          "path": "src/hooks/useFullscreen.ts",
+          "estimated_lines": 80,
+          "assessment": "妥当。Fullscreen API + CSSフォールバック処理に適切なサイズ"
+        },
+        {
+          "path": "src/hooks/useLocalStorageState.ts",
+          "estimated_lines": 50,
+          "assessment": "妥当。useState + localStorage同期処理に適切なサイズ"
+        },
+        {
+          "path": "tests/e2e/markdown-editor-mobile.spec.ts",
+          "estimated_lines": 150,
+          "assessment": "妥当。モバイル専用E2Eテストとして適切なサイズ"
+        },
+        {
+          "path": "src/config/z-index.ts",
+          "estimated_lines": 20,
+          "assessment": "妥当。定数定義ファイルとして適切なサイズ"
+        }
+      ]
+    },
+    "mobile_impact_verification": {
+      "status": "WELL_DOCUMENTED",
+      "playwright_config": {
+        "mobile_project_exists": true,
+        "device": "iPhone 13",
+        "project_name": "Mobile Safari"
+      },
+      "mobile_considerations_in_issue": [
+        "フルスクリーンAPIフォールバック戦略（iOS Safari対応）",
+        "スワイプダウンジェスチャーで最大化解除",
+        "タブ切替UI（縦向き時）",
+        "タッチフレンドリー（44px以上のタッチターゲット）",
+        "仮想キーボード対応",
+        "Portrait/Landscape切替対応"
+      ],
+      "assessment": "モバイル影響は包括的に文書化されている"
+    },
+    "risk_assessment_verification": {
+      "overall_risk": "medium",
+      "stage3_assessment": "medium",
+      "current_assessment": "medium",
+      "reasoning": "Stage 3で指摘された主要リスク（localStorage競合、PaneResizer破壊的変更）は全てIssueに対策として反映済み。既存コードベースとの整合性も確認済み"
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 1,
+    "stage3_resolution_rate": {
+      "must_fix": "2/2 (100%)",
+      "should_fix": "5/5 (100%)",
+      "nice_to_have": "0/3 (0% - 対応任意)"
+    }
+  },
+  "conclusion": "Stage 3の影響範囲レビューで指摘された全てのMust Fix項目とShould Fix項目がIssue本文に反映されていることを確認。影響ファイル一覧の行数も現在のコードベースと整合。PaneResizerの既存使用箇所、モバイル対応、リスク評価も適切に文書化されている。Issue #99は実装準備完了状態と評価できる",
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "主要変更対象。現在480行"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/PaneResizer.tsx",
+      "relevance": "拡張対象。現在254行。既存props: onResize, orientation, ariaValueNow"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/WorktreeDesktopLayout.tsx",
+      "relevance": "PaneResizer使用箇所。L189でリサイズ機能を使用"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/types/markdown-editor.ts",
+      "relevance": "型定義拡張対象。現在192行。LOCAL_STORAGE_KEY定数あり"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/hooks/useSwipeGesture.ts",
+      "relevance": "再利用対象。onSwipeDownコールバック対応確認済み（L27）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/playwright.config.ts",
+      "relevance": "Mobile Safariプロジェクト既存（L23-25）。モバイルE2Eテスト基盤あり"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/dev-reports/issue/99/issue-review/stage3-review-result.json",
+      "relevance": "前回影響範囲レビュー結果"
+    }
+  ]
+}

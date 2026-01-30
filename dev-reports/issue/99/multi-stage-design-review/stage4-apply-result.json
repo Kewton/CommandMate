@@ -1,0 +1,63 @@
+{
+  "issue_number": 99,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "status": "completed",
+  "applied_recommendations": [
+    {
+      "id": "REC-001",
+      "title": "localStorage読み込み時のバリデーション強化",
+      "priority": "medium",
+      "action_taken": "セクション7.4を新規追加。isValidSplitRatio()とisValidBoolean()のバリデーション関数実装例を記載。useLocalStorageStateフックにバリデーション関数を渡せるインターフェースを定義",
+      "design_doc_sections_updated": ["7.4", "11 (Phase 1チェックリスト)"]
+    },
+    {
+      "id": "REC-002",
+      "title": "最大化状態の視覚的インジケーター",
+      "priority": "low",
+      "action_taken": "セクション7.5を新規追加。最大化時に「Press ESC to exit」ヒントを表示する実装要件を記載。モバイルでは「Swipe down to exit」に変更する旨も記載",
+      "design_doc_sections_updated": ["7.5", "11 (Phase 2チェックリスト)"]
+    },
+    {
+      "id": "REC-003",
+      "title": "Fullscreen API呼び出しのユーザーアクション保証",
+      "priority": "low",
+      "action_taken": "セクション7.6を新規追加。Fullscreen APIはユーザーアクション（クリック、キー入力等）のイベントハンドラ内からのみ呼び出し可能であることを明記。正しい実装例と誤った実装例を記載",
+      "design_doc_sections_updated": ["7.6", "11 (Phase 1チェックリスト)"]
+    }
+  ],
+  "design_doc_changes_summary": {
+    "new_sections": [
+      "7.4 localStorage読み込み時のバリデーション（REC-001対応）",
+      "7.5 最大化状態の視覚的インジケーター（REC-002対応）",
+      "7.6 Fullscreen APIのユーザーアクション要件（REC-003対応）",
+      "13 Stage 4: セキュリティレビュー（2026-01-30）"
+    ],
+    "updated_sections": [
+      "11. 実装チェックリスト - Phase 1にバリデーション関連項目追加",
+      "11. 実装チェックリスト - Phase 2にヒント表示関連項目追加"
+    ]
+  },
+  "implementation_checklist_additions": [
+    "Phase 1: useFullscreen.ts - ユーザーアクションからの呼び出しを前提とした設計（REC-003対応）",
+    "Phase 1: useLocalStorageState.ts - isValidSplitRatio()バリデーション関数実装（REC-001対応）",
+    "Phase 1: useLocalStorageState.ts - isValidBoolean()バリデーション関数実装（REC-001対応）",
+    "Phase 1: useLocalStorageState.ts - バリデーション関数をhookに渡せるインターフェース実装（REC-001対応）",
+    "Phase 2: MarkdownEditor - 最大化時に「Press ESC to exit」ヒント表示（REC-002対応）",
+    "Phase 2: MarkdownEditor - モバイル最大化時は「Swipe down to exit」ヒント表示（REC-002対応）"
+  ],
+  "security_review_section_added": {
+    "review_result": "approved_with_recommendations",
+    "security_score": "A-",
+    "owasp_top_10_checks": 10,
+    "security_findings_documented": 8,
+    "positive_findings_documented": 6,
+    "implementation_security_notes_documented": 3
+  },
+  "files_modified": [
+    "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md"
+  ],
+  "source_code_modified": false,
+  "apply_date": "2026-01-30",
+  "reviewer": "apply-review-agent"
+}

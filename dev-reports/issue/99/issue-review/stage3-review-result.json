@@ -1,0 +1,313 @@
+{
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "issue_number": 99,
+  "review_date": "2026-01-30",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "category": "状態管理の衝突リスク",
+        "issue": "最大化状態（isMaximized）とviewMode状態の保存キーがlocalStorageで競合する可能性がある",
+        "location": "Issue本文 - 技術的考慮事項セクション",
+        "evidence": "Issue #49設計書では LOCAL_STORAGE_KEY = 'commandmate:md-editor-view-mode' を使用。Issue #99では 'commandmate:md-editor-maximized' と 'commandmate:md-editor-split-ratio' を追加。現行のMarkdownEditor.tsxがLOCAL_STORAGE_KEYを使用しており、新規キーとの整合性確認が必要",
+        "recommendation": "src/types/markdown-editor.ts にLOCAL_STORAGE_KEYS定数を追加し、全キーを一元管理する設計に変更すること。例: LOCAL_STORAGE_KEYS = { VIEW_MODE: '...', SPLIT_RATIO: '...', MAXIMIZED: '...' }",
+        "impact": "データ整合性エラーによりユーザー設定が失われる可能性"
+      },
+      {
+        "id": "MF-002",
+        "category": "PaneResizer拡張の破壊的変更リスク",
+        "issue": "既存PaneResizerコンポーネントへの拡張（onDoubleClick, minRatio props追加）が既存使用箇所に影響を与える可能性がある",
+        "location": "Issue本文 - Split Viewの表示領域リサイズセクション",
+        "evidence": "現行PaneResizer.tsx (255行) はonResize, orientation, ariaValueNow propsのみを持つ。Issueでは onDoubleClick, minRatio を追加予定だが、既存のPaneResizer使用箇所（WorktreeDesktopLayout等）への影響評価がない",
+        "recommendation": "PaneResizerの拡張propsは全てoptionalとし、後方互換性を維持すること。また、既存使用箇所の一覧と影響範囲をIssueに明記すること",
+        "impact": "既存画面のリサイズ機能が破損する可能性"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "CSS/スタイリング影響",
+        "issue": "最大化表示時のz-index競合リスクが考慮されていない",
+        "location": "Issue本文 - モバイルセクション - フォールバック戦略",
+        "evidence": "z-index: 9999 を使用予定だが、既存のModal, Toast, ContextMenuのz-index値との競合確認がない。Toast.tsx等は独自のz-index値を使用している可能性がある",
+        "recommendation": "src/config/z-index.ts等のz-index設定ファイルを新規作成し、全コンポーネントのz-index値を一元管理すること。現行のToast, Modal, ContextMenuのz-index値を調査し、最大化表示の値を適切に設定すること",
+        "impact": "UI要素の重なり順序が不正になりユーザー操作が阻害される"
+      },
+      {
+        "id": "SF-002",
+        "category": "フック依存関係",
+        "issue": "Issueで参照されているuseSwipeGesture, useVirtualKeyboardフックの実際の戻り値型と使用方法がIssueの想定と異なる可能性がある",
+        "location": "Issue本文 - 技術的考慮事項 - 再利用可能な既存フック",
+        "evidence": "useSwipeGestureの戻り値はref, isSwiping, swipeDirection, resetSwipeDirectionだが、Issueではスワイプダウンで最大化解除を想定。onSwipeDownコールバックは引数として渡す設計であり、戻り値から直接取得するものではない",
+        "recommendation": "useSwipeGestureの実際のAPI（引数としてonSwipeDown等を渡す）に合わせてIssueの実装アプローチを修正すること",
+        "impact": "実装時に設計との乖離が発生し、手戻りが生じる"
+      },
+      {
+        "id": "SF-003",
+        "category": "テスト影響",
+        "issue": "既存のMarkdownEditor.test.tsx, PaneResizer.test.tsxに対する変更範囲が明記されていない",
+        "location": "Issue本文 - 受け入れ条件 - テストセクション",
+        "evidence": "既存テストはviewMode切替、保存操作、XSS防止等をカバー。新機能（最大化、リサイズ）の追加により既存テストの修正または拡張が必要だが、その範囲がIssueで明確でない",
+        "recommendation": "既存テストファイルへの修正範囲を明記し、テストカバレッジ目標を設定すること。特にPaneResizer.test.tsxの282行に対する拡張内容を具体化すること",
+        "impact": "テスト漏れによりリグレッションが発生する"
+      },
+      {
+        "id": "SF-004",
+        "category": "E2Eテスト影響",
+        "issue": "モバイルビューポートでのE2Eテストが既存markdown-editor.spec.tsに含まれていない",
+        "location": "Issue本文 - 受け入れ条件",
+        "evidence": "既存E2Eテスト(markdown-editor.spec.ts)はデスクトップビューポートのみを対象としている。Issue要件ではモバイルE2Eテストが必須だが、Playwrightのモバイルエミュレーション設定への影響が考慮されていない",
+        "recommendation": "playwright.config.tsにモバイルデバイスプロジェクトを追加し、モバイル専用E2Eテストファイル（markdown-editor-mobile.spec.ts）を作成すること",
+        "impact": "モバイル機能のテスト不足により品質が担保されない"
+      },
+      {
+        "id": "SF-005",
+        "category": "型定義の拡張影響",
+        "issue": "EditorLayoutState型の追加がEditorPropsやEditorState型との関係性を複雑化させる",
+        "location": "Issue本文 - 状態管理の拡張方針",
+        "evidence": "既存src/types/markdown-editor.tsにはEditorState, EditorProps, ViewModeStrategy等が定義済み。新規EditorLayoutState追加により型定義間の責務分担が不明確になる",
+        "recommendation": "型定義の関係図（どの型がどのコンポーネントで使用されるか）をIssueに追加し、責務を明確化すること",
+        "impact": "型定義の混乱により保守性が低下する"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "パフォーマンス最適化",
+        "issue": "requestAnimationFrameによるスロットリングの具体的な実装方針が不明確",
+        "location": "Issue本文 - パフォーマンス考慮セクション",
+        "evidence": "リサイズ中はrequestAnimationFrameでスロットリングと記載があるが、既存PaneResizerの実装にはrAFが含まれていない",
+        "recommendation": "PaneResizerの拡張時に、requestAnimationFrameを使用したスロットリング実装のコード例を設計書に追加すること"
+      },
+      {
+        "id": "NTH-002",
+        "category": "アクセシビリティ",
+        "issue": "キーボードショートカット Ctrl/Cmd + Shift + F の既存ショートカットとの競合確認がない",
+        "location": "Issue本文 - 最大化表示機能 - デスクトップセクション",
+        "evidence": "既存のMarkdownEditorはCtrl/Cmd+Sを保存に使用。新規ショートカット追加時のブラウザデフォルト動作との競合（例: フルスクリーンF11との違い）や他機能との重複確認がない",
+        "recommendation": "既存キーボードショートカット一覧を作成し、競合がないことを確認すること"
+      },
+      {
+        "id": "NTH-003",
+        "category": "ドキュメント影響",
+        "issue": "CLAUDE.mdの更新範囲が明記されていない",
+        "location": "Issue本文全体",
+        "evidence": "新機能追加により「最近の実装機能」セクションや「主要機能モジュール」セクションへの追記が必要だが、具体的な更新内容がIssueに含まれていない",
+        "recommendation": "実装完了時にCLAUDE.mdへ追記すべき内容をIssueのTODOに追加すること"
+      }
+    ]
+  },
+  "impact_summary": {
+    "affected_files": [
+      {
+        "path": "src/components/worktree/MarkdownEditor.tsx",
+        "change_type": "major_modification",
+        "current_lines": 481,
+        "estimated_change_lines": 150,
+        "risk_level": "high",
+        "description": "最大化機能、リサイズ機能、モバイル対応の追加。状態管理の大幅拡張が必要"
+      },
+      {
+        "path": "src/components/worktree/PaneResizer.tsx",
+        "change_type": "modification",
+        "current_lines": 255,
+        "estimated_change_lines": 50,
+        "risk_level": "medium",
+        "description": "onDoubleClick, minRatio props追加。後方互換性維持が必要"
+      },
+      {
+        "path": "src/types/markdown-editor.ts",
+        "change_type": "modification",
+        "current_lines": 193,
+        "estimated_change_lines": 30,
+        "risk_level": "low",
+        "description": "EditorLayoutState型、localStorage key定数の追加"
+      },
+      {
+        "path": "src/hooks/useIsMobile.ts",
+        "change_type": "no_change",
+        "current_lines": 81,
+        "estimated_change_lines": 0,
+        "risk_level": "none",
+        "description": "既存フックをそのまま使用可能"
+      },
+      {
+        "path": "src/hooks/useSwipeGesture.ts",
+        "change_type": "no_change",
+        "current_lines": 205,
+        "estimated_change_lines": 0,
+        "risk_level": "none",
+        "description": "既存フックをそのまま使用可能。onSwipeDownコールバックで最大化解除を実装"
+      },
+      {
+        "path": "src/hooks/useVirtualKeyboard.ts",
+        "change_type": "no_change",
+        "current_lines": 105,
+        "estimated_change_lines": 0,
+        "risk_level": "none",
+        "description": "既存フックをそのまま使用可能"
+      },
+      {
+        "path": "tests/unit/components/MarkdownEditor.test.tsx",
+        "change_type": "modification",
+        "current_lines": 646,
+        "estimated_change_lines": 100,
+        "risk_level": "medium",
+        "description": "最大化、リサイズ、モバイル表示のテスト追加"
+      },
+      {
+        "path": "tests/unit/components/PaneResizer.test.tsx",
+        "change_type": "modification",
+        "current_lines": 285,
+        "estimated_change_lines": 50,
+        "risk_level": "low",
+        "description": "ダブルクリック、最小幅制限のテスト追加"
+      },
+      {
+        "path": "tests/e2e/markdown-editor.spec.ts",
+        "change_type": "modification",
+        "current_lines": 382,
+        "estimated_change_lines": 80,
+        "risk_level": "medium",
+        "description": "デスクトップでの最大化、リサイズE2Eテスト追加"
+      }
+    ],
+    "new_files": [
+      {
+        "path": "src/hooks/useFullscreen.ts",
+        "estimated_lines": 80,
+        "description": "Fullscreen API操作とフォールバック処理のカスタムフック（新規作成推奨）"
+      },
+      {
+        "path": "src/hooks/useLocalStorageState.ts",
+        "estimated_lines": 50,
+        "description": "localStorage永続化対応のstate hook（新規作成推奨）。既存の分散したlocalStorage操作を統一"
+      },
+      {
+        "path": "tests/e2e/markdown-editor-mobile.spec.ts",
+        "estimated_lines": 150,
+        "description": "モバイルビューポート専用E2Eテスト"
+      },
+      {
+        "path": "src/config/z-index.ts",
+        "estimated_lines": 20,
+        "description": "z-index値の一元管理設定ファイル（推奨）"
+      }
+    ],
+    "dependencies": [
+      {
+        "name": "@types/dom-screen-wake-lock",
+        "type": "devDependency",
+        "required": false,
+        "reason": "Fullscreen API型定義補完（TypeScript 5.0+では不要の可能性あり）"
+      }
+    ],
+    "breaking_changes": [
+      {
+        "id": "BC-001",
+        "component": "PaneResizer",
+        "description": "新規propsの追加により、既存使用箇所でTypeScriptエラーが発生する可能性（propsがoptionalであれば問題なし）",
+        "mitigation": "全ての新規propsをoptionalとして定義し、デフォルト値を設定する",
+        "severity": "low"
+      },
+      {
+        "id": "BC-002",
+        "component": "MarkdownEditor",
+        "description": "EditorPropsに新規props（initialMaximized等）を追加する場合、呼び出し側への影響がある",
+        "mitigation": "新規propsは全てoptionalとし、既存の呼び出しコードの変更を不要にする",
+        "severity": "low"
+      }
+    ],
+    "risk_level": "medium",
+    "confidence": "high"
+  },
+  "performance_implications": [
+    {
+      "area": "バンドルサイズ",
+      "impact": "minimal",
+      "description": "Fullscreen API、Pointer Events APIはブラウザ標準APIであり、追加ライブラリは不要。バンドルサイズへの影響は最小限"
+    },
+    {
+      "area": "ランタイムパフォーマンス",
+      "impact": "low",
+      "description": "リサイズ中のrequestAnimationFrameスロットリングにより、高頻度のre-renderを防止。適切に実装すれば影響は最小限"
+    },
+    {
+      "area": "メモリ使用量",
+      "impact": "minimal",
+      "description": "新規state（isMaximized, splitRatio）の追加による影響は無視できるレベル"
+    },
+    {
+      "area": "初期レンダリング",
+      "impact": "low",
+      "description": "localStorageからの初期値読み込みが追加されるが、同期処理のため遅延は最小限"
+    }
+  ],
+  "mobile_specific_impacts": [
+    {
+      "area": "Fullscreen API対応",
+      "impact": "iOS Safariでの制限",
+      "description": "iOS SafariはFullscreen APIを完全にはサポートしていない。CSS固定ポジションによるフォールバックが必須",
+      "mitigation": "Issueで言及済み。position: fixed + inset: 0 によるモーダル表示"
+    },
+    {
+      "area": "タッチ操作",
+      "impact": "リサイズハンドルのタッチ領域",
+      "description": "タッチ操作でのリサイズは44px以上のタッチターゲットが必要（WCAG 2.1 Target Size）",
+      "mitigation": "Issueで言及済み。最低44pxのタッチ領域確保"
+    },
+    {
+      "area": "Portrait/Landscape切替",
+      "impact": "レイアウト自動切替",
+      "description": "縦向き時はタブ切替UI、横向き時はSplit View。orientationchange時のレイアウト再計算が必要",
+      "mitigation": "useIsMobileフックに加え、orientationを監視するロジックが必要"
+    },
+    {
+      "area": "仮想キーボード",
+      "impact": "レイアウト調整",
+      "description": "仮想キーボード表示時にエディタ領域が押し上げられる。visualViewport APIによる調整が必要",
+      "mitigation": "既存useVirtualKeyboardフックを活用"
+    }
+  ],
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "主要変更対象。最大化機能、リサイズ機能の統合先"
+    },
+    {
+      "file": "src/components/worktree/PaneResizer.tsx",
+      "relevance": "拡張対象。onDoubleClick, minRatio追加"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "relevance": "型定義拡張対象。EditorLayoutState追加"
+    },
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "既存フック再利用。モバイル判定に使用"
+    },
+    {
+      "file": "src/hooks/useSwipeGesture.ts",
+      "relevance": "既存フック再利用。スワイプジェスチャー検出"
+    },
+    {
+      "file": "src/hooks/useVirtualKeyboard.ts",
+      "relevance": "既存フック再利用。仮想キーボード検出"
+    },
+    {
+      "file": "dev-reports/design/issue-49-markdown-editor-design-policy.md",
+      "relevance": "Issue #49設計書。既存設計との整合性確認に参照"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトガイドライン。実装後の更新が必要"
+    },
+    {
+      "file": "dev-reports/design/issue-49-markdown-editor-design-policy.md",
+      "relevance": "Issue #49設計書。本Issue実装の基盤となる設計"
+    }
+  ]
+}

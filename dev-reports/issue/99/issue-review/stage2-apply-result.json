@@ -1,0 +1,86 @@
+{
+  "issue_number": 99,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_date": "2026-01-30",
+  "applied_items": [
+    {
+      "id": "SF-001",
+      "category": "明確性",
+      "issue": "最大化表示時のlocalStorage保存キー名が未定義",
+      "action_taken": "localStorageキー`commandmate:md-editor-maximized`を明示的に定義。機能要件、受け入れ条件、技術的考慮事項の3箇所に追記。",
+      "locations_updated": [
+        "## 機能要件 > 1. 最大化表示機能 > デスクトップ",
+        "## 受け入れ条件 > 必須",
+        "## 技術的考慮事項 > localStorage キー一覧"
+      ]
+    },
+    {
+      "id": "SF-002",
+      "category": "技術的妥当性",
+      "issue": "Fullscreen APIのブラウザサポートとフォールバック戦略が未定義",
+      "action_taken": "iOS Safari等のFullscreen API非対応時のフォールバック戦略を追加。CSS固定ポジション（`position: fixed` + `z-index: 9999` + `inset: 0`）によるモーダル表示を明記。",
+      "locations_updated": [
+        "## 機能要件 > 1. 最大化表示機能 > モバイル",
+        "## 受け入れ条件 > 必須（新規項目追加）",
+        "## 技術的考慮事項 > 実装アプローチ表"
+      ]
+    },
+    {
+      "id": "SF-003",
+      "category": "整合性",
+      "issue": "既存PaneResizerコンポーネントとの関係性が不明確",
+      "action_taken": "「既存コンポーネントとの関係」セクションを新設。PaneResizerの再利用方針、既存機能の活用点、拡張が必要な点を明記。",
+      "locations_updated": [
+        "## 機能要件 > 2. Split Viewの表示領域リサイズ > 既存コンポーネントとの関係（新規セクション）",
+        "## 技術的考慮事項 > 実装アプローチ表"
+      ]
+    },
+    {
+      "id": "SF-004",
+      "category": "整合性",
+      "issue": "Issue #49 設計書との状態管理方針の不整合",
+      "action_taken": "「状態管理の拡張方針」セクションを新設。最大化状態はViewModeとは独立管理する方針を明記。型定義の拡張例（EditorLayoutState）とVIEW_MODE_STRATEGIESとの関係を説明。",
+      "locations_updated": [
+        "## 技術的考慮事項 > 状態管理の拡張方針（新規セクション）"
+      ]
+    }
+  ],
+  "skipped_items": [],
+  "nice_to_have_notes": [
+    {
+      "id": "NTH-001",
+      "note": "リサイズハンドルのビジュアルフィードバック詳細は既存PaneResizerの再利用により解決"
+    },
+    {
+      "id": "NTH-002",
+      "note": "既存フックの再利用可能性を技術的考慮事項セクションに追記"
+    },
+    {
+      "id": "NTH-003",
+      "note": "E2Eテストのビューポートサイズは実装時に詳細化予定"
+    }
+  ],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/99",
+  "changes_summary": {
+    "sections_added": [
+      "既存コンポーネントとの関係",
+      "状態管理の拡張方針",
+      "localStorage キー一覧",
+      "再利用可能な既存フック"
+    ],
+    "sections_modified": [
+      "機能要件 > 1. 最大化表示機能 > デスクトップ",
+      "機能要件 > 1. 最大化表示機能 > モバイル",
+      "受け入れ条件 > 必須",
+      "技術的考慮事項 > 実装アプローチ"
+    ],
+    "acceptance_criteria_added": [
+      "リサイズ位置が`commandmate:md-editor-split-ratio`キーでlocalStorageに保存・復元される",
+      "最大化状態が`commandmate:md-editor-maximized`キーでlocalStorageに保存・復元される",
+      "Fullscreen API非対応ブラウザでもCSS固定ポジションによるフォールバックが機能する"
+    ]
+  }
+}

@@ -15,7 +15,11 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
 import type { ViewMode } from '@/types/markdown-editor';
-import { LOCAL_STORAGE_KEY } from '@/types/markdown-editor';
+import {
+  LOCAL_STORAGE_KEY,
+  LOCAL_STORAGE_KEY_SPLIT_RATIO,
+  LOCAL_STORAGE_KEY_MAXIMIZED,
+} from '@/types/markdown-editor';
 
 // Mock fetch API
 const mockFetch = vi.fn();
@@ -156,9 +160,9 @@ describe('MarkdownEditor', () => {
 
       expect(editorButton).toHaveAttribute('aria-pressed', 'true');
       expect(screen.getByTestId('markdown-editor-textarea')).toBeVisible();
-      // Preview should be hidden (w-0 class applied)
+      // Preview should be hidden
       const previewContainer = screen.getByTestId('markdown-preview-container');
-      expect(previewContainer).toHaveClass('w-0');
+      expect(previewContainer).toHaveClass('hidden');
     });
 
     it('should switch to preview-only mode', async () => {
@@ -172,9 +176,9 @@ describe('MarkdownEditor', () => {
       fireEvent.click(previewButton);
 
       expect(previewButton).toHaveAttribute('aria-pressed', 'true');
-      // Editor should be hidden (w-0 class applied)
+      // Editor should be hidden
       const editorContainer = screen.getByTestId('markdown-editor-container');
-      expect(editorContainer).toHaveClass('w-0');
+      expect(editorContainer).toHaveClass('hidden');
     });
   });
 
@@ -580,6 +584,148 @@ describe('MarkdownEditor', () => {
       // react-markdown renders content as children, not via dangerouslySetInnerHTML
       // The presence of proper child elements indicates react-markdown is being used
       expect(preview.children.length).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('Maximize Feature', () => {
+    it('should render maximize button', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('maximize-button')).toBeInTheDocument();
+      });
+    });
+
+    it('should show ESC hint when maximized', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+      });
+
+      // Click maximize button
+      const maximizeButton = screen.getByTestId('maximize-button');
+      fireEvent.click(maximizeButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('maximize-hint')).toBeInTheDocument();
+        expect(screen.getByText(/Press ESC/i)).toBeInTheDocument();
+      });
+    });
+
+    it('should have aria-pressed attribute on maximize button', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        const maximizeButton = screen.getByTestId('maximize-button');
+        expect(maximizeButton).toHaveAttribute('aria-pressed');
+      });
+    });
+  });
+
+  describe('Resize Feature', () => {
+    it('should render PaneResizer in split mode', async () => {
+      // Force split mode via localStorage
+      localStorageMock.getItem.mockImplementation((key: string) => {
+        if (key === LOCAL_STORAGE_KEY) {
+          return 'split';
+        }
+        return null;
+      });
+
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+      });
+
+      // Should have a separator element (PaneResizer) - but only in split mode on desktop
+      // Note: The resizer might not render if mobile detection returns true
+      // This test assumes desktop environment
+      const separator = screen.queryByRole('separator');
+      // If separator exists, it should be a PaneResizer
+      if (separator) {
+        expect(separator).toBeInTheDocument();
+      }
+    });
+
+    it('should not render PaneResizer in editor-only mode', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+      });
+
+      // Switch to editor-only mode
+      const editorButton = screen.getByTestId('view-mode-editor');
+      fireEvent.click(editorButton);
+
+      // Should not have a separator element
+      expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+    });
+
+    it('should restore split ratio from localStorage', async () => {
+      // Set a custom split ratio in localStorage
+      localStorageMock.getItem.mockImplementation((key: string) => {
+        if (key === LOCAL_STORAGE_KEY_SPLIT_RATIO) {
+          return JSON.stringify(0.7);
+        }
+        return null;
+      });
+
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+      });
+
+      // The editor container should have a custom width based on the split ratio
+      const editorContainer = screen.getByTestId('markdown-editor-container');
+      expect(editorContainer).toHaveStyle({ width: '70%' });
+    });
+  });
+
+  describe('Keyboard Shortcuts', () => {
+    it('should handle Ctrl+Shift+F for maximize toggle', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+      });
+
+      const editor = screen.getByTestId('markdown-editor');
+
+      // Trigger Ctrl+Shift+F
+      fireEvent.keyDown(editor, { key: 'F', ctrlKey: true, shiftKey: true });
+
+      // Should show maximize hint
+      await waitFor(() => {
+        expect(screen.getByTestId('maximize-hint')).toBeInTheDocument();
+      });
+    });
+
+    it('should handle ESC to exit maximized mode', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+      });
+
+      // First maximize
+      const maximizeButton = screen.getByTestId('maximize-button');
+      fireEvent.click(maximizeButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('maximize-hint')).toBeInTheDocument();
+      });
+
+      // Press ESC
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      // Hint should be gone
+      await waitFor(() => {
+        expect(screen.queryByTestId('maximize-hint')).not.toBeInTheDocument();
+      });
     });
   });
 

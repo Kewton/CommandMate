@@ -1,0 +1,234 @@
+{
+  "issue_number": 99,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "result": "approved_with_recommendations",
+  "security_score": "A-",
+  "owasp_top_10_check": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "findings": "既存のisPathSafe()によるパストラバーサル防止が維持される。新機能はクライアントサイドのUI改善のみで、APIアクセス制御に影響なし"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "findings": "本機能では暗号化処理を行わない"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "findings": "既存のrehype-sanitizeによるXSS防止が最大化モードでも継続使用される。設計書セクション7.1で明記"
+    },
+    "A04_insecure_design": {
+      "status": "pass_with_notes",
+      "findings": "z-index 9999による最大化は他のUI要素を覆い隠す可能性があるが、ESCキーでの解除機能により適切に制御可能"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "findings": "localStorageには表示設定のみを保存し、機密情報は含まれない。設計書セクション7.3で明記"
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "findings": "新規の外部依存パッケージは追加されない。既存のreact-markdown、rehype-sanitize等を継続使用"
+    },
+    "A07_authentication_failures": {
+      "status": "not_applicable",
+      "findings": "本機能は認証機能に影響しない"
+    },
+    "A08_data_integrity_failures": {
+      "status": "pass",
+      "findings": "ファイル保存は既存のAPIを使用し、既存のバリデーション（isPathSafe、isValidNewName）が適用される"
+    },
+    "A09_logging_monitoring_failures": {
+      "status": "pass_with_notes",
+      "findings": "Fullscreen API失敗時のconsole.warnは設計書に記載。本番環境でのエラー監視は既存のログ基盤に依存"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "findings": "本機能ではサーバーサイドリクエストを行わない"
+    }
+  },
+  "security_findings": [
+    {
+      "id": "SEC-001",
+      "severity": "low",
+      "category": "XSS防止",
+      "title": "XSS保護の継続確認",
+      "status": "confirmed",
+      "description": "既存のrehype-sanitizeによるXSS保護が最大化モードでも維持されることを設計書セクション7.1で明記済み。ReactMarkdownコンポーネントのrehypePluginsにrehypeSanitize [SEC-MF-001]が含まれていることを確認",
+      "existing_protection": "src/components/worktree/MarkdownEditor.tsx line 466: rehypeSanitize"
+    },
+    {
+      "id": "SEC-002",
+      "severity": "low",
+      "category": "キーボードショートカット",
+      "title": "ブラウザショートカットとの競合回避",
+      "status": "confirmed",
+      "description": "Ctrl/Cmd+Shift+Fを最大化トグルに使用。これはブラウザの検索（Ctrl+F）や全画面（F11）とは競合しない適切な選択",
+      "recommendation": "実装時にe.preventDefault()を確実に呼び出すこと（設計書のコード例に記載済み）"
+    },
+    {
+      "id": "SEC-003",
+      "severity": "info",
+      "category": "localStorage",
+      "title": "localStorageデータの安全性",
+      "status": "confirmed",
+      "description": "保存される値はviewMode（'split'|'editor'|'preview'）、splitRatio（0.2-0.8の数値）、isMaximized（boolean）のみ。機密情報は含まれない",
+      "recommendation": "読み込み時のバリデーションを実装すること。既存のisValidViewMode()パターンを参照"
+    },
+    {
+      "id": "SEC-004",
+      "severity": "medium",
+      "category": "Fullscreen API",
+      "title": "Fullscreen API悪用防止",
+      "status": "requires_attention",
+      "description": "Fullscreen APIはフィッシング攻撃（偽のブラウザUIを表示）に悪用される可能性がある。ただし本設計ではCSS固定ポジション（fallbackMode）を優先使用し、Fullscreen APIはモバイルの没入体験用途に限定",
+      "recommendation": "1. Fullscreen APIは必ずユーザーアクション（ボタンクリック）から呼び出すこと 2. 最大化状態であることを視覚的に示すインジケーター（ESCで解除のヒント等）を表示すること",
+      "mitigations_in_design": [
+        "ESCキーで最大化を解除可能",
+        "スワイプダウンで解除可能（モバイル）",
+        "CSS固定ポジションをフォールバックとして使用"
+      ]
+    },
+    {
+      "id": "SEC-005",
+      "severity": "low",
+      "category": "z-index overlay",
+      "title": "z-index 9999による他UI要素の隠蔽",
+      "status": "confirmed",
+      "description": "MAXIMIZED_EDITOR: 9999は他の全てのz-index（Toast z-50=300相当、Modal z-50=200相当）より高い。これによりToastやModalが最大化エディタの下に隠れる可能性がある",
+      "recommendation": "1. 最大化時もToast通知は表示されるべき。ToastContainerはMarkdownEditor内部にあるため問題なし 2. 将来z-index統合時にMAXIMIZED_EDITOR未満のOVERLAY層を定義することを検討"
+    },
+    {
+      "id": "SEC-006",
+      "severity": "info",
+      "category": "モバイルセキュリティ",
+      "title": "モバイル固有のセキュリティ考慮",
+      "status": "confirmed",
+      "description": "タブ切替UIはonClick=setViewModeのみで実装され、外部データを受け取らない。useSwipeGestureはタッチイベントの座標のみを処理し、安全",
+      "existing_protection": "useSwipeGesture hookはtouchイベントのclientX/clientYのみを使用"
+    },
+    {
+      "id": "SEC-007",
+      "severity": "info",
+      "category": "エラーメッセージ",
+      "title": "エラーメッセージでの情報漏洩",
+      "status": "confirmed",
+      "description": "設計書のuseFullscreenフックではエラーをconsole.warnで出力。本番環境でのスタックトレース露出に注意が必要だが、クライアントサイドのみであり、サーバーサイドの機密情報漏洩リスクはない",
+      "existing_protection": "src/lib/file-operations.ts: createErrorResult()は絶対パスを含まない [SEC-SF-002]"
+    },
+    {
+      "id": "SEC-008",
+      "severity": "info",
+      "category": "入力バリデーション",
+      "title": "splitRatio値のバリデーション",
+      "status": "confirmed",
+      "description": "設計書のコード例でMath.max(0.2, Math.min(0.8, newRatio))によるクランプ処理が記載。localStorage読み込み時も同様のバリデーションが必要",
+      "recommendation": "useLocalStorageStateフックにバリデーション関数を渡せるインターフェースを検討"
+    }
+  ],
+  "positive_findings": [
+    {
+      "id": "PF-001",
+      "category": "XSS",
+      "description": "既存のrehype-sanitizeによるXSS保護を最大化モードでも維持する設計は適切"
+    },
+    {
+      "id": "PF-002",
+      "category": "キーボードショートカット",
+      "description": "Ctrl/Cmd+Shift+Fはブラウザのデフォルトショートカット（Ctrl+F, F11等）と競合しない適切な選択"
+    },
+    {
+      "id": "PF-003",
+      "category": "最小権限の原則",
+      "description": "localStorageに機密情報を保存しない設計は情報漏洩リスクを最小化"
+    },
+    {
+      "id": "PF-004",
+      "category": "フォールバック設計",
+      "description": "Fullscreen APIが失敗した場合のCSS固定ポジションフォールバックは堅牢な設計"
+    },
+    {
+      "id": "PF-005",
+      "category": "既存セキュリティ基盤の活用",
+      "description": "ファイル操作は既存API（isPathSafe、rehype-sanitize）を使用し、新たな攻撃面を作らない"
+    },
+    {
+      "id": "PF-006",
+      "category": "ユーザー制御",
+      "description": "ESCキー、スワイプダウン、最大化ボタンと複数の解除方法を提供"
+    }
+  ],
+  "recommendations": [
+    {
+      "id": "REC-001",
+      "priority": "medium",
+      "title": "localStorage読み込み時のバリデーション強化",
+      "description": "splitRatio、isMaximizedの読み込み時に型チェックと範囲チェックを実装すること",
+      "implementation_hint": "既存のisValidViewMode()パターンに従い、isValidSplitRatio(value): value is number && value >= 0.2 && value <= 0.8を実装"
+    },
+    {
+      "id": "REC-002",
+      "priority": "low",
+      "title": "最大化状態の視覚的インジケーター",
+      "description": "最大化時に「ESCで解除」のヒントを表示し、ユーザーが閉じ込められた感覚を軽減",
+      "implementation_hint": "Toolbarに条件付きでヒントテキストを表示"
+    },
+    {
+      "id": "REC-003",
+      "priority": "low",
+      "title": "Fullscreen API呼び出しのユーザーアクション保証",
+      "description": "requestFullscreenは必ずボタンクリックハンドラから呼び出すこと（自動呼び出しはブラウザにブロックされる）",
+      "implementation_hint": "設計書のコード例では最大化ボタンクリック時に呼び出す設計であり問題なし"
+    }
+  ],
+  "scope_excluded_items": [
+    {
+      "id": "EXCL-001",
+      "description": "既存z-indexの一元管理移行は別Issue（IA-002）で対応予定"
+    },
+    {
+      "id": "EXCL-002",
+      "description": "自動保存機能はスコープ外（設計書セクション1.3）"
+    }
+  ],
+  "implementation_security_notes": [
+    {
+      "phase": 1,
+      "component": "useLocalStorageState",
+      "notes": [
+        "typeof window !== 'undefined'チェックでSSRエラーを防止",
+        "JSON.parseのtry-catchでmalformed dataを処理",
+        "バリデーション関数による値の検証"
+      ]
+    },
+    {
+      "phase": 1,
+      "component": "useFullscreen",
+      "notes": [
+        "try-catchでAPI失敗を捕捉しfallbackModeを使用",
+        "console.warnでデバッグ情報を出力（本番では適宜抑制）",
+        "ユーザーアクションからの呼び出しを前提"
+      ]
+    },
+    {
+      "phase": 2,
+      "component": "MarkdownEditor",
+      "notes": [
+        "rehype-sanitizeの継続使用を確認",
+        "e.preventDefault()でショートカット競合を防止",
+        "splitRatioのクランプ処理（0.2-0.8）"
+      ]
+    }
+  ],
+  "reviewed_files": [
+    "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/types/markdown-editor.ts",
+    "src/hooks/useSwipeGesture.ts",
+    "src/lib/file-operations.ts",
+    "src/lib/path-validator.ts"
+  ],
+  "reviewer": "architecture-review-agent",
+  "review_date": "2026-01-30",
+  "review_duration_minutes": 15
+}

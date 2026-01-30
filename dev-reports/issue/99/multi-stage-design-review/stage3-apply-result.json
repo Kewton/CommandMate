@@ -1,0 +1,102 @@
+{
+  "status": "completed",
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "issue_number": 99,
+  "apply_date": "2026-01-30",
+  "design_doc_path": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+  "applied_findings": {
+    "total": 4,
+    "details": [
+      {
+        "id": "IA-001",
+        "severity": "high",
+        "title": "新規フックのテストファイルが影響ファイル一覧に未記載",
+        "action": "10.2新規作成にtests/unit/hooks/useFullscreen.test.ts（50行）、tests/unit/hooks/useLocalStorageState.test.ts（40行）を追加",
+        "section_modified": "10.2 新規作成"
+      },
+      {
+        "id": "IA-002",
+        "severity": "medium",
+        "title": "既存z-indexとの一元化計画が不明確",
+        "action": "12.2将来の改善候補にz-index段階的統合計画を追記。本Issueのスコープ外として明記",
+        "section_modified": "12.2 将来の改善候補"
+      },
+      {
+        "id": "IA-003",
+        "severity": "medium",
+        "title": "後方互換性テストの明示が必要",
+        "action": "9.1単体テストのPaneResizerテストケースに「後方互換性テスト（既存propsのみでの動作確認）」を追加",
+        "section_modified": "9.1 単体テスト"
+      },
+      {
+        "id": "IA-005",
+        "severity": "medium",
+        "title": "Fullscreen API失敗時のエラーハンドリング",
+        "action": "3.2のuseFullscreen設計にtry-catchでエラーを捕捉し、fallbackModeをtrueに設定する処理を追加",
+        "section_modified": "3.2 Fullscreen APIフォールバック戦略"
+      }
+    ]
+  },
+  "skipped_findings": {
+    "total": 1,
+    "details": [
+      {
+        "id": "IA-004",
+        "severity": "medium",
+        "title": "VIEW_MODE_STRATEGIESとの整合性",
+        "reason": "Stage 2 (SF-002)で対応済み。splitモード時の動的幅設定についてコード例にコメントで明記済み"
+      }
+    ]
+  },
+  "info_recorded": {
+    "total": 6,
+    "details": [
+      {
+        "id": "IA-006",
+        "title": "containerRef追加の影響",
+        "note": "実装時にuseRefでcontainerRefを追加し、最外側divにアタッチする"
+      },
+      {
+        "id": "IA-007",
+        "title": "CLAUDE.md更新の詳細が未定義",
+        "note": "「最近の実装機能」セクションにIssue #99の機能概要を追記"
+      },
+      {
+        "id": "IA-008",
+        "title": "最大化ボタンのaria属性",
+        "note": "実装時にaria-label=\"Maximize editor\", aria-expanded={isMaximized}を追加"
+      },
+      {
+        "id": "IA-009",
+        "title": "既存E2Eテストへの影響確認",
+        "note": "既存テストのセレクタ（data-testid）が変更されないことを確認"
+      },
+      {
+        "id": "IA-010",
+        "title": "Fullscreen APIのブラウザサポート",
+        "note": "Safari 12+以降を想定。webkitRequestFullscreenフォールバック実装済み"
+      },
+      {
+        "id": "IA-011",
+        "title": "localStorage読み込み時のSSR考慮",
+        "note": "typeof window !== 'undefined'のチェックを実装に含める"
+      }
+    ]
+  },
+  "sections_added": [
+    "Stage 3: 影響分析レビュー（13. レビュー履歴）"
+  ],
+  "sections_modified": [
+    "3.2 Fullscreen APIフォールバック戦略",
+    "9.1 単体テスト",
+    "10.2 新規作成",
+    "12.2 将来の改善候補"
+  ],
+  "verification": {
+    "design_doc_updated": true,
+    "review_history_added": true,
+    "all_must_fix_addressed": true,
+    "all_should_fix_addressed": true
+  }
+}

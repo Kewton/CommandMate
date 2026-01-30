@@ -27,6 +27,10 @@ export interface PaneResizerProps {
   orientation?: ResizerOrientation;
   /** Current position value for aria-valuenow (percentage) */
   ariaValueNow?: number;
+  /** Optional callback when double-clicked (e.g., reset to 50:50) */
+  onDoubleClick?: () => void;
+  /** Minimum ratio (0.0-1.0) - informational only, parent must enforce (default: 0.1) */
+  minRatio?: number;
 }
 
 // ============================================================================
@@ -101,6 +105,8 @@ export const PaneResizer = memo(function PaneResizer({
   onResize,
   orientation = 'horizontal',
   ariaValueNow = 50,
+  onDoubleClick,
+  minRatio: _minRatio = 0.1, // eslint-disable-line @typescript-eslint/no-unused-vars
 }: PaneResizerProps) {
   const [isDragging, setIsDragging] = useState(false);
   const startPositionRef = useRef<number>(0);
@@ -170,6 +176,15 @@ export const PaneResizer = memo(function PaneResizer({
   const handleDragEnd = useCallback(() => {
     setIsDragging(false);
   }, []);
+
+  /**
+   * Handle double click to reset ratio
+   */
+  const handleDoubleClick = useCallback(() => {
+    if (onDoubleClick) {
+      onDoubleClick();
+    }
+  }, [onDoubleClick]);
 
   /**
    * Handle keyboard navigation for accessibility
@@ -247,6 +262,7 @@ export const PaneResizer = memo(function PaneResizer({
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
       onKeyDown={handleKeyDown}
+      onDoubleClick={handleDoubleClick}
     />
   );
 });

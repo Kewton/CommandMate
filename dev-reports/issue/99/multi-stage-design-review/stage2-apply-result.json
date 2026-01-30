@@ -1,0 +1,62 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "issue_number": 99,
+  "apply_date": "2026-01-30",
+  "status": "completed",
+  "design_doc_path": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "finding_ref": "CS-001",
+        "title": "LOCAL_STORAGE_KEYS定数名の不整合",
+        "status": "applied",
+        "changes": [
+          {
+            "section": "4.1 型定義",
+            "description": "LOCAL_STORAGE_KEYSオブジェクト形式を、既存のLOCAL_STORAGE_KEY命名パターンに合わせて個別定数（LOCAL_STORAGE_KEY_SPLIT_RATIO, LOCAL_STORAGE_KEY_MAXIMIZED）に変更"
+          },
+          {
+            "section": "11. 実装チェックリスト Phase 1",
+            "description": "チェックリスト項目を新しい定数名に更新"
+          }
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "finding_ref": "CS-002",
+        "title": "useSwipeGestureフックのAPI使用方法の不整合",
+        "status": "applied",
+        "changes": [
+          {
+            "section": "5.1 MarkdownEditor拡張",
+            "description": "useSwipeGestureの戻り値を正しいAPIに修正。`const { onSwipeDown } = useSwipeGesture(...)` を `const { ref: swipeRef } = useSwipeGesture(...)` に変更し、refベースの実装であることをコメントで明記"
+          }
+        ]
+      },
+      {
+        "id": "SF-002",
+        "finding_ref": "CS-007",
+        "title": "VIEW_MODE_STRATEGIESの使用方法",
+        "status": "applied",
+        "changes": [
+          {
+            "section": "5.1 MarkdownEditor拡張",
+            "description": "splitモード時はsplitRatioで動的幅を設定しVIEW_MODE_STRATEGIESの固定幅は使用しないこと、editor/previewモード時はstrategyの固定幅を使用することをコード例にコメントと実装例として追記"
+          }
+        ]
+      }
+    ]
+  },
+  "review_history_updated": true,
+  "summary": {
+    "must_fix_applied": 1,
+    "must_fix_total": 1,
+    "should_fix_applied": 2,
+    "should_fix_total": 2,
+    "completion_rate": "100%"
+  }
+}

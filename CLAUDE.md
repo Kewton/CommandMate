@@ -132,6 +132,9 @@ src/
 | `src/config/file-operations.ts` | 再帰削除の安全設定 |
 | `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義 |
 | `src/hooks/useContextMenu.ts` | コンテキストメニュー状態管理フック |
+| `src/hooks/useFullscreen.ts` | Fullscreen API ラッパー（CSSフォールバック対応） |
+| `src/hooks/useLocalStorageState.ts` | localStorage永続化フック（バリデーション対応） |
+| `src/config/z-index.ts` | z-index値の一元管理 |
 | `src/config/uploadable-extensions.ts` | アップロード可能拡張子・MIMEタイプ・マジックバイト検証 |
 | `src/config/image-extensions.ts` | 画像ファイル拡張子・マジックバイト・SVG XSS検証 |
 | `src/components/worktree/ImageViewer.tsx` | 画像表示コンポーネント |
@@ -292,6 +295,19 @@ npm run db:reset      # DBリセット
   - `src/config/uploadable-extensions.ts` - アップロード可能拡張子・検証ロジック
   - `src/app/api/worktrees/[id]/upload/[...path]/route.ts` - アップロードAPIエンドポイント
 - 詳細: [設計書](./dev-reports/design/issue-94-file-upload-design-policy.md)
+
+### Issue #99: マークダウンエディタ表示機能改善
+- **最大化機能**: エディタを画面全体に最大化表示（Ctrl/Cmd+Shift+F、ESCで解除）
+- **リサイズ機能**: Split View時にドラッグでエディタ/プレビュー比率を変更（ダブルクリックで50:50リセット）
+- **モバイル対応**: 縦向き時はタブ切替UI、スワイプダウンで最大化解除
+- **状態永続化**: リサイズ比率と最大化状態をlocalStorageに保存・復元
+- **Fullscreen API**: CSSフォールバック対応（iOS Safari等）
+- **主要コンポーネント**:
+  - `src/hooks/useFullscreen.ts` - Fullscreen API ラッパー
+  - `src/hooks/useLocalStorageState.ts` - localStorage永続化フック
+  - `src/config/z-index.ts` - z-index値の一元管理
+  - `src/components/worktree/PaneResizer.tsx` - onDoubleClick, minRatio props追加
+- 詳細: [設計書](./dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md)
 
 ### Issue #49: マークダウンエディタとビューワー
 - **マークダウンエディタ**: GUIからマークダウンファイルの作成・編集・保存が可能

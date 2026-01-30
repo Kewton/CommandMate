@@ -1,0 +1,109 @@
+{
+  "issue_number": 99,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（Stage 3 影響範囲レビュー）",
+  "apply_date": "2026-01-30",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "status": "applied",
+        "change_summary": "localStorageキー一元管理要件を追加。LOCAL_STORAGE_KEYS定数のコード例を技術的考慮事項に追加し、受け入れ条件にも検証項目を追加"
+      },
+      {
+        "id": "MF-002",
+        "status": "applied",
+        "change_summary": "PaneResizer後方互換性要件を追加。新規propsはoptional必須、既存使用箇所の動作確認必須を明記。受け入れ条件にも検証項目を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "status": "applied",
+        "change_summary": "z-index競合対策セクションを技術的考慮事項に追加。src/config/z-index.ts作成を推奨"
+      },
+      {
+        "id": "SF-002",
+        "status": "applied",
+        "change_summary": "useSwipeGestureのAPI使用方法を明確化（onSwipeDownはコールバック引数として渡す旨を注記）"
+      },
+      {
+        "id": "SF-003",
+        "status": "applied",
+        "change_summary": "テスト影響範囲を明確化。受け入れ条件に具体的なテストファイル名を追加、既存テストパス要件を追加"
+      },
+      {
+        "id": "SF-004",
+        "status": "applied",
+        "change_summary": "モバイルE2Eテスト要件を明確化。markdown-editor-mobile.spec.tsを新規ファイル一覧に追加"
+      },
+      {
+        "id": "SF-005",
+        "status": "applied",
+        "change_summary": "影響ファイル一覧セクションを新規追加。既存ファイル（変更対象/再利用）、新規ファイル（作成推奨）、PaneResizer使用箇所を一覧化"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "status": "skipped",
+        "reason": "requestAnimationFrameの具体的実装例は設計書フェーズで詳細化する方が適切"
+      },
+      {
+        "id": "NTH-002",
+        "status": "skipped",
+        "reason": "キーボードショートカット競合確認は実装フェーズで調査する方が効率的"
+      },
+      {
+        "id": "NTH-003",
+        "status": "skipped",
+        "reason": "CLAUDE.md更新は実装完了後に行うべき作業であり、Issue要件としては不要"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 10,
+    "applied": 7,
+    "skipped": 3,
+    "must_fix_applied": 2,
+    "must_fix_total": 2,
+    "should_fix_applied": 5,
+    "should_fix_total": 5
+  },
+  "changes_made": [
+    {
+      "section": "Split Viewの表示領域リサイズ",
+      "change": "後方互換性要件を追加（MF-002対応）"
+    },
+    {
+      "section": "受け入れ条件",
+      "change": "localStorage一元管理とPaneResizer後方互換性の検証項目を追加"
+    },
+    {
+      "section": "技術的考慮事項",
+      "change": "localStorageキー一元管理セクションを追加（MF-001対応）"
+    },
+    {
+      "section": "技術的考慮事項",
+      "change": "z-index競合対策セクションを追加（SF-001対応）"
+    },
+    {
+      "section": "再利用可能な既存フック",
+      "change": "useSwipeGestureのAPI注記を追加（SF-002対応）"
+    },
+    {
+      "section": "影響ファイル一覧",
+      "change": "新規セクションとして追加（SF-005対応）"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "Stage 3影響範囲レビューの対応履歴を追加"
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/99",
+    "updated_at": "2026-01-30"
+  }
+}
