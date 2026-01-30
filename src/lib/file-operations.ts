@@ -18,11 +18,13 @@ import { DELETE_SAFETY_CONFIG, isProtectedDirectory } from '@/config/file-operat
 
 /**
  * File operation result
+ * [QUALITY-001] size property added for upload response (optional for backward compatibility)
  */
 export interface FileOperationResult {
   success: boolean;
   path?: string;
   content?: string;
+  size?: number;
   error?: {
     code: string;
     message: string;
@@ -31,6 +33,7 @@ export interface FileOperationResult {
 
 /**
  * Error codes for file operations
+ * [CONS-001] Extended with upload-specific error codes
  */
 export type FileOperationErrorCode =
   | 'FILE_NOT_FOUND'
@@ -42,10 +45,18 @@ export type FileOperationErrorCode =
   | 'PROTECTED_DIRECTORY'
   | 'DELETE_LIMIT_EXCEEDED'
   | 'DISK_FULL'
-  | 'INTERNAL_ERROR';
+  | 'INTERNAL_ERROR'
+  // Upload-specific error codes
+  | 'INVALID_EXTENSION'
+  | 'INVALID_MIME_TYPE'
+  | 'INVALID_MAGIC_BYTES'
+  | 'FILE_TOO_LARGE'
+  | 'INVALID_FILENAME'
+  | 'INVALID_FILE_CONTENT';
 
 /**
  * Error messages for each error code
+ * [SEC-005] Upload error messages do not include specific details
  */
 const ERROR_MESSAGES: Record<FileOperationErrorCode, string> = {
   FILE_NOT_FOUND: 'File not found',
@@ -58,13 +69,21 @@ const ERROR_MESSAGES: Record<FileOperationErrorCode, string> = {
   DELETE_LIMIT_EXCEEDED: 'Delete limit exceeded',
   DISK_FULL: 'Disk is full',
   INTERNAL_ERROR: 'Internal error',
+  // Upload-specific error messages [SEC-005]
+  INVALID_EXTENSION: 'Unsupported file type',
+  INVALID_MIME_TYPE: 'Invalid file format',
+  INVALID_MAGIC_BYTES: 'Invalid file format',
+  FILE_TOO_LARGE: 'File size exceeds limit',
+  INVALID_FILENAME: 'Invalid filename',
+  INVALID_FILE_CONTENT: 'Invalid file content',
 };
 
 /**
  * Create an error result
  * [SEC-SF-002] Does not include absolute paths
+ * Exported for use in API routes
  */
-function createErrorResult(code: FileOperationErrorCode, customMessage?: string): FileOperationResult {
+export function createErrorResult(code: FileOperationErrorCode, customMessage?: string): FileOperationResult {
   return {
     success: false,
     error: {
@@ -86,13 +105,39 @@ export function isEditableFile(filePath: string): boolean {
 }
 
 /**
+ * Characters forbidden by various operating systems
+ * [SEC-004] Added for cross-platform compatibility and security
+ */
+const OS_FORBIDDEN_CHARS = /[<>:"|?*]/;
+
+/**
+ * Control characters (ASCII 0x00-0x1F)
+ * [SEC-004] All control characters should be rejected
+ */
+const CONTROL_CHARS = /[\x00-\x1F]/;
+
+/**
+ * Validation options for isValidNewName
+ */
+export interface ValidateNameOptions {
+  /** Enable additional checks for upload security [SEC-004] */
+  forUpload?: boolean;
+}
+
+/**
  * Validate a new file/directory name
  * [SEC-SF-003] Prevents directory traversal via rename
+ * [DRY-001] Unified filename validation for create and upload
+ * [SEC-004] Enhanced validation for upload security
  *
  * @param newName - The new name to validate
+ * @param options - Validation options
  * @returns Validation result
  */
-export function isValidNewName(newName: string): { valid: boolean; error?: string } {
+export function isValidNewName(
+  newName: string,
+  options?: ValidateNameOptions
+): { valid: boolean; error?: string } {
   // Check for empty name
   if (!newName || newName.trim() === '') {
     return { valid: false, error: 'Name cannot be empty' };
@@ -106,6 +151,25 @@ export function isValidNewName(newName: string): { valid: boolean; error?: strin
   // Check for directory separators
   if (newName.includes('/') || newName.includes('\\')) {
     return { valid: false, error: 'Name cannot contain path separators' };
+  }
+
+  // Additional checks for upload
+  if (options?.forUpload) {
+    // [SEC-004] Check for all control characters (includes null bytes, newlines)
+    if (CONTROL_CHARS.test(newName)) {
+      return { valid: false, error: 'Name cannot contain control characters' };
+    }
+
+    // [SEC-004] Check for OS-specific forbidden characters
+    if (OS_FORBIDDEN_CHARS.test(newName)) {
+      return { valid: false, error: 'Name contains forbidden characters' };
+    }
+
+    // [SEC-004] Check for trailing spaces or dots (Windows compatibility)
+    // Allow hidden files starting with dot (like .gitignore)
+    if (newName.endsWith(' ') || newName.endsWith('.')) {
+      return { valid: false, error: 'Name cannot end with space or dot' };
+    }
   }
 
   return { valid: true };
@@ -414,6 +478,60 @@ export async function renameFileOrDirectory(
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === 'EACCES') {
       return createErrorResult('PERMISSION_DENIED');
+    }
+    return createErrorResult('INTERNAL_ERROR');
+  }
+}
+
+/**
+ * Write binary file to the filesystem
+ * [SOLID-001] Follows the same pattern as createFileOrDirectory()
+ * [DRY-002] Includes path validation as defense-in-depth
+ *
+ * @param worktreeRoot - Root directory of the worktree
+ * @param relativePath - Relative path for the new file
+ * @param buffer - Binary content to write
+ * @returns Success or error with size information
+ */
+export async function writeBinaryFile(
+  worktreeRoot: string,
+  relativePath: string,
+  buffer: Buffer
+): Promise<FileOperationResult> {
+  // Validate path (defense-in-depth)
+  if (!isPathSafe(relativePath, worktreeRoot)) {
+    return createErrorResult('INVALID_PATH');
+  }
+
+  const fullPath = join(worktreeRoot, relativePath);
+
+  // Check if file already exists
+  if (existsSync(fullPath)) {
+    return createErrorResult('FILE_EXISTS');
+  }
+
+  try {
+    // Ensure parent directory exists
+    const parentDir = dirname(fullPath);
+    if (!existsSync(parentDir)) {
+      await mkdir(parentDir, { recursive: true });
+    }
+
+    // Write binary file
+    await writeFile(fullPath, buffer);
+
+    return {
+      success: true,
+      path: relativePath,
+      size: buffer.length,
+    };
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'EACCES') {
+      return createErrorResult('PERMISSION_DENIED');
+    }
+    if (nodeError.code === 'ENOSPC') {
+      return createErrorResult('DISK_FULL');
     }
     return createErrorResult('INTERNAL_ERROR');
   }

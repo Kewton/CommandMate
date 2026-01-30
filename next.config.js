@@ -7,7 +7,8 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      bodySizeLimit: '2mb',
+      // [CONS-006] Increased from 2mb to 6mb for file upload support (5MB + overhead)
+      bodySizeLimit: '6mb',
     },
   },
   async headers() {

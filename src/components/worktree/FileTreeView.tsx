@@ -38,6 +38,8 @@ export interface FileTreeViewProps {
   onRename?: (path: string) => void;
   /** Callback when item should be deleted */
   onDelete?: (path: string) => void;
+  /** Callback when file should be uploaded [IMPACT-002] */
+  onUpload?: (targetDir: string) => void;
   /** Additional CSS classes */
   className?: string;
   /** Trigger to refresh the tree (increment to refresh) */
@@ -327,6 +329,7 @@ export const FileTreeView = memo(function FileTreeView({
   onNewDirectory,
   onRename,
   onDelete,
+  onUpload,
   className = '',
   refreshTrigger = 0,
 }: FileTreeViewProps) {
@@ -507,6 +510,7 @@ export const FileTreeView = memo(function FileTreeView({
         onNewDirectory={onNewDirectory}
         onRename={onRename}
         onDelete={onDelete}
+        onUpload={onUpload}
       />
     </div>
   );

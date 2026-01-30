@@ -36,6 +36,8 @@ import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/Lef
 import { FileViewer } from '@/components/worktree/FileViewer';
 import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
 import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
+import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
+import { ToastContainer, useToast } from '@/components/common/Toast';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
@@ -713,6 +715,7 @@ interface MobileContentProps {
   onNewDirectory: (parentPath: string) => void;
   onRename: (path: string) => void;
   onDelete: (path: string) => void;
+  onUpload: (targetDir: string) => void;
   refreshTrigger: number;
 }
 
@@ -732,6 +735,7 @@ const MobileContent = memo(function MobileContent({
   onNewDirectory,
   onRename,
   onDelete,
+  onUpload,
   refreshTrigger,
 }: MobileContentProps) {
   switch (activeTab) {
@@ -767,6 +771,7 @@ const MobileContent = memo(function MobileContent({
             onNewDirectory={onNewDirectory}
             onRename={onRename}
             onDelete={onDelete}
+            onUpload={onUpload}
             refreshTrigger={refreshTrigger}
             className="h-full"
           />
@@ -1155,6 +1160,75 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
   }, [worktreeId, editorFilePath]);
 
+  // Toast state for upload notifications
+  const { toasts, showToast, removeToast } = useToast();
+
+  // Hidden file input ref for upload
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadTargetPathRef = useRef<string>('');
+
+  /** Handle file upload from FileTreeView context menu [IMPACT-004] */
+  const handleUpload = useCallback((targetDir: string) => {
+    uploadTargetPathRef.current = targetDir;
+    fileInputRef.current?.click();
+  }, []);
+
+  /** Handle file input change - perform actual upload */
+  const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input for re-selection of same file
+    e.target.value = '';
+
+    const targetDir = uploadTargetPathRef.current;
+    const ext = `.${file.name.split('.').pop()?.toLowerCase()}`;
+
+    // Client-side validation
+    if (!isUploadableExtension(ext)) {
+      showToast(`Unsupported file type: ${ext}. Allowed: ${UPLOADABLE_EXTENSIONS.join(', ')}`, 'error');
+      return;
+    }
+
+    const maxSize = getMaxFileSize(ext);
+    if (file.size > maxSize) {
+      showToast(`File too large. Maximum size: ${(maxSize / 1024 / 1024).toFixed(1)}MB`, 'error');
+      return;
+    }
+
+    // Build form data
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // Upload API call [API-004] Using /upload/:path endpoint
+    try {
+      const uploadPath = targetDir || '.';
+      const response = await fetch(
+        `/api/worktrees/${worktreeId}/upload/${encodeURIComponent(uploadPath)}`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData?.error?.message || 'Failed to upload file';
+        showToast(errorMessage, 'error');
+        return;
+      }
+
+      const result = await response.json();
+      showToast(`Uploaded: ${result.filename}`, 'success');
+
+      // Refresh file tree [IMPACT-004]
+      setFileTreeRefresh(prev => prev + 1);
+    } catch (err) {
+      console.error('[WorktreeDetailRefactored] Failed to upload:', err);
+      showToast('Upload failed. Please try again.', 'error');
+    }
+  }, [worktreeId, showToast]);
+
   // Auto-yes hook
   const { lastAutoResponse } = useAutoYes({
     worktreeId,
@@ -1311,6 +1385,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                           onNewDirectory={handleNewDirectory}
                           onRename={handleRename}
                           onDelete={handleDelete}
+                          onUpload={handleUpload}
                           refreshTrigger={fileTreeRefresh}
                           className="h-full"
                         />
@@ -1401,6 +1476,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               </div>
             </Modal>
           )}
+          {/* Hidden file input for upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={UPLOADABLE_EXTENSIONS.join(',')}
+            onChange={handleFileInputChange}
+            className="hidden"
+            aria-label="Upload file"
+          />
+          {/* Toast notifications */}
+          <ToastContainer toasts={toasts} onClose={removeToast} />
         </div>
       </ErrorBoundary>
     );
@@ -1446,6 +1532,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onNewDirectory={handleNewDirectory}
             onRename={handleRename}
             onDelete={handleDelete}
+            onUpload={handleUpload}
             refreshTrigger={fileTreeRefresh}
           />
         </main>
@@ -1505,6 +1592,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             </div>
           </Modal>
         )}
+        {/* Hidden file input for upload (Mobile) */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={UPLOADABLE_EXTENSIONS.join(',')}
+          onChange={handleFileInputChange}
+          className="hidden"
+          aria-label="Upload file"
+        />
+        {/* Toast notifications (Mobile) */}
+        <ToastContainer toasts={toasts} onClose={removeToast} />
       </div>
     </ErrorBoundary>
   );

@@ -34,6 +34,7 @@ import { extname } from 'path';
 /**
  * [DRY] Centralized mapping of error codes to HTTP status codes
  * Eliminates duplicate statusMap definitions across handlers
+ * [CONS-001] Extended with upload-specific error codes
  */
 const ERROR_CODE_TO_HTTP_STATUS: Record<string, number> = {
   FILE_NOT_FOUND: 404,
@@ -50,6 +51,13 @@ const ERROR_CODE_TO_HTTP_STATUS: Record<string, number> = {
   FILE_EXISTS: 409,
   DISK_FULL: 507,
   INTERNAL_ERROR: 500,
+  // Upload-specific error codes [CONS-001]
+  INVALID_EXTENSION: 400,
+  INVALID_MIME_TYPE: 400,
+  INVALID_MAGIC_BYTES: 400,
+  FILE_TOO_LARGE: 413,
+  INVALID_FILENAME: 400,
+  INVALID_FILE_CONTENT: 400,
 };
 
 /**

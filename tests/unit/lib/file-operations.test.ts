@@ -19,7 +19,10 @@ import {
   renameFileOrDirectory,
   isEditableFile,
   isValidNewName,
+  writeBinaryFile,
+  createErrorResult,
   FileOperationResult,
+  FileOperationErrorCode,
 } from '@/lib/file-operations';
 
 describe('File Operations', () => {
@@ -85,6 +88,80 @@ describe('File Operations', () => {
 
       const result2 = isValidNewName('   ');
       expect(result2.valid).toBe(false);
+    });
+
+    // [SEC-004] Upload-specific validation tests
+    describe('with forUpload option', () => {
+      it('should reject null bytes for upload', () => {
+        const result = isValidNewName('file\0name.txt', { forUpload: true });
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('control');
+      });
+
+      it('should reject control characters for upload', () => {
+        const result = isValidNewName('file\x01name.txt', { forUpload: true });
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('control');
+      });
+
+      it('should reject newline characters for upload', () => {
+        const result = isValidNewName('file\nname.txt', { forUpload: true });
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('control');
+      });
+
+      it('should reject OS forbidden characters for upload', () => {
+        const result1 = isValidNewName('file<name>.txt', { forUpload: true });
+        expect(result1.valid).toBe(false);
+        expect(result1.error).toContain('forbidden');
+
+        const result2 = isValidNewName('file:name.txt', { forUpload: true });
+        expect(result2.valid).toBe(false);
+
+        const result3 = isValidNewName('file|name.txt', { forUpload: true });
+        expect(result3.valid).toBe(false);
+
+        const result4 = isValidNewName('file?name.txt', { forUpload: true });
+        expect(result4.valid).toBe(false);
+
+        const result5 = isValidNewName('file*name.txt', { forUpload: true });
+        expect(result5.valid).toBe(false);
+      });
+
+      it('should reject trailing space for upload', () => {
+        const result = isValidNewName('filename.txt ', { forUpload: true });
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('space or dot');
+      });
+
+      it('should reject trailing dot for upload', () => {
+        const result = isValidNewName('filename.txt.', { forUpload: true });
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('space or dot');
+      });
+
+      it('should allow normal names for upload', () => {
+        const result = isValidNewName('file.txt', { forUpload: true });
+        expect(result.valid).toBe(true);
+      });
+
+      it('should allow hidden files starting with dot for upload', () => {
+        const result = isValidNewName('.gitignore', { forUpload: true });
+        expect(result.valid).toBe(true);
+      });
+
+      it('should allow names with hyphens and underscores for upload', () => {
+        const result1 = isValidNewName('my-file.txt', { forUpload: true });
+        expect(result1.valid).toBe(true);
+
+        const result2 = isValidNewName('my_file.txt', { forUpload: true });
+        expect(result2.valid).toBe(true);
+      });
+
+      it('should allow names with parentheses for upload', () => {
+        const result = isValidNewName('file (1).txt', { forUpload: true });
+        expect(result.valid).toBe(true);
+      });
     });
   });
 
@@ -310,6 +387,97 @@ describe('File Operations', () => {
 
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe('INVALID_PATH');
+    });
+  });
+
+  describe('[CONS-001] createErrorResult with upload error codes', () => {
+    it('should create error result for INVALID_EXTENSION', () => {
+      const result = createErrorResult('INVALID_EXTENSION');
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_EXTENSION');
+      expect(result.error?.message).toBeDefined();
+    });
+
+    it('should create error result for INVALID_MIME_TYPE', () => {
+      const result = createErrorResult('INVALID_MIME_TYPE');
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_MIME_TYPE');
+    });
+
+    it('should create error result for INVALID_MAGIC_BYTES', () => {
+      const result = createErrorResult('INVALID_MAGIC_BYTES');
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_MAGIC_BYTES');
+    });
+
+    it('should create error result for FILE_TOO_LARGE', () => {
+      const result = createErrorResult('FILE_TOO_LARGE');
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('FILE_TOO_LARGE');
+    });
+
+    it('should create error result for INVALID_FILENAME', () => {
+      const result = createErrorResult('INVALID_FILENAME');
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_FILENAME');
+    });
+
+    it('should create error result for INVALID_FILE_CONTENT', () => {
+      const result = createErrorResult('INVALID_FILE_CONTENT');
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_FILE_CONTENT');
+    });
+
+    it('should accept custom message', () => {
+      const result = createErrorResult('FILE_TOO_LARGE', 'Custom error message');
+      expect(result.error?.message).toBe('Custom error message');
+    });
+  });
+
+  describe('writeBinaryFile', () => {
+    it('should write binary file successfully', async () => {
+      const buffer = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+      const result = await writeBinaryFile(testDir, 'test.png', buffer);
+
+      expect(result.success).toBe(true);
+      expect(result.path).toBe('test.png');
+      expect(result.size).toBe(8);
+      expect(existsSync(join(testDir, 'test.png'))).toBe(true);
+    });
+
+    it('should create parent directories if needed', async () => {
+      const buffer = Buffer.from('text content');
+      const result = await writeBinaryFile(testDir, 'nested/dir/file.txt', buffer);
+
+      expect(result.success).toBe(true);
+      expect(existsSync(join(testDir, 'nested/dir/file.txt'))).toBe(true);
+    });
+
+    it('should return FILE_EXISTS error if file already exists', async () => {
+      writeFileSync(join(testDir, 'existing.png'), 'content');
+      const buffer = Buffer.from([0x89, 0x50]);
+
+      const result = await writeBinaryFile(testDir, 'existing.png', buffer);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('FILE_EXISTS');
+    });
+
+    it('should reject path traversal', async () => {
+      const buffer = Buffer.from('malicious');
+      const result = await writeBinaryFile(testDir, '../outside/file.txt', buffer);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('INVALID_PATH');
+    });
+
+    it('should return correct size in result', async () => {
+      const content = 'Hello, World!';
+      const buffer = Buffer.from(content);
+      const result = await writeBinaryFile(testDir, 'hello.txt', buffer);
+
+      expect(result.success).toBe(true);
+      expect(result.size).toBe(content.length);
     });
   });
 });
