@@ -228,6 +228,13 @@ npm run db:reset      # DBリセット
 | `issue-review-agent` | Issue内容レビュー |
 | `apply-issue-review-agent` | Issueレビュー結果反映 |
 
+### 利用可能なスキル
+
+| スキル | 説明 |
+|--------|------|
+| `/release` | バージョン更新、CHANGELOG更新、Gitタグ作成、GitHub Releases作成を自動化 |
+| `/rebuild` | サーバーをリビルドして再起動 |
+
 ---
 
 ## 最近の実装機能
@@ -293,6 +300,7 @@ npm run db:reset      # DBリセット
 - [README.md](./README.md) - プロジェクト概要
 - [アーキテクチャ](./docs/architecture.md) - システム設計
 - [移行ガイド](./docs/migration-to-commandmate.md) - MyCodeBranchDesk からの移行手順
+- [リリースガイド](./docs/release-guide.md) - バージョン管理とリリース手順
 - [クイックスタートガイド](./docs/user-guide/quick-start.md) - 5分で始める開発フロー
 - [コマンド利用ガイド](./docs/user-guide/commands-guide.md) - コマンドの詳細
 - [エージェント利用ガイド](./docs/user-guide/agents-guide.md) - エージェントの詳細
