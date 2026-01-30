@@ -1,0 +1,169 @@
+{
+  "status": "success",
+  "issue_number": 49,
+  "iteration": 1,
+  "phases": {
+    "phase1": {
+      "name": "Phase 1 - 基盤構築",
+      "status": "completed",
+      "coverage": 100,
+      "unit_tests": {
+        "total": 148,
+        "passed": 148,
+        "failed": 0,
+        "breakdown": {
+          "path_validation_compatibility": 18,
+          "utils_debounce": 8,
+          "editable_extensions": 22,
+          "file_operations_config": 19,
+          "file_operations_logic": 31,
+          "api_file_operations": 22,
+          "security": 28
+        }
+      },
+      "files_changed": [
+        "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+        "src/config/editable-extensions.ts",
+        "src/config/file-operations.ts",
+        "src/lib/file-operations.ts",
+        "src/lib/utils.ts",
+        "tests/integration/api-file-operations.test.ts",
+        "tests/integration/path-validation-compatibility.test.ts",
+        "tests/integration/security.test.ts",
+        "tests/unit/config/editable-extensions.test.ts",
+        "tests/unit/config/file-operations.test.ts",
+        "tests/unit/lib/file-operations.test.ts",
+        "tests/unit/lib/utils.test.ts"
+      ],
+      "tasks_completed": [
+        {
+          "id": "1.1",
+          "name": "パス検証互換性テスト作成",
+          "output": "tests/integration/path-validation-compatibility.test.ts",
+          "tests": 18,
+          "status": "completed"
+        },
+        {
+          "id": "1.2",
+          "name": "ユーティリティ関数作成",
+          "output": "src/lib/utils.ts",
+          "tests": 8,
+          "status": "completed"
+        },
+        {
+          "id": "1.3",
+          "name": "編集可能拡張子設定",
+          "output": "src/config/editable-extensions.ts",
+          "tests": 22,
+          "status": "completed"
+        },
+        {
+          "id": "1.4",
+          "name": "再帰削除安全設定",
+          "output": "src/config/file-operations.ts",
+          "tests": 19,
+          "status": "completed"
+        },
+        {
+          "id": "1.5",
+          "name": "ファイル操作ビジネスロジック",
+          "output": "src/lib/file-operations.ts",
+          "tests": 31,
+          "status": "completed"
+        },
+        {
+          "id": "1.6",
+          "name": "API拡張（PUT/POST/DELETE/PATCH）",
+          "output": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+          "tests": 22,
+          "status": "completed"
+        },
+        {
+          "id": "1.7",
+          "name": "APIテスト作成",
+          "output": "tests/integration/api-file-operations.test.ts",
+          "tests": 22,
+          "status": "completed"
+        },
+        {
+          "id": "1.8",
+          "name": "セキュリティテスト作成",
+          "output": "tests/integration/security.test.ts",
+          "tests": 28,
+          "status": "completed"
+        }
+      ],
+      "commits": [
+        "45fe08a: feat(api): add file operations API for markdown editor (Phase 1)"
+      ]
+    },
+    "phase2": {
+      "name": "Phase 2 - 共通UIコンポーネント",
+      "status": "completed",
+      "unit_tests": {
+        "total": 25,
+        "passed": 25,
+        "failed": 0,
+        "breakdown": {
+          "toast_rendering": 6,
+          "toast_close_button": 3,
+          "toast_auto_dismiss": 4,
+          "toast_container": 4,
+          "toast_hook": 5,
+          "toast_accessibility": 2,
+          "toast_animation": 1
+        }
+      },
+      "files_changed": [
+        "src/components/common/Toast.tsx",
+        "src/types/markdown-editor.ts",
+        "tailwind.config.js",
+        "tests/unit/components/Toast.test.tsx"
+      ],
+      "tasks_completed": [
+        {
+          "id": "2.1",
+          "name": "Toastコンポーネント作成",
+          "output": "src/components/common/Toast.tsx",
+          "description": "成功/エラー/情報表示、自動消去（3秒デフォルト）、手動閉じるボタン、useToastフック",
+          "status": "completed"
+        },
+        {
+          "id": "2.2",
+          "name": "Toastテスト作成",
+          "output": "tests/unit/components/Toast.test.tsx",
+          "tests": 25,
+          "status": "completed"
+        },
+        {
+          "id": "2.3",
+          "name": "型定義ファイル作成",
+          "output": "src/types/markdown-editor.ts",
+          "description": "ViewMode, ViewModeStrategy, EditorProps, ToastType, ToastItem, FileOperationRequest/Response, ContextMenuItem/State等の型定義",
+          "status": "completed"
+        }
+      ],
+      "commits": [
+        "d96d827: feat(ui): add Toast component and markdown-editor types (Phase 2)"
+      ]
+    }
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "security_checklist": {
+    "xss": "N/A (Phase 3で対応予定 - rehype-sanitize統合)",
+    "path_traversal": "isPathSafe()一貫使用、互換性テスト完了",
+    "recursive_delete": ".git/.github/node_modules保護、MAX_RECURSIVE_DELETE_FILES: 100",
+    "rename_validation": "ディレクトリセパレータ、..チェック実装",
+    "binary_detection": "NULL文字検出、制御文字警告実装",
+    "error_response": "絶対パス非公開、エラーコードのみ返却"
+  },
+  "total_tests": {
+    "phase1": 148,
+    "phase2": 25,
+    "combined": 173
+  },
+  "message": "Phase 2 TDD実装完了。Toast.tsx(成功/エラー/情報表示、自動消去3秒、useToastフック)、型定義ファイル(markdown-editor.ts)作成。全25テストパス。ESLint/TypeScriptエラー0件。"
+}
