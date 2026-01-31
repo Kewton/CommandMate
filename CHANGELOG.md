@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-02-01
+
+### Added
+- Security audit job in PR CI workflow (ci-pr.yml)
+  - Catches vulnerabilities before merge/release
+
+### Changed
+- Updated Next.js to 14.2.35 (latest 14.x patch)
+- Updated eslint-config-next to 14.2.35
+- Changed audit-level from `high` to `critical` in CI/publish workflows
+  - Allows high-severity vulnerabilities that require breaking changes to fix
+  - Next.js 15+ migration tracked separately
+
+### Security
+- Added npm audit to PR checks to catch vulnerabilities early
+
 ## [0.1.1] - 2026-02-01
 
 ### Added
@@ -125,6 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.1...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Kewton/CommandMate/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Kewton/CommandMate/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Kewton/CommandMate/releases/tag/v0.1.0

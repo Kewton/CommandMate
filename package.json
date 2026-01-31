@@ -1,6 +1,6 @@
 {
   "name": "commandmate",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Git worktree management with Claude CLI and tmux sessions",
   "bin": {
     "commandmate": "./bin/commandmate.js"
@@ -39,7 +39,7 @@
     "isomorphic-dompurify": "^2.35.0",
     "lucide-react": "^0.554.0",
     "mermaid": "^11.12.2",
-    "next": "^14.2.0",
+    "next": "^14.2.35",
     "postcss": "^8.5.6",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
@@ -69,7 +69,7 @@
     "@vitest/coverage-v8": "^4.0.16",
     "@vitest/ui": "^4.0.9",
     "eslint": "^8.57.0",
-    "eslint-config-next": "^14.2.0",
+    "eslint-config-next": "^14.2.35",
     "tailwindcss": "^3.4.18",
     "tsx": "^4.20.6",
     "typescript": "^5.5.0",

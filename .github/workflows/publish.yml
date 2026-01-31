@@ -1,6 +1,7 @@
 # Publish to npm workflow
 # Issue #96: npm install CLI support
-# MF-SEC-3: npm provenance enabled for SLSA compliance
+# Uses npm Trusted Publishers (OIDC authentication)
+# See: https://docs.npmjs.com/trusted-publishers
 
 name: Publish to npm
 
@@ -10,7 +11,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write  # Required for npm provenance
+  id-token: write  # Required for OIDC authentication and npm provenance
 
 jobs:
   publish:
@@ -28,7 +29,7 @@ jobs:
         run: npm ci
 
       - name: Security audit
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=critical
 
       - name: Run tests
         run: npm test
@@ -36,7 +37,8 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Build CLI
+        run: npm run build:cli
+
       - name: Publish to npm
-        run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
