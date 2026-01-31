@@ -16,7 +16,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: npm-publish  # Environment protection
+    # environment: npm-publish  # Temporarily disabled for troubleshooting
     steps:
       - uses: actions/checkout@v4
 
@@ -24,6 +24,12 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm for trusted publishing
+        run: npm i -g npm@^11.5.1
+
+      - name: Show versions
+        run: node -v && npm -v
 
       - name: Install dependencies
         run: npm ci
@@ -40,5 +46,5 @@ jobs:
       - name: Build CLI
         run: npm run build:cli
 
-      - name: Publish to npm
+      - name: Publish to npm (OIDC)
         run: npm publish --provenance --access public
