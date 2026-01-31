@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-02-01
+
+### Added
+- npm CLI support (`npm install -g commandmate`) (Issue #96)
+  - `commandmate init` - Initialize configuration
+  - `commandmate start` - Start server (foreground or daemon mode)
+  - `commandmate stop` - Stop server
+  - `commandmate status` - Show server status
+- File tree search functionality (Issue #21)
+  - Name search with real-time filtering (300ms debounce)
+  - Content search via server API (5s timeout)
+  - Search result highlighting
+  - Auto-expand parent directories of matched files
+  - Desktop/Mobile responsive design
+- Mermaid diagram rendering in markdown preview (Issue #100)
+- Image file viewer with security validation (Issue #95)
+- File upload feature with security validation (Issue #94)
+- Markdown editor with XSS protection (Issue #49)
+- Markdown editor display improvements (Issue #99)
+- pm-auto-design2dev slash command for automated workflow
+
+### Fixed
+- CLI now uses package directory instead of cwd for npm run
+- Search filtering applied to nested tree items
+- File tree refresh after operations
+- Markdown preview code block styling
+
+### Security
+- ReDoS prevention (no regex on server-side search)
+- Relative paths only in search results
+- Magic byte validation for file uploads
+- SVG XSS protection for image viewer
+- Mermaid securityLevel='strict' setting
+
 ### Added
 - Preflight check script `scripts/preflight-check.sh` for dependency validation (Issue #92)
   - Checks Node.js (v20+), npm, tmux, git, openssl
@@ -90,3 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `MCBD_LOG_DIR` -> `CM_LOG_DIR`
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
+
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Kewton/CommandMate/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/Kewton/CommandMate/releases/tag/v0.1.0
