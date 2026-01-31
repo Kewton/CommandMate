@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-02-01
+
+### Fixed
+- Re-enabled `environment: npm-publish` in publish workflow
+  - npm Trusted Publisher requires exact match of environment name
+
 ## [0.1.3] - 2026-02-01
 
 ### Fixed
@@ -147,7 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.3...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/Kewton/CommandMate/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/Kewton/CommandMate/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Kewton/CommandMate/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Kewton/CommandMate/compare/v0.1.0...v0.1.1

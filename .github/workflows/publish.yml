@@ -16,7 +16,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # environment: npm-publish  # Temporarily disabled for troubleshooting
+    environment: npm-publish  # Required: must match npm Trusted Publisher settings
     steps:
       - uses: actions/checkout@v4
 
