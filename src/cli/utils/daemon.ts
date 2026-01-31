@@ -7,6 +7,7 @@
 import { spawn } from 'child_process';
 import { DaemonStatus, StartOptions } from '../types';
 import { PidManager } from './pid-manager';
+import { getPackageRoot } from './paths';
 
 /**
  * Daemon manager for background server process
@@ -33,7 +34,8 @@ export class DaemonManager {
     this.pidManager.removePid();
 
     const npmScript = options.dev ? 'dev' : 'start';
-    const cwd = process.cwd();
+    // Use package installation directory, not current working directory
+    const packageRoot = getPackageRoot();
 
     // Build environment
     const env: NodeJS.ProcessEnv = { ...process.env };
@@ -43,7 +45,7 @@ export class DaemonManager {
 
     // Spawn detached process
     const child = spawn('npm', ['run', npmScript], {
-      cwd,
+      cwd: packageRoot,
       env,
       detached: true,
       stdio: 'ignore',

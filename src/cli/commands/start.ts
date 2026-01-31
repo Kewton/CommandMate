@@ -11,6 +11,7 @@ import { StartOptions, ExitCode } from '../types';
 import { CLILogger } from '../utils/logger';
 import { DaemonManager } from '../utils/daemon';
 import { logSecurityEvent } from '../utils/security-logger';
+import { getPackageRoot } from '../utils/paths';
 
 const logger = new CLILogger();
 const PID_FILE = join(process.cwd(), '.commandmate.pid');
@@ -89,8 +90,11 @@ export async function startCommand(options: StartOptions): Promise<void> {
       env.CM_PORT = String(options.port);
     }
 
+    // Use package installation directory, not current working directory
+    const packageRoot = getPackageRoot();
+
     const child = spawn('npm', ['run', npmScript], {
-      cwd: process.cwd(),
+      cwd: packageRoot,
       env,
       stdio: 'inherit',
     });
