@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-02-01
+
+### Fixed
+- npm publish workflow now upgrades npm to ^11.5.1 for OIDC Trusted Publishers support
+  - Node 20 ships with npm 10.8.2, but Trusted Publishers requires npm >= 11.5.1
+
 ## [0.1.2] - 2026-02-01
 
 ### Added
@@ -141,7 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.2...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/Kewton/CommandMate/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Kewton/CommandMate/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Kewton/CommandMate/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Kewton/CommandMate/releases/tag/v0.1.0

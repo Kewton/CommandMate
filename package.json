@@ -1,6 +1,6 @@
 {
   "name": "commandmate",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Git worktree management with Claude CLI and tmux sessions",
   "bin": {
     "commandmate": "./bin/commandmate.js"
