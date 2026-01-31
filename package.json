@@ -1,7 +1,11 @@
 {
   "name": "commandmate",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Git worktree management with Claude CLI and tmux sessions",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kewton/CommandMate.git"
+  },
   "bin": {
     "commandmate": "./bin/commandmate.js"
   },
