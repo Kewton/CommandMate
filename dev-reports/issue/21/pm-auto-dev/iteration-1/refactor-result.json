@@ -1,0 +1,51 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 73.96,
+    "after_coverage": 74.5
+  },
+  "refactorings_applied": [
+    "DRY: Extract computeMatchedPaths utility function to eliminate code duplication between useFileSearch.ts and FileTreeView.tsx",
+    "SRP: Extract SearchConfig interface to reduce searchDirectory parameter count from 9 to 4",
+    "SRP: Extract processFileEntry function from searchDirectory for single responsibility",
+    "Remove unnecessary handleModeChange callback wrapper in SearchBar.tsx"
+  ],
+  "files_changed": [
+    "src/lib/utils.ts",
+    "src/lib/file-search.ts",
+    "src/hooks/useFileSearch.ts",
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/SearchBar.tsx",
+    "tests/unit/lib/utils.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "coverage_by_file": {
+    "file-search.ts": {
+      "before": 84.94,
+      "after": 85.56
+    },
+    "useFileSearch.ts": {
+      "before": 53.84,
+      "after": 60.0
+    },
+    "FileTreeView.tsx": {
+      "before": 67.08,
+      "after": 70.66
+    },
+    "SearchBar.tsx": {
+      "before": 96.66,
+      "after": 96.42
+    },
+    "utils.ts": {
+      "before": 100,
+      "after": 100
+    }
+  },
+  "commits": [],
+  "message": "Refactoring completed successfully. Applied DRY principle by extracting computeMatchedPaths utility function. Applied SRP by introducing SearchConfig interface and extracting processFileEntry function. All tests pass (2164 tests), ESLint and TypeScript errors: 0."
+}

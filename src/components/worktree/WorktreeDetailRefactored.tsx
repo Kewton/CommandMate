@@ -32,6 +32,8 @@ import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
+import { SearchBar } from '@/components/worktree/SearchBar';
+import { useFileSearch } from '@/hooks/useFileSearch';
 import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/LeftPaneTabSwitcher';
 import { FileViewer } from '@/components/worktree/FileViewer';
 import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
@@ -717,7 +719,12 @@ interface MobileContentProps {
   onDelete: (path: string) => void;
   onUpload: (targetDir: string) => void;
   refreshTrigger: number;
+  /** [Issue #21] File search hook return object */
+  fileSearch: UseFileSearchReturn;
 }
+
+/** [Issue #21] Type for file search hook return */
+import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
 
 /** Renders content based on active mobile tab */
 const MobileContent = memo(function MobileContent({
@@ -737,6 +744,7 @@ const MobileContent = memo(function MobileContent({
   onDelete,
   onUpload,
   refreshTrigger,
+  fileSearch,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -764,17 +772,32 @@ const MobileContent = memo(function MobileContent({
     case 'files':
       return (
         <ErrorBoundary componentName="FileTreeView">
-          <FileTreeView
-            worktreeId={worktreeId}
-            onFileSelect={onFileSelect}
-            onNewFile={onNewFile}
-            onNewDirectory={onNewDirectory}
-            onRename={onRename}
-            onDelete={onDelete}
-            onUpload={onUpload}
-            refreshTrigger={refreshTrigger}
-            className="h-full"
-          />
+          <div className="h-full flex flex-col">
+            {/* [Issue #21] Search Bar - Mobile */}
+            <SearchBar
+              query={fileSearch.query}
+              mode={fileSearch.mode}
+              isSearching={fileSearch.isSearching}
+              error={fileSearch.error}
+              onQueryChange={fileSearch.setQuery}
+              onModeChange={fileSearch.setMode}
+              onClear={fileSearch.clearSearch}
+            />
+            <FileTreeView
+              worktreeId={worktreeId}
+              onFileSelect={onFileSelect}
+              onNewFile={onNewFile}
+              onNewDirectory={onNewDirectory}
+              onRename={onRename}
+              onDelete={onDelete}
+              onUpload={onUpload}
+              refreshTrigger={refreshTrigger}
+              searchQuery={fileSearch.query}
+              searchMode={fileSearch.mode}
+              searchResults={fileSearch.results?.results}
+              className="flex-1 min-h-0"
+            />
+          </div>
         </ErrorBoundary>
       );
     case 'memo':
@@ -829,6 +852,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
+
+  // [Issue #21] File search state
+  const fileSearch = useFileSearch({ worktreeId });
 
   // Track if initial load has completed to prevent re-triggering
   const initialLoadCompletedRef = useRef(false);
@@ -1378,17 +1404,32 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                     )}
                     {leftPaneTab === 'files' && (
                       <ErrorBoundary componentName="FileTreeView">
-                        <FileTreeView
-                          worktreeId={worktreeId}
-                          onFileSelect={handleFileSelect}
-                          onNewFile={handleNewFile}
-                          onNewDirectory={handleNewDirectory}
-                          onRename={handleRename}
-                          onDelete={handleDelete}
-                          onUpload={handleUpload}
-                          refreshTrigger={fileTreeRefresh}
-                          className="h-full"
-                        />
+                        <div className="h-full flex flex-col">
+                          {/* [Issue #21] Search Bar */}
+                          <SearchBar
+                            query={fileSearch.query}
+                            mode={fileSearch.mode}
+                            isSearching={fileSearch.isSearching}
+                            error={fileSearch.error}
+                            onQueryChange={fileSearch.setQuery}
+                            onModeChange={fileSearch.setMode}
+                            onClear={fileSearch.clearSearch}
+                          />
+                          <FileTreeView
+                            worktreeId={worktreeId}
+                            onFileSelect={handleFileSelect}
+                            onNewFile={handleNewFile}
+                            onNewDirectory={handleNewDirectory}
+                            onRename={handleRename}
+                            onDelete={handleDelete}
+                            onUpload={handleUpload}
+                            refreshTrigger={fileTreeRefresh}
+                            searchQuery={fileSearch.query}
+                            searchMode={fileSearch.mode}
+                            searchResults={fileSearch.results?.results}
+                            className="flex-1 min-h-0"
+                          />
+                        </div>
                       </ErrorBoundary>
                     )}
                     {leftPaneTab === 'memo' && (
@@ -1534,6 +1575,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onDelete={handleDelete}
             onUpload={handleUpload}
             refreshTrigger={fileTreeRefresh}
+            fileSearch={fileSearch}
           />
         </main>
 

@@ -1,0 +1,150 @@
+{
+  "issue_number": 21,
+  "stage": 1,
+  "stage_name": "設計原則レビュー",
+  "focus_area": "設計原則",
+  "review_date": "2026-01-31",
+  "design_doc_path": "dev-reports/design/issue-21-file-search-design-policy.md",
+  "review_status": "completed",
+  "summary": {
+    "total_findings": 8,
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 4
+  },
+  "findings": [
+    {
+      "id": "DP-001",
+      "category": "Must Fix",
+      "principle": "DRY",
+      "title": "isPathSafe関数のインポート元が誤っている",
+      "description": "設計書のセクション5.2では`isPathSafe`を`file-tree.ts`からインポートすると記載されているが、実際には`path-validator.ts`に定義されている。これは実装時に混乱を招く可能性がある。",
+      "location": "設計書 セクション5.2 パストラバーサル対策",
+      "current_design": "import { isPathSafe } from './file-tree';",
+      "recommended": "import { isPathSafe } from './path-validator';",
+      "impact": "実装時にインポートエラーが発生する可能性がある"
+    },
+    {
+      "id": "DP-002",
+      "category": "Should Fix",
+      "principle": "SRP",
+      "title": "useFileSearchフックの責務が多い",
+      "description": "useFileSearchフックは「検索状態管理」「debounce処理」「API呼び出し」「エラーハンドリング」の4つの責務を持つ。APIクライアントロジックを分離することで、テスタビリティと再利用性が向上する。",
+      "location": "設計書 セクション4.2.2 useFileSearch.ts",
+      "current_design": "useFileSearchフック内でfetch呼び出しを直接実装",
+      "recommended": "API呼び出し部分を`src/lib/search-api-client.ts`として分離し、useFileSearchは状態管理に集中させる",
+      "impact": "現状でも動作するが、テストしづらく、APIクライアントの再利用が難しい"
+    },
+    {
+      "id": "DP-003",
+      "category": "Should Fix",
+      "principle": "DRY",
+      "title": "MAX_FILE_SIZE_PREVIEW定数の参照元が不統一",
+      "description": "設計書ではMAX_FILE_SIZE_PREVIEWを`file-operations.ts`から参照すると記載(セクション9.1)しているが、実際には`file-tree.ts`のLIMITS.MAX_FILE_SIZE_PREVIEWに定義されている。file-operations.tsにはDELETE_SAFETY_CONFIGのみ存在する。",
+      "location": "設計書 セクション9.1 再利用するモジュール",
+      "current_design": "src/config/file-operations.ts から MAX_FILE_SIZE_PREVIEW を参照",
+      "recommended": "src/lib/file-tree.ts の LIMITS.MAX_FILE_SIZE_PREVIEW を参照するか、共通の定数ファイル(src/config/limits.ts)を作成して一元管理する",
+      "impact": "実装時に定数が見つからず、別途定義される可能性がある(DRY違反)"
+    },
+    {
+      "id": "DP-004",
+      "category": "Should Fix",
+      "principle": "OCP",
+      "title": "BINARY_EXTENSIONSの拡張性が考慮されていない",
+      "description": "バイナリファイル除外のためのBINARY_EXTENSIONSがfile-search.ts内でハードコードされる設計になっている。将来的にユーザーがカスタマイズしたい場合や、他のモジュール(画像ビューワ等)との共有が必要な場合に拡張しづらい。",
+      "location": "設計書 セクション6.3 バイナリファイル除外",
+      "current_design": "const BINARY_EXTENSIONS = ['.png', '.jpg', ...] をfile-search.ts内で定義",
+      "recommended": "src/config/binary-extensions.ts として設定ファイル化し、image-extensions.tsなど既存設定との整合性を取る",
+      "impact": "初期実装では問題ないが、将来の拡張時にコード変更が必要になる"
+    },
+    {
+      "id": "DP-005",
+      "category": "Nice to Have",
+      "principle": "DIP",
+      "title": "searchFileContentsのファイルシステム依存",
+      "description": "searchFileContents関数がfsモジュールに直接依存する設計になっている。テスト時にモック化が難しく、将来的にリモートファイルシステム対応などの拡張が困難になる可能性がある。",
+      "location": "設計書 セクション4.2.3 file-search.ts",
+      "current_design": "fs/promisesを直接importして使用",
+      "recommended": "FileSystemInterface抽象を導入し、依存性注入可能にする(ただし現状のスコープではオーバーエンジニアリング)",
+      "impact": "現状では問題ないが、テスタビリティ向上のためにmock可能な設計が望ましい"
+    },
+    {
+      "id": "DP-006",
+      "category": "Nice to Have",
+      "principle": "ISP",
+      "title": "SearchOptionsインターフェースが細分化可能",
+      "description": "SearchOptionsインターフェースには4つのオプション(maxResults, timeoutMs, maxFileSize, maxDepth)が含まれている。呼び出し側によっては一部のオプションのみ必要な場合があり、インターフェース分離の観点から検討の余地がある。",
+      "location": "設計書 セクション4.2.3 file-search.ts",
+      "current_design": "全オプションを1つのinterfaceに含める",
+      "recommended": "現状維持で問題ないが、将来的にLimitOptions, TimeoutOptionsなどに分離することも可能",
+      "impact": "軽微。全オプションがoptionalなため実用上の問題はない"
+    },
+    {
+      "id": "DP-007",
+      "category": "Nice to Have",
+      "principle": "KISS",
+      "title": "HighlightedTextコンポーネントの正規表現処理",
+      "description": "XSS対策として示されているHighlightedTextの実装は、escapeRegExpでエスケープ後にsplit/mapで処理している。シンプルな実装だが、大量のマッチがある場合のパフォーマンスは考慮されていない。",
+      "location": "設計書 セクション5.3 XSS対策",
+      "current_design": "text.split(new RegExp(`(${escapeRegExp(query)})`, 'gi')) で分割",
+      "recommended": "現状維持で問題ない(検索結果は100件制限があるため)",
+      "impact": "なし。制約値により問題は発生しない"
+    },
+    {
+      "id": "DP-008",
+      "category": "Nice to Have",
+      "principle": "YAGNI",
+      "title": "将来検討項目が適切にスコープ外化されている",
+      "description": "正規表現検索、検索履歴保存、検索インデックス構築、Web Workerなどが明確に「対象外」「将来検討」として記載されており、YAGNIに従った良い設計判断がなされている。",
+      "location": "設計書 セクション1.3, 8.2",
+      "current_design": "将来検討項目として明記",
+      "recommended": "現状維持",
+      "impact": "ポジティブ。実装スコープが明確で過剰実装を防いでいる"
+    }
+  ],
+  "positive_points": [
+    {
+      "principle": "DRY",
+      "description": "debounce関数(src/lib/utils.ts)、EXCLUDED_PATTERNS(src/lib/file-tree.ts)、MAX_DEPTH定数などの既存コードを再利用する設計になっている"
+    },
+    {
+      "principle": "SRP",
+      "description": "SearchBarコンポーネントをFileTreeViewから分離することで単一責任を維持している。レイヤー構成(プレゼンテーション/状態管理/ビジネスロジック/インフラ)が明確に定義されている"
+    },
+    {
+      "principle": "KISS",
+      "description": "外部ライブラリの追加なし。React標準機能(useState, useEffect)とAbortController(標準API)で実装する方針は適切"
+    },
+    {
+      "principle": "YAGNI",
+      "description": "検索インデックス、Web Worker、正規表現検索などの高度な機能を明確にスコープ外としており、初期実装の複雑性を抑えている"
+    },
+    {
+      "principle": "OCP",
+      "description": "SearchModeを'name' | 'content'の型で定義しており、将来的なモード追加に対応しやすい設計になっている"
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": "high",
+      "action": "isPathSafeのインポート元を`path-validator.ts`に修正する",
+      "reason": "実装時のエラーを防止するため"
+    },
+    {
+      "priority": "medium",
+      "action": "MAX_FILE_SIZE_PREVIEWの参照元を正確に記載する(file-tree.tsのLIMITS)",
+      "reason": "DRY原則に従い、既存定数を正しく参照するため"
+    },
+    {
+      "priority": "medium",
+      "action": "BINARY_EXTENSIONSを設定ファイルとして分離することを検討する",
+      "reason": "既存のimage-extensions.tsとの整合性を取り、拡張性を確保するため"
+    },
+    {
+      "priority": "low",
+      "action": "APIクライアント分離は将来のリファクタリングとして検討する",
+      "reason": "初期実装ではuseFileSearch内で完結させても問題ない"
+    }
+  ],
+  "conclusion": "設計方針書は全体的にSOLID原則、KISS、YAGNI、DRYに従った良い設計になっている。Must Fixは1件(isPathSafeのインポート元誤り)のみで、これは設計書の軽微な記載ミスである。Should Fixの3件も主に設計書内の参照先の不整合であり、設計思想自体に問題はない。既存コードの再利用が適切に計画されており、将来検討項目も明確にスコープ外化されている点は評価できる。"
+}

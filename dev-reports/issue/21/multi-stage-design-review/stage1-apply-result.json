@@ -1,0 +1,90 @@
+{
+  "issue_number": 21,
+  "stage": 1,
+  "stage_name": "設計原則レビュー",
+  "apply_date": "2026-01-31",
+  "design_doc_path": "dev-reports/design/issue-21-file-search-design-policy.md",
+  "review_result_path": "dev-reports/issue/21/multi-stage-design-review/stage1-review-result.json",
+  "apply_status": "completed",
+  "summary": {
+    "must_fix_applied": 1,
+    "should_fix_applied": 3,
+    "nice_to_have_skipped": 4,
+    "total_changes": 5
+  },
+  "applied_findings": [
+    {
+      "id": "DP-001",
+      "category": "Must Fix",
+      "title": "isPathSafe関数のインポート元が誤っている",
+      "action_taken": "セクション5.2のコードサンプルでインポート元を'./file-tree'から'./path-validator'に修正。セクション9.1の再利用モジュール表を更新し、isPathSafe()の参照元をpath-validator.tsに修正",
+      "sections_modified": ["5.2 パストラバーサル対策", "9.1 再利用するモジュール"]
+    },
+    {
+      "id": "DP-002",
+      "category": "Should Fix",
+      "title": "useFileSearchフックの責務が多い",
+      "action_taken": "セクション4.2.2に将来のリファクタリング方針を追記。初期実装ではフック内で完結させるが、将来的にAPIクライアントロジックをsrc/lib/search-api-client.tsとして分離することを検討事項として記載",
+      "sections_modified": ["4.2.2 useFileSearch.ts"]
+    },
+    {
+      "id": "DP-003",
+      "category": "Should Fix",
+      "title": "MAX_FILE_SIZE_PREVIEW定数の参照元が不統一",
+      "action_taken": "セクション9.1の再利用モジュール表を更新。file-operations.tsからMAX_FILE_SIZE_PREVIEWを参照する記載を削除し、file-tree.tsのLIMITS.MAX_FILE_SIZE_PREVIEWを参照するよう修正",
+      "sections_modified": ["9.1 再利用するモジュール"]
+    },
+    {
+      "id": "DP-004",
+      "category": "Should Fix",
+      "title": "BINARY_EXTENSIONSの拡張性が考慮されていない",
+      "action_taken": "セクション6.3を大幅更新。BINARY_EXTENSIONSをsrc/config/binary-extensions.tsとして設定ファイル化する設計を追記。image-extensions.tsとの整合性、型定義の追加、拡張性確保の方針を明記。実装チェックリストにファイル作成タスクを追加",
+      "sections_modified": ["6.3 バイナリファイル除外", "11. 実装チェックリスト Phase 1"]
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "DP-005",
+      "category": "Nice to Have",
+      "title": "searchFileContentsのファイルシステム依存",
+      "reason": "現状のスコープではオーバーエンジニアリング。FileSystemInterface抽象の導入は将来検討とする"
+    },
+    {
+      "id": "DP-006",
+      "category": "Nice to Have",
+      "title": "SearchOptionsインターフェースが細分化可能",
+      "reason": "全オプションがoptionalなため実用上の問題なし。インターフェース分離は不要"
+    },
+    {
+      "id": "DP-007",
+      "category": "Nice to Have",
+      "title": "HighlightedTextコンポーネントの正規表現処理",
+      "reason": "検索結果100件制限によりパフォーマンス問題は発生しない"
+    },
+    {
+      "id": "DP-008",
+      "category": "Nice to Have",
+      "title": "将来検討項目が適切にスコープ外化されている",
+      "reason": "ポジティブフィードバック。対応不要"
+    }
+  ],
+  "new_sections_added": [
+    {
+      "section": "13. レビュー履歴",
+      "description": "Stage 1設計原則レビューの指摘事項サマリ、対応内容、見送り理由、評価ポイントを記載"
+    }
+  ],
+  "implementation_checklist_updates": [
+    {
+      "phase": "Phase 1: 基盤",
+      "added_task": "src/config/binary-extensions.ts 作成 (DP-004対応)",
+      "reason": "BINARY_EXTENSIONSを設定ファイルとして分離するため"
+    },
+    {
+      "phase": "Phase 1: 基盤",
+      "modified_task": "src/lib/file-search.ts 作成",
+      "modification": "path-validator.tsからisPathSafeをインポートする旨を追記 (DP-001対応)"
+    }
+  ],
+  "conclusion": "Stage 1設計原則レビューの全Must Fix(1件)および全Should Fix(3件)を設計方針書に反映完了。Nice to Have(4件)は現状のスコープでは対応不要と判断し見送り。レビュー履歴セクションを新設し、指摘事項と対応内容をトレーサビリティ確保のため記録した。"
+}

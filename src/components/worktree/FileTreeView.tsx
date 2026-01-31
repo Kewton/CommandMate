@@ -17,9 +17,10 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, memo, useMemo } from 'react';
-import type { TreeItem, TreeResponse } from '@/types/models';
+import type { TreeItem, TreeResponse, SearchMode, SearchResultItem } from '@/types/models';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { ContextMenu } from '@/components/worktree/ContextMenu';
+import { escapeRegExp, computeMatchedPaths } from '@/lib/utils';
 
 // ============================================================================
 // Types
@@ -44,6 +45,14 @@ export interface FileTreeViewProps {
   className?: string;
   /** Trigger to refresh the tree (increment to refresh) */
   refreshTrigger?: number;
+  /** [Issue #21] Search query for filtering (optional) */
+  searchQuery?: string;
+  /** [Issue #21] Search mode: 'name' or 'content' (optional) */
+  searchMode?: SearchMode;
+  /** [Issue #21] Content search results for filtering (optional) */
+  searchResults?: SearchResultItem[];
+  /** [Issue #21] Callback when a search result is selected (optional) */
+  onSearchResultSelect?: (filePath: string) => void;
 }
 
 interface TreeNodeProps {
@@ -57,6 +66,12 @@ interface TreeNodeProps {
   onFileSelect?: (filePath: string) => void;
   onLoadChildren: (path: string) => Promise<void>;
   onContextMenu?: (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void;
+  /** [Issue #21] Search query for highlighting */
+  searchQuery?: string;
+  /** [Issue #21] Search mode for highlighting */
+  searchMode?: SearchMode;
+  /** [Issue #21] Set of matched file paths (for filtering) */
+  matchedPaths?: Set<string>;
 }
 
 // ============================================================================
@@ -140,6 +155,40 @@ const FolderIcon = memo(function FolderIcon({ open }: { open: boolean }) {
   );
 });
 
+/**
+ * [Issue #21] Highlight matching text in file names
+ * XSS-safe implementation using React auto-escape
+ */
+const HighlightedText = memo(function HighlightedText({
+  text,
+  query,
+}: {
+  text: string;
+  query?: string;
+}) {
+  if (!query || !query.trim()) {
+    return <>{text}</>;
+  }
+
+  // Use escapeRegExp to safely create regex pattern
+  const escapedQuery = escapeRegExp(query);
+  const parts = text.split(new RegExp(`(${escapedQuery})`, 'gi'));
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} className="bg-yellow-200 text-gray-900 px-0.5 rounded">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
+});
+
 const FileIcon = memo(function FileIcon({ extension }: { extension?: string }) {
   // Determine icon color based on extension
   const iconColor = useMemo(() => {
@@ -195,6 +244,9 @@ const TreeNode = memo(function TreeNode({
   onFileSelect,
   onLoadChildren,
   onContextMenu,
+  searchQuery,
+  searchMode,
+  matchedPaths,
 }: TreeNodeProps) {
   const [loading, setLoading] = useState(false);
   const fullPath = path ? `${path}/${item.name}` : item.name;
@@ -268,8 +320,14 @@ const TreeNode = memo(function TreeNode({
           <FileIcon extension={item.extension} />
         )}
 
-        {/* Name */}
-        <span className="flex-1 truncate text-sm text-gray-700">{item.name}</span>
+        {/* Name - with highlight for name search */}
+        <span className="flex-1 truncate text-sm text-gray-700">
+          {searchMode === 'name' && searchQuery ? (
+            <HighlightedText text={item.name} query={searchQuery} />
+          ) : (
+            item.name
+          )}
+        </span>
 
         {/* File size or item count */}
         <span className="text-xs text-gray-400 flex-shrink-0">
@@ -282,21 +340,66 @@ const TreeNode = memo(function TreeNode({
       {/* Children */}
       {isDirectory && isExpanded && children && (
         <div role="group">
-          {children.map((child) => (
-            <TreeNode
-              key={child.name}
-              item={child}
-              path={fullPath}
-              depth={depth + 1}
-              worktreeId={worktreeId}
-              expanded={expanded}
-              cache={cache}
-              onToggle={onToggle}
-              onFileSelect={onFileSelect}
-              onLoadChildren={onLoadChildren}
-              onContextMenu={onContextMenu}
-            />
-          ))}
+          {children
+            .filter((child) => {
+              const childFullPath = fullPath ? `${fullPath}/${child.name}` : child.name;
+
+              // No filtering if no search query
+              if (!searchQuery?.trim()) {
+                return true;
+              }
+
+              // Name search: filter by name match
+              if (searchMode === 'name') {
+                const lowerQuery = searchQuery.toLowerCase();
+                // Show if name matches
+                if (child.name.toLowerCase().includes(lowerQuery)) {
+                  return true;
+                }
+                // Show directories to allow expansion and discovery of nested matches
+                if (child.type === 'directory') {
+                  return true;
+                }
+                return false;
+              }
+
+              // Content search: filter by matchedPaths
+              if (searchMode === 'content' && matchedPaths && matchedPaths.size > 0) {
+                // Show if this path is in matched paths
+                if (matchedPaths.has(childFullPath)) {
+                  return true;
+                }
+                // Show directories if they contain matched paths
+                if (child.type === 'directory') {
+                  for (const path of matchedPaths) {
+                    if (path.startsWith(childFullPath + '/')) {
+                      return true;
+                    }
+                  }
+                }
+                return false;
+              }
+
+              return true;
+            })
+            .map((child) => (
+              <TreeNode
+                key={child.name}
+                item={child}
+                path={fullPath}
+                depth={depth + 1}
+                worktreeId={worktreeId}
+                expanded={expanded}
+                cache={cache}
+                onToggle={onToggle}
+                onFileSelect={onFileSelect}
+                onLoadChildren={onLoadChildren}
+                onContextMenu={onContextMenu}
+                searchQuery={searchQuery}
+                searchMode={searchMode}
+                matchedPaths={matchedPaths}
+              />
+            ))}
         </div>
       )}
     </>
@@ -332,6 +435,10 @@ export const FileTreeView = memo(function FileTreeView({
   onUpload,
   className = '',
   refreshTrigger = 0,
+  searchQuery,
+  searchMode,
+  searchResults,
+  onSearchResultSelect,
 }: FileTreeViewProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -439,6 +546,96 @@ export const FileTreeView = memo(function FileTreeView({
     });
   }, []);
 
+  /**
+   * [Issue #21] Compute matched paths for content search
+   * Used to filter tree items and auto-expand parent directories
+   * [DRY] Uses shared computeMatchedPaths utility
+   */
+  const matchedPaths = useMemo((): Set<string> => {
+    if (searchMode !== 'content' || !searchResults || searchResults.length === 0) {
+      return new Set();
+    }
+
+    return computeMatchedPaths(searchResults.map((item) => item.filePath));
+  }, [searchMode, searchResults]);
+
+  /**
+   * [Issue #21] Auto-expand directories containing matched files
+   */
+  useEffect(() => {
+    if (matchedPaths.size > 0) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        // Add all matched directory paths
+        for (const path of matchedPaths) {
+          // Only add if it's a directory (has children in cache or is a parent path)
+          if (cache.has(path) || searchResults?.some(r => r.filePath.startsWith(path + '/'))) {
+            next.add(path);
+          }
+        }
+        return next;
+      });
+    }
+  }, [matchedPaths, cache, searchResults]);
+
+  /**
+   * [Issue #21] Filter root items based on search
+   */
+  const filteredRootItems = useMemo((): TreeItem[] => {
+    // No filtering if no search query
+    if (!searchQuery?.trim()) {
+      return rootItems;
+    }
+
+    // Name search: filter by file/directory name
+    if (searchMode === 'name') {
+      const lowerQuery = searchQuery.toLowerCase();
+
+      // Recursive filter function that includes directories if any child matches
+      const filterItems = (items: TreeItem[], parentPath: string): TreeItem[] => {
+        return items.filter((item) => {
+          const fullPath = parentPath ? `${parentPath}/${item.name}` : item.name;
+
+          // Check if this item matches
+          const itemMatches = item.name.toLowerCase().includes(lowerQuery);
+
+          // For directories, also check if any cached children match
+          if (item.type === 'directory') {
+            const children = cache.get(fullPath);
+            if (children && filterItems(children, fullPath).length > 0) {
+              return true;
+            }
+          }
+
+          return itemMatches;
+        });
+      };
+
+      return filterItems(rootItems, '');
+    }
+
+    // Content search: filter by matched paths from search results
+    if (searchMode === 'content' && matchedPaths.size > 0) {
+      // Show items that are in matched paths or are parent directories
+      return rootItems.filter((item) => {
+        if (matchedPaths.has(item.name)) {
+          return true;
+        }
+        // Check if any matched path starts with this directory
+        if (item.type === 'directory') {
+          for (const path of matchedPaths) {
+            if (path.startsWith(item.name + '/') || path === item.name) {
+              return true;
+            }
+          }
+        }
+        return false;
+      });
+    }
+
+    return rootItems;
+  }, [rootItems, searchQuery, searchMode, matchedPaths, cache]);
+
   // Loading state
   if (loading) {
     return (
@@ -476,6 +673,20 @@ export const FileTreeView = memo(function FileTreeView({
     );
   }
 
+  // [Issue #21] No search results state
+  if (searchQuery?.trim() && filteredRootItems.length === 0) {
+    return (
+      <div
+        data-testid="file-tree-no-results"
+        className={`p-4 text-center text-gray-500 ${className}`}
+      >
+        <p className="text-sm">
+          No {searchMode === 'content' ? 'files containing' : 'files matching'} &quot;{searchQuery}&quot;
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
       data-testid="file-tree-view"
@@ -483,7 +694,7 @@ export const FileTreeView = memo(function FileTreeView({
       aria-label="File tree"
       className={`overflow-auto bg-white ${className}`}
     >
-      {rootItems.map((item) => (
+      {filteredRootItems.map((item) => (
         <TreeNode
           key={item.name}
           item={item}
@@ -493,9 +704,12 @@ export const FileTreeView = memo(function FileTreeView({
           expanded={expanded}
           cache={cache}
           onToggle={handleToggle}
-          onFileSelect={onFileSelect}
+          onFileSelect={onSearchResultSelect || onFileSelect}
           onLoadChildren={loadChildren}
           onContextMenu={openMenu}
+          searchQuery={searchQuery}
+          searchMode={searchMode}
+          matchedPaths={matchedPaths}
         />
       ))}
 

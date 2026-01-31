@@ -1,0 +1,188 @@
+{
+  "issue_number": 21,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "OWASP Top 10準拠",
+  "review_date": "2026-01-31",
+  "design_doc_path": "dev-reports/design/issue-21-file-search-design-policy.md",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2,
+    "positive_feedback_count": 8
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "category": "A03: インジェクション",
+        "title": "検索クエリの正規表現インジェクション対策が不十分",
+        "severity": "High",
+        "description": "設計書ではescapeRegExp関数を使用してXSS対策を行っているが、ファイル内容検索のサーバーサイドで検索クエリを正規表現としてそのまま使用する場合、ReDoS（Regular Expression Denial of Service）攻撃のリスクがある。",
+        "location": "セクション4.2.3, 5.3",
+        "current_design": "escapeRegExp関数はクライアントサイドのハイライト表示用に設計されている。サーバーサイドのsearchFileContents関数での検索クエリの取り扱いが明確でない。",
+        "recommendation": "1. サーバーサイド検索では正規表現を使用せず、単純な文字列マッチング（indexOf, includes）を使用する\n2. または、検索クエリに対してescapeRegExpを適用した後に正規表現検索を行う\n3. ReDoS対策として、正規表現の実行時間を監視し、タイムアウト（5秒）と組み合わせる",
+        "owasp_reference": "A03:2021 - Injection"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "category": "A01: アクセス制御の不備",
+        "title": "検索結果のファイルパス露出",
+        "severity": "Medium",
+        "description": "検索結果レスポンスにfilePathが含まれるが、worktreeのルートパスからの相対パスであることを明確にし、絶対パスが露出しないことを保証する必要がある。",
+        "location": "セクション4.3.1, 4.4.1 SearchResultItem",
+        "current_design": "SearchResultItemにfilePathフィールドが定義されているが、絶対パス/相対パスの区別が明確でない。",
+        "recommendation": "1. SearchResultItemのfilePath仕様に「worktreeルートからの相対パス」と明記\n2. 実装時にpath.relative()を使用して相対パスを返却することを保証\n3. 既存の/api/worktrees/:id/files/route.tsパターン（SEC-SF-002: Error responses without absolute paths）に準拠",
+        "owasp_reference": "A01:2021 - Broken Access Control"
+      },
+      {
+        "id": "SEC-SF-002",
+        "category": "A04: 安全でない設計",
+        "title": "検索結果のコンテンツ行に対するサニタイズ方針が未定義",
+        "severity": "Medium",
+        "description": "検索結果のmatchesに含まれるcontent（マッチした行の内容）がそのまま返却されるが、機密情報を含む可能性がある行の取り扱いが未定義。",
+        "location": "セクション4.4.1 SearchResultItem.matches",
+        "current_design": "検索結果の行内容は制限なく返却される設計。EXCLUDED_PATTERNSで.envファイル等は除外されるが、通常ファイル内の機密情報は保護されない。",
+        "recommendation": "1. マッチした行の長さを制限（例: 500文字でトランケート）してログ等での露出を抑制\n2. レスポンスには行番号とマッチ位置のみを返し、content表示はクライアントが個別にファイル読み込みAPIを呼び出す設計も検討\n3. 現状の設計を維持する場合は、検索結果のセキュリティに関する注意事項をドキュメントに記載",
+        "owasp_reference": "A04:2021 - Insecure Design"
+      },
+      {
+        "id": "SEC-SF-003",
+        "category": "A09: セキュリティログと監視の失敗",
+        "title": "検索API呼び出しのログ記録が未定義",
+        "severity": "Medium",
+        "description": "検索APIへのリクエストログ（クエリ内容、実行時間、結果件数）の記録方針が設計書に記載されていない。セキュリティ監査やDoS検出に必要。",
+        "location": "セクション4.3.1, 7.1",
+        "current_design": "エラーハンドリング設計でログレベル（WARN/DEBUG/ERROR）は定義されているが、正常系のアクセスログ記録は未定義。",
+        "recommendation": "1. 検索API呼び出し時に以下を記録: worktreeId, クエリハッシュ（プライバシー保護）, executionTimeMs, resultCount, truncated\n2. 既存のlogger.ts（createLogger）を使用し、module='api-search'で構造化ログを出力\n3. クエリ内容自体はプライバシー保護のためハッシュ化またはログ出力しない",
+        "owasp_reference": "A09:2021 - Security Logging and Monitoring Failures"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "SEC-NTH-001",
+        "category": "A05: セキュリティ設定のミス",
+        "title": "レート制限の設計追加",
+        "severity": "Low",
+        "description": "検索APIはCPU・I/O負荷が高い操作のため、レート制限の設計があると理想的。ただし、タイムアウト5秒・結果100件制限でDoS対策は一定レベル実施済み。",
+        "location": "セクション6.1, 4.3.1",
+        "current_design": "制約値（タイムアウト5秒、結果100件）で一定の保護あり。",
+        "recommendation": "将来的にNext.js middleware層でレート制限（例: 同一worktreeへの検索API呼び出しを10回/分に制限）を検討。現時点ではYAGNIに従い対応見送りで問題なし。",
+        "owasp_reference": "A05:2021 - Security Misconfiguration"
+      },
+      {
+        "id": "SEC-NTH-002",
+        "category": "A02: 暗号化の失敗",
+        "title": "検索キーワードの一時的なメモリ保持",
+        "severity": "Low",
+        "description": "検索クエリがサーバーメモリに一時的に保持されるが、機密性の高いキーワードで検索された場合のリスク。ただし、ローカル開発ツールとしての用途では許容範囲。",
+        "location": "セクション4.3.1",
+        "current_design": "特別な対策なし（通常のリクエスト処理）。",
+        "recommendation": "将来的にセキュリティ要件が高まった場合、検索クエリのメモリクリア処理を検討。現時点では対応不要。",
+        "owasp_reference": "A02:2021 - Cryptographic Failures"
+      }
+    ],
+    "positive_feedback": [
+      {
+        "id": "SEC-POS-001",
+        "category": "A03: インジェクション",
+        "title": "パストラバーサル対策が適切",
+        "description": "既存のisPathSafe()関数を再利用し、パストラバーサル攻撃を防止。null byte injection、URL encoding、相対パス(..)すべてに対応。path-validator.tsの堅牢な実装を継承。"
+      },
+      {
+        "id": "SEC-POS-002",
+        "category": "A03: インジェクション",
+        "title": "XSS対策が適切",
+        "description": "Reactの自動エスケープを活用し、dangerouslySetInnerHTMLを使用しない方針。ハイライト表示もReactコンポーネントで安全に実装。DOMPurify不要の判断も適切。"
+      },
+      {
+        "id": "SEC-POS-003",
+        "category": "A04: 安全でない設計",
+        "title": "機密ファイル除外パターンが網羅的",
+        "description": "EXCLUDED_PATTERNSにより.git, .env, *.pem, *.key等の機密ファイルを検索対象から除外。file-tree.tsからインポートして一元管理する設計も適切。"
+      },
+      {
+        "id": "SEC-POS-004",
+        "category": "A04: 安全でない設計",
+        "title": "タイムアウト・制限値によるDoS対策",
+        "description": "検索タイムアウト5秒、結果100件制限、ファイルサイズ1MB制限、深さ10階層制限により、リソース枯渇攻撃を防止。AbortControllerによるキャンセル可能な設計。"
+      },
+      {
+        "id": "SEC-POS-005",
+        "category": "A07: 認証の失敗",
+        "title": "既存認証ミドルウェアの自動適用",
+        "description": "新規検索APIは/api/worktrees/:id/searchパスに配置され、middleware.tsの認証パターン(/api/:path*)に自動的に含まれる。CM_BIND=0.0.0.0時のBearer認証が適用される。"
+      },
+      {
+        "id": "SEC-POS-006",
+        "category": "A08: ソフトウェアとデータの整合性の障害",
+        "title": "入力バリデーションが適切",
+        "description": "validateSearchQuery関数により空文字チェック、最大長1000文字チェックを実施。クエリパラメータの型検証も設計に含まれている。"
+      },
+      {
+        "id": "SEC-POS-007",
+        "category": "A06: 脆弱で古いコンポーネント",
+        "title": "外部ライブラリ追加なし",
+        "description": "新規に外部ライブラリを追加せず、React標準機能とAbortController（標準API）で実装。脆弱性を持つ依存関係の追加リスクなし。"
+      },
+      {
+        "id": "SEC-POS-008",
+        "category": "A04: 安全でない設計",
+        "title": "バイナリファイル除外による安全性",
+        "description": "BINARY_EXTENSIONSとisBinaryContent()によりバイナリファイルを検索対象から除外。悪意のあるバイナリコンテンツの処理を回避。image-extensions.tsとの整合性も確保。"
+      }
+    ]
+  },
+  "owasp_compliance_summary": {
+    "A01_broken_access_control": {
+      "status": "Pass with recommendations",
+      "notes": "パストラバーサル対策済み。検索結果のパス露出に関する推奨事項あり（SEC-SF-001）"
+    },
+    "A02_cryptographic_failures": {
+      "status": "Pass",
+      "notes": "機密情報の暗号化は本機能のスコープ外。検索キーワードの一時保持は許容範囲（SEC-NTH-002）"
+    },
+    "A03_injection": {
+      "status": "Needs attention",
+      "notes": "パストラバーサル・XSS対策は良好。ReDoS対策が必要（SEC-MF-001）"
+    },
+    "A04_insecure_design": {
+      "status": "Pass with recommendations",
+      "notes": "機密ファイル除外、タイムアウト設計は良好。検索結果コンテンツの取り扱いに推奨事項あり（SEC-SF-002）"
+    },
+    "A05_security_misconfiguration": {
+      "status": "Pass",
+      "notes": "APIエンドポイント設定は既存パターンに準拠。レート制限は将来検討（SEC-NTH-001）"
+    },
+    "A06_vulnerable_components": {
+      "status": "Pass",
+      "notes": "外部ライブラリ追加なし。既存依存関係のみ使用"
+    },
+    "A07_authentication_failures": {
+      "status": "Pass",
+      "notes": "middleware.tsの認証が自動適用される設計"
+    },
+    "A08_software_data_integrity_failures": {
+      "status": "Pass",
+      "notes": "入力バリデーション（validateSearchQuery）が適切に設計されている"
+    },
+    "A09_security_logging_monitoring_failures": {
+      "status": "Needs attention",
+      "notes": "エラーログは設計済み。正常系アクセスログの追加を推奨（SEC-SF-003）"
+    },
+    "A10_ssrf": {
+      "status": "Not applicable",
+      "notes": "内部ファイルシステムのみアクセス。外部リクエストなし"
+    }
+  },
+  "recommendations_summary": [
+    "SEC-MF-001: サーバーサイド検索でのReDoS対策を実装（文字列マッチングまたはescapeRegExp適用）",
+    "SEC-SF-001: SearchResultItemのfilePathを相対パスと明記し、実装で保証",
+    "SEC-SF-002: 検索結果のcontent行長を制限（500文字推奨）",
+    "SEC-SF-003: 検索APIアクセスログを構造化ログで記録"
+  ],
+  "conclusion": "設計方針書はOWASP Top 10の主要な観点でセキュリティ対策が適切に設計されている。特にパストラバーサル対策（isPathSafe）、XSS対策（React自動エスケープ）、機密ファイル除外（EXCLUDED_PATTERNS）、DoS対策（タイムアウト・制限値）、認証（middleware自動適用）は優れている。Must Fix 1件（ReDoS対策）は実装時に対応必須。Should Fix 3件（パス露出、コンテンツ長制限、アクセスログ）は実装時に考慮推奨。全体的にセキュアな設計であり、指摘事項対応後に実装可能。",
+  "next_action": "SEC-MF-001のReDoS対策を設計書に反映し、実装フェーズへ移行"
+}

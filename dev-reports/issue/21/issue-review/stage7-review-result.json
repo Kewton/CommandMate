@@ -1,0 +1,295 @@
+{
+  "issue_number": 21,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-01-31",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 2
+  },
+  "previous_stage_resolution": {
+    "stage3_findings": {
+      "MF-1": {
+        "status": "RESOLVED",
+        "original": "FileTreeView.tsxの変更範囲が大きく、既存機能との競合リスク",
+        "resolution": "「コンポーネント設計」セクションに SearchBar.tsx を別コンポーネントとして新規作成する方針を明記。「作成対象ファイル一覧」にも明確に記載。FileTreeViewには検索クエリpropsを受け取る設計で、責務分離が適切に行われる"
+      },
+      "MF-2": {
+        "status": "RESOLVED",
+        "original": "ファイル内容検索APIのタイムアウト実装方法が未定義",
+        "resolution": "「タイムアウト実装」セクションにAbortController + setTimeoutによる実装方法をコードサンプル付きで詳細に記載。signal監視の具体的な処理フローも明記"
+      },
+      "SF-1": {
+        "status": "RESOLVED",
+        "original": "テスト範囲が未定義",
+        "resolution": "「テスト計画」セクションを追加し、ユニットテスト・結合テスト・E2Eテストのファイルパスと対象を表形式で明記。テストファイル一覧も「作成対象ファイル一覧」に含まれている"
+      },
+      "SF-2": {
+        "status": "RESOLVED",
+        "original": "useFileSearch.tsカスタムフックの作成が不明",
+        "resolution": "「コンポーネント設計」テーブルに useFileSearch.ts を追加。責務（searchQuery, searchMode, isSearching, results、debounce処理、API呼び出し）を明記。「作成対象ファイル一覧」にも記載"
+      },
+      "SF-3": {
+        "status": "RESOLVED",
+        "original": "モバイルUIでの検索バー配置が未定義",
+        "resolution": "「モバイルUI」セクションとUIダイアグラム（ASCII）を追加。「検索アイコンタップで表示/非表示切替」方式を採用し、ファイルツリー領域を最大化する設計を明記"
+      },
+      "SF-4": {
+        "status": "RESOLVED",
+        "original": "CLAUDE.md更新内容が未定義",
+        "resolution": "「CLAUDE.md更新内容」セクションを追加。追加するモジュール一覧（file-search.ts, SearchBar.tsx, useFileSearch.ts）を表形式で明記。「最近の実装機能」への追加も言及"
+      },
+      "NTH-1": {
+        "status": "RESOLVED",
+        "original": "大規模リポジトリでの検索パフォーマンス最適化オプションが未記載",
+        "resolution": "「対象外（将来検討）」セクションに検索インデックスの事前構築、ファイル内容のキャッシュ、Web Workerによるバックグラウンド検索を追加"
+      },
+      "NTH-2": {
+        "status": "RESOLVED",
+        "original": "型定義ファイルの更新箇所が未記載",
+        "resolution": "「変更が必要なファイル」テーブルに src/types/models.ts を追加。SearchQuery、SearchResult、SearchMode型の追加を明記"
+      }
+    },
+    "stage5_findings": {
+      "SF-1": {
+        "status": "RESOLVED",
+        "original": "検索結果のXSSサニタイズ処理の具体的な実装方法が未記載",
+        "resolution": "「XSSサニタイズの実装方法」セクションを新規追加。Reactの自動エスケープを活用する方針を明記し、マッチ箇所のハイライト表示の安全な実装例（HighlightedText コンポーネント）をコード付きで提示。DOMPurify不使用の理由も説明"
+      },
+      "NTH-1": {
+        "status": "RESOLVED",
+        "original": "SearchBarコンポーネントのテストファイルのパスが不整合",
+        "resolution": "テストファイルパスを既存構造に合わせて tests/unit/components/worktree/SearchBar.test.tsx に修正。既存のテストファイル構造（tests/unit/components/worktree/）と整合"
+      },
+      "NTH-2": {
+        "status": "RESOLVED",
+        "original": "ファイル内容検索時のエンコーディング対応が未記載",
+        "resolution": "「ファイルエンコーディング・バイナリファイル対応」セクションを新規追加。バイナリファイル判定（拡張子ベース + NULLバイト検出）、非UTF-8ファイルのスキップ処理、受け入れ条件への追加を明記"
+      }
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "useFileSearchフックのテストファイルが新規作成ファイル一覧に未記載",
+        "location": "## 作成対象ファイル一覧 > 新規作成ファイル セクション",
+        "recommendation": "useFileSearchフックのユニットテストファイル（tests/unit/hooks/useFileSearch.test.ts）を新規作成ファイル一覧に追加することを推奨。既存のhooksディレクトリにはテストファイルがないが、カスタムフックのロジック（debounce処理、API呼び出し、状態管理）はテスト対象として重要",
+        "evidence": "Issue本文には tests/unit/lib/file-search.test.ts と tests/unit/components/worktree/SearchBar.test.tsx は記載されているが、useFileSearch.ts のテストファイルは未記載。フックはビジネスロジックを含むため、単体テストが望ましい"
+      },
+      {
+        "id": "NTH-2",
+        "category": "依存関係",
+        "issue": "escapeRegExp関数の実装場所が未定義",
+        "location": "## 技術要件 > XSSサニタイズの実装方法 セクション",
+        "recommendation": "HighlightedTextコンポーネントで使用するescapeRegExp関数の実装場所を明記。選択肢: (1) src/lib/utils.ts に追加、(2) src/lib/file-search.ts に追加、(3) SearchBar.tsx 内でローカル定義。既存のutils.tsに追加するのが自然",
+        "evidence": "Issue本文のXSSサニタイズ実装例で escapeRegExp(query) を使用しているが、この関数の実装場所や既存関数の再利用については言及がない"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": {
+      "modification_required": [
+        {
+          "file": "src/components/worktree/FileTreeView.tsx",
+          "change_type": "modify",
+          "impact_level": "medium",
+          "description": "検索クエリprops受け取り、ツリーフィルタリングロジック追加。SearchBar.tsx分離により、FileTreeView自体の変更は最小限（propsインターフェース追加、フィルタリングロジックのみ）"
+        },
+        {
+          "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "change_type": "modify",
+          "impact_level": "medium",
+          "description": "useFileSearchフック統合、SearchBarコンポーネント配置。既存のFileTreeView呼び出し箇所（行1379-1392）付近に検索バーを追加"
+        },
+        {
+          "file": "src/types/models.ts",
+          "change_type": "modify",
+          "impact_level": "low",
+          "description": "SearchQuery、SearchResult、SearchMode型定義追加。既存のTreeItem、TreeResponse型定義（行217-242）の近くに追加"
+        },
+        {
+          "file": "CLAUDE.md",
+          "change_type": "modify",
+          "impact_level": "low",
+          "description": "新規モジュールとAPIのドキュメント追加（主要機能モジュール、最近の実装機能セクション）"
+        }
+      ],
+      "new_files_required": [
+        {
+          "file": "src/app/api/worktrees/[id]/search/route.ts",
+          "description": "ファイル内容検索APIエンドポイント（GET /api/worktrees/:id/search）"
+        },
+        {
+          "file": "src/components/worktree/SearchBar.tsx",
+          "description": "検索バーUIコンポーネント（検索入力、モード切替、ローディング表示）"
+        },
+        {
+          "file": "src/hooks/useFileSearch.ts",
+          "description": "検索状態管理カスタムフック（debounce処理、API呼び出し、結果管理）"
+        },
+        {
+          "file": "src/lib/file-search.ts",
+          "description": "ファイル内容検索ビジネスロジック（EXCLUDED_PATTERNSフィルタ、AbortControllerタイムアウト、バイナリ/非UTF-8スキップ）"
+        },
+        {
+          "file": "tests/unit/lib/file-search.test.ts",
+          "description": "ファイル内容検索のユニットテスト（EXCLUDED_PATTERNSフィルタ、タイムアウト、バイナリ/非UTF-8スキップ）"
+        },
+        {
+          "file": "tests/unit/components/worktree/SearchBar.test.tsx",
+          "description": "検索UIコンポーネントテスト（入力、モード切替、ローディング表示）"
+        },
+        {
+          "file": "tests/integration/api-search.test.ts",
+          "description": "検索APIの結合テスト（正常系、エラー系、タイムアウト、機密ファイル除外）"
+        },
+        {
+          "file": "tests/e2e/file-search.spec.ts",
+          "description": "検索機能のE2Eテスト（UI操作、検索結果表示、モード切替、モバイル動作）"
+        }
+      ]
+    },
+    "breaking_changes": {
+      "has_breaking_changes": false,
+      "description": "新規機能追加のため、既存APIやコンポーネントのインターフェースに破壊的変更はない。FileTreeViewProps拡張は後方互換（オプショナルprops追加）"
+    },
+    "test_impact": {
+      "existing_tests_affected": [
+        {
+          "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+          "impact": "検索props追加に伴うテストケース追加が必要だが、既存テストへの影響はなし"
+        },
+        {
+          "file": "tests/unit/lib/file-tree.test.ts",
+          "impact": "EXCLUDED_PATTERNS参照テストに影響なし（file-search.tsで再利用するが、file-tree.ts自体は変更なし）"
+        }
+      ],
+      "new_tests_required": [
+        "tests/unit/lib/file-search.test.ts - ファイル内容検索ロジックのユニットテスト",
+        "tests/unit/components/worktree/SearchBar.test.tsx - 検索UIコンポーネントテスト",
+        "tests/integration/api-search.test.ts - 検索APIの結合テスト",
+        "tests/e2e/file-search.spec.ts - 検索機能のE2Eテスト"
+      ]
+    },
+    "performance_impact": {
+      "concerns": [
+        "ファイル内容検索時の大量ファイル読み込みによるメモリ使用量増加",
+        "深い階層のディレクトリ走査によるI/O負荷",
+        "検索結果のフィルタリング処理によるCPU負荷"
+      ],
+      "mitigations": [
+        "MAX_FILE_SIZE_PREVIEW (1MB) による大きなファイルのスキップ（file-tree.ts LIMITS準拠）",
+        "MAX_DEPTH (10階層) によるディレクトリ深さ制限（file-tree.ts LIMITS準拠）",
+        "検索結果上限 (100件) による結果セット制限",
+        "5秒タイムアウト（AbortController）による長時間検索の中断",
+        "ファイル名検索はクライアントサイドで実行（サーバー負荷なし）",
+        "バイナリファイル・非UTF-8ファイルのスキップによる不要な処理回避"
+      ]
+    },
+    "security_considerations": {
+      "addressed": [
+        "機密ファイル除外: EXCLUDED_PATTERNS準拠（.env, *.pem, *.key等）",
+        "パストラバーサル防止: isPathSafe()関数の再利用",
+        "XSS対策: Reactの自動エスケープ活用（dangerouslySetInnerHTML不使用）",
+        "タイムアウト: 5秒制限によるDoS対策"
+      ]
+    },
+    "mobile_considerations": {
+      "addressed": [
+        "検索アイコンタップで検索バー表示/非表示切替（常時表示ではない）",
+        "ドロップダウンによるモード切替でスペース節約",
+        "検索バー非表示時はファイルツリー領域を最大化"
+      ]
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "1-519",
+      "relevance": "検索クエリprops追加・フィルタリングロジック追加対象。現在519行で、SearchBar分離により複雑化を回避"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1379-1392",
+      "relevance": "FileTreeViewの使用箇所。SearchBar配置とuseFileSearchフック統合箇所"
+    },
+    {
+      "file": "src/lib/file-tree.ts",
+      "lines": "34-59",
+      "relevance": "EXCLUDED_PATTERNS、LIMITS定数。file-search.tsで再利用"
+    },
+    {
+      "file": "src/types/models.ts",
+      "lines": "217-242",
+      "relevance": "TreeItem、TreeResponse型定義。SearchQuery、SearchResult型の追加先"
+    },
+    {
+      "file": "src/lib/utils.ts",
+      "lines": "25-40",
+      "relevance": "debounce関数。useFileSearch.tsで再利用"
+    },
+    {
+      "file": "src/components/mobile/MobileTabBar.tsx",
+      "lines": "1-100",
+      "relevance": "モバイルタブバー。検索アイコン追加の参考"
+    },
+    {
+      "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+      "lines": "1-",
+      "relevance": "既存FileTreeViewテスト。検索props追加時の参考"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "section": "主要機能モジュール",
+      "relevance": "新規モジュール（file-search.ts, SearchBar.tsx, useFileSearch.ts）の追加先"
+    },
+    {
+      "file": "CLAUDE.md",
+      "section": "最近の実装機能",
+      "relevance": "検索機能の概要と設計書リンクの追加先"
+    }
+  ],
+  "overall_assessment": {
+    "implementability": "HIGH",
+    "clarity": "HIGH",
+    "security_consideration": "HIGH",
+    "impact_scope_completeness": "HIGH",
+    "quality_improvement": "SIGNIFICANT",
+    "notes": "Stage 3（影響範囲レビュー1回目）の全指摘事項（MF-1〜2、SF-1〜4、NTH-1〜2の計8件）およびStage 5（通常レビュー2回目）の指摘事項（SF-1、NTH-1〜2の計3件）が全て適切に対応されている。現時点でMust Fix・Should Fix項目はなく、Nice to Have 2件のみ。影響範囲が明確に定義されており、テスト計画・セキュリティ対策・モバイル対応も網羅されている。実装に着手可能な状態"
+  },
+  "review_history_summary": {
+    "stage1": {
+      "date": "2026-01-31",
+      "focus": "通常レビュー（1回目）",
+      "findings": "MF: 1, SF: 4, NTH: 2",
+      "resolution_status": "ALL RESOLVED"
+    },
+    "stage3": {
+      "date": "2026-01-31",
+      "focus": "影響範囲レビュー（1回目）",
+      "findings": "MF: 2, SF: 4, NTH: 2",
+      "resolution_status": "ALL RESOLVED"
+    },
+    "stage5": {
+      "date": "2026-01-31",
+      "focus": "通常レビュー（2回目）",
+      "findings": "MF: 0, SF: 1, NTH: 2",
+      "resolution_status": "ALL RESOLVED"
+    },
+    "stage7": {
+      "date": "2026-01-31",
+      "focus": "影響範囲レビュー（2回目）",
+      "findings": "MF: 0, SF: 0, NTH: 2",
+      "cumulative_resolution_rate": "100% (22/22 items resolved across all stages)"
+    }
+  }
+}

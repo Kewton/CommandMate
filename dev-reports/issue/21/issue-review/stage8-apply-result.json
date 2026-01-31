@@ -1,0 +1,66 @@
+{
+  "issue_number": 21,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-01-31",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "useFileSearchフックのテストファイル（tests/unit/hooks/useFileSearch.test.ts）を新規作成ファイル一覧に追加。テスト計画のユニットテストセクションにも追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "escapeRegExp関数の実装場所を src/lib/utils.ts に追加と明記。変更ファイル一覧に追加、XSSサニタイズ実装例のコードコメントにも記載"
+      }
+    ]
+  },
+  "changes_made": [
+    {
+      "section": "作成対象ファイル一覧 > 新規作成ファイル",
+      "change": "tests/unit/hooks/useFileSearch.test.ts を追加（useFileSearchフックのユニットテスト）"
+    },
+    {
+      "section": "テスト計画 > ユニットテスト",
+      "change": "tests/unit/hooks/useFileSearch.test.ts を追加（debounce処理、API呼び出し、状態管理、エラーハンドリング）"
+    },
+    {
+      "section": "変更が必要なファイル",
+      "change": "src/lib/utils.ts を追加（escapeRegExp関数を追加）"
+    },
+    {
+      "section": "XSSサニタイズの実装方法",
+      "change": "コードサンプルにコメント「escapeRegExp関数は src/lib/utils.ts に追加」を追加"
+    },
+    {
+      "section": "XSSサニタイズの実装方法",
+      "change": "Note「escapeRegExp関数の実装場所」セクションを追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "イテレーション 2 - Stage 7,8 (2026-01-31) エントリを追加"
+    }
+  ],
+  "summary": {
+    "total_findings": 2,
+    "applied": 2,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/21"
+  },
+  "review_completion": {
+    "all_stages_completed": true,
+    "total_iterations": 2,
+    "total_findings_across_stages": 22,
+    "total_resolved": 22,
+    "resolution_rate": "100%",
+    "final_status": "READY_FOR_IMPLEMENTATION"
+  }
+}

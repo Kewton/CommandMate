@@ -1,0 +1,148 @@
+{
+  "issue_number": 21,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "apply_date": "2026-01-31",
+  "source_review": "dev-reports/issue/21/multi-stage-design-review/stage2-review-result.json",
+  "target_document": "dev-reports/design/issue-21-file-search-design-policy.md",
+  "status": "completed",
+  "summary": {
+    "must_fix_applied": 2,
+    "should_fix_applied": 3,
+    "nice_to_have_deferred": 2,
+    "total_changes": 5
+  },
+  "applied_changes": [
+    {
+      "id": "CONS-MF-001",
+      "severity": "Must Fix",
+      "title": "isPathSafe関数のシグネチャが逆順",
+      "status": "applied",
+      "changes": [
+        {
+          "section": "5.2 パストラバーサル対策",
+          "change": "isPathSafe呼び出しを`isPathSafe(basePath, filePath)`から`isPathSafe(filePath, basePath)`に修正",
+          "details": "関数シグネチャ`isPathSafe(targetPath: string, rootDir: string)`との整合性を確保"
+        },
+        {
+          "section": "11. 実装チェックリスト",
+          "change": "Phase 1にisPathSafe引数順序の確認項目を追加"
+        }
+      ]
+    },
+    {
+      "id": "CONS-MF-002",
+      "severity": "Must Fix",
+      "title": "APIレスポンス形式の不一致",
+      "status": "applied",
+      "changes": [
+        {
+          "section": "4.3.1 検索API",
+          "change": "レスポンス形式を`{ success: boolean, data?: {...} }`から`{ success: true, results, totalMatches, ... }`に変更",
+          "details": "既存ファイル操作APIパターンに統一。SearchSuccessResponseとSearchErrorResponseに分離"
+        },
+        {
+          "section": "11. 実装チェックリスト",
+          "change": "Phase 2にレスポンス形式統一の確認項目を追加"
+        }
+      ]
+    },
+    {
+      "id": "CONS-SF-001",
+      "severity": "Should Fix",
+      "title": "EXCLUDED_PATTERNSの完全なパターンリストへの参照明記",
+      "status": "applied",
+      "changes": [
+        {
+          "section": "5.1 機密ファイル除外",
+          "change": "EXCLUDED_PATTERNSをfile-tree.tsからインポートして使用する旨を追記",
+          "details": "コード例とともに`import { EXCLUDED_PATTERNS, isExcludedPattern } from './file-tree'`を明記"
+        },
+        {
+          "section": "11. 実装チェックリスト",
+          "change": "Phase 1にEXCLUDED_PATTERNSインポートの確認項目を追加"
+        }
+      ]
+    },
+    {
+      "id": "CONS-SF-002",
+      "severity": "Should Fix",
+      "title": "escapeRegExp関数の具体的な実装詳細の追記",
+      "status": "applied",
+      "changes": [
+        {
+          "section": "5.3 XSS対策",
+          "change": "escapeRegExp関数の具体的な実装コードを追記"
+        },
+        {
+          "section": "9.2 変更が必要なモジュール",
+          "change": "escapeRegExp関数の実装詳細をコード例とともに追記"
+        },
+        {
+          "section": "11. 実装チェックリスト",
+          "change": "Phase 1のescapeRegExp項目にCONS-SF-002対応を明記"
+        }
+      ]
+    },
+    {
+      "id": "CONS-SF-003",
+      "severity": "Should Fix",
+      "title": "MAX_DEPTHをLIMITS.MAX_DEPTHとして参照するよう統一",
+      "status": "applied",
+      "changes": [
+        {
+          "section": "6.1 制約値",
+          "change": "MAX_DEPTHの参照を`LIMITS.MAX_DEPTH (file-tree.ts)`に更新",
+          "details": "MAX_FILE_SIZE_PREVIEWと同様にLIMITSオブジェクト経由の参照に統一"
+        },
+        {
+          "section": "9.1 再利用するモジュール",
+          "change": "file-tree.tsの用途に`LIMITS.MAX_DEPTH`を追加"
+        },
+        {
+          "section": "11. 実装チェックリスト",
+          "change": "Phase 1にLIMITS.MAX_DEPTH参照の確認項目を追加"
+        }
+      ]
+    }
+  ],
+  "deferred_items": [
+    {
+      "id": "CONS-NTH-001",
+      "severity": "Nice to Have",
+      "title": "binary-extensions.tsの配置が既存パターンと異なる可能性",
+      "reason": "isBinaryExtension関数の追加は将来の拡張時に検討"
+    },
+    {
+      "id": "CONS-NTH-002",
+      "severity": "Nice to Have",
+      "title": "CLAUDE.mdへの更新内容が未定義",
+      "reason": "実装完了時に具体的な内容を決定"
+    }
+  ],
+  "design_document_updates": {
+    "sections_modified": [
+      "4.3.1 検索API - レスポンス形式変更",
+      "5.1 機密ファイル除外 - EXCLUDED_PATTERNSインポート方法追記",
+      "5.2 パストラバーサル対策 - isPathSafe引数順序修正",
+      "5.3 XSS対策 - escapeRegExp実装詳細追記",
+      "6.1 制約値 - LIMITS.MAX_DEPTH参照に統一",
+      "9.1 再利用するモジュール - LIMITS.MAX_DEPTH追記",
+      "9.2 変更が必要なモジュール - escapeRegExp実装詳細追記",
+      "11. 実装チェックリスト - 各Phase確認項目追加",
+      "13. レビュー履歴 - Stage 2セクション追加"
+    ],
+    "new_sections_added": [
+      "13. レビュー履歴 > Stage 2: 整合性レビュー (2026-01-31)"
+    ]
+  },
+  "next_steps": [
+    "Stage 3（影響範囲分析）レビューへ進む",
+    "実装時はチェックリストに従って各修正点を確認する"
+  ],
+  "notes": [
+    "ソースコードは変更していない（設計方針書のみ更新）",
+    "Stage 1の指摘事項との整合性を確認済み",
+    "実装チェックリストに各レビュー指摘対応項目を追加し、トレーサビリティを確保"
+  ]
+}

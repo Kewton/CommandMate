@@ -1,0 +1,249 @@
+{
+  "status": "success",
+  "issue_number": 21,
+  "title": "ファイルツリー検索機能 - TDD実装",
+  "completed_at": "2026-01-31T18:40:00.000Z",
+  "phase_results": [
+    {
+      "phase": 1,
+      "name": "基盤（型定義・設定・ユーティリティ）",
+      "status": "success",
+      "tasks": [
+        {
+          "task": "1.1",
+          "name": "検索関連型定義追加",
+          "file": "src/types/models.ts",
+          "status": "complete"
+        },
+        {
+          "task": "1.2",
+          "name": "バイナリ拡張子設定ファイル作成",
+          "file": "src/config/binary-extensions.ts",
+          "status": "complete"
+        },
+        {
+          "task": "1.3",
+          "name": "escapeRegExp関数追加",
+          "file": "src/lib/utils.ts",
+          "status": "complete"
+        },
+        {
+          "task": "1.4",
+          "name": "既存utils.test.tsにテスト追加",
+          "file": "tests/unit/lib/utils.test.ts",
+          "status": "complete",
+          "tests_added": 9
+        }
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "サーバーサイド（検索ロジック・API）",
+      "status": "success",
+      "tasks": [
+        {
+          "task": "2.1",
+          "name": "ファイル内容検索ロジック",
+          "file": "src/lib/file-search.ts",
+          "status": "complete"
+        },
+        {
+          "task": "2.2",
+          "name": "file-searchユニットテスト",
+          "file": "tests/unit/lib/file-search.test.ts",
+          "status": "complete",
+          "tests_added": 40
+        },
+        {
+          "task": "2.3",
+          "name": "検索APIエンドポイント",
+          "file": "src/app/api/worktrees/[id]/search/route.ts",
+          "status": "complete"
+        },
+        {
+          "task": "2.4",
+          "name": "検索API結合テスト",
+          "file": "tests/integration/api-search.test.ts",
+          "status": "complete",
+          "tests_added": 13
+        }
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "クライアントサイド（フック・コンポーネント）",
+      "status": "success",
+      "tasks": [
+        {
+          "task": "3.1",
+          "name": "useFileSearchフック",
+          "file": "src/hooks/useFileSearch.ts",
+          "status": "complete"
+        },
+        {
+          "task": "3.2",
+          "name": "useFileSearchテスト",
+          "file": "tests/unit/hooks/useFileSearch.test.ts",
+          "status": "complete",
+          "tests_added": 19
+        },
+        {
+          "task": "3.3",
+          "name": "SearchBarコンポーネント",
+          "file": "src/components/worktree/SearchBar.tsx",
+          "status": "complete"
+        },
+        {
+          "task": "3.4",
+          "name": "SearchBarテスト",
+          "file": "tests/unit/components/worktree/SearchBar.test.tsx",
+          "status": "complete",
+          "tests_added": 21
+        }
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "統合（既存コンポーネント変更）",
+      "status": "success",
+      "tasks": [
+        {
+          "task": "4.1",
+          "name": "FileTreeViewにフィルタリング追加",
+          "file": "src/components/worktree/FileTreeView.tsx",
+          "status": "complete",
+          "changes": [
+            "searchQuery/searchMode/searchResults propsを追加",
+            "HighlightedTextコンポーネントでマッチ箇所をハイライト",
+            "filteredRootItemsでツリーをフィルタリング",
+            "matchedPathsで自動展開機能を追加",
+            "検索結果なし状態の表示を追加"
+          ]
+        },
+        {
+          "task": "4.2",
+          "name": "WorktreeDetailRefactoredに統合",
+          "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "status": "complete",
+          "changes": [
+            "useFileSearchフック統合",
+            "SearchBarコンポーネントをFilesタブに配置（Desktop/Mobile両対応）",
+            "MobileContentPropsにfileSearch追加"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "テスト・品質保証",
+      "status": "success",
+      "tasks": [
+        {
+          "task": "5.1",
+          "name": "E2Eテスト作成",
+          "file": "tests/e2e/file-search.spec.ts",
+          "status": "complete",
+          "tests_added": 8
+        },
+        {
+          "task": "5.2",
+          "name": "全テスト実行・品質チェック",
+          "status": "complete"
+        }
+      ]
+    }
+  ],
+  "test_summary": {
+    "passed": 2157,
+    "failed": 0,
+    "skipped": 7,
+    "total": 2181,
+    "breakdown": {
+      "utils_tests": 17,
+      "file_search_tests": 40,
+      "api_search_tests": 13,
+      "useFileSearch_tests": 19,
+      "SearchBar_tests": 21,
+      "e2e_tests": 8
+    }
+  },
+  "coverage": {
+    "overall": 73.96,
+    "new_files": {
+      "src/lib/file-search.ts": 85.71,
+      "src/lib/utils.ts": 100,
+      "src/hooks/useFileSearch.ts": 53.94,
+      "src/components/worktree/SearchBar.tsx": 93.10
+    }
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0,
+    "build": "success"
+  },
+  "files_created": [
+    "src/config/binary-extensions.ts",
+    "src/lib/file-search.ts",
+    "src/app/api/worktrees/[id]/search/route.ts",
+    "src/hooks/useFileSearch.ts",
+    "src/components/worktree/SearchBar.tsx",
+    "tests/unit/lib/file-search.test.ts",
+    "tests/unit/hooks/useFileSearch.test.ts",
+    "tests/unit/components/worktree/SearchBar.test.tsx",
+    "tests/integration/api-search.test.ts",
+    "tests/e2e/file-search.spec.ts"
+  ],
+  "files_modified": [
+    "src/types/models.ts",
+    "src/lib/utils.ts",
+    "tests/unit/lib/utils.test.ts",
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "security_checks": [
+    {
+      "id": "SEC-MF-001",
+      "name": "ReDoS対策（正規表現不使用）",
+      "status": "implemented",
+      "details": "サーバーサイド検索でindexOf/includesを使用、正規表現未使用"
+    },
+    {
+      "id": "SEC-SF-001",
+      "name": "相対パスのみ返却",
+      "status": "implemented",
+      "details": "path.relative()で相対パスに変換して返却"
+    },
+    {
+      "id": "SEC-SF-002",
+      "name": "コンテンツ500文字トランケート",
+      "status": "implemented",
+      "details": "truncateContent()で500文字制限"
+    },
+    {
+      "id": "SEC-SF-003",
+      "name": "検索APIアクセスログ",
+      "status": "implemented",
+      "details": "構造化ログでqueryHash、executionTimeMs等を記録"
+    },
+    {
+      "id": "パストラバーサル対策",
+      "status": "implemented",
+      "details": "isPathSafe()を使用"
+    },
+    {
+      "id": "機密ファイル除外",
+      "status": "implemented",
+      "details": "isExcludedPattern()でEXCLUDED_PATTERNS適用"
+    },
+    {
+      "id": "XSS対策",
+      "status": "implemented",
+      "details": "React自動エスケープ使用、dangerouslySetInnerHTML不使用、HighlightedTextコンポーネントでescapeRegExp使用"
+    }
+  ],
+  "remaining_tasks": [
+    "Phase 6: CLAUDE.md更新"
+  ],
+  "commits": [],
+  "message": "TDD実装完了（Phase 1-5）。ファイルツリー検索機能の全実装が完了。セキュリティ要件すべて実装済み。ESLint/TypeScriptエラー0件。ビルド成功。テスト2157件パス。"
+}

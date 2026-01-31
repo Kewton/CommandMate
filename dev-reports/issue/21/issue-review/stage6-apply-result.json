@@ -1,0 +1,121 @@
+{
+  "issue_number": 21,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-01-31",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "「XSSサニタイズの実装方法」セクションを追加。Reactの自動エスケープ活用、dangerouslySetInnerHTML不使用、マッチ箇所ハイライトの安全な実装例（文字列分割+markタグ方式）をコードサンプル付きで明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "テストファイルパスを既存構造に合わせて修正: tests/unit/components/SearchBar.test.tsx → tests/unit/components/worktree/SearchBar.test.tsx（他のworktreeコンポーネントテストと同じディレクトリに配置）"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "「ファイルエンコーディング・バイナリファイル対応」セクションを追加。バイナリファイル判定方法（拡張子ベース+NULLバイト検出）、非UTF-8ファイルのスキップ方式を明記。テスト計画とエラーケース対応にも関連項目を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "changes_made": [
+    {
+      "section": "セキュリティ",
+      "change": "「XSSサニタイズの実装方法」サブセクションを新規追加",
+      "details": [
+        "Reactの自動エスケープを主要対策として採用",
+        "dangerouslySetInnerHTML不使用を明記",
+        "マッチ箇所ハイライトの安全な実装例をコードサンプル付きで記載",
+        "DOMPurify不要の理由を説明"
+      ]
+    },
+    {
+      "section": "バックエンド（ファイル内容検索）",
+      "change": "「ファイルエンコーディング・バイナリファイル対応」サブセクションを新規追加",
+      "details": [
+        "バイナリファイル判定: 拡張子ベース（画像、実行ファイル、圧縮ファイル等）",
+        "バイナリファイル判定: 読み込み時NULLバイト検出",
+        "非UTF-8ファイル: スキップしてエラーログ記録、処理継続"
+      ]
+    },
+    {
+      "section": "作成対象ファイル一覧",
+      "change": "テストファイルパスを修正",
+      "details": [
+        "tests/unit/components/SearchBar.test.tsx → tests/unit/components/worktree/SearchBar.test.tsx"
+      ]
+    },
+    {
+      "section": "テスト計画",
+      "change": "テスト対象を拡充",
+      "details": [
+        "ユニットテストにバイナリ/非UTF-8ファイルスキップのテストを追加",
+        "結合テストにバイナリファイル除外テストを追加"
+      ]
+    },
+    {
+      "section": "受け入れ条件",
+      "change": "エラーケース対応に項目追加",
+      "details": [
+        "バイナリファイル・非UTF-8ファイル自動スキップの受け入れ条件を追加",
+        "マッチ箇所ハイライト表示（XSS安全方式）の受け入れ条件を追加"
+      ]
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "イテレーション2 Stage 5,6の履歴を追加",
+      "details": [
+        "SF-1: XSSサニタイズ実装方法",
+        "NTH-1: テストファイルパス修正",
+        "NTH-2: バイナリ/非UTF-8ファイル対応"
+      ]
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/21"
+  },
+  "review_history_summary": {
+    "stage1": {
+      "date": "2026-01-31",
+      "focus": "通常レビュー（1回目）",
+      "findings": "MF: 1, SF: 4, NTH: 2",
+      "resolution": "全7件対応済み"
+    },
+    "stage3": {
+      "date": "2026-01-31",
+      "focus": "影響範囲レビュー（1回目）",
+      "findings": "MF: 2, SF: 4, NTH: 2",
+      "resolution": "全8件対応済み"
+    },
+    "stage5": {
+      "date": "2026-01-31",
+      "focus": "通常レビュー（2回目）",
+      "findings": "MF: 0, SF: 1, NTH: 2",
+      "resolution": "全3件対応済み（本ステージ）"
+    }
+  },
+  "cumulative_resolution": {
+    "total_findings_all_stages": 18,
+    "total_resolved": 18,
+    "resolution_rate": "100%"
+  },
+  "next_stage": {
+    "stage": 7,
+    "name": "影響範囲レビュー（2回目）",
+    "description": "Stage 6で追加された内容（XSSサニタイズ実装、バイナリファイル対応）が既存機能に与える影響を確認"
+  }
+}

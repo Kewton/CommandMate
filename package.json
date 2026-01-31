@@ -1,11 +1,21 @@
 {
   "name": "commandmate",
   "version": "0.1.0",
-  "private": true,
   "description": "Git worktree management with Claude CLI and tmux sessions",
+  "bin": {
+    "commandmate": "./bin/commandmate.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    ".env.example"
+  ],
   "scripts": {
     "dev": "tsx server.ts",
     "build": "next build",
+    "build:cli": "tsc --project tsconfig.cli.json",
+    "build:all": "npm run build && npm run build:cli",
+    "prepublishOnly": "npm run build:cli",
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "next lint",
     "test": "vitest",
@@ -22,6 +32,7 @@
     "ansi-to-html": "^0.7.2",
     "autoprefixer": "^10.4.22",
     "better-sqlite3": "^12.4.1",
+    "commander": "^14.0.2",
     "date-fns": "^4.1.0",
     "gray-matter": "^4.0.3",
     "http-proxy": "^1.18.1",

@@ -95,9 +95,18 @@ hotfix/*  ──PR──> main
 
 ### ファイル構成
 ```
+bin/
+└── commandmate.js     # CLIエントリポイント（shebang付き）
+
 src/
 ├── app/           # Next.js App Router
 │   └── api/       # APIルート
+├── cli/           # CLIモジュール（Issue #96）
+│   ├── index.ts       # CLIメインロジック（commander設定）
+│   ├── commands/      # サブコマンド（init, start, stop, status）
+│   ├── utils/         # 依存チェック、環境設定、デーモン管理
+│   ├── config/        # 依存関係定義
+│   └── types/         # CLI共通型定義（ExitCode enum）
 ├── components/    # UIコンポーネント
 │   ├── common/    # 再利用可能な共通UIコンポーネント（Toast等）
 │   ├── sidebar/   # サイドバー関連
@@ -138,9 +147,30 @@ src/
 | `src/config/uploadable-extensions.ts` | アップロード可能拡張子・MIMEタイプ・マジックバイト検証 |
 | `src/config/image-extensions.ts` | 画像ファイル拡張子・マジックバイト・SVG XSS検証 |
 | `src/config/mermaid-config.ts` | mermaid設定定数（securityLevel='strict'） |
+| `src/config/binary-extensions.ts` | バイナリファイル拡張子設定（検索除外用） |
+| `src/lib/file-search.ts` | ファイル内容検索ロジック（EXCLUDED_PATTERNSフィルタ、AbortControllerタイムアウト） |
+| `src/components/worktree/SearchBar.tsx` | 検索UIコンポーネント（検索入力、モード切替、ローディング表示） |
+| `src/hooks/useFileSearch.ts` | 検索状態管理フック（debounce処理、API呼び出し、結果管理） |
 | `src/components/worktree/ImageViewer.tsx` | 画像表示コンポーネント |
 | `src/components/worktree/MermaidDiagram.tsx` | mermaidダイアグラム描画コンポーネント |
 | `src/components/worktree/MermaidCodeBlock.tsx` | mermaidコードブロックラッパー |
+
+### CLIモジュール（Issue #96）
+
+| モジュール | 説明 |
+|-----------|------|
+| `src/cli/index.ts` | CLIメインロジック（commander設定） |
+| `src/cli/commands/init.ts` | initコマンド（依存チェック、.env作成、DB初期化） |
+| `src/cli/commands/start.ts` | startコマンド（フォアグラウンド/デーモン起動） |
+| `src/cli/commands/stop.ts` | stopコマンド（サーバー停止） |
+| `src/cli/commands/status.ts` | statusコマンド（状態確認） |
+| `src/cli/utils/preflight.ts` | システム依存関係チェック |
+| `src/cli/utils/env-setup.ts` | 環境設定ファイル生成 |
+| `src/cli/utils/daemon.ts` | デーモンプロセス管理 |
+| `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
+| `src/cli/utils/security-logger.ts` | セキュリティイベントログ |
+| `src/cli/config/cli-dependencies.ts` | 依存関係定義 |
+| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum） |
 
 ---
 
@@ -189,7 +219,9 @@ src/
 npm run dev
 
 # ビルド
-npm run build
+npm run build          # Next.jsビルド
+npm run build:cli      # CLIモジュールビルド
+npm run build:all      # 全ビルド（Next.js + CLI）
 
 # テスト
 npm test              # 全テスト
@@ -203,6 +235,26 @@ npm run lint
 # データベース
 npm run db:init       # DB初期化
 npm run db:reset      # DBリセット
+```
+
+### CLIコマンド（グローバルインストール後）
+
+```bash
+# バージョン確認
+commandmate --version
+
+# 初期化
+commandmate init              # 対話形式
+commandmate init --defaults   # デフォルト値で非対話
+
+# サーバー起動
+commandmate start             # フォアグラウンド
+commandmate start --dev       # 開発モード
+commandmate start --daemon    # バックグラウンド
+
+# サーバー停止・状態確認
+commandmate stop
+commandmate status
 ```
 
 ---
@@ -255,6 +307,53 @@ npm run db:reset      # DBリセット
 ---
 
 ## 最近の実装機能
+
+### Issue #21: ファイルツリー検索機能
+- **検索UI**: ファイルツリー上部に検索バーを常時表示（デスクトップ）
+- **検索モード切替**: ファイル名検索（クライアントサイド）/ ファイル内容検索（サーバーサイド）をトグルで切替
+- **ファイル名検索**: 既にロード済みのツリーデータをフィルタリング（高速・APIコール不要）
+- **ファイル内容検索**: サーバーサイドAPIで全文検索（5秒タイムアウト）
+- **ツリーフィルタリング**: マッチしないファイルを非表示、マッチしたファイルの親ディレクトリを自動展開
+- **ハイライト表示**: マッチ箇所を黄色ハイライト表示（XSS安全なReactコンポーネント方式）
+- **セキュリティ対策**:
+  - ReDoS対策（サーバーサイドで正規表現不使用、indexOf/includes使用）
+  - ファイルパスは相対パスのみ返却
+  - コンテンツ行500文字トランケート
+  - 機密ファイル除外（EXCLUDED_PATTERNS適用）
+  - 検索APIアクセスログ記録
+  - パストラバーサル対策（isPathSafe使用）
+  - XSS対策（React自動エスケープ、escapeRegExp使用）
+- **主要コンポーネント**:
+  - `src/config/binary-extensions.ts` - バイナリファイル拡張子設定
+  - `src/lib/file-search.ts` - ファイル内容検索ロジック
+  - `src/app/api/worktrees/[id]/search/route.ts` - 検索APIエンドポイント
+  - `src/hooks/useFileSearch.ts` - 検索状態管理フック
+  - `src/components/worktree/SearchBar.tsx` - 検索UIコンポーネント
+- 詳細: [設計書](./dev-reports/design/issue-21-file-search-design-policy.md)
+
+### Issue #96: npm CLIサポート
+- **CLIコマンド**: `npm install -g commandmate`でグローバルインストール可能
+- **サブコマンド**:
+  - `commandmate init` - 依存関係チェック、.env作成、DB初期化
+  - `commandmate start` - サーバー起動（フォアグラウンド/デーモン）
+  - `commandmate stop` - サーバー停止
+  - `commandmate status` - サーバー状態確認
+- **セキュリティ対策**:
+  - spawnによるコマンドインジェクション対策（execSync禁止）
+  - PIDファイルのアトミック書き込み（O_EXCL使用）
+  - .envファイルのパーミッション0600
+  - 入力値サニタイズ
+  - セキュリティイベントログ
+- **主要コンポーネント**:
+  - `bin/commandmate.js` - CLIエントリポイント
+  - `src/cli/index.ts` - commander設定
+  - `src/cli/commands/` - サブコマンド実装
+  - `src/cli/utils/preflight.ts` - 依存関係チェック
+  - `src/cli/utils/env-setup.ts` - 環境設定
+  - `src/cli/utils/daemon.ts` - デーモン管理
+  - `src/cli/utils/pid-manager.ts` - PIDファイル管理
+- **ビルド**: `npm run build:cli`（TypeScriptコンパイル）
+- 詳細: [設計書](./dev-reports/design/issue-96-npm-cli-design-policy.md)
 
 ### Issue #100: Mermaidダイアグラム描画機能
 - **ダイアグラム描画**: マークダウンプレビューでmermaidコードブロックをSVGダイアグラムとして描画

@@ -1,0 +1,225 @@
+{
+  "issue_number": 21,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-01-31",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "FileTreeView.tsxの変更範囲が大きく、既存の右クリックメニュー機能との競合リスク",
+        "location": "src/components/worktree/FileTreeView.tsx",
+        "recommendation": "検索バーUIは別コンポーネント（SearchBar.tsx）として新規作成し、FileTreeViewにはprops経由で検索クエリを渡す設計を推奨。これにより既存のContextMenu、TreeNode等との競合を最小化できる",
+        "evidence": "FileTreeView.tsx（519行）は既に複雑で、useContextMenu、ContextMenu、TreeNodeと密結合している。検索UI追加で更に複雑化するリスクがある"
+      },
+      {
+        "id": "MF-2",
+        "category": "依存関係",
+        "issue": "ファイル内容検索APIのタイムアウト実装方法が未定義",
+        "location": "Issue本文 - 技術要件セクション",
+        "recommendation": "Node.js環境でのタイムアウト実装方針を明記。選択肢：(1) AbortController + setTimeout、(2) Promise.race、(3) child_process.exec with timeout option。推奨は(1)のAbortController使用",
+        "evidence": "Issueでは「検索タイムアウト: 5秒」と記載があるが、サーバーサイドでのファイル読み込み処理にタイムアウトを設定する具体的な実装方法が未定義"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "既存テストファイルへの影響と新規テスト範囲が未定義",
+        "location": "tests/unit/lib/file-tree.test.ts, tests/integration/api-file-tree.test.ts",
+        "recommendation": "以下のテストを追加/修正する必要がある：(1) file-tree.test.tsにファイル内容検索ロジックのユニットテスト追加、(2) 検索APIの結合テスト新規作成（tests/integration/api-search.test.ts）、(3) FileTreeViewの検索UI用コンポーネントテスト（tests/unit/components/）、(4) E2Eテスト（tests/e2e/file-search.spec.ts）",
+        "evidence": "既存のfile-tree.test.ts（475行）にはisExcludedPattern、filterExcludedItems、sortItems、readDirectoryのテストがある。検索機能は新規ロジックのためテスト追加が必要"
+      },
+      {
+        "id": "SF-2",
+        "category": "UI影響",
+        "issue": "WorktreeDetailRefactoredコンポーネントへの検索状態管理の統合方法",
+        "location": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "recommendation": "WorktreeDetailRefactored.tsx（1612行）は既に多くの状態を管理している。検索状態（searchQuery, searchMode, isSearching）はuseFileSearch()等のカスタムフックに分離することを推奨",
+        "evidence": "WorktreeDetailRefactoredは現在FileTreeViewをプロップス渡しで使用（行1381-1392）。検索状態が追加されると更に複雑化する"
+      },
+      {
+        "id": "SF-3",
+        "category": "UI影響",
+        "issue": "モバイルUIでの検索バー配置が未定義",
+        "location": "src/components/mobile/MobileTabBar.tsx",
+        "recommendation": "モバイル時の検索バー配置オプション：(1) ファイルタブ上部に固定表示、(2) 検索アイコンタップで検索バー表示/非表示切替、(3) フローティング検索ボタン。画面スペースの制約から(2)を推奨",
+        "evidence": "MobileContent内でFileTreeViewが使用されている（行764-778）。モバイルでは画面が狭く、常時表示の検索バーはツリー表示領域を圧迫する可能性がある"
+      },
+      {
+        "id": "SF-4",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdへの新規API追加記載が必要",
+        "location": "CLAUDE.md - 主要機能モジュールセクション",
+        "recommendation": "以下をCLAUDE.mdに追記：(1) src/lib/file-search.ts（新規）- ファイル内容検索ロジック、(2) src/components/worktree/SearchBar.tsx（新規）- 検索UIコンポーネント、(3) src/hooks/useFileSearch.ts（新規）- 検索状態管理フック、(4) APIエンドポイント GET /api/worktrees/:id/search",
+        "evidence": "CLAUDE.mdには主要機能モジュールの一覧があり、新規追加されるモジュールは記載が必要"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "パフォーマンス",
+        "issue": "大規模リポジトリでの検索パフォーマンス最適化オプション",
+        "location": "Issue本文 - 対象外セクション",
+        "recommendation": "将来検討として以下を対象外に追記：(1) 検索インデックスの事前構築、(2) ファイル内容のキャッシュ、(3) Web Workerによるバックグラウンド検索",
+        "evidence": "Issueの対象外セクションに将来検討項目があるが、パフォーマンス最適化オプションの記載がない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "影響ファイル",
+        "issue": "型定義ファイルの更新箇所",
+        "location": "src/types/models.ts",
+        "recommendation": "以下の型定義追加を推奨：(1) SearchQuery interface - 検索パラメータ、(2) SearchResult interface - 検索結果、(3) SearchMode type - 'name' | 'content'",
+        "evidence": "src/types/models.ts（269行）にTreeItem、TreeResponse等のファイルツリー関連型が定義されている。検索機能追加に伴い関連型の追加が必要"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": {
+      "modification_required": [
+        {
+          "file": "src/components/worktree/FileTreeView.tsx",
+          "change_type": "modify",
+          "impact_level": "high",
+          "description": "検索バーUI追加、検索クエリによるツリーフィルタリングロジック追加"
+        },
+        {
+          "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "change_type": "modify",
+          "impact_level": "medium",
+          "description": "検索状態管理の統合（検索クエリ、モード、ローディング状態）"
+        },
+        {
+          "file": "src/lib/file-tree.ts",
+          "change_type": "modify",
+          "impact_level": "high",
+          "description": "ファイル内容検索ロジック追加（grepライクな全文検索）"
+        },
+        {
+          "file": "src/types/models.ts",
+          "change_type": "modify",
+          "impact_level": "low",
+          "description": "SearchQuery、SearchResult等の型定義追加"
+        },
+        {
+          "file": "CLAUDE.md",
+          "change_type": "modify",
+          "impact_level": "low",
+          "description": "新規モジュールとAPIのドキュメント追加"
+        }
+      ],
+      "new_files_required": [
+        {
+          "file": "src/app/api/worktrees/[id]/search/route.ts",
+          "description": "ファイル内容検索APIエンドポイント（GET /api/worktrees/:id/search）"
+        },
+        {
+          "file": "src/components/worktree/SearchBar.tsx",
+          "description": "検索バーUIコンポーネント（検索入力、モード切替ボタン、ローディング表示）"
+        },
+        {
+          "file": "src/hooks/useFileSearch.ts",
+          "description": "検索状態管理カスタムフック（debounce処理、API呼び出し、結果管理）"
+        },
+        {
+          "file": "src/lib/file-search.ts",
+          "description": "ファイル内容検索ビジネスロジック（EXCLUDED_PATTERNSフィルタ、タイムアウト処理）"
+        },
+        {
+          "file": "tests/unit/lib/file-search.test.ts",
+          "description": "ファイル内容検索のユニットテスト"
+        },
+        {
+          "file": "tests/integration/api-search.test.ts",
+          "description": "検索APIの結合テスト"
+        },
+        {
+          "file": "tests/e2e/file-search.spec.ts",
+          "description": "検索機能のE2Eテスト"
+        }
+      ]
+    },
+    "breaking_changes": {
+      "has_breaking_changes": false,
+      "description": "新規機能追加のため、既存APIやコンポーネントのインターフェースに破壊的変更はない"
+    },
+    "test_impact": {
+      "existing_tests_affected": [
+        "tests/unit/lib/file-tree.test.ts - EXCLUDED_PATTERNSの参照テストに影響なし",
+        "tests/integration/api-file-tree.test.ts - 既存APIへの影響なし",
+        "tests/e2e/file-tree-operations.spec.ts - 既存操作への影響なし"
+      ],
+      "new_tests_required": [
+        "tests/unit/lib/file-search.test.ts - 検索ロジックのユニットテスト",
+        "tests/unit/components/SearchBar.test.tsx - 検索UIコンポーネントテスト",
+        "tests/integration/api-search.test.ts - 検索APIの結合テスト",
+        "tests/e2e/file-search.spec.ts - 検索機能のE2Eテスト"
+      ]
+    },
+    "performance_impact": {
+      "concerns": [
+        "ファイル内容検索時の大量ファイル読み込みによるメモリ使用量増加",
+        "深い階層のディレクトリ走査によるI/O負荷",
+        "検索結果のフィルタリング処理によるCPU負荷"
+      ],
+      "mitigations": [
+        "MAX_FILE_SIZE_PREVIEW (1MB) による大きなファイルのスキップ",
+        "MAX_DEPTH (10階層) によるディレクトリ深さ制限",
+        "検索結果上限 (100件) による結果セット制限",
+        "5秒タイムアウトによる長時間検索の中断"
+      ]
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "1-519",
+      "relevance": "検索UI追加の主要対象コンポーネント"
+    },
+    {
+      "file": "src/lib/file-tree.ts",
+      "lines": "1-296",
+      "relevance": "EXCLUDED_PATTERNS、LIMITSの定義、検索ロジック追加先"
+    },
+    {
+      "file": "src/lib/utils.ts",
+      "lines": "1-41",
+      "relevance": "debounce関数の再利用対象"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1379-1392",
+      "relevance": "FileTreeViewの使用箇所"
+    },
+    {
+      "file": "src/lib/path-validator.ts",
+      "lines": "1-118",
+      "relevance": "isPathSafe()関数の再利用対象"
+    },
+    {
+      "file": "src/types/models.ts",
+      "lines": "214-242",
+      "relevance": "TreeItem、TreeResponse型定義"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "section": "主要機能モジュール",
+      "relevance": "新規モジュール追加時の更新必要"
+    },
+    {
+      "file": "CLAUDE.md",
+      "section": "最近の実装機能",
+      "relevance": "検索機能の設計書リンク追加"
+    }
+  ]
+}

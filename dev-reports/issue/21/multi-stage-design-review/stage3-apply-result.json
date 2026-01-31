@@ -1,0 +1,104 @@
+{
+  "issue_number": 21,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IMPACT-MF-001",
+        "item": "FileTreeViewへの検索クエリprops追加による破壊的変更",
+        "sections_updated": ["4.2.1", "9.2", "11"],
+        "status": "reflected",
+        "update_summary": "FileTreeViewPropsの新規propsをオプショナルとして定義する方針を追記。searchQuery?, searchMode?, onSearchResultSelect?として定義し後方互換性を維持"
+      },
+      {
+        "id": "IMPACT-MF-002",
+        "item": "新規APIエンドポイント追加に伴うルーティング影響",
+        "sections_updated": ["4.3.1", "11"],
+        "status": "reflected",
+        "update_summary": "既存パターン踏襲の方針を追記。/api/worktrees/[id]/tree/route.tsを参考にworktree存在チェック、パス検証を実装。middleware.ts認証対象パターン確認"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IMPACT-SF-001",
+        "item": "useFileSearchフック追加によるWorktreeDetailRefactoredの複雑度増加",
+        "sections_updated": ["4.2.2", "11"],
+        "status": "reflected",
+        "update_summary": "既存useWorktreeUIStateパターンを参考にし、状態のreducer化を検討する方針を追記"
+      },
+      {
+        "id": "IMPACT-SF-002",
+        "item": "models.tsへの型追加による型定義ファイル肥大化",
+        "sections_updated": ["4.4.1", "11"],
+        "status": "reflected",
+        "update_summary": "将来的に300行超えの場合はsrc/types/search.tsへの分離を検討する方針を追記"
+      },
+      {
+        "id": "IMPACT-SF-003",
+        "item": "utils.tsへのescapeRegExp追加とテストカバレッジ",
+        "sections_updated": ["10.1", "11"],
+        "status": "reflected",
+        "update_summary": "既存tests/unit/lib/utils.test.tsへのテストケース追加を明記。テスト項目（特殊文字、空文字列、日本語、実際の検索パターン）を記載"
+      },
+      {
+        "id": "IMPACT-SF-004",
+        "item": "binary-extensions.tsとimage-extensions.tsとの整合性",
+        "sections_updated": ["6.3", "11"],
+        "status": "reflected",
+        "update_summary": "image-extensions.tsからIMAGE_EXTENSIONSをインポートして整合性を確保する方針を追記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IMPACT-NTH-001",
+        "item": "検索結果ハイライト時のレンダリングパフォーマンス",
+        "status": "noted",
+        "note": "検索結果100件制限により通常ケースでは問題なし。パフォーマンス問題発生時にReact.memo等で最適化"
+      },
+      {
+        "id": "IMPACT-NTH-002",
+        "item": "ファイル内容検索API追加によるサーバー負荷",
+        "status": "noted",
+        "note": "設計書で制限値が設定済み。本番環境でexecutionTimeMsを監視"
+      },
+      {
+        "id": "IMPACT-NTH-003",
+        "item": "モバイルUIでの検索バー表示/非表示アニメーション",
+        "sections_updated": ["4.2.1"],
+        "status": "reflected",
+        "update_summary": "モバイルUI考慮点を追記。デスクトップ版先行実装、モバイル対応は後続フェーズで実施可能"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-21-file-search-design-policy.md",
+  "sections_updated": [
+    "4.2.1 SearchBar.tsx - モバイルUI考慮点追記",
+    "4.2.2 useFileSearch.ts - 状態管理方針追記（IMPACT-SF-001対応）",
+    "4.3.1 検索API - 既存パターン踏襲方針追記（IMPACT-MF-002対応）",
+    "4.4.1 型定義 - 将来の分離方針追記（IMPACT-SF-002対応）",
+    "6.3 バイナリファイル除外 - image-extensions.ts整合性確保（IMPACT-SF-004対応）",
+    "9.2 変更が必要なモジュール - FileTreeViewProps後方互換性追記（IMPACT-MF-001対応）",
+    "10.1 ユニットテスト - utils.test.tsへのテストケース追加明記（IMPACT-SF-003対応）",
+    "10.3 E2Eテスト - テストデータ準備方針追記",
+    "11 実装チェックリスト - 全指摘事項のチェック項目追加",
+    "13 レビュー履歴 - Stage 3セクション追加"
+  ],
+  "positive_feedback_noted": [
+    "IMPACT-POS-001: 既存モジュールの適切な再利用",
+    "IMPACT-POS-002: 段階的な実装計画",
+    "IMPACT-POS-003: テスト計画の明確化",
+    "IMPACT-POS-004: オプショナルな機能追加設計",
+    "IMPACT-POS-005: 循環依存のリスクなし"
+  ],
+  "dependency_analysis_added": true,
+  "timestamp": "2026-01-31T17:30:00+09:00",
+  "next_stage": {
+    "stage": 4,
+    "name": "セキュリティレビュー",
+    "status": "ready"
+  }
+}

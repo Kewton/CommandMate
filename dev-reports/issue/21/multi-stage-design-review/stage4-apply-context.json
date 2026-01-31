@@ -1,0 +1,7 @@
+{
+  "issue_number": 21,
+  "review_result_path": "dev-reports/issue/21/multi-stage-design-review/stage4-review-result.json",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘事項反映",
+  "target_file": "dev-reports/design/issue-21-file-search-design-policy.md"
+}

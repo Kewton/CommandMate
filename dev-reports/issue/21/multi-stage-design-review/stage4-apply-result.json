@@ -1,0 +1,118 @@
+{
+  "issue_number": 21,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "title": "検索クエリの正規表現インジェクション対策が不十分（ReDoS攻撃リスク）",
+        "severity": "High",
+        "section_updated": "セクション5.4 ReDoS対策（サーバーサイド検索）",
+        "changes": [
+          "サーバーサイド検索での正規表現使用禁止を明記",
+          "indexOf/includesによる文字列マッチングのみを使用する方針を追加",
+          "findMatchingLines関数の実装例を追加",
+          "escapeRegExp使用はクライアントサイドのハイライト表示のみと明記"
+        ],
+        "checklist_updated": true,
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "title": "検索結果のファイルパス露出",
+        "severity": "Medium",
+        "section_updated": "セクション5.5.1 ファイルパスの取り扱い",
+        "changes": [
+          "SearchResultItem.filePathはworktreeルートからの相対パスのみを返却する方針を明記",
+          "path.relative()使用を必須化",
+          "型定義（SearchResultItem）にコメント追加"
+        ],
+        "checklist_updated": true,
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-002",
+        "title": "検索結果のコンテンツ行に対するサニタイズ方針が未定義",
+        "severity": "Medium",
+        "section_updated": "セクション5.5.2 コンテンツ行の長さ制限",
+        "changes": [
+          "マッチした行のcontentを500文字でトランケートする方針を明記",
+          "truncateContent関数の実装例を追加",
+          "型定義（SearchResultItem.matches.content）にコメント追加"
+        ],
+        "checklist_updated": true,
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-003",
+        "title": "検索API呼び出しのログ記録が未定義",
+        "severity": "Medium",
+        "section_updated": "セクション5.6 検索APIアクセスログ",
+        "changes": [
+          "検索APIアクセスログの構造化ログ出力方針を明記",
+          "ログ項目（worktreeId, queryHash, executionTimeMs, resultCount, truncated）を定義",
+          "クエリ内容自体は記録しない（プライバシー保護）方針を明記",
+          "hashQuery関数の実装例を追加"
+        ],
+        "checklist_updated": true,
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "SEC-NTH-001",
+        "title": "レート制限の設計追加",
+        "status": "deferred",
+        "reason": "タイムアウト5秒・結果100件制限でDoS対策は一定レベル実施済み。YAGNIに従い対応見送り。将来検討。"
+      },
+      {
+        "id": "SEC-NTH-002",
+        "title": "検索キーワードの一時的なメモリ保持",
+        "status": "deferred",
+        "reason": "ローカル開発ツールとしての用途では許容範囲。将来セキュリティ要件が高まった場合に検討。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-21-file-search-design-policy.md",
+  "sections_updated": [
+    "セクション5.4 ReDoS対策（サーバーサイド検索）（新設）",
+    "セクション5.5 検索結果のセキュリティ（新設）",
+    "セクション5.5.1 ファイルパスの取り扱い（新設）",
+    "セクション5.5.2 コンテンツ行の長さ制限（新設）",
+    "セクション5.6 検索APIアクセスログ（新設）",
+    "セクション5.7 入力バリデーション（番号変更: 旧5.4）",
+    "セクション4.4.1 型定義（コメント追加）",
+    "セクション11 実装チェックリスト（セキュリティ項目追加）",
+    "セクション13 レビュー履歴 Stage 4（新設）"
+  ],
+  "checklist_items_added": [
+    "Phase 1: SearchResultItem.filePathはworktreeルートからの相対パスとしてコメント記載（SEC-SF-001対応）",
+    "Phase 1: SearchResultItem.matches.contentは最大500文字としてコメント記載（SEC-SF-002対応）",
+    "Phase 1: サーバーサイド検索では正規表現を使用せず、indexOf/includesによる文字列マッチングを使用（SEC-MF-001対応）",
+    "Phase 1: 検索結果のfilePathはpath.relative()で相対パスに変換して返却（SEC-SF-001対応）",
+    "Phase 1: マッチした行のcontentは500文字でトランケート（SEC-SF-002対応）",
+    "Phase 2: 検索APIアクセスログを構造化ログで出力（SEC-SF-003対応）",
+    "Phase 3: HighlightedText.tsx作成時にクライアントサイドのみでescapeRegExp使用確認（SEC-MF-001対応）",
+    "Phase 4: file-search.tsのセキュリティテスト追加（SEC-MF-001, SEC-SF-001, SEC-SF-002対応）",
+    "Phase 4: 検索APIアクセスログ出力のテスト（SEC-SF-003対応）"
+  ],
+  "owasp_compliance": {
+    "A01_broken_access_control": "Pass with recommendations",
+    "A02_cryptographic_failures": "Pass",
+    "A03_injection": "Resolved",
+    "A04_insecure_design": "Pass with recommendations",
+    "A05_security_misconfiguration": "Pass",
+    "A06_vulnerable_components": "Pass",
+    "A07_authentication_failures": "Pass",
+    "A08_software_data_integrity_failures": "Pass",
+    "A09_security_logging_monitoring_failures": "Resolved",
+    "A10_ssrf": "Not applicable"
+  },
+  "timestamp": "2026-01-31T12:00:00Z"
+}

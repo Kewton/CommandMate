@@ -1,0 +1,81 @@
+{
+  "issue_number": 21,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-01-31",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "SearchBar.tsxを別コンポーネントとして新規作成する方針を明記。「コンポーネント分離」として検索UI節と「コンポーネント設計」テーブルに追加。FileTreeView.tsx（519行）との責務分離の設計方針を記載"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "タイムアウト実装方法を「タイムアウト実装」セクションとして追加。AbortController + setTimeoutのコードサンプルと、signal監視による処理中断の説明を記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "「テスト計画」セクションを新設。ユニットテスト（file-search.test.ts, SearchBar.test.tsx）、結合テスト（api-search.test.ts）、E2Eテスト（file-search.spec.ts）を明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "useFileSearch.tsカスタムフックを「コンポーネント設計」テーブルに追加。検索状態管理（searchQuery, searchMode, isSearching, results）、debounce処理、API呼び出しの責務を明記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "「モバイルUI」セクションを新設。検索アイコンタップで検索バー表示/非表示切替方式を採用。ASCIIアートでUIレイアウトを図示。受け入れ条件にもモバイル動作を追加"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "「CLAUDE.md更新内容」セクションを新設。file-search.ts、SearchBar.tsx、useFileSearch.tsの3モジュールと、最近の実装機能セクションへの追記内容を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "「対象外（将来検討）」セクションにパフォーマンス最適化オプション3項目を追加：検索インデックスの事前構築、ファイル内容のキャッシュ、Web Workerによるバックグラウンド検索"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "「変更が必要なファイル」テーブルにsrc/types/models.tsを追加。SearchQuery、SearchResult、SearchMode型定義の追加を明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "changes_made": {
+    "new_sections": [
+      "モバイルUI - 検索アイコンタップで表示/非表示切替方式のUI設計案",
+      "コンポーネント設計 - SearchBar.tsx、useFileSearch.ts、file-search.tsの責務分担",
+      "タイムアウト実装 - AbortController + setTimeoutによる実装方法とコードサンプル",
+      "作成対象ファイル一覧 - 新規作成ファイル8件と変更対象ファイル4件",
+      "テスト計画 - ユニット/結合/E2Eテストの対象ファイルとテスト対象",
+      "CLAUDE.md更新内容 - 実装完了後に追加するモジュール一覧"
+    ],
+    "updated_sections": [
+      "検索UI - コンポーネント分離の方針を追加",
+      "パフォーマンス制約 - タイムアウト実装方法への参照を追加",
+      "受け入れ条件 - モバイルでの検索バー表示/非表示条件を追加",
+      "対象外（将来検討）- パフォーマンス最適化オプション3項目を追加",
+      "レビュー履歴 - Stage 3,4の対応内容を追加"
+    ]
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/21"
+  }
+}

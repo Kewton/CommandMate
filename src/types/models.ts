@@ -266,3 +266,63 @@ export interface FileContent {
  * [MF-001] Explicit wrapper type for API responses
  */
 export type FileContentResponse = { success: true } & FileContent;
+
+// ============================================================================
+// Search Types (Issue #21)
+// ============================================================================
+
+/**
+ * Search mode - determines whether to search by filename or file content
+ * [Issue #21] File tree search functionality
+ */
+export type SearchMode = 'name' | 'content';
+
+/**
+ * Search query parameters
+ * [Issue #21] File tree search functionality
+ */
+export interface SearchQuery {
+  /** Search query string */
+  query: string;
+  /** Search mode: 'name' for filename, 'content' for file content */
+  mode: SearchMode;
+}
+
+/**
+ * Search result containing all matching files
+ * [Issue #21] File tree search functionality
+ */
+export interface SearchResult {
+  /** Search mode used */
+  mode: SearchMode;
+  /** Original search query */
+  query: string;
+  /** List of matching files */
+  results: SearchResultItem[];
+  /** Total number of matches found */
+  totalMatches: number;
+  /** Whether results were truncated (exceeds 100 items) */
+  truncated: boolean;
+  /** Time taken to execute search in milliseconds */
+  executionTimeMs: number;
+}
+
+/**
+ * Individual search result item
+ * [Issue #21] File tree search functionality
+ * [SEC-SF-001] filePath is relative path only (no absolute paths exposed)
+ * [SEC-SF-002] content is truncated to 500 characters max
+ */
+export interface SearchResultItem {
+  /** File path relative to worktree root (security: no absolute paths) */
+  filePath: string;
+  /** File name without path */
+  fileName: string;
+  /** Matching lines with content (for content search mode) */
+  matches?: Array<{
+    /** Line number (1-based) */
+    line: number;
+    /** Line content (truncated to 500 characters for security) */
+    content: string;
+  }>;
+}

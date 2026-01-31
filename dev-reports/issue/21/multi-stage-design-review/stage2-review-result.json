@@ -1,0 +1,118 @@
+{
+  "issue_number": 21,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_date": "2026-01-31",
+  "design_doc": "dev-reports/design/issue-21-file-search-design-policy.md",
+  "status": "completed",
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "positive_feedback": 5
+  },
+  "findings": [
+    {
+      "id": "CONS-MF-001",
+      "severity": "Must Fix",
+      "category": "設計書と既存コードの整合性",
+      "title": "isPathSafe関数のシグネチャが逆順",
+      "description": "設計書セクション5.2のisPathSafe呼び出しでは`isPathSafe(basePath, filePath)`と記載されているが、実際のpath-validator.tsの実装では`isPathSafe(targetPath: string, rootDir: string)`の順で、引数の順序が逆である。",
+      "location": "設計書セクション5.2、src/lib/path-validator.ts:29",
+      "actual_code": "export function isPathSafe(targetPath: string, rootDir: string): boolean",
+      "expected": "isPathSafe(filePath, basePath)の順で呼び出すべき",
+      "recommendation": "設計書のコード例を修正し、正しい呼び出し順序に変更する:\n```typescript\nif (!isPathSafe(filePath, basePath)) {\n  continue;\n}\n```"
+    },
+    {
+      "id": "CONS-MF-002",
+      "severity": "Must Fix",
+      "category": "API設計パターン整合性",
+      "title": "APIレスポンス形式の不一致",
+      "description": "設計書セクション4.3.1のSearchResponseインターフェースは既存のAPIパターンと異なる。既存のファイル操作APIでは`{ success: true, ...data }`形式を使用しているが、設計書では`{ success: boolean, data?: {...}, error?: {...} }`形式を採用している。",
+      "location": "設計書セクション4.3.1、src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "actual_code": "// 既存パターン\nreturn NextResponse.json({ success: true, path, content, ... });\n// 設計書パターン\ninterface SearchResponse { success: boolean; data?: { results, totalMatches, truncated }; error?: {...}; }",
+      "expected": "既存APIパターンに統一すべき",
+      "recommendation": "レスポンス形式を既存パターンに統一する:\n```typescript\ninterface SearchResponse {\n  success: true;\n  results: SearchResultItem[];\n  totalMatches: number;\n  truncated: boolean;\n  executionTimeMs: number;\n}\n// または error 時\ninterface SearchErrorResponse {\n  success: false;\n  error: { code: string; message: string; };\n}\n```"
+    },
+    {
+      "id": "CONS-SF-001",
+      "severity": "Should Fix",
+      "category": "設計書内の整合性",
+      "title": "EXCLUDED_PATTERNSの秘密鍵パターン記載不正確",
+      "description": "設計書セクション5.1では機密ファイル除外として`*.pem`, `*.key`を記載しているが、実際のfile-tree.tsのEXCLUDED_PATTERNSには`.env.local`, `.env.development`, `.env.production`, `.env.test`も含まれている。設計書の記載が不完全。",
+      "location": "設計書セクション5.1、src/lib/file-tree.ts:34-47",
+      "actual_code": "export const EXCLUDED_PATTERNS: string[] = [\n  '.git', '.env', '.env.*', 'node_modules', '.DS_Store', 'Thumbs.db',\n  '*.pem', '*.key', '.env.local', '.env.development', '.env.production', '.env.test',\n];",
+      "recommendation": "設計書に「EXCLUDED_PATTERNS準拠」と記載があるため、詳細なパターン列挙は不要だが、`file-tree.ts`の完全なパターンリストをインポートして使用する旨を明記すべき"
+    },
+    {
+      "id": "CONS-SF-002",
+      "severity": "Should Fix",
+      "category": "型定義整合性",
+      "title": "escapeRegExpがutils.tsに存在しない",
+      "description": "設計書では`src/lib/utils.ts`に`escapeRegExp`関数を追加する計画だが、現在のutils.tsには`debounce`関数のみが存在する。実装チェックリストにも記載があるが、セクション5.3のコード例で既に使用されており、追加が必須であることを明確にすべき。",
+      "location": "設計書セクション5.3、9.2、src/lib/utils.ts",
+      "actual_code": "// 現在のutils.ts\nexport function debounce<T>...",
+      "recommendation": "セクション9.2の「変更が必要なモジュール」表にescapeRegExp関数の具体的な実装を追記:\n```typescript\nexport function escapeRegExp(str: string): string {\n  return str.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\n}\n```"
+    },
+    {
+      "id": "CONS-SF-003",
+      "severity": "Should Fix",
+      "category": "定数参照整合性",
+      "title": "MAX_DEPTH定数の参照方法が不統一",
+      "description": "設計書セクション6.1ではディレクトリ深さを「10階層」と記載し、MAX_DEPTHを参照しているが、実際のfile-tree.tsでは`LIMITS.MAX_DEPTH`としてLIMITSオブジェクト内に定義されている。Stage 1レビューでMAX_FILE_SIZE_PREVIEWは修正済みだが、MAX_DEPTHも同様に`LIMITS.MAX_DEPTH`として参照すべき。",
+      "location": "設計書セクション6.1、src/lib/file-tree.ts:52-59",
+      "actual_code": "export const LIMITS = {\n  MAX_ITEMS_PER_DIR: 500,\n  MAX_DEPTH: 10,\n  MAX_FILE_SIZE_PREVIEW: 1024 * 1024,\n} as const;",
+      "recommendation": "設計書セクション6.1の表を更新:\n| ディレクトリ深さ | 10階層 | `LIMITS.MAX_DEPTH` (file-tree.ts) |"
+    },
+    {
+      "id": "CONS-NTH-001",
+      "severity": "Nice to Have",
+      "category": "設計パターン整合性",
+      "title": "binary-extensions.tsの配置が既存パターンと異なる可能性",
+      "description": "設計書では`src/config/binary-extensions.ts`を新規作成するが、既存の`image-extensions.ts`は`IMAGE_EXTENSIONS`に加えて検証関数も含んでいる。バイナリ拡張子も同様に検証関数を含めるかどうかの設計決定が明記されていない。",
+      "location": "設計書セクション6.3、src/config/image-extensions.ts",
+      "recommendation": "設計書に`isBinaryExtension(ext: string): boolean`関数の定義を追加することを検討"
+    },
+    {
+      "id": "CONS-NTH-002",
+      "severity": "Nice to Have",
+      "category": "ドキュメント整合性",
+      "title": "CLAUDE.mdへの更新内容が未定義",
+      "description": "実装チェックリストPhase 5で「CLAUDE.md更新」と記載があるが、具体的に追加すべき内容が定義されていない。最近の実装機能セクションへの追加内容を事前に定義しておくとよい。",
+      "location": "設計書セクション11、CLAUDE.md",
+      "recommendation": "実装完了後にCLAUDE.mdに追加すべき内容のテンプレートを設計書に追記"
+    }
+  ],
+  "positive_feedback": [
+    {
+      "id": "CONS-POS-001",
+      "title": "既存モジュールの再利用が適切",
+      "description": "file-tree.tsのEXCLUDED_PATTERNS、LIMITS、isExcludedPattern関数、path-validator.tsのisPathSafe関数、utils.tsのdebounce関数など、既存コードの再利用が適切に計画されている。DRY原則に従った良い設計。"
+    },
+    {
+      "id": "CONS-POS-002",
+      "title": "Stage 1レビュー指摘事項が反映済み",
+      "description": "DP-001(isPathSafeのインポート元)、DP-003(MAX_FILE_SIZE_PREVIEWの参照元)、DP-004(BINARY_EXTENSIONSの設定ファイル化)が設計書に適切に反映されており、レビュープロセスが機能している。"
+    },
+    {
+      "id": "CONS-POS-003",
+      "title": "ファイル構成がプロジェクト規約に準拠",
+      "description": "設計書セクション2.2のディレクトリ構成はCLAUDE.mdのファイル構成規約に準拠している。APIルートの配置、hooks、lib、config、typesの分離が既存パターンと一致。"
+    },
+    {
+      "id": "CONS-POS-004",
+      "title": "FileTreeViewへの統合設計が既存実装と整合",
+      "description": "WorktreeDetailRefactored.tsxの既存実装(onFileSelect、refreshTrigger等)と、設計書のFileTreeView変更計画が整合している。新しいprops追加による既存機能への影響が最小限。"
+    },
+    {
+      "id": "CONS-POS-005",
+      "title": "セキュリティ対策が既存パターンに準拠",
+      "description": "isPathSafe、EXCLUDED_PATTERNS、入力バリデーションなど、既存のセキュリティ対策パターンを踏襲しており、一貫したセキュリティアプローチが維持されている。"
+    }
+  ],
+  "recommendations": [
+    "CONS-MF-001, CONS-MF-002は実装前に必ず修正すること",
+    "CONS-SF-001~003は実装時に対応すること",
+    "Stage 3(影響範囲分析)に進む前に、Must Fixを解消すること"
+  ]
+}

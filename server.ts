@@ -38,10 +38,11 @@ import {
 import { getDbInstance } from './src/lib/db-instance';
 import { stopAllPolling } from './src/lib/response-poller';
 import { runMigrations } from './src/lib/db-migrations';
+import { getEnvByKey } from './src/lib/env';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = process.env.MCBD_BIND || '127.0.0.1';
-const port = parseInt(process.env.MCBD_PORT || process.env.PORT || '3000', 10);
+const hostname = getEnvByKey('CM_BIND') || '127.0.0.1';
+const port = parseInt(getEnvByKey('CM_PORT') || '3000', 10);
 
 // Create Next.js app
 const app = next({ dev, hostname, port });

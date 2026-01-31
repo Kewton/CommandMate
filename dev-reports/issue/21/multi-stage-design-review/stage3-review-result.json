@@ -1,0 +1,305 @@
+{
+  "issue_number": 21,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-01-31",
+  "design_doc": "dev-reports/design/issue-21-file-search-design-policy.md",
+  "summary": {
+    "total_findings": 9,
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 3,
+    "positive_feedback": 5
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IMPACT-MF-001",
+        "title": "FileTreeViewへの検索クエリprops追加による破壊的変更",
+        "category": "変更の波及効果",
+        "description": "FileTreeView.tsxの既存propsインターフェース(FileTreeViewProps)に検索関連プロパティを追加する場合、このコンポーネントを使用している全ての箇所で対応が必要になる",
+        "affected_files": [
+          "src/components/worktree/FileTreeView.tsx",
+          "src/components/worktree/WorktreeDetailRefactored.tsx"
+        ],
+        "current_state": "FileTreeViewPropsには検索関連propsが存在しない",
+        "impact": "WorktreeDetailRefactored.tsx内でFileTreeViewを使用している箇所(デスクトップ、モバイル両方)で新規propsの追加が必要",
+        "recommendation": "新規propsは全てオプショナル(?)として定義し、後方互換性を維持する。例: searchQuery?: string; searchMode?: SearchMode; onSearchResultSelect?: (path: string) => void;",
+        "severity": "high"
+      },
+      {
+        "id": "IMPACT-MF-002",
+        "title": "新規APIエンドポイント追加に伴うルーティング影響",
+        "category": "依存関係の影響",
+        "description": "GET /api/worktrees/:id/search エンドポイントの追加。既存APIパターンとの整合性および認証ミドルウェアの適用確認が必要",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/search/route.ts (新規)",
+          "src/middleware.ts"
+        ],
+        "current_state": "src/app/api/worktrees/[id]/ 配下に search/ ディレクトリは存在しない",
+        "impact": "1. APIエンドポイントは認証トークンチェックの対象となる(既存middleware.tsにて/api/*パスは認証対象)。2. 他の既存エンドポイント(tree, files等)とのURLパターン競合はなし",
+        "recommendation": "既存の/api/worktrees/[id]/tree/route.tsを参考に、同様のパターンでworktree存在チェック、パス検証を実装する。middleware.tsの認証対象パターンに自動的に含まれることを確認",
+        "severity": "high"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IMPACT-SF-001",
+        "title": "useFileSearchフック追加によるWorktreeDetailRefactoredの複雑度増加",
+        "category": "変更の波及効果",
+        "description": "WorktreeDetailRefactored.tsxは既に1600行超の大規模コンポーネント。新たにuseFileSearchフックを統合すると状態管理がさらに複雑化する",
+        "affected_files": [
+          "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "src/hooks/useFileSearch.ts (新規)"
+        ],
+        "current_state": "WorktreeDetailRefactoredは複数のローカル状態、カスタムフック(useWorktreeUIState, useAutoYes等)を使用している",
+        "impact": "検索状態(query, mode, isSearching, results, error)の追加により状態管理が複雑化",
+        "recommendation": "useFileSearchフックを「検索状態とUI」と「API呼び出しロジック」に責務分離することを検討(DP-002で指摘済み)。実装時はuseWorktreeUIStateパターンを参考にし、状態をreducer化することで可読性を維持",
+        "severity": "medium"
+      },
+      {
+        "id": "IMPACT-SF-002",
+        "title": "models.tsへの型追加による型定義ファイル肥大化",
+        "category": "型定義変更の波及範囲",
+        "description": "SearchMode, SearchQuery, SearchResult, SearchResultItem の4型をmodels.tsに追加予定。models.tsは既に269行あり肥大化傾向",
+        "affected_files": [
+          "src/types/models.ts"
+        ],
+        "current_state": "models.tsには Worktree, ChatMessage, TreeItem など主要な型が集約されている(269行)",
+        "impact": "型定義の追加自体は破壊的変更ではないが、ファイルの見通しが悪くなる可能性",
+        "recommendation": "検索関連型は models.ts に追加で問題ないが、将来的に型定義が300行を超える場合は search.ts など専用ファイルへの分離を検討。現時点では追加のみで対応",
+        "severity": "low"
+      },
+      {
+        "id": "IMPACT-SF-003",
+        "title": "utils.tsへのescapeRegExp追加とテストカバレッジ",
+        "category": "テストへの影響",
+        "description": "utils.tsにescapeRegExp関数を追加予定(CONS-SF-002対応済み)。既存のutils.test.tsにテストケース追加が必要",
+        "affected_files": [
+          "src/lib/utils.ts",
+          "tests/unit/lib/utils.test.ts"
+        ],
+        "current_state": "utils.tsにはdebounce関数のみ存在(41行)。tests/unit/lib/utils.test.tsが存在",
+        "impact": "escapeRegExp関数のユニットテストを追加する必要がある",
+        "recommendation": "utils.test.tsにescapeRegExpのテストケースを追加。テスト項目: 特殊文字エスケープ(.*+?^${}()|[]\\ )、空文字列、日本語文字列、実際の検索パターンケース",
+        "severity": "medium"
+      },
+      {
+        "id": "IMPACT-SF-004",
+        "title": "binary-extensions.ts新規作成とimage-extensions.tsとの整合性",
+        "category": "依存関係の影響",
+        "description": "設計書(DP-004)でsrc/config/binary-extensions.tsの新規作成が予定されている。既存のimage-extensions.tsとの拡張子重複や設計パターンの整合性確認が必要",
+        "affected_files": [
+          "src/config/binary-extensions.ts (新規)",
+          "src/config/image-extensions.ts",
+          "src/lib/file-search.ts (新規)"
+        ],
+        "current_state": "image-extensions.tsには画像拡張子(.png, .jpg, .jpeg, .gif, .webp, .svg)が定義済み",
+        "impact": "1. binary-extensions.tsで画像拡張子が重複定義される。2. 将来的に画像ファイルを検索対象から除外する際の参照元が不明確になる可能性",
+        "recommendation": "binary-extensions.tsではimage-extensions.tsをインポートして拡張子を再利用するか、または設計書記載通りコメントで整合性を明記。例: // Note: Image extensions also listed in image-extensions.ts",
+        "severity": "medium"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IMPACT-NTH-001",
+        "title": "検索結果ハイライト時のレンダリングパフォーマンス",
+        "category": "パフォーマンスへの影響",
+        "description": "設計書のHighlightedTextコンポーネントは検索クエリでテキストを分割してハイライト表示する。大量のマッチ結果がある場合のレンダリングコストを考慮",
+        "affected_files": [
+          "src/components/worktree/SearchBar.tsx (新規)"
+        ],
+        "current_state": "N/A (新規実装)",
+        "impact": "検索結果100件制限があるため、通常ケースでは問題なし(DP-007で確認済み)",
+        "recommendation": "初期実装では現状の設計で進め、パフォーマンス問題が発生した場合にReact.memoやuseMemoで最適化を検討"
+      },
+      {
+        "id": "IMPACT-NTH-002",
+        "title": "ファイル内容検索API追加によるサーバー負荷",
+        "category": "パフォーマンスへの影響",
+        "description": "ファイル内容検索APIはディレクトリを再帰的に走査し、テキストファイルを読み込んで検索する。大規模リポジトリでの負荷を考慮",
+        "affected_files": [
+          "src/lib/file-search.ts (新規)",
+          "src/app/api/worktrees/[id]/search/route.ts (新規)"
+        ],
+        "current_state": "N/A (新規実装)",
+        "impact": "設計書で以下の制限値が設定済み: タイムアウト5秒、結果100件、ファイルサイズ1MB、深さ10階層。適切に制限されている",
+        "recommendation": "初期実装後、実際の使用状況を監視し、必要に応じて制限値を調整。ログにexecutionTimeMsを出力して性能監視"
+      },
+      {
+        "id": "IMPACT-NTH-003",
+        "title": "モバイルUIでの検索バー表示/非表示アニメーション",
+        "category": "変更の波及効果",
+        "description": "設計書ではモバイルで検索バーをアイコンタップで表示/非表示とする仕様。MobileContentやMobileTabBarとのUI調整が必要",
+        "affected_files": [
+          "src/components/worktree/SearchBar.tsx (新規)",
+          "src/components/worktree/WorktreeDetailRefactored.tsx"
+        ],
+        "current_state": "MobileContentはFilesタブでFileTreeViewを表示",
+        "impact": "検索バーの表示位置やアニメーションをMobileContentのUI設計と整合させる必要がある",
+        "recommendation": "デスクトップ版を先に実装し、モバイル対応は後続フェーズで対応可能"
+      }
+    ]
+  },
+  "positive_feedback": [
+    {
+      "id": "IMPACT-POS-001",
+      "title": "既存モジュールの適切な再利用",
+      "category": "依存関係の影響",
+      "description": "file-tree.ts(EXCLUDED_PATTERNS, LIMITS)、path-validator.ts(isPathSafe)、utils.ts(debounce)の再利用が計画されており、DRY原則に従っている"
+    },
+    {
+      "id": "IMPACT-POS-002",
+      "title": "段階的な実装計画",
+      "category": "変更の波及効果",
+      "description": "Phase 1(基盤) -> Phase 2(API) -> Phase 3(フロントエンド) -> Phase 4(テスト) -> Phase 5(ドキュメント)の段階的実装により、各フェーズで影響範囲を限定できる"
+    },
+    {
+      "id": "IMPACT-POS-003",
+      "title": "テスト計画の明確化",
+      "category": "テストへの影響",
+      "description": "ユニットテスト(file-search.test.ts, SearchBar.test.tsx, useFileSearch.test.ts)、結合テスト(api-search.test.ts)、E2Eテスト(file-search.spec.ts)が計画されており、テストカバレッジへの配慮がある"
+    },
+    {
+      "id": "IMPACT-POS-004",
+      "title": "オプショナルな機能追加設計",
+      "category": "変更の波及効果",
+      "description": "検索機能はファイルツリーの拡張機能として追加される設計であり、既存のファイルツリー機能に影響を与えない(フィルタリングのみ)"
+    },
+    {
+      "id": "IMPACT-POS-005",
+      "title": "循環依存のリスクなし",
+      "category": "依存関係の影響",
+      "description": "新規モジュール(file-search.ts, useFileSearch.ts, SearchBar.tsx)は既存モジュールに一方向で依存し、逆方向の依存は発生しない設計になっている"
+    }
+  ],
+  "dependency_analysis": {
+    "new_modules_and_dependencies": {
+      "src/config/binary-extensions.ts": {
+        "depends_on": [],
+        "depended_by": ["src/lib/file-search.ts"]
+      },
+      "src/lib/file-search.ts": {
+        "depends_on": [
+          "src/lib/file-tree.ts (EXCLUDED_PATTERNS, isExcludedPattern, LIMITS)",
+          "src/lib/path-validator.ts (isPathSafe)",
+          "src/config/binary-extensions.ts (BINARY_EXTENSIONS)"
+        ],
+        "depended_by": ["src/app/api/worktrees/[id]/search/route.ts"]
+      },
+      "src/app/api/worktrees/[id]/search/route.ts": {
+        "depends_on": [
+          "src/lib/file-search.ts (searchFileContents)",
+          "src/lib/db.ts (getWorktreeById)"
+        ],
+        "depended_by": []
+      },
+      "src/hooks/useFileSearch.ts": {
+        "depends_on": [
+          "src/lib/utils.ts (debounce)",
+          "src/types/models.ts (SearchMode, SearchResult)"
+        ],
+        "depended_by": ["src/components/worktree/WorktreeDetailRefactored.tsx"]
+      },
+      "src/components/worktree/SearchBar.tsx": {
+        "depends_on": [
+          "src/types/models.ts (SearchMode)",
+          "src/lib/utils.ts (escapeRegExp)"
+        ],
+        "depended_by": ["src/components/worktree/WorktreeDetailRefactored.tsx"]
+      }
+    },
+    "circular_dependency_risk": "None identified"
+  },
+  "test_impact_analysis": {
+    "new_tests_required": [
+      {
+        "path": "tests/unit/lib/file-search.test.ts",
+        "test_cases": [
+          "searchFileContents: 正常系(マッチ結果返却)",
+          "searchFileContents: 空クエリ時のエラー",
+          "searchFileContents: EXCLUDED_PATTERNS除外",
+          "searchFileContents: バイナリファイル除外",
+          "searchFileContents: タイムアウト処理",
+          "searchFileContents: 結果件数制限(100件)"
+        ]
+      },
+      {
+        "path": "tests/unit/hooks/useFileSearch.test.ts",
+        "test_cases": [
+          "useFileSearch: 初期状態",
+          "useFileSearch: クエリ変更時のdebounce",
+          "useFileSearch: モード切替",
+          "useFileSearch: API呼び出しとローディング状態",
+          "useFileSearch: エラーハンドリング",
+          "useFileSearch: クリア処理"
+        ]
+      },
+      {
+        "path": "tests/unit/components/worktree/SearchBar.test.tsx",
+        "test_cases": [
+          "SearchBar: 入力変更イベント",
+          "SearchBar: モード切替ボタン",
+          "SearchBar: ローディング表示",
+          "SearchBar: クリアボタン"
+        ]
+      },
+      {
+        "path": "tests/integration/api-search.test.ts",
+        "test_cases": [
+          "GET /api/worktrees/:id/search: 正常系",
+          "GET /api/worktrees/:id/search: ワークツリー存在しない(404)",
+          "GET /api/worktrees/:id/search: 空クエリ(400)",
+          "GET /api/worktrees/:id/search: タイムアウト(408)"
+        ]
+      }
+    ],
+    "existing_tests_affected": [
+      {
+        "path": "tests/unit/lib/utils.test.ts",
+        "change": "escapeRegExp関数のテストケース追加"
+      }
+    ]
+  },
+  "performance_impact_analysis": {
+    "client_side": {
+      "rendering": {
+        "risk": "low",
+        "description": "ファイル名検索はクライアントサイドでフィルタリング。既存のTreeNodeコンポーネントはmemo化されており、検索フィルタリングによる再レンダリングは最小限",
+        "mitigation": "FileTreeViewのrootItemsをuseMemoでフィルタリングすることで不要な再計算を防止"
+      },
+      "memory": {
+        "risk": "low",
+        "description": "検索結果は最大100件に制限。SearchResultItemの構造もシンプル(filePath, matches配列)であり、メモリ使用量は許容範囲内"
+      }
+    },
+    "server_side": {
+      "cpu": {
+        "risk": "medium",
+        "description": "ファイル内容検索はディレクトリ再帰走査とファイル読み込みが発生。大規模リポジトリでは負荷が高い可能性",
+        "mitigation": "タイムアウト5秒、結果100件制限、ファイルサイズ1MB制限で負荷を制御"
+      },
+      "io": {
+        "risk": "medium",
+        "description": "多数のファイル読み込みによるI/O負荷",
+        "mitigation": "EXCLUDED_PATTERNS、バイナリ拡張子除外により不要なファイル読み込みを削減"
+      }
+    }
+  },
+  "recommendations": {
+    "before_implementation": [
+      "FileTreeViewProps拡張時はオプショナルプロパティとして定義し後方互換性を維持",
+      "既存のfile-tree.tsのテスト(tests/unit/lib/file-tree.test.ts)を確認し、EXCLUDED_PATTERNSのエクスポートが正しく機能することを確認"
+    ],
+    "during_implementation": [
+      "Phase 1(基盤)完了時点でmodels.tsの型定義とutils.tsのescapeRegExpをコミットし、レビューを実施",
+      "Phase 2(API)完了時点で結合テストを実行し、APIレスポンス形式が既存パターンと整合していることを確認"
+    ],
+    "after_implementation": [
+      "検索APIのexecutionTimeMsをログに出力し、本番環境でのパフォーマンスを監視",
+      "CLAUDE.mdに検索機能のモジュール情報を追加"
+    ]
+  },
+  "conclusion": "影響分析の結果、Issue #21の設計方針書は既存コードベースへの影響を最小限に抑えた設計となっている。Must Fixは2件(FileTreeViewProps拡張の後方互換性、新規APIエンドポイントの認証確認)あるが、いずれもオプショナルプロパティ化と既存パターン踏襲で解決可能。循環依存のリスクはなく、テスト計画も明確。Stage 4(セキュリティレビュー)への移行準備完了。"
+}

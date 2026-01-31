@@ -1,0 +1,97 @@
+{
+  "issue_number": 21,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-01-31",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "セキュリティセクションに EXCLUDED_PATTERNS 準拠の機密ファイル除外を明記。検索対象から .env、.pem、.key 等を除外することを記載。受け入れ条件にも機密ファイル除外の条件を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "パフォーマンス制約セクションを追加。検索対象ファイルの最大サイズ（1MB）、ディレクトリ深さ（10階層）、検索結果の最大件数（100件）、検索タイムアウト（5秒）を明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "EXCLUDED_PATTERNS との整合性を明記。除外パターンの具体例（.git, .env, node_modules, *.pem, *.key）を記載し、既存の EXCLUDED_PATTERNS を再利用することを明示"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "受け入れ条件にパフォーマンス条件セクションを追加。ファイル名検索は300ms以内、ファイル内容検索は5秒以内の応答時間を明記"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "検索対象テーブルに実行場所列を追加。ファイル名検索はクライアントサイド（APIコール不要）、ファイル内容検索はサーバーサイドAPIを使用することを明確化"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "エラーケース対応セクションを追加。検索タイムアウト時、アクセス権限エラー時、空クエリ時の具体的な動作を記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "フロントエンドセクションに既存の src/lib/utils.ts の debounce 関数を再利用する旨を明記（新規実装不要）"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/21"
+  },
+  "changes_made": [
+    {
+      "section": "検索対象",
+      "change": "テーブルに「実行場所」列を追加し、クライアントサイド/サーバーサイドの明確化"
+    },
+    {
+      "section": "技術要件 > フロントエンド",
+      "change": "既存 debounce 関数の再利用を明記"
+    },
+    {
+      "section": "技術要件 > バックエンド",
+      "change": "セキュリティ・除外パターンセクションとパフォーマンス制約セクションを追加"
+    },
+    {
+      "section": "技術要件 > セキュリティ",
+      "change": "機密ファイル漏洩防止と検索結果のサニタイズを追加"
+    },
+    {
+      "section": "受け入れ条件 > 必須条件",
+      "change": "機密ファイル除外の条件を追加"
+    },
+    {
+      "section": "受け入れ条件 > パフォーマンス条件",
+      "change": "新規セクションを追加（300ms/5秒の応答時間基準）"
+    },
+    {
+      "section": "受け入れ条件 > エラーケース対応",
+      "change": "新規セクションを追加（タイムアウト、アクセス権限、空クエリ）"
+    },
+    {
+      "section": "対象外",
+      "change": "検索キャンセル機能と同時検索リクエスト制限を追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "新規セクションを追加（イテレーション1の対応内容）"
+    }
+  ]
+}

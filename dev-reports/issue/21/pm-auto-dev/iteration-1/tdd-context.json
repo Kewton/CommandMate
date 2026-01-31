@@ -1,0 +1,52 @@
+{
+  "issue_number": 21,
+  "title": "PCでの利用時とスマホでの利用時ともにファイルツリーにてファイル検索したい",
+  "acceptance_criteria": [
+    "ファイルツリー上部に検索バーが常時表示されること（デスクトップ）",
+    "モバイルでは検索アイコンタップで検索バーが表示/非表示されること",
+    "ファイル名検索モードで、入力文字列にマッチするファイル/ディレクトリのみ表示されること",
+    "ファイル内容検索モードで、ファイル内テキストにマッチするファイルのみ表示されること",
+    "検索モード（名前/内容）を切り替えられること",
+    "検索クリア時に元のツリー表示に戻ること",
+    "PCで動作すること",
+    "スマホで動作すること",
+    ".env等の機密ファイルが検索対象から除外されること（EXCLUDED_PATTERNS準拠）",
+    "ファイル名検索は入力後300ms以内にフィルタリングが開始されること",
+    "ファイル内容検索は5秒以内に結果が返却されること",
+    "検索中にローディング表示されること",
+    "検索結果が0件の場合、適切なメッセージが表示されること",
+    "マッチしたファイルの親ディレクトリが自動展開されること",
+    "検索結果にマッチ箇所がハイライト表示されること"
+  ],
+  "implementation_tasks": [
+    "Phase 1.1: src/types/models.ts に検索関連型定義追加（SearchMode, SearchQuery, SearchResult, SearchResultItem）",
+    "Phase 1.2: src/config/binary-extensions.ts 作成（バイナリ拡張子設定）",
+    "Phase 1.3: src/lib/utils.ts に escapeRegExp関数追加",
+    "Phase 1.4: tests/unit/lib/utils.test.ts にescapeRegExpテスト追加",
+    "Phase 2.1: src/lib/file-search.ts 作成（ファイル内容検索ロジック）",
+    "Phase 2.2: tests/unit/lib/file-search.test.ts 作成",
+    "Phase 2.3: src/app/api/worktrees/[id]/search/route.ts 作成（検索API）",
+    "Phase 2.4: tests/integration/api-search.test.ts 作成",
+    "Phase 3.1: src/hooks/useFileSearch.ts 作成",
+    "Phase 3.2: tests/unit/hooks/useFileSearch.test.ts 作成",
+    "Phase 3.3: src/components/worktree/SearchBar.tsx 作成",
+    "Phase 3.4: tests/unit/components/worktree/SearchBar.test.tsx 作成",
+    "Phase 4.1: src/components/worktree/FileTreeView.tsx にフィルタリング機能追加",
+    "Phase 4.2: src/components/worktree/WorktreeDetailRefactored.tsx に検索統合",
+    "Phase 5.1: tests/e2e/file-search.spec.ts 作成",
+    "Phase 5.2: 全テスト実行・品質チェック",
+    "Phase 6.1: CLAUDE.md更新"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-21-file-search-design-policy.md",
+  "work_plan_path": "dev-reports/issue/21/work-plan.md",
+  "security_requirements": [
+    "SEC-MF-001: サーバーサイド検索で正規表現不使用（ReDoS対策）",
+    "SEC-SF-001: ファイルパスは相対パスのみ返却",
+    "SEC-SF-002: コンテンツ行500文字トランケート",
+    "SEC-SF-003: 検索APIアクセスログ記録",
+    "パストラバーサル対策（isPathSafe使用）",
+    "XSS対策（React自動エスケープ、dangerouslySetInnerHTML不使用）",
+    "機密ファイル除外（EXCLUDED_PATTERNS適用）"
+  ]
+}

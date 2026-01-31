@@ -1,0 +1,115 @@
+{
+  "issue_number": 21,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-01-31",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "セキュリティ",
+        "issue": "ファイル内容検索のセキュリティ対策が不十分",
+        "location": "## 技術要件 > セキュリティ セクション",
+        "recommendation": "ファイル内容検索時のセキュリティ対策を追加: (1) 検索対象ファイルのホワイトリスト（テキストファイル拡張子のみ）、(2) 検索結果に含めるファイル内容のサニタイズ、(3) 正規表現インジェクション対策（対象外とあるが将来対応時に必要）",
+        "evidence": "既存の isPathSafe() は言及されているが、ファイル内容を読み取って返却する際のセキュリティ考慮（機密ファイルの内容漏洩防止等）が記載されていない。file-tree.ts の EXCLUDED_PATTERNS には .env 等が含まれるが、ファイル内容検索でこれらが除外されるか明示されていない"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "技術的妥当性",
+        "issue": "ファイル内容検索時のパフォーマンス考慮が不十分",
+        "location": "## 技術要件 > バックエンド セクション",
+        "recommendation": "以下を明確化すべき: (1) 検索対象ファイルの最大サイズ制限（現状 file-tree.ts には MAX_FILE_SIZE_PREVIEW: 1MB がある）、(2) 検索対象ディレクトリの深さ制限（MAX_DEPTH: 10 を利用するか）、(3) 同時検索リクエスト数の制限、(4) 検索キャンセル機能の有無",
+        "evidence": "検索結果は最大100件程度に制限とあるが、検索処理自体のタイムアウト以外のパフォーマンス制約が不明確"
+      },
+      {
+        "id": "SF-2",
+        "category": "整合性",
+        "issue": "既存のEXCLUDED_PATTERNSとの整合性が不明確",
+        "location": "## 技術要件 > バックエンド セクション",
+        "recommendation": "file-tree.ts の EXCLUDED_PATTERNS（.git, .env, node_modules 等）を検索対象から除外することを明記。特に .env ファイルはセキュリティ上重要",
+        "evidence": "src/lib/file-tree.ts の EXCLUDED_PATTERNS には '.git', '.env', 'node_modules', '*.pem', '*.key' 等が定義されているが、Issue では検索対象の除外パターンについて言及がない"
+      },
+      {
+        "id": "SF-3",
+        "category": "受け入れ条件",
+        "issue": "検索応答時間の具体的な基準がない",
+        "location": "## 受け入れ条件 セクション",
+        "recommendation": "パフォーマンス基準を追加: 例「ファイル名検索は入力後300ms以内にフィルタリングが開始されること」「ファイル内容検索は5秒以内に結果が返却されること」",
+        "evidence": "debounce処理（300ms程度）は言及されているが、検索完了までの応答時間の受け入れ条件が明示されていない"
+      },
+      {
+        "id": "SF-4",
+        "category": "明確性",
+        "issue": "ファイル名検索がクライアントサイドかサーバーサイドか不明確",
+        "location": "## 提案する解決策 > 検索対象 セクション",
+        "recommendation": "ファイル名検索の実装方針を明確化: (1) 既にロード済みのツリーデータのクライアントサイドフィルタリング、(2) APIを呼び出すサーバーサイド検索、どちらを採用するか。パフォーマンスとUX観点から推奨を記載",
+        "evidence": "API設計では mode=name|content とあり両方APIを呼ぶように見えるが、ファイル名検索はクライアントサイドで実装可能な範囲であり、実装方針の明確化が必要"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "エラーケースの具体例が不足",
+        "location": "## 受け入れ条件 > 追加条件 セクション",
+        "recommendation": "以下のエラーケースを追加: (1) 検索タイムアウト時の表示、(2) 検索対象ファイルへのアクセス権限エラー時の処理、(3) 検索クエリが長すぎる場合の制限",
+        "evidence": "「検索結果が0件の場合」のみ言及されている"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "debounce関数の再利用について言及がない",
+        "location": "## 技術要件 > フロントエンド セクション",
+        "recommendation": "既存の src/lib/utils.ts に debounce 関数が実装済みであることを参照として追加。新規実装は不要である点を明記",
+        "evidence": "src/lib/utils.ts に debounce 関数が既に存在し、MarkdownEditor 等で使用されている"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "relevance": "検索機能を追加する主要コンポーネント。現在は検索機能なし（約520行）"
+    },
+    {
+      "file": "src/lib/file-tree.ts",
+      "relevance": "ディレクトリ読み取りロジック。EXCLUDED_PATTERNS と LIMITS 定数を含む"
+    },
+    {
+      "file": "src/lib/path-validator.ts",
+      "relevance": "isPathSafe() 関数。パストラバーサル対策"
+    },
+    {
+      "file": "src/lib/utils.ts",
+      "relevance": "debounce 関数が既に実装済み。検索入力で再利用可能"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/tree/route.ts",
+      "relevance": "既存のツリーAPI。検索API追加時の参考"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "TreeItem, TreeResponse 型定義。検索結果の型設計時の参考"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトのコーディング規約と既存機能一覧。整合性確認の参照"
+    }
+  ],
+  "overall_assessment": {
+    "implementability": "HIGH",
+    "clarity": "MEDIUM",
+    "security_consideration": "MEDIUM",
+    "notes": "Issue全体としては明確に記載されており、実装可能性は高い。ただし、ファイル内容検索時のセキュリティ対策（機密ファイルの除外）と、パフォーマンス制約の明確化が必要。既存コード（debounce関数、EXCLUDED_PATTERNS、isPathSafe）を適切に再利用することで効率的に実装可能"
+  }
+}

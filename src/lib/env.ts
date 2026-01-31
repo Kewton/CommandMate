@@ -168,7 +168,7 @@ export function getEnv(): Env {
   const authToken = getEnvByKey('CM_AUTH_TOKEN');
   const databasePath = getEnvByKey('CM_DB_PATH')
     || process.env.DATABASE_PATH
-    || path.join(process.cwd(), 'data', 'db.sqlite');
+    || path.join(process.cwd(), 'data', 'cm.db');
 
   // Validate values
   if (!rootDir) {

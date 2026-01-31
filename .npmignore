@@ -1,0 +1,42 @@
+# Test files
+tests/
+__tests__/
+*.test.ts
+*.spec.ts
+vitest.config.ts
+playwright.config.ts
+
+# Development files
+dev-reports/
+docs/
+.github/
+.vscode/
+.claude/
+workspace/
+
+# Logs and databases
+*.log
+npm-debug.log
+*.db
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+.npmrc
+secrets/
+credentials/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+
+# Source files (dist is published)
+src/
+
+# TypeScript config
+tsconfig.json
+tsconfig.*.json
