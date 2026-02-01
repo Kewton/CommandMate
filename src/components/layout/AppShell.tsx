@@ -14,6 +14,16 @@ import { Sidebar } from './Sidebar';
 import { Z_INDEX } from '@/config/z-index';
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * Common sidebar transition classes for GPU-accelerated animations.
+ * Used by both mobile drawer and desktop sidebar (Issue #112).
+ */
+const SIDEBAR_TRANSITION = 'transform transition-transform duration-300 ease-out';
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -62,12 +72,12 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
           />
         )}
 
-        {/* Mobile drawer */}
+        {/* Mobile drawer - uses z-50 (above overlay z-40) for proper stacking */}
         <aside
           data-testid="sidebar-container"
           className={`
             fixed left-0 top-0 h-full w-72 z-50
-            transform transition-transform duration-300 ease-out
+            ${SIDEBAR_TRANSITION}
             ${isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
           `}
           role="complementary"
@@ -87,12 +97,12 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   // Issue #112: Using transform for better performance (GPU-accelerated)
   return (
     <div data-testid="app-shell" className="h-screen flex">
-      {/* Sidebar container - fixed position with transform animation */}
+      {/* Desktop sidebar - fixed position with transform animation (Issue #112) */}
       <aside
         data-testid="sidebar-container"
         className={`
           fixed left-0 top-0 h-full w-72
-          transform transition-transform duration-300 ease-out
+          ${SIDEBAR_TRANSITION}
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
         style={{ zIndex: Z_INDEX.SIDEBAR }}
