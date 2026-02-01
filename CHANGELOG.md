@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-02-02
+
+### Added
+- Documentation updated to use `npm install -g commandmate` as primary setup method (Issue #114)
+  - New CLI setup guide at `docs/user-guide/cli-setup-guide.md`
+  - README.md Quick Start uses npm global install
+  - git clone method moved to "Developer Setup" section
+  - `--port` option documented in CLI commands table
+
+### Fixed
+- iPad fullscreen mode now uses Portal to cover full viewport (Issue #104)
+- Test z-index expectations updated from 40 to 55 to match Z_INDEX.MAXIMIZED_EDITOR
+
+### Changed
+- Sidebar toggle animation uses transform instead of width for GPU acceleration (Issue #112)
+  - Improves performance on iPad
+  - Added SIDEBAR constant (30) to z-index.ts
+- Pre-built JS compilation for server.ts enables npm CLI without TypeScript compilation (Issue #113)
+
 ## [0.1.5] - 2026-02-01
 
 ### Fixed
