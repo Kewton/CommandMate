@@ -160,7 +160,7 @@ src/
 | モジュール | 説明 |
 |-----------|------|
 | `src/cli/index.ts` | CLIメインロジック（commander設定） |
-| `src/cli/commands/init.ts` | initコマンド（依存チェック、.env作成、DB初期化） |
+| `src/cli/commands/init.ts` | initコマンド（対話形式/非対話形式対応、Issue #119） |
 | `src/cli/commands/start.ts` | startコマンド（フォアグラウンド/デーモン起動） |
 | `src/cli/commands/stop.ts` | stopコマンド（サーバー停止） |
 | `src/cli/commands/status.ts` | statusコマンド（状態確認） |
@@ -169,6 +169,7 @@ src/
 | `src/cli/utils/daemon.ts` | デーモンプロセス管理 |
 | `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
 | `src/cli/utils/security-logger.ts` | セキュリティイベントログ |
+| `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |
 | `src/cli/config/cli-dependencies.ts` | 依存関係定義 |
 | `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum） |
 
@@ -410,6 +411,19 @@ commandmate status
   - `src/cli/utils/pid-manager.ts` - PIDファイル管理
 - **ビルド**: `npm run build:cli`（TypeScriptコンパイル）
 - 詳細: [設計書](./dev-reports/design/issue-96-npm-cli-design-policy.md)
+
+### Issue #119: commandmate init 対話形式対応
+- **対話形式初期化**: `commandmate init`でTTY環境時に対話形式で設定を入力
+- **チルダ展開**: `~/repos`のようなパス入力を自動的にホームディレクトリに展開
+- **設定サマリー表示**: 設定完了後に入力した設定値の一覧を表示
+- **非対話モード**: `--defaults`オプションでCI/CD環境向けの非対話実行をサポート
+- **.envファイル配置**:
+  - グローバルインストール: `~/.commandmate/.env`
+  - ローカルインストール: カレントディレクトリの`.env`
+- **主要コンポーネント**:
+  - `src/cli/utils/prompt.ts` - 対話形式プロンプトユーティリティ（prompt, confirm, expandTilde, validatePort）
+  - `src/cli/commands/init.ts` - initコマンド（対話形式/非対話形式対応）
+  - `src/cli/utils/env-setup.ts` - getEnvPath(), isGlobalInstall(), getConfigDir()追加
 
 ### Issue #100: Mermaidダイアグラム描画機能
 - **ダイアグラム描画**: マークダウンプレビューでmermaidコードブロックをSVGダイアグラムとして描画

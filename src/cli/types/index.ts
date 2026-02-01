@@ -132,3 +132,23 @@ export interface ValidationResult {
   valid: boolean;
   errors: string[];
 }
+
+/**
+ * Options for prompt function
+ * Issue #119: Interactive init support
+ */
+export interface PromptOptions {
+  /** Default value if user presses Enter */
+  default?: string;
+  /** Validation function - returns error message or true if valid */
+  validate?: (input: string) => string | true;
+}
+
+/**
+ * Options for confirm function
+ * Issue #119: Interactive init support
+ */
+export interface ConfirmOptions {
+  /** Default value if user presses Enter (true = Y, false = N) */
+  default?: boolean;
+}

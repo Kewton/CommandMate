@@ -9,9 +9,11 @@ import {
   writeFileSync,
   chmodSync,
   copyFileSync,
+  mkdirSync,
 } from 'fs';
-import { join, normalize } from 'path';
+import { join, normalize, dirname } from 'path';
 import { randomBytes } from 'crypto';
+import { homedir } from 'os';
 import {
   EnvConfig,
   EnvSetupOptions,
@@ -29,6 +31,66 @@ export const ENV_DEFAULTS = {
   CM_LOG_LEVEL: 'info',
   CM_LOG_FORMAT: 'text',
 } as const;
+
+/**
+ * Default root directory for worktrees
+ */
+export const DEFAULT_ROOT_DIR = join(homedir(), 'repos');
+
+/**
+ * Check if running as global npm package
+ * Issue #119: Determine .env location based on install type
+ *
+ * @returns true if running as global npm package
+ */
+export function isGlobalInstall(): boolean {
+  // Check if running from global node_modules
+  // Global installs typically have paths like:
+  // - /usr/local/lib/node_modules/
+  // - /Users/xxx/.npm-global/lib/node_modules/
+  // - C:\Users\xxx\AppData\Roaming\npm\node_modules\
+  const currentPath = dirname(__dirname);
+  return (
+    currentPath.includes('/lib/node_modules/') ||
+    currentPath.includes('\\node_modules\\') ||
+    currentPath.includes('/node_modules/commandmate')
+  );
+}
+
+/**
+ * Get the path to .env file based on install type
+ * Issue #119: Global install uses ~/.commandmate/, local uses cwd
+ *
+ * @returns Path to .env file
+ */
+export function getEnvPath(): string {
+  if (isGlobalInstall()) {
+    const configDir = join(homedir(), '.commandmate');
+
+    // Create config directory if it doesn't exist
+    if (!existsSync(configDir)) {
+      mkdirSync(configDir, { recursive: true, mode: 0o700 });
+    }
+
+    return join(configDir, '.env');
+  }
+
+  // Local install - use current working directory
+  return join(process.cwd(), '.env');
+}
+
+/**
+ * Get the config directory path
+ * Issue #119: Returns ~/.commandmate for global, cwd for local
+ *
+ * @returns Path to config directory
+ */
+export function getConfigDir(): string {
+  if (isGlobalInstall()) {
+    return join(homedir(), '.commandmate');
+  }
+  return process.cwd();
+}
 
 /**
  * Sanitize input by removing control characters
