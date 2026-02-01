@@ -1,18 +1,146 @@
 /**
  * Init Command
  * Issue #96: npm install CLI support
+ * Issue #119: Interactive init support
  * Initialize CommandMate configuration
  */
 
-import { join } from 'path';
+import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { InitOptions, ExitCode, EnvConfig } from '../types';
 import { CLILogger } from '../utils/logger';
 import { PreflightChecker } from '../utils/preflight';
-import { EnvSetup, ENV_DEFAULTS, sanitizePath } from '../utils/env-setup';
+import {
+  EnvSetup,
+  ENV_DEFAULTS,
+  DEFAULT_ROOT_DIR,
+  getEnvPath,
+  sanitizePath,
+} from '../utils/env-setup';
+import {
+  prompt,
+  confirm,
+  resolvePath,
+  validatePort,
+  isInteractive,
+  closeReadline,
+} from '../utils/prompt';
 import { logSecurityEvent } from '../utils/security-logger';
 
 const logger = new CLILogger();
+
+/**
+ * Create default configuration (non-interactive mode)
+ */
+function createDefaultConfig(): EnvConfig {
+  return {
+    CM_ROOT_DIR: sanitizePath(process.env.CM_ROOT_DIR || DEFAULT_ROOT_DIR),
+    CM_PORT: ENV_DEFAULTS.CM_PORT,
+    CM_BIND: ENV_DEFAULTS.CM_BIND,
+    CM_DB_PATH: ENV_DEFAULTS.CM_DB_PATH,
+    CM_LOG_LEVEL: ENV_DEFAULTS.CM_LOG_LEVEL,
+    CM_LOG_FORMAT: ENV_DEFAULTS.CM_LOG_FORMAT,
+  };
+}
+
+/**
+ * Prompt user for configuration (interactive mode)
+ * Issue #119: Interactive init support
+ */
+async function promptForConfig(): Promise<EnvConfig> {
+  logger.info('--- Required Settings ---');
+  logger.blank();
+
+  // CM_ROOT_DIR
+  const rootDirInput = await prompt('Repository root directory (CM_ROOT_DIR)', {
+    default: DEFAULT_ROOT_DIR.replace(homedir(), '~'),
+  });
+  const rootDir = resolvePath(rootDirInput || DEFAULT_ROOT_DIR);
+
+  // Check if path exists
+  if (!existsSync(rootDir)) {
+    logger.warn(`Directory does not exist: ${rootDir}`);
+    const createDir = await confirm('Directory will be validated when adding repositories. Continue?', {
+      default: true,
+    });
+    if (!createDir) {
+      throw new Error('Setup cancelled by user');
+    }
+  }
+
+  logger.blank();
+  logger.info('--- Server Settings ---');
+  logger.blank();
+
+  // CM_PORT
+  const portInput = await prompt('Server port (CM_PORT)', {
+    default: String(ENV_DEFAULTS.CM_PORT),
+    validate: validatePort,
+  });
+  const port = parseInt(portInput || String(ENV_DEFAULTS.CM_PORT), 10);
+
+  // External access
+  const enableExternal = await confirm('Enable external access (bind to 0.0.0.0)?', {
+    default: false,
+  });
+
+  let bind: string = ENV_DEFAULTS.CM_BIND;
+  let authToken: string | undefined;
+
+  if (enableExternal) {
+    bind = '0.0.0.0';
+    const envSetup = new EnvSetup();
+    authToken = envSetup.generateAuthToken();
+    logger.blank();
+    logger.success('External access enabled');
+    logger.info(`  Bind address: 0.0.0.0`);
+    logger.info(`  Auth token generated: ${authToken.substring(0, 8)}...`);
+  }
+
+  // CM_DB_PATH
+  const dbPathInput = await prompt('Database path (CM_DB_PATH)', {
+    default: ENV_DEFAULTS.CM_DB_PATH,
+  });
+  const dbPath = dbPathInput || ENV_DEFAULTS.CM_DB_PATH;
+
+  return {
+    CM_ROOT_DIR: rootDir,
+    CM_PORT: port,
+    CM_BIND: bind,
+    CM_AUTH_TOKEN: authToken,
+    CM_DB_PATH: dbPath,
+    CM_LOG_LEVEL: ENV_DEFAULTS.CM_LOG_LEVEL,
+    CM_LOG_FORMAT: ENV_DEFAULTS.CM_LOG_FORMAT,
+  };
+}
+
+/**
+ * Display configuration summary
+ * Issue #119: Show settings after configuration
+ */
+function displayConfigSummary(config: EnvConfig, envPath: string): void {
+  logger.blank();
+  logger.info('==================================');
+  logger.info('Configuration Summary');
+  logger.info('==================================');
+  logger.blank();
+  logger.info(`  CM_ROOT_DIR:  ${config.CM_ROOT_DIR}`);
+  logger.info(`  CM_PORT:      ${config.CM_PORT}`);
+  logger.info(`  CM_BIND:      ${config.CM_BIND}`);
+  if (config.CM_AUTH_TOKEN) {
+    logger.info(`  CM_AUTH_TOKEN: ${config.CM_AUTH_TOKEN.substring(0, 8)}... (generated)`);
+  }
+  logger.info(`  CM_DB_PATH:   ${config.CM_DB_PATH}`);
+  logger.blank();
+  logger.info(`  Config file:  ${envPath}`);
+  logger.blank();
+
+  if (config.CM_AUTH_TOKEN) {
+    logger.warn('IMPORTANT: Save your auth token securely!');
+    logger.info(`  Token: ${config.CM_AUTH_TOKEN}`);
+    logger.blank();
+  }
+}
 
 /**
  * Execute init command
@@ -58,20 +186,33 @@ export async function initCommand(options: InitOptions): Promise<void> {
     logger.success('All required dependencies found');
     logger.blank();
 
-    // Step 2: Setup environment
-    const envSetup = new EnvSetup();
+    // Step 2: Get environment path
+    const envPath = getEnvPath();
+    const envSetup = new EnvSetup(envPath);
 
-    // Create configuration
-    const config: EnvConfig = {
-      CM_ROOT_DIR: options.defaults
-        ? join(homedir(), 'repos')
-        : sanitizePath(process.env.CM_ROOT_DIR || join(homedir(), 'repos')),
-      CM_PORT: ENV_DEFAULTS.CM_PORT,
-      CM_BIND: ENV_DEFAULTS.CM_BIND,
-      CM_DB_PATH: ENV_DEFAULTS.CM_DB_PATH,
-      CM_LOG_LEVEL: ENV_DEFAULTS.CM_LOG_LEVEL,
-      CM_LOG_FORMAT: ENV_DEFAULTS.CM_LOG_FORMAT,
-    };
+    // Backup existing .env if force mode
+    if (options.force) {
+      const backupPath = await envSetup.backupExisting();
+      if (backupPath) {
+        logger.info(`Backed up existing .env to ${backupPath}`);
+      }
+    }
+
+    // Step 3: Create configuration
+    let config: EnvConfig;
+
+    // Determine if interactive mode should be used
+    // Use interactive mode if:
+    // - Not using --defaults flag
+    // - Running in a TTY (interactive terminal)
+    const useInteractive = !options.defaults && isInteractive();
+
+    if (useInteractive) {
+      config = await promptForConfig();
+      closeReadline(); // Close readline after prompts
+    } else {
+      config = createDefaultConfig();
+    }
 
     // Validate configuration
     const validationResult = envSetup.validateConfig(config);
@@ -92,41 +233,43 @@ export async function initCommand(options: InitOptions): Promise<void> {
       return;
     }
 
-    // Backup existing .env if force mode
-    if (options.force) {
-      const backupPath = await envSetup.backupExisting();
-      if (backupPath) {
-        logger.info(`Backed up existing .env to ${backupPath}`);
-      }
-    }
-
-    // Create .env file
+    // Step 4: Create .env file
+    logger.blank();
+    logger.info('--- Generating .env ---');
+    logger.blank();
     logger.info('Creating .env file...');
     await envSetup.createEnvFile(config, { force: options.force });
     logger.success('.env file created');
 
-    // Step 3: Initialize database
+    // Step 5: Initialize database message
     logger.info('Initializing database...');
     // Note: Database initialization is handled by the server on startup
     logger.success('Database will be initialized on first server start');
 
-    logger.blank();
+    // Display configuration summary
+    displayConfigSummary(config, envPath);
+
     logger.success('CommandMate initialized successfully!');
     logger.blank();
     logger.info('Next steps:');
-    logger.info('  1. Edit .env to customize your configuration');
-    logger.info('  2. Run "commandmate start" to start the server');
+    if (!useInteractive) {
+      logger.info('  1. Edit .env to customize your configuration');
+      logger.info('  2. Run "commandmate start" to start the server');
+    } else {
+      logger.info('  1. Run "commandmate start" to start the server');
+    }
     logger.blank();
 
     logSecurityEvent({
       timestamp: new Date().toISOString(),
       command: 'init',
       action: 'success',
-      details: 'Configuration initialized',
+      details: `Configuration initialized (interactive: ${useInteractive})`,
     });
 
     process.exit(ExitCode.SUCCESS);
   } catch (error) {
+    closeReadline(); // Ensure readline is closed on error
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Initialization failed: ${message}`);
 
