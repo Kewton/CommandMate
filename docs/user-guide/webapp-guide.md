@@ -25,18 +25,35 @@ CommandMate のWebアプリを使った基本操作を説明します。
 
 ## アプリの起動とアクセス
 
-### 1. 開発サーバーの起動
+### 1. サーバーの起動
+
+#### npm グローバルインストールの場合（推奨）
+
+```bash
+# バックグラウンドで起動
+commandmate start --daemon
+
+# ステータス確認
+commandmate status
+
+# 停止
+commandmate stop
+```
+
+#### 開発環境（git clone）の場合
 
 ```bash
 cd CommandMate
-npm run dev
-```
 
-本番ビルドの場合:
-```bash
+# 開発サーバー
+npm run dev
+
+# 本番ビルド
 npm run build
 npm start
 ```
+
+> **Note**: 初めて使う場合は `commandmate init` で初期設定を行ってください。詳しくは [CLI セットアップガイド](./cli-setup-guide.md) を参照してください。
 
 ### 2. ブラウザでアクセス
 
@@ -46,7 +63,7 @@ npm start
 http://localhost:3000
 ```
 
-> **ポート変更**: `.env` ファイルで `CM_PORT=3001` のように変更できます。
+> **ポート変更**: `commandmate start --port 3001` または `.env` ファイルで `CM_PORT=3001` のように変更できます。
 
 ---
 
@@ -281,6 +298,7 @@ Cloudflare Tunnel などのトンネリングサービスを使用すること�
 
 ## 関連ドキュメント
 
+- [CLI セットアップガイド](./cli-setup-guide.md) - インストールと初期設定
 - [UI/UXガイド](../UI_UX_GUIDE.md) - UI実装の技術詳細
 - [ステータスインジケーター詳細](../features/sidebar-status-indicator.md) - ステータス検出の仕組み
 - [デプロイガイド](../DEPLOYMENT.md) - 本番環境構築手順

@@ -2,6 +2,24 @@
 
 本番環境にデプロイする前に、このチェックリストを確認してください。
 
+## 📦 インストール方法の選択
+
+### npm グローバルインストール（推奨）
+
+```bash
+npm install -g commandmate
+commandmate init
+commandmate start --daemon
+```
+
+詳しくは [CLI セットアップガイド](../user-guide/cli-setup-guide.md) を参照してください。
+
+### 開発環境（git clone）
+
+コントリビューターや自前でビルドする場合は、[デプロイガイド](../DEPLOYMENT.md#開発環境セットアップ) を参照してください。
+
+---
+
 ## 📋 デプロイ前チェックリスト
 
 ### 1. 環境設定
@@ -22,6 +40,10 @@
 
 - [ ] 依存関係チェックが成功する
   ```bash
+  # npm グローバルインストールの場合
+  commandmate init  # 依存関係を自動チェック
+
+  # 開発環境（git clone）の場合のみ
   ./scripts/preflight-check.sh
   ```
 - [ ] Node.js 20.x 以上がインストールされている
@@ -185,7 +207,44 @@
 
 チェックリストをすべて確認したら、以下の手順でデプロイします：
 
-### 初回デプロイ
+### npm グローバルインストール（推奨）
+
+#### 初回デプロイ
+
+```bash
+# インストール
+npm install -g commandmate
+
+# 初期設定（対話形式）
+commandmate init
+
+# サーバー起動
+commandmate start --daemon
+
+# ステータス確認
+commandmate status
+```
+
+#### 更新デプロイ
+
+```bash
+# サーバー停止
+commandmate stop
+
+# アップグレード
+npm install -g commandmate@latest
+
+# サーバー起動
+commandmate start --daemon
+```
+
+---
+
+### 開発環境（git clone）の場合
+
+> **Note**: 以下は開発者向けです。`./scripts/*` スクリプトは git clone 環境でのみ使用可能です。
+
+#### 初回デプロイ
 
 1. **セットアップスクリプトを実行**
    ```bash
@@ -213,7 +272,7 @@
    ./scripts/health-check.sh
    ```
 
-### 更新デプロイ
+#### 更新デプロイ
 
 1. **最新のコードを取得**
    ```bash

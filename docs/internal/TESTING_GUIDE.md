@@ -22,16 +22,18 @@
 # .env ファイルを作成
 cat > .env << 'EOF'
 # Development環境設定
-MCBD_ROOT_DIR=/Users/maenokota/share/work
-MCBD_PORT=3000
-MCBD_BIND=127.0.0.1
-MCBD_AUTH_TOKEN=dev-token-only-for-local
-DATABASE_PATH=./data/db.sqlite
+CM_ROOT_DIR=/Users/yourname/projects
+CM_PORT=3000
+CM_BIND=127.0.0.1
+CM_AUTH_TOKEN=dev-token-only-for-local
+CM_DB_PATH=./data/cm.db
 NODE_ENV=development
 EOF
 ```
 
-**重要**: `MCBD_ROOT_DIR` を実際の git worktree があるディレクトリに変更してください。
+**重要**: `CM_ROOT_DIR` を実際の git worktree があるディレクトリに変更してください。
+
+> **Note**: 旧名称の環境変数（`MCBD_*`）も後方互換性のためサポートされていますが、新名称（`CM_*`）の使用を推奨します。
 
 ### 2. データベースの初期化
 
@@ -131,7 +133,7 @@ curl -s http://localhost:3000/api/worktrees | jq .
 
 ### 2. 認証トークンのテスト
 
-認証が必要な環境（`MCBD_BIND=0.0.0.0`）の場合：
+認証が必要な環境（`CM_BIND=0.0.0.0`）の場合：
 
 ```bash
 # 認証なしでアクセス（エラーになるはず）
@@ -350,17 +352,17 @@ npm run db:init
 
 ### Worktree が検出されない
 
-`MCBD_ROOT_DIR` が正しく設定されているか確認：
+`CM_ROOT_DIR` が正しく設定されているか確認：
 
 ```bash
 # 環境変数を確認
-cat .env | grep MCBD_ROOT_DIR
+cat .env | grep CM_ROOT_DIR
 
 # ディレクトリが存在するか確認
-ls -la $MCBD_ROOT_DIR
+ls -la $CM_ROOT_DIR
 
 # Git worktree があるか確認
-cd $MCBD_ROOT_DIR && git worktree list
+cd $CM_ROOT_DIR && git worktree list
 ```
 
 ### WebSocket 接続エラー
@@ -380,10 +382,10 @@ curl -I \
 
 ```bash
 # 認証トークンを確認
-cat .env | grep MCBD_AUTH_TOKEN
+cat .env | grep CM_AUTH_TOKEN
 
 # ローカル開発の場合、BIND を 127.0.0.1 に設定
-echo "MCBD_BIND=127.0.0.1" >> .env
+echo "CM_BIND=127.0.0.1" >> .env
 ```
 
 ## パフォーマンスチェック

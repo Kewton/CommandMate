@@ -6,8 +6,8 @@
 
 1. [前提条件](#前提条件)
 2. [セットアップ手順](#セットアップ手順)
-3. [環境変数の設定](#環境変数の設定)
-4. [データベースの初期化](#データベースの初期化)
+3. [開発環境セットアップ](#開発環境セットアップ)
+4. [環境変数の設定](#環境変数の設定)
 5. [ビルドとデプロイ](#ビルドとデプロイ)
 6. [プロセス管理](#プロセス管理)
 7. [セキュリティ](#セキュリティ)
@@ -26,11 +26,45 @@
 | openssl | - | ✓ | `openssl version` |
 | Claude CLI | - | △ | `claude --version` |
 
-> **Tip**: `./scripts/preflight-check.sh` で依存関係を一括確認できます。
-
 ## セットアップ手順
 
-### 自動セットアップ（推奨）
+### npm グローバルインストール（推奨）
+
+最も簡単な方法です。
+
+```bash
+# インストール
+npm install -g commandmate
+
+# 初期設定（対話形式）
+commandmate init
+
+# サーバー起動
+commandmate start --daemon
+```
+
+ブラウザで http://localhost:3000 にアクセスしてください。
+
+### CLI コマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `commandmate init` | 初期設定（対話形式） |
+| `commandmate init --defaults` | 初期設定（デフォルト値） |
+| `commandmate start --daemon` | バックグラウンド起動 |
+| `commandmate start --port 3001` | ポートを指定して起動 |
+| `commandmate stop` | サーバー停止 |
+| `commandmate status` | 状態確認 |
+
+詳しくは [CLI セットアップガイド](./user-guide/cli-setup-guide.md) を参照してください。
+
+---
+
+## 開発環境セットアップ
+
+> **Note**: 以下は開発者・コントリビューター向けのセットアップです。一般利用には上記の npm グローバルインストールを推奨します。
+
+### 自動セットアップ
 
 ```bash
 git clone https://github.com/kewton/CommandMate.git
@@ -107,6 +141,8 @@ npm run db:init
 ```bash
 npm run build
 ```
+
+> **Note**: `./scripts/*` スクリプトは開発環境（git clone）でのみ使用可能です。グローバルインストールでは `commandmate` CLI を使用してください。
 
 ## 環境変数の設定
 
@@ -330,6 +366,21 @@ chmod 644 data/db.sqlite
 ```
 
 ## アップデート手順
+
+### npm グローバルインストールの場合
+
+```bash
+# サーバー停止
+commandmate stop
+
+# 最新版にアップグレード
+npm install -g commandmate@latest
+
+# サーバー再起動
+commandmate start --daemon
+```
+
+### 開発環境（git clone）の場合
 
 ```bash
 # 最新コードの取得

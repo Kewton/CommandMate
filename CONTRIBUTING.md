@@ -4,6 +4,8 @@ CommandMate への貢献を歓迎します。
 
 ## 開発環境のセットアップ
 
+> **Note**: コントリビューターは `git clone` を使用してください。`npm install -g commandmate` は一般ユーザー向けです。
+
 ```bash
 git clone https://github.com/Kewton/CommandMate.git
 cd CommandMate
@@ -16,8 +18,10 @@ npm run dev
 ### 前提条件
 
 - Node.js v20+
+- npm
 - tmux
 - git
+- openssl
 - Claude CLI（動作確認する場合）
 
 ## ブランチ戦略

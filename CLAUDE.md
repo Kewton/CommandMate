@@ -370,6 +370,23 @@ commandmate status
   - `src/components/worktree/SearchBar.tsx` - 検索UIコンポーネント
 - 詳細: [設計書](./dev-reports/design/issue-21-file-search-design-policy.md)
 
+### Issue #114: npm install -g ドキュメント整備
+- **ドキュメント更新**: `npm install -g commandmate` を標準セットアップ方法として明確化
+- **対象ユーザーの分離**:
+  - 一般ユーザー: `npm install -g commandmate`（推奨）
+  - 開発者/コントリビューター: `git clone`
+- **更新ファイル**:
+  - `README.md` - Quick Startを npm install -g 方式に変更
+  - `docs/DEPLOYMENT.md` - npm方式を追加、git clone を開発環境向けに移動
+  - `docs/user-guide/webapp-guide.md` - 起動方法を更新
+  - `docs/user-guide/quick-start.md` - 前提条件を追加
+  - `CONTRIBUTING.md` - 開発者向けセットアップを明記
+  - `docs/internal/TESTING_GUIDE.md` - 環境変数を `CM_*` に統一
+  - `docs/internal/PRODUCTION_CHECKLIST.md` - npm方式を追加
+- **新規ファイル**:
+  - `docs/user-guide/cli-setup-guide.md` - CLIセットアップ専用ガイド（インストール、トラブルシューティング、アップグレード、アンインストール）
+- **トラブルシューティング**: command not found、権限エラー、ポート競合の対応手順を文書化
+
 ### Issue #96: npm CLIサポート
 - **CLIコマンド**: `npm install -g commandmate`でグローバルインストール可能
 - **サブコマンド**:

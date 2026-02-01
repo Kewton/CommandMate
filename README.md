@@ -49,19 +49,48 @@ Claude Code での開発経験があり、本業の傍らで個人開発を続�
 
 - macOS / Linux（tmux 依存のため Windows は非対応）
 - Node.js v20+、npm、git、tmux、openssl
-- Claude CLI（CLAUDE_HOOKS_STOP 対応）
+- Claude CLI（オプション）
 
-> **Tip**: `./scripts/preflight-check.sh` で依存関係を確認できます。
+### インストール
 
-### セットアップ
+```bash
+npm install -g commandmate
+```
+
+### セットアップと起動
+
+```bash
+commandmate init              # 依存チェック、環境設定、DB初期化
+commandmate start --daemon    # バックグラウンドで起動
+```
+
+ブラウザで http://localhost:3000 にアクセスしてください。
+
+### CLI コマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `commandmate init` | 初期設定（対話形式） |
+| `commandmate init --defaults` | 初期設定（デフォルト値） |
+| `commandmate start --daemon` | バックグラウンド起動 |
+| `commandmate stop` | サーバー停止 |
+| `commandmate status` | 状態確認 |
+
+詳しくは [CLI セットアップガイド](./docs/user-guide/cli-setup-guide.md) を参照してください。
+
+### モバイルからのアクセス
+
+`commandmate init` で外部アクセスを有効にすると、`CM_BIND=0.0.0.0` と `CM_AUTH_TOKEN` が自動設定されます。同一LAN内から `http://<PCのIP>:3000` にアクセスします。
+
+## 開発者向けセットアップ
+
+コントリビューターや開発環境を構築する場合は、git clone を使用してください。
 
 ```bash
 git clone https://github.com/Kewton/CommandMate.git
 cd CommandMate
 ./scripts/setup.sh  # 依存チェック、環境設定、ビルド、起動まで自動実行
 ```
-
-ブラウザで http://localhost:3000 にアクセスしてください。
 
 ### 手動セットアップ（カスタマイズしたい場合）
 
@@ -76,7 +105,7 @@ npm run build
 npm start
 ```
 
-スマホから利用する場合は `./scripts/setup-env.sh` で外部アクセスを有効にすると、`CM_BIND=0.0.0.0` と `CM_AUTH_TOKEN` が自動設定されます。同一LAN内から `http://<PCのIP>:3000` にアクセスします。
+> **Note**: `./scripts/*` スクリプトは開発環境でのみ使用可能です。グローバルインストール（`npm install -g`）では `commandmate` CLI を使用してください。
 
 > **Note**: 旧名称の環境変数（`MCBD_*`）も後方互換性のためサポートされていますが、新名称（`CM_*`）の使用を推奨します。
 
@@ -104,13 +133,14 @@ A: 現時点では個人利用を想定しています。複数人での同時�
 
 | ドキュメント | 説明 |
 |-------------|------|
+| [CLI セットアップガイド](./docs/user-guide/cli-setup-guide.md) | インストールと初期設定 |
+| [Webアプリ操作ガイド](./docs/user-guide/webapp-guide.md) | Webアプリの基本操作 |
+| [クイックスタート](./docs/user-guide/quick-start.md) | Claude Codeコマンドの使い方 |
 | [コンセプト](./docs/concept.md) | ビジョンと解決する課題 |
 | [アーキテクチャ](./docs/architecture.md) | システム設計 |
 | [デプロイガイド](./docs/DEPLOYMENT.md) | 本番環境構築手順 |
 | [移行ガイド](./docs/migration-to-commandmate.md) | MyCodeBranchDesk からの移行手順 |
 | [UI/UXガイド](./docs/UI_UX_GUIDE.md) | UI実装の詳細 |
-| [Webアプリ操作ガイド](./docs/user-guide/webapp-guide.md) | Webアプリの基本操作 |
-| [クイックスタート](./docs/user-guide/quick-start.md) | Claude Codeコマンドの使い方 |
 | [Trust & Safety](./docs/TRUST_AND_SAFETY.md) | セキュリティと権限の考え方 |
 
 ## Contributing
