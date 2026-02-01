@@ -11,6 +11,7 @@ import React, { memo, type ReactNode } from 'react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { Sidebar } from './Sidebar';
+import { Z_INDEX } from '@/config/z-index';
 
 // ============================================================================
 // Types
@@ -82,31 +83,31 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
     );
   }
 
-  // Desktop layout with side-by-side panels
+  // Desktop layout with fixed sidebar and padding-based content shift
+  // Issue #112: Using transform for better performance (GPU-accelerated)
   return (
     <div data-testid="app-shell" className="h-screen flex">
-      {/* Sidebar container */}
+      {/* Sidebar container - fixed position with transform animation */}
       <aside
         data-testid="sidebar-container"
         className={`
-          flex-shrink-0 h-full
-          transition-all duration-300 ease-out
-          ${isOpen ? 'w-72' : 'w-0'}
-          overflow-hidden
+          fixed left-0 top-0 h-full w-72
+          transform transition-transform duration-300 ease-out
+          ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
+        style={{ zIndex: Z_INDEX.SIDEBAR }}
         role="complementary"
+        aria-hidden={!isOpen}
       >
-        <div className="w-72 h-full">
-          <Sidebar />
-        </div>
+        <Sidebar />
       </aside>
 
-      {/* Main content */}
+      {/* Main content - padding adjusts based on sidebar state */}
       <main
         className={`
           flex-1 min-w-0 h-full overflow-hidden
-          transition-all duration-300 ease-out
-          ${isOpen ? 'ml-0' : 'ml-0'}
+          transition-[padding] duration-300 ease-out
+          ${isOpen ? 'md:pl-72' : 'md:pl-0'}
         `}
         role="main"
       >

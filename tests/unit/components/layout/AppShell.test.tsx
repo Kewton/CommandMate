@@ -278,7 +278,9 @@ describe('AppShell', () => {
       );
 
       const sidebarContainer = screen.getByTestId('sidebar-container');
-      expect(sidebarContainer.className).toMatch(/w-72/);
+      // Desktop uses transform-based animation for performance (Issue #112)
+      expect(sidebarContainer.className).toMatch(/translate-x-0/);
+      expect(sidebarContainer.className).not.toMatch(/-translate-x-full/);
     });
 
     it('should render with custom initial state', () => {
@@ -299,7 +301,44 @@ describe('AppShell', () => {
       );
 
       const sidebarContainer = screen.getByTestId('sidebar-container');
-      expect(sidebarContainer.className).toMatch(/w-0/);
+      // Desktop uses transform-based animation for performance (Issue #112)
+      expect(sidebarContainer.className).toMatch(/-translate-x-full/);
+    });
+
+    it('should have aria-hidden when sidebar is closed', () => {
+      const CustomWrapper = ({ children }: { children: React.ReactNode }) => (
+        <SidebarProvider initialOpen={false}>
+          <WorktreeSelectionProvider>
+            {children}
+          </WorktreeSelectionProvider>
+        </SidebarProvider>
+      );
+
+      render(
+        <CustomWrapper>
+          <AppShell>
+            <div>Content</div>
+          </AppShell>
+        </CustomWrapper>
+      );
+
+      const sidebarContainer = screen.getByTestId('sidebar-container');
+      expect(sidebarContainer).toHaveAttribute('aria-hidden', 'true');
+    });
+
+    it('should not have aria-hidden when sidebar is open', () => {
+      (useIsMobile as ReturnType<typeof vi.fn>).mockReturnValue(false);
+
+      render(
+        <Wrapper>
+          <AppShell>
+            <div>Content</div>
+          </AppShell>
+        </Wrapper>
+      );
+
+      const sidebarContainer = screen.getByTestId('sidebar-container');
+      expect(sidebarContainer).not.toHaveAttribute('aria-hidden', 'true');
     });
   });
 });
