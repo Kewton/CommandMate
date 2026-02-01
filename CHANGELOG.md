@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-02-02
+
+### Added
+- Interactive mode for `commandmate init` command (Issue #119)
+  - TTY detection for automatic interactive/non-interactive mode selection
+  - Prompts for CM_ROOT_DIR, CM_PORT, external access, CM_DB_PATH
+  - `--defaults` flag for CI/CD environments (non-interactive)
+  - Tilde expansion for paths (`~/repos` → `/Users/xxx/repos`)
+  - Configuration summary display after setup
+  - Global install: `.env` saved to `~/.commandmate/`
+  - Local install: `.env` saved to current directory
+
 ## [0.1.6] - 2026-02-02
 
 ### Added
