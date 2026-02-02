@@ -165,13 +165,13 @@ src/
 | `src/cli/commands/stop.ts` | stopコマンド（サーバー停止） |
 | `src/cli/commands/status.ts` | statusコマンド（状態確認） |
 | `src/cli/utils/preflight.ts` | システム依存関係チェック |
-| `src/cli/utils/env-setup.ts` | 環境設定ファイル生成 |
-| `src/cli/utils/daemon.ts` | デーモンプロセス管理 |
+| `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125） |
+| `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告（Issue #125） |
 | `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
 | `src/cli/utils/security-logger.ts` | セキュリティイベントログ |
 | `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |
 | `src/cli/config/cli-dependencies.ts` | 依存関係定義 |
-| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum） |
+| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum、getErrorMessage関数） |
 
 ---
 
@@ -424,6 +424,20 @@ commandmate status
   - `src/cli/utils/prompt.ts` - 対話形式プロンプトユーティリティ（prompt, confirm, expandTilde, validatePort）
   - `src/cli/commands/init.ts` - initコマンド（対話形式/非対話形式対応）
   - `src/cli/utils/env-setup.ts` - getEnvPath(), isGlobalInstall(), getConfigDir()追加
+
+### Issue #125: グローバルインストール時の.env読み込み修正
+- **バグ修正**: `start`/`stop`/`status`コマンドがグローバルインストール時に`~/.commandmate/.env`を正しく読み込むよう修正
+- **getPidFilePath()追加**: PIDファイルパス取得をDRY原則に従いenv-setup.tsに集約
+- **パストラバーサル対策**: `fs.realpathSync()`によるシンボリックリンク解決とホームディレクトリ外チェック
+- **セキュリティ警告**: CM_BIND=0.0.0.0の場合に外部公開警告、認証トークン未設定時に追加警告
+- **環境変数伝播**: `dotenv`パッケージを使用して.envを読み込み、子プロセスに環境変数を伝播
+- **主要コンポーネント**:
+  - `src/cli/utils/env-setup.ts` - getPidFilePath(), resolveSecurePath()追加
+  - `src/cli/utils/daemon.ts` - dotenvによる.env読み込み、セキュリティ警告追加
+  - `src/cli/commands/start.ts` - getEnvPath(), getPidFilePath()使用
+  - `src/cli/commands/stop.ts` - getPidFilePath()使用
+  - `src/cli/commands/status.ts` - getPidFilePath()使用、dotenvConfig()追加
+- 詳細: [設計書](./dev-reports/design/issue-125-global-install-env-loading-design-policy.md)
 
 ### Issue #100: Mermaidダイアグラム描画機能
 - **ダイアグラム描画**: マークダウンプレビューでmermaidコードブロックをSVGダイアグラムとして描画
