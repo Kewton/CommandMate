@@ -11,6 +11,7 @@
 
 import { useMemo, memo } from 'react';
 import { MOBILE_STATUS_CONFIG, type WorktreeStatusType } from '@/config/status-colors';
+import { truncateString } from '@/lib/utils';
 import type { GitStatus } from '@/types/models';
 
 /**
@@ -73,13 +74,8 @@ const ICON_PATHS = {
 } as const;
 
 
-/**
- * Truncate branch name if too long (Issue #111)
- */
-function truncateBranch(branch: string, maxLength: number = 20): string {
-  if (branch.length <= maxLength) return branch;
-  return `${branch.substring(0, maxLength - 3)}...`;
-}
+/** Truncate branch name using shared utility (Issue #111 - DRY) */
+const MOBILE_BRANCH_MAX_LENGTH = 20;
 
 /**
  * MobileHeader - Header for mobile view
@@ -162,7 +158,7 @@ export function MobileHeader({
                     title={gitStatus.currentBranch}
                     data-testid="mobile-branch-name"
                   >
-                    {truncateBranch(gitStatus.currentBranch)}
+                    {truncateString(gitStatus.currentBranch, MOBILE_BRANCH_MAX_LENGTH)}
                   </span>
                   {gitStatus.isDirty && (
                     <span className="text-amber-500" title="Uncommitted changes">*</span>

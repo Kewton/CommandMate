@@ -43,6 +43,7 @@ import { ToastContainer, useToast } from '@/components/common/Toast';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
+import { truncateString } from '@/lib/utils';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
@@ -167,18 +168,14 @@ const DesktopHeader = memo(function DesktopHeader({
   onMenuClick,
 }: DesktopHeaderProps) {
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
-  // Truncate description to 50 characters
-  const truncatedDescription = worktreeDescription
-    ? worktreeDescription.length > 50
-      ? `${worktreeDescription.substring(0, 50)}...`
-      : worktreeDescription
-    : null;
+  // Issue #111: DRY - Use shared truncateString utility
+  const DESKTOP_BRANCH_MAX_LENGTH = 30;
+  const DESCRIPTION_MAX_LENGTH = 50;
 
-  // Issue #111: Truncate branch name if too long
-  const truncateBranch = (branch: string, maxLength: number = 30): string => {
-    if (branch.length <= maxLength) return branch;
-    return `${branch.substring(0, maxLength - 3)}...`;
-  };
+  // Truncate description using shared utility
+  const truncatedDescription = worktreeDescription
+    ? truncateString(worktreeDescription, DESCRIPTION_MAX_LENGTH)
+    : null;
 
   return (
     <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
@@ -273,7 +270,7 @@ const DesktopHeader = memo(function DesktopHeader({
                   title={gitStatus.currentBranch}
                   data-testid="desktop-branch-name"
                 >
-                  {truncateBranch(gitStatus.currentBranch)}
+                  {truncateString(gitStatus.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
                 </span>
                 {gitStatus.isDirty && (
                   <span className="text-amber-500" title="Uncommitted changes">*</span>

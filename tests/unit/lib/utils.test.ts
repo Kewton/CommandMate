@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { debounce, escapeRegExp, computeMatchedPaths } from '@/lib/utils';
+import { debounce, escapeRegExp, computeMatchedPaths, truncateString } from '@/lib/utils';
 
 describe('debounce', () => {
   beforeEach(() => {
@@ -277,5 +277,64 @@ describe('computeMatchedPaths', () => {
     expect(result.has('a/b/c/d/e')).toBe(true);
     expect(result.has('a/b/c/d/e/file.ts')).toBe(true);
     expect(result.size).toBe(6);
+  });
+});
+
+/**
+ * truncateString Tests
+ * [Issue #111] Branch visualization feature - DRY extraction
+ */
+describe('truncateString', () => {
+  it('should return original string if within limit', () => {
+    expect(truncateString('main', 30)).toBe('main');
+    expect(truncateString('feature/short', 30)).toBe('feature/short');
+  });
+
+  it('should truncate string with ellipsis when exceeding limit', () => {
+    expect(truncateString('feature/very-long-branch-name-that-exceeds-limit', 30))
+      .toBe('feature/very-long-branch-na...');
+  });
+
+  it('should handle exact limit length', () => {
+    const exactLength = 'a'.repeat(30);
+    expect(truncateString(exactLength, 30)).toBe(exactLength);
+  });
+
+  it('should handle one character over limit', () => {
+    const overByOne = 'a'.repeat(31);
+    expect(truncateString(overByOne, 30)).toBe('a'.repeat(27) + '...');
+  });
+
+  it('should use default maxLength of 30', () => {
+    const longString = 'a'.repeat(50);
+    expect(truncateString(longString)).toBe('a'.repeat(27) + '...');
+  });
+
+  it('should handle custom maxLength', () => {
+    expect(truncateString('feature/branch', 10)).toBe('feature...');
+    expect(truncateString('main', 10)).toBe('main');
+  });
+
+  it('should handle empty string', () => {
+    expect(truncateString('', 30)).toBe('');
+  });
+
+  it('should handle very short maxLength', () => {
+    // With maxLength=5, we get 2 chars + '...'
+    expect(truncateString('abcdefgh', 5)).toBe('ab...');
+  });
+
+  it('should handle maxLength of 3 (edge case)', () => {
+    // With maxLength=3, we get 0 chars + '...'
+    expect(truncateString('abcdefgh', 3)).toBe('...');
+  });
+
+  it('should handle Unicode characters', () => {
+    // 'feature/long-branch-name' is 24 chars, truncate at 20 -> 17 chars + '...'
+    expect(truncateString('feature/long-branch-name', 20)).toBe('feature/long-bran...');
+  });
+
+  it('should handle special characters in branch names', () => {
+    expect(truncateString('feature/special_chars.v1', 20)).toBe('feature/special_c...');
   });
 });
