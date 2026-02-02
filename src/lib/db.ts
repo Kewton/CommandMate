@@ -1140,6 +1140,59 @@ export function reorderMemos(
 }
 
 // ============================================================
+// Initial Branch Operations (Issue #111)
+// ============================================================
+
+/**
+ * Save initial branch for a worktree (at session start)
+ * Issue #111: Branch visualization feature
+ *
+ * @param db - Database instance
+ * @param worktreeId - ID of the worktree
+ * @param branchName - Branch name to save
+ *
+ * @remarks
+ * Uses prepared statement for SQL injection prevention
+ * Called from send/route.ts after startSession()
+ */
+export function saveInitialBranch(
+  db: Database.Database,
+  worktreeId: string,
+  branchName: string
+): void {
+  const stmt = db.prepare(`
+    UPDATE worktrees
+    SET initial_branch = ?
+    WHERE id = ?
+  `);
+
+  stmt.run(branchName, worktreeId);
+}
+
+/**
+ * Get initial branch for a worktree
+ * Issue #111: Branch visualization feature
+ *
+ * @param db - Database instance
+ * @param worktreeId - ID of the worktree
+ * @returns Branch name or null if not recorded
+ */
+export function getInitialBranch(
+  db: Database.Database,
+  worktreeId: string
+): string | null {
+  const stmt = db.prepare(`
+    SELECT initial_branch
+    FROM worktrees
+    WHERE id = ?
+  `);
+
+  const row = stmt.get(worktreeId) as { initial_branch: string | null } | undefined;
+
+  return row?.initial_branch ?? null;
+}
+
+// ============================================================
 // Repository Delete Operations (Issue #69)
 // ============================================================
 
