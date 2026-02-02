@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-02-02
+
+### Added
+- Git branch visualization feature (Issue #111)
+  - Display current branch name in worktree detail header
+  - Show warning when current branch differs from session start branch
+  - Mobile support for branch information display
+  - Automatic refresh (active: 2s, idle: 5s)
+  - Migration #15: added `initial_branch` column to worktrees table
+  - New `src/lib/git-utils.ts` module with `getGitStatus()` function
+  - `BranchMismatchAlert` component for branch mismatch warnings
+
+### Fixed
+- Repository filter UI now displays even when only one repository exists (Issue #129)
+
+### Security
+- Branch visualization uses `execFile` instead of `exec` to prevent command injection
+- 1 second timeout for git commands to prevent DoS
+- React auto-escaping for XSS prevention in branch name display
+
 ## [0.1.9] - 2026-02-02
 
 ### Fixed
