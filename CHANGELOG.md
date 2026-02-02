@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-02-02
+
+### Fixed
+- Global install CLI commands now load .env from correct location (Issue #125)
+  - `commandmate start/stop/status` use `getEnvPath()` and `getPidFilePath()`
+  - .env loaded from `~/.commandmate/.env` for global installs
+  - PID file created at `~/.commandmate/.commandmate.pid`
+  - Path traversal protection with symlink resolution
+  - Security warnings for external network access (CM_BIND=0.0.0.0)
+  - Fallback to process.env when .env loading fails
+
+### Security
+- Added path traversal protection in getConfigDir() (OWASP A01:2021)
+- Security warning when server is exposed externally without authentication (OWASP A05:2021)
+
 ## [0.1.7] - 2026-02-02
 
 ### Added
@@ -189,7 +204,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.5...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/Kewton/CommandMate/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/Kewton/CommandMate/compare/v0.1.6...v0.1.7
+[0.1.6]: https://github.com/Kewton/CommandMate/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Kewton/CommandMate/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/Kewton/CommandMate/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/Kewton/CommandMate/compare/v0.1.2...v0.1.3
