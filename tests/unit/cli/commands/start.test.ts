@@ -10,6 +10,15 @@ import * as childProcess from 'child_process';
 
 vi.mock('fs');
 vi.mock('child_process');
+vi.mock('dotenv', () => ({
+  config: vi.fn(() => ({
+    parsed: {
+      CM_ROOT_DIR: '/mock/repos',
+      CM_PORT: '3000',
+      CM_BIND: '127.0.0.1',
+    },
+  })),
+}));
 vi.mock('../../../../src/cli/utils/security-logger');
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/mock/home/.commandmate/.env'),
@@ -20,6 +29,7 @@ vi.mock('../../../../src/cli/utils/env-setup', () => ({
 import { startCommand } from '../../../../src/cli/commands/start';
 import { ExitCode } from '../../../../src/cli/types';
 import { getEnvPath, getPidFilePath } from '../../../../src/cli/utils/env-setup';
+import { config as dotenvConfig } from 'dotenv';
 
 describe('startCommand', () => {
   let mockExit: ReturnType<typeof vi.fn>;
@@ -74,6 +84,59 @@ describe('startCommand', () => {
       await startCommand({ daemon: true });
 
       expect(getPidFilePath).toHaveBeenCalled();
+    });
+
+    it('should load .env file using dotenv in foreground mode', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      const mockChild = {
+        pid: 12345,
+        on: vi.fn((event: string, callback: (code: number) => void) => {
+          if (event === 'close') {
+            // Don't call callback to avoid process.exit
+          }
+          return mockChild;
+        }),
+      };
+      vi.mocked(childProcess.spawn).mockReturnValue(mockChild as unknown as childProcess.ChildProcess);
+
+      // Start in foreground mode (no daemon flag)
+      // Note: This won't complete because we don't trigger 'close' event
+      startCommand({});
+
+      // Give it time to set up
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Verify dotenv.config was called with correct path
+      expect(dotenvConfig).toHaveBeenCalledWith({ path: '/mock/home/.commandmate/.env' });
+    });
+
+    it('should pass .env values to child process in foreground mode', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      const mockChild = {
+        pid: 12345,
+        on: vi.fn(() => mockChild),
+      };
+      vi.mocked(childProcess.spawn).mockReturnValue(mockChild as unknown as childProcess.ChildProcess);
+
+      // Start in foreground mode
+      startCommand({});
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Verify spawn was called with env containing .env values
+      expect(childProcess.spawn).toHaveBeenCalledWith(
+        'npm',
+        ['run', 'start'],
+        expect.objectContaining({
+          env: expect.objectContaining({
+            CM_ROOT_DIR: '/mock/repos',
+            CM_PORT: '3000',
+            CM_BIND: '127.0.0.1',
+          }),
+        })
+      );
     });
   });
 

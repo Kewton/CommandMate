@@ -7,6 +7,7 @@
 
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
+import { config as dotenvConfig } from 'dotenv';
 import { StartOptions, ExitCode, getErrorMessage } from '../types';
 import { CLILogger } from '../utils/logger';
 import { DaemonManager } from '../utils/daemon';
@@ -88,9 +89,36 @@ export async function startCommand(options: StartOptions): Promise<void> {
     const npmScript = options.dev ? 'dev' : 'start';
     logger.info(`Starting server in foreground (${options.dev ? 'development' : 'production'} mode)...`);
 
-    const env: NodeJS.ProcessEnv = { ...process.env };
+    // Issue #125: Load .env file from correct location (same as daemon mode)
+    const envResult = dotenvConfig({ path: envPath });
+
+    if (envResult.error) {
+      logger.warn(`Failed to load .env file at ${envPath}: ${envResult.error.message}`);
+      logger.info('Continuing with existing environment variables');
+    }
+
+    // Build environment by merging process.env with .env values
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...(envResult.parsed || {}),
+    };
+
+    // Command line options override .env values
     if (options.port) {
       env.CM_PORT = String(options.port);
+    }
+
+    // Issue #125: Security warnings for external access
+    const bindAddress = env.CM_BIND || '127.0.0.1';
+    const authToken = env.CM_AUTH_TOKEN;
+
+    if (bindAddress === '0.0.0.0') {
+      logger.warn('WARNING: Server is accessible from external networks (CM_BIND=0.0.0.0)');
+
+      if (!authToken) {
+        logger.warn('SECURITY WARNING: No authentication token configured. External access is not recommended without CM_AUTH_TOKEN.');
+        logger.info('Run "commandmate init" to configure a secure authentication token.');
+      }
     }
 
     // Use package installation directory, not current working directory
