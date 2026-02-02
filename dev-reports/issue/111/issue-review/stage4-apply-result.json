@@ -1,0 +1,97 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-02",
+  "issue_number": 111,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/111",
+  "applied_items": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "API設計",
+        "status": "applied",
+        "changes": [
+          "DBスキーマ拡張セクションの保存タイミングを修正: 「POST /api/sessions エンドポイント」から「send/route.ts 内の startSession() 呼び出し直後」に変更",
+          "バックエンドセクションの説明を更新",
+          "影響範囲テーブルに src/app/api/worktrees/[id]/send/route.ts を追加",
+          "Task 3 の説明を修正: send/route.ts 内の startSession() 呼び出し後に保存する処理に変更"
+        ]
+      },
+      {
+        "id": "MF-2",
+        "category": "データ整合性",
+        "status": "applied",
+        "changes": [
+          "「git コマンドエラーハンドリング」セクションを新規追加",
+          "detached HEAD / git コマンド失敗 / タイムアウト時の挙動を表形式で明記",
+          "各状態での currentBranch 値と isBranchMismatch フラグの動作を定義"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "パフォーマンス",
+        "status": "applied",
+        "changes": [
+          "「パフォーマンス対策」セクションを新規追加",
+          "git コマンド実行に1秒のタイムアウト設定を明記",
+          "タイムアウト時のキャッシュ値返却動作を定義",
+          "想定オーバーヘッド（10-50ms/回）を記載",
+          "影響範囲テーブルに「タイムアウト設定」を追加",
+          "受け入れ条件に「gitコマンドタイムアウト時もアプリが正常に動作する」を追加"
+        ]
+      },
+      {
+        "id": "SF-2",
+        "category": "UI/UX",
+        "status": "applied",
+        "changes": [
+          "BranchMismatchAlert.tsx 詳細設計テーブルの「再表示条件」を拡張",
+          "previousBranch state を保持する状態管理方式を明記",
+          "再表示条件を具体化: (1) ブランチ再変更時、(2) 画面リロード時"
+        ]
+      },
+      {
+        "id": "SF-3",
+        "category": "既存機能との整合性",
+        "status": "applied",
+        "changes": [
+          "API拡張方針セクションの interface 定義を gitStatus?: に変更（オプショナル化）",
+          "注意事項に後方互換性維持の説明を追加",
+          "影響範囲テーブルの型定義行に「オプショナル」を明記",
+          "Task 2 に「オプショナル」を追加",
+          "受け入れ条件に「既存テストが全てパスする（後方互換性維持）」を追加"
+        ]
+      },
+      {
+        "id": "SF-4",
+        "category": "テスト",
+        "status": "applied",
+        "changes": [
+          "「テストへの影響と対応」セクションを新規追加",
+          "影響を受ける既存テスト3件と対応方針を表形式で記載",
+          "新規追加が必要なテスト4件を明記",
+          "Task 7 に「新規4件、既存修正2件」の具体的数値を追加"
+        ]
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "UI/UX",
+        "status": "skipped",
+        "reason": "「元のブランチに戻る」ボタンは将来の機能拡張として検討。現時点では警告表示のみで十分"
+      },
+      {
+        "id": "NTH-2",
+        "category": "パフォーマンス",
+        "status": "skipped",
+        "reason": "git status 結果のキャッシュ機構は将来の最適化として検討。初期実装では毎回取得で問題ない"
+      }
+    ]
+  },
+  "review_history_updated": true,
+  "review_history_section": "Stage 3 Review (2026-02-02) - 影響範囲レビュー",
+  "summary": "Stage 3 影響範囲レビューの指摘事項を Issue #111 に反映完了。Must Fix 2件（初期ブランチ保存タイミング修正、エラーハンドリング定義）、Should Fix 4件（タイムアウト設定、アラート再表示条件、gitStatus オプショナル化、テスト影響対応）を全て適用。Nice to Have 2件はスコープ外として現時点ではスキップ。"
+}

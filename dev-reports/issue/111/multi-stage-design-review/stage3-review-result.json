@@ -1,0 +1,238 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-02",
+  "issue_number": 111,
+  "design_doc_path": "dev-reports/design/issue-111-branch-visualization-design-policy.md",
+  "findings": [
+    {
+      "id": "IMP-MF-001",
+      "priority": "Must Fix",
+      "category": "database",
+      "title": "Migration #15 rollback strategyが不完全",
+      "description": "設計書にMigration #15のdown()関数が定義されていない。SQLiteはALTER TABLE DROP COLUMNをサポートしないため、テーブル再作成が必要だが、rollback手順が未記載。",
+      "current_state": "down()関数の定義なし",
+      "recommendation": "Migration #15にdown()関数を追加し、テーブル再作成によるrollback手順を明記する。既存Migration #7のパターンを参照。",
+      "risk_level": "medium",
+      "affected_files": [
+        "src/lib/db-migrations.ts"
+      ]
+    },
+    {
+      "id": "IMP-MF-002",
+      "priority": "Must Fix",
+      "category": "api",
+      "title": "API応答サイズ増加の影響評価なし",
+      "description": "GET /api/worktrees/:id のレスポンスにgitStatusオブジェクト(約100-200 bytes)が追加される。ポーリング間隔2秒でのデータ転送量増加の評価が設計書に記載されていない。",
+      "current_state": "セクション12にレスポンスサイズ微増と記載あるが具体的評価なし",
+      "recommendation": "1) gitStatusフィールドサイズの想定値を明記 2) ポーリング頻度との組み合わせによる帯域消費評価 3) モバイル環境での影響考慮を追記",
+      "risk_level": "low",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/route.ts"
+      ]
+    },
+    {
+      "id": "IMP-SF-001",
+      "priority": "Should Fix",
+      "category": "testing",
+      "title": "既存テストへの影響範囲が不明確",
+      "description": "api-worktrees.test.tsの既存テストがgitStatusフィールドの追加で影響を受ける可能性がある。レスポンス検証テストの修正方針が設計書のテスト設計セクションに未記載。",
+      "current_state": "セクション9.2に api-worktrees.test.ts の修正言及あるが詳細なし",
+      "recommendation": "既存テストの互換性確認方針を明記: 1) gitStatusはオプショナルなので既存テストは基本的にパスするはず 2) gitStatus非存在のケースをカバーする新テスト追加",
+      "risk_level": "low",
+      "affected_files": [
+        "tests/integration/api-worktrees.test.ts",
+        "tests/integration/api-worktrees-cli-tool.test.ts"
+      ]
+    },
+    {
+      "id": "IMP-SF-002",
+      "priority": "Should Fix",
+      "category": "frontend",
+      "title": "WorktreeDetailRefactored.tsxへの統合点が未詳細",
+      "description": "1657行の大規模コンポーネントにBranchMismatchAlertを統合する具体的な挿入位置が設計書で不明確。DesktopHeaderと flex-1 div の間と記載されているが、コンポーネント階層の詳細が不足。",
+      "current_state": "セクション6.1に配置場所記載あり（Stage 2で改善済み）",
+      "recommendation": "WorktreeDetailRefactored.tsx内の具体的な行番号範囲（1379-1390行付近）を設計書に追記し、統合時の参照点を明確化",
+      "risk_level": "low",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ]
+    },
+    {
+      "id": "IMP-SF-003",
+      "priority": "Should Fix",
+      "category": "frontend",
+      "title": "MobileHeader.tsxの変更影響が未評価",
+      "description": "モバイルヘッダーへのブランチ表示追加時の既存レイアウトへの影響（スペース制約、テキスト切り捨て）が設計書に未記載。",
+      "current_state": "影響範囲テーブル（セクション10）にMobileHeader.tsx記載あるが変更詳細なし",
+      "recommendation": "MobileHeaderの既存レイアウト（worktreeName、repositoryName表示）との統合方針を追記。長いブランチ名のtruncate処理を明記。",
+      "risk_level": "low",
+      "affected_files": [
+        "src/components/mobile/MobileHeader.tsx"
+      ]
+    },
+    {
+      "id": "IMP-G-001",
+      "priority": "Good",
+      "category": "database",
+      "title": "後方互換性の適切な配慮",
+      "description": "initial_branchカラムがNULL許可で設計されており、既存データへの影響なし。GitStatusインターフェースも全フィールドオプショナルで後方互換性を維持。",
+      "current_state": "セクション3.2, 4.1で適切に設計済み",
+      "recommendation": "-",
+      "risk_level": "none",
+      "affected_files": []
+    },
+    {
+      "id": "IMP-G-002",
+      "priority": "Good",
+      "category": "api",
+      "title": "既存APIパターンへの準拠",
+      "description": "GET /api/worktrees/:idの既存スプレッドパターン（...worktree, isSessionRunning, etc.）にgitStatusを追加する形式で、既存クライアントへの影響を最小化。",
+      "current_state": "セクション5.1で既存パターン踏襲を明記済み（Stage 2で改善）",
+      "recommendation": "-",
+      "risk_level": "none",
+      "affected_files": []
+    },
+    {
+      "id": "IMP-I-001",
+      "priority": "Info",
+      "category": "deployment",
+      "title": "Feature flag要件の検討",
+      "description": "新機能の段階的ロールアウトにfeature flagを使用するかどうかが設計書に未記載。ブランチ警告は視覚的UIなので、問題発生時の即座無効化手段があると安全。",
+      "current_state": "記載なし",
+      "recommendation": "機能自体が低リスクで、gitStatusオプショナル設計により既に段階的導入可能なため、feature flagは必須ではないが、将来検討として記録。",
+      "risk_level": "none",
+      "affected_files": []
+    },
+    {
+      "id": "IMP-I-002",
+      "priority": "Info",
+      "category": "testing",
+      "title": "git-utils.tsのモック要件",
+      "description": "新規作成のgit-utils.tsはgitコマンドを実行するため、テスト時にはモック化が必要。execFileのモック戦略が設計書のテストセクションに記載されていない。",
+      "current_state": "セクション9.1でgit-utils.test.tsを記載するがモック戦略なし",
+      "recommendation": "child_process.execFileのモック方法（vitest.mock）をテスト設計に追記。タイムアウトテスト、エラーケーステストの具体例を含める。",
+      "risk_level": "low",
+      "affected_files": [
+        "tests/unit/git-utils.test.ts"
+      ]
+    }
+  ],
+  "impact_matrix": {
+    "database": {
+      "affected_tables": ["worktrees"],
+      "new_columns": ["initial_branch"],
+      "migration_required": true,
+      "migration_version": 15,
+      "rollback_complexity": "medium",
+      "data_migration": "none (NULL default)",
+      "backward_compatible": true,
+      "notes": "ALTER TABLE ADD COLUMNは非破壊的。既存データは影響なし。"
+    },
+    "api": {
+      "affected_endpoints": [
+        "GET /api/worktrees/:id",
+        "POST /api/worktrees/:id/send"
+      ],
+      "breaking_changes": false,
+      "new_response_fields": ["gitStatus"],
+      "response_size_increase": "~100-200 bytes per response",
+      "backward_compatible": true,
+      "notes": "gitStatusはオプショナルフィールドとして追加。既存クライアントは影響なし。"
+    },
+    "frontend": {
+      "affected_components": [
+        "WorktreeDetailRefactored.tsx",
+        "MobileHeader.tsx",
+        "BranchMismatchAlert.tsx (new)"
+      ],
+      "state_changes": ["dismissed state in BranchMismatchAlert"],
+      "render_impact": "minimal (conditional rendering)",
+      "bundle_size_increase": "~2-3KB (new component)",
+      "notes": "新規コンポーネント追加のみ。既存コンポーネントの変更は最小限。"
+    },
+    "testing": {
+      "new_test_files": [
+        "tests/unit/git-utils.test.ts",
+        "tests/unit/db-migrations.test.ts (append)",
+        "tests/unit/components/BranchMismatchAlert.test.tsx",
+        "tests/integration/api-worktrees-git-status.test.ts"
+      ],
+      "affected_existing_tests": [
+        "tests/unit/db.test.ts",
+        "tests/integration/api-worktrees.test.ts"
+      ],
+      "mock_requirements": ["child_process.execFile", "Database instance"],
+      "coverage_gaps": ["git command timeout scenarios", "detached HEAD handling"],
+      "notes": "既存テストはgitStatusオプショナルのため基本的にパスするはず。"
+    },
+    "deployment": {
+      "migration_order": "DB migration before code deployment",
+      "rollback_strategy": "1. Revert code 2. Run migration down()",
+      "feature_flag_required": false,
+      "zero_downtime": true,
+      "notes": "ADD COLUMNとオプショナルフィールド追加のため、ゼロダウンタイムデプロイ可能。"
+    }
+  },
+  "ripple_effects": [
+    {
+      "source": "Migration #15 (worktrees.initial_branch)",
+      "affected_areas": [
+        "db.ts (saveInitialBranch, getInitialBranch関数追加)",
+        "send/route.ts (初期ブランチ保存処理追加)",
+        "route.ts (gitStatus取得・返却処理追加)"
+      ],
+      "cascading_changes": "db.ts変更 -> route.ts変更 -> フロントエンド更新",
+      "risk_assessment": "低リスク - 追加のみで既存機能に影響なし"
+    },
+    {
+      "source": "GitStatus interface (models.ts)",
+      "affected_areas": [
+        "Worktree interface (gitStatus? オプショナルフィールド追加)",
+        "WorktreeDetailRefactored.tsx (gitStatus表示ロジック追加)",
+        "MobileHeader.tsx (ブランチ表示追加)"
+      ],
+      "cascading_changes": "型定義変更 -> API応答構造変更 -> UI更新",
+      "risk_assessment": "低リスク - オプショナルフィールドのため後方互換"
+    },
+    {
+      "source": "git-utils.ts (new file)",
+      "affected_areas": [
+        "route.ts (getGitStatus関数呼び出し)",
+        "テストファイル (モック必要)"
+      ],
+      "cascading_changes": "新規モジュール追加 -> API層から呼び出し",
+      "risk_assessment": "低リスク - 新規ファイルのため既存コード影響なし"
+    },
+    {
+      "source": "BranchMismatchAlert.tsx (new component)",
+      "affected_areas": [
+        "WorktreeDetailRefactored.tsx (コンポーネント統合)",
+        "DesktopHeader相当部分 (レイアウト変更)"
+      ],
+      "cascading_changes": "新規コンポーネント作成 -> 既存レイアウトに統合",
+      "risk_assessment": "低リスク - 追加のみ"
+    }
+  ],
+  "summary": {
+    "total_findings": 9,
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "good_count": 2,
+    "info_count": 1,
+    "overall_risk": "低",
+    "deployment_readiness": "要軽微修正",
+    "key_concerns": [
+      "Migration rollback手順の明記が必要",
+      "API応答サイズ増加の定量的評価が望ましい",
+      "テストモック戦略の詳細化が推奨"
+    ],
+    "strengths": [
+      "後方互換性への配慮が適切（NULL許可、オプショナルフィールド）",
+      "既存APIパターンへの準拠でクライアント影響最小化",
+      "ゼロダウンタイムデプロイ可能な設計"
+    ]
+  },
+  "overall_assessment": "設計書は影響範囲を適切に把握しており、後方互換性に十分配慮された設計となっている。Migration rollback手順の明記（IMP-MF-001）とAPI応答サイズ評価（IMP-MF-002）の2点を修正すれば、実装着手可能なレベル。全体的なリスクは低く、ゼロダウンタイムデプロイが可能な設計である。"
+}

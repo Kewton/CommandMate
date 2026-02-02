@@ -296,7 +296,7 @@ Type "delete" to confirm:`;
       </div>
 
       {/* Repository Filter */}
-      {repositories.length > 1 && (
+      {repositories.length > 0 && (
         <div className="flex gap-2 flex-wrap items-center">
           <Button
             variant={selectedRepository === null ? 'primary' : 'ghost'}

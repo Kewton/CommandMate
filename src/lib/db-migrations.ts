@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 /**
  * Migration definition
@@ -641,6 +641,83 @@ const migrations: Migration[] = [
       db.exec('DROP INDEX IF EXISTS idx_repositories_normalized_clone_url');
       db.exec('DROP TABLE IF EXISTS repositories');
       console.log('✓ Dropped repositories and clone_jobs tables');
+    }
+  },
+  {
+    version: 15,
+    name: 'add-initial-branch-column',
+    up: (db) => {
+      // Issue #111: Add initial_branch column to worktrees table
+      // Stores the branch name at session start for mismatch detection
+      db.exec(`
+        ALTER TABLE worktrees ADD COLUMN initial_branch TEXT;
+      `);
+
+      console.log('✓ Added initial_branch column to worktrees table');
+    },
+    down: (db) => {
+      // SQLite doesn't support DROP COLUMN directly
+      // Recreate table without initial_branch column
+      db.exec(`
+        -- 1. Create backup table without initial_branch
+        CREATE TABLE worktrees_backup AS
+        SELECT id, name, path, repository_path, repository_name, description,
+               last_user_message, last_user_message_at, last_message_summary,
+               favorite, status, link, cli_tool_id, updated_at, last_viewed_at
+        FROM worktrees;
+
+        -- 2. Drop original table
+        DROP TABLE worktrees;
+
+        -- 3. Recreate table without initial_branch
+        CREATE TABLE worktrees (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          path TEXT NOT NULL UNIQUE,
+          repository_path TEXT,
+          repository_name TEXT,
+          description TEXT,
+          last_user_message TEXT,
+          last_user_message_at INTEGER,
+          last_message_summary TEXT,
+          favorite INTEGER DEFAULT 0,
+          status TEXT DEFAULT NULL,
+          link TEXT DEFAULT NULL,
+          cli_tool_id TEXT DEFAULT 'claude',
+          updated_at INTEGER,
+          last_viewed_at TEXT
+        );
+
+        -- 4. Restore data
+        INSERT INTO worktrees (id, name, path, repository_path, repository_name,
+               description, last_user_message, last_user_message_at, last_message_summary,
+               favorite, status, link, cli_tool_id, updated_at, last_viewed_at)
+        SELECT id, name, path, repository_path, repository_name,
+               description, last_user_message, last_user_message_at, last_message_summary,
+               favorite, status, link, cli_tool_id, updated_at, last_viewed_at
+        FROM worktrees_backup;
+
+        -- 5. Drop backup
+        DROP TABLE worktrees_backup;
+
+        -- 6. Recreate indexes
+        CREATE INDEX IF NOT EXISTS idx_worktrees_updated_at
+        ON worktrees(updated_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_worktrees_repository
+        ON worktrees(repository_path);
+
+        CREATE INDEX IF NOT EXISTS idx_worktrees_favorite
+        ON worktrees(favorite DESC, updated_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_worktrees_status
+        ON worktrees(status);
+
+        CREATE INDEX IF NOT EXISTS idx_worktrees_cli_tool
+        ON worktrees(cli_tool_id);
+      `);
+
+      console.log('✓ Removed initial_branch column from worktrees table');
     }
   }
 ];

@@ -1,0 +1,270 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_date": "2026-02-02",
+  "issue_number": 111,
+  "design_doc_path": "dev-reports/design/issue-111-branch-visualization-design-policy.md",
+  "findings": [
+    {
+      "id": "CON-MF-001",
+      "priority": "Must Fix",
+      "category": "Implementation Pattern Mismatch",
+      "title": "worktrees.ts uses exec() instead of execFile() for git commands",
+      "description": "The design policy specifies using execFile() for security (Section 8.1), but existing worktrees.ts uses exec() via promisify. This creates inconsistency in the codebase.",
+      "evidence": {
+        "design_doc": "Section 8.1: 'execFile使用（シェル解釈なし）'",
+        "existing_code": "src/lib/worktrees.ts line 6: import { exec } from 'child_process'"
+      },
+      "impact": "Security inconsistency - exec() is susceptible to shell injection while execFile() is safer",
+      "recommendation": "Option A: Update design to use exec() for consistency with existing worktrees.ts pattern (lower risk since worktreePath comes from DB). Option B: Create git-utils.ts with execFile() and plan future migration of worktrees.ts. Document the discrepancy in Stage 1 Review's SF-1 note.",
+      "affected_files": [
+        "src/lib/git-utils.ts (new)",
+        "src/lib/worktrees.ts (existing pattern)"
+      ]
+    },
+    {
+      "id": "CON-MF-002",
+      "priority": "Must Fix",
+      "category": "Type Definition Inconsistency",
+      "title": "Worktree interface id type mismatch",
+      "description": "Design doc shows Worktree interface with 'id: number' (Section 5.1), but existing src/types/models.ts defines 'id: string'. This will cause type errors.",
+      "evidence": {
+        "design_doc": "Section 5.1 API response: 'id: number'",
+        "existing_code": "src/types/models.ts line 12: 'id: string'"
+      },
+      "impact": "Type compilation errors if design is followed as-is",
+      "recommendation": "Update design doc Section 5.1 to use 'id: string' to match existing codebase pattern",
+      "affected_files": [
+        "dev-reports/design/issue-111-branch-visualization-design-policy.md"
+      ]
+    },
+    {
+      "id": "CON-SF-001",
+      "priority": "Should Fix",
+      "category": "Migration Pattern",
+      "title": "Migration function naming pattern inconsistency",
+      "description": "Existing migrations are named with kebab-case descriptions (e.g., 'add-multi-repo-and-memo-support'), but the design doc doesn't specify a name for Migration #15.",
+      "evidence": {
+        "design_doc": "Section 3.2: Only shows version 15, no name specified",
+        "existing_code": "src/lib/db-migrations.ts: Each migration has a 'name' field"
+      },
+      "impact": "Minor - migration will work but name should follow conventions",
+      "recommendation": "Add migration name 'add-initial-branch-column' in design doc Section 3.1",
+      "affected_files": [
+        "dev-reports/design/issue-111-branch-visualization-design-policy.md"
+      ]
+    },
+    {
+      "id": "CON-SF-002",
+      "priority": "Should Fix",
+      "category": "DB Function Signature Pattern",
+      "title": "DB function signature inconsistency with codebase patterns",
+      "description": "Design doc Section 3.3 shows saveInitialBranch() taking worktreeId as second parameter, but some existing DB functions use different parameter ordering patterns.",
+      "evidence": {
+        "design_doc": "saveInitialBranch(db, worktreeId, branchName)",
+        "existing_code": "updateWorktreeDescription(db, worktreeId, description) - matches pattern; updateLastUserMessage(db, worktreeId, message, timestamp) - matches pattern"
+      },
+      "impact": "Low - the proposed signature matches existing patterns",
+      "recommendation": "No change needed - design matches existing codebase conventions",
+      "affected_files": []
+    },
+    {
+      "id": "CON-SF-003",
+      "priority": "Should Fix",
+      "category": "API Response Pattern",
+      "title": "GET /api/worktrees/:id response structure requires alignment",
+      "description": "Existing route.ts returns worktree data spread with session status fields. Design should clarify that gitStatus will be added to this existing spread pattern.",
+      "evidence": {
+        "design_doc": "Section 5.1 shows gitStatus as separate field in response",
+        "existing_code": "src/app/api/worktrees/[id]/route.ts line 109-118: return NextResponse.json({ ...worktree, isSessionRunning, isWaitingForResponse, isProcessing, sessionStatusByCli })"
+      },
+      "impact": "Medium - Implementation needs to preserve existing spread pattern",
+      "recommendation": "Design doc should explicitly show gitStatus being added to existing spread pattern: { ...worktree, gitStatus, isSessionRunning, ... }",
+      "affected_files": [
+        "dev-reports/design/issue-111-branch-visualization-design-policy.md"
+      ]
+    },
+    {
+      "id": "CON-SF-004",
+      "priority": "Should Fix",
+      "category": "Component Integration Pattern",
+      "title": "BranchMismatchAlert placement needs specific DOM location",
+      "description": "Design specifies 'DesktopHeader の下部' but doesn't specify the exact integration point in WorktreeDetailRefactored.tsx.",
+      "evidence": {
+        "design_doc": "Section 6.1: '配置場所: DesktopHeader の下部'",
+        "existing_code": "WorktreeDetailRefactored.tsx has DesktopHeader followed by WorktreeDesktopLayout (line 1381-1391)"
+      },
+      "impact": "Medium - Implementer needs guidance on exact insertion point",
+      "recommendation": "Specify that BranchMismatchAlert should be placed between DesktopHeader and the flex-1 div containing WorktreeDesktopLayout, similar to how the prompt panel is positioned",
+      "affected_files": [
+        "dev-reports/design/issue-111-branch-visualization-design-policy.md"
+      ]
+    },
+    {
+      "id": "CON-NTH-001",
+      "priority": "Nice to Have",
+      "category": "Import Pattern",
+      "title": "GitStatus import location should be specified",
+      "description": "Design shows GitStatus in models.ts but doesn't specify the import statement pattern for consumers.",
+      "evidence": {
+        "design_doc": "Section 4.1: GitStatus interface in models.ts",
+        "existing_code": "Other components import like: import type { Worktree, ChatMessage } from '@/types/models'"
+      },
+      "impact": "Low - developers will figure it out",
+      "recommendation": "Add note that GitStatus should be exported and imported same as Worktree: import type { Worktree, GitStatus } from '@/types/models'",
+      "affected_files": []
+    },
+    {
+      "id": "CON-NTH-002",
+      "priority": "Nice to Have",
+      "category": "Test File Naming",
+      "title": "Test file naming should follow existing patterns",
+      "description": "Design mentions test files but doesn't follow the existing test directory structure patterns.",
+      "evidence": {
+        "design_doc": "Section 9.1: 'tests/unit/git-utils.test.ts', 'tests/unit/components/BranchMismatchAlert.test.tsx'",
+        "existing_code": "Tests are in tests/unit/, tests/integration/ directories"
+      },
+      "impact": "Low - naming is acceptable",
+      "recommendation": "Verify test path is tests/unit/components/ for React components (may need to create this subdirectory)",
+      "affected_files": []
+    }
+  ],
+  "issue_requirements_consistency": {
+    "status": "Mostly Consistent",
+    "findings": [
+      {
+        "id": "REQ-001",
+        "status": "Consistent",
+        "requirement": "ワークツリー詳細画面のヘッダーに現在のgitブランチ名が表示される",
+        "design_coverage": "Section 6.1, 10 cover WorktreeDetailRefactored.tsx and MobileHeader.tsx integration"
+      },
+      {
+        "id": "REQ-002",
+        "status": "Consistent",
+        "requirement": "セッション開始時のブランチと現在のブランチが異なる場合、視覚的に警告が表示される",
+        "design_coverage": "Section 6.1 BranchMismatchAlert.tsx with isBranchMismatch flag"
+      },
+      {
+        "id": "REQ-003",
+        "status": "Consistent",
+        "requirement": "モバイル表示でもブランチ情報が確認できる",
+        "design_coverage": "Section 10 lists MobileHeader.tsx in affected files"
+      },
+      {
+        "id": "REQ-004",
+        "status": "Consistent",
+        "requirement": "ブランチ情報は定期的に更新される（アクティブ時: 2秒、アイドル時: 5秒）",
+        "design_coverage": "Uses existing polling mechanism via GET /api/worktrees/:id extension"
+      },
+      {
+        "id": "REQ-005",
+        "status": "Consistent",
+        "requirement": "DBマイグレーション（Migration #15）が正常に適用される",
+        "design_coverage": "Section 3.1-3.2 cover migration details"
+      },
+      {
+        "id": "REQ-006",
+        "status": "Consistent",
+        "requirement": "detached HEAD状態でも警告が不適切に表示されない",
+        "design_coverage": "Section 5.2 error handling table shows '(detached HEAD)' returns isBranchMismatch: false"
+      },
+      {
+        "id": "REQ-007",
+        "status": "Consistent",
+        "requirement": "gitコマンドタイムアウト時もアプリが正常に動作する",
+        "design_coverage": "Section 5.2-5.3 cover timeout handling with 1s limit and fallback to '(unknown)'"
+      },
+      {
+        "id": "REQ-008",
+        "status": "Consistent",
+        "requirement": "aheadBehindをスコープ外とする",
+        "design_coverage": "Section 1.3, 7.3 explicitly mark aheadBehind as out of scope"
+      }
+    ]
+  },
+  "internal_consistency": {
+    "status": "Consistent",
+    "findings": [
+      {
+        "id": "INT-001",
+        "status": "Consistent",
+        "sections": ["Section 3.3", "Section 5.1"],
+        "description": "saveInitialBranch function in db.ts aligns with initial_branch storage in send/route.ts"
+      },
+      {
+        "id": "INT-002",
+        "status": "Consistent",
+        "sections": ["Section 4.1", "Section 6.1"],
+        "description": "GitStatus interface fields match BranchMismatchAlertProps exactly"
+      },
+      {
+        "id": "INT-003",
+        "status": "Consistent",
+        "sections": ["Section 10", "Section 11"],
+        "description": "Affected files list matches implementation tasks"
+      }
+    ]
+  },
+  "naming_convention_check": {
+    "status": "Mostly Consistent",
+    "findings": [
+      {
+        "item": "GitStatus interface",
+        "convention": "PascalCase for interfaces",
+        "status": "OK"
+      },
+      {
+        "item": "BranchMismatchAlert component",
+        "convention": "PascalCase for components",
+        "status": "OK"
+      },
+      {
+        "item": "initial_branch column",
+        "convention": "snake_case for DB columns",
+        "status": "OK"
+      },
+      {
+        "item": "saveInitialBranch function",
+        "convention": "camelCase for functions",
+        "status": "OK"
+      },
+      {
+        "item": "isBranchMismatch field",
+        "convention": "camelCase for TS properties",
+        "status": "OK"
+      },
+      {
+        "item": "git-utils.ts filename",
+        "convention": "kebab-case for lib files",
+        "status": "OK"
+      }
+    ]
+  },
+  "file_structure_check": {
+    "status": "Consistent",
+    "findings": [
+      {
+        "file": "src/lib/git-utils.ts",
+        "convention": "New utility in lib folder",
+        "status": "OK - follows pattern of worktrees.ts, tmux.ts"
+      },
+      {
+        "file": "src/components/worktree/BranchMismatchAlert.tsx",
+        "convention": "Worktree-specific component",
+        "status": "OK - follows pattern of other worktree components"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 10,
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "requirements_coverage": "8/8 requirements covered",
+    "internal_consistency": "No contradictions found",
+    "naming_conventions": "All naming follows project conventions",
+    "file_structure": "Proposed structure aligns with codebase patterns"
+  },
+  "overall_assessment": "The design document is mostly consistent with the codebase and Issue #111 requirements. Two Must Fix items require attention: (1) Clarify exec vs execFile usage for git commands - recommend documenting this as a known discrepancy since existing worktrees.ts uses exec() and path comes from trusted DB source; (2) Fix the Worktree id type from number to string in the design doc examples. Four Should Fix items address minor integration details that will help implementers. The design thoroughly covers all acceptance criteria from Issue #111 and internal consistency is good with no contradictions between sections."
+}

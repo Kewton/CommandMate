@@ -43,9 +43,11 @@ import { ToastContainer, useToast } from '@/components/common/Toast';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
+import { truncateString } from '@/lib/utils';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
-import type { Worktree, ChatMessage, PromptData } from '@/types/models';
+import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
+import type { Worktree, ChatMessage, PromptData, GitStatus } from '@/types/models';
 
 // ============================================================================
 // Types
@@ -146,6 +148,7 @@ interface DesktopHeaderProps {
   repositoryName: string;
   description?: string;
   status: WorktreeStatus;
+  gitStatus?: GitStatus;
   onBackClick: () => void;
   onInfoClick: () => void;
   onMenuClick: () => void;
@@ -159,16 +162,19 @@ const DesktopHeader = memo(function DesktopHeader({
   repositoryName,
   description: worktreeDescription,
   status,
+  gitStatus,
   onBackClick,
   onInfoClick,
   onMenuClick,
 }: DesktopHeaderProps) {
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
-  // Truncate description to 50 characters
+  // Issue #111: DRY - Use shared truncateString utility
+  const DESKTOP_BRANCH_MAX_LENGTH = 30;
+  const DESCRIPTION_MAX_LENGTH = 50;
+
+  // Truncate description using shared utility
   const truncatedDescription = worktreeDescription
-    ? worktreeDescription.length > 50
-      ? `${worktreeDescription.substring(0, 50)}...`
-      : worktreeDescription
+    ? truncateString(worktreeDescription, DESCRIPTION_MAX_LENGTH)
     : null;
 
   return (
@@ -252,9 +258,26 @@ const DesktopHeader = memo(function DesktopHeader({
               </span>
             )}
           </div>
-          <span className="text-xs text-gray-500 truncate max-w-md">
-            {repositoryName}
-          </span>
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <span className="truncate max-w-[200px]">
+              {repositoryName}
+            </span>
+            {gitStatus && gitStatus.currentBranch !== '(unknown)' && (
+              <>
+                <span className="text-gray-300">/</span>
+                <span
+                  className="truncate max-w-[150px] font-mono"
+                  title={gitStatus.currentBranch}
+                  data-testid="desktop-branch-name"
+                >
+                  {truncateString(gitStatus.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
+                </span>
+                {gitStatus.isDirty && (
+                  <span className="text-amber-500" title="Uncommitted changes">*</span>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1383,10 +1406,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             repositoryName={worktree?.repositoryName ?? 'Unknown'}
             description={worktree?.description}
             status={worktreeStatus}
+            gitStatus={worktree?.gitStatus}
             onBackClick={handleBackClick}
             onInfoClick={handleInfoClick}
             onMenuClick={toggle}
           />
+          {/* Issue #111: Branch mismatch warning */}
+          {worktree?.gitStatus && (
+            <BranchMismatchAlert
+              isBranchMismatch={worktree.gitStatus.isBranchMismatch}
+              currentBranch={worktree.gitStatus.currentBranch}
+              initialBranch={worktree.gitStatus.initialBranch}
+            />
+          )}
           <div className="flex-1 min-h-0">
             <WorktreeDesktopLayout
               leftPane={
@@ -1545,9 +1577,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           worktreeName={worktreeName}
           repositoryName={worktree?.repositoryName}
           status={worktreeStatus}
+          gitStatus={worktree?.gitStatus}
           onBackClick={handleBackClick}
           onMenuClick={openMobileDrawer}
         />
+
+        {/* Issue #111: Branch mismatch warning (Mobile) */}
+        {worktree?.gitStatus && worktree.gitStatus.isBranchMismatch && (
+          <div className="fixed top-14 inset-x-0 z-35">
+            <BranchMismatchAlert
+              isBranchMismatch={worktree.gitStatus.isBranchMismatch}
+              currentBranch={worktree.gitStatus.currentBranch}
+              initialBranch={worktree.gitStatus.initialBranch}
+            />
+          </div>
+        )}
 
         <div className="fixed top-14 inset-x-0 z-30">
           <AutoYesToggle

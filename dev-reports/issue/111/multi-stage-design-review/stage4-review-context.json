@@ -1,0 +1,8 @@
+{
+  "issue_number": 111,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-111-branch-visualization-design-policy.md",
+  "previous_stages": ["stage1", "stage2", "stage3"]
+}

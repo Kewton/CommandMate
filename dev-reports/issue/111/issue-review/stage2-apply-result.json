@@ -1,0 +1,112 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-02",
+  "issue_number": 111,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/111",
+  "iteration": 1,
+  "applied_items": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "description": "DBスキーマ拡張（Migration #15）を実装タスクに追加",
+        "changes": [
+          "技術要件セクションに「DBスキーマ拡張（Migration #15）」サブセクションを追加",
+          "worktreesテーブルへのinitial_branchカラム追加を明記",
+          "セッション開始時（tmux session作成時）の保存タイミングを明確化",
+          "実装タスクにTask 1としてDBマイグレーションを追加",
+          "影響範囲にsrc/lib/db-migrations.tsを追加"
+        ]
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "description": "API設計方針を明確化（既存 GET /api/worktrees/:id を拡張）",
+        "changes": [
+          "技術要件セクションの「API拡張」を「API拡張方針」に改名し、方針を明確化",
+          "新規エンドポイントではなく既存APIを拡張する理由を記載",
+          "gitStatusフィールドを既存レスポンスに追加する形式に変更",
+          "実装タスクのTask 4を「API拡張 - GET /api/worktrees/:id にgitStatusフィールドを追加」に更新"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "description": "ポーリング間隔を具体化",
+        "changes": [
+          "受け入れ条件を「アクティブ時: 2秒、アイドル時: 5秒 - 既存のポーリング間隔に準拠」に更新"
+        ]
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "description": "BranchMismatchAlert の詳細設計を追加",
+        "changes": [
+          "影響範囲セクションに「BranchMismatchAlert.tsx 詳細設計」テーブルを追加",
+          "表示条件、配置場所、スタイル、アニメーション、閉じるボタン、再表示条件を明記",
+          "実装タスクのTask 5を「BranchMismatchAlert.tsx 作成（表示条件・配置・スタイル実装）」に更新"
+        ]
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "description": "aheadBehind をスコープ外として明記",
+        "changes": [
+          "API拡張方針セクションにaheadBehindがスコープ外である理由を追記",
+          "gitStatusインターフェースからaheadBehindフィールドを削除",
+          "備考セクションに「別Issueで対応予定」を追記"
+        ]
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "description": "セッション開始時のブランチ保存タイミングを明確化",
+        "changes": [
+          "DBスキーマ拡張セクションに「保存タイミング：POST /api/sessions エンドポイント内」を明記",
+          "バックエンドセクションの記載を更新",
+          "影響範囲にsrc/app/api/sessions/route.tsを追加",
+          "実装タスクにTask 3として「セッション開始時に initial_branch を保存する処理追加」を追加"
+        ]
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "not_applied",
+        "reason": "スコープ外（Nice to Have項目は今回の反映対象外）"
+      },
+      {
+        "id": "NTH-2",
+        "status": "not_applied",
+        "reason": "スコープ外（Nice to Have項目は今回の反映対象外）"
+      }
+    ]
+  },
+  "summary": {
+    "total_applied": 6,
+    "must_fix_applied": 2,
+    "should_fix_applied": 4,
+    "nice_to_have_applied": 0,
+    "skipped": 2
+  },
+  "issue_changes": {
+    "sections_added": [
+      "技術要件 > DBスキーマ拡張（Migration #15）",
+      "影響範囲 > BranchMismatchAlert.tsx 詳細設計",
+      "Review History"
+    ],
+    "sections_modified": [
+      "技術要件 > API拡張方針（旧：API拡張）",
+      "技術要件 > バックエンド",
+      "影響範囲",
+      "受け入れ条件",
+      "実装タスク",
+      "備考"
+    ],
+    "tasks_reordered": true,
+    "new_task_count": 7
+  }
+}

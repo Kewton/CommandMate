@@ -1,0 +1,166 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-02",
+  "issue_number": 111,
+  "focus_area": "通常",
+  "iteration": 2,
+  "previous_findings_status": {
+    "addressed": [
+      {
+        "id": "Stage1-MF-1",
+        "original_issue": "DBスキーマ拡張（Migration #15）が実装タスクに明記されていない",
+        "status": "addressed",
+        "evidence": "「DBスキーマ拡張（Migration #15）」セクションが追加され、initial_branchカラム追加のSQL文と保存タイミングが明確に記載されている"
+      },
+      {
+        "id": "Stage1-MF-2",
+        "original_issue": "新規APIエンドポイントと既存APIの役割分担が不明確",
+        "status": "addressed",
+        "evidence": "「API拡張方針」セクションで「既存の GET /api/worktrees/:id を拡張（推奨方針）」と明確化されている"
+      },
+      {
+        "id": "Stage1-SF-1",
+        "original_issue": "ポーリング間隔が具体的でない",
+        "status": "addressed",
+        "evidence": "受け入れ条件に「アクティブ時: 2秒、アイドル時: 5秒 - 既存のポーリング間隔に準拠」と明記されている"
+      },
+      {
+        "id": "Stage1-SF-2",
+        "original_issue": "BranchMismatchAlert.tsxの詳細設計が不足",
+        "status": "addressed",
+        "evidence": "「BranchMismatchAlert.tsx 詳細設計」テーブルが追加され、表示条件・配置場所・スタイル・アニメーション・閉じるボタン・再表示条件・状態管理が明記されている"
+      },
+      {
+        "id": "Stage1-SF-3",
+        "original_issue": "aheadBehindフィールドのスコープが不明確",
+        "status": "addressed",
+        "evidence": "「注意」セクションで「aheadBehind フィールド（リモートブランチとの差分）はスコープ外とする」と明記されている"
+      },
+      {
+        "id": "Stage1-SF-4",
+        "original_issue": "セッション開始時のブランチ保存タイミングが不明確",
+        "status": "addressed",
+        "evidence": "「保存タイミング：send/route.ts 内の startSession() 呼び出し直後」と明記されている"
+      },
+      {
+        "id": "Stage3-MF-1",
+        "original_issue": "初期ブランチ保存タイミングが実際のコードと不整合",
+        "status": "addressed",
+        "evidence": "Stage4で「POST /api/sessions」から「send/route.ts 内の startSession() 呼び出し直後」に修正された"
+      },
+      {
+        "id": "Stage3-MF-2",
+        "original_issue": "detached HEAD/gitコマンド失敗時の挙動が未定義",
+        "status": "addressed",
+        "evidence": "「git コマンドエラーハンドリング」セクションが追加され、各状態でのcurrentBranch値とisBranchMismatchフラグの動作が表形式で定義されている"
+      },
+      {
+        "id": "Stage3-SF-1",
+        "original_issue": "gitコマンド実行のパフォーマンス対策が未評価",
+        "status": "addressed",
+        "evidence": "「パフォーマンス対策」セクションが追加され、1秒タイムアウト・キャッシュ値返却・想定オーバーヘッドが明記されている"
+      },
+      {
+        "id": "Stage3-SF-2",
+        "original_issue": "アラート再表示条件が不明確",
+        "status": "addressed",
+        "evidence": "BranchMismatchAlert.tsx詳細設計の「再表示条件」と「状態管理」が拡張され、previousBranch state管理方式が明記されている"
+      },
+      {
+        "id": "Stage3-SF-3",
+        "original_issue": "gitStatusフィールドが必須だと既存コンポーネントに影響",
+        "status": "addressed",
+        "evidence": "「gitStatus?」としてオプショナルフィールドに変更され、後方互換性維持の説明が追加されている"
+      },
+      {
+        "id": "Stage3-SF-4",
+        "original_issue": "テストへの影響範囲が広い",
+        "status": "addressed",
+        "evidence": "「テストへの影響と対応」セクションが追加され、影響を受ける既存テスト3件と新規テスト4件が表形式で記載されている"
+      }
+    ],
+    "partially_addressed": [],
+    "not_addressed": []
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "整合性",
+        "issue": "CURRENT_SCHEMA_VERSION が14で、Migration #15が必要と記載されているが、db-migrations.tsの実装時にバージョン番号を正しく更新する必要がある",
+        "location": "## 技術要件 > DBスキーマ拡張（Migration #15）",
+        "recommendation": "実装時にCURRENT_SCHEMA_VERSIONを15に更新し、migrationsの配列に新規マイグレーションを追加することを確認する注記を追加することを検討",
+        "evidence": "src/lib/db-migrations.ts: export const CURRENT_SCHEMA_VERSION = 14; 現在のマイグレーションは14まで定義済み"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "Worktree型へのgitStatus追加の具体的な型定義が記載されていない",
+        "location": "## 技術要件 > API拡張方針",
+        "recommendation": "GitStatus interfaceの定義を明示的にissueに追加することを検討。例: interface GitStatus { currentBranch: string; initialBranch: string | null; isBranchMismatch: boolean; commitHash: string; isDirty: boolean; }",
+        "evidence": "API拡張方針セクションではWorktreeResponseに含まれるgitStatusの構造は記載されているが、独立したGitStatus interface定義としての記載がない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "commitHashとisDirtyの取得コマンドが未記載",
+        "location": "## 技術要件 > バックエンド",
+        "recommendation": "commitHash取得は git rev-parse --short HEAD、isDirty判定は git status --porcelain を使用することを明記",
+        "evidence": "バックエンドセクションでは currentBranch 取得の git rev-parse --abbrev-ref HEAD のみ記載されている"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "モバイル表示でのブランチ情報表示の具体的なレイアウトが未記載",
+        "location": "## 影響範囲 > MobileHeader.tsx",
+        "recommendation": "モバイルヘッダーでのブランチ情報表示位置（ワークツリー名の下など）とスタイル（フォントサイズ、省略表示など）を明記することを検討",
+        "evidence": "MobileHeader.tsxへの「ブランチ情報表示追加（省スペース版）」とのみ記載"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "initialBranch保存後のDBレコード更新方法が未記載",
+        "location": "## 技術要件 > DBスキーマ拡張（Migration #15）",
+        "recommendation": "src/lib/db.tsに追加する関数名（例: saveInitialBranch(db, worktreeId, branchName)）を明記することを検討",
+        "evidence": "影響範囲で「初期ブランチ名の保存・取得関数追加」と記載されているが、具体的な関数シグネチャは未定義"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/db-migrations.ts",
+      "relevance": "Migration #15追加先。現在CURRENT_SCHEMA_VERSION=14"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "Worktree型定義の拡張先。GitStatus interfaceを追加予定"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "relevance": "startSession()呼び出し後のinitialBranch保存処理追加先。L97-107周辺"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "ブランチ表示UI統合先。ACTIVE_POLLING_INTERVAL_MS=2000, IDLE_POLLING_INTERVAL_MS=5000が既に定義済み"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト技術スタック確認。TypeScript + Next.js 14 + SQLite (better-sqlite3)"
+    }
+  ],
+  "quality_score": {
+    "consistency": 5,
+    "correctness": 5,
+    "clarity": 4,
+    "completeness": 4,
+    "testability": 5,
+    "overall": 4.6
+  },
+  "summary": "Stage 1-4で指摘された全12件（Must Fix 4件、Should Fix 8件）は全て適切に対応されており、Issueの品質は大幅に向上している。現時点では重大な問題（Must Fix）は発見されなかった。Should Fix 2件（マイグレーションバージョン番号の確認注記、GitStatus型定義の明示化）と Nice to Have 3件（commitHash/isDirty取得コマンド、モバイルレイアウト詳細、DB関数シグネチャ）を新たに発見。全体的に実装可能な完成度の高いIssueであり、実装フェーズへの移行を推奨する。品質スコア: 4.6/5"
+}

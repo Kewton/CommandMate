@@ -1,0 +1,117 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-02",
+  "issue_number": 111,
+  "focus_area": "通常",
+  "iteration": 1,
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "提案されているGitStatusResponseインターフェースのinitialBranchフィールドが、既存のWorktree型にはセッション開始時のブランチ名を保存するフィールドが存在しないため、DB拡張が必要",
+        "location": "## 技術要件 > API拡張 セクション",
+        "recommendation": "worktreesテーブルにinitial_branchカラムを追加するDBマイグレーション（Migration #15）が必要であることを実装タスクに明記してください。セッション開始時にgit rev-parse --abbrev-ref HEADを実行し、initial_branchカラムに保存する処理を追加する必要があります。",
+        "evidence": "src/lib/db.ts および src/types/models.ts のWorktree型にはブランチ関連のフィールドが存在しない。Issueでは「セッション開始時のブランチ名をDBまたはメモリに保存」と記載されているが、具体的な保存先（DB vs メモリ）と永続化方針が不明確。"
+      },
+      {
+        "id": "MF-2",
+        "category": "技術的妥当性",
+        "issue": "新規APIエンドポイント /api/worktrees/:id/git-status の提案があるが、既存の GET /api/worktrees/:id で既にセッションステータスを返却しており、新規エンドポイントの必要性と既存APIとの役割分担が不明確",
+        "location": "## 技術要件 > API拡張 セクション",
+        "recommendation": "実装方針を以下のいずれかに明確化してください：(1) 既存の GET /api/worktrees/:id を拡張してgitStatusフィールドを追加（推奨：既存のポーリング処理を変更せずに済む）、(2) 新規エンドポイント /api/worktrees/:id/git-status を追加（フロントエンドで追加のAPI呼び出しが必要）。推奨は(1)です。",
+        "evidence": "src/app/api/worktrees/[id]/route.ts のGETハンドラは既に isSessionRunning, isWaitingForResponse, isProcessing, sessionStatusByCli を返却している。WorktreeDetailRefactored.tsx はこのAPIを定期的にポーリングしている。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "受け入れ条件「ブランチ情報は定期的に更新される（ポーリング間隔に合わせて）」が具体的でない",
+        "location": "## 受け入れ条件 セクション",
+        "recommendation": "現在のポーリング間隔（アクティブ時: 2秒、アイドル時: 5秒）を明記し、ブランチ情報取得がこの間隔で行われることを確認してください。または、ブランチ変更検出に別の間隔が望ましい場合はその理由を記載してください。",
+        "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx で ACTIVE_POLLING_INTERVAL_MS = 2000, IDLE_POLLING_INTERVAL_MS = 5000 が定義されている"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "影響範囲に記載されているBranchMismatchAlert.tsxの新規コンポーネントについて、どのような条件で表示するか、どこに配置するかの詳細が不足",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "BranchMismatchAlert.tsxの表示条件（isBranchMismatch === true の場合）、配置場所（DesktopHeaderの下部またはヘッダー内）、スタイル（警告色、アイコン、アニメーション有無）を明確化してください。また、ユーザーがアラートを閉じられるかどうかも検討してください。",
+        "evidence": "Issue本文では「ヘッダー部分に警告アイコン/バッジを表示」「ブランチ名を強調表示（例：赤色、点滅）」と記載されているが、具体的な実装詳細が不足"
+      },
+      {
+        "id": "SF-3",
+        "category": "技術的妥当性",
+        "issue": "aheadBehindフィールドがオプションとして記載されているが、リモートブランチとの比較には git fetch が必要でパフォーマンスに影響する可能性がある",
+        "location": "## 技術要件 > API拡張 セクション",
+        "recommendation": "aheadBehindフィールドはスコープ外として本Issueからは除外し、別Issueで対応することを推奨します。または、キャッシュ戦略（例: 5分間隔でのみ更新）を明記してください。",
+        "evidence": "git fetch はネットワーク通信を伴うため、2秒間隔のポーリングで毎回実行するとパフォーマンス問題を引き起こす可能性がある"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "セッション開始時のブランチ保存タイミングが不明確",
+        "location": "## 技術要件 > バックエンド セクション",
+        "recommendation": "セッション開始（tmux session作成）時にinitialBranchを保存するか、既存セッションがない場合の初回API呼び出し時に保存するかを明確化してください。推奨は前者（セッション作成時）です。関連するstart-sessionエンドポイントまたはセッション開始処理での保存を実装タスクに追加してください。",
+        "evidence": "現在のセッション開始フローにはブランチ保存処理が存在しない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "エラーハンドリングの記載がない",
+        "location": "## 技術要件 セクション",
+        "recommendation": "git rev-parse コマンドが失敗した場合（例: .git が存在しない、detached HEAD 状態）のエラーハンドリング方針を追加することを検討してください。",
+        "evidence": "git rev-parse --abbrev-ref HEAD は detached HEAD 状態では 'HEAD' を返す"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "テスト戦略の詳細が不足",
+        "location": "## 実装タスク > Task 5 セクション",
+        "recommendation": "具体的なテストケース例を追加することを検討してください：(1) ブランチが変更されていない場合の正常表示、(2) ブランチが変更された場合の警告表示、(3) git コマンド失敗時のエラーハンドリング、(4) モバイル表示での表示確認",
+        "evidence": "Task 5 は「ユニットテスト・結合テスト追加」とのみ記載"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/types/models.ts",
+      "relevance": "Worktree型定義 - gitStatus関連フィールド追加が必要"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "UI統合先 - DesktopHeader, MobileHeader への表示追加"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "relevance": "API拡張先 - git status情報の取得・返却"
+    },
+    {
+      "file": "src/components/mobile/MobileHeader.tsx",
+      "relevance": "モバイル用ブランチ表示追加先"
+    },
+    {
+      "file": "src/lib/db.ts",
+      "relevance": "DB操作 - initialBranch保存関数追加が必要"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "relevance": "DBマイグレーション - Migration #15 追加が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト概要・技術スタック確認"
+    }
+  ]
+}

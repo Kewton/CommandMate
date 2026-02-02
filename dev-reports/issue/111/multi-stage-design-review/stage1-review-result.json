@@ -1,0 +1,162 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "review_date": "2026-02-02",
+  "design_doc_path": "dev-reports/design/issue-111-branch-visualization-design-policy.md",
+  "findings": [
+    {
+      "id": "SF-1",
+      "severity": "Should Fix",
+      "category": "DRY",
+      "title": "tmux.tsがexecを使用しているのに対しgit-utils.tsではexecFileを使用する矛盾",
+      "description": "設計書ではgit-utils.tsでセキュリティのためexecFileを使用すると記載されているが、既存のtmux.tsはexec (シェル解釈あり) を使用している。コードベース内でコマンド実行方式が統一されていない。tmux.tsの引数はエスケープされているが、execFileの方がより安全である。",
+      "recommendation": "新規作成のgit-utils.tsではexecFileを使用するのは正しい選択。将来的にtmux.tsもexecFileへの移行を検討すべきだが、Issue #111のスコープ外として別Issueで対応を推奨。",
+      "affected_files": [
+        "src/lib/git-utils.ts (新規)",
+        "src/lib/tmux.ts (既存)"
+      ]
+    },
+    {
+      "id": "SF-2",
+      "severity": "Should Fix",
+      "category": "SRP",
+      "title": "send/route.tsの責務過多",
+      "description": "設計書では send/route.ts 内でセッション開始後に initial_branch をDBに保存すると記載されているが、send/route.ts は既に多くの責務を持っている (バリデーション、セッション管理、メッセージ保存、ポーリング開始)。ブランチ情報の保存という新しい責務を追加すると SRP 違反が深刻化する。",
+      "recommendation": "initial_branch の保存ロジックは専用の関数 (例: saveInitialBranch) として src/lib/db.ts または新規の src/lib/session-manager.ts に切り出し、send/route.ts からは関数呼び出しのみを行うようにする。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/send/route.ts"
+      ]
+    },
+    {
+      "id": "SF-3",
+      "severity": "Should Fix",
+      "category": "OCP",
+      "title": "GitStatus interfaceの拡張性に関する考慮不足",
+      "description": "設計書のセクション7.1ではOCP適用として 'GitStatus interfaceで拡張可能' と記載されているが、aheadBehind フィールドなど将来の拡張を明示的にコメントで記載すべき。また、現在のGitStatus interfaceは全フィールドがrequiredで、将来フィールド追加時に後方互換性の問題が発生する可能性がある。",
+      "recommendation": "GitStatus interface に JSDoc で将来の拡張候補を記載し、新規追加フィールドは全てオプショナル (?) とするポリシーを設計書に明記する。",
+      "affected_files": [
+        "src/types/models.ts"
+      ]
+    },
+    {
+      "id": "NTH-1",
+      "severity": "Nice to Have",
+      "category": "DRY",
+      "title": "エラーハンドリングパターンの統一",
+      "description": "設計書ではセクション7.4で 'エラーハンドリングパターンを統一' と記載されているが、具体的なパターン (エラーの型、ログ出力形式、レスポンス形式) が明確でない。既存コードでは getErrorMessage 関数が send/route.ts で定義されているが、src/cli/types/index.ts にも同様の関数がある。",
+      "recommendation": "共通のエラーハンドリングユーティリティを src/lib/error-utils.ts として抽出し、git-utils.ts で使用することを推奨。設計書にエラーレスポンスの統一形式を追記する。",
+      "affected_files": [
+        "src/lib/git-utils.ts (新規)",
+        "src/app/api/worktrees/[id]/send/route.ts",
+        "src/cli/types/index.ts"
+      ]
+    },
+    {
+      "id": "NTH-2",
+      "severity": "Nice to Have",
+      "category": "ISP",
+      "title": "BranchMismatchAlert の props interface が最小限に設計されていない",
+      "description": "設計書ではBranchMismatchAlert.tsxの設計が示されているが、コンポーネントが受け取るprops interfaceが明示されていない。gitStatus全体を渡すよりも、必要なフィールド (isBranchMismatch, currentBranch, initialBranch) のみを props として受け取る設計の方がISP原則に準拠する。",
+      "recommendation": "BranchMismatchAlertProps interface を設計書に追記し、gitStatus オブジェクト全体ではなく必要なプロパティのみを受け取るよう設計を明確化する。",
+      "affected_files": [
+        "src/components/worktree/BranchMismatchAlert.tsx (新規)"
+      ]
+    },
+    {
+      "id": "NTH-3",
+      "severity": "Nice to Have",
+      "category": "DIP",
+      "title": "git-utils.ts の依存性注入サポート",
+      "description": "設計書ではDIP適用として 'git操作を抽象化 (git-utils.ts)' と記載されているが、テスト時のモック化を容易にするための依存性注入パターンが考慮されていない。execFile を直接呼び出すと単体テストが困難になる。",
+      "recommendation": "git-utils.ts に execCommand のようなインターフェースを導入し、テスト時にモック可能な設計にする。または、テスト時は環境変数やファイルシステムの状態で動作を切り替えられるようにする。",
+      "affected_files": [
+        "src/lib/git-utils.ts (新規)"
+      ]
+    },
+    {
+      "id": "MF-1",
+      "severity": "Must Fix",
+      "category": "SOLID (DIP)",
+      "title": "API層がgitコマンド実行を直接依存している",
+      "description": "設計書のセクション5.1では GET /api/worktrees/:id 内でgitコマンドを実行すると記載されているが、これはAPI層が低レベルのgitコマンド実行に直接依存することになり、DIPに違反する。API層はビジネスロジック層 (lib) を通じてgit情報を取得すべきである。",
+      "recommendation": "src/lib/git-utils.ts に getGitStatus(worktreePath: string): Promise<GitStatus> 関数を実装し、route.ts からはこの関数を呼び出すだけにする。git コマンドの実行詳細はlib層にカプセル化する。設計書のセクション5にこの依存関係を明記する。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/lib/git-utils.ts (新規)"
+      ]
+    },
+    {
+      "id": "MF-2",
+      "severity": "Must Fix",
+      "category": "KISS",
+      "title": "BranchMismatchAlertの状態管理が複雑",
+      "description": "設計書セクション6.2の状態管理ロジック (previousBranch, dismissed, showAlert の条件式) は複雑で、特に previousBranch === null || previousBranch !== gitStatus.currentBranch の条件は直感的でない。KISS原則に違反している。",
+      "recommendation": "状態管理を簡素化する。dismissed フラグと currentBranch のみで制御し、currentBranch が変わったら dismissed を自動リセットする useEffect を使用するシンプルな実装を推奨。設計書のセクション6.2を以下のように簡素化: const [dismissed, setDismissed] = useState(false); useEffect(() => setDismissed(false), [gitStatus?.currentBranch]);",
+      "affected_files": [
+        "src/components/worktree/BranchMismatchAlert.tsx (新規)"
+      ]
+    }
+  ],
+  "summary": {
+    "total_findings": 8,
+    "must_fix": 2,
+    "should_fix": 3,
+    "nice_to_have": 3
+  },
+  "checklist": {
+    "SOLID": {
+      "SRP": {
+        "status": "partial",
+        "notes": "send/route.tsへの責務追加でSRP違反のリスクあり (SF-2)"
+      },
+      "OCP": {
+        "status": "pass",
+        "notes": "GitStatus interfaceによる拡張性は確保されている (NTH追加で改善可能)"
+      },
+      "LSP": {
+        "status": "pass",
+        "notes": "Worktree interfaceのgitStatusオプショナル化で後方互換性維持"
+      },
+      "ISP": {
+        "status": "partial",
+        "notes": "BranchMismatchAlert の props 設計が不明確 (NTH-2)"
+      },
+      "DIP": {
+        "status": "fail",
+        "notes": "API層がgitコマンド実行に直接依存 (MF-1)"
+      }
+    },
+    "KISS": {
+      "status": "partial",
+      "notes": "状態管理ロジックの複雑さ (MF-2)"
+    },
+    "YAGNI": {
+      "status": "pass",
+      "notes": "aheadBehindをスコープ外とする判断は適切"
+    },
+    "DRY": {
+      "status": "partial",
+      "notes": "エラーハンドリング、コマンド実行方式の不統一 (SF-1, NTH-1)"
+    }
+  },
+  "codebase_consistency": {
+    "models_ts": {
+      "status": "compatible",
+      "notes": "GitStatus interfaceは既存パターンに準拠。Worktree拡張もオプショナルフィールド追加で後方互換"
+    },
+    "db_migrations_ts": {
+      "status": "compatible",
+      "notes": "Migration #15はMigration #1-14の既存パターンに従っている。CURRENT_SCHEMA_VERSION更新も正しい"
+    },
+    "api_route_ts": {
+      "status": "compatible",
+      "notes": "GET /api/worktrees/:id の拡張パターンは既存のsessionStatusByCli追加パターンに一致"
+    },
+    "claude_md": {
+      "status": "requires_update",
+      "notes": "git-utils.tsを主要機能モジュールセクションに追加が必要"
+    }
+  },
+  "overall_assessment": "Issue #111の設計方針書は全体として良好な品質であり、YAGNI原則の適用（aheadBehindのスコープ除外）とLSP原則の適用（gitStatusオプショナル化）は特に評価できる。しかし、2点のMust Fix項目（API層のDIP違反、状態管理の複雑さ）は実装前に修正が必要である。特にMF-1のDIP違反は、git-utils.tsにgetGitStatus関数を用意しroute.tsから呼び出す形に設計を修正すべき。Should Fix項目の対応により、コードベースの保守性と拡張性が向上する。既存コードベースとの整合性は概ね取れており、Migration、型定義、APIパターンは既存の慣習に従っている。"
+}

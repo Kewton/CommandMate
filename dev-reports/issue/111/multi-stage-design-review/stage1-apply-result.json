@@ -1,0 +1,59 @@
+{
+  "stage": 1,
+  "stage_name": "指摘事項対応",
+  "applied_date": "2026-02-02",
+  "applied_items": [
+    {
+      "id": "MF-1",
+      "severity": "Must Fix",
+      "status": "completed",
+      "action": "セクション5.1にレイヤー間依存関係図とgit-utils.ts APIを追加。route.tsからgetGitStatus()を呼び出すだけにする設計を明記"
+    },
+    {
+      "id": "MF-2",
+      "severity": "Must Fix",
+      "status": "completed",
+      "action": "セクション6.2の状態管理ロジックを簡素化。previousBranchを削除し、useEffectでdismissedをリセットするシンプルな設計に変更"
+    },
+    {
+      "id": "SF-1",
+      "severity": "Should Fix",
+      "status": "noted",
+      "action": "tmux.tsとの差異はスコープ外。別Issue対応としてReview Historyに記録"
+    },
+    {
+      "id": "SF-2",
+      "severity": "Should Fix",
+      "status": "completed",
+      "action": "セクション3.3にsaveInitialBranch/getInitialBranch関数の設計を追加。send/route.tsからは関数呼び出しのみに"
+    },
+    {
+      "id": "SF-3",
+      "severity": "Should Fix",
+      "status": "completed",
+      "action": "セクション4.1のGitStatus interfaceにJSDocで将来拡張候補を追記。拡張ポリシーを明記"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "NTH-1",
+      "severity": "Nice to Have",
+      "reason": "エラーハンドリングユーティリティ抽出は別Issueで対応"
+    },
+    {
+      "id": "NTH-2",
+      "severity": "Nice to Have",
+      "reason": "BranchMismatchAlertProps設計は対応済み（SF-2の一環として）"
+    },
+    {
+      "id": "NTH-3",
+      "severity": "Nice to Have",
+      "reason": "依存性注入サポートは過剰設計。テストはVitestのモック機能で対応可能"
+    }
+  ],
+  "summary": {
+    "must_fix_applied": 2,
+    "should_fix_applied": 3,
+    "nice_to_have_skipped": 3
+  }
+}

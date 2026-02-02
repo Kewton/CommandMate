@@ -1,0 +1,60 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項対応",
+  "applied_date": "2026-02-02",
+  "applied_items": [
+    {
+      "id": "CON-MF-001",
+      "severity": "Must Fix",
+      "status": "completed",
+      "action": "セクション8.1にexec vs execFileの差異を明記。worktrees.tsとの整合性、将来の移行計画を説明"
+    },
+    {
+      "id": "CON-MF-002",
+      "severity": "Must Fix",
+      "status": "completed",
+      "action": "セクション5.1のWorktreeResponse例でid型をnumberからstringに修正。NOTEコメント追加"
+    },
+    {
+      "id": "CON-SF-001",
+      "severity": "Should Fix",
+      "status": "completed",
+      "action": "セクション3.1にMigration名 'add-initial-branch-column' を追加"
+    },
+    {
+      "id": "CON-SF-002",
+      "severity": "Should Fix",
+      "status": "no_action_needed",
+      "action": "既存パターンと一致しており、変更不要"
+    },
+    {
+      "id": "CON-SF-003",
+      "severity": "Should Fix",
+      "status": "completed",
+      "action": "セクション5.1に既存スプレッドパターンへの追加形式を明記"
+    },
+    {
+      "id": "CON-SF-004",
+      "severity": "Should Fix",
+      "status": "completed",
+      "action": "セクション6.1のBranchMismatchAlert配置場所を「DesktopHeaderとflex-1 div（WorktreeDesktopLayout含む）の間」に具体化"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "CON-NTH-001",
+      "severity": "Nice to Have",
+      "reason": "GitStatusのimport方法は既存パターンから自明"
+    },
+    {
+      "id": "CON-NTH-002",
+      "severity": "Nice to Have",
+      "reason": "テストディレクトリ構造は実装時に確認"
+    }
+  ],
+  "summary": {
+    "must_fix_applied": 2,
+    "should_fix_applied": 4,
+    "nice_to_have_skipped": 2
+  }
+}

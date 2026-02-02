@@ -136,7 +136,8 @@ src/
 | `src/types/sidebar.ts` | サイドバーステータス判定 |
 | `src/types/clone.ts` | クローン関連型定義（CloneJob, CloneError等） |
 | `src/lib/file-operations.ts` | ファイル操作（読取/更新/作成/削除/リネーム） |
-| `src/lib/utils.ts` | 汎用ユーティリティ関数（debounce等） |
+| `src/lib/git-utils.ts` | Git情報取得（getGitStatus関数、execFile使用、1秒タイムアウト） |
+| `src/lib/utils.ts` | 汎用ユーティリティ関数（debounce、truncateString等） |
 | `src/config/editable-extensions.ts` | 編集可能ファイル拡張子設定 |
 | `src/config/file-operations.ts` | 再帰削除の安全設定 |
 | `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義 |
@@ -347,6 +348,27 @@ commandmate status
 ---
 
 ## 最近の実装機能
+
+### Issue #111: Gitブランチ可視化機能
+- **ブランチ表示**: ワークツリー詳細画面のヘッダーに現在のgitブランチ名を表示
+- **ブランチ不一致警告**: セッション開始時と現在のブランチが異なる場合、視覚的な警告を表示
+- **モバイル対応**: モバイル表示でもブランチ情報が確認可能
+- **定期更新**: ブランチ情報は定期的に更新（アクティブ時: 2秒、アイドル時: 5秒）
+- **DBマイグレーション**: Migration #15でworktreesテーブルにinitial_branchカラム追加
+- **セキュリティ対策**:
+  - execFile使用によるコマンドインジェクション防止
+  - 1秒タイムアウトによるDoS防止
+  - React自動エスケープによるXSS防止
+  - DBからの信頼パス取得によるパストラバーサル防止
+- **エラーハンドリング**:
+  - detached HEAD状態では警告を表示しない
+  - gitコマンドタイムアウト時は`(unknown)`を返却しアプリは正常動作
+- **主要コンポーネント**:
+  - `src/lib/git-utils.ts` - Git情報取得ロジック（getGitStatus関数）
+  - `src/components/worktree/BranchMismatchAlert.tsx` - ブランチ不一致警告コンポーネント
+  - `src/types/models.ts` - GitStatus interface
+  - `src/lib/db.ts` - saveInitialBranch, getInitialBranch関数
+- 詳細: [設計書](./dev-reports/design/issue-111-branch-visualization-design-policy.md)
 
 ### Issue #21: ファイルツリー検索機能
 - **検索UI**: ファイルツリー上部に検索バーを常時表示（デスクトップ）

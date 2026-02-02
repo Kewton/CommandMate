@@ -5,6 +5,31 @@
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
+ * Git status information for a worktree
+ * Issue #111: Branch visualization feature
+ *
+ * @remarks
+ * New fields should be optional (?) for backward compatibility
+ *
+ * @future Potential extensions:
+ * - aheadBehind?: { ahead: number; behind: number } - Remote difference (separate Issue)
+ * - stashCount?: number - Number of stashes
+ * - lastCommitMessage?: string - Latest commit message
+ */
+export interface GitStatus {
+  /** Current git branch name (e.g., "main", "feature/xxx", "(detached HEAD)", "(unknown)") */
+  currentBranch: string;
+  /** Branch name at session start (null if not recorded) */
+  initialBranch: string | null;
+  /** True if currentBranch differs from initialBranch */
+  isBranchMismatch: boolean;
+  /** Short commit hash (e.g., "abc1234") */
+  commitHash: string;
+  /** True if there are uncommitted changes */
+  isDirty: boolean;
+}
+
+/**
  * Worktree representation
  */
 export interface Worktree {
@@ -58,6 +83,8 @@ export interface Worktree {
   link?: string;
   /** CLI tool type (claude, codex, gemini) - defaults to 'claude' */
   cliToolId?: CLIToolType;
+  /** Git status information (Issue #111) - optional for backward compatibility */
+  gitStatus?: GitStatus;
 }
 
 /**

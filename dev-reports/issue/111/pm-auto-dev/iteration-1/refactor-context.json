@@ -1,0 +1,25 @@
+{
+  "issue_number": 111,
+  "title": "現在の作業ブランチを可視化して欲しい",
+  "files_to_review": [
+    "src/lib/git-utils.ts",
+    "src/lib/db.ts",
+    "src/lib/db-migrations.ts",
+    "src/types/models.ts",
+    "src/components/worktree/BranchMismatchAlert.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/mobile/MobileHeader.tsx",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/send/route.ts"
+  ],
+  "design_doc_path": "dev-reports/design/issue-111-branch-visualization-design-policy.md",
+  "acceptance_result_path": "dev-reports/issue/111/pm-auto-dev/iteration-1/acceptance-result.json",
+  "focus_areas": [
+    "SOLID原則の遵守",
+    "KISS原則の遵守",
+    "DRY原則の遵守",
+    "コードの可読性",
+    "エラーハンドリングの一貫性",
+    "型定義の正確性"
+  ]
+}

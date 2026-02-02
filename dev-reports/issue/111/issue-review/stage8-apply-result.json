@@ -1,0 +1,73 @@
+{
+  "issue_number": 111,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-02",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "send/route.ts 内の initial_branch 保存処理の挿入位置を明確化。保存タイミングを「startSession() 呼び出し直後、sendMessage() 呼び出し前」と明記し、概念的なコード例を追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "GitStatus interface と Worktree interface の関係性を明確化。「Worktree interface との関係」セクションを新設し、Worktree に gitStatus?: GitStatus を追加する設計とその利点（後方互換性、型チェックでのオプショナルチェーン使用）を記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "CLAUDE.md の更新を影響範囲テーブルに追加し、Task 8 としてドキュメント更新タスクを追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "備考セクションに「git status キャッシュ機構は将来の最適化として別 Issue で対応予定」を追記"
+      }
+    ]
+  },
+  "changes_made": [
+    {
+      "section": "技術要件 > DBスキーマ拡張",
+      "change": "保存タイミングを「startSession() 呼び出し直後、sendMessage() 呼び出し前」に更新"
+    },
+    {
+      "section": "技術要件 > 型定義（新設：Worktree interface との関係）",
+      "change": "GitStatus と Worktree の関係性を明確化するセクションを追加。Worktree interface の例とオプショナルフィールド追加の利点を記載"
+    },
+    {
+      "section": "技術要件 > バックエンド",
+      "change": "send/route.ts 内の保存処理挿入位置を明確化し、概念的なコード例を追加"
+    },
+    {
+      "section": "影響範囲テーブル",
+      "change": "send/route.ts の変更内容を更新、CLAUDE.md を影響範囲に追加"
+    },
+    {
+      "section": "実装タスク",
+      "change": "Task 3 に挿入位置の詳細を追記、Task 8（CLAUDE.md 更新）を新規追加"
+    },
+    {
+      "section": "備考",
+      "change": "git status キャッシュ機構の将来検討についての備考を追記"
+    },
+    {
+      "section": "Review History",
+      "change": "Stage 7 Review セクションを追加（SF-1, SF-2, NTH-1, NTH-2）"
+    }
+  ],
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/111"
+  }
+}

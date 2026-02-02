@@ -1,0 +1,54 @@
+{
+  "stage": 3,
+  "stage_name": "指摘事項対応",
+  "applied_date": "2026-02-02",
+  "applied_items": [
+    {
+      "id": "IMP-MF-001",
+      "severity": "Must Fix",
+      "status": "completed",
+      "action": "セクション3.2にMigration #15のdown()関数を追加。SQLiteのALTER TABLE DROP COLUMN非対応に対応したテーブル再作成手順を明記"
+    },
+    {
+      "id": "IMP-MF-002",
+      "severity": "Must Fix",
+      "status": "completed",
+      "action": "セクション5.4を新設。gitStatusフィールドサイズ（100-200 bytes）、帯域消費（360 KB/時間）、モバイル影響評価を追加"
+    },
+    {
+      "id": "IMP-SF-001",
+      "severity": "Should Fix",
+      "status": "completed",
+      "action": "セクション9.2に既存テスト互換性の説明（オプショナルフィールドのためパスする）を追加"
+    },
+    {
+      "id": "IMP-I-002",
+      "severity": "Info",
+      "status": "completed",
+      "action": "セクション9.3を新設。git-utils.tsのVitestモック戦略とテスト例を追加"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "IMP-SF-002",
+      "severity": "Should Fix",
+      "reason": "Stage 2で配置場所を具体化済み。行番号は実装時に確認"
+    },
+    {
+      "id": "IMP-SF-003",
+      "severity": "Should Fix",
+      "reason": "MobileHeaderの詳細レイアウトは実装時に決定。truncate処理は一般的なパターン"
+    },
+    {
+      "id": "IMP-I-001",
+      "severity": "Info",
+      "reason": "Feature flagは低リスク機能のため不要と判断"
+    }
+  ],
+  "summary": {
+    "must_fix_applied": 2,
+    "should_fix_applied": 1,
+    "info_applied": 1,
+    "skipped": 3
+  }
+}

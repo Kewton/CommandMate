@@ -1,0 +1,18 @@
+{
+  "issue_number": 111,
+  "title": "現在の作業ブランチを可視化して欲しい",
+  "acceptance_criteria": [
+    "ワークツリー詳細画面のヘッダーに現在のgitブランチ名が表示される",
+    "セッション開始時のブランチと現在のブランチが異なる場合、視覚的に警告が表示される",
+    "モバイル表示でもブランチ情報が確認できる",
+    "ブランチ情報は定期的に更新される（アクティブ時: 2秒、アイドル時: 5秒）",
+    "パフォーマンスへの影響が最小限である（git コマンド実行のオーバーヘッド）",
+    "DBマイグレーション（Migration #15）が正常に適用される",
+    "detached HEAD状態でも警告が不適切に表示されない",
+    "gitコマンドタイムアウト時もアプリが正常に動作する",
+    "既存テストが全てパスする（後方互換性維持）"
+  ],
+  "tdd_result_path": "dev-reports/issue/111/pm-auto-dev/iteration-1/tdd-result.json",
+  "design_doc_path": "dev-reports/design/issue-111-branch-visualization-design-policy.md",
+  "work_plan_path": "dev-reports/issue/111/work-plan.md"
+}

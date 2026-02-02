@@ -1,0 +1,19 @@
+{
+  "issue_number": 111,
+  "title": "現在の作業ブランチを可視化して欲しい",
+  "iteration": 1,
+  "phases_completed": [
+    "Phase 1: Issue情報収集",
+    "Phase 2: TDD実装",
+    "Phase 3: 受入テスト",
+    "Phase 4: リファクタリング",
+    "Phase 5: ドキュメント最新化"
+  ],
+  "result_files": {
+    "tdd_result": "dev-reports/issue/111/pm-auto-dev/iteration-1/tdd-result.json",
+    "acceptance_result": "dev-reports/issue/111/pm-auto-dev/iteration-1/acceptance-result.json",
+    "refactor_result": "dev-reports/issue/111/pm-auto-dev/iteration-1/refactor-result.json"
+  },
+  "design_doc_path": "dev-reports/design/issue-111-branch-visualization-design-policy.md",
+  "work_plan_path": "dev-reports/issue/111/work-plan.md"
+}

@@ -1,0 +1,375 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_date": "2026-02-02",
+  "issue_number": 111,
+  "design_doc_path": "dev-reports/design/issue-111-branch-visualization-design-policy.md",
+  "findings": [
+    {
+      "id": "SEC-MF-001",
+      "priority": "Must Fix",
+      "category": "Injection (A03:2021)",
+      "title": "execFile timeout handling may leak error details",
+      "description": "設計書Section 8.1ではexecFile使用を明記しているが、Section 5.2のエラーハンドリングでタイムアウトエラー時に'(unknown)'を返すのみで、エラー詳細のログ出力方針が未記載。エラー詳細が意図せずクライアントに漏洩するリスク。",
+      "evidence": {
+        "design_doc": "Section 5.2: タイムアウト時 currentBranch = '(unknown)'",
+        "concern": "エラーオブジェクトの内容がログやレスポンスに含まれる可能性"
+      },
+      "owasp_category": "A03:2021-Injection / A05:2021-Security Misconfiguration",
+      "impact": "Low - Internal path information could be exposed in error messages",
+      "recommendation": "1) getGitStatus関数内でエラーをcatchした際、エラー詳細はサーバーログのみに出力し、クライアントには汎用エラー値('(unknown)')のみを返す方針を設計書に明記 2) worktreePathがログに含まれる場合の考慮を追記",
+      "affected_files": [
+        "src/lib/git-utils.ts"
+      ]
+    },
+    {
+      "id": "SEC-MF-002",
+      "priority": "Must Fix",
+      "category": "XSS Prevention",
+      "title": "ブランチ名表示時のXSS対策が未明記",
+      "description": "gitから取得したブランチ名(currentBranch, initialBranch)をフロントエンドで表示する際のXSS対策が設計書に記載されていない。Reactのデフォルトエスケープに依存する前提を明記すべき。",
+      "evidence": {
+        "design_doc": "Section 6.1: BranchMismatchAlert.tsx でブランチ名を表示",
+        "concern": "悪意あるブランチ名（例: <script>alert(1)</script>）への対処"
+      },
+      "owasp_category": "A03:2021-Injection (XSS)",
+      "impact": "Low - React automatically escapes, but should be documented",
+      "recommendation": "1) Section 8にXSS対策セクションを追加 2) Reactの自動エスケープ機能への依存を明記 3) dangerouslySetInnerHTML使用禁止を明記 4) ブランチ名がgitコマンドの出力から直接取得される安全な経路であることを記載",
+      "affected_files": [
+        "src/components/worktree/BranchMismatchAlert.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/mobile/MobileHeader.tsx"
+      ]
+    },
+    {
+      "id": "SEC-SF-001",
+      "priority": "Should Fix",
+      "category": "Command Injection (A03:2021)",
+      "title": "worktreePath引数の信頼境界が暗黙的",
+      "description": "git-utils.tsのgetGitStatus(worktreePath)でworktreePathをcwd引数として使用する設計だが、worktreePathの信頼境界(DBから取得した値のみを使用)が設計書で暗黙的になっている。",
+      "evidence": {
+        "design_doc": "Section 8.2: 'worktreePathはDBから取得した値のみ使用'と記載あり",
+        "existing_code": "route.ts line 22: const worktree = getWorktreeById(db, params.id)"
+      },
+      "owasp_category": "A03:2021-Injection",
+      "impact": "Low - Design already specifies DB-only source, but trust boundary should be explicit",
+      "recommendation": "1) getGitStatus関数のJSDocに'@param worktreePath - Must be a trusted path from database, not user input'を追加 2) 呼び出し元route.tsでworktree.pathを直接渡すことを設計書で明記",
+      "affected_files": [
+        "src/lib/git-utils.ts",
+        "src/app/api/worktrees/[id]/route.ts"
+      ]
+    },
+    {
+      "id": "SEC-SF-002",
+      "priority": "Should Fix",
+      "category": "SQL Injection (A03:2021)",
+      "title": "saveInitialBranch関数のパラメータ化確認",
+      "description": "設計書Section 3.3で提案されているsaveInitialBranch関数のSQL実装がプリペアドステートメントを使用することを明示していない。",
+      "evidence": {
+        "design_doc": "Section 3.3: saveInitialBranch関数のシグネチャのみ記載",
+        "existing_code": "db.ts の既存関数は全てdb.prepare()を使用（パラメータ化）"
+      },
+      "owasp_category": "A03:2021-Injection (SQL)",
+      "impact": "Low - Codebase pattern uses prepared statements, but should be explicit",
+      "recommendation": "Section 3.3にsaveInitialBranch実装例を追加し、db.prepare()使用を明記: `db.prepare('UPDATE worktrees SET initial_branch = ? WHERE id = ?').run(branchName, worktreeId)`",
+      "affected_files": [
+        "src/lib/db.ts"
+      ]
+    },
+    {
+      "id": "SEC-SF-003",
+      "priority": "Should Fix",
+      "category": "DoS Prevention",
+      "title": "gitコマンドタイムアウト値の根拠と上限設定",
+      "description": "設計書でgitコマンドのタイムアウトを1秒と設定しているが、この値の根拠と、大規模リポジトリやネットワークマウントストレージでの動作への影響評価が未記載。",
+      "evidence": {
+        "design_doc": "Section 5.3: 'タイムアウト: gitコマンド実行に1秒のタイムアウト設定'",
+        "concern": "ネットワークファイルシステムや高負荷時のタイムアウト頻発"
+      },
+      "owasp_category": "Availability (DoS consideration)",
+      "impact": "Low - Timeout prevents DoS, but value rationale should be documented",
+      "recommendation": "1) 1秒の根拠を追記（ローカルSSD想定で10-50ms、10倍マージン） 2) タイムアウト時のユーザーフィードバック（ブランチ情報更新失敗）方針を明記 3) タイムアウト値を設定可能にするか検討（将来課題）",
+      "affected_files": [
+        "src/lib/git-utils.ts"
+      ]
+    },
+    {
+      "id": "SEC-SF-004",
+      "priority": "Should Fix",
+      "category": "Sensitive Data Exposure (A02:2021)",
+      "title": "initial_branchカラムの情報漏洩リスク評価",
+      "description": "initial_branchはブランチ名を保存するが、ブランチ名にはIssue番号やfeature名など開発情報が含まれる場合がある。APIレスポンスでの公開範囲を検討すべき。",
+      "evidence": {
+        "design_doc": "Section 5.1: gitStatusとしてcurrentBranch, initialBranchを返却",
+        "concern": "ブランチ名からプロジェクト内部情報の推測可能"
+      },
+      "owasp_category": "A02:2021-Cryptographic Failures / A01:2021-Broken Access Control",
+      "impact": "Low - Branch names are generally visible in git repos anyway",
+      "recommendation": "1) 現状の設計で問題なしと判断可能（同じリポジトリにアクセスできるユーザーのみがAPIを使用） 2) 認証済みユーザーのみがAPIアクセス可能であることを前提として記載 3) CM_AUTH_TOKEN認証との関係を確認",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/route.ts"
+      ]
+    },
+    {
+      "id": "SEC-G-001",
+      "priority": "Good",
+      "category": "Command Injection Prevention",
+      "title": "execFile使用による安全なコマンド実行設計",
+      "description": "設計書Section 8.1でexecFile使用を明記し、引数を固定文字列のみとすることでコマンドインジェクションを防止。exec()からの改善として適切。",
+      "evidence": {
+        "design_doc": "Section 8.1: execFile('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath, timeout: 1000 })"
+      },
+      "owasp_category": "A03:2021-Injection",
+      "impact": "Positive - Good security practice",
+      "recommendation": "設計通りに実装すること",
+      "affected_files": []
+    },
+    {
+      "id": "SEC-G-002",
+      "priority": "Good",
+      "category": "Path Traversal Prevention",
+      "title": "パストラバーサル対策のDB依存設計",
+      "description": "設計書Section 8.2でworktreePathをDBから取得した値のみ使用と明記。外部からのパス指定を受け付けない設計で、パストラバーサル攻撃を防止。",
+      "evidence": {
+        "design_doc": "Section 8.2: 'worktreePathはDBから取得した値のみ使用', '外部からのパス指定は受け付けない'"
+      },
+      "owasp_category": "A01:2021-Broken Access Control",
+      "impact": "Positive - Good security practice",
+      "recommendation": "設計通りに実装すること",
+      "affected_files": []
+    },
+    {
+      "id": "SEC-G-003",
+      "priority": "Good",
+      "category": "Graceful Degradation",
+      "title": "gitコマンド失敗時の安全なフォールバック",
+      "description": "設計書Section 5.2でgitコマンド失敗時、タイムアウト時、detached HEAD時の安全なフォールバック値を定義。サービス継続性を確保。",
+      "evidence": {
+        "design_doc": "Section 5.2: エラー時currentBranch='(unknown)', isBranchMismatch=false"
+      },
+      "owasp_category": "Availability",
+      "impact": "Positive - Good resilience design",
+      "recommendation": "設計通りに実装すること",
+      "affected_files": []
+    },
+    {
+      "id": "SEC-I-001",
+      "priority": "Info",
+      "category": "Race Condition",
+      "title": "initial_branch保存とブランチ取得の競合",
+      "description": "send/route.tsでセッション開始時にinitial_branchを保存し、route.tsで現在のブランチを取得する設計。高速なブランチ切り替え時に保存と取得が競合する可能性。",
+      "evidence": {
+        "design_doc": "Section 2.2: セッション開始時にinitial_branch保存、ポーリング時にcurrentBranch取得"
+      },
+      "owasp_category": "Race Condition",
+      "impact": "Very Low - Edge case with minimal security impact",
+      "recommendation": "現状の設計で問題なし。ブランチ保存はセッション開始時1回のみ、取得はポーリングごと。時間的に十分離れており競合リスクは極めて低い。Info事項として記録。",
+      "affected_files": []
+    },
+    {
+      "id": "SEC-I-002",
+      "priority": "Info",
+      "category": "Logging Security",
+      "title": "gitコマンドエラーログのセキュリティ考慮",
+      "description": "gitコマンド実行失敗時のログ出力方針が設計書に未記載。ログにパス情報が含まれる場合のセキュリティ考慮。",
+      "evidence": {
+        "design_doc": "エラーログ方針の明示的記載なし",
+        "existing_code": "既存コードではconsole.error使用"
+      },
+      "owasp_category": "Logging & Monitoring",
+      "impact": "Very Low - Server-side logs only",
+      "recommendation": "サーバーサイドログのみなので現状で問題なし。ログレベル(ERROR)とログ内容(worktreeId, エラー種別)の指針があるとより良い。",
+      "affected_files": []
+    }
+  ],
+  "owasp_compliance": {
+    "A01_2021_Broken_Access_Control": {
+      "status": "Compliant",
+      "findings": [
+        "パストラバーサル対策: DBから取得したworktreePathのみ使用（SEC-G-002）",
+        "API認証: 既存のCM_AUTH_TOKEN認証機構に依存（設計書で明示推奨）"
+      ],
+      "risk_level": "low"
+    },
+    "A02_2021_Cryptographic_Failures": {
+      "status": "Not Applicable",
+      "findings": [
+        "本機能では暗号化処理なし",
+        "ブランチ名は機密情報ではない（リポジトリ可視範囲と同等）"
+      ],
+      "risk_level": "none"
+    },
+    "A03_2021_Injection": {
+      "status": "Mostly Compliant",
+      "findings": [
+        "コマンドインジェクション: execFile使用で防止（SEC-G-001）",
+        "SQLインジェクション: 既存パターン（prepare文）に準拠すれば安全（SEC-SF-002）",
+        "XSS: Reactの自動エスケープに依存、明示的記載推奨（SEC-MF-002）"
+      ],
+      "risk_level": "low",
+      "action_required": [
+        "XSS対策方針の明記（SEC-MF-002）",
+        "SQL prepare文使用の明記（SEC-SF-002）"
+      ]
+    },
+    "A04_2021_Insecure_Design": {
+      "status": "Compliant",
+      "findings": [
+        "信頼境界: DBからのパス取得に限定（SEC-SF-001で明示推奨）",
+        "入力検証: gitコマンド引数は固定文字列",
+        "タイムアウト: 1秒のタイムアウトでDoS防止"
+      ],
+      "risk_level": "low"
+    },
+    "A05_2021_Security_Misconfiguration": {
+      "status": "Mostly Compliant",
+      "findings": [
+        "エラーメッセージ: クライアントには汎用値('(unknown)')を返す設計",
+        "デフォルト値: isBranchMismatch=falseで安全側にデフォルト"
+      ],
+      "risk_level": "low",
+      "action_required": [
+        "エラー詳細のログ出力方針明記（SEC-MF-001）"
+      ]
+    },
+    "A06_2021_Vulnerable_Components": {
+      "status": "Not Applicable",
+      "findings": [
+        "新規外部ライブラリ追加なし",
+        "Node.js標準child_process使用"
+      ],
+      "risk_level": "none"
+    },
+    "A07_2021_Authentication_Failures": {
+      "status": "Not Applicable",
+      "findings": [
+        "本機能は認証機能を変更しない",
+        "既存のCM_AUTH_TOKEN認証に依存"
+      ],
+      "risk_level": "none"
+    },
+    "A08_2021_Software_Data_Integrity": {
+      "status": "Compliant",
+      "findings": [
+        "gitコマンド出力をそのまま使用（改ざんリスクなし）",
+        "DB更新は既存トランザクションパターンに準拠"
+      ],
+      "risk_level": "none"
+    },
+    "A09_2021_Security_Logging_Monitoring": {
+      "status": "Compliant",
+      "findings": [
+        "既存ログ機構に準拠",
+        "エラー時のログ出力推奨（SEC-I-002）"
+      ],
+      "risk_level": "none"
+    },
+    "A10_2021_SSRF": {
+      "status": "Not Applicable",
+      "findings": [
+        "外部リクエスト機能なし",
+        "gitコマンドはローカル実行のみ"
+      ],
+      "risk_level": "none"
+    }
+  },
+  "threat_model": {
+    "attack_surfaces": [
+      {
+        "surface": "git command execution",
+        "threats": ["Command injection", "Path traversal", "DoS via timeout"],
+        "mitigations": [
+          "execFile使用（シェル解釈なし）",
+          "引数固定（ユーザー入力なし）",
+          "cwdはDBから取得した信頼値",
+          "1秒タイムアウト"
+        ],
+        "residual_risk": "Very Low"
+      },
+      {
+        "surface": "API response",
+        "threats": ["Information disclosure", "XSS"],
+        "mitigations": [
+          "ブランチ名のみ返却（パス情報なし）",
+          "エラー時は汎用値返却",
+          "Reactの自動エスケープ"
+        ],
+        "residual_risk": "Very Low"
+      },
+      {
+        "surface": "Database operations",
+        "threats": ["SQL injection", "Data integrity"],
+        "mitigations": [
+          "Prepared statements使用（既存パターン）",
+          "worktreeIdはパス由来のsanitized値"
+        ],
+        "residual_risk": "Very Low"
+      },
+      {
+        "surface": "Frontend display",
+        "threats": ["XSS", "UI injection"],
+        "mitigations": [
+          "Reactの自動エスケープ",
+          "dangerouslySetInnerHTML不使用"
+        ],
+        "residual_risk": "Very Low"
+      }
+    ]
+  },
+  "security_checklist": {
+    "input_validation": {
+      "checked": true,
+      "notes": "gitコマンド引数は固定、worktreePathはDB由来"
+    },
+    "output_encoding": {
+      "checked": true,
+      "notes": "Reactの自動エスケープに依存（明示的記載推奨）"
+    },
+    "authentication": {
+      "checked": true,
+      "notes": "既存CM_AUTH_TOKEN認証に依存"
+    },
+    "authorization": {
+      "checked": true,
+      "notes": "worktree所有者のみアクセス可能（既存チェック）"
+    },
+    "cryptography": {
+      "checked": true,
+      "notes": "該当なし"
+    },
+    "error_handling": {
+      "checked": true,
+      "notes": "汎用エラー値('(unknown)')で情報漏洩防止"
+    },
+    "logging": {
+      "checked": true,
+      "notes": "既存ログ機構使用（詳細方針追記推奨）"
+    },
+    "data_protection": {
+      "checked": true,
+      "notes": "ブランチ名は機密情報ではない"
+    }
+  },
+  "summary": {
+    "total_findings": 11,
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "good_count": 3,
+    "info_count": 2,
+    "overall_risk": "低",
+    "owasp_compliance_level": "高",
+    "key_security_concerns": [
+      "XSS対策方針の明示的記載が必要（SEC-MF-002）",
+      "エラー詳細のログ出力方針の明記が必要（SEC-MF-001）",
+      "信頼境界（trust boundary）の明示的ドキュメント化推奨（SEC-SF-001）"
+    ],
+    "security_strengths": [
+      "execFile使用によるコマンドインジェクション防止",
+      "DBからの信頼パス取得によるパストラバーサル防止",
+      "タイムアウト設定によるDoS防止",
+      "安全側へのデフォルトフォールバック(isBranchMismatch=false)"
+    ]
+  },
+  "overall_assessment": "設計書のセキュリティ設計は基本的に適切であり、OWASP Top 10の主要脆弱性に対する対策が講じられている。execFile使用によるコマンドインジェクション防止、DBからの信頼パス取得、タイムアウト設定など、重要なセキュリティプラクティスが採用されている。2点のMust Fix（XSS対策の明記、エラー詳細の漏洩防止方針）と4点のShould Fix（信頼境界の明示化、SQLパラメータ化の明記、タイムアウト値根拠、情報漏洩リスク評価）を対応すれば、セキュリティ観点で実装可能なレベルである。全体的なセキュリティリスクは低い。"
+}

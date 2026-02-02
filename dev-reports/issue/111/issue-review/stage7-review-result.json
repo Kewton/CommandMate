@@ -1,0 +1,194 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-02-02",
+  "issue_number": 111,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "previous_findings_status": {
+    "addressed": [
+      {
+        "id": "Stage3-MF-1",
+        "original_issue": "セッション開始ロジックが send/route.ts 内の startSession() で実行されるため、initial_branch保存タイミングを明確化する必要がある",
+        "status": "addressed",
+        "evidence": "Issue本文の「DBスキーマ拡張」セクションで「保存タイミング：send/route.ts 内の startSession() 呼び出し直後」と明記されている。また影響範囲テーブルで send/route.ts への変更が記載されている"
+      },
+      {
+        "id": "Stage3-MF-2",
+        "original_issue": "git rev-parse --abbrev-ref HEAD 実行時のエラーハンドリングが未定義",
+        "status": "addressed",
+        "evidence": "「git コマンドエラーハンドリング」セクションが追加され、detached HEAD / git コマンド失敗 / タイムアウト時の currentBranch 値と isBranchMismatch フラグの動作が表形式で明確に定義されている"
+      },
+      {
+        "id": "Stage3-SF-1",
+        "original_issue": "git コマンド実行のオーバーヘッドが未評価",
+        "status": "addressed",
+        "evidence": "「パフォーマンス対策」セクションが追加され、1秒タイムアウト設定・タイムアウト時のキャッシュ値返却・想定オーバーヘッド（10-50ms/回）が明記されている"
+      },
+      {
+        "id": "Stage3-SF-2",
+        "original_issue": "BranchMismatchAlert の閉じるボタン押下後の再表示条件が不明確",
+        "status": "addressed",
+        "evidence": "「BranchMismatchAlert.tsx 詳細設計」テーブルの「再表示条件」と「状態管理」で previousBranch state を保持し、currentBranch !== previousBranch && !dismissed 条件でアラート再表示する仕様が明記されている"
+      },
+      {
+        "id": "Stage3-SF-3",
+        "original_issue": "Worktree 型定義変更による既存コンポーネントへの影響",
+        "status": "addressed",
+        "evidence": "「API拡張方針」セクションで gitStatus フィールドをオプショナル（gitStatus?）として追加し後方互換性を維持することが明記されている"
+      },
+      {
+        "id": "Stage3-SF-4",
+        "original_issue": "既存テストへの影響範囲が広い",
+        "status": "addressed",
+        "evidence": "「テストへの影響と対応」セクションが追加され、影響を受ける既存テスト3件と新規テスト4件が表形式で記載されている。gitStatus フィールドの undefined ケースと値が存在するケースの両方をカバーする方針が明確"
+      }
+    ],
+    "partially_addressed": [],
+    "not_addressed": []
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "実装整合性",
+        "issue": "send/route.ts の現在の実装では startSession() 呼び出し後に即座にポーリングを開始しているが、initial_branch 保存処理を追加する場所が明確でない",
+        "detail": "現在の send/route.ts の L97-107 周辺で startSession() が呼び出された後、すぐに savePendingAssistantResponse() と sendMessage() が続く。initial_branch 保存処理を startSession() の直後かつ sendMessage() の前に挿入する必要があるが、非同期処理の順序制御に注意が必要",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/send/route.ts"
+        ],
+        "recommendation": "実装タスク Task 3 で「!running 時のみ initial_branch を保存する」条件分岐を明示的に記載することを検討。例: if (!running) { await cliTool.startSession(...); await saveInitialBranch(db, params.id); }"
+      },
+      {
+        "id": "SF-2",
+        "category": "型定義整合性",
+        "issue": "GitStatus interface と Worktree interface の関係性がコード上で明確でない",
+        "detail": "Issue では GitStatus interface を src/types/models.ts に追加し、Worktree 型に gitStatus フィールドを追加すると記載されている。しかし、現在の models.ts の Worktree interface には gitStatus は定義されておらず、API レスポンスでのみ gitStatus を付与する設計かどうかが不明確",
+        "affected_files": [
+          "src/types/models.ts",
+          "src/app/api/worktrees/[id]/route.ts"
+        ],
+        "recommendation": "Worktree interface に gitStatus?: GitStatus を追加する場合の影響（型チェック、テスト）と、API レスポンス型を別途定義する場合（WorktreeWithGitStatus）の選択肢を明記することを検討"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント整合性",
+        "issue": "CLAUDE.md への更新が影響範囲に含まれていない",
+        "detail": "新機能追加時は CLAUDE.md の「最近の実装機能」セクションを更新する慣習があるが、影響範囲テーブルに CLAUDE.md が含まれていない",
+        "affected_files": [
+          "CLAUDE.md"
+        ],
+        "recommendation": "影響範囲テーブルに CLAUDE.md の更新を追加（変更内容: Issue #111 ブランチ可視化機能の追加）"
+      },
+      {
+        "id": "NTH-2",
+        "category": "キャッシュ機構",
+        "issue": "Stage 3 で Nice to Have とされた git status キャッシュ機構の検討状況が未記載",
+        "detail": "Stage 3 の NTH-2 で「短時間キャッシュ（例: 5秒）を設けることでオーバーヘッドを削減」が提案されていたが、Issue 本文には「将来の最適化として検討」の記載がない",
+        "affected_files": [],
+        "recommendation": "備考セクションに「git status キャッシュ機構は将来の最適化として別 Issue で対応予定」と追記することを検討"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files_verification": {
+      "verified": [
+        {
+          "file": "src/lib/db-migrations.ts",
+          "current_state": "CURRENT_SCHEMA_VERSION = 14, migrations 配列に Migration #14 まで定義済み",
+          "required_changes": "Migration #15 追加、CURRENT_SCHEMA_VERSION を 15 に更新",
+          "impact": "既存データへの影響なし（initial_branch は NULL 許容）"
+        },
+        {
+          "file": "src/types/models.ts",
+          "current_state": "Worktree interface に gitStatus 未定義、GitStatus interface 未定義",
+          "required_changes": "GitStatus interface 追加、Worktree 型に gitStatus?: GitStatus 追加",
+          "impact": "オプショナルフィールドのため既存コードへの影響最小"
+        },
+        {
+          "file": "src/lib/db.ts",
+          "current_state": "initial_branch 関連の関数なし",
+          "required_changes": "saveInitialBranch(), getInitialBranch() 関数追加",
+          "impact": "新規関数追加のみ、既存関数への影響なし"
+        },
+        {
+          "file": "src/app/api/worktrees/[id]/route.ts",
+          "current_state": "GET レスポンスに isSessionRunning, isWaitingForResponse, isProcessing, sessionStatusByCli フィールドあり",
+          "required_changes": "gitStatus フィールド追加、git コマンド実行ロジック追加",
+          "impact": "レスポンス拡張（追加のみ、破壊的変更なし）"
+        },
+        {
+          "file": "src/app/api/worktrees/[id]/send/route.ts",
+          "current_state": "L97-107 周辺で startSession() 呼び出し、その後 savePendingAssistantResponse() と sendMessage() が続く",
+          "required_changes": "startSession() 呼び出し後に initial_branch 保存処理追加",
+          "impact": "既存フローへの挿入、非同期処理の順序制御に注意"
+        },
+        {
+          "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "current_state": "ACTIVE_POLLING_INTERVAL_MS=2000, IDLE_POLLING_INTERVAL_MS=5000 定義済み、ヘッダーにブランチ情報なし",
+          "required_changes": "DesktopHeader にブランチ情報表示追加、BranchMismatchAlert 統合",
+          "impact": "UI 拡張、既存機能への影響なし"
+        },
+        {
+          "file": "src/components/mobile/MobileHeader.tsx",
+          "current_state": "worktreeName, repositoryName, status を表示、ブランチ情報なし",
+          "required_changes": "ブランチ情報表示追加（省スペース版）",
+          "impact": "Props 追加が必要、既存 Props との後方互換性維持"
+        }
+      ],
+      "new_files": [
+        {
+          "file": "src/components/worktree/BranchMismatchAlert.tsx",
+          "purpose": "ブランチ不一致警告コンポーネント",
+          "impact": "新規ファイル、既存機能への影響なし"
+        }
+      ]
+    },
+    "test_impact_verification": {
+      "existing_tests": [
+        {
+          "file": "tests/integration/api-worktrees.test.ts",
+          "impact": "Worktree 型変更による型エラーの可能性",
+          "mitigation": "gitStatus フィールドはオプショナルのため、既存テストはそのまま動作する見込み"
+        },
+        {
+          "file": "tests/integration/api-worktrees-cli-tool.test.ts",
+          "impact": "Worktree 型変更",
+          "mitigation": "オプショナルフィールドとして扱う"
+        },
+        {
+          "file": "tests/unit/worktrees.test.ts",
+          "impact": "DB 関連テストへの影響",
+          "mitigation": "新規関数（saveInitialBranch, getInitialBranch）のテスト追加"
+        }
+      ],
+      "new_tests_required": [
+        "tests/unit/db-migrations.test.ts - Migration #15 テスト追加",
+        "tests/unit/git-utils.test.ts - git コマンド実行・タイムアウト・エラーハンドリングのテスト",
+        "tests/unit/components/BranchMismatchAlert.test.tsx - 表示条件・閉じるボタン・再表示ロジックのテスト",
+        "tests/integration/api-worktrees-git-status.test.ts - gitStatus レスポンス検証"
+      ]
+    },
+    "breaking_changes": {
+      "api": "なし（gitStatus はオプショナルフィールドとして追加）",
+      "database": "なし（initial_branch は NULL 許容）",
+      "types": "なし（gitStatus はオプショナルフィールド）",
+      "ui": "なし（既存 UI への影響なし、拡張のみ）"
+    },
+    "migration_path": {
+      "existing_worktrees": "initial_branch = NULL のまま動作。セッション開始時に initial_branch が保存される",
+      "existing_sessions": "既存セッションは initial_branch が NULL のため、isBranchMismatch = false として警告表示しない"
+    }
+  },
+  "quality_score": {
+    "impact_coverage": 5,
+    "test_coverage_plan": 5,
+    "backward_compatibility": 5,
+    "migration_plan": 5,
+    "overall": 5.0
+  },
+  "summary": "Stage 3 で指摘された影響範囲関連の全 6 件（Must Fix 2件、Should Fix 4件）は全て適切に対応されている。Issue 本文は影響ファイル、テスト計画、破壊的変更の有無、移行パスを網羅的に記載しており、実装可能な完成度に達している。Stage 7 では新たな Must Fix は発見されなかった。Should Fix 2件（send/route.ts への initial_branch 保存処理の挿入位置明確化、GitStatus と Worktree の関係性明確化）と Nice to Have 2件（CLAUDE.md 更新、キャッシュ機構の備考追記）を新たに発見。全体として破壊的変更なく、オプショナルフィールド追加による段階的実装が可能な優れた設計。品質スコア: 5.0/5（影響範囲分析観点）"
+}

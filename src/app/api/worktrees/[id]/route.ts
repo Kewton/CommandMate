@@ -6,12 +6,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
+import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, getMessages, markPendingPromptsAsAnswered, getInitialBranch } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectThinking, stripAnsi } from '@/lib/cli-patterns';
 import { detectPrompt } from '@/lib/prompt-detector';
+import { getGitStatus } from '@/lib/git-utils';
+import type { GitStatus } from '@/types/models';
 
 export async function GET(
   request: NextRequest,
@@ -106,9 +108,20 @@ export async function GET(
       if (isProcessing) anyProcessing = true;
     }
 
+    // Issue #111: Get git status for branch visualization
+    let gitStatus: GitStatus | undefined;
+    try {
+      const initialBranch = getInitialBranch(db, params.id);
+      gitStatus = await getGitStatus(worktree.path, initialBranch);
+    } catch (gitError) {
+      // Log but don't fail - git status is non-critical
+      console.error(`[GET /api/worktrees/:id] Failed to get git status:`, gitError);
+    }
+
     return NextResponse.json(
       {
         ...worktree,
+        gitStatus,
         isSessionRunning: anyRunning,
         isWaitingForResponse: anyWaiting,
         isProcessing: anyProcessing,

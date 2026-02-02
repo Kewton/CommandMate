@@ -1,0 +1,194 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "API設計",
+        "description": "セッション開始ロジックが send/route.ts 内の cliTool.startSession() で実行されるため、initial_branch保存タイミングを明確化する必要がある",
+        "detail": "現在の設計では「POST /api/sessions」と記載されているが、実際のセッション開始は /api/worktrees/:id/send エンドポイント内で startSession() が呼ばれる。API設計を修正し、実際のコードに合わせるか、新規エンドポイントを追加する必要がある",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/send/route.ts",
+          "src/lib/cli-tools/base.ts"
+        ],
+        "recommendation": "send/route.ts 内の startSession() 呼び出し直後に initial_branch を保存するか、startSession() メソッド内で git rev-parse を実行して返却値に含める設計に変更"
+      },
+      {
+        "id": "MF-2",
+        "category": "データ整合性",
+        "description": "git rev-parse --abbrev-ref HEAD 実行時のエラーハンドリングが未定義",
+        "detail": "detached HEAD 状態や worktree 外のディレクトリで git コマンドが失敗した場合の挙動が定義されていない。NULL 値を許容する設計になっているが、エラー時の具体的な挙動を明記すべき",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/route.ts"
+        ],
+        "recommendation": "エラー時は currentBranch='(detached HEAD)' または '(unknown)' を返却し、isBranchMismatch=false とする仕様を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "パフォーマンス",
+        "description": "git コマンド実行のオーバーヘッドが未評価",
+        "detail": "2秒間隔のポーリング時に毎回 git rev-parse を実行すると、リモートNFSマウントやネットワークドライブ上のリポジトリでは遅延が発生する可能性がある",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/route.ts"
+        ],
+        "recommendation": "git コマンド実行にタイムアウト（例: 1秒）を設定し、タイムアウト時はキャッシュ値を返却する設計を検討"
+      },
+      {
+        "id": "SF-2",
+        "category": "UI/UX",
+        "description": "BranchMismatchAlert の閉じるボタン押下後の再表示条件が不明確",
+        "detail": "Issue では「ブランチが再度変更された場合、または画面をリロードした場合」と記載されているが、ブランチ変更検出のロジックがフロントエンド側で必要",
+        "affected_files": [
+          "src/components/worktree/BranchMismatchAlert.tsx (新規)"
+        ],
+        "recommendation": "previousBranch state を保持し、currentBranch !== previousBranch && !dismissed 条件でアラート再表示"
+      },
+      {
+        "id": "SF-3",
+        "category": "既存機能との整合性",
+        "description": "Worktree 型定義変更による既存コンポーネントへの影響",
+        "detail": "Worktree interface に gitStatus フィールドを追加すると、既存のすべてのコンポーネント（サイドバー、ヘッダー等）で型チェックエラーが発生する可能性がある。オプショナルフィールドとして追加する必要がある",
+        "affected_files": [
+          "src/types/models.ts",
+          "src/components/sidebar/BranchListItem.tsx",
+          "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "src/components/mobile/MobileHeader.tsx"
+        ],
+        "recommendation": "gitStatus?: GitStatus 形式でオプショナルフィールドとして追加し、後方互換性を維持"
+      },
+      {
+        "id": "SF-4",
+        "category": "テスト",
+        "description": "既存テストへの影響範囲が広い",
+        "detail": "Worktree 型の変更により、tests/unit/db.test.ts、tests/integration/api-worktrees.test.ts 等のテストが影響を受ける可能性がある",
+        "affected_files": [
+          "tests/unit/db.test.ts",
+          "tests/integration/api-worktrees.test.ts",
+          "tests/integration/api-worktrees-cli-tool.test.ts"
+        ],
+        "recommendation": "テストでは gitStatus フィールドの undefined ケースと値が存在するケースの両方をカバー"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "UI/UX",
+        "description": "ブランチ不一致時のアクションボタン追加の検討",
+        "detail": "警告表示だけでなく「元のブランチに戻る」ボタンがあると便利",
+        "affected_files": [
+          "src/components/worktree/BranchMismatchAlert.tsx (新規)"
+        ],
+        "recommendation": "将来の機能拡張として検討。現時点では警告表示のみで十分"
+      },
+      {
+        "id": "NTH-2",
+        "category": "パフォーマンス",
+        "description": "git status 結果のキャッシュ機構",
+        "detail": "同一ワークツリーへの連続アクセス時にgitコマンドを毎回実行せず、短時間キャッシュ（例: 5秒）を設けることでオーバーヘッドを削減",
+        "affected_files": [
+          "src/lib/git-utils.ts (新規)"
+        ],
+        "recommendation": "将来の最適化として検討。初期実装では毎回取得で問題ない"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "file": "src/lib/db-migrations.ts",
+        "change_type": "modify",
+        "impact": "Migration #15追加（initial_branch カラム）。既存データへの影響はなし（NULL許容）"
+      },
+      {
+        "file": "src/types/models.ts",
+        "change_type": "modify",
+        "impact": "Worktree interface に gitStatus オプショナルフィールド追加。GitStatus interface 新規定義"
+      },
+      {
+        "file": "src/lib/db.ts",
+        "change_type": "modify",
+        "impact": "saveInitialBranch(), getInitialBranch() 関数追加。getWorktreeById() の返却値は変更なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "change_type": "modify",
+        "impact": "GET レスポンスに gitStatus フィールド追加。git コマンド実行ロジック追加"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/send/route.ts",
+        "change_type": "modify",
+        "impact": "startSession() 呼び出し後に initial_branch 保存処理追加"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change_type": "modify",
+        "impact": "DesktopHeader にブランチ情報表示追加。BranchMismatchAlert 統合"
+      },
+      {
+        "file": "src/components/mobile/MobileHeader.tsx",
+        "change_type": "modify",
+        "impact": "ブランチ情報表示追加（省スペース版）"
+      },
+      {
+        "file": "src/components/worktree/BranchMismatchAlert.tsx",
+        "change_type": "new",
+        "impact": "新規コンポーネント作成。既存機能への影響なし"
+      }
+    ],
+    "affected_functions": [
+      {
+        "function": "getWorktreeById()",
+        "file": "src/lib/db.ts",
+        "impact": "返却型は変更なし。gitStatus は API レイヤーで付与"
+      },
+      {
+        "function": "GET /api/worktrees/:id",
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "impact": "レスポンスに gitStatus フィールド追加。破壊的変更ではない（追加のみ）"
+      },
+      {
+        "function": "startSession()",
+        "file": "src/lib/cli-tools/base.ts",
+        "impact": "シグネチャ変更なし。呼び出し元で initial_branch 保存を実装"
+      }
+    ],
+    "side_effects": [
+      {
+        "category": "パフォーマンス",
+        "description": "git rev-parse コマンド実行によるレイテンシ増加（推定 10-50ms/回）",
+        "severity": "low",
+        "mitigation": "タイムアウト設定とキャッシュ機構で対応可能"
+      },
+      {
+        "category": "既存UI",
+        "description": "ヘッダー領域の高さ増加（ブランチ情報表示分）",
+        "severity": "low",
+        "mitigation": "既存の repository_name 表示と同様のスタイルで統合"
+      },
+      {
+        "category": "既存テスト",
+        "description": "Worktree 型変更による型エラー",
+        "severity": "medium",
+        "mitigation": "オプショナルフィールドとして追加し、既存テストの互換性維持"
+      }
+    ],
+    "test_coverage": {
+      "existing_tests": [
+        "tests/unit/db.test.ts - 既存 Worktree CRUD テスト",
+        "tests/integration/api-worktrees.test.ts - API エンドポイントテスト"
+      ],
+      "required_new_tests": [
+        "tests/unit/db-migrations.test.ts - Migration #15 テスト追加",
+        "tests/unit/git-utils.test.ts - git コマンド実行テスト（新規）",
+        "tests/unit/components/BranchMismatchAlert.test.tsx - 新規コンポーネントテスト",
+        "tests/integration/api-worktrees-git-status.test.ts - gitStatus レスポンス検証"
+      ],
+      "estimated_coverage_impact": "新規テスト 4件追加。既存テスト修正 2件"
+    }
+  },
+  "summary": "Issue #111 は worktrees テーブルへの initial_branch カラム追加、GET /api/worktrees/:id レスポンスへの gitStatus フィールド追加、およびフロントエンドでのブランチ不一致警告表示を実装する。主な影響範囲は (1) DBマイグレーション #15 追加、(2) API レスポンス拡張（後方互換）、(3) UI コンポーネント 2件修正 + 1件新規作成。Must Fix として API設計の明確化（セッション開始ロジックの実態に合わせた修正）と git コマンドエラーハンドリングの定義が必要。Should Fix として パフォーマンス考慮（タイムアウト設定）と既存テストへの影響対策を推奨。全体として破壊的変更は少なく、オプショナルフィールド追加による段階的実装が可能。"
+}

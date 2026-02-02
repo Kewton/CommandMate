@@ -91,3 +91,22 @@ export function computeMatchedPaths(filePaths: string[]): Set<string> {
 
   return paths;
 }
+
+/**
+ * Truncate a string with ellipsis if it exceeds the maximum length
+ * Issue #111: Branch visualization feature - DRY extraction
+ *
+ * @param str - String to truncate
+ * @param maxLength - Maximum length before truncation (default: 30)
+ * @returns Truncated string with '...' suffix, or original if within limit
+ *
+ * @example
+ * ```typescript
+ * truncateString('feature/very-long-branch-name', 20);  // 'feature/very-long...'
+ * truncateString('main', 20);                          // 'main'
+ * ```
+ */
+export function truncateString(str: string, maxLength: number = 30): string {
+  if (str.length <= maxLength) return str;
+  return `${str.substring(0, maxLength - 3)}...`;
+}

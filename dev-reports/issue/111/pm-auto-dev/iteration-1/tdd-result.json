@@ -1,0 +1,28 @@
+{
+  "status": "success",
+  "coverage": 80.0,
+  "unit_tests": {
+    "total": 36,
+    "passed": 36,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/components/mobile/MobileHeader.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "commits": [
+    "593b896: feat(branch-viz): implement Tasks 5, 6, 8 for branch visualization"
+  ],
+  "implemented_tasks": [
+    "Task 5: send/route.ts - startSession() 呼び出し後に initial_branch を保存する処理追加",
+    "Task 6: API拡張 - GET /api/worktrees/:id にgitStatusフィールドを追加",
+    "Task 8: 統合 - WorktreeDetailRefactored.tsx と MobileHeader.tsx へのブランチ情報表示統合"
+  ],
+  "message": "TDD実装完了。Tasks 5, 6, 8を実装。全36テストがパス。ESLint/TypeScriptエラー0件。ブランチ情報がデスクトップ・モバイル両方のUIに表示され、ブランチ不一致時に警告が表示されます。"
+}

@@ -1,0 +1,59 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項対応",
+  "applied_date": "2026-02-02",
+  "applied_items": [
+    {
+      "id": "SEC-MF-001",
+      "severity": "Must Fix",
+      "status": "completed",
+      "action": "セクション8.4を新設。エラーログ方針を明記（サーバーログのみ詳細出力、クライアントには汎用値返却）"
+    },
+    {
+      "id": "SEC-MF-002",
+      "severity": "Must Fix",
+      "status": "completed",
+      "action": "セクション8.3を新設。XSS対策方針を明記（React自動エスケープ依存、dangerouslySetInnerHTML禁止）"
+    },
+    {
+      "id": "SEC-SF-001",
+      "severity": "Should Fix",
+      "status": "completed",
+      "action": "セクション8.2にgetGitStatus関数のJSDoc（Trust Boundary）を追加"
+    },
+    {
+      "id": "SEC-SF-002",
+      "severity": "Should Fix",
+      "status": "completed",
+      "action": "セクション3.3にsaveInitialBranchのSQL実装例（プリペアドステートメント使用）を追加"
+    },
+    {
+      "id": "SEC-SF-003",
+      "severity": "Should Fix",
+      "status": "completed",
+      "action": "セクション5.3にタイムアウト値の根拠（ローカルSSD想定10-50ms、10倍マージン）を追加"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "SEC-SF-004",
+      "severity": "Should Fix",
+      "reason": "ブランチ名はgitリポジトリ可視範囲と同等。CM_AUTH_TOKEN認証は既存機構。低リスクとして記録のみ"
+    },
+    {
+      "id": "SEC-I-001",
+      "severity": "Info",
+      "reason": "Race conditionは極めて低リスク。現状設計で問題なし"
+    },
+    {
+      "id": "SEC-I-002",
+      "severity": "Info",
+      "reason": "SEC-MF-001で対応済み"
+    }
+  ],
+  "summary": {
+    "must_fix_applied": 2,
+    "should_fix_applied": 3,
+    "info_skipped": 2
+  }
+}

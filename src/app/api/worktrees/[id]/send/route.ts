@@ -15,11 +15,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId } from '@/lib/db';
+import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
+import { getGitStatus } from '@/lib/git-utils';
 
 /** Supported CLI tool IDs */
 const VALID_CLI_TOOL_IDS: CLIToolType[] = ['claude', 'codex', 'gemini'];
@@ -97,6 +98,22 @@ export async function POST(
     if (!running) {
       try {
         await cliTool.startSession(params.id, worktree.path);
+
+        // Issue #111: Save initial branch at session start
+        // Get current branch and save it if not already recorded
+        const existingInitialBranch = getInitialBranch(db, params.id);
+        if (existingInitialBranch === null) {
+          try {
+            const gitStatus = await getGitStatus(worktree.path, null);
+            if (gitStatus.currentBranch !== '(unknown)' && gitStatus.currentBranch !== '(detached HEAD)') {
+              saveInitialBranch(db, params.id, gitStatus.currentBranch);
+              console.log(`[send] Saved initial branch for ${params.id}: ${gitStatus.currentBranch}`);
+            }
+          } catch (gitError) {
+            // Log but don't fail - git status is non-critical
+            console.error(`[send] Failed to get/save initial branch:`, gitError);
+          }
+        }
       } catch (error: unknown) {
         console.error(`Failed to start ${cliTool.name} session:`, error);
         return NextResponse.json(
