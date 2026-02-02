@@ -4,12 +4,14 @@
  * Mobile header for displaying worktree info and status
  *
  * SF1: Uses centralized status colors from @/config/status-colors
+ * Issue #111: Added branch name display
  */
 
 'use client';
 
 import { useMemo, memo } from 'react';
 import { MOBILE_STATUS_CONFIG, type WorktreeStatusType } from '@/config/status-colors';
+import type { GitStatus } from '@/types/models';
 
 /**
  * Status type for worktree
@@ -26,6 +28,8 @@ export interface MobileHeaderProps {
   repositoryName?: string;
   /** Current status */
   status: WorktreeStatus;
+  /** Git status for branch display (Issue #111) */
+  gitStatus?: GitStatus;
   /** Optional callback for back button */
   onBackClick?: () => void;
   /** Optional callback for menu button */
@@ -70,6 +74,14 @@ const ICON_PATHS = {
 
 
 /**
+ * Truncate branch name if too long (Issue #111)
+ */
+function truncateBranch(branch: string, maxLength: number = 20): string {
+  if (branch.length <= maxLength) return branch;
+  return `${branch.substring(0, maxLength - 3)}...`;
+}
+
+/**
  * MobileHeader - Header for mobile view
  *
  * Displays worktree name, status indicator, and optional navigation buttons.
@@ -79,6 +91,7 @@ export function MobileHeader({
   worktreeName,
   repositoryName,
   status,
+  gitStatus,
   onBackClick,
   onMenuClick,
 }: MobileHeaderProps) {
@@ -135,11 +148,28 @@ export function MobileHeader({
             >
               {worktreeName}
             </h1>
-            {repositoryName && (
-              <span className="text-xs text-gray-500 truncate text-center">
-                {repositoryName}
-              </span>
-            )}
+            <div className="flex items-center gap-1 text-xs text-gray-500">
+              {repositoryName && (
+                <span className="truncate max-w-[100px] text-center">
+                  {repositoryName}
+                </span>
+              )}
+              {gitStatus && gitStatus.currentBranch !== '(unknown)' && (
+                <>
+                  {repositoryName && <span className="text-gray-300">/</span>}
+                  <span
+                    className="truncate max-w-[80px] font-mono"
+                    title={gitStatus.currentBranch}
+                    data-testid="mobile-branch-name"
+                  >
+                    {truncateBranch(gitStatus.currentBranch)}
+                  </span>
+                  {gitStatus.isDirty && (
+                    <span className="text-amber-500" title="Uncommitted changes">*</span>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
 
