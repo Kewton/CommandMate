@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-02-02
+
+### Fixed
+- Foreground mode (`commandmate start`) now loads .env file (Issue #125 follow-up)
+  - v0.1.8 only fixed daemon mode, foreground mode was missing .env loading
+  - Now both modes load .env from `~/.commandmate/.env` for global installs
+  - Security warnings for external access also added to foreground mode
+
 ## [0.1.8] - 2026-02-02
 
 ### Fixed
@@ -204,7 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.8...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/Kewton/CommandMate/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/Kewton/CommandMate/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/Kewton/CommandMate/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/Kewton/CommandMate/compare/v0.1.5...v0.1.6
