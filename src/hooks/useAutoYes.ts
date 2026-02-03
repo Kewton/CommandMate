@@ -4,6 +4,9 @@
  * Handles automatic prompt response when auto-yes is enabled.
  * Uses a ref-based duplicate prevention mechanism to avoid
  * sending the same response multiple times during polling intervals.
+ *
+ * Issue #138: Added server-side duplicate prevention using lastServerResponseTimestamp.
+ * If the server has responded within the last 3 seconds, the client skips responding.
  */
 
 'use client';
@@ -11,6 +14,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { resolveAutoAnswer } from '@/lib/auto-yes-resolver';
 import type { PromptData } from '@/types/models';
+
+/** Duplicate prevention window in milliseconds (3 seconds) */
+const DUPLICATE_PREVENTION_WINDOW_MS = 3000;
 
 /** Parameters for useAutoYes hook */
 export interface UseAutoYesParams {
@@ -24,6 +30,8 @@ export interface UseAutoYesParams {
   promptData: PromptData | null;
   /** Whether auto-yes mode is enabled */
   autoYesEnabled: boolean;
+  /** Last server-side response timestamp (Issue #138) */
+  lastServerResponseTimestamp?: number | null;
 }
 
 /** Return value of useAutoYes hook */
@@ -41,6 +49,7 @@ export function useAutoYes({
   isPromptWaiting,
   promptData,
   autoYesEnabled,
+  lastServerResponseTimestamp,
 }: UseAutoYesParams): UseAutoYesReturn {
   const lastAutoRespondedRef = useRef<string | null>(null);
   const [lastAutoResponse, setLastAutoResponse] = useState<string | null>(null);
@@ -53,6 +62,15 @@ export function useAutoYes({
     }
 
     if (!promptData || !autoYesEnabled) return;
+
+    // Issue #138: Skip if server has responded recently (duplicate prevention)
+    if (lastServerResponseTimestamp) {
+      const timeSinceServerResponse = Date.now() - lastServerResponseTimestamp;
+      if (timeSinceServerResponse < DUPLICATE_PREVENTION_WINDOW_MS) {
+        // Server responded within the last 3 seconds, skip client-side response
+        return;
+      }
+    }
 
     // Generate composite key for duplicate prevention
     const promptKey = `${promptData.type}:${promptData.question}`;
@@ -72,7 +90,7 @@ export function useAutoYes({
     }).catch((err) => {
       console.error('[useAutoYes] Failed to send auto-response:', err);
     });
-  }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool]);
+  }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool, lastServerResponseTimestamp]);
 
   return { lastAutoResponse };
 }
