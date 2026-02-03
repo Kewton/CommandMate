@@ -1,0 +1,144 @@
+{
+  "issue_number": 136,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "DRY",
+        "severity": "high",
+        "title": "getDefaultDbPath() 重複実装の拡大リスク",
+        "description": "env-setup.ts と db-path-resolver.ts に同一ロジックの getDefaultDbPath() が存在する問題が継続。Issue #136 で getIssueDbPath() を追加する際、両ファイルに同様の拡張が必要となり、重複がさらに拡大する。",
+        "location": "設計書 4.1 Strategy パターン / 11.1 変更対象ファイル",
+        "recommendation": "db-path-resolver.ts を唯一のDBパス解決モジュールとして確立し、env-setup.ts からは import して使用する形にリファクタリングを先行実施すべき"
+      },
+      {
+        "id": "MF-002",
+        "principle": "SRP",
+        "severity": "high",
+        "title": "WorktreeSetupFacade の責務過多",
+        "description": "設計書 4.3 の WorktreeSetupFacade は5つの異なるサブシステム（ポート割当、Worktree作成、環境設定、External App登録、サーバー起動）を統合しているが、これらは異なるライフサイクルを持つため、単一クラスでの管理は責務過多となる可能性がある",
+        "location": "設計書 4.3 Facade パターン",
+        "recommendation": "Facade内部の各ステップを独立したCommand/Actionパターンで実装し、Facadeはオーケストレーションのみを担当するよう分離を検討"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "SOLID/OCP",
+        "severity": "medium",
+        "title": "ResourcePathResolver インターフェースの実装不足",
+        "description": "設計書 4.1 で ResourcePathResolver インターフェースを定義しているが、DbPathResolver のみが例示されている。PIDパス、ログパスの Resolver 実装が明示されておらず、OCP に従った拡張性の確保が不十分",
+        "location": "設計書 4.1 Strategy パターン",
+        "recommendation": "PidPathResolver, LogPathResolver の具体的なクラス設計を追加し、既存の getPidFilePath() との整合性を明確化する"
+      },
+      {
+        "id": "SF-002",
+        "principle": "DIP",
+        "severity": "medium",
+        "title": "CLI コマンドと DaemonManager の直接依存",
+        "description": "現在の start.ts は DaemonManager を直接インスタンス化している。Issue #136 で --issue フラグを追加する際、Issue 番号に応じた PID ファイルパスの解決ロジックが DaemonManager コンストラクタ呼び出し前に必要となり、依存関係が複雑化する",
+        "location": "設計書 6.1 CLI コマンド / src/cli/commands/start.ts",
+        "recommendation": "DaemonManager を抽象化するか、Factory パターンで生成することで、Issue 番号に基づく動的なパス解決を容易にする"
+      },
+      {
+        "id": "SF-003",
+        "principle": "KISS",
+        "severity": "medium",
+        "title": "ポート管理の二重システム可能性",
+        "description": "設計書 9.1 で DBベースポート管理を採用しつつ、8.2 で worktree-ports.json をキャッシュ用途として言及している。External Apps テーブルとキャッシュファイルの両方でポート情報を管理すると、同期問題が発生しやすくなる",
+        "location": "設計書 8.2 キャッシュ戦略 / 9.1 採用した設計",
+        "recommendation": "キャッシュファイルの必要性を再検討し、DB を Single Source of Truth として一本化するか、キャッシュの更新タイミング・無効化ルールを明確に定義する"
+      },
+      {
+        "id": "SF-004",
+        "principle": "ISP",
+        "severity": "medium",
+        "title": "ExternalApp インターフェースへの issueNo フィールド追加",
+        "description": "設計書 5.2 で ExternalApp に issueNo?: number を追加する設計だが、Issue と関連しない通常の External App にとっては不要なフィールドとなり、ISP 違反の懸念がある",
+        "location": "設計書 5.2 型定義拡張",
+        "recommendation": "WorktreeExternalApp のような派生型を定義するか、ExternalApp と issueNo のマッピングを別テーブルで管理することを検討"
+      }
+    ],
+    "consider": [
+      {
+        "id": "NTH-001",
+        "principle": "YAGNI",
+        "title": "ログディレクトリの Issue 別分離",
+        "description": "設計書 2.2 でログを Issue 別ディレクトリに分離する設計だが、現時点でログの Issue 別管理が必要かどうかは不明確。ログファイル名に Issue 番号を含めるだけで十分な可能性がある",
+        "location": "設計書 2.2 ディレクトリ構成",
+        "recommendation": "Phase 2 実装前にログの分離粒度を再検討。ディレクトリ分離は運用要件が明確になってから追加しても遅くない"
+      },
+      {
+        "id": "NTH-002",
+        "principle": "KISS",
+        "title": "develop ブランチ導入の複雑性",
+        "description": "設計書 9.1 で develop ブランチ導入を決定しているが、現在のトランクベース開発からの移行は CI/CD の変更、マージ戦略の変更など影響が大きい。並列開発の実現には必須ではない可能性がある",
+        "location": "設計書 9.1 / 9.2 ブランチ戦略",
+        "recommendation": "develop ブランチなしで feature/* から main への直接 PR でも並列 worktree 開発は可能。ブランチ戦略変更は別 Issue で段階的に導入することを検討"
+      },
+      {
+        "id": "NTH-003",
+        "principle": "DRY",
+        "title": "Claude Code スキルの重複処理",
+        "description": "設計書 11.2 で /worktree-setup と /worktree-cleanup スキルを新規作成するが、これらのスキル内で実行される処理が CLI コマンドと重複する可能性がある",
+        "location": "設計書 11.2 新規作成ファイル",
+        "recommendation": "スキルは CLI コマンドを呼び出すラッパーとして実装し、ビジネスロジックの重複を避ける"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "medium"
+  },
+  "design_principles_checklist": {
+    "single_responsibility": {
+      "status": "partial",
+      "notes": "WorktreeSetupFacade の責務が広すぎる。db-path-resolver.ts は適切に分離されている"
+    },
+    "open_closed": {
+      "status": "partial",
+      "notes": "Strategy パターンの採用は良いが、具体的な Resolver 実装が不足"
+    },
+    "liskov_substitution": {
+      "status": "ok",
+      "notes": "ResourcePathResolver インターフェースは LSP に適合した設計"
+    },
+    "interface_segregation": {
+      "status": "concern",
+      "notes": "ExternalApp への issueNo 追加は既存利用者に不要なフィールドを強制"
+    },
+    "dependency_inversion": {
+      "status": "partial",
+      "notes": "CLI コマンドが具象クラスに直接依存。抽象化の余地あり"
+    },
+    "simplicity": {
+      "status": "partial",
+      "notes": "DB とキャッシュファイルの二重管理、develop ブランチ導入など複雑性あり"
+    },
+    "no_premature_optimization": {
+      "status": "ok",
+      "notes": "パフォーマンス設計は現実的な範囲内"
+    },
+    "no_code_duplication": {
+      "status": "concern",
+      "notes": "getDefaultDbPath() の重複が継続し、拡張時にさらに悪化する懸念"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/pid-manager.ts",
+    "src/lib/db.ts",
+    "src/cli/types/index.ts",
+    "src/cli/commands/start.ts",
+    "src/types/external-apps.ts",
+    "src/lib/db-path-resolver.ts"
+  ],
+  "timestamp": "2026-02-03T12:00:00Z"
+}

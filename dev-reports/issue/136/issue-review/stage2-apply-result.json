@@ -1,0 +1,90 @@
+{
+  "issue_number": 136,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "Apply Review Findings (Stage 1)",
+  "apply_date": "2026-02-03",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "Added CI/CD workflow update section with specific changes: ci-pr.yml branches update from [main] to [main, develop], and clarified CLAUDE.md branch strategy section needs full update"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "Clarified db-path-resolver.ts changes: added specific function getIssueDbPath(issueNo: number) to be added, maintained existing getDefaultDbPath() for backward compatibility, and specified validateDbPath() extension"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "Resolved PID file path inconsistency: existing ~/.commandmate/.commandmate.pid maintained for backward compatibility, new getPidFilePath(issueNo?) function extends existing behavior, pids/ directory for issue-specific PIDs"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "Added detailed External Apps integration section: explained existing ExternalApp interface and pathPrefix routing, specified issueNo field addition, clarified DB table registration/deletion flow"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "Added explicit dependency section: Issue #135 must be completed first, parallel work not recommended due to db-path-resolver.ts change conflict risk"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "Added port management design section: specified DB-based management (External Apps unified), worktree-ports.json as optional cache only, port range 3001-3100"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "Added .env merge method details: specified dotenv package options usage, dotenv.config() with override:true for worktree-specific .env, daemon.ts extension approach"
+      },
+      {
+        "id": "SF-5",
+        "status": "applied",
+        "change_summary": "Added comprehensive security considerations section: AUTH_TOKEN sharing policy, port range restriction (3001-3100), PID file O_EXCL atomic write continuation, pids/ directory permissions, security event logging"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "Clarified skill directory structure: .claude/skills/worktree-setup/SKILL.md and .claude/skills/worktree-cleanup/SKILL.md following existing pattern"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "Added branch naming details: {description} auto-generated from Issue title (space to hyphen, special chars removed, 40 char limit)"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "Added test plan section: unit tests for path generation, integration tests for multi-worktree and proxy, E2E tests for skills and full workflow"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 11,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/136"
+  },
+  "key_changes": [
+    "Added review note at the top indicating update date and reference to review reports",
+    "Expanded CI/CD対応 section with specific workflow file changes",
+    "Detailed db-path-resolver.ts changes with function signatures",
+    "Clarified PID file path design for backward compatibility",
+    "Added comprehensive External Apps integration design",
+    "Created Security Considerations section with 4 subsections",
+    "Added Test Plan section with unit/integration/E2E test items",
+    "Created Dependencies section with clear prerequisite (Issue #135)",
+    "Updated file change table with more specific change descriptions"
+  ]
+}

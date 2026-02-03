@@ -1,0 +1,178 @@
+{
+  "issue_number": 136,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-SEC-001",
+        "category": "コマンドインジェクション",
+        "severity": "critical",
+        "title": "git worktree add コマンドの入力検証不足",
+        "description": "設計書では WorktreeCreator による git worktree add コマンドの実行が想定されているが、issueNo およびブランチ名の入力検証仕様が不足している。攻撃者が Issue 番号に特殊文字（シェルメタキャラクタ）を含めると、コマンドインジェクションのリスクがある。",
+        "owasp_category": "A03:2021 - Injection",
+        "current_design": "Section 4.3 の CreateWorktreeCommand で git worktree add を呼び出すが、issueNo の検証は整数バリデーションのみを暗黙的に想定",
+        "recommendation": "1. issueNo は厳密な正の整数検証（Number.isInteger && issueNo > 0 && issueNo < MAX_ISSUE_NO）を明示\n2. git コマンド実行には spawn/execFile を使用し、exec は禁止\n3. ブランチ名は [a-zA-Z0-9_/-] のホワイトリスト検証を追加\n4. 設計書 Section 7 に入力検証仕様を追加",
+        "affected_sections": ["4.3", "7"]
+      },
+      {
+        "id": "MF-SEC-002",
+        "category": "認証/認可",
+        "severity": "high",
+        "title": "Worktree間の認証トークン共有によるセキュリティ境界の曖昧さ",
+        "description": "Section 7.1 で「グローバル .env の CM_AUTH_TOKEN を全Worktreeで共有」と記載されているが、これにより単一のトークン漏洩で全Worktree環境へのアクセスが可能になる。また、Worktree固有トークンで上書き可能とあるが、上書き時の優先順位やトークン検証フローが不明確。",
+        "owasp_category": "A01:2021 - Broken Access Control",
+        "current_design": "Section 7.1: グローバルCM_AUTH_TOKEN共有、Worktree固有トークンで上書き可能",
+        "recommendation": "1. Worktree毎の独立トークン生成をデフォルトオプションとして追加（Issue毎に異なるトークン）\n2. トークンの優先順位を明確化: Worktree固有 > グローバル\n3. トークン共有使用時のリスク（1トークン漏洩=全環境アクセス）をドキュメント化\n4. 認証フローのシーケンス図を追加",
+        "affected_sections": ["7.1"]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-SEC-001",
+        "category": "パストラバーサル",
+        "severity": "medium",
+        "title": "ResourcePathResolver の validate() メソッドの TOCTOU 脆弱性リスク",
+        "description": "SF-CONS-005対応で existsSync チェック後に realpathSync を呼び出す設計になっているが、existsSync と realpathSync の間で競合状態（TOCTOU: Time-Of-Check-Time-Of-Use）が発生する可能性がある。",
+        "owasp_category": "A01:2021 - Broken Access Control",
+        "current_design": "Section 4.1: if (!fs.existsSync(path)) { ... } const resolved = fs.realpathSync(path);",
+        "recommendation": "1. try-catch で realpathSync を直接呼び出し、ENOENT は catch で処理\n2. または lstatSync + realpathSync を atomic に近い形で実行\n3. 既存実装 resolveSecurePath() のパターンを参照",
+        "affected_sections": ["4.1"]
+      },
+      {
+        "id": "SF-SEC-002",
+        "category": "DoS対策",
+        "severity": "medium",
+        "title": "ポート枯渇攻撃への対策不足",
+        "description": "Section 7.2 でポート範囲 3001-3100（100個）を定義しているが、悪意のあるユーザーによる大量Worktree作成でポートを枯渇させる攻撃シナリオへの対策が記載されていない。",
+        "owasp_category": "A05:2021 - Security Misconfiguration",
+        "current_design": "Section 7.2: 自動割り当て範囲 3001-3100、特権ポート禁止、設定による範囲変更可能",
+        "recommendation": "1. ユーザー毎のWorktree数上限を設定可能にする（例: 10個/ユーザー）\n2. ポート割り当てのクールダウン期間を設ける\n3. Section 8.1 のリソース使用量制限と連携し、上限到達時の警告/拒否ロジックを追加\n4. 管理者向けリソース制限設定をドキュメント化",
+        "affected_sections": ["7.2", "8.1"]
+      },
+      {
+        "id": "SF-SEC-003",
+        "category": "機密情報漏洩",
+        "severity": "medium",
+        "title": "エラーメッセージでの内部パス露出",
+        "description": "設計書全体でエラーメッセージに内部パス（configDir, targetPath等）を含める記載があるが、これらはクライアント側に露出させるべきではない。内部構造の露出は攻撃者への情報提供となる。",
+        "owasp_category": "A04:2021 - Insecure Design",
+        "current_design": "複数箇所で path 情報をエラーメッセージに含む設計（例: ERROR_DEFINITIONS.INVALID_TARGET_PATH）",
+        "recommendation": "1. クライアント向けエラーメッセージとサーバーログを分離\n2. クライアントには汎用的なエラーコードのみを返却\n3. 詳細パス情報はサーバーログにのみ記録\n4. 既存実装 git-utils.ts の「Error details are logged server-side, not exposed to client」パターンを全体に適用",
+        "affected_sections": ["4.1", "4.2", "4.3"]
+      },
+      {
+        "id": "SF-SEC-004",
+        "category": "権限管理",
+        "severity": "medium",
+        "title": "pids/ ディレクトリ作成時の権限設定タイミング",
+        "description": "Section 7.3 で pids/ ディレクトリのパーミッション 0700 を定義しているが、ディレクトリ作成時に適切な umask またはパーミッション設定が行われることを保証する設計が明示されていない。",
+        "owasp_category": "A05:2021 - Security Misconfiguration",
+        "current_design": "Section 7.3: pids/ ディレクトリのパーミッション: 0700",
+        "recommendation": "1. mkdirSync 呼び出し時に { recursive: true, mode: 0o700 } を明示的に指定\n2. 既存ディレクトリの場合も chmod でパーミッション確認/修正\n3. PidManager 初期化時にディレクトリパーミッション検証を追加",
+        "affected_sections": ["7.3", "4.1"]
+      },
+      {
+        "id": "SF-SEC-005",
+        "category": "セキュリティログ",
+        "severity": "low",
+        "title": "Worktree 操作のセキュリティイベントログ不足",
+        "description": "NTH-IMP-002 で issueNo オプション追加が将来検討事項となっているが、Worktree 作成/削除/起動/停止は重要なセキュリティイベントであり、監査ログへの記録は必須とすべき。",
+        "owasp_category": "A09:2021 - Security Logging and Monitoring Failures",
+        "current_design": "Section 14.4 NTH-IMP-002: 将来検討として記録のみ",
+        "recommendation": "1. WorktreeSetupFacade の各ステップ成功/失敗を logSecurityEvent() で記録\n2. issueNo、操作種別、結果、タイムスタンプを含める\n3. 優先度を「将来検討」から「Phase 1 で実装」に昇格",
+        "affected_sections": ["4.3", "14.4"]
+      }
+    ],
+    "consider": [
+      {
+        "id": "NTH-SEC-001",
+        "category": "暗号化",
+        "severity": "low",
+        "title": "Worktree間通信の暗号化",
+        "description": "localhost 内の通信であっても、将来的にリモート開発環境やコンテナ環境での使用を考慮すると、Worktree間通信（プロキシルーティング）の暗号化オプションがあると良い。",
+        "recommendation": "将来の拡張として、TLS対応のプロキシオプションを検討"
+      },
+      {
+        "id": "NTH-SEC-002",
+        "category": "入力検証",
+        "severity": "low",
+        "title": "Issue番号の上限設定",
+        "description": "Issue番号に明示的な上限（例: 2^31-1）を設定し、整数オーバーフローを防止。",
+        "recommendation": "MAX_ISSUE_NO 定数を定義し、検証ロジックに組み込む"
+      },
+      {
+        "id": "NTH-SEC-003",
+        "category": "監査",
+        "severity": "low",
+        "title": "認証トークンのローテーション機能",
+        "description": "長期間同じトークンを使用し続けるリスクを軽減するため、トークンローテーション機能を将来的に検討。",
+        "recommendation": "トークン有効期限と更新機能を将来バージョンで追加"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_2021_Broken_Access_Control": {
+      "status": "partial",
+      "notes": "パストラバーサル対策は設計済み（SF-CONS-005、Section 7.4）。ただしTOCTOUリスク（SF-SEC-001）と認証トークン共有の問題（MF-SEC-002）が残存。"
+    },
+    "A02_2021_Cryptographic_Failures": {
+      "status": "ok",
+      "notes": "認証トークンは randomBytes(32) で生成、ファイルパーミッション 0600 で保護。"
+    },
+    "A03_2021_Injection": {
+      "status": "concern",
+      "notes": "git worktree add コマンドの入力検証が不足（MF-SEC-001）。既存実装では execFile 使用だが、新規実装での一貫性を保証する設計が必要。"
+    },
+    "A04_2021_Insecure_Design": {
+      "status": "partial",
+      "notes": "エラーメッセージでの内部パス露出（SF-SEC-003）。セキュリティ設計セクション（Section 7）は存在するが、一部詳細不足。"
+    },
+    "A05_2021_Security_Misconfiguration": {
+      "status": "partial",
+      "notes": "ポート範囲制限・PIDパーミッション設計済み。ただしポート枯渇攻撃対策（SF-SEC-002）とディレクトリ作成時パーミッション（SF-SEC-004）に改善余地。"
+    },
+    "A06_2021_Vulnerable_Components": {
+      "status": "ok",
+      "notes": "dotenv v16+ バージョン確認がSF-IMP-002で対応済み。既存依存関係は問題なし。"
+    },
+    "A07_2021_Auth_Failures": {
+      "status": "partial",
+      "notes": "CM_AUTH_TOKEN による認証は実装済み。ただしWorktree間の認証境界が曖昧（MF-SEC-002）。"
+    },
+    "A08_2021_Software_Data_Integrity": {
+      "status": "ok",
+      "notes": "DBマイグレーションのロールバック機構、PIDファイルのO_EXCLアトミック書き込みが設計済み。"
+    },
+    "A09_2021_Logging_Monitoring": {
+      "status": "partial",
+      "notes": "既存の logSecurityEvent() は活用可能だが、Worktree操作のログ記録が不足（SF-SEC-005）。"
+    },
+    "A10_2021_SSRF": {
+      "status": "ok",
+      "notes": "プロキシルーティングは localhost のみを対象とし、外部URLへのSSRFリスクは低い。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "medium",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/pid-manager.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/security-logger.ts",
+    "src/lib/db-path-resolver.ts",
+    "src/lib/env.ts",
+    "src/lib/git-utils.ts",
+    "src/lib/clone-manager.ts",
+    "src/types/external-apps.ts",
+    "src/middleware.ts"
+  ],
+  "timestamp": "2026-02-03T10:30:00Z"
+}

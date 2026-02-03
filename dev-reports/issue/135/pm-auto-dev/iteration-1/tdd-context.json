@@ -1,0 +1,67 @@
+{
+  "issue_number": 135,
+  "issue_title": "バージョンアップ時にDBクリア",
+  "acceptance_criteria": [
+    "旧バージョンから新バージョンへアップグレード後、リポジトリ情報が保持される",
+    "グローバルインストールで任意のディレクトリから commandmate start を実行しても同じDBを参照する",
+    "commandmate init 実行後、.env に絶対パスで CM_DB_PATH が設定される",
+    "db-instance.ts が DATABASE_PATH を直接参照せず、env.ts 経由で CM_DB_PATH を使用する",
+    "旧バージョンのDB（db.sqlite）が検出された場合、cm.db にマイグレーションされる",
+    "単体テストでDBパス解決ロジックを検証する",
+    "DATABASE_PATH 環境変数使用時にdeprecation警告が出力される"
+  ],
+  "implementation_tasks": [
+    {
+      "phase": 1,
+      "name": "基盤修正",
+      "tasks": [
+        "src/lib/db-path-resolver.ts 新規作成 - getDefaultDbPath()関数実装",
+        "src/lib/env.ts 修正 - getDatabasePathWithDeprecationWarning()追加、validateDbPath()追加",
+        "src/lib/db-instance.ts 修正 - getEnv().CM_DB_PATH使用、ディレクトリ作成時mode: 0o700",
+        "tests/unit/db-path-resolver.test.ts 新規作成"
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "CLI修正",
+      "tasks": [
+        "src/cli/utils/env-setup.ts 修正 - ENV_DEFAULTSからCM_DB_PATH削除、getDefaultDbPath()エクスポート",
+        "src/cli/commands/init.ts 修正 - createDefaultConfig()とpromptForConfig()でgetDefaultDbPath()使用",
+        "scripts/health-check.sh 修正 - CM_DB_PATHフォールバック対応",
+        "scripts/status.sh 修正 - CM_DB_PATHフォールバック対応",
+        "tests/unit/cli/utils/env-setup.test.ts 修正"
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "マイグレーション",
+      "tasks": [
+        "src/lib/db-migration-path.ts 新規作成 - migrateDbIfNeeded(), getLegacyDbPaths(), resolveAndValidatePath()",
+        "src/lib/db-instance.ts 追加修正 - マイグレーション呼び出し統合",
+        "tests/unit/db-migration-path.test.ts 新規作成",
+        "tests/integration/db-instance.test.ts 修正/追加"
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "ドキュメント更新",
+      "tasks": [
+        ".env.example 更新 - CM_DB_PATHデフォルト値をcm.dbに変更",
+        "docs/DEPLOYMENT.md 修正 - DATABASE_PATH廃止説明追加",
+        "docs/migration-to-commandmate.md 修正 - 移行手順追加",
+        "CLAUDE.md 修正 - 新規モジュール説明追加"
+      ]
+    }
+  ],
+  "target_coverage": 80,
+  "security_requirements": [
+    "SEC-001: ローカルインストール時のシステムディレクトリ保護",
+    "SEC-002: シンボリックリンク解決によるTOCTOU防止",
+    "SEC-003: ディレクトリ作成時にmode: 0o700",
+    "SEC-004: DATABASE_PATH使用時のセキュリティログ",
+    "SEC-005: DATABASE_PATH検証後にマイグレーション対象追加",
+    "SEC-006: バックアップファイルのパーミッション設定"
+  ],
+  "design_policy_path": "dev-reports/design/issue-135-db-path-resolution-design-policy.md",
+  "work_plan_path": "dev-reports/issue/135/work-plan.md"
+}

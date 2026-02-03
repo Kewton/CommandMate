@@ -1,0 +1,169 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 135,
+  "review_date": "2026-02-03",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-001",
+        "category": "A01:2021 Broken Access Control",
+        "severity": "high",
+        "title": "validateDbPath() のパストラバーサル検証がグローバルインストール時のみ",
+        "description": "Section 7.1 の validateDbPath() 実装では、グローバルインストール時のみホームディレクトリ内チェックを行っている。ローカルインストール時には検証が行われないため、任意のパスにDBを作成される可能性がある。",
+        "location": "Section 7.1 validateDbPath()",
+        "current_implementation": "if (isGlobalInstall()) { /* check home dir only */ }",
+        "recommendation": "ローカルインストール時も、CWD配下またはプロジェクトルート配下であることを検証する。最低限、/etc, /usr, /bin 等のシステムディレクトリへの書き込みを禁止すべき。",
+        "code_example": "const systemDirs = ['/etc', '/usr', '/bin', '/sbin', '/var', '/tmp'];\nif (systemDirs.some(dir => resolvedPath.startsWith(dir))) {\n  throw new Error(`Security error: DB path cannot be in system directory: ${resolvedPath}`);\n}"
+      },
+      {
+        "id": "SEC-002",
+        "category": "A01:2021 Broken Access Control",
+        "severity": "high",
+        "title": "migrateDbIfNeeded() でのシンボリックリンク脆弱性",
+        "description": "Section 9.2 の migrateDbIfNeeded() では fs.existsSync() と fs.copyFileSync() を使用しているが、realpathSync() によるシンボリックリンク解決が行われていない。攻撃者がシンボリックリンクを配置した場合、意図しない場所にファイルをコピーされる可能性がある（TOCTOU攻撃）。",
+        "location": "Section 9.2 migrateDbIfNeeded()",
+        "current_implementation": "fs.existsSync(legacyPath) -> fs.copyFileSync(legacyPath, targetPath)",
+        "recommendation": "legacyPath と targetPath の両方を realpathSync() で解決し、許可されたディレクトリ内であることを検証してからコピーを実行する。Issue #125 の resolveSecurePath() を活用すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-003",
+        "category": "A05:2021 Security Misconfiguration",
+        "severity": "medium",
+        "title": "ディレクトリ作成時のモード未指定",
+        "description": "Section 4.1 の db-instance.ts 修正後コードで fs.mkdirSync(dir, { recursive: true }) を使用しているが、mode が未指定。デフォルトではumask適用後の権限となり、意図せず他ユーザーにアクセスを許可する可能性がある。",
+        "location": "Section 4.1 getDbInstance()",
+        "current_implementation": "fs.mkdirSync(dir, { recursive: true })",
+        "recommendation": "mode: 0o700 を明示的に指定する。これは Issue #119 の getEnvPath() (env-setup.ts:73) で既に使用されているパターンと整合する。",
+        "code_example": "fs.mkdirSync(dir, { recursive: true, mode: 0o700 });"
+      },
+      {
+        "id": "SEC-004",
+        "category": "A09:2021 Security Logging and Monitoring",
+        "severity": "medium",
+        "title": "DATABASE_PATH 使用時のセキュリティログ不足",
+        "description": "Section 7.2 で「DATABASE_PATH使用をセキュリティイベントとして記録」と記載されているが、具体的なログ実装が Section 6.1.1 のコード例に含まれていない。console.warn のみで、Issue #96 で導入された security-logger.ts への記録が設計されていない。",
+        "location": "Section 6.1.1, Section 7.2",
+        "current_implementation": "console.warn('[DEPRECATED] DATABASE_PATH is deprecated...')",
+        "recommendation": "security-logger.ts の logSecurityEvent() を使用して、旧環境変数使用をセキュリティイベントとして記録する。これにより、セキュリティ監査時に旧設定の使用状況を追跡可能になる。",
+        "code_example": "import { logSecurityEvent } from '../cli/utils/security-logger';\nif (dbPath) {\n  console.warn('[DEPRECATED] DATABASE_PATH is deprecated...');\n  logSecurityEvent('deprecated_env_var', { variable: 'DATABASE_PATH' });\n}"
+      },
+      {
+        "id": "SEC-005",
+        "category": "A01:2021 Broken Access Control",
+        "severity": "medium",
+        "title": "getLegacyDbPaths() での DATABASE_PATH 未検証使用",
+        "description": "Section 9.2 の getLegacyDbPaths() で process.env.DATABASE_PATH を検証なしで paths 配列に追加している。攻撃者が DATABASE_PATH にシステムファイルのパスを設定した場合、そのファイルが上書きコピーの対象となる可能性がある。",
+        "location": "Section 9.2 getLegacyDbPaths()",
+        "current_implementation": "if (process.env.DATABASE_PATH) { paths.push(process.env.DATABASE_PATH); }",
+        "recommendation": "DATABASE_PATH を paths に追加する前に、安全なディレクトリ内であることを検証する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "SEC-006",
+        "category": "Defense in Depth",
+        "severity": "low",
+        "title": "バックアップファイルのパーミッション未指定",
+        "description": "Section 9.2 の fs.copyFileSync(legacyPath, backupPath) でバックアップファイルを作成しているが、パーミッションが元ファイルと同じになる。DBファイルには機密情報が含まれる可能性があるため、明示的に 0o600 を設定することを推奨。",
+        "location": "Section 9.2 migrateDbIfNeeded()",
+        "current_implementation": "fs.copyFileSync(legacyPath, backupPath)",
+        "recommendation": "copyFileSync後に fs.chmodSync(backupPath, 0o600) を実行してパーミッションを明示的に設定する。"
+      },
+      {
+        "id": "SEC-007",
+        "category": "Defense in Depth",
+        "severity": "low",
+        "title": "DB接続後の整合性チェック未設計",
+        "description": "マイグレーション後に新しいパスでDBを開く際、DBファイルの整合性チェック（SQLite integrity_check）が設計されていない。コピー中の破損を検出する機構があると安全性が向上する。",
+        "location": "Section 9.2",
+        "recommendation": "マイグレーション後に PRAGMA integrity_check を実行し、結果を検証する処理を追加することを検討する。"
+      },
+      {
+        "id": "SEC-008",
+        "category": "A03:2021 Injection",
+        "severity": "low",
+        "title": "環境変数値の長さ制限未設計",
+        "description": "CM_DB_PATH 環境変数の値に長さ制限が設計されていない。極端に長いパスが設定された場合のバッファオーバーフロー等のリスクは低い（Node.jsの文字列処理は安全）が、最大長を設定することで予期しない動作を防げる。",
+        "location": "Section 6.1.1",
+        "recommendation": "CM_DB_PATH の最大長（例: 4096文字）を検証する処理を追加することを検討する。"
+      }
+    ]
+  },
+  "owasp_compliance": {
+    "A01_broken_access_control": "partial",
+    "A03_injection": "compliant",
+    "A05_security_misconfiguration": "partial",
+    "A09_security_logging": "partial"
+  },
+  "security_analysis": {
+    "path_traversal": {
+      "status": "partial",
+      "details": "グローバルインストール時はホームディレクトリ内チェックあり。ローカルインストール時は検証なし。resolveSecurePath() の活用が不十分。",
+      "existing_protection": "Issue #125 で resolveSecurePath() が実装済み",
+      "gap": "migrateDbIfNeeded() で resolveSecurePath() が使用されていない"
+    },
+    "symlink_resolution": {
+      "status": "partial",
+      "details": "validateDbPath() では path.resolve() のみ使用。fs.realpathSync() によるシンボリックリンク解決が不十分。",
+      "existing_protection": "env-setup.ts の resolveSecurePath() は realpathSync() を使用",
+      "gap": "設計書のコード例が resolveSecurePath() を使用していない"
+    },
+    "file_permissions": {
+      "status": "partial",
+      "details": ".env ファイルは 0o600 で作成される設計あり。ディレクトリ作成時とバックアップファイルのパーミッションが未指定。",
+      "existing_protection": "EnvSetup.createEnvFile() で mode: 0o600, chmod 0o600 を実行",
+      "gap": "db-instance.ts のディレクトリ作成時に mode 未指定"
+    },
+    "environment_variable_security": {
+      "status": "compliant",
+      "details": "既存の sanitizeInput(), sanitizePath() 関数が利用可能。env.ts での検証も実装済み。DATABASE_PATH の deprecation 警告も設計されている。",
+      "existing_protection": "env-setup.ts の sanitizeInput(), sanitizePath(), validatePort()",
+      "gap": "なし（設計書は既存機能の活用を想定）"
+    },
+    "migration_security": {
+      "status": "needs_improvement",
+      "details": "バックアップ作成は設計されているが、シンボリックリンク解決、パーミッション設定、整合性チェックが不足。",
+      "existing_protection": "なし（新規実装）",
+      "gap": "TOCTOU脆弱性、パーミッション設定、整合性チェックが未設計"
+    }
+  },
+  "consistency_with_issue_125": {
+    "resolveSecurePath_usage": {
+      "status": "insufficient",
+      "details": "Issue #125 で実装された resolveSecurePath(targetPath, allowedBaseDir) が、設計書のコード例で活用されていない。validateDbPath() では自前の実装を記述しており、DRY違反かつセキュリティ実装の重複。",
+      "recommendation": "validateDbPath() を削除し、resolveSecurePath() を直接使用するか、resolveSecurePath() をラップする形で実装する。"
+    },
+    "getConfigDir_reuse": {
+      "status": "partial",
+      "details": "getConfigDir() は既にシンボリックリンク解決とホームディレクトリ検証を行っている。この関数を活用することで、validateDbPath() の実装を簡略化できる。",
+      "recommendation": "グローバルインストール時のDBパスベースディレクトリとして getConfigDir() を使用する。"
+    }
+  },
+  "recommendations_summary": [
+    {
+      "priority": 1,
+      "action": "SEC-001 対応: ローカルインストール時のDBパス検証を追加。システムディレクトリへの書き込みを禁止する。"
+    },
+    {
+      "priority": 2,
+      "action": "SEC-002 対応: migrateDbIfNeeded() で resolveSecurePath() を使用してシンボリックリンク攻撃を防止する。"
+    },
+    {
+      "priority": 3,
+      "action": "SEC-003 対応: ディレクトリ作成時に mode: 0o700 を明示的に指定する。"
+    },
+    {
+      "priority": 4,
+      "action": "SEC-004 対応: DATABASE_PATH 使用時に security-logger.ts への記録を追加する。"
+    },
+    {
+      "priority": 5,
+      "action": "SEC-005 対応: getLegacyDbPaths() で DATABASE_PATH を検証してから使用する。"
+    }
+  ],
+  "verdict": "PROCEED_WITH_CHANGES",
+  "summary": "設計書は OWASP Top 10 の主要項目（A01, A03, A05）に対する対策を考慮しているが、実装の詳細において不十分な点がある。特に (1) ローカルインストール時のパストラバーサル検証の欠如、(2) マイグレーション処理でのシンボリックリンク脆弱性が高優先度の修正事項。Issue #125 で実装済みの resolveSecurePath() を活用することで、多くのセキュリティ懸念を解消できる。must_fix 2件、should_fix 3件、nice_to_have 3件の指摘事項を反映した上で実装を進めることを推奨。"
+}

@@ -37,8 +37,13 @@ export const CODEX_THINKING_PATTERN = /•\s*(Planning|Searching|Exploring|Runni
 /**
  * Claude prompt pattern (waiting for input)
  * Supports both legacy '>' and new '❯' (U+276F) prompt characters
+ * Issue #132: Also matches prompts with recommended commands (e.g., "❯ /work-plan")
+ *
+ * Matches:
+ * - Empty prompt: "❯ " or "> "
+ * - Prompt with command: "❯ /work-plan" or "> npm install"
  */
-export const CLAUDE_PROMPT_PATTERN = /^[>❯]\s*$/m;
+export const CLAUDE_PROMPT_PATTERN = /^[>❯](\s*$|\s+\S)/m;
 
 /**
  * Claude separator pattern

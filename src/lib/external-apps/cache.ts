@@ -1,6 +1,7 @@
 /**
  * Cache layer for external apps
  * Issue #42: Proxy routing for multiple frontend applications
+ * Issue #136: Phase 2 - Task 2.5 - Added invalidateByIssueNo for worktree cache invalidation
  *
  * Provides memory caching with TTL to reduce DB queries during proxy requests.
  * Uses Map-based cache with configurable TTL (default: 30 seconds).
@@ -94,6 +95,35 @@ export class ExternalAppCache {
     this.cache.clear();
     this.allAppsCache = null;
     this.lastRefresh = 0;
+  }
+
+  /**
+   * Invalidate cache for a specific issue number
+   * Issue #136: SF-IMP-004 - Worktree cache invalidation
+   *
+   * This method forces a full cache refresh to ensure the worktree
+   * external app is immediately routable after registration.
+   *
+   * Note: We perform a full invalidation rather than selective removal
+   * because the cache is keyed by pathPrefix (e.g., "commandmate_issue/135")
+   * and a full refresh is simpler and ensures consistency.
+   *
+   * @param issueNo - Issue number to invalidate cache for
+   *
+   * @example
+   * ```typescript
+   * // After registering a new worktree external app
+   * cache.invalidateByIssueNo(135);
+   * // The new worktree will be immediately routable
+   * ```
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  invalidateByIssueNo(issueNo: number): void {
+    // For simplicity and consistency, we invalidate the entire cache
+    // This ensures the new worktree is immediately routable
+    // The performance impact is minimal since the cache TTL is short (30s default)
+    // Note: issueNo parameter is kept for API clarity and potential future selective invalidation
+    this.invalidate();
   }
 }
 

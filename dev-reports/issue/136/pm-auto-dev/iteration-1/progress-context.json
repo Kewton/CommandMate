@@ -1,0 +1,11 @@
+{
+  "issue_number": 136,
+  "title": "Git Worktree 並列開発環境の整備",
+  "size": "XL",
+  "iteration": 1,
+  "tdd_result_path": "dev-reports/issue/136/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/136/pm-auto-dev/iteration-1/acceptance-result.json",
+  "refactor_result_path": "dev-reports/issue/136/pm-auto-dev/iteration-1/refactor-result.json",
+  "design_policy_path": "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+  "work_plan_path": "dev-reports/issue/136/work-plan.md"
+}

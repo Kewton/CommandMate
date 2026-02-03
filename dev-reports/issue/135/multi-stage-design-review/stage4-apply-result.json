@@ -1,0 +1,91 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項対応（セキュリティ）",
+  "issue_number": 135,
+  "applied_date": "2026-02-03",
+  "applied_items": [
+    {
+      "id": "SEC-001",
+      "category": "A01:2021 Broken Access Control",
+      "severity": "must_fix",
+      "title": "validateDbPath() のパストラバーサル検証がグローバルインストール時のみ",
+      "applied_section": "Section 7.1",
+      "changes": "validateDbPath() を拡張し、ローカルインストール時もシステムディレクトリ（/etc, /usr, /bin, /sbin, /var, /tmp, /dev, /sys, /proc）への書き込みを禁止する検証を追加"
+    },
+    {
+      "id": "SEC-002",
+      "category": "A01:2021 Broken Access Control",
+      "severity": "must_fix",
+      "title": "migrateDbIfNeeded() でのシンボリックリンク脆弱性",
+      "applied_section": "Section 9.2",
+      "changes": "migrateDbIfNeeded() を全面改修。fs.realpathSync() によるシンボリックリンク解決を追加し、TOCTOU攻撃を防止。resolveAndValidatePath() ヘルパー関数を新設"
+    },
+    {
+      "id": "SEC-003",
+      "category": "A05:2021 Security Misconfiguration",
+      "severity": "should_fix",
+      "title": "ディレクトリ作成時のモード未指定",
+      "applied_section": "Section 7.4, Section 9.2",
+      "changes": "新規 Section 7.4 を作成し、ディレクトリ作成時に mode: 0o700 を明示的に指定するコード例を追加。Section 9.2 のコード例にも反映"
+    },
+    {
+      "id": "SEC-004",
+      "category": "A09:2021 Security Logging and Monitoring",
+      "severity": "should_fix",
+      "title": "DATABASE_PATH 使用時のセキュリティログ不足",
+      "applied_section": "Section 7.2",
+      "changes": "Section 7.2 を拡充し、getDatabasePathWithDeprecationWarning() で security-logger.ts の logSecurityEvent() を使用するコード例を追加"
+    },
+    {
+      "id": "SEC-005",
+      "category": "A01:2021 Broken Access Control",
+      "severity": "should_fix",
+      "title": "getLegacyDbPaths() での DATABASE_PATH 未検証使用",
+      "applied_section": "Section 7.5, Section 9.2",
+      "changes": "新規 Section 7.5 を作成し、getLegacyDbPaths() で DATABASE_PATH をシステムディレクトリチェック後に追加するコード例を追加。Section 9.2 の getLegacyDbPaths() コードも更新"
+    },
+    {
+      "id": "SEC-006",
+      "category": "Defense in Depth",
+      "severity": "nice_to_have",
+      "title": "バックアップファイルのパーミッション未指定",
+      "applied_section": "Section 7.4, Section 9.2",
+      "changes": "Section 7.4 に追記。バックアップファイル作成後に fs.chmodSync(backupPath, 0o600) でパーミッションを設定するコード例を追加。Section 9.2 のコード例にも反映"
+    },
+    {
+      "id": "SEC-007",
+      "category": "Defense in Depth",
+      "severity": "nice_to_have",
+      "title": "DB接続後の整合性チェック未設計",
+      "applied_section": "Section 9.3 (new)",
+      "changes": "新規 Section 9.3 を作成。マイグレーション後の PRAGMA integrity_check によるDB整合性検証のオプション実装例を追加"
+    },
+    {
+      "id": "SEC-008",
+      "category": "A03:2021 Injection",
+      "severity": "nice_to_have",
+      "title": "環境変数値の長さ制限未設計",
+      "applied_section": "Section 7.5",
+      "changes": "Section 7.5 に追記。環境変数値の最大長制限（4096文字）を検証する getEnvWithLengthLimit() 関数のコード例を追加"
+    }
+  ],
+  "skipped_items": [],
+  "updated_sections": [
+    "Section 7.1 - パストラバーサル対策（SEC-001対応追加）",
+    "Section 7.2 - DATABASE_PATH廃止対応（SEC-004対応追加）",
+    "Section 7.3 - OWASP Top 10対応（A09追加）",
+    "Section 7.4 - ディレクトリ・ファイルパーミッション（新規作成、SEC-003, SEC-006）",
+    "Section 7.5 - 環境変数入力検証（新規作成、SEC-005, SEC-008）",
+    "Section 9.2 - マイグレーションロジック（SEC-002, SEC-003, SEC-005, SEC-006対応で全面改修）",
+    "Section 9.3 - DB整合性チェック（新規作成、SEC-007）",
+    "Section 15 - 変更履歴（Stage 4追加）",
+    "Section 16 - レビュー対応履歴（Stage 4セクション追加）"
+  ],
+  "owasp_compliance_after_update": {
+    "A01_broken_access_control": "compliant",
+    "A03_injection": "compliant",
+    "A05_security_misconfiguration": "compliant",
+    "A09_security_logging": "compliant"
+  },
+  "summary": "Stage 4 セキュリティレビューの全8件の指摘事項（must_fix: 2件、should_fix: 3件、nice_to_have: 3件）を設計方針書に反映完了。主要な変更点: (1) validateDbPath() にローカルインストール時のシステムディレクトリ保護を追加、(2) migrateDbIfNeeded() に realpathSync() によるシンボリックリンク解決を追加、(3) ファイル/ディレクトリパーミッションの明示化（0o700, 0o600）、(4) security-logger.ts を使用した旧環境変数使用のセキュリティログ追加、(5) DB整合性チェックのオプション実装例追加。OWASP Top 10 の A01, A03, A05, A09 全てで準拠状態を達成。"
+}

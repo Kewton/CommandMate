@@ -1,0 +1,205 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 136,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-02-03",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "依存関係影響",
+        "issue": "Issue #135との依存関係が明記されているが、#135は未完了（OPEN状態）であり、本Issueの実装順序に影響",
+        "location": "## 依存関係 セクション",
+        "recommendation": "Issue #135が「OPEN」状態であることを確認。本Issueの実装開始前に#135の完了を待つか、#135と#136を同時に実装する場合の競合回避戦略（db-path-resolver.tsへの変更を#135で完了させてから#136で拡張）を明記すべき",
+        "evidence": "gh issue view 135 の結果: state: OPEN。本Issueでdb-path-resolver.tsにgetIssueDbPath()を追加する計画だが、#135もdb-path-resolver.tsを変更対象としている"
+      },
+      {
+        "id": "MF-2",
+        "category": "互換性影響",
+        "issue": "external_appsテーブルへのissue_noカラム追加はDBマイグレーションが必要だが、マイグレーション計画が未記載",
+        "location": "### ポート管理設計 セクション",
+        "recommendation": "external_appsテーブルへのissue_noカラム追加は新規マイグレーション（Migration #16）として実装が必要。db-migrations.tsへの追加とCURRENT_SCHEMA_VERSION更新を影響範囲として明記すべき",
+        "evidence": "src/lib/db-migrations.ts: CURRENT_SCHEMA_VERSION = 15。external_appsテーブルは Migration #12で作成されており、カラム追加には新規マイグレーションが必須"
+      },
+      {
+        "id": "MF-3",
+        "category": "パフォーマンス影響",
+        "issue": "複数サーバー同時起動時のシステムリソース使用量の考慮が不足",
+        "location": "Issue全体",
+        "recommendation": "複数のNext.jsサーバーを同時起動する設計では、メモリ使用量（1サーバーあたり約200-500MB）、CPU負荷、ポート消費の上限を考慮すべき。同時起動可能なWorktree数の推奨上限（例: 5-10個）を設定し、ドキュメント化すべき",
+        "evidence": "ポート範囲3001-3100は100個のWorktreeをサポートする想定だが、実際のリソース制約（特にメモリ）を考慮した実用的な上限の検討が必要"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト影響",
+        "issue": "既存テストへの影響範囲が不明確",
+        "location": "## テスト計画 セクション",
+        "recommendation": "getPidFilePath()の既存テストがenv-setup.test.tsに存在する可能性があり、引数拡張（issueNo?）により既存テストの修正が必要。また、PidManagerクラスの既存テストへの影響も確認すべき",
+        "evidence": "src/cli/utils/pid-manager.tsのPidManagerクラスとsrc/cli/utils/env-setup.tsのgetPidFilePath()は既存テストが存在する可能性が高い"
+      },
+      {
+        "id": "SF-2",
+        "category": "運用影響",
+        "issue": "複数Worktreeサーバーのログ収集・監視方法が未定義",
+        "location": "### 2.4 ログ分離 セクション",
+        "recommendation": "各Worktreeが独立したログディレクトリを持つ設計は妥当だが、複数Worktreeのログを一元的に確認する方法（例: ログ集約コマンド、UIでのログビューワ）を検討すべき。また、ディスク容量管理（ログローテーション）の方針も必要",
+        "evidence": "パス例: ~/.commandmate/logs/{issue-no}/ は定義されているが、ログ管理の運用方針は未記載"
+      },
+      {
+        "id": "SF-3",
+        "category": "影響ファイル",
+        "issue": "影響範囲テーブルにdaemon.tsの変更内容が不足",
+        "location": "### 変更対象ファイル テーブル",
+        "recommendation": "daemon.tsの変更内容「複数.envファイルのマージ読み込み対応」は記載されているが、DaemonManagerクラスがissueNo引数を受け取る拡張も必要な可能性がある。コンストラクタの変更有無を明確化すべき",
+        "evidence": "src/cli/utils/daemon.ts: DaemonManagerはpidFilePathを引数に取る。Worktree対応でissueNoベースのパス解決が必要な場合、コンストラクタ設計に影響"
+      },
+      {
+        "id": "SF-4",
+        "category": "依存関係影響",
+        "issue": "プロキシルーティングの変更がExternalAppキャッシュに影響する可能性",
+        "location": "### 3. CommandMate External Apps 連携 セクション",
+        "recommendation": "src/lib/external-apps/cache.tsのgetByPathPrefix()がissueNoフィールドを考慮する必要がある場合、キャッシュ無効化ロジックの変更が必要。影響範囲として明記すべき",
+        "evidence": "proxy/[...path]/route.tsはgetExternalAppCache(db).getByPathPrefix(pathPrefix)を使用。issueNoフィールド追加後もpathPrefixベースのルーティングで対応可能だが、キャッシュ構造への影響確認が必要"
+      },
+      {
+        "id": "SF-5",
+        "category": "破壊的変更",
+        "issue": "getPidFilePath()の引数拡張は後方互換性があるが、明示的な確認が必要",
+        "location": "### 2.3 PID ファイル分離 セクション",
+        "recommendation": "getPidFilePath(issueNo?: number)の設計で、issueNo未指定時は既存の~/.commandmate/.commandmate.pidを返すことで後方互換性を維持する方針は妥当。ただし、start.ts/stop.ts/status.tsの既存呼び出し箇所が引数なしで動作することを確認するテストを追加すべき",
+        "evidence": "src/cli/commands/start.ts:28, stop.ts:23, status.ts（未確認）でgetPidFilePath()を引数なしで呼び出し。この動作が維持されることの確認が必要"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CLIヘルプメッセージの更新が影響範囲に含まれていない",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "commandmate start --auto-portフラグ追加に伴い、CLIヘルプメッセージ（src/cli/index.tsまたはcommander設定）の更新が必要。影響ファイルとして追加を推奨",
+        "evidence": "src/cli/index.tsにcommander設定が存在。新規フラグ追加時はhelp表示の更新が必要"
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "issue": "既存ユーザーがWorktree機能を使い始める際のマイグレーションパスが未記載",
+        "location": "Issue全体",
+        "recommendation": "既存のメインDB（cm.db）を使用しているユーザーが、Worktree別DBに移行する必要がある場合の手順を検討。または、既存メインDBとWorktree別DBの共存方針を明確化",
+        "evidence": "既存ユーザーは~/.commandmate/data/cm.dbを使用。Worktree機能導入後も既存DBの継続使用が可能かどうかの説明が必要"
+      },
+      {
+        "id": "NTH-3",
+        "category": "CI/CD影響",
+        "issue": "developブランチ対応後のCI/CDパイプライン動作の詳細が不足",
+        "location": "### CI/CD対応（必須）セクション",
+        "recommendation": "ci-pr.ymlのbranches更新は記載されているが、develop -> mainへのPR時とfeature -> developへのPR時で異なるCI動作が必要かどうかを検討。例えば、mainへのPRのみE2Eテストを実行するなど",
+        "evidence": ".github/workflows/ci-pr.yml: 現在はmainブランチへのPRのみを対象。developブランチ追加後の動作方針を明確化すべき"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3
+  },
+  "impact_analysis": {
+    "affected_files": {
+      "direct": [
+        "src/lib/db-path-resolver.ts - getIssueDbPath()追加",
+        "src/cli/utils/env-setup.ts - getPidFilePath()拡張",
+        "src/cli/utils/pid-manager.ts - Issue番号対応",
+        "src/cli/utils/daemon.ts - 複数.envマージ対応",
+        "src/cli/commands/start.ts - --auto-portフラグ",
+        "src/types/external-apps.ts - issueNo?フィールド",
+        "src/lib/db-migrations.ts - Migration #16追加（external_appsへissue_noカラム）",
+        ".github/workflows/ci-pr.yml - developブランチ対応",
+        "CLAUDE.md - ブランチ戦略・Worktreeフロー"
+      ],
+      "indirect": [
+        "src/lib/external-apps/db.ts - issueNoフィールド対応（createExternalApp等）",
+        "src/lib/external-apps/cache.ts - キャッシュ構造変更の可能性",
+        "src/app/proxy/[...path]/route.ts - ルーティングロジック確認",
+        "src/cli/commands/stop.ts - getPidFilePath()呼び出し確認",
+        "src/cli/commands/status.ts - getPidFilePath()呼び出し確認",
+        "src/cli/index.ts - CLIヘルプメッセージ更新"
+      ],
+      "new_files": [
+        "src/cli/utils/worktree-detector.ts",
+        "src/cli/utils/port-allocator.ts",
+        ".claude/skills/worktree-setup/SKILL.md",
+        ".claude/skills/worktree-cleanup/SKILL.md",
+        "docs/dev-guide/worktree-development.md"
+      ]
+    },
+    "backward_compatibility": {
+      "breaking_changes": [],
+      "compatible_changes": [
+        "getPidFilePath(issueNo?)の引数拡張（省略可能、既存動作維持）",
+        "external_appsテーブルへのissue_noカラム追加（NULLable、既存データに影響なし）"
+      ]
+    },
+    "dependencies": {
+      "blocking": [
+        "Issue #135: DBパス解決ロジック修正 - db-path-resolver.ts変更の前提条件"
+      ],
+      "related": [
+        "Issue #96: npm CLIサポート - CLI拡張の基盤",
+        "Issue #125: グローバルインストール.env読み込み - .env処理の参照",
+        "Issue #42: External Apps プロキシルーティング - 既存実装として参照"
+      ]
+    },
+    "resource_considerations": {
+      "memory": "複数Next.jsサーバー同時起動により、1サーバーあたり約200-500MBのメモリ消費",
+      "ports": "3001-3100のポート範囲（最大100個）を使用",
+      "disk": "各Worktreeに独立したDB、PID、ログファイルが作成される"
+    }
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/db-path-resolver.ts",
+      "relevance": "Issue #135と競合する変更対象。getIssueDbPath()追加予定"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/utils/env-setup.ts",
+      "relevance": "getPidFilePath()拡張の対象。既存関数（168-170行目）の変更"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/utils/pid-manager.ts",
+      "relevance": "PidManagerクラスの拡張対象。コンストラクタ設計に影響の可能性"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/db-migrations.ts",
+      "relevance": "Migration #16追加が必要。CURRENT_SCHEMA_VERSION更新"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/types/external-apps.ts",
+      "relevance": "ExternalAppインターフェースへのissueNo?追加"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/external-apps/db.ts",
+      "relevance": "issueNoフィールド追加に伴うDB操作関数の更新"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/.github/workflows/ci-pr.yml",
+      "relevance": "branches: [main, develop]への更新対象"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/CLAUDE.md",
+      "relevance": "ブランチ戦略セクションの更新、Worktree開発フローの追記"
+    }
+  ],
+  "related_issues": [
+    {
+      "issue_number": 135,
+      "title": "バージョンアップ時にDBクリア",
+      "state": "OPEN",
+      "relevance": "blocking dependency - db-path-resolver.ts変更の前提条件"
+    }
+  ]
+}

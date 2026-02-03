@@ -1,0 +1,122 @@
+{
+  "issue_number": 136,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "Apply 2nd Iteration Impact Scope Review",
+  "apply_date": "2026-02-03",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "CLI型定義影響",
+        "status": "applied",
+        "change_summary": "技術設計セクションに「CLI型定義の拡張（src/cli/types/index.ts）」サブセクションを追加。StopOptionsへのissue?: number追加、StatusOptionsインターフェース新規作成の詳細を記載"
+      },
+      {
+        "id": "SF-2",
+        "category": "External Apps DB操作影響",
+        "status": "applied",
+        "change_summary": "技術設計セクションに「External Apps DB型定義の拡張（src/lib/external-apps/db.ts）」サブセクションを追加。DbExternalAppRow/DbExternalAppInsert型へのissue_no追加、mapDbRowToExternalApp()/mapExternalAppToDbRow()関数の修正内容を記載"
+      },
+      {
+        "id": "SF-3",
+        "category": "テスト影響",
+        "status": "applied",
+        "change_summary": "テスト計画の統合テストセクションにtests/integration/external-apps-api.test.tsへのissueNoフィールドを含むCRUDテスト追加を記載。Phase 5にも反映"
+      },
+      {
+        "id": "SF-4",
+        "category": "コマンド引数影響",
+        "status": "applied",
+        "change_summary": "セクション7「CLI コマンドの Worktree 対応」に「commander設定の具体的変更（src/cli/index.ts）」サブセクションを追加。stop/statusコマンドへの.option('--issue <number>', ...)追加とaction内でのoptions.issue使用方法を具体的なコード例で記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "運用影響",
+        "status": "skipped",
+        "reason": "logs/main/からlogs/default/への変更はStage 5で既に対応済み。既存ユーザーへの移行は自動リネームよりドキュメント化で対応する方針のため、本Issueのスコープ外として扱う"
+      },
+      {
+        "id": "NTH-2",
+        "category": "依存関係影響",
+        "status": "applied",
+        "change_summary": "環境変数読み込み順序セクションにdotenv v16.0.0以降が必要である旨の注記を追加。備考セクションにもpackage.jsonで確認済みである旨を追記"
+      },
+      {
+        "id": "NTH-3",
+        "category": "将来機能影響",
+        "status": "applied",
+        "change_summary": "将来機能セクションにcommandmate logs --allの影響範囲（新規コマンド追加、ログ集約ロジック、パフォーマンス考慮）を追記し、別Issueで実装することを明示"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 6,
+    "skipped": 1
+  },
+  "changes_made": [
+    {
+      "section": "技術設計",
+      "change": "CLI型定義の拡張（src/cli/types/index.ts）サブセクション追加"
+    },
+    {
+      "section": "技術設計",
+      "change": "External Apps DB型定義の拡張（src/lib/external-apps/db.ts）サブセクション追加"
+    },
+    {
+      "section": "7. CLI コマンドの Worktree 対応",
+      "change": "commander設定の具体的変更（src/cli/index.ts）サブセクション追加"
+    },
+    {
+      "section": "テスト計画",
+      "change": "統合テストにexternal-apps-api.test.tsへのissueNoテスト追加を記載"
+    },
+    {
+      "section": "影響範囲",
+      "change": "src/cli/types/index.tsとsrc/lib/external-apps/db.tsの変更内容を詳細化"
+    },
+    {
+      "section": "受入条件",
+      "change": "CLI型定義とExternal Apps DB型定義の拡張に関する条件を追加"
+    },
+    {
+      "section": "実装計画",
+      "change": "Phase 3にCLI型定義拡張、Phase 4にExternal Apps DB型定義拡張、Phase 5にテスト追加を追記"
+    },
+    {
+      "section": "環境変数読み込み順序",
+      "change": "dotenv v16.0.0以降が必要である旨の注記を追加"
+    },
+    {
+      "section": "将来機能",
+      "change": "commandmate logs --allの影響範囲を追記し別Issueとして明示"
+    },
+    {
+      "section": "備考",
+      "change": "dotenvバージョン要件の確認済み記載を追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "Stage 7 - 2nd Iteration Impact Scope Reviewの記録を追加"
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/136"
+  },
+  "stage3_resolution_verification": {
+    "must_fix": "3/3 (100%) - All resolved in previous iterations",
+    "should_fix": "5/5 (100%) - All resolved in previous iterations",
+    "nice_to_have": "2.5/3 (83%) - Partially resolved"
+  },
+  "backward_compatibility_maintained": true,
+  "new_sections_added": [
+    "CLI型定義の拡張（src/cli/types/index.ts）",
+    "External Apps DB型定義の拡張（src/lib/external-apps/db.ts）",
+    "commander設定の具体的変更（src/cli/index.ts）"
+  ]
+}

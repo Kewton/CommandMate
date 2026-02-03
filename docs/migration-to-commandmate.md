@@ -235,6 +235,30 @@ sed -i '' 's/MyCodeBranchDesk/commandmate/g' .claude/settings.local.json
 
 > **重要**: v2.0.0 以降、旧名称（`MCBD_*`）を使用し続けた場合、アプリケーションは環境変数が未設定として扱い、デフォルト値を使用します。必ず v2.0.0 アップグレード前に `CM_*` への移行を完了してください。
 
+### DATABASE_PATH の廃止
+
+`DATABASE_PATH` 環境変数は廃止され、`CM_DB_PATH` に統一されました。
+
+**移行手順**:
+
+1. `.env` ファイルで `DATABASE_PATH` を `CM_DB_PATH` に変更
+2. 旧DBファイル（`db.sqlite`）は自動的に新パス（`cm.db`）にマイグレーションされます
+3. `commandmate init` を再実行すると、絶対パスで `CM_DB_PATH` が設定されます
+
+**例:**
+```bash
+# 変更前
+DATABASE_PATH=./data/db.sqlite
+
+# 変更後（グローバルインストール）
+CM_DB_PATH=~/.commandmate/data/cm.db
+
+# 変更後（ローカルインストール）
+CM_DB_PATH=/path/to/project/data/cm.db
+```
+
+> **Note**: `DATABASE_PATH` を使用すると deprecation 警告が出力されます。v2.0.0 で完全に削除されます。
+
 ---
 
 ## トラブルシューティング

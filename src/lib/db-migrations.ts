@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 /**
  * Migration definition
@@ -718,6 +718,76 @@ const migrations: Migration[] = [
       `);
 
       console.log('✓ Removed initial_branch column from worktrees table');
+    }
+  },
+  {
+    version: 16,
+    name: 'add-issue-no-to-external-apps',
+    up: (db) => {
+      // Issue #136: Add issue_no column to external_apps table
+      // This column identifies which worktree/issue an external app belongs to
+      // NULL = main app (non-worktree), integer = issue number
+      db.exec(`
+        ALTER TABLE external_apps ADD COLUMN issue_no INTEGER;
+      `);
+
+      // Create index for efficient querying by issue_no
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_external_apps_issue_no ON external_apps(issue_no);
+      `);
+
+      console.log('✓ Added issue_no column to external_apps table');
+      console.log('✓ Created index idx_external_apps_issue_no');
+    },
+    down: (db) => {
+      // SQLite doesn't support DROP COLUMN directly
+      // Recreate table without issue_no column
+      db.exec(`
+        -- 1. Create backup table without issue_no
+        CREATE TABLE external_apps_backup AS
+        SELECT id, name, display_name, description, path_prefix, target_port,
+               target_host, app_type, websocket_enabled, websocket_path_pattern,
+               enabled, created_at, updated_at
+        FROM external_apps;
+
+        -- 2. Drop original table (this also drops indexes)
+        DROP TABLE external_apps;
+
+        -- 3. Recreate table without issue_no
+        CREATE TABLE external_apps (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          description TEXT,
+          path_prefix TEXT NOT NULL UNIQUE,
+          target_port INTEGER NOT NULL,
+          target_host TEXT DEFAULT 'localhost',
+          app_type TEXT NOT NULL CHECK(app_type IN ('sveltekit', 'streamlit', 'nextjs', 'other')),
+          websocket_enabled INTEGER DEFAULT 0,
+          websocket_path_pattern TEXT,
+          enabled INTEGER DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        -- 4. Restore data
+        INSERT INTO external_apps (id, name, display_name, description, path_prefix,
+               target_port, target_host, app_type, websocket_enabled, websocket_path_pattern,
+               enabled, created_at, updated_at)
+        SELECT id, name, display_name, description, path_prefix,
+               target_port, target_host, app_type, websocket_enabled, websocket_path_pattern,
+               enabled, created_at, updated_at
+        FROM external_apps_backup;
+
+        -- 5. Drop backup
+        DROP TABLE external_apps_backup;
+
+        -- 6. Recreate original indexes
+        CREATE INDEX idx_external_apps_path_prefix ON external_apps(path_prefix);
+        CREATE INDEX idx_external_apps_enabled ON external_apps(enabled);
+      `);
+
+      console.log('✓ Removed issue_no column from external_apps table');
     }
   }
 ];

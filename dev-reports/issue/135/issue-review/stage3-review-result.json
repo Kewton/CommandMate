@@ -1,0 +1,89 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 135,
+  "review_date": "2026-02-03",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "M1",
+        "category": "影響範囲",
+        "description": "db-instance.tsの修正は56以上のAPIルートファイルに影響を与える。全てのAPIルートがgetDbInstance()を直接インポートして使用しており、DBパス解決ロジックの変更は全てのAPIエンドポイントの動作に影響する可能性がある。",
+        "suggestion": "修正後は全APIエンドポイントでDBアクセスが正常に動作することを統合テストで検証する必要がある。特に、グローバルインストール環境でのテストを追加すること。"
+      },
+      {
+        "id": "M2",
+        "category": "影響範囲",
+        "description": "20件以上の統合テストファイルがgetDbInstance()を使用している。これらのテストは現在process.cwd()ベースのパス解決を前提としており、新しいパス解決ロジックに合わせてテスト環境のセットアップを見直す必要がある。",
+        "suggestion": "統合テストのsetup/teardownでCM_DB_PATH環境変数を明示的に設定し、テスト間でDBファイルが干渉しないようにする。テスト実行前に既存テストが全てパスすることを確認すること。"
+      },
+      {
+        "id": "M3",
+        "category": "後方互換性",
+        "description": "DATABASE_PATH環境変数の廃止は後方互換性に影響する。既存ユーザーが.envでDATABASE_PATHを使用している場合、修正後はその設定が無視される可能性がある。",
+        "suggestion": "DATABASE_PATHからCM_DB_PATHへの自動マイグレーションまたはフォールバック機構を実装する。少なくとも警告メッセージを出力して、ユーザーに設定変更を促す。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1",
+        "category": "影響範囲",
+        "description": "server.tsはgetEnvByKey('CM_PORT')とgetEnvByKey('CM_BIND')を使用しているが、DBアクセスにはgetDbInstance()を使用している。db-instance.tsがenv.tsのgetEnv()を使用するように修正される場合、server.tsでの環境変数ロード順序に注意が必要。",
+        "suggestion": "server.tsでのgetDbInstance()呼び出し前に、.envファイルがロードされていることを保証する。現在はstart.tsでdotenvConfig()が呼ばれるが、server.ts単体で実行される場合の考慮も必要。"
+      },
+      {
+        "id": "S2",
+        "category": "影響範囲",
+        "description": "src/cli/commands/init.tsのcreateDefaultConfig()でENV_DEFAULTS.CM_DB_PATHを使用している。現在は相対パス('./data/cm.db')だが、修正後は絶対パスに変更される予定。この変更がinit時に生成される.envファイルの内容に影響する。",
+        "suggestion": "init.tsでgetConfigDir()を使用して絶対パスを生成するよう修正する。グローバルインストールとローカルインストールで異なるパスが生成されることをドキュメント化する。"
+      },
+      {
+        "id": "S3",
+        "category": "テスト影響",
+        "description": "tests/unit/env.test.tsはCM_DB_PATHのフォールバック機構をテストしているが、db-instance.tsがenv.tsを使用するようになった場合の統合動作はテストされていない。また、tests/unit/cli/utils/env-setup.test.tsはENV_DEFAULTSの値をテストしているが、絶対パスへの変更が必要。",
+        "suggestion": "db-instance.tsとenv.tsの統合テストを追加する。env-setup.test.tsのテストケースを更新して、グローバル/ローカルインストールの両方でのパス生成をテストする。"
+      },
+      {
+        "id": "S4",
+        "category": "ドキュメント影響",
+        "description": "複数のドキュメントファイルがDATABASE_PATHに言及している: .env.example, docs/DEPLOYMENT.md, docs/architecture.md, scripts/health-check.sh, scripts/status.sh。これらはCM_DB_PATHに統一する必要がある。",
+        "suggestion": "全てのドキュメントとスクリプトでDATABASE_PATH参照をCM_DB_PATHに更新する。移行ガイド（docs/migration-to-commandmate.md）にDATABASE_PATH廃止に関する記載を追加する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "N1",
+        "category": "影響範囲",
+        "description": "scripts/migrate-cli-tool-id.tsとscripts/clean-existing-messages.tsがgetEnvByKey('CM_DB_PATH')を使用している。これらのスクリプトはdb-instance.tsの修正後も正常に動作するはずだが、一貫性のためdb-instance.tsと同じパス解決ロジックを使用することが望ましい。",
+        "suggestion": "スクリプトでgetDbInstance()を使用するか、env.tsのgetEnv().CM_DB_PATHを使用するように統一する。"
+      },
+      {
+        "id": "N2",
+        "category": "CI/CD影響",
+        "description": "CI/CDパイプライン（.github/workflows/ci-pr.yml, publish.yml）では環境変数を明示的に設定している可能性がある。グローバルインストールのテストがCI環境で実行されるか確認が必要。",
+        "suggestion": "CI/CD設定でCM_DB_PATHが適切に設定されていることを確認する。必要であれば、グローバルインストールをシミュレートするテストジョブを追加する。"
+      }
+    ]
+  },
+  "impact_summary": {
+    "direct_impact": [
+      "src/lib/db-instance.ts - DBパス解決ロジックの修正",
+      "src/lib/env.ts - CM_DB_PATHのデフォルト値参照の修正可能性",
+      "src/cli/utils/env-setup.ts - ENV_DEFAULTS.CM_DB_PATHの絶対パス化",
+      "src/cli/commands/init.ts - createDefaultConfig()の修正",
+      "server.ts - getDbInstance()呼び出しへの間接的影響"
+    ],
+    "indirect_impact": [
+      "56+のAPIルートファイル（src/app/api/**）- 全てgetDbInstance()を使用",
+      "src/lib/response-poller.ts - DBアクセスに依存",
+      "src/lib/claude-poller.ts - DBアクセスに依存",
+      "scripts/migrate-cli-tool-id.ts - CM_DB_PATHを参照",
+      "scripts/clean-existing-messages.ts - CM_DB_PATHを参照"
+    ],
+    "backward_compatibility": "DATABASE_PATH環境変数の廃止は後方互換性に影響。既存ユーザーの.env設定が無視される可能性あり。フォールバック機構または警告メッセージによる緩和が必要。CM_DB_PATHのデフォルト値変更（db.sqlite -> cm.db）は以前のIssue #96で対応済みだが、db-instance.tsでは未反映。",
+    "test_impact": "20+の統合テストファイルがgetDbInstance()を使用。テスト環境のセットアップ見直しが必要。tests/unit/env.test.ts、tests/unit/cli/utils/env-setup.test.tsの更新が必要。新規テストケース: グローバル/ローカルインストールでのパス解決、DBマイグレーション動作の検証。",
+    "documentation_impact": "以下のドキュメント更新が必要: .env.example（DATABASE_PATH参照削除）、docs/DEPLOYMENT.md（CM_DB_PATH説明更新）、docs/architecture.md（MCBD_DB_PATH記載更新）、docs/migration-to-commandmate.md（DATABASE_PATH廃止追記）、scripts/health-check.sh、scripts/status.sh（DATABASE_PATH参照更新）、CLAUDE.md（db-instance.ts説明追加）",
+    "cicd_impact": "CI/CD設定への直接的な影響は軽微。ただし、グローバルインストールシナリオのテストがCI環境で実行されるか確認が必要。テスト実行時のCM_DB_PATH環境変数設定を見直す可能性あり。"
+  },
+  "summary": "Issue #135の修正は広範囲に影響を与える。db-instance.tsは56以上のAPIルートファイルから直接インポートされており、パス解決ロジックの変更は全てのDBアクセスに影響する。後方互換性の観点では、DATABASE_PATH環境変数の廃止がリスク要因となる。テスト面では20以上の統合テストファイルの更新が必要になる可能性がある。ドキュメントも複数ファイルで更新が必要。修正は技術的に正しいアプローチだが、影響範囲が広いため、段階的なリリースと十分なテストカバレッジが重要である。"
+}

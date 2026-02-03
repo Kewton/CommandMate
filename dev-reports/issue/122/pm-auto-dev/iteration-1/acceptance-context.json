@@ -1,0 +1,24 @@
+{
+  "issue_number": 122,
+  "feature_summary": "ファイルが存在しない状態でディレクトリやファイルの新規登録が出来ない",
+  "acceptance_criteria": [
+    "空のディレクトリ（ファイルが存在しない）の場合も、ファイル/ディレクトリを作成できる",
+    "「+ New File」ボタンをクリックすると、ファイル名入力ダイアログが表示される",
+    "「+ New Directory」ボタンをクリックすると、ディレクトリ名入力ダイアログが表示される",
+    "作成成功後、ファイルツリーが更新される",
+    "既存のファイルがある場合は、従来どおり右クリックメニューも使用可能",
+    "ボタンのスタイリングが既存UIと一貫している"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 空のディレクトリでNew Fileボタンが表示される",
+    "シナリオ2: 空のディレクトリでNew Directoryボタンが表示される",
+    "シナリオ3: New FileボタンクリックでonNewFile('')が呼ばれる",
+    "シナリオ4: New DirectoryボタンクリックでonNewDirectory('')が呼ばれる",
+    "シナリオ5: onNewFile/onNewDirectoryがundefinedの場合はボタン非表示",
+    "シナリオ6: ファイルが存在する場合は従来の表示（ボタン非表示）"
+  ],
+  "implementation_files": [
+    "src/components/worktree/FileTreeView.tsx",
+    "tests/unit/components/worktree/FileTreeView.test.tsx"
+  ]
+}

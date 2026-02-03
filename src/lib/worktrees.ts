@@ -8,7 +8,7 @@ import { promisify } from 'util';
 import path from 'path';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
-import { upsertWorktree } from './db';
+import { upsertWorktree, getWorktreeIdsByRepository, deleteWorktreesByIds } from './db';
 import { getEnvByKey } from './env';
 
 /**
@@ -245,6 +245,11 @@ export async function scanMultipleRepositories(
 /**
  * Sync scanned worktrees to database
  *
+ * This function performs a true sync:
+ * 1. Groups worktrees by repository
+ * 2. For each repository, removes worktrees that no longer exist
+ * 3. Upserts all current worktrees
+ *
  * @param db - Database instance
  * @param worktrees - Array of worktrees to sync
  *
@@ -258,7 +263,43 @@ export function syncWorktreesToDB(
   db: Database.Database,
   worktrees: Worktree[]
 ): void {
+  // If no worktrees provided, do nothing (avoid accidentally deleting all data)
+  if (worktrees.length === 0) {
+    return;
+  }
+
+  // Group worktrees by repository path
+  const worktreesByRepo = new Map<string, Worktree[]>();
   for (const worktree of worktrees) {
-    upsertWorktree(db, worktree);
+    const repoPath = worktree.repositoryPath || '';
+    if (!worktreesByRepo.has(repoPath)) {
+      worktreesByRepo.set(repoPath, []);
+    }
+    worktreesByRepo.get(repoPath)!.push(worktree);
+  }
+
+  // Process each repository
+  for (const [repoPath, repoWorktrees] of worktreesByRepo) {
+    if (!repoPath) continue;
+
+    // Get current worktree IDs in DB for this repository
+    const existingIds = getWorktreeIdsByRepository(db, repoPath);
+
+    // Get new worktree IDs from scan
+    const newIds = new Set(repoWorktrees.map(wt => wt.id));
+
+    // Find worktrees that no longer exist (deleted)
+    const deletedIds = existingIds.filter(id => !newIds.has(id));
+
+    // Delete removed worktrees from DB
+    if (deletedIds.length > 0) {
+      const result = deleteWorktreesByIds(db, deletedIds);
+      console.log(`Removed ${result.deletedCount} deleted worktree(s) from ${repoPath}`);
+    }
+
+    // Upsert current worktrees
+    for (const worktree of repoWorktrees) {
+      upsertWorktree(db, worktree);
+    }
   }
 }

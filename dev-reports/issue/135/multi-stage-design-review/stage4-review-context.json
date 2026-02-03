@@ -1,0 +1,7 @@
+{
+  "issue_number": 135,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-135-db-path-resolution-design-policy.md"
+}

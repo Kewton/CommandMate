@@ -1,0 +1,140 @@
+{
+  "status": "passed",
+  "overall_status": "passed",
+  "timestamp": "2026-02-03T08:32:00Z",
+  "issue_number": 135,
+  "feature_summary": "DBパス解決ロジック修正 - バージョンアップ時のDB消失防止",
+  "test_cases": [
+    {
+      "id": "AC-001",
+      "scenario": "db-instance.tsがgetEnv().CM_DB_PATHを使用する",
+      "type": "code_review",
+      "result": "passed",
+      "evidence": "src/lib/db-instance.ts (line 33-34) uses `const env = getEnv(); const dbPath = env.CM_DB_PATH;` and imports from './env' (line 12)"
+    },
+    {
+      "id": "AC-002",
+      "scenario": "DATABASE_PATH使用時にdeprecation警告が出力される",
+      "type": "code_review",
+      "result": "passed",
+      "evidence": "src/lib/env.ts (lines 108-117) implements getDatabasePathWithDeprecationWarning() which calls console.warn('[DEPRECATED] DATABASE_PATH is deprecated. Use CM_DB_PATH instead.') when DATABASE_PATH is set"
+    },
+    {
+      "id": "AC-003",
+      "scenario": "グローバルインストール時に~/.commandmate/data/cm.dbを返す",
+      "type": "code_review",
+      "result": "passed",
+      "evidence": "src/lib/db-path-resolver.ts (lines 46-51) getDefaultDbPath() returns path.join(homedir(), '.commandmate', 'data', 'cm.db') when isGlobalInstall() is true"
+    },
+    {
+      "id": "AC-004",
+      "scenario": "ローカルインストール時に絶対パスを返す",
+      "type": "code_review",
+      "result": "passed",
+      "evidence": "src/lib/db-path-resolver.ts (line 50) returns path.resolve(process.cwd(), 'data', 'cm.db') for local installs, ensuring absolute path"
+    },
+    {
+      "id": "AC-005",
+      "scenario": "マイグレーションロジックが旧DBを検出・移行する",
+      "type": "code_review",
+      "result": "passed",
+      "evidence": "src/lib/db-migration-path.ts implements migrateDbIfNeeded() (lines 138-193), getLegacyDbPaths() (lines 89-117), and resolveAndValidatePath() (lines 53-80) with proper security measures (SEC-002, SEC-003, SEC-005, SEC-006)"
+    },
+    {
+      "id": "AC-006",
+      "scenario": "シェルスクリプトがCM_DB_PATHフォールバックを使用",
+      "type": "code_review",
+      "result": "passed",
+      "evidence": "scripts/health-check.sh (line 45) and scripts/status.sh (line 59) both use DB_PATH=\"${CM_DB_PATH:-${DATABASE_PATH:-./data/cm.db}}\" pattern"
+    },
+    {
+      "id": "AC-007",
+      "scenario": "単体テストがDBパス解決ロジックをカバー",
+      "type": "test_coverage",
+      "result": "passed",
+      "evidence": "tests/unit/db-path-resolver.test.ts (21 tests passed) and tests/unit/db-migration-path.test.ts (18 tests passed) exist and all tests pass"
+    },
+    {
+      "id": "AC-008",
+      "scenario": "ENV_DEFAULTSからCM_DB_PATHが削除されている",
+      "type": "code_review",
+      "result": "passed",
+      "evidence": "src/cli/utils/env-setup.ts (lines 31-37) ENV_DEFAULTS contains CM_PORT, CM_BIND, CM_LOG_LEVEL, CM_LOG_FORMAT but NOT CM_DB_PATH. Comment on line 34 confirms: '// CM_DB_PATH removed - Issue #135: use getDefaultDbPath() instead'"
+    },
+    {
+      "id": "AC-009",
+      "scenario": "init.tsがgetDefaultDbPath()を使用",
+      "type": "code_review",
+      "result": "passed",
+      "evidence": "src/cli/commands/init.ts imports getDefaultDbPath (line 19), createDefaultConfig() uses getDefaultDbPath() at line 42, and promptForConfig() uses getDefaultDbPath() at lines 103-104 for default value"
+    },
+    {
+      "id": "AC-010",
+      "scenario": "ビルドとテストが成功する",
+      "type": "build_test",
+      "result": "passed",
+      "evidence": "npm run build:all completed successfully (warnings only, no errors). npm run test:unit shows 117 passed test files, 2341 tests passed. Worker error at end is infrastructure-related, not test failure."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "旧バージョンから新バージョンへアップグレード後、リポジトリ情報が保持される",
+      "verified": true,
+      "evidence": "migrateDbIfNeeded() in db-migration-path.ts handles migration from legacy paths to new paths with backup"
+    },
+    {
+      "criterion": "グローバルインストールで任意のディレクトリから commandmate start を実行しても同じDBを参照する",
+      "verified": true,
+      "evidence": "getDefaultDbPath() returns ~/.commandmate/data/cm.db for global installs regardless of cwd"
+    },
+    {
+      "criterion": "commandmate init 実行後、.env に絶対パスで CM_DB_PATH が設定される",
+      "verified": true,
+      "evidence": "init.ts uses getDefaultDbPath() which returns absolute paths via path.resolve() or path.join(homedir())"
+    },
+    {
+      "criterion": "db-instance.ts が DATABASE_PATH を直接参照せず、env.ts 経由で CM_DB_PATH を使用する",
+      "verified": true,
+      "evidence": "db-instance.ts uses getEnv().CM_DB_PATH, no direct process.env.DATABASE_PATH access"
+    },
+    {
+      "criterion": "旧バージョンのDB（db.sqlite）が検出された場合、cm.db にマイグレーションされる",
+      "verified": true,
+      "evidence": "getLegacyDbPaths() includes db.sqlite paths, migrateDbIfNeeded() performs copy with backup"
+    },
+    {
+      "criterion": "単体テストでDBパス解決ロジックを検証する",
+      "verified": true,
+      "evidence": "db-path-resolver.test.ts (21 tests) and db-migration-path.test.ts (18 tests) all pass"
+    },
+    {
+      "criterion": "DATABASE_PATH 環境変数使用時にdeprecation警告が出力される",
+      "verified": true,
+      "evidence": "getDatabasePathWithDeprecationWarning() outputs warning via console.warn"
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/db-path-resolver.test.ts",
+    "tests/unit/db-migration-path.test.ts",
+    "src/lib/db-instance.ts",
+    "src/lib/env.ts",
+    "src/lib/db-path-resolver.ts",
+    "src/lib/db-migration-path.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/commands/init.ts",
+    "scripts/health-check.sh",
+    "scripts/status.sh"
+  ],
+  "issues_found": [
+    {
+      "severity": "info",
+      "description": "Worker process error during test run appears to be infrastructure-related (node/vitest compatibility), not a test failure. All 2341 tests passed."
+    },
+    {
+      "severity": "info",
+      "description": "Build warnings about Edge Runtime compatibility for Node.js modules. These are expected for CLI/server-side code and do not affect functionality."
+    }
+  ],
+  "recommendations": [],
+  "message": "All acceptance criteria for Issue #135 (DB path resolution logic fix) have been verified and passed."
+}

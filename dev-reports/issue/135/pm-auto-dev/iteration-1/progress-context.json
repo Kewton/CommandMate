@@ -1,0 +1,77 @@
+{
+  "issue_number": 135,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 85.0,
+      "tests_passed": 108,
+      "tests_failed": 0,
+      "files_created": [
+        "src/lib/db-path-resolver.ts",
+        "src/lib/db-migration-path.ts",
+        "tests/unit/db-path-resolver.test.ts",
+        "tests/unit/db-migration-path.test.ts"
+      ],
+      "files_modified": [
+        "src/lib/env.ts",
+        "src/lib/db-instance.ts",
+        "src/cli/utils/env-setup.ts",
+        "src/cli/commands/init.ts",
+        "scripts/health-check.sh",
+        "scripts/status.sh"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 10,
+      "criteria_failed": 0,
+      "scenarios": [
+        "AC-001: db-instance.ts uses getEnv().CM_DB_PATH",
+        "AC-002: DATABASE_PATH deprecation warning",
+        "AC-003: Global install returns ~/.commandmate/data/cm.db",
+        "AC-004: Local install returns absolute path",
+        "AC-005: Migration logic (migrateDbIfNeeded)",
+        "AC-006: Shell scripts use CM_DB_PATH fallback",
+        "AC-007: Unit tests exist and pass",
+        "AC-008: ENV_DEFAULTS does not contain CM_DB_PATH",
+        "AC-009: init.ts uses getDefaultDbPath()",
+        "AC-010: Build and tests succeed"
+      ]
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "Extracted SYSTEM_DIRECTORIES to shared config module",
+        "Created isSystemDirectory() utility function",
+        "DRY compliance improved"
+      ],
+      "files_created": [
+        "src/config/system-directories.ts",
+        "tests/unit/config/system-directories.test.ts"
+      ]
+    },
+    "documentation": {
+      "status": "completed",
+      "files_updated": [
+        ".env.example",
+        "docs/DEPLOYMENT.md",
+        "docs/migration-to-commandmate.md",
+        "CLAUDE.md"
+      ]
+    }
+  },
+  "security_requirements_met": [
+    "SEC-001: System directory protection",
+    "SEC-002: Symlink resolution (TOCTOU prevention)",
+    "SEC-003: Directory creation with mode 0o700",
+    "SEC-004: DATABASE_PATH deprecation warning",
+    "SEC-005: DATABASE_PATH validation in getLegacyDbPaths()",
+    "SEC-006: Backup file permissions 0o600"
+  ],
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "build_status": "success"
+}

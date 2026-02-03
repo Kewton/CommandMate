@@ -28,6 +28,7 @@ export interface InitOptions {
 
 /**
  * Options for start command
+ * Issue #136: Added issue and autoPort for worktree support
  */
 export interface StartOptions {
   /** Start in development mode */
@@ -36,14 +37,34 @@ export interface StartOptions {
   daemon?: boolean;
   /** Override port number */
   port?: number;
+  /** Issue number for worktree-specific server (Issue #136) */
+  issue?: number;
+  /** Automatically allocate an available port (Issue #136) */
+  autoPort?: boolean;
+  /** Override database path for worktree server (Issue #136) */
+  dbPath?: string;
 }
 
 /**
  * Options for stop command
+ * Issue #136: Added issue for worktree support
  */
 export interface StopOptions {
   /** Force stop (SIGKILL) */
   force?: boolean;
+  /** Issue number for worktree-specific server (Issue #136) */
+  issue?: number;
+}
+
+/**
+ * Options for status command
+ * Issue #136: New interface for worktree support
+ */
+export interface StatusOptions {
+  /** Issue number for worktree-specific status (Issue #136) */
+  issue?: number;
+  /** Show status for all running servers (Issue #136) */
+  all?: boolean;
 }
 
 /**

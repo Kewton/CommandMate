@@ -524,6 +524,109 @@ describe('Optimistic Update - Multiple Choice prompts', () => {
   });
 });
 
+/**
+ * MessageList Scroll Behavior Tests
+ * Issue #131: Fix scroll animation when switching worktrees
+ */
+describe('MessageList scroll behavior', () => {
+  /**
+   * Helper function to compute scroll behavior based on worktree and message changes
+   * This mirrors the logic in MessageList.tsx useEffect
+   */
+  function computeScrollBehavior(
+    prevWorktreeId: string | undefined,
+    currentWorktreeId: string,
+    prevMessageCount: number,
+    currentMessageCount: number
+  ): { isWorktreeChange: boolean; isNewMessage: boolean; shouldScroll: boolean; scrollBehavior: 'instant' | 'smooth' } {
+    const isWorktreeChange = prevWorktreeId !== currentWorktreeId;
+    const isNewMessage = currentMessageCount > prevMessageCount;
+    const shouldScroll = isNewMessage || isWorktreeChange;
+    const scrollBehavior = isWorktreeChange ? 'instant' : 'smooth';
+    return { isWorktreeChange, isNewMessage, shouldScroll, scrollBehavior };
+  }
+
+  describe('scrollIntoView behavior parameter', () => {
+    it('should use instant scroll when worktreeId changes', () => {
+      // Simulate scroll behavior logic
+      const result = computeScrollBehavior('worktree-1', 'worktree-2', 5, 3);
+
+      // When worktreeId changes, should scroll with 'instant' behavior
+      expect(result.isWorktreeChange).toBe(true);
+      expect(result.shouldScroll).toBe(true);
+      expect(result.scrollBehavior).toBe('instant');
+    });
+
+    it('should use smooth scroll when new message added in same worktree', () => {
+      // Simulate scroll behavior logic - same worktree, new message added
+      const result = computeScrollBehavior('worktree-1', 'worktree-1', 5, 6);
+
+      // When new message added in same worktree, should scroll with 'smooth' behavior
+      expect(result.isWorktreeChange).toBe(false);
+      expect(result.isNewMessage).toBe(true);
+      expect(result.shouldScroll).toBe(true);
+      expect(result.scrollBehavior).toBe('smooth');
+    });
+
+    it('should not scroll when no new messages and same worktree', () => {
+      // Simulate scroll behavior logic - same worktree, same message count
+      const result = computeScrollBehavior('worktree-1', 'worktree-1', 5, 5);
+
+      // Should not scroll when neither worktree changed nor new message added
+      expect(result.isWorktreeChange).toBe(false);
+      expect(result.isNewMessage).toBe(false);
+      expect(result.shouldScroll).toBe(false);
+    });
+
+    it('should use instant scroll when switching to worktree with existing messages', () => {
+      // Scenario: User switches from worktree with 10 messages to one with 5
+      const result = computeScrollBehavior('worktree-1', 'worktree-2', 10, 5);
+
+      // Even though message count decreased, should still scroll because worktree changed
+      expect(result.isWorktreeChange).toBe(true);
+      expect(result.shouldScroll).toBe(true);
+      expect(result.scrollBehavior).toBe('instant');
+    });
+  });
+
+  describe('prevWorktreeIdRef tracking', () => {
+    it('should track worktreeId changes correctly', () => {
+      // Simulate ref tracking behavior
+      let prevWorktreeIdRef = 'worktree-1';
+      const worktreeChanges = ['worktree-1', 'worktree-2', 'worktree-2', 'worktree-3'];
+      const changeDetections: boolean[] = [];
+
+      for (const worktreeId of worktreeChanges) {
+        const isChange = prevWorktreeIdRef !== worktreeId;
+        changeDetections.push(isChange);
+        prevWorktreeIdRef = worktreeId;
+      }
+
+      // First: same worktree (no change)
+      expect(changeDetections[0]).toBe(false);
+      // Second: different worktree (change detected)
+      expect(changeDetections[1]).toBe(true);
+      // Third: same as previous (no change)
+      expect(changeDetections[2]).toBe(false);
+      // Fourth: different worktree (change detected)
+      expect(changeDetections[3]).toBe(true);
+    });
+
+    it('should handle undefined initial worktreeId', () => {
+      // Simulate first render with undefined prevWorktreeId
+      let prevWorktreeIdRef: string | undefined = undefined;
+      const worktreeId = 'worktree-1';
+
+      const isWorktreeChange = prevWorktreeIdRef !== worktreeId;
+      prevWorktreeIdRef = worktreeId;
+
+      // First render should detect as change (undefined !== 'worktree-1')
+      expect(isWorktreeChange).toBe(true);
+      expect(prevWorktreeIdRef).toBe('worktree-1');
+    });
+  });
+});
+
 describe('Optimistic Update - Error scenarios', () => {
   it('should handle rollback when target message has no promptData', () => {
     const originalMessages: ChatMessage[] = [

@@ -16,6 +16,7 @@ import {
   DEFAULT_ROOT_DIR,
   getEnvPath,
   sanitizePath,
+  getDefaultDbPath,
 } from '../utils/env-setup';
 import {
   prompt,
@@ -31,13 +32,14 @@ const logger = new CLILogger();
 
 /**
  * Create default configuration (non-interactive mode)
+ * Issue #135: Use getDefaultDbPath() for dynamic DB path resolution
  */
 function createDefaultConfig(): EnvConfig {
   return {
     CM_ROOT_DIR: sanitizePath(process.env.CM_ROOT_DIR || DEFAULT_ROOT_DIR),
     CM_PORT: ENV_DEFAULTS.CM_PORT,
     CM_BIND: ENV_DEFAULTS.CM_BIND,
-    CM_DB_PATH: ENV_DEFAULTS.CM_DB_PATH,
+    CM_DB_PATH: getDefaultDbPath(), // Issue #135: Use absolute path
     CM_LOG_LEVEL: ENV_DEFAULTS.CM_LOG_LEVEL,
     CM_LOG_FORMAT: ENV_DEFAULTS.CM_LOG_FORMAT,
   };
@@ -97,11 +99,12 @@ async function promptForConfig(): Promise<EnvConfig> {
     logger.info(`  Auth token generated: ${authToken.substring(0, 8)}...`);
   }
 
-  // CM_DB_PATH
+  // CM_DB_PATH - Issue #135: Use getDefaultDbPath() for absolute path
+  const defaultDbPath = getDefaultDbPath();
   const dbPathInput = await prompt('Database path (CM_DB_PATH)', {
-    default: ENV_DEFAULTS.CM_DB_PATH,
+    default: defaultDbPath,
   });
-  const dbPath = dbPathInput || ENV_DEFAULTS.CM_DB_PATH;
+  const dbPath = dbPathInput || defaultDbPath;
 
   return {
     CM_ROOT_DIR: rootDir,

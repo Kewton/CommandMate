@@ -55,8 +55,9 @@ fi
 echo ""
 
 # Check database
-if [ -f "${DATABASE_PATH:-./data/db.sqlite}" ]; then
-  DB_PATH="${DATABASE_PATH:-./data/db.sqlite}"
+# Issue #135: Support CM_DB_PATH with fallback to DATABASE_PATH
+DB_PATH="${CM_DB_PATH:-${DATABASE_PATH:-./data/cm.db}}"
+if [ -f "$DB_PATH" ]; then
   DB_SIZE=$(du -h "$DB_PATH" | cut -f1)
   echo "Database:"
   echo "  Path: $DB_PATH"

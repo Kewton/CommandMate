@@ -1,6 +1,7 @@
 /**
  * Environment Setup Utility
  * Issue #96: npm install CLI support
+ * Issue #136: DRY refactoring - isGlobalInstall and getConfigDir extracted to install-context.ts
  * Migrated from scripts/setup-env.sh
  */
 
@@ -12,7 +13,7 @@ import {
   mkdirSync,
   realpathSync,
 } from 'fs';
-import { join, normalize, dirname } from 'path';
+import { join, normalize } from 'path';
 import { randomBytes } from 'crypto';
 import { homedir } from 'os';
 import {
@@ -21,14 +22,26 @@ import {
   ValidationResult,
 } from '../types';
 
+// Issue #136: Import from install-context.ts to avoid circular imports
+// Re-export for backward compatibility
+import {
+  isGlobalInstall as _isGlobalInstall,
+  getConfigDir as _getConfigDir,
+} from './install-context';
+
+export { isGlobalInstall, getConfigDir } from './install-context';
+
 /**
  * Default environment configuration values
  * SF-4: DRY - Centralized defaults
+ *
+ * Issue #135: CM_DB_PATH removed - use getDefaultDbPath() instead
+ * for dynamic path resolution based on install type
  */
 export const ENV_DEFAULTS = {
   CM_PORT: 3000,
   CM_BIND: '127.0.0.1',
-  CM_DB_PATH: './data/cm.db',
+  // CM_DB_PATH removed - Issue #135: use getDefaultDbPath() instead
   CM_LOG_LEVEL: 'info',
   CM_LOG_FORMAT: 'text',
 } as const;
@@ -39,33 +52,35 @@ export const ENV_DEFAULTS = {
 export const DEFAULT_ROOT_DIR = join(homedir(), 'repos');
 
 /**
- * Check if running as global npm package
- * Issue #119: Determine .env location based on install type
+ * Get the default database path based on install type
+ * Issue #135: Dynamic DB path resolution
+ * Issue #136: Uses isGlobalInstall from install-context.ts
  *
- * @returns true if running as global npm package
+ * For global installs: ~/.commandmate/data/cm.db
+ * For local installs: <cwd>/data/cm.db (as absolute path)
+ *
+ * @returns Absolute path to the default database file
  */
-export function isGlobalInstall(): boolean {
-  // Check if running from global node_modules
-  // Global installs typically have paths like:
-  // - /usr/local/lib/node_modules/
-  // - /Users/xxx/.npm-global/lib/node_modules/
-  // - C:\Users\xxx\AppData\Roaming\npm\node_modules\
-  const currentPath = dirname(__dirname);
-  return (
-    currentPath.includes('/lib/node_modules/') ||
-    currentPath.includes('\\node_modules\\') ||
-    currentPath.includes('/node_modules/commandmate')
-  );
+export function getDefaultDbPath(): string {
+  if (_isGlobalInstall()) {
+    return join(homedir(), '.commandmate', 'data', 'cm.db');
+  }
+  // Use path module for absolute path resolution
+  const cwd = process.cwd();
+  return join(cwd, 'data', 'cm.db');
 }
 
 /**
  * Get the path to .env file based on install type
  * Issue #119: Global install uses ~/.commandmate/, local uses cwd
+ * Issue #136: Uses isGlobalInstall from install-context.ts
+ * Issue #136: Added issueNo parameter for worktree-specific .env files
  *
+ * @param issueNo - Optional issue number for worktree-specific .env
  * @returns Path to .env file
  */
-export function getEnvPath(): string {
-  if (isGlobalInstall()) {
+export function getEnvPath(issueNo?: number): string {
+  if (_isGlobalInstall()) {
     const configDir = join(homedir(), '.commandmate');
 
     // Create config directory if it doesn't exist
@@ -73,10 +88,20 @@ export function getEnvPath(): string {
       mkdirSync(configDir, { recursive: true, mode: 0o700 });
     }
 
+    // Issue #136: Worktree-specific .env file
+    if (issueNo !== undefined) {
+      const envsDir = join(configDir, 'envs');
+      if (!existsSync(envsDir)) {
+        mkdirSync(envsDir, { recursive: true, mode: 0o700 });
+      }
+      return join(envsDir, `${issueNo}.env`);
+    }
+
     return join(configDir, '.env');
   }
 
   // Local install - use current working directory
+  // Note: Worktree-specific .env not supported in local install mode
   return join(process.cwd(), '.env');
 }
 
@@ -100,44 +125,40 @@ export function resolveSecurePath(targetPath: string, allowedBaseDir: string): s
   return realPath;
 }
 
+// Note: getConfigDir is now exported from install-context.ts
+// The re-export above provides backward compatibility
+
 /**
- * Get the config directory path
- * Issue #119: Returns ~/.commandmate for global, cwd for local
- * Issue #125: Added symlink resolution for security (path traversal protection)
+ * Get the PIDs directory path
+ * Issue #136: Centralized pids directory path resolution
  *
- * @returns Path to config directory (absolute, with symlinks resolved)
+ * @returns Path to pids directory
  */
-export function getConfigDir(): string {
-  if (isGlobalInstall()) {
-    const configDir = join(homedir(), '.commandmate');
-
-    // Verify config directory is within home directory (security check)
-    // Only validate if the directory exists (it may not exist yet during init)
-    if (existsSync(configDir)) {
-      const realPath = realpathSync(configDir);
-      const realHome = realpathSync(homedir());
-      if (!realPath.startsWith(realHome)) {
-        throw new Error(`Security error: Config directory ${configDir} is outside home directory`);
-      }
-      return realPath;
-    }
-
-    return configDir;
-  }
-
-  // Local install - resolve symlinks in cwd
-  const cwd = process.cwd();
-  return realpathSync(cwd);
+export function getPidsDir(): string {
+  const configDir = _getConfigDir();
+  return join(configDir, 'pids');
 }
 
 /**
  * Get the PID file path based on install type
  * Issue #125: DRY principle - centralized PID file path resolution
+ * Issue #136: Uses getConfigDir from install-context.ts
  *
+ * @param issueNo - Optional issue number for worktree-specific PID file
  * @returns Path to PID file (uses getConfigDir for consistency)
  */
-export function getPidFilePath(): string {
-  return join(getConfigDir(), '.commandmate.pid');
+export function getPidFilePath(issueNo?: number): string {
+  const configDir = _getConfigDir();
+  if (issueNo !== undefined) {
+    // Issue #136: Worktree-specific PID file in pids/ directory
+    const pidsDir = getPidsDir();
+    if (!existsSync(pidsDir)) {
+      mkdirSync(pidsDir, { recursive: true, mode: 0o700 });
+    }
+    return join(pidsDir, `${issueNo}.pid`);
+  }
+  // Default: main PID file for backward compatibility
+  return join(configDir, '.commandmate.pid');
 }
 
 /**

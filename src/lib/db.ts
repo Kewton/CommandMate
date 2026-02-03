@@ -1235,3 +1235,29 @@ export function deleteRepositoryWorktrees(
   const result = stmt.run(repositoryPath);
   return { deletedCount: result.changes };
 }
+
+/**
+ * Delete worktrees by their IDs
+ * Related data (chat_messages, session_states, worktree_memos) will be
+ * automatically deleted via CASCADE foreign key constraints.
+ *
+ * @param db - Database instance
+ * @param worktreeIds - Array of worktree IDs to delete
+ * @returns Object containing the count of deleted worktrees
+ */
+export function deleteWorktreesByIds(
+  db: Database.Database,
+  worktreeIds: string[]
+): { deletedCount: number } {
+  if (worktreeIds.length === 0) {
+    return { deletedCount: 0 };
+  }
+
+  const placeholders = worktreeIds.map(() => '?').join(',');
+  const stmt = db.prepare(`
+    DELETE FROM worktrees WHERE id IN (${placeholders})
+  `);
+
+  const result = stmt.run(...worktreeIds);
+  return { deletedCount: result.changes };
+}

@@ -17,6 +17,7 @@ import {
   getConfigDir,
   getPidFilePath,
   resolveSecurePath,
+  getDefaultDbPath,
   DEFAULT_ROOT_DIR,
 } from '../../../../src/cli/utils/env-setup';
 import { homedir } from 'os';
@@ -388,6 +389,42 @@ describe('getPidFilePath', () => {
     // PID file should be in the config directory
     expect(pidPath.startsWith(configDir)).toBe(true);
   });
+
+  // Issue #136: Tests for issueNo parameter
+  it('should return issue-specific PID file path when issueNo is provided', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.realpathSync).mockImplementation((p) => p.toString());
+
+    const pidPath = getPidFilePath(135);
+
+    expect(typeof pidPath).toBe('string');
+    expect(pidPath).toContain('/pids/');
+    expect(pidPath.endsWith('135.pid')).toBe(true);
+  });
+
+  it('should create pids directory when it does not exist', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
+    vi.mocked(fs.realpathSync).mockImplementation((p) => p.toString());
+
+    const pidPath = getPidFilePath(200);
+
+    expect(fs.mkdirSync).toHaveBeenCalledWith(
+      expect.stringContaining('pids'),
+      expect.objectContaining({ recursive: true, mode: 0o700 })
+    );
+    expect(pidPath.endsWith('200.pid')).toBe(true);
+  });
+
+  it('should return main PID file for backward compatibility when issueNo is undefined', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.realpathSync).mockImplementation((p) => p.toString());
+
+    const pidPath = getPidFilePath(undefined);
+
+    expect(pidPath.endsWith('.commandmate.pid')).toBe(true);
+    expect(pidPath).not.toContain('/pids/');
+  });
 });
 
 describe('resolveSecurePath', () => {
@@ -511,5 +548,29 @@ describe('validateConfig additional cases', () => {
 
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.toLowerCase().includes('port'))).toBe(true);
+  });
+});
+
+// Issue #135: Tests for getDefaultDbPath
+describe('getDefaultDbPath (Issue #135)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('should return a string path', () => {
+    const dbPath = getDefaultDbPath();
+    expect(typeof dbPath).toBe('string');
+    expect(dbPath.endsWith('cm.db')).toBe(true);
+  });
+
+  it('should return an absolute path', () => {
+    const dbPath = getDefaultDbPath();
+    // Absolute paths start with /
+    expect(dbPath.startsWith('/')).toBe(true);
+  });
+
+  it('should include data directory', () => {
+    const dbPath = getDefaultDbPath();
+    expect(dbPath).toContain('/data/');
   });
 });

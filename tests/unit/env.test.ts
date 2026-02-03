@@ -10,6 +10,8 @@ import {
   getEnv,
   getLogConfig,
   resetWarnedKeys,
+  resetDatabasePathWarning,
+  getDatabasePathWithDeprecationWarning,
   ENV_MAPPING,
 } from '@/lib/env';
 
@@ -244,5 +246,137 @@ describe('ENV_MAPPING', () => {
       CM_LOG_DIR: 'MCBD_LOG_DIR',
       CM_DB_PATH: 'MCBD_DB_PATH',
     });
+  });
+});
+
+// Issue #135: DATABASE_PATH deprecation tests
+describe('getDatabasePathWithDeprecationWarning', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    resetDatabasePathWarning();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    vi.restoreAllMocks();
+  });
+
+  it('should return DATABASE_PATH value when set', () => {
+    process.env.DATABASE_PATH = '/custom/path/db.sqlite';
+
+    const result = getDatabasePathWithDeprecationWarning();
+
+    expect(result).toBe('/custom/path/db.sqlite');
+  });
+
+  it('should return undefined when DATABASE_PATH is not set', () => {
+    delete process.env.DATABASE_PATH;
+
+    const result = getDatabasePathWithDeprecationWarning();
+
+    expect(result).toBeUndefined();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('should output deprecation warning when DATABASE_PATH is set', () => {
+    process.env.DATABASE_PATH = '/old/path/db.sqlite';
+
+    getDatabasePathWithDeprecationWarning();
+
+    expect(console.warn).toHaveBeenCalledWith(
+      '[DEPRECATED] DATABASE_PATH is deprecated. Use CM_DB_PATH instead.'
+    );
+  });
+
+  it('should only warn once for multiple calls', () => {
+    process.env.DATABASE_PATH = '/old/path/db.sqlite';
+
+    getDatabasePathWithDeprecationWarning();
+    getDatabasePathWithDeprecationWarning();
+    getDatabasePathWithDeprecationWarning();
+
+    expect(console.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('should warn again after reset', () => {
+    process.env.DATABASE_PATH = '/old/path/db.sqlite';
+
+    getDatabasePathWithDeprecationWarning();
+    expect(console.warn).toHaveBeenCalledTimes(1);
+
+    resetDatabasePathWarning();
+
+    getDatabasePathWithDeprecationWarning();
+    expect(console.warn).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Issue #135: getEnv uses getDefaultDbPath tests
+describe('getEnv with DB path resolution (Issue #135)', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    resetWarnedKeys();
+    resetDatabasePathWarning();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    vi.restoreAllMocks();
+  });
+
+  it('should use CM_DB_PATH when set', () => {
+    process.env.CM_ROOT_DIR = '/test/path';
+    process.env.CM_DB_PATH = '/custom/cm.db';
+
+    const env = getEnv();
+
+    expect(env.CM_DB_PATH).toBe('/custom/cm.db');
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('should fallback to DATABASE_PATH with warning when CM_DB_PATH not set', () => {
+    process.env.CM_ROOT_DIR = '/test/path';
+    delete process.env.CM_DB_PATH;
+    delete process.env.MCBD_DB_PATH;
+    process.env.DATABASE_PATH = '/legacy/db.sqlite';
+
+    const env = getEnv();
+
+    expect(env.CM_DB_PATH).toBe('/legacy/db.sqlite');
+    expect(console.warn).toHaveBeenCalledWith(
+      '[DEPRECATED] DATABASE_PATH is deprecated. Use CM_DB_PATH instead.'
+    );
+  });
+
+  it('should use default path when no DB path env vars set', () => {
+    process.env.CM_ROOT_DIR = '/test/path';
+    delete process.env.CM_DB_PATH;
+    delete process.env.MCBD_DB_PATH;
+    delete process.env.DATABASE_PATH;
+
+    const env = getEnv();
+
+    // Should be an absolute path ending with cm.db
+    expect(env.CM_DB_PATH.endsWith('cm.db')).toBe(true);
+    expect(env.CM_DB_PATH.startsWith('/')).toBe(true);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('should return absolute path for CM_DB_PATH', () => {
+    process.env.CM_ROOT_DIR = '/test/path';
+    delete process.env.CM_DB_PATH;
+    delete process.env.MCBD_DB_PATH;
+    delete process.env.DATABASE_PATH;
+
+    const env = getEnv();
+
+    // Path should be absolute
+    expect(env.CM_DB_PATH.startsWith('/')).toBe(true);
   });
 });

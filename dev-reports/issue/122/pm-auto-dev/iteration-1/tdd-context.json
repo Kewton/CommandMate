@@ -1,0 +1,24 @@
+{
+  "issue_number": 122,
+  "issue_title": "ファイルが存在しない状態でディレクトリやファイルの新規登録が出来ない",
+  "acceptance_criteria": [
+    "空のディレクトリ（ファイルが存在しない）の場合も、ファイル/ディレクトリを作成できる",
+    "「+ New File」ボタンをクリックすると、ファイル名入力ダイアログが表示される",
+    "「+ New Directory」ボタンをクリックすると、ディレクトリ名入力ダイアログが表示される",
+    "作成成功後、ファイルツリーが更新される",
+    "既存のファイルがある場合は、従来どおり右クリックメニューも使用可能",
+    "ボタンのスタイリングが既存UIと一貫している"
+  ],
+  "implementation_tasks": [
+    "FileTreeView.tsxにFilePlus, FolderPlusアイコンをインポート",
+    "Empty state（rootItems.length === 0）の場合に「+ New File」「+ New Directory」ボタンを表示",
+    "ボタンクリック時にonNewFile('')/onNewDirectory('')を呼び出す",
+    "ContextMenu.tsxと整合したスタイリングを適用",
+    "単体テスト4件を追加"
+  ],
+  "target_files": [
+    "src/components/worktree/FileTreeView.tsx",
+    "tests/unit/components/worktree/FileTreeView.test.tsx"
+  ],
+  "target_coverage": 80
+}

@@ -188,6 +188,76 @@ describe('External Apps Cache', () => {
       });
     });
 
+    describe('invalidateByIssueNo', () => {
+      it('should invalidate cache entries for specific issue', async () => {
+        const cache = new ExternalAppCache(testDb);
+
+        // Create a main app (no issue_no)
+        createExternalApp(testDb, {
+          name: 'main-app',
+          displayName: 'Main App',
+          pathPrefix: 'main',
+          targetPort: 3000,
+          appType: 'nextjs',
+        });
+
+        // Create a worktree app (with issue_no = 135)
+        testDb.prepare(`
+          INSERT INTO external_apps (id, name, display_name, path_prefix, target_port, target_host, app_type, enabled, created_at, updated_at, issue_no)
+          VALUES ('wt-135', 'worktree-135', 'Worktree #135', 'commandmate_issue/135', 3001, 'localhost', 'other', 1, ?, ?, 135)
+        `).run(Date.now(), Date.now());
+
+        // Populate cache
+        await cache.getAll();
+        expect(cache.isStale()).toBe(false);
+
+        // Invalidate only for issue 135
+        cache.invalidateByIssueNo(135);
+
+        // Cache should be marked as stale
+        expect(cache.isStale()).toBe(true);
+      });
+
+      it('should allow new worktree to be routable immediately after registration', async () => {
+        const cache = new ExternalAppCache(testDb);
+
+        // Populate empty cache
+        await cache.getAll();
+
+        // Register new worktree app
+        testDb.prepare(`
+          INSERT INTO external_apps (id, name, display_name, path_prefix, target_port, target_host, app_type, enabled, created_at, updated_at, issue_no)
+          VALUES ('wt-200', 'worktree-200', 'Worktree #200', 'commandmate_issue/200', 3002, 'localhost', 'other', 1, ?, ?, 200)
+        `).run(Date.now(), Date.now());
+
+        // Before invalidation - cache still has old data
+        const beforeInvalidate = await cache.getByPathPrefix('commandmate_issue/200');
+        // Note: This might return the new app because getByPathPrefix checks isStale()
+        // but we're testing the explicit invalidation flow
+
+        // Invalidate for issue 200
+        cache.invalidateByIssueNo(200);
+
+        // After invalidation - should see new app
+        const afterInvalidate = await cache.getByPathPrefix('commandmate_issue/200');
+        expect(afterInvalidate).not.toBeNull();
+        expect(afterInvalidate?.name).toBe('worktree-200');
+      });
+
+      it('should handle case when issue has no associated apps', async () => {
+        const cache = new ExternalAppCache(testDb);
+
+        // Populate cache
+        await cache.getAll();
+
+        // Invalidating non-existent issue should not throw
+        expect(() => cache.invalidateByIssueNo(999)).not.toThrow();
+
+        // Cache should still be marked as stale for safety
+        expect(cache.isStale()).toBe(true);
+      });
+    });
+
     describe('invalidate', () => {
       it('should clear cache and force refresh on next call', async () => {
         const cache = new ExternalAppCache(testDb);

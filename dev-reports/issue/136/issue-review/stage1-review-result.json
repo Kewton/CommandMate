@@ -1,0 +1,155 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 136,
+  "review_date": "2026-02-03",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "ブランチ戦略の変更がCLAUDE.mdの既存記載と矛盾する可能性",
+        "location": "## ブランチ戦略の変更 セクション",
+        "recommendation": "CLAUDE.mdには現在「main ← PRマージのみ」と記載されている。developブランチ導入時にCLAUDE.mdのブランチ戦略セクション全体を更新する必要がある。CI/CDワークフロー（ci-pr.yml）も現在mainブランチのみを対象としており、developブランチ対応が必要",
+        "evidence": "CLAUDE.md記載: 「main (本番) ← PRマージのみ」、ci-pr.yml: 「branches: [main]」"
+      },
+      {
+        "id": "MF-2",
+        "category": "技術的正確性",
+        "issue": "src/lib/db-path-resolver.tsの変更内容が不正確",
+        "location": "### 変更対象ファイル テーブル",
+        "recommendation": "db-path-resolver.tsは既にgetDefaultDbPath()関数を持っており「Worktree ID対応」という記載は曖昧。具体的にどのような変更が必要か（例: Issue番号ベースのパス生成関数追加）を明記する必要がある",
+        "evidence": "既存のsrc/lib/db-path-resolver.tsにはgetDefaultDbPath()とvalidateDbPath()が存在。Issue記載の「Worktree ID対応」の具体的な修正内容が不明"
+      },
+      {
+        "id": "MF-3",
+        "category": "整合性",
+        "issue": "PIDファイルパスの設計が既存実装と不整合",
+        "location": "### 2.3 PID ファイル分離 セクション",
+        "recommendation": "既存のgetPidFilePath()は~/.commandmate/.commandmate.pidを返す。提案の~/.commandmate/pids/{issue-no}.pidはディレクトリ構造が異なる。既存との互換性維持方針（main用PIDファイルの扱い）を明記すべき",
+        "evidence": "src/cli/utils/env-setup.ts:168-170のgetPidFilePath()は単一のPIDファイルパスを返す設計"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "External Apps機能との連携方法が具体性に欠ける",
+        "location": "### 3. CommandMate External Apps 連携 セクション",
+        "recommendation": "External Appsは既存機能（Issue #42で実装済み）であり、pathPrefixベースのルーティングを使用。worktree-ports.jsonの管理方法とExternalApp DBテーブルへの登録フローの関係を明確にすべき。現在のExternalAppインターフェースにはissueNoフィールドがないため、連携設計の詳細が必要",
+        "evidence": "src/types/external-apps.tsのExternalAppインターフェースにはissue番号の概念がない。proxy/[...path]/route.tsはpathPrefixでルーティング"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "Issue #135との依存関係と作業順序が不明確",
+        "location": "## 関連 Issue セクション",
+        "recommendation": "Issue #135はDBパス解決ロジックの修正に関するバグIssueで、本Issueの「基盤として活用」とあるが、#135が先に完了している必要があるのか、並行して進めるのかを明記すべき。#135の修正方針とDB分離設計の整合性確認が必要",
+        "evidence": "Issue #135は「バージョンアップ時にDBクリア」のバグ修正Issue。db-path-resolver.tsの変更が両Issueで競合する可能性"
+      },
+      {
+        "id": "SF-3",
+        "category": "明確性",
+        "issue": "worktree-ports.jsonの管理責任と永続化方針が不明確",
+        "location": "### プロキシルーティング設計 セクション",
+        "recommendation": "worktree-ports.jsonはファイルベースの管理を提案しているが、External Appsは既にSQLiteのDBテーブルで管理されている。二重管理を避けるため、DBベースに統一するか、ファイルとDBの使い分け方針を明記すべき",
+        "evidence": "src/app/api/external-apps/route.tsはDBベースでExternal Appを管理。ファイルベースのworktree-ports.jsonとの整合性が未検討"
+      },
+      {
+        "id": "SF-4",
+        "category": "技術的妥当性",
+        "issue": "環境変数読み込み順序の実現方法が未記載",
+        "location": "### 環境変数読み込み順序 セクション",
+        "recommendation": "既存のdaemon.tsはdotenvConfig()で単一の.envを読み込む設計。複数の.envファイルをマージする実装方針（dotenv-expandの使用等）を具体的に記載すべき",
+        "evidence": "src/cli/utils/daemon.tsとsrc/cli/commands/start.tsはdotenvConfig({ path: envPath })で単一ファイルを読み込み"
+      },
+      {
+        "id": "SF-5",
+        "category": "完全性",
+        "issue": "セキュリティ考慮事項の記載がない",
+        "location": "Issue全体",
+        "recommendation": "複数のWorktreeサーバーが同時起動する設計では、認証トークンの共有方針（グローバル.envのCM_AUTH_TOKENを使用）、ポート範囲の制限、PIDファイルの競合防止などのセキュリティ考慮事項を追加すべき",
+        "evidence": "既存のCLI実装にはセキュリティログ、O_EXCLによるアトミック書き込み等の対策が実装されている"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "スキルファイルのディレクトリ構造が既存と異なる可能性",
+        "location": "### 新規作成ファイル テーブル",
+        "recommendation": "既存スキルは.claude/skills/{skill-name}/SKILL.md形式。worktree-setup/とworktree-cleanup/の構成がこれに準拠していることを確認・明記すべき",
+        "evidence": ".claude/skills/rebuild/SKILL.md、.claude/skills/release/SKILL.mdが存在"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "ブランチ命名規則の詳細が不足",
+        "location": "## Claude Code スキル: /worktree-setup セクション",
+        "recommendation": "「feature/{issue-no}-xxx または fix/{issue-no}-xxx」の「xxx」部分の決定方法（Issueタイトルからの自動生成、手動入力等）を明記すると実装時の曖昧さが減る",
+        "evidence": "CLAUDE.mdのブランチ命名規則では「feature/<issue-number>-<description>」と記載されており、descriptionの決定方法が必要"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "テスト計画の記載がない",
+        "location": "Issue全体",
+        "recommendation": "受け入れ条件に対応するテスト計画（ユニットテスト、統合テスト、E2Eテスト）の概要を追加すると品質担保の見通しが立つ",
+        "evidence": "Issue #135には詳細なテスト計画セクションがある"
+      }
+    ]
+  },
+  "summary": "Issue #136は Git worktree を活用した並列開発環境の整備を提案しており、技術設計の方向性は妥当。しかし、(1) ブランチ戦略変更のCI/CD対応、(2) db-path-resolver.tsの具体的な変更内容、(3) PIDファイル管理の既存実装との整合性について必須の修正が必要。また、External Apps連携の詳細設計、Issue #135との依存関係、セキュリティ考慮事項について推奨の追記が望まれる。",
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/db-path-resolver.ts",
+      "relevance": "DBパス解決の既存実装。Worktree ID対応の変更対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/utils/env-setup.ts",
+      "relevance": "getPidFilePath()、getEnvPath()、getConfigDir()の既存実装"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/utils/pid-manager.ts",
+      "relevance": "PidManagerクラスの既存実装。マルチPID対応の変更対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/commands/start.ts",
+      "relevance": "--auto-portフラグ追加の変更対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/types/external-apps.ts",
+      "relevance": "ExternalAppインターフェースの定義。Worktree連携の設計検討に必要"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/app/proxy/[...path]/route.ts",
+      "relevance": "既存のプロキシルーティング実装"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/.github/workflows/ci-pr.yml",
+      "relevance": "developブランチ対応が必要なCIワークフロー"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/CLAUDE.md",
+      "relevance": "ブランチ戦略、CLI構造、環境変数管理の既存記載。更新対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/.claude/skills/rebuild/SKILL.md",
+      "relevance": "既存スキルのディレクトリ構造参照"
+    }
+  ],
+  "related_issues": [
+    {
+      "issue_number": 135,
+      "title": "バージョンアップ時にDBクリア",
+      "relevance": "DBパス解決ロジックの修正。本Issueの基盤として依存関係あり"
+    },
+    {
+      "issue_number": 42,
+      "title": "External Apps プロキシルーティング",
+      "relevance": "プロキシ機能の既存実装。Worktree連携設計に影響"
+    }
+  ]
+}

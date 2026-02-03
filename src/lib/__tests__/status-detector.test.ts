@@ -102,6 +102,61 @@ Which option would you prefer?
         expect(result.confidence).toBe('high');
         expect(result.reason).toBe('prompt_detected');
       });
+
+      // Issue #132: Prompt with recommended commands should be "ready"
+      describe('Issue #132: prompt with recommended commands', () => {
+        it('should return "ready" when prompt shows recommended command "/work-plan"', () => {
+          const output = `
+Previous response here
+───────────────────────────────────────────────────────────────────────────
+❯ /work-plan
+`;
+          const result = detectSessionStatus(output, 'claude');
+
+          expect(result.status).toBe('ready');
+          expect(result.confidence).toBe('high');
+          expect(result.reason).toBe('input_prompt');
+        });
+
+        it('should return "ready" when prompt shows recommended command "> npm install"', () => {
+          const output = `
+Previous response here
+───────────────────────────────────────────────────────────────────────────
+> npm install
+`;
+          const result = detectSessionStatus(output, 'claude');
+
+          expect(result.status).toBe('ready');
+          expect(result.confidence).toBe('high');
+          expect(result.reason).toBe('input_prompt');
+        });
+
+        it('should return "ready" when prompt shows recommended git command', () => {
+          const output = `
+Previous response here
+───────────────────────────────────────────────────────────────────────────
+❯ git status
+`;
+          const result = detectSessionStatus(output, 'claude');
+
+          expect(result.status).toBe('ready');
+          expect(result.confidence).toBe('high');
+          expect(result.reason).toBe('input_prompt');
+        });
+
+        it('should return "running" when thinking indicator present (not just prompt)', () => {
+          // Even if prompt-like pattern exists, thinking indicator takes priority
+          const output = `
+❯ Some input
+✻ Processing…
+`;
+          const result = detectSessionStatus(output, 'claude');
+
+          expect(result.status).toBe('running');
+          expect(result.confidence).toBe('high');
+          expect(result.reason).toBe('thinking_indicator');
+        });
+      });
     });
 
     describe('codex', () => {

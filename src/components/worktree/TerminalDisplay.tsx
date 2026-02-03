@@ -79,11 +79,12 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   const sanitizedOutput = sanitizeTerminalOutput(output || '');
 
   // Auto-scroll effect when output changes
+  // Issue #131: Use 'instant' to prevent scroll animation during worktree switching
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTo({
         top: scrollRef.current.scrollHeight,
-        behavior: 'smooth',
+        behavior: 'instant',
       });
     }
   }, [sanitizedOutput, autoScroll, scrollRef]);

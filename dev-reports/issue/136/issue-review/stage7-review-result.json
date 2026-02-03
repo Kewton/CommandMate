@@ -1,0 +1,307 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 136,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_date": "2026-02-03",
+  "previous_stage_reference": "dev-reports/issue/136/issue-review/stage3-review-result.json",
+  "stage3_findings_status": {
+    "must_fix": [
+      {
+        "original_id": "MF-1",
+        "original_issue": "Issue #135依存関係の状態確認と並行作業方針",
+        "status": "RESOLVED",
+        "verification": "依存関係セクションに#135がOPEN状態であること、並行作業の禁止、代替案（同一ブランチ実装）を明記済み"
+      },
+      {
+        "original_id": "MF-2",
+        "original_issue": "DBマイグレーション計画の未記載",
+        "status": "RESOLVED",
+        "verification": "ポート管理設計セクションにMigration #16の詳細（ALTER TABLE、CREATE INDEX、CURRENT_SCHEMA_VERSION = 16）を追加済み。影響範囲テーブルにもdb-migrations.tsの変更を明記"
+      },
+      {
+        "original_id": "MF-3",
+        "original_issue": "システムリソース使用量の考慮不足",
+        "status": "RESOLVED",
+        "verification": "リソース使用量の考慮事項セクションを新設。メモリ200-500MB/サーバー、同時5-10個推奨、ログローテーション方針を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "original_id": "SF-1",
+        "original_issue": "既存テストへの影響範囲が不明確",
+        "status": "RESOLVED",
+        "verification": "テスト計画セクションに「既存テストへの影響確認」サブセクションを追加。env-setup.test.ts、pid-manager.test.ts、回帰テストの具体的な確認項目を記載"
+      },
+      {
+        "original_id": "SF-2",
+        "original_issue": "ログ収集・監視方法の未定義",
+        "status": "RESOLVED",
+        "verification": "2.4ログ分離セクションに複数Worktreeログの一元確認方法（commandmate logs --all）、ローテーション方針（7日間保持）を追加"
+      },
+      {
+        "original_id": "SF-3",
+        "original_issue": "daemon.tsの変更内容不足",
+        "status": "RESOLVED",
+        "verification": "影響範囲テーブルのdaemon.ts行に「DaemonManagerコンストラクタ設計確認（issueNo引数の必要性を検討）」を追記"
+      },
+      {
+        "original_id": "SF-4",
+        "original_issue": "External Appsキャッシュへの影響確認",
+        "status": "RESOLVED",
+        "verification": "External Apps連携セクションにcache.tsへの「影響なし」を明記。pathPrefixベースのルーティング継続、キャッシュキー変更不要、無効化ロジック影響なしを確認"
+      },
+      {
+        "original_id": "SF-5",
+        "original_issue": "getPidFilePath()後方互換性確認",
+        "status": "RESOLVED",
+        "verification": "テスト計画に「start.ts, stop.ts, status.tsの引数なしgetPidFilePath()呼び出しが維持されることの回帰テスト追加」を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "original_id": "NTH-1",
+        "original_issue": "CLIヘルプメッセージ更新の影響範囲記載",
+        "status": "RESOLVED",
+        "verification": "影響範囲テーブルにsrc/cli/index.tsの行を追加。--auto-port / --issueフラグのヘルプメッセージ追加を明記"
+      },
+      {
+        "original_id": "NTH-2",
+        "original_issue": "既存ユーザーの移行パス",
+        "status": "PARTIALLY_RESOLVED",
+        "verification": "ファイル構成図で既存メインDB（cm.db）とWorktree別DB（cm-xxx.db）の共存を示唆しているが、明示的な移行手順ドキュメントは未記載"
+      },
+      {
+        "original_id": "NTH-3",
+        "original_issue": "CI/CDパイプライン動作詳細",
+        "status": "RESOLVED",
+        "verification": "CI/CD対応セクションで.github/workflows/ci-pr.ymlとpublish.ymlの更新を明記"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "CLI型定義影響",
+        "issue": "StopOptionsとStatusOptions（暗黙のvoid型）への--issueフラグ追加に伴う型定義更新が影響範囲に未記載",
+        "location": "src/cli/types/index.ts",
+        "recommendation": "StopOptions interfaceにissue?: number追加が必要。また、statusCommand用にStatusOptions interfaceの新規作成が必要（現在は引数なし）。影響範囲テーブルに追加を推奨",
+        "evidence": "src/cli/types/index.ts:44-47にStopOptions定義（forceのみ）。statusCommand()は現在引数なし（line 20-21）。--issueフラグ追加により両方の型定義拡張が必要"
+      },
+      {
+        "id": "SF-2",
+        "category": "External Apps DB操作影響",
+        "issue": "external-apps/db.tsのDbExternalAppRowとDbExternalAppInsert型へのissue_no追加が影響範囲に未記載",
+        "location": "src/lib/external-apps/db.ts",
+        "recommendation": "DbExternalAppRow（line 37-51）とDbExternalAppInsert（line 56-66）の型定義更新、mapDbRowToExternalApp()とmapExternalAppToDbRow()関数の修正が必要。影響範囲として明記すべき",
+        "evidence": "db.tsのDbExternalAppRow/DbExternalAppInsert型はDBカラムに直接対応。issue_noカラム追加時にこれらの型も更新が必須"
+      },
+      {
+        "id": "SF-3",
+        "category": "テスト影響",
+        "issue": "external-apps-api.test.ts統合テストへの影響が未記載",
+        "location": "tests/integration/external-apps-api.test.ts",
+        "recommendation": "Worktree用External App登録テストの追加、issueNoフィールドを含むCRUDテスト、フィールド生成ルール検証テストを既存テストファイルへの影響として記載すべき",
+        "evidence": "tests/integration/external-apps-api.test.tsが存在。ExternalAppインターフェース変更により既存テストへの影響確認が必要"
+      },
+      {
+        "id": "SF-4",
+        "category": "コマンド引数影響",
+        "issue": "commander設定の--issueフラグ追加方法が具体的に未記載",
+        "location": "src/cli/index.ts",
+        "recommendation": "stop/statusコマンドへの.option('--issue <number>', 'Issue number for worktree', parseInt)追加が必要。また、action内でoptions.issueをstopCommand/statusCommandに渡すロジックの追加方針を明記すべき",
+        "evidence": "src/cli/index.ts:51-60（stopコマンド）、63-68（statusコマンド）が変更対象。現在はissueオプション未対応"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "運用影響",
+        "issue": "logs/defaultディレクトリ名変更に伴う既存ログの移行考慮",
+        "location": "ファイル構成（Worktree環境）セクション",
+        "recommendation": "Stage 5でlogs/main/からlogs/default/に変更されたが、既存環境でlogs/main/を使用しているユーザーへの移行考慮（自動リネームまたはドキュメント化）を検討",
+        "evidence": "レビュー履歴Stage 5でNTH-2として変更が記録されているが、既存ユーザー影響は未考慮"
+      },
+      {
+        "id": "NTH-2",
+        "category": "依存関係影響",
+        "issue": "dotenvパッケージのバージョン互換性確認",
+        "location": "環境変数読み込み順序セクション",
+        "recommendation": "dotenv.config()のoverride: trueオプションはdotenv v16.0.0以降で利用可能。package.jsonのdotenvバージョンが適合することを確認し、必要に応じてバージョン要件を明記",
+        "evidence": "環境変数読み込み順序でdotenv.config({ override: true })を使用する設計"
+      },
+      {
+        "id": "NTH-3",
+        "category": "将来機能影響",
+        "issue": "commandmate logs --allの将来実装時の影響範囲が不明確",
+        "location": "2.4 ログ分離セクション",
+        "recommendation": "logs --allは「オプション」と記載されているが、実装する場合の影響範囲（新規コマンド追加、ログ集約ロジック、パフォーマンス考慮）を別Issueとして分離することを明示すべき",
+        "evidence": "commandmate logs --allの実装詳細は本Issueスコープ外だが、依存関係として明確化が望ましい"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "stage3_resolution_rate": {
+      "must_fix": "3/3 (100%)",
+      "should_fix": "5/5 (100%)",
+      "nice_to_have": "2.5/3 (83%)"
+    }
+  },
+  "impact_analysis_update": {
+    "newly_identified_affected_files": [
+      {
+        "file": "src/cli/types/index.ts",
+        "change": "StopOptions拡張（issue?: number）、StatusOptions新規作成"
+      },
+      {
+        "file": "src/lib/external-apps/db.ts",
+        "change": "DbExternalAppRow/DbExternalAppInsert型にissue_no追加、マッピング関数修正"
+      },
+      {
+        "file": "tests/integration/external-apps-api.test.ts",
+        "change": "issueNoフィールドを含むテストケース追加"
+      }
+    ],
+    "cli_issue_flag_impact": {
+      "stop_command": {
+        "current": "stopCommand(options: StopOptions) - forceオプションのみ",
+        "after": "stopCommand(options: StopOptions) - force + issue追加、getPidFilePath(issueNo)呼び出し分岐"
+      },
+      "status_command": {
+        "current": "statusCommand() - 引数なし",
+        "after": "statusCommand(options?: StatusOptions) - issueオプション追加、getPidFilePath(issueNo)呼び出し分岐"
+      },
+      "index_ts": {
+        "changes": ".option('--issue <number>', ...)追加、action内でoptions.issueを各コマンドに渡す"
+      }
+    },
+    "external_apps_extension_impact": {
+      "interface_changes": [
+        "ExternalApp.issueNo?: number - 識別用オプショナルフィールド",
+        "CreateExternalAppInput.issueNo?: number - 登録時に指定",
+        "UpdateExternalAppInput.issueNo?: number - 更新時に指定可能"
+      ],
+      "db_type_changes": [
+        "DbExternalAppRow.issue_no: number | null",
+        "DbExternalAppInsert.issue_no: number | null"
+      ],
+      "function_changes": [
+        "mapDbRowToExternalApp() - issue_no→issueNoマッピング追加",
+        "mapExternalAppToDbRow() - issueNo→issue_noマッピング追加"
+      ],
+      "cache_impact": "影響なし（pathPrefixベースのキャッシュ継続、issueNoはフィルタリング用途のみ）"
+    },
+    "resource_limit_operational_impact": {
+      "recommended_limit": "同時5-10個",
+      "memory_per_server": "200-500MB",
+      "monitoring": "将来機能（commandmate status --all）で対応予定",
+      "cleanup_recommendation": "/worktree-cleanup による不要Worktree停止を推奨"
+    }
+  },
+  "backward_compatibility_verification": {
+    "getPidFilePath": {
+      "signature_change": "getPidFilePath() → getPidFilePath(issueNo?: number)",
+      "backward_compatible": true,
+      "verification_points": [
+        "引数なし呼び出しで~/.commandmate/.commandmate.pidを返す（既存動作）",
+        "start.ts:23, stop.ts:23, status.ts:23の引数なし呼び出しが維持される"
+      ],
+      "existing_tests": "tests/unit/cli/utils/env-setup.test.ts:367-391にgetPidFilePath()のテストが存在。引数なし呼び出しのテストあり"
+    },
+    "external_apps_table": {
+      "change": "issue_no INTEGER NULLableカラム追加",
+      "backward_compatible": true,
+      "verification_points": [
+        "既存レコードはissue_no=NULL（影響なし）",
+        "既存クエリはissue_noを参照しない（影響なし）"
+      ]
+    },
+    "stop_command": {
+      "change": "--issueフラグ追加",
+      "backward_compatible": true,
+      "verification_points": [
+        "フラグなし実行で既存動作（メインサーバー停止）を維持"
+      ]
+    },
+    "status_command": {
+      "change": "--issueフラグ追加",
+      "backward_compatible": true,
+      "verification_points": [
+        "フラグなし実行で既存動作（メインサーバー状態確認）を維持"
+      ]
+    }
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/types/index.ts",
+      "relevance": "StopOptions拡張、StatusOptions新規作成の対象",
+      "lines": "44-47（StopOptions）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/index.ts",
+      "relevance": "commander設定、--issueフラグ追加対象",
+      "lines": "51-68（stop/statusコマンド定義）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/commands/stop.ts",
+      "relevance": "--issueフラグ対応の変更対象",
+      "lines": "23（getPidFilePath()呼び出し）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/commands/status.ts",
+      "relevance": "--issueフラグ対応の変更対象",
+      "lines": "23（getPidFilePath()呼び出し）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/external-apps/db.ts",
+      "relevance": "issueNoフィールド追加に伴う型・関数修正対象",
+      "lines": "37-51（DbExternalAppRow）、56-66（DbExternalAppInsert）、71-87（mapDbRowToExternalApp）、92-104（mapExternalAppToDbRow）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/external-apps/cache.ts",
+      "relevance": "影響なし確認済み（pathPrefixベースのキャッシュ継続）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/db-migrations.ts",
+      "relevance": "Migration #16追加対象、CURRENT_SCHEMA_VERSION=15→16",
+      "lines": "14（CURRENT_SCHEMA_VERSION）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/cli/utils/env-setup.test.ts",
+      "relevance": "getPidFilePath()の既存テスト確認済み",
+      "lines": "367-391"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/cli/utils/pid-manager.test.ts",
+      "relevance": "PidManagerの既存テスト確認済み"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/integration/external-apps-api.test.ts",
+      "relevance": "External Apps統合テスト、issueNoテスト追加対象"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/CLAUDE.md",
+      "relevance": "ブランチ戦略・Worktree開発フロー更新対象"
+    }
+  ],
+  "related_issues": [
+    {
+      "issue_number": 135,
+      "title": "バージョンアップ時にDBクリア",
+      "state": "OPEN",
+      "relevance": "blocking dependency - 依然としてOPEN状態。本Issueの実装前に完了が必要"
+    }
+  ],
+  "conclusion": {
+    "overall_assessment": "Stage 3で指摘した影響範囲の課題はほぼ全て対応済み（Must Fix: 100%、Should Fix: 100%、Nice to Have: 83%解決）。新たに特定した影響範囲は主にCLI型定義とExternal Apps DB操作の詳細であり、いずれもShould Fix（推奨対応）レベル。破壊的変更はなく、後方互換性は維持される設計となっている。Issue #135のOPEN状態は引き続き実装開始のブロッカーとなる点に注意。",
+    "recommendation": "SF-1〜SF-4の影響範囲を追記した上で、Issue #135完了後に実装を開始することを推奨"
+  }
+}

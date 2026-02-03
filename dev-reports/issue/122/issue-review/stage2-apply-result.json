@@ -1,0 +1,36 @@
+{
+  "stage": 2,
+  "apply_date": "2026-02-03",
+  "issue_number": 122,
+  "iteration": 1,
+  "applied": [
+    {
+      "id": "MF-1",
+      "status": "applied",
+      "detail": "行番号の記載を削除し、「Empty state処理箇所（if文からreturnの閉じ括弧まで）」という表現に変更。コードは将来変更される可能性があるため、行番号への依存を排除"
+    },
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "detail": "handleCreateFile/handleCreateDirectoryを既存のonNewFile/onNewDirectory propsパターンに修正。空文字列を渡すことでルートディレクトリへの作成を指示する設計を明記。親コンポーネントとの連携を補足説明として追加"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "detail": "ボタンのスタイリング詳細を追加。ContextMenu.tsxと整合したUIスタイル（flex items-center gap-2 px-3 py-2 text-sm）、lucide-reactのFilePlus/FolderPlusアイコン使用、hover/transitionスタイルを明記。受入条件にも「ボタンのスタイリングが既存UIと一貫している」を追加"
+    }
+  ],
+  "skipped": [
+    {
+      "id": "NTH-1",
+      "reason": "Nice to Have項目。テストケースの追加は実装フェーズで検討するのが適切。Issueの受入条件は機能要件に集中させ、テスト要件は実装時に別途対応"
+    },
+    {
+      "id": "NTH-2",
+      "status": "applied",
+      "reason": "当初はスキップ予定だったが、関連性の明確化は有益と判断。関連Issueセクションを追加し、#49（ファイル操作）と#71（クローン機能）へのリンクを記載"
+    }
+  ],
+  "summary": "Must Fix 1件、Should Fix 2件を全て反映。Nice to Have 2件のうち、関連Issueリンク（NTH-2）は有益と判断し追加。テストケース追加（NTH-1）は実装フェーズで対応。主な変更点: (1) 行番号を削除し説明的な表現に変更、(2) 関数名を既存のonNewFile/onNewDirectoryパターンに整合、(3) スタイリング詳細を追加（Tailwindクラス、アイコン）、(4) 関連Issueセクション追加",
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/122"
+}

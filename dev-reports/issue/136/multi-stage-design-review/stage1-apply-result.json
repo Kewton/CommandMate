@@ -1,0 +1,149 @@
+{
+  "issue_number": 136,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "getDefaultDbPath() 重複実装の拡大リスク",
+        "section_updated": "4.1 Strategy パターン, 10.1 ブロッキング依存, 13 実装計画 (Phase 0), 14 実装チェックリスト",
+        "status": "reflected",
+        "changes": [
+          "Added prerequisite note in section 4.1 for DRY compliance",
+          "Added DRY refactoring as blocking dependency in section 10.1",
+          "Added Phase 0 for DRY refactoring in section 13",
+          "Added pre-condition checklist items in section 14.1 and 14.2"
+        ]
+      },
+      {
+        "id": "MF-002",
+        "item": "WorktreeSetupFacade の責務過多",
+        "section_updated": "4.3 Facade + Command パターン, 11.2 新規作成ファイル, 12.1 ユニットテスト, 14.3 実装チェックリスト",
+        "status": "reflected",
+        "changes": [
+          "Completely rewrote section 4.3 with Command pattern implementation",
+          "Added SetupCommand interface and 5 Command classes",
+          "Added rollback mechanism for error handling",
+          "Added setup-commands.ts to new files list",
+          "Added Command pattern tests to test plan",
+          "Added implementation checklist items for Command pattern"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "ResourcePathResolver インターフェースの実装不足",
+        "section_updated": "4.1 Strategy パターン, 11.1 変更対象ファイル, 11.2 新規作成ファイル, 12.1 ユニットテスト, 14.3 実装チェックリスト",
+        "status": "reflected",
+        "changes": [
+          "Added PidPathResolver class design in section 4.1",
+          "Added LogPathResolver class design in section 4.1",
+          "Added note about getPidFilePath() using PidPathResolver",
+          "Added resource-resolvers.ts to new files list",
+          "Added Resolver tests to test plan"
+        ]
+      },
+      {
+        "id": "SF-002",
+        "item": "CLI コマンドと DaemonManager の直接依存",
+        "section_updated": "4.4 Factory パターン (new section), 11.1 変更対象ファイル, 11.2 新規作成ファイル, 12.1 ユニットテスト, 13 実装計画, 14.3 実装チェックリスト",
+        "status": "reflected",
+        "changes": [
+          "Added new section 4.4 for DaemonManagerFactory pattern",
+          "Added IDaemonManager interface design",
+          "Added DaemonManagerFactory class design",
+          "Updated start.ts change description to include Factory usage",
+          "Added daemon-factory.ts to new files list",
+          "Added Factory tests to test plan",
+          "Added Phase 3 Factory introduction"
+        ]
+      },
+      {
+        "id": "SF-003",
+        "item": "ポート管理の二重システム可能性",
+        "section_updated": "3 技術選定, 6.2 プロキシルーティング, 8.2 キャッシュ戦略, 14.3 実装チェックリスト",
+        "status": "reflected",
+        "changes": [
+          "Added Single Source of Truth note in section 3",
+          "Updated section 8.2 to remove worktree-ports.json mention",
+          "Added clear statement that cache file will not be used",
+          "Updated proxy routing to explicitly use DB as source"
+        ]
+      },
+      {
+        "id": "SF-004",
+        "item": "ExternalApp インターフェースへの issueNo フィールド追加",
+        "section_updated": "4.2 Factory パターン, 5.2 型定義拡張, 11.1 変更対象ファイル, 14.3 実装チェックリスト",
+        "status": "reflected",
+        "changes": [
+          "Updated section 4.2 to remove issueNo from CreateExternalAppInput",
+          "Completely rewrote section 5.2 with ISP-compliant design",
+          "Added WorktreeExternalApp derived type",
+          "Added CreateWorktreeExternalAppInput type",
+          "Added isWorktreeExternalApp type guard function",
+          "Added DB layer handling note"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "NTH-001",
+        "item": "ログディレクトリの Issue 別分離",
+        "section_updated": "2.2 ディレクトリ構成, 14.4 将来検討事項",
+        "status": "noted",
+        "changes": [
+          "Updated directory structure to show file-based log naming",
+          "Added note explaining YAGNI consideration",
+          "Added to future consideration checklist"
+        ]
+      },
+      {
+        "id": "NTH-002",
+        "item": "develop ブランチ導入の複雑性",
+        "section_updated": "9.1 採用した設計, 14.4 将来検討事項",
+        "status": "noted",
+        "changes": [
+          "Added note about alternative approach without develop branch",
+          "Added to future consideration checklist"
+        ]
+      },
+      {
+        "id": "NTH-003",
+        "item": "スキルと CLI の重複処理",
+        "section_updated": "11.2 新規作成ファイル, 14.4 将来検討事項",
+        "status": "noted",
+        "changes": [
+          "Added note that skills should be CLI wrappers",
+          "Added to future consideration checklist"
+        ]
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+  "sections_updated": [
+    "2.2 ディレクトリ構成",
+    "3 技術選定",
+    "4.1 Strategy パターン",
+    "4.2 Factory パターン",
+    "4.3 Facade + Command パターン",
+    "4.4 Factory パターン (DaemonManager生成) - NEW",
+    "5.2 型定義拡張",
+    "6.2 プロキシルーティング",
+    "8.2 キャッシュ戦略",
+    "9.1 採用した設計",
+    "10.1 ブロッキング依存",
+    "11.1 変更対象ファイル",
+    "11.2 新規作成ファイル",
+    "12.1 ユニットテスト",
+    "12.2 統合テスト",
+    "13 実装計画",
+    "14 実装チェックリスト - NEW",
+    "レビュー履歴"
+  ],
+  "timestamp": "2026-02-03T12:30:00Z"
+}
