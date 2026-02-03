@@ -1,6 +1,7 @@
 /**
  * Session Cleanup Utility (Facade Pattern)
  * Issue #69: Repository delete feature
+ * Issue #138: Added auto-yes-poller cleanup
  *
  * Provides a unified interface for cleaning up CLI tool sessions and pollers.
  * Abstracts the differences between response-poller and claude-poller.
@@ -8,6 +9,7 @@
 
 import { stopPolling as stopResponsePolling } from './response-poller';
 import { stopPolling as stopClaudePolling } from './claude-poller';
+import { stopAutoYesPolling } from './auto-yes-manager';
 import type { CLIToolType } from './cli-tools/types';
 
 /**
@@ -108,6 +110,16 @@ export async function cleanupWorktreeSessions(
     const errorMsg = `claude-poller: ${error instanceof Error ? error.message : String(error)}`;
     result.pollerErrors.push(errorMsg);
     console.warn(`${LOG_PREFIX} Failed to stop claude-poller ${worktreeId}:`, error);
+  }
+
+  // 3. Stop auto-yes-poller (Issue #138)
+  try {
+    stopAutoYesPolling(worktreeId);
+    result.pollersStopped.push('auto-yes-poller');
+  } catch (error) {
+    const errorMsg = `auto-yes-poller: ${error instanceof Error ? error.message : String(error)}`;
+    result.pollerErrors.push(errorMsg);
+    console.warn(`${LOG_PREFIX} Failed to stop auto-yes-poller ${worktreeId}:`, error);
   }
 
   return result;
