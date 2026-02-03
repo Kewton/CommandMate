@@ -72,7 +72,8 @@ export async function GET(request: NextRequest) {
                   isProcessing = true;
                 } else {
                   // No thinking indicator - check for input prompt
-                  const hasInputPrompt = /^[>❯]\s*$/m.test(lastLines);
+                  // Issue #132: Also match prompts with recommended commands (e.g., "❯ /work-plan")
+                  const hasInputPrompt = /^[>❯](\s*$|\s+\S)/m.test(lastLines);
                   if (!hasInputPrompt) {
                     // Neither thinking nor input prompt - assume processing
                     isProcessing = true;
