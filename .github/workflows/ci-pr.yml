@@ -1,8 +1,10 @@
-name: CI - Pull Request
+name: CI
 
 on:
+  push:
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   lint:

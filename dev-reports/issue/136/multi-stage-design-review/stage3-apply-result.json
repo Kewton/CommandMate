@@ -1,0 +1,100 @@
+{
+  "issue_number": 136,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-IMP-001",
+        "item": "getPidFilePath() の既存利用箇所への破壊的影響",
+        "sections_updated": ["12.1 ユニットテスト", "13 実装計画 Phase 1", "14.3 Phase 1-5 実装項目"],
+        "status": "reflected"
+      },
+      {
+        "id": "MF-IMP-002",
+        "item": "Migration #16 の既存データ・運用への影響分析不足",
+        "sections_updated": ["5.1 external_apps テーブル拡張", "8.2 キャッシュ戦略", "13 実装計画 Phase 2", "14.3 Phase 1-5 実装項目"],
+        "status": "reflected"
+      },
+      {
+        "id": "MF-IMP-003",
+        "item": "循環インポート解決リファクタリングによる既存テストへの影響",
+        "sections_updated": ["13 実装計画 Phase 0", "14.2 Phase 0 チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-IMP-001",
+        "item": "CI/CD パイプラインへの段階的変更計画不足",
+        "sections_updated": ["1.2 スコープ"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IMP-002",
+        "item": "dotenv v16+ バージョン要件の波及効果",
+        "sections_updated": ["3 技術選定", "13 実装計画 Phase 0", "14.2 Phase 0 チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IMP-003",
+        "item": "複数サーバー同時起動時のリソース監視方法の不明確さ",
+        "sections_updated": ["6.1 CLI コマンド", "13 実装計画 Phase 3/Phase 5", "14.3 Phase 1-5 実装項目"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IMP-004",
+        "item": "DB-based ポート管理のパフォーマンス影響",
+        "sections_updated": ["4.3 Facade + Command パターン", "8.2 キャッシュ戦略", "11.2 新規作成ファイル", "14.3 Phase 1-5 実装項目"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IMP-005",
+        "item": "CLI Types 拡張の commander 設定への波及",
+        "sections_updated": ["6.1 CLI コマンド", "14.3 Phase 1-5 実装項目"],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "NTH-IMP-001",
+        "item": "Issue 番号以外の識別子サポート",
+        "sections_updated": ["14.4 将来検討事項"],
+        "status": "noted"
+      },
+      {
+        "id": "NTH-IMP-002",
+        "item": "複数サーバー起動によるセキュリティ監査ポイントの増加",
+        "sections_updated": ["14.4 将来検討事項"],
+        "status": "noted"
+      },
+      {
+        "id": "NTH-IMP-003",
+        "item": "CLAUDE.md の更新タイミング",
+        "sections_updated": ["13 実装計画 Phase 1", "14.3 Phase 1-5 実装項目"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+  "sections_updated": [
+    "1.2 スコープ",
+    "3 技術選定",
+    "4.3 Facade + Command パターン（RegisterExternalAppCommand）",
+    "5.1 external_apps テーブル拡張",
+    "6.1 CLI コマンド",
+    "8.2 キャッシュ戦略",
+    "11.1 変更対象ファイル",
+    "11.2 新規作成ファイル",
+    "12.1 ユニットテスト",
+    "13 実装計画（Phase 0, 1, 2, 3, 5）",
+    "14.2 Phase 0: DRY準拠リファクタリング",
+    "14.3 Phase 1-5 実装項目",
+    "14.4 将来検討事項",
+    "レビュー履歴 Stage 3"
+  ],
+  "timestamp": "2026-02-03T11:00:00Z"
+}

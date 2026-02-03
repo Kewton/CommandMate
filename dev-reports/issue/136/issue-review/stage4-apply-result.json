@@ -1,0 +1,124 @@
+{
+  "issue_number": 136,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-03",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "依存関係影響",
+        "status": "applied",
+        "change_summary": "Issue #135 の現在の状態（OPEN）を明記し、並行作業禁止と実装順序を依存関係セクションに詳細記載"
+      },
+      {
+        "id": "MF-2",
+        "category": "互換性影響",
+        "status": "applied",
+        "change_summary": "DBマイグレーション（Migration #16）計画を「ポート管理設計」セクションに追加。CURRENT_SCHEMA_VERSION更新とdb-migrations.tsの影響範囲テーブルへの追記"
+      },
+      {
+        "id": "MF-3",
+        "category": "パフォーマンス影響",
+        "status": "applied",
+        "change_summary": "「リソース使用量の考慮事項」セクションを新規追加。1サーバーあたりのメモリ使用量（200-500MB）、同時起動推奨上限（5-10個）、推奨運用方針を記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト影響",
+        "status": "applied",
+        "change_summary": "「既存テストへの影響確認」セクションをテスト計画に追加。env-setup.test.ts、pid-manager.test.ts、start/stop/statusコマンドの回帰テスト追加を明記"
+      },
+      {
+        "id": "SF-2",
+        "category": "運用影響",
+        "status": "applied",
+        "change_summary": "「2.4 ログ分離」セクションに複数Worktreeログの一元確認方法（commandmate logs --all）とログローテーション方針（7日間保持）を追加"
+      },
+      {
+        "id": "SF-3",
+        "category": "影響ファイル",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルのdaemon.ts行に「DaemonManagerコンストラクタ設計確認（issueNo引数の必要性を検討）」を追記"
+      },
+      {
+        "id": "SF-4",
+        "category": "依存関係影響",
+        "status": "applied",
+        "change_summary": "「3. CommandMate External Apps 連携」セクションにcache.tsへの影響なし（pathPrefixベースのルーティング継続）を明記。影響範囲テーブルにも追加"
+      },
+      {
+        "id": "SF-5",
+        "category": "破壊的変更",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルにstop.ts、status.tsを追加し「getPidFilePath()呼び出し確認（引数なしで既存動作維持）」を明記。テスト計画に回帰テスト追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルにsrc/cli/index.tsを追加し「--auto-portフラグのヘルプメッセージ追加」を明記"
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "status": "skipped",
+        "reason": "既存メインDBとWorktree別DBは共存する設計（cm.dbとcm-{issue-no}.db）であり、マイグレーション不要。Issue本文の設計セクションで既に明確"
+      },
+      {
+        "id": "NTH-3",
+        "category": "CI/CD影響",
+        "status": "skipped",
+        "reason": "develop/mainへのPRで同一のCI動作（全テスト実行）で十分。E2Eテストの分岐は将来的な最適化として検討可能だが、初期実装では不要"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 9,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/136"
+  },
+  "key_changes": [
+    {
+      "section": "依存関係",
+      "change": "Issue #135 の OPEN 状態と並行作業禁止を明記"
+    },
+    {
+      "section": "ポート管理設計",
+      "change": "Migration #16 の SQL とマイグレーション実装詳細を追加"
+    },
+    {
+      "section": "技術設計（新規セクション）",
+      "change": "リソース使用量の考慮事項テーブルと推奨運用を追加"
+    },
+    {
+      "section": "テスト計画",
+      "change": "既存テストへの影響確認セクションを追加"
+    },
+    {
+      "section": "2.4 ログ分離",
+      "change": "ログ収集・監視方法とローテーション方針を追加"
+    },
+    {
+      "section": "影響範囲テーブル",
+      "change": "daemon.ts、cache.ts、stop.ts、status.ts、index.tsの変更詳細を追記"
+    },
+    {
+      "section": "受入条件",
+      "change": "DBマイグレーションとリソース推奨上限のドキュメント化を追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "Stage 3 レビューで適用した全指摘事項のサマリーを追加"
+    }
+  ]
+}

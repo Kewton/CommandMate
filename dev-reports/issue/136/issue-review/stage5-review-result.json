@@ -1,0 +1,182 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 136,
+  "focus_area": "通常",
+  "iteration": 2,
+  "review_date": "2026-02-03",
+  "previous_findings_verification": {
+    "stage1_must_fix": {
+      "MF-1": {
+        "original": "ブランチ戦略の変更がCLAUDE.mdの既存記載と矛盾する可能性",
+        "status": "ADDRESSED",
+        "verification": "Issue本文に「CI/CD対応（必須）」セクションが追加され、ci-pr.ymlのbranches更新、CLAUDE.mdのブランチ戦略セクション更新がタスクとして明記されている"
+      },
+      "MF-2": {
+        "original": "src/lib/db-path-resolver.tsの変更内容が不正確",
+        "status": "ADDRESSED",
+        "verification": "「2.1 データベース分離」セクションで「具体的な変更: Issue番号ベースのDBパス生成関数 getIssueDbPath(issueNo: number): string を追加」と明確化されている"
+      },
+      "MF-3": {
+        "original": "PIDファイルパスの設計が既存実装と不整合",
+        "status": "ADDRESSED",
+        "verification": "「2.3 PID ファイル分離」セクションで「issueNo 引数がない場合は既存の ~/.commandmate/.commandmate.pid を返す（後方互換性維持）」と明記されている"
+      }
+    },
+    "stage1_should_fix": {
+      "SF-1": {
+        "original": "External Apps機能との連携方法が具体性に欠ける",
+        "status": "ADDRESSED",
+        "verification": "「3. CommandMate External Apps 連携」セクションに「既存実装との連携（重要）」サブセクションが追加され、ExternalAppインターフェース拡張、DB登録/削除フロー、cache.tsへの影響なしが明記されている"
+      },
+      "SF-2": {
+        "original": "Issue #135との依存関係と作業順序が不明確",
+        "status": "ADDRESSED",
+        "verification": "「## 依存関係」セクションで「#135は OPEN 状態（未完了）」「並行作業の禁止」「代替案」が明記されている"
+      },
+      "SF-3": {
+        "original": "worktree-ports.jsonの管理責任と永続化方針が不明確",
+        "status": "ADDRESSED",
+        "verification": "「ポート管理設計」セクションで「方針: DBベース管理（External Apps統一）」と明記され、worktree-ports.jsonは「補助ファイル（キャッシュ用途のみ）」として位置づけられている"
+      },
+      "SF-4": {
+        "original": "環境変数読み込み順序の実現方法が未記載",
+        "status": "ADDRESSED",
+        "verification": "「環境変数読み込み順序」セクションで「dotenv.config({ path: globalEnvPath })」「dotenv.config({ path: worktreeEnvPath, override: true })」と具体的な実装方法が記載されている"
+      },
+      "SF-5": {
+        "original": "セキュリティ考慮事項の記載がない",
+        "status": "ADDRESSED",
+        "verification": "「## セキュリティ考慮事項」セクションが新設され、認証トークン管理、ポート範囲制限、PIDファイル競合防止、ログ記録が明記されている"
+      }
+    },
+    "stage1_nice_to_have": {
+      "NTH-1": {
+        "original": "スキルファイルのディレクトリ構造が既存と異なる可能性",
+        "status": "ADDRESSED",
+        "verification": "スキルセクションに「ディレクトリ構造: .claude/skills/worktree-setup/SKILL.md（既存スキル形式に準拠）」と明記されている"
+      },
+      "NTH-2": {
+        "original": "ブランチ命名規則の詳細が不足",
+        "status": "ADDRESSED",
+        "verification": "「/worktree-setup」スキルの実行内容で「{description}: Issueタイトルから自動生成（スペース→ハイフン、特殊文字除去、40文字制限）」と明記されている"
+      },
+      "NTH-3": {
+        "original": "テスト計画の記載がない",
+        "status": "ADDRESSED",
+        "verification": "「## テスト計画」セクションが新設され、ユニットテスト、既存テストへの影響確認、統合テスト、E2Eテストが詳細に記載されている"
+      }
+    },
+    "stage3_must_fix": {
+      "MF-1": {
+        "original": "Issue #135との依存関係が明記されているが、#135は未完了（OPEN状態）",
+        "status": "ADDRESSED",
+        "verification": "依存関係セクションで状態、並行作業禁止、代替案が明記されている"
+      },
+      "MF-2": {
+        "original": "DBマイグレーション計画が未記載",
+        "status": "ADDRESSED",
+        "verification": "「ポート管理設計」セクションにMigration #16のSQLとマイグレーション実装方針が追加されている"
+      },
+      "MF-3": {
+        "original": "複数サーバー同時起動時のシステムリソース使用量の考慮が不足",
+        "status": "ADDRESSED",
+        "verification": "「リソース使用量の考慮事項」セクションが追加され、メモリ、CPU、ポート、ディスクの使用量と「同時5-10個まで推奨」が明記されている"
+      }
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "技術的正確性",
+        "issue": "ExternalAppインターフェースへのissueNoフィールド追加はIssue本文に記載されているが、CreateExternalAppInput/UpdateExternalAppInputへの対応が未記載",
+        "location": "### 3. CommandMate External Apps 連携 セクション",
+        "recommendation": "src/types/external-apps.tsのExternalAppインターフェースだけでなく、CreateExternalAppInputにもissueNo?フィールドを追加する必要があることを明記すべき。DB登録時に必要となる",
+        "evidence": "Issue記載: 「ExternalApp インターフェースの拡張（オプショナル）- issueNo?: number フィールドの追加」。しかしCreateExternalAppInput（60-87行目）への変更は未記載"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "commandmate stop / statusコマンドのWorktree対応が不明確",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "stop.tsとstatus.tsは「getPidFilePath()呼び出し確認（引数なしで既存動作維持）」と記載されているが、Issue番号を指定して特定のWorktreeを停止/確認する機能が必要かどうかを明記すべき。例: commandmate stop --issue 135",
+        "evidence": "start.tsには「--auto-port フラグ追加」と記載されているが、stop/statusのWorktree対応（--issue フラグ等）は未定義"
+      },
+      {
+        "id": "SF-3",
+        "category": "整合性",
+        "issue": "External Apps DBテーブルへの自動登録時のname/displayName/pathPrefixの生成ルールが未定義",
+        "location": "### 4. Claude Code スキル: /worktree-setup セクション",
+        "recommendation": "External Apps登録時のフィールド値を明確化すべき。例: name: 'worktree-135'、displayName: 'Worktree #135'、pathPrefix: 'commandmate_issue/135'。現在のIssueでは出力例のみで、DBに登録する値の生成ルールが不明",
+        "evidence": "出力例: 「External Apps: /proxy/commandmate_issue/135」。しかしExternalAppテーブルのname, displayName, description, appType等の値が未定義"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "worktree-ports.json（キャッシュファイル）の生成タイミングと更新方針が未詳細",
+        "location": "### ポート管理設計 セクション",
+        "recommendation": "worktree-ports.jsonが「補助ファイル（キャッシュ用途のみ）」と記載されているが、生成タイミング（起動時?定期更新?）、DBとの同期方法、ファイルが存在しない場合の動作を明記すると実装時の曖昧さが減る",
+        "evidence": "「~/.commandmate/worktree-ports.json # DBから生成されるキャッシュ（オプション）」と記載されているが、生成/更新の詳細は未記載"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "logsディレクトリのmain/サブディレクトリの位置づけが不明",
+        "location": "### ファイル構成（Worktree 環境）セクション",
+        "recommendation": "ファイル構成で「logs/main/」が示されているが、これがdevelopブランチ用なのか、メインサーバー用なのか明確でない。「main」という名前はブランチ名と混同しやすいため、別名（例: default/）を検討するか、用途を明記すべき",
+        "evidence": "ファイル構成: 「logs/├── main/├── 135/└── 200/」。mainの意味が不明確"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "複数Worktreeの状態一覧を確認するコマンドが未定義",
+        "location": "### リソース使用量の考慮事項 セクション",
+        "recommendation": "「commandmate status --all で各Worktreeの状態確認（将来機能）」と記載されているが、本Issueのスコープに含めるか、別Issueとするかを明記すべき。運用上は複数Worktreeの状態を一覧確認する機能が重要",
+        "evidence": "「メモリ使用量の監視: commandmate status --all で各Worktreeの状態確認（将来機能）」と記載。本Issueの受入条件には含まれていない"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3
+  },
+  "overall_assessment": {
+    "stage1_findings_resolution": "Stage 1で指摘した11件（MF:3, SF:5, NTH:3）全てが適切に対応されている",
+    "stage3_findings_resolution": "Stage 3で指摘した影響範囲の問題（MF:3, SF:5, NTH:3）も全て反映されている",
+    "new_issues_introduced": "更新により新たに3件のShould Fix、3件のNice to Haveを発見。いずれも重大な問題ではなく、実装フェーズで対応可能",
+    "quality_improvement": "Issueの品質は大幅に向上。技術設計の詳細化、セキュリティ考慮、テスト計画が充実",
+    "recommendation": "新規指摘のShould Fix 3件を反映後、実装開始可能。Nice to Have 3件は実装フェーズで検討"
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/types/external-apps.ts",
+      "relevance": "CreateExternalAppInputへのissueNo追加が必要（SF-1）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/commands/stop.ts",
+      "relevance": "Worktree対応の--issueフラグ検討（SF-2）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/commands/status.ts",
+      "relevance": "Worktree対応の--issueフラグ検討（SF-2）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/external-apps/db.ts",
+      "relevance": "Worktree用External App登録時のフィールド値生成（SF-3）"
+    }
+  ],
+  "doc_references": [],
+  "related_issues": [
+    {
+      "issue_number": 135,
+      "title": "バージョンアップ時にDBクリア",
+      "state": "OPEN",
+      "relevance": "blocking dependency - 依存関係が明確に記載されており、対応済み"
+    }
+  ]
+}

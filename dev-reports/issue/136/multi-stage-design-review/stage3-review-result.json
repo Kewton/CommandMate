@@ -1,0 +1,250 @@
+{
+  "issue_number": 136,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 3,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-IMP-001",
+        "category": "後方互換性",
+        "title": "getPidFilePath() の既存利用箇所への破壊的影響",
+        "description": "設計書では getPidFilePath(issueNo?: number) にオプション引数を追加予定だが、start.ts / stop.ts / status.ts で既に getPidFilePath() を引数なしで呼び出している。引数追加は後方互換だが、戻り値のパス変更（Issue番号あり時に pids/XXX.pid に変わる）によりメインサーバーの起動・停止ロジックに影響する可能性がある。",
+        "impact": "high",
+        "affected_files": [
+          "src/cli/utils/env-setup.ts",
+          "src/cli/commands/start.ts",
+          "src/cli/commands/stop.ts",
+          "src/cli/commands/status.ts"
+        ],
+        "recommendation": "既存のメインサーバー用パス（.commandmate.pid）は引数なしの場合に維持されることをテストで保証すること。また、env-setup.ts の既存テスト（tests/unit/cli/commands/*.test.ts）が新シグネチャでも動作することを確認する回帰テストを追加すること。"
+      },
+      {
+        "id": "MF-IMP-002",
+        "category": "DB マイグレーション影響",
+        "title": "Migration #16 の既存データ・運用への影響分析不足",
+        "description": "設計書では Migration #16 で external_apps に issue_no カラムを追加するが、既存レコード（issue_no = NULL）の扱いが明確でない。また、既存の getEnabledExternalApps() / getAllExternalApps() が Worktree 用アプリも返すことになり、UI 表示やキャッシュに予期しない影響がある可能性。",
+        "impact": "high",
+        "affected_files": [
+          "src/lib/db-migrations.ts",
+          "src/lib/external-apps/db.ts",
+          "src/lib/external-apps/cache.ts"
+        ],
+        "recommendation": "1) Migration #16 で既存レコードは issue_no = NULL のまま維持されることを明記。2) getEnabledExternalApps() に issue_no フィルタオプションを追加するか、メインアプリ用と Worktree 用を分離する API を設計に含めること。3) ExternalAppCache のキャッシュキー戦略（pathPrefix のみ vs pathPrefix + issueNo）を明確化すること。"
+      },
+      {
+        "id": "MF-IMP-003",
+        "category": "テスト影響",
+        "title": "循環インポート解決リファクタリングによる既存テストへの影響",
+        "description": "Phase 0 の install-context.ts 新規作成により、isGlobalInstall() と getConfigDir() が env-setup.ts から移動する。これらを import している既存テスト（tests/unit/cli/*.test.ts）が壊れる可能性が高い。",
+        "impact": "high",
+        "affected_files": [
+          "tests/unit/cli/commands/init.test.ts",
+          "tests/unit/cli/commands/start.test.ts",
+          "tests/unit/cli/commands/stop.test.ts",
+          "tests/unit/cli/commands/status.test.ts",
+          "tests/unit/cli/utils/*.test.ts"
+        ],
+        "recommendation": "設計書の Phase 0 に「既存テストファイルの import パス更新」タスクを明示的に追加すること。また、install-context.ts は env-setup.ts からの re-export を一時的に提供し、段階的に移行する戦略も検討すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-IMP-001",
+        "category": "CI/CD 影響",
+        "title": "CI/CD パイプラインへの段階的変更計画不足",
+        "description": "設計書では Phase 2 以降に develop ブランチ対応を延期しているが、ci-pr.yml が現在 main ブランチのみを対象としている。Phase 2 で追加される変更内容（ブランチ条件の追加、テストマトリクスの拡張等）の具体的な影響範囲が設計書に記載されていない。",
+        "impact": "medium",
+        "affected_files": [
+          ".github/workflows/ci-pr.yml"
+        ],
+        "recommendation": "Phase 2 の設計書または別 Issue で CI/CD 変更の詳細設計を行い、本設計書には「Phase 2 で別途設計」と明記すること。"
+      },
+      {
+        "id": "SF-IMP-002",
+        "category": "依存ライブラリ影響",
+        "title": "dotenv v16+ バージョン要件の波及効果",
+        "description": "設計書では dotenv v16+ の override オプションを前提としているが、package.json の dotenv バージョン確認と、バージョンアップが必要な場合の影響（他の dotenv 利用箇所との互換性）が分析されていない。",
+        "impact": "medium",
+        "affected_files": [
+          "package.json",
+          "src/cli/utils/daemon.ts",
+          "src/cli/commands/start.ts",
+          "src/cli/commands/status.ts"
+        ],
+        "recommendation": "現在の dotenv バージョンを確認し、v16+ でない場合はバージョンアップの影響範囲を分析すること。既存の dotenv.config() 呼び出し箇所で override オプションを使っていない場合は後方互換。"
+      },
+      {
+        "id": "SF-IMP-003",
+        "category": "運用影響",
+        "title": "複数サーバー同時起動時のリソース監視方法の不明確さ",
+        "description": "設計書ではリソース使用量の推奨上限（同時5-10個）を示しているが、運用時にリソース超過を検知・警告する仕組み、およびログ出力の確認方法（複数ログファイルの統合閲覧等）が設計されていない。",
+        "impact": "medium",
+        "affected_files": [],
+        "recommendation": "status コマンドに --all オプションを追加し、起動中の全 Worktree サーバー状態を一覧表示する機能を追加検討すること。また、ログ集約の運用ガイドを docs/ に追加すること。"
+      },
+      {
+        "id": "SF-IMP-004",
+        "category": "パフォーマンス影響",
+        "title": "DB-based ポート管理のパフォーマンス影響",
+        "description": "ファイルベースのキャッシュ（worktree-ports.json）を廃止し DB のみとする方針だが、プロキシリクエスト毎の DB アクセス増加によるレイテンシ影響が考慮されていない。ExternalAppCache は TTL 30秒でキャッシュするが、Worktree 追加直後のルーティングが TTL 内は失敗する可能性がある。",
+        "impact": "medium",
+        "affected_files": [
+          "src/lib/external-apps/cache.ts"
+        ],
+        "recommendation": "Worktree 登録後にキャッシュを invalidate する機構を RegisterExternalAppCommand に追加すること。また、TTL を短縮するか、write-through キャッシュ戦略を検討すること。"
+      },
+      {
+        "id": "SF-IMP-005",
+        "category": "型定義影響",
+        "title": "CLI Types 拡張の commander 設定への波及",
+        "description": "StopOptions と StatusOptions に issue?: number を追加するが、src/cli/index.ts の commander 設定への影響（.option() 追加）が設計書の変更対象ファイルに記載はあるものの、具体的な実装例がない。",
+        "impact": "low",
+        "affected_files": [
+          "src/cli/index.ts",
+          "src/cli/types/index.ts"
+        ],
+        "recommendation": "Section 6.1 または Section 11.1 に commander 設定の具体例（.option('--issue <number>', 'Issue number for worktree server')）を追加すること。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "NTH-IMP-001",
+        "category": "将来の拡張性",
+        "title": "Issue 番号以外の識別子サポート",
+        "description": "現設計は Issue 番号ベースの識別に限定されている。将来的に PR 番号やカスタム名での Worktree 管理が必要になった場合の拡張性が考慮されていない。",
+        "recommendation": "ResourcePathResolver に identifier: string | number の抽象化を導入し、Issue 番号は IssueIdentifier として実装するパターンを検討すること。ただし YAGNI の観点から、現時点での実装は不要。"
+      },
+      {
+        "id": "NTH-IMP-002",
+        "category": "セキュリティ監査への影響",
+        "title": "複数サーバー起動によるセキュリティ監査ポイントの増加",
+        "description": "セキュリティ設計は充実しているが、複数サーバー起動により監査対象が増加する。セキュリティログ（security-logger.ts）が Issue 番号を含むようにする拡張が将来必要になる可能性がある。",
+        "recommendation": "logSecurityEvent に issueNo オプションを追加し、Worktree 毎のセキュリティイベントを追跡可能にする拡張を将来検討すること。"
+      },
+      {
+        "id": "NTH-IMP-003",
+        "category": "ドキュメント影響",
+        "title": "CLAUDE.md の更新タイミング",
+        "description": "設計書では CLAUDE.md 更新を Phase 2 以降（ブランチ戦略変更時）に延期しているが、Phase 1 完了後でも新しい CLI フラグ（--auto-port, --issue）の記載が必要になる。",
+        "recommendation": "Phase 1 完了時点で CLAUDE.md の「開発コマンド」セクションに新 CLI フラグを追加するタスクを計画すること。"
+      }
+    ]
+  },
+  "impact_matrix": {
+    "direct_changes": [
+      {
+        "file": "src/cli/utils/env-setup.ts",
+        "change": "getPidFilePath(issueNo?) 追加、getDefaultDbPath() 削除",
+        "risk": "high",
+        "note": "既存 CLI コマンドに影響"
+      },
+      {
+        "file": "src/lib/db-path-resolver.ts",
+        "change": "getIssueDbPath() 追加、getDefaultDbPath() 一元化",
+        "risk": "medium",
+        "note": "循環インポート解決に伴う import 変更"
+      },
+      {
+        "file": "src/lib/db-migrations.ts",
+        "change": "Migration #16 追加（issue_no カラム）",
+        "risk": "medium",
+        "note": "既存 external_apps データへの影響"
+      },
+      {
+        "file": "src/cli/commands/start.ts",
+        "change": "--auto-port フラグ、DaemonManagerFactory 使用",
+        "risk": "medium",
+        "note": "既存起動ロジック変更"
+      },
+      {
+        "file": "src/cli/commands/stop.ts",
+        "change": "--issue フラグ追加",
+        "risk": "low",
+        "note": "オプション追加のみ"
+      },
+      {
+        "file": "src/cli/commands/status.ts",
+        "change": "--issue フラグ追加",
+        "risk": "low",
+        "note": "オプション追加のみ"
+      },
+      {
+        "file": "src/types/external-apps.ts",
+        "change": "WorktreeExternalApp 派生型追加",
+        "risk": "low",
+        "note": "型追加のみ、既存互換"
+      }
+    ],
+    "indirect_impact": [
+      {
+        "file": "src/lib/external-apps/db.ts",
+        "impact": "issue_no 対応のクエリ変更が必要になる可能性",
+        "risk": "medium"
+      },
+      {
+        "file": "src/lib/external-apps/cache.ts",
+        "impact": "Worktree 用アプリのキャッシュ戦略変更",
+        "risk": "medium"
+      },
+      {
+        "file": "tests/unit/cli/**/*.test.ts",
+        "impact": "import パス変更、新機能テスト追加",
+        "risk": "medium"
+      },
+      {
+        "file": "tests/unit/external-apps/*.test.ts",
+        "impact": "issue_no 関連テスト追加",
+        "risk": "low"
+      }
+    ],
+    "documentation_impact": [
+      {
+        "file": "CLAUDE.md",
+        "impact": "CLI コマンドセクション更新（Phase 1 後）",
+        "timing": "Phase 1 完了後"
+      },
+      {
+        "file": "docs/dev-guide/worktree-development.md",
+        "impact": "新規作成",
+        "timing": "Phase 5"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "medium",
+    "backward_compatibility": "medium",
+    "performance": "low"
+  },
+  "test_impact": {
+    "unit_tests_affected": 15,
+    "integration_tests_affected": 5,
+    "new_tests_required": 25,
+    "regression_risk": "medium"
+  },
+  "deployment_considerations": [
+    "DB マイグレーション（Migration #16）は自動適用されるが、既存 external_apps データの issue_no が NULL になることを運用者に周知",
+    "複数 Worktree 同時起動による一時的なリソース増加の可能性",
+    "既存 PID ファイル（.commandmate.pid）との互換性は維持される"
+  ],
+  "reviewed_files": [
+    "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+    "src/cli/utils/env-setup.ts",
+    "src/lib/db-path-resolver.ts",
+    "src/cli/utils/daemon.ts",
+    "src/types/external-apps.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/lib/db-migrations.ts",
+    "src/cli/types/index.ts",
+    ".github/workflows/ci-pr.yml",
+    "src/lib/external-apps/db.ts",
+    "src/lib/external-apps/cache.ts"
+  ],
+  "timestamp": "2026-02-03T10:30:00Z"
+}

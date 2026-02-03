@@ -1,0 +1,46 @@
+{
+  "status": "success",
+  "coverage": 80.0,
+  "unit_tests": {
+    "total": 2560,
+    "passed": 2560,
+    "failed": 0,
+    "skipped": 7
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/cli/index.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/port-allocator.ts",
+    "src/cli/utils/input-validators.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/types/index.ts",
+    ".claude/commands/worktree-setup.md",
+    ".claude/commands/worktree-cleanup.md",
+    "CLAUDE.md"
+  ],
+  "completed_tasks": [
+    "Phase 3 Task 3.6: commander設定更新 (--issue フラグ追加)",
+    "Phase 3 Task 3.7: /worktree-setup スキル作成",
+    "Phase 3 Task 3.8: /worktree-cleanup スキル作成",
+    "CLI統合: start/stop/status コマンドの --issue フラグ対応",
+    "CLI統合: status コマンドの --all フラグ対応",
+    "PortAllocator: getInstance() シングルトン追加",
+    "PortAllocator: allocate(issueNo) 同期メソッド追加",
+    "input-validators: validateIssueNoResult() 追加",
+    "StartOptions: dbPath フィールド追加",
+    "daemon.ts: dbPath オプション対応",
+    "CLAUDE.md: Issue #136 ドキュメント追加"
+  ],
+  "pending_tasks": [
+    "Phase 4 Task 4.3: プロキシルーティング更新",
+    "Phase 5 Tasks 5.3-5.5: E2Eテスト、セキュリティテスト、統合テスト"
+  ],
+  "commits": [],
+  "message": "Iteration 2 complete. CLI integration finished with --issue flag support for start/stop/status commands. Skills (/worktree-setup, /worktree-cleanup) created. Documentation updated."
+}

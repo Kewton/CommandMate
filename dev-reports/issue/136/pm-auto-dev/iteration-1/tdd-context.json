@@ -1,0 +1,100 @@
+{
+  "issue_number": 136,
+  "title": "Git Worktree 並列開発環境の整備",
+  "size": "XL",
+  "acceptance_criteria": [
+    "AC-001: /worktree-setup {issueNo} で Worktree 環境が自動構築される",
+    "AC-002: 複数の Worktree サーバーが同時に起動できる（ポート競合なし）",
+    "AC-003: External Apps から proxy/commandmate_issue/{issue-no} でアクセスできる",
+    "AC-004: /worktree-cleanup {issueNo} で Worktree 環境がクリーンアップされる",
+    "AC-005: 各 Worktree が独立した DB を使用している（cm-{issueNo}.db）",
+    "AC-006: 既存のメインPIDファイル（~/.commandmate/.commandmate.pid）との互換性が維持されている",
+    "AC-007: DBマイグレーション（Migration #16: issue_no カラム）が正しく動作し、既存データに影響がない",
+    "AC-008: commandmate stop --issue {issueNo} で特定Worktreeのサーバーを停止できる",
+    "AC-009: commandmate status --issue {issueNo} で特定Worktreeの状態を確認できる",
+    "AC-010: CLI型定義（StopOptions, StatusOptions）が拡張されている",
+    "AC-011: External Apps DB型定義（DbExternalAppRow, DbExternalAppInsert）が拡張されている",
+    "AC-012: 同時起動推奨上限（5-10個）がドキュメント化されている",
+    "AC-013: 新しいスキル（/worktree-setup, /worktree-cleanup）がドキュメント化されている"
+  ],
+  "implementation_tasks": [
+    {
+      "phase": 0,
+      "name": "DRY準拠リファクタリング",
+      "tasks": [
+        "install-context.ts 新規作成（isGlobalInstall, getConfigDir を抽出）",
+        "getDefaultDbPath() を db-path-resolver.ts に一元化",
+        "dotenv バージョン確認（v16+ 必須）",
+        "既存テスト更新（import パス修正）"
+      ]
+    },
+    {
+      "phase": 1,
+      "name": "基盤整備",
+      "tasks": [
+        "入力検証モジュール作成（validateIssueNo, validateBranchName）",
+        "ResourcePathResolver 実装（DbPathResolver, PidPathResolver, LogPathResolver）",
+        "Worktree検出ユーティリティ",
+        "ポート自動割り当てユーティリティ（3001-3100、MAX_WORKTREES制限）",
+        "エラー定義モジュール（AppError, createAppError）"
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "リソース分離",
+      "tasks": [
+        "db-path-resolver.ts 拡張（getIssueDbPath）",
+        "DBマイグレーション（Migration #16: issue_no カラム）",
+        "pids/ ディレクトリ管理（getPidFilePath拡張）",
+        "pid-manager.ts Issue番号対応",
+        "External Apps キャッシュ無効化"
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "CLI/スキル",
+      "tasks": [
+        "DaemonManager 抽象化（DaemonManagerFactory, DaemonManagerWrapper）",
+        "CLI型定義拡張（StopOptions, StatusOptions）",
+        "start.ts --auto-port フラグ",
+        "stop.ts --issue フラグ",
+        "status.ts --issue, --all フラグ",
+        "commander設定更新",
+        "Commandパターン実装（SetupCommand）",
+        "/worktree-setup スキル",
+        "/worktree-cleanup スキル"
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "External Apps連携",
+      "tasks": [
+        "ExternalApp型定義修正（WorktreeExternalApp派生型）",
+        "External Apps DB拡張（isWorktreeExternalApp、issue_no フィルタ）",
+        "プロキシルーティング更新"
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "ドキュメント・テスト",
+      "tasks": [
+        "開発者ガイド作成（worktree-development.md）",
+        "CLAUDE.md 更新（新CLIフラグ）",
+        "E2Eテスト",
+        "セキュリティテスト",
+        "統合テスト（Worktree同時起動）"
+      ]
+    }
+  ],
+  "security_requirements": [
+    "SEC-001: Issue番号の厳密な正整数検証（Number.isInteger && issueNo > 0 && issueNo < MAX_ISSUE_NO）",
+    "SEC-002: git コマンド実行には spawn/execFile を使用（exec 禁止）",
+    "SEC-003: ブランチ名は [a-zA-Z0-9_/-] のホワイトリスト検証",
+    "SEC-004: TOCTOU対策（validate() の try-catch パターン）",
+    "SEC-005: ポート枯渇攻撃対策（MAX_WORKTREES制限、クールダウン）",
+    "SEC-006: pids/ ディレクトリのパーミッション 0700"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+  "work_plan_path": "dev-reports/issue/136/work-plan.md"
+}

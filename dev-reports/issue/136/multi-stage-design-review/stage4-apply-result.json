@@ -1,0 +1,169 @@
+{
+  "issue_number": 136,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-SEC-001",
+        "item": "git worktree add コマンドの入力検証不足（コマンドインジェクション対策）",
+        "sections_updated": ["4.3", "7.5", "11.2", "12.1", "12.4", "13", "14.3"],
+        "status": "reflected",
+        "changes": [
+          "Section 4.3: validateIssueNo(), validateBranchName() 入力検証仕様を追加",
+          "Section 4.3: CreateWorktreeCommand に入力検証呼び出しを追加",
+          "Section 7.5: 入力検証仕様セクションを新設（issueNo検証、ブランチ名検証、git実行パターン）",
+          "Section 11.2: src/cli/utils/input-validators.ts を新規作成ファイルに追加",
+          "Section 12.1: input-validators.ts テスト項目を追加",
+          "Section 12.4: セキュリティテストセクションを新設",
+          "Section 13 Phase 1: 入力検証モジュール実装タスクを追加",
+          "Section 14.3: MF-SEC-001 チェックリスト項目を追加（6項目）"
+        ]
+      },
+      {
+        "id": "MF-SEC-002",
+        "item": "Worktree間の認証トークン共有によるセキュリティ境界の曖昧さ",
+        "sections_updated": ["7.1", "12.4", "13", "14.3"],
+        "status": "reflected",
+        "changes": [
+          "Section 7.1: トークン優先順位（Worktree固有 > グローバル）を明確化",
+          "Section 7.1: 独立トークン生成オプション（--independent-token）を追加",
+          "Section 7.1: リスクドキュメント（警告ボックス）を追加",
+          "Section 7.1: 認証フローシーケンス図（mermaid）を追加",
+          "Section 12.4: 認証トークン境界テストを追加",
+          "Section 13 Phase 3: --independent-token オプション追加タスク",
+          "Section 13 Phase 5: 認証トークン共有リスクドキュメント作成タスク",
+          "Section 14.3: MF-SEC-002 チェックリスト項目を追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-SEC-001",
+        "item": "ResourcePathResolver の validate() メソッドの TOCTOU 脆弱性リスク",
+        "sections_updated": ["4.1"],
+        "status": "reflected",
+        "changes": [
+          "Section 4.1: existsSync + realpathSync 方式から try-catch 方式に設計変更",
+          "Section 4.1: DbPathResolver, PidPathResolver, LogPathResolver の validate() を修正",
+          "Section 4.1: SF-SEC-001対応の注記を追加",
+          "Section 12.1: TOCTOU対策テスト項目を追加",
+          "Section 14.3: SF-SEC-001 チェックリスト項目を追加"
+        ]
+      },
+      {
+        "id": "SF-SEC-002",
+        "item": "ポート枯渇攻撃への対策不足",
+        "sections_updated": ["7.2", "12.1", "14.3"],
+        "status": "reflected",
+        "changes": [
+          "Section 7.2: Worktree数上限（CM_MAX_WORKTREES, デフォルト10）を追加",
+          "Section 7.2: ポート割り当てクールダウン（60秒）を追加",
+          "Section 7.2: PortAllocator実装例を追加",
+          "Section 7.2: 管理者向けリソース制限設定ドキュメント参照を追加",
+          "Section 12.1: Worktree数上限テスト、クールダウンテストを追加",
+          "Section 13 Phase 1: Worktree数上限、クールダウン実装タスクを追加",
+          "Section 14.3: SF-SEC-002 チェックリスト項目を追加（2項目）"
+        ]
+      },
+      {
+        "id": "SF-SEC-003",
+        "item": "エラーメッセージでの内部パス露出",
+        "sections_updated": ["4.2", "7.6", "11.2", "12.1", "13", "14.3"],
+        "status": "reflected",
+        "changes": [
+          "Section 4.2: SF-SEC-003対応の注記を追加",
+          "Section 7.6: エラーメッセージセキュリティセクションを新設",
+          "Section 7.6: エラーメッセージ分類表を追加",
+          "Section 7.6: AppError, ERROR_DEFINITIONS, createAppError() 実装パターンを追加",
+          "Section 11.2: src/lib/errors.ts を新規作成ファイルに追加",
+          "Section 12.1: errors.ts テスト項目を追加",
+          "Section 13 Phase 4: エラーメッセージ分離実装タスクを追加",
+          "Section 14.3: SF-SEC-003 チェックリスト項目を追加（3項目）"
+        ]
+      },
+      {
+        "id": "SF-SEC-004",
+        "item": "pids/ ディレクトリ作成時の権限設定タイミング",
+        "sections_updated": ["7.3", "12.1", "13", "14.3"],
+        "status": "reflected",
+        "changes": [
+          "Section 7.3: ensurePidsDirectory() 実装詳細を追加",
+          "Section 7.3: mkdirSync に { mode: 0o700 } 明示指定",
+          "Section 7.3: 既存ディレクトリのパーミッション確認/修正ロジックを追加",
+          "Section 7.3: PidManager コンストラクタでの呼び出しを追加",
+          "Section 12.1: ensurePidsDirectory() テスト項目を追加",
+          "Section 13 Phase 2: pids/ディレクトリパーミッション設定タスクを追加",
+          "Section 14.3: SF-SEC-004 チェックリスト項目を追加（2項目）"
+        ]
+      },
+      {
+        "id": "SF-SEC-005",
+        "item": "Worktree 操作のセキュリティイベントログ不足",
+        "sections_updated": ["4.3", "12.2", "13", "14.3", "14.4"],
+        "status": "reflected",
+        "changes": [
+          "Section 4.3: WorktreeSetupFacade に SecurityLogger 注入を追加",
+          "Section 4.3: setup() メソッドに logSecurityEvent() 呼び出しを追加（開始/各ステップ/成功/失敗/ロールバック失敗）",
+          "Section 12.2: セキュリティイベントログ出力確認テストを追加",
+          "Section 13 Phase 1: セキュリティイベントログ実装タスクを追加（将来検討から昇格）",
+          "Section 14.3: SF-SEC-005 チェックリスト項目を追加（2項目）",
+          "Section 14.4: NTH-IMP-002 の issueNo オプション追加は将来検討として維持"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "NTH-SEC-001",
+        "item": "Worktree間通信の暗号化（TLS対応プロキシ）",
+        "status": "noted_for_future",
+        "location": "Section 14.4"
+      },
+      {
+        "id": "NTH-SEC-002",
+        "item": "Issue番号の上限設定（MAX_ISSUE_NO）",
+        "status": "reflected_in_phase1",
+        "location": "Section 4.3, 7.5, 14.3",
+        "notes": "Phase 1 で MAX_ISSUE_NO 定数として実装"
+      },
+      {
+        "id": "NTH-SEC-003",
+        "item": "認証トークンのローテーション機能",
+        "status": "noted_for_future",
+        "location": "Section 14.4"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+  "sections_updated": [
+    "4.1 Strategy パターン（リソース解決）",
+    "4.2 Factory パターン（External App生成）",
+    "4.3 Facade + Command パターン（Worktreeセットアップ）",
+    "7.1 認証トークン管理",
+    "7.2 ポート範囲制限",
+    "7.3 PIDファイル競合防止",
+    "7.5 入力検証仕様（新設）",
+    "7.6 エラーメッセージセキュリティ（新設）",
+    "11.2 新規作成ファイル",
+    "12.1 ユニットテスト",
+    "12.2 統合テスト",
+    "12.4 セキュリティテスト（新設）",
+    "13 実装計画",
+    "14.3 Phase 1-5 実装項目",
+    "14.4 将来検討事項",
+    "レビュー履歴（Stage 4 追加）",
+    "レビュー指摘事項サマリー（新設）"
+  ],
+  "summary": {
+    "must_fix_reflected": 2,
+    "must_fix_total": 2,
+    "should_fix_reflected": 5,
+    "should_fix_total": 5,
+    "consider_noted": 3,
+    "consider_total": 3
+  },
+  "timestamp": "2026-02-03T10:45:00Z"
+}

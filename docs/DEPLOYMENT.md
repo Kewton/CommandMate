@@ -159,7 +159,7 @@ npm run build
 | 変数名 | 説明 | デフォルト |
 |--------|------|-----------|
 | `CM_PORT` | サーバーポート | `3000` |
-| `CM_DB_PATH` | SQLiteデータベースのパス | `./data/cm.db` |
+| `CM_DB_PATH` | SQLiteデータベースのパス | グローバル: `~/.commandmate/data/cm.db`、ローカル: `./data/cm.db` |
 | `CM_LOG_LEVEL` | ログレベル | `info` |
 | `CM_LOG_FORMAT` | ログフォーマット | `json` |
 

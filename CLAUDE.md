@@ -124,7 +124,11 @@ src/
 
 | モジュール | 説明 |
 |-----------|------|
-| `src/lib/env.ts` | 環境変数取得・フォールバック処理 |
+| `src/lib/env.ts` | 環境変数取得・フォールバック処理、getDatabasePathWithDeprecationWarning() |
+| `src/lib/db-path-resolver.ts` | DBパス解決（getDefaultDbPath()、validateDbPath()） |
+| `src/lib/db-migration-path.ts` | DBマイグレーション（migrateDbIfNeeded()、getLegacyDbPaths()） |
+| `src/lib/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用） |
+| `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック |
@@ -156,23 +160,29 @@ src/
 | `src/components/worktree/MermaidDiagram.tsx` | mermaidダイアグラム描画コンポーネント |
 | `src/components/worktree/MermaidCodeBlock.tsx` | mermaidコードブロックラッパー |
 
-### CLIモジュール（Issue #96）
+### CLIモジュール（Issue #96, #136）
 
 | モジュール | 説明 |
 |-----------|------|
 | `src/cli/index.ts` | CLIメインロジック（commander設定） |
 | `src/cli/commands/init.ts` | initコマンド（対話形式/非対話形式対応、Issue #119） |
-| `src/cli/commands/start.ts` | startコマンド（フォアグラウンド/デーモン起動） |
-| `src/cli/commands/stop.ts` | stopコマンド（サーバー停止） |
-| `src/cli/commands/status.ts` | statusコマンド（状態確認） |
+| `src/cli/commands/start.ts` | startコマンド（フォアグラウンド/デーモン起動、--issue対応 Issue #136） |
+| `src/cli/commands/stop.ts` | stopコマンド（サーバー停止、--issue対応 Issue #136） |
+| `src/cli/commands/status.ts` | statusコマンド（状態確認、--issue/--all対応 Issue #136） |
 | `src/cli/utils/preflight.ts` | システム依存関係チェック |
-| `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125） |
+| `src/cli/utils/env-setup.ts` | 環境設定ファイル生成、getPidFilePath()、パストラバーサル対策（Issue #125, #136） |
 | `src/cli/utils/daemon.ts` | デーモンプロセス管理、dotenv読み込み、セキュリティ警告（Issue #125） |
 | `src/cli/utils/pid-manager.ts` | PIDファイル管理（O_EXCLアトミック書き込み） |
 | `src/cli/utils/security-logger.ts` | セキュリティイベントログ |
 | `src/cli/utils/prompt.ts` | 対話形式プロンプトユーティリティ（Issue #119） |
+| `src/cli/utils/install-context.ts` | インストールコンテキスト検出（isGlobalInstall, getConfigDir）（Issue #136） |
+| `src/cli/utils/input-validators.ts` | 入力検証（Issue番号、ブランチ名）（Issue #136） |
+| `src/cli/utils/resource-resolvers.ts` | リソースパス解決（DB、PID、Log）（Issue #136） |
+| `src/cli/utils/port-allocator.ts` | ポート自動割り当て（MAX_WORKTREES=10制限）（Issue #136） |
+| `src/cli/utils/worktree-detector.ts` | Worktree検出ユーティリティ（Issue #136） |
+| `src/cli/utils/daemon-factory.ts` | DaemonManagerファクトリー（Issue #136） |
 | `src/cli/config/cli-dependencies.ts` | 依存関係定義 |
-| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum、getErrorMessage関数） |
+| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum、StartOptions、StopOptions、StatusOptions） |
 
 ---
 
@@ -296,6 +306,13 @@ commandmate start --daemon    # バックグラウンド
 # サーバー停止・状態確認
 commandmate stop
 commandmate status
+
+# Worktree並列開発（Issue #136）
+commandmate start --issue 135 --auto-port  # Issue #135用サーバー起動（自動ポート割当）
+commandmate start --issue 135 --port 3135  # 特定ポートで起動
+commandmate stop --issue 135               # Issue #135用サーバー停止
+commandmate status --issue 135             # Issue #135用サーバー状態確認
+commandmate status --all                   # 全サーバー状態確認
 ```
 
 ---
@@ -323,6 +340,8 @@ commandmate status
 | `/multi-stage-design-review` | 設計書の4段階レビュー（通常→整合性→影響分析→セキュリティ） |
 | `/multi-stage-issue-review` | Issueの多段階レビュー（通常→影響範囲）×2回 |
 | `/design-policy` | 設計方針策定 |
+| `/worktree-setup` | Worktree環境の自動構築（Issue #136） |
+| `/worktree-cleanup` | Worktree環境のクリーンアップ（Issue #136） |
 
 ### 利用可能なエージェント
 
@@ -348,6 +367,63 @@ commandmate status
 ---
 
 ## 最近の実装機能
+
+### Issue #136: Git Worktree 並列開発環境の整備
+- **目的**: 複数のIssue/機能を同時に開発できるWorktree環境を整備
+- **CLIコマンド拡張**:
+  - `commandmate start --issue {issueNo} [--auto-port]` - Issue専用サーバー起動
+  - `commandmate stop --issue {issueNo}` - Issue専用サーバー停止
+  - `commandmate status --issue {issueNo}` - Issue専用サーバー状態確認
+  - `commandmate status --all` - 全サーバー状態確認
+- **リソース分離**:
+  - Issue専用DB: `~/.commandmate/data/cm-{issueNo}.db`
+  - Issue専用PID: `~/.commandmate/pids/{issueNo}.pid`
+  - ポート範囲: 3001-3100（メインは3000）
+- **DBマイグレーション**: Migration #16でexternal_appsテーブルにissue_noカラム追加
+- **セキュリティ対策**:
+  - SEC-001: Issue番号の厳密な正整数検証（コマンドインジェクション防止）
+  - SEC-002: ブランチ名のホワイトリスト検証（`[a-zA-Z0-9_/-]`）
+  - SF-SEC-002: ポート枯渇攻撃対策（MAX_WORKTREES=10制限）
+  - TOCTOU対策: ResourcePathResolver.validate()のtry-catchパターン
+- **設計パターン**:
+  - Strategy: ResourcePathResolver（DB, PID, Log）
+  - Factory: DaemonManagerFactory
+  - ISP準拠: WorktreeExternalApp派生型
+- **スキル追加**:
+  - `/worktree-setup {issueNo}` - Worktree環境の自動構築
+  - `/worktree-cleanup {issueNo}` - Worktree環境のクリーンアップ
+- **主要コンポーネント**:
+  - `src/cli/utils/install-context.ts` - インストールコンテキスト検出
+  - `src/cli/utils/input-validators.ts` - 入力検証（validateIssueNo, validateBranchName）
+  - `src/cli/utils/resource-resolvers.ts` - リソースパス解決
+  - `src/cli/utils/port-allocator.ts` - ポート自動割り当て
+  - `src/cli/utils/daemon-factory.ts` - DaemonManagerファクトリー
+  - `src/types/external-apps.ts` - WorktreeExternalApp型
+  - `src/lib/external-apps/db.ts` - createWorktreeExternalApp(), getExternalAppsByIssueNo()
+- 詳細: [設計書](./dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md)
+
+### Issue #135: DBパス解決ロジック修正
+- **バグ修正**: グローバルインストール時のバージョンアップでDBが消失する問題を修正
+- **根本原因**: `process.cwd()`依存のDBパス解決がグローバルインストールで予測不能な動作
+- **修正内容**:
+  - `getEnv().CM_DB_PATH`経由でDBパスを取得するよう統一
+  - グローバルインストール: `~/.commandmate/data/cm.db`（絶対パス）
+  - ローカルインストール: `<cwd>/data/cm.db`（絶対パスに解決）
+- **マイグレーション機能**: 旧DB（`db.sqlite`）を自動検出し、新パスにマイグレーション
+- **セキュリティ対策**:
+  - SEC-001: システムディレクトリ保護（`/etc`, `/usr`等への書き込み禁止）
+  - SEC-002: シンボリックリンク解決（TOCTOU攻撃防止）
+  - SEC-003: ディレクトリ作成時に`mode: 0o700`
+  - SEC-004: `DATABASE_PATH`使用時にdeprecation警告
+  - SEC-005: `DATABASE_PATH`検証後にマイグレーション対象追加
+  - SEC-006: バックアップファイルのパーミッション`0o600`
+- **主要コンポーネント**:
+  - `src/lib/db-path-resolver.ts` - DBパス解決（getDefaultDbPath(), validateDbPath()）
+  - `src/lib/db-migration-path.ts` - マイグレーション（migrateDbIfNeeded()）
+  - `src/lib/env.ts` - getDatabasePathWithDeprecationWarning()追加
+  - `src/lib/db-instance.ts` - getEnv().CM_DB_PATH使用に変更
+  - `src/config/system-directories.ts` - システムディレクトリ定数（DRY対応）
+- 詳細: [設計書](./dev-reports/design/issue-135-db-path-resolution-design-policy.md)
 
 ### Issue #111: Gitブランチ可視化機能
 - **ブランチ表示**: ワークツリー詳細画面のヘッダーに現在のgitブランチ名を表示

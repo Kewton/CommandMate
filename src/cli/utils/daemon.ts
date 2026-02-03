@@ -65,6 +65,11 @@ export class DaemonManager {
       env.CM_PORT = String(options.port);
     }
 
+    // Issue #136: Set DB path for worktree servers
+    if (options.dbPath) {
+      env.CM_DB_PATH = options.dbPath;
+    }
+
     // Issue #125: Security warnings for external access (Stage 4 review: MF-2)
     const bindAddress = env.CM_BIND || '127.0.0.1';
     const authToken = env.CM_AUTH_TOKEN;

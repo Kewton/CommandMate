@@ -1,0 +1,155 @@
+{
+  "issue_number": 136,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 3,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-CONS-001",
+        "category": "設計書と既存コードの整合性",
+        "title": "ExternalApp 型定義の不一致",
+        "description": "設計書のExternalApp型定義と既存実装が大きく異なる。設計書では id: number, port: number, appType: 'local' | 'docker' だが、既存実装では id: string (UUID), targetPort: number, appType: 'sveltekit' | 'streamlit' | 'nextjs' | 'other' となっている",
+        "location": "設計書 Section 5.2 vs src/types/external-apps.ts",
+        "impact": "high",
+        "recommendation": "設計書のExternalApp型定義を既存実装に合わせて修正する必要がある。特にid型、port関連フィールド名、appType選択肢を既存に合わせること"
+      },
+      {
+        "id": "MF-CONS-002",
+        "category": "設計書と既存コードの整合性",
+        "title": "DaemonManager コンストラクタシグネチャの不整合",
+        "description": "設計書 Section 4.4 では DaemonManager({pidPath, envPath, dbPath, issueNo}) とオプションオブジェクトを渡す設計だが、既存 daemon.ts の DaemonManager は constructor(pidFilePath: string) で文字列のみを受け取る",
+        "location": "設計書 Section 4.4 vs src/cli/utils/daemon.ts",
+        "impact": "high",
+        "recommendation": "DaemonManagerのコンストラクタ変更は破壊的変更となる。Factory パターンで新しいインターフェースを提供しつつ、既存シグネチャとの後方互換性を維持する方法を設計書に明記すること"
+      },
+      {
+        "id": "MF-CONS-003",
+        "category": "依存関係の整合性",
+        "title": "getDefaultDbPath() 重複実装が既に存在",
+        "description": "設計書 MF-001 で「getDefaultDbPath() の db-path-resolver.ts への一元化」を必須としているが、現状 env-setup.ts と db-path-resolver.ts の両方に getDefaultDbPath() が既に存在し、コメントで「両方を同期して維持する」と記載されている。循環インポートを避けるための意図的な設計だが、設計書のリファクタリング方針と矛盾している",
+        "location": "設計書 Section 4.1, 10.1 vs src/cli/utils/env-setup.ts:49-68, src/lib/db-path-resolver.ts",
+        "impact": "high",
+        "recommendation": "循環インポート問題を解決する方法（共通モジュールへの抽出、または isGlobalInstall() の移動）を設計書に明記すること"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-CONS-001",
+        "category": "インターフェース整合性",
+        "title": "StopOptions, StatusOptions の既存型定義との差異",
+        "description": "設計書 Section 5.2 では StopOptions に issue?: number を追加しているが、既存 src/cli/types/index.ts の StopOptions には force?: boolean のみ。issue オプション追加の影響範囲が未記載",
+        "location": "設計書 Section 5.2 vs src/cli/types/index.ts:44-47",
+        "impact": "medium",
+        "recommendation": "既存コマンド（stop.ts, status.ts）への --issue フラグ追加に伴う変更箇所を影響範囲として明記すること"
+      },
+      {
+        "id": "SF-CONS-002",
+        "category": "設計書内の整合性",
+        "title": "Migration #16 の定義不足",
+        "description": "設計書 Section 5.1 で Migration #16 を定義しているが、external_apps テーブルは既に Migration #12 で作成済み。追加カラム issue_no のみの定義だが、既存テーブル構造（targetPort, targetHost など）と設計書の型定義（port）が一致していない",
+        "location": "設計書 Section 5.1 vs src/lib/db-migrations.ts:492-544",
+        "impact": "medium",
+        "recommendation": "Migration #16 は issue_no カラム追加のみとし、既存スキーマとの整合性を設計書に明記すること"
+      },
+      {
+        "id": "SF-CONS-003",
+        "category": "インターフェース整合性",
+        "title": "CreateExternalAppInput の既存定義との差異",
+        "description": "設計書の CreateExternalAppInput は簡略化されているが、既存定義には targetHost, websocketEnabled, websocketPathPattern などの追加フィールドがある",
+        "location": "設計書 Section 5.2 vs src/types/external-apps.ts:60-87",
+        "impact": "medium",
+        "recommendation": "CreateWorktreeExternalAppInput が既存の CreateExternalAppInput を正しく拡張する形に設計書を修正すること"
+      },
+      {
+        "id": "SF-CONS-004",
+        "category": "CLAUDE.md との整合性",
+        "title": "ブランチ戦略変更の詳細不足",
+        "description": "設計書では develop ブランチ導入を記載しているが、CLAUDE.md の「標準マージフロー」セクションには develop ブランチが含まれていない。CI/CD変更の具体的な内容も不明確",
+        "location": "設計書 Section 1.2, 9.1 vs CLAUDE.md ブランチ構成セクション",
+        "impact": "medium",
+        "recommendation": "NTH-002 で段階的導入を検討としているが、Phase 1 で実施するかどうかを明確化し、実施する場合は CLAUDE.md 更新内容を具体的に記載すること"
+      },
+      {
+        "id": "SF-CONS-005",
+        "category": "設計書内の整合性",
+        "title": "ResourcePathResolver の validate メソッドの例外処理",
+        "description": "設計書 Section 4.1 の validate メソッドでは fs.realpathSync() を使用しているが、ファイルが存在しない場合に ENOENT エラーが発生する。新規作成時のバリデーションが考慮されていない",
+        "location": "設計書 Section 4.1",
+        "impact": "medium",
+        "recommendation": "ファイル存在チェック前のパス検証ロジック（親ディレクトリの検証など）を追加するか、existsSync チェック後に realpathSync を呼び出す設計に修正すること"
+      }
+    ],
+    "consider": [
+      {
+        "id": "NTH-CONS-001",
+        "category": "設計書内の整合性",
+        "title": "ポート範囲 3001-3100 の根拠",
+        "description": "設計書 Section 7.2 でポート範囲を 3001-3100 としているが、この範囲選定の根拠が記載されていない。既存のデフォルトポート 3000 との関係も不明確",
+        "location": "設計書 Section 7.2",
+        "impact": "low",
+        "recommendation": "ポート範囲の根拠（例: 3000はメイン用に予約、100個は同時worktree数の想定上限）を記載するとより明確になる"
+      },
+      {
+        "id": "NTH-CONS-002",
+        "category": "依存関係の整合性",
+        "title": "Issue #135 の完了状態が不明",
+        "description": "設計書 Section 10.1 で Issue #135 を前提としているが、db-path-resolver.ts は既に存在する。Issue #135 の完了状態と本 Issue との関係を明確化すると良い",
+        "location": "設計書 Section 10.1",
+        "impact": "low",
+        "recommendation": "Issue #135 が完了済みかどうかを確認し、設計書を更新すること"
+      },
+      {
+        "id": "NTH-CONS-003",
+        "category": "インターフェース整合性",
+        "title": "CLI logger の一貫性",
+        "description": "既存の CLI コマンドでは CLILogger を使用しているが、設計書の Facade/Command パターンではログ出力方法が明示されていない",
+        "location": "設計書 Section 4.3",
+        "impact": "low",
+        "recommendation": "WorktreeSetupFacade でのログ出力方針（CLILogger の注入など）を明記すると実装時の指針になる"
+      }
+    ]
+  },
+  "consistency_matrix": {
+    "design_vs_implementation": {
+      "ExternalApp": "不一致（MF-CONS-001）",
+      "DaemonManager": "不一致（MF-CONS-002）",
+      "getDefaultDbPath": "部分的不一致（MF-CONS-003）",
+      "PidManager": "整合",
+      "CLI Types": "部分的不一致（SF-CONS-001）"
+    },
+    "design_internal": {
+      "型定義とDBスキーマ": "不一致（SF-CONS-002）",
+      "入力型と基本型": "部分的不一致（SF-CONS-003）",
+      "フェーズ間の依存": "整合",
+      "セキュリティ設計": "整合"
+    },
+    "design_vs_claude_md": {
+      "ブランチ戦略": "部分的不一致（SF-CONS-004）",
+      "コーディング規約": "整合",
+      "モジュール構成": "整合"
+    }
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "medium"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+    "src/cli/utils/env-setup.ts",
+    "src/lib/db-path-resolver.ts",
+    "src/types/external-apps.ts",
+    "src/cli/utils/pid-manager.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/types/index.ts",
+    "src/lib/external-apps/db.ts",
+    "src/lib/db-migrations.ts"
+  ],
+  "timestamp": "2026-02-03T09:30:00Z"
+}

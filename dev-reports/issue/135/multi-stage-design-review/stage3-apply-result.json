@@ -1,0 +1,65 @@
+{
+  "stage": 3,
+  "stage_name": "指摘事項対応（影響分析）",
+  "issue_number": 135,
+  "applied_date": "2026-02-03",
+  "applied_items": [
+    {
+      "id": "IMPACT-001",
+      "category": "直接的影響の不完全性",
+      "severity": "high",
+      "action": "Section 11.1にserver.tsを修正対象ファイルリストに追加。getDbInstance()をimportしているため動作検証が必要であることを明記。"
+    },
+    {
+      "id": "IMPACT-002",
+      "category": "シェルスクリプトの影響範囲不足",
+      "severity": "high",
+      "action": "Section 11.1にhealth-check.sh（行44）とstatus.sh（行58-59）の具体的な修正コード例を追記。CM_DB_PATHを最優先、DATABASE_PATHをフォールバック、デフォルトをcm.dbとする3点の修正ポイントを明記。"
+    },
+    {
+      "id": "IMPACT-003",
+      "category": "間接的影響のファイル数不正確",
+      "severity": "medium",
+      "action": "Section 11.3のファイル数を更新。grep調査結果から、src配下43ファイル、src/app/api/配下30+ファイル、tests/integration/配下20+ファイルに分類して記載。"
+    },
+    {
+      "id": "IMPACT-004",
+      "category": "テスト影響の詳細不足",
+      "severity": "medium",
+      "action": "Section 11.3に「テスト影響の詳細」を追加。影響を受けるテストディレクトリ、対応パターン（モック更新不要、環境変数設定見直し、旧環境変数テスト追加）、新規テストファイルを明記。"
+    },
+    {
+      "id": "IMPACT-005",
+      "category": ".envファイルの不整合",
+      "severity": "medium",
+      "action": "Section 11.3のCONS-009対応を拡充。.env.exampleのファイル名がdb.sqlite（旧式）のままである不整合を指摘し、Phase 4でcm.dbに修正することを明記。"
+    },
+    {
+      "id": "IMPACT-006",
+      "category": "docs/architecture.mdの旧環境変数参照",
+      "severity": "medium",
+      "action": "Section 11.3のCONS-005対応を拡充。MCBD_*参照の残存箇所（行73-78, 139-141）を具体的に記載。新規Issue作成またはIssue #77 Phase 4として対応するTODOを追記。"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "IMPACT-007",
+      "category": "マイグレーション検出パターンの拡張",
+      "severity": "low",
+      "reason": "npmグローバルインストール先の検出は複雑性が高く、現時点では投資対効果が低い。Section 5.2の注記で除外理由を説明済み。"
+    },
+    {
+      "id": "IMPACT-008",
+      "category": "ドキュメント影響の詳細化",
+      "severity": "low",
+      "reason": "影響を受けるドキュメントファイルのリストはSection 11.3で「7ファイル」として記載済み。実装フェーズで個別に確認する方針。"
+    },
+    {
+      "id": "IMPACT-009",
+      "category": "ロールバック戦略の明記",
+      "severity": "low",
+      "reason": "Section 9.2でバックアップ作成の記載があり、git revertによるコードロールバックは標準的なGit運用で対応可能。"
+    }
+  ],
+  "summary": "Stage 3影響分析レビューの指摘事項を設計方針書に反映。must_fix 2件（IMPACT-001: server.ts追加、IMPACT-002: シェルスクリプト修正詳細）、should_fix 4件（IMPACT-003〜006: ファイル数更新、テスト影響詳細、.env不整合、architecture.md TODO）を全て対応済み。nice_to_have 3件（IMPACT-007〜009）は投資対効果を考慮し見送り。設計書のSection 11.1, 11.3、変更履歴、レビュー対応履歴を更新。"
+}

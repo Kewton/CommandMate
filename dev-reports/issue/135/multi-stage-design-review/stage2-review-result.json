@@ -1,0 +1,186 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 135,
+  "review_date": "2026-02-03",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "CONS-001",
+        "category": "設計書と既存実装の整合性",
+        "title": "db-instance.ts のデフォルトファイル名の不一致",
+        "description": "設計書 Section 4.1 のコード例では `env.CM_DB_PATH` を使用する修正後コードを示しているが、現在の db-instance.ts:25 では `path.join(process.cwd(), 'data', 'db.sqlite')` となっている。設計書では `cm.db` への統一を謳っているが、現実装との差異を明確に記載する必要がある。",
+        "evidence": {
+          "design_doc": "Section 4.1: const dbPath = env.CM_DB_PATH; // 絶対パスが返却される",
+          "actual_code": "src/lib/db-instance.ts:25: const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'db.sqlite');"
+        },
+        "suggestion": "設計書に「現状の問題点」と「修正後のあるべき姿」を明確に分離して記載する。特にファイル名が db.sqlite から cm.db に変更される点を強調する。"
+      },
+      {
+        "id": "CONS-002",
+        "category": "設計書と既存実装の整合性",
+        "title": "env-setup.ts の ENV_DEFAULTS.CM_DB_PATH 値の不一致",
+        "description": "設計書 Section 6.1.2 では ENV_DEFAULTS から CM_DB_PATH を削除する設計だが、現在の env-setup.ts:31 には `CM_DB_PATH: './data/cm.db'` が相対パスで定義されている。設計書の修正後コード例と現実装の差異が不明確。",
+        "evidence": {
+          "design_doc": "Section 6.1.2: // CM_DB_PATH は動的に決定（getDefaultDbPath()使用）",
+          "actual_code": "src/cli/utils/env-setup.ts:31: CM_DB_PATH: './data/cm.db',"
+        },
+        "suggestion": "設計書に現在の ENV_DEFAULTS の状態を明記し、修正内容（CM_DB_PATH を定数から削除し、関数で動的に取得）を明確化する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CONS-003",
+        "category": "設計書と既存実装の整合性",
+        "title": "init.ts のDBパスプロンプトデフォルト値",
+        "description": "設計書 Section 6.1.3 では `createDefaultConfig()` で `getDefaultDbPath()` を使用するコードを示しているが、現在の init.ts:40 では `CM_DB_PATH: ENV_DEFAULTS.CM_DB_PATH` を使用している。また、promptForConfig() (init.ts:101-104) でもユーザーに相対パスをデフォルトとして表示している。",
+        "evidence": {
+          "design_doc": "Section 6.1.3: CM_DB_PATH: getDefaultDbPath(), // 絶対パス",
+          "actual_code": "src/cli/commands/init.ts:40: CM_DB_PATH: ENV_DEFAULTS.CM_DB_PATH, / init.ts:102: default: ENV_DEFAULTS.CM_DB_PATH"
+        },
+        "suggestion": "現状の init.ts の実装詳細を設計書に反映し、修正箇所を網羅的にリストアップする。"
+      },
+      {
+        "id": "CONS-004",
+        "category": "設計書内部の整合性",
+        "title": "Strategy パターンとシンプル実装の選択基準",
+        "description": "設計書 Section 4.2 では Strategy パターンのコード例を詳細に記載しつつ、「実装フェーズで決定する」と記載。しかし Section 6.1.1 の env.ts 修正後コードでは `getDbPathStrategy().getDefaultPath()` を呼び出す形になっており、Strategy パターン採用が前提となっている。選択の余地がある設計と断定的なコード例に矛盾がある。",
+        "evidence": {
+          "section_4_2": "最終判断は実装フェーズで決定する",
+          "section_6_1_1": "getDbPathStrategy().getDefaultPath();"
+        },
+        "suggestion": "Section 6.1.1 のコード例を両方のパターン（Strategy / 関数ベース）で示すか、Section 4.2 の記載を「Strategy パターンを推奨するが、シンプル実装も許容」に修正する。"
+      },
+      {
+        "id": "CONS-005",
+        "category": "関連Issue/ドキュメントとの整合性",
+        "title": "docs/architecture.md の環境変数名が旧名称のまま",
+        "description": "設計書 Section 11.3 では「ドキュメント7ファイル」への影響を挙げているが、docs/architecture.md を確認すると MCBD_* 環境変数が多数残存している（例: MCBD_BIND, MCBD_PORT, MCBD_AUTH_TOKEN, MCBD_ROOT_DIR, MCBD_DB_PATH）。Issue #135 の修正範囲としてこれらの更新が含まれるべきか不明確。",
+        "evidence": {
+          "design_doc": "Section 11.3: ドキュメント7ファイル - DATABASE_PATH廃止、CM_DB_PATH説明更新",
+          "actual_code": "docs/architecture.md:73: MCBD_BIND = 127.0.0.1, line 76-77: MCBD_BIND = 0.0.0.0, MCBD_AUTH_TOKEN"
+        },
+        "suggestion": "Issue #135 のスコープとして docs/architecture.md の MCBD_* 参照を CM_* に更新するか、別 Issue（例: #77 Phase 4）で対応するかを明記する。"
+      },
+      {
+        "id": "CONS-006",
+        "category": "設計書と既存実装の整合性",
+        "title": "影響範囲のAPI箇所数の精度",
+        "description": "設計書 Section 11.3 では「30ファイル、66箇所のAPIルート」と記載しているが、grep結果では34ファイル、74箇所で getDbInstance を使用している。数値の不一致がある。",
+        "evidence": {
+          "design_doc": "Section 11.3: 30ファイル、66箇所のAPIルート",
+          "grep_result": "34ファイル、74箇所（src/app/api配下以外も含む）"
+        },
+        "suggestion": "src/app/api 配下に限定した正確な数値を再調査するか、「約30ファイル」等の表現に修正する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "CONS-007",
+        "category": "設計書内部の整合性",
+        "title": "マイグレーション検出パターンの網羅性",
+        "description": "設計書 Section 5.2 のマイグレーション検出対象に `<npm-global>/data/db.sqlite` が含まれているが、Section 9.2 の getLegacyDbPaths() 実装例にはこのパターンが含まれていない。",
+        "evidence": {
+          "section_5_2": "| `<npm-global>/data/db.sqlite` | npmグローバル | 旧式インストール先 |",
+          "section_9_2": "paths.push(path.join(process.cwd(), 'data', 'db.sqlite')); // npm-global パターンなし"
+        },
+        "suggestion": "getLegacyDbPaths() に npm グローバルインストール先のパターンを追加するか、Section 5.2 の表から削除する。"
+      },
+      {
+        "id": "CONS-008",
+        "category": "用語・命名の統一",
+        "title": "ホームディレクトリの表記揺れ",
+        "description": "設計書内で homedir() の結果を `~` または `{homeDir}` 等と表記しているが、表記が統一されていない箇所がある。",
+        "evidence": {
+          "examples": [
+            "Section 2.1: ~/.commandmate/data/cm.db",
+            "Section 4.2: homedir() 関数を直接参照",
+            "Section 7.1: homeDir 変数"
+          ]
+        },
+        "suggestion": "コード例では homedir() または os.homedir() を一貫して使用し、説明文では `~` を使用する方針を統一する。"
+      },
+      {
+        "id": "CONS-009",
+        "category": "関連Issue/ドキュメントとの整合性",
+        "title": ".env.example のデフォルト値が db.sqlite のまま",
+        "description": ".env.example:36 では CM_DB_PATH=./data/db.sqlite となっているが、Issue #77 以降のデフォルトは cm.db のはず。設計書 Section 11.3 ではドキュメント更新について言及しているが、.env.example の具体的な修正内容が不明確。",
+        "evidence": {
+          "design_doc": "Section 11.3: .env.example 更新",
+          "actual_code": ".env.example:36: CM_DB_PATH=./data/db.sqlite"
+        },
+        "suggestion": "Issue #135 対応時に .env.example の CM_DB_PATH デフォルト値を cm.db に更新し、絶対パスの使用を推奨するコメントを追加する。"
+      }
+    ]
+  },
+  "issue_acceptance_criteria_check": {
+    "criteria_1": {
+      "description": "旧バージョンから新バージョンへアップグレード後、リポジトリ情報が保持される",
+      "design_coverage": "COVERED",
+      "notes": "Section 9 のマイグレーション設計で対応。migrateDbIfNeeded() 関数で旧DBの検出とコピーを実装予定。"
+    },
+    "criteria_2": {
+      "description": "グローバルインストールで任意のディレクトリから commandmate start を実行しても同じDBを参照する",
+      "design_coverage": "COVERED",
+      "notes": "Section 2.2 のパス解決フローと Section 4.2 の GlobalInstallStrategy で ~/.commandmate/data/cm.db を使用する設計。"
+    },
+    "criteria_3": {
+      "description": "commandmate init 実行後、.env に絶対パスで CM_DB_PATH が設定される",
+      "design_coverage": "COVERED",
+      "notes": "Section 6.1.3 で getDefaultDbPath() 使用を設計。ただし現在の init.ts との差分が大きい。"
+    },
+    "criteria_4": {
+      "description": "db-instance.ts が DATABASE_PATH を直接参照せず、env.ts 経由で CM_DB_PATH を使用する",
+      "design_coverage": "COVERED",
+      "notes": "Section 4.1 と Section 4.3 で getEnv().CM_DB_PATH を使用する設計を明記。"
+    },
+    "criteria_5": {
+      "description": "旧バージョンのDB（db.sqlite）が検出された場合、cm.db にマイグレーションされる",
+      "design_coverage": "COVERED",
+      "notes": "Section 9.2 の migrateDbIfNeeded() で対応。getLegacyDbPaths() で db.sqlite を検出対象に含む。"
+    },
+    "criteria_6": {
+      "description": "単体テストでDBパス解決ロジックを検証する",
+      "design_coverage": "COVERED",
+      "notes": "Section 12.1 にユニットテストのコード例を記載。GlobalInstallStrategy と LocalInstallStrategy のテストを含む。"
+    },
+    "criteria_7": {
+      "description": "DATABASE_PATH 環境変数使用時にdeprecation警告が出力される",
+      "design_coverage": "COVERED",
+      "notes": "Section 6.1.1 の getDatabasePathWithDeprecationWarning() で対応。Section 7.2 で廃止方針も明記。"
+    }
+  },
+  "related_issues_consistency": {
+    "issue_76": {
+      "title": "環境変数フォールバック",
+      "consistency": "CONSISTENT",
+      "notes": "設計書は CM_DB_PATH -> MCBD_DB_PATH -> DATABASE_PATH の優先順位を維持。env.ts の getEnvByKey() を再利用する方針で整合性あり。"
+    },
+    "issue_96": {
+      "title": "npm CLIサポート",
+      "consistency": "CONSISTENT",
+      "notes": "設計書は Issue #96 で導入された CLI 構造（bin/commandmate.js, src/cli/）を前提としている。"
+    },
+    "issue_119": {
+      "title": "対話形式init",
+      "consistency": "CONSISTENT",
+      "notes": "設計書の init.ts 修正は Issue #119 で追加された promptForConfig() を考慮している。"
+    },
+    "issue_125": {
+      "title": "グローバルインストール.env読み込み",
+      "consistency": "CONSISTENT",
+      "notes": "設計書は getEnvPath(), getConfigDir(), getPidFilePath() 等の Issue #125 で追加された関数を前提としている。"
+    }
+  },
+  "claude_md_consistency": {
+    "db_instance_description": {
+      "status": "NEEDS_UPDATE",
+      "notes": "CLAUDE.md の主要機能モジュールに src/lib/db-instance.ts の説明がない。設計書 Section 11.3 で CLAUDE.md 更新を予定しているが、具体的な追記内容が不明確。"
+    },
+    "env_setup_description": {
+      "status": "CONSISTENT",
+      "notes": "CLAUDE.md に src/cli/utils/env-setup.ts の説明があり、getPidFilePath() や resolveSecurePath() について記載済み。getDefaultDbPath() 追加時に更新が必要。"
+    }
+  },
+  "summary": "設計書は Issue #135 の受け入れ条件を網羅しており、関連 Issue (#76, #96, #119, #125) との整合性も概ね取れている。主な指摘事項は、(1) 現在の実装（db-instance.ts, env-setup.ts, init.ts）と設計書の修正後コード例の差異が明確でない点、(2) Strategy パターン採用の最終判断とコード例の矛盾、(3) 影響ファイル数の精度、(4) docs/architecture.md の旧名称残存への対応範囲が不明確な点である。must_fix 2件、should_fix 4件、nice_to_have 3件の指摘により、設計書の精度と実装時の混乱を軽減することを推奨する。"
+}

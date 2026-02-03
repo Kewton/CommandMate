@@ -1,0 +1,54 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 135,
+  "applied_date": "2026-02-03",
+  "applied_items": [
+    {
+      "id": "M1",
+      "status": "applied",
+      "description": "影響範囲セクションに「APIルートファイル（56ファイル以上）」サブセクションを追加。全APIルートがgetDbInstance()を使用しており、DBパス解決ロジック変更の影響範囲を明記した。"
+    },
+    {
+      "id": "M2",
+      "status": "applied",
+      "description": "影響範囲セクションに「統合テストファイル（20ファイル以上）」サブセクションを追加。テスト計画にも環境変数設定に関する注意事項（setup/teardownでCM_DB_PATHを明示的に設定）を追加した。"
+    },
+    {
+      "id": "M3",
+      "status": "applied",
+      "description": "修正方針に「DATABASE_PATH廃止時の警告（後方互換性対応）」セクションを追加。フォールバック機構と警告メッセージの実装要件を明記。受け入れ条件にもdeprecation警告の検証項目を追加した。"
+    },
+    {
+      "id": "S1",
+      "status": "applied",
+      "description": "直接的な影響リストにserver.tsへの間接的影響を明記。getDbInstance()呼び出し前の.envロード順序に関する考慮点を示唆。"
+    },
+    {
+      "id": "S2",
+      "status": "applied",
+      "description": "直接的な影響リストにsrc/cli/commands/init.tsのcreateDefaultConfig()修正を明記。ENV_DEFAULTS.CM_DB_PATHの絶対パス化要件は既存の修正方針と整合。"
+    },
+    {
+      "id": "S3",
+      "status": "applied",
+      "description": "テスト影響セクションにtests/unit/env.test.tsとtests/unit/cli/utils/env-setup.test.tsの更新要件を追加。db-instance.tsとenv.tsの統合テスト追加、グローバル/ローカルインストール両方のパス生成テストの必要性を明記。"
+    },
+    {
+      "id": "S4",
+      "status": "applied",
+      "description": "ドキュメント影響セクションを新設。DATABASE_PATH参照を更新すべきファイルリスト（.env.example, docs/DEPLOYMENT.md, docs/architecture.md, docs/migration-to-commandmate.md, scripts/health-check.sh, scripts/status.sh, CLAUDE.md）を明記。"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "N1",
+      "reason": "Nice to haveカテゴリ。scripts/migrate-cli-tool-id.tsとscripts/clean-existing-messages.tsのCM_DB_PATH参照統一は既に間接的な影響リストに含まれており、本修正の主要スコープ外。"
+    },
+    {
+      "id": "N2",
+      "reason": "Nice to haveカテゴリ。CI/CD影響はCI/CD影響セクションとして追加済み。グローバルインストールシミュレーションのテストジョブ追加は将来の改善項目として残す。"
+    }
+  ],
+  "summary": "Stage 3（影響範囲レビュー）の全Must Fix項目（M1-M3）と全Should Fix項目（S1-S4）をIssue #135に反映した。主な変更点: (1) 影響範囲セクションを詳細化し、56以上のAPIルートファイルと20以上の統合テストファイルへの影響を明記、(2) DATABASE_PATH廃止時のdeprecation警告要件を修正方針と受け入れ条件に追加、(3) ドキュメント更新対象リストを新設、(4) テスト計画に統合テスト環境セットアップの注意事項を追加、(5) レビュー履歴セクションを追加してトレーサビリティを確保。Nice to have項目（N1-N2）は既存の記載でカバーされているか、将来の改善項目としてスキップした。"
+}

@@ -1,0 +1,21 @@
+{
+  "issue_number": 122,
+  "refactor_targets": [
+    "src/components/worktree/FileTreeView.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 72.37,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "コードの重複を確認し、必要に応じて整理",
+    "スタイリングの一貫性を確認",
+    "テストカバレッジの確認"
+  ],
+  "constraints": [
+    "既存のテストを壊さないこと",
+    "機能の変更を伴わないこと",
+    "スモールな変更にとどめること（Issue #122はSサイズ）"
+  ]
+}

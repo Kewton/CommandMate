@@ -1,0 +1,50 @@
+{
+  "stage": 1,
+  "stage_name": "指摘事項対応（設計原則）",
+  "issue_number": 135,
+  "applied_date": "2026-02-03",
+  "applied_items": [
+    {
+      "id": "KISS-001",
+      "principle": "KISS",
+      "section": "4.2 Strategy パターン（新規）",
+      "change_description": "Strategy パターン採用理由を追記。将来の拡張性（Docker環境用Strategy、CI環境用Strategy等）を明記。関数ベースのシンプル実装も代替案として許容することを記載し、最終判断は実装フェーズで決定する方針とした。"
+    },
+    {
+      "id": "SRP-001",
+      "principle": "SRP",
+      "section": "4.3 Facade パターン（既存活用）",
+      "change_description": "env.ts と db-path-resolver.ts の責務分離を明確化。env.ts は db-path-resolver.ts の resolveDbPath() を呼び出すのみとし、DBパス解決の詳細ロジックを持たない方針を追記。"
+    },
+    {
+      "id": "DRY-001",
+      "principle": "DRY",
+      "section": "4.2 Strategy パターン（新規）",
+      "change_description": "コード例に isGlobalInstall() の import 文を追記（import { isGlobalInstall } from '../cli/utils/env-setup'）。env-setup.ts の既存関数を再利用することを明記し、重複実装を禁止する注記を追加。"
+    },
+    {
+      "id": "YAGNI-001",
+      "principle": "YAGNI",
+      "section": "7.2 DATABASE_PATH廃止対応",
+      "change_description": "DATABASE_PATH フォールバックの将来廃止方針を追記。v1.x では deprecation 警告付きでサポート継続、v2.0 で完全削除予定であることを明記。"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "SOLID-DIP-001",
+      "principle": "DIP",
+      "reason": "レビュー結果でも「現プロジェクトの規模感ではオーバーエンジニアリングの可能性あり、現行案でも許容範囲内」と評価されている。DbPathProvider interface 導入は過剰設計となるため見送り。"
+    },
+    {
+      "id": "OCP-001",
+      "principle": "OCP",
+      "reason": "レガシーパス定義の外部化は、マイグレーション機能が一時的なものであるため過度な拡張性は不要と判断。"
+    },
+    {
+      "id": "DRY-002",
+      "principle": "DRY",
+      "reason": "path.resolve() の呼び出し重複は、db-path-resolver.ts が常に絶対パスを返す設計で対応済み。追加の集約は不要。"
+    }
+  ],
+  "summary": "Stage 1 設計原則レビューの指摘事項4件（KISS-001, SRP-001, DRY-001, YAGNI-001）を設計方針書に反映。KISS-001ではStrategy パターンの採用理由と代替案を明記、SRP-001ではenv.tsとdb-path-resolver.tsの責務分離を明確化、DRY-001ではisGlobalInstall()の再利用を明記、YAGNI-001ではDATABASE_PATHの将来廃止方針を追記した。また、レビュー対応履歴セクション（Section 16）を新規追加し、対応済み/見送りの全指摘事項を記録した。"
+}

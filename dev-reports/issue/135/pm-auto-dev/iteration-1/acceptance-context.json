@@ -1,0 +1,76 @@
+{
+  "issue_number": 135,
+  "feature_summary": "DBパス解決ロジック修正 - バージョンアップ時のDB消失防止",
+  "acceptance_criteria": [
+    "旧バージョンから新バージョンへアップグレード後、リポジトリ情報が保持される",
+    "グローバルインストールで任意のディレクトリから commandmate start を実行しても同じDBを参照する",
+    "commandmate init 実行後、.env に絶対パスで CM_DB_PATH が設定される",
+    "db-instance.ts が DATABASE_PATH を直接参照せず、env.ts 経由で CM_DB_PATH を使用する",
+    "旧バージョンのDB（db.sqlite）が検出された場合、cm.db にマイグレーションされる",
+    "単体テストでDBパス解決ロジックを検証する",
+    "DATABASE_PATH 環境変数使用時にdeprecation警告が出力される"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-001",
+      "name": "db-instance.tsがgetEnv().CM_DB_PATHを使用する",
+      "type": "code_review",
+      "expected": "db-instance.tsがprocess.env.DATABASE_PATHを直接参照せず、getEnv().CM_DB_PATHを使用している"
+    },
+    {
+      "id": "AC-002",
+      "name": "DATABASE_PATH使用時にdeprecation警告が出力される",
+      "type": "unit_test",
+      "expected": "getDatabasePathWithDeprecationWarning()がconsole.warnを呼び出す"
+    },
+    {
+      "id": "AC-003",
+      "name": "グローバルインストール時に~/.commandmate/data/cm.dbを返す",
+      "type": "unit_test",
+      "expected": "isGlobalInstall()がtrueの時、getDefaultDbPath()がホームディレクトリベースのパスを返す"
+    },
+    {
+      "id": "AC-004",
+      "name": "ローカルインストール時に絶対パスを返す",
+      "type": "unit_test",
+      "expected": "isGlobalInstall()がfalseの時、getDefaultDbPath()がpath.resolve()で絶対パスを返す"
+    },
+    {
+      "id": "AC-005",
+      "name": "マイグレーションロジックが旧DBを検出・移行する",
+      "type": "unit_test",
+      "expected": "migrateDbIfNeeded()が旧パスのDBを検出し、新パスにコピーする"
+    },
+    {
+      "id": "AC-006",
+      "name": "シェルスクリプトがCM_DB_PATHフォールバックを使用",
+      "type": "code_review",
+      "expected": "health-check.shとstatus.shが${CM_DB_PATH:-${DATABASE_PATH:-./data/cm.db}}形式を使用"
+    },
+    {
+      "id": "AC-007",
+      "name": "単体テストがDBパス解決ロジックをカバー",
+      "type": "test_coverage",
+      "expected": "db-path-resolver.test.tsとdb-migration-path.test.tsが存在し、テストがパスする"
+    },
+    {
+      "id": "AC-008",
+      "name": "ENV_DEFAULTSからCM_DB_PATHが削除されている",
+      "type": "code_review",
+      "expected": "env-setup.tsのENV_DEFAULTSにCM_DB_PATHが含まれていない"
+    },
+    {
+      "id": "AC-009",
+      "name": "init.tsがgetDefaultDbPath()を使用",
+      "type": "code_review",
+      "expected": "createDefaultConfig()とpromptForConfig()がgetDefaultDbPath()を呼び出す"
+    },
+    {
+      "id": "AC-010",
+      "name": "ビルドとテストが成功する",
+      "type": "build_test",
+      "expected": "npm run build:all と npm run test:unit が成功する"
+    }
+  ],
+  "tdd_result_path": "dev-reports/issue/135/pm-auto-dev/iteration-1/tdd-result.json"
+}

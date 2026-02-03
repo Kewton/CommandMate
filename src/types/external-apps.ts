@@ -132,3 +132,44 @@ export interface ExternalAppHealth {
   /** Error message (only present if unhealthy) */
   error?: string;
 }
+
+/**
+ * Worktree-specific external app
+ * Issue #136: SF-004 (ISP) - Derived type for worktree apps
+ * Extends ExternalApp with required issueNo property
+ */
+export interface WorktreeExternalApp extends ExternalApp {
+  /** Issue number this worktree app belongs to */
+  issueNo: number;
+}
+
+/**
+ * Input for creating a worktree external app
+ * Issue #136: Extends CreateExternalAppInput with required issueNo
+ */
+export interface CreateWorktreeExternalAppInput extends CreateExternalAppInput {
+  /** Issue number for this worktree app (required) */
+  issueNo: number;
+}
+
+/**
+ * Type guard to check if an ExternalApp is a WorktreeExternalApp
+ * Issue #136: Helper for type narrowing
+ *
+ * @param app - The external app to check
+ * @returns true if the app has a valid issueNo
+ *
+ * @example
+ * ```typescript
+ * const app = getExternalAppById('some-id');
+ * if (isWorktreeExternalApp(app)) {
+ *   // TypeScript knows app.issueNo is number
+ *   console.log(`Worktree for issue #${app.issueNo}`);
+ * }
+ * ```
+ */
+export function isWorktreeExternalApp(
+  app: ExternalApp & { issueNo?: number | null }
+): app is WorktreeExternalApp {
+  return typeof app.issueNo === 'number' && app.issueNo > 0;
+}

@@ -1,0 +1,140 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 135,
+  "review_date": "2026-02-03",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IMPACT-001",
+        "category": "直接的影響の不完全性",
+        "severity": "high",
+        "description": "設計書Section 11.1の修正対象ファイルにserver.tsが含まれていない。server.tsは行3でgetDbInstance()をimportしており、直接的な影響を受ける。",
+        "location": "Section 11.1 直接的な影響",
+        "evidence": "server.ts:3 - import { getDbInstance } from './src/lib/db-instance';",
+        "recommendation": "server.tsを修正対象ファイルリストに追加し、影響範囲を明記する（インターフェース変更なしのため動作検証のみ必要）。"
+      },
+      {
+        "id": "IMPACT-002",
+        "category": "シェルスクリプトの影響範囲不足",
+        "severity": "high",
+        "description": "scripts/health-check.shとscripts/status.shが設計書に記載されているが、両スクリプトは未だDATABASE_PATHのみを参照しており、CM_DB_PATHへのフォールバック対応が必要。現在の設計書では「CM_DB_PATHフォールバック対応」と記載されているが、具体的な修正内容が不明。",
+        "location": "Section 11.1, scripts/health-check.sh:44, scripts/status.sh:58-59",
+        "evidence": "health-check.sh: DB_PATH=\"${DATABASE_PATH:-./data/db.sqlite}\", status.sh: if [ -f \"${DATABASE_PATH:-./data/db.sqlite}\" ]",
+        "recommendation": "シェルスクリプトの具体的な修正内容を設計書に追記。例: DB_PATH=\"${CM_DB_PATH:-${DATABASE_PATH:-./data/cm.db}}\""
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IMPACT-003",
+        "category": "間接的影響のファイル数不正確",
+        "severity": "medium",
+        "description": "設計書Section 11.3では「約34ファイル、74箇所のgetDbInstance()呼び出し」と記載されているが、実際のgrep調査では75ファイルがヒット（ただしdev-reportsを含む）。src配下のみでは約43ファイルが影響を受ける。",
+        "location": "Section 11.3",
+        "evidence": "grep結果: Found 75 files（getDbInstance検索結果）",
+        "recommendation": "正確なファイル数を再調査し記載を更新。特にsrc/app/api/配下の30+ファイルとtests/配下の20+ファイルを区別して記載すべき。"
+      },
+      {
+        "id": "IMPACT-004",
+        "category": "テスト影響の詳細不足",
+        "severity": "medium",
+        "description": "統合テストファイル20+件がgetDbInstance()をモックしているが、設計書ではテスト影響について「テスト環境セットアップの見直し」とのみ記載。具体的にどのテストファイルが影響を受け、どのような修正が必要かの詳細がない。",
+        "location": "Section 11.3, Section 12.2",
+        "evidence": "tests/integration/内の20ファイルでgetDbInstance: vi.fn()やgetDbInstance: () => mockDbのパターンでモック化",
+        "recommendation": "影響を受けるテストファイルのリストと、各テストで必要な対応（モック更新/環境変数設定等）を追記。"
+      },
+      {
+        "id": "IMPACT-005",
+        "category": ".envファイルの不整合",
+        "severity": "medium",
+        "description": ".env.example:36にはCM_DB_PATH=./data/db.sqliteと記載されているが、Issue #77以降の標準ファイル名はcm.dbである。設計書ではSection 11.3でこの修正を記載しているが、実際の.env.exampleは未更新のままである。",
+        "location": ".env.example:36, Section 11.3 CONS-009",
+        "evidence": ".env.example: CM_DB_PATH=./data/db.sqlite",
+        "recommendation": "設計書の実装計画Phase 4で.env.exampleの更新を明記し、ファイル名をcm.dbに統一する修正内容を具体化。"
+      },
+      {
+        "id": "IMPACT-006",
+        "category": "docs/architecture.mdの旧環境変数参照",
+        "severity": "medium",
+        "description": "docs/architecture.mdにはMCBD_BIND, MCBD_PORT, MCBD_AUTH_TOKEN, MCBD_ROOT_DIR等の旧名称環境変数が多数残存。設計書ではスコープ外としているが、この決定の根拠と別Issue番号の明記が必要。",
+        "location": "docs/architecture.md:73-78, 139-141, Section 11.3 CONS-005",
+        "evidence": "architecture.md: MCBD_BIND = 127.0.0.1, MCBD_PORT等",
+        "recommendation": "CONS-005で「Issue #77 Phase 4」として別対応を推奨しているが、具体的なIssue番号またはTODOコメントの追加を推奨。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IMPACT-007",
+        "category": "マイグレーション検出パターンの拡張",
+        "severity": "low",
+        "description": "Section 5.2のマイグレーション検出対象にnpmグローバルインストール先(<npm-global>/data/db.sqlite)が除外されている。現在の除外理由は妥当だが、将来的にnpm prefix -gを使用した検出の追加を検討しても良い。",
+        "location": "Section 5.2, Section 9.2",
+        "evidence": "注1: npmグローバルインストール先は検出が複雑になるため除外",
+        "recommendation": "将来の拡張としてTODOコメントを設計書に追記。"
+      },
+      {
+        "id": "IMPACT-008",
+        "category": "ドキュメント影響の詳細化",
+        "severity": "low",
+        "description": "設計書Section 11.3では「ドキュメント7ファイル」と記載されているが、具体的なファイルパスの列挙がない。影響を受けるドキュメントファイルを明示することで、実装時の見落としを防止できる。",
+        "location": "Section 11.3",
+        "evidence": "docs/DEPLOYMENT.md, docs/migration-to-commandmate.md, docs/internal/TESTING_GUIDE.md, docs/internal/PRODUCTION_CHECKLIST.md等が影響を受ける",
+        "recommendation": "影響を受けるドキュメントファイルの完全なリストを追記。"
+      },
+      {
+        "id": "IMPACT-009",
+        "category": "ロールバック戦略の明記",
+        "severity": "low",
+        "description": "設計書にはロールバック戦略が明記されていない。DBマイグレーション時にバックアップを作成する設計はあるが、コード変更のロールバック手順（git revert等）やDBロールバック手順の明記があるとより安全。",
+        "location": "全体",
+        "evidence": "Section 9.2でバックアップ作成の記載はあるが、ロールバック手順は未記載",
+        "recommendation": "実装計画に「ロールバック手順」セクションを追加。"
+      }
+    ]
+  },
+  "impact_summary": {
+    "direct_files": [
+      "src/lib/db-instance.ts",
+      "src/lib/env.ts",
+      "src/cli/utils/env-setup.ts",
+      "src/cli/commands/init.ts",
+      "scripts/health-check.sh",
+      "scripts/status.sh",
+      "server.ts"
+    ],
+    "indirect_files": [
+      "src/app/api/ 配下の30+ APIルートファイル",
+      "src/lib/response-poller.ts",
+      "src/lib/claude-poller.ts",
+      "tests/integration/ 配下の20+ テストファイル",
+      "tests/unit/cli/utils/env-setup.test.ts"
+    ],
+    "new_files": [
+      "src/lib/db-path-resolver.ts (オプション)",
+      "src/lib/db-migration-path.ts"
+    ],
+    "documentation_files": [
+      ".env.example",
+      "docs/DEPLOYMENT.md",
+      "docs/migration-to-commandmate.md",
+      "docs/internal/TESTING_GUIDE.md",
+      "docs/internal/PRODUCTION_CHECKLIST.md",
+      "CLAUDE.md",
+      "CHANGELOG.md"
+    ],
+    "test_impact": "統合テスト20+ファイルがgetDbInstance()をモックしている。インターフェース変更なしのため既存モックは動作するが、CM_DB_PATH環境変数のテスト時設定方法の見直しが必要。新規ユニットテストとしてdb-path-resolver.test.ts、db-migration-path.test.tsの追加が必要。",
+    "backward_compatibility": {
+      "DATABASE_PATH": "フォールバックサポート付きで廃止。Deprecation警告を出力し、v2.0で完全削除予定。",
+      "db.sqlite_filename": "旧ファイル名db.sqliteからcm.dbへのマイグレーションを自動実行。既存ユーザーのデータは保持される。",
+      "relative_path": "相対パスから絶対パスへの変更。既存の相対パス設定は動作するがpath.resolve()で絶対パスに変換される。"
+    },
+    "risk_level": "medium",
+    "risk_factors": [
+      "DBパス解決ロジックの変更は全APIルートに影響するため、リグレッションリスクがある",
+      "マイグレーション処理の失敗時にデータ損失の可能性（バックアップで軽減）",
+      "シェルスクリプトの更新漏れによるヘルスチェック/ステータス表示の不整合"
+    ]
+  },
+  "recommendation": "PROCEED_WITH_MINOR_CHANGES",
+  "summary": "設計書の影響分析は概ね適切だが、いくつかの不足点が発見された。特にserver.tsの修正対象リストへの追加（IMPACT-001）とシェルスクリプトの具体的な修正内容の明記（IMPACT-002）は必須修正事項である。テストファイルへの影響詳細と.env.exampleの整合性についても改善が望ましい。全体としてリスクレベルは中程度であり、適切なテストカバレッジとバックアップ戦略により管理可能。"
+}

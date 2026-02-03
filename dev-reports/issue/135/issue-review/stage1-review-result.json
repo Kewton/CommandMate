@@ -1,0 +1,112 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 135,
+  "review_date": "2026-02-03",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "M1",
+        "category": "正確性",
+        "description": "Issue内のコードスニペット行番号が実際のコードと一致しない。src/lib/db-instance.ts:25と記載されているが、実際のコードでは25行目である（正確）。src/lib/env.ts:169-171と記載されているが、実際はenv.tsの169-171行目にある（正確）。server.ts:72と記載されているが、実際にはgetDbInstance()の呼び出しは72行目である（正確）。start.ts:93でdotenvConfigが呼ばれるとあるが、実際は93行目である（正確）。検証の結果、行番号は全て正確であった。",
+        "suggestion": "行番号は正確であることを確認した。この指摘は取り下げ。"
+      },
+      {
+        "id": "M2",
+        "category": "整合性",
+        "description": "Issueでは「ファイル名が cm.db（db-instance.ts は db.sqlite）で不一致」と指摘しているが、これは正確な指摘である。src/lib/db-instance.ts:25では 'data/db.sqlite' を使用し、src/lib/env.ts:171では 'data/cm.db' を使用している。この不整合は実際に存在し、データ消失の一因となりうる。",
+        "suggestion": "この指摘は正確。修正方針に「ファイル名の統一: cm.db に統一」が含まれており、適切である。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1",
+        "category": "完全性",
+        "description": "修正方針の「マイグレーションロジック追加」が推奨修正とされているが、既存ユーザーのデータ救済のためには必須修正として扱うべきではないか。グローバルインストールで既にデータを失ったユーザーへの対応策が不明確。",
+        "suggestion": "マイグレーションロジックの優先度を再検討し、既存ユーザーのデータ救済手順を明記する。または、マイグレーション不可能な場合はその旨を明記する。"
+      },
+      {
+        "id": "S2",
+        "category": "明確性",
+        "description": "修正方針の「グローバルインストール: ~/.commandmate/data/cm.db（絶対パス）」と「ローカルインストール: ./.commandmate/data/cm.db（絶対パス）」の記載で、ローカルインストール時のパスが相対パス表記（./）になっているが、「（絶対パス）」と注記されており矛盾している。",
+        "suggestion": "ローカルインストール時の表記を「<cwd>/.commandmate/data/cm.db（絶対パスに解決）」などに修正し、矛盾を解消する。"
+      },
+      {
+        "id": "S3",
+        "category": "技術的妥当性",
+        "description": "受け入れ条件が明示されていない。バグ修正Issueであっても、具体的な受け入れ条件（例: バージョンアップ後もDBが保持される、テストケース）があると検証が容易になる。",
+        "suggestion": "以下のような受け入れ条件を追加する: 1) v0.1.10からv0.1.11へアップグレード後、リポジトリ情報が保持される 2) グローバルインストールで任意のディレクトリから commandmate start を実行しても同じDBを参照する 3) 単体テストでDBパス解決ロジックを検証する"
+      },
+      {
+        "id": "S4",
+        "category": "完全性",
+        "description": "DATABASE_PATH環境変数の扱いについて言及がない。src/lib/db-instance.tsとsrc/lib/env.tsの両方でDATABASE_PATH環境変数を参照しているが、これがCM_DB_PATHと重複しており、どちらを優先するか不明確。",
+        "suggestion": "DATABASE_PATH環境変数の扱い（廃止するか、CM_DB_PATHへのエイリアスとするか）を明記する。既存のIssue #76のフォールバック機構との整合性も確認が必要。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "N1",
+        "category": "完全性",
+        "description": "関連Issueへのリンクがない。Issue #96（npm CLIサポート）、Issue #119（対話形式init）、Issue #125（グローバルインストール.env読み込み）が密接に関連している。",
+        "suggestion": "関連Issueへのリンクを追加: - #96: npm CLIサポート（関連機能） - #119: 対話形式init（関連機能） - #125: グローバルインストール.env読み込み（関連バグ修正）"
+      },
+      {
+        "id": "N2",
+        "category": "完全性",
+        "description": "テスト計画が記載されていない。DBパス解決ロジックは複雑であり、グローバル/ローカルインストールの両方でテストが必要。",
+        "suggestion": "テスト計画を追加: 1) ユニットテスト: getDbInstance()のパス解決ロジック 2) 統合テスト: グローバルインストールシミュレーション 3) E2Eテスト: バージョンアップシナリオ"
+      },
+      {
+        "id": "N3",
+        "category": "整合性",
+        "description": "CLAUDE.mdにはsrc/lib/db-instance.tsの説明がない。Issue #135で修正対象となるモジュールであるため、ドキュメントへの追加が望ましい。",
+        "suggestion": "CLAUDE.mdの「主要機能モジュール」セクションにsrc/lib/db-instance.tsの説明を追加することを推奨。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/db-instance.ts",
+      "line": 25,
+      "relevance": "DBパス解決ロジック - process.cwd()とdb.sqliteを使用",
+      "verified": true
+    },
+    {
+      "file": "src/lib/env.ts",
+      "line": "169-171",
+      "relevance": "CM_DB_PATH環境変数の解決 - process.cwd()とcm.dbを使用",
+      "verified": true
+    },
+    {
+      "file": "src/cli/utils/env-setup.ts",
+      "line": 31,
+      "relevance": "ENV_DEFAULTSのCM_DB_PATHが相対パス('./data/cm.db')",
+      "verified": true
+    },
+    {
+      "file": "server.ts",
+      "line": 72,
+      "relevance": "getDbInstance()呼び出し - CM_DB_PATHを直接参照しない",
+      "verified": true
+    },
+    {
+      "file": "src/cli/commands/start.ts",
+      "line": 93,
+      "relevance": "dotenvConfig()でenvPathから.envをロード",
+      "verified": true
+    },
+    {
+      "file": "src/cli/commands/init.ts",
+      "relevance": "createDefaultConfig()でENV_DEFAULTS.CM_DB_PATHを使用",
+      "verified": true
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト概要 - Issue #96, #119, #125の実装詳細が記載"
+    }
+  ],
+  "summary": "Issue #135はグローバルインストール時のDBデータ消失バグを詳細に分析しており、技術的な根本原因の特定は正確である。コードスニペットと行番号も実際のコードと一致している。ただし、受け入れ条件の明示、DATABASE_PATH環境変数の扱い、マイグレーションロジックの優先度について補足が必要。また、関連Issue（#96, #119, #125）へのリンク追加が望ましい。全体として、バグの原因分析と修正方針は適切であり、軽微な修正で実装可能なIssueである。"
+}

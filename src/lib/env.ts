@@ -4,9 +4,13 @@
  *
  * Issue #76: Environment variable fallback support
  * Supports both new (CM_*) and legacy (MCBD_*) environment variable names
+ *
+ * Issue #135: DB path resolution fix
+ * Uses getDefaultDbPath() from db-path-resolver.ts for consistent DB path handling
  */
 
 import path from 'path';
+import { getDefaultDbPath, validateDbPath } from './db-path-resolver';
 
 // ============================================================
 // Environment Variable Mapping (for fallback support)
@@ -76,6 +80,40 @@ export function getEnvWithFallback(newKey: string, oldKey: string): string | und
  */
 export function getEnvByKey(key: EnvKey): string | undefined {
   return getEnvWithFallback(key, ENV_MAPPING[key]);
+}
+
+// ============================================================
+// [Issue #135] DATABASE_PATH Deprecation Support
+// ============================================================
+
+/**
+ * Set to track warned keys for DATABASE_PATH deprecation (separate from ENV_MAPPING warnings)
+ */
+let databasePathWarned = false;
+
+/**
+ * Reset DATABASE_PATH warning state (for testing purposes)
+ */
+export function resetDatabasePathWarning(): void {
+  databasePathWarned = false;
+}
+
+/**
+ * Get DATABASE_PATH with deprecation warning
+ *
+ * SEC-004: Logs security event when deprecated DATABASE_PATH is used
+ *
+ * @returns DATABASE_PATH value if set, undefined otherwise
+ */
+export function getDatabasePathWithDeprecationWarning(): string | undefined {
+  const dbPath = process.env.DATABASE_PATH;
+  if (dbPath) {
+    if (!databasePathWarned) {
+      console.warn('[DEPRECATED] DATABASE_PATH is deprecated. Use CM_DB_PATH instead.');
+      databasePathWarned = true;
+    }
+  }
+  return dbPath;
 }
 
 // ============================================================
@@ -166,9 +204,12 @@ export function getEnv(): Env {
   const port = parseInt(getEnvByKey('CM_PORT') || '3000', 10);
   const bind = getEnvByKey('CM_BIND') || '127.0.0.1';
   const authToken = getEnvByKey('CM_AUTH_TOKEN');
+
+  // Issue #135: DB path resolution with proper fallback chain
+  // Priority: CM_DB_PATH > DATABASE_PATH (deprecated) > getDefaultDbPath()
   const databasePath = getEnvByKey('CM_DB_PATH')
-    || process.env.DATABASE_PATH
-    || path.join(process.cwd(), 'data', 'cm.db');
+    || getDatabasePathWithDeprecationWarning()
+    || getDefaultDbPath();
 
   // Validate values
   if (!rootDir) {
@@ -188,12 +229,23 @@ export function getEnv(): Env {
     throw new Error('CM_AUTH_TOKEN (or MCBD_AUTH_TOKEN) is required when CM_BIND=0.0.0.0');
   }
 
+  // Issue #135: Validate DB path for security (SEC-001)
+  let validatedDbPath: string;
+  try {
+    validatedDbPath = validateDbPath(databasePath);
+  } catch {
+    // If validation fails, fall back to default path
+    // This can happen if DATABASE_PATH points to a system directory
+    console.warn(`[Security] Invalid DB path "${databasePath}", using default.`);
+    validatedDbPath = validateDbPath(getDefaultDbPath());
+  }
+
   return {
     CM_ROOT_DIR: path.resolve(rootDir),
     CM_PORT: port,
     CM_BIND: bind,
     CM_AUTH_TOKEN: authToken,
-    CM_DB_PATH: path.resolve(databasePath),
+    CM_DB_PATH: validatedDbPath,
   };
 }
 

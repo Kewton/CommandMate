@@ -1,0 +1,159 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 135,
+  "review_date": "2026-02-03",
+  "previous_findings_status": [
+    {
+      "id": "M1",
+      "original": "コードスニペット行番号の正確性確認",
+      "status": "addressed",
+      "note": "Stage 1レビューで検証の結果、行番号は全て正確であることを確認済み。この指摘は取り下げられた。"
+    },
+    {
+      "id": "M2",
+      "original": "db.sqliteとcm.dbのファイル名不一致",
+      "status": "addressed",
+      "note": "Issueの修正方針に「ファイル名の統一: cm.dbに統一」が含まれており、適切に対応されている。"
+    },
+    {
+      "id": "S1",
+      "original": "マイグレーションロジックの優先度",
+      "status": "addressed",
+      "note": "修正方針セクションでマイグレーションロジックを「優先度: 高」として明記。既存ユーザーデータ救済の手順と、マイグレーション不可能な場合の対応も記載された。"
+    },
+    {
+      "id": "S2",
+      "original": "ローカルインストール時のパス表記の矛盾",
+      "status": "addressed",
+      "note": "修正方針で「<cwd>/.commandmate/data/cm.db（絶対パスに解決）」と明確に記載され、矛盾が解消された。"
+    },
+    {
+      "id": "S3",
+      "original": "受け入れ条件の欠如",
+      "status": "addressed",
+      "note": "受け入れ条件セクションが追加され、7項目の具体的かつ検証可能な条件が記載された。"
+    },
+    {
+      "id": "S4",
+      "original": "DATABASE_PATH環境変数の扱い",
+      "status": "addressed",
+      "note": "修正方針の「DATABASE_PATH廃止時の警告（後方互換性対応）」セクションで詳細に記載。フォールバック機構、deprecation警告の仕様も明記された。"
+    },
+    {
+      "id": "N1",
+      "original": "関連Issueへのリンク不足",
+      "status": "addressed",
+      "note": "関連Issueセクションが追加され、#96, #119, #125, #76へのリンクと説明が記載された。"
+    },
+    {
+      "id": "N2",
+      "original": "テスト計画の不足",
+      "status": "addressed",
+      "note": "テスト計画セクションが追加され、ユニットテスト、統合テスト、E2Eテストの具体的な内容が記載された。"
+    },
+    {
+      "id": "N3",
+      "original": "CLAUDE.mdにdb-instance.tsの説明がない",
+      "status": "partially_addressed",
+      "note": "ドキュメント影響セクションで「CLAUDE.md - db-instance.ts説明追加」が対象として挙げられているが、Issue修正時に実施される予定であり、現時点では未対応。"
+    }
+  ],
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S5-1",
+        "category": "整合性",
+        "description": ".env.exampleのCM_DB_PATHデフォルト値が「./data/db.sqlite」となっているが、Issueの修正方針では「cm.db」に統一すると記載されている。.env.exampleの記載も更新対象として明記すべき。",
+        "location": "ドキュメント影響セクション",
+        "recommendation": "ドキュメント影響セクションに「.env.example - CM_DB_PATHのデフォルト値をcm.dbに更新」を追加する。",
+        "evidence": ".env.example line 36: CM_DB_PATH=./data/db.sqlite"
+      },
+      {
+        "id": "S5-2",
+        "category": "完全性",
+        "description": "テスト計画の統合テストセクションに「環境変数設定」の注意事項が追加されたが、具体的なsetup/teardownの実装方針（beforeEach/afterEachでCM_DB_PATHを一時ディレクトリに設定するなど）が不明確。",
+        "location": "テスト計画セクション - 統合テスト",
+        "recommendation": "統合テストの環境変数設定について、より具体的な実装方針を追加する。例: 「vi.stubEnv()を使用してCM_DB_PATHを一時ディレクトリに設定」など。"
+      },
+      {
+        "id": "S5-3",
+        "category": "技術的妥当性",
+        "description": "影響範囲の「APIルートファイル（56ファイル以上）」という記載があるが、実際のgetDbInstance使用箇所は30ファイルで66回の呼び出し。正確な数値に更新すべき。",
+        "location": "影響範囲セクション - 間接的な影響",
+        "recommendation": "「APIルートファイル（56ファイル以上）」を「APIルートファイル（30ファイル、66箇所）」に修正する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "N5-1",
+        "category": "明確性",
+        "description": "受け入れ条件の「v0.1.10からv0.1.11へアップグレード後」という記載があるが、実際の次バージョンが異なる可能性がある。汎用的な表現にすることを検討。",
+        "location": "受け入れ条件セクション",
+        "recommendation": "「旧バージョンから新バージョンへアップグレード後」または「修正前バージョンから修正後バージョンへ」のような表現に変更を検討。"
+      },
+      {
+        "id": "N5-2",
+        "category": "完全性",
+        "description": "migration-to-commandmate.mdにはDATABASE_PATH廃止に関する記載がない。Issueの修正後にドキュメント更新が必要だが、具体的な追記内容を示すと実装がスムーズになる。",
+        "location": "ドキュメント影響セクション",
+        "recommendation": "migration-to-commandmate.mdへの追記内容の概要を記載。例: 「DATABASE_PATH環境変数のサポート終了とCM_DB_PATHへの移行手順を追加」"
+      },
+      {
+        "id": "N5-3",
+        "category": "完全性",
+        "description": "E2Eテストの「バージョンアップシナリオ（v0.1.10 -> v0.1.11）」は、実際のCI環境での実行が困難な可能性がある。テストの実現可能性について補足があると良い。",
+        "location": "テスト計画セクション - E2Eテスト",
+        "recommendation": "E2Eテストのバージョンアップシナリオについて、実装方針の補足を追加。例: 「ローカル環境でのシミュレーションテストとして実装」など。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/db-instance.ts",
+      "line": 25,
+      "relevance": "DBパス解決ロジック - process.cwd()とdb.sqliteを使用",
+      "verified": true
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/env.ts",
+      "line": "169-171",
+      "relevance": "CM_DB_PATH環境変数の解決 - process.cwd()とcm.dbを使用",
+      "verified": true
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/utils/env-setup.ts",
+      "line": 31,
+      "relevance": "ENV_DEFAULTSのCM_DB_PATHが相対パス('./data/cm.db')",
+      "verified": true
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/server.ts",
+      "line": 72,
+      "relevance": "getDbInstance()呼び出し - CM_DB_PATHを直接参照しない",
+      "verified": true
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/cli/commands/start.ts",
+      "line": 93,
+      "relevance": "dotenvConfig()でenvPathから.envをロード",
+      "verified": true
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/.env.example",
+      "relevance": "CM_DB_PATHデフォルト値の不整合確認"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/docs/migration-to-commandmate.md",
+      "relevance": "DATABASE_PATH廃止に関する追記が必要"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/CLAUDE.md",
+      "relevance": "db-instance.ts説明の追加が予定されている"
+    }
+  ],
+  "summary": "Stage 1レビューで指摘された全9項目のうち8項目が適切に対処され、1項目（CLAUDE.mdへのdb-instance.ts説明追加）は修正時に対応予定として認識されている。Issueは大幅に改善され、受け入れ条件、テスト計画、影響範囲の詳細、DATABASE_PATHの廃止対応が追加された。Stage 5レビューでは新たに3件のShould Fix（.env.exampleの整合性、統合テスト実装方針、APIファイル数の正確性）と3件のNice to Have（バージョン番号の汎用化、ドキュメント追記内容の具体化、E2Eテスト実現可能性の補足）を検出した。全体として、Issue #135は実装に必要な情報が十分に記載されており、高品質なバグ修正Issueとして評価できる。"
+}

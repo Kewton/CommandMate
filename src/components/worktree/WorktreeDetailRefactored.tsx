@@ -884,6 +884,24 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Track if initial load has completed to prevent re-triggering
   const initialLoadCompletedRef = useRef(false);
 
+  // Issue #131: Track previous worktreeId to detect worktree changes
+  const prevWorktreeIdRef = useRef<string | undefined>(worktreeId);
+
+  // Issue #131: Reset state when worktreeId changes (worktree switching)
+  // This prevents stale messages from previous worktree causing scroll issues
+  useEffect(() => {
+    if (prevWorktreeIdRef.current !== worktreeId) {
+      // Clear messages immediately to prevent scroll animation on stale data
+      actions.clearMessages();
+      // Reset initial load flag to trigger fresh data fetch
+      initialLoadCompletedRef.current = false;
+      // Clear terminal output
+      actions.setTerminalOutput('', '');
+      // Update ref for next comparison
+      prevWorktreeIdRef.current = worktreeId;
+    }
+  }, [worktreeId, actions]);
+
   // ========================================================================
   // API Fetch Functions
   // ========================================================================

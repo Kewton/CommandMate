@@ -410,15 +410,24 @@ export function MessageList({
 
   // Track previous message count to detect new messages
   const prevMessageCountRef = useRef(messages.length);
+  // Issue #131: Track previous worktreeId to detect worktree changes
+  const prevWorktreeIdRef = useRef<string | undefined>(worktreeId);
 
-  // Auto-scroll to bottom ONLY when new messages arrive (not on realtime output updates)
+  // Auto-scroll to bottom when new messages arrive or worktree changes
+  // Issue #131: Use 'instant' scroll when switching worktrees to avoid animation during navigation
   useEffect(() => {
-    // Only scroll when message count increases (new message added)
-    if (messages.length > prevMessageCountRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const isWorktreeChange = prevWorktreeIdRef.current !== worktreeId;
+
+    // Scroll when message count increases (new message added) or when worktree changes
+    if (messages.length > prevMessageCountRef.current || isWorktreeChange) {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: isWorktreeChange ? 'instant' : 'smooth'
+      });
     }
+
     prevMessageCountRef.current = messages.length;
-  }, [messages.length]);
+    prevWorktreeIdRef.current = worktreeId;
+  }, [messages.length, worktreeId]);
 
   /**
    * Handle file path click - navigate to full screen file viewer

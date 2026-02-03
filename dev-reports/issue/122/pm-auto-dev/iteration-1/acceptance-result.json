@@ -1,0 +1,98 @@
+{
+  "status": "passed",
+  "issue_number": 122,
+  "feature_summary": "Empty state action buttons for file/directory creation in FileTreeView",
+  "test_cases": [
+    {
+      "scenario": "Empty state shows New File and New Directory buttons",
+      "result": "passed",
+      "evidence": "Test 'should show New File and New Directory buttons when directory is empty' passed. Verified in FileTreeView.tsx lines 666-698: Empty state renders buttons with data-testid='empty-new-file-button' and data-testid='empty-new-directory-button' when onNewFile and onNewDirectory callbacks are provided."
+    },
+    {
+      "scenario": "New File button calls onNewFile with empty string",
+      "result": "passed",
+      "evidence": "Test 'should call onNewFile with empty string when New File button is clicked' passed. Implementation confirmed at line 679: onClick={() => onNewFile('')}"
+    },
+    {
+      "scenario": "New Directory button calls onNewDirectory with empty string",
+      "result": "passed",
+      "evidence": "Test 'should call onNewDirectory with empty string when New Directory button is clicked' passed. Implementation confirmed at line 689: onClick={() => onNewDirectory('')}"
+    },
+    {
+      "scenario": "Buttons hidden when callbacks undefined",
+      "result": "passed",
+      "evidence": "Test 'should not show buttons when onNewFile and onNewDirectory are undefined' passed. Conditional rendering at lines 674-697 ensures buttons only appear when respective callbacks are provided."
+    },
+    {
+      "scenario": "Existing file display maintained",
+      "result": "passed",
+      "evidence": "When rootItems.length > 0, the component renders the full TreeNode tree (lines 716-740) instead of the empty state. Existing 38 FileTreeView tests continue to pass."
+    },
+    {
+      "scenario": "Button styling consistency",
+      "result": "passed",
+      "evidence": "Buttons use consistent styling with ContextMenu.tsx: same icon components (FilePlus, FolderPlus from lucide-react), similar color scheme (text-gray-700, bg-white, border-gray-300, hover:bg-gray-50), and matching spacing/layout patterns."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Empty directory allows file/directory creation",
+      "verified": true,
+      "evidence": "Empty state UI with action buttons implemented at lines 666-699"
+    },
+    {
+      "criterion": "New File button shows file name input dialog",
+      "verified": true,
+      "evidence": "Button calls onNewFile('') which propagates to handleNewFile in WorktreeDetailRefactored.tsx (line 1106) which uses window.prompt for input"
+    },
+    {
+      "criterion": "New Directory button shows directory name input dialog",
+      "verified": true,
+      "evidence": "Button calls onNewDirectory('') which propagates to handleNewDirectory in WorktreeDetailRefactored.tsx (line 1135) which uses window.prompt for input"
+    },
+    {
+      "criterion": "File tree refreshes after creation",
+      "verified": true,
+      "evidence": "Both handleNewFile and handleNewDirectory call setFileTreeRefresh(prev => prev + 1) on success, triggering FileTreeView refresh via refreshTrigger prop"
+    },
+    {
+      "criterion": "Right-click menu still works with existing files",
+      "verified": true,
+      "evidence": "When rootItems.length > 0, TreeNode renders with onContextMenu handler (lines 723-739), ContextMenu component displayed at lines 743-754"
+    },
+    {
+      "criterion": "Button styling consistent with existing UI",
+      "verified": true,
+      "evidence": "Uses same lucide-react icons, Tailwind classes match ContextMenu styling patterns"
+    }
+  ],
+  "test_results": {
+    "unit_tests": {
+      "status": "passed",
+      "details": "5 Empty state tests passed in FileTreeView.test.tsx (lines 556-665)",
+      "total_tests": 9,
+      "passed": 9,
+      "skipped": 0,
+      "failed": 0
+    },
+    "lint": {
+      "status": "passed",
+      "details": "No ESLint warnings or errors"
+    },
+    "type_check": {
+      "status": "passed",
+      "details": "npx tsc --noEmit completed without errors"
+    },
+    "build": {
+      "status": "passed",
+      "details": "npm run build completed successfully"
+    }
+  },
+  "evidence_files": [
+    "src/components/worktree/FileTreeView.tsx",
+    "tests/unit/components/worktree/FileTreeView.test.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "summary": "All acceptance criteria for Issue #122 have been verified. The implementation adds New File and New Directory buttons to the empty state of FileTreeView, allowing users to create files/directories even when the worktree is empty. The buttons correctly call the respective handlers with empty string path, triggering dialog prompts for name input. File tree refresh mechanism works correctly after creation. All 5 new unit tests pass, ESLint shows no errors, TypeScript compilation succeeds, and the build completes successfully.",
+  "timestamp": "2026-02-03T16:44:00+09:00"
+}

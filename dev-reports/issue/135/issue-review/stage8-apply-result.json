@@ -1,0 +1,35 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 135,
+  "applied_date": "2026-02-03",
+  "applied_items": [
+    {
+      "id": "S7-1",
+      "category": "ドキュメント影響",
+      "description": "scripts/health-check.shとscripts/status.shでDATABASE_PATHがフォールバックなしで使用されている問題",
+      "action_taken": "直接的な影響セクションにscripts/health-check.shとscripts/status.shを追加。CM_DB_PATHフォールバック対応が必要な旨を明記。ドキュメント影響セクションにもフォールバック形式（${CM_DB_PATH:-${DATABASE_PATH:-./data/cm.db}}）を具体的に記載。"
+    },
+    {
+      "id": "S7-2",
+      "category": "ドキュメント整合性",
+      "description": "docs/architecture.mdでMCBD_DB_PATH、db.sqliteへの参照が残っている問題",
+      "action_taken": "ドキュメント影響セクションのdocs/architecture.md記載を詳細化。MCBD_DB_PATHをCM_DB_PATHに更新、~/.mycodebranchdesk/db.sqliteを~/.commandmate/data/cm.dbに更新する必要性を明記。"
+    },
+    {
+      "id": "S7-3",
+      "category": "ドキュメント整合性",
+      "description": ".env.exampleのCM_DB_PATHデフォルト値がdb.sqliteとなっている問題",
+      "action_taken": "ドキュメント影響セクションの.env.example記載を詳細化。CM_DB_PATHのデフォルト値をdb.sqliteからcm.dbに更新する必要性を明記。"
+    },
+    {
+      "id": "S7-4",
+      "category": "テスト網羅性",
+      "description": "E2Eテストのバージョンアップシナリオについて具体的な代替テスト方法の詳細がない問題",
+      "action_taken": "E2Eテストセクションにローカルシミュレーション手順の詳細を追加。旧形式DBファイル配置パス、マイグレーション実行コマンド、検証チェックリスト（4項目）を具体的に記載。"
+    }
+  ],
+  "skipped_items": [],
+  "review_history_updated": true,
+  "summary": "Stage 7影響範囲レビュー2回目の全4件のShould Fix項目を反映。(1) シェルスクリプト（health-check.sh, status.sh）のCM_DB_PATHフォールバック対応を直接的な影響セクションとドキュメント影響セクションに追加。(2) docs/architecture.mdの旧名称参照更新をドキュメント影響セクションに詳細化。(3) .env.exampleのCM_DB_PATHデフォルト値更新（db.sqlite -> cm.db）を明記。(4) E2Eテストのローカルシミュレーション手順を具体化（ファイル配置、実行コマンド、検証チェックリスト）。レビュー履歴セクションにStage 7の変更内容を追記。"
+}

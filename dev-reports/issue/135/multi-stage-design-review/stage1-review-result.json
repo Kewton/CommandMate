@@ -1,0 +1,112 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 135,
+  "review_date": "2026-02-03",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SOLID-DIP-001",
+        "principle": "Dependency Inversion Principle (DIP)",
+        "severity": "medium",
+        "title": "db-instance.tsがprocess.envに直接依存している現状問題を設計書で認識するも、修正後もenv.tsという具象モジュールに依存",
+        "description": "現在のdb-instance.tsはprocess.envとpath.join(process.cwd())に直接依存している。設計書ではgetEnv()経由に修正する方針だが、依然として具象モジュール(env.ts)に依存する。本来はインターフェースを介して抽象に依存すべき。",
+        "current_code": "const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'db.sqlite');",
+        "proposed_fix": "設計書では getEnv().CM_DB_PATH としているが、DbPathProvider interfaceを定義し、依存注入できるようにすることでテスタビリティを向上させることを検討。ただし、現プロジェクトの規模感ではオーバーエンジニアリングの可能性もあり、現行案でも許容範囲内。",
+        "location": "src/lib/db-instance.ts (設計書 Section 4.1)"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DRY-001",
+        "principle": "DRY (Don't Repeat Yourself)",
+        "severity": "medium",
+        "title": "isGlobalInstall()が複数箇所で呼び出される可能性",
+        "description": "設計書では db-path-resolver.ts に getDbPathStrategy() を追加し、env.ts 内でも isGlobalInstall() を使用する設計となっている。isGlobalInstall() のロジックは env-setup.ts に既存だが、新たに db-path-resolver.ts でも Strategy パターンで利用する形になるため、import 経路が複雑化する可能性がある。",
+        "proposed_fix": "isGlobalInstall() を一箇所（例: env-setup.ts）に集約し、db-path-resolver.ts からは import して使用することを設計書に明記する。現設計でも可能だが、より明確に依存関係を図示すべき。",
+        "location": "src/lib/db-path-resolver.ts, src/cli/utils/env-setup.ts"
+      },
+      {
+        "id": "KISS-001",
+        "principle": "KISS (Keep It Simple, Stupid)",
+        "severity": "medium",
+        "title": "Strategy パターンの必要性再検討",
+        "description": "設計書では GlobalInstallStrategy と LocalInstallStrategy の2つの Strategy クラスを導入しているが、現時点でこれら以外の戦略が追加される見込みは低い。単純な if-else で済む処理を Strategy パターンで実装することは過剰設計の恐れがある。",
+        "proposed_fix": "Strategy パターンを採用する場合、将来の拡張性（例: Docker環境用Strategy、CI環境用Strategy等）を設計書に明記するか、シンプルに関数ベースの実装に変更することを検討。現状は getDefaultDbPath() 関数だけで十分な可能性が高い。",
+        "location": "src/lib/db-path-resolver.ts (設計書 Section 4.2)"
+      },
+      {
+        "id": "SRP-001",
+        "principle": "Single Responsibility Principle (SRP)",
+        "severity": "low",
+        "title": "env.ts の責務が拡大傾向",
+        "description": "env.ts は環境変数の取得・バリデーションを担当しているが、設計書では getDatabasePathWithDeprecationWarning() や validateDbPath() などDB関連のロジックも追加される予定。環境変数管理とDBパス解決という2つの責務を持つことになる。",
+        "proposed_fix": "DBパス解決ロジックは db-path-resolver.ts に完全に分離し、env.ts は純粋に環境変数の取得・バリデーションに集中させる。env.ts の getEnv() は db-path-resolver の関数を呼び出す形にする。",
+        "location": "src/lib/env.ts (設計書 Section 6.1.1)"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "OCP-001",
+        "principle": "Open/Closed Principle (OCP)",
+        "severity": "low",
+        "title": "マイグレーション検出パスのハードコード",
+        "description": "設計書 Section 9.2 の getLegacyDbPaths() では旧DBパスをハードコードしている。将来新たな旧形式が発見された場合、コード修正が必要となる（修正に対して閉じていない）。",
+        "proposed_fix": "レガシーパス定義を設定ファイルまたは定数配列として外部化し、コード修正なしで拡張可能にする。ただし、マイグレーションは一時的な機能であり、過度な拡張性は不要な可能性もある。",
+        "location": "src/lib/db-migration-path.ts (設計書 Section 9.2)"
+      },
+      {
+        "id": "YAGNI-001",
+        "principle": "YAGNI (You Aren't Gonna Need It)",
+        "severity": "low",
+        "title": "DATABASE_PATH のフォールバック維持の必要性",
+        "description": "設計書では DATABASE_PATH をdeprecation警告付きでフォールバックサポートする設計だが、DATABASE_PATH は Issue #77 以前の旧仕様であり、現在のユーザーベースで使用されている可能性は低い。CM_DB_PATH/MCBD_DB_PATH のフォールバック（Issue #76）で十分な可能性がある。",
+        "proposed_fix": "DATABASE_PATH サポートを完全廃止するか、マイグレーションガイドを提供して段階的に廃止する選択肢を検討。ただし、後方互換性を重視する方針であれば現設計で問題なし。",
+        "location": "src/lib/env.ts (設計書 Section 6.1.1)"
+      },
+      {
+        "id": "DRY-002",
+        "principle": "DRY (Don't Repeat Yourself)",
+        "severity": "low",
+        "title": "path.resolve() の呼び出し重複",
+        "description": "設計書では複数箇所で path.resolve() を呼び出して絶対パス化している。db-path-resolver.ts の getDefaultPath()、env.ts の validateDbPath()、init.ts の設定生成時など。",
+        "proposed_fix": "絶対パス変換の責務を一箇所に集約。例えば db-path-resolver.ts 内で常に絶対パスを返すことを保証し、呼び出し側での path.resolve() は不要にする。",
+        "location": "複数ファイル"
+      }
+    ]
+  },
+  "positive_aspects": [
+    {
+      "id": "POS-001",
+      "title": "Singleton パターンの適切な維持",
+      "description": "DBインスタンスの Singleton 管理は維持される設計であり、リソース管理として適切。getDbInstance() のインターフェースを変更せずに内部実装のみを修正する方針は既存コードへの影響を最小化する。"
+    },
+    {
+      "id": "POS-002",
+      "title": "既存フォールバック機構の再利用",
+      "description": "Issue #76 で実装された getEnvWithFallback() / getEnvByKey() を再利用する設計は DRY 原則に則っており、コードの重複を避けている。"
+    },
+    {
+      "id": "POS-003",
+      "title": "Facade パターンの活用",
+      "description": "getEnv() を Facade として使用し、パス解決の複雑さを隠蔽する設計は、呼び出し側のコードをシンプルに保つ。"
+    },
+    {
+      "id": "POS-004",
+      "title": "マイグレーション設計の充実",
+      "description": "旧DBからの自動マイグレーション設計（Section 9）は、ユーザー体験を損なわずにアップグレードを実現する配慮がある。バックアップ作成の設計も適切。"
+    },
+    {
+      "id": "POS-005",
+      "title": "セキュリティ設計の整合性",
+      "description": "既存の resolveSecurePath() を活用したパストラバーサル対策、OWASP Top 10 への対応が設計書に明記されており、Issue #125 との一貫性がある。"
+    }
+  ],
+  "summary": "設計書は全体として DRY 原則と既存コードの再利用を重視した堅実な設計となっている。Singleton パターンの維持、Facade パターンの活用、セキュリティ設計の充実など、多くの点で優れている。一方で、Strategy パターンの導入については KISS 原則の観点から再検討の余地がある。現時点で2つの戦略（Global/Local）のみであり、単純な関数ベースの実装で十分な可能性が高い。また、env.ts の責務拡大傾向があり、SRP の観点から DB パス解決ロジックの分離をより明確にすることを推奨する。must_fix は1件（DIP違反の認識だが許容範囲）、should_fix は3件、nice_to_have は3件。設計の大筋は問題なく、Phase 1-4 の実装計画に沿って進めることが可能。",
+  "recommendation": "PROCEED_WITH_MINOR_CHANGES",
+  "next_actions": [
+    "Strategy パターンの必要性を再評価し、シンプルな関数ベース実装への変更を検討",
+    "env.ts と db-path-resolver.ts の責務分離を明確化",
+    "isGlobalInstall() の import 経路を設計書に明記"
+  ]
+}

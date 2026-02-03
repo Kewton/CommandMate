@@ -66,7 +66,8 @@ function extractClaudeResponse(
   // Check if Claude has returned to prompt (indicated by the prompt symbols)
   // Claude shows "> " or "❯ " or "─────" when waiting for input
   // Supports both legacy '>' and new '❯' (U+276F) prompt characters
-  const promptPattern = /^[>❯]\s*$/m;
+  // Issue #132: Also matches prompts with recommended commands (e.g., "❯ /work-plan")
+  const promptPattern = /^[>❯](\s*$|\s+\S)/m;
   const separatorPattern = /^─{50,}$/m;
 
   // Check for thinking/processing indicators

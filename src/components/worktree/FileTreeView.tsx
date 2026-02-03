@@ -21,6 +21,7 @@ import type { TreeItem, TreeResponse, SearchMode, SearchResultItem } from '@/typ
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { escapeRegExp, computeMatchedPaths } from '@/lib/utils';
+import { FilePlus, FolderPlus } from 'lucide-react';
 
 // ============================================================================
 // Types
@@ -669,6 +670,31 @@ export const FileTreeView = memo(function FileTreeView({
         className={`p-4 text-center text-gray-500 ${className}`}
       >
         <p className="text-sm">No files found</p>
+        {/* Action buttons for empty state - only show when callbacks are provided */}
+        {(onNewFile || onNewDirectory) && (
+          <div className="flex flex-col gap-2 mt-4">
+            {onNewFile && (
+              <button
+                data-testid="empty-new-file-button"
+                onClick={() => onNewFile('')}
+                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              >
+                <FilePlus className="w-4 h-4" aria-hidden="true" />
+                <span>New File</span>
+              </button>
+            )}
+            {onNewDirectory && (
+              <button
+                data-testid="empty-new-directory-button"
+                onClick={() => onNewDirectory('')}
+                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              >
+                <FolderPlus className="w-4 h-4" aria-hidden="true" />
+                <span>New Directory</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   }

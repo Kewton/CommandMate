@@ -99,6 +99,7 @@ describe('External Apps Database Operations', () => {
           enabled: 1,
           created_at: 1700000000000,
           updated_at: 1700001000000,
+          issue_no: null, // Issue #136: Added issue_no field
         };
 
         const app = mapDbRowToExternalApp(dbRow);
@@ -133,6 +134,7 @@ describe('External Apps Database Operations', () => {
           enabled: 0,
           created_at: 1700000000000,
           updated_at: 1700000000000,
+          issue_no: null, // Issue #136: Added issue_no field
         };
 
         const app = mapDbRowToExternalApp(dbRow);

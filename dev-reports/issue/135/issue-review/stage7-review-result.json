@@ -1,0 +1,119 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 135,
+  "review_date": "2026-02-03",
+  "previous_findings_status": [
+    {
+      "id": "M1",
+      "status": "addressed",
+      "note": "APIルートファイルへの影響が正確な数値（30ファイル、66箇所）で詳細化され、影響範囲セクションで明示されている。"
+    },
+    {
+      "id": "M2",
+      "status": "addressed",
+      "note": "統合テストファイルへの影響が明記され、テスト計画の統合テストセクションでvi.stubEnvを使用した具体的な環境変数設定方法が追加された。"
+    },
+    {
+      "id": "M3",
+      "status": "addressed",
+      "note": "DATABASE_PATH廃止時のフォールバック機構とdeprecation警告が修正方針に追加され、受け入れ条件にも検証項目が追加された。"
+    },
+    {
+      "id": "S1",
+      "status": "addressed",
+      "note": "server.tsへの間接的影響が影響範囲セクションの直接的な影響リストに明記された。"
+    },
+    {
+      "id": "S2",
+      "status": "addressed",
+      "note": "init.tsでの絶対パス生成についてENV_DEFAULTS.CM_DB_PATHの絶対パス化として修正方針に含まれている。"
+    },
+    {
+      "id": "S3",
+      "status": "addressed",
+      "note": "テスト影響セクションでenv.test.tsとenv-setup.test.tsの更新必要性が明記され、新規テストケースも特定されている。"
+    },
+    {
+      "id": "S4",
+      "status": "addressed",
+      "note": "ドキュメント影響セクションで更新対象ファイルが網羅的にリストアップされている。migration-to-commandmate.mdへの追記内容も具体化された。"
+    },
+    {
+      "id": "N1",
+      "status": "addressed",
+      "note": "スクリプト（migrate-cli-tool-id.ts, clean-existing-messages.ts）がその他の影響ファイルとして明記されている。"
+    },
+    {
+      "id": "N2",
+      "status": "addressed",
+      "note": "CI/CD影響セクションが追加され、グローバルインストールシナリオのテスト確認必要性が記載されている。"
+    }
+  ],
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S1",
+        "category": "ドキュメント影響",
+        "description": "scripts/health-check.shとscripts/status.shでDATABASE_PATHがフォールバックなしで使用されている。CM_DB_PATHへのフォールバック対応が必要。",
+        "location": "scripts/health-check.sh:44, scripts/status.sh:58-59",
+        "suggestion": "シェルスクリプトでも`${CM_DB_PATH:-${DATABASE_PATH:-./data/cm.db}}`のようなフォールバック構文を使用する。既にCM_PORTではフォールバック対応済み（line 10, 27）なので、DB_PATHも同様に対応する。",
+        "evidence": "health-check.sh: DB_PATH=\"${DATABASE_PATH:-./data/db.sqlite}\" - CM_DB_PATHを参照していない、ファイル名もdb.sqlite（cm.dbではない）"
+      },
+      {
+        "id": "S2",
+        "category": "ドキュメント整合性",
+        "description": "docs/architecture.mdでMCBD_DB_PATH、db.sqliteへの参照が残っている。CM_DB_PATH、cm.dbへの更新が必要。",
+        "location": "docs/architecture.md:399, 453",
+        "suggestion": "以下を更新: (1) 「~/.mycodebranchdesk/db.sqlite」を「~/.commandmate/data/cm.db」に (2) 「MCBD_DB_PATH」を「CM_DB_PATH」に",
+        "evidence": "line 399: 保存場所の例: ~/.mycodebranchdesk/db.sqlite, line 453: MCBD_DB_PATH（db.sqlite の保存先）"
+      },
+      {
+        "id": "S3",
+        "category": "ドキュメント整合性",
+        "description": ".env.exampleのCM_DB_PATHデフォルト値がdb.sqliteとなっているが、cm.dbに更新すべき。",
+        "location": ".env.example:36",
+        "suggestion": "CM_DB_PATH=./data/db.sqlite を CM_DB_PATH=./data/cm.db に変更する",
+        "evidence": ".env.example: CM_DB_PATH=./data/db.sqlite"
+      },
+      {
+        "id": "S4",
+        "category": "テスト網羅性",
+        "description": "E2Eテストのバージョンアップシナリオについて、CI環境での自動実行が困難という注記があるが、具体的な代替テスト方法（ローカルシミュレーション）の詳細がない。",
+        "location": "テスト計画 > E2Eテスト",
+        "suggestion": "ローカルシミュレーションテストの具体的な手順を追加: (1) 旧形式DBファイルの配置パス (2) マイグレーション実行コマンド (3) 検証項目チェックリスト",
+        "evidence": "テスト計画には「旧形式のDBファイルを手動で配置し、マイグレーション動作を検証する方式」とあるが、具体的な手順が不明"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "N1",
+        "category": "ドキュメント整合性",
+        "description": "docs/internal/配下の複数ドキュメントでdb.sqlite参照が残っている（swe-agents.md, TESTING_GUIDE.md, PRODUCTION_CHECKLIST.md, requirements-design.md）。",
+        "location": "docs/internal/*.md",
+        "suggestion": "内部ドキュメントも一貫性のためcm.dbに更新することを推奨。ただし、これらは開発者向けドキュメントのため優先度は低い。",
+        "evidence": "Grep結果より複数ファイルでdb.sqlite参照を確認"
+      },
+      {
+        "id": "N2",
+        "category": "影響範囲完全性",
+        "description": "マイグレーションロジックの具体的な検出パターンが記載されているが、複数のDBファイルが存在する場合の優先順位が不明。",
+        "location": "修正方針 > マイグレーションロジック追加",
+        "suggestion": "検出対象リスト（./data/db.sqlite, ./data/cm.db, ~/.commandmate/data/db.sqlite）の優先順位を明記する。例: 最新のmodified timeを持つファイルを優先、など。",
+        "evidence": "検出対象は記載されているが、複数存在時の挙動が未定義"
+      }
+    ]
+  },
+  "impact_assessment": {
+    "coverage_completeness": "90%",
+    "remaining_gaps": [
+      "シェルスクリプト（health-check.sh, status.sh）のDATABASE_PATH直接参照がフォールバック対応されていない点",
+      ".env.exampleのCM_DB_PATHデフォルト値がdb.sqlite（cm.dbではない）",
+      "docs/architecture.mdの旧名称参照",
+      "E2Eバージョンアップテストの具体的手順"
+    ],
+    "risk_level": "low"
+  },
+  "summary": "Stage 3で指摘した全ての影響範囲に関する必須項目（M1-M3）および推奨項目（S1-S4）は適切に対処されており、Issueの影響範囲セクションは大幅に改善されている。APIルートファイル数の正確な数値化、統合テストの環境変数設定方法の具体化、DATABASE_PATH廃止時の警告要件追加など、重要な項目が網羅されている。残存する課題として、シェルスクリプトと.env.exampleでのDB_PATH参照のフォールバック対応、およびE2Eテストの具体的手順の明確化が必要だが、これらはShould Fix/Nice to Haveレベルであり、実装を阻害するものではない。全体として、影響範囲分析は十分な網羅性を持っており、実装に進める状態である。"
+}

@@ -1,0 +1,7 @@
+{
+  "issue_number": 135,
+  "review_result_path": "dev-reports/issue/135/multi-stage-design-review/stage3-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-135-db-path-resolution-design-policy.md",
+  "stage": 3,
+  "stage_name": "指摘事項対応（影響分析）"
+}

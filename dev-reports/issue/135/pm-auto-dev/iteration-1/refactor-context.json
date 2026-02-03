@@ -1,0 +1,39 @@
+{
+  "issue_number": 135,
+  "refactor_targets": [
+    "src/lib/db-path-resolver.ts",
+    "src/lib/db-migration-path.ts",
+    "src/lib/env.ts",
+    "src/lib/db-instance.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/commands/init.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 85.0,
+    "target_coverage": 85.0
+  },
+  "improvement_goals": [
+    "コード重複の確認と削除",
+    "SOLID原則への準拠確認",
+    "セキュリティ実装の確認（SEC-001〜SEC-006）",
+    "コードの可読性向上",
+    "不要なコメントの削除",
+    "型定義の明確化"
+  ],
+  "focus_areas": [
+    {
+      "area": "DRY原則",
+      "description": "isGlobalInstall()の重複使用がないか確認、システムディレクトリリストの共通化"
+    },
+    {
+      "area": "SRP原則",
+      "description": "各モジュールの責務が単一であることを確認"
+    },
+    {
+      "area": "セキュリティ",
+      "description": "SEC-001〜SEC-006の実装が完全であることを確認"
+    }
+  ],
+  "tdd_result_path": "dev-reports/issue/135/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/135/pm-auto-dev/iteration-1/acceptance-result.json"
+}

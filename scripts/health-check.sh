@@ -40,8 +40,9 @@ else
 fi
 
 # Check database
+# Issue #135: Support CM_DB_PATH with fallback to DATABASE_PATH
 echo -n "Checking database... "
-DB_PATH="${DATABASE_PATH:-./data/db.sqlite}"
+DB_PATH="${CM_DB_PATH:-${DATABASE_PATH:-./data/cm.db}}"
 if [ -f "$DB_PATH" ]; then
   if [ -r "$DB_PATH" ] && [ -w "$DB_PATH" ]; then
     echo "✓ ($DB_PATH)"

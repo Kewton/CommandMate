@@ -1,0 +1,65 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 135,
+  "applied_date": "2026-02-03",
+  "applied_items": [
+    {
+      "id": "S5-1",
+      "category": "整合性",
+      "description": ".env.exampleのCM_DB_PATHデフォルト値更新をドキュメント影響セクションに追記",
+      "changes": [
+        "ドキュメント影響セクションの.env.example行を「.env.example - DATABASE_PATH参照を削除/更新、CM_DB_PATHのデフォルト値をcm.dbに更新」に変更"
+      ]
+    },
+    {
+      "id": "S5-2",
+      "category": "完全性",
+      "description": "統合テストの環境変数設定について具体的な実装方針を追加",
+      "changes": [
+        "テスト計画の統合テストセクションに「vi.stubEnv('CM_DB_PATH', '/tmp/test-xxx/cm.db')」の使用例を追加",
+        "テスト専用DBをbeforeEach/afterEachで作成・削除する方式も選択肢として追記"
+      ]
+    },
+    {
+      "id": "S5-3",
+      "category": "技術的妥当性",
+      "description": "APIルートファイル数を正確な数値に修正",
+      "changes": [
+        "影響範囲セクションの「56ファイル以上」を「30ファイル、66箇所」に修正"
+      ]
+    },
+    {
+      "id": "N5-1",
+      "category": "明確性",
+      "description": "バージョン番号を汎用的な表現に変更（Nice to Have項目を適用）",
+      "changes": [
+        "受け入れ条件の「v0.1.10からv0.1.11へアップグレード後」を「旧バージョンから新バージョンへアップグレード後」に変更",
+        "E2Eテストの「v0.1.10 -> v0.1.11」を「旧バージョンから新バージョンへ」に変更"
+      ]
+    },
+    {
+      "id": "N5-2",
+      "category": "完全性",
+      "description": "migration-to-commandmate.mdへの追記内容を具体化（Nice to Have項目を適用）",
+      "changes": [
+        "ドキュメント影響セクションのmigration-to-commandmate.md行に追記内容の概要を追加",
+        "「DATABASE_PATH環境変数のサポート終了告知、CM_DB_PATHへの移行手順、.envファイルの書き換え例」を明記"
+      ]
+    },
+    {
+      "id": "N5-3",
+      "category": "完全性",
+      "description": "E2Eテストのバージョンアップシナリオについて実現可能性の補足を追加（Nice to Have項目を適用）",
+      "changes": [
+        "E2Eテストセクションに「注記」を追加",
+        "「CI環境での自動実行が困難なため、ローカル環境でのシミュレーションテストとして実装」と明記",
+        "「旧形式のDBファイルを手動で配置し、マイグレーション動作を検証する方式を採用」と具体的な実装方針を追記"
+      ]
+    }
+  ],
+  "skipped_items": [],
+  "review_history_updated": true,
+  "review_history_entry": "Stage 5: 通常レビュー 2回目（2026-02-03）- APIファイル数の正確性、バージョン番号の汎用化、統合テスト方針明確化、E2Eテスト実現可能性注記、ドキュメント更新内容の具体化",
+  "summary": "Stage 5レビューで検出された3件のShould Fix項目と3件のNice to Have項目の全6項目を反映した。主な変更点: (1) APIルートファイル数を「56ファイル以上」から正確な「30ファイル、66箇所」に修正、(2) 受け入れ条件とE2Eテストのバージョン番号を汎用的な表現に変更、(3) 統合テストの環境変数設定にvi.stubEnv()の使用例を追加、(4) E2EテストにCI環境での実行困難性と代替実装方針を注記として追加、(5) .env.exampleのCM_DB_PATH更新をドキュメント影響に追記、(6) migration-to-commandmate.mdへの追記内容を具体化。レビュー履歴セクションにStage 5の変更内容を追加した。"
+}

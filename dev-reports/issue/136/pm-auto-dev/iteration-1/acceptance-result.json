@@ -1,0 +1,307 @@
+{
+  "overall_status": "partial",
+  "issue_number": 136,
+  "title": "Git Worktree Parallel Development Environment",
+  "test_execution_date": "2026-02-03",
+  "summary": {
+    "total_criteria": 13,
+    "passed": 5,
+    "pending": 8,
+    "failed": 0
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-001",
+      "criterion": "/worktree-setup {issueNo} で Worktree 環境が自動構築される",
+      "status": "pending",
+      "verified": false,
+      "evidence": "Phase 3 Task 3.7 - Skills implementation not yet completed",
+      "notes": "Skill prompt files need to be created in .claude/commands/"
+    },
+    {
+      "id": "AC-002",
+      "criterion": "複数の Worktree サーバーが同時に起動できる（ポート競合なし）",
+      "status": "pending",
+      "verified": false,
+      "evidence": "E2E test required to verify multiple server instances",
+      "notes": "PortAllocator unit tests pass (62 tests), but integration test needed"
+    },
+    {
+      "id": "AC-003",
+      "criterion": "External Apps から proxy/commandmate_issue/{issue-no} でアクセスできる",
+      "status": "pending",
+      "verified": false,
+      "evidence": "Phase 4 Task 4.3 - Proxy routing update not yet completed",
+      "notes": "WorktreeExternalApp type is defined, but proxy routing logic not implemented"
+    },
+    {
+      "id": "AC-004",
+      "criterion": "/worktree-cleanup {issueNo} で Worktree 環境がクリーンアップされる",
+      "status": "pending",
+      "verified": false,
+      "evidence": "Phase 3 Task 3.8 - Cleanup skill not yet implemented",
+      "notes": "Skill prompt files need to be created in .claude/commands/"
+    },
+    {
+      "id": "AC-005",
+      "criterion": "各 Worktree が独立した DB を使用している（cm-{issueNo}.db）",
+      "status": "passed",
+      "verified": true,
+      "evidence": "DbPathResolver.resolve(135) returns ~/.commandmate/data/cm-135.db",
+      "test_file": "tests/unit/cli/utils/resource-resolvers.test.ts",
+      "test_count": 26,
+      "all_passed": true
+    },
+    {
+      "id": "AC-006",
+      "criterion": "既存のメインPIDファイル（~/.commandmate/.commandmate.pid）との互換性が維持されている",
+      "status": "passed",
+      "verified": true,
+      "evidence": "getPidFilePath() without args returns ~/.commandmate/.commandmate.pid, with issueNo returns ~/.commandmate/pids/{issueNo}.pid",
+      "test_file": "tests/unit/cli/utils/env-setup.test.ts",
+      "test_count": 5,
+      "all_passed": true
+    },
+    {
+      "id": "AC-007",
+      "criterion": "DBマイグレーション（Migration #16: issue_no カラム）が正しく動作し、既存データに影響がない",
+      "status": "passed",
+      "verified": true,
+      "evidence": "Migration #16 adds issue_no column to external_apps table with index. Existing data preserved with issue_no = NULL. Rollback tested.",
+      "test_file": "tests/unit/lib/db-migrations.test.ts",
+      "test_count": 8,
+      "all_passed": true,
+      "migration_tests": [
+        "should add issue_no column to external_apps table",
+        "should create index on issue_no column",
+        "should preserve existing external_apps data with issue_no = NULL",
+        "should allow inserting external_apps with issue_no",
+        "should support querying by issue_no",
+        "should maintain existing table structure",
+        "should rollback Migration #16 and remove issue_no column",
+        "should remove idx_external_apps_issue_no index on rollback"
+      ]
+    },
+    {
+      "id": "AC-008",
+      "criterion": "commandmate stop --issue {issueNo} で特定Worktreeのサーバーを停止できる",
+      "status": "pending",
+      "verified": false,
+      "evidence": "StopOptions type includes issue field. CLI integration not yet complete.",
+      "test_file": "tests/unit/cli/commands/stop-issue.test.ts",
+      "test_count": 6,
+      "all_passed": true,
+      "notes": "Type definitions and unit tests pass, but CLI command integration pending"
+    },
+    {
+      "id": "AC-009",
+      "criterion": "commandmate status --issue {issueNo} で特定Worktreeの状態を確認できる",
+      "status": "pending",
+      "verified": false,
+      "evidence": "StatusOptions type includes issue and all fields. CLI integration not yet complete.",
+      "test_file": "tests/unit/cli/commands/status-issue.test.ts",
+      "test_count": 7,
+      "all_passed": true,
+      "notes": "Type definitions and unit tests pass, but CLI command integration pending"
+    },
+    {
+      "id": "AC-010",
+      "criterion": "CLI型定義（StopOptions, StatusOptions）が拡張されている",
+      "status": "passed",
+      "verified": true,
+      "evidence": "StopOptions includes issue field. StatusOptions includes issue and all fields. StartOptions includes issue and autoPort fields.",
+      "test_files": [
+        "tests/unit/cli/commands/start-issue.test.ts",
+        "tests/unit/cli/commands/stop-issue.test.ts",
+        "tests/unit/cli/commands/status-issue.test.ts"
+      ],
+      "test_count": 18,
+      "all_passed": true
+    },
+    {
+      "id": "AC-011",
+      "criterion": "External Apps DB型定義（DbExternalAppRow, DbExternalAppInsert）が拡張されている",
+      "status": "passed",
+      "verified": true,
+      "evidence": "WorktreeExternalApp interface extends ExternalApp with issueNo. CreateWorktreeExternalAppInput extends CreateExternalAppInput. isWorktreeExternalApp() type guard implemented.",
+      "test_file": "tests/unit/types/external-apps.test.ts",
+      "test_count": 8,
+      "all_passed": true,
+      "type_definitions": [
+        "WorktreeExternalApp",
+        "CreateWorktreeExternalAppInput",
+        "isWorktreeExternalApp()"
+      ]
+    },
+    {
+      "id": "AC-012",
+      "criterion": "同時起動推奨上限（5-10個）がドキュメント化されている",
+      "status": "pending",
+      "verified": false,
+      "evidence": "MAX_WORKTREES constant defined in port-allocator.ts (value: 10). Documentation not yet created.",
+      "notes": "Phase 5 - Documentation task pending"
+    },
+    {
+      "id": "AC-013",
+      "criterion": "新しいスキル（/worktree-setup, /worktree-cleanup）がドキュメント化されている",
+      "status": "pending",
+      "verified": false,
+      "evidence": "Skills not yet implemented. Documentation pending.",
+      "notes": "Phase 5 - Documentation task pending"
+    }
+  ],
+  "test_results": {
+    "unit_tests": {
+      "resource-resolvers": {
+        "file": "tests/unit/cli/utils/resource-resolvers.test.ts",
+        "passed": 26,
+        "failed": 0,
+        "skipped": 0
+      },
+      "input-validators": {
+        "file": "tests/unit/cli/utils/input-validators.test.ts",
+        "passed": 24,
+        "failed": 0,
+        "skipped": 0
+      },
+      "port-allocator": {
+        "file": "tests/unit/cli/utils/port-allocator.test.ts",
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0
+      },
+      "env-setup": {
+        "file": "tests/unit/cli/utils/env-setup.test.ts",
+        "passed": 47,
+        "failed": 0,
+        "skipped": 0
+      },
+      "db-migrations": {
+        "file": "tests/unit/lib/db-migrations.test.ts",
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "external-apps-types": {
+        "file": "tests/unit/types/external-apps.test.ts",
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0
+      },
+      "cli-commands-issue": {
+        "files": [
+          "tests/unit/cli/commands/start-issue.test.ts",
+          "tests/unit/cli/commands/stop-issue.test.ts",
+          "tests/unit/cli/commands/status-issue.test.ts"
+        ],
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "typescript_compilation": {
+      "status": "passed",
+      "errors": 0
+    },
+    "total_tests": {
+      "passed": 150,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "security_verification": {
+    "input_validators": {
+      "status": "passed",
+      "command_injection_prevention": true,
+      "integer_overflow_prevention": true,
+      "tests": [
+        "validateIssueNo rejects non-integer types",
+        "validateIssueNo rejects numbers exceeding MAX_ISSUE_NO",
+        "validateBranchName rejects names with backticks (command injection)",
+        "validateBranchName rejects names with semicolons",
+        "validateBranchName rejects names with pipes"
+      ]
+    },
+    "path_traversal_protection": {
+      "status": "passed",
+      "toctou_protection": true,
+      "tests": [
+        "DbPathResolver.validate should return false for path outside config directory",
+        "DbPathResolver.validate should use try-catch pattern (TOCTOU)",
+        "PidPathResolver.validate should return false for path outside config directory"
+      ]
+    },
+    "port_allocator": {
+      "status": "passed",
+      "max_worktrees_limit": 10,
+      "tests": [
+        "should enforce MAX_WORKTREES limit",
+        "should throw PORT_EXHAUSTED when no ports available"
+      ]
+    }
+  },
+  "recommendations": [
+    {
+      "priority": "high",
+      "action": "Implement CLI command integration for --issue flag",
+      "affected_files": [
+        "src/cli/commands/start.ts",
+        "src/cli/commands/stop.ts",
+        "src/cli/commands/status.ts"
+      ],
+      "description": "Connect type definitions to actual CLI command handlers"
+    },
+    {
+      "priority": "high",
+      "action": "Create worktree skills",
+      "affected_files": [
+        ".claude/commands/worktree-setup.md",
+        ".claude/commands/worktree-cleanup.md"
+      ],
+      "description": "Implement Phase 3 Tasks 3.7-3.8"
+    },
+    {
+      "priority": "medium",
+      "action": "Implement proxy routing for worktree apps",
+      "affected_files": [
+        "src/app/api/proxy/[...path]/route.ts"
+      ],
+      "description": "Phase 4 Task 4.3 - Add /proxy/commandmate_issue/{issueNo} routing"
+    },
+    {
+      "priority": "medium",
+      "action": "Add E2E tests for multiple server instances",
+      "description": "Verify AC-002 with actual server startup"
+    },
+    {
+      "priority": "low",
+      "action": "Create documentation",
+      "affected_files": [
+        "docs/user-guide/worktree-guide.md",
+        "CLAUDE.md"
+      ],
+      "description": "Phase 5 - Document worktree parallel development feature"
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/cli/utils/resource-resolvers.test.ts",
+    "tests/unit/cli/utils/input-validators.test.ts",
+    "tests/unit/cli/utils/port-allocator.test.ts",
+    "tests/unit/cli/utils/env-setup.test.ts",
+    "tests/unit/lib/db-migrations.test.ts",
+    "tests/unit/types/external-apps.test.ts",
+    "tests/unit/cli/commands/start-issue.test.ts",
+    "tests/unit/cli/commands/stop-issue.test.ts",
+    "tests/unit/cli/commands/status-issue.test.ts"
+  ],
+  "source_files_verified": [
+    "src/cli/utils/resource-resolvers.ts",
+    "src/cli/utils/input-validators.ts",
+    "src/cli/utils/port-allocator.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/types/index.ts",
+    "src/types/external-apps.ts",
+    "src/lib/db-migrations.ts"
+  ],
+  "message": "5 of 13 acceptance criteria passed. 8 criteria pending implementation (skills, CLI integration, proxy routing, documentation). All implemented features have comprehensive test coverage with 150 passing tests. No failures detected. Security-critical modules (input-validators, path traversal protection) fully tested."
+}
