@@ -392,6 +392,7 @@ commandmate status --all                   # 全サーバー状態確認
   - `src/app/api/worktrees/[id]/current-output/route.ts` - タイムスタンプ提供
 - 詳細: [設計書](./dev-reports/design/issue-138-server-side-auto-yes-polling-design-policy.md)
 
+
 ### Issue #136: Git Worktree 並列開発環境の整備
 - **目的**: 複数のIssue/機能を同時に開発できるWorktree環境を整備
 - **CLIコマンド拡張**:
