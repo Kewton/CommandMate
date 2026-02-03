@@ -1,6 +1,7 @@
 /**
  * Database operations for external apps
  * Issue #42: Proxy routing for multiple frontend applications
+ * Issue #136: Added worktree external app support (issue_no)
  *
  * Provides CRUD operations for external app configuration stored in SQLite.
  * All operations are synchronous as better-sqlite3 is synchronous.
@@ -15,6 +16,8 @@ import type {
   ExternalAppType,
   CreateExternalAppInput,
   UpdateExternalAppInput,
+  WorktreeExternalApp,
+  CreateWorktreeExternalAppInput,
 } from '@/types/external-apps';
 
 /**
@@ -33,6 +36,7 @@ export class ExternalAppDbError extends Error {
 
 /**
  * Database row type for external_apps table
+ * Issue #136: Added issue_no column
  */
 export interface DbExternalAppRow {
   id: string;
@@ -48,6 +52,7 @@ export interface DbExternalAppRow {
   enabled: number;
   created_at: number;
   updated_at: number;
+  issue_no: number | null;
 }
 
 /**
@@ -281,35 +286,6 @@ export function getAllExternalApps(db: Database.Database): ExternalApp[] {
   }
 }
 
-/**
- * Get only enabled external apps
- *
- * @param db - Database instance
- * @returns Array of enabled ExternalApps, sorted by name
- */
-export function getEnabledExternalApps(db: Database.Database): ExternalApp[] {
-  try {
-    const stmt = db.prepare(`
-      SELECT id, name, display_name, description, path_prefix,
-             target_port, target_host, app_type,
-             websocket_enabled, websocket_path_pattern,
-             enabled, created_at, updated_at
-      FROM external_apps
-      WHERE enabled = 1
-      ORDER BY name ASC
-    `);
-
-    const rows = stmt.all() as DbExternalAppRow[];
-
-    return rows.map(mapDbRowToExternalApp);
-  } catch (error) {
-    throw new ExternalAppDbError(
-      `Failed to get enabled external apps: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      'DB_ERROR',
-      error instanceof Error ? error : undefined
-    );
-  }
-}
 
 /**
  * Update an existing external app
@@ -423,4 +399,188 @@ export function deleteExternalApp(
       error instanceof Error ? error : undefined
     );
   }
+}
+
+/**
+ * Options for filtering external apps by issue number
+ * Issue #136: MF-IMP-002 - issue_no filter options
+ */
+export interface GetExternalAppsOptions {
+  /**
+   * Filter by issue number:
+   * - undefined: Return all apps (no filter)
+   * - null: Return only main apps (issue_no IS NULL)
+   * - number: Return only apps for that specific issue
+   */
+  issueNo?: number | null;
+}
+
+/**
+ * Get enabled external apps with optional issue filter
+ * Issue #136: MF-IMP-002 - Added issue_no filter support
+ *
+ * @param db - Database instance
+ * @param options - Filter options
+ * @returns Array of enabled ExternalApps
+ */
+export function getEnabledExternalApps(
+  db: Database.Database,
+  options?: GetExternalAppsOptions
+): ExternalApp[] {
+  try {
+    let sql = `
+      SELECT id, name, display_name, description, path_prefix,
+             target_port, target_host, app_type,
+             websocket_enabled, websocket_path_pattern,
+             enabled, created_at, updated_at, issue_no
+      FROM external_apps
+      WHERE enabled = 1
+    `;
+
+    const params: (number | null)[] = [];
+
+    if (options?.issueNo === null) {
+      // Main apps only (issue_no IS NULL)
+      sql += ' AND issue_no IS NULL';
+    } else if (options?.issueNo !== undefined) {
+      // Specific issue
+      sql += ' AND issue_no = ?';
+      params.push(options.issueNo);
+    }
+    // If options?.issueNo is undefined, no filter is applied
+
+    sql += ' ORDER BY name ASC';
+
+    const stmt = db.prepare(sql);
+    const rows = (params.length > 0 ? stmt.all(...params) : stmt.all()) as DbExternalAppRow[];
+
+    return rows.map(mapDbRowToExternalApp);
+  } catch (error) {
+    throw new ExternalAppDbError(
+      `Failed to get enabled external apps: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      'DB_ERROR',
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+/**
+ * Create a worktree external app
+ * Issue #136: Creates external app with issue_no set
+ *
+ * @param db - Database instance
+ * @param input - Create input data with issueNo
+ * @returns The created WorktreeExternalApp
+ */
+export function createWorktreeExternalApp(
+  db: Database.Database,
+  input: CreateWorktreeExternalAppInput
+): WorktreeExternalApp {
+  const id = randomUUID();
+  const now = Date.now();
+  const dbRow = mapExternalAppToDbRow(input);
+
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO external_apps (
+        id, name, display_name, description, path_prefix,
+        target_port, target_host, app_type,
+        websocket_enabled, websocket_path_pattern,
+        enabled, created_at, updated_at, issue_no
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      dbRow.name,
+      dbRow.display_name,
+      dbRow.description,
+      dbRow.path_prefix,
+      dbRow.target_port,
+      dbRow.target_host,
+      dbRow.app_type,
+      dbRow.websocket_enabled,
+      dbRow.websocket_path_pattern,
+      now,
+      now,
+      input.issueNo
+    );
+
+    return {
+      id,
+      name: input.name,
+      displayName: input.displayName,
+      description: input.description,
+      pathPrefix: input.pathPrefix,
+      targetPort: input.targetPort,
+      targetHost: input.targetHost ?? 'localhost',
+      appType: input.appType,
+      websocketEnabled: input.websocketEnabled ?? false,
+      websocketPathPattern: input.websocketPathPattern,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+      issueNo: input.issueNo,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint')) {
+      throw new ExternalAppDbError(
+        `External app with name "${input.name}" or pathPrefix "${input.pathPrefix}" already exists`,
+        'DUPLICATE',
+        error
+      );
+    }
+    throw new ExternalAppDbError(
+      `Failed to create worktree external app: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      'DB_ERROR',
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+/**
+ * Get external apps by issue number
+ * Issue #136: Helper to get all apps for a specific worktree
+ *
+ * @param db - Database instance
+ * @param issueNo - Issue number
+ * @returns Array of ExternalApps for the issue
+ */
+export function getExternalAppsByIssueNo(
+  db: Database.Database,
+  issueNo: number
+): ExternalApp[] {
+  try {
+    const stmt = db.prepare(`
+      SELECT id, name, display_name, description, path_prefix,
+             target_port, target_host, app_type,
+             websocket_enabled, websocket_path_pattern,
+             enabled, created_at, updated_at, issue_no
+      FROM external_apps
+      WHERE issue_no = ?
+      ORDER BY name ASC
+    `);
+
+    const rows = stmt.all(issueNo) as DbExternalAppRow[];
+
+    return rows.map(mapDbRowToExternalApp);
+  } catch (error) {
+    throw new ExternalAppDbError(
+      `Failed to get external apps by issue: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      'DB_ERROR',
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+/**
+ * Get main external apps (non-worktree)
+ * Issue #136: Helper to get apps without issue_no
+ *
+ * @param db - Database instance
+ * @returns Array of main ExternalApps
+ */
+export function getMainExternalApps(db: Database.Database): ExternalApp[] {
+  return getEnabledExternalApps(db, { issueNo: null });
 }

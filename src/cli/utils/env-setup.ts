@@ -74,10 +74,12 @@ export function getDefaultDbPath(): string {
  * Get the path to .env file based on install type
  * Issue #119: Global install uses ~/.commandmate/, local uses cwd
  * Issue #136: Uses isGlobalInstall from install-context.ts
+ * Issue #136: Added issueNo parameter for worktree-specific .env files
  *
+ * @param issueNo - Optional issue number for worktree-specific .env
  * @returns Path to .env file
  */
-export function getEnvPath(): string {
+export function getEnvPath(issueNo?: number): string {
   if (_isGlobalInstall()) {
     const configDir = join(homedir(), '.commandmate');
 
@@ -86,10 +88,20 @@ export function getEnvPath(): string {
       mkdirSync(configDir, { recursive: true, mode: 0o700 });
     }
 
+    // Issue #136: Worktree-specific .env file
+    if (issueNo !== undefined) {
+      const envsDir = join(configDir, 'envs');
+      if (!existsSync(envsDir)) {
+        mkdirSync(envsDir, { recursive: true, mode: 0o700 });
+      }
+      return join(envsDir, `${issueNo}.env`);
+    }
+
     return join(configDir, '.env');
   }
 
   // Local install - use current working directory
+  // Note: Worktree-specific .env not supported in local install mode
   return join(process.cwd(), '.env');
 }
 
@@ -117,6 +129,17 @@ export function resolveSecurePath(targetPath: string, allowedBaseDir: string): s
 // The re-export above provides backward compatibility
 
 /**
+ * Get the PIDs directory path
+ * Issue #136: Centralized pids directory path resolution
+ *
+ * @returns Path to pids directory
+ */
+export function getPidsDir(): string {
+  const configDir = _getConfigDir();
+  return join(configDir, 'pids');
+}
+
+/**
  * Get the PID file path based on install type
  * Issue #125: DRY principle - centralized PID file path resolution
  * Issue #136: Uses getConfigDir from install-context.ts
@@ -128,7 +151,7 @@ export function getPidFilePath(issueNo?: number): string {
   const configDir = _getConfigDir();
   if (issueNo !== undefined) {
     // Issue #136: Worktree-specific PID file in pids/ directory
-    const pidsDir = join(configDir, 'pids');
+    const pidsDir = getPidsDir();
     if (!existsSync(pidsDir)) {
       mkdirSync(pidsDir, { recursive: true, mode: 0o700 });
     }

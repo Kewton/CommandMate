@@ -1,0 +1,118 @@
+{
+  "issue_number": 136,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-CONS-001",
+        "item": "ExternalApp 型定義の不一致（id, port, appType）",
+        "section_updated": "4.2 Factory パターン, 5.2 型定義拡張",
+        "status": "reflected",
+        "changes": "ExternalApp型定義を既存実装（id: string UUID, targetPort, appType: sveltekit|streamlit|nextjs|other）に合わせて修正"
+      },
+      {
+        "id": "MF-CONS-002",
+        "item": "DaemonManager コンストラクタシグネチャの不整合",
+        "section_updated": "4.4 Factory パターン（DaemonManager生成）",
+        "status": "reflected",
+        "changes": "DaemonManagerWrapperを導入し、既存constructor(pidFilePath: string)との後方互換性を維持する設計を追加"
+      },
+      {
+        "id": "MF-CONS-003",
+        "item": "getDefaultDbPath() 循環インポート問題",
+        "section_updated": "4.1 Strategy パターン, 10.1 依存関係, 11.2 新規作成ファイル, 13 Phase 0, 14.2 チェックリスト",
+        "status": "reflected",
+        "changes": "install-context.ts新規作成による循環インポート解決方針を追加、Phase 0に実装項目を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-CONS-001",
+        "item": "StopOptions, StatusOptions への issue オプション追加の影響範囲",
+        "section_updated": "5.2 型定義拡張, 6.1 CLI コマンド, 11.1 変更対象ファイル, 14.3 チェックリスト",
+        "status": "reflected",
+        "changes": "影響範囲（stop.ts, status.ts, commander設定）を明記"
+      },
+      {
+        "id": "SF-CONS-002",
+        "item": "Migration #16 の定義（既存テーブル構造との不一致）",
+        "section_updated": "5.1 external_apps テーブル拡張",
+        "status": "reflected",
+        "changes": "issue_noカラム追加のみに限定、既存スキーマとの整合性を明記"
+      },
+      {
+        "id": "SF-CONS-003",
+        "item": "CreateExternalAppInput の既存定義との差異",
+        "section_updated": "5.2 型定義拡張",
+        "status": "reflected",
+        "changes": "CreateWorktreeExternalAppInputが既存CreateExternalAppInputを正しく拡張する形に修正（targetHost, websocketEnabled等を追加）"
+      },
+      {
+        "id": "SF-CONS-004",
+        "item": "ブランチ戦略変更の詳細不足",
+        "section_updated": "1.2 スコープ, 9.1 採用した設計, 13 実装計画, 14.4 将来検討事項",
+        "status": "reflected",
+        "changes": "developブランチ導入をPhase 1スコープ外に明確化、別Issueで段階的導入する方針を追記"
+      },
+      {
+        "id": "SF-CONS-005",
+        "item": "ResourcePathResolver の validate メソッドの例外処理",
+        "section_updated": "4.1 Strategy パターン, 12.1 ユニットテスト, 14.3 チェックリスト",
+        "status": "reflected",
+        "changes": "existsSyncチェック後にrealpathSyncを呼び出す設計に修正、テスト項目追加"
+      }
+    ],
+    "consider": [
+      {
+        "id": "NTH-CONS-001",
+        "item": "ポート範囲 3001-3100 の根拠",
+        "section_updated": "7.2 ポート範囲制限",
+        "status": "reflected",
+        "changes": "根拠（3000はメイン用予約、100個は想定上限、非特権ポート使用）を追記"
+      },
+      {
+        "id": "NTH-CONS-002",
+        "item": "Issue #135 の完了状態が不明",
+        "section_updated": "10.1 ブロッキング依存, 14.1 事前条件",
+        "status": "reflected",
+        "changes": "完了状態確認の必要性を追記"
+      },
+      {
+        "id": "NTH-CONS-003",
+        "item": "CLI logger の一貫性",
+        "section_updated": "4.3 Facade + Command パターン, 14.3 チェックリスト",
+        "status": "reflected",
+        "changes": "WorktreeSetupFacadeにCLILoggerを注入する設計を追記"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+  "sections_updated": [
+    "1.2 スコープ",
+    "4.1 Strategy パターン（リソース解決）",
+    "4.2 Factory パターン（External App生成）",
+    "4.3 Facade + Command パターン（Worktreeセットアップ）",
+    "4.4 Factory パターン（DaemonManager生成）",
+    "5.1 external_apps テーブル拡張",
+    "5.2 型定義拡張",
+    "6.1 CLI コマンド",
+    "7.2 ポート範囲制限",
+    "9.1 採用した設計",
+    "10.1 ブロッキング依存",
+    "11.1 変更対象ファイル",
+    "11.2 新規作成ファイル",
+    "12.1 ユニットテスト",
+    "12.2 統合テスト",
+    "13 実装計画",
+    "14.1 事前条件",
+    "14.2 Phase 0: DRY準拠リファクタリング",
+    "14.3 Phase 1-5 実装項目",
+    "14.4 将来検討事項",
+    "レビュー履歴（Stage 2追加）"
+  ],
+  "timestamp": "2026-02-03T10:15:00Z"
+}

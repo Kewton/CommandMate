@@ -1,0 +1,7 @@
+{
+  "issue_number": 136,
+  "review_result_path": "dev-reports/issue/136/multi-stage-design-review/stage3-review-result.json",
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘事項対応",
+  "target_file": "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md"
+}

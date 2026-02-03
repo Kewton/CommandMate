@@ -1,0 +1,101 @@
+{
+  "issue_number": 136,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-03",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "CreateExternalAppInput/UpdateExternalAppInput への issueNo フィールド追加を「3. CommandMate External Apps 連携」セクションの実装方針に明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "「7. CLI コマンドの Worktree 対応」セクションを新設し、stop/status コマンドに --issue フラグを追加。影響範囲テーブルと受入条件も更新"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "「External Apps DBフィールド生成ルール（Worktree登録時）」テーブルを追加し、name/displayName/description/appType/port/pathPrefix/enabled/issueNo の生成ルールを明確化"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "「ポート管理設計」セクションに worktree-ports.json の生成タイミング（start --auto-port実行時）、用途（キャッシュ）、DBとの同期方針、ファイル不在時の動作を追記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "logs/main/ を logs/default/ に変更し、mainブランチ名との混同を回避。ファイル構成セクションにコメント追加"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "--all フラグを「将来機能（本Issueスコープ外）」として明記し、別Issueで実装することを明確化"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/136"
+  },
+  "key_changes": [
+    {
+      "section": "3. CommandMate External Apps 連携",
+      "change": "CreateExternalAppInput/UpdateExternalAppInput インターフェースへの issueNo フィールド追加を明記"
+    },
+    {
+      "section": "3. CommandMate External Apps 連携",
+      "change": "External Apps DBフィールド生成ルールテーブルを新設（name, displayName, pathPrefix等の生成ルール）"
+    },
+    {
+      "section": "7. CLI コマンドの Worktree 対応",
+      "change": "新規セクション追加。stop/status コマンドの --issue フラグ仕様を定義"
+    },
+    {
+      "section": "ポート管理設計",
+      "change": "worktree-ports.json の生成・更新方針を追記"
+    },
+    {
+      "section": "ファイル構成（Worktree 環境）",
+      "change": "logs/main/ を logs/default/ に変更（ブランチ名との混同回避）"
+    },
+    {
+      "section": "影響範囲",
+      "change": "stop.ts/status.ts の変更内容を --issue フラグ追加に更新"
+    },
+    {
+      "section": "受入条件",
+      "change": "stop/status --issue コマンドとExternal Appsフィールド生成ルールの受入条件を追加"
+    },
+    {
+      "section": "テスト計画",
+      "change": "stop/status --issue の回帰テストとExternal Apps登録テストを追加"
+    },
+    {
+      "section": "実装計画",
+      "change": "Phase 3に--issueフラグ、Phase 4にフィールド生成ロジックを追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "Stage 5 (2nd Iteration) の変更履歴を追加"
+    }
+  ],
+  "review_completion": {
+    "all_must_fix_resolved": true,
+    "all_should_fix_resolved": true,
+    "nice_to_have_addressed": "all",
+    "ready_for_implementation": true
+  }
+}

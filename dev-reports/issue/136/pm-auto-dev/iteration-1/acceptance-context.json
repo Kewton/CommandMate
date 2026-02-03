@@ -1,0 +1,34 @@
+{
+  "issue_number": 136,
+  "title": "Git Worktree 並列開発環境の整備",
+  "size": "XL",
+  "acceptance_criteria": [
+    "AC-001: /worktree-setup {issueNo} で Worktree 環境が自動構築される",
+    "AC-002: 複数の Worktree サーバーが同時に起動できる（ポート競合なし）",
+    "AC-003: External Apps から proxy/commandmate_issue/{issue-no} でアクセスできる",
+    "AC-004: /worktree-cleanup {issueNo} で Worktree 環境がクリーンアップされる",
+    "AC-005: 各 Worktree が独立した DB を使用している（cm-{issueNo}.db）",
+    "AC-006: 既存のメインPIDファイル（~/.commandmate/.commandmate.pid）との互換性が維持されている",
+    "AC-007: DBマイグレーション（Migration #16: issue_no カラム）が正しく動作し、既存データに影響がない",
+    "AC-008: commandmate stop --issue {issueNo} で特定Worktreeのサーバーを停止できる",
+    "AC-009: commandmate status --issue {issueNo} で特定Worktreeの状態を確認できる",
+    "AC-010: CLI型定義（StopOptions, StatusOptions）が拡張されている",
+    "AC-011: External Apps DB型定義（DbExternalAppRow, DbExternalAppInsert）が拡張されている",
+    "AC-012: 同時起動推奨上限（5-10個）がドキュメント化されている",
+    "AC-013: 新しいスキル（/worktree-setup, /worktree-cleanup）がドキュメント化されている"
+  ],
+  "tdd_result_path": "dev-reports/issue/136/pm-auto-dev/iteration-1/tdd-result.json",
+  "design_policy_path": "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+  "work_plan_path": "dev-reports/issue/136/work-plan.md",
+  "pending_implementation": [
+    "Phase 3 Task 3.7-3.9: Skills implementation (/worktree-setup, /worktree-cleanup)",
+    "Phase 4 Task 4.3: Proxy routing update",
+    "Phase 5: Documentation and E2E tests"
+  ],
+  "completed_implementation": [
+    "Phase 0: DRY refactoring (install-context.ts, getDefaultDbPath consolidation)",
+    "Phase 1: Foundation (input-validators, resource-resolvers, worktree-detector, port-allocator, errors)",
+    "Phase 2: Resource isolation (Migration #16, pid-manager, cache invalidation)",
+    "Phase 3-4: Partial (DaemonManagerFactory, CLI types, WorktreeExternalApp, DB extension)"
+  ]
+}

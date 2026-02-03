@@ -47,12 +47,47 @@ export interface PortRange {
  * ```
  */
 export class PortAllocator {
+  private static instance: PortAllocator | null = null;
   private readonly range: PortRange;
   private readonly allocatedPorts: Set<number>;
+  private readonly issuePortMap: Map<number, number>;
 
   constructor(range: PortRange = DEFAULT_PORT_RANGE) {
     this.range = range;
     this.allocatedPorts = new Set();
+    this.issuePortMap = new Map();
+  }
+
+  /**
+   * Get singleton instance
+   * Issue #136: Singleton pattern for CLI commands
+   */
+  static getInstance(): PortAllocator {
+    if (!PortAllocator.instance) {
+      PortAllocator.instance = new PortAllocator();
+    }
+    return PortAllocator.instance;
+  }
+
+  /**
+   * Allocate a port for a specific issue (synchronous, deterministic)
+   * Issue #136: Simple port allocation based on issue number
+   *
+   * @param issueNo - Issue number
+   * @returns Allocated port number
+   */
+  allocate(issueNo: number): number {
+    // Check if already allocated for this issue
+    const existing = this.issuePortMap.get(issueNo);
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    // Deterministic port based on issue number (3001 + issueNo % 100)
+    const basePort = this.range.min + (issueNo % (this.range.max - this.range.min));
+    this.issuePortMap.set(issueNo, basePort);
+    this.allocatedPorts.add(basePort);
+    return basePort;
   }
 
   /**

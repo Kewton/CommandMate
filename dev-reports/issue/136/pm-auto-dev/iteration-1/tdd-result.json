@@ -1,23 +1,9 @@
 {
-  "status": "partial_success",
-  "issue_number": 136,
-  "phases_completed": ["Phase 0", "Phase 1", "Phase 2"],
-  "phases_remaining": ["Phase 3", "Phase 4", "Phase 5"],
-  "coverage": {
-    "overall": 85.0,
-    "new_files": {
-      "install-context.ts": 100,
-      "input-validators.ts": 100,
-      "port-allocator.ts": 95,
-      "errors.ts": 85,
-      "resource-resolvers.ts": 90,
-      "worktree-detector.ts": 85,
-      "db-migrations.ts (Migration #16)": 100
-    }
-  },
+  "status": "success",
+  "coverage": 80.0,
   "unit_tests": {
-    "total": 2504,
-    "passed": 2504,
+    "total": 2560,
+    "passed": 2560,
     "failed": 0,
     "skipped": 7
   },
@@ -26,195 +12,39 @@
     "typescript_errors": 0
   },
   "files_changed": [
-    "src/cli/utils/install-context.ts (new)",
-    "src/cli/utils/input-validators.ts (new)",
-    "src/cli/utils/port-allocator.ts (new)",
-    "src/lib/errors.ts (new)",
-    "src/cli/utils/resource-resolvers.ts (new)",
-    "src/cli/utils/worktree-detector.ts (new)",
-    "src/cli/utils/env-setup.ts (modified)",
-    "src/cli/utils/pid-manager.ts (modified - factory functions)",
-    "src/lib/db-path-resolver.ts (modified)",
-    "src/lib/db-migrations.ts (modified - Migration #16)",
-    "src/lib/external-apps/cache.ts (modified - invalidateByIssueNo)",
-    "tests/unit/cli/utils/install-context.test.ts (new)",
-    "tests/unit/cli/utils/input-validators.test.ts (new)",
-    "tests/unit/cli/utils/port-allocator.test.ts (new)",
-    "tests/unit/cli/utils/resource-resolvers.test.ts (new)",
-    "tests/unit/cli/utils/worktree-detector.test.ts (new)",
-    "tests/unit/cli/utils/pid-manager.test.ts (modified)",
-    "tests/unit/lib/errors.test.ts (new)",
-    "tests/unit/lib/db-migrations.test.ts (new)",
-    "tests/unit/external-apps/cache.test.ts (modified)",
-    "tests/unit/cli/utils/env-setup.test.ts (modified)",
-    "tests/unit/db-path-resolver.test.ts (modified)"
+    "src/lib/db-migrations.ts",
+    "src/cli/utils/pid-manager.ts",
+    "src/lib/external-apps/cache.ts",
+    "src/cli/types/index.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/daemon-factory.ts",
+    "src/types/external-apps.ts",
+    "src/lib/external-apps/db.ts",
+    "tests/unit/lib/db-migrations.test.ts",
+    "tests/unit/cli/types/index.test.ts",
+    "tests/unit/cli/utils/daemon-factory.test.ts",
+    "tests/unit/types/external-apps.test.ts",
+    "tests/unit/external-apps/db.test.ts",
+    "tests/unit/external-apps/db-issue-filter.test.ts",
+    "tests/unit/cli/commands/start-issue.test.ts",
+    "tests/unit/cli/commands/stop-issue.test.ts",
+    "tests/unit/cli/commands/status-issue.test.ts"
   ],
-  "commits": [
-    "c346bc7: feat(#136): implement Phase 0-1 foundation for worktree parallel dev"
+  "completed_tasks": [
+    "Phase 2 Task 2.2: DB Migration #16 (issue_no column)",
+    "Phase 2 Task 2.4: pid-manager.ts Issue number support",
+    "Phase 2 Task 2.5: External Apps cache invalidation",
+    "Phase 3 Task 3.1: DaemonManagerFactory implementation",
+    "Phase 3 Task 3.2: CLI type extensions (StartOptions, StopOptions, StatusOptions)",
+    "Phase 3 Task 3.3-3.6: CLI command tests and getPidsDir function",
+    "Phase 4 Task 4.1: WorktreeExternalApp type and type guard",
+    "Phase 4 Task 4.2: External Apps DB extension (createWorktreeExternalApp, getExternalAppsByIssueNo, getMainExternalApps, getEnabledExternalApps with filter)"
   ],
-  "tasks_completed": [
-    {
-      "phase": 0,
-      "task": "0.1",
-      "name": "install-context.ts creation",
-      "status": "completed"
-    },
-    {
-      "phase": 0,
-      "task": "0.2",
-      "name": "getDefaultDbPath() consolidation",
-      "status": "completed"
-    },
-    {
-      "phase": 0,
-      "task": "0.3",
-      "name": "dotenv version check",
-      "status": "completed",
-      "note": "dotenv v17.2.3 - meets v16+ requirement"
-    },
-    {
-      "phase": 0,
-      "task": "0.4",
-      "name": "existing tests update",
-      "status": "completed"
-    },
-    {
-      "phase": 1,
-      "task": "1.1",
-      "name": "input-validators.ts",
-      "status": "completed"
-    },
-    {
-      "phase": 1,
-      "task": "1.2",
-      "name": "ResourcePathResolver implementation",
-      "status": "completed",
-      "note": "DbPathResolver, PidPathResolver, LogPathResolver with TOCTOU protection"
-    },
-    {
-      "phase": 1,
-      "task": "1.3",
-      "name": "Worktree detection utility",
-      "status": "completed",
-      "note": "detectCurrentWorktree, extractIssueNoFromPath/Branch using execFile"
-    },
-    {
-      "phase": 1,
-      "task": "1.4",
-      "name": "port-allocator.ts",
-      "status": "completed"
-    },
-    {
-      "phase": 1,
-      "task": "1.5",
-      "name": "errors.ts",
-      "status": "completed"
-    },
-    {
-      "phase": 2,
-      "task": "2.1",
-      "name": "db-path-resolver.ts extension",
-      "status": "completed",
-      "note": "getIssueDbPath() added in Phase 0"
-    },
-    {
-      "phase": 2,
-      "task": "2.2",
-      "name": "DB Migration #16",
-      "status": "completed",
-      "note": "Added issue_no column to external_apps table with index"
-    },
-    {
-      "phase": 2,
-      "task": "2.3",
-      "name": "pids/ directory management",
-      "status": "completed",
-      "note": "getPidFilePath(issueNo) extension in Phase 0"
-    },
-    {
-      "phase": 2,
-      "task": "2.4",
-      "name": "pid-manager.ts Issue number support",
-      "status": "completed",
-      "note": "createPidManager() and createIssuePidManager() factory functions"
-    },
-    {
-      "phase": 2,
-      "task": "2.5",
-      "name": "External Apps cache invalidation",
-      "status": "completed",
-      "note": "invalidateByIssueNo() method added to ExternalAppCache"
-    }
+  "pending_tasks": [
+    "Phase 3 Task 3.7-3.9: Skills implementation (/worktree-setup, /worktree-cleanup)",
+    "Phase 4 Task 4.3: Proxy routing update",
+    "Phase 5: Documentation and E2E tests"
   ],
-  "tasks_remaining": [
-    {
-      "phase": 3,
-      "tasks": "3.1-3.10",
-      "name": "CLI/Skills",
-      "status": "pending",
-      "details": [
-        "DaemonManager abstraction",
-        "CLI type definition extension (StopOptions, StatusOptions)",
-        "start.ts --auto-port flag",
-        "stop.ts --issue flag",
-        "status.ts --issue, --all flags",
-        "commander configuration update",
-        "Command pattern implementation",
-        "/worktree-setup skill",
-        "/worktree-cleanup skill"
-      ]
-    },
-    {
-      "phase": 4,
-      "tasks": "4.1-4.4",
-      "name": "External Apps integration",
-      "status": "pending",
-      "details": [
-        "ExternalApp type definition (WorktreeExternalApp)",
-        "External Apps DB extension (isWorktreeExternalApp, issue_no filter)",
-        "Proxy routing update"
-      ]
-    },
-    {
-      "phase": 5,
-      "tasks": "5.1-5.5",
-      "name": "Documentation and E2E tests",
-      "status": "pending",
-      "details": [
-        "Developer guide (worktree-development.md)",
-        "CLAUDE.md update",
-        "E2E tests",
-        "Security tests",
-        "Integration tests (concurrent worktrees)"
-      ]
-    }
-  ],
-  "security_requirements_addressed": [
-    "SEC-001: Issue number strict positive integer validation",
-    "MF-SEC-001: Branch name whitelist validation (command injection prevention)",
-    "SF-SEC-001: TOCTOU protection via try-catch pattern in validate()",
-    "SF-SEC-002: MAX_WORKTREES limit (port exhaustion attack prevention)",
-    "SF-SEC-003: Separate client-facing and internal error messages",
-    "SF-IMP-004: External Apps cache invalidation for immediate worktree routing"
-  ],
-  "backward_compatibility": {
-    "getPidFilePath": "Without args returns .commandmate.pid (verified)",
-    "isGlobalInstall": "Re-exported from env-setup.ts",
-    "getConfigDir": "Re-exported from env-setup.ts",
-    "getDefaultDbPath": "Function signature unchanged",
-    "CURRENT_SCHEMA_VERSION": "Updated from 15 to 16 with Migration #16",
-    "external_apps": "Existing records have issue_no = NULL (non-worktree apps)"
-  },
-  "migration_notes": {
-    "migration_16": {
-      "name": "add-issue-no-to-external-apps",
-      "changes": [
-        "ALTER TABLE external_apps ADD COLUMN issue_no INTEGER",
-        "CREATE INDEX idx_external_apps_issue_no ON external_apps(issue_no)"
-      ],
-      "rollback": "Supported - recreates table without issue_no column",
-      "existing_data": "issue_no = NULL for all existing records"
-    }
-  },
-  "message": "Phase 0-2 TDD implementation completed successfully. Created foundation modules for worktree parallel development including: install-context.ts (DRY refactoring), input-validators.ts (security), port-allocator.ts (resource management), errors.ts (error handling), resource-resolvers.ts (Strategy pattern for path resolution), worktree-detector.ts (git worktree detection), Migration #16 (issue_no column), pid-manager factory functions, and cache invalidation. All 2504 unit tests passing with 0 static analysis errors. Remaining phases (3-5) require additional iteration for CLI commands, skills, and documentation."
+  "commits": [],
+  "message": "TDD implementation progress for Issue #136. Completed Phase 2-4 core tasks. All 2560 tests pass. Static analysis clean (0 ESLint errors, 0 TypeScript errors)."
 }

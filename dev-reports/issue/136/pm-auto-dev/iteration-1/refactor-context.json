@@ -1,0 +1,32 @@
+{
+  "issue_number": 136,
+  "title": "Git Worktree 並列開発環境の整備",
+  "focus_areas": [
+    "DRY violations in CLI utilities",
+    "Error handling consistency",
+    "Type safety improvements"
+  ],
+  "files_to_review": [
+    "src/cli/utils/install-context.ts",
+    "src/cli/utils/input-validators.ts",
+    "src/cli/utils/port-allocator.ts",
+    "src/cli/utils/resource-resolvers.ts",
+    "src/cli/utils/worktree-detector.ts",
+    "src/cli/utils/daemon-factory.ts",
+    "src/lib/errors.ts",
+    "src/lib/db-migrations.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/types/index.ts",
+    "src/types/external-apps.ts",
+    "src/lib/external-apps/db.ts",
+    "src/lib/external-apps/cache.ts"
+  ],
+  "design_policy_path": "dev-reports/design/issue-136-worktree-parallel-dev-design-policy.md",
+  "acceptance_result_path": "dev-reports/issue/136/pm-auto-dev/iteration-1/acceptance-result.json",
+  "constraints": [
+    "Maintain backward compatibility",
+    "No breaking changes to existing APIs",
+    "Follow SOLID principles",
+    "Keep test coverage above 80%"
+  ]
+}

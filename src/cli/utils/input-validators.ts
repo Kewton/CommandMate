@@ -114,6 +114,15 @@ export function validatePortNumber(
 }
 
 /**
+ * Validation result interface for CLI commands
+ * Issue #136: Used by CLI commands for user-friendly error messages
+ */
+export interface IssueValidationResult {
+  valid: boolean;
+  error?: string;
+}
+
+/**
  * Type guard for checking if a value is a valid issue number
  *
  * @param value - Value to check
@@ -125,6 +134,30 @@ export function isValidIssueNo(value: unknown): value is number {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Validate issue number and return result (for CLI commands)
+ * Issue #136: CLI-friendly validation that returns result instead of throwing
+ *
+ * @param issueNo - The issue number to validate
+ * @returns Validation result with error message if invalid
+ */
+export function validateIssueNoResult(issueNo: unknown): IssueValidationResult {
+  try {
+    validateIssueNo(issueNo);
+    return { valid: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    switch (message) {
+      case 'INVALID_ISSUE_NO':
+        return { valid: false, error: 'Issue number must be a positive integer' };
+      case 'ISSUE_NO_OUT_OF_RANGE':
+        return { valid: false, error: `Issue number must be between 1 and ${MAX_ISSUE_NO}` };
+      default:
+        return { valid: false, error: 'Invalid issue number' };
+    }
   }
 }
 
