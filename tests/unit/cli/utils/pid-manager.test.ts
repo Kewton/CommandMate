@@ -1,11 +1,23 @@
 /**
  * PID Manager Tests
  * Tests for PIDManager class (SRP - separated from daemon.ts)
+ * Issue #136: Phase 2 - Task 2.4 - Added factory function tests
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import { PidManager } from '../../../../src/cli/utils/pid-manager';
+import path from 'path';
+import { homedir } from 'os';
+import {
+  PidManager,
+  createPidManager,
+  createIssuePidManager,
+} from '../../../../src/cli/utils/pid-manager';
+
+// Mock install-context module
+vi.mock('../../../../src/cli/utils/install-context', () => ({
+  getConfigDir: vi.fn(() => path.join(homedir(), '.commandmate')),
+}));
 
 vi.mock('fs');
 
@@ -161,6 +173,82 @@ describe('PidManager', () => {
       expect(() => pidManager.isProcessRunning()).toThrow('permission denied');
 
       killSpy.mockRestore();
+    });
+  });
+});
+
+describe('createPidManager factory', () => {
+  const mockConfigDir = path.join(homedir(), '.commandmate');
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('createPidManager', () => {
+    it('should create PidManager with main PID path when no issueNo provided', () => {
+      const manager = createPidManager();
+
+      // Verify it returns a PidManager instance
+      expect(manager).toBeInstanceOf(PidManager);
+
+      // The path should be the main PID path (backward compatibility)
+      // We test this by checking the internal path via exists() call pattern
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      manager.exists();
+
+      expect(fs.existsSync).toHaveBeenCalledWith(
+        path.join(mockConfigDir, '.commandmate.pid')
+      );
+    });
+
+    it('should create PidManager with issue-specific PID path when issueNo provided', () => {
+      const manager = createPidManager(135);
+
+      // Verify it returns a PidManager instance
+      expect(manager).toBeInstanceOf(PidManager);
+
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      manager.exists();
+
+      expect(fs.existsSync).toHaveBeenCalledWith(
+        path.join(mockConfigDir, 'pids', '135.pid')
+      );
+    });
+  });
+
+  describe('createIssuePidManager', () => {
+    it('should create PidManager for specific issue number', () => {
+      const manager = createIssuePidManager(200);
+
+      expect(manager).toBeInstanceOf(PidManager);
+
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      manager.exists();
+
+      expect(fs.existsSync).toHaveBeenCalledWith(
+        path.join(mockConfigDir, 'pids', '200.pid')
+      );
+    });
+
+    it('should create managers for different issues with different paths', () => {
+      const manager1 = createIssuePidManager(100);
+      const manager2 = createIssuePidManager(200);
+
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      manager1.exists();
+      expect(fs.existsSync).toHaveBeenLastCalledWith(
+        path.join(mockConfigDir, 'pids', '100.pid')
+      );
+
+      manager2.exists();
+      expect(fs.existsSync).toHaveBeenLastCalledWith(
+        path.join(mockConfigDir, 'pids', '200.pid')
+      );
     });
   });
 });

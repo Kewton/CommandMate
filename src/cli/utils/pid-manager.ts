@@ -1,6 +1,7 @@
 /**
  * PID File Manager
  * Issue #96: npm install CLI support
+ * Issue #136: Phase 2 - Task 2.4 - Added factory functions for Issue number support
  * SF-1: SRP - Separated from daemon.ts for single responsibility
  * MF-SEC-2: TOCTOU protection with O_EXCL atomic writes
  */
@@ -14,6 +15,7 @@ import {
   closeSync,
   constants,
 } from 'fs';
+import { PidPathResolver } from './resource-resolvers';
 
 /**
  * PID file manager for daemon process tracking
@@ -120,4 +122,45 @@ export class PidManager {
       throw err;
     }
   }
+}
+
+/**
+ * Factory function to create PidManager instance
+ * Issue #136: Uses PidPathResolver for path resolution
+ *
+ * @param issueNo - Optional issue number for worktree-specific PID
+ * @returns PidManager instance
+ *
+ * @example
+ * ```typescript
+ * // Main server PID manager
+ * const mainManager = createPidManager();
+ *
+ * // Worktree-specific PID manager
+ * const issueManager = createPidManager(135);
+ * ```
+ */
+export function createPidManager(issueNo?: number): PidManager {
+  const resolver = new PidPathResolver();
+  const pidPath = resolver.resolve(issueNo);
+  return new PidManager(pidPath);
+}
+
+/**
+ * Factory function to create PidManager for a specific issue
+ * Issue #136: Convenience function for worktree PID management
+ *
+ * @param issueNo - Issue number
+ * @returns PidManager instance for the specified issue
+ *
+ * @example
+ * ```typescript
+ * const manager = createIssuePidManager(135);
+ * if (manager.isProcessRunning()) {
+ *   console.log('Worktree server for issue #135 is running');
+ * }
+ * ```
+ */
+export function createIssuePidManager(issueNo: number): PidManager {
+  return createPidManager(issueNo);
 }
