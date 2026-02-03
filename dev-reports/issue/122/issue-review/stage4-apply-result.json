@@ -1,0 +1,42 @@
+{
+  "stage": 4,
+  "apply_date": "2026-02-03",
+  "iteration": 1,
+  "review_stage": "Stage 3 (影響範囲)",
+  "applied": [
+    {
+      "id": "SF-1",
+      "category": "テストへの影響",
+      "status": "applied",
+      "detail": "影響範囲セクションにEmpty stateの新しいUIに対するテストケースを追加。具体的には4つのテストケース（ボタン表示、onNewFileクリック、onNewDirectoryクリック、undefined時の非表示）を明記"
+    },
+    {
+      "id": "SF-2",
+      "category": "影響範囲の記載漏れ",
+      "status": "applied",
+      "detail": "関連ファイルセクションにテストファイル（tests/unit/components/worktree/FileTreeView.test.tsx）を追加。影響範囲セクションにもテストファイルへの言及と必要なテストケースの一覧を追加"
+    }
+  ],
+  "skipped": [
+    {
+      "id": "NTH-1",
+      "category": "E2Eテストへの影響",
+      "reason": "CLAUDE.mdでE2Eテストは「推奨チェック」として記載されており必須ではない。ユニットテストで十分なカバレッジが得られるため、E2Eテストの追加は実装時の判断に委ねる"
+    },
+    {
+      "id": "NTH-2",
+      "category": "アクセシビリティへの影響",
+      "reason": "Nice to Have項目であり、実装時にaria-label属性を追加することは望ましいが、Issue本文のコード例への反映は任意。実装者が既存のContextMenu.tsxのパターンを参照することで対応可能"
+    }
+  ],
+  "changes_made": {
+    "related_files_section": {
+      "added": "tests/unit/components/worktree/FileTreeView.test.tsx - Empty stateテストケースの追加"
+    },
+    "impact_scope_section": {
+      "before": "- FileTreeViewコンポーネントのみ\n- 既存のファイル作成・削除・編集機能には影響なし",
+      "after": "- FileTreeViewコンポーネントのEmpty state処理（行664-674）\n- テストファイル: tests/unit/components/worktree/FileTreeView.test.tsx\n  - Empty stateセクションにテストケース追加が必要\n  - 追加すべきテストケース:\n    - should show New File and New Directory buttons when directory is empty\n    - should call onNewFile with empty string when New File button is clicked\n    - should call onNewDirectory with empty string when New Directory button is clicked\n    - should not show buttons when onNewFile and onNewDirectory are undefined\n- 既存のファイル作成・削除・編集機能には影響なし"
+    }
+  },
+  "summary": "Stage 3影響範囲レビューの2件のShould Fix項目を全て反映完了。SF-1とSF-2の指摘に基づき、関連ファイルセクションにテストファイルを追加し、影響範囲セクションにテストファイルへの影響と必要なテストケース4件を明記した。Nice to Have項目2件（E2Eテスト、アクセシビリティ）は実装時の判断に委ねるためスキップ"
+}

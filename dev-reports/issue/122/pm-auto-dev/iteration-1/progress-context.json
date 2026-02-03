@@ -1,0 +1,26 @@
+{
+  "issue_number": 122,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_added": 4,
+      "tests_passed": 2294,
+      "coverage": 72.37
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 6,
+      "criteria_total": 6
+    },
+    "refactor": {
+      "status": "success",
+      "applied": false,
+      "reason": "コード品質良好、リファクタリング不要"
+    },
+    "documentation": {
+      "status": "skipped",
+      "reason": "バグ修正のためドキュメント更新不要"
+    }
+  }
+}

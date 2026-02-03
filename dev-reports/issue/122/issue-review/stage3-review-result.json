@@ -1,0 +1,163 @@
+{
+  "issue_number": 122,
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-02-03",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テストへの影響",
+        "issue": "Empty stateの新しいUIに対するテストケースが不足",
+        "location": "tests/unit/components/worktree/FileTreeView.test.tsx",
+        "recommendation": "Empty state時の「+ New File」「+ New Directory」ボタンの表示・クリック動作をテストするケースを追加すべき。具体的には: (1) rootItems.length === 0時にボタンが表示されること、(2) ボタンクリック時にonNewFile('')/onNewDirectory('')が呼ばれること、(3) onNewFile/onNewDirectoryがundefinedの場合はボタンが非表示になること",
+        "evidence": "現在のFileTreeView.test.tsxにはEmpty stateの表示テスト（行557-574）があるが、「No files found」メッセージの表示のみをテストしている。ボタンの動作テストは存在しない。Issue記載の変更により新しいUIが追加されるため、回帰テストが必要"
+      },
+      {
+        "id": "SF-2",
+        "category": "影響範囲の記載漏れ",
+        "issue": "Issue影響範囲セクションでテストファイルへの言及がない",
+        "location": "Issue本文 ## 影響範囲 セクション",
+        "recommendation": "影響範囲に「tests/unit/components/worktree/FileTreeView.test.tsx - Empty stateテストケースの追加」を明記すべき",
+        "evidence": "Issue本文では「FileTreeViewコンポーネントのみ」と記載されているが、テストファイルの更新も必要。プロジェクトのCLAUDE.mdには「Unit Test: npm run test:unit」が必須チェックとして記載されており、テスト追加は実装要件の一部と見なされる"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "E2Eテストへの影響",
+        "issue": "E2Eテストでの検証シナリオの追加検討",
+        "location": "tests/e2e/",
+        "recommendation": "空のリポジトリからのファイル作成フローをE2Eテストで検証することを推奨。ただし、E2Eテストの追加は「推奨チェック」であり必須ではない",
+        "evidence": "CLAUDE.mdでは「E2E Test: npm run test:e2e」は推奨チェックとして記載。新しいユースケース（空のworktreeからのファイル作成）はユーザーシナリオとして重要であり、将来的な回帰防止のためE2Eテスト追加が望ましい"
+      },
+      {
+        "id": "NTH-2",
+        "category": "アクセシビリティへの影響",
+        "issue": "新しいボタンのアクセシビリティ属性の考慮",
+        "location": "解決策のコード例",
+        "recommendation": "解決策コード例にaria-label属性を追加することを推奨。例: aria-label=\"Create new file in root directory\"",
+        "evidence": "既存のFileTreeView.tsxではrole=\"tree\"、role=\"treeitem\"、aria-expanded等のアクセシビリティ属性が適切に設定されている（行692-694）。新しいボタンも同様の品質を維持すべき"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "direct_impact": [
+      {
+        "file": "src/components/worktree/FileTreeView.tsx",
+        "change_type": "modification",
+        "change_scope": "Empty state処理（行664-674）の修正",
+        "risk_level": "low",
+        "notes": "既存のprops（onNewFile, onNewDirectory）を使用するため、インターフェース変更なし。既存のTreeNode描画ロジックには影響しない"
+      }
+    ],
+    "indirect_impact": [
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact_type": "none",
+        "notes": "handleNewFile/handleNewDirectoryは空文字列の引数を既に正しく処理できる設計（行1106-1158）。parentPathが空文字列の場合、newPath = finalNameとなりルートへの作成が実行される。変更不要"
+      },
+      {
+        "file": "src/components/worktree/ContextMenu.tsx",
+        "impact_type": "reference_only",
+        "notes": "UIスタイリングの参照用。lucide-reactアイコン（FilePlus, FolderPlus）とボタンスタイル（gap-3, px-3, py-2, text-sm）を参照すべき。変更不要"
+      },
+      {
+        "file": "src/lib/file-operations.ts",
+        "impact_type": "none",
+        "notes": "createFileOrDirectory関数は相対パスがファイル名のみの場合も正しく処理する。変更不要"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+        "impact_type": "none",
+        "notes": "POST APIはルートレベルのファイル作成を既にサポート。変更不要"
+      }
+    ],
+    "test_impact": [
+      {
+        "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+        "impact_type": "addition_required",
+        "notes": "Empty stateセクション（行556-575）にボタン表示とクリック動作のテストケース追加が必要",
+        "test_cases_needed": [
+          "should show New File and New Directory buttons when directory is empty",
+          "should call onNewFile with empty string when New File button is clicked",
+          "should call onNewDirectory with empty string when New Directory button is clicked",
+          "should not show buttons when onNewFile and onNewDirectory are undefined"
+        ]
+      }
+    ],
+    "security_impact": [
+      {
+        "area": "ファイル作成API",
+        "risk_level": "none",
+        "notes": "新しいアクセスパスは追加されない。既存のonNewFile/onNewDirectoryコールバックを使用し、WorktreeDetailRefactored.tsxのhandleNewFile/handleNewDirectoryを経由してAPIを呼び出す。これらのハンドラーは既にパストラバーサル対策（isPathSafe）が適用されている"
+      },
+      {
+        "area": "入力バリデーション",
+        "risk_level": "none",
+        "notes": "ファイル名入力はwindow.prompt()を使用し、WorktreeDetailRefactored.tsx内でサニタイズされる。APIレベルでisPathSafe()による検証も実施される"
+      }
+    ],
+    "performance_impact": [
+      {
+        "area": "レンダリング",
+        "impact_level": "negligible",
+        "notes": "Empty state時に2つのボタンが追加されるのみ。rootItems.length === 0の場合の早期リターンロジックは維持されるため、通常ケースのパフォーマンスに影響なし"
+      },
+      {
+        "area": "状態更新",
+        "impact_level": "none",
+        "notes": "新しい状態変数は追加されない。ボタンクリック時はpropsのコールバックを直接呼び出すのみ"
+      }
+    ],
+    "mobile_impact": {
+      "affected": false,
+      "notes": "FileTreeViewはデスクトップ・モバイル両方で使用されるが、今回の変更はEmpty stateの表示のみ。MobileContent内でFileTreeViewが使用されている（行808-822）が、propsの変更がないため影響なし。ボタンのタッチターゲットサイズ（px-3 py-2）は既存ContextMenuと同等で、モバイルでも操作可能"
+    },
+    "search_feature_interaction": {
+      "affected": false,
+      "notes": "ファイル検索機能（searchQuery, searchMode, searchResults props）はrootItems.length > 0の場合のみ動作する。Empty state時は検索機能は無関係"
+    }
+  },
+  "breaking_changes": {
+    "exists": false,
+    "notes": "FileTreeViewPropsインターフェースの変更なし。既存のprops（onNewFile, onNewDirectory）の使用方法も変更なし。後方互換性は完全に維持される"
+  },
+  "migration_requirements": {
+    "exists": false,
+    "notes": "既存ユーザーへの移行パスは不要。新機能の追加のみで、既存動作は変更されない"
+  },
+  "documentation_updates": {
+    "required": false,
+    "notes": "CLAUDE.mdの更新は不要。この変更はバグ修正であり、新しいAPIや機能の追加ではない"
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-122/src/components/worktree/FileTreeView.tsx",
+      "relevance": "変更対象ファイル。Empty state処理（行664-674）を修正",
+      "lines": "664-674"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-122/src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "handleNewFile/handleNewDirectoryの実装確認。空文字列引数を正しく処理することを確認済み",
+      "lines": "1106-1158"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-122/src/components/worktree/ContextMenu.tsx",
+      "relevance": "UIスタイリング参照。FilePlus/FolderPlusアイコンとボタンスタイルの参照元",
+      "lines": "19, 109-131"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-122/tests/unit/components/worktree/FileTreeView.test.tsx",
+      "relevance": "テストファイル。Empty stateセクションにテストケース追加が必要",
+      "lines": "556-575"
+    }
+  ]
+}
