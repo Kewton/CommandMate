@@ -574,6 +574,96 @@ describe('FileTreeView', () => {
     });
   });
 
+  describe('Empty state with action buttons', () => {
+    beforeEach(() => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            path: '',
+            name: '',
+            items: [],
+            parentPath: null,
+          }),
+      });
+    });
+
+    it('should show New File and New Directory buttons when directory is empty', async () => {
+      const onNewFile = vi.fn();
+      const onNewDirectory = vi.fn();
+
+      render(
+        <FileTreeView
+          worktreeId="test-worktree"
+          onNewFile={onNewFile}
+          onNewDirectory={onNewDirectory}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-empty')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('empty-new-file-button')).toBeInTheDocument();
+      expect(screen.getByTestId('empty-new-directory-button')).toBeInTheDocument();
+    });
+
+    it('should call onNewFile with empty string when New File button is clicked', async () => {
+      const onNewFile = vi.fn();
+      const onNewDirectory = vi.fn();
+
+      render(
+        <FileTreeView
+          worktreeId="test-worktree"
+          onNewFile={onNewFile}
+          onNewDirectory={onNewDirectory}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-empty')).toBeInTheDocument();
+      });
+
+      const newFileButton = screen.getByTestId('empty-new-file-button');
+      fireEvent.click(newFileButton);
+
+      expect(onNewFile).toHaveBeenCalledWith('');
+    });
+
+    it('should call onNewDirectory with empty string when New Directory button is clicked', async () => {
+      const onNewFile = vi.fn();
+      const onNewDirectory = vi.fn();
+
+      render(
+        <FileTreeView
+          worktreeId="test-worktree"
+          onNewFile={onNewFile}
+          onNewDirectory={onNewDirectory}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-empty')).toBeInTheDocument();
+      });
+
+      const newDirButton = screen.getByTestId('empty-new-directory-button');
+      fireEvent.click(newDirButton);
+
+      expect(onNewDirectory).toHaveBeenCalledWith('');
+    });
+
+    it('should not show buttons when onNewFile and onNewDirectory are undefined', async () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-empty')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByTestId('empty-new-file-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('empty-new-directory-button')).not.toBeInTheDocument();
+    });
+  });
+
   describe('Hover and selection states', () => {
     it('should highlight item on hover', async () => {
       render(<FileTreeView worktreeId="test-worktree" />);
