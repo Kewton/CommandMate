@@ -1,6 +1,7 @@
 /**
  * DB Path Resolver Tests
  * Issue #135: DB path resolution logic fix
+ * Issue #136: Updated to mock install-context.ts
  * Tests for db-path-resolver.ts
  */
 
@@ -8,16 +9,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
 import { homedir } from 'os';
 
-// Mock isGlobalInstall before importing db-path-resolver
-vi.mock('../../src/cli/utils/env-setup', () => ({
+// Mock install-context.ts before importing db-path-resolver
+// Issue #136: Updated import path
+vi.mock('../../src/cli/utils/install-context', () => ({
   isGlobalInstall: vi.fn(),
+  getConfigDir: vi.fn(() => path.join(homedir(), '.commandmate')),
 }));
 
-import { getDefaultDbPath, validateDbPath } from '../../src/lib/db-path-resolver';
-import { isGlobalInstall } from '../../src/cli/utils/env-setup';
+import { getDefaultDbPath, validateDbPath, getIssueDbPath } from '../../src/lib/db-path-resolver';
+import { isGlobalInstall, getConfigDir } from '../../src/cli/utils/install-context';
 
 describe('db-path-resolver', () => {
   const mockIsGlobalInstall = vi.mocked(isGlobalInstall);
+  const mockGetConfigDir = vi.mocked(getConfigDir);
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -163,6 +167,42 @@ describe('db-path-resolver', () => {
         expect(path.isAbsolute(result)).toBe(true);
         expect(result).toBe(path.resolve(relativePath));
       });
+    });
+  });
+
+  // Issue #136: Tests for getIssueDbPath
+  describe('getIssueDbPath', () => {
+    beforeEach(() => {
+      mockGetConfigDir.mockReturnValue(path.join(homedir(), '.commandmate'));
+    });
+
+    it('should return issue-specific db path', () => {
+      const result = getIssueDbPath(135);
+
+      const expected = path.join(homedir(), '.commandmate', 'data', 'cm-135.db');
+      expect(result).toBe(expected);
+    });
+
+    it('should return absolute path', () => {
+      const result = getIssueDbPath(200);
+
+      expect(path.isAbsolute(result)).toBe(true);
+    });
+
+    it('should include issue number in filename', () => {
+      const issueNo = 42;
+      const result = getIssueDbPath(issueNo);
+
+      expect(result).toContain(`cm-${issueNo}.db`);
+    });
+
+    it('should use getConfigDir for base path', () => {
+      const customConfigDir = '/custom/config/dir';
+      mockGetConfigDir.mockReturnValue(customConfigDir);
+
+      const result = getIssueDbPath(123);
+
+      expect(result).toBe(path.join(customConfigDir, 'data', 'cm-123.db'));
     });
   });
 });

@@ -1,6 +1,7 @@
 /**
  * DB Path Resolver
  * Issue #135: DB path resolution logic fix
+ * Issue #136: Import from install-context.ts to avoid circular imports
  *
  * Provides consistent DB path resolution for both global and local installs.
  * This module centralizes DB path logic to follow SRP (Single Responsibility Principle).
@@ -10,7 +11,7 @@
 
 import path from 'path';
 import { homedir } from 'os';
-import { isGlobalInstall } from '../cli/utils/env-setup';
+import { isGlobalInstall, getConfigDir } from '../cli/utils/install-context';
 import { isSystemDirectory } from '../config/system-directories';
 
 /**
@@ -33,6 +34,24 @@ export function getDefaultDbPath(): string {
     return path.join(homedir(), '.commandmate', 'data', 'cm.db');
   }
   return path.resolve(process.cwd(), 'data', 'cm.db');
+}
+
+/**
+ * Get the database path for a specific issue (worktree)
+ * Issue #136: Worktree-specific DB path
+ *
+ * @param issueNo - The issue number
+ * @returns Absolute path to the issue-specific database file
+ *
+ * @example
+ * ```typescript
+ * const dbPath = getIssueDbPath(135);
+ * // Returns: /Users/username/.commandmate/data/cm-135.db
+ * ```
+ */
+export function getIssueDbPath(issueNo: number): string {
+  const configDir = getConfigDir();
+  return path.join(configDir, 'data', `cm-${issueNo}.db`);
 }
 
 /**

@@ -389,6 +389,42 @@ describe('getPidFilePath', () => {
     // PID file should be in the config directory
     expect(pidPath.startsWith(configDir)).toBe(true);
   });
+
+  // Issue #136: Tests for issueNo parameter
+  it('should return issue-specific PID file path when issueNo is provided', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.realpathSync).mockImplementation((p) => p.toString());
+
+    const pidPath = getPidFilePath(135);
+
+    expect(typeof pidPath).toBe('string');
+    expect(pidPath).toContain('/pids/');
+    expect(pidPath.endsWith('135.pid')).toBe(true);
+  });
+
+  it('should create pids directory when it does not exist', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
+    vi.mocked(fs.realpathSync).mockImplementation((p) => p.toString());
+
+    const pidPath = getPidFilePath(200);
+
+    expect(fs.mkdirSync).toHaveBeenCalledWith(
+      expect.stringContaining('pids'),
+      expect.objectContaining({ recursive: true, mode: 0o700 })
+    );
+    expect(pidPath.endsWith('200.pid')).toBe(true);
+  });
+
+  it('should return main PID file for backward compatibility when issueNo is undefined', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.realpathSync).mockImplementation((p) => p.toString());
+
+    const pidPath = getPidFilePath(undefined);
+
+    expect(pidPath.endsWith('.commandmate.pid')).toBe(true);
+    expect(pidPath).not.toContain('/pids/');
+  });
 });
 
 describe('resolveSecurePath', () => {
