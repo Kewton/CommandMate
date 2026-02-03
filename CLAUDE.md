@@ -132,6 +132,9 @@ src/
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック |
+| `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138） |
+| `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
+| `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応） |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/session-cleanup.ts` | セッション/ポーラー停止の一元管理（Facade パターン） |
 | `src/lib/url-normalizer.ts` | Git URL正規化（重複検出用） |
@@ -367,6 +370,28 @@ commandmate status --all                   # 全サーバー状態確認
 ---
 
 ## 最近の実装機能
+
+### Issue #138: サーバー側Auto-Yesポーリング
+- **問題解決**: ブラウザのバックグラウンドタブで`setInterval`が抑制され、auto-yesが動作しない問題を解決
+- **サーバー側ポーリング**: クライアントに依存せず、サーバーが直接プロンプトを検出して自動応答
+- **ポーリング制御**: `startAutoYesPolling()`, `stopAutoYesPolling()`, `stopAllAutoYesPolling()`
+- **エラーバックオフ**: 5回連続エラー後に指数バックオフ（最大60秒）
+- **重複応答防止**: `lastServerResponseTimestamp`でクライアント側との同期
+- **セキュリティ対策**:
+  - worktreeID形式検証（コマンドインジェクション防止）
+  - MAX_CONCURRENT_POLLERS=50（DoS防止）
+  - ログへの機密情報非出力
+- **クリーンアップ統合**:
+  - session-cleanup.tsでworktree削除時に自動停止
+  - server.tsのgracefulShutdownで全ポーラー停止
+- **主要コンポーネント**:
+  - `src/lib/auto-yes-manager.ts` - 状態管理とポーリングループ
+  - `src/lib/auto-yes-resolver.ts` - 自動応答判定
+  - `src/hooks/useAutoYes.ts` - クライアント側フォールバック（重複防止対応）
+  - `src/app/api/worktrees/[id]/auto-yes/route.ts` - ポーリング開始/停止トリガー
+  - `src/app/api/worktrees/[id]/current-output/route.ts` - タイムスタンプ提供
+- 詳細: [設計書](./dev-reports/design/issue-138-server-side-auto-yes-polling-design-policy.md)
+
 
 ### Issue #136: Git Worktree 並列開発環境の整備
 - **目的**: 複数のIssue/機能を同時に開発できるWorktree環境を整備

@@ -37,6 +37,7 @@ import {
 } from './src/lib/worktrees';
 import { getDbInstance } from './src/lib/db-instance';
 import { stopAllPolling } from './src/lib/response-poller';
+import { stopAllAutoYesPolling } from './src/lib/auto-yes-manager';
 import { runMigrations } from './src/lib/db-migrations';
 import { getEnvByKey } from './src/lib/env';
 
@@ -121,6 +122,9 @@ app.prepare().then(() => {
 
     // Stop polling first
     stopAllPolling();
+
+    // Issue #138: Stop all auto-yes pollers
+    stopAllAutoYesPolling();
 
     // Close WebSocket connections immediately (don't wait)
     closeWebSocket();

@@ -1,19 +1,45 @@
 /**
  * API Route: GET/POST /api/worktrees/:id/auto-yes
  * Manages auto-yes mode state for a worktree
+ *
+ * Issue #138: Extended to trigger server-side polling
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { getAutoYesState, setAutoYesEnabled, type AutoYesState } from '@/lib/auto-yes-manager';
+import {
+  getAutoYesState,
+  setAutoYesEnabled,
+  startAutoYesPolling,
+  stopAutoYesPolling,
+  type AutoYesState,
+} from '@/lib/auto-yes-manager';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+
+/** Allowed CLI tool IDs */
+const ALLOWED_CLI_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
+
+/** Response shape for auto-yes state */
+interface AutoYesResponse {
+  enabled: boolean;
+  expiresAt: number | null;
+  pollingStarted?: boolean;
+}
 
 /** Build the JSON response shape from an AutoYesState */
-function buildAutoYesResponse(state: AutoYesState | null): { enabled: boolean; expiresAt: number | null } {
-  return {
+function buildAutoYesResponse(
+  state: AutoYesState | null,
+  pollingStarted?: boolean
+): AutoYesResponse {
+  const response: AutoYesResponse = {
     enabled: state?.enabled ?? false,
     expiresAt: state?.enabled ? state.expiresAt : null,
   };
+  if (pollingStarted !== undefined) {
+    response.pollingStarted = pollingStarted;
+  }
+  return response;
 }
 
 /** Validate that the worktree exists; returns 404 response if not found */
@@ -27,6 +53,12 @@ function validateWorktreeExists(worktreeId: string): NextResponse | null {
     );
   }
   return null;
+}
+
+/** Validate CLI tool ID */
+function isValidCliTool(cliToolId: string | undefined): cliToolId is CLIToolType {
+  if (!cliToolId) return false;
+  return ALLOWED_CLI_TOOLS.includes(cliToolId as CLIToolType);
 }
 
 export async function GET(
@@ -64,8 +96,26 @@ export async function POST(
       );
     }
 
+    // Validate cliToolId if provided (default: 'claude')
+    const cliToolId: CLIToolType = isValidCliTool(body.cliToolId)
+      ? body.cliToolId
+      : 'claude';
+
     const state = setAutoYesEnabled(params.id, body.enabled);
-    return NextResponse.json(buildAutoYesResponse(state));
+
+    // Issue #138: Start or stop server-side polling
+    let pollingStarted = false;
+    if (body.enabled) {
+      const result = startAutoYesPolling(params.id, cliToolId);
+      pollingStarted = result.started;
+      if (!result.started) {
+        console.warn(`[Auto-Yes API] Polling not started: ${result.reason}`);
+      }
+    } else {
+      stopAutoYesPolling(params.id);
+    }
+
+    return NextResponse.json(buildAutoYesResponse(state, pollingStarted));
   } catch (error: unknown) {
     console.error('Error setting auto-yes state:', error);
     return NextResponse.json(

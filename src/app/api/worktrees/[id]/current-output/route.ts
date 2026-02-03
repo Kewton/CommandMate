@@ -11,7 +11,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectThinking as detectThinkingState, stripAnsi } from '@/lib/cli-patterns';
-import { getAutoYesState } from '@/lib/auto-yes-manager';
+import { getAutoYesState, getLastServerResponseTimestamp } from '@/lib/auto-yes-manager';
 
 const SUPPORTED_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
 
@@ -92,6 +92,9 @@ export async function GET(
     // Get auto-yes state
     const autoYesState = getAutoYesState(params.id);
 
+    // Issue #138: Get last server response timestamp for duplicate prevention
+    const lastServerResponseTimestamp = getLastServerResponseTimestamp(params.id);
+
     return NextResponse.json({
       isRunning: true,
       cliToolId,
@@ -114,6 +117,8 @@ export async function GET(
         enabled: autoYesState?.enabled ?? false,
         expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
       },
+      // Issue #138: Server-side response timestamp for duplicate prevention
+      lastServerResponseTimestamp,
     });
   } catch (error: unknown) {
     console.error('Error getting current output:', error);
