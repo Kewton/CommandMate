@@ -1,0 +1,113 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "reviewed_at": "2026-02-04T10:00:00.000Z",
+  "issue_number": 153,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "description": "テスト計画に自動テストが含まれていない。手動検証手順のみが記載されており、回帰テストの実装方針が不明確。",
+        "location": "## テスト計画 セクション",
+        "recommendation": "ユニットテストの追加を検討。globalThis使用時のテストリセット機構（clearAllAutoYesStates, clearAllPollerStates関数が既存）の活用方針を明記すること。"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "description": "案1（globalThis）のデメリット「テスト時に状態リセットの考慮が必要」について、既存のclearAllAutoYesStates()とclearAllPollerStates()関数が存在するため、デメリットは軽減されることを補足すべき。",
+        "location": "## 推奨される改善策 > 案1 セクション",
+        "recommendation": "既存のテスト用クリア関数（auto-yes-manager.ts:173-194）がglobalThis移行後も使用可能であることを明記。"
+      },
+      {
+        "id": "SF-3",
+        "category": "明確性",
+        "description": "「しばらく待つ」という再現手順が曖昧。ホットリロードの自動トリガーは開発モードでのファイル変更時であり、本番モードでは異なる条件で発生する。",
+        "location": "## 再現手順 セクション",
+        "recommendation": "開発モードでは「ソースファイルを編集して保存（ホットリロード発生）」、本番モードでは「数十分〜数時間待機」など、具体的なトリガー条件を明記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "description": "案2（DB永続化）と案3（クリーンアップ）の詳細な実装案が記載されていない。将来的に案2を採用する可能性があるなら、DBスキーマ案があると有用。",
+        "location": "## 推奨される改善策 > 案2, 案3 セクション",
+        "recommendation": "今回は案1採用のため必須ではないが、案2のDBスキーマ案（例: worktreesテーブルにauto_yes_enabled, auto_yes_expires_at, auto_yes_poller_active カラム追加）を参考情報として追記すると、将来の機能強化時に有用。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "description": "ESLintの`no-var`ルール無効化コメントの説明がない。globalThis宣言にvarが必要な理由の補足があるとコードレビュー時に有用。",
+        "location": "## 推奨される改善策 > 案1 コードスニペット",
+        "recommendation": "「TypeScriptのglobal宣言ではconstではなくvarが必要」という補足を追加。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "ドキュメント参照",
+        "description": "CLAUDE.mdの「Issue #138: サーバー側Auto-Yesポーリング」セクションへの参照がない。",
+        "location": "## 関連Issue セクション",
+        "recommendation": "「CLAUDE.mdの関連セクションも参照」という補足を追加。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3,
+    "overall_quality": "good"
+  },
+  "verification_notes": {
+    "line_numbers_accuracy": "Issue記載の行番号（78-81, 312-314, 358-360）は実際のソースコードと一致している",
+    "code_snippets_accuracy": "Mapの宣言コードとsetTimeoutの使用箇所は正確に特定されている",
+    "root_cause_analysis": "モジュール再読み込み時のMap再初期化とsetTimeout継続動作の分析は技術的に正確",
+    "proposed_solution": "globalThisを使用した解決策は、Next.jsの開発サーバーでの状態保持パターンとして一般的かつ妥当"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "78-81",
+      "relevance": "インメモリMap宣言（問題の根本原因）"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "312-314",
+      "relevance": "scheduleNextPoll内のsetTimeout（孤児ポーラーの原因）"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "358-360",
+      "relevance": "startAutoYesPolling内のsetTimeout（ポーリング開始時）"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "173-194",
+      "relevance": "既存のテスト用クリア関数（clearAllAutoYesStates, clearAllPollerStates）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "Auto-Yes APIエンドポイント（状態取得・設定）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "状態取得API（autoYes.enabled, lastServerResponseTimestamp返却）"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "クライアント側フック（重複防止機構含む）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "section": "Issue #138: サーバー側Auto-Yesポーリング",
+      "relevance": "関連機能の設計ドキュメント"
+    },
+    {
+      "file": "dev-reports/design/issue-138-server-side-auto-yes-polling-design-policy.md",
+      "relevance": "Issue #138の詳細設計書"
+    }
+  ]
+}

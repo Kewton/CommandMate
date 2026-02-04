@@ -71,14 +71,36 @@ const AUTO_YES_TIMEOUT_MS = 3600000;
 const WORKTREE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 // =============================================================================
-// In-memory State
+// In-memory State (globalThis for hot reload persistence - Issue #153)
 // =============================================================================
 
-/** In-memory storage for auto-yes states */
-const autoYesStates = new Map<string, AutoYesState>();
+/**
+ * globalThis pattern for hot reload persistence (Issue #153)
+ *
+ * Problem: Next.js hot reload or worker restart resets module-scoped variables,
+ * causing UI and background state inconsistency.
+ *
+ * Solution: Use globalThis to persist state. globalThis is unique per process
+ * and persists even when modules are reloaded.
+ *
+ * Limitation: In multi-process environments (cluster mode, etc.), each process
+ * has its own state. CommandMate is designed for single-process operation,
+ * so this limitation is acceptable.
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var __autoYesStates: Map<string, AutoYesState> | undefined;
+  // eslint-disable-next-line no-var
+  var __autoYesPollerStates: Map<string, AutoYesPollerState> | undefined;
+}
 
-/** In-memory storage for poller states (Issue #138) */
-const autoYesPollerStates = new Map<string, AutoYesPollerState>();
+/** In-memory storage for auto-yes states (globalThis for hot reload persistence) */
+const autoYesStates = globalThis.__autoYesStates ??
+  (globalThis.__autoYesStates = new Map<string, AutoYesState>());
+
+/** In-memory storage for poller states (globalThis for hot reload persistence) */
+const autoYesPollerStates = globalThis.__autoYesPollerStates ??
+  (globalThis.__autoYesPollerStates = new Map<string, AutoYesPollerState>());
 
 // =============================================================================
 // Utility Functions

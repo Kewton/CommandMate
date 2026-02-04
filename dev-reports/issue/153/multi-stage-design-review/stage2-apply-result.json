@@ -1,0 +1,43 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "applied_at": "2026-02-04T12:30:00.000Z",
+  "applied_items": [
+    {
+      "id": "SF-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "title": "globalThis変数名のプレフィックス標準化提案",
+      "changes_made": "セクション3.2.3を新規追加。命名規則の検討として、現在の設計（__autoYesStates）とプロジェクトプレフィックス（__cm_autoYesStates）、一元管理ユーティリティの比較表を追加。将来のフォローアップIssueで命名規則を統一する方針を明記。"
+    },
+    {
+      "id": "NTH-003",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "title": "モジュール再読み込みテストの本番環境シミュレーション",
+      "changes_made": "セクション4.1.2を新規追加。NODE_ENV=productionでのvi.resetModules()テストのサンプルコードを追加。本番環境での問題報告があった場合に追加するオプションとして位置付けを明記。"
+    },
+    {
+      "id": "NTH-004",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "title": "clearAllAutoYesStates/clearAllPollerStatesのglobalThis対応",
+      "changes_made": "セクション3.1.1を新規追加。既存のクリア関数がglobalThis移行後も変更なしで動作する理由（Mapインスタンスへの参照を維持したままコンテンツをクリア）を詳細に説明。コードサンプルとテストでの使用方法を明記。"
+    }
+  ],
+  "skipped_items": [],
+  "summary": {
+    "total_applied": 3,
+    "total_skipped": 0,
+    "should_fix_applied": 1,
+    "nice_to_have_applied": 2,
+    "must_fix_applied": 0
+  },
+  "updated_document": "dev-reports/design/issue-153-auto-yes-state-inconsistency-design-policy.md",
+  "sections_modified": [
+    "3.1.1 既存クリア関数のglobalThis対応（新規追加）",
+    "3.2.3 命名規則の検討（新規追加）",
+    "4.1.2 本番環境シナリオのテスト（新規追加）",
+    "9. 変更履歴（更新）"
+  ]
+}

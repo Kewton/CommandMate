@@ -1,0 +1,18 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_at": "2026-02-04T14:00:00.000Z",
+  "issue_number": 153,
+  "applied_items": [],
+  "skipped_items": [
+    {
+      "id": "N2H-004",
+      "reason": "response-poller.tsとclaude-poller.tsへの同様パターン適用は、既に「検討事項」セクションに記載済み。追加更新は不要。実装フェーズで判断。"
+    }
+  ],
+  "summary": {
+    "total_applied": 0,
+    "total_skipped": 1,
+    "rationale": "Stage 7で発見された1件の指摘はNice to Haveで、既存の「検討事項」セクションで対応済み。Issue品質は既に「実装準備完了」と評価されており、追加更新は不要。"
+  }
+}

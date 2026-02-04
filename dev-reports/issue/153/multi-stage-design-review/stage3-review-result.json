@@ -1,0 +1,137 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "reviewed_at": "2026-02-04T12:00:00.000Z",
+  "issue_number": 153,
+  "impact_analysis": {
+    "direct_impact": {
+      "modified_files": [
+        "src/lib/auto-yes-manager.ts"
+      ],
+      "changed_functions": [
+        "Module-level variable declarations (autoYesStates, autoYesPollerStates)",
+        "No function signature changes - all exported functions remain unchanged"
+      ],
+      "runtime_implications": "State is stored in globalThis instead of module scope. This ensures state persistence across Next.js hot reloads and worker restarts. setTimeout timers scheduled against the Map will continue to reference the correct state after module re-initialization."
+    },
+    "indirect_impact": {
+      "dependent_modules": [
+        "src/app/api/worktrees/[id]/auto-yes/route.ts - calls getAutoYesState, setAutoYesEnabled, startAutoYesPolling, stopAutoYesPolling",
+        "src/app/api/worktrees/[id]/current-output/route.ts - calls getAutoYesState, getLastServerResponseTimestamp",
+        "src/lib/session-cleanup.ts - calls stopAutoYesPolling",
+        "server.ts - calls stopAllAutoYesPolling during graceful shutdown",
+        "tests/unit/lib/auto-yes-manager.test.ts - existing tests use clearAllAutoYesStates, clearAllPollerStates"
+      ],
+      "regression_risk": "low",
+      "uncovered_edge_cases": [
+        "Multi-process Node.js deployments (cluster mode) - globalThis is process-local, not shared across workers",
+        "Serverless deployments (Vercel, Lambda) where each invocation may be a cold start in a new process",
+        "Long-running server without restarts - no edge case, globalThis persists correctly"
+      ]
+    },
+    "deployment_impact": {
+      "database_migration_required": false,
+      "breaking_changes": false,
+      "rollback_difficulty": "easy"
+    },
+    "testing_impact": {
+      "existing_tests_sufficient": true,
+      "new_tests_needed": [
+        "Test that globalThis.__autoYesStates is properly initialized as a Map",
+        "Test that state persists after vi.resetModules() (module reload simulation)",
+        "Test that clearAllAutoYesStates clears the globalThis-backed Map correctly"
+      ],
+      "untestable_scenarios": [
+        "Actual Next.js hot reload behavior (requires manual testing)",
+        "Production worker restart scenarios (requires staging/production testing)",
+        "Multi-worker process behavior (requires cluster deployment testing)"
+      ]
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-003",
+        "category": "影響範囲",
+        "title": "Similar in-memory Map patterns in other modules",
+        "description": "The design document correctly identifies that response-poller.ts and claude-poller.ts use the same vulnerable pattern (module-scope Maps). These modules also manage activePollers and pollingStartTimes Maps that could become inconsistent on module reload. While this is not blocking for Issue #153, a follow-up issue should address these to prevent similar bugs.",
+        "affected_files": [
+          "src/lib/response-poller.ts (lines 36, 41)",
+          "src/lib/claude-poller.ts (lines 26, 31)"
+        ],
+        "recommendation": "Create a follow-up issue to apply the same globalThis pattern to response-poller.ts and claude-poller.ts, or implement the proposed createPersistentMap utility."
+      },
+      {
+        "id": "SF-004",
+        "category": "テスト影響",
+        "title": "Add module reload simulation test",
+        "description": "The design document proposes an optional integration test using vi.resetModules() to simulate module reloading. This test should be elevated from optional to recommended, as it directly validates the fix for the root cause.",
+        "affected_files": [
+          "tests/unit/lib/auto-yes-manager.test.ts"
+        ],
+        "recommendation": "Add the module reload simulation test as a required test case, not optional."
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-005",
+        "category": "将来対応",
+        "title": "Consider cluster mode implications",
+        "description": "In Node.js cluster mode, each worker has its own globalThis. If CommandMate is deployed with clustering, auto-yes state would not be shared across workers. This is unlikely to be an issue for single-server deployments but should be documented.",
+        "affected_files": [],
+        "recommendation": "Document in CLAUDE.md that globalThis-based state is process-local and not suitable for multi-process deployments without additional coordination (e.g., Redis)."
+      },
+      {
+        "id": "NTH-006",
+        "category": "テスト",
+        "title": "Add explicit globalThis type assertions in tests",
+        "description": "The proposed tests access globalThis.__autoYesStates directly. To ensure type safety, consider adding type guard assertions.",
+        "affected_files": [
+          "tests/unit/lib/auto-yes-manager.test.ts"
+        ],
+        "recommendation": "Use explicit type checks like expect(globalThis.__autoYesStates).toBeInstanceOf(Map) before accessing Map methods."
+      }
+    ]
+  },
+  "related_modules_analysis": {
+    "ws_server_ts": {
+      "file": "src/lib/ws-server.ts",
+      "pattern": "const clients = new Map<WebSocket, ClientInfo>(); const rooms = new Map<string, Set<WebSocket>>();",
+      "risk": "low",
+      "reason": "WebSocket state is inherently tied to current connections; module reload would disconnect all clients anyway, so Map reset is acceptable."
+    },
+    "terminal_websocket_ts": {
+      "file": "src/lib/terminal-websocket.ts",
+      "pattern": "const connections = new Map<string, TerminalConnection>();",
+      "risk": "low",
+      "reason": "Terminal connections are session-based; reconnection is expected on module reload."
+    },
+    "clone_manager_ts": {
+      "file": "src/lib/clone-manager.ts",
+      "pattern": "this.activeProcesses = new Map();",
+      "risk": "medium",
+      "reason": "Active clone processes could become orphaned on module reload, but clones are typically short-lived and infrequent."
+    },
+    "response_poller_ts": {
+      "file": "src/lib/response-poller.ts",
+      "pattern": "const activePollers = new Map<string, NodeJS.Timeout>(); const pollingStartTimes = new Map<string, number>();",
+      "risk": "medium",
+      "reason": "Same vulnerability as auto-yes-manager. Could result in orphaned pollers or duplicate polling. Should be addressed in follow-up."
+    },
+    "claude_poller_ts": {
+      "file": "src/lib/claude-poller.ts",
+      "pattern": "const activePollers = new Map<string, NodeJS.Timeout>(); const pollingStartTimes = new Map<string, number>();",
+      "risk": "medium",
+      "reason": "Same vulnerability as auto-yes-manager. Legacy module that appears similar to response-poller. Should be addressed in follow-up."
+    }
+  },
+  "summary": {
+    "total_findings": 4,
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2,
+    "overall_impact_level": "low",
+    "rationale": "The proposed change is minimal (approximately 20 lines in a single file) with no breaking changes to function signatures. All dependent modules will work without modification. The globalThis pattern is a proven solution for this class of Next.js hot reload issues. The main risk is that similar patterns in other poller modules remain unaddressed, but this can be handled in a follow-up issue."
+  }
+}

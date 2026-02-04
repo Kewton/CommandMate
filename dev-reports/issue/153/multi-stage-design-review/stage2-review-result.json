@@ -1,0 +1,125 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "reviewed_at": "2026-02-04T12:00:00.000Z",
+  "issue_number": 153,
+  "consistency_analysis": {
+    "design_code_consistency": {
+      "line_numbers_accurate": true,
+      "files_correctly_identified": true,
+      "function_signatures_accurate": true,
+      "notes": "設計書の行番号78-81はソースコード(src/lib/auto-yes-manager.ts)と一致。autoYesStatesはL78、autoYesPollerStatesはL81に正確に位置している。関連ファイル(auto-yes/route.ts, current-output/route.ts, useAutoYes.ts, session-cleanup.ts, server.ts)も全て正しく識別されており、getAutoYesState, setAutoYesEnabled, startAutoYesPolling, stopAutoYesPolling, stopAllAutoYesPolling, getLastServerResponseTimestampの各関数シグネチャも設計書の記述と実コードが一致している。"
+    },
+    "design_issue_consistency": {
+      "requirements_aligned": true,
+      "acceptance_criteria_covered": true,
+      "notes": "Issue #153の問題(UIとバックグラウンドの状態不整合)に対して、設計書はモジュール再読み込み時のインメモリMap状態リセットを根本原因として正しく特定。globalThisによる状態永続化という解決策は、開発環境(ホットリロード)と本番環境(ワーカー再起動)の両方のシナリオに対応している。受け入れ条件5項目(セクション7)は全てIssueの要求事項をカバーしている。"
+    },
+    "internal_consistency": {
+      "no_contradictions": true,
+      "sections_consistent": true,
+      "notes": "設計書内の全セクションは論理的に一貫している。セクション2(問題の詳細)からセクション3(設計方針)への流れは自然で、セクション3.4(関連機能への影響)の「変更不要」という記述は実際のコード構造と整合性がある。セクション4(テスト方針)で既存のclearAllAutoYesStates/clearAllPollerStates関数を活用する方針は、セクション3.1の「既存のクリア関数が使用可能」という記述と一致している。"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-002",
+        "category": "設計詳細",
+        "title": "globalThis変数名のプレフィックス標準化提案",
+        "description": "設計書では__autoYesStatesと__autoYesPollerStatesを使用しているが、プロジェクト全体でglobalThis変数を使用する場合の命名規則(例: __commandmate_autoYesStates)が未定義。将来の衝突防止のため、プレフィックス規則の明記を推奨する。",
+        "location": "設計書セクション3.2.2",
+        "recommendation": "グローバル名前空間汚染を防ぐため、__cm_autoYesStatesのようなプロジェクト固有プレフィックスを検討する。または、セクション6.1で提案されているcreatePersistentMap<K,V>(globalKey)ユーティリティで一元管理する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-003",
+        "category": "テスト",
+        "title": "モジュール再読み込みテストの本番環境シミュレーション",
+        "description": "設計書セクション4.1.1で統合テストをオプションとしているが、本番環境でのワーカー再起動シナリオは開発環境のホットリロードとは異なる可能性がある。",
+        "location": "設計書セクション4.1.1",
+        "recommendation": "NODE_ENV=productionでのvi.resetModules()テストを追加し、本番環境シナリオもカバーすることを検討する。"
+      },
+      {
+        "id": "NTH-004",
+        "category": "ドキュメント",
+        "title": "clearAllAutoYesStates/clearAllPollerStatesのglobalThis対応",
+        "description": "既存のクリア関数がglobalThis移行後も動作することは設計書に記載されているが、実装詳細(globalThis上のMapインスタンスをclear()する)の明示があるとより明確。",
+        "location": "設計書セクション3.1, 4.1",
+        "recommendation": "クリア関数の実装がautoYesStates.clear()を呼び出すだけで、globalThis参照を維持したままクリアされることを明記する。"
+      }
+    ]
+  },
+  "verification_details": {
+    "code_verification": {
+      "auto_yes_manager_ts": {
+        "file_path": "/Users/maenokota/share/work/github_kewton/commandmate-issue-153/src/lib/auto-yes-manager.ts",
+        "verified_items": [
+          "L78: const autoYesStates = new Map<string, AutoYesState>();",
+          "L81: const autoYesPollerStates = new Map<string, AutoYesPollerState>();",
+          "L71: WORKTREE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/",
+          "L65: MAX_CONCURRENT_POLLERS = 50",
+          "clearAllAutoYesStates(): L173-175",
+          "clearAllPollerStates(): L191-194"
+        ],
+        "status": "全て設計書と一致"
+      },
+      "auto_yes_route_ts": {
+        "file_path": "/Users/maenokota/share/work/github_kewton/commandmate-issue-153/src/app/api/worktrees/[id]/auto-yes/route.ts",
+        "verified_items": [
+          "getAutoYesState呼び出し: L72",
+          "setAutoYesEnabled呼び出し: L104",
+          "startAutoYesPolling呼び出し: L109",
+          "stopAutoYesPolling呼び出し: L115"
+        ],
+        "status": "設計書セクション3.4と一致"
+      },
+      "current_output_route_ts": {
+        "file_path": "/Users/maenokota/share/work/github_kewton/commandmate-issue-153/src/app/api/worktrees/[id]/current-output/route.ts",
+        "verified_items": [
+          "getAutoYesState呼び出し: L93",
+          "getLastServerResponseTimestamp呼び出し: L96",
+          "レスポンス内lastServerResponseTimestamp: L121"
+        ],
+        "status": "設計書セクション3.4と一致"
+      },
+      "useAutoYes_ts": {
+        "file_path": "/Users/maenokota/share/work/github_kewton/commandmate-issue-153/src/hooks/useAutoYes.ts",
+        "verified_items": [
+          "lastServerResponseTimestamp引数: L34, L52",
+          "重複応答防止ロジック: L66-73",
+          "DUPLICATE_PREVENTION_WINDOW_MS = 3000: L19"
+        ],
+        "status": "Issue #138の重複防止対応を確認"
+      },
+      "session_cleanup_ts": {
+        "file_path": "/Users/maenokota/share/work/github_kewton/commandmate-issue-153/src/lib/session-cleanup.ts",
+        "verified_items": [
+          "stopAutoYesPollingインポート: L12",
+          "stopAutoYesPolling呼び出し: L117",
+          "Issue #138コメント: L115"
+        ],
+        "status": "設計書セクション3.4と一致"
+      },
+      "server_ts": {
+        "file_path": "/Users/maenokota/share/work/github_kewton/commandmate-issue-153/server.ts",
+        "verified_items": [
+          "stopAllAutoYesPollingインポート: L40",
+          "gracefulShutdown内でstopAllAutoYesPolling呼び出し: L127",
+          "Issue #138コメント: L126"
+        ],
+        "status": "設計書セクション3.4と一致"
+      }
+    }
+  },
+  "summary": {
+    "total_findings": 3,
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2,
+    "overall_consistency": "excellent",
+    "conclusion": "設計書は実装コードと高い整合性を保っている。行番号、ファイルパス、関数シグネチャは全て正確であり、Issue #153の要求事項を適切にカバーしている。指摘事項は改善提案レベルのみで、設計の根本的な問題は発見されなかった。"
+  }
+}

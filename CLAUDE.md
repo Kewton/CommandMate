@@ -410,6 +410,30 @@ commandmate status --all                   # 全サーバー状態確認
   - `src/app/api/worktrees/[id]/current-output/route.ts` - タイムスタンプ提供
 - 詳細: [設計書](./dev-reports/design/issue-138-server-side-auto-yes-polling-design-policy.md)
 
+### Issue #153: Auto-Yes UIとバックグラウンドの状態不整合修正
+- **バグ修正**: Auto-Yesモードを有効化後、モジュール再読み込み（ホットリロード/ワーカー再起動）が発生すると、バックグラウンドでは正常動作するがUIは「オフ」と表示される問題を修正
+- **根本原因**: `auto-yes-manager.ts`のモジュールスコープMapがモジュール再読み込み時にリセットされる
+- **解決策**: globalThisパターンを適用し、状態をプロセス内で永続化
+- **コード変更**:
+  ```typescript
+  // Before: モジュールスコープMap（再読み込みでリセット）
+  const autoYesStates = new Map<string, AutoYesState>();
+
+  // After: globalThis参照（再読み込みでも永続化）
+  declare global {
+    var __autoYesStates: Map<string, AutoYesState> | undefined;
+  }
+  const autoYesStates = globalThis.__autoYesStates ??
+    (globalThis.__autoYesStates = new Map<string, AutoYesState>());
+  ```
+- **制限事項**: マルチプロセス環境（クラスターモード等）では各プロセスが独自の状態を持つ。CommandMateは単一プロセス運用が前提のため許容
+- **テスト追加**:
+  - `tests/unit/lib/auto-yes-manager.test.ts` - globalThis初期化・クリア関数テスト（7件）
+  - `tests/integration/auto-yes-persistence.test.ts` - `vi.resetModules()`によるモジュール再読み込みテスト（5件）
+- **主要コンポーネント**:
+  - `src/lib/auto-yes-manager.ts` - globalThis対応（約25行変更）
+- **フォローアップ検討**: `response-poller.ts`, `claude-poller.ts`も同様のパターン適用候補（別Issue）
+- 詳細: [設計書](./dev-reports/design/issue-153-auto-yes-state-inconsistency-design-policy.md)
 
 ### Issue #136: Git Worktree 並列開発環境の整備
 - **目的**: 複数のIssue/機能を同時に開発できるWorktree環境を整備
