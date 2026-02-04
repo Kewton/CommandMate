@@ -1,0 +1,88 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-04",
+  "issue_number": 123,
+  "focus_area": "通常（整合性・正確性）",
+  "iteration": 1,
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "参照実装PaneResizerにはonTouchCancelハンドラが未実装",
+        "location": "## 参照実装 セクション",
+        "recommendation": "PaneResizer.tsxにはonTouchStartとtouchend/touchmoveのイベントリスナーはあるが、touchcancelハンドラが明示的に設定されていない。Issueの解決方針では「onTouchCancel - タイマークリア」を挙げているが、参照実装にはこのパターンが含まれていない。参照実装の具体的な参照箇所（行番号）を追記するか、参照実装と解決方針の差異を明記すべき",
+        "evidence": "PaneResizer.tsx:133-141 handleTouchStart, 161-171 handleTouchMove, 176-178 handleDragEnd - touchcancelは223-224行のtouchendと同じhandleDragEndを使用"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "長押し閾値500msの根拠が不明",
+        "location": "## 解決方針 > 2. 長押し検出ロジック実装",
+        "recommendation": "「500ms程度（一般的な長押し判定時間）」と記載されているが、iOS/iPadOSの標準長押し時間や他のWebアプリの慣例との比較情報があると妥当性が明確になる。iOS標準は約500ms、Android標準は約400-600msなので妥当だが、根拠を明記することを推奨",
+        "evidence": "一般的なタッチデバイスの長押し閾値は400-600ms（Apple HIG, Material Design参照）"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "タッチ移動の閾値が未定義",
+        "location": "## 解決方針 > 2. 長押し検出ロジック実装",
+        "recommendation": "「移動検出: タッチ移動時はメニュー表示をキャンセル」と記載されているが、何ピクセル以上の移動でキャンセルとするか閾値が未定義。一般的には10-20px程度が使用される。具体的な閾値を受け入れ条件に含めることを推奨",
+        "evidence": "「タッチ移動時はメニュー表示をキャンセル」のみ記載、閾値なし"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "Android端末での動作確認が受け入れ条件に含まれていない",
+        "location": "## 受け入れ条件",
+        "recommendation": "iPhoneは受け入れ条件に含まれているが、Android端末（Chrome on Android）での動作確認が含まれていない。Androidでも同様の問題が発生する可能性があるため、スコープ外であることを明記するか、受け入れ条件に追加することを検討",
+        "evidence": "受け入れ条件: iPad, iPhone, PCのみ記載"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "アクセシビリティ考慮の記載がない",
+        "location": "## 解決方針",
+        "recommendation": "長押しはタッチデバイスのみの機能であり、キーボードナビゲーションでのコンテキストメニュー呼び出し（Shift+F10やアプリケーションキー）については既存実装の確認や追加対応の要否を記載すると良い",
+        "evidence": "現在の実装ではキーボード操作でコンテキストメニューを開く方法がないため、タッチ対応と合わせて検討の余地あり"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "line": 302,
+      "relevance": "変更対象: TreeNodeのonContextMenuハンドラ（タッチイベント追加先）"
+    },
+    {
+      "file": "src/hooks/useContextMenu.ts",
+      "line": 39,
+      "relevance": "変更対象: openMenu関数の型定義（TouchEvent対応）"
+    },
+    {
+      "file": "src/components/worktree/ContextMenu.tsx",
+      "relevance": "関連コンポーネント: コンテキストメニュー本体（変更不要の可能性）"
+    },
+    {
+      "file": "src/components/worktree/PaneResizer.tsx",
+      "line": "133-141, 161-171, 219-239",
+      "relevance": "参照実装: タッチイベントハンドリングのパターン"
+    }
+  ],
+  "doc_references": [],
+  "verification": {
+    "line_numbers_accurate": true,
+    "file_paths_accurate": true,
+    "referenced_code_exists": true,
+    "details": "Issue記載のFileTreeView.tsx:302、useContextMenu.ts:39は実際のコードと一致。PaneResizer.tsxの参照実装も存在を確認"
+  }
+}

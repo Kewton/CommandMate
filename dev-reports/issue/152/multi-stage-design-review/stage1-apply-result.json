@@ -1,0 +1,83 @@
+{
+  "issue_number": 152,
+  "stage": 1,
+  "stage_name": "指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DRY-001",
+        "item": "プロンプト検出パターンが重複している",
+        "section_updated": "詳細設計",
+        "status": "reflected",
+        "changes": [
+          "cli-patterns.ts から CLAUDE_PROMPT_PATTERN をインポートして使用するよう設計書を更新",
+          "レガシー '>' と新形式 '❯' の両方のプロンプト文字をサポートする設計に変更",
+          "実装チェックリストに DRY-001 対応項目を追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SRP-001",
+        "item": "waitForPrompt()のタイムアウト/ポーリングロジックが再利用不可",
+        "section_updated": "詳細設計",
+        "status": "reflected",
+        "decision": "YAGNI/KISS優先で現状維持",
+        "changes": [
+          "設計判断セクションを追加し、pollWithTimeout()抽象化を見送る理由を明記",
+          "将来3箇所以上で必要になった場合に検討する方針を記載"
+        ]
+      },
+      {
+        "id": "DRY-002",
+        "item": "セパレータパターンも重複",
+        "section_updated": "詳細設計",
+        "status": "reflected",
+        "changes": [
+          "cli-patterns.ts から CLAUDE_SEPARATOR_PATTERN をインポートして使用するよう設計書を更新",
+          "実装チェックリストに DRY-002 対応項目を追加"
+        ]
+      },
+      {
+        "id": "OCP-001",
+        "item": "タイムアウト値とポーリング間隔がハードコード",
+        "section_updated": "詳細設計",
+        "status": "reflected",
+        "changes": [
+          "タイムアウト定数の定義セクションを新規追加",
+          "CLAUDE_INIT_TIMEOUT, CLAUDE_INIT_POLL_INTERVAL, CLAUDE_POST_PROMPT_DELAY, CLAUDE_PROMPT_WAIT_TIMEOUT, CLAUDE_PROMPT_POLL_INTERVAL の5定数を定義",
+          "実装チェックリストに OCP-001 対応項目を追加"
+        ]
+      }
+    ]
+  },
+  "nice_to_have_noted": [
+    {
+      "id": "KISS-001",
+      "item": "sendMessageToClaude()内の二重プロンプト確認",
+      "section_updated": "詳細設計",
+      "status": "noted",
+      "note": "現在の設計は意図が明確であり優先度低として記録"
+    },
+    {
+      "id": "DOC-001",
+      "item": "500ms安定待機の根拠が不明",
+      "section_updated": "詳細設計, 実装チェックリスト",
+      "status": "noted",
+      "note": "CLAUDE_POST_PROMPT_DELAY 定数のJSDocコメントに根拠を追記、チェックリストにも追加"
+    }
+  ],
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-152-first-message-not-sent-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー",
+    "詳細設計",
+    "設計原則への準拠",
+    "テスト戦略",
+    "実装チェックリスト"
+  ],
+  "timestamp": "2026-02-04T00:00:00Z"
+}

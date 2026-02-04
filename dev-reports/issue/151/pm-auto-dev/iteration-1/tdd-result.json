@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "tasks_completed": [
+    "T0.1",
+    "T0.2",
+    "T0.3",
+    "T1.1",
+    "T1.2",
+    "T2.1"
+  ],
+  "files_created": [
+    ".claude/lib/validators.sh",
+    ".claude/lib/process-utils.sh"
+  ],
+  "files_modified": [
+    ".claude/commands/worktree-cleanup.md",
+    ".claude/commands/worktree-setup.md"
+  ],
+  "verification_notes": "Manual verification steps:\n\n1. validators.sh verification:\n   - MAX_ISSUE_NO=2147483647 constant defined (synced with src/cli/utils/input-validators.ts)\n   - validate_issue_no() function implemented with integer and range validation\n   - Reference comment included: # Synced with: src/cli/utils/input-validators.ts MAX_ISSUE_NO\n\n2. process-utils.sh verification:\n   - check_lsof_available() - checks lsof availability, shows alternatives if missing\n   - get_pid_by_port() - uses lsof -t -sTCP:LISTEN for PID retrieval\n   - get_process_cwd() - macOS uses 'lsof -F n | grep ^ncwd | cut -c5-', Linux uses /proc/$PID/cwd\n   - is_worktree_process() - validates cwd prefix match with worktree path\n   - verify_process_command() - validates process is node/npm\n   - verify_process_ownership() - validates process owner is current user\n   - graceful_kill() - SIGTERM with 3s wait, then SIGKILL if needed, includes security audit logging\n   - stop_server_by_port() - orchestration function combining all verification steps\n   - Security audit logging to ~/.commandmate/logs/security.log\n\n3. worktree-cleanup.md Phase 1 verification:\n   - Sources .claude/lib/validators.sh\n   - Issue number range updated to 1-2147483647\n   - Error handling table updated with new range\n\n4. worktree-cleanup.md Phase 2 verification:\n   - Sources .claude/lib/process-utils.sh\n   - Existing PID file detection preserved\n   - Port-based detection added as fallback (ports: 3000, 3{issueNo} for 4-digit issues)\n   - sleep 2 changed to sleep 3\n\n5. worktree-setup.md Phase 1 verification:\n   - Sources .claude/lib/validators.sh\n   - Issue number range updated to 1-2147483647\n   - Error handling table updated with new range\n\nManual test recommendations:\n- Test with npm run dev server on port 3000\n- Test with commandmate start --issue (PID file detection)\n- Test on both macOS and Linux (Docker node:18-alpine)\n- Test with lsof unavailable environment\n- Test with Issue numbers: 135 (3-digit), 9999 (4-digit boundary), 12345 (5-digit)",
+  "issues": []
+}

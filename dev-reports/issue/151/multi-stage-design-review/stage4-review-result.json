@@ -1,0 +1,232 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "issue_number": 151,
+  "review_date": "2026-02-04",
+  "design_doc": "dev-reports/design/issue-151-worktree-cleanup-server-detection-design-policy.md",
+  "security_analysis": {
+    "owasp_coverage": {
+      "A01_Broken_Access_Control": {
+        "status": "Addressed",
+        "analysis": "The design correctly relies on lsof/kill standard behavior which only affects processes owned by the current user. SEC-004 explicitly documents this. However, there is a gap in verifying process ownership explicitly before kill.",
+        "findings": ["Process ownership is implicitly handled by OS commands, but explicit verification could add defense-in-depth"]
+      },
+      "A02_Cryptographic_Failures": {
+        "status": "N/A",
+        "analysis": "No cryptographic operations involved in this feature."
+      },
+      "A03_Injection": {
+        "status": "Addressed",
+        "analysis": "SEC-001 and SEC-005 address command injection via Issue number and port number validation. The design uses ^[0-9]+$ regex pattern which is safe. However, cwd path returned by lsof needs proper quoting in bash.",
+        "findings": ["Issue number injection is well-mitigated", "Port number is derived from validated Issue number", "cwd path comparison needs proper quoting for paths with spaces"]
+      },
+      "A04_Insecure_Design": {
+        "status": "Partially Addressed",
+        "analysis": "The cwd-based process identification is a reasonable approach but has inherent limitations. Process could change cwd after startup, or multiple processes could share the same cwd.",
+        "findings": ["cwd verification is point-in-time, not continuous", "Design acknowledges this with prefix matching for subdirectories"]
+      },
+      "A05_Security_Misconfiguration": {
+        "status": "Addressed",
+        "analysis": "The design handles lsof unavailability gracefully with warnings and manual fallback instructions.",
+        "findings": []
+      },
+      "A06_Vulnerable_Components": {
+        "status": "Addressed",
+        "analysis": "External dependencies (lsof, readlink) are standard OS utilities. The design properly checks for their availability.",
+        "findings": []
+      },
+      "A07_Identification_Failures": {
+        "status": "Partially Addressed",
+        "analysis": "Process identification relies on port and cwd matching. This could potentially match unintended processes in edge cases.",
+        "findings": ["No process name/cmdline verification to confirm it's actually a Node.js/Next.js server"]
+      },
+      "A08_Data_Integrity_Failures": {
+        "status": "Addressed",
+        "analysis": "The cwd verification ensures only processes started from the specific worktree directory are affected. The prefix matching is intentional for monorepo support.",
+        "findings": []
+      },
+      "A09_Security_Logging": {
+        "status": "Not Addressed",
+        "analysis": "The design does not specify security logging for process termination events. Audit trail for who killed what process and when is missing.",
+        "findings": ["No audit logging for process kill operations", "No logging of cwd verification results"]
+      },
+      "A10_SSRF": {
+        "status": "N/A",
+        "analysis": "No server-side request functionality involved."
+      }
+    },
+    "threat_model": [
+      {
+        "threat": "T1: Accidental kill of unrelated process",
+        "likelihood": "Low",
+        "impact": "Medium",
+        "mitigation": "cwd verification (SEC-003), user confirmation prompt",
+        "residual_risk": "Low",
+        "notes": "Prefix matching could theoretically match processes in similarly-named directories"
+      },
+      {
+        "threat": "T2: Command injection via Issue number",
+        "likelihood": "Very Low",
+        "impact": "Critical",
+        "mitigation": "SEC-001: Strict ^[0-9]+$ validation",
+        "residual_risk": "Very Low",
+        "notes": "Well-addressed with regex validation"
+      },
+      {
+        "threat": "T3: Path traversal via crafted cwd",
+        "likelihood": "Very Low",
+        "impact": "Low",
+        "mitigation": "SEC-002: Fixed path pattern (~/.commandmate/)",
+        "residual_risk": "Very Low",
+        "notes": "The script generates paths, not user input"
+      },
+      {
+        "threat": "T4: Race condition (TOCTOU) between cwd check and kill",
+        "likelihood": "Very Low",
+        "impact": "Low",
+        "mitigation": "None explicitly addressed",
+        "residual_risk": "Very Low",
+        "notes": "Window is minimal; process would need to change cwd between check and kill"
+      },
+      {
+        "threat": "T5: Privilege escalation via process kill",
+        "likelihood": "Very Low",
+        "impact": "High",
+        "mitigation": "SEC-004: OS enforces same-user process kill",
+        "residual_risk": "Very Low",
+        "notes": "OS-level protection is sufficient"
+      },
+      {
+        "threat": "T6: Process impersonation (malicious process on same port)",
+        "likelihood": "Very Low",
+        "impact": "Medium",
+        "mitigation": "cwd verification",
+        "residual_risk": "Very Low",
+        "notes": "Attacker would need local access; cwd check provides protection"
+      },
+      {
+        "threat": "T7: Denial of service via repeated cleanup calls",
+        "likelihood": "Low",
+        "impact": "Low",
+        "mitigation": "None explicitly addressed",
+        "residual_risk": "Low",
+        "notes": "User action required; not an automated vector"
+      }
+    ],
+    "risk_level": "Low"
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-SEC-001",
+        "title": "Missing quoting for cwd path in bash comparison",
+        "description": "The cwd verification code shows: `if [[ -n \"$WORKTREE_ABS\" && \"$PROC_CWD\" == \"$WORKTREE_ABS\"* ]]`. While $PROC_CWD is quoted, paths with special characters (spaces, etc.) returned by lsof could cause unexpected behavior. The lsof output parsing (`awk '{print $NF}'`) will also fail for paths with spaces.",
+        "severity": "Medium",
+        "owasp_category": "A03 Injection",
+        "recommendation": "Use proper quoting throughout and consider using lsof -F format for machine-readable output. Example: `lsof -p $PID -F n | grep '^ncwd' | cut -c5-`",
+        "affected_section": "Section 4.3 - get_process_cwd(), Section 5.2",
+        "code_location": "Section 3.3 and Section 5.2 show: lsof -p \"$PID\" | grep cwd | awk '{print $NF}'"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-SEC-001",
+        "title": "Add process command verification for defense-in-depth",
+        "description": "Currently, only port and cwd are verified. Adding verification that the process is actually node/npm would prevent accidentally killing other services that happen to use the same port and cwd combination.",
+        "severity": "Low",
+        "owasp_category": "A07 Identification Failures",
+        "recommendation": "Add a check for process name/command line: `ps -p $PID -o comm= | grep -qE '^(node|npm)$'`",
+        "affected_section": "Section 4.3 - is_worktree_process()"
+      },
+      {
+        "id": "SF-SEC-002",
+        "title": "Add security audit logging for process termination",
+        "description": "Process termination is a potentially destructive operation. The design should include logging of: timestamp, Issue number, PID, cwd path, and termination result for audit trail purposes.",
+        "severity": "Low",
+        "owasp_category": "A09 Security Logging",
+        "recommendation": "Log kill operations to ~/.commandmate/logs/security.log with format: `[TIMESTAMP] PROCESS_KILL issue=$ISSUE_NO pid=$PID cwd=$PROC_CWD result=success|failed`",
+        "affected_section": "Section 4.3 - graceful_kill()"
+      },
+      {
+        "id": "SF-SEC-003",
+        "title": "Explicit process ownership verification",
+        "description": "While SEC-004 correctly notes that lsof/kill only work on user's own processes, adding explicit ownership verification provides defense-in-depth and clearer error messages.",
+        "severity": "Low",
+        "owasp_category": "A01 Broken Access Control",
+        "recommendation": "Add ownership check: `ps -p $PID -o user= | grep -q \"$(whoami)\"`",
+        "affected_section": "Section 5.1 - SEC-004"
+      },
+      {
+        "id": "SF-SEC-004",
+        "title": "Document TOCTOU window acknowledgement",
+        "description": "There is a small race condition window between cwd verification and process termination. While the risk is minimal, it should be documented in the security design section.",
+        "severity": "Low",
+        "owasp_category": "A04 Insecure Design",
+        "recommendation": "Add to Section 5: 'Note: There is a minimal TOCTOU window between cwd verification and kill. This is acceptable as the window is measured in microseconds and exploitation would require precise timing by a local attacker.'",
+        "affected_section": "Section 5 - Security Design"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-SEC-001",
+        "title": "Consider using signal trapping in target process",
+        "description": "Rather than external process detection, the server could register itself in a registry file on startup and deregister on shutdown. This would provide more reliable detection than port/cwd matching.",
+        "severity": "Info",
+        "recommendation": "For future consideration: Implement a server registry at ~/.commandmate/registry.json that tracks active servers with their PIDs, ports, cwds, and Issue numbers.",
+        "affected_section": "Future Enhancement"
+      },
+      {
+        "id": "NTH-SEC-002",
+        "title": "Add dry-run mode for safety",
+        "description": "A --dry-run flag would allow users to preview which processes would be killed without actually terminating them.",
+        "severity": "Info",
+        "recommendation": "Add a dry-run mode that shows what would be killed: `worktree-cleanup --dry-run 135`",
+        "affected_section": "Section 2 - Usage"
+      },
+      {
+        "id": "NTH-SEC-003",
+        "title": "Consider using process groups for reliable termination",
+        "description": "If the server spawns child processes, individual process kill may leave orphans. Using process groups (kill -TERM -$PID) would ensure all child processes are also terminated.",
+        "severity": "Info",
+        "recommendation": "Investigate using kill -TERM -$PID for process group termination when the process is a session leader.",
+        "affected_section": "Section 4.3 - graceful_kill()"
+      }
+    ]
+  },
+  "positive_findings": [
+    {
+      "id": "PF-001",
+      "title": "Comprehensive input validation",
+      "description": "The design includes thorough Issue number validation with both range checking (1-2147483647) and format validation (^[0-9]+$). This aligns well with the TypeScript validators in src/cli/utils/input-validators.ts."
+    },
+    {
+      "id": "PF-002",
+      "title": "Graceful degradation for missing dependencies",
+      "description": "The check_lsof_available() function handles missing lsof gracefully, providing fallback instructions rather than failing silently."
+    },
+    {
+      "id": "PF-003",
+      "title": "User confirmation for destructive operations",
+      "description": "The design includes user confirmation prompts before database deletion, following the principle of least surprise."
+    },
+    {
+      "id": "PF-004",
+      "title": "Proper graceful shutdown sequence",
+      "description": "The graceful_kill() function correctly implements SIGTERM with timeout before SIGKILL, allowing processes to clean up."
+    },
+    {
+      "id": "PF-005",
+      "title": "cwd-based process identification",
+      "description": "Using cwd verification (SEC-003) is a reasonable approach to prevent accidental termination of unrelated processes."
+    }
+  ],
+  "summary": "The security design for Issue #151 is generally sound with a Low overall risk rating. The design correctly addresses command injection (A03) through strict input validation and broken access control (A01) by relying on OS-level process ownership enforcement. The cwd-based process identification is a pragmatic approach that balances security with usability.\n\nOne must-fix item was identified: the lsof output parsing and path handling could fail for paths containing spaces. Several should-fix items focus on defense-in-depth measures including process command verification, security audit logging, and explicit ownership checks.\n\nThe design demonstrates good security thinking with explicit threat documentation (SEC-001 through SEC-005) and graceful degradation for missing dependencies. The integration with existing TypeScript validators (MAX_ISSUE_NO consistency) is well-considered.",
+  "overall_quality": "Good",
+  "reviewer": "Architecture Review Agent (Security Focus)",
+  "next_steps": [
+    "Address MF-SEC-001: Fix lsof output parsing for paths with spaces",
+    "Consider SF-SEC-002: Add security audit logging for compliance",
+    "Document TOCTOU acknowledgement per SF-SEC-004"
+  ]
+}

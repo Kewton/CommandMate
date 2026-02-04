@@ -1,0 +1,253 @@
+{
+  "issue_number": 152,
+  "review_type": "impact_analysis",
+  "stage": 3,
+  "stage_name": "Impact Analysis Review",
+  "reviewer": "architecture-review-agent",
+  "review_date": "2026-02-04",
+  "status": "conditional_approval",
+  "summary": "The design policy for Issue #152 has well-documented impact scope for direct changes. However, several important impact considerations are missing or incomplete. The new timeout error throwing behavior in startClaudeSession() creates a breaking change that affects error handling in callers. Test coverage for timing-related bugs is limited due to mocking. UI error handling improvements are mentioned but not specified in detail.",
+
+  "must_fix": [
+    {
+      "id": "IMP-001",
+      "category": "Breaking Change",
+      "title": "New exception from startClaudeSession() not documented as breaking change",
+      "description": "The design adds a new thrown Error on timeout in startClaudeSession(). This is a breaking change that affects all callers. Currently, callers may not have try-catch blocks expecting this error. The design policy should document this as a breaking change and list all affected callers.",
+      "affected_files": [
+        "src/lib/cli-tools/claude.ts (line 56 - startSession() calls startClaudeSession())",
+        "src/lib/claude-session.ts (line 373 - restartClaudeSession() calls startClaudeSession())",
+        "src/app/api/worktrees/[id]/send/route.ts (line 100 - via ClaudeTool.startSession())"
+      ],
+      "current_documentation": "Design mentions 'throw new Error(`Claude initialization timeout`)' but does not document as breaking change",
+      "recommended_documentation": "Add 'Breaking Changes' section to design policy documenting: 1) startClaudeSession() now throws on timeout (previously silent), 2) List all callers that need error handling updates, 3) Specify expected error message format for API response consistency"
+    },
+    {
+      "id": "IMP-002",
+      "category": "Test Coverage Gap",
+      "title": "Integration tests mock startClaudeSession/sendMessageToClaude - cannot test actual race condition",
+      "description": "The existing integration test (tests/integration/api-send-cli-tool.test.ts) mocks startClaudeSession and sendMessageToClaude at lines 14-19. This means the actual timing/race condition being fixed is NOT testable with current test infrastructure. The design should address how to verify the fix.",
+      "affected_files": [
+        "tests/integration/api-send-cli-tool.test.ts"
+      ],
+      "current_documentation": "Design lists unit tests for waitForPrompt() and startClaudeSession() but does not address integration testing limitations",
+      "recommended_documentation": "Add note about testing strategy: 1) Current integration tests use mocks and cannot verify timing fix, 2) Consider adding E2E test or manual verification procedure, 3) Document expected behavior when timeout occurs (error message, HTTP status)"
+    }
+  ],
+
+  "should_fix": [
+    {
+      "id": "IMP-003",
+      "category": "Missing Affected File",
+      "title": "claude-poller.ts uses captureClaudeOutput and isClaudeRunning - not listed in impact scope",
+      "description": "src/lib/claude-poller.ts imports captureClaudeOutput and isClaudeRunning from claude-session.ts (line 6). While these functions are not being modified, they share patterns with the changed functions. The design should mention this file as potentially affected by pattern consistency.",
+      "affected_files": [
+        "src/lib/claude-poller.ts"
+      ],
+      "current_documentation": "Not mentioned in design policy impact scope",
+      "recommended_documentation": "Add to 'Indirect Impact' section with note: 'No changes required - uses different functions from claude-session.ts'"
+    },
+    {
+      "id": "IMP-004",
+      "category": "Missing Affected File",
+      "title": "api/hooks/claude-done/route.ts uses captureClaudeOutput - not listed",
+      "description": "src/app/api/hooks/claude-done/route.ts imports captureClaudeOutput from claude-session.ts (line 9). While not directly affected, this file should be mentioned for completeness.",
+      "affected_files": [
+        "src/app/api/hooks/claude-done/route.ts"
+      ],
+      "current_documentation": "Not mentioned in design policy impact scope",
+      "recommended_documentation": "Add to 'Impact None' section: 'api/hooks/claude-done/route.ts - uses captureClaudeOutput only, unaffected'"
+    },
+    {
+      "id": "IMP-005",
+      "category": "Missing Test File",
+      "title": "tests/integration/api-prompt-handling.test.ts mocks claude-session - should be listed",
+      "description": "This test file mocks getSessionName and isClaudeRunning from claude-session.ts (lines 48-51). While the mock will continue working, any new exports (like waitForPrompt) may need to be added to the mock.",
+      "affected_files": [
+        "tests/integration/api-prompt-handling.test.ts"
+      ],
+      "current_documentation": "Not listed in test strategy section",
+      "recommended_documentation": "Add note: 'tests/integration/api-prompt-handling.test.ts - Mock may need update if waitForPrompt is exported'"
+    },
+    {
+      "id": "IMP-006",
+      "category": "API Response Change",
+      "title": "Error response format for timeout not specified",
+      "description": "The design specifies throwing an error on timeout but does not specify the HTTP response format. The send/route.ts already has error handling (lines 117-123) that catches errors and returns 500 with error message. The design should confirm this is the desired behavior.",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/send/route.ts"
+      ],
+      "current_documentation": "Design mentions 'send/route.ts - Error handling strengthening' without specifying details",
+      "recommended_documentation": "Specify: 1) HTTP status code (500 for timeout), 2) Error message format, 3) Whether to distinguish timeout from other errors"
+    },
+    {
+      "id": "IMP-007",
+      "category": "Rollback Consideration",
+      "title": "Rollback scenario for sessions in-progress not addressed",
+      "description": "The rollback plan is simple but does not address what happens to sessions that were started under the new timeout behavior. If a rollback is needed mid-session, the new error throwing may have already affected user experience.",
+      "affected_files": [],
+      "current_documentation": "Rollback plan mentions revert only",
+      "recommended_documentation": "Add note: 'No state cleanup required for rollback - new error throwing does not persist state. Sessions already started will continue normally.'"
+    }
+  ],
+
+  "nice_to_have": [
+    {
+      "id": "IMP-008",
+      "category": "Documentation",
+      "title": "CLI tools consistency check for Codex/Gemini",
+      "description": "The design mentions that Codex (fixed delay) and Gemini (non-interactive) are not affected. However, the design policy should explicitly state why the same changes are not needed for these tools.",
+      "affected_files": [
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/cli-tools/gemini.ts"
+      ],
+      "recommendation": "Add note: 'Codex uses fixed delay (3000ms) before sendMessage - no prompt detection needed. Gemini is non-interactive - no session initialization.'"
+    },
+    {
+      "id": "IMP-009",
+      "category": "UI Error Handling",
+      "title": "MessageInput error display already exists but design says 'if needed'",
+      "description": "MessageInput.tsx already has error state and displays errors (lines 35, 78, 206-209). The design says 'Error display addition (if needed)' which is vague.",
+      "affected_files": [
+        "src/components/worktree/MessageInput.tsx"
+      ],
+      "recommendation": "Clarify: 'MessageInput.tsx already handles errors via handleApiError(). No additional changes needed.' or specify what additional error handling is required."
+    },
+    {
+      "id": "IMP-010",
+      "category": "Pattern File Update",
+      "title": "cli-patterns.test.ts may need new tests for usage in claude-session.ts",
+      "description": "src/lib/__tests__/cli-patterns.test.ts has tests for CLAUDE_PROMPT_PATTERN. If the pattern usage in claude-session.ts differs from response-poller.ts, additional test cases may be valuable.",
+      "affected_files": [
+        "src/lib/__tests__/cli-patterns.test.ts"
+      ],
+      "recommendation": "Consider adding tests that verify CLAUDE_PROMPT_PATTERN behavior in session initialization context (e.g., partial output, empty output)."
+    }
+  ],
+
+  "impact_analysis": {
+    "files_with_direct_changes": [
+      {
+        "path": "src/lib/claude-session.ts",
+        "change_type": "modify",
+        "impact_level": "high",
+        "description": "Core changes: startClaudeSession() timeout handling, sendMessageToClaude() prompt verification, new waitForPrompt() function, new constants",
+        "functions_affected": [
+          "startClaudeSession (lines 165-225)",
+          "sendMessageToClaude (lines 239-271)",
+          "waitForPrompt (new function)"
+        ],
+        "breaking_changes": [
+          "startClaudeSession() now throws on timeout (previously silent)"
+        ]
+      },
+      {
+        "path": "src/app/api/worktrees/[id]/send/route.ts",
+        "change_type": "modify",
+        "impact_level": "medium",
+        "description": "Error handling for session startup failures. Already has try-catch at lines 117-123.",
+        "functions_affected": ["POST handler"],
+        "breaking_changes": []
+      }
+    ],
+    "files_with_indirect_impact": [
+      {
+        "path": "src/lib/cli-tools/claude.ts",
+        "impact_level": "low",
+        "reason": "Wraps claude-session.ts - inherits error behavior automatically. startSession() at line 56 calls startClaudeSession(). No code changes needed but error behavior changes."
+      },
+      {
+        "path": "src/lib/claude-poller.ts",
+        "impact_level": "none",
+        "reason": "Uses captureClaudeOutput and isClaudeRunning - different functions from those being modified."
+      },
+      {
+        "path": "src/app/api/hooks/claude-done/route.ts",
+        "impact_level": "none",
+        "reason": "Uses captureClaudeOutput only - not affected by changes."
+      },
+      {
+        "path": "src/lib/cli-tools/manager.ts",
+        "impact_level": "none",
+        "reason": "Instantiates ClaudeTool but does not directly interact with claude-session.ts functions."
+      },
+      {
+        "path": "src/components/worktree/MessageInput.tsx",
+        "impact_level": "low",
+        "reason": "May display new timeout error messages. Already has error handling in place."
+      },
+      {
+        "path": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact_level": "low",
+        "reason": "handleMessageSent() callback triggers message send. Errors are handled by MessageInput."
+      }
+    ],
+    "test_files_affected": [
+      {
+        "path": "tests/integration/api-send-cli-tool.test.ts",
+        "impact": "Mocks startClaudeSession and sendMessageToClaude - mock may need waitForPrompt added if exported",
+        "mock_lines": "14-19"
+      },
+      {
+        "path": "tests/integration/api-prompt-handling.test.ts",
+        "impact": "Mocks claude-session module - may need update for new exports",
+        "mock_lines": "48-51"
+      },
+      {
+        "path": "tests/unit/cli-tools/claude.test.ts",
+        "impact": "Tests ClaudeTool properties and interface - no changes needed"
+      },
+      {
+        "path": "src/lib/__tests__/cli-patterns.test.ts",
+        "impact": "Tests CLAUDE_PROMPT_PATTERN - no changes needed but additional tests could be valuable"
+      }
+    ],
+    "files_not_affected": [
+      {
+        "path": "src/lib/cli-tools/codex.ts",
+        "reason": "Uses fixed delay method - no prompt detection"
+      },
+      {
+        "path": "src/lib/cli-tools/gemini.ts",
+        "reason": "Non-interactive tool - no session management"
+      }
+    ]
+  },
+
+  "rollback_analysis": {
+    "complexity": "low",
+    "steps": [
+      "git revert changes to src/lib/claude-session.ts",
+      "git revert changes to src/app/api/worktrees/[id]/send/route.ts (if any)",
+      "No database migrations required",
+      "No configuration changes required"
+    ],
+    "risks": [
+      "Sessions started during the deployment period may have experienced timeout errors - users would need to retry"
+    ],
+    "data_impact": "None - no persistent state changes"
+  },
+
+  "checklist_additions": [
+    {
+      "category": "Documentation",
+      "item": "Add 'Breaking Changes' section documenting startClaudeSession() timeout behavior change"
+    },
+    {
+      "category": "Documentation",
+      "item": "Add claude-poller.ts and api/hooks/claude-done/route.ts to impact scope as 'No changes required'"
+    },
+    {
+      "category": "Testing",
+      "item": "Add note about integration test mocking limitations for timing verification"
+    },
+    {
+      "category": "Testing",
+      "item": "Consider E2E test or manual verification procedure for timing fix"
+    },
+    {
+      "category": "API",
+      "item": "Confirm HTTP 500 + error message format for timeout errors in send/route.ts"
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "issue_number": 152,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "review_date": "2026-02-04",
+  "reviewer": "architecture-review-agent",
+
+  "must_fix": [
+    {
+      "id": "DRY-001",
+      "principle": "DRY",
+      "severity": "high",
+      "title": "プロンプト検出パターンが重複している",
+      "description": "設計書の `waitForPrompt()` で `/^>\\s*$/m` というパターンを使用しているが、既存の `cli-patterns.ts` には `CLAUDE_PROMPT_PATTERN = /^[>❯](\\s*$|\\s+\\S)/m` という定数が既に定義されている。さらに、`startClaudeSession()` でも `/^>\\s*$/m` が直接記述されている。",
+      "location": {
+        "files": [
+          "src/lib/claude-session.ts:211",
+          "設計書: waitForPrompt()",
+          "設計書: sendMessageToClaude()"
+        ]
+      },
+      "current_pattern": "/^>\\s*$/m",
+      "existing_constant": "CLAUDE_PROMPT_PATTERN from cli-patterns.ts",
+      "recommendation": "既存の `CLAUDE_PROMPT_PATTERN` を使用するか、新しいパターンを `cli-patterns.ts` に追加して一元管理すること。これにより、新しいプロンプト文字 (❯) への対応漏れも防げる。",
+      "impact": "新しいプロンプト文字 (❯) に対応していないため、一部の環境でプロンプト検出が失敗する可能性がある"
+    }
+  ],
+
+  "should_fix": [
+    {
+      "id": "SRP-001",
+      "principle": "SRP (Single Responsibility)",
+      "severity": "medium",
+      "title": "waitForPrompt() のタイムアウト/ポーリングロジックが再利用不可",
+      "description": "設計書の `waitForPrompt()` は startClaudeSession() 内のポーリングロジックとほぼ同じ構造を持つ。while + Date.now() + setTimeout のパターンが重複している。",
+      "location": {
+        "files": [
+          "設計書: waitForPrompt()",
+          "src/lib/claude-session.ts:200-218 (startClaudeSession内のwhile loop)"
+        ]
+      },
+      "recommendation": "タイムアウト付きポーリングの汎用関数 `pollWithTimeout()` を作成し、両方の関数から利用することを検討。ただし、現時点では YAGNI の観点から過度な抽象化は避け、Issue #152 の修正完了後に必要に応じてリファクタリングする。",
+      "trade_off": "KISS vs DRY のトレードオフ。現在の設計はシンプルさを優先しており妥当"
+    },
+    {
+      "id": "DRY-002",
+      "principle": "DRY",
+      "severity": "medium",
+      "title": "セパレータパターンも重複",
+      "description": "`startClaudeSession()` 内で `/^─{10,}$/m` を直接使用しているが、`cli-patterns.ts` に `CLAUDE_SEPARATOR_PATTERN` が既に定義されている。",
+      "location": {
+        "files": [
+          "src/lib/claude-session.ts:211"
+        ]
+      },
+      "recommendation": "`CLAUDE_SEPARATOR_PATTERN` をインポートして使用する"
+    },
+    {
+      "id": "OCP-001",
+      "principle": "OCP (Open/Closed)",
+      "severity": "medium",
+      "title": "タイムアウト値とポーリング間隔がハードコード",
+      "description": "設計書ではタイムアウト 15秒、ポーリング間隔 300ms/200ms を固定値で設定している。将来の調整が必要な場合、コード変更が必要になる。",
+      "location": {
+        "files": [
+          "設計書: startClaudeSession()",
+          "設計書: waitForPrompt()"
+        ]
+      },
+      "recommendation": "定数として `cli-config.ts` または `claude-session.ts` 冒頭に抽出し、名前付き定数として管理する。例: `const CLAUDE_INIT_TIMEOUT = 15000;`",
+      "counter_argument": "YAGNI の観点から、現時点では必要ないかもしれない。ただし設定の可視性向上のため、少なくとも定数化は推奨"
+    }
+  ],
+
+  "nice_to_have": [
+    {
+      "id": "KISS-001",
+      "principle": "KISS",
+      "severity": "low",
+      "title": "sendMessageToClaude() 内の二重プロンプト確認",
+      "description": "設計書では送信前に一度プロンプト状態を確認し、プロンプトでなければ `waitForPrompt()` を呼ぶ構造になっている。単純に `waitForPrompt()` を呼ぶだけでよい可能性がある（内部で即座にプロンプトを検出すれば即時 return するため）。",
+      "location": {
+        "files": [
+          "設計書: sendMessageToClaude()"
+        ]
+      },
+      "recommendation": "最初のチェックを省略し、常に `waitForPrompt()` を呼ぶ形に簡略化を検討。ただし、現在の設計は意図が明確であり、パフォーマンスへの影響も軽微なため優先度は低い"
+    },
+    {
+      "id": "DOC-001",
+      "principle": "Documentation",
+      "severity": "low",
+      "title": "500ms 安定待機の根拠が不明",
+      "description": "プロンプト検出後の 500ms 待機について、なぜ 500ms が選ばれたかの根拠がドキュメント化されていない。",
+      "location": {
+        "files": [
+          "設計書: startClaudeSession() (安定待機)"
+        ]
+      },
+      "recommendation": "経験則であれば「Claude CLIの描画完了を確実にするためのバッファ」等のコメントを追加"
+    }
+  ],
+
+  "solid_analysis": {
+    "SRP": {
+      "status": "mostly_compliant",
+      "score": 4,
+      "notes": "waitForPrompt() は単一責任（プロンプト待機）を持つ。ポーリングロジックの抽象化は今後の検討事項"
+    },
+    "OCP": {
+      "status": "compliant",
+      "score": 4,
+      "notes": "既存の sendMessageToClaude() を拡張しており、既存機能への影響は最小限。タイムアウト値の設定化は改善の余地あり"
+    },
+    "LSP": {
+      "status": "not_applicable",
+      "score": null,
+      "notes": "継承関係なし"
+    },
+    "ISP": {
+      "status": "not_applicable",
+      "score": null,
+      "notes": "インターフェース変更なし"
+    },
+    "DIP": {
+      "status": "compliant",
+      "score": 5,
+      "notes": "tmux操作は既存の抽象化（capturePane, sendKeys）を使用しており、低レベル詳細への依存がない"
+    }
+  },
+
+  "other_principles_analysis": {
+    "KISS": {
+      "status": "compliant",
+      "score": 4,
+      "notes": "シンプルなポーリングループで実装。過度な抽象化を避けている"
+    },
+    "YAGNI": {
+      "status": "compliant",
+      "score": 5,
+      "notes": "必要な機能のみ実装。将来の可能性のための過度な設計がない"
+    },
+    "DRY": {
+      "status": "needs_improvement",
+      "score": 2,
+      "notes": "プロンプト検出パターンとセパレータパターンが cli-patterns.ts と重複している。must_fix 参照"
+    }
+  },
+
+  "summary": {
+    "overall_assessment": "設計は SOLID 原則に概ね準拠しており、KISS と YAGNI のバランスも良好。しかし DRY 原則において重要な違反がある。既存の cli-patterns.ts で定義済みのパターン定数を使用せず、ハードコードされた正規表現を使用している点は修正が必要。特に新しいプロンプト文字 (❯) への対応漏れは実際の不具合につながる可能性が高い。",
+    "total_findings": {
+      "must_fix": 1,
+      "should_fix": 3,
+      "nice_to_have": 2
+    },
+    "recommendation": "1. cli-patterns.ts から CLAUDE_PROMPT_PATTERN と CLAUDE_SEPARATOR_PATTERN をインポートして使用する\n2. 新しいプロンプト文字 (❯) への対応を確認する\n3. タイムアウト値を定数として抽出する",
+    "approval_status": "conditional_approval",
+    "approval_condition": "DRY-001 (プロンプト検出パターンの重複) を修正すれば承認可能"
+  }
+}

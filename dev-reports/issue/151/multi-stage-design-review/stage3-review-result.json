@@ -1,0 +1,110 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-04",
+  "design_doc": "dev-reports/design/issue-151-worktree-cleanup-server-detection-design-policy.md",
+  "impact_analysis": {
+    "direct_impact": [
+      ".claude/commands/worktree-cleanup.md - Phase 1修正、Phase 2拡張（約60-80行追加）",
+      ".claude/commands/worktree-setup.md - Phase 1検証範囲修正（約2行修正）",
+      ".claude/lib/validators.sh - 新規作成（Issue番号検証関数）",
+      ".claude/lib/process-utils.sh - 新規作成（プロセス関連関数）"
+    ],
+    "indirect_impact": [
+      "CLAUDE.md - Issue番号検証範囲が1-999999から1-2147483647に変更されることをドキュメントに反映する必要あり",
+      "dev-reports/issue/136/work-plan.md - worktree-setup/cleanupの変更履歴として参照される可能性",
+      "src/cli/utils/input-validators.ts - MAX_ISSUE_NO定数との同期が必要（validators.shと二重管理）",
+      "tests/unit/cli/utils/input-validators.test.ts - 将来的にbashスクリプトとの整合性テストが必要になる可能性"
+    ],
+    "breaking_changes": [
+      "Issue番号の検証範囲変更（1-999999 -> 1-2147483647）は後方互換性あり（範囲拡大のため）",
+      "待機時間の変更（2秒 -> 3秒）は後方互換性あり（タイムアウト延長のため）"
+    ],
+    "risk_level": "Low",
+    "risk_assessment": {
+      "rationale": "既存のPIDファイル検出ロジックは維持され、ポートベース検出はフォールバックとして追加される。lsof不在時もGraceful Degradationで既存機能は動作。破壊的変更なし。",
+      "mitigations": [
+        "cwd検証によりWorktreeディレクトリからの起動のみを停止対象とする",
+        "lsof不在時は警告表示と手動停止案内を提供",
+        "SIGTERM -> SIGKILL の段階的停止による安全なプロセス終了"
+      ]
+    }
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-IMP-001",
+        "title": ".claude/lib/ディレクトリの作成が設計書6.1に未記載",
+        "description": "設計書セクション6.1「変更対象ファイル」には worktree-cleanup.md と worktree-setup.md のみ記載されているが、実際にはセクション8「実装チェックリスト」で .claude/lib/validators.sh と .claude/lib/process-utils.sh の新規作成が必要とされている。影響範囲ドキュメントに新規作成ファイルを追加すべき。",
+        "recommendation": "セクション6.1に以下を追加：\n- `.claude/lib/validators.sh` - 新規作成、Issue番号検証関数\n- `.claude/lib/process-utils.sh` - 新規作成、プロセス関連関数",
+        "severity": "Medium"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-IMP-001",
+        "title": "CLAUDE.mdへの影響が未記載",
+        "description": "CLAUDE.mdには worktree-setup/cleanup スキルの説明が記載されている（346-347行、418-419行）。Issue番号の検証範囲が変更される場合、このドキュメントのエラーハンドリング説明との整合性を確認し、必要に応じて更新すべき。",
+        "recommendation": "CLAUDE.mdの関連セクションを確認し、Issue番号検証範囲の更新が反映されているか確認するステップをテスト計画に追加",
+        "severity": "Low"
+      },
+      {
+        "id": "SF-IMP-002",
+        "title": "ポート算出ロジック不整合の影響評価が不十分",
+        "description": "設計書4.2セクション[MF-CONS-002]で指摘されているように、port-allocator.ts（3001 + issueNo % 99）と worktree-setup.md（3001 + issueNo % 100）の算出ロジックが微妙に異なる。この不整合により、同一Issue番号でも異なるポートに割り当てられるケースがあり、worktree-cleanupでの検出漏れが発生する可能性がある。",
+        "recommendation": "テスト計画に「Issue #99等の境界値でポート検出が正しく動作するか」のテストケースを追加",
+        "severity": "Medium"
+      },
+      {
+        "id": "SF-IMP-003",
+        "title": "関連するCLIコマンド(stop)への影響分析が不足",
+        "description": "src/cli/commands/stop.ts は既にPIDファイルベースの停止機能を実装している。worktree-cleanupスキルとの機能重複・役割分担が明確でない。",
+        "recommendation": "設計書に「commandmate stop --issue」と「/worktree-cleanup」の使い分けガイドラインを追加、または関連性を明記",
+        "severity": "Low"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-IMP-001",
+        "title": "将来的なMAX_ISSUE_NO同期メカニズムの検討",
+        "description": "設計書10.2で言及されているように、validators.shとinput-validators.tsでMAX_ISSUE_NOを二重管理している。現時点ではコメントによる相互参照で対応しているが、長期的にはビルド時自動生成やテストによる整合性チェックを検討すべき。",
+        "recommendation": "将来課題としてIssue化を検討",
+        "severity": "Low"
+      },
+      {
+        "id": "NTH-IMP-002",
+        "title": "Linux環境でのテスト環境整備",
+        "description": "テスト計画7.1 #4にLinux環境（Docker node:18-alpine）でのテストが記載されているが、CI/CDパイプラインへの統合方法が不明。",
+        "recommendation": "CI/CD（GitHub Actions）でのLinuxテスト実行方法を検討",
+        "severity": "Low"
+      }
+    ]
+  },
+  "affected_files_summary": {
+    "new_files": [
+      ".claude/lib/validators.sh",
+      ".claude/lib/process-utils.sh"
+    ],
+    "modified_files": [
+      ".claude/commands/worktree-cleanup.md",
+      ".claude/commands/worktree-setup.md"
+    ],
+    "potentially_affected_documentation": [
+      "CLAUDE.md"
+    ],
+    "related_source_files": [
+      "src/cli/utils/input-validators.ts",
+      "src/cli/utils/port-allocator.ts",
+      "src/cli/commands/stop.ts"
+    ]
+  },
+  "migration_rollback_assessment": {
+    "migration_needed": false,
+    "migration_rationale": "新機能追加のみで、既存データや設定への影響なし",
+    "rollback_strategy": "Git revertで変更ファイルを元に戻すのみ。新規作成ファイル（.claude/lib/*）は削除。",
+    "rollback_complexity": "Low"
+  },
+  "summary": "設計書の影響範囲分析は概ね適切だが、セクション6.1「変更対象ファイル」に新規作成ファイル（.claude/lib/validators.sh, process-utils.sh）の記載が漏れている（Must Fix）。また、CLAUDE.mdへのドキュメント更新影響、ポート算出ロジック不整合に対するテストケース追加が推奨される（Should Fix）。後方互換性は維持されており、ロールバックも容易なため、リスクレベルはLow。",
+  "overall_quality": "Good"
+}

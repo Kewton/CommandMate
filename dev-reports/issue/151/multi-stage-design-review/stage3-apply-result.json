@@ -1,0 +1,54 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "applied_findings": [
+    {
+      "id": "MF-IMP-001",
+      "title": ".claude/lib/ディレクトリの作成が設計書6.1に未記載",
+      "severity": "Medium",
+      "action": "セクション6.1「変更対象ファイル」に `.claude/lib/validators.sh` と `.claude/lib/process-utils.sh` を新規作成ファイルとして追加"
+    },
+    {
+      "id": "SF-IMP-001",
+      "title": "CLAUDE.mdへの影響が未記載",
+      "severity": "Low",
+      "action": "セクション6.2「関連ドキュメント影響」を新規追加し、CLAUDE.md整合性確認の必要性を記載。テスト計画7.1に項目#9を追加"
+    },
+    {
+      "id": "SF-IMP-002",
+      "title": "ポート算出ロジック不整合の影響評価が不十分",
+      "severity": "Medium",
+      "action": "テスト計画7.1に項目#10「Issue #99等の境界値でポート検出」を追加。port-allocator.tsとworktree-setup.mdの差異を検証するテストケース"
+    },
+    {
+      "id": "SF-IMP-003",
+      "title": "関連するCLIコマンド(stop)への影響分析が不足",
+      "severity": "Low",
+      "action": "セクション6.3「CLIコマンドとの機能分担」を新規追加。`commandmate stop --issue`と`/worktree-cleanup`の役割・対象・検出方法・使用場面の違いを明確化"
+    }
+  ],
+  "skipped_findings": [],
+  "nice_to_have_noted": [
+    {
+      "id": "NTH-IMP-001",
+      "title": "将来的なMAX_ISSUE_NO同期メカニズムの検討",
+      "note": "既にセクション10.2で将来検討事項として記載済み"
+    },
+    {
+      "id": "NTH-IMP-002",
+      "title": "Linux環境でのテスト環境整備",
+      "note": "テスト計画7.1 #4にLinux環境テストは記載済み。CI/CD統合は実装フェーズで検討"
+    }
+  ],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-151-worktree-cleanup-server-detection-design-policy.md",
+  "changes_summary": {
+    "section_6_1": "新規作成ファイル(.claude/lib/validators.sh, process-utils.sh)を変更対象ファイル一覧に追加",
+    "section_6_2": "新規追加 - 関連ドキュメント影響（CLAUDE.md整合性確認）",
+    "section_6_3": "新規追加 - CLIコマンドとの機能分担ガイドライン",
+    "section_7_1": "テスト項目#9(CLAUDE.md整合性確認)、#10(Issue #99境界値テスト)を追加",
+    "section_9": "Stage 3レビュー指摘対応サマリーを追加"
+  },
+  "summary": "Stage 3（影響分析レビュー）の全指摘事項を設計書に反映完了。Must Fix 1件（セクション6.1に新規作成ファイル追加）、Should Fix 3件（関連ドキュメント影響、テストケース追加、CLI機能分担明確化）を対応。Nice to Have 2件は既存の将来検討事項または実装フェーズで対応予定として記録。",
+  "apply_date": "2026-02-04"
+}

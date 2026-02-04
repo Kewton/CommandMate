@@ -1,0 +1,104 @@
+{
+  "status": "passed",
+  "criteria_results": [
+    {
+      "id": 1,
+      "description": "iPadで長押し（500ms以上）によりコンテキストメニューが表示される",
+      "status": "pass",
+      "evidence": "useLongPress.ts exports LONG_PRESS_DELAY=500, useLongPress.test.ts 'should call onLongPress after 500ms' test passes, FileTreeView.test.tsx 'should open context menu on long press (500ms)' test passes"
+    },
+    {
+      "id": 2,
+      "description": "長押し中に10px以上移動した場合はメニューが表示されない",
+      "status": "pass",
+      "evidence": "useLongPress.ts exports MOVE_THRESHOLD=10, useLongPress.test.ts 'should clear timer when touch moves more than 10px' and 'should clear timer when touch moves 10px diagonally' tests pass, FileTreeView.test.tsx 'should NOT open context menu if touch moves more than 10px' test passes"
+    },
+    {
+      "id": 3,
+      "description": "PC（マウス右クリック）の既存動作が維持される",
+      "status": "pass",
+      "evidence": "FileTreeView.test.tsx 'Context menu - mouse right click' describe block contains tests: 'should trigger context menu on mouse right click', 'should open file context menu at mouse coordinates', 'should open directory context menu on right click' - all pass"
+    },
+    {
+      "id": 4,
+      "description": "iPhone（iOS）でも同様に動作する",
+      "status": "pass",
+      "evidence": "useLongPress hook is platform-agnostic React TouchEvent implementation, CSS properties (touch-action: manipulation, WebkitTouchCallout: none) prevent iOS native gestures, FileTreeView.test.tsx 'should have CSS to prevent native long press behavior' test verifies touch-action style"
+    },
+    {
+      "id": 5,
+      "description": "タッチキャンセル時（通知表示など）にタイマーが適切にクリアされる",
+      "status": "pass",
+      "evidence": "useLongPress.test.ts 'should clear timer on touchcancel' test passes, FileTreeView.test.tsx 'should clear timer on touchcancel (system interruption)' test passes"
+    },
+    {
+      "id": 6,
+      "description": "コンポーネントアンマウント時にタイマーがクリアされる（メモリリーク防止）",
+      "status": "pass",
+      "evidence": "useLongPress.ts useEffect cleanup returns clearTimer(), useLongPress.test.ts 'should clear timer on unmount' test explicitly verifies unmount cleanup"
+    }
+  ],
+  "test_summary": {
+    "total": 88,
+    "passed": 88,
+    "failed": 0,
+    "coverage": 80,
+    "test_files": [
+      {
+        "file": "tests/unit/hooks/useLongPress.test.ts",
+        "tests": 18,
+        "passed": 18
+      },
+      {
+        "file": "tests/unit/hooks/useContextMenu.test.ts",
+        "tests": 18,
+        "passed": 18
+      },
+      {
+        "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+        "tests": 52,
+        "passed": 52
+      }
+    ]
+  },
+  "static_analysis": {
+    "typescript_errors": 0,
+    "eslint_errors": 0
+  },
+  "build_status": "success",
+  "implementation_verification": {
+    "useLongPress_ts": {
+      "LONG_PRESS_DELAY_exported": true,
+      "MOVE_THRESHOLD_exported": true,
+      "value_LONG_PRESS_DELAY": 500,
+      "value_MOVE_THRESHOLD": 10
+    },
+    "useContextMenu_ts": {
+      "openMenu_accepts_TouchEvent": true,
+      "coordinate_extraction": "touches[0].clientX/clientY for TouchEvent, clientX/clientY for MouseEvent"
+    },
+    "FileTreeView_tsx": {
+      "useLongPress_imported": true,
+      "touch_handlers_attached": true,
+      "css_touch_action": "manipulation",
+      "css_webkit_touch_callout": "none"
+    }
+  },
+  "test_case_coverage": {
+    "long_press_fire_test": true,
+    "move_cancel_test": true,
+    "touch_cancel_test": true,
+    "unmount_cleanup_test": true,
+    "mouse_right_click_test": true,
+    "touch_event_support_test": true
+  },
+  "evidence_files": [
+    "src/hooks/useLongPress.ts",
+    "src/hooks/useContextMenu.ts",
+    "src/components/worktree/FileTreeView.tsx",
+    "tests/unit/hooks/useLongPress.test.ts",
+    "tests/unit/hooks/useContextMenu.test.ts",
+    "tests/unit/components/worktree/FileTreeView.test.tsx"
+  ],
+  "message": "All acceptance criteria verified successfully. iPad/iPhone long press context menu implementation is complete with 88 tests passing, 0 TypeScript errors, 0 ESLint errors, and successful build."
+}

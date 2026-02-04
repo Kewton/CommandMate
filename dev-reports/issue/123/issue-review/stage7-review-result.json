@@ -1,0 +1,208 @@
+{
+  "stage": 7,
+  "stage_name": "Impact Scope Review (2nd iteration)",
+  "review_date": "2026-02-04",
+  "previous_stage": 3,
+  "iteration": 2,
+  "focus_area": "Impact Scope",
+  "stage3_resolution_status": {
+    "must_fix": {
+      "count": 0,
+      "items": []
+    },
+    "should_fix": {
+      "count": 4,
+      "items": [
+        {
+          "id": "SF-001",
+          "issue": "Touch event test cases not specified in Issue",
+          "status": "RESOLVED",
+          "resolution": "Test requirements section added to acceptance criteria with specific test cases for FileTreeView.test.tsx and useContextMenu.test.ts"
+        },
+        {
+          "id": "SF-002",
+          "issue": "No mention of ContextMenuState type impact",
+          "status": "RESOLVED",
+          "resolution": "Added explicit statement in Impact Scope section: 'ContextMenuState type change is NOT required' with rationale that coordinate system is identical for touch and mouse events"
+        },
+        {
+          "id": "SF-003",
+          "issue": "Insufficient consideration of MobilePromptSheet consistency",
+          "status": "RESOLVED",
+          "resolution": "Added MobilePromptSheet.tsx to Reference Implementation section with detailed comparison noting different use cases (swipe vs long-press) and state management pattern references"
+        },
+        {
+          "id": "SF-004",
+          "issue": "Specific TreeNode change locations not documented",
+          "status": "RESOLVED",
+          "resolution": "Added detailed TreeNodeProps interface (line 59-76) and TreeNode div element (line 292-302) change locations to Impact Scope section"
+        }
+      ]
+    },
+    "nice_to_have": {
+      "count": 3,
+      "items": [
+        {
+          "id": "NTH-001",
+          "issue": "CLAUDE.md feature documentation not mentioned",
+          "status": "SKIPPED",
+          "reason": "Nice to Have item - documentation update can be addressed post-implementation"
+        },
+        {
+          "id": "NTH-002",
+          "issue": "setTimeout memory leak prevention not specified",
+          "status": "RESOLVED",
+          "resolution": "Added to Section 2. Long-press detection logic implementation: useEffect cleanup function for timer clear on unmount, with reference to PaneResizer cleanup pattern"
+        },
+        {
+          "id": "NTH-003",
+          "issue": "No haptic feedback consideration",
+          "status": "SKIPPED",
+          "reason": "Explicitly marked as out of scope in Scope section"
+        }
+      ]
+    }
+  },
+  "impact_analysis_verification": {
+    "affected_files": {
+      "status": "ADEQUATE",
+      "files": [
+        {
+          "file": "src/components/worktree/FileTreeView.tsx",
+          "current_state": "Line 302 has onContextMenu only, no touch event handlers",
+          "required_changes": "Add onTouchStart/onTouchEnd/onTouchMove/onTouchCancel to TreeNode div, extend TreeNodeProps interface",
+          "verification": "CONFIRMED - Line 302 shows onContextMenu={handleContextMenu} only"
+        },
+        {
+          "file": "src/hooks/useContextMenu.ts",
+          "current_state": "Line 86 openMenu accepts React.MouseEvent only",
+          "required_changes": "Extend type to React.MouseEvent | React.TouchEvent",
+          "verification": "CONFIRMED - Line 86 shows (e: React.MouseEvent, path: string, type: 'file' | 'directory')"
+        }
+      ]
+    },
+    "dependent_files": {
+      "status": "ADEQUATE",
+      "files": [
+        {
+          "file": "src/types/markdown-editor.ts",
+          "change_required": false,
+          "verification": "CONFIRMED - ContextMenuState (line 168-177) uses { x: number; y: number } which works for both mouse and touch coordinates"
+        },
+        {
+          "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "change_required": false,
+          "verification": "Parent component - no changes needed, only behavioral verification required"
+        },
+        {
+          "file": "src/components/worktree/ContextMenu.tsx",
+          "change_required": false,
+          "verification": "Menu display component - no changes needed, receives coordinates regardless of input method"
+        }
+      ]
+    },
+    "reference_implementations": {
+      "status": "ADEQUATE",
+      "implementations": [
+        {
+          "file": "src/components/worktree/PaneResizer.tsx",
+          "relevance": "Primary reference for touch event pattern",
+          "patterns_verified": [
+            "handleTouchStart (line 133-141) - matches proposed pattern",
+            "handleTouchMove (line 161-171) - useful for movement detection",
+            "useEffect cleanup (line 231-238) - pattern for timer cleanup",
+            "touchcancel NOT registered (line 219-224) - Issue correctly notes this difference"
+          ]
+        },
+        {
+          "file": "src/components/mobile/MobilePromptSheet.tsx",
+          "relevance": "Secondary reference for consistency check",
+          "patterns_verified": [
+            "Different use case (swipe vs long-press) correctly identified",
+            "State management pattern (useRef for touchStartY) is relevant"
+          ]
+        }
+      ]
+    },
+    "test_impact": {
+      "status": "ADEQUATE",
+      "test_files": [
+        {
+          "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+          "current_state": "741 lines, tests mouse events only (fireEvent.click, fireEvent.keyDown)",
+          "required_additions": "Touch event tests as specified in Issue",
+          "verification": "CONFIRMED - No touchstart/touchend/touchmove tests exist"
+        },
+        {
+          "file": "tests/unit/hooks/useContextMenu.test.ts",
+          "current_state": "295 lines, tests React.MouseEvent only",
+          "required_additions": "React.TouchEvent tests as specified in Issue",
+          "verification": "CONFIRMED - Line 40 casts to React.MouseEvent only"
+        }
+      ]
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "Test Completeness",
+        "issue": "Unmount cleanup test case not explicitly listed",
+        "location": "Test Requirements section",
+        "recommendation": "Consider adding explicit test case for component unmount timer cleanup verification. Current test list includes 'Touch cancel clears timer' but unmount is different from cancel event.",
+        "evidence": "Test requirements list: 'Long-press (500ms) shows context menu', '10px+ movement cancels menu', 'Touch cancel clears timer' - unmount cleanup not listed"
+      },
+      {
+        "id": "NTH-002",
+        "category": "Browser Compatibility",
+        "issue": "Safari iOS specific behavior considerations not documented",
+        "location": "Solution Approach section",
+        "recommendation": "Consider adding note about Safari iOS touch event quirks (e.g., 300ms delay, touch-action CSS property). The -webkit-touch-callout: none is mentioned but touch-action: manipulation could also be relevant for preventing double-tap zoom.",
+        "evidence": "Issue mentions -webkit-touch-callout: none but touch-action CSS property is not mentioned"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-123/src/components/worktree/FileTreeView.tsx",
+      "relevance": "Primary change target - TreeNode component",
+      "lines_of_interest": [59, 69, 281, 302]
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-123/src/hooks/useContextMenu.ts",
+      "relevance": "Type extension required for openMenu",
+      "lines_of_interest": [35, 39, 85, 86]
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-123/src/components/worktree/PaneResizer.tsx",
+      "relevance": "Touch event reference implementation",
+      "lines_of_interest": [133, 161, 176, 219, 231]
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-123/src/types/markdown-editor.ts",
+      "relevance": "ContextMenuState type - no changes needed",
+      "lines_of_interest": [168, 177]
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-123/tests/unit/components/worktree/FileTreeView.test.tsx",
+      "relevance": "Test file requiring touch event test additions",
+      "lines_of_interest": []
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-123/tests/unit/hooks/useContextMenu.test.ts",
+      "relevance": "Test file requiring TouchEvent test additions",
+      "lines_of_interest": [40]
+    }
+  ],
+  "summary": "Issue #123 has been significantly improved since Stage 3 review. All 4 Should Fix items have been properly addressed: (1) Test requirements are now explicitly documented in acceptance criteria with specific test cases, (2) ContextMenuState type impact is clarified as 'no change required' with rationale, (3) MobilePromptSheet reference added with comparison notes, (4) TreeNode specific change locations documented. The Impact Scope section now provides comprehensive coverage of affected files, dependent files, and test requirements. Only 2 Nice to Have items remain: unmount cleanup test case could be more explicit, and Safari iOS touch-action CSS property could be mentioned. The Issue is ready for implementation.",
+  "overall_assessment": {
+    "stage3_issues_resolved": "4/4 Should Fix (100%), 1/3 Nice to Have (33%)",
+    "new_must_fix": 0,
+    "new_should_fix": 0,
+    "new_nice_to_have": 2,
+    "implementation_readiness": "READY",
+    "confidence_level": "HIGH"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "issue_number": 123,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md"
+}

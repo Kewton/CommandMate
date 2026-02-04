@@ -1,0 +1,66 @@
+{
+  "issue_number": 123,
+  "stage": 4,
+  "status": "completed",
+  "timestamp": "2026-02-04T12:30:00Z",
+  "design_doc_path": "dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md",
+  "review_result_path": "dev-reports/issue/123/multi-stage-design-review/stage4-review-result.json",
+  "applied_changes": {
+    "review_history": {
+      "section": "13. レビュー履歴",
+      "change": "Stage 4セキュリティレビュー結果を追加（APPROVED 5/5）"
+    },
+    "security_design": {
+      "section": "6. セキュリティ設計",
+      "changes": [
+        "6.3 OWASP Top 10評価結果テーブルを追加",
+        "6.4 セキュリティ詳細分析結果（XSS、Injection、DoS、イベントハイジャック、クリックジャッキング）を追加",
+        "6.5 リスク評価サマリーを追加",
+        "6.6 考慮事項（SEC-CONSIDER-001）を追加"
+      ]
+    },
+    "findings_summary": {
+      "section": "14. レビュー指摘事項サマリー",
+      "change": "14.6 Stage 4セキュリティレビューセクションを追加（OWASP評価結果サマリー含む）"
+    },
+    "implementation_checklist": {
+      "section": "16. 実装チェックリスト",
+      "change": "16.6 Stage 4レビュー指摘対応項目（SEC-CONSIDER-001）を追加"
+    },
+    "metadata": {
+      "change": "最終更新日を更新（Stage 4セキュリティレビュー反映）"
+    }
+  },
+  "findings_applied": {
+    "must_fix": {
+      "count": 0,
+      "items": []
+    },
+    "should_fix": {
+      "count": 0,
+      "items": []
+    },
+    "consider": {
+      "count": 1,
+      "items": [
+        {
+          "id": "SEC-CONSIDER-001",
+          "title": "Touch coordinate validation comment",
+          "applied_to_sections": ["6.6", "16.6"]
+        }
+      ]
+    }
+  },
+  "owasp_evaluation": {
+    "total_checks": 10,
+    "passed": 6,
+    "not_applicable": 4,
+    "failed": 0,
+    "status": "APPROVED"
+  },
+  "verification": {
+    "source_code_modified": false,
+    "design_doc_updated": true,
+    "all_findings_reflected": true
+  }
+}

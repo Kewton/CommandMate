@@ -1,0 +1,73 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "applied_findings": [
+    {
+      "id": "MF-CONS-001",
+      "title": "Issue番号検証範囲の不一致",
+      "action": "Phase 1修正チェックリストに詳細を追加。1-999999から1-2147483647への更新を明記。src/cli/utils/input-validators.tsとの整合性を文書化。"
+    },
+    {
+      "id": "MF-CONS-002",
+      "title": "ポート算出ロジックの不整合",
+      "action": "4.2節に[MF-CONS-002]ブロックを追加。port-allocator.ts(3001 + issueNo % 99)とworktree-setup.md(3001 + issueNo % 100)の差異を明記。両方式を検出対象とする実装方針を文書化。"
+    },
+    {
+      "id": "SF-CONS-001",
+      "title": ".claude/lib/ディレクトリ作成",
+      "action": "共通ライブラリ作成チェックリストを更新。「現在存在しないため作成必要」と明記。validators.shの詳細（定数定義、参照コメント追加）を追加。"
+    },
+    {
+      "id": "SF-CONS-002",
+      "title": "エラーハンドリング表の文言更新",
+      "action": "Phase 1修正チェックリストに具体的な文言変更を明記。worktree-cleanup.mdとworktree-setup.md両方のエラーハンドリング表更新を文書化。"
+    },
+    {
+      "id": "SF-CONS-003",
+      "title": "待機時間の統一(2s→3s)",
+      "action": "Phase 2拡張チェックリストに詳細を追加。現行のsleep 2からsleep 3への更新理由（graceful_kill()設計との整合）を明記。"
+    },
+    {
+      "id": "SF-CONS-004",
+      "title": "port-allocator.ts整合性",
+      "action": "セクション10「将来検討事項」を新設。port-allocator.ts、worktree-setup.md、worktree-cleanup.mdのポート算出/検出ロジック統一を別Issueとして検討することを文書化。"
+    }
+  ],
+  "skipped_findings": [],
+  "nice_to_have_addressed": [
+    {
+      "id": "NTH-CONS-001",
+      "title": "MAX_ISSUE_NOのbash定数化",
+      "action": "セクション10.2に将来検討事項として追加。TypeScript/bash間の同期メカニズム検討を文書化。"
+    },
+    {
+      "id": "NTH-CONS-002",
+      "title": "DEFAULT_PORT_RANGEのbashスクリプトでの参照",
+      "action": "セクション10.1に含めて文書化。設定値の一元管理を将来検討事項として記載。"
+    },
+    {
+      "id": "NTH-CONS-003",
+      "title": "worktree-setup.mdのポート算出コメント追加",
+      "action": "セクション10.1の推奨アクションに含めて文書化。"
+    }
+  ],
+  "design_doc_updated": true,
+  "updated_sections": [
+    "4.2 Issue専用ポートの桁数制限 - [MF-CONS-002]ブロック追加",
+    "8. 実装チェックリスト - 共通ライブラリ作成セクション更新",
+    "8. 実装チェックリスト - Phase 1修正セクション詳細化",
+    "8. 実装チェックリスト - Phase 2拡張セクション待機時間詳細化",
+    "9. レビュー指摘対応サマリー - Stage 2テーブル追加",
+    "10. 将来検討事項 - 新規セクション追加",
+    "11. 参考資料 - port-allocator.ts参照追加"
+  ],
+  "consistency_matrix_status": {
+    "issue_validation_range": "CONSISTENT (updated to 1-2147483647)",
+    "port_calculation_logic": "DOCUMENTED (differences acknowledged, both methods supported)",
+    "lib_directory": "DOCUMENTED (creation required)",
+    "error_messages": "DOCUMENTED (update required)",
+    "wait_time": "DOCUMENTED (unification to 3s required)"
+  },
+  "summary": "Stage 2整合性レビューの全指摘事項（Must Fix 2件、Should Fix 4件）を設計方針書に反映。Issue番号検証範囲の1-2147483647への統一、ポート算出ロジックの差異の明文化、.claude/lib/ディレクトリ作成の明記、エラーハンドリング文言の更新要件追加、待機時間3秒統一の明記を実施。また、将来検討事項として port-allocator.ts との算出ロジック統一と MAX_ISSUE_NO 同期メカニズムを新規セクションに追加。Nice to Have 3件も将来検討事項として文書化。",
+  "timestamp": "2026-02-04T12:45:00Z"
+}

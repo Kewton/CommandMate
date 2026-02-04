@@ -1,0 +1,54 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_at": "2026-02-04T10:15:00.000Z",
+  "issue_number": 153,
+  "applied_items": [
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "changes_made": "テスト計画セクションに「自動テスト」サブセクションを追加。既存のclearAllAutoYesStates(), clearAllPollerStates()関数を活用した回帰テストの実装方針を明記。Vitestでのテスト例コードスニペットを追加。"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "changes_made": "案1のデメリット説明を更新。既存のクリア関数（auto-yes-manager.ts:173-194）がglobalThis移行後も使用可能であることを明記し、テスト時の状態リセットが容易であることを補足。"
+    },
+    {
+      "id": "SF-3",
+      "status": "applied",
+      "changes_made": "再現手順セクションを「開発環境」と「本番環境」に分割。開発環境では「ソースファイルを編集して保存（ホットリロード発生）」、本番環境では「数十分〜数時間待機（Next.jsワーカー再起動、メモリ圧力、APIルートのコールドスタート等が発生）」と具体的なトリガー条件を明記。"
+    },
+    {
+      "id": "NTH-1",
+      "status": "applied",
+      "changes_made": "案2（DB永続化）に「参考：DBスキーマ案」を追加。worktreesテーブルへのカラム追加SQL（auto_yes_enabled, auto_yes_expires_at, auto_yes_poller_active）を記載。将来の機能強化時の参照用として。"
+    },
+    {
+      "id": "NTH-2",
+      "status": "applied",
+      "changes_made": "案1のコードスニペットにESLint no-var無効化の理由をコメントで追加（「TypeScriptのglobal宣言ではconstではなくvarが必要なため」）。"
+    },
+    {
+      "id": "NTH-3",
+      "status": "applied",
+      "changes_made": "関連Issueセクションに「参考ドキュメント: CLAUDE.mdの『Issue #138: サーバー側Auto-Yesポーリング』セクションも参照」を追加。"
+    }
+  ],
+  "skipped_items": [],
+  "additional_improvements": [
+    {
+      "description": "関連コードセクションにテスト用クリア関数の行番号参照（auto-yes-manager.ts:173-194）を追加"
+    }
+  ],
+  "summary": {
+    "total_applied": 6,
+    "total_skipped": 0,
+    "should_fix_applied": 3,
+    "nice_to_have_applied": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/153"
+  }
+}

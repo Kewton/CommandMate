@@ -1,0 +1,89 @@
+{
+  "issue_number": 152,
+  "review_type": "通常レビュー（整合性・正確性）",
+  "stage": 1,
+  "iteration": 1,
+  "reviewed_at": "2026-02-04T00:00:00Z",
+  "overall_assessment": "PASS_WITH_RECOMMENDATIONS",
+  "summary": "Issue #152 is well-documented with accurate code analysis and clear reproduction steps. The code snippets and line numbers are accurate. The proposed solutions are technically sound. Minor improvements are recommended for completeness.",
+  "must_fix": [],
+  "should_fix": [
+    {
+      "id": "SF-001",
+      "category": "missing_context",
+      "title": "CLIToolインターフェース経由の呼び出しに関する説明が不足",
+      "description": "Issue内のコードスニペットは`src/lib/claude-session.ts`を直接参照しているが、実際の呼び出しは`src/lib/cli-tools/claude.ts`の`ClaudeTool`クラス経由で行われる。この中間層の存在を明記すべき。",
+      "current": "send/route.tsからcliTool.startSession()、cliTool.sendMessage()が呼ばれることは記載されているが、ClaudeToolクラスがclaude-session.tsをラップしている構造が不明確",
+      "recommended": "影響コンポーネントに`src/lib/cli-tools/claude.ts`（ClaudeToolクラス）を追加し、呼び出しチェーンを明確化: send/route.ts -> ClaudeTool -> claude-session.ts",
+      "priority": "medium"
+    },
+    {
+      "id": "SF-002",
+      "category": "technical_accuracy",
+      "title": "案2のwaitForPrompt関数が未定義",
+      "description": "推奨される改善策の案2で`waitForPrompt(sessionName, 5000)`関数を使用しているが、この関数は現在のコードベースに存在しない。新規実装が必要であることを明記すべき。",
+      "current": "waitForPrompt関数を使用するコードサンプルのみ記載",
+      "recommended": "waitForPrompt関数の新規実装が必要であることを明記し、期待される動作（プロンプト検出パターン、タイムアウト処理、エラー時の挙動）を定義する",
+      "priority": "medium"
+    },
+    {
+      "id": "SF-003",
+      "category": "acceptance_criteria",
+      "title": "受け入れ条件の具体化",
+      "description": "受け入れ条件「UIにローディング状態が正しく表示されること」の具体的な期待動作が不明確。",
+      "current": "UIにローディング状態が正しく表示されること",
+      "recommended": "「セッション起動中は送信ボタンが無効化され、スピナーまたはローディングインジケータが表示されること」など具体的な期待動作を記載",
+      "priority": "low"
+    }
+  ],
+  "nice_to_have": [
+    {
+      "id": "NTH-001",
+      "category": "documentation",
+      "title": "他のCLIツール（codex, gemini）への影響",
+      "description": "Issue #4でCLIツールサポートが追加されており、codex、geminiも同様のセッション初期化ロジックを持つ可能性がある。本修正が他のCLIツールにも適用されるべきか、またはClaude固有の問題かを明記するとよい。",
+      "recommendation": "codex.ts、gemini.tsの初期化ロジックを確認し、共通の問題であればbase.tsレベルでの修正を検討"
+    },
+    {
+      "id": "NTH-002",
+      "category": "test_coverage",
+      "title": "テスト手順の自動化",
+      "description": "テスト手順は手動確認を前提としている。可能であれば、セッション初期化タイミングをテストする統合テストまたはE2Eテストの追加を検討。",
+      "recommendation": "テスト手順に「統合テストの追加（任意）」を追加"
+    },
+    {
+      "id": "NTH-003",
+      "category": "clarity",
+      "title": "案1のプロンプト検出パターンの妥当性",
+      "description": "案1では`output.includes('Claude')`を追加しているが、Claude CLIの初期化画面に常に'Claude'文字列が含まれるかどうかの確認が必要。",
+      "recommendation": "Claude CLI初期化時の実際の出力例をスクリーンショットまたはログで確認し、検出パターンの妥当性を検証"
+    }
+  ],
+  "code_verification": {
+    "claude_session_ts": {
+      "file": "src/lib/claude-session.ts",
+      "referenced_lines": "165-225",
+      "actual_lines": "165-225",
+      "verification_status": "ACCURATE",
+      "notes": "startClaudeSession関数の位置と内容は正確。maxWaitTime=10000ms、pollInterval=500msも正確に記載されている。"
+    },
+    "send_route_ts": {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "referenced_lines": "94-124",
+      "actual_lines": "94-124",
+      "verification_status": "ACCURATE",
+      "notes": "isRunning/startSession/sendMessageの呼び出しフローは正確。ただし、現在の実装はより長く（179行まで）、Issue内のスニペットは簡略化されている。"
+    }
+  },
+  "consistency_check": {
+    "with_codebase": "CONSISTENT",
+    "with_documentation": "CONSISTENT",
+    "with_existing_issues": "NOT_CHECKED",
+    "notes": "コードベースとの整合性は確認済み。CLAUDE.mdに記載のCLIツールアーキテクチャ（Strategy パターン）との整合性も問題なし。"
+  },
+  "recommendations": [
+    "SF-001: 呼び出しチェーンを明確化するため、影響コンポーネントに`src/lib/cli-tools/claude.ts`を追加",
+    "SF-002: 案2のwaitForPrompt関数は新規実装が必要であることを明記",
+    "SF-003: 受け入れ条件のUIローディング状態について具体的な期待動作を定義"
+  ]
+}

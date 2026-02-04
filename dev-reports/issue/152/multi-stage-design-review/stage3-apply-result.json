@@ -1,0 +1,137 @@
+{
+  "issue_number": 152,
+  "stage": 3,
+  "stage_name": "Impact Analysis Review Apply",
+  "status": "completed",
+  "apply_date": "2026-02-04",
+  "design_doc_path": "dev-reports/design/issue-152-first-message-not-sent-design-policy.md",
+  "summary": "Successfully applied all Stage 3 impact analysis review findings to the design policy document.",
+
+  "must_fix_applied": [
+    {
+      "id": "IMP-001",
+      "title": "New exception from startClaudeSession() not documented as breaking change",
+      "action_taken": "Added 'Breaking Changes' section documenting: 1) startClaudeSession() now throws on timeout, 2) List of all affected callers with file paths and line numbers, 3) Error message format specification",
+      "design_doc_sections_updated": [
+        "Breaking Changes (IMP-001 対応)",
+        "レビュー指摘事項サマリー - Must Fix",
+        "Stage 3 影響分析レビュー詳細 - IMP-001",
+        "実装優先順位",
+        "詳細設計 - タイムアウト処理の改善"
+      ]
+    },
+    {
+      "id": "IMP-002",
+      "title": "Integration tests mock startClaudeSession/sendMessageToClaude - cannot test actual race condition",
+      "action_taken": "Added 'テストカバレッジに関する注意' section documenting: 1) Mock limitations in integration tests, 2) Verification strategy including unit tests, E2E tests, manual verification, and monitoring",
+      "design_doc_sections_updated": [
+        "レビュー指摘事項サマリー - Must Fix",
+        "Stage 3 影響分析レビュー詳細 - IMP-002",
+        "テスト戦略 - テストカバレッジに関する注意 (IMP-002 対応)",
+        "実装チェックリスト - テスト"
+      ]
+    }
+  ],
+
+  "should_fix_applied": [
+    {
+      "id": "IMP-003",
+      "title": "claude-poller.ts uses captureClaudeOutput and isClaudeRunning - not listed in impact scope",
+      "action_taken": "Added claude-poller.ts to '間接影響' section with note: 'captureClaudeOutput, isClaudeRunning を使用 - 本修正の対象関数とは異なる'",
+      "design_doc_sections_updated": [
+        "レビュー指摘事項サマリー - Should Fix",
+        "Stage 3 影響分析レビュー詳細 - IMP-003, IMP-004",
+        "影響範囲 - 間接影響"
+      ]
+    },
+    {
+      "id": "IMP-004",
+      "title": "api/hooks/claude-done/route.ts uses captureClaudeOutput - not listed",
+      "action_taken": "Added api/hooks/claude-done/route.ts to '間接影響' section with note: 'captureClaudeOutput のみ使用 - 影響なし'",
+      "design_doc_sections_updated": [
+        "レビュー指摘事項サマリー - Should Fix",
+        "Stage 3 影響分析レビュー詳細 - IMP-003, IMP-004",
+        "影響範囲 - 間接影響"
+      ]
+    },
+    {
+      "id": "IMP-005",
+      "title": "tests/integration/api-prompt-handling.test.ts mocks claude-session - should be listed",
+      "action_taken": "Added '影響を受けるテストファイル' table listing all affected test files with their mock status and required actions",
+      "design_doc_sections_updated": [
+        "レビュー指摘事項サマリー - Should Fix",
+        "Stage 3 影響分析レビュー詳細 - IMP-005",
+        "テスト戦略 - 影響を受けるテストファイル (IMP-005 対応)"
+      ]
+    },
+    {
+      "id": "IMP-006",
+      "title": "Error response format for timeout not specified",
+      "action_taken": "Added 'API エラーレスポンス仕様' section specifying: 1) HTTP status code 500, 2) JSON error format, 3) Design rationale for choosing 500 over 504",
+      "design_doc_sections_updated": [
+        "レビュー指摘事項サマリー - Should Fix",
+        "API エラーレスポンス仕様 (IMP-006 対応)",
+        "Stage 3 影響分析レビュー詳細 - IMP-006",
+        "実装チェックリスト - ドキュメント"
+      ]
+    },
+    {
+      "id": "IMP-007",
+      "title": "Rollback scenario for sessions in-progress not addressed",
+      "action_taken": "Added '進行中セッションへの影響' subsection to rollback plan documenting: no state cleanup required, sessions continue normally, users can retry",
+      "design_doc_sections_updated": [
+        "レビュー指摘事項サマリー - Should Fix",
+        "Stage 3 影響分析レビュー詳細 - IMP-007",
+        "ロールバック計画 - 進行中セッションへの影響 (IMP-007 対応)"
+      ]
+    }
+  ],
+
+  "nice_to_have_recorded": [
+    {
+      "id": "IMP-008",
+      "title": "CLI tools consistency check for Codex/Gemini",
+      "action_taken": "Added notes to '影響なし' section explaining why Codex (fixed delay) and Gemini (non-interactive) are not affected"
+    },
+    {
+      "id": "IMP-009",
+      "title": "MessageInput error display already exists but design says 'if needed'",
+      "action_taken": "Clarified in UIエラーハンドリング section that MessageInput.tsx already has error handling via handleApiError()"
+    },
+    {
+      "id": "IMP-010",
+      "title": "cli-patterns.test.ts may need new tests for usage in claude-session.ts",
+      "action_taken": "Recorded in Nice to Have section of review summary"
+    }
+  ],
+
+  "design_doc_changes_summary": {
+    "new_sections_added": [
+      "Breaking Changes (IMP-001 対応)",
+      "API エラーレスポンス仕様 (IMP-006 対応)",
+      "Stage 3 影響分析レビュー詳細",
+      "テストカバレッジに関する注意 (IMP-002 対応)",
+      "影響を受けるテストファイル (IMP-005 対応)",
+      "進行中セッションへの影響 (IMP-007 対応)"
+    ],
+    "sections_updated": [
+      "レビュー履歴 - Stage 3 entry added",
+      "レビュー指摘事項サマリー - Must Fix, Should Fix, Nice to Have tables",
+      "実装優先順位 - IMP-001 linked to CONS-005",
+      "詳細設計 - IMP-001 comment added to timeout handling",
+      "UIエラーハンドリング - IMP-009 clarification added",
+      "影響範囲 - 間接影響 table expanded",
+      "影響なし - IMP-008 notes added",
+      "ロールバック計画 - Restructured with new subsection",
+      "実装チェックリスト - IMP-001, IMP-002, IMP-006 items added"
+    ]
+  },
+
+  "verification": {
+    "all_must_fix_addressed": true,
+    "all_should_fix_addressed": true,
+    "nice_to_have_recorded": true,
+    "review_history_updated": true,
+    "implementation_checklist_updated": true
+  }
+}

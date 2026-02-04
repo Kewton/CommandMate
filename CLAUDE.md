@@ -131,6 +131,7 @@ src/
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
+| `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()） |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
@@ -148,7 +149,8 @@ src/
 | `src/config/editable-extensions.ts` | 編集可能ファイル拡張子設定 |
 | `src/config/file-operations.ts` | 再帰削除の安全設定 |
 | `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義 |
-| `src/hooks/useContextMenu.ts` | コンテキストメニュー状態管理フック |
+| `src/hooks/useContextMenu.ts` | コンテキストメニュー状態管理フック（MouseEvent/TouchEvent対応） |
+| `src/hooks/useLongPress.ts` | タッチ長押し検出フック（Issue #123、500ms閾値、10px移動キャンセル） |
 | `src/hooks/useFullscreen.ts` | Fullscreen API ラッパー（CSSフォールバック対応） |
 | `src/hooks/useLocalStorageState.ts` | localStorage永続化フック（バリデーション対応） |
 | `src/config/z-index.ts` | z-index値の一元管理 |
@@ -393,6 +395,41 @@ commandmate status --all                   # 全サーバー状態確認
   - `.claude/commands/worktree-setup.md` - Phase 1検証範囲修正
 - 詳細: [設計書](./dev-reports/design/issue-151-worktree-cleanup-server-detection-design-policy.md)
 
+### Issue #152: セッション初回メッセージ送信の信頼性向上
+- **問題解決**: 新規Worktree選択時に初回メッセージがClaude CLIに送信されない問題を解決
+- **根本原因**: `startClaudeSession()`がタイムアウト超過でもエラーなく続行し、Claude CLI初期化前にメッセージ送信されていた
+- **プロンプト検出強化**:
+  - `CLAUDE_PROMPT_PATTERN`/`CLAUDE_SEPARATOR_PATTERN`をcli-patterns.tsから使用（DRY原則）
+  - レガシー`>`と新形式`❯`(U+276F)の両方のプロンプト文字をサポート
+- **タイムアウト処理改善**:
+  - タイムアウト時に`Error('Claude initialization timeout (15000ms)')`をスロー
+  - タイムアウト値を名前付き定数として抽出（OCP原則）
+- **新規関数`waitForPrompt()`**:
+  - メッセージ送信前にプロンプト状態を検証
+  - タイムアウト時にエラースロー
+- **安定待機追加**: プロンプト検出後に500ms待機（Claude CLI描画完了バッファ）
+- **主要コンポーネント**:
+  - `src/lib/claude-session.ts` - コア実装（startClaudeSession, waitForPrompt, sendMessageToClaude改善）
+  - `src/lib/cli-patterns.ts` - CLAUDE_PROMPT_PATTERN, CLAUDE_SEPARATOR_PATTERN
+- 詳細: [設計書](./dev-reports/design/issue-152-first-message-not-sent-design-policy.md)
+
+### Issue #123: iPadタッチ長押しコンテキストメニュー
+- **問題解決**: iPadでファイルツリーを長押ししてもコンテキストメニューが表示されない問題を解決
+- **根本原因**: iPad Safari/Chromeでは`onContextMenu`イベントが長押しでトリガーされない仕様
+- **実装内容**:
+  - `useLongPress`フック新規作成（500ms閾値、10px移動キャンセル）
+  - `useContextMenu`の`openMenu`を`MouseEvent | TouchEvent`に型拡張
+  - `FileTreeView`にタッチイベントハンドラ統合
+- **対応デバイス**: iPad Safari/Chrome, iPhone Safari/Chrome
+- **CSS最適化**:
+  - `touch-action: manipulation` - ダブルタップズーム抑制
+  - `-webkit-touch-callout: none` - 標準コンテキストメニュー抑制
+- **主要コンポーネント**:
+  - `src/hooks/useLongPress.ts` - 長押し検出フック（LONG_PRESS_DELAY=500, MOVE_THRESHOLD=10）
+  - `src/hooks/useContextMenu.ts` - コンテキストメニュー状態管理（TouchEvent対応）
+  - `src/components/worktree/FileTreeView.tsx` - タッチイベント統合
+- 詳細: [設計書](./dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md)
+
 ### Issue #138: サーバー側Auto-Yesポーリング
 - **問題解決**: ブラウザのバックグラウンドタブで`setInterval`が抑制され、auto-yesが動作しない問題を解決
 - **サーバー側ポーリング**: クライアントに依存せず、サーバーが直接プロンプトを検出して自動応答
@@ -414,6 +451,30 @@ commandmate status --all                   # 全サーバー状態確認
   - `src/app/api/worktrees/[id]/current-output/route.ts` - タイムスタンプ提供
 - 詳細: [設計書](./dev-reports/design/issue-138-server-side-auto-yes-polling-design-policy.md)
 
+### Issue #153: Auto-Yes UIとバックグラウンドの状態不整合修正
+- **バグ修正**: Auto-Yesモードを有効化後、モジュール再読み込み（ホットリロード/ワーカー再起動）が発生すると、バックグラウンドでは正常動作するがUIは「オフ」と表示される問題を修正
+- **根本原因**: `auto-yes-manager.ts`のモジュールスコープMapがモジュール再読み込み時にリセットされる
+- **解決策**: globalThisパターンを適用し、状態をプロセス内で永続化
+- **コード変更**:
+  ```typescript
+  // Before: モジュールスコープMap（再読み込みでリセット）
+  const autoYesStates = new Map<string, AutoYesState>();
+
+  // After: globalThis参照（再読み込みでも永続化）
+  declare global {
+    var __autoYesStates: Map<string, AutoYesState> | undefined;
+  }
+  const autoYesStates = globalThis.__autoYesStates ??
+    (globalThis.__autoYesStates = new Map<string, AutoYesState>());
+  ```
+- **制限事項**: マルチプロセス環境（クラスターモード等）では各プロセスが独自の状態を持つ。CommandMateは単一プロセス運用が前提のため許容
+- **テスト追加**:
+  - `tests/unit/lib/auto-yes-manager.test.ts` - globalThis初期化・クリア関数テスト（7件）
+  - `tests/integration/auto-yes-persistence.test.ts` - `vi.resetModules()`によるモジュール再読み込みテスト（5件）
+- **主要コンポーネント**:
+  - `src/lib/auto-yes-manager.ts` - globalThis対応（約25行変更）
+- **フォローアップ検討**: `response-poller.ts`, `claude-poller.ts`も同様のパターン適用候補（別Issue）
+- 詳細: [設計書](./dev-reports/design/issue-153-auto-yes-state-inconsistency-design-policy.md)
 
 ### Issue #136: Git Worktree 並列開発環境の整備
 - **目的**: 複数のIssue/機能を同時に開発できるWorktree環境を整備

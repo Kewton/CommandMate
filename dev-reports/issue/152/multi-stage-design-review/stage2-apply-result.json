@@ -1,0 +1,198 @@
+{
+  "issue_number": 152,
+  "stage": 2,
+  "stage_name": "Consistency Review",
+  "apply_date": "2026-02-04",
+  "status": "completed",
+  "design_document": "dev-reports/design/issue-152-first-message-not-sent-design-policy.md",
+  "review_source": "dev-reports/issue/152/multi-stage-design-review/stage2-review-result.json",
+
+  "applied_items": {
+    "must_fix": [
+      {
+        "id": "CONS-001",
+        "title": "sendMessageToClaude() uses execAsync for Enter key instead of sendKeys",
+        "severity": "critical",
+        "action_taken": "documented_design_decision",
+        "details": "Added 'Stage 2 Consistency Review Details' section documenting the design decision to use sendKeys() instead of execAsync() for Enter key. Rationale: abstraction maintenance, consistency, testability. Updated code example in sendMessageToClaude() section.",
+        "design_sections_updated": [
+          "Stage 2 Consistency Review Details - CONS-001",
+          "3. sendMessageToClaude() Improvement (CONS-001, CONS-006)",
+          "Implementation Checklist - CONS-001 item added"
+        ]
+      },
+      {
+        "id": "CONS-002",
+        "title": "capturePane import verification",
+        "severity": "critical",
+        "action_taken": "verified_false_positive",
+        "details": "Verified that capturePane is already imported at line 10 of claude-session.ts. Documented as false positive in design policy. No implementation changes needed.",
+        "design_sections_updated": [
+          "Review Summary - CONS-002 marked as 'Verified - False Positive'",
+          "Stage 2 Consistency Review Details - CONS-002"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CONS-003",
+        "title": "Pattern detection differs from CLAUDE_PROMPT_PATTERN",
+        "severity": "medium",
+        "action_taken": "verified_stage1_coverage",
+        "details": "Verified that Stage 1 DRY-001 already addresses this. Design specifies importing and using CLAUDE_PROMPT_PATTERN from cli-patterns.ts.",
+        "design_sections_updated": [
+          "Review Summary - CONS-003 linked to DRY-001",
+          "Stage 2 Consistency Review Details - CONS-003 to CONS-007 verification table"
+        ]
+      },
+      {
+        "id": "CONS-004",
+        "title": "Timeout values differ from design",
+        "severity": "medium",
+        "action_taken": "verified_stage1_coverage",
+        "details": "Verified that Stage 1 OCP-001 already addresses this. Design defines CLAUDE_INIT_TIMEOUT=15000 and CLAUDE_INIT_POLL_INTERVAL=300 as named constants.",
+        "design_sections_updated": [
+          "Review Summary - CONS-004 linked to OCP-001"
+        ]
+      },
+      {
+        "id": "CONS-005",
+        "title": "startClaudeSession() does not throw on timeout",
+        "severity": "medium",
+        "action_taken": "verified_documented",
+        "details": "Design already specifies 'throw new Error(`Claude initialization timeout (${CLAUDE_INIT_TIMEOUT}ms)`)'. Added explicit note that current implementation continues after timeout which is the root cause of the bug. Added to implementation checklist.",
+        "design_sections_updated": [
+          "1. startClaudeSession() Improvement - Timeout handling section",
+          "Implementation Checklist - CONS-005 item added"
+        ]
+      },
+      {
+        "id": "CONS-006",
+        "title": "sendMessageToClaude() lacks prompt verification",
+        "severity": "medium",
+        "action_taken": "verified_documented",
+        "details": "Design already specifies checking CLAUDE_PROMPT_PATTERN before sending and calling waitForPrompt() if not at prompt. Added to implementation checklist.",
+        "design_sections_updated": [
+          "3. sendMessageToClaude() Improvement section",
+          "Implementation Checklist - CONS-006 item added"
+        ]
+      },
+      {
+        "id": "CONS-007",
+        "title": "Missing post-prompt delay after detection",
+        "severity": "medium",
+        "action_taken": "verified_documented",
+        "details": "Design already specifies CLAUDE_POST_PROMPT_DELAY=500 constant and its usage after prompt detection. Added to implementation checklist.",
+        "design_sections_updated": [
+          "0. Timeout Constants Definition section",
+          "1. startClaudeSession() Improvement section",
+          "Implementation Checklist - CONS-007 item added"
+        ]
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "CONS-008",
+        "title": "Console output uses emoji in current implementation",
+        "severity": "low",
+        "action_taken": "noted_no_action",
+        "details": "Minor cosmetic difference. Noted in Nice to Have section. No implementation action required."
+      },
+      {
+        "id": "CONS-009",
+        "title": "CLI tool wrapper (ClaudeTool) unchanged in design",
+        "severity": "low",
+        "action_taken": "verified_consistent",
+        "details": "Design correctly identifies no changes needed to ClaudeTool wrapper. Noted in Nice to Have section."
+      }
+    ]
+  },
+
+  "design_updates": {
+    "review_history_updated": true,
+    "new_sections_added": [
+      "Stage 2 Consistency Review Details",
+      "Implementation Priority"
+    ],
+    "existing_sections_updated": [
+      "Review Summary (Must Fix, Should Fix, Nice to Have tables)",
+      "Implementation Checklist (new CONS-* items added)",
+      "3. sendMessageToClaude() Improvement (CONS-001, CONS-006 references)",
+      "SOLID Principles Table (DIP row updated for CONS-001)"
+    ],
+    "implementation_checklist_additions": [
+      "CONS-001: sendMessageToClaude() で Enter 送信に sendKeys() を使用",
+      "CONS-005: startClaudeSession() タイムアウト時にエラーをスロー",
+      "CONS-006: sendMessageToClaude() 送信前にプロンプト状態を検証",
+      "CONS-007: プロンプト検出後に CLAUDE_POST_PROMPT_DELAY で安定待機"
+    ]
+  },
+
+  "implementation_priority": {
+    "summary": "Stage 2 review identified implementation priority based on bug root cause analysis",
+    "priority_order": [
+      {
+        "priority": 1,
+        "item": "Add error throw on timeout in startClaudeSession()",
+        "finding_id": "CONS-005",
+        "rationale": "Directly addresses root cause of the bug"
+      },
+      {
+        "priority": 2,
+        "item": "Import and use CLAUDE_PROMPT_PATTERN/SEPARATOR_PATTERN",
+        "finding_id": "CONS-003, DRY-001, DRY-002",
+        "rationale": "Improves prompt detection coverage"
+      },
+      {
+        "priority": 3,
+        "item": "Add prompt verification to sendMessageToClaude()",
+        "finding_id": "CONS-006",
+        "rationale": "Improves message sending reliability"
+      },
+      {
+        "priority": 4,
+        "item": "Replace timeout values with named constants",
+        "finding_id": "CONS-004, OCP-001",
+        "rationale": "Improves visibility and changeability"
+      },
+      {
+        "priority": 5,
+        "item": "Add post-prompt stability delay",
+        "finding_id": "CONS-007",
+        "rationale": "Ensures rendering completion"
+      },
+      {
+        "priority": 6,
+        "item": "Unify Enter key sending with sendKeys()",
+        "finding_id": "CONS-001",
+        "rationale": "Abstraction layer consistency"
+      }
+    ]
+  },
+
+  "verification_summary": {
+    "stage1_coverage_verified": [
+      "CONS-003 covered by DRY-001",
+      "CONS-004 covered by OCP-001",
+      "CONS-005 already documented in design",
+      "CONS-006 already documented in design",
+      "CONS-007 covered by CLAUDE_POST_PROMPT_DELAY"
+    ],
+    "false_positives": [
+      "CONS-002: capturePane is already imported at line 10 of claude-session.ts"
+    ],
+    "new_items_added": [
+      "CONS-001: Enter key sending method decision documented"
+    ]
+  },
+
+  "summary": {
+    "total_items_reviewed": 9,
+    "must_fix_applied": 2,
+    "should_fix_applied": 5,
+    "nice_to_have_noted": 2,
+    "false_positives_identified": 1,
+    "stage1_overlaps_verified": 5,
+    "result": "Design policy successfully updated with Stage 2 consistency review findings. All must_fix and should_fix items have been addressed or verified as already covered. Implementation priority guidance added based on root cause analysis."
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "issue_number": 152,
+  "feature_summary": "セッション一発目のメッセージが送信されない問題の修正",
+  "acceptance_criteria": [
+    "新規セッション起動後の初回メッセージが確実にClaude CLIに送信されること",
+    "セッション初期化タイムアウト時に適切なエラーメッセージが表示されること",
+    "UIにローディング状態が正しく表示されること（送信ボタン無効化、スピナー表示）",
+    "2回目以降のメッセージ送信に影響がないこと"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-001",
+      "name": "初回メッセージ送信成功",
+      "description": "新規セッション起動後の初回メッセージが確実に送信される",
+      "steps": [
+        "未起動のWorktreeを選択",
+        "メッセージを入力して送信",
+        "sendMessageToClaude()がwaitForPrompt()を呼び出すことを確認",
+        "プロンプト検出後にメッセージが送信されることを確認"
+      ],
+      "expected": "メッセージがClaude CLIに正常に送信される"
+    },
+    {
+      "id": "AC-002",
+      "name": "タイムアウトエラー表示",
+      "description": "セッション初期化タイムアウト時にエラーが適切にスローされる",
+      "steps": [
+        "startClaudeSession()でタイムアウトが発生するシナリオをテスト",
+        "エラーメッセージに'Claude initialization timeout'が含まれることを確認"
+      ],
+      "expected": "Error('Claude initialization timeout (15000ms)')がスローされる"
+    },
+    {
+      "id": "AC-003",
+      "name": "プロンプト検出後の安定待機",
+      "description": "プロンプト検出後に500ms待機してから続行する",
+      "steps": [
+        "startClaudeSession()でプロンプトが検出された場合",
+        "CLAUDE_POST_PROMPT_DELAY(500ms)待機してから戻る"
+      ],
+      "expected": "プロンプト検出後に安定待機が行われる"
+    },
+    {
+      "id": "AC-004",
+      "name": "2回目以降のメッセージ送信",
+      "description": "既存のメッセージ送信フローに影響がない",
+      "steps": [
+        "既にセッションが起動している状態でメッセージを送信",
+        "プロンプト状態の検証が行われることを確認",
+        "メッセージが正常に送信されることを確認"
+      ],
+      "expected": "既存の動作に影響なし"
+    }
+  ],
+  "tdd_result_path": "dev-reports/issue/152/pm-auto-dev/iteration-1/tdd-result.json"
+}

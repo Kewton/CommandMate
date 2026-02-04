@@ -1,0 +1,128 @@
+{
+  "status": "passed",
+  "scenarios": [
+    {
+      "id": 1,
+      "description": "validators.sh: MAX_ISSUE_NO=2147483647 is defined",
+      "status": "passed",
+      "notes": "Line 19: MAX_ISSUE_NO=2147483647 correctly defined"
+    },
+    {
+      "id": 2,
+      "description": "validators.sh: validate_issue_no() function exists and uses MAX_ISSUE_NO",
+      "status": "passed",
+      "notes": "Lines 39-53: Function validates range 1 to MAX_ISSUE_NO (2147483647)"
+    },
+    {
+      "id": 3,
+      "description": "validators.sh: Reference comment to input-validators.ts exists",
+      "status": "passed",
+      "notes": "Lines 15, 18: Comments reference src/cli/utils/input-validators.ts MAX_ISSUE_NO"
+    },
+    {
+      "id": 4,
+      "description": "process-utils.sh: check_lsof_available() function exists with fallback instructions",
+      "status": "passed",
+      "notes": "Lines 50-69: Function provides alternatives for macOS (netstat) and Linux (ss, netstat), plus installation instructions"
+    },
+    {
+      "id": 5,
+      "description": "process-utils.sh: get_pid_by_port() function exists",
+      "status": "passed",
+      "notes": "Lines 84-100: Uses lsof -i :port -t -sTCP:LISTEN"
+    },
+    {
+      "id": 6,
+      "description": "process-utils.sh: get_process_cwd() function exists with macOS and Linux support",
+      "status": "passed",
+      "notes": "Lines 116-150: macOS uses lsof -F n, Linux uses /proc/$pid/cwd"
+    },
+    {
+      "id": 7,
+      "description": "process-utils.sh: is_worktree_process() function exists",
+      "status": "passed",
+      "notes": "Lines 164-180: Checks if process CWD starts with worktree path"
+    },
+    {
+      "id": 8,
+      "description": "process-utils.sh: verify_process_command() function exists (checks for node/npm)",
+      "status": "passed",
+      "notes": "Lines 193-206: Uses ps -p $pid -o comm= and grep for node|npm"
+    },
+    {
+      "id": 9,
+      "description": "process-utils.sh: verify_process_ownership() function exists (checks current user)",
+      "status": "passed",
+      "notes": "Lines 219-233: Compares ps output with whoami"
+    },
+    {
+      "id": 10,
+      "description": "process-utils.sh: graceful_kill() function exists with security audit logging",
+      "status": "passed",
+      "notes": "Lines 248-284: SIGTERM first, sleep 3, SIGKILL if needed, logs to ~/.commandmate/logs/security.log"
+    },
+    {
+      "id": 11,
+      "description": "process-utils.sh: stop_server_by_port() orchestration function exists",
+      "status": "passed",
+      "notes": "Lines 299-349: Orchestrates all verification steps (ownership, command, cwd, worktree) before graceful_kill"
+    },
+    {
+      "id": 12,
+      "description": "worktree-cleanup.md: Sources validators.sh",
+      "status": "passed",
+      "notes": "Line 39: source \"$(dirname \"$0\")/../lib/validators.sh\""
+    },
+    {
+      "id": 13,
+      "description": "worktree-cleanup.md: Validation range is 1-2147483647",
+      "status": "passed",
+      "notes": "Lines 34, 198: Range correctly stated as 1-2147483647"
+    },
+    {
+      "id": 14,
+      "description": "worktree-cleanup.md: Sources process-utils.sh",
+      "status": "passed",
+      "notes": "Line 56: source \"$(dirname \"$0\")/../lib/process-utils.sh\""
+    },
+    {
+      "id": 15,
+      "description": "worktree-cleanup.md: Port-based detection logic added in Phase 2",
+      "status": "passed",
+      "notes": "Lines 77-93: check_lsof_available, PORTS_TO_CHECK array, stop_server_by_port loop"
+    },
+    {
+      "id": 16,
+      "description": "worktree-cleanup.md: sleep time is 3 seconds",
+      "status": "passed",
+      "notes": "Line 70: sleep 3 (not 2)"
+    },
+    {
+      "id": 17,
+      "description": "worktree-cleanup.md: Error handling table shows 1-2147483647",
+      "status": "passed",
+      "notes": "Line 198: 'Invalid issue number | ... (1-2147483647)'"
+    },
+    {
+      "id": 18,
+      "description": "worktree-setup.md: Sources validators.sh",
+      "status": "passed",
+      "notes": "Line 39: source \"$(dirname \"$0\")/../lib/validators.sh\""
+    },
+    {
+      "id": 19,
+      "description": "worktree-setup.md: Validation range is 1-2147483647",
+      "status": "passed",
+      "notes": "Lines 34, 154: Range correctly stated as 1-2147483647"
+    },
+    {
+      "id": 20,
+      "description": "worktree-setup.md: Error handling table shows 1-2147483647",
+      "status": "passed",
+      "notes": "Line 154: 'Invalid issue number | ... (1-2147483647)'"
+    }
+  ],
+  "passed_count": 20,
+  "failed_count": 0,
+  "summary": "All 20 acceptance criteria passed. Issue #151 implementation is complete. Key verifications: (1) validators.sh correctly defines MAX_ISSUE_NO=2147483647 and validate_issue_no() function; (2) process-utils.sh implements all required functions for process detection and safe termination with security audit logging; (3) worktree-cleanup.md sources both utility libraries and includes port-based detection with 3-second sleep; (4) worktree-setup.md sources validators.sh; (5) Both command files show correct validation range 1-2147483647 in Phase 1 and error handling tables."
+}

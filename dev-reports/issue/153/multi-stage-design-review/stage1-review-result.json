@@ -1,0 +1,77 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "reviewed_at": "2026-02-04T00:00:00.000Z",
+  "issue_number": 153,
+  "design_doc_path": "dev-reports/design/issue-153-auto-yes-state-inconsistency-design-policy.md",
+  "principle_compliance": {
+    "SOLID": {
+      "S": {
+        "compliant": true,
+        "notes": "auto-yes-manager.ts は Auto-Yes 状態管理という単一の責務を持っている。状態管理（autoYesStates）、ポーラー管理（autoYesPollerStates）、ポーリングロジック（pollAutoYes）が全て Auto-Yes 機能に関連している。今回の変更は状態格納メカニズムのみの変更であり、責務を増やさない。"
+      },
+      "O": {
+        "compliant": true,
+        "notes": "設計は拡張に開いている。関数インターフェース（getAutoYesState, setAutoYesEnabled, startAutoYesPolling 等）は変更不要であり、呼び出し元コードの修正も不要。内部実装の変更（モジュールスコープ Map から globalThis への移行）が外部インターフェースに影響を与えない。"
+      },
+      "I": {
+        "compliant": true,
+        "notes": "インターフェースは適切に分離されている。AutoYesState と AutoYesPollerState は明確に分離された型定義。クライアントは必要な関数のみを import して使用可能（例: getAutoYesState のみ、または startAutoYesPolling のみ）。"
+      },
+      "D": {
+        "compliant": true,
+        "notes": "依存関係は適切に抽象化されている。CLIToolManager、captureSessionOutput、sendKeys 等の外部依存は import 経由で注入され、モジュール内でハードコードされていない。今回の変更は内部状態管理のみであり、依存関係構造に影響しない。"
+      }
+    },
+    "KISS": {
+      "compliant": true,
+      "notes": "設計は最もシンプルな解決策を選択している。globalThis + nullish coalescing による状態永続化は約20行の変更で実現可能。DB永続化（マイグレーション + CRUD 実装が必要）やクリーンアップ機構と比較して、最小限の複雑さで問題を解決している。既存のクリア関数（clearAllAutoYesStates, clearAllPollerStates）もそのまま動作するため、追加の複雑さを導入しない。"
+    },
+    "YAGNI": {
+      "compliant": true,
+      "notes": "設計は即座の問題のみを解決し、将来の仮想的な要件を先回りして実装していない。DB永続化（サーバー再起動後の状態復元）は「将来対応」として明示的に除外されている。セクション6で関連ファイル（response-poller.ts, claude-poller.ts）への適用は「検討事項」として記録し、本 Issue では対象外としている点も YAGNI に準拠。"
+    },
+    "DRY": {
+      "compliant": true,
+      "notes": "コードの重複はない。状態管理ロジック（get/set/clear）は単一の場所に集約されている。globalThis への移行後も、autoYesStates と autoYesPollerStates の参照箇所（78-81行目）のみの変更で済み、各関数内での重複したグローバル参照コードは発生しない。ただし、セクション6で指摘されている response-poller.ts と claude-poller.ts との間で同様のパターンが存在する可能性があり、将来的にはユーティリティ関数への抽出を検討すべき（本 Issue のスコープ外）。"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "DRY",
+        "title": "globalThis 状態管理パターンの共通化検討",
+        "description": "設計書セクション6で言及されている通り、response-poller.ts と claude-poller.ts も同様のインメモリ Map 管理パターンを使用している可能性がある。本 Issue 修正後、これらのモジュールにも同様の問題が発生していないか調査し、必要であれば共通のユーティリティ関数（例: createPersistentMap<K,V>()）を抽出して DRY を促進することを検討すべき。",
+        "recommendation": "本 Issue のスコープ外として、別 Issue で対応。修正完了後にフォローアップ Issue を作成することを推奨。",
+        "severity": "low"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "documentation",
+        "title": "globalThis 使用時の注意事項ドキュメント化",
+        "description": "globalThis を使用した状態永続化パターンは Next.js プロジェクトで一般的なテクニックだが、チーム内で統一的な理解を促進するため、CLAUDE.md または内部ドキュメントにこのパターンの使用ガイドラインを追記することを検討。",
+        "recommendation": "実装完了後、CLAUDE.md の「Issue #153」セクションで globalThis パターンの採用理由を簡潔に記載。",
+        "severity": "low"
+      },
+      {
+        "id": "NTH-002",
+        "category": "testing",
+        "title": "統合テストでのモジュール再読み込みシミュレーション",
+        "description": "設計書のテスト方針（4.1）ではユニットテストでのシミュレーションのみ記載されているが、Jest の isolateModules や resetModules を使用した統合テストでより現実的なモジュール再読み込みシナリオをテストできる可能性がある。",
+        "recommendation": "ユニットテストで基本的な動作確認後、必要に応じて統合テストを追加。",
+        "severity": "low"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2,
+    "overall_compliance": "excellent"
+  }
+}

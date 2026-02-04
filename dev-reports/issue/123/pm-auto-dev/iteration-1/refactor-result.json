@@ -1,0 +1,37 @@
+{
+  "status": "success",
+  "changes": [
+    {
+      "file": "src/hooks/useContextMenu.ts",
+      "type": "comment_added",
+      "description": "Added SF-001 future refactoring consideration comment for coordinate extraction logic with YAGNI principle reference"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "type": "comment_added",
+      "description": "Added SF-002 comprehensive JSDoc for TreeNodeProps including touch event integration documentation and property descriptions"
+    }
+  ],
+  "test_results": {
+    "total": 2620,
+    "passed": 2620,
+    "skipped": 7,
+    "test_files": 133
+  },
+  "quality_metrics": {
+    "typescript_errors": 0,
+    "eslint_errors": 0
+  },
+  "commits": [
+    "e00fad1: refactor(touch): add JSDoc comments for review findings SF-001/SF-002"
+  ],
+  "refactorings_applied": [
+    "SF-001: Added future extraction consideration comment for coordinate logic in useContextMenu.ts",
+    "SF-002: Added comprehensive JSDoc documentation for TreeNodeProps touch event properties"
+  ],
+  "files_changed": [
+    "src/hooks/useContextMenu.ts",
+    "src/components/worktree/FileTreeView.tsx"
+  ],
+  "message": "Refactoring completed successfully. Added JSDoc comments addressing review findings SF-001 and SF-002. All tests passing, no static analysis errors."
+}

@@ -1,0 +1,26 @@
+{
+  "issue_number": 151,
+  "refactor_targets": [
+    ".claude/lib/validators.sh",
+    ".claude/lib/process-utils.sh",
+    ".claude/commands/worktree-cleanup.md",
+    ".claude/commands/worktree-setup.md"
+  ],
+  "quality_metrics": {
+    "acceptance_test_passed": true,
+    "scenarios_passed": 20,
+    "scenarios_total": 20
+  },
+  "improvement_goals": [
+    "コードの可読性向上",
+    "コメントの整備",
+    "エラーハンドリングの改善",
+    "bashスクリプトのベストプラクティス適用"
+  ],
+  "review_findings_applied": [
+    "MF-DRY-001: validators.sh導入済み",
+    "SF-SRP-001: 関数分離設計適用済み",
+    "MF-SEC-001: lsof -F n形式対応済み",
+    "SF-SEC-002: 監査ログ実装済み"
+  ]
+}

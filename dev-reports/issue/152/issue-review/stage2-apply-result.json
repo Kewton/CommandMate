@@ -1,0 +1,68 @@
+{
+  "issue_number": 152,
+  "stage": 2,
+  "stage_name": "Apply Stage 1 Review Findings",
+  "iteration": 1,
+  "applied_at": "2026-02-04T00:00:00Z",
+  "status": "COMPLETED",
+  "applied_items": [
+    {
+      "id": "SF-001",
+      "title": "CLIToolインターフェース経由の呼び出しに関する説明が不足",
+      "action": "APPLIED",
+      "changes": [
+        "Added call chain diagram at the beginning of problem identification section: `send/route.ts -> ClaudeTool (src/lib/cli-tools/claude.ts) -> claude-session.ts`",
+        "Added `src/lib/cli-tools/claude.ts` to the affected components list with description: ClaudeToolクラス（Strategyパターン、claude-session.tsをラップ）",
+        "Reordered affected components to show the call hierarchy clearly"
+      ]
+    },
+    {
+      "id": "SF-002",
+      "title": "案2のwaitForPrompt関数が未定義",
+      "action": "APPLIED",
+      "changes": [
+        "Added a note block before the code sample indicating that `waitForPrompt()` requires new implementation",
+        "Added detailed expected behavior specification for `waitForPrompt()` function:",
+        "  - Input parameters: sessionName (string), timeout (number)",
+        "  - Processing: Monitor tmux session pane until prompt detection",
+        "  - Timeout handling: Throw exception if prompt not detected within specified time",
+        "  - Return value: Promise<void> (resolves on detection, rejects on timeout)",
+        "Added inline comment in code sample marking the new implementation requirement"
+      ]
+    },
+    {
+      "id": "SF-003",
+      "title": "受け入れ条件の具体化",
+      "action": "APPLIED",
+      "changes": [
+        "Expanded the UI loading state acceptance criterion with three specific sub-criteria:",
+        "  - Send button disabled during session startup",
+        "  - Spinner or loading indicator displayed",
+        "  - Visual feedback to user that processing is in progress"
+      ]
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "NTH-001",
+      "title": "他のCLIツール（codex, gemini）への影響",
+      "reason": "Nice to have item - may be addressed during implementation phase if relevant"
+    },
+    {
+      "id": "NTH-002",
+      "title": "テスト手順の自動化",
+      "reason": "Nice to have item - integration/E2E test addition is optional and can be decided during implementation"
+    },
+    {
+      "id": "NTH-003",
+      "title": "案1のプロンプト検出パターンの妥当性",
+      "reason": "Nice to have item - pattern validation should be done during implementation with actual Claude CLI output"
+    }
+  ],
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/152",
+  "verification": {
+    "issue_updated": true,
+    "all_should_fix_applied": true,
+    "nice_to_have_noted": true
+  }
+}

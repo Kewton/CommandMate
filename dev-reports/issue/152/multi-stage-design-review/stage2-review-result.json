@@ -1,0 +1,180 @@
+{
+  "review_stage": "Stage 2 - Consistency Review",
+  "issue_number": 152,
+  "focus_area": "design_vs_implementation_consistency",
+  "review_date": "2026-02-04",
+  "reviewer": "architecture-review-agent",
+  "design_document": "dev-reports/design/issue-152-first-message-not-sent-design-policy.md",
+
+  "must_fix": [
+    {
+      "id": "CONS-001",
+      "severity": "critical",
+      "title": "sendMessageToClaude() uses execAsync for Enter key instead of sendKeys",
+      "description": "The design proposes using sendKeys() for both message and Enter, but the current implementation uses execAsync() directly for the Enter key (C-m). The design shows: 'await sendKeys(sessionName, '', true); // Enter' but the actual implementation uses 'await execAsync(`tmux send-keys -t \"${sessionName}\" C-m`);'",
+      "design_spec": "sendMessageToClaude() should use sendKeys() for consistency",
+      "current_implementation": "src/lib/claude-session.ts:261 uses execAsync() directly",
+      "impact": "The design assumes sendKeys() is used for all key operations, but actual code bypasses it. This inconsistency may not affect functionality but breaks the abstraction layer.",
+      "recommendation": "Either update the design to document the current execAsync approach, or modify implementation to use sendKeys(sessionName, '', true) as designed"
+    },
+    {
+      "id": "CONS-002",
+      "severity": "critical",
+      "title": "waitForPrompt() requires import of capturePane from tmux.ts",
+      "description": "The design shows waitForPrompt() calling capturePane() directly, but capturePane is not currently imported in claude-session.ts for use outside of startClaudeSession().",
+      "design_spec": "waitForPrompt() uses capturePane(sessionName, { startLine: -10 })",
+      "current_implementation": "capturePane is already imported at line 10 of claude-session.ts",
+      "impact": "No import changes needed - capturePane is already imported",
+      "recommendation": "Design is consistent with imports. No action needed - this was verified as false positive."
+    }
+  ],
+
+  "should_fix": [
+    {
+      "id": "CONS-003",
+      "severity": "medium",
+      "title": "Existing pattern detection differs from CLAUDE_PROMPT_PATTERN",
+      "description": "The current implementation uses /^>\\s*$/m for prompt detection, while CLAUDE_PROMPT_PATTERN in cli-patterns.ts is /^[>\\u276F](\\s*$|\\s+\\S)/m. The new pattern is more comprehensive and supports the new prompt character.",
+      "design_spec": "Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts",
+      "current_implementation": "startClaudeSession() line 211 uses /^>\\s*$/m",
+      "impact": "The current pattern only matches legacy '>' prompts with optional whitespace. It won't match '\\u276F' prompts or prompts with suggested commands like '> /work-plan'",
+      "recommendation": "Import and use CLAUDE_PROMPT_PATTERN as designed to ensure full prompt detection coverage"
+    },
+    {
+      "id": "CONS-004",
+      "severity": "medium",
+      "title": "Timeout values differ from design",
+      "description": "Current implementation uses maxWaitTime=10000ms and pollInterval=500ms, while design specifies CLAUDE_INIT_TIMEOUT=15000ms and CLAUDE_INIT_POLL_INTERVAL=300ms.",
+      "design_spec": "CLAUDE_INIT_TIMEOUT=15000, CLAUDE_INIT_POLL_INTERVAL=300",
+      "current_implementation": "startClaudeSession() line 201-202 uses 10000ms and 500ms",
+      "impact": "Shorter timeout may cause premature session initialization failures; longer poll interval may delay prompt detection",
+      "recommendation": "Update to designed values for improved reliability"
+    },
+    {
+      "id": "CONS-005",
+      "severity": "medium",
+      "title": "startClaudeSession() does not throw on timeout",
+      "description": "Current implementation continues execution after timeout without throwing an error, while design specifies throwing an error on timeout.",
+      "design_spec": "throw new Error(`Claude initialization timeout (${CLAUDE_INIT_TIMEOUT}ms)`);",
+      "current_implementation": "Line 218 shows while loop exits silently and continues to log success",
+      "impact": "Sessions may be considered 'started' even when Claude CLI hasn't fully initialized, leading to the exact bug this issue addresses",
+      "recommendation": "Add error throwing on timeout as per design"
+    },
+    {
+      "id": "CONS-006",
+      "severity": "medium",
+      "title": "sendMessageToClaude() lacks prompt verification",
+      "description": "Current implementation does not verify prompt state before sending message. Design requires checking CLAUDE_PROMPT_PATTERN and calling waitForPrompt() if needed.",
+      "design_spec": "Check output with CLAUDE_PROMPT_PATTERN, call waitForPrompt() if not at prompt",
+      "current_implementation": "sendMessageToClaude() lines 239-270 only check session existence, not prompt state",
+      "impact": "Messages may be sent before Claude is ready to receive them, causing message loss",
+      "recommendation": "Add prompt state verification as per design"
+    },
+    {
+      "id": "CONS-007",
+      "severity": "medium",
+      "title": "Missing post-prompt delay after detection",
+      "description": "Design specifies a 500ms delay after prompt detection for rendering stability, but current implementation breaks immediately after detection.",
+      "design_spec": "await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY)) after prompt detection",
+      "current_implementation": "Line 213 breaks immediately after detection, no stability delay",
+      "impact": "Claude CLI may not have finished rendering when considered ready",
+      "recommendation": "Add CLAUDE_POST_PROMPT_DELAY as designed"
+    }
+  ],
+
+  "nice_to_have": [
+    {
+      "id": "CONS-008",
+      "severity": "low",
+      "title": "Console output uses emoji in current implementation",
+      "description": "Current implementation uses emoji in console.log (e.g., '\\u2713 Claude initialized'). Design shows plain text 'console.log(`Claude initialized in ${Date.now() - startTime}ms`)' without emoji.",
+      "recommendation": "Minor cosmetic difference, no action needed unless log parsing depends on exact format"
+    },
+    {
+      "id": "CONS-009",
+      "severity": "low",
+      "title": "CLI tool wrapper (ClaudeTool) unchanged in design",
+      "description": "Design correctly notes src/lib/cli-tools/claude.ts wraps claude-session.ts and requires no changes. This is consistent.",
+      "recommendation": "No action needed - design correctly identifies no changes to wrapper"
+    }
+  ],
+
+  "consistency_analysis": {
+    "functions_verified": {
+      "capturePane": {
+        "exists": true,
+        "location": "src/lib/tmux.ts:263-297",
+        "signature_match": true,
+        "notes": "Supports both legacy number parameter and options object with startLine/endLine"
+      },
+      "sendKeys": {
+        "exists": true,
+        "location": "src/lib/tmux.ts:207-225",
+        "signature_match": true,
+        "notes": "Parameters: sessionName, keys, sendEnter=true. Handles single quote escaping."
+      },
+      "hasSession": {
+        "exists": true,
+        "location": "src/lib/tmux.ts:68-76",
+        "signature_match": true,
+        "notes": "Returns Promise<boolean>, uses tmux has-session command"
+      },
+      "getSessionName": {
+        "exists": true,
+        "location": "src/lib/claude-session.ts:94-96",
+        "signature_match": true,
+        "notes": "Returns 'mcbd-claude-${worktreeId}'"
+      }
+    },
+    "constants_verified": {
+      "CLAUDE_PROMPT_PATTERN": {
+        "exists": true,
+        "location": "src/lib/cli-patterns.ts:46",
+        "value": "/^[>\\u276F](\\s*$|\\s+\\S)/m",
+        "design_usage": "Correctly referenced in design for DRY-001"
+      },
+      "CLAUDE_SEPARATOR_PATTERN": {
+        "exists": true,
+        "location": "src/lib/cli-patterns.ts:51",
+        "value": "/^\\u2500{10,}$/m",
+        "design_usage": "Correctly referenced in design for DRY-002"
+      }
+    },
+    "api_routes_verified": {
+      "send_route": {
+        "location": "src/app/api/worktrees/[id]/send/route.ts",
+        "current_behavior": "Calls cliTool.startSession() then cliTool.sendMessage() without additional verification",
+        "design_change_needed": "startSession() error handling already exists at lines 117-123, but relies on startClaudeSession() throwing on failure",
+        "consistency_status": "partial - depends on claude-session.ts throwing errors properly"
+      }
+    },
+    "ui_components_verified": {
+      "MessageInput": {
+        "location": "src/components/worktree/MessageInput.tsx",
+        "error_handling": "Has error state (line 35) and displays errors (lines 206-209)",
+        "design_alignment": "Consistent - already has error display infrastructure"
+      },
+      "WorktreeDetailRefactored": {
+        "location": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "error_handling": "handleMessageSent callback (lines 1092-1098) triggers refresh after send",
+        "design_alignment": "Consistent - but may need try/catch if sendMessage starts throwing"
+      }
+    }
+  },
+
+  "summary": {
+    "overall_status": "requires_fixes",
+    "critical_issues": 1,
+    "medium_issues": 5,
+    "low_issues": 2,
+    "assessment": "The design document is well-structured and correctly identifies the constants and patterns needed from cli-patterns.ts. However, there are significant inconsistencies between the proposed changes and the current implementation: (1) The current timeout handling does not throw errors, which is the root cause of the bug being fixed; (2) The sendMessageToClaude() function lacks prompt verification; (3) Current pattern detection is less comprehensive than CLAUDE_PROMPT_PATTERN; (4) No post-prompt stability delay exists. The CLI tool wrapper (ClaudeTool) and API route are correctly identified as requiring no changes or minimal changes. The design's approach to fixing these issues is sound, but implementers must ensure all consistency points are addressed.",
+    "implementation_priority": [
+      "1. Add timeout error throwing to startClaudeSession() [CONS-005]",
+      "2. Import and use CLAUDE_PROMPT_PATTERN/CLAUDE_SEPARATOR_PATTERN [CONS-003]",
+      "3. Add prompt verification to sendMessageToClaude() [CONS-006]",
+      "4. Update timeout values to designed constants [CONS-004]",
+      "5. Add post-prompt delay [CONS-007]",
+      "6. Evaluate sendKeys vs execAsync for Enter key [CONS-001]"
+    ]
+  }
+}

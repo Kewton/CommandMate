@@ -10,10 +10,84 @@ import {
   capturePane,
   killSession,
 } from './tmux';
+import {
+  CLAUDE_PROMPT_PATTERN,
+  CLAUDE_SEPARATOR_PATTERN,
+} from './cli-patterns';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+
+// ----- Helper Functions -----
+
+/**
+ * Extract error message from unknown error type
+ * Provides consistent error message extraction across the module (DRY)
+ *
+ * @param error - Unknown error object
+ * @returns Error message string
+ */
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// ----- Timeout and Polling Constants (OCP-001) -----
+// These constants are exported to allow configuration and testing.
+// Changing these values affects Claude CLI session startup behavior.
+
+/**
+ * Claude CLI initialization max wait time (milliseconds)
+ *
+ * This timeout allows sufficient time for Claude CLI to:
+ * - Load and initialize its internal state
+ * - Authenticate with Anthropic servers (if needed)
+ * - Display the interactive prompt
+ *
+ * 15 seconds provides headroom for slower networks or cold starts.
+ */
+export const CLAUDE_INIT_TIMEOUT = 15000;
+
+/**
+ * Initialization polling interval (milliseconds)
+ *
+ * How frequently we check if Claude CLI has finished initializing.
+ * 300ms balances responsiveness with avoiding excessive polling overhead.
+ */
+export const CLAUDE_INIT_POLL_INTERVAL = 300;
+
+/**
+ * Stability delay after prompt detection (milliseconds)
+ *
+ * This delay is necessary because Claude CLI renders its UI progressively:
+ * 1. The prompt character (> or U+276F) appears first
+ * 2. Additional UI elements (tips, suggestions) may render afterward
+ * 3. Sending input too quickly can interrupt this rendering process
+ *
+ * The 500ms value was empirically determined to provide sufficient buffer
+ * for Claude CLI to complete its initialization rendering while maintaining
+ * responsive user experience. (DOC-001)
+ *
+ * @see Issue #152 - First message not being sent after session start
+ */
+export const CLAUDE_POST_PROMPT_DELAY = 500;
+
+/**
+ * Prompt wait timeout before message send (milliseconds)
+ *
+ * When sending a message, we first verify Claude is at a prompt state.
+ * This timeout limits how long we wait for Claude to return to prompt
+ * if it's still processing a previous request.
+ */
+export const CLAUDE_PROMPT_WAIT_TIMEOUT = 5000;
+
+/**
+ * Prompt wait polling interval (milliseconds)
+ *
+ * How frequently we check for prompt state before sending messages.
+ * 200ms provides quick response while minimizing CPU usage.
+ */
+export const CLAUDE_PROMPT_POLL_INTERVAL = 200;
 
 /**
  * Cached Claude CLI path
@@ -148,6 +222,39 @@ export async function getClaudeSessionState(
 }
 
 /**
+ * Wait for session to be at prompt state
+ * Polls for prompt detection using CLAUDE_PROMPT_PATTERN (DRY-001)
+ *
+ * @param sessionName - tmux session name
+ * @param timeout - Timeout in milliseconds (default: CLAUDE_PROMPT_WAIT_TIMEOUT)
+ * @throws {Error} If prompt is not detected within timeout
+ *
+ * @example
+ * ```typescript
+ * await waitForPrompt('mcbd-claude-feature-foo');
+ * // Session is now ready to receive input
+ * ```
+ */
+export async function waitForPrompt(
+  sessionName: string,
+  timeout: number = CLAUDE_PROMPT_WAIT_TIMEOUT
+): Promise<void> {
+  const startTime = Date.now();
+  const pollInterval = CLAUDE_PROMPT_POLL_INTERVAL;
+
+  while (Date.now() - startTime < timeout) {
+    const output = await capturePane(sessionName, { startLine: -10 });
+    // DRY-001: Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts
+    if (CLAUDE_PROMPT_PATTERN.test(output)) {
+      return; // Prompt detected
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+  }
+
+  throw new Error(`Prompt detection timeout (${timeout}ms)`);
+}
+
+/**
  * Start a Claude CLI session in tmux
  *
  * @param options - Session options
@@ -196,20 +303,25 @@ export async function startClaudeSession(
     // Start Claude CLI in interactive mode using dynamically resolved path
     await sendKeys(sessionName, claudePath, true);
 
-    // Wait for Claude to initialize with dynamic detection
-    // Check for Claude prompt instead of fixed delay
-    const maxWaitTime = 10000; // 10 seconds max
-    const pollInterval = 500;  // Check every 500ms
+    // Wait for Claude to initialize with dynamic detection (OCP-001)
+    // Use constants instead of hardcoded values
+    const maxWaitTime = CLAUDE_INIT_TIMEOUT;
+    const pollInterval = CLAUDE_INIT_POLL_INTERVAL;
     const startTime = Date.now();
 
+    let initialized = false;
     while (Date.now() - startTime < maxWaitTime) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
       try {
         const output = await capturePane(sessionName, { startLine: -50 });
-        // Claude is ready when we see the prompt (> ) or separator line
-        if (/^>\s*$/m.test(output) || /^─{10,}$/m.test(output)) {
-          console.log(`✓ Claude initialized in ${Date.now() - startTime}ms`);
+        // Claude is ready when we see the prompt or separator line (DRY-001, DRY-002)
+        // Use patterns from cli-patterns.ts for consistency
+        if (CLAUDE_PROMPT_PATTERN.test(output) || CLAUDE_SEPARATOR_PATTERN.test(output)) {
+          // Wait for stability after prompt detection (CONS-007, DOC-001)
+          await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
+          console.log(`Claude initialized in ${Date.now() - startTime}ms`);
+          initialized = true;
           break;
         }
       } catch {
@@ -217,10 +329,14 @@ export async function startClaudeSession(
       }
     }
 
-    console.log(`✓ Started Claude session: ${sessionName}`);
+    // Throw error on timeout instead of silently continuing (CONS-005, IMP-001)
+    if (!initialized) {
+      throw new Error(`Claude initialization timeout (${CLAUDE_INIT_TIMEOUT}ms)`);
+    }
+
+    console.log(`Started Claude session: ${sessionName}`);
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to start Claude session: ${errorMessage}`);
+    throw new Error(`Failed to start Claude session: ${getErrorMessage(error)}`);
   }
 }
 
@@ -250,24 +366,18 @@ export async function sendMessageToClaude(
     );
   }
 
-  try {
-    // Send message to Claude (without Enter)
-    await sendKeys(sessionName, message, false);
-
-    // Wait a moment for the text to be typed
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    // Send Enter key to submit (single Enter submits in Claude Code CLI)
-    await execAsync(`tmux send-keys -t "${sessionName}" C-m`);
-
-    // Wait a moment for the message to be processed
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    console.log(`✓ Sent message to Claude session: ${sessionName}`);
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to send message to Claude: ${errorMessage}`);
+  // Verify prompt state before sending (CONS-006, DRY-001)
+  const output = await capturePane(sessionName, { startLine: -10 });
+  if (!CLAUDE_PROMPT_PATTERN.test(output)) {
+    // Wait for prompt if not at prompt state
+    await waitForPrompt(sessionName, CLAUDE_PROMPT_WAIT_TIMEOUT);
   }
+
+  // Send message using sendKeys consistently (CONS-001)
+  await sendKeys(sessionName, message, false);  // Message without Enter
+  await sendKeys(sessionName, '', true);        // Enter key
+
+  console.log(`Sent message to Claude session: ${sessionName}`);
 }
 
 /**
@@ -298,8 +408,7 @@ export async function captureClaudeOutput(
   try {
     return await capturePane(sessionName, { startLine: -lines });
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to capture Claude output: ${errorMessage}`);
+    throw new Error(`Failed to capture Claude output: ${getErrorMessage(error)}`);
   }
 }
 
@@ -338,8 +447,7 @@ export async function stopClaudeSession(worktreeId: string): Promise<boolean> {
 
     return killed;
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`Error stopping Claude session: ${errorMessage}`);
+    console.error(`Error stopping Claude session: ${getErrorMessage(error)}`);
     return false;
   }
 }

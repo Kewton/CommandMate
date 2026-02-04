@@ -1,0 +1,81 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-DRY-001",
+        "principle": "DRY",
+        "location": "worktree-cleanup.md Phase 1, worktree-setup.md Phase 1",
+        "issue": "Issue番号検証ロジックが両ファイルに重複定義される設計",
+        "description": "設計書では「worktree-cleanup.mdとworktree-setup.mdで同じ検証ロジックを使用」と記載されているが、両ファイルにbashの検証コードをコピーする方式となっている。現在の999999上限から2147483647への変更時に2箇所を修正する必要があり、DRY原則に違反している。",
+        "recommendation": "共通のbash関数ファイル（例: .claude/lib/validators.sh）を作成し、source コマンドで読み込む構造にする。または、検証範囲を定数として1箇所で定義し、両ファイルから参照する方式を採用する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-SRP-001",
+        "principle": "SRP (Single Responsibility)",
+        "location": "stop_server_by_port() 関数設計",
+        "issue": "stop_server_by_port()関数が複数の責務を持つ",
+        "description": "設計書の関数説明によると、stop_server_by_port()は以下の責務を持つ: (1) lsofでPID取得, (2) OS判定, (3) cwd取得, (4) Worktreeマッチ検証, (5) ユーザー確認, (6) SIGTERM送信, (7) 待機とSIGKILL。これは単一責務原則に反している。",
+        "recommendation": "以下のように責務を分離する: get_pid_by_port() - ポートからPID取得, get_process_cwd() - OS判定込みでcwd取得, is_worktree_process() - cwd検証, graceful_kill() - SIGTERM→SIGKILL。stop_server_by_port()はこれらを組み合わせるオーケストレーション関数とする。"
+      },
+      {
+        "id": "SF-KISS-001",
+        "principle": "KISS",
+        "location": "4.2 Issue専用ポートの桁数制限",
+        "issue": "ポート番号算出ロジックの複雑性",
+        "description": "Issue番号の桁数によって検出対象を分岐する設計（1-4桁はポート検出、5桁以上はスキップ）は条件分岐を増やす。また、既存のworktree-setup.mdでは `PORT=$((3000 + ISSUE_NO % 100 + 1))` という別の算出式が使われており、整合性が取れていない。",
+        "recommendation": "ポート算出ロジックを統一する。worktree-setup.mdの既存方式（3000 + ISSUE_NO % 100 + 1）と設計書の3{issueNo}方式が異なる点を明確にし、どちらかに統一するか、両方式を検出対象とするか決定が必要。"
+      },
+      {
+        "id": "SF-DRY-002",
+        "principle": "DRY",
+        "location": "4.3 関数設計, OS互換性",
+        "issue": "OS判定ロジックの再利用性",
+        "description": "macOS/Linux判定でcwd取得方法を分岐するロジックは、将来的に他の機能でも必要になる可能性がある（例: プロセス情報取得）。現在の設計ではstop_server_by_port()内にインラインで実装される。",
+        "recommendation": "get_process_cwd()を汎用関数として切り出し、再利用可能にする。これにより将来の拡張時にも一貫した方法でプロセス情報を取得できる。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-OCP-001",
+        "principle": "OCP (Open/Closed)",
+        "location": "3.1 コンポーネント構成",
+        "issue": "ポート検出方式の拡張性",
+        "description": "設計書ではPORTS_TO_CHECK配列で新しいポート検出方法を追加可能としているが、検出「方法」（lsof以外の代替手段、例えばnetstatやss）の拡張については考慮されていない。",
+        "recommendation": "将来的にlsof以外の検出手段（netstat, ss, fuser等）をサポートする場合に備え、検出戦略を抽象化するコメントを設計書に追加。ただし、YAGNIの観点からは現時点での実装は不要。"
+      },
+      {
+        "id": "NTH-KISS-002",
+        "principle": "KISS",
+        "location": "5.1 SEC-003",
+        "issue": "cwd検証の前方一致方式",
+        "description": "$PROC_CWD == \"$WORKTREE_ABS\"* という前方一致は、サブディレクトリからの起動もマッチする。これは意図通りだが、明示的な説明がない。",
+        "recommendation": "設計書に「サブディレクトリからの起動も検出対象とする」旨を明記し、意図を明確化する。"
+      },
+      {
+        "id": "NTH-DOC-001",
+        "principle": "Documentation",
+        "location": "4.1 検出対象ポート表",
+        "issue": "自動割り当てポート範囲の検出方針",
+        "description": "自動割り当てポート（3001-3100）がスコープ外とされているが、worktree-setup.mdの既存実装では `PORT=$((3000 + ISSUE_NO % 100 + 1))` で3001-3100範囲を使用している。この不整合について説明がない。",
+        "recommendation": "設計書に、既存のworktree-setup.mdのポート算出方式との関係を明記する。PIDファイル検出に依存する理由も補足する。"
+      }
+    ]
+  },
+  "summary": "設計原則の観点から、設計書は概ね良好な品質である。SOLID原則の適用は明確に意識されており、特にYAGNI（自動割り当てポートのフルスキャンを実装しない判断）は適切である。主要な課題は、(1) 検証ロジックの重複（DRY違反）、(2) stop_server_by_port()の責務過多（SRP違反）、(3) worktree-setup.mdとのポート算出ロジックの不整合（KISS/一貫性の問題）である。MF-DRY-001は実装前に解決すべき設計上の課題として対処を推奨する。",
+  "overall_quality": "Good",
+  "review_metadata": {
+    "reviewer": "architecture-review-agent",
+    "review_date": "2026-02-04",
+    "design_doc_version": "2026-02-04",
+    "related_files_reviewed": [
+      ".claude/commands/worktree-cleanup.md",
+      ".claude/commands/worktree-setup.md",
+      "src/cli/utils/input-validators.ts"
+    ]
+  }
+}

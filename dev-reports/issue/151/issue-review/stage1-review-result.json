@@ -1,0 +1,113 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "issue_number": 151,
+  "review_date": "2026-02-04",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "category": "整合性",
+        "description": "Issue番号検証範囲がドキュメントと既存コードで不一致",
+        "location": "セキュリティ考慮事項セクション - SEC-001",
+        "evidence": "Issue記載: 1-999999範囲、既存コード(input-validators.ts): MAX_ISSUE_NO = 2147483647 (2^31-1)",
+        "recommendation": "既存コード(src/cli/utils/input-validators.ts)のMAX_ISSUE_NO値と整合するよう、Issue記載を「1-2147483647」に修正するか、スキルでの検証範囲として「1-999999」を採用することを明示し、その理由を記載する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "完全性",
+        "description": "ポート検出の3{issueNo}形式は桁数制限が必要だが説明が不十分",
+        "location": "検出対象ポートセクション",
+        "evidence": "Issue番号が4桁以上(例: 1234)の場合、3{issueNo}は31234となり5桁になる。コード例では「if [ ${#ISSUE_NO} -le 3 ]」で3桁以下を条件としているが、この理由がIssue本文に明記されていない",
+        "recommendation": "3{issueNo}形式が有効となる条件（Issue番号が3桁以下）とその理由（ポート番号は最大65535のため4桁Issue番号は5桁ポートになり使用不可）を明示する"
+      },
+      {
+        "id": "SF-002",
+        "category": "技術的妥当性",
+        "description": "lsofコマンドがインストールされていない場合の対応が不完全",
+        "location": "エッジケースセクションおよび推奨される改善策",
+        "evidence": "エッジケース表では「警告を表示し、手動停止を促す」とあるが、推奨コード例にはlsof存在チェックが含まれていない",
+        "recommendation": "コード例にlsofの存在チェック（例: command -v lsof >/dev/null）を追加し、不在時の代替検出方法（fuser, ss+プロセス照合など）またはスキップロジックを含める"
+      },
+      {
+        "id": "SF-003",
+        "category": "整合性",
+        "description": "worktree-cleanup.mdのPhase 2とIssueで提案されている改善策に差分がある",
+        "location": "推奨される改善策セクション",
+        "evidence": "現行の.claude/commands/worktree-cleanup.mdはPIDファイル確認のみ。Issueではポートベース検出を追加提案しているが、既存スキルのどのPhaseを置き換え/拡張するかが明確でない",
+        "recommendation": "既存worktree-cleanup.mdのPhase 2を拡張するのか、新しいPhase（Phase 2.5やPhase 2b）として追加するのかを明示する"
+      },
+      {
+        "id": "SF-004",
+        "category": "明確性",
+        "description": "自動割り当てポート（3001-3100）の検出方法が未定義",
+        "location": "検出対象ポートセクション",
+        "evidence": "検出対象ポート表に「3001-3100（自動割り当て）」があるが、推奨コードでは3000とIssue専用ポート(3{issueNo})のみをチェック。100個のポートを全スキャンするのは現実的でない",
+        "recommendation": "自動割り当てポートの検出は今回スコープ外とするか、検出方法（例: lsof出力から当該Worktreeのプロセスを抽出）を具体化する"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "完全性",
+        "description": "関連IssueへのリンクがIssue本文にない",
+        "location": "Issue本文全体",
+        "evidence": "Issue #136（Worktree並列開発機能）への参照がなく、文脈把握が困難",
+        "recommendation": "Related: #136（Git Worktree並列開発環境の整備）へのリンクを追加"
+      },
+      {
+        "id": "NTH-002",
+        "category": "明確性",
+        "description": "優先度・重要度の明示がない",
+        "location": "Issue本文",
+        "evidence": "バグの深刻度やリリースへの影響度が記載されていない",
+        "recommendation": "ラベル（bug, enhancement等）やPriorityを追加し、対応優先度を明確化"
+      },
+      {
+        "id": "NTH-003",
+        "category": "技術的妥当性",
+        "description": "SIGTERM失敗時の待機時間が異なる記載がある",
+        "location": "推奨コード例とエッジケース表",
+        "evidence": "推奨コードでは「sleep 3」、エッジケース表では「3秒待機後SIGKILL」と一致しているが、PIDファイル処理の既存コード（Phase 2）では「sleep 2」となっている",
+        "recommendation": "待機時間を統一する（推奨: 3秒）か、状況による使い分けの基準を明記"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/cli/utils/input-validators.ts",
+      "relevance": "Issue番号検証ロジック（MAX_ISSUE_NO定数）"
+    },
+    {
+      "file": "src/cli/utils/pid-manager.ts",
+      "relevance": "PIDファイル管理（既存実装との整合性確認）"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "デーモンプロセス管理（サーバー起動/停止）"
+    },
+    {
+      "file": "src/cli/utils/resource-resolvers.ts",
+      "relevance": "リソースパス解決（PID、DB、ログパス）"
+    },
+    {
+      "file": ".claude/commands/worktree-cleanup.md",
+      "relevance": "改善対象のスキル定義"
+    },
+    {
+      "file": ".claude/commands/worktree-setup.md",
+      "relevance": "関連スキル（Worktree作成）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト全体のドキュメント（Issue #136の機能説明）"
+    }
+  ],
+  "summary": "Issue #151は明確な問題定義と具体的な改善案を含む良質なバグ報告です。主要な指摘点として、Issue番号検証範囲が既存コードと不一致（MF-001）があり、これは整合性の観点から修正が必要です。また、ポート検出の桁数制限の説明不足（SF-001）、lsofの存在チェック欠如（SF-002）、既存スキルとの統合方法の不明確さ（SF-003）は対応を推奨します。全体として技術的な提案は妥当であり、軽微な修正で実装可能なIssueです。",
+  "overall_quality": "Good"
+}

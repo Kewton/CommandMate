@@ -1,0 +1,78 @@
+{
+  "issue_number": 123,
+  "stage": 2,
+  "stage_name": "Consistency Review",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "discrepancies": [
+      {
+        "id": "DISC-001",
+        "description": "TreeNodePropsへのタッチプロパティ追加方法の詳細化",
+        "severity": "Low",
+        "section_updated": "レビュー指摘事項サマリー (14.2)",
+        "status": "reflected",
+        "action": "対応不要として記録（設計意図は明確）"
+      },
+      {
+        "id": "DISC-002",
+        "description": "TreeNodeProps.onContextMenuの型更新が設計書に明示されていない",
+        "severity": "Medium",
+        "section_updated": "詳細設計 (5.3), 実装チェックリスト (16.3)",
+        "status": "reflected",
+        "action": "セクション5.3にonContextMenu型定義を追加、チェックリストに追加"
+      }
+    ],
+    "recommendations": [
+      {
+        "id": "REC-001",
+        "description": "TreeNodeProps.onContextMenuを`React.MouseEvent | React.TouchEvent`に更新",
+        "priority": "Medium",
+        "section_updated": "詳細設計 (5.3), 実装チェックリスト (16.3)",
+        "status": "reflected",
+        "action": "型定義を設計書に明記、実装チェックリストに追加"
+      },
+      {
+        "id": "REC-002",
+        "description": "座標取得ユーティリティ関数の抽出検討",
+        "priority": "Low",
+        "section_updated": "N/A",
+        "status": "already_covered",
+        "action": "SF-001で既に対応済み（YAGNI優先で見送り）"
+      },
+      {
+        "id": "REC-003",
+        "description": "handleContextMenuコールバック型の更新",
+        "priority": "Low",
+        "section_updated": "詳細設計 (5.3), 実装チェックリスト (16.3)",
+        "status": "reflected",
+        "action": "handleContextMenu型定義を設計書に追加、実装チェックリストに追加"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md",
+  "sections_updated": [
+    "13. レビュー履歴",
+    "14.2. Stage 2: 整合性レビュー",
+    "14.3. Stage 2 評価結果",
+    "5.3. FileTreeView 変更（TreeNodeProps型定義、handleContextMenu追加）",
+    "16.2. Stage 1レビュー指摘対応項目（番号調整）",
+    "16.3. Stage 2レビュー指摘対応項目（新規追加）",
+    "16.4. 品質確認項目（番号調整）"
+  ],
+  "consistency_checks_summary": {
+    "total": 10,
+    "pass": 8,
+    "warning": 1,
+    "needs_attention": 1
+  },
+  "approval_status": {
+    "approved": true,
+    "conditions": [
+      "Implement TreeNodeProps.onContextMenu type update as noted in REC-001",
+      "Update handleContextMenu callback type in TreeNode as noted in REC-003"
+    ]
+  },
+  "timestamp": "2026-02-04T00:00:00Z"
+}

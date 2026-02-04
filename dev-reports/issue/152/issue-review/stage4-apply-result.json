@@ -1,0 +1,92 @@
+{
+  "issue_number": 152,
+  "stage": 4,
+  "stage_name": "Apply Impact Scope Review (Stage 3)",
+  "iteration": 1,
+  "applied_at": "2026-02-04T00:00:00Z",
+  "result": "SUCCESS",
+  "summary": "Successfully applied all 3 should_fix items from the impact scope review to Issue #152. The Issue now includes comprehensive documentation about other CLI tools, test coverage gaps, and UI error handling expectations.",
+  "applied_items": [
+    {
+      "id": "SF-IMPACT-001",
+      "category": "impact_scope",
+      "title": "Other CLI Tools (Codex, Gemini) have similar timing issues",
+      "status": "applied",
+      "changes_made": [
+        "Added new section '### 他のCLIツールとの比較（Codex/Gemini）' under '### 影響範囲'",
+        "Created comparison table showing CodexTool uses fixed delays (3000ms + 500ms) and GeminiTool is non-interactive",
+        "Documented that CodexTool (src/lib/cli-tools/codex.ts lines 45-89) has different initialization pattern",
+        "Documented that GeminiTool (src/lib/cli-tools/gemini.ts lines 47-76) is unaffected due to non-interactive mode",
+        "Added conclusion that this Issue is Claude CLI specific"
+      ]
+    },
+    {
+      "id": "SF-IMPACT-002",
+      "category": "test_coverage",
+      "title": "Integration tests mock the timing-critical functions",
+      "status": "applied",
+      "changes_made": [
+        "Added new section '## テストに関する注意事項' with impact review attribution",
+        "Listed affected test files: api-send-cli-tool.test.ts, claude.test.ts, api-prompt-handling.test.ts",
+        "Documented that startClaudeSession and sendMessageToClaude are mocked (vi.fn())",
+        "Explained the test coverage gap - race condition is not reproduced in current tests",
+        "Added recommended test strategy: unit tests for timeout/error handling, updated integration test mocks, optional E2E consideration",
+        "Added implementation notes about updating mock behaviors for new error patterns"
+      ]
+    },
+    {
+      "id": "SF-IMPACT-003",
+      "category": "ui_impact",
+      "title": "UI loading state needs coordination with backend changes",
+      "status": "applied",
+      "changes_made": [
+        "Added new section '## UIエラーハンドリングの期待動作' with impact review attribution",
+        "Listed affected components: MessageInput.tsx, WorktreeDetailRefactored.tsx (lines 1092-1099)",
+        "Created table showing expected UI behavior for each state (starting, timeout, success)",
+        "Documented current MessageInput.tsx implementation (sending state, spinner, button disable)",
+        "Listed 4 required actions: catch timeout error, notify user, show retry option, maintain retryable state"
+      ]
+    }
+  ],
+  "skipped_items": [],
+  "nice_to_have_items_skipped": [
+    {
+      "id": "NTH-IMPACT-001",
+      "title": "No rollback considerations documented",
+      "reason": "Nice to have - rollback is straightforward (revert code changes, no DB migration) and is already documented in the review result"
+    },
+    {
+      "id": "NTH-IMPACT-002",
+      "title": "No observability improvements proposed",
+      "reason": "Nice to have - metrics/monitoring is out of scope for this bug fix Issue"
+    },
+    {
+      "id": "NTH-IMPACT-003",
+      "title": "CLAUDE.md should be updated after fix",
+      "reason": "Nice to have - documentation update should be done after the fix is implemented, not in the Issue"
+    },
+    {
+      "id": "NTH-IMPACT-004",
+      "title": "ICLITool interface may need enhancement",
+      "reason": "Nice to have - interface changes are optional and depend on implementation approach chosen"
+    }
+  ],
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/152",
+  "sections_added": [
+    "### 他のCLIツールとの比較（Codex/Gemini）",
+    "## テストに関する注意事項",
+    "## UIエラーハンドリングの期待動作"
+  ],
+  "preserved_sections": [
+    "## 概要",
+    "## スクリーンショット",
+    "## 技術調査結果",
+    "### 再現条件（推定）",
+    "### 問題箇所の特定",
+    "### 発生シナリオ",
+    "### 影響範囲",
+    "## 推奨される改善策",
+    "## 受け入れ条件",
+    "## テスト手順"
+  ]
+}

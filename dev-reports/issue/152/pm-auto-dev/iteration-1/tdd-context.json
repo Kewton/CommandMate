@@ -1,0 +1,68 @@
+{
+  "issue_number": 152,
+  "title": "セッション一発目のメッセージが送信されない",
+  "acceptance_criteria": [
+    "新規セッション起動後の初回メッセージが確実にClaude CLIに送信されること",
+    "セッション初期化タイムアウト時に適切なエラーメッセージが表示されること",
+    "UIにローディング状態が正しく表示されること（送信ボタン無効化、スピナー表示）",
+    "2回目以降のメッセージ送信に影響がないこと"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "1.1",
+      "task": "タイムアウト定数の定義（5定数）",
+      "file": "src/lib/claude-session.ts",
+      "constants": [
+        "CLAUDE_INIT_TIMEOUT = 15000",
+        "CLAUDE_INIT_POLL_INTERVAL = 300",
+        "CLAUDE_POST_PROMPT_DELAY = 500",
+        "CLAUDE_PROMPT_WAIT_TIMEOUT = 5000",
+        "CLAUDE_PROMPT_POLL_INTERVAL = 200"
+      ]
+    },
+    {
+      "id": "1.2",
+      "task": "パターン定数のインポート",
+      "file": "src/lib/claude-session.ts",
+      "imports": ["CLAUDE_PROMPT_PATTERN", "CLAUDE_SEPARATOR_PATTERN"]
+    },
+    {
+      "id": "1.3",
+      "task": "startClaudeSession() の改善",
+      "file": "src/lib/claude-session.ts",
+      "changes": [
+        "タイムアウト値を定数に置換",
+        "プロンプト検出パターンを定数に置換",
+        "プロンプト検出後の安定待機（500ms）追加",
+        "タイムアウト時にエラースロー"
+      ]
+    },
+    {
+      "id": "1.4",
+      "task": "waitForPrompt() 関数の新規実装",
+      "file": "src/lib/claude-session.ts",
+      "description": "プロンプト状態を検出するまでポーリングし、タイムアウト時にエラースロー"
+    },
+    {
+      "id": "1.5",
+      "task": "sendMessageToClaude() の改善",
+      "file": "src/lib/claude-session.ts",
+      "changes": [
+        "送信前にプロンプト状態を検証",
+        "Enter送信を sendKeys() に統一",
+        "waitForPrompt() を使用"
+      ]
+    }
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-152-first-message-not-sent-design-policy.md",
+  "review_findings": {
+    "DRY-001": "CLAUDE_PROMPT_PATTERN を cli-patterns.ts からインポートして使用",
+    "DRY-002": "CLAUDE_SEPARATOR_PATTERN を cli-patterns.ts からインポートして使用",
+    "OCP-001": "タイムアウト値を名前付き定数として抽出",
+    "CONS-001": "sendMessageToClaude() で Enter 送信に sendKeys() を使用",
+    "CONS-005": "startClaudeSession() タイムアウト時にエラーをスロー",
+    "CONS-006": "sendMessageToClaude() 送信前にプロンプト状態を検証",
+    "CONS-007": "プロンプト検出後に CLAUDE_POST_PROMPT_DELAY で安定待機"
+  }
+}

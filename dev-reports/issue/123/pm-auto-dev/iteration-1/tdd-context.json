@@ -1,0 +1,50 @@
+{
+  "issue_number": 123,
+  "title": "iPad利用時ファイルの追加が出来ない",
+  "acceptance_criteria": [
+    "iPadで長押し（500ms以上）によりコンテキストメニューが表示される",
+    "長押し中に10px以上移動した場合はメニューが表示されない",
+    "PC（マウス右クリック）の既存動作が維持される",
+    "iPhone（iOS）でも同様に動作する",
+    "タッチキャンセル時（通知表示など）にタイマーが適切にクリアされる",
+    "コンポーネントアンマウント時にタイマーがクリアされる（メモリリーク防止）"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "1.1",
+      "task": "useLongPressフック作成",
+      "file": "src/hooks/useLongPress.ts",
+      "test_file": "tests/unit/hooks/useLongPress.test.ts"
+    },
+    {
+      "id": "1.2",
+      "task": "useContextMenu型拡張（MouseEvent | TouchEvent）",
+      "file": "src/hooks/useContextMenu.ts",
+      "test_file": "tests/unit/hooks/useContextMenu.test.ts"
+    },
+    {
+      "id": "1.3",
+      "task": "useContextMenu座標取得ロジック修正",
+      "file": "src/hooks/useContextMenu.ts",
+      "test_file": "tests/unit/hooks/useContextMenu.test.ts"
+    },
+    {
+      "id": "2.1",
+      "task": "FileTreeView統合（タッチイベントハンドラ追加）",
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "test_file": "tests/unit/components/worktree/FileTreeView.test.tsx"
+    },
+    {
+      "id": "2.2",
+      "task": "CSS追加（touch-action, WebkitTouchCallout）",
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "test_file": null
+    }
+  ],
+  "target_coverage": 80,
+  "design_doc": "dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md",
+  "constants": {
+    "LONG_PRESS_DELAY": 500,
+    "MOVE_THRESHOLD": 10
+  }
+}

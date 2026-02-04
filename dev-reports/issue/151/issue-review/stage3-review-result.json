@@ -1,0 +1,198 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "issue_number": 151,
+  "review_date": "2026-02-04",
+  "impact_analysis": {
+    "direct_impact": [
+      {
+        "file": ".claude/commands/worktree-cleanup.md",
+        "change_type": "modify",
+        "description": "Phase 2セクションを拡張し、ポートベース検出ロジックを追加。既存のPIDファイル確認ロジックは維持しつつ、フォールバックとしてlsof検出を追加",
+        "lines_affected": "約60-80行の追加"
+      }
+    ],
+    "indirect_impact": [
+      {
+        "file": ".claude/commands/worktree-setup.md",
+        "impact_type": "documentation",
+        "description": "クリーンアップスキルの改善に伴い、サーバー起動方法の推奨（commandmate start --issue vs npm run dev）を明確化する可能性がある",
+        "risk": "low"
+      },
+      {
+        "file": "src/cli/commands/start.ts",
+        "impact_type": "none",
+        "description": "既存コードへの変更は不要。Issue専用サーバー起動時のPIDファイル生成は既に実装済み",
+        "risk": "none"
+      },
+      {
+        "file": "src/cli/commands/stop.ts",
+        "impact_type": "none",
+        "description": "既存コードへの変更は不要。PIDファイルベースの停止は既に実装済み",
+        "risk": "none"
+      },
+      {
+        "file": "src/cli/utils/daemon.ts",
+        "impact_type": "none",
+        "description": "既存コードへの変更は不要。デーモン管理はPIDファイルベースで完結",
+        "risk": "none"
+      },
+      {
+        "file": "src/cli/utils/pid-manager.ts",
+        "impact_type": "none",
+        "description": "既存コードへの変更は不要。PIDファイル管理は独立したモジュール",
+        "risk": "none"
+      },
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "impact_type": "consideration",
+        "description": "将来的な統合ポイント。現在はWebアプリ内セッションのクリーンアップを担当。CLIスキルとの役割分担は明確だが、統一的なクリーンアップAPIの可能性を検討価値あり",
+        "risk": "low"
+      }
+    ],
+    "user_impact": {
+      "positive": [
+        "npm run devで起動したサーバーがWorktree削除時に自動停止され、ENOENTエラーが発生しなくなる",
+        "ユーザーが手動でサーバーを停止する必要がなくなり、ワークフローがスムーズになる",
+        "Issue専用ポート（3{issueNo}形式）も検出対象に含まれ、複数Worktree同時開発時の安全性が向上"
+      ],
+      "neutral": [
+        "lsofが利用不可の環境では従来通り手動停止が必要（警告メッセージで案内）",
+        "5桁以上のIssue番号では3{issueNo}形式のポート検出はスキップ（PIDファイル検出に依存）"
+      ],
+      "negative": []
+    },
+    "breaking_changes": [],
+    "risk_assessment": {
+      "overall_risk": "low",
+      "risk_factors": [
+        {
+          "factor": "誤プロセス停止",
+          "mitigation": "cwd検証により、Worktreeディレクトリ以外から起動したプロセスは停止しない",
+          "residual_risk": "very_low"
+        },
+        {
+          "factor": "lsofの環境依存",
+          "mitigation": "check_lsof_available()関数で事前チェック、不在時は警告と代替コマンド案内",
+          "residual_risk": "low"
+        },
+        {
+          "factor": "macOS/Linux間の挙動差",
+          "mitigation": "OS判定によるlsofオプション/cwdの取得方法を分岐（Darwin vs Linux）",
+          "residual_risk": "low"
+        },
+        {
+          "factor": "プロセス強制終了によるデータ損失",
+          "mitigation": "SIGTERM後3秒待機してからSIGKILL、ユーザー確認プロンプト表示",
+          "residual_risk": "very_low"
+        }
+      ]
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-IMPACT-001",
+        "category": "テスト範囲",
+        "description": "テスト計画にLinux環境でのcwd取得方法（/proc/$PID/cwd）の検証が含まれているが、具体的なテスト環境（Docker等）の指定がない",
+        "location": "テスト計画セクション - 手動テスト4",
+        "evidence": "「Docker等でLinux環境を用意し、同様のテストを実施」とあるが、Dockerイメージの指定やCI統合の有無が不明",
+        "recommendation": "テスト用Dockerイメージ（例: node:18-alpine）を指定するか、CI/CD環境（GitHub Actions ubuntu-latest）での自動テストを検討する旨を追記"
+      },
+      {
+        "id": "SF-IMPACT-002",
+        "category": "影響ファイル",
+        "description": "影響範囲セクションに具体的な変更内容（行数、追加/修正）が記載されていない",
+        "location": "影響範囲セクション",
+        "evidence": "「/worktree-cleanup スキル - Phase 2を拡張」とあるが、具体的な変更規模が不明",
+        "recommendation": "予想される変更行数（例: 約60-80行追加）や、既存コードの削除/修正があるかを明記"
+      },
+      {
+        "id": "SF-IMPACT-003",
+        "category": "移行考慮",
+        "description": "既存のworktree-cleanup.mdを使用しているユーザーへの影響が未考慮",
+        "location": "推奨される改善策セクション",
+        "evidence": "Phase 2の「置き換え」と記載されているが、既存の手順でクリーンアップを実行した場合の挙動変化が説明されていない",
+        "recommendation": "変更後の挙動は上位互換であり、既存ユーザーの手順変更は不要である旨を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-IMPACT-001",
+        "category": "ドキュメント更新",
+        "description": "CLAUDE.mdの最近の実装機能セクションへの追記が未計画",
+        "location": "影響範囲セクション",
+        "evidence": "Issue #136, #138等の実装機能はCLAUDE.mdに記載されているが、本Issueの完了後の追記計画がない",
+        "recommendation": "完了後にCLAUDE.mdのコマンド一覧やセキュリティ考慮事項に本機能の説明を追加する旨を記載"
+      },
+      {
+        "id": "NTH-IMPACT-002",
+        "category": "依存関係",
+        "description": "session-cleanup.tsとの将来的な統合可能性が未検討",
+        "location": "影響範囲セクション",
+        "evidence": "src/lib/session-cleanup.tsはWebアプリ側のセッションクリーンアップを担当。CLIスキルとの統一的なクリーンアップAPIの可能性がある",
+        "recommendation": "将来的な統合の可能性をNice to Have（将来課題）として記載。現時点では別Issue対応としてスコープ外"
+      },
+      {
+        "id": "NTH-IMPACT-003",
+        "category": "テスト範囲",
+        "description": "単体テストの追加計画がない",
+        "location": "テスト計画セクション",
+        "evidence": "手動テストのみ記載。tests/unit/配下にsession-cleanup.test.ts等があるが、worktree-cleanup.mdのbashスクリプトは単体テスト対象外",
+        "recommendation": "bashスクリプトの単体テストはスコープ外とするか、将来的にshellcheck/bats等でのテスト導入を検討する旨を記載"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": ".claude/commands/worktree-cleanup.md",
+      "relevance": "直接変更対象。Phase 2セクションの拡張"
+    },
+    {
+      "file": ".claude/commands/worktree-setup.md",
+      "relevance": "関連スキル。クリーンアップ改善に伴う整合性確認"
+    },
+    {
+      "file": "src/cli/commands/start.ts",
+      "relevance": "間接影響。PIDファイル生成の既存実装確認"
+    },
+    {
+      "file": "src/cli/commands/stop.ts",
+      "relevance": "間接影響。PIDファイルベース停止の既存実装確認"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "間接影響。デーモン管理の既存実装確認"
+    },
+    {
+      "file": "src/cli/utils/pid-manager.ts",
+      "relevance": "間接影響。PIDファイル管理の既存実装確認"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "将来的な統合ポイント。Facadeパターンによるクリーンアップ統合"
+    },
+    {
+      "file": "src/cli/utils/input-validators.ts",
+      "relevance": "整合性確認。MAX_ISSUE_NO定数（2147483647）との整合"
+    },
+    {
+      "file": "tests/unit/session-cleanup.test.ts",
+      "relevance": "テストパターン参考。クリーンアップ関連テストの実装例"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "ドキュメント更新候補。最近の実装機能セクションへの追記"
+    },
+    {
+      "file": "docs/features/sidebar-status-indicator.md",
+      "relevance": "参考ドキュメント。検出ロジックの記述パターン"
+    }
+  ],
+  "summary": "Issue #151の影響範囲は限定的で、主な変更は.claude/commands/worktree-cleanup.mdのPhase 2拡張のみです。既存のCLIコマンド（start/stop/status）やTypeScriptモジュールへの変更は不要であり、破壊的変更もありません。リスクは低く、cwd検証による誤プロセス停止防止、lsof存在チェックによる環境互換性確保など、適切な緩和策が提案されています。Should Fix 3件はテスト計画の具体化と影響範囲の詳細化に関するもので、Issueの品質向上に寄与します。全体として、影響範囲は適切に特定されており、安全に実装可能なIssueです。",
+  "overall_quality": "Good"
+}

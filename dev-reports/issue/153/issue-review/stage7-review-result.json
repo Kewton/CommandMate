@@ -1,0 +1,163 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "reviewed_at": "2026-02-04T13:00:00.000Z",
+  "issue_number": 153,
+  "previous_findings_verification": {
+    "SF-001": {
+      "addressed": true,
+      "notes": "globalThis state verification test added in test plan section. The Issue now includes explicit test cases for verifying globalThis.__autoYesStates and globalThis.__autoYesPollerStates are properly initialized, managed, and cleared."
+    },
+    "SF-002": {
+      "addressed": true,
+      "notes": "JSDoc documentation requirement noted in implementation section. The Issue now states: 'globalThisパターンの理由（ホットリロード/ワーカー再起動対策）をJSDocコメントで説明すること' under implementation notes."
+    },
+    "N2H-001": {
+      "addressed": false,
+      "notes": "Not explicitly added to Issue, but this is an implementation detail that can be addressed during coding phase. The proposed eslint-disable approach in the Issue is acceptable."
+    },
+    "N2H-002": {
+      "addressed": true,
+      "notes": "Added to '検討事項' section. The Issue now mentions response-poller.ts as having similar Module-level Map patterns (activePollers, pollingStartTimes) that may need investigation after this fix."
+    },
+    "N2H-003": {
+      "addressed": true,
+      "notes": "Added to '検討事項' section. The Issue now mentions claude-poller.ts as having similar in-memory state management that may need the same globalThis treatment."
+    }
+  },
+  "impact_section_assessment": {
+    "accuracy": "accurate",
+    "completeness": "complete",
+    "impact_level_correct": true,
+    "notes": "The '影響範囲分析' section accurately describes: (1) Only src/lib/auto-yes-manager.ts needs modification, (2) No function interface changes, (3) No caller modifications required, (4) Existing test cleanup functions continue to work, (5) Memory impact is negligible. The 'low' impact level is correct because the change is isolated to internal state storage mechanism only."
+  },
+  "additional_impact_analysis": {
+    "cross_module_dependencies": {
+      "session_cleanup_ts": {
+        "imports": "stopAutoYesPolling from auto-yes-manager",
+        "impact": "None - stopAutoYesPolling interface unchanged",
+        "verified": true
+      },
+      "server_ts": {
+        "imports": "stopAllAutoYesPolling from auto-yes-manager",
+        "impact": "None - stopAllAutoYesPolling interface unchanged, graceful shutdown will work correctly",
+        "verified": true
+      },
+      "auto_yes_api_routes": {
+        "files": [
+          "src/app/api/worktrees/[id]/auto-yes/route.ts",
+          "src/app/api/worktrees/[id]/current-output/route.ts"
+        ],
+        "impact": "None - APIs use exported functions whose interfaces remain unchanged",
+        "verified": true
+      },
+      "useAutoYes_hook": {
+        "file": "src/hooks/useAutoYes.ts",
+        "impact": "None - consumes API responses, does not directly interact with auto-yes-manager",
+        "verified": true
+      }
+    },
+    "race_condition_analysis": {
+      "globalThis_initialization": {
+        "concern": "Potential race condition if two requests simultaneously initialize globalThis Maps",
+        "assessment": "Low risk - JavaScript single-threaded nature prevents true concurrent access. The nullish coalescing operator (??) ensures atomic check-and-set.",
+        "mitigation_in_issue": "Not explicitly mentioned, but the proposed code pattern handles this correctly"
+      },
+      "poller_timer_references": {
+        "concern": "Old setTimeout references in the event loop referencing old Map instances",
+        "assessment": "This is the exact problem being fixed. After globalThis migration, timers will reference the persistent Map instance.",
+        "mitigation_in_issue": "Addressed - this is the core fix"
+      }
+    },
+    "graceful_shutdown_interaction": {
+      "stopAllAutoYesPolling_call": {
+        "location": "server.ts line 127",
+        "behavior": "Iterates over autoYesPollerStates, clears timers, clears Map",
+        "post_fix_behavior": "Will correctly clear the globalThis-stored Map, ensuring all pollers are stopped",
+        "verified": true
+      },
+      "process_exit": {
+        "concern": "globalThis references persist until process exit",
+        "assessment": "Not a concern - graceful shutdown calls stopAllAutoYesPolling which clears the Map before process exit"
+      }
+    }
+  },
+  "edge_cases_reviewed": {
+    "multiple_hot_reloads": {
+      "scenario": "Multiple hot reloads occur in quick succession",
+      "expected_behavior": "Each reload finds the existing globalThis Map and reuses it",
+      "covered_in_issue": "Implicitly covered by the proposed solution"
+    },
+    "poller_started_during_reload": {
+      "scenario": "A new poller is started while hot reload is in progress",
+      "expected_behavior": "The new poller will be stored in the (soon to be re-referenced) globalThis Map",
+      "covered_in_issue": "Implicitly covered - Node.js single-threaded nature prevents true concurrency"
+    },
+    "globalThis_undefined": {
+      "scenario": "globalThis is undefined (very old Node.js versions)",
+      "expected_behavior": "globalThis is available in Node.js 12+ and all modern browsers",
+      "covered_in_issue": "Not a concern - project requires Node.js 18+ (per package.json engines)"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "N2H-004",
+        "category": "consistency",
+        "title": "Consider adding globalThis pattern to response-poller.ts and claude-poller.ts proactively",
+        "description": "The Issue mentions these files in '検討事項' for future investigation. However, since they use the exact same module-level Map pattern (activePollers, pollingStartTimes), they may exhibit the same hot-reload issue. Proactive migration could prevent future bugs.",
+        "location": "src/lib/response-poller.ts lines 36-41, src/lib/claude-poller.ts lines 26-31",
+        "recommendation": "Consider expanding scope to include response-poller.ts and claude-poller.ts in this Issue, or create a follow-up Issue immediately after this fix",
+        "priority": "low",
+        "risk_if_not_addressed": "Similar UI/backend state inconsistency bugs may appear for response polling and claude polling features"
+      }
+    ]
+  },
+  "code_references_verified": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "78-81",
+      "content_verified": "autoYesStates and autoYesPollerStates are module-level Maps as described in Issue"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "173-194",
+      "content_verified": "clearAllAutoYesStates and clearAllPollerStates exist and will continue to work after globalThis migration"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "312-314, 358-360",
+      "content_verified": "setTimeout calls exist as described for polling schedule"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "115-123",
+      "content_verified": "stopAutoYesPolling is called during worktree cleanup"
+    },
+    {
+      "file": "server.ts",
+      "lines": "127",
+      "content_verified": "stopAllAutoYesPolling is called during graceful shutdown"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "36-41",
+      "content_verified": "Similar module-level Map pattern exists (activePollers, pollingStartTimes)"
+    },
+    {
+      "file": "src/lib/claude-poller.ts",
+      "lines": "26-31",
+      "content_verified": "Similar module-level Map pattern exists (activePollers, pollingStartTimes)"
+    }
+  ],
+  "summary": {
+    "previous_findings_addressed": "all",
+    "new_findings_count": 1,
+    "impact_assessment": "low",
+    "impact_assessment_rationale": "The proposed change is minimal (~20 lines), isolated to a single file (auto-yes-manager.ts), does not change any exported function interfaces, and all existing callers and cleanup mechanisms will continue to work without modification. The '影響範囲分析' section in the Issue accurately reflects this assessment.",
+    "ready_for_implementation": true,
+    "final_notes": "The Issue is well-documented with clear problem description, root cause analysis, proposed solution, impact analysis, test plan, and acceptance criteria. All Stage 3 findings have been addressed. One nice-to-have suggestion (N2H-004) is to consider expanding scope to similar modules (response-poller.ts, claude-poller.ts) proactively, but this is not blocking for implementation."
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "issue_number": 151,
+  "review_date": "2026-02-04",
+  "previous_findings_status": {
+    "MF-001": {
+      "status": "addressed",
+      "evidence": "SEC-001セクションでIssue番号検証範囲が「1-2147483647範囲（既存コード `MAX_ISSUE_NO` と整合）」に修正されている"
+    },
+    "SF-001": {
+      "status": "addressed",
+      "evidence": "「Issue専用ポート（3{issueNo}形式）の桁数制限」セクションが追加され、4桁制限の理由（ポート番号上限65535）が明示。コード例も「${#ISSUE_NO} -le 4 && $ISSUE_NO -le 9999」に修正"
+    },
+    "SF-002": {
+      "status": "addressed",
+      "evidence": "check_lsof_available()関数がコード例に追加され、lsof不在時の警告メッセージと代替コマンド案内（fuser, ss, netstat）が含まれている"
+    },
+    "SF-003": {
+      "status": "addressed",
+      "evidence": "「統合方法」セクションが追加され、Phase 2を「置き換え（拡張）」することが明示。5項目の変更点がリストアップされている"
+    },
+    "SF-004": {
+      "status": "addressed",
+      "evidence": "「自動割り当てポート（3001-3100）の検出について」セクションが追加され、本Issueのスコープ外である理由（PIDファイル作成済み、100ポートスキャンは非効率）が明示"
+    },
+    "NTH-001": {
+      "status": "addressed",
+      "evidence": "「関連Issue」セクションが追加され、#136へのリンクが記載されている"
+    },
+    "NTH-002": {
+      "status": "skipped",
+      "evidence": "Nice to have - ラベルはGitHub UIから設定可能"
+    },
+    "NTH-003": {
+      "status": "addressed",
+      "evidence": "待機時間が3秒に統一（SIGTERM後の待機）"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-005",
+        "category": "整合性",
+        "description": "既存worktree-cleanup.mdのPhase 1検証範囲との不整合",
+        "location": "既存 .claude/commands/worktree-cleanup.md Phase 1セクションおよびエラーハンドリング表",
+        "evidence": "Issue #151では「1-2147483647」（MAX_ISSUE_NO整合）を提案しているが、既存worktree-cleanup.mdのPhase 1コード例は「1-999999」、エラーハンドリング表も「正の整数（1-999999）を指定してください」と記載。worktree-setup.mdも同様の不整合あり",
+        "recommendation": "本Issue実装時に、Phase 1の検証範囲も1-2147483647に更新するか、スキル内で999999を上限とする（実用上十分であり、ポート計算の簡素化のため）明確な方針を記載する。どちらの方針を採用するかをIssue本文に明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-004",
+        "category": "技術的妥当性",
+        "description": "cwd検証のパス比較ロジックに改善余地",
+        "location": "推奨コード例 stop_server_by_port() 関数",
+        "evidence": "「$PROC_CWD == \"$WORKTREE_ABS\"*」は前方一致で、/Users/foo/commandmate-issue-1が/Users/foo/commandmate-issue-123のサブディレクトリとして誤検出される可能性は低いが、厳密には完全一致（==）の方が安全",
+        "recommendation": "将来的な改善として、完全一致（$PROC_CWD == \"$WORKTREE_ABS\"）か、または末尾スラッシュ付きの前方一致を検討"
+      },
+      {
+        "id": "NTH-005",
+        "category": "完全性",
+        "description": "受け入れ条件にPhase 1検証範囲の更新が含まれていない",
+        "location": "受け入れ条件セクション",
+        "evidence": "Phase 2のポートベース検出が主眼だが、整合性のためにPhase 1の検証範囲更新も実装スコープに含める場合、受け入れ条件への追加が望ましい",
+        "recommendation": "「Phase 1のIssue番号検証範囲が既存コード（MAX_ISSUE_NO）と整合すること」を受け入れ条件に追加検討"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": ".claude/commands/worktree-cleanup.md",
+      "relevance": "直接変更対象。Phase 1検証範囲とPhase 2拡張"
+    },
+    {
+      "file": ".claude/commands/worktree-setup.md",
+      "relevance": "関連スキル。同様のIssue番号検証範囲の不整合あり"
+    },
+    {
+      "file": "src/cli/utils/input-validators.ts",
+      "relevance": "MAX_ISSUE_NO定数（2147483647）の定義元"
+    },
+    {
+      "file": "src/cli/utils/port-allocator.ts",
+      "relevance": "自動ポート割り当て（3001-3100）の実装確認"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "MAX_ISSUE_NO定数の説明とIssue #136機能の記載"
+    }
+  ],
+  "summary": "Stage 1で指摘された全てのMust Fix（1件）とShould Fix（4件）、Nice to Have（3件中2件）が適切に対応されています。新たに発見された指摘として、既存worktree-cleanup.mdのPhase 1検証範囲（1-999999）とIssue本文の提案（1-2147483647）の不整合（SF-005）があります。これはIssue実装時に解決すべき軽微な整合性問題です。Nice to Haveとして、cwd検証のパス比較ロジック改善（NTH-004）と受け入れ条件への追加（NTH-005）を挙げました。全体として、Issue #151は4回のレビュー・修正を経て高品質な状態に改善されており、実装準備が整っています。",
+  "overall_quality": "Good",
+  "recommendation": "実装可能。SF-005の対応方針を確定し、Phase 1検証範囲の整合性を確保した上で実装を開始することを推奨"
+}

@@ -1,0 +1,79 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "applied_findings": [
+    {
+      "id": "MF-SEC-001",
+      "title": "lsof出力解析がスペース含むパスで失敗",
+      "severity": "Medium",
+      "owasp_category": "A03 Injection",
+      "action": "セクション3.3のOS互換性テーブルでmacOSのcwd取得方法を `lsof -p \"$PID\" -F n | grep '^ncwd' | cut -c5-` 形式に変更。セクション4.3のget_process_cwd()関数設計、およびセクション8の実装チェックリストにも反映。"
+    },
+    {
+      "id": "SF-SEC-001",
+      "title": "プロセスコマンド検証の欠如",
+      "severity": "Low",
+      "owasp_category": "A07 Identification Failures",
+      "action": "セクション4.3にverify_process_command()関数設計を追加。ps -p $PID -o comm= | grep -qE '^(node|npm)$' によるプロセス種別検証。セクション5.1の対策一覧にSEC-007として追加。セクション8の実装チェックリストにも反映。"
+    },
+    {
+      "id": "SF-SEC-002",
+      "title": "セキュリティ監査ログの欠如",
+      "severity": "Low",
+      "owasp_category": "A09 Security Logging",
+      "action": "セクション4.3のgraceful_kill()関数設計にセキュリティ監査ログ記録機能を追加。ログ形式: [TIMESTAMP] PROCESS_KILL issue=$ISSUE_NO pid=$PID cwd=$PROC_CWD result=success|failed。ログ出力先: ~/.commandmate/logs/security.log。セクション5.1の対策一覧にSEC-006として追加。セクション8の実装チェックリストにも反映。"
+    },
+    {
+      "id": "SF-SEC-003",
+      "title": "明示的なプロセス所有者検証の欠如",
+      "severity": "Low",
+      "owasp_category": "A01 Broken Access Control",
+      "action": "セクション4.3にverify_process_ownership()関数設計を追加。ps -p $PID -o user= | grep -q \"$(whoami)\" による明示的な所有者検証。セクション5.1のSEC-004にverify_process_ownership()参照を追加。セクション8の実装チェックリストにも反映。"
+    },
+    {
+      "id": "SF-SEC-004",
+      "title": "TOCTOUウィンドウの未ドキュメント化",
+      "severity": "Low",
+      "owasp_category": "A04 Insecure Design",
+      "action": "セクション5.3「TOCTOU競合の認識」を新規追加。cwd検証とkill間のマイクロ秒単位のウィンドウについて、リスク評価（発生確率、悪用難易度、影響度）と許容判断を明記。セクション5.1の対策一覧にSEC-008として追加。"
+    }
+  ],
+  "skipped_findings": [],
+  "nice_to_have_noted": [
+    {
+      "id": "NTH-SEC-001",
+      "title": "サーバーレジストリ機構の検討",
+      "reason": "将来検討事項として認識。現在のポート/cwd検出方式で実用上十分な信頼性が確保されているため、本Issueでは対応不要。"
+    },
+    {
+      "id": "NTH-SEC-002",
+      "title": "dry-runモードの追加",
+      "reason": "ユーザビリティ向上機能として認識。本Issueのスコープ外であり、将来の機能拡張として検討。"
+    },
+    {
+      "id": "NTH-SEC-003",
+      "title": "プロセスグループによる終了",
+      "reason": "子プロセス管理の改善として認識。Next.jsのデフォルト動作では必要性が低く、将来的なモノレポ対応等で検討。"
+    }
+  ],
+  "positive_findings_acknowledged": [
+    "PF-001: 包括的な入力検証",
+    "PF-002: 依存関係欠如時のグレースフルデグラデーション",
+    "PF-003: 破壊的操作前のユーザー確認プロンプト",
+    "PF-004: 適切なグレースフルシャットダウンシーケンス",
+    "PF-005: cwdベースのプロセス識別"
+  ],
+  "design_doc_updated": true,
+  "updated_sections": [
+    "3.3 OS互換性 - lsof -F n 形式への変更",
+    "4.3 関数設計 - verify_process_command(), verify_process_ownership(), graceful_kill()更新",
+    "5.1 対策一覧 - SEC-006, SEC-007, SEC-008追加",
+    "5.3 TOCTOU競合の認識 - 新規セクション追加",
+    "8 実装チェックリスト - Phase 2拡張にセキュリティ関連タスク追加",
+    "9 レビュー指摘対応サマリー - Stage 4セキュリティレビュー追加"
+  ],
+  "summary": "Stage 4セキュリティレビューの全指摘事項（Must Fix 1件、Should Fix 4件）を設計方針書に反映完了。主な変更: (1) lsof出力解析をスペース含むパス対応の-F n形式に変更 [MF-SEC-001]、(2) プロセスコマンド検証関数の追加 [SF-SEC-001]、(3) セキュリティ監査ログ機能の追加 [SF-SEC-002]、(4) 明示的なプロセス所有者検証関数の追加 [SF-SEC-003]、(5) TOCTOU競合の認識と許容判断のドキュメント化 [SF-SEC-004]。これらの防御の深層化対策により、セキュリティ体制が強化された。Nice to Have 3件は将来検討事項として認識し、本Issueでは対応不要と判断。",
+  "overall_security_rating": "Low Risk (Acceptable)",
+  "reviewer": "Apply Review Agent",
+  "applied_at": "2026-02-04"
+}

@@ -1,0 +1,59 @@
+{
+  "issue_number": 152,
+  "issue_title": "セッション一発目のメッセージが送信されない",
+  "iteration": 1,
+  "phases_completed": [
+    {
+      "phase": 1,
+      "name": "Issue情報収集",
+      "status": "completed"
+    },
+    {
+      "phase": 2,
+      "name": "TDD実装",
+      "status": "completed",
+      "result_path": "dev-reports/issue/152/pm-auto-dev/iteration-1/tdd-result.json"
+    },
+    {
+      "phase": 3,
+      "name": "受け入れテスト",
+      "status": "completed",
+      "result_path": "dev-reports/issue/152/pm-auto-dev/iteration-1/acceptance-result.json"
+    },
+    {
+      "phase": 4,
+      "name": "リファクタリング",
+      "status": "completed",
+      "result_path": "dev-reports/issue/152/pm-auto-dev/iteration-1/refactor-result.json"
+    },
+    {
+      "phase": 5,
+      "name": "ドキュメント更新",
+      "status": "completed",
+      "files_updated": ["CLAUDE.md"]
+    }
+  ],
+  "summary": {
+    "tdd": {
+      "tests_passed": 2614,
+      "tests_failed": 0,
+      "new_tests_added": 20,
+      "coverage": 62.83
+    },
+    "acceptance": {
+      "criteria_passed": 4,
+      "criteria_failed": 0
+    },
+    "refactoring": {
+      "coverage_before": 62.83,
+      "coverage_after": 72.51,
+      "improvements": 4
+    }
+  },
+  "files_changed": [
+    "src/lib/claude-session.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "CLAUDE.md"
+  ],
+  "design_policy_path": "dev-reports/design/issue-152-first-message-not-sent-design-policy.md"
+}

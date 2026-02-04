@@ -1,0 +1,28 @@
+{
+  "issue_number": 152,
+  "refactor_targets": [
+    "src/lib/claude-session.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 62.83,
+    "tests_passed": 2614,
+    "tests_failed": 0
+  },
+  "improvement_goals": [
+    "コードの可読性向上",
+    "重複コードの削減（可能な場合）",
+    "コメントの改善（DOC-001対応）",
+    "テストカバレッジの維持"
+  ],
+  "design_compliance_verified": {
+    "DRY-001": "CLAUDE_PROMPT_PATTERN imported from cli-patterns.ts",
+    "DRY-002": "CLAUDE_SEPARATOR_PATTERN imported from cli-patterns.ts",
+    "OCP-001": "Timeout values extracted to named constants",
+    "CONS-001": "sendMessageToClaude() uses sendKeys() for Enter",
+    "CONS-005": "startClaudeSession() throws error on timeout",
+    "CONS-006": "sendMessageToClaude() verifies prompt state before sending",
+    "CONS-007": "Prompt detection followed by CLAUDE_POST_PROMPT_DELAY wait"
+  },
+  "tdd_result_path": "dev-reports/issue/152/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/152/pm-auto-dev/iteration-1/acceptance-result.json"
+}

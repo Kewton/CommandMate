@@ -1,0 +1,36 @@
+{
+  "issue_number": 151,
+  "feature_summary": "worktree-cleanup がWorktreeから起動中のサーバーを検出できない問題の修正",
+  "acceptance_criteria": [
+    "Phase 1のIssue番号検証範囲が既存コード（MAX_ISSUE_NO = 2147483647）と整合すること",
+    "/worktree-setup スキルのIssue番号検証範囲も同様に更新されること",
+    "Worktreeから npm run dev で起動したサーバーを検出できること",
+    "Worktree削除前にサーバーが停止されること",
+    "Issue専用ポート（3{issueNo}形式）も検出対象に含まれること（4桁以下）",
+    "サーバー停止時にユーザーへ通知されること",
+    "macOS/Linux両環境で動作すること",
+    "無関係なプロセス（他のWorktree/プロジェクト）を誤停止しないこと",
+    "Graceful shutdown（SIGTERM）を試行後、必要に応じてSIGKILLを使用すること",
+    "lsofが利用不可の場合、警告メッセージと代替コマンドを表示すること",
+    "既存のPIDファイル検出と新しいポートベース検出が両方機能すること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: validators.shにMAX_ISSUE_NO=2147483647が定義されていること",
+    "シナリオ2: worktree-cleanup.mdでvalidators.shがsourceされていること",
+    "シナリオ3: worktree-setup.mdでvalidators.shがsourceされていること",
+    "シナリオ4: worktree-cleanup.mdにポートベース検出ロジックが追加されていること",
+    "シナリオ5: process-utils.shにcheck_lsof_available関数が実装されていること",
+    "シナリオ6: process-utils.shにget_process_cwd関数がOS判定付きで実装されていること",
+    "シナリオ7: process-utils.shにgraceful_kill関数が監査ログ付きで実装されていること",
+    "シナリオ8: process-utils.shにverify_process_command関数が実装されていること",
+    "シナリオ9: process-utils.shにverify_process_ownership関数が実装されていること",
+    "シナリオ10: worktree-cleanup.mdのsleep時間が3秒に統一されていること",
+    "シナリオ11: エラーハンドリング表の文言が1-2147483647に更新されていること"
+  ],
+  "files_to_verify": [
+    ".claude/lib/validators.sh",
+    ".claude/lib/process-utils.sh",
+    ".claude/commands/worktree-cleanup.md",
+    ".claude/commands/worktree-setup.md"
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "issue_number": 151,
+  "title": "fix: worktree-cleanup がWorktreeから起動中のサーバーを検出できない",
+  "acceptance_criteria": [
+    "Phase 1のIssue番号検証範囲が既存コード（MAX_ISSUE_NO = 2147483647）と整合すること",
+    "/worktree-setup スキルのIssue番号検証範囲も同様に更新されること",
+    "Worktreeから npm run dev で起動したサーバーを検出できること",
+    "Worktree削除前にサーバーが停止されること",
+    "Issue専用ポート（3{issueNo}形式）も検出対象に含まれること（4桁以下）",
+    "サーバー停止時にユーザーへ通知されること",
+    "macOS/Linux両環境で動作すること",
+    "無関係なプロセス（他のWorktree/プロジェクト）を誤停止しないこと",
+    "Graceful shutdown（SIGTERM）を試行後、必要に応じてSIGKILLを使用すること",
+    "lsofが利用不可の場合、警告メッセージと代替コマンドを表示すること",
+    "既存のPIDファイル検出と新しいポートベース検出が両方機能すること"
+  ],
+  "implementation_tasks": [
+    {
+      "id": "T0.1",
+      "name": ".claude/lib/ ディレクトリ作成",
+      "output": ".claude/lib/"
+    },
+    {
+      "id": "T0.2",
+      "name": "validators.sh 作成",
+      "output": ".claude/lib/validators.sh",
+      "details": "MAX_ISSUE_NO=2147483647定数、validate_issue_no()関数"
+    },
+    {
+      "id": "T0.3",
+      "name": "process-utils.sh 作成",
+      "output": ".claude/lib/process-utils.sh",
+      "details": "check_lsof_available(), get_pid_by_port(), get_process_cwd(), is_worktree_process(), verify_process_command(), verify_process_ownership(), graceful_kill(), stop_server_by_port()"
+    },
+    {
+      "id": "T1.1",
+      "name": "worktree-cleanup.md Phase 1 更新",
+      "output": ".claude/commands/worktree-cleanup.md",
+      "details": "Issue番号検証範囲を1-2147483647に変更、validators.shをsourceで読み込み"
+    },
+    {
+      "id": "T1.2",
+      "name": "worktree-cleanup.md Phase 2 拡張",
+      "output": ".claude/commands/worktree-cleanup.md",
+      "details": "process-utils.shをsourceで読み込み、ポートベース検出を追加"
+    },
+    {
+      "id": "T2.1",
+      "name": "worktree-setup.md Phase 1 更新",
+      "output": ".claude/commands/worktree-setup.md",
+      "details": "Issue番号検証範囲を1-2147483647に変更"
+    }
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-151-worktree-cleanup-server-detection-design-policy.md",
+  "work_plan_path": "dev-reports/issue/151/work-plan.md"
+}

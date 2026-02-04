@@ -1,0 +1,60 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "applied_findings": [
+    {
+      "id": "MF-DRY-001",
+      "type": "must_fix",
+      "principle": "DRY",
+      "action": "共通bash関数ファイル `.claude/lib/validators.sh` の導入を設計に追加。Issue番号検証ロジックを一元化し、両スクリプト(worktree-cleanup.md, worktree-setup.md)からsourceコマンドで読み込む構造に変更。実装チェックリストにも反映。"
+    },
+    {
+      "id": "SF-SRP-001",
+      "type": "should_fix",
+      "principle": "SRP",
+      "action": "stop_server_by_port()関数をオーケストレーション関数として再設計。責務を以下の4つの独立関数に分離: get_pid_by_port(), get_process_cwd(), is_worktree_process(), graceful_kill()。各関数の責務とインターフェースを設計書に明記。"
+    },
+    {
+      "id": "SF-KISS-001",
+      "type": "should_fix",
+      "principle": "KISS",
+      "action": "worktree-setup.mdの既存ポート算出式(`3000 + ISSUE_NO % 100 + 1`)と本設計書の`3{issueNo}`方式の不整合を明記。統一方針として両方式を検出対象とすることを決定。将来的な統一は別Issue化を推奨。"
+    },
+    {
+      "id": "SF-DRY-002",
+      "type": "should_fix",
+      "principle": "DRY",
+      "action": "get_process_cwd()を汎用関数として `.claude/lib/process-utils.sh` に配置することを推奨。将来的なプロセス情報取得機能での再利用を考慮した設計に変更。"
+    }
+  ],
+  "skipped_findings": [],
+  "nice_to_have_noted": [
+    {
+      "id": "NTH-OCP-001",
+      "note": "ポート検出方式の拡張性についてはYAGNI観点から現時点では対応不要と判断"
+    },
+    {
+      "id": "NTH-KISS-002",
+      "note": "cwd検証の前方一致方式について、サブディレクトリからの起動も検出対象である旨を設計書に明記（SEC-003補足として追加）"
+    },
+    {
+      "id": "NTH-DOC-001",
+      "note": "SF-KISS-001の対応でworktree-setup.mdとの関係を明記済み"
+    }
+  ],
+  "design_doc_updated": true,
+  "updated_sections": [
+    "2.4 DRY原則 - MF-DRY-001対応方針追加",
+    "4.2 Issue専用ポートの桁数制限 - SF-KISS-001ポート算出ロジック整合性追加",
+    "4.3 関数設計 - SF-SRP-001責務分離設計追加、SF-DRY-002再利用性推奨追加",
+    "5.2 cwd検証の重要性 - 前方一致の意図を補足",
+    "8. 実装チェックリスト - MF-DRY-001, SF-SRP-001対応項目追加",
+    "9. レビュー指摘対応サマリー - 新規セクション追加"
+  ],
+  "summary": "Stage 1レビューの全指摘事項(Must Fix 1件, Should Fix 3件)を設計方針書に反映完了。MF-DRY-001では共通バリデーション関数ファイルの導入を設計に追加。SF-SRP-001ではstop_server_by_port()の責務分離設計を詳細化。SF-KISS-001ではポート算出ロジックの不整合を明記し両方式対応の方針を決定。SF-DRY-002ではOS判定ロジックの汎用関数化を推奨として追加。Nice to Have項目についても関連する補足情報を設計書に追加。",
+  "apply_metadata": {
+    "apply_agent": "apply-review-agent",
+    "apply_date": "2026-02-04",
+    "design_doc_path": "dev-reports/design/issue-151-worktree-cleanup-server-detection-design-policy.md"
+  }
+}

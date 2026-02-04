@@ -1,0 +1,59 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_findings": [
+    {
+      "id": "MF-001",
+      "category": "整合性",
+      "status": "applied",
+      "changes": "SEC-001のIssue番号検証範囲を「1-999999」から「1-2147483647」に修正。既存コード（src/cli/utils/input-validators.ts）のMAX_ISSUE_NO定数と整合。"
+    },
+    {
+      "id": "SF-001",
+      "category": "完全性",
+      "status": "applied",
+      "changes": "「Issue専用ポート（3{issueNo}形式）の桁数制限」セクションを追加。ポート番号上限65535による制限を明示し、5桁以上のIssue番号では3{issueNo}形式が使用不可である理由を説明。コード例も「${#ISSUE_NO} -le 3」から「${#ISSUE_NO} -le 4 && $ISSUE_NO -le 9999」に修正。"
+    },
+    {
+      "id": "SF-002",
+      "category": "技術的妥当性",
+      "status": "applied",
+      "changes": "check_lsof_available()関数を追加。lsof不在時に警告メッセージと代替コマンド（fuser, ss, netstat）を表示するロジックを追加。受け入れ条件とエッジケース表も更新。"
+    },
+    {
+      "id": "SF-003",
+      "category": "整合性",
+      "status": "applied",
+      "changes": "「Phase 2拡張案」として明確化し、「統合方法」セクションを追加。既存worktree-cleanup.mdのPhase 2を置き換え（拡張）することを明示。変更点を5項目でリストアップ。"
+    },
+    {
+      "id": "SF-004",
+      "category": "明確性",
+      "status": "applied",
+      "changes": "「自動割り当てポート（3001-3100）の検出について」セクションを追加。本Issueのスコープ外とする理由（PIDファイルが作成される、100ポート全スキャンは非効率）を明示。検出対象ポート表にも「検出方法」列を追加し、スコープ外であることを記載。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "NTH-001",
+      "category": "完全性",
+      "status": "applied",
+      "reason": "Nice to have - but applied as it was simple to add. Added 'Related: #136' section."
+    },
+    {
+      "id": "NTH-002",
+      "category": "明確性",
+      "status": "skipped",
+      "reason": "Nice to have - ラベルはGitHub UIから別途設定可能。Issue本文への記載は冗長。"
+    },
+    {
+      "id": "NTH-003",
+      "category": "技術的妥当性",
+      "status": "applied",
+      "reason": "Nice to have - but applied for consistency. Changed existing PID file handling sleep from 2 to 3 seconds to match the port-based detection."
+    }
+  ],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/151",
+  "summary": "全てのMust Fix（1件）とShould Fix（4件）を適用。Nice to Have（3件）のうち2件も適用（NTH-001: 関連Issue追加、NTH-003: 待機時間統一）。主な変更点: (1) SEC-001のIssue番号範囲をMAX_ISSUE_NOと整合、(2) 3{issueNo}形式の桁数制限説明を追加、(3) lsof存在チェックとフォールバック案内を追加、(4) Phase 2拡張であることを明示、(5) 自動割り当てポートをスコープ外と明記。受け入れ条件とテスト計画も更新済み。"
+}

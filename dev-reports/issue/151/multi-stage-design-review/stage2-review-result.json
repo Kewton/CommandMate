@@ -1,0 +1,169 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-CONS-001",
+        "title": "Issue番号検証範囲の不一致",
+        "description": "既存のworktree-cleanup.mdとworktree-setup.mdのPhase 1は「1-999999」範囲を使用しているが、設計書では「1-2147483647」(MAX_ISSUE_NO)への更新を要求している。設計書の方針は正しく、src/cli/utils/input-validators.tsのMAX_ISSUE_NO=2147483647と整合させるべき。",
+        "current_implementation": "1-999999",
+        "design_specification": "1-2147483647",
+        "reference_file": "src/cli/utils/input-validators.ts:15",
+        "priority": "P1"
+      },
+      {
+        "id": "MF-CONS-002",
+        "title": "ポート算出ロジックの不整合",
+        "description": "worktree-setup.mdではPORT=$((3000 + ISSUE_NO % 100 + 1))（範囲:3001-3100）を使用しているが、設計書では「3{issueNo}」方式（例:31234）と既存方式の両方を検出対象としている。設計書の[SF-KISS-001]で認識済みだが、worktree-setup.mdとの現行実装の整合性を明確に文書化すべき。",
+        "current_implementation": "PORT=$((3000 + ISSUE_NO % 100 + 1)) -> 3001-3100",
+        "design_specification": "検出対象: 3000, 3{issueNo}(4桁以下), PIDファイルベースで3001-3100",
+        "reference_file": ".claude/commands/worktree-setup.md:103",
+        "priority": "P1"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-CONS-001",
+        "title": ".claude/lib/ディレクトリが存在しない",
+        "description": "設計書では.claude/lib/validators.shと.claude/lib/process-utils.shの作成を計画しているが、現在.claude/lib/ディレクトリは存在しない。新規ディレクトリ作成が必要。",
+        "current_implementation": ".claude/配下にlib/ディレクトリなし",
+        "design_specification": ".claude/lib/validators.sh, .claude/lib/process-utils.sh作成",
+        "priority": "P2"
+      },
+      {
+        "id": "SF-CONS-002",
+        "title": "エラーハンドリング表の文言不一致",
+        "description": "worktree-cleanup.mdのエラーハンドリング表では「Invalid issue number | 正の整数（1-999999）を指定してください」と記載。設計書に従い「正の整数（1-2147483647）」に更新が必要。同様にworktree-setup.mdも更新必要。",
+        "current_implementation": "正の整数（1-999999）を指定してください",
+        "design_specification": "正の整数（1-2147483647）を指定してください",
+        "reference_file": ".claude/commands/worktree-cleanup.md:167, .claude/commands/worktree-setup.md:150",
+        "priority": "P2"
+      },
+      {
+        "id": "SF-CONS-003",
+        "title": "待機時間の不整合",
+        "description": "現行worktree-cleanup.mdではsleep 2を使用しているが、設計書のgraceful_kill()では3秒待機と定義。統一が必要。",
+        "current_implementation": "sleep 2",
+        "design_specification": "3秒待機",
+        "reference_file": ".claude/commands/worktree-cleanup.md:58",
+        "priority": "P2"
+      },
+      {
+        "id": "SF-CONS-004",
+        "title": "port-allocator.tsとの算出ロジック整合性",
+        "description": "src/cli/utils/port-allocator.tsのallocate()メソッドでは「this.range.min + (issueNo % (this.range.max - this.range.min))」を使用。worktree-setup.mdの「3000 + ISSUE_NO % 100 + 1」と近いが完全一致ではない（range.min=3001, range.max=3100なので実質3001 + issueNo % 99）。将来的な統一の検討が必要。",
+        "current_implementation": "PortAllocator: 3001 + (issueNo % 99), worktree-setup: 3000 + (issueNo % 100) + 1",
+        "design_specification": "設計書では両方式を検出対象としているが、計算式の微妙な差異は認識されていない",
+        "reference_file": "src/cli/utils/port-allocator.ts:87",
+        "priority": "P2"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-CONS-001",
+        "title": "MAX_ISSUE_NOのbash定数化",
+        "description": "設計書ではvalidators.shでMAX_ISSUE_NO=2147483647をbash定数として定義する計画。TypeScript側のsrc/cli/utils/input-validators.tsと同期を保つメカニズム（コメント参照など）を追加すると保守性が向上。",
+        "suggestion": "validators.shにTypeScriptソースファイルへの参照コメントを追加",
+        "priority": "P3"
+      },
+      {
+        "id": "NTH-CONS-002",
+        "title": "DEFAULT_PORT_RANGEのbashスクリプトでの参照",
+        "description": "src/cli/utils/port-allocator.tsのDEFAULT_PORT_RANGE（min:3001, max:3100）がbashスクリプトでは直接参照されない。将来的にはJSONやenvファイルで共有設定を管理することを検討。",
+        "suggestion": "設定値の一元管理を別Issueとして検討",
+        "priority": "P3"
+      },
+      {
+        "id": "NTH-CONS-003",
+        "title": "worktree-setup.mdのポート算出コメント追加",
+        "description": "worktree-setup.mdのポート算出ロジック（3000 + ISSUE_NO % 100 + 1）にコメントを追加し、port-allocator.tsとの関係性を明記すると保守性向上。",
+        "suggestion": "# ポート範囲はsrc/cli/utils/port-allocator.ts DEFAULT_PORT_RANGEと整合",
+        "priority": "P3"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "Issue番号検証範囲",
+      "design_value": "1-2147483647",
+      "implementation_file": "worktree-cleanup.md",
+      "implementation_value": "1-999999",
+      "status": "INCONSISTENT",
+      "action_required": "更新必要"
+    },
+    {
+      "design_item": "Issue番号検証範囲",
+      "design_value": "1-2147483647",
+      "implementation_file": "worktree-setup.md",
+      "implementation_value": "1-999999",
+      "status": "INCONSISTENT",
+      "action_required": "更新必要"
+    },
+    {
+      "design_item": "MAX_ISSUE_NO定数",
+      "design_value": "2147483647",
+      "implementation_file": "input-validators.ts",
+      "implementation_value": "2147483647",
+      "status": "CONSISTENT",
+      "action_required": "なし"
+    },
+    {
+      "design_item": "ポート検出対象",
+      "design_value": "3000, 3{issueNo}(4桁以下), PIDファイル(3001-3100)",
+      "implementation_file": "worktree-setup.md",
+      "implementation_value": "3000 + ISSUE_NO % 100 + 1",
+      "status": "DESIGN_AWARE",
+      "action_required": "設計書で認識済み[SF-KISS-001]"
+    },
+    {
+      "design_item": "ポート範囲",
+      "design_value": "3001-3100",
+      "implementation_file": "port-allocator.ts",
+      "implementation_value": "DEFAULT_PORT_RANGE: min:3001, max:3100",
+      "status": "CONSISTENT",
+      "action_required": "なし"
+    },
+    {
+      "design_item": "共通ライブラリ配置先",
+      "design_value": ".claude/lib/",
+      "implementation_file": ".claude/",
+      "implementation_value": "lib/ディレクトリ未存在",
+      "status": "NEW_DIRECTORY",
+      "action_required": "新規作成必要"
+    }
+  ],
+  "naming_convention_check": [
+    {
+      "item": "Issue検証関数名",
+      "design": "validate_issue_no()",
+      "typescript": "validateIssueNo()",
+      "convention": "bash: snake_case, TypeScript: camelCase",
+      "status": "APPROPRIATE"
+    },
+    {
+      "item": "定数名",
+      "design": "MAX_ISSUE_NO",
+      "typescript": "MAX_ISSUE_NO",
+      "convention": "UPPER_SNAKE_CASE",
+      "status": "CONSISTENT"
+    },
+    {
+      "item": "関数名",
+      "design": "check_lsof_available, stop_server_by_port, get_pid_by_port, get_process_cwd, is_worktree_process, graceful_kill",
+      "typescript": "N/A (bash-only functions)",
+      "convention": "snake_case for bash",
+      "status": "APPROPRIATE"
+    }
+  ],
+  "summary": "設計書とexisting実装間で主に2つの重要な不整合が検出された: (1) Issue番号検証範囲が999999から2147483647への更新が必要、(2) ポート算出ロジックの差異は設計書で認識済みだが実装詳細の整理が必要。新規.claude/lib/ディレクトリの作成と、エラーメッセージ・待機時間の統一も必要。全体として設計書はexisting実装のパターンを正しく参照しており、命名規則も適切。",
+  "overall_quality": "Good",
+  "reviewed_files": [
+    ".claude/commands/worktree-cleanup.md",
+    ".claude/commands/worktree-setup.md",
+    "src/cli/utils/input-validators.ts",
+    "src/cli/utils/port-allocator.ts"
+  ],
+  "timestamp": "2026-02-04T12:30:00Z"
+}
