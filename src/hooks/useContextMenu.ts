@@ -97,6 +97,12 @@ export function useContextMenu(): UseContextMenuReturn {
 
       // Extract coordinates from mouse or touch event
       // Touch coordinates are safe numeric values from browser Touch API
+      //
+      // [SF-001] Future refactoring consideration:
+      // If this coordinate extraction logic is needed in 2+ locations,
+      // consider extracting to src/lib/event-utils.ts as:
+      //   getEventCoordinates(e: React.MouseEvent | React.TouchEvent): { x: number, y: number } | null
+      // Currently only used here, so inline implementation is preferred (YAGNI).
       let x: number, y: number;
       if ('touches' in e && e.touches.length > 0) {
         // TouchEvent - extract from first touch point

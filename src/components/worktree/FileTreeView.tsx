@@ -63,24 +63,45 @@ export interface FileTreeViewProps {
  *
  * [Issue #123 DISC-002/REC-001] onContextMenu type extended to support TouchEvent
  * for iPad/iPhone long press context menu.
+ *
+ * Touch Event Integration:
+ * Touch events are handled via useLongPress hook which provides:
+ * - onTouchStart: Starts the long press timer (500ms delay)
+ * - onTouchMove: Cancels if touch moves beyond 10px threshold
+ * - onTouchEnd/onTouchCancel: Cancels the long press timer
+ *
+ * [SF-002] These handlers are spread onto each TreeNode element to enable
+ * context menu access on touch devices (iPad/iPhone) via long press gesture.
  */
 interface TreeNodeProps {
+  /** Tree item data (name, type, size, etc.) */
   item: TreeItem;
+  /** Parent path for building full file path */
   path: string;
+  /** Nesting depth for indentation calculation */
   depth: number;
+  /** Worktree ID for API calls */
   worktreeId: string;
+  /** Set of expanded directory paths */
   expanded: Set<string>;
+  /** Cache of loaded directory contents */
   cache: Map<string, TreeItem[]>;
+  /** Toggle directory expansion state */
   onToggle: (path: string) => void;
+  /** Handle file selection */
   onFileSelect?: (filePath: string) => void;
+  /** Load children for a directory (lazy loading) */
   onLoadChildren: (path: string) => Promise<void>;
-  /** Context menu handler - supports both mouse and touch events [Issue #123] */
+  /**
+   * Context menu handler - supports both mouse right-click and touch long press
+   * [Issue #123] Extended to accept TouchEvent for iPad/iPhone support
+   */
   onContextMenu?: (e: React.MouseEvent | React.TouchEvent, path: string, type: 'file' | 'directory') => void;
-  /** [Issue #21] Search query for highlighting */
+  /** [Issue #21] Search query for name highlighting */
   searchQuery?: string;
-  /** [Issue #21] Search mode for highlighting */
+  /** [Issue #21] Search mode ('name' or 'content') for filtering behavior */
   searchMode?: SearchMode;
-  /** [Issue #21] Set of matched file paths (for filtering) */
+  /** [Issue #21] Set of matched file/directory paths for content search filtering */
   matchedPaths?: Set<string>;
 }
 
