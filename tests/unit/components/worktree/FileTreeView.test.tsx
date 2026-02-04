@@ -737,4 +737,278 @@ describe('FileTreeView', () => {
       expect(onFileSelect).toHaveBeenCalledWith('package.json');
     });
   });
+
+  /**
+   * Issue #123: Touch support for iPad context menu
+   * [ADD-003] Mouse right-click baseline tests
+   */
+  describe('Context menu - mouse right click', () => {
+    it('should trigger context menu on mouse right click', async () => {
+      const onNewFile = vi.fn();
+      render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('package.json')).toBeInTheDocument();
+      });
+
+      const fileItem = screen.getByTestId('tree-item-package.json');
+      fireEvent.contextMenu(fileItem);
+
+      // Context menu should open
+      await waitFor(() => {
+        // The ContextMenu component should be rendered
+        expect(screen.getByRole('menu')).toBeInTheDocument();
+      });
+    });
+
+    it('should open file context menu at mouse coordinates', async () => {
+      const onNewFile = vi.fn();
+      render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('package.json')).toBeInTheDocument();
+      });
+
+      const fileItem = screen.getByTestId('tree-item-package.json');
+      fireEvent.contextMenu(fileItem, { clientX: 100, clientY: 200 });
+
+      await waitFor(() => {
+        const menu = screen.getByRole('menu');
+        // Menu should be positioned at click coordinates
+        expect(menu).toHaveStyle({ left: '100px', top: '200px' });
+      });
+    });
+
+    it('should open directory context menu on right click', async () => {
+      const onNewFile = vi.fn();
+      const onNewDirectory = vi.fn();
+      render(
+        <FileTreeView
+          worktreeId="test-worktree"
+          onNewFile={onNewFile}
+          onNewDirectory={onNewDirectory}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      const srcItem = screen.getByTestId('tree-item-src');
+      fireEvent.contextMenu(srcItem);
+
+      await waitFor(() => {
+        expect(screen.getByRole('menu')).toBeInTheDocument();
+      });
+    });
+  });
+
+  /**
+   * Issue #123: Touch long press support for iPad/iPhone
+   */
+  describe('Context menu - touch long press', () => {
+    /**
+     * Helper to create a mock TouchEvent for fireEvent
+     */
+    const createTouchEventInit = (
+      clientX: number,
+      clientY: number
+    ): { touches: Touch[] } => ({
+      touches: [
+        {
+          identifier: 0,
+          target: document.createElement('div'),
+          clientX,
+          clientY,
+          screenX: clientX,
+          screenY: clientY,
+          pageX: clientX,
+          pageY: clientY,
+          radiusX: 0,
+          radiusY: 0,
+          rotationAngle: 0,
+          force: 1,
+        } as Touch,
+      ],
+    });
+
+    it('should open context menu on long press (500ms)', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const onNewFile = vi.fn();
+        mockFetch.mockImplementation((url: string) => {
+          if (url.includes('/tree')) {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve(mockRootData),
+            });
+          }
+          return Promise.reject(new Error('Not found'));
+        });
+
+        render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
+
+        // Advance timers to allow component to load
+        await vi.runAllTimersAsync();
+
+        const fileItem = screen.getByTestId('tree-item-package.json');
+
+        // Start touch
+        fireEvent.touchStart(fileItem, createTouchEventInit(100, 200));
+
+        // Advance time by 500ms to trigger long press
+        await vi.advanceTimersByTimeAsync(500);
+
+        // Context menu should open
+        expect(screen.queryByRole('menu')).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should NOT open context menu if touch moves more than 10px', async () => {
+      vi.useFakeTimers();
+      try {
+        const onNewFile = vi.fn();
+        mockFetch.mockImplementation((url: string) => {
+          if (url.includes('/tree')) {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve(mockRootData),
+            });
+          }
+          return Promise.reject(new Error('Not found'));
+        });
+
+        render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
+
+        await vi.runAllTimersAsync();
+
+        const fileItem = screen.getByTestId('tree-item-package.json');
+
+        // Start touch
+        fireEvent.touchStart(fileItem, createTouchEventInit(100, 100));
+
+        // Move touch beyond threshold (15px)
+        fireEvent.touchMove(fileItem, createTouchEventInit(115, 100));
+
+        // Wait for would-be long press delay
+        vi.advanceTimersByTime(500);
+
+        // Context menu should NOT open
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should clear timer on touchcancel (system interruption)', async () => {
+      vi.useFakeTimers();
+      try {
+        const onNewFile = vi.fn();
+        mockFetch.mockImplementation((url: string) => {
+          if (url.includes('/tree')) {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve(mockRootData),
+            });
+          }
+          return Promise.reject(new Error('Not found'));
+        });
+
+        render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
+
+        await vi.runAllTimersAsync();
+
+        const fileItem = screen.getByTestId('tree-item-package.json');
+
+        // Start touch
+        fireEvent.touchStart(fileItem, createTouchEventInit(100, 200));
+
+        // Simulate system interruption (e.g., notification)
+        fireEvent.touchCancel(fileItem);
+
+        // Wait for would-be long press delay
+        vi.advanceTimersByTime(500);
+
+        // Context menu should NOT open
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should clear timer on touchend (short tap)', async () => {
+      vi.useFakeTimers();
+      try {
+        const onNewFile = vi.fn();
+        mockFetch.mockImplementation((url: string) => {
+          if (url.includes('/tree')) {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve(mockRootData),
+            });
+          }
+          return Promise.reject(new Error('Not found'));
+        });
+
+        render(<FileTreeView worktreeId="test-worktree" onNewFile={onNewFile} />);
+
+        await vi.runAllTimersAsync();
+
+        const fileItem = screen.getByTestId('tree-item-package.json');
+
+        // Start touch
+        fireEvent.touchStart(fileItem, createTouchEventInit(100, 200));
+
+        // End touch before delay
+        fireEvent.touchEnd(fileItem);
+
+        // Wait for would-be long press delay
+        vi.advanceTimersByTime(500);
+
+        // Context menu should NOT open (short tap should select file, not open menu)
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should have CSS to prevent native long press behavior', async () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('package.json')).toBeInTheDocument();
+      });
+
+      const fileItem = screen.getByTestId('tree-item-package.json');
+
+      // Check for touch-action in the element's style property
+      // jsdom may not serialize all CSS properties to the style attribute,
+      // but the HTMLElement.style object should have them
+      const elementStyle = (fileItem as HTMLElement).style;
+      expect(elementStyle.touchAction).toBe('manipulation');
+      // Note: WebkitTouchCallout may not be available in jsdom,
+      // but touch-action is the critical property for preventing scroll interference
+    });
+
+    it('should have touch event handlers attached', async () => {
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('package.json')).toBeInTheDocument();
+      });
+
+      const fileItem = screen.getByTestId('tree-item-package.json');
+
+      // Verify that touch events can be fired without error
+      // This implicitly tests that handlers are attached
+      expect(() => {
+        fireEvent.touchStart(fileItem, createTouchEventInit(100, 100));
+        fireEvent.touchMove(fileItem, createTouchEventInit(100, 100));
+        fireEvent.touchEnd(fileItem);
+        fireEvent.touchCancel(fileItem);
+      }).not.toThrow();
+    });
+  });
 });

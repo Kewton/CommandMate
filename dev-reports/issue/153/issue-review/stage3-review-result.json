@@ -1,0 +1,116 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "reviewed_at": "2026-02-04T12:00:00.000Z",
+  "issue_number": 153,
+  "impact_analysis": {
+    "code_impact": {
+      "files_to_modify": [
+        "src/lib/auto-yes-manager.ts"
+      ],
+      "functions_affected": [
+        "getAutoYesState",
+        "setAutoYesEnabled",
+        "clearAllAutoYesStates",
+        "getActivePollerCount",
+        "clearAllPollerStates",
+        "getLastServerResponseTimestamp",
+        "updateLastServerResponseTimestamp",
+        "resetErrorCount",
+        "incrementErrorCount",
+        "pollAutoYes",
+        "scheduleNextPoll",
+        "startAutoYesPolling",
+        "stopAutoYesPolling",
+        "stopAllAutoYesPolling"
+      ],
+      "callers_to_update": [],
+      "no_caller_changes_required": true,
+      "reason_no_caller_changes": "The proposed change uses globalThis to store Map instances, but the exported function interfaces remain unchanged. All callers will continue to work without modification."
+    },
+    "test_impact": {
+      "affected_test_files": [
+        "tests/unit/lib/auto-yes-manager.test.ts",
+        "tests/unit/lib/auto-yes-resolver.test.ts",
+        "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+        "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx"
+      ],
+      "test_isolation_concerns": "After globalThis migration, state will persist across test files unless explicitly cleared. The existing test file already uses beforeEach/afterEach with clearAllAutoYesStates() and clearAllPollerStates(), which will continue to work because these functions will clear the globalThis-stored Maps. However, if tests in other files import auto-yes-manager, cross-test contamination could occur.",
+      "required_test_changes": [
+        "Verify that clearAllAutoYesStates() and clearAllPollerStates() properly clear the globalThis-stored Maps",
+        "Add regression tests to verify state persistence across simulated module reloads",
+        "Consider adding globalThis cleanup in vitest.setup.ts if cross-file test isolation issues arise"
+      ]
+    },
+    "runtime_impact": {
+      "memory_implications": "globalThis will hold references to Map instances throughout the Node.js process lifetime. This is the same memory footprint as the current module-level Map, but the references will not be garbage collected on module reload. Given the expected number of worktrees (typically <100), memory impact is negligible.",
+      "cleanup_considerations": "The existing cleanup mechanisms remain effective: (1) stopAllAutoYesPolling() in server.ts gracefulShutdown clears pollerStates, (2) session-cleanup.ts cleanupWorktreeSessions() calls stopAutoYesPolling() for individual worktrees, (3) clearTimeout() is called for each timer before Map deletion. No additional cleanup code is required."
+    },
+    "related_features_impact": {
+      "issue_138_server_side_polling": "This fix directly addresses a bug in the Issue #138 implementation. After the fix, server-side polling state will persist correctly across hot reloads (dev) and Next.js worker restarts (production), ensuring UI state matches backend state.",
+      "useAutoYes_client_hook": "No changes required. The client hook (src/hooks/useAutoYes.ts) relies on API responses from GET /current-output which uses getAutoYesState() and getLastServerResponseTimestamp(). These APIs will return correct state after the fix.",
+      "current_output_api": "No changes required. The API (src/app/api/worktrees/[id]/current-output/route.ts) calls getAutoYesState() and getLastServerResponseTimestamp() directly. With globalThis persistence, these will return accurate state.",
+      "auto_yes_api": "No changes required. The API (src/app/api/worktrees/[id]/auto-yes/route.ts) uses getAutoYesState(), setAutoYesEnabled(), startAutoYesPolling(), and stopAutoYesPolling(). All will work correctly with globalThis-backed storage.",
+      "other_features": [
+        "AutoYesToggle component - will reflect correct state from APIs",
+        "AutoYesConfirmDialog component - no state interaction, unaffected",
+        "WorktreeDetailRefactored component - consumes API data, unaffected"
+      ]
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "test_isolation",
+        "title": "Add globalThis state verification test",
+        "description": "While the existing clear functions work, there should be an explicit test verifying that globalThis.__autoYesStates and globalThis.__autoYesPollerStates are properly managed.",
+        "location": "tests/unit/lib/auto-yes-manager.test.ts",
+        "recommendation": "Add a test case that verifies globalThis variables are correctly initialized and cleared"
+      },
+      {
+        "id": "SF-002",
+        "category": "documentation",
+        "title": "Document globalThis usage pattern for future maintainers",
+        "description": "The globalThis pattern for Next.js hot-reload resilience is a common pattern but should be documented in code comments.",
+        "location": "src/lib/auto-yes-manager.ts",
+        "recommendation": "Add JSDoc comment explaining why globalThis is used and the hot-reload/worker-restart scenario it addresses"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "N2H-001",
+        "category": "type_safety",
+        "title": "Consider interface for globalThis extensions",
+        "description": "The Issue proposes using eslint-disable comments for 'no var' rule. A cleaner approach might be to extend the NodeJS.Global interface in a dedicated types file.",
+        "location": "src/lib/auto-yes-manager.ts",
+        "recommendation": "Create src/types/global.d.ts with proper NodeJS.Global extension for better type safety"
+      },
+      {
+        "id": "N2H-002",
+        "category": "consistency",
+        "title": "Check if similar pattern needed for response-poller.ts",
+        "description": "response-poller.ts also uses module-level Maps (activePollers, pollingStartTimes). While not reported as having the same issue, it may be susceptible to similar hot-reload problems.",
+        "location": "src/lib/response-poller.ts",
+        "recommendation": "Investigate if response-poller.ts exhibits similar state loss on hot-reload and apply consistent pattern if needed"
+      },
+      {
+        "id": "N2H-003",
+        "category": "consistency",
+        "title": "Check if similar pattern needed for claude-poller.ts",
+        "description": "session-cleanup.ts imports stopClaudePolling from claude-poller.ts, suggesting it also uses in-memory state that could be affected by module reloads.",
+        "location": "src/lib/claude-poller.ts (referenced in session-cleanup.ts)",
+        "recommendation": "Investigate claude-poller.ts for similar state management patterns"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 3,
+    "impact_level": "low",
+    "impact_level_rationale": "The proposed change is minimal (~20 lines) and only affects the internal state storage mechanism. All exported function interfaces remain unchanged, so no callers need modification. Existing tests and cleanup mechanisms will continue to work. The change is isolated to a single file."
+  }
+}

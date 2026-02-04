@@ -1,0 +1,137 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-04",
+  "impact_analysis": {
+    "affected_files": [
+      "src/components/worktree/FileTreeView.tsx",
+      "src/hooks/useContextMenu.ts",
+      "src/types/markdown-editor.ts"
+    ],
+    "affected_components": [
+      "FileTreeView",
+      "TreeNode",
+      "useContextMenu",
+      "ContextMenu"
+    ],
+    "dependent_files": [
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "src/components/worktree/ContextMenu.tsx"
+    ],
+    "reference_implementations": [
+      "src/components/worktree/PaneResizer.tsx",
+      "src/components/mobile/MobilePromptSheet.tsx"
+    ],
+    "test_impact": "既存テスト（FileTreeView.test.tsx, useContextMenu.test.ts, ContextMenu.test.tsx）はマウスイベントのみをテストしており、タッチイベントのテストは未実装。新規テストケースの追加が必要。",
+    "performance_impact": "タッチイベントハンドラ追加による影響は軽微。useCallback/useRefでハンドラを最適化することで、不要な再レンダリングを回避可能。ただしタイマー管理（500msの長押し検出）にuseRefを使用する必要あり。",
+    "security_impact": "タッチイベント処理自体にセキュリティリスクはない。既存のcontextMenuハンドラを再利用するため、新たなセキュリティ考慮は不要。"
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "テスト影響",
+        "issue": "タッチイベントのテストケースがIssueに明記されていない",
+        "location": "受け入れ条件 セクション",
+        "recommendation": "受け入れ条件に以下を追加: 「タッチイベント関連のユニットテストが追加されている」",
+        "evidence": "既存テストファイル（tests/unit/components/worktree/FileTreeView.test.tsx, tests/unit/hooks/useContextMenu.test.ts）にはタッチイベントのテストが存在しない"
+      },
+      {
+        "id": "SF-002",
+        "category": "依存関係",
+        "issue": "useContextMenuの型定義拡張がContextMenuStateに影響する可能性の明記がない",
+        "location": "## 解決方針 > ### 3. 型定義の拡張 セクション",
+        "recommendation": "src/types/markdown-editor.ts内のContextMenuState型への影響がないことを明記する。現状position: { x: number; y: number }であり、タッチイベントでも同じ座標系を使用するため変更不要であることを補足",
+        "evidence": "src/types/markdown-editor.ts:168-177にContextMenuState型が定義されている"
+      },
+      {
+        "id": "SF-003",
+        "category": "整合性",
+        "issue": "他のタッチイベント実装（MobilePromptSheet）との整合性検討が不足",
+        "location": "## 参照実装 セクション",
+        "recommendation": "MobilePromptSheet.tsx（行82-110）にもタッチイベント実装があり、パターンの整合性を確認する記載を追加。MobilePromptSheetはスワイプ操作のため長押し検出とは異なるが、状態管理パターン（touchStartY, translateY）は参考になる",
+        "evidence": "src/components/mobile/MobilePromptSheet.tsx:82-110にhandleTouchStart/Move/Endの実装がある"
+      },
+      {
+        "id": "SF-004",
+        "category": "完全性",
+        "issue": "TreeNodeコンポーネントの変更箇所が具体的に記載されていない",
+        "location": "## 該当コード セクション",
+        "recommendation": "FileTreeView.tsx内のTreeNodeコンポーネント（行237-408）への変更箇所を明記。具体的にはTreeNodePropsインターフェース（行59-76）へのタッチイベントハンドラ追加と、TreeNode内のdiv要素（行292-302）へのonTouchStart/End/Move/Cancelの追加が必要",
+        "evidence": "FileTreeView.tsx:302にonContextMenuのみ実装されている"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "ドキュメント",
+        "issue": "CLAUDE.mdへの機能追加記載が言及されていない",
+        "location": "Issue本文",
+        "recommendation": "実装完了後にCLAUDE.mdの「最近の実装機能」セクションにタッチ対応の記載を追加することを検討"
+      },
+      {
+        "id": "NTH-002",
+        "category": "パフォーマンス",
+        "issue": "setTimeoutのメモリリーク防止策が明記されていない",
+        "location": "## 解決方針 > ### 2. 長押し検出ロジック実装 セクション",
+        "recommendation": "コンポーネントのアンマウント時にタイマーをクリアする処理（useEffectのcleanup関数）の実装を明記。PaneResizerはuseEffect内でイベントリスナーをクリーンアップしているパターンを参照",
+        "evidence": "PaneResizer.tsx:231-238でクリーンアップ処理が実装されている"
+      },
+      {
+        "id": "NTH-003",
+        "category": "アクセシビリティ",
+        "issue": "触覚フィードバック（haptic feedback）の考慮がない",
+        "location": "Issue本文",
+        "recommendation": "長押し検出時のvibration APIによるフィードバックは将来の拡張として検討可能（スコープ外として明記してもよい）"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "relevance": "主要な変更対象ファイル - TreeNodeコンポーネントにタッチイベントハンドラを追加",
+      "lines_of_interest": [59, 69, 281, 302]
+    },
+    {
+      "file": "src/hooks/useContextMenu.ts",
+      "relevance": "openMenu関数の型をReact.MouseEvent | React.TouchEventに拡張",
+      "lines_of_interest": [35, 39, 85, 86]
+    },
+    {
+      "file": "src/components/worktree/PaneResizer.tsx",
+      "relevance": "タッチイベント実装の参照パターン",
+      "lines_of_interest": [133, 161, 176, 219]
+    },
+    {
+      "file": "src/components/mobile/MobilePromptSheet.tsx",
+      "relevance": "別のタッチイベント実装パターン（整合性確認用）",
+      "lines_of_interest": [82, 89, 104]
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "relevance": "ContextMenuState型の定義場所（変更不要だが確認必要）",
+      "lines_of_interest": [168, 177]
+    }
+  ],
+  "test_references": [
+    {
+      "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+      "relevance": "タッチイベントのテストケース追加が必要",
+      "required_additions": [
+        "長押し（500ms）でコンテキストメニューが表示されるテスト",
+        "10px以上移動でメニューがキャンセルされるテスト",
+        "タッチキャンセル時にタイマーがクリアされるテスト"
+      ]
+    },
+    {
+      "file": "tests/unit/hooks/useContextMenu.test.ts",
+      "relevance": "openMenuがTouchEventを受け付けるテストの追加が必要",
+      "required_additions": [
+        "React.TouchEventでopenMenuを呼び出すテスト",
+        "タッチ座標からメニュー位置が設定されるテスト"
+      ]
+    }
+  ],
+  "summary": "Issue #123の影響範囲は限定的で、主な変更はFileTreeView.tsx（TreeNodeコンポーネント）とuseContextMenu.tsに集中しています。参照実装としてPaneResizerとMobilePromptSheetが存在し、タッチイベント処理のパターンは確立されています。必須修正項目はありませんが、テストケースの明記、型定義への影響確認、他のタッチ実装との整合性検討、TreeNodeの具体的な変更箇所の明記を推奨します。パフォーマンス・セキュリティへの影響は軽微です。"
+}

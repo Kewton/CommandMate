@@ -323,4 +323,82 @@ describe('auto-yes-manager', () => {
       expect(MAX_CONCURRENT_POLLERS).toBe(50);
     });
   });
+
+  // ==========================================================================
+  // Issue #153: globalThis State Persistence Tests
+  // ==========================================================================
+
+  describe('globalThis state management (Issue #153)', () => {
+    beforeEach(() => {
+      // Clear globalThis state before each test
+      clearAllAutoYesStates();
+      clearAllPollerStates();
+    });
+
+    it('should initialize globalThis.__autoYesStates', () => {
+      // After module initialization, globalThis should have the Map
+      expect(globalThis.__autoYesStates).toBeInstanceOf(Map);
+    });
+
+    it('should initialize globalThis.__autoYesPollerStates', () => {
+      // After module initialization, globalThis should have the Map
+      expect(globalThis.__autoYesPollerStates).toBeInstanceOf(Map);
+    });
+
+    it('should store state in globalThis.__autoYesStates', () => {
+      setAutoYesEnabled('test-worktree', true);
+
+      // State should be stored in globalThis
+      expect(globalThis.__autoYesStates).toBeInstanceOf(Map);
+      expect(globalThis.__autoYesStates?.has('test-worktree')).toBe(true);
+      expect(globalThis.__autoYesStates?.get('test-worktree')?.enabled).toBe(true);
+    });
+
+    it('should store poller state in globalThis.__autoYesPollerStates', () => {
+      setAutoYesEnabled('test-worktree-2', true);
+      startAutoYesPolling('test-worktree-2', 'claude');
+
+      // Poller state should be stored in globalThis
+      expect(globalThis.__autoYesPollerStates).toBeInstanceOf(Map);
+      expect(globalThis.__autoYesPollerStates?.has('test-worktree-2')).toBe(true);
+    });
+
+    it('should clear globalThis.__autoYesStates when clearAllAutoYesStates is called', () => {
+      setAutoYesEnabled('test-worktree-3', true);
+      expect(globalThis.__autoYesStates?.has('test-worktree-3')).toBe(true);
+
+      clearAllAutoYesStates();
+
+      // Map should be empty but still exist
+      expect(globalThis.__autoYesStates).toBeInstanceOf(Map);
+      expect(globalThis.__autoYesStates?.size).toBe(0);
+    });
+
+    it('should clear globalThis.__autoYesPollerStates when clearAllPollerStates is called', () => {
+      setAutoYesEnabled('test-worktree-4', true);
+      startAutoYesPolling('test-worktree-4', 'claude');
+      expect(globalThis.__autoYesPollerStates?.has('test-worktree-4')).toBe(true);
+
+      clearAllPollerStates();
+
+      // Map should be empty but still exist
+      expect(globalThis.__autoYesPollerStates).toBeInstanceOf(Map);
+      expect(globalThis.__autoYesPollerStates?.size).toBe(0);
+    });
+
+    it('should maintain state reference after module access', () => {
+      // Set state
+      setAutoYesEnabled('persistence-test', true);
+
+      // Get reference to globalThis state
+      const statesRef = globalThis.__autoYesStates;
+
+      // Access state through exported function
+      const state = getAutoYesState('persistence-test');
+
+      // References should be the same
+      expect(statesRef).toBe(globalThis.__autoYesStates);
+      expect(state?.enabled).toBe(true);
+    });
+  });
 });

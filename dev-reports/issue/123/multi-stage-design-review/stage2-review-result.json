@@ -1,0 +1,192 @@
+{
+  "review_metadata": {
+    "issue_number": 123,
+    "stage": 2,
+    "focus_area": "Consistency",
+    "design_doc_path": "dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md",
+    "reviewed_files": [
+      "src/hooks/useContextMenu.ts",
+      "src/components/worktree/FileTreeView.tsx",
+      "src/components/worktree/PaneResizer.tsx",
+      "src/types/markdown-editor.ts"
+    ],
+    "review_date": "2026-02-04",
+    "reviewer": "architecture-review-agent"
+  },
+  "overall_result": "PASS_WITH_NOTES",
+  "summary": "The design document is largely consistent with the existing codebase. Minor discrepancies were found in line number references and interface structure, but the overall technical approach is sound and implementable.",
+  "consistency_checks": [
+    {
+      "id": "CC-001",
+      "category": "File Path Accuracy",
+      "status": "PASS",
+      "description": "All referenced file paths exist and are accurate",
+      "details": "Design document correctly references: src/hooks/useContextMenu.ts, src/components/worktree/FileTreeView.tsx, src/components/worktree/PaneResizer.tsx, src/types/markdown-editor.ts"
+    },
+    {
+      "id": "CC-002",
+      "category": "Line Number Accuracy",
+      "status": "WARNING",
+      "description": "Line number references in design document do not match actual code",
+      "details": "Design states 'TreeNodeProps interface at lines 59-76' but actual TreeNodeProps is at lines 59-76 (CORRECT). Design states 'openMenu at lines 85-96' and actual openMenu is at lines 85-96 (CORRECT). Design states 'UseContextMenuReturn at line 39' but actual is at lines 35-44. Minor discrepancy but within acceptable range.",
+      "recommendation": "Update design document line references to match current code or note that line numbers are approximate"
+    },
+    {
+      "id": "CC-003",
+      "category": "Type Definition Consistency - UseContextMenuReturn",
+      "status": "NEEDS_ATTENTION",
+      "description": "Design proposes changing openMenu signature but existing interface is different",
+      "details": "Current signature: openMenu: (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void. Proposed change: openMenu: (e: React.MouseEvent | React.TouchEvent, path: string, type: 'file' | 'directory') => void. This is a valid extension but must ensure backward compatibility.",
+      "current_code": {
+        "file": "src/hooks/useContextMenu.ts",
+        "line_range": "35-44",
+        "content": "export interface UseContextMenuReturn {\n  menuState: ContextMenuState;\n  openMenu: (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void;\n  closeMenu: () => void;\n  resetMenu: () => void;\n}"
+      },
+      "impact": "Low - Union type extension is backward compatible",
+      "recommendation": "Design is correct. Union type (React.MouseEvent | React.TouchEvent) will accept all existing MouseEvent usages"
+    },
+    {
+      "id": "CC-004",
+      "category": "Type Definition Consistency - TreeNodeProps",
+      "status": "PASS",
+      "description": "TreeNodeProps structure matches design assumptions",
+      "details": "Current TreeNodeProps (lines 59-76) has onContextMenu callback typed as (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void. Design proposes adding 4 optional touch event props. Structure is compatible.",
+      "current_code": {
+        "file": "src/components/worktree/FileTreeView.tsx",
+        "line_range": "59-76",
+        "content": "interface TreeNodeProps {\n  item: TreeItem;\n  path: string;\n  depth: number;\n  worktreeId: string;\n  expanded: Set<string>;\n  cache: Map<string, TreeItem[]>;\n  onToggle: (path: string) => void;\n  onFileSelect?: (filePath: string) => void;\n  onLoadChildren: (path: string) => Promise<void>;\n  onContextMenu?: (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void;\n  searchQuery?: string;\n  searchMode?: SearchMode;\n  matchedPaths?: Set<string>;\n}"
+      }
+    },
+    {
+      "id": "CC-005",
+      "category": "Existing Pattern Consistency - PaneResizer Reference",
+      "status": "PASS",
+      "description": "PaneResizer touch handling pattern is consistent with design approach",
+      "details": "PaneResizer uses getPosition() helper function (lines 70-81) that handles both MouseEvent and TouchEvent. Design's approach in useContextMenu is similar but inline. PaneResizer pattern supports design's SF-001 note about future utility extraction.",
+      "reference_pattern": {
+        "file": "src/components/worktree/PaneResizer.tsx",
+        "line_range": "70-81",
+        "content": "function getPosition(e: MouseEvent | React.MouseEvent | TouchEvent | React.TouchEvent, isHorizontal: boolean): number {\n  if ('touches' in e && e.touches.length > 0) {\n    return isHorizontal ? e.touches[0].clientX : e.touches[0].clientY;\n  }\n  if ('clientX' in e) {\n    return isHorizontal ? e.clientX : e.clientY;\n  }\n  return 0;\n}"
+      }
+    },
+    {
+      "id": "CC-006",
+      "category": "Existing Pattern Consistency - ContextMenuState Type",
+      "status": "PASS",
+      "description": "ContextMenuState type in design matches existing type definition",
+      "details": "Design references ContextMenuState with position: { x: number; y: number }. Actual type in markdown-editor.ts (lines 168-177) matches exactly.",
+      "current_code": {
+        "file": "src/types/markdown-editor.ts",
+        "line_range": "168-177",
+        "content": "export interface ContextMenuState {\n  isOpen: boolean;\n  position: { x: number; y: number };\n  targetPath: string | null;\n  targetType: 'file' | 'directory' | null;\n}"
+      }
+    },
+    {
+      "id": "CC-007",
+      "category": "React Event Handling Pattern",
+      "status": "PASS",
+      "description": "Design follows existing React event handling patterns in codebase",
+      "details": "Design uses useCallback for event handlers, useRef for timer/position state, useEffect for cleanup - consistent with useContextMenu.ts (lines 85-96, 120-136) and PaneResizer.tsx patterns"
+    },
+    {
+      "id": "CC-008",
+      "category": "Technical Accuracy - CSS Properties",
+      "status": "PASS",
+      "description": "CSS properties (touch-action, WebkitTouchCallout) are valid and appropriate",
+      "details": "Design proposes: WebkitTouchCallout: 'none' (disables iOS callout), touchAction: 'manipulation' (allows pan/zoom but disables double-tap-zoom). Both are valid CSS properties supported by modern browsers including iOS Safari.",
+      "reference": "https://developer.mozilla.org/docs/Web/CSS/touch-action"
+    },
+    {
+      "id": "CC-009",
+      "category": "TypeScript Type Safety",
+      "status": "PASS",
+      "description": "Type narrowing approach is correct for union types",
+      "details": "Design uses 'touches' in e type guard which correctly narrows TouchEvent from MouseEvent. This pattern is used in PaneResizer.tsx (line 74) and is TypeScript best practice for event type discrimination."
+    },
+    {
+      "id": "CC-010",
+      "category": "Hook Return Type Structure",
+      "status": "PASS",
+      "description": "useLongPress return type structure follows React conventions",
+      "details": "Design's UseLongPressReturn interface with onTouchStart, onTouchMove, onTouchEnd, onTouchCancel follows the same pattern as native React event handlers and can be spread onto elements"
+    }
+  ],
+  "discrepancies": [
+    {
+      "id": "DISC-001",
+      "severity": "Low",
+      "category": "Interface Location",
+      "description": "Design proposes adding touch props to TreeNodeProps inline but design section 5.3 shows them as optional",
+      "design_reference": "Section 5.3, lines 313-319",
+      "actual_code_reference": "FileTreeView.tsx, lines 59-76",
+      "impact": "No impact - design intent is clear",
+      "recommendation": "None required"
+    },
+    {
+      "id": "DISC-002",
+      "severity": "Low",
+      "category": "onContextMenu Type Signature",
+      "description": "Design proposes changing onContextMenu callback to accept TouchEvent but does not explicitly update TreeNodeProps.onContextMenu type",
+      "design_reference": "Section 5.3",
+      "actual_code_reference": "FileTreeView.tsx, line 69: onContextMenu?: (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void",
+      "impact": "Medium - Implementation must also update TreeNodeProps.onContextMenu type to React.MouseEvent | React.TouchEvent",
+      "recommendation": "Explicitly add TreeNodeProps.onContextMenu type update to design document"
+    }
+  ],
+  "technical_validation": {
+    "typescript_types": {
+      "status": "VALID",
+      "notes": "All proposed types are syntactically correct and semantically appropriate"
+    },
+    "react_hooks_usage": {
+      "status": "VALID",
+      "notes": "useCallback, useRef, useEffect patterns follow React best practices and existing codebase patterns"
+    },
+    "event_handling": {
+      "status": "VALID",
+      "notes": "Touch event handling approach is consistent with PaneResizer implementation"
+    },
+    "css_properties": {
+      "status": "VALID",
+      "notes": "touch-action: manipulation and WebkitTouchCallout: none are appropriate for iOS Safari"
+    }
+  },
+  "recommendations": [
+    {
+      "id": "REC-001",
+      "priority": "Medium",
+      "description": "Update TreeNodeProps.onContextMenu type in implementation",
+      "details": "When implementing, ensure TreeNodeProps.onContextMenu is updated to: (e: React.MouseEvent | React.TouchEvent, path: string, type: 'file' | 'directory') => void",
+      "affected_file": "src/components/worktree/FileTreeView.tsx",
+      "affected_line": 69
+    },
+    {
+      "id": "REC-002",
+      "priority": "Low",
+      "description": "Consider extracting coordinate utility function (per SF-001)",
+      "details": "PaneResizer already has getPosition() helper. If touch coordinate extraction is needed in multiple places, consider creating shared utility in src/lib/event-utils.ts",
+      "rationale": "DRY principle, but YAGNI takes precedence for now"
+    },
+    {
+      "id": "REC-003",
+      "priority": "Low",
+      "description": "Verify handleContextMenu callback in TreeNode",
+      "details": "Current handleContextMenu (FileTreeView.tsx line 281-286) is typed as React.MouseEvent. When useLongPress calls onContextMenu with TouchEvent, this will need type update.",
+      "affected_file": "src/components/worktree/FileTreeView.tsx",
+      "affected_line": 282
+    }
+  ],
+  "risk_assessment": {
+    "overall_risk": "Low",
+    "breaking_changes": false,
+    "backward_compatibility": true,
+    "notes": "Union type extension (MouseEvent | TouchEvent) is fully backward compatible. All existing MouseEvent usages will continue to work."
+  },
+  "approval_status": {
+    "approved": true,
+    "conditions": [
+      "Implement TreeNodeProps.onContextMenu type update as noted in REC-001",
+      "Update handleContextMenu callback type in TreeNode as noted in REC-003"
+    ]
+  }
+}

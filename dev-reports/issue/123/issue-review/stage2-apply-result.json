@@ -1,0 +1,50 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-04",
+  "issue_number": 123,
+  "iteration": 1,
+  "applied": [
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "description": "参照実装PaneResizerのtouchcancelハンドリングについて詳細を追記。行223-224でtouchcancelがtouchendと同じhandleDragEndで処理されていることを明記し、本Issueでも同様のパターンを採用することを解決方針に記載。また「参照実装との差異」セクションを追加して、ドラッグ操作と長押し検出の違いを明確化"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "description": "長押し閾値500msの根拠を追記。Apple Human Interface Guidelines（iOS）の標準長押し時間が約500ms、Material Design（Android）も400-600msを推奨していることを記載し、クロスプラットフォームで妥当な値であることを明記"
+    },
+    {
+      "id": "SF-3",
+      "status": "applied",
+      "description": "タッチ移動キャンセルの閾値を10pxと定義。一般的なWebアプリで10-20pxが使用されていることを根拠として記載。また具体的な判定ロジック（Math.sqrt((dx * dx) + (dy * dy)) > 10）を追記し、受け入れ条件にも「10px以上移動した場合はメニューが表示されない」を追加"
+    }
+  ],
+  "skipped": [
+    {
+      "id": "NTH-1",
+      "status": "acknowledged",
+      "description": "Android端末での動作確認について「スコープ外」セクションを追加し、将来の拡張として別Issueで対応可能であることを明記"
+    },
+    {
+      "id": "NTH-2",
+      "status": "acknowledged",
+      "description": "キーボードナビゲーションによるコンテキストメニュー呼び出しについて「スコープ外」セクションに記載"
+    }
+  ],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/123",
+  "changes_summary": {
+    "sections_added": [
+      "スコープ（対象/スコープ外）",
+      "参照実装との差異"
+    ],
+    "sections_modified": [
+      "解決方針（タッチイベントハンドラの追加 - onTouchCancel詳細追記）",
+      "解決方針（長押し検出ロジック実装 - 閾値根拠、移動閾値10px追加）",
+      "参照実装（行番号と詳細説明追加）",
+      "受け入れ条件（具体的な閾値を含む条件に更新、タッチキャンセル条件追加）"
+    ]
+  }
+}

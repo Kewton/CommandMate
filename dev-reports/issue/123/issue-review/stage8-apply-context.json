@@ -1,0 +1,8 @@
+{
+  "issue_number": 123,
+  "review_result_path": "dev-reports/issue/123/issue-review/stage7-review-result.json",
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "note": "Stage 7で Must Fix: 0件, Should Fix: 0件のため、Nice to Have 2件のみ検討"
+}

@@ -1,0 +1,50 @@
+{
+  "issue_number": 153,
+  "issue_title": "Auto-Yes UIとバックグラウンドの状態不整合",
+  "design_doc_path": "dev-reports/design/issue-153-auto-yes-state-inconsistency-design-policy.md",
+  "work_plan_path": "dev-reports/issue/153/work-plan.md",
+  "target_files": [
+    "src/lib/auto-yes-manager.ts"
+  ],
+  "test_files": [
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/integration/auto-yes-persistence.test.ts"
+  ],
+  "acceptance_criteria": [
+    "Auto-Yesを有効化後、モジュール再読み込みが発生してもUI状態が正しく表示されること",
+    "UIからOFFにした場合、バックグラウンドポーラーも確実に停止すること",
+    "lastServerResponseTimestampが正しく更新されること",
+    "開発環境・本番環境の両方で問題が発生しないこと",
+    "既存の自動テストがすべてパスすること"
+  ],
+  "implementation_requirements": {
+    "change_type": "globalThis pattern implementation",
+    "affected_lines": "77-81",
+    "expected_changes": [
+      "global型宣言追加（__autoYesStates, __autoYesPollerStates）",
+      "モジュールスコープMapをglobalThis参照に変更",
+      "JSDocコメント追加（globalThisパターンの理由説明）"
+    ],
+    "code_pattern": {
+      "before": "const autoYesStates = new Map<string, AutoYesState>();\nconst autoYesPollerStates = new Map<string, AutoYesPollerState>();",
+      "after": "declare global {\n  // eslint-disable-next-line no-var\n  var __autoYesStates: Map<string, AutoYesState> | undefined;\n  // eslint-disable-next-line no-var\n  var __autoYesPollerStates: Map<string, AutoYesPollerState> | undefined;\n}\n\nconst autoYesStates = globalThis.__autoYesStates ??\n  (globalThis.__autoYesStates = new Map<string, AutoYesState>());\n\nconst autoYesPollerStates = globalThis.__autoYesPollerStates ??\n  (globalThis.__autoYesPollerStates = new Map<string, AutoYesPollerState>());"
+    }
+  },
+  "test_requirements": {
+    "unit_tests": [
+      "globalThis変数の初期化確認",
+      "クリア関数のglobalThis対応確認",
+      "状態の永続性確認"
+    ],
+    "integration_tests": [
+      "vi.resetModules()を使用したモジュール再読み込みシミュレーション",
+      "再読み込み後の状態維持確認"
+    ]
+  },
+  "quality_checks": {
+    "typescript": "npx tsc --noEmit",
+    "eslint": "npm run lint",
+    "unit_test": "npm run test:unit",
+    "build": "npm run build"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "applied_at": "2026-02-04T00:00:00.000Z",
+  "applied_items": [
+    {
+      "id": "SF-001",
+      "status": "applied",
+      "changes_made": "セクション6に「6.1 DRY改善のためのフォローアップ（SF-001）」を追加。フォローアップIssue作成の推奨と、createPersistentMap<K,V>()ユーティリティのコード例を記載。"
+    },
+    {
+      "id": "NTH-001",
+      "status": "applied",
+      "changes_made": "セクション6に「6.2 ドキュメント更新（NTH-001）」を追加。実装完了後にCLAUDE.mdへglobalThisパターンの採用理由を追記する推奨事項を記載。"
+    },
+    {
+      "id": "NTH-002",
+      "status": "applied",
+      "changes_made": "セクション4.1の後に「4.1.1 統合テストでのモジュール再読み込みシミュレーション（オプション）」を追加。Vitestのvi.resetModulesを使用したより現実的なテストシナリオのコード例を記載。"
+    }
+  ],
+  "skipped_items": [],
+  "summary": {
+    "total_applied": 3,
+    "total_skipped": 0
+  }
+}

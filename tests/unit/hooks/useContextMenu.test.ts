@@ -291,4 +291,148 @@ describe('useContextMenu', () => {
       });
     });
   });
+
+  /**
+   * Issue #123: TouchEvent support for iPad context menu
+   */
+  describe('TouchEvent support', () => {
+    /**
+     * Helper to create a mock TouchEvent
+     */
+    const createMockTouchEvent = (
+      clientX: number,
+      clientY: number
+    ): React.TouchEvent => {
+      const mockEvent = {
+        preventDefault: vi.fn(),
+        touches: [
+          {
+            identifier: 0,
+            target: document.createElement('div'),
+            clientX,
+            clientY,
+            screenX: clientX,
+            screenY: clientY,
+            pageX: clientX,
+            pageY: clientY,
+            radiusX: 0,
+            radiusY: 0,
+            rotationAngle: 0,
+            force: 1,
+          },
+        ] as unknown as React.TouchList,
+        targetTouches: [] as unknown as React.TouchList,
+        changedTouches: [] as unknown as React.TouchList,
+        altKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        type: 'touchstart',
+        nativeEvent: {} as TouchEvent,
+        currentTarget: document.createElement('div') as EventTarget & Element,
+        target: document.createElement('div') as EventTarget & Element,
+        bubbles: true,
+        cancelable: true,
+        defaultPrevented: false,
+        eventPhase: 0,
+        isTrusted: true,
+        timeStamp: Date.now(),
+        isDefaultPrevented: () => false,
+        isPropagationStopped: () => false,
+        persist: () => {},
+        stopPropagation: () => {},
+        // Additional required properties for React.TouchEvent
+        getModifierState: () => false,
+        detail: 0,
+        view: null as unknown as Window,
+      };
+      return mockEvent as unknown as React.TouchEvent;
+    };
+
+    it('should open menu with TouchEvent', () => {
+      const { result } = renderHook(() => useContextMenu());
+
+      const mockTouchEvent = createMockTouchEvent(150, 250);
+
+      act(() => {
+        result.current.openMenu(mockTouchEvent, 'docs/readme.md', 'file');
+      });
+
+      expect(mockTouchEvent.preventDefault).toHaveBeenCalled();
+      expect(result.current.menuState.isOpen).toBe(true);
+      expect(result.current.menuState.position).toEqual({ x: 150, y: 250 });
+      expect(result.current.menuState.targetPath).toBe('docs/readme.md');
+      expect(result.current.menuState.targetType).toBe('file');
+    });
+
+    it('should extract touch coordinates from TouchEvent', () => {
+      const { result } = renderHook(() => useContextMenu());
+
+      // Test with specific coordinates to verify extraction
+      const mockTouchEvent = createMockTouchEvent(300, 400);
+
+      act(() => {
+        result.current.openMenu(mockTouchEvent, 'src/index.ts', 'file');
+      });
+
+      // Position should be extracted from touches[0].clientX/clientY
+      // Touch coordinates are safe numeric values from browser Touch API
+      expect(result.current.menuState.position.x).toBe(300);
+      expect(result.current.menuState.position.y).toBe(400);
+    });
+
+    it('should work with directory type on TouchEvent', () => {
+      const { result } = renderHook(() => useContextMenu());
+
+      const mockTouchEvent = createMockTouchEvent(200, 300);
+
+      act(() => {
+        result.current.openMenu(mockTouchEvent, 'src', 'directory');
+      });
+
+      expect(result.current.menuState.isOpen).toBe(true);
+      expect(result.current.menuState.targetPath).toBe('src');
+      expect(result.current.menuState.targetType).toBe('directory');
+    });
+
+    it('should not open menu if touches array is empty', () => {
+      const { result } = renderHook(() => useContextMenu());
+
+      // Create touch event with empty touches array
+      const mockEmptyTouchEvent = {
+        preventDefault: vi.fn(),
+        touches: [] as unknown as React.TouchList,
+        targetTouches: [] as unknown as React.TouchList,
+        changedTouches: [] as unknown as React.TouchList,
+        altKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        type: 'touchstart',
+        nativeEvent: {} as TouchEvent,
+        currentTarget: document.createElement('div') as EventTarget & Element,
+        target: document.createElement('div') as EventTarget & Element,
+        bubbles: true,
+        cancelable: true,
+        defaultPrevented: false,
+        eventPhase: 0,
+        isTrusted: true,
+        timeStamp: Date.now(),
+        isDefaultPrevented: () => false,
+        isPropagationStopped: () => false,
+        persist: () => {},
+        stopPropagation: () => {},
+        getModifierState: () => false,
+        detail: 0,
+        view: null as unknown as Window,
+      } as unknown as React.TouchEvent;
+
+      act(() => {
+        result.current.openMenu(mockEmptyTouchEvent, 'test.md', 'file');
+      });
+
+      // Menu should not open (position cannot be determined)
+      expect(result.current.menuState.isOpen).toBe(false);
+    });
+  });
 });
