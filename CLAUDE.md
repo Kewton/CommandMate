@@ -148,7 +148,8 @@ src/
 | `src/config/editable-extensions.ts` | 編集可能ファイル拡張子設定 |
 | `src/config/file-operations.ts` | 再帰削除の安全設定 |
 | `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義 |
-| `src/hooks/useContextMenu.ts` | コンテキストメニュー状態管理フック |
+| `src/hooks/useContextMenu.ts` | コンテキストメニュー状態管理フック（MouseEvent/TouchEvent対応） |
+| `src/hooks/useLongPress.ts` | タッチ長押し検出フック（Issue #123、500ms閾値、10px移動キャンセル） |
 | `src/hooks/useFullscreen.ts` | Fullscreen API ラッパー（CSSフォールバック対応） |
 | `src/hooks/useLocalStorageState.ts` | localStorage永続化フック（バリデーション対応） |
 | `src/config/z-index.ts` | z-index値の一元管理 |
@@ -370,6 +371,23 @@ commandmate status --all                   # 全サーバー状態確認
 ---
 
 ## 最近の実装機能
+
+### Issue #123: iPadタッチ長押しコンテキストメニュー
+- **問題解決**: iPadでファイルツリーを長押ししてもコンテキストメニューが表示されない問題を解決
+- **根本原因**: iPad Safari/Chromeでは`onContextMenu`イベントが長押しでトリガーされない仕様
+- **実装内容**:
+  - `useLongPress`フック新規作成（500ms閾値、10px移動キャンセル）
+  - `useContextMenu`の`openMenu`を`MouseEvent | TouchEvent`に型拡張
+  - `FileTreeView`にタッチイベントハンドラ統合
+- **対応デバイス**: iPad Safari/Chrome, iPhone Safari/Chrome
+- **CSS最適化**:
+  - `touch-action: manipulation` - ダブルタップズーム抑制
+  - `-webkit-touch-callout: none` - 標準コンテキストメニュー抑制
+- **主要コンポーネント**:
+  - `src/hooks/useLongPress.ts` - 長押し検出フック（LONG_PRESS_DELAY=500, MOVE_THRESHOLD=10）
+  - `src/hooks/useContextMenu.ts` - コンテキストメニュー状態管理（TouchEvent対応）
+  - `src/components/worktree/FileTreeView.tsx` - タッチイベント統合
+- 詳細: [設計書](./dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md)
 
 ### Issue #138: サーバー側Auto-Yesポーリング
 - **問題解決**: ブラウザのバックグラウンドタブで`setInterval`が抑制され、auto-yesが動作しない問題を解決

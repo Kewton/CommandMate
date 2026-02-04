@@ -12,6 +12,7 @@
  * - Right-click context menu for file operations [Phase 4]
  * - Keyboard navigation support
  * - Responsive design with touch-friendly targets
+ * - [Issue #123] Touch long press context menu for iPad/iPhone
  */
 
 'use client';
@@ -19,6 +20,7 @@
 import React, { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import type { TreeItem, TreeResponse, SearchMode, SearchResultItem } from '@/types/models';
 import { useContextMenu } from '@/hooks/useContextMenu';
+import { useLongPress } from '@/hooks/useLongPress';
 import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { escapeRegExp, computeMatchedPaths } from '@/lib/utils';
 import { FilePlus, FolderPlus } from 'lucide-react';
@@ -56,22 +58,50 @@ export interface FileTreeViewProps {
   onSearchResultSelect?: (filePath: string) => void;
 }
 
+/**
+ * TreeNode Props
+ *
+ * [Issue #123 DISC-002/REC-001] onContextMenu type extended to support TouchEvent
+ * for iPad/iPhone long press context menu.
+ *
+ * Touch Event Integration:
+ * Touch events are handled via useLongPress hook which provides:
+ * - onTouchStart: Starts the long press timer (500ms delay)
+ * - onTouchMove: Cancels if touch moves beyond 10px threshold
+ * - onTouchEnd/onTouchCancel: Cancels the long press timer
+ *
+ * [SF-002] These handlers are spread onto each TreeNode element to enable
+ * context menu access on touch devices (iPad/iPhone) via long press gesture.
+ */
 interface TreeNodeProps {
+  /** Tree item data (name, type, size, etc.) */
   item: TreeItem;
+  /** Parent path for building full file path */
   path: string;
+  /** Nesting depth for indentation calculation */
   depth: number;
+  /** Worktree ID for API calls */
   worktreeId: string;
+  /** Set of expanded directory paths */
   expanded: Set<string>;
+  /** Cache of loaded directory contents */
   cache: Map<string, TreeItem[]>;
+  /** Toggle directory expansion state */
   onToggle: (path: string) => void;
+  /** Handle file selection */
   onFileSelect?: (filePath: string) => void;
+  /** Load children for a directory (lazy loading) */
   onLoadChildren: (path: string) => Promise<void>;
-  onContextMenu?: (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void;
-  /** [Issue #21] Search query for highlighting */
+  /**
+   * Context menu handler - supports both mouse right-click and touch long press
+   * [Issue #123] Extended to accept TouchEvent for iPad/iPhone support
+   */
+  onContextMenu?: (e: React.MouseEvent | React.TouchEvent, path: string, type: 'file' | 'directory') => void;
+  /** [Issue #21] Search query for name highlighting */
   searchQuery?: string;
-  /** [Issue #21] Search mode for highlighting */
+  /** [Issue #21] Search mode ('name' or 'content') for filtering behavior */
   searchMode?: SearchMode;
-  /** [Issue #21] Set of matched file paths (for filtering) */
+  /** [Issue #21] Set of matched file/directory paths for content search filtering */
   matchedPaths?: Set<string>;
 }
 
@@ -278,14 +308,50 @@ const TreeNode = memo(function TreeNode({
     [handleClick]
   );
 
+  /**
+   * Handle context menu for mouse right-click
+   * [Issue #123 REC-003] Type extended to support TouchEvent
+   */
   const handleContextMenu = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.MouseEvent | React.TouchEvent) => {
+      e.preventDefault();
       onContextMenu?.(e, fullPath, isDirectory ? 'directory' : 'file');
     },
     [fullPath, isDirectory, onContextMenu]
   );
 
+  /**
+   * [Issue #123] Long press handler for touch devices (iPad/iPhone)
+   * Opens context menu on long press (500ms)
+   */
+  const handleLongPress = useCallback(
+    (e: React.TouchEvent) => {
+      onContextMenu?.(e, fullPath, isDirectory ? 'directory' : 'file');
+    },
+    [fullPath, isDirectory, onContextMenu]
+  );
+
+  /**
+   * [Issue #123] Long press detection for touch context menu
+   * Uses useLongPress hook with default 500ms delay and 10px move threshold
+   */
+  const longPressHandlers = useLongPress({
+    onLongPress: handleLongPress,
+  });
+
   const indentStyle = getIndentStyle(depth);
+
+  /**
+   * [Issue #123] Combined inline styles for tree item
+   * - Base indentation from depth calculation
+   * - touch-action: manipulation - prevents browser default long press (scroll optimization)
+   * - WebkitTouchCallout: none - prevents iOS native context menu
+   */
+  const combinedStyle: React.CSSProperties = {
+    ...indentStyle,
+    touchAction: 'manipulation',
+    WebkitTouchCallout: 'none',
+  };
 
   return (
     <>
@@ -296,10 +362,14 @@ const TreeNode = memo(function TreeNode({
         aria-expanded={isDirectory ? isExpanded : undefined}
         tabIndex={0}
         className="flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-gray-100 rounded transition-colors"
-        style={indentStyle}
+        style={combinedStyle}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
+        onTouchStart={longPressHandlers.onTouchStart}
+        onTouchMove={longPressHandlers.onTouchMove}
+        onTouchEnd={longPressHandlers.onTouchEnd}
+        onTouchCancel={longPressHandlers.onTouchCancel}
       >
         {/* Chevron for directories */}
         {isDirectory ? (

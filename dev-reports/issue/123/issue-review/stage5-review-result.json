@@ -1,0 +1,181 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-04",
+  "issue_number": 123,
+  "focus_area": "通常（整合性・正確性）",
+  "iteration": 2,
+  "previous_review": "dev-reports/issue/123/issue-review/stage1-review-result.json",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 1,
+    "stage1_findings_resolved": true,
+    "stage3_findings_resolved": true
+  },
+  "previous_findings_verification": {
+    "stage1": {
+      "SF-1": {
+        "status": "resolved",
+        "verification": "参照実装PaneResizerのtouchcancelハンドリングについて、行223-224でtouchendと同じhandleDragEndで処理されることが明記され、本Issueでも同様のパターンを採用することが解決方針に記載済み。「参照実装との差異」セクションも追加済み",
+        "evidence": "Issue本文の「## 解決方針 > ### 1. タッチイベントハンドラの追加」と「## 参照実装 > **参照実装との差異**」セクションで対応"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "verification": "長押し閾値500msの根拠として、Apple Human Interface Guidelines（iOS）の標準長押し時間約500ms、Material Design（Android）の400-600ms推奨が明記済み",
+        "evidence": "Issue本文の「## 解決方針 > ### 2. 長押し検出ロジック実装 > **閾値**: 500ms」で根拠を記載"
+      },
+      "SF-3": {
+        "status": "resolved",
+        "verification": "タッチ移動キャンセルの閾値10pxが定義され、判定ロジック（Math.sqrt((dx * dx) + (dy * dy)) > 10）も明記。受け入れ条件にも「10px以上移動した場合はメニューが表示されない」を追加済み",
+        "evidence": "Issue本文の「## 解決方針 > ### 2. 長押し検出ロジック実装 > **移動検出閾値**: 10px」と「## 受け入れ条件 > ### 機能要件」で対応"
+      },
+      "NTH-1": {
+        "status": "acknowledged",
+        "verification": "Android端末での動作確認は「スコープ外」セクションに明記。将来の拡張として別Issueで対応可能であることを記載済み",
+        "evidence": "Issue本文の「## スコープ > ### スコープ外」で「Android端末での動作確認」を明記"
+      },
+      "NTH-2": {
+        "status": "acknowledged",
+        "verification": "キーボードナビゲーションによるコンテキストメニュー呼び出しは「スコープ外」セクションに明記済み",
+        "evidence": "Issue本文の「## スコープ > ### スコープ外」で「キーボードナビゲーションによるコンテキストメニュー呼び出し（Shift+F10等）」を明記"
+      }
+    },
+    "stage3": {
+      "SF-001": {
+        "status": "resolved",
+        "verification": "テスト要件が受け入れ条件に追加済み。FileTreeView.test.tsxとuseContextMenu.test.tsに追加すべき具体的なテストケースを明記",
+        "evidence": "Issue本文の「## 受け入れ条件 > ### テスト要件」で5つの具体的なテストケースを記載"
+      },
+      "SF-002": {
+        "status": "resolved",
+        "verification": "ContextMenuState型への影響がないことを明記。座標系が同一（position: { x: number; y: number }）であるため変更不要であることを補足済み",
+        "evidence": "Issue本文の「## 影響範囲 > ### 型定義への影響」セクションで詳細に説明"
+      },
+      "SF-003": {
+        "status": "resolved",
+        "verification": "MobilePromptSheet.tsxを整合性確認用の参照実装として追加。状態管理パターンの参考になる点を記載済み",
+        "evidence": "Issue本文の「## 参照実装 > ### MobilePromptSheet.tsx（整合性確認用）」セクションで詳細に説明"
+      },
+      "SF-004": {
+        "status": "resolved",
+        "verification": "TreeNodeコンポーネントの具体的な変更箇所を明記。TreeNodePropsインターフェース（行59-76）とdiv要素（行292-302）への変更を記載済み",
+        "evidence": "Issue本文の「## 影響範囲 > ### TreeNodeコンポーネントの具体的な変更箇所」で2項目を記載"
+      },
+      "NTH-001": {
+        "status": "skipped",
+        "verification": "CLAUDE.mdへの記載は実装完了後に行うため、Issue内には記載不要として対応"
+      },
+      "NTH-002": {
+        "status": "resolved",
+        "verification": "useEffectのクリーンアップ関数でタイマーをクリアする旨を追加。非機能要件にも記載済み",
+        "evidence": "Issue本文の「## 解決方針 > ### 2. 長押し検出ロジック実装 > **タイマー管理**」と「## 受け入れ条件 > ### 非機能要件」で対応"
+      },
+      "NTH-003": {
+        "status": "resolved",
+        "verification": "触覚フィードバック（Vibration API）を将来の拡張としてスコープ外に明記済み",
+        "evidence": "Issue本文の「## スコープ > ### スコープ外」で「触覚フィードバック（Vibration API）（将来の拡張として検討可能）」を記載"
+      }
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "完全性",
+        "issue": "PaneResizerにtouchcancelイベントリスナーが実際には存在しない",
+        "location": "## 参照実装 > ### PaneResizer.tsx（主要参照）",
+        "recommendation": "Issue本文では「行223-224: touchcancelがtouchendと同じhandleDragEndで処理されている」と記載されているが、実際のPaneResizer.tsxのuseEffect内のイベントリスナー登録（行219-239）を確認したところ、touchmove、touchend、mouseup、mousemoveのみ登録されており、touchcancelは登録されていない。ただし、本Issue実装時にはtouchcancelを適切に処理する予定であり、参照実装との「差異」として既に記載されているため、実装への影響は軽微。正確性のため、Issueの記載を「PaneResizerではtouchcancelが明示的に登録されていないが、本Issueでは長押しタイマーのクリアのためtouchcancelも処理する」に修正することを推奨",
+        "evidence": "PaneResizer.tsx:219-239でtouchcancelのイベントリスナー登録が見当たらない",
+        "priority": "low",
+        "impact_on_implementation": "none"
+      }
+    ]
+  },
+  "code_verification": {
+    "FileTreeView_tsx": {
+      "verified": true,
+      "line_302": "onContextMenuのみ実装（Issue記載と一致）",
+      "TreeNodeProps_lines_59_76": "存在確認済み（タッチイベントハンドラ追加予定箇所）",
+      "TreeNode_div_lines_292_302": "存在確認済み（タッチイベント追加予定箇所）"
+    },
+    "useContextMenu_ts": {
+      "verified": true,
+      "openMenu_type": "React.MouseEvent（TouchEvent対応の拡張が必要）",
+      "line_86": "openMenu関数の型定義確認済み"
+    },
+    "PaneResizer_tsx": {
+      "verified": true,
+      "touch_handlers": "handleTouchStart、handleTouchMove、handleDragEnd確認済み",
+      "useEffect_event_listeners": "touchmove、touchend、mouseup、mousemove登録（touchcancelは未登録）"
+    },
+    "ContextMenuState_type": {
+      "verified": true,
+      "position_type": "{ x: number; y: number }（タッチイベントでも同一座標系）",
+      "location": "src/types/markdown-editor.ts:168-177"
+    },
+    "test_files": {
+      "FileTreeView_test": "tests/unit/components/worktree/FileTreeView.test.tsx - 存在確認済み",
+      "useContextMenu_test": "tests/unit/hooks/useContextMenu.test.ts - 存在確認済み"
+    }
+  },
+  "consistency_check": {
+    "issue_vs_code": {
+      "status": "consistent",
+      "details": "Issue記載のファイルパス、行番号、コード構造は実際のコードベースと一致"
+    },
+    "issue_vs_stage1_review": {
+      "status": "all_resolved",
+      "details": "Stage 1の全指摘事項（SF-1〜3、NTH-1〜2）が適切に対応済み"
+    },
+    "issue_vs_stage3_review": {
+      "status": "all_resolved",
+      "details": "Stage 3の全指摘事項（SF-001〜004、NTH-001〜003）が適切に対応済み（1件はスキップ判断済み）"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines_of_interest": [59, 76, 281, 286, 292, 302],
+      "relevance": "変更対象ファイル - TreeNodeコンポーネントとonContextMenuハンドラ"
+    },
+    {
+      "file": "src/hooks/useContextMenu.ts",
+      "lines_of_interest": [35, 39, 85, 86],
+      "relevance": "変更対象ファイル - openMenu関数の型拡張"
+    },
+    {
+      "file": "src/components/worktree/PaneResizer.tsx",
+      "lines_of_interest": [133, 141, 161, 171, 176, 178, 219, 239],
+      "relevance": "参照実装 - タッチイベント処理パターン"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "lines_of_interest": [168, 177],
+      "relevance": "ContextMenuState型（変更不要確認済み）"
+    },
+    {
+      "file": "src/components/mobile/MobilePromptSheet.tsx",
+      "lines_of_interest": [82, 89, 104, 110],
+      "relevance": "整合性確認用参照実装 - タッチイベント状態管理パターン"
+    }
+  ],
+  "test_references": [
+    {
+      "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+      "relevance": "タッチイベントテストケース追加先（Issue記載と一致）"
+    },
+    {
+      "file": "tests/unit/hooks/useContextMenu.test.ts",
+      "relevance": "TouchEvent対応テストケース追加先（Issue記載と一致）"
+    }
+  ],
+  "overall_assessment": {
+    "quality": "high",
+    "completeness": "complete",
+    "readiness_for_implementation": "ready",
+    "summary": "Issue #123は2回の通常レビュー（Stage 1, 5）と1回の影響範囲レビュー（Stage 3）を経て、全ての指摘事項が適切に対応されています。Issue本文は詳細で明確であり、実装に必要な情報（変更対象ファイル、行番号、技術仕様、テスト要件、スコープ定義）が網羅されています。1件のNice to Have（PaneResizerのtouchcancelイベント登録に関する記載の正確性）を除き、問題点は見当たりません。実装準備完了と判断します。"
+  }
+}

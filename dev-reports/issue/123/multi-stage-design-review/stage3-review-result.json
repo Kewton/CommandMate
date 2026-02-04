@@ -1,0 +1,271 @@
+{
+  "issueNumber": 123,
+  "stage": 3,
+  "reviewType": "impact_analysis",
+  "reviewDate": "2026-02-04",
+  "designDocPath": "dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md",
+  "result": "PASS_WITH_NOTES",
+  "summary": "影響範囲分析の結果、設計書に記載された影響範囲は概ね正確で網羅的。追加で考慮すべき影響範囲とリグレッションリスクを特定。破壊的変更なし、後方互換性あり。",
+  "impactAnalysis": {
+    "newFiles": [
+      {
+        "path": "src/hooks/useLongPress.ts",
+        "description": "長押し検出フック（新規作成）",
+        "dependencies": ["react"],
+        "dependedBy": ["src/components/worktree/FileTreeView.tsx"],
+        "risk": "Low",
+        "notes": "独立したフックとして設計されており、他のコードへの影響なし"
+      }
+    ],
+    "modifiedFiles": [
+      {
+        "path": "src/hooks/useContextMenu.ts",
+        "changeType": "type_extension",
+        "changes": [
+          {
+            "item": "UseContextMenuReturn.openMenu",
+            "before": "(e: React.MouseEvent, path: string, type: 'file' | 'directory') => void",
+            "after": "(e: React.MouseEvent | React.TouchEvent, path: string, type: 'file' | 'directory') => void",
+            "backwardCompatible": true
+          }
+        ],
+        "callers": ["src/components/worktree/FileTreeView.tsx"],
+        "risk": "Low",
+        "notes": "Union型による拡張は後方互換性あり。既存のMouseEvent呼び出しは引き続き有効。"
+      },
+      {
+        "path": "src/components/worktree/FileTreeView.tsx",
+        "changeType": "enhancement",
+        "changes": [
+          {
+            "item": "TreeNode内部",
+            "description": "タッチイベントハンドラ追加（onTouchStart/Move/End/Cancel）",
+            "linesAffected": "line 290-302 (div要素)"
+          },
+          {
+            "item": "TreeNodeProps",
+            "description": "onContextMenu型をUnion型に拡張",
+            "linesAffected": "line 69"
+          },
+          {
+            "item": "handleContextMenu",
+            "description": "イベント型をUnion型に拡張",
+            "linesAffected": "line 281-286"
+          },
+          {
+            "item": "CSSスタイル追加",
+            "description": "WebkitTouchCallout: 'none', touchAction: 'manipulation'",
+            "linesAffected": "line 367-369"
+          }
+        ],
+        "callers": ["src/components/worktree/WorktreeDetailRefactored.tsx"],
+        "risk": "Medium",
+        "notes": "TreeNodeは内部コンポーネントのため外部影響なし。ただし、このファイルは機能が多く、テストカバレッジ確認が重要。"
+      }
+    ],
+    "unaffectedFiles": [
+      {
+        "path": "src/components/worktree/ContextMenu.tsx",
+        "reason": "メニュー表示ロジックに変更なし。座標系（position: {x, y}）は同一形式。"
+      },
+      {
+        "path": "src/types/markdown-editor.ts",
+        "reason": "ContextMenuState型に変更なし。座標系は既存と同一。"
+      },
+      {
+        "path": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "reason": "FileTreeViewの呼び出し方に変更なし。コールバック型は互換維持。"
+      }
+    ]
+  },
+  "dependencyAnalysis": {
+    "useLongPress": {
+      "imports": ["react (useRef, useCallback, useEffect)"],
+      "exports": ["useLongPress", "UseLongPressOptions", "UseLongPressReturn", "LONG_PRESS_DELAY", "MOVE_THRESHOLD"],
+      "circularDependencyRisk": "None"
+    },
+    "useContextMenu": {
+      "currentImports": ["react (useState, useCallback, useEffect)", "@/types/markdown-editor (ContextMenuState)"],
+      "newImports": [],
+      "exportChanges": "型定義のみ拡張、関数シグネチャ互換維持"
+    }
+  },
+  "testImpact": {
+    "existingTests": [
+      {
+        "path": "tests/unit/hooks/useContextMenu.test.ts",
+        "status": "NEEDS_UPDATE",
+        "requiredChanges": [
+          "TouchEventでのopenMenu呼び出しテスト追加",
+          "タッチ座標からメニュー位置設定テスト追加"
+        ],
+        "currentTestCount": 12,
+        "additionalTestsNeeded": 2
+      },
+      {
+        "path": "tests/unit/components/worktree/FileTreeView.test.tsx",
+        "status": "NEEDS_UPDATE",
+        "requiredChanges": [
+          "長押し(500ms)でコンテキストメニュー表示テスト追加",
+          "10px以上移動でメニューキャンセルテスト追加",
+          "タッチキャンセル時のタイマークリアテスト追加"
+        ],
+        "currentTestCount": 30,
+        "additionalTestsNeeded": 4
+      }
+    ],
+    "newTests": [
+      {
+        "path": "tests/unit/hooks/useLongPress.test.ts",
+        "description": "useLongPressフックのユニットテスト",
+        "testCases": [
+          "500ms後にonLongPressが呼ばれる",
+          "10px以上移動でタイマーがクリアされる",
+          "touchendでタイマーがクリアされる",
+          "touchcancelでタイマーがクリアされる",
+          "アンマウント時にタイマーがクリアされる",
+          "マルチタッチ（2本指以上）では発火しない"
+        ],
+        "estimatedCount": 6
+      },
+      {
+        "path": "tests/integration/touch-context-menu.test.tsx",
+        "description": "タッチコンテキストメニュー統合テスト",
+        "testCases": [
+          "タッチ長押し→メニュー表示→項目選択の一連のフロー",
+          "マウス右クリックとタッチ長押しが共存する"
+        ],
+        "estimatedCount": 2
+      }
+    ]
+  },
+  "regressionRisks": [
+    {
+      "id": "RR-001",
+      "area": "マウス右クリック",
+      "description": "既存のマウス右クリックによるコンテキストメニュー表示が影響を受ける可能性",
+      "likelihood": "Low",
+      "impact": "High",
+      "mitigation": "Union型使用により後方互換性確保。既存テストで回帰確認必須。"
+    },
+    {
+      "id": "RR-002",
+      "area": "スクロールとの競合",
+      "description": "長押し検出とスクロール操作の競合リスク",
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "mitigation": "10px移動閾値でスクロール開始時にキャンセル。touchAction: 'manipulation'でブラウザデフォルト制御。"
+    },
+    {
+      "id": "RR-003",
+      "area": "TreeNodeのレンダリングパフォーマンス",
+      "description": "タッチイベントハンドラ追加による再レンダリング増加の可能性",
+      "likelihood": "Low",
+      "impact": "Low",
+      "mitigation": "useCallback使用でハンドラ参照安定化。TreeNodeはmemo化済み。"
+    },
+    {
+      "id": "RR-004",
+      "area": "FileViewer/EditorとのModal競合",
+      "description": "コンテキストメニュー表示時のz-index競合リスク",
+      "likelihood": "Low",
+      "impact": "Low",
+      "mitigation": "既存z-index管理（z-50 for ContextMenu）を維持。変更なし。"
+    }
+  ],
+  "breakingChanges": [],
+  "performanceImpact": {
+    "assessment": "Minimal",
+    "details": [
+      "タイマー生成/クリアは軽量操作（O(1)）",
+      "タッチ座標計算は単純な算術演算",
+      "useCallback/useRefによるハンドラ最適化済み",
+      "TreeNodeはReact.memoで不要な再レンダリング防止済み"
+    ],
+    "recommendations": [
+      "パフォーマンステストで60fps維持を確認",
+      "長押し検出レイテンシが500ms±50msに収まることを確認"
+    ]
+  },
+  "additionalDiscoveries": [
+    {
+      "id": "ADD-001",
+      "type": "existing_pattern",
+      "description": "PaneResizer.tsxに類似のタッチ座標取得パターンが存在",
+      "relevance": "getPosition関数（line 70-81）がTouchEvent/MouseEventの座標取得を実装。設計書のSF-001で検討された座標取得ユーティリティの既存実装例として参照可能。",
+      "recommendation": "将来的にevent-utils.tsへ共通化する場合、PaneResizerのgetPositionも統合対象に含める。"
+    },
+    {
+      "id": "ADD-002",
+      "type": "missing_impact",
+      "description": "MobilePromptSheet.tsxもタッチイベントを使用",
+      "relevance": "スワイプ操作にタッチイベントを使用。useLongPressとの競合リスクはないが、タッチイベントパターンの参考実装として存在。",
+      "recommendation": "タッチイベント実装の一貫性確認のため、実装時にパターン整合性を確認。"
+    },
+    {
+      "id": "ADD-003",
+      "type": "test_coverage",
+      "description": "既存テストにコンテキストメニュー関連テストがない",
+      "relevance": "FileTreeView.test.tsxにはコンテキストメニュー表示のテストが含まれていない（onContextMenuのモック確認なし）。",
+      "recommendation": "Issue #123実装時に、マウス右クリックのコンテキストメニューテストも追加してテストカバレッジを向上。"
+    }
+  ],
+  "scopeCompleteness": {
+    "designDocCoverage": "Adequate",
+    "missingItems": [
+      {
+        "item": "既存コンテキストメニューテストの不在",
+        "severity": "Low",
+        "recommendation": "テスト設計（8.1節）にマウス右クリックの既存動作確認テストを追加"
+      },
+      {
+        "item": "z-index競合の明示的記載",
+        "severity": "Low",
+        "recommendation": "セキュリティ/パフォーマンス設計にz-index管理の記載追加を推奨（現状は暗黙的に維持）"
+      }
+    ],
+    "wellCoveredAreas": [
+      "変更ファイル一覧（9.1節）は正確",
+      "依存コンポーネント（9.2節）は正確",
+      "型定義への影響（9.3節）は適切に分析済み",
+      "テスト設計（8節）は網羅的"
+    ]
+  },
+  "checklist": {
+    "breakingChangesIdentified": true,
+    "regressionRisksDocumented": true,
+    "testImpactAnalyzed": true,
+    "performanceImpactAssessed": true,
+    "dependencyChainVerified": true,
+    "backwardCompatibilityConfirmed": true
+  },
+  "recommendations": [
+    {
+      "id": "REC-001",
+      "priority": "Medium",
+      "category": "Testing",
+      "description": "既存のマウス右クリックコンテキストメニューテストを追加",
+      "rationale": "現在FileTreeView.test.tsxにonContextMenuのテストがない。長押し機能追加前に既存動作のベースラインを確保すべき。"
+    },
+    {
+      "id": "REC-002",
+      "priority": "Low",
+      "category": "Documentation",
+      "description": "設計書の影響範囲セクションにテスト影響の詳細を追加",
+      "rationale": "テスト設計（8節）は存在するが、既存テストへの影響が9節に明記されていない。"
+    },
+    {
+      "id": "REC-003",
+      "priority": "Low",
+      "category": "Architecture",
+      "description": "将来的なevent-utils.ts作成時にPaneResizer.getPositionも統合検討",
+      "rationale": "DRY原則適用の一貫性のため、既存のタッチ座標取得ロジックも統合対象に含める。"
+    }
+  ],
+  "conclusion": {
+    "overallRisk": "Low",
+    "readyForImplementation": true,
+    "blockers": [],
+    "notes": "影響範囲は適切に特定されており、破壊的変更なし。テスト追加により安全に実装可能。既存のPaneResizerタッチパターンとの整合性も確認済み。"
+  }
+}

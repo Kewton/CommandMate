@@ -1,0 +1,131 @@
+{
+  "issueNumber": 123,
+  "stage": 3,
+  "action": "apply_review",
+  "executionDate": "2026-02-04",
+  "status": "SUCCESS",
+  "targetDocument": "dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md",
+  "sourceReview": "dev-reports/issue/123/multi-stage-design-review/stage3-review-result.json",
+  "appliedChanges": [
+    {
+      "section": "13. レビュー履歴",
+      "change": "Stage 3（影響分析レビュー）の行を追加",
+      "details": "PASS_WITH_NOTESの結果と対応内容（ADD-001〜003、RR-001〜004）を記録"
+    },
+    {
+      "section": "14.3（新規）",
+      "change": "Stage 3: 影響分析レビューセクションを追加",
+      "details": "ADD-001〜003の追加発見事項テーブルを追加"
+    },
+    {
+      "section": "14.4（新規）",
+      "change": "Stage 3 リグレッションリスク評価セクションを追加",
+      "details": "RR-001〜004のリグレッションリスクテーブルを追加（発生可能性、影響度、緩和策含む）"
+    },
+    {
+      "section": "8.1 ユニットテスト",
+      "change": "マウス右クリックテストケースを追加",
+      "details": "ADD-003対応として、FileTreeView mouse context menuテストブロックを追加（4テストケース）"
+    },
+    {
+      "section": "15.1 SF-001検討詳細",
+      "change": "ADD-001関連の参照情報を追記",
+      "details": "PaneResizer.getPosition（line 70-81）が将来的な統合対象であることを明記"
+    },
+    {
+      "section": "12.1 参照実装",
+      "change": "ADD-001、ADD-002の関連情報を追記",
+      "details": "PaneResizerとMobilePromptSheetの参照情報に影響分析結果を付記"
+    },
+    {
+      "section": "16.4（新規）",
+      "change": "Stage 3レビュー指摘対応項目チェックリストを追加",
+      "details": "ADD-001〜003、RR-001〜004の対応チェックリスト（7項目）"
+    },
+    {
+      "section": "フッター",
+      "change": "最終更新日を更新",
+      "details": "Stage 2整合性レビュー反映 → Stage 3影響分析レビュー反映"
+    }
+  ],
+  "additionalDiscoveriesApplied": [
+    {
+      "id": "ADD-001",
+      "description": "PaneResizer.tsxのgetPosition関数が座標取得の参照になりうる",
+      "appliedTo": ["15.1 SF-001検討詳細", "12.1 参照実装"]
+    },
+    {
+      "id": "ADD-002",
+      "description": "MobilePromptSheet.tsxとのパターン整合性確認推奨",
+      "appliedTo": ["12.1 参照実装", "16.4 チェックリスト"]
+    },
+    {
+      "id": "ADD-003",
+      "description": "既存テストにコンテキストメニュー関連テストがない。マウス右クリックテストも追加推奨",
+      "appliedTo": ["8.1 ユニットテスト", "16.4 チェックリスト"]
+    }
+  ],
+  "regressionRisksApplied": [
+    {
+      "id": "RR-001",
+      "area": "マウス右クリック",
+      "likelihood": "Low",
+      "impact": "High",
+      "appliedTo": ["14.4 リグレッションリスク評価", "16.4 チェックリスト"]
+    },
+    {
+      "id": "RR-002",
+      "area": "スクロールとの競合",
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "appliedTo": ["14.4 リグレッションリスク評価", "16.4 チェックリスト"]
+    },
+    {
+      "id": "RR-003",
+      "area": "TreeNodeパフォーマンス",
+      "likelihood": "Low",
+      "impact": "Low",
+      "appliedTo": ["14.4 リグレッションリスク評価", "16.4 チェックリスト"]
+    },
+    {
+      "id": "RR-004",
+      "area": "z-index競合",
+      "likelihood": "Low",
+      "impact": "Low",
+      "appliedTo": ["14.4 リグレッションリスク評価", "16.4 チェックリスト"]
+    }
+  ],
+  "testDesignUpdates": {
+    "addedTestCases": [
+      "マウス右クリックでコンテキストメニューが表示される",
+      "ファイル右クリックでファイルメニューが表示される",
+      "ディレクトリ右クリックでディレクトリメニューが表示される",
+      "右クリック座標にメニューが表示される"
+    ],
+    "addedToFile": "tests/unit/components/worktree/FileTreeView.test.tsx",
+    "rationale": "ADD-003対応: 既存のマウス右クリック動作のベースラインテストを追加し、リグレッション検知を可能にする"
+  },
+  "checklistUpdates": {
+    "newSection": "16.4 Stage 3レビュー指摘対応項目",
+    "itemCount": 7,
+    "items": [
+      "ADD-001対応: SF-001検討結果にPaneResizer.getPositionを将来的な統合対象として追記",
+      "ADD-002対応: 実装時にMobilePromptSheet.tsxのタッチイベントパターンとの整合性確認",
+      "ADD-003対応: FileTreeView.test.tsxにマウス右クリックのベースラインテスト追加",
+      "RR-001対応: 既存のマウス右クリック動作をテストで確認（回帰テスト）",
+      "RR-002対応: スクロール操作との競合テストを統合テストに追加",
+      "RR-003対応: TreeNode再レンダリング回数のパフォーマンステストを検討",
+      "RR-004対応: z-index競合テストをE2Eテストで確認"
+    ]
+  },
+  "notes": [
+    "ソースコードの変更は行っていない（設計方針書のみ更新）",
+    "Stage 3のレビュー結果を全て設計方針書に反映完了",
+    "実装チェックリストにStage 3指摘対応項目を追加し、実装時の漏れを防止"
+  ],
+  "conclusion": {
+    "designDocStatus": "Updated",
+    "readyForStage4": true,
+    "nextStage": "Stage 4（セキュリティレビュー）"
+  }
+}

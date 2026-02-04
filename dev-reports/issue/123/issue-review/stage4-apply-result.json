@@ -1,0 +1,90 @@
+{
+  "issue_number": 123,
+  "stage": 4,
+  "stage_name": "影響範囲レビュー反映（1回目）",
+  "iteration": 1,
+  "apply_date": "2026-02-04",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "status": "applied",
+        "change_summary": "テスト要件セクションを受け入れ条件に追加。FileTreeView.test.tsxとuseContextMenu.test.tsに追加すべき具体的なテストケースを明記"
+      },
+      {
+        "id": "SF-002",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「型定義への影響」を追加。ContextMenuState型への変更が不要である理由（座標系が同一）を明記"
+      },
+      {
+        "id": "SF-003",
+        "status": "applied",
+        "change_summary": "参照実装セクションにMobilePromptSheet.tsxのサブセクションを追加。整合性確認用の参照実装として位置付け、状態管理パターンの参考になる点を記載"
+      },
+      {
+        "id": "SF-004",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「TreeNodeコンポーネントの具体的な変更箇所」を追加。TreeNodePropsインターフェース（行59-76）とdiv要素（行292-302）への変更を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "status": "skipped",
+        "reason": "CLAUDE.mdへの記載は実装完了後に行うため、Issue内には記載不要"
+      },
+      {
+        "id": "NTH-002",
+        "status": "applied",
+        "change_summary": "解決方針セクションの「タイマー管理」に、useEffectのクリーンアップ関数でタイマーをクリアする旨を追加。非機能要件にも「コンポーネントアンマウント時にタイマーがクリアされる」を追加"
+      },
+      {
+        "id": "NTH-003",
+        "status": "applied",
+        "change_summary": "スコープ外セクションに「触覚フィードバック（Vibration API）」を将来の拡張として明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 6,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/123"
+  },
+  "changes_made": [
+    {
+      "section": "影響範囲",
+      "action": "added",
+      "description": "新規セクションを追加。変更対象ファイル、変更対象コンポーネント、TreeNodeの具体的な変更箇所、依存ファイル、型定義への影響を記載"
+    },
+    {
+      "section": "受け入れ条件",
+      "action": "restructured",
+      "description": "機能要件、テスト要件、非機能要件の3カテゴリに再構成。テスト要件に具体的なテストケースを追加"
+    },
+    {
+      "section": "解決方針 > 長押し検出ロジック実装",
+      "action": "updated",
+      "description": "タイマー管理（useRef、useEffectクリーンアップ）の詳細を追加"
+    },
+    {
+      "section": "参照実装",
+      "action": "updated",
+      "description": "MobilePromptSheet.tsxを整合性確認用の参照実装として追加"
+    },
+    {
+      "section": "スコープ外",
+      "action": "updated",
+      "description": "触覚フィードバック（Vibration API）を将来の拡張として追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "action": "updated",
+      "description": "Stage 4の反映内容を追記"
+    }
+  ]
+}
