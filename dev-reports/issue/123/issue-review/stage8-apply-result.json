@@ -1,0 +1,68 @@
+{
+  "issue_number": 123,
+  "stage": 8,
+  "stage_name": "Apply Impact Scope Review (2nd iteration)",
+  "iteration": 2,
+  "apply_date": "2026-02-04",
+  "previous_review": "stage7-review-result.json",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "Test Completeness",
+        "issue": "Unmount cleanup test case not explicitly listed",
+        "status": "applied",
+        "change_summary": "Added 'Component unmount timer cleanup test' to FileTreeView.test.tsx test requirements in acceptance criteria",
+        "location_changed": "Acceptance Criteria > Test Requirements > FileTreeView.test.tsx"
+      },
+      {
+        "id": "NTH-002",
+        "category": "Browser Compatibility",
+        "issue": "Safari iOS specific behavior considerations not documented",
+        "status": "applied",
+        "change_summary": "Added touch-action: manipulation CSS property recommendation to Solution Approach section 4 (renamed to 'Standard menu suppression and touch optimization')",
+        "location_changed": "Solution Approach > Section 4"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 2,
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "applied": 2,
+    "skipped": 0
+  },
+  "changes_made": [
+    {
+      "section": "Acceptance Criteria > Test Requirements",
+      "change_type": "addition",
+      "description": "Added 'コンポーネントアンマウント時にタイマーがクリアされるテスト' to FileTreeView.test.tsx test list"
+    },
+    {
+      "section": "Solution Approach > Section 4",
+      "change_type": "enhancement",
+      "description": "Renamed section to '標準メニュー抑制とタッチ最適化', added touch-action: manipulation CSS property recommendation with MDN reference link"
+    },
+    {
+      "section": "Review History",
+      "change_type": "addition",
+      "description": "Added Stage 8 entry documenting NTH-001 and NTH-002 resolutions"
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/123",
+    "updated_at": "2026-02-04"
+  },
+  "overall_assessment": {
+    "all_must_fix_resolved": true,
+    "all_should_fix_resolved": true,
+    "nice_to_have_applied": "2/2 (100%)",
+    "issue_quality": "EXCELLENT",
+    "implementation_readiness": "READY",
+    "notes": "Issue #123 has completed 2 full iterations of multi-stage review. All Must Fix and Should Fix items from both iterations have been addressed. Nice to Have items from Stage 7 have been applied to improve test completeness and browser compatibility documentation. The Issue is now comprehensive and ready for implementation."
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "issue_number": 123,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "DRY - 座標取得ロジックのユーティリティ関数化検討",
+        "section_updated": "レビュー指摘検討詳細",
+        "status": "reflected",
+        "decision": "YAGNI優先で現状維持、将来拡張時に検討"
+      },
+      {
+        "id": "SF-002",
+        "item": "ISP - TreeNodePropsへのタッチイベントプロパティ追加方法",
+        "section_updated": "レビュー指摘検討詳細",
+        "status": "reflected",
+        "decision": "現設計で進行、明示的プロパティ指定を維持"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-123-ipad-touch-context-menu-design-policy.md",
+  "sections_added": [
+    "13. レビュー履歴",
+    "14. レビュー指摘事項サマリー",
+    "15. レビュー指摘検討詳細",
+    "16. 実装チェックリスト（レビュー指摘反映版）"
+  ],
+  "checklist_items_added": [
+    "SF-001対応: useContextMenu.tsの座標取得ロジックにコメント追加",
+    "SF-002対応: TreeNodePropsのタッチイベントプロパティにJSDocコメント追加",
+    "NH-003対応: useLongPress.tsのtouchEventRefにコメント追加"
+  ],
+  "timestamp": "2026-02-04T09:30:00+09:00"
+}

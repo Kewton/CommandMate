@@ -1,0 +1,36 @@
+{
+  "issue_number": 123,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "files_created": [
+        "src/hooks/useLongPress.ts",
+        "tests/unit/hooks/useLongPress.test.ts"
+      ],
+      "files_modified": [
+        "src/hooks/useContextMenu.ts",
+        "src/components/worktree/FileTreeView.tsx",
+        "tests/unit/hooks/useContextMenu.test.ts",
+        "tests/unit/components/worktree/FileTreeView.test.tsx"
+      ],
+      "test_count": 88
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 6,
+      "criteria_total": 6
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "SF-001: 座標取得ロジックにコメント追加",
+        "SF-002: TreeNodePropsにJSDoc追加"
+      ]
+    },
+    "documentation": {
+      "status": "completed",
+      "files_updated": ["CLAUDE.md"]
+    }
+  }
+}

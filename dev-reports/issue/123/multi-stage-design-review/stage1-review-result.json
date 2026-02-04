@@ -1,0 +1,94 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則（SOLID/KISS/YAGNI/DRY）",
+  "review_date": "2026-02-04",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "DRY",
+        "severity": "Medium",
+        "location": "useContextMenu.ts openMenu関数",
+        "issue": "タッチイベント/マウスイベント座標取得の条件分岐ロジックが、将来的に他のコンポーネントで再利用される可能性があるが、ユーティリティ関数として抽出されていない",
+        "recommendation": "座標取得ロジック（getEventCoordinates）をユーティリティ関数として抽出することを検討。ただし、現時点では使用箇所が1箇所のため、YAGNI原則との兼ね合いで実装時に判断可",
+        "code_snippet": "if ('touches' in e && e.touches.length > 0) {\n  x = e.touches[0].clientX;\n  y = e.touches[0].clientY;\n} else if ('clientX' in e) {\n  x = e.clientX;\n  y = e.clientY;\n}"
+      },
+      {
+        "id": "SF-002",
+        "principle": "ISP（インターフェース分離原則）",
+        "severity": "Low",
+        "location": "FileTreeView.tsx TreeNodeProps",
+        "issue": "TreeNodePropsにタッチイベント用の4つのオプショナルプロパティ（onTouchStart, onTouchMove, onTouchEnd, onTouchCancel）が追加されているが、これらは常にセットで使用される",
+        "recommendation": "代替案として、useLongPressの戻り値の型（UseLongPressReturn）をそのままスプレッド可能にする設計を検討。現設計でも動作に問題はないが、インターフェースの凝集度が低下する",
+        "code_snippet": "interface TreeNodeProps {\n  onTouchStart?: (e: React.TouchEvent) => void;\n  onTouchMove?: (e: React.TouchEvent) => void;\n  onTouchEnd?: () => void;\n  onTouchCancel?: () => void;\n}"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NH-001",
+        "principle": "OCP（開放閉鎖原則）",
+        "severity": "Low",
+        "location": "useLongPress.ts",
+        "issue": "500msの遅延と10pxの移動閾値が定数として定義されているが、将来的にユーザー設定として変更可能にする場合、フック外部から注入可能な設計になっている点は良い",
+        "observation": "現設計ではoptions引数でdelay/moveThresholdを受け取れるようになっており、OCPに準拠している。ただし、アクセシビリティ観点でユーザーが長押し時間を調整したい場合のUI設計は範囲外",
+        "recommendation": "将来の拡張時に備え、現状の設計を維持"
+      },
+      {
+        "id": "NH-002",
+        "principle": "DRY",
+        "severity": "Low",
+        "location": "useLongPress.ts clearTimer関数",
+        "issue": "onTouchEnd/onTouchCancelの処理が同一（clearTimer呼び出しのみ）で重複している",
+        "observation": "設計書のコードでは両者を別関数として定義しているが、動作は同一。ただし、セマンティック上は異なるイベントであり、将来的に処理が分岐する可能性もあるため、現状維持で問題なし",
+        "recommendation": "現設計を維持。将来、touchcancelのみの特殊処理が必要になった場合に分岐可能"
+      },
+      {
+        "id": "NH-003",
+        "principle": "KISS",
+        "severity": "Low",
+        "location": "useLongPress.ts touchEventRef",
+        "issue": "touchEventRefでReact.TouchEventを保存し、タイマーコールバック内で参照している設計は、イベントオブジェクトの有効期限（SyntheticEventのpooling問題）を回避するための工夫だが、コメントがない",
+        "recommendation": "なぜtouchEventRefが必要かをコードコメントで説明すると保守性が向上する（React 17以降ではpoolingは廃止されているが、安全のための設計であることを明記）"
+      }
+    ]
+  },
+  "solid_evaluation": {
+    "SRP": {
+      "status": "PASS",
+      "assessment": "useLongPressフックは長押し検出のみに責任を持ち、メニュー表示ロジックはuseContextMenuに委譲。単一責任原則に準拠。"
+    },
+    "OCP": {
+      "status": "PASS",
+      "assessment": "delay/moveThresholdがオプション引数で変更可能。新しいジェスチャー検出が必要になった場合も、既存コードを変更せずに新しいフックを追加可能。"
+    },
+    "LSP": {
+      "status": "PASS",
+      "assessment": "UseLongPressOptions/UseLongPressReturn型が明確に定義され、契約に従った実装。型安全性が担保されている。"
+    },
+    "ISP": {
+      "status": "PASS_WITH_NOTE",
+      "assessment": "useLongPressの戻り値は4つのイベントハンドラを返すが、すべて必要な最小限のインターフェース。TreeNodePropsへの追加は凝集度の観点で改善の余地あり（SF-002参照）。"
+    },
+    "DIP": {
+      "status": "PASS",
+      "assessment": "useLongPressはonLongPressコールバックを受け取り、具体的な実装（コンテキストメニュー表示）に依存しない。抽象（コールバック）に依存している。"
+    }
+  },
+  "other_principles_evaluation": {
+    "KISS": {
+      "status": "PASS",
+      "assessment": "サードパーティライブラリを使用せず、標準のタッチイベントとsetTimeoutで実装。複雑なジェスチャーライブラリを導入せず、シンプルな設計。"
+    },
+    "YAGNI": {
+      "status": "PASS",
+      "assessment": "現時点で必要な機能（長押し検出、移動キャンセル、マルチタッチ除外）のみを実装。触覚フィードバック、ダブルタップ等の不要な機能は含まれていない。"
+    },
+    "DRY": {
+      "status": "PASS_WITH_NOTE",
+      "assessment": "基本的にDRYに準拠。座標取得ロジックの抽出は将来検討可（SF-001参照）。既存のuseContextMenuフックを拡張する形で、コード重複を最小化。"
+    }
+  },
+  "summary": "設計方針書はSOLID原則、KISS、YAGNI、DRY原則に概ね準拠しており、Must Fix項目はありません。useLongPressフックは単一責任（長押し検出のみ）を持ち、useContextMenuとの責務分離が明確です。主な改善提案として、(1) 座標取得ロジックのユーティリティ化検討（SF-001）、(2) TreeNodePropsへのタッチイベントプロパティ追加方法の再検討（SF-002）があります。ただし、これらはいずれもShould Fixレベルであり、現設計でも実装に支障はありません。Custom Hookパターン、定数抽出パターンを適切に採用しており、テスト容易性と再利用性を確保した良い設計です。"
+}
