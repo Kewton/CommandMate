@@ -10,12 +10,7 @@
 import { stopPolling as stopResponsePolling } from './response-poller';
 import { stopPolling as stopClaudePolling } from './claude-poller';
 import { stopAutoYesPolling } from './auto-yes-manager';
-import type { CLIToolType } from './cli-tools/types';
-
-/**
- * All supported CLI tool IDs
- */
-const CLI_TOOL_IDS: CLIToolType[] = ['claude', 'codex', 'gemini'];
+import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
 
 /**
  * Result of cleaning up a single worktree's sessions

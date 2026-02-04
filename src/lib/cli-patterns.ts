@@ -31,8 +31,9 @@ export const CLAUDE_THINKING_PATTERN = new RegExp(
 /**
  * Codex thinking pattern
  * Matches activity indicators like "• Planning", "• Searching", etc.
+ * T1.1: Extended to include "Ran" and "Deciding"
  */
-export const CODEX_THINKING_PATTERN = /•\s*(Planning|Searching|Exploring|Running|Thinking|Working|Reading|Writing|Analyzing)/m;
+export const CODEX_THINKING_PATTERN = /•\s*(Planning|Searching|Exploring|Running|Thinking|Working|Reading|Writing|Analyzing|Ran|Deciding)/m;
 
 /**
  * Claude prompt pattern (waiting for input)
@@ -52,8 +53,9 @@ export const CLAUDE_SEPARATOR_PATTERN = /^─{10,}$/m;
 
 /**
  * Codex prompt pattern
+ * T1.2: Improved to detect empty prompts as well
  */
-export const CODEX_PROMPT_PATTERN = /^›\s+.+/m;
+export const CODEX_PROMPT_PATTERN = /^›\s*/m;
 
 /**
  * Codex separator pattern
@@ -132,6 +134,11 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
           /^\s*for shortcuts$/, // Shortcuts hint
           /╭─+╮/, // Box drawing (top)
           /╰─+╯/, // Box drawing (bottom)
+          // T1.3: Additional skip patterns for Codex
+          /•\s*Ran\s+/, // Command execution lines
+          /^\s*└/, // Tree output (completion indicator)
+          /^\s*│/, // Continuation lines
+          /\(.*esc to interrupt\)/, // Interrupt hint
         ],
       };
 

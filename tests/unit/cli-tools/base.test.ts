@@ -42,14 +42,27 @@ describe('BaseCLITool', () => {
       expect(sessionName).toBe('mcbd-claude-feature-foo');
     });
 
-    it('should handle worktree id with slashes', () => {
-      const sessionName = tool.getSessionName('feature/bar');
-      expect(sessionName).toBe('mcbd-claude-feature/bar');
+    // T2.3: Session name validation now rejects slashes for security
+    it('should throw error for worktree id with slashes (T2.3 - MF4-001)', () => {
+      expect(() => tool.getSessionName('feature/bar')).toThrow(/Invalid session name format/);
     });
 
     it('should use tool id in session name', () => {
       const sessionName = tool.getSessionName('test');
       expect(sessionName).toContain('mcbd-claude-');
+    });
+
+    // T2.3: Additional validation tests
+    it('should throw error for worktree id with command injection characters (T2.3)', () => {
+      expect(() => tool.getSessionName('test;rm -rf')).toThrow(/Invalid session name format/);
+      expect(() => tool.getSessionName('test$(whoami)')).toThrow(/Invalid session name format/);
+      expect(() => tool.getSessionName('test`id`')).toThrow(/Invalid session name format/);
+    });
+
+    it('should allow valid worktree ids with alphanumeric, underscore, and hyphen', () => {
+      expect(() => tool.getSessionName('feature-123')).not.toThrow();
+      expect(() => tool.getSessionName('test_feature')).not.toThrow();
+      expect(() => tool.getSessionName('main')).not.toThrow();
     });
   });
 

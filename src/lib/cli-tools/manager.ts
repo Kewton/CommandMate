@@ -7,6 +7,8 @@ import type { CLIToolType, ICLITool, CLIToolInfo } from './types';
 import { ClaudeTool } from './claude';
 import { CodexTool } from './codex';
 import { GeminiTool } from './gemini';
+import { stopPolling as stopResponsePolling } from '../response-poller';
+import { stopPolling as stopClaudePolling } from '../claude-poller';
 
 /**
  * CLI Tool Manager (Singleton)
@@ -148,5 +150,32 @@ export class CLIToolManager {
   async getInstalledTools(): Promise<CLIToolInfo[]> {
     const allInfo = await this.getAllToolsInfo();
     return allInfo.filter(info => info.installed);
+  }
+
+  /**
+   * Stop pollers for a specific worktree and CLI tool
+   * T2.4: Abstraction for poller stopping (MF1-001 DIP compliance)
+   *
+   * This method abstracts the poller stopping logic so API layer
+   * doesn't need to know about specific poller implementations.
+   *
+   * @param worktreeId - Worktree ID
+   * @param cliToolId - CLI tool ID
+   *
+   * @example
+   * ```typescript
+   * const manager = CLIToolManager.getInstance();
+   * manager.stopPollers('my-worktree', 'claude');
+   * ```
+   */
+  stopPollers(worktreeId: string, cliToolId: CLIToolType): void {
+    // Stop response-poller for all tools
+    stopResponsePolling(worktreeId, cliToolId);
+
+    // claude-poller is Claude-specific
+    if (cliToolId === 'claude') {
+      stopClaudePolling(worktreeId);
+    }
+    // Future: Add other tool-specific pollers here if needed
   }
 }
