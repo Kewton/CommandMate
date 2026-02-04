@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-02-04
+
+_No changes recorded._
+
 ## [0.1.11] - 2026-02-04
 
 ### Added
@@ -266,7 +270,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.9...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/Kewton/CommandMate/compare/v0.1.11...v0.1.12
+[0.1.11]: https://github.com/Kewton/CommandMate/compare/v0.1.10...v0.1.11
+[0.1.10]: https://github.com/Kewton/CommandMate/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/Kewton/CommandMate/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/Kewton/CommandMate/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/Kewton/CommandMate/compare/v0.1.6...v0.1.7
