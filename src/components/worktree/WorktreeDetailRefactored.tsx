@@ -1703,13 +1703,63 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           </div>
         )}
 
-        <div className="fixed top-14 inset-x-0 z-30">
+        {/* Auto Yes + CLI Tool Tabs combined row (Mobile) */}
+        <div className="fixed top-14 inset-x-0 z-30 flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b border-gray-200">
+          {/* Left: Auto Yes toggle (inline mode) */}
           <AutoYesToggle
             enabled={autoYesEnabled}
             expiresAt={autoYesExpiresAt}
             onToggle={handleAutoYesToggle}
             lastAutoResponse={lastAutoResponse}
+            inline
           />
+          {/* Right: CLI tool tabs + End button */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <nav className="flex gap-2" aria-label="CLI Tool Selection">
+              {(['claude', 'codex'] as const).map((tool) => {
+                const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
+                const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+                return (
+                  <button
+                    key={tool}
+                    onClick={() => setActiveCliTab(tool)}
+                    className={`px-1.5 py-0.5 rounded font-medium text-xs transition-colors flex items-center gap-1 ${
+                      activeCliTab === tool
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                    aria-current={activeCliTab === tool ? 'page' : undefined}
+                  >
+                    {statusConfig.type === 'spinner' ? (
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
+                        title={statusConfig.label}
+                      />
+                    ) : (
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
+                        title={statusConfig.label}
+                      />
+                    )}
+                    {tool.charAt(0).toUpperCase() + tool.slice(1)}
+                  </button>
+                );
+              })}
+            </nav>
+            <button
+              onClick={handleKillSession}
+              disabled={!worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning}
+              className={`flex items-center gap-0.5 px-1.5 py-0.5 text-xs font-medium rounded transition-colors ${
+                worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning
+                  ? 'text-red-600 hover:bg-red-50'
+                  : 'invisible'
+              }`}
+              aria-label={`End ${activeCliTab} session`}
+            >
+              <span aria-hidden="true">&#x2715;</span>
+              End
+            </button>
+          </div>
         </div>
 
         <main

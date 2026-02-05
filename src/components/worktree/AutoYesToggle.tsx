@@ -20,6 +20,8 @@ export interface AutoYesToggleProps {
   onToggle: (enabled: boolean) => Promise<void>;
   /** Last auto-response answer (for notification) */
   lastAutoResponse: string | null;
+  /** If true, render without outer container styles (for inline embedding) */
+  inline?: boolean;
 }
 
 /**
@@ -37,6 +39,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   expiresAt,
   onToggle,
   lastAutoResponse,
+  inline = false,
 }: AutoYesToggleProps) {
   const [timeRemaining, setTimeRemaining] = useState<string>('');
   const [notification, setNotification] = useState<string | null>(null);
@@ -90,7 +93,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   }, []);
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200">
+    <div className={inline ? 'flex items-center gap-2' : 'flex items-center gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200'}>
       {/* Toggle switch */}
       <button
         type="button"
