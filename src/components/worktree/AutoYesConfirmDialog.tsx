@@ -18,18 +18,21 @@ export interface AutoYesConfirmDialogProps {
   onConfirm: () => void;
   /** Callback when user cancels */
   onCancel: () => void;
+  /** Name of the CLI tool Auto Yes will target */
+  cliToolName?: string;
 }
 
 export function AutoYesConfirmDialog({
   isOpen,
   onConfirm,
   onCancel,
+  cliToolName,
 }: AutoYesConfirmDialogProps) {
   return (
     <Modal
       isOpen={isOpen}
       onClose={onCancel}
-      title="Auto Yesモードを有効にしますか？"
+      title={`Auto Yesモードを有効にしますか？${cliToolName ? `（${cliToolName}）` : ''}`}
       size="sm"
       showCloseButton={true}
     >
@@ -41,6 +44,12 @@ export function AutoYesConfirmDialog({
             <li>複数選択肢 → デフォルトまたは先頭の選択肢を自動選択</li>
           </ul>
           <p className="mt-1">1時間後に自動でOFFになります。</p>
+          {cliToolName && (
+            <p className="mt-2 text-gray-500">
+              ※ Auto Yesは現在選択中の <span className="font-medium text-gray-700">{cliToolName}</span> セッションのみに適用されます。
+              他のCLIツールには影響しません。
+            </p>
+          )}
         </div>
 
         <div className="text-sm text-gray-700">

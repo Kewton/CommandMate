@@ -20,6 +20,8 @@ export interface AutoYesToggleProps {
   onToggle: (enabled: boolean) => Promise<void>;
   /** Last auto-response answer (for notification) */
   lastAutoResponse: string | null;
+  /** Currently active CLI tool name (e.g. 'claude', 'codex') */
+  cliToolName?: string;
   /** If true, render without outer container styles (for inline embedding) */
   inline?: boolean;
 }
@@ -34,11 +36,18 @@ function formatTimeRemaining(expiresAt: number): string {
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
+/** Capitalize CLI tool name for display */
+function formatCliToolName(name?: string): string {
+  if (!name) return '';
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 export const AutoYesToggle = memo(function AutoYesToggle({
   enabled,
   expiresAt,
   onToggle,
   lastAutoResponse,
+  cliToolName,
   inline = false,
 }: AutoYesToggleProps) {
   const [timeRemaining, setTimeRemaining] = useState<string>('');
@@ -114,6 +123,13 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       </button>
       <span className="text-sm font-medium text-gray-700">Auto Yes</span>
 
+      {/* Active CLI tool indicator */}
+      {enabled && cliToolName && (
+        <span className="text-xs text-blue-600 font-medium" aria-label="Auto Yes target">
+          ({formatCliToolName(cliToolName)})
+        </span>
+      )}
+
       {/* Countdown timer */}
       {enabled && timeRemaining && (
         <span className="text-sm text-gray-500" aria-label="Time remaining">
@@ -132,6 +148,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
         isOpen={showConfirmDialog}
         onConfirm={handleConfirm}
         onCancel={handleCancel}
+        cliToolName={formatCliToolName(cliToolName)}
       />
     </div>
   );

@@ -1130,7 +1130,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify({ enabled, cliToolId: activeCliTab }),
       });
       if (response.ok) {
         const data = await response.json();
@@ -1140,7 +1140,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Error toggling auto-yes:', err);
     }
-  }, [worktreeId]);
+  }, [worktreeId, activeCliTab]);
 
   /** Issue #4: Kill session confirmation dialog state */
   const [showKillConfirm, setShowKillConfirm] = useState(false);
@@ -1629,6 +1629,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             expiresAt={autoYesExpiresAt}
             onToggle={handleAutoYesToggle}
             lastAutoResponse={lastAutoResponse}
+            cliToolName={activeCliTab}
           />
           {/* Prompt Panel - fixed overlay at bottom */}
           {state.prompt.visible && !autoYesEnabled && (
@@ -1755,6 +1756,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             expiresAt={autoYesExpiresAt}
             onToggle={handleAutoYesToggle}
             lastAutoResponse={lastAutoResponse}
+            cliToolName={activeCliTab}
             inline
           />
           {/* Right: CLI tool tabs + End button */}
