@@ -813,7 +813,11 @@ commandmate status --all                   # 全サーバー状態確認
 - **対応ツール**: Claude Code, Codex CLI
 - **Strategy パターン**: 拡張可能な設計（BaseCLITool抽象クラス）
 - **Codexタブ有効化**: WorktreeDetailにCodexタブを追加
-- **個別セッション終了**: Claude/Codex/Geminiを個別に終了可能
+- **個別セッション終了**: Claude/Codex/Geminiを個別に終了可能（確認ダイアログ付き）
+- **セッション終了確認ダイアログ**: ENDボタン押下時にModal確認ダイアログを表示（誤操作防止）
+- **CLI別ステータスドット**: サイドバーとCLIタブにClaude/Codex個別のステータスインジケータを表示
+- **モバイルCLIタブ切替**: モバイル表示でAuto Yesトグルとインラインで配置
+- **レスポンス保存バグ修正**: tmuxバッファの空行パディングによる行数不整合を修正（assistant-response-saver.ts）
 - **セキュリティ対策**: sessionName検証によるコマンドインジェクション防止
 - **パターン拡張**: CODEX_THINKING_PATTERNにRan, Deciding追加
 - **主要コンポーネント**:
@@ -822,6 +826,10 @@ commandmate status --all                   # 全サーバー状態確認
   - `src/lib/cli-tools/manager.ts` - stopPollers()メソッド追加
   - `src/lib/cli-patterns.ts` - Codexパターン拡張
   - `src/app/api/worktrees/[id]/kill-session/route.ts` - cliToolパラメータ対応
+  - `src/components/worktree/WorktreeDetailRefactored.tsx` - 確認ダイアログ、CLI別ステータスドット
+  - `src/components/sidebar/BranchListItem.tsx` - サイドバーCLI別ステータスドット
+  - `src/types/sidebar.ts` - deriveCliStatus()、SidebarBranchItem.cliStatus拡張
+  - `src/lib/assistant-response-saver.ts` - tmuxバッファ行数トリミング修正
 - 詳細: [設計書](./dev-reports/design/issue-4-codex-cli-support-design-policy.md)
 
 ---

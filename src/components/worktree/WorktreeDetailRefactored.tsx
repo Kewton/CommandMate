@@ -1142,8 +1142,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
   }, [worktreeId]);
 
-  /** Issue #4: Handle killing a specific CLI tool session */
-  const handleKillSession = useCallback(async (): Promise<void> => {
+  /** Issue #4: Kill session confirmation dialog state */
+  const [showKillConfirm, setShowKillConfirm] = useState(false);
+
+  /** Issue #4: Show confirmation dialog before killing session */
+  const handleKillSession = useCallback((): void => {
+    setShowKillConfirm(true);
+  }, []);
+
+  /** Issue #4: Execute session kill after confirmation */
+  const handleKillConfirm = useCallback(async (): Promise<void> => {
+    setShowKillConfirm(false);
     try {
       const response = await fetch(
         `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}`,
@@ -1160,6 +1169,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       console.error('[WorktreeDetailRefactored] Error killing session:', err);
     }
   }, [worktreeId, activeCliTab, actions, fetchWorktree]);
+
+  /** Issue #4: Cancel session kill */
+  const handleKillCancel = useCallback((): void => {
+    setShowKillConfirm(false);
+  }, []);
 
   // ========================================================================
   // File Operation Handlers (for FileTreeView context menu)
@@ -1672,6 +1686,36 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             className="hidden"
             aria-label="Upload file"
           />
+          {/* Kill session confirmation dialog */}
+          <Modal
+            isOpen={showKillConfirm}
+            onClose={handleKillCancel}
+            title={`${activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1)} セッションを終了しますか？`}
+            size="sm"
+            showCloseButton={true}
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-700">
+                セッションを終了すると、チャット履歴がクリアされます。
+              </p>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleKillCancel}
+                  className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  onClick={handleKillConfirm}
+                  className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
+                >
+                  終了する
+                </button>
+              </div>
+            </div>
+          </Modal>
           {/* Toast notifications */}
           <ToastContainer toasts={toasts} onClose={removeToast} />
         </div>
@@ -1853,6 +1897,36 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           className="hidden"
           aria-label="Upload file"
         />
+        {/* Kill session confirmation dialog (Mobile) */}
+        <Modal
+          isOpen={showKillConfirm}
+          onClose={handleKillCancel}
+          title={`${activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1)} セッションを終了しますか？`}
+          size="sm"
+          showCloseButton={true}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700">
+              セッションを終了すると、チャット履歴がクリアされます。
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleKillCancel}
+                className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleKillConfirm}
+                className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
+              >
+                終了する
+              </button>
+            </div>
+          </div>
+        </Modal>
         {/* Toast notifications (Mobile) */}
         <ToastContainer toasts={toasts} onClose={removeToast} />
       </div>
