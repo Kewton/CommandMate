@@ -357,6 +357,78 @@ export async function ensureSession(
 }
 
 /**
+ * Send multiline text via tmux buffer (paste detection bypass)
+ *
+ * Uses tmux load-buffer/paste-buffer to send text without triggering
+ * Claude CLI's paste detection mechanism. This prevents the
+ * "[Pasted text...]" folding behavior for multiline messages.
+ *
+ * @param sessionName - Target tmux session name
+ * @param text - Text content to send (supports multiline)
+ * @param sendEnter - Whether to send Enter key after the text (default: true)
+ *
+ * @throws {Error} If buffer operations fail
+ *
+ * @example
+ * ```typescript
+ * // Send multiline message with Enter
+ * await sendTextViaBuffer('my-session', 'line1\nline2\nline3');
+ *
+ * // Send without Enter
+ * await sendTextViaBuffer('my-session', 'partial text', false);
+ * ```
+ */
+export async function sendTextViaBuffer(
+  sessionName: string,
+  text: string,
+  sendEnter: boolean = true
+): Promise<void> {
+  // SEC-002: Buffer name sanitization
+  const sanitizedSessionName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const bufferName = `cm-${sanitizedSessionName}`;
+
+  // SEC-004: NUL byte removal
+  const sanitizedText = text.replace(/\0/g, '');
+
+  // SEC-001: Escape processing (order matters - backslash first to prevent double-escape)
+  const escapedText = sanitizedText
+    .replace(/\\/g, '\\\\\\\\')  // \ -> \\\\
+    .replace(/\$/g, '\\\\$')     // $ -> \\$
+    .replace(/"/g, '\\\\"')      // " -> \\"
+    .replace(/`/g, '\\\\`');     // ` -> \\`
+
+  try {
+    // Load text into tmux buffer
+    await execAsync(
+      `printf '%s' "${escapedText}" | tmux load-buffer -b "${bufferName}" -`,
+      { timeout: DEFAULT_TIMEOUT }
+    );
+
+    // Paste buffer into session and auto-delete buffer (-d), no trailing newline (-p)
+    await execAsync(
+      `tmux paste-buffer -t "${sessionName}" -b "${bufferName}" -dp`,
+      { timeout: DEFAULT_TIMEOUT }
+    );
+
+    // Send Enter key if requested
+    if (sendEnter) {
+      await execAsync(
+        `tmux send-keys -t "${sessionName}" C-m`,
+        { timeout: DEFAULT_TIMEOUT }
+      );
+    }
+  } catch (error) {
+    // SEC-003: Buffer leak prevention - cleanup on error
+    try {
+      await execAsync(`tmux delete-buffer -b "${bufferName}" 2>/dev/null || true`);
+    } catch {
+      // Cleanup failure is ignored - main error takes priority
+    }
+    throw error;
+  }
+}
+
+/**
  * Special key type for tmux send-keys
  */
 export type SpecialKey = 'Escape' | 'C-c' | 'C-d';

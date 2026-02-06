@@ -7,6 +7,7 @@ import {
   hasSession,
   createSession,
   sendKeys,
+  sendTextViaBuffer,
   capturePane,
   killSession,
 } from './tmux';
@@ -386,9 +387,8 @@ export async function sendMessageToClaude(
     }
   }
 
-  // Send message using sendKeys consistently (CONS-001)
-  await sendKeys(sessionName, message, false);  // Message without Enter
-  await sendKeys(sessionName, '', true);        // Enter key
+  // Send message via buffer to avoid paste detection (Issue #163)
+  await sendTextViaBuffer(sessionName, message, true);
 
   console.log(`Sent message to Claude session: ${sessionName}`);
 }

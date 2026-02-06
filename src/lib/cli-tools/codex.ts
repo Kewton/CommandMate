@@ -9,6 +9,7 @@ import {
   hasSession,
   createSession,
   sendKeys,
+  sendTextViaBuffer,
   killSession,
 } from '../tmux';
 import { exec } from 'child_process';
@@ -106,17 +107,8 @@ export class CodexTool extends BaseCLITool {
     }
 
     try {
-      // Send message to Codex (without Enter)
-      await sendKeys(sessionName, message, false);
-
-      // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // Send Enter key separately
-      await execAsync(`tmux send-keys -t "${sessionName}" C-m`);
-
-      // Wait a moment for the message to be processed
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Send message via buffer to avoid paste detection (Issue #163)
+      await sendTextViaBuffer(sessionName, message, true);
 
       console.log(`✓ Sent message to Codex session: ${sessionName}`);
     } catch (error: unknown) {
