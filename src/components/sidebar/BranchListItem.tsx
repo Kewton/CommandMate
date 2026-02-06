@@ -8,8 +8,8 @@
 'use client';
 
 import React, { memo } from 'react';
-import type { SidebarBranchItem } from '@/types/sidebar';
-import { BranchStatusIndicator } from './BranchStatusIndicator';
+import type { SidebarBranchItem, BranchStatus } from '@/types/sidebar';
+import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 
 // ============================================================================
 // Types
@@ -23,6 +23,34 @@ export interface BranchListItemProps {
   isSelected: boolean;
   /** Callback when branch is clicked */
   onClick: () => void;
+}
+
+// ============================================================================
+// CLI Status Dot
+// ============================================================================
+
+/** Small status indicator dot for a CLI tool */
+function CliStatusDot({ status, label }: { status: BranchStatus; label: string }) {
+  const config = SIDEBAR_STATUS_CONFIG[status];
+  const title = `${label}: ${config.label}`;
+
+  if (config.type === 'spinner') {
+    return (
+      <span
+        className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${config.className}`}
+        title={title}
+        aria-label={title}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={`w-2 h-2 rounded-full flex-shrink-0 ${config.className}`}
+      title={title}
+      aria-label={title}
+    />
+  );
 }
 
 // ============================================================================
@@ -58,10 +86,15 @@ export const BranchListItem = memo(function BranchListItem({
         ${isSelected ? 'bg-gray-700 border-l-2 border-blue-500' : 'border-l-2 border-transparent'}
       `}
     >
-      {/* Main row: status, info, unread */}
+      {/* Main row: CLI status dots, info, unread */}
       <div className="flex items-center gap-3 w-full">
-        {/* Status indicator */}
-        <BranchStatusIndicator status={branch.status} />
+        {/* CLI tool status dots */}
+        {branch.cliStatus && (
+          <div className="flex items-center gap-1 flex-shrink-0" aria-label="CLI tool status">
+            <CliStatusDot status={branch.cliStatus.claude} label="Claude" />
+            <CliStatusDot status={branch.cliStatus.codex} label="Codex" />
+          </div>
+        )}
 
         {/* Branch info */}
         <div className="flex-1 min-w-0 text-left">

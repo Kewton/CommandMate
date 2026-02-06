@@ -1,0 +1,38 @@
+{
+  "issue_number": 161,
+  "stage": 6,
+  "applied_findings": [
+    {
+      "severity": "nice_to_have",
+      "description": "TEXT_INPUT_PATTERNSの具体的なパターンリストがIssue記載と実際のコードで完全には一致していない（「enter」と「differently」が欠落）",
+      "status": "applied",
+      "reason": "情報の正確性向上のため、prompt-detector.ts:169-175の実際のパターンリスト（type here, tell me/claude, enter, custom, differently）を完全に記載。ソースコード参照行番号も追加。"
+    },
+    {
+      "severity": "nice_to_have",
+      "description": "調査対象ファイル（response-poller.ts, claude-poller.ts）が追加されたが、調査結果や結論が未記載",
+      "status": "applied",
+      "reason": "セクションタイトルを「調査対象（要確認）」から「調査対象（実装フェーズでのTODO）」に変更し、実装フェーズで調査を行う旨を明記。また、調査ステータス列（未調査）を追加してタスクとしての位置づけを明確化。"
+    },
+    {
+      "severity": "nice_to_have",
+      "description": "継続行(continuation line)の検出ロジックが言及されていない（prompt-detector.ts:222-233）",
+      "status": "skipped",
+      "reason": "Stage 5レビューでnice_to_haveレベルと判定されており、Issueの本質的な正確性には影響しない実装詳細のため。"
+    },
+    {
+      "severity": "nice_to_have",
+      "description": "スキャン範囲が50行に拡張されている点が言及されていない（prompt-detector.ts:206）",
+      "status": "skipped",
+      "reason": "Stage 5レビューでnice_to_haveレベルと判定されており、実装詳細であるため。"
+    },
+    {
+      "severity": "nice_to_have",
+      "description": "サーバー側ポーリングとクライアント側フックの具体的なポーリング間隔（2秒）や重複防止ウィンドウ（3秒）の詳細が記載されていない",
+      "status": "skipped",
+      "reason": "Stage 5レビューでpartially_resolved/nice_to_haveと判定されており、既に主要な情報（クライアント側フックへの影響）は記載済み。詳細な数値は実装時に参照可能。"
+    }
+  ],
+  "issue_updated": true,
+  "summary": "Stage 5レビューで指摘されたnice_to_haveレベルの2件（TEXT_INPUT_PATTERNSの完全なリスト記載、調査対象ファイルのTODO明確化）を適用した。TEXT_INPUT_PATTERNSセクションに「enter」「differently」を追加し、ソースコード参照（prompt-detector.ts:169-175）を明記。調査対象ファイルのセクションタイトルを「実装フェーズでのTODO」に変更し、ステータス列を追加。その他のnice_to_have項目（継続行ロジック、スキャン範囲50行、ポーリング間隔詳細）は実装詳細であり、Issueの本質的な正確性に影響しないためスキップ。レビュー履歴セクションにStage 6の反映内容を追記。"
+}

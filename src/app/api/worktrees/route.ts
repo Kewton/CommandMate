@@ -13,7 +13,7 @@ import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswere
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { detectThinking, stripAnsi } from '@/lib/cli-patterns';
+import { detectThinking, stripAnsi, getCliToolPatterns } from '@/lib/cli-patterns';
 import { detectPrompt } from '@/lib/prompt-detector';
 
 export async function GET(request: NextRequest) {
@@ -72,8 +72,9 @@ export async function GET(request: NextRequest) {
                   isProcessing = true;
                 } else {
                   // No thinking indicator - check for input prompt
-                  // Issue #132: Also match prompts with recommended commands (e.g., "❯ /work-plan")
-                  const hasInputPrompt = /^[>❯](\s*$|\s+\S)/m.test(lastLines);
+                  // Issue #4: Use CLI tool-specific prompt pattern (fixes Codex spinner issue)
+                  const { promptPattern } = getCliToolPatterns(cliToolId);
+                  const hasInputPrompt = promptPattern.test(lastLines);
                   if (!hasInputPrompt) {
                     // Neither thinking nor input prompt - assume processing
                     isProcessing = true;

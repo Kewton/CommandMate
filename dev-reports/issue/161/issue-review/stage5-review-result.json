@@ -1,0 +1,65 @@
+{
+  "issue_number": 161,
+  "stage": 5,
+  "focus_area": "通常",
+  "iteration": 2,
+  "previous_findings_status": [
+    {
+      "finding": "検出条件の説明が不正確。Issueでは「2つ以上のオプション + ❯インジケーター」と記載されているが、実際のコードでは「2つ以上のオプション AND 少なくとも1つに❯インジケーターが存在」という条件",
+      "status": "resolved",
+      "notes": "Issue更新済み: 「現在の条件: options.length >= 2 AND options.some(opt => opt.isDefault)」「isDefaultは❯インジケーターの有無で判定（prompt-detector.ts:241-248参照）」と正確に記載されている"
+    },
+    {
+      "finding": "TEXT_INPUT_PATTERNSの存在が言及されていない",
+      "status": "resolved",
+      "notes": "Issue更新済み: 「既存の関連機構」セクションに「TEXT_INPUT_PATTERNS による自動応答スキップ」が追加され、対象キーワード（type here、tell me、custom等）とrequiresTextInputフラグの説明が記載されている"
+    },
+    {
+      "finding": "detectThinking関数が既に存在するが言及されていない",
+      "status": "resolved",
+      "notes": "Issue更新済み: 「既存の関連機構」セクションに「detectThinking() 関数」が追加され、cli-patterns.ts L71-93への参照と対策案2での活用可能性が記載されている。関連コンポーネント表にも「detectThinking()関数」が追加されている"
+    },
+    {
+      "finding": "optionPatternの正規表現について空白文字も許容している点をより明確にすべき",
+      "status": "resolved",
+      "notes": "Issue更新済み: 「注意: キャプチャグループ [❯ ] は❯インジケーターだけでなく空白文字も許容しており、通常の番号付きリストにもマッチしやすい構造となっている」と明確に記載"
+    },
+    {
+      "finding": "対策案3で連番検証を提案しているが、現在のコードでは既にnumber値をパースしている点を踏まえた記述にすべき",
+      "status": "resolved",
+      "notes": "Issue更新済み: 「注意: 現在のコードでは既にnumber値をパース・保存している（prompt-detector.ts:213）が、連番かどうかの検証は行っていない」と正確に記載"
+    },
+    {
+      "finding": "継続行(continuation line)の検出ロジックが言及されていない",
+      "status": "unresolved",
+      "notes": "prompt-detector.ts:222-233で継続行（インデントされた行、5文字未満の断片）を検出してスキップするロジックがあるが、Issueには記載されていない。nice_to_haveレベルのため優先度は低い"
+    },
+    {
+      "finding": "スキャン範囲が50行に拡張されている点が言及されていない",
+      "status": "unresolved",
+      "notes": "prompt-detector.ts:206で20行から50行に拡張されている点がIssueに記載されていない。nice_to_haveレベルのため優先度は低い"
+    },
+    {
+      "finding": "サーバー側ポーリングとクライアント側フックの動作タイミングの説明がない",
+      "status": "partially_resolved",
+      "notes": "影響範囲セクションで「クライアント側フック: useAutoYes.tsはprompt検出結果に依存しており、detectPrompt変更による重複応答防止の動作確認が必要」と記載されたが、具体的なポーリング間隔（2秒）や重複防止ウィンドウ（3秒）の詳細は記載されていない。nice_to_haveレベル"
+    }
+  ],
+  "new_findings": [
+    {
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "description": "TEXT_INPUT_PATTERNSの具体的なパターンリストがIssue記載と実際のコードで完全には一致していない",
+      "current": "Issue記載: 「type here」「tell me」「custom」「その他テキスト入力を示すパターン」",
+      "suggestion": "実際のパターン（prompt-detector.ts:169-175）: type here, tell me/claude, enter, custom, differently の5パターン。「enter」と「differently」が明示されていない。情報の正確性のため完全なリストを記載することを推奨"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "調査対象ファイル（response-poller.ts, claude-poller.ts）が追加されたが、調査結果や結論が未記載",
+      "current": "「以下のファイルに同様のプロンプト検出ロジックが存在しないか調査が必要」と記載",
+      "suggestion": "調査Issueまたは実装フェーズでの調査タスクとして明確に区分するか、調査完了後に結果を追記することを推奨"
+    }
+  ],
+  "summary": "Stage 1で指摘したmust_fix（検出条件の説明）およびshould_fix（TEXT_INPUT_PATTERNS、detectThinking関数、連番検証の現状）の項目はすべて適切に修正されている。Issue内容は実際のソースコード（prompt-detector.ts、cli-patterns.ts、auto-yes-resolver.ts）と整合性が取れており、正確な記述に更新された。nice_to_haveレベルの指摘（継続行ロジック、スキャン範囲50行、ポーリング間隔詳細）は未対応だが、Issueの本質的な正確性・完全性には影響しない。新たな問題として、TEXT_INPUT_PATTERNSの完全なリスト記載と調査対象ファイルの結論追記が推奨されるが、いずれもnice_to_haveレベル。全体として、Issue #161は前回レビューの指摘を適切に反映しており、実装に必要な情報が正確に記載されている状態になった。"
+}

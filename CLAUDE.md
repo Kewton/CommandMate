@@ -133,8 +133,8 @@ src/
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
 | `src/lib/tmux.ts` | tmuxセッション管理（sendKeys(), sendTextViaBuffer(), capturePane(), sendSpecialKey()等） |
 | `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()） |
-| `src/lib/prompt-detector.ts` | プロンプト検出ロジック |
-| `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138） |
+| `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証） |
+| `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応） |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
@@ -391,6 +391,24 @@ commandmate status --all                   # 全サーバー状態確認
   - `src/lib/claude-session.ts` - sendMessageToClaude() 修正
   - `src/lib/cli-tools/codex.ts` - sendMessage() 修正、未使用import削除
 - 詳細: [設計書](./dev-reports/design/issue-163-multiline-message-buffer-design-policy.md)
+
+### Issue #161: Auto-Yes誤検出修正（番号付きリストの誤検出防止）
+- **問題解決**: Auto-Yesモード有効時、Claude CLIの通常出力に含まれる番号付きリスト（例：「1. ファイルを作成」「2. テストを実行」）がmultiple_choiceプロンプトとして誤検出され、「1」が自動送信される問題を修正
+- **根本原因**: `detectMultipleChoicePrompt`の`optionPattern`の`[❯ ]`文字クラスが空白文字も許容し、通常の番号付きリストが選択肢として蓄積されていた
+- **2パス❯検出方式**（多層防御Layer 2）:
+  - パス1: 50行ウィンドウ内で❯インジケーターの存在を確認
+  - パス2: ❯が存在する場合のみ選択肢行を収集
+  - ❯が存在しない場合、通常の番号付きリストは一切検出されない
+- **thinking状態スキップ**（多層防御Layer 1）:
+  - `auto-yes-manager.ts`の`pollAutoYes()`で`detectThinking()`による事前チェック
+  - thinking中は`detectPrompt()`をスキップ
+- **連番検証**（多層防御Layer 3、防御的措置）:
+  - `isConsecutiveFromOne()`で選択肢番号が1始まり連番であることを検証
+- **設計原則準拠**: prompt-detector.tsのCLIツール非依存性を維持（CLAUDE_THINKING_PATTERNをimportしない）
+- **主要コンポーネント**:
+  - `src/lib/prompt-detector.ts` - 2パス検出方式、連番検証（防御的措置）
+  - `src/lib/auto-yes-manager.ts` - thinking状態のprompt検出スキップ
+- 詳細: [設計書](./dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md)
 
 ### Issue #151: worktree-cleanup サーバー検出機能改善
 - **問題解決**: `/worktree-cleanup` スキル実行時、`npm run dev` で直接起動したサーバーを検出・停止できない問題を修正
@@ -828,9 +846,34 @@ commandmate status --all                   # 全サーバー状態確認
 - **ブランチ一覧**: リアルタイムステータス付き
 - **ソート機能**: 更新日時、リポジトリ名、ブランチ名、ステータス
 
-### Issue #4: CLIツールサポート
-- **対応ツール**: Claude Code
-- **Strategy パターン**: 拡張可能な設計
+### Issue #4: CLIツールサポート（Codex CLI追加）
+- **対応ツール**: Claude Code, Codex CLI
+- **Strategy パターン**: 拡張可能な設計（BaseCLITool抽象クラス）
+- **Codexタブ有効化**: WorktreeDetailにCodexタブを追加
+- **個別セッション終了**: Claude/Codex/Geminiを個別に終了可能（確認ダイアログ付き）
+- **セッション終了確認ダイアログ**: ENDボタン押下時にModal確認ダイアログを表示（誤操作防止）
+- **CLI別ステータスドット**: サイドバーとCLIタブにClaude/Codex個別のステータスインジケータを表示
+- **モバイルCLIタブ切替**: モバイル表示でAuto Yesトグルとインラインで配置
+- **レスポンス保存バグ修正**: tmuxバッファの空行パディングによる行数不整合を修正（assistant-response-saver.ts）
+- **セキュリティ対策**: sessionName検証によるコマンドインジェクション防止
+- **パターン拡張**: CODEX_THINKING_PATTERNにRan, Deciding追加
+- **スラッシュコマンドフィルタリング**: CLIツール別にスラッシュコマンドをフィルタリング
+  - Claude標準（16）: 既存コマンドを維持（`/clear`, `/compact`, `/resume`, `/rewind`, `/config`, `/model`, `/permissions`, `/status`, `/context`, `/cost`, `/review`, `/pr-comments`, `/help`, `/doctor`, `/export`, `/todos`）
+  - Codex専用（10）: `/new`, `/undo`, `/logout`, `/quit`, `/approvals`, `/diff`, `/mention`, `/mcp`, `/init`, `/feedback`
+- **主要コンポーネント**:
+  - `src/lib/cli-tools/validation.ts` - sessionName検証（SESSION_NAME_PATTERN）
+  - `src/lib/cli-tools/types.ts` - CLI_TOOL_IDS定数、CLIToolType派生
+  - `src/lib/cli-tools/manager.ts` - stopPollers()メソッド追加
+  - `src/lib/cli-patterns.ts` - Codexパターン拡張
+  - `src/lib/standard-commands.ts` - CLIツール別コマンド定義
+  - `src/lib/command-merger.ts` - filterCommandsByCliTool()関数
+  - `src/app/api/worktrees/[id]/kill-session/route.ts` - cliToolパラメータ対応
+  - `src/app/api/worktrees/[id]/slash-commands/route.ts` - cliToolクエリパラメータ対応
+  - `src/components/worktree/WorktreeDetailRefactored.tsx` - 確認ダイアログ、CLI別ステータスドット
+  - `src/components/sidebar/BranchListItem.tsx` - サイドバーCLI別ステータスドット
+  - `src/types/sidebar.ts` - deriveCliStatus()、SidebarBranchItem.cliStatus拡張
+  - `src/lib/assistant-response-saver.ts` - tmuxバッファ行数トリミング修正
+- 詳細: [設計書](./dev-reports/design/issue-4-codex-cli-support-design-policy.md)
 
 ---
 

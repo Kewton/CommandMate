@@ -1,0 +1,14 @@
+{
+  "issue_number": 161,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_doc_path": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+  "review_criteria": [
+    "設計書と既存コードベースの整合性",
+    "設計書内のセクション間の整合性",
+    "設計書とIssue本文の整合性",
+    "コード参照（行番号、関数名、変数名）の正確性",
+    "提案されるコード変更の実現可能性"
+  ]
+}

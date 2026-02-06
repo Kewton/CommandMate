@@ -152,8 +152,22 @@ describe('BranchListItem', () => {
     });
   });
 
-  describe('Status indicator', () => {
-    it('should render status indicator', () => {
+  describe('CLI status dots', () => {
+    it('should render CLI status dots when cliStatus is provided', () => {
+      render(
+        <BranchListItem
+          branch={{ ...defaultBranch, cliStatus: { claude: 'idle', codex: 'idle' } }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      expect(screen.getByLabelText('CLI tool status')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Claude:/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Codex:/)).toBeInTheDocument();
+    });
+
+    it('should not render CLI status dots when cliStatus is absent', () => {
       render(
         <BranchListItem
           branch={defaultBranch}
@@ -162,33 +176,20 @@ describe('BranchListItem', () => {
         />
       );
 
-      expect(screen.getByTestId('status-indicator')).toBeInTheDocument();
+      expect(screen.queryByLabelText('CLI tool status')).not.toBeInTheDocument();
     });
 
-    it('should pass status to indicator for idle', () => {
+    it('should reflect running status with spinner styling', () => {
       render(
         <BranchListItem
-          branch={{ ...defaultBranch, status: 'idle' }}
+          branch={{ ...defaultBranch, cliStatus: { claude: 'running', codex: 'idle' } }}
           isSelected={false}
           onClick={() => {}}
         />
       );
 
-      const indicator = screen.getByTestId('status-indicator');
-      expect(indicator).toBeInTheDocument();
-    });
-
-    it('should pass status to indicator for running', () => {
-      render(
-        <BranchListItem
-          branch={{ ...defaultBranch, status: 'running' }}
-          isSelected={false}
-          onClick={() => {}}
-        />
-      );
-
-      const indicator = screen.getByTestId('status-indicator');
-      expect(indicator.className).toMatch(/green|animate/);
+      const claudeDot = screen.getByLabelText(/Claude:/);
+      expect(claudeDot.className).toMatch(/animate-spin/);
     });
   });
 

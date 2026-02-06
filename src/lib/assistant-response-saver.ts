@@ -241,8 +241,15 @@ export async function savePendingAssistantResponse(
     }
 
     // 3. Calculate current line count
+    // Trim trailing empty lines for consistency with response-poller's extractResponse.
+    // Without this, tmux buffer padding inflates the line count, causing the poller's
+    // dedup check (result.lineCount <= lastCapturedLine) to always trigger.
     const lines = output.split('\n');
-    const currentLineCount = lines.length;
+    let trimmedLength = lines.length;
+    while (trimmedLength > 0 && lines[trimmedLength - 1].trim() === '') {
+      trimmedLength--;
+    }
+    const currentLineCount = trimmedLength;
 
     // 4. Detect buffer reset (Issue #59 fix)
     const { bufferReset, reason } = detectBufferReset(currentLineCount, lastCapturedLine);
@@ -261,9 +268,15 @@ export async function savePendingAssistantResponse(
     // 6. Check for new output (using effective position)
     // Prevent duplicate saves when no new output has been added
     if (!bufferReset && currentLineCount <= lastCapturedLine) {
-      console.log(
-        `[savePendingAssistantResponse] No new output (current: ${currentLineCount}, last: ${lastCapturedLine})`
-      );
+      // Correct stale position: if stored lastCapturedLine was inflated (untrimmed count
+      // from before the trimming fix), update it to the current trimmed count so the
+      // response-poller's dedup check can work correctly.
+      if (currentLineCount < lastCapturedLine) {
+        updateSessionState(db, worktreeId, cliToolId, currentLineCount);
+        console.log(
+          `[savePendingAssistantResponse] Corrected stale position (${lastCapturedLine} → ${currentLineCount})`
+        );
+      }
       return null;
     }
 

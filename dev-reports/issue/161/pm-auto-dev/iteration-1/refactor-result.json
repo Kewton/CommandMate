@@ -1,0 +1,39 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage_prompt_detector": 95.57,
+    "after_coverage_prompt_detector": 95.57,
+    "before_coverage_auto_yes_manager": 86.55,
+    "after_coverage_auto_yes_manager": 86.55
+  },
+  "refactorings_applied": [
+    "Extracted DEFAULT_OPTION_PATTERN and NORMAL_OPTION_PATTERN from function-local to module-level constants with JSDoc including ReDoS safety reference (S4-001)",
+    "Narrowed rawLine variable scope from loop-level to its actual usage site (continuation line check block only)",
+    "Improved test comment for thinking state skip test with clearer defense-in-depth explanation",
+    "Added clarifying comment for test numbering gap (Test #5 is in auto-yes-manager.test.ts per design policy Section 5.1/5.3)",
+    "Improved 50-line window boundary Test #3 comment with specific Layer 3/4 cross-references and Section 9.4 edge case documentation"
+  ],
+  "files_changed": [
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "16bcd12: refactor(prompt-detector): extract regex patterns to module level and improve comments"
+  ],
+  "scope_notes": {
+    "in_scope": "Issue #161 changed files only: prompt-detector.ts (2-pass detection patterns), auto-yes-manager.ts (thinking pre-check), test files",
+    "out_of_scope_respected": [
+      "S1-003: yes/no pattern DRY improvement not performed",
+      "S1-009: detectMultipleChoicePrompt responsibility split not performed",
+      "S1-008: claude-poller.ts thinking pattern unification not performed"
+    ]
+  },
+  "message": "Refactoring complete. Extracted 2-pass detection regex patterns to module-level constants for better readability, documented ReDoS safety, narrowed variable scope, and improved test comments with design policy cross-references. All 107 tests pass, zero static analysis errors."
+}

@@ -15,6 +15,13 @@ import {
 } from '../tmux';
 
 /**
+ * Codex initialization timing constants
+ * T2.6: Extracted as constants for maintainability
+ */
+const CODEX_INIT_WAIT_MS = 3000;  // Wait for Codex to start
+const CODEX_MODEL_SELECT_WAIT_MS = 200;  // Wait between model selection keystrokes
+
+/**
  * Codex CLI tool implementation
  * Manages Codex sessions using tmux
  */
@@ -71,13 +78,20 @@ export class CodexTool extends BaseCLITool {
       await sendKeys(sessionName, 'codex', true);
 
       // Wait for Codex to initialize (and potentially show update notification)
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, CODEX_INIT_WAIT_MS));
 
       // Auto-skip update notification if present (select option 2: Skip)
       await sendKeys(sessionName, '2', true);
 
       // Wait a moment for the selection to process
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, CODEX_MODEL_SELECT_WAIT_MS));
+
+      // T2.6: Skip model selection dialog by sending Down arrow + Enter
+      // This selects the default model and proceeds to the prompt
+      await sendKeys(sessionName, 'Down', false);
+      await new Promise((resolve) => setTimeout(resolve, CODEX_MODEL_SELECT_WAIT_MS));
+      await sendKeys(sessionName, '', true);
+      await new Promise((resolve) => setTimeout(resolve, CODEX_MODEL_SELECT_WAIT_MS));
 
       console.log(`✓ Started Codex session: ${sessionName}`);
     } catch (error: unknown) {

@@ -638,6 +638,34 @@ export function deleteAllMessages(
 }
 
 /**
+ * Delete messages for a specific CLI tool in a worktree
+ * Issue #4: T4.2 - Individual CLI tool session termination (MF3-001)
+ *
+ * Used when killing only a specific CLI tool's session to clear its message history
+ * while preserving messages from other CLI tools.
+ * Note: Log files are preserved for historical reference
+ *
+ * @param db - Database instance
+ * @param worktreeId - Worktree ID
+ * @param cliTool - CLI tool ID to delete messages for
+ * @returns Number of deleted messages
+ */
+export function deleteMessagesByCliTool(
+  db: Database.Database,
+  worktreeId: string,
+  cliTool: CLIToolType
+): number {
+  const stmt = db.prepare(`
+    DELETE FROM chat_messages
+    WHERE worktree_id = ? AND cli_tool_id = ?
+  `);
+
+  const result = stmt.run(worktreeId, cliTool);
+  console.log(`[deleteMessagesByCliTool] Deleted ${result.changes} messages for worktree: ${worktreeId}, cliTool: ${cliTool}`);
+  return result.changes;
+}
+
+/**
  * Get session state for a worktree
  */
 export function getSessionState(

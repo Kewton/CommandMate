@@ -1,0 +1,35 @@
+{
+  "stage": 2,
+  "applied_findings": [
+    "S2-001",
+    "S2-002",
+    "S2-003",
+    "S2-004",
+    "S2-005",
+    "S2-006",
+    "S2-007",
+    "S2-008",
+    "S2-009",
+    "S2-010"
+  ],
+  "skipped_findings": [],
+  "changes_made": [
+    "S2-001 (Must Fix): Adopted 2-pass detection approach (A) for Section 3.1. Pass 1 scans all lines for defaultOptionPattern (❯ indicator); if none found, returns isPrompt: false immediately. Pass 2 only runs if ❯ found, collecting options with both patterns. Updated Section 3.1 title, detection logic, design note, Section 4 Layer 2 description, Section 1.3 table, Section 6.2 performance, Section 8 step 1, and Section 11 checklist.",
+    "S2-002 (Should Fix): Updated Section 7.1 thinking judgment descriptions to be specific: response-poller.ts uses getCliToolPatterns().thinkingPattern (L266, L337, L533), claude-poller.ts uses local thinkingPattern (/[✻✽⏺·∴✢✳]/m) at L76, status-detector.ts uses detectThinking() at L91. Added S2-002 annotation note after Section 7.1 table.",
+    "S2-003 (Should Fix): Added src/lib/status-detector.ts to Section 2 changed files table as conditional ('必要に応じて') with S2-003 annotation note.",
+    "S2-004 (Should Fix): Added note in Section 3.2 that stripAnsi is already imported on L17 of auto-yes-manager.ts, so only detectThinking needs to be added to the existing import. Added code comment showing before/after import change.",
+    "S2-005 (Should Fix): Updated Section 5.1 test table to add '保護する防御層' column clarifying which layer provides protection for each test case. Test case #2 now explicitly states Layer 2 (2-pass approach) provides protection since no ❯ indicator exists. Added S2-005 annotation note.",
+    "S2-006 (Should Fix): Added tests/unit/lib/auto-yes-manager.test.ts to Section 2 changed files table. Updated Section 5.3 table to add '実装先' column specifying test implementation locations. Added S2-006 annotation clarifying that Section 5.3 test #1 and Section 5.4 thinking test are the same test case. Updated Section 5.4 with explicit cross-reference.",
+    "S2-007 (Nice to Have): Added note to Section 3.3 that hasDefaultIndicator variable name matches existing code at L242, and clarified the insertion point as before L241.",
+    "S2-008 (Nice to Have): Added detailed note to Section 4 Layer 1 about status-detector.ts execution order issue (detectPrompt at L80 runs before detectThinking at L91), noting that Layer 1 can be bypassed during thinking and that Step 5 addresses this.",
+    "S2-009 (Nice to Have): Added user-facing impact note to Section 1.1 describing what happens when false positive occurs (auto-sends '1', causing unintended CLI selection, workflow interruption).",
+    "S2-010 (Nice to Have): Added note to Section 1.2 about line numbers being point-in-time references that should be re-verified at implementation time.",
+    "Added Stage 2 findings summary table (Section 10.2) with all 10 findings and their resolution status.",
+    "Added S2-004 checklist item to Section 11 Should Fix section for import modification.",
+    "Updated Section 11 Must Fix checklist to include 2-pass detection sub-items.",
+    "Updated Section 11 test checklist to reference auto-yes-manager.test.ts explicitly."
+  ],
+  "files_modified": [
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md"
+  ]
+}

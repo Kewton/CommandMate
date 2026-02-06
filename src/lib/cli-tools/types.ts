@@ -3,9 +3,17 @@
  */
 
 /**
- * CLIツールタイプ
+ * CLI Tool IDs constant array
+ * T2.1: Single source of truth for CLI tool IDs
+ * CLIToolType is derived from this constant (DRY principle)
  */
-export type CLIToolType = 'claude' | 'codex' | 'gemini';
+export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini'] as const;
+
+/**
+ * CLIツールタイプ
+ * Derived from CLI_TOOL_IDS for type safety and sync
+ */
+export type CLIToolType = typeof CLI_TOOL_IDS[number];
 
 /**
  * SWE CLIツールの共通インターフェース

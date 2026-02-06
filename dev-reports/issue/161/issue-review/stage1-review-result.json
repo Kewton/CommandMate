@@ -1,0 +1,64 @@
+{
+  "issue_number": 161,
+  "stage": 1,
+  "focus_area": "通常",
+  "findings": [
+    {
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "Issueに記載されているoptionPatternの正規表現が実際のコードと異なる",
+      "current": "Issue記載: `const optionPattern = /^\\s*([❯ ]\\s*)?(\\d+)\\.\\s*(.+)$/;`",
+      "suggestion": "実際のコード(prompt-detector.ts:198): `const optionPattern = /^\\s*([❯ ]\\s*)?(\\d+)\\.\\s*(.+)$/;` - 正規表現自体は一致しているが、Issueでは「❯インジケーター」のみを強調しているのに対し、実際のコードでは空白文字も許容している点をより明確にすべき"
+    },
+    {
+      "severity": "must_fix",
+      "category": "正確性",
+      "description": "検出条件の説明が不正確。Issueでは「2つ以上のオプション + ❯インジケーター」と記載されているが、実際のコードでは「2つ以上のオプション AND 少なくとも1つに❯インジケーターが存在」という条件",
+      "current": "Issue記載: 「現在の条件: 2つ以上のオプション + ❯インジケーター」",
+      "suggestion": "正確な条件を記載: 「現在の条件: options.length >= 2 AND options.some(opt => opt.isDefault) ※isDefaultは❯インジケーターの有無で判定」(prompt-detector.ts:241-248参照)"
+    },
+    {
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "TEXT_INPUT_PATTERNSの存在が言及されていない。自動応答をスキップする重要な条件として存在する",
+      "current": "Issue記載なし",
+      "suggestion": "auto-yes-resolver.tsとprompt-detector.tsでTEXT_INPUT_PATTERNSによるrequiresTextInputチェックが行われている点を追記。これにより「type here」「tell me」「custom」等を含む選択肢は自動応答がスキップされる"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "継続行(continuation line)の検出ロジックが言及されていない",
+      "current": "Issue記載なし",
+      "suggestion": "prompt-detector.ts:222-233で継続行（インデントされた行、5文字未満の断片）を検出してスキップするロジックがある。これが誤検出の原因となる可能性もあるため言及すると良い"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "スキャン範囲が50行に拡張されている点が言及されていない",
+      "current": "Issue記載なし",
+      "suggestion": "prompt-detector.ts:206のコメントによると、スキャン範囲は当初20行から50行に拡張されている。複数行にまたがるオプションへの対応だが、これにより誤検出リスクが増加している可能性がある"
+    },
+    {
+      "severity": "should_fix",
+      "category": "整合性",
+      "description": "対策案3「選択肢パターンの厳密化」で連番検証を提案しているが、現在のコードでは既にnumber値をパースしている",
+      "current": "対策案3: 「選択肢が正確に連番（1, 2, 3...）であることを検証」",
+      "suggestion": "現在のコードではnumber値をパースして保存しているが、連番かどうかの検証は行っていない(prompt-detector.ts:213)。対策案として連番検証を追加することは有効だが、現状で既にnumberをパースしている点を踏まえた記述にすべき"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "description": "サーバー側ポーリングとクライアント側フックの動作タイミングの説明がない",
+      "current": "「サーバー側ポーリング（auto-yes-manager.ts）とクライアント側フック（useAutoYes.ts）の両方」",
+      "suggestion": "サーバー側は2秒間隔(POLLING_INTERVAL_MS=2000)でポーリング、クライアント側はサーバーが3秒以内に応答した場合はスキップ(DUPLICATE_PREVENTION_WINDOW_MS=3000)という重複防止機構がある点を明記すると問題の理解が深まる"
+    },
+    {
+      "severity": "should_fix",
+      "category": "整合性",
+      "description": "対策案2「コンテキスト判定」でthinking状態の確認を提案しているが、detectThinking関数が既に存在する",
+      "current": "対策案2: 「Claude CLIが「thinking」状態でないことを確認」",
+      "suggestion": "cli-patterns.tsにdetectThinking()関数が既に存在する(L71-93)。この関数はCLAUDE_THINKING_PATTERNを使用してthinking状態を検出する。auto-yes-managerでこの関数を利用するよう修正する対策として記述を更新すべき"
+    }
+  ],
+  "summary": "Issue #161の記載内容は概ね正確だが、いくつかの点で実際のコードとの差異や不足がある。特に重要なのは: (1) 検出条件の正確な説明（「2つ以上のオプション AND ❯インジケーターを持つオプションが1つ以上」）、(2) TEXT_INPUT_PATTERNSによるrequiresTextInputチェックの存在、(3) 既存のdetectThinking()関数の活用可能性。これらを踏まえると、対策案2（コンテキスト判定）は既存関数を活用する形で比較的容易に実装可能。対策案1（厳格なプロンプト検出）と対策案3（選択肢パターンの厳密化）は有効だが、実装の詳細を詰める必要がある。根本原因の仮説は妥当であり、optionPatternが通常の番号付きリストにマッチしてしまう問題の指摘は正確。"
+}

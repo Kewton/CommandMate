@@ -1,14 +1,15 @@
 /**
- * Worktree-Specific Slash Commands API (Issue #56)
+ * Worktree-Specific Slash Commands API (Issue #56, Issue #4)
  *
- * GET /api/worktrees/[id]/slash-commands
+ * GET /api/worktrees/[id]/slash-commands?cliTool=claude|codex|gemini
  *
  * Returns merged slash commands for a specific worktree:
- * - Standard Claude Code commands
+ * - Standard CLI tool commands (filtered by cliTool)
  * - Worktree-specific commands from .claude/commands/
  *
  * MF-1: Implements path validation to prevent traversal attacks
  * SF-1: Worktree commands take priority over standard commands
+ * Issue #4: Filters commands by CLI tool
  */
 
 import { NextResponse } from 'next/server';
@@ -16,9 +17,10 @@ import type { NextRequest } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { getSlashCommandGroups } from '@/lib/slash-commands';
-import { getStandardCommandGroups, STANDARD_COMMANDS } from '@/lib/standard-commands';
-import { mergeCommandGroups, countCommands } from '@/lib/command-merger';
+import { getStandardCommandGroups } from '@/lib/standard-commands';
+import { mergeCommandGroups, filterCommandsByCliTool } from '@/lib/command-merger';
 import { isValidWorktreePath } from '@/lib/worktree-path-validator';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup } from '@/types/slash-commands';
 
 /**
@@ -31,12 +33,24 @@ interface SlashCommandsResponse {
     worktree: number;
     mcbd: number;
   };
+  cliTool: CLIToolType;
+}
+
+/**
+ * Validate CLI tool ID from query parameter
+ */
+function validateCliTool(cliTool: string | null): CLIToolType {
+  if (cliTool && CLI_TOOL_IDS.includes(cliTool as CLIToolType)) {
+    return cliTool as CLIToolType;
+  }
+  return 'claude'; // Default to Claude for backward compatibility
 }
 
 /**
  * GET /api/worktrees/[id]/slash-commands
  *
  * Returns merged slash commands for the specified worktree.
+ * Optionally filters by CLI tool via ?cliTool=claude|codex|gemini query parameter.
  */
 export async function GET(
   request: NextRequest,
@@ -63,6 +77,9 @@ export async function GET(
       );
     }
 
+    // Issue #4: Get CLI tool from query parameter
+    const cliTool = validateCliTool(request.nextUrl.searchParams.get('cliTool'));
+
     // Get standard command groups
     const standardGroups = getStandardCommandGroups();
 
@@ -78,17 +95,25 @@ export async function GET(
     // SF-1: Merge with worktree commands taking priority
     const mergedGroups = mergeCommandGroups(standardGroups, worktreeGroups);
 
-    // Calculate source counts
-    const standardCount = STANDARD_COMMANDS.length;
-    const worktreeCount = countCommands(worktreeGroups);
+    // Issue #4: Filter by CLI tool
+    const filteredGroups = filterCommandsByCliTool(mergedGroups, cliTool);
+
+    // Calculate source counts (after filtering)
+    const filteredStandardCount = filteredGroups
+      .flatMap(g => g.commands)
+      .filter(cmd => cmd.source === 'standard').length;
+    const filteredWorktreeCount = filteredGroups
+      .flatMap(g => g.commands)
+      .filter(cmd => cmd.source === 'worktree').length;
 
     return NextResponse.json({
-      groups: mergedGroups,
+      groups: filteredGroups,
       sources: {
-        standard: standardCount,
-        worktree: worktreeCount,
+        standard: filteredStandardCount,
+        worktree: filteredWorktreeCount,
         mcbd: 0, // MCBD commands are loaded separately via /api/slash-commands
       },
+      cliTool,
     });
   } catch (error) {
     console.error('[slash-commands API] Error:', error);

@@ -2,6 +2,8 @@
  * useSlashCommands Hook
  *
  * Provides slash commands data with loading state and filtering
+ *
+ * Issue #4: Added cliToolId parameter to filter commands by CLI tool
  */
 
 'use client';
@@ -10,6 +12,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { handleApiError } from '@/lib/api-client';
 import { filterCommandGroups } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
  * Return type for useSlashCommands hook
@@ -31,18 +34,21 @@ export interface UseSlashCommandsResult {
   setFilter: (filter: string) => void;
   /** Refresh commands from API */
   refresh: () => void;
+  /** Currently loaded CLI tool */
+  cliTool: CLIToolType;
 }
 
 /**
  * Hook for loading and filtering slash commands
  *
  * @param worktreeId - Optional worktree ID for loading worktree-specific commands (Issue #56)
+ * @param cliToolId - Optional CLI tool ID to filter commands (Issue #4)
  * @returns UseSlashCommandsResult with commands data and controls
  *
  * @example
  * ```tsx
  * function CommandSelector() {
- *   const { filteredGroups, loading, filter, setFilter } = useSlashCommands();
+ *   const { filteredGroups, loading, filter, setFilter } = useSlashCommands(worktreeId, 'codex');
  *
  *   if (loading) return <Spinner />;
  *
@@ -61,25 +67,35 @@ export interface UseSlashCommandsResult {
  * }
  * ```
  */
-export function useSlashCommands(worktreeId?: string): UseSlashCommandsResult {
+export function useSlashCommands(
+  worktreeId?: string,
+  cliToolId?: CLIToolType
+): UseSlashCommandsResult {
   const [groups, setGroups] = useState<SlashCommandGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [currentCliTool, setCurrentCliTool] = useState<CLIToolType>(cliToolId || 'claude');
 
   /**
    * Fetch commands from API
    * If worktreeId is provided, fetches worktree-specific commands (Issue #56)
+   * If cliToolId is provided, filters by CLI tool (Issue #4)
    */
   const fetchCommands = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Use worktree-specific API if worktreeId is provided
-      const endpoint = worktreeId
+      // Build endpoint URL with optional cliTool query param
+      let endpoint = worktreeId
         ? `/api/worktrees/${worktreeId}/slash-commands`
         : '/api/slash-commands';
+
+      // Issue #4: Add cliTool query parameter if provided
+      if (cliToolId) {
+        endpoint += `?cliTool=${cliToolId}`;
+      }
 
       const response = await fetch(endpoint);
       if (!response.ok) {
@@ -87,16 +103,17 @@ export function useSlashCommands(worktreeId?: string): UseSlashCommandsResult {
       }
       const data = await response.json();
       setGroups(data.groups);
+      setCurrentCliTool(data.cliTool || cliToolId || 'claude');
     } catch (err) {
       setError(handleApiError(err));
       setGroups([]);
     } finally {
       setLoading(false);
     }
-  }, [worktreeId]);
+  }, [worktreeId, cliToolId]);
 
   /**
-   * Load commands on mount
+   * Load commands on mount or when cliToolId changes
    */
   useEffect(() => {
     void fetchCommands();
@@ -133,5 +150,6 @@ export function useSlashCommands(worktreeId?: string): UseSlashCommandsResult {
     filter,
     setFilter,
     refresh,
+    cliTool: currentCliTool,
   };
 }

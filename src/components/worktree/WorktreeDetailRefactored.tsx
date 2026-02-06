@@ -26,7 +26,7 @@ import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MobileHeader, type WorktreeStatus } from '@/components/mobile/MobileHeader';
-import { DESKTOP_STATUS_CONFIG } from '@/config/status-colors';
+import { DESKTOP_STATUS_CONFIG, SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { MobileTabBar, type MobileTab } from '@/components/mobile/MobileTabBar';
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
@@ -48,6 +48,8 @@ import { useAutoYes } from '@/hooks/useAutoYes';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import type { Worktree, ChatMessage, PromptData, GitStatus } from '@/types/models';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { deriveCliStatus } from '@/types/sidebar';
 
 // ============================================================================
 // Types
@@ -95,36 +97,39 @@ const DEFAULT_WORKTREE_NAME = 'Unknown';
 /** Convert worktree data to WorktreeStatus - consistent with sidebar */
 function deriveWorktreeStatus(
   worktree: Worktree | null,
-  hasError: boolean
+  hasError: boolean,
+  cliTool: CLIToolType = 'claude'
 ): WorktreeStatus {
   if (hasError) return 'error';
   if (!worktree) return 'idle';
 
   // Use the same logic as sidebar (from API response)
-  const claudeStatus = worktree.sessionStatusByCli?.claude;
-  if (claudeStatus) {
-    if (claudeStatus.isWaitingForResponse) {
+  const cliStatus = worktree.sessionStatusByCli?.[cliTool];
+  if (cliStatus) {
+    if (cliStatus.isWaitingForResponse) {
       return 'waiting';
     }
-    if (claudeStatus.isProcessing) {
+    if (cliStatus.isProcessing) {
       return 'running';
     }
     // Session running but not processing = ready (waiting for user to type new message)
-    if (claudeStatus.isRunning) {
+    if (cliStatus.isRunning) {
       return 'ready';
     }
   }
 
-  // Fall back to legacy status fields
-  if (worktree.isWaitingForResponse) {
-    return 'waiting';
-  }
-  if (worktree.isProcessing) {
-    return 'running';
-  }
-  // Session running but not processing = ready
-  if (worktree.isSessionRunning) {
-    return 'ready';
+  // Fall back to legacy status fields (only for claude)
+  if (cliTool === 'claude') {
+    if (worktree.isWaitingForResponse) {
+      return 'waiting';
+    }
+    if (worktree.isProcessing) {
+      return 'running';
+    }
+    // Session running but not processing = ready
+    if (worktree.isSessionRunning) {
+      return 'ready';
+    }
   }
 
   return 'idle';
@@ -875,6 +880,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [isEditorMaximized, setIsEditorMaximized] = useState(false);
   const [autoYesEnabled, setAutoYesEnabled] = useState(false);
   const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
+  // Issue #4: CLI tool tab state (Claude/Codex)
+  const [activeCliTab, setActiveCliTab] = useState<CLIToolType>('claude');
+  // Issue #4: Ref to avoid polling callback recreation on tab switch
+  const activeCliTabRef = useRef<CLIToolType>(activeCliTab);
+  activeCliTabRef.current = activeCliTab;
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
@@ -924,9 +934,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   }, [worktreeId]);
 
   /** Fetch message history for the worktree */
+  // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchMessages = useCallback(async (): Promise<void> => {
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/messages?cliTool=claude`);
+      const response = await fetch(`/api/worktrees/${worktreeId}/messages?cliTool=${activeCliTabRef.current}`);
       if (!response.ok) {
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
@@ -938,9 +949,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   }, [worktreeId, actions]);
 
   /** Fetch current terminal output and prompt status */
+  // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchCurrentOutput = useCallback(async (): Promise<void> => {
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/current-output?cliTool=claude`);
+      const response = await fetch(`/api/worktrees/${worktreeId}/current-output?cliTool=${activeCliTabRef.current}`);
       if (!response.ok) {
         return;
       }
@@ -975,6 +987,20 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
     }
   }, [worktreeId, actions, state.prompt.visible]);
+
+  // Issue #4: Immediately refresh data when CLI tab changes (without polling restart)
+  const prevCliTabRef = useRef<CLIToolType>(activeCliTab);
+  useEffect(() => {
+    if (prevCliTabRef.current !== activeCliTab) {
+      prevCliTabRef.current = activeCliTab;
+      // Clear stale data immediately for snappy UI
+      actions.clearMessages();
+      actions.setTerminalOutput('', '');
+      // Fetch fresh data for the new tab
+      void fetchMessages();
+      void fetchCurrentOutput();
+    }
+  }, [activeCliTab, actions, fetchMessages, fetchCurrentOutput]);
 
   // ========================================================================
   // Event Handlers
@@ -1050,7 +1076,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         const response = await fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ answer, cliTool: 'claude' }),
+          body: JSON.stringify({ answer, cliTool: activeCliTab }),
         });
         if (!response.ok) {
           throw new Error(`Failed to send prompt response: ${response.status}`);
@@ -1064,7 +1090,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         actions.setPromptAnswering(false);
       }
     },
-    [worktreeId, actions, fetchCurrentOutput]
+    [worktreeId, actions, fetchCurrentOutput, activeCliTab]
   );
 
   /** Handle prompt dismiss without response */
@@ -1104,7 +1130,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify({ enabled, cliToolId: activeCliTab }),
       });
       if (response.ok) {
         const data = await response.json();
@@ -1114,7 +1140,40 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Error toggling auto-yes:', err);
     }
-  }, [worktreeId]);
+  }, [worktreeId, activeCliTab]);
+
+  /** Issue #4: Kill session confirmation dialog state */
+  const [showKillConfirm, setShowKillConfirm] = useState(false);
+
+  /** Issue #4: Show confirmation dialog before killing session */
+  const handleKillSession = useCallback((): void => {
+    setShowKillConfirm(true);
+  }, []);
+
+  /** Issue #4: Execute session kill after confirmation */
+  const handleKillConfirm = useCallback(async (): Promise<void> => {
+    setShowKillConfirm(false);
+    try {
+      const response = await fetch(
+        `/api/worktrees/${worktreeId}/kill-session?cliTool=${activeCliTab}`,
+        { method: 'POST' }
+      );
+      if (!response.ok) return;
+      actions.clearMessages();
+      actions.setTerminalOutput('', '');
+      actions.setTerminalActive(false);
+      actions.setTerminalThinking(false);
+      actions.clearPrompt();
+      await fetchWorktree();
+    } catch (err) {
+      console.error('[WorktreeDetailRefactored] Error killing session:', err);
+    }
+  }, [worktreeId, activeCliTab, actions, fetchWorktree]);
+
+  /** Issue #4: Cancel session kill */
+  const handleKillCancel = useCallback((): void => {
+    setShowKillConfirm(false);
+  }, []);
 
   // ========================================================================
   // File Operation Handlers (for FileTreeView context menu)
@@ -1301,7 +1360,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Auto-yes hook
   const { lastAutoResponse } = useAutoYes({
     worktreeId,
-    cliTool: 'claude',
+    cliTool: activeCliTab,
     isPromptWaiting: state.prompt.visible,
     promptData: state.prompt.data,
     autoYesEnabled,
@@ -1380,8 +1439,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
   /** Derive worktree status - consistent with sidebar display */
   const worktreeStatus = useMemo<WorktreeStatus>(
-    () => deriveWorktreeStatus(worktree, state.error.type !== null),
-    [worktree, state.error.type]
+    () => deriveWorktreeStatus(worktree, state.error.type !== null, activeCliTab),
+    [worktree, state.error.type, activeCliTab]
   );
 
   /** Current active tab for mobile view */
@@ -1429,6 +1488,53 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onInfoClick={handleInfoClick}
             onMenuClick={toggle}
           />
+          {/* Issue #4: CLI Tool Tab Switcher (Claude/Codex) */}
+          <div className="px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between">
+            <nav className="flex gap-4" aria-label="CLI Tool Selection">
+              {(['claude', 'codex'] as const).map((tool) => {
+                const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
+                const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+                return (
+                  <button
+                    key={tool}
+                    onClick={() => setActiveCliTab(tool)}
+                    className={`pb-2 px-2 border-b-2 font-medium text-sm transition-colors flex items-center gap-1.5 ${
+                      activeCliTab === tool
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-600 hover:text-gray-900'
+                    }`}
+                    aria-current={activeCliTab === tool ? 'page' : undefined}
+                  >
+                    {statusConfig.type === 'spinner' ? (
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
+                        title={statusConfig.label}
+                        aria-label={`${tool} status: ${statusConfig.label}`}
+                      />
+                    ) : (
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
+                        title={statusConfig.label}
+                        aria-label={`${tool} status: ${statusConfig.label}`}
+                      />
+                    )}
+                    {tool.charAt(0).toUpperCase() + tool.slice(1)}
+                  </button>
+                );
+              })}
+            </nav>
+            {/* Issue #4: End Session button - shown only when active CLI tool session is running */}
+            {worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning && (
+              <button
+                onClick={handleKillSession}
+                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
+                aria-label={`End ${activeCliTab} session`}
+              >
+                <span aria-hidden="true">&#x2715;</span>
+                End Session
+              </button>
+            )}
+          </div>
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (
             <BranchMismatchAlert
@@ -1513,7 +1619,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             <MessageInput
               worktreeId={worktreeId}
               onMessageSent={handleMessageSent}
-              cliToolId="claude"
+              cliToolId={activeCliTab}
               isSessionRunning={state.terminal.isActive}
             />
           </div>
@@ -1523,6 +1629,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             expiresAt={autoYesExpiresAt}
             onToggle={handleAutoYesToggle}
             lastAutoResponse={lastAutoResponse}
+            cliToolName={activeCliTab}
           />
           {/* Prompt Panel - fixed overlay at bottom */}
           {state.prompt.visible && !autoYesEnabled && (
@@ -1580,6 +1687,36 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             className="hidden"
             aria-label="Upload file"
           />
+          {/* Kill session confirmation dialog */}
+          <Modal
+            isOpen={showKillConfirm}
+            onClose={handleKillCancel}
+            title={`${activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1)} セッションを終了しますか？`}
+            size="sm"
+            showCloseButton={true}
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-700">
+                セッションを終了すると、チャット履歴がクリアされます。
+              </p>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleKillCancel}
+                  className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  onClick={handleKillConfirm}
+                  className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
+                >
+                  終了する
+                </button>
+              </div>
+            </div>
+          </Modal>
           {/* Toast notifications */}
           <ToastContainer toasts={toasts} onClose={removeToast} />
         </div>
@@ -1611,13 +1748,64 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           </div>
         )}
 
-        <div className="fixed top-14 inset-x-0 z-30">
+        {/* Auto Yes + CLI Tool Tabs combined row (Mobile) */}
+        <div className="fixed top-14 inset-x-0 z-30 flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b border-gray-200">
+          {/* Left: Auto Yes toggle (inline mode) */}
           <AutoYesToggle
             enabled={autoYesEnabled}
             expiresAt={autoYesExpiresAt}
             onToggle={handleAutoYesToggle}
             lastAutoResponse={lastAutoResponse}
+            cliToolName={activeCliTab}
+            inline
           />
+          {/* Right: CLI tool tabs + End button */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <nav className="flex gap-2" aria-label="CLI Tool Selection">
+              {(['claude', 'codex'] as const).map((tool) => {
+                const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
+                const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
+                return (
+                  <button
+                    key={tool}
+                    onClick={() => setActiveCliTab(tool)}
+                    className={`px-1.5 py-0.5 rounded font-medium text-xs transition-colors flex items-center gap-1 ${
+                      activeCliTab === tool
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                    aria-current={activeCliTab === tool ? 'page' : undefined}
+                  >
+                    {statusConfig.type === 'spinner' ? (
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 border-2 border-t-transparent animate-spin ${statusConfig.className}`}
+                        title={statusConfig.label}
+                      />
+                    ) : (
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.className}`}
+                        title={statusConfig.label}
+                      />
+                    )}
+                    {tool.charAt(0).toUpperCase() + tool.slice(1)}
+                  </button>
+                );
+              })}
+            </nav>
+            <button
+              onClick={handleKillSession}
+              disabled={!worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning}
+              className={`flex items-center gap-0.5 px-1.5 py-0.5 text-xs font-medium rounded transition-colors ${
+                worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning
+                  ? 'text-red-600 hover:bg-red-50'
+                  : 'invisible'
+              }`}
+              aria-label={`End ${activeCliTab} session`}
+            >
+              <span aria-hidden="true">&#x2715;</span>
+              End
+            </button>
+          </div>
         </div>
 
         <main
@@ -1653,7 +1841,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <MessageInput
             worktreeId={worktreeId}
             onMessageSent={handleMessageSent}
-            cliToolId="claude"
+            cliToolId={activeCliTab}
             isSessionRunning={state.terminal.isActive}
           />
         </div>
@@ -1711,6 +1899,36 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           className="hidden"
           aria-label="Upload file"
         />
+        {/* Kill session confirmation dialog (Mobile) */}
+        <Modal
+          isOpen={showKillConfirm}
+          onClose={handleKillCancel}
+          title={`${activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1)} セッションを終了しますか？`}
+          size="sm"
+          showCloseButton={true}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700">
+              セッションを終了すると、チャット履歴がクリアされます。
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleKillCancel}
+                className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleKillConfirm}
+                className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
+              >
+                終了する
+              </button>
+            </div>
+          </div>
+        </Modal>
         {/* Toast notifications (Mobile) */}
         <ToastContainer toasts={toasts} onClose={removeToast} />
       </div>

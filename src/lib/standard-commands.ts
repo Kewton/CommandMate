@@ -1,20 +1,29 @@
 /**
- * Standard Claude Code Commands (Issue #56)
+ * Standard CLI Tool Commands (Issue #56, Issue #4)
  *
- * Static definitions for Claude Code's built-in slash commands.
- * These commands are available in all Claude Code sessions without any setup.
+ * Static definitions for built-in slash commands of supported CLI tools.
+ * - Claude Code commands (existing, no cliTools field for backward compatibility)
+ * - Codex CLI commands (new, with cliTools: ['codex'])
  *
- * Reference: https://www.gradually.ai/en/claude-code-commands/
+ * References:
+ * - Claude Code: https://www.gradually.ai/en/claude-code-commands/
+ * - Codex CLI: https://developers.openai.com/codex/cli/slash-commands
  */
 
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 import { groupByCategory } from '@/lib/command-merger';
 
 /**
- * Standard Claude Code commands
- * These are built into Claude Code CLI and require no additional configuration.
+ * Standard CLI tool commands
+ *
+ * Issue #4: Codex-specific commands use `cliTools: ['codex']`.
+ * Existing Claude commands have no cliTools field (backward compatible, Claude-only).
  */
 export const STANDARD_COMMANDS: SlashCommand[] = [
+  // ============================================================================
+  // CLAUDE CODE COMMANDS (existing, no cliTools for backward compatibility)
+  // ============================================================================
+
   // Session Management
   {
     name: 'clear',
@@ -152,19 +161,117 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     source: 'standard',
     filePath: '',
   },
+
+  // ============================================================================
+  // CODEX CLI ONLY COMMANDS (Issue #4)
+  // ============================================================================
+
+  // Session Management - Codex only
+  {
+    name: 'new',
+    description: 'Start a new conversation in same session',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'undo',
+    description: 'Undo the last Codex action',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'logout',
+    description: 'Sign out from Codex',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'quit',
+    description: 'Exit Codex CLI',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+
+  // Configuration - Codex only
+  {
+    name: 'approvals',
+    description: 'Change auto-execution approval level',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+
+  // Git/Review - Codex only
+  {
+    name: 'diff',
+    description: 'Show Git diff (including untracked files)',
+    category: 'standard-git',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+
+  // Utility - Codex only
+  {
+    name: 'mention',
+    description: 'Attach file/folder for next interaction',
+    category: 'standard-util',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'mcp',
+    description: 'List available MCP tools',
+    category: 'standard-util',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'init',
+    description: 'Generate AGENTS.md template in current directory',
+    category: 'standard-util',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
+  {
+    name: 'feedback',
+    description: 'Send feedback to Codex team',
+    category: 'standard-util',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['codex'],
+  },
 ];
 
 /**
- * Frequently used standard commands
- * These are displayed at the top of the command list for easy access.
+ * Frequently used standard commands per CLI tool
  */
-export const FREQUENTLY_USED: string[] = [
-  'clear',
-  'compact',
-  'status',
-  'help',
-  'review',
-];
+export const FREQUENTLY_USED: Record<string, string[]> = {
+  claude: ['clear', 'compact', 'status', 'help', 'review'],
+  codex: ['new', 'undo', 'diff', 'approvals', 'mcp'],
+};
 
 /**
  * Get standard commands grouped by category
@@ -179,10 +286,21 @@ export function getStandardCommandGroups(): SlashCommandGroup[] {
 }
 
 /**
- * Get frequently used commands
+ * Get frequently used commands for a specific CLI tool
  *
+ * @param cliToolId - CLI tool ID ('claude', 'codex', etc.)
  * @returns Array of frequently used SlashCommand objects
  */
-export function getFrequentlyUsedCommands(): SlashCommand[] {
-  return STANDARD_COMMANDS.filter((cmd) => FREQUENTLY_USED.includes(cmd.name));
+export function getFrequentlyUsedCommands(cliToolId?: string): SlashCommand[] {
+  const toolId = cliToolId || 'claude';
+  const frequentNames = FREQUENTLY_USED[toolId] || FREQUENTLY_USED.claude;
+  return STANDARD_COMMANDS.filter(
+    (cmd) =>
+      frequentNames.includes(cmd.name) &&
+      // For Claude: include commands without cliTools or with 'claude' in cliTools
+      // For Codex: include only commands with 'codex' in cliTools
+      (toolId === 'claude'
+        ? !cmd.cliTools || cmd.cliTools.includes('claude')
+        : cmd.cliTools?.includes(toolId as 'claude' | 'codex' | 'gemini'))
+  );
 }

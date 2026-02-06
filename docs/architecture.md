@@ -51,7 +51,7 @@
 ### 1.3 実装済み機能
 
 - **CLI ツールのサポート** (Issue #4で実装完了)
-  - Claude Code 対応
+  - Claude Code, Codex CLI 対応
   - Strategy パターンによる拡張可能な設計
 
 ---
@@ -144,10 +144,10 @@ graph TD
 	•	SQLite への接続
 	•	tmux server
 	•	システム上に既存の tmux サーバを利用
-	•	cw_{worktreeId} というセッション名で Claude CLI を起動
-	•	Claude CLI プロセス
-	•	各 tmux セッション内で claude が起動
-	•	CLAUDE_HOOKS_STOP に設定されたコマンドで完了通知
+	•	cw_{worktreeId} というセッション名で CLI ツールを起動
+	•	CLI ツールプロセス（Claude Code / Codex CLI）
+	•	各 tmux セッション内で選択された CLI ツールが起動
+	•	CLAUDE_HOOKS_STOP に設定されたコマンドで完了通知（Claude Code の場合）
 
 ⸻
 

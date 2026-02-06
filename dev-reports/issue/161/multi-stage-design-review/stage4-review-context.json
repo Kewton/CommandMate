@@ -1,0 +1,15 @@
+{
+  "issue_number": 161,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+  "review_criteria": [
+    "OWASP Top 10準拠",
+    "入力検証（正規表現パターンの安全性）",
+    "ReDoS攻撃への耐性",
+    "コマンドインジェクション防止",
+    "機密情報のログ出力",
+    "自動応答による意図しない操作のリスク"
+  ]
+}

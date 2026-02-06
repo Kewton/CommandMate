@@ -6,6 +6,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { ICLITool, CLIToolType } from './types';
+import { validateSessionName } from './validation';
 import { sendSpecialKey } from '../tmux';
 
 const execAsync = promisify(exec);
@@ -36,11 +37,16 @@ export abstract class BaseCLITool implements ICLITool {
    * Generate session name for a worktree
    * Format: mcbd-{cli_tool_id}-{worktree_id}
    *
+   * T2.3: Added validation to prevent command injection (MF4-001)
+   *
    * @param worktreeId - Worktree ID
    * @returns Session name
+   * @throws Error if the resulting session name is invalid
    */
   getSessionName(worktreeId: string): string {
-    return `mcbd-${this.id}-${worktreeId}`;
+    const sessionName = `mcbd-${this.id}-${worktreeId}`;
+    validateSessionName(sessionName);
+    return sessionName;
   }
 
   // Abstract methods that must be implemented by subclasses

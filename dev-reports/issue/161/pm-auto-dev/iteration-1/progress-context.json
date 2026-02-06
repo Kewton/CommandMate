@@ -1,0 +1,52 @@
+{
+  "issue_number": 161,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage_prompt_detector": 95.57,
+      "coverage_auto_yes_manager": 86.55,
+      "new_tests": 21,
+      "total_tests": 115,
+      "passed": 115,
+      "failed": 0,
+      "eslint_errors": 0,
+      "typescript_errors": 0
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_total": 8,
+      "scenarios_passed": 8,
+      "scenarios_failed": 0,
+      "ci_lint": "passed",
+      "ci_typecheck": "passed",
+      "ci_test": "passed (115/115 for Issue #161 files; 2 pre-existing failures in unrelated claude-session.test.ts)",
+      "ci_build": "passed"
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "Regex patterns extracted to module-level constants with JSDoc",
+        "Variable scope narrowed",
+        "Test comments improved with design policy cross-references"
+      ]
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": [
+        "CLAUDE.md (prompt-detector.ts description, auto-yes-manager.ts description, Issue #161 section in recent features)"
+      ]
+    }
+  },
+  "commits": [
+    "21835c6: fix(auto-yes): prevent false positive detection of numbered lists as multiple_choice prompts",
+    "16bcd12: refactor(prompt-detector): extract regex patterns to module level and improve comments"
+  ],
+  "files_changed": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "CLAUDE.md"
+  ]
+}

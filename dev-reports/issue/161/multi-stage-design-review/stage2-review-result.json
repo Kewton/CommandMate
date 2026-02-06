@@ -1,0 +1,103 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "S2-001",
+      "severity": "must_fix",
+      "category": "cross_section",
+      "title": "Section 3.1のnormalOptionPatternコンテキスト制約と検出ロジックの不整合",
+      "description": "Section 3.1の設計判断ノートには「normalOptionPatternは選択肢プロンプトのコンテキスト内（❯付き行が既に検出された後）でのみ有効な行として扱う」と記載されている。しかし、同セクションの検出ロジック（ステップ1-3）は各行に対して独立に (1) defaultOptionPattern、(2) normalOptionPatternの順でマッチを試みる設計であり、❯付き行の事前検出というコンテキスト制約は実装されていない。この不整合は、通常の番号付きリスト行がnormalOptionPatternにマッチしてoptions配列に蓄積される問題を実質的に解決しないことを意味する。現在のoptionPatternから[❯ ]を削除してnormalOptionPatternにしただけでは、`^\\s*(\\d+)\\.\\s*(.+)$`がリスト行にもマッチする点は変わらない。",
+      "recommendation": "以下のいずれかの方式で整合性を確保する。(A) 検出ロジックを2パス方式に変更し、1パス目で❯付き行の有無をスキャンし、❯付き行が存在する場合のみ2パス目でnormalOptionPatternを適用する。(B) 設計判断ノートからコンテキスト制約の記述を削除し、normalOptionPatternが全行に適用されることを前提に、Layer 3(連番検証)とLayer 4(hasDefault必須)に検出精度を委任する設計であることを明記する。方式(A)が誤検出防止の観点からより安全である。",
+      "affected_sections": ["Section 3.1"]
+    },
+    {
+      "id": "S2-002",
+      "severity": "should_fix",
+      "category": "code_reference",
+      "title": "Section 7.1のresponse-poller.tsのthinking判定状況の記述が不正確",
+      "description": "Section 7.1の影響調査テーブルでは、response-poller.tsについて「既に独自のthinking判定あり」と記載されている。実際のコード（response-poller.ts L266, L337, L533）では、detectThinking()関数ではなくgetCliToolPatterns()から取得したthinkingPatternをthinkingPattern.test()で直接使用している。一方、auto-yes-manager.tsの変更提案ではdetectThinking()関数を使用する計画である。両者は同じCLAUDE_THINKING_PATTERNを参照するため結果は同等だが、「独自のthinking判定」という表現はdetectThinking()関数を使用しているかのような印象を与え、実装方式の違いが不明確である。claude-poller.ts（L76）ではさらに別のローカルthinkingPattern `/[✻✽⏺·∴✢✳]/m` を定義しており、CLAUDE_THINKING_PATTERNよりも簡略化されたパターンを使用している。設計書の記述は3つの異なるthinking判定方式を「独自のthinking判定」で一括りにしている。",
+      "recommendation": "Section 7.1のthinking判定状況列を以下のように具体化する。response-poller.ts: 「getCliToolPatterns().thinkingPatternによるパターンマッチ」、claude-poller.ts: 「ローカル定義のthinkingPattern(/[✻✽⏺·∴✢✳]/m)によるパターンマッチ -- cli-patterns.tsのCLAUDE_THINKING_PATTERNとは異なるパターン」、status-detector.ts: 「detectThinking()関数を使用（L91）」。これにより各呼び出し元での判定方式の違いが明確になる。",
+      "affected_sections": ["Section 7.1"]
+    },
+    {
+      "id": "S2-003",
+      "severity": "should_fix",
+      "category": "cross_section",
+      "title": "Section 2変更対象ファイルにstatus-detector.tsが含まれていない",
+      "description": "Section 7.1およびSection 8(実装順序Step 5)では、status-detector.tsの実行順序確認と必要に応じた修正を記載している。Section 11(実装チェックリスト)のShould Fix対応にも「必要に応じてstatus-detector.tsでdetectPrompt()前にdetectThinking()チェックを追加する」と記載されている。しかし、Section 2の変更対象ファイルテーブルにはstatus-detector.tsが含まれていない。変更の可能性があるファイルが変更対象一覧に記載されていないのはセクション間の不整合である。",
+      "recommendation": "Section 2の変更対象ファイルテーブルにstatus-detector.tsを「条件付き」として追加する。例: `src/lib/status-detector.ts | detectPrompt前のthinkingチェック追加（必要に応じて） | 小`。もしくは「スコープ外だが調査対象」として注釈を付ける。",
+      "affected_sections": ["Section 2", "Section 7.1", "Section 8", "Section 11"]
+    },
+    {
+      "id": "S2-004",
+      "severity": "should_fix",
+      "category": "feasibility",
+      "title": "auto-yes-manager.tsのthinkingチェック追加時のcliToolId型の整合性確認",
+      "description": "Section 3.2の提案コードでは`detectThinking(cliToolId, cleanOutput)`を呼び出す。detectThinking()のシグネチャは`detectThinking(cliToolId: CLIToolType, content: string): boolean`である（cli-patterns.ts L71）。pollAutoYes()関数のシグネチャは`pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<void>`（auto-yes-manager.ts L262）であり、CLIToolType型は一致している。しかし、auto-yes-manager.tsの現在のimport文（L11）は`import type { CLIToolType } from './cli-tools/types';`であり、cli-patterns.tsのimport（L6）も同じパスからCLIToolTypeをimportしている。型の整合性は問題ないが、設計書ではこのimport追加(`import { detectThinking, stripAnsi } from './cli-patterns';`)のみを記載しており、stripAnsiが既にimport済みであることに言及していない。",
+      "recommendation": "Section 3.2の提案importを正確に記載する。現在のauto-yes-manager.ts L17は`import { stripAnsi } from './cli-patterns';`であるため、変更は`import { stripAnsi, detectThinking } from './cli-patterns';`（detectThinkingの追加のみ）となる。設計書の提案コードは`import { detectThinking, stripAnsi } from './cli-patterns';`と記載しており、import順序は異なるが実質的に正しい。ただし、既存importへの追加であることを明記するとより正確になる。",
+      "affected_sections": ["Section 3.2"]
+    },
+    {
+      "id": "S2-005",
+      "severity": "should_fix",
+      "category": "test_coverage",
+      "title": "Section 5.1テストケース#2の期待結果がSection 3.1の設計変更と整合しない可能性",
+      "description": "Section 5.1テストケース#2は「❯なしの番号付きリスト `  1. Yes\\n  2. No` -> isPrompt: false」を期待している。しかし、Section 3.1の設計変更（パターン分離）後でも、normalOptionPattern `^\\s*(\\d+)\\.\\s*(.+)$` は`  1. Yes`と`  2. No`にマッチし、options配列に蓄積される。isDefault=falseの選択肢が2つ蓄積されるが、Layer 4の`hasDefaultIndicator`チェック（options.some(opt => opt.isDefault)）でfalseとなるため、最終的にはisPrompt: falseが返却される。テストは通過するが、これはLayer 4による保護であり、Layer 2（❯厳格化）による保護ではない。設計書が意図する「❯パターン分離による誤マッチ低減」の効果がこのテストケースでは検証されていない。",
+      "recommendation": "テストケース#2に対して、設計の意図を明確にするコメントを追加する。例: 「このテストはLayer 4 (hasDefault必須) による保護を検証する。Layer 2 (パターン分離) はnormalOptionPatternが依然としてマッチするため、このケースでは直接的な保護を提供しない」。あるいは、S2-001で提案した2パス方式を採用する場合は、Layer 2レベルでの保護が有効になるため、テストの意図も変わる。",
+      "affected_sections": ["Section 5.1", "Section 3.1"]
+    },
+    {
+      "id": "S2-006",
+      "severity": "should_fix",
+      "category": "test_coverage",
+      "title": "Section 5.3境界テスト#1のテスト実装場所が不明確",
+      "description": "Section 5.3の防御層境界テスト#1は「thinking中 + ❯付き連番選択肢 -> Layer 1（呼び出し元）でスキップ」を検証する。このテストはprompt-detector.tsの単体テストではなく、auto-yes-manager.tsの単体テスト（またはpollAutoYes関数のモックテスト）として実装する必要がある。しかし、Section 2の変更対象ファイルではテストファイルとして`tests/unit/prompt-detector.test.ts`と`tests/unit/lib/auto-yes-resolver.test.ts`のみを記載しており、`tests/unit/lib/auto-yes-manager.test.ts`は変更対象として明記されていない。Section 5.4で「thinking中にpollAutoYesがprompt検出をスキップすること」のテストを記載しているが、Section 5.3テスト#1との関係（同一テストか別テストか）が不明確である。",
+      "recommendation": "Section 2の変更対象ファイルテーブルに`tests/unit/lib/auto-yes-manager.test.ts`を追加し、Section 5.3テスト#1とSection 5.4の「thinking中にpollAutoYesがprompt検出をスキップすること」が同一テストケースであることを明記する。もしくは、Section 5.3テスト#1をauto-yes-manager側のテストとして実装する旨を記載する。",
+      "affected_sections": ["Section 2", "Section 5.3", "Section 5.4"]
+    },
+    {
+      "id": "S2-007",
+      "severity": "nice_to_have",
+      "category": "code_reference",
+      "title": "Section 3.3の連番検証の適用場所記述が既存コードの構造と微妙に不一致",
+      "description": "Section 3.3では連番検証の適用場所を「選択肢収集後、options.length < 2 || !hasDefaultIndicator チェックの前」と記載し、コード例で`const hasDefaultIndicator = options.some(opt => opt.isDefault);`を示している。しかし、既存コード（prompt-detector.ts L242-243）では、変数名は`hasDefaultIndicator`ではなく、直接`options.some(opt => opt.isDefault)`を評価し、それ以前の行で個別にhasDefaultを設定する変数名はforループ内の`hasDefault`（L212）である。設計書のコード例の変数名`hasDefaultIndicator`は既存コードのL242の式と同等だが、新しい変数名を導入している。",
+      "recommendation": "設計書のコード例で使用する変数名を既存コードと合わせるか、新しい変数名を導入する場合はその旨を明記する。既存コードL242-243は`const hasDefaultIndicator = options.some(opt => opt.isDefault); if (options.length < 2 || !hasDefaultIndicator)`であり、実は変数名`hasDefaultIndicator`は既存コードでも使用されている。設計書の記述は正確だが、適用場所の表現「チェックの前」をより具体的に「L241（現在のhasDefaultIndicator定義）の前」とすると実装者にとって明確になる。",
+      "affected_sections": ["Section 3.3"]
+    },
+    {
+      "id": "S2-008",
+      "severity": "nice_to_have",
+      "category": "cross_section",
+      "title": "Section 4多層防御図のLayer 1にstatus-detector.tsが記載されているがSection 8実装順序との整合性",
+      "description": "Section 4の多層防御図のLayer 1には「status-detector.ts: 独自のdetectThinking()」と記載されている。Section 8の実装順序ではStep 5で「status-detector.tsの実行順序確認・必要に応じて対応」としている。Section 4はstatus-detector.tsが既にLayer 1として機能しているかのような記述だが、実際にはstatus-detector.ts（L80）はdetectPrompt()をdetectThinking()より前に呼び出すため、thinking中のmultiple_choice誤検出時にLayer 1をバイパスする可能性がある（Section 7.1でも指摘済み）。",
+      "recommendation": "Section 4の多層防御図のLayer 1にstatus-detector.tsの実行順序問題に関する注記を追加する。例: 「注: status-detector.tsはdetectPrompt()がdetectThinking()より前に実行されるため、現状ではLayer 1が完全に機能しない。Step 5で対応を検討する」。",
+      "affected_sections": ["Section 4", "Section 7.1", "Section 8"]
+    },
+    {
+      "id": "S2-009",
+      "severity": "nice_to_have",
+      "category": "issue_design",
+      "title": "Issue #161で報告されている具体的な再現シナリオの設計書内での言及",
+      "description": "設計書Section 1.1ではIssue #161の問題を「番号付きリスト（例：1. ファイルを作成、2. テストを実行）がmultiple_choiceプロンプトとして誤検出される」と記載しているが、Issue #161で報告されている可能性のある具体的な再現シナリオ（どのworktree操作時に発生するか、どの頻度で発生するか等）に関する言及がない。設計書は技術的な根本原因と対策に焦点を当てており、ユーザー体験の視点からの影響範囲（例: Auto-Yesモード有効時に意図しない操作が実行される危険性）が明示されていない。",
+      "recommendation": "Section 1に「影響範囲」サブセクションを追加し、Auto-Yesモード有効時に誤検出された場合の具体的な影響（例: 「1」が自動送信されることでClaude CLIの選択肢1が選択される動作が発生する等）を記載する。ただし、これは設計書としてはnice_to_haveレベルであり、実装に直接影響しない。",
+      "affected_sections": ["Section 1"]
+    },
+    {
+      "id": "S2-010",
+      "severity": "nice_to_have",
+      "category": "code_reference",
+      "title": "Section 1.2のoptionPatternの位置をL198と記載しているが、行番号は将来変動する可能性がある",
+      "description": "設計書の複数箇所でソースコードの行番号を参照している（L198, L212, L193, L280, L248, L556, L164, L80, L91等）。現時点では全ての行番号が実際のソースコードと一致していることを確認した。しかし、Stage 1の指摘対応（設計書更新）やmainブランチへのマージ等で他の変更が先に入った場合、行番号がずれる可能性がある。",
+      "recommendation": "行番号は実装時の参考情報として有用であるため現状のままで問題ないが、実装着手時に行番号を再確認することを推奨する。重要な参照には行番号に加えて関数名やパターン文字列も併記する（設計書の多くの箇所では既に実施済みであり、これは確認事項にとどまる）。",
+      "affected_sections": ["Section 1.2", "Section 3.1", "Section 7.1"]
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4,
+    "overall_assessment": "設計書と既存コードベースの整合性は全体的に高い水準にある。行番号、関数名、変数名、ファイルパスの参照は全て正確であり、Stage 1レビュー指摘の反映も適切に行われている。唯一のmust_fix (S2-001) は、Section 3.1のnormalOptionPatternに関する設計判断ノートの「コンテキスト制約」と実際の検出ロジック（各行独立マッチ）の不整合である。この不整合は、設計意図（通常の番号付きリストのoptions配列蓄積を防ぐ）と実装効果（Layer 4のhasDefault必須チェックに依存する結果となる）の齟齬を生み、実装者が混乱する可能性がある。should_fixの5件は、(1) response-poller.ts/claude-poller.tsのthinking判定方式の記述精度、(2) status-detector.tsの変更対象一覧への追加、(3) import変更の既存コードとの整合、(4-5) テストカバレッジの意図明確化に関するものである。nice_to_haveの4件はドキュメントの精度向上に関するもので、実装に直接影響しない。全体として、設計書はStage 1の指摘を適切に反映しており、実装可能な品質に達している。S2-001の不整合を解消すれば、多層防御の各レイヤーの役割がより明確になり、実装品質が向上する。"
+  }
+}

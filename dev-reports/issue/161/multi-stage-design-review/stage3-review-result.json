@@ -1,0 +1,141 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "ripple_effect",
+      "title": "API routes (worktrees/route.ts, worktrees/[id]/route.ts) share the same detectPrompt-before-detectThinking execution order problem as status-detector.ts",
+      "description": "The design document (Section 7.1) identifies 4 callers of detectPrompt(): auto-yes-manager.ts, response-poller.ts, claude-poller.ts, and status-detector.ts. However, 3 additional callers in API routes are not listed: (1) src/app/api/worktrees/route.ts (L62), (2) src/app/api/worktrees/[id]/route.ts (L62), and (3) src/app/api/worktrees/[id]/current-output/route.ts (L79). The first two API routes exhibit the exact same execution order problem identified for status-detector.ts in S1-006: they call detectPrompt() first, and only if no prompt is detected do they call detectThinking(). When a false positive multiple_choice detection occurs during thinking state, these routes will set isWaitingForResponse=true and skip the thinking check, resulting in incorrect sidebar status (showing 'waiting' instead of 'running'). This directly affects the user-visible sidebar status indicators. The current-output route (L79/L87) also calls detectPrompt() before detectThinking(), but has a slightly different guard: it uses `!isPromptWaiting && detectThinkingState(...)` which correctly prevents thinking=true when prompt is detected, but still allows the false positive prompt to propagate to the client as isPromptWaiting=true and promptData.",
+      "recommendation": "Add all 3 API route files to Section 7.1's caller analysis table. For worktrees/route.ts and worktrees/[id]/route.ts, the false positive issue will be resolved by the 2-pass detection changes in prompt-detector.ts (Layer 2), so no direct code changes are needed in these files. However, the design document should acknowledge these callers to ensure completeness of the impact analysis. If there is concern about edge cases where the 2-pass method alone is insufficient, consider reordering these routes to check detectThinking() first, consistent with the pattern being added to auto-yes-manager.ts.",
+      "affected_files": [
+        "src/app/api/worktrees/route.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts"
+      ]
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "category": "race_condition",
+      "title": "Server-side (auto-yes-manager) and client-side (useAutoYes) duplicate response risk during the transition from false-positive to corrected detection",
+      "description": "The current architecture has both server-side polling (auto-yes-manager.ts pollAutoYes()) and client-side hook (useAutoYes.ts) capable of responding to prompts. The duplicate prevention mechanism relies on lastServerResponseTimestamp with a 3-second window (DUPLICATE_PREVENTION_WINDOW_MS). With the proposed change, there is a subtle timing scenario: (1) A legitimate multiple_choice prompt appears, (2) Server-side poller detects it and sends a response, (3) The prompt display briefly remains in the client because the tmux output has not yet updated, (4) The client-side hook, seeing the prompt data via the current-output API, also attempts to respond because 3 seconds have passed since the server response. This existing race condition is not introduced by Issue #161's changes, but the design document should acknowledge that the proposed changes do NOT worsen this scenario. More critically, after the fix reduces false positives, the existing 3-second deduplication window remains the sole guard against double responses for legitimate prompts. The design document does not analyze whether the deduplication mechanism is robust enough.",
+      "recommendation": "Add a note in Section 6 (Risk Analysis) or Section 7 (Caller Impact) explicitly stating that the existing server-client duplicate prevention mechanism (3-second timestamp window) is unaffected by this change and remains adequate. If the team considers the 3-second window fragile, a stronger deduplication mechanism (e.g., prompt ID or question hash based deduplication) could be considered as a follow-up.",
+      "affected_files": [
+        "src/lib/auto-yes-manager.ts",
+        "src/hooks/useAutoYes.ts"
+      ]
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "edge_case",
+      "title": "The Unicode character U+276F (HEAVY RIGHT-POINTING ANGLE QUOTATION MARK) appears in both selection indicators and CLI prompt patterns, creating ambiguity",
+      "description": "The design proposes that the 2-pass detection requires at least one line matching defaultOptionPattern (containing the U+276F character) in the 50-line window. However, the same U+276F character is used as the Claude CLI prompt character (CLAUDE_PROMPT_PATTERN in cli-patterns.ts L46: /^[>\\u276F](\\s*$|\\s+\\S)/m). This means that in tmux output containing both a prompt line (e.g., 'prompt-char /work-plan') and a numbered list (e.g., '1. Step one\\n2. Step two'), the prompt-char on the prompt line could satisfy Pass 1's requirement for a defaultOptionPattern match. Specifically, if ANSI stripping or line boundaries cause the prompt-char character to appear at the start of a line that also happens to have a number-dot pattern nearby, a false positive could occur. While the defaultOptionPattern requires the specific format `^\\s*U+276F\\s*(\\d+)\\.\\s*(.+)$` (prompt-char followed by number-dot), reducing this risk significantly, the 50-line window scan is broad enough that unusual tmux formatting could create edge cases.",
+      "recommendation": "Add a test case that simulates tmux output containing both a Claude CLI prompt line with prompt-char and a numbered list in close proximity, to verify that the 2-pass detection does not produce false positives in this scenario. For example: '\\u276F /work-plan\\n\\nI will do the following:\\n1. Create file\\n2. Run tests'. This should return isPrompt: false because the prompt-char line does not match defaultOptionPattern (it is followed by /work-plan, not a number-dot pattern).",
+      "affected_files": [
+        "src/lib/prompt-detector.ts",
+        "tests/unit/prompt-detector.test.ts"
+      ]
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "category": "backward_compat",
+      "title": "Existing tests lack coverage for multiple_choice prompt detection - no regression safety net",
+      "description": "The existing test file tests/unit/prompt-detector.test.ts contains 0 test cases for multiple_choice prompts. All existing tests cover yes/no patterns (Patterns 1-5) and the getAnswerInput function. This means there is no regression test baseline for the current multiple_choice detection behavior. When the 2-pass detection and consecutive number validation are implemented, there will be no automated verification that previously-working legitimate prompts continue to be detected correctly. Section 5.2 of the design document lists 6 regression test cases, but the fact that none of these exist today means the implementation must create them from scratch. If even one regression test case is missed or implemented incorrectly, a backward compatibility break could go undetected.",
+      "recommendation": "Before implementing any changes to detectMultipleChoicePrompt(), first add the regression test cases from Section 5.2 (tests 1-6) against the CURRENT codebase to establish a baseline. Verify they all pass. Then proceed with the implementation changes. This 'test-first' approach ensures backward compatibility is validated against the actual current behavior, not just the expected behavior documented in the design.",
+      "affected_files": [
+        "tests/unit/prompt-detector.test.ts"
+      ]
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "ripple_effect",
+      "title": "response-poller.ts calls detectPrompt() at two separate points (L248 and L556) with different contexts and no thinking guard",
+      "description": "response-poller.ts calls detectPrompt() in two distinct locations within the extractResponse() function: (1) At L248, early in the function for Claude-specific permission prompt detection using the full output, and (2) At L556 (via the variable named promptDetection at the end of extractResponse), checking the full output again for interactive prompts when the response is not yet considered complete. Additionally, detectPrompt() is called a third time at L556 in checkForResponse() for the completed response. The design document lists response-poller.ts as having 'existing thinking detection' (via getCliToolPatterns().thinkingPattern at L266/L337/L533), but these thinking checks occur AFTER the first detectPrompt() call at L248. If a false positive multiple_choice detection occurs at L248, the function returns early with isComplete: true before any thinking check. While the 2-pass detection fix in prompt-detector.ts will reduce false positives at this call site, the design document does not acknowledge the multiple call sites within response-poller.ts and their different execution contexts.",
+      "recommendation": "Update Section 7.1 to note that response-poller.ts has multiple detectPrompt() call sites (L248 for early prompt detection and L556 for end-of-extraction prompt detection) and that the early call at L248 has no preceding thinking guard. Since the 2-pass detection fix in prompt-detector.ts itself will handle this at Layer 2, no code change is needed in response-poller.ts, but the impact analysis should be explicit about all call sites.",
+      "affected_files": [
+        "src/lib/response-poller.ts"
+      ]
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "dependency",
+      "title": "Claude CLI output format changes (prompt-char character, selection indicator format) could invalidate the 2-pass detection",
+      "description": "The 2-pass detection relies on the presence of the specific Unicode character U+276F as the selection indicator in multiple-choice prompts. This is an implementation detail of Claude CLI's terminal UI. If a future Claude CLI version changes the selection indicator character (e.g., to an arrow symbol, a checkmark, or a different Unicode character), the defaultOptionPattern will fail to match, and ALL legitimate multiple-choice prompts will be classified as isPrompt: false (complete false negative). The design document acknowledges this dependency implicitly by referencing 'Claude CLIは常に1始まり連番を使用（仕様確認済み）' in Section 6.1, but does not assess the risk of the prompt-char/selection indicator format changing. Claude CLI has already changed its prompt character from '>' to 'prompt-char' (U+276F) in the past, demonstrating that such changes do occur.",
+      "recommendation": "Add a subsection to Section 6.1 (False Negative Risk) that explicitly documents the dependency on Claude CLI's selection indicator format (U+276F character). Note the historical precedent of the prompt character change from '>' to 'prompt-char' (U+276F). Consider adding an integration-level smoke test that validates the detection against actual Claude CLI output format, which can serve as an early warning when CLI format changes. Also consider making the defaultOptionPattern configurable or extracting the selection indicator character as a named constant in cli-patterns.ts for easier future updates.",
+      "affected_files": [
+        "src/lib/prompt-detector.ts",
+        "src/lib/cli-patterns.ts"
+      ]
+    },
+    {
+      "id": "S3-007",
+      "severity": "should_fix",
+      "category": "edge_case",
+      "title": "The 50-line scan window may be insufficient or excessive depending on the tmux output context",
+      "description": "The 2-pass detection scans the last 50 lines (existing window size) for the defaultOptionPattern. Two edge cases arise: (1) If Claude outputs a very long explanation followed by a selection prompt, the 50-line window may not contain the prompt-char indicator line if the output has many continuation lines or wrapped text. This would cause a false negative. (2) Conversely, if tmux output contains a legitimate selection prompt that was already answered (scrolled partially out of view) followed by a new numbered list output, the stale prompt-char from the old prompt could trigger a false positive on the new numbered list. The current code already handles continuation lines (L222-233), but the 50-line window size is a fixed constant that was chosen for the original single-pattern approach. The 2-pass approach changes the semantic meaning of the window (from 'scan for options' to 'verify prompt-char presence + scan for options'), which may warrant re-evaluation.",
+      "recommendation": "Add test cases for the boundary conditions of the 50-line window: (1) A selection prompt where the prompt-char line is exactly at the 50th line from the end (boundary case), (2) A scenario where the tmux buffer contains an old answered prompt with prompt-char followed by new numbered list output. Document the rationale for the 50-line window size in the code comments, and consider whether the window should be reduced for Pass 1 (prompt-char existence check) to minimize stale data interference.",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ]
+    },
+    {
+      "id": "S3-008",
+      "severity": "should_fix",
+      "category": "user_experience",
+      "title": "Reduced false positive detection may cause brief UI flickering for legitimate prompts during thinking-to-prompt transitions",
+      "description": "Currently, the thinking state check (Layer 1) in auto-yes-manager.ts will skip prompt detection entirely when thinking is detected. There is a transition window when Claude CLI finishes thinking and displays a selection prompt. During this transition, the tmux output may still contain thinking indicators (e.g., spinner characters in earlier lines) while the prompt is being rendered in the latest lines. The detectThinking() function checks the content broadly (not just the last line), so it could return true even when the prompt has already appeared in the latest lines. This would cause a delay in prompt detection until the thinking indicators scroll out of the checked window. For auto-yes mode, this means the automatic response could be delayed by one or more polling intervals (2 seconds each). This is not a correctness issue (the prompt will eventually be detected), but it is a user experience consideration.",
+      "recommendation": "Document this expected behavior in the design document as a known trade-off. The delay is bounded by the polling interval (2 seconds) and is preferable to false positive responses. Consider noting that if this delay becomes noticeable to users, a possible mitigation is to check the last N lines for the prompt BEFORE checking for thinking indicators, but only for the auto-yes path. However, this optimization should only be pursued if user feedback indicates it is needed.",
+      "affected_files": [
+        "src/lib/auto-yes-manager.ts"
+      ]
+    },
+    {
+      "id": "S3-009",
+      "severity": "nice_to_have",
+      "category": "ripple_effect",
+      "title": "UI components (PromptPanel.tsx, MobilePromptSheet.tsx, PromptMessage.tsx) consume PromptData but are not directly affected",
+      "description": "Multiple UI components consume the PromptData type: PromptPanel.tsx, MobilePromptSheet.tsx, PromptMessage.tsx, MessageList.tsx, and WorktreeDetailRefactored.tsx. These components receive promptData from the current-output API response. With the proposed changes, these components will receive fewer false positive promptData objects, which is the intended behavior. However, none of these components need code changes because they already handle the case where promptData is null or undefined. The design document does not mention these downstream consumers at all.",
+      "recommendation": "Add a brief note in Section 7 acknowledging that UI components that render PromptData (PromptPanel, MobilePromptSheet, etc.) are downstream consumers that benefit from reduced false positives but require no code changes. This improves the completeness of the impact analysis.",
+      "affected_files": [
+        "src/components/worktree/PromptPanel.tsx",
+        "src/components/worktree/PromptMessage.tsx",
+        "src/components/mobile/MobilePromptSheet.tsx"
+      ]
+    },
+    {
+      "id": "S3-010",
+      "severity": "nice_to_have",
+      "category": "edge_case",
+      "title": "The consecutive number validation (Layer 3) rejects prompts with gaps but Claude CLI could theoretically produce filtered option lists",
+      "description": "The isConsecutiveFromOne() function requires options to be numbered 1, 2, 3, ... without gaps. While the design document states 'Claude CLIは常に1始まり連番を使用（仕様確認済み）', there is a theoretical edge case: if Claude CLI filters out certain options based on context (e.g., removing a deprecated option), the remaining options might not form a consecutive sequence. For example, options 1, 2, 4 (with option 3 removed). This would cause a false negative. However, this is speculative and has not been observed in practice.",
+      "recommendation": "No code change needed. The design document already classifies this as a defensive measure (Should, not Must). Add a brief comment in the isConsecutiveFromOne() implementation noting that this validation may need relaxation if Claude CLI is observed to produce non-consecutive option numbering in the future.",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ]
+    },
+    {
+      "id": "S3-011",
+      "severity": "nice_to_have",
+      "category": "dependency",
+      "title": "claude-poller.ts uses a simplified local thinkingPattern that does not match the full CLAUDE_THINKING_PATTERN, potentially affecting prompt detection accuracy in its code path",
+      "description": "claude-poller.ts (L76) defines a local thinkingPattern `/[\\u2713\\u2735\\u23fa\\u00b7\\u2234\\u2722\\u2733]/m` which only checks for the presence of spinner characters without requiring the trailing '...' text pattern. In contrast, CLAUDE_THINKING_PATTERN in cli-patterns.ts requires `spinner + space + text + '...'` OR 'to interrupt)'. This means claude-poller.ts may classify output as 'thinking' more aggressively than other modules. When it determines thinking=false, it calls detectPrompt(fullOutput) at L164. If the output contains spinner characters that are part of response content (e.g., the bullet character \\u2609 in a response), claude-poller.ts would NOT call detectPrompt, potentially missing a legitimate prompt. While this is an existing inconsistency (noted in S1-008), the proposed changes in Issue #161 do not address it, and the design document should clarify that claude-poller.ts's code path is a separate concern.",
+      "recommendation": "This is already identified as existing technical debt in S1-008. No additional action needed for Issue #161. The design document already acknowledges this in Section 10.3 (Scope-external technical debt).",
+      "affected_files": [
+        "src/lib/claude-poller.ts"
+      ]
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 6,
+    "nice_to_have_count": 3,
+    "overall_assessment": "The impact analysis reveals that the design document's caller inventory in Section 7.1 is incomplete. Three API route files (worktrees/route.ts, worktrees/[id]/route.ts, worktrees/[id]/current-output/route.ts) also call detectPrompt() and share the same detectPrompt-before-detectThinking execution order as status-detector.ts. This is the most significant gap (S3-001). The proposed 2-pass detection change in prompt-detector.ts will resolve false positives at ALL call sites (including the undocumented API routes), making the fix inherently safe. However, the design document should acknowledge all callers for completeness. The second must_fix (S3-002) highlights that the existing server-client duplicate response prevention mechanism should be documented as unaffected by the change. The should_fix items cover important edge cases: the shared use of U+276F between prompt indicators and selection indicators (S3-003), the lack of existing multiple_choice test coverage as a regression baseline (S3-004), response-poller.ts's multiple call sites (S3-005), Claude CLI format change dependency risk (S3-006), 50-line window boundary conditions (S3-007), and thinking-to-prompt transition delays (S3-008). Overall, the proposed changes have well-contained impact because the core fix is within prompt-detector.ts (a pure function with no side effects), and the Layer 1 thinking guard is confined to auto-yes-manager.ts. The risk of backward compatibility breaks is low, provided the regression test cases from Section 5.2 are implemented before the code changes."
+  }
+}

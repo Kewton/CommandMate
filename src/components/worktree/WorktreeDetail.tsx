@@ -25,10 +25,10 @@ export interface WorktreeDetailProps {
   worktreeId: string;
 }
 
-type TabView = 'claude' | 'logs' | 'info' | 'description';
+type TabView = 'claude' | 'codex' | 'logs' | 'info' | 'description';
 
-// Check if tab is a CLI tab (only Claude after Issue #33)
-const isCliTab = (tab: TabView): tab is 'claude' => tab === 'claude';
+// Check if tab is a CLI tab (Claude and Codex - Issue #4)
+const isCliTab = (tab: TabView): tab is 'claude' | 'codex' => tab === 'claude' || tab === 'codex';
 
 /**
  * Worktree detail page component
@@ -368,8 +368,16 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
     // Handle session status changes
     if (isSessionStatusPayload(message.data) && message.data.worktreeId === worktreeId) {
       if (message.data.messagesCleared) {
-        console.log('[WorktreeDetail] Session killed, clearing messages');
-        setMessages([]);
+        const targetCliTool = message.data.cliTool as CLIToolType | null | undefined;
+        if (targetCliTool) {
+          // Issue #4: Individual session termination - clear only that CLI tool's messages
+          console.log(`[WorktreeDetail] Session killed for ${targetCliTool}, clearing its messages`);
+          setMessages(prevMessages => prevMessages.filter(m => m.cliToolId !== targetCliTool));
+        } else {
+          // All sessions killed - clear all messages
+          console.log('[WorktreeDetail] All sessions killed, clearing all messages');
+          setMessages([]);
+        }
         setWaitingForResponse(false);
         setPendingCliTool(null);
         setGeneratingContent('');
@@ -548,6 +556,37 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
     fetchMessages(toolId);
   };
 
+  /**
+   * Handle session termination for a specific CLI tool
+   * Issue #4: Individual session termination support
+   */
+  const handleKillSession = async (cliTool: CLIToolType) => {
+    try {
+      setError(null);
+      const response = await fetch(`/api/worktrees/${worktreeId}/kill-session?cliTool=${cliTool}`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.error || 'Failed to kill session');
+        return;
+      }
+
+      // Clear messages for this CLI tool (WebSocket will also broadcast)
+      setMessages(prevMessages => prevMessages.filter(m => m.cliToolId !== cliTool));
+      setWaitingForResponse(false);
+      setPendingCliTool(null);
+      setGeneratingContent('');
+      setRealtimeOutput('');
+      setIsThinking(false);
+
+      console.log(`[WorktreeDetail] Killed ${cliTool} session for worktree ${worktreeId}`);
+    } catch (err) {
+      setError(handleApiError(err));
+    }
+  };
+
   if (loading) {
     return (
       <div className="container-custom py-8">
@@ -658,6 +697,16 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
             Claude
           </button>
           <button
+            onClick={() => setActiveTab('codex')}
+            className={`pb-3 px-4 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'codex'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Codex
+          </button>
+          <button
             onClick={() => setActiveTab('logs')}
             className={`pb-3 px-4 border-b-2 font-medium text-sm transition-colors ${
               activeTab === 'logs'
@@ -721,11 +770,25 @@ export function WorktreeDetail({ worktreeId }: WorktreeDetailProps) {
           {/* Message Input */}
           <div className="sticky bottom-0 flex-shrink-0 w-full bg-gray-50 border-t border-gray-200">
             <div className="px-4 sm:px-6 lg:px-8 pb-4 pt-2">
-              <MessageInput
-                worktreeId={worktreeId}
-                onMessageSent={handleMessageSent}
-                cliToolId={activeTab as 'claude' | 'codex' | 'gemini'}
-              />
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <MessageInput
+                    worktreeId={worktreeId}
+                    onMessageSent={handleMessageSent}
+                    cliToolId={activeTab as 'claude' | 'codex' | 'gemini'}
+                  />
+                </div>
+                {/* Issue #4: Session termination button */}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => handleKillSession(activeTab as CLIToolType)}
+                  title={`Terminate ${activeTab} session`}
+                  className="flex-shrink-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  ✕ End
+                </Button>
+              </div>
             </div>
           </div>
         </div>

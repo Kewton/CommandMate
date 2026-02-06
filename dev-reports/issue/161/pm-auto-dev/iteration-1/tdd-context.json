@@ -1,0 +1,42 @@
+{
+  "issue_number": 161,
+  "title": "auto yes 実行時、それなりの頻度で\"1\"が送信される",
+  "design_policy_path": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+  "work_plan_path": "dev-reports/issue/161/work-plan.md",
+  "acceptance_criteria": [
+    "通常の番号付きリスト（例：「1. ファイルを作成\\n2. テストを実行」）でmultiple_choiceとして誤検出しない",
+    "有効な❯インジケーター付きmultiple_choiceプロンプト（例：「❯ 1. Yes\\n  2. No」）を正しく検出する",
+    "thinking状態中はdetectPrompt()をスキップする（auto-yes-manager.tsの呼び出し元で）",
+    "既存のyes/noパターン検出が影響を受けない",
+    "既存のApproveパターン検出が影響を受けない",
+    "CIチェック全パス（lint, type-check, test, build）"
+  ],
+  "implementation_tasks": [
+    "Phase 0 [TDD]: 回帰テストベースライン作成 - 設計方針書Section 5.2の回帰テストケース1-6を現在のコードに対して作成し、全パス確認",
+    "Task 1.1: prompt-detector.ts — 2パス❯検出方式の実装（案1/Must）: defaultOptionPattern(/^\\s*❯\\s*(\\d+)\\.\\s*(.+)$/)とnormalOptionPattern(/^\\s*(\\d+)\\.\\s*(.+)$/)に分離。パス1で❯存在確認、パス2で選択肢収集",
+    "Task 1.2: prompt-detector.ts — 連番検証の追加（案3/Should/防御的措置）: isConsecutiveFromOne()関数を追加。選択肢番号が1始まり連番であることを検証",
+    "Task 1.3: auto-yes-manager.ts — thinking事前チェック追加（案2/Must）: pollAutoYes()内でdetectPrompt()前にdetectThinking(cliToolId, cleanOutput)チェックを追加。既存import文(L17のstripAnsi)にdetectThinkingを追加",
+    "Task 1.4: status-detector.ts — 実行順序確認・対応: detectPrompt(L80)がdetectThinking(L91)より先に実行される問題。2パス検出修正で解消されるか確認、必要に応じて対応",
+    "Task 2.1: 誤検出防止テスト（7ケース）- 設計方針書Section 5.1",
+    "Task 2.2: 防御層境界テスト（5ケース）- 設計方針書Section 5.3。テスト#1はauto-yes-manager.test.tsに実装",
+    "Task 2.3: 50行ウィンドウ境界条件テスト（3ケース）- 設計方針書Section 5.4",
+    "Task 2.4: auto-yes-manager回帰テスト - thinking中のpollAutoYesスキップテスト"
+  ],
+  "target_coverage": 80,
+  "design_constraints": {
+    "S1-001_S1-002": "prompt-detector.tsにCLAUDE_THINKING_PATTERNをimportしない。thinking判定はauto-yes-manager.ts側のみ。prompt-detector.tsのCLIツール非依存性を維持",
+    "S2-001": "2パス検出方式を採用。パス1でdefaultOptionPattern(❯付き)の存在確認、パス2で選択肢収集。normalOptionPatternは❯が確認されたコンテキスト内でのみ適用",
+    "S1-005": "連番検証はShould（防御的措置）。Issue #161の実際の誤検出パターンは1始まり連番のため、この検証単体では防止不可",
+    "S3-010": "isConsecutiveFromOne()のコメントに将来の緩和可能性を記載",
+    "S2-004": "auto-yes-manager.tsの既存import文(L17のstripAnsi)にdetectThinkingを追加",
+    "S4-001": "提案パターンはアンカー付き(^...$)でReDoS安全であること"
+  },
+  "changed_files": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/status-detector.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/lib/auto-yes-resolver.test.ts"
+  ]
+}

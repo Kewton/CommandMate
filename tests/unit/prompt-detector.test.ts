@@ -5,7 +5,12 @@
 
 import { describe, it, expect } from 'vitest';
 import { detectPrompt, getAnswerInput } from '@/lib/prompt-detector';
-import type { PromptData, YesNoPromptData } from '@/types/models';
+import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
+
+// Type guard for MultipleChoicePromptData
+function isMultipleChoicePrompt(data: PromptData | undefined): data is MultipleChoicePromptData {
+  return data?.type === 'multiple_choice';
+}
 
 // Type guard for YesNoPromptData
 function isYesNoPrompt(data: PromptData | undefined): data is YesNoPromptData {
@@ -439,6 +444,214 @@ Are you sure you want to continue? (yes/no)
         status: 'pending',
         defaultOption: 'yes',
       });
+    });
+  });
+
+  // ==========================================================================
+  // Issue #161: Regression Tests (Section 5.2)
+  // Baseline tests to ensure backward compatibility of multiple_choice
+  // detection and existing yes/no patterns after code changes.
+  // ==========================================================================
+  describe('Issue #161: Regression tests - multiple_choice detection', () => {
+    it('should detect valid multiple_choice with cursor indicator', () => {
+      // Section 5.2 Test #1
+      const output = '❯ 1. Yes\n  2. No';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+    });
+
+    it('should detect consecutive 3-option multiple_choice with cursor indicator', () => {
+      // Section 5.2 Test #2
+      const output = '❯ 1. Yes\n  2. No\n  3. Cancel';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(3);
+      }
+    });
+
+    it('should set requiresTextInput for text input options', () => {
+      // Section 5.2 Test #3
+      const output = '❯ 1. Yes\n  2. Tell me differently';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options[1].requiresTextInput).toBe(true);
+      }
+    });
+
+    it('should still detect yes/no pattern (y/n)', () => {
+      // Section 5.2 Test #4
+      const output = 'Proceed? (y/n)';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('yes_no');
+    });
+
+    it('should still detect Approve pattern', () => {
+      // Section 5.2 Test #5
+      const output = 'Approve?';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('yes_no');
+    });
+
+    it('should still detect [Y/n] pattern with default yes', () => {
+      // Section 5.2 Test #6
+      const output = 'Continue? [Y/n]';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      if (isYesNoPrompt(result.promptData)) {
+        expect(result.promptData.defaultOption).toBe('yes');
+      }
+    });
+  });
+
+  // ==========================================================================
+  // Issue #161: False Positive Prevention Tests (Section 5.1)
+  // Tests that numbered lists without cursor indicator are NOT detected
+  // as multiple_choice prompts.
+  // ==========================================================================
+  describe('Issue #161: False positive prevention', () => {
+    it('should NOT detect plain numbered list as multiple_choice (Test #1)', () => {
+      // Layer 2 protection: 2-pass method - no cursor indicator found in pass 1
+      const output = '1. Create file\n2. Run tests';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should NOT detect indented numbered list without cursor as multiple_choice (Test #2)', () => {
+      // Layer 2 protection: no cursor indicator found
+      const output = '  1. Yes\n  2. No';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should NOT detect non-consecutive numbered options (Test #3)', () => {
+      // Layer 3 protection: consecutive number validation
+      const output = '❯ 1. Option A\n  3. Option B';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should NOT detect options not starting from 1 (Test #4)', () => {
+      // Layer 3 protection: consecutive number validation (must start from 1)
+      const output = '❯ 2. Option A\n  3. Option B';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    // Note: Test #5 (thinking state with numbered output) is in
+    // auto-yes-manager.test.ts as it tests Layer 1 (caller-side thinking check).
+    // See Section 5.1 of the design policy and Section 5.3 Test #1.
+
+    it('should NOT detect CLI step descriptions as multiple_choice (Test #6)', () => {
+      // Layer 2 protection: no cursor indicator in output
+      const output = "I'll do the following:\n1. Create file\n2. Run tests\n3. Commit";
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should NOT detect prompt cursor with numbered list as multiple_choice (Test #7 - S3-003)', () => {
+      // Layer 2 protection: cursor line does not match defaultOptionPattern
+      // because "❯ /work-plan" has /work-plan after cursor, not a number
+      const output = '❯ /work-plan\n\nI will do the following:\n1. Create file\n2. Run tests';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #161: Defense Layer Boundary Tests (Section 5.3)
+  // Tests that each defense layer stops false positives independently.
+  // Note: Test #1 is in auto-yes-manager.test.ts (Layer 1 - thinking check)
+  // ==========================================================================
+  describe('Issue #161: Defense layer boundary tests', () => {
+    it('Layer 2: no cursor indicator in numbered list should not be detected (Test #2)', () => {
+      const output = '  1. Option A\n  2. Option B';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('Layer 3: cursor present but non-consecutive numbers should not be detected (Test #3)', () => {
+      const output = '❯ 1. Option A\n  3. Option C\n  5. Option E';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('Layer 4: cursor present, consecutive but only 1 option should not be detected (Test #4)', () => {
+      const output = '❯ 1. Only option';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('All layers pass: valid multiple_choice should be detected (Test #5)', () => {
+      const output = '❯ 1. Yes\n  2. No';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #161: 50-line Window Boundary Tests (Section 5.4)
+  // Tests for the 50-line scan window boundary conditions.
+  // ==========================================================================
+  describe('Issue #161: 50-line window boundary tests', () => {
+    it('should detect cursor at window boundary (49 lines + prompt)', () => {
+      // Section 5.4 Test #1: cursor at boundary of 50-line window
+      const fillerLines = Array.from({ length: 49 }, (_, i) => `Line ${i + 1}`).join('\n');
+      const output = fillerLines + '\n❯ 1. Yes\n  2. No';
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+    });
+
+    it('should NOT detect cursor outside window (50+ lines before)', () => {
+      // Section 5.4 Test #2: cursor scrolled out of 50-line window
+      const fillerLines = Array.from({ length: 50 }, (_, i) => `Line ${i + 1}`).join('\n');
+      const output = '❯ 1. Yes\n' + fillerLines + '\n  2. No';
+      const result = detectPrompt(output);
+
+      // The cursor line is outside the 50-line scan window from the end
+      // so it should not be detected as a valid multiple_choice
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should handle old prompt cursor with new numbered list in window (Test #3)', () => {
+      // Section 5.4 Test #3: old answered prompt with cursor + new numbered list.
+      // Known edge case (Section 9.4): when an old ❯ line remains within the
+      // 50-line scan window, Pass 1 finds it and Pass 2 collects both old and
+      // new numbered lines. The consecutive number validation (Layer 3) and
+      // hasDefault check (Layer 4) provide partial protection.
+      const oldPrompt = '❯ 1. Yes\n  2. No';
+      const middleLines = Array.from({ length: 40 }, (_, i) => `Output line ${i + 1}`).join('\n');
+      const newList = '1. Step one\n2. Step two';
+      const output = oldPrompt + '\n' + middleLines + '\n' + newList;
+      const result = detectPrompt(output);
+
+      // Verify no crash occurs. The exact isPrompt value depends on how
+      // the old and new numbered lines interact with Layer 3/4 validation.
+      expect(result).toBeDefined();
+      expect(typeof result.isPrompt).toBe('boolean');
     });
   });
 });

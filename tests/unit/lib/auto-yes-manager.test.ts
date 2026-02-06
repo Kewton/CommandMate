@@ -19,6 +19,24 @@ import {
   type AutoYesState,
 } from '@/lib/auto-yes-manager';
 
+// Mock modules for pollAutoYes testing (Issue #161)
+vi.mock('@/lib/cli-session', () => ({
+  captureSessionOutput: vi.fn(),
+}));
+vi.mock('@/lib/tmux', () => ({
+  sendKeys: vi.fn(),
+}));
+vi.mock('@/lib/cli-tools/manager', () => ({
+  CLIToolManager: {
+    getInstance: () => ({
+      getTool: () => ({
+        getSessionName: (id: string) => `claude-${id}`,
+        name: 'Claude',
+      }),
+    }),
+  },
+}));
+
 describe('auto-yes-manager', () => {
   beforeEach(() => {
     clearAllAutoYesStates();
@@ -399,6 +417,84 @@ describe('auto-yes-manager', () => {
       // References should be the same
       expect(statesRef).toBe(globalThis.__autoYesStates);
       expect(state?.enabled).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #161: Thinking state skip test (Section 5.3 Test #1 / Section 5.5)
+  // Verifies that pollAutoYes skips prompt detection during thinking state.
+  // ==========================================================================
+  describe('Issue #161: pollAutoYes thinking state skip', () => {
+    it('should skip prompt detection when thinking state is detected', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { detectThinking } = await import('@/lib/cli-patterns');
+      const { detectPrompt } = await import('@/lib/prompt-detector');
+      const { sendKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      // Setup: enable auto-yes and start polling
+      setAutoYesEnabled('wt-thinking', true);
+      startAutoYesPolling('wt-thinking', 'claude');
+
+      // Mock: captureSessionOutput returns thinking output with numbered list
+      // Note: Uses unicode ellipsis (U+2026) to match CLAUDE_THINKING_PATTERN
+      const thinkingOutput = '\u2733 Analyzing\u2026\n1. Step one\n2. Step two';
+      vi.mocked(captureSessionOutput).mockResolvedValue(thinkingOutput);
+
+      // Advance timer to trigger pollAutoYes
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: captureSessionOutput was called (poll ran)
+      expect(captureSessionOutput).toHaveBeenCalled();
+
+      // Verify: sendKeys was NOT called, confirming that pollAutoYes
+      // skipped prompt detection due to thinking state (Layer 1 defense).
+      // The thinking output '✻ Analyzing...' matches CLAUDE_THINKING_PATTERN,
+      // so detectThinking() returns true and detectPrompt() is never called.
+      // Note: Even without Layer 1, the 2-pass fix (Layer 2) would also prevent
+      // false detection of the numbered list, but Layer 1 provides defense-in-depth.
+      expect(sendKeys).not.toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-thinking');
+      vi.mocked(captureSessionOutput).mockReset();
+    });
+
+    it('should call detectPrompt when NOT in thinking state', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      // Setup: enable auto-yes and start polling
+      setAutoYesEnabled('wt-normal', true);
+      startAutoYesPolling('wt-normal', 'claude');
+
+      // Mock: captureSessionOutput returns a valid multiple_choice prompt
+      const promptOutput = 'Select an option:\n\u276F 1. Yes\n  2. No';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+
+      // Advance timer to trigger pollAutoYes
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: captureSessionOutput was called
+      expect(captureSessionOutput).toHaveBeenCalled();
+
+      // Verify: sendKeys was called (prompt was detected and auto-answered)
+      // This confirms that when NOT in thinking state, prompt detection
+      // proceeds normally and auto-answer is sent.
+      expect(sendKeys).toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-normal');
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
     });
   });
 });

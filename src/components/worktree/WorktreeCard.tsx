@@ -28,7 +28,7 @@ export interface WorktreeCardProps {
  * ```
  */
 export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: WorktreeCardProps) {
-  const { id, name, description, lastMessagesByCli, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link, sessionStatusByCli } = worktree;
+  const { id, name, description, updatedAt, isSessionRunning, isWaitingForResponse, favorite, status, link } = worktree;
   const [isKilling, setIsKilling] = useState(false);
   const [isFavorite, setIsFavorite] = useState(favorite || false);
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
@@ -216,32 +216,6 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
                   </svg>
                   <span className="truncate">{link}</span>
                 </button>
-              </div>
-            )}
-
-            {/* Last Messages per CLI Tool with Status */}
-            {(lastMessagesByCli || sessionStatusByCli) && (
-              <div>
-                <p className="text-xs text-gray-500 mb-2">Last Messages & Status</p>
-                <div className="space-y-1.5">
-                  {/* Claude */}
-                  {(lastMessagesByCli?.claude || sessionStatusByCli?.claude) && (
-                    <div className="flex items-start gap-2">
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <Badge variant="info" className="text-xs">Claude</Badge>
-                        {sessionStatusByCli?.claude?.isRunning && sessionStatusByCli?.claude?.isWaitingForResponse && (
-                          <Badge variant="warning" dot className="text-xs">待機中</Badge>
-                        )}
-                        {sessionStatusByCli?.claude?.isRunning && !sessionStatusByCli?.claude?.isWaitingForResponse && (
-                          <Badge variant="success" dot className="text-xs">完了</Badge>
-                        )}
-                      </div>
-                      {lastMessagesByCli?.claude && (
-                        <p className="text-sm text-gray-700 line-clamp-1 flex-1">{lastMessagesByCli.claude}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 

@@ -1,0 +1,50 @@
+{
+  "issue_number": 161,
+  "stage": 4,
+  "applied_findings": [
+    {
+      "severity": "must_fix",
+      "description": "useAutoYes.tsへの影響が記載されていない。クライアント側フックはprompt-detector.tsの検出結果に依存しており、detectPromptの変更がクライアント側の動作にも影響する",
+      "status": "applied",
+      "reason": "影響範囲セクションにuseAutoYes.tsへの影響を追加"
+    },
+    {
+      "severity": "must_fix",
+      "description": "detectMultipleChoicePromptの誤検出テストケースが不足。既存のprompt-detector.test.tsにはmultiple_choiceプロンプトのテストが存在しない",
+      "status": "applied",
+      "reason": "テスト要件セクションを新規追加。ユニットテスト5件、統合テスト1件を明記"
+    },
+    {
+      "severity": "should_fix",
+      "description": "response-poller.tsへの影響分析が不足。auto-yes-manager.ts内でstripAnsiとdetectPromptを呼び出しているが、同様のロジックがresponse-poller.tsにも存在する可能性がある",
+      "status": "applied",
+      "reason": "調査対象（要確認）セクションを追加し、response-poller.tsとclaude-poller.tsを調査対象として明記"
+    },
+    {
+      "severity": "should_fix",
+      "description": "対策案2（detectThinking活用）を実装する場合、cli-patterns.tsのCLAUDE_THINKING_PATTERNに依存することになる。このパターンの網羅性が不十分だと新たな誤検出または検出漏れが発生する可能性",
+      "status": "applied",
+      "reason": "副作用分析セクションを新規追加。detectThinking()依存時のパターン網羅性確認の必要性を明記"
+    },
+    {
+      "severity": "should_fix",
+      "description": "対策案1または案3を実装すると、現在正しく検出できているmultiple_choiceプロンプトが検出されなくなる可能性（false negative増加）",
+      "status": "applied",
+      "reason": "破壊的変更の可能性セクションを新規追加。False Negative増加のリスクと緩和策を明記"
+    },
+    {
+      "severity": "nice_to_have",
+      "description": "E2Eテストまたは統合テストの必要性が言及されていない",
+      "status": "applied",
+      "reason": "テスト要件セクションの統合テスト部分で対応"
+    },
+    {
+      "severity": "nice_to_have",
+      "description": "ログ出力への影響が未記載",
+      "status": "applied",
+      "reason": "副作用分析セクションにログ出力への影響を追加"
+    }
+  ],
+  "issue_updated": true,
+  "summary": "Stage 3の影響範囲レビュー結果を全て反映。must_fix 2件、should_fix 3件、nice_to_have 2件を適用。新規セクションとして「テスト要件」「破壊的変更の可能性」「副作用分析」「調査対象（要確認）」を追加。レビュー履歴セクションも追加。"
+}

@@ -1,0 +1,38 @@
+{
+  "stage": 3,
+  "applied_findings": [
+    "S3-001",
+    "S3-002",
+    "S3-003",
+    "S3-004",
+    "S3-005",
+    "S3-006",
+    "S3-007",
+    "S3-008",
+    "S3-009",
+    "S3-010",
+    "S3-011"
+  ],
+  "skipped_findings": [],
+  "changes_made": [
+    "S3-001: Added 3 API route files (worktrees/route.ts, worktrees/[id]/route.ts, worktrees/[id]/current-output/route.ts) to Section 7.1 caller table with thinking guard status and note that 2-pass detection fix resolves false positives at all call sites",
+    "S3-001: Added S3-001 annotation to Section 7.1 notes explaining the 3 new API route callers",
+    "S3-002: Added new Section 6.2 documenting that the existing 3-second duplicate prevention window (DUPLICATE_PREVENTION_WINDOW_MS) is unaffected by this change, with explicit confirmation that detectPrompt() return type, responseTimestamp recording, and client-side check are unchanged",
+    "S3-003: Added test case #7 to Section 5.1 for prompt line containing U+276F followed by numbered list (e.g., '❯ /work-plan' + numbered steps), verifying defaultOptionPattern does not match non-selection ❯ lines",
+    "S3-004: Added Step 0 (recommended TDD approach) to Section 8 implementation order, recommending regression test baseline creation before code changes using Section 5.2 test cases 1-6 against current codebase",
+    "S3-005: Updated Section 7.1 response-poller.ts entry to list all 3 detectPrompt() call sites (L248, L442, L556) and noted that L248 early detection has no preceding thinking guard",
+    "S3-006: Added Claude CLI output format dependency risk note to Section 6.1 documenting the historical precedent of prompt character change and recommending named constant extraction and integration smoke tests as follow-up items",
+    "S3-007: Added new Section 5.4 with 3 boundary condition test cases for the 50-line scan window (boundary inclusion, boundary exclusion, stale prompt interference)",
+    "S3-008: Added new Section 6.3 documenting the thinking-to-prompt transition delay as a known trade-off (max 2-second delay bounded by polling interval, acceptable vs false positive risk)",
+    "S3-009: Added note in Section 7.2 listing UI components (PromptPanel, MobilePromptSheet, PromptMessage, MessageList, WorktreeDetailRefactored) as downstream PromptData consumers requiring no code changes",
+    "S3-010: Added S3-010 comment to isConsecutiveFromOne() code example in Section 3.3 noting potential future relaxation if Claude CLI produces non-consecutive option numbering",
+    "S3-011: Confirmed already covered by S1-008. Updated Section 10.4 technical debt table to reference both S1-008 and S3-011 for claude-poller.ts thinkingPattern unification",
+    "Added Stage 3 findings summary table to Section 10.3 with all 11 findings and their disposition",
+    "Renumbered Section 10.3 (technical debt) to Section 10.4 and added 3 new technical debt items from Stage 3 findings (S3-002, S3-006 x2)",
+    "Updated Section 11 implementation checklist: added S3-001 and S3-002 to Must Fix, added S3-004/S3-005/S3-010 to Should Fix, added S3-003 and S3-007 to Test section",
+    "Renumbered Section 5.4 (auto-yes-manager tests) to Section 5.5, Section 6.2 (performance) to Section 6.4"
+  ],
+  "files_modified": [
+    "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md"
+  ]
+}

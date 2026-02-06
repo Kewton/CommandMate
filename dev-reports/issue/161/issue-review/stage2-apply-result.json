@@ -1,0 +1,56 @@
+{
+  "issue_number": 161,
+  "stage": 2,
+  "applied_findings": [
+    {
+      "severity": "must_fix",
+      "description": "検出条件の説明が不正確。「2つ以上のオプション + ❯インジケーター」から「options.length >= 2 AND options.some(opt => opt.isDefault)」に修正",
+      "status": "applied",
+      "reason": "根本原因の仮説セクションの検出条件を正確な記述に更新し、コード参照も追加"
+    },
+    {
+      "severity": "should_fix",
+      "description": "optionPatternの正規表現で空白文字も許容している点を明確化",
+      "status": "applied",
+      "reason": "パターンマッチの問題セクションに注意書きを追加し、[❯ ]が空白文字も許容する点を説明"
+    },
+    {
+      "severity": "should_fix",
+      "description": "TEXT_INPUT_PATTERNSによるrequiresTextInputチェックの存在を追記",
+      "status": "applied",
+      "reason": "新規セクション「既存の関連機構」を追加し、TEXT_INPUT_PATTERNSの動作を説明"
+    },
+    {
+      "severity": "should_fix",
+      "description": "detectThinking()関数が既に存在することを言及",
+      "status": "applied",
+      "reason": "「既存の関連機構」セクションと対策案2にdetectThinking()関数の活用可能性を追記"
+    },
+    {
+      "severity": "should_fix",
+      "description": "現在のコードで既にnumber値をパースしている点を踏まえた記述に更新",
+      "status": "applied",
+      "reason": "対策案3に現状でnumberをパースしている点と連番検証が未実装である点を追記"
+    },
+    {
+      "severity": "nice_to_have",
+      "description": "継続行の検出ロジックが言及されていない",
+      "status": "skipped",
+      "reason": "nice_to_haveのため今回は対象外。必要に応じて次のイテレーションで対応"
+    },
+    {
+      "severity": "nice_to_have",
+      "description": "スキャン範囲が50行に拡張されている点が言及されていない",
+      "status": "skipped",
+      "reason": "nice_to_haveのため今回は対象外。必要に応じて次のイテレーションで対応"
+    },
+    {
+      "severity": "nice_to_have",
+      "description": "サーバー側ポーリングとクライアント側フックの動作タイミングの説明がない",
+      "status": "skipped",
+      "reason": "nice_to_haveのため今回は対象外。必要に応じて次のイテレーションで対応"
+    }
+  ],
+  "issue_updated": true,
+  "summary": "Issue #161にStage 1のレビュー指摘事項を反映。must_fix(1件)とshould_fix(4件)を全て適用。主な変更点: (1)検出条件の正確な説明への修正、(2)optionPatternの空白文字許容の明確化、(3)TEXT_INPUT_PATTERNS機構の説明追加、(4)detectThinking()関数の活用可能性の追記、(5)対策案3へのnumberパース現状と連番検証提案の追記。nice_to_have(3件)は今回スキップ。"
+}

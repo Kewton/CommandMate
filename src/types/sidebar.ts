@@ -16,6 +16,27 @@ import type { Worktree } from '@/types/models';
  */
 export type BranchStatus = 'idle' | 'ready' | 'running' | 'waiting' | 'generating';
 
+/** Per-CLI tool status input shape */
+interface CLIToolStatusInput {
+  isRunning: boolean;
+  isWaitingForResponse: boolean;
+  isProcessing: boolean;
+}
+
+/**
+ * Derive BranchStatus from per-CLI tool session status flags.
+ * Shared by sidebar (toBranchItem) and WorktreeDetailRefactored tab dots.
+ */
+export function deriveCliStatus(
+  toolStatus?: CLIToolStatusInput
+): BranchStatus {
+  if (!toolStatus) return 'idle';
+  if (toolStatus.isWaitingForResponse) return 'waiting';
+  if (toolStatus.isProcessing) return 'running';
+  if (toolStatus.isRunning) return 'ready';
+  return 'idle';
+}
+
 /**
  * Branch item for sidebar display
  * Derived from Worktree with sidebar-specific fields
@@ -35,46 +56,11 @@ export interface SidebarBranchItem {
   lastActivity?: Date | string;
   /** User description for this branch */
   description?: string;
-}
-
-/**
- * Determine branch status from Worktree data
- *
- * Status priority:
- * - waiting: Claude asked a yes/no prompt, waiting for user's answer (green dot)
- * - running: Claude is actively processing user's request (spinner)
- * - ready: Session running, waiting for user's new message (green dot)
- * - idle: Session not running (gray dot)
- */
-function determineBranchStatus(worktree: Worktree): BranchStatus {
-  // Check CLI-specific status first
-  const claudeStatus = worktree.sessionStatusByCli?.claude;
-  if (claudeStatus) {
-    if (claudeStatus.isWaitingForResponse) {
-      return 'waiting';
-    }
-    if (claudeStatus.isProcessing) {
-      return 'running';
-    }
-    // Session running but not processing = ready (waiting for user to type new message)
-    if (claudeStatus.isRunning) {
-      return 'ready';
-    }
-  }
-
-  // Fall back to legacy status fields
-  if (worktree.isWaitingForResponse) {
-    return 'waiting';
-  }
-  if (worktree.isProcessing) {
-    return 'running';
-  }
-  // Session running but not processing = ready
-  if (worktree.isSessionRunning) {
-    return 'ready';
-  }
-
-  return 'idle';
+  /** Per-CLI tool status for sidebar display */
+  cliStatus?: {
+    claude: BranchStatus;
+    codex: BranchStatus;
+  };
 }
 
 /**
@@ -110,7 +96,9 @@ export function calculateHasUnread(worktree: Worktree): boolean {
  * @returns SidebarBranchItem for sidebar display
  */
 export function toBranchItem(worktree: Worktree): SidebarBranchItem {
-  const status = determineBranchStatus(worktree);
+  // Issue #4: Sidebar no longer shows per-CLI session status.
+  // Status is always 'idle' since detailed status is shown in WorktreeDetail.
+  const status: BranchStatus = 'idle';
 
   // Use new hasUnread logic based on lastAssistantMessageAt and lastViewedAt
   const hasUnread = calculateHasUnread(worktree);
@@ -123,5 +111,9 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
     hasUnread,
     lastActivity: worktree.updatedAt,
     description: worktree.description,
+    cliStatus: {
+      claude: deriveCliStatus(worktree.sessionStatusByCli?.claude),
+      codex: deriveCliStatus(worktree.sessionStatusByCli?.codex),
+    },
   };
 }

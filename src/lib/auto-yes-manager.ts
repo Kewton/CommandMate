@@ -14,7 +14,7 @@ import { detectPrompt } from './prompt-detector';
 import { resolveAutoAnswer } from './auto-yes-resolver';
 import { sendKeys } from './tmux';
 import { CLIToolManager } from './cli-tools/manager';
-import { stripAnsi } from './cli-patterns';
+import { stripAnsi, detectThinking } from './cli-patterns';
 
 /** Auto yes state for a worktree */
 export interface AutoYesState {
@@ -275,8 +275,18 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     // 1. Capture tmux output
     const output = await captureSessionOutput(worktreeId, cliToolId, 5000);
 
-    // 2. Strip ANSI codes and detect prompt
+    // 2. Strip ANSI codes
     const cleanOutput = stripAnsi(output);
+
+    // 2.5. Skip prompt detection during thinking state (Issue #161, Layer 1)
+    // This prevents false positive detection of numbered lists in CLI output
+    // while Claude is actively processing (thinking/planning).
+    if (detectThinking(cliToolId, cleanOutput)) {
+      scheduleNextPoll(worktreeId, cliToolId);
+      return;
+    }
+
+    // 3. Detect prompt
     const promptDetection = detectPrompt(cleanOutput);
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
@@ -285,7 +295,7 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
       return;
     }
 
-    // 3. Resolve auto answer
+    // 4. Resolve auto answer
     const answer = resolveAutoAnswer(promptDetection.promptData);
     if (answer === null) {
       // Cannot auto-answer this prompt
@@ -293,7 +303,7 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
       return;
     }
 
-    // 4. Send answer to tmux
+    // 5. Send answer to tmux
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId);
@@ -303,10 +313,10 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     await new Promise(resolve => setTimeout(resolve, 100));
     await sendKeys(sessionName, '', true);
 
-    // 5. Update timestamp
+    // 6. Update timestamp
     updateLastServerResponseTimestamp(worktreeId, Date.now());
 
-    // 6. Reset error count on success
+    // 7. Reset error count on success
     resetErrorCount(worktreeId);
 
     // Log success (without sensitive content)

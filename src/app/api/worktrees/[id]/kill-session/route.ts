@@ -1,16 +1,21 @@
 /**
  * API Route: POST /api/worktrees/:id/kill-session
- * Kills all CLI tool sessions (Claude, Codex, Gemini) for a worktree
+ * Kills CLI tool sessions for a worktree
+ *
+ * Query parameters:
+ * - cliTool: Optional. If specified, kills only that CLI tool's session.
+ *            If not specified, kills all sessions (backward compatible).
+ *
+ * Issue #4: Added individual session termination support
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, deleteSessionState, deleteAllMessages } from '@/lib/db';
+import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux';
 import { broadcast } from '@/lib/ws-server';
-import { stopPolling } from '@/lib/response-poller';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 
 export async function POST(
   request: NextRequest,
@@ -28,16 +33,30 @@ export async function POST(
       );
     }
 
+    // Get cliTool from query parameter (Issue #4: individual session termination)
+    const cliToolParam = request.nextUrl.searchParams.get('cliTool');
+    const targetCliTool = cliToolParam as CLIToolType | null;
+
+    // Validate cliTool parameter if provided
+    if (targetCliTool && !CLI_TOOL_IDS.includes(targetCliTool)) {
+      return NextResponse.json(
+        { error: `Invalid cliTool: '${targetCliTool}'. Valid values: ${CLI_TOOL_IDS.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
     // Get CLI tool manager
     const manager = CLIToolManager.getInstance();
-    const allToolIds: CLIToolType[] = ['claude', 'codex', 'gemini'];
+
+    // Determine which tools to kill
+    const toolsToKill: CLIToolType[] = targetCliTool ? [targetCliTool] : [...CLI_TOOL_IDS];
 
     // Track killed sessions
     const killedSessions: string[] = [];
     let anySessionRunning = false;
 
-    // Kill all CLI tool sessions
-    for (const cliToolId of allToolIds) {
+    // Kill specified CLI tool sessions
+    for (const cliToolId of toolsToKill) {
       const cliTool = manager.getTool(cliToolId);
       const isRunning = await cliTool.isRunning(params.id);
 
@@ -51,8 +70,8 @@ export async function POST(
           console.log(`[kill-session] Killed ${cliToolId} session: ${sessionName}`);
         }
 
-        // Stop poller if running
-        stopPolling(params.id, cliToolId);
+        // Stop poller if running (uses CLIToolManager.stopPollers for DIP compliance - MF1-001)
+        manager.stopPollers(params.id, cliToolId);
 
         // Clean up session state
         deleteSessionState(db, params.id, cliToolId);
@@ -60,28 +79,40 @@ export async function POST(
     }
 
     if (!anySessionRunning) {
+      const targetMsg = targetCliTool ? ` for ${targetCliTool}` : '';
       return NextResponse.json(
-        { error: 'No active sessions found for this worktree' },
+        { error: `No active sessions found${targetMsg} for this worktree` },
         { status: 404 }
       );
     }
 
-    // Clear all messages for this worktree (log files are preserved)
-    deleteAllMessages(db, params.id);
+    // Clear messages based on whether targeting specific CLI tool or all
+    if (targetCliTool) {
+      // Issue #4: Delete only messages for the specific CLI tool
+      deleteMessagesByCliTool(db, params.id, targetCliTool);
+    } else {
+      // Delete all messages (backward compatible)
+      deleteAllMessages(db, params.id);
+    }
 
     // Broadcast session status change via WebSocket
+    // Issue #4: Include cliTool in payload for targeted updates
     broadcast(params.id, {
       type: 'session_status_changed',
       worktreeId: params.id,
       isRunning: false,
       messagesCleared: true,
+      cliTool: targetCliTool || null,
     });
 
     return NextResponse.json(
       {
         success: true,
-        message: `All sessions killed successfully: ${killedSessions.join(', ')}`,
+        message: targetCliTool
+          ? `Session killed successfully: ${killedSessions.join(', ')}`
+          : `All sessions killed successfully: ${killedSessions.join(', ')}`,
         killedSessions,
+        cliTool: targetCliTool || null,
       },
       { status: 200 }
     );

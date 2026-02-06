@@ -15,6 +15,8 @@ export interface SessionStatusPayload {
   worktreeId: string;
   isRunning: boolean;
   messagesCleared?: boolean;
+  /** Issue #4: CLI tool that was terminated (null = all tools) */
+  cliTool?: string | null;
 }
 
 export interface ChatBroadcastPayload {

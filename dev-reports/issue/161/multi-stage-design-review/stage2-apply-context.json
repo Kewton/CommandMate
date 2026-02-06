@@ -1,0 +1,9 @@
+{
+  "issue_number": 161,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "design_doc_path": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+  "review_result_path": "dev-reports/issue/161/multi-stage-design-review/stage2-review-result.json",
+  "action": "update_design_policy_only",
+  "instructions": "設計方針書のみを更新する。ソースコードは変更しない。"
+}

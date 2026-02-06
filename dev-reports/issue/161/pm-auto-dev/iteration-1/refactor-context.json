@@ -1,0 +1,22 @@
+{
+  "issue_number": 161,
+  "refactor_targets": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/auto-yes-manager.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage_prompt_detector": 95.57,
+    "before_coverage_auto_yes_manager": 86.55
+  },
+  "improvement_goals": [
+    "コードの可読性確認（2パス検出ロジックの明確性）",
+    "isConsecutiveFromOne()関数のコメントの適切性確認",
+    "テストコードの重複排除・整理",
+    "SOLID原則準拠の最終確認",
+    "設計方針書との一貫性確認"
+  ],
+  "design_constraints": {
+    "S1-001_S1-002": "prompt-detector.tsにCLAUDE_THINKING_PATTERNをimportしない",
+    "scope_limitation": "Issue #161のスコープ外のリファクタリング（S1-003: yes/noパターンDRY改善、S1-009: detectMultipleChoicePrompt責務分割等）は行わない"
+  }
+}

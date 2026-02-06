@@ -1,14 +1,17 @@
 /**
- * Command Merger Module (Issue #56)
+ * Command Merger Module (Issue #56, Issue #4)
  *
  * Merges standard commands with worktree-specific commands.
  * Implements SF-1: Worktree commands take priority over standard commands.
+ *
+ * Issue #4: Added CLI tool filtering to show only relevant commands for each tool.
  *
  * This module provides shared utilities for grouping and filtering commands,
  * following DRY principle by centralizing category ordering and grouping logic.
  */
 
 import type { SlashCommand, SlashCommandGroup, SlashCommandCategory } from '@/types/slash-commands';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import { CATEGORY_LABELS } from '@/types/slash-commands';
 
 /**
@@ -161,6 +164,36 @@ export function filterCommandGroups(
         const nameMatch = cmd.name.toLowerCase().includes(lowerQuery);
         const descMatch = cmd.description.toLowerCase().includes(lowerQuery);
         return nameMatch || descMatch;
+      }),
+    }))
+    .filter((group) => group.commands.length > 0);
+}
+
+/**
+ * Filter command groups by CLI tool (Issue #4)
+ *
+ * Filters commands to only show those available for the specified CLI tool.
+ * - Commands with undefined cliTools: Claude only (backward compatible with existing commands)
+ * - Commands with cliTools array: shown only for specified tools
+ *
+ * @param groups - Array of SlashCommandGroup objects
+ * @param cliToolId - CLI tool ID to filter by ('claude', 'codex', 'gemini')
+ * @returns Filtered groups containing only commands available for the specified tool
+ */
+export function filterCommandsByCliTool(
+  groups: SlashCommandGroup[],
+  cliToolId: CLIToolType
+): SlashCommandGroup[] {
+  return groups
+    .map((group) => ({
+      ...group,
+      commands: group.commands.filter((cmd) => {
+        // If cliTools is undefined, command is Claude-only (backward compatible)
+        if (!cmd.cliTools) {
+          return cliToolId === 'claude';
+        }
+        // Otherwise, check if the tool is in the allowed list
+        return cmd.cliTools.includes(cliToolId);
       }),
     }))
     .filter((group) => group.commands.length > 0);

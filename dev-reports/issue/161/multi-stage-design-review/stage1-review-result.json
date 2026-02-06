@@ -1,0 +1,115 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "must_fix",
+      "category": "DRY",
+      "title": "thinking判定ロジックがprompt-detector.tsとauto-yes-manager.tsで二重に実行される",
+      "description": "設計方針書のSection 3.2では、thinking状態チェックを2箇所に追加する計画になっている。(1) prompt-detector.tsのdetectMultipleChoicePrompt()関数内でCLAUDE_THINKING_PATTERNを直接チェック、(2) auto-yes-manager.tsのpollAutoYes()関数内でdetectThinking()を呼び出してdetectPrompt()前にスキップ。pollAutoYes()が呼び出す場合、thinking判定が2回実行される（auto-yes-managerでの事前チェック + detectMultipleChoicePrompt内のチェック）。これはDRY原則に反する重複である。さらに、detectMultipleChoicePrompt()はCLAUDE_THINKING_PATTERNのみをハードコードするが、detectThinking()はCLIツール別に分岐するため、同じ概念の判定に2つの異なる実装が共存することになる。",
+      "recommendation": "thinking判定はauto-yes-manager.ts側のdetectThinking()呼び出しのみに集約し、prompt-detector.ts内ではthinking判定を行わない。prompt-detector.tsは純粋にプロンプトパターンの検出に責務を限定すべきである。auto-yes-manager.ts以外の呼び出し元（response-poller.ts, claude-poller.ts, status-detector.ts）は既に独自のthinking判定を行っているため、prompt-detector.ts内で重複させる必要はない。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts",
+        "src/lib/auto-yes-manager.ts"
+      ]
+    },
+    {
+      "id": "S1-002",
+      "severity": "must_fix",
+      "category": "SOLID",
+      "title": "prompt-detector.tsにClaude CLI固有のCLAUDE_THINKING_PATTERNを直接importすることはSRP/OCP違反",
+      "description": "設計方針書Section 3.2.1では、detectMultipleChoicePrompt()にCLAUDE_THINKING_PATTERNをimportして直接チェックする計画である。prompt-detector.tsは現在CLIツール非依存の汎用プロンプト検出モジュールであり、detectPrompt()はCLIツールIDを引数に取らない。ここにClaude固有のパターンをハードコードすると、(1) SRP違反: プロンプト検出モジュールがClaude CLI固有のthinking状態の判定責務を持つ、(2) OCP違反: 新しいCLIツール（CodexやGemini）のthinkingパターンを追加する場合にprompt-detector.tsの修正が必要になる。設計方針書自体もこのトレードオフを認識し「主要な利用シーンはClaude CLI」と記載しているが、これは設計上の妥協であり、既存のdetectThinking()関数が適切な抽象化を提供している。",
+      "recommendation": "S1-001の推奨と同じく、thinking判定はprompt-detector.ts外部（呼び出し元）で行うべきである。これにより prompt-detector.ts はCLIツール非依存を維持できる。設計方針書のSection 3.2.1を削除し、Section 3.2.2のauto-yes-manager.ts側での事前チェックのみを残す。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ]
+    },
+    {
+      "id": "S1-003",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "detectPrompt()内のyes/noパターン検出で同一構造のコードが4回繰り返されている（既存問題）",
+      "description": "prompt-detector.tsのdetectPrompt()関数内で、Pattern 1-4（(y/n), [y/N], [Y/n], (yes/no)）は全て同じ構造のコードで処理されている: 正規表現マッチ -> isPromptフラグ設定 -> PromptDetectionResult構築。defaultOptionの値のみが異なる。今回の変更でこの関数に更にthinking判定を追加する前に、この既存の重複を認識しておくべきである。ただし、今回のIssue #161のスコープには直接含まれないため、should_fixとする。",
+      "recommendation": "yes/noパターンを配列で定義し、ループで処理する方式にリファクタリングすることを検討する。例: const patterns = [{regex, defaultOption?}] の配列を順次マッチさせる。ただしこれはIssue #161のスコープ外であり、別Issueでのフォローアップが適切。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ]
+    },
+    {
+      "id": "S1-004",
+      "severity": "should_fix",
+      "category": "KISS",
+      "title": "❯パターン分離で正規表現が2つに増える設計は適切だが、既存のhasDefault判定ロジックとの整合性に注意が必要",
+      "description": "設計方針書Section 3.1で提案されているdefaultOptionPatternとnormalOptionPatternへの分離は、根本原因（[❯ ]文字クラスの問題）を正しく解決する。しかし、現在のコード（L212）では`match[1] && match[1].includes('❯')`で既にhasDefaultを判定しており、この判定だけでも空白のみのケースは排除できるはずである。実際に現在のコードを確認すると、`const hasDefault = Boolean(match[1] && match[1].includes('❯'));`（L212）が記述されており、match[1]が空白1文字の場合でもincludes('❯')はfalseを返す。つまり、設計方針書が指摘する「空白1文字が❯と同じ扱いになる」問題は、実際のhasDefault判定コード（L212）では既に防がれている可能性がある。",
+      "recommendation": "設計方針書Section 3.1の問題の詳細を再検証する必要がある。L212のhasDefault判定がincludes('❯')を使用しているため、空白のみのmatch[1]ではhasDefault=falseとなる。ただし、optionPatternのキャプチャグループが空白1文字にマッチすること自体は不要なマッチを増やしパフォーマンスに影響する可能性があるため、パターン分離自体は有益。再検証の結果によっては、パターン修正をより最小限の変更（[❯ ]を❯に変更するだけ）に留められる可能性がある。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ]
+    },
+    {
+      "id": "S1-005",
+      "severity": "should_fix",
+      "category": "KISS",
+      "title": "連番検証（案3）のisConsecutiveFromOne関数は、実際の誤検出シナリオでの有効性を再検討すべき",
+      "description": "設計方針書Section 3.3の連番検証は防御層としては有効だが、Issue #161で報告されている実際の誤検出パターン「1. ファイルを作成\n2. テストを実行」は1始まりの連番である。つまり、この誤検出パターンは連番検証をパスしてしまう。連番検証が防げるのは「1, 5, 10等の散発的な番号」のみであり、実際のClaude CLI出力で散発的な番号付きリストが出現する頻度は低い。KISS原則の観点から、実際の問題を解決しない検証ロジックの追加は複雑さのみを増やす恐れがある。",
+      "recommendation": "連番検証の必要性を再評価する。実際のIssue #161の誤検出は、❯厳格化（案1）+ thinking判定（案2）の2層で十分に防止できる。連番検証は将来の未知の誤検出パターンに対する防御として価値はあるが、YAGNI観点では、実際に散発的番号による誤検出が報告された時点で追加すべきである。もし追加するなら、コメントで「防御的チェック：将来の未知パターン対策」と明記すべきである。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ]
+    },
+    {
+      "id": "S1-006",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "status-detector.tsがdetectPrompt()を呼び出す経路でthinking中の誤検出が発生する可能性",
+      "description": "設計方針書Section 7.1の影響調査では、response-poller.ts, claude-poller.ts, useAutoYes.tsを列挙しているが、status-detector.tsが言及されていない。status-detector.ts（L80）でもdetectPrompt(lastLines)を呼び出しており、thinking中にmultiple_choiceの誤検出が発生した場合、ステータスが誤って'waiting'になる可能性がある。status-detector.tsはL91で独自にdetectThinking()を呼び出しているが、コードの実行順序はdetectPromptが先（L80）であり、promptが検出されるとL81の条件でearly returnしてしまうため、L91のthinkingチェックには到達しない。",
+      "recommendation": "status-detector.tsの呼び出し元もSection 7.1の影響調査テーブルに追加する。auto-yes-manager.ts同様、status-detector.tsでもdetectPrompt()呼び出し前にdetectThinking()チェックを追加するか、実行順序をthinking -> prompt の順に変更することを検討する。これはprompt-detector.ts内にthinking判定を追加する代わりの方法としても有効。",
+      "affected_files": [
+        "src/lib/status-detector.ts",
+        "src/lib/prompt-detector.ts"
+      ]
+    },
+    {
+      "id": "S1-007",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "多層防御の4層構造は理解しやすいが、各層の独立性と相互作用のテストが必要",
+      "description": "設計方針書Section 4の多層防御（Layer 1-4）は分かりやすい構造だが、各層が独立して機能することと、組み合わせた場合の動作の両方をテストする必要がある。テスト計画（Section 5）では個別のテストケースは記載されているが、「Layer 1は通過するがLayer 2で停止するケース」「Layer 2は通過するがLayer 3で停止するケース」のような層ごとの境界テストが明示されていない。",
+      "recommendation": "テスト計画に各防御層の境界テストを追加する。例: (1) thinking中でないが❯なし（Layer 2で停止）、(2) ❯ありだが非連番（Layer 3で停止）、(3) 全層パスの正常系。これにより各層が期待通りに機能していることを個別に検証できる。",
+      "affected_files": [
+        "tests/unit/prompt-detector.test.ts"
+      ]
+    },
+    {
+      "id": "S1-008",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "claude-poller.tsのthinkingPatternがcli-patterns.tsのCLAUDE_THINKING_PATTERNと重複定義されている（既存問題）",
+      "description": "claude-poller.ts（L76）で`const thinkingPattern = /[✻✽⏺·∴✢✳]/m;`がローカルに定義されており、cli-patterns.tsのCLAUDE_THINKING_PATTERNとは異なるパターンを使用している。CLAUDE_THINKING_PATTERNはスピナー文字+テキスト+…のフルパターンだが、claude-poller.tsはスピナー文字の存在だけをチェックする簡略版を使用している。今回のIssue #161ではclaude-poller.tsは変更対象に含まれていないが、thinking判定の一貫性に関わる既存の技術的負債として認識しておくべきである。",
+      "recommendation": "Issue #161のスコープ外だが、claude-poller.tsのローカルthinkingPatternをcli-patterns.tsのCLAUDE_THINKING_PATTERNまたはdetectThinking()に統一することを別Issueとして記録することを推奨する。",
+      "affected_files": [
+        "src/lib/claude-poller.ts",
+        "src/lib/cli-patterns.ts"
+      ]
+    },
+    {
+      "id": "S1-009",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "detectMultipleChoicePrompt()の責務が大きい - パース・検証・結果構築が混在",
+      "description": "現在のdetectMultipleChoicePrompt()関数（prompt-detector.ts L193-289）は、(1) 行のスキャンとパース、(2) オプションの検証（数量チェック、❯チェック）、(3) 結果オブジェクトの構築、(4) 質問テキストの抽出を全て1つの関数で行っている。今回の変更でさらにthinking判定と連番検証が追加されると、関数の認知的複雑さが増大する。SRP観点からは、パースと検証を分離することが望ましい。",
+      "recommendation": "今回のスコープでは必須ではないが、将来的にはdetectMultipleChoicePrompt()を (1) parseOptionLines(): 行をスキャンして選択肢を抽出、(2) validateOptions(): 連番・❯・数量チェック、(3) buildResult(): PromptDetectionResult構築、のように分割することで、各検証ロジックのテスト容易性と可読性が向上する。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ]
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "overall_assessment": "設計方針書の全体的な方向性（多層防御によるFalse Positive削減）は適切であり、問題の根本原因分析も正確である。しかし、設計原則の観点から2つの重要な問題がある。第一に、thinking判定をprompt-detector.ts内とauto-yes-manager.ts内の両方に追加する計画はDRY原則に反し、prompt-detector.tsのCLIツール非依存性を損なう（S1-001, S1-002）。thinking判定はauto-yes-manager.ts側のみに集約すべきである。第二に、❯パターンの問題分析（S1-004）について、既存コードのhasDefault判定（L212）がincludes('❯')を使用しているため、設計方針書が主張する誤検出経路が本当に存在するか再検証が必要である。連番検証（S1-005）は実際のIssue #161の誤検出パターンを防げないため、YAGNI観点からの再評価を推奨する。また、status-detector.tsが影響調査から漏れている点（S1-006）も重要である。これらの指摘を反映することで、よりシンプルで保守性の高い実装が実現できる。"
+  }
+}

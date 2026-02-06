@@ -6,14 +6,14 @@
 
 import { describe, it, expect } from 'vitest';
 import type { BranchStatus, SidebarBranchItem } from '@/types/sidebar';
-import { toBranchItem } from '@/types/sidebar';
+import { toBranchItem, deriveCliStatus } from '@/types/sidebar';
 import type { Worktree } from '@/types/models';
 
 describe('sidebar types', () => {
   describe('BranchStatus', () => {
     it('should accept valid status values', () => {
-      const statuses: BranchStatus[] = ['idle', 'running', 'waiting', 'generating'];
-      expect(statuses).toHaveLength(4);
+      const statuses: BranchStatus[] = ['idle', 'ready', 'running', 'waiting', 'generating'];
+      expect(statuses).toHaveLength(5);
     });
   });
 
@@ -68,7 +68,7 @@ describe('sidebar types', () => {
       expect(result.hasUnread).toBe(false);
     });
 
-    it('should set status to ready when session is running but not processing', () => {
+    it('should always return idle status (Issue #4: sidebar no longer shows session status)', () => {
       const worktree: Worktree = {
         id: 'feature-test',
         name: 'feature/test',
@@ -82,10 +82,10 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
-      expect(result.status).toBe('ready');
+      expect(result.status).toBe('idle');
     });
 
-    it('should set status to running when session is processing', () => {
+    it('should return idle even when session is processing', () => {
       const worktree: Worktree = {
         id: 'feature-test',
         name: 'feature/test',
@@ -99,10 +99,10 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
-      expect(result.status).toBe('running');
+      expect(result.status).toBe('idle');
     });
 
-    it('should set status to waiting when waiting for response', () => {
+    it('should return idle even when waiting for response', () => {
       const worktree: Worktree = {
         id: 'feature-test',
         name: 'feature/test',
@@ -115,10 +115,10 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
-      expect(result.status).toBe('waiting');
+      expect(result.status).toBe('idle');
     });
 
-    it('should use sessionStatusByCli for more granular status', () => {
+    it('should return idle even with sessionStatusByCli data', () => {
       const worktree: Worktree = {
         id: 'feature-test',
         name: 'feature/test',
@@ -132,7 +132,45 @@ describe('sidebar types', () => {
 
       const result = toBranchItem(worktree);
 
-      expect(result.status).toBe('waiting');
+      expect(result.status).toBe('idle');
+    });
+
+    it('should populate cliStatus from sessionStatusByCli', () => {
+      const worktree: Worktree = {
+        id: 'feature-test',
+        name: 'feature/test',
+        path: '/path/to/worktree',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'MyRepo',
+        sessionStatusByCli: {
+          claude: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
+          codex: { isRunning: true, isWaitingForResponse: true, isProcessing: false },
+        },
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(result.cliStatus).toEqual({
+        claude: 'running',
+        codex: 'waiting',
+      });
+    });
+
+    it('should return idle cliStatus when no sessionStatusByCli', () => {
+      const worktree: Worktree = {
+        id: 'feature-test',
+        name: 'feature/test',
+        path: '/path/to/worktree',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'MyRepo',
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(result.cliStatus).toEqual({
+        claude: 'idle',
+        codex: 'idle',
+      });
     });
 
     it('should set hasUnread based on lastAssistantMessageAt and lastViewedAt', () => {
@@ -170,6 +208,32 @@ describe('sidebar types', () => {
       const result = toBranchItem(worktree);
 
       expect(result.lastActivity).toEqual(updateDate);
+    });
+  });
+
+  describe('deriveCliStatus', () => {
+    it('should return idle when toolStatus is undefined', () => {
+      expect(deriveCliStatus(undefined)).toBe('idle');
+    });
+
+    it('should return idle when session is not running', () => {
+      expect(deriveCliStatus({ isRunning: false, isWaitingForResponse: false, isProcessing: false })).toBe('idle');
+    });
+
+    it('should return ready when session is running but not processing or waiting', () => {
+      expect(deriveCliStatus({ isRunning: true, isWaitingForResponse: false, isProcessing: false })).toBe('ready');
+    });
+
+    it('should return running when session is processing', () => {
+      expect(deriveCliStatus({ isRunning: true, isWaitingForResponse: false, isProcessing: true })).toBe('running');
+    });
+
+    it('should return waiting when waiting for response', () => {
+      expect(deriveCliStatus({ isRunning: true, isWaitingForResponse: true, isProcessing: false })).toBe('waiting');
+    });
+
+    it('should prioritize waiting over running', () => {
+      expect(deriveCliStatus({ isRunning: true, isWaitingForResponse: true, isProcessing: true })).toBe('waiting');
     });
   });
 });

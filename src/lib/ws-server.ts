@@ -36,7 +36,21 @@ const rooms = new Map<string, Set<WebSocket>>();
  * ```
  */
 export function setupWebSocket(server: HTTPServer): void {
-  wss = new WebSocketServer({ server });
+  wss = new WebSocketServer({ noServer: true });
+
+  // Handle upgrade requests - only accept app WebSocket connections, not Next.js HMR
+  server.on('upgrade', (request, socket, head) => {
+    const pathname = request.url || '/';
+
+    // Let Next.js handle its own HMR WebSocket connections
+    if (pathname.startsWith('/_next/')) {
+      return;
+    }
+
+    wss!.handleUpgrade(request, socket, head, (ws) => {
+      wss!.emit('connection', ws, request);
+    });
+  });
 
   // Handle WebSocket server errors (e.g., invalid frames from clients)
   wss.on('error', (error) => {

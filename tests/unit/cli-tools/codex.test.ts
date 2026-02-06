@@ -69,9 +69,9 @@ describe('CodexTool', () => {
       expect(sessionName).toBe('mcbd-codex-feature-foo');
     });
 
-    it('should handle worktree id with slashes', () => {
-      const sessionName = tool.getSessionName('feature/issue/123');
-      expect(sessionName).toBe('mcbd-codex-feature/issue/123');
+    // T2.3: Session name validation now rejects slashes for security
+    it('should throw error for worktree id with slashes (T2.3 security)', () => {
+      expect(() => tool.getSessionName('feature/issue/123')).toThrow(/Invalid session name format/);
     });
   });
 

@@ -2,7 +2,11 @@
  * Slash Command Types
  *
  * Type definitions for slash commands loaded from .claude/commands/*.md
+ *
+ * Issue #4: Added cliTools field for CLI tool-specific command filtering
  */
+
+import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
  * Available command categories
@@ -43,6 +47,14 @@ export interface SlashCommand {
   isStandard?: boolean;
   /** Command source: standard, mcbd, or worktree (Issue #56) */
   source?: SlashCommandSource;
+  /**
+   * CLI tools this command is available for (Issue #4)
+   * - undefined: available for ALL tools (backward compatible)
+   * - ['claude']: Claude Code only
+   * - ['codex']: Codex CLI only
+   * - ['claude', 'codex']: both tools
+   */
+  cliTools?: CLIToolType[];
 }
 
 /**

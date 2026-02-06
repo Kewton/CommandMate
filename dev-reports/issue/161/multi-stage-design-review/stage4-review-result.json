@@ -1,0 +1,106 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "should_fix",
+      "category": "redos",
+      "title": "TEXT_INPUT_PATTERNSの一部正規表現にバックトラッキングリスクがある",
+      "description": "prompt-detector.ts L169-175に定義されているTEXT_INPUT_PATTERNSの中で、/enter\\s+/i パターンは末尾の\\s+が貪欲マッチである。このパターンはoptions配列内のlabel文字列に対してtest()で適用される（L274）。labelは通常短い文字列（数十文字）であり、入力はtmux出力から抽出された選択肢ラベルに限定されるため、実際のReDoSリスクは低い。しかし、万が一長いスペース文字列が含まれるlabelが生成された場合に不要なバックトラッキングが発生する。提案されているdefaultOptionPatternとnormalOptionPatternについては、/^\\s*\\u276F\\s*(\\d+)\\.\\s*(.+)$/ と /^\\s*(\\d+)\\.\\s*(.+)$/ はいずれもアンカー付き（^...$）であり、各量化子が異なる文字クラスを消費するため、病的なバックトラッキングは発生しない。ReDoSの観点からは安全である。",
+      "recommendation": "/enter\\s+/i を /enter\\s/i に変更するか、文字数上限チェック（例: label.length > 200 の場合はスキップ）を追加する。ただし、実際のリスクは低いため、変更は防御的措置として扱ってよい。提案されているdefaultOptionPattern/normalOptionPatternについては変更不要。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/prompt-detector.ts"
+      ]
+    },
+    {
+      "id": "S4-002",
+      "severity": "should_fix",
+      "category": "auto_response_safety",
+      "title": "Auto-Yes機能がFalse Positiveに基づいてClaude CLIに意図しない入力を送信するリスク（Issue #161の核心問題）",
+      "description": "これはIssue #161が直接対処しようとしている問題であり、設計方針書の多層防御アプローチが正しく実装されれば緩和される。現在のコードでは、Claude CLIの通常出力に含まれる番号付きリスト（例:「1. ファイルを作成」）がmultiple_choiceプロンプトとして誤検出され、resolveAutoAnswer()が「1」を返し、sendKeys()でtmuxセッションに「1」+Enterが送信される。これにより、Claude CLIが意図しない入力を受け取り、予期しない動作が発生する。セキュリティの観点からは、自動応答機能がユーザーの意図しないコマンド実行を引き起こす可能性がある点が重要である。設計方針書の2パス検出方式（Layer 2）とthinkingガード（Layer 1）の組み合わせがこのリスクを大幅に軽減するが、以下の残存リスクに注意が必要：(1) 50行ウィンドウ内に古い回答済みプロンプトの❯が残存している場合、新しい番号付きリスト出力がFalse Positiveとなる可能性（設計書Section 5.4テスト#3で認識済み）、(2) thinking状態からプロンプト表示への遷移期間中の不確実性。",
+      "recommendation": "設計方針書の多層防御を確実に実装することに加え、以下を検討する：(1) auto-yes-manager.tsのpollAutoYes()にて、応答送信前にログを出力する際、検出されたpromptDataのtypeとoptionsの概要をログに含め、事後分析を可能にする（機密情報は含めない）。(2) 50行ウィンドウ内の古い❯残存によるFalse Positiveリスクについて、将来のフォローアップとしてウィンドウサイズの動的調整または応答済みプロンプトの追跡メカニズムを検討する。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/prompt-detector.ts",
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/auto-yes-manager.ts",
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/auto-yes-resolver.ts"
+      ]
+    },
+    {
+      "id": "S4-003",
+      "severity": "should_fix",
+      "category": "command_injection",
+      "title": "tmux sendKeys経由のコマンドインジェクション防御：resolveAutoAnswer()の出力値が制限されている点は良いが、tmux.tsのエスケープ処理が不完全",
+      "description": "auto-yes-manager.tsのpollAutoYes() L301-304では、resolveAutoAnswer()の戻り値をsendKeys()に渡している。resolveAutoAnswer()は以下の値のみを返す：(1) 'y'（yes/noプロンプトの場合）、(2) 数値文字列（target.number.toString()、multiple_choiceの場合）、(3) null（スキップ）。これらの値はいずれも安全な文字列であり、tmuxコマンドインジェクションのリスクは極めて低い。しかし、tmux.ts L213のエスケープ処理 `keys.replace(/'/g, \"'\\\\''\")` はシングルクォートのみをエスケープしている。sendKeys()は `tmux send-keys -t \"${sessionName}\" '${escapedKeys}'` としてシェルコマンドを構築するため、シングルクォート内に値が配置される。シングルクォート内ではほとんどの特殊文字はリテラルとして扱われるため、現在の実装は概ね安全である。ただし、sessionNameはダブルクォートで囲まれているため、sessionName側にインジェクション文字が含まれると理論的にリスクがある。sessionNameはgetSessionName()により `mcbd-${this.id}-${worktreeId}` として構築され、worktreeIdはWORKTREE_ID_PATTERN（/^[a-zA-Z0-9_-]+$/）で検証済みであるため、現実的なリスクは低い。",
+      "recommendation": "現在の実装は、resolveAutoAnswer()の出力値の制限（'y'または数値文字列のみ）とworktreeIdの検証（WORKTREE_ID_PATTERN）の組み合わせにより、コマンドインジェクションに対して十分な防御がある。追加の対策として、sendKeys()の呼び出し前に answer が予期された形式（/^(y|n|\\d+)$/）であることを明示的にアサートするガードを追加することで、将来resolveAutoAnswer()の変更時にも安全性を維持できる。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/tmux.ts",
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/auto-yes-manager.ts",
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/auto-yes-resolver.ts"
+      ]
+    },
+    {
+      "id": "S4-004",
+      "severity": "nice_to_have",
+      "category": "input_validation",
+      "title": "tmux出力のstripAnsi()処理は適切だが、ANSI_PATTERNが一部の非標準エスケープシーケンスをカバーしない可能性",
+      "description": "cli-patterns.ts L160のANSI_PATTERN `/\\x1b\\[[0-9;]*[a-zA-Z]|\\x1b\\][^\\x07]*\\x07|\\[[0-9;]*m/g` は標準的なANSIエスケープシーケンスをカバーしている。3つの代替パターンがある：(1) CSIシーケンス（ESC[...letter）、(2) OSCシーケンス（ESC]...BEL）、(3) 不完全なCSI（ESCなしの[...m、tmux特有の出力に対応）。Claude CLIの出力に含まれるANSIコードに対しては実績があり適切に機能している。提案されているdefaultOptionPattern/normalOptionPatternは、stripAnsi()適用後のクリーンな文字列に対して実行されるため、ANSIコード残留による誤マッチのリスクは低い。ただし、設計書が指摘するように「ANSI codes sometimes cause spaces to be lost after stripping」（prompt-detector.ts L197コメント）があるため、ANSIストリップ後に予期しない空白消失が発生し、パターンマッチの挙動が変わる可能性がある。",
+      "recommendation": "現在のstripAnsi()実装で実用上十分であり、変更は不要。将来、新しいCLIツールの出力で非標準のANSIシーケンスが問題になった場合は、strip-ansiパッケージなどの実績あるライブラリへの移行を検討する。Issue #161のスコープ内では対応不要。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/cli-patterns.ts"
+      ]
+    },
+    {
+      "id": "S4-005",
+      "severity": "nice_to_have",
+      "category": "logging",
+      "title": "ログ出力にtmux出力内容やプロンプトデータの機密情報が含まれないことの確認",
+      "description": "auto-yes-manager.ts L313では `console.info('[Auto-Yes Poller] Sent response for worktree: ${worktreeId}')` としてworktreeIdのみをログ出力しており、応答内容（answer）やプロンプトの質問文（promptData.question）は含まれていない。L319-320のエラーログもerror.messageのみを出力している。prompt-detector.ts L58-62のログでは `question` と `optionsCount` を出力しているが、questionはClaude CLIのUI要素テキスト（例：「Do you want to proceed?」）であり、ユーザーの機密データではない。detectPrompt()のL45の入力ログは `outputLength` のみで、tmux出力内容自体はログに含まれていない。設計方針書の変更で新たに追加されるthinkingチェックのログ出力（detectThinking()内のL73, L92）も `contentLength` と `isThinking` のブール値のみであり、機密情報の漏洩リスクはない。全体的に、ログ出力のセキュリティは適切に管理されている。",
+      "recommendation": "現状で問題はない。将来のデバッグ目的でログレベルをdebugに変更してtmux出力内容を記録する場合は、ユーザーのコード内容やClaude CLIのレスポンス内容が含まれる可能性があるため、LOG_LEVEL=debugを運用環境で使用しないことをドキュメントに明記することを推奨する。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/auto-yes-manager.ts",
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/prompt-detector.ts"
+      ]
+    },
+    {
+      "id": "S4-006",
+      "severity": "should_fix",
+      "category": "auto_response_safety",
+      "title": "Auto-Yesがyes/noプロンプトに対して常に'y'を返す設計は、破壊的操作の自動承認リスクを内包する",
+      "description": "auto-yes-resolver.ts L19-21では、yes/noプロンプトに対して無条件に'y'を返す。これはIssue #161の変更スコープ外の既存設計だが、セキュリティレビューとして指摘する。Claude CLIが「このファイルを削除しますか？(y/n)」「このディレクトリを上書きしますか？(y/n)」等の破壊的操作の確認プロンプトを表示した場合、Auto-Yesモードは自動的に'y'を送信する。ユーザーがAuto-Yesモードを有効にしている限りこれは意図された動作だが、1時間のタイムアウト（AUTO_YES_TIMEOUT_MS = 3600000）内に破壊的操作のプロンプトが表示された場合のリスクがある。Issue #161のFalse Positive修正はこのリスクを間接的に軽減する（誤検出による意図しない'y'送信を防ぐため）が、正当なプロンプトに対する自動承認リスクは残存する。",
+      "recommendation": "Issue #161のスコープ外だが、以下を将来のフォローアップとして検討する：(1) Auto-Yesの応答前に破壊的操作キーワード（delete, remove, overwrite, destroy等）を質問文から検出し、該当する場合は自動応答をスキップするセーフガード。(2) Auto-Yesモードの有効時間を設定可能にする。(3) Auto-Yes応答の履歴をUIに表示し、ユーザーが事後確認できる仕組み。これらは別Issueでのフォローアップが適切。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/auto-yes-resolver.ts"
+      ]
+    },
+    {
+      "id": "S4-007",
+      "severity": "nice_to_have",
+      "category": "owasp",
+      "title": "OWASP Top 10との関連性評価：直接的な該当項目はないが、A01:2021 Broken Access Controlの間接的関連がある",
+      "description": "Issue #161の変更はWebアプリケーションのHTTPリクエスト処理には直接関与しないため、OWASP Top 10の大部分は適用外である。しかし、Auto-Yes機能は認証トークン（CM_AUTH_TOKEN）で保護されたAPIエンドポイント（/api/worktrees/[id]/auto-yes/route.ts）経由で有効化される。Auto-Yesの有効化自体は認証が必要だが、一度有効化されると1時間の間サーバー側で自動応答が行われ続ける。A01:2021 Broken Access Controlの観点では、Auto-Yesモードの操作が適切に認証されたユーザーのみに制限されていることが重要である。既存のworktreeIdバリデーション（WORKTREE_ID_PATTERN）とMAX_CONCURRENT_POLLERS（50）のDoS対策は適切に実装されている。本変更はこれらの既存セキュリティメカニズムに影響を与えない。",
+      "recommendation": "現状の認証・認可メカニズムで十分である。Issue #161のスコープでは追加のOWASP対応は不要。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/auto-yes-manager.ts"
+      ]
+    },
+    {
+      "id": "S4-008",
+      "severity": "should_fix",
+      "category": "redos",
+      "title": "CLAUDE_THINKING_PATTERNの .+… 部分にReDoSリスクがある",
+      "description": "cli-patterns.ts L26-29のCLAUDE_THINKING_PATTERNは `[spinnerChars]\\s+.+…|to interrupt\\)` である。`.+…` の部分で、`.+` は貪欲マッチであり、入力文字列に「…」（U+2026 HORIZONTAL ELLIPSIS）が含まれない場合、`.+` がバックトラッキングを行う。ただし、`|` の右側 `to interrupt\\)` はフォールバックとして機能し、`.+` は `.` と `…` の間で二重の量化子を持たないため、典型的なReDoSパターン（(a+)+のようなネスト量化子）には該当しない。実際のバックトラッキングは入力行の長さに対して線形であり、tmux出力の1行は通常数百文字以下であるため、パフォーマンスへの実際の影響は軽微である。ただし、設計方針書で提案されているauto-yes-manager.tsの変更では、detectThinking()がdetectPrompt()の前に呼び出されるため、この正規表現がより頻繁に評価される。mフラグ（multiline）が使用されているため、各行に対して個別にマッチが試みられる。",
+      "recommendation": "現在のパターンで実用上の問題はないが、`.+…` を `[^\\n]+…` に変更することで、不要なバックトラッキングを明示的に抑制できる。また、/m フラグにより . は改行にマッチしないため挙動は同等だが、意図の明確化になる。これは防御的な改善であり、Issue #161のスコープ外として扱ってよい。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-161/src/lib/cli-patterns.ts"
+      ]
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "overall_assessment": "Issue #161の設計方針書はセキュリティの観点から概ね適切であり、must_fix に分類される重大なセキュリティ脆弱性は発見されなかった。提案されている正規表現パターン（defaultOptionPattern, normalOptionPattern）はReDoS耐性があり安全である。tmux sendKeysへのコマンドインジェクションリスクは、resolveAutoAnswer()の出力値制限（'y'または数値文字列のみ）とworktreeIdのバリデーション（WORKTREE_ID_PATTERN）により十分に緩和されている。ログ出力にもtmux出力内容やユーザーの機密データは含まれておらず、情報漏洩リスクは低い。should_fixの5件は主に防御的措置に関するものであり、(1) TEXT_INPUT_PATTERNSの軽微なReDoSリスク、(2) Auto-Yes False Positiveの残存リスク（設計書のコア問題、多層防御で緩和予定）、(3) sendKeys前の入力値アサーション追加の推奨、(4) yes/noプロンプトの無条件自動承認リスク（既存設計、スコープ外）、(5) CLAUDE_THINKING_PATTERNの防御的なReDoS対策である。overall：設計方針書の多層防御アプローチが正しく実装されれば、Issue #161のセキュリティリスクは適切に管理される。"
+  }
+}

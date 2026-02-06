@@ -1,0 +1,13 @@
+{
+  "issue_number": 161,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_doc_path": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+  "review_criteria": [
+    "SOLID原則準拠（特にSRP, OCP）",
+    "KISS原則（過度に複雑でないか）",
+    "YAGNI原則（不要な機能を追加していないか）",
+    "DRY原則（重複がないか）"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "issue_number": 161,
+  "feature_summary": "Auto-Yes誤検出修正: 通常の番号付きリストがmultiple_choiceプロンプトとして誤検出されて「1」が自動送信される問題を修正",
+  "design_policy_path": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+  "work_plan_path": "dev-reports/issue/161/work-plan.md",
+  "acceptance_criteria": [
+    "通常の番号付きリスト（例：「1. ファイルを作成\\n2. テストを実行」）でmultiple_choiceとして誤検出しない",
+    "有効な❯インジケーター付きmultiple_choiceプロンプト（例：「❯ 1. Yes\\n  2. No」）を正しく検出する",
+    "thinking状態中はauto-yes-manager.tsがdetectPrompt()をスキップする",
+    "既存のyes/noパターン検出が影響を受けない",
+    "既存のApproveパターン検出が影響を受けない",
+    "CIチェック全パス（lint, type-check, test, build）"
+  ],
+  "test_scenarios": [
+    "シナリオ1: prompt-detector.tsの2パス❯検出方式が正しく動作し、❯なしの番号付きリストをisPrompt: falseと判定する",
+    "シナリオ2: ❯付きの有効な選択肢プロンプトを正しくisPrompt: trueと判定する",
+    "シナリオ3: 連番検証（isConsecutiveFromOne）が非連番を正しく排除する",
+    "シナリオ4: auto-yes-manager.tsがthinking状態中にdetectPrompt()をスキップする",
+    "シナリオ5: 50行ウィンドウ境界で❯が範囲内/外の場合の正しい挙動",
+    "シナリオ6: 既存のyes/no・Approve・[Y/n]パターン検出が引き続き正常動作する",
+    "シナリオ7: 全CIチェック（lint, type-check, test, build）がパスする",
+    "シナリオ8: prompt-detector.tsにCLAUDE_THINKING_PATTERNのimportがない（CLIツール非依存性維持）"
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "issue_number": 161,
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "findings": [
+    {
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "description": "useAutoYes.tsへの影響が記載されていない。クライアント側フックはprompt-detector.tsの検出結果に依存しており、detectPromptの変更がクライアント側の動作にも影響する",
+      "current": "関連コンポーネントに`src/hooks/useAutoYes.ts`が記載されているが、「影響範囲」セクションには含まれていない",
+      "suggestion": "影響範囲セクションに「クライアント側フック（useAutoYes.ts）への影響: prompt検出ロジック変更により、重複応答防止の動作確認が必要」を追加"
+    },
+    {
+      "severity": "must_fix",
+      "category": "テスト",
+      "description": "detectMultipleChoicePromptの誤検出テストケースが不足。既存のprompt-detector.test.tsにはmultiple_choiceプロンプトのテストが存在しない",
+      "current": "テスト要件の記載なし。Issue本文では対策案の提示のみ",
+      "suggestion": "テスト要件を明記: (1) 番号付きリストを含む通常出力で誤検出しないことを確認するテスト、(2) 有効なmultiple_choiceプロンプトを正しく検出するテスト、(3) 非連番の番号付きリストを除外するテスト、(4) thinking状態での検出抑制テスト"
+    },
+    {
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "response-poller.tsへの影響分析が不足。auto-yes-manager.ts内でstripAnsiとdetectPromptを呼び出しているが、同様のロジックがresponse-poller.tsにも存在する可能性がある",
+      "current": "関連コンポーネントにresponse-poller.tsが含まれていない",
+      "suggestion": "response-poller.tsとclaude-poller.tsの調査を影響分析に追加し、同様のプロンプト検出ロジックが存在しないか確認"
+    },
+    {
+      "severity": "should_fix",
+      "category": "副作用",
+      "description": "対策案2（detectThinking活用）を実装する場合、cli-patterns.tsのCLAUDE_THINKING_PATTERNに依存することになる。このパターンの網羅性が不十分だと新たな誤検出または検出漏れが発生する可能性",
+      "current": "対策案2でdetectThinking()関数の活用に言及しているが、副作用分析がない",
+      "suggestion": "CLAUDE_THINKING_PATTERNの現在のカバレッジを確認し、thinking状態検出の信頼性を評価。必要に応じてパターン拡張も検討"
+    },
+    {
+      "severity": "should_fix",
+      "category": "破壊的変更",
+      "description": "対策案1または案3を実装すると、現在正しく検出できているmultiple_choiceプロンプトが検出されなくなる可能性（false negative増加）",
+      "current": "破壊的変更の分析なし",
+      "suggestion": "破壊的変更の可能性を明記: 「検出条件の厳格化により、一部の正当なmultiple_choiceプロンプトが検出されなくなる可能性がある。回帰テストで既存の検出パターンが引き続き動作することを確認する」"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "テスト",
+      "description": "E2Eテストまたは統合テストの必要性が言及されていない。サーバー側ポーリング（auto-yes-manager.ts）とクライアント側フック（useAutoYes.ts）の両方が正しく動作することを確認する統合テストが望ましい",
+      "current": "テスト要件の記載なし",
+      "suggestion": "統合テスト要件を追加: 「auto-yes-manager.tsとuseAutoYes.tsの連携動作を確認する統合テスト」"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "ログ出力への影響が未記載。prompt-detector.tsはcreateLoggerを使用しており、検出ロジック変更に伴いログ出力内容も変更される可能性がある",
+      "current": "ログ関連の影響分析なし",
+      "suggestion": "影響範囲に「ログ出力: デバッグログの内容が変更される可能性あり」を追加"
+    }
+  ],
+  "impact_analysis": {
+    "affected_files": [
+      "src/lib/prompt-detector.ts",
+      "src/lib/auto-yes-manager.ts",
+      "src/lib/auto-yes-resolver.ts",
+      "src/lib/cli-patterns.ts",
+      "src/hooks/useAutoYes.ts",
+      "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "tests/unit/prompt-detector.test.ts",
+      "tests/unit/lib/auto-yes-resolver.test.ts"
+    ],
+    "breaking_changes": true,
+    "breaking_change_details": "detectMultipleChoicePromptの検出条件を厳格化すると、現在検出できているプロンプトが検出されなくなる可能性がある（false negative）。ただし、誤検出（false positive）を減らすためにはトレードオフとして許容される場合がある",
+    "test_requirements": [
+      "誤検出防止テスト: 番号付きリストを含む通常出力でmultiple_choiceと誤検出しないことを確認",
+      "正常検出テスト: 有効なmultiple_choiceプロンプト（❯インジケーター付き）を正しく検出",
+      "回帰テスト: 既存のyes/noプロンプト検出が影響を受けないことを確認",
+      "連番検証テスト（案3実装時）: 非連番の番号付きリスト（1, 3, 7等）を除外",
+      "thinking状態テスト（案2実装時）: thinking中はmultiple_choice検出をスキップ",
+      "統合テスト: auto-yes-manager.tsとuseAutoYes.tsの連携動作確認"
+    ],
+    "side_effects": [
+      "検出条件厳格化によるfalse negative増加の可能性",
+      "thinking状態チェック追加によるパフォーマンス影響（軽微）",
+      "ログ出力内容の変更",
+      "サーバー側ポーリングとクライアント側フックの両方に影響"
+    ],
+    "missing_impact_areas": [
+      "response-poller.tsの調査（同様のプロンプト検出ロジックの有無）",
+      "claude-poller.tsの調査（同様のプロンプト検出ロジックの有無）",
+      "既存のmultiple_choiceテストケースの追加（現在prompt-detector.test.tsに存在しない）"
+    ]
+  },
+  "summary": "Issue #161は影響範囲の記載が部分的に不足している。特に、(1) useAutoYes.tsへの影響、(2) テスト要件の明示、(3) 破壊的変更の可能性分析が必要。また、detectMultipleChoicePromptのユニットテストが既存テストファイルに存在しないため、修正前にまずテストカバレッジを拡充することを推奨。対策案の選択によってはCLAUDE_THINKING_PATTERNへの依存が発生するため、cli-patterns.tsのパターン網羅性も確認が必要。"
+}

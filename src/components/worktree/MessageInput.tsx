@@ -41,8 +41,9 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Hooks for slash command functionality
+  // Issue #4: Pass cliToolId to filter commands by CLI tool
   const isMobile = useIsMobile();
-  const { groups } = useSlashCommands(worktreeId);
+  const { groups } = useSlashCommands(worktreeId, cliToolId);
 
   /**
    * Auto-resize textarea based on content
