@@ -611,6 +611,63 @@ Are you sure you want to continue? (yes/no)
   });
 
   // ==========================================================================
+  // Issue #161: Client-side thinking-prompt ordering test
+  // Verifies that the defense pattern used in current-output/route.ts
+  // (detectThinking before detectPrompt) correctly prevents false positives.
+  // This test documents the fix for the client-side auto-yes path that was
+  // missing the Layer 1 thinking check, causing useAutoYes.ts to send "1".
+  // ==========================================================================
+  describe('Issue #161: Client-side thinking-prompt ordering', () => {
+    it('should skip prompt detection when thinking is detected (client-side pattern)', async () => {
+      // Import detectThinking to simulate the current-output/route.ts pattern
+      const { detectThinking } = await import('@/lib/cli-patterns');
+
+      // Simulate output with thinking indicator AND a valid multiple_choice prompt
+      // (e.g., old prompt still visible in tmux buffer while Claude is thinking)
+      // Note: ✻ is a Claude spinner char, … (U+2026) is required by CLAUDE_THINKING_PATTERN
+      const thinkingOutput = [
+        '\u2733 Analyzing the code\u2026',
+        'Here are the steps:',
+        '\u276F 1. Yes',
+        '  2. No',
+      ].join('\n');
+
+      // Step 1: Check thinking state FIRST (as current-output/route.ts now does)
+      const isThinking = detectThinking('claude', thinkingOutput);
+
+      // Step 2: Only call detectPrompt if NOT thinking
+      const promptDetection = isThinking
+        ? { isPrompt: false, cleanContent: thinkingOutput }
+        : detectPrompt(thinkingOutput);
+
+      // The thinking indicator should be detected
+      expect(isThinking).toBe(true);
+      // Therefore prompt detection should be skipped
+      expect(promptDetection.isPrompt).toBe(false);
+    });
+
+    it('should detect prompt when NOT thinking (client-side pattern)', async () => {
+      const { detectThinking } = await import('@/lib/cli-patterns');
+
+      // Output with a valid prompt but NO thinking indicator
+      const promptOutput = [
+        'Do you want to proceed?',
+        '❯ 1. Yes',
+        '  2. No',
+      ].join('\n');
+
+      const isThinking = detectThinking('claude', promptOutput);
+      const promptDetection = isThinking
+        ? { isPrompt: false, cleanContent: promptOutput }
+        : detectPrompt(promptOutput);
+
+      expect(isThinking).toBe(false);
+      expect(promptDetection.isPrompt).toBe(true);
+      expect(promptDetection.promptData?.type).toBe('multiple_choice');
+    });
+  });
+
+  // ==========================================================================
   // Issue #161: 50-line Window Boundary Tests (Section 5.4)
   // Tests for the 50-line scan window boundary conditions.
   // ==========================================================================

@@ -73,18 +73,23 @@ export async function GET(
     const nonEmptyLines = lines.map(l => stripAnsi(l)).filter(line => line.trim() !== '');
     const lastSection = nonEmptyLines.slice(-15).join('\n');
 
-    // Check if it's an interactive prompt (yes/no or multiple choice)
-    // Strip ANSI codes before prompt detection for reliable pattern matching
+    // Strip ANSI codes before state detection for reliable pattern matching
     const cleanOutput = stripAnsi(output);
-    const promptDetection = detectPrompt(cleanOutput);
+
+    // Check for thinking indicator FIRST (takes priority over prompt detection)
+    // Issue #161: Skip prompt detection during thinking state to prevent
+    // false positive detection of numbered lists as multiple_choice prompts.
+    // This mirrors the same defense in auto-yes-manager.ts pollAutoYes().
+    const thinking = detectThinkingState(cliToolId, lastSection);
+
+    // Check if it's an interactive prompt (yes/no or multiple choice)
+    // Skip detection during thinking to avoid false positives propagating
+    // to useAutoYes.ts client-side auto-response.
+    const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput);
 
     // isComplete is ONLY used for prompt detection (yes/no questions)
     // We no longer try to detect "normal" response completion
     const isPromptWaiting = promptDetection.isPrompt;
-
-    // Check for thinking indicator FIRST (takes priority)
-    // Even if input prompt is visible, thinking indicator means processing
-    const thinking = !isPromptWaiting && detectThinkingState(cliToolId, lastSection);
 
     // Extract realtime snippet (last 100 lines for better context)
     const realtimeSnippet = lines.slice(-100).join('\n');
