@@ -388,8 +388,15 @@ export async function sendMessageToClaude(
     }
   }
 
-  // Send message via buffer to avoid paste detection (Issue #163)
-  await sendTextViaBuffer(sessionName, message, true);
+  // Issue #163: Route by content type
+  // - Single-line: use sendKeys (keystroke-by-keystroke, proven to work with Claude CLI)
+  // - Multiline: use sendTextViaBuffer with bracketed paste to avoid
+  //   paste detection folding ("[Pasted text #1 +XX lines]")
+  if (message.includes('\n')) {
+    await sendTextViaBuffer(sessionName, message, true);
+  } else {
+    await sendKeys(sessionName, message, true);
+  }
 
   console.log(`Sent message to Claude session: ${sessionName}`);
 }
