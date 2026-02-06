@@ -1,6 +1,8 @@
 /**
- * Tests for standard-commands module (Issue #56)
+ * Tests for standard-commands module (Issue #56, Issue #4)
  * TDD: Red phase - write tests first
+ *
+ * Issue #4: Updated to test CLI tool-specific commands
  *
  * @vitest-environment node
  */
@@ -10,12 +12,13 @@ import {
   STANDARD_COMMANDS,
   FREQUENTLY_USED,
   getStandardCommandGroups,
+  getFrequentlyUsedCommands,
 } from '@/lib/standard-commands';
 import type { SlashCommandCategory } from '@/types/slash-commands';
 
 describe('STANDARD_COMMANDS', () => {
-  it('should have at least 16 standard commands', () => {
-    expect(STANDARD_COMMANDS.length).toBeGreaterThanOrEqual(16);
+  it('should have at least 26 standard commands (16 Claude + 10 Codex)', () => {
+    expect(STANDARD_COMMANDS.length).toBeGreaterThanOrEqual(26);
   });
 
   it('should have all required properties for each command', () => {
@@ -29,12 +32,40 @@ describe('STANDARD_COMMANDS', () => {
     });
   });
 
-  it('should include session management commands', () => {
-    const sessionCommands = ['clear', 'compact', 'resume', 'rewind'];
-    sessionCommands.forEach((name) => {
+  it('should have cliTools field for each command (Issue #4)', () => {
+    STANDARD_COMMANDS.forEach((cmd) => {
+      expect(cmd.cliTools).toBeDefined();
+      expect(Array.isArray(cmd.cliTools)).toBe(true);
+      expect(cmd.cliTools!.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('should include Claude-only session management commands', () => {
+    const claudeSessionCommands = ['clear', 'resume', 'rewind'];
+    claudeSessionCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
       expect(cmd?.category).toBe('standard-session');
+      expect(cmd?.cliTools).toEqual(['claude']);
+    });
+  });
+
+  it('should include shared commands (Claude + Codex)', () => {
+    const sharedCommands = ['compact', 'model', 'status', 'review'];
+    sharedCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.cliTools).toContain('claude');
+      expect(cmd?.cliTools).toContain('codex');
+    });
+  });
+
+  it('should include Codex-only commands', () => {
+    const codexCommands = ['approvals', 'diff', 'mention', 'mcp', 'init', 'feedback', 'new', 'undo', 'logout', 'quit'];
+    codexCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.cliTools).toEqual(['codex']);
     });
   });
 
@@ -57,7 +88,7 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   it('should include git commands', () => {
-    const gitCommands = ['review', 'pr-comments'];
+    const gitCommands = ['review', 'pr-comments', 'diff'];
     gitCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -66,7 +97,7 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   it('should include utility commands', () => {
-    const utilCommands = ['help', 'doctor', 'export', 'todos'];
+    const utilCommands = ['help', 'doctor', 'export', 'todos', 'mention', 'mcp', 'init', 'feedback'];
     utilCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -82,20 +113,35 @@ describe('STANDARD_COMMANDS', () => {
 });
 
 describe('FREQUENTLY_USED', () => {
-  it('should contain at least 5 frequently used commands', () => {
-    expect(FREQUENTLY_USED.length).toBeGreaterThanOrEqual(5);
+  it('should be an object with cli tool keys', () => {
+    expect(FREQUENTLY_USED).toBeDefined();
+    expect(FREQUENTLY_USED.claude).toBeDefined();
+    expect(FREQUENTLY_USED.codex).toBeDefined();
+  });
+
+  it('should contain at least 5 frequently used commands per tool', () => {
+    expect(FREQUENTLY_USED.claude.length).toBeGreaterThanOrEqual(5);
+    expect(FREQUENTLY_USED.codex.length).toBeGreaterThanOrEqual(5);
   });
 
   it('should only contain names that exist in STANDARD_COMMANDS', () => {
     const standardNames = STANDARD_COMMANDS.map((c) => c.name);
-    FREQUENTLY_USED.forEach((name) => {
+    FREQUENTLY_USED.claude.forEach((name: string) => {
+      expect(standardNames).toContain(name);
+    });
+    FREQUENTLY_USED.codex.forEach((name: string) => {
       expect(standardNames).toContain(name);
     });
   });
 
-  it('should include clear and compact', () => {
-    expect(FREQUENTLY_USED).toContain('clear');
-    expect(FREQUENTLY_USED).toContain('compact');
+  it('Claude frequently used should include clear and compact', () => {
+    expect(FREQUENTLY_USED.claude).toContain('clear');
+    expect(FREQUENTLY_USED.claude).toContain('compact');
+  });
+
+  it('Codex frequently used should include compact and undo', () => {
+    expect(FREQUENTLY_USED.codex).toContain('compact');
+    expect(FREQUENTLY_USED.codex).toContain('undo');
   });
 });
 
@@ -143,5 +189,40 @@ describe('getStandardCommandGroups', () => {
         expect(cmd.source).toBe('standard');
       });
     });
+  });
+});
+
+describe('getFrequentlyUsedCommands', () => {
+  it('should return Claude frequently used commands by default', () => {
+    const commands = getFrequentlyUsedCommands();
+    expect(commands.length).toBeGreaterThan(0);
+    expect(commands.some((c) => c.name === 'clear')).toBe(true);
+    expect(commands.some((c) => c.name === 'compact')).toBe(true);
+  });
+
+  it('should return Claude commands when cliToolId is claude', () => {
+    const commands = getFrequentlyUsedCommands('claude');
+    expect(commands.length).toBeGreaterThan(0);
+    expect(commands.some((c) => c.name === 'clear')).toBe(true);
+    // All returned commands should be available for Claude
+    commands.forEach((cmd) => {
+      expect(cmd.cliTools).toContain('claude');
+    });
+  });
+
+  it('should return Codex commands when cliToolId is codex', () => {
+    const commands = getFrequentlyUsedCommands('codex');
+    expect(commands.length).toBeGreaterThan(0);
+    expect(commands.some((c) => c.name === 'undo')).toBe(true);
+    // All returned commands should be available for Codex
+    commands.forEach((cmd) => {
+      expect(cmd.cliTools).toContain('codex');
+    });
+  });
+
+  it('should not return Claude-only commands for Codex', () => {
+    const commands = getFrequentlyUsedCommands('codex');
+    // 'clear' is Claude-only, should not be in Codex list
+    expect(commands.some((c) => c.name === 'clear')).toBe(false);
   });
 });
