@@ -87,8 +87,7 @@ describe('sendTextViaBuffer() - Issue #163', () => {
       const pasteBufferCall = vi.mocked(exec).mock.calls[0][0] as string;
       expect(pasteBufferCall).toContain('tmux paste-buffer');
       expect(pasteBufferCall).toContain('-t "test-session"');
-      expect(pasteBufferCall).toContain('-d');
-      expect(pasteBufferCall).not.toContain('-dp');
+      expect(pasteBufferCall).toContain('-dp');
 
       // Verify Enter key
       const enterCall = vi.mocked(exec).mock.calls[1][0] as string;
