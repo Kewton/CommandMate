@@ -131,7 +131,6 @@ src/
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
-| `src/lib/tmux.ts` | tmuxセッション管理（sendKeys(), sendTextViaBuffer(), capturePane(), sendSpecialKey()等） |
 | `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()） |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証） |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
@@ -373,24 +372,6 @@ commandmate status --all                   # 全サーバー状態確認
 ---
 
 ## 最近の実装機能
-
-### Issue #163: 複数行メッセージのバッファ送信方式
-- **問題解決**: 複数行テキストを`tmux send-keys`で送信するとClaude CLIが「ペースト操作」として認識し`[Pasted text #1 +XX lines]`と表示されるだけで処理が開始されない問題を修正
-- **バッファ送信方式**: `tmux load-buffer/paste-buffer`を使用してペースト検出を回避
-- **新規関数`sendTextViaBuffer()`**:
-  - バッファ名サニタイズ: `[^a-zA-Z0-9_-]` → `_`、プレフィックス `cm-`
-  - NULバイト除去
-  - エスケープ処理: `\`, `$`, `"`, `` ` `` の4種（バックスラッシュ最初に処理で二重エスケープ防止）
-  - バッファリーク防止: `paste-buffer -dp` + エラー時クリーンアップ
-- **適用箇所**:
-  - `sendMessageToClaude()`: `sendKeys()` 2回呼び出し → `sendTextViaBuffer()` 1回に置換
-  - Codex `sendMessage()`: `sendKeys()` + `execAsync(C-m)` → `sendTextViaBuffer()` 1回に置換
-- **リファクタリング**: `stopClaudeSession()`と`CodexTool.killSession()`の`execAsync(C-d)` → `sendSpecialKey()` に統一
-- **主要コンポーネント**:
-  - `src/lib/tmux.ts` - sendTextViaBuffer() 新規追加
-  - `src/lib/claude-session.ts` - sendMessageToClaude() 修正
-  - `src/lib/cli-tools/codex.ts` - sendMessage() 修正、未使用import削除
-- 詳細: [設計書](./dev-reports/design/issue-163-multiline-message-buffer-design-policy.md)
 
 ### Issue #161: Auto-Yes誤検出修正（番号付きリストの誤検出防止）
 - **問題解決**: Auto-Yesモード有効時、Claude CLIの通常出力に含まれる番号付きリスト（例：「1. ファイルを作成」「2. テストを実行」）がmultiple_choiceプロンプトとして誤検出され、「1」が自動送信される問題を修正

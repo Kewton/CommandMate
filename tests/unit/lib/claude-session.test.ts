@@ -12,7 +12,6 @@ vi.mock('@/lib/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
-  sendTextViaBuffer: vi.fn(),
   capturePane: vi.fn(),
   killSession: vi.fn(),
 }));
@@ -43,7 +42,7 @@ import {
   CLAUDE_PROMPT_WAIT_TIMEOUT,
   CLAUDE_PROMPT_POLL_INTERVAL,
 } from '@/lib/claude-session';
-import { hasSession, createSession, sendKeys, sendTextViaBuffer, capturePane } from '@/lib/tmux';
+import { hasSession, createSession, sendKeys, capturePane } from '@/lib/tmux';
 import { CLAUDE_PROMPT_PATTERN, CLAUDE_SEPARATOR_PATTERN } from '@/lib/cli-patterns';
 
 describe('claude-session - Issue #152 improvements', () => {
@@ -106,7 +105,7 @@ describe('claude-session - Issue #152 improvements', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       await expect(promise).resolves.toBeUndefined();
-      expect(capturePane).toHaveBeenCalledWith(sessionName, { startLine: -50 });
+      expect(capturePane).toHaveBeenCalledWith(sessionName, { startLine: -10 });
     });
 
     it('should detect legacy prompt character ">"', async () => {
@@ -163,12 +162,9 @@ describe('claude-session - Issue #152 improvements', () => {
 
       const timeout = 1000;
       const promise = waitForPrompt(sessionName, timeout);
-      // Prevent unhandled rejection while timers advance
-      const safePromise = promise.catch(() => {});
 
       // Advance past timeout
       await vi.advanceTimersByTimeAsync(timeout + 100);
-      await safePromise;
 
       await expect(promise).rejects.toThrow(`Prompt detection timeout (${timeout}ms)`);
     });
@@ -178,12 +174,9 @@ describe('claude-session - Issue #152 improvements', () => {
       vi.mocked(capturePane).mockResolvedValue('Still processing...');
 
       const promise = waitForPrompt(sessionName);
-      // Prevent unhandled rejection while timers advance
-      const safePromise = promise.catch(() => {});
 
       // Advance past default timeout (CLAUDE_PROMPT_WAIT_TIMEOUT = 5000ms)
       await vi.advanceTimersByTimeAsync(CLAUDE_PROMPT_WAIT_TIMEOUT + 100);
-      await safePromise;
 
       await expect(promise).rejects.toThrow(`Prompt detection timeout (${CLAUDE_PROMPT_WAIT_TIMEOUT}ms)`);
     });
@@ -205,12 +198,9 @@ describe('claude-session - Issue #152 improvements', () => {
       };
 
       const promise = startClaudeSession(options);
-      // Prevent unhandled rejection while timers advance
-      const safePromise = promise.catch(() => {});
 
       // Advance past CLAUDE_INIT_TIMEOUT
       await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
-      await safePromise;
 
       await expect(promise).rejects.toThrow(`Claude initialization timeout (${CLAUDE_INIT_TIMEOUT}ms)`);
     });
@@ -325,14 +315,15 @@ describe('claude-session - Issue #152 improvements', () => {
       expect(callCount).toBeGreaterThanOrEqual(2);
     });
 
-    it('should use sendTextViaBuffer for message sending', async () => {
+    it('should use sendKeys for Enter instead of execAsync (CONS-001)', async () => {
       vi.mocked(capturePane).mockResolvedValue('> ');
 
       await sendMessageToClaude('test-worktree', 'Hello Claude');
 
-      // Should call sendTextViaBuffer once with message and Enter
-      expect(sendTextViaBuffer).toHaveBeenCalledTimes(1);
-      expect(sendTextViaBuffer).toHaveBeenCalledWith('mcbd-claude-test-worktree', 'Hello Claude', true);
+      // Should call sendKeys twice: once for message, once for Enter
+      expect(sendKeys).toHaveBeenCalledTimes(2);
+      expect(sendKeys).toHaveBeenNthCalledWith(1, 'mcbd-claude-test-worktree', 'Hello Claude', false);
+      expect(sendKeys).toHaveBeenNthCalledWith(2, 'mcbd-claude-test-worktree', '', true);
     });
 
     it('should throw error if session does not exist', async () => {
@@ -343,18 +334,15 @@ describe('claude-session - Issue #152 improvements', () => {
       );
     });
 
-    it('should send message even when prompt not detected within timeout', async () => {
+    it('should throw error if prompt not detected within timeout', async () => {
       vi.mocked(capturePane).mockResolvedValue('Still processing...');
 
       const promise = sendMessageToClaude('test-worktree', 'Hello');
 
-      // Advance past the 10s waitForPrompt timeout used in sendMessageToClaude
-      await vi.advanceTimersByTimeAsync(10100);
+      // Advance past prompt wait timeout
+      await vi.advanceTimersByTimeAsync(CLAUDE_PROMPT_WAIT_TIMEOUT + 100);
 
-      // Should resolve (not reject) because the catch block logs a warning and proceeds
-      await expect(promise).resolves.toBeUndefined();
-      // sendTextViaBuffer should still be called
-      expect(sendTextViaBuffer).toHaveBeenCalledWith('mcbd-claude-test-worktree', 'Hello', true);
+      await expect(promise).rejects.toThrow(`Prompt detection timeout (${CLAUDE_PROMPT_WAIT_TIMEOUT}ms)`);
     });
   });
 

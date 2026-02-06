@@ -7,8 +7,6 @@ import {
   hasSession,
   createSession,
   sendKeys,
-  sendTextViaBuffer,
-  sendSpecialKey,
   capturePane,
   killSession,
 } from './tmux';
@@ -388,8 +386,9 @@ export async function sendMessageToClaude(
     }
   }
 
-  // Send message via buffer to avoid paste detection (Issue #163)
-  await sendTextViaBuffer(sessionName, message, true);
+  // Send message using sendKeys consistently (CONS-001)
+  await sendKeys(sessionName, message, false);  // Message without Enter
+  await sendKeys(sessionName, '', true);        // Enter key
 
   console.log(`Sent message to Claude session: ${sessionName}`);
 }
@@ -445,8 +444,8 @@ export async function stopClaudeSession(worktreeId: string): Promise<boolean> {
     const exists = await hasSession(sessionName);
     if (exists) {
       await sendKeys(sessionName, '', false);
-      // Send Ctrl+D via tmux abstraction layer
-      await sendSpecialKey(sessionName, 'C-d');
+      // Send Ctrl+D (ASCII 4)
+      await execAsync(`tmux send-keys -t "${sessionName}" C-d`);
 
       // Wait a moment for Claude to exit
       await new Promise((resolve) => setTimeout(resolve, 500));
