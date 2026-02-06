@@ -3,7 +3,7 @@
  * Provides functions to manage tmux sessions for Claude CLI integration
  */
 
-import { exec, spawn } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -390,36 +390,19 @@ export async function sendTextViaBuffer(
   // SEC-004: NUL byte removal
   const sanitizedText = text.replace(/\0/g, '');
 
+  // SEC-001: Escape processing (order matters - backslash first to prevent double-escape)
+  const escapedText = sanitizedText
+    .replace(/\\/g, '\\\\\\\\')  // \ -> \\\\
+    .replace(/\$/g, '\\\\$')     // $ -> \\$
+    .replace(/"/g, '\\\\"')      // " -> \\"
+    .replace(/`/g, '\\\\`');     // ` -> \\`
+
   try {
-    // Load text into tmux buffer via stdin pipe (no shell interpretation)
-    // Using spawn instead of execAsync avoids all shell escaping issues
-    await new Promise<void>((resolve, reject) => {
-      const proc = spawn('tmux', ['load-buffer', '-b', bufferName, '-'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      let stderr = '';
-      proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
-
-      const timer = setTimeout(() => {
-        proc.kill();
-        reject(new Error(`tmux load-buffer timeout (${DEFAULT_TIMEOUT}ms)`));
-      }, DEFAULT_TIMEOUT);
-
-      proc.on('close', (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else reject(new Error(`tmux load-buffer failed (code ${code}): ${stderr}`));
-      });
-
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-
-      proc.stdin.write(sanitizedText);
-      proc.stdin.end();
-    });
+    // Load text into tmux buffer
+    await execAsync(
+      `printf '%s' "${escapedText}" | tmux load-buffer -b "${bufferName}" -`,
+      { timeout: DEFAULT_TIMEOUT }
+    );
 
     // Paste buffer into session and auto-delete buffer (-d), no trailing newline (-p)
     await execAsync(
