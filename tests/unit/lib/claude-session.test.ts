@@ -163,9 +163,12 @@ describe('claude-session - Issue #152 improvements', () => {
 
       const timeout = 1000;
       const promise = waitForPrompt(sessionName, timeout);
+      // Prevent unhandled rejection while timers advance
+      const safePromise = promise.catch(() => {});
 
       // Advance past timeout
       await vi.advanceTimersByTimeAsync(timeout + 100);
+      await safePromise;
 
       await expect(promise).rejects.toThrow(`Prompt detection timeout (${timeout}ms)`);
     });
@@ -175,9 +178,12 @@ describe('claude-session - Issue #152 improvements', () => {
       vi.mocked(capturePane).mockResolvedValue('Still processing...');
 
       const promise = waitForPrompt(sessionName);
+      // Prevent unhandled rejection while timers advance
+      const safePromise = promise.catch(() => {});
 
       // Advance past default timeout (CLAUDE_PROMPT_WAIT_TIMEOUT = 5000ms)
       await vi.advanceTimersByTimeAsync(CLAUDE_PROMPT_WAIT_TIMEOUT + 100);
+      await safePromise;
 
       await expect(promise).rejects.toThrow(`Prompt detection timeout (${CLAUDE_PROMPT_WAIT_TIMEOUT}ms)`);
     });
@@ -199,9 +205,12 @@ describe('claude-session - Issue #152 improvements', () => {
       };
 
       const promise = startClaudeSession(options);
+      // Prevent unhandled rejection while timers advance
+      const safePromise = promise.catch(() => {});
 
       // Advance past CLAUDE_INIT_TIMEOUT
       await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
+      await safePromise;
 
       await expect(promise).rejects.toThrow(`Claude initialization timeout (${CLAUDE_INIT_TIMEOUT}ms)`);
     });

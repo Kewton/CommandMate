@@ -10,12 +10,9 @@ import {
   createSession,
   sendKeys,
   sendTextViaBuffer,
+  sendSpecialKey,
   killSession,
 } from '../tmux';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
 
 /**
  * Codex CLI tool implementation
@@ -129,8 +126,8 @@ export class CodexTool extends BaseCLITool {
       // Send Ctrl+D to exit Codex gracefully
       const exists = await hasSession(sessionName);
       if (exists) {
-        // Send Ctrl+D (ASCII 4)
-        await execAsync(`tmux send-keys -t "${sessionName}" C-d`);
+        // Send Ctrl+D via tmux abstraction layer
+        await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for Codex to exit
         await new Promise((resolve) => setTimeout(resolve, 500));
