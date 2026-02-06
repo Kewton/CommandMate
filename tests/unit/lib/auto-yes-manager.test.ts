@@ -450,18 +450,13 @@ describe('auto-yes-manager', () => {
       // Verify: captureSessionOutput was called (poll ran)
       expect(captureSessionOutput).toHaveBeenCalled();
 
-      // Verify: detectThinking was called by the internal code path
-      // The thinking output contains '✻ Analyzing...' which matches CLAUDE_THINKING_PATTERN
-      // Since detectThinking returns true, detectPrompt should NOT be called
-      // and sendKeys should NOT be called
+      // Verify: sendKeys was NOT called, confirming that pollAutoYes
+      // skipped prompt detection due to thinking state (Layer 1 defense).
+      // The thinking output '✻ Analyzing...' matches CLAUDE_THINKING_PATTERN,
+      // so detectThinking() returns true and detectPrompt() is never called.
+      // Note: Even without Layer 1, the 2-pass fix (Layer 2) would also prevent
+      // false detection of the numbered list, but Layer 1 provides defense-in-depth.
       expect(sendKeys).not.toHaveBeenCalled();
-
-      // The behavior we are testing:
-      // When thinking state is detected, pollAutoYes skips detectPrompt
-      // and schedules next poll without sending any response.
-      // We verify this indirectly: if detectPrompt were called with this output,
-      // it would NOT detect a prompt anyway (due to 2-pass fix),
-      // but the thinking check provides Layer 1 defense.
 
       // Cleanup
       stopAutoYesPolling('wt-thinking');

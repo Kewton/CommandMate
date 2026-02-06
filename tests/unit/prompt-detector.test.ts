@@ -552,6 +552,10 @@ Are you sure you want to continue? (yes/no)
       expect(result.isPrompt).toBe(false);
     });
 
+    // Note: Test #5 (thinking state with numbered output) is in
+    // auto-yes-manager.test.ts as it tests Layer 1 (caller-side thinking check).
+    // See Section 5.1 of the design policy and Section 5.3 Test #1.
+
     it('should NOT detect CLI step descriptions as multiple_choice (Test #6)', () => {
       // Layer 2 protection: no cursor indicator in output
       const output = "I'll do the following:\n1. Create file\n2. Run tests\n3. Commit";
@@ -633,19 +637,19 @@ Are you sure you want to continue? (yes/no)
     });
 
     it('should handle old prompt cursor with new numbered list in window (Test #3)', () => {
-      // Section 5.4 Test #3: old prompt with cursor + new numbered list
+      // Section 5.4 Test #3: old answered prompt with cursor + new numbered list.
+      // Known edge case (Section 9.4): when an old ❯ line remains within the
+      // 50-line scan window, Pass 1 finds it and Pass 2 collects both old and
+      // new numbered lines. The consecutive number validation (Layer 3) and
+      // hasDefault check (Layer 4) provide partial protection.
       const oldPrompt = '❯ 1. Yes\n  2. No';
       const middleLines = Array.from({ length: 40 }, (_, i) => `Output line ${i + 1}`).join('\n');
       const newList = '1. Step one\n2. Step two';
       const output = oldPrompt + '\n' + middleLines + '\n' + newList;
       const result = detectPrompt(output);
 
-      // The old cursor is within the window, and new numbered list lines
-      // will also be captured. The behavior depends on the implementation
-      // details - with 2-pass method, the old cursor line satisfies pass 1,
-      // and both old and new lines will be collected in pass 2.
-      // This is a known edge case (Section 9.4).
-      // We just verify it does not crash and returns a result.
+      // Verify no crash occurs. The exact isPrompt value depends on how
+      // the old and new numbered lines interact with Layer 3/4 validation.
       expect(result).toBeDefined();
       expect(typeof result.isPrompt).toBe('boolean');
     });

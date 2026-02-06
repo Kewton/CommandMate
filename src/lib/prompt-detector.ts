@@ -175,6 +175,20 @@ const TEXT_INPUT_PATTERNS: RegExp[] = [
 ];
 
 /**
+ * Pattern for ❯ (U+276F) indicator lines used by Claude CLI to mark the default selection.
+ * Used in Pass 1 (existence check) and Pass 2 (option collection) of the 2-pass detection.
+ * Anchored at both ends -- ReDoS safe (S4-001).
+ */
+const DEFAULT_OPTION_PATTERN = /^\s*\u276F\s*(\d+)\.\s*(.+)$/;
+
+/**
+ * Pattern for normal option lines (no ❯ indicator, just leading whitespace + number).
+ * Only applied in Pass 2 when ❯ indicator existence is confirmed by Pass 1.
+ * Anchored at both ends -- ReDoS safe (S4-001).
+ */
+const NORMAL_OPTION_PATTERN = /^\s*(\d+)\.\s*(.+)$/;
+
+/**
  * Defensive check: protection against future unknown false positive patterns.
  * Note: The actual false positive pattern in Issue #161 ("1. Create file\n2. Run tests")
  * IS consecutive from 1, so this validation alone does not prevent it.
@@ -219,11 +233,6 @@ function isConsecutiveFromOne(numbers: number[]): boolean {
 function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
   const lines = output.split('\n');
 
-  // ❯ (U+276F) indicator pattern for default selection
-  const defaultOptionPattern = /^\s*\u276F\s*(\d+)\.\s*(.+)$/;
-  // Normal option pattern (no ❯ indicator, just leading whitespace + number)
-  const normalOptionPattern = /^\s*(\d+)\.\s*(.+)$/;
-
   // Calculate scan window: last 50 lines
   const scanStart = Math.max(0, lines.length - 50);
 
@@ -234,7 +243,7 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
   let hasDefaultLine = false;
   for (let i = scanStart; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (defaultOptionPattern.test(line)) {
+    if (DEFAULT_OPTION_PATTERN.test(line)) {
       hasDefaultLine = true;
       break;
     }
@@ -256,10 +265,9 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
 
   for (let i = lines.length - 1; i >= scanStart; i--) {
     const line = lines[i].trim();
-    const rawLine = lines[i]; // Keep original indentation for checking
 
-    // Try defaultOptionPattern first (❯ indicator)
-    const defaultMatch = line.match(defaultOptionPattern);
+    // Try DEFAULT_OPTION_PATTERN first (❯ indicator)
+    const defaultMatch = line.match(DEFAULT_OPTION_PATTERN);
     if (defaultMatch) {
       const number = parseInt(defaultMatch[1], 10);
       const label = defaultMatch[2].trim();
@@ -267,8 +275,8 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
       continue;
     }
 
-    // Try normalOptionPattern (no ❯ indicator)
-    const normalMatch = line.match(normalOptionPattern);
+    // Try NORMAL_OPTION_PATTERN (no ❯ indicator)
+    const normalMatch = line.match(NORMAL_OPTION_PATTERN);
     if (normalMatch) {
       const number = parseInt(normalMatch[1], 10);
       const label = normalMatch[2].trim();
@@ -281,6 +289,7 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
       // Check if this is a continuation line (indented line between options)
       // Continuation lines typically start with spaces (like "  work/github...")
       // Also treat very short lines (< 5 chars) as potential word-wrap fragments
+      const rawLine = lines[i]; // Original line with indentation preserved
       const hasLeadingSpaces = rawLine.match(/^\s{2,}[^\d]/) && !rawLine.match(/^\s*\d+\./);
       const isShortFragment = line.length < 5 && !line.endsWith('?');
       const isContinuationLine = hasLeadingSpaces || isShortFragment;
