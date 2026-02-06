@@ -580,27 +580,25 @@ export const FileTreeView = memo(function FileTreeView({
 
         // Step 3: Re-fetch expanded directories in parallel chunks
         const newCache = new Map<string, TreeItem[]>();
-        const pathsToRemoveFromExpanded: string[] = [];
+        const stalePaths: string[] = [];
 
         for (let i = 0; i < expandedPaths.length; i += CONCURRENT_LIMIT) {
           if (!mounted) return;
 
           const chunk = expandedPaths.slice(i, i + CONCURRENT_LIMIT);
           const results = await Promise.allSettled(
-            chunk.map(async (path) => {
-              const data = await fetchDirectory(path);
-              return { path, data };
+            chunk.map(async (dirPath) => {
+              const data = await fetchDirectory(dirPath);
+              return { dirPath, data };
             })
           );
 
-          for (let j = 0; j < results.length; j++) {
-            const result = results[j];
-            const originalPath = chunk[j];
+          for (const [j, result] of results.entries()) {
             if (result.status === 'fulfilled' && result.value.data) {
-              newCache.set(result.value.path, result.value.data.items);
+              newCache.set(result.value.dirPath, result.value.data.items);
             } else {
-              // Failed or null data - directory may have been deleted
-              pathsToRemoveFromExpanded.push(originalPath);
+              // Directory may have been deleted or become inaccessible
+              stalePaths.push(chunk[j]);
             }
           }
         }
@@ -611,11 +609,11 @@ export const FileTreeView = memo(function FileTreeView({
         setRootItems(rootData.items);
         setCache(newCache);
 
-        // Remove failed paths from expanded
-        if (pathsToRemoveFromExpanded.length > 0) {
+        // Remove stale paths (deleted/inaccessible directories) from expanded set
+        if (stalePaths.length > 0) {
           setExpanded((prev) => {
             const next = new Set(prev);
-            for (const path of pathsToRemoveFromExpanded) {
+            for (const path of stalePaths) {
               if (path) next.delete(path);
             }
             return next;
