@@ -69,7 +69,7 @@ describe('sendTextViaBuffer() - Issue #163', () => {
   });
 
   describe('Normal operations', () => {
-    it('should send single-line text via buffer with Enter (no bracketed paste)', async () => {
+    it('should send single-line text via buffer with Enter', async () => {
       await sendTextViaBuffer('test-session', 'Hello World');
 
       // spawn called once for load-buffer
@@ -80,58 +80,34 @@ describe('sendTextViaBuffer() - Issue #163', () => {
         expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] })
       );
 
-      // Single-line: exec called twice: paste-buffer + send-keys (C-m)
-      // No bracketed paste markers for single-line text
+      // exec called twice: paste-buffer + send-keys (C-m)
       expect(exec).toHaveBeenCalledTimes(2);
 
-      // Verify paste-buffer call (with -dp for single-line)
+      // Verify paste-buffer call
       const pasteBufferCall = vi.mocked(exec).mock.calls[0][0] as string;
       expect(pasteBufferCall).toContain('tmux paste-buffer');
       expect(pasteBufferCall).toContain('-t "test-session"');
-      expect(pasteBufferCall).toContain('-dp');
+      expect(pasteBufferCall).toContain('-d');
+      expect(pasteBufferCall).not.toContain('-dp');
 
       // Verify Enter key
       const enterCall = vi.mocked(exec).mock.calls[1][0] as string;
       expect(enterCall).toContain('tmux send-keys');
       expect(enterCall).toContain('C-m');
 
-      // Verify no bracketed paste markers were sent
-      const allCalls = vi.mocked(exec).mock.calls.map(c => c[0] as string);
-      expect(allCalls.some(c => c.includes('-H 1b 5b 32 30 30 7e'))).toBe(false);
-
       // Verify text was written to stdin
       const mockProc = vi.mocked(spawn).mock.results[0].value;
       expect(mockProc.stdin.writtenData).toBe('Hello World');
     });
 
-    it('should send multiline text with explicit bracketed paste markers', async () => {
+    it('should send multiline text (50+ lines) via buffer', async () => {
       const lines = Array.from({ length: 55 }, (_, i) => `Line ${i + 1}`);
       const multilineText = lines.join('\n');
 
       await sendTextViaBuffer('test-session', multilineText);
 
       expect(spawn).toHaveBeenCalledTimes(1);
-      // Multiline: bracket-start + paste-buffer + bracket-end + C-m = 4 exec calls
-      expect(exec).toHaveBeenCalledTimes(4);
-
-      // Verify bracketed paste start marker (ESC [ 2 0 0 ~)
-      const startMarkerCall = vi.mocked(exec).mock.calls[0][0] as string;
-      expect(startMarkerCall).toContain('send-keys');
-      expect(startMarkerCall).toContain('-H 1b 5b 32 30 30 7e');
-
-      // Verify paste-buffer call (with -dp, markers sent explicitly)
-      const pasteBufferCall = vi.mocked(exec).mock.calls[1][0] as string;
-      expect(pasteBufferCall).toContain('tmux paste-buffer');
-      expect(pasteBufferCall).toContain('-dp');
-
-      // Verify bracketed paste end marker (ESC [ 2 0 1 ~)
-      const endMarkerCall = vi.mocked(exec).mock.calls[2][0] as string;
-      expect(endMarkerCall).toContain('send-keys');
-      expect(endMarkerCall).toContain('-H 1b 5b 32 30 31 7e');
-
-      // Verify Enter key
-      const enterCall = vi.mocked(exec).mock.calls[3][0] as string;
-      expect(enterCall).toContain('C-m');
+      expect(exec).toHaveBeenCalledTimes(2);
 
       // Verify the full multiline text was written to stdin
       const mockProc = vi.mocked(spawn).mock.results[0].value;
@@ -141,7 +117,7 @@ describe('sendTextViaBuffer() - Issue #163', () => {
     it('should not send Enter when sendEnter=false', async () => {
       await sendTextViaBuffer('test-session', 'Hello', false);
 
-      // Single-line, no Enter: spawn once for load-buffer, exec once for paste-buffer
+      // spawn once for load-buffer, exec once for paste-buffer (no C-m)
       expect(spawn).toHaveBeenCalledTimes(1);
       expect(exec).toHaveBeenCalledTimes(1);
 

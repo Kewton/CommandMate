@@ -421,38 +421,15 @@ export async function sendTextViaBuffer(
       proc.stdin.end();
     });
 
-    const isMultiline = sanitizedText.includes('\n');
-
-    if (isMultiline) {
-      // Send explicit bracketed paste start marker (\e[200~)
-      // This ensures the application treats all content as a single paste,
-      // regardless of whether it has requested bracketed paste mode
-      // Hex: 1b=[ESC] 5b=[ 32=2 30=0 30=0 7e=~
-      await execAsync(
-        `tmux send-keys -t "${sessionName}" -H 1b 5b 32 30 30 7e`,
-        { timeout: DEFAULT_TIMEOUT }
-      );
-    }
-
-    // Paste buffer content into session
+    // Paste buffer into session with bracketed paste mode
     // -d: delete buffer after pasting
-    // -p: don't insert automatic bracket markers (we send them explicitly)
+    // Without -p: tmux sends bracketed paste markers (\e[200~ ... \e[201~)
+    //   so the application treats the entire content as a single paste operation
+    //   and newlines are NOT interpreted as Enter keypresses
     await execAsync(
-      `tmux paste-buffer -t "${sessionName}" -b "${bufferName}" -dp`,
+      `tmux paste-buffer -t "${sessionName}" -b "${bufferName}" -d`,
       { timeout: DEFAULT_TIMEOUT }
     );
-
-    if (isMultiline) {
-      // Send explicit bracketed paste end marker (\e[201~)
-      // Hex: 1b=[ESC] 5b=[ 32=2 30=0 31=1 7e=~
-      await execAsync(
-        `tmux send-keys -t "${sessionName}" -H 1b 5b 32 30 31 7e`,
-        { timeout: DEFAULT_TIMEOUT }
-      );
-
-      // Wait for application to process the paste event
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
 
     // Send Enter key if requested
     if (sendEnter) {
