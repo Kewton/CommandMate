@@ -820,12 +820,19 @@ commandmate status --all                   # 全サーバー状態確認
 - **レスポンス保存バグ修正**: tmuxバッファの空行パディングによる行数不整合を修正（assistant-response-saver.ts）
 - **セキュリティ対策**: sessionName検証によるコマンドインジェクション防止
 - **パターン拡張**: CODEX_THINKING_PATTERNにRan, Deciding追加
+- **スラッシュコマンドフィルタリング**: CLIツール別にスラッシュコマンドをフィルタリング
+  - Claude専用（12）: `/clear`, `/resume`, `/rewind`, `/config`, `/permissions`, `/context`, `/cost`, `/pr-comments`, `/help`, `/doctor`, `/export`, `/todos`
+  - Codex専用（10）: `/approvals`, `/diff`, `/mention`, `/mcp`, `/init`, `/feedback`, `/new`, `/undo`, `/logout`, `/quit`
+  - 共通（4）: `/compact`, `/model`, `/status`, `/review`
 - **主要コンポーネント**:
   - `src/lib/cli-tools/validation.ts` - sessionName検証（SESSION_NAME_PATTERN）
   - `src/lib/cli-tools/types.ts` - CLI_TOOL_IDS定数、CLIToolType派生
   - `src/lib/cli-tools/manager.ts` - stopPollers()メソッド追加
   - `src/lib/cli-patterns.ts` - Codexパターン拡張
+  - `src/lib/standard-commands.ts` - CLIツール別コマンド定義
+  - `src/lib/command-merger.ts` - filterCommandsByCliTool()関数
   - `src/app/api/worktrees/[id]/kill-session/route.ts` - cliToolパラメータ対応
+  - `src/app/api/worktrees/[id]/slash-commands/route.ts` - cliToolクエリパラメータ対応
   - `src/components/worktree/WorktreeDetailRefactored.tsx` - 確認ダイアログ、CLI別ステータスドット
   - `src/components/sidebar/BranchListItem.tsx` - サイドバーCLI別ステータスドット
   - `src/types/sidebar.ts` - deriveCliStatus()、SidebarBranchItem.cliStatus拡張
