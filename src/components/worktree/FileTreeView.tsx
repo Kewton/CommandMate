@@ -17,7 +17,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, memo, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo, useMemo } from 'react';
 import type { TreeItem, TreeResponse, SearchMode, SearchResultItem } from '@/types/models';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { useLongPress } from '@/hooks/useLongPress';
@@ -104,6 +104,9 @@ interface TreeNodeProps {
   /** [Issue #21] Set of matched file/directory paths for content search filtering */
   matchedPaths?: Set<string>;
 }
+
+/** Maximum number of concurrent directory fetches during tree reload */
+const CONCURRENT_LIMIT = 5;
 
 // ============================================================================
 // Utility Functions
@@ -517,6 +520,13 @@ export const FileTreeView = memo(function FileTreeView({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [cache, setCache] = useState<Map<string, TreeItem[]>>(() => new Map());
 
+  // [Issue #164] Ref to access current expanded state without adding to useEffect dependencies
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+
+  // [Issue #164] Ref to track in-progress fetches and prevent duplicate requests
+  const loadingPathsRef = useRef<Set<string>>(new Set());
+
   // Context menu state (separated for rendering optimization)
   const { menuState, openMenu, closeMenu } = useContextMenu();
 
@@ -546,21 +556,70 @@ export const FileTreeView = memo(function FileTreeView({
   );
 
   /**
-   * Load root directory on mount or when refreshTrigger changes
+   * [Issue #164] Load root directory and re-fetch all expanded directories
+   * on mount or when refreshTrigger changes.
+   *
+   * Instead of clearing cache and only reloading root (which caused expanded
+   * directories to lose their contents), this re-fetches all expanded
+   * directories in parallel chunks of CONCURRENT_LIMIT.
    */
   useEffect(() => {
     let mounted = true;
 
-    const loadRoot = async () => {
+    const reloadTreeWithExpandedDirs = async () => {
       setLoading(true);
       setError(null);
-      // Clear cache on refresh to ensure fresh data
-      setCache(new Map());
 
       try {
-        const data = await fetchDirectory();
-        if (mounted && data) {
-          setRootItems(data.items);
+        // Step 1: Re-fetch root directory
+        const rootData = await fetchDirectory();
+        if (!mounted || !rootData) return;
+
+        // Step 2: Get currently expanded paths from ref (avoids dependency on expanded)
+        const expandedPaths = Array.from(expandedRef.current);
+
+        // Step 3: Re-fetch expanded directories in parallel chunks
+        const newCache = new Map<string, TreeItem[]>();
+        const pathsToRemoveFromExpanded: string[] = [];
+
+        for (let i = 0; i < expandedPaths.length; i += CONCURRENT_LIMIT) {
+          if (!mounted) return;
+
+          const chunk = expandedPaths.slice(i, i + CONCURRENT_LIMIT);
+          const results = await Promise.allSettled(
+            chunk.map(async (path) => {
+              const data = await fetchDirectory(path);
+              return { path, data };
+            })
+          );
+
+          for (let j = 0; j < results.length; j++) {
+            const result = results[j];
+            const originalPath = chunk[j];
+            if (result.status === 'fulfilled' && result.value.data) {
+              newCache.set(result.value.path, result.value.data.items);
+            } else {
+              // Failed or null data - directory may have been deleted
+              pathsToRemoveFromExpanded.push(originalPath);
+            }
+          }
+        }
+
+        if (!mounted) return;
+
+        // Step 4: Update state in batch
+        setRootItems(rootData.items);
+        setCache(newCache);
+
+        // Remove failed paths from expanded
+        if (pathsToRemoveFromExpanded.length > 0) {
+          setExpanded((prev) => {
+            const next = new Set(prev);
+            for (const path of pathsToRemoveFromExpanded) {
+              if (path) next.delete(path);
+            }
+            return next;
+          });
         }
       } catch (err) {
         if (mounted) {
@@ -573,7 +632,7 @@ export const FileTreeView = memo(function FileTreeView({
       }
     };
 
-    loadRoot();
+    reloadTreeWithExpandedDirs();
 
     return () => {
       mounted = false;
@@ -582,21 +641,30 @@ export const FileTreeView = memo(function FileTreeView({
 
   /**
    * Load children for a directory
+   * [Issue #164] Fixed: uses setCache instead of direct Map mutation,
+   * and loadingPathsRef to prevent duplicate fetches.
    */
   const loadChildren = useCallback(
     async (path: string) => {
-      // Check cache first
-      if (cache.has(path)) {
+      // Check cache or in-progress fetch first
+      if (cache.has(path) || loadingPathsRef.current.has(path)) {
         return;
       }
 
+      loadingPathsRef.current.add(path);
       try {
         const data = await fetchDirectory(path);
         if (data) {
-          cache.set(path, data.items);
+          setCache(prev => {
+            const next = new Map(prev);
+            next.set(path, data.items);
+            return next;
+          });
         }
       } catch (err) {
         console.error('[FileTreeView] Error loading children:', err);
+      } finally {
+        loadingPathsRef.current.delete(path);
       }
     },
     [cache, fetchDirectory]

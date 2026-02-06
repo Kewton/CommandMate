@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import type { TreeResponse } from '@/types/models';
 
@@ -1009,6 +1009,389 @@ describe('FileTreeView', () => {
         fireEvent.touchEnd(fileItem);
         fireEvent.touchCancel(fileItem);
       }).not.toThrow();
+    });
+  });
+
+  /**
+   * Issue #164: refreshTrigger should maintain expanded directory state
+   *
+   * When refreshTrigger changes (after file/directory creation, rename, delete, upload),
+   * the tree should re-fetch all expanded directories and maintain their expanded state.
+   */
+  describe('refreshTrigger - expand state preservation (Issue #164)', () => {
+    const mockComponentsData: TreeResponse = {
+      path: 'src/components',
+      name: 'components',
+      items: [
+        { name: 'App.tsx', type: 'file', size: 256, extension: 'tsx' },
+      ],
+      parentPath: 'src',
+    };
+
+    it('should maintain expanded directory contents after refreshTrigger changes', async () => {
+      // Setup: mock responses for root, src, and src/components
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/tree/src/components')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockComponentsData),
+          });
+        }
+        if (url.includes('/tree/src')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockSrcData),
+          });
+        }
+        if (url.includes('/tree')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockRootData),
+          });
+        }
+        return Promise.reject(new Error('Not found'));
+      });
+
+      const { rerender } = render(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={0} />
+      );
+
+      // Wait for initial render
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      // Expand src directory
+      fireEvent.click(screen.getByTestId('tree-item-src'));
+      await waitFor(() => {
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+      });
+
+      // Clear fetch mock to track new calls
+      mockFetch.mockClear();
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/tree/src/components')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockComponentsData),
+          });
+        }
+        if (url.includes('/tree/src')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockSrcData),
+          });
+        }
+        if (url.includes('/tree')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockRootData),
+          });
+        }
+        return Promise.reject(new Error('Not found'));
+      });
+
+      // Trigger refresh (simulates file creation/rename/delete)
+      rerender(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={1} />
+      );
+
+      // After refresh, expanded directory contents should still be visible
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+      });
+
+      // Verify that both root AND expanded directory were re-fetched
+      const fetchCalls = mockFetch.mock.calls.map((call) => call[0]);
+      expect(fetchCalls).toContain('/api/worktrees/test-worktree/tree');
+      expect(fetchCalls).toContain('/api/worktrees/test-worktree/tree/src');
+    });
+
+    it('should limit concurrent API requests to CONCURRENT_LIMIT (5)', async () => {
+      // Create mock data with many expanded directories
+      const manyDirsRoot: TreeResponse = {
+        path: '',
+        name: '',
+        items: Array.from({ length: 8 }, (_, i) => ({
+          name: `dir${i}`,
+          type: 'directory' as const,
+          itemCount: 1,
+        })),
+        parentPath: null,
+      };
+
+      // Track concurrent fetches
+      let currentConcurrent = 0;
+      let maxConcurrent = 0;
+
+      mockFetch.mockImplementation((url: string) => {
+        currentConcurrent++;
+        maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            currentConcurrent--;
+            const dirMatch = url.match(/\/tree\/(dir\d+)$/);
+            if (dirMatch) {
+              resolve({
+                ok: true,
+                json: () =>
+                  Promise.resolve({
+                    path: dirMatch[1],
+                    name: dirMatch[1],
+                    items: [
+                      { name: `file-in-${dirMatch[1]}.ts`, type: 'file', size: 100, extension: 'ts' },
+                    ],
+                    parentPath: '',
+                  }),
+              });
+            } else if (url.includes('/tree')) {
+              resolve({
+                ok: true,
+                json: () => Promise.resolve(manyDirsRoot),
+              });
+            } else {
+              resolve({
+                ok: false,
+                status: 404,
+                json: () => Promise.resolve({ error: 'Not found' }),
+              });
+            }
+          }, 50);
+        });
+      });
+
+      const { rerender } = render(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={0} />
+      );
+
+      // Wait for initial load
+      await waitFor(() => {
+        expect(screen.getByText('dir0')).toBeInTheDocument();
+      });
+
+      // Expand all 8 directories
+      for (let i = 0; i < 8; i++) {
+        fireEvent.click(screen.getByTestId(`tree-item-dir${i}`));
+        await waitFor(() => {
+          expect(screen.getByText(`file-in-dir${i}.ts`)).toBeInTheDocument();
+        });
+      }
+
+      // Reset concurrent tracking
+      maxConcurrent = 0;
+      currentConcurrent = 0;
+
+      // Trigger refresh
+      await act(async () => {
+        rerender(
+          <FileTreeView worktreeId="test-worktree" refreshTrigger={1} />
+        );
+      });
+
+      // Wait for all fetches to complete
+      await waitFor(
+        () => {
+          // All directories should still be visible
+          for (let i = 0; i < 8; i++) {
+            expect(screen.getByText(`file-in-dir${i}.ts`)).toBeInTheDocument();
+          }
+        },
+        { timeout: 5000 }
+      );
+
+      // Max concurrent should not exceed CONCURRENT_LIMIT (5) + root (1) = 6
+      // But since root is fetched first before chunks, the max during chunk processing should be <= 5
+      expect(maxConcurrent).toBeLessThanOrEqual(6);
+    });
+
+    it('should remove deleted directories from expanded state gracefully', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/tree/src')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockSrcData),
+          });
+        }
+        if (url.includes('/tree')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockRootData),
+          });
+        }
+        return Promise.reject(new Error('Not found'));
+      });
+
+      const { rerender } = render(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={0} />
+      );
+
+      // Wait for initial render
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      // Expand src directory
+      fireEvent.click(screen.getByTestId('tree-item-src'));
+      await waitFor(() => {
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+      });
+
+      // Now simulate: src directory was deleted on server
+      // On refresh, fetching src returns a 404/error
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/tree/src')) {
+          // src directory no longer exists
+          return Promise.resolve({
+            ok: false,
+            status: 404,
+            json: () => Promise.resolve({ error: 'Directory not found' }),
+          });
+        }
+        if (url.includes('/tree')) {
+          // Root no longer has src
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                path: '',
+                name: '',
+                items: [
+                  { name: 'package.json', type: 'file', size: 1024, extension: 'json' },
+                  { name: 'README.md', type: 'file', size: 2048, extension: 'md' },
+                ],
+                parentPath: null,
+              }),
+          });
+        }
+        return Promise.reject(new Error('Not found'));
+      });
+
+      // Trigger refresh
+      rerender(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={1} />
+      );
+
+      // After refresh, src should no longer be visible (removed from root)
+      // And the component should not error out
+      await waitFor(() => {
+        expect(screen.queryByText('src')).not.toBeInTheDocument();
+        expect(screen.getByText('package.json')).toBeInTheDocument();
+      });
+
+      // No error state should be shown
+      expect(screen.queryByTestId('file-tree-error')).not.toBeInTheDocument();
+    });
+
+    it('should not enter infinite loop on refreshTrigger change', async () => {
+      let fetchCount = 0;
+
+      mockFetch.mockImplementation((url: string) => {
+        fetchCount++;
+        if (url.includes('/tree/src')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockSrcData),
+          });
+        }
+        if (url.includes('/tree')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockRootData),
+          });
+        }
+        return Promise.reject(new Error('Not found'));
+      });
+
+      const { rerender } = render(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={0} />
+      );
+
+      // Wait for initial render
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      // Expand src directory
+      fireEvent.click(screen.getByTestId('tree-item-src'));
+      await waitFor(() => {
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+      });
+
+      // Record fetch count before refresh
+      fetchCount = 0;
+
+      // Trigger refresh
+      rerender(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={1} />
+      );
+
+      // Wait for refresh to complete
+      await waitFor(() => {
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+      });
+
+      // Wait a bit to detect potential infinite loops
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // fetchCount should be bounded:
+      // root fetch (1) + expanded dirs (1 for src) = 2 expected
+      // Allow some margin but not excessive (infinite loop would cause 100+)
+      expect(fetchCount).toBeLessThan(10);
+    });
+
+    it('should cancel previous reload when refreshTrigger changes rapidly', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/tree/src')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockSrcData),
+          });
+        }
+        if (url.includes('/tree')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockRootData),
+          });
+        }
+        return Promise.reject(new Error('Not found'));
+      });
+
+      const { rerender } = render(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={0} />
+      );
+
+      // Wait for initial render
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+      });
+
+      // Expand src directory
+      fireEvent.click(screen.getByTestId('tree-item-src'));
+      await waitFor(() => {
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+      });
+
+      // Rapidly change refreshTrigger multiple times
+      rerender(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={1} />
+      );
+      rerender(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={2} />
+      );
+      rerender(
+        <FileTreeView worktreeId="test-worktree" refreshTrigger={3} />
+      );
+
+      // The final state should be consistent - tree should be rendered correctly
+      await waitFor(() => {
+        expect(screen.getByText('src')).toBeInTheDocument();
+        expect(screen.getByText('index.ts')).toBeInTheDocument();
+      });
+
+      // No error state should appear
+      expect(screen.queryByTestId('file-tree-error')).not.toBeInTheDocument();
     });
   });
 });
