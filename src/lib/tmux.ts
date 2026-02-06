@@ -421,9 +421,13 @@ export async function sendTextViaBuffer(
       proc.stdin.end();
     });
 
-    // Paste buffer into session and auto-delete buffer (-d), no trailing newline (-p)
+    // Paste buffer into session with bracketed paste mode
+    // -d: delete buffer after pasting
+    // Without -p: tmux sends bracketed paste markers (\e[200~ ... \e[201~)
+    //   so the application treats the entire content as a single paste operation
+    //   and newlines are NOT interpreted as Enter keypresses
     await execAsync(
-      `tmux paste-buffer -t "${sessionName}" -b "${bufferName}" -dp`,
+      `tmux paste-buffer -t "${sessionName}" -b "${bufferName}" -d`,
       { timeout: DEFAULT_TIMEOUT }
     );
 
