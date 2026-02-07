@@ -199,6 +199,158 @@ maenokota@host %
       });
     });
 
+    // Issue #180: Status display inconsistency fix tests
+    describe('Issue #180: past prompts should not affect current status', () => {
+      it('should return "ready" when past y/n prompt is >15 lines ago and tail has input prompt', () => {
+        // Past y/n prompt buried in scrollback, current state is ready (❯ prompt at tail)
+        const pastPrompt = 'Do you want to proceed? (y/n)';
+        const filler = Array.from({ length: 20 }, (_, i) => `Processing line ${i}`).join('\n');
+        const output = `${pastPrompt}\n${filler}\n---\n❯\n`;
+        const result = detectSessionStatus(output, 'claude');
+
+        expect(result.status).toBe('ready');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('input_prompt');
+        expect(result.hasActivePrompt).toBe(false);
+      });
+
+      it('should return "ready" when past multiple choice is >15 lines ago and tail has input prompt', () => {
+        // Past multiple choice prompt buried in scrollback
+        const pastMultipleChoice = [
+          'Which option would you prefer?',
+          '❯ 1. Option A',
+          '  2. Option B',
+          '  3. Option C',
+        ].join('\n');
+        const filler = Array.from({ length: 20 }, (_, i) => `Response line ${i}`).join('\n');
+        const output = `${pastMultipleChoice}\n${filler}\n───\n❯\n`;
+        const result = detectSessionStatus(output, 'claude');
+
+        expect(result.status).toBe('ready');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('input_prompt');
+        expect(result.hasActivePrompt).toBe(false);
+      });
+
+      it('should return "waiting" when y/n prompt is in the tail (last 15 lines)', () => {
+        // Active y/n prompt at the tail of output
+        const output = [
+          'Some previous output',
+          'More output',
+          'Do you want to continue? (y/n)',
+        ].join('\n');
+        const result = detectSessionStatus(output, 'claude');
+
+        expect(result.status).toBe('waiting');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('prompt_detected');
+        expect(result.hasActivePrompt).toBe(true);
+      });
+
+      it('should return "waiting" when multiple choice prompt is in the tail (last 15 lines)', () => {
+        // Active multiple choice prompt at the tail of output
+        const output = [
+          'Some previous output',
+          'Which option would you prefer?',
+          '❯ 1. Option A',
+          '  2. Option B',
+          '  3. Option C',
+        ].join('\n');
+        const result = detectSessionStatus(output, 'claude');
+
+        expect(result.status).toBe('waiting');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('prompt_detected');
+        expect(result.hasActivePrompt).toBe(true);
+      });
+
+      it('should correctly map StatusDetectionResult to isWaitingForResponse/isProcessing flags', () => {
+        // Test the mapping contract that route.ts uses:
+        // isWaitingForResponse = status === 'waiting'
+        // isProcessing = status === 'running'
+
+        // Case 1: waiting -> isWaitingForResponse=true, isProcessing=false
+        const waitingResult = detectSessionStatus('Do you want to proceed? (y/n)', 'claude');
+        expect(waitingResult.status === 'waiting').toBe(true);
+        expect(waitingResult.status === 'running').toBe(false);
+
+        // Case 2: running -> isWaitingForResponse=false, isProcessing=true
+        const runningResult = detectSessionStatus('❯ Tell me about TypeScript\n✻ Thinking\u2026', 'claude');
+        expect(runningResult.status === 'waiting').toBe(false);
+        expect(runningResult.status === 'running').toBe(true);
+
+        // Case 3: ready -> isWaitingForResponse=false, isProcessing=false
+        const readyResult = detectSessionStatus('───\n❯\n', 'claude');
+        expect(readyResult.status === 'waiting').toBe(false);
+        expect(readyResult.status === 'running').toBe(false);
+      });
+
+      it('should set hasActivePrompt: true when prompt detected, false otherwise', () => {
+        // hasActivePrompt should be true only when an interactive prompt is detected
+        const withPrompt = detectSessionStatus('Do you want to proceed? (y/n)', 'claude');
+        expect(withPrompt.hasActivePrompt).toBe(true);
+        expect(withPrompt.status).toBe('waiting');
+
+        // No prompt -> hasActivePrompt: false
+        const withInputPrompt = detectSessionStatus('───\n❯\n', 'claude');
+        expect(withInputPrompt.hasActivePrompt).toBe(false);
+        expect(withInputPrompt.status).toBe('ready');
+
+        const withThinking = detectSessionStatus('❯ Tell me\n✻ Thinking\u2026', 'claude');
+        expect(withThinking.hasActivePrompt).toBe(false);
+        expect(withThinking.status).toBe('running');
+
+        const defaultCase = detectSessionStatus('Some intermediate output', 'claude');
+        expect(defaultCase.hasActivePrompt).toBe(false);
+      });
+
+      it('should handle empty line padding correctly', () => {
+        // Sub-scenario (a): 5 empty lines + prompt -> ready (prompt within 15-line window)
+        const promptWith5EmptyLines = '───\n❯\n' + '\n'.repeat(5);
+        const resultA = detectSessionStatus(promptWith5EmptyLines, 'claude');
+        expect(resultA.status).toBe('ready');
+        expect(resultA.confidence).toBe('high');
+        expect(resultA.reason).toBe('input_prompt');
+
+        // Sub-scenario (b): 20+ empty lines after prompt -> prompt pushed outside 15-line window
+        // SEC-009: When prompt is pushed outside the window, default-to-running is expected
+        const promptWith20EmptyLines = '❯\n' + '\n'.repeat(20);
+        const resultB = detectSessionStatus(promptWith20EmptyLines, 'claude');
+        // Prompt is outside the 15-line window; last 15 lines are all empty
+        expect(resultB.status).toBe('running');
+        expect(resultB.confidence).toBe('low');
+        expect(resultB.reason).toBe('default');
+
+        // Sub-scenario (c): 10 empty lines + y/n prompt -> waiting (prompt within 15-line window)
+        const ynPromptWith10EmptyLines = '\n'.repeat(10) + 'Do you want to continue? (y/n)\n';
+        const resultC = detectSessionStatus(ynPromptWith10EmptyLines, 'claude');
+        expect(resultC.status).toBe('waiting');
+        expect(resultC.confidence).toBe('high');
+        expect(resultC.reason).toBe('prompt_detected');
+        expect(resultC.hasActivePrompt).toBe(true);
+      });
+
+      it('should correctly handle raw ANSI output (DR-001)', () => {
+        // Raw output with ANSI escape codes should be correctly stripped and detected
+        // Simulates raw tmux output containing ANSI color codes around the prompt
+        const rawOutput = '\x1b[1m\x1b[34mSome colored output\x1b[0m\n\x1b[32m❯\x1b[0m\n';
+        const result = detectSessionStatus(rawOutput, 'claude');
+
+        expect(result.status).toBe('ready');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('input_prompt');
+        expect(result.hasActivePrompt).toBe(false);
+
+        // Raw ANSI with y/n prompt
+        const rawYnOutput = '\x1b[33mDo you want to proceed? (y/n)\x1b[0m\n';
+        const ynResult = detectSessionStatus(rawYnOutput, 'claude');
+
+        expect(ynResult.status).toBe('waiting');
+        expect(ynResult.confidence).toBe('high');
+        expect(ynResult.hasActivePrompt).toBe(true);
+      });
+    });
+
     describe('edge cases', () => {
       it('should handle empty output', () => {
         const result = detectSessionStatus('', 'claude');

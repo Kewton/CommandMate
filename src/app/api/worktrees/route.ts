@@ -13,8 +13,7 @@ import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswere
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { detectThinking, stripAnsi, getCliToolPatterns } from '@/lib/cli-patterns';
-import { detectPrompt } from '@/lib/prompt-detector';
+import { detectSessionStatus } from '@/lib/status-detector';
 
 export async function GET(request: NextRequest) {
   try {
@@ -56,35 +55,14 @@ export async function GET(request: NextRequest) {
           if (isRunning) {
             try {
               const output = await captureSessionOutput(worktree.id, cliToolId, 100);
-              const cleanOutput = stripAnsi(output);
-
-              // Check for interactive prompt (yes/no, multiple choice, etc.)
-              const promptDetection = detectPrompt(cleanOutput);
-              if (promptDetection.isPrompt) {
-                isWaitingForResponse = true;
-              } else {
-                // Check LAST few lines for state detection (filter out empty lines)
-                const nonEmptyLines = cleanOutput.split('\n').filter(line => line.trim() !== '');
-                const lastLines = nonEmptyLines.slice(-15).join('\n');
-                // Check for thinking indicator FIRST (takes priority)
-                // Even if input prompt is visible, thinking indicator means processing
-                if (detectThinking(cliToolId, lastLines)) {
-                  isProcessing = true;
-                } else {
-                  // No thinking indicator - check for input prompt
-                  // Issue #4: Use CLI tool-specific prompt pattern (fixes Codex spinner issue)
-                  const { promptPattern } = getCliToolPatterns(cliToolId);
-                  const hasInputPrompt = promptPattern.test(lastLines);
-                  if (!hasInputPrompt) {
-                    // Neither thinking nor input prompt - assume processing
-                    isProcessing = true;
-                  }
-                  // If hasInputPrompt && no thinking → "ready"
-                }
-              }
+              const statusResult = detectSessionStatus(output, cliToolId);
+              isWaitingForResponse = statusResult.status === 'waiting';
+              isProcessing = statusResult.status === 'running';
 
               // Clean up stale pending prompts if no prompt is showing
-              if (!promptDetection.isPrompt) {
+              // NOTE: !statusResult.hasActivePrompt is logically equivalent to
+              //       !promptDetection.isPrompt in the previous implementation (C-004)
+              if (!statusResult.hasActivePrompt) {
                 const messages = getMessages(db, worktree.id, undefined, 10, cliToolId);
                 const hasPendingPrompt = messages.some(
                   msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
