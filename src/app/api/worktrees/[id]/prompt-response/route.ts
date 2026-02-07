@@ -10,6 +10,9 @@ import { getWorktreeById } from '@/lib/db';
 import { sendKeys } from '@/lib/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { captureSessionOutput } from '@/lib/cli-session';
+import { detectPrompt } from '@/lib/prompt-detector';
+import { stripAnsi } from '@/lib/cli-patterns';
 
 interface PromptResponseRequest {
   answer: string;
@@ -61,6 +64,27 @@ export async function POST(
 
     // Get session name for the CLI tool
     const sessionName = cliTool.getSessionName(params.id);
+
+    // Issue #161: Re-verify that a prompt is still active before sending keys.
+    // This prevents a race condition where the prompt disappears between
+    // detection (in current-output API) and sending (here), causing "1" to
+    // be typed at the Claude user input prompt instead of a tool permission prompt.
+    try {
+      const currentOutput = await captureSessionOutput(params.id, cliToolId, 5000);
+      const cleanOutput = stripAnsi(currentOutput);
+      const promptCheck = detectPrompt(cleanOutput);
+
+      if (!promptCheck.isPrompt) {
+        return NextResponse.json({
+          success: false,
+          reason: 'prompt_no_longer_active',
+          answer,
+        });
+      }
+    } catch {
+      // If capture fails, proceed with caution - don't block manual responses
+      console.warn('[prompt-response] Failed to verify prompt state, proceeding with send');
+    }
 
     // Send answer to tmux
     try {
