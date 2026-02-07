@@ -457,10 +457,10 @@ export async function sendKeysSpawn(
  * Encapsulates the "send content -> wait -> send Enter" protocol.
  * Prompt verification logic is NOT included (SRP - handled by callers like sendMessageToClaude).
  *
- * For multiline messages (containing \n), uses spawn-based `tmux send-keys -l`
- * which sends content literally without shell interpretation, preventing
- * "[Pasted text]" display in Claude CLI's ink TextInput.
- * [Issue #163] Phase 2: Multiline message support
+ * For multiline messages (containing \n), uses tmux `set-buffer` + `paste-buffer`
+ * which sends content via bracketed paste mode. This prevents newline bytes (0x0A)
+ * from being interpreted as Enter key presses by the terminal.
+ * [Issue #163] Phase 2: Multiline message support (paste-buffer approach)
  *
  * @param sessionName - Target session name
  * @param message - Message to send
@@ -517,16 +517,18 @@ export async function sendMessageWithEnter(
 }
 
 /**
- * Send multiline content to a tmux session using spawn-based send-keys -l
- * [Issue #163] Phase 2: Literal multiline send
+ * Send multiline content to a tmux session using set-buffer + paste-buffer
+ * [Issue #163] Phase 2: Bracketed paste multiline send
  *
- * Uses spawn() instead of exec() to avoid shell interpretation.
- * The -l flag sends characters literally, so newlines become soft newlines
- * (new line within input) rather than Enter (submit).
+ * Uses tmux set-buffer to store the content, then paste-buffer with -p flag
+ * to paste it via bracketed paste mode (\e[200~...\e[201~). This ensures
+ * newline bytes (0x0A) are treated as text content, not as Enter key presses.
+ *
+ * Both commands use spawn() to avoid shell interpretation (injection safe).
  *
  * @param sessionName - Target session name (must be pre-validated)
  * @param content - Multiline content to send
- * @throws {Error} If spawn fails or tmux exits with non-zero code
+ * @throws {Error} If set-buffer or paste-buffer fails
  */
 async function sendMultilineContent(
   sessionName: string,
@@ -534,18 +536,39 @@ async function sendMultilineContent(
 ): Promise<void> {
   const { spawn } = await import('child_process');
 
-  return new Promise<void>((resolve, reject) => {
-    const tmuxSend = spawn('tmux', ['send-keys', '-l', '-t', sessionName, content]);
+  // Step 1: Store content in tmux paste buffer
+  // '--' prevents content starting with '-' from being interpreted as an option
+  await new Promise<void>((resolve, reject) => {
+    const setBuffer = spawn('tmux', ['set-buffer', '--', content]);
 
-    tmuxSend.on('error', (error) => {
-      reject(new Error(`Failed to send multiline message: ${getErrorMessage(error)}`));
+    setBuffer.on('error', (error) => {
+      reject(new Error(`Failed to set tmux buffer: ${getErrorMessage(error)}`));
     });
 
-    tmuxSend.on('close', (code) => {
+    setBuffer.on('close', (code) => {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`tmux send-keys -l exited with code ${code}`));
+        reject(new Error(`tmux set-buffer exited with code ${code}`));
+      }
+    });
+  });
+
+  // Step 2: Paste buffer into the target session with bracketed paste mode
+  // -d: delete buffer after pasting (cleanup)
+  // -p: use bracketed paste mode (newlines treated as text, not Enter)
+  await new Promise<void>((resolve, reject) => {
+    const pasteBuffer = spawn('tmux', ['paste-buffer', '-dp', '-t', sessionName]);
+
+    pasteBuffer.on('error', (error) => {
+      reject(new Error(`Failed to paste buffer: ${getErrorMessage(error)}`));
+    });
+
+    pasteBuffer.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`tmux paste-buffer exited with code ${code}`));
       }
     });
   });
