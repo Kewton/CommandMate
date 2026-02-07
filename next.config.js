@@ -1,5 +1,11 @@
+// Build-time version from package.json (not user-configurable, distinct from .env variables)
+const packageJson = require('./package.json');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_APP_VERSION: packageJson.version,
+  },
   reactStrictMode: true,
   eslint: {
     // Temporarily ignore ESLint errors during build

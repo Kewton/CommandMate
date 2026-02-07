@@ -1,0 +1,34 @@
+{
+  "status": "success",
+  "iteration": 1,
+  "tests_added": 4,
+  "tests_passed": 4,
+  "tests_failed": 0,
+  "files_modified": [
+    "next.config.js",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "files_created": [
+    "tests/unit/components/app-version-display.test.tsx"
+  ],
+  "static_analysis": {
+    "tsc": "pass",
+    "lint": "pass"
+  },
+  "coverage": {
+    "note": "Module-level constant APP_VERSION_DISPLAY tested via vi.resetModules() + dynamic import pattern"
+  },
+  "unit_tests": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "test_cases": [
+      "InfoModal displays version v0.1.12 when NEXT_PUBLIC_APP_VERSION is set",
+      "InfoModal shows - when NEXT_PUBLIC_APP_VERSION is not set",
+      "MobileInfoContent displays version v0.1.12 when NEXT_PUBLIC_APP_VERSION is set",
+      "MobileInfoContent shows - when NEXT_PUBLIC_APP_VERSION is not set"
+    ]
+  },
+  "commits": [],
+  "summary": "TDD implementation complete for Issue #159. Added NEXT_PUBLIC_APP_VERSION build-time environment variable to next.config.js, APP_VERSION_DISPLAY module-level constant to WorktreeDetailRefactored.tsx, and Version display sections to both InfoModal (desktop) and MobileInfoContent (mobile). All 4 tests pass, TypeScript and ESLint checks pass with 0 errors."
+}
