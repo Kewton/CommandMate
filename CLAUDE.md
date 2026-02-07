@@ -131,6 +131,7 @@ src/
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
+| `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行ウィンドウイング） |
 | `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()） |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証） |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
@@ -372,6 +373,20 @@ commandmate status --all                   # 全サーバー状態確認
 ---
 
 ## 最近の実装機能
+
+### Issue #180: ステータス表示の不整合修正
+- **問題解決**: CLIがidle状態（`❯`プロンプト表示）であるにも関わらず、UIが「running」（スピナー）や「waiting」（黄色）ステータスを誤表示する問題を修正
+- **根本原因**: `route.ts`の`detectPrompt()`に`cleanOutput`全文（最大100行）を渡していたため、スクロールバックに残る過去の`(y/n)`プロンプトを現在アクティブなプロンプトとして誤検出
+- **修正方針**: `status-detector.ts`の`detectSessionStatus()`を共通関数として活用し、`route.ts`x2のインラインロジックを統合（DRY原則）
+- **主要な変更点**:
+  - `StatusDetectionResult`に`hasActivePrompt: boolean`フィールド追加（SRP遵守、カプセル化維持）
+  - `detectSessionStatus()`が生のtmux出力を受け取る入力契約を明確化（stripAnsi二重呼び出し防止）
+  - 15行ウィンドウイングにより過去のプロンプト誤検出を防止
+- **主要コンポーネント**:
+  - `src/lib/status-detector.ts` - セッションステータス検出共通関数（hasActivePrompt追加）
+  - `src/app/api/worktrees/route.ts` - インラインロジック→detectSessionStatus()呼び出しに統合
+  - `src/app/api/worktrees/[id]/route.ts` - 同上
+- 詳細: [設計書](./dev-reports/design/issue-180-status-display-inconsistency-design-policy.md)
 
 ### Issue #161: Auto-Yes誤検出修正（番号付きリストの誤検出防止）
 - **問題解決**: Auto-Yesモード有効時、Claude CLIの通常出力に含まれる番号付きリスト（例：「1. ファイルを作成」「2. テストを実行」）がmultiple_choiceプロンプトとして誤検出され、「1」が自動送信される問題を修正

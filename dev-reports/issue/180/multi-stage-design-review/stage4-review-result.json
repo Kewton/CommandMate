@@ -1,0 +1,209 @@
+{
+  "issue_number": 180,
+  "review_type": "security",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "reviewer": "architecture-review-agent",
+  "date": "2026-02-07",
+  "design_doc": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+  "files_reviewed": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/cli-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/__tests__/status-detector.test.ts"
+  ],
+  "summary": "Issue #180 proposes a refactoring that consolidates inline status detection logic from two route.ts files into the existing detectSessionStatus() function in status-detector.ts. From a security perspective, this change is LOW RISK. No new attack surface is introduced. The change reduces code duplication, which improves the security posture by ensuring future security fixes are applied in one place. Minor observations are noted regarding stripAnsi completeness against ANSI injection, regex safety, and error handling, but these are pre-existing conditions not introduced by this change.",
+  "findings": [
+    {
+      "id": "SEC-001",
+      "severity": "nice_to_have",
+      "category": "ANSI Injection / Output Encoding",
+      "title": "stripAnsi() pattern completeness for ANSI escape sequences",
+      "description": "The design correctly delegates ANSI stripping to detectSessionStatus() internally via stripAnsi(). The stripAnsi() function (cli-patterns.ts line 167) uses the pattern /\\x1b\\[[0-9;]*[a-zA-Z]|\\x1b\\][^\\x07]*\\x07|\\[[0-9;]*m/g which covers standard CSI sequences, OSC sequences (terminated by BEL), and orphaned SGR codes. This is adequate for the tmux output use case. However, the pattern does not cover: (1) C1 control codes (0x80-0x9F range, e.g., 0x9B as CSI alternate), (2) APC/PM/SOS sequences, (3) ST-terminated OSC sequences (\\x1b\\\\ as alternative to BEL). Since the input source is tmux capture-pane output (a trusted local process), the risk of encountering exotic ANSI sequences crafted for injection is negligible. This is a pre-existing condition, not introduced by Issue #180.",
+      "owasp_relevance": "A03:2021 - Injection (indirect, ANSI injection category)",
+      "recommendation": "No action required for Issue #180. For a future hardening pass, consider using a well-tested ANSI stripping library (e.g., strip-ansi npm package) or extending the pattern to cover C1 control codes.",
+      "risk_level": "negligible",
+      "is_new_risk": false
+    },
+    {
+      "id": "SEC-002",
+      "severity": "nice_to_have",
+      "category": "ReDoS",
+      "title": "Regex pattern safety with reduced input window",
+      "description": "The change actually IMPROVES ReDoS resilience. Currently, route.ts passes the full cleanOutput (up to 100 lines of tmux content) to detectPrompt(). After the change, detectSessionStatus() passes only the last 15 lines (lastLines) to detectPrompt(). The regex patterns in prompt-detector.ts are well-anchored: DEFAULT_OPTION_PATTERN and NORMAL_OPTION_PATTERN use start/end anchors (^...$), and yes/no patterns use ^...$/m which are anchored per-line. The detectMultipleChoicePrompt() applies its own 50-line window (min(50, 15) = 15 lines after the change). All patterns examined (CLAUDE_THINKING_PATTERN, CLAUDE_PROMPT_PATTERN, CODEX_THINKING_PATTERN, CODEX_PROMPT_PATTERN, GEMINI_PROMPT_PATTERN, ANSI_PATTERN) use bounded quantifiers or character classes that do not exhibit catastrophic backtracking. The design document correctly notes this improvement in Section 7.",
+      "owasp_relevance": "Not directly OWASP Top 10, but relates to availability/DoS",
+      "recommendation": "No action required. The change improves the existing ReDoS posture by reducing input size to regex matchers.",
+      "risk_level": "negligible",
+      "is_new_risk": false
+    },
+    {
+      "id": "SEC-003",
+      "severity": "nice_to_have",
+      "category": "Information Disclosure",
+      "title": "Error handling in route.ts catch blocks preserves existing behavior",
+      "description": "Both route.ts files have try-catch blocks around the status detection logic (route.ts line 96-99, [id]/route.ts line 96-99). On catch, they set isProcessing = true and continue. The outer try-catch (route.ts line 133-139) returns a generic error message ('Failed to fetch worktrees'/'Failed to fetch worktree') without exposing stack traces to clients. The proposed change does not modify this error handling pattern. The detectSessionStatus() function itself does not throw exceptions under normal operation (it returns a default result). The existing error handling is appropriate.",
+      "owasp_relevance": "A01:2021 - Broken Access Control (information disclosure subset)",
+      "recommendation": "No action required. The existing error handling is maintained unchanged.",
+      "risk_level": "negligible",
+      "is_new_risk": false
+    },
+    {
+      "id": "SEC-004",
+      "severity": "nice_to_have",
+      "category": "Race Conditions",
+      "title": "No new timing vulnerabilities introduced by refactoring",
+      "description": "The change replaces inline logic with a function call that performs the same operations in the same order. The stale prompt cleanup logic (checking messages and calling markPendingPromptsAsAnswered) remains in the route.ts caller, maintaining the same timing characteristics. The hasActivePrompt boolean is derived synchronously from detectPrompt() within detectSessionStatus(), so there is no new TOCTOU window between prompt detection and the cleanup decision. The existing race condition window (between captureSessionOutput and the next polling cycle) is unchanged.",
+      "owasp_relevance": "Not directly OWASP Top 10",
+      "recommendation": "No action required.",
+      "risk_level": "negligible",
+      "is_new_risk": false
+    },
+    {
+      "id": "SEC-005",
+      "severity": "nice_to_have",
+      "category": "DoS / Performance",
+      "title": "Reduced processing scope improves DoS resilience",
+      "description": "The existing captureSessionOutput() already limits capture to 100 lines (DoS mitigation). The change further reduces the regex processing window from potentially 100 lines (route.ts currently passes cleanOutput, the full 100-line output) to 15 lines (STATUS_CHECK_LINE_COUNT in status-detector.ts). This is a security improvement, reducing the computational cost of each status detection call. The Promise.all in route.ts processes all worktrees concurrently, but this behavior is unchanged.",
+      "owasp_relevance": "Not directly OWASP Top 10, but availability concern",
+      "recommendation": "No action required. The change improves the existing DoS posture.",
+      "risk_level": "negligible",
+      "is_new_risk": false
+    },
+    {
+      "id": "SEC-006",
+      "severity": "nice_to_have",
+      "category": "Input Validation",
+      "title": "No change to user-controlled input processing",
+      "description": "The proposed changes do not affect how user-controlled input is processed. The status detection logic operates on tmux output (server-side captured terminal content), not on user-supplied HTTP request data. The cliToolId parameter is constrained to CLIToolType ('claude' | 'codex' | 'gemini') by TypeScript's type system. The worktree ID used in captureSessionOutput comes from the database (getWorktrees/getWorktreeById), not directly from user input. The repositoryFilter query parameter in route.ts is passed to getWorktrees() which performs parameterized DB queries. None of these input validation characteristics change.",
+      "owasp_relevance": "A03:2021 - Injection",
+      "recommendation": "No action required.",
+      "risk_level": "negligible",
+      "is_new_risk": false
+    },
+    {
+      "id": "SEC-007",
+      "severity": "nice_to_have",
+      "category": "Output Encoding / XSS",
+      "title": "No change to API response rendering path",
+      "description": "The API response format (isWaitingForResponse, isProcessing, sessionStatusByCli) is unchanged. These are boolean/object values consumed by React components (WorktreeDetailRefactored.tsx, WorktreeCard.tsx) which use React's built-in auto-escaping. The status detection changes do not introduce new string values that would be rendered in the UI. The existing output encoding posture is maintained.",
+      "owasp_relevance": "A03:2021 - Injection (XSS subset)",
+      "recommendation": "No action required.",
+      "risk_level": "negligible",
+      "is_new_risk": false
+    },
+    {
+      "id": "SEC-008",
+      "severity": "should_fix",
+      "category": "Security Improvement via DRY",
+      "title": "Consolidation reduces security fix application risk",
+      "description": "The primary security benefit of this change is the elimination of duplicated status detection logic across two route.ts files. Currently, any security fix to the status detection logic must be applied in three places (status-detector.ts, route.ts, [id]/route.ts). After the change, only status-detector.ts needs to be modified. This reduces the risk of partial security patches, which is a common source of vulnerabilities. The design document correctly identifies this benefit in Section 6.",
+      "owasp_relevance": "General secure development practice",
+      "recommendation": "Proceed with the consolidation as designed. This is a positive security outcome.",
+      "risk_level": "improvement",
+      "is_new_risk": false
+    },
+    {
+      "id": "SEC-009",
+      "severity": "should_fix",
+      "category": "Defense in Depth",
+      "title": "Empty line windowing edge case and status misrepresentation",
+      "description": "The design document (IS-006, DR-003) correctly identifies that tmux buffers can contain trailing empty lines that push meaningful content outside the 15-line window. If a prompt line is pushed outside the window by empty padding, detectSessionStatus() returns 'running' (low confidence) as a default. This causes the UI to show a spinner when the CLI is actually idle. While this is not a traditional security vulnerability, it represents a status misrepresentation that could lead to user confusion. In a scenario where auto-yes is enabled and depends on accurate status detection, a misrepresented status could lead to unexpected behavior (though the auto-yes path uses its own detection, not this code path). The design document proposes adequate mitigation through test coverage and staged response options (increase window, add empty line filtering, or hybrid approach).",
+      "owasp_relevance": "Not directly OWASP Top 10",
+      "recommendation": "Ensure the test cases in Section 8-2 item 7 (especially 7b - empty line padding scenario) are implemented and that the results drive a decision on whether STATUS_CHECK_LINE_COUNT needs adjustment or empty line filtering should be added. Consider empty line filtering as the safer default.",
+      "risk_level": "low",
+      "is_new_risk": true
+    },
+    {
+      "id": "SEC-010",
+      "severity": "nice_to_have",
+      "category": "Defense in Depth",
+      "title": "stripAnsi() called on raw tmux output before line splitting - safe ordering",
+      "description": "The design specifies that detectSessionStatus() receives raw tmux output and calls stripAnsi() before any line splitting or pattern matching (status-detector.ts lines 74-76). This ordering is correct: ANSI codes are removed before the output is analyzed. If stripAnsi() were called after line splitting, multi-line ANSI sequences could cause incorrect line boundaries. The current implementation correctly strips first, then splits. The consolidation preserves this ordering.",
+      "owasp_relevance": "A03:2021 - Injection (ANSI injection)",
+      "recommendation": "No action required. The ordering is already correct.",
+      "risk_level": "negligible",
+      "is_new_risk": false
+    }
+  ],
+  "checklist": {
+    "owasp_a01_broken_access_control": {
+      "status": "pass",
+      "notes": "No access control changes. Error handling does not leak sensitive information."
+    },
+    "owasp_a02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "No cryptographic operations involved in the status detection changes."
+    },
+    "owasp_a03_injection": {
+      "status": "pass",
+      "notes": "No new injection vectors. stripAnsi() handles ANSI escape codes. Regex patterns are anchored. tmux output is from trusted local process. No user-controlled input reaches the changed code paths."
+    },
+    "owasp_a04_insecure_design": {
+      "status": "pass",
+      "notes": "Design consolidates duplicated logic, improving maintainability and reducing security fix omission risk."
+    },
+    "owasp_a05_security_misconfiguration": {
+      "status": "not_applicable",
+      "notes": "No configuration changes."
+    },
+    "owasp_a06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "No new dependencies introduced."
+    },
+    "owasp_a07_auth_failures": {
+      "status": "not_applicable",
+      "notes": "No authentication/session management changes."
+    },
+    "owasp_a08_software_data_integrity": {
+      "status": "pass",
+      "notes": "No deserialization or CI/CD pipeline changes."
+    },
+    "owasp_a09_logging_monitoring": {
+      "status": "pass",
+      "notes": "Existing logging in detectSessionStatus() and route.ts error handlers is preserved."
+    },
+    "owasp_a10_ssrf": {
+      "status": "not_applicable",
+      "notes": "No server-side request forgery vectors. The change operates on local tmux process output."
+    },
+    "redos_safety": {
+      "status": "pass",
+      "notes": "Input window reduced from ~100 lines to 15 lines. All regex patterns are anchored and use bounded quantifiers."
+    },
+    "race_conditions": {
+      "status": "pass",
+      "notes": "No new TOCTOU windows. hasActivePrompt is derived synchronously."
+    },
+    "information_disclosure": {
+      "status": "pass",
+      "notes": "Generic error messages maintained. No new data exposed in API responses."
+    },
+    "dos_resilience": {
+      "status": "pass",
+      "notes": "Processing window reduced from 100 to 15 lines for regex matching. Improvement over current state."
+    },
+    "ansi_injection": {
+      "status": "pass",
+      "notes": "stripAnsi() called before pattern matching. Safe ordering preserved. Coverage adequate for tmux output."
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "low",
+    "new_risks_introduced": 1,
+    "pre_existing_observations": 9,
+    "security_improvements": 2,
+    "summary": "The proposed changes introduce no meaningful new security risks. The single new risk (SEC-009, empty line windowing edge case) is a minor functional concern rather than a security vulnerability, and is adequately mitigated by the proposed test strategy. The change provides two security improvements: reduced regex processing scope (SEC-005) and consolidated security fix surface (SEC-008)."
+  },
+  "verdict": "approve",
+  "verdict_reason": "The design is sound from a security perspective. The refactoring consolidates duplicated logic, reducing the risk of inconsistent security fixes. No new attack surface is introduced. The ANSI stripping, input validation, error handling, and output encoding postures are maintained or improved. The empty line windowing edge case (SEC-009) should be addressed through test coverage as the design already proposes.",
+  "recommendations_for_implementation": [
+    "Implement test case 8-2 item 7b (empty line padding pushing prompt outside 15-line window) to validate the edge case and inform the STATUS_CHECK_LINE_COUNT decision",
+    "After removing stripAnsi/detectThinking/getCliToolPatterns/detectPrompt imports from route.ts files, verify that no dead import references remain",
+    "When adding hasActivePrompt to StatusDetectionResult, ensure all return paths in detectSessionStatus() include the field (compiler will enforce this with strict mode)"
+  ]
+}

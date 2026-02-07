@@ -1,0 +1,84 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 180,
+  "applied_date": "2026-02-07",
+  "actions": [
+    {
+      "finding_id": "S3-001",
+      "severity": "must_fix",
+      "action": "applied",
+      "description": "影響範囲セクションに src/lib/status-detector.ts を追加。ロジック重複解消セクションと軸1セクションに detectSessionStatus() の既存実装活用の検討項目を追加"
+    },
+    {
+      "finding_id": "S3-002",
+      "severity": "must_fix",
+      "action": "applied",
+      "description": "影響範囲セクションに src/lib/response-poller.ts と src/lib/claude-poller.ts を追加。detectPrompt() コールマップを新規セクションとして追加し、全8呼び出し箇所の入力内容・目的を一覧化"
+    },
+    {
+      "finding_id": "S3-003",
+      "severity": "must_fix",
+      "action": "applied",
+      "description": "影響範囲セクションに src/app/api/worktrees/[id]/current-output/route.ts と src/hooks/useAutoYes.ts を追加。isPromptWaiting/promptData がクライアント側の自動応答トリガーとなることを明記"
+    },
+    {
+      "finding_id": "S3-004",
+      "severity": "must_fix",
+      "action": "applied",
+      "description": "影響範囲セクションに src/app/api/worktrees/[id]/prompt-response/route.ts を追加。5000行キャプチャ出力に対する detectPrompt() 呼び出しであり、方式Bの影響が大きいことを明記"
+    },
+    {
+      "finding_id": "S3-005",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "修正案の軸2セクションに、各方式（A/B/C）の影響ファイル一覧をテーブル形式で追加。方式選択の判断材料として活用できるようにした"
+    },
+    {
+      "finding_id": "S3-006",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "受け入れ条件をテスト要件として分離し、5つのテストファイルの既存テストパス要件を追加（条件7-11）。Issue #161 の回帰テスト（False Positive Prevention、Defense Layer Boundary Tests）のパスを明示的に要求"
+    },
+    {
+      "finding_id": "S3-007",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "問題1セクションに補足として route.ts と status-detector.ts の detectPrompt() 入力前処理の不一致を記載。status-detector.ts の方式が修正方針と整合していることと、行数の差異（15行 vs 2-3行）の検討必要性を明記"
+    },
+    {
+      "finding_id": "S3-008",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "問題3セクションに補足として detectThinking() の呼び出し箇所ごとの入力範囲不一致を記載。auto-yes-manager.ts で全文を渡す理由と末尾限定にした場合の防御効果減少リスクを明記"
+    },
+    {
+      "finding_id": "S3-009",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "受け入れ条件にUI表示確認セクションを追加（条件12-14）。WorktreeDetailRefactored、WorktreeCard、BranchListItem の3コンポーネントの表示確認項目を追加。間接影響としてUIコンポーネント群を影響範囲セクションに追加"
+    },
+    {
+      "finding_id": "S3-010",
+      "severity": "nice_to_have",
+      "action": "applied",
+      "description": "detectPrompt() コールマップに claude-poller.ts のレガシー可能性について注記を追加。設計時に使用有無を確認し、不要なら修正対象から除外して廃止候補として記録するよう記載"
+    },
+    {
+      "finding_id": "S3-011",
+      "severity": "nice_to_have",
+      "action": "applied",
+      "description": "軸1セクションに status-detector.ts の detectSessionStatus() 既存実装の活用検討項目を追加。既存テスト活用の利点にも言及"
+    }
+  ],
+  "summary": {
+    "total_findings": 11,
+    "applied": 11,
+    "skipped": 0,
+    "partial": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/180"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "issue_number": 180,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目・最終）",
+  "apply_date": "2026-02-07",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S7-001",
+        "status": "applied",
+        "change_summary": "受け入れ条件11に tests/unit/lib/cli-patterns.test.ts を追加。テストファイルセクションにも同ファイル（行142-161）を追加。detectThinkingのテストが2ファイルに存在することを明記"
+      },
+      {
+        "id": "S7-002",
+        "status": "applied",
+        "change_summary": "claude-poller.ts の注記を更新。stopPolling が session-cleanup.ts および cli-tools/manager.ts から import されていることを明記。startPolling は呼び出されておらず detectPrompt() 呼び出しは到達不能コードであることを正確に記載。影響範囲セクションの claude-poller.ts の説明も同様に更新"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S7-003",
+        "status": "applied",
+        "change_summary": "コールマップの current-output/route.ts 行に、thinking検出（lastSection: 最後15行）と detectPrompt（cleanOutput: 全文）の入力スコープ非対称性に関する注記を追加。Issue #161設計との整合性についても併記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/180"
+  },
+  "changes_made": {
+    "header_note": "Stage 7（影響範囲レビュー2回目）反映に更新",
+    "acceptance_criteria_11": "tests/unit/lib/cli-patterns.test.ts を追加（2ファイル体制を明記）",
+    "test_files_section": "tests/unit/lib/cli-patterns.test.ts（行142-161）を追加",
+    "callmap_claude_poller_note": "レガシー注記を正確な使用状況（stopPolling使用中・startPolling未使用・detectPrompt到達不能）に更新",
+    "callmap_current_output_row": "thinking検出とdetectPromptの入力スコープ非対称性の注記を追加",
+    "impact_scope_claude_poller": "影響範囲セクションのclaude-poller.tsの説明をcallmap注記と一致するよう更新",
+    "review_history": "イテレーション2 - 影響範囲レビュー2回目セクションを追加（S7-001, S7-002, S7-003）"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 180,
+  "review_date": "2026-02-07",
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "detectPrompt() コールマップの response-poller.ts の呼び出し箇所が2箇所（行248, 行442）と記載されているが、実際には3箇所存在する。行556の checkForResponse() 内で detectPrompt(result.response) として呼び出されている。この3箇所目は、レスポンスが完了した後にプロンプトかどうかを判定するために使用されており、方式B/Cの場合にテスト対象から漏れる可能性がある。",
+      "recommendation": "コールマップの response-poller.ts の行を「行248, 行442, 行556」に修正し、3箇所目の用途（完了レスポンスのプロンプト判定）を追記する。",
+      "location": "## detectPrompt() コールマップ"
+    },
+    {
+      "id": "S5-002",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "コールマップで current-output/route.ts の入力内容を「cleanOutput（thinkingスキップ後）」と記載しているが、実際のコード（行88）は `thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput)` という三項演算子であり、detectPrompt() に渡される cleanOutput 自体は「thinkingスキップ後」の加工を受けたものではない。thinking状態の場合は detectPrompt() 自体が呼ばれずにスキップされる構造である。「thinkingスキップ後」という表現は、入力が加工されているように誤解される。",
+      "recommendation": "入力内容の説明を「cleanOutput（全文、ただしthinking検出時はdetectPrompt自体をスキップ）」のように修正して、スキップメカニズムが入力加工ではなく呼び出し回避であることを明確にする。",
+      "location": "## detectPrompt() コールマップ > current-output/route.ts 行"
+    },
+    {
+      "id": "S5-003",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "コールマップで current-output/route.ts の呼び出し箇所を「行88付近」と記載しているが、実際の detectPrompt() 呼び出しは行88の三項演算子内にある。一方、prompt-response/route.ts は「行75付近」と記載されており、実際は行75に detectPrompt(cleanOutput) がある。route.ts は「行47付近」と記載されているが、実際の detectPrompt(cleanOutput) 呼び出しは行62にある（行47はfor文の開始）。[id]/route.ts も同様に行62である。",
+      "recommendation": "コールマップの行番号を実際のコードに合わせて修正する: route.ts x2 は「行62」、current-output/route.ts は「行88」、prompt-response/route.ts は「行75」。「行47付近」は不正確であり、検出ロジック全体のブロック開始行（forループ）であって detectPrompt() の呼び出し行ではない。",
+      "location": "## detectPrompt() コールマップ > route.ts 行番号"
+    },
+    {
+      "id": "S5-004",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "「現在のロジック（問題あり）」のコードスニペットでコメントに「route.ts (行47-111)」と記載されているが、実際のステータス検出ロジックのコアは行56-84（isRunning内のtry-catch内）であり、行47-111はforループ全体（sessionStatusByCli構築含む）の範囲である。detectPrompt() は行62、detectThinking() は行71、promptPattern.test() は行77に位置する。スニペット自体のコード構造は実際のコードと一致しているが、行番号の範囲指定が広すぎて不正確。",
+      "recommendation": "コメントを「route.ts (行56-84) - route.ts と [id]/route.ts の両方に同一コードが存在」に修正するか、行47-111が forループ全体であることを注記する。",
+      "location": "## 修正案 > 現在のロジック（問題あり）コードスニペット"
+    },
+    {
+      "id": "S5-005",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "コールマップで auto-yes-manager.ts の detectPrompt() 呼び出しを「行290付近」と記載しているが、実際の行は行290である。影響範囲セクションでも「行290付近」と記載されている。detectThinking() の呼び出しは「行284」と正確に記載されている。detectPrompt() も同様に正確な行番号を記載する方が一貫性がある。",
+      "recommendation": "「行290付近」を「行290」に修正して、他の行番号記載と一貫性を持たせる。",
+      "location": "## detectPrompt() コールマップ / ## 影響範囲"
+    },
+    {
+      "id": "S5-006",
+      "severity": "should_fix",
+      "category": "技術的妥当性",
+      "description": "方式Bの影響ファイル一覧に8ファイルが記載されているが、response-poller.ts の detectPrompt() 呼び出しは extractResponse() 内（行248, 行442）と checkForResponse() 内（行556）の3箇所あり、それぞれ異なる用途で使用されている。extractResponse() 内の2箇所は「インタラクティブプロンプト検出→完了判定」、checkForResponse() 内の1箇所は「完了レスポンスがプロンプトかどうかの再判定」である。方式Bで検索範囲を制限した場合、行556の呼び出しでは result.response（抽出済みレスポンス全文）を渡しているため、末尾N行に制限すると正常なプロンプト検出が維持されるかどうか、extractResponse() 内の2つの呼び出しとは異なる影響分析が必要である。",
+      "recommendation": "方式B/Cの影響分析において、response-poller.ts の3箇所の detectPrompt() 呼び出しを個別に分析する旨を記載する。特に行556の checkForResponse() 内の用途が他と異なることを明記する。",
+      "location": "## 修正案 > 各方式の影響ファイル一覧"
+    },
+    {
+      "id": "S5-007",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "description": "受け入れ条件の項目6「route.ts と [id]/route.ts の両方に修正が適用されていること」は、ロジック重複解消（共通関数化）が実施された場合には不要になる。共通関数化は「修正案」セクションの「ロジック重複の解消」で提案されているが、受け入れ条件ではこのケースが考慮されていない。",
+      "recommendation": "受け入れ条件6を「route.ts と [id]/route.ts の両方に修正が適用されていること（共通関数化により1箇所での修正で両方に反映される場合はそれで可）」のように補足するか、共通関数化自体を受け入れ条件の1つとして追加する。",
+      "location": "## 受け入れ条件 > 機能要件"
+    },
+    {
+      "id": "S5-008",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "status-detector.ts の detectSessionStatus() について「このモジュールはアプリケーション内で一切使用されていない（テストのみ）」と記載されているが、これが意図的な設計（将来使用予定のモジュール）なのか、過去のリファクタリングで使われなくなった残存コードなのかが不明。設計方針書でこのモジュールの活用を検討する際、モジュールが「未使用」である理由を知っていると判断に役立つ。",
+      "recommendation": "status-detector.ts が未使用である経緯や理由（Issue #54で作成されたが統合されなかった等）について分かる範囲で補足情報を追記する。",
+      "location": "## 修正案 > 軸1: 検出優先順位の変更"
+    },
+    {
+      "id": "S5-009",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "status-detector.ts の detectSessionStatus() の優先順位について、Issue では「1.interactivePrompt -> 2.thinking -> 3.inputPrompt -> 4.time-based -> 5.default」と記載されている。実際のコードを確認すると、status-detector.ts は detectPrompt(lastLines) を呼び出しており、lastLines は lines.slice(-STATUS_CHECK_LINE_COUNT=15) で最後15行に制限されている。これは route.ts の detectPrompt(cleanOutput)（全文を渡す）とは異なる入力方式である。Issue の「問題1」補足でこの不一致について言及しているが、status-detector.ts の detectPrompt() に渡される入力が lastLines（15行）であるという重要な事実がコールマップに正確に反映されていない。コールマップでは「lastLines（最後15行）」と記載されており、これは正確である。ただし、status-detector.ts 内部で stripAnsi() を適用してから split/slice している点（行74-76）が明記されていない。route.ts では stripAnsi 適用済みの cleanOutput を直接 detectPrompt() に渡しているのに対し、status-detector.ts は stripAnsi → split → slice → join → detectPrompt の順序で処理している。この前処理の違いは方式A（route.ts側で切り出す）を選択した場合に status-detector.ts の方式を参照実装とする際の重要な情報である。",
+      "recommendation": "コールマップの status-detector.ts 行に「入力内容: lastLines（stripAnsi適用後の最後15行の結合文字列）」と前処理パイプラインを明記する。",
+      "location": "## detectPrompt() コールマップ > status-detector.ts 行"
+    }
+  ],
+  "stage1_resolution_check": {
+    "S1-001_title_scope": "resolved - タイトルが「fix: ステータス表示の不整合 - CLIがidle状態でもrunning/waitingと誤表示」に修正され、モバイル限定ではなく全プラットフォーム共通の問題として正しく表現されている。問題概要にも「モバイル・デスクトップを問わず全プラットフォームで発生する」と明記されている。",
+    "S1-002_missing_id_route": "resolved - 影響範囲に src/app/api/worktrees/[id]/route.ts が追加され、「両ファイルの該当コードは完全に同一のロジック重複」と明記されている。",
+    "S1-003_modification_proposal": "resolved - 修正案が「軸1: 検出優先順位の変更」と「軸2: detectPrompt() の検索範囲制限」の2つに整理され、方式A/B/Cの選択肢が明確に提示されている。",
+    "S1-004_search_hierarchy": "resolved - 問題1に「ステータス検出には2段階の行数制限が存在する」として captureSessionOutput(100行)→detectPrompt(10行/50行)の構造が明記されている。",
+    "S1-005_acceptance_criteria": "resolved - 受け入れ条件セクションが新設され、機能要件6項目、テスト要件5項目、UI表示確認3項目の合計14項目が具体的かつ検証可能な形で定義されている。",
+    "S1-006_auto_yes_manager": "resolved - 影響範囲に auto-yes-manager.ts が追加され、「Layer 1（thinking状態スキップ）による防御が別途あるため影響度は限定的だが、検索範囲変更は波及する」と明記されている。",
+    "S1-007_priority_tradeoff": "resolved - 「優先順位変更のトレードオフ」セクションが追加され、❯プロンプト直前にyes/noプロンプトがある場合のエッジケースが記載されている。",
+    "S1-008_screenshots": "resolved - スクリーンショットセクションに「スクリーンショットなし、テキスト記録のみ」と明記されている。",
+    "S1-009_related_issues": "resolved - 関連Issueに Issue #161 と Issue #152 が追加されている。",
+    "S1-010_modification_approach": "resolved - 方式A/B/Cが明確に定義され、各方式の影響ファイル一覧と影響範囲の比較表が追加されている。"
+  },
+  "summary": {
+    "total_findings": 9,
+    "must_fix": 0,
+    "should_fix": 6,
+    "nice_to_have": 3,
+    "stage1_all_resolved": true
+  }
+}

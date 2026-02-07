@@ -1,0 +1,118 @@
+{
+  "issue_number": 180,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DR-001",
+        "item": "detectSessionStatus()の入力契約（生出力 vs ストリップ済み）の明確化、stripAnsi二重呼び出し防止",
+        "section_updated": "Section 3 (データフロー), Section 5-1 (入力契約), Section 5-2 (route.ts変更), Section 9 (設計判断), Section 13 (実装チェックリスト)",
+        "status": "reflected",
+        "changes": [
+          "データフローを rawOutput 渡しに更新",
+          "detectSessionStatus()の入力契約セクションを新規追加",
+          "route.tsコード例からstripAnsi呼び出しを削除",
+          "import変更からstripAnsiも削除対象に追加",
+          "設計判断テーブルに生出力受け取りの決定を追加",
+          "実装チェックリストにDR-001対応項目を追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR-002",
+        "item": "promptDetection?: PromptDetectionResultをhasActivePrompt: booleanに変更（SRP遵守）",
+        "section_updated": "Section 5-1 (StatusDetectionResult), Section 5-2 (route.ts), Section 9 (設計判断), Section 13 (実装チェックリスト)",
+        "status": "reflected",
+        "changes": [
+          "StatusDetectionResultインターフェースをhasActivePrompt: booleanに変更",
+          "設計判断の根拠（SRP、カプセル化、変更耐性）をblockquoteで追加",
+          "hasActivePromptの保持ロジックのコード例を更新",
+          "route.tsのstale cleanup条件を!statusResult.hasActivePromptに変更",
+          "設計判断テーブルのpromptDetectionエントリをhasActivePromptに更新"
+        ]
+      },
+      {
+        "id": "DR-003",
+        "item": "route.tsとstatus-detector.tsの空行フィルタリング動作差異の文書化",
+        "section_updated": "Section 5-1 (動作差異注記), Section 8-2 (テストケース追加), Section 9 (設計判断)",
+        "status": "reflected",
+        "changes": [
+          "空行フィルタリングの動作差異と許容理由をblockquoteで追加",
+          "テスト補強の指示を追加",
+          "末尾空行テストケースをテスト戦略Section 8-2に追加（テストケース7）",
+          "設計判断テーブルに空行フィルタリング統一の決定を追加"
+        ]
+      },
+      {
+        "id": "DR-007",
+        "item": "detectPrompt()内部のレイヤードウィンドウイングの文書化",
+        "section_updated": "Section 3 (データフロー注記)",
+        "status": "reflected",
+        "changes": [
+          "レイヤードウィンドウイングの詳細注記をSection 3に追加（y/n: 10行、multiple choice: 50行の実効ウィンドウ）"
+        ]
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DR-004",
+        "item": "Facadeパターンの責務境界の明示的定義",
+        "section_updated": "Section 4 (設計パターン), Section 13 (実装チェックリスト)",
+        "status": "reflected",
+        "changes": [
+          "Facadeの責務範囲と責務外（DB操作、API形式変換）をblockquoteで追加"
+        ]
+      },
+      {
+        "id": "DR-005",
+        "item": "stripAnsi二重呼び出しのDRY観点での解決",
+        "section_updated": "Section 3 (データフロー注記)",
+        "status": "reflected",
+        "changes": [
+          "DR-001の対応によりstripAnsi呼び出しが1箇所に集約されることを注記"
+        ]
+      },
+      {
+        "id": "DR-006",
+        "item": "lastOutputTimestampがroute.tsから渡されない理由の文書化",
+        "section_updated": "Section 9 (設計判断テーブル)",
+        "status": "reflected",
+        "changes": [
+          "lastOutputTimestamp未使用の設計判断と安全性の根拠を追加"
+        ]
+      },
+      {
+        "id": "DR-008",
+        "item": "claude-poller.tsの到達不能コードに対するフォローアップ推奨",
+        "section_updated": "Section 2 (方式Aの制約), Section 9 (将来の検討事項), Section 13 (実装チェックリスト)",
+        "status": "reflected",
+        "changes": [
+          "フォローアップ推奨のblockquoteをSection 2に追加",
+          "将来の検討事項テーブルをSection 9に新規追加",
+          "変更しないファイル表のclaude-poller.tsにDR-008参照を追加"
+        ]
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+  "sections_updated": [
+    "Section 2 (技術選定 - フォローアップ推奨追加)",
+    "Section 3 (アーキテクチャ設計 - データフロー更新、stripAnsi契約注記、レイヤードウィンドウイング注記)",
+    "Section 4 (設計パターン - Facade責務境界追加)",
+    "Section 5-1 (詳細設計 - StatusDetectionResult変更、入力契約追加、空行差異注記)",
+    "Section 5-2 (詳細設計 - route.ts変更コード更新、import変更更新)",
+    "Section 8-2 (テスト戦略 - テストケース6,7,8追加)",
+    "Section 9 (設計判断 - 4列テーブル化、将来検討事項テーブル追加)",
+    "Section 10 (実装順序 - JSDoc更新ステップ追加)",
+    "Section 11 (影響範囲 - 変更内容更新)",
+    "Section 12 (レビュー指摘事項サマリー - 新規追加)",
+    "Section 13 (実装チェックリスト - 新規追加)",
+    "Section 14 (レビュー履歴 - 新規追加)"
+  ],
+  "timestamp": "2026-02-07T00:00:00Z"
+}

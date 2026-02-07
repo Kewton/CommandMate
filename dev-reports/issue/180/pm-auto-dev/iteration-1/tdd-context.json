@@ -1,0 +1,24 @@
+{
+  "issue_number": 180,
+  "acceptance_criteria": [
+    "❯プロンプトが出力末尾にある場合、ステータスはreadyと表示されること",
+    "過去の(y/n)プロンプトがスクロールバックに残っていても末尾が❯の場合、ステータスはreadyと表示されること",
+    "thinkingインジケーター(✻等)が末尾にある場合、ステータスはrunningと表示されること",
+    "(y/n)プロンプトが末尾にある場合、ステータスはwaitingと表示されること",
+    "既存の正常なステータス表示が壊れないこと（回帰テスト）",
+    "route.tsと[id]/route.tsの両方に修正が適用されていること",
+    "hasActivePrompt: booleanフィールドがStatusDetectionResultに追加されていること",
+    "detectSessionStatus()が生のtmux出力を受け取る契約が維持されていること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: StatusDetectionResultにhasActivePrompt: booleanフィールド追加し、detectPrompt()結果をboolean変換して各return文に設定",
+    "Task 1.2: detectSessionStatus()のJSDocを更新（Raw tmux output契約を明記）",
+    "Task 2.1: status-detector.test.tsにIssue #180固有の8テストケース追加（過去y/n+末尾プロンプト→ready, 過去multiple choice+末尾プロンプト→ready, 末尾y/n→waiting, 末尾multiple choice→waiting, StatusResult→flag変換, hasActivePrompt検証, 末尾空行テスト3サブシナリオ, 生出力ANSIコードテスト）",
+    "Task 4.1: route.ts行56-99のインラインロジックをdetectSessionStatus(output, cliToolId)呼び出しに置き換え（生出力を渡す、stripAnsi不要）",
+    "Task 4.2: [id]/route.tsに同等の修正適用（params.id使用）",
+    "Task 4.3: 不要import削除（stripAnsi, detectThinking, getCliToolPatterns, detectPromptをroute.tsから削除、detectSessionStatusを追加）"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+  "work_plan_path": "dev-reports/issue/180/work-plan.md"
+}

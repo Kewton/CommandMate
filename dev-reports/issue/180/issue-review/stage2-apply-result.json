@@ -1,0 +1,74 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 180,
+  "applied_date": "2026-02-07",
+  "actions": [
+    {
+      "finding_id": "S1-001",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "Issueタイトルを「fix: ステータス表示の不整合 - CLIがidle状態でもrunning/waitingと誤表示」に変更し、モバイル限定ではなく全プラットフォーム共通の問題であることを明記。問題概要と再現手順からもモバイル固有の記述を除去し、APIレスポンスの段階でステータスが誤っている旨を追記。"
+    },
+    {
+      "finding_id": "S1-002",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "影響範囲に src/app/api/worktrees/[id]/route.ts を追加。根本原因セクションでも両ファイルの該当コードが完全に同一のロジック重複であることを明記。修正案にロジック重複の解消（共通関数への抽出）を検討事項として追加。受け入れ条件に「route.ts と [id]/route.ts の両方に修正が適用されていること」を追加。"
+    },
+    {
+      "finding_id": "S1-003",
+      "severity": "must_fix",
+      "action": "applied",
+      "description": "修正案セクションを2つの軸で再構成: (1) 検出優先順位の変更（軸1）、(2) detectPrompt()の検索範囲制限（軸2）。軸2については3つの方式(A)(B)(C)を明記し、設計時にトレードオフを分析して選択する指示を追加。現在のコードスニペットにルートファイル・行番号情報を追記。"
+    },
+    {
+      "finding_id": "S1-004",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "問題1の説明を2段階構造として明確化: 「1. captureSessionOutput()がtmuxバッファの最後100行を取得 → 2. detectPrompt()がその中の最後10行（yes/noパターン）/ 最後50行（multiple_choiceパターン）を検索」と記載。"
+    },
+    {
+      "finding_id": "S1-005",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "「受け入れ条件」セクションを新規追加。テスト可能な6つの条件をチェックリスト形式で記載: (1)❯末尾でready、(2)過去のy/n残存でも末尾❯ならready、(3)thinking末尾でrunning、(4)y/n末尾でwaiting、(5)回帰テスト、(6)両ファイルへの修正適用。"
+    },
+    {
+      "finding_id": "S1-006",
+      "severity": "nice_to_have",
+      "action": "applied",
+      "description": "影響範囲に src/lib/auto-yes-manager.ts を追加。pollAutoYes()関数内でのdetectPrompt()使用と、今回の変更の波及について記載。Layer 1（thinking状態スキップ）による防御があるため影響度は限定的である旨も併記。"
+    },
+    {
+      "finding_id": "S1-007",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "修正案に「優先順位変更のトレードオフ」サブセクションを追加。❯プロンプト表示行の直前にyes/noプロンプトがある場合のエッジケースを明記し、設計時にこのケースの挙動を明確に定義しテストケースとして含める指示を記載。"
+    },
+    {
+      "finding_id": "S1-008",
+      "severity": "nice_to_have",
+      "action": "applied",
+      "description": "スクリーンショットセクションに「スクリーンショットなし、テキスト記録のみ」と明記。"
+    },
+    {
+      "finding_id": "S1-009",
+      "severity": "nice_to_have",
+      "action": "applied",
+      "description": "関連Issueに Issue #161（Auto-Yes誤検出修正 - prompt-detector.tsの2パス検出方式）と Issue #152（セッション初回メッセージ送信の信頼性向上 - プロンプト検出強化）を追加。"
+    },
+    {
+      "finding_id": "S1-010",
+      "severity": "should_fix",
+      "action": "applied",
+      "description": "修正案の軸2として、detectPrompt()の検索範囲制限について3つの方式を明確に定義: (A) route.ts側で末尾N行に切り出す方式、(B) detectPrompt()内部のslice範囲を変更する方式、(C) detectPrompt()に末尾位置検証を追加する方式。各方式の概要と設計時の選択指示を記載。"
+    }
+  ],
+  "summary": {
+    "total_findings": 10,
+    "applied": 10,
+    "skipped": 0,
+    "partial": 0
+  }
+}

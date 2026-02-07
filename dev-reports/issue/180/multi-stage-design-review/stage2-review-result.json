@@ -1,0 +1,115 @@
+{
+  "issue_number": 180,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_date": "2026-02-07",
+  "design_doc_path": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+  "overall_assessment": "PASS_WITH_FINDINGS",
+  "summary": "設計書と実コードの整合性を検証した結果、設計書は概ね正確に現在の実装を反映しているが、関数シグネチャの型記述に2件の不正確な点と、1件のコードスニペット不整合を発見した。提案される変更は技術的に実現可能であり、既存の型定義との後方互換性も確保されている。",
+  "findings": [
+    {
+      "id": "C-001",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "detectSessionStatus()のlastOutputTimestamp型が設計書と実コードで不一致",
+      "description": "設計書 Section 5-1 のシグネチャでは `lastOutputTimestamp?: number` と記載されているが、実際のコード(src/lib/status-detector.ts:71)では `lastOutputTimestamp?: Date` である。Date型の場合、内部で `lastOutputTimestamp.getTime()` を呼び出す実装(status-detector.ts:113)と整合するが、設計書のシグネチャをそのままコピーすると型エラーが発生する。",
+      "location": "設計書 Section 5-1 (行186-197)",
+      "actual_code": "lastOutputTimestamp?: Date  // status-detector.ts:71",
+      "design_code": "lastOutputTimestamp?: number  // 設計書 Section 5-1",
+      "recommendation": "設計書のシグネチャを `lastOutputTimestamp?: Date` に修正する。"
+    },
+    {
+      "id": "C-002",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "detectSessionStatus()のcliToolId型が設計書と実コードで不一致",
+      "description": "設計書 Section 5-1 のシグネチャでは `cliToolId: string` と記載されているが、実際のコード(src/lib/status-detector.ts:70)では `cliToolId: CLIToolType` (import from './cli-tools/types') である。CLIToolType は 'claude' | 'codex' | 'gemini' のユニオン型であり、string型を渡すとTypeScriptコンパイルエラーとなる。route.tsの呼び出し側変数 `cliToolId` は `CLIToolType` 型であるため実装上は問題ないが、設計書の記述が不正確。",
+      "location": "設計書 Section 5-1 (行186-197)",
+      "actual_code": "cliToolId: CLIToolType  // status-detector.ts:70",
+      "design_code": "cliToolId: string  // 設計書 Section 5-1",
+      "recommendation": "設計書のシグネチャを `cliToolId: CLIToolType` に修正する。"
+    },
+    {
+      "id": "C-003",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "設計書のBefore/Afterコードでの行番号参照が概算値",
+      "description": "設計書では「行56-84のインラインロジック」と記述しているが、実際にはroute.tsのステータス検出ロジックは行56-99(stale prompt cleanup含む)に及ぶ。行84はelse ブロックの閉じ括弧であり、行86-95のstale prompt cleanup は別途After コードで記述されているため実装上の問題にはならないが、レビュアーの混乱を避けるために行番号を正確にするか、「行56-95のインラインステータス検出・クリーンアップロジック全体」と記述すべきである。",
+      "location": "設計書 Section 5-2 (行246)",
+      "recommendation": "行番号を「行56-95」または「行56-99(try-catch含む)」に修正するか、行番号ではなくコードブロックの論理的境界で記述する。"
+    },
+    {
+      "id": "C-004",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "Afterコードのstale prompt cleanup条件が現行route.tsの条件と微妙に異なる",
+      "description": "設計書のAfterコード(Section 5-2, 行273)では `if (!statusResult.hasActivePrompt)` でstale prompt cleanupを発火するが、現行route.tsの実装(行87)では `if (!promptDetection.isPrompt)` である。status-detector.tsでの `hasActivePrompt: true` は `detectPrompt().isPrompt === true` のときのみセットされるため、論理的には等価である。ただし、現行コードでは `isRunning` ブロック内で `promptDetection.isPrompt` を直接参照しているのに対し、After コードでは `statusResult` から間接参照するため、detectSessionStatusが将来的に `hasActivePrompt` を異なる条件で設定した場合、動作が変わる可能性がある。設計書はこの等価性について明示的な説明を加えるべき。",
+      "location": "設計書 Section 5-2 (行267-281)",
+      "recommendation": "Afterコードの `!statusResult.hasActivePrompt` が現行の `!promptDetection.isPrompt` と論理的に等価であることをコメントまたは設計書内注記で明記する。"
+    },
+    {
+      "id": "C-005",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "設計書Section 5-2のimport削除リストに不足あり",
+      "description": "設計書では削除するimportとして `detectThinking, stripAnsi, getCliToolPatterns` (cli-patternsから) と `detectPrompt` (prompt-detectorから) を列挙している。しかし、route.ts(行12)では `getMessages` と `markPendingPromptsAsAnswered` もdb.tsからインポートされており、After コード(行274)でも引き続き使用するため削除対象外であることは正しい。ただし、After コードで `worktreeId` 変数を使用しているが、route.tsの現行コードでは `worktree.id` を使用しており(行88)、[id]/route.tsでは `params.id` を使用している(行88)。設計書のAfterコードが `worktreeId` という未定義変数を参照している点は不正確。",
+      "location": "設計書 Section 5-2 (行274)",
+      "actual_code_route": "getMessages(db, worktree.id, undefined, 10, cliToolId)  // route.ts:88",
+      "actual_code_id_route": "getMessages(db, params.id, undefined, 10, cliToolId)  // [id]/route.ts:88",
+      "design_code": "getMessages(db, worktreeId, undefined, 10, cliToolId)  // 設計書 Section 5-2",
+      "recommendation": "Afterコード例で `worktreeId` を `worktree.id` (route.ts用) または `params.id` ([id]/route.ts用) に変更するか、疑似コードであることを明記する。"
+    },
+    {
+      "id": "C-006",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "StatusDetectionResult の hasActivePrompt 追加は後方互換",
+      "description": "StatusDetectionResult インターフェースに `hasActivePrompt: boolean` フィールドを追加する変更は、既存の利用箇所(status-detector.test.ts)でフィールドの存在を要求していない(テストではstatus/confidence/reasonのみ検証)ため、後方互換性が保たれている。ただし、既存テスト(例: status-detector.test.ts:22-26)は `hasActivePrompt` を検証しておらず、追加後にテストを更新して新フィールドの値も確認することが推奨される。設計書 Section 8-2 のテスト項目6でこの点はカバーされている。",
+      "location": "src/lib/__tests__/status-detector.test.ts, 設計書 Section 8-2",
+      "recommendation": "確認事項のみ。既存テストは壊れないが、新フィールドの検証を追加テストで確実にカバーすること。設計書の記述は適切。"
+    }
+  ],
+  "consistency_checklist": {
+    "code_snippets_match_actual": {
+      "status": "PARTIAL",
+      "details": "Before コードスニペットは実際のroute.tsのインラインロジックと概ね一致するが、detectPrompt(cleanOutput) の呼び出し箇所・変数名は正確。ただし行番号に若干のずれがあり、After コードの worktreeId 変数は未定義。"
+    },
+    "line_numbers_accurate": {
+      "status": "PARTIAL",
+      "details": "status-detector.ts の行74-76は正確。route.tsの行56-84は概算値で、実際のロジック全体は行56-99。"
+    },
+    "function_signatures_correct": {
+      "status": "FAIL",
+      "details": "detectSessionStatus() のシグネチャで lastOutputTimestamp の型が number (設計書) vs Date (実コード)、cliToolId の型が string (設計書) vs CLIToolType (実コード) で不一致。"
+    },
+    "proposed_after_code_compiles": {
+      "status": "PASS",
+      "details": "型の不一致を修正すれば(CLIToolType, Date)、After コードはコンパイル可能。route.ts の cliToolId は CLIToolType 型、output は string 型であり、detectSessionStatus() に正しく渡せる。statusResult.status は SessionStatus 型であり、'waiting' / 'running' との比較は合法。"
+    },
+    "import_paths_correct": {
+      "status": "PASS",
+      "details": "追加 import `import { detectSessionStatus } from '@/lib/status-detector'` は既存のパスエイリアス(@/)規約に従っており正しい。削除対象の import も正確に特定されている。"
+    },
+    "interface_change_backward_compatible": {
+      "status": "PASS",
+      "details": "StatusDetectionResult に hasActivePrompt: boolean を追加する変更は、既存の利用箇所が新フィールドを参照していないため後方互換。TypeScript のインターフェースはフィールド追加に対して安全。"
+    },
+    "dr007_layered_windowing_accurate": {
+      "status": "PASS",
+      "details": "detectPrompt() 内部の実装を確認: y/n パターンは lines.slice(-10) (prompt-detector.ts:48)、multiple choice は detectMultipleChoicePrompt(output) に全入力を渡し内部で lines.length-50 (prompt-detector.ts:268) で制限。detectSessionStatus() から 15行を渡した場合、y/n = min(10,15) = 10行、multiple choice = min(50,15) = 15行。DR-007 の記述と一致。"
+    },
+    "dr003_empty_line_behavior_documented": {
+      "status": "PASS",
+      "details": "route.ts(行67)は filter(line => line.trim() !== '') で空行除外後に slice(-15)、status-detector.ts(行75-76)は空行含めて slice(-15)。設計書 DR-003 でこの差異と許容理由が正確に文書化されている。"
+    },
+    "dr008_unreachable_code_claim_verified": {
+      "status": "PASS",
+      "details": "claude-poller.ts の startPolling() は外部から一切インポート・呼び出しされていない。response-poller.ts の startPolling() のみが send/route.ts, respond/route.ts, start-polling/route.ts から使用されている。DR-008 の到達不能コード主張は正確。"
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "LOW",
+    "details": "設計書の型記述の不正確さは実装時に自然に修正される可能性が高いが、型を設計書通りにコピーするとコンパイルエラーとなるため must_fix とした。提案される共通化アプローチ自体は技術的に健全であり、既存テストとの互換性も確保されている。"
+  }
+}

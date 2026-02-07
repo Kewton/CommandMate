@@ -1,0 +1,78 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 180,
+  "review_date": "2026-02-07",
+  "findings": [
+    {
+      "id": "DR-001",
+      "severity": "must_fix",
+      "category": "DRY",
+      "description": "Design document Section 5-2 shows the route.ts replacement code as `detectSessionStatus(cleanOutput, cliToolId)`, where `cleanOutput` is already ANSI-stripped. However, the existing `detectSessionStatus()` in status-detector.ts (line 74) internally calls `stripAnsi(output)` again. The design document does not address this double-stripping. Either the function signature should document that raw output is expected (and the route.ts code should pass raw output), or the function should be made idempotent-aware. This is not merely cosmetic -- it represents an unclear contract that could cause subtle behavior differences if stripAnsi is not fully idempotent for all edge cases.",
+      "recommendation": "Add a note in the design document clarifying the contract of `detectSessionStatus()`: does it expect raw tmux output or already-cleaned output? Recommend one of: (A) pass raw output from route.ts and let detectSessionStatus handle stripping (simpler, consistent with current function signature), or (B) rename/add a parameter to make the pre-cleaned case explicit. Option A is recommended since it matches the existing function's documented behavior (`@param output - Raw tmux output`).",
+      "location": "Section 5-2 (route.ts / [id]/route.ts の変更)"
+    },
+    {
+      "id": "DR-002",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "description": "The design adds a `promptDetection` field to `StatusDetectionResult` (Section 5-1) solely to support the stale prompt cleanup logic in route.ts. This violates the Single Responsibility Principle: `StatusDetectionResult` should represent session status, not carry internal detection artifacts for a caller's side-effect logic. The `promptDetection` field leaks the internal implementation detail of how status was determined into the public API of the function.",
+      "recommendation": "Consider two alternatives: (1) Have route.ts call `detectPrompt()` separately with the same `lastLines` logic for cleanup purposes (explicit, but minor duplication), or (2) Add a simple boolean field like `hasActivePrompt: boolean` instead of exposing the full `PromptDetectionResult` object. Option 2 is preferred as it maintains encapsulation while providing the needed information. Document this decision in Section 9 (design decisions).",
+      "location": "Section 5-1 (status-detector.ts の変更)"
+    },
+    {
+      "id": "DR-003",
+      "severity": "should_fix",
+      "category": "KISS",
+      "description": "The design document does not address a subtle behavioral difference between the current route.ts logic and status-detector.ts: route.ts (line 67) filters out empty lines before taking the last 15 (`nonEmptyLines = cleanOutput.split('\\n').filter(line => line.trim() !== '')` then `.slice(-15)`), while status-detector.ts (line 75-76) takes the last 15 lines including empty lines (`cleanOutput.split('\\n')` then `.slice(-STATUS_CHECK_LINE_COUNT)`). This means the effective 'window' of content analyzed differs between the two implementations. When route.ts is replaced with detectSessionStatus(), the behavior will change for outputs with many trailing blank lines. The design should explicitly acknowledge this difference and justify which behavior is correct.",
+      "recommendation": "Add a note in Section 5-1 or Section 9 explaining: (A) the blank-line filtering difference between route.ts and status-detector.ts, (B) why the status-detector.ts approach (include blank lines) is acceptable or preferable, and (C) whether any test cases should be added to cover outputs with many trailing blank lines. If the route.ts behavior of filtering blanks was intentional for a reason, consider aligning status-detector.ts accordingly.",
+      "location": "Section 5-1 / Section 9 (設計上の決定事項とトレードオフ)"
+    },
+    {
+      "id": "DR-004",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "description": "The design document (Section 4) identifies detectSessionStatus() as a Facade pattern, which is accurate. However, the function currently performs two responsibilities: (1) ANSI stripping and line extraction, and (2) status detection logic. The proposed change adds a third implicit responsibility: carrying prompt detection results for callers. While the current scope is manageable, documenting the boundary of this facade's responsibilities would help future maintainers decide when to refactor.",
+      "recommendation": "Add a brief note in Section 4 (設計パターン) that explicitly defines the boundary of the Facade: 'detectSessionStatus() is responsible for output preprocessing (ANSI strip, line extraction) and status determination. It is NOT responsible for prompt cleanup side-effects, which remain in the caller.' This clarifies separation of concerns.",
+      "location": "Section 4 (設計パターン)"
+    },
+    {
+      "id": "DR-005",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "description": "The design document (Section 3, data flow) shows `stripAnsi(output)` being called in route.ts before passing to `detectSessionStatus()`, but detectSessionStatus() also calls `stripAnsi()` internally. While this is also captured in DR-001, from a DRY perspective, having two stripAnsi calls in the same data flow is redundant code that should be explicitly resolved in the design.",
+      "recommendation": "This is a restatement of DR-001 from a DRY perspective. Resolve by choosing one stripping location and documenting it clearly in the data flow diagram in Section 3.",
+      "location": "Section 3 (データフロー)"
+    },
+    {
+      "id": "DR-006",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "description": "The design document mentions `lastOutputTimestamp` parameter in the existing detectSessionStatus() signature (Section 5-1, unchanged), but the proposed route.ts replacement code in Section 5-2 does not pass this parameter. This means the time-based heuristic (priority 4: 'no_recent_output') will never trigger when called from route.ts. While this is existing behavior (the current inline logic in route.ts also does not use time-based detection), the design should explicitly note whether this is intentional or a limitation to address later.",
+      "recommendation": "Add a brief note in Section 9 (design decisions) stating that `lastOutputTimestamp` is not passed from route.ts because the current architecture does not track output timestamps at the API level, and this is acceptable because the default-to-running fallback is safe.",
+      "location": "Section 9 (設計上の決定事項とトレードオフ)"
+    },
+    {
+      "id": "DR-007",
+      "severity": "should_fix",
+      "category": "KISS",
+      "description": "The design document Section 3 states 'detectPrompt(lastLines) -- 末尾限定で誤検出防止' but does not mention that detectPrompt() internally applies its own last-10-line window for y/n patterns (prompt-detector.ts line 48) and a last-50-line window for multiple choice patterns (line 268). This means for y/n prompts, the effective window is last 10 of last 15 (= 10 lines), and for multiple choice, the effective window is last 50 of last 15 (= 15 lines). The layered windowing is not immediately obvious and should be documented to prevent confusion during implementation and future maintenance.",
+      "recommendation": "Add a note in Section 5-1 or Section 3 explaining the layered windowing: 'Note: detectPrompt() internally applies its own windowing (last 10 lines for y/n patterns, last 50 lines for multiple choice). When called with lastLines (15 lines), the effective windows are: y/n = min(10, 15) = 10 lines, multiple_choice = min(50, 15) = 15 lines. This layering is acceptable because the outer 15-line window provides the primary defense against stale prompt detection.'",
+      "location": "Section 3 (データフロー) or Section 5-1"
+    },
+    {
+      "id": "DR-008",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "description": "Section 2 (技術選定) states 'claude-poller.ts の detectPrompt() 呼び出しは到達不能コード' as a reason to not modify it. While this may be true in the current codebase, making design decisions based on dead code analysis is fragile. If the code becomes reachable in a future change, the same bug would manifest.",
+      "recommendation": "While it is fine to exclude claude-poller.ts from the current scope, consider adding a note recommending a follow-up task to either remove the dead code or apply the same fix if it becomes reachable. This could be added to Section 9 under a 'future considerations' note.",
+      "location": "Section 2 (方式Aの制約と許容)"
+    }
+  ],
+  "summary": {
+    "total_findings": 8,
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 4
+  }
+}

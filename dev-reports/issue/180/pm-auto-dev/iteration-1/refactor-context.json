@@ -1,0 +1,16 @@
+{
+  "issue_number": 180,
+  "refactor_targets": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 100.0
+  },
+  "improvement_goals": [
+    "不要なimport参照が完全に除去されていることの確認",
+    "コード重複が解消されていることの確認",
+    "コードスタイルの一貫性確認"
+  ]
+}

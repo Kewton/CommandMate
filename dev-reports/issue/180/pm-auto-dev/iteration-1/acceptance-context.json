@@ -1,0 +1,32 @@
+{
+  "issue_number": 180,
+  "feature_summary": "fix: ステータス表示の不整合 - CLIがidle状態でもrunning/waitingと誤表示",
+  "acceptance_criteria": [
+    "1. ❯プロンプトが出力末尾にある場合、ステータスはreadyと表示されること",
+    "2. 過去の(y/n)プロンプトがスクロールバックに残っていても、末尾が❯の場合、ステータスはreadyと表示されること",
+    "3. thinkingインジケーター(✻等)が末尾にある場合、ステータスはrunningと表示されること",
+    "4. (y/n)プロンプトが末尾にある場合、ステータスはwaitingと表示されること",
+    "5. 既存の正常なステータス表示が壊れないこと（回帰テスト）",
+    "6. route.tsと[id]/route.tsの両方に修正が適用されていること（共通関数化により1箇所での修正で両方に反映）",
+    "7. tests/unit/prompt-detector.test.ts - Issue #161回帰テストがパスすること",
+    "8. tests/unit/lib/auto-yes-manager.test.ts - pollAutoYes thinkingスキップテストがパスすること",
+    "9. tests/unit/api/prompt-response-verification.test.ts - プロンプト再検証テストがパスすること",
+    "10. src/lib/__tests__/status-detector.test.ts - status-detectorテストがパスすること",
+    "11. src/lib/__tests__/cli-patterns.test.ts および tests/unit/lib/cli-patterns.test.ts - detectThinkingテストがパスすること",
+    "12. WorktreeDetailRefactoredのヘッダーステータス表示が正常であること（API形式不変のため影響なし確認）",
+    "13. WorktreeCardのステータスドット表示が正常であること（API形式不変のため影響なし確認）",
+    "14. サイドバーのcliStatusドット表示（BranchListItem）が正常であること（API形式不変のため影響なし確認）"
+  ],
+  "test_scenarios": [
+    "シナリオ1: status-detector.test.tsの全テスト（25件）がパスすること",
+    "シナリオ2: prompt-detector.test.tsの全テスト（76件）がパスすること（Issue #161回帰テスト含む）",
+    "シナリオ3: auto-yes-manager.test.tsの全テスト（39件）がパスすること",
+    "シナリオ4: cli-patterns.test.ts（両ファイル）の全テストがパスすること",
+    "シナリオ5: prompt-response-verification.test.tsの全テストがパスすること",
+    "シナリオ6: route.tsとroute[id].tsでdetectSessionStatus()が使用され、インラインロジックが削除されていること",
+    "シナリオ7: TypeScript型チェック（npx tsc --noEmit）がエラー0件であること",
+    "シナリオ8: ESLint（npm run lint）がエラー0件であること",
+    "シナリオ9: npm run test:unitが全テストパスすること",
+    "シナリオ10: StatusDetectionResultにhasActivePrompt: booleanが存在すること"
+  ]
+}

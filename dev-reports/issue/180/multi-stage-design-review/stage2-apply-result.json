@@ -1,0 +1,70 @@
+{
+  "issue_number": 180,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "C-001",
+        "item": "detectSessionStatus()のlastOutputTimestamp型が設計書と実コードで不一致（number -> Date）",
+        "section_updated": "Section 5-1 (detectSessionStatus() 入力契約)",
+        "status": "reflected"
+      },
+      {
+        "id": "C-002",
+        "item": "detectSessionStatus()のcliToolId型が設計書と実コードで不一致（string -> CLIToolType）",
+        "section_updated": "Section 5-1 (detectSessionStatus() 入力契約), Section 3 (データフロー)",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "C-003",
+        "item": "設計書のBefore/Afterコードでの行番号参照が概算値（56-84 -> 56-99）",
+        "section_updated": "Section 3 (route.ts の修正内容), Section 5-2 (削除するコード)",
+        "status": "reflected"
+      },
+      {
+        "id": "C-004",
+        "item": "Afterコードのstale prompt cleanup条件が現行route.tsの条件と微妙に異なる（論理的等価性の文書化）",
+        "section_updated": "Section 5-2 (置き換えるコード), Section 3 (route.ts の修正内容)",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "C-005",
+        "item": "Afterコードで未定義変数worktreeIdを使用（worktree.id / params.idに修正）",
+        "section_updated": "Section 3 (route.ts の修正内容), Section 5-2 (置き換えるコード)",
+        "status": "reflected"
+      },
+      {
+        "id": "C-006",
+        "item": "StatusDetectionResultのhasActivePrompt追加は後方互換であることの確認",
+        "section_updated": "Section 9 (設計上の決定事項とトレードオフ)",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+  "sections_updated": [
+    "Section 3 (アーキテクチャ設計) - データフロー図のcliToolId型修正、route.ts修正内容の行番号・変数名・等価性注記修正",
+    "Section 5-1 (status-detector.ts の変更) - detectSessionStatus()シグネチャのCLIToolType/Date型修正、import文追加、C-001/C-002注記追加",
+    "Section 5-2 (route.ts / [id]/route.ts の変更) - 行番号修正(56-99)、C-003注記追加、C-004等価性注記追加、C-005変数名修正・注記追加",
+    "Section 9 (設計上の決定事項とトレードオフ) - C-006後方互換性確認行追加",
+    "Section 12 (レビュー指摘事項サマリー) - Stage 2 整合性レビュー指摘テーブル追加",
+    "Section 13 (実装チェックリスト) - Stage 2対応チェックリスト追加（Must Fix 3項目、Should Fix 2項目、Nice to Have 2項目）",
+    "Section 14 (レビュー履歴) - Stage 2行追加"
+  ],
+  "consistency_checklist_status": {
+    "function_signatures_correct": "FIXED - CLIToolType and Date types now match actual code",
+    "line_numbers_accurate": "FIXED - Updated from 56-84 to 56-99",
+    "variable_names_correct": "FIXED - worktreeId replaced with worktree.id / params.id",
+    "logical_equivalence_documented": "FIXED - C-004 note added explaining hasActivePrompt === promptDetection.isPrompt equivalence",
+    "backward_compatibility_noted": "FIXED - C-006 confirmation added to design decisions table"
+  },
+  "timestamp": "2026-02-07T00:00:00Z"
+}

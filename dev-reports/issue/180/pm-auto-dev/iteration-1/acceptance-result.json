@@ -1,0 +1,139 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: status-detector.test.ts (25 tests)",
+      "result": "passed",
+      "evidence": "25/25 tests passed (8ms). Includes Issue #180 specific tests: past y/n prompts, past multiple choice, hasActivePrompt flag, ANSI output handling, empty line padding."
+    },
+    {
+      "scenario": "Scenario 2: prompt-detector.test.ts (76 tests, Issue #161 regression)",
+      "result": "passed",
+      "evidence": "76/76 tests passed (16ms). All Issue #161 regression tests (false positive prevention, defense layer boundary, 50-line window boundary, thinking-prompt ordering) passed."
+    },
+    {
+      "scenario": "Scenario 3: auto-yes-manager.test.ts (39 tests)",
+      "result": "passed",
+      "evidence": "39/39 tests passed (10ms). Issue #161 pollAutoYes thinking state skip tests passed. globalThis state management (Issue #153) tests passed."
+    },
+    {
+      "scenario": "Scenario 4: cli-patterns.test.ts (both files, 45 tests total)",
+      "result": "passed",
+      "evidence": "src/lib/__tests__/cli-patterns.test.ts: 23/23 passed (4ms). tests/unit/lib/cli-patterns.test.ts: 22/22 passed (5ms). detectThinking for claude, codex, gemini all verified."
+    },
+    {
+      "scenario": "Scenario 5: prompt-response-verification.test.ts (5 tests)",
+      "result": "passed",
+      "evidence": "5/5 tests passed (234ms). Prompt re-verification, race condition handling, fallback behavior all verified."
+    },
+    {
+      "scenario": "Scenario 6: route.ts and [id]/route.ts use detectSessionStatus(), no inline logic",
+      "result": "passed",
+      "evidence": "Both route.ts files import detectSessionStatus from '@/lib/status-detector'. No imports of stripAnsi, detectThinking, getCliToolPatterns, or detectPrompt found in either route.ts file. Confirmed via grep: 0 matches for old imports, 2 matches for detectSessionStatus import, 2 matches for detectSessionStatus usage."
+    },
+    {
+      "scenario": "Scenario 7: TypeScript type check (npx tsc --noEmit)",
+      "result": "passed",
+      "evidence": "npx tsc --noEmit completed with 0 errors (exit code 0, no output)."
+    },
+    {
+      "scenario": "Scenario 8: ESLint (npm run lint)",
+      "result": "passed",
+      "evidence": "npm run lint: 'No ESLint warnings or errors'."
+    },
+    {
+      "scenario": "Scenario 9: npm run test:unit full suite",
+      "result": "passed",
+      "evidence": "139/141 test files passed, 2754/2780 tests passed, 7 skipped. 2 failures in claude-session.test.ts are PRE-EXISTING (confirmed by running same tests on main branch with identical failures - unhandled promise rejections from timeout tests). Not related to Issue #180."
+    },
+    {
+      "scenario": "Scenario 10: StatusDetectionResult has hasActivePrompt: boolean",
+      "result": "passed",
+      "evidence": "src/lib/status-detector.ts line 43: 'hasActivePrompt: boolean;' present in StatusDetectionResult interface. JSDoc comment on lines 38-42 documents its purpose."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "1. Prompt at end of output -> ready status",
+      "verified": true,
+      "evidence": "status-detector.test.ts: 'should return ready with high confidence when input prompt is detected' PASSED"
+    },
+    {
+      "criterion": "2. Past (y/n) prompt in scrollback, tail has prompt -> ready status",
+      "verified": true,
+      "evidence": "status-detector.test.ts: 'should return ready when past y/n prompt is >15 lines ago and tail has input prompt' PASSED"
+    },
+    {
+      "criterion": "3. Thinking indicator at end -> running status",
+      "verified": true,
+      "evidence": "status-detector.test.ts: 'should return running with high confidence when thinking indicator is detected' PASSED"
+    },
+    {
+      "criterion": "4. (y/n) prompt at end -> waiting status",
+      "verified": true,
+      "evidence": "status-detector.test.ts: 'should return waiting when y/n prompt is in the tail (last 15 lines)' PASSED"
+    },
+    {
+      "criterion": "5. No regression in existing status display",
+      "verified": true,
+      "evidence": "All 76 prompt-detector tests, all 45 cli-patterns tests, all 39 auto-yes-manager tests passed. Full unit suite: 2754 tests passed with only pre-existing failures."
+    },
+    {
+      "criterion": "6. Both route.ts files use detectSessionStatus() (shared function)",
+      "verified": true,
+      "evidence": "src/app/api/worktrees/route.ts line 16 and src/app/api/worktrees/[id]/route.ts line 13 both import detectSessionStatus from '@/lib/status-detector'. No inline logic imports (stripAnsi, detectThinking, getCliToolPatterns, detectPrompt) found."
+    },
+    {
+      "criterion": "7. prompt-detector.test.ts Issue #161 regression tests pass",
+      "verified": true,
+      "evidence": "76/76 tests passed including Issue #161 sections: 'Regression tests - multiple_choice detection', 'False positive prevention', 'Defense layer boundary tests', '50-line window boundary tests', 'Client-side thinking-prompt ordering'."
+    },
+    {
+      "criterion": "8. auto-yes-manager.test.ts pollAutoYes thinking skip tests pass",
+      "verified": true,
+      "evidence": "39/39 tests passed including 'Issue #161: pollAutoYes thinking state skip' (2 tests: should skip prompt detection when thinking, should call detectPrompt when NOT thinking)."
+    },
+    {
+      "criterion": "9. prompt-response-verification.test.ts tests pass",
+      "verified": true,
+      "evidence": "5/5 tests passed: send keys when prompt active, NOT send when disappeared, proceed on capture failure, 404 for non-existent, 400 when answer missing."
+    },
+    {
+      "criterion": "10. status-detector.test.ts tests pass",
+      "verified": true,
+      "evidence": "25/25 tests passed (8ms). Includes claude, codex, gemini tools, Issue #132 recommended commands, Issue #180 past prompt handling, edge cases."
+    },
+    {
+      "criterion": "11. cli-patterns.test.ts (both files) detectThinking tests pass",
+      "verified": true,
+      "evidence": "src/lib/__tests__/cli-patterns.test.ts: 23/23 passed. tests/unit/lib/cli-patterns.test.ts: 22/22 passed."
+    },
+    {
+      "criterion": "12. WorktreeDetailRefactored header status display unchanged",
+      "verified": true,
+      "evidence": "WorktreeDetailRefactored.tsx still references isWaitingForResponse (lines 109, 123) and isProcessing (lines 112, 126). API response format unchanged."
+    },
+    {
+      "criterion": "13. WorktreeCard status dot display unchanged",
+      "verified": true,
+      "evidence": "WorktreeCard.tsx still destructures isWaitingForResponse (line 31) and uses it for status rendering (lines 160, 165). API response format unchanged."
+    },
+    {
+      "criterion": "14. BranchListItem cliStatus dot display unchanged",
+      "verified": true,
+      "evidence": "BranchListItem.tsx does not directly reference isWaitingForResponse/isProcessing (uses derived cliStatus from sidebar types). API response format unchanged, so deriveCliStatus() in sidebar.ts continues to work correctly."
+    }
+  ],
+  "evidence_files": [
+    "src/lib/status-detector.ts - StatusDetectionResult interface with hasActivePrompt: boolean (line 43)",
+    "src/app/api/worktrees/route.ts - imports detectSessionStatus from '@/lib/status-detector' (line 16)",
+    "src/app/api/worktrees/[id]/route.ts - imports detectSessionStatus from '@/lib/status-detector' (line 13)",
+    "src/lib/__tests__/status-detector.test.ts - 25 tests all passed",
+    "tests/unit/prompt-detector.test.ts - 76 tests all passed",
+    "tests/unit/lib/auto-yes-manager.test.ts - 39 tests all passed",
+    "tests/unit/api/prompt-response-verification.test.ts - 5 tests all passed",
+    "src/lib/__tests__/cli-patterns.test.ts - 23 tests all passed",
+    "tests/unit/lib/cli-patterns.test.ts - 22 tests all passed"
+  ],
+  "message": "All acceptance criteria verified and passed. The 2 test failures in the full unit suite (claude-session.test.ts) are confirmed pre-existing on the main branch and are unrelated to Issue #180."
+}

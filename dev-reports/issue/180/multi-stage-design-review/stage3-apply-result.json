@@ -1,0 +1,86 @@
+{
+  "issue_number": 180,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IS-007",
+        "item": "auto-yes-manager.ts has the same full-output-to-detectPrompt vulnerability pattern (line 290, up to 5000 lines)",
+        "section_updated": "Section 9 (future considerations), Section 11 (unchanged files table with notes column)",
+        "status": "reflected",
+        "details": "Added auto-yes-manager.ts as a follow-up candidate in the future considerations table with full vulnerability description. Updated the unchanged files table to include a notes column with IS-007 warning. Added Stage 3 checklist item."
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IS-003",
+        "item": "StatusDetectionResult type change backward compatibility verification -- no external code constructs the type",
+        "section_updated": "Section 5-1 (new IS-003 blockquote), Section 9 (design decisions table)",
+        "status": "reflected",
+        "details": "Added detailed backward compatibility verification note in Section 5-1 confirming no external code constructs StatusDetectionResult objects. Updated the design decisions table in Section 9 to include IS-003 reference. Added Stage 3 checklist item."
+      },
+      {
+        "id": "IS-006",
+        "item": "Empty line filtering behavioral change risk -- tmux padding can push prompt outside 15-line window",
+        "section_updated": "Section 5-1 (DR-003 blockquote extended with IS-006), Section 8-2 (test case 7 strengthened with sub-scenarios), Section 9 (design decisions table)",
+        "status": "reflected",
+        "details": "Extended DR-003 note with explicit tmux padding risk scenario and 3 mitigation options (A: increase line count, B: add empty line filtering, C: hybrid). Strengthened test case 7 with sub-scenarios (a) 5 empty lines, (b) 20+ empty lines pushing prompt outside window, (c) 10 empty lines with y/n prompt. Added Stage 3 checklist item."
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IS-001",
+        "item": "current-output/route.ts has same inline status detection vulnerability pattern",
+        "section_updated": "Section 9 (future considerations table), Section 11 (unchanged files table notes)",
+        "status": "reflected",
+        "details": "Added current-output/route.ts as a follow-up candidate alongside response-poller.ts and claude-poller.ts. Updated unchanged files table with IS-001 note."
+      },
+      {
+        "id": "IS-002",
+        "item": "UI component dependency chain should be explicitly listed",
+        "section_updated": "Section 11 (new 'API Response Consumers' subsection)",
+        "status": "reflected",
+        "details": "Added new subsection 'APIレスポンス消費側' with table listing 5 downstream consumers (models.ts, sidebar.ts, WorktreeDetailRefactored.tsx, WorktreeCard.tsx, WorktreeSelectionContext.tsx) with consumed fields and impact assessment."
+      },
+      {
+        "id": "IS-004",
+        "item": "response-poller.ts detectPrompt calls confirmation (design analysis validation)",
+        "section_updated": "Section 9 (future considerations table)",
+        "status": "reflected",
+        "details": "Added IS-004 confirmation note to the existing response-poller.ts entry in future considerations, noting that Stage 3 review confirmed the design's analysis is correct."
+      },
+      {
+        "id": "IS-005",
+        "item": "claude-poller.ts reachability assessment fragility -- recommend legacy/deprecated comment",
+        "section_updated": "Section 2 (new IS-005 blockquote), Section 9 (future considerations table updated with IS-005)",
+        "status": "reflected",
+        "details": "Added IS-005 blockquote in Section 2 noting the fragility of grep-based reachability assessment and recommending legacy/deprecated code comment. Updated DR-008 entry in future considerations to include IS-005 recommendation."
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+  "sections_updated": [
+    "Section 2 (技術選定) -- IS-005 blockquote added",
+    "Section 5-1 (詳細設計 status-detector.ts) -- IS-003 backward compatibility note, IS-006 tmux padding risk",
+    "Section 8-2 (テスト戦略 新規テスト) -- Test case 7 strengthened with sub-scenarios",
+    "Section 9 (設計上の決定事項とトレードオフ) -- IS-003 reference in table, IS-006 reference in table, future considerations expanded with IS-001/IS-004/IS-005/IS-007",
+    "Section 11 (影響範囲サマリー) -- Unchanged files table expanded with notes column (IS-001/IS-004/IS-005/IS-007), new API response consumers subsection (IS-002)",
+    "Section 12 (レビュー指摘事項サマリー) -- Stage 3 findings table added",
+    "Section 13 (実装チェックリスト) -- Stage 3 checklist items added (1 must_fix, 2 should_fix, 3 nice_to_have)",
+    "Section 14 (レビュー履歴) -- Stage 3 row added"
+  ],
+  "review_summary": {
+    "total_findings": 7,
+    "must_fix_reflected": 1,
+    "must_fix_total": 1,
+    "should_fix_reflected": 2,
+    "should_fix_total": 2,
+    "nice_to_have_reflected": 4,
+    "nice_to_have_total": 4
+  },
+  "timestamp": "2026-02-07T00:00:00Z"
+}

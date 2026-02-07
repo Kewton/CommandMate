@@ -35,6 +35,12 @@ export interface StatusDetectionResult {
   confidence: StatusConfidence;
   /** Reason for the detection (for debugging) */
   reason: string;
+  /**
+   * Whether an active interactive prompt (y/n, multiple choice) was detected
+   * in the last N lines. Used by callers for stale prompt cleanup logic.
+   * Does NOT expose internal PromptDetectionResult details (encapsulation).
+   */
+  hasActivePrompt: boolean;
 }
 
 /**
@@ -60,10 +66,11 @@ const STALE_OUTPUT_THRESHOLD_MS: number = 5000;
  * 4. No recent output (>5s) -> ready (low confidence)
  * 5. Default -> running (low confidence)
  *
- * @param output - Raw tmux output
- * @param cliToolId - CLI tool identifier
- * @param lastOutputTimestamp - Timestamp of the last output change
- * @returns Detection result with status, confidence, and reason
+ * @param output - Raw tmux output (including ANSI escape codes).
+ *                 This function handles ANSI stripping internally.
+ * @param cliToolId - CLI tool identifier for pattern selection (CLIToolType: 'claude' | 'codex' | 'gemini').
+ * @param lastOutputTimestamp - Optional timestamp (Date) for time-based heuristic.
+ * @returns Detection result with status, confidence, reason, and hasActivePrompt
  */
 export function detectSessionStatus(
   output: string,
@@ -83,6 +90,7 @@ export function detectSessionStatus(
       status: 'waiting',
       confidence: 'high',
       reason: 'prompt_detected',
+      hasActivePrompt: true,
     };
   }
 
@@ -93,6 +101,7 @@ export function detectSessionStatus(
       status: 'running',
       confidence: 'high',
       reason: 'thinking_indicator',
+      hasActivePrompt: false,
     };
   }
 
@@ -104,6 +113,7 @@ export function detectSessionStatus(
       status: 'ready',
       confidence: 'high',
       reason: 'input_prompt',
+      hasActivePrompt: false,
     };
   }
 
@@ -116,6 +126,7 @@ export function detectSessionStatus(
         status: 'ready',
         confidence: 'low',
         reason: 'no_recent_output',
+        hasActivePrompt: false,
       };
     }
   }
@@ -126,5 +137,6 @@ export function detectSessionStatus(
     status: 'running',
     confidence: 'low',
     reason: 'default',
+    hasActivePrompt: false,
   };
 }

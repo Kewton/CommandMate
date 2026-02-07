@@ -1,0 +1,94 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 180,
+  "review_date": "2026-02-07",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "Issueタイトルは「モバイルステータス表示の不整合」とモバイル固有の問題として記述されているが、根本原因として特定されているステータス検出ロジックは /api/worktrees/route.ts および /api/worktrees/[id]/route.ts のAPI層にあり、デスクトップ表示（WorktreeDetailRefactored.tsx の DesktopHeader）にも同一のAPIレスポンスが使われている。実際にはモバイル固有の問題ではなく、全プラットフォーム共通の問題である。タイトルが問題のスコープを過小に表現している。",
+      "recommendation": "Issueタイトルを「fix: ステータス表示の不整合 - CLIがidle状態でもrunning/waitingと誤表示」のようにモバイル限定ではないことを反映するか、もしモバイルでのみ顕在化する条件があるならその理由を明記する。",
+      "location": "Issueタイトル"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "影響範囲に src/app/api/worktrees/route.ts と src/lib/prompt-detector.ts のみが記載されているが、同一のステータス検出ロジックが src/app/api/worktrees/[id]/route.ts にも完全に重複して存在する（route.ts 行47-111と [id]/route.ts 行47-111が同一パターン）。修正時にこちらも同様に修正が必要。",
+      "recommendation": "影響範囲に src/app/api/worktrees/[id]/route.ts を追加する。また、ロジック重複の解消（共通関数への抽出）も合わせて検討するべき。",
+      "location": "## 影響範囲"
+    },
+    {
+      "id": "S1-003",
+      "severity": "must_fix",
+      "category": "正確性",
+      "description": "Issueの「修正案」セクションに記載されている現在のコードスニペットが実際のコードと微妙に異なる。具体的に、Issueでは detectThinking の検出が detectPrompt の else ブロック内にあると正しく示しているが、修正案の「1. まず最後2-3行で入力プロンプト(❯)をチェック → ready」という提案は、現在のコードにおける優先順位ロジック（detectPrompt → detectThinking → promptPattern）を根本的に変更する内容である。しかし、detectPrompt() 関数は内部で最後10行（yes/no系）および最後50行（multiple_choice系）を検索しており、この関数の検索範囲自体が問題の一端であるにもかかわらず、修正案では detectPrompt の検索範囲制限については言及されていない。",
+      "recommendation": "修正案を以下の2つの軸で整理する: (1) 検出優先順位の変更（まず末尾の入力プロンプト❯を確認し、あればready判定）、(2) detectPrompt() 内部の検索範囲の制限（最後10行ではなく最後2-3行に限定するか、末尾位置の検証を追加するか）。両方を明確に分けて記述すべき。",
+      "location": "## 修正案"
+    },
+    {
+      "id": "S1-004",
+      "severity": "should_fix",
+      "category": "明確性",
+      "description": "「問題1: 過去のプロンプト誤検出」の説明で「detectPrompt() が最後10-50行を検索」と記載されている。実際には detectPrompt() 内で yes/no パターンは lastLines = lines.slice(-10) で最後10行を検索し、detectMultipleChoicePrompt() では scanStart = Math.max(0, lines.length - 50) で最後50行を検索する。captureSessionOutput() は route.ts で lines=100 として呼ばれているため、tmuxバッファの最後100行を取得した上で更にその中の10行/50行を見ている。この検索階層が明確ではない。",
+      "recommendation": "「captureSessionOutput()が最後100行を取得 → detectPrompt() がその中の最後10行（yes/no）/最後50行（multiple_choice）を検索」という2段階の構造を明記する。",
+      "location": "## 根本原因 > 問題1"
+    },
+    {
+      "id": "S1-005",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "受け入れ条件（Acceptance Criteria）が明示されていない。「期待される動作」セクションは存在するが、テスト可能な受け入れ条件として明確に定義されていない。例えば「❯プロンプトが出力の最終行にある場合、ステータスはreadyであること」「過去の(y/n)プロンプトがスクロールバックに残っていても、末尾が❯プロンプトであればreadyであること」等の具体的な検証条件が必要。",
+      "recommendation": "以下のような受け入れ条件を追加する:\n1. ❯プロンプトが出力末尾にある場合 → ready 表示\n2. 過去の(y/n)プロンプトがスクロールバックに残っていても、末尾が❯の場合 → ready 表示\n3. thinking インジケーターが末尾にある場合 → running 表示\n4. (y/n)プロンプトが末尾にある場合 → waiting 表示\n5. 既存の正常なステータス表示が壊れないこと（回帰テスト）",
+      "location": "Issue本文全体"
+    },
+    {
+      "id": "S1-006",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "auto-yes-manager.ts のポーリングロジック（pollAutoYes関数）も同様に detectPrompt() を使用しており（auto-yes-manager.ts 行290）、ここでも過去のプロンプトを誤検出する可能性がある。ただしこちらは Layer 1（thinking状態スキップ）による防御がある点が異なる。この関連性について言及がない。",
+      "recommendation": "auto-yes-manager.ts のポーリングにおける detectPrompt() 使用も関連する影響範囲として言及し、今回の修正が auto-yes ポーリングにも波及するかどうかを明記する。",
+      "location": "## 影響範囲"
+    },
+    {
+      "id": "S1-007",
+      "severity": "should_fix",
+      "category": "技術的妥当性",
+      "description": "修正案で「まず最後2-3行で入力プロンプト(❯)をチェック → ready」とあるが、この変更により detectPrompt()（インタラクティブプロンプト検出）よりも入力プロンプト検出が先に実行されることになる。しかし、❯プロンプトが表示されている行の直前にyes/noプロンプトが表示されている場合（Claude CLIが新しいプロンプトを質問直後に出す場合）、本来waitingであるべき状態がreadyと誤判定される可能性がある。この優先順位変更のトレードオフについて検討が不足している。",
+      "recommendation": "優先順位変更のトレードオフを分析し、「末尾2-3行に❯がある場合でも、その直前にyes/noプロンプトがある場合の挙動」を明確に定義する。または、detectPrompt() 自体の検索範囲を末尾2-3行に制限する方式を検討する。",
+      "location": "## 修正案"
+    },
+    {
+      "id": "S1-008",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "スクリーンショットセクションに「調査時に確認した問題」として2つのケースが記述されているが、実際の画像は添付されていない。Issueの再現性確認のためにスクリーンショットがあると有用。",
+      "recommendation": "可能であれば、問題が発生している状態のスクリーンショットを添付する。または「スクリーンショットなし」と明記する。",
+      "location": "## スクリーンショット"
+    },
+    {
+      "id": "S1-009",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "関連Issueとして Issue #4 と Issue #31 が挙げられているが、直接的に関連する Issue #161（Auto-Yes誤検出修正、prompt-detector.ts の2パス検出方式）への参照がない。Issue #161で実施された detectMultipleChoicePrompt の改善と今回の修正は、同じ prompt-detector.ts に対する変更であり密接に関連する。",
+      "recommendation": "関連Issueに Issue #161 を追加する。また Issue #152（プロンプト検出強化）も関連する可能性がある。",
+      "location": "## 関連"
+    },
+    {
+      "id": "S1-010",
+      "severity": "should_fix",
+      "category": "技術的妥当性",
+      "description": "現在の detectPrompt() は出力全体を受け取り内部で slice(-10) しているが、route.ts 側では nonEmptyLines.slice(-15) で thinking/prompt の検出を行っている。Issue の修正案では「最後2-3行」に統一する提案だが、captureSessionOutput() の引数が100行である点と、detectPrompt() への入力が cleanOutput 全体（100行分）である点の整合性が検討されていない。route.ts 側で事前に末尾数行に制限してから detectPrompt() に渡すのか、detectPrompt() 内部のスライス範囲を変更するのかが不明確。",
+      "recommendation": "修正の方針を明確にする: (A) route.ts 側で末尾N行に切り出してから detectPrompt() に渡す方式、(B) detectPrompt() 内部の検索範囲を制限する方式、(C) detectPrompt() に「末尾位置検証」を追加する方式のいずれかを選択し、根拠とともに記載する。",
+      "location": "## 修正案"
+    }
+  ],
+  "summary": {
+    "total_findings": 10,
+    "must_fix": 1,
+    "should_fix": 6,
+    "nice_to_have": 3
+  }
+}

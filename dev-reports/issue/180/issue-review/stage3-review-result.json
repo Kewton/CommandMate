@@ -1,0 +1,159 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 180,
+  "review_date": "2026-02-07",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "description": "status-detector.ts が未使用であるにもかかわらず、同一の検出優先順位ロジックの重複が存在する。status-detector.ts の detectSessionStatus() は Issue #180 で提案された優先順位変更（入力プロンプト最優先）に近い構造を既に持っている（1.interactivePrompt -> 2.thinking -> 3.inputPrompt -> 4.time-based -> 5.default）。route.ts の重複コードを修正する際に、このモジュールの存在と設計を活用すべきだが、Issue にはこのファイルへの言及が全くない。",
+      "recommendation": "Issue の影響範囲セクションに src/lib/status-detector.ts を追加する。route.ts のステータス検出ロジックを status-detector.ts の detectSessionStatus() に統合するか、少なくともこのファイルの存在を設計方針で検討すること。status-detector.ts を共通関数として利用すれば、Issue で指摘されている route.ts と [id]/route.ts のロジック重複も同時に解消できる。",
+      "location": "影響範囲セクション",
+      "affected_files": [
+        "src/lib/status-detector.ts",
+        "src/lib/__tests__/status-detector.test.ts"
+      ]
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "description": "response-poller.ts と claude-poller.ts が detectPrompt() を検索範囲の制限なしで呼び出しているが、Issue の影響範囲に含まれていない。response-poller.ts の extractResponse() 内では detectPrompt(cleanFullOutput)（行248）と detectPrompt(fullOutput)（行442）の2箇所で全文に対して detectPrompt() を呼び出している。claude-poller.ts の extractClaudeResponse() でも detectPrompt(fullOutput)（行164）と detectPrompt(result.response)（行232）で同様の呼び出しがある。detectPrompt() の検索範囲変更（方式A/B/C のいずれか）はこれらのポーラーにも波及する。",
+      "recommendation": "Issue の影響範囲セクションに src/lib/response-poller.ts と src/lib/claude-poller.ts を追加する。特に response-poller.ts の extractResponse() では、全tmux出力をそのまま detectPrompt() に渡しており、方式B（detectPrompt 内部の範囲制限）を選択した場合、ポーラーが有効なプロンプトを見逃す可能性がある。方式A（呼び出し側で切り出し）を選択する場合、ポーラー側の呼び出しは影響を受けないが、この違いを設計書で明確にすべき。",
+      "location": "影響範囲セクション",
+      "affected_files": [
+        "src/lib/response-poller.ts",
+        "src/lib/claude-poller.ts"
+      ]
+    },
+    {
+      "id": "S3-003",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "description": "current-output/route.ts が detectPrompt() を呼び出しており、このAPIの結果が useAutoYes.ts のクライアント側自動応答の入力となるが、Issue の影響範囲に含まれていない。current-output/route.ts（行88）では thinking スキップ後に detectPrompt(cleanOutput) を呼んでいる。このAPIが返す isPromptWaiting と promptData はクライアント側の useAutoYes フックに渡され、自動応答のトリガーとなる。detectPrompt() の検索範囲変更はこのパスにも影響する。",
+      "recommendation": "Issue の影響範囲セクションに src/app/api/worktrees/[id]/current-output/route.ts と src/hooks/useAutoYes.ts を追加する。current-output/route.ts は既に thinking スキップ（Layer 1）を実装しているが、detectPrompt() の範囲変更がこのパスに与える影響を設計時に検討すべき。",
+      "location": "影響範囲セクション",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/hooks/useAutoYes.ts"
+      ]
+    },
+    {
+      "id": "S3-004",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "description": "prompt-response/route.ts が detectPrompt() を呼び出してプロンプト再検証を行っているが、Issue の影響範囲に含まれていない。prompt-response API（行75）は、プロンプト応答送信前に detectPrompt() で再検証を行い、レースコンディション防止を実装している（Issue #161）。detectPrompt() の検索範囲変更はこの再検証ロジックにも影響する。",
+      "recommendation": "Issue の影響範囲セクションに src/app/api/worktrees/[id]/prompt-response/route.ts を追加する。このAPIでの detectPrompt() 呼び出しは5000行分のキャプチャ出力に対して行われるため、方式B（内部範囲制限）を選択した場合の影響が大きい。",
+      "location": "影響範囲セクション",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ]
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "detectPrompt() の検索範囲変更方式（A/B/C）の選択によって、影響を受けるファイル群が大きく異なるが、Issue にこの分析が不足している。方式A（route.ts側で切り出し）: route.ts 2ファイルのみ変更、他の呼び出し元は影響なし。方式B（detectPrompt 内部制限）: detectPrompt() を呼ぶ全8ファイル（route.ts x2, current-output/route.ts, prompt-response/route.ts, response-poller.ts, claude-poller.ts, auto-yes-manager.ts, status-detector.ts）に影響。方式C（末尾位置検証追加）: 方式Bと同範囲だが、検索自体は広いまま維持。",
+      "recommendation": "各方式の影響ファイル一覧を Issue または設計方針書に明記し、方式選択の判断材料にする。特に方式Bは最も広範囲に影響するため、全呼び出し箇所のテストが必要。方式Aは影響範囲が最も限定的だが、根本的な修正にはならない（他の呼び出し元で同じ問題が起きうる）。",
+      "location": "修正案 > 軸2: detectPrompt() の検索範囲制限",
+      "affected_files": [
+        "src/lib/prompt-detector.ts",
+        "src/app/api/worktrees/route.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/lib/response-poller.ts",
+        "src/lib/claude-poller.ts",
+        "src/lib/auto-yes-manager.ts",
+        "src/lib/status-detector.ts"
+      ]
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "テスト影響範囲の記載が不足している。detectPrompt() の変更に伴い、以下のテストファイルが影響を受ける可能性がある: (1) tests/unit/prompt-detector.test.ts（直接テスト、835行、Issue #161の回帰テスト含む）、(2) tests/unit/lib/auto-yes-manager.test.ts（pollAutoYes の thinking スキップテスト）、(3) tests/unit/api/prompt-response-verification.test.ts（プロンプト再検証テスト）、(4) src/lib/__tests__/status-detector.test.ts（status-detector テスト）、(5) src/lib/__tests__/cli-patterns.test.ts（detectThinking テスト）。受け入れ条件5「既存の正常なステータス表示が壊れないこと（回帰テスト）」があるが、具体的にどのテストを実行すべきかの記載がない。",
+      "recommendation": "受け入れ条件に、更新・追加が必要なテストファイルの一覧を明記する。最低限、上記5ファイルの既存テストが全てパスすることを確認すべき。また、Issue #161 で追加された回帰テスト（prompt-detector.test.ts の「False Positive Prevention」と「Defense Layer Boundary Tests」セクション）が引き続きパスすることを明示的に要求すべき。",
+      "location": "受け入れ条件",
+      "affected_files": [
+        "tests/unit/prompt-detector.test.ts",
+        "tests/unit/lib/auto-yes-manager.test.ts",
+        "tests/unit/api/prompt-response-verification.test.ts",
+        "src/lib/__tests__/status-detector.test.ts",
+        "src/lib/__tests__/cli-patterns.test.ts"
+      ]
+    },
+    {
+      "id": "S3-007",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "route.ts のステータス検出ロジックと status-detector.ts の detectSessionStatus() で、detectPrompt() に渡す入力の前処理が異なる。route.ts では cleanOutput（全文）を detectPrompt() に渡しているが、status-detector.ts では lastLines（最後15行）を渡している。この不一致は Issue が指摘する問題の一因であり、共通関数化の際に統一する必要がある。",
+      "recommendation": "共通関数への統合時に、detectPrompt() に渡す入力の前処理を統一する。status-detector.ts の方式（最後N行に切り出してから渡す）が Issue の修正方針と整合している。ただし、status-detector.ts では15行に切り出しているのに対し、Issue では2-3行を提案しており、この差異も検討が必要。",
+      "location": "根本原因 > 問題1: 過去のプロンプト誤検出",
+      "affected_files": [
+        "src/app/api/worktrees/route.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/lib/status-detector.ts"
+      ]
+    },
+    {
+      "id": "S3-008",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "detectThinking() の検索範囲に関する修正は、auto-yes-manager.ts の pollAutoYes() にも波及するが、Issue の分析では「影響度は限定的」と述べるのみで具体的な影響の説明が不足している。auto-yes-manager.ts（行284）では cleanOutput 全文に対して detectThinking() を呼んでおり、route.ts（行71）では lastLines（最後15行の非空行）に対して呼んでいる。この不一致が修正対象に含まれるか不明。",
+      "recommendation": "detectThinking() の呼び出し箇所ごとの入力範囲を整理し、統一すべきかどうかを設計方針で明確にする。auto-yes-manager.ts で全文を渡しているのは、thinking 中の prompt 検出スキップが目的であり、末尾限定にすると防御効果が減少する可能性がある。",
+      "location": "影響範囲セクション > auto-yes-manager.ts の記述",
+      "affected_files": [
+        "src/lib/auto-yes-manager.ts",
+        "src/app/api/worktrees/route.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts"
+      ]
+    },
+    {
+      "id": "S3-009",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "UIコンポーネント側の間接的な影響が Issue に記載されていない。WorktreeDetailRefactored.tsx（行107-126）と WorktreeCard.tsx（行31, 160-165）は API レスポンスの isWaitingForResponse / isProcessing フラグを直接参照してステータス表示を行っている。また、sidebar.ts の deriveCliStatus() は sessionStatusByCli を変換している。API 側のステータス判定ロジック変更はこれらの表示に直接影響する。テスト時にUI側の目視確認が必要。",
+      "recommendation": "受け入れ条件に、UIコンポーネントの表示確認項目を追加する。少なくとも以下を確認すべき: (1) WorktreeDetailRefactored のヘッダーステータス表示、(2) WorktreeCard のステータスドット表示、(3) サイドバーの cliStatus ドット表示。これらは自動テストでカバーしにくいため、手動確認またはE2Eテスト追加を検討。",
+      "location": "受け入れ条件",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/WorktreeCard.tsx",
+        "src/types/sidebar.ts",
+        "src/components/sidebar/BranchListItem.tsx"
+      ]
+    },
+    {
+      "id": "S3-010",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "claude-poller.ts（レガシーポーラー）にも detectPrompt() の呼び出しが存在するが、このファイルが現在も使用されているかどうかが不明。response-poller.ts が同等の機能を提供しており、claude-poller.ts はレガシーの可能性がある。不要であれば修正対象から除外できる。",
+      "recommendation": "claude-poller.ts が実際に使用されているかを確認する。使用されていない場合は、Issue の修正対象から除外し、後日の廃止候補として記録する。使用されている場合は、影響範囲に含める。",
+      "location": "影響範囲セクション",
+      "affected_files": [
+        "src/lib/claude-poller.ts"
+      ]
+    },
+    {
+      "id": "S3-011",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "Issue の修正案「軸1: 検出優先順位の変更」で提案されている新しい優先順位は、status-detector.ts の detectSessionStatus() が既に実装している構造と非常に類似している。ただし、detectSessionStatus() はアプリケーション内で一切使用されていない（テストのみ）。この既存実装の存在を活用すべきか、新規に共通関数を作成すべきかの判断が必要。",
+      "recommendation": "設計方針書で、status-detector.ts の detectSessionStatus() を拡張して使用するか、新規に共通関数を作成するかを比較検討する。detectSessionStatus() を使用する場合、既存のテスト（src/lib/__tests__/status-detector.test.ts）も活用できる利点がある。",
+      "location": "修正案 > 軸1: 検出優先順位の変更",
+      "affected_files": [
+        "src/lib/status-detector.ts",
+        "src/lib/__tests__/status-detector.test.ts"
+      ]
+    }
+  ],
+  "summary": {
+    "total_findings": 11,
+    "must_fix": 4,
+    "should_fix": 5,
+    "nice_to_have": 2
+  }
+}

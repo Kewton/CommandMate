@@ -1,0 +1,101 @@
+{
+  "issue_number": 180,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "verdict": "APPROVE",
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SEC-008",
+        "item": "Consolidation reduces security fix application risk -- DRY principle improves security posture by reducing fix application from 3 locations to 1",
+        "section_updated": "Section 6 (セキュリティ設計), Section 12 (レビュー指摘事項サマリー), Section 13 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-009",
+        "item": "Empty line windowing edge case and status misrepresentation -- tmux empty line padding can push prompt outside 15-line window, causing default-to-running false positive",
+        "section_updated": "Section 6 (セキュリティ設計), Section 8-2 (テストケース7b), Section 9 (設計判断テーブル), Section 12 (レビュー指摘事項サマリー), Section 13 (実装チェックリスト)",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "SEC-001",
+        "item": "stripAnsi() pattern completeness for ANSI escape sequences (pre-existing condition)",
+        "section_updated": "Section 6 (セキュリティレビュー観察事項テーブル, 将来のハードニング候補チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-002",
+        "item": "Regex pattern safety with reduced input window (security improvement)",
+        "section_updated": "Section 6 (セキュリティレビュー観察事項テーブル, OWASP チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-003",
+        "item": "Error handling preserves existing behavior (pre-existing, no change)",
+        "section_updated": "Section 6 (セキュリティレビュー観察事項テーブル)",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-004",
+        "item": "No new timing vulnerabilities (hasActivePrompt is synchronous)",
+        "section_updated": "Section 6 (セキュリティレビュー観察事項テーブル, OWASP チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-005",
+        "item": "Reduced processing scope improves DoS resilience (100 -> 15 lines)",
+        "section_updated": "Section 6 (セキュリティレビュー観察事項テーブル, OWASP チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-006",
+        "item": "No change to user-controlled input processing",
+        "section_updated": "Section 6 (セキュリティレビュー観察事項テーブル)",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-007",
+        "item": "No change to API response rendering path (React auto-escaping)",
+        "section_updated": "Section 6 (セキュリティレビュー観察事項テーブル)",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-010",
+        "item": "stripAnsi() call ordering before line splitting is safe and preserved",
+        "section_updated": "Section 6 (セキュリティレビュー観察事項テーブル, 将来のハードニング候補チェックリスト)",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+  "sections_updated": [
+    "Section 6 (セキュリティ設計) -- SEC-008/SEC-009注記、セキュリティレビュー観察事項テーブル、OWASPチェックリスト追加",
+    "Section 8-2 (テスト戦略) -- テストケース7にSEC-009参照追加、テストケース7bにセキュリティレビュー必須指摘を明記",
+    "Section 9 (設計判断テーブル) -- 空行フィルタリング決定にSEC-009参照追加",
+    "Section 12 (レビュー指摘事項サマリー) -- Stage 4セキュリティレビュー全10件追加",
+    "Section 13 (実装チェックリスト) -- Stage 4 Should Fix (3項目) + Nice to Have (2項目) 追加",
+    "Section 14 (レビュー履歴) -- Stage 4行追加（判定列追加）",
+    "フッター -- Stage 4適用記録追加"
+  ],
+  "security_review_summary": {
+    "overall_risk": "low",
+    "new_risks_introduced": 1,
+    "pre_existing_observations": 9,
+    "security_improvements": 2,
+    "owasp_checks_passed": 8,
+    "owasp_checks_na": 5,
+    "additional_checks_passed": 5
+  },
+  "implementation_recommendations": [
+    "Implement test case 8-2 item 7b (empty line padding pushing prompt outside 15-line window) to validate the edge case and inform the STATUS_CHECK_LINE_COUNT decision",
+    "After removing stripAnsi/detectThinking/getCliToolPatterns/detectPrompt imports from route.ts files, verify that no dead import references remain",
+    "When adding hasActivePrompt to StatusDetectionResult, ensure all return paths in detectSessionStatus() include the field (compiler will enforce this with strict mode)"
+  ],
+  "timestamp": "2026-02-07T12:00:00Z"
+}

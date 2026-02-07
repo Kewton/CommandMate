@@ -1,0 +1,23 @@
+{
+  "status": "success",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 25,
+    "passed": 25,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/status-detector.ts",
+    "src/lib/__tests__/status-detector.test.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts"
+  ],
+  "commits": [
+    "2b03191: fix(status-detector): consolidate status detection to prevent past prompt false positives (#180)"
+  ],
+  "message": "TDD implementation complete. Added hasActivePrompt: boolean to StatusDetectionResult, consolidated inline status detection in route.ts and [id]/route.ts into detectSessionStatus() call, added 8 Issue #180 test cases. Coverage: 100% statements/lines/functions, 90% branches for status-detector.ts. All static analysis checks passed."
+}

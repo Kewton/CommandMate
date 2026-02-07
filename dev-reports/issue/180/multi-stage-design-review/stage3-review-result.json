@@ -1,0 +1,135 @@
+{
+  "issue_number": 180,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-07",
+  "reviewer": "architecture-review-agent",
+  "design_doc_path": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+  "overall_assessment": "PASS_WITH_OBSERVATIONS",
+  "summary": "The impact scope analysis in the design policy is accurate and well-documented. All directly changed files are correctly identified. Files listed as 'not changed' are confirmed to be unaffected by this change. The API response format remains unchanged. However, several observations were identified: (1) a missing mention of current-output/route.ts having a similar but distinct inline status detection pattern, (2) UI component dependencies are correctly unaffected but deserve explicit mention in the design, and (3) the claim about claude-poller.ts detectPrompt being 'unreachable code' warrants careful verification.",
+  "findings": [
+    {
+      "id": "IS-001",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "current-output/route.ts has its own inline status detection logic",
+      "description": "The file src/app/api/worktrees/[id]/current-output/route.ts (lines 72-88) contains its own inline status detection logic: it calls detectPrompt(cleanOutput) on the full clean output (not last 15 lines), similar to the problematic pattern in route.ts and [id]/route.ts. While the design correctly lists this file as 'not changed' with reason 'independent thinking skip logic', the file actually has a similar vulnerability: detectPrompt is called on cleanOutput (the full stripped output) rather than just the last N lines. However, this file's use case is different -- it provides real-time prompt detection for the current-output API which feeds client-side auto-yes functionality, and the thinking skip (Layer 1 defense, line 88) provides some protection. The design acknowledges this pattern is not being fixed in scope (Section 2: 'other callers use detectPrompt for different purposes'), which is a reasonable scoping decision. However, the design should mention that current-output/route.ts also passes full output to detectPrompt, making it a future follow-up candidate alongside response-poller.ts.",
+      "location": "src/app/api/worktrees/[id]/current-output/route.ts:88",
+      "recommendation": "Add current-output/route.ts to the 'future consideration' list in Section 9 or Section 11 as a follow-up candidate, alongside response-poller.ts, since it also passes full output to detectPrompt."
+    },
+    {
+      "id": "IS-002",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "UI component dependency chain should be explicitly listed",
+      "description": "The design states 'UI components: API response format is unchanged' in Section 11, which is correct. However, the full chain of downstream consumers is not listed. The components that consume isWaitingForResponse/isProcessing/sessionStatusByCli from the API response include: (1) src/types/models.ts (Worktree interface, lines 69-76), (2) src/types/sidebar.ts (deriveCliStatus function), (3) src/components/worktree/WorktreeDetailRefactored.tsx (lines 107-128, uses sessionStatusByCli), (4) src/components/worktree/WorktreeCard.tsx (lines 31, 160-165, uses isWaitingForResponse), (5) src/contexts/WorktreeSelectionContext.tsx (line 55, uses isProcessing/isWaitingForResponse for polling interval). All of these are confirmed unaffected because the API response shape (isWaitingForResponse, isProcessing, sessionStatusByCli) remains identical. Listing them explicitly would strengthen the impact analysis.",
+      "location": "Design Section 11",
+      "recommendation": "Consider enumerating the specific UI components that consume the API response to demonstrate thorough impact analysis, even if they are all confirmed unaffected."
+    },
+    {
+      "id": "IS-003",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "StatusDetectionResult type change may affect TypeScript strict mode consumers",
+      "description": "Adding hasActivePrompt: boolean to StatusDetectionResult is backward compatible for reading (existing consumers that destructure only {status, confidence, reason} will continue to work). However, any code that constructs a StatusDetectionResult literal (e.g., in test mocks or factory functions) will fail TypeScript compilation because the new required field is missing. Currently, the only file that constructs StatusDetectionResult is status-detector.ts itself (the test file only reads the results). This is confirmed safe. The design correctly notes this in C-006, but should explicitly confirm that no mock or factory code constructs StatusDetectionResult objects outside of status-detector.ts.",
+      "location": "src/lib/status-detector.ts:31-38",
+      "recommendation": "Add an explicit verification note in Section 9 or Section 11 stating that no external code constructs StatusDetectionResult objects, confirming the backward compatibility claim is validated by code search."
+    },
+    {
+      "id": "IS-004",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "response-poller.ts detectPrompt calls pass full output in some paths",
+      "description": "In response-poller.ts, detectPrompt is called in multiple locations: (1) line 248: detectPrompt(cleanFullOutput) in the early Claude permission prompt check, passing full output; (2) line 442: detectPrompt(fullOutput) for interactive prompt detection on the full buffer; (3) line 556: detectPrompt(result.response) on the extracted response content. These are different use cases from the status detection in route.ts (they are for response extraction, not status display), so the design's decision not to modify them is correct. The design already acknowledges this in Section 2 and Section 9 (future considerations). This finding confirms the design's analysis.",
+      "location": "src/lib/response-poller.ts:248,442,556",
+      "recommendation": "No action needed. This confirms the design's analysis that response-poller.ts uses detectPrompt for a different purpose and is correctly excluded from scope."
+    },
+    {
+      "id": "IS-005",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "claude-poller.ts reachability assessment is accurate but fragile",
+      "description": "The design claims that detectPrompt calls in claude-poller.ts are unreachable code because startPolling is not called. Verification: claude-poller.ts exports startPolling (line 324) and it is not imported or called from anywhere in the src directory. Grep confirms no file imports startPolling from claude-poller.ts. The module appears to be a legacy module superseded by response-poller.ts. The design's DR-008 note about this being a follow-up candidate is appropriate. However, the design should note that if any future import adds a call to claude-poller.startPolling(), the same full-output-to-detectPrompt bug would manifest.",
+      "location": "src/lib/claude-poller.ts:164,232",
+      "recommendation": "The DR-008 follow-up is already documented. Consider adding a code comment to claude-poller.ts marking it as legacy/deprecated to prevent accidental activation."
+    },
+    {
+      "id": "IS-006",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "Behavioral change from empty line filtering difference needs explicit test coverage",
+      "description": "The design (DR-003) documents that route.ts currently filters out empty lines before taking the last 15 lines, while status-detector.ts includes empty lines. After the change, the status-detector.ts behavior (including empty lines) will be used. The design states this is acceptable because 'regex patterns match within lines and skip empty lines'. However, tmux buffers frequently have trailing empty padding lines. If the tmux buffer has, say, 20 trailing empty lines after a prompt, the effective window in status-detector.ts would be 15 empty lines with no useful content, potentially causing a false 'running (low confidence)' instead of 'ready'. The design mentions a test case for this in Section 8-2 item 7, which is good. This finding elevates the importance of that test case.",
+      "location": "src/lib/status-detector.ts:75-76",
+      "recommendation": "Ensure test case 8-2 item 7 (trailing empty lines test) specifically covers the scenario where tmux buffer padding pushes the prompt line outside the 15-line window. Consider whether STATUS_CHECK_LINE_COUNT should be increased or whether empty line filtering should be added to status-detector.ts to match the effective behavior."
+    },
+    {
+      "id": "IS-007",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "auto-yes-manager.ts passes full cleanOutput to detectPrompt -- potential same bug",
+      "description": "In auto-yes-manager.ts line 290, detectPrompt(cleanOutput) is called with the full cleaned output (up to 5000 lines captured on line 276). This is the same pattern that causes the bug in route.ts. While the thinking skip on line 284 provides Layer 1 defense, and detectPrompt's internal windowing (last 10 lines for y/n, last 50 lines for multiple choice) provides some protection, the auto-yes-manager could still experience false positives for y/n prompts beyond 10 lines from the end but within the full output. The design lists auto-yes-manager.ts as 'not changed, independent thinking skip logic', which is correct for this issue's scope. However, the design should explicitly acknowledge that auto-yes-manager.ts has the same fundamental vulnerability (full output passed to detectPrompt) and is a follow-up candidate. Currently, only response-poller.ts and claude-poller.ts are mentioned as future candidates in Section 9.",
+      "location": "src/lib/auto-yes-manager.ts:290",
+      "recommendation": "Add auto-yes-manager.ts to the 'future consideration' list in Section 9 as having the same potential vulnerability. Note that while thinking skip (Layer 1) and detectPrompt internal windowing provide partial protection, they do not fully prevent false positives from historical y/n prompts in the last 10 lines of a very long output."
+    }
+  ],
+  "verification_results": {
+    "directly_changed_files_correct": true,
+    "directly_changed_files_notes": "All 3 directly changed files (status-detector.ts, route.ts, [id]/route.ts) and 1 test file (status-detector.test.ts) are correctly identified. The inline logic in both route.ts files (lines 56-99) is confirmed to be near-identical duplicate code that can be replaced by detectSessionStatus().",
+    "unchanged_files_correct": true,
+    "unchanged_files_notes": "All files listed as 'not changed' are confirmed to not require changes for this issue's scope. prompt-detector.ts is a generic function. response-poller.ts, claude-poller.ts, auto-yes-manager.ts, current-output/route.ts, and prompt-response/route.ts all use detectPrompt for different purposes. However, auto-yes-manager.ts and current-output/route.ts share the same vulnerability pattern (full output to detectPrompt) and should be noted as follow-up candidates.",
+    "missing_from_impact_scope": [
+      {
+        "file": "src/types/models.ts",
+        "reason": "Defines the Worktree interface with isWaitingForResponse/isProcessing/sessionStatusByCli fields consumed from API. Not changed but not listed in the 'not changed' section. Should be listed to show the data model is unaffected."
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "reason": "Consumes sessionStatusByCli from API response for CLI tab status dots. Listed only as 'UI components' generically. Not affected since API format unchanged."
+      },
+      {
+        "file": "src/components/worktree/WorktreeCard.tsx",
+        "reason": "Consumes isWaitingForResponse from API for badge display. Not affected since API format unchanged."
+      },
+      {
+        "file": "src/contexts/WorktreeSelectionContext.tsx",
+        "reason": "Uses isProcessing/isWaitingForResponse to determine polling interval. Not affected since API format unchanged."
+      }
+    ],
+    "all_callers_of_detectSessionStatus_listed": true,
+    "all_callers_notes": "detectSessionStatus() is currently only called from status-detector.test.ts. After the change, it will be called from route.ts and [id]/route.ts as well. No other callers exist.",
+    "api_response_format_unchanged": true,
+    "api_response_format_notes": "Confirmed. Both route.ts and [id]/route.ts return the same JSON shape: {isWaitingForResponse, isProcessing, sessionStatusByCli, isSessionRunning}. The proposed change maps detectSessionStatus result to these same fields. The Worktree interface in models.ts defines the expected shape which remains unchanged.",
+    "indirect_ui_effects": false,
+    "indirect_ui_effects_notes": "No indirect UI effects. The API response shape is preserved. deriveCliStatus() in sidebar.ts consumes sessionStatusByCli which is unchanged. WorktreeCard, WorktreeDetailRefactored, and WorktreeSelectionContext all consume the same API fields which are unchanged."
+  },
+  "checklist": {
+    "all_impact_files_reviewed": true,
+    "callers_of_changed_function_verified": true,
+    "api_contract_stability_verified": true,
+    "type_change_backward_compatibility_verified": true,
+    "test_coverage_for_behavior_change_identified": true,
+    "ui_component_chain_verified": true,
+    "follow_up_candidates_identified": true
+  },
+  "risk_assessment": {
+    "overall_risk": "LOW",
+    "risk_factors": [
+      {
+        "factor": "Empty line filtering behavior change (DR-003)",
+        "risk": "MEDIUM",
+        "mitigation": "Test case 8-2 item 7 covers this. Status-detector.ts existing tests already pass with empty lines included."
+      },
+      {
+        "factor": "StatusDetectionResult type extension",
+        "risk": "LOW",
+        "mitigation": "No external code constructs this type. Adding hasActivePrompt is additive."
+      },
+      {
+        "factor": "Import changes in route.ts files",
+        "risk": "LOW",
+        "mitigation": "Straightforward import replacement. TypeScript compiler will catch any missing imports."
+      }
+    ]
+  }
+}
