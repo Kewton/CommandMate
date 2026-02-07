@@ -25,6 +25,7 @@ vi.mock('@/lib/cli-session', () => ({
 }));
 vi.mock('@/lib/tmux', () => ({
   sendKeys: vi.fn(),
+  sendMessageWithEnter: vi.fn(),
 }));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
@@ -465,7 +466,7 @@ describe('auto-yes-manager', () => {
 
     it('should call detectPrompt when NOT in thinking state', async () => {
       const { captureSessionOutput } = await import('@/lib/cli-session');
-      const { sendKeys } = await import('@/lib/tmux');
+      const { sendMessageWithEnter } = await import('@/lib/tmux');
 
       vi.useFakeTimers();
       const now = Date.now();
@@ -478,7 +479,7 @@ describe('auto-yes-manager', () => {
       // Mock: captureSessionOutput returns a valid multiple_choice prompt
       const promptOutput = 'Select an option:\n\u276F 1. Yes\n  2. No';
       vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
-      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendMessageWithEnter).mockResolvedValue(undefined);
 
       // Advance timer to trigger pollAutoYes
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
@@ -486,15 +487,15 @@ describe('auto-yes-manager', () => {
       // Verify: captureSessionOutput was called
       expect(captureSessionOutput).toHaveBeenCalled();
 
-      // Verify: sendKeys was called (prompt was detected and auto-answered)
+      // Verify: sendMessageWithEnter was called (prompt was detected and auto-answered)
       // This confirms that when NOT in thinking state, prompt detection
-      // proceeds normally and auto-answer is sent.
-      expect(sendKeys).toHaveBeenCalled();
+      // proceeds normally and auto-answer is sent via unified pattern (Task-PRE-003).
+      expect(sendMessageWithEnter).toHaveBeenCalled();
 
       // Cleanup
       stopAutoYesPolling('wt-normal');
       vi.mocked(captureSessionOutput).mockReset();
-      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendMessageWithEnter).mockReset();
     });
   });
 });

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { debounce, escapeRegExp, computeMatchedPaths, truncateString } from '@/lib/utils';
+import { debounce, escapeRegExp, computeMatchedPaths, truncateString, getErrorMessage } from '@/lib/utils';
 
 describe('debounce', () => {
   beforeEach(() => {
@@ -336,5 +336,51 @@ describe('truncateString', () => {
 
   it('should handle special characters in branch names', () => {
     expect(truncateString('feature/special_chars.v1', 20)).toBe('feature/special_c...');
+  });
+});
+
+/**
+ * getErrorMessage Tests
+ * [Issue #163] Task-PRE-004: Common error message extraction utility
+ */
+describe('getErrorMessage', () => {
+  it('should extract message from Error instance', () => {
+    expect(getErrorMessage(new Error('test error'))).toBe('test error');
+  });
+
+  it('should extract message from Error subclasses', () => {
+    expect(getErrorMessage(new TypeError('type error'))).toBe('type error');
+    expect(getErrorMessage(new RangeError('range error'))).toBe('range error');
+  });
+
+  it('should convert string to string', () => {
+    expect(getErrorMessage('string error')).toBe('string error');
+  });
+
+  it('should convert number to string', () => {
+    expect(getErrorMessage(42)).toBe('42');
+    expect(getErrorMessage(0)).toBe('0');
+    expect(getErrorMessage(-1)).toBe('-1');
+  });
+
+  it('should convert null to string', () => {
+    expect(getErrorMessage(null)).toBe('null');
+  });
+
+  it('should convert undefined to string', () => {
+    expect(getErrorMessage(undefined)).toBe('undefined');
+  });
+
+  it('should handle empty Error message', () => {
+    expect(getErrorMessage(new Error(''))).toBe('');
+  });
+
+  it('should handle boolean values', () => {
+    expect(getErrorMessage(true)).toBe('true');
+    expect(getErrorMessage(false)).toBe('false');
+  });
+
+  it('should handle objects', () => {
+    expect(getErrorMessage({ key: 'value' })).toBe('[object Object]');
   });
 });

@@ -10,11 +10,9 @@ import {
   createSession,
   sendKeys,
   killSession,
+  sendSpecialKey,
 } from '../tmux';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { getErrorMessage } from '../utils';
 
 /**
  * Gemini CLI tool implementation
@@ -70,7 +68,7 @@ export class GeminiTool extends BaseCLITool {
 
       console.log(`✓ Started Gemini session: ${sessionName}`);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Gemini session: ${errorMessage}`);
     }
   }
@@ -103,7 +101,7 @@ export class GeminiTool extends BaseCLITool {
 
       console.log(`✓ Sent message to Gemini session: ${sessionName}`);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Gemini: ${errorMessage}`);
     }
   }
@@ -120,8 +118,8 @@ export class GeminiTool extends BaseCLITool {
       // Send Ctrl+D to exit Gemini gracefully
       const exists = await hasSession(sessionName);
       if (exists) {
-        // Send Ctrl+D (ASCII 4)
-        await execAsync(`tmux send-keys -t "${sessionName}" C-d`);
+        // Send Ctrl+D via sendSpecialKey (Task-PRE-001)
+        await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for Gemini to exit
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -134,7 +132,7 @@ export class GeminiTool extends BaseCLITool {
         console.log(`✓ Stopped Gemini session: ${sessionName}`);
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       console.error(`Error stopping Gemini session: ${errorMessage}`);
       throw error;
     }

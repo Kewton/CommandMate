@@ -3,6 +3,8 @@
  * Provides functions to manage tmux sessions for Claude CLI integration
  */
 
+import { getErrorMessage, DANGEROUS_CONTROL_CHARS } from './utils';
+import { validateSessionName } from './cli-tools/validation';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -66,6 +68,7 @@ export async function isTmuxAvailable(): Promise<boolean> {
  * ```
  */
 export async function hasSession(sessionName: string): Promise<boolean> {
+  validateSessionName(sessionName);
   try {
     await execAsync(`tmux has-session -t "${sessionName}"`, { timeout: DEFAULT_TIMEOUT });
     return true;
@@ -170,6 +173,8 @@ export async function createSession(
     historyLimit = sessionNameOrOptions.historyLimit || 50000;
   }
 
+  validateSessionName(sessionName);
+
   try {
     // Create session
     await execAsync(
@@ -183,7 +188,7 @@ export async function createSession(
       { timeout: DEFAULT_TIMEOUT }
     );
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     throw new Error(`Failed to create tmux session: ${errorMessage}`);
   }
 }
@@ -209,6 +214,7 @@ export async function sendKeys(
   keys: string,
   sendEnter: boolean = true
 ): Promise<void> {
+  validateSessionName(sessionName);
   // Escape single quotes in the keys
   const escapedKeys = keys.replace(/'/g, "'\\''");
 
@@ -219,7 +225,7 @@ export async function sendKeys(
   try {
     await execAsync(command, { timeout: DEFAULT_TIMEOUT });
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     throw new Error(`Failed to send keys to tmux session: ${errorMessage}`);
   }
 }
@@ -267,6 +273,8 @@ export async function capturePane(
   let startLine: number;
   let endLine: number | string;
 
+  validateSessionName(sessionName);
+
   if (typeof linesOrOptions === 'number') {
     // Legacy signature
     startLine = -linesOrOptions;
@@ -291,7 +299,7 @@ export async function capturePane(
     );
     return stdout;
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     throw new Error(`Failed to capture pane: ${errorMessage}`);
   }
 }
@@ -311,13 +319,14 @@ export async function capturePane(
  * ```
  */
 export async function killSession(sessionName: string): Promise<boolean> {
+  validateSessionName(sessionName);
   try {
     await execAsync(`tmux kill-session -t "${sessionName}"`, {
       timeout: DEFAULT_TIMEOUT,
     });
     return true;
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     // Session doesn't exist or already killed
     if (
       errorMessage?.includes('no server running') ||
@@ -359,7 +368,7 @@ export async function ensureSession(
 /**
  * Special key type for tmux send-keys
  */
-export type SpecialKey = 'Escape' | 'C-c' | 'C-d';
+export type SpecialKey = 'Escape' | 'C-c' | 'C-d' | 'C-m' | 'Down' | 'Enter' | 'Up';
 
 /**
  * Send a special key to a tmux session
@@ -382,13 +391,162 @@ export async function sendSpecialKey(
   sessionName: string,
   key: SpecialKey
 ): Promise<void> {
+  validateSessionName(sessionName);
   try {
     await execAsync(
       `tmux send-keys -t "${sessionName}" ${key}`,
       { timeout: DEFAULT_TIMEOUT }
     );
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     throw new Error(`Failed to send special key: ${errorMessage}`);
   }
+}
+
+/**
+ * Send keys to a tmux session using spawn (no shell interpretation)
+ * [Issue #163] Task-PRE-001: Spawn-based tmux send-keys for terminal-websocket
+ *
+ * Unlike sendKeys() which uses exec() (shell interpretation),
+ * this function uses spawn() for direct process invocation,
+ * preventing shell metacharacter injection.
+ *
+ * @param sessionName - Target session name
+ * @param keys - Keys to send
+ * @throws {Error} If session name is invalid or send fails
+ */
+export async function sendKeysSpawn(
+  sessionName: string,
+  keys: string
+): Promise<void> {
+  validateSessionName(sessionName);
+
+  // Size limit (4KB for WebSocket terminal input)
+  if (keys.length > 4096) {
+    throw new Error('Input too large for sendKeysSpawn (max 4096 bytes)');
+  }
+
+  // Reject null bytes
+  if (keys.includes('\0')) {
+    throw new Error('Input contains null byte');
+  }
+
+  const { spawn } = await import('child_process');
+
+  return new Promise<void>((resolve, reject) => {
+    const tmuxSend = spawn('tmux', ['send-keys', '-t', sessionName, keys]);
+
+    tmuxSend.on('error', (error) => {
+      reject(new Error(`Failed to send keys via spawn: ${getErrorMessage(error)}`));
+    });
+
+    tmuxSend.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`tmux send-keys exited with code ${code}`));
+      }
+    });
+  });
+}
+
+/**
+ * Send a message followed by Enter key, with configurable delay
+ * [Issue #163] Task-PRE-003: Unified message send pattern
+ *
+ * Encapsulates the "send content -> wait -> send Enter" protocol.
+ * Prompt verification logic is NOT included (SRP - handled by callers like sendMessageToClaude).
+ *
+ * For multiline messages (containing \n), uses spawn-based `tmux send-keys -l`
+ * which sends content literally without shell interpretation, preventing
+ * "[Pasted text]" display in Claude CLI's ink TextInput.
+ * [Issue #163] Phase 2: Multiline message support
+ *
+ * @param sessionName - Target session name
+ * @param message - Message to send
+ * @param delay - Delay in ms between message and Enter (default: 100)
+ * @throws {Error} If session name is invalid, message exceeds limits, or send fails
+ */
+export async function sendMessageWithEnter(
+  sessionName: string,
+  message: string,
+  delay: number = 100
+): Promise<void> {
+  validateSessionName(sessionName);
+
+  // Size limits: 100KB / 10,000 lines
+  const MAX_MESSAGE_SIZE = 100 * 1024;
+  const MAX_LINE_COUNT = 10000;
+
+  if (Buffer.byteLength(message, 'utf-8') > MAX_MESSAGE_SIZE) {
+    throw new Error(`Message exceeds maximum size of ${MAX_MESSAGE_SIZE} bytes`);
+  }
+
+  if (message.includes('\0')) {
+    throw new Error('Message contains null byte');
+  }
+
+  // Reject dangerous control characters (allow \t, \n, \r)
+  if (DANGEROUS_CONTROL_CHARS.test(message)) {
+    throw new Error('Message contains prohibited control characters');
+  }
+
+  const lineCount = message.split('\n').length;
+  if (lineCount > MAX_LINE_COUNT) {
+    throw new Error(`Message exceeds maximum line count of ${MAX_LINE_COUNT}`);
+  }
+
+  // Multiline messages: use spawn-based tmux send-keys -l for literal content
+  // Single-line messages: use existing sendKeys() (backward compatible)
+  const isMultiline = message.includes('\n');
+
+  if (isMultiline) {
+    await sendMultilineContent(sessionName, message);
+  } else {
+    // Send message content (without Enter)
+    await sendKeys(sessionName, message, false);
+  }
+
+  // Wait for input to be processed
+  if (delay > 0) {
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  // Send Enter key
+  await sendKeys(sessionName, '', true);
+}
+
+/**
+ * Send multiline content to a tmux session using spawn-based send-keys -l
+ * [Issue #163] Phase 2: Literal multiline send
+ *
+ * Uses spawn() instead of exec() to avoid shell interpretation.
+ * The -l flag sends characters literally, so newlines become soft newlines
+ * (new line within input) rather than Enter (submit).
+ *
+ * @param sessionName - Target session name (must be pre-validated)
+ * @param content - Multiline content to send
+ * @throws {Error} If spawn fails or tmux exits with non-zero code
+ */
+async function sendMultilineContent(
+  sessionName: string,
+  content: string
+): Promise<void> {
+  const { spawn } = await import('child_process');
+
+  return new Promise<void>((resolve, reject) => {
+    const tmuxSend = spawn('tmux', ['send-keys', '-l', '-t', sessionName, content]);
+
+    tmuxSend.on('error', (error) => {
+      reject(new Error(`Failed to send multiline message: ${getErrorMessage(error)}`));
+    });
+
+    tmuxSend.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`tmux send-keys -l exited with code ${code}`));
+      }
+    });
+  });
 }

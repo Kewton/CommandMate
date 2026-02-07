@@ -10,11 +10,10 @@ import {
   createSession,
   sendKeys,
   killSession,
+  sendSpecialKey,
+  sendMessageWithEnter,
 } from '../tmux';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { getErrorMessage } from '../utils';
 
 /**
  * Codex initialization timing constants
@@ -90,14 +89,14 @@ export class CodexTool extends BaseCLITool {
 
       // T2.6: Skip model selection dialog by sending Down arrow + Enter
       // This selects the default model and proceeds to the prompt
-      await execAsync(`tmux send-keys -t "${sessionName}" Down`);
+      await sendSpecialKey(sessionName, 'Down');
       await new Promise((resolve) => setTimeout(resolve, CODEX_MODEL_SELECT_WAIT_MS));
-      await execAsync(`tmux send-keys -t "${sessionName}" Enter`);
+      await sendSpecialKey(sessionName, 'Enter');
       await new Promise((resolve) => setTimeout(resolve, CODEX_MODEL_SELECT_WAIT_MS));
 
       console.log(`✓ Started Codex session: ${sessionName}`);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Codex session: ${errorMessage}`);
     }
   }
@@ -120,21 +119,15 @@ export class CodexTool extends BaseCLITool {
     }
 
     try {
-      // Send message to Codex (without Enter)
-      await sendKeys(sessionName, message, false);
+      // Send message with Enter using unified pattern
+      await sendMessageWithEnter(sessionName, message, 100);
 
-      // Wait a moment for the text to be typed
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // Send Enter key separately
-      await execAsync(`tmux send-keys -t "${sessionName}" C-m`);
-
-      // Wait a moment for the message to be processed
+      // Wait a moment for the message to be processed (Codex-specific post-Enter delay)
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       console.log(`✓ Sent message to Codex session: ${sessionName}`);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Codex: ${errorMessage}`);
     }
   }
@@ -151,8 +144,8 @@ export class CodexTool extends BaseCLITool {
       // Send Ctrl+D to exit Codex gracefully
       const exists = await hasSession(sessionName);
       if (exists) {
-        // Send Ctrl+D (ASCII 4)
-        await execAsync(`tmux send-keys -t "${sessionName}" C-d`);
+        // Send Ctrl+D via sendSpecialKey (Task-PRE-001)
+        await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for Codex to exit
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -165,7 +158,7 @@ export class CodexTool extends BaseCLITool {
         console.log(`✓ Stopped Codex session: ${sessionName}`);
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       console.error(`Error stopping Codex session: ${errorMessage}`);
       throw error;
     }

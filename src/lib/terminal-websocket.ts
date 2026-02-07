@@ -5,9 +5,10 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server as HTTPServer, IncomingMessage } from 'http';
-import { spawn } from 'child_process';
 import { captureSessionOutput } from './cli-session';
+import { sendKeysSpawn } from './tmux';
 import type { CLIToolType } from './cli-tools/types';
+import { getSessionNameUtil, isValidCliToolId } from './session-name';
 
 interface TerminalConnection {
   worktreeId: string;
@@ -20,9 +21,13 @@ const connections = new Map<string, TerminalConnection>();
 
 /**
  * Get tmux session name for a worktree and CLI tool
+ * [Issue #163] Task-PRE-002: Delegated to centralized getSessionNameUtil
  */
 function getSessionName(worktreeId: string, cliToolId: string): string {
-  return `mcbd-${cliToolId}-${worktreeId}`;
+  if (!isValidCliToolId(cliToolId)) {
+    throw new Error(`Invalid CLI tool ID: ${cliToolId}`);
+  }
+  return getSessionNameUtil(worktreeId, cliToolId);
 }
 
 /**
@@ -82,7 +87,7 @@ export function initTerminalWebSocket(server: HTTPServer) {
         switch (data.type) {
           case 'input':
             // Send user input to tmux session
-            await sendToTmux(connection.tmuxSession, data.data);
+            await sendKeysSpawn(connection.tmuxSession, data.data);
 
             // Capture and send back updated output
             setTimeout(async () => {
@@ -97,7 +102,7 @@ export function initTerminalWebSocket(server: HTTPServer) {
 
           case 'command':
             // Execute a complete command
-            await sendToTmux(connection.tmuxSession, data.data);
+            await sendKeysSpawn(connection.tmuxSession, data.data);
 
             // Capture output after command execution
             setTimeout(async () => {
@@ -163,61 +168,3 @@ export function initTerminalWebSocket(server: HTTPServer) {
   return wss;
 }
 
-/**
- * Send input to tmux session
- */
-async function sendToTmux(sessionName: string, input: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const tmuxSend = spawn('tmux', ['send-keys', '-t', sessionName, input]);
-
-    tmuxSend.on('error', (error) => {
-      console.error('Error sending to tmux:', error);
-      reject(error);
-    });
-
-    tmuxSend.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`tmux send-keys exited with code ${code}`));
-      }
-    });
-  });
-}
-
-/**
- * Alternative: Direct PTY approach (without tmux)
- * This creates a direct pseudo-terminal connection
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function createDirectTerminal(worktreeId: string, cliToolId: string) {
-  const pty = spawn('bash', [], {
-    env: {
-      ...process.env,
-      TERM: 'xterm-256color',
-      COLORTERM: 'truecolor',
-    },
-    cwd: `/Users/maenokota/share/work/github_kewton/MySwiftAgent-worktrees/${worktreeId}`,
-  });
-
-  return {
-    onData: (callback: (data: string) => void) => {
-      pty.stdout.on('data', (data) => callback(data.toString()));
-      pty.stderr.on('data', (data) => callback(data.toString()));
-    },
-
-    write: (data: string) => {
-      pty.stdin.write(data);
-    },
-
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    resize: (cols: number, rows: number) => {
-      // PTY resize if needed
-      // This would require node-pty for proper implementation
-    },
-
-    destroy: () => {
-      pty.kill();
-    }
-  };
-}

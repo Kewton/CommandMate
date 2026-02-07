@@ -38,6 +38,7 @@ vi.mock('@/lib/db-instance', () => {
 // Mock tmux
 vi.mock('@/lib/tmux', () => ({
   sendKeys: vi.fn().mockResolvedValue(undefined),
+  sendMessageWithEnter: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock cli-session (captureSessionOutput)
@@ -110,7 +111,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
   it('should send keys when prompt is still active', async () => {
     const { captureSessionOutput } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
-    const { sendKeys } = await import('@/lib/tmux');
+    const { sendMessageWithEnter } = await import('@/lib/tmux');
 
     // Prompt is still active at the time of re-verification
     vi.mocked(captureSessionOutput).mockResolvedValue('Do you want to proceed?\n❯ 1. Yes\n  2. No');
@@ -133,13 +134,13 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     const data = await response.json();
 
     expect(data.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalled();
+    expect(sendMessageWithEnter).toHaveBeenCalled();
   });
 
   it('should NOT send keys when prompt has disappeared (race condition)', async () => {
     const { captureSessionOutput } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
-    const { sendKeys } = await import('@/lib/tmux');
+    const { sendMessageWithEnter } = await import('@/lib/tmux');
 
     // Prompt disappeared by the time of re-verification
     vi.mocked(captureSessionOutput).mockResolvedValue('⏺ Processing complete.\n\n❯ ');
@@ -154,12 +155,12 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
 
     expect(data.success).toBe(false);
     expect(data.reason).toBe('prompt_no_longer_active');
-    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendMessageWithEnter).not.toHaveBeenCalled();
   });
 
   it('should proceed with send when capture fails (fallback for manual responses)', async () => {
     const { captureSessionOutput } = await import('@/lib/cli-session');
-    const { sendKeys } = await import('@/lib/tmux');
+    const { sendMessageWithEnter } = await import('@/lib/tmux');
 
     // captureSessionOutput fails (e.g., tmux error)
     vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux capture failed'));
@@ -170,7 +171,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
 
     // Should still send keys (don't block manual responses)
     expect(data.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalled();
+    expect(sendMessageWithEnter).toHaveBeenCalled();
   });
 
   it('should return 404 for non-existent worktree', async () => {

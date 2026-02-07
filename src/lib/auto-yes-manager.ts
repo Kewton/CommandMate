@@ -12,9 +12,10 @@ import type { CLIToolType } from './cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectPrompt } from './prompt-detector';
 import { resolveAutoAnswer } from './auto-yes-resolver';
-import { sendKeys } from './tmux';
+import { sendMessageWithEnter } from './tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, detectThinking } from './cli-patterns';
+import { getErrorMessage } from './utils';
 
 /** Auto yes state for a worktree */
 export interface AutoYesState {
@@ -308,10 +309,8 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId);
 
-    // Send answer followed by Enter
-    await sendKeys(sessionName, answer, false);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    await sendKeys(sessionName, '', true);
+    // Send answer followed by Enter using unified pattern (Task-PRE-003)
+    await sendMessageWithEnter(sessionName, answer, 100);
 
     // 6. Update timestamp
     updateLastServerResponseTimestamp(worktreeId, Date.now());
@@ -326,7 +325,7 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     incrementErrorCount(worktreeId);
 
     // Log error (without sensitive details)
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = getErrorMessage(error);
     console.warn(`[Auto-Yes Poller] Error for worktree ${worktreeId}: ${errorMessage}`);
   }
 

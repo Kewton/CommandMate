@@ -9,29 +9,20 @@ import {
   sendKeys,
   capturePane,
   killSession,
+  sendMessageWithEnter,
 } from './tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
   CLAUDE_SEPARATOR_PATTERN,
   stripAnsi,
 } from './cli-patterns';
+import { getErrorMessage } from './utils';
+import { getSessionNameUtil } from './session-name';
+import { sendSpecialKey } from './tmux';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
-
-// ----- Helper Functions -----
-
-/**
- * Extract error message from unknown error type
- * Provides consistent error message extraction across the module (DRY)
- *
- * @param error - Unknown error object
- * @returns Error message string
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 // ----- Timeout and Polling Constants (OCP-001) -----
 // These constants are exported to allow configuration and testing.
@@ -166,8 +157,11 @@ export interface ClaudeSessionState {
  * getSessionName('feature-foo') // => 'mcbd-claude-feature-foo'
  * ```
  */
+/**
+ * @deprecated Use getSessionNameUtil(worktreeId, 'claude') from '@/lib/session-name' instead
+ */
 export function getSessionName(worktreeId: string): string {
-  return `mcbd-claude-${worktreeId}`;
+  return getSessionNameUtil(worktreeId, 'claude');
 }
 
 /**
@@ -386,9 +380,8 @@ export async function sendMessageToClaude(
     }
   }
 
-  // Send message using sendKeys consistently (CONS-001)
-  await sendKeys(sessionName, message, false);  // Message without Enter
-  await sendKeys(sessionName, '', true);        // Enter key
+  // Send message using unified pattern (Task-PRE-003, CONS-001)
+  await sendMessageWithEnter(sessionName, message, 100);
 
   console.log(`Sent message to Claude session: ${sessionName}`);
 }
@@ -444,8 +437,8 @@ export async function stopClaudeSession(worktreeId: string): Promise<boolean> {
     const exists = await hasSession(sessionName);
     if (exists) {
       await sendKeys(sessionName, '', false);
-      // Send Ctrl+D (ASCII 4)
-      await execAsync(`tmux send-keys -t "${sessionName}" C-d`);
+      // Send Ctrl+D via sendSpecialKey (Task-PRE-001)
+      await sendSpecialKey(sessionName, 'C-d');
 
       // Wait a moment for Claude to exit
       await new Promise((resolve) => setTimeout(resolve, 500));

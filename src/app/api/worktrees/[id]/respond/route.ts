@@ -6,11 +6,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
-import { sendKeys } from '@/lib/tmux';
+import { sendMessageWithEnter } from '@/lib/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { startPolling } from '@/lib/response-poller';
 import { getAnswerInput } from '@/lib/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
+import { getErrorMessage, DANGEROUS_CONTROL_CHARS, MAX_ANSWER_LENGTH } from '@/lib/utils';
 
 /**
  * POST /api/worktrees/[id]/respond
@@ -38,6 +39,21 @@ export async function POST(
     if (!messageId || !answer) {
       return NextResponse.json(
         { error: 'messageId and answer are required' },
+        { status: 400 }
+      );
+    }
+
+    // Answer field validation (SEC-009)
+    if (typeof answer !== 'string' || answer.length > MAX_ANSWER_LENGTH) {
+      return NextResponse.json(
+        { error: `Answer must be a string of at most ${MAX_ANSWER_LENGTH} characters` },
+        { status: 400 }
+      );
+    }
+
+    if (DANGEROUS_CONTROL_CHARS.test(answer)) {
+      return NextResponse.json(
+        { error: 'Answer contains prohibited control characters' },
         { status: 400 }
       );
     }
@@ -104,9 +120,8 @@ export async function POST(
       try {
         input = getAnswerInput(answer, message.promptData.type);
       } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
-          { error: `Invalid answer: ${errorMessage}` },
+          { error: `Invalid answer: ${getErrorMessage(error)}` },
           { status: 400 }
         );
       }
@@ -141,24 +156,13 @@ export async function POST(
     // Get session name for the CLI tool
     const sessionName = cliTool.getSessionName(params.id);
 
-    // Send answer to tmux
-    // For Claude prompts, send the answer and then Enter separately
-    // This is because Claude's interactive menu responds immediately to the key press
+    // Send answer to tmux using unified pattern (Task-PRE-003)
     try {
-      // Send the answer (number or y/n)
-      await sendKeys(sessionName, input, false);
+      await sendMessageWithEnter(sessionName, input, 100);
       console.log(`✓ Sent answer '${input}' to ${sessionName} (${cliTool.name})`);
-
-      // Wait a moment for the input to be processed
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Send Enter
-      await sendKeys(sessionName, '', true);
-      console.log(`✓ Sent Enter to ${sessionName}`);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
-        { error: `Failed to send answer to tmux: ${errorMessage}` },
+        { error: `Failed to send answer to tmux: ${getErrorMessage(error)}` },
         { status: 500 }
       );
     }
@@ -185,9 +189,8 @@ export async function POST(
     });
   } catch (error: unknown) {
     console.error('Failed to respond to prompt:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json(
-      { error: errorMessage },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }

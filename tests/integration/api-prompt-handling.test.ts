@@ -41,6 +41,7 @@ vi.mock('@/lib/db-instance', () => {
 // Mock tmux module
 vi.mock('@/lib/tmux', () => ({
   sendKeys: vi.fn().mockResolvedValue(undefined),
+  sendMessageWithEnter: vi.fn().mockResolvedValue(undefined),
   isClaudeRunning: vi.fn().mockResolvedValue(true),
 }));
 
@@ -175,7 +176,7 @@ describe('POST /api/worktrees/:id/respond', () => {
     });
 
     it('should send "y" to tmux when answering yes', async () => {
-      const { sendKeys } = await import('@/lib/tmux');
+      const { sendMessageWithEnter } = await import('@/lib/tmux');
 
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
@@ -202,11 +203,11 @@ describe('POST /api/worktrees/:id/respond', () => {
 
       await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-test-worktree', 'y', true);
+      expect(sendMessageWithEnter).toHaveBeenCalledWith('mcbd-test-worktree', 'y', 100);
     });
 
     it('should send "n" to tmux when answering no', async () => {
-      const { sendKeys } = await import('@/lib/tmux');
+      const { sendMessageWithEnter } = await import('@/lib/tmux');
 
       const message = createMessage(db, {
         worktreeId: 'test-worktree',
@@ -233,7 +234,7 @@ describe('POST /api/worktrees/:id/respond', () => {
 
       await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-test-worktree', 'n', true);
+      expect(sendMessageWithEnter).toHaveBeenCalledWith('mcbd-test-worktree', 'n', 100);
     });
 
     it('should resume polling after responding', async () => {

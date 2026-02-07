@@ -145,7 +145,8 @@ src/
 | `src/types/clone.ts` | クローン関連型定義（CloneJob, CloneError等） |
 | `src/lib/file-operations.ts` | ファイル操作（読取/更新/作成/削除/リネーム） |
 | `src/lib/git-utils.ts` | Git情報取得（getGitStatus関数、execFile使用、1秒タイムアウト） |
-| `src/lib/utils.ts` | 汎用ユーティリティ関数（debounce、truncateString等） |
+| `src/lib/utils.ts` | 汎用ユーティリティ関数（debounce、truncateString、getErrorMessage、DANGEROUS_CONTROL_CHARS等） |
+| `src/lib/session-name.ts` | セッション名生成一元化（getSessionNameUtil、isValidCliToolId）（Issue #163） |
 | `src/config/editable-extensions.ts` | 編集可能ファイル拡張子設定 |
 | `src/config/file-operations.ts` | 再帰削除の安全設定 |
 | `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義 |
@@ -372,6 +373,29 @@ commandmate status --all                   # 全サーバー状態確認
 ---
 
 ## 最近の実装機能
+
+### Issue #163: 複数行メッセージ送信対応（[Pasted text]問題修正）
+- **問題解決**: 複数行メッセージをClaude CLIに送信するとtmuxのペースト検出により「[Pasted text]」と表示され、Claude CLIが処理を開始しない問題を修正
+- **根本原因**: `sendKeys()` のexec方式で複数行テキストを一括送信すると、tmuxがペーストとして検出し、Claude CLIのink TextInputが折りたたみ表示する
+- **解決策（方式A）**: `tmux send-keys -l` のspawn方式で文字をリテラル送信。改行文字がClaude CLIのink TextInputでソフト改行（入力内の改行）として解釈され、Enter（送信）とは区別される
+- **前提タスク4件完了**:
+  - Task-PRE-004: `getErrorMessage()` ユーティリティの抽出（DRY）
+  - Task-PRE-002: `getSessionNameUtil()` によるセッション名生成の一元化（5箇所の重複解消）
+  - Task-PRE-001: tmux送信パスの統合（`sendSpecialKey()`拡張、`sendKeysSpawn()`追加）
+  - Task-PRE-003: `sendMessageWithEnter()` によるメッセージ送信パターンの統合（5箇所の散在パターン解消）
+- **セキュリティ対策**:
+  - spawn()方式によりシェル解釈を完全にバイパス（SEC-004: 改行インジェクション防止）
+  - ヌルバイト拒否、危険制御文字拒否（DANGEROUS_CONTROL_CHARS共通定数化）
+  - メッセージサイズ制限（100KB / 10,000行）
+  - 全セッション名にSESSION_NAME_PATTERNバリデーション追加
+  - APIルートのanswerフィールドに最大長（1,000文字）と制御文字バリデーション追加
+  - `createDirectTerminal()`デッドコード除去（SEC-F014）
+- **主要コンポーネント**:
+  - `src/lib/tmux.ts` - `sendMessageWithEnter()` 複数行対応（spawn方式）、`sendKeysSpawn()`、`sendSpecialKey()`拡張
+  - `src/lib/session-name.ts` - セッション名生成一元化（`getSessionNameUtil()`、`isValidCliToolId()`）
+  - `src/lib/utils.ts` - `getErrorMessage()`、`DANGEROUS_CONTROL_CHARS`、`MAX_ANSWER_LENGTH`
+  - `src/lib/terminal-websocket.ts` - `sendKeysSpawn()`使用、`createDirectTerminal()`除去
+- 詳細: [設計書](./dev-reports/design/issue-163-multiline-message-pasted-text-design-policy.md)
 
 ### Issue #161: Auto-Yes誤検出修正（番号付きリストの誤検出防止）
 - **問題解決**: Auto-Yesモード有効時、Claude CLIの通常出力に含まれる番号付きリスト（例：「1. ファイルを作成」「2. テストを実行」）がmultiple_choiceプロンプトとして誤検出され、「1」が自動送信される問題を修正

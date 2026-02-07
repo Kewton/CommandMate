@@ -14,6 +14,8 @@ vi.mock('@/lib/tmux', () => ({
   sendKeys: vi.fn(),
   capturePane: vi.fn(),
   killSession: vi.fn(),
+  sendMessageWithEnter: vi.fn(),
+  sendSpecialKey: vi.fn(),
 }));
 
 // Mock child_process
@@ -42,7 +44,7 @@ import {
   CLAUDE_PROMPT_WAIT_TIMEOUT,
   CLAUDE_PROMPT_POLL_INTERVAL,
 } from '@/lib/claude-session';
-import { hasSession, createSession, sendKeys, capturePane } from '@/lib/tmux';
+import { hasSession, createSession, sendKeys, capturePane, sendMessageWithEnter } from '@/lib/tmux';
 import { CLAUDE_PROMPT_PATTERN, CLAUDE_SEPARATOR_PATTERN } from '@/lib/cli-patterns';
 
 describe('claude-session - Issue #152 improvements', () => {
@@ -105,7 +107,7 @@ describe('claude-session - Issue #152 improvements', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       await expect(promise).resolves.toBeUndefined();
-      expect(capturePane).toHaveBeenCalledWith(sessionName, { startLine: -10 });
+      expect(capturePane).toHaveBeenCalledWith(sessionName, { startLine: -50 });
     });
 
     it('should detect legacy prompt character ">"', async () => {
@@ -284,6 +286,7 @@ describe('claude-session - Issue #152 improvements', () => {
     beforeEach(() => {
       vi.mocked(hasSession).mockResolvedValue(true);
       vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(sendMessageWithEnter).mockResolvedValue();
     });
 
     it('should verify prompt state before sending (CONS-006)', async () => {
@@ -315,15 +318,16 @@ describe('claude-session - Issue #152 improvements', () => {
       expect(callCount).toBeGreaterThanOrEqual(2);
     });
 
-    it('should use sendKeys for Enter instead of execAsync (CONS-001)', async () => {
+    it('should use sendMessageWithEnter instead of raw sendKeys (Task-PRE-003)', async () => {
       vi.mocked(capturePane).mockResolvedValue('> ');
 
       await sendMessageToClaude('test-worktree', 'Hello Claude');
 
-      // Should call sendKeys twice: once for message, once for Enter
-      expect(sendKeys).toHaveBeenCalledTimes(2);
-      expect(sendKeys).toHaveBeenNthCalledWith(1, 'mcbd-claude-test-worktree', 'Hello Claude', false);
-      expect(sendKeys).toHaveBeenNthCalledWith(2, 'mcbd-claude-test-worktree', '', true);
+      // Should call sendMessageWithEnter once (unified pattern)
+      expect(sendMessageWithEnter).toHaveBeenCalledTimes(1);
+      expect(sendMessageWithEnter).toHaveBeenCalledWith(
+        'mcbd-claude-test-worktree', 'Hello Claude', 100
+      );
     });
 
     it('should throw error if session does not exist', async () => {
@@ -334,15 +338,26 @@ describe('claude-session - Issue #152 improvements', () => {
       );
     });
 
-    it('should throw error if prompt not detected within timeout', async () => {
+    it('should warn and send anyway if prompt not detected within timeout', async () => {
       vi.mocked(capturePane).mockResolvedValue('Still processing...');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       const promise = sendMessageToClaude('test-worktree', 'Hello');
 
-      // Advance past prompt wait timeout
-      await vi.advanceTimersByTimeAsync(CLAUDE_PROMPT_WAIT_TIMEOUT + 100);
+      // Advance past the 10000ms timeout used in sendMessageToClaude
+      await vi.advanceTimersByTimeAsync(10000 + 100);
 
-      await expect(promise).rejects.toThrow(`Prompt detection timeout (${CLAUDE_PROMPT_WAIT_TIMEOUT}ms)`);
+      // Should resolve (not reject) - sends message anyway after timeout
+      await expect(promise).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[sendMessageToClaude] Prompt not detected, sending anyway'
+      );
+      // Message should still be sent via sendMessageWithEnter
+      expect(sendMessageWithEnter).toHaveBeenCalledWith(
+        'mcbd-claude-test-worktree', 'Hello', 100
+      );
+
+      warnSpy.mockRestore();
     });
   });
 

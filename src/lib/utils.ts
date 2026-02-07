@@ -4,6 +4,32 @@
  */
 
 /**
+ * Extract error message from unknown error type
+ * [Issue #163] Task-PRE-004: Common error message extraction utility
+ *
+ * @param error - Unknown error value (Error instance, string, or any type)
+ * @returns Error message string
+ */
+export function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Dangerous control characters pattern
+ * Matches ASCII 0x00-0x08, 0x0B (VT), 0x0C (FF), 0x0E-0x1F
+ * Allows: \t (0x09), \n (0x0A), \r (0x0D)
+ * [Issue #163] SEC-009: Extracted for DRY across API routes and tmux.ts
+ */
+// eslint-disable-next-line no-control-regex
+export const DANGEROUS_CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F]/;
+
+/**
+ * Maximum answer length for prompt response APIs
+ * [Issue #163] SEC-009: Shared constant for respond and prompt-response routes
+ */
+export const MAX_ANSWER_LENGTH = 1000;
+
+/**
  * Creates a debounced version of a function that delays execution
  * until after the specified delay has passed since the last invocation.
  *
