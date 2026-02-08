@@ -25,7 +25,6 @@ cat > .env << 'EOF'
 CM_ROOT_DIR=/Users/yourname/projects
 CM_PORT=3000
 CM_BIND=127.0.0.1
-CM_AUTH_TOKEN=dev-token-only-for-local
 CM_DB_PATH=./data/cm.db
 NODE_ENV=development
 EOF
@@ -131,20 +130,7 @@ curl -s http://localhost:3000/api/worktrees | jq .
 ]
 ```
 
-### 2. 認証トークンのテスト
-
-認証が必要な環境（`CM_BIND=0.0.0.0`）の場合：
-
-```bash
-# 認証なしでアクセス（エラーになるはず）
-curl -s http://localhost:3000/api/worktrees
-
-# 認証トークン付きでアクセス
-curl -s -H "Authorization: Bearer dev-token-only-for-local" \
-  http://localhost:3000/api/worktrees | jq .
-```
-
-### 3. メッセージの取得
+### 2. メッセージの取得
 
 ```bash
 # 特定の worktree のメッセージを取得
@@ -152,7 +138,7 @@ WORKTREE_ID="your-worktree-id"
 curl -s "http://localhost:3000/api/worktrees/${WORKTREE_ID}/messages" | jq .
 ```
 
-### 4. メッセージの送信
+### 3. メッセージの送信
 
 ```bash
 # メッセージを送信
@@ -165,7 +151,7 @@ curl -X POST http://localhost:3000/api/worktrees/${WORKTREE_ID}/send \
   }' | jq .
 ```
 
-### 5. ログファイルの一覧取得
+### 4. ログファイルの一覧取得
 
 ```bash
 # ログファイル一覧を取得
@@ -378,15 +364,10 @@ curl -I \
 # 開発者ツール > Console タブ
 ```
 
-### 認証エラー
+### 外部アクセスのセキュリティ
 
-```bash
-# 認証トークンを確認
-cat .env | grep CM_AUTH_TOKEN
-
-# ローカル開発の場合、BIND を 127.0.0.1 に設定
-echo "CM_BIND=127.0.0.1" >> .env
-```
+外部公開する場合はリバースプロキシでの認証を設定してください。
+詳細は [セキュリティガイド](../../docs/security-guide.md) を参照してください。
 
 ## パフォーマンスチェック
 

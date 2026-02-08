@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING**: Removed `CM_AUTH_TOKEN` authentication mechanism (Issue #179)
+  - `src/middleware.ts` deleted (Next.js authentication middleware)
+  - `CM_AUTH_TOKEN`, `NEXT_PUBLIC_CM_AUTH_TOKEN`, `MCBD_AUTH_TOKEN` environment variables are no longer used
+  - Existing AUTH_TOKEN settings are silently ignored (no errors, no effect)
+  - External access now requires reverse proxy authentication (Nginx + Basic Auth, Cloudflare Access, Tailscale)
+  - `commandmate init` and `commandmate start` show reverse proxy warning when `CM_BIND=0.0.0.0`
+  - ENV_MAPPING reduced from 8 to 7 entries
+  - Client-side `api-client.ts` no longer sends Authorization header
+
+### Added
+- New security guide: `docs/security-guide.md` (Issue #179)
+  - Threat model for localhost vs external access
+  - Nginx + Basic Auth configuration example
+  - Cloudflare Access and Tailscale setup instructions
+  - Migration steps from CM_AUTH_TOKEN
+  - Security checklist for external deployment
+- `src/cli/config/security-messages.ts` with shared REVERSE_PROXY_WARNING constant (Issue #179)
+
+### Removed
+- `CM_AUTH_TOKEN` / `MCBD_AUTH_TOKEN` environment variable support (Issue #179)
+- `NEXT_PUBLIC_CM_AUTH_TOKEN` / `NEXT_PUBLIC_MCBD_AUTH_TOKEN` client-side token support (Issue #179)
+- `isAuthRequired()` function from `src/lib/env.ts` (Issue #179)
+- `generateAuthToken()` method from `EnvSetup` class (Issue #179)
+- `CM_AUTH_TOKEN` masking patterns from logger and security-logger (Issue #179)
+
+### Security
+- Removed broken authentication that exposed tokens in client-side JavaScript (Issue #179)
+- Added reverse proxy authentication recommendation for external deployments (Issue #179)
+
 ## [0.1.12] - 2026-02-04
 
 _No changes recorded._

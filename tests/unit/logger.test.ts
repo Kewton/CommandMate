@@ -238,19 +238,6 @@ describe('Logger', () => {
       expect(parsed.data.password).toBe('[REDACTED]');
     });
 
-    it('should redact MCBD_AUTH_TOKEN in log data', () => {
-      const consoleSpy = vi.spyOn(console, 'log');
-
-      const logger = createLogger('test');
-      logger.info('env', {
-        output: 'MCBD_AUTH_TOKEN=super-secret-token-123',
-      });
-
-      const output = consoleSpy.mock.calls[0][0] as string;
-      expect(output).toContain('MCBD_AUTH_TOKEN=[REDACTED]');
-      expect(output).not.toContain('super-secret-token-123');
-    });
-
     it('should redact nested sensitive data', () => {
       const consoleSpy = vi.spyOn(console, 'log');
 

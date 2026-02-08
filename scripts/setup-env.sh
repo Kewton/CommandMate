@@ -47,7 +47,6 @@ Environment Variables Configured:
     - CM_ROOT_DIR       Repository root directory (required)
     - CM_PORT           Server port (default: 3000)
     - CM_BIND           Bind address (default: 127.0.0.1)
-    - CM_AUTH_TOKEN     Authentication token (auto-generated if external access enabled)
     - CM_DB_PATH        Database path (default: ./data/cm.db)
     - CM_LOG_LEVEL      Log level (default: info)
     - CM_LOG_FORMAT     Log format (default: text)
@@ -165,11 +164,6 @@ read_yesno() {
     fi
 }
 
-# Generate auth token
-generate_token() {
-    openssl rand -hex 32
-}
-
 # Backup existing .env
 backup_env() {
     if [ -f .env ]; then
@@ -228,15 +222,14 @@ main() {
     read_yesno "Enable external access (bind to 0.0.0.0)?" "n" enable_external
 
     local bind_address="$DEFAULT_BIND"
-    local auth_token=""
 
     if [ "$enable_external" = true ]; then
         bind_address="0.0.0.0"
-        auth_token=$(generate_token)
         log_info ""
         log_success "External access enabled"
         log_info "    Bind address: 0.0.0.0"
-        log_info "    Auth token generated: ${auth_token:0:8}..."
+        log_warning "IMPORTANT: Configure reverse proxy authentication before exposing to external networks."
+        log_info "    See: docs/security-guide.md"
     fi
 
     log_info ""
@@ -285,34 +278,17 @@ CM_PORT=${port}
 
 # Bind address
 # - 127.0.0.1: Localhost only (development)
-# - 0.0.0.0: All interfaces (production, requires auth token)
+# - 0.0.0.0: All interfaces (production, reverse proxy auth recommended)
 CM_BIND=${bind_address}
 
 # ===================================
 # Security
 # ===================================
 
-EOF
-
-    if [ -n "$auth_token" ]; then
-        cat >> .env << EOF
-# Authentication token for API access
-# Required when CM_BIND=0.0.0.0
-CM_AUTH_TOKEN=${auth_token}
-
-# Client-side auth token (for browser)
-NEXT_PUBLIC_CM_AUTH_TOKEN=${auth_token}
+# When CM_BIND=0.0.0.0, use a reverse proxy (e.g., Nginx) with authentication.
+# See: docs/security-guide.md
 
 EOF
-    else
-        cat >> .env << EOF
-# Authentication token for API access
-# Required when CM_BIND=0.0.0.0
-# Generate with: openssl rand -hex 32
-# CM_AUTH_TOKEN=
-
-EOF
-    fi
 
     cat >> .env << EOF
 # ===================================
@@ -369,18 +345,9 @@ EOF
     log_info "  CM_ROOT_DIR:  ${root_dir}"
     log_info "  CM_PORT:      ${port}"
     log_info "  CM_BIND:      ${bind_address}"
-    if [ -n "$auth_token" ]; then
-        log_info "  CM_AUTH_TOKEN: ${auth_token:0:8}... (generated)"
-    fi
     log_info "  CM_DB_PATH:   ${db_path}"
     log_info "  CM_LOG_LEVEL: ${log_level}"
     log_info ""
-
-    if [ -n "$auth_token" ]; then
-        log_warning "IMPORTANT: Save your auth token securely!"
-        log_info "  Token: ${auth_token}"
-        log_info ""
-    fi
 
     log_info "Next steps:"
     log_info "  1. Review .env file if needed"

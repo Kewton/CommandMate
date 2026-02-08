@@ -15,6 +15,7 @@ import { DaemonManager } from '../utils/daemon';
 import { logSecurityEvent } from '../utils/security-logger';
 import { getPackageRoot } from '../utils/paths';
 import { getEnvPath, getPidFilePath } from '../utils/env-setup';
+import { REVERSE_PROXY_WARNING } from '../config/security-messages';
 import { validateIssueNoResult } from '../utils/input-validators';
 import { PortAllocator } from '../utils/port-allocator';
 import { DbPathResolver } from '../utils/resource-resolvers';
@@ -161,17 +162,11 @@ export async function startCommand(options: StartOptions): Promise<void> {
       env.CM_DB_PATH = dbPath;
     }
 
-    // Issue #125: Security warnings for external access
+    // Issue #179: Security warning for external access - recommend reverse proxy
     const bindAddress = env.CM_BIND || '127.0.0.1';
-    const authToken = env.CM_AUTH_TOKEN;
 
     if (bindAddress === '0.0.0.0') {
-      logger.warn('WARNING: Server is accessible from external networks (CM_BIND=0.0.0.0)');
-
-      if (!authToken) {
-        logger.warn('SECURITY WARNING: No authentication token configured. External access is not recommended without CM_AUTH_TOKEN.');
-        logger.info('Run "commandmate init" to configure a secure authentication token.');
-      }
+      console.log(REVERSE_PROXY_WARNING);
     }
 
     // Use package installation directory, not current working directory

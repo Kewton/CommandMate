@@ -81,7 +81,7 @@ commandmate start --daemon    # バックグラウンドで起動
 
 ### モバイルからのアクセス
 
-`commandmate init` で外部アクセスを有効にすると、`CM_BIND=0.0.0.0` と `CM_AUTH_TOKEN` が自動設定されます。同一LAN内から `http://<PCのIP>:3000` にアクセスします。
+`commandmate init` で外部アクセスを有効にすると、`CM_BIND=0.0.0.0` が設定されます。同一LAN内から `http://<PCのIP>:3000` にアクセスします。外部公開時はリバースプロキシでの認証を推奨します。詳細は [セキュリティガイド](./docs/security-guide.md) を参照してください。
 
 ## 開発者向けセットアップ
 

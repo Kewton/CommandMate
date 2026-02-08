@@ -11,6 +11,7 @@ import { DaemonStatus, StartOptions } from '../types';
 import { PidManager } from './pid-manager';
 import { getPackageRoot } from './paths';
 import { getEnvPath } from './env-setup';
+import { REVERSE_PROXY_WARNING } from '../config/security-messages';
 import { CLILogger } from './logger';
 
 /**
@@ -70,18 +71,12 @@ export class DaemonManager {
       env.CM_DB_PATH = options.dbPath;
     }
 
-    // Issue #125: Security warnings for external access (Stage 4 review: MF-2)
+    // Issue #179: Security warning for external access - recommend reverse proxy
     const bindAddress = env.CM_BIND || '127.0.0.1';
-    const authToken = env.CM_AUTH_TOKEN;
     const port = env.CM_PORT || '3000';
 
     if (bindAddress === '0.0.0.0') {
-      this.logger.warn('WARNING: Server is accessible from external networks (CM_BIND=0.0.0.0)');
-
-      if (!authToken) {
-        this.logger.warn('SECURITY WARNING: No authentication token configured. External access is not recommended without CM_AUTH_TOKEN.');
-        this.logger.info('Run "commandmate init" to configure a secure authentication token.');
-      }
+      console.log(REVERSE_PROXY_WARNING);
     }
 
     // Log startup with accurate settings (Stage 4 review: MF-2)

@@ -59,7 +59,7 @@ describe('EnvSetup', () => {
       expect(fs.chmodSync).toHaveBeenCalledWith(expect.any(String), 0o600);
     });
 
-    it('should include auth token when bind is 0.0.0.0', async () => {
+    it('should create .env file for 0.0.0.0 bind without auth token (Issue #179)', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
       vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
       vi.mocked(fs.chmodSync).mockReturnValue(undefined);
@@ -71,14 +71,16 @@ describe('EnvSetup', () => {
         CM_DB_PATH: './data/cm.db',
         CM_LOG_LEVEL: 'info',
         CM_LOG_FORMAT: 'text',
-        CM_AUTH_TOKEN: 'test-token-12345',
       });
 
       expect(fs.writeFileSync).toHaveBeenCalledWith(
         expect.any(String),
-        expect.stringContaining('CM_AUTH_TOKEN=test-token-12345'),
+        expect.stringContaining('CM_BIND=0.0.0.0'),
         expect.any(Object)
       );
+      // Should NOT contain CM_AUTH_TOKEN
+      const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
+      expect(writtenContent).not.toContain('CM_AUTH_TOKEN');
     });
 
     it('should throw error when .env exists and force is false', async () => {
@@ -138,16 +140,6 @@ describe('EnvSetup', () => {
     });
   });
 
-  describe('generateAuthToken', () => {
-    it('should generate 64-character hex token', () => {
-      const token = envSetup.generateAuthToken();
-
-      expect(token).toHaveLength(64);
-      // Verify it's a valid hex string
-      expect(/^[a-f0-9]+$/.test(token)).toBe(true);
-    });
-  });
-
   describe('validateConfig', () => {
     it('should pass for valid config', () => {
       const result = envSetup.validateConfig({
@@ -191,7 +183,7 @@ describe('EnvSetup', () => {
       expect(result.errors.some(e => e.toLowerCase().includes('bind'))).toBe(true);
     });
 
-    it('should require auth token for 0.0.0.0 bind', () => {
+    it('should allow 0.0.0.0 bind without auth token (Issue #179)', () => {
       const result = envSetup.validateConfig({
         CM_ROOT_DIR: '/path/to/repos',
         CM_PORT: 3000,
@@ -201,8 +193,8 @@ describe('EnvSetup', () => {
         CM_LOG_FORMAT: 'text',
       });
 
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.toLowerCase().includes('auth'))).toBe(true);
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
     });
   });
 });
@@ -507,7 +499,7 @@ describe('validateConfig additional cases', () => {
     expect(result.errors.some(e => e.toLowerCase().includes('log format'))).toBe(true);
   });
 
-  it('should pass when auth token is provided for 0.0.0.0 bind', () => {
+  it('should pass for 0.0.0.0 bind (Issue #179: no auth token needed)', () => {
     const result = envSetup.validateConfig({
       CM_ROOT_DIR: '/path/to/repos',
       CM_PORT: 3000,
@@ -515,7 +507,6 @@ describe('validateConfig additional cases', () => {
       CM_DB_PATH: './data/cm.db',
       CM_LOG_LEVEL: 'info',
       CM_LOG_FORMAT: 'text',
-      CM_AUTH_TOKEN: 'secure-token-123',
     });
 
     expect(result.valid).toBe(true);

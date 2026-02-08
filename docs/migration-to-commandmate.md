@@ -24,24 +24,19 @@ MyCodeBranchDesk は **CommandMate** にリネームされました。このリ�
 
 > **Note**: 環境変数マッピングの正式な定義は `src/lib/env.ts` の `ENV_MAPPING` を参照してください。
 
-### サーバー基本設定（8種類）
+### サーバー基本設定（7種類）
 
 | 旧名称 | 新名称 | 用途 | デフォルト値 |
 |--------|--------|------|-------------|
 | `MCBD_ROOT_DIR` | `CM_ROOT_DIR` | ワークツリールートディレクトリ | カレントディレクトリ |
 | `MCBD_PORT` | `CM_PORT` | サーバーポート | `3000` |
 | `MCBD_BIND` | `CM_BIND` | バインドアドレス | `127.0.0.1` |
-| `MCBD_AUTH_TOKEN` | `CM_AUTH_TOKEN` | 認証トークン | なし |
 | `MCBD_LOG_LEVEL` | `CM_LOG_LEVEL` | ログレベル | `info`（本番）/ `debug`（開発） |
 | `MCBD_LOG_FORMAT` | `CM_LOG_FORMAT` | ログフォーマット | `text` |
 | `MCBD_LOG_DIR` | `CM_LOG_DIR` | ログディレクトリ | `./data/logs` |
 | `MCBD_DB_PATH` | `CM_DB_PATH` | DBファイルパス | `./data/cm.db` |
 
-### クライアント設定（1種類）
-
-| 旧名称 | 新名称 | 用途 |
-|--------|--------|------|
-| `NEXT_PUBLIC_MCBD_AUTH_TOKEN` | `NEXT_PUBLIC_CM_AUTH_TOKEN` | クライアント側認証トークン |
+> **Note**: `CM_AUTH_TOKEN` / `MCBD_AUTH_TOKEN` / `NEXT_PUBLIC_CM_AUTH_TOKEN` は Issue #179 で廃止されました。外部公開時はリバースプロキシでの認証を推奨します。詳細は [セキュリティガイド](./security-guide.md) を参照してください。
 
 ---
 
@@ -154,15 +149,7 @@ sudo mv /etc/systemd/system/mycodebranch-desk.service \
 
 **セキュリティ推奨事項:**
 
-認証トークン（`CM_AUTH_TOKEN`）はサービスファイルに直接記述せず、以下の方法を推奨します：
-
-```ini
-# オプション1: EnvironmentFile を使用
-EnvironmentFile=/etc/commandmate/env
-
-# オプション2: systemd-creds を使用（systemd 250以降）
-LoadCredential=auth_token:/etc/commandmate/auth_token
-```
+外部公開時はリバースプロキシでの認証を設定してください。詳細は [セキュリティガイド](./security-guide.md) を参照してください。
 
 ### 4. systemd をリロードして新サービスを開始
 
@@ -288,14 +275,13 @@ cat .env
 sed -i '' 's/MCBD_/CM_/g' .env
 ```
 
-#### 3. 認証エラーが発生する
+#### 3. 外部アクセスのセキュリティ
 
-**原因**: `CM_AUTH_TOKEN` が正しく設定されていない可能性があります。
+`CM_BIND=0.0.0.0` で外部公開する場合は、リバースプロキシでの認証を設定してください。
 
 **対処法**:
-- `CM_BIND=0.0.0.0` の場合、`CM_AUTH_TOKEN` は必須です
-- トークン値が正しいことを確認してください
-- ログにトークン値は出力されません（マスキング済み）
+- Nginx + Basic認証、Cloudflare Access、Tailscale などを使用
+- 詳細は [セキュリティガイド](./security-guide.md) を参照
 
 ### ログの確認方法
 

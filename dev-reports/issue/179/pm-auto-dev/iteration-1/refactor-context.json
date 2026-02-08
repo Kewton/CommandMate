@@ -1,0 +1,23 @@
+{
+  "issue_number": 179,
+  "refactor_targets": [
+    "src/lib/env.ts",
+    "src/lib/api-client.ts",
+    "src/lib/logger.ts",
+    "src/cli/utils/security-logger.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/commands/init.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/config/security-messages.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "Remove any dead code or unused imports left from AUTH_TOKEN removal",
+    "Ensure consistent code style after deletions",
+    "Verify no orphaned type definitions or interfaces remain",
+    "Check for any TODO/FIXME comments related to AUTH_TOKEN that should be cleaned up"
+  ]
+}

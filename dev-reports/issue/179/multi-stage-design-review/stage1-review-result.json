@@ -1,0 +1,94 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "S1-SF-1",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "警告メッセージのインライン重複定義はDRY違反",
+      "description": "設計方針書セクション4.4では、REVERSE_PROXY_WARNINGメッセージをstart.tsとdaemon.tsの2箇所にインラインで定義すると記載されている。設計上の判断として「2箇所のみの使用であるためYAGNI原則に基づきインライン定義」と説明されているが、この警告メッセージにはドキュメントURL、推奨認証方法の箇条書き、複数行のフォーマットされたテキストが含まれており、変更時に2箇所の同期が必要になる。さらにinit.tsでも同様の警告が必要とされており、実際には3箇所で同じ内容の警告が使われる可能性がある。メッセージの内容が複雑（URL、箇条書き、フォーマット済みテキスト）であるほど、インライン重複のリスクは高まる。",
+      "recommendation": "警告メッセージ定数を`src/cli/config/`配下（例: `src/cli/config/security-messages.ts`）に定義し、start.ts、daemon.ts、init.tsから参照する方式を推奨する。YAGNI原則は「機能」に対して適用すべきであり、同一テキストの重複排除は保守性の観点から正当化される。",
+      "affected_section": "4.4 CLI警告メッセージの置換"
+    },
+    {
+      "id": "S1-SF-2",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "env.tsのgetEnv()からCM_AUTH_TOKEN削除時のvalidateEnv()への影響が未記載",
+      "description": "設計方針書セクション4.3では、env.tsからCM_AUTH_TOKEN関連を削除すると記載しているが、getEnv()の変更がvalidateEnv()に与える影響について明示的に言及がない。現在のvalidateEnv()はgetEnv()を内部で呼び出しており、getEnv()がCM_BIND=0.0.0.0かつCM_AUTH_TOKEN未設定時にthrowする動作を前提としている可能性がある。throwを削除すると、validateEnv()の振る舞いも暗黙的に変わる。実装者がこの連鎖的影響を見落とさないよう明記すべきである。",
+      "recommendation": "セクション4.3にvalidateEnv()の振る舞い変化について注記を追加する。具体的には、「getEnv()からthrow文を削除することで、validateEnv()がCM_BIND=0.0.0.0時にもvalid: trueを返すようになる。これは意図した動作変更である」と明記する。",
+      "affected_section": "4.3 src/lib/env.ts の変更"
+    },
+    {
+      "id": "S1-SF-3",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "env-setup.tsのvalidateConfig()からAUTH_TOKEN必須チェック削除が未記載",
+      "description": "設計方針書セクション3.2では、env-setup.tsの変更内容として「generateAuthToken()・validateConfig()の認証チェック削除」と記載しているが、Issueタスクリストでは「validateConfig()内のCM_AUTH_TOKEN認証チェック（行300）」と具体的に記載されている一方、セクション4（詳細設計）にはenv-setup.tsの詳細設計が存在しない。現在のenv-setup.ts行300には`if (config.CM_BIND === '0.0.0.0' && !config.CM_AUTH_TOKEN)`というバリデーションがあり、これを削除する必要がある。詳細設計にも明確に含めるべき。",
+      "recommendation": "セクション4に「4.X src/cli/utils/env-setup.ts の変更」として詳細設計を追加し、以下を明記する: (1) generateAuthToken()メソッドの削除、(2) validateConfig()からCM_AUTH_TOKEN必須チェックの削除、(3) createEnvFile()からCM_AUTH_TOKEN書き込みの削除。",
+      "affected_section": "3.2 ソースコード修正 / 4. 詳細設計"
+    },
+    {
+      "id": "S1-SF-4",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "init.tsのpromptForConfig()内authToken変数とdisplayConfigSummary()のAUTH_TOKEN表示削除が詳細設計に不足",
+      "description": "設計方針書セクション4.5ではinit.tsの変更として「認証トークン生成・表示ロジックを削除」と概要を述べているが、具体的な変更箇所の特定が不十分。実際のコード(init.ts行89-100)では、(1) authToken変数の宣言(行90)、(2) EnvSetup.generateAuthToken()呼び出し(行95)、(3) トークン情報のログ出力(行97-99)がある。さらにdisplayConfigSummary()関数(行133-145)にもCM_AUTH_TOKENの条件付き表示ロジックがあるが、設計書ではdisplayConfigSummary()の変更に言及していない。",
+      "recommendation": "セクション4.5にdisplayConfigSummary()関数の変更を追加する。具体的には、行133-135のCM_AUTH_TOKEN表示と行141-145のトークン保存警告の削除を明記する。",
+      "affected_section": "4.5 commandmate init の変更"
+    },
+    {
+      "id": "S1-NTH-1",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "getEnvWithFallback()関数のAUTH_TOKEN以外の今後の使用範囲について考慮",
+      "description": "設計方針書ではgetEnvWithFallback()関数自体は残すと判断しているが、この関数はmiddleware.tsからも直接呼び出されている（middleware.ts行28, 37）。middleware.ts削除後、getEnvWithFallback()の直接呼び出し元はなくなり（getEnvByKey()経由の間接呼び出しのみ）、CM_AUTH_TOKENエントリをENV_MAPPINGから削除するとEnvKey型からも消える。これは正しい動作だが、設計書でgetEnvWithFallback()のexport維持の理由を明示しておくと実装者に親切である。",
+      "recommendation": "セクション4.3に「getEnvWithFallback()はENV_MAPPING以外のキーにも使用可能な汎用関数であり、exportを維持する。middleware.tsからの直接呼び出しは削除されるが、getEnvByKey()の内部実装として引き続き使用される」と補足する。",
+      "affected_section": "4.3 src/lib/env.ts の変更"
+    },
+    {
+      "id": "S1-NTH-2",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "logger.tsのSENSITIVE_PATTERNS配列からAUTH_TOKEN固有パターン削除後も汎用パターンでカバーされる旨を明記",
+      "description": "設計方針書セクション3.2ではlogger.tsから「AUTH_TOKENマスキングパターン削除」と記載しているが、logger.tsにはCM_AUTH_TOKEN/MCBD_AUTH_TOKEN固有パターン（行83-85）の他に、汎用的な`token`パターン（行81）や`Bearer`パターン（行77）が存在する。AUTH_TOKEN固有パターンを削除しても汎用パターンが残るため、将来的にtokenという文字列を含むログは引き続きマスキングされる。これは意図通りだが、明示的に記載すると実装者が安心して削除できる。",
+      "recommendation": "セクション4に「logger.tsのCM_AUTH_TOKEN/MCBD_AUTH_TOKEN固有パターン（行83-85）を削除する。汎用的なtoken/secretパターン（行81）およびBearerパターン（行77）は他の用途でも使用されるため残す」と明記する。",
+      "affected_section": "3.2 ソースコード修正"
+    },
+    {
+      "id": "S1-NTH-3",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "security-logger.tsのmaskSensitiveData()からAUTH_TOKEN固有パターンを削除する範囲の明確化",
+      "description": "設計方針書ではsecurity-logger.tsから「AUTH_TOKENマスキング処理削除」と記載しているが、maskSensitiveData()関数には(1) CM_AUTH_TOKEN固有パターン（行62）と(2) 汎用tokenパターン（行65-67）が含まれる。削除対象が(1)のみであるか、(2)も含むかが明確でない。security-logger.tsのmaskSensitiveData()はlogger.tsのsanitize()と別の実装であり、役割が異なる。",
+      "recommendation": "設計書に「security-logger.tsのmaskSensitiveData()から行62のCM_AUTH_TOKEN=固有パターンのみを削除する。行65-67の汎用tokenパターンは他のセキュリティイベントログでも使用されるため残す」と明記する。",
+      "affected_section": "3.2 ソースコード修正"
+    },
+    {
+      "id": "S1-NTH-4",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "Env interfaceからCM_AUTH_TOKENフィールドを削除する際のgetEnv()戻り値の整合性確認",
+      "description": "設計方針書セクション4.3ではEnv interfaceからCM_AUTH_TOKENフィールドを削除し、getEnv()の戻り値からもauthTokenを除去すると記載している。現在のgetEnv()（env.ts行206, 247）ではauthToken変数を取得しCM_AUTH_TOKENとして返しているが、これらの行も削除対象であることが暗黙的にしか読み取れない。",
+      "recommendation": "セクション4.3の削除対象リストに「getEnv()内のauthToken変数取得（行206）およびreturnオブジェクトのCM_AUTH_TOKENプロパティ（行247）の削除」を明示的に追加する。",
+      "affected_section": "4.3 src/lib/env.ts の変更"
+    },
+    {
+      "id": "S1-NTH-5",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "実装順序のステップ2でinit.tsがstart.ts/daemon.tsと分離されている理由が不明確",
+      "description": "設計方針書セクション7の実装順序では、ステップ2「CLI修正」としてenv-setup.ts、types、init.ts、start.ts、daemon.tsを同一グループにまとめているが、init.tsの変更は警告メッセージ追加を含み、start.ts/daemon.tsの変更は既存警告の置換である。依存関係上、これらは独立して実装可能であり、グループ化の必然性が薄い。ただし現在の順序で問題が生じるわけではないため、改善の優先度は低い。",
+      "recommendation": "現在の実装順序で問題はないが、もし警告メッセージを共通定数化する場合（S1-SF-1）は、定数ファイルの作成をステップ2の最初に行う旨を追記するとよい。",
+      "affected_section": "7. 実装順序"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 4,
+    "nice_to_have_count": 5,
+    "overall_assessment": "設計方針書は全体として高品質であり、YAGNI/KISS/SRP原則の適用が適切に説明されている。変更対象ファイルの網羅性も高く、ソースコードのgrep結果と設計書の対象ファイルリストが完全に一致している。セキュリティモデルの転換（セキュリティシアターの認証削除 → リバースプロキシ委譲）は合理的であり、破壊的変更の影響分析も適切。主な改善点は4件の should_fix: (1) 警告メッセージの3箇所インライン重複はDRY違反のリスクがあるため共通定数化を推奨、(2) validateEnv()の暗黙的な振る舞い変化を明記すべき、(3) env-setup.tsの詳細設計が欠落している、(4) init.tsのdisplayConfigSummary()変更が詳細設計に含まれていない。nice_to_have 5件はいずれも実装者の理解を助ける補足情報の追加に関するもの。must_fixレベルの設計上の欠陥は検出されなかった。"
+  }
+}

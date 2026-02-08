@@ -1,0 +1,25 @@
+{
+  "issue_number": 179,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "target_file": "dev-reports/design/issue-179-remove-auth-token-design-policy.md",
+  "review_result_file": "dev-reports/issue/179/multi-stage-design-review/stage1-review-result.json",
+  "items_to_apply": [
+    {
+      "id": "S1-SF-1",
+      "action": "Update section 4.4 to extract warning message to shared constant in src/cli/config/security-messages.ts instead of inline definition in each file"
+    },
+    {
+      "id": "S1-SF-2",
+      "action": "Add note to section 4.3 about validateEnv() behavior change when throw is removed"
+    },
+    {
+      "id": "S1-SF-3",
+      "action": "Add new subsection 4.X for env-setup.ts detailed design"
+    },
+    {
+      "id": "S1-SF-4",
+      "action": "Update section 4.5 to include displayConfigSummary() changes"
+    }
+  ]
+}

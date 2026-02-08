@@ -14,7 +14,6 @@ import {
   realpathSync,
 } from 'fs';
 import { join, normalize } from 'path';
-import { randomBytes } from 'crypto';
 import { homedir } from 'os';
 import {
   EnvConfig,
@@ -242,10 +241,6 @@ export class EnvSetup {
       `CM_LOG_FORMAT=${config.CM_LOG_FORMAT}`,
     ];
 
-    if (config.CM_AUTH_TOKEN) {
-      lines.push(`CM_AUTH_TOKEN=${config.CM_AUTH_TOKEN}`);
-    }
-
     lines.push('');
 
     const content = lines.join('\n');
@@ -273,13 +268,6 @@ export class EnvSetup {
   }
 
   /**
-   * Generate secure authentication token
-   */
-  generateAuthToken(): string {
-    return randomBytes(32).toString('hex');
-  }
-
-  /**
    * Validate configuration
    */
   validateConfig(config: EnvConfig): ValidationResult {
@@ -294,11 +282,6 @@ export class EnvSetup {
     const validBinds = ['127.0.0.1', '0.0.0.0', 'localhost'];
     if (!validBinds.includes(config.CM_BIND)) {
       errors.push(`Invalid bind address: must be one of ${validBinds.join(', ')}`);
-    }
-
-    // Require auth token for external access
-    if (config.CM_BIND === '0.0.0.0' && !config.CM_AUTH_TOKEN) {
-      errors.push('auth token is required when binding to 0.0.0.0');
     }
 
     // Validate log level

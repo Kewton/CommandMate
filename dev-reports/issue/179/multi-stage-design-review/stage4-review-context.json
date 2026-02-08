@@ -1,0 +1,14 @@
+{
+  "issue_number": 179,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-179-remove-auth-token-design-policy.md",
+  "review_perspectives": [
+    "OWASP Top 10準拠",
+    "認証削除によるセキュリティリスク評価",
+    "リバースプロキシ方式の妥当性",
+    "情報漏洩リスク",
+    "セキュリティ警告の十分性"
+  ]
+}

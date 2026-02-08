@@ -112,10 +112,10 @@ SWE エージェントがコードを触る際は、以下の責務分離を意�
 - Worktree ごとの .claude_logs/ ディレクトリに保存する
 
 ### 3.3 セキュリティ
-1. 外部アクセス時は認証必須
-- MCBD_BIND=0.0.0.0（LAN からのアクセスを許可）にする場合、
-- MCBD_AUTH_TOKEN を必須とし、
-- すべての Web UI / API で Authorization: Bearer <token> をチェックする
+1. 外部アクセス時はリバースプロキシ認証を推奨
+- CM_BIND=0.0.0.0（LAN からのアクセスを許可）にする場合、
+- Nginx + Basic Auth、Cloudflare Access、Tailscale などのリバースプロキシ認証を設定する
+- 詳細は `docs/security-guide.md` を参照
 
 エージェントは、上記の前提を 仕様変更なしに破壊する提案はしないでください。
 仕様変更をしたい場合は、必ず人間開発者の指示で docs/architecture.md や本ドキュメントを先に更新します。
@@ -181,7 +181,7 @@ SWE エージェントに任せやすいタスク例です。
 - GET /api/worktrees/:id/messages に before / limit パラメータを追加し、ページング実装
 - Stop フック API (POST /api/hooks/claude-done) が requestId を受け取れるように拡張
 - tmux capture-pane 差分抽出処理のリファクタリング・ユニットテスト追加
-- MCBD_AUTH_TOKEN の検証ロジックを共通ミドルウェアとして切り出す
+- リバースプロキシ認証の設定ガイド整備
 
 ### 5.3 インフラ・ツールまわり
 - ESLint / Prettier / TypeScript 設定の追加・改善
@@ -230,7 +230,7 @@ SWE エージェントが PR 相当の変更提案を行うとき、
 自分自身で以下の観点をチェックすることを推奨します。
 - 既存の責務分離を守っているか（UI / API / lib / types を適切に分離しているか）
 - ライセンスヘッダや LICENSE ファイルに誤った変更を加えていないか
-- MCBD_ROOT_DIR / MCBD_BIND / MCBD_AUTH_TOKEN など、既存設定値の意味を崩していないか
+- CM_ROOT_DIR / CM_BIND など、既存設定値の意味を崩していないか
 - 新しい環境変数や設定を追加した場合、README.md と docs/configuration.md（存在する場合）を更新したか
 - 必要に応じてテストを追加し、少なくとも既存テストが壊れていないか確認したか
 - UI 変更がモバイルでも破綻していないか（レスポンシブの確認）

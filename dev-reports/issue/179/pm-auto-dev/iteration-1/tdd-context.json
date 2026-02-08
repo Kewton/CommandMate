@@ -1,0 +1,28 @@
+{
+  "issue_number": 179,
+  "issue_title": "CM_AUTH_TOKEN認証機能を削除し、リバースプロキシ認証を推奨",
+  "design_doc_path": "dev-reports/design/issue-179-remove-auth-token-design-policy.md",
+  "work_plan_path": "dev-reports/issue/179/work-plan.md",
+  "acceptance_criteria": [
+    "CM_BIND=0.0.0.0設定時も認証なしでAPIアクセス可能",
+    "既存のCM_AUTH_TOKEN設定があっても動作に影響なし（無視される）",
+    "commandmate initで外部公開設定時にリバースプロキシ認証推奨メッセージが表示される",
+    "commandmate startでCM_BIND=0.0.0.0時にリバースプロキシ推奨警告が表示される",
+    "外部公開時のセキュリティガイド（docs/security-guide.md）がドキュメントに追加されている",
+    "DEPLOYMENT.mdとTRUST_AND_SAFETY.mdのセキュリティセクションが更新されている",
+    "AUTH_TOKEN関連の全ドキュメントが更新されている",
+    "docs/migration-to-commandmate.mdのAUTH_TOKEN参照が全て更新されている",
+    "AUTH_TOKEN関連のテストが全て更新され、npm run test:unitが通ること",
+    "npm run lintとnpx tsc --noEmitが通ること",
+    "CHANGELOGに破壊的変更（BREAKING CHANGE）として記載されていること"
+  ],
+  "implementation_tasks": [
+    "Phase 1: サーバー側認証ロジック削除 (middleware.ts削除, env.ts修正, api-client.ts修正, logger.ts修正, security-logger.ts修正)",
+    "Phase 2: CLI修正 (security-messages.ts新規作成, env-setup.ts修正, types修正, init.ts修正, start.ts警告置換, daemon.ts警告置換)",
+    "Phase 3: 設定ファイル修正 (.env.example, .env.production.example, setup-env.sh)",
+    "Phase 4: テスト更新 (middleware.test.ts削除, env.test.ts更新, logger.test.ts更新, env-setup.test.ts更新, daemon.test.ts更新, security-logger.test.ts更新)",
+    "Phase 5: ドキュメント更新 (security-guide.md新規作成, DEPLOYMENT.md, TRUST_AND_SAFETY.md, migration-to-commandmate.md, README.md, 他7件, CHANGELOG.md)"
+  ],
+  "target_coverage": 80,
+  "notes": "This is primarily a deletion/refactoring task. TDD approach: First update tests to expect new behavior, then modify source code to pass tests."
+}

@@ -1,0 +1,14 @@
+{
+  "issue_number": 179,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_doc_path": "dev-reports/design/issue-179-remove-auth-token-design-policy.md",
+  "review_perspectives": [
+    "変更の波及効果分析",
+    "既存機能への影響",
+    "ユーザー影響の網羅性",
+    "移行パスの妥当性",
+    "ロールバック可能性"
+  ]
+}

@@ -130,7 +130,6 @@ export interface EnvConfig {
   CM_ROOT_DIR: string;
   CM_PORT: number;
   CM_BIND: string;
-  CM_AUTH_TOKEN?: string;
   CM_DB_PATH: string;
   CM_LOG_LEVEL: string;
   CM_LOG_FORMAT: string;

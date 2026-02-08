@@ -1,0 +1,14 @@
+{
+  "issue_number": 179,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_doc_path": "dev-reports/design/issue-179-remove-auth-token-design-policy.md",
+  "review_perspectives": [
+    "設計書と実際のソースコードの整合性",
+    "Issueタスクリストと設計書の整合性",
+    "変更対象ファイルリストの網羅性",
+    "削除対象の行番号の正確性",
+    "依存関係の整合性"
+  ]
+}

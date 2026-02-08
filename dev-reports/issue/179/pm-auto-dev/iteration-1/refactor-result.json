@@ -1,0 +1,35 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [
+    "Removed trailing extra blank lines in src/lib/env.ts (code style consistency)",
+    "Updated CLAUDE.md Issue #76 section to remove stale AUTH_TOKEN references (7 env vars, not 8; removed client-side AUTH_TOKEN fallback and masking pattern lines)",
+    "Cleaned up .env file to remove stale MCBD_AUTH_TOKEN and NEXT_PUBLIC_MCBD_AUTH_TOKEN commented references, replaced with security-guide.md reference"
+  ],
+  "files_changed": [
+    "src/lib/env.ts",
+    "CLAUDE.md",
+    ".env"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [],
+  "analysis_summary": {
+    "dead_code_or_unused_imports": "No dead code or unused imports found in src/ related to AUTH_TOKEN removal. All AUTH_TOKEN references were properly removed from source files.",
+    "consistent_code_style": "Fixed trailing blank lines in src/lib/env.ts. All other target files have consistent formatting.",
+    "orphaned_type_definitions": "No orphaned type definitions. EnvConfig, Env interface, and ENV_MAPPING no longer contain AUTH_TOKEN fields. CLI types/index.ts is clean.",
+    "todo_fixme_comments": "No TODO/FIXME comments related to AUTH_TOKEN found in source code.",
+    "stale_documentation": "Updated CLAUDE.md Issue #76 section (stale AUTH_TOKEN references). Cleaned .env file (stale commented-out AUTH_TOKEN lines).",
+    "logger_security_patterns": "SENSITIVE_PATTERNS and SENSITIVE_KEY_PATTERN in logger.ts remain valid for general security sanitization (Bearer tokens, generic auth patterns). These are not specific to CM_AUTH_TOKEN.",
+    "security_logger_mask": "maskSensitiveData() in security-logger.ts remains valid for general token masking in security logs.",
+    "pre_existing_test_failure": "claude-session.test.ts has pre-existing failures due to tmux dependency. Unrelated to Issue #179 changes."
+  },
+  "message": "Refactoring complete. Cleaned up stale AUTH_TOKEN references in documentation and configuration files. Source code (src/) was already clean with no dead code or orphaned types. Static analysis passes with zero errors."
+}

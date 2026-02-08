@@ -27,11 +27,7 @@ commandmate start --daemon
 - [ ] `.env` ファイルが作成され、適切な値が設定されている
 - [ ] `CM_ROOT_DIR` がワークツリーのルートディレクトリを正しく指している
 - [ ] `CM_BIND=0.0.0.0` が設定されている（外部アクセスを許可する場合）
-- [ ] `CM_AUTH_TOKEN` が安全なランダム値に設定されている（必須）
-  ```bash
-  # トークン生成コマンド
-  openssl rand -hex 32
-  ```
+- [ ] 外部公開時はリバースプロキシでの認証が設定されている（推奨、詳細: `docs/security-guide.md`）
 - [ ] `CM_DB_PATH` が適切な場所を指している
 - [ ] `NODE_ENV=production` が設定されている
 - [ ] `.env` ファイルが `.gitignore` に含まれている（セキュリティ）
@@ -109,8 +105,7 @@ commandmate start --daemon
 
 ### 6. セキュリティ
 
-- [ ] 認証トークンが設定されている（`CM_AUTH_TOKEN`）
-- [ ] トークンが `.env` ファイルに保存され、Git に含まれていない
+- [ ] 外部公開時はリバースプロキシ認証が設定されている（詳細: `docs/security-guide.md`）
 - [ ] ファイアウォールが適切に設定されている
   ```bash
   # UFW (Ubuntu/Debian)
@@ -325,10 +320,10 @@ commandmate start --daemon
   npm run db:reset
   ```
 
-### 認証エラー
+### 外部アクセスの問題
 
-- [ ] `CM_AUTH_TOKEN` が設定されているか確認
-- [ ] クライアント側で正しいトークンを使用しているか確認
+- [ ] リバースプロキシ認証が設定されているか確認（外部公開時）
+- [ ] ファイアウォール設定を確認
 
 ## 📊 本番環境の監視
 

@@ -1,0 +1,49 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "applied_items": [
+    {
+      "id": "S4-OWASP-A07-1",
+      "severity": "must_fix",
+      "action": "セクション4.7のsecurity-guide.md構成に脅威モデルセクションを追加（RCE、ファイル操作、セッション操作、情報漏洩の4カテゴリ）",
+      "status": "applied"
+    },
+    {
+      "id": "S4-DOC-2",
+      "severity": "must_fix",
+      "action": "セクション4.7の移行手順冒頭に強い警告を追加、セクション4.8のCHANGELOGにアップグレード前のリバースプロキシ設定完了の警告を追加",
+      "status": "applied"
+    },
+    {
+      "id": "S4-WARN-1",
+      "severity": "should_fix",
+      "action": "セクション4.4のREVERSE_PROXY_WARNING定数をANSIエスケープシーケンス（赤色/ボールド）付きの具体的リスク記述に強化",
+      "status": "applied"
+    },
+    {
+      "id": "S4-DOC-1",
+      "severity": "should_fix",
+      "action": "セクション3.6のTRUST_AND_SAFETY.md更新タスクに非推奨設定リストの具体的な書き換え内容を明記",
+      "status": "applied"
+    },
+    {
+      "id": "S4-OWASP-A01-2",
+      "severity": "should_fix",
+      "action": "セクション4.7のNginx設定例にレート制限設定（limit_req_zone）を含める要件を追加",
+      "status": "applied"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "S4-OWASP-A01-1",
+      "severity": "should_fix",
+      "reason": "確認プロンプトの追加はIssueのスコープ外（Issueでは警告メッセージの置換と記載）。CLI警告メッセージの強化で対応。フォローアップIssueとして検討可能"
+    },
+    {
+      "id": "S4-DEFENSE-1",
+      "severity": "should_fix",
+      "reason": "X-Forwarded-Forヘッダーチェックの追加はスコープ外。KISS/YAGNI原則に基づき、リバースプロキシへの委譲を維持。security-guide.mdでの脅威モデル明記で対応"
+    }
+  ],
+  "summary": "Must Fix 2件すべてを設計方針書に反映完了。Should Fix 5件のうち3件を反映、2件はスコープ外としてスキップ（フォローアップ検討可能）"
+}

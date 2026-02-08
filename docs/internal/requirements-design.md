@@ -105,7 +105,7 @@
 #### 2.2.1 セキュリティ
 
 - [NFR-SEC-01] デフォルトでは `localhost` (`127.0.0.1`) にバインドし、同一マシンからのみアクセス可能とすること。
-- [NFR-SEC-02] `MCBD_BIND=0.0.0.0` などで LAN 公開する場合は、`MCBD_AUTH_TOKEN` によるトークン認証を必須とすること。
+- [NFR-SEC-02] `CM_BIND=0.0.0.0` などで LAN 公開する場合は、リバースプロキシ（Nginx + Basic Auth、Cloudflare Access、Tailscale 等）による認証を推奨すること。詳細は `docs/security-guide.md` を参照。
 - [NFR-SEC-03] root ディレクトリ配下の worktree のみを対象とし、
   - API から任意のパスを直接指定して触れることがないようにすること。
 
@@ -209,9 +209,10 @@ export CLAUDE_HOOKS_STOP="${HOOK_COMMAND}"
 ⸻
 
 ### 3.6 セキュリティ設計
-- 初期値は MCBD_BIND=127.0.0.1 とし、ローカルホスト限定で動作させる。
-- LAN 公開などで MCBD_BIND=0.0.0.0 とする場合、
-- MCBD_AUTH_TOKEN を必須とし、すべての Web UI / API / WebSocket でトークン認証を行う。
+- 初期値は CM_BIND=127.0.0.1 とし、ローカルホスト限定で動作させる。
+- LAN 公開などで CM_BIND=0.0.0.0 とする場合、
+- リバースプロキシ（Nginx + Basic Auth、Cloudflare Access、Tailscale 等）による認証を推奨する。
+- 詳細は `docs/security-guide.md` を参照。
 - HTTPS / TLS については、
 - CommandMate 自身は HTTP のままとし、
 - 必要に応じて前段のリバースプロキシ（Caddy / nginx / Traefik 等）で終端する想定とする。

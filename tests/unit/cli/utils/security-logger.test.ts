@@ -121,13 +121,6 @@ describe('maskSensitiveData', () => {
     expect(result).toContain('***');
   });
 
-  it('should mask CM_AUTH_TOKEN in env format', () => {
-    const input = 'CM_AUTH_TOKEN=supersecrettoken123';
-    const result = maskSensitiveData(input);
-    expect(result).not.toContain('supersecrettoken123');
-    expect(result).toContain('***masked***');
-  });
-
   it('should not mask non-sensitive data', () => {
     const input = 'Port: 3000, Bind: 127.0.0.1';
     const result = maskSensitiveData(input);

@@ -25,7 +25,7 @@ export const ENV_MAPPING = {
   CM_ROOT_DIR: 'MCBD_ROOT_DIR',
   CM_PORT: 'MCBD_PORT',
   CM_BIND: 'MCBD_BIND',
-  CM_AUTH_TOKEN: 'MCBD_AUTH_TOKEN',
+
   CM_LOG_LEVEL: 'MCBD_LOG_LEVEL',
   CM_LOG_FORMAT: 'MCBD_LOG_FORMAT',
   CM_LOG_DIR: 'MCBD_LOG_DIR',
@@ -179,9 +179,6 @@ export interface Env {
   /** Bind address (127.0.0.1 or 0.0.0.0) */
   CM_BIND: string;
 
-  /** Authentication token (optional for localhost) */
-  CM_AUTH_TOKEN?: string;
-
   /** Database file path */
   CM_DB_PATH: string;
 }
@@ -203,8 +200,6 @@ export function getEnv(): Env {
   const rootDir = getEnvByKey('CM_ROOT_DIR') || process.cwd();
   const port = parseInt(getEnvByKey('CM_PORT') || '3000', 10);
   const bind = getEnvByKey('CM_BIND') || '127.0.0.1';
-  const authToken = getEnvByKey('CM_AUTH_TOKEN');
-
   // Issue #135: DB path resolution with proper fallback chain
   // Priority: CM_DB_PATH > DATABASE_PATH (deprecated) > getDefaultDbPath()
   const databasePath = getEnvByKey('CM_DB_PATH')
@@ -224,11 +219,6 @@ export function getEnv(): Env {
     throw new Error(`Invalid CM_BIND: ${bind}. Must be '127.0.0.1', '0.0.0.0', or 'localhost'.`);
   }
 
-  // Require auth token for public binding
-  if (bind === '0.0.0.0' && !authToken) {
-    throw new Error('CM_AUTH_TOKEN (or MCBD_AUTH_TOKEN) is required when CM_BIND=0.0.0.0');
-  }
-
   // Issue #135: Validate DB path for security (SEC-001)
   let validatedDbPath: string;
   try {
@@ -244,7 +234,6 @@ export function getEnv(): Env {
     CM_ROOT_DIR: path.resolve(rootDir),
     CM_PORT: port,
     CM_BIND: bind,
-    CM_AUTH_TOKEN: authToken,
     CM_DB_PATH: validatedDbPath,
   };
 }
@@ -266,14 +255,4 @@ export function validateEnv(): { valid: boolean; errors: string[] } {
     }
     return { valid: false, errors };
   }
-}
-
-/**
- * Check if authentication is required based on bind address
- *
- * @returns True if authentication is required
- */
-export function isAuthRequired(): boolean {
-  const env = getEnv();
-  return env.CM_BIND === '0.0.0.0';
 }

@@ -1,0 +1,148 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "S2-LN-1",
+      "severity": "nice_to_have",
+      "category": "行番号",
+      "title": "middleware.tsの行数記載が微妙に不正確（89行 vs wc -l 88行）",
+      "description": "設計方針書セクション3.1で middleware.ts を「89行」と記載しているが、wc -l コマンドでは88行と報告される。ファイルの最終行（空行）がwc -l では改行文字がないためカウントされない可能性がある。Read ツールでは89行目まで表示される。実質的な影響はないが、正確性の観点で記録する。",
+      "recommendation": "実質的な差異はないため、現状のまま「89行」の記載で問題なし。",
+      "affected_section": "セクション3.1 削除対象ファイル"
+    },
+    {
+      "id": "S2-LN-2",
+      "severity": "nice_to_have",
+      "category": "行番号",
+      "title": "api-client.tsの行番号はIssue・設計書ともに正確",
+      "description": "Issueでは clientAuthTokenWarned を行45、authToken取得を行54-55、deprecation警告を行58-64（行52-65全体）、Authorization設定を行70-73 と記載。実際のソースコードの行番号と完全に一致している。設計方針書セクション4.2の記述とも整合している。",
+      "recommendation": "対応不要。正確に記載されている。",
+      "affected_section": "セクション4.2 src/lib/api-client.ts の変更"
+    },
+    {
+      "id": "S2-LN-3",
+      "severity": "nice_to_have",
+      "category": "行番号",
+      "title": "env.ts, init.ts, start.ts, daemon.ts, env-setup.ts の行番号はすべて正確",
+      "description": "設計方針書およびIssueで参照されているすべての行番号が実際のソースコードと一致していることを確認した。具体的には: env.ts ENV_MAPPING(行24-33), Env interface CM_AUTH_TOKEN(行183), getEnvByKey CM_AUTH_TOKEN(行206), throw文(行228-229), return CM_AUTH_TOKEN(行247), isAuthRequired(行276-279) / init.ts authToken(行90), generateAuthToken(行95), log出力(行97-99), displayConfigSummary(行133-135, 141-145) / start.ts セキュリティ警告(行168-174) / daemon.ts セキュリティ警告(行78-84) / env-setup.ts generateAuthToken(行278-280), validateConfig(行300), createEnvFile(行245-247)。",
+      "recommendation": "対応不要。すべて正確に記載されている。",
+      "affected_section": "セクション4.3-4.6"
+    },
+    {
+      "id": "S2-MO-1",
+      "severity": "nice_to_have",
+      "category": "網羅性",
+      "title": "ソースコード内のAUTH_TOKEN参照は設計書で完全に網羅されている",
+      "description": "grepによる全検索の結果、srcディレクトリ内でAUTH_TOKEN/authTokenを含むファイルは正確に10ファイルであり、設計方針書セクション3の変更対象ファイル（削除1件 + 修正8件 + 型定義1件 = 10件）と完全に一致する。NEXT_PUBLIC_CM_AUTH_TOKENを含むファイルは api-client.ts, scripts/setup-env.sh, .env.production.example の3件で、すべて設計書でカバーされている。CI/CDワークフローファイルにはAUTH_TOKEN参照なし。next.config.jsにもAUTH_TOKEN参照なし。",
+      "recommendation": "対応不要。網羅的にカバーされている。",
+      "affected_section": "セクション3 変更対象ファイル"
+    },
+    {
+      "id": "S2-MO-2",
+      "severity": "should_fix",
+      "category": "網羅性",
+      "title": "CHANGELOG.mdのAUTH_TOKEN関連既存記述の更新方針が設計書に未記載",
+      "description": "CHANGELOG.md にはIssue #76, #77 で追加されたAUTH_TOKEN関連の記述が複数存在する（行232, 252, 257, 258, 266, 271等）。設計方針書セクション4.8ではCHANGELOG更新として[Unreleased]セクションに破壊的変更を追記する方針のみ記載しているが、既存エントリ（過去のバージョンのCHANGELOG記述）は変更しないという方針が明示されていない。Issueの実装タスクでも「CHANGELOG更新（破壊的変更として記載）」のみで、既存記述の扱いに言及がない。通常、過去バージョンのCHANGELOG記述は変更しないのが慣例であり、意図通りと推測されるが、明示すると実装時の迷いを防げる。",
+      "recommendation": "設計方針書セクション4.8に「既存のCHANGELOGエントリ（Issue #76, #77等の過去バージョン記述）は歴史的記録として変更しない」旨を明記する。",
+      "affected_section": "セクション4.8 CHANGELOG の更新"
+    },
+    {
+      "id": "S2-NA-1",
+      "severity": "should_fix",
+      "category": "名前",
+      "title": "設計書セクション4.3のgetEnvWithFallback() CM_AUTH_TOKEN処理削除の記述が不正確",
+      "description": "設計方針書セクション4.3の削除対象リストに「getEnvWithFallback() のCM_AUTH_TOKEN処理」と記載されているが、getEnvWithFallback()は汎用関数であり、CM_AUTH_TOKEN固有の処理は含んでいない。実際に削除すべきは (1) ENV_MAPPINGからのCM_AUTH_TOKENエントリ（行28）、(2) getEnv()内のauthToken変数取得（行206）、(3) return文のCM_AUTH_TOKENプロパティ（行247）、(4) throw文（行228-229）である。これらは設計書の他の箇所で正しく記載されているが、「getEnvWithFallback()のCM_AUTH_TOKEN処理」という表現は、middleware.tsからのgetEnvWithFallback('CM_AUTH_TOKEN', 'MCBD_AUTH_TOKEN')呼び出しの削除（middleware.ts自体の削除による）を指している可能性がある。しかし、そのコンテキストは「env.tsの変更」セクションであるため混乱を招く。",
+      "recommendation": "セクション4.3の削除対象リストから「getEnvWithFallback() のCM_AUTH_TOKEN処理」を削除するか、「ENV_MAPPINGからCM_AUTH_TOKENエントリ（行28）を削除することで、getEnvByKey('CM_AUTH_TOKEN')経由のフォールバック処理が自動的に不要になる」という正確な表現に修正する。",
+      "affected_section": "セクション4.3 src/lib/env.ts の変更"
+    },
+    {
+      "id": "S2-IS-1",
+      "severity": "nice_to_have",
+      "category": "Issue整合性",
+      "title": "設計書の合計ファイル数（32）とIssueの合計ファイル数（31）の不一致",
+      "description": "設計方針書セクション9では合計32件としており、Issueの影響範囲では合計31件としている。差分は設計方針書が「ソースコード新規作成 1件（src/cli/config/security-messages.ts）」を独立カテゴリとしてカウントしているのに対し、Issueではこの新規ファイルを明示的にリストアップしていないことによる。Issueの実装タスクでは start.ts, daemon.ts, init.ts の変更が「リバースプロキシ推奨警告」に言及しており、暗黙的に共通メッセージ定数の存在を前提としているが、security-messages.ts の新規作成タスクが明示的に記載されていない。",
+      "recommendation": "Issueの実装タスクに「src/cli/config/security-messages.ts に共通警告メッセージ定数（REVERSE_PROXY_WARNING）を新規作成」タスクを追加するか、影響ファイル一覧の件数を設計書と合わせる。ただし、設計書側でカバーされているため実装上の問題は小さい。",
+      "affected_section": "セクション9 影響範囲サマリー"
+    },
+    {
+      "id": "S2-IS-2",
+      "severity": "nice_to_have",
+      "category": "Issue整合性",
+      "title": "設計書とIssueの実装タスクは内容面で整合している",
+      "description": "Issueの全実装タスク（サーバー側5件、CLI側6件、環境変数・設定3件、ドキュメント14件、テスト6件）と設計方針書の変更対象ファイル・詳細設計を照合した結果、すべてのタスクが設計書でカバーされていることを確認した。受け入れ条件もすべて設計書の変更内容と整合している。",
+      "recommendation": "対応不要。整合性は確保されている。",
+      "affected_section": "全セクション"
+    },
+    {
+      "id": "S2-DE-1",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "isAuthRequired()関数の外部参照有無の確認が設計書に未記載",
+      "description": "設計方針書セクション4.3でisAuthRequired()関数の削除を明記しているが、この関数がsrc/lib/env.tsからexportされている（行276）。grep検索の結果、srcディレクトリ内でisAuthRequired()を呼び出しているファイルは見つからなかったが、設計書にはこの確認結果が記載されていない。未使用のexport関数であることを明示すると、実装者が安心して削除できる。",
+      "recommendation": "セクション4.3に「isAuthRequired()関数はexportされているが、現時点でsrcディレクトリ内に呼び出し箇所がないことを確認済み」と追記する。",
+      "affected_section": "セクション4.3 src/lib/env.ts の変更"
+    },
+    {
+      "id": "S2-DE-2",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "title": "実装順序（セクション7）の依存関係は正確",
+      "description": "設計方針書セクション7の実装順序は、依存関係の上流からの削除順を正しく定義している。middleware.ts削除（env.tsのgetEnvWithFallbackを参照）を最初に行い、次にenv.tsからAUTH_TOKEN関連を削除、その後api-client.ts、logger.ts、security-logger.tsの順に進む。CLI側修正は共通定数ファイル（security-messages.ts）を先に作成してから各コマンドファイルを修正する順序も適切である。",
+      "recommendation": "対応不要。依存関係チェーンは正確。",
+      "affected_section": "セクション7 実装順序"
+    },
+    {
+      "id": "S2-MO-3",
+      "severity": "should_fix",
+      "category": "網羅性",
+      "title": "scripts/setup-env.shのAUTH_TOKEN関連削除範囲が設計書で不十分",
+      "description": "設計方針書セクション3.4ではscripts/setup-env.shについて「NEXT_PUBLIC_CM_AUTH_TOKEN関連削除」と記載しているが、実際のsetup-env.shにはNEXT_PUBLIC_CM_AUTH_TOKEN以外にも多数のAUTH_TOKEN関連コードが存在する: (1) ヘルプテキストのCM_AUTH_TOKEN説明（行50）、(2) generate_token関数（行168-171）、(3) auth_token変数と条件分岐（行231, 233-240）、(4) CM_AUTH_TOKEN書き込み（行297-314）、(5) サマリー表示（行372-374）、(6) トークン保存警告（行379-382）。設計書はこれらを「NEXT_PUBLIC_CM_AUTH_TOKEN関連削除」の一言で済ませているが、変更範囲が大きいため明示したほうが安全である。",
+      "recommendation": "設計方針書セクション3.4のscripts/setup-env.shの変更内容を「NEXT_PUBLIC_CM_AUTH_TOKEN関連削除」から「AUTH_TOKEN関連の全削除（ヘルプテキスト、generate_token関数、auth_token変数、CM_AUTH_TOKEN/NEXT_PUBLIC_CM_AUTH_TOKEN書き込み、サマリー表示、トークン保存警告）」に詳細化する。",
+      "affected_section": "セクション3.4 設定ファイル修正"
+    },
+    {
+      "id": "S2-IS-3",
+      "severity": "must_fix",
+      "category": "Issue整合性",
+      "title": "設計書にsrc/cli/config/security-messages.tsの新規作成タスクが記載されているがIssueの実装タスクリストに欠落",
+      "description": "設計方針書セクション4.4およびセクション7（実装順序ステップ2）で、共通警告メッセージ定数ファイル src/cli/config/security-messages.ts の新規作成が明記されている。しかし、Issueの実装タスクリストには「src/cli/config/security-messages.ts の新規作成」に相当するチェックボックスが存在しない。start.ts、daemon.ts、init.ts が REVERSE_PROXY_WARNING を参照する設計であるため、この新規ファイルが作成されないとコンパイルエラーが発生する。",
+      "recommendation": "Issueの「CLI側」実装タスクセクションに「src/cli/config/security-messages.ts に共通警告メッセージ定数（REVERSE_PROXY_WARNING）を新規作成」タスクを追加する。",
+      "affected_section": "セクション4.4, セクション7"
+    },
+    {
+      "id": "S2-NA-2",
+      "severity": "nice_to_have",
+      "category": "名前",
+      "title": "設計書のREVERSE_PROXY_WARNING定数名はIssueの警告メッセージ記述と整合",
+      "description": "設計方針書セクション4.4で定義されるREVERSE_PROXY_WARNING定数の内容（外部公開設定警告、推奨認証方法3件、セキュリティガイドURL）は、Issueの「commandmate init / start での警告メッセージ」セクションに記載された警告メッセージと完全に一致している。定数名、メッセージ内容、ファイル配置場所のいずれも設計書とIssueで整合している。",
+      "recommendation": "対応不要。",
+      "affected_section": "セクション4.4"
+    },
+    {
+      "id": "S2-MO-4",
+      "severity": "should_fix",
+      "category": "網羅性",
+      "title": ".env.exampleの行番号がIssueとソースで一致しているが設計書セクション3.4の記述が簡略すぎる",
+      "description": "Issueでは.env.exampleについて詳細な行番号付きの変更指示がある（行29のCM_AUTH_TOKEN行削除、行16-18のCM_BIND説明コメント更新、行26-28のAUTH_TOKEN関連コメント削除、行67のMCBD_AUTH_TOKENコメント行削除）。実際のソースコードの行番号を確認した結果: 行29=CM_AUTH_TOKEN（正確）、行16-18=CM_BIND説明（行16-17が該当、行18はCM_BIND=の値行なので正確には行15-17）、行26-28=AUTH_TOKENコメント（行24-28が該当セクション、行26-28は正確）、行67=MCBD_AUTH_TOKEN（正確）。設計方針書セクション3.4は「CM_AUTH_TOKEN行削除、CM_BIND説明更新」のみで、Issueの詳細指示（行26-28、行67）を十分にカバーしていない。",
+      "recommendation": "設計方針書セクション3.4の.env.exampleの変更内容を、Issueと同等の詳細度に更新する。具体的には「CM_AUTH_TOKEN行（行29）削除、CM_BIND説明コメント（行16-17）の 'auth required' を 'reverse proxy auth recommended' に更新、AUTH_TOKEN関連コメント（行26-28）削除、MCBD_AUTH_TOKENコメント行（行67）削除」とする。",
+      "affected_section": "セクション3.4 設定ファイル修正"
+    },
+    {
+      "id": "S2-LN-4",
+      "severity": "should_fix",
+      "category": "行番号",
+      "title": ".env.exampleのCM_BIND説明コメントの行番号がIssueで「行16-18」だが実際は行15-18",
+      "description": "Issueでは「CM_BIND説明コメント（行16-18）の 'auth required' を 'reverse proxy auth recommended' に更新」と記載している。実際のファイルでは: 行15=空行、行16='# - 127.0.0.1: Localhost only (development, no auth required)'、行17='# - 0.0.0.0: All interfaces (production, auth required)'、行18='CM_BIND=127.0.0.1'。'auth required' を含むのは行17のみであり、行16は 'no auth required' という表現である。更新対象は行17の 'auth required' 部分で正確だが、「行16-18」という範囲指定はやや広い（行18はCM_BINDの値行であり、コメントではない）。",
+      "recommendation": "Issueの行番号参照を「行16-17」に修正するか、「行17の 'auth required' を更新」に絞り込む。設計書側でも同様に明確化する。",
+      "affected_section": "セクション3.4 設定ファイル修正"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 5,
+    "nice_to_have_count": 8,
+    "overall_assessment": "設計方針書とIssueの整合性は全体的に高い水準にある。ソースコードの行番号はほぼすべて正確であり、変更対象ファイルの網羅性も確認できた。src配下のAUTH_TOKEN参照10ファイルはすべて設計書でカバーされている。Must Fixは1件のみで、Issueの実装タスクリストにsrc/cli/config/security-messages.tsの新規作成タスクが欠落している点である。この定数ファイルは start.ts, daemon.ts, init.ts が参照するため、作成が漏れるとコンパイルエラーになる。Should Fixの5件は、(1) CHANGELOGの既存記述の扱い方針の明示、(2) getEnvWithFallback()の削除対象表現の不正確さ、(3) isAuthRequired()の外部参照有無の確認結果の明示、(4) setup-env.shの変更範囲の詳細化、(5-6) .env.exampleの変更指示の詳細化であり、いずれも実装者の作業効率向上に寄与する。依存関係チェーンは正確であり、実装順序も適切に設計されている。"
+  }
+}

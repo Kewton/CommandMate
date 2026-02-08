@@ -58,10 +58,8 @@ export function maskSensitiveData(input: string | undefined): string | undefined
     return input;
   }
 
-  // Mask CM_AUTH_TOKEN values
-  let result = input.replace(/CM_AUTH_TOKEN=\S+/g, 'CM_AUTH_TOKEN=***masked***');
-
   // Mask any token-like strings (12+ hex/alphanumeric characters after "token:")
+  let result = input;
   result = result.replace(/(?:token|Token)[:\s]+([a-zA-Z0-9]{12,})/gi, (_match, token) => {
     return _match.replace(token, '***');
   });

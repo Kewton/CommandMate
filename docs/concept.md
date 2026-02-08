@@ -162,7 +162,7 @@ npm install
 # 設定（.env）
 CM_ROOT_DIR=/path/to/your/repos
 CM_BIND=0.0.0.0
-CM_AUTH_TOKEN=your-secret-token
+# External access: configure reverse proxy authentication (see docs/security-guide.md)
 
 # 起動
 npm run build && npm start

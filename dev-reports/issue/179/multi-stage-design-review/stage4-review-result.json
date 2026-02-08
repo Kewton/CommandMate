@@ -1,0 +1,113 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "findings": [
+    {
+      "id": "S4-OWASP-A01-1",
+      "severity": "should_fix",
+      "category": "OWASP-A01",
+      "title": "CM_BIND=0.0.0.0時の無認証起動に対するフェイルセーフ不足",
+      "description": "設計書4.3節でgetEnv()のthrow文を削除することにより、CM_BIND=0.0.0.0でCM_AUTH_TOKEN未設定時にもサーバーが起動可能になる。現行実装ではenv.ts行228-229のthrow文がフェイルセーフとして機能し、無認証での外部公開を物理的に防止している。削除後はCLI警告メッセージのみが防御手段となり、ユーザーが警告を見落とした場合に全35個のAPIエンドポイントが無認証で外部公開される。特にsend(コマンド実行)、kill-session(セッション終了)、files(ファイル読み書き削除)、upload(ファイルアップロード)は高リスクな操作である。",
+      "recommendation": "CLI警告をインタラクティブな確認プロンプト(y/N)に変更し、ユーザーが明示的にリスクを承諾しない限りCM_BIND=0.0.0.0での無認証起動を拒否することを検討する。あるいは、起動時に一度だけ表示される警告ではなく、コンソールに定期的に赤色の警告バナーを表示し続ける方式も有効。最低限、現行のthrow文削除に代わるCLI側の明示的ブロック機構をstart.tsおよびdaemon.tsに追加すべきである。",
+      "affected_section": "4.3 src/lib/env.ts の変更、4.4 CLI警告メッセージの置換"
+    },
+    {
+      "id": "S4-OWASP-A01-2",
+      "severity": "should_fix",
+      "category": "OWASP-A01",
+      "title": "APIエンドポイントにレート制限なし",
+      "description": "middleware.tsの削除により、将来的にレート制限や追加のセキュリティヘッダー設定を行うNext.jsミドルウェア層が完全に消失する。現在35個のAPIエンドポイントが存在し、外部公開時にはブルートフォースやDoS攻撃のリスクがある。設計書ではリバースプロキシに委譲するとしているが、レート制限をリバースプロキシの設定に完全依存するのは多層防御の観点で不十分。",
+      "recommendation": "middleware.tsを完全に削除するのではなく、認証ロジックのみを削除し、セキュリティヘッダー(X-Content-Type-Options, X-Frame-Options等)の設定やCM_BIND=0.0.0.0時の追加警告ログを残すことを検討する。あるいは、docs/security-guide.mdにレート制限の設定例(Nginx limit_req_zone等)を必ず含めることを要件に追加すべきである。",
+      "affected_section": "4.1 src/middleware.ts の削除"
+    },
+    {
+      "id": "S4-OWASP-A07-1",
+      "severity": "must_fix",
+      "category": "OWASP-A07",
+      "title": "セキュリティガイド(docs/security-guide.md)の具体的な脅威モデル記載が不足",
+      "description": "設計書4.7節のsecurity-guide.md構成案には、CommandMateが無認証で公開された場合の具体的な脅威シナリオが記載されていない。CommandMateはtmuxセッションを通じてCLIツール(Claude Code等)を操作できるため、無認証公開は事実上RCE(Remote Code Execution)と同等のリスクを意味する。具体的には、/api/worktrees/:id/sendエンドポイント経由で任意のプロンプトをClaude CLIに送信でき、ファイル操作やコマンド実行が可能。この重大なリスクをsecurity-guide.mdに明記しなければ、ユーザーがリバースプロキシ設定の必要性を過小評価する恐れがある。",
+      "recommendation": "docs/security-guide.mdに「脅威モデル」セクションを追加し、以下の攻撃シナリオを具体的に記載すべき: (1) 無認証公開時のRCE相当リスク(sendエンドポイントを通じたCLIコマンド実行)、(2) ファイルシステムの読み書き削除(filesエンドポイント)、(3) セッション操作(kill-session、auto-yes)、(4) 情報漏洩(current-output、messages、logsエンドポイント)。これにより、リバースプロキシ認証の必要性が技術的に明確になる。",
+      "affected_section": "4.7 docs/security-guide.md の新規作成"
+    },
+    {
+      "id": "S4-INFO-1",
+      "severity": "nice_to_have",
+      "category": "情報漏洩",
+      "title": "残存AUTH_TOKENアーティファクトによるユーザー混乱リスク",
+      "description": "設計書5.3節では、既存のCM_AUTH_TOKEN/MCBD_AUTH_TOKEN環境変数が設定されていても「エラーにはならない(単に無視される)」としている。これは後方互換性の観点で正しい判断だが、ユーザーが.envにCM_AUTH_TOKENを設定し続けた場合、認証が機能していると誤認する可能性がある。logger.tsのSENSITIVE_PATTERNSにはCM_AUTH_TOKEN/MCBD_AUTH_TOKENのマスキングパターンが残る(設計書3.2でlogger.tsからの削除は記載あり)が、既存の.envファイルからトークンが自動的に削除されるわけではない。",
+      "recommendation": "サーバー起動時にCM_AUTH_TOKENまたはMCBD_AUTH_TOKENが環境変数に設定されている場合、「CM_AUTH_TOKEN is no longer used. Authentication has been removed. For external access, use a reverse proxy.」というdeprecation情報ログを1回だけ出力する仕組みを検討する。これは既存のgetEnvWithFallback()パターンと同様のdeprecation通知で実現可能。",
+      "affected_section": "5.3 後方互換性"
+    },
+    {
+      "id": "S4-DEFENSE-1",
+      "severity": "should_fix",
+      "category": "多層防御",
+      "title": "単層防御(リバースプロキシのみ)への移行リスク",
+      "description": "現行はアプリケーション層認証+ネットワーク層(bind address制御)の2層だが、変更後はリバースプロキシのみの1層になる。多層防御(Defense in Depth)の原則から、アプリケーション層にも何らかの防御機構を残すことが望ましい。特にCommandMateはCLIツールを通じたファイル操作やコマンド実行が可能であり、侵害時の影響範囲が大きい。リバースプロキシの設定ミスやバイパスが単一障害点(SPOF)となる。",
+      "recommendation": "完全な認証機構は不要だが、以下のいずれかのアプリケーション層防御を検討する: (1) CM_BIND=0.0.0.0時にAPIレスポンスにX-CommandMate-Unprotectedヘッダーを付与し、リバースプロキシでの検証に使用できるようにする、(2) next.config.jsでhttpAgentKeepAlive等のセキュリティ関連設定を追加する、(3) 最低限、/api/worktrees/:id/sendなどの高リスクエンドポイントにX-Forwarded-Forヘッダーチェックを追加し、リバースプロキシ経由でないアクセスを検出する。ただし、設計書が述べるYAGNI/KISSの原則とのバランスを考慮し、過度な実装は避けるべき。",
+      "affected_section": "5.1 セキュリティモデル"
+    },
+    {
+      "id": "S4-WARN-1",
+      "severity": "should_fix",
+      "category": "警告",
+      "title": "CLI警告メッセージの緊急性表現が不十分",
+      "description": "設計書4.4節のREVERSE_PROXY_WARNING定数は「⚠ 外部公開設定が有効です」「強く推奨します」という表現だが、CommandMateが無認証で外部公開された場合のリスクの深刻度(RCE相当)に対して緊急性が弱い。現行のstart.ts(行172)にある「SECURITY WARNING: No authentication token configured. External access is not recommended without CM_AUTH_TOKEN.」も同様に表現が控えめすぎる。ユーザーが「推奨」を「オプション」と解釈し、リバースプロキシなしで外部公開してしまうリスクがある。",
+      "recommendation": "警告メッセージを以下のように強化する: (1) 「外部公開設定が有効です」を「セキュリティ警告: 認証なしで外部ネットワークに公開されます」に変更、(2) 「強く推奨します」を「リバースプロキシでの認証設定なしでの外部公開は重大なセキュリティリスクです。ファイルの読み書き削除、コマンド実行が第三者から可能になります」に変更、(3) 赤色/ボールドのANSIエスケープシーケンスを使用して視覚的な緊急性を伝達する。",
+      "affected_section": "4.4 CLI警告メッセージの置換"
+    },
+    {
+      "id": "S4-DOC-1",
+      "severity": "should_fix",
+      "category": "ドキュメント",
+      "title": "TRUST_AND_SAFETY.mdの旧名称と非推奨設定リストが未更新",
+      "description": "TRUST_AND_SAFETY.md(行28)では「LAN 内アクセスの場合は MCBD_BIND=0.0.0.0 と MCBD_AUTH_TOKEN の設定が必要です」と記載されている。設計書3.6にTRUST_AND_SAFETY.mdの更新は記載されているが、具体的な更新内容として「非推奨設定」セクション(行40-42)の「認証トークンなしで MCBD_BIND=0.0.0.0 を設定すること」をどう書き換えるかが明確でない。認証トークンが存在しなくなった以上、この項目は「リバースプロキシ認証なしで CM_BIND=0.0.0.0 を設定すること」に書き換える必要がある。",
+      "recommendation": "設計書のTRUST_AND_SAFETY.md更新タスクに、行40-42の非推奨設定リスト更新の具体的な記載内容を明記する。特に「認証トークンなしで MCBD_BIND=0.0.0.0 を設定すること」は「リバースプロキシ認証を設定せずに CM_BIND=0.0.0.0 でサーバーを公開すること」に更新すべき。",
+      "affected_section": "3.6 ドキュメント更新"
+    },
+    {
+      "id": "S4-DOC-2",
+      "severity": "must_fix",
+      "category": "ドキュメント",
+      "title": "security-guide.mdに既存ユーザー向け移行手順のタイミング警告が不足",
+      "description": "設計書4.7節の移行手順は「手順1: リバースプロキシを設定する → 手順2: CommandMateをアップグレードする」の順序で記載されているが、ユーザーが手順2を先に実行してしまった場合(npm update -g commandmate)、リバースプロキシ設定完了前に認証が消失する時間窓が発生する。CM_BIND=0.0.0.0で運用中のユーザーにとって、これはセキュリティ上のクリティカルな問題となる。",
+      "recommendation": "security-guide.mdの移行手順セクションの冒頭に、赤字相当の強い警告として「CM_BIND=0.0.0.0で運用中のユーザーは、必ずリバースプロキシの設定と動作確認を完了してからアップグレードしてください。先にアップグレードすると、認証なしでサーバーが外部公開されます。」を追加すべき。また、CHANGELOG.mdの破壊的変更記載にも同様の警告を含めるべきである。",
+      "affected_section": "4.7 docs/security-guide.md の新規作成、4.8 CHANGELOG の更新"
+    },
+    {
+      "id": "S4-RESIDUAL-1",
+      "severity": "nice_to_have",
+      "category": "残存リスク",
+      "title": "CSRF保護の欠如",
+      "description": "middleware.ts削除後、Next.jsのAPI Routesにはデフォルトでのセキュリティミドルウェアが存在しなくなる。現行のmiddleware.tsにもCSRF保護は含まれていないが、APIがCookieベースではなくBearerトークンベースであったため問題にならなかった。認証削除後、ブラウザからの直接アクセスが前提となるため、同一ネットワーク内の悪意あるWebページからのCSRF攻撃リスクが理論的に存在する。例えば、LAN内の別端末で悪意あるサイトを開いた場合、fetchで127.0.0.1:3000のAPIを呼び出せる可能性がある。",
+      "recommendation": "現時点ではリスクは限定的(ローカルホスト/LAN内前提、SameSite Cookie非使用)だが、将来の考慮事項としてdocs/security-guide.mdの「セキュリティチェックリスト」にCSRF対策(Origin/Refererヘッダーチェック)の検討を記載する。",
+      "affected_section": "5.1 セキュリティモデル"
+    },
+    {
+      "id": "S4-RESIDUAL-2",
+      "severity": "nice_to_have",
+      "category": "残存リスク",
+      "title": "SSRF経由のlocalhost API呼び出しリスク",
+      "description": "CommandMateはClaude CLIを通じてプロンプトを送信する機能を持つ。理論的には、Claude CLIの出力にCommandMate自身のAPI呼び出しを誘導する内容が含まれた場合、Auto-Yesモードと組み合わせてSSRF的な攻撃チェーンが構成される可能性がある。これは認証の有無に関わらず存在する構造的リスクだが、認証削除により攻撃の複雑度が低下する。",
+      "recommendation": "これはIssue #179のスコープ外の構造的リスクだが、docs/security-guide.mdの「注意事項」セクションに、Auto-Yesモードの使用リスクとして記載しておくことを推奨する。現行のTRUST_AND_SAFETY.md(行42)にある注意書きを引き継ぐ形で十分。",
+      "affected_section": "5.1 セキュリティモデル"
+    },
+    {
+      "id": "S4-OWASP-A01-3",
+      "severity": "nice_to_have",
+      "category": "OWASP-A01",
+      "title": "env-setup.tsのvalidateConfig()におけるCM_BIND=0.0.0.0バリデーション削除後の空白",
+      "description": "src/cli/utils/env-setup.ts行300のvalidateConfig()でCM_BIND=0.0.0.0時のCM_AUTH_TOKEN必須チェックを削除する設計となっている。削除後、validateConfig()はCM_BIND=0.0.0.0を完全に有効な設定として通過させる。initコマンド実行時にvalidateConfig()がpassした後でREVERSE_PROXY_WARNINGを表示する流れになるが、バリデーション結果(valid: true)とセキュリティ警告の間に意味的な矛盾が生じる。",
+      "recommendation": "validateConfig()にセキュリティ警告レベルの概念を追加し、ValidationResult型にwarningsフィールド(string[])を追加することを検討する。valid: trueだがwarningsが存在する場合にCLIが警告を表示する方式にすれば、バリデーションとセキュリティ警告の一貫性が保たれる。ただし、これは設計の美しさの問題であり、現行の設計でも機能的には問題ない。",
+      "affected_section": "4.5 src/cli/utils/env-setup.ts の変更"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4,
+    "overall_assessment": "設計書の基本方針(NEXT_PUBLIC_CM_AUTH_TOKENのセキュリティシアター排除、リバースプロキシ認証への委譲)は技術的に正しく、業界標準に沿った判断である。しかし、認証削除に伴うリスク緩和策が十分でない点がある。最も重要な指摘は、(1) security-guide.mdに具体的な脅威モデル(RCE相当リスク)を明記すること、(2) 既存ユーザーの移行手順でアップグレード前にリバースプロキシ設定を完了する旨の強い警告を追加すること、の2点である。CM_BIND=0.0.0.0での無認証起動に対するフェイルセーフ(確認プロンプトまたは明示的ブロック)の追加、CLI警告メッセージの緊急性強化も推奨する。全体として、設計書は包括的でよく検討されているが、リスクコミュニケーションの強化が必要である。"
+  },
+  "timestamp": "2026-02-08T12:00:00Z"
+}

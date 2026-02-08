@@ -804,10 +804,9 @@ commandmate status --all                   # 全サーバー状態確認
 
 ### Issue #76: 環境変数フォールバック（CommandMateリネーム Phase 1）
 - **フォールバック機能**: 新名称`CM_*`と旧名称`MCBD_*`の両方をサポート
-- **対象環境変数**: 8種類（ROOT_DIR, PORT, BIND, AUTH_TOKEN, LOG_LEVEL, LOG_FORMAT, LOG_DIR, DB_PATH）
-- **クライアント側**: `NEXT_PUBLIC_CM_AUTH_TOKEN` / `NEXT_PUBLIC_MCBD_AUTH_TOKEN`のフォールバック
+- **対象環境変数**: 7種類（ROOT_DIR, PORT, BIND, LOG_LEVEL, LOG_FORMAT, LOG_DIR, DB_PATH）
 - **Deprecation警告**: 旧名称使用時にログ出力（同一キー1回のみ）
-- **セキュリティ**: `CM_AUTH_TOKEN`マスキングパターンを`logger.ts`に追加
+- **Note**: AUTH_TOKEN関連はIssue #179で廃止済み。リバースプロキシ認証を推奨
 - **コアモジュール**: `src/lib/env.ts`に`getEnvWithFallback()`, `getEnvByKey()`関数追加
 - **CHANGELOG**: Keep a Changelogフォーマットで新規作成
 - 詳細: [設計書](./dev-reports/design/issue-76-env-fallback-design-policy.md)

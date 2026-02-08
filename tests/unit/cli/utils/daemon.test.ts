@@ -246,13 +246,13 @@ describe('DaemonManager', () => {
       );
     });
 
-    it('should not log security warning when auth token is provided', async () => {
+    it('should log reverse proxy warning when binding to 0.0.0.0 (Issue #179)', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
       vi.mocked(fs.openSync).mockReturnValue(3);
       vi.mocked(fs.writeSync).mockReturnValue(5);
       vi.mocked(fs.closeSync).mockReturnValue(undefined);
       vi.mocked(dotenv.config).mockReturnValue({
-        parsed: { CM_BIND: '0.0.0.0', CM_PORT: '3000', CM_AUTH_TOKEN: 'secret-token' },
+        parsed: { CM_BIND: '0.0.0.0', CM_PORT: '3000' },
       });
 
       const mockChild = {
@@ -262,16 +262,16 @@ describe('DaemonManager', () => {
       };
       vi.mocked(childProcess.spawn).mockReturnValue(mockChild as unknown as childProcess.ChildProcess);
 
-      const warnSpy = vi.spyOn(console, 'log');
+      const logSpy = vi.spyOn(console, 'log');
 
       const pid = await daemonManager.start({});
 
       expect(pid).toBe(12345);
-      // Should log about 0.0.0.0 but not the "No authentication token" warning
-      const warningCalls = warnSpy.mock.calls.filter(call =>
-        typeof call[0] === 'string' && call[0].includes('No authentication token')
+      // Should log reverse proxy warning (contains "reverse proxy" or "authentication")
+      const reverseProxyWarnings = logSpy.mock.calls.filter(call =>
+        typeof call[0] === 'string' && call[0].includes('reverse proxy')
       );
-      expect(warningCalls).toHaveLength(0);
+      expect(reverseProxyWarnings.length).toBeGreaterThan(0);
     });
 
     it('should not log warning when binding to localhost', async () => {

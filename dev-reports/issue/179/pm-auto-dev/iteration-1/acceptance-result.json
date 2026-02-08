@@ -1,0 +1,115 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: src/middleware.ts has been deleted",
+      "result": "passed",
+      "evidence": "File check returned DELETED. src/middleware.ts does not exist. tests/unit/middleware.test.ts is also deleted."
+    },
+    {
+      "scenario": "Scenario 2: src/lib/env.ts has no CM_AUTH_TOKEN references",
+      "result": "passed",
+      "evidence": "Grep for 'CM_AUTH_TOKEN|AUTH_TOKEN' in src/lib/env.ts returned no matches. ENV_MAPPING no longer includes AUTH_TOKEN entry. Env interface has no AUTH_TOKEN property."
+    },
+    {
+      "scenario": "Scenario 3: src/lib/api-client.ts has no Authorization header logic",
+      "result": "passed",
+      "evidence": "Grep for 'Authorization|AUTH_TOKEN' in src/lib/api-client.ts returned no matches. fetchApi() sets only Content-Type header."
+    },
+    {
+      "scenario": "Scenario 4: src/cli/config/security-messages.ts has REVERSE_PROXY_WARNING constant",
+      "result": "passed",
+      "evidence": "File exists at src/cli/config/security-messages.ts. Contains 'export const REVERSE_PROXY_WARNING' with formatted warning about external network exposure, risks, and recommended authentication methods (Nginx + Basic Auth, Cloudflare Access, Tailscale)."
+    },
+    {
+      "scenario": "Scenario 5: start.ts, daemon.ts, init.ts reference REVERSE_PROXY_WARNING",
+      "result": "passed",
+      "evidence": "Grep confirmed: start.ts imports and uses REVERSE_PROXY_WARNING (lines 18, 169). init.ts imports and uses REVERSE_PROXY_WARNING (lines 30, 97). daemon.ts imports and uses REVERSE_PROXY_WARNING (lines 14, 79)."
+    },
+    {
+      "scenario": "Scenario 6: tsc, lint, and unit tests pass",
+      "result": "passed",
+      "evidence": "npx tsc --noEmit: passed (no output). npm run lint: 'No ESLint warnings or errors'. npm run test:unit: 138 passed, 1 failed (claude-session.test.ts - pre-existing unhandled rejection issue, confirmed identical failure on main branch with git stash test, zero diff from main). All 2716 tests pass (7 skipped) excluding the pre-existing failure."
+    },
+    {
+      "scenario": "Scenario 7: docs/security-guide.md contains threat model and migration steps",
+      "result": "passed",
+      "evidence": "File exists (204 lines). Contains: 'Threat Model' section (line 8), risk table (file read/write/delete, command execution, source code exposure, data manipulation), 'Migration Steps' section (line 128) with step-by-step CM_AUTH_TOKEN removal guide, 'Security Checklist' section, 'Recommended Authentication Methods' (Nginx, Cloudflare, Tailscale). Reverse proxy requirement explicitly stated."
+    },
+    {
+      "scenario": "Scenario 8: CHANGELOG has BREAKING CHANGE entry",
+      "result": "passed",
+      "evidence": "CHANGELOG.md line 11: '- **BREAKING**: Removed `CM_AUTH_TOKEN` authentication mechanism (Issue #179)'. Lists removed components and added security guide."
+    },
+    {
+      "scenario": "Scenario 9: No AUTH_TOKEN references remain in source code (src/)",
+      "result": "passed",
+      "evidence": "Grep for AUTH_TOKEN in src/ directory returned no matches. Also confirmed: logger.ts has no AUTH_TOKEN references, security-logger.ts has no AUTH_TOKEN references. Shell scripts (*.sh) have no AUTH_TOKEN references. Only references found in tests/ are negative assertions (expect(...).not.toContain('CM_AUTH_TOKEN')). Markdown/JSON references are limited to CLAUDE.md (historical docs), CHANGELOG.md (recording the change), docs/migration-to-commandmate.md (deprecation notice), docs/security-guide.md (migration guide), and dev-reports/ (historical)."
+    },
+    {
+      "scenario": "Scenario 10: .env.example and .env.production.example have no AUTH_TOKEN lines",
+      "result": "passed",
+      "evidence": "Grep for AUTH_TOKEN in .env.example returned no matches. Grep for AUTH_TOKEN in .env.production.example returned no matches."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "CM_BIND=0.0.0.0 setting allows API access without authentication",
+      "verified": true,
+      "evidence": "src/middleware.ts deleted (no authentication middleware exists). api-client.ts has no Authorization header logic. No AUTH_TOKEN validation code remains in src/."
+    },
+    {
+      "criterion": "Existing CM_AUTH_TOKEN settings are ignored without errors",
+      "verified": true,
+      "evidence": "ENV_MAPPING in env.ts no longer includes AUTH_TOKEN. Env interface has no AUTH_TOKEN property. No code reads or validates AUTH_TOKEN. Settings will simply be unused environment variables."
+    },
+    {
+      "criterion": "commandmate init shows reverse proxy recommendation on external exposure",
+      "verified": true,
+      "evidence": "init.ts imports REVERSE_PROXY_WARNING (line 30) and displays it (line 97)."
+    },
+    {
+      "criterion": "commandmate start shows reverse proxy warning when CM_BIND=0.0.0.0",
+      "verified": true,
+      "evidence": "start.ts imports REVERSE_PROXY_WARNING (line 18) and displays it (line 169). daemon.ts also imports and displays it (lines 14, 79)."
+    },
+    {
+      "criterion": "Security guide (docs/security-guide.md) is added to documentation",
+      "verified": true,
+      "evidence": "File exists at docs/security-guide.md (204 lines). Contains threat model, 3 authentication options, migration steps, security checklist, and firewall configuration."
+    },
+    {
+      "criterion": "DEPLOYMENT.md and TRUST_AND_SAFETY.md security sections are updated",
+      "verified": true,
+      "evidence": "DEPLOYMENT.md references security-guide.md and reverse proxy authentication in 4 locations. TRUST_AND_SAFETY.md references reverse proxy authentication in 3 locations. No AUTH_TOKEN references remain in either file."
+    },
+    {
+      "criterion": "All AUTH_TOKEN-related documentation is updated",
+      "verified": true,
+      "evidence": "No AUTH_TOKEN references in DEPLOYMENT.md, TRUST_AND_SAFETY.md, or shell scripts. migration-to-commandmate.md has a deprecation notice pointing to security-guide.md. CHANGELOG records the breaking change."
+    },
+    {
+      "criterion": "docs/migration-to-commandmate.md AUTH_TOKEN references are all updated",
+      "verified": true,
+      "evidence": "Only reference is a deprecation notice (line 39) stating AUTH_TOKEN was removed in Issue #179 and recommending reverse proxy authentication with link to security-guide.md."
+    },
+    {
+      "criterion": "AUTH_TOKEN-related tests are all updated and npm run test:unit passes",
+      "verified": true,
+      "evidence": "tests/unit/middleware.test.ts deleted. env-setup.test.ts updated with negative assertion. 138 test files pass, 2716 tests pass. 1 pre-existing failure in claude-session.test.ts (confirmed identical on main branch, no changes in this branch)."
+    },
+    {
+      "criterion": "npm run lint and npx tsc --noEmit pass",
+      "verified": true,
+      "evidence": "npm run lint: 'No ESLint warnings or errors'. npx tsc --noEmit: no output (success)."
+    },
+    {
+      "criterion": "CHANGELOG records the breaking change (BREAKING CHANGE)",
+      "verified": true,
+      "evidence": "CHANGELOG.md line 11: '- **BREAKING**: Removed `CM_AUTH_TOKEN` authentication mechanism (Issue #179)'"
+    }
+  ],
+  "evidence_files": [],
+  "notes": "One pre-existing test failure exists in tests/unit/lib/claude-session.test.ts (unhandled rejection in timer-based tests). This was confirmed as pre-existing by running the same test on main branch code (via git stash). The file has zero diff from main branch. This failure is unrelated to Issue #179.",
+  "message": "All acceptance criteria are satisfied. All 10 test scenarios pass. The CM_AUTH_TOKEN authentication mechanism has been completely removed from source code, middleware, API client, environment configuration, documentation, and tests. Reverse proxy warning is properly integrated into CLI commands (init, start, daemon). Security guide provides comprehensive threat model, authentication options, and migration steps."
+}

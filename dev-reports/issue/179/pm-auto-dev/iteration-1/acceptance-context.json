@@ -1,0 +1,29 @@
+{
+  "issue_number": 179,
+  "feature_summary": "CM_AUTH_TOKEN認証機能を削除し、リバースプロキシ認証を推奨",
+  "acceptance_criteria": [
+    "CM_BIND=0.0.0.0設定時も認証なしでAPIアクセス可能",
+    "既存のCM_AUTH_TOKEN設定があっても動作に影響なし（無視される）",
+    "commandmate initで外部公開設定時にリバースプロキシ認証推奨メッセージが表示される",
+    "commandmate startでCM_BIND=0.0.0.0時にリバースプロキシ推奨警告が表示される",
+    "外部公開時のセキュリティガイド（docs/security-guide.md）がドキュメントに追加されている",
+    "DEPLOYMENT.mdとTRUST_AND_SAFETY.mdのセキュリティセクションが更新されている",
+    "AUTH_TOKEN関連の全ドキュメントが更新されている",
+    "docs/migration-to-commandmate.mdのAUTH_TOKEN参照が全て更新されている",
+    "AUTH_TOKEN関連のテストが全て更新され、npm run test:unitが通ること",
+    "npm run lintとnpx tsc --noEmitが通ること",
+    "CHANGELOGに破壊的変更（BREAKING CHANGE）として記載されていること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: src/middleware.tsが削除されていることを確認",
+    "シナリオ2: src/lib/env.tsにCM_AUTH_TOKEN参照が残っていないことを確認",
+    "シナリオ3: src/lib/api-client.tsにAuthorizationヘッダー送信ロジックが残っていないことを確認",
+    "シナリオ4: src/cli/config/security-messages.tsにREVERSE_PROXY_WARNING定数が存在することを確認",
+    "シナリオ5: start.ts/daemon.ts/init.tsがREVERSE_PROXY_WARNINGを参照していることを確認",
+    "シナリオ6: テストが全てパスすることを確認（npx tsc, npm run lint, npm run test:unit）",
+    "シナリオ7: docs/security-guide.mdに脅威モデル・移行手順が含まれていることを確認",
+    "シナリオ8: CHANGELOGにBREAKING CHANGEが記載されていることを確認",
+    "シナリオ9: AUTH_TOKENへの参照がソースコード内に残っていないことをgrep確認",
+    "シナリオ10: .env.example/.env.production.exampleからAUTH_TOKEN行が削除されていることを確認"
+  ]
+}

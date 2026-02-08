@@ -224,8 +224,8 @@ describe('getLogConfig with fallback', () => {
 });
 
 describe('ENV_MAPPING', () => {
-  it('should have exactly 8 environment variable mappings', () => {
-    expect(Object.keys(ENV_MAPPING)).toHaveLength(8);
+  it('should have exactly 7 environment variable mappings', () => {
+    expect(Object.keys(ENV_MAPPING)).toHaveLength(7);
   });
 
   it('should have correct key format', () => {
@@ -240,7 +240,6 @@ describe('ENV_MAPPING', () => {
       CM_ROOT_DIR: 'MCBD_ROOT_DIR',
       CM_PORT: 'MCBD_PORT',
       CM_BIND: 'MCBD_BIND',
-      CM_AUTH_TOKEN: 'MCBD_AUTH_TOKEN',
       CM_LOG_LEVEL: 'MCBD_LOG_LEVEL',
       CM_LOG_FORMAT: 'MCBD_LOG_FORMAT',
       CM_LOG_DIR: 'MCBD_LOG_DIR',

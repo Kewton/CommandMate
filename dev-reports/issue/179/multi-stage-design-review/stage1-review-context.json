@@ -1,0 +1,14 @@
+{
+  "issue_number": 179,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_doc_path": "dev-reports/design/issue-179-remove-auth-token-design-policy.md",
+  "review_perspectives": [
+    "SOLID原則準拠",
+    "KISS原則準拠",
+    "YAGNI原則準拠",
+    "DRY原則準拠",
+    "設計の明確さと完全性"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "applied_items": [
+    {
+      "id": "S1-SF-1",
+      "action": "警告メッセージをsrc/cli/config/security-messages.tsに共通定数化。セクション4.4を更新、トレードオフ表を更新、ファイル数サマリーを更新",
+      "status": "applied"
+    },
+    {
+      "id": "S1-SF-2",
+      "action": "セクション4.3にvalidateEnv()への影響とgetEnvWithFallback()維持の注記を追加",
+      "status": "applied"
+    },
+    {
+      "id": "S1-SF-3",
+      "action": "セクション4.5としてenv-setup.tsの詳細設計を新規追加（generateAuthToken, validateConfig, createEnvFile）",
+      "status": "applied"
+    },
+    {
+      "id": "S1-SF-4",
+      "action": "セクション4.6（旧4.5）にdisplayConfigSummary()の変更を追加",
+      "status": "applied"
+    }
+  ],
+  "skipped_items": [],
+  "summary": "Should Fix 4件すべてを設計方針書に反映完了"
+}

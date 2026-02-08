@@ -1,0 +1,38 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "applied_items": [
+    {
+      "id": "S2-IS-3",
+      "action": "security-messages.ts新規作成はすでにセクション4.4, 7, 9に記載済み。Issueタスクリストへの追加は設計書の管轄外だが、実装時に注意する旨を確認",
+      "status": "acknowledged"
+    },
+    {
+      "id": "S2-MO-2",
+      "action": "セクション4.8にCHANGELOG既存記述を変更しない方針を明記",
+      "status": "applied"
+    },
+    {
+      "id": "S2-NA-1",
+      "action": "セクション4.3の削除対象リストからgetEnvWithFallback()の不正確な記述を削除",
+      "status": "applied"
+    },
+    {
+      "id": "S2-DE-1",
+      "action": "セクション4.3にisAuthRequired()の外部参照なし確認結果を追記",
+      "status": "applied"
+    },
+    {
+      "id": "S2-MO-3",
+      "action": "セクション3.4のscripts/setup-env.shの変更内容をAUTH_TOKEN関連全削除の詳細に更新",
+      "status": "applied"
+    },
+    {
+      "id": "S2-MO-4",
+      "action": "セクション3.4の.env.exampleの変更内容を行番号付きで詳細化",
+      "status": "applied"
+    }
+  ],
+  "skipped_items": [],
+  "summary": "Must Fix 1件（Issueタスクリスト更新は設計書管轄外だが実装時に対応）、Should Fix 5件すべてを設計方針書に反映完了"
+}

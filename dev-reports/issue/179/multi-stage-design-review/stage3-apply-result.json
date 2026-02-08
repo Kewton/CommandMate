@@ -1,0 +1,62 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "applied_items": [
+    {
+      "id": "S3-CA-1",
+      "severity": "must_fix",
+      "action": "セクション4.3にgetEnv() throw文削除の波及効果（db-instance.tsへの影響）を追記",
+      "status": "applied"
+    },
+    {
+      "id": "S3-RT-1",
+      "severity": "must_fix",
+      "action": "セクション3.5のenv-setup.test.tsにvalidateConfigテスト（行510-523）の更新を明記",
+      "status": "applied"
+    },
+    {
+      "id": "S3-CA-2",
+      "severity": "should_fix",
+      "action": "セクション3.5のenv.test.tsにENV_MAPPINGテスト更新詳細を追記",
+      "status": "applied"
+    },
+    {
+      "id": "S3-US-1",
+      "severity": "should_fix",
+      "action": "セクション4.7のsecurity-guide.md構成に既存ユーザー移行手順セクションを追加",
+      "status": "applied"
+    },
+    {
+      "id": "S3-MI-1",
+      "severity": "should_fix",
+      "action": "セクション4.7の移行手順にCM_AUTH_TOKEN削除が任意である旨を含めた",
+      "status": "applied"
+    },
+    {
+      "id": "S3-RB-1",
+      "severity": "should_fix",
+      "action": "セクション10としてロールバック計画を新規追加",
+      "status": "applied"
+    },
+    {
+      "id": "S3-CA-3",
+      "severity": "should_fix",
+      "action": "セクション4.4にstart.ts/daemon.tsのauthToken変数削除を明記",
+      "status": "applied"
+    },
+    {
+      "id": "S3-RT-3",
+      "severity": "should_fix",
+      "action": "セクション4.4に.env手動編集後のstartシナリオの注記を追記",
+      "status": "applied"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "S3-US-2",
+      "severity": "nice_to_have",
+      "reason": "移行通知メッセージ機能はIssueスコープ外。フォローアップIssueとして検討"
+    }
+  ],
+  "summary": "Must Fix 2件、Should Fix 6件すべてを設計方針書に反映完了。Nice to Have 6件のうち1件（S3-US-2）はスコープ外としてスキップ"
+}

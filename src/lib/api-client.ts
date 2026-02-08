@@ -38,39 +38,12 @@ export class ApiError extends Error {
 }
 
 /**
- * Client-side warned flag for auth token deprecation
- * Prevents duplicate warnings in browser console
- * Issue #76: Environment variable fallback support
- */
-let clientAuthTokenWarned = false;
-
-/**
  * Base fetch wrapper with error handling
  */
 async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
   try {
-    // Get auth token from environment variable (with fallback - Issue #76)
-    // NEXT_PUBLIC_* environment variables are embedded at build time
-    const authToken = process.env.NEXT_PUBLIC_CM_AUTH_TOKEN
-      || process.env.NEXT_PUBLIC_MCBD_AUTH_TOKEN;
-
-    // Warn once if using deprecated name
-    if (
-      process.env.NEXT_PUBLIC_MCBD_AUTH_TOKEN &&
-      !process.env.NEXT_PUBLIC_CM_AUTH_TOKEN &&
-      !clientAuthTokenWarned
-    ) {
-      console.warn('[DEPRECATED] NEXT_PUBLIC_MCBD_AUTH_TOKEN is deprecated, use NEXT_PUBLIC_CM_AUTH_TOKEN instead');
-      clientAuthTokenWarned = true;
-    }
-
     const headers = new Headers(options?.headers);
     headers.set('Content-Type', 'application/json');
-
-    // Add Bearer token if available
-    if (authToken) {
-      headers.set('Authorization', `Bearer ${authToken}`);
-    }
 
     const response = await fetch(url, {
       ...options,

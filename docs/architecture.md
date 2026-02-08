@@ -73,8 +73,8 @@
   - `MCBD_BIND = 127.0.0.1`
   - 接続元は同一マシンのみ
 - **LAN アクセスモード（任意）**
-  - `MCBD_BIND = 0.0.0.0`
-  - `MCBD_AUTH_TOKEN` による簡易認証を必須とする
+  - `CM_BIND = 0.0.0.0`
+  - リバースプロキシでの認証を推奨（詳細: `docs/security-guide.md`）
   - 同一ネットワーク上のスマホからアクセス可能
 
 ---
@@ -448,7 +448,6 @@ feature/foo
 - git worktree 管理のルートディレクトリ
 - MCBD_PORT (任意, デフォルト: 3000)
 - MCBD_BIND (任意, デフォルト: 127.0.0.1)
-- MCBD_AUTH_TOKEN (任意だが MCBD_BIND=0.0.0.0 の場合は必須)
 - 将来的に追加される可能性のあるもの:
 - MCBD_DB_PATH（db.sqlite の保存先）
 - MCBD_LOG_LEVEL（ログ出力レベル）
@@ -465,10 +464,9 @@ feature/foo
 - セキュリティリスクはほぼ OS ユーザーに依存。
 
 ### 9.2 LAN アクセスモード
-- MCBD_BIND=0.0.0.0 の場合、同一 LAN 上の任意端末からのアクセスが可能になるため、以下を必須とする:
-- MCBD_AUTH_TOKEN を設定
-- すべての HTTP / WebSocket 接続に対し、Authorization: Bearer <token> で認証を行う
-- HTTPS / TLS 終端については、当面は前段のリバースプロキシ（Caddy / nginx 等）に委譲する。
+- CM_BIND=0.0.0.0 の場合、同一 LAN 上の任意端末からのアクセスが可能になる
+- リバースプロキシ（Nginx / Caddy 等）での認証を推奨（詳細: `docs/security-guide.md`）
+- HTTPS / TLS 終端はリバースプロキシに委譲する
 
 ⸻
 

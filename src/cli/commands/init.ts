@@ -27,6 +27,7 @@ import {
   closeReadline,
 } from '../utils/prompt';
 import { logSecurityEvent } from '../utils/security-logger';
+import { REVERSE_PROXY_WARNING } from '../config/security-messages';
 
 const logger = new CLILogger();
 
@@ -87,16 +88,13 @@ async function promptForConfig(): Promise<EnvConfig> {
   });
 
   let bind: string = ENV_DEFAULTS.CM_BIND;
-  let authToken: string | undefined;
 
   if (enableExternal) {
     bind = '0.0.0.0';
-    const envSetup = new EnvSetup();
-    authToken = envSetup.generateAuthToken();
     logger.blank();
     logger.success('External access enabled');
     logger.info(`  Bind address: 0.0.0.0`);
-    logger.info(`  Auth token generated: ${authToken.substring(0, 8)}...`);
+    console.log(REVERSE_PROXY_WARNING);
   }
 
   // CM_DB_PATH - Issue #135: Use getDefaultDbPath() for absolute path
@@ -110,7 +108,6 @@ async function promptForConfig(): Promise<EnvConfig> {
     CM_ROOT_DIR: rootDir,
     CM_PORT: port,
     CM_BIND: bind,
-    CM_AUTH_TOKEN: authToken,
     CM_DB_PATH: dbPath,
     CM_LOG_LEVEL: ENV_DEFAULTS.CM_LOG_LEVEL,
     CM_LOG_FORMAT: ENV_DEFAULTS.CM_LOG_FORMAT,
@@ -130,19 +127,11 @@ function displayConfigSummary(config: EnvConfig, envPath: string): void {
   logger.info(`  CM_ROOT_DIR:  ${config.CM_ROOT_DIR}`);
   logger.info(`  CM_PORT:      ${config.CM_PORT}`);
   logger.info(`  CM_BIND:      ${config.CM_BIND}`);
-  if (config.CM_AUTH_TOKEN) {
-    logger.info(`  CM_AUTH_TOKEN: ${config.CM_AUTH_TOKEN.substring(0, 8)}... (generated)`);
-  }
   logger.info(`  CM_DB_PATH:   ${config.CM_DB_PATH}`);
   logger.blank();
   logger.info(`  Config file:  ${envPath}`);
   logger.blank();
 
-  if (config.CM_AUTH_TOKEN) {
-    logger.warn('IMPORTANT: Save your auth token securely!');
-    logger.info(`  Token: ${config.CM_AUTH_TOKEN}`);
-    logger.blank();
-  }
 }
 
 /**
