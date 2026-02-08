@@ -4,6 +4,7 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
+import type { DetectPromptOptions } from './prompt-detector';
 import { createLogger } from './logger';
 
 const logger = createLogger('cli-patterns');
@@ -161,11 +162,50 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
 }
 
 /**
- * Strip ANSI escape codes from a string
- * Optimized version at module level for performance
+ * Strip ANSI escape codes from a string.
+ * Optimized version at module level for performance.
+ *
+ * Covers:
+ * - SGR sequences: ESC[Nm (colors, bold, underline, etc.)
+ * - OSC sequences: ESC]...BEL (window title, hyperlinks, etc.)
+ * - CSI sequences: ESC[...letter (cursor movement, erase, etc.)
+ *
+ * Known limitations (SEC-002):
+ * - 8-bit CSI (0x9B): C1 control code form of CSI is not covered
+ * - DEC private modes: ESC[?25h and similar are not covered
+ * - Character set switching: ESC(0, ESC(B are not covered
+ * - Some RGB color forms: ESC[38;2;r;g;bm may not be fully matched
+ *
+ * In practice, tmux capture-pane output rarely contains these sequences,
+ * so the risk is low. Future consideration: adopt the `strip-ansi` npm package
+ * for more comprehensive coverage.
  */
 const ANSI_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\[[0-9;]*m/g;
 
 export function stripAnsi(str: string): string {
   return str.replace(ANSI_PATTERN, '');
+}
+
+/**
+ * Build DetectPromptOptions for a given CLI tool.
+ * Centralizes cliToolId-to-options mapping logic (DRY - MF-001).
+ *
+ * prompt-detector.ts remains CLI tool independent (Issue #161 principle);
+ * this function lives in cli-patterns.ts which already depends on CLIToolType.
+ *
+ * [Future extension memo (C-002)]
+ * If CLI tool count grows significantly (currently 3), consider migrating
+ * to a CLIToolConfig registry pattern where tool-specific settings
+ * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @returns DetectPromptOptions for the tool, or undefined for default behavior
+ */
+export function buildDetectPromptOptions(
+  cliToolId: CLIToolType
+): DetectPromptOptions | undefined {
+  if (cliToolId === 'claude') {
+    return { requireDefaultIndicator: false };
+  }
+  return undefined; // Default behavior (requireDefaultIndicator = true)
 }

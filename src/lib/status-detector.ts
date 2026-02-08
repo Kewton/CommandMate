@@ -9,7 +9,7 @@
  * 4. Using time-based heuristics when patterns don't match
  */
 
-import { stripAnsi, detectThinking, getCliToolPatterns } from './cli-patterns';
+import { stripAnsi, detectThinking, getCliToolPatterns, buildDetectPromptOptions } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { CLIToolType } from './cli-tools/types';
 
@@ -84,7 +84,8 @@ export function detectSessionStatus(
 
   // 1. Interactive prompt detection (highest priority)
   // This includes yes/no prompts, multiple choice, and approval prompts
-  const promptDetection = detectPrompt(lastLines);
+  const promptOptions = buildDetectPromptOptions(cliToolId);
+  const promptDetection = detectPrompt(lastLines, promptOptions);
   if (promptDetection.isPrompt) {
     return {
       status: 'waiting',

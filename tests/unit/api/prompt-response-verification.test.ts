@@ -53,6 +53,7 @@ vi.mock('@/lib/prompt-detector', () => ({
 // Mock cli-patterns
 vi.mock('@/lib/cli-patterns', () => ({
   stripAnsi: vi.fn((s: string) => s),
+  buildDetectPromptOptions: vi.fn().mockReturnValue({ requireDefaultIndicator: false }),
 }));
 
 // Mock CLIToolManager

@@ -9,6 +9,32 @@ import { createLogger } from './logger';
 const logger = createLogger('prompt-detector');
 
 /**
+ * Options for prompt detection behavior customization.
+ * Maintains prompt-detector.ts CLI tool independence (Issue #161 principle).
+ *
+ * [Future extension memo (SF-001)]
+ * The current requireDefaultIndicator controls both Pass 1 (cursor existence check)
+ * and Layer 4 (hasDefaultIndicator check) with a single flag. If a future requirement
+ * arises to skip Pass 1 only or Layer 4 only per CLI tool, split into individual flags:
+ *   skipPass1Gate?: boolean;   // Skip Pass 1 cursor existence check
+ *   skipLayer4Gate?: boolean;  // Skip Layer 4 hasDefaultIndicator check
+ * Per YAGNI, a single flag is maintained for now as no such requirement exists.
+ */
+export interface DetectPromptOptions {
+  /**
+   * Controls Pass 1 DEFAULT_OPTION_PATTERN existence check and
+   * Layer 4 hasDefaultIndicator check.
+   * - true (default): Marker required (existing behavior)
+   * - false: Detect choices without marker (Claude Code special format)
+   *
+   * When false:
+   * - Pass 1: Skip hasDefaultLine check entirely
+   * - Layer 4: Skip hasDefaultIndicator check, require only options.length >= 2
+   */
+  requireDefaultIndicator?: boolean;
+}
+
+/**
  * Prompt detection result
  */
 export interface PromptDetectionResult {
@@ -41,7 +67,7 @@ export interface PromptDetectionResult {
  * // result.promptData.question === 'Do you want to proceed?'
  * ```
  */
-export function detectPrompt(output: string): PromptDetectionResult {
+export function detectPrompt(output: string, options?: DetectPromptOptions): PromptDetectionResult {
   logger.debug('detectPrompt:start', { outputLength: output.length });
 
   const lines = output.split('\n');
@@ -53,7 +79,7 @@ export function detectPrompt(output: string): PromptDetectionResult {
   // ❯ 1. Yes
   //   2. No
   //   3. Cancel
-  const multipleChoiceResult = detectMultipleChoicePrompt(output);
+  const multipleChoiceResult = detectMultipleChoicePrompt(output, options);
   if (multipleChoiceResult.isPrompt) {
     logger.info('detectPrompt:multipleChoice', {
       isPrompt: true,
@@ -261,7 +287,10 @@ function isContinuationLine(rawLine: string, line: string): boolean {
  * @param output - The tmux output to analyze (typically captured from tmux pane)
  * @returns Detection result with prompt data if a valid multiple choice prompt is found
  */
-function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
+function detectMultipleChoicePrompt(output: string, options?: DetectPromptOptions): PromptDetectionResult {
+  // C-003: Use ?? true for readability instead of !== false double negation
+  const requireDefault = options?.requireDefaultIndicator ?? true;
+
   const lines = output.split('\n');
 
   // Calculate scan window: last 50 lines
@@ -269,29 +298,32 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
 
   // ==========================================================================
   // Pass 1: Check for ❯ indicator existence in scan window
-  // If no ❯ lines found, there is no multiple_choice prompt.
+  // If no ❯ lines found and requireDefault is true, there is no multiple_choice prompt.
+  // When requireDefault is false, skip this gate entirely to allow ❯-less detection.
   // ==========================================================================
-  let hasDefaultLine = false;
-  for (let i = scanStart; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (DEFAULT_OPTION_PATTERN.test(line)) {
-      hasDefaultLine = true;
-      break;
+  if (requireDefault) {
+    let hasDefaultLine = false;
+    for (let i = scanStart; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (DEFAULT_OPTION_PATTERN.test(line)) {
+        hasDefaultLine = true;
+        break;
+      }
+    }
+
+    if (!hasDefaultLine) {
+      return {
+        isPrompt: false,
+        cleanContent: output.trim(),
+      };
     }
   }
 
-  if (!hasDefaultLine) {
-    return {
-      isPrompt: false,
-      cleanContent: output.trim(),
-    };
-  }
-
   // ==========================================================================
-  // Pass 2: Collect options (only executed when ❯ was found in Pass 1)
+  // Pass 2: Collect options (executed when Pass 1 passes or is skipped)
   // Scan from end to find options, using both patterns.
   // ==========================================================================
-  const options: Array<{ number: number; label: string; isDefault: boolean }> = [];
+  const collectedOptions: Array<{ number: number; label: string; isDefault: boolean }> = [];
   let questionEndIndex = -1;
 
   for (let i = lines.length - 1; i >= scanStart; i--) {
@@ -302,7 +334,7 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
     if (defaultMatch) {
       const number = parseInt(defaultMatch[1], 10);
       const label = defaultMatch[2].trim();
-      options.unshift({ number, label, isDefault: true });
+      collectedOptions.unshift({ number, label, isDefault: true });
       continue;
     }
 
@@ -311,12 +343,12 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
     if (normalMatch) {
       const number = parseInt(normalMatch[1], 10);
       const label = normalMatch[2].trim();
-      options.unshift({ number, label, isDefault: false });
+      collectedOptions.unshift({ number, label, isDefault: false });
       continue;
     }
 
     // Non-option line handling
-    if (options.length > 0 && line && !line.match(/^[-─]+$/)) {
+    if (collectedOptions.length > 0 && line && !line.match(/^[-─]+$/)) {
       // Check if this is a continuation line (indented line between options,
       // or path/filename fragments from terminal width wrapping - Issue #181)
       const rawLine = lines[i]; // Original line with indentation preserved
@@ -332,7 +364,7 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
   }
 
   // Layer 3: Consecutive number validation (defensive measure)
-  const optionNumbers = options.map(opt => opt.number);
+  const optionNumbers = collectedOptions.map(opt => opt.number);
   if (!isConsecutiveFromOne(optionNumbers)) {
     return {
       isPrompt: false,
@@ -340,9 +372,31 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
     };
   }
 
-  // Layer 4: Must have at least 2 options AND at least one with ❯ indicator
-  const hasDefaultIndicator = options.some(opt => opt.isDefault);
-  if (options.length < 2 || !hasDefaultIndicator) {
+  // Layer 4: Must have at least 2 options. When requireDefault is true,
+  // also require at least one option with ❯ indicator.
+  const hasDefaultIndicator = collectedOptions.some(opt => opt.isDefault);
+  if (requireDefault) {
+    if (collectedOptions.length < 2 || !hasDefaultIndicator) {
+      return {
+        isPrompt: false,
+        cleanContent: output.trim(),
+      };
+    }
+  } else {
+    // requireDefaultIndicator = false: only require options.length >= 2
+    if (collectedOptions.length < 2) {
+      return {
+        isPrompt: false,
+        cleanContent: output.trim(),
+      };
+    }
+  }
+
+  // Layer 5 [SEC-001]: questionEndIndex guard for requireDefaultIndicator=false.
+  // When requireDefault is false and no question line was found (questionEndIndex === -1),
+  // return isPrompt: false to prevent generic question fallback from triggering Auto-Yes
+  // on plain numbered lists that happen to be consecutive from 1.
+  if (!requireDefault && questionEndIndex === -1) {
     return {
       isPrompt: false,
       cleanContent: output.trim(),
@@ -371,7 +425,7 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
     promptData: {
       type: 'multiple_choice',
       question: question.trim(),
-      options: options.map(opt => {
+      options: collectedOptions.map(opt => {
         // Check if this option requires text input using module-level patterns
         const requiresTextInput = TEXT_INPUT_PATTERNS.some(pattern =>
           pattern.test(opt.label)
@@ -415,7 +469,8 @@ export function getAnswerInput(answer: string, promptType: string = 'yes_no'): s
     if (/^\d+$/.test(normalized)) {
       return normalized;
     }
-    throw new Error(`Invalid answer for multiple choice: ${answer}. Expected a number.`);
+    // SEC-003: Fixed error message without user input to prevent log injection
+    throw new Error('Invalid answer for multiple choice prompt. Expected a number.');
   }
 
   // Handle yes/no prompts
@@ -427,5 +482,6 @@ export function getAnswerInput(answer: string, promptType: string = 'yes_no'): s
     return 'n';
   }
 
-  throw new Error(`Invalid answer: ${answer}. Expected 'yes', 'no', 'y', or 'n'.`);
+  // SEC-003: Fixed error message without user input to prevent log injection
+  throw new Error("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
 }
