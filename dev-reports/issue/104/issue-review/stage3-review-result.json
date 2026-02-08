@@ -1,0 +1,198 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-01",
+  "issue_number": 104,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "iPad Chrome固有のテストケースがテスト戦略に含まれていない",
+        "location": "## 受け入れ条件",
+        "recommendation": "iPad Chrome（横置き）での動作確認を受け入れ条件に明記しているが、自動テストでこの環境をどのようにカバーするか（E2Eテスト、手動テスト等）を明確化すべき。Playwrightのwebkit/chromiumエミュレーションやBrowserStackの利用を検討",
+        "evidence": "現在のテストスイートはjsdom環境でのユニットテストが中心。tests/unit/components/MarkdownEditor.test.tsx にMaximize機能のテストはあるが、iPad Chrome固有のFullscreen API挙動はモック環境では再現不可能"
+      },
+      {
+        "id": "SF-2",
+        "category": "影響ファイル",
+        "issue": "修正案1（z-index条件の変更）によるデスクトップへの影響が分析されていない",
+        "location": "## 修正方針案 > 案1",
+        "recommendation": "z-index条件を `isMaximized` のみに変更した場合、デスクトップのFullscreen API成功時にも不必要にz-indexが設定される。これがパフォーマンスや他のz-index要素との競合に影響しないか確認が必要",
+        "evidence": "src/config/z-index.ts: MAXIMIZED_EDITOR=40, MODAL=50, TOAST=60, CONTEXT_MENU=70。最大化エディタのz-indexが40だが、Modal(50)やToast(60)より低い。Fullscreen API成功時はブラウザが要素を最上位に配置するためz-indexは不要だが、条件を緩和すると不必要なスタイル適用が発生する"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdへの影響記載がない",
+        "location": "Issue本文全体",
+        "recommendation": "Issue #99の設計がIssue #104のバグ原因である可能性があるため、修正後にCLAUD.mdの「最近の実装機能」セクションにある Issue #99 の記載を更新し、iPad Chrome対応についての注記を追加することを検討",
+        "evidence": "CLAUDE.md: Issue #99の記載には「Fullscreen API: CSSフォールバック対応（iOS Safari等）」とあるが、iPad Chromeの挙動については言及がない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "依存関係",
+        "issue": "WorktreeDetailRefactored.tsx でのMarkdownEditor使用箇所への影響確認が不足",
+        "location": "## 影響範囲",
+        "recommendation": "WorktreeDetailRefactored.tsxでMarkdownEditorをModal内で使用している（L1510-1517, L1627-1634）。最大化機能がModal内で使用された場合の挙動（Modalのz-index=50との関係）を確認すべき",
+        "evidence": "WorktreeDetailRefactored.tsx L1503-1519: MarkdownEditorはModalコンポーネント内でレンダリングされている。Modal自体がz-index=50を持つため、最大化時のz-index設定との相互作用を確認する必要がある"
+      },
+      {
+        "id": "NTH-3",
+        "category": "リグレッション",
+        "issue": "既存のE2Eテストへの影響確認が記載されていない",
+        "location": "Issue本文全体",
+        "recommendation": "既存のE2Eテスト（tests/e2e/）が存在する場合、最大化機能の変更がそれらに影響しないことを確認すべき。特にセレクタ（data-testid）やスタイルに依存するテストへの影響を確認",
+        "evidence": "tests/unit/components/MarkdownEditor.test.tsx: data-testid=\"maximize-button\", data-testid=\"maximize-hint\" などのセレクタを使用。これらは変更予定なし"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_components": [
+      {
+        "file": "src/components/worktree/MarkdownEditor.tsx",
+        "lines": "L436-441",
+        "change_type": "修正",
+        "risk_level": "中",
+        "description": "containerStyleのz-index条件を変更。案1ではisFallbackMode条件を削除"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "lines": "L1503-1519, L1620-1636",
+        "change_type": "影響確認必要",
+        "risk_level": "低",
+        "description": "MarkdownEditorをModal内で使用。Modal(z-index=50)との相互作用確認が必要"
+      },
+      {
+        "file": "src/hooks/useFullscreen.ts",
+        "lines": "N/A",
+        "change_type": "変更なし",
+        "risk_level": "低",
+        "description": "案1では変更不要。フック自体の動作は正常"
+      },
+      {
+        "file": "src/hooks/useIsMobile.ts",
+        "lines": "N/A",
+        "change_type": "変更なし（案3では変更対象）",
+        "risk_level": "低",
+        "description": "案1では変更不要。タブレット判定追加は将来対応"
+      },
+      {
+        "file": "src/config/z-index.ts",
+        "lines": "N/A",
+        "change_type": "変更なし",
+        "risk_level": "低",
+        "description": "MAXIMIZED_EDITOR=40の値は維持"
+      }
+    ],
+    "test_impact": [
+      {
+        "file": "tests/unit/components/MarkdownEditor.test.tsx",
+        "change_required": "追加推奨",
+        "description": "iPad Chrome横置き環境での最大化テストケース追加を検討。jsdom環境では完全な再現は困難だが、isFallbackMode=falseかつisMaximized=trueの場合のz-index設定を確認するテストは追加可能"
+      },
+      {
+        "file": "tests/unit/hooks/useFullscreen.test.ts",
+        "change_required": "なし",
+        "description": "useFullscreenフック自体の動作は正常。テスト変更不要"
+      },
+      {
+        "file": "tests/unit/hooks/useIsMobile.test.ts",
+        "change_required": "なし（案3では追加必要）",
+        "description": "案1では変更不要"
+      }
+    ],
+    "regression_risks": [
+      {
+        "id": "RR-1",
+        "severity": "低",
+        "description": "デスクトップ（Windows/Mac）でのFullscreen API成功時の挙動変化",
+        "mitigation": "案1適用後、デスクトップ環境での最大化動作を確認。z-indexが設定されても視覚的に問題ないことを確認",
+        "affected_environments": ["Windows Chrome", "Mac Chrome", "Mac Safari"]
+      },
+      {
+        "id": "RR-2",
+        "severity": "低",
+        "description": "iOS Safari（縦向き）での挙動への影響",
+        "mitigation": "iOS Safariではフォールバックモードが使用されるため、z-index条件変更の影響は限定的。現状と同じ動作を確認",
+        "affected_environments": ["iOS Safari"]
+      },
+      {
+        "id": "RR-3",
+        "severity": "中",
+        "description": "Modal内でMarkdownEditorを使用した際のz-index競合",
+        "mitigation": "WorktreeDetailRefactoredでの使用パターン（Modal内）をテスト。Modal(z-50) > MaximizedEditor(z-40)の関係を確認",
+        "affected_environments": ["全環境"]
+      }
+    ],
+    "breaking_changes": []
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "L436-441",
+      "relevance": "修正対象。containerStyleのz-index条件"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "L1503-1519, L1620-1636",
+      "relevance": "MarkdownEditorの使用箇所（Modal内）"
+    },
+    {
+      "file": "src/config/z-index.ts",
+      "lines": "L21-36",
+      "relevance": "z-index階層定義（MAXIMIZED_EDITOR=40, MODAL=50）"
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "lines": "L590-729",
+      "relevance": "Maximize Feature, Keyboard Shortcuts テスト"
+    },
+    {
+      "file": "tests/unit/hooks/useFullscreen.test.ts",
+      "lines": "全体",
+      "relevance": "useFullscreenフックのテスト（fallbackMode含む）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+      "relevance": "Issue #99設計書。z-index条件設計の根拠（セクション5.1, 7.2, 12.1）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #99の機能説明。iPad Chrome対応についての追記が必要な可能性"
+    }
+  ],
+  "verification_results": {
+    "affected_files_check": {
+      "MarkdownEditor.tsx": "確認済み。L436-441がz-index条件の該当箇所",
+      "WorktreeDetailRefactored.tsx": "確認済み。L1511, L1628でMarkdownEditorを使用",
+      "useFullscreen.ts": "確認済み。フック自体は正常動作",
+      "useIsMobile.ts": "確認済み。resizeイベントリスナー実装あり"
+    },
+    "test_coverage_check": {
+      "MarkdownEditor_maximize_tests": "あり。tests/unit/components/MarkdownEditor.test.tsx L590-729",
+      "useFullscreen_tests": "あり。fallbackModeテスト含む",
+      "iPad_specific_tests": "なし。追加検討"
+    },
+    "z_index_hierarchy_check": {
+      "DROPDOWN": 10,
+      "MAXIMIZED_EDITOR": 40,
+      "MODAL": 50,
+      "TOAST": 60,
+      "CONTEXT_MENU": 70,
+      "analysis": "Modal(50) > MaximizedEditor(40) の関係。Modal内でのMaximized表示は問題なし"
+    }
+  }
+}

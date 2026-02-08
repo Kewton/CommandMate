@@ -1,0 +1,76 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": []
+  },
+  "security_assessment": {
+    "owasp_top_10": {
+      "evaluation": "影響なし",
+      "details": {
+        "A01_Broken_Access_Control": "影響なし - UI表示条件の変更のみ。削除API自体の認可ロジックは変更されない。既存の認証トークン（CM_AUTH_TOKEN）による保護は維持される。",
+        "A02_Cryptographic_Failures": "影響なし - 暗号化処理への変更なし",
+        "A03_Injection": "影響なし - 入力処理への変更なし。削除APIは既存のrepositoryPath検証を継続使用。SQLインジェクション対策（パラメータ化クエリ）は変更なし。",
+        "A04_Insecure_Design": "影響なし - 設計レベルの変更なし。UIの表示条件（`> 1` から `> 0`）の変更のみで、セキュリティアーキテクチャには影響しない。",
+        "A05_Security_Misconfiguration": "影響なし - 設定への変更なし",
+        "A06_Vulnerable_Components": "影響なし - 依存ライブラリの追加・変更なし",
+        "A07_Auth_Failures": "影響なし - 認証・セッション管理への変更なし",
+        "A08_Software_Data_Integrity": "影響なし - データ整合性への変更なし。削除操作のトランザクション管理は既存実装を使用。",
+        "A09_Logging_Monitoring": "影響なし - ログ機能への変更なし。削除操作のログ記録（`[Repository Delete]` プレフィックス）は維持される。",
+        "A10_SSRF": "影響なし - サーバー間リクエストへの変更なし"
+      }
+    },
+    "xss_risk": {
+      "evaluation": "リスクなし",
+      "details": "今回の変更はJSXの条件式（`repositories.length > 0`）のみ。ユーザー入力の処理やDOM操作は変更されない。リポジトリ名の表示は既存のReact自動エスケープにより保護されている。"
+    },
+    "csrf_risk": {
+      "evaluation": "リスクなし",
+      "details": "削除APIへのリクエスト方法に変更なし。既存のNext.js APIルートの保護機構を継続使用。確認ダイアログ（`delete`入力要求）による二重保護も維持される。"
+    },
+    "injection_risk": {
+      "evaluation": "リスクなし",
+      "details": "入力検証ロジックへの変更なし。削除API（`DELETE /api/repositories`）は既存の入力検証（repositoryPathの文字列型チェック）を使用。DBクエリはパラメータ化されている。"
+    },
+    "auth_impact": {
+      "evaluation": "影響なし",
+      "details": "認証・認可ロジックへの変更なし。UI表示条件の変更は、APIエンドポイントのアクセス制御に影響しない。全ての削除リクエストは既存の認証チェックを通過する必要がある。"
+    }
+  },
+  "existing_security_measures": {
+    "confirmation_dialog": {
+      "description": "削除操作前に`delete`文字列入力を要求する確認ダイアログ",
+      "status": "維持される",
+      "location": "WorktreeList.tsx handleDeleteRepository関数"
+    },
+    "env_warning": {
+      "description": "環境変数で設定されたリポジトリに対する警告表示",
+      "status": "維持される",
+      "details": "isInEnvVar()チェックによりWORKTREE_REPOS設定リポジトリに警告を表示"
+    },
+    "session_cleanup": {
+      "description": "削除前のセッション/ポーラー停止（Facadeパターン）",
+      "status": "維持される",
+      "location": "repositories/route.ts DELETE handler"
+    },
+    "api_validation": {
+      "description": "APIレベルの入力検証",
+      "status": "維持される",
+      "details": "repositoryPathの型チェック、存在確認"
+    }
+  },
+  "change_scope_analysis": {
+    "modified_file": "src/components/worktree/WorktreeList.tsx",
+    "modified_lines": "299行目（1行のみ）",
+    "change_type": "UI表示条件の変更",
+    "change_detail": "repositories.length > 1 から repositories.length > 0 への変更",
+    "security_boundary_crossed": false,
+    "data_flow_impact": false,
+    "authentication_impact": false,
+    "authorization_impact": false
+  },
+  "summary": "本設計変更はセキュリティ観点から問題なし。変更内容はUIコンポーネント（WorktreeList.tsx）の表示条件式（`repositories.length > 1` から `> 0`）を1行変更するのみであり、セキュリティ境界を越える変更ではない。OWASP Top 10の全項目において影響なし。既存のセキュリティ対策（確認ダイアログ、API入力検証、セッションクリーンアップ）は全て維持される。XSS、CSRF、インジェクションのリスク増加なし。認証・認可への影響なし。must_fix、should_fixともに指摘事項なし。"
+}

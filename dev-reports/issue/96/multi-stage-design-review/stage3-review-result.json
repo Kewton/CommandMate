@@ -1,0 +1,444 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 96,
+  "review_date": "2026-01-31",
+  "design_doc_path": "dev-reports/design/issue-96-npm-cli-design-policy.md",
+  "impact_analysis": {
+    "files_to_create": [
+      {
+        "path": "bin/commandmate.js",
+        "purpose": "CLIエントリポイント（shebang付きNode.js実行ファイル）",
+        "lines_estimate": "2-3行"
+      },
+      {
+        "path": "src/cli/index.ts",
+        "purpose": "CLIメインロジック（commander設定）",
+        "lines_estimate": "50-80行"
+      },
+      {
+        "path": "src/cli/commands/init.ts",
+        "purpose": "initコマンド実装",
+        "lines_estimate": "80-120行"
+      },
+      {
+        "path": "src/cli/commands/start.ts",
+        "purpose": "startコマンド実装",
+        "lines_estimate": "60-100行"
+      },
+      {
+        "path": "src/cli/commands/stop.ts",
+        "purpose": "stopコマンド実装",
+        "lines_estimate": "40-60行"
+      },
+      {
+        "path": "src/cli/commands/status.ts",
+        "purpose": "statusコマンド実装",
+        "lines_estimate": "40-60行"
+      },
+      {
+        "path": "src/cli/utils/preflight.ts",
+        "purpose": "依存関係チェック（scripts/preflight-check.shの移植）",
+        "lines_estimate": "150-200行"
+      },
+      {
+        "path": "src/cli/utils/env-setup.ts",
+        "purpose": "環境設定生成（scripts/setup-env.shの移植）",
+        "lines_estimate": "200-300行"
+      },
+      {
+        "path": "src/cli/utils/daemon.ts",
+        "purpose": "デーモンプロセス管理",
+        "lines_estimate": "60-80行"
+      },
+      {
+        "path": "src/cli/utils/pid-manager.ts",
+        "purpose": "PIDファイル管理（SRP対応でdaemon.tsから分離）",
+        "lines_estimate": "40-60行"
+      },
+      {
+        "path": "src/cli/utils/logger.ts",
+        "purpose": "CLI専用ロガー（色付き出力）",
+        "lines_estimate": "30-50行"
+      },
+      {
+        "path": "src/cli/config/cli-dependencies.ts",
+        "purpose": "依存関係定義（OCP対応で外部設定化）",
+        "lines_estimate": "30-40行"
+      },
+      {
+        "path": "src/cli/interfaces/preflight-checker.ts",
+        "purpose": "IPreflightCheckerインターフェース（DIP対応）",
+        "lines_estimate": "15-20行"
+      },
+      {
+        "path": "src/cli/interfaces/env-setup.ts",
+        "purpose": "IEnvSetupインターフェース（DIP対応）",
+        "lines_estimate": "15-20行"
+      },
+      {
+        "path": "src/cli/interfaces/daemon-manager.ts",
+        "purpose": "IDaemonManagerインターフェース（DIP対応）",
+        "lines_estimate": "15-20行"
+      },
+      {
+        "path": "src/cli/types/index.ts",
+        "purpose": "CLI共通型定義（ExitCode enum含む）",
+        "lines_estimate": "30-50行"
+      },
+      {
+        "path": "src/config/defaults.ts",
+        "purpose": "環境変数デフォルト値一元管理（DRY対応）",
+        "lines_estimate": "15-25行"
+      },
+      {
+        "path": ".npmignore",
+        "purpose": "npm publish用除外ファイル定義",
+        "lines_estimate": "20-30行"
+      },
+      {
+        "path": ".github/workflows/publish.yml",
+        "purpose": "npm publish自動化ワークフロー",
+        "lines_estimate": "25-35行"
+      }
+    ],
+    "files_to_modify": [
+      {
+        "path": "package.json",
+        "changes": [
+          "bin フィールド追加（commandmate CLIコマンド登録）",
+          "files フィールド追加（npm publish対象ファイル指定）",
+          "private フィールド変更（true -> false）※npm publish直前に実施",
+          "dependencies に commander 追加"
+        ],
+        "risk": "中（npm publish設定の影響）"
+      },
+      {
+        "path": "server.ts",
+        "changes": [
+          "MCBD_BIND -> getEnvByKey('CM_BIND') に変更（MF-1対応）",
+          "MCBD_PORT -> getEnvByKey('CM_PORT') に変更（MF-1対応）",
+          "src/lib/env.ts からのインポート追加"
+        ],
+        "risk": "高（サーバー起動に直接影響）"
+      },
+      {
+        "path": "src/lib/env.ts",
+        "changes": [
+          "CM_DB_PATHデフォルト値をdb.sqliteからcm.dbに変更（MF-2対応）",
+          "src/config/defaults.ts からのインポート追加",
+          "デフォルト値をENV_DEFAULTSから参照するよう修正",
+          "WORKTREE_REPOSフォールバック対応確認（NTH-3対応）"
+        ],
+        "risk": "高（環境設定全体に影響）"
+      },
+      {
+        "path": "tsconfig.json",
+        "changes": [
+          "noEmit: false への変更検討（CLIビルド出力必要）",
+          "または別途tsconfig.cli.json作成"
+        ],
+        "risk": "中（ビルド構成への影響）"
+      },
+      {
+        "path": "README.md",
+        "changes": [
+          "Quick StartセクションにCLIインストール手順追加",
+          "npm install -g commandmate の案内追加",
+          "commandmate init/start/stop/status コマンドの説明追加"
+        ],
+        "risk": "低（ドキュメント変更のみ）"
+      },
+      {
+        "path": "CLAUDE.md",
+        "changes": [
+          "開発コマンドセクションにCLIコマンド追加"
+        ],
+        "risk": "低（ドキュメント変更のみ）"
+      },
+      {
+        "path": "docs/DEPLOYMENT.md",
+        "changes": [
+          "CLIを使ったセットアップ手順を主要手順として追加",
+          "シェルスクリプト手順をレガシーとして記載",
+          "本格運用向け推奨事項（PM2, systemd）の追記"
+        ],
+        "risk": "低（ドキュメント変更のみ）"
+      }
+    ],
+    "dependencies_to_add": [
+      {
+        "name": "commander",
+        "version": "^12.0.0",
+        "type": "dependencies",
+        "purpose": "CLIフレームワーク（サブコマンド・ヘルプ自動生成）",
+        "size_impact": "軽量（依存関係少）"
+      }
+    ],
+    "tests_required": [
+      {
+        "path": "tests/unit/cli/preflight.test.ts",
+        "description": "依存関係チェックのユニットテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/env-setup.test.ts",
+        "description": "環境設定生成のユニットテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/daemon.test.ts",
+        "description": "デーモン管理のユニットテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/pid-manager.test.ts",
+        "description": "PIDファイル管理のユニットテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/commands/init.test.ts",
+        "description": "initコマンドのユニットテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/commands/start.test.ts",
+        "description": "startコマンドのユニットテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/commands/stop.test.ts",
+        "description": "stopコマンドのユニットテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/commands/status.test.ts",
+        "description": "statusコマンドのユニットテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/config/defaults.test.ts",
+        "description": "デフォルト値一元管理のテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/integration/cli/workflow.test.ts",
+        "description": "init -> start -> status -> stop の統合テスト",
+        "priority": "推奨"
+      },
+      {
+        "path": "tests/unit/env.test.ts（既存）",
+        "description": "env.ts変更に伴う既存テストの更新",
+        "priority": "必須"
+      }
+    ],
+    "docs_to_update": [
+      {
+        "path": "README.md",
+        "section": "Quick Start",
+        "changes": "CLIインストール手順を主要手順に追加"
+      },
+      {
+        "path": "CLAUDE.md",
+        "section": "開発コマンド",
+        "changes": "CLIコマンド（commandmate init/start/stop/status）追加"
+      },
+      {
+        "path": "docs/DEPLOYMENT.md",
+        "section": "セットアップ手順",
+        "changes": "CLIセットアップを推奨手順に変更、シェルスクリプトをレガシーとして記載"
+      },
+      {
+        "path": "docs/migration-to-commandmate.md",
+        "section": "新規追加",
+        "changes": "シェルスクリプトからCLIへの移行手順、WORKTREE_REPOSからCM_ROOT_DIRへの移行手順"
+      },
+      {
+        "path": "docs/user-guide/quick-start.md",
+        "section": "セットアップ",
+        "changes": "CLIコマンドの使い方を追加"
+      },
+      {
+        "path": "CHANGELOG.md",
+        "section": "Added",
+        "changes": "CLI機能追加の記録"
+      }
+    ],
+    "ci_cd_changes": [
+      {
+        "path": ".github/workflows/publish.yml（新規）",
+        "description": "GitHub Release時のnpm publish自動化",
+        "trigger": "release published",
+        "required_secrets": ["NPM_TOKEN"]
+      },
+      {
+        "path": ".github/workflows/ci-pr.yml（既存）",
+        "description": "CLIテストを既存CIに追加",
+        "changes": [
+          "tests/unit/cli/**のテスト実行追加（test:unit内で自動対応）",
+          "CLIビルド検証ステップ追加を検討"
+        ]
+      }
+    ],
+    "breaking_changes": [
+      {
+        "id": "BC-1",
+        "category": "環境変数",
+        "description": "CM_DB_PATHのデフォルト値変更（db.sqlite -> cm.db）",
+        "impact": "既存ユーザーで.envにCM_DB_PATHを明示設定していない場合、DBファイルが見つからなくなる可能性",
+        "mitigation": "移行ガイドにDB_PATH明示設定またはファイルリネームの手順を記載",
+        "severity": "中"
+      },
+      {
+        "id": "BC-2",
+        "category": "npm",
+        "description": "package.json private: false への変更",
+        "impact": "誤ってnpm publishが実行される可能性",
+        "mitigation": "npm publish直前まで private: true を維持、CI/CDでの自動publishを推奨",
+        "severity": "低"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "ビルド構成",
+        "title": "CLIビルド出力設定の不足",
+        "description": "現在のtsconfig.jsonは noEmit: true となっており、CLIのビルド出力（dist/cli/）が生成されない。bin/commandmate.js は dist/cli/index.js を参照するため、ビルド出力設定が必要",
+        "affected_files": ["tsconfig.json", "package.json"],
+        "suggestion": "tsconfig.cli.json を新規作成し、CLI専用のビルド設定（outDir: dist, noEmit: false）を定義。package.json の scripts に build:cli を追加",
+        "reason": "ビルド出力がないとCLIが動作しない"
+      },
+      {
+        "id": "MF-2",
+        "category": "依存関係",
+        "title": "tsxによるserver.ts実行との整合性",
+        "description": "現在server.tsはtsxで直接実行されている（npm run dev, npm start）。CLI start コマンドがserver.tsを起動する際、同様にtsxを使用するか、ビルド済みファイルを使用するかの整合性が必要",
+        "affected_files": ["src/cli/commands/start.ts", "package.json"],
+        "suggestion": "CLI startコマンドは npm start を内部的に実行する形式を推奨。または、server.tsもビルド済み形式（dist/server.js）に移行",
+        "reason": "実行方式の不整合がエラーの原因になる"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト",
+        "title": "既存テストへの影響確認",
+        "description": "src/lib/env.ts の変更（DB_PATHデフォルト値変更、defaults.ts参照）により、tests/unit/env.test.ts の既存テストが影響を受ける可能性",
+        "affected_files": ["tests/unit/env.test.ts"],
+        "suggestion": "env.ts変更前に既存テストを確認し、デフォルト値のアサーションを更新",
+        "reason": "テスト失敗によるCI/CD阻害"
+      },
+      {
+        "id": "SF-2",
+        "category": "ドキュメント",
+        "title": "シェルスクリプトDeprecation警告の追加",
+        "description": "設計書15.1節のPhase 2（1-2ヶ月後）でシェルスクリプトにDeprecation警告を追加する計画だが、具体的な実装方法が未定義",
+        "affected_files": ["scripts/setup.sh", "scripts/start.sh", "scripts/stop.sh", "scripts/status.sh"],
+        "suggestion": "各シェルスクリプトの冒頭に「echo '[DEPRECATED] This script is deprecated. Use commandmate CLI instead.'」を追加する実装計画を明確化",
+        "reason": "移行促進のための重要な施策"
+      },
+      {
+        "id": "SF-3",
+        "category": "セキュリティ",
+        "title": "PIDファイルのパス設定",
+        "description": "PIDファイル(.commandmate.pid)の配置場所が設計書で明確でない。カレントディレクトリに配置すると、複数インスタンス実行時の競合や権限問題が発生する可能性",
+        "affected_files": ["src/cli/utils/pid-manager.ts"],
+        "suggestion": "PIDファイルのパスを環境変数またはXDG仕様（$XDG_RUNTIME_DIR）で設定可能にすることを検討",
+        "reason": "本番環境での運用安定性"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "開発体験",
+        "title": "CLI開発用のwatch機能",
+        "description": "CLI開発中に毎回ビルドが必要になる。開発効率向上のためwatch機能があると便利",
+        "affected_files": ["package.json"],
+        "suggestion": "package.json に build:cli:watch スクリプトを追加（tsc -w --project tsconfig.cli.json）",
+        "reason": "開発効率向上"
+      },
+      {
+        "id": "NTH-2",
+        "category": "エラーハンドリング",
+        "title": "ポート競合時の詳細情報表示",
+        "description": "設計書8.2節でポート競合時に「使用中のプロセス情報を表示」とあるが、具体的な実装方法が未定義",
+        "affected_files": ["src/cli/commands/start.ts"],
+        "suggestion": "lsof -i :PORT または netstat コマンドの実行結果をエラーメッセージに含める",
+        "reason": "トラブルシューティング効率向上"
+      },
+      {
+        "id": "NTH-3",
+        "category": "将来拡張",
+        "title": "logs/restart/health-checkコマンドの将来計画",
+        "description": "設計書1.3節で対象外とされているが、既存シェルスクリプト（logs.sh, restart.sh, health-check.sh）との対応関係を明確にしておくと良い",
+        "affected_files": [],
+        "suggestion": "将来Issueとして登録し、設計書にIssue番号を参照として追記",
+        "reason": "機能ロードマップの明確化"
+      }
+    ]
+  },
+  "affected_modules_summary": {
+    "high_impact": [
+      "server.ts - サーバー起動ロジック変更",
+      "src/lib/env.ts - 環境変数管理の中核",
+      "package.json - npm設定・依存関係"
+    ],
+    "medium_impact": [
+      "tsconfig.json - ビルド構成",
+      "既存ユニットテスト - env.ts変更の影響"
+    ],
+    "low_impact": [
+      "README.md, CLAUDE.md, docs/* - ドキュメント更新",
+      "scripts/*.sh - 並行運用期間中は影響なし"
+    ]
+  },
+  "implementation_order_recommendation": [
+    {
+      "phase": 1,
+      "name": "基盤準備",
+      "tasks": [
+        "src/config/defaults.ts 作成",
+        "src/lib/env.ts 修正（defaults.ts参照、DB_PATH変更）",
+        "server.ts 修正（getEnvByKey使用）",
+        "既存テスト更新"
+      ],
+      "rationale": "MF-1, MF-2対応。CLI実装の前提条件"
+    },
+    {
+      "phase": 2,
+      "name": "CLIコア実装",
+      "tasks": [
+        "tsconfig.cli.json 作成",
+        "src/cli/types, interfaces 作成",
+        "src/cli/utils/* 実装",
+        "ユニットテスト作成"
+      ],
+      "rationale": "CLIユーティリティの基盤構築"
+    },
+    {
+      "phase": 3,
+      "name": "コマンド実装",
+      "tasks": [
+        "src/cli/commands/* 実装",
+        "src/cli/index.ts 実装",
+        "bin/commandmate.js 作成",
+        "コマンドテスト作成"
+      ],
+      "rationale": "ユーザー向け機能の実装"
+    },
+    {
+      "phase": 4,
+      "name": "npm publish準備",
+      "tasks": [
+        "package.json 更新（bin, files）",
+        ".npmignore 作成",
+        ".github/workflows/publish.yml 作成",
+        "ドキュメント更新"
+      ],
+      "rationale": "リリース準備"
+    }
+  ],
+  "summary": "Issue #96の実装は約20個の新規ファイル作成と7個の既存ファイル修正が必要な中規模の変更。最も影響が大きいのはserver.tsとsrc/lib/env.tsの変更で、サーバー起動と環境設定の中核部分に影響する。ビルド構成（tsconfig.json）の変更とテストへの影響確認が重要なリスクポイント。実装は4フェーズに分けて段階的に進めることを推奨。新規依存関係はcommander（軽量）のみで、既存の依存関係への影響は最小限。後方互換性の観点では、DB_PATHデフォルト値変更が既存ユーザーに影響する可能性があり、移行ガイドの整備が必要。"
+}

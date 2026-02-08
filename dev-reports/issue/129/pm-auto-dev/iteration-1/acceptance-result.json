@@ -1,0 +1,68 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: Register 1 repository and confirm filter UI is displayed",
+      "result": "passed",
+      "evidence": "Code analysis: Line 299 condition `repositories.length > 0` evaluates to true when 1 repository exists (1 > 0 = true), causing the filter UI block (lines 299-337) to render"
+    },
+    {
+      "scenario": "Scenario 2: Confirm delete button is clickable with 1 repository",
+      "result": "passed",
+      "evidence": "Code analysis: Delete button (lines 323-333) is inside the filter UI block. With the condition changed to > 0, the filter UI and its delete button are accessible when 1 repository exists"
+    },
+    {
+      "scenario": "Scenario 3: Confirm repository can be deleted and reaches 0 state",
+      "result": "passed",
+      "evidence": "Code analysis: handleDeleteRepository function (lines 216-262) calls repositoryApi.delete() and refreshes the worktree list via fetchWorktrees(), properly handling state transitions"
+    },
+    {
+      "scenario": "Scenario 4: Confirm filter UI hides when 0 repositories",
+      "result": "passed",
+      "evidence": "Code analysis: Condition `repositories.length > 0` evaluates to false when 0 repositories exist (0 > 0 = false), causing the filter UI block to not render"
+    },
+    {
+      "scenario": "Scenario 5: Confirm existing multi-repository behavior is unchanged",
+      "result": "passed",
+      "evidence": "Code analysis: Multiple repositories (2, 3, etc.) all satisfy `> 0` condition, so filter UI continues to display as before. No other logic was modified"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Delete UI is accessible when only 1 repository exists",
+      "verified": true,
+      "verification_method": "Code analysis: Changed condition from `repositories.length > 1` to `repositories.length > 0` on line 299 ensures filter UI (containing delete button) renders when 1+ repositories exist"
+    },
+    {
+      "criterion": "The last single repository can be deleted",
+      "verified": true,
+      "verification_method": "Code analysis: Delete button (lines 323-333) is now accessible within the filter UI when 1 repository exists. The handleDeleteRepository function (lines 216-262) handles deletion properly"
+    },
+    {
+      "criterion": "Appropriate display when repository list becomes 0 after deletion",
+      "verified": true,
+      "verification_method": "Code analysis: When repositories.length becomes 0, condition `> 0` is false, filter UI hides. Empty state message on lines 420-438 displays 'No worktrees found' appropriately"
+    },
+    {
+      "criterion": "No impact on existing multi-repository behavior",
+      "verified": true,
+      "verification_method": "Code analysis: Changing from `> 1` to `> 0` is a superset condition. All values that satisfied `> 1` also satisfy `> 0`, so existing multi-repository behavior is preserved"
+    }
+  ],
+  "build_result": {
+    "status": "passed",
+    "command": "npm run build",
+    "output": "Compiled successfully, no type errors, 12 static pages generated"
+  },
+  "evidence_files": [
+    "src/components/worktree/WorktreeList.tsx (line 299: condition changed)"
+  ],
+  "implementation_verification": {
+    "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/WorktreeList.tsx",
+    "line": 299,
+    "expected_change": "repositories.length > 1 -> repositories.length > 0",
+    "actual_code": "{repositories.length > 0 && (",
+    "verified": true
+  },
+  "message": "All acceptance criteria have been verified through code analysis and build verification. The implementation change correctly fixes the issue where the delete UI was inaccessible when only 1 repository existed."
+}

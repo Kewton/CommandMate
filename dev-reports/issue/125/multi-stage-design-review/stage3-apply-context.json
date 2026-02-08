@@ -1,0 +1,48 @@
+{
+  "issue_number": 125,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "target_file": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "review_result_file": "dev-reports/issue/125/multi-stage-design-review/stage3-review-result.json",
+  "must_fix_items": [
+    {
+      "id": "MF-1",
+      "category": "依存関係の変化",
+      "issue": "dotenv依存の追加が設計書に明記されていない",
+      "recommendation": "設計書に「dotenvパッケージをdependenciesに追加する」旨を明記"
+    },
+    {
+      "id": "MF-2",
+      "category": "既存機能への影響",
+      "issue": "getStatus()が.envを読み込まないため、正しい設定値を取得できない可能性",
+      "recommendation": "getStatus()内でもdotenv.config()を呼び出すか、ドキュメントに動作を明記"
+    }
+  ],
+  "should_fix_items": [
+    {
+      "id": "SF-1",
+      "category": "波及効果",
+      "issue": "env-setup.tsの責務増加",
+      "recommendation": "将来的なpaths.tsへの分離を検討事項として記録"
+    },
+    {
+      "id": "SF-2",
+      "category": "後方互換性",
+      "issue": "マイグレーションパスが未定義",
+      "recommendation": "CHANGELOG.mdに移行手順を追記することを記録"
+    },
+    {
+      "id": "SF-3",
+      "category": "パフォーマンスへの影響",
+      "issue": "ファイルI/Oの増加",
+      "recommendation": "対応不要（オーバーヘッドは無視可能レベル）"
+    },
+    {
+      "id": "SF-4",
+      "category": "運用・保守への影響",
+      "issue": "デバッグ容易性",
+      "recommendation": "起動時ログに設定ファイルパスを出力することを検討"
+    }
+  ],
+  "action": "設計方針書にStage 3の指摘事項を反映し、must_fix項目については設計を修正する。should_fix項目については検討事項として記録する。"
+}

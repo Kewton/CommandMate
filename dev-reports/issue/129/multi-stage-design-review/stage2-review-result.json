@@ -1,0 +1,126 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "N1",
+        "title": "設計書の行番号表記の注意書き追加を推奨",
+        "description": "設計書では「299行目付近」「451行目付近」と記載されているが、実際のコードでは299行目と451行目に該当コードが存在する。現時点では一致しているが、将来のコード変更で行番号がずれる可能性があるため、Issue本文と同様に「参考情報」であることを明記することを推奨",
+        "location": "設計書 Section 3.2.1, 3.2.2",
+        "severity": "low"
+      }
+    ]
+  },
+  "consistency_check": {
+    "design_vs_code": {
+      "status": "CONSISTENT",
+      "details": [
+        {
+          "item": "リポジトリフィルタ表示条件（299行目）",
+          "design_doc": "{repositories.length > 1 && (",
+          "actual_code": "{repositories.length > 1 && (",
+          "line_number": 299,
+          "match": true,
+          "note": "変更前の状態として正しく記載されている。設計書の変更後「> 0」は未実装（設計レビュー段階のため正常）"
+        },
+        {
+          "item": "リポジトリヘッダー表示条件（451行目）",
+          "design_doc": "{(repositories.length > 1 || !selectedRepository) && (",
+          "actual_code": "{(repositories.length > 1 || !selectedRepository) && (",
+          "line_number": 451,
+          "match": true,
+          "note": "現行維持と記載されており、実際のコードと一致"
+        },
+        {
+          "item": "handleDeleteRepository関数",
+          "design_doc": "216-261行目、約45行",
+          "actual_code": "216-262行目（実質46行）",
+          "line_number": "216-262",
+          "match": true,
+          "note": "設計書の記載と実際のコード位置が一致"
+        },
+        {
+          "item": "変更対象ファイル",
+          "design_doc": "src/components/worktree/WorktreeList.tsx",
+          "actual_code": "ファイル存在確認済み",
+          "match": true
+        }
+      ]
+    },
+    "design_vs_issue": {
+      "status": "CONSISTENT",
+      "details": [
+        {
+          "item": "Issue概要",
+          "issue": "リポジトリを1つ追加して削除しようとしたが、トップページにリポジトリ名が表示されず削除できない",
+          "design_doc": "リポジトリが1つの場合、フィルタUI全体（削除ボタン含む）が非表示になるため、削除操作にアクセスできない",
+          "match": true
+        },
+        {
+          "item": "根本原因",
+          "issue": "WorktreeList.tsxのリポジトリフィルタUIの表示条件がrepositories.length > 1となっているため",
+          "design_doc": "WorktreeList.tsxのリポジトリフィルタUIの表示条件がrepositories.length > 1となっているため",
+          "match": true
+        },
+        {
+          "item": "修正方針",
+          "issue": "案1: repositories.length > 0 に変更（推奨）",
+          "design_doc": "案1を採用: repositories.length > 0 に変更",
+          "match": true
+        },
+        {
+          "item": "受け入れ条件",
+          "issue": "4項目（1件でも削除UI表示、最後の1件削除可、0件時の表示、複数時の動作維持）",
+          "design_doc": "同一の4項目を記載",
+          "match": true
+        },
+        {
+          "item": "UI整合性考慮",
+          "issue": "Allボタン表示に関する一貫性優先 vs UX優先の検討",
+          "design_doc": "一貫性優先を採用、理由も明記",
+          "match": true
+        },
+        {
+          "item": "リポジトリヘッダー表示条件",
+          "issue": "リポジトリフィルタUI修正と合わせて見直しが必要",
+          "design_doc": "検討結果を明記（現行維持、理由説明あり）",
+          "match": true,
+          "note": "Issueの要求に対して設計書で明確な判断と理由を示している"
+        },
+        {
+          "item": "テストカバレッジ",
+          "issue": "WorktreeListの単体テストが存在しない、テスト追加を検討",
+          "design_doc": "Section 4.2で将来的なテスト追加推奨として記載",
+          "match": true
+        }
+      ]
+    }
+  },
+  "code_verification": {
+    "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/WorktreeList.tsx",
+    "total_lines": 477,
+    "key_locations": {
+      "repository_filter_condition": {
+        "line": 299,
+        "code": "{repositories.length > 1 && (",
+        "verified": true
+      },
+      "repository_header_condition": {
+        "line": 451,
+        "code": "{(repositories.length > 1 || !selectedRepository) && (",
+        "verified": true
+      },
+      "handleDeleteRepository_function": {
+        "start_line": 216,
+        "end_line": 262,
+        "verified": true
+      }
+    }
+  },
+  "summary": "設計書とソースコードの整合性は良好である。設計書に記載された行番号（299行目、451行目）は実際のコードと正確に一致している。Issue #129の内容と設計書の内容も完全に整合しており、根本原因の分析、修正方針（案1採用）、受け入れ条件、UI整合性の考慮事項、テストカバレッジに関する指摘事項がすべて設計書に反映されている。特に、リポジトリヘッダー表示条件については、Issueで「見直しが必要」と指摘された点に対して、設計書で明確な判断（現行維持）と理由（既存の設計意図を尊重）を示しており、適切に対応されている。Stage1レビューの指摘事項（S1: ヘッダー表示条件の明確化、N1/N2: 将来改善候補）も設計書v1.1で適切に反映されている。",
+  "recommendation": "設計書の品質は高く、実装フェーズに進んで問題ない。実装時は設計書Section 3.2.1の変更（299行目の条件を > 0 に変更）を正確に適用すること。実装完了後は手動テストケース（特に#6: リポジトリ1件時のフィルタ選択動作）を確実に実施すること。"
+}

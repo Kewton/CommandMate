@@ -1,0 +1,57 @@
+{
+  "issue_number": 125,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_date": "2026-02-02",
+  "applied_items": [
+    {
+      "id": "MF-2",
+      "status": "applied",
+      "description": "stop.tsとstatus.tsも同様の問題があることを「問題2」に追記、修正案にも追加"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "description": "「エラー発生時に期待される設定ファイルパスが表示されること」を受け入れ条件に追加"
+    },
+    {
+      "id": "SF-3",
+      "status": "applied",
+      "description": "「移行に関する考慮事項」セクションを追加"
+    },
+    {
+      "id": "SF-1",
+      "status": "noted",
+      "description": "テスト更新はIssue説明には含めず、実装時に対応"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "MF-1",
+      "reason": "既にStage 2で対応済み"
+    },
+    {
+      "id": "MF-3",
+      "reason": "既にStage 2で対応済み"
+    },
+    {
+      "id": "NTH-1",
+      "reason": "Issue内で双方向リンクは不要（GitHubが自動リンク）"
+    },
+    {
+      "id": "NTH-2",
+      "reason": "実装時に確認する事項"
+    }
+  ],
+  "additional_updates": [
+    {
+      "section": "影響範囲",
+      "description": "変更対象ファイルとテスト影響を表形式で追加"
+    },
+    {
+      "section": "受け入れ条件",
+      "description": "stop/statusコマンドの動作確認、後方互換性を追加"
+    }
+  ],
+  "summary": "Must Fix 1件（MF-2）、Should Fix 2件を反映。影響範囲セクションを強化し、stop.ts/status.tsの問題も明記しました。"
+}

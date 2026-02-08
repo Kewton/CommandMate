@@ -1,0 +1,81 @@
+{
+  "issue_number": 125,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "item": "dotenvパッケージの依存追加を設計書に明記",
+        "sections_updated": [
+          "変更概要",
+          "依存関係の追加（新規セクション）",
+          "受け入れ条件"
+        ],
+        "status": "reflected",
+        "details": "package.jsonへのdotenv追加を変更概要テーブルに追加、「依存関係の追加」セクションを新設し、パッケージ情報・理由・代替案を明記"
+      },
+      {
+        "id": "MF-2",
+        "item": "getStatus()での設定値取得問題への対応",
+        "sections_updated": [
+          "変更概要",
+          "4. status.ts の修正",
+          "テスト計画",
+          "受け入れ条件"
+        ],
+        "status": "reflected",
+        "details": "status.ts内でdotenvConfig()を呼び出す設計を追加、設計意図と代替案（不採用）を明記、テストケースと受け入れ条件を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "item": "env-setup.tsの責務増加 - 将来的なpaths.ts分離を検討",
+        "section_updated": "今後の検討事項 > Stage 3レビュー対応 > SF-1",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-2",
+        "item": "マイグレーションパスの定義 - CHANGELOG.md移行手順追記を検討",
+        "section_updated": "今後の検討事項 > Stage 3レビュー対応 > SF-2",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-3",
+        "item": "ファイルI/Oの増加 - オーバーヘッドは無視可能レベル",
+        "section_updated": "今後の検討事項 > Stage 3レビュー対応 > SF-3",
+        "status": "reflected",
+        "note": "対応不要と明記"
+      },
+      {
+        "id": "SF-4",
+        "item": "デバッグ容易性 - 起動時ログに設定ファイルパス出力を検討",
+        "section_updated": "今後の検討事項 > Stage 3レビュー対応 > SF-4",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "sections_updated": [
+    "変更概要",
+    "依存関係の追加（Stage 3レビュー対応: MF-1）",
+    "4. status.ts の修正（Stage 1レビュー対応: MF-1、Stage 3レビュー対応: MF-2）",
+    "テスト計画 > 単体テスト > status.ts",
+    "受け入れ条件",
+    "今後の検討事項 > Stage 3レビュー対応",
+    "レビュー指摘事項サマリー > Stage 3（影響分析レビュー）",
+    "レビュー履歴"
+  ],
+  "summary": {
+    "total_must_fix": 2,
+    "reflected_must_fix": 2,
+    "total_should_fix": 4,
+    "reflected_should_fix": 4,
+    "skipped_count": 0
+  },
+  "timestamp": "2026-02-02T00:00:00Z"
+}

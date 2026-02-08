@@ -1,0 +1,118 @@
+{
+  "issue_number": 125,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "category": "技術的正確性",
+        "title": "根本原因の記載が正確",
+        "description": "Issue記載の根本原因は正確です。start.ts:25で `join(process.cwd(), '.env')` を使用しており、init.tsで使用している `getEnvPath()` と不整合があります。コード確認により確認済み。",
+        "status": "confirmed",
+        "evidence": "src/cli/commands/start.ts:25 - `const envPath = join(process.cwd(), '.env');`\nsrc/cli/commands/init.ts:190 - `const envPath = getEnvPath();`"
+      },
+      {
+        "id": "MF-002",
+        "category": "整合性",
+        "title": "PIDファイルパスも同様の問題あり",
+        "description": "start.ts:17で `PID_FILE = join(process.cwd(), '.commandmate.pid')` も同様に process.cwd() を使用しています。グローバルインストール時は PID ファイルも ~/.commandmate/ に配置すべきです。Issueにこの問題の記載がありません。",
+        "status": "missing_in_issue",
+        "recommendation": "修正案にPIDファイルパスの修正も追加すべき",
+        "evidence": "src/cli/commands/start.ts:17 - `const PID_FILE = join(process.cwd(), '.commandmate.pid');`"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "修正案の実現可能性",
+        "title": "daemon.ts への .env パス伝播方法が不明確",
+        "description": "修正案2「daemon.ts を更新し、正しい .env パスを子プロセスに渡す」について、具体的な実装方法が不明確です。Next.jsは自動的にcwd()から.envを読むため、環境変数として設定を渡すか、cwd を変更するか、dotenv-cli を使用するか等の方針を明確にすべきです。",
+        "recommendation": "以下のいずれかの方針を明記すべき:\n1. spawn時の cwd を ~/.commandmate に変更\n2. .env の内容を環境変数として子プロセスに渡す\n3. dotenv-cliまたはdotenvパッケージでロード後にNext.js起動",
+        "evidence": "src/cli/utils/daemon.ts:47-52 - spawn時に cwd: packageRoot を設定中"
+      },
+      {
+        "id": "SF-002",
+        "category": "技術的正確性",
+        "title": "Next.js の .env 読み込み動作の補足が必要",
+        "description": "修正案3「Next.js が正しい場所から .env を読み込むようにする」について、Next.jsは実行ディレクトリ（cwd）の.envを自動読み込みするため、packageRoot で実行する限り別途対応が必要です。この技術的制約をIssueに補足すべきです。",
+        "recommendation": "Next.jsの.env読み込み仕様への言及を追加"
+      },
+      {
+        "id": "SF-003",
+        "category": "再現手順の妥当性",
+        "title": "再現手順は妥当だが環境前提の明記が望ましい",
+        "description": "再現手順は妥当ですが、「カレントディレクトリに.envが存在しない状態」という前提条件を明記すると、再現性が向上します。",
+        "recommendation": "再現手順の前提条件として「カレントディレクトリに.envが存在しない状態」を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NH-001",
+        "category": "ドキュメント整合性",
+        "title": "回避策の記載は有用",
+        "description": "3つの回避策（シンボリックリンク、コピー、ホームディレクトリ実行）の記載は有用です。ユーザーが即座に問題を回避できます。",
+        "status": "positive"
+      },
+      {
+        "id": "NH-002",
+        "category": "関連Issue",
+        "title": "Issue #96 との関連は適切",
+        "description": "Issue #96（npm install CLI サポート）との関連付けは適切です。同Issueの設計で考慮漏れがあった問題として認識できます。",
+        "status": "positive"
+      },
+      {
+        "id": "NH-003",
+        "category": "テスト観点",
+        "title": "テストケースの追加を推奨",
+        "description": "修正後の受け入れ条件として、以下のテストケースを追加することを推奨します:\n1. グローバルインストール時に任意のディレクトリから start できること\n2. ~/.commandmate/.env の設定が正しく読み込まれること",
+        "recommendation": "受け入れ条件にテストケースを追加"
+      },
+      {
+        "id": "NH-004",
+        "category": "エラーメッセージ改善",
+        "title": "エラーメッセージの改善提案",
+        "description": "現在のエラーメッセージ「.env file not found」に、期待されるパスを表示すると診断が容易になります。",
+        "recommendation": "エラーメッセージに期待されるパスを含める\n例: `.env file not found at ${envPath}`"
+      }
+    ]
+  },
+  "code_review_summary": {
+    "start_ts": {
+      "file": "src/cli/commands/start.ts",
+      "issues": [
+        {
+          "line": 17,
+          "code": "const PID_FILE = join(process.cwd(), '.commandmate.pid');",
+          "problem": "グローバルインストール時、PIDファイルがcwdに作成される",
+          "fix": "getEnvPath()と同様にgetConfigDir()を使用すべき"
+        },
+        {
+          "line": 25,
+          "code": "const envPath = join(process.cwd(), '.env');",
+          "problem": "Issue記載通り、getEnvPath()を使用すべき",
+          "fix": "getEnvPath()をimportして使用"
+        }
+      ]
+    },
+    "daemon_ts": {
+      "file": "src/cli/utils/daemon.ts",
+      "issues": [
+        {
+          "line": "41-52",
+          "code": "const env: NodeJS.ProcessEnv = { ...process.env };",
+          "problem": ".envファイルの内容が子プロセスに渡らない",
+          "fix": "dotenvパッケージで.envを読み込み、環境変数に設定してからspawn"
+        }
+      ]
+    },
+    "env_setup_ts": {
+      "file": "src/cli/utils/env-setup.ts",
+      "status": "正常",
+      "note": "getEnvPath()とisGlobalInstall()は正しく実装されている"
+    }
+  },
+  "summary": "Issue #125 の内容は技術的に正確であり、根本原因の特定も正しいです。ただし、以下の点を補足・修正することで、より完全なIssueになります：(1) PIDファイルパスも同様の問題があることを追記、(2) daemon.tsでの.envロード方法を具体化、(3) Next.jsの.env読み込み仕様への対応方針を明記。修正案は実現可能ですが、実装詳細の明確化が必要です。",
+  "recommendation": "Issue内容を更新し、MF-002（PIDファイルパス問題）を追記した上で実装に進むことを推奨します。"
+}

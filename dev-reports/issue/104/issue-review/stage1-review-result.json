@@ -1,0 +1,113 @@
+{
+  "issue_number": 104,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-01",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "Issueで参照している行番号がコードの実際の行番号と一致しない",
+        "location": "## 原因分析 セクション",
+        "recommendation": "正しい行番号に修正する: isMobilePortrait は L184、containerStyle の条件は L436-441",
+        "evidence": "Issueでは 'src/components/worktree/MarkdownEditor.tsx:184' と記載されているが、実際のコードを確認すると L184 に該当するコードは存在する（正しい）。一方、z-index条件は 'L437-441' と記載されているが、実際はL436-441。1行のずれがある。"
+      },
+      {
+        "id": "MF-2",
+        "category": "正確性",
+        "issue": "z-index条件の問題分析が不完全 - Fullscreen API成功時のz-index設定に関する説明が不足",
+        "location": "## 原因分析 > 2. z-index の条件付き設定",
+        "recommendation": "Fullscreen API成功時はブラウザがフルスクリーン要素を最上位に配置するため、z-indexは不要という点を追記する。問題はFullscreen APIが成功しているにも関わらずタブが前面に来る点にあり、これは親要素のスタッキングコンテキストの問題である可能性を追記すべき",
+        "evidence": "useFullscreen.ts L188-193: Fullscreen API成功時は `setIsFallbackMode(false)` となり、z-indexは設定されない。これは意図された動作であり、Fullscreen APIが正常に動作していればz-indexは不要なはず。iPad Chromeでの問題はFullscreen API自体の挙動またはスタッキングコンテキストに起因する可能性がある。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "iPad Chrome固有のFullscreen API挙動調査結果が不足",
+        "location": "## 原因分析",
+        "recommendation": "iPad ChromeでFullscreen APIがどのように動作しているか（成功/失敗）、isFallbackModeの値を確認した結果を追記すべき。DevToolsでの確認結果があれば記載する",
+        "evidence": "Issueでは 'isFallbackMode = false (Fullscreen API成功時)' と記載されているが、実際にiPad Chromeでこの値を確認したかどうかが不明。Fullscreen APIが失敗している場合は L200-203 のフォールバック処理が実行されるはずだが、その確認が行われていない可能性がある"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "修正方針案1と案2/案3の関係が不明確",
+        "location": "## 修正方針案",
+        "recommendation": "案1は即座の修正として有効だが、案2と案3はオリエンテーション変更やタブレット判定の問題であり、今回のバグとは直接関係しない可能性がある。各案の目的と適用条件を明確化し、優先度を明記すべき",
+        "evidence": "Issue本文では「ターミナルタブが前面に表示される」ことが主要な問題だが、オリエンテーション変更の検知不足は別の問題（モバイルポートレートモードのUI切替）に関連するもの。これらが混在している"
+      },
+      {
+        "id": "SF-3",
+        "category": "整合性",
+        "issue": "useIsMobile.tsに関する分析が実装と一致していない",
+        "location": "## 原因分析 > 3. iPad の判定漏れ",
+        "recommendation": "useIsMobile.tsはresizeイベントをリッスンしており、オリエンテーション変更時にも更新される。問題は isMobilePortrait の計算がコンポーネント内で再評価されないことにある点を明確化すべき",
+        "evidence": "useIsMobile.ts L68-70: `window.addEventListener('resize', handleResize);` でリサイズイベントをリッスンしている。従ってisMobile自体はオリエンテーション変更時に更新される。問題はMarkdownEditor.tsx L184 の `isMobilePortrait` がコンポーネントの通常レンダリング時にのみ評価され、独立したstateになっていない点"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "Issue #99との関連性の詳細説明がない",
+        "location": "## 関連Issue",
+        "recommendation": "Issue #99で実装された機能のどの部分がこのバグに関係しているかを具体的に説明すると、調査・修正がスムーズになる",
+        "evidence": "関連Issueとして #99 を挙げているが、#99 の設計書では z-index条件について 'isMaximized && isFallbackMode' の両方がtrueの場合にのみz-indexを設定する設計が明記されている（セクション7.2、12.1）。この設計判断が現在の問題の原因である可能性がある"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "再現手順の詳細が不足",
+        "location": "## 再現手順",
+        "recommendation": "どのバージョンのiPadOS/Chromeで確認したか、サーバーがローカルホストかリモートか等の詳細を追記するとデバッグしやすくなる",
+        "evidence": "環境情報には 'iPadOS' と 'Chrome' のみ記載。具体的なバージョン情報がないと、ブラウザ固有の問題かどうかの判断が難しい"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "問題の主要箇所。L184（isMobilePortrait判定）、L436-441（containerStyle z-index条件）"
+    },
+    {
+      "file": "src/hooks/useFullscreen.ts",
+      "relevance": "Fullscreen API処理とフォールバックモードの管理。L188-210（enterFullscreen関数）"
+    },
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "モバイル判定フック。resizeイベントリスナー実装あり（L68-70）"
+    },
+    {
+      "file": "src/config/z-index.ts",
+      "relevance": "z-index値の定義。MAXIMIZED_EDITOR: 40"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+      "relevance": "Issue #99の設計書。z-index条件設定の設計判断が記載（セクション5.1、7.2、12.1）"
+    }
+  ],
+  "verification_results": {
+    "line_number_check": {
+      "MarkdownEditor_L184": "一致: isMobilePortrait定義が存在",
+      "MarkdownEditor_L437-441": "1行ずれ: 実際はL436-441",
+      "useIsMobile_breakpoint": "一致: L51でブレークポイント使用"
+    },
+    "code_logic_check": {
+      "isMobilePortrait_static": "確認: 初回レンダリング時のみ評価される（state/effectではない）",
+      "z_index_condition": "確認: isMaximized && isFallbackMode の両方がtrueの場合のみ",
+      "useIsMobile_resize_listener": "確認: resizeイベントリスナーあり（L68-70）"
+    }
+  }
+}

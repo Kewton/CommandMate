@@ -1,0 +1,136 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項対応",
+  "issue_number": 96,
+  "applied_findings": [
+    {
+      "id": "MF-1",
+      "category": "server.ts整合性",
+      "status": "applied",
+      "applied_sections": ["11.1", "20.1"],
+      "description": "server.tsが旧環境変数を直接参照している問題を実装前提条件として文書化",
+      "changes": [
+        "11.1節にMF-1タグを追加し、整合性レビュー指摘であることを明記",
+        "実装チェックリスト（MF-1）を11.1節に追加",
+        "20.1節（事前準備チェックリスト）にMF-1項目を追加"
+      ]
+    },
+    {
+      "id": "MF-2",
+      "category": "デフォルト値整合性",
+      "status": "applied",
+      "applied_sections": ["11.2", "17.1", "20.1"],
+      "description": "DBファイル名の不一致（db.sqlite vs cm.db）を実装前提条件として文書化",
+      "changes": [
+        "11.2節を新規追加（データベースファイル名の統一）",
+        "現状の不一致を表形式で明示",
+        "修正方針をcm.dbに統一と明記",
+        "実装チェックリスト（MF-2）を11.2節に追加",
+        "既存ユーザー向けマイグレーション注意を追記",
+        "20.1節（事前準備チェックリスト）にMF-2項目を追加"
+      ]
+    },
+    {
+      "id": "SF-1",
+      "category": "設計書明確化",
+      "status": "applied",
+      "applied_sections": ["17.2", "20.2"],
+      "description": "src/config/defaults.tsの作成タイミングと既存env.tsとの整合性を明確化",
+      "changes": [
+        "17.2節に修正手順（ステップ1-3）を追加",
+        "実装チェックリスト（SF-1）を17.2節に追加",
+        "20.2節（基盤モジュール作成チェックリスト）にSF-1項目を追加"
+      ]
+    },
+    {
+      "id": "SF-2",
+      "category": "型定義整合性",
+      "status": "applied",
+      "applied_sections": ["4.3.2"],
+      "description": "EnvConfig型とEnv型・LogConfig型の関係性を明確化",
+      "changes": [
+        "4.3.2節にEnvConfig型と既存Env型の関係性を詳細に追記",
+        "Env型、LogConfig型、EnvConfig型それぞれの役割を明記",
+        "実装時の方針（Env型を拡張せず独立した型として定義）を追記"
+      ]
+    },
+    {
+      "id": "SF-3",
+      "category": "移植対象整合性",
+      "status": "applied",
+      "applied_sections": ["4.3.2"],
+      "description": "setup-env.shの全機能がenv-setup.tsで再現されることを確認するチェックリストを追加",
+      "changes": [
+        "4.3.2節にシェルスクリプト機能網羅性（SF-3対応）セクションを追加",
+        "バックアップ、トークン生成、対話入力の各機能を明記",
+        "実装チェックリスト（backupExisting, generateAuthToken, promptForConfig, --defaults）を追加"
+      ]
+    },
+    {
+      "id": "NTH-1",
+      "category": "ドキュメント整合性",
+      "status": "applied",
+      "applied_sections": ["4.3.1"],
+      "description": "openssl依存の並行運用期間中の扱いを明確化",
+      "changes": [
+        "4.3.1節にopenssl依存について（NTH-1対応）セクションを追加",
+        "CLI実装後のopenssl不要化を説明",
+        "Phase 1-2（約4ヶ月）の並行運用期間中はpreflight-check.shで必須維持",
+        "Phase 3以降でoptionalへの変更を検討と明記"
+      ]
+    },
+    {
+      "id": "NTH-2",
+      "category": "package.json整合性",
+      "status": "applied",
+      "applied_sections": ["11.3", "20.4"],
+      "description": "private: falseへの変更タイミングを明確化",
+      "changes": [
+        "11.3節にprivateフラグ変更タイミング（NTH-2対応）を追記",
+        "npm publish直前に変更し、開発中はprivate: trueを維持と明記",
+        "20.4節（npm publish準備チェックリスト）にNTH-2項目を追加"
+      ]
+    },
+    {
+      "id": "NTH-3",
+      "category": "環境変数整合性",
+      "status": "applied",
+      "applied_sections": ["11.4", "20.2"],
+      "description": "WORKTREE_REPOS環境変数との互換性を設計書に追加",
+      "changes": [
+        "11.4節を新規追加（WORKTREE_REPOS互換性）",
+        "フォールバック優先順位（CM_ROOT_DIR -> MCBD_ROOT_DIR -> WORKTREE_REPOS）を明記",
+        "実装チェックリスト（NTH-3）を11.4節に追加",
+        "20.2節（基盤モジュール作成チェックリスト）にNTH-3項目を追加"
+      ]
+    }
+  ],
+  "design_document_updated": true,
+  "design_document_path": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/dev-reports/design/issue-96-npm-cli-design-policy.md",
+  "new_sections_added": [
+    "11.2 データベースファイル名の統一（MF-2: 必須）",
+    "11.4 WORKTREE_REPOS互換性（NTH-3対応）",
+    "20. 実装チェックリスト（全体）"
+  ],
+  "sections_modified": [
+    "2.2 ディレクトリ構成 - config/ディレクトリ追加",
+    "4.3.1 preflight.ts - openssl依存の説明追加",
+    "4.3.2 env-setup.ts - 型関係性とシェルスクリプト機能網羅性追加",
+    "11.1 server.tsの修正 - MF-1タグと実装チェックリスト追加",
+    "11.3 package.jsonの変更 - privateフラグ変更タイミング追記",
+    "13.2 移植対象スクリプト - setup-env.sh行数を394行に修正",
+    "17.2 既存src/lib/env.tsの修正 - 修正手順とチェックリスト追加",
+    "18. レビュー履歴 - Stage 2反映記録追加",
+    "19. レビュー指摘事項対応サマリー - Stage 2セクション追加"
+  ],
+  "summary": "Stage 2整合性レビューの全8件（MF: 2件, SF: 3件, NTH: 3件）の指摘事項を設計方針書に反映完了。MF-1（server.ts環境変数参照）とMF-2（DBファイル名不一致）は実装前提条件として明確に文書化し、実装チェックリストを追加。SF-1〜SF-3は設計書の該当セクションに詳細な説明とチェックリストを追加。NTH-1〜NTH-3は補足説明として各セクションに追記。新規に第20章「実装チェックリスト（全体）」を追加し、実装時の作業順序を明確化した。",
+  "next_steps": [
+    "Stage 3（影響分析レビュー）の実施",
+    "Stage 4（セキュリティレビュー）の実施",
+    "レビュー完了後、実装チェックリストに従って実装を開始"
+  ],
+  "review_metadata": {
+    "applied_at": "2026-01-31T00:00:00+09:00",
+    "applied_by": "apply-review-agent"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "issue_number": 96,
+  "title": "npm installからセットアップ可能にする",
+  "acceptance_criteria": [
+    "npm install -g commandmateが成功すること",
+    "commandmate --versionでバージョンが正しく表示されること",
+    "commandmate initで.envファイルが作成され、DBが初期化されること",
+    "commandmate initでシステム依存関係（Node.js, tmux, git, openssl）のチェックが実行されること",
+    "commandmate startでサーバーがフォアグラウンド起動すること",
+    "commandmate start --devで開発モードで起動すること",
+    "commandmate start --daemonでバックグラウンド起動し、PIDファイルが作成されること",
+    "commandmate stopでサーバーが停止し、PIDファイルが削除されること",
+    "commandmate statusでサーバー状態が表示されること"
+  ],
+  "implementation_tasks": [
+    "server.tsの環境変数参照をgetEnvByKey()に修正",
+    "src/lib/env.tsのdbPathデフォルト値をcm.dbに統一",
+    "bin/commandmate.js（CLIエントリポイント）の作成",
+    "src/cli/index.ts（CLIメインロジック）の作成",
+    "src/cli/types/index.ts（型定義・ExitCode enum）の作成",
+    "src/cli/utils/logger.ts（CLIロガー）の作成",
+    "src/cli/utils/preflight.ts（依存関係チェック）の作成",
+    "src/cli/utils/env-setup.ts（環境設定）の作成",
+    "src/cli/utils/pid-manager.ts（PIDファイル管理）の作成",
+    "src/cli/utils/daemon.ts（デーモン管理）の作成",
+    "src/cli/utils/security-logger.ts（セキュリティイベントログ）の作成",
+    "src/cli/config/cli-dependencies.ts（依存関係定義）の作成",
+    "src/cli/commands/init.ts（initコマンド）の作成",
+    "src/cli/commands/start.ts（startコマンド）の作成",
+    "src/cli/commands/stop.ts（stopコマンド）の作成",
+    "src/cli/commands/status.ts（statusコマンド）の作成",
+    "package.jsonにbin, filesフィールドを追加",
+    ".npmignoreの作成",
+    ".github/workflows/publish.ymlの作成"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-96-npm-cli-design-policy.md",
+  "prerequisites": [
+    {
+      "task": "server.ts環境変数参照修正",
+      "description": "MCBD_BIND/MCBD_PORTをgetEnvByKey()に変更"
+    },
+    {
+      "task": "dbPathデフォルト値統一",
+      "description": "src/lib/env.tsのdbPathデフォルト値をcm.dbに変更"
+    }
+  ]
+}

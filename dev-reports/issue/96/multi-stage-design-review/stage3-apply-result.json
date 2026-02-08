@@ -1,0 +1,115 @@
+{
+  "stage": 3,
+  "stage_name": "指摘事項対応",
+  "issue_number": 96,
+  "applied_findings": [
+    {
+      "id": "MF-1",
+      "category": "ビルド構成",
+      "title": "CLIビルド出力設定の不足",
+      "status": "applied",
+      "applied_sections": ["19.3.1", "20.1", "21.1", "21.2", "22.1"]
+    },
+    {
+      "id": "MF-2",
+      "category": "依存関係",
+      "title": "tsxによるserver.ts実行との整合性",
+      "status": "applied",
+      "applied_sections": ["19.3.1", "20.3", "21.3", "22.3"]
+    },
+    {
+      "id": "SF-1",
+      "category": "テスト",
+      "title": "既存テストへの影響確認",
+      "status": "applied",
+      "applied_sections": ["19.3.2", "20.1", "21.4", "22.1"]
+    },
+    {
+      "id": "SF-2",
+      "category": "ドキュメント",
+      "title": "シェルスクリプトDeprecation警告の追加",
+      "status": "applied",
+      "applied_sections": ["19.3.2", "20.6", "21.5"]
+    },
+    {
+      "id": "SF-3",
+      "category": "セキュリティ",
+      "title": "PIDファイルのパス設定",
+      "status": "applied",
+      "applied_sections": ["19.3.2", "20.3", "21.6"]
+    },
+    {
+      "id": "BC-1",
+      "category": "環境変数",
+      "title": "CM_DB_PATHのデフォルト値変更",
+      "status": "applied",
+      "applied_sections": ["19.3.3", "20.5", "21.7"]
+    },
+    {
+      "id": "BC-2",
+      "category": "npm",
+      "title": "package.json private: false への変更",
+      "status": "applied",
+      "applied_sections": ["19.3.3", "20.4"]
+    },
+    {
+      "id": "NTH-1",
+      "category": "開発体験",
+      "title": "CLI開発用のwatch機能",
+      "status": "applied",
+      "applied_sections": ["19.3.4", "20.2", "21.2"]
+    },
+    {
+      "id": "NTH-2",
+      "category": "エラーハンドリング",
+      "title": "ポート競合時の詳細情報表示",
+      "status": "applied",
+      "applied_sections": ["19.3.4", "21.8"]
+    },
+    {
+      "id": "NTH-3",
+      "category": "将来拡張",
+      "title": "logs/restart/health-checkコマンドの将来計画",
+      "status": "applied",
+      "applied_sections": ["19.3.4", "1.3"]
+    },
+    {
+      "id": "implementation_order",
+      "category": "実装順序",
+      "title": "推奨実装順序（4フェーズ）",
+      "status": "applied",
+      "applied_sections": ["22"]
+    },
+    {
+      "id": "impact_summary",
+      "category": "影響範囲",
+      "title": "影響範囲サマリー",
+      "status": "applied",
+      "applied_sections": ["23"]
+    }
+  ],
+  "design_doc_updated": "dev-reports/design/issue-96-npm-cli-design-policy.md",
+  "sections_added": [
+    "19.3 Stage 3: 影響分析レビュー",
+    "21. Stage 3 影響分析レビュー対応詳細",
+    "21.1 CLIビルド構成（MF-1対応）",
+    "21.2 package.json ビルドスクリプト追加（MF-1対応）",
+    "21.3 CLI startコマンドの実行方式（MF-2対応）",
+    "21.4 既存テストへの影響（SF-1対応）",
+    "21.5 シェルスクリプトDeprecation警告実装（SF-2対応）",
+    "21.6 PIDファイルのパス設定（SF-3対応）",
+    "21.7 BC-1: CM_DB_PATHデフォルト値変更の影響緩和",
+    "21.8 ポート競合時の詳細情報表示（NTH-2対応）",
+    "22. 推奨実装順序（影響分析レビュー反映）",
+    "22.1 Phase 1: 基盤準備",
+    "22.2 Phase 2: CLIコア実装",
+    "22.3 Phase 3: コマンド実装",
+    "22.4 Phase 4: npm publish準備",
+    "23. 影響範囲サマリー（Stage 3レビュー反映）"
+  ],
+  "sections_updated": [
+    "18. レビュー履歴",
+    "20. 実装チェックリスト（全体）"
+  ],
+  "summary": "Stage 3（影響分析レビュー）の指摘事項10件（MF-2件、SF-3件、BC-2件、NTH-3件）と推奨実装順序・影響範囲サマリーを設計方針書に反映。新規セクション16件を追加し、レビュー履歴と実装チェックリストを更新。特に重要な対応として、CLIビルド構成（tsconfig.cli.json）の新規作成、CLI startコマンドのnpm start内部実行方式の採用、既存テストへの影響確認手順、PIDファイルパスのXDG仕様対応、DB_PATHデフォルト値変更の移行ガイド整備を設計書に明記。4フェーズの段階的実装順序（基盤準備→CLIコア実装→コマンド実装→npm publish準備）と影響範囲サマリー（高/中/低影響モジュール分類）も追加し、実装時のリスク管理を強化。"
+}

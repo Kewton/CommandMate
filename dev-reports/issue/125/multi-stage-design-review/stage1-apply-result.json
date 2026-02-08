@@ -1,0 +1,41 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "applied_date": "2026-02-02",
+  "must_fix_applied": [
+    {
+      "id": "MF-1",
+      "action_taken": "設計方針を変更し、getPidFilePath()をstart.ts/stop.ts/status.tsに個別定義するのではなく、env-setup.tsに集約する設計に修正。詳細設計セクション1に「env-setup.ts への getPidFilePath() 集約」を追加し、各コマンドファイルはそれをimportして使用する設計とした。変更概要テーブルも更新し、env-setup.tsへの関数追加を明記。テスト計画にもenv-setup.tsのgetPidFilePath()テストを追加。",
+      "status": "applied"
+    },
+    {
+      "id": "MF-2",
+      "action_taken": "設計方針を変更し、環境変数読み込み責務をdaemon.tsに一元化する設計に修正。start.tsは.envファイルの存在確認のみを行い、実際の読み込みと子プロセスへの伝播はdaemon.tsが担当する設計とした。詳細設計セクション5に「設計意図」サブセクションを追加し、責務分担を明確化。テスト計画のdaemon.tsテストケースにも責務一元化の検証項目を追加。",
+      "status": "applied"
+    }
+  ],
+  "should_fix_recorded": [
+    {
+      "id": "SF-1",
+      "section_added": "今後の検討事項（Stage 1レビュー対応）",
+      "status": "recorded"
+    },
+    {
+      "id": "SF-2",
+      "section_added": "今後の検討事項（Stage 1レビュー対応）",
+      "status": "recorded"
+    },
+    {
+      "id": "SF-3",
+      "section_added": "今後の検討事項（Stage 1レビュー対応）",
+      "status": "recorded"
+    },
+    {
+      "id": "SF-4",
+      "section_added": "今後の検討事項（Stage 1レビュー対応）",
+      "status": "recorded"
+    }
+  ],
+  "design_doc_updated": true,
+  "changes_summary": "設計方針書を以下のように更新: (1) MF-1対応: getPidFilePath()をenv-setup.tsに集約する設計に変更し、詳細設計セクション1を新規追加。変更概要テーブルにenv-setup.tsへの関数追加を追記。テスト計画にenv-setup.tsのテストケースを追加。(2) MF-2対応: daemon.tsで環境変数読み込みを一元化する設計に変更し、詳細設計セクション5に設計意図を追加。start.tsの詳細設計にMF-2対応コメントを追加。(3) SF-1〜SF-4を「今後の検討事項（Stage 1レビュー対応）」セクションに記録。指摘内容、推奨対応、優先度を明記。(4) 「レビュー履歴」テーブルを新規追加し、Stage 1対応履歴を記録。"
+}

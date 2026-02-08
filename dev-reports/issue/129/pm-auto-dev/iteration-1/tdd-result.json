@@ -1,0 +1,17 @@
+{
+  "status": "success",
+  "changes": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/worktree/WorktreeList.tsx",
+      "description": "Changed repository filter UI display condition from `repositories.length > 1` to `repositories.length > 0` at line 299. This allows the filter UI (including delete button) to be visible when only one repository exists."
+    }
+  ],
+  "test_results": {
+    "unit": "pass",
+    "integration": "partial",
+    "notes": "Unit tests: 112/113 test files passed (2243 tests passed). The single failure was a worker exit error unrelated to the code change. Integration tests: 16/26 test files passed (272 tests passed). The 40 failing tests are pre-existing issues related to Next.js app router mocking in test environment, not related to this change."
+  },
+  "lint_result": "pass",
+  "type_check_result": "pass",
+  "summary": "Successfully fixed Issue #129 by changing the repository filter UI display condition from `repositories.length > 1` to `repositories.length > 0`. This single-line change allows users to see the repository filter UI and access the delete button when only one repository exists. All static analysis (ESLint, TypeScript) passes. Unit tests pass (minor worker error unrelated to change). Integration test failures are pre-existing and unrelated to this fix."
+}

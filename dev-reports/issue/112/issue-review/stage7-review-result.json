@@ -1,0 +1,145 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 112,
+  "review_date": "2026-02-01",
+  "previous_findings_status": [
+    {
+      "id": "MUST-001",
+      "description": "AppShell.test.tsxのテストケース更新",
+      "status": "addressed",
+      "verification": "Issue本文「テスト更新必須」セクションに具体的な対応方針が明記されている（L281, L302の2箇所を`translate-x-0`/`-translate-x-full`チェックに変更）。受け入れ条件にも反映済み。"
+    },
+    {
+      "id": "MUST-002",
+      "description": "SidebarToggle.tsxの位置計算確認",
+      "status": "addressed",
+      "verification": "Issue本文「確認・調整必要」セクションにSidebarToggle.tsxが追加され、`left-[284px]`/`left-2`（L42）の確認必要性が明記。オーバーレイ型の場合の代替案（サイドバー内部配置またはfixed配置）も言及。"
+    },
+    {
+      "id": "MUST-003",
+      "description": "z-index階層管理との整合性確認",
+      "status": "addressed",
+      "verification": "Issue本文に「z-index階層管理」セクションが追加され、目標階層定義（SIDEBAR=30）、z-index.tsへの追加必須、WorktreeDetailRefactored.tsxとの競合確認が明記。受け入れ条件にも反映。"
+    },
+    {
+      "id": "SHOULD-001",
+      "description": "レイアウト方式の選択（オーバーレイ型/プッシュ型）",
+      "status": "addressed",
+      "verification": "Issue本文「レイアウト方式の選択」セクションで2つのアプローチが明示され、オーバーレイ型が推奨と記載。メインコンテンツのパディング動作（`${isOpen ? 'md:pl-72' : 'md:pl-0'}`）も説明追加。"
+    },
+    {
+      "id": "SHOULD-002",
+      "description": "CSSトランジション最適化",
+      "status": "addressed",
+      "verification": "Issue本文「CSSトランジション最適化」セクションに`transition-all`から`transition-transform`への変更、<main>要素の不要な`transition-all`削除が明記。"
+    },
+    {
+      "id": "SHOULD-003",
+      "description": "モバイル互換性とisMobile判定ポイント確認",
+      "status": "addressed",
+      "verification": "Issue本文「モバイル互換性」セクションに768px前後のレイアウト遷移確認、iPadのuseIsMobile判定がfalseを返すことの確認が明記。"
+    },
+    {
+      "id": "SHOULD-004",
+      "description": "アクセシビリティ（aria-hidden連動）",
+      "status": "addressed",
+      "verification": "Issue本文「アクセシビリティ」セクションに`role='complementary'`維持、`aria-hidden`属性のisOpen連動検討が明記。受け入れ条件「アクセシビリティ要件」にも反映。"
+    },
+    {
+      "id": "NICE-001",
+      "description": "will-change-transformの追加",
+      "status": "not_addressed",
+      "verification": "Issue本文に言及なし。Nice to Haveのため必須ではないが、実装時に検討可能。"
+    },
+    {
+      "id": "NICE-002",
+      "description": "SidebarContext width機能のコメント明記",
+      "status": "addressed",
+      "verification": "Issue本文「SidebarContextのwidth機能について」セクションに将来的なリサイズ機能用として維持する旨、コメントで将来用途を明記する方針が記載。"
+    },
+    {
+      "id": "NICE-003",
+      "description": "内部ラッパーの削除によるDOM簡素化",
+      "status": "partially_addressed",
+      "verification": "Issue本文「実装イメージ」のAfterコードでは内部ラッパーが削除されている。しかし、「注意」として内部ラッパーが不要になる旨の説明は追加されたが、対象ファイル一覧には明示的に記載されていない。"
+    }
+  ],
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-NEW-001",
+        "category": "z-index競合詳細",
+        "description": "WorktreeDetailRefactored.tsxのz-30使用箇所（L1552: AutoYesToggle、L1588: MessageInput）はモバイルレイアウト専用である。デスクトップサイドバーのz-30とモバイルの固定要素のz-30は、isMobile判定により同時に表示されることはないため、直接的な競合は発生しない。ただし、z-index.tsにSIDEBAR定数として追加する際、この点を開発者が混乱しないようコメントで明記することを推奨。",
+        "location": "z-index階層管理セクション",
+        "recommendation": "z-index.tsにSIDEBAR(30)追加時、コメントで「デスクトップレイアウト専用。モバイルではMobileHeader(z-40)、drawer-overlay(z-40)、sidebar-container(z-50)の階層を使用」と明記する。"
+      },
+      {
+        "id": "SF-NEW-002",
+        "category": "SidebarToggle位置調整の具体策欠如",
+        "description": "SidebarToggle.tsxの`left-[284px]`（サイドバー幅288px - 4px）は、現在のwidth方式ではサイドバー右端に配置されるが、transform方式（オーバーレイ型）ではサイドバーがfixed配置となるため、AppShellの親要素ではなくviewport基準での配置となる。この場合、SidebarToggleの動作に変更が必要か、具体的な調整方針が不明。",
+        "location": "確認・調整必要 セクション",
+        "recommendation": "以下のいずれかの方針を明記: (1) SidebarToggleをサイドバー内部に移動、(2) SidebarToggleもfixed配置に変更し`left-[284px]`を維持、(3) SidebarToggleの位置をサイドバーのtransform状態に連動させる。現在の「確認」だけでなく、想定される調整方針を追記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-NEW-001",
+        "category": "E2Eテスト範囲の明確化",
+        "description": "tests/e2e/worktree-detail.spec.tsを確認したところ、サイドバー表示/非表示の切り替えに関する直接的なテストは存在しない。確認推奨とされているが、実際にはこのE2Eテストへの影響は軽微である可能性が高い。",
+        "location": "確認・調整必要 セクション",
+        "recommendation": "E2Eテストの確認推奨について、「サイドバー関連のE2Eテストが存在しないため、影響は軽微と想定。ただし、レスポンシブテスト（L172-186のモバイルビューポートテスト）でサイドバー動作に影響がないか確認」と具体化する。"
+      },
+      {
+        "id": "NTH-NEW-002",
+        "category": "SidebarToggle.test.tsx影響確認",
+        "description": "SidebarToggle.test.tsxを確認したところ、位置（left-[284px]/left-2）に関する直接的なテストは存在しない。Styling描述テストは`hover:`や`focus:`のクラス存在確認のみ。実際にはこのテストへの影響は軽微。",
+        "location": "確認・調整必要 セクション",
+        "recommendation": "SidebarToggle.test.tsxについて、「位置関連のテストは存在しないため更新不要。ただし、transform方式でSidebarToggleの配置方式を変更する場合は、新規テストの追加を検討」と明記。"
+      }
+    ]
+  },
+  "affected_files_verification": {
+    "complete": true,
+    "verified_files": [
+      {
+        "file": "src/components/layout/AppShell.tsx",
+        "verified": true,
+        "notes": "デスクトップレイアウト（L85-116）がwidth方式を使用していることを確認。transform方式への変更対象として正確。"
+      },
+      {
+        "file": "tests/unit/components/layout/AppShell.test.tsx",
+        "verified": true,
+        "notes": "L281の`w-72`チェック、L302の`w-0`チェックの存在を確認。テスト更新必須。"
+      },
+      {
+        "file": "src/config/z-index.ts",
+        "verified": true,
+        "notes": "現在SIDEBAR定数が存在しないことを確認。追加必須。"
+      },
+      {
+        "file": "src/components/layout/SidebarToggle.tsx",
+        "verified": true,
+        "notes": "L42の`left-[284px]`/`left-2`を確認。transform方式での動作確認必要。"
+      },
+      {
+        "file": "tests/unit/components/layout/SidebarToggle.test.tsx",
+        "verified": true,
+        "notes": "位置関連のテストは存在しない。変更不要の可能性高い。"
+      },
+      {
+        "file": "tests/e2e/worktree-detail.spec.ts",
+        "verified": true,
+        "notes": "サイドバー表示切り替えの直接テストなし。影響軽微。"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "verified": true,
+        "notes": "z-30使用箇所（L1552, L1588）はモバイルレイアウト専用。デスクトップサイドバーとの競合なし。"
+      }
+    ],
+    "missing_files": []
+  },
+  "summary": "Stage 3の影響範囲レビュー指摘事項は概ね適切に反映されている。MUST-FIXの3項目は全て対応済み。SHOULD-FIXの4項目も全て対応済み。NICE-TO-HAVEの3項目中、1項目は未対応（will-change-transform）、1項目は部分対応（内部ラッパー削除）、1項目は対応済み（width機能コメント）。新たに確認した結果、z-30のWorktreeDetailRefactored.tsxとの競合リスクは、モバイル専用要素であるため実際には低いことが判明。SidebarToggle.test.tsxおよびE2Eテストへの影響も軽微と確認。残る課題として、SidebarToggleの位置調整の具体的方針を明記することを推奨（Should Fix）。全体として、影響範囲の特定と対応方針は十分に記載されており、実装に進むことが可能な状態である。"
+}

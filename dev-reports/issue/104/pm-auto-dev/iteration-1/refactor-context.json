@@ -1,0 +1,17 @@
+{
+  "issue_number": 104,
+  "refactor_targets": [
+    "src/components/worktree/MarkdownEditor.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 72.67
+  },
+  "improvement_goals": [
+    "containerClassesとcontainerStyleの条件差異についてコード内コメントを追加",
+    "テストコードの可読性向上（既に実施済みの場合はスキップ）"
+  ],
+  "scope_notes": [
+    "本Issueはバグ修正のため、大規模なリファクタリングは行わない",
+    "コメント追加のみで十分"
+  ]
+}

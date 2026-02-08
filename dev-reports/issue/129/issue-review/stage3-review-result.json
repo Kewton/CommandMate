@@ -1,0 +1,93 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S1",
+        "category": "UI整合性",
+        "description": "修正案1を適用すると、リポジトリが1つの場合にも「All (n)」ボタンが表示される。これは「フィルタとして機能しない」状態でのAllボタン表示になり、UXとしての妥当性を検討する必要がある",
+        "recommendation": "案1採用時は、リポジトリが1つの場合のUIについて以下を検討: (1) Allボタンは非表示にして削除ボタン付きのリポジトリ名のみ表示 (2) 現状のまま（Allボタンも表示）として一貫性を優先",
+        "affected_area": "src/components/worktree/WorktreeList.tsx 300-307行目"
+      },
+      {
+        "id": "S2",
+        "category": "リポジトリヘッダー表示",
+        "description": "451行目のリポジトリヘッダー表示条件`(repositories.length > 1 || !selectedRepository)`は、リポジトリが1つでselectRepositoryがnullの場合に常にヘッダーが表示される。修正後にリポジトリフィルタで1つだけ選択した場合、selectedRepositoryが設定されるとヘッダーが非表示になる可能性がある",
+        "recommendation": "リポジトリフィルタUI修正と合わせて、リポジトリヘッダーの表示条件も見直し、リポジトリが1つの場合の表示を統一すること",
+        "affected_area": "src/components/worktree/WorktreeList.tsx 450-456行目"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "N1",
+        "category": "テストカバレッジ",
+        "description": "WorktreeListコンポーネントの単体テストが存在しない。UI変更に対するリグレッションテストがない状態",
+        "recommendation": "修正と同時に、リポジトリフィルタUIの表示条件に関するテストケースを追加することを検討"
+      },
+      {
+        "id": "N2",
+        "category": "ドキュメント更新",
+        "description": "docs/architecture.mdの581行目「リポジトリフィルターチップにホバー時削除ボタン（×）表示」の記述は現在の実装と整合しているが、修正後のリポジトリが1つの場合の動作についての記述がない",
+        "recommendation": "修正後にドキュメントを更新し、リポジトリが1つの場合のフィルタUI動作を明記することを検討"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": [
+      "src/components/worktree/WorktreeList.tsx"
+    ],
+    "affected_functions": [
+      "WorktreeList (JSX return - Repository Filter section 298-337行目)",
+      "WorktreeList (JSX return - Repository Header section 450-456行目)"
+    ],
+    "side_effects": [
+      {
+        "description": "リポジトリが1つの場合にフィルタUI全体が表示されるようになる（Allボタン、リポジトリ名ボタン、削除ボタン）",
+        "risk_level": "低",
+        "mitigation": "UIとして自然な表示になるかの確認が必要"
+      },
+      {
+        "description": "リポジトリ0件時（全削除後）のUIは現状通り（フィルタUI非表示）となり、影響なし",
+        "risk_level": "なし",
+        "mitigation": "不要"
+      },
+      {
+        "description": "リポジトリヘッダーの表示条件との整合性（451行目）に注意が必要",
+        "risk_level": "低",
+        "mitigation": "リポジトリ1つ時にフィルタUIとヘッダー表示の両方の動作を確認"
+      }
+    ],
+    "test_coverage": {
+      "existing_tests": [
+        "tests/integration/api-repository-delete.test.ts - API層の削除機能テスト（UIは対象外）",
+        "tests/unit/db-repository-delete.test.ts - DB層のリポジトリ削除テスト"
+      ],
+      "missing_tests": [
+        "WorktreeListコンポーネントの単体テスト",
+        "リポジトリフィルタUIの表示条件に関するテスト",
+        "リポジトリが1つ/0件の場合のUIテスト"
+      ],
+      "recommended_tests": [
+        "リポジトリが1つの場合にフィルタUIが表示されることのテスト",
+        "リポジトリが0件の場合にフィルタUIが非表示になることのテスト",
+        "最後の1つのリポジトリ削除後のUI状態テスト"
+      ]
+    },
+    "related_components": {
+      "no_impact": [
+        "src/components/repository/RepositoryManager.tsx - リポジトリ追加/クローンUI。削除UIはWorktreeListのみに存在するため影響なし",
+        "src/app/api/repositories/route.ts - API層。UI変更のため影響なし",
+        "src/lib/api-client.ts - APIクライアント。UI変更のため影響なし"
+      ],
+      "indirect_impact": [
+        "src/components/sidebar/SortSelector.tsx - selectedRepositoryを参照している可能性。確認の結果、直接の依存なし",
+        "src/components/mobile/MobileHeader.tsx - Repositoryを参照しているが、削除UIは含まない"
+      ]
+    },
+    "breaking_changes": []
+  },
+  "summary": "Issue #129の修正は、主にsrc/components/worktree/WorktreeList.tsxの298-337行目（リポジトリフィルタ）と450-456行目（リポジトリヘッダー）の2箇所に影響する。条件を`repositories.length > 0`に変更することで、リポジトリが1つの場合でもフィルタUI（削除ボタン含む）が表示されるようになる。副作用リスクは低いが、リポジトリが1つの場合の「All」ボタン表示の妥当性と、リポジトリヘッダー表示条件との整合性について確認が必要。API層やDB層への影響はなく、UIのみの変更となる。テストカバレッジについては、WorktreeListコンポーネントの単体テストが存在しないため、修正と同時にUIテストの追加を推奨する。"
+}

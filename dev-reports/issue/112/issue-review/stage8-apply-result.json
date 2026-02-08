@@ -1,0 +1,38 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 112,
+  "applied_date": "2026-02-01",
+  "applied_findings": [
+    {
+      "id": "SF-NEW-001",
+      "category": "z-index競合詳細",
+      "status": "applied",
+      "change_summary": "z-index階層管理セクションに「z-30の使用状況と競合分析」を追加。WorktreeDetailRefactored.tsxのz-30使用箇所（L1552, L1588）がモバイルレイアウト専用であり、isMobile判定によりデスクトップサイドバーのz-30と同時表示されないため競合しないことを明記。また、z-index.tsへの追加時のコメント例を追加。"
+    },
+    {
+      "id": "SF-NEW-002",
+      "category": "SidebarToggle位置調整の具体策",
+      "status": "applied",
+      "change_summary": "「確認・調整必要」セクションのSidebarToggle.tsxの行に具体的な調整方針を追加。オーバーレイ型（fixed配置）では、SidebarToggleもfixed配置に変更し`left-[284px]`を維持するか、またはサイドバー内部（右端）に配置を移動する方針を明記。"
+    },
+    {
+      "id": "NTH-NEW-001",
+      "category": "E2Eテスト範囲の明確化",
+      "status": "applied",
+      "change_summary": "「確認・調整必要」セクションのE2Eテスト行を更新。サイドバー関連の直接テストが存在しないため影響軽微と明記し、レスポンシブテスト（L172-186のモバイルビューポートテスト）でのサイドバー動作確認を推奨として記載。"
+    },
+    {
+      "id": "NTH-NEW-002",
+      "category": "SidebarToggle.test.tsx影響確認",
+      "status": "applied",
+      "change_summary": "「確認・調整必要」セクションのSidebarToggle.test.tsx行を更新。位置関連テストは存在しないため更新不要と明記し、transform方式でSidebarToggleの配置方式を変更する場合は新規テスト追加を検討と記載。"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": "Stage 7の影響範囲レビュー（2回目）で検出された2件のShould Fix項目と2件のNice to Have項目を全て反映しました。SF-NEW-001ではz-index競合がモバイル/デスクトップのisMobile判定により発生しないことを明確化し、z-index.tsへの追加時のコメント例を追加しました。SF-NEW-002ではSidebarToggleの位置調整について、fixed配置への変更またはサイドバー内部配置という具体的な方針を明記しました。また、E2EテストとSidebarToggle.test.tsxへの影響が軽微であることも明確化しました。レビュー履歴にStage 7の反映内容を追加しています。",
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/112"
+  }
+}

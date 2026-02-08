@@ -1,0 +1,53 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "status": "applied",
+        "action": "技術スコープを「削除して再実装」から「既存実装のレビュー・改善」に修正"
+      },
+      {
+        "id": "MF-002",
+        "status": "applied",
+        "action": "前提条件セクションを追加し、Codex CLIの利用可能性確認を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "status": "applied",
+        "action": "UI有効化セクションを追加し、isCliTab関数の拡張を明記"
+      },
+      {
+        "id": "SF-002",
+        "status": "applied",
+        "action": "アーキテクチャ方針セクションを追加し、Strategyパターン維持を明記"
+      },
+      {
+        "id": "SF-003",
+        "status": "applied",
+        "action": "受け入れ条件にプロンプト検出パターンの検証を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "status": "applied",
+        "action": "備考にAuto-Yes機能のPhase 2分離を追記"
+      },
+      {
+        "id": "NTH-002",
+        "status": "applied",
+        "action": "セキュリティ考慮事項セクションを追加"
+      },
+      {
+        "id": "NTH-003",
+        "status": "applied",
+        "action": "テスト要件セクションを追加"
+      }
+    ]
+  },
+  "summary": "Stage 1の指摘8件すべてを反映。技術スコープの誤りを修正し、前提条件・セキュリティ・テスト要件を追加。"
+}

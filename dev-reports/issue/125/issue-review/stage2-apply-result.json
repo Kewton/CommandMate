@@ -1,0 +1,53 @@
+{
+  "issue_number": 125,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_date": "2026-02-02",
+  "applied_items": [
+    {
+      "id": "MF-002",
+      "status": "applied",
+      "description": "PIDファイルパス問題を「問題2」として追記"
+    },
+    {
+      "id": "SF-001",
+      "status": "applied",
+      "description": "daemon.tsへの.env伝播方法を「問題3」として追記、修正案に具体的方針を明記"
+    },
+    {
+      "id": "SF-002",
+      "status": "applied",
+      "description": "Next.jsの.env読み込み仕様への言及を追加"
+    },
+    {
+      "id": "SF-003",
+      "status": "applied",
+      "description": "再現手順の前提条件として「カレントディレクトリに.envが存在しない状態」を追加"
+    },
+    {
+      "id": "NH-003",
+      "status": "applied",
+      "description": "受け入れ条件セクションを追加"
+    },
+    {
+      "id": "NH-004",
+      "status": "applied",
+      "description": "エラーメッセージ改善を修正案に追加"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "MF-001",
+      "reason": "既に記載済み（確認のみ）"
+    },
+    {
+      "id": "NH-001",
+      "reason": "ポジティブフィードバック（変更不要）"
+    },
+    {
+      "id": "NH-002",
+      "reason": "ポジティブフィードバック（変更不要）"
+    }
+  ],
+  "summary": "Must Fix 1件（MF-002）、Should Fix 3件、Nice to Have 2件を反映。合計6件の指摘事項をIssueに反映しました。"
+}

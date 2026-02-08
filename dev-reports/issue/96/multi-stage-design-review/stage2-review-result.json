@@ -1,0 +1,167 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 96,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "server.ts整合性",
+        "title": "server.tsが旧環境変数を直接参照している",
+        "description": "設計書11.1節でserver.tsの修正が「CLI実装前に完了する必要がある」と明記されているが、現在のserver.ts（43-44行目）は依然として`MCBD_BIND`, `MCBD_PORT`を直接参照しており、`getEnvByKey()`を使用していない",
+        "location": "server.ts:43-44",
+        "current_code": "const hostname = process.env.MCBD_BIND || '127.0.0.1';\nconst port = parseInt(process.env.MCBD_PORT || process.env.PORT || '3000', 10);",
+        "expected_code": "import { getEnvByKey } from './src/lib/env';\nconst hostname = getEnvByKey('CM_BIND') || '127.0.0.1';\nconst port = parseInt(getEnvByKey('CM_PORT') || '3000', 10);",
+        "impact": "high",
+        "reason": "設計書で明示的に前提条件として記載されており、CLI実装時に環境変数の一貫性が失われる"
+      },
+      {
+        "id": "MF-2",
+        "category": "デフォルト値整合性",
+        "title": "データベースファイル名の不一致",
+        "description": "設計書17.1節のENV_DEFAULTSでは`CM_DB_PATH: './data/cm.db'`と定義されているが、src/lib/env.ts（170-171行目）では`db.sqlite`を使用している。setup-env.shでは`cm.db`を使用しており、設計書とシェルスクリプトは一致するがenv.tsと不一致",
+        "location": "src/lib/env.ts:170-171, scripts/setup-env.sh:26, 設計書17.1節",
+        "current_values": {
+          "env.ts": "./data/db.sqlite",
+          "setup-env.sh": "./data/cm.db",
+          "design_doc": "./data/cm.db"
+        },
+        "expected_value": "./data/cm.db（設計書とシェルスクリプトに合わせる）",
+        "impact": "high",
+        "reason": "CLIで生成される.envとenv.tsのデフォルト値が異なると、既存ユーザーに混乱を招く"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "設計書明確化",
+        "title": "src/config/defaults.tsの作成タイミング明確化",
+        "description": "設計書17章で`src/config/defaults.ts`を新規作成する計画があるが、これが既存の`src/lib/env.ts`との整合性をどのように取るか（env.tsの修正も必要か）が明確でない",
+        "location": "設計書17.2節",
+        "suggestion": "17.2節の「既存src/lib/env.tsの修正」を実装計画に明示的に含める。また、defaults.tsからenv.tsへの参照関係を図示する",
+        "impact": "medium",
+        "reason": "実装者がdefaults.tsだけ作成しenv.tsの修正を忘れるリスクがある"
+      },
+      {
+        "id": "SF-2",
+        "category": "型定義整合性",
+        "title": "EnvConfig型とEnv型の関係性明確化",
+        "description": "設計書4.3.2のEnvConfig型と既存env.tsのEnv型（134-149行目）は類似しているが完全に同一ではない。EnvConfigにはCM_LOG_LEVELとCM_LOG_FORMATが含まれるが、既存のEnv型にはない（LogConfig型で別管理）",
+        "location": "設計書4.3.2, src/lib/env.ts:134-149, 93-96",
+        "suggestion": "EnvConfig型を定義する際、既存のEnv型およびLogConfig型との関係性を設計書に明記する。または既存の型を拡張する形で設計を更新する",
+        "impact": "medium",
+        "reason": "型の重複定義はメンテナンスコストを増加させる"
+      },
+      {
+        "id": "SF-3",
+        "category": "移植対象整合性",
+        "title": "シェルスクリプトの機能網羅性確認",
+        "description": "設計書13.2節でsetup-env.sh（393行）の移植が計画されているが、実際のsetup-env.shは394行（空行含む）。また、対話形式でのバックアップ機能、外部アクセス設定など全機能がenv-setup.tsで再現されるか確認が必要",
+        "location": "設計書13.2, scripts/setup-env.sh",
+        "features_to_verify": [
+          "既存.envのバックアップ（backup_env関数）",
+          "外部アクセス時のトークン自動生成（generate_token関数）",
+          "非対話モード（--yes）",
+          "対話形式の入力（read_input, read_yesno関数）"
+        ],
+        "impact": "medium",
+        "reason": "機能欠落があるとシェルスクリプトからの移行に支障"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント整合性",
+        "title": "openssl依存の残存",
+        "description": "設計書7.1節で「openssl依存からの脱却: Node.js標準のcryptoモジュールを使用」と記載されているが、preflight-check.shではopensslが必須依存として残っている",
+        "location": "設計書7.1, scripts/preflight-check.sh:194-201, 設計書4.3.1",
+        "suggestion": "preflight-check.shでopensslをoptionalに変更するか、設計書の依存関係リストからopensslを削除するかを検討",
+        "impact": "low",
+        "reason": "CLI実装後はopensslは不要になるが、シェルスクリプト並行運用期間中は必要"
+      },
+      {
+        "id": "NTH-2",
+        "category": "package.json整合性",
+        "title": "private: falseへの変更タイミング",
+        "description": "設計書11.2節で`private: false`への変更が記載されているが、現在のpackage.jsonは`private: true`。npm publish準備として必要だが、変更タイミングと条件（npm publish直前など）を明記すると良い",
+        "location": "設計書11.2, package.json:4",
+        "suggestion": "privateフラグ変更のタイミングをnpm publish workflowセクションに追記",
+        "impact": "low",
+        "reason": "明確なタイミング指定で意図しないpublishを防止"
+      },
+      {
+        "id": "NTH-3",
+        "category": "環境変数整合性",
+        "title": "WORKTREE_REPOS環境変数の扱い",
+        "description": "server.ts（79行目）では`WORKTREE_REPOS`または`MCBD_ROOT_DIR`を参照しているが、設計書ではCM_ROOT_DIRのみ言及。WORKTREE_REPOSとの互換性について設計書に記載がない",
+        "location": "server.ts:79, 設計書4.3.2",
+        "suggestion": "WORKTREE_REPOSのフォールバック対応についてenv-setup.tsまたはdefaults.tsの設計に追記",
+        "impact": "low",
+        "reason": "既存ユーザーがWORKTREE_REPOSを使用している可能性"
+      }
+    ]
+  },
+  "verified_items": [
+    {
+      "item": "ポートのデフォルト値",
+      "design_doc": "CM_PORT: 3000",
+      "actual": "env.ts:166, setup-env.sh:24 共に3000",
+      "status": "consistent"
+    },
+    {
+      "item": "バインドアドレスのデフォルト値",
+      "design_doc": "CM_BIND: '127.0.0.1'",
+      "actual": "env.ts:167, setup-env.sh:25 共に127.0.0.1",
+      "status": "consistent"
+    },
+    {
+      "item": "ログレベルのデフォルト値",
+      "design_doc": "CM_LOG_LEVEL: 'info'",
+      "actual": "env.ts:122（production時）, setup-env.sh:27 共にinfo",
+      "status": "consistent"
+    },
+    {
+      "item": "ログフォーマットのデフォルト値",
+      "design_doc": "CM_LOG_FORMAT: 'text'",
+      "actual": "env.ts:126, setup-env.sh:28 共にtext",
+      "status": "consistent"
+    },
+    {
+      "item": "依存関係チェック項目",
+      "design_doc": "Node.js v20+, npm, tmux, git, openssl, Claude CLI(optional)",
+      "actual": "preflight-check.shの全チェック項目と一致",
+      "status": "consistent"
+    },
+    {
+      "item": "環境変数マッピング",
+      "design_doc": "CM_* -> MCBD_* フォールバック",
+      "actual": "env.ts:20-29 ENV_MAPPING定義と一致",
+      "status": "consistent"
+    },
+    {
+      "item": "バインドアドレス検証",
+      "design_doc": "127.0.0.1, 0.0.0.0, localhost許可",
+      "actual": "env.ts:182-184で同じ3値を検証",
+      "status": "consistent"
+    },
+    {
+      "item": "外部公開時のトークン必須化",
+      "design_doc": "0.0.0.0バインド時はCM_AUTH_TOKEN必須",
+      "actual": "env.ts:187-189で実装済み",
+      "status": "consistent"
+    }
+  ],
+  "summary": "設計書Issue #96と既存実装の整合性レビューを実施。2件のMust Fix（server.tsの環境変数参照方法、データベースファイル名の不一致）、3件のShould Fix（defaults.ts作成計画の明確化、型定義の関係性明確化、シェルスクリプト機能網羅性）、3件のNice to Have（openssl依存の扱い、privateフラグ変更タイミング、WORKTREE_REPOS互換性）を検出。デフォルト値（ポート、バインド、ログ設定）や環境変数マッピング、依存関係チェック項目については設計書と既存実装で一貫性が確認された。特にMF-1のserver.ts修正は設計書で「CLI実装前に完了する必要がある」と明記されており、優先対応が必要。",
+  "review_metadata": {
+    "reviewed_files": [
+      "dev-reports/design/issue-96-npm-cli-design-policy.md",
+      "src/lib/env.ts",
+      "server.ts",
+      "scripts/preflight-check.sh",
+      "scripts/setup-env.sh",
+      "package.json"
+    ],
+    "reviewed_at": "2026-01-31T00:00:00+09:00",
+    "reviewer": "architecture-review-agent"
+  }
+}

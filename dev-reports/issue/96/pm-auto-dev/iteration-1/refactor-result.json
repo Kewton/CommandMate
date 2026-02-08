@@ -1,0 +1,41 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 72.9,
+    "after_coverage": 77.0,
+    "cli_commands_coverage_before": 70.9,
+    "cli_commands_coverage_after": 76.96,
+    "cli_utils_coverage_before": 93.36,
+    "cli_utils_coverage_after": 93.83
+  },
+  "refactorings_applied": [
+    "CLIビルドステップの追加（tsconfig.cli.json, build:cli script）",
+    "npm publish向けprepublishOnlyスクリプト追加",
+    "stop.tsのテストカバレッジ向上（43% -> 77%）",
+    "start.tsのデーモンモードテスト拡充",
+    ".gitignoreにdistディレクトリを追加"
+  ],
+  "files_changed": [
+    "package.json",
+    "package-lock.json",
+    "tsconfig.cli.json",
+    "tests/unit/cli/commands/start.test.ts",
+    "tests/unit/cli/commands/stop.test.ts",
+    ".gitignore"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "0d829a6: refactor(cli): add CLI build step and improve test coverage"
+  ],
+  "notes": [
+    "フォアグラウンドモードのテストはVitestのワーカープロセスとprocess.exitの競合によりスキップ（E2Eテストでカバー）",
+    "CLIビルド（tsc --project tsconfig.cli.json）が正常に動作することを確認",
+    "ビルド成果物はdist/cli/に出力される"
+  ],
+  "message": "リファクタリング完了。CLIビルドステップを追加し、テストカバレッジを改善しました。"
+}

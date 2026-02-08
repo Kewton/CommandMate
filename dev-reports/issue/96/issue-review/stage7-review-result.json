@@ -1,0 +1,183 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 96,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_date": "2026-01-31",
+  "previous_findings_status": {
+    "stage3_addressed": [
+      {
+        "id": "MF-1",
+        "original": "server.ts で環境変数を直接参照している",
+        "status": "対応済み",
+        "evidence": "Issue本文「0. 実装前提条件」セクションにserver.tsの修正要件を明記。getEnvByKey()を使用するコード例も提示済み。"
+      },
+      {
+        "id": "MF-2",
+        "original": ".npmignore が存在しない",
+        "status": "対応済み",
+        "evidence": "Issue本文「3. 作成対象ファイル」に .npmignore を必須ファイルとして追加。除外内容（tests/, docs/, dev-reports/, .github/等）も詳細に記載。"
+      },
+      {
+        "id": "MF-3",
+        "original": "better-sqlite3 のネイティブモジュール対応",
+        "status": "対応済み",
+        "evidence": "Issue本文「5. better-sqlite3 のクロスプラットフォーム対応」セクションで対応プラットフォーム、ビルドツール要件、postinstallスクリプト検討、docs/DEPLOYMENT.md追加内容を詳細に記載。"
+      },
+      {
+        "id": "SF-1",
+        "original": "既存シェルスクリプトとの整合性確認",
+        "status": "対応済み",
+        "evidence": "Issue本文「4. 既存スクリプトとの関係」および「移行方針」セクションで、移行期間（6ヶ月）、Deprecation警告、削除予定（v2.0.0）を明記。"
+      },
+      {
+        "id": "SF-2",
+        "original": "CLIコマンドのテスト方針が未定義",
+        "status": "対応済み",
+        "evidence": "Issue本文「受け入れ条件 > テスト要件」セクションに各コマンドのユニットテスト、preflightテスト、統合テスト（推奨）を明記。"
+      },
+      {
+        "id": "SF-3",
+        "original": "npm publish ワークフローが未定義",
+        "status": "対応済み",
+        "evidence": "Issue本文「7. CI/CD 拡張」セクションで publish.yml の新規作成、トリガー（GitHub Release作成時）、処理フロー（テスト→ビルド→publish→通知）を詳細に記載。「受け入れ条件 > CI/CD 要件」にも明記。"
+      },
+      {
+        "id": "SF-4",
+        "original": "npm publish 時の認証情報管理",
+        "status": "対応済み",
+        "evidence": "Issue本文「6. npm registry 公開方針 > 認証情報管理」セクションでNPM_TOKENのGitHub Secrets管理、CI/CD経由のみ許可（ローカルpublish禁止）を明記。"
+      }
+    ],
+    "stage3_not_addressed": []
+  },
+  "impact_analysis": {
+    "additional_files": [
+      {
+        "path": "src/cli/types/index.ts",
+        "description": "CLI型定義ファイル（コマンドオプション、設定型など）",
+        "priority": "推奨",
+        "reason": "TypeScriptのCLIコマンド群で共通の型定義を一元管理するため"
+      }
+    ],
+    "additional_tests": [
+      {
+        "path": "tests/unit/cli/utils/env-setup.test.ts",
+        "description": "env-setup.tsのユニットテスト",
+        "priority": "必須",
+        "reason": "Issue記載のテスト対象リストにenv-setup.tsのテストが含まれていない。preflightと同様に重要なユーティリティ。"
+      }
+    ],
+    "additional_docs": [
+      {
+        "path": "docs/cli-reference.md",
+        "description": "CLIコマンドの詳細リファレンス（helpより詳細な説明、ユースケース例）",
+        "priority": "推奨",
+        "reason": "READMEには簡易的な手順を記載し、詳細リファレンスは別ドキュメントとする方が保守性が高い"
+      }
+    ],
+    "dependency_impacts": [
+      {
+        "module": "commander または yargs",
+        "description": "CLIコマンドパーサーライブラリの追加が必要",
+        "status": "Issueに未記載",
+        "recommendation": "CLIフレームワーク（commander, yargs, oclif等）の選定をIssueに追記するか、実装時に決定する方針を明記"
+      }
+    ],
+    "breaking_changes_review": [
+      {
+        "change": "package.json の private: true 削除",
+        "assessment": "適切に文書化済み。ユーザー影響なし（npm publishが可能になるのみ）。",
+        "status": "OK"
+      },
+      {
+        "change": "bin フィールド追加",
+        "assessment": "適切に文書化済み。新機能として問題なし。",
+        "status": "OK"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト",
+        "issue": "env-setup.tsのテストがテスト要件リストに含まれていない",
+        "location": "Issue本文「受け入れ条件 > テスト要件」セクション",
+        "evidence": "preflight.tsのテストは記載されているが、env-setup.tsのテストが記載されていない",
+        "recommendation": "tests/unit/cli/utils/env-setup.test.ts をテスト要件に追加",
+        "impact": "環境設定ロジックのテストカバレッジ不足"
+      },
+      {
+        "id": "SF-2",
+        "category": "依存関係",
+        "issue": "CLIフレームワーク（commander等）の選定が未記載",
+        "location": "Issue本文全体",
+        "evidence": "CLIエントリポイントとコマンド構造は定義されているが、使用するCLIパーサーライブラリの記載がない",
+        "recommendation": "commander, yargs, oclif等のCLIフレームワーク選定を補足情報として追記するか、実装時に決定する方針を明記",
+        "impact": "実装時の技術選定の曖昧さ"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント",
+        "issue": "CLIリファレンスの詳細ドキュメント",
+        "location": "Issue本文「ドキュメント要件」セクション",
+        "recommendation": "docs/cli-reference.md として詳細リファレンス（ユースケース例、トラブルシューティング）を作成検討"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "CLIの型定義ファイル",
+        "location": "Issue本文「作成対象ファイル」セクション",
+        "recommendation": "src/cli/types/index.ts として共通型定義を追加検討（コマンドオプション、設定型など）"
+      },
+      {
+        "id": "NTH-3",
+        "category": "整合性",
+        "issue": "CLAUDE.mdへのCLIコマンド記載",
+        "location": "Issue本文「ドキュメント要件」セクション",
+        "recommendation": "CLAUDE.mdの「開発コマンド」セクションにCLIコマンド（commandmate init/start/stop/status）を追加することを明記"
+      }
+    ]
+  },
+  "summary": {
+    "stage3_must_fix_resolved": 3,
+    "stage3_should_fix_resolved": 4,
+    "new_must_fix_count": 0,
+    "new_should_fix_count": 2,
+    "new_nice_to_have_count": 3,
+    "overall_assessment": "Stage 3で指摘した全ての項目（MF-1〜MF-3, SF-1〜SF-4）が適切に対応されている。新たに発見した影響範囲として、env-setup.tsのテスト追加とCLIフレームワーク選定の明記が推奨される。全体として、影響範囲は適切に特定・文書化されており、実装に進む準備が整っている。"
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/server.ts",
+      "relevance": "環境変数の直接参照（MCBD_BIND, MCBD_PORT）の修正対象 - Issue記載済み"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/env.ts",
+      "relevance": "getEnvByKey()関数の参照元 - Issue記載済み"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/package.json",
+      "relevance": "private: true削除、binフィールド追加の対象 - Issue記載済み"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/docs/DEPLOYMENT.md",
+      "relevance": "better-sqlite3ビルドツール要件追加の対象 - Issue記載済み"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/docs/release-guide.md",
+      "relevance": "npm publish手順追加の対象 - Issue記載済み"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/README.md",
+      "relevance": "npmインストール手順追加の対象 - Issue記載済み"
+    }
+  ]
+}

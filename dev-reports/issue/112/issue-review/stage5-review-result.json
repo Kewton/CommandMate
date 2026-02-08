@@ -1,0 +1,98 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 112,
+  "review_date": "2026-02-01",
+  "previous_findings_status": [
+    {
+      "id": "MF-1",
+      "original_issue": "Issueに記載されている現状のコード(L89-96)が実際のAppShell.tsxのコード（L89-102）と一致しない。内部ラッパーの記載漏れ。",
+      "status": "RESOLVED",
+      "evidence": "Issue本文の「現状 (AppShell.tsx:89-102)」セクションに、内部ラッパー`<div className=\"w-72 h-full\">`を含む完全なコードが引用されている。"
+    },
+    {
+      "id": "MF-2",
+      "original_issue": "transform方式への変更時に内部ラッパーの扱いが不明確。",
+      "status": "RESOLVED",
+      "evidence": "「注意」セクションで「内部ラッパー `<div className=\"w-72 h-full\">` は、transform方式ではサイドバー自体が常時`w-72`になるため不要となる。」と明記されている。"
+    },
+    {
+      "id": "SF-1",
+      "original_issue": "メインコンテンツ側のmarginトランジションがReflowを引き起こす可能性。",
+      "status": "RESOLVED",
+      "evidence": "「実装イメージ」が「オーバーレイ型」に変更され、メインコンテンツは`md:pl-72`固定パディングを使用し、Reflowが発生しない設計になった。また「代替案：プッシュ型」も追加され、両方がtransformを使用する設計が提示されている。"
+    },
+    {
+      "id": "SF-2",
+      "original_issue": "main要素にもtransition-allが適用されている点が言及されていない。",
+      "status": "RESOLVED",
+      "evidence": "「現状 (AppShell.tsx:105-114)」セクションにmain要素のコードが追加され、「CSSトランジション最適化」セクションで「`<main>`要素の不要な`transition-all`を削除（現状`ml-0`固定で変化なし）」と明記されている。"
+    },
+    {
+      "id": "SF-3",
+      "original_issue": "テストコード更新要件が不明確。",
+      "status": "RESOLVED",
+      "evidence": "「テスト更新必須」テーブルにAppShell.test.tsxが追加され、「`w-72`/`w-0`チェック → `translate-x-0`/`-translate-x-full`チェックに変更（L281, L302の2箇所）」と具体的な行番号と変更内容が明記されている。受け入れ条件にも同様の記載がある。"
+    },
+    {
+      "id": "SF-4",
+      "original_issue": "SidebarContextのwidth機能との整合性が不明確。",
+      "status": "RESOLVED",
+      "evidence": "「SidebarContextのwidth機能について」セクションが追加され、「将来的なサイドバーリサイズ機能のために`width`関連機能は維持する」と明記されている。影響範囲テーブルにも「`width`/`setWidth`は引き続き存在（将来的なリサイズ機能用）」と記載。"
+    },
+    {
+      "id": "NTH-1",
+      "original_issue": "CLAUDE.mdにAppShellの記載がない。",
+      "status": "NOT_ADDRESSED",
+      "note": "本Issueのスコープ外。フォローアップタスクとして妥当。"
+    },
+    {
+      "id": "NTH-2",
+      "original_issue": "パフォーマンス計測データがない。",
+      "status": "NOT_ADDRESSED",
+      "note": "Nice to Haveとして妥当。実装後に計測可能。"
+    },
+    {
+      "id": "NTH-3",
+      "original_issue": "Issue #99のz-index管理との整合性確認が未記載。",
+      "status": "RESOLVED",
+      "evidence": "「関連」セクションに「Issue #99（マークダウンエディタ表示機能改善）のz-index管理との整合性確認」が追加されている。また、z-index階層管理セクションも追加された。"
+    }
+  ],
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-NEW-1",
+        "category": "技術的正確性",
+        "description": "z-index階層定義で「SIDEBAR(30) [新規追加]」と記載されているが、現在のsrc/config/z-index.tsにはSIDEBARが定義されていない。受け入れ条件では「z-index階層管理（`src/config/z-index.ts`）にSIDEBAR定数が追加される」と記載されており、実装タスクとしては正しいが、Issue内のz-index階層図は「現在の階層定義」と記載されているため、誤解を招く可能性がある。",
+        "location": "z-index階層管理セクション",
+        "suggestion": "「現在の階層定義」を「目標階層定義（実装後）」に変更するか、SIDEBAR(30)が新規追加であることをより明確に示す表現に修正。"
+      },
+      {
+        "id": "SF-NEW-2",
+        "category": "実装詳細の明確さ",
+        "description": "オーバーレイ型の実装イメージでは`md:pl-72`をメインコンテンツに追加するが、サイドバーが閉じている時にもパディングが維持されると、メインコンテンツの左側に空白が残る可能性がある。isOpenとの連動が必要かどうか不明確。",
+        "location": "実装イメージ - After (transform方式 - オーバーレイ型)",
+        "suggestion": "コメントに「/* 必要に応じてisOpenで切り替え */」とあるが、具体的にどのように切り替えるか（例：`${isOpen ? 'md:pl-72' : 'md:pl-0'}`）を明記するか、オーバーレイ型ではサイドバーは常時表示（トグルで閉じない）という想定かを明確化。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-NEW-1",
+        "category": "ドキュメント完全性",
+        "description": "「レビュー履歴」セクションにStage 3の反映事項が記載されているが、Stage 1, 2, 4の反映履歴がない。",
+        "location": "レビュー履歴セクション",
+        "suggestion": "各ステージのレビュー反映履歴を追加するか、「主要レビューステージ」としてStage 3のみ記載している理由を明記。"
+      },
+      {
+        "id": "NTH-NEW-2",
+        "category": "アクセシビリティ記載",
+        "description": "アクセシビリティ要件の「サイドバー閉じ時に`aria-hidden=\"true\"`の追加を検討」は「検討」レベルの記載であり、実装時の判断が曖昧。",
+        "location": "アクセシビリティ要件",
+        "suggestion": "「検討」を「追加する」または「追加しない（理由：...）」のいずれかに決定するか、実装時に判断する旨を明記。"
+      }
+    ]
+  },
+  "summary": "Stage 1で指摘された全てのMust Fix項目とShould Fix項目が適切に対応されている。Issue本文は大幅に改善され、コード引用の正確性、内部ラッパーの扱い、メインコンテンツのトランジション問題、テスト更新要件、SidebarContextとの整合性について全て明確化されている。新たに2件のShould Fix項目（z-index階層図の表現改善、オーバーレイ型でのisOpen連動の明確化）と2件のNice to Have項目を検出したが、いずれも軽微な改善事項であり、実装を妨げるものではない。Issueは実装可能な状態に達している。"
+}

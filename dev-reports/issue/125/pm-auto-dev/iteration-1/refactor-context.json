@@ -1,0 +1,22 @@
+{
+  "issue_number": 125,
+  "refactor_targets": [
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 77.17,
+    "target_coverage": 80
+  },
+  "improvement_goals": [
+    "カバレッジを80%以上に向上（現在77.17%）",
+    "重複コードの削除",
+    "コードの可読性向上",
+    "エラーハンドリングの改善"
+  ],
+  "tdd_result_path": "dev-reports/issue/125/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/125/pm-auto-dev/iteration-1/acceptance-result.json"
+}

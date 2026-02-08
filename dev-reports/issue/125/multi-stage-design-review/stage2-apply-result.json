@@ -1,0 +1,111 @@
+{
+  "issue_number": 125,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "item": "JSDocコメントの精度不足 - getPidFilePath()の戻り値説明を実態に合わせて修正",
+        "section_updated": "詳細設計 > 1. env-setup.ts への getPidFilePath() 集約",
+        "status": "reflected",
+        "changes": [
+          "JSDocコメントを「PIDファイルのパス（グローバルインストール時は絶対パス、ローカル時はカレントディレクトリ相対）」に修正",
+          "Stage 2レビュー対応としてコメント内に注記を追加"
+        ]
+      },
+      {
+        "id": "MF-2",
+        "item": "daemon.tsでenvResult.errorのエラーハンドリングが設計されていない",
+        "section_updated": "詳細設計 > 5. daemon.ts の修正",
+        "status": "reflected",
+        "changes": [
+          "envResult.errorのチェックロジックを設計コードに追加",
+          "フォールバック動作（process.envのみを使用して続行）を明記",
+          "レースコンディション対策としての防御コードであることを説明",
+          "テスト計画に.env読み込みエラー時のフォールバック動作テストを追加",
+          "受け入れ条件に.env読み込みエラー時のフォールバック動作を追加"
+        ]
+      },
+      {
+        "id": "MF-3",
+        "item": "DaemonManagerのシグネチャ検討が不足 - コンストラクタ維持の設計意図を明記",
+        "section_updated": "詳細設計 > 5. daemon.ts の修正 > DaemonManagerのシグネチャ設計",
+        "status": "reflected",
+        "changes": [
+          "新規サブセクション「DaemonManagerのシグネチャ設計（Stage 2レビュー対応: MF-3）」を追加",
+          "コンストラクタシグネチャを維持する設計方針を明記",
+          "getEnvPath()をstart()メソッド内で呼び出す設計の理由を記載",
+          "将来検討の代替案（DaemonManagerOptions）を記載"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "item": "命名規則の一貫性 - PID_FILE（定数）からpidFilePath（変数）への移行",
+        "section_updated": "詳細設計 > 2. start.ts の修正 > 命名規則、今後の検討事項 > Stage 2レビュー対応",
+        "status": "reflected",
+        "changes": [
+          "各修正後コードにcamelCase使用のコメントを追加",
+          "命名規則サブセクションを追加し、camelCase選択の理由を説明",
+          "今後の検討事項に対応済みとして記録"
+        ]
+      },
+      {
+        "id": "SF-2",
+        "item": "テスト検証方法の具体化",
+        "section_updated": "テスト計画 > テスト検証方法（Stage 2レビュー対応: SF-2）",
+        "status": "reflected",
+        "changes": [
+          "新規セクション「テスト検証方法」を追加",
+          "spawnモック化による検証方法の具体的なコード例を追加",
+          "Vitestのspy機能を使用した検証手法を記載"
+        ]
+      },
+      {
+        "id": "SF-3",
+        "item": "エラーメッセージパターンの統一",
+        "section_updated": "今後の検討事項 > Stage 2レビュー対応 > SF-3",
+        "status": "deferred",
+        "reason": "本Issueのスコープ外、将来の改善として今後の検討事項に記録"
+      },
+      {
+        "id": "SF-4",
+        "item": "影響なしファイル（init.ts）の明記",
+        "section_updated": "設計方針 > 変更概要、今後の検討事項 > Stage 2レビュー対応",
+        "status": "reflected",
+        "changes": [
+          "「影響なしのファイル」テーブルを変更概要セクションに追加",
+          "init.tsが既にgetEnvPath()を使用しており変更不要であることを明記"
+        ]
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "sections_updated": [
+    "設計方針 > 変更概要（影響なしファイル追加）",
+    "詳細設計 > 1. env-setup.ts（JSDocコメント修正）",
+    "詳細設計 > 2. start.ts（命名規則追加）",
+    "詳細設計 > 3. stop.ts（命名規則コメント追加）",
+    "詳細設計 > 4. status.ts（命名規則コメント追加）",
+    "詳細設計 > 5. daemon.ts（シグネチャ設計・エラーハンドリング追加）",
+    "テスト計画 > 単体テスト（エラーハンドリングテスト追加）",
+    "テスト計画 > テスト検証方法（新規追加）",
+    "受け入れ条件（フォールバック動作追加）",
+    "今後の検討事項 > Stage 2レビュー対応（新規追加）",
+    "レビュー指摘事項サマリー（新規追加）",
+    "レビュー履歴（Stage 2エントリ追加）"
+  ],
+  "summary": {
+    "must_fix_reflected": 3,
+    "must_fix_total": 3,
+    "should_fix_reflected": 3,
+    "should_fix_deferred": 1,
+    "should_fix_total": 4
+  },
+  "timestamp": "2026-02-02T00:00:00Z"
+}

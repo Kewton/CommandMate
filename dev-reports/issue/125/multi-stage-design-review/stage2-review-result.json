@@ -1,0 +1,155 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "設計書と既存コードの整合性",
+        "severity": "high",
+        "location": "設計書: セクション3「詳細設計」vs src/cli/utils/env-setup.ts",
+        "issue": "設計書ではgetPidFilePath()関数をenv-setup.tsに追加すると記載されているが、現在のenv-setup.tsにはgetConfigDir()関数が既に存在する。設計書の追加関数実装コードは`join(getConfigDir(), '.commandmate.pid')`となっており、getConfigDir()に依存するため整合している。ただし、設計書のコード例では戻り値のJSDocに「PIDファイルの絶対パス」と記載があるが、ローカルインストール時にprocess.cwd()を使用する場合、シンボリックリンクなどで相対パス的な挙動になる可能性があり、ドキュメント上の精度が不十分。",
+        "recommendation": "設計書のJSDocコメントを「PIDファイルのパス（グローバルインストール時は絶対パス、ローカル時はカレントディレクトリ相対）」のように実態に合わせて修正する。または、getConfigDir()の戻り値を常に絶対パス化（path.resolve使用）することを検討。"
+      },
+      {
+        "id": "MF-2",
+        "category": "設計書内セクション間の整合性",
+        "severity": "high",
+        "location": "設計書: セクション2「start.ts の修正」vs セクション5「daemon.ts の修正」",
+        "issue": "設計書では「start.tsはenvPathの存在確認のみを行う」と記載しているが、セクション2の修正後コードには`if (!existsSync(envPath))`の存在確認ロジックが含まれている。一方、セクション5のdaemon.tsでは`dotenvConfig({ path: envPath })`で読み込みを行うが、envPathが存在しない場合のエラーハンドリングが記載されていない。daemon.ts側で.envが読み込めなかった場合のフォールバック処理が設計されていない。",
+        "recommendation": "daemon.tsの設計にenvResult.errorのチェックを追加し、.envファイルが読み込めなかった場合のエラーメッセージまたはフォールバック動作を明記する。start.tsで存在確認済みのため通常は発生しないが、レースコンディション対策としてdaemon.ts側にも防御コードを設計に含めるべき。"
+      },
+      {
+        "id": "MF-3",
+        "category": "APIシグネチャの整合性",
+        "severity": "high",
+        "location": "設計書: セクション5「daemon.ts」vs 既存src/cli/utils/daemon.ts",
+        "issue": "設計書のdaemon.ts修正後コードでは`async start(options: StartOptions)`の引数はStartOptionsのみだが、現在の実装と同じシグネチャ。しかし、設計書では`getEnvPath()`をdaemon.ts内で呼び出す設計となっている。現在のDaemonManagerコンストラクタは`pidFilePath: string`を受け取るが、設計書ではenvPath取得をdaemon.ts内で行うため、コンストラクタまたはstart()メソッドのシグネチャ変更が必要か検討が不足している。",
+        "recommendation": "DaemonManagerのコンストラクタシグネチャを`constructor(pidFilePath: string)`のまま維持し、start()内で`getEnvPath()`を呼び出す設計で問題ないことを明記する。または、DaemonManagerOptionsとして`{ pidFilePath: string, envPath?: string }`を渡す設計も検討し、テスト容易性を向上させる。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "命名規則の一貫性",
+        "severity": "medium",
+        "location": "設計書全体 vs 既存コード",
+        "issue": "設計書では`pidFilePath`という変数名を使用しているが、既存のstop.ts/status.tsでは`PID_FILE`という定数名（UPPER_SNAKE_CASE）を使用している。命名規則が混在しており、修正後のコードで一貫性が損なわれる可能性がある。",
+        "recommendation": "設計書の修正後コードを`const pidFilePath = getPidFilePath();`（camelCase）に統一するか、既存の`PID_FILE`定数命名規則に合わせて`const PID_FILE_PATH = getPidFilePath();`とするかを明記する。推奨はcamelCase（関数からの戻り値であるため定数ではない）。"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト計画と実装の整合性",
+        "severity": "medium",
+        "location": "設計書: セクション「テスト計画」",
+        "issue": "テスト計画にはdaemon.tsの「.envの環境変数が子プロセスに渡ること」「コマンドラインオプションが.envの値をオーバーライドすること」が記載されているが、現在のdaemon.ts実装ではprocess.envに直接アクセスしており、子プロセスへの環境変数伝播テストの具体的な検証方法が不明確。",
+        "recommendation": "テスト計画に「spawnの第3引数envオブジェクトに.envの値とオーバーライド値が含まれていることを検証」という具体的なテスト方法を追記する。または、spawn呼び出しをモック化してenvオブジェクトの内容を検証するテスト設計を明記。"
+      },
+      {
+        "id": "SF-3",
+        "category": "エラーハンドリングの整合性",
+        "severity": "medium",
+        "location": "設計書: セクション6「エラーメッセージの改善」vs 既存start.ts:27-30",
+        "issue": "設計書のエラーメッセージ改善では`.env file not found at ${envPath}`とパスを表示する設計だが、既存のstart.tsでは`.env file not found`のみでパスを表示していない。この改善は良いが、同様のエラーハンドリングパターンがstop.ts/status.tsにも必要か検討されていない。PIDファイルが見つからない場合のエラーメッセージにもパス情報を含めるべきか統一されていない。",
+        "recommendation": "全コマンドで一貫したエラーメッセージ形式を定義する。例：「{ファイル種別} not found at {パス}」の形式を標準化し、エラーメッセージテンプレートをcli/utils/messages.tsなどに集約することを検討。"
+      },
+      {
+        "id": "SF-4",
+        "category": "設計書内の整合性",
+        "severity": "medium",
+        "location": "設計書: 変更概要テーブル vs 詳細設計",
+        "issue": "変更概要テーブルにはinit.tsが含まれていないが、init.tsは既に`getEnvPath()`を使用しており、今回の修正で影響を受けない。これは整合しているが、「影響を受けないファイル」として明示されていないため、レビュアーが確認に時間を要する可能性がある。",
+        "recommendation": "変更概要セクションに「影響なしのファイル」として`init.ts（既にgetEnvPath()を使用、変更不要）`を明記する。"
+      }
+    ],
+    "good_practices": [
+      {
+        "category": "設計原則との整合性",
+        "location": "設計書: 設計方針セクション",
+        "description": "Stage 1レビューで指摘されたMF-1（getPidFilePath()のDRY）、MF-2（環境変数読み込み責務の一元化）への対応が設計書に反映されている。レビュー履歴セクションでトレーサビリティが確保されている。"
+      },
+      {
+        "category": "後方互換性の考慮",
+        "location": "設計書: 後方互換性セクション",
+        "description": "isGlobalInstall()がfalseを返す場合の既存動作維持が明記されており、ローカルインストール環境への影響が考慮されている。レガシーPIDファイルの警告表示も検討されている。"
+      },
+      {
+        "category": "コード例の具体性",
+        "location": "設計書: 詳細設計セクション",
+        "description": "各ファイルについて「現状」と「修正後」のコード例が具体的に示されており、実装者が迷わず作業できる。import文の変更も明記されている。"
+      },
+      {
+        "category": "テスト計画の網羅性",
+        "location": "設計書: テスト計画セクション",
+        "description": "単体テスト（5項目）と統合テスト（2シナリオ）が定義されており、グローバル/ローカルインストールの両方のテストケースが含まれている。"
+      },
+      {
+        "category": "今後の検討事項の分離",
+        "location": "設計書: 今後の検討事項セクション",
+        "description": "Stage 1レビューのSF（should_fix）項目を「今後の検討事項」として設計書に取り込み、本Issueのスコープ外であることを明確化している。優先度も記載されており、判断の透明性が高い。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "must_fix_count": 3,
+    "should_fix_count": 4,
+    "overall_assessment": "設計書はStage 1レビューの指摘を適切に反映しているが、整合性の観点から3点の重要な改善が必要。特にdaemon.tsでの.env読み込みエラーハンドリング、DaemonManagerのシグネチャ検討、およびJSDocコメントの精度向上が必要。命名規則とエラーメッセージパターンの統一も推奨。既存コード構造との整合性は概ね良好で、getConfigDir()等の既存関数を適切に活用する設計となっている。"
+  },
+  "consistency_checks": {
+    "design_vs_code": {
+      "status": "部分的適合",
+      "findings": [
+        "getEnvPath()は既にinit.tsで使用されており整合",
+        "getConfigDir()が既に存在し、getPidFilePath()の実装基盤がある",
+        "PID_FILE定数のUPPER_SNAKE_CASEからcamelCase変数への移行について明記が必要"
+      ]
+    },
+    "internal_consistency": {
+      "status": "要改善",
+      "findings": [
+        "start.ts側の存在確認とdaemon.ts側の読み込みエラーハンドリングの責務分担が曖昧",
+        "変更対象ファイル一覧に影響なしファイルの明記がない"
+      ]
+    },
+    "naming_consistency": {
+      "status": "部分的適合",
+      "findings": [
+        "関数名（getEnvPath, getConfigDir, getPidFilePath）は一貫したcamelCase",
+        "定数からの変数化により命名規則が変わる点の明記が必要"
+      ]
+    },
+    "api_signature_consistency": {
+      "status": "要確認",
+      "findings": [
+        "DaemonManagerコンストラクタはstring型のpidFilePathを受け取る既存設計を維持",
+        "getEnvPath()のdaemon.ts内呼び出しはコンストラクタ変更不要で実装可能"
+      ]
+    },
+    "error_handling_consistency": {
+      "status": "部分的適合",
+      "findings": [
+        "エラーメッセージへのパス情報追加は良い改善",
+        "全コマンドでの一貫したエラーメッセージ形式の定義が未検討"
+      ]
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/commands/init.ts"
+  ],
+  "previous_stage_alignment": {
+    "MF-1_addressed": true,
+    "MF-1_note": "getPidFilePath()をenv-setup.tsに集約する設計が反映済み",
+    "MF-2_addressed": true,
+    "MF-2_note": "環境変数読み込み責務をdaemon.tsに一元化する設計が反映済み"
+  },
+  "timestamp": "2026-02-02T00:00:00Z"
+}

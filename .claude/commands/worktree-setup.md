@@ -48,15 +48,15 @@ fi
 ### Phase 2: 前提条件チェック
 
 1. 現在のディレクトリがGitリポジトリであることを確認
-2. mainブランチが存在することを確認
+2. developブランチが存在することを確認
 3. git worktreeコマンドが利用可能であることを確認
 
 ```bash
 # Gitリポジトリチェック
 git rev-parse --git-dir > /dev/null 2>&1 || { echo "Error: Not a git repository"; exit 1; }
 
-# mainブランチ存在チェック
-git show-ref --verify --quiet refs/heads/main || { echo "Error: main branch not found"; exit 1; }
+# developブランチ存在チェック
+git show-ref --verify --quiet refs/heads/develop || { echo "Error: develop branch not found"; exit 1; }
 ```
 
 ### Phase 3: Worktree作成
@@ -73,8 +73,8 @@ WORKTREE_DIR="../commandmate-issue-${ISSUE_NO}"
 if git worktree list | grep -q "$WORKTREE_DIR"; then
   echo "Worktree already exists: $WORKTREE_DIR"
 else
-  # Worktree作成（mainブランチから派生）
-  git worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" main
+  # Worktree作成（developブランチから派生）
+  git worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" develop
 fi
 ```
 
@@ -153,7 +153,7 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 |--------|------|
 | Invalid issue number | 正の整数（1-2147483647）を指定してください |
 | Not a git repository | Gitリポジトリ内で実行してください |
-| main branch not found | mainブランチを作成してください |
+| develop branch not found | developブランチを作成してください |
 | Worktree already exists | 既存のWorktreeを使用するか、cleanupしてください |
 
 ---

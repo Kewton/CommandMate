@@ -1,0 +1,68 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 112,
+  "applied_date": "2026-02-01",
+  "applied_findings": [
+    {
+      "id": "MUST-001",
+      "category": "テストへの影響",
+      "description": "AppShell.test.tsxのテストケースがw-72/w-0クラスの存在をチェックしている（L281, L302）。transform方式に変更すると、これらのテストが失敗する。",
+      "action_taken": "テスト更新必須セクションに具体的なファイル名と変更内容を追加。受け入れ条件にL281とL302のテスト更新を明記。"
+    },
+    {
+      "id": "MUST-002",
+      "category": "コンポーネント影響",
+      "description": "SidebarToggle.tsxのボタン位置がleft-[284px]とleft-2でisOpenに連動している（L42）。transform方式でサイドバーがfixed/absoluteになった場合、この位置計算が機能しなくなる可能性がある。",
+      "action_taken": "確認・調整必要セクションにSidebarToggle.tsxを追加。オーバーレイ型の場合のサイドバー内部配置またはfixed配置への変更検討を明記。受け入れ条件にも確認項目を追加。"
+    },
+    {
+      "id": "MUST-003",
+      "category": "z-index階層",
+      "description": "提案コードでサイドバーにz-30を使用しているが、src/config/z-index.tsには定義がない。また、WorktreeDetailRefactored.tsxでz-30が使用されているため、重複する可能性がある。",
+      "action_taken": "直接変更対象にz-index.tsを追加。z-index階層管理セクションを新設し、現在の階層定義とSIDEBAR定数の位置を明記。WorktreeDetailRefactored.tsxとの競合確認を受け入れ条件に追加。"
+    },
+    {
+      "id": "SHOULD-001",
+      "category": "レイアウト影響",
+      "description": "デスクトップレイアウトで現在はflexboxでサイドバー幅を制御している。transform方式に変更すると、サイドバーがfixed/absoluteになりflexboxレイアウトから外れる。",
+      "action_taken": "レイアウト方式の選択セクションを新設。オーバーレイ型（推奨）とプッシュ型の2つのアプローチを明記。"
+    },
+    {
+      "id": "SHOULD-002",
+      "category": "CSSクラス",
+      "description": "現在のtransition-allがtransition-transformに変更される。これにより、widthやmargin等の他プロパティのトランジションが無効になる。",
+      "action_taken": "CSSトランジション最適化セクションを新設。main要素の不要なtransition-all削除についても明記。"
+    },
+    {
+      "id": "SHOULD-003",
+      "category": "モバイル互換性",
+      "description": "モバイルレイアウトは既にtransform方式を使用しているため変更不要だが、デスクトップとの切り替え時に一貫性を確認する必要がある。",
+      "action_taken": "モバイル互換性セクションを新設。768px前後でのレイアウト遷移確認とiPadのuseIsMobile判定を明記。受け入れ条件にも確認項目を追加。"
+    },
+    {
+      "id": "SHOULD-004",
+      "category": "アクセシビリティ",
+      "description": "サイドバーがfixed配置になると、フォーカス管理やスクリーンリーダーの読み上げ順序に影響する可能性がある。",
+      "action_taken": "アクセシビリティセクションを新設。role='complementary'維持とaria-hidden属性のisOpen連動を受け入れ条件に追加。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "NICE-001",
+      "category": "パフォーマンス",
+      "reason": "Nice to haveのため今回は反映対象外。will-change-transformの追加は実装時に検討。"
+    },
+    {
+      "id": "NICE-002",
+      "category": "将来拡張",
+      "reason": "Nice to haveのため今回は反映対象外。SidebarContextのwidth機能については既存の説明で十分。"
+    },
+    {
+      "id": "NICE-003",
+      "category": "コード品質",
+      "reason": "Nice to haveのため今回は反映対象外。内部ラッパー削除は実装詳細であり、既に注意事項として記載済み。"
+    }
+  ],
+  "summary": "Issue #112に影響範囲レビュー（Stage 3）の指摘事項を反映。Must Fix 3件、Should Fix 4件の計7件を反映。主な変更点: (1) 対象ファイルセクションを詳細化し、直接変更対象/テスト更新必須/確認・調整必要/影響なしに分類、(2) z-index階層管理セクションを新設しSIDEBAR定数追加とWorktreeDetailRefactored.tsxとの競合確認を明記、(3) レイアウト方式の選択/CSSトランジション最適化/モバイル互換性/アクセシビリティの各セクションを新設、(4) 受け入れ条件を機能要件/品質要件/アクセシビリティ要件に分類し具体的な確認項目を追加、(5) レビュー履歴セクションを追加し反映された指摘事項を記録。Nice to have 3件は今回は反映対象外としてスキップ。"
+}

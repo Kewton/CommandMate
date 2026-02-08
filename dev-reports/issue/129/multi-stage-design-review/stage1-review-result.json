@@ -1,0 +1,37 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S1",
+        "principle": "DRY",
+        "title": "リポジトリ数による表示条件が複数箇所に存在",
+        "description": "設計書では299行目の条件変更のみを記載しているが、451行目にも類似の条件 `repositories.length > 1 || !selectedRepository` が存在する。設計書3.2.2節で「現行の条件を維持」と記載されているが、この判断根拠をより明確に文書化すべき。フィルタUIが表示されるのにヘッダーが表示されないケースが発生する可能性があるため、UI整合性の観点から再検討を推奨。",
+        "location": "設計書3.2.2節およびsrc/components/worktree/WorktreeList.tsx:451",
+        "recommendation": "リポジトリ1件でフィルタ選択時のヘッダー表示/非表示について、手動テストケースを追加して期待動作を明確化する"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "N1",
+        "principle": "SOLID (SRP)",
+        "title": "削除機能のコンポーネント分離検討",
+        "description": "handleDeleteRepository関数（216-261行）は確認ダイアログ表示、API呼び出し、状態更新を含む約45行の処理。現時点では許容範囲だが、将来的に削除ロジックが複雑化した場合はカスタムフック（useRepositoryDelete）への抽出を検討。",
+        "location": "src/components/worktree/WorktreeList.tsx:216-261",
+        "recommendation": "現状維持で問題なし。今後の機能追加時に検討"
+      },
+      {
+        "id": "N2",
+        "principle": "DRY",
+        "title": "リポジトリ表示条件の定数化",
+        "description": "`repositories.length > 0` や `repositories.length > 1` という条件が複数箇所に分散している。shouldShowFilterUI、shouldShowRepositoryHeaderなどの名前付き変数に抽出すると、条件の意図が明確になり保守性が向上する。",
+        "location": "src/components/worktree/WorktreeList.tsx:299,451",
+        "recommendation": "将来的なリファクタリング候補として記録"
+      }
+    ]
+  },
+  "summary": "Issue #129の設計方針は、SOLID/KISS/YAGNI/DRY原則に概ね準拠しています。特にKISS原則（1行の条件変更で問題解決）とYAGNI原則（過剰な設計を避けている）への準拠は良好です。\n\n主な検討事項として、リポジトリヘッダーの表示条件（451行目）との整合性について、設計書では「現行維持」としていますが、リポジトリ1件でフィルタ選択した場合の表示状態をテストケースで明確化することを推奨します。これにより、UI一貫性が担保されます。\n\n全体として、この修正は最小限の変更で問題を解決する適切なアプローチであり、必須の修正事項はありません。"
+}

@@ -1,0 +1,219 @@
+{
+  "issue_number": 179,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-08",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "previous_findings_status": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "original_issue": "タイトルが「refactor」でラベルが「bug」「enhancement」と矛盾",
+        "status": "RESOLVED",
+        "detail": "タイトルが「feat!: CM_AUTH_TOKEN認証機能を削除し、リバースプロキシ認証を推奨」に変更され、ラベルは「enhancement」のみに整理された。CLAUDE.mdのコミットメッセージ規約でfeatは新機能、!は破壊的変更を示し、適切な分類となった。"
+      },
+      {
+        "id": "MF-2",
+        "original_issue": "NEXT_PUBLIC_CM_AUTH_TOKENの削除タスクが漏れている",
+        "status": "RESOLVED",
+        "detail": "実装タスクの「環境変数・設定ファイル」セクションにscripts/setup-env.sh、.env.production.example、docs/migration-to-commandmate.mdの更新が追加された。api-client.tsのAuthorizationヘッダー削除も明記された。"
+      },
+      {
+        "id": "MF-3",
+        "original_issue": "env.tsのCM_BIND=0.0.0.0時のCM_AUTH_TOKEN必須チェック削除が未記載",
+        "status": "RESOLVED",
+        "detail": "実装タスクに「CM_BIND=0.0.0.0時のCM_AUTH_TOKEN必須チェック（行228-229のthrow）を削除」が明記された。env-setup.tsのvalidateConfig()内チェック（行300）の削除、start.ts/daemon.tsの警告ロジックの「リバースプロキシ推奨警告」への置換も追加された。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "original_issue": "logger.tsのAUTH_TOKENマスキングパターン削除が含まれていない",
+        "status": "RESOLVED",
+        "detail": "「src/lib/logger.tsからAUTH_TOKENマスキングパターンを削除」「src/cli/utils/security-logger.tsからAUTH_TOKENマスキング処理を削除」が実装タスクに追加された。"
+      },
+      {
+        "id": "SF-2",
+        "original_issue": "テストファイルの更新タスクが記載されていない",
+        "status": "RESOLVED",
+        "detail": "「テストファイル更新」セクションが新設され、6ファイル全てが明記された。middleware.test.tsはファイル削除として明確化された。"
+      },
+      {
+        "id": "SF-3",
+        "original_issue": "TRUST_AND_SAFETY.mdが旧名称で認証トークン方式を推奨",
+        "status": "RESOLVED",
+        "detail": "ドキュメント更新セクションにTRUST_AND_SAFETY.mdの3項目（外部アクセスセクション、最小権限ガイド、旧名称統一）が追加された。"
+      },
+      {
+        "id": "SF-4",
+        "original_issue": "警告メッセージ内のドキュメントリンクが存在しないパス",
+        "status": "PARTIALLY_RESOLVED",
+        "detail": "URLが「https://github.com/Kewton/CommandMate/blob/main/docs/security-guide.md」に修正された。ただしdocs/security-guide.mdはまだ存在しないため、実装タスクの「新規作成」が前提となる。この依存関係は明記されており、リンク形式自体は正しくなった。"
+      },
+      {
+        "id": "SF-5",
+        "original_issue": "DEPLOYMENT.mdのセキュリティセクション更新が含まれていない",
+        "status": "RESOLVED",
+        "detail": "ドキュメント更新セクションにDEPLOYMENT.mdの2項目（セキュリティセクション書き換え、必須環境変数一覧更新）が追加された。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "original_issue": "isAuthRequired()関数の扱いが未記載",
+        "status": "RESOLVED",
+        "detail": "「isAuthRequired()関数を削除」が実装タスクに明記された。"
+      },
+      {
+        "id": "NTH-2",
+        "original_issue": "型定義ファイルの更新が不明確",
+        "status": "RESOLVED",
+        "detail": "Env interface、EnvConfig interfaceの具体的なフィールド削除が実装タスクに明記された。ENV_MAPPING定数からのエントリ削除とEnvKey型への自動波及も記載された。"
+      },
+      {
+        "id": "NTH-3",
+        "original_issue": "CLAUDE.mdの関連セクション更新が望ましい",
+        "status": "NOT_ADDRESSED",
+        "detail": "CLAUDE.mdの更新は実装タスクにもフォローアップタスクにも記載されていない。Nice to Haveのため許容範囲だが、Issue #76, #125, #77の記述がCM_AUTH_TOKENに言及しているため、最終的な整合性のために更新が望ましい。"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-4",
+        "category": "整合性",
+        "issue": ".env.exampleのCM_BIND設定説明コメント（行16-18）に「0.0.0.0: All interfaces (production, auth required)」と記載されている。.env.production.example（行17-18）にも同様に「auth required」の記述がある。認証機能削除後はこれらのコメントが不正確になるが、実装タスクの.env.example削除範囲にはCM_AUTH_TOKEN行（行29）のみが記載されており、関連するCM_BIND説明コメントの更新が漏れている。",
+        "location": "## 実装タスク > 環境変数・設定ファイル セクション",
+        "recommendation": ".env.exampleの行16-18のコメントを「0.0.0.0: All interfaces (production, reverse proxy auth recommended)」等に更新するタスクを追加する。.env.production.exampleの行17-18も同様に更新する。また.env.production.exampleの行23「Security (REQUIRED FOR PRODUCTION)」セクション全体をリバースプロキシ推奨に書き換える必要がある。",
+        "evidence": ".env.example行17: '# - 0.0.0.0: All interfaces (production, auth required)', .env.production.example行18: '# - 0.0.0.0: All interfaces (production, auth required)', .env.production.example行23: '# Security (REQUIRED FOR PRODUCTION)'"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-6",
+        "category": "完全性",
+        "issue": ".env.production.exampleのLegacy Supportセクション（行65-77）にMCBD_AUTH_TOKEN -> CM_AUTH_TOKENのマッピングが記載されている（行74）。認証機能削除後はこのマッピング自体が不要になるが、実装タスクでは「CM_AUTH_TOKENおよびNEXT_PUBLIC_CM_AUTH_TOKENを削除」のみが記載されており、Legacyセクションの更新が漏れている。",
+        "location": "## 実装タスク > 環境変数・設定ファイル セクション",
+        "recommendation": ".env.production.exampleのLegacy Supportセクション（行74）からMCBD_AUTH_TOKEN -> CM_AUTH_TOKENの行を削除するタスクを追加する。",
+        "evidence": ".env.production.example行74: '# MCBD_AUTH_TOKEN -> CM_AUTH_TOKEN'"
+      },
+      {
+        "id": "SF-7",
+        "category": "完全性",
+        "issue": "CHANGELOG.md（行232, 252, 257-258, 266, 271）にCM_AUTH_TOKEN/MCBD_AUTH_TOKENのフォールバック機能やマスキングパターンに関する記載がある。実装タスクには「CHANGELOG更新（破壊的変更として記載）」とあるが、過去のCHANGELOGエントリ（既にリリース済みバージョン）の変更は一般的に行わないため問題はないが、新規エントリに「BREAKING CHANGE」セクションとして明確に記載すべきことを受け入れ条件に含めた方が良い。",
+        "location": "## 受け入れ条件 セクション",
+        "recommendation": "受け入れ条件に「CHANGELOGに破壊的変更（BREAKING CHANGE）として記載されていること」を追加する。現在のCHANGELOGタスクは実装タスクにあるが、受け入れ条件には含まれていない。",
+        "evidence": "実装タスクに「CHANGELOG更新（破壊的変更として記載、Issue #76で導入されたCM_AUTH_TOKEN/MCBD_AUTH_TOKENフォールバック機能の削除を明記）」の記載はあるが、受け入れ条件8項目のいずれにもCHANGELOGへの言及がない。"
+      },
+      {
+        "id": "SF-8",
+        "category": "正確性",
+        "issue": "Issue本文のapi-client.ts削除対象に「行45」「行52-65」「行58-64」「行70-73」と行番号が記載されているが、実際のファイルと照合すると、clientAuthTokenWarned変数は行45（正確）、authToken取得ロジックは行54-55（「行52-65」は範囲が広すぎる）、deprecation警告は行58-64（正確）、Authorizationヘッダー設定は行70-73（正確）となっている。行52-65の範囲指定が「fetchApi関数のtry {以降の冒頭からauthToken取得完了まで」を意図しているなら正確性に問題はないが、行52はtry {ブロックの開始でありauthToken取得ロジックではない。",
+        "location": "## 実装タスク > サーバー側 > api-client.ts",
+        "recommendation": "行番号を「行54-55: NEXT_PUBLIC_CM_AUTH_TOKEN/NEXT_PUBLIC_MCBD_AUTH_TOKEN参照」に修正するか、「行52-65のauthToken関連ロジック全体」と明記する。",
+        "evidence": "src/lib/api-client.ts 行52: '// Get auth token from environment variable (with fallback - Issue #76)', 行54: 'const authToken = process.env.NEXT_PUBLIC_CM_AUTH_TOKEN'"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-4",
+        "category": "完全性",
+        "issue": "影響範囲セクションの「合計30件」の内訳を合算すると、ソースコード9 + 型定義2 + テスト6 + 設定ファイル3 + ドキュメント10 + 新規ファイル1 = 31件であり、1件の差異がある。env.tsがソースコードと型定義の両方にカウントされている可能性がある。",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "「合計30件」を「合計31件」に修正するか、重複カウントの意図を明記する（例: 「env.tsはソースコード/型定義で重複カウント。ユニークファイル数は30件」）。",
+        "evidence": "影響ファイル一覧テーブルの件数合計: 9+2+6+3+10+1=31"
+      },
+      {
+        "id": "NTH-5",
+        "category": "明確性",
+        "issue": "ラベルが「enhancement」のみとなっているが、破壊的変更を含む変更であるためConventional Commitsの「feat!」に対応する「breaking-change」等のラベルがあると、Issueリストでの視認性が向上する。",
+        "location": "Issue ラベル",
+        "recommendation": "「breaking-change」ラベルの追加を検討する。タイトルの「feat!:」で破壊的変更は示されているが、ラベルでも可視化すると管理しやすい。",
+        "evidence": "現在のラベル: [enhancement]。タイトルに「feat!:」が含まれており破壊的変更であることが示されている。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/middleware.ts",
+      "relevance": "認証ロジック全89行。Issue記載通りファイル削除対象。行数も一致確認済み。"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "行45(clientAuthTokenWarned), 行54-55(authToken取得), 行58-64(deprecation警告), 行70-73(Authorization設定)。削除対象として正しく特定されている。"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "行28(ENV_MAPPING:CM_AUTH_TOKEN), 行183(Env:CM_AUTH_TOKEN), 行206(authToken取得), 行228-229(0.0.0.0必須チェック), 行276-279(isAuthRequired)。全て削除対象として網羅されている。"
+    },
+    {
+      "file": "src/cli/commands/init.ts",
+      "relevance": "行90-100の認証トークン生成・表示ロジック。Issue記載の行番号は正確。"
+    },
+    {
+      "file": "src/cli/commands/start.ts",
+      "relevance": "行168-174のセキュリティ警告。Issue記載は「行168-174」だが、実際は行168-175（ifブロック終端含む）。概ね正確。"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "行78-84のセキュリティ警告。Issue記載の「行78-84」と一致確認済み。"
+    },
+    {
+      "file": "src/cli/utils/env-setup.ts",
+      "relevance": "行278-280(generateAuthToken), 行300(validateConfig内チェック)。Issue記載の行番号と一致確認済み。"
+    },
+    {
+      "file": ".env.example",
+      "relevance": "行17の「auth required」コメント更新が漏れている（MF-4で指摘）。行29のCM_AUTH_TOKEN削除はIssueに記載済み。"
+    },
+    {
+      "file": ".env.production.example",
+      "relevance": "行18の「auth required」コメント、行23-34のSecurityセクション全体、行74のLegacyマッピング更新が必要（MF-4, SF-6で指摘）。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/concept.md",
+      "relevance": "行165のCM_AUTH_TOKEN参照。Issueに更新タスク記載済み。"
+    },
+    {
+      "file": "docs/architecture.md",
+      "relevance": "行77,451,469-470のMCBD_AUTH_TOKEN参照。Issueに更新タスク記載済み。行番号確認済み。"
+    },
+    {
+      "file": "docs/user-guide/webapp-guide.md",
+      "relevance": "行262のCM_AUTH_TOKEN参照。Issueに更新タスク記載済み。"
+    },
+    {
+      "file": "docs/internal/PRODUCTION_CHECKLIST.md",
+      "relevance": "行30,112,330のCM_AUTH_TOKEN参照。Issueに更新タスク記載済み。行番号確認済み。"
+    },
+    {
+      "file": "docs/internal/TESTING_GUIDE.md",
+      "relevance": "行28,385のCM_AUTH_TOKEN参照。Issueに更新タスク記載済み。"
+    },
+    {
+      "file": "docs/internal/swe-agents.md",
+      "relevance": "行117,184,233のMCBD_AUTH_TOKEN参照。Issueに更新タスク記載済み。"
+    },
+    {
+      "file": "docs/internal/requirements-design.md",
+      "relevance": "行108,214のNFR-SEC-02要件。Issueに更新タスク記載済み。"
+    },
+    {
+      "file": "docs/DEPLOYMENT.md",
+      "relevance": "行155(必須変数一覧), 行237-258(セキュリティセクション)。Issueに更新タスク記載済み。行番号確認済み。"
+    },
+    {
+      "file": "docs/TRUST_AND_SAFETY.md",
+      "relevance": "行23-28,36-41のMCBD_*参照。Issueに更新タスク記載済み。行番号確認済み。"
+    }
+  ]
+}

@@ -1,0 +1,287 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "依存関係の変化",
+        "severity": "high",
+        "location": "package.json / src/cli/utils/daemon.ts",
+        "issue": "設計書ではdaemon.tsでdotenvパッケージを使用して.envファイルを読み込む予定だが、現在のpackage.jsonにdotenvが依存関係として含まれていない。この依存関係の追加が明示的に計画されていない。",
+        "recommendation": "設計書に「dotenvパッケージをdependenciesに追加する」旨を明記する。npm install dotenv を実行し、package.jsonのdependenciesに追加すること。または、Node.js 20.6以降で利用可能なビルトインの--env-fileフラグの使用を検討する（ただし互換性の観点からdotenvが推奨）。",
+        "impact": {
+          "affected_files": ["package.json", "package-lock.json"],
+          "risk_level": "medium",
+          "mitigation": "dotenvは広く使用されている安定したパッケージであり、追加によるリスクは低い"
+        }
+      },
+      {
+        "id": "MF-2",
+        "category": "既存機能への影響",
+        "severity": "high",
+        "location": "src/cli/utils/daemon.ts getStatus()",
+        "issue": "daemon.tsのgetStatus()メソッドは現在process.envから直接CM_PORT、CM_BINDを読み取っているが、設計変更後は.envファイルがdaemon.ts内で読み込まれるのはstart()メソッド内のみ。stop/statusコマンド実行時は.envを読み込まないため、getStatus()が正しいポート/URL情報を取得できない可能性がある。",
+        "recommendation": "getStatus()でも正しい設定値を表示するため、以下のいずれかの対応を検討: (1) getStatus()内でもdotenv.config()を呼び出す、(2) PIDファイルにポート情報も記録する、(3) ドキュメントに「statusコマンドは実行時の環境変数を使用する」と明記し、期待値を調整。",
+        "impact": {
+          "affected_files": ["src/cli/utils/daemon.ts", "src/cli/commands/status.ts"],
+          "risk_level": "medium",
+          "mitigation": "statusコマンドの出力に影響するが、サーバー動作自体には影響なし"
+        }
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "波及効果",
+        "severity": "medium",
+        "location": "src/cli/utils/env-setup.ts",
+        "issue": "getPidFilePath()をenv-setup.tsに追加することで、env-setup.tsの責務が増加する。現在env-setup.tsは「環境設定ファイルの管理」を担当しているが、PIDファイルパス管理という別の責務が混在することになる。",
+        "recommendation": "短期的にはenv-setup.tsへの追加で問題ないが、将来的にはpaths.tsまたはconfig-paths.tsとして設定パス全般を管理するモジュールに分離することを検討。現時点では設計書の方針通りenv-setup.tsに追加し、コメントで今後の分離候補であることを明記。",
+        "impact": {
+          "affected_files": ["src/cli/utils/env-setup.ts"],
+          "risk_level": "low",
+          "mitigation": "機能的には問題なく動作、保守性の観点での指摘"
+        }
+      },
+      {
+        "id": "SF-2",
+        "category": "後方互換性",
+        "severity": "medium",
+        "location": "設計書: 後方互換性セクション",
+        "issue": "設計書では「レガシーPIDファイルの警告表示」を検討事項としているが、具体的な移行パスが定義されていない。既存ユーザーがグローバルインストールにアップグレードした場合、カレントディレクトリの.commandmate.pidが残存し、混乱を招く可能性がある。",
+        "recommendation": "バージョンアップノートまたはCHANGELOG.mdに移行手順を明記: (1) 旧バージョンでstopコマンドを実行、(2) 残存する.commandmate.pidを手動削除、(3) commandmate initを再実行。start/stopコマンドに移行ガイダンスメッセージの追加も検討。",
+        "impact": {
+          "affected_files": ["CHANGELOG.md", "docs/migration-to-commandmate.md"],
+          "risk_level": "low",
+          "mitigation": "ドキュメント追加で対応可能"
+        }
+      },
+      {
+        "id": "SF-3",
+        "category": "パフォーマンスへの影響",
+        "severity": "low",
+        "location": "src/cli/utils/daemon.ts start()",
+        "issue": "daemon.tsのstart()メソッドでdotenv.config()を呼び出すことで、ファイルI/Oが1回増加する。start.tsで既に存在確認を行っているため、同じファイルに2回アクセスすることになる。",
+        "recommendation": "起動時のオーバーヘッドは無視できるレベル（数ms程度）であり、責務分離の観点からは許容範囲。ただし、将来的にstart.tsで.envを読み込んでdaemon.start()に渡す設計も検討可能。現時点での対応は不要。",
+        "impact": {
+          "affected_files": ["src/cli/utils/daemon.ts", "src/cli/commands/start.ts"],
+          "risk_level": "negligible",
+          "mitigation": "パフォーマンス影響は無視できるレベル"
+        }
+      },
+      {
+        "id": "SF-4",
+        "category": "運用・保守への影響",
+        "severity": "medium",
+        "location": "全CLIコマンド",
+        "issue": "設定ファイルパスがグローバル/ローカルで異なる場合、デバッグ時にどちらの設定が使用されているか判断しにくい。特にログメッセージに設定ファイルパスが含まれていない場合、問題の切り分けが困難になる。",
+        "recommendation": "CLIの起動時ログに使用している設定ファイルパスを出力する。例: logger.debug(`Using config: ${getEnvPath()}`); また、statusコマンドの出力にConfig fileパスを追加することを検討。",
+        "impact": {
+          "affected_files": ["src/cli/commands/start.ts", "src/cli/commands/status.ts"],
+          "risk_level": "low",
+          "mitigation": "ログ出力の改善で対応可能"
+        }
+      }
+    ],
+    "good_practices": [
+      {
+        "category": "影響範囲の限定",
+        "location": "設計書: 変更概要テーブル",
+        "description": "変更対象をCLIモジュール（src/cli/）に限定しており、Web UIやAPIなど他のモジュールへの影響がない。CLIとWebアプリの責務分離が適切に維持されている。"
+      },
+      {
+        "category": "依存方向の維持",
+        "location": "src/cli/commands/* -> src/cli/utils/*",
+        "description": "変更後も依存の方向は commands -> utils の一方向を維持している。env-setup.tsからcommands/*への逆方向の依存は発生しない設計となっている。"
+      },
+      {
+        "category": "init.tsの影響回避",
+        "location": "src/cli/commands/init.ts",
+        "description": "init.tsは既にgetEnvPath()を使用しており、今回の変更で修正が不要。設計書で「影響なしのファイル」として明記されており、変更範囲の明確化に貢献している。"
+      },
+      {
+        "category": "テスト計画の具体性",
+        "location": "設計書: テスト計画セクション",
+        "description": "グローバル/ローカル両方のインストールシナリオでのテストケースが定義されており、Stage 2で指摘されたspawnモック化による検証方法も追記されている。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_modules": [
+      {
+        "module": "src/cli/commands/start.ts",
+        "change_type": "direct",
+        "impact_description": "getEnvPath()、getPidFilePath()のimport追加、PID_FILE定数の削除、envPath取得ロジックの変更",
+        "risk_assessment": "low"
+      },
+      {
+        "module": "src/cli/commands/stop.ts",
+        "change_type": "direct",
+        "impact_description": "getPidFilePath()のimport追加、PID_FILE定数の削除",
+        "risk_assessment": "low"
+      },
+      {
+        "module": "src/cli/commands/status.ts",
+        "change_type": "direct",
+        "impact_description": "getPidFilePath()のimport追加、PID_FILE定数の削除",
+        "risk_assessment": "low"
+      },
+      {
+        "module": "src/cli/utils/daemon.ts",
+        "change_type": "direct",
+        "impact_description": "dotenvのimport追加、start()メソッドでの.env読み込みロジック追加、環境変数マージ処理の追加",
+        "risk_assessment": "medium"
+      },
+      {
+        "module": "src/cli/utils/env-setup.ts",
+        "change_type": "direct",
+        "impact_description": "getPidFilePath()関数の追加",
+        "risk_assessment": "low"
+      },
+      {
+        "module": "src/cli/commands/init.ts",
+        "change_type": "none",
+        "impact_description": "既にgetEnvPath()を使用、変更不要",
+        "risk_assessment": "none"
+      },
+      {
+        "module": "src/cli/utils/pid-manager.ts",
+        "change_type": "indirect",
+        "impact_description": "変更なし、PidManagerの呼び出し元（DaemonManager）経由で影響を受ける可能性があるが、インターフェースは不変",
+        "risk_assessment": "none"
+      },
+      {
+        "module": "package.json",
+        "change_type": "direct",
+        "impact_description": "dotenv依存の追加が必要",
+        "risk_assessment": "low"
+      }
+    ],
+    "dependency_changes": [
+      {
+        "type": "new_dependency",
+        "module": "dotenv",
+        "reason": "daemon.tsで.envファイルを読み込むために必要",
+        "version_recommendation": "^16.0.0",
+        "alternatives": ["Node.js --env-file フラグ（20.6+）", "fs.readFileSync + 手動パース"],
+        "recommendation": "dotenvの使用を推奨（広く使用されている安定したライブラリ）"
+      },
+      {
+        "type": "import_change",
+        "from": "start.ts, stop.ts, status.ts",
+        "to": "env-setup.ts",
+        "function": "getPidFilePath()",
+        "impact": "コンパイル時の依存関係追加のみ、実行時の影響は軽微"
+      },
+      {
+        "type": "import_change",
+        "from": "daemon.ts",
+        "to": "env-setup.ts",
+        "function": "getEnvPath()",
+        "impact": "daemon.tsがenv-setup.tsに依存するようになる（新規依存）"
+      }
+    ],
+    "backward_compatibility": {
+      "local_install": {
+        "status": "maintained",
+        "description": "isGlobalInstall()がfalseを返す場合、process.cwd()ベースの動作を維持。既存のローカルインストール環境は影響を受けない。",
+        "risk": "low"
+      },
+      "global_install_existing_users": {
+        "status": "requires_migration",
+        "description": "既存のカレントディレクトリ配置の.commandmate.pidが残存する可能性。新しい~/.commandmate/.commandmate.pidとの二重管理リスク。",
+        "risk": "medium",
+        "mitigation": "レガシーPIDファイル検出時の警告表示、マイグレーションドキュメントの整備"
+      },
+      "env_file_format": {
+        "status": "maintained",
+        "description": ".envファイルのフォーマットは変更なし。既存の.envファイルはそのまま使用可能。",
+        "risk": "none"
+      },
+      "api_compatibility": {
+        "status": "maintained",
+        "description": "CLIコマンドの引数・オプションに変更なし。ユーザーインターフェースは維持される。",
+        "risk": "none"
+      }
+    },
+    "performance_impact": {
+      "startup_time": {
+        "description": "daemon.tsのstart()でdotenv.config()呼び出しが追加される",
+        "estimated_overhead": "1-5ms",
+        "assessment": "negligible",
+        "recommendation": "対応不要"
+      },
+      "file_io": {
+        "description": "start.tsでの.env存在確認 + daemon.tsでの.env読み込みで同一ファイルに2回アクセス",
+        "estimated_overhead": "1-2ms",
+        "assessment": "negligible",
+        "recommendation": "対応不要（OSキャッシュにより2回目のアクセスは高速）"
+      },
+      "memory_usage": {
+        "description": "dotenvパッケージの読み込みによるメモリ使用量増加",
+        "estimated_overhead": "~100KB",
+        "assessment": "negligible",
+        "recommendation": "対応不要"
+      }
+    },
+    "operational_impact": {
+      "debugging": {
+        "current_state": "設定ファイルパスがログに出力されない",
+        "proposed_improvement": "起動時ログとstatusコマンド出力に設定ファイルパスを追加",
+        "priority": "medium",
+        "recommendation": "SF-4の対応として実装を推奨"
+      },
+      "logging": {
+        "current_state": "CLIログは標準出力に出力、設定ファイル関連のログは最小限",
+        "impact": "daemon.tsでenvResult.errorの警告ログが追加される（設計書に反映済み）",
+        "assessment": "positive",
+        "recommendation": "設計書の方針通りで問題なし"
+      },
+      "monitoring": {
+        "current_state": "PIDファイルによるプロセス監視",
+        "impact": "PIDファイルの配置場所が変更されるため、既存の監視スクリプトがある場合は更新が必要",
+        "recommendation": "ドキュメントに新しいPIDファイルパスを明記"
+      },
+      "configuration_management": {
+        "current_state": "カレントディレクトリの.envを使用",
+        "impact": "グローバルインストール時は~/.commandmate/.envに集約され、設定管理が簡素化される",
+        "assessment": "positive",
+        "recommendation": "ドキュメントに設定ファイルの配置場所を明記"
+      }
+    }
+  },
+  "summary": {
+    "total_findings": 6,
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "overall_assessment": "設計変更の影響範囲はCLIモジュールに限定されており、適切にスコープ管理されている。主な懸念点は(1)dotenv依存の追加が設計書に明記されていない点、(2)getStatus()での設定値取得が変更後も正しく動作するかの検証が必要な点。後方互換性は概ね維持されるが、グローバルインストールへの移行時にレガシーPIDファイルの取り扱いについてドキュメント整備が必要。パフォーマンス・運用への影響は軽微であり、デバッグ容易性向上のためのログ改善が推奨される。"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/commands/init.ts",
+    "src/cli/utils/pid-manager.ts",
+    "src/cli/index.ts",
+    "package.json"
+  ],
+  "previous_stage_alignment": {
+    "stage1_MF-1_status": "addressed",
+    "stage1_MF-1_note": "getPidFilePath()のenv-setup.ts集約は影響範囲の観点からも妥当",
+    "stage1_MF-2_status": "addressed",
+    "stage1_MF-2_note": "daemon.tsへの環境変数読み込み一元化はdotenv依存追加を伴う点を確認",
+    "stage2_MF-1_status": "addressed",
+    "stage2_MF-1_note": "JSDocコメントの修正は影響なし",
+    "stage2_MF-2_status": "addressed",
+    "stage2_MF-2_note": "envResult.errorハンドリングは運用・保守の観点からも適切",
+    "stage2_MF-3_status": "addressed",
+    "stage2_MF-3_note": "DaemonManagerシグネチャ維持は既存モジュールへの影響を最小化"
+  },
+  "timestamp": "2026-02-02T00:00:00Z"
+}

@@ -1,0 +1,54 @@
+{
+  "issue_number": 125,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "target_file": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "review_result_file": "dev-reports/issue/125/multi-stage-design-review/stage2-review-result.json",
+  "must_fix_items": [
+    {
+      "id": "MF-1",
+      "category": "設計書と既存コードの整合性",
+      "issue": "JSDocコメントの精度不足 - getPidFilePath()の戻り値説明が「絶対パス」と記載されているが、ローカルインストール時の挙動と整合していない",
+      "recommendation": "JSDocコメントを「PIDファイルのパス（グローバルインストール時は絶対パス、ローカル時はカレントディレクトリ相対）」に修正"
+    },
+    {
+      "id": "MF-2",
+      "category": "設計書内セクション間の整合性",
+      "issue": "daemon.tsでdotenvConfig()呼び出し時のエラーハンドリングが設計されていない（レースコンディション対策）",
+      "recommendation": "daemon.tsの設計にenvResult.errorのチェックを追加し、フォールバック動作を明記"
+    },
+    {
+      "id": "MF-3",
+      "category": "APIシグネチャの整合性",
+      "issue": "DaemonManagerのシグネチャ検討が不足 - コンストラクタを変更せずstart()内でgetEnvPath()を呼び出す設計であることが明記されていない",
+      "recommendation": "DaemonManagerのコンストラクタシグネチャを維持し、start()内でgetEnvPath()を呼び出す設計で問題ないことを明記"
+    }
+  ],
+  "should_fix_items": [
+    {
+      "id": "SF-1",
+      "category": "命名規則の一貫性",
+      "issue": "PID_FILE（定数）からpidFilePath（変数）への移行",
+      "recommendation": "camelCase（関数からの戻り値であるため定数ではない）に統一することを明記"
+    },
+    {
+      "id": "SF-2",
+      "category": "テスト計画と実装の整合性",
+      "issue": "テスト検証方法の不明確さ",
+      "recommendation": "spawn呼び出しのモック化など具体的な検証方法を追記"
+    },
+    {
+      "id": "SF-3",
+      "category": "エラーハンドリングの整合性",
+      "issue": "エラーメッセージパターンの不統一",
+      "recommendation": "全コマンドで一貫した形式を定義"
+    },
+    {
+      "id": "SF-4",
+      "category": "設計書内の整合性",
+      "issue": "影響なしファイルの明記",
+      "recommendation": "init.tsが変更不要であることを明示"
+    }
+  ],
+  "action": "設計方針書にStage 2の指摘事項を反映し、must_fix項目については設計を修正する。should_fix項目については検討事項として記録する。"
+}

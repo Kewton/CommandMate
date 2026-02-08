@@ -1,0 +1,127 @@
+{
+  "issue_number": 125,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "item": "パストラバーサル対策 - getEnvPath()/getConfigDir()でシンボリックリンク解決が行われていない",
+        "owasp_reference": "A01:2021 - Broken Access Control",
+        "sections_updated": [
+          "変更概要",
+          "詳細設計（2. パストラバーサル対策）",
+          "セキュリティ設計",
+          "テスト計画",
+          "受け入れ条件",
+          "レビュー指摘事項サマリー",
+          "レビュー履歴"
+        ],
+        "changes_made": [
+          "resolveSecurePath()関数を設計に追加",
+          "getConfigDir()にfs.realpathSync()によるシンボリックリンク解決を追加",
+          "許可ディレクトリ内チェックの設計を追加",
+          "パストラバーサル対策の実装チェックリストを追加",
+          "セキュリティテストケースを追加"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "MF-2",
+        "item": "機密情報の取り扱い - 起動成功時のログで不正確な情報表示、0.0.0.0バインド時のセキュリティ警告欠如",
+        "owasp_reference": "A05:2021 - Security Misconfiguration",
+        "sections_updated": [
+          "変更概要",
+          "詳細設計（6. daemon.tsの修正）",
+          "セキュリティ設計",
+          "テスト計画",
+          "受け入れ条件",
+          "レビュー指摘事項サマリー",
+          "レビュー履歴"
+        ],
+        "changes_made": [
+          "外部公開設定時のセキュリティ警告（CM_BIND=0.0.0.0）を設計に追加",
+          "認証トークン未設定時の追加警告を設計に追加",
+          ".env読み込み後の正確な設定値を使用する設計を明記",
+          "起動成功ログに正確なポート/バインド値を出力する設計を追加",
+          "機密情報の取り扱いの実装チェックリストを追加",
+          "セキュリティテストケースを追加"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "item": "コマンドインジェクション対策 - options.portのバリデーション強化",
+        "owasp_reference": "A03:2021 - Injection",
+        "section_updated": "今後の検討事項（Stage 4レビュー対応）",
+        "status": "reflected_as_future_consideration"
+      },
+      {
+        "id": "SF-2",
+        "item": "ファイルパーミッション - 既存ディレクトリのパーミッション検証追加",
+        "owasp_reference": "A05:2021 - Security Misconfiguration",
+        "section_updated": "今後の検討事項（Stage 4レビュー対応）",
+        "status": "reflected_as_future_consideration"
+      },
+      {
+        "id": "SF-3",
+        "item": "セキュリティログ・監視 - .env読み込み失敗、PID競合時のlogSecurityEvent()呼び出し追加",
+        "owasp_reference": "A09:2021 - Security Logging and Monitoring Failures",
+        "section_updated": "今後の検討事項（Stage 4レビュー対応）",
+        "status": "reflected_as_future_consideration"
+      },
+      {
+        "id": "SF-4",
+        "item": "認証・認可 - start時の0.0.0.0 + トークン未設定の再検証",
+        "owasp_reference": "A07:2021 - Identification and Authentication Failures",
+        "section_updated": "今後の検討事項（Stage 4レビュー対応）",
+        "status": "reflected_as_future_consideration"
+      },
+      {
+        "id": "SF-5",
+        "item": "入力バリデーション - sanitizePath()に..チェック追加",
+        "owasp_reference": "A03:2021 - Injection (Path Traversal)",
+        "section_updated": "今後の検討事項（Stage 4レビュー対応）",
+        "status": "reflected_as_future_consideration"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "sections_updated": [
+    "変更概要",
+    "詳細設計（2. パストラバーサル対策 - 新規追加）",
+    "詳細設計（6. daemon.ts - 外部公開設定時のセキュリティ警告追加）",
+    "セキュリティ設計（新規追加）",
+    "テスト計画（セキュリティテスト追加）",
+    "受け入れ条件（Stage 4項目追加）",
+    "今後の検討事項（Stage 4レビュー対応 - 新規追加）",
+    "レビュー指摘事項サマリー（Stage 4テーブル追加）",
+    "レビュー履歴（Stage 4対応追加）"
+  ],
+  "new_sections_added": [
+    "セキュリティ設計（Stage 4レビュー対応）",
+    "今後の検討事項 > Stage 4レビュー対応（セキュリティ）"
+  ],
+  "good_practices_documented": [
+    "機密情報の保護（.envファイルパーミッション0o600）",
+    "TOCTOU対策（O_EXCLフラグ使用）",
+    "機密データのマスキング（CM_AUTH_TOKENログマスク）",
+    "コマンドインジェクション防止（spawn引数配列）",
+    "安全な乱数生成（crypto.randomBytes）",
+    "入力サニタイズ（sanitizeInput/escapeEnvValue）",
+    "セキュリティログ出力（logSecurityEvent）"
+  ],
+  "summary": {
+    "total_must_fix": 2,
+    "total_should_fix": 5,
+    "must_fix_reflected": 2,
+    "should_fix_reflected_as_future": 5,
+    "skipped_count": 0
+  },
+  "timestamp": "2026-02-02T00:30:00Z"
+}

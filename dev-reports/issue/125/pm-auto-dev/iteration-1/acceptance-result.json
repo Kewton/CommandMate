@@ -1,0 +1,170 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "id": "AT-1",
+      "scenario": "グローバルインストール時のstart動作",
+      "result": "passed",
+      "evidence": "tests/unit/cli/commands/start.test.ts: 'should use getEnvPath for .env path resolution' - PASSED. start.ts line 26: getEnvPath()が呼び出され、グローバルインストール時は~/.commandmate/.envを返す",
+      "files_verified": [
+        "src/cli/commands/start.ts",
+        "src/cli/utils/env-setup.ts",
+        "tests/unit/cli/commands/start.test.ts"
+      ]
+    },
+    {
+      "id": "AT-2",
+      "scenario": "グローバルインストール時のPIDファイル配置",
+      "result": "passed",
+      "evidence": "tests/unit/cli/utils/env-setup.test.ts: 'should return a path ending with .commandmate.pid' - PASSED. getPidFilePath()がgetConfigDir()を使用し、グローバルインストール時は~/.commandmate/.commandmate.pidを返す",
+      "files_verified": [
+        "src/cli/utils/env-setup.ts",
+        "tests/unit/cli/utils/env-setup.test.ts"
+      ]
+    },
+    {
+      "id": "AT-3",
+      "scenario": "ローカルインストール時の後方互換性",
+      "result": "passed",
+      "evidence": "tests/unit/cli/utils/env-setup.test.ts: 'should resolve symlinks using realpathSync' - PASSED. isGlobalInstall()がfalseの場合、process.cwd()ベースのパスが返される（env-setup.ts line 79-80, 129-130）",
+      "files_verified": [
+        "src/cli/utils/env-setup.ts",
+        "tests/unit/cli/utils/env-setup.test.ts"
+      ]
+    },
+    {
+      "id": "AT-4",
+      "scenario": "パストラバーサル対策",
+      "result": "passed",
+      "evidence": "tests/unit/cli/utils/env-setup.test.ts: 'should throw error for path traversal attempt' - PASSED. resolveSecurePath()がrealpathSync()でシンボリックリンクを解決し、許可されたディレクトリ外へのパスでエラーをスロー（env-setup.ts line 92-101）",
+      "files_verified": [
+        "src/cli/utils/env-setup.ts",
+        "tests/unit/cli/utils/env-setup.test.ts"
+      ]
+    },
+    {
+      "id": "AT-5",
+      "scenario": "セキュリティ警告（外部公開）",
+      "result": "passed",
+      "evidence": "src/cli/utils/daemon.ts line 73-74: CM_BIND=0.0.0.0の場合に'WARNING: Server is accessible from external networks'ログを出力。実装コードで確認済み",
+      "files_verified": [
+        "src/cli/utils/daemon.ts"
+      ]
+    },
+    {
+      "id": "AT-6",
+      "scenario": "セキュリティ警告（認証未設定）",
+      "result": "passed",
+      "evidence": "src/cli/utils/daemon.ts line 76-79: CM_BIND=0.0.0.0かつCM_AUTH_TOKEN未設定の場合に'SECURITY WARNING: No authentication token configured'ログを出力。実装コードで確認済み",
+      "files_verified": [
+        "src/cli/utils/daemon.ts"
+      ]
+    },
+    {
+      "id": "AT-7",
+      "scenario": ".env読み込みエラー時のフォールバック",
+      "result": "passed",
+      "evidence": "tests/unit/cli/utils/daemon.test.ts: 'should fallback when .env loading fails' - PASSED. daemon.ts line 52-55でenvResult.errorをチェックし、警告ログを出力してprocess.envで続行",
+      "files_verified": [
+        "src/cli/utils/daemon.ts",
+        "tests/unit/cli/utils/daemon.test.ts"
+      ]
+    },
+    {
+      "id": "AT-8",
+      "scenario": "status.tsでの設定値表示",
+      "result": "passed",
+      "evidence": "tests/unit/cli/commands/status.test.ts: 'should load .env using dotenv for correct settings display' - PASSED. status.ts line 27でdotenvConfig()を呼び出し、.envの設定値を読み込んで表示",
+      "files_verified": [
+        "src/cli/commands/status.ts",
+        "tests/unit/cli/commands/status.test.ts"
+      ]
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "グローバルインストール時に任意のディレクトリから commandmate start できること",
+      "verified": true,
+      "evidence": "getEnvPath()とgetPidFilePath()が~/.commandmate/配下のパスを返し、任意のディレクトリから実行可能"
+    },
+    {
+      "criterion": "~/.commandmate/.env の設定が正しく読み込まれること",
+      "verified": true,
+      "evidence": "daemon.tsでdotenv.config()を使用し、getEnvPath()で取得したパスから.envを読み込む"
+    },
+    {
+      "criterion": "PIDファイルが ~/.commandmate/.commandmate.pid に作成されること",
+      "verified": true,
+      "evidence": "getPidFilePath()がgetConfigDir()を使用し、グローバルインストール時は~/.commandmate/.commandmate.pidを返す"
+    },
+    {
+      "criterion": "stop/status コマンドが正しいPIDファイルを参照すること",
+      "verified": true,
+      "evidence": "stop.tsとstatus.tsがgetPidFilePath()を使用してPIDファイルパスを取得"
+    },
+    {
+      "criterion": "エラー発生時に期待される設定ファイルパスが表示されること",
+      "verified": true,
+      "evidence": "start.ts line 30: `.env file not found at ${envPath}`でパスを表示"
+    },
+    {
+      "criterion": "ローカルインストール時の動作が維持されること（後方互換性）",
+      "verified": true,
+      "evidence": "isGlobalInstall()がfalseの場合、process.cwd()ベースのパスを返す"
+    },
+    {
+      "criterion": "daemon.tsで.env読み込みエラー時にフォールバック動作すること",
+      "verified": true,
+      "evidence": "daemon.ts line 52-55でenvResult.errorをチェックし、警告ログを出力してprocess.envで続行"
+    },
+    {
+      "criterion": "statusコマンドで正しい設定値が表示されること",
+      "verified": true,
+      "evidence": "status.ts line 27でdotenvConfig()を呼び出し、.envの設定値を読み込んで表示"
+    },
+    {
+      "criterion": "getConfigDir()でシンボリックリンク解決とパストラバーサル検証が実装されていること",
+      "verified": true,
+      "evidence": "env-setup.ts line 117-122でrealpathSync()を使用しシンボリックリンクを解決、ホームディレクトリ外へのパスでエラーをスロー"
+    },
+    {
+      "criterion": "CM_BIND=0.0.0.0の場合にセキュリティ警告が表示されること",
+      "verified": true,
+      "evidence": "daemon.ts line 73-74で警告メッセージを出力"
+    },
+    {
+      "criterion": "外部公開+認証未設定時に追加警告が表示されること",
+      "verified": true,
+      "evidence": "daemon.ts line 76-79でCM_AUTH_TOKEN未設定時に追加警告を出力"
+    },
+    {
+      "criterion": "起動成功ログに正確な設定値が表示されること",
+      "verified": true,
+      "evidence": "daemon.ts line 83で`Starting server at http://${bindAddress}:${port}`を表示"
+    }
+  ],
+  "unit_test_summary": {
+    "total_tests": 2216,
+    "passed": 2216,
+    "failed": 0,
+    "skipped": 7,
+    "coverage": "77.17%",
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "evidence_files": [
+    "tests/unit/cli/utils/env-setup.test.ts",
+    "tests/unit/cli/utils/daemon.test.ts",
+    "tests/unit/cli/commands/start.test.ts",
+    "tests/unit/cli/commands/stop.test.ts",
+    "tests/unit/cli/commands/status.test.ts"
+  ],
+  "implementation_files": [
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts"
+  ],
+  "message": "すべての受入条件を満たしています。12個の受入条件すべてが検証済みで、8個のテストシナリオすべてがPASSEDです。"
+}

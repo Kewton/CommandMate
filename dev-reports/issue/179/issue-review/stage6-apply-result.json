@@ -1,0 +1,54 @@
+{
+  "issue_number": 179,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-4",
+        "status": "applied",
+        "change_summary": ".env.exampleと.env.production.exampleの環境変数・設定ファイルセクションに、CM_BIND説明コメント（行16-18）の「auth required」を「reverse proxy auth recommended」に更新するタスクを追加。.env.production.exampleについてはSecurityセクション（行23-34）のリバースプロキシ推奨書き換えも追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-6",
+        "status": "applied",
+        "change_summary": ".env.production.exampleの更新タスクにLegacy Supportセクション（行74）からMCBD_AUTH_TOKEN -> CM_AUTH_TOKEN行の削除を追加"
+      },
+      {
+        "id": "SF-7",
+        "status": "applied",
+        "change_summary": "受け入れ条件に「CHANGELOGに破壊的変更（BREAKING CHANGE）として記載されていること」を10番目の条件として追加"
+      },
+      {
+        "id": "SF-8",
+        "status": "applied",
+        "change_summary": "api-client.tsのauthToken取得ロジックの行番号を「行54-55」に修正し、行52-65全体がfallback/deprecation処理を含む範囲であることを明確化"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-4",
+        "status": "applied",
+        "change_summary": "影響ファイル一覧の合計を「30件」から「31件」に修正。テーブルに「備考」列を追加し、env.tsのソースコード/型定義での重複カウントを明記。テーブル下にユニークファイル数30件の注記を追加"
+      },
+      {
+        "id": "NTH-5",
+        "status": "skipped",
+        "reason": "ラベル追加はリポジトリのラベル体系に依存するため、Issue本文の更新範囲外。タイトルの「feat!:」で破壊的変更は既に示されている"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 5,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/179"
+  }
+}

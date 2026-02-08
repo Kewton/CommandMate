@@ -1,0 +1,68 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "issue_number": 112,
+  "applied_date": "2026-02-01",
+  "applied_findings": [
+    {
+      "id": "MF-S2-001",
+      "category": "設計書の記述誤り",
+      "severity": "Must Fix",
+      "description": "設計書のセクション2.1の行番号を89-102から86-116に修正",
+      "applied_section": "2.1 問題のあるコード",
+      "change_summary": "コメント内の行番号参照を「AppShell.tsx:86-116」に修正し、「デスクトップレイアウト部分」の注釈を追加"
+    },
+    {
+      "id": "MF-S2-002",
+      "category": "テスト更新計画の不備",
+      "severity": "Must Fix",
+      "description": "テスト更新対象の詳細化（テストケース名と行番号を明記）",
+      "applied_section": "5.2 テスト更新必須",
+      "change_summary": "影響を受けるテストケースの詳細を追加: 'should start with sidebar open on desktop by default' (line 281), 'should render with custom initial state' (line 302)"
+    },
+    {
+      "id": "SF-S2-001",
+      "category": "z-index階層の整合性",
+      "severity": "Should Fix",
+      "description": "モバイルz-index値(z-40, z-50)の一元管理検討を注記として追加",
+      "applied_section": "4.1 z-index階層管理",
+      "change_summary": "将来的にモバイル用の値もz-index.tsで一元管理することを検討する旨の注記を追加（MOBILE_OVERLAY: 40, MOBILE_DRAWER: 50）"
+    },
+    {
+      "id": "SF-S2-002",
+      "category": "SidebarToggle配置方針の整合性",
+      "severity": "Should Fix",
+      "description": "SidebarToggleの現状実装と変更後の実装の対比を明確化",
+      "applied_section": "4.2 SidebarToggle配置方針",
+      "change_summary": "「現状の実装」セクションを追加し、SidebarToggle.tsx:42の状態依存位置切り替えコードを明記。変更後の実装との対比を明確化"
+    },
+    {
+      "id": "SF-S2-003",
+      "category": "CSS変数の現状確認",
+      "severity": "Should Fix",
+      "description": "既存のw-72ハードコード箇所を網羅的にリストアップ",
+      "applied_section": "3.2 サイドバー幅のCSS変数管理",
+      "change_summary": "ハードコード箇所一覧を追加: AppShell.tsx line 68, 94, 99のw-72、SidebarToggle.tsx line 42のleft-[284px]"
+    },
+    {
+      "id": "SF-S2-004",
+      "category": "mainタグの現状実装との差異",
+      "severity": "Should Fix",
+      "description": "mainタグの問題点をクリーンアップ項目として明記",
+      "applied_section": "4.3 CSSトランジション最適化",
+      "change_summary": "現状のmainタグの問題点を追記: (1) 不要なtransition-all、(2) 機能していないml-0条件分岐。設計変更時のクリーンアップ項目として明記"
+    }
+  ],
+  "skipped_findings": [],
+  "updated_sections": [
+    "2.1 問題のあるコード",
+    "3.2 サイドバー幅のCSS変数管理",
+    "4.1 z-index階層管理",
+    "4.2 SidebarToggle配置方針",
+    "4.3 CSSトランジション最適化",
+    "5.2 テスト更新必須",
+    "8. レビュー履歴",
+    "9. レビュー指摘事項サマリー"
+  ],
+  "summary": "Stage 2整合性レビューの指摘事項6件（Must Fix: 2件、Should Fix: 4件）を全て設計書に反映した。主な変更点: (1) 行番号の修正(89-102→86-116)、(2) テスト影響範囲の詳細化、(3) モバイルz-index一元管理の検討注記、(4) SidebarToggle現状/変更後対比の明確化、(5) w-72ハードコード箇所の網羅的リストアップ、(6) mainタグのクリーンアップ項目明記。Nice to Haveの2件(NT-S2-001, NT-S2-002)は本対応では反映せず、必要に応じて後続対応とする。"
+}

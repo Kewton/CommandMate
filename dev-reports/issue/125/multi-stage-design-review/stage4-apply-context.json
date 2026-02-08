@@ -1,0 +1,56 @@
+{
+  "issue_number": 125,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "target_file": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "review_result_file": "dev-reports/issue/125/multi-stage-design-review/stage4-review-result.json",
+  "must_fix_items": [
+    {
+      "id": "MF-1",
+      "category": "パストラバーサル対策",
+      "owasp": "A01:2021 - Broken Access Control",
+      "issue": "getEnvPath()、getConfigDir()でシンボリックリンク解決が行われていない。パストラバーサル攻撃に対する防御が不十分。",
+      "recommendation": "fs.realpathSync()によるシンボリックリンク解決、許可ディレクトリ内チェックの追加"
+    },
+    {
+      "id": "MF-2",
+      "category": "機密情報の取り扱い",
+      "owasp": "A05:2021 - Security Misconfiguration",
+      "issue": "起動成功時のログでprocess.envを直接参照し不正確な情報を表示する可能性。0.0.0.0バインド時のセキュリティ警告が欠如。",
+      "recommendation": ".env読み込み後の正確な値を使用、外部公開設定時の警告表示追加"
+    }
+  ],
+  "should_fix_items": [
+    {
+      "id": "SF-1",
+      "category": "コマンドインジェクション対策",
+      "issue": "options.portのバリデーション強化",
+      "recommendation": "validatePort()関数をdaemon.tsでも使用"
+    },
+    {
+      "id": "SF-2",
+      "category": "ファイルパーミッション",
+      "issue": "既存ディレクトリのパーミッション検証追加",
+      "recommendation": "statSync()でパーミッション確認、0o700より緩い場合は警告"
+    },
+    {
+      "id": "SF-3",
+      "category": "セキュリティログ・監視",
+      "issue": ".env読み込み失敗、PID競合のログ追加",
+      "recommendation": "envResult.error、EEXIST発生時にlogSecurityEvent()呼び出し"
+    },
+    {
+      "id": "SF-4",
+      "category": "認証・認可",
+      "issue": "start時の0.0.0.0 + トークン未設定の再検証",
+      "recommendation": "daemon.tsのstart()でバインド設定とトークン設定の整合性を検証"
+    },
+    {
+      "id": "SF-5",
+      "category": "入力バリデーション",
+      "issue": "sanitizePath()に..チェック追加",
+      "recommendation": "normalize後のパスが..を含まないことを検証"
+    }
+  ],
+  "action": "設計方針書にStage 4の指摘事項を反映し、must_fix項目については設計を修正する。should_fix項目については検討事項として記録する。"
+}

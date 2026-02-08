@@ -1,0 +1,68 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘事項対応",
+  "issue_number": 112,
+  "applied_date": "2026-02-01",
+  "applied_findings": [
+    {
+      "id": "SEC-S4-001",
+      "category": "アクセシビリティセキュリティ",
+      "severity": "should_fix",
+      "description": "aria-hidden使用時のフォーカス管理連動",
+      "applied_to": [
+        "4.4項（アクセシビリティ）に詳細な実装ガイダンスを追加",
+        "6.5項（アクセシビリティ要件）にチェックリスト項目を追加",
+        "9項（レビュー指摘事項サマリー）Stage 4テーブルに記載"
+      ],
+      "implementation_guidance": "inert属性（推奨）またはtabindex=-1（代替案）でフォーカス制御を連動させる"
+    },
+    {
+      "id": "SEC-S4-002",
+      "category": "クリックジャッキング防御",
+      "severity": "should_fix",
+      "description": "z-index一元管理の将来課題認識",
+      "applied_to": [
+        "4.1項（z-index階層管理）に注記を追加",
+        "6.6項（セキュリティ要件）を新規追加しチェックリスト項目を記載",
+        "9項（レビュー指摘事項サマリー）Stage 4テーブルに記載"
+      ],
+      "implementation_guidance": "モバイル用z-index値（MOBILE_OVERLAY: 40, MOBILE_DRAWER: 50, MOBILE_FIXED_UI: 30）のz-index.ts統合を将来課題として認識"
+    }
+  ],
+  "skipped_findings": [],
+  "nice_to_have_noted": [
+    {
+      "id": "SEC-S4-003",
+      "category": "CSS変数インジェクション",
+      "description": "CSS変数はコード内固定値のみ使用、ユーザー入力からの設定禁止",
+      "status": "現時点で問題なし - 将来的なコーディングガイドラインとして認識"
+    },
+    {
+      "id": "SEC-S4-004",
+      "category": "localStorage使用",
+      "description": "既存のlocalStorage使用は非機密データのみ、Issue #112で新規使用なし",
+      "status": "現時点で問題なし"
+    }
+  ],
+  "design_document_updates": {
+    "file_path": "dev-reports/design/issue-112-sidebar-transform-design-policy.md",
+    "sections_updated": [
+      "4.1 z-index階層管理 - SEC-S4-002注記追加",
+      "4.4 アクセシビリティ - SEC-S4-001フォーカス管理ガイダンス追加",
+      "6.5 アクセシビリティ要件 - SEC-S4-001チェックリスト追加",
+      "6.6 セキュリティ要件（Stage 4） - 新規セクション追加",
+      "8 レビュー履歴 - Stage 4行追加",
+      "9 レビュー指摘事項サマリー - Stage 4セクション追加"
+    ],
+    "last_updated": "2026-02-01 (Stage 4 Security Review Applied)"
+  },
+  "security_assessment_summary": {
+    "overall_risk": "minimal",
+    "xss_risk": "none",
+    "css_injection_risk": "none",
+    "clickjacking_risk": "low",
+    "client_state_manipulation_risk": "none",
+    "owasp_top_10_applicable": false
+  },
+  "summary": "Stage 4セキュリティレビューの指摘事項2件（Should Fix）を設計方針書に反映しました。SEC-S4-001ではaria-hidden使用時のフォーカス管理連動（inert属性またはtabindex=-1）に関する詳細な実装ガイダンスを4.4項に追加し、6.5項にチェックリスト項目を追加しました。SEC-S4-002ではz-index一元管理の将来課題認識に関する注記を4.1項に追加し、新規セクション6.6（セキュリティ要件）を作成しました。Nice to Have項目2件（SEC-S4-003, SEC-S4-004）はサマリーテーブルに記載し、現時点で対応不要であることを明記しました。総合的なセキュリティリスクは最小限であり、実装を進めて問題ありません。"
+}

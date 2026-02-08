@@ -1,0 +1,76 @@
+{
+  "issue_number": 179,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目影響範囲レビュー）",
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "docs/migration-to-commandmate.mdの更新タスクを拡張: 行34のMCBD_AUTH_TOKENマッピング削除、行155-165のsystemdセキュリティ推奨セクションのリバースプロキシ推奨書き換え、行291-298の認証エラートラブルシューティング項目の更新を追加。受け入れ条件にもmigration-to-commandmate.mdのAUTH_TOKEN参照全更新を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-5",
+        "status": "applied",
+        "change_summary": "docs/DEPLOYMENT.mdの更新範囲を拡張: commandmate init説明セクション内の行116（CM_AUTH_TOKEN説明）の削除、行125-129（CM_AUTH_TOKENランダム値設定セクション）の削除、行131の旧名称フォールバック案内からAUTH_TOKEN言及の更新を実装タスクに追加。"
+      },
+      {
+        "id": "SF-6",
+        "status": "applied",
+        "change_summary": ".env.exampleの更新範囲を拡張: 行26-28のAUTH_TOKEN関連コメント（Optional when..., Generate a secure random token:, openssl rand -hex 32）および行67のLegacy環境変数セクション内のMCBD_AUTH_TOKENコメント行の削除を実装タスクに追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "CLAUDE.mdのIssue #76, #125, #77セクション内AUTH_TOKEN言及の更新は、Issue完了後のCLAUDE.md更新フローで対応する方針。Stage 5のNTH-3と同一指摘であり、個別Issue内での対応は不要と判断。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 3,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/179"
+  },
+  "changes_made": [
+    {
+      "section": "Note（冒頭）",
+      "change": "「2回目通常レビュー反映済み」を「2回目影響範囲レビュー反映済み」に更新"
+    },
+    {
+      "section": "実装タスク > 環境変数・設定ファイル > .env.example",
+      "change": "行26-28のAUTH_TOKEN関連コメントおよび行67のMCBD_AUTH_TOKENコメント行の削除を追加（SF-6）"
+    },
+    {
+      "section": "実装タスク > ドキュメント更新 > docs/DEPLOYMENT.md",
+      "change": "行116, 125-129, 131のcommandmate initセクション内AUTH_TOKEN参照の更新を追加（SF-5）"
+    },
+    {
+      "section": "実装タスク > ドキュメント更新 > docs/migration-to-commandmate.md",
+      "change": "行44のみだったタスクを拡張: 行34マッピング削除、行155-165 systemdセクション書き換え、行291-298トラブルシューティング更新を追加（MF-3）"
+    },
+    {
+      "section": "受け入れ条件",
+      "change": "docs/migration-to-commandmate.mdのAUTH_TOKEN参照全更新の確認条件を追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "「イテレーション 2 - 影響範囲レビュー (2026-02-08)」セクションを追加: MF-3, SF-5, SF-6, NTH-3の4件の対応を記録"
+    }
+  ],
+  "previous_findings_cumulative_status": {
+    "iteration_1_content_review": "全8件反映済み (MF-1~3, SF-1~5)",
+    "iteration_1_impact_review": "全8件反映済み (MF-1~2, SF-1~4, NTH-1~2)",
+    "iteration_2_content_review": "全5件反映済み (MF-4, SF-6~8, NTH-4)",
+    "iteration_2_impact_review": "3件反映、1件スキップ (MF-3, SF-5~6 applied; NTH-3 skipped)"
+  }
+}

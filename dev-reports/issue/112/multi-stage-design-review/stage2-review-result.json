@@ -1,0 +1,127 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 112,
+  "review_date": "2026-02-01",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-S2-001",
+        "category": "設計書の記述誤り",
+        "description": "設計書のセクション2.1「現状 (AppShell.tsx:89-102)」の行番号が実際のコードと一致しない。実際のデスクトップレイアウト部分は86-116行目にある。設計書のコード例では内部ラッパーが「常時w-72固定」と記載されているが、実装通りである。ただし、行番号の不一致は誤解を招く。",
+        "suggestion": "設計書の行番号を「AppShell.tsx:86-116」に修正する。または行番号を省略し「デスクトップレイアウト部分」のような記述にする。"
+      },
+      {
+        "id": "MF-S2-002",
+        "category": "テスト更新計画の不備",
+        "description": "設計書セクション5.2でテスト更新必須として「w-72/w-0 → translate-x-0/-translate-x-full に変更」と記載されているが、現在のテストコード(AppShell.test.tsx:281, 302)では明示的にw-72/w-0をチェックしており、デスクトップレイアウトのテストケース「Initial Sidebar State」がこれに依存している。テスト更新の影響範囲をより詳細に記載すべき。",
+        "suggestion": "テスト影響範囲を詳細化し、以下のテストケースが変更対象であることを明記する: (1) 'should start with sidebar open on desktop by default' - line 281のw-72チェック, (2) 'should render with custom initial state' - line 302のw-0チェック"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S2-001",
+        "category": "z-index階層の整合性",
+        "description": "設計書セクション4.1で提案されているSIDEBAR(30)は、現在のz-index.tsには存在しない。現在の階層は DROPDOWN(10) < MODAL(50) < MAXIMIZED_EDITOR(55) < TOAST(60) < CONTEXT_MENU(70)。モバイルレイアウトでは既にz-40(overlay)とz-50(sidebar drawer)がハードコードされている(AppShell.tsx:58, 68)。設計書のSIDEBAR(30)との不整合がある。",
+        "suggestion": "モバイルレイアウトで使用しているz-40, z-50を考慮した上で、デスクトップ用SIDEBARの値を再検討する。また、モバイルのz-40, z-50もz-index.tsで管理することを検討する（MOBILE_OVERLAY: 40, MOBILE_DRAWER: 50など）。"
+      },
+      {
+        "id": "SF-S2-002",
+        "category": "SidebarToggle配置方針の整合性",
+        "description": "設計書セクション4.2ではSidebarToggleをサイドバー内部に配置することを推奨しているが、現在のSidebarToggle.tsx(line 42)では状態依存の位置切り替え `${isOpen ? 'left-[284px]' : 'left-2'}` を使用している。これは設計書で「削除可能」と記載されているパターンそのもの。設計書と現状実装の差異が明確であり、実装時の変更点として正確。",
+        "suggestion": "整合性自体は問題ないが、設計書に「現状の実装」と「変更後の実装」を明確に対比させるセクションを追加すると、レビュアーにとってより分かりやすい。"
+      },
+      {
+        "id": "SF-S2-003",
+        "category": "CSS変数の現状確認",
+        "description": "設計書セクション3.2でCSS変数 `--sidebar-width` の導入を提案しているが、現在のglobals.cssとtailwind.config.jsのいずれにも該当する変数定義は存在しない。これは新規追加であることを意味し、設計書の記載は正確。ただし、既存のw-72ハードコード箇所（AppShell.tsx:68, 94, 99, SidebarToggle.tsx:42のleft-[284px]=w-72+12px）を網羅的にリストアップすべき。",
+        "suggestion": "影響を受けるハードコード箇所を設計書に明記する: AppShell.tsx(line 68, 94, 99)のw-72、SidebarToggle.tsx(line 42)のleft-[284px]"
+      },
+      {
+        "id": "SF-S2-004",
+        "category": "mainタグの現状実装との差異",
+        "description": "設計書セクション4.3で「mainタグのpadding変更はトランジションなし」と記載しているが、現在のAppShell.tsx(line 108)では `transition-all duration-300 ease-out` が適用されており、更にline 109の条件分岐 `${isOpen ? 'ml-0' : 'ml-0'}` は常に同じ値を返す無意味なコードとなっている。",
+        "suggestion": "設計書に現状のmainタグの問題点を追記する: (1) transition-allが適用されている、(2) isOpenによるml条件分岐が機能していない（両方ml-0）。これらは設計変更時にクリーンアップすべき項目として明記する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NT-S2-001",
+        "category": "ドキュメント品質",
+        "description": "設計書セクション5.4「影響なし」にSidebarContext.tsx, Sidebar.tsx, useSidebar.tsが列挙されているが、useSidebar.tsというファイルは実際には存在しない可能性がある（Glob検索で確認が必要）。正確なファイル名を記載すべき。",
+        "suggestion": "影響なしファイルのリストを実際のコードベースと照合し、正確なファイル名・パスを記載する。"
+      },
+      {
+        "id": "NT-S2-002",
+        "category": "アクセシビリティ整合性",
+        "description": "設計書セクション4.4で「サイドバー閉じ時にaria-hidden=true追加」と記載されているが、現在のデスクトップレイアウト(AppShell.tsx:89-102)にはaria-hidden属性がない。モバイルレイアウトではオーバーレイ(line 60)にaria-hidden=trueがある。整合性としては問題ないが、追加対象を明確にすべき。",
+        "suggestion": "aria-hidden追加対象がデスクトップのasideタグであることを明記し、モバイルレイアウトとの差異を説明する。"
+      }
+    ]
+  },
+  "consistency_issues": [
+    {
+      "id": "CI-001",
+      "design_doc_section": "2.1 問題のあるコード",
+      "actual_code_location": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/layout/AppShell.tsx:86-116",
+      "issue": "行番号の不一致: 設計書では89-102、実際は86-116",
+      "impact": "低（ドキュメントの正確性のみ）"
+    },
+    {
+      "id": "CI-002",
+      "design_doc_section": "3.3 実装イメージ",
+      "actual_code_location": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/layout/AppShell.tsx:105-114",
+      "issue": "設計書ではmainにpadding-left使用を提案しているが、現在はmargin-left(ml-0)を使用。ただしml-0の条件分岐は機能していない。",
+      "impact": "中（実装方針の明確化が必要）"
+    },
+    {
+      "id": "CI-003",
+      "design_doc_section": "4.1 z-index階層管理",
+      "actual_code_location": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/config/z-index.ts",
+      "issue": "設計書ではSIDEBAR(30)を追加提案しているが、モバイルレイアウトでは既にz-40/z-50がハードコードされており、デスクトップとモバイルでz-index管理方針が異なる。",
+      "impact": "中（z-index一元管理の整合性）"
+    },
+    {
+      "id": "CI-004",
+      "design_doc_section": "5.2 テスト更新必須",
+      "actual_code_location": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tests/unit/components/layout/AppShell.test.tsx:269-304",
+      "issue": "設計書の記載は正確だが、具体的なテストケース名と行番号が不足している。",
+      "impact": "低（実装時の効率性のみ）"
+    }
+  ],
+  "codebase_verification": {
+    "files_verified": [
+      {
+        "path": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/layout/AppShell.tsx",
+        "exists": true,
+        "design_assumptions_match": true,
+        "notes": "width方式のデスクトップレイアウトは設計書記載通り。ただしmainタグのtransition-allとml-0条件分岐に問題あり。"
+      },
+      {
+        "path": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/config/z-index.ts",
+        "exists": true,
+        "design_assumptions_match": true,
+        "notes": "SIDEBAR定数は未定義（設計書は新規追加を提案）。階層順序は設計書記載通り。"
+      },
+      {
+        "path": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/components/layout/SidebarToggle.tsx",
+        "exists": true,
+        "design_assumptions_match": true,
+        "notes": "状態依存の位置切り替え(left-[284px]/left-2)は設計書で指摘されている通り。"
+      },
+      {
+        "path": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/app/globals.css",
+        "exists": true,
+        "design_assumptions_match": true,
+        "notes": "--sidebar-width変数は未定義（設計書は新規追加を提案）。"
+      },
+      {
+        "path": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/tailwind.config.js",
+        "exists": true,
+        "design_assumptions_match": true,
+        "notes": "サイドバー関連のカスタム設定なし（設計書は代替案として追加を提案）。"
+      }
+    ]
+  },
+  "summary": "Issue #112 サイドバートグルパフォーマンス改善の設計書について、実際のコードベースとの整合性レビューを実施した。設計書は全体として正確であり、現状のコードベースを適切に分析している。主な整合性の問題は以下の通り: (1) 行番号の軽微な不一致（MF-S2-001）、(2) テスト更新対象の詳細不足（MF-S2-002）、(3) z-index管理でモバイル/デスクトップ間の不整合（SF-S2-001）、(4) mainタグの既存実装における問題（無意味な条件分岐、transition-all使用）が設計書で明記されていない（SF-S2-004）。これらは実装開始前に設計書を更新することで解消可能。全体として、設計方針は妥当であり、Stage 1レビューで指摘されたDRY/KISS/YAGNI原則への対応も適切に反映されている。"
+}

@@ -1,0 +1,314 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "パストラバーサル対策",
+        "severity": "high",
+        "location": "src/cli/utils/env-setup.ts - getEnvPath(), getConfigDir()",
+        "issue": "getEnvPath()およびgetConfigDir()はprocess.cwd()を直接使用しており、シンボリックリンクを経由した場合のパストラバーサル攻撃に対する防御が不十分。攻撃者がシンボリックリンクを作成し、意図しないディレクトリの.envファイルを読み込ませる可能性がある。",
+        "owasp_reference": "A01:2021 - Broken Access Control",
+        "recommendation": "fs.realpathSync()を使用してシンボリックリンクを解決し、正規化されたパスを使用すること。また、返却されるパスがユーザーのホームディレクトリまたは許可されたディレクトリ内にあることを検証する。",
+        "code_example": "const realPath = fs.realpathSync(process.cwd()); if (!realPath.startsWith(homedir())) { throw new Error('Invalid working directory'); }"
+      },
+      {
+        "id": "MF-2",
+        "category": "機密情報の取り扱い",
+        "severity": "high",
+        "location": "src/cli/commands/start.ts - line 55-57",
+        "issue": "起動成功時のログメッセージでprocess.env.CM_BINDを直接参照し、URLとして出力している。.envファイルがdaemon.ts内で読み込まれる設計変更後、start.tsではprocess.envに.envの値が反映されておらず、不正確な情報を表示する可能性がある。また、0.0.0.0バインド時のセキュリティ警告が欠如している。",
+        "owasp_reference": "A05:2021 - Security Misconfiguration",
+        "recommendation": "1) .env読み込み後の正確なポート/バインド値を使用する設計に変更、2) CM_BIND=0.0.0.0の場合は「Warning: Server is accessible from external networks」のような警告を表示、3) 認証トークンの設定状況を確認し、未設定時に警告を表示。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "コマンドインジェクション対策",
+        "severity": "medium",
+        "location": "src/cli/utils/daemon.ts - line 47-52",
+        "issue": "spawn()は引数配列を使用しており基本的なコマンドインジェクションは防止されているが、環境変数envオブジェクトにユーザー入力（options.port）が含まれる。parseInt()で数値変換しているものの、String()変換前のバリデーションが不十分。",
+        "owasp_reference": "A03:2021 - Injection",
+        "recommendation": "env-setup.tsのvalidatePort()関数を使用して、options.portを環境変数に設定する前に明示的にバリデーションすること。また、ポート番号の範囲チェック（1024-65535の非特権ポート範囲推奨）を追加。",
+        "current_mitigation": "spawn()の引数配列使用でシェルインジェクションは防止済み"
+      },
+      {
+        "id": "SF-2",
+        "category": "ファイルパーミッション",
+        "severity": "medium",
+        "location": "src/cli/utils/env-setup.ts - getEnvPath() line 72",
+        "issue": "~/.commandmate/ディレクトリ作成時にmode: 0o700を設定しているが、既存ディレクトリのパーミッションが緩い場合の検証・修正が行われていない。また、umaskによってパーミッションが意図せず変更される可能性がある。",
+        "owasp_reference": "A05:2021 - Security Misconfiguration",
+        "recommendation": "1) mkdirSync後にchmodSyncで明示的にパーミッションを再設定、2) 既存ディレクトリがある場合はパーミッションを検証し、0o700より緩い場合は警告を表示、3) statSync().modeでパーミッションを確認するヘルパー関数を追加。"
+      },
+      {
+        "id": "SF-3",
+        "category": "セキュリティログ・監視",
+        "severity": "medium",
+        "location": "src/cli/utils/security-logger.ts",
+        "issue": "セキュリティイベントログは実装されているが、以下の重要イベントがログ対象になっていない: 1) .env読み込み失敗、2) PIDファイル競合（EEXIST）、3) 設定ファイルパーミッションの異常検出。また、ログローテーションが実装されていない。",
+        "owasp_reference": "A09:2021 - Security Logging and Monitoring Failures",
+        "recommendation": "1) daemon.tsでenvResult.error発生時にlogSecurityEvent()を呼び出す、2) pid-manager.tsでEEXIST発生時にlogSecurityEvent()を呼び出す、3) 設定ファイル読み込み時にパーミッションチェックを追加しログ出力、4) 将来的にログローテーション機能を検討。"
+      },
+      {
+        "id": "SF-4",
+        "category": "認証・認可",
+        "severity": "medium",
+        "location": "src/cli/utils/env-setup.ts - validateConfig() line 231-233",
+        "issue": "CM_BIND=0.0.0.0の場合にCM_AUTH_TOKENが必須とするバリデーションは実装されているが、initコマンドでのみ検証される。start時に.envを読み込む際の再検証が行われておらず、ユーザーが手動で.envを編集してトークンを削除した場合、外部公開状態で認証なし起動が可能。",
+        "owasp_reference": "A07:2021 - Identification and Authentication Failures",
+        "recommendation": "daemon.tsのstart()メソッドで.env読み込み後、CM_BIND=0.0.0.0かつCM_AUTH_TOKEN未設定の場合にエラーまたは強制的なwarningを出力する検証ロジックを追加。"
+      },
+      {
+        "id": "SF-5",
+        "category": "入力バリデーション",
+        "severity": "medium",
+        "location": "src/cli/utils/env-setup.ts - sanitizePath() line 108-111",
+        "issue": "sanitizePath()はpath.normalize()を使用しているが、これだけでは../(親ディレクトリ参照)を含むパスを防げない。悪意のあるパスが設定ファイルに書き込まれる可能性がある。",
+        "owasp_reference": "A03:2021 - Injection (Path Traversal)",
+        "recommendation": "sanitizePath()に以下のチェックを追加: 1) normalize後のパスが..を含まないことを検証、2) 絶対パスの場合は許可されたベースディレクトリ内であることを検証。isPathSafe()のような専用関数の実装を検討。"
+      }
+    ],
+    "good_practices": [
+      {
+        "category": "機密情報の保護",
+        "location": "src/cli/utils/env-setup.ts - createEnvFile() line 185-188",
+        "description": ".envファイル作成時にmode: 0o600を設定し、さらにchmodSync()で明示的にパーミッションを再設定している。これによりumaskに関係なく適切なパーミッションが保証される。"
+      },
+      {
+        "category": "TOCTOU対策",
+        "location": "src/cli/utils/pid-manager.ts - writePid() line 61-83",
+        "description": "O_EXCLフラグを使用したアトミックなファイル作成により、PIDファイルの二重作成競合（TOCTOU脆弱性）を防止している。EEXISTエラーを適切にハンドリングしている。"
+      },
+      {
+        "category": "機密データのマスキング",
+        "location": "src/cli/utils/security-logger.ts - maskSensitiveData()",
+        "description": "CM_AUTH_TOKENおよびtoken様の文字列をログ出力前にマスキングしている。正規表現パターンにより多様なフォーマットに対応。"
+      },
+      {
+        "category": "コマンドインジェクション防止",
+        "location": "src/cli/utils/daemon.ts - spawn() calls",
+        "description": "child_process.spawn()を引数配列形式で使用しており、シェルを経由しないためコマンドインジェクションのリスクが大幅に低減されている。shell: trueオプションを使用していない点が良い。"
+      },
+      {
+        "category": "安全な乱数生成",
+        "location": "src/cli/utils/env-setup.ts - generateAuthToken()",
+        "description": "crypto.randomBytes()を使用した暗号学的に安全な乱数生成によりCM_AUTH_TOKENを生成している。32バイト（256ビット）のエントロピーは十分なセキュリティ強度。"
+      },
+      {
+        "category": "入力サニタイズ",
+        "location": "src/cli/utils/env-setup.ts - sanitizeInput(), escapeEnvValue()",
+        "description": "制御文字の除去、.envファイル書き込み時の特殊文字エスケープが実装されており、インジェクション攻撃のベクトルを削減している。"
+      },
+      {
+        "category": "セキュリティログ出力",
+        "location": "src/cli/commands/start.ts, stop.ts",
+        "description": "start/stopコマンドの成功/失敗時にlogSecurityEvent()を呼び出しており、セキュリティ監査に必要なイベント追跡が可能。"
+      }
+    ]
+  },
+  "security_analysis": {
+    "owasp_compliance": {
+      "A01_Broken_Access_Control": {
+        "status": "needs_improvement",
+        "findings": [
+          "getEnvPath()/getConfigDir()でシンボリックリンク解決が行われていない",
+          "パストラバーサル攻撃に対する防御が不十分"
+        ],
+        "recommendations": [
+          "fs.realpathSync()によるシンボリックリンク解決",
+          "許可ディレクトリ内チェックの追加"
+        ]
+      },
+      "A02_Cryptographic_Failures": {
+        "status": "compliant",
+        "findings": [
+          "crypto.randomBytes()による安全なトークン生成",
+          ".envファイルのパーミッション0o600設定"
+        ],
+        "recommendations": []
+      },
+      "A03_Injection": {
+        "status": "mostly_compliant",
+        "findings": [
+          "spawn()引数配列使用でコマンドインジェクション防止",
+          "sanitizeInput()による制御文字除去",
+          "escapeEnvValue()によるシェル特殊文字エスケープ"
+        ],
+        "recommendations": [
+          "sanitizePath()に親ディレクトリ参照(../)チェックを追加",
+          "options.portのバリデーション強化"
+        ]
+      },
+      "A05_Security_Misconfiguration": {
+        "status": "needs_improvement",
+        "findings": [
+          "0.0.0.0バインド時の警告表示が不十分",
+          "既存ディレクトリのパーミッション検証なし"
+        ],
+        "recommendations": [
+          "外部公開設定時のセキュリティ警告追加",
+          "ディレクトリパーミッション検証の追加"
+        ]
+      },
+      "A07_Identification_and_Authentication_Failures": {
+        "status": "needs_improvement",
+        "findings": [
+          "initコマンドでのみCM_AUTH_TOKEN必須チェック",
+          "start時の再検証が欠如"
+        ],
+        "recommendations": [
+          "daemon.tsのstart()でバインド設定とトークン設定の整合性を再検証"
+        ]
+      },
+      "A09_Security_Logging_and_Monitoring_Failures": {
+        "status": "mostly_compliant",
+        "findings": [
+          "start/stopイベントのセキュリティログ出力あり",
+          "機密データのマスキング実装あり"
+        ],
+        "recommendations": [
+          ".env読み込み失敗時のセキュリティログ追加",
+          "PIDファイル競合時のセキュリティログ追加",
+          "ログローテーションの検討"
+        ]
+      }
+    },
+    "authentication": {
+      "cm_auth_token_handling": {
+        "generation": "secure - crypto.randomBytes(32) (256-bit entropy)",
+        "storage": "secure - .env file with 0o600 permissions",
+        "validation": "partial - only validated during init, not at start time",
+        "transmission": "not_applicable - CLI tool, token stored locally",
+        "logging": "secure - masked in security logs"
+      },
+      "recommendations": [
+        "start時に0.0.0.0バインド + トークン未設定の組み合わせを検証",
+        "トークン長の最小要件を明示的に定義（現状32バイト）"
+      ]
+    },
+    "input_validation": {
+      "port_validation": {
+        "current_implementation": "parseInt() + range check 1-65535 in validatePort()",
+        "usage_in_daemon": "options.port is converted via String() without explicit validation",
+        "recommendation": "daemon.tsでoptions.port設定前にvalidatePort()を呼び出す"
+      },
+      "path_validation": {
+        "current_implementation": "sanitizeInput() + path.normalize() in sanitizePath()",
+        "gap": "../ parent directory traversal not prevented",
+        "recommendation": "normalize後のパスに..が含まれないことを検証"
+      },
+      "env_value_escaping": {
+        "current_implementation": "escapeEnvValue() handles backslashes, quotes, special chars",
+        "assessment": "adequate for .env file format"
+      }
+    },
+    "sensitive_data": {
+      "env_file_permissions": {
+        "creation": "0o600 (owner read/write only)",
+        "enforcement": "chmodSync() called after writeFileSync()",
+        "assessment": "compliant"
+      },
+      "config_directory_permissions": {
+        "creation": "0o700 (owner full access only)",
+        "gap": "existing directory permissions not verified",
+        "recommendation": "既存ディレクトリのパーミッション検証を追加"
+      },
+      "environment_variable_logging": {
+        "masking": "CM_AUTH_TOKEN masked in security logs",
+        "gap": "CM_ROOT_DIR and other paths may reveal sensitive system information",
+        "recommendation": "ログ詳細度をCM_LOG_LEVELに応じて制御"
+      },
+      "pid_file": {
+        "permissions": "0o600 (set in openSync)",
+        "content": "numeric PID only - no sensitive data",
+        "assessment": "compliant"
+      }
+    },
+    "file_permissions": {
+      "summary": {
+        "env_file": "0o600 - compliant",
+        "pid_file": "0o600 - compliant",
+        "config_directory": "0o700 - compliant (creation only)",
+        "security_log": "0o600 - compliant"
+      },
+      "gaps": [
+        "既存ディレクトリのパーミッションが検証されない",
+        "umaskによる影響がmkdirSyncで完全に制御されない可能性"
+      ]
+    },
+    "injection_prevention": {
+      "command_injection": {
+        "status": "protected",
+        "mechanism": "spawn() with argument array (no shell)",
+        "assessment": "shell: true オプション未使用により安全"
+      },
+      "env_injection": {
+        "status": "mostly_protected",
+        "mechanism": "escapeEnvValue() for .env file writing",
+        "gap": "環境変数への直接代入時のバリデーションが追加で望ましい"
+      },
+      "path_injection": {
+        "status": "needs_improvement",
+        "mechanism": "sanitizePath() uses normalize()",
+        "gap": "../ traversal not blocked"
+      }
+    },
+    "path_traversal": {
+      "getEnvPath": {
+        "risk_level": "medium",
+        "attack_vector": "シンボリックリンク経由で意図しない.envファイルにアクセス",
+        "current_protection": "none",
+        "recommendation": "fs.realpathSync()でシンボリックリンク解決"
+      },
+      "getPidFilePath": {
+        "risk_level": "medium",
+        "attack_vector": "シンボリックリンク経由で意図しないPIDファイルに書き込み",
+        "current_protection": "none (same as getEnvPath via getConfigDir)",
+        "recommendation": "getConfigDir()で返すパスをrealpathで解決"
+      },
+      "getConfigDir": {
+        "risk_level": "medium",
+        "attack_vector": "process.cwd()がシンボリックリンクの場合",
+        "current_protection": "none",
+        "recommendation": "fs.realpathSync(process.cwd())を使用"
+      },
+      "sanitizePath": {
+        "risk_level": "medium",
+        "attack_vector": "../ を含むパスによる親ディレクトリアクセス",
+        "current_protection": "path.normalize() only",
+        "recommendation": "normalize後に..が含まれないことを検証"
+      }
+    }
+  },
+  "summary": {
+    "total_findings": 7,
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "overall_assessment": "セキュリティ実装は概ね適切に行われており、特に機密ファイルのパーミッション設定、コマンドインジェクション防止（spawn引数配列）、認証トークン生成（crypto.randomBytes）、セキュリティログのマスキングなどは良好な実装となっている。主な改善点として、(1) パストラバーサル攻撃に対する防御強化（シンボリックリンク解決、親ディレクトリ参照チェック）、(2) 0.0.0.0バインド時のセキュリティ警告とstart時の認証トークン再検証、が必要である。OWASP Top 10への準拠は概ね達成されているが、A01(アクセス制御)とA05(セキュリティ設定ミス)の領域で追加対策が推奨される。Issue #125の設計変更自体は新たなセキュリティリスクを導入するものではなく、むしろ設定ファイルの一元管理により運用時のセキュリティ設定ミスのリスクを低減する効果がある。"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/pid-manager.ts",
+    "src/cli/utils/security-logger.ts",
+    "src/cli/utils/paths.ts"
+  ],
+  "previous_stage_alignment": {
+    "stage1_status": "reviewed",
+    "stage1_security_relevance": "getPidFilePath()集約と環境変数読み込み一元化はセキュリティ上の一貫性向上に寄与",
+    "stage2_status": "reviewed",
+    "stage2_security_relevance": "envResult.errorハンドリング追加によりセキュリティログ出力の機会が増加（推奨）",
+    "stage3_status": "reviewed",
+    "stage3_security_relevance": "dotenv依存追加は広く使用されるライブラリであり、セキュリティリスクは低い"
+  },
+  "timestamp": "2026-02-02T00:00:00Z"
+}

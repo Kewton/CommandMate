@@ -1,0 +1,18 @@
+{
+  "issue_number": 95,
+  "refactor_targets": [
+    "src/config/image-extensions.ts",
+    "src/components/worktree/ImageViewer.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 97.87
+  },
+  "improvement_goals": [
+    "カバレッジを維持",
+    "重複コードの削除",
+    "SOLID原則の適用確認",
+    "DRY原則の適用確認"
+  ]
+}

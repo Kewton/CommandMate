@@ -1,0 +1,87 @@
+{
+  "issue_number": 179,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "Issueタイトルを 'refactor:' から 'feat!:' に変更（破壊的変更を明示）。ラベルから 'bug' を削除し 'enhancement' のみに統一。"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "実装タスクに以下を追加: scripts/setup-env.shからNEXT_PUBLIC_CM_AUTH_TOKEN関連削除、.env.production.exampleからNEXT_PUBLIC_CM_AUTH_TOKEN削除、docs/migration-to-commandmate.mdのマッピング削除。「環境変数・設定ファイル」セクションとして独立化。"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "実装タスクに以下を追加: src/lib/env.tsのCM_BIND=0.0.0.0時のCM_AUTH_TOKEN必須チェック削除、env-setup.tsのvalidateConfig()内チェック削除、daemon.ts/start.tsのセキュリティ警告ロジック削除。各タスクに行番号を記載。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "実装タスクに src/lib/logger.ts のAUTH_TOKENマスキングパターン削除と src/cli/utils/security-logger.ts のAUTH_TOKENマスキング処理削除を追加。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "「テストファイル更新」セクションを新設し、6件のテストファイル（env.test.ts, middleware.test.ts, logger.test.ts, env-setup.test.ts, daemon.test.ts, security-logger.test.ts）の更新タスクを追加。受け入れ条件にもテスト通過条件を追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "docs/TRUST_AND_SAFETY.mdの更新を「ドキュメント更新」セクションに追加。更新対象セクション（行23-28, 行36-41）とMCBD_*からCM_*への統一を明記。受け入れ条件にも反映。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "警告メッセージ内のドキュメントリンクを 'https://github.com/Kewton/CommandMate/docs/security-guide.md' から 'https://github.com/Kewton/CommandMate/blob/main/docs/security-guide.md' に修正。"
+      },
+      {
+        "id": "SF-5",
+        "status": "applied",
+        "change_summary": "docs/DEPLOYMENT.mdの更新を「ドキュメント更新」セクションに追加。セキュリティセクション（行237-258）の書き換えと必須環境変数一覧（行155）からのCM_AUTH_TOKEN削除を明記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "src/lib/env.tsの実装タスク内にisAuthRequired()関数の削除を明記。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "src/lib/env.tsのEnv interfaceとsrc/cli/types/index.tsのEnvConfig interfaceからのCM_AUTH_TOKENフィールド削除を個別タスクとして明記。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "CLAUDE.mdの更新は本Issue完了後に別途フォローアップとして対応する。本Issueの実装範囲を超えるため。"
+      }
+    ]
+  },
+  "title_change": {
+    "before": "refactor: CM_AUTH_TOKEN認証機能を削除し、リバースプロキシ認証を推奨",
+    "after": "feat!: CM_AUTH_TOKEN認証機能を削除し、リバースプロキシ認証を推奨"
+  },
+  "label_change": {
+    "before": ["bug", "enhancement"],
+    "after": ["enhancement"]
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 10,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/179"
+  }
+}

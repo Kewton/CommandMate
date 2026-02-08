@@ -1,0 +1,334 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 96,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-01-31",
+  "impact_analysis": {
+    "files_to_create": [
+      {
+        "path": "bin/commandmate.js",
+        "description": "CLIエントリポイント（shebang付きのNode.js実行可能ファイル）",
+        "priority": "必須"
+      },
+      {
+        "path": "src/cli/index.ts",
+        "description": "CLIメインロジック（TypeScript実装）",
+        "priority": "必須"
+      },
+      {
+        "path": "src/cli/commands/init.ts",
+        "description": "initコマンド実装",
+        "priority": "必須"
+      },
+      {
+        "path": "src/cli/commands/start.ts",
+        "description": "startコマンド実装",
+        "priority": "必須"
+      },
+      {
+        "path": "src/cli/commands/stop.ts",
+        "description": "stopコマンド実装",
+        "priority": "必須"
+      },
+      {
+        "path": "src/cli/commands/status.ts",
+        "description": "statusコマンド実装",
+        "priority": "必須"
+      },
+      {
+        "path": "src/cli/utils/preflight.ts",
+        "description": "依存関係チェックロジック（scripts/preflight-check.shのTypeScript移植）",
+        "priority": "必須"
+      },
+      {
+        "path": "src/cli/utils/env-setup.ts",
+        "description": "環境設定ロジック（scripts/setup-env.shのTypeScript移植）",
+        "priority": "必須"
+      },
+      {
+        "path": ".npmignore",
+        "description": "npm publish時の除外ファイル設定",
+        "priority": "必須"
+      }
+    ],
+    "files_to_modify": [
+      {
+        "path": "package.json",
+        "changes": [
+          "private: true を削除",
+          "bin フィールドを追加",
+          "engines フィールドを追加（Node.js v20+）",
+          "files フィールドを追加（公開対象指定）",
+          "repository/bugs/homepage フィールドを追加"
+        ],
+        "impact": "高",
+        "breaking": true
+      },
+      {
+        "path": "README.md",
+        "changes": [
+          "npm install -g commandmate 手順を追加",
+          "CLI コマンドリファレンスを追加",
+          "Quick Start セクションを更新"
+        ],
+        "impact": "中",
+        "breaking": false
+      },
+      {
+        "path": "docs/DEPLOYMENT.md",
+        "changes": [
+          "npm グローバルインストール手順を追加",
+          "CLIコマンドによるセットアップ手順を追加"
+        ],
+        "impact": "中",
+        "breaking": false
+      },
+      {
+        "path": "docs/migration-to-commandmate.md",
+        "changes": [
+          "npm install への移行手順を追加"
+        ],
+        "impact": "低",
+        "breaking": false
+      },
+      {
+        "path": "docs/release-guide.md",
+        "changes": [
+          "npm publish 手順を追加",
+          "バージョニングとnpm publishの連携を記載"
+        ],
+        "impact": "中",
+        "breaking": false
+      },
+      {
+        "path": "CHANGELOG.md",
+        "changes": [
+          "npm install対応の記録"
+        ],
+        "impact": "低",
+        "breaking": false
+      },
+      {
+        "path": "server.ts",
+        "changes": [
+          "環境変数参照を getEnvByKey() に統一（現在 MCBD_BIND, MCBD_PORT を直接参照）"
+        ],
+        "impact": "中",
+        "breaking": false
+      }
+    ],
+    "tests_required": [
+      {
+        "path": "tests/unit/cli/index.test.ts",
+        "description": "CLIエントリポイントのテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/commands/init.test.ts",
+        "description": "initコマンドのテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/commands/start.test.ts",
+        "description": "startコマンドのテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/commands/stop.test.ts",
+        "description": "stopコマンドのテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/commands/status.test.ts",
+        "description": "statusコマンドのテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/unit/cli/utils/preflight.test.ts",
+        "description": "依存関係チェックのテスト",
+        "priority": "必須"
+      },
+      {
+        "path": "tests/integration/cli-e2e.test.ts",
+        "description": "CLI統合テスト（オプション）",
+        "priority": "推奨"
+      }
+    ],
+    "docs_to_update": [
+      "README.md",
+      "docs/DEPLOYMENT.md",
+      "docs/migration-to-commandmate.md",
+      "docs/release-guide.md",
+      "CHANGELOG.md",
+      "CLAUDE.md（開発コマンドセクション）"
+    ],
+    "ci_cd_changes": [
+      {
+        "file": ".github/workflows/ci-pr.yml",
+        "change": "CLIテストのステップ追加を検討",
+        "priority": "推奨"
+      },
+      {
+        "file": ".github/workflows/publish.yml（新規）",
+        "change": "npm publish 自動化ワークフロー",
+        "priority": "推奨"
+      }
+    ],
+    "breaking_changes": [
+      {
+        "change": "package.json の private: true 削除",
+        "impact": "npm publish が可能になる（意図的な変更）",
+        "migration": "なし（ユーザー影響なし）"
+      },
+      {
+        "change": "bin フィールド追加",
+        "impact": "npm install -g 時にグローバルコマンドが登録される",
+        "migration": "なし（新機能）"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "server.ts で環境変数を直接参照している",
+        "location": "server.ts:43-44",
+        "evidence": "const hostname = process.env.MCBD_BIND || '127.0.0.1'; const port = parseInt(process.env.MCBD_PORT || process.env.PORT || '3000', 10);",
+        "recommendation": "src/lib/env.ts の getEnvByKey() を使用するよう修正が必要。CLI実装前にこの不整合を解消すべき。",
+        "impact": "CLI側で環境変数を設定しても server.ts で旧名称が参照される可能性"
+      },
+      {
+        "id": "MF-2",
+        "category": "影響範囲",
+        "issue": ".npmignore が存在しない",
+        "location": "プロジェクトルート",
+        "evidence": "Glob検索で .npmignore がプロジェクトルートに存在しないことを確認",
+        "recommendation": "npm publish 時に不要なファイル（tests/, docs/, dev-reports/, .github/ 等）が含まれないよう .npmignore を作成する必要がある",
+        "impact": "パッケージサイズの肥大化、テストファイルや内部ドキュメントの漏洩"
+      },
+      {
+        "id": "MF-3",
+        "category": "依存関係",
+        "issue": "better-sqlite3 のネイティブモジュール対応",
+        "location": "package.json:24",
+        "evidence": "\"better-sqlite3\": \"^12.4.1\" - ネイティブバイナリを含む",
+        "recommendation": "Issue記載のとおり、ビルドツール要件とトラブルシューティングガイドをドキュメントに追加。postinstall スクリプトでの検証も検討。",
+        "impact": "環境によっては npm install が失敗する可能性"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響範囲",
+        "issue": "既存シェルスクリプトとの整合性確認",
+        "location": "scripts/*.sh（11ファイル）",
+        "evidence": "setup.sh, start.sh, preflight-check.sh 等が存在",
+        "recommendation": "CLIコマンドと既存シェルスクリプトの機能重複を明確化し、移行期間中の共存方針をドキュメント化する",
+        "impact": "ユーザーがどちらを使うべきか混乱する可能性"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト",
+        "issue": "CLIコマンドのテスト方針が未定義",
+        "location": "Issue本文",
+        "evidence": "受け入れ条件にテストに関する記載がない",
+        "recommendation": "各CLIコマンドのユニットテスト、統合テスト（実際のファイルシステム操作）の方針を明確化",
+        "impact": "テストカバレッジの低下"
+      },
+      {
+        "id": "SF-3",
+        "category": "CI/CD",
+        "issue": "npm publish ワークフローが未定義",
+        "location": ".github/workflows/",
+        "evidence": "ci-pr.yml のみ存在、publish ワークフローなし",
+        "recommendation": "GitHub Actions で npm publish を自動化するワークフローを追加検討（タグプッシュ時に自動publish）",
+        "impact": "手動 publish によるヒューマンエラーのリスク"
+      },
+      {
+        "id": "SF-4",
+        "category": "セキュリティ",
+        "issue": "npm publish 時の認証情報管理",
+        "location": "Issue本文（npm registry 公開方針）",
+        "evidence": "npm publish 方針は記載あるが、認証トークン管理の詳細なし",
+        "recommendation": "GitHub Secrets での NPM_TOKEN 管理方針を明記",
+        "impact": "セキュリティリスク"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "npx commandmate サポートの詳細",
+        "location": "Issue本文（代替案セクション）",
+        "recommendation": "npx でのインストールレス実行の動作確認手順を追加"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "Windows WSL2 対応の検証計画",
+        "location": "Issue本文（プラットフォーム要件）",
+        "recommendation": "WSL2 での動作検証を別 Issue として計画"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "PM2 連携の詳細仕様",
+        "location": "Issue本文（--pm2 オプション）",
+        "recommendation": "PM2 連携は初期リリースではスコープ外とし、別 Issue で対応することを明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_files_to_create": 9,
+    "total_files_to_modify": 7,
+    "total_tests_required": 7,
+    "total_docs_to_update": 6,
+    "must_fix_count": 3,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "overall_impact": "大規模な変更。新規ファイル作成が多く、既存機能への影響は限定的だが、package.json の変更は重要な破壊的変更。"
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/package.json",
+      "relevance": "private: true の削除、bin フィールド追加の対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/server.ts",
+      "relevance": "環境変数の直接参照（MCBD_BIND, MCBD_PORT）の修正対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/src/lib/env.ts",
+      "relevance": "環境変数フォールバック機能の参照元"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/scripts/setup.sh",
+      "relevance": "CLI init コマンドの参考実装"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/scripts/preflight-check.sh",
+      "relevance": "CLI preflight チェックの参考実装"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/README.md",
+      "relevance": "Quick Start セクションの更新対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/docs/DEPLOYMENT.md",
+      "relevance": "デプロイ手順の更新対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/docs/release-guide.md",
+      "relevance": "npm publish 手順の追加対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/CHANGELOG.md",
+      "relevance": "変更履歴の記録対象"
+    }
+  ]
+}

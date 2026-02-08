@@ -1,0 +1,125 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S1",
+        "category": "テスト影響",
+        "description": "E2Eテスト(worktree-list.spec.ts)にリポジトリフィルタUIのテストケースが存在しない",
+        "detail": "現在のE2Eテストでは「Sort buttons」の存在確認はあるが、「Repository Filter」UIの表示確認テストがない。今回の変更(repositories.length > 1 から > 0 への変更)によりUIの表示条件が変わるため、リポジトリが1つの場合のフィルタUI表示を検証するE2Eテストの追加を推奨する。",
+        "recommendation": "tests/e2e/worktree-list.spec.ts に以下のテストケースを追加検討: (1)リポジトリ1件時のフィルタUI表示確認 (2)リポジトリ1件時の削除ボタン動作確認",
+        "priority": "中",
+        "related_file": "tests/e2e/worktree-list.spec.ts"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "N1",
+        "category": "ドキュメント影響",
+        "description": "Issue #69設計書のUI設計セクションとの整合性確認",
+        "detail": "Issue #69設計書(issue-69-repository-delete-design-policy.md)の7章「UI設計」では、リポジトリフィルタの削除ボタン配置を '[All (10)] [MyProject (5) x] [OtherRepo (3) x]' と記載している。今回の変更後も同様のUI表示となるため、設計書の更新は不要だが、将来的にリポジトリ1件時の表示仕様として補足を追加すると良い。",
+        "recommendation": "Issue #69設計書に「リポジトリが1件の場合でもフィルタUIを表示する」旨の補足を追加（任意）",
+        "priority": "低"
+      },
+      {
+        "id": "N2",
+        "category": "アーキテクチャドキュメント",
+        "description": "architecture.mdへの影響なし",
+        "detail": "docs/architecture.mdはシステム全体のアーキテクチャを記述しており、UIコンポーネントの表示条件詳細は記載されていない。今回の変更はアーキテクチャレベルの変更ではないため、更新不要。",
+        "recommendation": "対応不要",
+        "priority": "なし"
+      }
+    ]
+  },
+  "impact_assessment": {
+    "component_impact": {
+      "evaluation": "非常に低い",
+      "affected_components": [
+        {
+          "file": "src/components/worktree/WorktreeList.tsx",
+          "change_scope": "条件式1行の変更（299行目: repositories.length > 1 から > 0）",
+          "impact_level": "最小"
+        }
+      ],
+      "unaffected_components": [
+        "src/app/api/repositories/route.ts（API層変更なし）",
+        "src/lib/api-client.ts（クライアント層変更なし）",
+        "src/lib/db.ts（データベース層変更なし）",
+        "src/lib/session-cleanup.ts（削除ロジック変更なし）",
+        "src/app/page.tsx（WorktreeListの呼び出し方変更なし）"
+      ],
+      "detail": "影響範囲は単一コンポーネント(WorktreeList.tsx)内の表示条件変更のみ。WorktreeListを使用している箇所(page.tsx)やexportしているindex.tsへの影響はない。削除処理自体は既存のhandleDeleteRepository関数をそのまま使用するため、API層・DB層への影響もない。"
+    },
+    "side_effect_risk": {
+      "evaluation": "非常に低い",
+      "identified_risks": [
+        {
+          "risk": "フィルタUIのレイアウト変更",
+          "probability": "低",
+          "impact": "低",
+          "mitigation": "手動テストケース#1-6で確認"
+        },
+        {
+          "risk": "Allボタンの冗長表示（リポジトリ1件時）",
+          "probability": "確定（仕様）",
+          "impact": "なし",
+          "mitigation": "設計方針として許容。削除機能へのアクセス手段として必要"
+        }
+      ],
+      "regression_risk": "なし - 既存の複数リポジトリがある場合の動作は変更されない（repositories.length > 1 の場合は従来通りフィルタUI表示）",
+      "detail": "条件式の変更は表示判定のみに影響し、削除処理のロジック・セッションクリーンアップ・DB操作・WebSocket通知には一切影響しない。Issue #69で実装済みのセキュリティ対策（確認ダイアログ、段階的エラーハンドリング等）も完全に維持される。"
+    },
+    "test_impact": {
+      "evaluation": "軽微",
+      "existing_tests": {
+        "unit_tests": {
+          "db-repository-delete.test.ts": "影響なし（DB層テスト）",
+          "detail": "WorktreeListコンポーネントの単体テストは現在存在しない"
+        },
+        "integration_tests": {
+          "api-repository-delete.test.ts": "影響なし（API層テスト）",
+          "detail": "UIコンポーネントのテストは含まれていない"
+        },
+        "e2e_tests": {
+          "worktree-list.spec.ts": "リポジトリフィルタUIのテストケースが存在しないため、新規追加を推奨"
+        }
+      },
+      "recommended_test_additions": [
+        "WorktreeListコンポーネントの単体テスト（将来的な推奨、設計書4.2項に記載済み）",
+        "E2Eテスト: リポジトリ1件時のフィルタUI表示確認"
+      ],
+      "detail": "既存テストは全てAPI層・DB層のテストであり、今回のUI表示条件変更の影響を受けない。設計書4.2項で将来的なテスト追加が推奨されているが、今回の修正の必須要件ではない。"
+    }
+  },
+  "verification_checklist": [
+    {
+      "item": "影響ファイル一覧の網羅性",
+      "status": "OK",
+      "note": "設計書5.1項の影響ファイル（WorktreeList.tsx）は正確。5.2項の非影響ファイル一覧も適切。"
+    },
+    {
+      "item": "副作用リスク評価の妥当性",
+      "status": "OK",
+      "note": "設計書5.3項のリスク評価は適切。追加リスクは特定されなかった。"
+    },
+    {
+      "item": "テスト影響の分析",
+      "status": "部分的",
+      "note": "設計書4章で手動テストケースは網羅されているが、E2Eテストへの影響言及がない。S1として指摘。"
+    },
+    {
+      "item": "ドキュメント影響の分析",
+      "status": "OK",
+      "note": "関連ドキュメント（architecture.md, Issue #69設計書）への更新は不要。N1として任意の補足追加を提案。"
+    },
+    {
+      "item": "エッジケースの網羅性",
+      "status": "OK",
+      "note": "設計書3.4項でリポジトリ0件/1件/複数/最後の1件削除のケースが網羅されている。"
+    }
+  ],
+  "summary": "設計書の影響範囲分析は適切であり、変更の影響は単一コンポーネント(WorktreeList.tsx)の条件式1行のみに限定されている。既存のAPI層・DB層・テストへの影響はない。E2Eテストにリポジトリフィルタ関連のテストケースが存在しないため、将来的なテスト追加を推奨するが(S1)、今回の修正のブロッカーではない。副作用リスクは非常に低く、Issue #69で実装済みの削除機能のセキュリティ対策は完全に維持される。影響分析として必要な項目は網羅されており、設計書の品質は十分である。"
+}

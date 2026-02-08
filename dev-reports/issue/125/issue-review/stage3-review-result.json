@@ -1,0 +1,254 @@
+{
+  "issue_number": 125,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-02-02",
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "path": "src/cli/commands/start.ts",
+        "change_type": "modify",
+        "impact_level": "high",
+        "description": "getEnvPath()とgetConfigDir()を使用するよう変更、envPath/PID_FILEのパス解決ロジック修正"
+      },
+      {
+        "path": "src/cli/commands/stop.ts",
+        "change_type": "modify",
+        "impact_level": "high",
+        "description": "PID_FILEパスをgetConfigDir()から取得するよう変更"
+      },
+      {
+        "path": "src/cli/commands/status.ts",
+        "change_type": "modify",
+        "impact_level": "high",
+        "description": "PID_FILEパスをgetConfigDir()から取得するよう変更"
+      },
+      {
+        "path": "src/cli/utils/daemon.ts",
+        "change_type": "modify",
+        "impact_level": "high",
+        "description": "dotenvを使用して.envファイルを読み込み、子プロセスのenvに環境変数を渡す"
+      },
+      {
+        "path": "src/cli/utils/env-setup.ts",
+        "change_type": "no_change",
+        "impact_level": "none",
+        "description": "getEnvPath()とgetConfigDir()は既に実装済み"
+      },
+      {
+        "path": "tests/unit/cli/commands/start.test.ts",
+        "change_type": "modify",
+        "impact_level": "medium",
+        "description": "getEnvPath()のモック追加、パス解決のテストケース追加"
+      },
+      {
+        "path": "tests/unit/cli/commands/stop.test.ts",
+        "change_type": "modify",
+        "impact_level": "medium",
+        "description": "getConfigDir()のモック追加、PIDファイルパステストケース追加"
+      },
+      {
+        "path": "tests/unit/cli/commands/status.test.ts",
+        "change_type": "modify",
+        "impact_level": "medium",
+        "description": "getConfigDir()のモック追加"
+      },
+      {
+        "path": "tests/unit/cli/utils/daemon.test.ts",
+        "change_type": "modify",
+        "impact_level": "medium",
+        "description": "環境変数伝播テストケース追加"
+      }
+    ],
+    "dependencies": [
+      {
+        "module": "src/cli/utils/env-setup.ts",
+        "affected_by": ["start.ts", "stop.ts", "status.ts"],
+        "type": "internal",
+        "description": "getEnvPath()とgetConfigDir()関数を共有"
+      },
+      {
+        "module": "src/cli/utils/daemon.ts",
+        "affected_by": ["start.ts", "stop.ts"],
+        "type": "internal",
+        "description": "DaemonManagerクラスがPID管理と環境変数伝播を担当"
+      },
+      {
+        "module": "dotenv",
+        "affected_by": ["daemon.ts"],
+        "type": "external",
+        "description": ".envファイル解析用ライブラリ（既に依存関係に含まれている可能性あり）"
+      }
+    ],
+    "backward_compatibility": {
+      "status": "breaking_change_possible",
+      "details": [
+        "ローカルインストール環境（process.cwd()）での動作は維持される必要あり",
+        "グローバルインストール時のPIDファイル位置変更により、既存の.commandmate.pidが孤立する可能性",
+        "既存のstart/stopワークフローを持つユーザーへの影響を考慮"
+      ],
+      "migration_needed": true,
+      "migration_steps": [
+        "既存のカレントディレクトリ内.commandmate.pidを~/.commandmate/に移動",
+        "既存の.envファイルがある場合は警告表示を検討"
+      ]
+    },
+    "test_impact": {
+      "unit_tests": {
+        "affected": [
+          "tests/unit/cli/commands/start.test.ts",
+          "tests/unit/cli/commands/stop.test.ts",
+          "tests/unit/cli/commands/status.test.ts",
+          "tests/unit/cli/utils/daemon.test.ts"
+        ],
+        "new_tests_needed": [
+          "グローバルインストール時のパス解決テスト",
+          "ローカルインストール時のパス解決テスト（後方互換性）",
+          "daemon.tsでの環境変数伝播テスト"
+        ]
+      },
+      "integration_tests": {
+        "affected": [],
+        "new_tests_needed": [
+          "グローバルインストールでのE2Eフロー（init -> start -> status -> stop）"
+        ]
+      }
+    },
+    "documentation_impact": {
+      "affected_documents": [
+        "CLAUDE.md",
+        "docs/migration-to-commandmate.md",
+        "README.md"
+      ],
+      "updates_needed": [
+        "グローバルインストール時の設定ファイル配置場所（~/.commandmate/）の説明追加",
+        "PIDファイル位置の変更に関する移行手順",
+        "回避策セクションの更新（修正後は不要になる）"
+      ]
+    }
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "start.tsがprocess.cwd()を使用している一方、init.tsはgetEnvPath()を使用しており不整合",
+        "location": "src/cli/commands/start.ts:17,25",
+        "evidence": "start.ts L17: const PID_FILE = join(process.cwd(), '.commandmate.pid'); start.ts L25: const envPath = join(process.cwd(), '.env'); init.ts L190: const envPath = getEnvPath();",
+        "recommendation": "start.tsでgetEnvPath()とgetConfigDir()を使用するよう修正"
+      },
+      {
+        "id": "MF-2",
+        "category": "整合性",
+        "issue": "stop.tsとstatus.tsも同様にprocess.cwd()を使用しており不整合",
+        "location": "src/cli/commands/stop.ts:14, src/cli/commands/status.ts:13",
+        "evidence": "stop.ts L14: const PID_FILE = join(process.cwd(), '.commandmate.pid'); status.ts L13: const PID_FILE = join(process.cwd(), '.commandmate.pid');",
+        "recommendation": "getConfigDir()を使用してPID_FILEパスを構築"
+      },
+      {
+        "id": "MF-3",
+        "category": "機能欠落",
+        "issue": "daemon.tsが.envファイルの環境変数を子プロセスに伝播していない",
+        "location": "src/cli/utils/daemon.ts:41-44",
+        "evidence": "daemon.ts L41-44: const env: NodeJS.ProcessEnv = { ...process.env }; // .envファイルの内容が子プロセスに渡らない（Issueの問題3で指摘）",
+        "recommendation": "dotenvを使用して.envファイルを読み込み、envオブジェクトにマージ"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト",
+        "issue": "既存テストがprocess.cwd()ベースのパス解決を前提としている",
+        "location": "tests/unit/cli/commands/start.test.ts",
+        "evidence": "テストでfs.existsSync mockが.envパスをチェックしているが、グローバルインストール時のパスをテストしていない",
+        "recommendation": "env-setup.tsのgetEnvPath()をモックし、両方のインストールタイプをテスト"
+      },
+      {
+        "id": "SF-2",
+        "category": "エラーメッセージ",
+        "issue": "Issueの修正案3に記載の「エラーメッセージ改善」が受け入れ条件に含まれていない",
+        "location": "Issue body - 修正案セクション",
+        "evidence": "修正案3: エラーメッセージ改善 - 期待されるパスをエラーメッセージに含める",
+        "recommendation": "受け入れ条件に「エラー発生時に期待される設定ファイルパスが表示されること」を追加"
+      },
+      {
+        "id": "SF-3",
+        "category": "後方互換性",
+        "issue": "既存環境からの移行パスが明示されていない",
+        "location": "Issue body - 全体",
+        "evidence": "カレントディレクトリにある.commandmate.pidファイルの扱いが不明",
+        "recommendation": "移行手順または自動マイグレーション機能を受け入れ条件に追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント",
+        "issue": "関連Issue #119（commandmate init対話形式モード）へのリンクはあるが、双方向の関連付けが不明",
+        "location": "Issue body - 関連Issueセクション",
+        "recommendation": "Issue #119にも#125への参照を追加すると追跡が容易"
+      },
+      {
+        "id": "NTH-2",
+        "category": "実装詳細",
+        "issue": "dotenv依存の追加が必要かどうかの確認",
+        "location": "package.json",
+        "recommendation": "dotenvが既に依存関係に含まれているか確認し、含まれていない場合は追加の検討"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/cli/commands/start.ts",
+      "lines": "17, 25",
+      "relevance": "PID_FILEとenvPathの定義箇所（修正対象）"
+    },
+    {
+      "file": "src/cli/commands/stop.ts",
+      "lines": "14",
+      "relevance": "PID_FILEの定義箇所（修正対象）"
+    },
+    {
+      "file": "src/cli/commands/status.ts",
+      "lines": "13",
+      "relevance": "PID_FILEの定義箇所（修正対象）"
+    },
+    {
+      "file": "src/cli/commands/init.ts",
+      "lines": "190",
+      "relevance": "getEnvPath()の正しい使用例（参照）"
+    },
+    {
+      "file": "src/cli/utils/env-setup.ts",
+      "lines": "46-93",
+      "relevance": "isGlobalInstall(), getEnvPath(), getConfigDir()の実装（参照）"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "lines": "41-52",
+      "relevance": "環境変数構築部分（修正対象）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-96-npm-cli-design-policy.md",
+      "relevance": "CLIアーキテクチャの元設計書"
+    },
+    {
+      "file": "docs/migration-to-commandmate.md",
+      "relevance": "環境変数移行ガイド（更新が必要）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "CLIモジュール説明（更新が必要）"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2,
+    "overall_assessment": "Issue #125は技術的に明確で、根本原因と修正案が適切に記載されています。主な問題は、start.ts/stop.ts/status.tsがprocess.cwd()を使用している一方、init.tsは正しくgetEnvPath()を使用している不整合です。影響範囲は4つのCLIコマンドファイルとdaemon.tsに及び、対応するテストファイルも更新が必要です。後方互換性の観点から、ローカルインストール環境での動作維持と、既存ユーザーの移行パスの明確化が推奨されます。"
+  }
+}

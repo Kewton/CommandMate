@@ -1,0 +1,48 @@
+{
+  "issue_number": 125,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "target_file": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "review_result_file": "dev-reports/issue/125/multi-stage-design-review/stage1-review-result.json",
+  "must_fix_items": [
+    {
+      "id": "MF-1",
+      "principle": "DRY",
+      "issue": "PID_FILE定数が3つのファイルで重複。設計書の修正方針ではgetPidFilePath()関数を各ファイルに追加する予定だが、これも3回の重複となる。",
+      "recommendation": "getPidFilePath()をenv-setup.tsに集約し、start.ts/stop.ts/status.tsはそれをimportして使用する。"
+    },
+    {
+      "id": "MF-2",
+      "principle": "DRY",
+      "issue": "envPathの取得とCM_PORT環境変数の設定ロジックがstart.tsとdaemon.tsで重複。責務が曖昧。",
+      "recommendation": "環境変数読み込み責務をdaemon.tsに一元化するか、共通のenv-loader.tsモジュールを作成する。"
+    }
+  ],
+  "should_fix_items": [
+    {
+      "id": "SF-1",
+      "principle": "SRP",
+      "issue": "startCommand()がフォアグラウンド起動とデーモン起動の両方のロジックを含み、複数の責務を持っている。",
+      "recommendation": "startForeground()とstartDaemon()の2つのプライベート関数に分割。"
+    },
+    {
+      "id": "SF-2",
+      "principle": "OCP",
+      "issue": "isGlobalInstall()がハードコードされた文字列パターンで判定。新しいインストール方式への拡張時に関数本体を修正する必要がある。",
+      "recommendation": "パターンを定数配列として外部化。ただしYAGNI観点から優先度低。"
+    },
+    {
+      "id": "SF-3",
+      "principle": "DIP",
+      "issue": "各コマンドがDaemonManagerを直接インスタンス化しており、テストでのモック差し替えが困難。",
+      "recommendation": "DaemonManagerのインターフェースを定義し、ファクトリ関数またはコンストラクタ注入を検討。"
+    },
+    {
+      "id": "SF-4",
+      "principle": "KISS",
+      "issue": "EnvSetupクラスに異なる粒度の責務が混在。",
+      "recommendation": "将来的にはEnvFileWriter, EnvValidator, TokenGeneratorなどに分離することを検討。現時点では優先度低。"
+    }
+  ],
+  "action": "設計方針書にレビュー指摘事項を反映し、must_fix項目については設計を修正する。should_fix項目については検討事項として記録する。"
+}

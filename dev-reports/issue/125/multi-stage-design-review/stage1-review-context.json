@@ -1,0 +1,20 @@
+{
+  "issue_number": 125,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_doc_path": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "review_criteria": [
+    "SOLID原則（SRP, OCP, LSP, ISP, DIP）への準拠",
+    "KISS原則（シンプルさの維持）",
+    "YAGNI原則（不要な機能の排除）",
+    "DRY原則（重複の排除）"
+  ],
+  "target_files": [
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/env-setup.ts"
+  ]
+}

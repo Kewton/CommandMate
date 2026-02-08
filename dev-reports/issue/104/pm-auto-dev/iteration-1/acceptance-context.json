@@ -1,0 +1,49 @@
+{
+  "issue_number": 104,
+  "feature_summary": "iPadにて横置きでMarkdownエディタの全画面表示が正しく動作するようにする",
+  "acceptance_criteria": [
+    "iPad Chrome（横置き）で全画面ボタンをクリックした際、Markdownエディタが最前面に表示される",
+    "ターミナルタブが前面に表示されない",
+    "既存のデスクトップ・モバイル動作に影響がない",
+    "isMaximized=true 時にz-indexが設定されることを確認するユニットテストが追加されている"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC-001",
+      "name": "z-indexテストケース存在確認",
+      "type": "unit_test",
+      "description": "isMaximized=true, isFallbackMode=false時にz-index=40が設定されるテストが存在する"
+    },
+    {
+      "id": "AC-002",
+      "name": "z-indexテストケース存在確認（フォールバック）",
+      "type": "unit_test",
+      "description": "isMaximized=true, isFallbackMode=true時にz-index=40が設定されるテストが存在する"
+    },
+    {
+      "id": "AC-003",
+      "name": "z-index未設定テスト",
+      "type": "unit_test",
+      "description": "isMaximized=false時にz-indexが設定されないテストが存在する"
+    },
+    {
+      "id": "AC-004",
+      "name": "コード変更確認",
+      "type": "code_review",
+      "description": "containerStyleのz-index条件がisMaximizedのみになっている"
+    },
+    {
+      "id": "AC-005",
+      "name": "リグレッションテスト",
+      "type": "unit_test",
+      "description": "既存のMarkdownEditorテストがすべてパスする"
+    },
+    {
+      "id": "AC-006",
+      "name": "ビルド成功確認",
+      "type": "build",
+      "description": "npm run buildが成功する"
+    }
+  ],
+  "tdd_result_path": "dev-reports/issue/104/pm-auto-dev/iteration-1/tdd-result.json"
+}

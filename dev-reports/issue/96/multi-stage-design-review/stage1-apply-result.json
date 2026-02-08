@@ -1,0 +1,65 @@
+{
+  "stage": 1,
+  "stage_name": "指摘事項対応",
+  "issue_number": 96,
+  "applied_findings": [
+    {
+      "id": "SF-1",
+      "status": "applied",
+      "action_taken": "daemon.tsからPIDファイル管理をpid-manager.tsに分離する設計を追加。セクション2.2にpid-manager.tsを追加、セクション4.3.3を修正、セクション4.3.4として新モジュール設計を追加。"
+    },
+    {
+      "id": "SF-2",
+      "status": "applied",
+      "action_taken": "依存関係定義を外部設定ファイル（cli-dependencies.ts）から読み込む設計に変更。セクション4.3.1にloadDependencies()の使用とフォールバック設計を追加。"
+    },
+    {
+      "id": "SF-3",
+      "status": "applied",
+      "action_taken": "抽象化インターフェース（IPreflightChecker, IEnvSetup, IDaemonManager）を新設。セクション2.2にinterfacesディレクトリを追加、セクション16章として詳細設計を追加。"
+    },
+    {
+      "id": "SF-4",
+      "status": "applied",
+      "action_taken": "デフォルト値をsrc/config/defaults.tsに集約する設計を追加。セクション4.3.2を修正、セクション17章として共通デフォルト値モジュール設計を追加。"
+    },
+    {
+      "id": "NTH-1",
+      "status": "applied",
+      "action_taken": "pid-manager.tsにisProcessRunning()メソッドを追加し、軽量なプロセス存在確認APIを提供。セクション4.3.4に反映。"
+    },
+    {
+      "id": "NTH-2",
+      "status": "applied",
+      "action_taken": "移行計画のDeprecation警告開始を早期化（3ヶ月後→1-2ヶ月後）。セクション15.1の表を修正。"
+    },
+    {
+      "id": "NTH-3",
+      "status": "applied",
+      "action_taken": "対象外セクションにlogs/restart/health-checkコマンドを明記し、将来拡張として整理。セクション1.3に追加。"
+    },
+    {
+      "id": "NTH-4",
+      "status": "applied",
+      "action_taken": "終了コードをsrc/cli/types/index.tsにExitCode enumとして定義する設計を追加。セクション6.3にTypeScript enum定義例を追加。"
+    }
+  ],
+  "design_doc_updated": "dev-reports/design/issue-96-npm-cli-design-policy.md",
+  "sections_added": [
+    "16. 抽象化インターフェース設計（SF-3対応）",
+    "17. 共通デフォルト値モジュール（SF-4対応）",
+    "19. レビュー指摘事項対応サマリー"
+  ],
+  "sections_modified": [
+    "1.3 対象外",
+    "2.2 ディレクトリ構成",
+    "4.3.1 preflight.ts",
+    "4.3.2 env-setup.ts",
+    "4.3.3 daemon.ts",
+    "4.3.4 pid-manager.ts（新規）",
+    "6.3 終了コード",
+    "15.1 既存スクリプトとの並行運用",
+    "18. レビュー履歴"
+  ],
+  "summary": "Stage 1（設計原則レビュー）の全8件（Should Fix 4件、Nice to Have 4件）の指摘事項を設計方針書に反映完了。主な変更は(1)PIDファイル管理のモジュール分離、(2)依存関係定義の外部設定化、(3)コマンド層の抽象化インターフェース新設、(4)デフォルト値の一元管理、(5)移行計画の早期化。設計書には各変更箇所に対応する設計原則IDを明記し、トレーサビリティを確保した。"
+}

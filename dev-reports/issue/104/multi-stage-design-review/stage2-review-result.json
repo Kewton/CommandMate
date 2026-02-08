@@ -1,0 +1,92 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_date": "2026-02-01",
+  "issue_number": 104,
+  "design_doc_path": "dev-reports/design/issue-104-ipad-fullscreen-bugfix-design-policy.md",
+  "consistency_score": "A-",
+  "consistency_checks": {
+    "line_numbers": "pass",
+    "variable_names": "pass",
+    "z_index_values": "partial",
+    "design_doc_references": "partial"
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "Issue #99設計書のz-index値が実装と不整合",
+        "description": "Issue #99設計書のセクション4.2では`MAXIMIZED_EDITOR: 9999`と記載されているが、実際の実装（src/config/z-index.ts）では`MAXIMIZED_EDITOR: 40`となっている。Issue #104設計書はこの不整合を認識し、実装の値（40）を正しく参照している。",
+        "location": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md セクション4.2",
+        "recommendation": "Issue #99設計書のz-index値を実装に合わせて40に更新するか、変更経緯を追記する"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "title": "containerClasses条件との差異の明示",
+        "description": "Issue #104設計書セクション2.1にて、containerStyleの条件（isMaximized && isFallbackMode）がcontainerClasses（L424-433）の条件と同一であることを明示すると、読者の理解が容易になる",
+        "location": "dev-reports/design/issue-104-ipad-fullscreen-bugfix-design-policy.md セクション2.1",
+        "recommendation": "containerClasses（L424-433）も同様の条件分岐を持つことをセクション2.2に追記"
+      }
+    ]
+  },
+  "verified_items": [
+    {
+      "id": "VI-001",
+      "category": "行番号",
+      "description": "containerStyle定義は設計書通りL436-441に存在",
+      "status": "pass"
+    },
+    {
+      "id": "VI-002",
+      "category": "変数名",
+      "description": "isMaximized, isFallbackMode, containerStyle, Z_INDEX.MAXIMIZED_EDITOR は全て設計書と一致",
+      "status": "pass"
+    },
+    {
+      "id": "VI-003",
+      "category": "z-index階層",
+      "description": "MAXIMIZED_EDITOR(40) < MODAL(50) < TOAST(60) < CONTEXT_MENU(70) の階層は設計書と実装が一致",
+      "status": "pass"
+    },
+    {
+      "id": "VI-004",
+      "category": "条件分岐",
+      "description": "現在のcontainerStyle条件は `isMaximized && isFallbackMode` で設計書の記載と一致",
+      "status": "pass"
+    },
+    {
+      "id": "VI-005",
+      "category": "useFullscreenフック",
+      "description": "src/hooks/useFullscreen.ts は isFallbackMode を正しく返却しており、設計書の想定と一致",
+      "status": "pass"
+    },
+    {
+      "id": "VI-006",
+      "category": "影響ファイル",
+      "description": "設計書セクション4.2/4.3の影響確認ファイル（useFullscreen.ts, z-index.ts）が存在し、変更不要の理由が妥当",
+      "status": "pass"
+    }
+  ],
+  "positive_findings": [
+    {
+      "id": "PF-001",
+      "description": "設計書の行番号参照（L436-441）が実装と完全一致"
+    },
+    {
+      "id": "PF-002",
+      "description": "z-index階層設計が明確に文書化されており、競合リスクが適切に評価されている"
+    },
+    {
+      "id": "PF-003",
+      "description": "修正方針（isFallbackMode条件の削除）は最小限の変更で問題を解決する設計"
+    },
+    {
+      "id": "PF-004",
+      "description": "Issue #99設計書との関連性が明示されており、トレーサビリティが確保されている"
+    }
+  ],
+  "summary": "Issue #104設計方針書は実装との整合性が高く評価できる（A-）。行番号、変数名、z-index値は全て正確に記載されている。唯一の注意点として、参照元のIssue #99設計書にはz-index値の不整合（設計書9999 vs 実装40）があり、これは別途修正が推奨される。Issue #104の修正方針自体は妥当であり、実装に進めて問題ない。"
+}

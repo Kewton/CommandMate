@@ -1,0 +1,63 @@
+{
+  "issue_number": 96,
+  "feature_summary": "npm installからセットアップ可能にする",
+  "acceptance_criteria": [
+    "npm install -g commandmateが成功すること（ローカル確認: npm link）",
+    "commandmate --versionでバージョンが正しく表示されること",
+    "commandmate initで.envファイルが作成され、DBが初期化されること",
+    "commandmate initでシステム依存関係（Node.js, tmux, git, openssl）のチェックが実行されること",
+    "commandmate init --defaultsで対話なしにデフォルト値で設定が作成されること",
+    "commandmate startでサーバーがフォアグラウンド起動すること",
+    "commandmate start --devで開発モードで起動すること",
+    "commandmate start --daemonでバックグラウンド起動し、PIDファイルが作成されること",
+    "commandmate stopでサーバーが停止し、PIDファイルが削除されること",
+    "commandmate statusでサーバー状態が表示されること",
+    "commandmate --helpで利用可能なコマンド一覧が表示されること"
+  ],
+  "test_scenarios": [
+    {
+      "name": "バージョン表示",
+      "command": "commandmate --version",
+      "expected": "package.jsonのバージョンが表示される"
+    },
+    {
+      "name": "ヘルプ表示",
+      "command": "commandmate --help",
+      "expected": "コマンド一覧（init, start, stop, status）が表示される"
+    },
+    {
+      "name": "initコマンド（デフォルトモード）",
+      "command": "commandmate init --defaults",
+      "expected": ".envファイルが作成され、cm.dbが初期化される"
+    },
+    {
+      "name": "statusコマンド（未起動時）",
+      "command": "commandmate status",
+      "expected": "サーバーが停止中であることが表示される"
+    },
+    {
+      "name": "startコマンド（デーモンモード）",
+      "command": "commandmate start --daemon",
+      "expected": "サーバーがバックグラウンドで起動し、.commandmate.pidが作成される"
+    },
+    {
+      "name": "statusコマンド（起動中）",
+      "command": "commandmate status",
+      "expected": "サーバーが実行中であることとPIDが表示される"
+    },
+    {
+      "name": "stopコマンド",
+      "command": "commandmate stop",
+      "expected": "サーバーが停止し、.commandmate.pidが削除される"
+    },
+    {
+      "name": "statusコマンド（停止後）",
+      "command": "commandmate status",
+      "expected": "サーバーが停止中であることが表示される"
+    }
+  ],
+  "prerequisites": [
+    "npm run build が成功していること",
+    "commander依存関係がインストールされていること"
+  ]
+}

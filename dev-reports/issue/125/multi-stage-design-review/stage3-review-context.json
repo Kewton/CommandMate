@@ -1,0 +1,31 @@
+{
+  "issue_number": 125,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_doc_path": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "review_criteria": [
+    "変更による他モジュールへの波及効果",
+    "依存関係の変化",
+    "既存機能への影響",
+    "パフォーマンスへの影響",
+    "運用・保守への影響"
+  ],
+  "target_files": [
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/env-setup.ts"
+  ],
+  "previous_stages": [
+    {
+      "stage": 1,
+      "result_file": "dev-reports/issue/125/multi-stage-design-review/stage1-review-result.json"
+    },
+    {
+      "stage": 2,
+      "result_file": "dev-reports/issue/125/multi-stage-design-review/stage2-review-result.json"
+    }
+  ]
+}

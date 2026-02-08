@@ -1,0 +1,1 @@
+{"body":"## 概要\n\nnpm installから利用可能にする\n\n## 背景・課題\n\n利用までのハードルを下げることで利用者を増やす\n\n## 提案する解決策\nnpm install -g commandmate\ncommandmate --version\ncommandmate init\ncommandmate start\n\n\n## 代替案（任意）\n\n他に検討した方法があれば。\n\n## 補足情報（任意）\n\n","title":"npm installからセットアップ可能にする"}

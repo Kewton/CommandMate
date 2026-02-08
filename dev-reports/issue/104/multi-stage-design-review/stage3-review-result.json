@@ -1,0 +1,255 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_date": "2026-02-01",
+  "issue_number": 104,
+  "impact_score": "A",
+  "summary": "本修正は影響範囲が最小限で、リグレッションリスクも低い。z-index条件の緩和によりiPad Chrome横置きでの全画面表示問題を解決できる。z-index階層設計が適切に維持されており、Modal(z-50)やその他のUI要素との競合リスクはない。テストカバレッジの追加により、今後の回帰を防止できる。",
+  "affected_components": [
+    {
+      "path": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "436-441",
+      "change_type": "条件修正",
+      "impact_level": "中",
+      "description": "containerStyleのz-index設定条件を `isMaximized && isFallbackMode` から `isMaximized` に変更",
+      "details": {
+        "current_code": "if (isMaximized && isFallbackMode) { return { zIndex: Z_INDEX.MAXIMIZED_EDITOR }; }",
+        "proposed_code": "if (isMaximized) { return { zIndex: Z_INDEX.MAXIMIZED_EDITOR }; }",
+        "z_index_value": 40
+      }
+    },
+    {
+      "path": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1503-1519, 1619-1636",
+      "change_type": "影響確認",
+      "impact_level": "低",
+      "description": "Modal内でMarkdownEditorを使用。Modal(z-50) > MaximizedEditor(z-40)の階層関係が維持されるため問題なし",
+      "details": {
+        "modal_z_index": 50,
+        "maximized_editor_z_index": 40,
+        "hierarchy_maintained": true
+      }
+    },
+    {
+      "path": "src/config/z-index.ts",
+      "lines": "1-42",
+      "change_type": "確認のみ（変更不要）",
+      "impact_level": "なし",
+      "description": "z-index階層定義。MAXIMIZED_EDITOR(40) < MODAL(50) < TOAST(60) < CONTEXT_MENU(70)の階層が適切",
+      "details": {
+        "hierarchy": {
+          "DROPDOWN": 10,
+          "MAXIMIZED_EDITOR": 40,
+          "MODAL": 50,
+          "TOAST": 60,
+          "CONTEXT_MENU": 70
+        }
+      }
+    },
+    {
+      "path": "src/hooks/useFullscreen.ts",
+      "lines": "全体",
+      "change_type": "変更不要",
+      "impact_level": "なし",
+      "description": "フック自体の動作は正常。isFallbackModeの算出ロジックに変更なし"
+    }
+  ],
+  "regression_risks": [
+    {
+      "id": "RR-1",
+      "category": "UI表示",
+      "risk_level": "低",
+      "description": "デスクトップでFullscreen API成功時にも不必要にz-indexが設定される",
+      "mitigation": "z-index階層設計(40)により競合なし。ブラウザFullscreen APIが要素を最上位に配置するため視覚的問題なし",
+      "test_required": true
+    },
+    {
+      "id": "RR-2",
+      "category": "パフォーマンス",
+      "risk_level": "非常に低",
+      "description": "useMemo依存配列からisFallbackModeが削除され、再計算タイミングが変わる",
+      "mitigation": "isMaximizedのみの依存で再計算回数は減少。パフォーマンス影響は軽微",
+      "test_required": false
+    },
+    {
+      "id": "RR-3",
+      "category": "モーダル内動作",
+      "risk_level": "低",
+      "description": "Modal内でMarkdownEditorを最大化した場合の表示",
+      "mitigation": "Modal(z-50) > MaximizedEditor(z-40)のため、Modalが常に前面。ただしModal内での最大化はユースケースとして限定的",
+      "test_required": true
+    },
+    {
+      "id": "RR-4",
+      "category": "iOS Safari動作",
+      "risk_level": "低",
+      "description": "iOS Safari（縦向き）でのフォールバックモード動作",
+      "mitigation": "既存動作を維持。isFallbackMode=trueの場合もz-indexが設定される（変更なし）",
+      "test_required": true
+    }
+  ],
+  "test_coverage": {
+    "existing_tests": {
+      "path": "tests/unit/components/MarkdownEditor.test.tsx",
+      "coverage": {
+        "maximize_feature": true,
+        "keyboard_shortcuts": true,
+        "view_mode_switching": true,
+        "z_index_behavior": false
+      },
+      "missing_tests": [
+        "z-index設定条件のテスト",
+        "isMaximized=true, isFallbackMode=falseの場合のz-index確認",
+        "isMaximized=true, isFallbackMode=trueの場合のz-index確認",
+        "isMaximized=falseの場合のz-index未設定確認"
+      ]
+    },
+    "required_new_tests": [
+      {
+        "test_id": "UT-ZINDEX-001",
+        "description": "isMaximized=true時にz-indexが設定されることを確認（isFallbackModeに関係なく）",
+        "priority": "高"
+      },
+      {
+        "test_id": "UT-ZINDEX-002",
+        "description": "isMaximized=false時にz-indexが設定されないことを確認",
+        "priority": "高"
+      },
+      {
+        "test_id": "UT-ZINDEX-003",
+        "description": "containerStyleのz-index値がZ_INDEX.MAXIMIZED_EDITOR(40)であることを確認",
+        "priority": "中"
+      }
+    ],
+    "manual_tests_required": [
+      {
+        "test_id": "MT-001",
+        "environment": "iPad Chrome（横置き）",
+        "description": "全画面ボタンクリック後、MarkdownEditorが正しく前面表示されること",
+        "priority": "高"
+      },
+      {
+        "test_id": "MT-002",
+        "environment": "iPad Chrome（縦置き）",
+        "description": "全画面表示が正しく動作すること",
+        "priority": "中"
+      },
+      {
+        "test_id": "MT-003",
+        "environment": "デスクトップ Chrome/Safari",
+        "description": "既存の全画面動作が維持されること",
+        "priority": "高"
+      },
+      {
+        "test_id": "MT-004",
+        "environment": "iOS Safari",
+        "description": "フォールバックモードでの全画面表示が正常動作すること",
+        "priority": "中"
+      },
+      {
+        "test_id": "MT-005",
+        "environment": "全環境",
+        "description": "Modal内でMarkdownEditorを開き、最大化してもModalが正しく表示されること",
+        "priority": "中"
+      }
+    ]
+  },
+  "z_index_hierarchy_analysis": {
+    "current_hierarchy": [
+      { "component": "Base content", "z_index": "default", "notes": "通常のスタッキング" },
+      { "component": "DROPDOWN", "z_index": 10, "notes": "ドロップダウンメニュー" },
+      { "component": "MobileHeader", "z_index": 40, "notes": "Tailwind z-40" },
+      { "component": "MobileTabBar", "z_index": 40, "notes": "Tailwind z-40" },
+      { "component": "MAXIMIZED_EDITOR", "z_index": 40, "notes": "Z_INDEX定数" },
+      { "component": "AppShell overlay", "z_index": 40, "notes": "Tailwind z-40" },
+      { "component": "MODAL", "z_index": 50, "notes": "Z_INDEX定数、Modal.tsx" },
+      { "component": "MobilePromptSheet", "z_index": 50, "notes": "Tailwind z-50" },
+      { "component": "SlashCommandSelector", "z_index": 50, "notes": "Tailwind z-50" },
+      { "component": "ContextMenu", "z_index": 50, "notes": "Tailwind z-50" },
+      { "component": "TOAST", "z_index": 60, "notes": "Z_INDEX定数（未使用）、Toast.tsx: z-50" },
+      { "component": "CONTEXT_MENU", "z_index": 70, "notes": "Z_INDEX定数（未使用）" },
+      { "component": "Header", "z_index": 50, "notes": "Tailwind z-50、sticky" }
+    ],
+    "conflict_analysis": {
+      "maximized_editor_vs_modal": {
+        "status": "safe",
+        "reason": "MAXIMIZED_EDITOR(40) < MODAL(50)のため、Modalが常に前面に表示される"
+      },
+      "maximized_editor_vs_mobile_header": {
+        "status": "safe",
+        "reason": "両方z-40だが、最大化時はfixed inset-0で全画面覆うため問題なし"
+      },
+      "maximized_editor_vs_toast": {
+        "status": "safe",
+        "reason": "Toast(z-50)が前面に表示される"
+      },
+      "maximized_editor_vs_context_menu": {
+        "status": "safe",
+        "reason": "ContextMenu(z-50)が前面に表示される"
+      }
+    },
+    "recommendation": "現在のz-index階層設計は適切。修正による競合リスクなし"
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "テスト",
+        "severity": "中",
+        "description": "z-index設定条件のユニットテストが不足",
+        "recommendation": "設計書5.1に記載のテストケース3件を追加することで、今後の回帰を防止",
+        "effort": "低（1-2時間）"
+      },
+      {
+        "id": "SF-002",
+        "category": "ドキュメント",
+        "severity": "低",
+        "description": "containerClassesとcontainerStyleで条件が異なる理由のコードコメントがない",
+        "recommendation": "containerClasses: isFallbackMode時のみfixed inset-0、containerStyle: isMaximized時にz-index設定、という違いをコメントで明記",
+        "effort": "非常に低（15分）"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "設計",
+        "severity": "情報",
+        "description": "Z_INDEX定数とTailwind z-*クラスの混在",
+        "recommendation": "将来的にz-index値をZ_INDEX定数に統一することで、一元管理が可能になる。ただし本Issueのスコープ外",
+        "effort": "中（別Issue対応推奨）"
+      },
+      {
+        "id": "NTH-002",
+        "category": "設計",
+        "severity": "情報",
+        "description": "containerClassesの条件（isFallbackMode）とcontainerStyleの条件（isMaximized）の差異",
+        "recommendation": "containerClassesにもisMaximized条件を追加する案も考えられるが、現状のCSS設計で問題なく動作するため不要",
+        "effort": "低"
+      }
+    ]
+  },
+  "wave_effect_analysis": {
+    "direct_impact": [
+      "MarkdownEditor.tsx: containerStyleのuseMemo依存配列変更"
+    ],
+    "indirect_impact": [
+      "WorktreeDetailRefactored.tsx: Modal内でMarkdownEditorを使用しているが、z-index階層により影響なし"
+    ],
+    "no_impact": [
+      "useFullscreen.ts: ロジック変更なし",
+      "useIsMobile.ts: 変更なし",
+      "z-index.ts: 定数値変更なし",
+      "Modal.tsx: 変更なし",
+      "Toast.tsx: 変更なし",
+      "ContextMenu.tsx: 変更なし"
+    ]
+  },
+  "approval_status": "APPROVED",
+  "approval_conditions": [
+    "設計書5.1記載のユニットテスト3件の追加",
+    "手動テストMT-001（iPad Chrome横置き）の実施・確認"
+  ],
+  "reviewer": "architecture-review-agent",
+  "review_completed_at": "2026-02-01T10:30:00+09:00"
+}

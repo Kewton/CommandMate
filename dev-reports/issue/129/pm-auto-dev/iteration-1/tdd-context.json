@@ -1,0 +1,19 @@
+{
+  "issue_number": 129,
+  "issue_title": "リポジトリが1つしか存在しない場合削除出来ない",
+  "acceptance_criteria": [
+    "リポジトリが1つの場合でも削除UIにアクセスできる",
+    "最後の1つのリポジトリを削除できる",
+    "削除後にリポジトリ一覧が0件になった場合の表示が適切である",
+    "既存の複数リポジトリがある場合の動作に影響がない"
+  ],
+  "implementation_tasks": [
+    {
+      "task": "リポジトリフィルタ表示条件の修正",
+      "file": "src/components/worktree/WorktreeList.tsx",
+      "change": "299行目付近の条件 repositories.length > 1 を repositories.length > 0 に変更"
+    }
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-129-single-repository-delete-design-policy.md"
+}

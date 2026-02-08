@@ -1,0 +1,74 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 112,
+  "applied_date": "2026-02-01",
+  "applied_findings": [
+    {
+      "id": "MF-1",
+      "category": "技術的正確性",
+      "status": "applied",
+      "change_summary": "コード引用を実際のAppShell.tsx L89-102に更新。内部ラッパー`<div className=\"w-72 h-full\">`を含む完全なコードに修正。data-testid、role属性も追記。"
+    },
+    {
+      "id": "MF-2",
+      "category": "技術的正確性",
+      "status": "applied",
+      "change_summary": "実装イメージを大幅更新。(1) オーバーレイ型（position: fixed）と代替案のプッシュ型（メインコンテンツもtransformでスライド）の2パターンを提示。(2) 内部ラッパーがtransform方式では不要となることを注記として明記。"
+    },
+    {
+      "id": "SF-1",
+      "category": "実装方針の妥当性",
+      "status": "applied",
+      "change_summary": "メインコンテンツ側の実装方針を修正。marginトランジションではなく、(1) オーバーレイ型ではmd:pl-72でレイアウト固定、(2) プッシュ型ではtransformでスライドする方式に変更。Reflowを回避する設計を明記。"
+    },
+    {
+      "id": "SF-2",
+      "category": "記載内容の明確さ",
+      "status": "applied",
+      "change_summary": "main要素（L105-114）のコードも「現状の問題」セクションに追記。transition-allが適用されていることを明示。"
+    },
+    {
+      "id": "SF-3",
+      "category": "テスト計画",
+      "status": "applied",
+      "change_summary": "対象ファイルにtests/unit/components/layout/AppShell.test.tsxを追加。受け入れ条件に「AppShell.test.tsxのテストが更新され、パスする」を追加し、具体的な変更内容（w-72/w-0 → translate-x-0/-translate-x-full）を明記。"
+    },
+    {
+      "id": "SF-4",
+      "category": "影響範囲",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルにSidebarContext行を追加。また「SidebarContextのwidth機能について」セクションを新設し、width/setWidth機能は将来的なリサイズ機能のために維持することを明記。"
+    },
+    {
+      "id": "NTH-3",
+      "category": "関連Issue",
+      "status": "applied",
+      "change_summary": "Issue #99（z-index管理）との整合性確認を影響範囲テーブルと受け入れ条件に追加。関連セクションにもIssue #99を追記。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "NTH-1",
+      "category": "ドキュメント整合性",
+      "status": "skipped",
+      "reason": "CLAUDE.mdへのAppShell追記は本Issue対応後のフォローアップタスクとして別途対応が適切。本Issueの範囲外。"
+    },
+    {
+      "id": "NTH-2",
+      "category": "パフォーマンス計測",
+      "status": "skipped",
+      "reason": "定量的な計測データの追加は実装時に行うべきもの。Issue段階では「モッサリ感」という定性的な問題認識で十分。実装完了後のパフォーマンス比較として対応するのが適切。"
+    }
+  ],
+  "summary": {
+    "total_findings": 9,
+    "applied": 7,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/112"
+  },
+  "changes_summary": "Issue #112のレビュー指摘を反映しました。主な変更点: (1) コード引用を実際のL89-102に修正し、内部ラッパーを含む完全なコードに更新、(2) main要素のtransition-all適用も追記、(3) 実装イメージをオーバーレイ型・プッシュ型の2パターンに拡充しReflow回避設計を明確化、(4) テストコード更新要件を対象ファイルと受け入れ条件に追加、(5) SidebarContextのwidth機能の扱いを明記、(6) z-index階層管理との整合性確認を追加。"
+}

@@ -1,0 +1,34 @@
+{
+  "issue_number": 95,
+  "acceptance_criteria": [
+    "PNG, JPG, GIF, WEBP, SVG形式の画像ファイルがFileTreeViewで選択可能",
+    "選択した画像ファイルがビューワ領域に表示される",
+    "画像は最大幅100%、最大高さ500pxで表示される",
+    "5MB以上の画像ファイルはエラーメッセージを表示",
+    "対応外のファイル形式は従来通りの動作",
+    "単体テストが追加されている",
+    "E2Eテストが追加されている",
+    "SVG XSS攻撃（イベントハンドラ、javascript:スキーム、foreignObject）が防止されている"
+  ],
+  "implementation_tasks": [
+    "Phase 1: 型定義・設定 - image-extensions.ts作成、FileContent移動、FileViewer型更新",
+    "Phase 2: API拡張 - GET API拡張（画像対応、Base64エンコード、マジックバイト検証、SVG XSS対策）",
+    "Phase 3: UIコンポーネント - ImageViewer.tsx作成、FileViewer.tsx更新",
+    "Phase 4: テスト - 単体テスト、結合テスト確認、E2Eテスト作成"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-95-image-viewer-design-policy.md",
+  "work_plan_path": "dev-reports/issue/95/work-plan.md",
+  "security_requirements": [
+    "パストラバーサル防止（isPathSafe使用）",
+    "拡張子ホワイトリスト方式",
+    "マジックバイト検証（PNG, JPEG, GIF, WebP）",
+    "WebP完全検証（RIFFヘッダー+WEBPシグネチャ）",
+    "SVG XSS対策: scriptタグ拒否",
+    "SVG XSS対策: イベントハンドラ属性（on*）拒否",
+    "SVG XSS対策: javascript:/data:/vbscript:スキーム拒否",
+    "SVG XSS対策: foreignObject要素拒否",
+    "5MBファイルサイズ制限",
+    "エラーメッセージ情報漏洩防止"
+  ]
+}

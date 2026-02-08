@@ -1,0 +1,37 @@
+{
+  "issue_number": 129,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "changes": [
+        {
+          "file": "src/components/worktree/WorktreeList.tsx",
+          "line": 299,
+          "description": "条件式を repositories.length > 1 から repositories.length > 0 に変更"
+        }
+      ],
+      "lint_result": "pass",
+      "type_check_result": "pass",
+      "unit_test_result": "pass"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_results": [
+        {"criterion": "リポジトリが1つの場合でも削除UIにアクセスできる", "status": "passed"},
+        {"criterion": "最後の1つのリポジトリを削除できる", "status": "passed"},
+        {"criterion": "削除後にリポジトリ一覧が0件になった場合の表示が適切である", "status": "passed"},
+        {"criterion": "既存の複数リポジトリがある場合の動作に影響がない", "status": "passed"}
+      ],
+      "build_result": "pass"
+    },
+    "refactor": {
+      "status": "skipped",
+      "reason": "1行の条件式変更のみで追加リファクタリング不要"
+    },
+    "documentation": {
+      "status": "not_required",
+      "reason": "アーキテクチャ・API変更なし、ドキュメント更新不要"
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 96,
+  "apply_date": "2026-01-31",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "private: true 設定がnpm publishをブロックすることを明記し、削除が必要であることを記載"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "bin フィールドの追加とCLIエントリポイント（bin/commandmate.js）の設計を詳細に記載"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "better-sqlite3のクロスプラットフォーム対応セクションを追加。対応プラットフォーム（macOS, Linux, Windows）と対処方針（prebuildバイナリ、エラーハンドリング、ビルドツール要件）を記載"
+      },
+      {
+        "id": "MF-4",
+        "status": "applied",
+        "change_summary": "受け入れ条件セクションを新規追加。必須条件（インストール、各コマンド動作）、プラットフォーム要件、ドキュメント要件をチェックリスト形式で記載"
+      },
+      {
+        "id": "MF-5",
+        "status": "applied",
+        "change_summary": "既存スクリプトとの関係セクションを追加。setup.sh、start.sh、preflight-check.sh、setup-env.shとCLIコマンドの対応関係および実装方針（TypeScriptで再実装）を表形式で明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "各サブコマンド（init, start, stop, status, --version）の詳細仕様を表形式で追加。initコマンドとstartコマンドの詳細処理フローも記載"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "npm registry公開方針セクションを追加。npmjs.comへの公開を選択した理由を記載"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "システム依存関係のガイダンスを補足情報セクションに追加。initコマンドでの依存関係チェックと不足時のインストール案内表示を受け入れ条件に含めた"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "バージョニング戦略をnpm registry公開方針セクション内に記載。semver遵守、CHANGELOG連携、GitHub Releases同期を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "代替案セクションを充実。npx、GitHub Releasesバイナリ配布、Dockerイメージの3案をメリット・デメリット・採否を表形式で比較し、結論を記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "関連Issueセクションを追加。#76（環境変数フォールバック）と#77（名称置換）へのリンクと整合性確認の必要性を記載"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "背景・課題セクションにターゲットユーザー（開発者、オンボーディング担当者）と想定ユースケース（新規導入、環境構築、CI/CD利用）を追加"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 12,
+    "applied": 12,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/96"
+  }
+}

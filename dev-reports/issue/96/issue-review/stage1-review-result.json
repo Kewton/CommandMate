@@ -1,0 +1,148 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 96,
+  "review_date": "2026-01-31",
+  "summary": {
+    "must_fix_count": 5,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "package.jsonの 'private: true' 設定が npm publish をブロックする",
+        "location": "提案する解決策セクション",
+        "recommendation": "npm publish を可能にするために 'private: true' を削除する必要があることを Issue に明記。または、npm publish 不要の場合は代替手法（npx等）を検討",
+        "evidence": "package.json line 4: \"private\": true - これが設定されている場合、npm publish コマンドは失敗する"
+      },
+      {
+        "id": "MF-2",
+        "category": "完全性",
+        "issue": "CLIエントリポイント（bin フィールド）の設計が未記載",
+        "location": "提案する解決策セクション",
+        "recommendation": "package.json に bin フィールドを追加し、CLI エントリポイントスクリプト（bin/commandmate.js等）を作成する必要があることを記載",
+        "evidence": "現在 package.json に bin フィールドが存在しない。npm install -g で CLI コマンドを提供するには bin フィールドが必須"
+      },
+      {
+        "id": "MF-3",
+        "category": "技術的妥当性",
+        "issue": "ネイティブ依存関係（better-sqlite3）のクロスプラットフォーム対応が未検討",
+        "location": "提案する解決策セクション",
+        "recommendation": "better-sqlite3 はネイティブバイナリを含むため、prebuild バイナリの配布またはインストール時のビルドが必要。対応プラットフォームと対処方針を明記",
+        "evidence": "dependencies に better-sqlite3 が含まれる（package.json line 24）。ネイティブモジュールは npm install -g 時にビルドが必要になる可能性がある"
+      },
+      {
+        "id": "MF-4",
+        "category": "完全性",
+        "issue": "受け入れ条件が未定義",
+        "location": "Issue 本文全体",
+        "recommendation": "具体的な受け入れ条件を追加: 例）npm install -g commandmate が成功すること、commandmate --version でバージョンが表示されること、commandmate init で .env と DB が初期化されること、commandmate start でサーバーが起動すること",
+        "evidence": "Issue 本文に受け入れ条件セクションが存在しない"
+      },
+      {
+        "id": "MF-5",
+        "category": "明確性",
+        "issue": "commandmate init / start が既存スクリプト（setup.sh, start.sh）と同等の機能を持つのか不明",
+        "location": "提案する解決策セクション",
+        "recommendation": "既存のシェルスクリプト（scripts/setup.sh, scripts/start.sh 等）との関係を明確化。CLI コマンドがこれらを呼び出すのか、TypeScriptで再実装するのか、両方サポートするのかを記載",
+        "evidence": "scripts/setup.sh（135行）と scripts/start.sh（44行）が存在し、既に同等の機能を提供している"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "各サブコマンド（init, start, --version）の詳細仕様が未定義",
+        "location": "提案する解決策セクション",
+        "recommendation": "各コマンドの詳細を記載: init は何を初期化するか（.env作成、DB初期化、npm install等）、start は何を起動するか（開発モード/本番モード、PM2使用有無）、その他必要なサブコマンド（stop, status等）",
+        "evidence": "既存の setup.sh は preflight-check -> npm install -> setup-env -> build-and-start を順に実行する複合処理"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "issue": "npm registry への公開方針が未検討",
+        "location": "背景・課題セクション",
+        "recommendation": "公開レジストリ（npmjs.com）への公開か、GitHub Packages への公開か、または npx での実行のみサポートするかを検討し記載",
+        "evidence": "Issue の目的「利用までのハードルを下げる」を達成するには配布方法の決定が必要"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "システム依存関係（tmux, git, openssl, Claude CLI）のインストールガイダンスが未検討",
+        "location": "提案する解決策セクション",
+        "recommendation": "preflight-check.sh が検出する必須依存関係（Node.js v20+, tmux, git, openssl）のインストール案内を commandmate init 時に表示するか、ドキュメントへの誘導を追加することを検討",
+        "evidence": "scripts/preflight-check.sh（240行）が Node.js, npm, tmux, git, openssl を必須としてチェックしている"
+      },
+      {
+        "id": "SF-4",
+        "category": "明確性",
+        "issue": "バージョニング戦略が未記載",
+        "location": "提案する解決策セクション",
+        "recommendation": "npm publish 時のバージョン管理方針（semver遵守、CHANGELOG連携、GitHub Releases との同期等）を検討",
+        "evidence": "現在 version は 0.1.0（package.json line 3）。npm 公開後はバージョン管理が重要になる"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "代替案セクションが空",
+        "location": "代替案セクション",
+        "recommendation": "検討した代替案を記載: npx commandmate（インストール不要）、docker run、GitHub Releases からのバイナリ配布等"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "関連 Issue へのリンクがない",
+        "location": "Issue 本文",
+        "recommendation": "関連する Issue（#76 環境変数フォールバック、#77 名称置換）へのリンクを追加。特に環境変数名の統一（CM_* vs MCBD_*）との整合性確認"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "想定されるターゲットユーザーとユースケースの記載がない",
+        "location": "背景・課題セクション",
+        "recommendation": "誰が（開発者、チームリーダー等）、どのような状況で（新規プロジェクト開始時、チームメンバーのオンボーディング時等）使用することを想定しているかを記載"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/package.json",
+      "relevance": "npm publish の設定確認（private フラグ、bin フィールド）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/server.ts",
+      "relevance": "サーバー起動ロジック（CLI start コマンドの実装参考）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/scripts/setup.sh",
+      "relevance": "既存セットアップフロー（CLI init コマンドの実装参考）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/scripts/start.sh",
+      "relevance": "既存起動フロー（CLI start コマンドの実装参考）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/scripts/preflight-check.sh",
+      "relevance": "システム依存関係チェックロジック"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/scripts/setup-env.sh",
+      "relevance": "環境変数設定ロジック（CLI init コマンドの実装参考）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/docs/architecture.md",
+      "relevance": "アーキテクチャドキュメント（システム依存関係の確認）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/MyCodeBranchDesk/CLAUDE.md",
+      "relevance": "プロジェクトガイドライン（既存コマンド体系の確認）"
+    }
+  ]
+}

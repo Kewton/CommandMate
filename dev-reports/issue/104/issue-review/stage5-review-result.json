@@ -1,0 +1,101 @@
+{
+  "issue_number": 104,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-01",
+  "previous_findings_addressed": {
+    "MF-1": true,
+    "MF-2": true,
+    "SF-1": true,
+    "SF-2": true,
+    "SF-3": true,
+    "NTH-1": true,
+    "NTH-2": true
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "整合性",
+        "issue": "Issue #99設計書に記載されているz-index値と実装の差異に関する補足が必要",
+        "location": "## 関連Issue",
+        "recommendation": "Issue #99設計書ではz-index値として9999が記載されているが（セクション4.2）、実際の実装（src/config/z-index.ts）ではMAXIMIZED_EDITOR: 40となっている。これは設計書作成後の実装時にz-index階層を見直した結果と思われるが、Issue本文での言及があるとより正確。「設計書セクション4.2ではz-index: 9999と記載されているが、実装時に他のUI要素との階層関係を考慮しz-40に変更された」旨を追記することを推奨",
+        "evidence": "Issue #99設計書セクション4.2: 'MAXIMIZED_EDITOR: 9999'、src/config/z-index.ts L26: 'MAXIMIZED_EDITOR: 40'。Issueでは'MAXIMIZED_EDITOR(40)'と正しい値を参照しているが、設計書との差異についての説明がない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "調査項目チェックリストの確認状態が未記入のまま",
+        "location": "## 原因分析 > 2. z-index の条件付き設定",
+        "recommendation": "Stage 1レビューで追加された調査項目チェックリスト（Fullscreen API成功/失敗確認、isFallbackMode値確認、エラーイベント有無）は実装前の確認事項として適切。ただし、実際に調査を行った場合は結果を記入し、未調査の場合はその旨を明記すると進捗が分かりやすい",
+        "evidence": "現在のチェックリストは空のチェックボックス（'- [ ]'）のまま。調査済み/未調査の状態が不明"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "WorktreeDetailRefactoredでのModal内使用に関するテスト観点の詳細が不足",
+        "location": "## リグレッションリスク > RR-3",
+        "recommendation": "RR-3でModal内でのz-index競合について言及しているが、具体的なテストシナリオ（例：Modal内でMarkdownEditorを開いた状態で最大化→Modal(z-50)とMaximizedEditor(z-40)の重なり確認）を追記すると実装者がテストしやすい",
+        "evidence": "RR-3の「対策」は'Modal内での使用パターンをテスト'とあるが、どのような状態で何を確認すべきかの詳細がない"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "問題の主要箇所。L184（isMobilePortrait判定）、L436-441（containerStyle z-index条件）"
+    },
+    {
+      "file": "src/hooks/useFullscreen.ts",
+      "relevance": "Fullscreen API処理とフォールバックモードの管理。L188-210（enterFullscreen関数）"
+    },
+    {
+      "file": "src/config/z-index.ts",
+      "relevance": "z-index値の定義。MAXIMIZED_EDITOR: 40（設計書の9999から変更済み）"
+    },
+    {
+      "file": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+      "relevance": "Issue #99の設計書。セクション4.2にz-index: 9999の記載あり（実装とは異なる）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+      "relevance": "Issue #99の設計書。z-index条件設定の設計判断が記載（セクション5.1、7.2、12.1）"
+    }
+  ],
+  "verification_results": {
+    "stage1_findings_verification": {
+      "MF-1_line_number": "反映確認: Issue本文のL437-441がL436-441に修正済み",
+      "MF-2_fullscreen_explanation": "反映確認: Fullscreen API成功時の動作説明と親要素スタッキングコンテキストの可能性を追記済み",
+      "SF-1_investigation_checklist": "反映確認: 調査項目チェックリストを原因分析セクションに追加済み",
+      "SF-2_priority_clarification": "反映確認: 案1を推奨・最優先と明記、案2と案3の目的・適用条件を明確化済み",
+      "SF-3_useIsMobile_supplement": "反映確認: resizeイベントリスナーの存在とisMobilePortraitがstateになっていない点を補足追記済み"
+    },
+    "new_issues_from_stage2_changes": {
+      "check_result": "Stage 2反映による新たな不整合なし"
+    },
+    "consistency_check": {
+      "code_line_numbers": "一致: L436-441の記載がコード実装と一致",
+      "z_index_value": "一致: Issue本文のMAXIMIZED_EDITOR(40)がsrc/config/z-index.tsと一致",
+      "useIsMobile_behavior": "一致: resizeイベントリスナーの説明がコードL68-70と一致",
+      "useFullscreen_behavior": "一致: enterFullscreen関数のフォールバック動作説明がコードL188-210と一致"
+    }
+  },
+  "overall_assessment": {
+    "quality_score": "A",
+    "stage1_improvements": "全てのMust Fix項目とShould Fix項目が適切に反映された。Nice to Have項目も部分的に対応されている。",
+    "remaining_concerns": "1件のShould Fix（設計書z-index値との差異説明）と2件のNice to Have（調査項目の記入状態、テストシナリオ詳細）が残存。いずれも軽微であり、実装に支障はない。",
+    "recommendation": "Issue内容は十分な品質に達している。SF-1の対応を推奨するが、必須ではない。実装を開始可能。"
+  }
+}

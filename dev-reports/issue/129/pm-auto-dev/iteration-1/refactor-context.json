@@ -1,0 +1,13 @@
+{
+  "issue_number": 129,
+  "refactor_targets": [
+    "src/components/worktree/WorktreeList.tsx"
+  ],
+  "quality_metrics": {
+    "lint_status": "pass",
+    "type_check_status": "pass",
+    "build_status": "pass"
+  },
+  "improvement_goals": [],
+  "notes": "今回の変更は1行の条件式変更のみ。設計レビューで指摘されたNice to Have項目（N1: 削除機能のコンポーネント分離、N2: 表示条件の定数化）は将来的なリファクタリング候補として記録済み。現時点では追加のリファクタリングは不要。"
+}

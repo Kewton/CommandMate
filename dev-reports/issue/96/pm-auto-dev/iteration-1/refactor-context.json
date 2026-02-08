@@ -1,0 +1,30 @@
+{
+  "issue_number": 96,
+  "refactor_targets": [
+    "src/cli/commands/init.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/preflight.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/pid-manager.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/security-logger.ts",
+    "src/cli/index.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 72.9,
+    "target_coverage": 80
+  },
+  "improvement_goals": [
+    "カバレッジを80%以上に向上",
+    "重複コードの削除",
+    "エラーハンドリングの改善",
+    "型安全性の向上",
+    "CLIビルドステップの追加（package.json scripts）"
+  ],
+  "acceptance_test_notes": [
+    "bin/commandmate.jsはdist/cli/index.jsを参照するため、npm run buildにtscステップが必要",
+    "現在はnpx tsxでTypeScript直接実行して動作確認"
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-02-01",
+  "issue_number": 104,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "previous_findings_addressed": {
+    "SF-1": true,
+    "SF-2": true,
+    "NTH-1": false,
+    "NTH-2": true,
+    "NTH-3": true
+  },
+  "previous_findings_verification": {
+    "SF-1": {
+      "original_issue": "iPad Chrome固有のテストケースがテスト戦略に含まれていない",
+      "status": "addressed",
+      "verification": "テスト戦略セクションが新規追加され、自動テスト（ユニットテスト）、iPad Chrome固有のテスト方針（手動テスト必須）、将来検討（Playwright/BrowserStack）の3段階で明確化されている"
+    },
+    "SF-2": {
+      "original_issue": "修正案1（z-index条件の変更）によるデスクトップへの影響が分析されていない",
+      "status": "addressed",
+      "verification": "案1に「デスクトップへの影響」セクションが追記され、z-index階層関係、視覚的影響なし、パフォーマンス影響軽微であることが説明されている"
+    },
+    "NTH-1": {
+      "original_issue": "CLAUDE.mdへの影響記載がない",
+      "status": "not_addressed",
+      "reason": "Nice to Have項目。修正完了後の対応として適切にスキップされた"
+    },
+    "NTH-2": {
+      "original_issue": "WorktreeDetailRefactored.tsx でのMarkdownEditor使用箇所への影響確認が不足",
+      "status": "addressed",
+      "verification": "修正対象ファイル詳細テーブルにWorktreeDetailRefactored.tsxが追加され、リグレッションリスクRR-3でもModal内使用について言及されている"
+    },
+    "NTH-3": {
+      "original_issue": "既存のE2Eテストへの影響確認が記載されていない",
+      "status": "addressed",
+      "verification": "テスト戦略セクションで自動テストの方針が記載され、現時点でE2Eテストが最大化機能を直接テストしていないことも確認済み"
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響ファイル",
+        "issue": "containerClassesのCSS fallback条件にも同様の変更が必要かの検討が不足",
+        "location": "## 影響範囲 > 修正対象ファイル詳細",
+        "recommendation": "containerStyle（L436-441）だけでなく、containerClasses（L424-433）も isFallbackMode 条件を使用している。案1でz-index条件のみを変更する場合、CSSクラスの条件は現状維持で問題ないが、両者の条件が異なることによる混乱を避けるため、設計判断の理由をコメントとして残すことを推奨",
+        "evidence": "L427: 'if (isMaximized && isFallbackMode) { return `${base} fixed inset-0`; }' - containerClassesは fixed inset-0 をisFallbackMode時のみ適用しており、これはFullscreen API成功時には不要（ブラウザが全画面配置を行う）。z-index条件変更後も、この条件は維持すべき"
+      },
+      {
+        "id": "NTH-2",
+        "category": "テスト範囲",
+        "issue": "Modal内でのMaximize動作に関する具体的なテストシナリオが未記載",
+        "location": "## リグレッションリスク > RR-3",
+        "recommendation": "RR-3の対策として「Modal内での使用パターンをテスト」とあるが、具体的なテストシナリオを追記するとより明確。例：1) Modal内でMarkdownEditorを開く 2) 最大化ボタンをクリック 3) MarkdownEditorがModal内に留まり、Modalの上に重ならないことを確認（MAXIMIZED_EDITOR=40 < MODAL=50）",
+        "evidence": "WorktreeDetailRefactored.tsx L1504-1518, L1620-1636: MarkdownEditorはModal(size='full')内でレンダリングされており、最大化時のz-index関係確認が必要"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "coverage_assessment": "影響範囲の網羅性は良好。修正対象ファイル詳細テーブルで5ファイルが特定され、変更種別・リスクレベル・説明が記載されている。テスト戦略も3段階で整理されており、自動テストと手動テストの役割分担が明確。リグレッションリスクも3件特定され、対策と影響環境が記載されている。",
+    "remaining_risks": [
+      {
+        "id": "RISK-1",
+        "severity": "低",
+        "description": "containerStyleとcontainerClassesで異なる条件を使用することによる将来のメンテナンス時の混乱リスク",
+        "mitigation": "コード内コメントで条件の違いの理由を明記する",
+        "status": "軽微、実装時に対応可能"
+      },
+      {
+        "id": "RISK-2",
+        "severity": "低",
+        "description": "iPad Chrome固有の挙動が将来変更される可能性",
+        "mitigation": "テスト戦略で手動テストを必須とし、将来的にはBrowserStack等での自動化を検討（記載済み）",
+        "status": "既に対策済み"
+      }
+    ],
+    "test_coverage_verification": {
+      "unit_tests": {
+        "status": "計画済み",
+        "detail": "isMaximized=true時にz-indexが設定されることを確認するテスト追加が受け入れ条件に含まれている"
+      },
+      "manual_tests": {
+        "status": "計画済み",
+        "detail": "iPad Chrome実機での動作確認が必須テストとして明記されている（横置き/縦置き/オリエンテーション変更）"
+      },
+      "regression_tests": {
+        "status": "計画済み",
+        "detail": "デスクトップ環境（Windows/Mac Chrome, Mac Safari）、iOS Safari、全環境でのModal内使用テストが計画されている"
+      }
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "L424-433, L436-441",
+      "relevance": "containerClasses（L424-433）とcontainerStyle（L436-441）の両方が影響。修正対象はL436-441のみだが、L424-433も関連条件を使用"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "L1504-1518, L1620-1636",
+      "relevance": "MarkdownEditorをModal内で使用。Desktop（L1504-1518）とMobile（L1620-1636）の両方で同じパターン"
+    },
+    {
+      "file": "src/components/ui/Modal.tsx",
+      "lines": "L75",
+      "relevance": "Modal本体のz-index定義。'z-50'（z-index: 50）を使用"
+    },
+    {
+      "file": "src/config/z-index.ts",
+      "lines": "L21-36",
+      "relevance": "z-index階層定義。MAXIMIZED_EDITOR=40, MODAL=50の関係を確認"
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "lines": "L590-729",
+      "relevance": "Maximize Feature, Keyboard Shortcuts テスト。z-index条件のテスト追加が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-99-markdown-editor-display-improvement-design-policy.md",
+      "relevance": "Issue #99設計書。z-index条件設計の根拠（セクション5.1, 7.2, 12.1）。実装時にz-index値が9999から40に変更された経緯"
+    }
+  ],
+  "verification_results": {
+    "stage3_findings_verification": {
+      "SF-1_test_strategy": "反映確認: テスト戦略セクションが追加され、3段階（自動テスト、手動テスト、将来自動化）で方針が明確化されている",
+      "SF-2_desktop_impact": "反映確認: 案1に「デスクトップへの影響」セクションが追記され、z-index階層、視覚的影響、パフォーマンス影響が分析されている"
+    },
+    "stage4_apply_verification": {
+      "test_strategy_section": "確認: Issue本文に「## テスト戦略」セクションが存在",
+      "regression_risk_section": "確認: Issue本文に「## リグレッションリスク」セクションが存在",
+      "acceptance_condition_4": "確認: 受け入れ条件に「ユニットテスト追加」が含まれている",
+      "file_detail_table": "確認: 影響範囲セクションに「修正対象ファイル詳細」テーブルが存在"
+    },
+    "code_verification": {
+      "containerStyle_location": "一致: L436-441の記載がコード実装と一致",
+      "containerClasses_location": "新規確認: L424-433でisFallbackMode条件を使用。Issue本文では言及なし（軽微）",
+      "modal_z_index": "確認: Modal.tsx L75で'z-50'を使用。MODAL=50の定義と一致",
+      "z_index_hierarchy": "確認: MAXIMIZED_EDITOR(40) < MODAL(50)の関係が維持されている"
+    },
+    "new_issues_from_stage4_changes": {
+      "check_result": "重大な新規問題なし。containerClasses条件との整合性についてNice to Haveとして指摘"
+    }
+  },
+  "overall_assessment": {
+    "quality_score": "A",
+    "stage3_improvements": "全てのShould Fix項目（SF-1, SF-2）が適切に反映された。テスト戦略、デスクトップ影響分析、リグレッションリスク、受け入れ条件の拡充が行われ、影響範囲の網羅性が大幅に向上した。",
+    "remaining_concerns": "2件のNice to Have項目（containerClasses条件との整合性コメント、Modal内テストシナリオ詳細）が残存。いずれも実装時に対応可能な軽微な項目。",
+    "recommendation": "Issue #104の影響範囲分析は十分な品質に達している。実装を開始可能。Nice to Have項目は実装時のコメント追加とテストコードで対応することを推奨。"
+  }
+}

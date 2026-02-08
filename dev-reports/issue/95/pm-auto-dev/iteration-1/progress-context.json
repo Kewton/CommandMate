@@ -1,0 +1,69 @@
+{
+  "issue_number": 95,
+  "feature_summary": "画像ファイルビューワ",
+  "phases": [
+    {
+      "name": "Phase 1: 型定義・設定",
+      "status": "completed",
+      "deliverables": [
+        "src/config/image-extensions.ts",
+        "src/types/models.ts (FileContent interface追加)"
+      ]
+    },
+    {
+      "name": "Phase 2: API拡張",
+      "status": "completed",
+      "deliverables": [
+        "src/app/api/worktrees/[id]/files/[...path]/route.ts (画像対応拡張)"
+      ]
+    },
+    {
+      "name": "Phase 3: UIコンポーネント",
+      "status": "completed",
+      "deliverables": [
+        "src/components/worktree/ImageViewer.tsx",
+        "src/components/worktree/FileViewer.tsx (画像表示対応)"
+      ]
+    },
+    {
+      "name": "Phase 4: テスト",
+      "status": "completed",
+      "deliverables": [
+        "tests/unit/config/image-extensions.test.ts (71テスト)"
+      ],
+      "metrics": {
+        "unit_tests": 71,
+        "coverage": "98.14%"
+      }
+    },
+    {
+      "name": "Phase 5: ドキュメント",
+      "status": "completed",
+      "deliverables": [
+        "CLAUDE.md (Issue #95追記)"
+      ]
+    }
+  ],
+  "tdd_result_path": "dev-reports/issue/95/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/95/pm-auto-dev/iteration-1/acceptance-result.json",
+  "refactor_result_path": "dev-reports/issue/95/pm-auto-dev/iteration-1/refactor-result.json",
+  "commits": [
+    "feat(issue-95): add image extensions configuration with security validations",
+    "feat(issue-95): add FileContent interface to shared types",
+    "feat(issue-95): extend file API for image file support",
+    "feat(issue-95): add ImageViewer component and update FileViewer",
+    "test(issue-95): add comprehensive unit tests for image extensions",
+    "refactor(issue-95): apply DRY principle to image extensions code",
+    "docs(issue-95): add image viewer feature to CLAUDE.md"
+  ],
+  "security_features": [
+    "マジックバイト検証（PNG, JPEG, GIF, WebP）",
+    "WebP完全検証（RIFFヘッダー+WEBPシグネチャ）",
+    "SVG XSS対策: scriptタグ拒否",
+    "SVG XSS対策: イベントハンドラ属性（on*）拒否",
+    "SVG XSS対策: javascript:/data:/vbscript:スキーム拒否",
+    "SVG XSS対策: foreignObject要素拒否",
+    "5MBファイルサイズ制限",
+    "パストラバーサル防止（isPathSafe()）"
+  ]
+}

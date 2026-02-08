@@ -1,0 +1,57 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 97.87,
+    "after_coverage": 98.14
+  },
+  "refactorings_applied": [
+    "DRY: Extract normalizeExtension() helper function",
+    "DRY: Extract getMimeTypeByExtension() helper function",
+    "Remove duplicate extension normalization from isImageExtension()",
+    "Remove duplicate extension normalization from validateImageMagicBytes()",
+    "Remove duplicate extension normalization from validateImageContent()",
+    "Simplify API route MIME type lookup using centralized helper"
+  ],
+  "files_changed": [
+    "src/config/image-extensions.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "tests/unit/config/image-extensions.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "test_results": {
+    "total_tests": 1874,
+    "passed": 1874,
+    "failed": 0,
+    "skipped": 6,
+    "new_tests_added": 8
+  },
+  "commits": [
+    "cd9ac55: refactor(issue-95): apply DRY principle to image extensions code"
+  ],
+  "code_analysis": {
+    "solid_principles": {
+      "single_responsibility": "OK - Each function has single purpose (normalization, MIME lookup, validation)",
+      "open_closed": "OK - Extension validation can be extended via IMAGE_EXTENSION_VALIDATORS array",
+      "liskov_substitution": "N/A - No inheritance hierarchy",
+      "interface_segregation": "OK - ImageValidationResult interface is minimal and focused",
+      "dependency_inversion": "OK - High-level functions depend on abstraction (validators array)"
+    },
+    "dry_improvements": [
+      "Extension normalization logic: 3 duplicates -> 1 helper function",
+      "MIME type lookup logic: 2 duplicates -> 1 helper function"
+    ],
+    "code_smells_found": 0,
+    "code_quality_notes": [
+      "No long methods (all functions < 50 lines)",
+      "No large files (image-extensions.ts: 282 lines)",
+      "Clear naming conventions",
+      "Comprehensive JSDoc documentation"
+    ]
+  },
+  "message": "Refactoring completed successfully. Applied DRY principle by extracting normalizeExtension() and getMimeTypeByExtension() helper functions. Coverage maintained at 98.14%. All 1874 tests pass. No static analysis errors."
+}

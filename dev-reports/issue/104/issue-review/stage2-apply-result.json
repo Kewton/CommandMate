@@ -1,0 +1,54 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_date": "2026-02-01",
+  "applied_items": [
+    {
+      "id": "MF-1",
+      "category": "正確性",
+      "description": "行番号修正: L437-441 → L436-441",
+      "action": "Issue本文の影響範囲テーブルおよび問題箇所の記載をL436-441に修正"
+    },
+    {
+      "id": "MF-2",
+      "category": "正確性",
+      "description": "Fullscreen API成功時のz-index説明を追記",
+      "action": "「z-indexの条件付き設定」セクションにFullscreen API成功時の動作説明と親要素スタッキングコンテキストの可能性を追記。調査項目チェックリストも追加"
+    },
+    {
+      "id": "SF-1",
+      "category": "完全性",
+      "description": "iPad Chrome固有のFullscreen API調査項目を追加",
+      "action": "原因分析セクションに調査項目チェックリストを追加（Fullscreen API成功/失敗確認、isFallbackMode値確認、エラーイベント有無）"
+    },
+    {
+      "id": "SF-2",
+      "category": "明確性",
+      "description": "修正方針案の目的・適用条件・優先度を明確化",
+      "action": "各案に「目的」「適用条件」を追記。案1を推奨・最優先と明記。案2は本Issueと直接関係しない可能性を注記。案3は将来対応・スコープ外と明記"
+    },
+    {
+      "id": "SF-3",
+      "category": "整合性",
+      "description": "useIsMobile.tsのresizeイベントリスナー実装について補足追記",
+      "action": "原因分析セクション1に補足を追加: useIsMobile.tsはresizeイベントをリッスンしておりisMobile自体は更新される点、問題はisMobilePortraitがstateになっていない点を明記"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "NTH-1",
+      "category": "完全性",
+      "description": "Issue #99との関連性の詳細説明",
+      "reason": "関連Issueセクションに設計書のセクション番号と設計判断の要点を追記（部分的に対応）"
+    },
+    {
+      "id": "NTH-2",
+      "category": "完全性",
+      "description": "再現手順の詳細（バージョン情報等）",
+      "reason": "再現手順セクションに環境詳細の記入欄を追加（実際の値は調査時に記入予定）"
+    }
+  ],
+  "issue_updated": true,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/104",
+  "summary": "Stage 1レビューの全Must Fix項目（2件）およびShould Fix項目（3件）をIssue本文に反映しました。主な変更点: (1) 行番号をL436-441に修正、(2) Fullscreen API成功時の動作説明と調査項目を追加、(3) 修正方針案に目的・適用条件・優先度を明記、(4) useIsMobile.tsの動作について補足追記、(5) レビュー履歴セクションを追加。Nice to Have項目は部分的に対応しました。"
+}

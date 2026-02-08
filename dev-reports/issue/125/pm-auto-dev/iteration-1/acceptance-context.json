@@ -1,0 +1,104 @@
+{
+  "issue_number": 125,
+  "feature_summary": "グローバルインストール時に start コマンドが ~/.commandmate/.env を読み込む",
+  "acceptance_criteria": [
+    "グローバルインストール時に任意のディレクトリから commandmate start できること",
+    "~/.commandmate/.env の設定が正しく読み込まれること",
+    "PIDファイルが ~/.commandmate/.commandmate.pid に作成されること",
+    "stop/status コマンドが正しいPIDファイルを参照すること",
+    "エラー発生時に期待される設定ファイルパスが表示されること",
+    "ローカルインストール時の動作が維持されること（後方互換性）",
+    "daemon.tsで.env読み込みエラー時にフォールバック動作すること",
+    "statusコマンドで正しい設定値が表示されること",
+    "getConfigDir()でシンボリックリンク解決とパストラバーサル検証が実装されていること",
+    "CM_BIND=0.0.0.0の場合にセキュリティ警告が表示されること",
+    "外部公開+認証未設定時に追加警告が表示されること",
+    "起動成功ログに正確な設定値が表示されること"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AT-1",
+      "name": "グローバルインストール時のstart動作",
+      "precondition": "グローバルインストール環境をシミュレート",
+      "steps": [
+        "isGlobalInstall()がtrueを返す状態を設定",
+        "~/.commandmate/.envが存在する状態を設定",
+        "startCommandを実行",
+        "正しいパスから.envが読み込まれることを確認"
+      ],
+      "expected": ".envが~/.commandmate/.envから読み込まれる"
+    },
+    {
+      "id": "AT-2",
+      "name": "グローバルインストール時のPIDファイル配置",
+      "precondition": "グローバルインストール環境をシミュレート",
+      "steps": [
+        "getPidFilePath()を呼び出す",
+        "返却されるパスを検証"
+      ],
+      "expected": "~/.commandmate/.commandmate.pidが返される"
+    },
+    {
+      "id": "AT-3",
+      "name": "ローカルインストール時の後方互換性",
+      "precondition": "ローカルインストール環境をシミュレート",
+      "steps": [
+        "isGlobalInstall()がfalseを返す状態を設定",
+        "getEnvPath()とgetPidFilePath()を呼び出す",
+        "返却されるパスを検証"
+      ],
+      "expected": "process.cwd()ベースのパスが返される"
+    },
+    {
+      "id": "AT-4",
+      "name": "パストラバーサル対策",
+      "precondition": "シンボリックリンク環境をシミュレート",
+      "steps": [
+        "realpathSync()が正しく呼び出されることを確認",
+        "ホームディレクトリ外へのパスでエラーが発生することを確認"
+      ],
+      "expected": "パストラバーサル攻撃が検出されエラーがスローされる"
+    },
+    {
+      "id": "AT-5",
+      "name": "セキュリティ警告（外部公開）",
+      "precondition": "CM_BIND=0.0.0.0の環境をシミュレート",
+      "steps": [
+        "daemon.start()を実行",
+        "ログ出力を確認"
+      ],
+      "expected": "外部公開の警告メッセージが表示される"
+    },
+    {
+      "id": "AT-6",
+      "name": "セキュリティ警告（認証未設定）",
+      "precondition": "CM_BIND=0.0.0.0かつCM_AUTH_TOKEN未設定の環境",
+      "steps": [
+        "daemon.start()を実行",
+        "ログ出力を確認"
+      ],
+      "expected": "認証未設定の追加警告が表示される"
+    },
+    {
+      "id": "AT-7",
+      "name": ".env読み込みエラー時のフォールバック",
+      "precondition": ".envファイルが存在するが読み込みエラーが発生",
+      "steps": [
+        "dotenv.config()がエラーを返す状態をシミュレート",
+        "daemon.start()を実行"
+      ],
+      "expected": "警告ログを出力し、process.envのみで続行"
+    },
+    {
+      "id": "AT-8",
+      "name": "status.tsでの設定値表示",
+      "precondition": ".envにCM_PORT=4000が設定されている",
+      "steps": [
+        "statusCommand()を実行",
+        "表示される設定値を確認"
+      ],
+      "expected": ".envの設定値が正しく表示される"
+    }
+  ],
+  "tdd_result_path": "dev-reports/issue/125/pm-auto-dev/iteration-1/tdd-result.json"
+}

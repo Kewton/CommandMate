@@ -1,0 +1,37 @@
+{
+  "issue_number": 125,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-125-global-install-env-loading-design-policy.md",
+  "review_criteria": [
+    "OWASP Top 10 準拠",
+    "認証・認可の適切性",
+    "入力バリデーション",
+    "機密情報の取り扱い",
+    "ファイルパーミッション",
+    "コマンドインジェクション対策",
+    "パストラバーサル対策"
+  ],
+  "target_files": [
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/env-setup.ts"
+  ],
+  "previous_stages": [
+    {
+      "stage": 1,
+      "result_file": "dev-reports/issue/125/multi-stage-design-review/stage1-review-result.json"
+    },
+    {
+      "stage": 2,
+      "result_file": "dev-reports/issue/125/multi-stage-design-review/stage2-review-result.json"
+    },
+    {
+      "stage": 3,
+      "result_file": "dev-reports/issue/125/multi-stage-design-review/stage3-review-result.json"
+    }
+  ]
+}

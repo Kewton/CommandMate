@@ -1,0 +1,150 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項対応",
+  "issue_number": 96,
+  "applied_findings": [
+    {
+      "id": "MF-SEC-1",
+      "category": "A03: インジェクション",
+      "status": "applied",
+      "changes": [
+        "7.4節: コマンドインジェクション対策セクション追加（spawn配列引数形式、バリデーション要件）",
+        "21.8節: getProcessUsingPort()実装をexecSyncからspawnSync配列引数形式に変更",
+        "20.3節: 実装チェックリストにspawn配列引数形式の確認項目追加",
+        "25.1節: セキュリティ実装チェックリストにMust Fixとして追加"
+      ]
+    },
+    {
+      "id": "MF-SEC-2",
+      "category": "A05: セキュリティ設定ミス",
+      "status": "applied",
+      "changes": [
+        "7.2節: PIDファイルのアトミック書き込み実装例追加（O_EXCLフラグ使用）",
+        "24.1節: PidManager.writePidAtomic()の詳細実装と使用例追加",
+        "20.3節: 実装チェックリストにアトミック書き込み確認項目追加",
+        "25.1節: セキュリティ実装チェックリストにMust Fixとして追加"
+      ]
+    },
+    {
+      "id": "MF-SEC-3",
+      "category": "npm サプライチェーン",
+      "status": "applied",
+      "changes": [
+        "14.2節: publish.ymlにnpm publish --provenance追加、id-token権限設定、environment保護追加",
+        "14.2節: セキュリティ設定要件テーブル追加",
+        "20.4節: 実装チェックリストに--provenance, id-token権限確認項目追加",
+        "25.1節: セキュリティ実装チェックリストにMust Fixとして追加"
+      ]
+    },
+    {
+      "id": "SF-SEC-1",
+      "category": "A02: 暗号化の失敗",
+      "status": "applied",
+      "changes": [
+        "7.1節: .envファイルパーミッション0600設定の実装例追加（saveEnvFile関数）",
+        "20.3節: 実装チェックリストに.envパーミッション設定確認項目追加",
+        "25.2節: セキュリティ実装チェックリストにShould Fixとして追加"
+      ]
+    },
+    {
+      "id": "SF-SEC-2",
+      "category": "A09: ログ監視不備",
+      "status": "applied",
+      "changes": [
+        "7.6節: CLIセキュリティイベントログセクション新規追加（security-logger.ts実装例）",
+        "20.3節: 実装チェックリストにsecurity-logger.ts作成項目追加",
+        "24.2節: stopコマンドでのセキュリティイベントログ使用例追加",
+        "25.2節: セキュリティ実装チェックリストにShould Fixとして追加"
+      ]
+    },
+    {
+      "id": "SF-SEC-3",
+      "category": "A03: インジェクション",
+      "status": "applied",
+      "changes": [
+        "7.5節: 環境変数値のサニタイズセクション新規追加（sanitizeInput, sanitizePath, validatePort, escapeEnvValue関数）",
+        "20.3節: 実装チェックリストに入力サニタイズ確認項目追加",
+        "25.2節: セキュリティ実装チェックリストにShould Fixとして追加"
+      ]
+    },
+    {
+      "id": "SF-SEC-4",
+      "category": "A06: 脆弱コンポーネント",
+      "status": "applied",
+      "changes": [
+        "14.2節: publish.ymlにnpm audit --audit-level=high追加",
+        "14.3節: dependabot.yml設定セクション新規追加",
+        "20.4節: 実装チェックリストにdependabot.yml作成項目追加",
+        "25.2節: セキュリティ実装チェックリストにShould Fixとして追加"
+      ]
+    },
+    {
+      "id": "SF-SEC-5",
+      "category": "npm パッケージ",
+      "status": "applied",
+      "changes": [
+        "14.1節: .npmignoreにセキュリティ関連ファイルパターン追加（.npmrc, npm-debug.log, secrets/, credentials/, OS固有ファイル, .git/）",
+        "20.4節: 実装チェックリストにセキュリティ関連ファイルパターン確認項目追加",
+        "25.2節: セキュリティ実装チェックリストにShould Fixとして追加"
+      ]
+    },
+    {
+      "id": "NTH-SEC-1",
+      "category": "A04: 安全でない設計",
+      "status": "applied",
+      "changes": [
+        "24.2節: グレースフル停止のタイムアウト設定セクション新規追加（デフォルト10秒、SIGKILL自動フォールバック）",
+        "20.3節: 実装チェックリストにグレースフル停止タイムアウト確認項目追加",
+        "25.3節: セキュリティ実装チェックリストにNice to Haveとして追加"
+      ]
+    },
+    {
+      "id": "NTH-SEC-2",
+      "category": "A01: 認証不備",
+      "status": "applied",
+      "changes": [
+        "24.3節: タイミング攻撃対策の推奨セクション新規追加（crypto.timingSafeEqual使用例、ドキュメント追記案）",
+        "25.3節: セキュリティ実装チェックリストにNice to Haveとして追加"
+      ]
+    },
+    {
+      "id": "NTH-SEC-3",
+      "category": "postinstall",
+      "status": "applied",
+      "changes": [
+        "24.4節: postinstallスクリプト禁止ポリシーセクション新規追加（理由、代替手段、package.json記載例）",
+        "25.3節: セキュリティ実装チェックリストにNice to Haveとして追加"
+      ]
+    }
+  ],
+  "updated_sections": [
+    "7.1 認証トークン生成（SF-SEC-1対応追加）",
+    "7.2 PIDファイルのパーミッション（MF-SEC-2対応追加）",
+    "7.4 コマンドインジェクション対策（MF-SEC-1対応、新規追加）",
+    "7.5 環境変数値のサニタイズ（SF-SEC-3対応、新規追加）",
+    "7.6 CLIセキュリティイベントログ（SF-SEC-2対応、新規追加）",
+    "14.1 .npmignore（SF-SEC-5対応追加）",
+    "14.2 CI/CDワークフロー（MF-SEC-3, SF-SEC-4対応追加）",
+    "14.3 依存関係の脆弱性チェック自動化（SF-SEC-4対応、新規追加）",
+    "18. レビュー履歴（Stage 4追加）",
+    "19.4 Stage 4: セキュリティレビュー（新規追加）",
+    "20.3 CLIモジュール実装（セキュリティ項目追加）",
+    "20.4 npm publish準備（セキュリティ項目追加）",
+    "21.8 ポート競合時の詳細情報表示（MF-SEC-1対応更新）",
+    "24. Stage 4 セキュリティレビュー対応詳細（新規追加）",
+    "25. セキュリティ実装チェックリスト（新規追加）"
+  ],
+  "owasp_compliance_summary": {
+    "A01_broken_access_control": "conditional_pass",
+    "A02_cryptographic_failures": "pass",
+    "A03_injection": "fixed",
+    "A04_insecure_design": "pass",
+    "A05_security_misconfiguration": "fixed",
+    "A06_vulnerable_outdated_components": "conditional_pass",
+    "A07_identification_authentication_failures": "pass",
+    "A08_software_data_integrity_failures": "fixed",
+    "A09_security_logging_monitoring_failures": "fixed",
+    "A10_ssrf": "not_applicable"
+  },
+  "summary": "Stage 4セキュリティレビューの全指摘事項（Must Fix 3件、Should Fix 5件、Nice to Have 3件）を設計方針書に反映完了。主な変更内容: (1) MF-SEC-1: コマンドインジェクション対策としてexecSyncからspawn配列引数形式への変更を設計書全体で統一、(2) MF-SEC-2: PIDファイルのアトミック書き込み（O_EXCLフラグ）実装を追加、(3) MF-SEC-3: npm publishワークフローにprovenance, id-token権限, environment保護を追加、(4) SF-SEC-1〜5: .envパーミッション設定、セキュリティイベントログ、入力サニタイズ、dependabot設定、.npmignore強化を追加、(5) NTH-SEC-1〜3: グレースフル停止タイムアウト、タイミング攻撃対策ドキュメント、postinstall禁止ポリシーを追加。OWASPコンプライアンス評価をA03, A05, A08, A09でfixedに更新。第24章（Stage 4対応詳細）および第25章（セキュリティ実装チェックリスト）を新規追加。"
+}

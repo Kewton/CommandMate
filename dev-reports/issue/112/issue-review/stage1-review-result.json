@@ -1,0 +1,69 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 112,
+  "review_date": "2026-02-01",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "技術的正確性",
+        "description": "Issueに記載されている現状のコード(L89-96)が実際のAppShell.tsxのコード（L89-102）と一致しない。現状のコードでは`<div className=\"w-72 h-full\">`という内部ラッパーが存在するが、Issueの引用には含まれていない。",
+        "suggestion": "Issueの「現状の問題」セクションのコード引用を、内部ラッパー`<div className=\"w-72 h-full\">`を含む完全なコードに更新すること。"
+      },
+      {
+        "id": "MF-2",
+        "category": "技術的正確性",
+        "description": "提案された「After (transform方式)」の実装イメージでは、サイドバーに`w-72`固定幅を維持しつつ`-translate-x-full`でスライドする設計だが、現状のデスクトップレイアウトでは内部に`<div className=\"w-72 h-full\">`ラッパーがあるため、単純なtranslate-xだけでは不十分。サイドバー内部構造の変更も考慮が必要。",
+        "suggestion": "実装イメージを更新し、内部ラッパーの扱い（削除するか、overflow処理をどうするか等）を明確にすること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "実装方針の妥当性",
+        "description": "提案された「メインコンテンツ側」の実装`<main className=\"${isOpen ? 'ml-72' : 'ml-0'} transition-[margin]\">`は、margin-leftのトランジションを使用している。margin変更も同様にReflowを引き起こすため、transform方式への変更メリットが半減する可能性がある。",
+        "suggestion": "メインコンテンツ側もtransform（translateX）方式で対応するか、サイドバーがオーバーレイ方式（position: absolute/fixed）になる設計に変更することを検討すること。または、marginトランジションがwidth変更より高速である理由があれば明記すること。"
+      },
+      {
+        "id": "SF-2",
+        "category": "記載内容の明確さ",
+        "description": "現状の問題セクションで、AppShell.tsx:89-96と行番号を指定しているが、実際のコードは89-102（または内部ラッパーを含めると89-102）である。また、現状コードにある`<main>`要素（L105-115）にも`transition-all`が適用されているが、Issueでは言及されていない。",
+        "suggestion": "main要素にも同様のtransition-allが適用されている点を追記し、両方の要素に対する改善策を明記すること。"
+      },
+      {
+        "id": "SF-3",
+        "category": "テスト計画",
+        "description": "受け入れ条件にはESLint/TypeScriptチェックパスが含まれているが、既存のAppShell.test.tsxでは`w-72`や`w-0`クラスの存在チェックを行っている（L281, L302）。transform方式に変更した場合、これらのテストが失敗する可能性がある。",
+        "suggestion": "受け入れ条件にテストコードの更新要件を追加し、具体的なテスト変更内容を明記すること（例：`translate-x-0`/`-translate-x-full`クラスのチェックに変更）。"
+      },
+      {
+        "id": "SF-4",
+        "category": "影響範囲",
+        "description": "SidebarContextには`width`プロパティとsetWidth関数が存在する（SidebarContext.tsx:45-47, 71）。transform方式では幅は固定（w-72）となり、動的な幅変更が不要になる可能性がある。widthプロパティの利用状況と、今回の変更による影響を確認すべき。",
+        "suggestion": "SidebarContextのwidth関連機能が今回の変更で不要になるか、引き続き必要かを明記すること。不要になる場合は、将来的なリファクタリング対象として言及するか、コンテキストの簡素化も検討すること。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント整合性",
+        "description": "CLAUDE.mdの「主要機能モジュール」セクションにはAppShellの記載がない。主要なレイアウトコンポーネントとして追加しても良い。",
+        "suggestion": "CLAUDE.mdの主要機能モジュールにAppShellを追加することを検討（本Issue対応後のフォローアップタスクとして）。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "パフォーマンス計測",
+        "description": "「モッサリしている」という問題の具体的な計測データ（フレームレート、レイアウト再計算時間等）がない。改善効果を定量的に評価できる指標があると望ましい。",
+        "suggestion": "Chrome DevToolsのPerformanceタブで、改善前後のレイアウト再計算時間を計測し、改善効果を定量化することを検討。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "関連Issue",
+        "description": "Issue #104（iPad フルスクリーン対応）との関連が記載されているが、Issue #99（マークダウンエディタ表示機能改善）で実装されたz-index管理（src/config/z-index.ts）との整合性確認も有用。",
+        "suggestion": "z-indexの階層管理に影響がないことを確認項目として追加を検討。"
+      }
+    ]
+  },
+  "summary": "Issue #112は、iPadでのサイドバートグルパフォーマンス改善を目的としたもので、技術的な問題分析と対策方針は概ね適切である。ただし、以下の点で修正が必要：(1) コード引用の正確性（内部ラッパーの記載漏れ）、(2) transform方式への変更時の内部構造の扱い。また、メインコンテンツ側のmarginトランジションもReflowを引き起こす可能性があるため、実装方針の再検討を推奨する。既存テストコードへの影響と、SidebarContextのwidth機能との整合性についても言及があると望ましい。"
+}

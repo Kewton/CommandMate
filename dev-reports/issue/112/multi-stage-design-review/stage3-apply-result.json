@@ -1,0 +1,58 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘事項対応",
+  "issue_number": 112,
+  "applied_date": "2026-02-01",
+  "applied_findings": [
+    {
+      "id": "MF-S3-001",
+      "category": "z-index競合リスク",
+      "severity": "must_fix",
+      "description": "WorktreeDetailRefactored.tsxのz-30との競合回避のためSIDEBARをz-20に変更",
+      "sections_updated": ["4.1 z-index階層管理", "5.1 直接変更対象", "6.2 レビュー指摘対応（Stage 3）", "9 レビュー指摘事項サマリー"],
+      "status": "reflected"
+    },
+    {
+      "id": "MF-S3-002",
+      "category": "padding-left変更の視覚的影響",
+      "severity": "must_fix",
+      "description": "コンテンツジャンプのリスクとiPad実機プロトタイプ検証の必要性を明記",
+      "sections_updated": ["4.3 CSSトランジション最適化", "6.2 レビュー指摘対応（Stage 3）", "9 レビュー指摘事項サマリー"],
+      "status": "reflected"
+    },
+    {
+      "id": "SF-S3-001",
+      "category": "テストカバレッジ不足",
+      "severity": "should_fix",
+      "description": "aria-hidden、SidebarToggle、transform関連テスト追加要件を明記",
+      "sections_updated": ["5.2 テスト更新必須", "6.2 レビュー指摘対応（Stage 3）", "6.4 品質要件", "9 レビュー指摘事項サマリー"],
+      "status": "reflected"
+    },
+    {
+      "id": "SF-S3-002",
+      "category": "E2Eテスト影響",
+      "severity": "should_fix",
+      "description": "iPadビューポートでのサイドバートグルE2Eテスト追加推奨を新規セクションとして追加",
+      "sections_updated": ["5.4 E2Eテスト要件（新規追加）", "6.2 レビュー指摘対応（Stage 3）", "9 レビュー指摘事項サマリー"],
+      "status": "reflected"
+    },
+    {
+      "id": "SF-S3-003",
+      "category": "CSS変数の段階的導入",
+      "severity": "should_fix",
+      "description": "globals.css統一とSidebarContext.tsxのDEFAULT_SIDEBAR_WIDTH定数との同期方法を明確化",
+      "sections_updated": ["3.2 サイドバー幅のCSS変数管理", "5.3 確認・調整必要", "6.2 レビュー指摘対応（Stage 3）", "9 レビュー指摘事項サマリー"],
+      "status": "reflected"
+    },
+    {
+      "id": "SF-S3-004",
+      "category": "SidebarToggle配置変更の波及影響",
+      "severity": "should_fix",
+      "description": "SidebarToggle使用箇所のgrep確認要件とHeader.tsxとの相互作用確認を追加",
+      "sections_updated": ["4.2 SidebarToggle配置方針", "5.3 確認・調整必要", "6.2 レビュー指摘対応（Stage 3）", "9 レビュー指摘事項サマリー"],
+      "status": "reflected"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": "Stage 3影響分析レビューの全6件の指摘事項（Must Fix: 2件、Should Fix: 4件）を設計方針書に反映した。主な変更点: (1) z-index競合回避のためSIDEBARを30から20に変更 (2) padding-left即時変更によるコンテンツジャンプリスクへの考慮とiPad実機プロトタイプ検証の必要性を明記 (3) テストカバレッジ要件（aria-hidden、transform関連）を5.2項に追加 (4) E2Eテスト要件を5.4項として新規セクション追加 (5) CSS変数とTypeScript定数の整合性確保方針を3.2項に追加 (6) SidebarToggle使用箇所確認要件を4.2項に追加。実装チェックリスト6.2項にStage 3対応項目を追加し、レビュー履歴とサマリーを更新した。"
+}

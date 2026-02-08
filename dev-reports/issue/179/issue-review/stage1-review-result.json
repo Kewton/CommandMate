@@ -1,0 +1,181 @@
+{
+  "issue_number": 179,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-08",
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "Issueのタイトルが「refactor」となっているが、ラベルは「bug」と「enhancement」が付与されている。認証機能の削除はリファクタリングではなく、セキュリティアーキテクチャの変更（破壊的変更）であり、ラベルとタイトルの分類が矛盾している。",
+        "location": "Issue タイトルおよびラベル",
+        "recommendation": "タイトルを「feat: CM_AUTH_TOKEN認証機能を削除し、リバースプロキシ認証を推奨」または「breaking: ...」に変更するか、ラベルを「refactor」に変更して統一する。コミットメッセージ規約（CLAUDE.md）に照らすと、破壊的変更には本文かフッターに明記が必要。",
+        "evidence": "CLAUDE.mdのコミットメッセージ規約では type=refactor はリファクタリング（機能変更なし）と定義されているが、認証機能の削除は明確な機能変更・破壊的変更である。"
+      },
+      {
+        "id": "MF-2",
+        "category": "整合性",
+        "issue": "実装タスクにNEXT_PUBLIC_CM_AUTH_TOKENの削除が含まれていない。現在のクライアント側（api-client.ts）ではprocess.env.NEXT_PUBLIC_CM_AUTH_TOKENを参照してAuthorizationヘッダーを付与しており、さらにscripts/setup-env.shや.env.production.exampleでもNEXT_PUBLIC_CM_AUTH_TOKENを設定している。これらの削除・更新タスクが漏れている。",
+        "location": "## 実装タスク セクション",
+        "recommendation": "以下のタスクを追加する: (1) scripts/setup-env.shからNEXT_PUBLIC_CM_AUTH_TOKEN関連を削除、(2) .env.production.exampleからNEXT_PUBLIC_CM_AUTH_TOKENを削除、(3) docs/migration-to-commandmate.mdのNEXT_PUBLIC_MCBD_AUTH_TOKEN -> NEXT_PUBLIC_CM_AUTH_TOKENマッピングを更新。",
+        "evidence": "scripts/setup-env.sh 行304: 'NEXT_PUBLIC_CM_AUTH_TOKEN=${auth_token}', .env.production.example 行34: 'NEXT_PUBLIC_CM_AUTH_TOKEN=your-secure-token-here-replace-this', docs/migration-to-commandmate.md 行44にマッピング記載あり。"
+      },
+      {
+        "id": "MF-3",
+        "category": "整合性",
+        "issue": "env.tsのgetEnv()関数内でCM_BIND=0.0.0.0かつCM_AUTH_TOKENが未設定の場合にエラーをスローする検証ロジック（行228-229）が存在するが、実装タスクにこの検証ロジックの削除が明記されていない。このロジックが残るとCM_AUTH_TOKEN無しではCM_BIND=0.0.0.0でサーバーが起動できず、Issue目的と矛盾する。",
+        "location": "## 実装タスク セクション",
+        "recommendation": "「src/lib/env.tsからCM_BIND=0.0.0.0時のCM_AUTH_TOKEN必須チェックを削除」を実装タスクに追加する。同様にenv-setup.tsのvalidateConfig()内（行300）の同様のチェック、daemon.ts（行81-83）およびstart.ts（行171-173）のセキュリティ警告ロジックも更新が必要。",
+        "evidence": "src/lib/env.ts 行228-229: throw new Error('CM_AUTH_TOKEN (or MCBD_AUTH_TOKEN) is required when CM_BIND=0.0.0.0'), src/cli/utils/env-setup.ts 行300: if (config.CM_BIND === '0.0.0.0' && !config.CM_AUTH_TOKEN)"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "実装タスクにlogger.tsのAUTH_TOKENマスキングパターン削除が含まれていない。logger.ts（行82-85）にはCM_AUTH_TOKENとMCBD_AUTH_TOKENのマスキングパターンが定義されている。認証機能削除後はこれらは不要になるが、削除対象として明記されていない。",
+        "location": "## 実装タスク セクション",
+        "recommendation": "「src/lib/logger.tsからAUTH_TOKENマスキングパターンを削除」をタスクに追加する。同様にsrc/cli/utils/security-logger.ts（行61-62）のマスキング処理も削除対象に含める。",
+        "evidence": "src/lib/logger.ts 行82-85, src/cli/utils/security-logger.ts 行61-62"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "既存テストファイルの更新タスクが記載されていない。AUTH_TOKENに関連するテストが少なくとも6ファイルに存在し、これらの更新・削除が必要。",
+        "location": "## 実装タスク セクション",
+        "recommendation": "以下のテストファイル更新を実装タスクに追加: tests/unit/env.test.ts, tests/unit/middleware.test.ts, tests/unit/logger.test.ts, tests/unit/cli/utils/env-setup.test.ts, tests/unit/cli/utils/daemon.test.ts, tests/unit/cli/utils/security-logger.test.ts",
+        "evidence": "grep結果でAUTH_TOKENを参照するテストファイルが6件確認済み。"
+      },
+      {
+        "id": "SF-3",
+        "category": "整合性",
+        "issue": "TRUST_AND_SAFETY.mdが旧名称（MCBD_*）を使用しており、かつ現在の認証トークン方式を推奨している。Issue #179の変更後、このドキュメントのセキュリティモデルセクションの大幅な書き換えが必要だが、実装タスクのドキュメント更新に含まれていない。",
+        "location": "## 実装タスク セクション",
+        "recommendation": "docs/TRUST_AND_SAFETY.mdの更新を実装タスクに追加する。特に「外部アクセス時の依存」セクション（行23-28）と「最小権限ガイド」セクション（行36-41）はリバースプロキシ推奨に書き換えが必要。",
+        "evidence": "docs/TRUST_AND_SAFETY.md 行28: 'MCBD_BIND=0.0.0.0 と MCBD_AUTH_TOKEN の設定が必要です', 行36: 'MCBD_AUTH_TOKEN を設定し、認証なしでのアクセスを防ぐ'"
+      },
+      {
+        "id": "SF-4",
+        "category": "正確性",
+        "issue": "警告メッセージ内のドキュメントリンクが存在しないパスを参照している。'https://github.com/Kewton/CommandMate/docs/security-guide.md' は現在存在せず、GitHub上でもこのパスではアクセスできない（正しくはblob/main/docs/...形式）。",
+        "location": "## commandmate init での警告メッセージ セクション",
+        "recommendation": "リンクを有効なURLに修正する。例: 'https://github.com/Kewton/CommandMate/blob/main/docs/security-guide.md' または、新規作成するセキュリティガイドの正確なパスを記載する。",
+        "evidence": "docs/ディレクトリにsecurity-guide.mdは存在しない（Glob検索で確認済み）。"
+      },
+      {
+        "id": "SF-5",
+        "category": "整合性",
+        "issue": "DEPLOYMENT.mdのセキュリティセクション（行237-258）がCM_AUTH_TOKENの生成を推奨しており、環境変数設定の必須変数一覧（行155）にもCM_AUTH_TOKENが含まれている。これらのドキュメント更新が実装タスクに含まれていない。",
+        "location": "## 実装タスク セクション",
+        "recommendation": "docs/DEPLOYMENT.mdの更新を実装タスクに追加する。セキュリティセクション全体の書き換え、必須変数一覧からのCM_AUTH_TOKEN削除、リバースプロキシ認証の推奨追加が必要。",
+        "evidence": "docs/DEPLOYMENT.md 行155: 'CM_AUTH_TOKEN | API認証トークン（本番必須）', 行239-245: 認証トークン生成のセクション"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "isAuthRequired()関数（env.ts行276-279）の扱いが実装タスクに記載されていない。この関数はCM_AUTH_TOKENの仕組みに依存した設計であり、認証削除後の扱い（削除 or 用途変更）を明記すると良い。",
+        "location": "## 実装タスク セクション",
+        "recommendation": "isAuthRequired()関数を削除するか、用途を変更する場合はその旨を実装タスクに追加する。",
+        "evidence": "src/lib/env.ts 行276-279: export function isAuthRequired(): boolean { return env.CM_BIND === '0.0.0.0'; }"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "env.tsのEnvインターフェース内のCM_AUTH_TOKENフィールド（行183）と、EnvConfig内のCM_AUTH_TOKEN（cli/types/index.ts行133）の削除が個別タスクとして明示されていない。「CM_AUTH_TOKEN関連を削除」の記載はあるが、具体的な対象が分かりにくい。",
+        "location": "## 実装タスク セクション",
+        "recommendation": "型定義ファイルの更新を明記する: src/lib/env.ts Env interface, src/cli/types/index.ts EnvConfig interface。",
+        "evidence": "src/lib/env.ts 行183, src/cli/types/index.ts 行133"
+      },
+      {
+        "id": "NTH-3",
+        "category": "明確性",
+        "issue": "CLAUDE.md内のIssue #76, #125, #77に関する記載がCM_AUTH_TOKENのフォールバックやセキュリティ警告に言及しており、認証削除後はCLAUDE.mdの関連セクションの更新が望ましい。",
+        "location": "Issue本文",
+        "recommendation": "CLAUDE.mdの更新を実装タスクまたはフォローアップタスクとして記載する。",
+        "evidence": "CLAUDE.md内でCM_AUTH_TOKENを参照する記載が複数箇所に存在（Issue #76, #125, #77の記述）。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/middleware.ts",
+      "relevance": "認証ロジックの削除対象（メインの認証ミドルウェア）"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "Authorizationヘッダー送信の削除対象"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "CM_AUTH_TOKEN関連の定義・検証ロジックの削除対象"
+    },
+    {
+      "file": "src/cli/commands/init.ts",
+      "relevance": "認証トークン設定プロンプトの削除対象"
+    },
+    {
+      "file": "src/cli/commands/start.ts",
+      "relevance": "CM_AUTH_TOKENセキュリティ警告の削除対象"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "CM_AUTH_TOKENセキュリティ警告の削除対象"
+    },
+    {
+      "file": "src/cli/utils/env-setup.ts",
+      "relevance": ".envファイル生成時のCM_AUTH_TOKEN書き込み、validateConfigの認証チェック削除対象"
+    },
+    {
+      "file": "src/cli/types/index.ts",
+      "relevance": "EnvConfig型定義のCM_AUTH_TOKENフィールド削除対象"
+    },
+    {
+      "file": "src/lib/logger.ts",
+      "relevance": "AUTH_TOKENマスキングパターンの削除対象"
+    },
+    {
+      "file": "src/cli/utils/security-logger.ts",
+      "relevance": "AUTH_TOKENマスキングの削除対象"
+    },
+    {
+      "file": "scripts/setup-env.sh",
+      "relevance": "NEXT_PUBLIC_CM_AUTH_TOKEN設定の削除対象"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": ".env.example",
+      "relevance": "CM_AUTH_TOKENの削除対象"
+    },
+    {
+      "file": ".env.production.example",
+      "relevance": "CM_AUTH_TOKEN, NEXT_PUBLIC_CM_AUTH_TOKENの削除対象"
+    },
+    {
+      "file": "docs/TRUST_AND_SAFETY.md",
+      "relevance": "認証モデル記載の全面書き換え対象（旧名称MCBD_*使用中）"
+    },
+    {
+      "file": "docs/DEPLOYMENT.md",
+      "relevance": "セキュリティセクション、必須環境変数一覧の更新対象"
+    },
+    {
+      "file": "docs/migration-to-commandmate.md",
+      "relevance": "AUTH_TOKEN関連のマッピング削除対象"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "CM_AUTH_TOKEN参照記載のフォローアップ更新対象"
+    }
+  ]
+}

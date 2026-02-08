@@ -1,0 +1,236 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 112,
+  "review_date": "2026-02-01",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-S3-001",
+        "category": "z-index競合リスク",
+        "description": "設計書ではSIDEBARのz-indexを30に設定する予定だが、WorktreeDetailRefactored.tsx (line 1552, 1588) でモバイルレイアウトの固定要素(AutoYesToggle, MessageInput)が既にz-30を使用している。これにより、iPadでサイドバーを開いた際にこれらの要素とz-indexが競合し、意図しない重なり順になる可能性がある。",
+        "suggestion": "SIDEBARのz-indexを20に下げるか、WorktreeDetailRefactored.tsxのモバイル固定要素のz-indexを25に調整する。または、z-index.tsに MOBILE_FIXED_UI: 25 を追加して明示的に階層を定義する。設計書の4.1項に現状のz-30使用箇所との競合分析を追加すること。",
+        "affected_files": [
+          "src/config/z-index.ts",
+          "src/components/worktree/WorktreeDetailRefactored.tsx (line 1552, 1588)"
+        ]
+      },
+      {
+        "id": "MF-S3-002",
+        "category": "padding-left変更の視覚的影響",
+        "description": "設計書4.3項では「padding変更はトランジションなし」と記載されているが、サイドバーがtransformでスライドアウトする間にメインコンテンツのpadding-leftが即座に変わると、コンテンツが突然ジャンプして見え、UXが低下する恐れがある。特にiPad横向きでサイドバートグル時に顕著になる可能性がある。",
+        "suggestion": "以下のいずれかを検討: (1) main要素にもtransition-[padding]を追加(ただしパフォーマンス影響を計測) (2) paddingではなくmarginを使用 (3) メインコンテンツを固定幅にせずflexで自動調整。実装前にiPad実機でのプロトタイプ検証を推奨。設計書に視覚的ジャンプについての考慮事項を追記すること。",
+        "affected_files": [
+          "src/components/layout/AppShell.tsx"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S3-001",
+        "category": "テストカバレッジ不足",
+        "description": "AppShell.test.tsxの更新計画(設計書5.2項)ではクラス名の検証変更のみ言及されているが、transform方式への変更に伴いtransition動作の検証やaria-hidden属性の追加検証が含まれていない。また、SidebarToggle.tsxの配置変更に伴うテストファイル(tests/unit/components/layout/SidebarToggle.test.tsx)への影響が未評価。",
+        "suggestion": "以下のテストケースを追加: (1) サイドバー閉じ時のaria-hidden='true'検証 (2) SidebarToggle配置変更後の位置・クリック動作検証 (3) transform/transition-transformクラスの存在確認。設計書5.2項にSidebarToggleのテスト更新計画を追加。",
+        "affected_files": [
+          "tests/unit/components/layout/AppShell.test.tsx",
+          "tests/unit/components/layout/SidebarToggle.test.tsx (存在確認要)"
+        ]
+      },
+      {
+        "id": "SF-S3-002",
+        "category": "E2Eテスト影響",
+        "description": "tests/e2e/worktree-detail.spec.tsにはサイドバー関連のテスト(line 148-170)が含まれているが、デスクトップレイアウトでのサイドバートグル動作のE2Eテストが存在しない。transform方式変更後のiPad/デスクトップでの視覚的回帰をE2Eで検証する仕組みがない。",
+        "suggestion": "E2Eテストに以下を追加: (1) iPadビューポート(1024x768)でのサイドバートグル動作確認 (2) トグル後のメインコンテンツ領域のレイアウト確認。または、Visual Regression Testingの導入を検討。",
+        "affected_files": [
+          "tests/e2e/worktree-detail.spec.ts"
+        ]
+      },
+      {
+        "id": "SF-S3-003",
+        "category": "CSS変数の段階的導入",
+        "description": "設計書3.2項でCSS変数--sidebar-widthを導入予定だが、globals.cssとtailwind.config.jsの両方に設定オプションが示されており、どちらを採用するか明確でない。また、既存のSidebarContext.tsxのDEFAULT_SIDEBAR_WIDTH定数(line 27)との整合性が取れていない。",
+        "suggestion": "CSS変数の定義場所をglobals.cssに統一し、JavaScriptからも参照可能なようにSidebarContext.tsxのDEFAULT_SIDEBAR_WIDTHをCSS変数から取得する方法を検討。または、TypeScript定数とCSS変数の二重管理を許容し、両者の値が一致することをテストで保証する。",
+        "affected_files": [
+          "src/app/globals.css",
+          "tailwind.config.js",
+          "src/contexts/SidebarContext.tsx"
+        ]
+      },
+      {
+        "id": "SF-S3-004",
+        "category": "SidebarToggle配置変更の波及影響",
+        "description": "設計書4.2項でSidebarToggleをサイドバー内部に配置する方針だが、現状SidebarToggleはAppShellの外側で使用されている可能性がある。SidebarToggleの使用箇所を全て特定し、配置変更の影響を評価する必要がある。",
+        "suggestion": "SidebarToggleの全使用箇所をgrepで特定し、設計書5.3項に影響を受けるコンポーネントの完全なリストを追加。特にHeader.tsx(z-50使用)との相互作用を確認。",
+        "affected_files": [
+          "src/components/layout/SidebarToggle.tsx",
+          "src/components/layout/AppShell.tsx",
+          "src/components/layout/Header.tsx"
+        ]
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NH-S3-001",
+        "category": "モバイルz-indexの一元管理",
+        "description": "設計書4.1項の注記(SF-S2-001)でモバイルz-index値のz-index.ts一元管理が将来検討として記載されているが、今回のSIDEBAR追加と合わせて実施すると管理が容易になる。",
+        "suggestion": "z-index.tsに以下を追加: MOBILE_OVERLAY: 40, MOBILE_DRAWER: 50, MOBILE_FIXED_UI: 30。これにより、WorktreeDetailRefactored.tsx, AppShell.tsx, MobileHeader.tsx等のハードコードされたz-index値を定数参照に置き換え可能。",
+        "affected_files": [
+          "src/config/z-index.ts",
+          "src/components/layout/AppShell.tsx",
+          "src/components/mobile/MobileHeader.tsx",
+          "src/components/mobile/MobileTabBar.tsx",
+          "src/components/worktree/WorktreeDetailRefactored.tsx"
+        ]
+      },
+      {
+        "id": "NH-S3-002",
+        "category": "パフォーマンス計測指標",
+        "description": "設計書にはiPadでの「モッサリ感」改善が目的として記載されているが、改善を定量的に計測する指標や方法が示されていない。",
+        "suggestion": "以下の計測方法を検討: (1) Chrome DevTools Performance録画でのフレームレート比較 (2) Layout Shift (CLS) 値の計測 (3) Safari Web Inspectorでのレンダリング時間計測。Before/After比較のためのベースライン計測を実装前に実施。",
+        "affected_files": []
+      },
+      {
+        "id": "NH-S3-003",
+        "category": "アクセシビリティ強化",
+        "description": "設計書4.4項でaria-hidden追加が計画されているが、キーボードナビゲーション時のフォーカストラップや、スクリーンリーダーへの状態変更通知(aria-live)については言及がない。",
+        "suggestion": "サイドバー閉じ時にフォーカスがサイドバー内にある場合のフォーカス移動先を定義。また、サイドバートグル時にaria-liveリージョンで状態変更を通知することを検討。",
+        "affected_files": [
+          "src/components/layout/AppShell.tsx",
+          "src/components/layout/SidebarToggle.tsx"
+        ]
+      }
+    ]
+  },
+  "impact_analysis": {
+    "direct_code_changes": {
+      "primary_files": [
+        {
+          "path": "src/components/layout/AppShell.tsx",
+          "change_type": "major_refactor",
+          "lines_affected": "86-117 (desktop layout section)",
+          "description": "デスクトップレイアウトのwidth方式からtransform方式への変更。aside要素のposition: fixedへの変更、main要素のpadding-left追加。"
+        },
+        {
+          "path": "src/config/z-index.ts",
+          "change_type": "addition",
+          "lines_affected": "new constant",
+          "description": "SIDEBAR: 30定数の追加。既存階層への影響確認要。"
+        },
+        {
+          "path": "src/app/globals.css",
+          "change_type": "addition",
+          "lines_affected": ":root section",
+          "description": "--sidebar-width CSS変数の追加。"
+        }
+      ],
+      "secondary_files": [
+        {
+          "path": "src/components/layout/SidebarToggle.tsx",
+          "change_type": "major_refactor",
+          "lines_affected": "36-44 (className section)",
+          "description": "absolute位置指定からサイドバー内部配置への変更。left-[284px]/left-2の条件分岐削除。"
+        },
+        {
+          "path": "tailwind.config.js",
+          "change_type": "optional_addition",
+          "lines_affected": "theme.extend section",
+          "description": "カスタムwidth/paddingユーティリティの追加(代替案)。"
+        }
+      ]
+    },
+    "ripple_effects": [
+      {
+        "component": "WorktreeDetailRefactored.tsx",
+        "risk_level": "medium",
+        "description": "モバイルレイアウトでz-30を使用しており、SIDEBARのz-30と競合する可能性。iPadがデスクトップレイアウトとして扱われる場合に影響。"
+      },
+      {
+        "component": "SidebarContext.tsx",
+        "risk_level": "low",
+        "description": "DEFAULT_SIDEBAR_WIDTH定数がCSS変数と重複定義になる可能性。同期が必要。"
+      },
+      {
+        "component": "Header.tsx",
+        "risk_level": "low",
+        "description": "z-50を使用しており、サイドバー(z-30予定)の上に表示される。意図通りだが確認要。"
+      }
+    ],
+    "test_coverage_impact": {
+      "unit_tests": {
+        "files_to_update": [
+          "tests/unit/components/layout/AppShell.test.tsx"
+        ],
+        "new_tests_required": [
+          "transform/translate-x class verification",
+          "aria-hidden attribute on closed sidebar",
+          "CSS variable usage verification"
+        ],
+        "tests_to_verify": [
+          "SidebarToggle.test.tsx (if exists)"
+        ]
+      },
+      "e2e_tests": {
+        "files_to_update": [],
+        "new_tests_recommended": [
+          "iPad viewport sidebar toggle test",
+          "Desktop sidebar animation smoothness test"
+        ]
+      }
+    },
+    "user_experience_impact": {
+      "ipad": {
+        "expected_improvement": "サイドバートグルのアニメーションがスムーズになり、モッサリ感が解消される",
+        "potential_issues": [
+          "padding-left即時変更によるコンテンツジャンプの可能性",
+          "z-index競合による要素重なり問題の可能性"
+        ]
+      },
+      "desktop": {
+        "expected_improvement": "大きな変化なし(既にスムーズ)",
+        "potential_issues": [
+          "レイアウト動作の微妙な変化による既存ユーザーの違和感"
+        ]
+      },
+      "mobile": {
+        "expected_improvement": "変更なし(既にtransform方式)",
+        "potential_issues": [
+          "なし(スコープ外)"
+        ]
+      }
+    },
+    "breaking_changes": {
+      "api_changes": [],
+      "style_changes": [
+        {
+          "description": "サイドバーがposition: fixed + transformになることで、メインコンテンツのレイアウト計算が変わる",
+          "migration_required": false
+        }
+      ],
+      "behavior_changes": [
+        {
+          "description": "サイドバー閉じ時にDOM上では幅72のサイドバーが存在し続ける(transform: -translate-x-full)",
+          "migration_required": false
+        }
+      ]
+    },
+    "dependencies_and_integrations": {
+      "internal_dependencies": [
+        {
+          "module": "SidebarContext",
+          "impact": "isOpen状態の利用方法は変わらないが、width状態の必要性を再評価"
+        },
+        {
+          "module": "useIsMobile hook",
+          "impact": "影響なし"
+        }
+      ],
+      "external_dependencies": [
+        {
+          "module": "Tailwind CSS",
+          "impact": "CSS変数のJITサポートを使用(w-[var(--sidebar-width)])"
+        }
+      ]
+    }
+  },
+  "summary": "Issue #112の設計方針書に対する影響分析レビューを実施した。主な懸念点は2つ: (1) z-index競合リスク - SIDEBARのz-30がWorktreeDetailRefactored.tsxのモバイル固定要素(z-30)と競合する可能性がある (2) padding-left即時変更によるコンテンツジャンプ - サイドバーがスムーズにスライドする間にメインコンテンツのpaddingが即座に変わることでUX低下の恐れがある。テストカバレッジについては、aria-hidden属性の検証やSidebarToggle配置変更のテスト、E2EでのiPadビューポートテストが不足している。CSS変数の導入はDRY原則に沿っているが、既存のTypeScript定数(DEFAULT_SIDEBAR_WIDTH)との二重管理を避ける方針を明確にする必要がある。全体として設計は妥当だが、z-index競合の解消とpadding変更の視覚的影響の検討を実装前に行うことを推奨する。"
+}

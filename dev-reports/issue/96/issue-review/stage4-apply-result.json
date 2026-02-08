@@ -1,0 +1,77 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 96,
+  "applied_findings": [
+    {
+      "id": "MF-1",
+      "category": "整合性",
+      "issue": "server.tsで環境変数を直接参照している",
+      "action": "「0. 実装前提条件」セクションを新規追加。server.tsの環境変数参照修正（MCBD_* -> env.ts利用）を実装前の必須作業として明記。修正前後のコード例を記載。",
+      "status": "applied"
+    },
+    {
+      "id": "MF-2",
+      "category": "影響範囲",
+      "issue": ".npmignore が存在しない",
+      "action": "「3. 作成対象ファイル」セクションを新規追加。.npmignoreを必須ファイルとしてリスト化し、除外対象の具体的な内容（tests/, docs/, dev-reports/, .github/等）を明記。",
+      "status": "applied"
+    },
+    {
+      "id": "MF-3",
+      "category": "依存関係",
+      "issue": "better-sqlite3のネイティブモジュール対応",
+      "action": "「5. better-sqlite3のクロスプラットフォーム対応」セクションを拡充。ドキュメント追加内容（ビルドツール要件、トラブルシューティング）を具体的に記載。postinstallスクリプトの検討内容を追記。ドキュメント要件にdocs/DEPLOYMENT.mdの更新を追加。",
+      "status": "applied"
+    },
+    {
+      "id": "SF-1",
+      "category": "影響範囲",
+      "issue": "既存シェルスクリプトとの整合性確認",
+      "action": "「4. 既存スクリプトとの関係」セクションに移行方針を追加。移行期間（6ヶ月）、Deprecation警告、ドキュメント更新方針、削除予定（v2.0.0）を明記。",
+      "status": "applied"
+    },
+    {
+      "id": "SF-2",
+      "category": "テスト",
+      "issue": "CLIコマンドのテスト方針が未定義",
+      "action": "「テスト要件」セクションを受け入れ条件に新規追加。CLIエントリポイント、各コマンド（init, start, stop, status）、依存関係チェックのユニットテスト、統合テスト（E2E）を明記。",
+      "status": "applied"
+    },
+    {
+      "id": "SF-3",
+      "category": "CI/CD",
+      "issue": "npm publish ワークフローが未定義",
+      "action": "「7. CI/CD 拡張」セクションを新規追加。.github/workflows/publish.ymlの内容（トリガー、処理フロー）を明記。「CI/CD 要件」セクションを受け入れ条件に追加。",
+      "status": "applied"
+    },
+    {
+      "id": "SF-4",
+      "category": "セキュリティ",
+      "issue": "npm publish 時の認証情報管理",
+      "action": "「6. npm registry 公開方針」セクションに「認証情報管理」を追加。NPM_TOKENのGitHub Secrets管理、CI/CD経由のみでの使用、ローカル環境でのpublish禁止を明記。",
+      "status": "applied"
+    }
+  ],
+  "skipped_findings": [],
+  "nice_to_have_items": [
+    {
+      "id": "NTH-1",
+      "issue": "npx commandmate サポートの詳細",
+      "reason": "初回イテレーションではスキップ。代替案セクションで「補助的にサポート」と記載済み。詳細は実装フェーズで対応。"
+    },
+    {
+      "id": "NTH-2",
+      "issue": "Windows WSL2 対応の検証計画",
+      "reason": "初回イテレーションではスキップ。別Issueでの対応を想定。プラットフォーム要件にはLinux (x64)のみ記載。"
+    },
+    {
+      "id": "NTH-3",
+      "issue": "PM2 連携の詳細仕様",
+      "reason": "初回イテレーションではスキップ。start コマンドの--pm2オプションとして言及済み。詳細仕様は実装フェーズで定義。"
+    }
+  ],
+  "summary": "Stage 3（影響範囲レビュー）の指摘事項7件（Must Fix: 3件、Should Fix: 4件）をすべてGitHub Issue #96に反映しました。主な変更点: (1) server.tsの環境変数参照修正を実装前提条件として追加、(2) .npmignoreを作成対象ファイルに追加し除外設定内容を明記、(3) better-sqlite3のビルドツール要件・トラブルシューティングを具体化、(4) 既存シェルスクリプトの移行方針（6ヶ月移行期間、v2.0.0で削除予定）を明確化、(5) テスト要件セクションを新設、(6) CI/CD拡張セクション（npm publishワークフロー）を新設、(7) 認証情報管理方針（NPM_TOKEN、GitHub Secrets）を追記。Nice to Have項目3件は実装フェーズでの対応を想定しスキップ。",
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/96",
+  "updated_at": "2026-01-31"
+}

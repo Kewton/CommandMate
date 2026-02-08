@@ -1,0 +1,409 @@
+{
+  "issue_number": 179,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-08",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "Issueの実装タスクに含まれていないドキュメントファイルが少なくとも7件、AUTH_TOKENへの参照を含んでおり、更新漏れのリスクがある。具体的には docs/concept.md, docs/architecture.md, docs/user-guide/webapp-guide.md, docs/internal/swe-agents.md, docs/internal/requirements-design.md, docs/internal/PRODUCTION_CHECKLIST.md, docs/internal/TESTING_GUIDE.md がIssueの実装タスクに含まれていない。",
+        "location": "## 実装タスク > ドキュメント更新 セクション",
+        "recommendation": "以下のドキュメント更新を実装タスクに追加する: (1) docs/concept.md 行165のCM_AUTH_TOKEN参照削除、(2) docs/architecture.md 行77,451,469-470のMCBD_AUTH_TOKEN参照をリバースプロキシ方式に書き換え、(3) docs/user-guide/webapp-guide.md 行262のCM_AUTH_TOKEN参照削除、(4) docs/internal/PRODUCTION_CHECKLIST.md 行30,112,330のCM_AUTH_TOKENチェック項目更新、(5) docs/internal/TESTING_GUIDE.md 行28,385のCM_AUTH_TOKEN参照削除、(6) docs/internal/swe-agents.md 行117,184,233のMCBD_AUTH_TOKEN参照更新、(7) docs/internal/requirements-design.md 行108,214のNFR-SEC-02要件更新。",
+        "evidence": "grepで確認: docs/concept.md:165, docs/architecture.md:77,451,469, docs/user-guide/webapp-guide.md:262, docs/internal/PRODUCTION_CHECKLIST.md:30,112,330, docs/internal/TESTING_GUIDE.md:28,385, docs/internal/swe-agents.md:117,184,233, docs/internal/requirements-design.md:108,214"
+      },
+      {
+        "id": "MF-2",
+        "category": "破壊的変更",
+        "issue": "env.tsのgetEnv()関数からCM_AUTH_TOKENの必須チェック（行228-229）を削除した場合、CM_BIND=0.0.0.0設定時にサーバーが認証なしで全APIを公開する状態になる。しかし、middleware.tsも同時に削除されるため、APIは完全に無防備になる。このセキュリティリスクの移行パスが不十分。Issueでは commandmate init に警告メッセージを追加する計画はあるが、既存ユーザーが commandmate init を再実行せずに commandmate start だけで運用を続ける場合、警告なしに認証がなくなる。",
+        "location": "## 解決策 > 3. commandmate init での警告メッセージ セクション",
+        "recommendation": "commandmate start 実行時にもCM_BIND=0.0.0.0の場合に「認証機能は削除されました。外部公開する場合はリバースプロキシでの認証設定を推奨します。」旨の警告メッセージを出力するタスクを追加する。start.ts行168-174とdaemon.ts行78-84の既存セキュリティ警告ロジックを「AUTH_TOKEN未設定警告」から「リバースプロキシ推奨警告」に置換する方式が適切。",
+        "evidence": "src/cli/commands/start.ts 行168-174: 現在のCM_BIND=0.0.0.0警告ロジック、src/cli/utils/daemon.ts 行78-84: 同様の警告ロジック。Issueの実装タスクではこれらを「削除」と記載しているが、リバースプロキシ推奨警告への「置換」が安全。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "依存関係",
+        "issue": "EnvSetupクラスのgenerateAuthToken()メソッド（env-setup.ts行278-280）は認証トークン削除後に不要になるが、Issueの実装タスクにこのメソッドの削除が明記されていない。init.tsの行94-95でこのメソッドが呼ばれており、連鎖的な修正が必要。",
+        "location": "## 実装タスク > CLI側 セクション",
+        "recommendation": "EnvSetup.generateAuthToken()メソッドの削除を実装タスクに追加する。併せてinit.tsの行90-100（enableExternal分岐内のauthToken生成・表示ロジック全体）の削除も明記する。",
+        "evidence": "src/cli/utils/env-setup.ts 行278-280: generateAuthToken()メソッド定義、src/cli/commands/init.ts 行94-95: envSetup.generateAuthToken()呼び出し"
+      },
+      {
+        "id": "SF-2",
+        "category": "依存関係",
+        "issue": "api-client.tsのfetchApi関数内のclientAuthTokenWarnedフラグ（行45）とdeprecation警告ロジック（行57-64）はAUTH_TOKEN削除に伴い不要になるが、Issueの実装タスクでは「Authorizationヘッダー送信を削除」とのみ記載されている。Authorizationヘッダー送信だけでなく、authToken取得ロジック全体（行52-73）とclientAuthTokenWarned変数も削除対象として明記すべき。",
+        "location": "## 実装タスク > サーバー側 セクション",
+        "recommendation": "api-client.tsの削除範囲を明確化する: clientAuthTokenWarned変数（行45）、authToken取得ロジック（行52-65）、Authorizationヘッダー設定（行70-73）の全てを削除対象として記載する。",
+        "evidence": "src/lib/api-client.ts 行45: let clientAuthTokenWarned = false, 行54-55: NEXT_PUBLIC_CM_AUTH_TOKEN/NEXT_PUBLIC_MCBD_AUTH_TOKEN参照, 行58-64: deprecation警告ロジック, 行71-73: Authorizationヘッダー設定"
+      },
+      {
+        "id": "SF-3",
+        "category": "移行考慮",
+        "issue": "README.md行84に「commandmate init で外部アクセスを有効にすると、CM_BIND=0.0.0.0 と CM_AUTH_TOKEN が自動設定されます」と記載されている。この記述は認証削除後に不正確になるが、Issueのドキュメント更新タスクにREADME.mdの更新が含まれていない。",
+        "location": "## 実装タスク > ドキュメント更新 セクション",
+        "recommendation": "README.mdの「モバイルからのアクセス」セクション（行82-84）を更新するタスクを追加する。CM_AUTH_TOKENの自動設定への言及を削除し、外部アクセス時のリバースプロキシ推奨を記載する。",
+        "evidence": "README.md 行84: 'commandmate init で外部アクセスを有効にすると、CM_BIND=0.0.0.0 と CM_AUTH_TOKEN が自動設定されます'"
+      },
+      {
+        "id": "SF-4",
+        "category": "テスト範囲",
+        "issue": "middleware.tsの認証ロジックを削除する場合、middleware.ts自体をどう扱うか（ファイル自体を削除するか、空のパススルーとして残すか）によってテスト戦略が変わる。現在のmiddleware.tsはAPI認証のみを担当しており、認証削除後はファイルごと削除可能だが、将来の拡張（レート制限、CORS等）を見据えて空のスケルトンを残すかの判断が明示されていない。tests/unit/middleware.test.tsも全テストケースが認証テストであり、ファイル削除の判断が必要。",
+        "location": "## 実装タスク > サーバー側 セクション",
+        "recommendation": "middleware.tsのファイル自体の扱い（削除 vs 空スケルトン維持）を明記する。認証以外のmiddlewareロジックがない現状では、ファイルごと削除してtests/unit/middleware.test.tsも削除する方が明確。将来必要になった時点で再作成すればよい。",
+        "evidence": "src/middleware.ts: 全89行が認証ロジックのみ。config.matcher='/api/:path*'のみ。tests/unit/middleware.test.ts: 全182行が認証テストのみ。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CHANGELOG.mdにIssue #76で追加されたAUTH_TOKEN関連の変更履歴（行232, 252, 257-258, 266, 271）が記録されている。Issue #179完了時のCHANGELOG更新では、これらの過去エントリは変更不要だが、破壊的変更セクションにこれらの過去機能が削除された旨を明確に記載すると、利用者の移行が容易になる。",
+        "location": "## 実装タスク > ドキュメント更新 セクション",
+        "recommendation": "CHANGELOGの破壊的変更セクションに「Issue #76で導入されたCM_AUTH_TOKEN/MCBD_AUTH_TOKENフォールバック機能を削除」と明記する。",
+        "evidence": "CHANGELOG.md 行232, 252, 257-258, 266, 271にAUTH_TOKEN関連の過去変更が記録されている。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "依存関係",
+        "issue": "env.tsのENV_MAPPING定数（行24-33）からCM_AUTH_TOKEN: 'MCBD_AUTH_TOKEN'エントリを削除した場合、EnvKey型からCM_AUTH_TOKENが除外される。現在EnvKeyを参照している箇所（getEnvByKey関数など）への影響は軽微だが、ENV_MAPPINGの変更がEnvKey型に波及することを認識しておくとよい。",
+        "location": "## 実装タスク > サーバー側 セクション",
+        "recommendation": "env.tsのENV_MAPPINGからCM_AUTH_TOKENエントリの削除を明記する。型定義への波及はTypeScriptコンパイラが検出するため、tsc --noEmitの実行で網羅的に確認可能。",
+        "evidence": "src/lib/env.ts 行24-33: ENV_MAPPING定義, 行35: export type EnvKey = keyof typeof ENV_MAPPING"
+      }
+    ]
+  },
+  "impact_summary": {
+    "total_affected_files": 30,
+    "categories": {
+      "source_code": {
+        "count": 9,
+        "files": [
+          {
+            "file": "src/middleware.ts",
+            "impact": "HIGH",
+            "description": "ファイル全体が認証ロジック。削除またはスケルトン化。"
+          },
+          {
+            "file": "src/lib/api-client.ts",
+            "impact": "MEDIUM",
+            "description": "fetchApi関数内のauthToken取得・Authorizationヘッダー設定・deprecation警告を削除。約20行の変更。"
+          },
+          {
+            "file": "src/lib/env.ts",
+            "impact": "HIGH",
+            "description": "ENV_MAPPINGからCM_AUTH_TOKEN削除、Env interfaceからCM_AUTH_TOKEN削除、getEnv()内の必須チェック削除、isAuthRequired()関数削除。約15行の変更。"
+          },
+          {
+            "file": "src/lib/logger.ts",
+            "impact": "LOW",
+            "description": "SENSITIVE_PATTERNS配列からCM_AUTH_TOKEN/MCBD_AUTH_TOKENパターン削除。2行の変更。"
+          },
+          {
+            "file": "src/cli/commands/init.ts",
+            "impact": "MEDIUM",
+            "description": "authToken生成・表示ロジック削除、リバースプロキシ推奨警告の追加。約15行の変更。"
+          },
+          {
+            "file": "src/cli/commands/start.ts",
+            "impact": "LOW",
+            "description": "セキュリティ警告ロジックをリバースプロキシ推奨に置換。約5行の変更。"
+          },
+          {
+            "file": "src/cli/utils/daemon.ts",
+            "impact": "LOW",
+            "description": "セキュリティ警告ロジックをリバースプロキシ推奨に置換。約5行の変更。"
+          },
+          {
+            "file": "src/cli/utils/env-setup.ts",
+            "impact": "MEDIUM",
+            "description": "createEnvFile()内のCM_AUTH_TOKEN書き込み削除、validateConfig()内の認証チェック削除、generateAuthToken()メソッド削除。約10行の変更。"
+          },
+          {
+            "file": "src/cli/utils/security-logger.ts",
+            "impact": "LOW",
+            "description": "maskSensitiveData()内のCM_AUTH_TOKENマスキング削除。1行の変更。"
+          }
+        ]
+      },
+      "type_definitions": {
+        "count": 2,
+        "files": [
+          {
+            "file": "src/lib/env.ts",
+            "impact": "MEDIUM",
+            "description": "Env interfaceからCM_AUTH_TOKEN?フィールド削除、EnvKey型からCM_AUTH_TOKEN除外。"
+          },
+          {
+            "file": "src/cli/types/index.ts",
+            "impact": "LOW",
+            "description": "EnvConfig interfaceからCM_AUTH_TOKEN?フィールド削除。1行の変更。"
+          }
+        ]
+      },
+      "test_files": {
+        "count": 6,
+        "files": [
+          {
+            "file": "tests/unit/middleware.test.ts",
+            "impact": "HIGH",
+            "description": "全テストケース(182行)が認証テスト。middleware.ts削除時はファイルごと削除。"
+          },
+          {
+            "file": "tests/unit/env.test.ts",
+            "impact": "MEDIUM",
+            "description": "CM_AUTH_TOKEN関連テストの削除・更新。"
+          },
+          {
+            "file": "tests/unit/logger.test.ts",
+            "impact": "LOW",
+            "description": "MCBD_AUTH_TOKENマスキングテストの削除。"
+          },
+          {
+            "file": "tests/unit/cli/utils/env-setup.test.ts",
+            "impact": "MEDIUM",
+            "description": "CM_AUTH_TOKEN関連テストの削除・更新。"
+          },
+          {
+            "file": "tests/unit/cli/utils/daemon.test.ts",
+            "impact": "LOW",
+            "description": "セキュリティ警告テストの更新。"
+          },
+          {
+            "file": "tests/unit/cli/utils/security-logger.test.ts",
+            "impact": "LOW",
+            "description": "CM_AUTH_TOKENマスキングテストの削除。"
+          }
+        ]
+      },
+      "config_files": {
+        "count": 3,
+        "files": [
+          {
+            "file": ".env.example",
+            "impact": "MEDIUM",
+            "description": "CM_AUTH_TOKEN関連セクション(行22-29)の削除。"
+          },
+          {
+            "file": ".env.production.example",
+            "impact": "MEDIUM",
+            "description": "CM_AUTH_TOKENとNEXT_PUBLIC_CM_AUTH_TOKEN(行30-34)の削除。"
+          },
+          {
+            "file": "scripts/setup-env.sh",
+            "impact": "MEDIUM",
+            "description": "CM_AUTH_TOKENとNEXT_PUBLIC_CM_AUTH_TOKEN関連処理の削除(行50,301-304,312,373)。"
+          }
+        ]
+      },
+      "documentation": {
+        "count": 10,
+        "files": [
+          {
+            "file": "README.md",
+            "impact": "LOW",
+            "description": "行84のCM_AUTH_TOKEN参照更新。Issue実装タスクに未記載。"
+          },
+          {
+            "file": "docs/DEPLOYMENT.md",
+            "impact": "HIGH",
+            "description": "セキュリティセクション全面書き換え、環境変数一覧更新。"
+          },
+          {
+            "file": "docs/TRUST_AND_SAFETY.md",
+            "impact": "HIGH",
+            "description": "外部アクセス認証モデルの全面書き換え。旧名称(MCBD_*)の更新も必要。"
+          },
+          {
+            "file": "docs/migration-to-commandmate.md",
+            "impact": "MEDIUM",
+            "description": "AUTH_TOKENマッピング行の削除。"
+          },
+          {
+            "file": "docs/concept.md",
+            "impact": "LOW",
+            "description": "行165のCM_AUTH_TOKEN参照削除。Issue実装タスクに未記載。"
+          },
+          {
+            "file": "docs/architecture.md",
+            "impact": "MEDIUM",
+            "description": "行77,451,469-470のMCBD_AUTH_TOKEN参照更新。Issue実装タスクに未記載。"
+          },
+          {
+            "file": "docs/user-guide/webapp-guide.md",
+            "impact": "LOW",
+            "description": "行262のCM_AUTH_TOKEN参照削除。Issue実装タスクに未記載。"
+          },
+          {
+            "file": "docs/internal/PRODUCTION_CHECKLIST.md",
+            "impact": "MEDIUM",
+            "description": "行30,112,330のCM_AUTH_TOKENチェック項目更新。Issue実装タスクに未記載。"
+          },
+          {
+            "file": "docs/internal/TESTING_GUIDE.md",
+            "impact": "LOW",
+            "description": "行28,385のCM_AUTH_TOKEN参照削除。Issue実装タスクに未記載。"
+          },
+          {
+            "file": "docs/internal/swe-agents.md",
+            "impact": "LOW",
+            "description": "行117,184,233のMCBD_AUTH_TOKEN参照更新。Issue実装タスクに未記載。"
+          }
+        ]
+      },
+      "new_files": {
+        "count": 1,
+        "files": [
+          {
+            "file": "docs/security-guide.md",
+            "impact": "HIGH",
+            "description": "新規作成。リバースプロキシ認証の設定ガイド。"
+          }
+        ]
+      }
+    }
+  },
+  "breaking_changes": {
+    "summary": "CM_AUTH_TOKEN/NEXT_PUBLIC_CM_AUTH_TOKEN環境変数が無視されるようになり、middleware.tsによるAPI認証が完全に削除される。外部公開時は認証なしでAPIが露出するため、リバースプロキシでの認証が必須。",
+    "affected_users": [
+      {
+        "user_type": "CM_BIND=0.0.0.0で運用中のユーザー",
+        "impact": "CRITICAL",
+        "migration_action": "リバースプロキシ(Nginx等)での認証設定が必須。認証なしの期間が生じないよう、アップグレード前にリバースプロキシを設定する必要がある。"
+      },
+      {
+        "user_type": "CM_BIND=127.0.0.1で運用中のユーザー",
+        "impact": "NONE",
+        "migration_action": "対応不要。ローカルホストのみのアクセスのため認証は元々無効。"
+      },
+      {
+        "user_type": "CI/CDパイプラインでCM_AUTH_TOKENを設定しているユーザー",
+        "impact": "LOW",
+        "migration_action": "CM_AUTH_TOKEN環境変数は無視されるため、設定の削除は任意。エラーにはならない。"
+      }
+    ]
+  },
+  "security_implications": {
+    "risk_level": "MEDIUM",
+    "details": "認証機能の削除自体は、現在の認証がセキュリティシアター（NEXT_PUBLIC_*でクライアントJSにトークンが埋め込まれる）であることを考慮すると、実質的なセキュリティ低下は軽微。ただし、形式的にでも認証ヘッダーが存在していた状態から完全に無防備になるため、外部公開ユーザーへの移行告知が重要。",
+    "mitigations": [
+      "commandmate start/daemon実行時のCM_BIND=0.0.0.0警告を維持（削除ではなくリバースプロキシ推奨に置換）",
+      "CHANGELOG/リリースノートでの破壊的変更の明確な告知",
+      "docs/security-guide.md新規作成によるリバースプロキシ設定手順の提供",
+      "受け入れ条件に「既存のCM_AUTH_TOKEN設定があっても動作に影響なし（無視される）」を含む（後方互換性確保）"
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/middleware.ts",
+      "relevance": "認証ミドルウェア本体。削除対象。"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "クライアント側Auth処理。削除対象。"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "ENV_MAPPING, Env interface, getEnv(), isAuthRequired()。削除対象。"
+    },
+    {
+      "file": "src/lib/logger.ts",
+      "relevance": "AUTH_TOKENマスキングパターン。削除対象。"
+    },
+    {
+      "file": "src/cli/commands/init.ts",
+      "relevance": "authToken生成・表示。削除対象。"
+    },
+    {
+      "file": "src/cli/commands/start.ts",
+      "relevance": "セキュリティ警告。置換対象。"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "セキュリティ警告。置換対象。"
+    },
+    {
+      "file": "src/cli/utils/env-setup.ts",
+      "relevance": "envファイル生成、validateConfig、generateAuthToken。削除対象。"
+    },
+    {
+      "file": "src/cli/utils/security-logger.ts",
+      "relevance": "AUTH_TOKENマスキング。削除対象。"
+    },
+    {
+      "file": "src/cli/types/index.ts",
+      "relevance": "EnvConfig interface。修正対象。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "README.md",
+      "relevance": "CM_AUTH_TOKEN参照の更新（Issue未記載）"
+    },
+    {
+      "file": ".env.example",
+      "relevance": "CM_AUTH_TOKEN削除"
+    },
+    {
+      "file": ".env.production.example",
+      "relevance": "CM_AUTH_TOKEN, NEXT_PUBLIC_CM_AUTH_TOKEN削除"
+    },
+    {
+      "file": "scripts/setup-env.sh",
+      "relevance": "AUTH_TOKEN関連処理削除"
+    },
+    {
+      "file": "docs/DEPLOYMENT.md",
+      "relevance": "セキュリティセクション全面書き換え"
+    },
+    {
+      "file": "docs/TRUST_AND_SAFETY.md",
+      "relevance": "認証モデル全面書き換え"
+    },
+    {
+      "file": "docs/migration-to-commandmate.md",
+      "relevance": "AUTH_TOKENマッピング削除"
+    },
+    {
+      "file": "docs/concept.md",
+      "relevance": "CM_AUTH_TOKEN参照削除（Issue未記載）"
+    },
+    {
+      "file": "docs/architecture.md",
+      "relevance": "MCBD_AUTH_TOKEN参照更新（Issue未記載）"
+    },
+    {
+      "file": "docs/user-guide/webapp-guide.md",
+      "relevance": "CM_AUTH_TOKEN参照削除（Issue未記載）"
+    },
+    {
+      "file": "docs/internal/PRODUCTION_CHECKLIST.md",
+      "relevance": "CM_AUTH_TOKENチェック項目更新（Issue未記載）"
+    },
+    {
+      "file": "docs/internal/TESTING_GUIDE.md",
+      "relevance": "CM_AUTH_TOKEN参照削除（Issue未記載）"
+    },
+    {
+      "file": "docs/internal/swe-agents.md",
+      "relevance": "MCBD_AUTH_TOKEN参照更新（Issue未記載）"
+    },
+    {
+      "file": "docs/internal/requirements-design.md",
+      "relevance": "NFR-SEC-02要件更新（Issue未記載）"
+    },
+    {
+      "file": "docs/security-guide.md",
+      "relevance": "新規作成（リバースプロキシ設定ガイド）"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "stage": 1,
+  "stage_name": "指摘事項対応",
+  "applied_date": "2026-02-01",
+  "skipped": true,
+  "skip_reason": "Must Fix項目が0件のため、設計方針書の更新不要",
+  "applied_items": [],
+  "summary": "Stage 1レビューでMust Fix項目が検出されなかったため、設計方針書の更新をスキップ"
+}

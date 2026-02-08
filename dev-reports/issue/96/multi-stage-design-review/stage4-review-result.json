@@ -1,0 +1,224 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 96,
+  "review_date": "2026-01-31",
+  "design_doc": "dev-reports/design/issue-96-npm-cli-design-policy.md",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-SEC-1",
+        "category": "A03: インジェクション",
+        "title": "コマンドインジェクション脆弱性のリスク",
+        "description": "設計書21.8節のgetProcessUsingPort()において、ポート番号を直接シェルコマンドに埋め込んでいる。execSync(`lsof -i :${port} -t`)のportがユーザー入力由来の場合、コマンドインジェクションの可能性がある。",
+        "location": "設計書21.8節 getProcessUsingPort()",
+        "current": "execSync(`lsof -i :${port} -t`, { encoding: 'utf-8' })",
+        "recommendation": "1. ポート番号は必ず整数バリデーションを行う（parseInt + Number.isInteger）\n2. 可能であればexecSyncではなくNode.js APIまたはspawnWithArgsを使用\n3. シェル経由の実行を避け、spawnで配列引数を渡す形式を推奨",
+        "risk_level": "high",
+        "owasp_reference": "A03:2021"
+      },
+      {
+        "id": "MF-SEC-2",
+        "category": "A05: セキュリティ設定ミス",
+        "title": "PIDファイルのレースコンディション",
+        "description": "設計書4.3.4節のPidManagerにおいて、PIDファイルの読み書きにTOCTOU（Time of Check to Time of Use）問題が存在する可能性。exists()で確認後にwritePid()を呼ぶ間に別プロセスがファイルを作成する可能性。",
+        "location": "設計書4.3.4節 PidManager",
+        "current": "exists()とwritePid()が独立したメソッドとして設計",
+        "recommendation": "1. O_EXCLフラグを使用したアトミック書き込みを実装\n2. ファイルロック（flock相当）の使用を検討\n3. writePid()をアトミックに「存在確認+書き込み」を行う形式に変更",
+        "risk_level": "medium",
+        "owasp_reference": "A05:2021"
+      },
+      {
+        "id": "MF-SEC-3",
+        "category": "npm サプライチェーン",
+        "title": "npm publish CI/CDワークフローのセキュリティ強化",
+        "description": "設計書14.2節のpublish.ymlにおいて、最小権限の原則やOIDC認証が適用されていない。NPM_TOKENがsecretsに保存されるが、トークンの権限範囲や有効期限が未定義。",
+        "location": "設計書14.2節 .github/workflows/publish.yml",
+        "current": "secrets.NPM_TOKENを使用した基本的な認証のみ",
+        "recommendation": "1. npm provenance（--provenance）の追加でSLSA準拠のパッケージ公開\n2. id-tokenの権限設定とnpm publishにprovenance追加\n3. NPM Automation tokenの使用（publish専用、2FA不要）\n4. 環境（Environment）による保護を追加",
+        "risk_level": "high",
+        "owasp_reference": "A08:2021"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-SEC-1",
+        "category": "A02: 暗号化の失敗",
+        "title": "認証トークン生成のエントロピー確認",
+        "description": "設計書7.1節でrandomBytes(32)を使用しているが、生成されたトークンの安全な保管方法（.envファイルのパーミッション）が明示されていない。",
+        "location": "設計書7.1節 generateAuthToken()",
+        "current": "randomBytes(32).toString('hex')のみ記載",
+        "recommendation": "1. .envファイルのパーミッションを0600に設定する処理を追加\n2. トークン生成時に.envファイルの権限を自動設定\n3. 0.0.0.0バインド時のトークン必須チェック後のセキュアな保存を保証",
+        "risk_level": "medium",
+        "owasp_reference": "A02:2021"
+      },
+      {
+        "id": "SF-SEC-2",
+        "category": "A09: セキュリティログと監視の不備",
+        "title": "CLIセキュリティイベントのログ記録",
+        "description": "CLIコマンドの実行ログ（特にstart/stop/init）のセキュリティイベントが設計されていない。不正なstop試行やforce stop実行の監査証跡が残らない。",
+        "location": "設計書全体（ログ設計なし）",
+        "current": "CLIロガーは色付き出力のみ（4.3.3節）",
+        "recommendation": "1. start/stop/initコマンドの実行ログをファイルに記録\n2. --force stop使用時は警告ログを出力\n3. 認証トークン生成イベントのログ記録（トークン値はマスク）",
+        "risk_level": "medium",
+        "owasp_reference": "A09:2021"
+      },
+      {
+        "id": "SF-SEC-3",
+        "category": "A03: インジェクション",
+        "title": "環境変数値のサニタイズ",
+        "description": "設計書4.3.2節のenv-setup.tsで対話入力を受け付けるが、入力値のサニタイズ（改行文字、制御文字、シェルメタ文字）が設計されていない。",
+        "location": "設計書4.3.2節 env-setup.ts promptForConfig()",
+        "current": "readline/readlinePromisesで対話入力を受け付け",
+        "recommendation": "1. 入力値から改行文字・制御文字を除去\n2. パス入力はpath.normalize()でサニタイズ\n3. ポート番号は整数パース後にバリデーション\n4. .envへの書き込み時にキー・値をエスケープ",
+        "risk_level": "medium",
+        "owasp_reference": "A03:2021"
+      },
+      {
+        "id": "SF-SEC-4",
+        "category": "A06: 脆弱で古いコンポーネント",
+        "title": "依存関係の脆弱性チェック自動化",
+        "description": "設計書14.2節のCI/CDワークフローにnpm auditやdependabotの設定が含まれていない。commanderパッケージの脆弱性監視が未設計。",
+        "location": "設計書14.2節",
+        "current": "npm ci, npm test, npm buildのみ",
+        "recommendation": "1. npm audit --audit-level=highをCIに追加\n2. dependabot.ymlの設定を追加\n3. commander等の依存関係の定期的な更新チェック",
+        "risk_level": "medium",
+        "owasp_reference": "A06:2021"
+      },
+      {
+        "id": "SF-SEC-5",
+        "category": "npm パッケージセキュリティ",
+        "title": ".npmignoreによる機密ファイル漏洩防止の強化",
+        "description": "設計書14.1節の.npmignoreにセキュリティ関連ファイルのパターンが不足。.npmrcやnpm-debug.logなどが除外されていない。",
+        "location": "設計書14.1節 .npmignore",
+        "current": "基本的な開発ファイルのみ除外",
+        "recommendation": "1. .npmrc（npm認証情報）を追加\n2. npm-debug.logを追加\n3. .DS_Store, Thumbs.dbなどOS固有ファイルを追加\n4. .git/を追加（npm packでは自動除外だが明示推奨）\n5. secrets/やcredentials/パターンを追加",
+        "risk_level": "medium",
+        "owasp_reference": "A01:2021"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-SEC-1",
+        "category": "A04: 安全でない設計",
+        "title": "SIGTERMハンドリングのグレースフル停止",
+        "description": "設計書4.2.3節のstopコマンドでSIGTERM送信後の待機処理があるが、タイムアウト値やグレースフル停止の詳細が未定義。",
+        "location": "設計書4.2.3節 stopコマンド",
+        "current": "SIGTERM送信 -> 停止待機 -> PIDファイル削除",
+        "recommendation": "1. SIGTERMタイムアウト値を設定可能に（デフォルト10秒）\n2. タイムアウト後は自動的にSIGKILLにフォールバック\n3. グレースフル停止中のログ出力",
+        "risk_level": "low"
+      },
+      {
+        "id": "NTH-SEC-2",
+        "category": "A01: 認証の不備",
+        "title": "トークン比較のタイミング攻撃対策",
+        "description": "ローカル開発ツールではあるが、0.0.0.0バインド時のトークン認証において、crypto.timingSafeEqualの使用を検討すべき。",
+        "location": "src/lib/env.tsの認証ロジック（既存実装）",
+        "current": "通常の文字列比較（推定）",
+        "recommendation": "外部アクセス許可時はcrypto.timingSafeEqualでトークン比較を行う。ただしローカル開発ツールとしては現状で十分な可能性あり。",
+        "risk_level": "low"
+      },
+      {
+        "id": "NTH-SEC-3",
+        "category": "postinstall セキュリティ",
+        "title": "postinstallスクリプト回避の設計",
+        "description": "npm installでのpostinstallスクリプトはサプライチェーン攻撃のベクトルになりうる。本設計ではpostinstallを使用していないが、今後の追加を禁止するポリシーが望ましい。",
+        "location": "package.json（将来）",
+        "current": "postinstallスクリプトなし",
+        "recommendation": "1. package.jsonにpostinstallスクリプトを追加しないポリシーを明文化\n2. 必要な初期化はcommmandmate initコマンドで明示的に実行",
+        "risk_level": "low"
+      }
+    ]
+  },
+  "owasp_compliance": {
+    "A01_broken_access_control": {
+      "status": "conditional_pass",
+      "notes": "0.0.0.0バインド時のCM_AUTH_TOKEN必須チェックは実装済み。PIDファイルパーミッション0600設定済み。ただしトークン比較のタイミング攻撃対策は未実装（NTH-SEC-2）。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "pass",
+      "notes": "crypto.randomBytes(32)による256ビットエントロピーのトークン生成を設計。Node.js標準cryptoモジュール使用でopenssl依存を排除。.envファイルパーミッション設定の明示が望ましい（SF-SEC-1）。"
+    },
+    "A03_injection": {
+      "status": "needs_fix",
+      "notes": "MF-SEC-1: getProcessUsingPort()でのコマンドインジェクションリスク。SF-SEC-3: 対話入力のサニタイズ未設計。spawnWithArgs形式の採用を推奨。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "抽象化インターフェース（DIP）、設定外部化（OCP）により安全な設計。PIDファイルによるプロセス管理は業界標準パターン。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "needs_fix",
+      "notes": "MF-SEC-2: PIDファイルのTOCTOU問題。アトミック書き込みの実装が必要。XDG_RUNTIME_DIR対応（SF-3 Stage3）は適切。"
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "conditional_pass",
+      "notes": "commander v12の使用を明記。ただしnpm audit自動化（SF-SEC-4）が未設計。dependabotの設定追加を推奨。"
+    },
+    "A07_identification_authentication_failures": {
+      "status": "pass",
+      "notes": "外部アクセス時の認証トークン必須化は適切。ローカル（127.0.0.1）バインド時は認証不要という設計は妥当。"
+    },
+    "A08_software_data_integrity_failures": {
+      "status": "needs_fix",
+      "notes": "MF-SEC-3: npm publishワークフローにprovenance未設定。SLSA準拠のサプライチェーンセキュリティ強化が必要。"
+    },
+    "A09_security_logging_monitoring_failures": {
+      "status": "needs_improvement",
+      "notes": "SF-SEC-2: CLIセキュリティイベントのログ設計が不足。start/stop/initの監査証跡を追加すべき。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "CLIツールのためSSRFリスクは該当なし。外部URLへのリクエストは行わない設計。"
+    }
+  },
+  "cli_specific_security": {
+    "command_injection": {
+      "status": "needs_fix",
+      "notes": "MF-SEC-1で指摘。execSyncでのシェル展開リスクあり。spawn配列引数形式への変更を推奨。"
+    },
+    "environment_variables": {
+      "status": "pass",
+      "notes": "getEnvByKey()による型安全な環境変数アクセス。フォールバックチェーンも適切に設計。"
+    },
+    "auth_token_storage": {
+      "status": "conditional_pass",
+      "notes": ".envファイルへの保存は一般的だがパーミッション設定の明示が必要。トークンのログマスキングは既存logger.tsで対応済み。"
+    },
+    "pid_file_permissions": {
+      "status": "pass",
+      "notes": "設計書7.2節でmode: 0o600を明記。所有者のみ読み書き可能で適切。"
+    },
+    "path_operations": {
+      "status": "pass",
+      "notes": "path.resolve()による絶対パス変換、isPathSafe()によるトラバーサル防止が既存実装で確認済み。"
+    }
+  },
+  "npm_package_security": {
+    "supply_chain": {
+      "status": "needs_improvement",
+      "notes": "npm provenanceの設定追加が必要（MF-SEC-3）。"
+    },
+    "dependency_safety": {
+      "status": "conditional_pass",
+      "notes": "commander単一依存は最小限で良好。npm audit自動化の追加を推奨。"
+    },
+    "postinstall_risk": {
+      "status": "pass",
+      "notes": "postinstallスクリプト不使用で安全。今後も使用しないポリシーを維持すべき。"
+    },
+    "npmignore_coverage": {
+      "status": "needs_improvement",
+      "notes": "SF-SEC-5: .npmrc等の追加が必要。"
+    }
+  },
+  "summary": "Issue #96のnpm CLI設計は、基本的なセキュリティ設計が適切に行われているが、3点の重要な修正が必要。(1) コマンドインジェクション対策としてexecSyncからspawnへの変更、(2) PIDファイルのアトミック書き込み実装、(3) npm publishワークフローへのprovenance追加。OWASP Top 10の観点では、A03（インジェクション）、A05（設定ミス）、A08（データ整合性）で対応が必要。認証トークン生成、PIDファイルパーミッション、環境変数バリデーションは適切に設計されている。npm パッケージとしては、postinstallスクリプト不使用で安全であり、依存関係も最小限に抑えられている。",
+  "risk_assessment": {
+    "overall_risk": "medium",
+    "critical_findings": 0,
+    "high_findings": 2,
+    "medium_findings": 6,
+    "low_findings": 3,
+    "recommendation": "MF-SEC-1（コマンドインジェクション）とMF-SEC-3（npm provenance）を優先的に対応すること。これらはセキュリティ上の直接的なリスクとサプライチェーンセキュリティに関わる重要事項。"
+  }
+}

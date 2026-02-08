@@ -1,0 +1,121 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "review_date": "2026-02-02",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "principle": "DRY",
+        "severity": "high",
+        "location": "src/cli/commands/start.ts:17, stop.ts:14, status.ts:13",
+        "issue": "PID_FILE定数が3つのファイルで同じロジック`join(process.cwd(), '.commandmate.pid')`で重複定義されている。設計書の修正方針ではgetPidFilePath()関数を各ファイルに追加する予定だが、これも3回の重複となる。",
+        "recommendation": "getPidFilePath()をenv-setup.tsまたは新規のpaths.tsに集約し、start.ts/stop.ts/status.tsはそれをimportして使用する。getConfigDir()を既に持つenv-setup.tsに追加するのが適切。"
+      },
+      {
+        "id": "MF-2",
+        "principle": "DRY",
+        "severity": "high",
+        "location": "src/cli/commands/start.ts:25-26, daemon.ts:41-44",
+        "issue": "envPathの取得とCM_PORT環境変数の設定ロジックがstart.tsとdaemon.tsで重複している。設計書の方針ではdaemon.tsでもdotenvで.envを読み込む予定だが、start.ts側の処理との責務が曖昧になる。",
+        "recommendation": "環境変数読み込み責務をdaemon.tsに一元化するか、共通のenv-loader.tsモジュールを作成する。daemon.tsのstart()が.envを読み込み、呼び出し元のstart.tsはenvPathの存在確認のみを行う設計が望ましい。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "principle": "SRP",
+        "severity": "medium",
+        "location": "src/cli/commands/start.ts:22-141",
+        "issue": "startCommand()がフォアグラウンド起動とデーモン起動の両方のロジックを含み、複数の責務を持っている。条件分岐により2つの異なるコードパスが存在する。",
+        "recommendation": "startForeground()とstartDaemon()の2つのプライベート関数に分割し、startCommand()はオプションに応じてどちらかを呼び出すディスパッチャとして機能させる。"
+      },
+      {
+        "id": "SF-2",
+        "principle": "OCP",
+        "severity": "medium",
+        "location": "src/cli/utils/env-setup.ts:46-58",
+        "issue": "isGlobalInstall()がハードコードされた文字列パターンで判定を行っている。新しいパッケージマネージャやインストール方式が追加された場合、この関数を直接修正する必要がある。",
+        "recommendation": "パターンを設定ファイルまたは定数配列として外部化し、新規パターン追加時に関数本体を修正せずに済むようにする。ただし、現時点でのパターンは十分に網羅的であり、YAGNIの観点から緊急性は低い。"
+      },
+      {
+        "id": "SF-3",
+        "principle": "DIP",
+        "severity": "medium",
+        "location": "src/cli/commands/start.ts:33, stop.ts:21, status.ts:20",
+        "issue": "各コマンドがDaemonManagerを直接インスタンス化しており、テストでのモック差し替えが困難。高レベルのコマンドモジュールが低レベルのDaemonManager具象クラスに直接依存している。",
+        "recommendation": "DaemonManagerのインターフェースを定義し、ファクトリ関数またはコンストラクタ注入で依存性を渡す設計を検討。ただし、CLIという単純なユースケースでは過度な抽象化となる可能性もあるため、テスト容易性とのバランスを考慮する。"
+      },
+      {
+        "id": "SF-4",
+        "principle": "KISS",
+        "severity": "low",
+        "location": "src/cli/utils/env-setup.ts:144-252",
+        "issue": "EnvSetupクラスにはcreateEnvFile, backupExisting, generateAuthToken, validateConfigという異なる粒度の責務が混在している。クラスとして抽象化する必然性が低い。",
+        "recommendation": "現状の設計でも動作するが、将来的にはEnvFileWriter, EnvValidator, TokenGeneratorなどに分離することで、各モジュールのテスト容易性が向上する。現時点では優先度低。"
+      }
+    ],
+    "good_practices": [
+      {
+        "principle": "SRP",
+        "location": "src/cli/utils/pid-manager.ts",
+        "description": "PidManagerクラスはPIDファイルの読み書きと削除という単一の責務のみを担当しており、DaemonManagerから適切に分離されている。SF-1コメントで設計意図も明記されている。"
+      },
+      {
+        "principle": "DRY",
+        "location": "src/cli/utils/env-setup.ts:27-33",
+        "description": "ENV_DEFAULTS定数でデフォルト値を一元管理しており、init.tsなど複数箇所から参照されている。"
+      },
+      {
+        "principle": "KISS",
+        "location": "src/cli/utils/env-setup.ts:66-93",
+        "description": "getEnvPath()とgetConfigDir()はシンプルな条件分岐で実装されており、過度な抽象化を避けている。"
+      },
+      {
+        "principle": "セキュリティ",
+        "location": "src/cli/utils/pid-manager.ts:61-83",
+        "description": "O_EXCLフラグを使用したアトミックなPIDファイル書き込みにより、TOCTOU競合状態を防止している。MF-SEC-2コメントで設計意図を明記。"
+      },
+      {
+        "principle": "DRY",
+        "location": "src/cli/commands/init.ts:190",
+        "description": "initコマンドは既にgetEnvPath()を使用しており、Issue #125の設計方針と一貫している。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "overall_assessment": "設計方針は全体的に妥当だが、DRY原則に関して2点の重要な改善が必要。getPidFilePath()の重複定義を避けるため、env-setup.tsへの集約を推奨。また、環境変数読み込みの責務分担をstart.tsとdaemon.ts間で明確化すべき。既存コードはPidManagerの分離やENV_DEFAULTSの集約など、良い設計パターンが既に適用されている。"
+  },
+  "design_doc_alignment": {
+    "principle_1_consistency": {
+      "status": "適合",
+      "note": "設計書の方針通り、全CLIコマンドで同じ設定ファイル解決ロジックを使用する設計となっている"
+    },
+    "principle_2_backward_compatibility": {
+      "status": "適合",
+      "note": "isGlobalInstall()によりローカルインストール時の動作は維持される"
+    },
+    "principle_3_srp": {
+      "status": "部分的適合",
+      "note": "設定ファイルパス解決はenv-setup.tsに集約されているが、getPidFilePath()が各コマンドファイルに分散する設計は改善の余地あり"
+    },
+    "principle_4_dry": {
+      "status": "要改善",
+      "note": "getPidFilePath()の3箇所重複を解消するため、env-setup.tsへの集約を推奨"
+    }
+  },
+  "reviewed_files": [
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/pid-manager.ts",
+    "src/cli/commands/init.ts"
+  ],
+  "timestamp": "2026-02-02T00:00:00Z"
+}

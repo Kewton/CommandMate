@@ -1,0 +1,70 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 112,
+  "review_date": "2026-02-01",
+  "focus_area": "設計原則",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "category": "DRY原則",
+        "description": "設計書のオーバーレイ型実装イメージでmain要素にmd:pl-72/md:pl-0を使用しているが、これはサイドバー幅(w-72)と重複する値。将来サイドバー幅を変更した際に複数箇所の修正が必要になる。",
+        "suggestion": "サイドバー幅をCSS変数（--sidebar-width）として定義し、一元管理する。または、Tailwindのカスタムユーティリティを使用して重複を排除する。例：`--sidebar-width: 18rem`を定義し、`w-[var(--sidebar-width)]`と`pl-[var(--sidebar-width)]`で参照する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "単一責任原則（SRP）",
+        "description": "AppShell.tsxがモバイルレイアウトとデスクトップレイアウトの両方を条件分岐で処理している。現状のコードは既にこの構造だが、transform方式に変更する際にロジックが複雑化する可能性がある。",
+        "suggestion": "レイアウトロジックをMobileLayout/DesktopLayoutコンポーネントに分離することを検討する。ただし、現状の規模では過度な分離は不要のため、将来的な拡張時に検討する程度で可。"
+      },
+      {
+        "id": "SF-002",
+        "category": "KISS原則",
+        "description": "設計書4.2項でSidebarToggleのfixed配置または内部配置への変更を検討しているが、現状のSidebarToggleはleft位置をisOpen状態で切り替える単純な実装（left-[284px]/left-2）になっている。transform方式への変更でこの位置計算が複雑化する可能性がある。",
+        "suggestion": "SidebarToggleをサイドバー内部（右端）に配置する方式を採用することで、サイドバーのtransformに追従し、位置計算ロジックを削除できる。これによりKISS原則に沿ったシンプルな実装になる。"
+      },
+      {
+        "id": "SF-003",
+        "category": "YAGNI原則",
+        "description": "設計書3.3項で代替案（プッシュ型）を記載しているが、採用しない方式の詳細実装イメージを設計書に残す必要性は低い。",
+        "suggestion": "代替案セクションは簡潔に「検討したが不採用」と理由を記載する程度に留め、詳細コードサンプルは削除する。ただし、決定プロセスを記録として残したい場合は現状維持でも可。"
+      },
+      {
+        "id": "SF-004",
+        "category": "DRY原則",
+        "description": "モバイルレイアウト（既存）とデスクトップレイアウト（変更後）でtransform方式のクラス名パターンが重複する。`translate-x-0`/`-translate-x-full`/`transition-transform duration-300 ease-out`が両方に記述される。",
+        "suggestion": "共通のトランジションクラス群を定数として切り出す。例：`const SIDEBAR_TRANSITION_CLASSES = 'transition-transform duration-300 ease-out'`をファイル上部に定義する。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NH-001",
+        "category": "開放閉鎖原則（OCP）",
+        "description": "z-index.tsへのSIDEBAR定数追加は適切だが、将来的にレイヤー階層が増えた場合の拡張性について言及がない。",
+        "suggestion": "z-index.tsのコメントにレイヤー追加時の命名規約や配置ルールを追記する。例：「10刻みで定義し、間に新規レイヤーを追加可能にする」など。"
+      },
+      {
+        "id": "NH-002",
+        "category": "KISS原則",
+        "description": "設計書109行目のmain要素のpad-left切り替え（md:pl-72/md:pl-0）について、トランジションが適用されるかの記載がない。padding変更にトランジションを適用するとwidth方式と同様のReflow問題が発生する可能性がある。",
+        "suggestion": "main要素のpadding変更はトランジションなし（即座に切り替え）で実装し、サイドバーのtransformアニメーションのみで視覚的な遷移を実現することを明記する。"
+      },
+      {
+        "id": "NH-003",
+        "category": "インタフェース分離原則（ISP）",
+        "description": "useSidebarContextが返す値（isOpen, isMobileDrawerOpen, closeMobileDrawer, toggle等）のうち、デスクトップとモバイルで必要な値が異なる。現状は全てを返すフックになっている。",
+        "suggestion": "現状の規模では問題ないが、将来的にコンテキストが肥大化した場合はuseDesktopSidebar/useMobileSidebarのような専用フックへの分離を検討する。今回の変更では不要。"
+      }
+    ]
+  },
+  "summary": "設計方針書は全体として適切に構成されており、問題点の分析・解決策・影響範囲が明確に記載されている。設計原則の観点では、DRY原則に関する指摘（サイドバー幅の重複定義）が最も重要な改善点である。SOLID原則については現状の規模感では大きな問題はなく、将来的な拡張時に検討すべき項目として記録した。KISS原則に沿った設計（SidebarToggleのサイドバー内部配置）を採用することで、実装がよりシンプルになる可能性がある。YAGNI原則については代替案の記載量を検討すべきだが、意思決定の記録として残す価値もある。",
+  "review_statistics": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "total_findings": 8
+  }
+}

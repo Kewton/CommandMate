@@ -1,0 +1,64 @@
+{
+  "issue_number": 96,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "total_tests": 2064,
+      "passed": 2064,
+      "failed": 0,
+      "coverage": {
+        "cli_utils": 93.36,
+        "cli_config": 100,
+        "cli_commands": 70.9,
+        "overall": 72.9
+      },
+      "static_analysis": {
+        "eslint_errors": 0,
+        "typescript_errors": 0
+      }
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_total": 12,
+      "scenarios_passed": 12,
+      "criteria_total": 11,
+      "criteria_passed": 11
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "CLIビルドステップ追加（npm run build:cli）",
+        "tsconfig.cli.json作成",
+        "テストカバレッジ向上（cli/commands: 70.9% -> 77.0%）",
+        ".gitignoreにdist追加"
+      ]
+    },
+    "documentation": {
+      "status": "completed",
+      "updated_files": [
+        "README.md - CLIコマンドセクション追加",
+        "CLAUDE.md - ファイル構成、CLIモジュール、開発コマンドセクション更新"
+      ]
+    }
+  },
+  "created_files": [
+    "bin/commandmate.js",
+    "src/cli/index.ts",
+    "src/cli/types/index.ts",
+    "src/cli/commands/init.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/stop.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/utils/logger.ts",
+    "src/cli/utils/preflight.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/pid-manager.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/utils/security-logger.ts",
+    "src/cli/config/cli-dependencies.ts",
+    "tsconfig.cli.json",
+    ".npmignore",
+    ".github/workflows/publish.yml"
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_date": "2026-02-01",
+  "security_score": "A",
+  "owasp_top10_check": {
+    "A01_Broken_Access_Control": "N/A",
+    "A02_Cryptographic_Failures": "N/A",
+    "A03_Injection": "pass",
+    "A04_Insecure_Design": "pass",
+    "A05_Security_Misconfiguration": "pass",
+    "A06_Vulnerable_and_Outdated_Components": "N/A",
+    "A07_Identification_and_Authentication_Failures": "N/A",
+    "A08_Software_and_Data_Integrity_Failures": "N/A",
+    "A09_Security_Logging_and_Monitoring_Failures": "N/A",
+    "A10_Server_Side_Request_Forgery": "N/A"
+  },
+  "owasp_details": {
+    "A01_Broken_Access_Control": {
+      "status": "N/A",
+      "reason": "本修正はクライアントサイドのUI表示ロジックのみ。アクセス制御に関する変更なし。"
+    },
+    "A02_Cryptographic_Failures": {
+      "status": "N/A",
+      "reason": "暗号化処理に関する変更なし。"
+    },
+    "A03_Injection": {
+      "status": "pass",
+      "reason": "z-index値はsrc/config/z-index.tsで定数定義（MAXIMIZED_EDITOR=40）されており、ユーザー入力は一切介在しない。XSS保護はrehype-sanitize [SEC-MF-001]により既存対策が維持される。"
+    },
+    "A04_Insecure_Design": {
+      "status": "pass",
+      "reason": "z-index階層設計が適切に管理されている（DROPDOWN=10 < MAXIMIZED_EDITOR=40 < MODAL=50 < TOAST=60 < CONTEXT_MENU=70）。条件緩和後も階層設計の整合性は維持される。"
+    },
+    "A05_Security_Misconfiguration": {
+      "status": "pass",
+      "reason": "z-index設定のみの変更であり、セキュリティ設定への影響なし。"
+    },
+    "A06_Vulnerable_and_Outdated_Components": {
+      "status": "N/A",
+      "reason": "新規ライブラリの追加なし。既存コンポーネントの条件分岐変更のみ。"
+    },
+    "A07_Identification_and_Authentication_Failures": {
+      "status": "N/A",
+      "reason": "認証/認可ロジックに関する変更なし。"
+    },
+    "A08_Software_and_Data_Integrity_Failures": {
+      "status": "N/A",
+      "reason": "データ整合性に関する変更なし。"
+    },
+    "A09_Security_Logging_and_Monitoring_Failures": {
+      "status": "N/A",
+      "reason": "ログ/監視機能に関する変更なし。"
+    },
+    "A10_Server_Side_Request_Forgery": {
+      "status": "N/A",
+      "reason": "サーバーサイド処理に関する変更なし。純粋なクライアントサイドUI修正。"
+    }
+  },
+  "z_index_security_analysis": {
+    "click_jacking_risk": "none",
+    "click_jacking_detail": "z-index値は内部で固定定義（40）されており、外部からの操作不可。全画面表示は意図的なユーザー操作（ボタンクリック/キーボードショートカット）によってのみ発動。",
+    "ui_redress_risk": "none",
+    "ui_redress_detail": "z-index階層が明確に定義されており、MODAL(50)やTOAST(60)は常にMAXIMIZED_EDITOR(40)より上位に表示される。重要なUI要素が隠蔽されるリスクなし。",
+    "z_index_hierarchy_integrity": "maintained",
+    "hierarchy_detail": "DROPDOWN(10) < MAXIMIZED_EDITOR(40) < MODAL(50) < TOAST(60) < CONTEXT_MENU(70)の階層が維持される。"
+  },
+  "existing_security_measures_compatibility": {
+    "rehype_sanitize": {
+      "status": "compatible",
+      "detail": "XSS保護のrehype-sanitize [SEC-MF-001]は本修正の影響を受けない。ReactMarkdownのrehypePluginsで継続使用。"
+    },
+    "mermaid_security": {
+      "status": "compatible",
+      "detail": "Issue #100で実装されたmermaid securityLevel='strict'設定は影響を受けない。"
+    },
+    "file_operations_security": {
+      "status": "compatible",
+      "detail": "ファイル操作API（PUT/POST/DELETE/PATCH）のセキュリティ対策（isPathSafe等）は影響を受けない。"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "SEC-NH-001",
+        "category": "ドキュメント",
+        "description": "z-index条件変更の理由と安全性についてコード内コメントで説明を追加することを推奨",
+        "reason": "将来のメンテナンス時にisFallbackMode条件削除の意図が分かりやすくなる",
+        "severity": "info"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "overall_risk": "low",
+    "risk_factors": [],
+    "mitigations_in_place": [
+      "z-index値がソースコード内で定数定義されており、ユーザー入力を介さない",
+      "z-index階層設計により、重要なUI要素（Modal, Toast, ContextMenu）は常にMaximizedEditorより上位",
+      "既存のXSS保護（rehype-sanitize）が維持される",
+      "useMemoによる計算済み値の使用でパフォーマンス影響は軽微"
+    ]
+  },
+  "summary": "Issue #104の設計方針書に対するセキュリティレビューを実施した結果、セキュリティスコアはAと評価する。本修正はz-index条件の緩和（isMaximized && isFallbackMode → isMaximized）のみであり、OWASP Top 10の観点で問題となる変更は含まれない。z-index値はソースコード内で定数定義されておりユーザー入力を介さないため、XSSやクリックジャッキングのリスクはない。既存のセキュリティ対策（rehype-sanitize、mermaid securityLevel='strict'、ファイル操作APIの保護）との整合性も維持される。必須修正項目はなく、セキュリティ上の懸念なく実装を進めることができる。"
+}

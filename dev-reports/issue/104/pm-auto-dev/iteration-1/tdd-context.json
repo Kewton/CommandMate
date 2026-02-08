@@ -1,0 +1,41 @@
+{
+  "issue_number": 104,
+  "title": "iPadにて横置きでmarkdownファイルを編集しようとするとターミナル画面に遷移してしまう",
+  "acceptance_criteria": [
+    "iPad Chrome（横置き）で全画面ボタンをクリックした際、Markdownエディタが最前面に表示される",
+    "ターミナルタブが前面に表示されない",
+    "既存のデスクトップ・モバイル動作に影響がない",
+    "isMaximized=true 時にz-indexが設定されることを確認するユニットテストが追加されている"
+  ],
+  "implementation_tasks": [
+    "src/components/worktree/MarkdownEditor.tsx L436-441のz-index条件を修正（isFallbackMode条件を削除）",
+    "containerClassesとcontainerStyleの条件差異についてコード内コメントを追加",
+    "ユニットテスト追加（z-index設定のテストケース3件）"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-104-ipad-fullscreen-bugfix-design-policy.md",
+  "work_plan_path": "dev-reports/issue/104/work-plan.md",
+  "modification_details": {
+    "file": "src/components/worktree/MarkdownEditor.tsx",
+    "lines": "436-441",
+    "before": "if (isMaximized && isFallbackMode) {",
+    "after": "if (isMaximized) {"
+  },
+  "test_cases": [
+    {
+      "name": "should set z-index when isMaximized=true regardless of isFallbackMode",
+      "input": { "isMaximized": true, "isFallbackMode": false },
+      "expected": { "zIndex": 40 }
+    },
+    {
+      "name": "should set z-index when isMaximized=true and isFallbackMode=true",
+      "input": { "isMaximized": true, "isFallbackMode": true },
+      "expected": { "zIndex": 40 }
+    },
+    {
+      "name": "should not set z-index when isMaximized=false",
+      "input": { "isMaximized": false, "isFallbackMode": false },
+      "expected": { "zIndex": null }
+    }
+  ]
+}

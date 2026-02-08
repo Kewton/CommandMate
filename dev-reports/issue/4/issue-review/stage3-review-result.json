@@ -1,0 +1,211 @@
+{
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IS-MF-001",
+        "description": "Issue内の影響範囲リストに`src/lib/prompt-detector.ts`が含まれていない。Codexプロンプトパターン検出はcli-patterns.tsで定義されているが、prompt-detector.tsの`detectPrompt()`関数はClaude専用のパターン（y/n、yes/no、Approve?、multiple_choice）を前提としており、Codex固有のプロンプト形式への対応が必要。",
+        "recommendation": "影響ファイルリストに`src/lib/prompt-detector.ts`を追加し、Codexプロンプト形式の調査と対応を技術スコープに含める。"
+      },
+      {
+        "id": "IS-MF-002",
+        "description": "E2Eテスト`tests/e2e/cli-tool-selection.spec.ts`がIssue #33でCodex/Geminiタブ非表示に対応済みだが、Codex有効化後のテスト更新が影響範囲に含まれていない。現在のテストはCodexバッジが表示されないことを確認している。",
+        "recommendation": "影響ファイルリストにE2Eテストファイルを追加し、Codex有効化後のテストシナリオ更新を明記する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IS-SF-001",
+        "description": "`src/lib/auto-yes-manager.ts`と`src/lib/auto-yes-resolver.ts`の影響分析が不足。Auto-Yes機能はIssue #138でサーバー側ポーリングとして実装されており、Codexの場合のプロンプト検出・自動応答動作の検証が必要。",
+        "recommendation": "Auto-Yes機能のCodex対応をPhase 2として分離する旨は記載済みだが、Phase 1でも基本動作確認（プロンプト検出が正しく動作するか）をテスト要件に含めることを推奨。"
+      },
+      {
+        "id": "IS-SF-002",
+        "description": "`src/lib/response-poller.ts`のCodex対応実装の詳細確認が影響範囲に含まれていない。同ファイルはCodex用の`extractResponse()`、`cleanClaudeResponse()`（Claude用のみ実装）、`cleanGeminiResponse()`を含むが、Codex用のレスポンスクリーニング関数が存在しない。",
+        "recommendation": "技術スコープに`response-poller.ts`のCodexレスポンス処理検証を追加。必要に応じて`cleanCodexResponse()`関数の追加を検討。"
+      },
+      {
+        "id": "IS-SF-003",
+        "description": "`src/lib/session-cleanup.ts`がCodexを含む全CLIツールの一括クリーンアップに対応済みであることの確認が影響範囲に記載されていない。既存実装で対応済みだが、動作確認テストが必要。",
+        "recommendation": "テスト要件に`session-cleanup.ts`のCodex対応動作確認を追加。"
+      },
+      {
+        "id": "IS-SF-004",
+        "description": "`src/lib/status-detector.ts`のCodex対応テスト（`src/lib/__tests__/status-detector.test.ts`）が存在するが、Issue内でテストカバレッジの確認が言及されていない。",
+        "recommendation": "既存のCodexステータス検出テストを実行し、実際のCodex CLI出力との整合性を検証する作業を明記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IS-NTH-001",
+        "description": "`src/lib/log-manager.ts`、`src/lib/conversation-logger.ts`のCodex対応確認が影響範囲に含まれていない。これらはCLI出力のログ記録に使用され、Codex固有の出力形式に対応が必要な可能性がある。",
+        "recommendation": "ログ出力の動作確認をテスト要件に追加することを推奨。"
+      },
+      {
+        "id": "IS-NTH-002",
+        "description": "terminal/page.tsxでCodexタブは既に定義されているが、WorktreeDetail.tsxとの機能差異（terminal/page.tsxはフルターミナル、WorktreeDetail.tsxはチャットUI）の整理が必要。",
+        "recommendation": "UI有効化セクションに両ページの役割と変更範囲を明確化することを推奨。"
+      },
+      {
+        "id": "IS-NTH-003",
+        "description": "既存の結合テスト群（`tests/integration/api-*-cli-tool.test.ts`）がCodex対応済みだが、実際のCodex CLI動作との結合テストは手動確認となる。",
+        "recommendation": "手動テストの実施手順をテスト要件に追記することを推奨。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "path": "src/lib/cli-tools/codex.ts",
+        "type": "core",
+        "change_type": "review_and_improve",
+        "description": "既存Codex実装のレビュー・改善。startSession()のupdate notification skip処理の検証が必要。"
+      },
+      {
+        "path": "src/lib/cli-patterns.ts",
+        "type": "core",
+        "change_type": "verify",
+        "description": "CODEX_PROMPT_PATTERN、CODEX_THINKING_PATTERNの実際のCLI出力との一致確認。"
+      },
+      {
+        "path": "src/lib/prompt-detector.ts",
+        "type": "core",
+        "change_type": "potentially_modify",
+        "description": "Codex固有のプロンプト形式対応が必要な場合は修正。"
+      },
+      {
+        "path": "src/lib/response-poller.ts",
+        "type": "core",
+        "change_type": "verify_and_potentially_modify",
+        "description": "Codexレスポンス抽出ロジックの動作確認。cleanCodexResponse()追加の可能性。"
+      },
+      {
+        "path": "src/lib/status-detector.ts",
+        "type": "core",
+        "change_type": "verify",
+        "description": "Codexステータス検出の動作確認。"
+      },
+      {
+        "path": "src/components/worktree/WorktreeDetail.tsx",
+        "type": "ui",
+        "change_type": "modify",
+        "description": "isCliTab関数を拡張してCodexタブを有効化。TabView型の拡張。"
+      },
+      {
+        "path": "src/app/worktrees/[id]/terminal/page.tsx",
+        "type": "ui",
+        "change_type": "verify",
+        "description": "Codexタブは既に定義済み。動作確認のみ。"
+      },
+      {
+        "path": "src/lib/session-cleanup.ts",
+        "type": "infrastructure",
+        "change_type": "verify",
+        "description": "Codexセッションクリーンアップの動作確認。既存実装で対応済み。"
+      },
+      {
+        "path": "src/lib/auto-yes-manager.ts",
+        "type": "infrastructure",
+        "change_type": "phase2",
+        "description": "Auto-Yes機能のCodex対応はPhase 2。Phase 1では基本動作確認のみ。"
+      },
+      {
+        "path": "src/lib/auto-yes-resolver.ts",
+        "type": "infrastructure",
+        "change_type": "phase2",
+        "description": "Auto-Yes自動応答のCodex対応はPhase 2。"
+      },
+      {
+        "path": "tests/unit/cli-tools/codex.test.ts",
+        "type": "test",
+        "change_type": "verify_and_extend",
+        "description": "既存テストの実行確認。必要に応じて追加テストケース。"
+      },
+      {
+        "path": "src/lib/__tests__/cli-patterns.test.ts",
+        "type": "test",
+        "change_type": "extend",
+        "description": "Codexパターンのテストケース追加。"
+      },
+      {
+        "path": "src/lib/__tests__/status-detector.test.ts",
+        "type": "test",
+        "change_type": "verify",
+        "description": "Codexテストケースの実行確認。"
+      },
+      {
+        "path": "tests/e2e/cli-tool-selection.spec.ts",
+        "type": "test",
+        "change_type": "modify",
+        "description": "Codexタブ有効化後のE2Eテスト更新。"
+      },
+      {
+        "path": "tests/integration/api-send-cli-tool.test.ts",
+        "type": "test",
+        "change_type": "verify",
+        "description": "Codex送信テストの実行確認。"
+      }
+    ],
+    "risk_areas": [
+      {
+        "area": "Codex CLI EOL",
+        "risk_level": "high",
+        "description": "OpenAI Codex CLIがEOL（End of Life）の可能性があり、実際に利用可能かどうかの事前確認が最重要。利用不可の場合、Issue全体がブロックされる。",
+        "mitigation": "Issue着手前にCodex CLIのインストール・認証・基本動作を手動で確認する。"
+      },
+      {
+        "area": "プロンプト検出パターン精度",
+        "risk_level": "medium",
+        "description": "CODEX_PROMPT_PATTERN（/^>\\s+.+/m）が実際のCodex CLI出力と一致しない可能性がある。",
+        "mitigation": "実際のCodex CLI出力をキャプチャし、パターンの精度検証を行う。"
+      },
+      {
+        "area": "UI状態管理の複雑化",
+        "risk_level": "medium",
+        "description": "WorktreeDetail.tsxでisCliTab関数を拡張する際、既存のClaude固有ロジック（realtimeOutput、isThinking等）がCodexでも正しく動作するか確認が必要。",
+        "mitigation": "Claude/Codex両方での手動テストを実施。状態管理ロジックの共通化を検討。"
+      },
+      {
+        "area": "レスポンスクリーニング",
+        "risk_level": "low",
+        "description": "response-poller.tsにcleanCodexResponse()関数がなく、Codex出力がそのまま保存される可能性がある。",
+        "mitigation": "実際のCodex出力を確認し、必要に応じてクリーニング関数を追加。"
+      }
+    ],
+    "dependencies": [
+      {
+        "from": "src/components/worktree/WorktreeDetail.tsx",
+        "to": "src/lib/cli-tools/types.ts",
+        "type": "type",
+        "description": "CLIToolType型の参照。"
+      },
+      {
+        "from": "src/lib/cli-tools/manager.ts",
+        "to": "src/lib/cli-tools/codex.ts",
+        "type": "runtime",
+        "description": "CLIToolManagerがCodexToolインスタンスを管理。"
+      },
+      {
+        "from": "src/lib/response-poller.ts",
+        "to": "src/lib/cli-patterns.ts",
+        "type": "runtime",
+        "description": "Codexパターンを使用してレスポンス抽出。"
+      },
+      {
+        "from": "src/lib/session-cleanup.ts",
+        "to": "src/lib/cli-tools/types.ts",
+        "type": "type",
+        "description": "CLI_TOOL_IDS配列でCodexを含む全ツールを処理。"
+      },
+      {
+        "from": "src/app/api/worktrees/[id]/send/route.ts",
+        "to": "src/lib/cli-tools/manager.ts",
+        "type": "runtime",
+        "description": "APIルートがCLIToolManagerを通じてCodexを使用。"
+      }
+    ],
+    "breaking_changes": []
+  },
+  "summary": "Issue #4（Codex対応）の影響範囲分析を実施。既存のCodex実装（codex.ts、cli-patterns.ts）は有効であり、主な作業はUI有効化（WorktreeDetail.tsxのisCliTab拡張）と動作検証。ただし、prompt-detector.tsのCodex対応、response-poller.tsのレスポンスクリーニング、E2Eテスト更新がIssue内で明示されていない。最大のリスクはCodex CLI自体のEOL状態であり、着手前の事前確認が必須。影響ファイルは15ファイル程度で、既存アーキテクチャ（Strategyパターン）を維持しながらの対応が可能。"
+}

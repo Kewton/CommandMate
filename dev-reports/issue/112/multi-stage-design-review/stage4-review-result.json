@@ -1,0 +1,140 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 112,
+  "review_date": "2026-02-01",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SEC-S4-001",
+        "category": "アクセシビリティセキュリティ",
+        "description": "設計書で提案されている`aria-hidden=\"true\"`のサイドバー閉じ時の追加について、実装時にフォーカス管理と連動させる必要がある。`aria-hidden=\"true\"`の要素内にフォーカス可能な要素がある場合、スクリーンリーダーとキーボードナビゲーションの整合性が崩れる可能性がある。",
+        "suggestion": "サイドバーが閉じた状態では、内部のインタラクティブ要素に`tabindex=\"-1\"`を設定するか、`inert`属性の使用を検討する。または、transformで画面外に移動している間は`aria-hidden`を設定し、フォーカストラップを適切に管理する。"
+      },
+      {
+        "id": "SEC-S4-002",
+        "category": "クリックジャッキング防御",
+        "description": "z-indexの変更（SIDEBAR: 20の追加）により、将来的にモバイルとデスクトップのz-index階層が複雑化する可能性がある。現在モバイルレイアウトではz-40, z-50がハードコードされており、統一管理が必要。",
+        "suggestion": "設計書4.1項の注記通り、将来的にモバイル用z-index値（MOBILE_OVERLAY: 40, MOBILE_DRAWER: 50, MOBILE_FIXED_UI: 30）もz-index.tsで一元管理することを推奨。これにより、オーバーレイ要素の階層を明確化し、意図しない要素の重なりによるクリックジャッキングリスクを軽減できる。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "SEC-S4-003",
+        "category": "CSS変数インジェクション",
+        "description": "CSS変数`--sidebar-width`の導入自体はセキュリティリスクは低いが、将来的にユーザー入力からCSS変数を設定するような拡張があった場合、CSSインジェクションのリスクがある。",
+        "suggestion": "CSS変数の値は常にコード内で定義されたものを使用し、ユーザー入力から直接CSS変数を設定しないことをコーディングガイドラインに明記することを検討。現時点では問題なし。"
+      },
+      {
+        "id": "SEC-S4-004",
+        "category": "localStorage使用",
+        "description": "SidebarContextで既にlocalStorageを使用してソート設定を永続化している。Issue #112の変更自体はlocalStorageを新規使用しないが、関連機能として認識しておく。",
+        "suggestion": "現在のlocalStorage使用は非機密データ（ソート設定）のみであり、セキュリティ上の問題はない。機密情報をlocalStorageに保存しないよう継続的に注意する。"
+      }
+    ]
+  },
+  "security_assessment": {
+    "owasp_top_10_analysis": {
+      "A01_broken_access_control": {
+        "risk_level": "none",
+        "assessment": "Issue #112はCSS/レイアウト変更のみであり、アクセス制御には影響しない"
+      },
+      "A02_cryptographic_failures": {
+        "risk_level": "none",
+        "assessment": "暗号化に関する変更なし"
+      },
+      "A03_injection": {
+        "risk_level": "minimal",
+        "assessment": "CSS変数の導入があるが、値はコード内で固定されており、ユーザー入力を受け付けない。CSSインジェクションのリスクなし"
+      },
+      "A04_insecure_design": {
+        "risk_level": "none",
+        "assessment": "UIレイアウトのパフォーマンス改善であり、セキュリティアーキテクチャに影響なし"
+      },
+      "A05_security_misconfiguration": {
+        "risk_level": "none",
+        "assessment": "設定変更なし"
+      },
+      "A06_vulnerable_components": {
+        "risk_level": "none",
+        "assessment": "新しい外部依存関係の追加なし"
+      },
+      "A07_auth_failures": {
+        "risk_level": "none",
+        "assessment": "認証・認可に関する変更なし"
+      },
+      "A08_data_integrity_failures": {
+        "risk_level": "none",
+        "assessment": "データ整合性に影響なし"
+      },
+      "A09_logging_monitoring_failures": {
+        "risk_level": "none",
+        "assessment": "ログ・監視に関する変更なし"
+      },
+      "A10_ssrf": {
+        "risk_level": "none",
+        "assessment": "サーバーサイドリクエストに関する変更なし"
+      }
+    },
+    "specific_risks": {
+      "xss": {
+        "risk_level": "none",
+        "details": "Issue #112で変更される要素（AppShell, SidebarToggle, z-index.ts, globals.css）はすべて静的なReactコンポーネントとCSS定義である。動的コンテンツのレンダリングは行われず、XSSリスクはない。"
+      },
+      "css_injection": {
+        "risk_level": "none",
+        "details": "CSS変数`--sidebar-width`は:rootで固定値(18rem)として定義される。ユーザー入力からCSS値を設定する箇所はなく、CSSインジェクションのリスクはない。"
+      },
+      "clickjacking": {
+        "risk_level": "low",
+        "details": "z-indexの変更により、UI要素の重なり順序が変わる。設計書では適切な階層管理（SIDEBAR: 20）を計画しており、他要素との競合回避策も記載されている。実装時にz-index階層を一元管理することで、クリックジャッキングのリスクは最小化される。"
+      },
+      "aria_hidden_misuse": {
+        "risk_level": "low",
+        "details": "サイドバー閉じ時の`aria-hidden=\"true\"`追加について、フォーカス管理との整合性を確保する必要がある。SEC-S4-001で対応を推奨。"
+      },
+      "client_state_manipulation": {
+        "risk_level": "none",
+        "details": "SidebarContextの状態（isOpen, isMobileDrawerOpen）は既存のReact状態管理を使用。Issue #112はこの状態管理の仕組みを変更せず、CSSアニメーション方式のみを変更する。セキュリティ上重要な状態管理の変更はない。"
+      }
+    },
+    "overall_risk": "minimal",
+    "overall_assessment": "Issue #112はCSS/レイアウトのパフォーマンス改善が主目的であり、セキュリティへの影響は最小限。主な変更点（width→transform方式、CSS変数導入、z-index追加）はすべて静的な定義であり、ユーザー入力を処理しない。OWASP Top 10のいずれの脆弱性カテゴリにも該当しない。aria-hidden使用時のアクセシビリティセキュリティと、将来的なz-index一元管理について軽微な改善提案あり。"
+  },
+  "checklist_evaluation": {
+    "xss_from_dynamic_content": {
+      "checked": true,
+      "result": "問題なし - 動的コンテンツのレンダリングなし"
+    },
+    "css_injection": {
+      "checked": true,
+      "result": "問題なし - CSS変数は固定値、ユーザー入力なし"
+    },
+    "clickjacking_from_z_index": {
+      "checked": true,
+      "result": "低リスク - z-index階層管理が設計書に明記済み"
+    },
+    "aria_hidden_misuse": {
+      "checked": true,
+      "result": "要確認 - フォーカス管理との連動が必要（SEC-S4-001）"
+    },
+    "client_state_manipulation": {
+      "checked": true,
+      "result": "問題なし - 状態管理の仕組みに変更なし"
+    }
+  },
+  "recommendations": [
+    {
+      "priority": "medium",
+      "description": "aria-hidden実装時にフォーカス管理を適切に行う",
+      "rationale": "アクセシビリティとセキュリティの両立のため"
+    },
+    {
+      "priority": "low",
+      "description": "z-index値のモバイル/デスクトップ一元管理を将来的に検討",
+      "rationale": "UI層の明確化とクリックジャッキング防御の強化"
+    }
+  ],
+  "summary": "Issue #112のセキュリティリスクは最小限です。本変更はCSS/レイアウトのパフォーマンス改善が主目的であり、OWASP Top 10の脆弱性カテゴリには該当しません。XSS、CSSインジェクション、クリックジャッキングのリスクは低く、クライアント側状態操作の懸念もありません。唯一の改善提案として、aria-hidden属性使用時のフォーカス管理連動（SEC-S4-001）と、将来的なz-index一元管理（SEC-S4-002）を推奨します。Must Fix項目はなく、実装を進めて問題ありません。"
+}

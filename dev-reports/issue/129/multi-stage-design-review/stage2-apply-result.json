@@ -1,0 +1,17 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "apply_date": "2026-02-02",
+  "applied_items": [
+    {
+      "id": "N1",
+      "title": "設計書の行番号表記の注意書き追加を推奨",
+      "severity": "nice_to_have",
+      "action": "Section 3.2 コード変更箇所の冒頭に、行番号が参考情報である旨の注意書きを追加",
+      "location": "設計書 Section 3.2"
+    }
+  ],
+  "skipped_items": [],
+  "design_policy_version": "1.2",
+  "summary": "Stage2整合性レビューのNice to Have項目（N1）を適用。設計書Section 3.2に行番号が参考情報である旨の注意書きを追加し、将来のコード変更による行番号のずれに対応。設計書バージョンを1.2に更新。Must Fix/Should Fix項目は0件のため、設計書とコードの整合性は良好であることが確認された。"
+}

@@ -1,0 +1,64 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー指摘事項対応",
+  "issue_number": 112,
+  "applied_date": "2026-02-01",
+  "applied_findings": [
+    {
+      "id": "MF-001",
+      "category": "DRY原則",
+      "severity": "must_fix",
+      "description": "サイドバー幅の重複定義をCSS変数で一元管理",
+      "sections_updated": ["3.2 サイドバー幅のCSS変数管理", "5.1 直接変更対象", "6.1 レビュー指摘対応"],
+      "status": "reflected"
+    },
+    {
+      "id": "SF-001",
+      "category": "SRP",
+      "severity": "should_fix",
+      "description": "将来的なレイアウトコンポーネント分離の検討",
+      "sections_updated": ["4.5 将来的な拡張性についての注記"],
+      "status": "reflected"
+    },
+    {
+      "id": "SF-002",
+      "category": "KISS原則",
+      "severity": "should_fix",
+      "description": "SidebarToggleをサイドバー内部に配置",
+      "sections_updated": ["4.2 SidebarToggle配置方針", "6.1 レビュー指摘対応"],
+      "status": "reflected"
+    },
+    {
+      "id": "SF-003",
+      "category": "YAGNI原則",
+      "severity": "should_fix",
+      "description": "代替案（プッシュ型）の詳細コード削除",
+      "sections_updated": ["3.5 代替案：プッシュ型（不採用）"],
+      "status": "reflected"
+    },
+    {
+      "id": "SF-004",
+      "category": "DRY原則",
+      "severity": "should_fix",
+      "description": "トランジションクラスの定数化",
+      "sections_updated": ["3.4 共通トランジションクラスの定数化", "6.1 レビュー指摘対応"],
+      "status": "reflected"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_path": "dev-reports/design/issue-112-sidebar-transform-design-policy.md",
+  "sections_updated": [
+    "3.2 サイドバー幅のCSS変数管理",
+    "3.3 実装イメージ",
+    "3.4 共通トランジションクラスの定数化",
+    "3.5 代替案：プッシュ型（不採用）",
+    "4.2 SidebarToggle配置方針",
+    "4.5 将来的な拡張性についての注記",
+    "5.1 直接変更対象",
+    "6. 実装チェックリスト",
+    "8. レビュー履歴",
+    "9. レビュー指摘事項サマリー"
+  ],
+  "summary": "Stage 1通常レビューの全5件の指摘事項（Must Fix: 1件、Should Fix: 4件）を設計方針書に反映完了。MF-001のCSS変数管理は新規セクション3.2として追加し、実装イメージも更新。SF-001は将来的な拡張性の注記として4.5項に追加。SF-002はSidebarToggle配置方針として4.2項を拡充。SF-003は代替案セクションを簡潔化し詳細コードサンプルを削除。SF-004はトランジションクラス定数化として3.4項を新規追加。レビュー履歴とサマリーセクションも追加し、トレーサビリティを確保。",
+  "timestamp": "2026-02-01T00:00:00Z"
+}

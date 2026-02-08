@@ -1,0 +1,103 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 96,
+  "design_doc_path": "dev-reports/design/issue-96-npm-cli-design-policy.md",
+  "reviewed_at": "2026-01-31",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "principle": "単一責任原則（SRP）",
+        "description": "daemon.tsがデーモン起動・停止・状態確認・PIDファイル管理の複数責務を持つ設計となっている。PIDファイル管理は独立したモジュールに分離すべき。",
+        "location": "4.3.3 daemon.ts（セクション4.3.3）",
+        "recommendation": "pid-manager.tsを新設し、PIDファイルの読み書き・存在確認をdaemon.tsから分離。daemon.tsはプロセス起動・停止に専念させる。"
+      },
+      {
+        "id": "SF-2",
+        "principle": "開放閉鎖原則（OCP）",
+        "description": "preflight.tsのDEPENDENCIES配列はハードコードされており、新しい依存関係を追加するには既存コードの修正が必要。",
+        "location": "4.3.1 preflight.ts（セクション4.3.1）",
+        "recommendation": "依存関係定義を外部設定ファイル（cli-dependencies.json）または設定モジュールに外出しし、配列を拡張可能にする。新しい依存関係はコード修正なしで追加可能にする。"
+      },
+      {
+        "id": "SF-3",
+        "principle": "依存性逆転原則（DIP）",
+        "description": "commands/*.tsが具体的なユーティリティ（preflight.ts, env-setup.ts, daemon.ts）を直接インポートする設計。抽象化層が不足している。",
+        "location": "2.1 システム構成図（セクション2.1）",
+        "recommendation": "コマンド実行に必要な機能をインターフェースで抽象化（例: IPreflightChecker, IEnvSetup, IDaemonManager）し、コマンド層は抽象に依存させる。テスト時のモック注入が容易になる。"
+      },
+      {
+        "id": "SF-4",
+        "principle": "DRY原則",
+        "description": "env-setup.tsのDEFAULT_CONFIGと既存src/lib/env.tsのデフォルト値が重複する可能性がある。.env生成時のデフォルト値と環境変数読取時のデフォルト値の一元管理が必要。",
+        "location": "4.3.2 env-setup.ts（セクション4.3.2）",
+        "recommendation": "デフォルト値を共通定数モジュール（例: src/config/defaults.ts）に集約し、env-setup.tsとsrc/lib/env.tsの両方から参照する設計に変更。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "principle": "インターフェース分離原則（ISP）",
+        "description": "statusコマンドはDaemonStatusの全情報を必要とするが、stopコマンドはPIDのみ必要。getDaemonStatus()が過剰な情報を返す可能性。",
+        "location": "4.3.3 daemon.ts（セクション4.3.3）",
+        "recommendation": "isRunning()とgetPid()を独立した軽量関数として提供し、getDaemonStatus()は詳細が必要な場合のみ使用するよう設計を検討。"
+      },
+      {
+        "id": "NTH-2",
+        "principle": "KISS原則",
+        "description": "移行計画（セクション15）の4フェーズ移行は妥当だが、CLIとシェルスクリプトの並行運用期間が長い（6ヶ月）。メンテナンスコストが増加する。",
+        "location": "15.1 既存スクリプトとの並行運用（セクション15.1）",
+        "recommendation": "Phase 2のDeprecation警告を早期（1-2ヶ月後）に開始し、移行を促進。新規ユーザーにはCLIのみを案内する。"
+      },
+      {
+        "id": "NTH-3",
+        "principle": "YAGNI原則",
+        "description": "logsコマンド、restartコマンドが設計に含まれていないが、既存シェルスクリプト（logs.sh, restart.sh）は存在する。スコープ外として明示的に記載があると良い。",
+        "location": "1.2 スコープ（セクション1.2）",
+        "recommendation": "対象外セクションにlogs/restart/health-checkコマンドを明記し、将来拡張として整理。現時点での不要機能追加を防止。"
+      },
+      {
+        "id": "NTH-4",
+        "principle": "DRY原則",
+        "description": "終了コード定義（セクション6.3）がドキュメント内のみで、TypeScript型として定義されていない。実装時に重複定義が発生する可能性。",
+        "location": "6.3 終了コード（セクション6.3）",
+        "recommendation": "src/cli/types/index.tsにExitCode enumまたはconst objectとして終了コードを定義し、設計書と実装の一元管理を実現。"
+      }
+    ]
+  },
+  "positive_aspects": [
+    {
+      "id": "PA-1",
+      "principle": "単一責任原則（SRP）",
+      "description": "コマンド層・ユーティリティ層・ビジネスロジック層の3層分離が明確。各コマンドファイル（init.ts, start.ts, stop.ts, status.ts）が単一コマンドに対応。"
+    },
+    {
+      "id": "PA-2",
+      "principle": "開放閉鎖原則（OCP）",
+      "description": "commanderフレームワークの採用により、新しいサブコマンドの追加が既存コード修正なしで可能。プラグイン的な拡張が容易。"
+    },
+    {
+      "id": "PA-3",
+      "principle": "KISS原則",
+      "description": "フォアグラウンドをデフォルト起動とする設計は、Node.js CLIの慣例に従いシンプル。PIDファイル管理も軽量な実装。"
+    },
+    {
+      "id": "PA-4",
+      "principle": "DRY原則",
+      "description": "既存モジュール（src/lib/env.ts, server.ts, db-migrations.ts）の再利用が明確に設計されている。シェルスクリプトの機能をTypeScriptに移植しつつ共通ロジックを共有。"
+    },
+    {
+      "id": "PA-5",
+      "principle": "YAGNI原則",
+      "description": "Windows対応、Docker対応、PM2連携を対象外として明確にスコープ限定。必要最小限の機能に絞った設計。"
+    }
+  ],
+  "summary": "Issue #96の設計方針書は全体として良好な設計原則の適用が見られる。レイヤー分離、既存コードの再利用、スコープ限定が適切に行われている。主な改善点は、(1) daemon.tsのPIDファイル管理責務の分離、(2) 依存関係チェックの拡張性向上、(3) コマンド層の抽象化による依存性逆転、(4) デフォルト値の一元管理である。must_fixレベルの重大な設計原則違反は検出されず、should_fixレベルの改善で設計品質を向上できる。",
+  "risk_assessment": {
+    "level": "低",
+    "rationale": "設計原則の重大な違反がなく、改善点はリファクタリングレベル。既存コードとの整合性も確保されている。"
+  },
+  "next_stage_recommendation": "Stage 2（整合性レビュー）に進み、設計書と既存実装の整合性を確認することを推奨。"
+}

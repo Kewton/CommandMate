@@ -340,6 +340,7 @@ commandmate status --all                   # 全サーバー状態確認
 | `/refactoring` | リファクタリング実行 |
 | `/acceptance-test` | 受け入れテスト |
 | `/issue-create` | Issue一括作成 |
+| `/issue-enhance` | Issueの対話的補完（不足情報をユーザーに質問して補完） |
 | `/issue-split` | Issue分割計画 |
 | `/architecture-review` | アーキテクチャレビュー（サブエージェント対応） |
 | `/apply-review` | レビュー指摘事項の実装反映 |
