@@ -12,6 +12,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { stripAnsi, detectPromptForCli } from '@/lib/cli-patterns';
+import { sanitizeAnswer } from '@/lib/prompt-detector';
 
 interface PromptResponseRequest {
   answer: string;
@@ -34,18 +35,15 @@ export async function POST(
       );
     }
 
-    // Issue #193: Input validation
-    if (typeof answer === 'string' && answer.length > 1000) {
+    // Issue #193: Input sanitization (shared with respond/route.ts via DRY)
+    const sanitizeResult = sanitizeAnswer(answer);
+    if (!sanitizeResult.valid) {
       return NextResponse.json(
-        { error: 'Answer exceeds maximum length of 1000 characters' },
+        { error: sanitizeResult.error },
         { status: 400 }
       );
     }
-
-    // Control character filtering (remove \x00-\x1F except \n, \x7F)
-    const sanitizedAnswer = typeof answer === 'string'
-      ? answer.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '')
-      : answer;
+    const sanitizedAnswer = sanitizeResult.sanitized;
 
     const db = getDbInstance();
 

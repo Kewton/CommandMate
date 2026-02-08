@@ -9,7 +9,7 @@ import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { sendKeys } from '@/lib/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { startPolling } from '@/lib/response-poller';
-import { getAnswerInput } from '@/lib/prompt-detector';
+import { getAnswerInput, sanitizeAnswer } from '@/lib/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
 
 /**
@@ -75,19 +75,15 @@ export async function POST(
       );
     }
 
-    // Issue #193: Input sanitization
-    // Max length check
-    if (typeof answer === 'string' && answer.length > 1000) {
+    // Issue #193: Input sanitization (shared with prompt-response/route.ts via DRY)
+    const sanitizeResult = sanitizeAnswer(answer);
+    if (!sanitizeResult.valid) {
       return NextResponse.json(
-        { error: 'Answer exceeds maximum length of 1000 characters' },
+        { error: sanitizeResult.error },
         { status: 400 }
       );
     }
-
-    // Control character filtering (remove \x00-\x1F except \n, \x7F)
-    const sanitizedAnswer = typeof answer === 'string'
-      ? answer.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '')
-      : answer;
+    const sanitizedAnswer = sanitizeResult.sanitized;
 
     // Validate answer based on prompt type
     let input: string;

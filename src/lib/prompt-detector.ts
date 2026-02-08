@@ -440,6 +440,49 @@ function detectMultipleChoicePrompt(output: string, opts?: DetectPromptOptions):
 }
 
 /**
+ * Maximum allowed length for a prompt answer (security limit).
+ */
+export const MAX_ANSWER_LENGTH = 1000;
+
+/**
+ * Control character pattern for sanitization.
+ * Removes \x00-\x09, \x0B-\x1F, and \x7F while preserving \n (\x0A).
+ */
+const CONTROL_CHAR_PATTERN = /[\x00-\x09\x0B-\x1F\x7F]/g;
+
+/**
+ * Sanitize and validate a prompt answer string.
+ *
+ * - Rejects answers exceeding MAX_ANSWER_LENGTH characters
+ * - Strips control characters (except newline)
+ *
+ * @param answer - Raw answer string from the client
+ * @returns Object with `valid: true` and `sanitized` string, or `valid: false` and `error` message
+ *
+ * @example
+ * ```typescript
+ * const result = sanitizeAnswer('yes');
+ * // result === { valid: true, sanitized: 'yes' }
+ *
+ * const bad = sanitizeAnswer('a'.repeat(1001));
+ * // bad === { valid: false, error: 'Answer exceeds maximum length of 1000 characters' }
+ * ```
+ */
+export function sanitizeAnswer(
+  answer: string
+): { valid: true; sanitized: string } | { valid: false; error: string } {
+  if (typeof answer === 'string' && answer.length > MAX_ANSWER_LENGTH) {
+    return { valid: false, error: `Answer exceeds maximum length of ${MAX_ANSWER_LENGTH} characters` };
+  }
+
+  const sanitized = typeof answer === 'string'
+    ? answer.replace(CONTROL_CHAR_PATTERN, '')
+    : answer;
+
+  return { valid: true, sanitized };
+}
+
+/**
  * Get tmux input string for an answer
  *
  * @param answer - User's answer ('yes', 'no', 'y', 'n', or number for multiple choice)

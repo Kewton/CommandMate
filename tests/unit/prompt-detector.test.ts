@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectPrompt, getAnswerInput } from '@/lib/prompt-detector';
+import { detectPrompt, getAnswerInput, sanitizeAnswer, MAX_ANSWER_LENGTH } from '@/lib/prompt-detector';
 import type { DetectPromptOptions } from '@/lib/prompt-detector';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 
@@ -961,6 +961,68 @@ Are you sure you want to continue? (yes/no)
           expect(error.message).toBe("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
         }
       });
+    });
+  });
+
+  describe('sanitizeAnswer', () => {
+    it('should return valid result for normal input', () => {
+      const result = sanitizeAnswer('yes');
+      expect(result).toEqual({ valid: true, sanitized: 'yes' });
+    });
+
+    it('should return valid result for numeric input', () => {
+      const result = sanitizeAnswer('1');
+      expect(result).toEqual({ valid: true, sanitized: '1' });
+    });
+
+    it('should reject answers exceeding MAX_ANSWER_LENGTH', () => {
+      const longAnswer = 'a'.repeat(MAX_ANSWER_LENGTH + 1);
+      const result = sanitizeAnswer(longAnswer);
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.error).toContain('maximum length');
+      }
+    });
+
+    it('should accept answers at exactly MAX_ANSWER_LENGTH', () => {
+      const exactAnswer = 'a'.repeat(MAX_ANSWER_LENGTH);
+      const result = sanitizeAnswer(exactAnswer);
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.sanitized).toBe(exactAnswer);
+      }
+    });
+
+    it('should strip control characters except newline', () => {
+      const result = sanitizeAnswer('hello\x00\x01\x02world');
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.sanitized).toBe('helloworld');
+      }
+    });
+
+    it('should preserve newline characters', () => {
+      const result = sanitizeAnswer('hello\nworld');
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.sanitized).toBe('hello\nworld');
+      }
+    });
+
+    it('should strip DEL character (0x7F)', () => {
+      const result = sanitizeAnswer('test\x7Fvalue');
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.sanitized).toBe('testvalue');
+      }
+    });
+
+    it('should strip tab characters', () => {
+      const result = sanitizeAnswer('hello\tworld');
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.sanitized).toBe('helloworld');
+      }
     });
   });
 });
