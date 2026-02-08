@@ -12,7 +12,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectPrompt } from '@/lib/prompt-detector';
-import { stripAnsi } from '@/lib/cli-patterns';
+import { stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
 
 interface PromptResponseRequest {
   answer: string;
@@ -72,7 +72,8 @@ export async function POST(
     try {
       const currentOutput = await captureSessionOutput(params.id, cliToolId, 5000);
       const cleanOutput = stripAnsi(currentOutput);
-      const promptCheck = detectPrompt(cleanOutput);
+      const promptOptions = buildDetectPromptOptions(cliToolId);
+      const promptCheck = detectPrompt(cleanOutput, promptOptions);
 
       if (!promptCheck.isPrompt) {
         return NextResponse.json({

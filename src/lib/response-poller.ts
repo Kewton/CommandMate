@@ -15,10 +15,11 @@ import {
 } from './db';
 import { broadcastMessage } from './ws-server';
 import { detectPrompt } from './prompt-detector';
+import type { PromptDetectionResult } from './prompt-detector';
 import { recordClaudeConversation } from './conversation-logger';
 import type { CLIToolType } from './cli-tools/types';
 import { parseClaudeOutput } from './claude-output';
-import { getCliToolPatterns, stripAnsi } from './cli-patterns';
+import { getCliToolPatterns, stripAnsi, buildDetectPromptOptions } from './cli-patterns';
 
 /**
  * Polling interval in milliseconds (default: 2 seconds)
@@ -45,6 +46,23 @@ const pollingStartTimes = new Map<string, number>();
  */
 function getPollerKey(worktreeId: string, cliToolId: CLIToolType): string {
   return `${worktreeId}:${cliToolId}`;
+}
+
+/**
+ * Internal helper: detect prompt with CLI-tool-specific options (SF-003).
+ * Applies stripAnsi() uniformly inside this helper (IA-001).
+ * stripAnsi() is idempotent, so double-application on already-stripped input is harmless.
+ *
+ * @param output - Raw or pre-stripped output
+ * @param cliToolId - CLI tool identifier for building detection options
+ * @returns PromptDetectionResult
+ */
+function detectPromptWithOptions(
+  output: string,
+  cliToolId: CLIToolType
+): PromptDetectionResult {
+  const promptOptions = buildDetectPromptOptions(cliToolId);
+  return detectPrompt(stripAnsi(output), promptOptions);
 }
 
 /**
@@ -243,15 +261,13 @@ function extractResponse(
   // Permission prompts appear after normal responses and need special handling
   if (cliToolId === 'claude') {
     const fullOutput = lines.join('\n');
-    // Strip ANSI codes before prompt detection
-    const cleanFullOutput = stripAnsi(fullOutput);
-    const promptDetection = detectPrompt(cleanFullOutput);
+    const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
     if (promptDetection.isPrompt) {
       // Return the full output as a complete interactive prompt
       // Use the cleaned output without ANSI codes
       return {
-        response: cleanFullOutput,
+        response: stripAnsi(fullOutput),
         isComplete: true,
         lineCount: totalLines,
       };
@@ -439,7 +455,7 @@ function extractResponse(
   // Check if this is an interactive prompt (yes/no or multiple choice)
   // Interactive prompts don't have the ">" prompt and separator, so we need to detect them separately
   const fullOutput = lines.join('\n');
-  const promptDetection = detectPrompt(fullOutput);
+  const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
   if (promptDetection.isPrompt) {
     // This is an interactive prompt - consider it complete
@@ -553,7 +569,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     }
 
     // Response is complete! Check if it's a prompt
-    const promptDetection = detectPrompt(result.response);
+    const promptDetection = detectPromptWithOptions(result.response, cliToolId);
 
     if (promptDetection.isPrompt) {
       // This is a prompt - save as prompt message
@@ -719,7 +735,6 @@ export function stopPolling(worktreeId: string, cliToolId: CLIToolType): void {
  * Used for cleanup on server shutdown
  */
 export function stopAllPolling(): void {
-
   for (const pollerKey of activePollers.keys()) {
     const [worktreeId, cliToolId] = pollerKey.split(':') as [string, CLIToolType];
     stopPolling(worktreeId, cliToolId);

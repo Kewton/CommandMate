@@ -103,6 +103,40 @@ Which option would you prefer?
         expect(result.reason).toBe('prompt_detected');
       });
 
+      // Issue #193: Multiple choice prompt without cursor indicator
+      describe('Issue #193: multiple choice without cursor indicator', () => {
+        it('should detect Claude multiple choice without cursor as waiting', () => {
+          const output = [
+            'Some previous output',
+            'Do you want to proceed?',
+            '  1. Yes',
+            '  2. No',
+            '  3. Cancel',
+          ].join('\n');
+          const result = detectSessionStatus(output, 'claude');
+
+          expect(result.status).toBe('waiting');
+          expect(result.confidence).toBe('high');
+          expect(result.reason).toBe('prompt_detected');
+          expect(result.hasActivePrompt).toBe(true);
+        });
+
+        it('should NOT detect Codex multiple choice without cursor as waiting', () => {
+          // Codex should use default behavior (requireDefaultIndicator: true)
+          const output = [
+            'Some previous output',
+            'Do you want to proceed?',
+            '  1. Yes',
+            '  2. No',
+          ].join('\n');
+          const result = detectSessionStatus(output, 'codex');
+
+          // Without cursor indicator and default requireDefaultIndicator: true,
+          // this should NOT be detected as a prompt
+          expect(result.hasActivePrompt).toBe(false);
+        });
+      });
+
       // Issue #132: Prompt with recommended commands should be "ready"
       describe('Issue #132: prompt with recommended commands', () => {
         it('should return "ready" when prompt shows recommended command "/work-plan"', () => {

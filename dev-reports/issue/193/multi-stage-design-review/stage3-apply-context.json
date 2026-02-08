@@ -1,0 +1,7 @@
+{
+  "issue_number": 193,
+  "review_result_path": "dev-reports/issue/193/multi-stage-design-review/stage3-review-result.json",
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "target_doc": "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md"
+}

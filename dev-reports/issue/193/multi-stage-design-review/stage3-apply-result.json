@@ -1,0 +1,81 @@
+{
+  "issue_number": 193,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IA-001",
+        "item": "response-poller.tsのdetectPromptWithOptions()ヘルパー内でstripAnsi()一律適用に統一",
+        "sections_updated": ["4.5", "5", "6.3", "9 Step 4", "10", "11"],
+        "status": "reflected",
+        "details": "セクション4.5のヘルパー関数内にstripAnsi()一律適用を明記。コード例にstripAnsi(output)を追加。冪等性（idempotent）によりL248の二重適用が無害であることをコメントで明記。セクション6.3をIA-001統一方針として全面改訂し、3箇所の呼び出しごとのANSI状態を表形式で整理。セクション4.5と6.3の記述が統一方針に収束するよう調整"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IA-002",
+        "item": "cli-patterns.tsからprompt-detector.tsへのtype-only import依存方向の明記",
+        "sections_updated": ["4.4", "10", "11"],
+        "status": "reflected",
+        "details": "セクション4.4にモジュール依存方向のASCII図を追加。変更前/変更後の依存グラフ、循環依存チェック結果、type-only importの特性（ランタイム依存なし、バンドルサイズ影響なし）を明記"
+      },
+      {
+        "id": "IA-003",
+        "item": "PromptPanel.tsx等UIコンポーネントへのisDefaultフラグ影響なしの根拠記載",
+        "sections_updated": ["4.6", "5 テスト", "9 Step 6", "11"],
+        "status": "reflected",
+        "details": "セクション4.6にUIコンポーネント3件（PromptPanel.tsx, MobilePromptSheet.tsx, WorktreeDetailRefactored.tsx）がisDefaultフラグに基づく条件分岐を行っていないことの根拠を具体的に記載。将来的なisDefaultハイライト表示追加時の注意事項も追記。テストセクションにstatus-detector.test.tsのClaude用テスト追加を推奨として追加"
+      },
+      {
+        "id": "IA-004",
+        "item": "prompt-response-verification.test.tsのcli-patternsモックにbuildDetectPromptOptions追加",
+        "sections_updated": ["5 テスト", "9 Step 6", "10", "11"],
+        "status": "reflected",
+        "details": "セクション5テスト表にprompt-response-verification.test.tsを追加。モック更新の必要性、toHaveBeenCalledWith()検証時のoptionsパラメータ追加について記載。Step 6にも同内容を追加"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IA-005",
+        "item": "UIコンポーネントへの間接影響は限定的",
+        "sections_updated": ["4.6", "11"],
+        "status": "reflected"
+      },
+      {
+        "id": "IA-006",
+        "item": "Codex/Gemini CLIツールへの影響なし確認",
+        "sections_updated": ["11"],
+        "status": "reflected"
+      },
+      {
+        "id": "IA-007",
+        "item": "claude-poller.ts到達不能コードへの影響ゼロ確認",
+        "sections_updated": ["11"],
+        "status": "reflected"
+      },
+      {
+        "id": "IA-008",
+        "item": "useAutoYes.tsクライアントフックへの間接影響確認",
+        "sections_updated": ["11"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+  "sections_updated": [
+    "4.4 buildDetectPromptOptions() - モジュール依存方向明示（IA-002）",
+    "4.5 response-poller.ts内部ヘルパー - stripAnsi一元化方針（IA-001）",
+    "4.6 Issue #161 多層防御との整合性 - UIコンポーネント影響なし根拠（IA-003）",
+    "5 変更対象ファイル一覧 - テスト表にIA-003/IA-004対象追加、ANSI修正表にIA-001反映",
+    "6.3 ANSI未ストリップ修正 - IA-001統一方針に全面改訂",
+    "9 実装順序 - Step 4にIA-001方針反映、Step 6にIA-004/IA-003テスト追加",
+    "10 受入条件 - IA-001/IA-002/IA-004の受入条件追加",
+    "11 実装チェックリスト - Stage 3セクション追加（Must Fix 1件、Should Fix 3件、Consider 4件）",
+    "12 レビュー指摘事項サマリー - Stage 3セクション追加（レビュー情報、指摘一覧、影響マトリクス、依存関係変更）"
+  ],
+  "timestamp": "2026-02-09T14:00:00Z"
+}

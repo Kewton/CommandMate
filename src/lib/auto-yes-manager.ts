@@ -14,7 +14,7 @@ import { detectPrompt } from './prompt-detector';
 import { resolveAutoAnswer } from './auto-yes-resolver';
 import { sendKeys } from './tmux';
 import { CLIToolManager } from './cli-tools/manager';
-import { stripAnsi, detectThinking } from './cli-patterns';
+import { stripAnsi, detectThinking, buildDetectPromptOptions } from './cli-patterns';
 
 /** Auto yes state for a worktree */
 export interface AutoYesState {
@@ -314,7 +314,8 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     }
 
     // 3. Detect prompt
-    const promptDetection = detectPrompt(cleanOutput);
+    const promptOptions = buildDetectPromptOptions(cliToolId);
+    const promptDetection = detectPrompt(cleanOutput, promptOptions);
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
       // No prompt detected, schedule next poll

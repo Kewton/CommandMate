@@ -1,0 +1,310 @@
+{
+  "issue_number": 193,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-02-08",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2,
+    "previous_must_fix_resolved": 2,
+    "previous_should_fix_resolved": 4,
+    "previous_nice_to_have_resolved": 3
+  },
+  "previous_findings_verification": {
+    "stage3_must_fix": [
+      {
+        "id": "MF-1",
+        "status": "resolved",
+        "verification": "status-detector.ts経由の間接依存が影響範囲に正しく追加されている。間接影響ファイルテーブルにworktrees/route.ts L58とworktrees/[id]/route.ts L58が記載されている。status-detector.tsの変更対象ファイルテーブルにもcliToolIdからDetectPromptOptionsを構築して渡す内部修正の記述あり。コードベースL77でcliToolIdが引数として受け取られ、L87でdetectPrompt(lastLines)として呼び出されていることを確認。detectSessionStatus()のシグネチャは変更不要という方針も適切"
+      },
+      {
+        "id": "MF-2",
+        "status": "resolved",
+        "verification": "既存テストのモック修正方針が具体化されている。既存テストファイル更新テーブルに「具体的な修正方針」カラムが追加され、vi.fn()が引数の数に依存しないこと、toHaveBeenCalledWithアサーションの確認・更新が必要であることが記載。さらに重要な発見として、コードベースのgrep結果から全テストファイルにおいてdetectPromptに対するtoHaveBeenCalledWith()アサーションは一切使用されていないことを確認済み（Stage 5 NTH-NEW-2で一部反映済み）。したがってモック修正は実質不要であり、Issueの記述はやや慎重すぎるが安全側の方針として妥当"
+      }
+    ],
+    "stage3_should_fix": [
+      {
+        "id": "SF-1",
+        "status": "resolved",
+        "verification": "claude-poller.tsが到達不能コードであることが変更対象ファイルテーブル、呼び出し箇所リスト、Phase 3チェックリストに明記されている。Issue #180 stage8-issue-body.mdとの整合性も記載。コードベースのgrepでstartPollingのimportがsrc/内に存在しないことを確認（stopPollingのみがsession-cleanup.tsとcli-tools/manager.tsからインポートされている）"
+      },
+      {
+        "id": "SF-2",
+        "status": "resolved",
+        "verification": "tests/unit/lib/auto-yes-resolver.test.tsがテスト影響範囲テーブルと既存テストファイル更新テーブルに追加されている。コードベース確認の結果、L47-58に「should return first option number when no default」テストが既存であり、全選択肢がisDefault: falseの場合にoptions[0]（番号1）を返すことが検証されている。Issueの「確認し、なければ追加」の方針は適切であり、既存テストが存在するため追加は不要"
+      },
+      {
+        "id": "SF-3",
+        "status": "resolved",
+        "verification": "tests/integration/api-prompt-handling.test.tsとtests/integration/auto-yes-persistence.test.tsがテスト影響範囲テーブルに追加されている。Stage 5 SF-NEW-2の反映により、detectPromptの直接モック使用はないことが明記され、変更要否が「パス確認のみ」に更新されている。コードベースのgrepでこの2ファイルにdetectPromptの参照が存在しないことを確認済み"
+      },
+      {
+        "id": "SF-4",
+        "status": "resolved",
+        "verification": "CLAUDE.mdが変更対象ファイルテーブルとドキュメント影響範囲テーブルに記載されている。Issue #193概要セクションの追加、DetectPromptOptions interface記載、Issue #161「CLIツール非依存性」原則との整合性記載が明記されている"
+      }
+    ],
+    "stage3_nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "resolved",
+        "verification": "間接影響ファイルテーブルにPromptPanel.tsx、MobilePromptSheet.tsx、PromptMessage.tsxが記載されている。Phase 5動作検証にUIコンポーネントのisDefault: false時の表示確認が追加されている。コードベース確認で、PromptPanel.tsx L71とMobilePromptSheet.tsx L209でdefaultOpt?.number ?? nullとしてデフォルト選択の自動選択が行われており、全選択肢がisDefault: falseの場合はselectedOptionがnullになり、ユーザーが明示的に選択肢を選ぶ必要があることを確認。UIクラッシュの懸念なし"
+      },
+      {
+        "id": "NTH-2",
+        "status": "resolved",
+        "verification": "ケースBの設計にCodex/Geminiへの影響分析が追加されている。response-poller.ts L442が全CLIツール共通パスであること、L498のcheckForResponse(worktreeId, cliToolId)でcliToolIdが利用可能であること、Codex/GeminiではrequireDefaultIndicatorのデフォルト値（true）を維持する設計が明記されている"
+      },
+      {
+        "id": "NTH-3",
+        "status": "resolved",
+        "verification": "ドキュメント影響範囲テーブルにPROMPT_HANDLING_IMPLEMENTATION_PLAN.md L459, L964のフォローアップ対応が記載されている"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-7-1",
+        "category": "影響ファイル",
+        "issue": "response-poller.ts L442のdetectPrompt(fullOutput)呼び出しにおいて、fullOutputはlines.join('\\n')で構築されており、linesはrawLinesから末尾空行をトリミングしたものだが、stripAnsi()は適用されていない。Issueでは「stripAnsi()適用追加」を変更内容として記載しているが、Phase 3の記述ではL442の修正として「ANSI未ストリップ問題の修正」と「CLIツール別options構築」の2つの変更を同時に行うことになっている。しかし、L442に到達するのは「L248のClaude専用ガードで検出されなかった場合」または「Claude以外のCLIツール」であり、Claudeの場合L248で既にstripAnsi(fullOutput)が適用されてdetectPrompt()が呼ばれている。L442のClaude到達パスでは、L248のdetectPrompt()がfalseを返してここに到達しているため、同じfullOutputにstripAnsi()を適用しても結果は変わらない。L442修正の実質的な恩恵は主にCodex/Geminiのパスにある。この点がIssueのPhase 3記述では不明瞭",
+        "location": "## 対策案 > Phase 3 > response-poller.ts > L442",
+        "recommendation": "Phase 3のresponse-poller.ts L442の説明を補足し、「Claudeの場合はL248で既にstripAnsi適用済みのdetectPrompt()が実行されているため、L442のstripAnsi追加はClaude到達パスでは重複適用となる（結果は同一）。L442のstripAnsi追加の主な恩恵はCodex/Geminiのパス、およびコードの一貫性維持にある」と記述する",
+        "evidence": "response-poller.ts L244-258: Claudeの場合はconst cleanFullOutput = stripAnsi(fullOutput)でdetectPrompt(cleanFullOutput)が呼ばれる。L442: const promptDetection = detectPrompt(fullOutput) -- stripAnsiなし。Claudeがここに到達するのはL248のpromptDetection.isPromptがfalseの場合のみ"
+      },
+      {
+        "id": "SF-7-2",
+        "category": "テスト範囲",
+        "issue": "PromptPanel.tsxとMobilePromptSheet.tsxにおいて、全選択肢がisDefault: falseの場合、初期状態でselectedOptionがnullになる。この場合、ユーザーが選択肢を明示的に選択しないと送信ボタンが押せない（handleMultipleChoiceSubmit内のselectedOption === null チェック）。これは期待動作であるが、Phase 5の動作検証項目に「selectedOptionがnull初期状態で送信ボタンが無効化されていること」の確認が含まれていない。既存の❯マーカー付きプロンプトでは必ずisDefault: trueの選択肢があり自動選択されるが、ケースBでは全てfalseになるため、ユーザー体験が変わる",
+        "location": "## 対策案 > Phase 5",
+        "recommendation": "Phase 5の動作検証に「ケースBプロンプトで、デフォルト選択肢がない場合に送信ボタンが初期状態で無効化されており、ユーザーが選択肢をクリックして初めて送信可能になること」の確認項目を追加する。これはバグではなく意図された動作だが、ユーザーが選択肢を選ばずに送信ボタンを押そうとする可能性があるため、確認が必要",
+        "evidence": "PromptPanel.tsx L69-74: const [selectedOption, setSelectedOption] = useState<number | null>(() => { if (promptData.type === 'multiple_choice') { const defaultOpt = promptData.options.find(opt => opt.isDefault); return defaultOpt?.number ?? null; } return null; }); L106: if (isDisabled || selectedOption === null) return;"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-7-1",
+        "category": "テスト範囲",
+        "issue": "既存テストファイル更新テーブルのprompt-response-verification.test.tsに「toHaveBeenCalledWith()アサーションのみ確認・更新」と記載されているが、コードベースのgrepで確認した結果、detectPromptに対するtoHaveBeenCalledWith()アサーションはこのファイル内に存在しない。テストではsendKeysやcaptureSessionOutputのtoHaveBeenCalled()（引数なし）で動作を検証している。したがって「toHaveBeenCalledWithアサーションの更新」という修正方針は実行すべき作業が存在しない",
+        "location": "## 影響範囲 > 既存テストファイルの更新 > prompt-response-verification.test.ts",
+        "recommendation": "prompt-response-verification.test.tsの修正方針を「detectPromptに対するtoHaveBeenCalledWithアサーションは使用されていない。vi.fn().mockReturnValue(...)のモック定義は引数の数に依存しないため既存テストは変更不要。パス確認のみ」に修正する。これにより実装者が不要な修正作業を行うことを防止できる",
+        "evidence": "grep結果: tests/unit/api/prompt-response-verification.test.ts内にdetectPrompt.*toHaveBeenCalledWithまたはtoHaveBeenCalledWith.*detectPromptのパターンは存在しない。L136: expect(sendKeys).toHaveBeenCalled() -- sendKeysの呼び出し確認のみ"
+      },
+      {
+        "id": "NTH-7-2",
+        "category": "影響ファイル",
+        "issue": "status-detector.tsのdetectSessionStatus()はstripAnsi()を内部で呼び出し（L81: const cleanOutput = stripAnsi(output)）、cleanOutputからlastLinesを切り出してdetectPrompt(lastLines)に渡している。したがってstatus-detector.ts経由のdetectPrompt()呼び出しは既にANSIストリップ済みであり、受入条件の「detectPrompt()を呼び出す全箇所（計9箇所）でANSI未ストリップの生出力が渡されていないこと」は、status-detector.ts経由のパスでは現行でも達成済みである。この事実がIssueで明示されていないため、実装者がstatus-detector.tsのstripAnsi適用を二重に行う可能性がある",
+        "location": "## 影響範囲 > 変更対象ファイル > status-detector.ts",
+        "recommendation": "status-detector.tsの変更内容の記述に「status-detector.tsは内部でstripAnsi()を既に適用済み（L81）のため、ANSIストリップの追加修正は不要。修正対象はdetectPrompt(lastLines)へのoptions引数追加のみ」と補足する",
+        "evidence": "status-detector.ts L80-83: const cleanOutput = stripAnsi(output); const lines = cleanOutput.split('\\n'); const lastLines = lines.slice(-STATUS_CHECK_LINE_COUNT).join('\\n'); L87: const promptDetection = detectPrompt(lastLines); -- lastLinesはcleanOutput由来でありANSIストリップ済み"
+      }
+    ]
+  },
+  "impact_analysis_completeness": {
+    "direct_changes_table": {
+      "status": "complete",
+      "file_count": 9,
+      "verification": "変更対象ファイルテーブルの9ファイル全てをコードベースで確認。各ファイルのdetectPrompt()呼び出し行番号、cliToolIdの取得元、stripAnsi()の適用状況がコードベースと一致。CLAUDE.mdの更新内容も適切に記載。claude-poller.tsの到達不能コード注記も正確"
+    },
+    "indirect_impacts_table": {
+      "status": "complete",
+      "file_count": 8,
+      "verification": "間接影響ファイル8件は全て妥当。worktrees/route.ts L58とworktrees/[id]/route.ts L58のdetectSessionStatus()経由の間接呼び出しはコードベースと一致（両方L58）。auto-yes-resolver.ts L23-36のisDefaultフォールバック、respond/route.ts L12のgetAnswerInputインポート、PromptPanel/MobilePromptSheet/PromptMessage/useAutoYesの間接影響記述は全て適切。追加すべき間接影響ファイルは発見されなかった"
+    },
+    "test_impacts_table": {
+      "status": "complete",
+      "file_count": 7,
+      "verification": "テスト影響範囲7ファイルの網羅性を確認。prompt-detector.test.tsの新規テスト追加（追加のみ）、auto-yes-manager.test.tsのパス確認のみ（toHaveBeenCalledWithアサーション未使用のため変更不要）、prompt-response-verification.test.tsの確認・更新（ただしtoHaveBeenCalledWithアサーション未使用のため実質変更不要）、auto-yes-resolver.test.tsの確認・追加（L47-58に既存テストあり追加不要）、api-prompt-handling/auto-yes-persistence統合テストのパス確認、status-detector.test.tsのパス確認。追加すべきテストファイルは発見されなかった"
+    },
+    "document_impacts_table": {
+      "status": "complete",
+      "file_count": 2,
+      "verification": "CLAUDE.mdの更新（Phase 4完了後）とPROMPT_HANDLING_IMPLEMENTATION_PLAN.mdのフォローアップ対応が記載。追加すべきドキュメントは発見されなかった"
+    },
+    "existing_test_updates_table": {
+      "status": "complete",
+      "file_count": 3,
+      "verification": "auto-yes-manager.test.ts、prompt-response-verification.test.ts、auto-yes-resolver.test.tsの3ファイルに修正方針が記載。ただしtoHaveBeenCalledWithアサーションの更新に関する方針は、実際にはアサーションが存在しないため過剰（NTH-7-1で指摘）"
+    }
+  },
+  "detectPrompt_signature_change_impact": {
+    "total_call_sites": 9,
+    "direct_calls": 8,
+    "indirect_calls": 1,
+    "call_site_verification": [
+      {
+        "file": "auto-yes-manager.ts",
+        "line": "L290",
+        "stripAnsi_status": "適用済み（L279）",
+        "cliToolId_available": true,
+        "cliToolId_source": "L262 関数引数",
+        "issue_description_accurate": true
+      },
+      {
+        "file": "prompt-response/route.ts",
+        "line": "L75",
+        "stripAnsi_status": "適用済み（L74）",
+        "cliToolId_available": true,
+        "cliToolId_source": "L50 cliToolParam || worktree.cliToolId",
+        "issue_description_accurate": true
+      },
+      {
+        "file": "current-output/route.ts",
+        "line": "L88",
+        "stripAnsi_status": "適用済み（L77）",
+        "cliToolId_available": true,
+        "cliToolId_source": "L40 isCliTool(cliToolParam) ? cliToolParam : worktree.cliToolId || 'claude'",
+        "issue_description_accurate": true
+      },
+      {
+        "file": "response-poller.ts",
+        "line": "L248",
+        "stripAnsi_status": "適用済み（L247）",
+        "cliToolId_available": true,
+        "cliToolId_source": "L498 checkForResponse引数",
+        "issue_description_accurate": true,
+        "note": "Claude専用ガード内。変更不要と記載されており正確"
+      },
+      {
+        "file": "response-poller.ts",
+        "line": "L442",
+        "stripAnsi_status": "未適用（要修正）",
+        "cliToolId_available": true,
+        "cliToolId_source": "L498 checkForResponse引数",
+        "issue_description_accurate": true
+      },
+      {
+        "file": "response-poller.ts",
+        "line": "L556",
+        "stripAnsi_status": "未適用（要修正）",
+        "cliToolId_available": true,
+        "cliToolId_source": "L498 checkForResponse引数",
+        "issue_description_accurate": true,
+        "note": "extractResponse()がstripAnsi前の生行をpushしておりresult.responseにANSI残存。Issueの記述は正確"
+      },
+      {
+        "file": "claude-poller.ts",
+        "line": "L164",
+        "stripAnsi_status": "未適用（要修正、到達不能コード）",
+        "cliToolId_available": false,
+        "cliToolId_source": "N/A（claude-pollerはcliToolIdパラメータなし）",
+        "issue_description_accurate": true,
+        "note": "到達不能コード。一貫性修正"
+      },
+      {
+        "file": "claude-poller.ts",
+        "line": "L232",
+        "stripAnsi_status": "未適用（要修正、到達不能コード）",
+        "cliToolId_available": false,
+        "cliToolId_source": "N/A",
+        "issue_description_accurate": true,
+        "note": "到達不能コード。一貫性修正"
+      },
+      {
+        "file": "status-detector.ts",
+        "line": "L87（間接）",
+        "stripAnsi_status": "適用済み（L81 stripAnsi(output)）",
+        "cliToolId_available": true,
+        "cliToolId_source": "L77 detectSessionStatus引数",
+        "issue_description_accurate": true
+      }
+    ],
+    "backward_compatibility": "完全に保持。optionalパラメータの追加のためTypeScript型互換性は維持。既存の呼び出し元は引数変更なしで動作する",
+    "test_mock_impact": "toHaveBeenCalledWith()アサーションがdetectPromptに対して一切使用されていないことをgrepで確認。したがってモック修正は実質不要。vi.fn().mockReturnValue(...)のモック定義は引数の数に依存しないため変更不要"
+  },
+  "breaking_changes": {
+    "has_breaking_changes": false,
+    "details": "前回レビューの判定を維持。optionalパラメータ追加による型互換性の保持を確認"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "L44, L182, L189, L264-391, L274-288, L344-350",
+      "relevance": "detectPrompt()シグネチャ、DEFAULT_OPTION_PATTERN, NORMAL_OPTION_PATTERN, Pass 1, Layer 4 -- 全て確認済み"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "L13, L50, L75-87",
+      "relevance": "detectPromptインポート、STATUS_CHECK_LINE_COUNT定数、detectSessionStatus内部のstripAnsi(L81)とdetectPrompt(L87)呼び出し -- 確認済み"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "L17, L244-258, L441-442, L556",
+      "relevance": "detectPromptインポート、Claude専用ガード（L248 stripAnsi適用済み）、L442 ANSI未ストリップ、L556 extractResponse経由 -- 確認済み"
+    },
+    {
+      "file": "src/lib/claude-poller.ts",
+      "lines": "L10, L41-52, L163-164, L232",
+      "relevance": "detectPromptインポート、extractClaudeResponse内部のANSI未ストリップ、到達不能コード -- 確認済み。startPollingのインポートがsrc/内に存在しないことも確認"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "L13, L262, L279-290",
+      "relevance": "detectPromptインポート、pollAutoYes内のstripAnsi(L279)適用済みdetectPrompt(L290) -- 確認済み"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "lines": "L14, L50, L74-75",
+      "relevance": "detectPromptインポート、cliToolId取得（L50）、stripAnsi(L74)+detectPrompt(L75) -- 確認済み"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "L9, L40, L77, L88",
+      "relevance": "detectPromptインポート、cliToolId取得（L40）、stripAnsi(L77)、thinkingガード付きdetectPrompt(L88) -- 確認済み"
+    },
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "lines": "L16, L58",
+      "relevance": "detectSessionStatusインポート、detectSessionStatus()呼び出し -- 確認済み"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "L13, L58",
+      "relevance": "detectSessionStatusインポート、detectSessionStatus()呼び出し -- 確認済み"
+    },
+    {
+      "file": "src/components/worktree/PromptPanel.tsx",
+      "lines": "L69-74, L106, L283-290",
+      "relevance": "isDefault依存のselectedOption初期化（L71）、selectedOption === nullでの送信ブロック（L106）、isDefault UIバッジ表示（L287-290）"
+    },
+    {
+      "file": "src/components/mobile/MobilePromptSheet.tsx",
+      "lines": "L207-213, L400",
+      "relevance": "isDefault依存のselectedOption初期化（L209）、isDefault UIバッジ表示（L400）"
+    },
+    {
+      "file": "src/lib/auto-yes-resolver.ts",
+      "lines": "L18-39",
+      "relevance": "resolveAutoAnswer()のisDefault/options[0]フォールバック -- 確認済み"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-resolver.test.ts",
+      "lines": "L47-58",
+      "relevance": "全選択肢isDefault: falseのフォールバックテスト既存。追加不要と確認"
+    },
+    {
+      "file": "tests/unit/api/prompt-response-verification.test.ts",
+      "lines": "L49-51, L112-157",
+      "relevance": "detectPromptモック。toHaveBeenCalledWithアサーションはdetectPromptに対して未使用を確認"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "lines": "L427-498",
+      "relevance": "thinking stateスキップテスト。detectPromptのtoHaveBeenCalledWithアサーション未使用、sendKeys呼び出し有無で検証を確認"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #161のCLIツール非依存性原則、Issue #193概要の追加対象"
+    },
+    {
+      "file": "dev-reports/issue/180/issue-review/stage8-issue-body.md",
+      "relevance": "claude-poller.ts到達不能コード判定の根拠"
+    }
+  ]
+}

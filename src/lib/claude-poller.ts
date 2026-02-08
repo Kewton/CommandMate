@@ -159,6 +159,8 @@ function extractClaudeResponse(
 
   // Check if this is an interactive prompt (yes/no or multiple choice)
   // Interactive prompts don't have the ">" prompt and separator, so we need to detect them separately
+  // TODO [Issue #193]: This code path is unreachable (claude-poller.ts is superseded by response-poller.ts).
+  // When refactoring/removing claude-poller.ts, apply stripAnsi() + buildDetectPromptOptions() here.
   if (!isThinking) {
     const fullOutput = lines.join('\n');
     const promptDetection = detectPrompt(fullOutput);
@@ -224,11 +226,13 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
       return false;
     }
 
-      if (!result.isComplete) {
-        return false;
-      }
+    if (!result.isComplete) {
+      return false;
+    }
 
     // Response is complete! Check if it's a prompt
+    // TODO [Issue #193]: This code path is unreachable (claude-poller.ts is superseded by response-poller.ts).
+    // When refactoring/removing claude-poller.ts, apply stripAnsi() + buildDetectPromptOptions() here.
     const promptDetection = detectPrompt(result.response);
 
     if (promptDetection.isPrompt) {

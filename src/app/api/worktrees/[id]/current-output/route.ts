@@ -10,7 +10,7 @@ import { detectPrompt } from '@/lib/prompt-detector';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { detectThinking as detectThinkingState, stripAnsi } from '@/lib/cli-patterns';
+import { detectThinking as detectThinkingState, stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
 import { getAutoYesState, getLastServerResponseTimestamp } from '@/lib/auto-yes-manager';
 
 const SUPPORTED_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
@@ -85,7 +85,9 @@ export async function GET(
     // Check if it's an interactive prompt (yes/no or multiple choice)
     // Skip detection during thinking to avoid false positives propagating
     // to useAutoYes.ts client-side auto-response.
-    const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput);
+    // IC-004: Maintain thinking conditional; only pass promptOptions when detectPrompt is called
+    const promptOptions = buildDetectPromptOptions(cliToolId);
+    const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput, promptOptions);
 
     // isComplete is ONLY used for prompt detection (yes/no questions)
     // We no longer try to detect "normal" response completion

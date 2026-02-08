@@ -1,0 +1,75 @@
+{
+  "issue_number": 193,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "cliToolId判定パターンの6箇所分散（DRY違反）-> buildDetectPromptOptions()ヘルパー関数で1箇所に集約",
+        "sections_updated": ["4.4 buildDetectPromptOptions()", "5. 変更対象ファイル一覧", "9. 実装順序", "10. 受入条件", "11. 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "DetectPromptOptions将来拡張性の記載（OCP）-> JSDocに将来拡張メモ追加",
+        "sections_updated": ["4.1 DetectPromptOptions Interface", "8. 設計上の決定事項とトレードオフ", "11. 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "status-detector.tsの責務拡大（SRP）-> buildDetectPromptOptions()使用で解消",
+        "sections_updated": ["4.4 buildDetectPromptOptions()", "5. 変更対象ファイル一覧", "9. 実装順序", "11. 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-003",
+        "item": "response-poller.ts内detectPrompt()3箇所分散（KISS）-> detectPromptWithOptions()内部ヘルパー追加",
+        "sections_updated": ["4.5 response-poller.ts内部ヘルパー", "5. 変更対象ファイル一覧", "9. 実装順序", "11. 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "item": "claude-poller.ts到達不能コード修正の工数対効果（YAGNI）-> TODOコメント優先、実装変更はオプショナル",
+        "sections_updated": ["5. 変更対象ファイル一覧", "8. 設計上の決定事項とトレードオフ", "9. 実装順序", "11. 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "C-002",
+        "item": "CLIToolType拡張時のレジストリパターン検討（OCP）-> 将来拡張セクション追加",
+        "sections_updated": ["4.4 buildDetectPromptOptions()", "8. 設計上の決定事項とトレードオフ", "11. 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "C-003",
+        "item": "requireDefaultIndicator !== false の二重否定（KISS）-> ?? true 変数代入パターンに変更",
+        "sections_updated": ["4.3 detectMultipleChoicePrompt()", "9. 実装順序", "10. 受入条件", "11. 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+  "sections_updated": [
+    "2. アーキテクチャ設計（mermaid図に共通ユーティリティ層追加）",
+    "3. 技術選定（CLIツール判定の記述更新）",
+    "4.1 DetectPromptOptions Interface（将来拡張メモ追加 - SF-001）",
+    "4.3 detectMultipleChoicePrompt()（?? trueパターンに変更 - C-003）",
+    "4.4 buildDetectPromptOptions()（新規セクション - MF-001/SF-002）",
+    "4.5 response-poller.ts内部ヘルパー（新規セクション - SF-003）",
+    "5. 変更対象ファイル一覧（cli-patterns.ts追加、到達不能コード方針変更 - MF-001/C-001）",
+    "7. パフォーマンス設計（buildDetectPromptOptions()オーバーヘッド追記）",
+    "8. 設計上の決定事項とトレードオフ（ヘルパー関数、TODOコメント優先、将来拡張方針追加）",
+    "9. 実装順序（全Step更新）",
+    "10. 受入条件（MF-001/C-003の受入条件追加）",
+    "11. 実装チェックリスト（新規セクション）",
+    "12. レビュー指摘事項サマリー（新規セクション）"
+  ],
+  "timestamp": "2026-02-08T12:30:00Z"
+}
