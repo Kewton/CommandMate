@@ -1,0 +1,67 @@
+{
+  "issue_number": 193,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IC-001",
+        "item": "変更対象呼び出し元数の記載不整合（「6箇所」が実態と不一致）",
+        "sections_updated": ["セクション3（代替案比較表）", "セクション4.4（ヘルパー関数説明）", "セクション5（変更対象ファイル一覧）", "セクション8（トレードオフ表）", "セクション10（受入条件）", "セクション11（チェックリスト）", "セクション12（整合性レビュー結果追記）"],
+        "status": "reflected",
+        "detail": "P0+P1で7呼び出し箇所（5ファイル）、P2含む合計9呼び出し箇所（7ファイル）に修正"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IC-002",
+        "item": "response-poller.ts L556のresult.responseのANSI状態の明確化不足",
+        "sections_updated": ["セクション4.5（response-poller.ts内部ヘルパー注記）", "セクション6.3（ANSI未ストリップ修正）", "セクション11（整合性レビュー指摘チェックリスト）"],
+        "status": "reflected",
+        "detail": "extractResponse()内部のデータフロー（cleanLine vs 生のline push）を補足。stripAnsi()適用必要性を明記"
+      },
+      {
+        "id": "IC-003",
+        "item": "status-detector.tsのcliToolId伝搬経路が不明確",
+        "sections_updated": ["セクション5（変更対象ファイル一覧）", "セクション9（Step 3実装順序）", "セクション11（整合性レビュー指摘チェックリスト）"],
+        "status": "reflected",
+        "detail": "detectSessionStatus()の既存引数cliToolId（L77）をbuildDetectPromptOptions()に渡す旨を明記"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IC-004",
+        "item": "current-output/route.tsのthinking条件分岐との統合の明示",
+        "sections_updated": ["セクション2（データフロー図）", "セクション5（変更対象ファイル一覧）", "セクション9（Step 4実装順序）", "セクション11（整合性レビュー指摘チェックリスト）"],
+        "status": "reflected",
+        "detail": "thinking分岐は維持しdetectPrompt()が呼ばれるケースでのみpromptOptionsを渡す旨を明記。Pass 1スキップ時のPass 2入口挙動も明確化"
+      },
+      {
+        "id": "IC-005",
+        "item": "auto-yes-resolver.tsのisDefault=falseフォールバック動作の記載",
+        "sections_updated": ["セクション4.6（Issue #161整合性）", "セクション8（リスクテーブル）", "セクション11（整合性レビュー指摘チェックリスト）"],
+        "status": "reflected",
+        "detail": "isDefault=false時のnullish coalescingによるoptions[0]フォールバック動作を明記"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+  "sections_updated": [
+    "セクション2（データフロー図 - Pass 1スキップ時のPass 2入口挙動明確化）",
+    "セクション3（代替案比較表 - 呼び出し箇所数修正）",
+    "セクション4.4（ヘルパー関数説明 - 分散箇所数修正）",
+    "セクション4.5（response-poller.ts - L248/L556データフロー注記追加）",
+    "セクション4.6（Issue #161整合性 - isDefaultフォールバック動作追記）",
+    "セクション5（変更対象ファイル一覧 - cliToolId伝搬パス/thinking分岐明記）",
+    "セクション6.3（ANSI未ストリップ修正 - L556データフロー詳細追加）",
+    "セクション8（トレードオフ/リスク - 呼び出し箇所数修正、isDefaultフォールバックリスク追加）",
+    "セクション9（実装順序 - cliToolId伝搬/thinking分岐の注記追加）",
+    "セクション10（受入条件 - 呼び出し箇所数修正）",
+    "セクション11（実装チェックリスト - Stage 2指摘項目追加）",
+    "セクション12（レビュー指摘事項サマリー - Stage 2整合性レビュー結果追記）"
+  ],
+  "timestamp": "2026-02-09T13:00:00Z"
+}

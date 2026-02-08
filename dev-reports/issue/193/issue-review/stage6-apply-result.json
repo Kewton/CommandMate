@@ -1,0 +1,48 @@
+{
+  "issue_number": 193,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-NEW-1",
+        "status": "applied",
+        "change_summary": "current-output/route.tsのcliToolId取得行番号を「L66付近でworktree.cliToolIdから取得」から「L40でクエリパラメータまたはworktree.cliToolIdから取得」に修正。Phase 3のcurrent-output/route.ts記述と変更対象ファイルテーブルの両方を更新。コード参照（const cliToolId: CLIToolType = isCliTool(cliToolParam) ? cliToolParam : (worktree.cliToolId || 'claude')）も追加"
+      },
+      {
+        "id": "SF-NEW-2",
+        "status": "applied",
+        "change_summary": "テスト影響範囲テーブルのtests/integration/api-prompt-handling.test.tsとtests/integration/auto-yes-persistence.test.tsの影響内容を修正。「detectPromptのモック使用状況を確認する必要あり。シグネチャ変更の影響を受ける可能性がある」から「detectPromptの直接モック使用はないが、シグネチャ変更後の統合動作確認が必要」に変更。変更要否を「要確認」から「パス確認のみ」に変更"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-NEW-1",
+        "status": "applied",
+        "change_summary": "detectPrompt()呼び出し箇所リスト（計9箇所）を直接呼び出し（8箇所）と間接呼び出し（1箇所: status-detector.ts経由）に分類して構造を明確化。status-detector.tsの項目を間接呼び出しセクションに移動"
+      },
+      {
+        "id": "NTH-NEW-2",
+        "status": "applied",
+        "change_summary": "auto-yes-manager.test.tsの修正方針を精度向上。Phase 4の記述を「toHaveBeenCalledWithアサーションの更新が必要な場合あり」から「L451-459ではsendKeys呼び出し有無で検証しておりtoHaveBeenCalledWithアサーションは未使用。既存テストは変更不要。新パターンテスト追加時はdetectPromptモック戻り値をisDefault: falseに設定しsendKeysの呼び出しを検証」に修正。既存テストファイル更新テーブルとテスト影響範囲テーブルの両方を更新。テスト影響範囲テーブルの変更要否を「確認・更新」から「パス確認のみ」に変更"
+      },
+      {
+        "id": "NTH-NEW-3",
+        "status": "applied",
+        "change_summary": "response-poller.ts L556のextractResponse()データフロー説明を精度向上。Phase 3の記述を「一部の行はstripAnsi()されるパスもあるが」という曖昧な表現から「extractResponse()内部ではstripAnsi()をパターンマッチ判定にのみ使用し（const cleanLine = stripAnsi(line)でマッチ判定）、responseLines.push(line)ではstripAnsi前の生の行をpushしている。そのためresult.responseにはANSIコードが残存する」に修正"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/193"
+  }
+}

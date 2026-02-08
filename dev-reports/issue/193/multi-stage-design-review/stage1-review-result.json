@@ -1,0 +1,125 @@
+{
+  "issue_number": 193,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "DRY",
+        "title": "cliToolId === 'claude' 判定の分散（6箇所）",
+        "description": "呼び出し元6箇所で `cliToolId === 'claude' ? { requireDefaultIndicator: false } : undefined` という同一パターンが繰り返される。CLIツール非依存性原則を維持しつつも、この判定ロジックをヘルパー関数として共通化すべき。",
+        "recommendation": "src/lib/prompt-detector.ts または新規ファイルに `buildDetectPromptOptions(cliToolId: CLIToolType): DetectPromptOptions | undefined` ヘルパー関数を作成する。ただしprompt-detector.ts内部にCLIToolTypeをimportすることを避けるため、呼び出し元の共通モジュール（例: cli-patterns.ts）に配置することが望ましい。",
+        "severity": "medium",
+        "file": "複数ファイル（prompt-response/route.ts, auto-yes-manager.ts, status-detector.ts, response-poller.ts, current-output/route.ts, claude-poller.ts）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "OCP",
+        "title": "DetectPromptOptions interfaceの拡張性に関する懸念",
+        "description": "現在のrequireDefaultIndicatorは単一のbooleanフラグで、Pass 1とLayer 4の2つの独立した関心事を同時に制御している。将来別のCLIツールがPass 1のみスキップしたい場合やLayer 4のみスキップしたい場合に対応できない。ただし現時点でそのような要件は存在しない。",
+        "recommendation": "現時点ではrequireDefaultIndicatorで十分だが、設計書内に「将来的にPass 1とLayer 4を独立して制御する必要が生じた場合は、skipPass1Gate / skipLayer4Gate のような個別フラグに分割する」旨のコメントを残しておくことを推奨。",
+        "severity": "low"
+      },
+      {
+        "id": "SF-002",
+        "principle": "SRP",
+        "title": "status-detector.tsの責務拡大",
+        "description": "設計書では status-detector.ts 内部で cliToolId から options を構築すると記載されている。status-detector.ts は既に cliToolId を受け取っており自然な拡張だが、detectPrompt() の呼び出し方に関する知識（どの cliToolId でどのオプションを使うか）がこのモジュールに埋め込まれることになる。ヘルパー関数 (MF-001) で解決可能。",
+        "recommendation": "MF-001のヘルパー関数を使用すれば、status-detector.ts自体はオプション構築ロジックを持つ必要がなくなり、SRP違反が解消される。",
+        "severity": "low"
+      },
+      {
+        "id": "SF-003",
+        "principle": "KISS",
+        "title": "response-poller.ts内のdetectPrompt()呼び出しが3箇所に分散",
+        "description": "response-poller.tsでは L248, L442, L556 の3箇所でdetectPrompt()が呼び出されている。L248はClaude専用パス（早期チェック）、L442はCodex/Gemini汎用パス（interactive prompt検出）、L556は応答完了後のprompt再チェック。3箇所全てにoptions引数を追加する必要があり、変更漏れリスクがある。",
+        "recommendation": "response-poller.ts内にprivateヘルパー関数 `detectPromptWithOptions(output: string, cliToolId: CLIToolType)` を設けて呼び出しを集約し、変更漏れリスクを低減する。",
+        "severity": "low"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "YAGNI",
+        "title": "claude-poller.ts（到達不能コード）の修正は工数対効果が低い",
+        "description": "設計書ではclaude-poller.tsの到達不能コード2箇所（L164, L232）も修正対象としている（P2優先度）。到達不能コードの一貫性修正はコード品質向上に寄与するが、実行されないコードへの変更は厳密にはYAGNI原則に抵触する。ただし設計書がP2（最低優先度）としており、「一貫性のため」と明示しているため、判断は妥当。",
+        "recommendation": "到達不能コードの修正よりも、到達不能であることのドキュメント化（コメントまたはTODO）を優先する方が工数効率が良い。将来的にclaude-poller.tsを廃止またはリファクタリングする際にまとめて対応する方が効率的。",
+        "severity": "info"
+      },
+      {
+        "id": "C-002",
+        "principle": "OCP",
+        "title": "CLIToolType拡張時のoptions構築パターン追加",
+        "description": "新しいCLIツール（例: cursor）が追加された場合、options構築ヘルパーにも条件追加が必要。現在のアーキテクチャではCLIToolType自体がcli-tools/types.tsで定数配列として管理されているため、ツール追加時の変更は不可避だが、変更箇所が明確でありリスクは低い。",
+        "recommendation": "将来的にCLIツール数が増加する場合は、CLIToolConfigのようなレジストリパターンでツール別設定（promptDetectionOptions含む）を管理する方式を検討。現時点では3ツールのため不要。",
+        "severity": "info"
+      },
+      {
+        "id": "C-003",
+        "principle": "KISS",
+        "title": "requireDefaultIndicator !== false の二重否定パターン",
+        "description": "設計書のコード例 `if (options?.requireDefaultIndicator !== false)` は二重否定に近い表現で、可読性がやや低い。`options?.requireDefaultIndicator ?? true` を変数に代入して使用する方が意図が明確。",
+        "recommendation": "`const requireDefault = options?.requireDefaultIndicator ?? true;` と変数に代入し、以降 `if (requireDefault)` で判定する。",
+        "severity": "info"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principles_checklist": {
+    "SRP": {
+      "status": "pass_with_notes",
+      "notes": "prompt-detector.tsはCLIツール非依存性を維持しつつパラメータ化で対応。status-detector.tsへのoptions構築ロジック埋め込みはSF-002で指摘。"
+    },
+    "OCP": {
+      "status": "pass",
+      "notes": "DetectPromptOptions interfaceによる拡張ポイント設計は適切。デフォルト値trueで後方互換性を維持。将来の拡張余地あり。"
+    },
+    "LSP": {
+      "status": "not_applicable",
+      "notes": "継承関係なし。"
+    },
+    "ISP": {
+      "status": "pass",
+      "notes": "DetectPromptOptionsはoptionalフィールドのみで構成。呼び出し元は必要なフィールドのみ指定可能。"
+    },
+    "DIP": {
+      "status": "pass",
+      "notes": "prompt-detector.tsはCLIToolTypeに依存せず、抽象的なoptionsインターフェースのみに依存。"
+    },
+    "KISS": {
+      "status": "pass_with_notes",
+      "notes": "単一フラグでPass 1/Layer 4を同時制御するアプローチは簡潔。二重否定パターン（C-003）は改善余地あり。"
+    },
+    "YAGNI": {
+      "status": "pass_with_notes",
+      "notes": "到達不能コード修正（P2）はYAGNI観点でやや過剰だが、一貫性目的で優先度を下げている点は妥当。"
+    },
+    "DRY": {
+      "status": "needs_improvement",
+      "notes": "cliToolId判定パターンの6箇所分散（MF-001）はDRY原則の明確な違反。ヘルパー関数で解消可能。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/claude-poller.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/cli-tools/types.ts"
+  ],
+  "timestamp": "2026-02-08T12:00:00Z"
+}

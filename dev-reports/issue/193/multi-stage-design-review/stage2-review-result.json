@@ -1,0 +1,199 @@
+{
+  "issue_number": 193,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IC-001",
+        "title": "変更対象呼び出し元数の記載不整合",
+        "description": "セクション3の代替案比較表では「呼び出し元9箇所のうち6箇所を更新」と記載しているが、セクション5の変更対象ファイル一覧ではP0が5箇所（prompt-response, auto-yes-manager, status-detector, response-poller x3を1ファイルとして, current-output）+ P1で計7呼び出し箇所、P2を含めると9箇所となる。セクション11のMF-001チェックリストではclaude-poller x2を含む全9箇所を記載。「6」の数字はセクション3とセクション5/11で矛盾しており、実装者が対象範囲を誤認する恐れがある。",
+        "severity": "medium",
+        "recommendation": "セクション3の「6箇所」を実際の対象数に修正する。P0+P1で7呼び出し箇所（5ファイル）、P2含む合計で9呼び出し箇所（7ファイル）と明記する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IC-002",
+        "title": "response-poller.ts L556のdetectPrompt()への入力がresult.responseであり、ANSIストリップ済みとは限らない点の明確化不足",
+        "description": "設計書セクション6.3では「response-poller.ts L442/L556でstripAnsi()を適用」と記載しているが、L556で渡されるresult.responseはextractResponse()の戻り値である。extractResponse()内部ではL310で個別の行にstripAnsi()を適用しているケースもあるが、responseLines.push(line)ではlineを直接pushしている（L330）ため、stripAnsi()されていない行が混在している。設計書にはこのデータフローの詳細が記載されていないため、実装者がstripAnsi()の必要性を正しく判断できない可能性がある。",
+        "severity": "low",
+        "recommendation": "セクション6.3または4.5に、L556のresult.responseがなぜANSIストリップされていないのか（extractResponse()内部でcleanLineはパターンマッチ用だがpushされるのは生のline）を補足する。"
+      },
+      {
+        "id": "IC-003",
+        "title": "status-detector.tsのdetectPrompt()呼び出しでcliToolIdの伝搬経路が不明確",
+        "description": "設計書セクション5ではstatus-detector.tsについて「buildDetectPromptOptions() + detectPrompt(lastLines, promptOptions) -- L87修正」と記載。しかしdetectSessionStatus()の引数にはcliToolIdが既にあるが（L77）、設計書ではbuildDetectPromptOptions(cliToolId)の引数としてこのcliToolIdを使用することが明示的に記載されていない。status-detector.ts内ではcliToolIdはdetectThinking()やgetCliToolPatterns()でも使用されており自然な変更ではあるが、SF-002で「自身でoptions構築ロジックを持たない」と記載しながら、cliToolIdの伝搬パスを明記していない。",
+        "severity": "low",
+        "recommendation": "セクション5のstatus-detector.ts行で「detectSessionStatus()の既存引数cliToolIdをbuildDetectPromptOptions()に渡す」と明記する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IC-004",
+        "title": "current-output/route.tsのthinking条件分岐との統合",
+        "description": "current-output/route.ts L88では、thinking状態の場合にdetectPrompt()を呼ばずに{ isPrompt: false, cleanContent: cleanOutput }を返すインライン分岐がある。設計書ではbuildDetectPromptOptions()のimport追加と記載しているが、thinking時にdetectPrompt()自体がスキップされるこの分岐構造が、buildDetectPromptOptions()追加後も維持されるのかが明示されていない。",
+        "severity": "info",
+        "recommendation": "セクション5のcurrent-output/route.ts行に、thinking分岐は維持しdetectPrompt()が呼ばれるケースでのみpromptOptionsを渡す旨を補足する。"
+      },
+      {
+        "id": "IC-005",
+        "title": "mermaid図でのAR（auto-yes-resolver.ts）へのデータフローの補足",
+        "description": "mermaid図ではAY -> AR（resolveAutoAnswer）の矢印があるが、この経路ではdetectPrompt()の結果（PromptDetectionResult.promptData）がそのままresolveAutoAnswer()に渡される。requireDefaultIndicator=false時にisDefault=falseの選択肢が渡された場合のresolveAutoAnswerの動作（promptData.options[0]にフォールバック）はセクション4.6に記載がなく、セクション8のリスクテーブルでも言及されていない。実コードの動作は正しい（L24-25のnullish coalescing）が、設計書としてのトレーサビリティが弱い。",
+        "severity": "info",
+        "recommendation": "セクション4.6の整合性テーブルに「auto-yes-resolver.ts: isDefault=falseフォールバック動作」を追加するか、セクション8のリスクテーブルで言及する。"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "item": "prompt-detector.ts 行番号（Pass 1: L274-288, Layer 4: L344-350）",
+      "design_doc": "L274-288, L344-350",
+      "actual_code": "L274-288, L343-350",
+      "match": true,
+      "note": "Layer 4の開始行がL343（hasDefaultIndicator代入）とL344（ifチェック）で1行のズレがあるが、範囲としては一致"
+    },
+    {
+      "item": "detectPrompt()シグネチャ",
+      "design_doc": "export function detectPrompt(output: string): PromptDetectionResult",
+      "actual_code": "export function detectPrompt(output: string): PromptDetectionResult (L44)",
+      "match": true,
+      "note": ""
+    },
+    {
+      "item": "detectMultipleChoicePrompt()シグネチャ",
+      "design_doc": "function detectMultipleChoicePrompt(output: string): PromptDetectionResult",
+      "actual_code": "function detectMultipleChoicePrompt(output: string): PromptDetectionResult (L264)",
+      "match": true,
+      "note": ""
+    },
+    {
+      "item": "cli-patterns.tsのCLIToolType import",
+      "design_doc": "CLIToolTypeのimportが自然な位置にある",
+      "actual_code": "import type { CLIToolType } from './cli-tools/types'; (L6)",
+      "match": true,
+      "note": "既にimport済み"
+    },
+    {
+      "item": "status-detector.ts detectPrompt()呼び出し (L87)",
+      "design_doc": "detectPrompt(lastLines) -- L87",
+      "actual_code": "const promptDetection = detectPrompt(lastLines); (L87)",
+      "match": true,
+      "note": "stripAnsi()はL81で適用済みも一致"
+    },
+    {
+      "item": "response-poller.ts detectPrompt() L248",
+      "design_doc": "L248 -- stripAnsi()適用済み",
+      "actual_code": "const promptDetection = detectPrompt(cleanFullOutput); (L248) -- stripAnsi()はL247で適用",
+      "match": true,
+      "note": ""
+    },
+    {
+      "item": "response-poller.ts detectPrompt() L442",
+      "design_doc": "L442 -- stripAnsi()未適用",
+      "actual_code": "const promptDetection = detectPrompt(fullOutput); (L442) -- stripAnsi()未適用",
+      "match": true,
+      "note": "設計書の指摘通りstripAnsi()追加が必要"
+    },
+    {
+      "item": "response-poller.ts detectPrompt() L556",
+      "design_doc": "L556 -- stripAnsi()未適用",
+      "actual_code": "const promptDetection = detectPrompt(result.response); (L556) -- stripAnsi()未適用",
+      "match": true,
+      "note": "設計書の指摘通りstripAnsi()追加が必要"
+    },
+    {
+      "item": "auto-yes-manager.ts detectPrompt() L290",
+      "design_doc": "L290",
+      "actual_code": "const promptDetection = detectPrompt(cleanOutput); (L290)",
+      "match": true,
+      "note": "stripAnsi()はL279で適用済み"
+    },
+    {
+      "item": "auto-yes-resolver.ts isDefaultフォールバック動作",
+      "design_doc": "multiple_choice without default -> first option number",
+      "actual_code": "const target = defaultOpt ?? promptData.options[0]; (L25)",
+      "match": true,
+      "note": "isDefault=false時はdefaultOpt=undefinedとなりoptions[0]にフォールバック"
+    },
+    {
+      "item": "claude-poller.ts detectPrompt() L164",
+      "design_doc": "L164 -- 到達不能",
+      "actual_code": "const promptDetection = detectPrompt(fullOutput); (L164) -- stripAnsi()未適用",
+      "match": true,
+      "note": "到達不能である点も確認済み（startPollingがどこからも呼ばれない）"
+    },
+    {
+      "item": "claude-poller.ts detectPrompt() L232",
+      "design_doc": "L232 -- 到達不能",
+      "actual_code": "const promptDetection = detectPrompt(result.response); (L232) -- stripAnsi()未適用",
+      "match": true,
+      "note": ""
+    },
+    {
+      "item": "prompt-response/route.ts detectPrompt()呼び出し",
+      "design_doc": "detectPrompt(cleanOutput) -- cliToolId取得可能",
+      "actual_code": "const promptCheck = detectPrompt(cleanOutput); (L75) -- cliToolIdはL50で取得",
+      "match": true,
+      "note": ""
+    },
+    {
+      "item": "current-output/route.ts detectPrompt()呼び出し L88",
+      "design_doc": "L88 -- cliToolIdはL40で取得済み",
+      "actual_code": "detectPrompt(cleanOutput) (L88内) -- cliToolIdはL40で取得",
+      "match": true,
+      "note": "thinking分岐の三項演算子内で呼ばれる"
+    },
+    {
+      "item": "mermaid図: WR -> detectSessionStatus -> SD",
+      "design_doc": "worktrees/route.ts -> detectSessionStatus",
+      "actual_code": "import { detectSessionStatus } from '@/lib/status-detector'; (L16) -- L58で呼び出し",
+      "match": true,
+      "note": ""
+    },
+    {
+      "item": "mermaid図: WD -> detectSessionStatus -> SD",
+      "design_doc": "worktrees/[id]/route.ts -> detectSessionStatus",
+      "actual_code": "import { detectSessionStatus } from '@/lib/status-detector'; (L13) -- L58で呼び出し",
+      "match": true,
+      "note": ""
+    },
+    {
+      "item": "detectPrompt()呼び出し箇所の総数",
+      "design_doc": "9箇所",
+      "actual_code": "9箇所（prompt-response:1, current-output:1, auto-yes-manager:1, status-detector:1, response-poller:3, claude-poller:2）",
+      "match": true,
+      "note": ""
+    },
+    {
+      "item": "変更対象数「6箇所」（セクション3）",
+      "design_doc": "呼び出し元9箇所のうち6箇所を更新",
+      "actual_code": "P0: 5呼び出し箇所, P1: 4呼び出し箇所 = 合計7呼び出し箇所（claude-poller 2除外）",
+      "match": false,
+      "note": "IC-001: 「6」は実際の7と不一致。セクション11のMF-001では全9箇所を列挙。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/lib/claude-poller.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/cli-tools/types.ts"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

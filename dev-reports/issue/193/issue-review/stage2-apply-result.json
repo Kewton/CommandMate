@@ -1,0 +1,73 @@
+{
+  "issue_number": 193,
+  "iteration": 1,
+  "stage": 2,
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "CLAUDE_CHOICE_INDICATOR_PATTERNへの参照を全て削除。選択肢パターンはprompt-detector.ts内のDEFAULT_OPTION_PATTERN (L182) / NORMAL_OPTION_PATTERN (L189)であることを明記。変更対象ファイルからcli-patterns.tsを除外"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "Layer 4 (hasDefaultIndicator, L344-350)が根本原因分析から欠落していた問題を修正。処理フローにLayer 4のブロック条件を追加し、Pass 1とLayer 4の両方が独立したゲートであることを明記。ケースBの対策案にrequireDefaultIndicatorがPass 1とLayer 4の両方に影響することを明記"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "response-poller.tsのANSI未ストリップ問題の記述を修正。L248のClaude専用ガード内ではstripAnsi()適用済みであること、L442到達条件（Claude専用ガード通過後またはClaude以外のCLIツール）の正確なデータフロー分析を記載。L556についてもextractResponse()経由のデータフローを記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "DetectPromptOptionsのrequireDefaultIndicatorのTypeScript interface定義をJSDocコメント付きで追加。Pass 1 (L274-288)とLayer 4 (L344-350)の両方に影響することを設計に明記。requireDefaultIndicator=falseの場合の具体的なロジック（Pass 1スキップ、Layer 4スキップ）を記載"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "claude-poller.ts L164/L232のANSI未ストリップ問題を変更対象ファイルテーブルに昇格。フォローアップ候補ではなく本Issue対象として、extractClaudeResponse()内のfullOutput (lines.join)のデータフロー分析とstripAnsi()適用方針を記載"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "受入条件にリグレッションテスト要件を具体化: (1) 既存のprompt-detector.testの全multiple_choiceテストケースがパスすること、(2) 既存の❯マーカー付き選択肢パターンの検出が維持されることを確認するリグレッションテストを追加すること。Phase 4にも対応する作業項目を追加"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "current-output/route.tsのthinkingガード内でのoptions伝搬方法を記載。cliToolIdがworktree.cliToolIdから取得済みであることを明記し、Phase 3のチェックリスト項目と変更対象ファイルテーブルの両方に反映"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "respond/route.tsの動作確認目的を明記。detectPrompt()への直接依存はないが、選択肢応答がprompt-response/route.tsとは異なるフローでルーティングされるため間接的な動作確認が必要であることを記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "スクリーンショットセクションとPhase 1の調査項目に、選択肢テキスト形式の正確な記録を追加（行頭インデント有無、番号後のピリオド有無、各選択肢の区切り文字等）"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "ケースBの設計にIssue #161多層防御との整合性説明を追加。requireDefaultIndicator=falseの場合でもLayer 1（thinking skip）とLayer 3（連番検証）は維持されることを明記。関連Issueセクションにも多層防御の3つのLayerを列挙"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 10,
+    "applied": 10,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/193"
+  }
+}

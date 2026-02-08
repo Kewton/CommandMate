@@ -1,0 +1,37 @@
+{
+  "issue_number": 193,
+  "acceptance_criteria": [
+    "Claude Codeの複数選択肢にUIから番号を入力して回答を送信できること",
+    "Auto-YesモードでClaude Codeの選択肢に自動応答されること（デフォルト選択がない場合は最初の選択肢を選択）",
+    "既存の❯マーカー付き選択肢検出に影響がないこと（リグレッションテスト）",
+    "detectPrompt()全9箇所でANSI未ストリップの生出力が渡されていないこと",
+    "ユニットテストが追加・パスしていること",
+    "既存テストが全パスしていること",
+    "buildDetectPromptOptions()ヘルパー関数がcli-patterns.tsに配置されていること（MF-001）",
+    "P0+P1の呼び出し元7箇所全てがbuildDetectPromptOptions()を使用していること（DRY確認）",
+    "options?.requireDefaultIndicator ?? trueパターンが使用されていること（C-003可読性）",
+    "response-poller.tsのdetectPromptWithOptions()ヘルパー内でstripAnsi()が一律適用されていること（IA-001統一方針）",
+    "requireDefaultIndicator=falseかつquestionEndIndex === -1の場合にisPrompt: falseが返ること（SEC-001）",
+    "stripAnsi()のJSDocにカバー範囲と既知制限事項が記載されていること（SEC-002）",
+    "getAnswerInput()のエラーメッセージにユーザー入力が直接埋め込まれていないこと（SEC-003）"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: DetectPromptOptions interface定義 + detectPrompt()/detectMultipleChoicePrompt()シグネチャ変更 + Pass 1/Layer 4条件分岐 + Layer 5 SEC-001対応（src/lib/prompt-detector.ts）",
+    "Task 1.2: buildDetectPromptOptions()ヘルパー関数追加（src/lib/cli-patterns.ts）",
+    "Task 1.3: コアテスト追加 - requireDefaultIndicator:false検出、リグレッション、連番検証、SEC-001テスト（tests/unit/prompt-detector.test.ts）",
+    "Task 2.1: prompt-response/route.ts修正 - buildDetectPromptOptions + detectPrompt呼び出し",
+    "Task 2.2: auto-yes-manager.ts修正 - buildDetectPromptOptions + detectPrompt呼び出し",
+    "Task 2.3: status-detector.ts修正 - buildDetectPromptOptions(cliToolId) + detectPrompt呼び出し",
+    "Task 3.1: response-poller.ts修正 - detectPromptWithOptions()内部ヘルパー + stripAnsi一律適用 + L248/L442/L556統一",
+    "Task 3.2: current-output/route.ts修正 - buildDetectPromptOptions + detectPrompt呼び出し（thinking条件分岐維持）",
+    "Task 4.1: claude-poller.ts TODOコメント追加（到達不能コード明記）",
+    "Task 4.2: SEC-002 stripAnsi() JSDoc追加 + SEC-003 getAnswerInput()エラーメッセージ安全化",
+    "Task 5.1: auto-yes-resolver.test.ts - isDefault:false フォールバック動作テスト確認・追加",
+    "Task 5.2: prompt-response-verification.test.ts - cli-patternsモックにbuildDetectPromptOptions追加",
+    "Task 5.3: status-detector.test.ts - Claude用❯なし形式テスト追加検討",
+    "Task 6.1: CLAUDE.md更新 - Issue #193セクション追加"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+  "work_plan_path": "dev-reports/issue/193/work-plan.md"
+}

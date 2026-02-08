@@ -1,0 +1,111 @@
+{
+  "issue_number": 193,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-001",
+        "title": "requireDefaultIndicator=false時のAuto-Yes誤検出によるコマンド実行リスクの緩和策不足",
+        "severity": "medium",
+        "description": "requireDefaultIndicator=falseにより、Layer 2（Pass 1の❯存在チェック）とLayer 4（hasDefaultIndicatorチェック）の2層がスキップされる。残存する防御はLayer 1（thinking状態スキップ）とLayer 3（連番検証）のみ。Claude Codeがidleプロンプト状態で番号付きリストを出力した場合（例: 前回のレスポンスに残る「1. foo\\n2. bar\\n3. baz」）、Layer 1はスキップされず（thinking=false）、Layer 3は連番であれば通過し、Auto-Yesが「1」を自動送信する可能性がある。これによりClaude CLIに意図しないコマンド文字列が入力される。",
+        "recommendation": "設計書セクション6.1の誤検出防止策に、Pass 2の逆スキャン時の質問行検出（questionEndIndex）が-1の場合に検出をブロックする明示的な防御層を追加することを検討する。質問行が見つからない番号リストのみの場合はisPrompt: falseとする条件を明確に設計書に記載すべき。現行コードでquestionEndIndex=-1の場合、question='Please select an option:'というジェネリック質問が使用されてisPromptがtrueで返る実装になっており、番号リストのみの出力でもプロンプトとして検出される。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-002",
+        "title": "ANSI_PATTERNの網羅性に関する制限事項の文書化",
+        "severity": "low",
+        "description": "cli-patterns.tsのANSI_PATTERNは /\\x1b\\[[0-9;]*[a-zA-Z]|\\x1b\\][^\\x07]*\\x07|\\[[0-9;]*m/g であるが、以下のANSIエスケープパターンがカバーされていない: (1) 8-bit CSI (0x9B)、(2) ESC[?シーケンス（DEC private modes: ESC[?25h等）、(3) ESC(0/ESC(Bなどの文字セット切替、(4) ESC[38;2;r;g;bm（RGB色指定の一部形式）。ただしtmux capture-paneの-eオプションの出力仕様上、これらが実際に含まれるかは限定的。",
+        "recommendation": "stripAnsi()のJSDocにカバー範囲と既知の制限事項を記載する。また、npmパッケージstrip-ansiの採用を将来検討事項として記載する。現行のANSI_PATTERNでtmux capture-pane出力に含まれる一般的なANSIシーケンスは概ねカバーされているため、実運用上のリスクは低い。"
+      },
+      {
+        "id": "SEC-003",
+        "title": "getAnswerInput()のエラーメッセージへのユーザー入力反映",
+        "severity": "low",
+        "description": "prompt-detector.tsのgetAnswerInput()がthrow new Error(`Invalid answer for multiple choice: ${answer}`)でユーザー入力(answer)をそのままエラーメッセージに含める。このエラーメッセージがAPIレスポンスやログに出力される場合、XSSリスク（APIレスポンスがHTMLコンテキストでレンダリングされる場合）やログインジェクションの可能性がある。",
+        "recommendation": "エラーメッセージからユーザー入力を除去するか、sanitizeした上で含める。ただし、現行のAPIルートではNextResponse.json()経由のJSON出力であるためXSSリスクは低い。ログ出力については構造化ログ(logger)がサニタイズ機能を持つため、console.errorへの直接出力を避ければリスクは最小化される。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-004",
+        "title": "tmux.tsのsendKeys()のシェルインジェクション対策の確認",
+        "severity": "info",
+        "description": "sendKeys()はexecAsync()を使用しており、`tmux send-keys -t \"${sessionName}\" '${escapedKeys}'`の形式でシェルコマンドを構築している。escapedKeysはsingle quoteをエスケープしているが、sessionNameはdouble quote内に展開される。sessionNameの検証はvalidateSessionName()（cli-tools/validation.ts）で行われるが、sendKeys()自身は検証を行わない。Issue #193の変更ではsendKeys()は直接変更されないが、Auto-Yesでの自動応答パスで使用されるため、信頼チェーンの確認が重要。",
+        "recommendation": "sendKeys()の呼び出しパスにおけるsessionNameの検証が確実に行われていることをテストで確認する。auto-yes-manager.tsのpollAutoYes()ではCLIToolManager.getTool().getSessionName()経由でsessionNameを取得しており、getSessionName()内でvalidateSessionName()が呼ばれているか確認する。"
+      },
+      {
+        "id": "SEC-005",
+        "title": "buildDetectPromptOptions()のcliToolId入力の信頼境界",
+        "severity": "info",
+        "description": "buildDetectPromptOptions()はCLIToolType型（'claude' | 'codex' | 'gemini'のunion literal）を受け取る。TypeScriptの型チェックによりコンパイル時に不正な値は防止される。ランタイムでは、呼び出し元のAPIルート（prompt-response/route.ts, current-output/route.ts）でリクエストパラメータからcliToolIdを取得する際に、isCliTool()やCLI_TOOL_IDS.includes()による検証が行われている。",
+        "recommendation": "現状の信頼境界は適切に設計されている。特にcurrent-output/route.tsのisCliTool()関数とprompt-response/route.tsのCLIToolManager.getTool()（不正なIDに対してエラーをスロー）により、外部入力経由の不正なcliToolIdは排除される。追加対応は不要。"
+      },
+      {
+        "id": "SEC-006",
+        "title": "detectPrompt()のログ出力における機密情報の確認",
+        "severity": "info",
+        "description": "prompt-detector.tsのdetectPrompt()はlogger.info()でquestionとoptionsCountをログ出力する。questionはtmux出力から抽出されたテキストであり、Claude CLIの出力に機密情報（APIキー、パスワード等）が含まれる場合、ログに残存する可能性がある。ただし、これはIssue #193の変更に固有のリスクではなく、既存の動作である。",
+        "recommendation": "Issue #193固有のリスクではないが、将来的にlogger.ts側のsanitize機能でquestionフィールドをマスクすることを検討する。現時点では、ログレベルがdebug/infoであり、本番環境ではinfo以上のログのみ出力される想定のため、questionの出力は許容範囲と判断する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "security_checklist": {
+    "injection_prevention": {
+      "status": "pass",
+      "notes": "detectPrompt()の入力はtmux capture-pane出力であり、外部ユーザーが直接制御できない。sendKeys()はsessionName検証済みパスを使用。正規表現パターンはanchored。"
+    },
+    "authentication_authorization": {
+      "status": "not_applicable",
+      "notes": "本変更は認証・認可ロジックに影響しない"
+    },
+    "sensitive_data_protection": {
+      "status": "pass_with_notes",
+      "notes": "ログ出力にquestionフィールドが含まれるが、tmux出力由来であり外部公開されない。SEC-006参照。"
+    },
+    "xss_prevention": {
+      "status": "pass",
+      "notes": "promptData.optionsはReactコンポーネントで自動エスケープされる。APIレスポンスはJSON形式。"
+    },
+    "security_misconfiguration": {
+      "status": "pass",
+      "notes": "デフォルト値true（requireDefaultIndicator）により既存動作を維持。誤設定リスクは低い。"
+    },
+    "redos_prevention": {
+      "status": "pass",
+      "notes": "DEFAULT_OPTION_PATTERNとNORMAL_OPTION_PATTERNは両端アンカー付き。繰り返し量指定子の入れ子なし。ReDoS安全。SEC-007参照。"
+    },
+    "ansi_bypass_prevention": {
+      "status": "pass_with_notes",
+      "notes": "response-poller.tsのdetectPromptWithOptions()ヘルパー内で一律stripAnsi()適用により構造的に防止。ANSI_PATTERNの網羅性に制限事項あり（SEC-002）。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/claude-poller.ts",
+    "src/lib/tmux.ts",
+    "src/lib/cli-session.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/lib/logger.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts"
+  ],
+  "timestamp": "2026-02-09T10:00:00Z"
+}
