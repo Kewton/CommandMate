@@ -5,6 +5,8 @@
 
 import type { CLIToolType } from './cli-tools/types';
 import { createLogger } from './logger';
+import { detectPrompt } from './prompt-detector';
+import type { DetectPromptOptions, PromptDetectionResult } from './prompt-detector';
 
 const logger = createLogger('cli-patterns');
 
@@ -158,6 +160,85 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
       // Default to Claude patterns
       return getCliToolPatterns('claude');
   }
+}
+
+// =============================================================================
+// Issue #193: Choice detection patterns for CLI tools
+// =============================================================================
+
+/**
+ * Claude CLI choice indicator pattern: ❯ (U+276F) marker followed by number.
+ * Same as DEFAULT_OPTION_PATTERN in prompt-detector.ts.
+ * Anchored at both ends -- ReDoS safe (S4-001).
+ */
+export const CLAUDE_CHOICE_INDICATOR_PATTERN = /^\s*\u276F\s*(\d+)\.\s*(.+)$/;
+
+/**
+ * Claude CLI normal option pattern (no ❯ indicator).
+ * Same as NORMAL_OPTION_PATTERN in prompt-detector.ts.
+ * Anchored at both ends -- ReDoS safe (S4-001).
+ */
+export const CLAUDE_CHOICE_NORMAL_PATTERN = /^\s*(\d+)\.\s*(.+)$/;
+
+/**
+ * Codex CLI choice indicator pattern.
+ * Codex has no special marker; all options use the same numbered format.
+ * Anchored at both ends -- ReDoS safe (S4-001).
+ */
+export const CODEX_CHOICE_INDICATOR_PATTERN = /^\s*(\d+)\.\s*(.+)$/;
+
+/**
+ * Codex CLI normal option pattern (same as indicator since no marker).
+ * Anchored at both ends -- ReDoS safe (S4-001).
+ */
+export const CODEX_CHOICE_NORMAL_PATTERN = /^\s*(\d+)\.\s*(.+)$/;
+
+/**
+ * Get choice detection patterns for a CLI tool.
+ * Used by callers to pass to detectPrompt() options.
+ *
+ * Claude patterns are returned explicitly (not as empty object)
+ * to make behavior self-documenting at the call site.
+ */
+export function getChoiceDetectionPatterns(cliToolId: CLIToolType): DetectPromptOptions {
+  switch (cliToolId) {
+    case 'claude':
+      return {
+        choiceIndicatorPattern: CLAUDE_CHOICE_INDICATOR_PATTERN,
+        normalOptionPattern: CLAUDE_CHOICE_NORMAL_PATTERN,
+        requireDefaultIndicator: true,
+      };
+    case 'codex':
+      return {
+        choiceIndicatorPattern: CODEX_CHOICE_INDICATOR_PATTERN,
+        normalOptionPattern: CODEX_CHOICE_NORMAL_PATTERN,
+        requireDefaultIndicator: false,
+      };
+    default:
+      return {
+        choiceIndicatorPattern: CLAUDE_CHOICE_INDICATOR_PATTERN,
+        normalOptionPattern: CLAUDE_CHOICE_NORMAL_PATTERN,
+        requireDefaultIndicator: true,
+      };
+  }
+}
+
+/**
+ * Convenience wrapper: detect prompts using CLI-tool-specific patterns.
+ *
+ * Encapsulates getChoiceDetectionPatterns() + detectPrompt() into a single call
+ * to reduce DRY violations across 5+ call sites.
+ *
+ * @param cleanOutput - ANSI-stripped output text (caller must call stripAnsi first)
+ * @param cliToolId - CLI tool type
+ * @returns PromptDetectionResult
+ */
+export function detectPromptForCli(
+  cleanOutput: string,
+  cliToolId: CLIToolType
+): PromptDetectionResult {
+  const options = getChoiceDetectionPatterns(cliToolId);
+  return detectPrompt(cleanOutput, options);
 }
 
 /**

@@ -1,0 +1,261 @@
+{
+  "issue_number": 193,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_date": "2026-02-08",
+  "design_doc_path": "dev-reports/design/issue-193-codex-multiple-choice-detection-design-policy.md",
+  "overall_assessment": "must_fix",
+  "summary": "設計書と実際のソースコード間で複数の不整合を検出。特にresponse-poller.tsの構造に関する根本的な誤認、行番号のずれ、detectPromptのシグネチャ記述の不一致が重大。auto-yes-manager.tsとstatus-detector.tsの行番号も実コードと乖離している。これらは実装フェーズで混乱を招く可能性がある。",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "response-poller.ts: 'this.cliToolId'クラスメンバ参照は誤り -- モジュール関数ベース構造",
+      "description": "設計書Section 5.3の呼び出し元修正表でresponse-poller.tsについて'クラスメンバcliToolId'と記載し、修正コード例で`this.cliToolId`を使用しているが、実際のresponse-poller.tsはクラスではなくモジュールレベル関数で構成されている。`extractResponse()`はスタンドアロン関数でcliToolIdをパラメータとして受け取る。`this.cliToolId`という参照は存在しない。",
+      "design_reference": "Section 5.3 呼び出し元修正表、Section 5.4",
+      "actual_code": "src/lib/response-poller.ts: function extractResponse(output, lastCapturedLine, cliToolId: CLIToolType) -- スタンドアロン関数、クラスメンバなし",
+      "recommendation": "修正コード例を`detectPromptForCli(stripAnsi(lastOutput), cliToolId)`に変更（thisを削除）。呼び出し元修正表のcliToolId取得元を'関数パラメータcliToolId'に修正する。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "response-poller.ts: L248のdetectPrompt呼び出しはClaude専用ガード内ではなくガード外にもある",
+      "description": "設計書Section 5.3ではL248を'Claude専用ガード内'として変更不要と記載。実際のコードではL248付近（L244-259）のdetectPrompt呼び出しは確かにcliToolId === 'claude'ガード内にある。しかし、設計書でL248と特定している行番号は実際にはL248ではなく、`if (cliToolId === 'claude')`はL244、`detectPrompt(cleanFullOutput)`はL248にある。この点は正確である。ただし、この'変更不要'判断自体に問題がある -- Codexセッションでresponse-poller.tsが使用された場合、L442のdetectPromptでCodexの選択肢を検出する必要があるが、L248はClaude専用なので変更不要という判断は正しい。しかし、L248のdetectPromptも将来的にCodex対応が必要になる可能性がある点を注記すべき。",
+      "design_reference": "Section 5.3 呼び出し元修正表、Section 12.2",
+      "actual_code": "src/lib/response-poller.ts L244-248: if (cliToolId === 'claude') { ... const promptDetection = detectPrompt(cleanFullOutput);",
+      "recommendation": "L248の行番号参照は実コードと一致しているが、将来のCodex対応でこのClaude専用ガードの拡張が必要になる可能性を12.2節に追記すべき。現時点の'変更不要'判断は妥当。severity を nice_to_have に下げても可。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "response-poller.ts: L442とL556の行番号が実コードと大幅にずれている",
+      "description": "設計書ではresponse-poller.tsのdetectPrompt呼び出しをL442とL556としているが、実際のソースコードでは: (1) L442は`const promptDetection = detectPrompt(fullOutput);`で正しい。ただし`fullOutput`はstripAnsiされていない生の`lines.join('\\n')`。(2) L556は`const promptDetection = detectPrompt(result.response);`で正しい。設計書のstripAnsi追加提案は正当だが、L442で使用されている変数名が`fullOutput`（設計書では`lastOutput`）である点が不一致。",
+      "design_reference": "Section 5.3、Section 5.4",
+      "actual_code": "src/lib/response-poller.ts L442: detectPrompt(fullOutput) -- fullOutputはstripAnsi未適用。L556: detectPrompt(result.response) -- result.responseもstripAnsi未適用の可能性あり（ただしL349でcleanResponseにstripAnsiしているケースもある）",
+      "recommendation": "設計書の変数名をlastOutputからfullOutput/result.responseに修正。L442でstripAnsiが必要な理由（現在はANSI付き出力をdetectPromptに渡している）を明確に記載。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "auto-yes-manager.ts: detectPromptの呼び出しはL290ではなくL290付近",
+      "description": "設計書Section 5.3ではauto-yes-manager.tsのdetectPrompt呼び出しをL290としている。実際のソースコードではdetectPrompt呼び出しはL290にある（`const promptDetection = detectPrompt(cleanOutput);`）。この行番号は正確である。また、cliToolIdの取得元を'引数cliToolId (L262)'としているが、実際にはL262の`pollAutoYes`関数のパラメータとして定義されている。この参照は正確。",
+      "design_reference": "Section 5.3",
+      "actual_code": "src/lib/auto-yes-manager.ts L290: const promptDetection = detectPrompt(cleanOutput); / L262: async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType)",
+      "recommendation": "行番号参照はL290、L262ともに実コードと一致しているため修正不要。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "status-detector.ts: detectPromptの呼び出しはL87で正確だが、引数がlastLinesであり設計書の修正提案と整合的",
+      "description": "設計書Section 5.5ではstatus-detector.tsのL87で`detectPrompt(lastLines)`を呼び出していると記載。実際のコードL87は`const promptDetection = detectPrompt(lastLines);`であり正確。cliToolIdの取得元を'引数cliToolId (L77)'としているが、実際にはL75-78の`detectSessionStatus`関数シグネチャでcliToolIdはL77ではなくL77にある。この参照も正確。ただし、設計書の修正提案でfull cleanOutputを渡す変更は、detectSessionStatus関数がL81で`const cleanOutput = stripAnsi(output);`としている変数を利用できるため妥当。",
+      "design_reference": "Section 5.3、Section 5.5",
+      "actual_code": "src/lib/status-detector.ts L87: const promptDetection = detectPrompt(lastLines); / L77: cliToolId: CLIToolType / L81: const cleanOutput = stripAnsi(output);",
+      "recommendation": "行番号参照は正確。修正提案も実コードの変数名と一致している。修正不要。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "prompt-response/route.ts: detectPromptの呼び出しはL75で正確、cliToolIdはL50で正確",
+      "description": "設計書Section 5.3ではprompt-response/route.tsのdetectPrompt呼び出しをL75、cliToolIdをL50としている。実際のコードではL75が`const promptCheck = detectPrompt(cleanOutput);`、L50が`const cliToolId: CLIToolType = cliToolParam || worktree.cliToolId || 'claude';`であり、ともに正確。",
+      "design_reference": "Section 5.3",
+      "actual_code": "src/app/api/worktrees/[id]/prompt-response/route.ts L75: const promptCheck = detectPrompt(cleanOutput); / L50: const cliToolId: CLIToolType = cliToolParam || worktree.cliToolId || 'claude';",
+      "recommendation": "修正不要。行番号参照は実コードと一致。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "current-output/route.ts: detectPromptの呼び出しはL88で正確だが、cliToolId取得はL40ではなくL39-40",
+      "description": "設計書Section 5.3ではcurrent-output/route.tsのdetectPrompt呼び出しをL88としている。実際のコードL88は`const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput);`であり正確。ただし、この行はthinking状態で条件分岐しており、設計書はこの条件分岐について言及していない。`detectPromptForCli()`に変更する場合、このthinking条件分岐との整合性を考慮する必要がある。cliToolId取得はL39-40にまたがっており（L39: URLパラメータ取得、L40: フォールバック含む代入）、L40参照は概ね正確。",
+      "design_reference": "Section 5.3、DR1-010",
+      "actual_code": "src/app/api/worktrees/[id]/current-output/route.ts L88: const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput); / L39-40: const cliToolParam = url.searchParams.get('cliTool'); const cliToolId: CLIToolType = isCliTool(cliToolParam) ? cliToolParam : (worktree.cliToolId || 'claude');",
+      "recommendation": "L88のthinking条件分岐をdetectPromptForCli()に変更する場合の修正方法を設計書に明記すべき。thinking ? no-prompt : detectPromptForCli(cleanOutput, cliToolId) という形式になるが、この点が設計書に記載されていない。"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "claude-poller.ts: detectPromptの呼び出しはL164とL232ではなく異なる行",
+      "description": "設計書Section 5.3ではclaude-poller.tsのdetectPrompt呼び出しをL164とL232としている。実際のコードでは: (1) L164は`const promptDetection = detectPrompt(fullOutput);`で正しい。(2) L232は`const promptDetection = detectPrompt(result.response);`で正しい。両方とも実際の行番号と一致している。設計書の'変更不要（Claude専用 + optional引数で後方互換）'判断も、claude-poller.tsがClaude専用モジュールであることから妥当。",
+      "design_reference": "Section 5.3、Section 12.2",
+      "actual_code": "src/lib/claude-poller.ts L164: const promptDetection = detectPrompt(fullOutput); / L232: const promptDetection = detectPrompt(result.response);",
+      "recommendation": "行番号は実コードと一致しており修正不要。判断も妥当。"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "detectMultipleChoicePromptのシグネチャ: 設計書の'Before'記載が不正確",
+      "description": "設計書Section 5.2では`detectMultipleChoicePrompt`のBeforeシグネチャを`function detectMultipleChoicePrompt(output: string): PromptDetectionResult;`としているが、実際のコード（L264）は`function detectMultipleChoicePrompt(output: string): PromptDetectionResult`である（export付きではなくmodule-privateのfunction宣言）。これ自体は些細だが、設計書は`detectMultipleChoicePrompt`がexport付きかのような表記をしている場合、実装時に混乱を招く可能性がある。実際にはprivate関数であり、外部からはdetectPrompt()経由でのみアクセスされる。",
+      "design_reference": "Section 5.2",
+      "actual_code": "src/lib/prompt-detector.ts L264: function detectMultipleChoicePrompt(output: string): PromptDetectionResult {",
+      "recommendation": "設計書のシグネチャ表記からexportの有無を明確にするか、'(module-private)'と注記を追加。"
+    },
+    {
+      "id": "DR2-010",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "auto-yes-resolver.ts: isDefault処理の設計書記載は実コードと一致している",
+      "description": "設計書Section 12.3ではauto-yes-resolver.tsの'isDefaultフラグのCodex動作（requireDefaultIndicator=false時）'を動作確認対象としている。実際のコードL24でfind(o => o.isDefault)を使い、デフォルトがない場合はpromptData.options[0]にフォールバックする。requireDefaultIndicator=false時、Codexの選択肢はすべてisDefault=falseとなるため、自動的にoptions[0]（最初の選択肢）が選ばれる。この動作は設計意図と一致している。",
+      "design_reference": "Section 12.3、Section 9.1",
+      "actual_code": "src/lib/auto-yes-resolver.ts L24-25: const defaultOpt = promptData.options.find(o => o.isDefault); const target = defaultOpt ?? promptData.options[0];",
+      "recommendation": "修正不要。設計書の動作確認指示は妥当であり、フォールバック動作も想定通り。"
+    },
+    {
+      "id": "DR2-011",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "models.ts: PromptData型とMultipleChoiceOptionの設計書記載は実コードと一致",
+      "description": "設計書Section 9.1ではMultipleChoiceOptionのisDefaultフィールドを'Codexにデフォルトがない場合はfalse'と記載。実際のコード（L153-162）ではisDefault?: booleanとoptionalで定義されている。isDefault未指定とfalseはJavaScript的に同じfalsyだが、型安全性の観点からprompt-detector.tsでは明示的にisDefault: false/trueを設定している（L305, L314）。Codex対応時も同様にisDefault: falseを明示的に設定すべき。",
+      "design_reference": "Section 9.1",
+      "actual_code": "src/types/models.ts L153-162: MultipleChoiceOption interface with isDefault?: boolean",
+      "recommendation": "設計書に「Codex選択肢ではisDefault: falseを明示的に設定する」ことを注記すべき。undefined vs falseの扱いの違いに注意。"
+    },
+    {
+      "id": "DR2-012",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "テストファイルのモック行番号が不正確",
+      "description": "設計書Section 8.2ではauto-yes-manager.test.tsのモック箇所をL431としているが、実際のコードではL431はdetectPromptのimportを含むテスト関数の内部であり、モック定義箇所ではない。detectPromptのモック定義はvitest.mockで行われている可能性がある。prompt-response-verification.test.tsについてはL50が`detectPrompt: vi.fn().mockReturnValue({ isPrompt: false, cleanContent: '' })`であり正確。L112とL141はテスト内でdetectPromptのモック返却値を変更している箇所であり、これらの行番号は概ね正確（L112: `vi.mocked(detectPrompt).mockReturnValue(...)`, L141-142: 同様）。",
+      "design_reference": "Section 8.2",
+      "actual_code": "auto-yes-manager.test.ts: detectPromptのモック定義箇所はvitest.mock宣言内（ファイル先頭付近）、L431はimport行。prompt-response-verification.test.ts: L50はモック定義、L112/L141はモック返却値変更。",
+      "recommendation": "auto-yes-manager.test.tsのモック行番号をvi.mock宣言の実際の行番号に修正。prompt-response-verification.test.tsの行番号はL50=正確、L112/L141=117/146付近（vi.mocked呼び出し箇所）に修正。"
+    },
+    {
+      "id": "DR2-013",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "設計書Section 5.5とSection 7.2: STATUS_CHECK_LINE_COUNTの値は正確",
+      "description": "設計書ではSTATUS_CHECK_LINE_COUNT = 15と記載。実際のコード（status-detector.ts L50）ではconst STATUS_CHECK_LINE_COUNT: number = 15;であり正確。ただし、設計書ではdetectMultipleChoicePrompt内部の50行ウィンドウとの不整合を問題視しているが、detectPromptのyes/noパターン検出部分もlastLines（10行スライス、L48）を使用している点が設計書で言及されていない。status-detectorから渡されるlastLinesはSTATUS_CHECK_LINE_COUNT=15行であり、detectPrompt内部のlastLines=10行よりは大きいため、yes/noパターン検出には影響しない。multiple_choice検出のみが影響を受ける。",
+      "design_reference": "Section 5.5、Section 7.2",
+      "actual_code": "src/lib/status-detector.ts L50: const STATUS_CHECK_LINE_COUNT: number = 15; / src/lib/prompt-detector.ts L48: const lastLines = lines.slice(-10).join('\\n');",
+      "recommendation": "設計書に「detectPrompt内部のyes/noパターンはlast 10行を使用するためstatus-detectorの15行渡しで問題ないが、multiple_choice検出は全出力を使用するため影響を受ける」という詳細を追記すると、修正の根拠がより明確になる。"
+    },
+    {
+      "id": "DR2-014",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "codex.ts TUI操作パターン参照: L91-96ではなくL91-96",
+      "description": "設計書Section 4.2では「既存の設計参考: codex.ts:91-96のDown arrow + Enter操作パターン」と記載。実際のコードではL91-96が`await execAsync(tmux send-keys Down)` + wait + `await execAsync(tmux send-keys Enter)`のパターンを含んでおり、行番号参照は正確。",
+      "design_reference": "Section 4.2",
+      "actual_code": "src/lib/cli-tools/codex.ts L91-96: Down arrow + Enter TUI操作パターン",
+      "recommendation": "修正不要。行番号参照は正確。"
+    },
+    {
+      "id": "DR2-015",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "detectPromptForCliのreturn型: PromptDetectionResultの名前付きexportを確認",
+      "description": "設計書Section 3.3のdetectPromptForCli関数シグネチャではreturn型をPromptDetectionResultとしている。prompt-detector.tsでは`export interface PromptDetectionResult`（L14）として定義されている。cli-patterns.tsからimportするには`import { detectPrompt, PromptDetectionResult } from './prompt-detector';`が必要。設計書Section 3.3のimport文はこの形式を使用しており正確。ただし、既存のcli-patterns.tsはprompt-detector.tsからのimportを行っていない（依存方向が新規）。設計書はこの新規依存方向を明確に認識しており（Section 3.3の'依存方向'段落）、問題ない。",
+      "design_reference": "Section 3.3",
+      "actual_code": "src/lib/prompt-detector.ts L14: export interface PromptDetectionResult / src/lib/cli-patterns.ts: 現在prompt-detector.tsへのimportなし",
+      "recommendation": "新規依存方向（cli-patterns.ts -> prompt-detector.ts）の導入は設計書で認識済み。循環依存チェックをPhase 2で実施すべき旨を実装チェックリストに追加すると良い。"
+    },
+    {
+      "id": "DR2-016",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "Section 16チェックリストとSection 5の整合性: response-poller.tsの変数名不一致",
+      "description": "Section 16 Phase 3チェックリストでは`detectPromptForCli(stripAnsi(lastOutput), this.cliToolId)`と記載しているが、(1) this.cliToolIdは存在しない（DR2-001参照）、(2) 変数名lastOutputは実コードではfullOutput（L441-442）またはresult.response（L556）である。チェックリストは実装者が直接参照するため、変数名の正確性は特に重要。",
+      "design_reference": "Section 16 Phase 3",
+      "actual_code": "src/lib/response-poller.ts L441-442: const fullOutput = lines.join('\\n'); const promptDetection = detectPrompt(fullOutput); / L556: const promptDetection = detectPrompt(result.response);",
+      "recommendation": "チェックリストのresponse-poller.ts項目を修正: (1) L442: `detectPromptForCli(stripAnsi(fullOutput), cliToolId)` (2) L556: `detectPromptForCli(stripAnsi(result.response), cliToolId)` 両方ともthisを削除し、正しい変数名を使用。"
+    },
+    {
+      "id": "DR2-017",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "current-output/route.ts: detectPromptへの入力がcleanOutputであり、設計書の修正提案と一致",
+      "description": "設計書ではcurrent-output/route.tsの修正を`detectPromptForCli(cleanOutput, cliToolId)`としているが、実際のコードL88ではdetectPrompt(cleanOutput)の呼び出しの前にthinking状態チェック（L83-88の条件分岐）が存在する。設計書はこのthinking条件分岐との統合方法を詳述していない。thinking状態でdetectPromptForCliをスキップする既存のロジックを維持する必要がある。",
+      "design_reference": "Section 5.3",
+      "actual_code": "src/app/api/worktrees/[id]/current-output/route.ts L83-88: const thinking = detectThinkingState(cliToolId, lastSection); const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput);",
+      "recommendation": "設計書に修正後のコード例を追記: `const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPromptForCli(cleanOutput, cliToolId);` この形式であれば既存のthinkingスキップロジックを維持できる。"
+    },
+    {
+      "id": "DR2-018",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "detectPromptの'Before'シグネチャ表記が実コードと一致",
+      "description": "設計書Section 5.2のBeforeシグネチャ `export function detectPrompt(output: string): PromptDetectionResult;` は実際のコードL44 `export function detectPrompt(output: string): PromptDetectionResult {` と一致している。Afterシグネチャのoptional引数追加も後方互換であり、設計は正確。",
+      "design_reference": "Section 5.2",
+      "actual_code": "src/lib/prompt-detector.ts L44: export function detectPrompt(output: string): PromptDetectionResult {",
+      "recommendation": "修正不要。"
+    },
+    {
+      "id": "DR2-019",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "DEFAULT_OPTION_PATTERNとNORMAL_OPTION_PATTERNの設計書記載は実コードと一致",
+      "description": "設計書Section 5.2ではDEFAULT_OPTION_PATTERN = /^\\s*\\u276F\\s*(\\d+)\\.\\s*(.+)$/、NORMAL_OPTION_PATTERN = /^\\s*(\\d+)\\.\\s*(.+)$/と記載。実際のコードL182とL189の定義と完全一致。",
+      "design_reference": "Section 5.2",
+      "actual_code": "src/lib/prompt-detector.ts L182: const DEFAULT_OPTION_PATTERN = /^\\s*\\u276F\\s*(\\d+)\\.\\s*(.+)$/; L189: const NORMAL_OPTION_PATTERN = /^\\s*(\\d+)\\.\\s*(.+)$/;",
+      "recommendation": "修正不要。"
+    },
+    {
+      "id": "DR2-020",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "Layer 4のhasDefaultIndicator検証: 実コードではoptions.length < 2とのAND条件",
+      "description": "設計書Section 5.2のLayer 4条件化コード例では`if (requireDefault && !hasDefaultIndicator)`のみを示しているが、実際のコードL345では`if (options.length < 2 || !hasDefaultIndicator)`として2つの条件をORで結合している。設計書の条件化でrequireDefaultIndicator=falseの場合、hasDefaultIndicatorチェックのみスキップすべきか、options.length < 2チェックも影響を受けるかが不明確。実際のコードでは`options.length < 2`は独立した検証であり、requireDefaultIndicatorに関わらず維持すべき。",
+      "design_reference": "Section 5.2 DR1-001",
+      "actual_code": "src/lib/prompt-detector.ts L344-350: const hasDefaultIndicator = options.some(opt => opt.isDefault); if (options.length < 2 || !hasDefaultIndicator) { return { isPrompt: false, ... }; }",
+      "recommendation": "設計書のLayer 4条件化コード例を実際のコード構造に合わせて修正: `if (options.length < 2) { return no-prompt; } const requireDefault = options?.requireDefaultIndicator ?? true; if (requireDefault && !hasDefaultIndicator) { return no-prompt; }` -- options.length < 2は独立して維持し、hasDefaultIndicatorのみを条件化。"
+    }
+  ],
+  "risk_assessment": {
+    "critical_risks": [
+      {
+        "risk": "response-poller.tsの構造誤認（クラスメンバvs関数パラメータ）",
+        "impact": "実装フェーズでthis.cliToolIdを使用しようとしてコンパイルエラー",
+        "mitigation": "設計書の修正コード例と変数参照を実コードに合わせて更新"
+      }
+    ],
+    "medium_risks": [
+      {
+        "risk": "current-output/route.tsのthinking条件分岐との統合方法が未記載",
+        "impact": "実装者がthinking条件分岐を誤って削除するか、統合方法に迷う",
+        "mitigation": "修正後のコード例をthinking条件分岐込みで記載"
+      },
+      {
+        "risk": "Layer 4のoptions.length < 2条件との統合方法が不明確",
+        "impact": "requireDefaultIndicator=falseの場合にoptions.length < 2も誤ってスキップされる可能性",
+        "mitigation": "条件分離を明確にしたコード例を提供"
+      }
+    ],
+    "low_risks": [
+      {
+        "risk": "テストファイルの行番号ずれ",
+        "impact": "モック更新時に正しい箇所を特定するのに追加の確認が必要",
+        "mitigation": "行番号よりもモック名/関数名で特定する方法を推奨"
+      }
+    ]
+  },
+  "checklist_evaluation": {
+    "phase2_core": {
+      "status": "pass_with_notes",
+      "notes": "DetectPromptOptions定義、シグネチャ変更、パターンパラメータ化、Layer 4条件化の設計はすべて実コードベースと整合的。ただしLayer 4の条件化でoptions.length < 2との分離が必要（DR2-020）。"
+    },
+    "phase3_callsites": {
+      "status": "fail",
+      "notes": "response-poller.tsのthis.cliToolId参照（DR2-001）、変数名不一致（DR2-003, DR2-016）、current-output/route.tsのthinking条件分岐未記載（DR2-007, DR2-017）が修正必要。"
+    },
+    "phase4_tests": {
+      "status": "pass_with_notes",
+      "notes": "テストケース設計は包括的。行番号参照に若干のずれがあるが実装に大きな影響なし。"
+    }
+  },
+  "statistics": {
+    "total_findings": 20,
+    "must_fix": 6,
+    "should_fix": 8,
+    "nice_to_have": 4,
+    "verified_accurate": 2
+  }
+}

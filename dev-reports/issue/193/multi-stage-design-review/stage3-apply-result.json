@@ -1,0 +1,102 @@
+{
+  "issue_number": 193,
+  "stage": 3,
+  "stage_name": "影響分析レビュー - 指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DR3-001",
+        "item": "worktrees/route.ts と worktrees/[id]/route.ts が間接的影響を受けるが設計書に記載なし",
+        "section_updated": "12.3節（動作確認が必要なファイル）",
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-002",
+        "item": "status-detector.test.ts が設計書の更新対象テストに未記載",
+        "section_updated": "8.2節、12.1節、16節（Phase 4）",
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-003",
+        "item": "response-poller.ts L248のClaude専用ガード内でdetectPromptにstripAnsi適用済み vs L442のstripAnsi未適用の差異が未記載",
+        "section_updated": "12.2節（変更不要なファイル）",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR3-004",
+        "item": "status-detector.tsのウィンドウイング変更がPromise.all並列処理時のパフォーマンスに影響する可能性",
+        "section_updated": "7.2節（status-detector.tsのウィンドウイング）",
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-005",
+        "item": "api-prompt-handling.test.tsの回帰テスト実行がPhase 5に未記載",
+        "section_updated": "16節（Phase 5チェックリスト）",
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-006",
+        "item": "useAutoYes.tsはcurrent-output APIを直接呼び出していない（設計書12.4節の記載が不正確）",
+        "section_updated": "12.4節（クライアント側cliToolパラメータ付与の検証対象）",
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-007",
+        "item": "cli-patterns.tsのテストファイルが2つ存在し、新規テストの配置先が不明確",
+        "section_updated": "8.1節（cli-patterns.test.ts追加テストケース）",
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-008",
+        "item": "Phase 2チェックリストにPromptDetectionResultのexport確認項目がない",
+        "section_updated": "16節（Phase 2チェックリスト）",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DR3-009",
+        "item": "claude-poller.tsのdetectPrompt呼び出しは到達不能コードだが将来のメンテナンスリスク",
+        "section_updated": "12.2節（変更不要なファイル）",
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-010",
+        "item": "respond/route.ts -> startPolling() -> detectPrompt()の呼び出しチェーンを12.3節に記載すべき",
+        "section_updated": "12.3節、16節（Phase 5）",
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-011",
+        "item": "auto-yes-manager.test.tsのpollAutoYesテストがdetectPromptForCli移行後に期待通り動作するか",
+        "section_updated": "8.2節（auto-yes-manager.test.tsの注記）",
+        "status": "reflected"
+      },
+      {
+        "id": "DR3-012",
+        "item": "detectSessionStatus()の内部動作変更によりE2Eテストでの動作確認が推奨",
+        "section_updated": "16節（Phase 5チェックリスト）",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-193-codex-multiple-choice-detection-design-policy.md",
+  "sections_updated": [
+    "7.2節 - パフォーマンス設計（並列処理時のメモリ影響追記）",
+    "8.1節 - テスト設計（テストファイル配置方針追記）",
+    "8.2節 - 既存テストのモック更新（status-detector.test.ts追加、auto-yes-manager.test.tsモック注記追加）",
+    "12.1節 - 変更が必要なファイル（status-detector.test.ts追加）",
+    "12.2節 - 変更不要なファイル（L248/L442 stripAnsi差異の明記、claude-poller.ts到達不能コード注記）",
+    "12.3節 - 動作確認が必要なファイル（worktrees/route.ts, worktrees/[id]/route.ts追加、respond/route.ts呼び出しチェーン追記）",
+    "12.4節 - クライアント側cliToolパラメータ付与（useAutoYes.tsの記載修正）",
+    "15節 - レビュー指摘事項サマリー（Stage 3テーブル追加）",
+    "16節 - 実装チェックリスト（Phase 2: PromptDetectionResult export確認、Phase 4: status-detector.test.ts 3項目、Phase 5: 回帰テスト4項目）",
+    "17節 - レビュー履歴（Stage 3行追加）"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}

@@ -9,7 +9,7 @@ import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { sendKeys } from '@/lib/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { startPolling } from '@/lib/response-poller';
-import { getAnswerInput } from '@/lib/prompt-detector';
+import { getAnswerInput, sanitizeAnswer } from '@/lib/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
 
 /**
@@ -75,19 +75,29 @@ export async function POST(
       );
     }
 
+    // Issue #193: Input sanitization (shared with prompt-response/route.ts via DRY)
+    const sanitizeResult = sanitizeAnswer(answer);
+    if (!sanitizeResult.valid) {
+      return NextResponse.json(
+        { error: sanitizeResult.error },
+        { status: 400 }
+      );
+    }
+    const sanitizedAnswer = sanitizeResult.sanitized;
+
     // Validate answer based on prompt type
     let input: string;
 
     // For multiple choice, check if answer is an option number or custom text
     if (message.promptData.type === 'multiple_choice') {
-      const answerNum = parseInt(answer, 10);
+      const answerNum = parseInt(sanitizedAnswer, 10);
 
       // If answer is a number, validate it's one of the available options
       if (!isNaN(answerNum)) {
         const validNumbers = message.promptData.options.map(opt => opt.number);
         if (!validNumbers.includes(answerNum)) {
           return NextResponse.json(
-            { error: `Invalid choice: ${answer}. Valid options are: ${validNumbers.join(', ')}` },
+            { error: 'Invalid choice. The selected option is not available.' },
             { status: 400 }
           );
         }
@@ -96,17 +106,17 @@ export async function POST(
         input = answerNum.toString();
       } else {
         // If answer is not a number, it's custom text input
-        // Use it as-is (no validation needed)
-        input = answer;
+        // Apply sanitization
+        input = sanitizedAnswer;
       }
     } else {
       // For yes/no prompts, use the standard validation
       try {
-        input = getAnswerInput(answer, message.promptData.type);
+        input = getAnswerInput(sanitizedAnswer, message.promptData.type);
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
-          { error: `Invalid answer: ${errorMessage}` },
+          { error: errorMessage },
           { status: 400 }
         );
       }

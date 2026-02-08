@@ -11,8 +11,8 @@ import { sendKeys } from '@/lib/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { detectPrompt } from '@/lib/prompt-detector';
-import { stripAnsi } from '@/lib/cli-patterns';
+import { stripAnsi, detectPromptForCli } from '@/lib/cli-patterns';
+import { sanitizeAnswer } from '@/lib/prompt-detector';
 
 interface PromptResponseRequest {
   answer: string;
@@ -34,6 +34,16 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    // Issue #193: Input sanitization (shared with respond/route.ts via DRY)
+    const sanitizeResult = sanitizeAnswer(answer);
+    if (!sanitizeResult.valid) {
+      return NextResponse.json(
+        { error: sanitizeResult.error },
+        { status: 400 }
+      );
+    }
+    const sanitizedAnswer = sanitizeResult.sanitized;
 
     const db = getDbInstance();
 
@@ -72,7 +82,8 @@ export async function POST(
     try {
       const currentOutput = await captureSessionOutput(params.id, cliToolId, 5000);
       const cleanOutput = stripAnsi(currentOutput);
-      const promptCheck = detectPrompt(cleanOutput);
+      // Issue #193: use CLI-specific patterns for prompt detection
+      const promptCheck = detectPromptForCli(cleanOutput, cliToolId);
 
       if (!promptCheck.isPrompt) {
         return NextResponse.json({
@@ -88,8 +99,8 @@ export async function POST(
 
     // Send answer to tmux
     try {
-      // Send the answer
-      await sendKeys(sessionName, answer, false);
+      // Send the sanitized answer
+      await sendKeys(sessionName, sanitizedAnswer, false);
 
       // Wait a moment for the input to be processed
       await new Promise(resolve => setTimeout(resolve, 100));

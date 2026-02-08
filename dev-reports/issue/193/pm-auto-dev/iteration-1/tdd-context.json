@@ -1,0 +1,37 @@
+{
+  "issue_number": 193,
+  "issue_title": "claude Codexからの複数選択肢に対し、回答を送信出来ない",
+  "design_policy_path": "dev-reports/design/issue-193-codex-multiple-choice-detection-design-policy.md",
+  "work_plan_path": "dev-reports/issue/193/work-plan.md",
+  "acceptance_criteria": [
+    "Codex CLIの複数選択肢にUIから番号を入力して回答を送信できること",
+    "Auto-YesモードでCodex CLIの選択肢に自動応答されること（デフォルト選択がない場合は最初の選択肢を選択）",
+    "Claude CLIの既存の選択肢検出・応答機能に影響がないこと（後方互換性）",
+    "Codex CLI選択肢表示時のサイドバーステータスが正しく'waiting'になること",
+    "ユニットテストが追加されていること（Codex選択肢検出テスト）",
+    "既存テストがすべてパスすること"
+  ],
+  "implementation_tasks": [
+    "Task 2.1: prompt-detector.ts - DetectPromptOptions定義 + detectPrompt(output, options?)シグネチャ変更 + Layer 4のrequireDefaultIndicator条件分岐 + getAnswerInput()エラーメッセージ修正",
+    "Task 2.2: cli-patterns.ts - CLAUDE_CHOICE_INDICATOR_PATTERN, CLAUDE_CHOICE_NORMAL_PATTERN, CODEX_CHOICE_INDICATOR_PATTERN, CODEX_CHOICE_NORMAL_PATTERN定義 + getChoiceDetectionPatterns(cliToolId)関数 + detectPromptForCli()ラッパー",
+    "Task 3.1: auto-yes-manager.ts - L290: detectPromptForCli(cleanOutput, cliToolId)に変更",
+    "Task 3.2: status-detector.ts - L87: detectPromptForCli(cleanOutput, cliToolId)に変更（lastLinesではなくfull cleanOutput渡し）",
+    "Task 3.3: response-poller.ts - L442: detectPromptForCli(stripAnsi(fullOutput), cliToolId)、L556: detectPromptForCli(stripAnsi(result.response), cliToolId)に変更",
+    "Task 3.4: prompt-response/route.ts - L75: detectPromptForCli(cleanOutput, cliToolId)に変更 + 入力バリデーション追加（数値/y/n検証 + 最大長1000文字 + 制御文字フィルタリング）",
+    "Task 3.5: current-output/route.ts - L88: detectPromptForCli(cleanOutput, cliToolId)に変更（既存thinking条件分岐を維持）",
+    "Task 3.6: respond/route.ts - テキスト入力サニタイズ（最大長1000文字 + 制御文字フィルタリング） + エラーメッセージ修正",
+    "Task 4.1: prompt-detector.test.ts - Codex選択肢検出テスト + Layer 4条件化テスト + 後方互換性テスト",
+    "Task 4.2: cli-patterns.test.ts - パターン返却テスト + ラッパーテスト + ReDoS安全性テスト",
+    "Task 4.3: status-detector.test.ts - ウィンドウイング変更テスト",
+    "Task 4.4: 既存テストのモック更新（auto-yes-manager.test.ts, prompt-response-verification.test.ts）"
+  ],
+  "target_coverage": 80,
+  "key_design_decisions": {
+    "approach": "Plan B: パターンパラメータ化 - DetectPromptOptionsをdetectPrompt()に渡す",
+    "wrapper": "detectPromptForCli()ラッパーをcli-patterns.tsに追加（DRY原則）",
+    "layer4": "requireDefaultIndicator=falseでLayer 4bスキップ（Codex対応）",
+    "windowing": "status-detector.tsでfull cleanOutputを渡す（15行制限を解消）",
+    "security": "入力バリデーション + 制御文字フィルタリング + 固定エラーメッセージ + ReDoS防止"
+  },
+  "codex_pattern_note": "Codexの実際の選択肢出力形式はPhase 1（前提条件確認）で未確認のため、スクリーンショット分析に基づく暫定パターンを使用。番号付き選択肢（1. xxx, 2. xxx）のテキストベース入力を前提とする。"
+}

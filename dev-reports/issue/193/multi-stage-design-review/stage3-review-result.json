@@ -1,0 +1,207 @@
+{
+  "issue_number": 193,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-08",
+  "design_doc_path": "dev-reports/design/issue-193-codex-multiple-choice-detection-design-policy.md",
+  "summary": {
+    "total_findings": 12,
+    "must_fix": 3,
+    "should_fix": 5,
+    "nice_to_have": 4,
+    "verdict": "設計書の影響範囲分析は概ね正確だが、見落とされた波及効果が3件あり修正が必要。特にworktrees/route.tsとworktrees/[id]/route.tsが間接的に影響を受ける点、status-detector.tsテストの更新必要性、およびresponse-poller.ts内のClaude専用ガード（L244-248）でdetectPromptに非stripAnsi済みデータを渡している問題は設計書に反映すべき。"
+  },
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "must_fix",
+      "category": "影響範囲漏れ",
+      "title": "worktrees/route.ts と worktrees/[id]/route.ts が間接的影響を受けるが設計書に記載なし",
+      "description": "worktrees/route.ts（L16, L58）および worktrees/[id]/route.ts（L13, L58）は detectSessionStatus() を呼び出している。detectSessionStatus() は内部で detectPrompt() を呼び出しており、status-detector.ts の修正（lastLines から cleanOutput への変更、cliToolId パラメータ追加）は detectSessionStatus() のシグネチャ変更を伴う可能性がある。現在の設計書の detectSessionStatus(output, cliToolId) シグネチャには変更がないが、内部動作の変更（full cleanOutput を detectPrompt に渡す）により、これら2つの API route の動作が変わる。設計書の12.3節（動作確認が必要なファイル）にこの2ファイルを追加すべき。",
+      "evidence": "src/app/api/worktrees/route.ts L16: import { detectSessionStatus } from '@/lib/status-detector'; L58: const statusResult = detectSessionStatus(output, cliToolId);\nsrc/app/api/worktrees/[id]/route.ts L13: import { detectSessionStatus } from '@/lib/status-detector'; L58: const statusResult = detectSessionStatus(output, cliToolId);",
+      "recommendation": "12.3節（動作確認が必要なファイル）に以下を追加: src/app/api/worktrees/route.ts と src/app/api/worktrees/[id]/route.ts。確認内容は「detectSessionStatus() の内部動作変更（full cleanOutput をdetectPrompt に渡す変更）によるサイドバーステータス表示への影響確認」。"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "must_fix",
+      "category": "テスト影響範囲漏れ",
+      "title": "src/lib/__tests__/status-detector.test.ts が設計書の更新対象テストに未記載",
+      "description": "status-detector.ts の detectPrompt() 呼び出しが lastLines から cleanOutput に変更され、かつ detectPromptForCli() ラッパーに移行する。status-detector.test.ts（src/lib/__tests__/status-detector.test.ts）は detectSessionStatus() を直接テストしており、内部動作変更の影響を受ける。特に「should check only last 15 lines」テスト（L374-385）は、50行のfiller linesの後にプロンプトなし出力を検証しているが、full cleanOutput を detectPrompt に渡す変更後もこのテストが正しく動作するか確認が必要。また、detectPrompt のモックが必要になる可能性がある。設計書の8.2節（既存テストのモック更新）および12.1節（変更対象ファイル一覧）にこのテストファイルが記載されていない。",
+      "evidence": "src/lib/__tests__/status-detector.test.ts: 全テストが detectSessionStatus() を直接呼び出し、内部的に detectPrompt() が呼ばれる。L374-385 のテストは15行ウィンドウ制限を前提としている。",
+      "recommendation": "8.2節に status-detector.test.ts を追加。特に以下のテスト更新が必要: (1) 15行ウィンドウ境界テスト（L374-385）の期待値確認、(2) multiple choice prompt 検出テスト（L92-104）でfull cleanOutput渡しの動作確認、(3) Issue #180 の past prompts テスト（L203-351）でwindowing変更後の動作確認。"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "must_fix",
+      "category": "影響範囲漏れ",
+      "title": "response-poller.ts L244-248のClaude専用ガード内でdetectPromptにstripAnsi未適用のfullOutputを渡している",
+      "description": "response-poller.ts L244-258（Claude専用早期チェック）では stripAnsi(fullOutput) を変数 cleanFullOutput に格納し detectPrompt(cleanFullOutput) を呼び出している（L247-248）。しかし L442 の detectPrompt(fullOutput) は stripAnsi されていない fullOutput を渡している。設計書5.4節ではL442を「detectPromptForCli(stripAnsi(fullOutput), cliToolId)」に変更する計画だが、L248のClaude専用ガード内のdetectPrompt呼び出しも同様にdetectPromptForCliに統一すべきか、またはClaude専用のまま残すかの判断が記載されていない。設計書12.2節ではL248を「変更不要（Claude専用ガード内）」としているが、L248の呼び出しはすでにstripAnsi済みであり、L442のstripAnsi未適用のfullOutput渡しとは状況が異なることが明確化されていない。",
+      "evidence": "response-poller.ts L244-258:\n  if (cliToolId === 'claude') {\n    const fullOutput = lines.join('\\n');\n    const cleanFullOutput = stripAnsi(fullOutput);\n    const promptDetection = detectPrompt(cleanFullOutput);  // L248: stripAnsi済み\n  }\n\nresponse-poller.ts L441-442:\n  const fullOutput = lines.join('\\n');\n  const promptDetection = detectPrompt(fullOutput);  // L442: stripAnsi未適用",
+      "recommendation": "設計書12.2節のL248の「変更不要」理由に以下を追記: 「L248は既にstripAnsi(fullOutput)を適用済みであり、Claude専用ガード内のため現時点では変更不要。ただしL442はstripAnsi未適用であったため、detectPromptForCli(stripAnsi(fullOutput), cliToolId)に変更する。」"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "should_fix",
+      "category": "影響範囲検証",
+      "title": "status-detector.ts のウィンドウイング変更がサイドバーステータス表示のパフォーマンスに影響する可能性",
+      "description": "status-detector.ts の detectPrompt() 呼び出しを lastLines（15行）から cleanOutput（全量）に変更する提案（5.5節）について、パフォーマンスへの影響分析が不十分。worktrees/route.ts では全ワークツリーに対して detectSessionStatus() を並列呼び出ししている（L33-99, Promise.all）。各ワークツリーにつき最大3つのCLIツール（claude, codex, gemini）について captureSessionOutput を呼び出し、その出力（最大10000文字）が detectPrompt に渡される。detectMultipleChoicePrompt は内部で50行にスライスするため計算量自体は変わらないが、yes/noパターン検出（L48: lines.slice(-10)）は引き続き10行スライスを使用するため影響なし。ただし、大量のワークツリーが存在する場合のメモリ使用量への影響を明記すべき。",
+      "evidence": "src/app/api/worktrees/route.ts L33-99: Promise.all で全ワークツリーを並列処理。各ワークツリーにつき最大3 CLIツールの captureSessionOutput(worktree.id, cliToolId, 100) を呼び出し（capture_count パラメータ = 100行）。status-detector.ts で全量を detectPrompt に渡す場合、各呼び出しで最大100行のテキストが処理される。",
+      "recommendation": "7.2節に以下を追記: 「worktrees/route.ts は capture_count=100 で出力を取得するため、detectPrompt に渡される出力は最大100行。15行から100行への変更は、detectMultipleChoicePrompt 内部の50行スライスにより実質的な計算量増加はない。ただし複数ワークツリーの並列処理時のメモリ使用量は微増する。」"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "should_fix",
+      "category": "テスト影響範囲",
+      "title": "tests/integration/api-prompt-handling.test.ts の回帰テスト実行が未記載",
+      "description": "tests/integration/api-prompt-handling.test.ts は respond/route.ts の統合テストであり、detectPrompt を直接 import/mock していないため、detectPrompt のシグネチャ変更の直接的影響はない。しかし、respond/route.ts 内の getAnswerInput() は prompt-detector.ts から import されており、Codex multiple_choice の動作確認として回帰テスト実行が必要。設計書のPhase 5（動作検証）チェックリストにこのファイルの回帰テスト実行が明示されていない。",
+      "evidence": "tests/integration/api-prompt-handling.test.ts L7: import { POST as respondToPrompt } from '@/app/api/worktrees/[id]/respond/route'; L12: import { getAnswerInput } from '@/lib/prompt-detector'; は respond/route.ts 内で使用。",
+      "recommendation": "Phase 5 チェックリスト（16節）に追加: 「tests/integration/api-prompt-handling.test.ts を回帰テストとして実行し、Codex multiple_choice のgetAnswerInput() 動作を確認する。」"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "should_fix",
+      "category": "影響範囲検証",
+      "title": "useAutoYes.ts のcliTool パラメータは prompt-response API に渡されるが current-output API には渡されない",
+      "description": "useAutoYes.ts（L86-89）は prompt-response API にcliTool パラメータを送信している。しかし useAutoYes フック自体は current-output API を直接呼び出していない。current-output API の呼び出しは WorktreeDetailRefactored.tsx（L972）が行い、cliTool パラメータを付与している（activeCliTabRef.current）。設計書12.4節では useAutoYes.ts が「Auto-Yesポーリング」時にcurrent-output APIを呼び出すと記載しているが、実際にはuseAutoYes はサーバー側Auto-Yesポーリング（auto-yes-manager.ts）の結果をcurrent-output APIのレスポンスから間接的に受け取るだけで、直接呼び出してはいない。12.4節の確認対象の記載が不正確。",
+      "evidence": "src/hooks/useAutoYes.ts: L86-89 は /api/worktrees/${worktreeId}/prompt-response に fetch する。current-output API は呼び出していない。\nsrc/components/worktree/WorktreeDetailRefactored.tsx L972: `/api/worktrees/${worktreeId}/current-output?cliTool=${activeCliTabRef.current}` -- cliTool パラメータ付与確認済み。",
+      "recommendation": "12.4節の useAutoYes.ts の確認内容を修正: 「useAutoYes.ts は current-output API を直接呼び出していない。prompt-response API に cliTool パラメータを渡している（L89）ことを確認済み。current-output API の cliTool パラメータ付与は WorktreeDetailRefactored.tsx（L972）で確認済み。」"
+    },
+    {
+      "id": "DR3-007",
+      "severity": "should_fix",
+      "category": "影響範囲検証",
+      "title": "cli-patterns.ts から prompt-detector.ts への新規依存が既存の cli-patterns テスト2ファイルに影響",
+      "description": "detectPromptForCli() を cli-patterns.ts に追加することで、cli-patterns.ts が prompt-detector.ts から detectPrompt と PromptDetectionResult を import する新規依存が発生する。既存のcli-patternsテストファイルが2つ存在する: (1) src/lib/__tests__/cli-patterns.test.ts (Issue #132向け), (2) tests/unit/lib/cli-patterns.test.ts (Issue #4向け)。設計書8.1節では tests/unit/lib/cli-patterns.test.ts のみを追加テスト対象として記載しているが、src/lib/__tests__/cli-patterns.test.ts にも getChoiceDetectionPatterns() および detectPromptForCli() のテスト追加を検討すべき。または、テストファイルの重複を整理すべき。",
+      "evidence": "src/lib/__tests__/cli-patterns.test.ts: Issue #132, #54 向けテスト（9件のimport）\ntests/unit/lib/cli-patterns.test.ts: Issue #4 向けテスト（13件のimport）\n2つのテストファイルが異なるディレクトリに存在し、テスト対象が重複している。",
+      "recommendation": "設計書に以下のいずれかを記載: (A) 新規テスト（getChoiceDetectionPatterns, detectPromptForCli）は tests/unit/lib/cli-patterns.test.ts に追加し、src/lib/__tests__/cli-patterns.test.ts は既存のまま維持。(B) テストファイルの統合を別Issueとして起票。現時点では(A)を推奨。"
+    },
+    {
+      "id": "DR3-008",
+      "severity": "should_fix",
+      "category": "影響範囲検証",
+      "title": "detectPrompt のシグネチャ変更が PromptDetectionResult 型を使用するコードに波及しないことの確認",
+      "description": "detectPrompt() のシグネチャが (output: string) から (output: string, options?: DetectPromptOptions) に変更される。戻り値型 PromptDetectionResult は変更なし。PromptDetectionResult は prompt-detector.ts でのみ定義・export されており、status-detector.ts のコメント（L41）で参照されているが import はされていない。detectPromptForCli() が cli-patterns.ts に追加される際に PromptDetectionResult を import する必要があるが、これは新規 import であり既存コードへの波及はない。ただし、将来的に外部から PromptDetectionResult を import するコードが増える場合、型定義の配置（prompt-detector.ts 内 vs 共有型ファイル）の再検討が必要になる。設計書3.1節の DR1-005 でこの点は認識されているが、Phase 2 チェックリストに PromptDetectionResult の export 確認項目がない。",
+      "evidence": "src/lib/prompt-detector.ts L14: export interface PromptDetectionResult\ncli-patterns.ts の detectPromptForCli() は PromptDetectionResult を戻り値型として使用するため import が必要。",
+      "recommendation": "Phase 2 チェックリスト（16節）に追加: 「PromptDetectionResult が prompt-detector.ts から正しく export されていることを確認。detectPromptForCli() の戻り値型として cli-patterns.ts で import する。」"
+    },
+    {
+      "id": "DR3-009",
+      "severity": "nice_to_have",
+      "category": "波及効果分析",
+      "title": "claude-poller.ts の detectPrompt 呼び出しは到達不能コードだが、将来のメンテナンスリスク",
+      "description": "claude-poller.ts は L164 と L232 で detectPrompt() を呼び出しているが、startPolling() が呼び出されていないため、これらは事実上到達不能コードである（Issue #180 で確認済み）。設計書12.2節では「Claude専用 + optional引数で後方互換」として変更不要と判断しているが、将来 claude-poller.ts が再活性化された場合、detectPrompt の optional 引数がデフォルト（Claude用パターン）で動作するため後方互換性は維持される。ただし、メンテナンスの観点から、到達不能コードであることをコメントに明記するか、別Issueで claude-poller.ts の廃止/統合を検討することを推奨。",
+      "evidence": "claude-poller.ts L10: import { detectPrompt } from './prompt-detector';\nL164: const promptDetection = detectPrompt(fullOutput);\nL232: const promptDetection = detectPrompt(result.response);\nIssue #180 レビュー結果: startPolling は呼び出されておらず、detectPrompt() 呼び出しは到達不能コード。",
+      "recommendation": "nice_to_have: 設計書12.2節に注記追加「claude-poller.ts の startPolling() は現在呼び出されておらず、内部の detectPrompt() 呼び出しは到達不能コードである。将来の廃止/統合を別Issueで検討すること。」"
+    },
+    {
+      "id": "DR3-010",
+      "severity": "nice_to_have",
+      "category": "波及効果分析",
+      "title": "response-poller.ts の startPolling が respond/route.ts から呼び出されており、Codex prompt 応答後のポーリング再開が正しく動作するか確認必要",
+      "description": "respond/route.ts L178 は startPolling(params.id, cliToolId) を呼び出してポーリングを再開する。response-poller.ts の startPolling() -> checkForResponse() -> extractResponse() パスで detectPrompt() が呼び出される（L248, L442, L556）。Codex セッションで multiple_choice prompt に応答した後、ポーリング再開時の extractResponse() で Codex 用パターンが正しく適用されるか（L442, L556 が detectPromptForCli に移行されるか）の確認が必要。これは設計書12.1節に記載されているが、respond/route.ts からの呼び出しチェーンとして 12.3節に記載すべき。",
+      "evidence": "src/app/api/worktrees/[id]/respond/route.ts L178: startPolling(params.id, cliToolId); -- response-poller.ts の startPolling を呼び出し、内部で detectPrompt が使用される。",
+      "recommendation": "12.3節に respond/route.ts -> startPolling() -> checkForResponse() -> extractResponse() -> detectPrompt() の呼び出しチェーンを明記。Codex セッションでの回帰テストシナリオとして Phase 5 に追加。"
+    },
+    {
+      "id": "DR3-011",
+      "severity": "nice_to_have",
+      "category": "影響範囲検証",
+      "title": "auto-yes-manager.test.ts の pollAutoYes テスト（L428-498）が detectPromptForCli 移行後に期待通り動作するか",
+      "description": "auto-yes-manager.test.ts の Issue #161 テスト（L428-498）は pollAutoYes の動作を検証しており、内部的に detectPrompt が呼び出される。設計書8.2節では「vi.mock() 宣言内の detectPrompt モック定義を更新」と記載しているが、実際にはこのテストファイルでは detectPrompt を直接モックしておらず、auto-yes-manager.ts が内部で import する detectPrompt がテスト実行時に実際の prompt-detector.ts のコードを使用している。detectPromptForCli への移行後、auto-yes-manager.ts の import が detectPromptForCli（cli-patterns.ts）に変わるため、テストのモック設定の変更が不要であることを確認すべき（detectPrompt ではなく detectPromptForCli が呼ばれるため）。",
+      "evidence": "tests/unit/lib/auto-yes-manager.test.ts: L22-38 でモックしているのは cli-session, tmux, cli-tools/manager のみ。prompt-detector はモックしていない。L431 で import('@/lib/cli-patterns') から detectThinking を取得しているが、detectPrompt は直接モックされていない。",
+      "recommendation": "設計書8.2節の auto-yes-manager.test.ts の修正内容を精査: auto-yes-manager.ts の import が detectPrompt (from prompt-detector) から detectPromptForCli (from cli-patterns) に変わった場合、テストのモック設定に影響がないことを確認。モックが不要な場合はその旨を明記。"
+    },
+    {
+      "id": "DR3-012",
+      "severity": "nice_to_have",
+      "category": "波及効果分析",
+      "title": "detectSessionStatus() のシグネチャは変更されないが、内部動作の変更によりE2Eテストでの動作確認が推奨",
+      "description": "detectSessionStatus() のシグネチャ (output, cliToolId, lastOutputTimestamp?) は変更されないため、呼び出し元（worktrees/route.ts, [id]/route.ts）のコード修正は不要。しかし、内部で detectPrompt に渡す出力が lastLines（15行）から cleanOutput（全量）に変更されることで、サイドバーのステータス表示動作が微妙に変わる可能性がある（特に、以前は15行ウィンドウ外にあったmultiple_choice promptが検出されるようになるケース）。E2Eテスト（Playwright）でサイドバーのステータス表示の回帰テストを実行することを推奨。",
+      "evidence": "status-detector.ts L87: detectPrompt(lastLines) -> detectPromptForCli(cleanOutput, cliToolId) に変更。cleanOutput は全量出力であり、lastLines は15行制限。",
+      "recommendation": "Phase 5 チェックリストに追加: 「E2Eテストでサイドバーのステータスインジケータ（idle/ready/running/waiting）の動作を確認。特に multiple_choice プロンプト表示時の waiting ステータスが正しく反映されることを検証。」"
+    }
+  ],
+  "impact_summary": {
+    "files_directly_affected": {
+      "count": 7,
+      "files": [
+        "src/lib/prompt-detector.ts",
+        "src/lib/cli-patterns.ts",
+        "src/lib/auto-yes-manager.ts",
+        "src/lib/status-detector.ts",
+        "src/lib/response-poller.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts"
+      ]
+    },
+    "files_indirectly_affected": {
+      "count": 4,
+      "files": [
+        "src/app/api/worktrees/route.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/app/api/worktrees/[id]/respond/route.ts",
+        "src/lib/claude-poller.ts"
+      ]
+    },
+    "test_files_requiring_update": {
+      "count": 5,
+      "files": [
+        "tests/unit/prompt-detector.test.ts",
+        "tests/unit/lib/cli-patterns.test.ts",
+        "tests/unit/lib/auto-yes-manager.test.ts",
+        "tests/unit/api/prompt-response-verification.test.ts",
+        "src/lib/__tests__/status-detector.test.ts"
+      ]
+    },
+    "test_files_requiring_regression_run": {
+      "count": 2,
+      "files": [
+        "tests/integration/api-prompt-handling.test.ts",
+        "src/lib/__tests__/cli-patterns.test.ts"
+      ]
+    },
+    "no_impact_confirmed": {
+      "count": 5,
+      "files": [
+        "src/hooks/useAutoYes.ts",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/lib/auto-yes-resolver.ts",
+        "src/components/worktree/PromptPanel.tsx",
+        "src/components/worktree/MobilePromptSheet.tsx"
+      ]
+    }
+  },
+  "checklist": [
+    {
+      "item": "detectPrompt を import しているファイルが設計書に全て記載されているか",
+      "result": "partial",
+      "note": "ソースコードで detectPrompt を import する8ファイル中、直接変更対象5ファイル + 変更不要2ファイル（claude-poller.ts, response-poller.ts L248）は正しく分類されている。ただし間接影響を受ける worktrees/route.ts, [id]/route.ts が12.3節に未記載。"
+    },
+    {
+      "item": "detectPrompt のシグネチャ変更が動的/ランタイム使用を破壊しないか",
+      "result": "pass",
+      "note": "optional引数の追加のみであり、既存の呼び出し元は全て (output: string) の1引数呼び出し。後方互換性は維持される。動的呼び出しやreflection的使用は確認されなかった。"
+    },
+    {
+      "item": "detectPromptForCli を cli-patterns.ts に追加してモジュール読み込みの問題が発生しないか",
+      "result": "pass",
+      "note": "cli-patterns.ts -> prompt-detector.ts 方向の依存は一方向。prompt-detector.ts は cli-patterns.ts を import しないため循環依存は発生しない。DR2-015のチェックリスト項目で確認される。"
+    },
+    {
+      "item": "更新が必要だが設計書に記載されていないテストファイルがないか",
+      "result": "fail",
+      "note": "src/lib/__tests__/status-detector.test.ts が設計書の更新対象テストリストに含まれていない（DR3-002）。"
+    },
+    {
+      "item": "status-detector.ts のウィンドウイング変更がパフォーマンスや動作に影響しないか",
+      "result": "partial",
+      "note": "計算量の増加は最小限（detectMultipleChoicePrompt 内部の50行スライスによる）。ただし worktrees/route.ts の並列処理時のメモリ使用量への微増について7.2節に明記すべき（DR3-004）。"
+    },
+    {
+      "item": "E2Eまたは統合テストで検証すべきシナリオが明示されているか",
+      "result": "partial",
+      "note": "Phase 5に手動検証項目はあるが、tests/integration/api-prompt-handling.test.ts の回帰テスト実行（DR3-005）およびE2Eでのサイドバーステータス確認（DR3-012）が明示されていない。"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "issue_number": 193,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（影響範囲レビュー）",
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S3-001",
+        "status": "applied",
+        "change_summary": "claude-poller.tsを変更対象ファイルテーブルに追加。Claude専用ポーラーのためCodexセッションでは使用されないこと、案B（パターンパラメータ化）でoptionalパラメータとする場合は後方互換性があり変更不要であることを明記。また、具体的な問題箇所の呼び出し一覧にclaude-poller.ts L164/L232を追加。"
+      },
+      {
+        "id": "S3-002",
+        "status": "applied",
+        "change_summary": "response-poller.tsの影響範囲説明を修正。L248がClaude専用ガード（if (cliToolId === 'claude')）内のため変更不要であること、L442とL556が全CLIツール共通パスであり変更必要であることを明記。実装タスクにも「L442, L556のみ変更必要（L248はClaude専用ガード内のため変更不要）」と追記。問題箇所一覧でも各行にClaude専用/全CLIツール共通の注記を追加。"
+      },
+      {
+        "id": "S3-003",
+        "status": "applied",
+        "change_summary": "新セクション「TUIベースの場合の影響範囲（代替設計パス）」を対策案に追加。(1)変更が集中するモジュール（prompt-response/route.ts, auto-yes-manager.ts, respond/route.ts, getAnswerInput()）、(2)detectMultipleChoicePromptの役割変化、(3)フロントエンドコンポーネントへの影響、(4)codex.tsの既存TUI操作を設計参考として記載。前提条件確認後に影響範囲テーブルを更新するワークフローも明記。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-004",
+        "status": "applied",
+        "change_summary": "案Bに「（推奨）」ラベルを追加し、推奨理由を詳述。Issue #161のCLIツール非依存性原則維持、optionalパラメータによる後方互換性、型定義の例（DetectPromptOptions interface）を記載。影響範囲テーブルのNoteも案B推奨に更新。"
+      },
+      {
+        "id": "S3-005",
+        "status": "applied",
+        "change_summary": "respond/route.tsを「関連コンポーネント（動作確認）」セクションに追加。getAnswerInput()の使用箇所（L82-113）とCodex TUIベース選択肢の場合のsendKeysロジック変更の可能性を明記。TUIベース代替設計パスセクションにもrespond/route.ts L149-156の影響を追記。"
+      },
+      {
+        "id": "S3-006",
+        "status": "applied",
+        "change_summary": "前提条件の確認項目3にisDefaultフラグの確認ポイントを追加。auto-yes-resolver.tsのresolveAutoAnswer()の動作詳細（isDefault=falseの場合は最初の選択肢を選択）を明記。実装タスクにisDefault動作確認の検証タスクを追加。関連コンポーネントのauto-yes-resolver.ts説明も具体化。"
+      },
+      {
+        "id": "S3-007",
+        "status": "applied",
+        "change_summary": "status-detector.tsの影響範囲説明にSTATUS_CHECK_LINE_COUNT=15の制限を注記。実装タスクに選択肢数が多い場合の引き上げ検討を追記。受入条件のサイドバーステータス項目に、選択肢数が多い場合（7個以上）のテストケース追加のNoteを追記。"
+      },
+      {
+        "id": "S3-008",
+        "status": "applied",
+        "change_summary": "PromptPanel.tsx、MobilePromptSheet.tsx、useAutoYes.tsを「関連コンポーネント（動作確認）」セクションに追加。TUIベースの場合の番号クリック->矢印キー操作変換の中間レイヤーの必要性と、テキストベースの場合は現行UIで対応可能であることを記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-009",
+        "status": "applied",
+        "change_summary": "「既存テストファイルの更新（シグネチャ変更時）」サブセクションを影響範囲に新設。auto-yes-manager.test.ts（L431）、prompt-response-verification.test.ts（L50, L112, L141）、api-prompt-handling.test.tsの3ファイルを追加。実装タスクにも既存テストファイルの更新確認タスクを追加。"
+      },
+      {
+        "id": "S3-010",
+        "status": "applied",
+        "change_summary": "「全11箇所」を「外部呼び出し箇所（計9箇所）」に修正し、全9箇所をファイル名・行番号付きで明示的にリストアップ。各箇所にClaude専用ガード内/全CLIツール共通/Claude専用ポーラーの注記を追加。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 10,
+    "applied": 10,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/193"
+  }
+}

@@ -21,6 +21,36 @@ export interface PromptDetectionResult {
 }
 
 /**
+ * Options for customizing prompt detection patterns.
+ * When omitted, defaults to Claude CLI patterns (backward compatible).
+ *
+ * Issue #193: Added to support Codex CLI multiple choice detection.
+ */
+export interface DetectPromptOptions {
+  /**
+   * Pattern for the default option indicator line.
+   * Claude: /^\s*\u276F\s*(\d+)\.\s*(.+)$/ (marker)
+   * Codex: /^\s*(\d+)\.\s*(.+)$/ (no special marker)
+   */
+  choiceIndicatorPattern?: RegExp;
+
+  /**
+   * Pattern for normal option lines (no indicator).
+   * Default: /^\s*(\d+)\.\s*(.+)$/
+   */
+  normalOptionPattern?: RegExp;
+
+  /**
+   * Whether Layer 4 validation (at least one default indicator must exist)
+   * should be enforced. Defaults to true for backward compatibility (Claude).
+   *
+   * Set to false for CLI tools that do not have a default-indicator concept
+   * (e.g., Codex presents choices without marking a default).
+   */
+  requireDefaultIndicator?: boolean;
+}
+
+/**
  * Detect if output contains an interactive prompt
  *
  * Supports the following patterns:
@@ -41,7 +71,7 @@ export interface PromptDetectionResult {
  * // result.promptData.question === 'Do you want to proceed?'
  * ```
  */
-export function detectPrompt(output: string): PromptDetectionResult {
+export function detectPrompt(output: string, options?: DetectPromptOptions): PromptDetectionResult {
   logger.debug('detectPrompt:start', { outputLength: output.length });
 
   const lines = output.split('\n');
@@ -53,7 +83,7 @@ export function detectPrompt(output: string): PromptDetectionResult {
   // ❯ 1. Yes
   //   2. No
   //   3. Cancel
-  const multipleChoiceResult = detectMultipleChoicePrompt(output);
+  const multipleChoiceResult = detectMultipleChoicePrompt(output, options);
   if (multipleChoiceResult.isPrompt) {
     logger.info('detectPrompt:multipleChoice', {
       isPrompt: true,
@@ -261,20 +291,28 @@ function isContinuationLine(rawLine: string, line: string): boolean {
  * @param output - The tmux output to analyze (typically captured from tmux pane)
  * @returns Detection result with prompt data if a valid multiple choice prompt is found
  */
-function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
+function detectMultipleChoicePrompt(output: string, opts?: DetectPromptOptions): PromptDetectionResult {
   const lines = output.split('\n');
+
+  // Parameterized patterns (Issue #193)
+  const indicatorPattern = opts?.choiceIndicatorPattern ?? DEFAULT_OPTION_PATTERN;
+  const normalPattern = opts?.normalOptionPattern ?? NORMAL_OPTION_PATTERN;
+  const requireDefault = opts?.requireDefaultIndicator ?? true;
 
   // Calculate scan window: last 50 lines
   const scanStart = Math.max(0, lines.length - 50);
 
   // ==========================================================================
-  // Pass 1: Check for ❯ indicator existence in scan window
-  // If no ❯ lines found, there is no multiple_choice prompt.
+  // Pass 1: Check for indicator existence in scan window
+  // If no indicator lines found and requireDefaultIndicator=true,
+  // there is no multiple_choice prompt.
+  // When requireDefaultIndicator=false, skip this early-exit check
+  // since the indicator pattern may match all options.
   // ==========================================================================
   let hasDefaultLine = false;
   for (let i = scanStart; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (DEFAULT_OPTION_PATTERN.test(line)) {
+    if (indicatorPattern.test(line)) {
       hasDefaultLine = true;
       break;
     }
@@ -288,7 +326,7 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
   }
 
   // ==========================================================================
-  // Pass 2: Collect options (only executed when ❯ was found in Pass 1)
+  // Pass 2: Collect options (only executed when indicator was found in Pass 1)
   // Scan from end to find options, using both patterns.
   // ==========================================================================
   const options: Array<{ number: number; label: string; isDefault: boolean }> = [];
@@ -297,8 +335,8 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
   for (let i = lines.length - 1; i >= scanStart; i--) {
     const line = lines[i].trim();
 
-    // Try DEFAULT_OPTION_PATTERN first (❯ indicator)
-    const defaultMatch = line.match(DEFAULT_OPTION_PATTERN);
+    // Try indicator pattern first (e.g., ❯ indicator for Claude)
+    const defaultMatch = line.match(indicatorPattern);
     if (defaultMatch) {
       const number = parseInt(defaultMatch[1], 10);
       const label = defaultMatch[2].trim();
@@ -306,8 +344,8 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
       continue;
     }
 
-    // Try NORMAL_OPTION_PATTERN (no ❯ indicator)
-    const normalMatch = line.match(NORMAL_OPTION_PATTERN);
+    // Try normal pattern (no indicator)
+    const normalMatch = line.match(normalPattern);
     if (normalMatch) {
       const number = parseInt(normalMatch[1], 10);
       const label = normalMatch[2].trim();
@@ -340,13 +378,24 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
     };
   }
 
-  // Layer 4: Must have at least 2 options AND at least one with ❯ indicator
-  const hasDefaultIndicator = options.some(opt => opt.isDefault);
-  if (options.length < 2 || !hasDefaultIndicator) {
+  // Layer 4a: Must have at least 2 options
+  if (options.length < 2) {
     return {
       isPrompt: false,
       cleanContent: output.trim(),
     };
+  }
+
+  // Layer 4b: Require at least one default indicator (Issue #193: conditional)
+  // When requireDefaultIndicator=false (e.g., Codex), skip this check
+  if (requireDefault) {
+    const hasDefaultIndicator = options.some(opt => opt.isDefault);
+    if (!hasDefaultIndicator) {
+      return {
+        isPrompt: false,
+        cleanContent: output.trim(),
+      };
+    }
   }
 
   // Extract question text
@@ -391,6 +440,49 @@ function detectMultipleChoicePrompt(output: string): PromptDetectionResult {
 }
 
 /**
+ * Maximum allowed length for a prompt answer (security limit).
+ */
+export const MAX_ANSWER_LENGTH = 1000;
+
+/**
+ * Control character pattern for sanitization.
+ * Removes \x00-\x09, \x0B-\x1F, and \x7F while preserving \n (\x0A).
+ */
+const CONTROL_CHAR_PATTERN = /[\x00-\x09\x0B-\x1F\x7F]/g;
+
+/**
+ * Sanitize and validate a prompt answer string.
+ *
+ * - Rejects answers exceeding MAX_ANSWER_LENGTH characters
+ * - Strips control characters (except newline)
+ *
+ * @param answer - Raw answer string from the client
+ * @returns Object with `valid: true` and `sanitized` string, or `valid: false` and `error` message
+ *
+ * @example
+ * ```typescript
+ * const result = sanitizeAnswer('yes');
+ * // result === { valid: true, sanitized: 'yes' }
+ *
+ * const bad = sanitizeAnswer('a'.repeat(1001));
+ * // bad === { valid: false, error: 'Answer exceeds maximum length of 1000 characters' }
+ * ```
+ */
+export function sanitizeAnswer(
+  answer: string
+): { valid: true; sanitized: string } | { valid: false; error: string } {
+  if (typeof answer === 'string' && answer.length > MAX_ANSWER_LENGTH) {
+    return { valid: false, error: `Answer exceeds maximum length of ${MAX_ANSWER_LENGTH} characters` };
+  }
+
+  const sanitized = typeof answer === 'string'
+    ? answer.replace(CONTROL_CHAR_PATTERN, '')
+    : answer;
+
+  return { valid: true, sanitized };
+}
+
+/**
  * Get tmux input string for an answer
  *
  * @param answer - User's answer ('yes', 'no', 'y', 'n', or number for multiple choice)
@@ -415,7 +507,7 @@ export function getAnswerInput(answer: string, promptType: string = 'yes_no'): s
     if (/^\d+$/.test(normalized)) {
       return normalized;
     }
-    throw new Error(`Invalid answer for multiple choice: ${answer}. Expected a number.`);
+    throw new Error('Invalid answer for multiple choice prompt. Expected a number.');
   }
 
   // Handle yes/no prompts
@@ -427,5 +519,5 @@ export function getAnswerInput(answer: string, promptType: string = 'yes_no'): s
     return 'n';
   }
 
-  throw new Error(`Invalid answer: ${answer}. Expected 'yes', 'no', 'y', or 'n'.`);
+  throw new Error("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
 }

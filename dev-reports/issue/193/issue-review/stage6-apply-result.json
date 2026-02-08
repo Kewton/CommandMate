@@ -1,0 +1,48 @@
+{
+  "issue_number": 193,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S5-001",
+        "status": "applied",
+        "change_summary": "tests/integration/api-prompt-handling.test.tsを「既存テストファイルの更新（シグネチャ変更時）」テーブルから削除。detectPromptを直接import/mockしていないため影響なしと明記。回帰テストとして実行を推奨するNote文を追加"
+      },
+      {
+        "id": "S5-002",
+        "status": "applied",
+        "change_summary": "関連コンポーネントのrespond/route.ts説明にNote追記。startPollingのimport元がresponse-poller.tsであること、テスト（api-prompt-handling.test.ts）がclaude-pollerをモックしている不整合を認識事項として記載（本Issueスコープ外）"
+      },
+      {
+        "id": "S5-003",
+        "status": "applied",
+        "change_summary": "実装タスクの全7箇所で「cliToolIdを渡す修正」を「CLIツール別パターンをoptions引数で渡す修正」に修正。cli-patterns.tsからパターンセットを取得しdetectPromptにoptions引数として渡す具体的な手順を記載。変更対象テーブルの記述も案Bに整合"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S5-004",
+        "status": "applied",
+        "change_summary": "根本原因セクションのdetectPrompt呼び出し箇所リスト項目5のresponse-poller.ts L248の注記を「[Claude専用ガード内 - 変更不要の可能性]」から「[Claude専用ガード内 - 変更不要]」に修正。変更対象テーブルの記載と表現を統一"
+      },
+      {
+        "id": "S5-005",
+        "status": "applied",
+        "change_summary": "useAutoYes.tsの確認内容を具体化。「サーバー側ポーリングとの連携確認」から「Codex選択肢検出時にisPromptWaiting=trueがcurrent-output APIから返された場合、クライアント側Auto-Yesがサーバー側ポーリング（auto-yes-manager.ts）と重複応答しないことを確認（lastServerResponseTimestampによる重複防止機構の動作検証）」に更新"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/193"
+  }
+}

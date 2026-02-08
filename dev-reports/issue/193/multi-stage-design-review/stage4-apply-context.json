@@ -1,0 +1,7 @@
+{
+  "issue_number": 193,
+  "review_result_path": "dev-reports/issue/193/multi-stage-design-review/stage4-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-193-codex-multiple-choice-detection-design-policy.md",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー - 指摘事項対応"
+}

@@ -1,0 +1,107 @@
+{
+  "issue_number": 193,
+  "review_stage": 4,
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DR4-001",
+        "item": "prompt-response/route.ts sends raw user answer to tmux sendKeys without sanitization",
+        "sections_updated": ["6.1", "6.3", "10.1", "12.1", "14", "16 Phase 3"],
+        "status": "reflected",
+        "details": "Added new section 6.3 documenting sendKeys command injection risk, input sanitization requirements (length limit, control character filtering, numeric validation), and DR4-006 out-of-scope follow-up for exec->execFile migration. Updated 6.1 table, 10.1 API table, 12.1 file list, 14 risk table, and Phase 3 checklist."
+      },
+      {
+        "id": "DR4-002",
+        "item": "TBD placeholder Codex regex patterns must be validated for ReDoS safety before implementation",
+        "sections_updated": ["5.1", "6.2", "8.1", "16 Phase 2", "16 Phase 4"],
+        "status": "reflected",
+        "details": "Added [DR4-002] security comments to CODEX_CHOICE_INDICATOR_PATTERN and CODEX_CHOICE_NORMAL_PATTERN definitions in 5.1. Added ReDoS-safe pattern construction rules (5 rules), verification procedure (safe-regex/recheck), and pathological input test requirements to 6.2. Added ReDoS pathological input test to 8.1 cli-patterns test table. Added automated ReDoS verification checklist item and pathological test item to Phase 2 and Phase 4 checklists."
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR4-003",
+        "item": "requireDefaultIndicator=false reduces false-positive defense for Auto-Yes with Codex",
+        "sections_updated": ["5.2", "14", "16 Phase 5"],
+        "status": "reflected",
+        "details": "Added comprehensive [DR4-003] subsection to 5.2 documenting residual risk, Layer 1 thinking check as primary defense, Layer 3 as secondary defense, Phase 1 mandatory testing requirements, and three alternative Layer 4b replacements. Updated 14 risk table with DR4-003 references. Added Phase 5 checklist item for Codex Auto-Yes false positive testing."
+      },
+      {
+        "id": "DR4-004",
+        "item": "Error messages in getAnswerInput() and API routes echo user input",
+        "sections_updated": ["6.1", "6.5", "12.1", "14", "16 Phase 2", "16 Phase 3", "16 Phase 5"],
+        "status": "reflected",
+        "details": "Added new section 6.5 with error message correction table (getAnswerInput, respond/route.ts, prompt-response/route.ts). Updated 6.1 table. Added error message modification items to Phase 2 (getAnswerInput), Phase 3 (prompt-response 404, respond error echo), and Phase 5 (security verification) checklists. Added to 12.1 file list and 14 risk table."
+      },
+      {
+        "id": "DR4-005",
+        "item": "prompt-response/route.ts does not validate answer format before sending to tmux",
+        "sections_updated": ["6.1", "6.4", "10.1", "12.1", "16 Phase 3", "16 Phase 4"],
+        "status": "reflected",
+        "details": "Added new section 6.4 with detailed validation requirements (prompt type format validation, max length 1000, control character filtering) including code examples. Updated 6.1 table, 10.1 API table. Added Phase 3 checklist items for validation implementation and Phase 4 item for validation tests. Added Phase 5 security verification item."
+      },
+      {
+        "id": "DR4-006",
+        "item": "tmux sendKeys escaping only handles single quotes - incomplete shell metacharacter protection",
+        "sections_updated": ["6.3"],
+        "status": "reflected",
+        "details": "Documented as out-of-scope follow-up in section 6.3 with accepted residual risk, recommended follow-up Issue for exec->execFile migration, and interim mitigation via input length limits and control character filtering."
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DR4-007",
+        "item": "No rate limiting on prompt-response API endpoint",
+        "sections_updated": ["10.1"],
+        "status": "reflected",
+        "details": "Added [DR4-007] rate limiting note to section 10.1 documenting the current absence and future consideration."
+      },
+      {
+        "id": "DR4-008",
+        "item": "Auto-Yes response logging includes worktreeId but not the answer sent",
+        "sections_updated": ["6.7"],
+        "status": "reflected",
+        "details": "Added new section 6.7 with recommended log format including answer type and value."
+      },
+      {
+        "id": "DR4-009",
+        "item": "TEXT_INPUT_PATTERNS use case-insensitive flags but lack anchoring",
+        "sections_updated": ["6.2"],
+        "status": "reflected",
+        "details": "Added [DR4-009] improvement recommendation to 6.2 suggesting word boundary additions to prevent substring false positives."
+      },
+      {
+        "id": "DR4-010",
+        "item": "ANSI_PATTERN regex /g flag with global state risk (informational)",
+        "sections_updated": ["6.6"],
+        "status": "reflected",
+        "details": "Added new section 6.6 with informational note about /g flag lastIndex state. Documented as no-action-required."
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-193-codex-multiple-choice-detection-design-policy.md",
+  "sections_updated": [
+    "5.1 cli-patterns.ts (DR4-002 security comments on TBD patterns)",
+    "5.2 prompt-detector.ts (DR4-003 residual risk documentation)",
+    "6.1 Security table (DR4-001, DR4-004, DR4-005 references)",
+    "6.2 ReDoS requirements (DR4-002 safe pattern rules, DR4-009 TEXT_INPUT_PATTERNS)",
+    "6.3 sendKeys injection prevention (DR4-001, DR4-006)",
+    "6.4 prompt-response input validation (DR4-005)",
+    "6.5 Error message information disclosure (DR4-004)",
+    "6.6 ANSI_PATTERN /g flag note (DR4-010)",
+    "6.7 Auto-Yes logging improvement (DR4-008)",
+    "8.1 Test design (DR4-002 ReDoS pathological test)",
+    "10.1 API design (DR4-005, DR4-007)",
+    "12.1 File change list (DR4-001, DR4-004, DR4-005)",
+    "13 Implementation phases (DR4-001, DR4-002, DR4-004, DR4-005)",
+    "14 Risk table (DR4-001, DR4-002, DR4-003, DR4-004)",
+    "15 Review findings summary (Stage 4 section added)",
+    "16 Implementation checklist (Phase 2, 3, 4, 5 items added)",
+    "17 Review history (Stage 4 entry added)",
+    "Security review summary section added"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}
