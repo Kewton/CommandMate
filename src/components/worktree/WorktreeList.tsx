@@ -217,10 +217,6 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
   };
 
   /**
-   * Handle repository deletion
-   * Shows a confirmation dialog requiring 'delete' input
-   */
-  /**
    * Handle restoring an excluded repository
    * Issue #190: Repository exclusion on sync
    */
@@ -241,6 +237,10 @@ export function WorktreeList({ initialWorktrees = [] }: WorktreeListProps) {
     }
   };
 
+  /**
+   * Handle repository deletion
+   * Shows a confirmation dialog requiring 'delete' input
+   */
   const handleDeleteRepository = async (repositoryPath: string, repositoryName: string) => {
     const worktreeCount = repositories.find(r => r.path === repositoryPath)?.worktreeCount || 0;
 

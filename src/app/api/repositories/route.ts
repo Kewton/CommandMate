@@ -11,8 +11,7 @@ import {
   getWorktreeIdsByRepository,
   deleteRepositoryWorktrees,
 } from '@/lib/db';
-import { resolveRepositoryPath, disableRepository } from '@/lib/db-repository';
-import { isSystemDirectory } from '@/config/system-directories';
+import { validateRepositoryPath, disableRepository } from '@/lib/db-repository';
 import { cleanupMultipleWorktrees } from '@/lib/session-cleanup';
 import { cleanupRooms, broadcastMessage } from '@/lib/ws-server';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -60,27 +59,11 @@ export async function DELETE(request: NextRequest) {
     const body = await request.json();
     const { repositoryPath } = body;
 
-    // Validate input
-    if (!repositoryPath || typeof repositoryPath !== 'string') {
+    // Validate and resolve repository path (DRY: shared validation)
+    const validation = validateRepositoryPath(repositoryPath);
+    if (!validation.valid) {
       return NextResponse.json(
-        { success: false, error: 'repositoryPath is required' },
-        { status: 400 }
-      );
-    }
-
-    // Path traversal validation (SEC-MF-001)
-    if (repositoryPath.includes('\0')) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid repository path' },
-        { status: 400 }
-      );
-    }
-
-    const resolvedPath = resolveRepositoryPath(repositoryPath);
-
-    if (isSystemDirectory(resolvedPath)) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid repository path' },
+        { success: false, error: validation.error },
         { status: 400 }
       );
     }

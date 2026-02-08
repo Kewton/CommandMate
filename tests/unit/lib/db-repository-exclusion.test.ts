@@ -12,9 +12,8 @@ import {
   createRepository,
   getRepositoryByPath,
   getAllRepositories,
-} from '@/lib/db-repository';
-import {
   resolveRepositoryPath,
+  validateRepositoryPath,
   ensureEnvRepositoriesRegistered,
   filterExcludedPaths,
   disableRepository,
@@ -59,6 +58,61 @@ describe('resolveRepositoryPath', () => {
   it('should resolve parent directory references', () => {
     const result = resolveRepositoryPath('/home/user/repos/../repos/myrepo');
     expect(result).toBe('/home/user/repos/myrepo');
+  });
+});
+
+// ============================================================
+// validateRepositoryPath()
+// ============================================================
+
+describe('validateRepositoryPath', () => {
+  it('should return valid=true for valid absolute path', () => {
+    const result = validateRepositoryPath('/home/user/repos/myrepo');
+    expect(result.valid).toBe(true);
+    expect(result.resolvedPath).toBe('/home/user/repos/myrepo');
+    expect(result.error).toBeUndefined();
+  });
+
+  it('should return valid=false for null', () => {
+    const result = validateRepositoryPath(null);
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('repositoryPath is required');
+  });
+
+  it('should return valid=false for undefined', () => {
+    const result = validateRepositoryPath(undefined);
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('repositoryPath is required');
+  });
+
+  it('should return valid=false for empty string', () => {
+    const result = validateRepositoryPath('');
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('repositoryPath is required');
+  });
+
+  it('should return valid=false for non-string type', () => {
+    const result = validateRepositoryPath(123);
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('repositoryPath is required');
+  });
+
+  it('should return valid=false for null byte in path (SEC-MF-001)', () => {
+    const result = validateRepositoryPath('/path/to/repo\0malicious');
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('Invalid repository path');
+  });
+
+  it('should return valid=false for system directory path', () => {
+    const result = validateRepositoryPath('/etc/passwd');
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('Invalid repository path');
+  });
+
+  it('should resolve path with trailing slash', () => {
+    const result = validateRepositoryPath('/home/user/repos/myrepo/');
+    expect(result.valid).toBe(true);
+    expect(result.resolvedPath).toBe('/home/user/repos/myrepo');
   });
 });
 

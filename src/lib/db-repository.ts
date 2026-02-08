@@ -1,12 +1,14 @@
 /**
  * Repository and Clone Job Database Operations
  * Issue #71: Clone URL registration feature
+ * Issue #190: Repository exclusion on sync
  */
 
 import { randomUUID } from 'crypto';
 import path from 'path';
 import Database from 'better-sqlite3';
 import type { CloneJobStatus } from '@/types/clone';
+import { isSystemDirectory } from '@/config/system-directories';
 
 /**
  * Repository model
@@ -311,6 +313,45 @@ export const MAX_DISABLED_REPOSITORIES = 1000;
  */
 export function resolveRepositoryPath(repoPath: string): string {
   return path.resolve(repoPath);
+}
+
+/**
+ * Validation result for repository path.
+ * If error is set, the path is invalid and the error message should be returned to the client.
+ */
+export interface RepositoryPathValidationResult {
+  valid: boolean;
+  error?: string;
+  resolvedPath?: string;
+}
+
+/**
+ * Validate and resolve a repository path for API requests.
+ * Centralizes all validation checks to avoid duplication across route handlers.
+ *
+ * Checks performed:
+ * 1. Presence and type check (must be non-empty string)
+ * 2. Null byte check (path traversal prevention, SEC-MF-001)
+ * 3. System directory check (prevents operations on /etc, /usr, etc.)
+ *
+ * DRY: Used by DELETE /api/repositories and PUT /api/repositories/restore
+ */
+export function validateRepositoryPath(repositoryPath: unknown): RepositoryPathValidationResult {
+  if (!repositoryPath || typeof repositoryPath !== 'string') {
+    return { valid: false, error: 'repositoryPath is required' };
+  }
+
+  if (repositoryPath.includes('\0')) {
+    return { valid: false, error: 'Invalid repository path' };
+  }
+
+  const resolvedPath = resolveRepositoryPath(repositoryPath);
+
+  if (isSystemDirectory(resolvedPath)) {
+    return { valid: false, error: 'Invalid repository path' };
+  }
+
+  return { valid: true, resolvedPath };
 }
 
 /**
