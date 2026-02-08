@@ -226,9 +226,9 @@ async function checkForResponse(worktreeId: string): Promise<boolean> {
       return false;
     }
 
-      if (!result.isComplete) {
-        return false;
-      }
+    if (!result.isComplete) {
+      return false;
+    }
 
     // Response is complete! Check if it's a prompt
     // TODO [Issue #193]: This code path is unreachable (claude-poller.ts is superseded by response-poller.ts).

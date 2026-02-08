@@ -133,7 +133,7 @@ src/
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
 | `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行ウィンドウイング） |
 | `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数） |
-| `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証） |
+| `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証。Issue #193: DetectPromptOptions interface追加、requireDefaultIndicatorフラグによる❯なし形式対応、Layer 5 SEC-001ガード） |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応） |
@@ -374,6 +374,30 @@ commandmate status --all                   # 全サーバー状態確認
 ---
 
 ## 最近の実装機能
+
+### Issue #193: Claude Code複数選択肢プロンプト検出
+- **バグ修正**: Claude Codeからの複数選択肢メッセージ（1~4の選択肢）に対し、CommandMateのUIから回答を送信できず、Auto-Yesモードでもタスクが進まない問題を修正
+- **根本原因**: `detectMultipleChoicePrompt()`の2パス❯検出方式（Issue #161）が❯マーカーなしの選択肢形式をブロック。Pass 1（❯存在チェック）とLayer 4（hasDefaultIndicatorチェック）の2つの独立したゲートが原因
+- **修正方針**: `DetectPromptOptions` interfaceに`requireDefaultIndicator?: boolean`フラグを追加し、Claude Code用に`false`を設定してPass 1/Layer 4をスキップ
+- **主要な変更点**:
+  - `prompt-detector.ts`に`DetectPromptOptions` interface追加、`detectPrompt()`/`detectMultipleChoicePrompt()`にoptionalパラメータ追加
+  - `cli-patterns.ts`に`buildDetectPromptOptions(cliToolId)`ヘルパー関数追加（DRY原則、MF-001）
+  - `response-poller.ts`に`detectPromptWithOptions()`内部ヘルパー追加（stripAnsi()一律適用、IA-001）
+  - 呼び出し元7箇所（5ファイル）を`buildDetectPromptOptions()`経由に統一
+- **セキュリティ対策**:
+  - Layer 5（SEC-001）: `requireDefaultIndicator=false`かつ`questionEndIndex === -1`（質問行未検出）時に`isPrompt: false`を返し、番号リストのみの出力でのAuto-Yes誤検出を防止
+  - SEC-002: `stripAnsi()`のJSDocにカバー範囲と既知制限事項を記載
+  - SEC-003: `getAnswerInput()`のエラーメッセージを固定メッセージに変更（ユーザー入力除去）
+- **Issue #161との整合性**: Layer 1（thinking skip）、Layer 3（連番検証）は維持。prompt-detector.tsのCLIツール非依存性原則を維持（CLIToolTypeに依存しない）
+- **主要コンポーネント**:
+  - `src/lib/prompt-detector.ts` - DetectPromptOptions interface、Pass 1/Layer 4条件分岐、Layer 5 SEC-001ガード
+  - `src/lib/cli-patterns.ts` - buildDetectPromptOptions()ヘルパー関数
+  - `src/lib/response-poller.ts` - detectPromptWithOptions()内部ヘルパー（stripAnsi一律適用）
+  - `src/lib/status-detector.ts` - buildDetectPromptOptions(cliToolId)呼び出し追加
+  - `src/lib/auto-yes-manager.ts` - buildDetectPromptOptions(cliToolId)呼び出し追加
+  - `src/app/api/worktrees/[id]/prompt-response/route.ts` - detectPrompt options追加
+  - `src/app/api/worktrees/[id]/current-output/route.ts` - detectPrompt options追加（thinking条件分岐維持）
+- 詳細: [設計書](./dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md)
 
 ### Issue #190: リポジトリ削除後のSync All復活防止
 - **バグ修正**: UIで削除したリポジトリがSync All実行時に再スキャン・再登録されて復活する問題を修正

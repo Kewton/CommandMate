@@ -264,7 +264,7 @@ function isContinuationLine(rawLine: string, line: string): boolean {
   const isShortFragment = line.length < 5 && !line.endsWith('?');
   // Path string continuation: lines starting with / or ~, or alphanumeric-only fragments (2+ chars)
   const isPathContinuation = /^[\/~]/.test(line) || (line.length >= 2 && /^[a-zA-Z0-9_-]+$/.test(line));
-  return !!(hasLeadingSpaces) || isShortFragment || isPathContinuation;
+  return !!hasLeadingSpaces || isShortFragment || isPathContinuation;
 }
 
 /**
@@ -375,21 +375,11 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
   // Layer 4: Must have at least 2 options. When requireDefault is true,
   // also require at least one option with ❯ indicator.
   const hasDefaultIndicator = collectedOptions.some(opt => opt.isDefault);
-  if (requireDefault) {
-    if (collectedOptions.length < 2 || !hasDefaultIndicator) {
-      return {
-        isPrompt: false,
-        cleanContent: output.trim(),
-      };
-    }
-  } else {
-    // requireDefaultIndicator = false: only require options.length >= 2
-    if (collectedOptions.length < 2) {
-      return {
-        isPrompt: false,
-        cleanContent: output.trim(),
-      };
-    }
+  if (collectedOptions.length < 2 || (requireDefault && !hasDefaultIndicator)) {
+    return {
+      isPrompt: false,
+      cleanContent: output.trim(),
+    };
   }
 
   // Layer 5 [SEC-001]: questionEndIndex guard for requireDefaultIndicator=false.

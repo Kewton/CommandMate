@@ -735,7 +735,6 @@ export function stopPolling(worktreeId: string, cliToolId: CLIToolType): void {
  * Used for cleanup on server shutdown
  */
 export function stopAllPolling(): void {
-
   for (const pollerKey of activePollers.keys()) {
     const [worktreeId, cliToolId] = pollerKey.split(':') as [string, CLIToolType];
     stopPolling(worktreeId, cliToolId);
