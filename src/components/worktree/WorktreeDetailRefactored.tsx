@@ -90,6 +90,11 @@ const IDLE_POLLING_INTERVAL_MS = 5000;
 /** Default worktree name when not loaded */
 const DEFAULT_WORKTREE_NAME = 'Unknown';
 
+/** Build-time app version from package.json via next.config.js */
+const APP_VERSION_DISPLAY = process.env.NEXT_PUBLIC_APP_VERSION
+  ? `v${process.env.NEXT_PUBLIC_APP_VERSION}`
+  : '-';
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -481,6 +486,12 @@ const InfoModal = memo(function InfoModal({
             </p>
           </div>
         )}
+
+        {/* Version */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h2 className="text-sm font-medium text-gray-500 mb-1">Version</h2>
+          <p className="text-sm text-gray-700">{APP_VERSION_DISPLAY}</p>
+        </div>
       </div>
     </Modal>
   );
@@ -725,6 +736,12 @@ const MobileInfoContent = memo(function MobileInfoContent({
           </p>
         </div>
       )}
+
+      {/* Version */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <h2 className="text-sm font-medium text-gray-500 mb-1">Version</h2>
+        <p className="text-sm text-gray-700">{APP_VERSION_DISPLAY}</p>
+      </div>
     </div>
   );
 });

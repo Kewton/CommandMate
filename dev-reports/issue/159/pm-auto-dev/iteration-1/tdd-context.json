@@ -1,0 +1,27 @@
+{
+  "issue_number": 159,
+  "issue_title": "feat: infoタブにてアプリバージョン表示",
+  "design_doc_path": "dev-reports/design/issue-159-info-tab-app-version-design-policy.md",
+  "work_plan_path": "dev-reports/issue/159/work-plan.md",
+  "acceptance_criteria": [
+    "デスクトップのinfoモーダルにバージョンが表示される",
+    "モバイルのinfoタブにバージョンが表示される",
+    "表示されるバージョンがpackage.jsonのバージョンと一致する",
+    "npm run build が通ること",
+    "npm run lint と npx tsc --noEmit が通ること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: next.config.js に env.NEXT_PUBLIC_APP_VERSION を追加（package.jsonのversionを参照）",
+    "Task 1.2: WorktreeDetailRefactored.tsx にモジュールレベル定数 APP_VERSION_DISPLAY を追加",
+    "Task 1.3: InfoModal（デスクトップ）の Last Updated 後に Version セクション追加（h2 + mb-1 + bg-gray-50 カード）",
+    "Task 1.4: MobileInfoContent（モバイル）の Last Updated 後に Version セクション追加（h2 + mb-1 + bg-white border カード）",
+    "Task 2.1: ユニットテスト作成（vi.resetModules() + 動的import 方式、6テストケース）"
+  ],
+  "target_files": [
+    "next.config.js",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "target_coverage": 80,
+  "test_approach": "vi.resetModules() + dynamic import for module-level constant APP_VERSION_DISPLAY testing"
+}

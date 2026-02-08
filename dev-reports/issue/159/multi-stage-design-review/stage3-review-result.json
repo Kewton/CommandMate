@@ -1,0 +1,145 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-08",
+  "issue_number": 159,
+  "design_doc": "dev-reports/design/issue-159-info-tab-app-version-design-policy.md",
+  "findings": [
+    {
+      "id": "IMPACT-001",
+      "category": "ビルド・デプロイへの影響",
+      "title": "next.config.js の env ブロック追加はビルド・CI/CD に影響なし",
+      "severity": "info",
+      "classification": "none",
+      "description": "next.config.js に `env: { NEXT_PUBLIC_APP_VERSION: packageJson.version }` を追加する変更は、Next.js の標準的なビルド時環境変数の仕組みを利用しており、既存の reactStrictMode, eslint, experimental, headers 設定に一切影響を与えない。CI/CD ワークフロー（.github/workflows/ci-pr.yml）の build ステップ（npm run build）も、package.json が常にリポジトリに存在するため、追加の環境変数設定なしで正常に動作する。",
+      "affected_files": [
+        "next.config.js",
+        ".github/workflows/ci-pr.yml",
+        ".github/workflows/publish.yml"
+      ],
+      "risk_level": "low",
+      "recommendation": "変更なし。既存の仕組みと完全に互換。"
+    },
+    {
+      "id": "IMPACT-002",
+      "category": "既存環境変数処理との干渉",
+      "title": "既存 NEXT_PUBLIC_* 環境変数との衝突はない",
+      "severity": "info",
+      "classification": "none",
+      "description": "現在使用中の NEXT_PUBLIC_* 環境変数は (1) NEXT_PUBLIC_CM_AUTH_TOKEN / NEXT_PUBLIC_MCBD_AUTH_TOKEN（src/lib/api-client.ts、.env 経由）と (2) NEXT_PUBLIC_WORKTREE_REPOS（src/components/worktree/WorktreeList.tsx、next.config.js ではなく .env 経由で推定）の2つ。新規追加の NEXT_PUBLIC_APP_VERSION は名前空間が異なり、かつ next.config.js の env ブロックで設定されるため .env ファイルの値と衝突しない。src/lib/env.ts の getEnvWithFallback() などサーバーサイドの環境変数処理（CM_*/MCBD_*）とも無関係。",
+      "affected_files": [
+        "src/lib/api-client.ts",
+        "src/components/worktree/WorktreeList.tsx",
+        "src/lib/env.ts"
+      ],
+      "risk_level": "low",
+      "recommendation": "変更なし。命名空間の分離が適切。"
+    },
+    {
+      "id": "IMPACT-003",
+      "category": "テストへの影響",
+      "title": "APP_VERSION_DISPLAY 定数のモジュールレベル定義によるテスト時の環境変数制御に注意が必要",
+      "severity": "warning",
+      "classification": "should_fix",
+      "description": "設計方針書では `APP_VERSION_DISPLAY` をモジュールレベル定数（コンポーネント外）として定義する。しかし、process.env.NEXT_PUBLIC_APP_VERSION はモジュール読み込み時に一度だけ評価される。Vitest では vi.stubEnv() や直接 process.env を書き換えても、既にモジュールがキャッシュされていると定数値が変更されない。テスト方針に記載されている『process.env.NEXT_PUBLIC_APP_VERSION をテスト内で設定/クリアして検証』は、vi.resetModules() と動的 import を組み合わせない限り正しく機能しない可能性がある。既存テストファイル（WorktreeDetailRefactored.test.tsx）は vi.mock() でモジュール全体をモックしているため、InfoModal や MobileInfoContent の内部レンダリングを直接テストできる構造にはなっていない。バージョン表示テストはモジュール再読み込みのアプローチか、もしくは APP_VERSION_DISPLAY を関数化（getAppVersionDisplay()）する必要がある。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+      ],
+      "risk_level": "medium",
+      "recommendation": "テスト実装時に以下のいずれかを検討: (A) vi.resetModules() + 動的 import でモジュールを再読み込みしてテスト、(B) APP_VERSION_DISPLAY をモジュールレベル定数ではなく関数に変更してテスト時にスタブ可能にする、(C) InfoModal / MobileInfoContent のレンダリング内で直接 process.env を参照するインラインパターンを採用してテスト時に process.env を書き換え可能にする。推奨は (A) だが、設計書のテスト方針セクションに具体的なテスト手法を明記すべき。"
+    },
+    {
+      "id": "IMPACT-004",
+      "category": "既存コンポーネントテストへの影響",
+      "title": "既存の WorktreeDetailRefactored テストは破壊されない",
+      "severity": "info",
+      "classification": "none",
+      "description": "既存のユニットテスト（tests/unit/components/WorktreeDetailRefactored.test.tsx, 797行）は InfoModal を直接テストしておらず、Desktop Mode テストでは desktop-layout testid の存在を確認するのみ。Mobile Mode テストでは mobile-header, mobile-tab-bar の存在を確認するのみ。InfoModal と MobileInfoContent に Version セクションを追加しても既存テストのアサーションに影響しない。統合テスト（tests/integration/worktree-detail-integration.test.tsx）も同様にモック化された子コンポーネントに依存しており影響はない。",
+      "affected_files": [
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "tests/integration/worktree-detail-integration.test.tsx"
+      ],
+      "risk_level": "low",
+      "recommendation": "変更なし。既存テストは影響を受けない。"
+    },
+    {
+      "id": "IMPACT-005",
+      "category": "コンポーネント依存関係",
+      "title": "WorktreeDetailRefactored を import する外部コンポーネントへの影響はない",
+      "severity": "info",
+      "classification": "none",
+      "description": "WorktreeDetailRefactored を import しているファイルを調査した結果、以下の3箇所のみ: (1) src/app/worktrees/[id]/page.tsx（ページコンポーネント、WorktreeDetailRefactoredProps は worktreeId のみ）、(2) tests/unit/components/WorktreeDetailRefactored.test.tsx（ユニットテスト）、(3) tests/integration/worktree-detail-integration.test.tsx（統合テスト）。InfoModal と MobileInfoContent は WorktreeDetailRefactored.tsx 内のローカルコンポーネントであり、外部に export されていない。props インターフェースの変更もないため、import 元への影響はゼロ。",
+      "affected_files": [
+        "src/app/worktrees/[id]/page.tsx"
+      ],
+      "risk_level": "low",
+      "recommendation": "変更なし。"
+    },
+    {
+      "id": "IMPACT-006",
+      "category": "テストカバレッジ",
+      "title": "バージョン表示のフォールバックテストケースが不十分",
+      "severity": "warning",
+      "classification": "should_fix",
+      "description": "設計書のテスト方針では4つのテストケースが記載されている: (1) InfoModal バージョン表示（値あり）、(2) MobileInfoContent バージョン表示（値あり）、(3) InfoModal バージョン未設定フォールバック、(4) MobileInfoContent バージョン未設定フォールバック。しかし、以下のエッジケースが記載されていない: (a) 空文字列の場合の挙動（process.env.NEXT_PUBLIC_APP_VERSION = '' は falsy なので '-' が表示されるが、これは意図的か）、(b) version フォーマットが semver でない場合（例: '1.0.0-beta.1'）。(a) は APP_VERSION_DISPLAY の条件分岐 `process.env.NEXT_PUBLIC_APP_VERSION ? ...` で空文字列は falsy として '-' になるため、package.json の version が空文字列になることは通常ないが、テストとしてカバーしておくのが望ましい。",
+      "affected_files": [
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+      ],
+      "risk_level": "low",
+      "recommendation": "テスト実装時にエッジケース（空文字列、pre-release バージョン文字列）を追加することを推奨する。必須ではないが、フォールバック分岐の信頼性が向上する。"
+    },
+    {
+      "id": "IMPACT-007",
+      "category": "他のIssue/機能との干渉",
+      "title": "進行中の他Issueとの干渉はない",
+      "severity": "info",
+      "classification": "none",
+      "description": "現在のブランチ（feature/159-worktree）はクリーンな状態であり、最近マージされた Issue #180, #181 の変更とは影響範囲が重ならない。Issue #180 は status-detector.ts と route.ts の変更、Issue #181 は prompt-detector.ts の変更であり、いずれも WorktreeDetailRefactored.tsx の InfoModal/MobileInfoContent セクションとは無関係。next.config.js も最近変更されていない。フォローアップとして設計書 Section 13 で言及されている WorktreeDetailRefactored.tsx のファイル分割（InfoModal.tsx, MobileInfoContent.tsx への抽出）が将来実施される場合、APP_VERSION_DISPLAY 定数の配置場所を再検討する必要があるが、本 Issue のスコープ外であり、現時点で干渉はない。",
+      "affected_files": [],
+      "risk_level": "low",
+      "recommendation": "変更なし。"
+    },
+    {
+      "id": "IMPACT-008",
+      "category": "ビルド・デプロイへの影響",
+      "title": "require('./package.json') の相対パス解決は next.config.js から安全",
+      "severity": "info",
+      "classification": "none",
+      "description": "next.config.js は Next.js によりプロジェクトルートから読み込まれるため、require('./package.json') は常にプロジェクトルートの package.json を正しく参照する。CI/CD 環境（GitHub Actions の ubuntu-latest）でも npm ci によりプロジェクトルートに package.json が存在することが保証される。npm publish 後のグローバルインストール環境では next.config.js はビルド時に使用済みであり、ランタイムでは参照されないため問題ない。",
+      "affected_files": [
+        "next.config.js",
+        "package.json"
+      ],
+      "risk_level": "low",
+      "recommendation": "変更なし。"
+    },
+    {
+      "id": "IMPACT-009",
+      "category": "テストカバレッジ",
+      "title": "InfoModal/MobileInfoContent の既存テストカバレッジが低い（既存の技術的負債）",
+      "severity": "info",
+      "classification": "nice_to_have",
+      "description": "既存のユニットテストは WorktreeDetailRefactored 全体をレンダリングし、子コンポーネントの多くをモックしている。InfoModal の表示内容（Worktree名、Repository情報、Path、Status、Description、Link、Last Updated）を検証するテストは存在しない。MobileInfoContent も同様。これは Issue #159 固有の問題ではなく既存の技術的負債だが、バージョン表示テストを追加する際に InfoModal/MobileInfoContent のレンダリングテストインフラを整備する良い機会となる。InfoModal は isOpen=true でレンダリングすると Modal コンポーネント経由で表示されるため、テスト内で isInfoModalOpen 状態を制御するか、InfoModal を単独でテストできるよう export する必要がある。",
+      "affected_files": [
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+      ],
+      "risk_level": "low",
+      "recommendation": "本 Issue のスコープ内でバージョン表示テストを実装する際に、InfoModal 単体のレンダリングテストを追加することを推奨。InfoModal は現在 export されていないため、テストのために named export を追加するか、WorktreeDetailRefactored 経由で Info ボタンクリック -> モーダル表示のフローをテストする方法を検討する。"
+    }
+  ],
+  "summary": "Issue #159 の影響範囲分析の結果、変更対象は next.config.js（env ブロック追加）と WorktreeDetailRefactored.tsx（InfoModal/MobileInfoContent への Version セクション追加）の2ファイルに限定されており、影響範囲は非常に小さい。既存のビルド、CI/CD、テスト、他コンポーネント、他 Issue への破壊的影響はない。ただし、テスト実装方針に関して2点の should_fix 指摘がある: (1) APP_VERSION_DISPLAY がモジュールレベル定数であるためテスト時の環境変数制御が困難になる可能性（IMPACT-003）、(2) エッジケーステストの追加推奨（IMPACT-006）。いずれも実装フェーズで対処可能であり、設計方針自体の変更は必須ではない。",
+  "overall_assessment": "pass_with_conditions",
+  "conditions": [
+    "テスト実装時に APP_VERSION_DISPLAY のモジュールレベル定数とテスト環境変数制御の整合性を確保すること（IMPACT-003）",
+    "テスト実装時にフォールバック分岐のエッジケースをカバーすること（IMPACT-006）"
+  ],
+  "statistics": {
+    "total_findings": 9,
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 1,
+    "info": 6
+  }
+}

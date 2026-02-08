@@ -1,0 +1,13 @@
+{
+  "issue_number": 159,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_doc_path": "dev-reports/design/issue-159-info-tab-app-version-design-policy.md",
+  "review_criteria": [
+    "設計書とIssue要件の整合性",
+    "設計書と既存コードベースの整合性",
+    "設計書内の記述の一貫性",
+    "受け入れ条件との整合性"
+  ]
+}

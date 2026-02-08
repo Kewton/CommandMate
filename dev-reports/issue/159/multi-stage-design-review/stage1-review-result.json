@@ -1,0 +1,71 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "severity": "should_fix",
+      "category": "DRY",
+      "description": "InfoModal and MobileInfoContent contain nearly identical code for description editing logic (state management, handleSaveDescription, handleCancelDescription). These two components share approximately 40+ lines of duplicated business logic. The proposed design adds identical version display markup to both components, further increasing the duplication.",
+      "recommendation": "Extract the shared description editing logic into a custom hook (e.g., useDescriptionEditor) to consolidate the state and handlers. For the version display specifically, consider extracting a shared AppVersionDisplay component that can be used in both InfoModal and MobileInfoContent with a style prop to accommodate the different card styles (bg-gray-50 vs bg-white with border).",
+      "location": "src/components/worktree/WorktreeDetailRefactored.tsx - InfoModal (lines 325-487) and MobileInfoContent (lines 560-730)"
+    },
+    {
+      "severity": "should_fix",
+      "category": "SOLID",
+      "description": "WorktreeDetailRefactored.tsx is 1939 lines long and contains multiple components (DesktopHeader, InfoModal, LoadingIndicator, ErrorDisplay, MobileInfoContent, MobileContent, and the main component). Adding version display further increases the responsibilities of this already large file. This violates the Single Responsibility Principle - the file handles layout, modals, error display, mobile tabs, description editing, and now version information.",
+      "recommendation": "Consider extracting InfoModal and MobileInfoContent into separate files (e.g., src/components/worktree/InfoModal.tsx and src/components/worktree/MobileInfoContent.tsx). This is a pre-existing issue, but adding new features to this file without addressing it increases technical debt. For this issue specifically, the change is small enough to proceed, but file extraction should be tracked as follow-up work.",
+      "location": "src/components/worktree/WorktreeDetailRefactored.tsx (1939 lines total)"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "description": "The version display string formatting logic `process.env.NEXT_PUBLIC_APP_VERSION ? \\`v${process.env.NEXT_PUBLIC_APP_VERSION}\\` : '-'` is duplicated in both InfoModal and MobileInfoContent in the design. While simple, extracting this into a constant or utility function would centralize the 'v' prefix formatting and the fallback value '-'.",
+      "recommendation": "Define a constant at the module level: `const APP_VERSION_DISPLAY = process.env.NEXT_PUBLIC_APP_VERSION ? \\`v${process.env.NEXT_PUBLIC_APP_VERSION}\\` : '-';` This ensures the formatting logic and fallback are defined once.",
+      "location": "Design document sections 4-2 and 4-3"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "Consistency",
+      "description": "The existing codebase uses NEXT_PUBLIC_ environment variables accessed directly via process.env in components (NEXT_PUBLIC_CM_AUTH_TOKEN in api-client.ts, NEXT_PUBLIC_WORKTREE_REPOS in WorktreeList.tsx). The design proposes the same pattern via next.config.js env block, which is a valid Next.js approach but differs from the existing pattern where NEXT_PUBLIC_WORKTREE_REPOS appears to be set via .env files rather than next.config.js env block. However, since version is derived from package.json (not a user-configurable value), using next.config.js env block is actually the more appropriate choice.",
+      "recommendation": "No change needed. The next.config.js env block approach is correctly chosen for build-time values derived from package.json. This is distinct from user-configurable values that belong in .env files. Add a brief comment in next.config.js explaining why this is in the env block (derived from package.json at build time) to distinguish it from .env-sourced variables.",
+      "location": "next.config.js"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "description": "The design uses `require('./package.json').version` in next.config.js. This is appropriately simple and follows KISS. The alternative approaches (API endpoint, Server Component props) were correctly rejected. The design document provides clear rationale for the chosen approach.",
+      "recommendation": "No change needed. This is noted as a positive observation - the design correctly applies KISS principle.",
+      "location": "Design document section 2 - Architecture Design"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "description": "The design correctly avoids over-engineering by not including build hash, commit SHA, build date, or other metadata. Only the version string from package.json is exposed. This is a good application of YAGNI.",
+      "recommendation": "No change needed. This is noted as a positive observation.",
+      "location": "Design document section 7 - Security Design"
+    }
+  ],
+  "summary": "The design for Issue #159 is well-conceived and appropriately simple. The build-time environment variable approach via next.config.js is the correct choice for static version information. Two should_fix items were identified: (1) the description editing logic duplication between InfoModal and MobileInfoContent is a pre-existing DRY violation that this change marginally worsens by adding identical version display markup to both components, and (2) the WorktreeDetailRefactored.tsx file is already very large (1939 lines) and adding more UI sections without extracting components increases technical debt. Both issues are pre-existing and do not block this specific change, but should be addressed in follow-up work. The KISS and YAGNI principles are well-applied in the design choices.",
+  "overall_assessment": "pass_with_conditions",
+  "conditions": [
+    "Extract version display string into a module-level constant to avoid inline duplication",
+    "Track InfoModal/MobileInfoContent extraction into separate files as follow-up technical debt"
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-159-info-tab-app-version-design-policy.md",
+    "next.config.js",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/lib/env.ts",
+    "src/lib/api-client.ts",
+    "src/components/worktree/WorktreeList.tsx",
+    ".env.example",
+    "package.json"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}

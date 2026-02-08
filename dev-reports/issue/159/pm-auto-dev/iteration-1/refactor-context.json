@@ -1,0 +1,19 @@
+{
+  "issue_number": 159,
+  "refactor_targets": [
+    "next.config.js",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/app-version-display.test.tsx"
+  ],
+  "quality_metrics": {
+    "tsc": "pass",
+    "lint": "pass",
+    "tests": "4/4 passed"
+  },
+  "improvement_goals": [
+    "コードの可読性確認",
+    "テストの品質確認",
+    "既存パターンとの一貫性確認"
+  ],
+  "scope_limitation": "Issue #159 で変更したファイルのみを対象とする。既存の技術的負債（ファイル分割、Description編集共通化）は本Issueのスコープ外。"
+}

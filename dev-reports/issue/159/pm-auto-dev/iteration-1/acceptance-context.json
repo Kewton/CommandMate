@@ -1,0 +1,28 @@
+{
+  "issue_number": 159,
+  "feature_summary": "infoタブにてアプリバージョン表示",
+  "acceptance_criteria": [
+    "デスクトップのinfoモーダルにバージョンが表示される",
+    "モバイルのinfoタブにバージョンが表示される",
+    "表示されるバージョンがpackage.jsonのバージョンと一致する",
+    "npm run build が通ること",
+    "npm run lint と npx tsc --noEmit が通ること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: next.config.js に NEXT_PUBLIC_APP_VERSION が package.json から正しく設定されている",
+    "シナリオ2: InfoModal（デスクトップ）に Version セクションが Last Updated の後に表示される",
+    "シナリオ3: MobileInfoContent（モバイル）に Version セクションが Last Updated の後に表示される",
+    "シナリオ4: バージョン表示が v{version} フォーマットである",
+    "シナリオ5: npm run build が成功する",
+    "シナリオ6: npx tsc --noEmit が成功する",
+    "シナリオ7: npm run lint が成功する",
+    "シナリオ8: 全ユニットテストがパスする"
+  ],
+  "modified_files": [
+    "next.config.js",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "test_files": [
+    "tests/unit/components/app-version-display.test.tsx"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "issue_number": 159,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_doc_path": "dev-reports/design/issue-159-info-tab-app-version-design-policy.md",
+  "review_criteria": [
+    "変更の波及効果分析",
+    "既存機能への影響",
+    "ビルド・デプロイへの影響",
+    "テストカバレッジの充分性",
+    "他のIssue/機能との干渉"
+  ]
+}

@@ -1,0 +1,196 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_date": "2026-02-08",
+  "issue_number": 159,
+  "design_doc": "dev-reports/design/issue-159-info-tab-app-version-design-policy.md",
+  "findings": [
+    {
+      "id": "SEC-001",
+      "category": "A01:2021 - Broken Access Control",
+      "title": "バージョン情報はクライアントバンドルに埋め込まれるため認証不要 - 問題なし",
+      "severity": "info",
+      "classification": "none",
+      "owasp_category": "A01:2021",
+      "description": "NEXT_PUBLIC_APP_VERSION はビルド時にクライアントサイド JavaScript バンドルに文字列リテラルとして埋め込まれる。これは API エンドポイント経由で提供されるものではなく、認証ミドルウェア（src/middleware.ts）のスコープ外である。バージョン情報は package.json の version フィールドから取得され、npm レジストリで公開済みの情報であるため、アクセス制御の対象にする必要はない。認証が必要な CM_BIND=0.0.0.0 環境でも、バージョン情報はバンドル内に含まれるため、認証済みユーザーのみがアクセスする HTML/JS を通じて表示される形となり、追加の認証は不要。",
+      "affected_files": [
+        "next.config.js",
+        "src/middleware.ts"
+      ],
+      "risk_level": "low",
+      "recommendation": "対応不要。設計は適切。"
+    },
+    {
+      "id": "SEC-002",
+      "category": "A03:2021 - Injection",
+      "title": "バージョン文字列のインジェクションリスクは実質ゼロ",
+      "severity": "info",
+      "classification": "none",
+      "owasp_category": "A03:2021",
+      "description": "バージョン文字列は package.json の version フィールドから取得される。この値は (1) npm publish 時に npm が semver 形式を検証する、(2) ビルド時に require('./package.json').version として読み込まれ next.config.js の env ブロックに設定される、(3) Next.js のビルドプロセスが文字列リテラルとしてバンドルに埋め込む、という3段階のプロセスを経る。ユーザー入力が介在するパスは存在しない。仮に package.json の version フィールドに悪意のある文字列（例: '<script>alert(1)</script>'）が含まれていたとしても、React JSX の自動エスケープにより HTML として解釈されることはない（後述 SEC-003 参照）。また、テンプレートリテラル `v${process.env.NEXT_PUBLIC_APP_VERSION}` で 'v' プレフィックスが付与されるが、これも文字列結合であり、SQL や OS コマンド等のインジェクションベクターは存在しない。",
+      "affected_files": [
+        "next.config.js",
+        "package.json"
+      ],
+      "risk_level": "low",
+      "recommendation": "対応不要。インジェクションベクターは存在しない。"
+    },
+    {
+      "id": "SEC-003",
+      "category": "XSS Prevention",
+      "title": "React JSX 自動エスケープによる XSS 防止 - 問題なし",
+      "severity": "info",
+      "classification": "none",
+      "owasp_category": "A03:2021",
+      "description": "バージョン文字列は React JSX 内で `<p className='text-sm text-gray-700'>{APP_VERSION_DISPLAY}</p>` として表示される。React は JSX 式 {} 内の文字列を自動的に HTML エスケープするため、仮にバージョン文字列に '<', '>', '\"', '&' 等の特殊文字が含まれていても、テキストノードとしてレンダリングされ、DOM インジェクションは発生しない。dangerouslySetInnerHTML は使用されていない。設計書セクション7のXSS対策記載は正確である。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "risk_level": "low",
+      "recommendation": "対応不要。React の自動エスケープにより安全。"
+    },
+    {
+      "id": "SEC-004",
+      "category": "A04:2021 - Insecure Design",
+      "title": "情報漏洩リスク評価 - 許容範囲内",
+      "severity": "nice_to_have",
+      "classification": "nice_to_have",
+      "owasp_category": "A04:2021",
+      "description": "バージョン情報のクライアントサイド公開について設計上の懸念を評価した。(1) CommandMate は OSS プロジェクト（GitHub: Kewton/CommandMate）であり、バージョン番号は npm レジストリおよび GitHub Releases で既に公開されている。(2) 設計書で明記されている通り、ビルドハッシュ、コミット SHA、ビルド日時、Node.js バージョン等の追加メタデータは含まれない。(3) バージョン番号単体では、既知の脆弱性を特定するのに不十分である（CVE データベースに CommandMate のエントリーがないため）。ただし、一般的なセキュリティベストプラクティスとして、プロダクション環境ではバージョン情報の公開を制限することが推奨される場合がある。本プロジェクトは開発ツールであり、一般的にはローカルまたは信頼されたネットワーク内で使用されるため、リスクは低い。",
+      "affected_files": [
+        "next.config.js",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "risk_level": "low",
+      "recommendation": "現状で許容可能。将来的に公開インターネット向けのデプロイシナリオが想定される場合は、バージョン表示を認証済みユーザーのみに限定する機能（環境変数による表示/非表示切替）を検討してもよいが、現時点では YAGNI 原則により不要。"
+    },
+    {
+      "id": "SEC-005",
+      "category": "A05:2021 - Security Misconfiguration",
+      "title": "CSP ヘッダーへの影響なし",
+      "severity": "info",
+      "classification": "none",
+      "owasp_category": "A05:2021",
+      "description": "next.config.js の Content-Security-Policy ヘッダーは `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'` と設定されている。バージョン文字列は既存の JavaScript バンドル内にビルド時に埋め込まれるため、追加のスクリプトソース、外部リソース読み込み、インラインスクリプトの追加は発生しない。CSP の既存設定との互換性に問題はない。env ブロックの追加が headers() 関数の動作に干渉することもない（next.config.js の別プロパティ）。",
+      "affected_files": [
+        "next.config.js"
+      ],
+      "risk_level": "low",
+      "recommendation": "対応不要。CSP への影響なし。"
+    },
+    {
+      "id": "SEC-006",
+      "category": "A05:2021 - Security Misconfiguration",
+      "title": "既存セキュリティヘッダーとの互換性確認 - 問題なし",
+      "severity": "info",
+      "classification": "none",
+      "owasp_category": "A05:2021",
+      "description": "next.config.js に設定されている全セキュリティヘッダー（X-Frame-Options: DENY, X-Content-Type-Options: nosniff, X-XSS-Protection: 1; mode=block, Referrer-Policy: strict-origin-when-cross-origin, Permissions-Policy: camera=(), microphone=(), geolocation=()）は、バージョン表示機能の追加による影響を受けない。env ブロックは headers() 非同期関数とは独立したプロパティであり、ヘッダー生成ロジックに変更はない。",
+      "affected_files": [
+        "next.config.js"
+      ],
+      "risk_level": "low",
+      "recommendation": "対応不要。"
+    },
+    {
+      "id": "SEC-007",
+      "category": "A08:2021 - Software and Data Integrity Failures",
+      "title": "package.json 改ざんリスクの評価",
+      "severity": "nice_to_have",
+      "classification": "nice_to_have",
+      "owasp_category": "A08:2021",
+      "description": "package.json の version フィールドが改ざんされた場合、表示されるバージョンが不正確になる可能性がある。ただし、package.json を改ざんできる攻撃者は (1) ソースコードリポジトリへの書き込みアクセスを持つ、または (2) ビルドパイプラインを侵害している、のいずれかの状態にあり、バージョン表示の改ざんはより深刻な攻撃の副次的効果に過ぎない。npm の publish 時には package.json の整合性が npm レジストリのチェックサムで検証される。CI/CD パイプライン（GitHub Actions）では actions/checkout でリポジトリのクリーンコピーを取得するため、ローカル改ざんが本番ビルドに影響することはない。require('./package.json') は Node.js のモジュール解決に依存しており、プロジェクトルートの package.json が読み込まれることが保証されている。",
+      "affected_files": [
+        "package.json",
+        "next.config.js",
+        ".github/workflows/ci-pr.yml",
+        ".github/workflows/publish.yml"
+      ],
+      "risk_level": "low",
+      "recommendation": "現状で十分なリスク緩和措置がある。npm publish のチェックサム検証と CI/CD のクリーンチェックアウトにより、改ざんリスクは低い。追加の対策は不要。"
+    },
+    {
+      "id": "SEC-008",
+      "category": "クライアントバンドル内の機密情報漏洩",
+      "title": "NEXT_PUBLIC_ プレフィックスの適切な使用",
+      "severity": "info",
+      "classification": "none",
+      "owasp_category": "A04:2021",
+      "description": "Next.js の NEXT_PUBLIC_ プレフィックスは、その環境変数がクライアントサイドバンドルに含まれることを明示するための規約である。本設計では version 情報（公開済み情報）のみを NEXT_PUBLIC_APP_VERSION として公開しており、秘密情報の漏洩リスクはない。対照的に、CM_AUTH_TOKEN は NEXT_PUBLIC_ プレフィックスなしでサーバーサイドのみで使用されている（src/middleware.ts）。NEXT_PUBLIC_CM_AUTH_TOKEN は API クライアント（src/lib/api-client.ts）で使用されるが、これは既存の設計であり本 Issue のスコープ外である。バージョン情報の公開に NEXT_PUBLIC_ プレフィックスを使用するのは適切である。",
+      "affected_files": [
+        "next.config.js",
+        "src/lib/api-client.ts",
+        "src/middleware.ts"
+      ],
+      "risk_level": "low",
+      "recommendation": "対応不要。NEXT_PUBLIC_ プレフィックスの使用は適切。"
+    }
+  ],
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "notes": "バージョン情報はクライアントバンドルに埋め込まれ、API経由ではない。認証対象外で問題なし。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "暗号化関連の変更なし。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "notes": "ユーザー入力は介在しない。React JSX自動エスケープにより XSS も防止。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "OSSプロジェクトのバージョン番号公開は許容範囲。追加メタデータは含まれない。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "CSP、セキュリティヘッダーへの影響なし。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "新規依存関係の追加なし。"
+    },
+    "A07_identification_auth_failures": {
+      "status": "not_applicable",
+      "notes": "認証・認可の変更なし。"
+    },
+    "A08_software_data_integrity": {
+      "status": "pass",
+      "notes": "package.json の改ざんリスクは CI/CD チェックサム検証で緩和済み。"
+    },
+    "A09_security_logging": {
+      "status": "not_applicable",
+      "notes": "セキュリティログの変更なし。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "サーバーサイドリクエストの追加なし。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": "Issue #159 のセキュリティレビュー（OWASP Top 10 準拠）の結果、セキュリティ上の問題は検出されなかった。バージョン文字列は package.json から取得されるビルド時の静的値であり、ユーザー入力は介在しない。React JSX の自動エスケープにより XSS リスクは排除されている。NEXT_PUBLIC_ プレフィックスの使用は適切であり、秘密情報の漏洩リスクはない。CSP を含むセキュリティヘッダーへの影響もない。2件の nice_to_have 指摘（情報漏洩リスクの将来的検討、package.json 改ざんリスクの評価）はいずれも現時点で対策不要と判断した。設計書セクション7のセキュリティ設計は正確かつ十分である。",
+  "overall_assessment": "pass",
+  "statistics": {
+    "total_findings": 8,
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "info": 6
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-159-info-tab-app-version-design-policy.md",
+    "next.config.js",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "package.json",
+    "src/middleware.ts",
+    "src/lib/api-client.ts",
+    "src/lib/env.ts"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}

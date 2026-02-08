@@ -374,6 +374,15 @@ commandmate status --all                   # 全サーバー状態確認
 
 ## 最近の実装機能
 
+### Issue #159: infoタブにてアプリバージョン表示
+- **機能追加**: Worktree詳細画面のinfoタブ（デスクトップ: InfoModal、モバイル: MobileInfoContent）にCommandMateのアプリバージョンを表示
+- **ビルド時環境変数方式**: `next.config.js` の `env` ブロックで `package.json` の `version` を `NEXT_PUBLIC_APP_VERSION` として公開
+- **DRY対応**: モジュールレベル定数 `APP_VERSION_DISPLAY` で `v` プレフィックス付与・フォールバック `-` を集約
+- **主要コンポーネント**:
+  - `next.config.js` - `env.NEXT_PUBLIC_APP_VERSION` 追加
+  - `src/components/worktree/WorktreeDetailRefactored.tsx` - InfoModal・MobileInfoContent にバージョン表示セクション追加
+- 詳細: [設計書](./dev-reports/design/issue-159-info-tab-app-version-design-policy.md)
+
 ### Issue #180: ステータス表示の不整合修正
 - **問題解決**: CLIがidle状態（`❯`プロンプト表示）であるにも関わらず、UIが「running」（スピナー）や「waiting」（黄色）ステータスを誤表示する問題を修正
 - **根本原因**: `route.ts`の`detectPrompt()`に`cleanOutput`全文（最大100行）を渡していたため、スクロールバックに残る過去の`(y/n)`プロンプトを現在アクティブなプロンプトとして誤検出

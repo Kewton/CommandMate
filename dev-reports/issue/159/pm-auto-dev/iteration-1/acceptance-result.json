@@ -1,0 +1,46 @@
+{
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "AC-1: InfoModal (desktop) displays version section with APP_VERSION_DISPLAY",
+      "status": "passed",
+      "evidence": "In /Users/maenokota/share/work/github_kewton/commandmate-issue-159/src/components/worktree/WorktreeDetailRefactored.tsx, InfoModal component (lines 490-494) contains a Version section after Last Updated (lines 481-488). The section uses the expected card style 'bg-gray-50 rounded-lg p-4', an h2 label with 'text-sm font-medium text-gray-500 mb-1', and renders APP_VERSION_DISPLAY in a p tag. Unit test 'displays version v0.1.12 when NEXT_PUBLIC_APP_VERSION is set' (InfoModal desktop) passes."
+    },
+    {
+      "criterion": "AC-2: MobileInfoContent (mobile) displays version section with APP_VERSION_DISPLAY",
+      "status": "passed",
+      "evidence": "In /Users/maenokota/share/work/github_kewton/commandmate-issue-159/src/components/worktree/WorktreeDetailRefactored.tsx, MobileInfoContent component (lines 741-744) contains a Version section after Last Updated (lines 731-738). The section uses mobile card style 'bg-white rounded-lg border border-gray-200 p-4', an h2 label with 'text-sm font-medium text-gray-500 mb-1', and renders APP_VERSION_DISPLAY in a p tag. Unit test 'displays version v0.1.12 when NEXT_PUBLIC_APP_VERSION is set' (MobileInfoContent mobile) passes."
+    },
+    {
+      "criterion": "AC-3: Displayed version matches package.json version via build-time env variable",
+      "status": "passed",
+      "evidence": "In /Users/maenokota/share/work/github_kewton/commandmate-issue-159/next.config.js (lines 1-8), NEXT_PUBLIC_APP_VERSION is set from require('./package.json').version. In /Users/maenokota/share/work/github_kewton/commandmate-issue-159/package.json (line 3), version is '0.1.12'. The module-level constant APP_VERSION_DISPLAY (lines 93-96 of WorktreeDetailRefactored.tsx) formats this as 'v0.1.12' with fallback to '-'. Build succeeded confirming the env variable is correctly embedded."
+    },
+    {
+      "criterion": "AC-4: npm run build passes",
+      "status": "passed",
+      "evidence": "npm run build completed successfully with 'Compiled successfully' output. All pages generated without errors. Build output shows 12/12 static pages generated and all routes compiled."
+    },
+    {
+      "criterion": "AC-5: npx tsc --noEmit and npm run lint pass",
+      "status": "passed",
+      "evidence": "npx tsc --noEmit completed with exit code 0 (no type errors). npm run lint completed with 'No ESLint warnings or errors'."
+    },
+    {
+      "criterion": "AC-6: Unit tests pass (app-version-display specific)",
+      "status": "passed",
+      "evidence": "All 4 tests in tests/unit/components/app-version-display.test.tsx passed: (1) InfoModal displays 'v0.1.12' when env is set, (2) InfoModal shows '-' when env is not set, (3) MobileInfoContent displays 'v0.1.12' when env is set, (4) MobileInfoContent shows '-' when env is not set. Full unit test suite has 2 failures in tests/unit/lib/claude-session.test.ts which are pre-existing (file not modified in this branch per git diff) and unrelated to Issue #159."
+    },
+    {
+      "criterion": "Additional: Version section appears AFTER Last Updated in both components",
+      "status": "passed",
+      "evidence": "In InfoModal, Version section (line 490) appears after Last Updated section (line 481). In MobileInfoContent, Version section (line 741) appears after Last Updated section (line 731). Both follow the design specification placement."
+    },
+    {
+      "criterion": "Additional: APP_VERSION_DISPLAY constant exists at module level with fallback to '-'",
+      "status": "passed",
+      "evidence": "APP_VERSION_DISPLAY is defined at module level (line 94) as: process.env.NEXT_PUBLIC_APP_VERSION ? `v${process.env.NEXT_PUBLIC_APP_VERSION}` : '-'. This is outside any component, ensuring DRY usage by both InfoModal and MobileInfoContent."
+    }
+  ],
+  "summary": "All acceptance criteria for Issue #159 have passed. The implementation correctly adds app version display to both desktop InfoModal and mobile MobileInfoContent components. The version is sourced from package.json at build time via next.config.js NEXT_PUBLIC_APP_VERSION environment variable, formatted as 'v{version}' with a '-' fallback. The Version section is placed after Last Updated with styling consistent with existing info items. Build, type checking, linting, and all relevant unit tests pass. The 2 test failures in the full unit test suite are pre-existing issues in claude-session.test.ts (not modified in this branch) and are unrelated to Issue #159."
+}

@@ -1,0 +1,145 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "CONS-001",
+      "severity": "must_fix",
+      "category": "設計書と既存コードベースの整合性",
+      "title": "InfoModal版バージョン表示のHTML要素がコードベースと不一致",
+      "description": "設計書セクション4-3ではバージョンラベルに<p>タグ（className='text-sm font-medium text-gray-500'）を使用しているが、既存のInfoModalの全情報項目ラベルは<h2>タグ（className='text-sm font-medium text-gray-500 mb-1'）を使用している。<p>タグの使用と'mb-1'クラスの欠落は、既存UIとの視覚的・構造的不一致を生む。",
+      "location": "設計書 セクション4-3（行87-92）",
+      "actual_code_reference": "WorktreeDetailRefactored.tsx 行376, 382, 389, 396, 463, 478: 全て<h2>タグ + 'mb-1'クラス使用",
+      "recommendation": "バージョンラベルを<h2 className='text-sm font-medium text-gray-500 mb-1'>Version</h2>に変更する。値の<p>タグはそのままでよい（既存パターンと一致）。"
+    },
+    {
+      "id": "CONS-002",
+      "severity": "must_fix",
+      "category": "設計書と既存コードベースの整合性",
+      "title": "MobileInfoContent版バージョン表示のHTML要素がコードベースと不一致",
+      "description": "設計書セクション4-4でもInfoModal同様に<p>タグを使用しているが、MobileInfoContentの既存ラベルは全て<h2>タグ（className='text-sm font-medium text-gray-500 mb-1'）を使用している。",
+      "location": "設計書 セクション4-4（行102-107）",
+      "actual_code_reference": "WorktreeDetailRefactored.tsx 行620, 626, 633, 640, 707, 722: 全て<h2>タグ + 'mb-1'クラス使用",
+      "recommendation": "MobileInfoContentのバージョンラベルも<h2 className='text-sm font-medium text-gray-500 mb-1'>Version</h2>に変更する。"
+    },
+    {
+      "id": "CONS-003",
+      "severity": "should_fix",
+      "category": "設計書内の記述の一貫性",
+      "title": "vプレフィックスの根拠がCLI実装と不一致",
+      "description": "設計書セクション11の決定事項テーブルで「CLIの--version出力と一貫性」を根拠にvプレフィックスを付与するとしているが、実際のCLI実装（src/cli/index.ts行21）ではcommanderの.version()を使用しており、出力は'0.1.12'（vプレフィックスなし）となる。根拠として不正確。",
+      "location": "設計書 セクション11（行174）",
+      "actual_code_reference": "src/cli/index.ts 行21: .version(pkg.version) - commanderのデフォルト出力はvプレフィックスなし",
+      "recommendation": "根拠を「npmエコシステムの慣例（GitHubリリースタグ等でのvプレフィックス）」または「UIにおけるバージョン表記の一般的慣例」に修正する。vプレフィックスの表示自体は問題ない。"
+    },
+    {
+      "id": "CONS-004",
+      "severity": "should_fix",
+      "category": "設計書と既存コードベースの整合性",
+      "title": "テストファイルパスの拡張子が不一致",
+      "description": "設計書セクション10の影響範囲テーブルでテストファイルを'tests/unit/components/WorktreeDetailRefactored.test.ts'と記載しているが、実際のファイルは'tests/unit/components/WorktreeDetailRefactored.test.tsx'（.tsx拡張子）である。",
+      "location": "設計書 セクション10（行162）",
+      "actual_code_reference": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "recommendation": "テストファイルパスを'.tsx'拡張子に修正する。"
+    },
+    {
+      "id": "CONS-005",
+      "severity": "nice_to_have",
+      "category": "設計書と既存コードベースの整合性",
+      "title": "next.config.jsのコードサンプルにおける構造表現が簡略化されすぎ",
+      "description": "設計書セクション4-1のコードサンプルでは'// ... existing config'と省略しているが、実際のnextConfigにはreactStrictMode, eslint, experimental, headersの4つのプロパティが存在する。envプロパティの追加位置（先頭か末尾か）が不明確。ただし機能上の影響はなく、実装者が参照すれば自明。",
+      "location": "設計書 セクション4-1（行51-61）",
+      "actual_code_reference": "next.config.js 行1-65",
+      "recommendation": "実装時にenvプロパティをnextConfigオブジェクトの先頭（reactStrictModeの前）に配置するのが慣例的に適切。設計書での明記は任意。"
+    },
+    {
+      "id": "CONS-006",
+      "severity": "nice_to_have",
+      "category": "設計書とIssue要件の整合性",
+      "title": "ラベル名の選択肢がIssueと設計書で異なる",
+      "description": "Issue要件では表示仕様のラベルとして「Version」または「バージョン」の2案を提示しているが、設計書では「Version」に確定している。既存のInfoModal/MobileInfoContentの全ラベルが英語（Worktree, Repository, Path, Status, Description, Link, Last Updated）であることを考慮すると「Version」が正しい選択であり、整合性は取れている。確認事項として記録。",
+      "location": "設計書 セクション4-3, 4-4",
+      "actual_code_reference": "Issue #159 表示仕様セクション",
+      "recommendation": "対応不要。「Version」で正しい。"
+    },
+    {
+      "id": "CONS-007",
+      "severity": "nice_to_have",
+      "category": "設計書とIssue要件の整合性",
+      "title": "Issueの行番号参照が正確",
+      "description": "Issue要件では「Last Updatedの後、行483付近」（InfoModal）と「行727付近」（MobileInfoContent）を指定している。実際のコードではInfoModalのLast Updatedセクション終了が行483、MobileInfoContentのLast Updatedセクション終了が行727であり、正確に一致している。",
+      "location": "Issue #159 実装タスク",
+      "actual_code_reference": "WorktreeDetailRefactored.tsx 行476-483, 行719-727",
+      "recommendation": "対応不要。参考情報として記録。"
+    },
+    {
+      "id": "CONS-008",
+      "severity": "nice_to_have",
+      "category": "設計書と既存コードベースの整合性",
+      "title": "ファイル行数の記載が正確",
+      "description": "設計書セクション13-1で「WorktreeDetailRefactored.tsxは1939行あり」と記載しており、実際のファイルは1939行（wc -l確認済み）で完全に一致している。",
+      "location": "設計書 セクション13-1（行193）",
+      "actual_code_reference": "WorktreeDetailRefactored.tsx: 1939行",
+      "recommendation": "対応不要。参考情報として記録。"
+    }
+  ],
+  "acceptance_criteria_coverage": {
+    "criteria": [
+      {
+        "id": "AC-1",
+        "description": "デスクトップのinfoモーダルにバージョンが表示される",
+        "covered": true,
+        "design_section": "4-3",
+        "notes": "InfoModalへの追加セクションが設計されている"
+      },
+      {
+        "id": "AC-2",
+        "description": "モバイルのinfoタブにバージョンが表示される",
+        "covered": true,
+        "design_section": "4-4",
+        "notes": "MobileInfoContentへの追加セクションが設計されている"
+      },
+      {
+        "id": "AC-3",
+        "description": "表示されるバージョンがpackage.jsonのバージョンと一致する",
+        "covered": true,
+        "design_section": "4-1, 4-2",
+        "notes": "next.config.jsでpackage.jsonのversionを読み込み、NEXT_PUBLIC_APP_VERSIONとして公開する方式"
+      },
+      {
+        "id": "AC-4",
+        "description": "npm run build が通ること",
+        "covered": true,
+        "design_section": "12（実装順序ステップ6）",
+        "notes": "ビルド検証が実装順序に含まれている"
+      },
+      {
+        "id": "AC-5",
+        "description": "npm run lint と npx tsc --noEmit が通ること",
+        "covered": true,
+        "design_section": "12（実装順序ステップ6）",
+        "notes": "リント・テスト検証が実装順序に含まれている"
+      }
+    ],
+    "all_covered": true
+  },
+  "summary": "設計書はIssue #159の要件を網羅的にカバーしており、技術選定（ビルド時環境変数方式）も適切である。ただし、HTML要素の不一致（<p>タグ vs 既存の<h2>タグ、mb-1クラスの欠落）が2件のmust_fix事項として検出された。これらは実装時にUIの視覚的一貫性を損なう可能性があるため、設計書の修正が必要。その他、テストファイル拡張子の誤記（.ts -> .tsx）とvプレフィックスの根拠の不正確さがshould_fixとして検出された。全体として、設計の方向性は正しく、minor修正で実装に進められる。",
+  "overall_assessment": "pass_with_conditions",
+  "conditions_for_pass": [
+    "CONS-001: InfoModalのバージョンラベルを<h2>タグ + mb-1クラスに修正",
+    "CONS-002: MobileInfoContentのバージョンラベルを<h2>タグ + mb-1クラスに修正"
+  ],
+  "reviewed_at": "2026-02-08",
+  "reviewed_files": {
+    "design_doc": "dev-reports/design/issue-159-info-tab-app-version-design-policy.md",
+    "issue": "https://github.com/Kewton/CommandMate/issues/159",
+    "source_files": [
+      "next.config.js",
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "package.json",
+      "src/cli/index.ts",
+      "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+    ]
+  }
+}
