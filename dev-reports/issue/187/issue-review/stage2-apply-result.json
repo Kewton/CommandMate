@@ -1,0 +1,66 @@
+{
+  "issue_number": 187,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "改善案テーブルにP1行「waitForPrompt()呼び出しのハードコード値10000msをCLAUDE_PROMPT_WAIT_TIMEOUT定数で統一するか、専用定数として定義」を追加。問題点3の説明にもハードコード値10000msとCLAUDE_PROMPT_WAIT_TIMEOUT(5000ms)の不整合に関する注意書きを追記。受け入れ条件にもタイムアウト値の定数化を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "受け入れ条件セクションを新規追加。8項目のチェックリスト形式で、P0修正（安定化待機2ケース）、P1修正（セパレータ除外、エラースロー、定数化）、回帰確認、テスト関連の条件を記載。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "改善案テーブルP0 2行目を「L378のif条件がfalse（=プロンプト検出済み）の場合にもCLAUDE_POST_PROMPT_DELAYを適用。if文の外側（L387の後）に安定化待機を配置することで両ケースをカバー」と具体的に記載。問題点1の説明文にもプロンプト即検出時の挙動を詳述。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "関連セクションを大幅拡充。Issue #152で何が修正されたか（startClaudeSession()のタイムアウト改善、waitForPrompt()追加、CLAUDE_POST_PROMPT_DELAY導入）と、Issue #187で残存する4つの問題（sendMessageToClaude()側の安定化待機未適用、プロンプト即検出時の待機未適用、セパレータ早期検出、タイムアウト時の送信強行）を明確に列記。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "問題点2にセパレータパターン除外の副作用に関する補足を追加。DRY-002で意図的に追加された経緯、除外による初期化検出遅延の可能性、CLAUDE_INIT_TIMEOUT(15秒)の猶予による影響限定の説明を記載。改善案テーブルP1行にも同様の補足を追記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "テストに関する注意事項セクションを新規追加。既存テストのモック制約（Issue #152参照）とP0修正に対するユニットテスト追加推奨を記載。受け入れ条件にもテスト関連項目を2つ追加。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "問題点4に「tmuxではsend-keys C-uでクリア可能だが、Claude CLIのキーバインド処理の検証が必要」という実装補足を追加。改善案テーブルP2行にも同様の補足を追記。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "初回のみ失敗する理由セクションに、具体的な4ステップのシーケンス（startClaudeSession()のセパレータ早期復帰→sendMessageToClaude()のプロンプト検出→安定化待機なし送信→メッセージ消失）と2回目以降の正常動作の説明を追加。"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/187"
+  },
+  "issue_updated": true
+}

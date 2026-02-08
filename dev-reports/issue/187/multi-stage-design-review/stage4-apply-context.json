@@ -1,0 +1,7 @@
+{
+  "issue_number": 187,
+  "review_result_path": "dev-reports/issue/187/multi-stage-design-review/stage4-review-result.json",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー - 指摘事項対応",
+  "target_doc": "dev-reports/design/issue-187-session-first-message-reliability-design-policy.md"
+}

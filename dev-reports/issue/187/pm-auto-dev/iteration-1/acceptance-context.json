@@ -1,0 +1,21 @@
+{
+  "issue_number": 187,
+  "feature_summary": "セッション初回メッセージ送信信頼性改善",
+  "acceptance_criteria": [
+    "sendMessageToClaude()でwaitForPrompt()復帰後にCLAUDE_POST_PROMPT_DELAY（500ms）が適用されること",
+    "sendMessageToClaude()でプロンプト即検出時にもCLAUDE_POST_PROMPT_DELAYが適用されること",
+    "startClaudeSession()がセパレータパターンのみでは初期化完了と判定しないこと",
+    "waitForPrompt()タイムアウト時にメッセージを送信せずエラーがスローされること",
+    "waitForPrompt()のタイムアウト値がCLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数を使用していること",
+    "既存の2回目以降のメッセージ送信に回帰がないこと",
+    "claude-session.test.tsの全テストがパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 新規テスト Path A（即検出）でCLAUDE_POST_PROMPT_DELAY経過前にsendKeysが呼ばれないことを検証",
+    "シナリオ2: 新規テスト Path B（waitForPrompt経由）でポーリング+安定化待機を検証",
+    "シナリオ3: セパレータのみ出力時にstartClaudeSession()がタイムアウトすることを検証",
+    "シナリオ4: タイムアウト時にsendKeysが呼ばれずエラーがスローされることを検証",
+    "シナリオ5: CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数が10000msとしてエクスポートされることを検証",
+    "シナリオ6: TypeScript型チェック・ESLintが全パスすることを検証"
+  ]
+}

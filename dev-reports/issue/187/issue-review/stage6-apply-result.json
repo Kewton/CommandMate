@@ -1,0 +1,58 @@
+{
+  "issue_number": 187,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "apply_date": "2026-02-08",
+  "applied_findings": [
+    {
+      "id": "SF-1",
+      "original_id": "F-1",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "「既存テストの不整合」セクションに「不整合2: claude-session.test.ts L337-346 のタイムアウトテストが既にFAILしている」を追加。ハードコード値10000msとvitest進行5100msの不一致、catch+console.warn+続行によるrejects.toThrow不成立の2点を具体的に記載。Issue #187のP1修正で解消される見込みである旨も併記"
+    },
+    {
+      "id": "SF-2",
+      "original_id": "F-2",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "問題点1の説明を「パスA: プロンプト即検出（L378 if条件false）」と「パスB: プロンプト未検出 → waitForPrompt() → 検出後即送信」の2つのサブ見出し（####レベル）で分離。コードコメント内でもパスA/パスBを明示し可読性を向上"
+    },
+    {
+      "id": "NTH-3",
+      "original_id": "F-3",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "間接影響ファイルテーブルの各行に適用優先度をカッコ書きで付記。cli-tools/claude.ts: (P0)、send/route.ts: (P1)、route.ts x2: (P2のみ)、auto-yes-manager.ts: (P2のみ: stripAnsi変更)、status-detector.ts/response-poller.ts/assistant-response-saver.ts: (P2のみ)、tmux.ts: (P2のみ)"
+    },
+    {
+      "id": "NTH-4",
+      "original_id": "F-4",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "受け入れ条件のL232-246テスト更新を「セパレータのみの出力（'────────────────────'）をcapturePaneが返す場合にstartClaudeSession()が初期化完了とせずポーリングを継続することを検証するテストに更新」と具体的な期待動作を記載"
+    },
+    {
+      "id": "NTH-5",
+      "original_id": "F-5",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "レビュー履歴に「ステージ1: 通常レビュー（1回目）」セクションを新設。MF-1（ハードコード値の定数化）、SF-1〜SF-4（受け入れ条件追加、P0曖昧さ解消、#152関係明確化、セパレータ副作用）、NTH-1〜NTH-3（テスト注意事項、Ctrl+U補足、シーケンス図）の8件の指摘概要を簡潔に記載"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0,
+    "must_fix": 0,
+    "should_fix_applied": 2,
+    "nice_to_have_applied": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/187"
+  },
+  "issue_updated": true
+}

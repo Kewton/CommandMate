@@ -132,7 +132,7 @@ src/
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
 | `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行ウィンドウイング） |
-| `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()） |
+| `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数） |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証） |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
@@ -479,6 +479,23 @@ commandmate status --all                   # 全サーバー状態確認
   - `src/lib/claude-session.ts` - コア実装（startClaudeSession, waitForPrompt, sendMessageToClaude改善）
   - `src/lib/cli-patterns.ts` - CLAUDE_PROMPT_PATTERN, CLAUDE_SEPARATOR_PATTERN
 - 詳細: [設計書](./dev-reports/design/issue-152-first-message-not-sent-design-policy.md)
+
+### Issue #187: セッション初回メッセージ送信信頼性改善
+- **問題解決**: セッション初回メッセージが送信されないケースが多発する問題を修正（Issue #152のフォローアップ）
+- **根本原因**: `sendMessageToClaude()`でプロンプト検出後の安定化待機がなく、Claude CLIの入力ハンドラ準備前にメッセージ送信。また`startClaudeSession()`がセパレータパターンのみで初期化完了と誤判定
+- **P0修正（安定化待機追加）**:
+  - `sendMessageToClaude()`のif文外側に`CLAUDE_POST_PROMPT_DELAY`（500ms）安定化待機を追加
+  - Path A（即検出）とPath B（waitForPrompt経由）の両方で安定化待機が実行される
+- **P1-1修正（セパレータパターン除外）**:
+  - `startClaudeSession()`の初期化判定から`CLAUDE_SEPARATOR_PATTERN`を除外
+  - `CLAUDE_SEPARATOR_PATTERN`のインポートを削除
+- **P1-2修正（エラー伝播）**:
+  - `sendMessageToClaude()`のtry-catch削除、`waitForPrompt()`のタイムアウトエラーをそのまま伝播
+- **P1-3修正（定数統一）**:
+  - `CLAUDE_SEND_PROMPT_WAIT_TIMEOUT`定数（10000ms）を追加、ハードコード値を置換
+- **主要コンポーネント**:
+  - `src/lib/claude-session.ts` - CLAUDE_SEND_PROMPT_WAIT_TIMEOUT追加、sendMessageToClaude改善、startClaudeSessionセパレータ除外
+- 詳細: [設計書](./dev-reports/design/issue-187-session-first-message-reliability-design-policy.md)
 
 ### Issue #123: iPadタッチ長押しコンテキストメニュー
 - **問題解決**: iPadでファイルツリーを長押ししてもコンテキストメニューが表示されない問題を解決
