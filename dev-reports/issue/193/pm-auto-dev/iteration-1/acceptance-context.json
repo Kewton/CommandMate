@@ -1,0 +1,25 @@
+{
+  "issue_number": 193,
+  "feature_summary": "Codex CLIの複数選択肢検出・応答対応",
+  "acceptance_criteria": [
+    "Codex CLIの複数選択肢にUIから番号を入力して回答を送信できること",
+    "Auto-YesモードでCodex CLIの選択肢に自動応答されること（デフォルト選択がない場合は最初の選択肢を選択）",
+    "Claude CLIの既存の選択肢検出・応答機能に影響がないこと（後方互換性）",
+    "Codex CLI選択肢表示時のサイドバーステータスが正しく'waiting'になること",
+    "ユニットテストが追加されていること（Codex選択肢検出テスト）",
+    "既存テストがすべてパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: Codex CLI選択肢検出 - Codex形式の番号付き選択肢（❯なし）がdetectPromptForCli('codex')で正しく検出される",
+    "シナリオ2: Claude CLI後方互換性 - Claude形式の選択肢（❯付き）がdetectPromptForCli('claude')で引き続き正しく検出される",
+    "シナリオ3: detectPrompt()後方互換性 - options引数なしのdetectPrompt()呼び出しが既存と同じ動作をする",
+    "シナリオ4: Layer 4分離 - requireDefaultIndicator=falseでもoptions.length < 2は拒否される",
+    "シナリオ5: status-detectorウィンドウイング - status-detector.tsでfull cleanOutputが渡され、50行ウィンドウが正しく機能する",
+    "シナリオ6: 入力バリデーション - prompt-response/route.tsで不正入力（制御文字、長すぎる文字列）が拒否される",
+    "シナリオ7: セキュリティ - getAnswerInput()のエラーメッセージにユーザー入力が含まれない",
+    "シナリオ8: Auto-Yes自動応答 - Codex選択肢検出時にauto-yes-managerがdetectPromptForCliを使用する",
+    "シナリオ9: TypeScript型チェック - npx tsc --noEmit が0エラー",
+    "シナリオ10: ESLint - npm run lint が0エラー",
+    "シナリオ11: ビルド - npm run build が成功"
+  ]
+}

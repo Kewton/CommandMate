@@ -1,0 +1,22 @@
+{
+  "issue_number": 193,
+  "refactor_targets": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/response-poller.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/respond/route.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "DRY原則: 入力サニタイズロジックの重複を確認し、共通化が必要であれば提案する",
+    "SOLID原則: DetectPromptOptionsインターフェースの設計が適切か確認する",
+    "セキュリティ: 入力バリデーションの一貫性を確認する",
+    "コード品質: 不要なimport、未使用変数、コメントの整合性を確認する"
+  ]
+}

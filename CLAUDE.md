@@ -130,10 +130,10 @@ src/
 | `src/lib/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用） |
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
-| `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
-| `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行ウィンドウイング） |
+| `src/lib/cli-patterns.ts` | CLIツール別パターン定義、選択肢検出パターン（Issue #193: Codex対応、getChoiceDetectionPatterns()、detectPromptForCli()ラッパー） |
+| `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、Issue #193: full cleanOutput渡しに変更） |
 | `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()） |
-| `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証） |
+| `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証、Issue #193: DetectPromptOptions、パターンパラメータ化、sanitizeAnswer()） |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応） |
@@ -374,6 +374,32 @@ commandmate status --all                   # 全サーバー状態確認
 ---
 
 ## 最近の実装機能
+
+### Issue #193: Codex CLI複数選択肢検出・応答対応
+- **バグ修正**: Codex CLIの複数選択肢メッセージに対し、CommandMateのUIからの手動応答およびAuto-Yes自動応答が機能しない問題を修正
+- **根本原因**: `prompt-detector.ts`の`detectMultipleChoicePrompt()`がClaude CLI固有の`❯`(U+276F)マーカーのみに対応しており、Codex CLIの選択肢形式を検出できなかった
+- **修正方針**: パターンパラメータ化（Plan B）- `DetectPromptOptions`インターフェースで選択肢検出パターンを外部注入可能にし、CLIツール非依存性を維持
+- **主要な変更点**:
+  - `prompt-detector.ts`: `DetectPromptOptions`インターフェース追加、`detectPrompt(output, options?)`シグネチャ変更、Layer 4を4a/4b分離（`requireDefaultIndicator`）、`sanitizeAnswer()`関数追加
+  - `cli-patterns.ts`: 4パターン定数追加（CLAUDE_CHOICE_INDICATOR/NORMAL、CODEX_CHOICE_INDICATOR/NORMAL）、`getChoiceDetectionPatterns()`、`detectPromptForCli()`ラッパー
+  - 5箇所の`detectPrompt()`呼び出しを`detectPromptForCli()`に更新
+  - `status-detector.ts`: 15行`lastLines`から全`cleanOutput`渡しに変更（50行ウィンドウイングとの整合性）
+  - `prompt-response/route.ts`, `respond/route.ts`: 入力バリデーション・サニタイズ追加
+- **セキュリティ対策**:
+  - 入力サニタイズ: 最大長1000文字、制御文字フィルタリング（`sanitizeAnswer()`に共通化）
+  - 固定エラーメッセージ（ユーザー入力非エコーバック）
+  - ReDoS防止（アンカー付きパターン）
+  - prompt-response APIの応答フォーマットバリデーション（数値/y/n検証）
+- **主要コンポーネント**:
+  - `src/lib/prompt-detector.ts` - DetectPromptOptions、パターンパラメータ化、Layer 4条件化、sanitizeAnswer()
+  - `src/lib/cli-patterns.ts` - Codex選択肢パターン、getChoiceDetectionPatterns()、detectPromptForCli()
+  - `src/lib/auto-yes-manager.ts` - detectPromptForCli使用
+  - `src/lib/status-detector.ts` - full cleanOutput渡し
+  - `src/lib/response-poller.ts` - detectPromptForCli + stripAnsi適用
+  - `src/app/api/worktrees/[id]/prompt-response/route.ts` - detectPromptForCli + 入力バリデーション
+  - `src/app/api/worktrees/[id]/current-output/route.ts` - detectPromptForCli
+  - `src/app/api/worktrees/[id]/respond/route.ts` - 入力サニタイズ + 固定エラーメッセージ
+- 詳細: [設計書](./dev-reports/design/issue-193-codex-multiple-choice-detection-design-policy.md)
 
 ### Issue #190: リポジトリ削除後のSync All復活防止
 - **バグ修正**: UIで削除したリポジトリがSync All実行時に再スキャン・再登録されて復活する問題を修正

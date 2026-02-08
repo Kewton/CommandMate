@@ -1,0 +1,196 @@
+{
+  "issue_number": 193,
+  "review_stage": 4,
+  "review_type": "security",
+  "review_date": "2026-02-08",
+  "design_doc": "dev-reports/design/issue-193-codex-multiple-choice-detection-design-policy.md",
+  "reviewer": "architecture-review-agent",
+  "overall_assessment": "acceptable_with_recommendations",
+  "summary": "The design demonstrates strong security awareness with explicit ReDoS prevention requirements, command injection protections, and worktreeID validation. However, several security gaps were identified: (1) the prompt-response/route.ts sends user-supplied answer text directly to tmux without sanitization for custom text input, (2) TBD placeholder regex patterns could introduce ReDoS risk if not properly anchored when finalized, (3) the error message in getAnswerInput() echoes back user input which could assist in information gathering, and (4) disabling Layer 4 (requireDefaultIndicator=false) for Codex reduces defense-in-depth against false positive auto-yes responses. None of these are critical vulnerabilities given the local deployment model, but they warrant attention during implementation.",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "must_fix",
+      "category": "Command Injection",
+      "title": "prompt-response/route.ts sends raw user answer to tmux sendKeys without sanitization",
+      "description": "In prompt-response/route.ts (L92), the user-supplied `answer` from the request body is passed directly to `sendKeys(sessionName, answer, false)`. While the sendKeys function escapes single quotes, it does not prevent injection of tmux-specific control sequences. A crafted answer string could include tmux special key names or escape sequences that alter terminal behavior. The respond/route.ts has the same issue but additionally allows arbitrary custom text input for multiple_choice prompts (L99-101: `input = answer` when answer is not a number).",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/app/api/worktrees/[id]/respond/route.ts"
+      ],
+      "recommendation": "Add input sanitization before passing user answers to sendKeys(). For multiple_choice numeric answers, enforce strict numeric-only validation (already done via getAnswerInput()). For custom text input in respond/route.ts, sanitize or length-limit the input. Consider adding a whitelist of allowed characters for tmux sendKeys input, or ensure the single-quote escaping in sendKeys() is sufficient to prevent all tmux key-name interpretation.",
+      "owasp_category": "A03:2021-Injection",
+      "design_doc_section": "6.1"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "must_fix",
+      "category": "ReDoS Prevention",
+      "title": "TBD placeholder Codex regex patterns must be validated for ReDoS safety before implementation",
+      "description": "The design correctly specifies that Codex patterns should use line-start/end anchors (section 6.2, S4-001). However, the actual patterns are defined as /TBD_AFTER_CONFIRMATION/ placeholders. There is a risk that when the actual patterns are finalized in Phase 1/Phase 2, they may inadvertently introduce ReDoS-vulnerable constructs (e.g., nested quantifiers, overlapping alternatives). The design document states 'Test for ReDoS vulnerability checks' but does not mandate a specific automated tool or methodology.",
+      "affected_files": [
+        "src/lib/cli-patterns.ts"
+      ],
+      "recommendation": "Add an explicit Phase 2 checklist item requiring automated ReDoS safety verification using a tool such as `safe-regex` or `recheck` npm package. Each new pattern must be tested against pathological input strings (e.g., 1000+ character lines with partial matches). Document the specific ReDoS-safe pattern construction rules: (1) always anchor with ^ and $, (2) avoid nested quantifiers like (a+)+, (3) avoid overlapping alternatives, (4) limit repetition quantifiers.",
+      "owasp_category": "N/A (Availability/DoS)",
+      "design_doc_section": "6.2, 16 Phase 2"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "should_fix",
+      "category": "Defense in Depth",
+      "title": "requireDefaultIndicator=false reduces false-positive defense for Auto-Yes with Codex",
+      "description": "Setting requireDefaultIndicator=false for Codex (section 5.2) disables Layer 4b validation, which is one of the defenses against false positive multiple_choice detection. When combined with Auto-Yes mode (auto-yes-manager.ts), a false positive could cause automatic sending of '1' to the tmux session. While Layer 1 (thinking check) and Layer 3 (consecutive numbering) remain active, the reduced defense layers increase the risk surface for Codex sessions. If Codex CLI outputs numbered lists during processing (similar to the Issue #161 scenario for Claude), and those lists happen to be consecutive from 1, they would pass Layer 3 and potentially trigger auto-yes.",
+      "affected_files": [
+        "src/lib/prompt-detector.ts",
+        "src/lib/auto-yes-manager.ts",
+        "src/lib/auto-yes-resolver.ts"
+      ],
+      "recommendation": "Add a Codex-specific Layer 4 replacement that provides equivalent defense without requiring a default indicator marker. Options include: (1) require a question-like line (ending with '?') above the options list, (2) add a minimum context validation (e.g., options must appear after a blank line or separator), (3) add a Codex-specific thinking pattern check before auto-yes resolution. Document the accepted residual risk if no additional layer is added, and ensure the Phase 1 real-device testing specifically validates that numbered lists in Codex output do not trigger false positives.",
+      "owasp_category": "N/A (Logic flaw)",
+      "design_doc_section": "5.2, 14"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "should_fix",
+      "category": "Information Disclosure",
+      "title": "Error messages in getAnswerInput() and API routes echo user input",
+      "description": "getAnswerInput() (prompt-detector.ts L418) throws Error(`Invalid answer for multiple choice: ${answer}`) which includes the raw user input. In respond/route.ts L109, this error message is returned to the client as-is. Similarly, prompt-response/route.ts L44 returns Worktree ID in the 404 error. While the current deployment model is localhost-only, echoing user input in error messages could facilitate attack reconnaissance if the application is exposed on a network (as noted in the CM_BIND=0.0.0.0 security warning in daemon.ts).",
+      "affected_files": [
+        "src/lib/prompt-detector.ts",
+        "src/app/api/worktrees/[id]/respond/route.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ],
+      "recommendation": "Use fixed error messages that do not echo user input. For example: 'Invalid answer format for multiple choice prompt' instead of including the raw answer value. This is consistent with the existing security pattern used in db-repository.ts (noted in CLAUDE.md as 'fixed error messages for information leakage prevention').",
+      "owasp_category": "A01:2021-Broken Access Control / Information Disclosure",
+      "design_doc_section": "6.1"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "should_fix",
+      "category": "Input Validation",
+      "title": "prompt-response/route.ts does not validate answer format before sending to tmux",
+      "description": "The prompt-response/route.ts API endpoint (L92) sends the raw `answer` value to tmux without any format validation. Unlike respond/route.ts which validates the answer against the prompt type (numeric for multiple_choice, y/n for yes_no), prompt-response/route.ts performs only a re-verification of prompt state but not answer format validation. This means any arbitrary string can be sent to the tmux session. The design document section 6.1 states 'getAnswerInput() numeric validation - no change', but this refers to the respond/route.ts path, not the prompt-response path.",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ],
+      "recommendation": "Add answer format validation to prompt-response/route.ts before sending to tmux. At minimum: (1) if the detected prompt type is multiple_choice, validate that the answer is a numeric string, (2) if the detected prompt type is yes_no, validate using getAnswerInput(), (3) enforce a maximum length limit on the answer string (e.g., 1000 characters) to prevent buffer-based attacks, (4) reject control characters and non-printable characters.",
+      "owasp_category": "A03:2021-Injection",
+      "design_doc_section": "6.1, 10.1"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "should_fix",
+      "category": "Command Injection",
+      "title": "tmux sendKeys escaping only handles single quotes - incomplete shell metacharacter protection",
+      "description": "The sendKeys() function in tmux.ts (L213) only escapes single quotes via `keys.replace(/'/g, \"'\\\\''\")`. The resulting command uses single-quote wrapping: `tmux send-keys -t \"session\" 'escaped_keys' C-m`. While single-quoted strings in bash do not interpret most special characters, the escaping is limited to quote-breaking prevention. The sessionName is wrapped in double quotes and validated by SESSION_NAME_PATTERN. However, if a crafted answer value contains specific byte sequences that could be interpreted differently by the shell layer (e.g., null bytes), there is a residual risk. The use of exec() (child_process) rather than execFile() means the command goes through shell interpretation.",
+      "affected_files": [
+        "src/lib/tmux.ts"
+      ],
+      "recommendation": "Consider migrating sendKeys() from exec() to execFile() or spawn() with argument arrays to avoid shell interpretation entirely. For example: `execFile('tmux', ['send-keys', '-t', sessionName, keys])` followed by a separate call for C-m. This would eliminate the need for manual escaping and provide defense-in-depth against shell injection. If migration is not feasible in this issue, document the accepted risk and add input length limits.",
+      "owasp_category": "A03:2021-Injection",
+      "design_doc_section": "6.1"
+    },
+    {
+      "id": "DR4-007",
+      "severity": "nice_to_have",
+      "category": "Rate Limiting",
+      "title": "No rate limiting on prompt-response API endpoint",
+      "description": "The POST /api/worktrees/[id]/prompt-response endpoint has no rate limiting. An attacker or malfunctioning client could rapidly send responses, potentially causing rapid tmux key sending that disrupts the CLI session. While MAX_CONCURRENT_POLLERS=50 protects the auto-yes polling path, the manual prompt-response path has no throttling.",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ],
+      "recommendation": "Add a simple per-worktree rate limiter (e.g., max 5 requests per second) to prevent rapid-fire response sending. This could be implemented as an in-memory counter with a sliding window, similar to the approach used in auto-yes-manager.ts for consecutive error tracking.",
+      "owasp_category": "A05:2021-Security Misconfiguration",
+      "design_doc_section": "10.1"
+    },
+    {
+      "id": "DR4-008",
+      "severity": "nice_to_have",
+      "category": "Logging",
+      "title": "Auto-Yes response logging includes worktreeId but not the answer sent",
+      "description": "In auto-yes-manager.ts L323, the success log `[Auto-Yes Poller] Sent response for worktree: ${worktreeId}` does not include what answer was sent. While the comment on L322 says 'Log success (without sensitive content)', knowing what automatic response was sent (e.g., 'y' or '1') is useful for security auditing without being sensitive. In contrast, respond/route.ts L150 logs the actual input value sent. Having consistent audit logging across both paths would improve incident investigation capabilities.",
+      "affected_files": [
+        "src/lib/auto-yes-manager.ts"
+      ],
+      "recommendation": "Add the answer type (yes_no or multiple_choice) and the answer value to the auto-yes success log. For example: `[Auto-Yes Poller] Sent response '${answer}' (type: ${promptData.type}) for worktree: ${worktreeId}`. The answer values are always short strings (y, n, or a number) and are not sensitive.",
+      "owasp_category": "A09:2021-Security Logging and Monitoring Failures",
+      "design_doc_section": "6.1"
+    },
+    {
+      "id": "DR4-009",
+      "severity": "nice_to_have",
+      "category": "Defense in Depth",
+      "title": "TEXT_INPUT_PATTERNS in prompt-detector.ts use case-insensitive flags but lack anchoring",
+      "description": "The TEXT_INPUT_PATTERNS array (prompt-detector.ts L169-175) contains patterns like /type\\s+here/i, /tell\\s+(me|claude)/i, etc. These are tested against option labels. While they use the /i flag for case-insensitivity, they lack start/end anchors, meaning they could match substrings within longer labels. Additionally, these patterns contain \\s+ which could theoretically cause slowdown on very long option labels (though practical risk is minimal since labels are extracted from tmux output which is line-bounded).",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "recommendation": "While the practical ReDoS risk is minimal (labels are short), consider adding word boundaries (\\b) to prevent false-positive substring matching. For example: /\\btype\\s+here\\b/i. This would prevent matching 'prototype here' as requiring text input.",
+      "owasp_category": "N/A (Availability/DoS)",
+      "design_doc_section": "6.2"
+    },
+    {
+      "id": "DR4-010",
+      "severity": "nice_to_have",
+      "category": "ANSI Stripping",
+      "title": "ANSI_PATTERN regex in cli-patterns.ts uses /g flag with global state risk",
+      "description": "The ANSI_PATTERN (cli-patterns.ts L167) is a module-level RegExp with the /g flag: /\\x1b\\[[0-9;]*[a-zA-Z]|\\x1b\\][^\\x07]*\\x07|\\[[0-9;]*m/g. Since RegExp objects with /g maintain internal lastIndex state, concurrent calls to stripAnsi() from parallel Promise.all processing in worktrees/route.ts could theoretically cause incorrect results if JavaScript runtime interleaves regex execution. However, since String.prototype.replace() resets lastIndex before use, this is not an actual vulnerability in practice.",
+      "affected_files": [
+        "src/lib/cli-patterns.ts"
+      ],
+      "recommendation": "This is informational only. The current implementation is safe because String.prototype.replace() handles lastIndex correctly. No change needed, but if stripAnsi() is ever used with test() or exec(), the global flag could cause issues.",
+      "owasp_category": "N/A",
+      "design_doc_section": "6.1"
+    }
+  ],
+  "security_checklist": {
+    "redos_prevention": {
+      "status": "pass_with_caveat",
+      "details": "Existing patterns in prompt-detector.ts (DEFAULT_OPTION_PATTERN, NORMAL_OPTION_PATTERN) are properly anchored and ReDoS-safe. The proposed Codex patterns are TBD placeholders. Design mandates anchoring (S4-001) but lacks automated verification tooling requirement."
+    },
+    "command_injection": {
+      "status": "pass_with_caveat",
+      "details": "Session names are validated via SESSION_NAME_PATTERN. sendKeys() escapes single quotes. However, exec() is used instead of execFile(), and the prompt-response/route.ts sends unvalidated user input to sendKeys()."
+    },
+    "input_validation": {
+      "status": "partial_pass",
+      "details": "respond/route.ts validates answers against prompt type. prompt-response/route.ts does not validate answer format. worktreeID validation is present (isValidWorktreeId). cliToolId is validated via SUPPORTED_TOOLS whitelist."
+    },
+    "auto_yes_safety": {
+      "status": "pass_with_caveat",
+      "details": "Layer 1 (thinking check), Layer 3 (consecutive numbering), and worktreeID validation are maintained. Layer 4 is conditionally disabled for Codex, reducing defense depth. MAX_CONCURRENT_POLLERS prevents DoS. Error backoff is implemented."
+    },
+    "information_disclosure": {
+      "status": "partial_pass",
+      "details": "Some error messages echo user input (getAnswerInput, 404 responses). Internal error details are logged to console. Production error responses in current-output/route.ts use fixed messages."
+    },
+    "owasp_top10_compliance": {
+      "A01_broken_access_control": "N/A - local application, no authentication layer",
+      "A02_cryptographic_failures": "N/A - no cryptographic operations in scope",
+      "A03_injection": "Partial - sendKeys uses shell exec with basic escaping; should migrate to execFile",
+      "A04_insecure_design": "Pass - pattern parameterization preserves separation of concerns",
+      "A05_security_misconfiguration": "Pass - no configuration changes in scope",
+      "A06_vulnerable_components": "N/A - no new dependencies added",
+      "A07_identification_authentication": "N/A - local application",
+      "A08_software_data_integrity": "Pass - no deserialization or integrity concerns",
+      "A09_logging_monitoring": "Partial - auto-yes logs lack answer details for audit trail",
+      "A10_ssrf": "N/A - no outbound requests in scope"
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "low",
+    "rationale": "The application runs on localhost by default (CM_BIND=127.0.0.1), significantly reducing the attack surface. The proposed changes are primarily in-memory pattern matching logic with no new network-facing APIs, database changes, or authentication modifications. The main risks are (1) potential command injection through tmux sendKeys, mitigated by single-quote escaping and session name validation, and (2) reduced auto-yes false-positive defense for Codex with Layer 4 disabled, mitigated by Layer 1 and Layer 3 remaining active.",
+    "residual_risks": [
+      "If CM_BIND=0.0.0.0 is configured, unvalidated prompt-response input could be exploited from the network",
+      "Codex false-positive auto-yes is possible if Codex outputs consecutive numbered lists during non-thinking states",
+      "TBD Codex regex patterns could introduce ReDoS if not properly constructed"
+    ]
+  },
+  "findings_summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "total": 10
+  }
+}

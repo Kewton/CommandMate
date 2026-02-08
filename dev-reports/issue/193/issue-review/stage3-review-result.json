@@ -1,0 +1,107 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "issue_number": 193,
+  "review_date": "2026-02-08",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "claude-poller.ts が変更対象ファイル一覧から欠落している",
+      "description": "Issue の影響範囲テーブルに claude-poller.ts が記載されていない。しかし実際には claude-poller.ts の L164 と L232 で detectPrompt() を呼び出しており、かつ cliToolId によるガードが存在しない。claude-poller.ts は旧来の Claude 専用ポーラーであり response-poller.ts とは別モジュールとして依然として存在し import されている。Issue 本文では「関連コンポーネント（動作確認）」セクションに claude-poller.ts を記載しているが、もし detectPrompt() のシグネチャを変更する場合（cliToolId パラメータ追加）、claude-poller.ts も変更対象になる。変更対象テーブルに昇格させるか、claude-poller.ts が Codex セッションでは使用されないことを明記すべきである。",
+      "recommendation": "claude-poller.ts が Codex セッションでは呼び出されないことを確認のうえ、(1) detectPrompt のシグネチャ変更時に claude-poller.ts も変更対象として影響範囲テーブルに追加するか、(2) claude-poller.ts は Claude 専用であり Codex セッションでは使われないため変更不要である旨を明記する。現状のコードを確認すると claude-poller.ts の checkForResponse() は isClaudeRunning() を使い Claude セッション専用で動作するため後者が妥当。ただし detectPrompt のシグネチャが optional パラメータ追加であれば後方互換性があり変更不要。その判断根拠を Issue に記載すべき。",
+      "affected_section": "影響範囲 > 変更対象ファイル"
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "response-poller.ts の detectPrompt 呼び出し箇所の分析が不正確（L248 は Claude ガード内だが L442/L556 は全 CLI ツール共通）",
+      "description": "Issue は response-poller.ts の detectPrompt 呼び出しを L248, L442, L556 として一括で cliToolId 対応が必要としている。しかし実際のコードを分析すると: (1) L248 は `if (cliToolId === 'claude')` ブロック内にあり Codex セッションでは実行されない。(2) L442 と L556 は cliToolId のガードなしで全 CLI ツールに対して呼び出される。この区別は実装戦略に直接影響する。L248 は変更不要（Claude 専用パス）であり、L442 と L556 のみが Codex 対応の変更が必要な箇所である。",
+      "recommendation": "影響範囲テーブルで response-poller.ts の説明を修正し、L248 は Claude 専用ガード内であるため変更不要、L442 と L556 が全 CLI ツール共通パスであり Codex 対応が必要な箇所であることを明記する。これにより実装者が不要な箇所を変更するリスクを回避できる。",
+      "affected_section": "影響範囲 > 変更対象ファイル > response-poller.ts"
+    },
+    {
+      "id": "S3-003",
+      "severity": "must_fix",
+      "category": "regression_risk",
+      "title": "Codex CLI の TUI ベース選択肢の場合、番号入力ではなく矢印キー操作が必要になる可能性が未解決",
+      "description": "Issue の「前提条件」セクションで Codex CLI の選択肢がテキストベースか TUI ベースかの実機確認を求めている。しかし codex.ts の startSession() (L91-96) では既に Down arrow + Enter による TUI 操作を行っており、Codex CLI が TUI ベースの選択肢 UI を使用している強い証拠がある。もし TUI ベースであれば、detectMultipleChoicePrompt のテキストパターンマッチアプローチ自体が機能しない可能性がある。tmux capture-pane で取得したバッファにはテキストとして選択肢が残るか、ANSI エスケープシーケンスのみが残り stripAnsi 後に情報が失われるか、という根本的な問題がある。この前提条件の確認結果次第で設計方針が根本的に変わるため、実装タスクの最初に位置づけられているが、もしTUI ベースであった場合の代替設計（send-keys による矢印キー操作）の具体的な影響範囲が未分析である。",
+      "recommendation": "Issue に以下を追記すべき: (1) TUI ベースの場合の影響範囲は detectMultipleChoicePrompt ではなく、prompt-response/route.ts と auto-yes-manager.ts の sendKeys ロジックに変更が集中する（番号送信ではなく矢印キー+Enter の操作シーケンス）。(2) TUI ベースの場合は getAnswerInput() の multiple_choice ハンドリングも変更が必要（番号 -> 矢印キー回数への変換）。(3) respond/route.ts の sendKeys 呼び出し（L149-156）も影響を受ける。これらの代替パスの影響範囲を事前に文書化しておくことで、実機確認後の設計フェーズをスムーズに進められる。",
+      "affected_section": "対策案 > 前提条件 / 影響範囲"
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "category": "architecture",
+      "title": "prompt-detector.ts の CLI ツール非依存性原則と detectPrompt シグネチャ変更の整合性が未検討",
+      "description": "Issue #161 で確立された設計原則として prompt-detector.ts は CLIToolType を import せず CLI ツール非依存であるべきとされている。しかし Issue #193 の実装タスクでは detectPrompt(output, cliToolId?) という形でシグネチャを変更する案が示唆されている（案A）。Issue 本文では案A/B/C の3案を提示しているが、どの案を採用するかの判断基準や推奨が不明確。特に案B（パターンのパラメータ化）を採用する場合、detectMultipleChoicePrompt に渡すパターン定義を呼び出し側で用意する必要があり、11箇所すべての呼び出し元で適切なパターンを渡す責務が発生する。案C（ラッパー関数）の場合は既存の detectPrompt を変更せずに済むが、11箇所の呼び出しをラッパーに切り替える変更が必要。",
+      "recommendation": "Issue 本文に推奨案を明記すべき。コード分析の結果、案B（パターンのパラメータ化）が最も適切と考えられる。理由: (1) prompt-detector.ts の CLI ツール非依存性を維持できる。(2) detectPrompt(output, options?) のようにオプションパラメータでパターン設定を渡す形にすれば後方互換性を保てる（options 省略時は既存の Claude 用パターンを使用）。(3) 呼び出し元は cli-patterns.ts から取得したパターンセットを渡すだけで済む。具体的な型定義の例: `interface DetectPromptOptions { choiceIndicatorPattern?: RegExp; normalOptionPattern?: RegExp; }`",
+      "affected_section": "対策案 > Codex 選択肢パターン対応 > 3"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "respond/route.ts (既存のメッセージ ID ベースのプロンプト応答 API) が影響範囲に含まれていない",
+      "description": "影響範囲テーブルには prompt-response/route.ts（軽量プロンプト応答 API）のみが記載されているが、respond/route.ts（メッセージ ID ベースのプロンプト応答 API）も getAnswerInput() を使用しており、Codex の TUI ベース選択肢の場合はこの API の sendKeys ロジックも影響を受ける。具体的には respond/route.ts L82-113 の multiple_choice ハンドリングで、現在は数値を文字列として送信しているが、Codex の TUI ベース選択肢の場合は矢印キー操作に変換する必要がある可能性がある。また、respond/route.ts では detectPrompt を直接呼び出していないが、保存された promptData（detectPrompt の結果）を参照してレスポンスを処理するため、PromptData 型や isDefault フラグの意味が Codex の場合に変わる可能性がある。",
+      "recommendation": "respond/route.ts を影響範囲テーブルの「関連コンポーネント（動作確認）」セクションに追加し、特に multiple_choice ハンドリングの動作確認が必要であることを明記する。TUI ベースの場合は respond/route.ts の sendKeys ロジックも変更対象に昇格する可能性がある旨を注記する。",
+      "affected_section": "影響範囲 > 関連コンポーネント（動作確認）"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "dependency",
+      "title": "auto-yes-resolver.ts の isDefault フラグ依存が Codex TUI 選択肢で機能しない可能性",
+      "description": "auto-yes-resolver.ts の resolveAutoAnswer() は promptData.options.find(o => o.isDefault) でデフォルト選択肢を探し、見つからない場合は最初の選択肢を選択する。Claude CLI では isDefault は detectMultipleChoicePrompt の Pass 1 で検出された '❯' マーカーの存在で決定される。Codex CLI の選択肢で '❯' に相当するデフォルト表示がない場合、isDefault が常に false になり、常に最初の選択肢が選ばれることになる。これは Issue の受入条件「デフォルト選択が検出できる場合はデフォルトを選択」に影響する。Issue 本文では「Codex 固有の選択肢パターンに対してカスタムルールが必要な場合は別途検討」と記載しているが、auto-yes-resolver.ts のロジック自体は変更不要か、Codex 固有の Auto-Yes 戦略が必要かの判断を実機確認の確認項目に含めるべき。",
+      "recommendation": "前提条件の確認項目3（Codex CLI がデフォルト選択をどう表示するか）の確認結果に基づき、auto-yes-resolver.ts の変更要否を判断するフローを Issue に明記する。具体的には: (a) Codex にデフォルトマーカーがある場合 -> detectMultipleChoicePrompt で検出し isDefault を設定（パターン変更で対応可能）、(b) デフォルトマーカーがない場合 -> 現行ロジック（最初の選択肢）で許容可能か検討。",
+      "affected_section": "影響範囲 > 関連コンポーネント（動作確認） > auto-yes-resolver.ts"
+    },
+    {
+      "id": "S3-007",
+      "severity": "should_fix",
+      "category": "regression_risk",
+      "title": "status-detector.ts の detectPrompt 呼び出しは入力が 15 行に制限されており Codex 選択肢が切り詰められる可能性",
+      "description": "status-detector.ts の detectSessionStatus() は L83 で `lines.slice(-STATUS_CHECK_LINE_COUNT)` (STATUS_CHECK_LINE_COUNT=15) により最後の 15 行のみを取得してから detectPrompt に渡している。detectMultipleChoicePrompt は内部で最後 50 行をスキャンするが、入力自体が 15 行に制限されていれば 15 行分しかスキャンできない。Codex の選択肢が多い場合（例: 10 個以上の選択肢 + 質問テキスト）、15 行では収まらず detectPrompt が検出に失敗し、サイドバーのステータスが 'waiting' にならない可能性がある。現行の Claude CLI の選択肢は通常 2-5 個程度なので問題にならなかったが、Codex の選択肢数が多い場合は問題になりうる。",
+      "recommendation": "Issue の受入条件「Codex CLI 選択肢表示時のサイドバーステータスが正しく 'waiting'（黄色）になること」のテスト計画に、選択肢数が多い場合（7 個以上）のケースを含めるべき。必要に応じて STATUS_CHECK_LINE_COUNT の引き上げを検討するか、status-detector.ts では detectPrompt に渡す前に 15 行制限を解除する変更が必要かもしれない旨を注記する。",
+      "affected_section": "影響範囲 > 変更対象ファイル > status-detector.ts"
+    },
+    {
+      "id": "S3-008",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "フロントエンドの PromptPanel / MobilePromptSheet / MessageList コンポーネントが影響範囲に含まれていない",
+      "description": "Issue の影響範囲テーブルにはバックエンドのファイルのみが記載されているが、フロントエンドコンポーネントも影響を受ける可能性がある。PromptPanel.tsx と MobilePromptSheet.tsx は promptData.type === 'multiple_choice' のブランチで選択肢 UI を描画しており、Codex 固有の選択肢形式（例: TUI ベースで番号入力ではなく矢印キー選択の場合）では UI の送信ロジックが異なる可能性がある。ただし、テキストベースの番号入力方式であれば現行の UI で対応可能。また WorktreeDetailRefactored.tsx の isPromptWaiting / promptData 消費ロジックは現行のままで問題ない。",
+      "recommendation": "TUI ベースの場合: PromptPanel と MobilePromptSheet の multiple_choice セクションで、ユーザーが番号をクリック -> sendKeys で矢印キー操作に変換する中間レイヤーが必要になる可能性がある。テキストベースの場合: 現行 UI で対応可能。いずれにせよ、フロントエンドコンポーネントを「関連コンポーネント（動作確認）」に追加し、動作確認対象とすべき。",
+      "affected_section": "影響範囲 > 関連コンポーネント（動作確認）"
+    },
+    {
+      "id": "S3-009",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "テストファイルの影響範囲が不足（auto-yes-manager.test.ts, prompt-response-verification.test.ts）",
+      "description": "Issue は tests/unit/prompt-detector.test.ts と tests/unit/lib/cli-patterns.test.ts のみをテスト追加対象としているが、detectPrompt のシグネチャが変更される場合、以下のテストファイルも更新が必要になる可能性がある: (1) tests/unit/lib/auto-yes-manager.test.ts - detectPrompt をモックしており（L431）、新シグネチャ対応のモック更新が必要。(2) tests/unit/api/prompt-response-verification.test.ts - detectPrompt をモックしており（L50, L112, L141）、同様にモック更新が必要。(3) tests/integration/api-prompt-handling.test.ts - プロンプト処理の統合テスト。",
+      "recommendation": "影響範囲テーブルに既存テストファイルの更新も含める。特に detectPrompt をモックしているテストは、シグネチャ変更に合わせてモックの引数を更新する必要がある。具体的には: tests/unit/lib/auto-yes-manager.test.ts, tests/unit/api/prompt-response-verification.test.ts, tests/integration/api-prompt-handling.test.ts。",
+      "affected_section": "実装タスク / 影響範囲"
+    },
+    {
+      "id": "S3-010",
+      "severity": "nice_to_have",
+      "category": "architecture",
+      "title": "detectPrompt の呼び出し箇所の正確な数が Issue 本文と実際のコードで不一致",
+      "description": "Issue 本文の「根本原因の仮説」セクションで「detectPrompt() の全 11 箇所の呼び出し」と記載されているが、実際にコードを検索すると以下の通り: (1) prompt-detector.ts 内の定義/内部呼び出し除外で、外部からの呼び出しは 8 箇所: auto-yes-manager.ts L290, status-detector.ts L87, prompt-response/route.ts L75, current-output/route.ts L88, response-poller.ts L248/L442/L556, claude-poller.ts L164/L232。合計 9 箇所（claude-poller.ts を含めると）。11 という数字の根拠が不明であり、正確な呼び出し箇所リストを明示すべき。",
+      "recommendation": "Issue 本文の「全 11 箇所」を正確な数に修正するか、全呼び出し箇所の一覧を明示的にリストアップする。正確な外部呼び出し箇所: (1) auto-yes-manager.ts L290, (2) status-detector.ts L87, (3) prompt-response/route.ts L75, (4) current-output/route.ts L88, (5) response-poller.ts L248 [Claude only], (6) response-poller.ts L442, (7) response-poller.ts L556, (8) claude-poller.ts L164, (9) claude-poller.ts L232。計 9 箇所。",
+      "affected_section": "根本原因の仮説 > 具体的な問題箇所 > 4"
+    }
+  ],
+  "summary": {
+    "total_findings": 10,
+    "must_fix": 3,
+    "should_fix": 5,
+    "nice_to_have": 2,
+    "overall_assessment": "Issue #193 の影響範囲分析は概ね正確であるが、3 つの重要な問題がある。第一に、claude-poller.ts が変更対象から欠落している（S3-001）。第二に、response-poller.ts の detectPrompt 呼び出し L248 が Claude 専用ガード内にあることが区別されておらず、実装者が不要な変更を行うリスクがある（S3-002）。第三に、Codex CLI の TUI ベース選択肢の場合の代替設計パスの影響範囲が未分析であり（S3-003）、前提条件確認の結果次第で prompt-detector.ts だけでなく sendKeys ロジック全体に影響が波及する可能性がある。アーキテクチャ面では、prompt-detector.ts の CLI ツール非依存性原則との整合性について案B（パターンパラメータ化）が最も妥当と考えられるが、Issue に推奨案が明記されていない。全体として、前提条件確認（TUI vs テキスト）の結果が影響範囲を大きく左右するため、確認後に影響範囲テーブルを更新するワークフローを明記すべきである。"
+  }
+}

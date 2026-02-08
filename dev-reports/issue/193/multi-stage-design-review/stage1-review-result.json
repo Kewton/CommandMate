@@ -1,0 +1,106 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "issue_number": 193,
+  "review_date": "2026-02-08",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "OCP",
+      "title": "detectMultipleChoicePrompt internal to prompt-detector.ts remains unparameterized for Pass 1/2 patterns",
+      "description": "The design policy shows that detectPrompt() receives DetectPromptOptions and passes them to detectMultipleChoicePrompt(). However, the current detectMultipleChoicePrompt() contains additional defense layers (Layer 3: isConsecutiveFromOne, Layer 4: hasDefaultIndicator check) that are hardcoded assumptions specific to Claude CLI. For example, Layer 4 requires 'at least one with indicator' - but the design does not clarify whether Codex's choiceIndicatorPattern always has such a concept. If Codex uses a different default-selection mechanism (or no default at all), the hasDefaultIndicator check in Layer 4 (line 344-349 of prompt-detector.ts) will cause all Codex multiple-choice detections to fail silently. The design should explicitly address whether Layer 4's 'must have at least one default indicator' invariant holds for Codex patterns.",
+      "recommendation": "Add a section in the design policy (Section 5.2 or a new subsection) that explicitly documents which validation layers (Layer 3 and Layer 4) apply to Codex patterns. If Codex does not have a default indicator concept, Layer 4 should be made conditional based on DetectPromptOptions (e.g., add an optional requireDefaultIndicator?: boolean field to DetectPromptOptions, defaulting to true for backward compatibility).",
+      "affected_section": "Section 5.2 prompt-detector.ts Changes"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "response-poller.ts has two separate detectPrompt() call sites that need identical modifications",
+      "description": "The design policy identifies two detectPrompt() call sites in response-poller.ts: L442 and L556 (Section 5.3). Looking at the actual source code, these correspond to line 248 (Claude-specific early check inside cliToolId === 'claude' block) and line 442/556 (generic check). The design notes L248 as 'change not needed (Claude-specific guard)' but L442 and L556 both need the same modification pattern (stripAnsi + getChoiceDetectionPatterns). This is a DRY concern: the same transformation logic (stripAnsi then detectPrompt with options) is being applied identically at two separate points within the same function (extractResponse). Consider whether the function could be refactored to avoid calling detectPrompt in two places with the same setup pattern.",
+      "recommendation": "In Section 5.4, add a note recommending extraction of a helper function within response-poller.ts such as 'detectPromptWithOptions(output, cliToolId)' that encapsulates stripAnsi + getChoiceDetectionPatterns + detectPrompt into a single call. This eliminates the risk of one call site being updated but not the other, and reduces the modification surface area.",
+      "affected_section": "Section 5.3 and 5.4 (response-poller.ts changes)"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "must_fix",
+      "category": "OCP",
+      "title": "status-detector.ts passes only last 15 lines (lastLines) to detectPrompt but design omits this windowing impact",
+      "description": "In the current source code, status-detector.ts line 87 calls detectPrompt(lastLines) where lastLines is the last 15 lines (STATUS_CHECK_LINE_COUNT). However, detectMultipleChoicePrompt internally uses the last 50 lines as its scan window. When status-detector passes only 15 lines, the 50-line window inside detectMultipleChoicePrompt becomes a 15-line window effectively. The design policy mentions this limitation briefly in Section 7.2 ('15行を超える選択肢リストは検出できない') but does not address the architectural mismatch: detectPrompt() was designed assuming it receives a larger output buffer, not a pre-windowed 15-line slice. When getChoiceDetectionPatterns is applied, Codex patterns may behave differently from Claude patterns under this 15-line constraint. This interaction between status-detector's windowing and prompt-detector's internal windowing should be explicitly documented.",
+      "recommendation": "In Section 5.3 (status-detector.ts changes), add explicit documentation about the 15-line windowing behavior. Consider whether status-detector.ts should pass the full cleanOutput to detectPrompt (with options) instead of lastLines, letting detectMultipleChoicePrompt handle its own windowing consistently. This would align with how auto-yes-manager.ts already passes the full cleanOutput (line 290). At minimum, document this behavioral difference as a known constraint.",
+      "affected_section": "Section 5.3 (status-detector.ts call site) and Section 7.2"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "category": "ISP",
+      "title": "DetectPromptOptions interface may need additional fields for TUI-based fallback",
+      "description": "Section 4.2 describes a TUI-based alternative design path where Codex uses arrow keys instead of number input. However, DetectPromptOptions (Section 3.1) only contains choiceIndicatorPattern and normalOptionPattern - both are RegExp fields for text-based detection. If the TUI path is needed, the interface would need to be extended with fundamentally different fields (e.g., inputMethod: 'number' | 'arrow-key'), which would violate ISP since text-based callers would see arrow-key-related fields they do not need. The current interface design is clean for the text-based path, but the design should acknowledge this potential future incompatibility.",
+      "recommendation": "Add a note in Section 3.1 or Section 4.2 explicitly stating that if the TUI path is needed, DetectPromptOptions should remain focused on detection patterns only, and a separate interface (e.g., PromptResponseStrategy) should handle the input method differences. This preserves ISP by separating detection concerns from response-method concerns.",
+      "affected_section": "Section 3.1 and Section 4.2"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "should_fix",
+      "category": "SRP",
+      "title": "getChoiceDetectionPatterns in cli-patterns.ts conflates pattern definition with prompt-detector interface knowledge",
+      "description": "The proposed getChoiceDetectionPatterns() function in cli-patterns.ts (Section 3.2) returns a DetectPromptOptions type, which is defined in prompt-detector.ts. This creates a dependency where cli-patterns.ts must import from prompt-detector.ts. Currently, the dependency direction is prompt-detector.ts -> (no imports from cli-patterns.ts), and cli-patterns.ts is a utility module. Adding a return type dependency from cli-patterns.ts to prompt-detector.ts creates a bidirectional conceptual coupling: cli-patterns defines patterns, prompt-detector consumes them, but now cli-patterns must know prompt-detector's interface shape. While not a circular import (the interface is just a type), it blurs the single responsibility of cli-patterns.ts as a pure pattern-definition module.",
+      "recommendation": "Define the DetectPromptOptions interface in a shared location (either in cli-patterns.ts where the patterns are defined, or in a separate types file like src/types/prompt-detection.ts). This keeps the dependency direction clean: prompt-detector.ts imports the interface from the shared types module, and cli-patterns.ts also imports from the same shared module. Alternatively, acknowledge in the design that cli-patterns.ts importing from prompt-detector.ts is an acceptable trade-off given the small interface surface.",
+      "affected_section": "Section 3.1 and 3.2"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "Optional parameter with empty-object default for Claude adds cognitive overhead",
+      "description": "The design has getChoiceDetectionPatterns('claude') returning an empty object {}, and detectPrompt internally uses ?? to fall back to DEFAULT_OPTION_PATTERN. While this maintains backward compatibility, it adds a layer of indirection: callers pass an empty object that looks like 'no configuration' but actually means 'use Claude defaults'. A reader must trace through two levels of fallback (getChoiceDetectionPatterns returns {} -> detectPrompt applies ?? defaults) to understand what patterns Claude actually uses. This is not a bug, but it increases cognitive load.",
+      "recommendation": "Consider having getChoiceDetectionPatterns('claude') return the actual Claude patterns explicitly (i.e., { choiceIndicatorPattern: DEFAULT_OPTION_PATTERN, normalOptionPattern: NORMAL_OPTION_PATTERN }) rather than relying on the ?? fallback in detectPrompt. This makes the behavior self-documenting at the call site. Alternatively, add a code comment in detectPrompt explaining that undefined options fields mean 'Claude CLI defaults'.",
+      "affected_section": "Section 3.2 and 5.2"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "Pattern for applying detectPrompt modifications is repeated identically across 5 call sites",
+      "description": "Section 5.3 shows that 5 different files need the identical 3-line modification pattern: (1) import getChoiceDetectionPatterns, (2) call getChoiceDetectionPatterns(cliToolId), (3) pass result to detectPrompt. The design acknowledges this repetition as a trade-off of the chosen approach (Section 11.1), but does not propose any mitigation. With 5+ call sites performing the same setup, a future pattern change (e.g., adding a third option to DetectPromptOptions) requires updating all sites. This is a maintainability risk.",
+      "recommendation": "Consider introducing a convenience wrapper function in cli-patterns.ts such as 'detectPromptForCli(cleanOutput: string, cliToolId: CLIToolType): PromptDetectionResult' that encapsulates the pattern lookup and detectPrompt call. This reduces the per-site modification to a single import + function call, and centralizes future changes. Document this as a design decision in Section 3.3 or Section 11.1.",
+      "affected_section": "Section 3.3 and Section 5.3"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "TUI-based alternative design path (Section 4.2) adds significant design surface area without confirmed need",
+      "description": "Section 4.2 describes a complete alternative design for TUI-based Codex CLI selection (arrow keys, sendKeys modification, getAnswerInput branching). However, Section 4.3 states the screenshot analysis suggests text-based input is likely. Including the full TUI alternative design in the policy adds complexity to the document and may mislead implementers into partially preparing for both paths. YAGNI suggests deferring the TUI design until it is confirmed as necessary (Phase 1 confirmation).",
+      "recommendation": "Reduce Section 4.2 to a brief note (2-3 sentences) acknowledging TUI as a possibility, with a reference to create a separate design addendum if Phase 1 confirms TUI behavior. Remove the detailed code examples and impact analysis from the current design policy to keep it focused.",
+      "affected_section": "Section 4.2"
+    },
+    {
+      "id": "DR1-009",
+      "severity": "nice_to_have",
+      "category": "DIP",
+      "title": "prompt-detector.ts default patterns remain as module-level constants rather than injectable defaults",
+      "description": "The design parameterizes patterns via DetectPromptOptions but keeps DEFAULT_OPTION_PATTERN and NORMAL_OPTION_PATTERN as module-level constants that serve as fallback values. This means the default behavior is still hardcoded to Claude CLI patterns within prompt-detector.ts. While the ?? operator provides extensibility, the module still 'knows' about Claude's specific patterns. For full DIP compliance, the default patterns could be provided by the caller or a configuration module, making prompt-detector.ts truly pattern-agnostic.",
+      "recommendation": "This is a minor DIP observation. The current approach is a pragmatic trade-off between purity and simplicity. Document in Section 11.1 that the default-pattern coupling to Claude is intentional for backward compatibility and KISS reasons, and that full DIP is not pursued to avoid over-engineering.",
+      "affected_section": "Section 11.1"
+    },
+    {
+      "id": "DR1-010",
+      "severity": "should_fix",
+      "category": "OCP",
+      "title": "current-output/route.ts cliToolId derivation differs from other call sites and is not addressed",
+      "description": "The design policy notes in Section 5.3 that current-output/route.ts needs modification, with cliToolId obtention marked as 'confirm how to get'. Looking at the actual source code (current-output/route.ts line 40), cliToolId is already derived from URL query parameters with fallback to worktree.cliToolId. However, the design does not confirm this is sufficient. If the cliToolId from the query param is missing and worktree.cliToolId defaults to 'claude', then Codex sessions polled via current-output API without explicit cliTool param would get Claude patterns applied, causing silent detection failures. This is an integration gap.",
+      "recommendation": "In Section 5.3, explicitly document how current-output/route.ts obtains cliToolId (from query param with worktree fallback), confirm this is correct for the Codex use case, and verify that all client-side callers of this API endpoint (especially useAutoYes.ts and the polling hooks) always pass the cliTool query parameter.",
+      "affected_section": "Section 5.3 (current-output/route.ts row)"
+    }
+  ],
+  "summary": {
+    "total_findings": 10,
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 4,
+    "overall_assessment": "The design policy demonstrates strong architectural thinking, particularly in choosing pattern parameterization (Option B) to maintain prompt-detector.ts CLI-tool independence. The OCP compliance is well-reasoned, and the backward compatibility strategy via optional parameters is sound. However, there are several areas requiring attention: (1) The interaction between status-detector.ts 15-line windowing and detectMultipleChoicePrompt's internal 50-line window is insufficiently documented and could cause silent Codex detection failures (must_fix). (2) The repeated 3-line modification pattern across 5 call sites creates a DRY concern that could be mitigated with a convenience wrapper function. (3) Layer 4's 'must have default indicator' assumption may not hold for Codex patterns, which could silently break detection. (4) The TUI alternative design section adds YAGNI complexity before Phase 1 confirmation. Overall, the design is solid and well-structured, with the main risk being edge cases in how existing defense layers interact with non-Claude patterns."
+  }
+}

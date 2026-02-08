@@ -1,0 +1,111 @@
+{
+  "issue_number": 193,
+  "stage": 1,
+  "stage_name": "通常レビュー - 指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DR1-003",
+        "item": "status-detector.ts 15行ウィンドウとprompt-detector.ts 50行ウィンドウの不整合",
+        "section_updated": "5.5節(新規), 5.3節, 7.2節, 11.1節, 12.1節, 14節, 16節",
+        "status": "reflected",
+        "details": "status-detector.tsでlastLines(15行)ではなくfull cleanOutputをdetectPromptに渡す方針に変更。ウィンドウイングの責務をdetectMultipleChoicePrompt内部に統一。新規セクション5.5を追加して詳細を記述。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR1-001",
+        "item": "Layer 4 hasDefaultIndicator のCodex対応",
+        "section_updated": "3.1節, 3.2節, 5.2節(新規サブセクション), 8.1節, 11.1節, 14節, 16節",
+        "status": "reflected",
+        "details": "DetectPromptOptionsにrequireDefaultIndicator?: booleanフィールドを追加。Layer 3/4のCLIツール別適用方針を5.2節に明記。getChoiceDetectionPatternsでCodexはrequireDefaultIndicator: falseを設定。テストケースを追加。"
+      },
+      {
+        "id": "DR1-007",
+        "item": "5+呼び出し元の3行パターン重複(DRY)",
+        "section_updated": "2.2節, 3.3節(新規), 5.1節, 5.3節, 7.1節, 11.1節, 12.1節, 16節",
+        "status": "reflected",
+        "details": "detectPromptForCli()コンビニエンスラッパー関数をcli-patterns.tsに追加する設計を新規セクション3.3に記述。全呼び出し元の修正パターンをラッパー使用に統一。アーキテクチャ図を更新。"
+      },
+      {
+        "id": "DR1-002",
+        "item": "response-poller.tsの2箇所の重複detectPrompt呼び出し",
+        "section_updated": "5.4節",
+        "status": "reflected",
+        "details": "detectPromptForCli()ラッパーによるDRY改善を5.4節に記載。stripAnsi結果の変数格納・再利用を追加推奨として記述。"
+      },
+      {
+        "id": "DR1-005",
+        "item": "DetectPromptOptionsの配置と依存方向",
+        "section_updated": "3.1節, 11.2節",
+        "status": "reflected",
+        "details": "DetectPromptOptionsをprompt-detector.tsに定義する設計判断と理由を3.1節に明記。cli-patterns.ts->prompt-detector.tsの型依存を許容する根拠を記述。将来の共有型ファイル抽出の検討条件を記載。不採用案としてDetectPromptOptions別ファイル抽出を11.2節に追加。"
+      },
+      {
+        "id": "DR1-010",
+        "item": "current-output/route.tsのcliToolId取得方法",
+        "section_updated": "5.3節, 12.4節(新規)",
+        "status": "reflected",
+        "details": "current-output/route.tsのcliToolId取得方法(クエリパラメータ+worktreeフォールバック)を5.3節に明記。正しく動作する条件とリスクを記述。12.4節にクライアント側cliToolパラメータ付与の検証対象を追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DR1-004",
+        "item": "TUIベースへのインターフェース拡張時のISP注意",
+        "section_updated": "3.1節",
+        "status": "reflected",
+        "details": "DetectPromptOptionsがテキストベース検出に特化している旨と、TUI対応時はPromptResponseStrategy等の別インターフェースで検出と応答方式を分離すべき旨をISP注意事項として追記。"
+      },
+      {
+        "id": "DR1-006",
+        "item": "Claude用パターンの明示的返却",
+        "section_updated": "3.2節, 5.1節",
+        "status": "reflected",
+        "details": "getChoiceDetectionPatterns('claude')が空オブジェクトではなくClaude用パターンを明示的に返却する設計に変更。自己文書化の利点をコメントで説明。CLAUDE_CHOICE_INDICATOR_PATTERN/CLAUDE_CHOICE_NORMAL_PATTERNをcli-patterns.tsにexport定義として追加。"
+      },
+      {
+        "id": "DR1-008",
+        "item": "TUI代替設計セクションの簡素化",
+        "section_updated": "4.2節",
+        "status": "reflected",
+        "details": "4.2節をYAGNI原則に基づき簡素化。詳細なコード例とTUI設計を削除し、3行の影響範囲要約と設計参考のみに縮小。Phase 1確認後に別途設計追補を作成する方針を明記。"
+      },
+      {
+        "id": "DR1-009",
+        "item": "デフォルトパターンのClaude結合の意図的許容",
+        "section_updated": "11.1節",
+        "status": "reflected",
+        "details": "DEFAULT_OPTION_PATTERN/NORMAL_OPTION_PATTERNのClaude結合が意図的な設計判断であることを11.1節に明記。完全DIP準拠を不採用とした理由(KISS優先)を記述。DR1-006のexplicit patterns設計との関係を説明。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-193-codex-multiple-choice-detection-design-policy.md",
+  "sections_updated": [
+    "2.2節 (アーキテクチャ図更新、detectPromptForCli追加)",
+    "3.1節 (requireDefaultIndicator追加、DR1-005/DR1-004注記)",
+    "3.2節 (Claude明示的パターン返却、DR1-006対応)",
+    "3.3節 (新規: detectPromptForCliラッパー関数、DR1-007)",
+    "4.2節 (YAGNI簡素化、DR1-008)",
+    "5.1節 (CLAUDE_CHOICE_*パターン追加)",
+    "5.2節 (Layer 3/4バリデーション詳細、DR1-001)",
+    "5.3節 (detectPromptForCli使用統一、DR1-010詳細)",
+    "5.4節 (DRY改善、DR1-002)",
+    "5.5節 (新規: ウィンドウイング修正、DR1-003)",
+    "7.1節 (detectPromptForCliパフォーマンス追加)",
+    "7.2節 (ウィンドウイング方針変更、DR1-003)",
+    "8.1節 (requireDefaultIndicatorテストケース追加)",
+    "11.1節 (DR1-007/DR1-001/DR1-003決定追加、DR1-009注記)",
+    "11.2節 (DetectPromptOptions別ファイル不採用案追加)",
+    "12.1節 (変更ファイルリスト更新)",
+    "12.4節 (新規: cliToolパラメータ検証対象、DR1-010)",
+    "14節 (新リスク追加: Layer 4スキップ、cliToolパラメータ欠落)",
+    "15節 (新規: レビュー指摘事項サマリー)",
+    "16節 (新規: 実装チェックリスト)",
+    "17節 (新規: レビュー履歴)"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}

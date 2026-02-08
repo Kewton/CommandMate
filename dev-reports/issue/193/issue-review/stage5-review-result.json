@@ -1,0 +1,74 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "iteration": 2,
+  "issue_number": 193,
+  "review_date": "2026-02-08",
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "should_fix",
+      "category": "correctness",
+      "title": "tests/integration/api-prompt-handling.test.ts は detectPrompt をモック・参照しておらず、シグネチャ変更の影響を受けない",
+      "description": "Issue の「既存テストファイルの更新（シグネチャ変更時）」テーブルに tests/integration/api-prompt-handling.test.ts が「プロンプト処理の統合テスト - シグネチャ変更の影響確認」として記載されている。しかし実際のコードを確認すると、このテストファイルは respond/route.ts のみをテストしており、detectPrompt を直接 import/mock していない。respond/route.ts は detectPrompt を呼び出さず getAnswerInput のみを使用している。getAnswerInput のシグネチャは本 Issue で変更対象ではないため、api-prompt-handling.test.ts は detectPrompt のシグネチャ変更の影響を受けない。このテストファイルをシグネチャ変更の更新対象として記載すると、実装者が不要な調査時間を費やすリスクがある。",
+      "recommendation": "「既存テストファイルの更新（シグネチャ変更時）」テーブルから tests/integration/api-prompt-handling.test.ts を削除するか、「detectPrompt のシグネチャ変更の直接的影響はなし。respond/route.ts 経由の動作確認のみ」と更新理由を修正すべき。",
+      "affected_section": "影響範囲 > 既存テストファイルの更新（シグネチャ変更時）"
+    },
+    {
+      "id": "S5-002",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "respond/route.ts が response-poller.ts の startPolling を import しているが、Issue 本文の import 関係記述と実際のコードに不整合がある",
+      "description": "Issue の「関連コンポーネント（動作確認）」セクションでは respond/route.ts について「getAnswerInput()を使用しており（L82-113）、Codex TUIベース選択肢の場合はsendKeysロジックの変更が必要になる可能性あり」と記載されている。しかし実際のコードを確認すると、respond/route.ts は L12 で response-poller.ts の startPolling を import し L178 で startPolling(params.id, cliToolId) を呼び出している。一方、api-prompt-handling.test.ts は claude-poller.ts の startPolling をモックしている（L54-57, L240）。この不整合は respond/route.ts のテストが claude-poller を参照しているにもかかわらず、実際のコードは response-poller を使用していることを示しており、テスト自体が不正確な可能性がある。ただしこれは本 Issue の直接的なスコープ外であるため、動作確認時の注意事項として認識しておく程度でよい。",
+      "recommendation": "この不整合は本 Issue のスコープ外だが、動作確認時に respond/route.ts の startPolling が response-poller.ts から import されていることを認識しておくべき。テスト修正が必要な場合は別 Issue として扱う。",
+      "affected_section": "影響範囲 > 関連コンポーネント（動作確認）"
+    },
+    {
+      "id": "S5-003",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "案B（パターンパラメータ化）採用時の具体的な実装タスク分解が不足",
+      "description": "Issue は案Bを推奨と明記しており、DetectPromptOptions の型定義例まで示している。しかし実装タスクリストは案B に特化した分解になっていない。具体的には: (1) DetectPromptOptions interface の定義タスクが明示されていない。(2) detectPrompt(output, options?) のシグネチャ変更タスクが個別タスクとして記載されていない（「detectMultipleChoicePrompt()をCodex形式対応」の中に暗黙的に含まれている）。(3) 呼び出し元でパターンセットを cli-patterns.ts から取得して渡す変更が、各ファイルの実装タスクに「cliToolIdを渡す修正」と記載されているが、案B ではcliToolIdではなくパターンオブジェクトを渡すため、タスク記述と推奨案の間にズレがある。案B を採用する場合、各呼び出し元は「cliToolId に基づき cli-patterns.ts からパターンセットを取得し、detectPrompt(output, { choiceIndicatorPattern, normalOptionPattern }) として渡す」という処理になり、「cliToolId を渡す」とは異なる。",
+      "recommendation": "以下のいずれかの対応が望ましい: (A) 実装タスクの記述を案B に合わせて更新（「cliToolIdを渡す修正」ではなく「CLIツール別パターンをoptions引数で渡す修正」と記載）。(B) または、案B の詳細設計は設計フェーズで行うため、実装タスクは現状の概要レベルで十分と判断する旨を注記する。実装者が混乱しないよう、推奨案と実装タスクの記述が整合していることが重要。",
+      "affected_section": "実装タスク"
+    },
+    {
+      "id": "S5-004",
+      "severity": "nice_to_have",
+      "category": "clarity",
+      "title": "「detectPromptの外部呼び出し箇所（計9箇所）」のリスト番号5-9にクラウドバッジ的な注記があるが、変更対象テーブルとの整合性で一部不明瞭",
+      "description": "根本原因セクションの呼び出し箇所リストでは response-poller.ts L248 に「[Claude専用ガード内 - 変更不要の可能性]」と注記がある。一方、変更対象テーブルでは response-poller.ts の説明に「L248はClaude専用ガード内のため変更不要。L442とL556が変更必要」と記載されている。リストの「変更不要の可能性」と影響範囲テーブルの「変更不要」は表現の確度が異なり、若干の不整合がある。些細な問題であるが、実装者が「まだ確定していない」と解釈する可能性がある。",
+      "recommendation": "根本原因セクションの注記を「[Claude専用ガード内 - 変更不要]」に統一する（「の可能性」を削除）。変更対象テーブルの記載と整合させる。",
+      "affected_section": "根本原因の仮説 > 具体的な問題箇所 > 4"
+    },
+    {
+      "id": "S5-005",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "useAutoYes.ts の影響確認記述が薄い",
+      "description": "関連コンポーネントに useAutoYes.ts が「クライアント側Auto-Yesフック。サーバー側ポーリングとの連携確認」として記載されているが、具体的に何を確認すべきかが不明確。useAutoYes.ts は current-output/route.ts の isPromptWaiting と promptData を消費しており、Codex の選択肢が正しく検出された場合に isPromptWaiting=true が返され、クライアント側の Auto-Yes ロジックが重複応答を試みないかの確認が重要。サーバー側ポーリング（auto-yes-manager.ts）が既に自動応答を送信した場合、lastServerResponseTimestamp による重複防止が機能するかの確認が主な動作確認ポイントになる。",
+      "recommendation": "useAutoYes.ts の確認内容を具体化する。例:「Codex 選択肢検出時に isPromptWaiting=true が current-output API から返された場合、クライアント側 Auto-Yes がサーバー側ポーリングと重複しないことを確認（lastServerResponseTimestamp による防止機構の動作検証）」。",
+      "affected_section": "影響範囲 > 関連コンポーネント（動作確認）"
+    }
+  ],
+  "summary": {
+    "total_findings": 5,
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "overall_assessment": "2回の更新を経て、Issue #193 は大幅に改善された。Stage 1 の全10件の指摘事項（must_fix 2件、should_fix 5件、nice_to_have 3件）および Stage 3 の全10件の指摘事項（must_fix 3件、should_fix 5件、nice_to_have 2件）はすべて適切に対処されている。特に以下の点が顕著に改善された: (1) detectPrompt() の全9箇所の呼び出しが正確な行番号とともに列挙されている、(2) TUI ベース vs テキストベースの代替設計パスが影響範囲とともに文書化されている、(3) 設計方針が案Bに絞り込まれ推奨理由と型定義例が示されている、(4) テストファイルの更新計画が追加されている。残存する3件のshould_fix指摘は、(a) api-prompt-handling.test.ts がシグネチャ変更の影響を受けないにもかかわらず更新対象に含まれている不正確さ、(b) 実装タスクの「cliToolIdを渡す」記述が推奨案B（パターンパラメータ化）と整合していないズレ、(c) respond/route.ts のテストにおける startPolling import元の不整合（スコープ外）である。全体として、Issue は実装に十分な情報を含んでおり、前提条件確認（TUI vs テキスト）後の設計フェーズにスムーズに移行できる状態にある。"
+  },
+  "stage1_findings_resolution": {
+    "S1-001": "resolved - 全9箇所の呼び出しが行番号付きで列挙され、変更対象テーブルに反映済み",
+    "S1-002": "resolved - 前提条件セクションに TUI vs テキスト確認の4項目が追加済み",
+    "S1-003": "resolved - prompt-response/route.ts が変更対象テーブルと実装タスクに追加済み",
+    "S1-004": "resolved - auto-yes-manager.ts が変更対象テーブルと実装タスクに追加済み",
+    "S1-005": "resolved - response-poller.ts（L248/L442/L556の区別付き）と claude-poller.ts が追加済み",
+    "S1-006": "resolved - TUI ベースの代替設計パスセクションが追加済み",
+    "S1-007": "resolved - 受入条件に Auto-Yes の具体的な動作方針が追加済み",
+    "S1-008": "resolved - status-detector.ts が変更対象テーブルに追加済み（STATUS_CHECK_LINE_COUNT注記付き）",
+    "S1-009": "resolved - current-output/route.ts が変更対象テーブルに追加済み",
+    "S1-010": "resolved - 案B が推奨案として明記され、理由と型定義例が示されている"
+  }
+}

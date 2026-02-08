@@ -1,0 +1,49 @@
+{
+  "status": "success",
+  "refactoring_applied": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "change": "Added exported sanitizeAnswer() function, MAX_ANSWER_LENGTH constant, and CONTROL_CHAR_PATTERN",
+      "reason": "DRY: Extract duplicated input sanitization logic from two API route handlers into a single shared function"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "change": "Replaced inline max-length check and control character filtering with sanitizeAnswer() call",
+      "reason": "DRY: Use shared sanitization function from prompt-detector.ts"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/respond/route.ts",
+      "change": "Replaced inline max-length check and control character filtering with sanitizeAnswer() call",
+      "reason": "DRY: Use shared sanitization function from prompt-detector.ts"
+    },
+    {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "change": "Added 8 unit tests for sanitizeAnswer() covering: normal input, numeric input, max length rejection, exact max length, control character stripping, newline preservation, DEL character stripping, tab stripping",
+      "reason": "Test coverage for new shared function"
+    }
+  ],
+  "refactoring_skipped": [
+    {
+      "candidate": "Duplicate regex patterns between prompt-detector.ts (DEFAULT_OPTION_PATTERN) and cli-patterns.ts (CLAUDE_CHOICE_INDICATOR_PATTERN)",
+      "reason": "Intentional architectural separation: prompt-detector.ts is CLI-tool-agnostic (module-private defaults), cli-patterns.ts is CLI-tool-aware (exported for callers). Sharing would create circular dependency or break module boundary. Comments document the relationship."
+    },
+    {
+      "candidate": "DetectPromptOptions interface redesign",
+      "reason": "Interface is already clean: 3 optional properties, each with clear JSDoc. No violation of ISP (Interface Segregation Principle). No change needed."
+    },
+    {
+      "candidate": "response-poller.ts detectPrompt() usage on line 248 (Claude-specific early check without CLI options)",
+      "reason": "This is inside a Claude-specific code path (if cliToolId === 'claude'), so using detectPrompt() without options is correct (defaults to Claude patterns). Converting to detectPromptForCli would be functionally equivalent but add unnecessary indirection."
+    },
+    {
+      "candidate": "Additional shared helpers (e.g., tmux send-keys pattern used in both routes)",
+      "reason": "The send-keys pattern (send answer, wait 100ms, send Enter) is used in 3 places (prompt-response, respond, auto-yes-manager) but each has slightly different surrounding logic (e.g., different error handling, logging). Extraction would add complexity without meaningful benefit. YAGNI."
+    }
+  ],
+  "verification": {
+    "tsc": "pass",
+    "lint": "pass",
+    "test": "pass"
+  },
+  "notes": "One refactoring applied: extracted duplicated input sanitization logic into shared sanitizeAnswer() function (DRY). Pre-existing test failure in claude-session.test.ts (2 tests, timeout-related, unrelated to Issue #193) exists before and after refactoring. All 140 other test files pass (2819 tests + 8 new = total passing). Static analysis clean (0 ESLint errors, 0 TypeScript errors). Commit: fdf9d7d."
+}
