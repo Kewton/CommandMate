@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 description: "開発進捗サマリ作成、ブロッカー報告"
 ---
 

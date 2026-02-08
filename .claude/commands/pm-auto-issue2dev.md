@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 description: "Issueレビューから実装完了まで完全自動化（Issueレビュー→設計レビュー→作業計画→TDD実装）"
 ---
 
@@ -21,6 +21,10 @@ Issueレビューから実装完了までの全工程（Issueレビュー → �
 ### パラメータ
 
 - **issue_number**: 開発対象のIssue番号（必須）
+
+### サブエージェントモデル指定
+
+各サブコマンド内で個別にモデル指定されています（レビュー・TDD系=opus、反映・報告系=sonnet継承）。
 
 ---
 
