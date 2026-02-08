@@ -1,0 +1,80 @@
+{
+  "issue_number": 187,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "iteration": 1,
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F-1",
+        "status": "applied",
+        "change_summary": "「既存テストの不整合（事前対応が必要）」セクションを新設。claude-session.test.ts L108のstartLineアサーション不整合（-10 vs -50）を記載し、Issue #187作業開始前の事前修正が必要な旨を明記"
+      },
+      {
+        "id": "F-2",
+        "status": "applied",
+        "change_summary": "受け入れ条件を「claude-session.test.tsの既存テストが全てパスすること」から「以下の更新を行った上で全てパスすること」に変更。DRY-002テスト（L232-246）のセパレータ除外後の期待動作への更新を具体的に記載"
+      },
+      {
+        "id": "F-3",
+        "status": "applied",
+        "change_summary": "受け入れ条件にタイムアウトテスト（L337-346）の更新内容を具体的に記載。エラースロー後にsendKeysが呼ばれないことを検証するテストへの更新と、安定化待機の新テスト追加を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F-4",
+        "status": "applied",
+        "change_summary": "問題点1に「レイテンシに関するトレードオフ」段落を追加。500ms遅延が全メッセージ送信に適用されること、UX体感への影響が許容範囲であること、初回のみ適用する条件分岐の検討可能性を記載"
+      },
+      {
+        "id": "F-5",
+        "status": "applied",
+        "change_summary": "「auto-yes-managerへの影響に関する補足」セクションを新設。コンテキストの違い（初期化直後ではない）、detectPrompt()の厳密性、送信内容の定型性の3点から安定化待機が不要である理由を明記"
+      },
+      {
+        "id": "F-6",
+        "status": "applied",
+        "change_summary": "問題点5に「波及範囲」段落を追加。stripAnsi()を使用する6つのソースファイルを列挙。テスト注意事項にcli-patterns.test.tsへのDEC Private Modeテスト追加とresponse-poller.tsのテスト確認の必要性を追記"
+      },
+      {
+        "id": "F-7",
+        "status": "applied",
+        "change_summary": "問題点4に「適用範囲の考慮」段落を追加。Ctrl+UをsendMessageToClaude()のみに適用する理由（サジェスト結合リスクが最も高いパス）、auto-yes-managerに適用しない理由、将来的なtmux.tsオプション化の検討を記載"
+      },
+      {
+        "id": "F-8",
+        "status": "applied",
+        "change_summary": "問題点2の副作用に関する補足に、セパレータ除外による初期化時間増加の推定値（セパレータ出現からプロンプト出現まで通常1〜3秒）を追記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F-9",
+        "status": "applied",
+        "change_summary": "テスト注意事項に、api-send-cli-tool.test.tsがsendMessageToClaudeをモックしているためタイムアウトエラー伝播のAPIレベル検証が不可である旨を追記"
+      },
+      {
+        "id": "F-10",
+        "status": "applied",
+        "change_summary": "影響範囲のテスト更新計画にapi-prompt-handling.test.tsを追加（変更不要、影響なしの確認記録として）"
+      }
+    ]
+  },
+  "additional_sections_added": [
+    "影響範囲（直接修正ファイル、間接影響ファイル、テスト更新計画）",
+    "既存テストの不整合（事前対応が必要）",
+    "auto-yes-managerへの影響に関する補足",
+    "レビュー履歴"
+  ],
+  "summary": {
+    "total_findings": 10,
+    "applied": 10,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/187"
+  }
+}

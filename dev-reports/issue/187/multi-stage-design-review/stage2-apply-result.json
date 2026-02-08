@@ -1,0 +1,80 @@
+{
+  "issue_number": 187,
+  "stage": 2,
+  "applied_findings": [
+    {
+      "id": "S2-F-1",
+      "severity": "must_fix",
+      "description": "Fixed line number references: L374-393 -> L360-394 with explanatory note about function signature start at L360",
+      "applied_to": "Section 3.1"
+    },
+    {
+      "id": "S2-F-2",
+      "severity": "should_fix",
+      "description": "Added note that inline comments (L374-377, L379-380, L384) are omitted for brevity in the code snippet",
+      "applied_to": "Section 3.1"
+    },
+    {
+      "id": "S2-F-3",
+      "severity": "must_fix",
+      "description": "Documented dual cause of L337-346 test failure: (1) timeout value mismatch (5000ms test vs 10000ms impl) and (2) try-catch swallowing errors. Explicitly noted that P1-2 + P1-3 jointly resolve both issues",
+      "applied_to": "Section 4.1 修正3, Section 11 テスト checklist"
+    },
+    {
+      "id": "S2-F-6",
+      "severity": "should_fix",
+      "description": "Added line reference L362 for SpecialKey type definition in src/lib/tmux.ts",
+      "applied_to": "Section 3.5, Section 11 P2-1 checklist"
+    },
+    {
+      "id": "S2-F-8",
+      "severity": "should_fix",
+      "description": "Fixed separator-only test assertion to use partial matching: toThrow('Claude initialization timeout') instead of exact match, to account for 'Failed to start Claude session: ' prefix wrapping at L344",
+      "applied_to": "Section 4.1 修正2, Section 11 テスト checklist"
+    },
+    {
+      "id": "S2-F-10",
+      "severity": "nice_to_have",
+      "description": "Added placement suggestion for CLAUDE_SEND_PROMPT_WAIT_TIMEOUT: after CLAUDE_PROMPT_WAIT_TIMEOUT (L83), before CLAUDE_PROMPT_POLL_INTERVAL (L91)",
+      "applied_to": "Section 3.4, Section 11 P1-3 checklist"
+    },
+    {
+      "id": "S2-F-11",
+      "severity": "should_fix",
+      "description": "Clarified Path B test mock: changed to require 3 capturePane calls (first 2 return non-prompt, 3rd returns prompt) so waitForPrompt polling timer advancement is actually exercised",
+      "applied_to": "Section 4.2 P0 Test Path B, Section 11 テスト checklist"
+    },
+    {
+      "id": "S2-F-12",
+      "severity": "nice_to_have",
+      "description": "Added recommendation to verify indirect impact files during implementation, especially error propagation through claude.ts and send/route.ts",
+      "applied_to": "Section 9, Section 11 new checklist section"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S2-F-4",
+      "severity": "should_fix",
+      "reason": "No change needed - review confirmed Section 3.2 L325 reference is accurate"
+    },
+    {
+      "id": "S2-F-5",
+      "severity": "nice_to_have",
+      "reason": "No change needed - review confirmed Section 3.6 L167 ANSI_PATTERN reference is accurate"
+    },
+    {
+      "id": "S2-F-7",
+      "severity": "must_fix",
+      "reason": "No change needed - review confirmed the L108 test inconsistency finding is already accurately documented in the design doc"
+    },
+    {
+      "id": "S2-F-9",
+      "severity": "should_fix",
+      "reason": "No change needed - review confirmed the proposed timer advancement in 修正3 is internally consistent after P1-2 and P1-3 are applied"
+    }
+  ],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-187-session-first-message-reliability-design-policy.md",
+  "summary": "Applied 8 Stage 2 consistency review findings to the design policy document. 3 must_fix items addressed: (1) corrected line number references for sendMessageToClaude from L374-393 to L360-394, (2) documented dual cause of L337-346 test failure and joint resolution by P1-2/P1-3, (3) F-7 was already correctly documented. 3 should_fix items applied: added code comment omission note, SpecialKey line reference, separator test partial matching, and Path B test mock clarification. 2 nice_to_have items applied: constant placement guidance and indirect impact verification. 4 findings skipped as they confirmed existing documentation accuracy.",
+  "applied_at": "2026-02-08"
+}

@@ -1,0 +1,33 @@
+{
+  "status": "success",
+  "tests_passed": 28,
+  "tests_failed": 0,
+  "coverage": 80,
+  "unit_tests": {
+    "total": 28,
+    "passed": 28,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_modified": [
+    "src/lib/claude-session.ts",
+    "tests/unit/lib/claude-session.test.ts"
+  ],
+  "files_created": [],
+  "commits": [
+    "fa0609c: fix(claude-session): improve first message send reliability"
+  ],
+  "summary": "Issue #187 TDD implementation complete. All P0/P1 changes implemented: (P0) Added CLAUDE_POST_PROMPT_DELAY stability wait in sendMessageToClaude() for both Path A (immediate prompt) and Path B (waitForPrompt). (P1-1) Removed CLAUDE_SEPARATOR_PATTERN from startClaudeSession() initialization check. (P1-2) Removed try-catch to propagate timeout errors. (P1-3) Added CLAUDE_SEND_PROMPT_WAIT_TIMEOUT constant (10000ms). All 28 tests pass, TypeScript and ESLint clean.",
+  "acceptance_criteria_results": {
+    "stability_delay_after_waitForPrompt": "PASS - CLAUDE_POST_PROMPT_DELAY applied after waitForPrompt returns in sendMessageToClaude()",
+    "stability_delay_on_immediate_prompt": "PASS - CLAUDE_POST_PROMPT_DELAY applied when prompt immediately detected (Path A)",
+    "separator_pattern_not_used_for_init": "PASS - startClaudeSession() no longer uses CLAUDE_SEPARATOR_PATTERN for initialization check",
+    "timeout_throws_error": "PASS - waitForPrompt timeout throws Error instead of silently sending message",
+    "timeout_uses_constant": "PASS - sendMessageToClaude uses CLAUDE_SEND_PROMPT_WAIT_TIMEOUT (10000ms) instead of hardcoded value",
+    "no_regression_on_subsequent_messages": "PASS - existing sendKeys tests updated and pass with stability delay",
+    "all_tests_pass": "PASS - 28/28 tests pass in claude-session.test.ts"
+  }
+}

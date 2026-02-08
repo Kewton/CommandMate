@@ -1,0 +1,95 @@
+{
+  "issue_number": 187,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_focus": "設計原則",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "F-1",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "category": "定数の重複管理",
+      "description": "CLAUDE_SEND_PROMPT_WAIT_TIMEOUT (10000ms) は CLAUDE_PROMPT_WAIT_TIMEOUT (5000ms) と用途が異なるため別定数としての導入自体は妥当だが、sendMessageToClaude() の既存コードでは 10000 がハードコードされており、現状の動作を定数化するだけの変更である。しかし、定数名に 'SEND' を含めて使用コンテキストをエンコードしている点が気になる。将来的に他の箇所でも '送信前のプロンプト待ち' が必要になった場合、同じ値を使うべきか別の定数を作るべきかが曖昧になる。",
+      "suggestion": "定数名を CLAUDE_SEND_PROMPT_WAIT_TIMEOUT のまま維持するのは許容範囲だが、JSDocコメントで 'sendMessageToClaude専用' であることと CLAUDE_PROMPT_WAIT_TIMEOUT との関係を明確に記述すること。設計書のSection 3.4のコメントは既にこの点を十分に説明しているため、実装時にそのコメントが忠実に反映されることを確認すれば問題ない。",
+      "location": "Section 3.4 P1-3: タイムアウト定数統一"
+    },
+    {
+      "id": "F-2",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "category": "P2-2 stripAnsi拡張の必要性",
+      "description": "ANSI_PATTERN の DEC Private Mode 対応 (P2-2) は7ファイルに波及する変更だが、設計書では具体的にどのDEC Private Modeシーケンスが問題を引き起こしているかの実例が示されていない。stripAnsiの現行パターンで実際に不具合が報告されたのか、それとも予防的な改善なのかが不明。YAGNIの観点では、実際に問題が発生してから対応しても遅くない。",
+      "suggestion": "P2-2の実装を進める場合、実際にClaude CLIが出力するDEC Private Modeシーケンス (例: '\\x1b[?25h' カーソル表示) がプロンプト検出を妨害した具体例をテストケースとして追加すること。具体例がない場合は、P2-2は延期を推奨する。",
+      "location": "Section 3.6 P2-2: stripAnsi DEC Private Mode対応"
+    },
+    {
+      "id": "F-3",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "category": "P0の安定化待機が全メッセージ送信に適用される点",
+      "description": "設計書はP0で安定化待機を if 文の外側に配置し、Path A (即検出) と Path B (waitForPrompt経由) の両方に適用する判断をしている。KISS原則に照らすとこのアプローチは正しい。ただし、設計書のSection 7で '2回目以降にも500ms遅延' というトレードオフが明記されている。Claude CLIの応答時間 (数秒~数十秒) に対して500msは無視できるという根拠は妥当だが、将来的にバッチ送信やテスト自動化で多数のメッセージを連続送信するユースケースが出た場合、累積遅延が問題になる可能性がある。",
+      "suggestion": "現時点では設計書の判断通りで問題ない。ただし、将来のバッチ送信ユースケースが出た場合に最適化する余地があることをコメントとして残すことを検討する。なお、現段階での最適化は YAGNI に該当するため不要。",
+      "location": "Section 3.1 P0: sendMessageToClaude() 安定化待機追加"
+    },
+    {
+      "id": "F-4",
+      "severity": "must_fix",
+      "principle": "DRY",
+      "category": "既存テストと実装の不整合 (capturePane startLine)",
+      "description": "既存テスト L108 で waitForPrompt() の capturePane 呼び出しが { startLine: -10 } を期待しているが、実装では { startLine: -50 } を使用している。この不整合は設計書の Section 4.1 修正1 で認識されており修正計画がある。しかし、これは設計書の問題ではなく既存コードのバグ (テストが実装に追随していない) であり、P0/P1の実装前に修正しないとテストが不安定になる。",
+      "suggestion": "設計書の Section 8 実装順序の '1. 事前対応' で既にこの修正が含まれている点は評価できる。実装時にこの順序を厳守すること。",
+      "location": "Section 4.1 既存テストの修正（事前対応）"
+    },
+    {
+      "id": "F-5",
+      "severity": "should_fix",
+      "principle": "SOLID (SRP)",
+      "category": "sendMessageToClaude の責務範囲",
+      "description": "P0/P1/P2の変更後、sendMessageToClaude() は以下の責務を持つ: (1) セッション存在確認、(2) プロンプト状態検証、(3) プロンプト待機、(4) 安定化待機、(5) 入力クリア (P2)、(6) メッセージ送信、(7) Enter送信。7つのステップは多いが、各ステップが1-2行であり、全体で20行程度に収まるため、関数分割するほどの複雑性はない。SRP違反の兆候はあるが、現時点では許容範囲。",
+      "suggestion": "現時点での関数分割は不要。ただし、今後さらにステップが追加される場合 (例: リトライ機構、メッセージ検証) は、'プロンプト準備' と 'メッセージ送信' を分離する extract method を検討すること。",
+      "location": "Section 3.1, 3.5 (sendMessageToClaude全体)"
+    },
+    {
+      "id": "F-6",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "category": "P2-1 SpecialKey型拡張の最小性",
+      "description": "SpecialKey 型に 'C-u' を追加する変更は最小限で適切。既存の sendSpecialKey 関数を活用しており、新しい関数やインターフェースを導入していない。tmux の send-keys で 'C-u' はそのまま動作するため、特別なエスケープ処理も不要。設計は KISS に準拠している。",
+      "suggestion": "変更なし。設計は適切。",
+      "location": "Section 3.5 P2-1: Ctrl+U入力クリア"
+    },
+    {
+      "id": "F-7",
+      "severity": "should_fix",
+      "principle": "SOLID (OCP)",
+      "category": "P1-1 セパレータパターン除外の設計判断",
+      "description": "startClaudeSession() から CLAUDE_SEPARATOR_PATTERN の検出を除外する変更は、信頼性向上の観点で妥当。ただし、この変更により CLAUDE_SEPARATOR_PATTERN のインポートが claude-session.ts で不要になる可能性がある。設計書では 'テストファイルでのインポートは残す' と記載しているが、テストファイルで CLAUDE_SEPARATOR_PATTERN を直接テストしているケース (L232-246, DRY-002テスト) は、セパレータパターンが '使われなくなった' ことのテストに変更される。既存のテストコード L232-246 の修正案 (Section 4.1 修正2) はこの点を正しく反映している。",
+      "suggestion": "claude-session.ts から CLAUDE_SEPARATOR_PATTERN のインポートを削除し、cli-patterns.ts のテスト (別ファイル) でパターン自体の正当性を検証する構成に変更すること。これにより、使用していないインポートが残る問題を回避できる。ESLintの unused-imports ルールに引っかかる可能性がある。",
+      "location": "Section 3.2 P1-1: startClaudeSession() セパレータパターン除外"
+    },
+    {
+      "id": "F-8",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "category": "テスト設計の網羅性",
+      "description": "テスト設計 (Section 4.2) はP0のPath A/Path Bの両方をカバーしており十分。ただし、P2-1 (Ctrl+U) のテストケースが設計書に含まれていない。P2は 'optional' と位置付けられているが、実装する場合はテストも必要。",
+      "suggestion": "P2-1を実装する場合、sendSpecialKey('C-u') が sendKeys の前に呼ばれることを検証するテストを追加すること。",
+      "location": "Section 4.2 新規テスト"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-187-session-first-message-reliability-design-policy.md",
+    "src/lib/claude-session.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/tmux.ts",
+    "tests/unit/lib/claude-session.test.ts"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}

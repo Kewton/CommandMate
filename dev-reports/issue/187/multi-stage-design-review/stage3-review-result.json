@@ -1,0 +1,73 @@
+{
+  "issue_number": 187,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_focus": "影響範囲",
+  "status": "conditionally_approved",
+  "score": "4/5",
+  "findings": [
+    {
+      "id": "S3-F-1",
+      "severity": "must_fix",
+      "category": "missing_impact",
+      "description": "設計書Section 9の「間接影響ファイル」にて、テストファイル tests/unit/lib/claude-session.test.ts のL108で waitForPrompt() の capturePane引数が { startLine: -10 } を期待しているが、実装は { startLine: -50 } を使用している不整合が記載されている（F-4）。しかし、Section 9にはもう一つの間接影響テストファイルが欠落している。tests/integration/api-send-cli-tool.test.ts（L17）では sendMessageToClaude をモックしているが、P1-2のエラースロー変更後は sendMessageToClaude がタイムアウト時にErrorをthrowするようになるため、このインテグレーションテストのモック設定がエラーケースをカバーしていない。send/route.ts のL140-148のtry-catchがこのエラーをHTTP 500に変換する動作を検証するインテグレーションテストの追加が望ましい。",
+      "suggestion": "Section 9の間接影響ファイルリストに tests/integration/api-send-cli-tool.test.ts を追加し、P1-2のエラー伝播をカバーするテストケース追加を実装チェックリストのS2-F-12項目に明記する。"
+    },
+    {
+      "id": "S3-F-2",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "description": "設計書Section 9の間接影響ファイルのP2変更時リストに、worktreeステータス検出で stripAnsi を間接的に使用するファイルが2件欠落している。src/app/api/worktrees/route.ts と src/app/api/worktrees/[id]/route.ts は detectSessionStatus() を呼び出し、detectSessionStatus() 内部で stripAnsi() を使用する。P2-2の ANSI_PATTERN 拡張は stripAnsi の挙動を変更するため、これらのファイルも間接影響を受ける。また、tests/unit/lib/cli-patterns.test.ts にも stripAnsi のテストケースが存在し（L165-174）、P2-2適用時にはこのテストファイルの更新・拡充が必要になる。",
+      "suggestion": "Section 9のP2間接影響ファイルリストに以下を追加: src/app/api/worktrees/route.ts（detectSessionStatus経由）、src/app/api/worktrees/[id]/route.ts（detectSessionStatus経由）、tests/unit/lib/cli-patterns.test.ts（stripAnsiテスト更新）。"
+    },
+    {
+      "id": "S3-F-3",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "description": "sendMessageToClaude の呼び出し元について、設計書Section 9では src/lib/cli-tools/claude.ts のClaudeTool.sendMessage()（L66）と src/app/api/worktrees/[id]/send/route.ts を記載しているが、エラー伝播パスの説明が不完全。具体的には: (1) ClaudeTool.sendMessage() はtry-catchなしで sendMessageToClaude() を直接awaitしており、エラーは呼び出し元にそのまま伝播する。(2) send/route.ts のL140-148で cliTool.sendMessage() をtry-catchしてHTTP 500を返す。この伝播チェーンは設計書のS2-F-12で推奨事項として言及されているが、ClaudeTool.sendMessage()にtry-catchがない点（エラーをラップ/変換しない点）を確認事項として明示すべき。",
+      "suggestion": "Section 9またはSection 3.3に、エラー伝播パスのフロー図を追加: waitForPrompt() throws -> sendMessageToClaude() propagates -> ClaudeTool.sendMessage() propagates (no try-catch) -> send/route.ts catches -> HTTP 500. ClaudeTool.sendMessage()が意図的にエラーを透過している点を設計判断として記載する。"
+    },
+    {
+      "id": "S3-F-4",
+      "severity": "should_fix",
+      "category": "incorrect_impact",
+      "description": "設計書Section 9にて、P2変更時の影響ファイルとして response-poller.ts を記載しているが、response-poller.ts 内での stripAnsi 使用箇所は9箇所と非常に多い（L59, L233, L247, L262, L310, L349, L464, L532）。「基本的に正の効果」というSection 3.6の評価は妥当だが、response-poller.ts は出力解析ロジックが複雑であり、stripAnsi の挙動変更がレスポンスパースのロジックに予期しない影響を与える可能性がある。この高密度な使用を考慮したリグレッションテスト方針が記載されていない。",
+      "suggestion": "Section 3.6の「波及影響」セクションに、response-poller.ts が stripAnsi を9箇所で使用しており高密度な影響を持つことを明記し、P2-2実装時には response-poller の既存テストを全件パスすることを確認するリグレッションテスト方針を追記する。"
+    },
+    {
+      "id": "S3-F-5",
+      "severity": "nice_to_have",
+      "category": "missing_impact",
+      "description": "waitForPrompt() の呼び出し元として、設計書では sendMessageToClaude() 内部と startClaudeSession() の2箇所を暗黙的に示している。コードベースを検索した結果、waitForPrompt() はこの2箇所でのみ使用されていることを確認した（テストファイルを除く）。この確認結果を設計書に明示的に記載すると、将来のレビュアーにとって有益。",
+      "suggestion": "Section 9に waitForPrompt() の使用箇所を明示的に列挙: (1) sendMessageToClaude() L382、(2) startClaudeSession() では直接呼び出しなし（独自のポーリングループで同等処理を実施）。"
+    },
+    {
+      "id": "S3-F-6",
+      "severity": "nice_to_have",
+      "category": "missing_impact",
+      "description": "claude-poller.ts は claude-session.ts から captureClaudeOutput と isClaudeRunning をインポートしている。Issue #187の変更は sendMessageToClaude, waitForPrompt, startClaudeSession に限定されるため、claude-poller.ts には直接影響しない。ただし、この「影響なし」の判断根拠がSection 9に記載されていないため、レビュアーが独自に確認する必要がある。",
+      "suggestion": "Section 9に「影響なし判定ファイル」として claude-poller.ts を注記し、変更対象関数を使用していないことを明示する（レビュー効率向上のため）。"
+    },
+    {
+      "id": "S3-F-7",
+      "severity": "nice_to_have",
+      "category": "test_coverage",
+      "description": "P1-1（セパレータパターン除外）に伴い、テストファイル tests/unit/lib/claude-session.test.ts のL46で CLAUDE_SEPARATOR_PATTERN をインポートしている箇所と、L89-92の CLAUDE_SEPARATOR_PATTERN テスト（DRY-002 usage test）の扱いを明確にする必要がある。Section 4.1 修正2で「セパレータのみではポーリング継続」テストへの変更を記載しているが、L89-92の独立テスト（should use CLAUDE_SEPARATOR_PATTERN from cli-patterns）の扱いが言及されていない。テストファイルのインポートとして CLAUDE_SEPARATOR_PATTERN が残るか削除するかの方針が不明確。",
+      "suggestion": "Section 4.1にL89-92テストの扱いを明記: (1) CLAUDE_SEPARATOR_PATTERN 自体は cli-patterns.ts に残存するため、テストファイルでのインポートと独立テストは維持してよい、(2) ただしテストの意味が「claude-session.tsでの使用を検証」から「パターン自体の正当性検証」に変わるため、テストのdescribe/itメッセージの修正を推奨。"
+    },
+    {
+      "id": "S3-F-8",
+      "severity": "should_fix",
+      "category": "missing_impact",
+      "description": "P0の安定化待機（500ms）が auto-yes-manager.ts の pollAutoYes() に影響しないことの確認が不足。auto-yes-manager.ts のL312はsendKeysを直接呼び出しており sendMessageToClaude() を経由しないため、P0の500ms遅延は適用されない。これは設計書Section 3.5で「auto-yes-managerやrespond APIには不要」と言及されている（P2-1のCtrl+Uの文脈）が、P0の安定化待機についても同様の「影響なし」判断を明示すべき。auto-yes-manager が sendMessageToClaude() ではなく sendKeys を直接使用する設計判断の根拠（応答の即時性が求められるため）を記載すると、将来の保守性が向上する。",
+      "suggestion": "Section 3.1のP0設計判断に、auto-yes-manager.ts のpollAutoYes()がsendKeysを直接使用しており sendMessageToClaude() を経由しないため、P0の安定化待機の影響を受けないことを明記する。"
+    }
+  ],
+  "summary": "影響範囲の分析は概ね正確で、主要な直接修正ファイル4件と間接影響ファイルの記載は適切である。ただし、must_fix 1件として、P1-2のエラースロー変更に伴うインテグレーションテスト（api-send-cli-tool.test.ts）の影響が欠落している。should_fix 4件では、P2のstripAnsi変更時の間接影響ファイルの不足（worktreeルート2件、cli-patternsテスト1件）、エラー伝播パスの明確化、response-poller.tsの高密度stripAnsi使用へのリグレッションテスト方針の欠如を指摘した。nice_to_have 3件は、レビュー効率向上のための「影響なし判定」の明示化とテストファイルのインポート扱いに関するものである。全体として、設計書の影響範囲分析は実用的なレベルで正確だが、エラー伝播チェーンの可視化とP2変更時の間接影響の網羅性を改善することで、実装時のリスクをさらに低減できる。",
+  "risk_assessment": {
+    "technical_risk": "low",
+    "security_risk": "low",
+    "operational_risk": "low"
+  },
+  "review_date": "2026-02-08"
+}

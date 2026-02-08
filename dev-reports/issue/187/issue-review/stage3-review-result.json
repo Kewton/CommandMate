@@ -1,0 +1,204 @@
+{
+  "issue_number": 187,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_focus": "影響範囲",
+  "review_date": "2026-02-08",
+  "findings": [
+    {
+      "id": "F-1",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "description": "既存テスト claude-session.test.ts L108 のアサーション不整合: waitForPrompt() のテストが capturePane を { startLine: -10 } で呼び出すことを期待しているが、実装（claude-session.ts L248）では { startLine: -50 } を使用。このテストは現時点で既にFAILする状態であり、Issue #187 の修正とは無関係の既存不整合。修正時にテスト全量パスの受け入れ条件と矛盾するため、先行して修正が必要。",
+      "suggestion": "テスト L108 の expect を { startLine: -50 } に修正するか、実装側と合わせてどちらかに統一する。Issue #187 の作業開始前に、この既存テスト不整合を確認・修正する手順を追加する。",
+      "affected_files": [
+        "tests/unit/lib/claude-session.test.ts"
+      ]
+    },
+    {
+      "id": "F-2",
+      "severity": "must_fix",
+      "category": "regression_risk",
+      "description": "P1「startClaudeSession() の初期化判定からセパレータパターンを除外」の変更は、既存テスト 'should detect separator using CLAUDE_SEPARATOR_PATTERN (DRY-002)' (claude-session.test.ts L232-246) を直接破壊する。このテストはセパレータのみで初期化完了する動作を期待しており、修正後はこのテストケースの削除または改変が必須。受け入れ条件「claude-session.test.ts の既存テストが全てパスすること」と矛盾する。",
+      "suggestion": "受け入れ条件の文言を修正し、「セパレータ単独での初期化検出テストを除き、既存テストが全てパスすること」とするか、あるいは「テストをセパレータ除外後の期待動作に合わせて更新した上で全てパスすること」と明記する。Issue本文に、DRY-002テストが変更される旨を明示的に記載すべき。",
+      "affected_files": [
+        "tests/unit/lib/claude-session.test.ts",
+        "src/lib/claude-session.ts"
+      ]
+    },
+    {
+      "id": "F-3",
+      "severity": "must_fix",
+      "category": "regression_risk",
+      "description": "P1「タイムアウト時の送信強行をエラースローに変更」は、sendMessageToClaude() の現在のテスト 'should throw error if prompt not detected within timeout' (L337-346) の期待値に影響する。現テストは capturePane が常に 'Still processing...' を返す想定で CLAUDE_PROMPT_WAIT_TIMEOUT (5000ms) 後のタイムアウトを期待しているが、現在のコードでは 10000ms のハードコード値を使用しており、catch ブロックで warn ログを出して sendKeys を続行する。この変更は: (1) タイムアウト値の変更、(2) エラーの伝播方式の変更、の両方でテストを破壊する可能性がある。",
+      "suggestion": "修正後のテストで期待されるタイムアウト値と、エラースロー後の sendKeys 非呼び出しを検証するテストを明確に設計する。テスト更新計画を Issue に追記する。",
+      "affected_files": [
+        "tests/unit/lib/claude-session.test.ts",
+        "src/lib/claude-session.ts"
+      ]
+    },
+    {
+      "id": "F-4",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "sendMessageToClaude() に CLAUDE_POST_PROMPT_DELAY (500ms) を追加することで、全てのメッセージ送信（初回だけでなく2回目以降も）に追加500msの遅延が発生する。これは ClaudeTool.sendMessage() 経由で /api/worktrees/:id/send API のレスポンス時間を増加させる。API呼び出し元（UIのメッセージ送信ボタン）のUX体感に影響する。",
+      "suggestion": "安定化待機が初回（セッション開始直後）のみ必要なのか、毎回必要なのかを検討する。2回目以降のメッセージ送信では Claude CLI が既に安定しているため、初回のみ安定化待機を適用する条件分岐も検討する。ただし、一律適用でも500msの追加は体感上問題ないレベルかもしれないため、トレードオフを明記する。",
+      "affected_files": [
+        "src/lib/claude-session.ts",
+        "src/lib/cli-tools/claude.ts",
+        "src/app/api/worktrees/[id]/send/route.ts"
+      ]
+    },
+    {
+      "id": "F-5",
+      "severity": "should_fix",
+      "category": "missing_consideration",
+      "description": "auto-yes-manager.ts (L306-314) も sendKeys を使用してメッセージを Claude CLI に送信している。auto-yes-manager は detectPrompt で prompt 検出後に即座に sendKeys を実行しており、sendMessageToClaude() と同様に安定化待機のパターンが適用されていない。Issue #187 の修正範囲を sendMessageToClaude() に限定した場合、auto-yes-manager 側で同様のメッセージ消失が発生する可能性は低い（prompt 検出がより厳密なため）が、整合性の観点で考慮が必要。",
+      "suggestion": "auto-yes-manager のメッセージ送信パスについて、同様の安定化待機が不要であることの理由をIssueまたは設計書に明記する。auto-yes-manager は detectPrompt() で既にプロンプトが確実に表示されている状態を検出しているため、sendMessageToClaude() とはコンテキストが異なる（初期化直後ではない）ことを記録する。",
+      "affected_files": [
+        "src/lib/auto-yes-manager.ts"
+      ]
+    },
+    {
+      "id": "F-6",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "description": "P2「stripAnsi の DEC Private Mode 対応」は、stripAnsi() を使用する全ファイルに影響する。stripAnsi() は以下の8ファイルで使用されている: claude-session.ts, status-detector.ts, auto-yes-manager.ts, response-poller.ts (5箇所), assistant-response-saver.ts, cli-patterns.ts (定義元)。ANSI_PATTERN の正規表現変更は全ての stripAnsi 呼び出し元に波及する。影響は「より多くのエスケープシーケンスを除去する」方向であるため、基本的には正の効果だが、既存のテスト（stripAnsi のテスト、各モジュールでの出力パース結果テスト）が影響を受ける可能性がある。",
+      "suggestion": "stripAnsi のテスト (cli-patterns.test.ts L165-175) に DEC Private Mode のテストケースを追加する。既存テストが破壊されないことを確認する。response-poller.ts は stripAnsi を5箇所で使用しており、最も影響範囲が広いため、response-poller のテストも確認する。",
+      "affected_files": [
+        "src/lib/cli-patterns.ts",
+        "src/lib/claude-session.ts",
+        "src/lib/status-detector.ts",
+        "src/lib/auto-yes-manager.ts",
+        "src/lib/response-poller.ts",
+        "src/lib/assistant-response-saver.ts",
+        "tests/unit/lib/cli-patterns.test.ts"
+      ]
+    },
+    {
+      "id": "F-7",
+      "severity": "should_fix",
+      "category": "missing_consideration",
+      "description": "P2「メッセージ送信前に Ctrl+U で入力エリアをクリア」は、sendMessageToClaude() 内で sendKeys(sessionName, '', false) の前に tmux send-keys C-u を追加する提案。しかし、auto-yes-manager (L312) や、/api/worktrees/:id/respond/route.ts (tmux sendKeys を直接使用) など、他のメッセージ送信パスには同様のクリア処理が適用されない。複数の送信パスの一貫性が保たれない。",
+      "suggestion": "入力エリアクリアを適用する場合、全ての sendKeys 呼び出しパスに一貫して適用するか、sendMessageToClaude() のみに適用する理由を明記する。または tmux.ts の sendKeys 関数にオプションとしてクリア機能を組み込むことも検討。",
+      "affected_files": [
+        "src/lib/claude-session.ts",
+        "src/lib/auto-yes-manager.ts",
+        "src/lib/tmux.ts"
+      ]
+    },
+    {
+      "id": "F-8",
+      "severity": "should_fix",
+      "category": "regression_risk",
+      "description": "P1「startClaudeSession() のセパレータパターン除外」は初期化検出を遅くする。現在セパレータは通常プロンプトより先に表示されるため、除外するとプロンプト出現まで待機時間が延びる。Issue では「CLAUDE_INIT_TIMEOUT（15秒）の猶予があるため検出遅延の影響は限定的」と記載しているが、startClaudeSession() 完了後に /api/worktrees/:id/send API のレスポンスが返るため、ユーザーの初回メッセージ送信時のUX（待機時間の増加）に直接影響する。",
+      "suggestion": "セパレータ除外による初期化時間の増加について、実測データまたは推定値を記載する。例えば「セパレータ出現からプロンプト出現まで通常 1-3 秒のため、初期化完了が 1-3 秒遅延する」等。受け入れ条件に「初期化時間の許容範囲」を定義するか、あるいは「セパレータ検出時にプロンプト待機を継続する」（セパレータを中間検出として扱い、早期リターンしない）アプローチも検討。",
+      "affected_files": [
+        "src/lib/claude-session.ts",
+        "src/app/api/worktrees/[id]/send/route.ts"
+      ]
+    },
+    {
+      "id": "F-9",
+      "severity": "nice_to_have",
+      "category": "missing_consideration",
+      "description": "integration テスト api-send-cli-tool.test.ts (L14-19) は sendMessageToClaude を vi.fn() でモックしているため、Issue #187 の修正（安定化待機の追加、タイムアウト時のエラースロー）が実際にAPIレベルで正しく動作するかを検証できない。Issue 本文の「テストに関する注意事項」セクションで claude-session.test.ts のモック制約には言及しているが、API レベルのテストカバレッジの限界には言及していない。",
+      "suggestion": "テスト注意事項セクションに「api-send-cli-tool.test.ts は sendMessageToClaude をモックしているため、タイムアウト時のエラー伝播が API レスポンス（500）に正しく反映されることの検証は api-send-cli-tool.test.ts では不可」と追記する。あるいは、タイムアウトエラー時の API 500 レスポンスを検証するテストケースの追加を検討する。",
+      "affected_files": [
+        "tests/integration/api-send-cli-tool.test.ts"
+      ]
+    },
+    {
+      "id": "F-10",
+      "severity": "nice_to_have",
+      "category": "missing_consideration",
+      "description": "api-prompt-handling.test.ts (L48-51) で claude-session モジュールを部分的にモックしている（getSessionName, isClaudeRunning のみ）。waitForPrompt のエクスポートや sendMessageToClaude の動作変更は、このテストファイルのモックに直接影響しないが、将来的に prompt 応答パスで sendMessageToClaude を使用する場合に注意が必要。",
+      "suggestion": "現時点では影響なしと判断。ドキュメントとして影響ファイル一覧に含めておく。",
+      "affected_files": [
+        "tests/integration/api-prompt-handling.test.ts"
+      ]
+    }
+  ],
+  "impact_summary": {
+    "directly_modified_files": [
+      "src/lib/claude-session.ts",
+      "src/lib/cli-patterns.ts"
+    ],
+    "indirectly_affected_files": [
+      "src/lib/cli-tools/claude.ts",
+      "src/app/api/worktrees/[id]/send/route.ts",
+      "src/app/api/worktrees/[id]/route.ts",
+      "src/app/api/worktrees/route.ts",
+      "src/lib/auto-yes-manager.ts",
+      "src/lib/status-detector.ts",
+      "src/lib/response-poller.ts",
+      "src/lib/assistant-response-saver.ts",
+      "src/lib/tmux.ts"
+    ],
+    "test_files_needed": [
+      {
+        "file": "tests/unit/lib/claude-session.test.ts",
+        "action": "update",
+        "reason": "既存テストのアサーション修正（startLine: -10 -> -50）、セパレータ単独検出テストの更新、タイムアウトテストの更新、安定化待機に関する新テスト追加"
+      },
+      {
+        "file": "tests/unit/lib/cli-patterns.test.ts",
+        "action": "update",
+        "reason": "stripAnsi の DEC Private Mode 対応テスト追加（P2適用時）"
+      },
+      {
+        "file": "tests/integration/api-send-cli-tool.test.ts",
+        "action": "no_change_required",
+        "reason": "sendMessageToClaude をモックしているため、claude-session.ts の内部変更による影響なし。ただしタイムアウトエラー伝播のテストカバレッジが不十分"
+      },
+      {
+        "file": "tests/integration/api-prompt-handling.test.ts",
+        "action": "no_change_required",
+        "reason": "claude-session の getSessionName/isClaudeRunning のみモックしており、sendMessageToClaude の変更影響なし"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/claude-session.ts",
+      "relevance": "主要な変更対象。sendMessageToClaude()（P0: 安定化待機追加）、startClaudeSession()（P1: セパレータパターン除外）、waitForPrompt()（P1: ハードコード値定数化）の3関数が修正対象",
+      "lines_affected": "L325 (セパレータOR条件), L374-391 (sendMessageToClaude), L239-258 (waitForPrompt), L382 (ハードコード10000ms)"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "P2変更対象。stripAnsi() の ANSI_PATTERN 正規表現修正",
+      "lines_affected": "L167 (ANSI_PATTERN)"
+    },
+    {
+      "file": "src/lib/cli-tools/claude.ts",
+      "relevance": "sendMessageToClaude() の直接呼び出し元。安定化待機追加による遅延増加の影響あり",
+      "lines_affected": "L66"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "relevance": "ClaudeTool.sendMessage() 経由で sendMessageToClaude() を使用。タイムアウトエラー時のHTTP 500レスポンス返却パスに影響",
+      "lines_affected": "L141 (cliTool.sendMessage), L142-148 (error handling)"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "stripAnsi 使用 (L279)、sendKeys 直接使用 (L312-314)。P2 stripAnsi 変更の波及影響あり。sendKeys 使用パスでの安定化待機は適用されないが、コンテキストが異なる",
+      "lines_affected": "L279, L306-314"
+    },
+    {
+      "file": "tests/unit/lib/claude-session.test.ts",
+      "relevance": "全面的なテスト更新が必要。L108 (startLine不整合), L232-246 (セパレータテスト), L337-346 (タイムアウトテスト), 安定化待機の新テスト追加",
+      "lines_affected": "L108, L232-246, L337-346"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-152-first-message-not-sent-design-policy.md",
+      "relevance": "Issue #152 の設計書。DRY-002 (CLAUDE_SEPARATOR_PATTERN), CONS-007 (CLAUDE_POST_PROMPT_DELAY) の設計根拠。Issue #187 の変更根拠の参照"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #187 の修正完了後に「最近の実装機能」セクションへの追記が必要"
+    }
+  ],
+  "summary": "Issue #187 の影響範囲は主に src/lib/claude-session.ts と tests/unit/lib/claude-session.test.ts に集中する。直接修正ファイルは2ファイル（claude-session.ts, cli-patterns.ts）、間接影響ファイルは9ファイル。最も重大な指摘事項は3件: (1) 既存テストの startLine アサーション不整合（F-1）、(2) セパレータパターン除外による既存テストの破壊（F-2）、(3) タイムアウト挙動変更によるテストの破壊（F-3）。いずれもテスト更新計画を事前に策定することで解消可能。安定化待機の一律追加（F-4）やstripAnsi変更の広範な波及（F-6）は should_fix レベルだが、設計判断の根拠を明記することが望ましい。auto-yes-manager への影響（F-5, F-7）は限定的だが、設計上の整合性として記録すべき。"
+}

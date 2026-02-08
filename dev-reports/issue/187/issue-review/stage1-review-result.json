@@ -1,0 +1,113 @@
+{
+  "issue_number": 187,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-08",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "問題点3の記述で、10000msのハードコード値がCLAUDE_PROMPT_WAIT_TIMEOUT定数（5000ms）と異なることが説明されていない。Issueは「10秒のタイムアウト後」と記載しているがこれは正確であるものの、定数名との不整合が改善案に反映されていない。P1改善案「タイムアウト時の送信強行をエラースローに変更」だけでは不十分で、ハードコード値10000msをCLAUDE_PROMPT_WAIT_TIMEOUT定数で統一する（または別定数として定義する）提案も含めるべき。",
+        "location": "問題点3 / 改善案テーブル P1行",
+        "recommendation": "改善案P1に「waitForPrompt()呼び出しのハードコード値10000msをCLAUDE_PROMPT_WAIT_TIMEOUTまたは専用定数に置き換え」を追加する。あるいはP1行を分割して2項目にする。",
+        "evidence": "claude-session.ts L83: CLAUDE_PROMPT_WAIT_TIMEOUT = 5000, L382: waitForPrompt(sessionName, 10000) -- ハードコード値と定数が不整合"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "受け入れ条件が記載されていない。Issue #152には詳細な受け入れ条件（4項目）とテスト手順が記載されているが、Issue #187にはこれらが欠落している。バグ修正Issueとして、いつ「完了」とみなすかの基準が不明確。",
+        "location": "Issue全体（受け入れ条件セクションの欠落）",
+        "recommendation": "受け入れ条件を追加する。例: (1) sendMessageToClaude()でwaitForPrompt()復帰後にCLAUDE_POST_PROMPT_DELAYが適用されること, (2) startClaudeSession()がセパレータのみでは初期化完了と判定しないこと, (3) タイムアウト時にメッセージを送信しないこと, (4) 既存の2回目以降のメッセージ送信に回帰がないこと",
+        "evidence": "Issue #152には「受け入れ条件」セクションに4つの条件が明記されている。Issue #187は改善案テーブルのみで検証可能な完了条件がない"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "問題点1の「初回判定」に関するP0改善案（改善案テーブル2行目）の説明が曖昧。「プロンプト即検出時にも安定化待機を適用（初回判定）」とあるが、sendMessageToClaude()のL378のif条件がtrueの場合（プロンプトが既に検出されている場合）にも安定化待機を適用するという意味か、それとも「初回メッセージかどうか」を判定するフラグを追加するのか不明。",
+        "location": "改善案テーブル P0 2行目",
+        "recommendation": "改善案の意図を明確にする。具体的には「sendMessageToClaude()のL378のif文がfalse（=プロンプト即検出）の場合にもCLAUDE_POST_PROMPT_DELAYを適用する」と記載するか、あるいはコード例を追加する。",
+        "evidence": "claude-session.ts L378: if (!CLAUDE_PROMPT_PATTERN.test(stripAnsi(output))) -- この条件がfalseの場合（プロンプト検出済み）でも安定化待機なしでL390のsendKeysに到達"
+      },
+      {
+        "id": "SF-3",
+        "category": "整合性",
+        "issue": "Issue #152との関係性の説明が不十分。Issue #152はCLOSED状態であり、同様の問題（セッション初回メッセージ送信の信頼性向上）に対する修正が実施済み。Issue #187は#152で導入された修正（waitForPrompt()、CLAUDE_POST_PROMPT_DELAY、タイムアウト時のエラースロー）が残した「穴」を塞ぐ修正であることを明確にすべき。現状の「関連」セクションでは単に参照しているだけで、#152で何が修正され、#187で何が残っているのかが分からない。",
+        "location": "関連 セクション",
+        "recommendation": "「関連」セクションを拡充し、「Issue #152ではstartClaudeSession()のタイムアウト処理改善とwaitForPrompt()関数追加が行われたが、sendMessageToClaude()側でのwaitForPrompt()復帰後の安定化待機、セパレータ早期検出、タイムアウト時の送信強行の問題は残存している」のように記載する。",
+        "evidence": "Issue #152の設計書 CONS-007にはCLAUDE_POST_PROMPT_DELAYでの対応済み記載あり。しかしそれはstartClaudeSession()側のみで、sendMessageToClaude()側には適用されていない。"
+      },
+      {
+        "id": "SF-4",
+        "category": "技術的妥当性",
+        "issue": "問題点2（セパレータ早期検出）のP1改善案「startClaudeSession()の初期化判定からセパレータパターンを除外」について、セパレータパターンを除外した場合の副作用（初期化検出が遅くなる、またはタイムアウトするケースが増える可能性）への言及がない。Claude CLIのバージョンによってはセパレータが先に表示されプロンプトが遅延するケースもあり得る。",
+        "location": "改善案テーブル P1 1行目",
+        "recommendation": "セパレータパターン除外の副作用について補足する。例: 「セパレータ除外により初期化検出タイミングが遅くなる可能性があるが、安定化待機と組み合わせることでプロンプト到達を確実に検出でき、信頼性が向上する。CLAUDE_INIT_TIMEOUTの15秒は十分な猶予がある。」",
+        "evidence": "claude-session.ts L325のOR条件は Issue #152の設計時にDRY-002として意図的に追加されたもの。除外する際はその設計判断の経緯を踏まえるべき"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "テスト戦略への言及がない。Issue #152にはテストに関する詳細な注意事項（既存テストがモックを使用している制約、推奨テスト戦略）が記載されているが、Issue #187にはテストに関する記述がない。",
+        "location": "Issue全体",
+        "recommendation": "最低限、「修正後にclaude-session.test.tsの既存テストが通ることを確認」「P0修正に対するユニットテスト追加を推奨」程度の言及を追加する。",
+        "evidence": "Issue #152の「テストに関する注意事項」セクション参照"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "問題点4（入力エリアクリア）のP2改善案について、Ctrl+UがtmuxのsendKeysで正しく動作するかの検証結果や制約への言及がない。tmuxのsendKeysでCtrl+Uを送信する方法（C-u）の補足があると実装時に役立つ。",
+        "location": "改善案テーブル P2 1行目",
+        "recommendation": "「tmux send-keys C-u でClaude CLIの入力行をクリアできることを検証の上実装」のように補足する。",
+        "evidence": "tmuxではCtrl+Uは C-u として送信可能だが、Claude CLIのターミナルUIがこのキーバインドを正しく処理するかは検証が必要"
+      },
+      {
+        "id": "NTH-3",
+        "category": "明確性",
+        "issue": "「初回のみ失敗する理由」セクションの説明が概念的であり、具体的なタイミングチャートやシーケンス図がない。Issue #152にはフロー図が記載されており分かりやすかった。",
+        "location": "初回のみ失敗する理由 セクション",
+        "recommendation": "Issue #152と同様に、問題が発生するタイミングを示すシーケンス図やフローチャートを追加するとより分かりやすくなる。",
+        "evidence": "Issue #152には[Server] isRunning() -> false ... [Claude] まだ初期化中、メッセージが無視される のようなシーケンス記載あり"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/claude-session.ts",
+      "relevance": "主要な変更対象ファイル。sendMessageToClaude()とstartClaudeSession()の両方が修正対象"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "stripAnsiのANSI_PATTERN修正（P2）、CLAUDE_SEPARATOR_PATTERNの使用箇所"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "relevance": "startSession() -> sendMessage()の呼び出しチェーン。エラーハンドリングの変更に影響を受ける"
+    },
+    {
+      "file": "src/lib/cli-tools/claude.ts",
+      "relevance": "ClaudeToolラッパー。claude-session.tsの変更がそのまま透過的に影響"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/design/issue-152-first-message-not-sent-design-policy.md",
+      "relevance": "Issue #152の設計書。今回のIssueとの差分確認に使用"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト全体の構造・コンポーネント説明"
+    }
+  ]
+}

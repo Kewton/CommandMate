@@ -1,0 +1,120 @@
+{
+  "issue_number": 187,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_focus": "整合性",
+  "findings": [
+    {
+      "id": "F-1",
+      "severity": "must_fix",
+      "category": "line_number_mismatch",
+      "description": "Design doc Section 3.1 states sendMessageToClaude() code is at L374-393, but the actual function definition starts at L360 (export async function sendMessageToClaude) and the relevant body (session check through console.log) spans L364-393. The '変更前' snippet in the design doc starts from the function signature 'export async function sendMessageToClaude(', which is at L360, not L374. L374 corresponds to a comment line '// Verify prompt state before sending'. This 14-line offset means implementers relying on the design doc line numbers will look at the wrong position.",
+      "design_doc_reference": "Section 3.1 '変更前（L374-393）'",
+      "actual_code_reference": "src/lib/claude-session.ts:360-394",
+      "suggestion": "Update the design doc to state '変更前（L360-394）' or '変更前（L374-393 body logic）' with a note that the function signature starts at L360. Alternatively, reference the function name rather than line numbers."
+    },
+    {
+      "id": "F-2",
+      "severity": "should_fix",
+      "category": "code_snippet_mismatch",
+      "description": "Design doc Section 3.1 '変更前' code snippet omits several inline comments that exist in the actual source code. The actual code includes comments at L374 (// Verify prompt state before sending (CONS-006, DRY-001)), L375 (// Use -50 lines...), L377 (// Strip ANSI escape sequences...), L379-380 (// Wait for prompt... / // Use longer timeout...), and L384 (// Log warning but don't block...). The design doc '変更前' shows a cleaner version without these comments. While the logic matches, an implementer doing a diff-based verification cannot confirm exact line-by-line match.",
+      "design_doc_reference": "Section 3.1 '変更前' code block",
+      "actual_code_reference": "src/lib/claude-session.ts:360-394",
+      "suggestion": "Include the actual inline comments in the '変更前' code snippet, or add a note that comments are omitted for brevity."
+    },
+    {
+      "id": "F-3",
+      "severity": "must_fix",
+      "category": "code_snippet_mismatch",
+      "description": "Design doc Section 4.1 修正3 (L337-346 timeout test) proposes changing the test to use CLAUDE_SEND_PROMPT_WAIT_TIMEOUT, but does not address a deeper existing inconsistency: the current test at L343 uses 'await vi.advanceTimersByTimeAsync(CLAUDE_PROMPT_WAIT_TIMEOUT + 100)' (5100ms) and expects a rejection with 'Prompt detection timeout (5000ms)'. However, the actual implementation at L382 calls 'waitForPrompt(sessionName, 10000)' (10 seconds). Furthermore, the current implementation wraps waitForPrompt in a try-catch that swallows the error (L381-386), meaning sendMessageToClaude never rejects due to prompt timeout -- it logs a warning and sends anyway. This means the current test should actually be failing or is only passing due to timer interaction subtleties. The design doc correctly proposes removing the try-catch (P1-2) and using CLAUDE_SEND_PROMPT_WAIT_TIMEOUT (P1-3), but the 修正3 section does not explicitly acknowledge that the current test is doubly incorrect (wrong timeout value AND wrong rejection expectation given the try-catch behavior).",
+      "design_doc_reference": "Section 4.1 修正3 (L337-346)",
+      "actual_code_reference": "tests/unit/lib/claude-session.test.ts:337-346 and src/lib/claude-session.ts:381-386",
+      "suggestion": "Add a note in 修正3 explaining that the current test has two issues: (1) the timeout value mismatch (5000ms test vs 10000ms implementation), and (2) the try-catch in the current implementation means sendMessageToClaude never actually rejects on prompt timeout. The proposed change simultaneously fixes both issues by removing the try-catch (P1-2) and introducing the named constant (P1-3). This context helps implementers understand why the test transformation is valid."
+    },
+    {
+      "id": "F-4",
+      "severity": "should_fix",
+      "category": "line_number_mismatch",
+      "description": "Design doc Section 3.2 correctly states the modification is at L325 for the separator pattern check. The actual code at L325 matches exactly: 'if (CLAUDE_PROMPT_PATTERN.test(cleanOutput) || CLAUDE_SEPARATOR_PATTERN.test(cleanOutput)) {'. This is consistent. No issue here -- verified as correct.",
+      "design_doc_reference": "Section 3.2 'L325'",
+      "actual_code_reference": "src/lib/claude-session.ts:325",
+      "suggestion": "No change needed. Line reference is accurate."
+    },
+    {
+      "id": "F-5",
+      "severity": "nice_to_have",
+      "category": "code_snippet_mismatch",
+      "description": "Design doc Section 3.6 correctly references L167 for ANSI_PATTERN. The actual pattern at L167 matches the '変更前' snippet exactly: '/\\x1b\\[[0-9;]*[a-zA-Z]|\\x1b\\][^\\x07]*\\x07|\\[[0-9;]*m/g'. Consistent.",
+      "design_doc_reference": "Section 3.6 'L167'",
+      "actual_code_reference": "src/lib/cli-patterns.ts:167",
+      "suggestion": "No change needed. Line reference and code snippet are accurate."
+    },
+    {
+      "id": "F-6",
+      "severity": "should_fix",
+      "category": "code_snippet_mismatch",
+      "description": "Design doc Section 3.5 shows the SpecialKey type as 'Escape' | 'C-c' | 'C-d' | 'C-u' in the proposed change. The actual type at tmux.ts L362 is 'Escape' | 'C-c' | 'C-d' (without C-u), which is the expected current state. However, the design doc description text says 'sendSpecialKey関数は既に存在し' and suggests adding C-u to SpecialKey型. The doc does not mention the line number for the SpecialKey type definition. For implementer clarity, the line number (L362) should be referenced.",
+      "design_doc_reference": "Section 3.5 P2-1",
+      "actual_code_reference": "src/lib/tmux.ts:362",
+      "suggestion": "Add 'src/lib/tmux.ts L362' as the line reference for the SpecialKey type definition to help implementers locate the change target."
+    },
+    {
+      "id": "F-7",
+      "severity": "must_fix",
+      "category": "code_snippet_mismatch",
+      "description": "Design doc Section 4.1 修正1 correctly identifies the test at L108 expecting '{ startLine: -10 }' while the actual implementation at claude-session.ts L248 uses '{ startLine: -50 }'. This is a genuine pre-existing inconsistency between the test and the implementation. However, the design doc F-4 labels this as must_fix and orders it as the first implementation step. This is correct. The actual test at L108 reads: expect(capturePane).toHaveBeenCalledWith(sessionName, { startLine: -10 }). The actual waitForPrompt implementation at L248 reads: const output = await capturePane(sessionName, { startLine: -50 }). Confirmed as a real inconsistency that matches the design doc's description.",
+      "design_doc_reference": "Section 4.1 修正1 (L108)",
+      "actual_code_reference": "tests/unit/lib/claude-session.test.ts:108 vs src/lib/claude-session.ts:248",
+      "suggestion": "No change needed to the design doc. The finding is accurate and correctly prioritized as the first implementation step."
+    },
+    {
+      "id": "F-8",
+      "severity": "should_fix",
+      "category": "other",
+      "description": "Design doc Section 4.1 修正2 proposes replacing the DRY-002 test at L232-246 with a test that expects startClaudeSession to reject when only separator output is returned. The proposed test expects: 'await expect(promise).rejects.toThrow(`Claude initialization timeout (${CLAUDE_INIT_TIMEOUT}ms)`)'. However, the actual startClaudeSession implementation wraps the initialization loop in a try-catch at L343-345 that re-throws as 'Failed to start Claude session: Claude initialization timeout (15000ms)'. This means the proposed test's toThrow message will NOT match because the actual thrown error will have the 'Failed to start Claude session: ' prefix. The proposed test should use: rejects.toThrow('Claude initialization timeout') (partial match) or rejects.toThrow(/Claude initialization timeout/).",
+      "design_doc_reference": "Section 4.1 修正2 (L232-246)",
+      "actual_code_reference": "src/lib/claude-session.ts:338-345",
+      "suggestion": "Update the proposed test assertion from exact match `rejects.toThrow(`Claude initialization timeout (${CLAUDE_INIT_TIMEOUT}ms)`)` to partial match `rejects.toThrow('Claude initialization timeout')` to account for the 'Failed to start Claude session: ' prefix wrapping at L344."
+    },
+    {
+      "id": "F-9",
+      "severity": "should_fix",
+      "category": "other",
+      "description": "Design doc Section 4.1 修正3 and the existing test at L337-346 reference the behavior where sendMessageToClaude should reject on prompt timeout. After P1-2 removes the try-catch, the proposed test uses 'await vi.advanceTimersByTimeAsync(CLAUDE_SEND_PROMPT_WAIT_TIMEOUT + 100)'. However, sendMessageToClaude calls waitForPrompt which internally uses polling with CLAUDE_PROMPT_POLL_INTERVAL (200ms) intervals. The timer advancement must account for both the polling intervals AND the overall timeout. The test advances time by CLAUDE_SEND_PROMPT_WAIT_TIMEOUT + 100 (10100ms), which should be sufficient to pass the 10000ms timeout. The error message would be 'Prompt detection timeout (10000ms)'. This appears correct after P1-2 and P1-3 are applied.",
+      "design_doc_reference": "Section 4.1 修正3",
+      "actual_code_reference": "tests/unit/lib/claude-session.test.ts:337-346",
+      "suggestion": "The proposed change is internally consistent after P1-2 and P1-3 are applied. No change needed to this specific finding."
+    },
+    {
+      "id": "F-10",
+      "severity": "nice_to_have",
+      "category": "other",
+      "description": "Design doc Section 3.4 proposes adding CLAUDE_SEND_PROMPT_WAIT_TIMEOUT = 10000 as a new exported constant. The existing constants in claude-session.ts are organized in lines 36-91 under the '// ----- Timeout and Polling Constants (OCP-001) -----' section. The design doc does not specify where in this section the new constant should be placed. For consistency, it should be placed after CLAUDE_PROMPT_WAIT_TIMEOUT (L83) and before CLAUDE_PROMPT_POLL_INTERVAL (L91), since it is semantically related to prompt waiting.",
+      "design_doc_reference": "Section 3.4",
+      "actual_code_reference": "src/lib/claude-session.ts:36-91",
+      "suggestion": "Add a note in Section 3.4 suggesting placement after CLAUDE_PROMPT_WAIT_TIMEOUT (L83) for logical grouping with other prompt-related timeout constants."
+    },
+    {
+      "id": "F-11",
+      "severity": "should_fix",
+      "category": "other",
+      "description": "Design doc Section 4.2 P0 test 'Path B' assumes that after advancing by CLAUDE_PROMPT_POLL_INTERVAL, the waitForPrompt will have polled once and detected the prompt. However, the test sets capturePane mock to return 'Processing...' on first call and '> ' on second call. The first capturePane call happens in sendMessageToClaude itself (L376), not in waitForPrompt. So when waitForPrompt is entered, its first capturePane call is actually the second overall call, which returns '> '. This means waitForPrompt returns immediately (within the same tick after its first capturePane call). The timer advance of CLAUDE_PROMPT_POLL_INTERVAL may not actually be needed; the test's assertion that sendKeys was not called before CLAUDE_POST_PROMPT_DELAY should still hold because the stability delay hasn't elapsed yet. However, the comment '// Advance through waitForPrompt polling' is misleading since waitForPrompt returns on its first poll without needing a timer advance.",
+      "design_doc_reference": "Section 4.2 P0 Test Path B",
+      "actual_code_reference": "src/lib/claude-session.ts:376,248",
+      "suggestion": "Clarify the test comment or adjust the mock to require 3+ capturePane calls (e.g., first 2 return non-prompt, third returns prompt) so that the timer advancement for waitForPrompt polling is actually exercised, making the test more meaningful."
+    },
+    {
+      "id": "F-12",
+      "severity": "nice_to_have",
+      "category": "other",
+      "description": "Design doc Section 9 lists indirect impact file 'src/lib/cli-tools/claude.ts' as the call site for sendMessageToClaude. This is correct for understanding impact scope. The doc also mentions 'src/app/api/worktrees/[id]/send/route.ts' as the API route that would surface HTTP 500 on timeout errors. These references were not verified as part of this review scope but are noted for completeness.",
+      "design_doc_reference": "Section 9",
+      "actual_code_reference": "N/A (not verified)",
+      "suggestion": "Consider verifying these indirect impact files during implementation to ensure error propagation works as expected."
+    }
+  ],
+  "summary": "The design doc is well-structured and largely consistent with the actual codebase. Three must-fix issues were identified: (1) Line number offset of 14 lines for sendMessageToClaude function reference (F-1), (2) The existing test at L337-346 has a deeper inconsistency than documented -- the try-catch swallows errors so the test's rejection expectation may not behave as expected, requiring explicit documentation of the dual-fix nature of P1-2/P1-3 (F-3), and (3) The proposed separator-only test in 修正2 will fail because the actual error message is wrapped with 'Failed to start Claude session: ' prefix (F-8, classified as should_fix but borderline must_fix since the test would fail). All other line number references (L325, L167, L108, L232-246) are accurate. Code snippets for cli-patterns.ts, tmux.ts SpecialKey type, and the startClaudeSession separator check all match exactly. The P0/P1 proposed changes are syntactically valid and should compile. The P2 changes are correctly noted as optional/conditional. Overall consistency score: 4/5.",
+  "status": "conditionally_approved",
+  "score": 4,
+  "reviewed_at": "2026-02-08"
+}

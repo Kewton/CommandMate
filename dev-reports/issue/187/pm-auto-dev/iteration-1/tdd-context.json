@@ -1,0 +1,24 @@
+{
+  "issue_number": 187,
+  "acceptance_criteria": [
+    "sendMessageToClaude()でwaitForPrompt()復帰後にCLAUDE_POST_PROMPT_DELAY（500ms）が適用されること",
+    "sendMessageToClaude()でプロンプト即検出時（L378 if条件false）にもCLAUDE_POST_PROMPT_DELAYが適用されること",
+    "startClaudeSession()がセパレータパターンのみでは初期化完了と判定しないこと",
+    "waitForPrompt()タイムアウト時にメッセージを送信せずエラーがスローされること",
+    "waitForPrompt()のタイムアウト値がハードコード10000msではなく定数を使用していること",
+    "既存の2回目以降のメッセージ送信に回帰がないこと",
+    "claude-session.test.tsのテストが全てパスすること"
+  ],
+  "implementation_tasks": [
+    "Task 0.1: tests/unit/lib/claude-session.test.ts L108 capturePane引数を{startLine: -50}に修正",
+    "Task 0.2: tests/unit/lib/claude-session.test.ts L337-346 タイムアウトテストの一時修正",
+    "Task 1.1: CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数追加（10000ms）をclaude-session.tsに追加",
+    "Task 1.2: sendMessageToClaude()修正 - try-catch削除、定数使用、安定化待機追加",
+    "Task 1.3: startClaudeSession()からセパレータパターン除外、インポート削除",
+    "Task 2.1: 既存テスト更新（L232-246セパレータテスト、L337-346タイムアウトテスト）",
+    "Task 2.2: P0新規テスト追加（Path A即検出、Path B waitForPrompt経由、定数エクスポート）"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-187-session-first-message-reliability-design-policy.md",
+  "work_plan_path": "dev-reports/issue/187/work-plan.md"
+}

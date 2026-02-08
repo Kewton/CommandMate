@@ -1,0 +1,169 @@
+{
+  "issue_number": 187,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_focus": "通常",
+  "review_date": "2026-02-08",
+  "previous_findings_status": "all_addressed",
+  "previous_findings_verification": {
+    "stage1_findings": {
+      "MF-1": {
+        "status": "addressed",
+        "verification": "改善案テーブルにP1行「ハードコード値10000msの定数化」が追加されている。問題点3にもハードコード値と定数の不整合に関する注意書きが追記されている。受け入れ条件にも反映済み。"
+      },
+      "SF-1": {
+        "status": "addressed",
+        "verification": "受け入れ条件セクションが新規追加されており、8項目のチェックリスト形式で記載されている。P0/P1修正、回帰確認、テスト関連の条件を網羅している。"
+      },
+      "SF-2": {
+        "status": "addressed",
+        "verification": "改善案テーブルP0 2行目に「L378のif条件がfalse=プロンプト検出済みの場合にもCLAUDE_POST_PROMPT_DELAYを適用。if文の外側に配置して両ケースをカバー」と具体的に記載。問題点1にもプロンプト即検出時の挙動が詳述されている。"
+      },
+      "SF-3": {
+        "status": "addressed",
+        "verification": "関連セクションが大幅拡充され、Issue #152で何が修正され、Issue #187で何が残存しているか4つの問題点として列記されている。"
+      },
+      "SF-4": {
+        "status": "addressed",
+        "verification": "問題点2にセパレータ除外の副作用に関する補足が追加されている。DRY-002の経緯、初期化検出遅延1-3秒の推定値、CLAUDE_INIT_TIMEOUT(15秒)猶予の説明が記載。"
+      },
+      "NTH-1": {
+        "status": "addressed",
+        "verification": "テストに関する注意事項セクションが新規追加され、既存テストのモック制約とP0修正テスト推奨が記載されている。"
+      },
+      "NTH-2": {
+        "status": "addressed",
+        "verification": "問題点4にtmux send-keys C-uの補足が追加されている。改善案テーブルP2行にも検証の上実装と記載。"
+      },
+      "NTH-3": {
+        "status": "addressed",
+        "verification": "初回のみ失敗する理由セクションに具体的な4ステップシーケンスと2回目以降の正常動作説明が追加されている。"
+      }
+    },
+    "stage3_findings": {
+      "F-1": {
+        "status": "addressed",
+        "verification": "既存テストの不整合セクションが新設され、L108のstartLine不整合を記載。事前修正が必要な旨も明記。受け入れ条件に修正内容を具体的に記載。"
+      },
+      "F-2": {
+        "status": "addressed",
+        "verification": "受け入れ条件が「テストを更新した上で全てパス」に修正。DRY-002テスト(L232-246)の更新内容が具体的に記載されている。"
+      },
+      "F-3": {
+        "status": "addressed",
+        "verification": "受け入れ条件にタイムアウトテスト(L337-346)の更新が具体的に記載。エラースロー後のsendKeys非呼び出し検証への更新が明記されている。"
+      },
+      "F-4": {
+        "status": "addressed",
+        "verification": "問題点1に「レイテンシに関するトレードオフ」段落が追加され、500ms遅延の影響とUX許容範囲の判断が記載。"
+      },
+      "F-5": {
+        "status": "addressed",
+        "verification": "auto-yes-managerへの影響に関する補足セクションが新設され、安定化待機不要の理由が3点で説明されている。"
+      },
+      "F-6": {
+        "status": "addressed",
+        "verification": "問題点5に波及範囲として6ソースファイルが列挙。テスト注意事項にDEC Private Modeテスト追加の必要性が追記。"
+      },
+      "F-7": {
+        "status": "addressed",
+        "verification": "問題点4に適用範囲の考慮が追加。sendMessageToClaude()のみに適用する理由と将来的なtmux.tsオプション化の検討が記載。"
+      },
+      "F-8": {
+        "status": "addressed",
+        "verification": "問題点2に初期化時間増加の推定値（1-3秒）が追記されている。"
+      },
+      "F-9": {
+        "status": "addressed",
+        "verification": "テスト注意事項にapi-send-cli-tool.test.tsのモック制約とAPIレベル検証の限界が追記。"
+      },
+      "F-10": {
+        "status": "addressed",
+        "verification": "影響範囲のテスト更新計画にapi-prompt-handling.test.tsが追加（変更不要として記録）。"
+      }
+    }
+  },
+  "findings": [
+    {
+      "id": "F-1",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "テスト L337-346 の現状認識が不完全。Issueは受け入れ条件でタイムアウトテスト(L337-346)を「エラースロー後にsendKeysが呼ばれないことを検証するテストに更新」と記載しているが、現状のテストは既にFAILしている（vi.advanceTimersByTimeAsync で CLAUDE_PROMPT_WAIT_TIMEOUT+100=5100ms しか進めないが、実装は 10000ms のハードコード値を使用しているため waitForPrompt が完了しない。さらにcatch節で console.warn + 続行のため rejects.toThrow が成立しない）。Issueは「タイムアウト時の送信強行をエラースローに変更」をP1として提案しているが、現在のテストが既にFAILしている事実を「既存テストの不整合」セクションに追記すべき。L108の不整合と同様に、Issue #187とは無関係の既存不整合として認識されるべき。",
+      "suggestion": "「既存テストの不整合」セクションに2件目の不整合として追記する。内容: 'L337-346: sendMessageToClaudeのタイムアウトテストが、(1) ハードコード値10000msと定数CLAUDE_PROMPT_WAIT_TIMEOUT(5000ms)の不一致、(2) catch節での console.warn + 続行（rejectではなくresolve）により既にFAILしている。Issue #187のP1修正（エラースロー変更 + 定数化）により解消される見込みだが、事前の現状認識として記録する。'",
+      "location": "既存テストの不整合 セクション"
+    },
+    {
+      "id": "F-2",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "問題点1のコード例で「L378のif条件がfalse（=プロンプトが既に検出されている場合）はwaitForPrompt()自体がスキップされ」と説明されているが、if条件の否定に関する説明がやや冗長で読者を混乱させる可能性がある。具体的には、「L378の `if (!CLAUDE_PROMPT_PATTERN.test(stripAnsi(output)))` が false の場合（=プロンプトが既に検出されている場合）は waitForPrompt() 自体がスキップされ」と記載されているが、コード例ではこの「スキップ」パスが明示的にコメントで示されており、改善案テーブルのP0 2行目でも「if文の外側に安定化待機を配置」と解決策が提示されている。ただし、「プロンプト即検出」と「プロンプト未検出→waitForPrompt()→検出後即送信」の2つのパスの区別が問題点1の説明文中で混在しており、整理すると可読性が向上する。",
+      "suggestion": "問題点1の説明で、(A) プロンプト即検出パス（if条件false→waitForPromptスキップ→安定化待機なしで送信）と (B) プロンプト未検出パス（if条件true→waitForPrompt→復帰後安定化待機なしで送信）を明確に分離して記述する。現状でも理解可能だが、番号付きリストや小見出しで分離すると分かりやすくなる。",
+      "location": "問題点1 セクション"
+    },
+    {
+      "id": "F-3",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "影響範囲の「間接影響ファイル」にリストされている `src/app/api/worktrees/[id]/route.ts` と `src/app/api/worktrees/route.ts` はP2（stripAnsi変更）適用時のみ影響を受けるが、その旨の条件が「stripAnsi変更の波及影響（P2適用時）」と簡潔に記載されている。一方で、`src/lib/cli-tools/claude.ts` は P0 修正で確実に影響を受ける（500ms遅延増加）ファイルであり、`src/app/api/worktrees/[id]/send/route.ts` もP1修正で影響を受ける（タイムアウトエラー時のHTTP 500レスポンス）。影響確実性の度合い（P0/P1で確実 vs P2で条件付き）が区別されているのは良いが、表の「影響内容」列でP2の条件付き影響とP0/P1の確実な影響がより明確に視覚的に区別されるとベター。",
+      "suggestion": "影響範囲テーブルの各行に適用される優先度（P0/P1/P2）をカッコ書きで付記する。例: 「`src/lib/cli-tools/claude.ts` | 安定化待機追加による500ms遅延増加 (P0) |」「`src/app/api/worktrees/[id]/route.ts` | stripAnsi変更の波及影響 (P2のみ) |」",
+      "location": "影響範囲 > 間接影響ファイル テーブル"
+    },
+    {
+      "id": "F-4",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "description": "受け入れ条件の7番目「claude-session.test.ts のテストについて」でL232-246のテスト更新を「セパレータのみではbreakしないことを検証するテストに変更」と記載しているが、具体的にどのような入力でどのような期待結果になるかの記述がない。L108の修正（startLineの期待値を-50に修正）は非常に具体的に記載されている一方で、L232-246の更新は抽象的。実装者がテスト更新時に迷わないよう、もう少し具体的な期待動作を記載すると良い。",
+      "suggestion": "受け入れ条件のL232-246テスト更新について、「セパレータのみの出力（'────────────────────'）をcapturePaneが返す場合、startClaudeSession()が初期化完了とせずポーリングを継続することを検証」のように期待動作を具体的に記載する。",
+      "location": "受け入れ条件 セクション"
+    },
+    {
+      "id": "F-5",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "レビュー履歴セクションにStage 1（通常レビュー1回目）の指摘反映内容が記載されていない。Stage 2/Stage 3の反映内容は記載されているが、Stage 1で指摘されたMF-1, SF-1〜SF-4, NTH-1〜NTH-3の8件の反映がStage 2で行われたことが「ステージ2: 通常レビュー」としてまとめて記載されている。しかし、ステージ1のレビュー自体への言及（何が指摘されたか）がなく、ステージ2の反映結果のみが記載されている。レビュー監査証跡としてはステージ1の指摘概要も記載があるとベター。",
+      "suggestion": "レビュー履歴に「ステージ1: 通常レビュー（1回目）」のサブセクションを追加し、MF-1（ハードコード値の定数化）、SF-1〜SF-4（受け入れ条件追加、P0曖昧さ解消、#152関係明確化、セパレータ副作用）、NTH-1〜NTH-3（テスト注意事項、Ctrl+U補足、シーケンス図）の8件が指摘された旨を簡潔に記載する。",
+      "location": "レビュー履歴 セクション"
+    }
+  ],
+  "summary": "Stage 1（通常レビュー1回目）の8件およびStage 3（影響範囲レビュー1回目）の10件、合計18件の指摘事項は全て適切にIssueに反映されている。Issueは非常に充実した内容に仕上がっており、原因分析、改善案、受け入れ条件、影響範囲、テスト更新計画、auto-yes-managerへの影響考慮、レビュー履歴と、バグ修正Issueとして必要な情報を網羅している。新たに検出した指摘事項は5件で、must_fixは0件。should_fixが2件（テストL337-346の既存FAIL状態の認識追記、問題点1の2パス説明の整理）、nice_to_haveが3件（影響範囲テーブルの優先度付記、L232-246テスト更新の具体化、レビュー履歴のステージ1記録追加）。全体として、このIssueは実装に着手可能な品質に達している。",
+  "code_references": [
+    {
+      "file": "src/lib/claude-session.ts",
+      "relevance": "主要変更対象。全問題点の実装コードが含まれる。Line 378, 382-385の動作を実テスト実行で確認済み。"
+    },
+    {
+      "file": "tests/unit/lib/claude-session.test.ts",
+      "relevance": "既存テストの不整合確認。L108（startLine: -10 vs -50）とL337-346（タイムアウトテスト）が実際にFAILすることをテスト実行で確認済み。"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "P2変更対象。ANSI_PATTERNの定義とstripAnsi関数の確認。"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "安定化待機の適用除外対象。L312-314のsendKeys使用を確認。detectPrompt()による事前検出との差異を確認。"
+    },
+    {
+      "file": "src/lib/cli-tools/claude.ts",
+      "relevance": "sendMessageToClaude()のラッパー。L66でsendMessageToClaudeを透過的に呼び出すことを確認。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/issue/187/issue-review/stage1-review-result.json",
+      "relevance": "Stage 1レビュー結果。8件の指摘事項の反映確認に使用。"
+    },
+    {
+      "file": "dev-reports/issue/187/issue-review/stage3-review-result.json",
+      "relevance": "Stage 3レビュー結果。10件の指摘事項の反映確認に使用。"
+    },
+    {
+      "file": "dev-reports/issue/187/issue-review/stage2-apply-result.json",
+      "relevance": "Stage 2反映結果。Stage 1指摘の反映状況確認に使用。"
+    },
+    {
+      "file": "dev-reports/issue/187/issue-review/stage4-apply-result.json",
+      "relevance": "Stage 4反映結果。Stage 3指摘の反映状況確認に使用。"
+    }
+  ]
+}
