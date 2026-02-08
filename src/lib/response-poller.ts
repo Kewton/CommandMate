@@ -18,7 +18,7 @@ import { detectPrompt } from './prompt-detector';
 import { recordClaudeConversation } from './conversation-logger';
 import type { CLIToolType } from './cli-tools/types';
 import { parseClaudeOutput } from './claude-output';
-import { getCliToolPatterns, stripAnsi } from './cli-patterns';
+import { getCliToolPatterns, stripAnsi, detectPromptForCli } from './cli-patterns';
 
 /**
  * Polling interval in milliseconds (default: 2 seconds)
@@ -439,7 +439,8 @@ function extractResponse(
   // Check if this is an interactive prompt (yes/no or multiple choice)
   // Interactive prompts don't have the ">" prompt and separator, so we need to detect them separately
   const fullOutput = lines.join('\n');
-  const promptDetection = detectPrompt(fullOutput);
+  // Issue #193: use CLI-specific patterns for prompt detection
+  const promptDetection = detectPromptForCli(stripAnsi(fullOutput), cliToolId);
 
   if (promptDetection.isPrompt) {
     // This is an interactive prompt - consider it complete
@@ -553,7 +554,8 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     }
 
     // Response is complete! Check if it's a prompt
-    const promptDetection = detectPrompt(result.response);
+    // Issue #193: use CLI-specific patterns for prompt detection
+    const promptDetection = detectPromptForCli(stripAnsi(result.response), cliToolId);
 
     if (promptDetection.isPrompt) {
       // This is a prompt - save as prompt message

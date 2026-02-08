@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { detectPrompt, getAnswerInput } from '@/lib/prompt-detector';
+import type { DetectPromptOptions } from '@/lib/prompt-detector';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 
 // Type guard for MultipleChoicePromptData
@@ -356,23 +357,23 @@ Are you sure you want to continue? (yes/no)
       });
 
       it('should throw error for invalid text', () => {
-        expect(() => getAnswerInput('maybe')).toThrow('Invalid answer: maybe');
+        expect(() => getAnswerInput('maybe')).toThrow("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
       });
 
       it('should throw error for numbers', () => {
-        expect(() => getAnswerInput('1')).toThrow('Invalid answer: 1');
+        expect(() => getAnswerInput('1')).toThrow("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
       });
 
       it('should throw error for special characters', () => {
-        expect(() => getAnswerInput('!')).toThrow('Invalid answer: !');
+        expect(() => getAnswerInput('!')).toThrow("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
       });
 
       it('should throw error for partial matches', () => {
-        expect(() => getAnswerInput('ye')).toThrow('Invalid answer: ye');
+        expect(() => getAnswerInput('ye')).toThrow("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
       });
 
       it('should throw error for multiple words', () => {
-        expect(() => getAnswerInput('yes please')).toThrow('Invalid answer: yes please');
+        expect(() => getAnswerInput('yes please')).toThrow("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
       });
     });
 
@@ -830,6 +831,136 @@ Are you sure you want to continue? (yes/no)
       // the old and new numbered lines interact with Layer 3/4 validation.
       expect(result).toBeDefined();
       expect(typeof result.isPrompt).toBe('boolean');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #193: Codex CLI multiple choice detection tests
+  // Tests for parameterized pattern detection with DetectPromptOptions
+  // ==========================================================================
+  describe('Issue #193: Codex CLI multiple choice detection', () => {
+    describe('DetectPromptOptions parameter', () => {
+      it('should detect Codex-style multiple choice with requireDefaultIndicator=false', () => {
+        // Codex CLI shows numbered options without any indicator marker
+        const output = 'Which option do you want?\n1. Apply changes\n2. Skip\n3. Cancel';
+        const options: DetectPromptOptions = {
+          choiceIndicatorPattern: /^\s*(\d+)\.\s*(.+)$/,
+          normalOptionPattern: /^\s*(\d+)\.\s*(.+)$/,
+          requireDefaultIndicator: false,
+        };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+        if (isMultipleChoicePrompt(result.promptData)) {
+          expect(result.promptData.options).toHaveLength(3);
+          expect(result.promptData.options[0].label).toBe('Apply changes');
+          expect(result.promptData.options[1].label).toBe('Skip');
+          expect(result.promptData.options[2].label).toBe('Cancel');
+        }
+      });
+
+      it('should detect options without default indicator when requireDefaultIndicator=false', () => {
+        // Codex-style: no marker character at all, just numbered list
+        const output = '1. Yes\n2. No';
+        const options: DetectPromptOptions = {
+          choiceIndicatorPattern: /^\s*(\d+)\.\s*(.+)$/,
+          normalOptionPattern: /^\s*(\d+)\.\s*(.+)$/,
+          requireDefaultIndicator: false,
+        };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+      });
+
+      it('should still reject options.length < 2 even with requireDefaultIndicator=false (Layer 4a)', () => {
+        // Even without indicator requirement, we need at least 2 options
+        const output = '1. Only option';
+        const options: DetectPromptOptions = {
+          choiceIndicatorPattern: /^\s*(\d+)\.\s*(.+)$/,
+          normalOptionPattern: /^\s*(\d+)\.\s*(.+)$/,
+          requireDefaultIndicator: false,
+        };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('should maintain backward compatibility when options parameter is omitted', () => {
+        // Default behavior (no options): Claude CLI patterns, requireDefaultIndicator=true
+        const output = '❯ 1. Yes\n  2. No';
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+      });
+
+      it('should maintain backward compatibility: plain numbered list NOT detected without options', () => {
+        // Without options, default Claude behavior rejects plain numbered lists
+        const output = '1. Create file\n2. Run tests';
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('should require default indicator when requireDefaultIndicator=true (default)', () => {
+        // Explicit requireDefaultIndicator=true: same as Claude behavior
+        const output = '1. Yes\n2. No';
+        const options: DetectPromptOptions = {
+          requireDefaultIndicator: true,
+        };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('should still enforce Layer 3 consecutive number validation with Codex options', () => {
+        // Non-consecutive numbers should be rejected regardless of indicator requirement
+        const output = '1. Option A\n3. Option B';
+        const options: DetectPromptOptions = {
+          choiceIndicatorPattern: /^\s*(\d+)\.\s*(.+)$/,
+          normalOptionPattern: /^\s*(\d+)\.\s*(.+)$/,
+          requireDefaultIndicator: false,
+        };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+    });
+
+    describe('getAnswerInput fixed error messages', () => {
+      it('should throw fixed error message for invalid multiple choice answer', () => {
+        expect(() => getAnswerInput('abc', 'multiple_choice')).toThrow(
+          'Invalid answer for multiple choice prompt. Expected a number.'
+        );
+      });
+
+      it('should throw fixed error message for invalid yes/no answer', () => {
+        expect(() => getAnswerInput('maybe')).toThrow(
+          "Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'."
+        );
+      });
+
+      it('should NOT include user input in error message (security)', () => {
+        try {
+          getAnswerInput('<script>alert(1)</script>', 'multiple_choice');
+        } catch (e: unknown) {
+          const error = e as Error;
+          expect(error.message).not.toContain('<script>');
+          expect(error.message).toBe('Invalid answer for multiple choice prompt. Expected a number.');
+        }
+      });
+
+      it('should NOT include user input in yes/no error message (security)', () => {
+        try {
+          getAnswerInput('<script>alert(1)</script>');
+        } catch (e: unknown) {
+          const error = e as Error;
+          expect(error.message).not.toContain('<script>');
+          expect(error.message).toBe("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
+        }
+      });
     });
   });
 });

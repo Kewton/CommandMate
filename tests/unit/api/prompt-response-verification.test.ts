@@ -45,14 +45,10 @@ vi.mock('@/lib/cli-session', () => ({
   captureSessionOutput: vi.fn().mockResolvedValue(''),
 }));
 
-// Mock prompt-detector
-vi.mock('@/lib/prompt-detector', () => ({
-  detectPrompt: vi.fn().mockReturnValue({ isPrompt: false, cleanContent: '' }),
-}));
-
-// Mock cli-patterns
+// Mock cli-patterns (includes detectPromptForCli, stripAnsi)
 vi.mock('@/lib/cli-patterns', () => ({
   stripAnsi: vi.fn((s: string) => s),
+  detectPromptForCli: vi.fn().mockReturnValue({ isPrompt: false, cleanContent: '' }),
 }));
 
 // Mock CLIToolManager
@@ -109,12 +105,12 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
 
   it('should send keys when prompt is still active', async () => {
     const { captureSessionOutput } = await import('@/lib/cli-session');
-    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { detectPromptForCli } = await import('@/lib/cli-patterns');
     const { sendKeys } = await import('@/lib/tmux');
 
     // Prompt is still active at the time of re-verification
     vi.mocked(captureSessionOutput).mockResolvedValue('Do you want to proceed?\n❯ 1. Yes\n  2. No');
-    vi.mocked(detectPrompt).mockReturnValue({
+    vi.mocked(detectPromptForCli).mockReturnValue({
       isPrompt: true,
       promptData: {
         type: 'multiple_choice',
@@ -138,12 +134,12 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
 
   it('should NOT send keys when prompt has disappeared (race condition)', async () => {
     const { captureSessionOutput } = await import('@/lib/cli-session');
-    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { detectPromptForCli } = await import('@/lib/cli-patterns');
     const { sendKeys } = await import('@/lib/tmux');
 
     // Prompt disappeared by the time of re-verification
     vi.mocked(captureSessionOutput).mockResolvedValue('⏺ Processing complete.\n\n❯ ');
-    vi.mocked(detectPrompt).mockReturnValue({
+    vi.mocked(detectPromptForCli).mockReturnValue({
       isPrompt: false,
       cleanContent: '⏺ Processing complete.\n\n❯ ',
     });

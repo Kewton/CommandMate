@@ -75,19 +75,33 @@ export async function POST(
       );
     }
 
+    // Issue #193: Input sanitization
+    // Max length check
+    if (typeof answer === 'string' && answer.length > 1000) {
+      return NextResponse.json(
+        { error: 'Answer exceeds maximum length of 1000 characters' },
+        { status: 400 }
+      );
+    }
+
+    // Control character filtering (remove \x00-\x1F except \n, \x7F)
+    const sanitizedAnswer = typeof answer === 'string'
+      ? answer.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '')
+      : answer;
+
     // Validate answer based on prompt type
     let input: string;
 
     // For multiple choice, check if answer is an option number or custom text
     if (message.promptData.type === 'multiple_choice') {
-      const answerNum = parseInt(answer, 10);
+      const answerNum = parseInt(sanitizedAnswer, 10);
 
       // If answer is a number, validate it's one of the available options
       if (!isNaN(answerNum)) {
         const validNumbers = message.promptData.options.map(opt => opt.number);
         if (!validNumbers.includes(answerNum)) {
           return NextResponse.json(
-            { error: `Invalid choice: ${answer}. Valid options are: ${validNumbers.join(', ')}` },
+            { error: 'Invalid choice. The selected option is not available.' },
             { status: 400 }
           );
         }
@@ -96,17 +110,17 @@ export async function POST(
         input = answerNum.toString();
       } else {
         // If answer is not a number, it's custom text input
-        // Use it as-is (no validation needed)
-        input = answer;
+        // Apply sanitization
+        input = sanitizedAnswer;
       }
     } else {
       // For yes/no prompts, use the standard validation
       try {
-        input = getAnswerInput(answer, message.promptData.type);
+        input = getAnswerInput(sanitizedAnswer, message.promptData.type);
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
-          { error: `Invalid answer: ${errorMessage}` },
+          { error: errorMessage },
           { status: 400 }
         );
       }

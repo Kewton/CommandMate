@@ -11,8 +11,7 @@ import { sendKeys } from '@/lib/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { detectPrompt } from '@/lib/prompt-detector';
-import { stripAnsi } from '@/lib/cli-patterns';
+import { stripAnsi, detectPromptForCli } from '@/lib/cli-patterns';
 
 interface PromptResponseRequest {
   answer: string;
@@ -34,6 +33,19 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    // Issue #193: Input validation
+    if (typeof answer === 'string' && answer.length > 1000) {
+      return NextResponse.json(
+        { error: 'Answer exceeds maximum length of 1000 characters' },
+        { status: 400 }
+      );
+    }
+
+    // Control character filtering (remove \x00-\x1F except \n, \x7F)
+    const sanitizedAnswer = typeof answer === 'string'
+      ? answer.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '')
+      : answer;
 
     const db = getDbInstance();
 
@@ -72,7 +84,8 @@ export async function POST(
     try {
       const currentOutput = await captureSessionOutput(params.id, cliToolId, 5000);
       const cleanOutput = stripAnsi(currentOutput);
-      const promptCheck = detectPrompt(cleanOutput);
+      // Issue #193: use CLI-specific patterns for prompt detection
+      const promptCheck = detectPromptForCli(cleanOutput, cliToolId);
 
       if (!promptCheck.isPrompt) {
         return NextResponse.json({
@@ -88,8 +101,8 @@ export async function POST(
 
     // Send answer to tmux
     try {
-      // Send the answer
-      await sendKeys(sessionName, answer, false);
+      // Send the sanitized answer
+      await sendKeys(sessionName, sanitizedAnswer, false);
 
       // Wait a moment for the input to be processed
       await new Promise(resolve => setTimeout(resolve, 100));
