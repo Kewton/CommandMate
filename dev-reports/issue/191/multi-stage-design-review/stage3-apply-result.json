@@ -1,0 +1,60 @@
+{
+  "issue_number": 191,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "IA-004",
+        "item": "current-output/route.tsのdetectThinkingState呼び出しとの差異が影響分析で不十分",
+        "sections_updated": ["Section 2 (ウィンドウイング比較表)", "Section 9 (影響分析)"],
+        "status": "reflected",
+        "details": "Section 2の表でcurrent-output/route.tsの現状列を「末尾15行（stripAnsi + 非空行フィルタ後）」に修正。Section 9の影響なし欄にIA-004として非空行フィルタ差異の根拠を追記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IA-001",
+        "item": "slice(-50)のバッファ50行未満時の安全な縮退の明文化",
+        "sections_updated": ["Section 3-1 (コード例コメント)"],
+        "status": "reflected",
+        "details": "コード例のコメントにバッファが50行未満の場合のslice(-50)挙動（配列全体返却による安全な縮退）を追記。"
+      },
+      {
+        "id": "IA-002",
+        "item": "stripAnsiをsplit前に適用する処理順序の重要性",
+        "sections_updated": ["Section 3-1 (コード例コメント)"],
+        "status": "reflected",
+        "details": "コード例のコメントにstripAnsi -> split -> slice -> joinの処理順序の重要性を追記。ANSIシーケンスが行境界に跨る場合でも行数カウントへの影響を排除している旨を記載。"
+      },
+      {
+        "id": "IA-003",
+        "item": "50行境界でのthinkingサマリー行の取りこぼしシナリオの分析",
+        "sections_updated": ["Section 9 (回帰リスク)"],
+        "status": "reflected",
+        "details": "回帰リスク欄にIA-003としてthinkingサマリー行の50行ウィンドウ内残存シナリオの分析を追記。thinking完了直後のサマリー行残存時にはプロンプト行も未出現のため実害なし。"
+      },
+      {
+        "id": "IA-005",
+        "item": "既存テストの入力サイズとウィンドウイング後の挙動の明確化",
+        "sections_updated": ["Section 4-2 (既存テスト)"],
+        "status": "reflected",
+        "details": "既存テストがウィンドウイングの有無に関わらず同一挙動となる点、境界効果は新規テスト1・2で検証する旨を注記として追記。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-191-auto-yes-thinking-windowing-design-policy.md",
+  "sections_updated": [
+    "Section 2 (ウィンドウイング比較表)",
+    "Section 3-1 (コード例コメント)",
+    "Section 4-2 (既存テスト)",
+    "Section 9 (影響分析)",
+    "Section 10 (レビュー履歴)",
+    "Section 11 (レビュー指摘事項サマリー - Stage 3追加)"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}

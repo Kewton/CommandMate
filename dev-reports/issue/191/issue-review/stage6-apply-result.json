@@ -1,0 +1,37 @@
+{
+  "issue_number": 191,
+  "iteration": 2,
+  "stage": 6,
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "案2のメリット説明を修正。「status-detector.tsのアプローチと整合性が高く、既存の実績がある」から、3つの呼び出し元のうちprompt優先はstatus-detector.tsのみであり、current-output/route.tsとauto-yes-manager.tsはthinking優先であることを正確に反映。既存実装の間でアプローチが分かれている事実を明記した。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "案1のウィンドウサイズ整合性注記の箇条書きで、current-output/route.tsの用途ラベルを「ステータス表示用」から「ステータス表示およびクライアント側Auto-Yesパス用」に修正し、同APIのクライアント側Auto-Yesパスとしての役割を反映した。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "レビュー履歴セクションに「イテレーション 2 - Stage 6」のエントリを追加し、SF-1およびNTH-1の改修内容を記録した。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/191"
+  }
+}

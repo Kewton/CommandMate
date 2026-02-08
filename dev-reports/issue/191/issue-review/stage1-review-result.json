@@ -1,0 +1,109 @@
+{
+  "issue_number": 191,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-08",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "技術的妥当性",
+        "issue": "案1（検索範囲限定）の末尾20行の根拠が不十分。status-detector.tsは15行、detectPromptのyes/no検出は10行、multiple_choice検出は50行を使用しており、20行がこれらとの整合性を欠く",
+        "location": "## 修正方針の候補 > 案1",
+        "recommendation": "detectPromptが使う最大ウィンドウサイズ（末尾50行）に合わせるか、それより大きい値（例：50行）にすべき。あるいはdetectPromptと同じ末尾N行を使い回す設計の根拠を明記する。20行ではmultiple_choiceプロンプト（50行ウィンドウ）が表示されている最中にthinkingパターンが15行目以降に存在した場合を検出できず、本来のIssue #161の防御が機能しない可能性がある",
+        "evidence": "prompt-detector.ts L48: slice(-10), L268: slice(-50); status-detector.ts L50: STATUS_CHECK_LINE_COUNT=15; status-detector.ts L99: detectThinking(cliToolId, lastLines) -- 末尾15行のみ使用"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "案2（プロンプト検出優先）と案3（パターン除外）の却下理由やトレードオフ分析が記載されていない。推奨案が案1であることは明記されているが、他の案の問題点が不明",
+        "location": "## 修正方針の候補 > 案2, 案3",
+        "recommendation": "各案のメリット・デメリットを簡潔に記載する。特に案2はstatus-detector.tsの優先順位（プロンプト > thinking > input prompt）と同じアプローチであり、既存実装との整合性が高いことに言及すべき。案3はClaude CLIのバージョンアップでサマリー行フォーマットが変わった場合の脆弱性を記載すべき",
+        "evidence": "status-detector.ts L85-106: detectPrompt()をdetectThinking()より先に実行（優先順位が逆）"
+      },
+      {
+        "id": "SF-3",
+        "category": "整合性",
+        "issue": "status-detector.tsのdetectSessionStatus()は既にdetectThinking()をlastLines（末尾15行）に対してのみ実行しており、auto-yes-manager.tsとの一貫性の欠如が本Issueの根本原因であることが明示されていない",
+        "location": "## 根本原因 > 問題の非対称性",
+        "recommendation": "「問題の非対称性」テーブルにstatus-detector.tsの行（15行ウィンドウ）を追加し、auto-yes-manager.tsだけがバッファ全体を渡している異常な状態であることを強調する。これにより修正の正当性がより明確になる",
+        "evidence": "status-detector.ts L99: detectThinking(cliToolId, lastLines) where lastLines = lines.slice(-15); auto-yes-manager.ts L284: detectThinking(cliToolId, cleanOutput) where cleanOutput is full 5000 lines"
+      },
+      {
+        "id": "SF-4",
+        "category": "受け入れ条件",
+        "issue": "受け入れ条件にstatus-detector.tsとの一貫性検証が含まれていない",
+        "location": "## 受け入れ条件",
+        "recommendation": "「detectThinking()の検索範囲がstatus-detector.tsの実装と一貫していること」を受け入れ条件に追加する。また、回帰テストとして「5000行バッファにサマリー行を含むが末尾にプロンプトがある場合にプロンプトが正常検出される」テストケースの追加を条件に含めるべき",
+        "evidence": "status-detector.ts L99 uses lastLines (15 lines) for detectThinking; this consistency should be tested"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "影響ファイルテーブルにstatus-detector.tsが記載されていない。直接の変更対象ではないが、整合性確認の参照として記載があると修正者にとって有益",
+        "location": "## 影響ファイル",
+        "recommendation": "status-detector.ts L99を「参照（整合性確認）」として影響ファイルテーブルに追加"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "`to interrupt)` パターン部分の挙動についてIssueで言及がない。CLAUDE_THINKING_PATTERNの後半部分 `to interrupt)` もバッファ全体を検索する際に過去の出力にマッチする可能性がある",
+        "location": "## 根本原因 > マッチしてしまう残存出力の例",
+        "recommendation": "テーブルに `(esc to interrupt)` のようなパターンもバッファに残存しうることを注記として追加。ただし `to interrupt)` はthinking状態のみで表示されるため、残存リスクは低い"
+      },
+      {
+        "id": "NTH-3",
+        "category": "明確性",
+        "issue": "「Do you want to proceed?」はyes/noパターン `(y/n)` には合致しない。Issueタイトルの「Do you want to proceed?」が実際にどのプロンプトパターン（yes_no? multiple_choice?）として検出されるかが不明瞭",
+        "location": "## 再現手順 ステップ4",
+        "recommendation": "プロンプトの具体的なフォーマット（例：「Do you want to proceed? (y/n)」なのか「❯ 1. Yes / 2. No」形式なのか）を明記すると、再現性と検証の精度が向上する"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "276-287",
+      "relevance": "バグの発生箇所: detectThinking()にバッファ全体（5000行）を渡している"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "lines": "26-29, 73-95",
+      "relevance": "CLAUDE_THINKING_PATTERNの定義とdetectThinking()関数"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "44-63, 264-268",
+      "relevance": "detectPrompt()の検索範囲: 末尾10行（yes/no）、末尾50行（multiple_choice）"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "81-106",
+      "relevance": "既にdetectThinking()を末尾15行に限定して実行している参照実装。修正の方向性を裏付ける"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "lines": "427-499",
+      "relevance": "Issue #161のthinking stateスキップテスト。今回の修正で影響を受ける可能性がある"
+    },
+    {
+      "file": "tests/unit/lib/cli-patterns.test.ts",
+      "lines": "142-163",
+      "relevance": "detectThinking()の既存テスト。回帰テストとして参照"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #161のAuto-Yes誤検出修正の記載との整合性確認"
+    }
+  ]
+}

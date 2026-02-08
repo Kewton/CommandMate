@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "coverage": 86.77,
+  "unit_tests": {
+    "total": 42,
+    "passed": 42,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/auto-yes-manager.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "commits": [
+    "17ef02b: fix(auto-yes): apply windowing to detectThinking() to prevent stale thinking lines from blocking prompt detection"
+  ],
+  "message": "TDD implementation complete. Applied windowing (last 50 lines) to detectThinking() in pollAutoYes() to prevent stale thinking summary lines from permanently blocking prompt detection. 3 new tests added, all 42 tests pass. Coverage: 86.77% statements, 87.82% lines."
+}

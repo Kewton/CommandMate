@@ -1,0 +1,22 @@
+{
+  "issue_number": 191,
+  "feature_summary": "fix: Auto-Yes が古いthinkingサマリー行によりプロンプト検出をスキップする",
+  "acceptance_criteria": [
+    "バッファに過去のthinkingサマリー行が残存していても、プロンプトが正常に検出される",
+    "実際のthinking状態（Claude CLIが処理中）ではプロンプト検出がスキップされる（Issue #161の防御は維持）",
+    "detectThinking()の検索範囲がstatus-detector.tsの実装方針（末尾N行のウィンドウイング）と一貫していること",
+    "回帰テスト: 5000行バッファ内の先頭100行にthinkingサマリー行が存在し、末尾10行にプロンプトがある場合にプロンプトが正常検出される",
+    "回帰テスト: thinkingパターンが末尾50行以内に存在する場合にプロンプト検出が正しくスキップされる",
+    "既存のAuto-Yesテストがすべてパスする",
+    "npm run test:unit が通ること",
+    "npm run lint と npx tsc --noEmit が通ること"
+  ],
+  "test_scenarios": [
+    "Scenario 1: pollAutoYes with 5000-line buffer containing stale thinking summary lines in first 100 lines and yes/no prompt in last 10 lines -> prompt detected, sendKeys called",
+    "Scenario 2: pollAutoYes with thinking pattern within last 50 lines -> prompt detection skipped, sendKeys NOT called",
+    "Scenario 3: THINKING_CHECK_LINE_COUNT value matches prompt-detector.ts multiple_choice window size (SF-001)",
+    "Scenario 4: Existing Issue #161 tests pass unchanged (backward compatibility)",
+    "Scenario 5: npm run test:unit all pass",
+    "Scenario 6: npx tsc --noEmit and npm run lint pass with 0 errors"
+  ]
+}

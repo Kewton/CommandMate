@@ -375,6 +375,16 @@ commandmate status --all                   # 全サーバー状態確認
 
 ## 最近の実装機能
 
+### Issue #191: Auto-Yes detectThinking() ウィンドウイング修正
+- **バグ修正**: Auto-Yesモード有効時、tmuxバッファ内に残存する過去のthinkingサマリー行（例: `· Simmering… (4m 16s)`）が`detectThinking()`にマッチし、プロンプト検出が永続的にスキップされる問題を修正
+- **根本原因**: `auto-yes-manager.ts`の`pollAutoYes()`が`detectThinking()`に5000行バッファ全体を渡していたのに対し、`status-detector.ts`や`current-output/route.ts`は既に末尾15行に限定していた（一貫性の欠如）
+- **修正方針**: `detectThinking()`呼び出し前にバッファ末尾50行のウィンドウイングを適用
+- **ウィンドウサイズ50行の根拠**: `detectPrompt()`のmultiple_choice検出範囲（`prompt-detector.ts` L268: 末尾50行）と一致させ、Issue #161 Layer 1防御の整合性を維持
+- **SF-001対応**: `THINKING_CHECK_LINE_COUNT`と`prompt-detector.ts`のウィンドウサイズの意味的結合をテストで検証（共有定数ではなくテストベースの一致検証を採用。`prompt-detector.ts`のCLIツール非依存設計を維持）
+- **主要コンポーネント**:
+  - `src/lib/auto-yes-manager.ts` - `THINKING_CHECK_LINE_COUNT = 50`定数追加、`pollAutoYes()`ウィンドウイング適用
+- 詳細: [設計書](./dev-reports/design/issue-191-auto-yes-thinking-windowing-design-policy.md)
+
 ### Issue #190: リポジトリ削除後のSync All復活防止
 - **バグ修正**: UIで削除したリポジトリがSync All実行時に再スキャン・再登録されて復活する問題を修正
 - **根本原因**: `syncWorktreesToDB()`が環境変数パスを毎回スキャンし、削除されたリポジトリを除外する仕組みがなかった
@@ -432,6 +442,7 @@ commandmate status --all                   # 全サーバー状態確認
 - **thinking状態スキップ**（多層防御Layer 1）:
   - `auto-yes-manager.ts`の`pollAutoYes()`で`detectThinking()`による事前チェック
   - thinking中は`detectPrompt()`をスキップ
+  - Issue #191: 末尾50行のウィンドウ検索を使用し、過去のthinkingサマリー行がプロンプト検出をブロックすることを防止
 - **連番検証**（多層防御Layer 3、防御的措置）:
   - `isConsecutiveFromOne()`で選択肢番号が1始まり連番であることを検証
 - **設計原則準拠**: prompt-detector.tsのCLIツール非依存性を維持（CLAUDE_THINKING_PATTERNをimportしない）

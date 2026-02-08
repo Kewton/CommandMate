@@ -1,0 +1,66 @@
+{
+  "issue_number": 191,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "ウィンドウイング定数の分散定義（DRY）",
+        "sections_updated": [
+          "Section 3-1 (定数コメントにprompt-detector.ts L268への相互参照を追加)",
+          "Section 3-2 (SF-001対応方針: テストによる整合性検証を採用、共有定数不採用の理由を文書化)",
+          "Section 4-1 (テスト3: 定数値テストからウィンドウサイズ一致検証テストに改善)",
+          "Section 7 (設計決定テーブルにSF-001参照を追加、共有定数モジュール方式を不採用案に追加)",
+          "Section 8 (チェックリストにSF-001対応コメント含む定数追加、テスト3を追加)"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "split-slice-join パターンの重複（DRY）",
+        "sections_updated": [
+          "Section 3-4 (新規: SF-002設計判断セクション、パターン使用箇所一覧、不採用理由、将来の改善候補を文書化)",
+          "Section 7 (設計決定テーブルにSF-002対応を追加、将来検討事項にgetLastNLines()抽出を追加)"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "item": "status-detector.ts と auto-yes-manager.ts のウィンドウサイズ差異の明文化",
+        "sections_updated": ["Section 7 (将来検討事項)"],
+        "status": "noted_for_future"
+      },
+      {
+        "id": "C-002",
+        "item": "テスト3(定数値テスト)の必要性",
+        "sections_updated": ["Section 4-1 (テスト3の設計を改善: 定数値テストからウィンドウサイズ一致検証に変更)"],
+        "status": "reflected_as_improvement"
+      },
+      {
+        "id": "C-003",
+        "item": "detectThinking() 側でウィンドウイングを内包する設計の将来検討",
+        "sections_updated": ["Section 7 (将来検討事項)"],
+        "status": "noted_for_future"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-191-auto-yes-thinking-windowing-design-policy.md",
+  "sections_updated": [
+    "Section 3-1 (定数コメント強化)",
+    "Section 3-2 (SF-001対応方針追加)",
+    "Section 3-4 (SF-002設計判断 新規追加)",
+    "Section 4-1 (テスト3改善)",
+    "Section 7 (設計決定テーブル更新、不採用案追加、将来検討事項追加)",
+    "Section 8 (実装チェックリスト更新)",
+    "Section 10 (レビュー履歴 新規追加)",
+    "Section 11 (レビュー指摘事項サマリー 新規追加)"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}

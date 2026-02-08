@@ -1,0 +1,133 @@
+{
+  "issue_number": 191,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-08",
+  "design_doc_path": "dev-reports/design/issue-191-auto-yes-thinking-windowing-design-policy.md",
+  "result": "conditionally_approved",
+  "score": 4,
+  "score_max": 5,
+  "summary": "影響範囲の特定は概ね正確。detectThinking()の全呼び出し元3箇所が正しく識別されており、再エクスポートも存在しない。回帰リスク評価も妥当。ただし、current-output/route.tsのdetectThinking()に渡されるデータの違い（非空行フィルタ後の15行 vs 空行含む末尾行）が影響分析セクションで十分に説明されておらず、tmuxバッファの-eフラグによるANSI出力とstripAnsiの処理順序に関する境界ケースの分析が不足している。",
+  "findings": [
+    {
+      "id": "IA-001",
+      "severity": "Nice to Have",
+      "category": "影響範囲の正確性",
+      "title": "captureSessionOutputがリクエスト行数より少ない行を返す場合のslice(-50)挙動の明文化",
+      "description": "captureSessionOutput(worktreeId, cliToolId, 5000)は最大5000行をリクエストするが、セッション開始直後やバッファが短い場合、返却行数は50行未満になりうる。Array.slice(-50)はlines.length < 50のとき配列全体を返すため、実動作としては正しい。しかし設計書にこの境界ケースの挙動が記載されておらず、「末尾50行」という表現が暗黙的に50行以上あることを前提としているように読める。",
+      "location": "設計書 Section 3-1",
+      "recommendation": "設計書またはコードコメントに「バッファが50行未満の場合はバッファ全体がdetectThinking()に渡される（Array.slice(-N)の仕様による安全な縮退）」と明記する。実装上の変更は不要。",
+      "risk_level": "low",
+      "effort": "low"
+    },
+    {
+      "id": "IA-002",
+      "severity": "Nice to Have",
+      "category": "影響範囲の正確性",
+      "title": "tmux -eフラグによるANSIエスケープシーケンスと行境界の相互作用",
+      "description": "tmux.tsのcapturePaneは-eフラグを使用してANSIエスケープシーケンスを含む出力を返す。stripAnsi()は改行文字を保持するためsplit('\\n')の行数には影響しないが、ANSI制御シーケンスが行をまたぐケース（例: 色コードが行末で開始し次行冒頭で終了するなど）は理論的に存在しうる。提案された修正ではstripAnsiをsplit前に適用しているため問題ないが、この処理順序の重要性が設計書に記載されていない。",
+      "location": "設計書 Section 3-1, src/lib/auto-yes-manager.ts L279",
+      "recommendation": "コードコメントまたは設計書に「stripAnsiをsplit前に適用することで、ANSIシーケンスが行境界に跨る場合でも行数カウントへの影響を排除している」と補足する。現在の実装順序（stripAnsi -> split -> slice -> join）は正しい。",
+      "risk_level": "low",
+      "effort": "low"
+    },
+    {
+      "id": "IA-003",
+      "severity": "Nice to Have",
+      "category": "回帰リスク",
+      "title": "50行境界でのthinkingサマリー行の取りこぼしシナリオの分析",
+      "description": "Claude CLIが出力するthinkingインジケータ行（例: '* Analyzing...'）は、アクティブなthinkingの場合は常にバッファ末尾付近（最終行〜数行以内）に表示される。thinkingが完了してサマリー行（例: '・ Simmering... (4m 16s)'）に変わった場合、そのサマリー行自体がCLAUDE_THINKING_PATTERNにマッチする点がIssue #191の問題の根本原因である。50行ウィンドウ内にサマリー行が残存する時間は、サマリー表示後に50行以上の新規出力が生成されるまでの期間に限られる。Claudeが大量出力する場合、この期間は数秒で解消される。一方、thinking完了直後でまだ新規出力が少ない段階では、サマリー行が50行内に残りうるが、この場合はprompt行もまだ出現していないためprompt検出スキップの影響はない。",
+      "location": "設計書 Section 3-2, Section 9",
+      "recommendation": "この分析を設計書Section 9の回帰リスク欄に追記することで、50行ウィンドウがthinking完了直後のサマリー行残存にどう対処するかの説明が完全になる。実装変更は不要。",
+      "risk_level": "low",
+      "effort": "low"
+    },
+    {
+      "id": "IA-004",
+      "severity": "Should Fix",
+      "category": "影響範囲の網羅性",
+      "title": "current-output/route.tsのdetectThinkingState呼び出しとの差異が影響分析で不十分",
+      "description": "設計書Section 2の表で3つの呼び出し元を正しく列挙しているが、current-output/route.ts L83のdetectThinkingState()呼び出しに渡されるlastSectionは「非空行フィルタリング後の末尾15行」であるのに対し、status-detector.ts L83の「空行含む末尾15行」とは質的に異なる。設計書Section 2の表では両方とも「末尾15行」と記載されており、この差異が不明瞭。将来、ウィンドウサイズの統一を検討する際にこの差異が見落とされるリスクがある。なおC-C01として既に将来検討事項に記載されているが、影響分析セクション（Section 9）の「影響なし」欄にはこの前提が明記されていない。",
+      "location": "設計書 Section 2 (ウィンドウイング比較表), Section 9 (影響分析)",
+      "recommendation": "Section 2の表のcurrent-output/route.tsの「現状」列を「末尾15行（非空行フィルタ後）」に修正し、Section 9の影響分析にcurrent-output/route.tsが「変更なし」であることの根拠として、非空行フィルタの差異がauto-yes-manager.tsの修正と無関係である旨を明記する。",
+      "risk_level": "low",
+      "effort": "low"
+    },
+    {
+      "id": "IA-005",
+      "severity": "Nice to Have",
+      "category": "テスト影響",
+      "title": "既存テストの入力サイズとウィンドウイング後の挙動の明確化",
+      "description": "設計書Section 4-2で「3行入力のため50行ウィンドウ内に収まり、動作に影響なし」と正しく記載している。実際の既存テスト（auto-yes-manager.test.ts L444, L479）を確認したところ、thinkingOutput = '\\u2733 Analyzing\\u2026\\n1. Step one\\n2. Step two'（3行）、promptOutput = 'Select an option:\\n\\u276F 1. Yes\\n  2. No'（3行）であり、いずれも50行以内。ウィンドウイング前処理のslice(-50)が加わっても出力は同一となるため、これらの既存テストは修正後も通過する。この分析は正確であるが、新規テスト（テスト1, テスト2）がこのウィンドウイングの効果を直接検証するため、既存テストはウィンドウイング前後の挙動を区別できない点を明記してもよい。",
+      "location": "設計書 Section 4-2",
+      "recommendation": "Section 4-2に「既存テストの入力サイズが50行未満であるため、ウィンドウイングの有無に関わらず同一挙動となる。ウィンドウイングの境界効果は新規テスト1・2で検証する」と補足する。",
+      "risk_level": "low",
+      "effort": "low"
+    }
+  ],
+  "impact_analysis_verification": {
+    "question_1_all_consumers_identified": {
+      "verified": true,
+      "details": "detectThinking()はcli-patterns.tsで定義・エクスポートされ、以下の3箇所で呼び出されている: (1) auto-yes-manager.ts L284 (修正対象), (2) status-detector.ts L99 (既にウィンドウイング済み: 15行), (3) current-output/route.ts L83 (既にウィンドウイング済み: 非空行フィルタ後15行)。設計書Section 2の表で3箇所とも正しく識別されている。"
+    },
+    "question_2_no_indirect_callers_missed": {
+      "verified": true,
+      "details": "detectThinking()は cli-patterns.ts からのみエクスポートされている。re-exportやindex.ts経由の間接エクスポートは存在しない。getCliToolPatterns()はthinkingPatternプロパティを返すが、これはRegExpオブジェクトであり、detectThinking()関数とは独立している。getCliToolPatternsの呼び出し元（response-poller.ts, status-detector.ts）はthinkingPatternをskipPatternsの一部として使用するが、detectThinking()とは異なるコンテキストでの使用であり影響はない。"
+    },
+    "question_3_boundary_miss_risk": {
+      "verified": true,
+      "details": "アクティブなthinkingインジケータ（スピナー+テキスト+省略記号）は、Claude CLIがリアルタイムで更新するため常にバッファ末尾付近（最終行〜数行以内）に表示される。50行ウィンドウでこれを見逃すシナリオは、thinking中に50行以上の出力が同時に生成される場合に限られるが、thinking中のClaude CLIは出力を行わない（スピナーのみ）ため、このシナリオは発生しない。thinkingサマリー行がウィンドウ境界（50行目付近）に位置する場合、サマリー行がウィンドウ外に出るタイミングはClaude CLIが新規出力を50行以上生成した後であり、その時点ではプロンプト行も既に出現しているため、prompt検出が正常に機能する。"
+    },
+    "question_4_regression_risk_accurate": {
+      "verified": true,
+      "details": "回帰リスクの「低」評価は妥当。修正は検索範囲を縮小する方向（5000行->50行）であり、新たな誤検出パターンを導入しない。detectPrompt()は内部で自己ウィンドウイング（yes/no: 10行, multiple_choice: 50行）を行うため、cleanOutput全体を渡しても安全。既存テストは3行入力で50行ウィンドウ内に収まるため影響なし。"
+    },
+    "question_5_tmux_edge_cases": {
+      "verified": true,
+      "details": "tmux capture-paneの-eフラグはANSIエスケープシーケンスを含む出力を返す。auto-yes-manager.tsではstripAnsi()をsplit('\\n')の前に適用するため、ANSIシーケンスが行境界を跨いでも行数カウントに影響しない。tmuxは行単位でバッファを管理するため、partial lines（行の途中で切れる）は通常発生しない。capturePane()はstdout全体を返すため、バッファの途中で切れることもない。"
+    },
+    "question_6_fewer_than_50_lines": {
+      "verified": true,
+      "details": "captureSessionOutputが50行未満を返す場合、Array.prototype.slice(-50)は配列全体を返す（JavaScriptの仕様）。例えばlines.length = 10の場合、slice(-50)はslice(0)と等価で10行全てが返る。この場合detectThinking()にはバッファ全体が渡されるため、現在の動作（修正前）と同一の挙動となる。セッション開始直後のバッファが短い状態でも安全に動作する。"
+    }
+  },
+  "unaffected_modules_verified": [
+    {
+      "module": "src/lib/auto-yes-resolver.ts",
+      "verified": true,
+      "reason": "resolveAutoAnswer()はPromptDataを入力として受け取るpure functionであり、バッファ操作やdetectThinking()との依存関係がない。"
+    },
+    {
+      "module": "src/lib/session-cleanup.ts",
+      "verified": true,
+      "reason": "stopAutoYesPolling()を呼び出すのみ（Facade）。ポーリングの内部ロジックには関与しない。"
+    },
+    {
+      "module": "src/lib/claude-session.ts",
+      "verified": true,
+      "reason": "captureClaudeOutput()はcapturePane()のラッパーであり、detectThinking()を使用しない。startClaudeSession()のプロンプト検出はCLAUDE_PROMPT_PATTERNを直接使用し、detectThinking()とは独立。"
+    },
+    {
+      "module": "src/hooks/useAutoYes.ts",
+      "verified": true,
+      "reason": "クライアントサイドフック。サーバー側のpollAutoYes()とは独立に動作し、current-output/route.tsのレスポンスからpromptDataとlastServerResponseTimestampを取得する。detectThinking()の呼び出しはcurrent-output/route.ts側で行われており、そちらは既にウィンドウイング済み（変更なし）。"
+    },
+    {
+      "module": "src/lib/prompt-detector.ts",
+      "verified": true,
+      "reason": "detectPrompt()とdetectMultipleChoicePrompt()は内部で独自のウィンドウイング（slice(-10)とslice(-50)）を自己適用する。auto-yes-manager.tsからcleanOutput全体が渡されても安全に動作する。本修正の影響はdetectThinking()の入力のみであり、detectPrompt()への入力は変更なし。"
+    },
+    {
+      "module": "tests/unit/lib/auto-yes-manager.test.ts",
+      "verified": true,
+      "reason": "既存のIssue #161テスト（L428-498）は3行入力を使用しており、50行ウィンドウ内に完全に収まる。ウィンドウイング適用前後で挙動は同一。新規テスト3件が追加されるが、既存テストの変更は不要。"
+    }
+  ],
+  "risk_assessment": {
+    "technical_risk": "low",
+    "security_risk": "low",
+    "operational_risk": "low",
+    "regression_risk": "low"
+  }
+}

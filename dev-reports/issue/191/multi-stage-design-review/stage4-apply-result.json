@@ -1,0 +1,57 @@
+{
+  "issue_number": 191,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "status": "completed",
+  "target_document": "dev-reports/design/issue-191-auto-yes-thinking-windowing-design-policy.md",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "SEC-C01",
+        "action": "acknowledged",
+        "description": "pollAutoYes error.message のtmuxバッファ内容漏洩の認識。現状は適切な範囲のため変更不要。将来検討事項として記録",
+        "reflected_sections": ["Section 7 (将来検討事項)", "Section 11 Stage 4 (Consider表)"]
+      },
+      {
+        "id": "SEC-C02",
+        "action": "reflected",
+        "description": "50行ウィンドウイングのAuto-Yes安全性根拠をコードコメントに明文化する推奨事項を設計書に反映",
+        "reflected_sections": [
+          "Section 3-1 (コード例にSafetyコメント追記)",
+          "Section 5 (SEC-C02セクション新設)",
+          "Section 8 (実装チェックリストに項目追加)",
+          "Section 11 Stage 4 (Consider表)"
+        ]
+      }
+    ]
+  },
+  "changes_made": [
+    {
+      "section": "Section 3-1",
+      "change": "コード例のコメントに「Safety: Claude CLI does not emit prompts during thinking, so narrowing the window cannot cause false auto-responses (see IA-003 in design doc).」を追記"
+    },
+    {
+      "section": "Section 5",
+      "change": "SEC-C02サブセクション新設。ウィンドウイングのAuto-Yes安全性に関するコードコメント推奨事項と実装指針を記載"
+    },
+    {
+      "section": "Section 7",
+      "change": "将来検討事項にSEC-C01（error.messageのtmuxバッファ内容漏洩の認識）を追加"
+    },
+    {
+      "section": "Section 8",
+      "change": "実装チェックリストのコア実装にSEC-C02対応項目を追加"
+    },
+    {
+      "section": "Section 10",
+      "change": "レビュー履歴にStage 4行を追加（approved, 5/5）"
+    },
+    {
+      "section": "Section 11",
+      "change": "Stage 4セキュリティレビューセクション新設（Must Fix 0件、Should Fix 0件、Consider 2件、セキュリティチェックリスト10項目、リスク評価）"
+    }
+  ],
+  "timestamp": "2026-02-08T12:15:00Z"
+}

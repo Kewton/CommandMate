@@ -1,0 +1,116 @@
+{
+  "issue_number": 191,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-C01",
+        "title": "prompt-detector.ts L268 のコード形式の記述が不正確",
+        "description": "設計書の Section 3-1 定数コメント及び Section 3-2 項目1 で 'prompt-detector.ts L268で slice(-50) を使用' と記載されているが、実際のコードは Math.max(0, lines.length - 50) を使用している。設計書内の Section 3-3 では正しく Math.max(0, length-50) と記載されており、文書内で矛盾が発生している。",
+        "location": "設計書 Section 3-1 (定数コメント), Section 3-2 項目1",
+        "actual_code": "const scanStart = Math.max(0, lines.length - 50);  // prompt-detector.ts L268",
+        "design_doc_claim": "prompt-detector.ts L268で slice(-50) を使用",
+        "severity": "medium",
+        "effort": "low",
+        "recommendation": "設計書 Section 3-1 の定数コメント内 'slice(-50)' を 'Math.max(0, lines.length - 50)' に修正。Section 3-2 項目1 も同様に修正。Section 3-3 の記載と統一する。"
+      },
+      {
+        "id": "SF-C02",
+        "title": "THINKING_CHECK_LINE_COUNT のエクスポート指定がチェックリストに未記載",
+        "description": "設計書 Section 4-1 テスト3 (SF-001) で 'THINKING_CHECK_LINE_COUNT をエクスポートして直接値を検証' と明記しているが、Section 8 の実装チェックリストでは '定数追加' としか記載されておらず、export が必要である旨が明示されていない。",
+        "location": "設計書 Section 8 (実装チェックリスト)",
+        "severity": "medium",
+        "effort": "low",
+        "recommendation": "チェックリスト項目を 'THINKING_CHECK_LINE_COUNT 定数追加（export）' に修正する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-C01",
+        "title": "current-output/route.ts の非空行フィルタリングの差異",
+        "description": "設計書 Section 2 の表で current-output/route.ts を '末尾15行（非空行）' と正しく記載しているが、status-detector.ts の15行は空行を含む全行であるという違いがコードコメントや設計書本文で明確に説明されていない。実装に直接影響しないが、将来の保守者向けに明確化すると良い。",
+        "location": "設計書 Section 2, Section 3-4",
+        "severity": "low",
+        "effort": "low"
+      },
+      {
+        "id": "C-C02",
+        "title": "テスト設計例のモックパターンが既存テストと異なる",
+        "description": "設計書 Section 4-1 のテスト1-2 では vi.mocked(captureSessionOutput) をトップレベルで使用するパターンで記載されているが、既存の Issue #161 テスト（L429-498）では await import() による動的インポートパターンを使用している。実装時には既存テストのパターンに合わせることが望ましい。",
+        "location": "設計書 Section 4-1 (テスト1, テスト2)",
+        "severity": "low",
+        "effort": "low"
+      },
+      {
+        "id": "C-C03",
+        "title": "Mermaid図が提案後のフローを描写している旨の明記",
+        "description": "設計書 Section 2 の Mermaid 図は修正後（After）のフローを描画しているが、現状（Before）のフローとの差異が図上で明示されていない。'detectThinking 末尾50行' のノート内表記は提案内容であり、現状は5000行全体であることを注記すると読者の混乱を防げる。",
+        "location": "設計書 Section 2 (Mermaid図)",
+        "severity": "low",
+        "effort": "low"
+      }
+    ]
+  },
+  "line_number_verification": {
+    "auto-yes-manager.ts L284 (detectThinking)": "MATCH - 実際のコード L284",
+    "auto-yes-manager.ts L276-287 (pollAutoYes変更範囲)": "MATCH - L276: captureSessionOutput, L279: stripAnsi, L284: detectThinking, L287: return",
+    "auto-yes-manager.ts L290 (detectPrompt)": "MATCH - 実際のコード L290",
+    "status-detector.ts L99 (detectThinking)": "MATCH - 実際のコード L99",
+    "status-detector.ts L83 (split-slice-join)": "MATCH - 実際のコード L83",
+    "prompt-detector.ts L268 (scanStart)": "PARTIAL MATCH - 実際は Math.max(0, lines.length - 50) であり slice(-50) ではない (SF-C01)",
+    "current-output/route.ts L83 (detectThinking)": "MATCH - 実際のコード L83",
+    "current-output/route.ts L73-74 (非空行15行)": "MATCH - 実際のコード L73-74"
+  },
+  "before_code_verification": {
+    "auto-yes-manager.ts pollAutoYes Before block": "MATCH - コメント行は省略されているが本質的に一致",
+    "detectThinking receives full cleanOutput": "CONFIRMED - L284で cleanOutput(5000行全体) を渡している"
+  },
+  "function_signature_verification": {
+    "detectThinking(cliToolId, content)": "MATCH - cli-patterns.ts L73",
+    "stripAnsi(str)": "MATCH - cli-patterns.ts L169",
+    "detectPrompt(output)": "MATCH - prompt-detector.ts L44",
+    "STATUS_CHECK_LINE_COUNT": "MATCH - status-detector.ts L50, value=15",
+    "captureSessionOutput": "MATCH - imported from cli-session",
+    "sendKeys": "MATCH - imported from tmux"
+  },
+  "impact_analysis_verification": {
+    "modified_files_correct": true,
+    "unchanged_files_confirmed": [
+      "detectThinking() function itself",
+      "detectPrompt() function",
+      "status-detector.ts",
+      "current-output/route.ts",
+      "auto-yes-resolver.ts"
+    ],
+    "regression_risk_assessment": "low - confirmed"
+  },
+  "test_design_verification": {
+    "existing_tests_structure": "Issue #161 tests at L427-499 use dynamic import pattern",
+    "proposed_test_mock_pattern_differs": true,
+    "note": "C-C02: proposed tests use top-level vi.mocked() but existing tests use await import()"
+  },
+  "architecture_diagram_verification": {
+    "call_flow_accurate": true,
+    "note": "Diagram shows proposed (After) flow, not current (Before) flow - see C-C03"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-191-auto-yes-thinking-windowing-design-policy.md",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/prompt-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}
