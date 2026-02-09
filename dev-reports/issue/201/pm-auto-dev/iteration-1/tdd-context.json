@@ -1,0 +1,23 @@
+{
+  "issue_number": 201,
+  "acceptance_criteria": [
+    "新規ワークスペースで信頼性確認ダイアログが表示された場合、自動でEnterが送信されること",
+    "Enterの送信は1回のみ行われること（二重送信防止ガードが機能すること）",
+    "自動応答後にClaude CLIが正常にプロンプト状態になること",
+    "自動応答時に info レベルのコンソールログが出力されること",
+    "Enter送信後、CLAUDE_INIT_TIMEOUTの残り時間内にプロンプトが検出されない場合はタイムアウトエラーが発生すること",
+    "既存のセッション初期化フロー（ダイアログなし）に回帰がないこと",
+    "claude-session.test.ts の全テストがパスすること",
+    "cli-patterns.test.ts に CLAUDE_TRUST_DIALOG_PATTERN のマッチ/非マッチテストが追加されていること"
+  ],
+  "implementation_tasks": [
+    "src/lib/cli-patterns.ts に CLAUDE_TRUST_DIALOG_PATTERN を追加",
+    "src/lib/claude-session.ts の startClaudeSession() 初期化ポーリングループ内にダイアログ検出・自動応答ロジックを追加",
+    "tests/unit/lib/claude-session.test.ts にテスト追加",
+    "src/lib/__tests__/cli-patterns.test.ts に CLAUDE_TRUST_DIALOG_PATTERN のテスト追加",
+    "CLAUDE.md の「最近の実装機能」セクションに Issue #201 の概要を追記"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-201-trust-dialog-auto-response-design-policy.md",
+  "work_plan_path": "dev-reports/issue/201/work-plan.md"
+}

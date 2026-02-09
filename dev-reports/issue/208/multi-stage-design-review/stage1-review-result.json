@@ -1,0 +1,102 @@
+{
+  "issue_number": 208,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "KISS",
+        "title": "QUESTION_KEYWORD_PATTERNのキーワード数が多い",
+        "description": "QUESTION_KEYWORD_PATTERNに16個のキーワードが含まれている。現時点で必要な最小限（select, choose, pick, which, what, enter, confirm）に絞り、残りは実際にClaude Codeで観測された場合に追加する方がKISS/YAGNI原則に沿う。ただし、防御的措置として許容範囲内。",
+        "recommendation": "実際にClaude Codeが使用するキーワードを調査し、観測されていないキーワード（how, where, type, specify, approve, accept, reject, decide, preference, option）を削除するか、コメントで「防御的追加」と明示する。",
+        "severity": "low",
+        "priority": "P3"
+      },
+      {
+        "id": "SF-002",
+        "category": "DRY",
+        "title": "全角疑問符判定の分離記述",
+        "description": "セクション3.2では line.endsWith('?') のみ記載し、セクション4.2で全角疑問符 '？' への対応を別途追加している。実装時に漏れるリスクがある。",
+        "recommendation": "セクション3.2のisQuestionLikeLine()定義内に全角疑問符判定を統合し、一箇所で完結させる。",
+        "severity": "low",
+        "priority": "P3"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "category": "OCP",
+        "title": "QUESTION_KEYWORD_PATTERNの拡張メカニズム",
+        "description": "セクション7.3で「キーワード追加で対応可能」と記載しているが、パターンはモジュールスコープのconst定数として定義される。将来的にCLIツール別に異なるキーワードセットが必要になった場合、DetectPromptOptionsを拡張する設計余地がある。",
+        "recommendation": "現時点では不要だが、将来の拡張可能性をコメントとして記録しておく（既存のSF-001コメントスタイルに倣う）。"
+      },
+      {
+        "id": "C-002",
+        "category": "KISS",
+        "title": "endsWith(':')判定と全角コロン",
+        "description": "セクション4.1のシナリオ分析で全角コロン '：' は半角 ':' と異なるため endsWith(':') はfalseと正しく説明しているが、将来的にCLIツールが全角コロンで質問する可能性がゼロではない。",
+        "recommendation": "YAGNI原則に従い現時点では対応不要。将来の観測に基づいて判断する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principles_evaluation": {
+    "single_responsibility": {
+      "status": "pass",
+      "score": 5,
+      "detail": "isQuestionLikeLine()は「質問行か否かの判定」という単一責任のみを持つ。QUESTION_KEYWORD_PATTERNは質問キーワードの定義という単一責任。Layer 5内のSEC-001a/SEC-001bも責任が明確に分離されている。"
+    },
+    "open_closed": {
+      "status": "pass",
+      "score": 4,
+      "detail": "QUESTION_KEYWORD_PATTERNへのキーワード追加で拡張可能。ただし、判定ロジック自体の変更（Pattern 3追加等）にはisQuestionLikeLine()の修正が必要。既存のDetectPromptOptionsインターフェースの拡張設計（SF-001コメント）に倣った将来拡張の記録があるとなお良い。"
+    },
+    "liskov_substitution": {
+      "status": "pass",
+      "score": 5,
+      "detail": "本設計はインターフェースや継承を使用しないため、LSPの適用対象外。detectPrompt()の呼び出しシグネチャに変更はなく、既存の利用者コードとの互換性は維持される。"
+    },
+    "interface_segregation": {
+      "status": "pass",
+      "score": 5,
+      "detail": "DetectPromptOptionsインターフェースに新規プロパティは追加されず、呼び出し元の変更が不要。isQuestionLikeLine()はモジュール内部関数として公開せず、不要なインターフェース肥大化を回避している。"
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "score": 5,
+      "detail": "isQuestionLikeLine()は外部依存を持たない純粋関数。QUESTION_KEYWORD_PATTERNはモジュールスコープ定数で、依存方向が適切。Layer 5の修正は呼び出し元（auto-yes-manager.ts等）に影響を与えない。"
+    },
+    "kiss": {
+      "status": "pass",
+      "score": 4,
+      "detail": "既存Layer 5を拡張するアプローチは最もシンプル。isQuestionLikeLine()のロジックは2パターン（?終端、キーワード+:終端）のみで明快。ただし、QUESTION_KEYWORD_PATTERNの16キーワードはやや多い（SF-001参照）。"
+    },
+    "yagni": {
+      "status": "pass",
+      "score": 4,
+      "detail": "新規防御層の追加を避け、既存Layer 5の拡張のみで対応している点はYAGNI準拠。QUESTION_KEYWORD_PATTERNの一部キーワード（how, where, specify, preference等）はClaude Codeの実プロンプトで観測されていない可能性があり、やや防御的（SF-001参照）。全角疑問符対応もセクション4.2で「防御的措置」と明示しており意図は明確。"
+    },
+    "dry": {
+      "status": "pass",
+      "score": 4,
+      "detail": "単一ファイル（prompt-detector.ts）内の変更で完結し、ロジック重複なし。全角疑問符判定がセクション3.2と4.2に分離記述されている点は軽微な懸念（SF-002参照）。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/cli-patterns.ts"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

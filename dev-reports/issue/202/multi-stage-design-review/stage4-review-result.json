@@ -1,0 +1,136 @@
+{
+  "issue_number": 202,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-SEC-001",
+        "category": "セキュリティ",
+        "owasp": "A03:2021 Injection",
+        "title": "scan/route.ts が filterExcludedPaths() を経由せず削除済みリポジトリを再登録可能（既知制限）",
+        "description": "POST /api/repositories/scan は個別リポジトリパスを受け取り、filterExcludedPaths() を経由せずに scanWorktrees() -> syncWorktreesToDB() を直接呼び出す。ユーザーが削除済みリポジトリのパスを手動入力した場合、enabled=0 の除外状態を無視してワークツリーが DB に再登録される。この経路は isPathSafe() によるパストラバーサル防御は適用されているが、除外状態チェックが欠如している。設計方針書 Section 2 で SF-IA-001 として既知の制限事項と記載されており、本 Issue のスコープ外だがフォローアップ対応が必要。",
+        "severity": "medium",
+        "affected_file": "src/app/api/repositories/scan/route.ts",
+        "recommendation": "フォローアップ Issue で scan/route.ts に除外チェック（getRepositoryByPath() で enabled=0 かを確認し、除外済みの場合は 400 エラーまたは警告を返す）を追加すること。"
+      },
+      {
+        "id": "SF-SEC-002",
+        "category": "セキュリティ",
+        "owasp": "A04:2021 Insecure Design",
+        "title": "server.ts の initializeWorktrees() にリポジトリパス数の上限チェックが未実装",
+        "description": "server.ts の initializeWorktrees() は getRepositoryPaths() から環境変数 WORKTREE_REPOS のパスを取得し、ensureEnvRepositoriesRegistered() でそれらを全て DB に登録する。WORKTREE_REPOS に極端に多数のパスが設定された場合（例: 数万件）、DB INSERT が大量発生し、起動時間が著しく増大する可能性がある。ただし、環境変数はサーバー管理者のみが設定可能であり、外部からの攻撃ベクタではないためリスクは限定的。",
+        "severity": "low",
+        "affected_file": "server.ts",
+        "recommendation": "環境変数からのパス数に上限（例: MAX_WORKTREES=100）を設け、超過時は警告ログを出力して先頭N件のみ処理する方式を検討すること。優先度は低い。"
+      },
+      {
+        "id": "SF-SEC-003",
+        "category": "セキュリティ",
+        "owasp": "A09:2021 Security Logging and Monitoring Failures",
+        "title": "server.ts の除外フィルタリングで除外されたリポジトリのパスがログに出力されない",
+        "description": "設計方針書の修正後コードでは、除外されたリポジトリの「数」はログ出力されるが、「どのリポジトリが除外されたか」のパス情報はログに含まれない。セキュリティ監査やトラブルシューティングの観点から、除外されたリポジトリの具体的なパスをデバッグレベルのログで出力することが望ましい。",
+        "severity": "low",
+        "affected_file": "server.ts",
+        "recommendation": "除外リポジトリのパスをデバッグレベルで出力するログ行を追加することを検討すること。例: excludedPaths の forEach でパスを出力。本番環境ではログレベル制御により抑制可能。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-SEC-001",
+        "category": "セキュリティ",
+        "owasp": "A01:2021 Broken Access Control",
+        "title": "API エンドポイントの認証・認可メカニズムが未実装（プロジェクト全体の既存課題）",
+        "description": "本修正で追加される機能自体は server.ts の内部処理であり API エンドポイントを直接変更しない。しかし、関連する API エンドポイント（DELETE /api/repositories、PUT /api/repositories/restore、POST /api/repositories/scan、POST /api/repositories/sync）には認証・認可メカニズムが実装されていない。これはプロジェクト全体の既存課題であり、本 Issue のスコープ外。デフォルトのバインドアドレス 127.0.0.1 によりローカルアクセスに限定されているため、現時点での実害リスクは低い。",
+        "recommendation": "プロジェクトレベルで認証メカニズムの導入を検討すること。特に CM_BIND=0.0.0.0 で起動する場合のリスクを文書化すること。"
+      },
+      {
+        "id": "C-SEC-002",
+        "category": "セキュリティ",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "title": "worktree 別サーバー間での DB 分離による除外状態の非同期",
+        "description": "Issue #136 で追加された commandmate start --issue オプションにより、worktree 別サーバーインスタンスが独立した DB を持つ。メインサーバーでリポジトリを削除しても、worktree 別サーバーの DB には反映されない。これは設計上の制限であり、Stage 3 で C-IA-001 として既に認識されている。セキュリティ上の直接的な脅威ではないが、運用上の混乱を招く可能性がある。",
+        "recommendation": "worktree 別サーバーの運用ガイドに、除外状態が共有されない旨を明記すること。"
+      },
+      {
+        "id": "C-SEC-003",
+        "category": "セキュリティ",
+        "owasp": "A08:2021 Software and Data Integrity Failures",
+        "title": "ensureEnvRepositoriesRegistered() と filterExcludedPaths() の呼び出し順序がコード上の規約に依存",
+        "description": "ensureEnvRepositoriesRegistered() を filterExcludedPaths() の前に呼び出す順序制約は、インラインコメントと JSDoc で明示化される設計方針（SF-001/SF-CS-001/SF-CS-002）が既に策定されている。しかし、コンパイル時や実行時に順序を強制する仕組み（例: 型システムによる保証）はない。将来の保守者がコメントを見落として順序を変更した場合、除外フィルタリングが正しく機能しなくなる。フォローアップ Issue で共通関数への抽出が計画されており、これにより順序制約がカプセル化される。",
+        "recommendation": "フォローアップ Issue（共通関数 initializeFilteredRepositories() への抽出）を優先的に対応すること。"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "acceptable",
+      "detail": "本修正は server.ts 内部のサーバー初期化処理であり、新たな API エンドポイントを追加しない。既存 API エンドポイント群に認証機構は未実装だが、デフォルトバインドが 127.0.0.1 のため外部アクセスは制限されている。本 Issue のスコープ外。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "detail": "本修正は暗号化機能を含まず、機密データの暗号化は対象外。DB ファイルのディレクトリ権限は SEC-003 で 0o700 に設定済み。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "detail": "better-sqlite3 のパラメータ化クエリ（prepared statements）を使用しており、SQL インジェクションは防止されている。ensureEnvRepositoriesRegistered() と filterExcludedPaths() は全て prepared statements を使用。環境変数 WORKTREE_REPOS から取得されるパスは path.resolve() で正規化される。null byte チェックは validateRepositoryPath() で実施済み。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "detail": "設計は sync/route.ts の参照実装を転写する方式であり、検証済みパターンの再利用。ensureEnvRepositoriesRegistered() は冪等操作。filterExcludedPaths() は enabled=0 の除外済みパスを確実にフィルタリング。disableRepository() には SEC-SF-004 の MAX_DISABLED_REPOSITORIES=1000 制限が実装済み。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "detail": "tsconfig.server.json への明示的な include 追加により、ビルド対象ファイルの管理が明確化される。server.ts はデフォルトで 127.0.0.1 にバインドし、環境変数の検証（ポート範囲、バインドアドレス）も実装済み。"
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "not_applicable",
+      "detail": "本修正は新たな外部依存を追加しない。既存の better-sqlite3 と Next.js を引き続き使用。"
+    },
+    "A07_identification_authentication_failures": {
+      "status": "acceptable",
+      "detail": "本修正は認証フローに関与しない。プロジェクト全体として認証メカニズムは未実装だが、ローカルバインドにより緩和されている。"
+    },
+    "A08_software_data_integrity_failures": {
+      "status": "pass",
+      "detail": "ensureEnvRepositoriesRegistered() は冪等操作であり、既登録リポジトリに対しては何もしない。filterExcludedPaths() は DB の enabled フィールドに基づく安定した判定。呼び出し順序制約はコメントと JSDoc で明示化される設計。"
+    },
+    "A09_security_logging_monitoring_failures": {
+      "status": "acceptable",
+      "detail": "除外リポジトリの数はログ出力されるが、具体的なパスは含まれない（SF-SEC-003）。エラーハンドリングでは console.error で例外をログ出力。SEC-SF-003 で API エラーレスポンスから内部詳細を除外する対策が既存 API に実装済み。"
+    },
+    "A10_server_side_request_forgery": {
+      "status": "not_applicable",
+      "detail": "本修正は外部 HTTP リクエストを発行しない。ファイルシステムアクセスのみであり、SSRF のリスクは存在しない。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "server.ts",
+    "src/lib/db-repository.ts",
+    "src/config/system-directories.ts",
+    "src/lib/worktrees.ts",
+    "src/lib/db-instance.ts",
+    "src/lib/env.ts",
+    "src/lib/path-validator.ts",
+    "src/lib/db-migrations.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/excluded/route.ts",
+    "src/app/api/repositories/restore/route.ts",
+    "tests/unit/lib/db-repository-exclusion.test.ts",
+    "tests/integration/repository-exclusion.test.ts",
+    "tsconfig.server.json",
+    "dev-reports/design/issue-202-server-startup-exclusion-filter-design-policy.md"
+  ],
+  "timestamp": "2026-02-09T15:00:00Z"
+}

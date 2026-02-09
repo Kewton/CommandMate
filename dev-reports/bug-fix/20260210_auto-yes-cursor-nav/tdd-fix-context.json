@@ -1,0 +1,31 @@
+{
+  "bug_id": "20260210_auto-yes-cursor-nav",
+  "bug_description": "Server-side Auto-Yes poller (auto-yes-manager.ts) sends text via sendKeys() for Claude Code multiple_choice prompts, but Claude Code uses cursor-based navigation (Arrow/Enter). Fix: add cursor-based navigation support matching prompt-response/route.ts implementation.",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "Add cursor-based navigation to auto-yes-manager pollAutoYes()",
+      "description": "In auto-yes-manager.ts pollAutoYes(), after resolveAutoAnswer() returns a number, check if it's Claude Code multiple_choice. If so, calculate arrow key offset from default option and send via sendSpecialKeys(). Otherwise use existing sendKeys() path.",
+      "files_to_modify": [
+        "src/lib/auto-yes-manager.ts"
+      ],
+      "reference_implementation": "src/app/api/worktrees/[id]/prompt-response/route.ts lines 96-129"
+    }
+  ],
+  "implementation_tasks": [
+    "1. Add import for sendSpecialKeys from ./tmux",
+    "2. In pollAutoYes() lines 334-342, add Claude multi-choice detection: cliToolId === 'claude' && promptDetection.promptData?.type === 'multiple_choice' && /^\\d+$/.test(answer)",
+    "3. If Claude multi-choice: calculate offset from default option (isDefault) to target number, build Down/Up key sequence + Enter, send via sendSpecialKeys()",
+    "4. Otherwise: use existing sendKeys() text path (preserves yes/no, codex/gemini)",
+    "5. Add unit tests verifying: (a) Claude multi-choice uses sendSpecialKeys, (b) yes/no still uses sendKeys, (c) codex multi-choice still uses sendKeys, (d) correct arrow key calculation"
+  ],
+  "acceptance_criteria": [
+    "auto-yes-manager sends cursor navigation (sendSpecialKeys) for Claude Code multiple_choice prompts",
+    "auto-yes-manager still sends text (sendKeys) for yes/no prompts",
+    "auto-yes-manager still sends text (sendKeys) for non-Claude CLI tools",
+    "All existing tests pass",
+    "TypeScript compiles with zero errors",
+    "ESLint passes with zero errors"
+  ],
+  "target_coverage": 80
+}

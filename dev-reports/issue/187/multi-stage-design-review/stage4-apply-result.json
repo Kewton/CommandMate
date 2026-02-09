@@ -1,0 +1,71 @@
+{
+  "issue_number": 187,
+  "stage": 4,
+  "applied_findings": [
+    {
+      "id": "S4-F-1",
+      "severity": "should_fix",
+      "category": "command_injection",
+      "title": "claude-session.ts の getSessionName() にセッション名バリデーションが欠如",
+      "applied_to": "Section 5 (セキュリティ設計) - 既知の制限事項として文書化、Section 10 (Stage 4レビューサマリー)、Section 11 (実装チェックリスト: 別Issue推奨)"
+    },
+    {
+      "id": "S4-F-2",
+      "severity": "nice_to_have",
+      "category": "command_injection",
+      "title": "sendKeys() のシングルクォートエスケープのみでは不完全なケースがある",
+      "applied_to": "Section 5 (セキュリティ考慮事項 nice-to-have)、Section 10 (Stage 4レビューサマリー)"
+    },
+    {
+      "id": "S4-F-3",
+      "severity": "nice_to_have",
+      "category": "command_injection",
+      "title": "P2-1 Ctrl+U 送信における sendSpecialKey の安全性確認",
+      "applied_to": "Section 5 (セキュリティ考慮事項 nice-to-have)、Section 10 (Stage 4レビューサマリー)"
+    },
+    {
+      "id": "S4-F-4",
+      "severity": "nice_to_have",
+      "category": "information_leakage",
+      "title": "エラーメッセージにセッション名が含まれ、内部構造が露出する",
+      "applied_to": "Section 5 (セキュリティ考慮事項 nice-to-have)、Section 10 (Stage 4レビューサマリー)"
+    },
+    {
+      "id": "S4-F-5",
+      "severity": "nice_to_have",
+      "category": "dos",
+      "title": "P0 安定化待機 500ms による累積的 DoS の可能性（理論的）",
+      "applied_to": "Section 5 (セキュリティ考慮事項 nice-to-have)、Section 10 (Stage 4レビューサマリー)"
+    },
+    {
+      "id": "S4-F-6",
+      "severity": "nice_to_have",
+      "category": "other",
+      "title": "stripAnsi の ANSI_PATTERN 拡張（P2-2）による ReDoS リスク評価",
+      "applied_to": "Section 5 (セキュリティ考慮事項 nice-to-have - 確認済み安全)、Section 10 (Stage 4レビューサマリー)"
+    },
+    {
+      "id": "S4-F-7",
+      "severity": "should_fix",
+      "category": "command_injection",
+      "title": "stopClaudeSession() の execAsync 直接呼び出しにセッション名バリデーションなし",
+      "applied_to": "Section 5 (セキュリティ設計) - 一貫性改善として文書化、Section 10 (Stage 4レビューサマリー)、Section 11 (実装チェックリスト: P2-1同時対応または別Issue)"
+    },
+    {
+      "id": "S4-F-8",
+      "severity": "nice_to_have",
+      "category": "information_leakage",
+      "title": "P1-2 エラー伝播後のエラーメッセージにタイミング情報が含まれる",
+      "applied_to": "Section 5 (セキュリティ考慮事項 nice-to-have)、Section 10 (Stage 4レビューサマリー)"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "sections_updated": [
+    "Section 5 (セキュリティ設計) - S4-F-1既知の制限事項、S4-F-7一貫性改善、nice-to-have考慮事項6件、OWASP Top 10リスク評価表を追加",
+    "Section 10 (レビュー指摘事項サマリー) - Stage 4セキュリティレビュー findings全8件とレビュー評価を追加",
+    "Section 11 (実装チェックリスト) - S4-F-1別Issue推奨チェック、S4-F-7 sendSpecialKey統一チェックを追加",
+    "Section 12 (レビュー履歴) - Stage 4エントリを追加"
+  ],
+  "summary": "Stage 4セキュリティレビューの全8件の指摘事項（should_fix 2件、nice_to_have 6件）を設計方針書に反映。must_fix指摘はなし。should_fix 2件（S4-F-1: getSessionName()バリデーション欠如の既知制限文書化、S4-F-7: stopClaudeSession() execAsync直接呼び出しの一貫性改善文書化）はSection 5に詳細記載し、Section 11の実装チェックリストに別Issue切り出し推奨を追加。nice_to_have 6件はSection 5のセキュリティ考慮事項として一括記載。OWASP Top 10リスク評価表をSection 5に追加。"
+}

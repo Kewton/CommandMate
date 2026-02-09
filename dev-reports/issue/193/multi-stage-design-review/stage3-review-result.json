@@ -1,0 +1,254 @@
+{
+  "issue_number": 193,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IA-001",
+        "category": "影響範囲",
+        "title": "response-poller.ts L442のfullOutputにstripAnsi未適用のままdetectPromptに渡される問題",
+        "severity": "medium",
+        "description": "response-poller.ts L442では `const fullOutput = lines.join('\\n');` の後に直接 `detectPrompt(fullOutput)` を呼び出している。linesはL197-202で元のrawLinesからトリミングしたものであり、stripAnsiは適用されていない。設計書ではL442にstripAnsi追加を記載しているが、detectPromptWithOptions()ヘルパー内でstripAnsiを適用するか、呼び出し前に適用するかの方針が2箇所に分散して記載されており（セクション4.5と6.3）、実装時に混乱が生じる可能性がある。ヘルパー内に一元化するか、呼び出し前に一元化するか、明確に1つの方針に決定すべき。",
+        "recommendation": "detectPromptWithOptions()ヘルパー内で一律stripAnsiを適用する方針を推奨。ただし、L248では既にstripAnsi済みの入力を渡しているため、二重適用の無害性（冪等性）をコメントで明記すること。",
+        "evidence": "response-poller.ts L442: `const promptDetection = detectPrompt(fullOutput);` -- fullOutputにANSIコードが残存。設計書セクション4.5と6.3で方針が2通り記載。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IA-002",
+        "category": "影響範囲",
+        "title": "status-detector.tsがbuildDetectPromptOptionsをimportすることによるcli-patterns.tsへの循環依存リスク",
+        "severity": "low",
+        "description": "status-detector.tsは既にcli-patterns.tsからstripAnsi, detectThinking, getCliToolPatternsをimportしている。buildDetectPromptOptions追加はimport行の追加のみであり、新たな依存方向は生じない。ただし、cli-patterns.tsがprompt-detector.tsからDetectPromptOptionsをimportする新しい依存が追加される。現在のモジュール依存グラフ: cli-patterns.ts -> cli-tools/types.ts。変更後: cli-patterns.ts -> cli-tools/types.ts + prompt-detector.ts。prompt-detector.ts -> (依存なし、promptData型のみmodels.ts)。循環依存は発生しない。",
+        "recommendation": "循環依存は発生しないことを確認済み。設計書にモジュール依存の方向性を明示する図を追加するとより明確になる。",
+        "evidence": "cli-patterns.ts L6: `import type { CLIToolType } from './cli-tools/types';` -- 既存依存。prompt-detector.ts L6: `import type { PromptData } from '@/types/models';` -- 外部依存はmodels.tsのみ。"
+      },
+      {
+        "id": "IA-003",
+        "category": "影響範囲",
+        "title": "status-detector.test.tsの既存テストがdetectPromptをオプション無しで呼び出す前提",
+        "severity": "low",
+        "description": "status-detector.test.tsの既存テスト（18テストケース）はdetectSessionStatusを直接呼び出すが、内部でdetectPrompt(lastLines)をオプションなしで呼び出す現在の実装に依存している。変更後はdetectPrompt(lastLines, promptOptions)となるが、cliToolIdは既にdetectSessionStatusの第2引数として渡されているため、buildDetectPromptOptions(cliToolId)の呼び出しは内部実装の変更に留まる。既存テストのうちcliToolId='claude'で多重選択肢を検出するテスト（L92-104, L250-264）は、requireDefaultIndicator=falseにより検出動作が変わる可能性がある。ただし、テスト入力には全て❯マーカーが含まれているため、既存動作に影響はない。",
+        "recommendation": "既存テストはそのまま通過することを確認すること。Claude用の❯なし形式テストをstatus-detector.test.tsにも追加して、新しい検出動作を検証することを推奨。",
+        "evidence": "status-detector.test.ts L92-104: `❯ 1. Option A` を含むテスト入力。L250-264も同様。これらは❯マーカーありのため、requireDefaultIndicator=falseでも同じ結果を返す。"
+      },
+      {
+        "id": "IA-004",
+        "category": "影響範囲",
+        "title": "prompt-response-verification.test.tsのdetectPromptモックが新シグネチャを反映しない場合の影響",
+        "severity": "low",
+        "description": "tests/unit/api/prompt-response-verification.test.ts L49-51では `vi.mock('@/lib/prompt-detector', () => ({ detectPrompt: vi.fn().mockReturnValue({ isPrompt: false, cleanContent: '' }) }))` としてdetectPromptをモックしている。新シグネチャではdetectPrompt(output, options?)となるが、vi.fn()はオプションパラメータを無視して呼び出し可能なため、テストは破壊されない。ただし、テスト内でdetectPromptの呼び出し引数を検証している場合（例: `expect(detectPrompt).toHaveBeenCalledWith(...)`)、optionsパラメータの有無で失敗する可能性がある。",
+        "recommendation": "テスト内のdetectPrompt呼び出し引数検証箇所を確認し、必要に応じてoptions引数を含めるよう更新すること。",
+        "evidence": "tests/unit/api/prompt-response-verification.test.ts L49-51: モック定義。L75のdetectPromptはprompt-response/route.ts内で呼び出される。route.ts変更後はbuildDetectPromptOptionsが呼ばれ、detectPromptにoptionsが渡される。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IA-005",
+        "category": "影響範囲",
+        "title": "UIコンポーネント（PromptPanel, MobilePromptSheet）への間接影響は限定的",
+        "severity": "info",
+        "description": "PromptPanel.tsx, MobilePromptSheet.tsx, WorktreeDetailRefactored.tsxはpromptDataとisPromptWaitingをprops経由で受け取り表示するのみ。detectPromptの出力形式（PromptDetectionResult）は変更されず、promptData内のoptionsフィールドのisDefaultがfalseになるケースが増えるのみ。UIコンポーネントはisDefaultを直接参照して表示を変えていないため、影響なし。",
+        "recommendation": "UIコンポーネントの変更は不要であることを確認済み。",
+        "evidence": "src/components/worktree/PromptPanel.tsx, src/components/mobile/MobilePromptSheet.tsx -- promptData.optionsの表示ロジックにisDefaultの条件分岐なし。"
+      },
+      {
+        "id": "IA-006",
+        "category": "影響範囲",
+        "title": "Codex/Gemini CLIツールへの影響がないことの確認",
+        "severity": "info",
+        "description": "buildDetectPromptOptions()はcliToolId='claude'の場合のみ{ requireDefaultIndicator: false }を返し、'codex'と'gemini'ではundefinedを返す。undefinedが渡されたdetectPromptはoptions?.requireDefaultIndicator ?? trueでtrueとなり、既存動作を完全に維持する。response-poller.tsのdetectPromptWithOptionsヘルパーも汎用的にcliToolIdを受け取るため、Codex/Geminiのポーリングパスでも正しくundefinedが渡される。",
+        "recommendation": "Codex/Gemini用のリグレッションテストは既存テストで十分カバーされている。特別な追加テストは不要。",
+        "evidence": "buildDetectPromptOptions設計: `if (cliToolId === 'claude') return { requireDefaultIndicator: false }; return undefined;` -- Codex/Geminiは常にundefined。"
+      },
+      {
+        "id": "IA-007",
+        "category": "影響範囲",
+        "title": "claude-poller.tsの到達不能コードへの影響は実質ゼロ",
+        "severity": "info",
+        "description": "claude-poller.tsのstartPollingは外部から呼び出されておらず、L164/L232のdetectPrompt呼び出しは到達不能。設計書でP2としてTODOコメント追加を優先し、実装変更をオプションとしている方針は合理的。ただし、stopPollingはsession-cleanup.tsとcli-tools/manager.tsからimportされているため、claude-poller.tsモジュール自体は読み込まれる。到達不能であってもモジュールレベルのimport文は実行されるため、detectPromptのimport自体に影響はない。",
+        "recommendation": "P2対応として記載されている通り、TODOコメント追加で十分。",
+        "evidence": "claude-poller.ts L10: `import { detectPrompt } from './prompt-detector';` -- importは実行されるがdetectPrompt呼び出し箇所は到達不能。"
+      },
+      {
+        "id": "IA-008",
+        "category": "影響範囲",
+        "title": "useAutoYes.tsクライアントフックへの間接影響",
+        "severity": "info",
+        "description": "useAutoYes.tsはresolveAutoAnswer(promptData)を呼び出してauto-responseを行う。promptDataはcurrent-output/route.tsのAPIレスポンスから取得される。requireDefaultIndicator=false時、multiple_choiceのoptions[].isDefaultが全てfalseになるケースが増える。resolveAutoAnswer内のフォールバック（options[0]選択）は既にテスト済み（auto-yes-resolver.test.ts L47-58）。クライアント側のuseAutoYes.tsは変更不要。",
+        "recommendation": "auto-yes-resolver.test.tsに「全optionのisDefault=false、かつoptions.length >= 2」のテストケースが既に存在することを確認済み（L47-58）。追加テストは不要。",
+        "evidence": "auto-yes-resolver.ts L24-25: `const defaultOpt = promptData.options.find(o => o.isDefault); const target = defaultOpt ?? promptData.options[0];`"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_matrix": {
+    "direct_changes": [
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "change": "DetectPromptOptions interface追加、detectPrompt/detectMultipleChoicePromptにoptionalパラメータ追加、Pass 1/Layer 4の条件分岐",
+        "risk": "low",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "change": "buildDetectPromptOptions()関数追加、DetectPromptOptionsのimport追加",
+        "risk": "low",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "change": "buildDetectPromptOptions import追加、detectPrompt呼び出しにoptions引数追加",
+        "risk": "low",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "change": "buildDetectPromptOptions import追加、L290のdetectPrompt呼び出しにoptions引数追加",
+        "risk": "low",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "change": "buildDetectPromptOptions import追加、L87のdetectPrompt呼び出しにoptions引数追加",
+        "risk": "low",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "change": "detectPromptWithOptions()内部ヘルパー追加、L248/L442/L556のdetectPrompt呼び出し統一、L442/L556にstripAnsi追加",
+        "risk": "medium",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "change": "buildDetectPromptOptions import追加、L88のdetectPrompt呼び出しにoptions引数追加（thinking分岐維持）",
+        "risk": "low",
+        "backward_compatible": true
+      }
+    ],
+    "indirect_impact": [
+      {
+        "file": "src/app/api/worktrees/route.ts",
+        "change": "detectSessionStatus()経由でdetectPromptが呼び出される。detectSessionStatus内部でbuildDetectPromptOptionsが使用される。route.ts自体の変更は不要。",
+        "risk": "none"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "change": "detectSessionStatus()経由でdetectPromptが呼び出される。route.ts自体の変更は不要。",
+        "risk": "none"
+      },
+      {
+        "file": "src/lib/auto-yes-resolver.ts",
+        "change": "isDefault=false時のフォールバック動作（options[0]選択）が発動するケースが増加。コード変更不要。",
+        "risk": "none"
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "change": "current-output APIのレスポンス経由でpromptDataを受け取る。promptData形式に変更なし。コード変更不要。",
+        "risk": "none"
+      },
+      {
+        "file": "src/components/worktree/PromptPanel.tsx",
+        "change": "promptData表示のみ。isDefaultフィールドはUI表示に使用されていない。コード変更不要。",
+        "risk": "none"
+      },
+      {
+        "file": "src/components/mobile/MobilePromptSheet.tsx",
+        "change": "同上。コード変更不要。",
+        "risk": "none"
+      },
+      {
+        "file": "src/lib/claude-poller.ts",
+        "change": "到達不能コード。P2でTODOコメント追加。実質影響なし。",
+        "risk": "none"
+      }
+    ],
+    "test_impact": [
+      {
+        "file": "tests/unit/prompt-detector.test.ts",
+        "change": "新規テストケース追加（requireDefaultIndicator=false）。既存テストは破壊されない。",
+        "update_required": "add_new_tests"
+      },
+      {
+        "file": "tests/unit/lib/auto-yes-resolver.test.ts",
+        "change": "isDefault=falseフォールバック動作は既存テスト（L47-58）でカバー済み。追加テスト検討。",
+        "update_required": "optional_add"
+      },
+      {
+        "file": "src/lib/__tests__/status-detector.test.ts",
+        "change": "既存テストはそのまま通過。内部実装変更のみ。Claude用❯なしテスト追加推奨。",
+        "update_required": "optional_add"
+      },
+      {
+        "file": "tests/unit/api/prompt-response-verification.test.ts",
+        "change": "detectPromptモックは新シグネチャでも動作する。引数検証がある場合のみ更新必要。",
+        "update_required": "verify_no_breaking"
+      },
+      {
+        "file": "tests/unit/lib/auto-yes-manager.test.ts",
+        "change": "detectPromptのdynamic importを使用。新シグネチャでも動作する。",
+        "update_required": "verify_no_breaking"
+      }
+    ],
+    "no_impact": [
+      "src/types/models.ts -- PromptData/PromptDetectionResult型定義に変更なし",
+      "src/lib/db.ts -- promptData保存ロジックに変更なし",
+      "src/components/worktree/WorktreeDetailRefactored.tsx -- UI表示のみ、変更不要",
+      "src/components/worktree/PromptMessage.tsx -- promptData表示のみ、変更不要",
+      "src/components/worktree/MessageList.tsx -- メッセージ一覧表示のみ、変更不要",
+      "src/app/api/worktrees/[id]/respond/route.ts -- プロンプト応答送信のみ、detectPrompt非使用"
+    ]
+  },
+  "dependency_graph_changes": {
+    "new_dependencies": [
+      {
+        "from": "src/lib/cli-patterns.ts",
+        "to": "src/lib/prompt-detector.ts",
+        "type": "type-only import (DetectPromptOptions)",
+        "risk": "none",
+        "circular": false
+      }
+    ],
+    "existing_dependencies_unchanged": [
+      "status-detector.ts -> cli-patterns.ts (stripAnsi, detectThinking, getCliToolPatterns)",
+      "status-detector.ts -> prompt-detector.ts (detectPrompt)",
+      "status-detector.ts -> cli-tools/types.ts (CLIToolType)",
+      "response-poller.ts -> prompt-detector.ts (detectPrompt)",
+      "response-poller.ts -> cli-patterns.ts (getCliToolPatterns, stripAnsi)",
+      "auto-yes-manager.ts -> prompt-detector.ts (detectPrompt)",
+      "auto-yes-manager.ts -> cli-patterns.ts (stripAnsi, detectThinking)",
+      "cli-patterns.ts -> cli-tools/types.ts (CLIToolType)"
+    ]
+  },
+  "reviewed_files": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/lib/claude-poller.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/auto-yes-resolver.test.ts",
+    "tests/unit/api/prompt-response-verification.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "src/lib/__tests__/status-detector.test.ts",
+    "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

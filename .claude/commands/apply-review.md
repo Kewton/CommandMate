@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 description: "レビュー指摘事項を実装に反映"
 ---
 

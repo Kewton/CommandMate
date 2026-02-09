@@ -1,0 +1,41 @@
+{
+  "issue_number": 202,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "受け入れ条件の手動テスト項目に具体的な検証手順（再現手順の逆順: 1. リポジトリを削除、2. サーバー再起動、3. 削除済みリポジトリが表示されないことを確認）を補記。テスト方針の手動テスト項目にも同様の説明を追加。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 1,
+    "applied": 1,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/202"
+  },
+  "changes_made": [
+    {
+      "section": "受け入れ条件",
+      "change": "手動テストの受け入れ条件に括弧内で具体的な手順（再現手順の逆順: 1. リポジトリを削除、2. サーバー再起動、3. 削除済みリポジトリが表示されないことを確認）を追記"
+    },
+    {
+      "section": "テスト方針",
+      "change": "手動テスト項目に「再現手順の逆順で検証」の説明を追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "Stage 7 影響範囲レビュー 2回目のエントリを追加"
+    }
+  ]
+}

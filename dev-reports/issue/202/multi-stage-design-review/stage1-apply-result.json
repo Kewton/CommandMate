@@ -1,0 +1,51 @@
+{
+  "issue_number": 202,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "server.ts と sync/route.ts のワークツリー初期化フローが重複（DRY）",
+        "sections_updated": [
+          "Section 4: 呼び出し順序制約のドキュメント化",
+          "Section 7-1: server.ts修正後コードに順序制約コメント追加",
+          "Section 7-3: db-repository.ts JSDoc追加方針",
+          "Section 7-4: sync/route.ts コメント確認方針",
+          "Section 12: DRY準拠状況の更新",
+          "Section 14: レビュー指摘事項サマリー",
+          "Section 15: 実装チェックリスト"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "server.ts の initializeWorktrees() に対する統合テストが不足",
+        "sections_updated": [
+          "Section 10: テスト可能性改善セクション追加",
+          "Section 10: 手動テストシナリオ表追加",
+          "Section 14: レビュー指摘事項サマリー",
+          "Section 15: 実装チェックリスト"
+        ],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-202-server-startup-exclusion-filter-design-policy.md",
+  "sections_updated": [
+    "Section 4: 設計パターン（呼び出し順序制約のドキュメント化追加）",
+    "Section 7-1: server.ts修正内容（順序制約コメント追加）",
+    "Section 7-3: db-repository.ts JSDoc追加（新規）",
+    "Section 7-4: sync/route.ts コメント確認（新規）",
+    "Section 10: テスト方針（テスト可能性改善・手動テストシナリオ追加）",
+    "Section 12: 制約条件（DRY準拠状況更新）",
+    "Section 13: レビュー履歴（新規）",
+    "Section 14: レビュー指摘事項サマリー（新規）",
+    "Section 15: 実装チェックリスト（新規）"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

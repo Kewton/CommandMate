@@ -1,0 +1,122 @@
+{
+  "issue_number": 187,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_focus": "セキュリティ",
+  "review_date": "2026-02-08",
+  "status": "conditionally_approved",
+  "score": "4/5",
+  "risk_assessment": {
+    "technical_risk": "low",
+    "security_risk": "medium",
+    "operational_risk": "low"
+  },
+  "findings": [
+    {
+      "id": "S4-F-1",
+      "severity": "should_fix",
+      "category": "command_injection",
+      "title": "claude-session.ts の getSessionName() にセッション名バリデーションが欠如",
+      "description": "claude-session.ts の getSessionName() (L169-171) は worktreeId を検証せずに `mcbd-claude-${worktreeId}` を返し、この値は hasSession(), capturePane(), sendKeys() 等で tmux コマンドのシェル引数として使用される。BaseCLITool.getSessionName() は validateSessionName() を呼んでいるが、ClaudeTool.sendMessage() は sendMessageToClaude() を経由し、そこで claude-session.ts 独自の getSessionName() が使われるため、バリデーションが迂回される。現状は worktreeId が generateWorktreeId() で [a-z0-9-] にサニタイズされ、API route で getWorktreeById() による DB 存在チェックも行われるため、実際の攻撃リスクは低い。しかし、防御の深層（Defense in Depth）として claude-session.ts 側にもバリデーションを追加すべきである。",
+      "suggestion": "claude-session.ts の getSessionName() に validateSessionName() を追加するか、BaseCLITool.getSessionName() を共通利用するようリファクタリングする。最小限の対応として: import { validateSessionName } from './cli-tools/validation'; を追加し、getSessionName() 内で validateSessionName(sessionName) を return 前に呼び出す。",
+      "owasp_category": "A03:2021-Injection",
+      "affected_files": ["src/lib/claude-session.ts"],
+      "existing_mitigation": "generateWorktreeId() による [a-z0-9-] サニタイズ、DB存在チェック、tmux.ts の sendKeys() でシングルクォートエスケープ"
+    },
+    {
+      "id": "S4-F-2",
+      "severity": "nice_to_have",
+      "category": "command_injection",
+      "title": "sendKeys() のシングルクォートエスケープのみでは不完全なケースがある",
+      "description": "tmux.ts の sendKeys() (L212-213) は `keys.replace(/'/g, \"'\\\\''\")`でシングルクォートのみをエスケープし、コマンドを `tmux send-keys -t \"${sessionName}\" '${escapedKeys}'` 形式で構築している。ユーザーメッセージ（body.content）はこの経路で直接 tmux に送信される。シングルクォートで囲まれている限り、シェルインジェクションは発生しない（シングルクォート内では変数展開やコマンド置換が無効）。ただし、この安全性はシェルのシングルクォートセマンティクスに依存しており、将来のリファクタリングでダブルクォートに変更された場合に脆弱性が発生するリスクがある。Issue #187 の変更自体はこのコードに触れないため、直接的な問題ではない。",
+      "suggestion": "sendKeys() に防御的コメントを追加し、シングルクォートを使用する理由（シェルインジェクション防止）を明記する。将来的には execFile() への移行を検討する（child_process.execFile はシェルを経由しないため、インジェクションリスクが根本的に排除される）。",
+      "owasp_category": "A03:2021-Injection",
+      "affected_files": ["src/lib/tmux.ts"],
+      "existing_mitigation": "シングルクォート囲みによりシェル変数展開・コマンド置換が無効化されている"
+    },
+    {
+      "id": "S4-F-3",
+      "severity": "nice_to_have",
+      "category": "command_injection",
+      "title": "P2-1 Ctrl+U 送信における sendSpecialKey の安全性確認",
+      "description": "P2-1 で追加予定の sendSpecialKey(sessionName, 'C-u') は、tmux.ts L386-388 で `tmux send-keys -t \"${sessionName}\" ${key}` として実行される。key パラメータは SpecialKey 型（'Escape' | 'C-c' | 'C-d' | 'C-u'）に制限されており、ユーザー入力が直接渡されることはない。ただし、sendSpecialKey では key がクォートなしで展開される設計であり、SpecialKey 型以外の値が渡された場合のフォールバック保護がない。TypeScript の型システムが実行時に型チェックを行わないことを考慮すると、ランタイムバリデーションがあると堅牢になる。",
+      "suggestion": "sendSpecialKey() にランタイムのホワイトリストチェックを追加する: const VALID_SPECIAL_KEYS = new Set(['Escape', 'C-c', 'C-d', 'C-u']); if (!VALID_SPECIAL_KEYS.has(key)) throw new Error('Invalid special key');。これにより TypeScript の型ガードが迂回された場合でも安全性が担保される。",
+      "owasp_category": "A03:2021-Injection",
+      "affected_files": ["src/lib/tmux.ts"],
+      "existing_mitigation": "TypeScript の SpecialKey 型制約、sendSpecialKey の呼び出し元がハードコード値のみを使用"
+    },
+    {
+      "id": "S4-F-4",
+      "severity": "nice_to_have",
+      "category": "information_leakage",
+      "title": "エラーメッセージにセッション名が含まれ、内部構造が露出する",
+      "description": "claude-session.ts の複数箇所でセッション名がエラーメッセージに含まれている: L369-371 `Claude session ${sessionName} does not exist.`、L344 `Failed to start Claude session: ${getErrorMessage(error)}`。これらのエラーは send/route.ts L142-147 で `getErrorMessage(error)` としてHTTP 500レスポンスに含まれるため、クライアントにセッション名の命名規則（mcbd-claude-{worktreeId}）やtmuxの使用が露出する。Issue #187 の P1-2 変更後は、waitForPrompt のタイムアウトエラーも同様に伝播する。ただし、CommandMateはローカル開発ツールであり、攻撃者が同一マシン上にいるシナリオでは、この情報漏洩の実害は限定的である。",
+      "suggestion": "API ルート層（send/route.ts）のエラーレスポンスで内部エラーメッセージをそのまま返さず、固定メッセージ（例: 'Failed to send message to Claude'）を返すことを検討する。詳細エラーはサーバーログにのみ記録する。ただし、CommandMateのユースケース（ローカル開発ツール）を考慮し、デバッグ容易性とのトレードオフで現状維持も許容される。",
+      "owasp_category": "A04:2021-Insecure Design",
+      "affected_files": ["src/lib/claude-session.ts", "src/app/api/worktrees/[id]/send/route.ts"],
+      "existing_mitigation": "ローカル開発ツールという使用コンテキスト"
+    },
+    {
+      "id": "S4-F-5",
+      "severity": "nice_to_have",
+      "category": "dos",
+      "title": "P0 安定化待機 500ms による累積的 DoS の可能性（理論的）",
+      "description": "P0 で追加される 500ms の安定化待機は、sendMessageToClaude() の全呼び出しに適用される。大量のメッセージを短時間に送信するシナリオでは、500ms * N の累積遅延が発生する。ただし、Claude CLI 自体の応答時間（数秒〜数十秒）がボトルネックであり、500ms の追加は実質的に DoS の要因にならない。また、API ルートの同期的な設計上、同一ワークツリーへの並列メッセージ送信は前のメッセージの完了を待つことになるため、攻撃者が意図的に大量リクエストを送っても各リクエストが直列化される。",
+      "suggestion": "現時点では対応不要。設計書の Section 6 に記載されている通り、Claude CLI の応答時間に対して 500ms は許容範囲内。将来的にバッチ送信ユースケースが出た場合は F-3 の方針に従い初回のみ条件分岐を検討する。",
+      "owasp_category": null,
+      "affected_files": ["src/lib/claude-session.ts"],
+      "existing_mitigation": "Claude CLI の応答時間がボトルネット、直列処理による自然なレート制限"
+    },
+    {
+      "id": "S4-F-6",
+      "severity": "nice_to_have",
+      "category": "other",
+      "title": "stripAnsi の ANSI_PATTERN 拡張（P2-2）による ReDoS リスク評価",
+      "description": "P2-2 で提案されている ANSI_PATTERN の拡張 `/\\x1b\\[[\\x30-\\x3f]*[\\x20-\\x2f]*[\\x40-\\x7e]|\\x1b\\][^\\x07]*\\x07|\\[[\\x30-\\x3f]*m/g` について、ReDoS（正規表現サービス拒否）リスクを評価する。各代替パターンの量化子は `[\\x30-\\x3f]*`（文字クラス + *）と `[^\\x07]*`（否定文字クラス + *）であり、いずれもバックトラッキングが発生しにくい構造（ネストされた量化子やオーバーラップする文字クラスがない）である。現行パターン `[0-9;]*` も同様に安全であり、P2-2 の変更は ReDoS リスクを増加させない。",
+      "suggestion": "特に対応不要。P2-2 の正規表現は ReDoS 安全である。",
+      "owasp_category": null,
+      "affected_files": ["src/lib/cli-patterns.ts"],
+      "existing_mitigation": "バックトラッキング脆弱性のないパターン構造"
+    },
+    {
+      "id": "S4-F-7",
+      "severity": "should_fix",
+      "category": "command_injection",
+      "title": "stopClaudeSession() の execAsync 直接呼び出しにセッション名バリデーションなし",
+      "description": "stopClaudeSession() の L448 `await execAsync(`tmux send-keys -t \"${sessionName}\" C-d`)` は、sendSpecialKey() を使わずに execAsync を直接呼び出している。sessionName はダブルクォートで囲まれているが、S4-F-1 で指摘した通り claude-session.ts の getSessionName() にバリデーションがないため、防御の深層が不足している。この箇所は Issue #187 の直接的な変更対象ではないが、P2-1 で sendSpecialKey に C-u を追加するリファクタリングと同時に、この C-d 送信も sendSpecialKey 経由に統一することを推奨する。",
+      "suggestion": "L448 を `await sendSpecialKey(sessionName, 'C-d');` に変更し、sendSpecialKey の SpecialKey 型に 'C-d' が既に含まれていることを活用する。これにより tmux コマンドの構築が一元化され、セキュリティレビューの対象箇所が減少する。なお、この変更は Issue #187 のスコープ外であるため、別 Issue として切り出すことも可能。",
+      "owasp_category": "A03:2021-Injection",
+      "affected_files": ["src/lib/claude-session.ts"],
+      "existing_mitigation": "ダブルクォート囲み、worktreeId の生成時サニタイズ"
+    },
+    {
+      "id": "S4-F-8",
+      "severity": "nice_to_have",
+      "category": "other",
+      "title": "P1-2 エラー伝播後のエラーメッセージにタイミング情報が含まれる",
+      "description": "P1-2 適用後、waitForPrompt() のタイムアウトエラー `Prompt detection timeout (10000ms)` がそのままクライアントに伝播する。このメッセージにはタイムアウト値（10000ms）が含まれており、内部のタイミングパラメータが露出する。攻撃者がこの情報を使ってタイミング攻撃を行うリスクは極めて低い（ローカルツール、かつタイムアウト値を知っても攻撃に活用できる経路がない）が、セキュリティベストプラクティスとしては内部実装の詳細を外部に露出しない方が望ましい。",
+      "suggestion": "S4-F-4 と同様、API ルート層でのエラーメッセージ抽象化で対応可能。個別対応は不要。",
+      "owasp_category": "A04:2021-Insecure Design",
+      "affected_files": ["src/lib/claude-session.ts"],
+      "existing_mitigation": "ローカル開発ツールという使用コンテキスト"
+    }
+  ],
+  "design_doc_security_section_assessment": {
+    "section_5_accuracy": "設計書 Section 5（セキュリティ設計）の記述は正確である。コマンドインジェクションリスクについて「変更なし。sendKeysの既存エスケープ処理を継続使用」と記載されており、実際に Issue #187 の変更（P0/P1/P2）はコマンド構築ロジックに触れない。ただし、既存コードの claude-session.ts getSessionName() にバリデーションが欠如している点（S4-F-1）は設計書で言及されていない。",
+    "ctrl_u_security": "P2-1 の Ctrl+U 送信について「sendSpecialKey関数を使用し、tmux専用のキー送信パスを経由。ユーザー入力は含まれない」は正確。SpecialKey 型によるコンパイル時制約も適切。",
+    "strip_ansi_security": "P2-2 の stripAnsi 変更について「ANSIエスケープシーケンスの除去範囲が広がるが、セキュリティ的にはプラス方向」は正確。より多くのエスケープシーケンスを除去することで、パターンマッチの信頼性が向上する。"
+  },
+  "owasp_top10_assessment": {
+    "A01_broken_access_control": "該当なし。Issue #187 の変更はアクセス制御に影響しない。",
+    "A02_cryptographic_failures": "該当なし。暗号化処理への変更なし。",
+    "A03_injection": "低リスク。claude-session.ts の getSessionName() にバリデーション欠如（S4-F-1）があるが、上流の worktreeId 生成時サニタイズと DB 存在チェックにより実質的なリスクは低い。sendKeys のシングルクォートエスケープ（S4-F-2）も現行実装で安全。",
+    "A04_insecure_design": "低リスク。エラーメッセージに内部情報が含まれる（S4-F-4, S4-F-8）が、ローカル開発ツールの文脈では許容範囲。",
+    "A05_security_misconfiguration": "該当なし。",
+    "A06_vulnerable_components": "該当なし。サードパーティ依存関係への変更なし。",
+    "A07_auth_failures": "該当なし。認証メカニズムへの変更なし。",
+    "A08_data_integrity_failures": "該当なし。",
+    "A09_logging_monitoring": "既存のコンソールログによるモニタリングが維持される。Issue #187 の変更は logging に影響しない。",
+    "A10_ssrf": "該当なし。サーバーサイドリクエストへの変更なし。"
+  },
+  "summary": "Issue #187 の設計方針書はセキュリティ観点から概ね適切である。P0（安定化待機）、P1（エラースロー、定数化、セパレータ除外）、P2（Ctrl+U、stripAnsi拡張）のいずれも新たなセキュリティ脆弱性を導入しない。主要な指摘は既存コードに関するもの: (1) claude-session.ts の getSessionName() に validateSessionName() が欠如している点（S4-F-1, should_fix）は防御の深層として改善が望ましい。(2) stopClaudeSession() の execAsync 直接呼び出し（S4-F-7, should_fix）も sendSpecialKey への統一が推奨される。これらはいずれも実際の攻撃リスクは低い（worktreeId の生成時サニタイズが有効なため）が、コードベースの一貫性と将来の保守性の観点から改善を推奨する。OWASP Top 10 に対するリスク評価は全項目 low 以下であり、ローカル開発ツールとしてのセキュリティ水準は十分である。must_fix 指摘はなし。"
+}

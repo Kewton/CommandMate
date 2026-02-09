@@ -1,0 +1,14 @@
+{
+  "issue_number": 191,
+  "refactor_targets": [
+    "src/lib/auto-yes-manager.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 86.77
+  },
+  "improvement_goals": [
+    "コードコメントの品質確認（設計方針書との整合性）",
+    "THINKING_CHECK_LINE_COUNT定数の配置が適切であること",
+    "ウィンドウイング処理がDRY/KISSに準拠していること"
+  ]
+}

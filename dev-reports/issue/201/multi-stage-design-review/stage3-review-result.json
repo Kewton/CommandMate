@@ -1,0 +1,230 @@
+{
+  "issue_number": 201,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "integration test coverage for trust dialog auto-response in send/route.ts call chain",
+        "description": "The send/route.ts -> ClaudeTool.startSession() -> startClaudeSession() call chain is the primary consumer. While unit tests for claude-session.test.ts are planned in the design doc, there is no integration test covering the full API route invocation path (POST /api/worktrees/:id/send) with the trust dialog scenario. tests/integration/api-send-cli-tool.test.ts exists but does not cover initialization dialog cases.",
+        "severity": "informational",
+        "recommendation": "Consider adding an integration test to api-send-cli-tool.test.ts or a new test file that mocks capturePane to return the trust dialog text on first calls. This would validate the full call chain from API route through ClaudeTool to startClaudeSession(). Not blocking because the unit-level tests in claude-session.test.ts adequately cover the core logic."
+      },
+      {
+        "id": "C-002",
+        "title": "claude-poller.ts imports captureClaudeOutput from claude-session.ts",
+        "description": "claude-poller.ts (legacy poller) imports captureClaudeOutput and isClaudeRunning from claude-session.ts. While these functions are unrelated to startClaudeSession() and the proposed changes do not modify them, the module dependency exists. If the import structure of claude-session.ts were to change (e.g., barrel re-export), it could have downstream effects.",
+        "severity": "informational",
+        "recommendation": "No action needed. The proposed changes add only a new import (CLAUDE_TRUST_DIALOG_PATTERN) and modify the body of startClaudeSession(). The module's export surface is stable."
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_changed_files": [
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "change": "Add CLAUDE_TRUST_DIALOG_PATTERN constant (approx 3 lines including JSDoc and SF-001 inline comment)",
+        "risk": "low",
+        "rationale": "Additive change only. New export const does not modify any existing pattern constants or functions. 7 existing consumers (status-detector.ts, response-poller.ts, auto-yes-manager.ts, claude-session.ts, assistant-response-saver.ts, prompt-response/route.ts, current-output/route.ts) import from this module but none will be affected because no existing exports change."
+      },
+      {
+        "file": "src/lib/claude-session.ts",
+        "change": "Add CLAUDE_TRUST_DIALOG_PATTERN import; add dialog detection + Enter send logic in startClaudeSession() polling loop; add trustDialogHandled flag; add console.log with TODO comment (SF-002); add JSDoc note to CLAUDE_INIT_TIMEOUT (C-002/Stage2-SF-001)",
+        "risk": "low",
+        "rationale": "Modification is scoped to the startClaudeSession() function's polling loop (L332-354). The new condition branch is guarded by trustDialogHandled flag and placed after the existing CLAUDE_PROMPT_PATTERN check. No function signatures change. No existing behavior is altered when the trust dialog is absent (CLAUDE_TRUST_DIALOG_PATTERN simply does not match). sendMessageToClaude(), waitForPrompt(), captureClaudeOutput(), stopClaudeSession() are completely untouched."
+      },
+      {
+        "file": "tests/unit/lib/claude-session.test.ts",
+        "change": "Add 3 new test cases: dialog detection + Enter send, double-send prevention, regression (no dialog existing flow)",
+        "risk": "low",
+        "rationale": "Additive test additions. Existing test suites for Issue #152 and #187 remain untouched. The new tests follow the established vi.useFakeTimers() and vi.mocked(capturePane) patterns already used throughout the file."
+      },
+      {
+        "file": "src/lib/__tests__/cli-patterns.test.ts",
+        "change": "Add 3-4 test cases for CLAUDE_TRUST_DIALOG_PATTERN matching (full text, partial match, non-match)",
+        "risk": "low",
+        "rationale": "Additive test additions to the existing test file (182 lines). No existing test cases modified. Test import line (L9) will need CLAUDE_TRUST_DIALOG_PATTERN added to the import destructuring."
+      },
+      {
+        "file": "CLAUDE.md",
+        "change": "Add Issue #201 summary to 'Recent implementations' section",
+        "risk": "low",
+        "rationale": "Documentation-only change."
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/lib/cli-tools/claude.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "ClaudeTool.startSession() calls startClaudeSession() without passing any new parameters. The function signature of startClaudeSession() is unchanged. The trust dialog handling is entirely internal to startClaudeSession()."
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/send/route.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "Calls cliTool.startSession() (line 100), which delegates to startClaudeSession(). The API route's error handling (catch block at L117-123) will correctly propagate any errors from the modified startClaudeSession(). The trust dialog auto-response is transparent to this caller."
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "Imports stripAnsi, detectThinking, getCliToolPatterns, buildDetectPromptOptions from cli-patterns.ts. None of these are modified. CLAUDE_TRUST_DIALOG_PATTERN is not imported here and should not be, as status detection operates on already-initialized sessions."
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "Imports stripAnsi, detectThinking, buildDetectPromptOptions from cli-patterns.ts. Auto-yes polling only runs after sessions are initialized. The trust dialog appears only during initialization, so auto-yes will never encounter it."
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "Imports getCliToolPatterns, stripAnsi, buildDetectPromptOptions from cli-patterns.ts. Response polling starts after message send, which occurs after session initialization completes. No exposure to trust dialog scenario."
+      },
+      {
+        "file": "src/lib/assistant-response-saver.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "Only imports stripAnsi from cli-patterns.ts. Completely unrelated to session initialization."
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "Imports stripAnsi, buildDetectPromptOptions from cli-patterns.ts. Prompt-response handling operates on active sessions. No exposure to initialization dialog."
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "Imports stripAnsi, buildDetectPromptOptions from cli-patterns.ts. Current-output reading operates on active sessions. No exposure to initialization dialog."
+      },
+      {
+        "file": "src/lib/claude-poller.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "Legacy poller imports captureClaudeOutput and isClaudeRunning from claude-session.ts. Neither function is modified. No exposure to initialization logic."
+      },
+      {
+        "file": "src/lib/tmux.ts",
+        "change": "No code change required",
+        "risk": "none",
+        "rationale": "Provides sendKeys() and capturePane() used by the modified code. The existing API is consumed as-is: sendKeys(sessionName, '', true) for Enter. No changes to tmux.ts are needed."
+      }
+    ],
+    "test_files_affected": [
+      {
+        "file": "tests/unit/lib/claude-session.test.ts",
+        "change": "Direct: 3 new test cases added",
+        "risk": "low"
+      },
+      {
+        "file": "src/lib/__tests__/cli-patterns.test.ts",
+        "change": "Direct: 3-4 new test cases added",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/lib/cli-patterns.test.ts",
+        "change": "No change needed. This file tests Codex patterns and general functions. CLAUDE_TRUST_DIALOG_PATTERN tests go in src/lib/__tests__/cli-patterns.test.ts per design doc.",
+        "risk": "none"
+      },
+      {
+        "file": "tests/unit/lib/status-detector.test.ts",
+        "change": "No change needed. Status detection is not affected.",
+        "risk": "none"
+      },
+      {
+        "file": "tests/unit/lib/auto-yes-manager.test.ts",
+        "change": "No change needed. Auto-yes polling is not affected.",
+        "risk": "none"
+      },
+      {
+        "file": "tests/integration/api-send-cli-tool.test.ts",
+        "change": "No change needed currently. Consider C-001 for future enhancement.",
+        "risk": "none"
+      }
+    ],
+    "no_impact_verification": [
+      {
+        "area": "Database schema",
+        "rationale": "No database changes. Trust dialog handling is runtime-only logic in the session initialization flow."
+      },
+      {
+        "area": "API contracts",
+        "rationale": "No API endpoint signatures, request/response formats, or HTTP status codes change. The auto-response is internal to startClaudeSession()."
+      },
+      {
+        "area": "UI components",
+        "rationale": "No UI components are modified. The trust dialog auto-response is transparent to the frontend. The existing error handling in send/route.ts will correctly surface initialization timeout errors to the UI if the dialog pattern fails."
+      },
+      {
+        "area": "Configuration / Environment variables",
+        "rationale": "No new environment variables or configuration values are introduced. CLAUDE_INIT_TIMEOUT (15s) remains unchanged."
+      },
+      {
+        "area": "Build / CI pipeline",
+        "rationale": "No build configuration changes. The new pattern constant and code changes are standard TypeScript that the existing build pipeline handles. CI checks (lint, tsc, test:unit, build) apply without modification."
+      },
+      {
+        "area": "Codex and Gemini CLI tools",
+        "rationale": "The trust dialog detection is Claude-CLI-specific, embedded in startClaudeSession(). Codex and Gemini have separate session management paths (src/lib/cli-tools/codex.ts, src/lib/cli-tools/gemini.ts) that do not call startClaudeSession()."
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "regression_risk_analysis": {
+    "existing_flow_without_dialog": {
+      "risk": "none",
+      "rationale": "When the trust dialog is not displayed (most sessions after first use), CLAUDE_TRUST_DIALOG_PATTERN.test(cleanOutput) returns false. The trustDialogHandled flag remains false but is never read again. The polling loop proceeds exactly as before: CLAUDE_PROMPT_PATTERN check -> break on match -> stability delay -> initialized=true."
+    },
+    "existing_flow_with_timeout": {
+      "risk": "none",
+      "rationale": "If CLAUDE_PROMPT_PATTERN never matches (existing timeout scenario), the new CLAUDE_TRUST_DIALOG_PATTERN check is an additional regex test per poll cycle but has no side effects. The timeout path (L357-358) is unchanged."
+    },
+    "sendMessageToClaude_unchanged": {
+      "risk": "none",
+      "rationale": "sendMessageToClaude() (L379-412) is completely unmodified. The trust dialog is only shown during initialization and should never appear after the session is ready for messages."
+    },
+    "waitForPrompt_unchanged": {
+      "risk": "none",
+      "rationale": "waitForPrompt() (L257-276) is completely unmodified. It uses CLAUDE_PROMPT_PATTERN only, which is appropriate because waitForPrompt is called after initialization."
+    },
+    "restartClaudeSession_unchanged": {
+      "risk": "none",
+      "rationale": "restartClaudeSession() calls stopClaudeSession() then startClaudeSession(). The modified startClaudeSession() will correctly handle the trust dialog on restart if needed."
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-201-trust-dialog-auto-response-design-policy.md",
+    "dev-reports/issue/201/multi-stage-design-review/stage1-review-result.json",
+    "dev-reports/issue/201/multi-stage-design-review/stage2-review-result.json",
+    "src/lib/cli-patterns.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/lib/tmux.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/claude-poller.ts",
+    "src/lib/__tests__/cli-patterns.test.ts",
+    "tests/unit/lib/cli-patterns.test.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts"
+  ],
+  "timestamp": "2026-02-09T17:30:00Z"
+}

@@ -1,0 +1,31 @@
+{
+  "issue_number": 202,
+  "feature_summary": "サーバー再起動時に削除済みリポジトリが復活しないようにする",
+  "acceptance_criteria": [
+    "サーバー再起動後、削除済みリポジトリが復活しないこと（手動テスト）",
+    "server.ts の initializeWorktrees() が sync/route.ts と同一の ensureEnvRepositoriesRegistered() + filterExcludedPaths() パターンを使用していること",
+    "ensureEnvRepositoriesRegistered() が filterExcludedPaths() より前に呼び出されていること",
+    "server.ts の import文が ./src/lib/ 形式の相対パスであること",
+    "除外フィルタリング結果のログが出力されること（除外数とフィルタ後のリポジトリ数）",
+    "tsconfig.server.json の include 配列に src/lib/db-repository.ts と src/config/system-directories.ts が追加されていること",
+    "npm run build:server が成功すること",
+    "既存のテスト（単体テスト・結合テスト）がパスし、build:server を含む全ビルドが成功すること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 初回起動（DBなし）- 全リポジトリが登録・表示される",
+    "シナリオ2: リポジトリ削除後に再起動 - 削除済みリポジトリが復活しない",
+    "シナリオ3: 全リポジトリ削除後に再起動 - サイドバーが空の状態で表示される",
+    "シナリオ4: 削除後にSync All実行 - 削除済みリポジトリが復活しない（Issue #190 で対策済み）",
+    "シナリオ5: 削除 -> 再起動 -> Sync All - 削除済みリポジトリが復活しない（両経路で除外が機能）"
+  ],
+  "implementation_details": {
+    "changed_files": [
+      "server.ts",
+      "tsconfig.server.json",
+      "src/lib/db-repository.ts",
+      "src/app/api/repositories/sync/route.ts"
+    ],
+    "test_file": "tests/unit/lib/server-startup-exclusion-filter.test.ts",
+    "reference_implementation": "src/app/api/repositories/sync/route.ts"
+  }
+}

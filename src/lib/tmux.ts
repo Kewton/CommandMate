@@ -225,6 +225,59 @@ export async function sendKeys(
 }
 
 /**
+ * Allowed tmux special key names for sendSpecialKeys().
+ * Restricts input to prevent command injection via arbitrary tmux key names.
+ */
+const ALLOWED_SPECIAL_KEYS = new Set([
+  'Up', 'Down', 'Left', 'Right',
+  'Enter', 'Space', 'Tab', 'Escape',
+  'BSpace', 'DC',  // Backspace, Delete
+]);
+
+/** Delay between individual key presses for TUI apps that need processing time (ms). */
+const SPECIAL_KEY_DELAY_MS = 100;
+
+/**
+ * Send tmux special keys (unquoted key names like Down, Up, Enter, Space).
+ * Used for cursor-based navigation in CLI tool prompts (e.g., Claude Code AskUserQuestion).
+ *
+ * Keys are sent one at a time with a short delay between each press,
+ * because ink-based TUI apps (like Claude Code) need time to process
+ * each keystroke before the next one arrives.
+ *
+ * @param sessionName - Target session name
+ * @param keys - Array of tmux special key names (e.g., ['Down', 'Down', 'Space', 'Enter'])
+ * @throws {Error} If any key name is not in the allowed set, or if tmux command fails
+ */
+export async function sendSpecialKeys(
+  sessionName: string,
+  keys: string[]
+): Promise<void> {
+  if (keys.length === 0) return;
+
+  // Validate all keys are in the allowed set (command injection prevention)
+  for (const key of keys) {
+    if (!ALLOWED_SPECIAL_KEYS.has(key)) {
+      throw new Error(`Invalid special key: ${key}`);
+    }
+  }
+
+  try {
+    for (let i = 0; i < keys.length; i++) {
+      const command = `tmux send-keys -t "${sessionName}" ${keys[i]}`;
+      await execAsync(command, { timeout: DEFAULT_TIMEOUT });
+      // Delay between key presses (skip after the last key)
+      if (i < keys.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, SPECIAL_KEY_DELAY_MS));
+      }
+    }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to send special keys to tmux session: ${errorMessage}`);
+  }
+}
+
+/**
  * Capture pane output from a tmux session (legacy signature)
  */
 export async function capturePane(

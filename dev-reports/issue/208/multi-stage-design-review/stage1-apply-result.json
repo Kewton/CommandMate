@@ -1,0 +1,50 @@
+{
+  "issue_number": 208,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "QUESTION_KEYWORD_PATTERNのキーワード数が多い",
+        "section_updated": "セクション3.3 QUESTION_KEYWORD_PATTERN の設計",
+        "change_description": "JSDocコメントにキーワードを「観測済み」と「防御的追加」の2グループに分類し、各グループの意図・根拠・将来方針を明記。設計根拠にもレビューID(SF-001)を追記。",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "全角疑問符判定の分離記述",
+        "section_updated": "セクション3.2 isQuestionLikeLine() / セクション4.2 日本語質問文への対応",
+        "change_description": "セクション3.2のPattern 1に全角疑問符(？)判定を統合。セクション4.2は独立した実装定義から、セクション3.2への参照に変更。",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "consider_items": [
+    {
+      "id": "C-001",
+      "item": "QUESTION_KEYWORD_PATTERNの拡張メカニズム",
+      "status": "noted_in_summary"
+    },
+    {
+      "id": "C-002",
+      "item": "endsWith(':')判定と全角コロン",
+      "status": "noted_in_summary"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "sections_updated": [
+    "セクション3.2 isQuestionLikeLine() 関数の設計 - Pattern 1に全角疑問符統合",
+    "セクション3.3 QUESTION_KEYWORD_PATTERN の設計 - キーワード分類コメント追加",
+    "セクション4.2 日本語質問文への対応 - セクション3.2への参照に変更",
+    "セクション12 レビューチェックリスト - SF-001/SF-002確認項目追加",
+    "セクション13 レビュー履歴 - 新規追加",
+    "セクション14 レビュー指摘事項サマリー - 新規追加",
+    "セクション15 実装チェックリスト（レビュー指摘反映分） - 新規追加"
+  ],
+  "timestamp": "2026-02-09T12:30:00Z"
+}

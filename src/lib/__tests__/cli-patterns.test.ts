@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { CLAUDE_PROMPT_PATTERN, CLAUDE_THINKING_PATTERN, detectThinking, getCliToolPatterns } from '../cli-patterns';
+import { CLAUDE_PROMPT_PATTERN, CLAUDE_THINKING_PATTERN, CLAUDE_TRUST_DIALOG_PATTERN, detectThinking, getCliToolPatterns } from '../cli-patterns';
 
 describe('cli-patterns', () => {
   describe('CLAUDE_PROMPT_PATTERN', () => {
@@ -25,7 +25,7 @@ describe('cli-patterns', () => {
         expect(CLAUDE_PROMPT_PATTERN.test(output)).toBe(true);
       });
 
-      it('should match ">" only', () => {
+      it('should match "❯" only', () => {
         const output = `Some output
 ❯
 `;
@@ -107,8 +107,13 @@ Next line
       expect(CLAUDE_THINKING_PATTERN.test(output)).toBe(true);
     });
 
-    it('should match "(esc to interrupt)"', () => {
+    it('should match "(esc to interrupt)" with parens', () => {
       const output = `(esc to interrupt)`;
+      expect(CLAUDE_THINKING_PATTERN.test(output)).toBe(true);
+    });
+
+    it('should match "esc to interrupt" without parens (status bar format)', () => {
+      const output = `  27 files +0 -0 · esc to interrupt · ctrl+t to hide tasks`;
       expect(CLAUDE_THINKING_PATTERN.test(output)).toBe(true);
     });
 
@@ -142,6 +147,28 @@ Next line
     it('should return false for prompt with recommended command', () => {
       const output = `❯ /work-plan`;
       expect(detectThinking('claude', output)).toBe(false);
+    });
+  });
+
+  describe('CLAUDE_TRUST_DIALOG_PATTERN', () => {
+    it('should match trust dialog full text', () => {
+      const output = `Quick safety check: Is this a project you created or one you trust?\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit`;
+      expect(CLAUDE_TRUST_DIALOG_PATTERN.test(output)).toBe(true);
+    });
+
+    it('should match trust dialog with tmux padding (partial match)', () => {
+      const output = `\n\n  Some tmux header content\nQuick safety check: Is this a project you created or one you trust?\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n`;
+      expect(CLAUDE_TRUST_DIALOG_PATTERN.test(output)).toBe(true);
+    });
+
+    it('should NOT match "No, exit" option', () => {
+      const output = `No, exit`;
+      expect(CLAUDE_TRUST_DIALOG_PATTERN.test(output)).toBe(false);
+    });
+
+    it('should NOT match regular CLI output', () => {
+      const output = `❯ git status\nOn branch main\nnothing to commit, working tree clean`;
+      expect(CLAUDE_TRUST_DIALOG_PATTERN.test(output)).toBe(false);
     });
   });
 

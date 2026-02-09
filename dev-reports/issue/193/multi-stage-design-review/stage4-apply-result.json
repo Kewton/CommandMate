@@ -1,0 +1,100 @@
+{
+  "issue_number": 193,
+  "status": "success",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "SEC-001",
+        "item": "requireDefaultIndicator=false時のAuto-Yes誤検出によるコマンド実行リスクの緩和策不足 - Layer 5 (questionEndIndex === -1 ガード) 追加",
+        "sections_updated": [
+          "2 (データフロー)",
+          "4.3 (detectMultipleChoicePrompt変更箇所・コード)",
+          "4.6 (多層防御テーブル)",
+          "6.1 (誤検出防止)",
+          "8 (リスクと緩和策)",
+          "9 (Step 1, Step 2)",
+          "10 (受入条件)",
+          "11 (実装チェックリスト)",
+          "12 (Stage 4レビュー指摘事項サマリー)"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-002",
+        "item": "ANSI_PATTERNの網羅性に関する制限事項の文書化 - stripAnsi() JSDocにカバー範囲・制限事項記載指針追加",
+        "sections_updated": [
+          "6.4 (新規: ANSI_PATTERNの網羅性制限事項)",
+          "8 (リスクと緩和策)",
+          "9 (Step 5.5)",
+          "10 (受入条件)",
+          "11 (実装チェックリスト)",
+          "12 (Stage 4レビュー指摘事項サマリー)"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-003",
+        "item": "getAnswerInput()のエラーメッセージへのユーザー入力反映 - エラーメッセージ安全化指針追加",
+        "sections_updated": [
+          "6.5 (新規: getAnswerInput()のエラーメッセージ安全性)",
+          "9 (Step 5.5)",
+          "10 (受入条件)",
+          "11 (実装チェックリスト)",
+          "12 (Stage 4レビュー指摘事項サマリー)"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-004",
+        "item": "sendKeys()のシェルインジェクション対策の信頼チェーン確認",
+        "sections_updated": [
+          "6.6 (新規: セキュリティ検討事項)",
+          "11 (実装チェックリスト)"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-005",
+        "item": "buildDetectPromptOptions()のcliToolId入力の信頼境界",
+        "sections_updated": [
+          "6.6 (新規: セキュリティ検討事項)",
+          "11 (実装チェックリスト)"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-006",
+        "item": "detectPrompt()のログ出力における機密情報の確認",
+        "sections_updated": [
+          "6.6 (新規: セキュリティ検討事項)",
+          "11 (実装チェックリスト)"
+        ],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+  "sections_updated": [
+    "2 (データフロー - Layer 5追加)",
+    "4.3 (detectMultipleChoicePrompt変更 - Layer 5コード追加)",
+    "4.6 (多層防御テーブル - Layer 5行追加)",
+    "6.1 (誤検出防止 - SEC-001詳細追加)",
+    "6.4 (新規: ANSI_PATTERNの網羅性制限事項 - SEC-002)",
+    "6.5 (新規: getAnswerInput()のエラーメッセージ安全性 - SEC-003)",
+    "6.6 (新規: セキュリティ検討事項 - SEC-004/005/006)",
+    "8 (リスクと緩和策 - SEC-001/SEC-002リスク行追加)",
+    "9 (実装順序 - Step 1にSEC-001追加, Step 2にSEC-001テスト追加, Step 5.5新規追加)",
+    "10 (受入条件 - SEC-001/002/003条件追加)",
+    "11 (実装チェックリスト - セキュリティレビュー指摘セクション新規追加)",
+    "12 (レビュー指摘事項サマリー - Stage 4セクション新規追加)"
+  ],
+  "timestamp": "2026-02-09T11:00:00Z"
+}

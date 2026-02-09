@@ -104,7 +104,7 @@ describe('loadSlashCommands', () => {
     const workPlan = commands.find((cmd) => cmd.name === 'work-plan');
     expect(workPlan).toBeDefined();
     expect(workPlan?.description).toBe('Issue単位の具体的な作業計画立案');
-    expect(workPlan?.model).toBe('opus');
+    expect(workPlan?.model).toBe('sonnet');
   });
 
   it('should extract command name from filename', async () => {

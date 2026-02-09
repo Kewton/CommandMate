@@ -1,0 +1,100 @@
+{
+  "issue_number": 191,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "DRY",
+        "title": "ウィンドウイング定数の分散定義",
+        "description": "THINKING_CHECK_LINE_COUNT=50 は auto-yes-manager.ts にローカル定数として定義される設計だが、prompt-detector.ts の detectMultipleChoicePrompt() も同じ50行ウィンドウを使用している。設計書では「detectPrompt()のmultiple_choice範囲と一致」と明記されており、両者は意味的に結合している。どちらか一方が変更された場合、もう一方も追従する必要があるが、現設計ではそれがコメントのみで担保されている。",
+        "recommendation": "共通定数として cli-patterns.ts や専用の定数モジュールに MULTIPLE_CHOICE_SCAN_WINDOW = 50 を定義し、prompt-detector.ts と auto-yes-manager.ts の両方からインポートする。あるいは、最低限 auto-yes-manager.ts の THINKING_CHECK_LINE_COUNT のコメントに prompt-detector.ts L268 への相互参照を記載し、テストで両者の値が一致することを検証する。",
+        "severity": "medium",
+        "effort": "low"
+      },
+      {
+        "id": "SF-002",
+        "principle": "DRY",
+        "title": "split-slice-join パターンの重複",
+        "description": "バッファ末尾N行を取得する `output.split('\\n').slice(-N).join('\\n')` パターンが、status-detector.ts (L83), current-output/route.ts (L73-74), そして今回 auto-yes-manager.ts にも追加される。3箇所以上で同一のイディオムが繰り返されている。",
+        "recommendation": "ユーティリティ関数 getLastNLines(output: string, n: number): string を utils.ts や cli-patterns.ts に定義し、各呼び出し箇所で利用する。本Issueのスコープでは必須ではないが、今後のメンテナンス性向上のために検討すべき。",
+        "severity": "low",
+        "effort": "low"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "KISS",
+        "title": "status-detector.ts と auto-yes-manager.ts のウィンドウサイズ差異の明文化",
+        "description": "status-detector.ts は STATUS_CHECK_LINE_COUNT=15、auto-yes-manager.ts は THINKING_CHECK_LINE_COUNT=50 と異なる値を使用する。設計書では「用途が異なるため許容」と正当化されているが、2つの detectThinking() 呼び出し元で異なるウィンドウサイズを使う理由を、コードコメントとしてより明確に記述することで、将来の開発者の混乱を防止できる。"
+      },
+      {
+        "id": "C-002",
+        "principle": "YAGNI",
+        "title": "テスト3(定数値テスト)の必要性",
+        "description": "設計書のテスト3「THINKING_CHECK_LINE_COUNT定数のエクスポートと値確認」は、定数値が50であることを直接アサートするテストである。定数値のハードコードテストは、値を変更する正当な理由が生じたときにテストが壊れる。値のテストよりも、SF-001で推奨した「prompt-detector.tsのウィンドウサイズと一致することの検証テスト」の方が本質的な不変条件を捉えている。"
+      },
+      {
+        "id": "C-003",
+        "principle": "OCP (Open/Closed)",
+        "title": "detectThinking() 側でウィンドウイングを内包する設計の将来検討",
+        "description": "現設計では呼び出し元(auto-yes-manager.ts)で前処理としてウィンドウイングを行い、detectThinking()には加工済みデータを渡す。一方、detectPrompt()は内部で自己ウィンドウイングしている。detectThinking()にもオプショナルなwindowSize引数を追加する設計にすると、呼び出し元での前処理が不要になり、ウィンドウイングの責務がdetect系関数内に統一される。ただし、現時点ではdetectThinking()の呼び出し元が3箇所のみであり、各々異なるウィンドウサイズを使う正当な理由があるため、今回は過度な抽象化(YAGNI違反)になる。将来的に呼び出し元が増えた場合に再検討。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principles_evaluation": {
+    "single_responsibility": {
+      "status": "pass",
+      "note": "auto-yes-manager.ts のpollAutoYes()はポーリングオーケストレーションの責務を持ち、detectThinking()への入力前処理はその範囲内。detectThinking()自体は変更なし。"
+    },
+    "open_closed": {
+      "status": "pass",
+      "note": "detectThinking()関数を変更せず、呼び出し元での前処理で対応。既存コードの修正は最小限。"
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "note": "本変更には継承関係が含まれない。"
+    },
+    "interface_segregation": {
+      "status": "not_applicable",
+      "note": "インターフェース変更なし。"
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "note": "依存関係に変更なし。detectThinking()への依存方向は維持。"
+    },
+    "kiss": {
+      "status": "pass",
+      "note": "変更は1箇所の前処理追加(split/slice/join)と1定数追加のみ。非常にシンプルで理解しやすい。"
+    },
+    "yagni": {
+      "status": "pass",
+      "note": "不要な抽象化や将来のための過剰設計は行っていない。detectThinking()への引数追加などの過度な一般化を回避した判断は適切。"
+    },
+    "dry": {
+      "status": "conditional_pass",
+      "note": "ウィンドウサイズ50の意味的重複(SF-001)とsplit-slice-joinパターンの繰り返し(SF-002)がある。致命的ではないが改善の余地あり。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-191-auto-yes-thinking-windowing-design-policy.md",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/prompt-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "timestamp": "2026-02-08T00:00:00Z"
+}

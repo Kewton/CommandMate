@@ -1,0 +1,237 @@
+{
+  "issue_number": 208,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-09",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "response-poller.tsの2箇所のdetectPromptWithOptions()呼び出し（L299, L489）が影響範囲セクションに記載されていない。response-poller.tsはClaude CLIのfullOutputを渡してプロンプト検出を行っており、auto-yes-manager.tsと同じ誤検出パスが存在する。番号付きリストをpromptとして誤検出した場合、DBにmessageType='prompt'の偽メッセージが保存され、WebSocket経由でクライアントにブロードキャストされる",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "影響範囲セクションに以下を追記する: response-poller.ts内のdetectPromptWithOptions()がClaude CLIのfullOutput全文（trimmed後）でプロンプト検出を実行しており、(1) extractResponse() L297-310のearly checkでfullOutputを渡して誤検出するとisComplete=trueで偽レスポンスが返る、(2) checkForResponse() L488-498で再度fullOutputを検査して誤検出するとDB上にpromptメッセージが作成されブロードキャストされる、(3) L608でも完了後レスポンスに対してdetectPromptWithOptions()が呼ばれ同様の誤検出リスクがある。これらはAuto-Yesの有無に関係なく発生し得る影響パスである",
+        "evidence": "response-poller.ts L297-310: if (cliToolId === 'claude') { const fullOutput = lines.join('\\n'); const promptDetection = detectPromptWithOptions(fullOutput, cliToolId); if (promptDetection.isPrompt) { return { response: stripAnsi(fullOutput), isComplete: true, lineCount: totalLines }; } } -- L488-498: const promptDetection = detectPromptWithOptions(fullOutput, cliToolId); if (promptDetection.isPrompt) { return { response: fullOutput, isComplete: true, lineCount: totalLines }; } -- L608: const promptDetection = detectPromptWithOptions(result.response, cliToolId); -- いずれもbuildDetectPromptOptions('claude')を内部で呼び出し、requireDefaultIndicator: falseが適用される"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響ファイル",
+        "issue": "claude-poller.tsがdetectPrompt()をbuildDetectPromptOptions()なしで呼び出している（L166, L236）点が影響範囲に記載されていない。TODOコメント付きで「superseded by response-poller.ts」と記載されているが、コード上は依然として到達可能であり、requireDefaultIndicator未指定（=デフォルトtrue）のため逆にPass 1が常に有効となり、本Issueの誤検出は発生しない。しかし、修正時にclaude-poller.tsの存在を見落とすと不整合が生じる",
+        "location": "## 関連コード セクション",
+        "recommendation": "関連コードテーブルまたは影響範囲セクションにclaude-poller.ts L166, L236の2箇所のdetectPrompt()呼び出しを記載する。現時点ではbuildDetectPromptOptions()が未適用のため本Issueのバグは発生しないが、修正時の整合性チェック対象として明記すべき。TODOコメント（Issue #193）の記載があるため、本修正と合わせて対応するかどうかの判断材料として有用",
+        "evidence": "claude-poller.ts L162-163: // TODO [Issue #193]: This code path is unreachable (claude-poller.ts is superseded by response-poller.ts). // When refactoring/removing claude-poller.ts, apply stripAnsi() + buildDetectPromptOptions() here. L166: const promptDetection = detectPrompt(fullOutput); -- L234-236: 同様のTODOコメントとdetectPrompt(result.response)呼び出し"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "テスト範囲に関する記載が完全に欠落している。本Issueの修正にあたっては、(1) prompt-detector.tsの単体テスト（番号付きリストのrequireDefaultIndicator=false時の検出結果）、(2) auto-yes-manager.tsの結合テスト（番号付きリストを含むtmux出力に対する自動応答の発生有無）、(3) status-detector.tsの単体テスト（番号付きリストを含む15行ウィンドウでのステータス判定）、(4) response-poller.tsの単体テスト（番号付きリストを含むfullOutputでのextractResponse結果）が必要",
+        "location": "Issue本文全体",
+        "recommendation": "影響範囲セクションまたは新規セクションとして「テスト対象」を追加し、各影響パスに対する回帰テストの必要性を明記する。特に(1) detectMultipleChoicePrompt()に対するrequireDefaultIndicator=false + 番号付きリスト（question行あり/なし）の組み合わせテスト、(2) pollAutoYes()のエンドツーエンドフロー（captureSessionOutput -> detectPrompt -> resolveAutoAnswer -> sendKeys）の統合テスト、(3) detectSessionStatus()のwindow=15行における番号付きリストの扱い、(4) response-poller.tsのextractResponse()における偽prompt検出の防止テスト",
+        "evidence": "既存テスト: tests/unit/prompt-detector.test.ts, tests/unit/lib/auto-yes-manager.test.ts, tests/unit/lib/auto-yes-resolver.test.ts, tests/unit/lib/status-detector.test.ts, tests/integration/auto-yes-persistence.test.ts -- これらに本Issue固有のテストケース（requireDefaultIndicator=false + 番号付きリスト誤検出シナリオ）が追加される必要がある"
+      },
+      {
+        "id": "SF-3",
+        "category": "依存関係",
+        "issue": "useAutoYes.tsクライアント側フック経由の影響パスが記載されていない。useAutoYes.tsはcurrent-output APIから取得したisPromptWaitingとpromptDataに依存して自動応答を送信する。status-detector.tsの誤検出によりisPromptWaiting=trueが返された場合、クライアント側でもresolveAutoAnswer()が呼ばれ「1」が送信される（サーバー側と二重送信のリスク）",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "影響範囲セクションに、useAutoYes.tsクライアント側フォールバックの影響パスを追記する。current-output APIがisPromptWaiting=trueとpromptData(type='multiple_choice')を返した場合、(1) サーバー側auto-yes-manager.tsが「1」を送信、(2) クライアント側useAutoYes.tsも3秒の重複防止ウィンドウ後に「1」を送信する二重経路が存在する。ただし、current-output/route.tsのthinkingチェック（L92）とSF-004のstatusResult.hasActivePrompt（15行ウィンドウ）により、auto-yes-manager.tsの5000行バッファより検出範囲が狭いため、両方が同時に誤検出する確率はauto-yes-manager.ts単独より低い",
+        "evidence": "useAutoYes.ts L79-92: const answer = resolveAutoAnswer(promptData); ... fetch(`/api/worktrees/${worktreeId}/prompt-response`, ...) -- current-output/route.ts L99: const isPromptWaiting = statusResult.hasActivePrompt; L126: promptData: isPromptWaiting ? promptDetection.promptData : null; -- useAutoYes.tsのisPromptWaitingはstatusResult.hasActivePrompt由来（15行ウィンドウ）だが、promptDataはdetectPrompt(cleanOutput, promptOptions)由来（cleanOutputは全文、内部50行スキャン）"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "修正完了後にCLAUDE.mdのIssue #193セクションの記載更新が必要になる。現在CLAUDE.mdにはIssue #193の設計判断として「requireDefaultIndicator: false導入」と「Layer 5 SEC-001によるAuto-Yes誤検出防止」が記載されているが、本Issue修正後はこの防御機構の挙動が変更される可能性がある",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "影響範囲セクションに「ドキュメント更新対象」として CLAUDE.md の Issue #193 セクション、および関連設計書（dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md、dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md）を列挙する",
+        "evidence": "CLAUDE.md L433: 修正方針: DetectPromptOptions interfaceにrequireDefaultIndicator?: booleanフラグを追加し、Claude Code用にfalseを設定してPass 1/Layer 4をスキップ -- L440: Layer 5（SEC-001）: requireDefaultIndicator=falseかつquestionEndIndex === -1（質問行未検出）時にisPrompt: falseを返し、番号リストのみの出力でのAuto-Yes誤検出を防止"
+      },
+      {
+        "id": "NTH-2",
+        "category": "破壊的変更",
+        "issue": "対策案の方向性によっては、現在Issue #193で対応したClaude Codeの選択肢プロンプト検出（requireDefaultIndicator=false時の正常動作）が回帰する可能性がある。対策案1（question行検出厳格化）であれば回帰リスクは低いが、対策案2（追加防御層）の実装次第では、正当なプロンプト検出が阻害されるケースを考慮する必要がある",
+        "location": "## 対策案の方向性 セクション",
+        "recommendation": "各対策案にIssue #193の回帰リスク評価を追記する。具体的には「Claude Codeが実際に表示する選択肢プロンプト」のサンプル出力（❯なし、質問行あり/なし、番号付き選択肢）を用いた正常系テストが各案に対して必要であることを明記する",
+        "evidence": "Issue #193の設計書に記載されたClaude Code選択肢プロンプトの実例が、本Issue修正後も正しく検出されることを保証する必要がある。prompt-detector.ts L299-444のdetectMultipleChoicePrompt()の修正が両方のケース（通常番号付きリスト: false、実プロンプト: true）を正しく区別できることが受け入れ条件となる"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "impact_type": "direct",
+        "description": "detectMultipleChoicePrompt()のPass 1/Layer 4/Layer 5ロジックが修正対象。requireDefaultIndicator=false時の防御層強化が必要"
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "impact_type": "direct",
+        "description": "buildDetectPromptOptions()のClaude用設定値が修正される可能性がある。またはDetectPromptOptionsに新フラグが追加される可能性"
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "impact_type": "direct",
+        "description": "pollAutoYes() L317-318でdetectPrompt(cleanOutput, promptOptions)を呼び出し。cleanOutputは5000行全文を渡す。誤検出の主要パス"
+      },
+      {
+        "file": "src/lib/auto-yes-resolver.ts",
+        "impact_type": "indirect",
+        "description": "resolveAutoAnswer()が誤検出されたmultiple_choice promptDataに対して\"1\"を返す。ロジック自体は正常だが、上流の誤検出修正により呼び出されなくなる"
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "impact_type": "direct",
+        "description": "detectSessionStatus() L134-135でbuildDetectPromptOptions(cliToolId)経由のdetectPrompt()呼び出し。15行ウィンドウ+末尾空行トリムにより発生頻度は低いが同じ誤検出パスが存在"
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "impact_type": "direct",
+        "description": "detectPromptWithOptions()内部ヘルパーを通じて3箇所でdetectPrompt()を呼び出し（L299, L489, L608）。いずれもbuildDetectPromptOptions('claude')経由でrequireDefaultIndicator=false。fullOutputを渡すため誤検出リスクが高い"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "impact_type": "direct",
+        "description": "L93-94でbuildDetectPromptOptions(cliToolId)経由のdetectPrompt()呼び出し。promptDataをAPIレスポンスとして返し、クライアント側useAutoYes.tsに影響を与える"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "impact_type": "direct",
+        "description": "L75-76でbuildDetectPromptOptions(cliToolId)経由のdetectPrompt()呼び出し。送信前のprompt活性確認に使用。誤検出によりprompt_no_longer_activeの正確性が低下"
+      },
+      {
+        "file": "src/app/api/worktrees/route.ts",
+        "impact_type": "indirect",
+        "description": "detectSessionStatus()経由で間接的に影響。isWaitingForResponseフラグがサイドバーUI表示に使用される"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "impact_type": "indirect",
+        "description": "detectSessionStatus()経由で間接的に影響。ワークツリー詳細APIのisWaitingForResponseフラグに影響"
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "impact_type": "indirect",
+        "description": "current-output APIの応答に依存。isPromptWaiting=trueかつpromptData(type='multiple_choice')が返された場合にクライアント側でも自動応答を送信"
+      },
+      {
+        "file": "src/lib/claude-poller.ts",
+        "impact_type": "low",
+        "description": "superseded by response-poller.tsだがコード上は到達可能。detectPrompt()をbuildDetectPromptOptions()なしで呼び出し（requireDefaultIndicator=trueがデフォルト適用）。本Issue修正時の整合性チェック対象"
+      }
+    ],
+    "affected_scenarios": [
+      {
+        "scenario": "Auto-Yesモード有効 + Claude CLIが番号付きリストを出力",
+        "consequence": "「1」がtmuxに自動送信される（主要バグ）",
+        "severity": "high",
+        "frequency": "サブエージェント完了後、タスクリスト表示、ステップ説明時に頻繁に発生"
+      },
+      {
+        "scenario": "Auto-Yesモード無効 + Claude CLIが番号付きリストを出力 + response-poller.tsが稼働中",
+        "consequence": "response-poller.tsが番号付きリストをpromptとして誤検出し、DB上にmessageType='prompt'の偽メッセージが保存される。UIにfalse promptが表示される可能性",
+        "severity": "medium",
+        "frequency": "response-poller.tsのポーリングタイミングと番号付きリスト出力タイミングが一致した場合に発生"
+      },
+      {
+        "scenario": "サイドバー表示更新時 + Claude CLIが番号付きリストを出力",
+        "consequence": "detectSessionStatus()が15行ウィンドウ内の番号付きリストをwaitingと誤検出し、サイドバーのステータスドットが黄色(waiting)と誤表示される",
+        "severity": "low",
+        "frequency": "15行ウィンドウに番号付きリストと上部テキスト行が収まっている場合のみ発生。末尾空行トリムにより検出範囲が縮小されるため頻度は低い"
+      },
+      {
+        "scenario": "current-output APIポーリング + useAutoYes.tsクライアント側フォールバック",
+        "consequence": "サーバー側Auto-Yes + クライアント側Auto-Yesの二重送信。DUPLICATE_PREVENTION_WINDOW_MS=3秒で軽減されるが完全ではない",
+        "severity": "medium",
+        "frequency": "Auto-Yesモード有効かつサーバー側応答後3秒以上経過した場合に発生し得る"
+      },
+      {
+        "scenario": "prompt-response APIの送信前検証",
+        "consequence": "ユーザーが手動で回答を送信しようとした際、既にpromptが消えているのにdetectPrompt()が番号付きリストを誤検出してisPrompt=trueを返し、不要なキー送信を許可する",
+        "severity": "low",
+        "frequency": "手動応答とtmux出力内の番号付きリストのタイミングが一致する場合のみ"
+      }
+    ],
+    "breaking_changes": [],
+    "migration_considerations": "本Issueはバグ修正であり、既存ユーザーへの移行パスは不要。ただし修正内容によってはIssue #193で対応したClaude Codeの選択肢プロンプト検出が回帰する可能性があるため、回帰テストが必須"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "299-444",
+      "relevance": "detectMultipleChoicePrompt()の全防御層。修正の中心対象"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "lines": "218-225",
+      "relevance": "buildDetectPromptOptions('claude')がrequireDefaultIndicator: falseを返す。問題の起点"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "273-363",
+      "relevance": "pollAutoYes()のポーリングループ。cleanOutput全文をdetectPrompt()に渡す主要誤検出パス"
+    },
+    {
+      "file": "src/lib/auto-yes-resolver.ts",
+      "lines": "18-39",
+      "relevance": "resolveAutoAnswer()がmultiple_choiceに対してoptions[0]の番号を返す"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "112-190",
+      "relevance": "detectSessionStatus()。15行ウィンドウ内でのdetectPrompt()呼び出し"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "95-101, 297-310, 486-498, 606-629",
+      "relevance": "detectPromptWithOptions()ヘルパーおよび3箇所のfullOutput検査。Issueに未記載の影響パス"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "80-99",
+      "relevance": "detectSessionStatus()統合とdetectPrompt()個別呼び出し。isPromptWaitingとpromptDataの返却"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "lines": "68-88",
+      "relevance": "送信前prompt活性確認のdetectPrompt()呼び出し"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "lines": "46-96",
+      "relevance": "クライアント側Auto-Yesフォールバック。current-output APIのisPromptWaitingに依存"
+    },
+    {
+      "file": "src/lib/claude-poller.ts",
+      "lines": "160-176, 234-236",
+      "relevance": "superseded但し到達可能。buildDetectPromptOptions()未適用のdetectPrompt()呼び出し"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #161, #193, #191, #188の実装詳細。修正後の更新対象"
+    },
+    {
+      "file": "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+      "relevance": "requireDefaultIndicator: false導入の設計根拠。回帰テスト設計の参照元"
+    },
+    {
+      "file": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+      "relevance": "2パス検出方式の設計根拠。修正後の防御層再構成の参照元"
+    },
+    {
+      "file": "dev-reports/design/issue-188-thinking-indicator-false-detection-design-policy.md",
+      "relevance": "status-detector.tsウィンドウイング設計。影響パス分析の参照元"
+    }
+  ]
+}

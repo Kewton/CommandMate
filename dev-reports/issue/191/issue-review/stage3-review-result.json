@@ -1,0 +1,191 @@
+{
+  "issue_number": 191,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-08",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "Issue does not identify the third caller of detectThinking(): src/app/api/worktrees/[id]/current-output/route.ts (L83). This route already applies 15-line windowing (lastSection = nonEmptyLines.slice(-15)) before passing to detectThinking(), and uses thinking state to gate detectPrompt() (L88: thinking ? skip : detectPrompt). This call site is consistent with the proposed fix but must be listed in the Issue's impact analysis for completeness, as it shares the same Layer 1 defense pattern as auto-yes-manager.ts",
+        "location": "## 影響ファイル テーブル",
+        "recommendation": "Add row: `src/app/api/worktrees/[id]/current-output/route.ts` | L83 | Reference (already windowed, consistent) | Uses 15-line windowing + thinking->prompt gating. This route feeds isPromptWaiting and thinking flags to the client-side useAutoYes hook, forming the client-side Auto-Yes path. If the windowing change in auto-yes-manager.ts is inconsistent with this route, the server-side and client-side Auto-Yes flows could produce divergent behaviors",
+        "evidence": "current-output/route.ts L73-74: `const nonEmptyLines = lines.map(l => stripAnsi(l)).filter(line => line.trim() !== ''); const lastSection = nonEmptyLines.slice(-15).join('\\n');`; L83: `const thinking = detectThinkingState(cliToolId, lastSection);`; L88: `const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput);`"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "Existing test for 'pollAutoYes thinking state skip' (auto-yes-manager.test.ts L427-499) uses short strings that do not exercise the 5000-line buffer scenario. The test at L444 uses thinkingOutput = '\\u2733 Analyzing\\u2026\\n1. Step one\\n2. Step two' (3 lines), which will pass regardless of whether windowing is applied. No test verifies the actual bug scenario: thinking pattern present only in early lines of a large buffer, with a prompt at the tail",
+        "location": "tests/unit/lib/auto-yes-manager.test.ts L427-499",
+        "recommendation": "Add a regression test that constructs a 5000-line buffer with a thinking summary line (e.g., '\\u00B7 Simmering\\u2026 (4m 16s)') in the first 100 lines, filler content in the middle, and a valid prompt (e.g., 'Do you want to proceed? (y/n)') in the last 10 lines. Verify that after the fix, sendKeys IS called (prompt detected despite old thinking line in buffer). Also add a test where the thinking pattern IS in the last 50 lines to verify it still correctly skips prompt detection",
+        "evidence": "auto-yes-manager.test.ts L443-444: `const thinkingOutput = '\\u2733 Analyzing\\u2026\\n1. Step one\\n2. Step two';` -- only 3 lines, does not test windowing boundary"
+      },
+      {
+        "id": "SF-2",
+        "category": "依存関係",
+        "issue": "The current-output/route.ts applies windowing BEFORE detectThinking() (15-line window of non-empty lines), while the proposed fix for auto-yes-manager.ts uses 50-line window of all lines. This creates a window size inconsistency between the two Auto-Yes paths (server-side polling via auto-yes-manager.ts uses 50 lines; client-side polling via current-output/route.ts uses 15 non-empty lines). In normal operation they should not conflict because the server-side path takes priority (duplicate prevention), but the Issue should acknowledge this difference",
+        "location": "## 修正方針の候補 > 案1",
+        "recommendation": "Add a note in the Issue acknowledging the window size difference: auto-yes-manager.ts will use 50 lines (to align with detectPrompt multiple_choice), while current-output/route.ts already uses 15 non-empty lines (to align with status-detector.ts). Document the rationale: current-output/route.ts is for status display (15 lines sufficient), while auto-yes-manager.ts needs to cover the full multiple_choice detection range (50 lines). Alternatively, consider aligning the auto-yes-manager.ts window to also filter empty lines for consistency",
+        "evidence": "current-output/route.ts L73-74: filters empty lines then slices -15; auto-yes-manager.ts proposed change: slice(-50) without filtering empty lines; status-detector.ts L83: slices -15 without filtering; prompt-detector.ts L268: slices -50 without filtering"
+      },
+      {
+        "id": "SF-3",
+        "category": "破壊的変更",
+        "issue": "Codex CLI thinking detection could be affected by windowing. CODEX_THINKING_PATTERN matches patterns like '\\u2022 Ran ls -la' which are command execution logs. Unlike Claude's spinner+ellipsis pattern, Codex's 'Ran' pattern matches completed command execution output (not just active thinking). Applying a 50-line window to Codex detectThinking() may still produce false positives from recent 'Ran' lines in the buffer. However, this is an existing issue not introduced by Issue #191's fix, and the window reduction will strictly reduce false positive surface",
+        "location": "## 影響ファイル テーブル, src/lib/cli-patterns.ts L82-84",
+        "recommendation": "Add a note in the Issue that Codex CLI's CODEX_THINKING_PATTERN (matching '\\u2022 Ran') could still cause false thinking detection within the 50-line window after a command completes. This is pre-existing behavior and out of scope for Issue #191, but should be tracked for future improvement. The proposed windowing fix strictly reduces the false positive window from 5000 lines to 50 lines, so it is a net improvement for all CLI tools",
+        "evidence": "cli-patterns.ts L36: `CODEX_THINKING_PATTERN = /\\u2022\\s*(Planning|Searching|...|Ran|Deciding)/m`; cli-patterns.ts L82-84: switch case 'codex' uses CODEX_THINKING_PATTERN"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "claude-poller.ts (L76) uses a locally-defined simplified thinkingPattern `/[\\u2733\\u273D\\u23FA\\u00B7\\u2234\\u2722\\u2733]/m` that only checks for spinner character presence (without ellipsis). This is a separate code path from detectThinking() and is NOT affected by Issue #191's fix, but the pattern duplication was flagged in Issue #161 design review (S1-008, S3-011) as a follow-up. Mentioning this in the Issue helps readers understand the full thinking-detection landscape",
+        "location": "Issue body, ## 関連",
+        "recommendation": "Add a brief note in the 関連 section: 'Note: claude-poller.ts (L76) uses a separate local thinkingPattern that does not use detectThinking(). This is a known pattern duplication (Issue #161 S1-008) and is not affected by this fix.'",
+        "evidence": "claude-poller.ts L76: `const thinkingPattern = /[\\u2733\\u273D\\u23FA\\u00B7\\u2234\\u2722\\u2733]/m;`; Issue #161 design policy S1-008 flagged this for unification"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.md's Issue #161 section documents the multi-layer defense (Layer 1: thinking skip in auto-yes-manager.ts). After Issue #191 is resolved, the 'thinking skip' behavior changes from 'full buffer check' to 'windowed check'. The CLAUDE.md description should be updated to note the windowing",
+        "location": "CLAUDE.md, Issue #161 section",
+        "recommendation": "After implementation, update CLAUDE.md Issue #161 section to note: 'Layer 1 (thinking state skip) uses windowed search (last 50 lines) to prevent stale thinking patterns from blocking prompt detection (Issue #191)'"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "callers_of_detectThinking": [
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "line": 284,
+        "windowing": "NONE (full 5000-line buffer)",
+        "impact": "PRIMARY fix target. Change to use windowed input",
+        "risk": "Low - windowing strictly reduces false positive surface"
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "line": 99,
+        "windowing": "15-line window (STATUS_CHECK_LINE_COUNT)",
+        "impact": "NONE - already windowed. Reference implementation",
+        "risk": "None"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "line": 83,
+        "windowing": "15-line window (non-empty lines filtered)",
+        "impact": "NONE - already windowed. NOT listed in Issue (MF-1)",
+        "risk": "None for this fix, but window size divergence with auto-yes-manager.ts (SF-2)"
+      }
+    ],
+    "multi_layer_defense_impact": {
+      "layer_1_thinking_skip": "MODIFIED: detectThinking() input changes from full buffer to 50-line window. Defense still active but scoped to recent output. Net improvement: eliminates stale thinking pattern false positives",
+      "layer_2_two_pass_detection": "NOT AFFECTED: 2-pass detection in prompt-detector.ts operates on its own 50-line window independently",
+      "layer_3_consecutive_validation": "NOT AFFECTED: Operates within prompt-detector.ts independently"
+    },
+    "auto_yes_flow_impact": {
+      "server_side_path": "auto-yes-manager.ts pollAutoYes() -> detectThinking(windowed) -> detectPrompt() -> resolveAutoAnswer() -> sendKeys(). Fix reduces false thinking detection, allowing prompt detection to proceed when appropriate",
+      "client_side_path": "current-output/route.ts -> detectThinking(15-line window) -> detectPrompt() -> useAutoYes.ts -> prompt-response API. NOT affected by this fix (already windowed)",
+      "graceful_shutdown": "stopAllAutoYesPolling() in session-cleanup.ts and server.ts. NOT affected by this fix",
+      "auto_yes_resolver": "resolveAutoAnswer() in auto-yes-resolver.ts. NOT affected (receives PromptData, not raw buffer)"
+    },
+    "cli_tool_impact": {
+      "claude": "Primary beneficiary. Stale spinner+ellipsis patterns in buffer will no longer block prompt detection",
+      "codex": "Marginal improvement. CODEX_THINKING_PATTERN ('Ran', 'Deciding') may still match recent output within 50-line window, but false positive surface reduced from 5000 to 50 lines",
+      "gemini": "No impact. detectThinking() always returns false for gemini"
+    },
+    "regression_risks": [
+      {
+        "risk": "Legitimate thinking state missed if thinking indicator appears before the 50-line window",
+        "likelihood": "Very Low",
+        "rationale": "Claude CLI thinking indicators (spinner+ellipsis) are continuously rewritten on the last visible line during active processing. They do not scroll out of view while thinking is active. The 50-line window is sufficient to capture any active thinking indicator",
+        "mitigation": "Aligns with status-detector.ts (15 lines) which has been operating correctly since Issue #180"
+      },
+      {
+        "risk": "Codex 'Ran' thinking pattern in 50-line window triggers false thinking detection after command completion",
+        "likelihood": "Low",
+        "rationale": "Pre-existing issue, but reduced from 5000-line to 50-line surface. Codex auto-yes usage is less common than Claude",
+        "mitigation": "Out of scope for Issue #191. Can be addressed by refining CODEX_THINKING_PATTERN in future Issue"
+      }
+    ],
+    "breaking_changes": "None. The proposed change is a behavioral fix that reduces false positive thinking detection. No API changes, no interface changes, no configuration changes"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "276-287",
+      "relevance": "Primary fix target: L276 captures 5000-line buffer, L284 passes full buffer to detectThinking()"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "lines": "26-29, 36, 73-95",
+      "relevance": "detectThinking() function definition, CLAUDE_THINKING_PATTERN and CODEX_THINKING_PATTERN"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "50, 81-106",
+      "relevance": "Reference implementation: 15-line windowing for detectThinking() at L99"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "73-74, 83, 88",
+      "relevance": "Third caller of detectThinking() (NOT listed in Issue). Already windowed (15 non-empty lines). Gates client-side Auto-Yes via isPromptWaiting flag"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "48, 268",
+      "relevance": "detectPrompt() window sizes: 10 lines (yes/no), 50 lines (multiple_choice)"
+    },
+    {
+      "file": "src/lib/auto-yes-resolver.ts",
+      "lines": "1-39",
+      "relevance": "Not affected. Receives PromptData, not raw buffer"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "110-118",
+      "relevance": "Not affected. Calls stopAutoYesPolling() for cleanup, no interaction with detectThinking()"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "lines": "46-96",
+      "relevance": "Client-side Auto-Yes. Not directly affected. Receives pre-processed isPromptWaiting from current-output/route.ts"
+    },
+    {
+      "file": "src/lib/claude-poller.ts",
+      "lines": "76",
+      "relevance": "Separate local thinkingPattern (not using detectThinking()). Not affected by this fix. Known duplication (Issue #161 S1-008)"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "lines": "427-499",
+      "relevance": "Existing thinking state skip tests. Insufficient for testing windowing boundary (SF-1)"
+    },
+    {
+      "file": "tests/unit/lib/cli-patterns.test.ts",
+      "lines": "142-163",
+      "relevance": "detectThinking() unit tests. Test the function in isolation (not windowing context)"
+    },
+    {
+      "file": "src/lib/__tests__/status-detector.test.ts",
+      "lines": "1-389",
+      "relevance": "status-detector tests verify 15-line windowing behavior. Reference for testing approach"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #161 section documents multi-layer defense. May need update after fix (NTH-2)"
+    }
+  ]
+}

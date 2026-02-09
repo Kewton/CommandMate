@@ -162,6 +162,36 @@ More text`;
     });
   });
 
+  // Issue #188 Task 2.2: Additional thinking pattern tests
+  describe('CLAUDE_THINKING_PATTERN - Issue #188', () => {
+    it('should match completed thinking summary (e.g., "Churned for 41s")', () => {
+      // The pattern itself matches completed summaries; false detection is prevented
+      // by windowing in status-detector.ts (STATUS_THINKING_LINE_COUNT=5)
+      const { thinkingPattern } = getCliToolPatterns('claude');
+      expect(thinkingPattern.test('\u2733 Churned for 41s\u2026')).toBe(true);
+    });
+
+    it('should match "(esc to interrupt)" thinking indicator', () => {
+      const { thinkingPattern } = getCliToolPatterns('claude');
+      expect(thinkingPattern.test('Planning \u00b7 (esc to interrupt)')).toBe(true);
+    });
+
+    it('should match active thinking indicator', () => {
+      const { thinkingPattern } = getCliToolPatterns('claude');
+      expect(thinkingPattern.test('\u2733 Planning\u2026')).toBe(true);
+    });
+
+    it('should match thinking summary with duration', () => {
+      const { thinkingPattern } = getCliToolPatterns('claude');
+      expect(thinkingPattern.test('\u00b7 Simmering\u2026 (4m 16s)')).toBe(true);
+    });
+
+    it('should match thinking with parenthetical description', () => {
+      const { thinkingPattern } = getCliToolPatterns('claude');
+      expect(thinkingPattern.test('\u2733 Verifying implementation (dead code detection)\u2026')).toBe(true);
+    });
+  });
+
   describe('stripAnsi', () => {
     it('should remove ANSI escape codes', () => {
       const input = '\x1b[31mRed text\x1b[0m';

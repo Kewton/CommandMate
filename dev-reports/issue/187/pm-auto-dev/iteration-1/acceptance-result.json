@@ -1,0 +1,67 @@
+{
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "AC1: sendMessageToClaude()でwaitForPrompt()復帰後にCLAUDE_POST_PROMPT_DELAY（500ms）が適用されること",
+      "status": "passed",
+      "evidence": "claude-session.ts line 407: `await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));` is placed AFTER the if block containing waitForPrompt(), ensuring it executes on both Path A and Path B. Test 'should wait CLAUDE_POST_PROMPT_DELAY after waitForPrompt returns (Path B)' at line 391 verifies sendKeys is not called until after CLAUDE_PROMPT_POLL_INTERVAL + CLAUDE_POST_PROMPT_DELAY."
+    },
+    {
+      "criterion": "AC2: sendMessageToClaude()でプロンプト即検出時にもCLAUDE_POST_PROMPT_DELAYが適用されること",
+      "status": "passed",
+      "evidence": "claude-session.ts line 407: The CLAUDE_POST_PROMPT_DELAY is placed OUTSIDE the if block (lines 396-399), so it runs regardless of whether Path A (immediate prompt detection) or Path B (waitForPrompt) was taken. Test 'should wait CLAUDE_POST_PROMPT_DELAY after immediate prompt detection (Path A)' at line 374 verifies sendKeys is not called before the delay elapses."
+    },
+    {
+      "criterion": "AC3: startClaudeSession()がセパレータパターンのみでは初期化完了と判定しないこと",
+      "status": "passed",
+      "evidence": "claude-session.ts line 345: Only `CLAUDE_PROMPT_PATTERN.test(cleanOutput)` is used for initialization detection. CLAUDE_SEPARATOR_PATTERN is NOT imported (line 13-16 imports only CLAUDE_PROMPT_PATTERN and stripAnsi). Line 342 has a comment documenting the removal. Test 'should not treat separator-only output as initialization complete (Issue #187, P1-1)' at line 237 verifies separator-only output causes timeout."
+    },
+    {
+      "criterion": "AC4: waitForPrompt()タイムアウト時にメッセージを送信せずエラーがスローされること",
+      "status": "passed",
+      "evidence": "claude-session.ts lines 396-399: sendMessageToClaude() calls `await waitForPrompt(sessionName, CLAUDE_SEND_PROMPT_WAIT_TIMEOUT)` without try-catch, so the timeout error from waitForPrompt (line 275) propagates directly to the caller. sendKeys() at lines 410-411 is never reached on timeout. Test 'should throw error if prompt not detected within timeout (Issue #187, P1-2/P1-3)' at line 354 verifies both error throw AND that sendKeys was NOT called."
+    },
+    {
+      "criterion": "AC5: waitForPrompt()のタイムアウト値がCLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数を使用していること",
+      "status": "passed",
+      "evidence": "claude-session.ts line 398: `await waitForPrompt(sessionName, CLAUDE_SEND_PROMPT_WAIT_TIMEOUT)` uses the named constant (10000ms, defined at line 101) instead of a hardcoded 10000. The constant has comprehensive JSDoc (lines 85-100) documenting its purpose, relationship to other timeout constants, and reference to Issue #187. Test at line 81 verifies `CLAUDE_SEND_PROMPT_WAIT_TIMEOUT` is exported as 10000ms."
+    },
+    {
+      "criterion": "AC6: 既存の2回目以降のメッセージ送信に回帰がないこと",
+      "status": "passed",
+      "evidence": "All 28 tests in claude-session.test.ts passed, including pre-existing tests: 'should verify prompt state before sending (CONS-006)', 'should call waitForPrompt if not at prompt (CONS-006)', 'should use sendKeys for Enter instead of execAsync (CONS-001)', 'should throw error if session does not exist'. No test regressions detected."
+    },
+    {
+      "criterion": "AC7: claude-session.test.tsの全テストがパスすること",
+      "status": "passed",
+      "evidence": "Vitest output: 'Test Files: 1 passed (1)', 'Tests: 28 passed (28)'. All 28 test cases passed. The 5 'unhandled rejection' warnings are a known vitest fake-timers interaction (PromiseRejectionHandledWarning) and do not indicate test failures -- all assertions passed correctly."
+    }
+  ],
+  "test_results": {
+    "passed": 28,
+    "failed": 0,
+    "total": 28
+  },
+  "static_analysis": {
+    "tsc": "pass",
+    "eslint": "pass"
+  },
+  "additional_verifications": [
+    {
+      "check": "CLAUDE_SEPARATOR_PATTERN import removed from claude-session.ts",
+      "status": "passed",
+      "evidence": "Lines 6-16: Only CLAUDE_PROMPT_PATTERN and stripAnsi are imported from cli-patterns. CLAUDE_SEPARATOR_PATTERN is not imported. Grep confirms only a comment reference at line 342."
+    },
+    {
+      "check": "CLAUDE_SEND_PROMPT_WAIT_TIMEOUT has proper JSDoc",
+      "status": "passed",
+      "evidence": "Lines 85-100: Comprehensive JSDoc including purpose description, relationship to other timeout constants (CLAUDE_PROMPT_WAIT_TIMEOUT, CLAUDE_INIT_TIMEOUT), and @see reference to Issue #187."
+    },
+    {
+      "check": "New tests cover Path A, Path B, timeout, and constant export",
+      "status": "passed",
+      "evidence": "Path A test at line 374, Path B test at line 391, timeout test at line 354, constant export test at line 81. Additionally, separator-only test at line 237 covers the P1-1 scenario."
+    }
+  ],
+  "summary": "All 7 acceptance criteria passed. All 28 unit tests passed. TypeScript type checking and ESLint both passed with no errors. The implementation correctly adds CLAUDE_POST_PROMPT_DELAY after prompt detection in sendMessageToClaude() for both Path A (immediate detection) and Path B (waitForPrompt polling), removes CLAUDE_SEPARATOR_PATTERN from startClaudeSession() initialization, propagates timeout errors without try-catch wrapping, and uses the named constant CLAUDE_SEND_PROMPT_WAIT_TIMEOUT (10000ms) with comprehensive JSDoc documentation."
+}

@@ -1,0 +1,57 @@
+{
+  "issue_number": 191,
+  "iteration": 1,
+  "stage": 2,
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "案1のウィンドウサイズを20行から50行に変更し、detectPrompt()のmultiple_choice（50行ウィンドウ）との整合性根拠を詳細に追記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "案2にstatus-detector.tsとの整合性メリットとIssue #161防御を覆すデメリットを追記。案3にCLIフォーマット変更への脆弱性（ブラックリスト方式の限界）を追記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "「問題の非対称性」テーブルにstatus-detector.ts（末尾15行）とprompt-detector.tsの各ウィンドウサイズを追加し、auto-yes-manager.tsのみがバッファ全体を渡している異常な状態であることを強調。テーブル後に根本原因の要約文を追加"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "受け入れ条件にstatus-detector.tsとの一貫性検証（ウィンドウイング方針の一貫性）と回帰テストシナリオ（5000行バッファ+サマリー行+末尾プロンプト）を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "影響ファイルテーブルにstatus-detector.ts L81-106を「参照（整合性確認）」として追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "残存出力テーブル後に「to interrupt)」パターンの残存リスクに関する注記を追加（リスクは低いが認識すべき点として）"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "再現手順ステップ4のプロンプト形式を「Do you want to proceed? (y/n)」形式として具体化し、detectPrompt()のyes_noパターンとして検出される旨を明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/191"
+  }
+}

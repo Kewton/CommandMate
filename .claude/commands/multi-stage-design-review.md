@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 description: "設計書の4段階レビュー（通常→整合性→影響分析→セキュリティ）と指摘対応を自動実行"
 ---
 
@@ -31,6 +31,13 @@ description: "設計書の4段階レビュー（通常→整合性→影響分�
 
 - **issue_number**: 対象Issue番号（必須）
 - **skip_stage**: スキップするステージ番号（カンマ区切り）
+
+### サブエージェントモデル指定
+
+| エージェント | モデル | 理由 |
+|-------------|--------|------|
+| architecture-review-agent | **opus** | 品質判断にOpus必要 |
+| apply-review-agent | sonnet（継承） | 設計方針書更新のみ |
 
 ---
 
@@ -76,7 +83,7 @@ mkdir -p dev-reports/issue/{issue_number}/multi-stage-design-review
 #### 1-1. レビュー実行
 
 ```
-Use architecture-review-agent to review Issue #{issue_number} with focus on 設計原則.
+Use architecture-review-agent (model: opus) to review Issue #{issue_number} with focus on 設計原則.
 
 Context file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage1-review-context.json
 Output file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage1-review-result.json
@@ -121,7 +128,7 @@ IMPORTANT: Only update design policy documents. Do NOT modify source code.
 #### 2-1. レビュー実行
 
 ```
-Use architecture-review-agent to review Issue #{issue_number} with focus on 整合性.
+Use architecture-review-agent (model: opus) to review Issue #{issue_number} with focus on 整合性.
 
 Context file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage2-review-context.json
 Output file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage2-review-result.json
@@ -168,7 +175,7 @@ IMPORTANT: Only update design policy documents. Do NOT modify source code.
 #### 3-1. レビュー実行
 
 ```
-Use architecture-review-agent to review Issue #{issue_number} with focus on 影響範囲.
+Use architecture-review-agent (model: opus) to review Issue #{issue_number} with focus on 影響範囲.
 
 Context file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage3-review-context.json
 Output file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage3-review-result.json
@@ -214,7 +221,7 @@ IMPORTANT: Only update design policy documents. Do NOT modify source code.
 #### 4-1. レビュー実行
 
 ```
-Use architecture-review-agent to review Issue #{issue_number} with focus on セキュリティ.
+Use architecture-review-agent (model: opus) to review Issue #{issue_number} with focus on セキュリティ.
 
 Context file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage4-review-context.json
 Output file: dev-reports/issue/{issue_number}/multi-stage-design-review/stage4-review-result.json

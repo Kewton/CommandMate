@@ -1,0 +1,24 @@
+{
+  "issue_number": 208,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_criteria": [
+    "変更の波及効果分析",
+    "呼び出し元への影響（auto-yes-manager.ts, status-detector.ts, response-poller.ts等）",
+    "既存機能への影響（Codex/Gemini等のCLIツール）",
+    "パフォーマンスへの影響",
+    "テストカバレッジの影響"
+  ],
+  "design_policy_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "affected_modules": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/lib/claude-poller.ts"
+  ]
+}

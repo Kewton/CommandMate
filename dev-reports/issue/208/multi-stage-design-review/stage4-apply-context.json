@@ -1,0 +1,37 @@
+{
+  "issue_number": 208,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_result_file": "dev-reports/issue/208/multi-stage-design-review/stage4-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "apply_scope": "design_policy_only",
+  "must_fix_items": [
+    {
+      "id": "SEC-S4-001",
+      "category": "command_injection",
+      "title": "Auto-Yesが送信する値の安全性保証を明記",
+      "description": "resolveAutoAnswer()が返す値は 'y' または数字文字列のみであり、tmuxコマンドインジェクションのリスクがないことを明記する。",
+      "recommendation": "セクション7（セキュリティ設計）に、resolveAutoAnswer()の安全性保証を追加する。"
+    }
+  ],
+  "should_fix_items": [
+    {
+      "id": "SEC-S4-002",
+      "category": "redos",
+      "title": "QUESTION_KEYWORD_PATTERNのReDoS安全性を明示",
+      "recommendation": "セクション3.3のQUESTION_KEYWORD_PATTERNのJSDocに 'ReDoS safe' の注釈を追加する。"
+    },
+    {
+      "id": "SEC-S4-003",
+      "category": "false_positive_safety",
+      "title": "多層防御の全体像を記載",
+      "recommendation": "セクション7に、5つのLayerと既存の緩和策（expiry timeout等）を整理して記載する。"
+    },
+    {
+      "id": "SEC-S4-004",
+      "category": "input_validation",
+      "title": "isQuestionLikeLine()の制御文字耐性を明記",
+      "recommendation": "isQuestionLikeLine()のコメントに、制御文字が残留していても安全に動作することを明記する。"
+    }
+  ]
+}

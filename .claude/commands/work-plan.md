@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 description: "Issue単位の具体的な作業計画立案"
 ---
 

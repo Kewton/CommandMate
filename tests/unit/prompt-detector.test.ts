@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { detectPrompt, getAnswerInput } from '@/lib/prompt-detector';
+import type { DetectPromptOptions } from '@/lib/prompt-detector';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 
 // Type guard for MultipleChoicePromptData
@@ -356,23 +357,23 @@ Are you sure you want to continue? (yes/no)
       });
 
       it('should throw error for invalid text', () => {
-        expect(() => getAnswerInput('maybe')).toThrow('Invalid answer: maybe');
+        expect(() => getAnswerInput('maybe')).toThrow('Invalid answer for yes/no prompt');
       });
 
       it('should throw error for numbers', () => {
-        expect(() => getAnswerInput('1')).toThrow('Invalid answer: 1');
+        expect(() => getAnswerInput('1')).toThrow('Invalid answer for yes/no prompt');
       });
 
       it('should throw error for special characters', () => {
-        expect(() => getAnswerInput('!')).toThrow('Invalid answer: !');
+        expect(() => getAnswerInput('!')).toThrow('Invalid answer for yes/no prompt');
       });
 
       it('should throw error for partial matches', () => {
-        expect(() => getAnswerInput('ye')).toThrow('Invalid answer: ye');
+        expect(() => getAnswerInput('ye')).toThrow('Invalid answer for yes/no prompt');
       });
 
       it('should throw error for multiple words', () => {
-        expect(() => getAnswerInput('yes please')).toThrow('Invalid answer: yes please');
+        expect(() => getAnswerInput('yes please')).toThrow('Invalid answer for yes/no prompt');
       });
     });
 
@@ -390,6 +391,20 @@ Are you sure you want to continue? (yes/no)
       it('should handle excessive whitespace', () => {
         expect(getAnswerInput('   yes   ')).toBe('y');
         expect(getAnswerInput('\t\tno\t\t')).toBe('n');
+      });
+    });
+
+    describe('Valid multiple choice inputs', () => {
+      it('should return number string for valid single digit', () => {
+        expect(getAnswerInput('1', 'multiple_choice')).toBe('1');
+      });
+
+      it('should return number string for multi-digit input', () => {
+        expect(getAnswerInput('12', 'multiple_choice')).toBe('12');
+      });
+
+      it('should return number string with leading/trailing whitespace trimmed', () => {
+        expect(getAnswerInput('  3  ', 'multiple_choice')).toBe('3');
       });
     });
   });
@@ -830,6 +845,685 @@ Are you sure you want to continue? (yes/no)
       // the old and new numbered lines interact with Layer 3/4 validation.
       expect(result).toBeDefined();
       expect(typeof result.isPrompt).toBe('boolean');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #193: requireDefaultIndicator option tests
+  // Tests for detecting multiple choice prompts without the ❯ (U+276F) marker
+  // when requireDefaultIndicator is set to false.
+  // ==========================================================================
+  describe('Issue #193: requireDefaultIndicator option', () => {
+    describe('requireDefaultIndicator: false - basic detection', () => {
+      it('should detect numbered choices without cursor indicator when requireDefaultIndicator is false', () => {
+        const output = [
+          'Which option would you like?',
+          '  1. Yes',
+          '  2. No',
+          '  3. Cancel',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+        if (isMultipleChoicePrompt(result.promptData)) {
+          expect(result.promptData.options).toHaveLength(3);
+          expect(result.promptData.options[0].label).toBe('Yes');
+          expect(result.promptData.options[0].isDefault).toBe(false);
+          expect(result.promptData.options[1].label).toBe('No');
+          expect(result.promptData.options[2].label).toBe('Cancel');
+        }
+      });
+
+      it('should detect Claude Code 4-option prompt without cursor indicator', () => {
+        const output = [
+          'Do you want to proceed?',
+          '  1. Yes',
+          "  2. Yes, and don't ask again for this tool",
+          '  3. No',
+          '  4. No, and stop for now',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        if (isMultipleChoicePrompt(result.promptData)) {
+          expect(result.promptData.options).toHaveLength(4);
+          expect(result.promptData.question).toContain('Do you want to proceed?');
+        }
+      });
+
+      it('should set all isDefault to false when no cursor indicator present', () => {
+        const output = [
+          'Choose an action:',
+          '  1. Option A',
+          '  2. Option B',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        if (isMultipleChoicePrompt(result.promptData)) {
+          expect(result.promptData.options.every(opt => opt.isDefault === false)).toBe(true);
+        }
+      });
+    });
+
+    describe('requireDefaultIndicator: false - defense layers', () => {
+      it('should still reject non-consecutive numbers (Layer 3 maintained)', () => {
+        const output = [
+          'Select one:',
+          '  1. Option A',
+          '  3. Option C',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('should still reject options not starting from 1 (Layer 3 maintained)', () => {
+        const output = [
+          'Select one:',
+          '  2. Option B',
+          '  3. Option C',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('should still reject when fewer than 2 options', () => {
+        const output = [
+          'Select one:',
+          '  1. Only option',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+    });
+
+    describe('SEC-001: questionEndIndex guard (Layer 5)', () => {
+      it('should return isPrompt: false when requireDefaultIndicator=false and no question line (numbered list only)', () => {
+        // Pure numbered list without question line - should NOT be detected as a prompt
+        const output = [
+          '1. Create file',
+          '2. Run tests',
+          '3. Deploy',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('should return isPrompt: true when requireDefaultIndicator=false and question line is present', () => {
+        // Numbered list WITH question line - should be detected as a prompt
+        const output = [
+          'Which option do you prefer?',
+          '  1. Option A',
+          '  2. Option B',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+      });
+
+      it('should return isPrompt: false for numbered list with only separator lines before it', () => {
+        // Separator lines should not count as question lines
+        const output = [
+          '───────────────────────',
+          '  1. Option A',
+          '  2. Option B',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+    });
+
+    describe('requireDefaultIndicator: true (default) - regression', () => {
+      it('should NOT detect numbered choices without cursor when requireDefaultIndicator defaults to true', () => {
+        const output = [
+          'Which option would you like?',
+          '  1. Yes',
+          '  2. No',
+        ].join('\n');
+
+        // No options passed - defaults to requireDefaultIndicator: true
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('should NOT detect numbered choices without cursor when requireDefaultIndicator explicitly true', () => {
+        const output = [
+          'Which option would you like?',
+          '  1. Yes',
+          '  2. No',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: true };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('should still detect cursor-indicated choices with default true', () => {
+        const output = [
+          'Do you want to proceed?',
+          '\u276F 1. Yes',
+          '  2. No',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: true };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+      });
+    });
+
+    describe('requireDefaultIndicator: false with cursor indicator present', () => {
+      it('should still detect and mark isDefault correctly when cursor indicator is present', () => {
+        const output = [
+          'Do you want to proceed?',
+          '\u276F 1. Yes',
+          '  2. No',
+        ].join('\n');
+
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        if (isMultipleChoicePrompt(result.promptData)) {
+          expect(result.promptData.options[0].isDefault).toBe(true);
+          expect(result.promptData.options[1].isDefault).toBe(false);
+        }
+      });
+    });
+  });
+
+  // ==========================================================================
+  // Bug fix: Claude Bash tool indented question line detection
+  // Tests for detecting prompts where the question line has 2-space indentation
+  // (e.g., "  Do you want to proceed?") which was misclassified as a
+  // continuation line by isContinuationLine()'s hasLeadingSpaces check.
+  // ==========================================================================
+  describe('Bug fix: Claude Bash tool indented question detection', () => {
+    it('should detect 2-space indented question + numbered choices (requireDefaultIndicator: false)', () => {
+      // Claude Bash tool format: question and options are 2-space indented
+      const output = [
+        'Some previous output from bash tool',
+        '  Do you want to proceed?',
+        '  1. Yes',
+        '  2. No',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(2);
+        expect(result.promptData.question).toContain('Do you want to proceed?');
+      }
+    });
+
+    it('should detect indented question with long wrapping option text (requireDefaultIndicator: false)', () => {
+      // When option text wraps, the continuation line is indented.
+      // The question line itself is also indented.
+      const output = [
+        '  Do you want to proceed?',
+        "  1. Yes, and don't ask again for curl commands in",
+        '/Users/maenokota/share/work/test',
+        '  2. No',
+        '  3. Cancel',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(3);
+        expect(result.promptData.question).toContain('Do you want to proceed?');
+      }
+    });
+
+    it('should still treat indented non-question line (no "?" ending) as continuation line (regression)', () => {
+      // An indented line that does NOT end with '?' should still be treated
+      // as a continuation line when it appears between options.
+      const output = [
+        'Do you want to proceed?',
+        '\u276F 1. Option A',
+        '  some continuation text',
+        '  2. Option B',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(2);
+        // The continuation line should not appear as a separate option
+        expect(result.promptData.options[0].label).toBe('Option A');
+        expect(result.promptData.options[1].label).toBe('Option B');
+      }
+    });
+
+    it('should exclude "?" ending lines from hasLeadingSpaces in isContinuationLine (boundary test)', () => {
+      // Direct test of the boundary condition: a line with 2+ spaces AND ending with '?'
+      // should NOT be treated as a continuation line, allowing it to be the question.
+      const output = [
+        '  Is this the right choice?',
+        '  1. Yes',
+        '  2. No',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.question).toContain('Is this the right choice?');
+      }
+    });
+  });
+
+  // ==========================================================================
+  // Bug fix: trailing empty lines (tmux terminal padding) in scan window
+  // ==========================================================================
+  describe('Bug fix: trailing empty lines in detectMultipleChoicePrompt scan window', () => {
+    it('should detect prompt when output has many trailing empty lines (tmux padding)', () => {
+      // Real-world scenario: tmux buffer ends with 40+ empty padding lines
+      // that would push the prompt options outside the 50-line scan window
+      const lines: string[] = [];
+      lines.push('Previous output');
+      lines.push(' Do you want to proceed?');
+      lines.push(' \u276F 1. Yes');
+      lines.push("   2. Yes, and don't ask again for gh commands in /some/long/path");
+      lines.push('   3. No');
+      lines.push('');
+      lines.push(' Esc to cancel \u00B7 Tab to amend \u00B7 ctrl+e to explain');
+      // Add 46 trailing empty lines (tmux padding)
+      for (let i = 0; i < 46; i++) {
+        lines.push('');
+      }
+      const output = lines.join('\n');
+      const result = detectPrompt(output, { requireDefaultIndicator: false });
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options.length).toBe(3);
+        expect(result.promptData.question).toContain('Do you want to proceed?');
+      }
+    });
+
+    it('should detect prompt with requireDefaultIndicator: true and trailing empty lines', () => {
+      const lines: string[] = [];
+      lines.push('Question?');
+      lines.push('\u276F 1. Option A');
+      lines.push('  2. Option B');
+      for (let i = 0; i < 50; i++) {
+        lines.push('');
+      }
+      const output = lines.join('\n');
+      const result = detectPrompt(output);
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #208: SEC-001b question line validation (Layer 5 enhancement)
+  // Prevents false positive detection of normal numbered lists as
+  // multiple_choice prompts when requireDefaultIndicator=false.
+  // ==========================================================================
+  describe('Issue #208: SEC-001b question line validation', () => {
+    // T1-T4: False positive prevention tests
+    describe('T1-T4: False positive prevention (numbered lists should NOT be detected)', () => {
+      it('T1: heading + numbered list should NOT be detected as prompt', () => {
+        const output = '## Recommendations:\n1. Add test coverage\n2. Update docs\n3. Run perf tests';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('T2: task completion list should NOT be detected as prompt', () => {
+        const output = 'Completed the following tasks:\n1. Created unit tests\n2. Updated documentation';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('T3: step description list should NOT be detected as prompt', () => {
+        const output = 'I performed these steps:\n1. Analyzed the code\n2. Fixed the bug\n3. Added tests';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('T4: markdown heading + numbered list should NOT be detected as prompt', () => {
+        const output = '### Changes Made\n1. Updated config\n2. Added validation\n3. Fixed error handling';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+    });
+
+    // T5-T8: Claude Code real prompt regression tests
+    describe('T5-T8: Claude Code real prompt regression tests', () => {
+      it('T5: question ending with ? + numbered choices should be detected', () => {
+        const output = 'Which option would you like?\n1. Create new file\n2. Edit existing\n3. Delete';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+      });
+
+      it('T6: colon + select keyword question + numbered choices should be detected', () => {
+        const output = 'Select an option:\n1. Development\n2. Production\n3. Staging';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+      });
+
+      it('T7: choose keyword + colon should be detected', () => {
+        const output = 'Choose a mode:\n1. Fast\n2. Normal\n3. Thorough';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+      });
+
+      it('T8: numbered list without question line (SEC-001a) should NOT be detected', () => {
+        const output = '1. Option A\n2. Option B\n3. Option C';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+    });
+
+    // T9-T10: requireDefaultIndicator=true regression tests
+    describe('T9-T10: requireDefaultIndicator=true (default) regression tests', () => {
+      it('T9: cursor-indicated prompt with default settings should be detected', () => {
+        const output = 'Select:\n\u276F 1. Yes\n  2. No';
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+      });
+
+      it('T10: numbered list without cursor with default settings should NOT be detected', () => {
+        const output = 'Steps:\n1. First\n2. Second\n3. Third';
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(false);
+      });
+    });
+
+    // T11: isQuestionLikeLine() indirect unit tests
+    describe('T11: isQuestionLikeLine() validation via indirect tests', () => {
+      // True cases - question-like lines that should allow prompt detection
+      it('T11a: "Which file?" should be recognized as question line', () => {
+        const output = 'Which file?\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(true);
+      });
+
+      it('T11b: "Select an option:" should be recognized as question line', () => {
+        const output = 'Select an option:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(true);
+      });
+
+      it('T11c: "Choose a mode:" should be recognized as question line', () => {
+        const output = 'Choose a mode:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(true);
+      });
+
+      it('T11d: "Pick one:" should be recognized as question line', () => {
+        const output = 'Pick one:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(true);
+      });
+
+      it('T11e: "What would you like to do?" should be recognized as question line', () => {
+        const output = 'What would you like to do?\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(true);
+      });
+
+      it('T11f: "Enter your choice:" should be recognized as question line', () => {
+        const output = 'Enter your choice:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(true);
+      });
+
+      it('T11g: "Confirm deletion:" should be recognized as question line', () => {
+        const output = 'Confirm deletion:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(true);
+      });
+
+      // False cases - non-question lines that should block prompt detection
+      it('T11h: "Recommendations:" should NOT be recognized as question line', () => {
+        const output = 'Recommendations:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('T11i: "Steps:" should NOT be recognized as question line', () => {
+        const output = 'Steps:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('T11j: "Changes Made:" should NOT be recognized as question line', () => {
+        const output = 'Changes Made:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('T11k: "## Summary" (no colon or ?) should NOT be recognized as question line', () => {
+        const output = '## Summary\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('T11l: "Completed tasks:" should NOT be recognized as question line', () => {
+        const output = 'Completed tasks:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('T11m: "I did the following:" should NOT be recognized as question line', () => {
+        const output = 'I did the following:\n1. Option A\n2. Option B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+        expect(result.isPrompt).toBe(false);
+      });
+    });
+
+    // T12-T14: Edge case tests
+    describe('T12-T14: Edge case tests', () => {
+      it('T12: full-width question mark should be detected as prompt', () => {
+        const output = '\u3069\u3061\u3089\u3092\u9078\u3073\u307e\u3059\u304b\uff1f\n1. \u30aa\u30d7\u30b7\u30e7\u30f3A\n2. \u30aa\u30d7\u30b7\u30e7\u30f3B';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+      });
+
+      it('T13: long output with trailing numbered list should NOT be detected as prompt', () => {
+        // 500 lines of normal output followed by a numbered list with non-question heading
+        const longOutput = Array.from({ length: 500 }, (_, i) => `Output line ${i + 1}`).join('\n');
+        const output = longOutput + '\nResults:\n1. Test passed\n2. Build passed';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(false);
+      });
+
+      it('T14: Bash tool format (indented question + choices) should be detected as prompt', () => {
+        // Tests isContinuationLine() ?-ending exclusion -> questionEndIndex set -> SEC-001b passes
+        const output = '  Allow this command?\n  1. Yes\n  2. No';
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+      });
+
+      it('T15: indented question with full-width question mark should be detected as prompt', () => {
+        // Tests isContinuationLine() full-width ？ (U+FF1F) exclusion.
+        // Without the fix, the indented question ending with ？ is misclassified as
+        // a continuation line, causing questionEndIndex to remain -1 and
+        // Layer 5 SEC-001a to reject the detection.
+        const output = [
+          '  \u30b3\u30d4\u30fc\u3057\u305f\u3044\u5bfe\u8c61\u306f\u3069\u308c\u3067\u3059\u304b\uff1f',  // "  コピーしたい対象はどれですか？" (indented)
+          '  1. \u30e6\u30fc\u30b6\u30fc\u5165\u529b\u306e\u307f',  // "  1. ユーザー入力のみ"
+          '  2. \u30ec\u30b9\u30dd\u30f3\u30b9\u306e\u307f',  // "  2. レスポンスのみ"
+        ].join('\n');
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+        if (isMultipleChoicePrompt(result.promptData)) {
+          expect(result.promptData.options).toHaveLength(2);
+          expect(result.promptData.question).toContain('\uff1f');  // Contains ？
+        }
+      });
+
+      it('T16: Claude Code AskUserQuestion format with tabs, descriptions, and full-width question mark', () => {
+        // Reproduces the exact format from Issue #193 regression:
+        // tabs header + indented question with ？ + options with descriptions + separator lines
+        const output = [
+          '\u2190 \u25a1 \u30b3\u30d4\u30fc\u5bfe\u8c61  \u25a1 UI\u65b9\u5f0f  \u25a1 \u30b3\u30d4\u30fc\u5f62\u5f0f  \u2714 Submit',
+          '\u2192',
+          '',
+          '  \u30b3\u30d4\u30fc\u3057\u305f\u3044\u5bfe\u8c61\u306f\u3069\u308c\u3067\u3059\u304b\uff1f',  // indented question with ？
+          '',
+          '\u276f 1.  [ ] \u30e6\u30fc\u30b6\u30fc\u5165\u529b\u306e\u307f',
+          '    \u81ea\u5206\u304c\u9001\u4fe1\u3057\u305f\u30e1\u30c3\u30bb\u30fc\u30b8\u3060\u3051\u30b3\u30d4\u30fc',
+          '  2.  [ ] \u30ec\u30b9\u30dd\u30f3\u30b9\u306e\u307f',
+          '    \u30a2\u30b7\u30b9\u30bf\u30f3\u30c8\u306e\u5fdc\u7b54\u3060\u3051\u30b3\u30d4\u30fc',
+          '  3.  [ ] \u4e21\u65b9\u500b\u5225\u306b',
+          '    \u5165\u529b\u30fb\u30ec\u30b9\u30dd\u30f3\u30b9\u305d\u308c\u305e\u308c\u306b\u30b3\u30d4\u30fc\u30dc\u30bf\u30f3',
+          '  4.  [ ] \u4f1a\u8a71\u30da\u30a2\u4e00\u62ec',
+          '    \u5165\u529b+\u30ec\u30b9\u30dd\u30f3\u30b9\u3092\u307e\u3068\u3081\u3066\u30b3\u30d4\u30fc',
+          '  5.  [ ] Type something',
+          '    Next',
+          '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
+          '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
+          '  6. Chat about this',
+          '',
+          'Enter to select \u00b7 Tab/Arrow keys to navigate \u00b7 Esc to cancel',
+        ].join('\n');
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+        if (isMultipleChoicePrompt(result.promptData)) {
+          expect(result.promptData.options.length).toBeGreaterThanOrEqual(2);
+          expect(result.promptData.question).toContain('\uff1f');
+        }
+      });
+    });
+  });
+
+  // ==========================================================================
+  // Issue #193: getAnswerInput SEC-003 - Safe error messages
+  // ==========================================================================
+  describe('Issue #193: getAnswerInput SEC-003 - safe error messages', () => {
+    it('should not include user input in multiple_choice error message', () => {
+      try {
+        getAnswerInput('<script>alert("xss")</script>', 'multiple_choice');
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const error = e as Error;
+        expect(error.message).not.toContain('<script>');
+        expect(error.message).not.toContain('alert');
+      }
+    });
+
+    it('should not include user input in yes_no error message', () => {
+      try {
+        getAnswerInput('malicious_input_value', 'yes_no');
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const error = e as Error;
+        expect(error.message).not.toContain('malicious_input_value');
+      }
+    });
+  });
+
+  // ==========================================================================
+  // Issue #193: buildDetectPromptOptions helper tests
+  // ==========================================================================
+  describe('Issue #193: buildDetectPromptOptions', () => {
+    it('should return requireDefaultIndicator: false for claude', async () => {
+      const { buildDetectPromptOptions } = await import('@/lib/cli-patterns');
+      const result = buildDetectPromptOptions('claude');
+
+      expect(result).toEqual({ requireDefaultIndicator: false });
+    });
+
+    it('should return undefined for codex', async () => {
+      const { buildDetectPromptOptions } = await import('@/lib/cli-patterns');
+      const result = buildDetectPromptOptions('codex');
+
+      expect(result).toBeUndefined();
+    });
+
+    it('should return undefined for gemini', async () => {
+      const { buildDetectPromptOptions } = await import('@/lib/cli-patterns');
+      const result = buildDetectPromptOptions('gemini');
+
+      expect(result).toBeUndefined();
     });
   });
 });

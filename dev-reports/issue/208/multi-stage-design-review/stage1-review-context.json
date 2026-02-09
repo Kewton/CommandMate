@@ -1,0 +1,13 @@
+{
+  "issue_number": 208,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_criteria": [
+    "SOLID原則（単一責任、開放閉鎖、リスコフ置換、インターフェース分離、依存性逆転）",
+    "KISS原則（シンプルさの維持）",
+    "YAGNI原則（必要最小限の実装）",
+    "DRY原則（重複排除）"
+  ],
+  "design_policy_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md"
+}

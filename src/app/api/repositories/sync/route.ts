@@ -7,7 +7,7 @@
 import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getRepositoryPaths, scanMultipleRepositories, syncWorktreesToDB } from '@/lib/worktrees';
-import { ensureEnvRepositoriesRegistered, filterExcludedPaths } from '@/lib/db-repository';
+import { registerAndFilterRepositories } from '@/lib/db-repository';
 
 export async function POST() {
   try {
@@ -23,11 +23,9 @@ export async function POST() {
 
     const db = getDbInstance();
 
-    // Issue #190: Register environment variable repositories to repositories table (idempotent)
-    ensureEnvRepositoriesRegistered(db, repositoryPaths);
-
-    // Issue #190: Filter out excluded (enabled=0) repositories
-    const filteredPaths = filterExcludedPaths(db, repositoryPaths);
+    // Issue #190/#202: Register environment variable repositories and filter out excluded ones
+    // registerAndFilterRepositories() encapsulates the ordering constraint
+    const { filteredPaths } = registerAndFilterRepositories(db, repositoryPaths);
 
     // Scan filtered repositories (excluded repos are skipped)
     const allWorktrees = await scanMultipleRepositories(filteredPaths);

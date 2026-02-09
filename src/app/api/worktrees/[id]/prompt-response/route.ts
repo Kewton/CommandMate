@@ -7,12 +7,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { sendKeys } from '@/lib/tmux';
+import { sendKeys, sendSpecialKeys } from '@/lib/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { detectPrompt } from '@/lib/prompt-detector';
-import { stripAnsi } from '@/lib/cli-patterns';
+import { detectPrompt, type PromptDetectionResult } from '@/lib/prompt-detector';
+import { stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
 
 interface PromptResponseRequest {
   answer: string;
@@ -69,10 +69,12 @@ export async function POST(
     // This prevents a race condition where the prompt disappears between
     // detection (in current-output API) and sending (here), causing "1" to
     // be typed at the Claude user input prompt instead of a tool permission prompt.
+    let promptCheck: PromptDetectionResult | null = null;
     try {
       const currentOutput = await captureSessionOutput(params.id, cliToolId, 5000);
       const cleanOutput = stripAnsi(currentOutput);
-      const promptCheck = detectPrompt(cleanOutput);
+      const promptOptions = buildDetectPromptOptions(cliToolId);
+      promptCheck = detectPrompt(cleanOutput, promptOptions);
 
       if (!promptCheck.isPrompt) {
         return NextResponse.json({
@@ -88,14 +90,72 @@ export async function POST(
 
     // Send answer to tmux
     try {
-      // Send the answer
-      await sendKeys(sessionName, answer, false);
+      // Issue #193: Claude Code AskUserQuestion uses cursor-based navigation
+      // (Arrow/Space/Enter), not number input. Detect this format and send
+      // the appropriate key sequence instead of typing the number.
+      const isClaudeMultiChoice = cliToolId === 'claude'
+        && promptCheck?.promptData?.type === 'multiple_choice'
+        && /^\d+$/.test(answer);
 
-      // Wait a moment for the input to be processed
-      await new Promise(resolve => setTimeout(resolve, 100));
+      if (isClaudeMultiChoice && promptCheck?.promptData?.type === 'multiple_choice') {
+        const targetNum = parseInt(answer, 10);
+        const mcOptions = promptCheck.promptData.options;
+        const defaultOption = mcOptions.find(o => o.isDefault);
+        const defaultNum = defaultOption?.number ?? 1;
+        const offset = targetNum - defaultNum;
 
-      // Send Enter
-      await sendKeys(sessionName, '', true);
+        // Detect multi-select (checkbox) prompts by checking for [ ] in option labels.
+        // Multi-select prompts require: Space to toggle checkbox → navigate to "Next" → Enter.
+        // Single-select prompts require: navigate to option → Enter.
+        const isMultiSelect = mcOptions.some(o => /^\[[ x]\] /.test(o.label));
+
+        if (isMultiSelect) {
+          // Multi-select: toggle checkbox, then navigate to "Next" and submit
+          const checkboxCount = mcOptions.filter(o => /^\[[ x]\] /.test(o.label)).length;
+
+          const keys: string[] = [];
+
+          // 1. Navigate to target option
+          if (offset > 0) {
+            for (let i = 0; i < offset; i++) keys.push('Down');
+          } else if (offset < 0) {
+            for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
+          }
+
+          // 2. Space to toggle checkbox
+          keys.push('Space');
+
+          // 3. Navigate to "Next" button (positioned right after all checkbox options)
+          const downToNext = checkboxCount - targetNum + 1;
+          for (let i = 0; i < downToNext; i++) keys.push('Down');
+
+          // 4. Enter to submit
+          keys.push('Enter');
+
+          await sendSpecialKeys(sessionName, keys);
+        } else {
+          // Single-select: navigate and Enter to select
+          const keys: string[] = [];
+
+          if (offset > 0) {
+            for (let i = 0; i < offset; i++) keys.push('Down');
+          } else if (offset < 0) {
+            for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
+          }
+
+          keys.push('Enter');
+          await sendSpecialKeys(sessionName, keys);
+        }
+      } else {
+        // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
+        await sendKeys(sessionName, answer, false);
+
+        // Wait a moment for the input to be processed
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Send Enter
+        await sendKeys(sessionName, '', true);
+      }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(

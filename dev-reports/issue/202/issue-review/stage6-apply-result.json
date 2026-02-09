@@ -1,0 +1,29 @@
+{
+  "issue_number": 202,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "修正方針の手順5に具体的なログフォーマット例（Excluded repositories: N, Active repositories: M）を追記。server.ts の既存ログが console.log を使用している点も補足として記載。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 1,
+    "applied": 1,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/202"
+  },
+  "review_history_updated": true,
+  "review_history_entry": "Stage 5 通常レビュー 2回目 (2026-02-09): NTH-1 修正方針の手順5にログフォーマットの具体例を追記"
+}

@@ -1,0 +1,48 @@
+{
+  "issue_number": 201,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "変更ファイル一覧にsrc/lib/__tests__/cli-patterns.test.tsを追加。実装タスクにCLAUDE_TRUST_DIALOG_PATTERNのパターンマッチ/非マッチテスト（全文マッチ、部分一致、類似文字列の非マッチ）を記載。受入条件にcli-patterns.test.tsのテスト追加条件を追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "変更ファイル一覧にCLAUDE.mdを追加。実装タスクにCLAUDE.mdの「最近の実装機能」セクションへのIssue #201概要追記を記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "「原因」セクションに「Auto-Yesポーリングとの相互作用」サブセクションを追加。startClaudeSession()の初期化フェーズ完了前にAuto-Yesポーリングが干渉しないこと、CLAUDE_PROMPT_PATTERNにマッチしないため誤応答リスクがないことを明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "サイズ見積もりを「S（小）- 3ファイル、約30行の追加」から「S（小）- 5ファイル、約75行の追加」に更新。SF-1（cli-patterns.test.ts +15行）、SF-2（CLAUDE.md +15行）、既存テスト追加分を反映"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "「対応方針」セクションに「後方互換性」サブセクションを追加。CLAUDE_TRUST_DIALOG_PATTERNがダイアログ非表示時にはマッチせず既存フローに影響しないこと、関数シグネチャ変更なしで破壊的変更がないことを明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/201"
+  }
+}

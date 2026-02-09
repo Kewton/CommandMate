@@ -1,0 +1,15 @@
+{
+  "issue_number": 208,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_criteria": [
+    "OWASP Top 10準拠",
+    "入力検証・バリデーション",
+    "インジェクション攻撃への耐性",
+    "正規表現のReDoS脆弱性",
+    "情報漏洩リスク",
+    "Auto-Yesの安全性"
+  ],
+  "design_policy_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md"
+}

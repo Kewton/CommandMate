@@ -1,0 +1,7 @@
+{
+  "issue_number": 191,
+  "review_result_path": "dev-reports/issue/191/multi-stage-design-review/stage2-review-result.json",
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "target_document": "dev-reports/design/issue-191-auto-yes-thinking-windowing-design-policy.md"
+}

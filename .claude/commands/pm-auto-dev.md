@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 description: "Issue開発を完全自動化（TDD→テスト→報告）"
 ---
 
@@ -24,6 +24,15 @@ Issue開発（TDD実装 → 受入テスト → リファクタリング → 進
 - **issue_number**: 開発対象のIssue番号（必須）
 - **max_iterations**: 最大イテレーション回数（デフォルト: 3）
 - **target_coverage**: 目標カバレッジ（デフォルト: 80）
+
+### サブエージェントモデル指定
+
+| エージェント | モデル | 理由 |
+|-------------|--------|------|
+| tdd-impl-agent | **opus** | コード生成にOpus必要 |
+| acceptance-test-agent | **opus** | テスト品質にOpus必要 |
+| refactoring-agent | **opus** | コード改善にOpus必要 |
+| progress-report-agent | sonnet（継承） | テンプレート埋め込み程度 |
 
 ---
 
@@ -100,7 +109,7 @@ Writeツールで以下のファイルを作成：
 #### 2-2. TDD実装サブエージェント呼び出し
 
 ```
-Use tdd-impl-agent to implement Issue #{issue_number} with TDD approach.
+Use tdd-impl-agent (model: opus) to implement Issue #{issue_number} with TDD approach.
 
 Context file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/tdd-context.json
 Output file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/tdd-result.json
@@ -137,7 +146,7 @@ Output file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/tdd-result
 #### 3-2. 受入テストサブエージェント呼び出し
 
 ```
-Use acceptance-test-agent to verify Issue #{issue_number} acceptance criteria.
+Use acceptance-test-agent (model: opus) to verify Issue #{issue_number} acceptance criteria.
 
 Context file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/acceptance-context.json
 Output file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/acceptance-result.json
@@ -171,7 +180,7 @@ Output file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/acceptance
 #### 4-2. リファクタリングサブエージェント呼び出し
 
 ```
-Use refactoring-agent to improve code quality for Issue #{issue_number}.
+Use refactoring-agent (model: opus) to improve code quality for Issue #{issue_number}.
 
 Context file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/refactor-context.json
 Output file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/refactor-result.json

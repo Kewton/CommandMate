@@ -7,26 +7,30 @@
 ## 使用方法
 
 ```bash
-/worktree-cleanup [Issue番号]
+/worktree-cleanup [Issue番号...]
 ```
 
 **例**:
 ```bash
 /worktree-cleanup 135
-/worktree-cleanup 200
+/worktree-cleanup 187 188 191 193
 ```
 
 ## 実行内容
 
 あなたはWorktree環境クリーンアップの専門家です。以下の手順でWorktree環境を安全にクリーンアップしてください。
+複数のIssue番号が指定された場合は、各Issueに対してPhase 1〜5を順番に繰り返し実行します。
 
 ### パラメータ
 
-- **issue_number**: 対象Issue番号（必須、正の整数）
+- **issue_numbers**: 対象Issue番号（必須、1つ以上、スペース区切り、各番号は正の整数）
 
 ---
 
 ## 実行フェーズ
+
+**複数Issue指定時**: 以下のPhase 1〜5を各Issueに対して順番に実行します。
+Phase 6（Worktree同期）は全Issue完了後にまとめて1回実行します。
 
 ### Phase 1: 入力検証
 
@@ -175,6 +179,8 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 
 ## 出力例
 
+### 単一Issue
+
 ```
 ✅ Worktree Cleanup Complete!
 
@@ -187,6 +193,36 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 
 ⚠️  Note: DB file preserved. Delete manually if needed:
     rm ~/.commandmate/data/cm-135.db
+```
+
+### 複数Issue
+
+```
+✅ Worktree Cleanup Complete! (4 issues)
+
+📋 Cleanup Summary:
+
+  Issue #187:
+    Server:    Not running
+    Worktree:  Removed (../commandmate-issue-187)
+    Branch:    Deleted (feature/187-worktree) [merged]
+
+  Issue #188:
+    Server:    Not running
+    Worktree:  Removed (../commandmate-issue-188)
+    Branch:    Deleted (feature/188-worktree) [merged]
+
+  Issue #191:
+    Server:    Not running
+    Worktree:  Removed (../commandmate-issue-191)
+    Branch:    Deleted (feature/191-worktree) [merged]
+
+  Issue #193:
+    Server:    Stopped (PID: 54321)
+    Worktree:  Removed (../commandmate-issue-193)
+    Branch:    ⚠️ Not merged (feature/193-worktree)
+
+🔄 Worktree sync completed.
 ```
 
 ---

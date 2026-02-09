@@ -1,0 +1,18 @@
+{
+  "issue_number": 187,
+  "refactor_targets": [
+    "src/lib/claude-session.ts",
+    "tests/unit/lib/claude-session.test.ts"
+  ],
+  "quality_metrics": {
+    "tests_passed": 28,
+    "tests_failed": 0,
+    "tsc_errors": 0,
+    "eslint_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性確認",
+    "コメントの正確性確認",
+    "テストのカバレッジ確認"
+  ]
+}

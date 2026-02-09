@@ -1,0 +1,184 @@
+{
+  "issue_number": 202,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-02-09",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 1,
+    "previous_findings_verified": 5,
+    "previous_findings_resolved": 5
+  },
+  "previous_findings_verification": {
+    "stage3_findings": [
+      {
+        "id": "S3-MF-1",
+        "original_issue": "tsconfig.server.json の include 配列に db-repository.ts と system-directories.ts が含まれていない",
+        "status": "resolved",
+        "verification": "修正方針の手順6に tsconfig.server.json の include 配列更新が明記されている。追加対象（src/lib/db-repository.ts, src/config/system-directories.ts）と追加不要の理由（src/types/clone.ts は src/types/**/*.ts として既に含まれている）が正確に記載されている。影響範囲テーブルにも tsconfig.server.json が含まれ、受け入れ条件にも具体的な確認項目がある。実際の tsconfig.server.json（L8-24）を確認したところ、include 配列に src/lib/db-repository.ts, src/config/system-directories.ts が含まれていないことが Issue 記載と一致する。"
+      },
+      {
+        "id": "S3-SF-1",
+        "original_issue": "npm run build:server の成功確認が受け入れ条件に未記載",
+        "status": "resolved",
+        "verification": "受け入れ条件に「npm run build:server が成功すること」と「既存のテスト（単体テスト・結合テスト）がパスし、build:server を含む全ビルドが成功すること」が追加されている。テスト方針にもビルド確認として「npm run build:server を含む全ビルド（npm run build:all）が成功すること」が記載されている。package.json の build:all が 'npm run build && npm run build:cli && npm run build:server' であることと整合する。"
+      },
+      {
+        "id": "S3-SF-2",
+        "original_issue": "db-repository.ts の間接依存（system-directories.ts, clone.ts）が影響範囲に未記載",
+        "status": "resolved",
+        "verification": "影響範囲セクションに「間接依存（変更なし）」サブセクションが新設されている。db-repository.ts（server.ts から直接 import, 追加が必要）、system-directories.ts（db-repository.ts の依存, 追加が必要）、clone.ts（db-repository.ts の型依存, 追加不要: src/types/**/*.ts として既に含まれている）の3ファイルが依存関係と tsconfig.server.json での状態を含むテーブルで整理されている。実際の db-repository.ts の import 文（L10-11: @/types/clone, @/config/system-directories）と一致することを確認した。"
+      },
+      {
+        "id": "S3-NTH-1",
+        "original_issue": "テスト方針に結合テスト（repository-exclusion.test.ts）の言及がない",
+        "status": "resolved",
+        "verification": "テスト方針に「既存テスト（結合）: tests/integration/repository-exclusion.test.ts の Exclusion -> Sync フロー等の結合テストが引き続きパスすること」が追加されている。実際にこのファイルが存在することを確認した。"
+      },
+      {
+        "id": "S3-NTH-2",
+        "original_issue": "CLAUDE.md のモジュール記載に server.ts がない",
+        "status": "resolved",
+        "verification": "備考セクションに「CLAUDE.md の主要機能モジュールテーブルに server.ts の記載がないため、server.ts の initializeWorktrees() が sync/route.ts と同一パターンになる旨を将来的に追記することを検討する（本 Issue のスコープ外）」と追記されている。スコープ外として適切に分離されている。"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "server.ts の initializeWorktrees() に除外フィルタリングを追加した後の動作を確認する手動テストの手順が、受け入れ条件には「サーバー再起動後、削除済みリポジトリが復活しないこと（手動テスト）」と記載されているが、具体的な手動テスト手順（例: どのリポジトリを削除するか、DB内の enabled フラグの確認方法、複数リポジトリ環境での確認など）は記載されていない。これは Issue のスコープとしては十分であるが、QA担当者や実装者以外が手動テストを実施する場合に参考になる情報である。",
+        "location": "テスト方針セクション",
+        "recommendation": "手動テストの具体的手順を別途テスト計画書で記載するか、または受け入れ条件の手動テスト項目に簡潔な手順（1. CM_ROOT_DIR に複数リポジトリを設定、2. UI から1つを削除、3. npm run build && npm start を実行、4. UI で削除済みリポジトリが表示されないことを確認）を追記することを検討する。ただし、Issue の再現手順セクションに同等の手順が既に記載されているため、対応は任意。",
+        "evidence": "再現手順セクションに「1. トップ画面でリポジトリを削除、2. npm run build && npm start（またはサーバー再起動）、3. トップ画面に削除済みリポジトリが再表示される」と記載されており、これを逆転させれば手動テスト手順となる。そのため実質的に手順は記載されていると見なせるが、「復活しないこと」を確認する手順として明示されていない点が微小な改善余地。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "server.ts",
+        "change_type": "modify",
+        "description": "initializeWorktrees() に ensureEnvRepositoriesRegistered() + filterExcludedPaths() 追加、import文追加（./src/lib/db-repository 形式）、除外フィルタリング結果のログ出力追加",
+        "verified": true,
+        "verification_detail": "server.ts L69-100 の initializeWorktrees() を確認。現在 ensureEnvRepositoriesRegistered/filterExcludedPaths の呼び出しがなく、L91 で repositoryPaths をフィルタなしで scanMultipleRepositories() に渡していることを確認。Issue 記載の根本原因と完全に一致。既存 import 文（L29-42）はすべて ./src/lib/ 形式であり、Issue の import 方針と一致。"
+      },
+      {
+        "file": "tsconfig.server.json",
+        "change_type": "modify",
+        "description": "include 配列に src/lib/db-repository.ts, src/config/system-directories.ts を追加",
+        "verified": true,
+        "verification_detail": "tsconfig.server.json L8-24 の include 配列を確認。src/lib/db-repository.ts と src/config/system-directories.ts が含まれていないことを確認。src/types/**/*.ts は L23 に含まれている。build:server コマンドは 'tsc --project tsconfig.server.json && tsc-alias -p tsconfig.server.json'（package.json L23）であり、tsc-alias が @/ パスエイリアスを解決するため、include に明示的に含める必要がある。"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/lib/db-repository.ts",
+        "impact": "変更なし。ensureEnvRepositoriesRegistered()（L369-386）と filterExcludedPaths()（L400-408）が server.ts から新たに呼び出される。",
+        "verified": true,
+        "verification_detail": "db-repository.ts の依存: crypto（Node.js built-in）、path（Node.js built-in）、better-sqlite3（npm パッケージ, 既に依存済み）、@/types/clone（L10, 型 import のみ）、@/config/system-directories（L11, isSystemDirectory 関数）。すべて既存の依存であり、新たなパッケージ追加は不要。"
+      },
+      {
+        "file": "src/config/system-directories.ts",
+        "impact": "変更なし。db-repository.ts の間接依存として tsconfig.server.json の include 対象にする必要がある。",
+        "verified": true,
+        "verification_detail": "system-directories.ts は外部 import がなく（Node.js built-in のみ使用）、自己完結的なモジュール。依存チェーンの末端であるため、追加の transitive dependency は存在しない。"
+      },
+      {
+        "file": "src/types/clone.ts",
+        "impact": "変更なし。db-repository.ts が CloneJobStatus 型を import type で参照。src/types/**/*.ts として既に tsconfig.server.json に含まれている。",
+        "verified": true,
+        "verification_detail": "tsconfig.server.json L23: \"src/types/**/*.ts\" により含まれている。db-repository.ts L10 は import type であるため、ランタイム依存はなし。"
+      }
+    ],
+    "unaffected_files_with_justification": [
+      {
+        "file": "src/app/api/repositories/sync/route.ts",
+        "justification": "参考実装。server.ts がこれと同一の ensureEnvRepositoriesRegistered -> filterExcludedPaths パターンを採用する。sync/route.ts 自体への変更は不要。"
+      },
+      {
+        "file": "src/app/api/repositories/scan/route.ts",
+        "justification": "個別リポジトリスキャンAPI。除外ロジックは呼び出し元で制御する方式のため影響なし。"
+      },
+      {
+        "file": "src/app/api/repositories/route.ts",
+        "justification": "DELETE ハンドラー。disableRepository() を呼び出す側であり、本 Issue の変更スコープ外。"
+      },
+      {
+        "file": "src/app/api/repositories/restore/route.ts",
+        "justification": "リストア API。本 Issue の変更スコープ外。"
+      },
+      {
+        "file": "src/cli/commands/start.ts",
+        "justification": "CLI start コマンド。npm run start を spawn するだけで、initializeWorktrees() の呼び出しは server.ts 側で行われるため、CLI 側の変更は不要。"
+      },
+      {
+        "file": "src/lib/worktrees.ts",
+        "justification": "scanMultipleRepositories() と syncWorktreesToDB() の提供元。これらの関数のインターフェースは変更されず、呼び出し引数が filteredPaths に変わるのみ。worktrees.ts 自体の変更は不要。"
+      },
+      {
+        "file": "src/lib/db-instance.ts",
+        "justification": "getDbInstance() の提供元。server.ts が既に L38 で import 済みであり、本 Issue で新たな変更は不要。"
+      }
+    ],
+    "breaking_changes": "なし。内部的な初期化処理の修正であり、外部APIやUIの変更はない。既存の API エンドポイント（sync/route.ts 等）は影響を受けない。",
+    "migration_considerations": "なし。既存ユーザーへの影響はない。サーバー再起動時の動作が改善される（削除済みリポジトリが復活しなくなる）。データベースのスキーマ変更もなし。"
+  },
+  "overall_assessment": {
+    "quality": "high",
+    "readiness": "ready_for_implementation",
+    "rationale": "Stage 3 影響範囲レビューで検出された全5件の指摘事項（MF-1, SF-1, SF-2, NTH-1, NTH-2）がすべて Issue 本文に適切に反映されていることを確認した。影響範囲の観点で以下の点が十分に整理されている: (1) 直接変更対象ファイル（server.ts, tsconfig.server.json）が明確で、変更内容が具体的、(2) 間接依存（db-repository.ts, system-directories.ts, clone.ts）がテーブル形式で整理され、tsconfig.server.json での対応状況が明記されている、(3) 影響を受けないファイル（sync/route.ts, scan/route.ts, CLI commands 等）が明示されている、(4) 破壊的変更がなく、既存ユーザーへの移行考慮が不要であることが確認できる、(5) テスト範囲が単体テスト・結合テスト・手動テスト・ビルド確認の4層で網羅されている。新規の Must Fix / Should Fix は検出されず、実装準備完了と判断する。"
+  },
+  "code_references": [
+    {
+      "file": "server.ts",
+      "lines": "29-42, 69-100",
+      "relevance": "修正対象: initializeWorktrees() 関数（L69-100）。import 文は ./src/lib/ 形式の相対パス（L29-42）。L77 の getRepositoryPaths() → L91 の scanMultipleRepositories(repositoryPaths) の間にフィルタリングが欠如している。"
+    },
+    {
+      "file": "tsconfig.server.json",
+      "lines": "8-24",
+      "relevance": "修正対象: include 配列。src/lib/db-repository.ts と src/config/system-directories.ts の追加が必要。src/types/**/*.ts（L23）は既に含まれている。"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "lines": "10, 27-30",
+      "relevance": "参考実装: ensureEnvRepositoriesRegistered() → filterExcludedPaths() のパターン（L27-30）。server.ts の修正はこれと同一パターンを採用する。"
+    },
+    {
+      "file": "src/lib/db-repository.ts",
+      "lines": "7-11, 369-386, 400-408",
+      "relevance": "使用する関数。import 依存として crypto（L7）、path（L8）、better-sqlite3（L9）、@/types/clone（L10）、@/config/system-directories（L11）。ensureEnvRepositoriesRegistered()（L369-386）と filterExcludedPaths()（L400-408）。"
+    },
+    {
+      "file": "src/config/system-directories.ts",
+      "lines": "1-38",
+      "relevance": "db-repository.ts の間接依存。外部 import なし。isSystemDirectory() を export。tsconfig.server.json の include に追加が必要。"
+    },
+    {
+      "file": "tests/unit/lib/db-repository-exclusion.test.ts",
+      "relevance": "既存テスト: filterExcludedPaths / ensureEnvRepositoriesRegistered の単体テスト。"
+    },
+    {
+      "file": "tests/integration/repository-exclusion.test.ts",
+      "relevance": "既存結合テスト: Exclusion -> Sync フローの検証。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成参照。server.ts のモジュール記載がない点は Issue 備考に記載済み（スコープ外）。"
+    },
+    {
+      "file": "package.json",
+      "lines": "23-24",
+      "relevance": "build:server（L23）と build:all（L24）コマンド定義。受け入れ条件のビルド確認に関連。"
+    }
+  ]
+}

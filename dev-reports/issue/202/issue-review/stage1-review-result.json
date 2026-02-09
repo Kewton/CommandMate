@@ -1,0 +1,100 @@
+{
+  "issue_number": 202,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "review_date": "2026-02-09",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "完全性",
+        "issue": "修正方針に import 文の追加が明記されていない。server.ts は相対パス import (`./src/lib/...`) を使用しており、`ensureEnvRepositoriesRegistered` と `filterExcludedPaths` を `./src/lib/db-repository` から import する必要がある。この記載がないと実装者が `@/lib/db-repository` を使用して TypeScript の path alias 解決エラーを引き起こす可能性がある。",
+        "location": "## 修正方針 セクション",
+        "recommendation": "修正方針に以下を追記: 「server.ts に `import { ensureEnvRepositoriesRegistered, filterExcludedPaths } from './src/lib/db-repository';` を追加する。server.ts は `@/` エイリアスではなく `./src/lib/` 形式の相対パスを使用しているため注意。」",
+        "evidence": "server.ts の既存 import 文（L29-42）はすべて `./src/lib/...` 形式の相対パスを使用。sync/route.ts は `@/lib/db-repository` 形式を使用しているが、server.ts はプロジェクトルート直下のファイルであるため path alias が適用されない。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "修正方針の手順 1-3 で、呼び出し順序の制約が暗黙的。`ensureEnvRepositoriesRegistered()` は `filterExcludedPaths()` の前に呼び出す必要がある（未登録リポジトリを先に登録しないと、filterExcludedPaths で正しくフィルタリングできない）が、この制約が明文化されていない。",
+        "location": "## 修正方針 セクション",
+        "recommendation": "手順の説明に「ensureEnvRepositoriesRegistered() を先に呼び出す（初回起動時に未登録のリポジトリを repositories テーブルに登録し、以降の filterExcludedPaths() が正しく動作するようにする）」という順序制約を明記する。",
+        "evidence": "sync/route.ts（L27-30）では正しい順序で呼び出されているが、Issue 本文の修正方針では番号付きリストで示されているのみで、順序依存の理由が説明されていない。"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "影響範囲テーブルに server.ts の変更のみ記載されているが、ログ出力の変更が考慮されていない。現在の initializeWorktrees() は L85-88 でフィルタリング前の repositoryPaths.length を表示している。フィルタリング後は除外されたリポジトリ数やフィルタリング結果のログも出力すべきだが、その点に言及がない。",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "影響範囲テーブルの server.ts 行に「除外フィルタリング結果のログ出力追加（除外数とフィルタ後のリポジトリ数）」を追記する。sync/route.ts と同様のログ可視性を確保する。",
+        "evidence": "server.ts L85-88 で `Configured repositories: ${repositoryPaths.length}` と全パスを表示しているが、フィルタリング後にどのリポジトリが除外されたかの情報がないと、サーバー起動時のデバッグが困難になる。"
+      },
+      {
+        "id": "SF-3",
+        "category": "技術的妥当性",
+        "issue": "受け入れ条件に「API Sync All と同じ除外ロジックが適用されていること」とあるが、検証方法が不明確。テストとしてどのように検証するか（ユニットテスト vs 手動テスト）が記載されていない。Issue #190 で既に db-repository-exclusion.test.ts に filterExcludedPaths のユニットテストが存在するため、server.ts の initializeWorktrees に対する新規テストの必要性を明確にすべき。",
+        "location": "## 受け入れ条件 セクション",
+        "recommendation": "受け入れ条件を以下のように具体化: 「server.ts の initializeWorktrees() が sync/route.ts と同一の ensureEnvRepositoriesRegistered() + filterExcludedPaths() パターンを使用していること（コードレビューで確認）」。また、server.ts は統合テスト対象としにくいため、手動テスト手順も明示する。",
+        "evidence": "initializeWorktrees() はサーバー起動時に一度だけ呼ばれる関数で、Next.js の app.prepare() コールバック内にネストされている（server.ts L69-100）。ユニットテストとして切り出すにはモック化が必要であり、Issue本文にその考慮がない。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "Issue #190 の実装で sync/route.ts に除外ロジックが追加された時点で server.ts への適用漏れがあったことを示す。再発防止策（例: 共通関数への切り出し）への言及があるとより良い。",
+        "location": "Issue 本文全体",
+        "recommendation": "将来的な改善案として、initializeWorktrees() と sync/route.ts で共通化されているリポジトリ初期化フロー（getRepositoryPaths -> ensureEnvRepositoriesRegistered -> filterExcludedPaths -> scanMultipleRepositories -> syncWorktreesToDB）を共通関数として抽出するフォローアップ Issue を検討する旨を追記する。",
+        "evidence": "server.ts L77-94 と sync/route.ts L15-36 は、ほぼ同一の処理フローを持つ。修正後は完全に同一のフローになるため、DRY 原則の観点から共通化の候補となる。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "整合性",
+        "issue": "Issue 本文の再現手順の手順 2 に `npm run build && npm run start` とあるが、CLAUDE.md のコマンドリスト上では `npm run build` と `npm start` が標準。`npm run start` と `npm start` は同義だが表記統一があると良い。",
+        "location": "## 再現手順 セクション",
+        "recommendation": "軽微な表記の問題であり、対応は任意。",
+        "evidence": "CLAUDE.md の開発コマンドセクションでは `npm run build` と `npm run dev` が記載されているが、`npm run start` / `npm start` は記載されていない。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "server.ts",
+      "lines": "29-42, 69-100",
+      "relevance": "修正対象: initializeWorktrees() 関数。import 文は相対パス形式を使用。"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "lines": "10, 27-33",
+      "relevance": "参考実装: Issue #190 で実装済みの除外ロジック。server.ts はこれと同一パターンにすべき。"
+    },
+    {
+      "file": "src/lib/db-repository.ts",
+      "lines": "369-408",
+      "relevance": "使用する関数: ensureEnvRepositoriesRegistered() と filterExcludedPaths()。"
+    },
+    {
+      "file": "tests/unit/lib/db-repository-exclusion.test.ts",
+      "relevance": "既存テスト: filterExcludedPaths と ensureEnvRepositoriesRegistered の単体テストが Issue #190 で実装済み。"
+    },
+    {
+      "file": "src/app/api/repositories/scan/route.ts",
+      "lines": "49-50",
+      "relevance": "関連ファイル: syncWorktreesToDB() を呼び出すが、本 Issue の変更スコープ外。除外ロジックは呼び出し元制御方式のため scan API には影響しない。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・技術スタック・モジュール一覧の参照ドキュメント"
+    }
+  ]
+}

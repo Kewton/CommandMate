@@ -1,0 +1,39 @@
+{
+  "status": "success",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 126,
+    "passed": 126,
+    "failed": 0,
+    "new_tests_added": 26
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector.test.ts"
+  ],
+  "implementation_summary": {
+    "QUESTION_KEYWORD_PATTERN": "Added constant with 17 keywords (7 observed + 10 defensive). ReDoS safe (SEC-S4-002).",
+    "isQuestionLikeLine": "Added function with Pattern 1 (? / U+FF1F ending) and Pattern 2 (: ending + keyword). Control character resilient (SEC-S4-004).",
+    "SEC_001b_guard": "Refactored Layer 5 SEC-001 into SEC-001a (existing questionEndIndex check) + SEC-001b (new isQuestionLikeLine validation). Applied only when requireDefaultIndicator=false."
+  },
+  "test_categories": {
+    "T1_T4_false_positive_prevention": "4 tests - all pass",
+    "T5_T8_claude_code_regression": "4 tests - all pass",
+    "T9_T10_default_settings_regression": "2 tests - all pass",
+    "T11_isQuestionLikeLine_indirect": "13 tests - all pass",
+    "T12_T14_edge_cases": "3 tests - all pass"
+  },
+  "regression_verification": {
+    "issue_161_tests": "All existing Issue #161 tests pass (no regression)",
+    "issue_193_tests": "All existing Issue #193 tests pass (no regression)",
+    "existing_prompt_detector_tests": "All 100 pre-existing tests pass"
+  },
+  "commits": [
+    "2e4ee97: fix(prompt-detector): add SEC-001b question line validation to prevent numbered list false positives"
+  ],
+  "message": "TDD implementation complete. All 126 tests pass (100 existing + 26 new). ESLint 0 errors, TypeScript 0 errors. SEC-001b guard successfully prevents false positive detection of normal numbered lists while preserving Claude Code real prompt detection."
+}

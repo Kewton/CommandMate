@@ -12,7 +12,7 @@ import {
 } from './tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
-  CLAUDE_SEPARATOR_PATTERN,
+  CLAUDE_TRUST_DIALOG_PATTERN,
   stripAnsi,
 } from './cli-patterns';
 import { exec } from 'child_process';
@@ -44,6 +44,9 @@ function getErrorMessage(error: unknown): string {
  * - Load and initialize its internal state
  * - Authenticate with Anthropic servers (if needed)
  * - Display the interactive prompt
+ *
+ * This timeout also covers trust dialog auto-response time (typically <1s).
+ * When reducing this value, consider dialog response overhead.
  *
  * 15 seconds provides headroom for slower networks or cold starts.
  */
@@ -81,6 +84,25 @@ export const CLAUDE_POST_PROMPT_DELAY = 500;
  * if it's still processing a previous request.
  */
 export const CLAUDE_PROMPT_WAIT_TIMEOUT = 5000;
+
+/**
+ * Prompt wait timeout before message send (milliseconds).
+ *
+ * Used exclusively by sendMessageToClaude() to limit how long we wait
+ * for Claude to return to a prompt state before sending a user message.
+ * This is separate from CLAUDE_PROMPT_WAIT_TIMEOUT (5000ms, the default
+ * for waitForPrompt()) because sendMessageToClaude() may be called
+ * shortly after session initialization, where Claude CLI needs additional
+ * time to become ready.
+ *
+ * Relationship to other timeout constants:
+ * - CLAUDE_PROMPT_WAIT_TIMEOUT (5000ms): Default for waitForPrompt()
+ * - CLAUDE_SEND_PROMPT_WAIT_TIMEOUT (10000ms): sendMessageToClaude() specific
+ * - CLAUDE_INIT_TIMEOUT (15000ms): Session initialization timeout
+ *
+ * @see Issue #187 - Constant unification for sendMessageToClaude timeout
+ */
+export const CLAUDE_SEND_PROMPT_WAIT_TIMEOUT = 10000;
 
 /**
  * Prompt wait polling interval (milliseconds)
@@ -268,7 +290,6 @@ export async function waitForPrompt(
  * await startClaudeSession({
  *   worktreeId: 'feature-foo',
  *   worktreePath: '/path/to/worktree',
- *   baseUrl: 'http://localhost:3000',
  * });
  * ```
  */
@@ -313,21 +334,34 @@ export async function startClaudeSession(
     const startTime = Date.now();
 
     let initialized = false;
+    let trustDialogHandled = false;
     while (Date.now() - startTime < maxWaitTime) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
       try {
         const output = await capturePane(sessionName, { startLine: -50 });
-        // Claude is ready when we see the prompt or separator line (DRY-001, DRY-002)
-        // Use patterns from cli-patterns.ts for consistency
+        // Claude is ready when we see the prompt (DRY-001)
+        // Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts for consistency
         // Strip ANSI escape sequences before pattern matching (Issue #152)
+        // Note: CLAUDE_SEPARATOR_PATTERN was removed from initialization check (Issue #187, P1-1)
+        // because separator early-detection caused premature returns before prompt was ready
         const cleanOutput = stripAnsi(output);
-        if (CLAUDE_PROMPT_PATTERN.test(cleanOutput) || CLAUDE_SEPARATOR_PATTERN.test(cleanOutput)) {
+        if (CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
           // Wait for stability after prompt detection (CONS-007, DOC-001)
           await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
           console.log(`Claude initialized in ${Date.now() - startTime}ms`);
           initialized = true;
           break;
+        }
+
+        // Issue #201: Detect trust dialog and auto-respond with Enter
+        // Condition order: CLAUDE_PROMPT_PATTERN (above) is checked first for shortest path
+        if (!trustDialogHandled && CLAUDE_TRUST_DIALOG_PATTERN.test(cleanOutput)) {
+          await sendKeys(sessionName, '', true);
+          trustDialogHandled = true;
+          // TODO: Log output method unification (console.log vs createLogger) to be addressed in a separate Issue (SF-002)
+          console.log('Trust dialog detected, sending Enter to confirm');
+          // Continue polling to wait for prompt detection
         }
       } catch {
         // Ignore capture errors during initialization
@@ -372,24 +406,23 @@ export async function sendMessageToClaude(
   }
 
   // Verify prompt state before sending (CONS-006, DRY-001)
-  // Use -50 lines to ensure we capture the prompt even with status bars
   const output = await capturePane(sessionName, { startLine: -50 });
-  // Strip ANSI escape sequences before pattern matching (Issue #152)
   if (!CLAUDE_PROMPT_PATTERN.test(stripAnsi(output))) {
-    // Wait for prompt if not at prompt state
-    // Use longer timeout (10s) to handle slow responses
-    try {
-      await waitForPrompt(sessionName, 10000);
-    } catch {
-      // Log warning but don't block - Claude might be in a special state
-      console.warn(`[sendMessageToClaude] Prompt not detected, sending anyway`);
-    }
+    // Path B: Prompt not detected - wait for it (P1: throw on timeout)
+    await waitForPrompt(sessionName, CLAUDE_SEND_PROMPT_WAIT_TIMEOUT);
   }
 
-  // Send message using sendKeys consistently (CONS-001)
-  await sendKeys(sessionName, message, false);  // Message without Enter
-  await sendKeys(sessionName, '', true);        // Enter key
+  // P0: Stability delay after prompt detection (both Path A and Path B)
+  // Same delay as startClaudeSession() to ensure Claude CLI input handler is ready
+  // NOTE: This 500ms delay also applies to 2nd+ messages. Currently acceptable since
+  // Claude CLI response time (seconds to tens of seconds) dwarfs this overhead.
+  // If future batch-send use cases arise, this could be optimized to first-message-only,
+  // but that optimization is deferred per YAGNI principle. (ref: F-3)
+  await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
 
+  // Send message using sendKeys consistently (CONS-001)
+  await sendKeys(sessionName, message, false);
+  await sendKeys(sessionName, '', true);
   console.log(`Sent message to Claude session: ${sessionName}`);
 }
 
@@ -475,7 +508,6 @@ export async function stopClaudeSession(worktreeId: string): Promise<boolean> {
  * await restartClaudeSession({
  *   worktreeId: 'feature-foo',
  *   worktreePath: '/path/to/worktree',
- *   baseUrl: 'http://localhost:3000',
  * });
  * ```
  */

@@ -1,0 +1,21 @@
+{
+  "issue_number": 208,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_criteria": [
+    "設計方針書と実装コードの整合性",
+    "テスト計画と実装の整合性",
+    "関連Issue（#161, #193）の設計書との整合性",
+    "ドキュメント間の一貫性"
+  ],
+  "design_policy_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "related_design_docs": [
+    "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+    "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md"
+  ],
+  "implementation_files": [
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector.test.ts"
+  ]
+}

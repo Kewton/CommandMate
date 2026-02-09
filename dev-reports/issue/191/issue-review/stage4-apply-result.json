@@ -1,0 +1,53 @@
+{
+  "issue_number": 191,
+  "iteration": 1,
+  "stage": 4,
+  "apply_date": "2026-02-08",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "「問題の非対称性」テーブルにcurrent-output/route.tsの行を追加（detectThinking()の第3の呼び出し元、15行非空行ウィンドウ済み、クライアント側Auto-Yesパス）。影響ファイルテーブルにもL73-74, L83, L88の参照行として追加。根本原因セクションの本質説明を更新し、status-detector.tsだけでなくcurrent-output/route.tsも既にウィンドウイング済みであることを明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "受け入れ条件に具体的な回帰テストシナリオ2件を追加: (1) 5000行バッファの先頭100行にthinkingサマリー行+末尾10行にプロンプトがある場合にsendKeysが呼び出されること、(2) thinkingパターンが末尾50行以内に存在する場合にプロンプト検出がスキップされること"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "案1にウィンドウサイズの整合性に関する注記セクションを追加。auto-yes-manager.ts(50行全行)、current-output/route.ts(15行非空行フィルタ後)、status-detector.ts(15行)の3つの差異を明示し、それぞれの用途に基づく根拠を文書化。サーバー側パス優先による動作上の不整合がないことも説明"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "案1に「CLIツール別の影響」セクションを追加。CODEX_THINKING_PATTERNのRanパターンが5000行バッファで誤検出される可能性と、50行ウィンドウへの縮小による改善効果を記載。50行以内での残存リスクはスコープ外の既存課題として別Issue追跡を推奨"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "関連セクションの備考にclaude-poller.ts(L76)の独自thinkingPattern（detectThinking()未使用）に関する説明を追加。Issue #161 S1-008で指摘された既知のパターン重複であり、本Issueの修正による影響がないことを明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "関連セクションの備考に実装完了後のCLAUDE.md更新指示を追加。Issue #161セクションの多層防御Layer 1の記述にウィンドウイング適用の追記例を具体的に記載"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/191"
+  }
+}

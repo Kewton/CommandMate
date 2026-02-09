@@ -1,0 +1,22 @@
+{
+  "issue_number": 208,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_result_file": "dev-reports/issue/208/multi-stage-design-review/stage1-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "apply_scope": "design_policy_only",
+  "should_fix_items": [
+    {
+      "id": "SF-001",
+      "category": "KISS",
+      "title": "QUESTION_KEYWORD_PATTERNのキーワード数が多い",
+      "recommendation": "実際にClaude Codeが使用するキーワードを調査し、観測されていないキーワード（how, where, type, specify, approve, accept, reject, decide, preference, option）を削除するか、コメントで「防御的追加」と明示する。"
+    },
+    {
+      "id": "SF-002",
+      "category": "DRY",
+      "title": "全角疑問符判定の分離記述",
+      "recommendation": "セクション3.2のisQuestionLikeLine()定義内に全角疑問符判定を統合し、一箇所で完結させる。"
+    }
+  ]
+}

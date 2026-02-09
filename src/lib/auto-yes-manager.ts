@@ -12,9 +12,9 @@ import type { CLIToolType } from './cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectPrompt } from './prompt-detector';
 import { resolveAutoAnswer } from './auto-yes-resolver';
-import { sendKeys } from './tmux';
+import { sendKeys, sendSpecialKeys } from './tmux';
 import { CLIToolManager } from './cli-tools/manager';
-import { stripAnsi, detectThinking } from './cli-patterns';
+import { stripAnsi, detectThinking, buildDetectPromptOptions } from './cli-patterns';
 
 /** Auto yes state for a worktree */
 export interface AutoYesState {
@@ -66,6 +66,17 @@ export const MAX_CONCURRENT_POLLERS = 50;
 
 /** Timeout duration: 1 hour in milliseconds */
 const AUTO_YES_TIMEOUT_MS = 3600000;
+
+/**
+ * Number of lines from the end to check for thinking indicators (Issue #191)
+ * Matches detectPrompt()'s multiple_choice scan range (50 lines in prompt-detector.ts)
+ * to ensure Issue #161 Layer 1 defense covers the same scope as prompt detection.
+ *
+ * IMPORTANT: This value is semantically coupled to the hardcoded 50 in
+ * prompt-detector.ts detectMultipleChoicePrompt() (L268: Math.max(0, lines.length - 50)).
+ * See SF-001 in Stage 1 review. A cross-reference test validates this coupling.
+ */
+export const THINKING_CHECK_LINE_COUNT = 50;
 
 /** Worktree ID validation pattern (security: prevent command injection) */
 const WORKTREE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
@@ -281,13 +292,30 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     // 2.5. Skip prompt detection during thinking state (Issue #161, Layer 1)
     // This prevents false positive detection of numbered lists in CLI output
     // while Claude is actively processing (thinking/planning).
-    if (detectThinking(cliToolId, cleanOutput)) {
+    //
+    // Issue #191: Apply windowing to detectThinking() to prevent stale thinking
+    // summary lines (e.g., "· Simmering…") from blocking prompt detection.
+    // Window size matches detectPrompt()'s multiple_choice scan range (50 lines).
+    //
+    // Safety: Claude CLI does not emit prompts during thinking, so narrowing
+    // the window cannot cause false auto-responses (see IA-003 in design doc).
+    //
+    // Processing order: stripAnsi -> split -> slice -> join
+    // stripAnsi is applied BEFORE split to ensure ANSI escape sequences spanning
+    // line boundaries do not affect line counting (IA-002).
+    //
+    // Boundary case: if buffer has fewer than 50 lines, slice(-50) returns the
+    // entire array (Array.prototype.slice specification), which is safe degradation
+    // equivalent to pre-fix behavior (IA-001).
+    const recentLines = cleanOutput.split('\n').slice(-THINKING_CHECK_LINE_COUNT).join('\n');
+    if (detectThinking(cliToolId, recentLines)) {
       scheduleNextPoll(worktreeId, cliToolId);
       return;
     }
 
     // 3. Detect prompt
-    const promptDetection = detectPrompt(cleanOutput);
+    const promptOptions = buildDetectPromptOptions(cliToolId);
+    const promptDetection = detectPrompt(cleanOutput, promptOptions);
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
       // No prompt detected, schedule next poll
@@ -308,10 +336,66 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId);
 
-    // Send answer followed by Enter
-    await sendKeys(sessionName, answer, false);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    await sendKeys(sessionName, '', true);
+    // Issue #193: Claude Code AskUserQuestion uses cursor-based navigation
+    // (Arrow/Space/Enter), not number input. Detect multi-choice and send
+    // appropriate key sequence instead of typing the number.
+    const isClaudeMultiChoice = cliToolId === 'claude'
+      && promptDetection.promptData?.type === 'multiple_choice'
+      && /^\d+$/.test(answer);
+
+    if (isClaudeMultiChoice && promptDetection.promptData?.type === 'multiple_choice') {
+      const targetNum = parseInt(answer, 10);
+      const mcOptions = promptDetection.promptData.options;
+      const defaultOption = mcOptions.find(o => o.isDefault);
+      const defaultNum = defaultOption?.number ?? 1;
+      const offset = targetNum - defaultNum;
+
+      // Detect multi-select (checkbox) prompts by checking for [ ] in option labels.
+      const isMultiSelect = mcOptions.some(o => /^\[[ x]\] /.test(o.label));
+
+      if (isMultiSelect) {
+        // Multi-select: toggle checkbox, then navigate to "Next" and submit
+        const checkboxCount = mcOptions.filter(o => /^\[[ x]\] /.test(o.label)).length;
+
+        const keys: string[] = [];
+
+        // 1. Navigate to target option
+        if (offset > 0) {
+          for (let i = 0; i < offset; i++) keys.push('Down');
+        } else if (offset < 0) {
+          for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
+        }
+
+        // 2. Space to toggle checkbox
+        keys.push('Space');
+
+        // 3. Navigate to "Next" button (positioned right after all checkbox options)
+        const downToNext = checkboxCount - targetNum + 1;
+        for (let i = 0; i < downToNext; i++) keys.push('Down');
+
+        // 4. Enter to submit
+        keys.push('Enter');
+
+        await sendSpecialKeys(sessionName, keys);
+      } else {
+        // Single-select: navigate and Enter to select
+        const keys: string[] = [];
+
+        if (offset > 0) {
+          for (let i = 0; i < offset; i++) keys.push('Down');
+        } else if (offset < 0) {
+          for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
+        }
+
+        keys.push('Enter');
+        await sendSpecialKeys(sessionName, keys);
+      }
+    } else {
+      // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
+      await sendKeys(sessionName, answer, false);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await sendKeys(sessionName, '', true);
+    }
 
     // 6. Update timestamp
     updateLastServerResponseTimestamp(worktreeId, Date.now());

@@ -1,0 +1,35 @@
+{
+  "issue_number": 193,
+  "feature_summary": "Claude Codeからの複数選択肢に対し、回答を送信出来ない",
+  "acceptance_criteria": [
+    "Claude Codeの複数選択肢にUIから番号を入力して回答を送信できること",
+    "Auto-YesモードでClaude Codeの選択肢に自動応答されること（デフォルト選択がない場合は最初の選択肢を選択）",
+    "既存の❯マーカー付き選択肢検出に影響がないこと（リグレッションテスト）",
+    "Claude Code選択肢表示時のサイドバーステータスが正しく'waiting'（黄色）になること",
+    "detectPrompt()全9箇所でANSI未ストリップの生出力が渡されていないこと",
+    "ユニットテストが追加・パスしていること",
+    "既存テストが全パスしていること",
+    "buildDetectPromptOptions()ヘルパー関数がcli-patterns.tsに配置されていること（MF-001）",
+    "P0+P1の呼び出し元7箇所全てがbuildDetectPromptOptions()を使用していること（DRY確認）",
+    "options?.requireDefaultIndicator ?? trueパターンが使用されていること（C-003可読性）",
+    "response-poller.tsのdetectPromptWithOptions()ヘルパー内でstripAnsi()が一律適用されていること（IA-001統一方針）",
+    "cli-patterns.tsからprompt-detector.tsへのtype-only importが循環依存を生じないこと（IA-002）",
+    "prompt-response-verification.test.tsのcli-patternsモックにbuildDetectPromptOptionsが含まれていること（IA-004）",
+    "requireDefaultIndicator=falseかつquestionEndIndex === -1の場合にisPrompt: falseが返ること（SEC-001）",
+    "stripAnsi()のJSDocにカバー範囲と既知制限事項が記載されていること（SEC-002）",
+    "getAnswerInput()のエラーメッセージにユーザー入力が直接埋め込まれていないこと（SEC-003）"
+  ],
+  "test_scenarios": [
+    "シナリオ1: detectPrompt()にrequireDefaultIndicator:falseで❯なし番号付き選択肢+質問行を渡すとisPrompt:trueが返る",
+    "シナリオ2: detectPrompt()にrequireDefaultIndicator:true（デフォルト）で❯なし番号付き選択肢を渡すとisPrompt:falseが返る（既存動作維持）",
+    "シナリオ3: detectPrompt()にrequireDefaultIndicator:falseで番号リストのみ（質問行なし）を渡すとisPrompt:falseが返る（SEC-001）",
+    "シナリオ4: buildDetectPromptOptions('claude')が{requireDefaultIndicator:false}を返す",
+    "シナリオ5: buildDetectPromptOptions('codex')がundefinedを返す",
+    "シナリオ6: response-poller.tsのdetectPromptWithOptions()ヘルパーがstripAnsi()を適用している",
+    "シナリオ7: 全呼び出し元がbuildDetectPromptOptions()を使用している（DRY確認）",
+    "シナリオ8: 既存の❯マーカー付きパターンが引き続き検出される（リグレッション）",
+    "シナリオ9: getAnswerInput()がユーザー入力を含まない固定エラーメッセージを使用している（SEC-003）",
+    "シナリオ10: stripAnsi()のJSDocにカバー範囲が記載されている（SEC-002）",
+    "シナリオ11: npx tsc --noEmit、npm run lint、npm run test:unitが全パスする"
+  ]
+}

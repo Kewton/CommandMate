@@ -1,0 +1,348 @@
+{
+  "issue_number": 193,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-08",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "status-detector.ts の detectPrompt() 呼び出し (L87) は STATUS_CHECK_LINE_COUNT=15 行のみを切り出した lastLines を渡しており、detectPrompt() のシグネチャが options を受け取るように変更された場合でも options 引数を渡す方法が明確でない。さらに、detectSessionStatus() は cliToolId を引数で受け取るが、この cliToolId を DetectPromptOptions の構築に活用する設計になっていない。status-detector.ts は detectPrompt() を内部で呼び出す中間モジュールであるため、detectSessionStatus() の呼び出し元 (worktrees/route.ts L58, [id]/route.ts L58) まで影響が波及する",
+        "location": "src/lib/status-detector.ts L87, src/app/api/worktrees/route.ts L58, src/app/api/worktrees/[id]/route.ts L58",
+        "recommendation": "detectSessionStatus() が内部で detectPrompt() を呼ぶ際に cliToolId を活用して DetectPromptOptions を構築する設計を明記する。detectSessionStatus() のシグネチャ自体は変更不要だが、内部ロジックの修正が必要。影響範囲テーブルに worktrees/route.ts と [id]/route.ts を間接影響として追加する",
+        "evidence": "status-detector.ts L87: const promptDetection = detectPrompt(lastLines); -- options 引数なし。L75-78: detectSessionStatus(output, cliToolId, lastOutputTimestamp) -- cliToolId は受け取っているが detectPrompt() に伝搬していない。worktrees/route.ts L58, [id]/route.ts L58: detectSessionStatus(output, cliToolId) -- detectPrompt() への間接依存"
+      },
+      {
+        "id": "MF-2",
+        "category": "破壊的変更",
+        "issue": "detectPrompt() のシグネチャを detectPrompt(output, options?) に変更する場合、TypeScript の型互換性は保たれる（optional パラメータ）が、既存テストのモック定義が旧シグネチャに依存している。tests/unit/api/prompt-response-verification.test.ts L49-51 と tests/unit/lib/auto-yes-manager.test.ts L431 の vi.mock() は detectPrompt を 1 引数の関数としてモックしており、第 2 引数の options が渡されるようになると、モックの検証（vi.mocked(detectPrompt).toHaveBeenCalledWith(...)）が失敗する可能性がある。Issue の既存テストファイル更新テーブルではこの 2 ファイルを記載しているが、具体的にどの行をどう修正するかが不明確",
+        "location": "tests/unit/api/prompt-response-verification.test.ts L49-51, L112-147; tests/unit/lib/auto-yes-manager.test.ts L431",
+        "recommendation": "1. 既存テストのモック定義が options 引数を受け入れるよう修正する方法を具体的に記載する（例: vi.fn().mockReturnValue(...) は引数の数に依存しないが、toHaveBeenCalledWith のアサーションが第 2 引数を含むかを確認する必要がある）。2. tests/unit/prompt-detector.test.ts の既存テストは detectPrompt() を直接呼んでいるため、シグネチャ変更後もそのまま動作することを確認する（options 未指定のデフォルト動作テスト）",
+        "evidence": "prompt-response-verification.test.ts L50: detectPrompt: vi.fn().mockReturnValue({ isPrompt: false, cleanContent: '' }), -- vi.fn() は任意の引数を受け入れるためモック定義自体は問題ないが、テスト内で vi.mocked(detectPrompt).mock.calls を検証している箇所があれば引数の数が変わる"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "依存関係",
+        "issue": "claude-poller.ts は Issue #180 のレビューで「startPolling は呼び出されておらず、detectPrompt() 呼び出し (L164, L232) はポーリングが開始されない限り到達不能コード」と判定されている。本 Issue で claude-poller.ts の detectPrompt() 修正を変更対象に含めているが、到達不能コードの修正は工数対効果が低い。一方で、stripAnsi() の適用漏れを放置するとコードの一貫性が損なわれる",
+        "location": "src/lib/claude-poller.ts L164, L232",
+        "recommendation": "claude-poller.ts を変更対象から除外するか、または「到達不能コードだが一貫性のために修正する」旨を明記する。Issue #180 の stage8-issue-body.md に記載の「修正の優先度は低い」との整合性を取る。代替案として claude-poller.ts 自体の廃止（response-poller.ts への統合）を別 Issue として提案する",
+        "evidence": "dev-reports/issue/180/issue-review/stage8-issue-body.md L141: 「startPolling は呼び出されておらず、ポーリングのメインパスでは response-poller.ts が使用されている。detectPrompt() の呼び出し（行164, 行232）はポーリングが開始されない限り到達しないため、修正の優先度は低い。」"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "tests/unit/lib/auto-yes-resolver.test.ts が影響範囲に記載されていない。resolveAutoAnswer() は promptData.options[].isDefault フラグに依存しており、ケースB（requireDefaultIndicator: false）で全選択肢が isDefault: false になった場合の挙動テストが必要。現行ロジックでは defaultOpt が undefined となり、options[0] にフォールバックするが、これが期待動作であることをテストで保証すべき",
+        "location": "src/lib/auto-yes-resolver.ts L23-36, tests/unit/lib/auto-yes-resolver.test.ts",
+        "recommendation": "tests/unit/lib/auto-yes-resolver.test.ts に「全選択肢が isDefault: false の場合は最初の選択肢を選択する」テストケースが既存かを確認し、なければ追加をPhase 4に含める。Issue の影響範囲テーブルの既存テスト更新セクションにこのテストファイルを追加する",
+        "evidence": "auto-yes-resolver.ts L24-25: const defaultOpt = promptData.options.find(o => o.isDefault); const target = defaultOpt ?? promptData.options[0]; -- isDefault が全て false なら options[0] にフォールバック"
+      },
+      {
+        "id": "SF-3",
+        "category": "テスト範囲",
+        "issue": "tests/integration/api-prompt-handling.test.ts と tests/integration/auto-yes-persistence.test.ts が影響範囲に記載されていない。インテグレーションテストでは detectPrompt() のモックを通じて動作検証を行っている可能性があり、シグネチャ変更の影響を受ける可能性がある",
+        "location": "tests/integration/api-prompt-handling.test.ts, tests/integration/auto-yes-persistence.test.ts",
+        "recommendation": "これら 2 つのインテグレーションテストファイルで detectPrompt のモック使用状況を確認し、影響がある場合は Phase 4 のテスト更新対象に含める",
+        "evidence": "Glob 検索結果: tests/integration/api-prompt-handling.test.ts, tests/integration/auto-yes-persistence.test.ts が存在する"
+      },
+      {
+        "id": "SF-4",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.md の Issue #161 セクションに「prompt-detector.ts の CLIツール非依存性」原則が記載されている。ケースBの DetectPromptOptions は CLIツール固有のパラメータを直接含まず、汎用的な requireDefaultIndicator フラグとして設計されているため非依存性原則を維持しているが、その設計判断を CLAUDE.md に反映する更新が Issue の影響範囲に含まれていない",
+        "location": "CLAUDE.md > Issue #161 セクション, Issue #193 影響範囲テーブル",
+        "recommendation": "Issue #193 の変更対象ファイルテーブルに CLAUDE.md の更新を追加し、prompt-detector.ts の DetectPromptOptions interface 追加と detectPrompt() シグネチャ変更を記載する。また「最近の実装機能」セクションに Issue #193 の概要を追加する必要がある",
+        "evidence": "CLAUDE.md の Issue #161 記述: 「prompt-detector.tsのCLIツール非依存性を維持」-- ケースBの DetectPromptOptions がこの原則に従っていることの記載が必要"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響ファイル",
+        "issue": "UIコンポーネント (PromptPanel.tsx, MobilePromptSheet.tsx, PromptMessage.tsx) は detectPrompt() を直接呼び出していないが、current-output/route.ts の API レスポンスの promptData フィールドを消費している。ケースBで detectMultipleChoicePrompt() が新しい形式の選択肢を検出するようになると、UIに表示される選択肢のデータ構造（MultipleChoiceOption の isDefault フラグ）が変わる可能性がある",
+        "location": "src/components/worktree/PromptPanel.tsx, src/components/mobile/MobilePromptSheet.tsx, src/components/worktree/PromptMessage.tsx",
+        "recommendation": "PromptPanel.tsx が isDefault フラグを UI 表示にどのように使用しているか確認し、全選択肢が isDefault: false の場合の UI 表現を動作確認項目に含める（例: デフォルト選択肢のハイライト表示が消えるなど）",
+        "evidence": "PromptPanel.tsx L12: import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models'; -- PromptData を UI に描画。isDefault フラグの視覚的表現が影響を受ける可能性あり"
+      },
+      {
+        "id": "NTH-2",
+        "category": "影響ファイル",
+        "issue": "Codex / Gemini への影響が Issue 本文で明示的に分析されていない。detectPrompt() は CLIツール非依存関数だが、response-poller.ts L442 の修正は全 CLIツール共通パスにあるため、Codex / Gemini のプロンプト検出にも影響する。ケースBで requireDefaultIndicator オプションを渡す場合、Codex / Gemini の呼び出し元でどの値を渡すべきかの分析が必要",
+        "location": "src/lib/response-poller.ts L442, L556",
+        "recommendation": "Phase 3 の呼び出し元修正で、Codex / Gemini のコンテキストでは requireDefaultIndicator のデフォルト値 (true) を維持し、Claude Code のコンテキストでのみ false を渡す設計を明記する。response-poller.ts L442 では cliToolId が関数引数として利用可能 (L498: checkForResponse(worktreeId, cliToolId)) であることを確認する",
+        "evidence": "response-poller.ts L498: async function checkForResponse(worktreeId: string, cliToolId: CLIToolType) -- cliToolId は利用可能。L442: detectPrompt(fullOutput) -- 現在は cliToolId を渡していない"
+      },
+      {
+        "id": "NTH-3",
+        "category": "移行考慮",
+        "issue": "detectPrompt() のシグネチャ変更は optional パラメータのためランタイムの後方互換性は保たれるが、外部からインポートしている箇所（docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md 等のドキュメント内コード例）が古いシグネチャのままになる。ドキュメントの整合性が損なわれる",
+        "location": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md L459, L964",
+        "recommendation": "Issue #193 の Phase 4 完了後にドキュメント内のコード例を新シグネチャに更新するか、別のフォローアップ Issue で対応する",
+        "evidence": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md L459: import { detectPrompt } from './prompt-detector'; -- ドキュメント内のコード例は旧シグネチャのまま"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "change_type": "シグネチャ変更・ロジック修正",
+        "lines": "L44, L182, L189, L264-391, L274-288, L344-350",
+        "description": "detectPrompt() に optional な options パラメータ追加。DetectPromptOptions interface 定義。detectMultipleChoicePrompt() の Pass 1 と Layer 4 に requireDefaultIndicator 条件分岐追加",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "change_type": "detectPrompt() 呼び出し修正",
+        "lines": "L75",
+        "description": "detectPrompt(cleanOutput) に options 引数を追加。cliToolId は L50 で取得済み",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "change_type": "detectPrompt() 呼び出し修正",
+        "lines": "L290",
+        "description": "detectPrompt(cleanOutput) に options 引数を追加。cliToolId は L262 の関数引数から利用可能。stripAnsi() は既に適用済み (L279)",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "change_type": "stripAnsi() 追加 + detectPrompt() 呼び出し修正",
+        "lines": "L442, L556",
+        "description": "L442: fullOutput に stripAnsi() を適用してから detectPrompt() に渡す + options 引数追加。L556: result.response に stripAnsi() を適用 + options 引数追加。L248 は Claude 専用ガード内で stripAnsi() 適用済みのため変更不要",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/lib/claude-poller.ts",
+        "change_type": "stripAnsi() 追加 + detectPrompt() 呼び出し修正",
+        "lines": "L164, L232",
+        "description": "L164: fullOutput に stripAnsi() を適用してから detectPrompt() に渡す + options 引数追加。L232: result.response に同様の修正。ただしこのファイルの startPolling は呼び出されておらず到達不能コード",
+        "backward_compatible": true,
+        "note": "到達不能コード。一貫性のための修正"
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "change_type": "detectPrompt() 呼び出し修正",
+        "lines": "L87",
+        "description": "detectPrompt(lastLines) に options 引数を追加。cliToolId は detectSessionStatus() の引数から利用可能 (L77)",
+        "backward_compatible": true
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "change_type": "detectPrompt() 呼び出し修正",
+        "lines": "L88",
+        "description": "thinking ガード内の detectPrompt(cleanOutput) に options 引数を追加。cliToolId は L40 で取得済み。thinking 時は detectPrompt() がスキップされるため options 構築は thinking チェック前後のいずれでも可",
+        "backward_compatible": true
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "src/app/api/worktrees/route.ts",
+        "lines": "L58",
+        "description": "detectSessionStatus() 経由で detectPrompt() を間接呼び出し。detectSessionStatus() のシグネチャは変更なしのため、このファイル自体の修正は不要だが、detectPrompt() の検出精度向上の恩恵を受ける",
+        "requires_change": false
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "lines": "L58",
+        "description": "上記と同様。detectSessionStatus() 経由の間接影響",
+        "requires_change": false
+      },
+      {
+        "file": "src/lib/auto-yes-resolver.ts",
+        "lines": "L23-36",
+        "description": "resolveAutoAnswer() は PromptData.options[].isDefault フラグに依存。ケースBで全選択肢が isDefault: false になった場合、options[0] にフォールバックする（期待動作）。コード変更不要だが動作確認必要",
+        "requires_change": false
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/respond/route.ts",
+        "lines": "L12",
+        "description": "getAnswerInput() のみインポート。detectPrompt() への依存なし。ただし選択肢応答の間接フローとして動作確認が必要",
+        "requires_change": false
+      },
+      {
+        "file": "src/components/worktree/PromptPanel.tsx",
+        "description": "PromptData の UI 描画コンポーネント。isDefault フラグの視覚的表現が影響を受ける可能性あり（全選択肢が isDefault: false の場合のデフォルトハイライト消失）",
+        "requires_change": false
+      },
+      {
+        "file": "src/components/mobile/MobilePromptSheet.tsx",
+        "description": "モバイル版の PromptData UI。PromptPanel.tsx と同様の間接影響",
+        "requires_change": false
+      },
+      {
+        "file": "src/components/worktree/PromptMessage.tsx",
+        "description": "既回答済みプロンプトの選択肢描画。isDefault フラグの表示に影響する可能性",
+        "requires_change": false
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "description": "クライアント側 Auto-Yes フック。resolveAutoAnswer() を使用し、サーバーから受け取った promptData に基づく。detectPrompt() への直接依存なし。重複応答防止ロジックの動作確認が必要",
+        "requires_change": false
+      }
+    ],
+    "test_impacts": [
+      {
+        "file": "tests/unit/prompt-detector.test.ts",
+        "impact": "新規テスト追加（新しい選択肢パターン検出テスト、リグレッションテスト）。既存テストは options 未指定のデフォルト動作テストとして機能する。変更不要だがパス確認必須",
+        "requires_change": true
+      },
+      {
+        "file": "tests/unit/api/prompt-response-verification.test.ts",
+        "impact": "L50 の detectPrompt モック定義は vi.fn() のため引数の数に依存しない。ただし L112, L141 で detectPrompt の呼び出し引数を検証している場合は更新が必要",
+        "requires_change": true
+      },
+      {
+        "file": "tests/unit/lib/auto-yes-manager.test.ts",
+        "impact": "L431 の detectPrompt モック。vi.fn() のため引数の数に依存しないが、呼び出し引数のアサーションがあれば更新が必要",
+        "requires_change": true
+      },
+      {
+        "file": "tests/unit/lib/auto-yes-resolver.test.ts",
+        "impact": "全選択肢が isDefault: false の場合の resolveAutoAnswer() テスト。既存テストケースの確認と必要に応じた追加",
+        "requires_change": false
+      },
+      {
+        "file": "tests/integration/api-prompt-handling.test.ts",
+        "impact": "detectPrompt のモック使用状況を確認する必要あり",
+        "requires_change": false
+      },
+      {
+        "file": "tests/integration/auto-yes-persistence.test.ts",
+        "impact": "detectPrompt のモック使用状況を確認する必要あり",
+        "requires_change": false
+      },
+      {
+        "file": "src/lib/__tests__/status-detector.test.ts",
+        "impact": "detectSessionStatus() のテスト。detectPrompt() を内部で呼び出すため、新しいパターンの統合テストとしても機能する。既存テストの pass 確認必須",
+        "requires_change": false
+      }
+    ],
+    "documentation_impacts": [
+      {
+        "file": "CLAUDE.md",
+        "impact": "Issue #193 の概要セクション追加、prompt-detector.ts の DetectPromptOptions interface 記載",
+        "requires_change": true
+      },
+      {
+        "file": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md",
+        "impact": "detectPrompt() のコード例が旧シグネチャのまま",
+        "requires_change": false
+      }
+    ]
+  },
+  "breaking_changes": {
+    "has_breaking_changes": false,
+    "details": "detectPrompt() のシグネチャ変更は optional パラメータ (options?) の追加であり、既存の呼び出し元は引数なしでもコンパイル・動作する。TypeScript の型互換性は完全に保持される。PromptDetectionResult の構造にも変更はない。PromptData 型（MultipleChoiceOption の isDefault フィールド）も既存の定義を維持する"
+  },
+  "cli_tool_impact": {
+    "claude": "直接影響。detectPrompt() の検出精度向上により、新しい形式の選択肢プロンプトが検出可能になる。Auto-Yes 自動応答も改善される",
+    "codex": "間接影響。response-poller.ts L442 の stripAnsi() 追加により、Codex の detectPrompt() 呼び出しでもANSIコードがストリップされるようになる（品質向上）。requireDefaultIndicator はデフォルト値 true が使用されるため、Codex の既存動作に影響なし",
+    "gemini": "間接影響。Codex と同様に response-poller.ts L442 の stripAnsi() 追加の恩恵を受ける。requireDefaultIndicator はデフォルト値 true が使用されるため、Gemini の既存動作に影響なし"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "L44, L182, L189, L264-391",
+      "relevance": "detectPrompt() シグネチャ変更、DetectPromptOptions 定義、detectMultipleChoicePrompt() の Pass 1/Layer 4 修正"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "L50, L75-87",
+      "relevance": "detectPrompt() への中間呼び出し、STATUS_CHECK_LINE_COUNT=15 制約、detectSessionStatus() への cliToolId 伝搬"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "L262-290",
+      "relevance": "pollAutoYes() の detectPrompt() 呼び出し。cliToolId は関数引数、stripAnsi() は適用済み"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "L190-260, L440-450, L554-560",
+      "relevance": "extractResponse() のデータフロー、L442 の ANSI 未ストリップ問題、L556 の result.response"
+    },
+    {
+      "file": "src/lib/claude-poller.ts",
+      "lines": "L41-53, L160-174, L230-235",
+      "relevance": "extractClaudeResponse() の ANSI 未ストリップ。到達不能コードだが一貫性修正対象"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "lines": "L50, L72-87",
+      "relevance": "cliToolId 取得済み、detectPrompt() 再検証ロジック"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "L40, L83-88",
+      "relevance": "cliToolId 取得済み、thinking ガード付き detectPrompt() 呼び出し"
+    },
+    {
+      "file": "src/lib/auto-yes-resolver.ts",
+      "lines": "L23-36",
+      "relevance": "isDefault フラグ依存の自動応答判定。ケースBでの動作確認対象"
+    },
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "lines": "L58",
+      "relevance": "detectSessionStatus() 経由の間接影響（サイドバーステータス表示）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "L58",
+      "relevance": "detectSessionStatus() 経由の間接影響（ワークツリー詳細ステータス表示）"
+    },
+    {
+      "file": "src/components/worktree/PromptPanel.tsx",
+      "relevance": "PromptData UI 描画。isDefault フラグの視覚的表現の間接影響"
+    },
+    {
+      "file": "src/components/mobile/MobilePromptSheet.tsx",
+      "relevance": "モバイル版 PromptData UI。PromptPanel と同様"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "クライアント側 Auto-Yes。resolveAutoAnswer() 経由の間接影響"
+    },
+    {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "relevance": "新規テスト追加とリグレッション確認の基盤"
+    },
+    {
+      "file": "tests/unit/api/prompt-response-verification.test.ts",
+      "relevance": "detectPrompt モック更新対象"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "relevance": "detectPrompt モック更新対象"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-resolver.test.ts",
+      "relevance": "isDefault: false フォールバック動作の確認対象"
+    },
+    {
+      "file": "src/lib/__tests__/status-detector.test.ts",
+      "relevance": "detectSessionStatus() のテスト。内部 detectPrompt() の動作確認"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #161 の設計原則（CLIツール非依存性、2パス検出）、Issue #193 概要の追加対象"
+    },
+    {
+      "file": "dev-reports/issue/180/issue-review/stage8-issue-body.md",
+      "relevance": "claude-poller.ts の到達不能コード判定の根拠"
+    },
+    {
+      "file": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+      "relevance": "多層防御設計の根拠。ケースBでの Layer 1/3 維持の参照元"
+    }
+  ]
+}

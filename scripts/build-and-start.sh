@@ -33,7 +33,7 @@ Description:
     This script performs the following steps:
     1. Creates data directory (if needed)
     2. Initializes database (npm run db:init)
-    3. Builds application (npm run build)
+    3. Builds application (npm run build:all)
     4. Starts production server (npm start)
 
 Examples:
@@ -77,7 +77,7 @@ if [ "$1" = "--daemon" ] || [ "$1" = "-d" ]; then
 
     # Build first (in foreground to see errors)
     echo "=== Building application ==="
-    npm run build
+    npm run build:all
 
     echo ""
     echo "=== Starting production server in background ==="
@@ -104,7 +104,7 @@ if [ "$1" = "--daemon" ] || [ "$1" = "-d" ]; then
 else
     # Foreground mode
     echo "=== Building application ==="
-    npm run build
+    npm run build:all
 
     echo ""
     echo "=== Starting production server ==="

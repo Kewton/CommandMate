@@ -1,0 +1,44 @@
+{
+  "issue_number": 201,
+  "stage": 3,
+  "stage_name": "影響分析レビュー対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "Stage3-C-001",
+        "item": "send/route.ts呼び出しチェーンの結合テストカバレッジ",
+        "section_updated": "テスト設計 / 将来検討: 結合テスト, レビュー指摘事項サマリー",
+        "status": "reflected"
+      },
+      {
+        "id": "Stage3-C-002",
+        "item": "claude-poller.tsからclaude-session.tsへのモジュール依存",
+        "section_updated": "影響分析 / 間接影響ファイル, レビュー指摘事項サマリー",
+        "status": "reflected"
+      }
+    ]
+  },
+  "impact_analysis_reflected": {
+    "directly_changed_files": "5 files documented (all low risk)",
+    "indirectly_affected_files": "10 files documented (all risk: none)",
+    "no_impact_areas": "6 areas documented",
+    "regression_risk": "5 existing flows analyzed (all risk: none)"
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-201-trust-dialog-auto-response-design-policy.md",
+  "sections_updated": [
+    "テスト設計 / 将来検討: 結合テスト（Stage3-C-001）",
+    "影響分析（Stage 3レビュー結果）",
+    "影響分析 / リスク評価",
+    "影響分析 / 間接影響ファイル（変更不要）",
+    "影響分析 / 影響なし確認領域",
+    "影響分析 / 回帰リスク分析",
+    "レビュー履歴",
+    "レビュー指摘事項サマリー / Stage 3"
+  ],
+  "timestamp": "2026-02-09T17:45:00Z"
+}

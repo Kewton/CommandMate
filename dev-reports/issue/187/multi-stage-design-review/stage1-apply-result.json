@@ -1,0 +1,88 @@
+{
+  "issue_number": 187,
+  "stage": 1,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": [
+    {
+      "id": "F-4",
+      "severity": "must_fix",
+      "description": "Existing test L108 capturePane assertion fix ({startLine: -10} vs -50) must be resolved before P0/P1 implementation",
+      "sections_updated": ["Section 4.1", "Section 8", "Section 10", "Section 11"],
+      "status": "reflected",
+      "notes": "Added prominent blockquote warning in Section 4.1, emphasized in Section 8 implementation order step 1 with explicit instruction to verify all tests pass before proceeding, added to implementation checklist"
+    },
+    {
+      "id": "F-7",
+      "severity": "should_fix",
+      "description": "Remove CLAUDE_SEPARATOR_PATTERN import from claude-session.ts after P1-1 to avoid ESLint unused-imports violation",
+      "sections_updated": ["Section 3.2", "Section 8", "Section 9", "Section 10", "Section 11"],
+      "status": "reflected",
+      "notes": "Added [F-7] tag in Section 3.2 design judgment with explicit deletion instruction, added as sub-item in Section 8 step 3, updated Section 9 file table to include import deletion, added to implementation checklist"
+    },
+    {
+      "id": "F-1",
+      "severity": "should_fix",
+      "description": "JSDoc comment for CLAUDE_SEND_PROMPT_WAIT_TIMEOUT to document sendMessageToClaude exclusivity and relationship with CLAUDE_PROMPT_WAIT_TIMEOUT",
+      "sections_updated": ["Section 3.4", "Section 8", "Section 10", "Section 11"],
+      "status": "reflected",
+      "notes": "Enhanced JSDoc in Section 3.4 code example with full relationship documentation, added [F-1] tag in Section 8 step 5, added to implementation checklist"
+    },
+    {
+      "id": "F-5",
+      "severity": "should_fix",
+      "description": "sendMessageToClaude responsibility monitoring - 7 steps currently acceptable, plan extract method if more steps added",
+      "sections_updated": ["Section 3.1", "Section 10", "Section 11"],
+      "status": "reflected",
+      "notes": "Added new subsection [F-5] in Section 3.1 listing all 7 responsibility steps with extract method guidance, added responsibility monitoring checklist items"
+    },
+    {
+      "id": "F-2",
+      "severity": "nice_to_have",
+      "description": "P2-2 stripAnsi DEC Private Mode - YAGNI concern, defer unless concrete failure examples exist",
+      "sections_updated": ["Section 3.6", "Section 8", "Section 10", "Section 11"],
+      "status": "reflected",
+      "notes": "Added [F-2] YAGNI subsection in Section 3.6 with implementation decision criteria, updated Section 8 step 8 to conditional, added conditional checklist items"
+    },
+    {
+      "id": "F-3",
+      "severity": "nice_to_have",
+      "description": "Future batch-send use case may accumulate 500ms delay - note in code comment",
+      "sections_updated": ["Section 3.1", "Section 10", "Section 11"],
+      "status": "reflected",
+      "notes": "Added NOTE comment in Section 3.1 code example referencing F-3, added [F-3] design judgment bullet, added to implementation checklist"
+    },
+    {
+      "id": "F-6",
+      "severity": "nice_to_have",
+      "description": "P2-1 SpecialKey type extension design is appropriate - no changes needed",
+      "sections_updated": ["Section 10"],
+      "status": "reflected",
+      "notes": "Confirmed as appropriate in review summary table, no design changes required"
+    },
+    {
+      "id": "F-8",
+      "severity": "nice_to_have",
+      "description": "P2-1 implementation should include sendSpecialKey('C-u') test case",
+      "sections_updated": ["Section 3.5", "Section 8", "Section 10", "Section 11"],
+      "status": "reflected",
+      "notes": "Added [F-8] subsection in Section 3.5 with complete test code example, added as sub-item in Section 8 step 7, added to implementation checklist"
+    }
+  ],
+  "skipped_findings": [],
+  "sections_updated": [
+    "Section 3.1 - P0 design (F-3, F-5 added)",
+    "Section 3.2 - P1-1 design (F-7 import deletion instruction)",
+    "Section 3.4 - P1-3 design (F-1 enhanced JSDoc)",
+    "Section 3.5 - P2-1 design (F-8 test requirements)",
+    "Section 3.6 - P2-2 design (F-2 YAGNI criteria)",
+    "Section 4.1 - Test design (F-4 must-fix blockquote warning)",
+    "Section 8 - Implementation order (F-4 emphasis, F-7/F-1/F-8/F-2 sub-items)",
+    "Section 9 - Impact scope (F-7 import deletion in file table)",
+    "Section 10 - Review findings summary (NEW section)",
+    "Section 11 - Implementation checklist (NEW section)",
+    "Section 12 - Review history (NEW section)"
+  ],
+  "design_doc_path": "dev-reports/design/issue-187-session-first-message-reliability-design-policy.md",
+  "timestamp": "2026-02-08T00:00:00Z"
+}

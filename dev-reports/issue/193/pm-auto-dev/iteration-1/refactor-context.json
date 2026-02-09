@@ -1,0 +1,23 @@
+{
+  "issue_number": 193,
+  "refactor_targets": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/claude-poller.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "SOLID原則の準拠確認（特にSRP、DIP）",
+    "DRY原則の確認（buildDetectPromptOptionsの利用が統一されていること）",
+    "不要なコメント・デッドコードの除去",
+    "変数名の一貫性確認",
+    "テストの可読性確認"
+  ]
+}

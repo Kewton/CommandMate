@@ -1,0 +1,8 @@
+{
+  "issue_number": 201,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "previous_stages": ["stage1", "stage2"]
+}

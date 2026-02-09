@@ -1,0 +1,26 @@
+{
+  "issue_number": 208,
+  "refactor_targets": [
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 100.0,
+    "current_tests": 126,
+    "current_eslint_errors": 0,
+    "current_typescript_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（コメント・命名の改善）",
+    "テストの保守性向上（テストケースの整理・重複排除）",
+    "パフォーマンスの最適化（不要な計算の削減）",
+    "既存テストの網羅性向上"
+  ],
+  "constraints": [
+    "カバレッジ100%を維持",
+    "全テストパスを維持",
+    "静的解析エラー0件を維持",
+    "Issue #193/#161回帰テストを維持"
+  ],
+  "notes": "TDD実装は既に高品質で完成している。リファクタリングはコード品質の微調整とテストの整理に焦点を当てる。"
+}

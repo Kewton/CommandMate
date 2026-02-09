@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 description: "Issue記載内容の多段階レビュー（通常→影響範囲）×2回と指摘対応を自動実行"
 ---
 
@@ -33,6 +33,13 @@ Issueの記載内容を多角的にレビューし、ブラッシュアップす
 
 - **issue_number**: 対象Issue番号（必須）
 - **skip_stage**: スキップするステージ番号（カンマ区切り）
+
+### サブエージェントモデル指定
+
+| エージェント | モデル | 理由 |
+|-------------|--------|------|
+| issue-review-agent | **opus** | 品質判断にOpus必要 |
+| apply-issue-review-agent | sonnet（継承） | JSON→Issue更新のみ |
 
 ---
 
@@ -183,7 +190,7 @@ Issue内に記載された仮説・原因分析・前提条件をコードベー
 #### 1-2. レビュー実行
 
 ```
-Use issue-review-agent to review Issue #{issue_number} with focus on 通常.
+Use issue-review-agent (model: opus) to review Issue #{issue_number} with focus on 通常.
 
 Context file: dev-reports/issue/{issue_number}/issue-review/stage1-review-context.json
 Output file: dev-reports/issue/{issue_number}/issue-review/stage1-review-result.json
@@ -248,7 +255,7 @@ Output file: dev-reports/issue/{issue_number}/issue-review/stage2-apply-result.j
 #### 3-2. レビュー実行
 
 ```
-Use issue-review-agent to review Issue #{issue_number} with focus on 影響範囲.
+Use issue-review-agent (model: opus) to review Issue #{issue_number} with focus on 影響範囲.
 
 Context file: dev-reports/issue/{issue_number}/issue-review/stage3-review-context.json
 Output file: dev-reports/issue/{issue_number}/issue-review/stage3-review-result.json
@@ -293,6 +300,29 @@ Output file: dev-reports/issue/{issue_number}/issue-review/stage4-apply-result.j
 
 ---
 
+### 2回目イテレーション自動スキップ判定
+
+Stage 4完了後、1回目イテレーションの Must Fix 件数を確認し、**2回目イテレーション（Stage 5-8）の実行要否を判定**します。
+
+#### 判定手順
+
+1. `stage1-review-result.json` と `stage3-review-result.json` を読み込む
+2. 各ファイルから Must Fix 件数を集計する
+3. **Must Fix 合計が 0件** の場合 → Stage 5-8 をスキップし、Phase Final に進む
+4. **Must Fix が 1件以上** の場合 → Stage 5-8 を通常通り実行する
+
+#### スキップ時の記録
+
+スキップする場合、以下をログに記録してください：
+
+```
+✅ 1回目イテレーション Must Fix: 0件 → 2回目イテレーション（Stage 5-8）をスキップ
+```
+
+Stage 5-8 の TodoWrite 項目は「スキップ（Must Fix 0件）」として完了マークしてください。
+
+---
+
 ### Stage 5: 通常レビュー（2回目）
 
 #### 5-1. コンテキスト作成
@@ -314,7 +344,7 @@ Output file: dev-reports/issue/{issue_number}/issue-review/stage4-apply-result.j
 #### 5-2. レビュー実行
 
 ```
-Use issue-review-agent to review Issue #{issue_number} with focus on 通常 (2nd iteration).
+Use issue-review-agent (model: opus) to review Issue #{issue_number} with focus on 通常 (2nd iteration).
 
 Context file: dev-reports/issue/{issue_number}/issue-review/stage5-review-context.json
 Output file: dev-reports/issue/{issue_number}/issue-review/stage5-review-result.json
@@ -382,7 +412,7 @@ Output file: dev-reports/issue/{issue_number}/issue-review/stage6-apply-result.j
 #### 7-2. レビュー実行
 
 ```
-Use issue-review-agent to review Issue #{issue_number} with focus on 影響範囲 (2nd iteration).
+Use issue-review-agent (model: opus) to review Issue #{issue_number} with focus on 影響範囲 (2nd iteration).
 
 Context file: dev-reports/issue/{issue_number}/issue-review/stage7-review-context.json
 Output file: dev-reports/issue/{issue_number}/issue-review/stage7-review-result.json
@@ -462,10 +492,10 @@ gh issue view {issue_number}
 | 2 | 指摘事項反映（1回目） | - | X | ✅ |
 | 3 | 影響範囲レビュー（1回目） | X | - | ✅ |
 | 4 | 指摘事項反映（1回目） | - | X | ✅ |
-| 5 | 通常レビュー（2回目） | X | - | ✅ |
-| 6 | 指摘事項反映（2回目） | - | X | ✅ |
-| 7 | 影響範囲レビュー（2回目） | X | - | ✅ |
-| 8 | 指摘事項反映（2回目） | - | X | ✅ |
+| 5 | 通常レビュー（2回目） | X | - | ✅/⏭️スキップ |
+| 6 | 指摘事項反映（2回目） | - | X | ✅/⏭️スキップ |
+| 7 | 影響範囲レビュー（2回目） | X | - | ✅/⏭️スキップ |
+| 8 | 指摘事項反映（2回目） | - | X | ✅/⏭️スキップ |
 
 ## 統計
 
@@ -542,6 +572,7 @@ dev-reports/issue/{issue_number}/
 
 - 仮説検証完了（仮説がない場合はスキップ記録）
 - 全8ステージ完了（またはスキップ指定分を除く）
+  - **2回目イテレーション自動スキップ**: 1回目のMust Fix合計0件の場合、Stage 5-8は自動スキップ
 - 各ステージのMust Fix指摘が対応済み
 - GitHubのIssueが更新されている
 - サマリーレポート作成完了

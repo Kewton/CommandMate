@@ -1,0 +1,68 @@
+{
+  "issue_number": 208,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "SEC-S4-001",
+        "item": "Auto-Yesが送信する値の安全性保証を明記",
+        "section_updated": "セクション7.4（セキュリティ設計）",
+        "status": "reflected",
+        "details": "resolveAutoAnswer()が返す値は'y'または数字文字列のみであり、tmuxコマンドインジェクションのリスクがないことを明記。将来の戻り値変更時の再評価要件も記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-S4-002",
+        "item": "QUESTION_KEYWORD_PATTERNのReDoS安全性を明示",
+        "section_updated": "セクション3.3（QUESTION_KEYWORD_PATTERNの設計）",
+        "status": "reflected",
+        "details": "JSDocコメントに'ReDoS safe (SEC-S4-002)'注釈を追加。Alternation-onlyパターンの線形時間構造を文書化"
+      },
+      {
+        "id": "SEC-S4-003",
+        "item": "多層防御の全体像を記載",
+        "section_updated": "セクション7.5（セキュリティ設計）",
+        "status": "reflected",
+        "details": "Layer 1-5の各防御層の役割・緩和効果、既存の追加緩和策（expiry timeout、重複応答防止、ポーリング間隔）、残留リスク評価を記載"
+      },
+      {
+        "id": "SEC-S4-004",
+        "item": "isQuestionLikeLine()の制御文字耐性を明記",
+        "section_updated": "セクション3.2（isQuestionLikeLine()関数の設計）",
+        "status": "reflected",
+        "details": "JSDocに制御文字が残留してもendsWith()/QUESTION_KEYWORD_PATTERN.test()が安全に動作する（false-safe）ことを明記"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-S4-005",
+        "item": "エラーメッセージにおけるワークツリー情報の露出",
+        "status": "noted",
+        "details": "レビュー指摘事項サマリーに記載。現時点では対応不要"
+      },
+      {
+        "id": "SEC-S4-006",
+        "item": "isQuestionLikeLine()のキーワードリスト操作による防御回避",
+        "status": "noted",
+        "details": "レビュー指摘事項サマリーに記載。現在の脅威モデルでは対応不要"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "sections_updated": [
+    "セクション3.2（isQuestionLikeLine()関数の設計）- SEC-S4-004 制御文字耐性をJSDocに追加",
+    "セクション3.3（QUESTION_KEYWORD_PATTERNの設計）- SEC-S4-002 ReDoS安全性注釈を追加",
+    "セクション7.4（セキュリティ設計）- SEC-S4-001 resolveAutoAnswer()の安全性保証を新規追加",
+    "セクション7.5（セキュリティ設計）- SEC-S4-003 多層防御の全体像を新規追加",
+    "セクション12（レビューチェックリスト）- SEC-S4-001/002/004のチェック項目を追加",
+    "セクション13（レビュー履歴）- Stage 4を追加",
+    "セクション14（レビュー指摘事項サマリー）- Stage 4 全指摘事項を追加",
+    "セクション15（実装チェックリスト）- SEC-S4-001/002/003/004の実装チェック項目を追加"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

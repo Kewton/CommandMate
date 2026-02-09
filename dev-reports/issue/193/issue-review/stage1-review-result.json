@@ -1,0 +1,170 @@
+{
+  "issue_number": 193,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "review_date": "2026-02-08",
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "Issue記載の CLAUDE_CHOICE_INDICATOR_PATTERN はコードベースに存在しない。変更対象ファイル欄で cli-patterns.ts への変更を示唆しているが、選択肢検出ロジックは prompt-detector.ts 内にハードコードされている (DEFAULT_OPTION_PATTERN L182, NORMAL_OPTION_PATTERN L189)",
+        "location": "## 対策案 > ケースA / ## 影響範囲 > 変更対象ファイル",
+        "recommendation": "1. CLAUDE_CHOICE_INDICATOR_PATTERN への参照を全て DEFAULT_OPTION_PATTERN (prompt-detector.ts L182) に修正する。2. 変更対象ファイル欄の cli-patterns.ts の行を削除するか、prompt-detector.ts に置き換える。3. ケースAの説明を「cli-patterns.ts のパターン修正」から「prompt-detector.ts の DEFAULT_OPTION_PATTERN / NORMAL_OPTION_PATTERN の修正」に変更する",
+        "evidence": "grep -r 'CLAUDE_CHOICE_INDICATOR_PATTERN' src/ の結果: 該当なし。検出パターンは prompt-detector.ts L182 (DEFAULT_OPTION_PATTERN = /^\\s*\\u276F\\s*(\\d+)\\.\\s*(.+)$/) と L189 (NORMAL_OPTION_PATTERN = /^\\s*(\\d+)\\.\\s*(.+)$/) にハードコードされている"
+      },
+      {
+        "id": "MF-2",
+        "category": "正確性",
+        "issue": "Layer 4 (L344-350) の hasDefaultIndicator チェックが根本原因分析から欠落している。Pass 1 の問題だけでなく、Layer 4 も options.some(opt => opt.isDefault) を要求しているため、仮に Pass 1 を緩和しても Layer 4 で依然としてブロックされる。ケースBの対策案が Layer 4 の修正を含んでいない",
+        "location": "## 根本原因の仮説 / ## 対策案 > ケースB",
+        "recommendation": "根本原因セクションに「Layer 4: hasDefaultIndicator チェックも同時に修正が必要」を明記する。ケースBの対策案に Layer 4 の requireDefaultIndicator パラメータ化を含める（detectPrompt options に requireDefaultIndicator: false を渡した場合、Layer 4 の hasDefaultIndicator チェックをスキップするロジック）",
+        "evidence": "prompt-detector.ts L344-350: const hasDefaultIndicator = options.some(opt => opt.isDefault); if (options.length < 2 || !hasDefaultIndicator) { return { isPrompt: false, cleanContent: output.trim() }; } -- Pass 1 を緩和しても、options が全て isDefault: false なら Layer 4 で false が返る"
+      },
+      {
+        "id": "MF-3",
+        "category": "正確性",
+        "issue": "response-poller.ts L442 の ANSI 未ストリップ問題の記述が不正確。Issue では「L442とL556ではANSI未ストリップの生出力をdetectPrompt()に渡している」と記載しているが、L248 (Claude専用ガード) では stripAnsi() が適用されているため、L442 は Claude 以外の CLIツール（Codex, Gemini）でのみ到達する。さらに L556 の result.response は extractResponse() の戻り値であり、extractResponse() 内部で一部の行は stripAnsi() されるパスもあるが、L442 のパス（プロンプト早期チェック失敗後のフォールバック）では生の lines を再結合している",
+        "location": "## 対策案 > Phase 3 > response-poller.ts",
+        "recommendation": "L442 の問題を正確に記述する: 「L248 の Claude 専用ガード通過後、非 Claude CLIツール（Codex, Gemini）または L248 のプロンプト検出失敗後に L442 に到達する。L442 では lines（rawLines から空行トリミングのみ）を join しており ANSI コードが残存する」。L556 については extractResponse() の戻り値のデータフローを精査し、どのパスで ANSI が残存するかを明記する",
+        "evidence": "response-poller.ts L244: if (cliToolId === 'claude') { ... L247: const cleanFullOutput = stripAnsi(fullOutput); L248: detectPrompt(cleanFullOutput); } -- Claude の場合は L248 で ANSI ストリップ済み。L442 は Claude のプロンプト早期チェック (L244-258) を通過した後に到達するため、Claude でも L248 で検出されなかった場合に L442 に到達する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "技術的妥当性",
+        "issue": "ケースBの DetectPromptOptions interface 設計で requireDefaultIndicator パラメータのみでは不十分。Pass 1 のスキップ、Layer 4 のスキップ、追加パターンの注入の3つの制御が必要だが、requireDefaultIndicator 1つで全てを制御すると責任が曖昧になる",
+        "location": "## 対策案 > ケースB",
+        "recommendation": "DetectPromptOptions の設計を以下のように明確化する: { skipDefaultIndicatorCheck?: boolean; /* Pass 1 と Layer 4 の両方をスキップ */ additionalOptionPattern?: RegExp; /* 追加パターン注入 */ } または、よりシンプルに requireDefaultIndicator?: boolean を Pass 1 と Layer 4 の両方に適用することを明記する",
+        "evidence": "prompt-detector.ts の 2 パス検出: Pass 1 (L274-288) は DEFAULT_OPTION_PATTERN の存在チェック、Layer 4 (L344-350) は hasDefaultIndicator の真偽チェック。両方が独立したゲートとして機能しているため、パラメータが両方に影響することを設計で明確にする必要がある"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "claude-poller.ts L164 の ANSI 未ストリップ問題がフォローアップ候補として記載されているが、実際には response-poller.ts L442 と同じ問題構造（extractClaudeResponse() が ANSI 未ストリップの lines を返す）であり、本 Issue で同時に修正すべき",
+        "location": "## 影響範囲 > 関連コンポーネント（動作確認）",
+        "recommendation": "claude-poller.ts L164 を変更対象ファイルテーブルに昇格させ、「extractClaudeResponse() 内の fullOutput (lines.join) が ANSI 未ストリップのため detectPrompt() に渡す前に stripAnsi() を適用する」を修正内容に追加する。claude-poller.ts L232 も同様",
+        "evidence": "claude-poller.ts L47-52: const rawLines = output.split('\\n'); ... const lines = rawLines.slice(0, trimmedLength); -- ANSI ストリップなし。L163: const fullOutput = lines.join('\\n'); L164: detectPrompt(fullOutput); -- ANSI コード残存のまま detectPrompt() に渡される"
+      },
+      {
+        "id": "SF-3",
+        "category": "明確性",
+        "issue": "受入条件に「Claude Codeの既存の選択肢検出・応答機能に影響がないこと」とあるが、具体的にどのテストケースで確認するかが不明。既存テストが全てモック依存（detectPrompt をモック）のため、実際のパターンマッチングのリグレッションを検出できない可能性がある",
+        "location": "## 受入条件",
+        "recommendation": "受入条件に以下を追加: 「既存の prompt-detector.test.ts の全 multiple_choice テストケースがパスすること」「新規テストケースとして、既存の (U+276F) マーカー付き選択肢パターンが引き続き正しく検出されることを確認するリグレッションテストを追加すること」",
+        "evidence": "tests/unit/api/prompt-response-verification.test.ts L49-51: detectPrompt をモックしているため、実際のパターンマッチは検証されない。prompt-detector.test.ts にリグレッションテストが必要"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "current-output/route.ts (L88) の detectPrompt() 呼び出しに thinking ガードがあるが、この箇所で detectPrompt() のシグネチャ変更に対応する際の注意事項が記載されていない。thinking 時は detectPrompt() がスキップされるため、options パラメータの伝搬ロジックが必要になる",
+        "location": "## 対策案 > Phase 3 > current-output/route.ts",
+        "recommendation": "current-output/route.ts の detectPrompt() 呼び出しは L88 で thinking ガード内にあるため、options パラメータの伝搬に加えて cliToolId の取得元（L66 付近で worktree から取得）を明記する",
+        "evidence": "current-output/route.ts L83: const thinking = detectThinkingState(cliToolId, lastSection); L88: const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput); -- cliToolId は worktree.cliToolId から取得済み"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "respond/route.ts が関連コンポーネントに記載されているが、このファイルは detectPrompt() を呼び出していない。動作確認の目的が不明確",
+        "location": "## 影響範囲 > 関連コンポーネント（動作確認）",
+        "recommendation": "respond/route.ts の動作確認目的を明記する（例: メッセージIDベースのプロンプト応答APIで、prompt-response/route.ts とは異なるフローのため、選択肢応答が正しくルーティングされることの確認）",
+        "evidence": "src/app/api/worktrees/[id]/respond/route.ts が存在するが、detectPrompt() への依存がなく、影響範囲が間接的"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "スクリーンショットの選択肢形式が具体的にどのようなテキストパターンかをPhase 1で確認する旨は記載されているが、スクリーンショット自体の解析結果（番号の前に空白があるか、行頭の文字は何か等）がIssue本文に記載されていない",
+        "location": "## スクリーンショット / ## 対策案 > Phase 1",
+        "recommendation": "可能であればスクリーンショットから読み取れる選択肢のテキスト形式を記載する（例: 行頭にインデントがあるか、番号の後にピリオドがあるか、各選択肢の区切りなど）。これによりPhase 1の調査が効率化される",
+        "evidence": "スクリーンショットは画像のみで、テキスト形式の記載なし"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "Issue #161 との関連で、ケースBを採用した場合に Issue #161 のLayer 2（2パス検出方式）の設計原則をどのように維持するかの説明が薄い",
+        "location": "## 対策案 > ケースB",
+        "recommendation": "ケースBの設計において、Issue #161 の誤検出防止メカニズム（thinking チェック、連番検証）がどのように維持されるかを明記する。特に requireDefaultIndicator: false の場合に通常の番号付きリストと選択肢プロンプトをどう区別するかの戦略が必要",
+        "evidence": "Issue #161 設計書で確立された多層防御: Layer 1 (thinking skip), Layer 2 (2-pass detection), Layer 3 (consecutive validation)。ケースBで Layer 2 を緩和する場合、Layer 1 と Layer 3 だけで誤検出を防げるかの検討が必要"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "L182, L189, L264-391, L344-350",
+      "relevance": "選択肢検出ロジックの中核。DEFAULT_OPTION_PATTERN, NORMAL_OPTION_PATTERN, detectMultipleChoicePrompt(), Layer 4 hasDefaultIndicator チェック"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "Issue記載の CLAUDE_CHOICE_INDICATOR_PATTERN が存在しないことの確認元。stripAnsi() 関数の提供元"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "L50, L83, L87",
+      "relevance": "STATUS_CHECK_LINE_COUNT=15 の制約。detectPrompt() に15行のみ渡す"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "L190-203, L244-258, L441-442, L556",
+      "relevance": "ANSI未ストリップの detectPrompt() 呼び出し箇所。extractResponse() のデータフロー"
+    },
+    {
+      "file": "src/lib/claude-poller.ts",
+      "lines": "L41-53, L163-164, L232",
+      "relevance": "extractClaudeResponse() の ANSI 未ストリップ問題。フォローアップ候補ではなく本Issue対象とすべき"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "lines": "L50, L74-75",
+      "relevance": "cliToolId取得済み。detectPrompt() へのパラメータ伝搬が可能"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "L83, L88",
+      "relevance": "thinking ガード付き detectPrompt() 呼び出し"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "L262, L276-290",
+      "relevance": "cliToolId を引数で受け取り、stripAnsi() 適用済みの出力を detectPrompt() に渡す（正しい実装）"
+    },
+    {
+      "file": "src/lib/auto-yes-resolver.ts",
+      "lines": "L23-36",
+      "relevance": "multiple_choice の defaultOpt 検出。isDefault フラグに依存しており、全選択肢が isDefault: false の場合は最初の選択肢を選択する（ケースBでの動作確認対象）"
+    },
+    {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "relevance": "既存の multiple_choice テストケース。リグレッションテストの基盤"
+    },
+    {
+      "file": "tests/unit/api/prompt-response-verification.test.ts",
+      "lines": "L49-51",
+      "relevance": "detectPrompt をモックしているため、実際のパターンマッチは検証されない"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "lines": "L431",
+      "relevance": "detectPrompt をモックしているため、シグネチャ変更時の更新対象"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #161 の2パス検出方式の設計原則記載。prompt-detector.ts のCLIツール非依存性原則"
+    },
+    {
+      "file": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+      "relevance": "2パス検出方式と多層防御の設計根拠"
+    }
+  ]
+}

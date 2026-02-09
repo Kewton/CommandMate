@@ -1,0 +1,38 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 100.0,
+    "after_coverage": 100.0,
+    "before_test_count": 86,
+    "after_test_count": 86,
+    "test_pass_rate": 100.0
+  },
+  "refactorings_applied": [
+    "DRY: Extract shared test constants (TEST_WORKTREE_ID, TEST_SESSION_NAME, TEST_SESSION_OPTIONS, TRUST_DIALOG_OUTPUT)",
+    "DRY: Extract countEnterOnlyCalls() helper function to eliminate 3x repeated sendKeys filter logic",
+    "Fix misleading test description: 'should match \">\" only' corrected to 'should match \"❯\" only' for test that verifies U+276F character"
+  ],
+  "files_changed": [
+    "src/lib/__tests__/cli-patterns.test.ts",
+    "tests/unit/lib/claude-session.test.ts"
+  ],
+  "files_analyzed_no_changes": [
+    "src/lib/cli-patterns.ts",
+    "src/lib/claude-session.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "93e389f: refactor(tests): improve test code quality for Issue #201"
+  ],
+  "analysis_notes": {
+    "cli_patterns_ts": "Well-structured with comprehensive JSDoc. No code smells detected. CLAUDE_TRUST_DIALOG_PATTERN intentional partial matching design preserved (SF-001).",
+    "claude_session_ts": "console.log usage noted but intentionally deferred per SF-002 TODO comment. trustDialogHandled flag design maintained per constraints. No source code changes needed.",
+    "test_deduplication_details": "Removed 38 net lines through constant extraction and helper function. 7 occurrences of 'test-worktree' string literal replaced with TEST_WORKTREE_ID. 6 occurrences of options object creation replaced with TEST_SESSION_OPTIONS. 3 occurrences of sendKeys filter logic replaced with countEnterOnlyCalls()."
+  },
+  "message": "Refactoring complete. Test code quality improved through DRY principle application. All 86 tests pass. Static analysis errors remain at 0. Source code (cli-patterns.ts, claude-session.ts) analyzed but no changes needed - already well-structured."
+}

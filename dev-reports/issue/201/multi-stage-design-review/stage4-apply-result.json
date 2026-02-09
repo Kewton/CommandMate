@@ -1,0 +1,40 @@
+{
+  "issue_number": 201,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "Stage4-C-001",
+        "item": "CLAUDE_TRUST_DIALOG_PATTERN部分一致の敵対的バッファ内容に対するスコープ",
+        "section_updated": "セキュリティ設計（脅威分析テーブル、OWASP Top 10チェックリスト、セキュリティ分析詳細）、レビュー指摘事項サマリー",
+        "status": "reflected",
+        "action": "対応不要（理論的リスク、SF-001で文書化済み）。脅威分析テーブルに行追加、セキュリティ分析セクションに詳細記載、レビュー履歴に記録"
+      },
+      {
+        "id": "Stage4-C-002",
+        "item": "ログメッセージ情報漏洩評価",
+        "section_updated": "セキュリティ設計（脅威分析テーブル、OWASP Top 10チェックリスト、セキュリティ分析詳細）、レビュー指摘事項サマリー",
+        "status": "reflected",
+        "action": "対応不要（SEC-003準拠の固定文字列アプローチ、SF-002 TODOで将来対応計画済み）。脅威分析テーブルに行追加、セキュリティ分析セクションに詳細記載、レビュー履歴に記録"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-201-trust-dialog-auto-response-design-policy.md",
+  "sections_updated": [
+    "セキュリティ設計 > 脅威分析",
+    "セキュリティ設計 > OWASP Top 10チェックリスト（新規追加）",
+    "セキュリティ設計 > セキュリティ分析詳細（新規追加）",
+    "セキュリティ設計 > リスク評価（新規追加）",
+    "レビュー履歴",
+    "レビュー指摘事項サマリー > Stage 4"
+  ],
+  "owasp_checklist_added": true,
+  "security_analysis_added": true,
+  "timestamp": "2026-02-09T18:30:00Z"
+}

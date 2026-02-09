@@ -1,0 +1,57 @@
+{
+  "issue_number": 201,
+  "iteration": 1,
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "二重送信防止ガード(trustDialogHandledフラグ)を実装タスク2のフローチャートと説明に追加。受け入れ条件に「Enterの送信は1回のみ行われること」を追加。テストケースに二重送信防止テストを追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "CLAUDE_PROMPT_PATTERNの記述を /^[>❯]/m から実際のパターン /^[>❯](\\s*$|\\s+\\S)/m に修正"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "原因セクションに「sendMessageToClaude() への影響」サブセクションを追加。waitForPrompt()が同じパターンを使用している点、タイムアウト後リトライ/セッション再利用時の再ダイアログのエッジケース分析、修正不要の結論を明記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "対応方針に「前提条件」セクションを追加し、Claude CLIが英語UIのみである前提と、多言語対応時のパターン更新が別Issueで対処される旨を明記"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "受け入れ条件に「Enter送信後、CLAUDE_INIT_TIMEOUT（15秒）の残り時間内にプロンプトが検出されない場合はタイムアウトエラーが発生すること」を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "「検討した代替案」セクションを追加し、案B(--trust-workspaceフラグ)、案C(settings.json事前許可)、案D(UI通知+手動対応)の3案と各却下理由を記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "受け入れ条件のログ出力項目をinfoレベル指定に変更し、ログ内容例とユーザー入力/パス情報を含めない旨の注記を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/201"
+  }
+}

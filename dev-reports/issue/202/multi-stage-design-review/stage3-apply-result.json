@@ -1,0 +1,73 @@
+{
+  "issue_number": 202,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-IA-001",
+        "item": "scan/route.ts がフィルタリングなしで個別リポジトリをスキャンする経路が残存",
+        "severity": "medium",
+        "sections_updated": [
+          "レビュー履歴",
+          "レビュー指摘事項サマリー（Stage 3）",
+          "アーキテクチャ設計（既知の制限事項）",
+          "実装チェックリスト（フォローアップ項目）"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IA-002",
+        "item": "tsconfig.server.json の tsc-alias パス変換に対する db-repository.ts の @/ import 依存",
+        "severity": "low",
+        "sections_updated": [
+          "レビュー履歴",
+          "レビュー指摘事項サマリー（Stage 3）",
+          "具体的な修正内容（7-2 注記追加）"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-IA-001",
+        "item": "CLI commandmate start --issue によるworktree別サーバーでの影響",
+        "sections_updated": [
+          "レビュー指摘事項サマリー（Stage 3）",
+          "実装チェックリスト（フォローアップ項目）"
+        ],
+        "status": "noted"
+      },
+      {
+        "id": "C-IA-002",
+        "item": "restore/route.ts の復元経路との整合性",
+        "sections_updated": [
+          "レビュー指摘事項サマリー（Stage 3）"
+        ],
+        "status": "noted_no_action_required"
+      },
+      {
+        "id": "C-IA-003",
+        "item": "clone-manager.ts の db-repository.ts 依存",
+        "sections_updated": [
+          "レビュー指摘事項サマリー（Stage 3）"
+        ],
+        "status": "noted_no_action_required"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-202-server-startup-exclusion-filter-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴（Stage 3 追加）",
+    "アーキテクチャ設計（既知の制限事項 SF-IA-001 追加）",
+    "具体的な修正内容 7-2（SF-IA-002 ビルド検証注記追加）",
+    "レビュー指摘事項サマリー（Stage 3 全5件追加）",
+    "実装チェックリスト（フォローアップ項目 2件追加）",
+    "フッター（Stage 3 更新日時追加）"
+  ],
+  "timestamp": "2026-02-09T14:30:00Z"
+}

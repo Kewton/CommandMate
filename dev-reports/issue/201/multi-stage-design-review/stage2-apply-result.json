@@ -1,0 +1,49 @@
+{
+  "issue_number": 201,
+  "stage": 2,
+  "stage_name": "整合性レビュー対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "Stage2-SF-001",
+        "item": "CLAUDE_INIT_TIMEOUT定数のJSDocにC-002注記が未反映",
+        "section_updated": "実装チェックリスト / 実装ガイドライン / レビュー指摘事項サマリー",
+        "status": "reflected",
+        "detail": "チェックリストのC-002項目に具体的なJSDocテキスト（英語）と対象コード行番号を追記。コーディング規約セクションも同様に強化。レビュー指摘事項サマリーにStage 2セクション追加。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "Stage2-C-001",
+        "item": "Issue本文のCLAUDE_PROMPT_PATTERNパターン記述との差異",
+        "section_updated": "レビュー指摘事項サマリー",
+        "status": "noted",
+        "detail": "対応不要。設計書は正確なパターンを前提としており、Issue本文の簡略記述は本質に影響しない。レビュー指摘事項サマリーに記録。"
+      },
+      {
+        "id": "Stage2-C-002",
+        "item": "テストファイルの配置場所の二重性",
+        "section_updated": "レビュー指摘事項サマリー",
+        "status": "noted",
+        "detail": "対応不要。設計書でsrc/lib/__tests__/cli-patterns.test.tsを明示済み。Issueレビュー Stage 7で解消済み。レビュー指摘事項サマリーに記録。"
+      }
+    ]
+  },
+  "skipped": [],
+  "consistency_verification": {
+    "design_vs_codebase": "8/8 items consistent",
+    "design_vs_issue": "5/5 items consistent",
+    "design_vs_existing_patterns": "5/5 items consistent"
+  },
+  "design_doc_path": "dev-reports/design/issue-201-trust-dialog-auto-response-design-policy.md",
+  "sections_updated": [
+    "実装ガイドライン > コーディング規約 (項目6強化)",
+    "実装チェックリスト > レビュー指摘対応項目 (C-002項目強化)",
+    "レビュー履歴 (Stage 2行追加)",
+    "レビュー指摘事項サマリー (Stage 2セクション追加)"
+  ],
+  "timestamp": "2026-02-09T14:30:00Z"
+}

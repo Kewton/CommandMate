@@ -1,0 +1,156 @@
+{
+  "issue_number": 202,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-09",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "tsconfig.server.json の include 配列に src/lib/db-repository.ts が含まれていない。server.ts のビルドは tsconfig.server.json を使用する（npm run build:server）。db-repository.ts を import しても、tsconfig.server.json の include にこのファイルが明示的にリストされていないため、ビルド時に型チェック対象外となる可能性がある。さらに db-repository.ts は @/types/clone と @/config/system-directories を import しているが、src/config/**/*.ts も tsconfig.server.json の include に含まれていない。tsc-alias でパス解決されるが、コンパイル対象として明示的に含めないとビルドエラーが発生するリスクがある。",
+        "location": "影響範囲セクション",
+        "recommendation": "影響範囲テーブルに tsconfig.server.json を追加し、include 配列に以下を追記する必要がある旨を記載: (1) src/lib/db-repository.ts, (2) src/config/system-directories.ts（db-repository.ts の依存先）。修正方針にも tsconfig.server.json の変更手順を追加すべき。",
+        "evidence": "tsconfig.server.json の include は明示的にファイルをリストしている（L8-24）。現在 src/lib/db-repository.ts, src/config/system-directories.ts は含まれていない。server.ts のビルドコマンドは 'tsc --project tsconfig.server.json && tsc-alias -p tsconfig.server.json'（package.json の build:server）。TypeScript はファイルからの import チェーンで暗黙的に含まれる場合があるが、明示的な include に含めないと tsc-alias によるパス変換が不完全になるリスクがある。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "build:server（npm run build:server）の成功確認が受け入れ条件に含まれていない。server.ts への import 追加は Next.js ビルド（npm run build）だけでなく、サーバー専用ビルド（npm run build:server）でも成功する必要がある。",
+        "location": "受け入れ条件セクション / テスト方針セクション",
+        "recommendation": "受け入れ条件に「npm run build:server が成功すること」を追加する。または既存テスト条件の「既存のテストがパスすること」を「既存のテストがパスし、build:server を含む全ビルドが成功すること」に拡充する。",
+        "evidence": "package.json: \"build:server\": \"tsc --project tsconfig.server.json && tsc-alias -p tsconfig.server.json\"。server.ts は tsconfig.server.json でコンパイルされるため、新しい import を追加する場合はこのビルドターゲットでの動作確認が必須。CI/CD の必須チェックリスト（CLAUDE.md）には Build: npm run build のみ記載されており、build:server は明示されていない。"
+      },
+      {
+        "id": "SF-2",
+        "category": "依存関係",
+        "issue": "db-repository.ts の内部依存として isSystemDirectory（src/config/system-directories.ts）と CloneJobStatus 型（src/types/clone.ts）が存在するが、server.ts の修正では ensureEnvRepositoriesRegistered と filterExcludedPaths のみを使用するため、isSystemDirectory は直接呼び出されない。しかし TypeScript コンパイラは import チェーン全体を解決するため、server.ts のビルドでこれらの間接依存が正しく解決される必要がある。Issue の影響範囲セクションではこの間接依存について言及がない。",
+        "location": "影響範囲セクション",
+        "recommendation": "影響範囲テーブルに db-repository.ts の間接依存（src/config/system-directories.ts, src/types/clone.ts）を注記として追記する。src/types/**/*.ts は既に tsconfig.server.json の include に含まれているため clone.ts は問題ないが、src/config/system-directories.ts は含まれていないことを明記する。",
+        "evidence": "db-repository.ts L10-11: import type { CloneJobStatus } from '@/types/clone'; import { isSystemDirectory } from '@/config/system-directories';。tsconfig.server.json は src/types/**/*.ts を含むが src/config/**/*.ts を含まない。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "テスト方針に「既存テスト: db-repository-exclusion.test.ts の filterExcludedPaths / ensureEnvRepositoriesRegistered 単体テストが引き続きパスすること」とあるが、結合テスト tests/integration/repository-exclusion.test.ts にも関連テスト（Exclusion -> Sync flow、Full round-trip flow）が存在する。これらのテストも引き続きパスすることを確認対象に含めると、より網羅的な検証になる。",
+        "location": "テスト方針セクション",
+        "recommendation": "テスト方針に結合テスト（tests/integration/repository-exclusion.test.ts）の言及を追加する。",
+        "evidence": "tests/integration/repository-exclusion.test.ts に 'Exclusion -> Sync flow' テストスイート（L62-107）があり、ensureEnvRepositoriesRegistered + disableRepository + filterExcludedPaths のフルフローをテストしている。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.md の主要機能モジュールテーブルに server.ts のモジュール説明がない。本 Issue で initializeWorktrees() に除外フィルタリングが追加されるため、将来的にこのテーブルに server.ts の記載を追加するとドキュメントの網羅性が向上する。ただし本 Issue のスコープ外であるため、フォローアップとして検討する程度で良い。",
+        "location": "Issue 本文全体",
+        "recommendation": "CLAUDE.md の更新は本 Issue のスコープ外だが、server.ts の initializeWorktrees() が sync/route.ts と同一パターンになる旨を備考に追記することを検討する。",
+        "evidence": "CLAUDE.md の主要機能モジュールテーブルに server.ts の記載がない。一方で sync/route.ts に関連する db-repository.ts は「Issue #190: 除外・復活・パス正規化・バリデーション関数追加」と記載されている。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "server.ts",
+        "change_type": "modify",
+        "description": "initializeWorktrees() に ensureEnvRepositoriesRegistered() + filterExcludedPaths() 追加、import 文追加、ログ出力追加"
+      },
+      {
+        "file": "tsconfig.server.json",
+        "change_type": "modify",
+        "description": "include 配列に src/lib/db-repository.ts, src/config/system-directories.ts を追加"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/lib/db-repository.ts",
+        "impact": "変更なし。ensureEnvRepositoriesRegistered() と filterExcludedPaths() が server.ts から新たに呼び出される。"
+      },
+      {
+        "file": "src/config/system-directories.ts",
+        "impact": "変更なし。db-repository.ts の間接依存として tsconfig.server.json の include 対象にする必要がある。"
+      },
+      {
+        "file": "src/types/clone.ts",
+        "impact": "変更なし。db-repository.ts の型依存だが、src/types/**/*.ts として既に tsconfig.server.json に含まれている。"
+      }
+    ],
+    "unaffected_files_with_justification": [
+      {
+        "file": "src/app/api/repositories/sync/route.ts",
+        "justification": "参考実装。変更不要。server.ts がこれと同一パターンを採用する。"
+      },
+      {
+        "file": "src/app/api/repositories/scan/route.ts",
+        "justification": "個別リポジトリスキャンAPI。除外ロジックは呼び出し元（sync, server.ts）で制御する方式のため影響なし。"
+      },
+      {
+        "file": "src/app/api/repositories/route.ts",
+        "justification": "DELETE ハンドラー。disableRepository() を呼び出す側であり、本 Issue の変更スコープ外。"
+      },
+      {
+        "file": "src/app/api/repositories/restore/route.ts",
+        "justification": "リストア API。本 Issue の変更スコープ外。"
+      },
+      {
+        "file": "src/cli/commands/start.ts",
+        "justification": "CLI start コマンド。npm run start を spawn するだけで、initializeWorktrees() の呼び出しは server.ts 側で行われるため、CLI 側の変更は不要。"
+      }
+    ],
+    "breaking_changes": "なし。内部的な初期化処理の修正であり、外部APIやUIの変更はない。",
+    "migration_considerations": "なし。既存ユーザーへの影響はない。サーバー再起動時の動作が改善される。"
+  },
+  "code_references": [
+    {
+      "file": "server.ts",
+      "lines": "29-42, 69-100",
+      "relevance": "修正対象: initializeWorktrees() 関数。import 文は ./src/lib/ 形式の相対パスを使用。"
+    },
+    {
+      "file": "tsconfig.server.json",
+      "lines": "8-24",
+      "relevance": "修正対象: include 配列に db-repository.ts と system-directories.ts の追加が必要。"
+    },
+    {
+      "file": "src/app/api/repositories/sync/route.ts",
+      "lines": "10, 27-33",
+      "relevance": "参考実装: Issue #190 で実装済みの除外ロジック。"
+    },
+    {
+      "file": "src/lib/db-repository.ts",
+      "lines": "10-11, 369-408",
+      "relevance": "使用する関数。@/types/clone と @/config/system-directories への依存あり。"
+    },
+    {
+      "file": "src/config/system-directories.ts",
+      "relevance": "db-repository.ts の間接依存。tsconfig.server.json の include に追加が必要。"
+    },
+    {
+      "file": "tests/unit/lib/db-repository-exclusion.test.ts",
+      "relevance": "既存テスト: filterExcludedPaths / ensureEnvRepositoriesRegistered の単体テスト。"
+    },
+    {
+      "file": "tests/integration/repository-exclusion.test.ts",
+      "relevance": "既存結合テスト: Exclusion -> Sync フローの検証。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・技術スタック参照。server.ts のモジュール記載なし。"
+    },
+    {
+      "file": "package.json",
+      "relevance": "build:server コマンド定義の参照。"
+    }
+  ]
+}

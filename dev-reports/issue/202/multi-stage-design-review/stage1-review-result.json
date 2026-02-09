@@ -1,0 +1,95 @@
+{
+  "issue_number": 202,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "DRY",
+        "title": "server.ts と sync/route.ts のワークツリー初期化フローが重複",
+        "description": "ensureEnvRepositoriesRegistered() -> filterExcludedPaths() -> scanMultipleRepositories() -> syncWorktreesToDB() の4ステップの呼び出しシーケンスが server.ts と sync/route.ts に重複する。設計書では認識済みかつフォローアップIssueとして明記されているが、呼び出し順序制約（ensureEnvRepositoriesRegistered を filterExcludedPaths の前に呼ぶ必要がある）が暗黙的であり、将来の保守時にフロー不一致のリスクがある。",
+        "recommendation": "フォローアップIssueで共通関数（例: initializeFilteredRepositories(db, repositoryPaths)）への抽出を検討する。設計書のSection 4で明記された呼び出し順序制約をJSDocやインラインコメントで両方の呼び出し箇所に残すことを推奨する。",
+        "severity": "medium"
+      },
+      {
+        "id": "SF-002",
+        "principle": "テスト方針",
+        "title": "server.ts の initializeWorktrees() に対する統合テストが不足",
+        "description": "設計書ではserver.tsのinitializeWorktrees()はNext.jsのapp.prepare()コールバック内にネストされているためユニットテスト困難としている。既存のensureEnvRepositoriesRegistered()とfilterExcludedPaths()のユニットテストはカバーされているが、server.ts内でこれらを正しい順序で呼び出すことを検証するテストがない。",
+        "recommendation": "initializeWorktrees()内のビジネスロジック部分を独立関数として抽出し、テスト可能にすることを検討する。あるいは、手動テストシナリオを明文化してテスト手順書として残す。",
+        "severity": "low"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "OCP (Open/Closed Principle)",
+        "title": "除外フィルタリングの拡張性",
+        "description": "現在のfilterExcludedPaths()はenabled=0のリポジトリのみをフィルタリングする。将来的にパターンベース除外や一時的除外などの要件が追加された場合、filterExcludedPaths()の内部を変更する必要がある。ただし、現時点ではYAGNI原則に基づき過度な拡張設計は不要。",
+        "recommendation": "現時点では対応不要。将来の要件発生時にStrategy パターン等での拡張を検討する。"
+      },
+      {
+        "id": "C-002",
+        "principle": "Logging consistency",
+        "title": "ログ出力の条件分岐による一貫性",
+        "description": "設計書では除外数が0の場合はログ出力しない仕様だが、デバッグ目的では常時出力が望ましい場面もある。設計書のトレードオフ表（Section 11）で既に認識されている。",
+        "recommendation": "LOG_LEVELやDEBUGフラグ導入はYAGNIに反するため、現行設計を維持する。"
+      }
+    ]
+  },
+  "design_principles_checklist": {
+    "single_responsibility": {
+      "status": "pass",
+      "note": "initializeWorktrees()はサーバー起動時のワークツリー初期化という単一の責務を持つ。除外フィルタリングは初期化処理の一部として適切。filterExcludedPaths()やensureEnvRepositoriesRegistered()は各々独立した責務を持つ関数として既に分離済み。"
+    },
+    "open_closed": {
+      "status": "pass",
+      "note": "filterExcludedPaths()に除外ロジックがカプセル化されており（SF-003）、呼び出し元のserver.tsは除外の具体的な判定ロジックを知らない。除外基準の変更はfilterExcludedPaths()内部のみで完結する。"
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "note": "本修正にはクラス継承やポリモーフィズムの使用がないため評価対象外。"
+    },
+    "interface_segregation": {
+      "status": "pass",
+      "note": "db-repository.tsの各関数は粒度の細かいインターフェースを提供しており、server.tsは必要な関数（ensureEnvRepositoriesRegistered, filterExcludedPaths）のみをimportしている。"
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "note": "server.tsはdb-repository.tsの具象関数に依存しているが、現行アーキテクチャではこのレベルの抽象化で十分。Database型はbetter-sqlite3の型として注入されており、テストではin-memoryDBに差し替え可能。"
+    },
+    "kiss": {
+      "status": "pass",
+      "note": "既存の参照実装（sync/route.ts）と同一パターンの転写であり、新しい概念・抽象化・パターンの導入がない。修正は最小限（import追加 + 4行のビジネスロジック + ログ出力）に抑えられている。"
+    },
+    "yagni": {
+      "status": "pass",
+      "note": "共通関数への抽出やStrategy パターン導入などの過度な抽象化を行わず、バグ修正に必要最小限の変更に留めている。DRY違反はフォローアップIssueとして明示的に先送りしており、適切なYAGNI判断。"
+    },
+    "dry": {
+      "status": "conditional_pass",
+      "note": "server.tsとsync/route.tsに同一の4ステップフロー（register -> filter -> scan -> sync）が重複する。設計書で認識済みかつフォローアップIssue候補として明記。バグ修正スコープでの共通化はリスクが高いため、現行判断は妥当。ただし、フォローアップIssueの作成を確実に行うべき。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-202-server-startup-exclusion-filter-design-policy.md",
+    "server.ts",
+    "src/lib/db-repository.ts",
+    "src/config/system-directories.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "tsconfig.server.json",
+    "tests/unit/lib/db-repository-exclusion.test.ts",
+    "tests/integration/repository-exclusion.test.ts"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

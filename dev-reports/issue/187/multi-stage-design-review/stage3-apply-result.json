@@ -1,0 +1,69 @@
+{
+  "issue_number": 187,
+  "stage": 3,
+  "status": "success",
+  "design_doc_updated": true,
+  "applied_findings": [
+    {
+      "id": "S3-F-1",
+      "severity": "must_fix",
+      "description": "tests/integration/api-send-cli-tool.test.tsをSection 9の間接影響ファイルリストに追加。P1-2のエラー伝播をカバーするテストケース追加をSection 11に明記",
+      "sections_updated": ["Section 9 影響範囲", "Section 11 実装チェックリスト"]
+    },
+    {
+      "id": "S3-F-2",
+      "severity": "should_fix",
+      "description": "P2間接影響リストに3ファイル追加: worktrees/route.ts, worktrees/[id]/route.ts (detectSessionStatus経由), cli-patterns.test.ts (stripAnsiテスト更新)",
+      "sections_updated": ["Section 9 影響範囲", "Section 11 実装チェックリスト"]
+    },
+    {
+      "id": "S3-F-3",
+      "severity": "should_fix",
+      "description": "エラー伝播パスのフロー図をSection 3.3に追加: waitForPrompt -> sendMessageToClaude -> ClaudeTool.sendMessage -> send/route.ts。ClaudeTool.sendMessage()がtry-catchなしでエラーを透過する設計判断を明記",
+      "sections_updated": ["Section 3.3 P1-2: タイムアウト時のエラースロー"]
+    },
+    {
+      "id": "S3-F-4",
+      "severity": "should_fix",
+      "description": "response-poller.tsのstripAnsi 9箇所の高密度使用に対するリグレッションテスト方針をSection 3.6に追加。P2-2適用前後での既存テスト全件パスを必須手順として明記",
+      "sections_updated": ["Section 3.6 P2-2: stripAnsi DEC Private Mode対応", "Section 11 実装チェックリスト"]
+    },
+    {
+      "id": "S3-F-5",
+      "severity": "nice_to_have",
+      "description": "waitForPrompt()の使用箇所を明示的に列挙: sendMessageToClaude() L382のみ、startClaudeSession()は独自ポーリングループ",
+      "sections_updated": ["Section 9 影響範囲"]
+    },
+    {
+      "id": "S3-F-6",
+      "severity": "nice_to_have",
+      "description": "claude-poller.tsを「影響なし判定ファイル」として追加。変更対象関数を使用していないことを明示",
+      "sections_updated": ["Section 9 影響範囲"]
+    },
+    {
+      "id": "S3-F-7",
+      "severity": "nice_to_have",
+      "description": "L89-92のCLAUDE_SEPARATOR_PATTERNテストの扱いを明記: インポート維持、itメッセージ修正推奨",
+      "sections_updated": ["Section 4.1 既存テストの修正", "Section 11 実装チェックリスト"]
+    },
+    {
+      "id": "S3-F-8",
+      "severity": "should_fix",
+      "description": "auto-yes-manager.tsのpollAutoYes()がsendKeysを直接使用しsendMessageToClaude()を経由しないため、P0の安定化待機の影響を受けないことをSection 3.1に明記",
+      "sections_updated": ["Section 3.1 P0: sendMessageToClaude() 安定化待機追加"]
+    }
+  ],
+  "skipped_findings": [],
+  "sections_updated": [
+    "Section 3.1 P0: sendMessageToClaude() 安定化待機追加",
+    "Section 3.3 P1-2: タイムアウト時のエラースロー",
+    "Section 3.6 P2-2: stripAnsi DEC Private Mode対応",
+    "Section 4.1 既存テストの修正",
+    "Section 9 影響範囲",
+    "Section 10 レビュー指摘事項サマリー",
+    "Section 11 実装チェックリスト",
+    "Section 12 レビュー履歴"
+  ],
+  "design_doc_path": "dev-reports/design/issue-187-session-first-message-reliability-design-policy.md",
+  "timestamp": "2026-02-08"
+}
