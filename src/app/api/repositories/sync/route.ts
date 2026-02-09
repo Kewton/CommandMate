@@ -7,7 +7,8 @@
 import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getRepositoryPaths, scanMultipleRepositories, syncWorktreesToDB } from '@/lib/worktrees';
-import { registerAndFilterRepositories } from '@/lib/db-repository';
+import { registerAndFilterRepositories, resolveRepositoryPath } from '@/lib/db-repository';
+import { getWorktreeIdsByRepository, deleteWorktreesByIds } from '@/lib/db';
 
 export async function POST() {
   try {
@@ -25,7 +26,17 @@ export async function POST() {
 
     // Issue #190/#202: Register environment variable repositories and filter out excluded ones
     // registerAndFilterRepositories() encapsulates the ordering constraint
-    const { filteredPaths } = registerAndFilterRepositories(db, repositoryPaths);
+    const { filteredPaths, excludedPaths } = registerAndFilterRepositories(db, repositoryPaths);
+
+    // Issue #202: Remove worktrees of excluded repositories from DB
+    // Without this, worktree records remain in DB and appear in the UI
+    for (const excludedPath of excludedPaths) {
+      const resolvedPath = resolveRepositoryPath(excludedPath);
+      const worktreeIds = getWorktreeIdsByRepository(db, resolvedPath);
+      if (worktreeIds.length > 0) {
+        deleteWorktreesByIds(db, worktreeIds);
+      }
+    }
 
     // Scan filtered repositories (excluded repos are skipped)
     const allWorktrees = await scanMultipleRepositories(filteredPaths);
