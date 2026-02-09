@@ -1415,6 +1415,63 @@ Are you sure you want to continue? (yes/no)
         expect(result.isPrompt).toBe(true);
         expect(result.promptData?.type).toBe('multiple_choice');
       });
+
+      it('T15: indented question with full-width question mark should be detected as prompt', () => {
+        // Tests isContinuationLine() full-width ？ (U+FF1F) exclusion.
+        // Without the fix, the indented question ending with ？ is misclassified as
+        // a continuation line, causing questionEndIndex to remain -1 and
+        // Layer 5 SEC-001a to reject the detection.
+        const output = [
+          '  \u30b3\u30d4\u30fc\u3057\u305f\u3044\u5bfe\u8c61\u306f\u3069\u308c\u3067\u3059\u304b\uff1f',  // "  コピーしたい対象はどれですか？" (indented)
+          '  1. \u30e6\u30fc\u30b6\u30fc\u5165\u529b\u306e\u307f',  // "  1. ユーザー入力のみ"
+          '  2. \u30ec\u30b9\u30dd\u30f3\u30b9\u306e\u307f',  // "  2. レスポンスのみ"
+        ].join('\n');
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+        if (isMultipleChoicePrompt(result.promptData)) {
+          expect(result.promptData.options).toHaveLength(2);
+          expect(result.promptData.question).toContain('\uff1f');  // Contains ？
+        }
+      });
+
+      it('T16: Claude Code AskUserQuestion format with tabs, descriptions, and full-width question mark', () => {
+        // Reproduces the exact format from Issue #193 regression:
+        // tabs header + indented question with ？ + options with descriptions + separator lines
+        const output = [
+          '\u2190 \u25a1 \u30b3\u30d4\u30fc\u5bfe\u8c61  \u25a1 UI\u65b9\u5f0f  \u25a1 \u30b3\u30d4\u30fc\u5f62\u5f0f  \u2714 Submit',
+          '\u2192',
+          '',
+          '  \u30b3\u30d4\u30fc\u3057\u305f\u3044\u5bfe\u8c61\u306f\u3069\u308c\u3067\u3059\u304b\uff1f',  // indented question with ？
+          '',
+          '\u276f 1.  [ ] \u30e6\u30fc\u30b6\u30fc\u5165\u529b\u306e\u307f',
+          '    \u81ea\u5206\u304c\u9001\u4fe1\u3057\u305f\u30e1\u30c3\u30bb\u30fc\u30b8\u3060\u3051\u30b3\u30d4\u30fc',
+          '  2.  [ ] \u30ec\u30b9\u30dd\u30f3\u30b9\u306e\u307f',
+          '    \u30a2\u30b7\u30b9\u30bf\u30f3\u30c8\u306e\u5fdc\u7b54\u3060\u3051\u30b3\u30d4\u30fc',
+          '  3.  [ ] \u4e21\u65b9\u500b\u5225\u306b',
+          '    \u5165\u529b\u30fb\u30ec\u30b9\u30dd\u30f3\u30b9\u305d\u308c\u305e\u308c\u306b\u30b3\u30d4\u30fc\u30dc\u30bf\u30f3',
+          '  4.  [ ] \u4f1a\u8a71\u30da\u30a2\u4e00\u62ec',
+          '    \u5165\u529b+\u30ec\u30b9\u30dd\u30f3\u30b9\u3092\u307e\u3068\u3081\u3066\u30b3\u30d4\u30fc',
+          '  5.  [ ] Type something',
+          '    Next',
+          '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
+          '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
+          '  6. Chat about this',
+          '',
+          'Enter to select \u00b7 Tab/Arrow keys to navigate \u00b7 Esc to cancel',
+        ].join('\n');
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+        if (isMultipleChoicePrompt(result.promptData)) {
+          expect(result.promptData.options.length).toBeGreaterThanOrEqual(2);
+          expect(result.promptData.question).toContain('\uff1f');
+        }
+      });
     });
   });
 

@@ -320,14 +320,15 @@ function isConsecutiveFromOne(numbers: number[]): boolean {
  */
 function isContinuationLine(rawLine: string, line: string): boolean {
   // Indented non-option line.
-  // Excludes lines ending with '?' because those are typically question lines
-  // (e.g., "  Do you want to proceed?") from Claude Bash tool output where
-  // both the question and options are 2-space indented. Without this exclusion,
+  // Excludes lines ending with '?' or '？' (U+FF1F) because those are typically question lines
+  // (e.g., "  Do you want to proceed?", "  コピーしたい対象はどれですか？") from CLI tool output
+  // where both the question and options are 2-space indented. Without this exclusion,
   // the question line would be misclassified as a continuation line, causing
   // questionEndIndex to remain -1 and Layer 5 SEC-001 to block detection.
-  const hasLeadingSpaces = rawLine.match(/^\s{2,}[^\d]/) && !rawLine.match(/^\s*\d+\./) && !line.endsWith('?');
+  const endsWithQuestion = line.endsWith('?') || line.endsWith('\uff1f');
+  const hasLeadingSpaces = rawLine.match(/^\s{2,}[^\d]/) && !rawLine.match(/^\s*\d+\./) && !endsWithQuestion;
   // Short fragment (< 5 chars, excluding question-ending lines)
-  const isShortFragment = line.length < 5 && !line.endsWith('?');
+  const isShortFragment = line.length < 5 && !endsWithQuestion;
   // Path string continuation: lines starting with / or ~, or alphanumeric-only fragments (2+ chars)
   const isPathContinuation = /^[\/~]/.test(line) || (line.length >= 2 && /^[a-zA-Z0-9_-]+$/.test(line));
   return !!hasLeadingSpaces || isShortFragment || isPathContinuation;
