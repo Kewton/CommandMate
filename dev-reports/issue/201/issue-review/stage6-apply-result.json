@@ -1,0 +1,38 @@
+{
+  "issue_number": 201,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "疑似コードの冒頭に `let trustDialogHandled = false;` の初期化行を追加し、ポーリングループのスコープ（ループ外、startClaudeSession関数内）で宣言されることをコメントで明記。セッション間で状態がリークしないことの保証も記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "疑似コードのEnter送信箇所に `await sendKeys(sessionName, '', true)` の具体的なAPI呼び出しを追加し、`// tmux C-m でEnter送信` のコメントを付与"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "実装タスク2に「Enter送信方式」パラグラフを追加。sendKeys/C-m方式の説明、sendMessageToClaude()との動作実績の共有、TUIフレームワーク（ink等）でのC-m/C-j挙動差異の注意事項、実装時のE2E動作確認の推奨を記載"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/201"
+  }
+}

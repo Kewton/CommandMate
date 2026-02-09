@@ -1,0 +1,182 @@
+{
+  "issue_number": 201,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-09",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "cli-patterns.test.tsにCLAUDE_TRUST_DIALOG_PATTERNのテストが必要だが、変更ファイル一覧に含まれていない",
+        "location": "## 技術要件 > 変更ファイル",
+        "recommendation": "CLAUDE_TRUST_DIALOG_PATTERNはcli-patterns.tsに追加されるパブリックexportである。既存のテストファイルsrc/lib/__tests__/cli-patterns.test.tsに、パターンのマッチ/非マッチを検証するテストケースを追加すべき。具体的には: (1) 信頼性ダイアログの全文テキストにマッチすること、(2) 部分一致で正しく動作すること（前後にtmux出力が付加されたケース）、(3) 類似だが異なる文字列（例: 'No, exit'や通常のCLI出力）にマッチしないこと。変更ファイル一覧にsrc/lib/__tests__/cli-patterns.test.tsを追加すべき",
+        "evidence": "src/lib/__tests__/cli-patterns.test.tsはCLAUDE_PROMPT_PATTERN、CLAUDE_THINKING_PATTERN等のパターン定数ごとにテストケースを持つ。CLAUDE_TRUST_DIALOG_PATTERNも同様のカバレッジが期待される。現在のIssueの変更ファイル一覧は3ファイルのみ(cli-patterns.ts, claude-session.ts, claude-session.test.ts)"
+      },
+      {
+        "id": "SF-2",
+        "category": "影響ファイル",
+        "issue": "CLAUDE.mdの更新が変更ファイル一覧に含まれていない",
+        "location": "## 技術要件 > 変更ファイル",
+        "recommendation": "本プロジェクトではCLAUDE.mdの「最近の実装機能」セクションに実装済みIssueの概要・主要コンポーネント・変更点を記録する慣例がある（Issue #187, #191, #193等の実績あり）。Issue #201の修正内容（CLAUDE_TRUST_DIALOG_PATTERN追加、startClaudeSession()のダイアログ検出・自動応答）もCLAUDE.mdに追記すべき。変更ファイル一覧にCLAUDE.mdを追加すること",
+        "evidence": "CLAUDE.mdの「最近の実装機能」セクションには直近のIssue #193, #191, #190, #187, #152等全ての実装済みIssueが記録されている"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "依存関係",
+        "issue": "Auto-Yesポーリング(auto-yes-manager.ts)との相互作用に関する分析が記載されていない",
+        "location": "Issue本文全体",
+        "recommendation": "auto-yes-manager.tsのpollAutoYes()はセッション開始後にプロンプト検出で自動応答を行う。信頼性ダイアログはstartClaudeSession()の初期化フェーズで処理されるため、startClaudeSession()が完了する前にAuto-Yesポーリングが開始されることはない（send/route.tsのフロー: startSession()完了 -> メッセージ送信 -> startPolling()）。この相互作用が問題ないことの一文があると、影響範囲の網羅性が向上する。ただし、フローを追跡すれば問題ないことは自明であるため、Nice to Haveとする",
+        "evidence": "src/app/api/worktrees/[id]/send/route.ts L98-100: startSession()が完了してからメッセージ送信・ポーリング開始。auto-yes-manager.tsはsrc/app/api/worktrees/[id]/auto-yes/route.tsから起動され、セッション開始とは独立したタイミングだが、Auto-Yesが有効でも信頼性ダイアログ時点ではプロンプト検出できない（CLAUDE_PROMPT_PATTERNにマッチしない）ため誤応答のリスクはない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント更新",
+        "issue": "Issue #198(Epic)との関連でサイズ見積もりの妥当性を確認する記述がない",
+        "location": "## 技術要件 > サイズ",
+        "recommendation": "サイズ見積もりがS(小)で「3ファイル、約30行」とあるが、本レビューで追加されるテストファイル(cli-patterns.test.ts)とCLAUDE.mdの更新を含めると、実質5ファイルへの変更となる。テスト追加分の行数(+20-30行程度)を含めても全体としてはS(小)の範囲内に収まると考えられるが、ファイル数の記載を更新するとより正確になる",
+        "evidence": "変更対象: (1) src/lib/cli-patterns.ts (+3行), (2) src/lib/claude-session.ts (+15行), (3) tests/unit/lib/claude-session.test.ts (+30行), (4) src/lib/__tests__/cli-patterns.test.ts (+15行, SF-1), (5) CLAUDE.md (+15行, SF-2)"
+      },
+      {
+        "id": "NTH-3",
+        "category": "移行考慮",
+        "issue": "Claude CLI v2.x以前のバージョンとの後方互換性に関する記述が明示的にない",
+        "location": "Issue本文全体",
+        "recommendation": "CLAUDE_TRUST_DIALOG_PATTERNは信頼性ダイアログが表示されない場合（v2.x未満やダイアログ済みワークスペース）には単にマッチせず、既存のポーリングフローがそのまま動作する。つまり破壊的変更はない。Issue本文にも「既存のセッション初期化フロー（ダイアログなし）に回帰がないこと」が受け入れ条件として含まれているため、後方互換性は事実上保証されている。この点を明示的に一文記載すると、レビュアーの確認コストが下がる",
+        "evidence": "claude-session.ts L332-354のポーリングループ: CLAUDE_TRUST_DIALOG_PATTERNマッチは条件分岐の一つとして追加されるのみで、マッチしない場合は既存ループ動作に影響しない。受け入れ条件の最後の項目「既存のセッション初期化フロー（ダイアログなし）に回帰がないこと」が後方互換性の保証に相当する"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_changed_files": [
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "change_type": "追加",
+        "description": "CLAUDE_TRUST_DIALOG_PATTERN定数のexport追加（約3行）。既存のexportには影響しない"
+      },
+      {
+        "file": "src/lib/claude-session.ts",
+        "change_type": "修正",
+        "description": "startClaudeSession()のポーリングループ内（L332-354）にCLAUDE_TRUST_DIALOG_PATTERNのimportとマッチ条件分岐を追加。新規importとif文追加のみで、既存の制御フローは変更しない"
+      },
+      {
+        "file": "tests/unit/lib/claude-session.test.ts",
+        "change_type": "追加",
+        "description": "信頼性ダイアログ関連テストケースの追加（3件: 検出時Enter送信、Enter後プロンプト検出、二重送信防止）"
+      }
+    ],
+    "should_be_changed_files": [
+      {
+        "file": "src/lib/__tests__/cli-patterns.test.ts",
+        "change_type": "追加",
+        "description": "CLAUDE_TRUST_DIALOG_PATTERNのパターンマッチテスト追加（SF-1）"
+      },
+      {
+        "file": "CLAUDE.md",
+        "change_type": "更新",
+        "description": "最近の実装機能セクションにIssue #201の概要を追記（SF-2）"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/lib/cli-tools/claude.ts",
+        "impact": "なし",
+        "reason": "startClaudeSession()をラップするClaudeTool.startSession()経由で呼び出されるが、インターフェースの変更はないため影響なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/send/route.ts",
+        "impact": "なし",
+        "reason": "cliTool.startSession()経由でstartClaudeSession()を呼び出すが、戻り値型やエラー型の変更はないため影響なし。ダイアログ自動応答によりタイムアウトエラー頻度が減少する（正の影響）"
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "impact": "なし",
+        "reason": "セッション初期化完了後にポーリング開始するため、信頼性ダイアログとの相互作用はない"
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "impact": "なし",
+        "reason": "cli-patterns.tsからインポートしているが、CLAUDE_TRUST_DIALOG_PATTERNは使用しない"
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "impact": "なし",
+        "reason": "cli-patterns.tsからインポートしているが、CLAUDE_TRUST_DIALOG_PATTERNは使用しない"
+      }
+    ],
+    "breaking_changes": {
+      "has_breaking_changes": false,
+      "reason": "CLAUDE_TRUST_DIALOG_PATTERNは新規追加のexportであり、既存のexportには影響しない。startClaudeSession()のポーリングループに条件分岐を追加するのみで、パターン未マッチ時は既存動作と完全に同一。関数シグネチャの変更もなし"
+    },
+    "dependency_impact": {
+      "new_dependencies": "なし（新規外部ライブラリの追加はない）",
+      "internal_dependency_changes": "cli-patterns.tsからclaude-session.tsへのCLAUDE_TRUST_DIALOG_PATTERNのimport追加のみ。この依存方向は既存（CLAUDE_PROMPT_PATTERN, stripAnsi）と同一であり、新たな循環依存は発生しない"
+    },
+    "test_coverage": {
+      "existing_tests": [
+        "tests/unit/lib/claude-session.test.ts - startClaudeSession()の初期化タイムアウト、プロンプト検出、安定化待機テスト",
+        "src/lib/__tests__/cli-patterns.test.ts - CLAUDE_PROMPT_PATTERN、CLAUDE_THINKING_PATTERNのマッチテスト"
+      ],
+      "required_new_tests": [
+        "tests/unit/lib/claude-session.test.ts - 信頼性ダイアログ検出時にEnter送信されること",
+        "tests/unit/lib/claude-session.test.ts - Enter送信後にプロンプト検出で初期化完了すること",
+        "tests/unit/lib/claude-session.test.ts - Enter送信が1回のみ行われること（二重送信防止）",
+        "src/lib/__tests__/cli-patterns.test.ts - CLAUDE_TRUST_DIALOG_PATTERNマッチ/非マッチテスト（SF-1）"
+      ],
+      "regression_risk": "低。startClaudeSession()のポーリングループに条件分岐を追加するのみであり、既存テストケース（タイムアウト、プロンプト検出、セパレータ除外、安定化待機）が回帰を検出可能"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/lib/claude-session.ts",
+      "relevance": "直接変更対象: startClaudeSession()ポーリングループ（L332-354）にダイアログ検出ロジック追加"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "直接変更対象: CLAUDE_TRUST_DIALOG_PATTERN定数の追加（L48付近）"
+    },
+    {
+      "file": "tests/unit/lib/claude-session.test.ts",
+      "relevance": "直接変更対象: 信頼性ダイアログ自動応答テスト追加"
+    },
+    {
+      "file": "src/lib/__tests__/cli-patterns.test.ts",
+      "relevance": "追加推奨: CLAUDE_TRUST_DIALOG_PATTERNのパターンテスト（SF-1）"
+    },
+    {
+      "file": "src/lib/cli-tools/claude.ts",
+      "relevance": "間接影響: ClaudeTool.startSession()がstartClaudeSession()をラップ（影響なし）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "relevance": "間接影響: セッション起動フローの呼び出し元（影響なし、正の影響としてタイムアウト減少）"
+    },
+    {
+      "file": "src/lib/tmux.ts",
+      "relevance": "依存: sendKeys()関数（Enter送信に使用、変更なし）"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "間接影響確認: セッション初期化とポーリングの順序関係（影響なし）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "追加推奨: 最近の実装機能セクションへの記録（SF-2）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "実装完了後にIssue #201の概要を「最近の実装機能」セクションに追記すべき"
+    }
+  ]
+}

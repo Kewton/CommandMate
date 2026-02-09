@@ -1,0 +1,140 @@
+{
+  "issue_number": 201,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-02-09",
+  "previous_stages_verified": {
+    "stage1": {
+      "status": "all_addressed",
+      "findings_status": {
+        "MF-1": {
+          "status": "addressed",
+          "verification": "二重送信防止ガード（trustDialogHandledフラグ）が実装タスク2の疑似コードと受け入れ条件の2番目に明記されている"
+        },
+        "SF-1": {
+          "status": "addressed",
+          "verification": "CLAUDE_PROMPT_PATTERNの記述が正確なパターン /^[>❯](\\s*$|\\s+\\S)/m に修正されている"
+        },
+        "SF-2": {
+          "status": "addressed",
+          "verification": "「sendMessageToClaude() への影響」セクションが追加され、影響がない理由（タイムアウト後リトライ、セッション再利用時の再ダイアログ）が詳細に分析されている"
+        },
+        "SF-3": {
+          "status": "addressed",
+          "verification": "「前提条件」セクションでClaude CLIが英語UIのみであることが明記され、将来の多言語対応時は別Issueで対処する旨が記載されている"
+        },
+        "SF-4": {
+          "status": "addressed",
+          "verification": "受け入れ条件の5番目に「Enter送信後、CLAUDE_INIT_TIMEOUT（15秒）の残り時間内にプロンプトが検出されない場合はタイムアウトエラーが発生すること」が追加されている"
+        },
+        "NTH-1": {
+          "status": "addressed",
+          "verification": "「検討した代替案」セクションに案B（--trust-workspaceフラグ）、案C（settings.json事前許可）、案D（UI通知後手動対応）の3案と却下理由が記載されている"
+        },
+        "NTH-2": {
+          "status": "addressed",
+          "verification": "受け入れ条件の4番目にログレベル「info」と出力内容の例が明記されている。ユーザー入力やパス情報を含めない旨も記載"
+        }
+      }
+    },
+    "stage3": {
+      "status": "all_addressed",
+      "findings_status": {
+        "SF-1": {
+          "status": "addressed",
+          "verification": "変更ファイル一覧にsrc/lib/__tests__/cli-patterns.test.tsが追加され、実装タスク4としてテスト内容が具体化されている"
+        },
+        "SF-2": {
+          "status": "addressed",
+          "verification": "変更ファイル一覧にCLAUDE.mdが追加され、実装タスク5として追記内容が明記されている"
+        },
+        "NTH-1": {
+          "status": "addressed",
+          "verification": "「Auto-Yesポーリングとの相互作用」セクションが原因セクションに追加され、相互作用の分析が詳述されている"
+        },
+        "NTH-2": {
+          "status": "addressed",
+          "verification": "サイズ見積もりが「5ファイル、約75行」に更新されている"
+        },
+        "NTH-3": {
+          "status": "addressed",
+          "verification": "「後方互換性」セクションが対応方針に追加され、破壊的変更がないことが明示されている"
+        }
+      }
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "trustDialogHandledフラグの初期値が疑似コードで明示されていない",
+        "location": "## 対応方針 > 実装タスク > 2.",
+        "recommendation": "疑似コードの冒頭に `let trustDialogHandled = false;` の初期化行を追加すべき。フラグの条件分岐（trustDialogHandled === false / true）は記載されているが、初期値の宣言が省略されている。実装者にとっては自明だが、レビュアーやテスト設計者が初期状態を確認する際に参照できる明示的な記載があると望ましい。また、このフラグがポーリングループのスコープ内（ループ外、関数内）で宣言されることを示すと、セッション間で状態がリークしないことが明確になる",
+        "evidence": "疑似コードは「未送信（trustDialogHandled === false）→ Enter送信 + フラグ設定」と「送信済み（trustDialogHandled === true）→ ポーリング継続」を記載しているが、フラグの宣言と初期値の行がない。startClaudeSession()のポーリングループ（claude-session.ts L332-354）のスコープで宣言される必要がある"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "明確性",
+        "issue": "Enter送信の具体的なAPI呼び出しが明示されていない",
+        "location": "## 対応方針 > 実装タスク > 2.",
+        "recommendation": "疑似コードに `await sendKeys(sessionName, '', true)` の形式を記載すると、実装の意図がより明確になる。現在のコードベースでは sendMessageToClaude() (claude-session.ts L410) が同様のパターンで Enter 送信を行っており、一貫性を確保できる。ただし疑似コードの「Enter送信」という記述から実装方法は十分推測可能であるため、Nice to Have とする",
+        "evidence": "claude-session.ts L410: `await sendKeys(sessionName, '', true);` -- sendMessageToClaude()でのEnter送信パターン。tmux.ts L215-216: sendEnter=true の場合 `C-m` が付与される"
+      },
+      {
+        "id": "NTH-2",
+        "category": "技術的妥当性",
+        "issue": "Claude CLIダイアログのキー入力方式（C-m）での動作確認に関する記載がない",
+        "location": "## 対応方針",
+        "recommendation": "tmux の sendKeys で Enter を送信する場合、内部的には `C-m`（Carriage Return）が送信される。Claude CLI の信頼性確認ダイアログが `C-m` を Enter として正しく解釈することは一般的に期待されるが、TUIフレームワーク（ink等）によっては `C-j`（Line Feed）との挙動差異がある場合がある。実装時に手動でのE2E動作確認を行うことで十分対処可能であるため、Nice to Have とする。なお、既存の sendMessageToClaude() が同じ C-m 方式で問題なく動作していることから、リスクは低い",
+        "evidence": "tmux.ts L215-216: sendEnter=true の場合 `tmux send-keys -t \"sessionName\" '' C-m` が実行される。Claude CLIの通常プロンプト（❯）への入力送信は既にこの方式で動作実績がある"
+      }
+    ]
+  },
+  "overall_assessment": {
+    "quality": "high",
+    "readiness": "ready_for_implementation",
+    "comment": "Stage 1（通常レビュー1回目）の7件およびStage 3（影響範囲レビュー1回目）の5件、合計12件の指摘事項が全て適切に反映されている。Issueの記載は以下の点で特に優れている: (1) sendMessageToClaude()およびAuto-Yesポーリングとの相互作用分析が詳細かつ正確、(2) 検討した代替案と却下理由が明確、(3) 後方互換性の保証が受け入れ条件と紐づいている、(4) セキュリティ考慮（ログにユーザー入力を含めない等）が適切。残りの指摘はSF-1（フラグ初期値の明示）が推奨対応、NTH-1/NTH-2が参考情報レベルであり、実装開始を妨げるものではない"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/claude-session.ts",
+      "relevance": "変更対象: startClaudeSession()ポーリングループ（L332-354）にダイアログ検出ロジック追加。trustDialogHandledフラグはこのスコープで宣言される"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "変更対象: CLAUDE_TRUST_DIALOG_PATTERN定数の追加（L48付近）"
+    },
+    {
+      "file": "src/lib/tmux.ts",
+      "relevance": "依存: sendKeys()関数（L207-225）-- Enter送信にsendEnter=trueで使用。C-m方式"
+    },
+    {
+      "file": "tests/unit/lib/claude-session.test.ts",
+      "relevance": "変更対象: 信頼性ダイアログ自動応答テスト追加（検出時Enter送信、初期化完了、二重送信防止）"
+    },
+    {
+      "file": "src/lib/__tests__/cli-patterns.test.ts",
+      "relevance": "変更対象: CLAUDE_TRUST_DIALOG_PATTERNのパターンマッチ/非マッチテスト追加"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "変更対象: 最近の実装機能セクションにIssue #201の概要を追記"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #152, #187のセッション管理改善履歴の記録先。Issue #201も同様に記録予定"
+    }
+  ]
+}

@@ -1,0 +1,179 @@
+{
+  "issue_number": 201,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "CLAUDE_INIT_TIMEOUT定数のJSDocにC-002注記が未反映",
+        "description": "設計書の実装チェックリスト（レビュー指摘対応項目）でC-002として「CLAUDE_INIT_TIMEOUT定数のJSDocにダイアログ応答分（通常1秒未満）を含む旨を注記」が明記されているが、現在のclaude-session.ts L39-49のCLAUDE_INIT_TIMEOUTのJSDocにはダイアログ応答に関する記述がない。実装時にこの注記を忘れないよう、チェックリストの存在を強調する。",
+        "severity": "low",
+        "recommendation": "実装時にCLAUDE_INIT_TIMEOUT定数のJSDoc（claude-session.ts L39-49）に『This timeout also covers trust dialog auto-response time (typically <1s). When reducing this value, consider dialog response overhead.』のような注記を追加すること。設計書のチェックリストに既に記載済みであり、設計と実装の整合性を実装フェーズで担保する事項。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "Issue本文のCLAUDE_PROMPT_PATTERNパターン記述との差異",
+        "description": "Issue本文の「原因」セクションではCLAUDE_PROMPT_PATTERNを「/^[>❯]/m」と記載しているが、実際のコード（cli-patterns.ts L48）は「/^[>❯](\\s*$|\\s+\\S)/m」である。設計書はこの正確なパターンを前提に書かれており問題はないが、Issue本文との記述差異が存在する。仮説検証レポートで既に指摘済みであり、Issueレビューの修正済みだが、将来のIssue参照時に混乱しないよう留意。",
+        "recommendation": "設計書は正確なパターンを前提としているため対応不要。Issue本文の簡略記述は本質（行頭マッチ）に影響しない。"
+      },
+      {
+        "id": "C-002",
+        "title": "テストファイルの配置場所の二重性",
+        "description": "cli-patterns.test.tsが2箇所に存在する（src/lib/__tests__/cli-patterns.test.ts と tests/unit/lib/cli-patterns.test.ts）。設計書は前者（src/lib/__tests__/cli-patterns.test.ts）をパターンテストの追加先として明示しており、Issueレビュー Stage 7で既に指摘・解消済み。設計書とIssueの記載は整合している。",
+        "recommendation": "設計書の記載通りsrc/lib/__tests__/cli-patterns.test.tsにパターンテストを追加すること。既に設計書で明示されているため追加対応不要。"
+      }
+    ]
+  },
+  "consistency_checklist": {
+    "design_vs_codebase": {
+      "status": "consistent",
+      "items": [
+        {
+          "item": "CLAUDE_TRUST_DIALOG_PATTERNの配置場所",
+          "design": "src/lib/cli-patterns.tsに追加",
+          "codebase": "cli-patterns.tsに既存パターン定数（CLAUDE_PROMPT_PATTERN, CLAUDE_THINKING_PATTERN等）が集約されている",
+          "consistency": "整合"
+        },
+        {
+          "item": "startClaudeSession()のポーリングループ構造",
+          "design": "既存ポーリングループ内にCLAUDE_TRUST_DIALOG_PATTERNの条件分岐を追加",
+          "codebase": "claude-session.ts L333-354のwhileループ内にcapturePane→stripAnsi→CLAUDE_PROMPT_PATTERN.testの既存構造が存在",
+          "consistency": "整合"
+        },
+        {
+          "item": "sendKeys()のAPI呼び出し形式",
+          "design": "await sendKeys(sessionName, '', true) でEnter送信",
+          "codebase": "tmux.ts L207-225のsendKeys(sessionName, keys, sendEnter)と一致。sendEnter=trueでC-m送信。claude-session.ts L410でも同形式で使用済み",
+          "consistency": "整合"
+        },
+        {
+          "item": "stripAnsi()の適用",
+          "design": "既存のcleanOutput変数を使用（stripAnsi済み）",
+          "codebase": "claude-session.ts L343: const cleanOutput = stripAnsi(output); L344でcleanOutputをCLAUDE_PROMPT_PATTERN.testに使用",
+          "consistency": "整合"
+        },
+        {
+          "item": "条件分岐の順序",
+          "design": "CLAUDE_PROMPT_PATTERN（先）→ CLAUDE_TRUST_DIALOG_PATTERN（後）",
+          "codebase": "既存コードでCLAUDE_PROMPT_PATTERNチェック（L344）が先に来ている",
+          "consistency": "整合"
+        },
+        {
+          "item": "ログ出力方式",
+          "design": "console.log（既存のclaude-session.ts内ログ方式と統一）",
+          "codebase": "claude-session.ts L308,347,361,411,477,481で一貫してconsole.log/console.errorを使用",
+          "consistency": "整合"
+        },
+        {
+          "item": "import文の拡張",
+          "design": "cli-patterns.tsからCLAUDE_TRUST_DIALOG_PATTERNを追加インポート",
+          "codebase": "claude-session.ts L14-16で既にCLAUDE_PROMPT_PATTERN, stripAnsiをcli-patterns.tsからインポート済み",
+          "consistency": "整合"
+        },
+        {
+          "item": "タイムアウト値の共有",
+          "design": "CLAUDE_INIT_TIMEOUT（15秒）をダイアログ応答と通常プロンプト待機で共有",
+          "codebase": "claude-session.ts L49: CLAUDE_INIT_TIMEOUT = 15000、L328: maxWaitTime = CLAUDE_INIT_TIMEOUT",
+          "consistency": "整合"
+        }
+      ]
+    },
+    "design_vs_issue": {
+      "status": "consistent",
+      "items": [
+        {
+          "item": "問題の根本原因",
+          "design": "❯が行頭以外に出現するためCLAUDE_PROMPT_PATTERNにマッチしない",
+          "issue": "❯が行頭ではなくスペース後に出現するためマッチしない",
+          "consistency": "整合"
+        },
+        {
+          "item": "対応方針",
+          "design": "ポーリングループ内でダイアログ検出→Enter送信（案A採用）",
+          "issue": "案A: startClaudeSession()でダイアログ検出時に自動でEnter送信",
+          "consistency": "整合"
+        },
+        {
+          "item": "変更ファイル",
+          "design": "5ファイル（cli-patterns.ts, claude-session.ts, claude-session.test.ts, cli-patterns.test.ts, CLAUDE.md）",
+          "issue": "3ファイル（Issueレビューにより5ファイルに拡張済み）",
+          "consistency": "整合（設計書がIssueレビュー後の最終版を反映）"
+        },
+        {
+          "item": "受入条件",
+          "design": "二重送信防止、回帰テスト、パターンテストを含む",
+          "issue": "自動応答、正常プロンプト遷移、ログ出力、回帰テスト",
+          "consistency": "整合（設計書がIssueの受入条件を包含し拡張）"
+        },
+        {
+          "item": "パターン文字列",
+          "design": "/Yes, I trust this folder/m",
+          "issue": "CLAUDE_TRUST_DIALOG_PATTERN = /Yes, I trust this folder/m",
+          "consistency": "完全一致"
+        }
+      ]
+    },
+    "design_vs_existing_patterns": {
+      "status": "consistent",
+      "items": [
+        {
+          "item": "パターン定数の命名規則",
+          "design": "CLAUDE_TRUST_DIALOG_PATTERN",
+          "existing": "CLAUDE_PROMPT_PATTERN, CLAUDE_THINKING_PATTERN, CLAUDE_SEPARATOR_PATTERN",
+          "consistency": "整合（CLAUDE_*_PATTERN命名規則に準拠）"
+        },
+        {
+          "item": "パターン定数のexport方式",
+          "design": "export const で直接export",
+          "existing": "全パターン定数がexport constで定義（cli-patterns.ts L16,27,48,53等）",
+          "consistency": "整合"
+        },
+        {
+          "item": "テストの配置パターン",
+          "design": "パターンテスト→src/lib/__tests__/、セッションテスト→tests/unit/lib/",
+          "existing": "既存のcli-patterns.test.tsはsrc/lib/__tests__/、claude-session.test.tsはtests/unit/lib/に配置",
+          "consistency": "整合"
+        },
+        {
+          "item": "初期化ポーリングのcapturePane呼び出し",
+          "design": "capturePane(sessionName, { startLine: -50 })",
+          "existing": "claude-session.ts L337で同一形式を使用",
+          "consistency": "整合"
+        },
+        {
+          "item": "Issue #152/187のプロンプト検出改善との継続性",
+          "design": "Issue #152で導入されたwaitForPrompt()、CLAUDE_POST_PROMPT_DELAYを変更せず、startClaudeSession()のポーリングループのみ修正",
+          "existing": "waitForPrompt()（L257-276）、sendMessageToClaude()（L379-412）は変更不要",
+          "consistency": "整合"
+        }
+      ]
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-201-trust-dialog-auto-response-design-policy.md",
+    "dev-reports/issue/201/issue-review/original-issue.json",
+    "dev-reports/issue/201/issue-review/hypothesis-verification.md",
+    "dev-reports/issue/201/issue-review/summary-report.md",
+    "dev-reports/issue/201/multi-stage-design-review/stage1-review-result.json",
+    "src/lib/cli-patterns.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/lib/__tests__/cli-patterns.test.ts",
+    "tests/unit/lib/cli-patterns.test.ts",
+    "tests/unit/lib/claude-session.test.ts"
+  ],
+  "timestamp": "2026-02-09T14:00:00Z"
+}

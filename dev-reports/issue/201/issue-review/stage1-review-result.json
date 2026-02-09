@@ -1,0 +1,99 @@
+{
+  "issue_number": 201,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-09",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "完全性",
+        "issue": "信頼性ダイアログの自動Enter送信が繰り返しトリガーされることを防ぐガード条件が記載されていない",
+        "location": "## 対応方針 > 実装タスク > 2.",
+        "recommendation": "ポーリングループ内でCLAUDE_TRUST_DIALOG_PATTERNにマッチした際、Enter送信後にフラグを設定して二重送信を防止するか、最大送信回数を制限するガード条件を受け入れ条件と実装タスクに明記すべき。startClaudeSession()のポーリングループは300msごとに実行されるため、Enter送信後もダイアログが消える前に再度マッチしEnterが連打される可能性がある",
+        "evidence": "claude-session.ts L333-354のポーリングループはCLAUDE_INIT_POLL_INTERVAL(300ms)間隔で繰り返し実行される。CLAUDE_TRUST_DIALOG_PATTERNは検出後もバッファに残存する可能性があり、Enter送信後300ms以内にダイアログが消えなければ再度Enterが送信される"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "正確性",
+        "issue": "Issue本文のCLAUDE_PROMPT_PATTERNの記述が実際のコードと異なる",
+        "location": "## 原因 セクション",
+        "recommendation": "Issue本文では「CLAUDE_PROMPT_PATTERN（/^[>❯]/m）」と記載されているが、実際のパターンは/^[>❯](\\s*$|\\s+\\S)/m である。行頭マッチという核心は正しいが、正確なパターンに修正することで誤解を防げる",
+        "evidence": "src/lib/cli-patterns.ts:48 の実際の定義: export const CLAUDE_PROMPT_PATTERN = /^[>❯](\\s*$|\\s+\\S)/m;"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "sendMessageToClaude()への影響分析が不足している",
+        "location": "## 原因 セクション",
+        "recommendation": "Issue本文はstartClaudeSession()の修正のみを実装タスクとして挙げているが、sendMessageToClaude()内のwaitForPrompt()も同様にCLAUDE_PROMPT_PATTERNのみを使用している（claude-session.ts L395）。startClaudeSession()で自動応答が完了すれば通常フローに戻るため影響しないはずだが、その分析を明記すべき。例えばstartClaudeSession()がタイムアウト後にリトライされた場合や、セッション再利用時に再度ダイアログが表示されるケースの考慮が必要",
+        "evidence": "claude-session.ts L394-398: sendMessageToClaude()はCLAUDE_PROMPT_PATTERN.test(stripAnsi(output))でプロンプト検出し、未検出時はwaitForPrompt()にフォールバックする。waitForPrompt()もCLAUDE_PROMPT_PATTERNのみを検出する"
+      },
+      {
+        "id": "SF-3",
+        "category": "明確性",
+        "issue": "CLAUDE_TRUST_DIALOG_PATTERNの検出文字列が英語固定であることの妥当性が記載されていない",
+        "location": "## 対応方針 > 実装タスク > 1.",
+        "recommendation": "Claude CLIが多言語対応（ローカライズ）された場合、パターン「Yes, I trust this folder」がマッチしなくなる可能性がある。現時点でClaude CLIが英語UIのみであることの前提を明記するか、より堅牢な検出パターン（例: 構造的特徴の検出）を検討候補として記載すべき",
+        "evidence": "提案パターン: /Yes, I trust this folder/m は特定の英語文字列にのみマッチする"
+      },
+      {
+        "id": "SF-4",
+        "category": "受け入れ条件",
+        "issue": "Enter送信後の状態遷移に対するタイムアウト処理の受け入れ条件がない",
+        "location": "## 受入条件",
+        "recommendation": "Enter送信後にプロンプトが表示されるまでの追加待機時間を考慮した受け入れ条件を追加すべき。例えば「Enter送信後、CLAUDE_INIT_TIMEOUT内にプロンプトが検出されない場合はタイムアウトエラーが発生すること」を明記する。現在のCLAUDE_INIT_TIMEOUT(15秒)は、ダイアログ応答+プロンプト表示の両方に十分な時間かどうかの検討も必要",
+        "evidence": "claude-session.ts L328: CLAUDE_INIT_TIMEOUT=15000ms。ダイアログ検出・Enter送信にN秒消費した場合、残り(15-N)秒でプロンプト検出まで到達する必要がある"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "代替案（案B, 案Cなど）の検討が記載されていない",
+        "location": "## 対応方針",
+        "recommendation": "案Aは妥当な選択肢だが、検討した代替案（例: claude --trust-workspace フラグでの起動、settings.jsonでの事前許可設定、ユーザーへのUI通知後に手動対応を促す案）の有無と却下理由を記載すると、設計判断の根拠が明確になる",
+        "evidence": "Issue本文には「案A」のみ記載され、他の案は言及なし"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "ログ出力の具体的な内容・レベルが未指定",
+        "location": "## 受入条件",
+        "recommendation": "受け入れ条件に「自動応答時にコンソールログが出力されること」とあるが、ログレベル（info/warn/debug）と出力内容の仕様が未指定。セキュリティイベントとして記録すべきか、通常のinfoログで十分かを明記するとよい",
+        "evidence": "受け入れ条件の3番目: 「自動応答時にコンソールログが出力されること」"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/claude-session.ts",
+      "relevance": "変更対象: startClaudeSession()ポーリングループにダイアログ検出ロジック追加"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "変更対象: CLAUDE_TRUST_DIALOG_PATTERN定数の追加先"
+    },
+    {
+      "file": "tests/unit/lib/claude-session.test.ts",
+      "relevance": "変更対象: 信頼性ダイアログ自動応答テストの追加先"
+    },
+    {
+      "file": "src/lib/tmux.ts",
+      "relevance": "依存: sendKeys()関数（Enter送信に使用）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #152, #187のセッション管理改善履歴の記録先"
+    }
+  ]
+}

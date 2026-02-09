@@ -1,0 +1,50 @@
+{
+  "issue_number": 201,
+  "stage": 1,
+  "stage_name": "設計原則レビュー対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "CLAUDE_TRUST_DIALOG_PATTERN正規表現のアンカリング統一",
+        "section_updated": "設計パターン > パターン定数の外部化（DRY-001）, 実装ガイドライン > コーディング規約, 実装チェックリスト > レビュー指摘対応項目",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "console.logの使用に関する既存コードとの一貫性確認",
+        "section_updated": "設計上の決定事項とトレードオフ > 採用した設計, 実装ガイドライン > コーディング規約, 実装チェックリスト > レビュー指摘対応項目",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "item": "初期化ダイアログ検出をStrategy Patternに一般化する拡張性",
+        "section_updated": "設計上の決定事項とトレードオフ > 採用した設計",
+        "status": "reflected"
+      },
+      {
+        "id": "C-002",
+        "item": "タイムアウト共有制約のドキュメント補強",
+        "section_updated": "前提条件と制約 > 制約, 実装ガイドライン > コーディング規約, 実装チェックリスト > レビュー指摘対応項目",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-201-trust-dialog-auto-response-design-policy.md",
+  "sections_updated": [
+    "設計パターン > パターン定数の外部化（DRY-001）",
+    "設計上の決定事項とトレードオフ > 採用した設計",
+    "前提条件と制約 > 制約",
+    "実装ガイドライン > コーディング規約",
+    "実装チェックリスト",
+    "レビュー履歴",
+    "レビュー指摘事項サマリー"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

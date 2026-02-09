@@ -1,0 +1,37 @@
+{
+  "issue_number": 201,
+  "iteration": 2,
+  "stage": 8,
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "実装タスク4にcli-patterns.test.tsの2重配置問題に関する注意書きを追加。src/lib/__tests__/cli-patterns.test.tsがClaude固有パターンの集約先であること、tests/unit/lib/cli-patterns.test.tsがCodex固有パターン・共通ユーティリティの配置先であることを明記。受入条件にも追加先パス（src/lib/__tests__/cli-patterns.test.ts）を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "実装タスク4の注意書き内にテストファイルの整理・統合は別Issueでの検討とする旨を記載。現時点ではsrc/lib/__tests__/cli-patterns.test.tsへのテスト追加のみで十分であることを明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "技術要件セクションに「間接影響ファイル（変更不要、影響なし確認済み）」サブセクションを新設。claude-poller.ts、hooks/claude-done/route.tsを含む全11件の間接影響確認結果を一覧として記載"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/201"
+  }
+}

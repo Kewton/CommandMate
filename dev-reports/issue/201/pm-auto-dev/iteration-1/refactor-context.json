@@ -1,0 +1,27 @@
+{
+  "issue_number": 201,
+  "refactor_targets": [
+    "src/lib/cli-patterns.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/__tests__/cli-patterns.test.ts",
+    "tests/unit/lib/claude-session.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 100.0,
+    "current_test_count": 97,
+    "current_test_pass_rate": 100.0
+  },
+  "improvement_goals": [
+    "カバレッジを100%維持または向上",
+    "コードの可読性向上（必要に応じて）",
+    "DRY原則の徹底確認",
+    "テストコードの重複削減（必要に応じて）",
+    "JSDocコメントの充実度確認"
+  ],
+  "constraints": [
+    "既存の全テスト（97件）が引き続きパスすること",
+    "CLAUDE_TRUST_DIALOG_PATTERNの意図的な部分一致設計を維持すること",
+    "trustDialogHandledフラグによる二重送信防止ロジックを維持すること",
+    "静的解析エラー0件を維持すること"
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "status": "success",
+  "coverage": 65.0,
+  "coverage_note": "65% overall for modified files (pre-existing untested code lowers average). New code (CLAUDE_TRUST_DIALOG_PATTERN, trust dialog detection logic) is 100% covered by tests.",
+  "unit_tests": {
+    "total": 59,
+    "passed": 59,
+    "failed": 0,
+    "new_tests": 8,
+    "details": {
+      "cli_patterns_test": {
+        "total": 27,
+        "new": 4,
+        "tests": [
+          "should match trust dialog full text",
+          "should match trust dialog with tmux padding (partial match)",
+          "should NOT match 'No, exit' option",
+          "should NOT match regular CLI output"
+        ]
+      },
+      "claude_session_test": {
+        "total": 32,
+        "new": 4,
+        "tests": [
+          "should send Enter when trust dialog is detected",
+          "should send Enter only once even when dialog persists (duplicate prevention)",
+          "should not affect existing dialog-less flow (regression test)",
+          "should complete initialization after trust dialog Enter send"
+        ]
+      }
+    }
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/cli-patterns.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/__tests__/cli-patterns.test.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "CLAUDE.md"
+  ],
+  "commits": [
+    "5e21ab1: fix(claude-session): add trust dialog auto-response for new workspace"
+  ],
+  "message": "TDD implementation complete. Added CLAUDE_TRUST_DIALOG_PATTERN for trust dialog detection and auto Enter response in startClaudeSession() polling loop. All 8 new tests pass. ESLint and TypeScript checks pass with 0 errors. Full unit test suite (2842 tests) passes with no regressions."
+}
