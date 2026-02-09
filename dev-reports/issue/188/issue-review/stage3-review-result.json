@@ -1,0 +1,157 @@
+{
+  "issue_number": 188,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-09",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "useAutoYes.ts(クライアント側)への影響がIssueに記載されていない。current-output/route.tsのisGenerating/thinking応答値を変更すると、WorktreeDetail.tsxのisGeneratingフラグ判定とuseAutoYesのisPromptWaiting伝播に影響する",
+        "location": "## 改善案 P0行 / ## 受け入れ条件",
+        "recommendation": "P0修正（thinking検出がプロンプト検出を無条件スキップする問題）を解消すると、current-output APIのisGeneratingとisPromptWaitingの応答値が変わる。これにより(1) WorktreeDetail.tsx L180のisGenerating判定が変わりUI表示に影響、(2) useAutoYes.tsに渡されるisPromptWaitingが正しく伝播するようになる。改善案セクションにcurrent-output APIの応答スキーマ変更の下流影響としてWorktreeDetail.tsx, useAutoYes.tsを明記すべき",
+        "evidence": "WorktreeDetail.tsx L180: data.isGeneratingでスピナー表示を制御。useAutoYes.ts L49: isPromptWaitingパラメータでauto-response発火を制御。current-output/route.ts L116: isGenerating: thinking, L120: isPromptWaiting。thinkingフラグが変わるとこれら全てに波及する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "破壊的変更",
+        "issue": "P0修正でthinking/prompt優先順位を変更した場合、Issue #161のAuto-Yes誤検出防止との整合性が不明確。特にcurrent-output/route.ts L89-90のthinking条件分岐を変更する際、どの条件下でdetectPromptをスキップし続けるべきかの設計判断が記載されていない",
+        "location": "## 改善案 P1行",
+        "recommendation": "Issue #161の意図は「thinking中に番号付きリストをmultiple_choiceプロンプトと誤検出しない」こと。修正案では以下を明確化すべき: (1) thinkingかつプロンプト+セパレータ共存時は「プロンプト優先」(status-detector.tsと同じ戦略)、(2) thinkingのみでプロンプトなしの場合は「thinking優先」(Issue #161維持)。つまりstatus-detector.tsのL85-107の優先順位をcurrent-output/route.tsにも適用すべきことを明示する",
+        "evidence": "status-detector.ts L85-96: promptDetection.isPrompt → waiting(最優先)。current-output/route.ts L90: thinking ? { isPrompt: false } : detectPrompt() でthinkingが無条件優先。auto-yes-manager.ts L311: detectThinking() → スキップ（Issue #161 Layer 1）。3箇所の戦略が統一されていない"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "テスト計画が受け入れ条件に含まれているが、具体的にどのテストファイルに何を追加すべきかが不明",
+        "location": "## 受け入れ条件",
+        "recommendation": "以下のテストを明示的に計画すべき: (1) status-detector.tsの単体テスト(thinking+prompt共存シナリオ)--現在テストファイルが存在しない、(2) cli-patterns.test.tsにdetectThinking()のウィンドウ境界テスト、(3) current-output/route.tsのthinking/prompt優先順位統合テスト、(4) Issue #161回帰テスト(thinking中にnumbered listがmultiple_choiceとして検出されないこと)",
+        "evidence": "Glob検索でtests/**/*status-detector*に該当するファイルなし。cli-patterns.test.tsにはdetectThinking()の基本テストはあるがウィンドウ境界テストなし。prompt-detector.test.tsは存在するがthinking連携テストなし"
+      },
+      {
+        "id": "SF-3",
+        "category": "依存関係",
+        "issue": "response-poller.tsのextractResponse()内のthinkingPatternチェック(L282, L353)がIssueの影響範囲分析で完全に欠落している",
+        "location": "## 原因分析 / ## 問題点の一覧",
+        "recommendation": "response-poller.tsのextractResponse()はraw行20行ウィンドウ(L236)でthinkingPattern.test(cleanOutputToCheck)を実行(L282)。さらにL353で応答全体にthinkingPatternが含まれていないかチェック。P0/P1修正でthinking検出ウィンドウを縮小する場合、response-poller.tsのウィンドウも統一対象として明記すべき。特にL353の全文チェックは、完了済みthinkingサマリー行が残っている場合に応答保存を誤ってブロックするリスクがある",
+        "evidence": "response-poller.ts L282: const isThinking = thinkingPattern.test(cleanOutputToCheck); L289: isClaudeComplete = ... && !isThinking; L353: if (thinkingPattern.test(response)) { return isComplete: false }。checkLineCount=20のウィンドウで完了済みthinkingサマリーが含まれる可能性あり"
+      },
+      {
+        "id": "SF-4",
+        "category": "移行考慮",
+        "issue": "auto-yes-manager.tsのTHINKING_CHECK_LINE_COUNT=50とstatus-detector.tsのSTATUS_CHECK_LINE_COUNT=15の関係が、本Issue修正後にどうなるべきかが不明確",
+        "location": "## 改善案 P1行",
+        "recommendation": "P1改善案「ウィンドウ方式の統一」を実行する場合、以下を決定して明記すべき: (1) thinking検出ウィンドウの統一値(5行? 15行? 50行?)、(2) prompt検出ウィンドウとの関係(status-detector.tsは15行、prompt-detector.tsのmultiple_choiceは50行)、(3) auto-yes-manager.tsのTHINKING_CHECK_LINE_COUNT=50をstatus-detector.tsのSTATUS_CHECK_LINE_COUNT=15に変更するか、逆か、新規値か。Issue #191で50行に設定した根拠(prompt-detector.tsの50行スキャン範囲との一致)を踏まえた上で判断する必要がある",
+        "evidence": "auto-yes-manager.ts L79: THINKING_CHECK_LINE_COUNT=50 (Issue #191)。status-detector.ts L50: STATUS_CHECK_LINE_COUNT=15。current-output/route.ts L74: 非空行15行。response-poller.ts L236: raw行20行。prompt-detector.ts L297: Math.max(0, lines.length - 50)。5箇所のウィンドウサイズが異なる"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdへの更新が必要になる可能性が記載されていない",
+        "location": "Issue本文全体",
+        "recommendation": "修正完了後、CLAUDE.mdのIssue #180セクション(status-detector.ts関連)とIssue #191セクション(auto-yes-manager.ts関連)に本Issue #188の修正内容との関連を追記する必要がある。また、Issue #188の独立セクションをCLAUDE.mdに追加すべき",
+        "evidence": "CLAUDE.mdは各Issueの主要な変更点を記録しており、thinking/prompt優先順位の変更は重要な設計変更に該当する"
+      },
+      {
+        "id": "NTH-2",
+        "category": "影響ファイル",
+        "issue": "sidebar.ts(deriveCliStatus)への間接影響が言及されていない",
+        "location": "## 改善案",
+        "recommendation": "worktrees/route.tsとworktrees/[id]/route.tsはdetectSessionStatus()を経由してisProcessing/isWaitingForResponseを返す。これをsidebar.tsのderiveCliStatus()が消費してrunning/waitingステータスを導出する。Issue修正によりstatus-detector.tsの判定結果が変わると、サイドバーのステータスドット表示にも影響する。この間接パスを依存関係図として記載すると実装者にとって有用",
+        "evidence": "sidebar.ts L34: if (toolStatus.isProcessing) return 'running'; L35: if (toolStatus.isRunning) return 'ready'。worktrees/route.ts L59-60: statusResult.status === 'running' → isProcessing = true"
+      }
+    ]
+  },
+  "impact_summary": {
+    "directly_modified_files": [
+      "src/app/api/worktrees/[id]/current-output/route.ts",
+      "src/lib/status-detector.ts"
+    ],
+    "indirectly_affected_files": [
+      "src/lib/auto-yes-manager.ts",
+      "src/lib/response-poller.ts",
+      "src/lib/cli-patterns.ts",
+      "src/lib/claude-poller.ts",
+      "src/components/worktree/WorktreeDetail.tsx",
+      "src/hooks/useAutoYes.ts",
+      "src/types/sidebar.ts",
+      "src/app/api/worktrees/route.ts",
+      "src/app/api/worktrees/[id]/route.ts"
+    ],
+    "test_files_needed": [
+      "tests/unit/lib/status-detector.test.ts (新規作成)",
+      "tests/unit/lib/cli-patterns.test.ts (ウィンドウ境界テスト追加)",
+      "tests/unit/prompt-detector.test.ts (thinking連携回帰テスト)",
+      "tests/integration/current-output-thinking.test.ts (thinking/prompt優先順位統合テスト)"
+    ],
+    "breaking_changes": false,
+    "breaking_change_detail": "APIレスポンススキーマ(isGenerating, isPromptWaiting)の値が変わるが、フィールド名は変更なし。フロントエンドは同一リポジトリ内のため後方互換性の問題なし"
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "P0修正の主要対象。L73-74: 非空行15行ウィンドウ、L83-90: thinking無条件優先ロジック、L116: isGenerating応答"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "relevance": "P1修正の参照実装。L85-107: prompt最優先の正しい優先順位。L50: STATUS_CHECK_LINE_COUNT=15のウィンドウサイズ"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "Issue #161 Layer 1防御、Issue #191ウィンドウイング。L79: THINKING_CHECK_LINE_COUNT=50。修正との整合性維持が必要"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "Issue未記載の影響範囲。L236: raw行20行ウィンドウ、L282: thinkingPattern.test、L353: 全文thinkingチェック"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "relevance": "Issue未記載の下流影響。L180: data.isGeneratingでスピナー表示制御"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "Issue未記載の下流影響。L49: isPromptWaitingでauto-response発火制御"
+    },
+    {
+      "file": "src/lib/claude-poller.ts",
+      "relevance": "P2対象。到達不能コードだがstopPolling()はsession-cleanup.tsとmanager.tsから参照"
+    },
+    {
+      "file": "src/types/sidebar.ts",
+      "relevance": "間接影響。L34: deriveCliStatus()がisProcessingからrunningステータスを導出"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "CLAUDE_THINKING_PATTERN定義。detectThinking()はstatus-detector.ts, current-output/route.ts, auto-yes-manager.tsの3箇所から呼ばれる"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #180, #191, #161の設計経緯。修正後に本Issue #188のセクション追加が必要"
+    },
+    {
+      "file": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+      "relevance": "thinking優先ロジック(Layer 1)の導入背景。本修正がLayer 1を破壊しないことの確認に必要"
+    },
+    {
+      "file": "dev-reports/design/issue-191-auto-yes-thinking-windowing-design-policy.md",
+      "relevance": "THINKING_CHECK_LINE_COUNT=50の設計根拠(SF-001)。ウィンドウ統一時の参照"
+    },
+    {
+      "file": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+      "relevance": "status-detector.ts統合の設計方針。prompt最優先の優先順位設計(DR-008)"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "issue_number": 188,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "apply_review_findings",
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "問題箇所1のコードスニペットをworktrees/route.tsのインラインロジックからstatus-detector.tsのdetectSessionStatus()呼び出しに修正。Issue #180での統合経緯を注記し、プロンプト検出が最優先である旨を明記"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "P2問題のclaude-poller.tsの記述を修正。到達不能コードであることを明記し、改善案を「thinkingPattern統一」から「全体をlegacy/deprecated化し将来的に削除検討（Issue #180設計書DR-008/IS-005準拠）」に変更"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "不整合テーブルにstatus-detector.tsの行を追加（全行15行、stripAnsi後）。worktrees/route.ts行をstatus-detector.ts経由として正確に記述し、空行処理カラムを追加して3方式の違いを明確化"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "受け入れ条件セクションを新規追加。6項目: (1)プロンプト表示時5秒以内にready遷移 (2)thinking中はrunningスピナー (3)thinkingサマリー残存時もプロンプト優先 (4)Issue #161互換性 (5)Issue #191整合性 (6)既存テストパス"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "P0問題の表現をcurrent-output/route.tsに限定。status-detector.tsではプロンプト検出が最優先であることを問題箇所1の注記で明記。問題点一覧のP0行からworktrees/route.tsを除去"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "検出ウィンドウの不整合テーブルを3行に拡張（response-poller.ts、status-detector.ts、current-output/route.ts）。空行処理カラムを追加し、3箇所の方式が異なることが根本的な不整合であると明記"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "改善案P2を「claude-poller.tsのthinkingPatternをCLAUDE_THINKING_PATTERNに統一」から「claude-poller.ts全体をlegacy/deprecated化し将来的に削除を検討（startPolling()は外部から呼ばれておらず到達不能。Issue #180設計書のDR-008/IS-005推奨に準拠）」に変更"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "関連セクションにIssue #180を追加。worktrees/route.tsのインラインロジックをstatus-detector.tsに統合した経緯が本Issueの前提であることを明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "原因分析セクションにauto-yes-manager.tsのTHINKING_CHECK_LINE_COUNT=50への言及を補足として追加。Issue #191で修正済みだが本Issueの修正内容との整合性確認が必要である旨を記載。また関連セクションにIssue #191を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 9,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/188"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "issue_number": 188,
+  "title": "fix: 応答完了後もスピナーが表示され続ける（thinkingインジケータの誤検出）",
+  "acceptance_criteria": [
+    "Claude CLIが応答完了してプロンプト（> / ❯）を表示している場合、サイドバーステータスが5秒以内に ready（緑）に変わること",
+    "thinking中（✻ 等のインジケータがアクティブ）は running（スピナー）が表示されること",
+    "応答完了後のthinkingサマリー行（例: ✻ Churned for 41s）がスクロールバックに残っていても、プロンプトが検出されれば ready に遷移すること",
+    "Issue #161のAuto-Yes誤検出防止（2パス検出方式、thinking状態スキップ）が維持されること",
+    "Issue #191のウィンドウイング修正（auto-yes-manager.ts THINKING_CHECK_LINE_COUNT=50）との整合性が保たれること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: status-detector.ts のthinking検出ウィンドウ分離（STATUS_THINKING_LINE_COUNT = 5定数追加、detectSessionStatus内でthinkingLines分離、JSDocコメント追加）",
+    "Task 1.2: current-output/route.ts のdetectSessionStatus()統合（インラインのthinking/prompt判定ロジック削除、detectSessionStatus()呼び出しに変更、promptData取得のためdetectPrompt()個別実行、SF-001トレードオフコメント追加）",
+    "Task 1.3: 単体テスト作成（tests/unit/lib/status-detector.test.ts）- thinking+prompt共存時プロンプト優先検証、thinking+prompt共存時waiting検証、アクティブthinking検証、thinkingサマリー5行外誤検出防止検証、STATUS_THINKING_LINE_COUNT境界テスト、空行を多く含む出力でのthinking/prompt検出テスト",
+    "Task 1.4: 統合テスト作成（tests/integration/current-output-thinking.test.ts）- 応答完了後のスピナー解除検証、thinking中のスピナー表示検証、Issue #161回帰テスト、thinking遷移JSON応答フィールド検証、isPromptWaitingソースオブトゥルース検証",
+    "Task 2.1: response-poller.ts L353のウィンドウ化（全文thinkingチェックを末尾5行チェックに変更、STATUS_THINKING_LINE_COUNT相互参照コメント追加）",
+    "Task 2.2: cli-patterns.test.ts への追加テスト（完了済みthinkingサマリーのマッチテスト、(esc to interrupt)のマッチテスト、アクティブthinkingのマッチテスト）"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-188-thinking-indicator-false-detection-design-policy.md",
+  "work_plan_path": "dev-reports/issue/188/work-plan.md",
+  "reference_issues": [
+    "Issue #161: Auto-Yes誤検出修正（2パス検出方式、thinking状態スキップ）",
+    "Issue #180: ステータス表示の不整合修正（detectSessionStatus()統合の前例）",
+    "Issue #191: Auto-Yes detectThinking()ウィンドウイング修正（THINKING_CHECK_LINE_COUNT=50）",
+    "Issue #193: Claude Code複数選択肢プロンプト検出（DetectPromptOptions追加）"
+  ],
+  "security_requirements": [
+    "Issue #161 Layer 1: thinking中のprompt検出スキップを維持",
+    "Issue #161 Layer 2: 2パス❯検出方式を維持",
+    "Issue #161 Layer 3: 連番検証を維持",
+    "Issue #193 Layer 5 SEC-001: questionEndIndexガードを維持",
+    "Issue #193 SEC-002: stripAnsi()適用を維持",
+    "Issue #193 SEC-003: 固定エラーメッセージを維持",
+    "Issue #191 SF-001: THINKING_CHECK_LINE_COUNT=50整合性を維持",
+    "Issue #138: DoS防止（MAX_CONCURRENT_POLLERS、worktreeId検証）を維持"
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "issue_number": 188,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "設計書Section 4.1.1の修正前コードスニペットの行番号が実装と不一致",
+        "description": "設計書はcurrent-output/route.tsの修正前コードを「L72-94」として記載しているが、実コード上ではthinking検出を含む対象ブロックはL72-94行に収まっている。ただし、設計書のコードスニペット内容（nonEmptyLines, lastSection, thinking = detectThinkingState(cliToolId, lastSection)）は実装のL72-83と正確に一致する。行番号のずれは軽微だが、レビュアーの混乱を防ぐため修正すべき。",
+        "severity": "low",
+        "design_spec": "Section 4.1.1: 修正前 (L72-94)",
+        "actual_impl": "対象コードは概ねL72-94範囲内に存在するが、スニペット末尾(isPromptWaiting)はL94行。範囲表記は概ね妥当"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "設計書Section 4.1.2のstatus-detector.ts修正前スニペットの行番号不正確",
+        "description": "設計書はstatus-detector.tsの修正前コードを「L50」「L82-107」「L100」として記載。実装を確認すると、STATUS_CHECK_LINE_COUNT定数はL50、detectSessionStatus関数はL75-143。detectThinking呼び出しはL100。行番号L82-107は関数内の一部で、実装上はL82-83(lastLines生成)のみ。設計書の「L82-107」は範囲が広すぎ、実際の修正対象行は限定的。",
+        "severity": "low",
+        "design_spec": "Section 4.1.2: L50, L82-107, L100",
+        "actual_impl": "STATUS_CHECK_LINE_COUNT=L50(正確), lastLines=L83, detectThinking=L100(正確)"
+      },
+      {
+        "id": "SF-002",
+        "title": "設計書Section 4.2.1のresponse-poller.ts行番号が実装と不一致",
+        "description": "設計書はresponse-poller.tsの全文thinkingチェックを「L353」「L351-359」として記載。実装を確認すると、当該コードはL351-359ではなくL353行付近。実コードL353: 'if (thinkingPattern.test(response))' は正確に一致している。ただし設計書は「修正前(L351-359)」としているが、実装のL351行は空行であり正確にはL352-358が対象範囲。",
+        "severity": "low",
+        "design_spec": "Section 4.2.1: L351-359",
+        "actual_impl": "L352-358が実際の対象範囲。L353 thinkingPattern.test(response)は正確"
+      },
+      {
+        "id": "SF-003",
+        "title": "設計書Section 2.1の修正前フロー図でcurrent-output/route.tsの非空行フィルタリング未言及",
+        "description": "設計書Section 2.1では修正前のcurrent-output/route.tsフローを「1. 非空行15行取得」と記載しているが、実装では非空行フィルタリングの前にstripAnsiも個別に適用しており(L73: lines.map(l => stripAnsi(l)).filter(line => line.trim() !== ''))、この点が設計書フロー図では省略されている。設計書Section 4.2.2で削除対象として明記されているため致命的ではないが、修正前フローの正確性に影響する。",
+        "severity": "low",
+        "design_spec": "Section 2.1: '1. 非空行15行取得'",
+        "actual_impl": "L73: lines.map(l => stripAnsi(l)).filter(line => line.trim() !== '')でstripAnsi+非空行フィルタの2段階"
+      },
+      {
+        "id": "SF-004",
+        "title": "detectPrompt()への入力不一致: 設計書はcleanOutputをdetectPromptに渡すが、修正後はdetectSessionStatus()が15行ウィンドウ(lastLines)を渡す",
+        "description": "設計書Section 3.1 DR-002代替案のコードスニペットでは、current-output/route.tsでdetectPrompt(cleanOutput, promptOptions)を呼ぶ（全文を渡す）と記載。一方、detectSessionStatus()内部ではdetectPrompt(lastLines, promptOptions)を呼んでおり、lastLinesは15行ウィンドウ。これは正しいステータス検出のため意図的だが、current-output/route.tsの「個別detectPrompt()再実行」で全文(cleanOutput)を渡す設計と、detectSessionStatus()内の15行ウィンドウの違いについて明確な説明が設計書にない。detectPrompt()内部で50行ウィンドウを独自に切り出すため実用上の問題はないが、入力の差異を文書化すべき。",
+        "severity": "medium",
+        "design_spec": "Section 3.1 DR-002代替案: detectPrompt(cleanOutput, promptOptions)",
+        "actual_impl": "detectSessionStatus()内: detectPrompt(lastLines, promptOptions) (15行), DR-002代替案: detectPrompt(cleanOutput, promptOptions) (全文)"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "response-poller.tsのcheckForResponse()内L548-554にもう一つの全文thinkingチェックが存在",
+        "description": "設計書はresponse-poller.tsのL353(extractResponse()内)を修正対象としているが、checkForResponse()のL547-554にもthinkingPattern.test(cleanOutput)による全文チェックがある。このチェックはprompt応答マーク処理のためだが、設計書Section 4の修正対象として言及されていない。別の目的（pending promptのanswered処理）のため修正不要とも解釈できるが、設計書の「6箇所の不統一」（P1）との整合性を明確にすべき。",
+        "severity": "low",
+        "design_spec": "Section 4.2.1: L353のみ言及",
+        "actual_impl": "response-poller.ts L547-554にも全文thinkingPattern.test(cleanOutput)が存在"
+      },
+      {
+        "id": "C-002",
+        "title": "Issue #180設計との整合性: status-detector.tsが既にdetectThinkingに15行ウィンドウを渡している",
+        "description": "設計書はstatus-detector.tsのthinking検出ウィンドウを15行から5行に縮小すると記載。Issue #180の設計書では、detectSessionStatus()のウィンドウは15行（STATUS_CHECK_LINE_COUNT）と定義されている。Issue #188の修正でthinking検出のみ5行に分離することはIssue #180の設計からの進化であり、矛盾ではないが、Issue #180設計書の更新や参照を設計書Section 11の関連Issue整合性表に明記すべき。",
+        "severity": "low",
+        "design_spec": "Section 11: Issue #180は'worktrees/route.tsのdetectSessionStatus()統合設計をcurrent-output/route.tsにも適用'",
+        "actual_impl": "status-detector.tsのウィンドウ構造自体も変更される（15行一本→15行+5行分離）。Issue #180設計書の更新は言及なし"
+      },
+      {
+        "id": "C-003",
+        "title": "設計書Section 5.1のthinking/prompt優先順位説明の一部不正確",
+        "description": "設計書Section 5.1の表では'Issue #161 Layer 1: thinking中のprompt検出スキップ'の維持方法を'detectSessionStatus()の優先順位で維持（thinking優先 = プロンプト未検出時のみ）'と記載。しかしdetectSessionStatus()の実際の優先順位は「プロンプト最優先(L85-96) → thinking(L98-107)」であり、「thinking優先」ではなく「プロンプト最優先」が正しい。設計書Section 2.2のフロー図は正しく記載されているため致命的ではないが、Section 5.1の表現が誤解を招く。",
+        "severity": "low",
+        "design_spec": "Section 5.1: 'thinking優先 = プロンプト未検出時のみ'",
+        "actual_impl": "detectSessionStatus(): プロンプト検出が最優先(L85-96)、thinkingはプロンプト未検出時のみ(L98-107)"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "DR-001: detectSessionStatus()共通化",
+      "design_spec": "current-output/route.tsのインラインロジックをdetectSessionStatus()に統合",
+      "current_impl": "current-output/route.ts L72-94: インラインでdetectThinkingState+detectPromptを個別実行。worktrees/route.ts L58, [id]/route.ts L58: 既にdetectSessionStatus()を使用",
+      "gap": "修正前の状態は設計書の記載通り。worktrees/route.tsが既にdetectSessionStatus()を使用していることも正確に確認済み",
+      "status": "一致"
+    },
+    {
+      "design_item": "DR-002代替案: promptDataは呼び出し元で個別取得",
+      "design_spec": "detectSessionStatus()後にthinking=falseの場合のみdetectPrompt()を個別実行",
+      "current_impl": "current-output/route.ts L90: thinking ? { isPrompt: false } : detectPrompt(cleanOutput, promptOptions)で既に条件分岐あり",
+      "gap": "修正後もthinking条件でdetectPrompt()の呼び出しを制御する点は一貫。detectSessionStatus()のhasActivePromptをisPromptWaitingに使用する設計も妥当",
+      "status": "一致"
+    },
+    {
+      "design_item": "DR-003: thinking検出ウィンドウ5行分離",
+      "design_spec": "STATUS_THINKING_LINE_COUNT = 5として新定数追加、thinkingLines変数でウィンドウ分離",
+      "current_impl": "status-detector.ts L50: STATUS_CHECK_LINE_COUNT = 15のみ存在。L83: lastLinesは15行。L100: detectThinking(cliToolId, lastLines)で15行ウィンドウをthinkingに使用",
+      "gap": "修正前の状態は設計書の記載通り。5行への分離は未実装（Issue #188の修正対象）",
+      "status": "一致（修正前の状態が設計書と合致）"
+    },
+    {
+      "design_item": "DR-004: response-poller.ts L353のウィンドウ化",
+      "design_spec": "応答全文チェック(thinkingPattern.test(response))を末尾5行チェックに変更",
+      "current_impl": "response-poller.ts L353: thinkingPattern.test(response)で応答全文をチェック",
+      "gap": "修正前の状態は設計書の記載通り",
+      "status": "一致（修正前の状態が設計書と合致）"
+    },
+    {
+      "design_item": "SF-002: STATUS_THINKING_LINE_COUNT命名によるauto-yes-manager.tsとの衝突回避",
+      "design_spec": "auto-yes-manager.tsのTHINKING_CHECK_LINE_COUNT=50と名前衝突を回避するためSTATUS_プレフィックスを付与",
+      "current_impl": "auto-yes-manager.ts L79: THINKING_CHECK_LINE_COUNT = 50がexport済み",
+      "gap": "auto-yes-manager.tsの定数名・値は設計書の記載通り",
+      "status": "一致"
+    },
+    {
+      "design_item": "ウィンドウサイズ統一ポリシー（Section 3.2）",
+      "design_spec": "thinking検出: 5行(status-detector), 50行(auto-yes-manager) / プロンプト検出: 15行(status-detector), 50行(prompt-detector内部) / 応答完了: 20行(response-poller)",
+      "current_impl": "status-detector: 15行(L50), auto-yes-manager: 50行(L79), prompt-detector: 50行(L297 scanStart), response-poller: 20行(L236 checkLineCount)",
+      "gap": "現状のウィンドウサイズはstatus-detectorが15行一本（thinkingもプロンプトも15行）。設計書のthinking=5行は新規追加の変更仕様。他のウィンドウサイズ値は設計書と完全一致",
+      "status": "一致"
+    },
+    {
+      "design_item": "関連Issue整合性: Issue #161 Layer 1-3",
+      "design_spec": "Layer 1(thinking中のpromptスキップ): detectSessionStatus()の優先順位で維持 / Layer 3(連番検証): prompt-detector.ts変更なし",
+      "current_impl": "prompt-detector.ts L366-373: isConsecutiveFromOne()でLayer 3維持。auto-yes-manager.ts L310-313: detectThinking()でLayer 1維持",
+      "gap": "設計書の記載通り。prompt-detector.tsは変更なし",
+      "status": "一致"
+    },
+    {
+      "design_item": "関連Issue整合性: Issue #193 Layer 5 SEC-001",
+      "design_spec": "prompt-detector.tsのDetectPromptOptions、buildDetectPromptOptions()は変更なし",
+      "current_impl": "prompt-detector.ts L22-35: DetectPromptOptions interface存在。cli-patterns.ts L204-211: buildDetectPromptOptions()存在。prompt-detector.ts L389-394: Layer 5 SEC-001ガード存在",
+      "gap": "設計書の記載通り",
+      "status": "一致"
+    },
+    {
+      "design_item": "関連Issue整合性: Issue #191 SF-001",
+      "design_spec": "auto-yes-manager.tsのTHINKING_CHECK_LINE_COUNT=50は変更なし",
+      "current_impl": "auto-yes-manager.ts L79: THINKING_CHECK_LINE_COUNT = 50",
+      "gap": "設計書の記載通り",
+      "status": "一致"
+    },
+    {
+      "design_item": "変更なしファイル確認（Section 10）",
+      "design_spec": "auto-yes-manager.ts, prompt-detector.ts, cli-patterns.ts, worktrees/route.tsは変更なし",
+      "current_impl": "全4ファイルが設計書の想定する状態と一致",
+      "gap": "設計書の記載通り",
+      "status": "一致"
+    }
+  ],
+  "reviewed_files": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts"
+  ],
+  "timestamp": "2026-02-09T11:00:00Z"
+}

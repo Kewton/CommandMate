@@ -1,0 +1,110 @@
+{
+  "issue_number": 188,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "detectPrompt() の二重実行リスク（DR-002代替案）",
+        "description": "current-output/route.ts で detectSessionStatus() を呼んだ後に promptData 取得のため detectPrompt() を再実行する設計。detectSessionStatus() 内部で既に detectPrompt() を実行しており、同じ入力に対する二重計算が発生する。パフォーマンスへの影響は軽微だが、SRP の観点からステータス判定とプロンプト詳細データ取得の責務を明確に分離する方法を検討すべき。",
+        "principle": "SRP / DRY",
+        "severity": "low",
+        "recommendation": "detectSessionStatus() の戻り値に optional な promptDetectionResult を含めるか、あるいは detectSessionStatus() を呼ばずにプロンプト検出結果をキャッシュして再利用するヘルパーを導入する。ただし設計書が述べる通り SRP を維持するために呼び出し元で個別取得する判断は合理的であり、トレードオフとして許容可能。"
+      },
+      {
+        "id": "SF-002",
+        "title": "thinking検出ウィンドウサイズの散在（5行 vs 50行 vs 20行）",
+        "description": "thinking 検出のウィンドウサイズが status-detector.ts(5行)、auto-yes-manager.ts(50行)、response-poller.ts(20行) で異なる。各箇所の目的が異なることは設計書で説明されているが、定数名が重複（THINKING_CHECK_LINE_COUNT が status-detector.ts と auto-yes-manager.ts の両方に存在する）し、将来の混乱リスクがある。",
+        "principle": "DRY / KISS",
+        "severity": "low",
+        "recommendation": "status-detector.ts の定数名を THINKING_WINDOW_LINES や STATUS_THINKING_LINE_COUNT など、auto-yes-manager.ts と区別可能な名称にすることを推奨。定数値の意図が名前から明確になる。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "response-poller.ts L353 のウィンドウ化でマジックナンバー 5",
+        "description": "DR-004 で response-poller.ts の thinking チェックを末尾5行に変更するが、この 5 は status-detector.ts の THINKING_CHECK_LINE_COUNT と同じ値。意味的には同じ目的のウィンドウサイズだが、response-poller.ts では定数化されていない（インライン 5）。",
+        "principle": "DRY",
+        "recommendation": "response-poller.ts 内にも THINKING_TAIL_LINE_COUNT のような定数を定義するか、共有定数として cli-patterns.ts に配置することを検討。YAGNI の観点から即座の対応は不要だが、将来のメンテナンス性向上のために留意。"
+      },
+      {
+        "id": "C-002",
+        "title": "current-output/route.ts の非空行フィルタリング除去の暗黙的影響",
+        "description": "P0 修正で非空行フィルタリング（nonEmptyLines）を除去し、detectSessionStatus() の全行ベースウィンドウに統一する。この変更により、空行が多いバッファでは検出ウィンドウの実効的なカバー範囲が変わる可能性がある。設計書では言及されているが、テストケースに空行多数のシナリオが明示されていない。",
+        "principle": "KISS",
+        "recommendation": "テスト設計に「空行を含む出力での thinking/prompt 検出」シナリオを追加することを検討。"
+      },
+      {
+        "id": "C-003",
+        "title": "detectSessionStatus() の汎用化と caller 固有ロジックの分離",
+        "description": "現在 detectSessionStatus() は StatusDetectionResult を返すが、current-output/route.ts は isGenerating, thinking, thinkingMessage, isPromptWaiting, promptData 等の多くのフィールドを JSON で返す必要がある。statusResult からこれらを導出するマッピングロジックが route.ts 側に残る。将来的に caller が増えた場合、このマッピングが重複する可能性がある。",
+        "principle": "OCP",
+        "recommendation": "現時点では caller が 2 箇所（worktrees/route.ts, current-output/route.ts）のみのため YAGNI で許容。caller が 3 箇所以上に増えた場合にマッピング関数の共通化を検討。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principles_evaluation": {
+    "SRP": {
+      "status": "pass",
+      "score": 4,
+      "notes": "status-detector.ts のステータス検出責務は明確に維持されている。DR-002 代替案の採用により promptData を StatusDetectionResult に含めないことで SRP を堅持。current-output/route.ts からのインラインロジック除去も SRP 改善。"
+    },
+    "OCP": {
+      "status": "pass",
+      "score": 4,
+      "notes": "ウィンドウサイズの定数化により将来の調整が容易。detectSessionStatus() の優先順位ロジックは既存の拡張ポイント（新しい CLI ツール追加時）を維持。"
+    },
+    "LSP": {
+      "status": "pass",
+      "score": 5,
+      "notes": "本修正の対象範囲に LSP が適用される継承関係は存在しない。CLIToolType の switch-case パターンは既存設計を踏襲しており問題なし。"
+    },
+    "ISP": {
+      "status": "pass",
+      "score": 5,
+      "notes": "StatusDetectionResult インターフェースは必要最小限のフィールドを維持。DR-002 代替案により promptData を含めないことで ISP を遵守。"
+    },
+    "DIP": {
+      "status": "pass",
+      "score": 4,
+      "notes": "current-output/route.ts が具象の detectThinking() から抽象の detectSessionStatus() に依存を移行。status-detector.ts が cli-patterns.ts と prompt-detector.ts に依存する構造は適切（高レベルモジュールが低レベルモジュールに依存しない方向）。"
+    },
+    "KISS": {
+      "status": "pass",
+      "score": 4,
+      "notes": "thinking 検出ウィンドウ縮小はシンプルなアプローチ。detectSessionStatus() の再利用により current-output/route.ts のコード複雑度が低減。ウィンドウサイズの使い分け（5行/15行/50行）は目的に応じた適切な複雑さ。"
+    },
+    "YAGNI": {
+      "status": "pass",
+      "score": 5,
+      "notes": "全箇所のウィンドウ統一を行わず問題のある箇所のみ修正するのは優秀な YAGNI 適用。auto-yes-manager.ts を変更しない判断も正しい。P2 修正（claude-poller.ts の deprecation）を将来 Issue に委ねる判断も適切。"
+    },
+    "DRY": {
+      "status": "pass",
+      "score": 4,
+      "notes": "detectSessionStatus() 共通化は DRY 原則の正しい適用。ただし detectPrompt() の二重実行（SF-001）と thinking ウィンドウサイズ定数の散在（SF-002）に軽微な DRY 違反が残る。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-188-thinking-indicator-false-detection-design-policy.md",
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/prompt-detector.ts",
+    "src/app/api/worktrees/route.ts"
+  ],
+  "timestamp": "2026-02-09T00:00:00Z"
+}
