@@ -1,0 +1,126 @@
+{
+  "issue_number": 208,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-09",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "関連コードテーブルの行番号がソースコードの実際の行番号と一致しない",
+        "location": "## 関連コード セクション",
+        "recommendation": "各ファイルの行番号を実際のソースコードに合わせて修正する。cli-patterns.ts:207-209 -> 218-222、auto-yes-manager.ts:317-318 -> 317、prompt-detector.ts:313-329はおおよそ正確だが、338-373はPass 2の範囲として338-403が正確（Layer 3-5を含む）。auto-yes-resolver.ts:23-36は正確。",
+        "evidence": "cli-patterns.ts: buildDetectPromptOptions()は実際にはL218-225に定義されている（Issueでは207-209と記載）。auto-yes-manager.ts: buildDetectPromptOptions呼び出しはL317（Issueでは317-318と記載だが2行目はdetectPrompt呼び出しのためこれは許容範囲）。prompt-detector.ts: Pass 1はL313-329（正確）、Pass 2はL338-373と記載だがLayer 5（L394-403）まで含めるべき。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "Layer 5（SEC-001）の分析がやや不正確 -- 「無効」ではなく「条件付きで通過」と表現すべき",
+        "location": "## 根本原因分析 > 各防御層の分析 テーブル",
+        "recommendation": "Layer 5の「効果」列を「無効」から「条件付きで通過」に変更し、「理由」列を「番号リスト上部にテキスト行が存在する場合、questionEndIndex >= 0 となりガードが発動しない。テキスト行が存在しない場合はLayer 5が防御として機能する」と修正する。現状の「無効」は誤解を招く表現であり、Layer 5は特定条件（questionEndIndex === -1）では依然として有効な防御層である。",
+        "evidence": "prompt-detector.ts L394-403: Layer 5は requireDefault === false && questionEndIndex === -1 の場合にisPrompt: falseを返す。Issue #208の発生シナリオでは番号リスト上部にテキスト行が存在するためquestionEndIndex >= 0となり通過するが、テキスト行がない番号リストのみの場合はLayer 5が機能する。"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "detectSessionStatus()経由のdetectPrompt()呼び出しパスがstatus-detector.tsにも存在するが、影響範囲の記載が不足",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "影響範囲セクションに、status-detector.ts L134-135でもbuildDetectPromptOptions(cliToolId)経由でdetectPrompt()が呼び出されている事実を追記する。status-detector.tsは既にrequireDefaultIndicator: falseの設定を伝搬しているため、同じ誤検出パスが存在する。サイドバーやワークツリー詳細のステータス表示にも影響が波及する可能性がある。",
+        "evidence": "status-detector.ts L134: const promptOptions = buildDetectPromptOptions(cliToolId); L135: const promptDetection = detectPrompt(lastLines, promptOptions); -- Claude CLIの場合、ここでもrequireDefaultIndicator: falseが適用され、番号付きリストをwaitingステータスとして誤検出する可能性がある。ただし、STATUS_CHECK_LINE_COUNT=15行のウィンドウイングと末尾空行トリムにより、auto-yes-manager.tsの5000行バッファよりも検出範囲が狭いため、発生頻度は低い。"
+      },
+      {
+        "id": "SF-3",
+        "category": "明確性",
+        "issue": "Issue #193の設計意図と本Issueのバグの関係性の説明が不十分",
+        "location": "## 根本原因分析 > 背景 セクション",
+        "recommendation": "背景セクションに以下を追記すべき: (1) Issue #193はClaude Codeの選択肢プロンプト（実際のプロンプト）を検出するために導入された正当な設計判断であったこと、(2) Issue #193のLayer 5（SEC-001）は「question行が存在しない番号リスト」に対する防御として機能するが、テキスト行が番号リストの上部に存在するケースは防御できないこと、(3) Issue #161の多層防御のうちPass 1（Layer 2）がrequireDefaultIndicator: falseによって無効化されたことが主要な防御崩壊ポイントであること。",
+        "evidence": "Issue #193のbodyに記載: 「Layer 5 [SEC-001]: requireDefaultIndicator=false かつ questionEndIndex === -1（質問行未検出）時にisPrompt: falseを返し、番号リストのみの出力でのAuto-Yes誤検出を防止」。Issue #208のシナリオではテキスト行が存在するためこのガードを通過する。"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "修正方針や対策案が記載されていない",
+        "location": "Issue本文全体",
+        "recommendation": "バグ報告Issueとしては根本原因分析と影響範囲の記載は十分だが、対策案の方向性（例: requireDefaultIndicator: falseの場合に追加の防御層を導入する、出力の文脈判定を強化する、プロンプトと通常出力の構造的な差異を利用する等）を少なくとも候補レベルで記載すると、実装フェーズでの設計判断が効率化される。Issue #161やIssue #193が詳細な対策案を含んでいたことと比較して、本Issueは分析のみで対策案が欠落している。",
+        "evidence": "Issue #161は3つの対策案（案1: 厳格プロンプト検出、案2: コンテキスト判定、案3: 選択肢パターン厳密化）を記載。Issue #193は5つのPhaseに分かれた詳細な対策案を記載。Issue #208は根本原因分析のみ。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "Issue #191のウィンドウイング（THINKING_CHECK_LINE_COUNT=50）がthinking検出の防御を期待どおりに限定するメカニズムの補足がない",
+        "location": "## 根本原因分析 > 各防御層の分析 テーブル",
+        "recommendation": "Layer 1（thinking検出）の分析に、THINKING_CHECK_LINE_COUNT=50行ウィンドウ内にthinkingインジケーターが存在しない場合はthinking防御が通過する旨を補足するとよい。サブエージェント完了後は末尾50行にthinkingインジケーターが含まれないため、Layer 1が発動しないことの根拠がより明確になる。",
+        "evidence": "auto-yes-manager.ts L310-314: recentLines = cleanOutput.split('\\n').slice(-THINKING_CHECK_LINE_COUNT).join('\\n'); if (detectThinking(cliToolId, recentLines)) { scheduleNextPoll(...); return; }"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "pollAutoYes()のdetectPrompt()にcleanOutput全文が渡されている点の記載がない",
+        "location": "## 根本原因分析 > 発生メカニズム フロー図",
+        "recommendation": "フロー図のステップ3に「detectPrompt(cleanOutput, ...)はcleanOutput全文（最大5000行）を受け取り、内部で末尾50行をスキャンする」という補足を追加すると、バッファ全体が検出対象となることが明確になる。これはstatus-detector.tsの15行ウィンドウとの対比にもなる。",
+        "evidence": "auto-yes-manager.ts L318: const promptDetection = detectPrompt(cleanOutput, promptOptions); -- cleanOutputは5000行キャプチャの全文。prompt-detector.ts L306: const scanStart = Math.max(0, lines.length - 50); -- detectMultipleChoicePrompt()内で末尾50行がスキャンされる。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "明確性",
+        "issue": "再現手順のステップ4「サブエージェント完了後、tmuxバッファに番号付きリストが残る」の表現が曖昧",
+        "location": "## 再現手順 セクション",
+        "recommendation": "ステップ4を「サブエージェント完了後、Claude CLIが結果サマリーを番号付きリスト形式で出力する（例: '1. レビューレポートを作成しました' '2. テスト結果を更新しました'）」のように具体的な出力例を追加するとより再現性が高まる。",
+        "evidence": "Issue本文の再現手順ステップ4: 「サブエージェント完了後、tmuxバッファに番号付きリストが残る」-- 「残る」という表現は受動的で、能動的にClaude CLIが出力するという事実が曖昧。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "lines": "218-225",
+      "relevance": "buildDetectPromptOptions()がClaude CLIに対してrequireDefaultIndicator: falseを返す -- Issue内で参照されている行番号207-209は不正確"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "299-444",
+      "relevance": "detectMultipleChoicePrompt()のPass 1/Pass 2/Layer 3-5の全防御層 -- Issueの核心的分析対象"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "273-363",
+      "relevance": "pollAutoYes()のポーリングループ -- 誤検出から自動送信までの実行パス"
+    },
+    {
+      "file": "src/lib/auto-yes-resolver.ts",
+      "lines": "18-39",
+      "relevance": "resolveAutoAnswer()がmultiple_choiceに対してoptions[0]の番号を返す"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "112-190",
+      "relevance": "detectSessionStatus()も同じbuildDetectPromptOptions(cliToolId)を使用 -- Issueで言及されていないが同じ誤検出パスが存在する可能性"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Issue #161, #193, #191の実装詳細が記載されており、本Issueの背景理解に必須"
+    },
+    {
+      "file": "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+      "relevance": "requireDefaultIndicator: false導入の設計根拠（Issue #208の根本原因）"
+    },
+    {
+      "file": "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+      "relevance": "2パス検出方式の設計根拠（Issue #208で無効化された防御層の由来）"
+    }
+  ]
+}

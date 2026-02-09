@@ -1,0 +1,84 @@
+{
+  "issue_number": 208,
+  "title": "Auto-Yes: Claude CLIで番号付きリストがmultiple_choiceプロンプトとして誤検出され「1」が自動送信される",
+  "problem_summary": "Issue #193で導入されたrequireDefaultIndicator: falseにより、Issue #161の主要防御ポイントであるPass 1ゲート（❯インジケーター存在チェック）が無効化され、通常の番号付きリストと実際の選択肢プロンプトの区別ができなくなった。",
+  "solution_approach": "Layer 5（SEC-001）の厳格化: isQuestionLikeLine()関数を追加し、質問行が実際に質問/選択を求める文であるかを検証する。",
+  "acceptance_criteria": [
+    "通常の番号付きリスト（「1. ファイルを作成」「2. テストを実行」等）がmultiple_choiceプロンプトとして誤検出されない",
+    "Claude Codeの実プロンプト（❯なし、質問行あり、番号付き選択肢）は正しく検出される",
+    "Codex/Gemini（requireDefaultIndicator=true）の既存動作に影響がない",
+    "Issue #193の機能（Claude Code選択肢プロンプト検出）が回帰しない",
+    "Issue #161の機能（2パス検出方式）が回帰しない"
+  ],
+  "implementation_tasks": [
+    {
+      "task": "QUESTION_KEYWORD_PATTERN定数の追加",
+      "file": "src/lib/prompt-detector.ts",
+      "details": "観測済みキーワード: select, choose, pick, which, what, enter, confirm。防御的追加: how, where, type, specify, approve, accept, reject, decide, preference, option。ReDoS安全性コメント追加（SEC-S4-002）"
+    },
+    {
+      "task": "isQuestionLikeLine()関数の実装",
+      "file": "src/lib/prompt-detector.ts",
+      "details": "Pattern 1: ?または？（全角）で終わる行→true。Pattern 2: :で終わり、QUESTION_KEYWORD_PATTERNにマッチ→true。制御文字耐性コメント追加（SEC-S4-004）"
+    },
+    {
+      "task": "Layer 5 SEC-001bガードの実装",
+      "file": "src/lib/prompt-detector.ts",
+      "details": "既存のSEC-001ガード（L402-411）をif (!requireDefault)ブロックでラップ。SEC-001a: 既存のquestionEndIndex===-1チェック。SEC-001b: isQuestionLikeLine()呼び出しを追加"
+    }
+  ],
+  "test_requirements": [
+    {
+      "category": "T1-T4: 誤検出防止テスト",
+      "tests": [
+        "通常の番号付きリスト（見出し+リスト）→ isPrompt: false",
+        "タスク完了リスト → isPrompt: false",
+        "ステップ説明リスト → isPrompt: false",
+        "マークダウン見出し+番号リスト → isPrompt: false"
+      ]
+    },
+    {
+      "category": "T5-T8: Claude Code実プロンプト回帰テスト",
+      "tests": [
+        "疑問符終端の質問行+番号選択肢 → isPrompt: true",
+        "コロン+選択キーワードの質問行+番号選択肢 → isPrompt: true",
+        "chooseキーワード+コロン → isPrompt: true",
+        "質問行なし（既存SEC-001a）→ isPrompt: false"
+      ]
+    },
+    {
+      "category": "T9-T10: requireDefaultIndicator=true回帰テスト",
+      "tests": [
+        "❯付き正常プロンプト（デフォルト設定）→ isPrompt: true",
+        "❯なし番号リスト（デフォルト設定）→ isPrompt: false"
+      ]
+    },
+    {
+      "category": "T11: isQuestionLikeLine()単体テスト",
+      "tests": [
+        "13パターンの検証（間接テスト経由）"
+      ]
+    },
+    {
+      "category": "T12-T14: エッジケーステスト",
+      "tests": [
+        "全角疑問符 → isPrompt: true",
+        "長い出力の末尾に番号付きリスト → isPrompt: false",
+        "Bashツール形式（インデント付き選択肢）→ isPrompt: true"
+      ]
+    }
+  ],
+  "target_coverage": 100,
+  "design_policy_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "work_plan_path": "dev-reports/issue/208/work-plan.md",
+  "related_issues": [
+    {
+      "number": 161,
+      "relation": "2パス検出方式の導入元"
+    },
+    {
+      "number": 193,
+      "relation": "requireDefaultIndicator: false の導入元"
+    }
+  ]
+}

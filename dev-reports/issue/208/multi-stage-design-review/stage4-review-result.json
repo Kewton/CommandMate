@@ -1,0 +1,124 @@
+{
+  "issue_number": 208,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-S4-001",
+        "category": "command_injection",
+        "title": "prompt-response API における answer パラメータの不十分な入力検証",
+        "description": "prompt-response/route.ts の answer パラメータは !answer の falsy チェックのみで、sendKeys() 経由で tmux に直接渡される。sendKeys() はシングルクォートエスケープのみ実施しているが、tmux send-keys コマンドのメタキーシーケンス（例: C-c, C-d 等）や特殊文字による意図しない操作の可能性がある。設計方針書で提案される変更自体にはこの問題は含まれないが、Auto-Yes の誤検出防止を目的とする本修正の文脈では、誤検出時に送信される '1' が安全であることの前提が重要。設計書はこの前提を明示的に記載すべきである。",
+        "severity": "medium",
+        "recommendation": "設計方針書のセキュリティ設計セクション（セクション7）に、Auto-Yesが送信する値の安全性保証に関する記述を追加する。具体的には、resolveAutoAnswer() が返す値は 'y' または数字文字列のみであり、tmux コマンドインジェクションのリスクがないことを明記する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-S4-002",
+        "category": "redos",
+        "title": "QUESTION_KEYWORD_PATTERN の ReDoS 安全性の明示的記載",
+        "description": "設計書のセクション3.3で定義される QUESTION_KEYWORD_PATTERN は /(?:select|choose|pick|which|what|how|where|enter|type|specify|confirm|approve|accept|reject|decide|preference|option)/i である。この正規表現は非キャプチャグループ内の OR（alternation）パターンであり、バックトラッキングの発生しない線形時間構造（O(n)）であるため、ReDoS 安全性は確保されている。ただし、既存の DEFAULT_OPTION_PATTERN や NORMAL_OPTION_PATTERN には 'ReDoS safe (S4-001)' のコメントが付されている一方、新規パターンにはこの注釈がない。",
+        "severity": "low",
+        "recommendation": "QUESTION_KEYWORD_PATTERN の JSDoc コメントに 'ReDoS safe' の注釈を追加し、既存パターンの命名規約（S4-001）に準拠する形で安全性を文書化する。例: '// Alternation-only, no nested quantifiers -- ReDoS safe (S4-002).'"
+      },
+      {
+        "id": "SEC-S4-003",
+        "category": "false_positive_safety",
+        "title": "Auto-Yes 誤動作時のフェイルセーフ不足",
+        "description": "現在のAuto-Yes設計では、誤検出が発生した場合に '1' や 'y' がtmuxセッションに送信される。設計方針書は SEC-001b ガードで誤検出を防止するが、万が一ガードをすり抜けた場合のフェイルセーフ（例: 送信前の二重確認、送信ログの監査証跡、連続応答回数制限）について言及がない。",
+        "severity": "medium",
+        "recommendation": "セキュリティ設計セクションに、SEC-001b がすり抜けた場合の残留リスクと既存の緩和策（Layer 1 thinking検出、Layer 3 連番検証、Layer 4 選択肢数チェック、expiry timeout）を整理して記載する。新規の追加対策は不要だが、多層防御の全体像を明確にすることで、レビューアの安全性確認を容易にする。"
+      },
+      {
+        "id": "SEC-S4-004",
+        "category": "input_validation",
+        "title": "tmux 出力に対する入力バリデーションの境界条件",
+        "description": "detectMultipleChoicePrompt() は tmux の capture-pane 出力をそのまま処理する。tmux 出力には制御文字や不正なUTFシーケンスが含まれる可能性がある。stripAnsi() は主要な ANSI エスケープを除去するが、SEC-002 として文書化されている通り、8-bit CSI (0x9B) や DEC private modes 等のカバレッジ不足がある。isQuestionLikeLine() はこれらの不完全な入力に対しても安全に動作する必要がある。",
+        "severity": "low",
+        "recommendation": "isQuestionLikeLine() が受け取る line パラメータは lines[questionEndIndex]?.trim() 経由であり、制御文字が残留していても endsWith('?') や endsWith(':') + QUESTION_KEYWORD_PATTERN.test() は安全に評価される（制御文字はこれらのパターンにマッチしないため false を返す）。この安全性をコメントとして明記することを推奨する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-S4-005",
+        "category": "information_disclosure",
+        "title": "エラーメッセージにおけるワークツリー情報の露出",
+        "description": "prompt-response/route.ts の L44 で `Worktree '${params.id}' not found` とワークツリーIDをエラーメッセージに含めている。ローカルツールのためリスクは低いが、将来のネットワーク公開時にはAPIレスポンスからの内部ID露出が情報漏洩となる可能性がある。",
+        "recommendation": "現時点では対応不要。将来ネットワーク公開対応を行う際に、エラーメッセージの詳細度を見直す。"
+      },
+      {
+        "id": "SEC-S4-006",
+        "category": "defense_in_depth",
+        "title": "isQuestionLikeLine() のキーワードリスト操作による防御回避",
+        "description": "理論的には、悪意のあるCLIツールがQUESTION_KEYWORD_PATTERNのキーワードを含む行を出力し、その後に番号付きリストを出力することで、isQuestionLikeLine() を通過させることが可能。ただし、攻撃者がtmuxセッション内のCLIツール出力を制御できる場合、既にセッション自体が侵害されているため、この攻撃ベクトルの実質的なリスクは極めて低い。",
+        "recommendation": "現在の脅威モデル（ローカル実行、信頼されたCLIツール）では対応不要。脅威モデルの変更時に再評価する。"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "not_applicable",
+      "notes": "本修正はprompt-detector.tsの内部ロジック変更のみ。アクセス制御の変更なし。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "暗号処理は含まれない。"
+    },
+    "A03_injection": {
+      "status": "pass_with_notes",
+      "notes": "新規追加のisQuestionLikeLine()はtmux出力を読み取るのみで外部コマンドを実行しない。QUESTION_KEYWORD_PATTERNは固定パターンでユーザー入力に基づく動的正規表現構築はない。sendKeys()のコマンドインジェクションリスクは既存コードの課題であり本修正のスコープ外だが、SEC-S4-001として記録。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "SEC-001a/SEC-001bの多層防御設計は適切。Layer 1-5の各層が独立した防御ポイントとして機能する。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "not_applicable",
+      "notes": "設定変更を含まない。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "外部依存の追加なし。"
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "notes": "認証機能の変更なし。"
+    },
+    "A08_data_integrity_failures": {
+      "status": "pass",
+      "notes": "detectPrompt()の結果はisPromptフラグとして使用され、データの永続化には直接関与しない。"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass_with_notes",
+      "notes": "既存のloggerインフラを使用。SEC-003（ログインジェクション対策）は既に実施済み。isQuestionLikeLine()の判定結果はlogger.debug経由で記録される既存フローに統合される。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "サーバー側のリクエスト送信を含まない。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/tmux.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "tests/unit/prompt-detector.test.ts"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

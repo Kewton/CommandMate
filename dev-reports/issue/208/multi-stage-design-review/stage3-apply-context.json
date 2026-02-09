@@ -1,0 +1,27 @@
+{
+  "issue_number": 208,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_result_file": "dev-reports/issue/208/multi-stage-design-review/stage3-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "apply_scope": "design_policy_only",
+  "must_fix_items": [],
+  "should_fix_items": [
+    {
+      "id": "IA-001",
+      "category": "legacy_code",
+      "title": "claude-poller.tsの状況確認",
+      "description": "claude-poller.ts L166/L236の detectPrompt() 呼び出しは requireDefaultIndicator なし（デフォルト true）で実行される。本修正は requireDefault=false パスにのみ影響するため、claude-poller.ts には直接影響しない。設計方針書セクション9.3に既に記載済み。",
+      "recommendation": "セクション9.3の記載を確認し、claude-poller.ts 削除時の考慮事項として明記されていることを検証する。",
+      "status": "既に記載済み - 追加アクション不要"
+    },
+    {
+      "id": "IA-002",
+      "category": "test_coverage",
+      "title": "response-poller.ts経由の統合テスト",
+      "description": "response-poller.ts の extractResponse() 内 detectPromptWithOptions() パスの間接的な効果を検証する統合テストがテスト計画に含まれていない。",
+      "recommendation": "prompt-detector.ts の単体テスト（T1-T14）で十分。統合テストは実装のオプションとして検討する程度でよい。",
+      "status": "オプション対応 - 設計方針書に明記"
+    }
+  ]
+}

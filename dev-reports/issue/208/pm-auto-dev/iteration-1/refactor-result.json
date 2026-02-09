@@ -1,0 +1,35 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 100.0,
+    "after_coverage": 100.0,
+    "before_statement_coverage": 97.76,
+    "after_statement_coverage": 98.41,
+    "before_branch_coverage": 93.87,
+    "after_branch_coverage": 94.68,
+    "before_line_coverage": 99.18,
+    "after_line_coverage": 100.0,
+    "before_tests": 126,
+    "after_tests": 129
+  },
+  "refactorings_applied": [
+    "DRY: Consolidated 4 repetitive yes/no pattern match-and-return blocks into data-driven YES_NO_PATTERNS table with single loop",
+    "DRY: Extracted noPromptResult() helper to eliminate 5 duplicated { isPrompt: false, cleanContent: output.trim() } return objects",
+    "DRY: Extracted SEPARATOR_LINE_PATTERN constant to replace 2 inline /^[-─]+$/ regex instances",
+    "Coverage: Added 3 tests for valid getAnswerInput with multiple_choice to close line 555 coverage gap"
+  ],
+  "files_changed": [
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "9c7152b: refactor(prompt-detector): improve code quality and test coverage"
+  ],
+  "message": "Refactoring complete. Applied DRY principle to consolidate repetitive yes/no pattern matching (68 lines reduced to 18 lines via data-driven table), extracted noPromptResult() helper and SEPARATOR_LINE_PATTERN constant. Added 3 tests for multiple_choice getAnswerInput coverage. Net reduction of 7 source lines. All 129 tests pass, line coverage improved from 99.18% to 100%, 0 static analysis errors."
+}

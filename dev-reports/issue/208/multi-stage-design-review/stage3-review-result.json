@@ -1,0 +1,154 @@
+{
+  "issue_number": 208,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "IA-001",
+        "category": "legacy_code",
+        "title": "claude-poller.ts の detectPrompt() 呼び出しが requireDefaultIndicator なしで実行される",
+        "description": "claude-poller.ts L166 と L236 で detectPrompt() が options 引数なし（requireDefaultIndicator=true がデフォルト）で呼び出されている。本修正は requireDefault=false パスにのみ SEC-001b ガードを追加するため、claude-poller.ts のコードパスには直接影響しない。ただし、claude-poller.ts 自体にTODOコメント（L162-163, L234-235）が既に存在し、response-poller.ts に置き換え済みとして非推奨であることが明記されている。将来のリファクタリング時に claude-poller.ts を削除または更新する際、本修正のコンテキストを認識しておく必要がある。",
+        "severity": "low",
+        "recommendation": "設計方針書のセクション9.3（整合性チェック対象）に claude-poller.ts の状況が記載済みであることを確認した。現時点で追加アクション不要。claude-poller.ts 削除のタイミングで buildDetectPromptOptions() を適用するか、ファイルごと削除するかを判断する。"
+      },
+      {
+        "id": "IA-002",
+        "category": "test_coverage",
+        "title": "response-poller.ts の extractResponse() 内 detectPromptWithOptions() パスの間接テスト不足",
+        "description": "response-poller.ts L299 の extractResponse() 内で detectPromptWithOptions() が Claude 用（requireDefaultIndicator=false）で呼び出される。本修正後、SEC-001b ガードにより番号付きリストが isPrompt=false を返すようになるが、この間接的な効果を検証する統合テストが T1-T14 のテスト計画には含まれていない。設計方針書のテスト計画は prompt-detector.ts の単体テストに限定されている。",
+        "severity": "low",
+        "recommendation": "prompt-detector.ts の単体テスト（T1-T14）で十分なカバレッジが得られると判断できる。response-poller.ts 経由の統合テストは実装のオプションとして検討する程度でよい。detectPromptWithOptions() は stripAnsi() + buildDetectPromptOptions() + detectPrompt() の薄いラッパーであり、detectPrompt() 自体がテスト済みであれば中間層のテストは必須ではない。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IA-003",
+        "category": "performance",
+        "title": "isQuestionLikeLine() の正規表現評価の追加コスト",
+        "description": "SEC-001b ガードが追加されることで、requireDefault=false かつ questionEndIndex >= 0 の場合に isQuestionLikeLine() が1回追加実行される。QUESTION_KEYWORD_PATTERN は非キャプチャグループの OR パターンで、バックトラッキングリスクはなく、入力は1行（通常50文字以下）であるため、計算量は O(n) で n は行の長さ。実行コストは無視できるレベル。",
+        "recommendation": "パフォーマンス上の懸念なし。追加の最適化は不要。"
+      },
+      {
+        "id": "IA-004",
+        "category": "edge_case",
+        "title": "Claude Code trust dialog（Issue #201）との相互作用",
+        "description": "cli-patterns.ts で定義される CLAUDE_TRUST_DIALOG_PATTERN ('Yes, I trust this folder') は detectPrompt() の検出対象外であり、別のコードパスで処理される。trust dialog 出力に番号付きリストが含まれるケースは未観測であり、本修正との相互作用はないと判断される。",
+        "recommendation": "現時点で対応不要。trust dialog のフォーマット変更が観測された場合に再評価する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "change": "isQuestionLikeLine() 関数追加、QUESTION_KEYWORD_PATTERN 定数追加、Layer 5 SEC-001b ガード追加",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/prompt-detector.test.ts",
+        "change": "T1-T14 テストケース追加",
+        "risk": "low"
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "call_site": "L318: detectPrompt(cleanOutput, promptOptions)",
+        "options": "buildDetectPromptOptions(cliToolId) -> requireDefaultIndicator: false for claude",
+        "impact": "positive - 番号付きリストの誤検出が防止され、不要な自動応答送信が停止される",
+        "change_required": false
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "call_site": "L135: detectPrompt(lastLines, promptOptions)",
+        "options": "buildDetectPromptOptions(cliToolId) -> requireDefaultIndicator: false for claude",
+        "impact": "positive - 15行ウィンドウ内の番号付きリストによる waiting 誤表示が解消される",
+        "change_required": false
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "call_site": "L99-101: detectPromptWithOptions(output, cliToolId) (L299, L489, L608)",
+        "options": "内部で buildDetectPromptOptions() 使用 -> requireDefaultIndicator: false for claude",
+        "impact": "positive - extractResponse() で偽 isComplete: true が防止、checkForResponse() で偽 prompt メッセージ保存が防止",
+        "change_required": false
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "call_site": "L93-94: detectPrompt(cleanOutput, promptOptions)",
+        "options": "buildDetectPromptOptions(cliToolId) -> requireDefaultIndicator: false for claude",
+        "impact": "positive - isPromptWaiting: false が正しく返され、クライアントへの偽 promptData 送信が防止される",
+        "change_required": false
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "call_site": "L76: detectPrompt(cleanOutput, promptOptions)",
+        "options": "buildDetectPromptOptions(cliToolId) -> requireDefaultIndicator: false for claude",
+        "impact": "positive - 偽プロンプト活性判定による不要なキー送信が防止される",
+        "change_required": false
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "call_site": "クライアント側フック（サーバーAPIの isPromptWaiting に依存）",
+        "options": "N/A（直接 detectPrompt を呼び出さない）",
+        "impact": "positive - サーバーから isPromptWaiting: false が返されるため、クライアント側の自動応答もトリガーされない",
+        "change_required": false
+      },
+      {
+        "file": "src/lib/claude-poller.ts",
+        "call_site": "L166, L236: detectPrompt() を options なしで呼び出し",
+        "options": "undefined（requireDefaultIndicator: true がデフォルト適用）",
+        "impact": "none - requireDefault=true パスは本修正の対象外。SEC-001b ガードは !requireDefault ブロック内にのみ追加されるため、このファイルの動作に一切影響しない",
+        "change_required": false
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "call_site": "buildDetectPromptOptions() 関数",
+        "options": "N/A（この関数自体は変更不要）",
+        "impact": "none - Claude 用 requireDefaultIndicator: false の返却ロジックに変更なし",
+        "change_required": false
+      }
+    ],
+    "cli_tool_impact": {
+      "claude": {
+        "requireDefaultIndicator": false,
+        "sec001b_applied": true,
+        "impact_description": "Layer 5 SEC-001b ガードが適用される。質問行が isQuestionLikeLine() を通過する場合のみ multiple_choice として検出される。正当な Claude Code プロンプトは '?' または選択キーワード+':' で終わるため、検出は維持される。"
+      },
+      "codex": {
+        "requireDefaultIndicator": true,
+        "sec001b_applied": false,
+        "impact_description": "requireDefault=true のためPass 1（ cursor indicator 存在チェック）で gate される。SEC-001b ガードは !requireDefault ブロック内にのみ存在するため一切適用されない。既存動作に変更なし。"
+      },
+      "gemini": {
+        "requireDefaultIndicator": true,
+        "sec001b_applied": false,
+        "impact_description": "Codex と同様。requireDefault=true のため本修正の影響範囲外。既存動作に変更なし。"
+      }
+    }
+  },
+  "reviewed_files": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/lib/claude-poller.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

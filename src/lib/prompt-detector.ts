@@ -47,6 +47,29 @@ export interface PromptDetectionResult {
 }
 
 /**
+ * Yes/no pattern definitions for data-driven matching.
+ * Each entry defines a regex pattern and its associated default option.
+ * Patterns are evaluated in order; the first match wins.
+ *
+ * Pattern format:
+ *   - regex: Must have a capture group (1) for the question text
+ *   - defaultOption: 'yes', 'no', or undefined (no default)
+ */
+const YES_NO_PATTERNS: ReadonlyArray<{
+  regex: RegExp;
+  defaultOption?: 'yes' | 'no';
+}> = [
+  // (y/n) - no default
+  { regex: /^(.+)\s+\(y\/n\)\s*$/m },
+  // [y/N] - default no
+  { regex: /^(.+)\s+\[y\/N\]\s*$/m, defaultOption: 'no' },
+  // [Y/n] - default yes
+  { regex: /^(.+)\s+\[Y\/n\]\s*$/m, defaultOption: 'yes' },
+  // (yes/no) - no default
+  { regex: /^(.+)\s+\(yes\/no\)\s*$/m },
+];
+
+/**
  * Detect if output contains an interactive prompt
  *
  * Supports the following patterns:
@@ -89,83 +112,32 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
     return multipleChoiceResult;
   }
 
-  // Pattern 1: (y/n)
-  const yesNoPattern = /^(.+)\s+\(y\/n\)\s*$/m;
-  const match1 = lastLines.match(yesNoPattern);
-
-  if (match1) {
-    return {
-      isPrompt: true,
-      promptData: {
-        type: 'yes_no',
-        question: match1[1].trim(),
-        options: ['yes', 'no'],
-        status: 'pending',
-      },
-      cleanContent: match1[1].trim(),
-    };
-  }
-
-  // Pattern 2: [y/N] (N is default)
-  const yesNoDefaultPattern = /^(.+)\s+\[y\/N\]\s*$/m;
-  const match2 = lastLines.match(yesNoDefaultPattern);
-
-  if (match2) {
-    return {
-      isPrompt: true,
-      promptData: {
-        type: 'yes_no',
-        question: match2[1].trim(),
-        options: ['yes', 'no'],
-        status: 'pending',
-        defaultOption: 'no',
-      },
-      cleanContent: match2[1].trim(),
-    };
-  }
-
-  // Pattern 3: [Y/n] (Y is default)
-  const yesDefaultPattern = /^(.+)\s+\[Y\/n\]\s*$/m;
-  const match3 = lastLines.match(yesDefaultPattern);
-
-  if (match3) {
-    return {
-      isPrompt: true,
-      promptData: {
-        type: 'yes_no',
-        question: match3[1].trim(),
-        options: ['yes', 'no'],
-        status: 'pending',
-        defaultOption: 'yes',
-      },
-      cleanContent: match3[1].trim(),
-    };
-  }
-
-  // Pattern 4: (yes/no)
-  const yesNoFullPattern = /^(.+)\s+\(yes\/no\)\s*$/m;
-  const match4 = lastLines.match(yesNoFullPattern);
-
-  if (match4) {
-    return {
-      isPrompt: true,
-      promptData: {
-        type: 'yes_no',
-        question: match4[1].trim(),
-        options: ['yes', 'no'],
-        status: 'pending',
-      },
-      cleanContent: match4[1].trim(),
-    };
+  // Patterns 1-4: Yes/no patterns (data-driven matching)
+  for (const pattern of YES_NO_PATTERNS) {
+    const match = lastLines.match(pattern.regex);
+    if (match) {
+      const question = match[1].trim();
+      return {
+        isPrompt: true,
+        promptData: {
+          type: 'yes_no',
+          question,
+          options: ['yes', 'no'],
+          status: 'pending',
+          ...(pattern.defaultOption !== undefined && { defaultOption: pattern.defaultOption }),
+        },
+        cleanContent: question,
+      };
+    }
   }
 
   // Pattern 5: Approve?
   // Matches "Approve?" on its own line or at the end of a line
   const approvePattern = /^(.*?)Approve\?\s*$/m;
-  const match5 = lastLines.match(approvePattern);
+  const approveMatch = lastLines.match(approvePattern);
 
-  if (match5) {
-    const content = match5[1].trim();
+  if (approveMatch) {
+    const content = approveMatch[1].trim();
     // If there's content before "Approve?", include it in the question
     const question = content ? `${content} Approve?` : 'Approve?';
     return {
@@ -213,6 +185,91 @@ const DEFAULT_OPTION_PATTERN = /^\s*\u276F\s*(\d+)\.\s*(.+)$/;
  * Anchored at both ends -- ReDoS safe (S4-001).
  */
 const NORMAL_OPTION_PATTERN = /^\s*(\d+)\.\s*(.+)$/;
+
+/**
+ * Pattern for separator lines (horizontal rules).
+ * Matches lines consisting only of dash (-) or em-dash (─) characters.
+ * Used to skip separator lines in question extraction and non-option line handling.
+ * Anchored at both ends -- ReDoS safe (S4-001).
+ */
+const SEPARATOR_LINE_PATTERN = /^[-─]+$/;
+
+/**
+ * Creates a "no prompt detected" result.
+ * Centralizes the repeated pattern of returning isPrompt: false with trimmed content.
+ *
+ * @param output - The original output text
+ * @returns PromptDetectionResult with isPrompt: false
+ */
+function noPromptResult(output: string): PromptDetectionResult {
+  return {
+    isPrompt: false,
+    cleanContent: output.trim(),
+  };
+}
+
+/**
+ * Pattern for detecting question/selection keywords in question lines.
+ * CLI tools typically use these keywords in the line immediately before numbered choices.
+ *
+ * Keyword classification:
+ *   [Observed] select, choose, pick, which, what, enter, confirm
+ *     - Keywords confirmed in actual Claude Code / CLI tool prompts.
+ *   [Defensive additions] how, where, type, specify, approve, accept, reject, decide, preference, option
+ *     - Not yet observed in actual prompts, but commonly used in question sentences.
+ *       Added defensively to reduce False Negative risk.
+ *     - Slightly beyond YAGNI, but False Positive risk from these keywords is
+ *       extremely low (they rarely appear in normal list headings).
+ *     - Consider removing unused keywords if confirmed unnecessary in the future.
+ *
+ * No word boundaries (\b) used -- partial matches (e.g., "Selections:" matching "select")
+ * are acceptable because such headings followed by consecutive numbered lists are
+ * likely actual prompts. See design policy IC-004 for tradeoff analysis.
+ *
+ * Alternation-only pattern with no nested quantifiers -- ReDoS safe (SEC-S4-002).
+ * The pattern consists only of OR (alternation) within a non-capturing group,
+ * resulting in a linear-time structure (O(n)) with no backtracking risk.
+ * Follows the 'ReDoS safe (S4-001)' annotation convention of existing patterns.
+ */
+const QUESTION_KEYWORD_PATTERN = /(?:select|choose|pick|which|what|how|where|enter|type|specify|confirm|approve|accept|reject|decide|preference|option)/i;
+
+/**
+ * Validates whether a question line actually asks a question or requests a selection.
+ * Distinguishes normal heading lines ("Recommendations:", "Steps:", etc.) from
+ * actual question lines ("Which option?", "Select a mode:", etc.).
+ *
+ * Control character resilience (SEC-S4-004): The line parameter is passed via
+ * lines[questionEndIndex]?.trim(), so residual control characters from tmux
+ * capture-pane output (8-bit CSI (0x9B), DEC private modes, etc. not fully
+ * removed by stripAnsi()) may be present. However, endsWith('?') / endsWith(':')
+ * inspect only the last character, and QUESTION_KEYWORD_PATTERN.test() matches
+ * only English letter keywords, so residual control characters will not match
+ * any pattern and the function returns false (false-safe).
+ *
+ * Full-width colon (U+FF1A) is intentionally not supported. Claude Code/CLI
+ * prompts use ASCII colon. See design policy IC-008.
+ *
+ * @param line - The line to validate (trimmed)
+ * @returns true if the line is a question/selection request, false otherwise
+ */
+function isQuestionLikeLine(line: string): boolean {
+  // Empty lines are not questions
+  if (line.length === 0) return false;
+
+  // Pattern 1: Lines ending with question mark (English or full-width Japanese)
+  // Full-width question mark (U+FF1F) support is a defensive measure: Claude Code/CLI
+  // displays questions in English, but this covers future multi-language support
+  // and third-party tool integration.
+  if (line.endsWith('?') || line.endsWith('\uff1f')) return true;
+
+  // Pattern 2: Lines ending with colon that contain a selection/input keyword
+  // Examples: "Select an option:", "Choose a mode:", "Pick one:"
+  if (line.endsWith(':')) {
+    if (QUESTION_KEYWORD_PATTERN.test(line)) return true;
+  }
+
+  return false;
+}
 
 /**
  * Defensive check: protection against future unknown false positive patterns.
@@ -329,10 +386,7 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
     }
 
     if (!hasDefaultLine) {
-      return {
-        isPrompt: false,
-        cleanContent: output.trim(),
-      };
+      return noPromptResult(output);
     }
   }
 
@@ -365,7 +419,7 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
     }
 
     // Non-option line handling
-    if (collectedOptions.length > 0 && line && !line.match(/^[-─]+$/)) {
+    if (collectedOptions.length > 0 && line && !SEPARATOR_LINE_PATTERN.test(line)) {
       // Check if this is a continuation line (indented line between options,
       // or path/filename fragments from terminal width wrapping - Issue #181)
       const rawLine = lines[i]; // Original line with indentation preserved
@@ -383,31 +437,34 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
   // Layer 3: Consecutive number validation (defensive measure)
   const optionNumbers = collectedOptions.map(opt => opt.number);
   if (!isConsecutiveFromOne(optionNumbers)) {
-    return {
-      isPrompt: false,
-      cleanContent: output.trim(),
-    };
+    return noPromptResult(output);
   }
 
   // Layer 4: Must have at least 2 options. When requireDefault is true,
   // also require at least one option with ❯ indicator.
   const hasDefaultIndicator = collectedOptions.some(opt => opt.isDefault);
   if (collectedOptions.length < 2 || (requireDefault && !hasDefaultIndicator)) {
-    return {
-      isPrompt: false,
-      cleanContent: output.trim(),
-    };
+    return noPromptResult(output);
   }
 
-  // Layer 5 [SEC-001]: questionEndIndex guard for requireDefaultIndicator=false.
-  // When requireDefault is false and no question line was found (questionEndIndex === -1),
-  // return isPrompt: false to prevent generic question fallback from triggering Auto-Yes
-  // on plain numbered lists that happen to be consecutive from 1.
-  if (!requireDefault && questionEndIndex === -1) {
-    return {
-      isPrompt: false,
-      cleanContent: output.trim(),
-    };
+  // Layer 5 [SEC-001]: Enhanced question line validation for requireDefaultIndicator=false.
+  // When requireDefault is false, apply stricter validation to prevent false positives
+  // from normal numbered lists (e.g., "Recommendations:\n1. Add tests\n2. Update docs").
+  if (!requireDefault) {
+    // SEC-001a: No question line found (questionEndIndex === -1) - reject.
+    // Prevents generic question fallback from triggering Auto-Yes
+    // on plain numbered lists that happen to be consecutive from 1.
+    if (questionEndIndex === -1) {
+      return noPromptResult(output);
+    }
+
+    // SEC-001b: Question line exists but is not actually a question/selection request.
+    // Validates that the question line contains a question mark or a selection keyword
+    // with colon, distinguishing "Select an option:" from "Recommendations:".
+    const questionLine = lines[questionEndIndex]?.trim() ?? '';
+    if (!isQuestionLikeLine(questionLine)) {
+      return noPromptResult(output);
+    }
   }
 
   // Extract question text
@@ -417,7 +474,7 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
     const questionLines: string[] = [];
     for (let i = Math.max(0, questionEndIndex - 5); i <= questionEndIndex; i++) {
       const line = lines[i].trim();
-      if (line && !line.match(/^[-─]+$/)) {
+      if (line && !SEPARATOR_LINE_PATTERN.test(line)) {
         questionLines.push(line);
       }
     }

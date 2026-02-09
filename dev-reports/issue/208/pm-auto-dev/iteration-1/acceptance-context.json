@@ -1,0 +1,59 @@
+{
+  "issue_number": 208,
+  "feature_summary": "Auto-Yes番号付きリスト誤検出防止",
+  "acceptance_criteria": [
+    "通常の番号付きリスト（「1. ファイルを作成」「2. テストを実行」等）がmultiple_choiceプロンプトとして誤検出されない",
+    "Claude Codeの実プロンプト（❯なし、質問行あり、番号付き選択肢）は正しく検出される",
+    "Codex/Gemini（requireDefaultIndicator=true）の既存動作に影響がない",
+    "Issue #193の機能（Claude Code選択肢プロンプト検出）が回帰しない",
+    "Issue #161の機能（2パス検出方式）が回帰しない"
+  ],
+  "test_scenarios": [
+    {
+      "id": "AC1",
+      "scenario": "通常の番号付きリスト誤検出防止",
+      "given": "Auto-Yesモード有効、Claude CLIがサブエージェント完了後に番号付きリストを出力",
+      "when": "detectPrompt()がrequireDefaultIndicator: falseで呼び出される",
+      "then": "isPrompt: falseが返り、自動応答が発生しない",
+      "test_reference": "T1-T4"
+    },
+    {
+      "id": "AC2",
+      "scenario": "Claude Code実プロンプト検出",
+      "given": "Claude Codeが選択肢プロンプト（❯なし、質問行あり）を表示",
+      "when": "detectPrompt()がrequireDefaultIndicator: falseで呼び出される",
+      "then": "isPrompt: true、type: 'multiple_choice'が返る",
+      "test_reference": "T5-T8"
+    },
+    {
+      "id": "AC3",
+      "scenario": "Codex/Gemini既存動作維持",
+      "given": "Codex/GeminiがrequireDefaultIndicator: true（デフォルト）で動作",
+      "when": "detectPrompt()が呼び出される",
+      "then": "Pass 1の❯インジケーターチェックが正常に機能し、SEC-001bは適用されない",
+      "test_reference": "T9-T10"
+    },
+    {
+      "id": "AC4",
+      "scenario": "Issue #193回帰なし",
+      "given": "Issue #193で追加されたrequireDefaultIndicator: false機能",
+      "when": "Claude Code選択肢プロンプトが表示される",
+      "then": "既存のIssue #193テスト（L842-1047）が全パス",
+      "test_reference": "既存テスト"
+    },
+    {
+      "id": "AC5",
+      "scenario": "Issue #161回帰なし",
+      "given": "Issue #161で追加された2パス検出方式",
+      "when": "各種プロンプトが表示される",
+      "then": "既存のIssue #161テスト（L456-835）が全パス",
+      "test_reference": "既存テスト"
+    }
+  ],
+  "implementation_files": [
+    "src/lib/prompt-detector.ts"
+  ],
+  "test_files": [
+    "tests/unit/prompt-detector.test.ts"
+  ]
+}
