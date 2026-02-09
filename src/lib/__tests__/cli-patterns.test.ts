@@ -107,8 +107,13 @@ Next line
       expect(CLAUDE_THINKING_PATTERN.test(output)).toBe(true);
     });
 
-    it('should match "(esc to interrupt)"', () => {
+    it('should match "(esc to interrupt)" with parens', () => {
       const output = `(esc to interrupt)`;
+      expect(CLAUDE_THINKING_PATTERN.test(output)).toBe(true);
+    });
+
+    it('should match "esc to interrupt" without parens (status bar format)', () => {
+      const output = `  27 files +0 -0 · esc to interrupt · ctrl+t to hide tasks`;
       expect(CLAUDE_THINKING_PATTERN.test(output)).toBe(true);
     });
 

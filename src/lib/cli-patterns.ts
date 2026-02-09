@@ -23,9 +23,15 @@ export const CLAUDE_SPINNER_CHARS = [
  * Claude thinking pattern
  * Matches spinner character followed by activity text ending with …
  * The text can contain spaces (e.g., "Verifying implementation (dead code detection)…")
+ *
+ * Alternative 2: "esc to interrupt" status bar text (Issue #XXX)
+ * Claude Code shows "esc to interrupt" in the terminal status bar during active processing.
+ * Previous pattern required closing paren `to interrupt\)` matching `(esc to interrupt)`,
+ * but Claude Code v2.x status bar format uses `· esc to interrupt ·` without parens.
+ * Updated to match `esc to interrupt` which covers both formats.
  */
 export const CLAUDE_THINKING_PATTERN = new RegExp(
-  `[${CLAUDE_SPINNER_CHARS.join('')}]\\s+.+…|to interrupt\\)`,
+  `[${CLAUDE_SPINNER_CHARS.join('')}]\\s+.+…|esc to interrupt`,
   'm'
 );
 

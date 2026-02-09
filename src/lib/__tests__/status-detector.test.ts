@@ -89,6 +89,34 @@ Some intermediate output that doesn't match any pattern
         expect(result.reason).toBe('thinking_indicator');
       });
 
+      it('should detect running during Task execution with status bar "esc to interrupt"', () => {
+        // When Claude Code runs a Task (subagent), the terminal shows:
+        // - Task progress with ✽ spinner (outside 5-line window)
+        // - Phase list (pushes spinner out of window)
+        // - ❯ prompt (user can type to interrupt)
+        // - Status bar with "esc to interrupt"
+        // The status bar in the last 5 lines should be detected as running.
+        const output = `
+✽ マルチステージ設計レビュー実行中… (4m 56s · ↓ 4.5k tokens)
+  ⎿  ◼ Phase 3: マルチステージ設計レビュー
+     ◻ Phase 4: 作業計画立案
+     ◻ Phase 5: TDD自動開発
+     ◻ Phase 6: 完了報告
+     ✔ Phase 1: マルチステージIssueレビュー
+     ✔ Phase 2: 設計方針書確認・作成
+
+───────────────────────────────────────────────────
+❯
+───────────────────────────────────────────────────
+  27 files +0 -0 · esc to interrupt · ctrl+t to hide tasks
+`;
+        const result = detectSessionStatus(output, 'claude');
+
+        expect(result.status).toBe('running');
+        expect(result.confidence).toBe('high');
+        expect(result.reason).toBe('thinking_indicator');
+      });
+
       it('should detect multiple choice prompt as waiting', () => {
         const output = `
 Which option would you prefer?
@@ -346,14 +374,15 @@ maenokota@host %
         expect(resultA.confidence).toBe('high');
         expect(resultA.reason).toBe('input_prompt');
 
-        // Sub-scenario (b): 20+ empty lines after prompt -> prompt pushed outside 15-line window
-        // SEC-009: When prompt is pushed outside the window, default-to-running is expected
+        // Sub-scenario (b): 20+ empty lines after prompt
+        // After trailing empty line stripping, the ❯ line IS the last content line
+        // and falls within the 15-line window, so 'ready' is the correct result.
+        // (Originally expected 'running' before trailing empty line stripping was added)
         const promptWith20EmptyLines = '❯\n' + '\n'.repeat(20);
         const resultB = detectSessionStatus(promptWith20EmptyLines, 'claude');
-        // Prompt is outside the 15-line window; last 15 lines are all empty
-        expect(resultB.status).toBe('running');
-        expect(resultB.confidence).toBe('low');
-        expect(resultB.reason).toBe('default');
+        expect(resultB.status).toBe('ready');
+        expect(resultB.confidence).toBe('high');
+        expect(resultB.reason).toBe('input_prompt');
 
         // Sub-scenario (c): 10 empty lines + y/n prompt -> waiting (prompt within 15-line window)
         const ynPromptWith10EmptyLines = '\n'.repeat(10) + 'Do you want to continue? (y/n)\n';
