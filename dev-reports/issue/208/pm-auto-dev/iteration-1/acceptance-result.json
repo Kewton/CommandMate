@@ -1,0 +1,107 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "AC1: Normal numbered list false positive prevention",
+      "result": "passed",
+      "evidence": "5/5 tests passed: Subagent completion output, markdown heading lists, plain numbered lists (SEC-001a), step descriptions (SEC-001b), and long output trailing lists are all correctly rejected as non-prompts when requireDefaultIndicator=false."
+    },
+    {
+      "scenario": "AC2: Claude Code real prompt detection",
+      "result": "passed",
+      "evidence": "6/6 tests passed: Question mark endings, Select/Choose keyword colons, 4-option tool permission prompts, indented Bash tool format, and full-width Japanese question marks are all correctly detected as multiple_choice prompts."
+    },
+    {
+      "scenario": "AC3: Codex/Gemini existing behavior maintenance",
+      "result": "passed",
+      "evidence": "5/5 tests passed: Default requireDefaultIndicator=true with cursor detected, without cursor rejected, explicit true matches default behavior, SEC-001b guard does NOT apply when requireDefaultIndicator=true, buildDetectPromptOptions returns correct per-tool values."
+    },
+    {
+      "scenario": "AC4: Issue #193 regression check",
+      "result": "passed",
+      "evidence": "5/5 acceptance tests + 18/18 existing unit tests passed: requireDefaultIndicator=false detects cursor-less choices, Layer 3 consecutive validation maintained, Layer 4 minimum options maintained, SEC-001a guard maintained, isDefault marking correct with cursor present."
+    },
+    {
+      "scenario": "AC5: Issue #161 regression check",
+      "result": "passed",
+      "evidence": "12/12 acceptance tests + 21/21 existing unit tests passed: Layer 2 (2-pass cursor detection), Layer 3 (consecutive numbers), Layer 4 (minimum options), 50-line window boundary, yes/no patterns (y/n, Approve?, [Y/n]), thinking-prompt ordering all verified."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Normal numbered lists (e.g., '1. Create file', '2. Run tests') are NOT falsely detected as multiple_choice prompts",
+      "verified": true
+    },
+    {
+      "criterion": "Claude Code real prompts (no cursor, question line present, numbered choices) are correctly detected",
+      "verified": true
+    },
+    {
+      "criterion": "Codex/Gemini (requireDefaultIndicator=true) existing behavior is unaffected",
+      "verified": true
+    },
+    {
+      "criterion": "Issue #193 functionality (Claude Code choice prompt detection) does not regress",
+      "verified": true
+    },
+    {
+      "criterion": "Issue #161 functionality (2-pass detection) does not regress",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/integration/issue-208-acceptance.test.ts",
+    "tests/unit/prompt-detector.test.ts"
+  ],
+  "test_summary": {
+    "acceptance_tests": {
+      "file": "tests/integration/issue-208-acceptance.test.ts",
+      "total": 33,
+      "passed": 33,
+      "failed": 0
+    },
+    "unit_tests_issue_208": {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "section": "Issue #208: SEC-001b question line validation",
+      "total": 26,
+      "passed": 26,
+      "failed": 0
+    },
+    "unit_tests_issue_193": {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "section": "Issue #193: requireDefaultIndicator option",
+      "total": 18,
+      "passed": 18,
+      "failed": 0
+    },
+    "unit_tests_issue_161": {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "section": "Issue #161 (multiple sections)",
+      "total": 21,
+      "passed": 21,
+      "failed": 0
+    },
+    "all_prompt_detector_tests": {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "total": 126,
+      "passed": 126,
+      "failed": 0
+    }
+  },
+  "implementation_review": {
+    "file": "src/lib/prompt-detector.ts",
+    "key_changes": [
+      "QUESTION_KEYWORD_PATTERN: regex for detecting question/selection keywords in heading lines",
+      "isQuestionLikeLine(): validates whether a line is a question (ending with ?) or selection request (keyword + colon)",
+      "Layer 5 SEC-001b: when requireDefaultIndicator=false and questionEndIndex found, validates the question line via isQuestionLikeLine() to reject non-question headings like 'Recommendations:' or 'Steps:'"
+    ],
+    "defense_layers_verified": [
+      "Layer 2: 2-pass cursor detection (Pass 1 gate for requireDefault=true)",
+      "Layer 3: Consecutive number validation (isConsecutiveFromOne)",
+      "Layer 4: Minimum 2 options + hasDefaultIndicator check",
+      "Layer 5 SEC-001a: questionEndIndex === -1 rejection for requireDefault=false",
+      "Layer 5 SEC-001b: isQuestionLikeLine validation for requireDefault=false"
+    ]
+  },
+  "message": "All 5 acceptance criteria are satisfied. All tests pass across acceptance (33/33), unit-208 (26/26), unit-193 (18/18), unit-161 (21/21), and the full prompt-detector suite (126/126)."
+}

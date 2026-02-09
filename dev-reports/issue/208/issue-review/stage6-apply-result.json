@@ -1,0 +1,44 @@
+{
+  "issue_number": 208,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "commit 6deb100による行番号シフトを反映。関連コードテーブルのprompt-detector.ts行番号を修正（Pass 1ゲート: 313-329 -> 321-337、Pass 2+Layer 3-5: 338-403 -> 346-411）。新規追加された末尾空行トリム処理（L305-311）を関連コードテーブルに行として追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "発生メカニズムフロー図のステップ3にcommit 6deb100の末尾空行トリム処理がバグの発生確率を上昇させる影響を追記。tmuxパディング空行のトリムによりスキャンウィンドウが実コンテンツに正確に位置し、誤検出がより確実に発生するようになった旨を記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "status-detector.ts L122-127の末尾空行トリム処理をprompt-detector.ts L305-311と同目的の独立実装として関連コードテーブルに追加し、DRY観点でのフォローアップ検討候補であることを注記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "対策案1の詳細にisContinuationLine()の?終端除外ロジック（Issue #188追加修正）がquestion行検出の出発点として活用できることを補足"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/208"
+  }
+}

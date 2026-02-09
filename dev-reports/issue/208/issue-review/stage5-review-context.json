@@ -1,0 +1,9 @@
+{
+  "issue_number": 208,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "previous_stages": ["stage1", "stage2", "stage3", "stage4"],
+  "previous_review": "dev-reports/issue/208/issue-review/stage1-review-result.json"
+}

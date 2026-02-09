@@ -1,0 +1,136 @@
+{
+  "issue_number": 208,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IC-001",
+        "category": "code_reference",
+        "title": "設計書セクション3.1の行番号が現在の実装と不一致",
+        "description": "設計書のセクション3.1「現在の実装 (prompt-detector.ts:402-411)」として参照されているLayer 5 SEC-001ガードは、実際のコード上ではL402-411に存在する。この参照は一致している。しかし、設計書セクション3.4で「isContinuationLine() (L264-277)」と記載されている部分は、実際にはL264-277に存在し一致している。全体として、行番号参照は現在のコードベースと整合性がある。ただし、Issue #208の修正を適用した後に行番号がシフトするため、実装着手時に再確認が必要。",
+        "severity": "low",
+        "status": "confirmed_accurate"
+      },
+      {
+        "id": "IC-002",
+        "category": "cross_section",
+        "title": "SEC-001bガードの挿入位置がLayer 5内部で明確に定義されているが、既存のquestion抽出ロジックとの間隔に注意が必要",
+        "description": "設計書セクション3.1では、SEC-001bガードをSEC-001a（questionEndIndex === -1）の直後に挿入する設計である。現在のコードでは、L406でSEC-001aの条件チェック後、L414-428で質問テキストの抽出を行っている。SEC-001bはL406-411のブロックとL414の間に挿入される必要がある。設計書の疑似コードではif (!requireDefault)ブロック全体をリファクタリングする形で示されているが、実装時にはL406の既存条件を内包する形で変更が必要であり、差分の適用方法を明確にすべきである。",
+        "severity": "medium",
+        "status": "needs_attention"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IC-003",
+        "category": "test_coverage",
+        "title": "テスト計画T14のBashツール形式テストが既存のisContinuationLine()除外ロジックとの相互作用を考慮しているか",
+        "description": "テスト計画T14は「  Allow this command?\\n  1. Yes\\n  2. No」（インデント付き）を入力とし、isPrompt: trueを期待する。既存のisContinuationLine()はhasLeadingSpaces条件で2スペース以上のインデントを持つ行をcontinuation lineとして扱うが、「?」で終わる行は除外される（L271の!line.endsWith('?')条件）。したがって「  Allow this command?」はcontinuation lineとして扱われず、questionEndIndexに設定される。この設計はテスト計画と整合するが、新規isQuestionLikeLine()によるSEC-001b検証では、「Allow this command?」が「?」終端のため正しくtrueを返す。テスト計画の期待結果は設計と整合しているが、この複数条件の連携を明示的にテストコメントに記載することを推奨する。",
+        "severity": "low",
+        "status": "needs_attention"
+      },
+      {
+        "id": "IC-004",
+        "category": "cross_section",
+        "title": "QUESTION_KEYWORD_PATTERNの正規表現に単語境界がない",
+        "description": "設計書セクション3.3のQUESTION_KEYWORD_PATTERNは/(?:select|choose|pick|...)/iで定義されているが、単語境界(\\b)が含まれていない。例えば「Selections:」という行は「select」にマッチするためtrueを返す可能性がある。テスト計画T11では「Completed tasks:」がfalseになることを期待しているが、これは「Completed」にキーワードが含まれないためfalse。一方、「Selections:」のような自然な見出しがfalse positiveになるリスクがある。ただし、このリスクは実運用上は極めて低い（「Selections:」のような見出しの後に1始まり連番が続くケースはプロンプトである可能性が高い）。設計書にこのトレードオフの認識を追記することを推奨する。",
+        "severity": "low",
+        "status": "needs_attention"
+      },
+      {
+        "id": "IC-005",
+        "category": "consistency",
+        "title": "設計書セクション6テスト計画のテスト件数表記「14件」とテストケース番号T1-T14の整合性確認",
+        "description": "設計書セクション9.1では「新規テスト14件追加」と記載されており、テスト計画セクション6ではT1-T14の14テストケースが定義されている。ただし、T11は単体テスト（isQuestionLikeLine()の直接テスト）であり、detectPromptの統合テスト（T1-T10, T12-T14）とは異なる粒度である。テストファイルへの反映時に、isQuestionLikeLine()がモジュール非公開関数（module-private）である場合、T11はdetectPromptを経由した間接テストとして実装する必要があるか、あるいはisQuestionLikeLine()をexportする必要がある。設計書ではisQuestionLikeLine()をfunction（非export）として定義しているため、T11の実装方法について明確化が必要。",
+        "severity": "medium",
+        "status": "needs_attention"
+      },
+      {
+        "id": "IC-006",
+        "category": "related_issue",
+        "title": "Issue #161設計書の防御層構造との整合性は維持されている",
+        "description": "Issue #161設計書のLayer構造（Layer 1: thinking, Layer 2: 2パス検出, Layer 3: 連番検証, Layer 4: options数+hasDefault）は、Issue #208設計書のセクション4で示されるLayer 5強化後の構造と整合している。Layer 1-4は変更なし、Layer 5のみがSEC-001a（既存）にSEC-001b（新規）を追加する形で拡張される。Issue #161で定義された防御層の番号体系とセマンティクスが維持されている。",
+        "severity": "info",
+        "status": "confirmed_accurate"
+      },
+      {
+        "id": "IC-007",
+        "category": "related_issue",
+        "title": "Issue #193設計書のSEC-001ガードとの整合性",
+        "description": "Issue #193設計書のセクション4.3で導入されたLayer 5 SEC-001は「!requireDefault && questionEndIndex === -1の場合にisPrompt: falseを返す」ものである。Issue #208設計書はこれをSEC-001aとして維持しつつ、SEC-001bとしてisQuestionLikeLine()検証を追加する。Issue #193で定義されたquestionEndIndexの算出ロジック（Pass 2逆順スキャン）は変更されないため、SEC-001aとSEC-001bは正しく直列に機能する。依存関係が正しく保たれている。",
+        "severity": "info",
+        "status": "confirmed_accurate"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IC-008",
+        "category": "edge_case",
+        "title": "全角コロン（：）への非対応が設計上意図的であることを実装コメントにも反映",
+        "description": "設計書セクション4.1のシナリオ5で、全角コロン「：」はendsWith(':')でfalseとなり正しく拒否されることが示されている。またセクション12のレビュー指摘C-002で「YAGNI原則に従い現時点では対応不要」と判断されている。実装時にisQuestionLikeLine()のコメントに、全角コロンは意図的に非対応である旨を記載することを検討する。",
+        "severity": "info",
+        "status": "acknowledged"
+      },
+      {
+        "id": "IC-009",
+        "category": "test_coverage",
+        "title": "requireDefaultIndicator=true（デフォルト）パスではSEC-001bが適用されないことのテスト確認",
+        "description": "設計書セクション3.1のコードではif (!requireDefault)ブロック内にSEC-001bが配置されるため、requireDefaultIndicator=true（Codex/Gemini等）では一切適用されない。テスト計画T9-T10はこのパスをカバーしているが、SEC-001bが明示的にスキップされることを検証するテストケースは含まれていない。既存の動作維持はT9-T10で間接的に確認されるが、将来のリファクタリング時の安全網として、requireDefault=true時にSEC-001bが影響しないことを明示的にテストすることを検討する。",
+        "severity": "info",
+        "status": "acknowledged"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "consistency_matrix": {
+    "design_vs_implementation": {
+      "layer5_sec001a_location": "一致 (L402-411)",
+      "isContinuationLine_location": "一致 (L264-277)",
+      "questionEndIndex_initialization": "一致 (L344)",
+      "questionEndIndex_assignment": "一致 (L378)",
+      "pass1_requireDefault_gate": "一致 (L321-337)",
+      "pass2_option_collection": "一致 (L346-381)",
+      "layer3_consecutive_validation": "一致 (L384-390)",
+      "layer4_options_check": "一致 (L394-400)",
+      "detectPrompt_signature": "一致 (L70)",
+      "DetectPromptOptions_interface": "一致 (L23-35)"
+    },
+    "design_vs_test": {
+      "sec001_existing_tests_L942_985": "一致 - SEC-001テストが存在 (L942-985)",
+      "requireDefaultIndicator_false_tests": "一致 - 包括的テスト群が存在 (L842-1047)",
+      "bash_tool_indented_question_tests": "一致 - isContinuationLine除外テストが存在 (L1055-1136)",
+      "test_plan_T1_T14_coverage": "新規テスト14件は未実装（設計書の計画段階）"
+    },
+    "design_161_vs_208": {
+      "layer_numbering": "一致 - Layer 1-5の番号体系が維持されている",
+      "layer5_extension": "一致 - SEC-001aを維持しSEC-001bを追加する構造",
+      "2pass_detection_unchanged": "一致 - Pass 1/Pass 2のロジックは変更なし",
+      "consecutive_validation_unchanged": "一致 - isConsecutiveFromOne()は変更なし"
+    },
+    "design_193_vs_208": {
+      "requireDefaultIndicator_semantics": "一致 - falseの場合のみSEC-001bが適用される",
+      "buildDetectPromptOptions_unchanged": "一致 - cli-patterns.tsのヘルパー関数は変更不要",
+      "caller_changes_unnecessary": "一致 - 呼び出し元の変更が不要であることが確認"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+    "dev-reports/design/issue-161-auto-yes-false-positive-design-policy.md",
+    "dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/cli-patterns.ts"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

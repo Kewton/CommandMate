@@ -1,0 +1,41 @@
+{
+  "issue_number": 208,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_result_file": "dev-reports/issue/208/multi-stage-design-review/stage2-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "apply_scope": "design_policy_only",
+  "must_fix_items": [
+    {
+      "id": "IC-001",
+      "category": "code_reference",
+      "title": "行番号参照の確認",
+      "description": "設計書の行番号参照は現在のコードベースと整合性があることが確認された。実装着手時に再確認が必要。",
+      "status": "confirmed_accurate"
+    },
+    {
+      "id": "IC-002",
+      "category": "cross_section",
+      "title": "SEC-001bガードの挿入位置を明確化",
+      "description": "SEC-001bはL406の既存条件を内包する形で変更が必要であり、差分の適用方法を明確にすべき。",
+      "recommendation": "セクション3.1に既存コードとの差分を明示し、実装時の混乱を防ぐ。"
+    }
+  ],
+  "should_fix_items": [
+    {
+      "id": "IC-003",
+      "title": "テスト計画T14のisContinuationLine()連携を明示",
+      "recommendation": "T14のテスト説明に、isContinuationLine()の?終端除外ロジックとの連携を記載する。"
+    },
+    {
+      "id": "IC-004",
+      "title": "QUESTION_KEYWORD_PATTERNの単語境界なしのトレードオフを記載",
+      "recommendation": "セクション3.3に、単語境界がないことによるトレードオフ（「Selections:」等の偽陽性リスクは極めて低い）を追記する。"
+    },
+    {
+      "id": "IC-005",
+      "title": "T11のisQuestionLikeLine()直接テスト実装方法を明確化",
+      "recommendation": "T11のテスト説明に、isQuestionLikeLine()がモジュール非公開の場合の実装方法（間接テストまたはexport）を記載する。"
+    }
+  ]
+}

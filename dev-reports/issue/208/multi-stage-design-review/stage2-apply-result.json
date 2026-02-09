@@ -1,0 +1,81 @@
+{
+  "issue_number": 208,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IC-001",
+        "item": "行番号参照の確認",
+        "section_updated": "レビュー指摘事項サマリー",
+        "status": "confirmed_accurate (対応不要)"
+      },
+      {
+        "id": "IC-002",
+        "item": "SEC-001bガードの挿入位置を明確化",
+        "section_updated": "セクション3.1, 実装チェックリスト, レビュー指摘事項サマリー",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IC-003",
+        "item": "T14のisContinuationLine()連携を明示",
+        "section_updated": "セクション6.5 T14, 実装チェックリスト, レビュー指摘事項サマリー",
+        "status": "reflected"
+      },
+      {
+        "id": "IC-004",
+        "item": "QUESTION_KEYWORD_PATTERNの単語境界なしのトレードオフを記載",
+        "section_updated": "セクション3.3, 実装チェックリスト, レビュー指摘事項サマリー",
+        "status": "reflected"
+      },
+      {
+        "id": "IC-005",
+        "item": "T11のisQuestionLikeLine()直接テスト実装方法を明確化",
+        "section_updated": "セクション6.4 T11, 実装チェックリスト, レビュー指摘事項サマリー",
+        "status": "reflected"
+      },
+      {
+        "id": "IC-006",
+        "item": "Issue #161設計書との整合性確認",
+        "section_updated": "レビュー指摘事項サマリー",
+        "status": "confirmed_accurate (対応不要)"
+      },
+      {
+        "id": "IC-007",
+        "item": "Issue #193設計書のSEC-001ガードとの整合性",
+        "section_updated": "レビュー指摘事項サマリー",
+        "status": "confirmed_accurate (対応不要)"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IC-008",
+        "item": "全角コロン非対応の意図をコメントに反映",
+        "section_updated": "レビュー指摘事項サマリー",
+        "status": "noted_for_implementation"
+      },
+      {
+        "id": "IC-009",
+        "item": "requireDefaultIndicator=true時のSEC-001bスキップ検証",
+        "section_updated": "レビュー指摘事項サマリー",
+        "status": "noted_for_future"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-208-auto-yes-numbered-list-false-positive-design-policy.md",
+  "sections_updated": [
+    "セクション3.1 (既存コードとの差分適用方法追記)",
+    "セクション3.3 (単語境界トレードオフ追記)",
+    "セクション6.4 T11 (実装方法注記追加)",
+    "セクション6.5 T14 (isContinuationLine()連携説明追加)",
+    "セクション13 レビュー履歴 (Stage 2追加)",
+    "セクション14 レビュー指摘事項サマリー (Stage 2追加)",
+    "セクション15 実装チェックリスト (IC-002/003/004/005追加)"
+  ],
+  "timestamp": "2026-02-09T12:30:00Z"
+}

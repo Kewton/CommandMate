@@ -1,0 +1,53 @@
+{
+  "issue_number": 208,
+  "iteration": 1,
+  "phase_results": {
+    "issue_collection": {
+      "status": "success",
+      "acceptance_criteria_count": 5,
+      "implementation_tasks_count": 3,
+      "test_requirements_count": 14
+    },
+    "tdd": {
+      "status": "success",
+      "coverage": 100.0,
+      "unit_tests_total": 126,
+      "unit_tests_passed": 126,
+      "unit_tests_new": 26,
+      "eslint_errors": 0,
+      "typescript_errors": 0,
+      "commits": ["2e4ee97"]
+    },
+    "acceptance": {
+      "status": "passed",
+      "acceptance_criteria_passed": 5,
+      "acceptance_criteria_total": 5,
+      "integration_tests_total": 33,
+      "integration_tests_passed": 33,
+      "issue_193_regression_tests": 18,
+      "issue_161_regression_tests": 21,
+      "all_regression_tests_passed": true
+    },
+    "refactor": {
+      "status": "success",
+      "coverage_before": 99.18,
+      "coverage_after": 100.0,
+      "tests_before": 126,
+      "tests_after": 129,
+      "tests_added": 3,
+      "code_quality_improvements": [
+        "YES_NO_PATTERNS data-driven table (DRY)",
+        "noPromptResult() helper extraction (DRY)",
+        "SEPARATOR_LINE_PATTERN constant (DRY)"
+      ],
+      "commits": ["9c7152b"]
+    },
+    "documentation": {
+      "status": "success",
+      "files_updated": ["CLAUDE.md"],
+      "update_summary": "prompt-detector.ts の説明にIssue #208実装内容を追記"
+    }
+  },
+  "overall_status": "success",
+  "all_phases_completed": true
+}

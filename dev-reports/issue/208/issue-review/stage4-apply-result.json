@@ -1,0 +1,54 @@
+{
+  "issue_number": 208,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "影響範囲レビュー反映（1回目）",
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "response-poller.tsの3箇所のdetectPromptWithOptions()呼び出し（L299, L489, L608）を影響範囲セクションに「パス2: response-poller.ts（Auto-Yes無効でも発生）」として追加。偽promptのDB保存・WebSocketブロードキャスト・UI表示リスクを詳細に記載。関連コードテーブルにresponse-poller.tsの4行（L95-101, L297-310, L486-498, L606-629）を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "claude-poller.ts L166, L236のdetectPrompt()呼び出しを影響範囲セクション内の「整合性チェック対象」サブセクションとして追加。buildDetectPromptOptions()未適用でrequireDefaultIndicator=trueがデフォルト適用される旨と、修正時の整合性チェック対象として明記。関連コードテーブルにも追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "「テスト対象」セクションを新規追加。単体テスト4項目（prompt-detector.ts, status-detector.ts, response-poller.ts, auto-yes-resolver.ts）、結合テスト1項目（auto-yes-manager.ts pollAutoYesフロー）、回帰テスト2項目（Issue #193 Claude Code実プロンプト検出、prompt-detector.ts網羅テスト）、既存テストファイル追加先テーブル（5ファイル）を記載"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "useAutoYes.tsクライアント側フォールバックの影響パスを「パス4: current-output API + useAutoYes.ts（クライアント側二重送信）」として追加。サーバー/クライアント二重送信リスクとDUPLICATE_PREVENTION_WINDOW_MS=3秒による軽減を記載。current-output/route.tsのisPromptWaitingとpromptData返却パスを明記。prompt-response APIの影響も「パス5」として追加。影響シナリオ一覧テーブルに5シナリオを追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "「ドキュメント更新対象」セクションを新規追加。CLAUDE.md（Issue #193セクション）、issue-193設計書、issue-161設計書の3ドキュメントの更新内容を明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "各対策案（案1/案2/案3）にIssue #193回帰リスク評価（低/中/低〜中）を追記。全案共通の回帰テスト必須項目として3パターンの選択肢プロンプトサンプル出力を記載。影響シナリオ一覧テーブルを新規追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/208"
+  }
+}

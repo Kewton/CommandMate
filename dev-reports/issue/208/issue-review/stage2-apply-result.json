@@ -1,0 +1,62 @@
+{
+  "issue_number": 208,
+  "iteration": 1,
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "関連コードテーブルの行番号を実際のソースコードに合わせて修正。cli-patterns.ts: 207-209 -> 218-225、prompt-detector.ts: 338-373 -> 338-403（Layer 3-5を含む範囲）、auto-yes-manager.ts: 317-318 -> 317。核心的問題セクションの行番号も207-209 -> 218-222に修正。status-detector.ts 134-135を関連コードテーブルに追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "各防御層の分析テーブルでLayer 5の効果列を「無効」から「条件付きで通過」に変更。理由列を「番号リスト上部にテキスト行が存在する場合、questionEndIndex >= 0 となりガードが発動しない。テキスト行が存在しない場合（番号リストのみ）はLayer 5が防御として機能する」に修正。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "影響範囲セクションにstatus-detector.ts L134-135のbuildDetectPromptOptions(cliToolId)経由のdetectPrompt()呼び出しパスを追記。サイドバーやワークツリー詳細のステータス表示への波及可能性と、STATUS_CHECK_LINE_COUNT=15行による発生頻度低減の説明を追加。関連コードテーブルにもstatus-detector.ts 134-135を追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "背景セクションを拡充。(1) Issue #193が正当な設計判断であったこと、(2) Layer 5（SEC-001）の防御範囲と限界、(3) Pass 1（Layer 2）の無効化が主要な防御崩壊ポイントであることを追記。防御層分析テーブルのPass 1行にも「主要な防御崩壊ポイント」を明記。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "「対策案の方向性」セクションを新規追加。3つの候補案を記載: 案1（構造的差異の利用 - question行検出の厳格化）、案2（追加防御層の導入）、案3（出力文脈判定の強化）。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "発生メカニズムフロー図のステップ2にTHINKING_CHECK_LINE_COUNT=50行ウィンドウの動作説明を補足追加。関連IssueにIssue #191を追加。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "発生メカニズムフロー図のステップ3にcleanOutput全文（最大5000行）の受け渡しと内部50行スキャン、status-detector.tsの15行ウィンドウとの対比を補足追加。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "再現手順ステップ4を「Claude CLIが結果サマリーを番号付きリスト形式で出力する」に能動態へ変更し、具体的な出力例を追加。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/208"
+  }
+}
