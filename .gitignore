@@ -29,6 +29,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
+.env
 .env*.local
 .env.local
 
@@ -42,8 +43,10 @@ next-env.d.ts
 # myCodeBranchDesk specific
 db.sqlite
 db.sqlite-journal
+server.log
 .claude_logs/
 /data/
 /temp/
+/workspace/
 .playwright-mcp/
 logs/

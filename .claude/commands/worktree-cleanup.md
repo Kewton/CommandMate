@@ -29,8 +29,8 @@
 
 ## 実行フェーズ
 
-**複数Issue指定時**: 以下のPhase 1〜5を各Issueに対して順番に実行します。
-Phase 6（Worktree同期）は全Issue完了後にまとめて1回実行します。
+**複数Issue指定時**: 以下のPhase 1〜6を各Issueに対して順番に実行します。
+Phase 7（Worktree同期）は全Issue完了後にまとめて1回実行します。
 
 ### Phase 1: 入力検証
 
@@ -97,7 +97,27 @@ if check_lsof_available && [ -n "$WORKTREE_ABS" ]; then
 fi
 ```
 
-### Phase 3: Worktree削除
+### Phase 3: tmuxセッション終了
+
+1. Issue番号に対応するtmuxセッションを検索
+2. 存在する場合は終了（`tmux kill-session`）
+
+```bash
+# tmuxセッション名パターン: mcbd-claude-*-feature-{ISSUE_NO}-worktree
+# tmux list-sessions でセッション名を取得し、Issue番号でフィルタ
+TMUX_SESSIONS=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E "feature-${ISSUE_NO}-worktree$" || true)
+
+if [ -n "$TMUX_SESSIONS" ]; then
+  for SESSION in $TMUX_SESSIONS; do
+    echo "Killing tmux session: $SESSION"
+    tmux kill-session -t "$SESSION"
+  done
+else
+  echo "No tmux session found for Issue #${ISSUE_NO}"
+fi
+```
+
+### Phase 4: Worktree削除
 
 1. Worktreeの存在確認
 2. git worktree removeコマンドを実行
@@ -114,7 +134,7 @@ else
 fi
 ```
 
-### Phase 4: ブランチ削除（オプション）
+### Phase 5: ブランチ削除（オプション）
 
 1. featureブランチがマージ済みか確認
 2. マージ済みの場合は削除（未マージの場合は警告のみ）
@@ -135,7 +155,7 @@ if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
 fi
 ```
 
-### Phase 5: リソースクリーンアップ
+### Phase 6: リソースクリーンアップ
 
 1. Issue専用DBファイルの削除（オプション）
 2. Issue専用ログファイルの削除（オプション）
@@ -161,7 +181,7 @@ if [ -f "$LOG_FILE" ]; then
 fi
 ```
 
-### Phase 6: Worktree同期
+### Phase 7: Worktree同期
 
 削除したWorktreeをCommandMateから除外するため、同期APIを呼び出します。
 
@@ -187,6 +207,7 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 📋 Cleanup Summary:
   Issue:     #135
   Server:    Stopped (PID: 12345)
+  tmux:      Killed (mcbd-claude-commandmate-feature-135-worktree)
   Worktree:  Removed (../commandmate-issue-135)
   Branch:    Deleted (feature/135-worktree)
   DB:        Preserved (~/.commandmate/data/cm-135.db)
@@ -204,21 +225,25 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 
   Issue #187:
     Server:    Not running
+    tmux:      Killed (mcbd-claude-commandmate-feature-187-worktree)
     Worktree:  Removed (../commandmate-issue-187)
     Branch:    Deleted (feature/187-worktree) [merged]
 
   Issue #188:
     Server:    Not running
+    tmux:      No session found
     Worktree:  Removed (../commandmate-issue-188)
     Branch:    Deleted (feature/188-worktree) [merged]
 
   Issue #191:
     Server:    Not running
+    tmux:      Killed (mcbd-claude-commandmate-feature-191-worktree)
     Worktree:  Removed (../commandmate-issue-191)
     Branch:    Deleted (feature/191-worktree) [merged]
 
   Issue #193:
     Server:    Stopped (PID: 54321)
+    tmux:      Killed (mcbd-claude-commandmate-feature-193-worktree)
     Worktree:  Removed (../commandmate-issue-193)
     Branch:    ⚠️ Not merged (feature/193-worktree)
 
