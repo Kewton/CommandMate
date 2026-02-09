@@ -1,0 +1,62 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: Sidebar status changes to ready within 5 seconds after response completion - Claude CLI completes response with > prompt displayed, sidebar status indicator changes to ready",
+      "result": "passed",
+      "evidence": "Unit test 'should prioritize prompt over thinking summary (ready)' in tests/unit/lib/status-detector.test.ts PASSED. Integration test 'should resolve spinner when prompt appears after completed thinking summary' in tests/integration/current-output-thinking.test.ts PASSED. detectSessionStatus() returns status='ready', reason='input_prompt' when prompt is in last 15 lines, even with thinking summary in scrollback. current-output/route.ts delegates to detectSessionStatus() (DR-001) ensuring unified priority-based detection."
+    },
+    {
+      "scenario": "Scenario 2: Spinner displays during active thinking - Claude CLI is in thinking state with spinner indicator, sidebar shows running (spinner)",
+      "result": "passed",
+      "evidence": "Unit test 'should detect active thinking indicator in last 5 lines' PASSED. Unit test 'should detect (esc to interrupt) in last 5 lines' PASSED. Integration tests 'should show spinner when thinking indicator is active in last 5 lines' and 'should show spinner when (esc to interrupt) is in output' PASSED. detectSessionStatus() returns status='running', reason='thinking_indicator' when active thinking is within STATUS_THINKING_LINE_COUNT=5 lines from end."
+    },
+    {
+      "scenario": "Scenario 3: Completed thinking summaries in scrollback don't prevent ready transition - Scrollback contains 'Churned for 41s' etc., but > prompt is detected and status transitions to ready",
+      "result": "passed",
+      "evidence": "Unit tests 'should not detect thinking summary at line 6+ from end when prompt exists' and 'should not detect thinking summary at line 6+ when no prompt exists' PASSED. Integration test 'should derive thinking=false when thinking summary is outside 5-line window' PASSED. Boundary tests confirm STATUS_THINKING_LINE_COUNT=5 works correctly: indicator at 5th line from end is detected, indicator at 6th line from end is NOT detected. response-poller.ts DR-004 also applies tail-5-line windowing for thinking check."
+    },
+    {
+      "scenario": "Scenario 4: Issue #161 regression prevention - During thinking, numbered lists (1. xxx, 2. xxx) are NOT falsely detected as multiple_choice prompts",
+      "result": "passed",
+      "evidence": "Integration test 'should detect active thinking even when numbered list exists in output' PASSED (Issue #161 Layer 1). All 94 prompt-detector.test.ts tests PASSED including Issue #161 false positive prevention tests and Issue #193 requireDefaultIndicator tests. current-output/route.ts maintains thinking check before prompt detection (SF-001): 'if (!thinking) { promptDetection = detectPrompt(...) }'. Auto-yes-manager.ts pollAutoYes() also skips prompt detection when thinking is detected (Layer 1 defense)."
+    },
+    {
+      "scenario": "Scenario 5: Issue #191 consistency - auto-yes-manager.ts THINKING_CHECK_LINE_COUNT=50 alignment with prompt-detector scan window",
+      "result": "passed",
+      "evidence": "THINKING_CHECK_LINE_COUNT=50 is defined in auto-yes-manager.ts (line 79) and used in pollAutoYes() (line 310: cleanOutput.split('\\n').slice(-THINKING_CHECK_LINE_COUNT)). SF-001 cross-reference test 'should have THINKING_CHECK_LINE_COUNT matching prompt-detector multiple_choice scan window' PASSED in auto-yes-manager.test.ts. SF-002 in status-detector.ts documents the distinction: STATUS_THINKING_LINE_COUNT=5 (UI accuracy) vs THINKING_CHECK_LINE_COUNT=50 (Auto-Yes safety). All 42 auto-yes-manager tests PASSED."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Claude CLIが応答完了してプロンプト（> / ❯）を表示している場合、サイドバーステータスが5秒以内に ready（緑）に変わること",
+      "verified": true
+    },
+    {
+      "criterion": "thinking中（✻ 等のインジケータがアクティブ）は running（スピナー）が表示されること",
+      "verified": true
+    },
+    {
+      "criterion": "応答完了後のthinkingサマリー行（例: ✻ Churned for 41s）がスクロールバックに残っていても、プロンプトが検出されれば ready に遷移すること",
+      "verified": true
+    },
+    {
+      "criterion": "Issue #161のAuto-Yes誤検出防止（2パス検出方式、thinking状態スキップ）が維持されること",
+      "verified": true
+    },
+    {
+      "criterion": "Issue #191のウィンドウイング修正（auto-yes-manager.ts THINKING_CHECK_LINE_COUNT=50）との整合性が保たれること",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/lib/status-detector.test.ts (15 tests passed)",
+    "tests/unit/lib/cli-patterns.test.ts (27 tests passed)",
+    "tests/integration/current-output-thinking.test.ts (12 tests passed)",
+    "tests/unit/prompt-detector.test.ts (94 tests passed)",
+    "tests/unit/lib/auto-yes-manager.test.ts (42 tests passed)",
+    "npx tsc --noEmit (0 errors)",
+    "npm run lint (0 warnings/errors)"
+  ],
+  "message": "All 5 acceptance criteria verified and passing. The implementation correctly fixes Issue #188 by introducing a split-window approach: STATUS_THINKING_LINE_COUNT=5 for UI status thinking detection (narrow, accuracy-focused) and STATUS_CHECK_LINE_COUNT=15 for prompt detection. current-output/route.ts now delegates to detectSessionStatus() (DR-001) for unified priority-based detection, eliminating the inline logic that caused the original priority inversion bug. Issue #161 and #191 regression prevention is maintained."
+}

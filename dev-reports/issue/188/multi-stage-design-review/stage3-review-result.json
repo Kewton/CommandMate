@@ -1,0 +1,189 @@
+{
+  "issue_number": 188,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "response-poller.ts checkForResponse() L547-554 full-text thinking check is not addressed and creates regression risk",
+        "category": "impact_scope",
+        "severity": "medium",
+        "description": "The design policy explicitly scopes out checkForResponse() L547-554's thinkingPattern.test(cleanOutput) (C-001 S2), yet this full-text check suffers the same false-detection problem as the P0 root cause. When thinking summaries appear in scrollback, this code path will incorrectly mark pending prompts as answered. The design should acknowledge this as a known limitation and document it as a follow-up issue, or include a minimal windowing fix in this Issue.",
+        "recommendation": "Add a comment in the implementation noting the known limitation at L547-554, and create a follow-up Issue to apply windowing. Alternatively, apply the same 5-line tail check at L547-554 as a low-risk P2 fix within this Issue."
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "Client-side consumers of current-output API rely on thinking/isGenerating field derivation",
+        "category": "downstream_impact",
+        "severity": "low",
+        "description": "WorktreeDetailRefactored.tsx reads data.thinking from the current-output API response and maps it to setTerminalThinking(). The new derivation (statusResult.status === 'running' && statusResult.reason === 'thinking_indicator') changes the semantics: previously thinking was detected via detectThinkingState() on non-empty-line-filtered 15 lines; now it uses detectSessionStatus() which checks last 5 full lines. This could change the timing of thinking=true/false transitions seen by the UI.",
+        "recommendation": "Add integration test scenarios that verify the thinking field in the JSON response matches expected values for: (a) active thinking in last 5 lines, (b) thinking summary beyond 5 lines with prompt present, (c) thinking summary beyond 5 lines without prompt."
+      },
+      {
+        "id": "SF-002",
+        "title": "Non-empty-line filtering removal changes effective window for prompt detection",
+        "category": "behavioral_change",
+        "severity": "medium",
+        "description": "The current implementation filters empty lines before taking the last 15 lines, effectively creating a larger actual window. The proposed change switches to full-line-based 15-line window via detectSessionStatus(). In tmux buffers with heavy empty-line padding (common in Claude CLI output), the effective visible content within the 15-line window will be reduced, potentially causing prompt detection misses if the prompt appears more than 15 raw lines from the end but within 15 non-empty lines.",
+        "recommendation": "The C-002 test cases in the design (empty-line-heavy buffers) adequately address this. Ensure these tests cover the boundary where a prompt is within 15 non-empty lines but beyond 15 total lines from end, to verify no regression."
+      },
+      {
+        "id": "SF-003",
+        "title": "response-poller.ts L353 windowing magic number 5 not aligned with STATUS_THINKING_LINE_COUNT",
+        "category": "maintainability",
+        "severity": "low",
+        "description": "DR-004 uses an inline magic number 5 for response-poller.ts L353 windowing. While the design acknowledges this (C-001 Stage 1), the lack of a named constant or cross-reference comment means future maintainers may not realize this value should track STATUS_THINKING_LINE_COUNT=5 in status-detector.ts.",
+        "recommendation": "Add a comment at the response-poller.ts L353 windowing location referencing STATUS_THINKING_LINE_COUNT and its purpose, per the design's own C-001 recommendation."
+      },
+      {
+        "id": "SF-004",
+        "title": "Missing test for isPromptWaiting source of truth (SF-004 from Stage 2)",
+        "category": "test_coverage",
+        "severity": "medium",
+        "description": "The design specifies that isPromptWaiting must derive from statusResult.hasActivePrompt (not promptDetection.isPrompt). However, the test plan does not include a specific test case that verifies this contract: a scenario where detectSessionStatus().hasActivePrompt differs from the individual detectPrompt().isPrompt result.",
+        "recommendation": "Add a test case in the integration tests where the 15-line window (used by detectSessionStatus) does not contain the prompt but the full output (used by individual detectPrompt) does. Verify that isPromptWaiting is false in this case, confirming statusResult.hasActivePrompt is the source of truth."
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "claude-poller.ts has identical full-text thinking check vulnerability",
+        "category": "legacy_code",
+        "description": "claude-poller.ts L144 has thinkingPattern.test(response) - the same full-text thinking check. While the design correctly notes this as P2/out-of-scope (deprecated code), it shares the same vulnerability. The TODO comments at L162 and L234 already mark this file as superseded.",
+        "recommendation": "Track claude-poller.ts deprecation as a separate follow-up Issue to avoid accumulating technical debt."
+      },
+      {
+        "id": "C-002",
+        "title": "Potential interaction with auto-yes-manager.ts during window size transition",
+        "category": "cross_issue_impact",
+        "description": "auto-yes-manager.ts uses THINKING_CHECK_LINE_COUNT=50 for thinking detection, while status-detector.ts will use STATUS_THINKING_LINE_COUNT=5. During the same polling cycle, it is theoretically possible for auto-yes-manager to detect thinking (from line 6-50) while status-detector does not (only checking lines 1-5). This is by design (different purposes), but could create temporary UI confusion where the sidebar shows 'ready' while auto-yes is suppressing prompt detection.",
+        "recommendation": "Document this expected behavioral difference in the CLAUDE.md entry for Issue #188, noting that the status display and auto-yes polling intentionally use different thinking detection windows."
+      },
+      {
+        "id": "C-003",
+        "title": "Rollback strategy should be documented",
+        "category": "operational",
+        "description": "The design does not include an explicit rollback plan. Given that the changes affect the core status detection pipeline (used by all CLI tools, all API routes, and all UI status displays), a rollback plan is valuable.",
+        "recommendation": "If issues arise post-deployment, the rollback is straightforward: revert the 3 file changes (status-detector.ts, current-output/route.ts, response-poller.ts). The changes are self-contained with no DB migration or state format changes. Document this in the PR description."
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_modified_files": [
+      {
+        "file": "src/lib/status-detector.ts",
+        "change": "Add STATUS_THINKING_LINE_COUNT=5 constant, split thinking detection window from prompt detection window",
+        "risk": "low",
+        "priority": "P0"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "change": "Replace inline thinking/prompt logic with detectSessionStatus() call, remove non-empty-line filtering, add individual detectPrompt() for promptData",
+        "risk": "medium",
+        "priority": "P0"
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "change": "Window L353 thinking check from full response to tail 5 lines",
+        "risk": "low",
+        "priority": "P1"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/app/api/worktrees/route.ts",
+        "impact": "Uses detectSessionStatus() - internal behavior changes (5-line thinking window) affect status results",
+        "risk": "low"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "impact": "Uses detectSessionStatus() - same internal behavior change",
+        "risk": "low"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact": "Consumes current-output API response (thinking, isPromptWaiting, isGenerating fields). Field derivation logic changes.",
+        "risk": "low"
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "impact": "Consumes isPromptWaiting from current-output API. Source of truth change (detectPrompt -> statusResult.hasActivePrompt).",
+        "risk": "low"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetail.tsx",
+        "impact": "Legacy component consuming current-output API fields.",
+        "risk": "low"
+      }
+    ],
+    "unchanged_files_requiring_verification": [
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "verification": "THINKING_CHECK_LINE_COUNT=50 unchanged (Issue #191 design maintained)"
+      },
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "verification": "No changes (CLI tool independence maintained)"
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "verification": "No changes (detectThinking(), buildDetectPromptOptions() unchanged)"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "verification": "Independent detectPrompt() call - not affected by status-detector changes"
+      }
+    ],
+    "new_test_files": [
+      "tests/unit/lib/status-detector.test.ts (additions to existing)",
+      "tests/integration/current-output-thinking.test.ts (new)"
+    ]
+  },
+  "cross_issue_impact": {
+    "issue_161": {
+      "status": "compatible",
+      "detail": "Layer 1 (thinking skip), Layer 2 (2-pass cursor detection), Layer 3 (consecutive number validation) all maintained. detectSessionStatus() preserves prompt-first priority which is compatible with Layer 1 defense."
+    },
+    "issue_180": {
+      "status": "compatible_with_evolution",
+      "detail": "Issue #180 introduced detectSessionStatus() for worktrees/route.ts and [id]/route.ts. Issue #188 extends this pattern to current-output/route.ts. Additionally, status-detector.ts internal window structure changes (15-line single -> 15-line + 5-line split). Interface unchanged."
+    },
+    "issue_191": {
+      "status": "compatible",
+      "detail": "auto-yes-manager.ts THINKING_CHECK_LINE_COUNT=50 is explicitly unchanged. Different purpose (safety-focused vs accuracy-focused) is well documented."
+    },
+    "issue_193": {
+      "status": "compatible",
+      "detail": "prompt-detector.ts DetectPromptOptions, buildDetectPromptOptions() unchanged. The current-output/route.ts modification preserves the buildDetectPromptOptions(cliToolId) call pattern."
+    }
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-188-thinking-indicator-false-detection-design-policy.md",
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/lib/claude-poller.ts",
+    "src/lib/__tests__/status-detector.test.ts",
+    "src/lib/__tests__/cli-patterns.test.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}

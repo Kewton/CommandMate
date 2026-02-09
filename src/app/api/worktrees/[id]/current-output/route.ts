@@ -10,7 +10,8 @@ import { detectPrompt } from '@/lib/prompt-detector';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { detectThinking as detectThinkingState, stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
+import { stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
+import { detectSessionStatus } from '@/lib/status-detector';
 import { getAutoYesState, getLastServerResponseTimestamp } from '@/lib/auto-yes-manager';
 
 const SUPPORTED_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
@@ -69,29 +70,33 @@ export async function GET(
     const newLines = lines.slice(Math.max(0, lastCapturedLine));
     const newContent = newLines.join('\n');
 
-    // Check last 15 non-empty lines for state detection
-    const nonEmptyLines = lines.map(l => stripAnsi(l)).filter(line => line.trim() !== '');
-    const lastSection = nonEmptyLines.slice(-15).join('\n');
-
     // Strip ANSI codes before state detection for reliable pattern matching
     const cleanOutput = stripAnsi(output);
 
-    // Check for thinking indicator FIRST (takes priority over prompt detection)
-    // Issue #161: Skip prompt detection during thinking state to prevent
-    // false positive detection of numbered lists as multiple_choice prompts.
-    // This mirrors the same defense in auto-yes-manager.ts pollAutoYes().
-    const thinking = detectThinkingState(cliToolId, lastSection);
+    // DR-001: Unified priority-based status detection via detectSessionStatus().
+    // This replaced the inline thinking/prompt logic that had inconsistent priority
+    // ordering (Issue #188 root cause: thinking detected on full output instead of
+    // 5-line window, causing perpetual spinner when thinking summary was in scrollback).
+    const statusResult = detectSessionStatus(output, cliToolId);
+    const thinking = statusResult.status === 'running' && statusResult.reason === 'thinking_indicator';
 
-    // Check if it's an interactive prompt (yes/no or multiple choice)
-    // Skip detection during thinking to avoid false positives propagating
-    // to useAutoYes.ts client-side auto-response.
-    // IC-004: Maintain thinking conditional; only pass promptOptions when detectPrompt is called
-    const promptOptions = buildDetectPromptOptions(cliToolId);
-    const promptDetection = thinking ? { isPrompt: false, cleanContent: cleanOutput } : detectPrompt(cleanOutput, promptOptions);
+    // SF-001: detectPrompt() is called separately to obtain promptData for the API response.
+    // detectSessionStatus() already calls detectPrompt() internally for status determination,
+    // but does not expose promptData in StatusDetectionResult (SRP: status module should not
+    // be coupled to prompt data shape). This second call is intentional and lightweight
+    // (regex-based, no I/O). See status-detector.ts module JSDoc for full rationale.
+    //
+    // Issue #161 Layer 1: Skip prompt detection during active thinking to prevent
+    // numbered lists in in-progress output from triggering false multiple_choice detection.
+    let promptDetection: { isPrompt: boolean; cleanContent: string; promptData?: unknown } = { isPrompt: false, cleanContent: cleanOutput };
+    if (!thinking) {
+      const promptOptions = buildDetectPromptOptions(cliToolId);
+      promptDetection = detectPrompt(cleanOutput, promptOptions);
+    }
 
-    // isComplete is ONLY used for prompt detection (yes/no questions)
-    // We no longer try to detect "normal" response completion
-    const isPromptWaiting = promptDetection.isPrompt;
+    // SF-004: isPromptWaiting uses statusResult.hasActivePrompt (15-line window) as
+    // the single source of truth, ensuring consistency between status and prompt state.
+    const isPromptWaiting = statusResult.hasActivePrompt;
 
     // Extract realtime snippet (last 100 lines for better context)
     const realtimeSnippet = lines.slice(-100).join('\n');

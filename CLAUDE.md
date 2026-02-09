@@ -131,8 +131,9 @@ src/
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
-| `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行ウィンドウイング） |
+| `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行プロンプト検出ウィンドウイング。Issue #188: STATUS_THINKING_LINE_COUNT=5追加、thinking/prompt優先順位統一、SF-001/SF-002/SF-004設計根拠ドキュメント化） |
 | `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数） |
+| `src/lib/response-poller.ts` | レスポンスポーリングとthinking検出（Issue #188: L353/L547-554ウィンドウ化、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数、detectPromptWithOptions()ヘルパー、Gemini LOADING_INDICATORS配列抽出） |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証。Issue #193: DetectPromptOptions interface追加、requireDefaultIndicatorフラグによる❯なし形式対応、Layer 5 SEC-001ガード） |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
@@ -374,6 +375,34 @@ commandmate status --all                   # 全サーバー状態確認
 ---
 
 ## 最近の実装機能
+
+### Issue #188: 応答完了後もスピナーが表示され続ける（thinkingインジケータの誤検出）
+- **バグ修正**: Claude CLIの応答が完了し `>` プロンプトが表示されているにもかかわらず、サイドバーのステータスがスピナー（`running`）のまま更新されない問題を修正
+- **根本原因**: `current-output/route.ts`がthinking検出を非空行15行ウィンドウで実行し、完了済みのthinkingサマリー行（例: `✻ Churned for 41s`）を誤検出。さらにthinking=trueでプロンプト検出を無条件スキップ
+- **修正方針**: `current-output/route.ts`のthinking/prompt優先順位を`status-detector.ts`と統一し、thinking検出ウィンドウを5行に縮小
+- **主要な変更点**:
+  - `status-detector.ts`に`STATUS_THINKING_LINE_COUNT = 5`定数を追加し、thinking検出用の5行ウィンドウを分離（SF-002: `auto-yes-manager.ts`の`THINKING_CHECK_LINE_COUNT=50`と名前を区別）
+  - `current-output/route.ts`のインラインthinking/prompt判定ロジックを削除し、`detectSessionStatus()`呼び出しに統合（DR-001: DRY原則）
+  - `thinking`を`statusResult.status === 'running' && statusResult.reason === 'thinking_indicator'`から導出
+  - `promptData`取得のために`detectPrompt()`を個別実行（SF-001: 制御されたDRY違反。SRP/ISP維持のため許容）
+  - `isPromptWaiting`を`statusResult.hasActivePrompt`から取得（SF-004: ソースオブトゥルース）
+  - `response-poller.ts` L353の全文thinkingチェックを末尾5行チェックに変更し、完了済みthinkingサマリーでの応答保存誤ブロックを防止
+  - `response-poller.ts` L547-554 `checkForResponse()`のthinkingチェックもウィンドウ化（MF-001修正）
+- **テスト追加**:
+  - `tests/unit/lib/status-detector.test.ts`（新規15テスト）- thinking+prompt共存時プロンプト優先検証、STATUS_THINKING_LINE_COUNT境界テスト、空行を多く含む出力でのthinking/prompt検出テスト
+  - `tests/integration/current-output-thinking.test.ts`（新規12テスト）- 応答完了後のスピナー解除検証、thinking中のスピナー表示検証、Issue #161回帰テスト、thinking遷移JSON応答フィールド検証、isPromptWaitingソースオブトゥルース検証
+  - `tests/unit/lib/cli-patterns.test.ts`（5テスト追加）- 完了済みthinkingサマリーのマッチテスト、(esc to interrupt)のマッチテスト
+- **セキュリティ対策維持**:
+  - Issue #161 Layer 1-3（thinking中のprompt検出スキップ、2パス❯検出方式、連番検証）を維持
+  - Issue #193 Layer 5 SEC-001（questionEndIndexガード）、SEC-002（stripAnsi適用）、SEC-003（固定エラーメッセージ）を維持
+  - Issue #191 SF-001（THINKING_CHECK_LINE_COUNT=50整合性）を維持
+  - Issue #138 DoS防止（MAX_CONCURRENT_POLLERS、worktreeId検証）を維持
+- **関連Issue**: Issue #180（detectSessionStatus()統合の前例）、Issue #161（thinking優先ロジックの経緯）、Issue #191（ウィンドウイング修正）、Issue #193（DetectPromptOptions追加）
+- **主要コンポーネント**:
+  - `src/lib/status-detector.ts` - STATUS_THINKING_LINE_COUNT=5追加、thinking検出ウィンドウ分離、SF-001/SF-002/SF-004設計根拠ドキュメント化
+  - `src/app/api/worktrees/[id]/current-output/route.ts` - detectSessionStatus()統合、DR-001/SF-001/SF-004コメント強化
+  - `src/lib/response-poller.ts` - L353ウィンドウ化（末尾5行）、L547-554ウィンドウ化（MF-001修正）、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数抽出
+- 詳細: [設計書](./dev-reports/design/issue-188-thinking-indicator-false-detection-design-policy.md)
 
 ### Issue #193: Claude Code複数選択肢プロンプト検出
 - **バグ修正**: Claude Codeからの複数選択肢メッセージ（1~4の選択肢）に対し、CommandMateのUIから回答を送信できず、Auto-Yesモードでもタスクが進まない問題を修正

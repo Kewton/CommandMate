@@ -1,0 +1,30 @@
+{
+  "issue_number": 188,
+  "refactor_targets": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/response-poller.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "current_coverage": 85.0,
+    "test_files": 142,
+    "tests_passed": 2831,
+    "tests_skipped": 7,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "カバレッジを維持しつつコードの可読性を向上",
+    "JSDocコメントの充実（特にSF-001トレードオフの説明）",
+    "テストコードの可読性向上",
+    "重複コードの削除（DRY原則の適用）"
+  ],
+  "design_constraints": [
+    "Issue #161の防御機構を維持（2パス検出、thinking状態スキップ、連番検証）",
+    "Issue #191のウィンドウイング戦略を維持（THINKING_CHECK_LINE_COUNT=50）",
+    "Issue #193の対応を維持（DetectPromptOptions、Layer 5 SEC-001）",
+    "SF-001トレードオフ（detectPrompt二重実行）の意図を明確にドキュメント化",
+    "SF-002区別（STATUS_THINKING_LINE_COUNT vs THINKING_CHECK_LINE_COUNT）の根拠を明確化"
+  ]
+}

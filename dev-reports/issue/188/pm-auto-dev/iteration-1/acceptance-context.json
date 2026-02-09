@@ -1,0 +1,28 @@
+{
+  "issue_number": 188,
+  "feature_summary": "fix: 応答完了後もスピナーが表示され続ける（thinkingインジケータの誤検出）",
+  "acceptance_criteria": [
+    "Claude CLIが応答完了してプロンプト（> / ❯）を表示している場合、サイドバーステータスが5秒以内に ready（緑）に変わること",
+    "thinking中（✻ 等のインジケータがアクティブ）は running（スピナー）が表示されること",
+    "応答完了後のthinkingサマリー行（例: ✻ Churned for 41s）がスクロールバックに残っていても、プロンプトが検出されれば ready に遷移すること",
+    "Issue #161のAuto-Yes誤検出防止（2パス検出方式、thinking状態スキップ）が維持されること",
+    "Issue #191のウィンドウイング修正（auto-yes-manager.ts THINKING_CHECK_LINE_COUNT=50）との整合性が保たれること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 応答完了後のステータス遷移 - Claude CLIが応答を完了し>プロンプトを表示したとき、サイドバーのステータスインジケータが5秒以内にreadyに変わる",
+    "シナリオ2: thinking中のスピナー表示 - Claude CLIがthinking中（✻インジケータ表示中）のとき、サイドバーがrunning（スピナー）を表示する",
+    "シナリオ3: 完了済みthinkingサマリーの無視 - スクロールバックに'✻ Churned for 41s'等の完了済みthinkingサマリーがあっても、>プロンプト検出でreadyに遷移する",
+    "シナリオ4: Issue #161回帰防止 - thinking中に番号付きリスト（1. xxx, 2. xxx）があってもmultiple_choiceプロンプトとして誤検出されない",
+    "シナリオ5: Issue #191整合性 - auto-yes-manager.tsのTHINKING_CHECK_LINE_COUNT=50との整合性が保たれ、Auto-Yesが正常動作する"
+  ],
+  "implementation_files": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/response-poller.ts"
+  ],
+  "test_files": [
+    "tests/unit/lib/status-detector.test.ts",
+    "tests/integration/current-output-thinking.test.ts",
+    "tests/unit/lib/cli-patterns.test.ts"
+  ]
+}

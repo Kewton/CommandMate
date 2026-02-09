@@ -1,6 +1,17 @@
 /**
- * CLI Tool response polling
- * Periodically checks tmux sessions for CLI tool responses (Claude, Codex, Gemini)
+ * CLI Tool response polling.
+ * Periodically checks tmux sessions for CLI tool responses (Claude, Codex, Gemini).
+ *
+ * Key responsibilities:
+ * - Extract completed responses from tmux output (extractResponse)
+ * - Detect interactive prompts and save as prompt messages
+ * - Clean tool-specific artifacts from response content
+ * - Manage polling lifecycle (start/stop/timeout)
+ *
+ * Issue #188 improvements:
+ * - DR-004: Tail-line windowing for thinking detection in extractResponse
+ * - MF-001 fix: Same windowing applied to checkForResponse thinking check
+ * - SF-003: RESPONSE_THINKING_TAIL_LINE_COUNT constant tracks STATUS_THINKING_LINE_COUNT
  */
 
 import { captureSessionOutput, isSessionRunning } from './cli-session';
@@ -32,6 +43,23 @@ const POLLING_INTERVAL = 2000;
 const MAX_POLLING_DURATION = 5 * 60 * 1000;
 
 /**
+ * Number of tail lines to check for active thinking indicators in response extraction.
+ *
+ * SF-003 coupling note: This value must track STATUS_THINKING_LINE_COUNT (5) in
+ * status-detector.ts. Both constants exist because they serve separate modules:
+ *   - RESPONSE_THINKING_TAIL_LINE_COUNT: response-poller.ts (response extraction)
+ *   - STATUS_THINKING_LINE_COUNT: status-detector.ts (UI status display)
+ * If STATUS_THINKING_LINE_COUNT changes, update this value accordingly.
+ *
+ * Why not a shared constant? status-detector.ts has no dependency on response-poller.ts
+ * and vice versa. Introducing a shared module would create a coupling that does not
+ * currently exist. The test suite validates consistency (SF-003 test).
+ *
+ * @constant
+ */
+const RESPONSE_THINKING_TAIL_LINE_COUNT = 5;
+
+/**
  * Active pollers map: "worktreeId:cliToolId" -> NodeJS.Timeout
  */
 const activePollers = new Map<string, NodeJS.Timeout>();
@@ -49,13 +77,20 @@ function getPollerKey(worktreeId: string, cliToolId: CLIToolType): string {
 }
 
 /**
- * Internal helper: detect prompt with CLI-tool-specific options (SF-003).
- * Applies stripAnsi() uniformly inside this helper (IA-001).
- * stripAnsi() is idempotent, so double-application on already-stripped input is harmless.
+ * Internal helper: detect prompt with CLI-tool-specific options.
  *
- * @param output - Raw or pre-stripped output
+ * Centralizes the stripAnsi() + buildDetectPromptOptions() + detectPrompt() pipeline
+ * to avoid repeating this 3-step sequence across extractResponse() and checkForResponse().
+ *
+ * Design notes:
+ * - IA-001: stripAnsi() is applied uniformly inside this helper. It is idempotent,
+ *   so double-application on already-stripped input is safe.
+ * - SF-003: Uses buildDetectPromptOptions() from cli-patterns.ts for tool-specific
+ *   configuration (e.g., Claude's requireDefaultIndicator=false for Issue #193).
+ *
+ * @param output - Raw or pre-stripped tmux output
  * @param cliToolId - CLI tool identifier for building detection options
- * @returns PromptDetectionResult
+ * @returns PromptDetectionResult with isPrompt, promptData, and cleanContent
  */
 function detectPromptWithOptions(
   output: string,
@@ -348,9 +383,10 @@ function extractResponse(
 
     const response = responseLines.join('\n').trim();
 
-    // Additional check: ensure response doesn't contain thinking indicators
-    // This prevents saving intermediate states as final responses
-    if (thinkingPattern.test(response)) {
+    // DR-004: Check only the tail of the response for thinking indicators.
+    // Prevents false blocking when completed thinking summaries appear in the response body.
+    const responseTailLines = response.split('\n').slice(-RESPONSE_THINKING_TAIL_LINE_COUNT).join('\n');
+    if (thinkingPattern.test(responseTailLines)) {
       return {
         response: '',
         isComplete: false,
@@ -417,18 +453,13 @@ function extractResponse(
         };
       }
 
-      // Check for auth/loading states that should not be treated as complete responses
-      if (response.includes('Waiting for auth') ||
-          response.includes('⠋') ||
-          response.includes('⠙') ||
-          response.includes('⠹') ||
-          response.includes('⠸') ||
-          response.includes('⠼') ||
-          response.includes('⠴') ||
-          response.includes('⠦') ||
-          response.includes('⠧') ||
-          response.includes('⠇') ||
-          response.includes('⠏')) {
+      // Check for auth/loading states that should not be treated as complete responses.
+      // Braille spinner characters are shared with CLAUDE_SPINNER_CHARS in cli-patterns.ts.
+      const LOADING_INDICATORS = [
+        'Waiting for auth',
+        '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏',
+      ];
+      if (LOADING_INDICATORS.some(indicator => response.includes(indicator))) {
         return {
           response: '',
           isComplete: false,
@@ -541,12 +572,17 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     const result = extractResponse(output, lastCapturedLine, cliToolId);
 
     if (!result || !result.isComplete) {
-      // No new output or response not yet complete
-      // But if Claude is processing (thinking), mark any pending prompts as answered
-      // This handles cases where user responded to prompts directly via terminal
+      // No new output or response not yet complete.
+      // If CLI tool is actively thinking, mark any pending prompts as answered.
+      // This handles cases where user responded to prompts directly via terminal.
+      //
+      // DR-004 windowing: Only check tail lines (same as extractResponse thinking check)
+      // to avoid false matches on completed thinking summaries in scrollback.
+      // Previously (MF-001), full-text check caused false positives.
       const { thinkingPattern } = getCliToolPatterns(cliToolId);
       const cleanOutput = stripAnsi(output);
-      if (thinkingPattern.test(cleanOutput)) {
+      const tailLines = cleanOutput.split('\n').slice(-RESPONSE_THINKING_TAIL_LINE_COUNT).join('\n');
+      if (thinkingPattern.test(tailLines)) {
         const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId);
         if (answeredCount > 0) {
           console.log(`Marked ${answeredCount} pending prompt(s) as answered (thinking detected) for ${worktreeId}`);

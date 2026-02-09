@@ -1,0 +1,147 @@
+{
+  "issue_number": 188,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001-S4",
+        "title": "validateSessionName() のエラーメッセージにユーザー入力が含まれる",
+        "category": "Information Disclosure",
+        "owasp": "A01:2021 - Broken Access Control / Information Leakage",
+        "severity": "low",
+        "description": "cli-tools/validation.ts の validateSessionName() が throw new Error(`Invalid session name format: ${sessionName}`) でユーザー入力をそのまま含む。Issue #188の変更範囲外だが、current-output/route.ts がこの関数の呼び出しチェーンに存在するため、error.messageがJSON応答に含まれた場合に情報漏洩のリスクがある。Issue #193 SEC-003で他の箇所は修正済みだが、この箇所が残存している。",
+        "recommendation": "既存の問題であり本Issue #188の修正範囲には直接関係しないが、フォローアップIssueで固定エラーメッセージへの変更を検討する。"
+      },
+      {
+        "id": "SF-002-S4",
+        "title": "current-output/route.ts の404エラーにユーザー入力(params.id)が含まれる",
+        "category": "Information Disclosure",
+        "owasp": "A01:2021 - Broken Access Control",
+        "severity": "low",
+        "description": "current-output/route.ts L33: `{ error: \\`Worktree '${params.id}' not found\\` }` でparams.idをそのままJSON応答に含む。修正後もこの行は変更されないが、Issue #188で本ルートの構造を見直す際に、エラーメッセージの安全性も確認する価値がある。他の複数のroute.tsにも同じパターンが存在する（既知の広域課題）。",
+        "recommendation": "Issue #188のスコープ外であるため、セキュリティ強化の別Issueで対応。固定メッセージ（例: 'Worktree not found'）への変更を検討する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001-S4",
+        "title": "ウィンドウサイズ縮小によるセキュリティ防御への影響評価",
+        "category": "Defense-in-Depth",
+        "description": "thinking検出ウィンドウを15行から5行に縮小する変更は、Issue #161 Layer 1防御（thinking中のプロンプト検出スキップ）に影響を与える可能性がある。ただし、detectSessionStatus()内のプロンプト最優先ロジック（プロンプト検出 -> thinking検出の順序）により、プロンプトがアクティブな場合はthinkingの検出結果に関係なく正しくwaitingステータスが返される。auto-yes-manager.tsのTHINKING_CHECK_LINE_COUNT=50は変更されないため、Auto-Yes側の防御は完全に維持されている。"
+      },
+      {
+        "id": "C-002-S4",
+        "title": "stripAnsi()のカバレッジ限界（SEC-002既知事項）",
+        "category": "Input Sanitization",
+        "owasp": "A03:2021 - Injection",
+        "description": "cli-patterns.ts のstripAnsi()はSEC-002で既知の制限事項（8-bit CSI、DEC private modes等）が文書化されている。Issue #188の変更はstripAnsi()自体を修正しないが、detectSessionStatus()内でstripAnsi()を一括適用するパスへの移行により、stripAnsi()の品質が全体のセキュリティに影響する表面が若干拡大する。現時点ではtmux capture-pane出力がこれらの特殊シーケンスを含む可能性が低いため、リスクは低い。"
+      },
+      {
+        "id": "C-003-S4",
+        "title": "response-poller.ts L547-554の全文thinkingチェック残存（MF-001 S3関連）",
+        "category": "Logic Vulnerability",
+        "description": "checkForResponse()内のthinkingPattern.test(cleanOutput)は全文チェックのまま残される（コメントで既知制限を明示）。これにより、スクロールバックに残存するthinkingサマリーがpending promptのanswered判定に影響する可能性がある。Auto-Yes動作に間接的に影響するセキュリティリスクであり、フォローアップIssueで対応予定。"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "notes": "params.id はDB参照のキーとして使用。SQLインジェクションはbetter-sqlite3のプリペアドステートメントで防止。ただしエラーメッセージにparams.idが含まれる点はSF-002-S4として記載。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "本変更は暗号化処理を含まない。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "notes": "tmux操作はsendKeys()経由で実行され、validateSessionName()でセッション名を検証。detectThinking()、detectPrompt()はRegExpパターンマッチングのみで、ユーザー入力から動的にRegExpを構築していない。ANSI_PATTERN、CLAUDE_THINKING_PATTERN等の正規表現はモジュールレベル定数でReDoSリスクが低い（アンカー付き、量子化限定的）。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "プロンプト最優先のステータス検出設計は、Auto-Yes誤発火防止の観点で安全。thinking検出ウィンドウ縮小もthinkingインジケータが常に末尾に表示される特性に基づく安全な設計。Issue #161/193のセキュリティレイヤーは全て維持される。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "ウィンドウサイズの定数化（STATUS_THINKING_LINE_COUNT=5、STATUS_CHECK_LINE_COUNT=15）は設定ミスのリスクを低減。定数名のSF-002リネーム（STATUS_プレフィックス追加）で誤参照リスクも低減。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "新規依存ライブラリの追加なし。"
+    },
+    "A07_authentication_failures": {
+      "status": "not_applicable",
+      "notes": "本変更は認証処理を含まない。"
+    },
+    "A08_data_integrity_failures": {
+      "status": "pass",
+      "notes": "detectSessionStatus()の戻り値はメモリ内のみで使用され、DBへの永続化はない（ステータス表示用）。response-poller.tsのDB書き込み（createMessage）は既存ロジックで変更なし。"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass",
+      "notes": "既存のログ出力パターンを維持。エラーメッセージにセンシティブ情報は含まれない（auto-yes-manager.tsのログはworktreeIdのみ）。console.error()のメッセージは固定文字列ベース。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "本変更は外部HTTPリクエストを含まない。"
+    }
+  },
+  "security_defenses_maintained": {
+    "issue_161_layer1": {
+      "status": "maintained",
+      "description": "thinking中のprompt検出スキップ。detectSessionStatus()のプロンプト最優先順序で維持。current-output/route.tsでも!thinking条件でdetectPrompt()をスキップ。"
+    },
+    "issue_161_layer2": {
+      "status": "maintained",
+      "description": "2パス cursor 検出方式。prompt-detector.tsは変更なし。"
+    },
+    "issue_161_layer3": {
+      "status": "maintained",
+      "description": "連番検証（isConsecutiveFromOne）。prompt-detector.tsは変更なし。"
+    },
+    "issue_193_layer5_sec001": {
+      "status": "maintained",
+      "description": "requireDefaultIndicator=false時のquestionEndIndexガード。prompt-detector.tsは変更なし。"
+    },
+    "issue_193_sec002": {
+      "status": "maintained",
+      "description": "stripAnsi()適用。detectSessionStatus()内で一括適用。"
+    },
+    "issue_193_sec003": {
+      "status": "maintained",
+      "description": "固定エラーメッセージ（getAnswerInput）。prompt-detector.tsは変更なし。"
+    },
+    "issue_191_sf001": {
+      "status": "maintained",
+      "description": "auto-yes-manager.ts THINKING_CHECK_LINE_COUNT=50。変更なし。"
+    },
+    "issue_138_dos_protection": {
+      "status": "maintained",
+      "description": "MAX_CONCURRENT_POLLERS=50、worktreeId検証。auto-yes-manager.tsは変更なし。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/lib/cli-tools/validation.ts"
+  ],
+  "timestamp": "2026-02-09T12:00:00Z"
+}
