@@ -1,12 +1,23 @@
 /**
- * Session status detection for CLI tools
- * Issue #54: Improved status detection with confidence levels
+ * Session status detection for CLI tools.
+ * Issue #54: Improved status detection with confidence levels.
+ * Issue #188: Thinking indicator false detection fix (windowed detection).
  *
- * This module provides more reliable session status detection by:
+ * This module provides reliable session status detection by:
  * 1. Checking for interactive prompts (yes/no, multiple choice)
- * 2. Checking for thinking/processing indicators
+ * 2. Checking for thinking/processing indicators (windowed to last N lines)
  * 3. Checking for input prompts (ready for user input)
  * 4. Using time-based heuristics when patterns don't match
+ *
+ * Architecture note (SF-001 tradeoff):
+ * This module returns StatusDetectionResult which intentionally does NOT include
+ * PromptDetectionResult.promptData. Callers that need promptData (e.g.,
+ * current-output/route.ts) must call detectPrompt() separately, resulting in
+ * detectPrompt() being invoked twice: once inside detectSessionStatus() and once
+ * by the caller. This controlled DRY violation is accepted because:
+ *   - StatusDetectionResult maintains SRP (status + confidence, not prompt details)
+ *   - Exposing promptData would couple status detection to prompt data shape changes
+ *   - detectPrompt() is lightweight (regex-based, no I/O), so the cost is negligible
  */
 
 import { stripAnsi, detectThinking, getCliToolPatterns, buildDetectPromptOptions } from './cli-patterns';
@@ -37,8 +48,11 @@ export interface StatusDetectionResult {
   reason: string;
   /**
    * Whether an active interactive prompt (y/n, multiple choice) was detected
-   * in the last N lines. Used by callers for stale prompt cleanup logic.
+   * in the last STATUS_CHECK_LINE_COUNT (15) lines.
+   *
+   * Used by callers as the source of truth for isPromptWaiting (SF-004).
    * Does NOT expose internal PromptDetectionResult details (encapsulation).
+   * Callers needing promptData must call detectPrompt() separately (SF-001).
    */
   hasActivePrompt: boolean;
 }
@@ -53,13 +67,21 @@ const STATUS_CHECK_LINE_COUNT: number = 15;
  * Number of lines from the end to check for thinking indicators.
  * Thinking indicators (spinner + activity text) only appear in the most recent lines.
  * A small window prevents completed thinking summaries (e.g., "Churned for 41s")
- * in scrollback from being falsely detected as active thinking.
+ * in scrollback from being falsely detected as active thinking (Issue #188 root cause).
  *
- * SF-002: Named STATUS_THINKING_LINE_COUNT (not THINKING_CHECK_LINE_COUNT) to avoid
- * naming collision with auto-yes-manager.ts's THINKING_CHECK_LINE_COUNT=50.
- * The two constants serve different purposes:
- *   - STATUS_THINKING_LINE_COUNT (5): UI status display (accuracy-focused)
- *   - THINKING_CHECK_LINE_COUNT (50): Auto-Yes false-fire prevention (safety-focused)
+ * SF-002 naming rationale: Named STATUS_THINKING_LINE_COUNT (not THINKING_CHECK_LINE_COUNT)
+ * to avoid naming collision with auto-yes-manager.ts. Three related constants exist:
+ *
+ * | Constant                          | Value | Module              | Purpose                          |
+ * |-----------------------------------|-------|---------------------|----------------------------------|
+ * | STATUS_THINKING_LINE_COUNT        |   5   | status-detector.ts  | UI status display (accuracy)     |
+ * | RESPONSE_THINKING_TAIL_LINE_COUNT |   5   | response-poller.ts  | Response extraction tail check   |
+ * | THINKING_CHECK_LINE_COUNT         |  50   | auto-yes-manager.ts | Auto-Yes safety (wider window)   |
+ *
+ * The UI constants (5) use a narrow window for precision. The Auto-Yes constant (50)
+ * uses a wider window that matches detectMultipleChoicePrompt's scan range, prioritizing
+ * safety over precision (Issue #191).
+ *
  * @constant
  */
 const STATUS_THINKING_LINE_COUNT: number = 5;

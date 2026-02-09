@@ -73,23 +73,29 @@ export async function GET(
     // Strip ANSI codes before state detection for reliable pattern matching
     const cleanOutput = stripAnsi(output);
 
-    // DR-001: detectSessionStatus() for unified priority-based status detection
-    // This replaces the inline thinking/prompt logic that had different priority
-    // ordering from status-detector.ts (Issue #188 root cause)
+    // DR-001: Unified priority-based status detection via detectSessionStatus().
+    // This replaced the inline thinking/prompt logic that had inconsistent priority
+    // ordering (Issue #188 root cause: thinking detected on full output instead of
+    // 5-line window, causing perpetual spinner when thinking summary was in scrollback).
     const statusResult = detectSessionStatus(output, cliToolId);
     const thinking = statusResult.status === 'running' && statusResult.reason === 'thinking_indicator';
 
-    // DR-002 (alternative): Obtain promptData separately when needed.
-    // SF-001: detectPrompt() is intentionally called separately from detectSessionStatus()
-    // to obtain promptData. This controlled DRY violation maintains SRP of StatusDetectionResult.
-    // Issue #161 maintained: only run prompt detection when not thinking
+    // SF-001: detectPrompt() is called separately to obtain promptData for the API response.
+    // detectSessionStatus() already calls detectPrompt() internally for status determination,
+    // but does not expose promptData in StatusDetectionResult (SRP: status module should not
+    // be coupled to prompt data shape). This second call is intentional and lightweight
+    // (regex-based, no I/O). See status-detector.ts module JSDoc for full rationale.
+    //
+    // Issue #161 Layer 1: Skip prompt detection during active thinking to prevent
+    // numbered lists in in-progress output from triggering false multiple_choice detection.
     let promptDetection: { isPrompt: boolean; cleanContent: string; promptData?: unknown } = { isPrompt: false, cleanContent: cleanOutput };
     if (!thinking) {
       const promptOptions = buildDetectPromptOptions(cliToolId);
       promptDetection = detectPrompt(cleanOutput, promptOptions);
     }
 
-    // SF-004: isPromptWaiting uses statusResult.hasActivePrompt as source of truth
+    // SF-004: isPromptWaiting uses statusResult.hasActivePrompt (15-line window) as
+    // the single source of truth, ensuring consistency between status and prompt state.
     const isPromptWaiting = statusResult.hasActivePrompt;
 
     // Extract realtime snippet (last 100 lines for better context)

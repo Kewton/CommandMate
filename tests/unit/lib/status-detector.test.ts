@@ -4,10 +4,11 @@
  *
  * Tests verify:
  * - Prompt takes priority over thinking (correct priority order)
- * - Thinking detection uses separate 5-line window (STATUS_THINKING_LINE_COUNT)
+ * - Thinking detection uses separate 5-line window (STATUS_THINKING_LINE_COUNT=5)
  * - Completed thinking summaries outside 5-line window are not falsely detected
- * - Boundary conditions for STATUS_THINKING_LINE_COUNT
+ * - Boundary conditions for STATUS_THINKING_LINE_COUNT (5th vs 6th line from end)
  * - Empty line handling in window-based detection
+ * - Existing behavior preservation (time-based heuristic, Codex support)
  *
  * @vitest-environment node
  */
@@ -15,22 +16,45 @@
 import { describe, it, expect } from 'vitest';
 import { detectSessionStatus } from '@/lib/status-detector';
 
+// Named constants for Unicode characters used in tmux output simulation.
+// These match the actual characters produced by Claude CLI and detected by cli-patterns.ts.
+const SPINNER = '\u2733';        // ✳ - Claude spinner character
+const ELLIPSIS = '\u2026';       // ... - thinking activity suffix
+const PROMPT = '\u276F';         // ❯ - Claude CLI prompt character
+const SEPARATOR = '\u2500'.repeat(15); // ─ repeated - Claude response separator
+const BULLET = '\u2022';         // - - Codex thinking indicator prefix
+
+/**
+ * Helper: create a thinking summary line (e.g., "✳ Churned for 41s...")
+ */
+function thinkingSummary(text: string): string {
+  return `${SPINNER} ${text}${ELLIPSIS}`;
+}
+
+/**
+ * Helper: create an active thinking indicator line (e.g., "✳ Planning...")
+ */
+function activeThinking(activity: string): string {
+  return `${SPINNER} ${activity}${ELLIPSIS}`;
+}
+
 describe('status-detector', () => {
   describe('Issue #188: thinking + prompt coexistence', () => {
-    it('should prioritize prompt over thinking summary (ready)', () => {
-      // Scenario: Completed thinking summary in scrollback, prompt at the end
-      // The thinking summary "Churned for 41s" is more than 5 lines from the end
+    it('should prioritize input prompt over completed thinking summary in scrollback', () => {
+      // Thinking summary "Churned for 41s" is more than 5 lines from end,
+      // so it falls outside STATUS_THINKING_LINE_COUNT window.
+      // The input prompt at end should be detected instead.
       const output = [
         'Some response content line 1',
         'Some response content line 2',
-        '\u2733 Churned for 41s\u2026', // thinking summary at line 3 (far from end)
+        thinkingSummary('Churned for 41s'),  // far from end (outside 5-line window)
         'More response content',
         'More response content',
         'More response content',
         'More response content',
         'More response content',
-        '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500', // separator
-        '\u276F ', // prompt at the end
+        SEPARATOR,
+        `${PROMPT} `,                        // input prompt at end
       ].join('\n');
 
       const result = detectSessionStatus(output, 'claude');
@@ -40,10 +64,10 @@ describe('status-detector', () => {
     });
 
     it('should prioritize interactive prompt (waiting) over thinking summary', () => {
-      // Scenario: y/n prompt at the end with old thinking summary in scrollback
+      // y/n prompt at end with old thinking summary in scrollback
       const output = [
         'Some response content',
-        '\u2733 Churned for 41s\u2026', // thinking summary (far from end)
+        thinkingSummary('Churned for 41s'),  // far from end
         'More content',
         'More content',
         'More content',
@@ -65,7 +89,7 @@ describe('status-detector', () => {
         'Some previous output',
         'More previous output',
         'Content line',
-        '\u2733 Planning\u2026', // active thinking in last 5 lines
+        activeThinking('Planning'),  // within 5-line window
       ].join('\n');
 
       const result = detectSessionStatus(output, 'claude');
@@ -91,17 +115,16 @@ describe('status-detector', () => {
 
   describe('Issue #188: thinking summary outside 5-line window (false detection prevention)', () => {
     it('should not detect thinking summary at line 6+ from end when prompt exists', () => {
-      // The thinking summary is at position > 5 lines from end
-      // With a prompt present, it should return ready
+      // Thinking summary is outside the 5-line window; input prompt should win.
       const output = [
-        '\u2733 Churned for 41s\u2026', // thinking summary - line 1 (far from end)
+        thinkingSummary('Churned for 41s'),  // line 1 (far from end, outside window)
         'Response content line 2',
         'Response content line 3',
         'Response content line 4',
         'Response content line 5',
         'Response content line 6',
-        '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500', // separator
-        '\u276F ', // prompt
+        SEPARATOR,
+        `${PROMPT} `,
       ].join('\n');
 
       const result = detectSessionStatus(output, 'claude');
@@ -110,9 +133,9 @@ describe('status-detector', () => {
     });
 
     it('should not detect thinking summary at line 6+ when no prompt exists', () => {
-      // Thinking summary far from end, no prompt -> default running (low confidence)
+      // Thinking summary far from end, no prompt -> falls through to default
       const output = [
-        '\u2733 Churned for 41s\u2026', // thinking summary at line 1
+        thinkingSummary('Churned for 41s'),
         'Response line 2',
         'Response line 3',
         'Response line 4',
@@ -123,7 +146,6 @@ describe('status-detector', () => {
       ].join('\n');
 
       const result = detectSessionStatus(output, 'claude');
-      // Without prompt or active thinking, should fall through to default
       expect(result.status).toBe('running');
       expect(result.confidence).toBe('low');
       expect(result.reason).toBe('default');
@@ -131,12 +153,12 @@ describe('status-detector', () => {
   });
 
   describe('Issue #188: STATUS_THINKING_LINE_COUNT boundary tests', () => {
-    it('should detect thinking indicator at exactly the 5th line from end (boundary)', () => {
-      // 5 lines from end: lines.slice(-5) should include this
+    it('should detect thinking at exactly the 5th line from end (inside window boundary)', () => {
+      // lines.slice(-5) includes index -5 through -1
       const output = [
         'Line far above',
         'Line far above 2',
-        '\u2733 Processing\u2026', // exactly 5th from end (index -5)
+        activeThinking('Processing'),  // exactly 5th from end (index -5) -- inside window
         'Line 4 from end',
         'Line 3 from end',
         'Line 2 from end',
@@ -149,11 +171,11 @@ describe('status-detector', () => {
       expect(result.reason).toBe('thinking_indicator');
     });
 
-    it('should NOT detect thinking indicator at 6th line from end (just outside window)', () => {
-      // 6th line from end: lines.slice(-5) should NOT include this
+    it('should NOT detect thinking at 6th line from end (outside window boundary)', () => {
+      // lines.slice(-5) does NOT include index -6
       const output = [
         'Line far above',
-        '\u2733 Processing\u2026', // 6th from end (index -6) - outside window
+        activeThinking('Processing'),  // 6th from end (index -6) -- outside window
         'Line 5 from end',
         'Line 4 from end',
         'Line 3 from end',
@@ -162,19 +184,19 @@ describe('status-detector', () => {
       ].join('\n');
 
       const result = detectSessionStatus(output, 'claude');
-      // Should NOT detect thinking (outside 5-line window)
       expect(result.reason).not.toBe('thinking_indicator');
     });
   });
 
   describe('Issue #188 C-002: empty lines in output', () => {
-    it('should detect thinking indicator with many empty lines in 5-line window', () => {
-      // Empty lines are included in the window, thinking indicator still in last 5 lines
+    it('should detect thinking indicator even when empty lines consume window slots', () => {
+      // Empty lines count toward the 5-line window. Thinking indicator at index -2
+      // is still inside the window.
       const output = [
         'Previous output',
         '',
         '',
-        '\u2733 Analyzing\u2026', // within last 5 lines
+        activeThinking('Analyzing'),  // within last 5 lines (index -2)
         '',
       ].join('\n');
 
@@ -183,8 +205,7 @@ describe('status-detector', () => {
       expect(result.reason).toBe('thinking_indicator');
     });
 
-    it('should detect prompt with many empty lines in 15-line window', () => {
-      // Prompt exists in 15-line window with many empty lines
+    it('should detect interactive prompt with many empty lines in 15-line window', () => {
       const output = [
         'Previous output',
         '',
@@ -195,7 +216,7 @@ describe('status-detector', () => {
         'Do you want to continue? (y/n)',
         '',
         '',
-        '\u276F Yes',
+        `${PROMPT} Yes`,
       ].join('\n');
 
       const result = detectSessionStatus(output, 'claude');
@@ -203,21 +224,12 @@ describe('status-detector', () => {
       expect(result.hasActivePrompt).toBe(true);
     });
 
-    it('should detect input prompt with empty line padding (15-line all-line window)', () => {
-      // Prompt at end with empty lines: the 15-line window includes all lines (including empty)
+    it('should detect input prompt with empty line padding in 15-line window', () => {
       const output = [
         'Content',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
-        '\u276F ',
+        '', '', '', '', '', '', '', '', '',  // 9 empty lines
+        SEPARATOR,
+        `${PROMPT} `,
         '',
         '',
       ].join('\n');
@@ -228,24 +240,22 @@ describe('status-detector', () => {
     });
   });
 
-  describe('Issue #188 SF-002 (S3): prompt outside 15-line all-line window', () => {
-    it('should fail to detect prompt when it is beyond 15 all-lines from end', () => {
-      // Prompt at line 16+ from end (with empty padding) is outside the 15-line window
-      // This is a known behavior change documented in the design policy
+  describe('Issue #188 SF-002 (S3): prompt outside 15-line STATUS_CHECK_LINE_COUNT window', () => {
+    it('should not detect prompt when it is beyond 15 lines from end', () => {
+      // Known behavior: STATUS_CHECK_LINE_COUNT=15 means prompts more than 15 lines
+      // from the end are not detected. This is acceptable because stale prompts
+      // that far back are unlikely to be currently active.
       const lines: string[] = [];
       lines.push('Content');
-      lines.push('\u276F '); // prompt - will be at position > 15 lines from end
-      // Add 16 lines after the prompt
+      lines.push(`${PROMPT} `);  // prompt at position 2 (will be >15 lines from end)
       for (let i = 0; i < 16; i++) {
-        lines.push('');
+        lines.push('');          // 16 empty lines push prompt outside window
       }
 
       const output = lines.join('\n');
-
       const result = detectSessionStatus(output, 'claude');
-      // Prompt is outside 15-line window, so it should NOT be detected
+
       expect(result.hasActivePrompt).toBe(false);
-      // Without prompt detection, falls through to default
       expect(result.status).toBe('running');
       expect(result.confidence).toBe('low');
     });
@@ -272,7 +282,7 @@ describe('status-detector', () => {
     });
 
     it('should detect codex thinking indicator', () => {
-      const output = '\u2022 Planning something';
+      const output = `${BULLET} Planning something`;
 
       const result = detectSessionStatus(output, 'codex');
       expect(result.status).toBe('running');
