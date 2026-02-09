@@ -1,0 +1,51 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 48,
+    "passed": 48,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/auto-yes-manager.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "commits": [
+    "27ace6d: fix(auto-yes): use cursor-based navigation for Claude Code multi-choice prompts"
+  ],
+  "message": "TDD implementation complete. Added cursor-based navigation (sendSpecialKeys) for Claude Code multiple_choice prompts in auto-yes-manager.ts. 6 new tests added, 1 existing test updated. All 48 tests pass. TypeScript and ESLint: 0 errors.",
+  "details": {
+    "production_changes": {
+      "file": "src/lib/auto-yes-manager.ts",
+      "changes": [
+        "Added import for sendSpecialKeys from ./tmux",
+        "In pollAutoYes() lines 339-366: detect Claude multi-choice (cliToolId=claude + type=multiple_choice + digit answer) and send Arrow keys + Enter via sendSpecialKeys",
+        "Keep existing sendKeys path for yes/no prompts and non-Claude CLI tools"
+      ]
+    },
+    "test_changes": {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "changes": [
+        "Updated tmux mock to include sendSpecialKeys: vi.fn()",
+        "Updated Issue #161 test to expect sendSpecialKeys (not sendKeys) for Claude multi-choice",
+        "Added 6 new tests in 'Issue #193: Claude Code cursor-based navigation in pollAutoYes' describe block"
+      ],
+      "new_tests": [
+        "should call sendSpecialKeys for Claude multiple_choice prompt (not sendKeys)",
+        "should call sendKeys (not sendSpecialKeys) for Claude yes/no prompt",
+        "should call sendKeys (not sendSpecialKeys) for non-Claude (codex) multiple_choice prompt",
+        "should calculate correct Down arrow offset (default=1, target=3 -> 2x Down + Enter)",
+        "should calculate correct Up arrow offset (default=3, target=1 -> 2x Up + Enter)",
+        "should send just Enter when default=target (offset=0)"
+      ]
+    },
+    "pre_existing_failures": [
+      "tests/unit/lib/cli-patterns.test.ts > detectThinking > should detect thinking for claude",
+      "tests/unit/api/prompt-response-verification.test.ts > should send keys when prompt is still active"
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "issue_description": "Server-side Auto-Yes poller (auto-yes-manager.ts) sends text via sendKeys() for Claude Code multiple_choice prompts, but Claude Code uses cursor-based navigation (Arrow/Enter), not text input. The text '1' is ignored by Claude Code's UI, so Auto-Yes fails when browser tab is in background.",
+  "error_logs": [],
+  "affected_files": [
+    "src/lib/auto-yes-manager.ts"
+  ],
+  "reproduction_steps": [
+    "1. Enable Auto-Yes mode for a Claude Code session",
+    "2. Put browser tab in background",
+    "3. Trigger a Claude Code AskUserQuestion (multiple_choice) prompt",
+    "4. Server-side poller detects the prompt and sends '1' via sendKeys()",
+    "5. Claude Code ignores the text input, prompt remains active"
+  ],
+  "environment": {
+    "os": "macOS",
+    "node_version": "18.x",
+    "browser": "Any (background tab)"
+  },
+  "severity_hint": "medium",
+  "root_cause": "auto-yes-manager.ts L340-342 uses sendKeys(sessionName, answer, false) + Enter for all prompt types. For Claude Code multiple_choice prompts, the answer is a number string (e.g., '1') which gets typed as text. Claude Code AskUserQuestion uses cursor-based navigation (Arrow Up/Down + Enter), not text number input. The prompt-response/route.ts was already fixed (PR #217) to use sendSpecialKeys() for Claude multi-choice, but auto-yes-manager bypasses the API and sends directly.",
+  "related_prs": ["#216", "#217"],
+  "related_issue": 193
+}

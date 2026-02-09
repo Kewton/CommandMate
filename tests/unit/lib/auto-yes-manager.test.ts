@@ -26,6 +26,7 @@ vi.mock('@/lib/cli-session', () => ({
 }));
 vi.mock('@/lib/tmux', () => ({
   sendKeys: vi.fn(),
+  sendSpecialKeys: vi.fn(),
 }));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
@@ -466,7 +467,7 @@ describe('auto-yes-manager', () => {
 
     it('should call detectPrompt when NOT in thinking state', async () => {
       const { captureSessionOutput } = await import('@/lib/cli-session');
-      const { sendKeys } = await import('@/lib/tmux');
+      const { sendSpecialKeys } = await import('@/lib/tmux');
 
       vi.useFakeTimers();
       const now = Date.now();
@@ -479,7 +480,7 @@ describe('auto-yes-manager', () => {
       // Mock: captureSessionOutput returns a valid multiple_choice prompt
       const promptOutput = 'Select an option:\n\u276F 1. Yes\n  2. No';
       vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
-      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
 
       // Advance timer to trigger pollAutoYes
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
@@ -487,15 +488,17 @@ describe('auto-yes-manager', () => {
       // Verify: captureSessionOutput was called
       expect(captureSessionOutput).toHaveBeenCalled();
 
-      // Verify: sendKeys was called (prompt was detected and auto-answered)
+      // Verify: sendSpecialKeys was called (prompt was detected and auto-answered)
       // This confirms that when NOT in thinking state, prompt detection
       // proceeds normally and auto-answer is sent.
-      expect(sendKeys).toHaveBeenCalled();
+      // Issue #193: Claude multiple_choice prompts now use sendSpecialKeys
+      // (cursor-based navigation) instead of sendKeys (text-based).
+      expect(sendSpecialKeys).toHaveBeenCalled();
 
       // Cleanup
       stopAutoYesPolling('wt-normal');
       vi.mocked(captureSessionOutput).mockReset();
-      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendSpecialKeys).mockReset();
     });
   });
 
@@ -645,6 +648,257 @@ describe('auto-yes-manager', () => {
       const outsideResult = detectPrompt(outsideBuffer);
       // Options are pushed outside the 50-line window, so should NOT be detected
       expect(outsideResult.isPrompt).toBe(false);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #193: Cursor-based navigation for Claude Code multiple_choice prompts
+  // Verifies that pollAutoYes sends Arrow/Enter keys via sendSpecialKeys()
+  // for Claude Code multiple_choice prompts, instead of typing numbers via sendKeys().
+  // ==========================================================================
+  describe('Issue #193: Claude Code cursor-based navigation in pollAutoYes', () => {
+    it('should call sendSpecialKeys for Claude multiple_choice prompt (not sendKeys)', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      // Clear all mock call history before this test
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendSpecialKeys).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-mc-claude', true);
+      startAutoYesPolling('wt-mc-claude', 'claude');
+
+      // Mock: captureSessionOutput returns a multiple_choice prompt with default on option 1
+      const promptOutput = 'Select an option:\n\u276F 1. Yes\n  2. No\n  3. Cancel';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+
+      // Advance timer to trigger pollAutoYes
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: sendSpecialKeys was called (cursor-based navigation)
+      expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+      const specialKeysCall = vi.mocked(sendSpecialKeys).mock.calls[0];
+      expect(specialKeysCall[0]).toBe('claude-wt-mc-claude'); // session name
+      // resolveAutoAnswer picks default (option 1), cursor starts at default (1), offset=0
+      // So just Enter is sent
+      expect(specialKeysCall[1]).toEqual(['Enter']);
+
+      // Verify: sendKeys was NOT called (no text-based sending for Claude multi-choice)
+      expect(sendKeys).not.toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-mc-claude');
+    });
+
+    it('should call sendKeys (not sendSpecialKeys) for Claude yes/no prompt', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      // Clear all mock call history before this test
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendSpecialKeys).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-yn', true);
+      startAutoYesPolling('wt-yn', 'claude');
+
+      // Mock: captureSessionOutput returns a yes/no prompt
+      const promptOutput = 'Do you want to proceed? (y/n)';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+
+      // Advance timer to trigger pollAutoYes
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: sendKeys was called with 'y' (text-based for yes/no prompts)
+      expect(sendKeys).toHaveBeenCalled();
+      const firstCall = vi.mocked(sendKeys).mock.calls[0];
+      expect(firstCall[1]).toBe('y'); // answer text
+
+      // Verify: sendSpecialKeys was NOT called (yes/no uses text, not cursor)
+      expect(sendSpecialKeys).not.toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-yn');
+    });
+
+    it('should call sendKeys (not sendSpecialKeys) for non-Claude (codex) multiple_choice prompt', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      // Clear all mock call history before this test
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendSpecialKeys).mockReset();
+
+      // Setup: use 'codex' CLI tool
+      setAutoYesEnabled('wt-codex-mc', true);
+      startAutoYesPolling('wt-codex-mc', 'codex');
+
+      // Mock: captureSessionOutput returns a multiple_choice prompt
+      const promptOutput = 'Select an option:\n\u276F 1. Yes\n  2. No';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+
+      // Advance timer to trigger pollAutoYes
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: sendKeys was called (text-based for non-Claude CLI tools)
+      expect(sendKeys).toHaveBeenCalled();
+
+      // Verify: sendSpecialKeys was NOT called (only Claude uses cursor navigation)
+      expect(sendSpecialKeys).not.toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-codex-mc');
+    });
+
+    it('should calculate correct Down arrow offset (default=1, target=3 -> 2x Down + Enter)', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux');
+      const autoYesResolver = await import('@/lib/auto-yes-resolver');
+
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      // Clear all mock call history before this test
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendSpecialKeys).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-offset-down', true);
+      startAutoYesPolling('wt-offset-down', 'claude');
+
+      // Mock: multiple_choice prompt with default on option 1
+      const promptOutput = 'Select an option:\n\u276F 1. Yes\n  2. Maybe\n  3. No';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+
+      // Mock resolveAutoAnswer to return '3' (target option 3, default is 1)
+      vi.spyOn(autoYesResolver, 'resolveAutoAnswer').mockReturnValue('3');
+
+      // Advance timer to trigger pollAutoYes
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: sendSpecialKeys was called with 2x Down + Enter
+      expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+      const specialKeysCall = vi.mocked(sendSpecialKeys).mock.calls[0];
+      expect(specialKeysCall[1]).toEqual(['Down', 'Down', 'Enter']);
+
+      // Verify: sendKeys was NOT called
+      expect(sendKeys).not.toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-offset-down');
+      vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
+    });
+
+    it('should calculate correct Up arrow offset (default=3, target=1 -> 2x Up + Enter)', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux');
+      const autoYesResolver = await import('@/lib/auto-yes-resolver');
+
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      // Clear all mock call history before this test
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendSpecialKeys).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-offset-up', true);
+      startAutoYesPolling('wt-offset-up', 'claude');
+
+      // Mock: multiple_choice prompt with default on option 3 (cursor indicator on 3)
+      const promptOutput = 'Select an option:\n  1. Yes\n  2. Maybe\n\u276F 3. No';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+
+      // Mock resolveAutoAnswer to return '1' (target option 1, default is 3)
+      vi.spyOn(autoYesResolver, 'resolveAutoAnswer').mockReturnValue('1');
+
+      // Advance timer to trigger pollAutoYes
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: sendSpecialKeys was called with 2x Up + Enter
+      expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+      const specialKeysCall = vi.mocked(sendSpecialKeys).mock.calls[0];
+      expect(specialKeysCall[1]).toEqual(['Up', 'Up', 'Enter']);
+
+      // Verify: sendKeys was NOT called
+      expect(sendKeys).not.toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-offset-up');
+      vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
+    });
+
+    it('should send just Enter when default=target (offset=0)', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux');
+      const autoYesResolver = await import('@/lib/auto-yes-resolver');
+
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      // Clear all mock call history before this test
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendSpecialKeys).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-offset-zero', true);
+      startAutoYesPolling('wt-offset-zero', 'claude');
+
+      // Mock: multiple_choice prompt with default on option 2
+      const promptOutput = 'Select an option:\n  1. Yes\n\u276F 2. Maybe\n  3. No';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+
+      // Mock resolveAutoAnswer to return '2' (target=2, default=2, offset=0)
+      vi.spyOn(autoYesResolver, 'resolveAutoAnswer').mockReturnValue('2');
+
+      // Advance timer to trigger pollAutoYes
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: sendSpecialKeys was called with just Enter (no arrow keys)
+      expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+      const specialKeysCall = vi.mocked(sendSpecialKeys).mock.calls[0];
+      expect(specialKeysCall[1]).toEqual(['Enter']);
+
+      // Verify: sendKeys was NOT called
+      expect(sendKeys).not.toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-offset-zero');
+      vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
     });
   });
 });

@@ -225,6 +225,51 @@ export async function sendKeys(
 }
 
 /**
+ * Allowed tmux special key names for sendSpecialKeys().
+ * Restricts input to prevent command injection via arbitrary tmux key names.
+ */
+const ALLOWED_SPECIAL_KEYS = new Set([
+  'Up', 'Down', 'Left', 'Right',
+  'Enter', 'Space', 'Tab', 'Escape',
+  'BSpace', 'DC',  // Backspace, Delete
+]);
+
+/**
+ * Send tmux special keys (unquoted key names like Down, Up, Enter, Space).
+ * Used for cursor-based navigation in CLI tool prompts (e.g., Claude Code AskUserQuestion).
+ *
+ * Unlike sendKeys() which sends quoted text, this function sends tmux key names
+ * without quotes, allowing special keys to be interpreted by tmux.
+ *
+ * @param sessionName - Target session name
+ * @param keys - Array of tmux special key names (e.g., ['Down', 'Down', 'Space', 'Enter'])
+ * @throws {Error} If any key name is not in the allowed set, or if tmux command fails
+ */
+export async function sendSpecialKeys(
+  sessionName: string,
+  keys: string[]
+): Promise<void> {
+  if (keys.length === 0) return;
+
+  // Validate all keys are in the allowed set (command injection prevention)
+  for (const key of keys) {
+    if (!ALLOWED_SPECIAL_KEYS.has(key)) {
+      throw new Error(`Invalid special key: ${key}`);
+    }
+  }
+
+  const keysStr = keys.join(' ');
+  const command = `tmux send-keys -t "${sessionName}" ${keysStr}`;
+
+  try {
+    await execAsync(command, { timeout: DEFAULT_TIMEOUT });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to send special keys to tmux session: ${errorMessage}`);
+  }
+}
+
+/**
  * Capture pane output from a tmux session (legacy signature)
  */
 export async function capturePane(
