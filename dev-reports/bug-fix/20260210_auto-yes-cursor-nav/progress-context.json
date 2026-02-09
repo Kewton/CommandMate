@@ -1,11 +1,15 @@
 {
   "bug_id": "20260210_auto-yes-cursor-nav",
   "bug_description": "Server-side Auto-Yes poller uses sendKeys() for Claude Code multiple_choice prompts instead of cursor-based navigation",
-  "fix_summary": "Added cursor-based navigation (sendSpecialKeys) to auto-yes-manager.ts pollAutoYes(), matching the fix already applied to prompt-response/route.ts",
+  "fix_summary": "1) Added cursor-based navigation (sendSpecialKeys) to auto-yes-manager.ts and prompt-response/route.ts with multi-select/single-select detection. 2) Fixed sendSpecialKeys() to send keys one-at-a-time with 100ms delay instead of all-at-once, because Claude Code's ink-based TUI needs processing time between keystrokes.",
   "phase_results": {
     "investigation": {
       "status": "success",
-      "root_cause": "auto-yes-manager.ts L340-342 bypasses prompt-response API and sends text via sendKeys() directly"
+      "root_cause": "sendSpecialKeys() in tmux.ts sent all keys in a single tmux send-keys command (e.g., 'tmux send-keys Space Down Down Down Enter'). Claude Code's ink-based TUI cannot process multiple keystrokes arriving simultaneously - only the first key gets processed. Manual testing confirmed: individual keys with delays work correctly, all-at-once does not.",
+      "previous_root_causes": [
+        "auto-yes-manager.ts L340-342 bypasses prompt-response API and sends text via sendKeys() directly",
+        "Multi-select checkbox prompts need Space+navigate-to-Next+Enter, not just Arrow+Enter"
+      ]
     },
     "tdd_fix": {
       "status": "success",
@@ -23,7 +27,9 @@
     }
   },
   "files_modified": [
+    "src/lib/tmux.ts",
     "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
     "tests/unit/lib/auto-yes-manager.test.ts",
     "tests/unit/api/prompt-response-verification.test.ts"
   ]

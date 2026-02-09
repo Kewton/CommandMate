@@ -234,12 +234,16 @@ const ALLOWED_SPECIAL_KEYS = new Set([
   'BSpace', 'DC',  // Backspace, Delete
 ]);
 
+/** Delay between individual key presses for TUI apps that need processing time (ms). */
+const SPECIAL_KEY_DELAY_MS = 100;
+
 /**
  * Send tmux special keys (unquoted key names like Down, Up, Enter, Space).
  * Used for cursor-based navigation in CLI tool prompts (e.g., Claude Code AskUserQuestion).
  *
- * Unlike sendKeys() which sends quoted text, this function sends tmux key names
- * without quotes, allowing special keys to be interpreted by tmux.
+ * Keys are sent one at a time with a short delay between each press,
+ * because ink-based TUI apps (like Claude Code) need time to process
+ * each keystroke before the next one arrives.
  *
  * @param sessionName - Target session name
  * @param keys - Array of tmux special key names (e.g., ['Down', 'Down', 'Space', 'Enter'])
@@ -258,11 +262,15 @@ export async function sendSpecialKeys(
     }
   }
 
-  const keysStr = keys.join(' ');
-  const command = `tmux send-keys -t "${sessionName}" ${keysStr}`;
-
   try {
-    await execAsync(command, { timeout: DEFAULT_TIMEOUT });
+    for (let i = 0; i < keys.length; i++) {
+      const command = `tmux send-keys -t "${sessionName}" ${keys[i]}`;
+      await execAsync(command, { timeout: DEFAULT_TIMEOUT });
+      // Delay between key presses (skip after the last key)
+      if (i < keys.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, SPECIAL_KEY_DELAY_MS));
+      }
+    }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to send special keys to tmux session: ${errorMessage}`);
