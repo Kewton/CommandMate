@@ -13,6 +13,7 @@
     "src/lib/db.ts",
     "src/lib/db-instance.ts",
     "src/lib/db-migrations.ts",
+    "src/lib/db-repository.ts",
     "src/lib/response-poller.ts",
     "src/lib/cli-session.ts",
     "src/lib/prompt-detector.ts",
@@ -20,6 +21,7 @@
     "src/lib/claude-output.ts",
     "src/lib/cli-patterns.ts",
     "src/lib/cli-tools/**/*.ts",
+    "src/config/system-directories.ts",
     "src/types/**/*.ts"
   ]
 }

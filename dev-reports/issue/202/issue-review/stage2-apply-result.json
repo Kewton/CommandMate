@@ -1,0 +1,53 @@
+{
+  "issue_number": 202,
+  "iteration": 1,
+  "stage": 2,
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "修正方針にimport文の追加を明記。server.tsが相対パス（./src/lib/）形式を使用する旨の注意書きと、具体的なimport文（ensureEnvRepositoriesRegistered, filterExcludedPaths from './src/lib/db-repository'）を手順1として追記。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "手順2にensureEnvRepositoriesRegisteredをfilterExcludedPathsより先に呼び出す順序制約を明記。初回起動時の未登録リポジトリ登録が後続のフィルタリングに必要である理由を説明追記。受け入れ条件にも順序確認項目を追加。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "修正方針に手順5として除外フィルタリング結果のログ出力追加を明記。影響範囲テーブルのserver.ts行にもログ出力追加を記載。受け入れ条件にログ出力の確認項目を追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "受け入れ条件を具体化（コードレビュー確認、手動テスト手順、import形式確認等）。テスト方針セクションを新設し、コードレビュー・手動テスト・既存テストの3つの検証方法を明示。app.prepare()コールバック内にネストされている制約も記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "備考セクションを新設し、initializeWorktrees()とsync/route.tsの処理フロー共通化をフォローアップIssueとして検討する旨を追記。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "再現手順のコマンド表記を「npm run build && npm start」に修正し、CLAUDE.mdの標準的な表記に合わせた。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/202"
+  }
+}

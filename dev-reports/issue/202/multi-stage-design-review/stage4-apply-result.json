@@ -1,0 +1,62 @@
+{
+  "issue_number": 202,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-SEC-001",
+        "item": "scan/route.ts が filterExcludedPaths() を経由せず削除済みリポジトリを再登録可能（既知制限）",
+        "owasp": "A03:2021 Injection",
+        "section_updated": "セキュリティ設計, アーキテクチャ設計, レビュー指摘事項サマリー, 実装チェックリスト",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-SEC-002",
+        "item": "server.ts の initializeWorktrees() にリポジトリパス数の上限チェックが未実装",
+        "owasp": "A04:2021 Insecure Design",
+        "section_updated": "セキュリティ設計, レビュー指摘事項サマリー, 実装チェックリスト",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-SEC-003",
+        "item": "server.ts の除外フィルタリングで除外されたリポジトリのパスがログに出力されない",
+        "owasp": "A09:2021 Security Logging and Monitoring Failures",
+        "section_updated": "具体的な修正内容, セキュリティ設計, 設計上の決定事項とトレードオフ, レビュー指摘事項サマリー, 実装チェックリスト",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-SEC-001",
+        "item": "API エンドポイントの認証・認可メカニズムが未実装（プロジェクト全体の既存課題）",
+        "status": "noted_in_followup"
+      },
+      {
+        "id": "C-SEC-002",
+        "item": "worktree 別サーバー間での DB 分離による除外状態の非同期",
+        "status": "noted_in_followup"
+      },
+      {
+        "id": "C-SEC-003",
+        "item": "ensureEnvRepositoriesRegistered() と filterExcludedPaths() の呼び出し順序がコード上の規約に依存",
+        "status": "noted_in_followup"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-202-server-startup-exclusion-filter-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー（Stage 4 追加）",
+    "セキュリティ設計（SF-SEC-001, SF-SEC-002, SF-SEC-003 追加）",
+    "具体的な修正内容 Section 7-1（SF-SEC-003 除外パスログ追加）",
+    "アーキテクチャ設計 Section 2（SF-SEC-001 OWASP分類追記）",
+    "設計上の決定事項とトレードオフ（SF-SEC-003 追加）",
+    "実装チェックリスト（SF-SEC-003 必須項目追加、SF-SEC-001/SF-SEC-002 フォローアップ追加）"
+  ],
+  "timestamp": "2026-02-09T15:30:00Z"
+}

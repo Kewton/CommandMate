@@ -142,7 +142,7 @@ src/
 | `src/lib/session-cleanup.ts` | セッション/ポーラー停止の一元管理（Facade パターン） |
 | `src/lib/url-normalizer.ts` | Git URL正規化（重複検出用） |
 | `src/lib/clone-manager.ts` | クローン処理管理（DBベース排他制御） |
-| `src/lib/db-repository.ts` | リポジトリDB操作関数群（Issue #190: 除外・復活・パス正規化・バリデーション関数追加） |
+| `src/lib/db-repository.ts` | リポジトリDB操作関数群（Issue #190: 除外・復活・パス正規化・バリデーション関数追加、Issue #202: registerAndFilterRepositories統合関数追加） |
 | `src/types/sidebar.ts` | サイドバーステータス判定 |
 | `src/types/clone.ts` | クローン関連型定義（CloneJob, CloneError等） |
 | `src/lib/file-operations.ts` | ファイル操作（読取/更新/作成/削除/リネーム） |

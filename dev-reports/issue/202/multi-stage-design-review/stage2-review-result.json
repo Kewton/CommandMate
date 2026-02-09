@@ -1,0 +1,183 @@
+{
+  "issue_number": 202,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-CS-001",
+        "category": "整合性",
+        "title": "filterExcludedPaths() の JSDoc に @requires 前提条件が未実装",
+        "description": "設計方針書 Section 7-3 では filterExcludedPaths() の JSDoc に '@requires ensureEnvRepositoriesRegistered() must be called before this function' を追記する方針が明記されている。しかし、現在の db-repository.ts (L400-408) の filterExcludedPaths() にはその JSDoc が存在しない。設計書で SF-001 対応として推奨項目に含まれており、実装チェックリストにも明記されている。",
+        "design_doc_section": "Section 7-3, Section 15 推奨項目",
+        "actual_implementation": "src/lib/db-repository.ts L399: JSDoc なし（関数コメントのみ）",
+        "gap": "設計書の記載あり、実装なし",
+        "severity": "medium",
+        "recommendation": "実装時に filterExcludedPaths() の JSDoc に @requires 前提条件を追記すること。"
+      },
+      {
+        "id": "SF-CS-002",
+        "category": "整合性",
+        "title": "sync/route.ts に順序制約コメントが不足",
+        "description": "設計方針書 Section 7-4 では sync/route.ts の ensureEnvRepositoriesRegistered() と filterExcludedPaths() の呼び出し箇所に順序制約のインラインコメントを確認・追加する方針が明記されている。現在の sync/route.ts (L26-30) には 'Issue #190' というコメントはあるが、呼び出し順序制約に関する明示的なコメント（'NOTE: Must be called BEFORE filterExcludedPaths()' 等）は存在しない。",
+        "design_doc_section": "Section 7-4, Section 15 推奨項目",
+        "actual_implementation": "src/app/api/repositories/sync/route.ts L26-30: 'Issue #190' コメントのみ",
+        "gap": "設計書の記載あり、実装なし",
+        "severity": "low",
+        "recommendation": "実装時に sync/route.ts の呼び出し箇所にも順序制約コメントを追加すること。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-CS-001",
+        "category": "整合性",
+        "title": "tsconfig.server.json の include と実際のトランスパイル依存関係の暗黙的解決",
+        "description": "tsconfig.server.json の include 配列は TypeScript のルートファイルを定義するものであり、トランスパイル時の依存解決はインポートグラフを辿って自動的に行われる。しかし tsc-alias がパスエイリアス (@/) を変換する際、include に含まれないファイルでも変換対象となるかは tsc-alias の実装依存である。設計書では db-repository.ts と system-directories.ts を明示的に追加する方針としており、これは tsc-alias の確実な動作保証の観点から適切である。現在の tsconfig.server.json でも auto-yes-manager.ts 等が include に含まれないまま動作しているが、新規追加ファイルでは明示的に含めることが安全である。",
+        "recommendation": "設計書の方針通り、明示的に include に追加する実装を行うこと。"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "server.ts への import 文追加 (ensureEnvRepositoriesRegistered, filterExcludedPaths)",
+      "design_section": "Section 7-1",
+      "current_implementation": "server.ts には import 未追加（修正前の状態）",
+      "consistency": "pending_implementation",
+      "note": "設計書の記載は正確。import パスは './src/lib/db-repository' で server.ts の既存パターン（相対パス）と整合。"
+    },
+    {
+      "design_item": "initializeWorktrees() に ensureEnvRepositoriesRegistered() 呼び出し追加",
+      "design_section": "Section 7-1",
+      "current_implementation": "server.ts L90-94: 直接 scanMultipleRepositories(repositoryPaths) を呼び出し（フィルタリングなし）",
+      "consistency": "pending_implementation",
+      "note": "根本原因の記述（Section 1）と現行コードが一致。設計書の修正後コードは sync/route.ts L26-33 のパターンと整合。"
+    },
+    {
+      "design_item": "initializeWorktrees() に filterExcludedPaths() 呼び出し追加",
+      "design_section": "Section 7-1",
+      "current_implementation": "server.ts L91: フィルタリングなし",
+      "consistency": "pending_implementation",
+      "note": "設計書の修正後コードは sync/route.ts のパターンと整合。"
+    },
+    {
+      "design_item": "呼び出し順序制約のインラインコメント（server.ts）",
+      "design_section": "Section 4, 7-1",
+      "current_implementation": "N/A（コード未追加）",
+      "consistency": "pending_implementation",
+      "note": "設計書のコメント文面は具体的かつ適切。SF-001 対応として設計書に反映済み。"
+    },
+    {
+      "design_item": "除外数ログ出力（条件付き）",
+      "design_section": "Section 7-1",
+      "current_implementation": "N/A（コード未追加）",
+      "consistency": "pending_implementation",
+      "note": "excludedCount > 0 の場合のみ出力する設計は server.ts の既存ログパターン（L96: 常時出力の worktree 数）と若干異なるが、C-002 で検討済み。"
+    },
+    {
+      "design_item": "tsconfig.server.json に db-repository.ts 追加",
+      "design_section": "Section 7-2",
+      "current_implementation": "tsconfig.server.json L8-24: include 配列に db-repository.ts なし",
+      "consistency": "pending_implementation",
+      "note": "設計書の挿入位置（db-migrations.ts の次）は tsconfig.server.json の既存アルファベット順と整合。"
+    },
+    {
+      "design_item": "tsconfig.server.json に system-directories.ts 追加",
+      "design_section": "Section 7-2",
+      "current_implementation": "tsconfig.server.json L8-24: include 配列に system-directories.ts なし",
+      "consistency": "pending_implementation",
+      "note": "db-repository.ts が @/config/system-directories を import するため必要。設計書の依存分析（Section 6）は正確。"
+    },
+    {
+      "design_item": "filterExcludedPaths() の JSDoc に @requires 追記",
+      "design_section": "Section 7-3",
+      "current_implementation": "db-repository.ts L392-408: 既存 JSDoc に @requires なし",
+      "consistency": "gap_found",
+      "note": "SF-CS-001 として報告。設計書の推奨項目だが、実装チェックリストに含まれている。"
+    },
+    {
+      "design_item": "sync/route.ts の順序制約コメント確認・追加",
+      "design_section": "Section 7-4",
+      "current_implementation": "sync/route.ts L26-30: 順序制約コメントなし",
+      "consistency": "gap_found",
+      "note": "SF-CS-002 として報告。設計書の推奨項目。"
+    },
+    {
+      "design_item": "ensureEnvRepositoriesRegistered() の関数シグネチャと挙動",
+      "design_section": "Section 4, 5",
+      "current_implementation": "db-repository.ts L369-386: (db, repositoryPaths) シグネチャ。冪等性、resolveRepositoryPath 正規化、既存レポジトリスキップ",
+      "consistency": "consistent",
+      "note": "設計書の記述と実装が完全に一致。テストも db-repository-exclusion.test.ts L123-188 で網羅。"
+    },
+    {
+      "design_item": "filterExcludedPaths() の関数シグネチャと挙動",
+      "design_section": "Section 4, 5",
+      "current_implementation": "db-repository.ts L400-408: (db, repositoryPaths) シグネチャ。enabled=0 のリポジトリを除外",
+      "consistency": "consistent",
+      "note": "設計書の記述と実装が完全に一致。テストも db-repository-exclusion.test.ts L195-268 で網羅。"
+    },
+    {
+      "design_item": "データモデル（repositories テーブル）",
+      "design_section": "Section 5",
+      "current_implementation": "db-repository.ts L52-63 RepositoryRow, db-migrations.ts に CREATE TABLE 定義",
+      "consistency": "consistent",
+      "note": "設計書のテーブル構造と実装のカラム定義が一致。"
+    },
+    {
+      "design_item": "セキュリティ対策（既存関数の再利用、新規リスクなし）",
+      "design_section": "Section 8",
+      "current_implementation": "db-repository.ts に isSystemDirectory, resolveRepositoryPath, null byte チェック, MAX_DISABLED_REPOSITORIES 実装済み",
+      "consistency": "consistent",
+      "note": "設計書のセキュリティ評価は正確。server.ts の修正は既存関数の呼び出しのみで新規入力経路なし。"
+    },
+    {
+      "design_item": "パフォーマンス影響（起動時1回、軽量クエリ）",
+      "design_section": "Section 9",
+      "current_implementation": "ensureEnvRepositoriesRegistered: SELECT + INSERT (per repo)、filterExcludedPaths: SELECT WHERE enabled = 0",
+      "consistency": "consistent",
+      "note": "設計書のパフォーマンス評価は正確。フィルタリングにより除外リポジトリのスキャン省略というメリットも正しい。"
+    },
+    {
+      "design_item": "テスト方針（既存テストで十分、新規テスト不要）",
+      "design_section": "Section 10",
+      "current_implementation": "tests/unit/lib/db-repository-exclusion.test.ts (38テスト), tests/integration/repository-exclusion.test.ts (9テスト)",
+      "consistency": "consistent",
+      "note": "既存テストが ensureEnvRepositoriesRegistered() と filterExcludedPaths() を網羅的にカバー。設計書の評価は妥当。"
+    },
+    {
+      "design_item": "変更ファイル一覧（直接変更: server.ts, tsconfig.server.json）",
+      "design_section": "Section 6",
+      "current_implementation": "両ファイルとも修正前の状態で存在を確認済み",
+      "consistency": "consistent",
+      "note": "設計書の変更ファイル一覧は正確かつ網羅的。間接依存の分析（db-repository.ts -> system-directories.ts -> types/clone.ts）も正確。"
+    },
+    {
+      "design_item": "import 形式（相対パス './src/lib/...'）",
+      "design_section": "Section 3, 7-1",
+      "current_implementation": "server.ts L32-42: 既存 import はすべて './src/lib/...' 形式の相対パス",
+      "consistency": "consistent",
+      "note": "設計書のimport形式選定は server.ts の既存パターンと完全に整合。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-202-server-startup-exclusion-filter-design-policy.md",
+    "server.ts",
+    "src/lib/db-repository.ts",
+    "src/config/system-directories.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "tsconfig.server.json",
+    "tsconfig.base.json",
+    "src/lib/worktrees.ts",
+    "tests/unit/lib/db-repository-exclusion.test.ts",
+    "tests/integration/repository-exclusion.test.ts"
+  ],
+  "timestamp": "2026-02-09T13:00:00Z"
+}

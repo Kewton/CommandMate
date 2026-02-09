@@ -1,0 +1,49 @@
+{
+  "issue_number": 202,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-CS-001",
+        "item": "filterExcludedPaths() の JSDoc に @requires 前提条件が未実装",
+        "section_updated": "レビュー指摘事項サマリー, 実装チェックリスト",
+        "status": "reflected",
+        "action": "推奨項目から必須項目へ昇格"
+      },
+      {
+        "id": "SF-CS-002",
+        "item": "sync/route.ts に順序制約コメントが不足",
+        "section_updated": "レビュー指摘事項サマリー, 実装チェックリスト",
+        "status": "reflected",
+        "action": "推奨項目から必須項目へ昇格"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-CS-001",
+        "item": "tsconfig.server.json の include と実際のトランスパイル依存関係の暗黙的解決",
+        "status": "noted",
+        "action": "設計方針通りの明示的追加で対応済み。変更不要。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-202-server-startup-exclusion-filter-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー",
+    "実装チェックリスト"
+  ],
+  "key_changes": [
+    "Stage 2 整合性レビューの結果をレビュー履歴に追加",
+    "SF-CS-001, SF-CS-002 の詳細をレビュー指摘事項サマリーに追加",
+    "SF-CS-001 (JSDoc @requires) を推奨項目から必須項目へ昇格",
+    "SF-CS-002 (sync/route.ts 順序制約コメント) を推奨項目から必須項目へ昇格",
+    "推奨項目セクションを削除（全項目が必須に昇格したため）"
+  ],
+  "timestamp": "2026-02-09T13:30:00Z"
+}

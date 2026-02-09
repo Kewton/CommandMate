@@ -1,0 +1,31 @@
+{
+  "issue_number": 202,
+  "issue_title": "fix: サーバー再起動時に削除済みリポジトリが復活する",
+  "acceptance_criteria": [
+    "サーバー再起動後、削除済みリポジトリが復活しないこと（手動テスト）",
+    "server.ts の initializeWorktrees() が sync/route.ts と同一の ensureEnvRepositoriesRegistered() + filterExcludedPaths() パターンを使用していること",
+    "ensureEnvRepositoriesRegistered() が filterExcludedPaths() より前に呼び出されていること",
+    "server.ts の import文が ./src/lib/ 形式の相対パスであること",
+    "除外フィルタリング結果のログが出力されること（除外数とフィルタ後のリポジトリ数）",
+    "tsconfig.server.json の include 配列に src/lib/db-repository.ts と src/config/system-directories.ts が追加されていること",
+    "npm run build:server が成功すること",
+    "既存のテスト（単体テスト・結合テスト）がパスし、build:server を含む全ビルドが成功すること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: server.ts への import 文追加（./src/lib/db-repository から ensureEnvRepositoriesRegistered, filterExcludedPaths を相対パス形式で import）",
+    "Task 1.2: server.ts の initializeWorktrees() にフィルタリングロジック追加（ensureEnvRepositoriesRegistered → filterExcludedPaths → 除外ログ出力 → scanMultipleRepositories(filteredPaths)）",
+    "Task 1.3: tsconfig.server.json の include 配列に src/lib/db-repository.ts と src/config/system-directories.ts を追加",
+    "Task 1.4: src/lib/db-repository.ts の filterExcludedPaths() に @requires JSDoc を追加（SF-CS-001対応）",
+    "Task 1.5: src/app/api/repositories/sync/route.ts に順序制約コメントを追加（SF-CS-002対応）"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-202-server-startup-exclusion-filter-design-policy.md",
+  "work_plan_path": "dev-reports/issue/202/work-plan.md",
+  "reference_implementation": "src/app/api/repositories/sync/route.ts",
+  "test_approach": "既存テストの実行（db-repository-exclusion.test.ts, repository-exclusion.test.ts）+ 手動テストシナリオ5件",
+  "notes": [
+    "server.ts は相対パス import（./src/lib/...）を使用する",
+    "呼び出し順序制約: ensureEnvRepositoriesRegistered() を filterExcludedPaths() より先に呼ぶ必要がある",
+    "除外リポジトリパスの詳細ログを出力（SF-SEC-003対応）"
+  ]
+}

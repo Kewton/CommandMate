@@ -1,0 +1,49 @@
+{
+  "issue_number": 202,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-09",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "tsconfig.server.json の include 配列更新を修正方針（手順6）として追加。影響範囲テーブルに tsconfig.server.json を追加。間接依存テーブルを新設し、db-repository.ts・system-directories.ts・clone.ts の tsconfig.server.json での状態を明記。受け入れ条件に tsconfig.server.json の include 確認項目を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "受け入れ条件に「npm run build:server が成功すること」を追加。既存テスト条件を「既存のテスト（単体テスト・結合テスト）がパスし、build:server を含む全ビルドが成功すること」に拡充。テスト方針に「ビルド確認: npm run build:server を含む全ビルド（npm run build:all）が成功すること」を追加。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「間接依存（変更なし）」サブセクションを新設。db-repository.ts の間接依存（system-directories.ts, clone.ts）について、依存関係と tsconfig.server.json での状態（追加が必要 / 既に含まれている）を明記したテーブルを追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "テスト方針に「既存テスト（結合）: tests/integration/repository-exclusion.test.ts の Exclusion -> Sync フロー等の結合テストが引き続きパスすること」を追加。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "備考セクションに「CLAUDE.md の主要機能モジュールテーブルに server.ts の記載がないため、将来的に追記を検討する（本 Issue のスコープ外）」を追記。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/202"
+  }
+}

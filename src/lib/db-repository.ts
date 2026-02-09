@@ -386,14 +386,22 @@ export function ensureEnvRepositoriesRegistered(
 }
 
 /**
- * Filter out excluded repository paths.
+ * Filter out excluded repository paths (enabled=0).
  * Exclusion logic is encapsulated here, so changes to exclusion criteria
  * (e.g., pattern-based exclusion, temporary exclusion) only affect this function.
+ *
+ * @requires ensureEnvRepositoriesRegistered() must be called before this function
+ *           to ensure all paths exist in the repositories table.
+ *           Without prior registration, unregistered paths will not be filtered correctly.
  *
  * NOTE (SEC-SF-002): Array.includes() performs case-sensitive string comparison.
  * On macOS (case-insensitive filesystem), paths with different casing would not match.
  * resolveRepositoryPath() normalization on both sides mitigates most cases.
  * On Linux (case-sensitive filesystem), the behavior is consistent.
+ *
+ * @param db - Database instance
+ * @param repositoryPaths - Array of repository paths to filter
+ * @returns Filtered array excluding disabled repositories
  *
  * SF-003: OCP - exclusion logic encapsulated
  */
@@ -405,6 +413,50 @@ export function filterExcludedPaths(
   return repositoryPaths.filter(p =>
     !excludedPaths.includes(resolveRepositoryPath(p))
   );
+}
+
+/**
+ * Summary of repository exclusion filtering results.
+ * Provides structured data for logging and audit purposes.
+ */
+export interface ExclusionSummary {
+  /** Repository paths that passed filtering (enabled repositories) */
+  filteredPaths: string[];
+  /** Repository paths that were excluded (disabled repositories) */
+  excludedPaths: string[];
+  /** Number of excluded repositories */
+  excludedCount: number;
+}
+
+/**
+ * Register environment variable repositories and filter out excluded ones.
+ * Encapsulates the ordering constraint: registration MUST happen before filtering.
+ *
+ * This function combines ensureEnvRepositoriesRegistered() and filterExcludedPaths()
+ * into a single atomic operation to prevent callers from accidentally reversing the order.
+ *
+ * DRY: Used by server.ts initializeWorktrees() and POST /api/repositories/sync
+ *
+ * @param db - Database instance
+ * @param repositoryPaths - Array of repository paths from environment variables
+ * @returns ExclusionSummary with filtered paths, excluded paths, and count
+ */
+export function registerAndFilterRepositories(
+  db: Database.Database,
+  repositoryPaths: string[]
+): ExclusionSummary {
+  // Step 1: Register (must be before filter - see design policy Section 4)
+  ensureEnvRepositoriesRegistered(db, repositoryPaths);
+
+  // Step 2: Filter
+  const filteredPaths = filterExcludedPaths(db, repositoryPaths);
+  const excludedPaths = repositoryPaths.filter(p => !filteredPaths.includes(p));
+
+  return {
+    filteredPaths,
+    excludedPaths,
+    excludedCount: excludedPaths.length,
+  };
 }
 
 /**

@@ -1,0 +1,237 @@
+{
+  "issue_number": 202,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-IA-001",
+        "category": "影響範囲",
+        "title": "scan/route.ts がフィルタリングなしで個別リポジトリをスキャンする経路が残存",
+        "description": "POST /api/repositories/scan (src/app/api/repositories/scan/route.ts) は個別のリポジトリパスを受け取り、filterExcludedPaths() を経由せずに scanWorktrees() -> syncWorktreesToDB() を直接呼び出している。ユーザーが削除済みリポジトリのパスを手動で指定した場合、除外状態を無視してワークツリーがDBに再登録される可能性がある。ただし、この経路はUI上の明示的な操作（手動パス入力）が必要であり、自動的な復活ではないためリスクは限定的。",
+        "severity": "medium",
+        "affected_file": "src/app/api/repositories/scan/route.ts",
+        "recommendation": "本 Issue のスコープ外だが、scan/route.ts に除外チェック（getRepositoryByPath() で enabled=0 かを確認）を追加するフォローアップ Issue を検討すること。あるいは、scan は意図的な操作であるため除外を無視する仕様として明文化すること。"
+      },
+      {
+        "id": "SF-IA-002",
+        "category": "影響範囲",
+        "title": "tsconfig.server.json の tsc-alias パス変換に対する db-repository.ts の @/ import 依存",
+        "description": "db-repository.ts は @/types/clone と @/config/system-directories を @/ パスエイリアスで import している。server.ts のビルド (npm run build:server) は tsc + tsc-alias を使用しており、tsc-alias が @/ エイリアスを相対パスに変換する。tsconfig.server.json の include に db-repository.ts と system-directories.ts を追加する設計方針は正しいが、db-repository.ts 内の @/types/clone は types/**/*.ts ワイルドカードで既にカバーされていることを確認した。tsc-alias の変換対象は include に含まれるファイルだけでなく、コンパイル対象となる全ファイル（import グラフを辿ったもの）に適用される。ただし、明示的な include 追加がより安全であるという設計判断は妥当。",
+        "severity": "low",
+        "affected_file": "tsconfig.server.json",
+        "recommendation": "設計書通りに明示的に include へ追加する方針を維持すること。ビルド成功を npm run build:server で必ず検証すること。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-IA-001",
+        "category": "影響範囲",
+        "title": "CLI commandmate start --issue によるworktree別サーバーでの影響",
+        "description": "Issue #136 で追加された commandmate start --issue オプションにより、worktree 別のサーバーインスタンスが起動可能。各インスタンスは独自の DB を持つが、同じ server.ts の initializeWorktrees() を実行する。本修正は server.ts の initializeWorktrees() に適用されるため、全サーバーインスタンスで除外フィルタリングが有効になる。これは正しい動作であり問題はないが、worktree 別サーバーでは DB が異なるため、メインサーバーでの削除操作が worktree 別サーバーには反映されない点を認識しておく必要がある。",
+        "recommendation": "worktree 別サーバー間での除外状態の同期は本 Issue のスコープ外。必要に応じてフォローアップで検討する。"
+      },
+      {
+        "id": "C-IA-002",
+        "category": "影響範囲",
+        "title": "restore/route.ts の復元経路との整合性",
+        "description": "PUT /api/repositories/restore (src/app/api/repositories/restore/route.ts) は restoreRepository() で enabled=1 に復元した後、scanWorktrees() -> syncWorktreesToDB() を直接呼び出す。この経路は除外済みリポジトリを意図的に復元する操作であるため、filterExcludedPaths() を通さないのは正しい設計。server.ts の修正後も、復元 -> 再起動 のフローで正しく動作する（復元後は enabled=1 のため filterExcludedPaths() で除外されない）。",
+        "recommendation": "現行設計は正しい。追加対応不要。"
+      },
+      {
+        "id": "C-IA-003",
+        "category": "影響範囲",
+        "title": "clone-manager.ts の db-repository.ts 依存",
+        "description": "src/lib/clone-manager.ts は db-repository.ts から複数の関数を import している。clone-manager.ts は Next.js の API ルート経由で使用されるため、server.ts のビルド（tsconfig.server.json）とは異なるビルドパス。db-repository.ts の JSDoc 追加（SF-001 / SF-CS-001）は clone-manager.ts に影響を与えない。",
+        "recommendation": "追加対応不要。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "server.ts",
+        "change_type": "修正",
+        "change_detail": "import 文に ensureEnvRepositoriesRegistered, filterExcludedPaths を追加。initializeWorktrees() 内に除外フィルタリングロジック（register -> filter -> ログ出力）を追加。scanMultipleRepositories() の引数を repositoryPaths から filteredPaths に変更。",
+        "risk": "low",
+        "risk_reason": "既存の参照実装（sync/route.ts）と同一パターンの転写。新しいロジックの導入なし。"
+      },
+      {
+        "file": "tsconfig.server.json",
+        "change_type": "修正",
+        "change_detail": "include 配列に src/lib/db-repository.ts と src/config/system-directories.ts を追加。",
+        "risk": "low",
+        "risk_reason": "ビルド対象ファイルの追加のみ。既存ファイルへの影響なし。"
+      },
+      {
+        "file": "src/lib/db-repository.ts",
+        "change_type": "JSDoc 追加",
+        "change_detail": "filterExcludedPaths() に @requires 前提条件の JSDoc を追記（SF-CS-001）。",
+        "risk": "low",
+        "risk_reason": "コメントの追加のみ。ランタイム動作に影響なし。"
+      },
+      {
+        "file": "src/app/api/repositories/sync/route.ts",
+        "change_type": "コメント追加",
+        "change_detail": "ensureEnvRepositoriesRegistered() と filterExcludedPaths() の呼び出し箇所に順序制約のインラインコメントを追加（SF-CS-002）。",
+        "risk": "low",
+        "risk_reason": "コメントの追加のみ。ランタイム動作に影響なし。"
+      }
+    ],
+    "indirect_dependencies": [
+      {
+        "file": "src/lib/db-repository.ts",
+        "dependency_type": "server.ts から直接 import",
+        "change_required": false,
+        "note": "ensureEnvRepositoriesRegistered() と filterExcludedPaths() は既存関数。シグネチャ・動作に変更なし。"
+      },
+      {
+        "file": "src/config/system-directories.ts",
+        "dependency_type": "db-repository.ts 経由の間接依存",
+        "change_required": false,
+        "note": "isSystemDirectory() は db-repository.ts 内部で使用。server.ts からの直接依存なし。"
+      },
+      {
+        "file": "src/types/clone.ts",
+        "dependency_type": "db-repository.ts の型参照",
+        "change_required": false,
+        "note": "CloneJobStatus 型。tsconfig.server.json の types/**/*.ts で既にカバー。"
+      },
+      {
+        "file": "src/lib/worktrees.ts",
+        "dependency_type": "server.ts から既存 import",
+        "change_required": false,
+        "note": "getRepositoryPaths(), scanMultipleRepositories(), syncWorktreesToDB() は引き続き使用。引数型に変更なし（filteredPaths は string[] 型で互換）。"
+      },
+      {
+        "file": "src/lib/db-instance.ts",
+        "dependency_type": "server.ts から既存 import",
+        "change_required": false,
+        "note": "getDbInstance() は引き続き使用。返却値の Database.Database 型は ensureEnvRepositoriesRegistered() と filterExcludedPaths() の第1引数と互換。"
+      }
+    ],
+    "unaffected_related_files": [
+      {
+        "file": "src/app/api/repositories/route.ts",
+        "justification": "DELETE /api/repositories。disableRepository() を使用してリポジトリを除外する側。本修正は除外されたリポジトリの読み込み時フィルタリングであり、除外操作自体には影響しない。"
+      },
+      {
+        "file": "src/app/api/repositories/excluded/route.ts",
+        "justification": "GET /api/repositories/excluded。getExcludedRepositories() で除外リストを返す読み取り専用API。本修正の影響なし。"
+      },
+      {
+        "file": "src/app/api/repositories/restore/route.ts",
+        "justification": "PUT /api/repositories/restore。restoreRepository() で enabled=1 に復元。復元後の再起動でも filterExcludedPaths() は enabled=1 のリポジトリを通すため正しく動作。"
+      },
+      {
+        "file": "src/app/api/repositories/clone/route.ts",
+        "justification": "POST /api/repositories/clone。クローン操作は db-repository.ts の別関数（createCloneJob 等）を使用。除外フィルタリングとは無関係。"
+      },
+      {
+        "file": "src/lib/clone-manager.ts",
+        "justification": "db-repository.ts から import しているが、使用する関数（createRepository, getRepositoryByNormalizedUrl 等）は本修正で変更されない。"
+      },
+      {
+        "file": "src/cli/commands/start.ts",
+        "justification": "CLI start コマンド。npm run start を spawn するだけで、initializeWorktrees() は server.ts 側で実行される。CLI 側の変更は不要。"
+      }
+    ],
+    "test_impact": [
+      {
+        "file": "tests/unit/lib/db-repository-exclusion.test.ts",
+        "test_count": 38,
+        "impact": "既存テストへの影響なし。ensureEnvRepositoriesRegistered() と filterExcludedPaths() のテストが引き続きパスすること。JSDoc 追加はテストに影響しない。",
+        "action_required": "テスト実行で全パスを確認"
+      },
+      {
+        "file": "tests/integration/repository-exclusion.test.ts",
+        "test_count": 9,
+        "impact": "既存テストへの影響なし。Exclusion -> Sync フロー、GET/PUT API、round-trip テストが引き続きパスすること。",
+        "action_required": "テスト実行で全パスを確認"
+      },
+      {
+        "file": "tests/unit/db-repository-clone.test.ts",
+        "test_count": -1,
+        "impact": "db-repository.ts の Clone Job 関連テスト。本修正はリポジトリ除外関連のため影響なし。",
+        "action_required": "テスト実行で全パスを確認"
+      },
+      {
+        "file": "tests/unit/db-repository-delete.test.ts",
+        "test_count": -1,
+        "impact": "db-repository.ts の Delete 関連テスト。本修正はリポジトリ除外関連のため影響なし。",
+        "action_required": "テスト実行で全パスを確認"
+      },
+      {
+        "file": "tests/integration/api-repository-delete.test.ts",
+        "test_count": -1,
+        "impact": "DELETE /api/repositories の統合テスト。本修正は server.ts の initializeWorktrees() であり、API ハンドラーには影響しない。",
+        "action_required": "テスト実行で全パスを確認"
+      }
+    ],
+    "build_impact": [
+      {
+        "build_command": "npm run build:server",
+        "impact": "tsconfig.server.json の変更により、db-repository.ts と system-directories.ts がコンパイル対象に追加される。tsc-alias が @/types/clone と @/config/system-directories のパスエイリアスを解決する必要がある。",
+        "risk": "low",
+        "verification": "npm run build:server が成功することを確認"
+      },
+      {
+        "build_command": "npm run build",
+        "impact": "Next.js ビルド。server.ts はカスタムサーバーとして Next.js ビルドとは独立。sync/route.ts のコメント追加のみが Next.js ビルドに含まれるが、コメントのみなので影響なし。",
+        "risk": "low",
+        "verification": "npm run build が成功することを確認"
+      },
+      {
+        "build_command": "npm run build:cli",
+        "impact": "CLI モジュールビルド。server.ts や db-repository.ts は CLI ビルドに含まれないため影響なし。",
+        "risk": "none",
+        "verification": "不要（影響なし）"
+      }
+    ]
+  },
+  "dependency_graph": {
+    "description": "修正後の server.ts の依存関係グラフ",
+    "edges": [
+      { "from": "server.ts", "to": "src/lib/worktrees.ts", "type": "existing_import", "functions": ["getRepositoryPaths", "scanMultipleRepositories", "syncWorktreesToDB"] },
+      { "from": "server.ts", "to": "src/lib/db-instance.ts", "type": "existing_import", "functions": ["getDbInstance"] },
+      { "from": "server.ts", "to": "src/lib/db-repository.ts", "type": "new_import", "functions": ["ensureEnvRepositoriesRegistered", "filterExcludedPaths"] },
+      { "from": "server.ts", "to": "src/lib/response-poller.ts", "type": "existing_import", "functions": ["stopAllPolling"] },
+      { "from": "server.ts", "to": "src/lib/auto-yes-manager.ts", "type": "existing_import", "functions": ["stopAllAutoYesPolling"] },
+      { "from": "server.ts", "to": "src/lib/db-migrations.ts", "type": "existing_import", "functions": ["runMigrations"] },
+      { "from": "server.ts", "to": "src/lib/ws-server.ts", "type": "existing_import", "functions": ["setupWebSocket", "closeWebSocket"] },
+      { "from": "server.ts", "to": "src/lib/env.ts", "type": "existing_import", "functions": ["getEnvByKey"] },
+      { "from": "src/lib/db-repository.ts", "to": "src/config/system-directories.ts", "type": "transitive_dependency", "functions": ["isSystemDirectory"] },
+      { "from": "src/lib/db-repository.ts", "to": "src/types/clone.ts", "type": "transitive_dependency", "functions": ["CloneJobStatus"] }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "server.ts",
+    "src/lib/db-repository.ts",
+    "src/config/system-directories.ts",
+    "src/lib/worktrees.ts",
+    "src/lib/db-instance.ts",
+    "src/app/api/repositories/sync/route.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "src/app/api/repositories/excluded/route.ts",
+    "src/app/api/repositories/restore/route.ts",
+    "src/lib/clone-manager.ts",
+    "src/cli/commands/start.ts",
+    "tsconfig.server.json",
+    "tsconfig.base.json",
+    "package.json",
+    "tests/unit/lib/db-repository-exclusion.test.ts",
+    "tests/integration/repository-exclusion.test.ts",
+    "dev-reports/design/issue-202-server-startup-exclusion-filter-design-policy.md"
+  ],
+  "timestamp": "2026-02-09T14:00:00Z"
+}

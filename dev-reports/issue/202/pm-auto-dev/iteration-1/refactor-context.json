@@ -1,0 +1,38 @@
+{
+  "issue_number": 202,
+  "refactor_targets": [
+    "server.ts",
+    "tests/unit/lib/server-startup-exclusion-filter.test.ts"
+  ],
+  "quality_metrics": {
+    "before_tests": {
+      "unit_tests": 50,
+      "integration_tests": 12
+    }
+  },
+  "improvement_goals": [
+    "テストカバレッジの確認・向上（目標: 85%以上）",
+    "テストの可読性改善",
+    "エッジケースのテスト追加（あれば）",
+    "コードコメントの充実"
+  ],
+  "completed_implementation": {
+    "changed_files": [
+      "server.ts",
+      "tsconfig.server.json",
+      "src/lib/db-repository.ts",
+      "src/app/api/repositories/sync/route.ts",
+      "tests/unit/lib/server-startup-exclusion-filter.test.ts"
+    ],
+    "test_results": {
+      "unit_tests": "50 passed",
+      "integration_tests": "12 passed",
+      "builds": "all succeeded"
+    }
+  },
+  "refactoring_constraints": [
+    "既存のテストを壊さないこと",
+    "パフォーマンスを劣化させないこと",
+    "SOLID原則に準拠すること"
+  ]
+}
