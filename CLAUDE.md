@@ -402,6 +402,12 @@ commandmate status --all                   # 全サーバー状態確認
   - `src/lib/status-detector.ts` - STATUS_THINKING_LINE_COUNT=5追加、thinking検出ウィンドウ分離、SF-001/SF-002/SF-004設計根拠ドキュメント化
   - `src/app/api/worktrees/[id]/current-output/route.ts` - detectSessionStatus()統合、DR-001/SF-001/SF-004コメント強化
   - `src/lib/response-poller.ts` - L353ウィンドウ化（末尾5行）、L547-554ウィンドウ化（MF-001修正）、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数抽出
+- **追加修正（2026-02-09）: Claude Bash toolインデント質問行の誤分類修正**:
+  - **追加バグ**: Claude CodeのBash tool形式（2スペースインデント）の「Do you want to proceed?」プロンプトがCommandMateで検出されない
+  - **追加根本原因**: `prompt-detector.ts`の`isContinuationLine()`関数の`hasLeadingSpaces`チェック（`/^\s{2,}[^\d]/`）が、2スペースインデントされた質問行「  Do you want to proceed?」をcontinuation line（折り返し行）として誤分類。結果、`questionEndIndex=-1`のままLayer 5 SEC-001ガードで`isPrompt: false`が返される
+  - **追加修正**: `isContinuationLine()`の`hasLeadingSpaces`に`!line.endsWith('?')`を追加し、`?`終端の質問行をcontinuation lineから除外（`isShortFragment`の既存`!line.endsWith('?')`除外との一貫性）
+  - **追加テスト**: `tests/unit/prompt-detector.test.ts`（4テスト追加）- インデント質問+選択肢検出、長い折り返しオプション付き検出、非質問インデント行の回帰テスト、`?`終端行の境界テスト。`tests/unit/lib/status-detector.test.ts`（1テスト追加）- 15行ウィンドウ内インデント質問のwaiting判定
+  - **JSDoc文書化**: `isContinuationLine()`のhasLeadingSpaces説明に`?`終端除外の設計根拠を追記
 - 詳細: [設計書](./dev-reports/design/issue-188-thinking-indicator-false-detection-design-policy.md)
 
 ### Issue #193: Claude Code複数選択肢プロンプト検出

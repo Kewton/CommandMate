@@ -1047,6 +1047,95 @@ Are you sure you want to continue? (yes/no)
   });
 
   // ==========================================================================
+  // Bug fix: Claude Bash tool indented question line detection
+  // Tests for detecting prompts where the question line has 2-space indentation
+  // (e.g., "  Do you want to proceed?") which was misclassified as a
+  // continuation line by isContinuationLine()'s hasLeadingSpaces check.
+  // ==========================================================================
+  describe('Bug fix: Claude Bash tool indented question detection', () => {
+    it('should detect 2-space indented question + numbered choices (requireDefaultIndicator: false)', () => {
+      // Claude Bash tool format: question and options are 2-space indented
+      const output = [
+        'Some previous output from bash tool',
+        '  Do you want to proceed?',
+        '  1. Yes',
+        '  2. No',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(2);
+        expect(result.promptData.question).toContain('Do you want to proceed?');
+      }
+    });
+
+    it('should detect indented question with long wrapping option text (requireDefaultIndicator: false)', () => {
+      // When option text wraps, the continuation line is indented.
+      // The question line itself is also indented.
+      const output = [
+        '  Do you want to proceed?',
+        "  1. Yes, and don't ask again for curl commands in",
+        '/Users/maenokota/share/work/test',
+        '  2. No',
+        '  3. Cancel',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(3);
+        expect(result.promptData.question).toContain('Do you want to proceed?');
+      }
+    });
+
+    it('should still treat indented non-question line (no "?" ending) as continuation line (regression)', () => {
+      // An indented line that does NOT end with '?' should still be treated
+      // as a continuation line when it appears between options.
+      const output = [
+        'Do you want to proceed?',
+        '\u276F 1. Option A',
+        '  some continuation text',
+        '  2. Option B',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options).toHaveLength(2);
+        // The continuation line should not appear as a separate option
+        expect(result.promptData.options[0].label).toBe('Option A');
+        expect(result.promptData.options[1].label).toBe('Option B');
+      }
+    });
+
+    it('should exclude "?" ending lines from hasLeadingSpaces in isContinuationLine (boundary test)', () => {
+      // Direct test of the boundary condition: a line with 2+ spaces AND ending with '?'
+      // should NOT be treated as a continuation line, allowing it to be the question.
+      const output = [
+        '  Is this the right choice?',
+        '  1. Yes',
+        '  2. No',
+      ].join('\n');
+
+      const options: DetectPromptOptions = { requireDefaultIndicator: false };
+      const result = detectPrompt(output, options);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.question).toContain('Is this the right choice?');
+      }
+    });
+  });
+
+  // ==========================================================================
   // Issue #193: getAnswerInput SEC-003 - Safe error messages
   // ==========================================================================
   describe('Issue #193: getAnswerInput SEC-003 - safe error messages', () => {

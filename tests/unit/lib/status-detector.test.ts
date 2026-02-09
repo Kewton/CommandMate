@@ -261,6 +261,26 @@ describe('status-detector', () => {
     });
   });
 
+  describe('Bug fix: indented question + choices -> waiting status', () => {
+    it('should detect waiting status for 2-space indented question with numbered choices in 15-line window', () => {
+      // Claude Bash tool format: question and options are 2-space indented
+      // detectSessionStatus uses buildDetectPromptOptions('claude') which sets
+      // requireDefaultIndicator: false, allowing detection without cursor indicator.
+      const output = [
+        'Bash tool output line 1',
+        'Bash tool output line 2',
+        '  Do you want to proceed?',
+        '  1. Yes',
+        '  2. No',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+      expect(result.status).toBe('waiting');
+      expect(result.hasActivePrompt).toBe(true);
+      expect(result.reason).toBe('prompt_detected');
+    });
+  });
+
   describe('existing behavior preservation', () => {
     it('should return ready with time-based heuristic when no patterns match', () => {
       const output = 'Some generic output without patterns';

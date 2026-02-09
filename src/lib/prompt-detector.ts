@@ -249,7 +249,11 @@ function isConsecutiveFromOne(numbers: number[]): boolean {
  *   }
  *
  * Each condition's responsibility:
- *   - hasLeadingSpaces: Indented non-option line (label text wrapping with indentation)
+ *   - hasLeadingSpaces: Indented non-option line (label text wrapping with indentation).
+ *     Excludes lines ending with '?' to prevent question lines (e.g., "  Do you want
+ *     to proceed?") from being misclassified as continuation. Claude Bash tool outputs
+ *     question and options with identical 2-space indentation, so this exclusion allows
+ *     the question line to be recognized as questionEndIndex instead of being skipped.
  *   - isShortFragment: Short fragment (< 5 chars, e.g., filename tail)
  *   - isPathContinuation: Path string continuation (Issue #181)
  *
@@ -258,8 +262,13 @@ function isConsecutiveFromOne(numbers: number[]): boolean {
  * @returns true if the line should be treated as a continuation of a previous option
  */
 function isContinuationLine(rawLine: string, line: string): boolean {
-  // Indented non-option line
-  const hasLeadingSpaces = rawLine.match(/^\s{2,}[^\d]/) && !rawLine.match(/^\s*\d+\./);
+  // Indented non-option line.
+  // Excludes lines ending with '?' because those are typically question lines
+  // (e.g., "  Do you want to proceed?") from Claude Bash tool output where
+  // both the question and options are 2-space indented. Without this exclusion,
+  // the question line would be misclassified as a continuation line, causing
+  // questionEndIndex to remain -1 and Layer 5 SEC-001 to block detection.
+  const hasLeadingSpaces = rawLine.match(/^\s{2,}[^\d]/) && !rawLine.match(/^\s*\d+\./) && !line.endsWith('?');
   // Short fragment (< 5 chars, excluding question-ending lines)
   const isShortFragment = line.length < 5 && !line.endsWith('?');
   // Path string continuation: lines starting with / or ~, or alphanumeric-only fragments (2+ chars)
