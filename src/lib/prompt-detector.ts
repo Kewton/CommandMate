@@ -215,6 +215,69 @@ const DEFAULT_OPTION_PATTERN = /^\s*\u276F\s*(\d+)\.\s*(.+)$/;
 const NORMAL_OPTION_PATTERN = /^\s*(\d+)\.\s*(.+)$/;
 
 /**
+ * Pattern for detecting question/selection keywords in question lines.
+ * CLI tools typically use these keywords in the line immediately before numbered choices.
+ *
+ * Keyword classification:
+ *   [Observed] select, choose, pick, which, what, enter, confirm
+ *     - Keywords confirmed in actual Claude Code / CLI tool prompts.
+ *   [Defensive additions] how, where, type, specify, approve, accept, reject, decide, preference, option
+ *     - Not yet observed in actual prompts, but commonly used in question sentences.
+ *       Added defensively to reduce False Negative risk.
+ *     - Slightly beyond YAGNI, but False Positive risk from these keywords is
+ *       extremely low (they rarely appear in normal list headings).
+ *     - Consider removing unused keywords if confirmed unnecessary in the future.
+ *
+ * No word boundaries (\b) used -- partial matches (e.g., "Selections:" matching "select")
+ * are acceptable because such headings followed by consecutive numbered lists are
+ * likely actual prompts. See design policy IC-004 for tradeoff analysis.
+ *
+ * Alternation-only pattern with no nested quantifiers -- ReDoS safe (SEC-S4-002).
+ * The pattern consists only of OR (alternation) within a non-capturing group,
+ * resulting in a linear-time structure (O(n)) with no backtracking risk.
+ * Follows the 'ReDoS safe (S4-001)' annotation convention of existing patterns.
+ */
+const QUESTION_KEYWORD_PATTERN = /(?:select|choose|pick|which|what|how|where|enter|type|specify|confirm|approve|accept|reject|decide|preference|option)/i;
+
+/**
+ * Validates whether a question line actually asks a question or requests a selection.
+ * Distinguishes normal heading lines ("Recommendations:", "Steps:", etc.) from
+ * actual question lines ("Which option?", "Select a mode:", etc.).
+ *
+ * Control character resilience (SEC-S4-004): The line parameter is passed via
+ * lines[questionEndIndex]?.trim(), so residual control characters from tmux
+ * capture-pane output (8-bit CSI (0x9B), DEC private modes, etc. not fully
+ * removed by stripAnsi()) may be present. However, endsWith('?') / endsWith(':')
+ * inspect only the last character, and QUESTION_KEYWORD_PATTERN.test() matches
+ * only English letter keywords, so residual control characters will not match
+ * any pattern and the function returns false (false-safe).
+ *
+ * Full-width colon (U+FF1A) is intentionally not supported. Claude Code/CLI
+ * prompts use ASCII colon. See design policy IC-008.
+ *
+ * @param line - The line to validate (trimmed)
+ * @returns true if the line is a question/selection request, false otherwise
+ */
+function isQuestionLikeLine(line: string): boolean {
+  // Empty lines are not questions
+  if (line.length === 0) return false;
+
+  // Pattern 1: Lines ending with question mark (English or full-width Japanese)
+  // Full-width question mark (U+FF1F) support is a defensive measure: Claude Code/CLI
+  // displays questions in English, but this covers future multi-language support
+  // and third-party tool integration.
+  if (line.endsWith('?') || line.endsWith('\uff1f')) return true;
+
+  // Pattern 2: Lines ending with colon that contain a selection/input keyword
+  // Examples: "Select an option:", "Choose a mode:", "Pick one:"
+  if (line.endsWith(':')) {
+    if (QUESTION_KEYWORD_PATTERN.test(line)) return true;
+  }
+
+  return false;
+}
+
+/**
  * Defensive check: protection against future unknown false positive patterns.
  * Note: The actual false positive pattern in Issue #161 ("1. Create file\n2. Run tests")
  * IS consecutive from 1, so this validation alone does not prevent it.
@@ -399,15 +462,30 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
     };
   }
 
-  // Layer 5 [SEC-001]: questionEndIndex guard for requireDefaultIndicator=false.
-  // When requireDefault is false and no question line was found (questionEndIndex === -1),
-  // return isPrompt: false to prevent generic question fallback from triggering Auto-Yes
-  // on plain numbered lists that happen to be consecutive from 1.
-  if (!requireDefault && questionEndIndex === -1) {
-    return {
-      isPrompt: false,
-      cleanContent: output.trim(),
-    };
+  // Layer 5 [SEC-001]: Enhanced question line validation for requireDefaultIndicator=false.
+  // When requireDefault is false, apply stricter validation to prevent false positives
+  // from normal numbered lists (e.g., "Recommendations:\n1. Add tests\n2. Update docs").
+  if (!requireDefault) {
+    // SEC-001a: No question line found (questionEndIndex === -1) - reject.
+    // Prevents generic question fallback from triggering Auto-Yes
+    // on plain numbered lists that happen to be consecutive from 1.
+    if (questionEndIndex === -1) {
+      return {
+        isPrompt: false,
+        cleanContent: output.trim(),
+      };
+    }
+
+    // SEC-001b: Question line exists but is not actually a question/selection request.
+    // Validates that the question line contains a question mark or a selection keyword
+    // with colon, distinguishing "Select an option:" from "Recommendations:".
+    const questionLine = lines[questionEndIndex]?.trim() ?? '';
+    if (!isQuestionLikeLine(questionLine)) {
+      return {
+        isPrompt: false,
+        cleanContent: output.trim(),
+      };
+    }
   }
 
   // Extract question text
