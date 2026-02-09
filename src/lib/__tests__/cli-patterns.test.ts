@@ -25,7 +25,7 @@ describe('cli-patterns', () => {
         expect(CLAUDE_PROMPT_PATTERN.test(output)).toBe(true);
       });
 
-      it('should match ">" only', () => {
+      it('should match "❯" only', () => {
         const output = `Some output
 ❯
 `;
