@@ -12,7 +12,7 @@ import type { CLIToolType } from './cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectPrompt } from './prompt-detector';
 import { resolveAutoAnswer } from './auto-yes-resolver';
-import { sendKeys } from './tmux';
+import { sendKeys, sendSpecialKeys } from './tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, detectThinking, buildDetectPromptOptions } from './cli-patterns';
 
@@ -336,10 +336,34 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId);
 
-    // Send answer followed by Enter
-    await sendKeys(sessionName, answer, false);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    await sendKeys(sessionName, '', true);
+    // Issue #193: Claude Code AskUserQuestion uses cursor-based navigation
+    // (Arrow/Space/Enter), not number input. Detect multi-choice and send
+    // appropriate key sequence instead of typing the number.
+    const isClaudeMultiChoice = cliToolId === 'claude'
+      && promptDetection.promptData?.type === 'multiple_choice'
+      && /^\d+$/.test(answer);
+
+    if (isClaudeMultiChoice && promptDetection.promptData?.type === 'multiple_choice') {
+      const targetNum = parseInt(answer, 10);
+      const mcOptions = promptDetection.promptData.options;
+      const defaultOption = mcOptions.find(o => o.isDefault);
+      const defaultNum = defaultOption?.number ?? 1;
+      const offset = targetNum - defaultNum;
+
+      const keys: string[] = [];
+      if (offset > 0) {
+        for (let i = 0; i < offset; i++) keys.push('Down');
+      } else if (offset < 0) {
+        for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
+      }
+      keys.push('Enter');
+      await sendSpecialKeys(sessionName, keys);
+    } else {
+      // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
+      await sendKeys(sessionName, answer, false);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await sendKeys(sessionName, '', true);
+    }
 
     // 6. Update timestamp
     updateLastServerResponseTimestamp(worktreeId, Date.now());
