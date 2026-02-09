@@ -1,0 +1,30 @@
+{
+  "bug_id": "20260210_auto-yes-cursor-nav",
+  "bug_description": "Server-side Auto-Yes poller uses sendKeys() for Claude Code multiple_choice prompts instead of cursor-based navigation",
+  "fix_summary": "Added cursor-based navigation (sendSpecialKeys) to auto-yes-manager.ts pollAutoYes(), matching the fix already applied to prompt-response/route.ts",
+  "phase_results": {
+    "investigation": {
+      "status": "success",
+      "root_cause": "auto-yes-manager.ts L340-342 bypasses prompt-response API and sends text via sendKeys() directly"
+    },
+    "tdd_fix": {
+      "status": "success",
+      "tests_added": 6,
+      "tests_modified": 1,
+      "total_tests_passed": 48
+    },
+    "acceptance": {
+      "status": "success",
+      "typescript_errors": 0,
+      "eslint_errors": 0,
+      "unit_tests_passed": 2900,
+      "unit_tests_failed": 1,
+      "failed_tests_note": "cli-patterns.test.ts - pre-existing from develop merge, unrelated"
+    }
+  },
+  "files_modified": [
+    "src/lib/auto-yes-manager.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/api/prompt-response-verification.test.ts"
+  ]
+}

@@ -1,0 +1,152 @@
+{
+  "status": "completed",
+  "investigation_summary": {
+    "issue_description": "Server-side Auto-Yes poller (auto-yes-manager.ts) sends text via sendKeys() for Claude Code multiple_choice prompts instead of using cursor-based navigation. Claude Code AskUserQuestion uses Arrow/Enter navigation, so the typed number text '1' is ignored and the prompt remains active.",
+    "error_type": "LogicError",
+    "affected_files": [
+      "src/lib/auto-yes-manager.ts"
+    ],
+    "reproduction_confirmed": true,
+    "reproduction_steps": [
+      "1. Enable Auto-Yes mode for a Claude Code session",
+      "2. Put browser tab in background (so server-side poller handles responses)",
+      "3. Trigger a Claude Code AskUserQuestion (multiple_choice) prompt",
+      "4. Server-side poller detects the prompt and sends '1' via sendKeys() as text",
+      "5. Claude Code ignores the text input; prompt remains active indefinitely"
+    ]
+  },
+  "root_cause_analysis": {
+    "category": "CodeBug",
+    "primary_cause": "auto-yes-manager.ts pollAutoYes() (L339-342) uses sendKeys(sessionName, answer, false) + sendKeys(sessionName, '', true) for ALL prompt types. For Claude Code multiple_choice prompts, `answer` is a number string (e.g., '1') returned by resolveAutoAnswer(). Claude Code AskUserQuestion uses cursor-based navigation (Arrow Up/Down + Enter), not text number input, so the typed '1' is silently ignored.",
+    "secondary_cause": "prompt-response/route.ts was fixed in PR #217 (commit a454a30) to use sendSpecialKeys() with cursor navigation for Claude multi-choice prompts, but auto-yes-manager.ts bypasses the prompt-response API entirely and sends keys directly to tmux. The fix was not propagated to the server-side poller code path.",
+    "evidence": [
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "lines": "339-342",
+        "description": "Bug location: sendKeys(sessionName, answer, false) sends answer as text. For Claude Code multiple_choice, answer='1' is typed as literal text which Claude Code ignores.",
+        "code": "await sendKeys(sessionName, answer, false);\nawait new Promise(resolve => setTimeout(resolve, 100));\nawait sendKeys(sessionName, '', true);"
+      },
+      {
+        "file": "src/lib/auto-yes-resolver.ts",
+        "lines": "23-36",
+        "description": "resolveAutoAnswer() returns target.number.toString() (e.g., '1') for multiple_choice prompts. This number string is correct for the resolver's purpose, but the caller must translate it into the appropriate tmux key sequence based on the CLI tool type.",
+        "code": "if (promptData.type === 'multiple_choice') {\n  const defaultOpt = promptData.options.find(o => o.isDefault);\n  const target = defaultOpt ?? promptData.options[0];\n  if (!target) return null;\n  if (target.requiresTextInput) return null;\n  return target.number.toString();\n}"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "lines": "93-129",
+        "description": "Reference fix (PR #217): Correctly detects Claude multi-choice and uses sendSpecialKeys() with Arrow Down/Up + Enter. Calculates offset from default option to target option for cursor navigation.",
+        "code": "const isClaudeMultiChoice = cliToolId === 'claude'\n  && promptCheck?.promptData?.type === 'multiple_choice'\n  && /^\\d+$/.test(answer);\nif (isClaudeMultiChoice && promptCheck?.promptData?.type === 'multiple_choice') {\n  const targetNum = parseInt(answer, 10);\n  const mcOptions = promptCheck.promptData.options;\n  const defaultOption = mcOptions.find(o => o.isDefault);\n  const defaultNum = defaultOption?.number ?? 1;\n  const offset = targetNum - defaultNum;\n  const keys: string[] = [];\n  if (offset > 0) { for (let i = 0; i < offset; i++) keys.push('Down'); }\n  else if (offset < 0) { for (let i = 0; i < Math.abs(offset); i++) keys.push('Up'); }\n  keys.push('Enter');\n  await sendSpecialKeys(sessionName, keys);\n}"
+      },
+      {
+        "file": "src/lib/tmux.ts",
+        "lines": "248-270",
+        "description": "sendSpecialKeys() function already exists with ALLOWED_SPECIAL_KEYS whitelist including 'Up', 'Down', 'Enter'. This function is ready to use but not imported in auto-yes-manager.ts.",
+        "code": "export async function sendSpecialKeys(sessionName: string, keys: string[]): Promise<void>"
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "lines": "15",
+        "description": "Current import only includes sendKeys, not sendSpecialKeys.",
+        "code": "import { sendKeys } from './tmux';"
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "lines": "317-324",
+        "description": "promptDetection (containing promptData with options array) is available in scope but not used in the send logic. The promptData.options are needed to find the default option and calculate cursor navigation offset.",
+        "code": "const promptDetection = detectPrompt(cleanOutput, promptOptions);\nif (!promptDetection.isPrompt || !promptDetection.promptData) {\n  scheduleNextPoll(worktreeId, cliToolId);\n  return;\n}"
+      }
+    ]
+  },
+  "severity_assessment": {
+    "severity": "medium",
+    "impact": "When the browser tab is in background, server-side Auto-Yes poller is the sole responder to prompts. For Claude Code multiple_choice prompts (AskUserQuestion), the poller's response is silently ignored, causing the Claude session to hang indefinitely waiting for user input. This defeats the purpose of Auto-Yes mode for background operation with Claude Code. Yes/no prompts and Codex/Gemini prompts are unaffected.",
+    "data_loss_risk": "none",
+    "affected_scenarios": [
+      "Claude Code AskUserQuestion prompts with background browser tab",
+      "Claude Code AskUserQuestion prompts when client-side polling is throttled"
+    ],
+    "unaffected_scenarios": [
+      "Yes/no prompts (y/n, Y/n, y/N) - text 'y' works correctly",
+      "Codex CLI multiple_choice prompts - text number input works",
+      "Foreground browser tab - client-side polling uses prompt-response API (already fixed)"
+    ]
+  },
+  "recommended_actions": [
+    {
+      "action_id": "1",
+      "priority": "high",
+      "title": "Add cursor-based navigation for Claude multi-choice in pollAutoYes()",
+      "description": "Mirror the fix from prompt-response/route.ts (PR #217) in auto-yes-manager.ts pollAutoYes(). Import sendSpecialKeys from tmux.ts. After resolveAutoAnswer() returns a number string, check if cliToolId is 'claude' and promptData.type is 'multiple_choice'. If so, calculate the offset from the default option to the target option using promptDetection.promptData.options, then send Arrow Down/Up + Enter via sendSpecialKeys(). For all other cases, preserve the existing sendKeys() text behavior.",
+      "files_to_modify": [
+        "src/lib/auto-yes-manager.ts"
+      ],
+      "risk_level": "low",
+      "implementation_details": {
+        "import_change": "Change `import { sendKeys } from './tmux';` to `import { sendKeys, sendSpecialKeys } from './tmux';`",
+        "logic_change_location": "Lines 334-342 in pollAutoYes(), between resolveAutoAnswer() result check and the sendKeys() calls",
+        "logic_description": "Add conditional branch: if cliToolId === 'claude' && promptDetection.promptData?.type === 'multiple_choice' && /^\\d+$/.test(answer), calculate cursor offset from default option and use sendSpecialKeys(). Else, use existing sendKeys() path.",
+        "cursor_navigation_logic": {
+          "step_1": "Parse targetNum from answer string",
+          "step_2": "Find default option from promptDetection.promptData.options (find o => o.isDefault)",
+          "step_3": "Calculate defaultNum (defaultOption?.number ?? 1)",
+          "step_4": "Calculate offset = targetNum - defaultNum",
+          "step_5": "Build keys array: offset > 0 -> push 'Down' (offset times); offset < 0 -> push 'Up' (abs(offset) times)",
+          "step_6": "Push 'Enter' to confirm selection",
+          "step_7": "Call sendSpecialKeys(sessionName, keys)"
+        },
+        "data_available": "promptDetection variable (line 318) already contains promptData.options with isDefault field. cliToolId is already a function parameter."
+      }
+    },
+    {
+      "action_id": "2",
+      "priority": "medium",
+      "title": "Add unit tests for Claude multi-choice cursor navigation in pollAutoYes()",
+      "description": "Add test cases in tests/unit/lib/auto-yes-manager.test.ts to verify that pollAutoYes() uses sendSpecialKeys() (not sendKeys()) when handling Claude Code multiple_choice prompts. Test both: (1) default option selected (no arrow keys needed, just Enter), and (2) non-default option selected (arrow keys + Enter).",
+      "files_to_modify": [
+        "tests/unit/lib/auto-yes-manager.test.ts"
+      ],
+      "risk_level": "low",
+      "implementation_details": {
+        "mock_changes": "Add sendSpecialKeys to the tmux mock: vi.mock('@/lib/tmux', () => ({ sendKeys: vi.fn(), sendSpecialKeys: vi.fn() }))",
+        "test_cases": [
+          "Should use sendSpecialKeys with Enter only when Claude multi-choice default option is selected",
+          "Should use sendSpecialKeys with Down + Enter when Claude multi-choice non-default option is selected",
+          "Should use sendKeys (text) for yes/no prompts (regression test)",
+          "Should use sendKeys (text) for non-Claude CLI tool multi-choice prompts (regression test)"
+        ]
+      }
+    },
+    {
+      "action_id": "3",
+      "priority": "low",
+      "title": "Consider extracting shared cursor navigation logic (DRY)",
+      "description": "The cursor navigation logic (calculate offset from default option, build Arrow key sequence) is now duplicated between prompt-response/route.ts and auto-yes-manager.ts. Consider extracting this into a shared utility function (e.g., in tmux.ts or a new cursor-navigation.ts). This is not urgent since the logic is simple (about 10 lines), but would prevent future divergence.",
+      "files_to_modify": [
+        "src/lib/tmux.ts (or new src/lib/cursor-navigation.ts)",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/lib/auto-yes-manager.ts"
+      ],
+      "risk_level": "low",
+      "implementation_details": {
+        "proposed_function": "buildCursorNavigationKeys(targetNum: number, options: MultipleChoiceOption[]): string[] - Returns array of tmux special key names (e.g., ['Down', 'Down', 'Enter'])",
+        "note": "Per YAGNI, this refactoring can be deferred. Only 2 call sites exist currently."
+      }
+    }
+  ],
+  "next_steps": [
+    "1. Implement action_id=1: Add sendSpecialKeys import and cursor navigation branch to auto-yes-manager.ts pollAutoYes()",
+    "2. Implement action_id=2: Add unit tests for the new cursor navigation path",
+    "3. Run existing unit tests to verify no regression: npm run test:unit -- tests/unit/lib/auto-yes-manager.test.ts",
+    "4. Run full test suite: npm run test:unit",
+    "5. Run TypeScript type check: npx tsc --noEmit",
+    "6. Run ESLint: npm run lint",
+    "7. Manual testing: Enable Auto-Yes, put browser in background, trigger Claude Code AskUserQuestion prompt, verify server-side poller sends cursor navigation keys"
+  ],
+  "related_references": {
+    "pr_217_commit": "a454a30 - fix(prompt-response): use cursor-based navigation for Claude Code multi-choice",
+    "issue_193": "Git Worktree parallel development environment",
+    "issue_138": "Server-side Auto-Yes polling (original implementation)",
+    "issue_161": "Auto-Yes false positive prevention (2-pass detection)"
+  }
+}

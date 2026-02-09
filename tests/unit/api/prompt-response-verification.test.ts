@@ -38,6 +38,7 @@ vi.mock('@/lib/db-instance', () => {
 // Mock tmux
 vi.mock('@/lib/tmux', () => ({
   sendKeys: vi.fn().mockResolvedValue(undefined),
+  sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock cli-session (captureSessionOutput)
@@ -111,7 +112,7 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
   it('should send keys when prompt is still active', async () => {
     const { captureSessionOutput } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
-    const { sendKeys } = await import('@/lib/tmux');
+    const { sendSpecialKeys } = await import('@/lib/tmux');
 
     // Prompt is still active at the time of re-verification
     vi.mocked(captureSessionOutput).mockResolvedValue('Do you want to proceed?\n❯ 1. Yes\n  2. No');
@@ -134,7 +135,8 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     const data = await response.json();
 
     expect(data.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalled();
+    // Issue #193: Claude multi-choice uses sendSpecialKeys (cursor-based navigation)
+    expect(sendSpecialKeys).toHaveBeenCalled();
   });
 
   it('should NOT send keys when prompt has disappeared (race condition)', async () => {
