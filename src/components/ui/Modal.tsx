@@ -81,7 +81,7 @@ export function Modal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+    <div className="fixed inset-0 z-[9999] overflow-y-auto">
       {/* Backdrop - Issue #104: skip onClick if disableClose is true */}
       <div
         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
@@ -89,7 +89,7 @@ export function Modal({
       />
 
       {/* Modal */}
-      <div className="flex min-h-full items-center justify-center p-2 sm:p-4">
+      <div className="relative flex min-h-full items-center justify-center p-2 sm:p-4">
         <div
           ref={modalRef}
           className={`relative w-full ${sizeClasses[size]} max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-white rounded-lg shadow-xl transform transition-all`}
