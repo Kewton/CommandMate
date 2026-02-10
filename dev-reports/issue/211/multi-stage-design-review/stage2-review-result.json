@@ -1,0 +1,163 @@
+{
+  "issue_number": 211,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-S2-1",
+        "title": "設計書のHistoryPane行番号がソースコードと不一致",
+        "description": "設計書Section 2のMermaidダイアグラムでHistoryPaneモバイル版を'L809'、デスクトップ版を'L1573'と記載しているが、実際のソースコードではモバイル版HistoryPaneは809行目(MobileContent内)、デスクトップ版は1573行目に位置しており、これは現在正確である。しかし、行番号はソースコード変更で容易に変わるため、設計書の行番号参照は実装の指標としてのみ使用し、今後の保守で不整合にならないよう留意が必要。現時点では不一致は認められないが、showToast props追加により行番号がずれる可能性がある。",
+        "severity": "low",
+        "category": "整合性"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S2-1",
+        "title": "showToast型シグネチャの設計書記載が実装と微差あり",
+        "description": "設計書Section 4.3のHistoryPanePropsでshowToastを '(message: string, type?: ToastType, duration?: number) => string' と定義しているが、実際のuseToastフックのshowToastは引数のデフォルト値付き(type: ToastType = 'info', duration: number = DEFAULT_DURATION)であり、戻り値はstringである。型定義自体は互換性があるが、設計書にtype引数のデフォルト値が'info'であることを明記しておくと実装者に親切。",
+        "severity": "low",
+        "category": "整合性"
+      },
+      {
+        "id": "SF-S2-2",
+        "title": "MobileContentPropsにshowToast伝搬の記述が設計書に不足",
+        "description": "設計書Section 4.1ではshowToastをWorktreeDetailRefactored -> HistoryPane -> ConversationPairCardの順で伝搬するとあるが、モバイルレイアウトではWorktreeDetailRefactored -> MobileContent -> HistoryPaneの経路となる。MobileContentPropsにshowToastを追加してHistoryPaneに中継する必要があるか、またはMobileContent内のHistoryPane呼び出し時に直接showToastを渡す設計にするかの明確化が必要。設計書C-2で将来検討としているが、実装時にここを見落とすリスクがある。",
+        "severity": "medium",
+        "category": "整合性"
+      },
+      {
+        "id": "SF-S2-3",
+        "title": "MessageBubbleがConversationPairCard内に存在しない",
+        "description": "設計書Section 6のメモ化戦略テーブルで'MessageBubble'コンポーネントを'React.memo(customCompare)'として記載しカスタム比較関数への影響を論じているが、MessageBubbleはMessageList.tsx内のコンポーネントであり、ConversationPairCard.tsxには存在しない。Phase 1スコープはConversationPairCardのみなので、MessageBubbleへの言及はPhase 2の先行的な記述として読めるが、Phase 1のメモ化戦略表に含めるのは混乱の元。",
+        "severity": "low",
+        "category": "整合性"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S2-1",
+        "title": "Copy iconのlucide-react使用可否確認",
+        "description": "設計書Section 3でlucide-react Copyアイコンを使用と記載。lucide-reactはpackage.jsonに含まれている(v0.554.0)が、現在のコードベースでは'Copy'アイコンを使用しているファイルは存在しない。lucide-reactのバージョン0.554.0にCopyアイコンが含まれることの確認が推奨される。"
+      },
+      {
+        "id": "C-S2-2",
+        "title": "UserMessageSectionのposition: relativeが未設定",
+        "description": "設計書Section 5.2でコピーボタンを'absolute top-2 right-2'に配置すると記載しているが、UserMessageSectionの現在のルートdivにposition: relativeが設定されていない。absolute配置のためにはrelativeの親要素が必要であり、実装時にクラス追加が必要。"
+      },
+      {
+        "id": "C-S2-3",
+        "title": "AssistantMessageItemのabsolute配置がAssistantMessagesSectionレベルで既に使われている",
+        "description": "ConversationPairCard.tsxの432行目で、AssistantMessagesSectionを包む'relative'なdivが存在し、その中でexpand/collapseボタンが'absolute top-2 right-2'に配置されている。設計書の通りにコピーボタンを'right-10 top-2'で展開ボタンの左隣に配置するには、ボタンをAssistantMessageItem内ではなくこのrelativeコンテナ内に配置するか、AssistantMessageItem自体をrelativeにする必要がある。実装時のレイアウト検証が重要。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "clipboard-utils.ts新規作成 (Section 5.1)",
+      "design_spec": "stripAnsi + navigator.clipboard.writeText のラッパー関数",
+      "implementation_status": "未実装（新規作成予定）",
+      "gap": "なし - stripAnsi関数はcli-patterns.ts L205に存在、設計通り再利用可能"
+    },
+    {
+      "design_item": "ConversationPairCardProps.onCopy (Section 4.3)",
+      "design_spec": "onCopy?: (content: string) => void をオプショナルPropsとして追加",
+      "implementation_status": "未実装（変更予定）",
+      "gap": "なし - 現在のPropsに追加するだけで後方互換性あり"
+    },
+    {
+      "design_item": "HistoryPaneProps.showToast (Section 4.3)",
+      "design_spec": "showToast?: (message: string, type?: ToastType, duration?: number) => string",
+      "implementation_status": "未実装（変更予定）",
+      "gap": "微差 - useToastのshowToast戻り値はstring(id)で設計書と一致するが、引数のデフォルト値の明記が不足(SF-S2-1)"
+    },
+    {
+      "design_item": "WorktreeDetailRefactored showToast伝搬 (Section 8)",
+      "design_spec": "showToastをHistoryPaneに2箇所（デスクトップ・モバイル）で伝搬",
+      "implementation_status": "未実装（変更予定）",
+      "gap": "要注意 - デスクトップは直接HistoryPaneにprops渡しで問題ないが、モバイルはMobileContent経由のため中継が必要(SF-S2-2)"
+    },
+    {
+      "design_item": "useToastフック安定性 (Section 6)",
+      "design_spec": "showToastはuseCallback([], [])で安定参照",
+      "implementation_status": "一致 - Toast.tsx L249のuseCallbackの依存配列は空[]",
+      "gap": "なし"
+    },
+    {
+      "design_item": "React.memoパターン (Section 6)",
+      "design_spec": "ConversationPairCard, UserMessageSection, AssistantMessageItem, AssistantMessagesSection全てReact.memo済み",
+      "implementation_status": "一致 - 全コンポーネントがmemo()で包まれている",
+      "gap": "なし"
+    },
+    {
+      "design_item": "expand/collapseボタン位置 (Section 5.2)",
+      "design_spec": "AssistantMessagesSection内でexpandボタンがabsolute top-2 right-2",
+      "implementation_status": "一致 - ConversationPairCard.tsx L440にdiv.absolute.top-2.right-2",
+      "gap": "なし"
+    },
+    {
+      "design_item": "stripAnsi関数 (Section 5.1)",
+      "design_spec": "cli-patterns.tsから再利用、変更なし",
+      "implementation_status": "一致 - cli-patterns.ts L205にexport function stripAnsiが存在",
+      "gap": "なし"
+    },
+    {
+      "design_item": "useToastフック (Section 3)",
+      "design_spec": "Toast.tsxの既存useToastフックを活用、変更なし",
+      "implementation_status": "一致 - Toast.tsx L242にuseToastが存在、showToast/removeToast/toastsを返す",
+      "gap": "なし"
+    },
+    {
+      "design_item": "ConversationPair型 (Section 8)",
+      "design_spec": "types/conversation.tsの既存型を活用、変更なし",
+      "implementation_status": "一致 - conversation.ts にConversationPair/ConversationHistoryが定義済み",
+      "gap": "なし"
+    },
+    {
+      "design_item": "ToastType型 (Section 8)",
+      "design_spec": "types/markdown-editor.tsの既存型を活用、変更なし",
+      "implementation_status": "一致 - markdown-editor.ts L96にToastType = 'success' | 'error' | 'info'",
+      "gap": "なし"
+    },
+    {
+      "design_item": "MessageList.tsx変更なし (Section 8)",
+      "design_spec": "Phase 1では変更しない",
+      "implementation_status": "一致 - Phase 2別Issue化の方針",
+      "gap": "なし"
+    },
+    {
+      "design_item": "lucide-react Copyアイコン (Section 3)",
+      "design_spec": "プロジェクト既存のlucide-reactライブラリのCopyアイコンを使用",
+      "implementation_status": "依存パッケージ存在確認済み - lucide-react v0.554.0",
+      "gap": "微差 - 現在Copyアイコンの使用実績なし、動作確認推奨(C-S2-1)"
+    },
+    {
+      "design_item": "MessageBubbleメモ化 (Section 6)",
+      "design_spec": "MessageBubble React.memo(customCompare)のカスタム比較関数修正不要",
+      "implementation_status": "Phase 1スコープ外 - MessageBubbleはMessageList.tsx内のコンポーネント",
+      "gap": "不整合 - Phase 1メモ化戦略表にPhase 2コンポーネントが混在(SF-S2-3)"
+    }
+  ],
+  "reviewed_files": [
+    "dev-reports/design/issue-211-history-copy-button-design-policy.md",
+    "src/lib/cli-patterns.ts",
+    "src/components/common/Toast.tsx",
+    "src/types/conversation.ts",
+    "src/types/markdown-editor.ts",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+    "src/components/worktree/MessageList.tsx"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}

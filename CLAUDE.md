@@ -131,6 +131,7 @@ src/
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
 | `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
+| `src/lib/clipboard-utils.ts` | クリップボードコピーユーティリティ（stripAnsi利用、空文字バリデーション、Issue #211） |
 | `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行プロンプト検出ウィンドウイング。Issue #188: STATUS_THINKING_LINE_COUNT=5追加、thinking/prompt優先順位統一、SF-001/SF-002/SF-004設計根拠ドキュメント化） |
 | `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数） |
 | `src/lib/response-poller.ts` | レスポンスポーリングとthinking検出（Issue #188: L353/L547-554ウィンドウ化、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数、detectPromptWithOptions()ヘルパー、Gemini LOADING_INDICATORS配列抽出） |

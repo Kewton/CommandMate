@@ -8,6 +8,7 @@
 'use client';
 
 import React, { useMemo, useCallback, memo } from 'react';
+import { Copy } from 'lucide-react';
 import type { ConversationPair } from '@/types/conversation';
 import type { ChatMessage } from '@/types/models';
 
@@ -27,6 +28,8 @@ export interface ConversationPairCardProps {
   isExpanded?: boolean;
   /** Callback when expand/collapse is toggled */
   onToggleExpand?: () => void;
+  /** Callback when a message is copied (optional) */
+  onCopy?: (content: string) => void;
 }
 
 /** Parsed content part type */
@@ -194,9 +197,11 @@ function PendingIndicator() {
 const UserMessageSection = memo(function UserMessageSection({
   message,
   onFilePathClick,
+  onCopy,
 }: {
   message: ChatMessage;
   onFilePathClick: (path: string) => void;
+  onCopy?: (content: string) => void;
 }) {
   const formattedTime = useMemo(
     () => message.timestamp.toLocaleTimeString(),
@@ -204,7 +209,7 @@ const UserMessageSection = memo(function UserMessageSection({
   );
 
   return (
-    <div className="bg-blue-900/30 border-l-4 border-blue-500 p-3">
+    <div className="relative bg-blue-900/30 border-l-4 border-blue-500 p-3">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xs font-medium text-blue-400">You</span>
         <span className="text-xs text-gray-500">{formattedTime}</span>
@@ -212,6 +217,18 @@ const UserMessageSection = memo(function UserMessageSection({
       <div className="text-sm text-gray-200 whitespace-pre-wrap break-words">
         <MessageContent content={message.content} onFilePathClick={onFilePathClick} />
       </div>
+      {onCopy && (
+        <button
+          type="button"
+          data-testid="copy-user-message"
+          onClick={() => onCopy(message.content)}
+          className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-200 bg-gray-800/80 rounded transition-colors"
+          aria-label="Copy message"
+          title="Copy"
+        >
+          <Copy size={14} aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
 });
@@ -232,12 +249,14 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   total,
   isExpanded,
   onFilePathClick,
+  onCopy,
 }: {
   message: ChatMessage;
   index: number;
   total: number;
   isExpanded: boolean;
   onFilePathClick: (path: string) => void;
+  onCopy?: (content: string) => void;
 }) {
   const formattedTime = useMemo(
     () => message.timestamp.toLocaleTimeString(),
@@ -252,7 +271,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   const displayContent = isExpanded || !isTruncated ? message.content : truncatedText;
 
   return (
-    <div className="assistant-message-item">
+    <div className="assistant-message-item relative">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xs font-medium text-gray-400">Assistant</span>
         <span className="text-xs text-gray-500">{formattedTime}</span>
@@ -268,6 +287,18 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
           <span className="text-gray-500">...</span>
         )}
       </div>
+      {onCopy && (
+        <button
+          type="button"
+          data-testid="copy-assistant-message"
+          onClick={() => onCopy(message.content)}
+          className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-200 bg-gray-800/80 rounded transition-colors"
+          aria-label="Copy message"
+          title="Copy"
+        >
+          <Copy size={14} aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
 });
@@ -284,10 +315,12 @@ const AssistantMessagesSection = memo(function AssistantMessagesSection({
   messages,
   isExpanded,
   onFilePathClick,
+  onCopy,
 }: {
   messages: ChatMessage[];
   isExpanded: boolean;
   onFilePathClick: (path: string) => void;
+  onCopy?: (content: string) => void;
 }) {
   return (
     <div className="bg-gray-800/50 border-l-4 border-gray-600 p-3 border-t border-gray-700 space-y-3">
@@ -305,6 +338,7 @@ const AssistantMessagesSection = memo(function AssistantMessagesSection({
             total={messages.length}
             isExpanded={isExpanded}
             onFilePathClick={onFilePathClick}
+            onCopy={onCopy}
           />
         </React.Fragment>
       ))}
@@ -368,6 +402,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
   onFilePathClick,
   isExpanded = false,
   onToggleExpand,
+  onCopy,
 }: ConversationPairCardProps) {
   // Determine if expand button should be shown
   const hasLongContent = useMemo(() => {
@@ -420,6 +455,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
         <UserMessageSection
           message={pair.userMessage}
           onFilePathClick={onFilePathClick}
+          onCopy={onCopy}
         />
       )}
 
@@ -434,6 +470,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
             messages={pair.assistantMessages}
             isExpanded={isExpanded}
             onFilePathClick={onFilePathClick}
+            onCopy={onCopy}
           />
           {/* Expand/Collapse button */}
           {hasLongContent && (

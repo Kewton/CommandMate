@@ -1,0 +1,213 @@
+{
+  "issue_number": 211,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-02-10",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "showToast props伝搬の経路で、WorktreeDetailRefactored.tsxにおけるHistoryPaneの呼び出し箇所が2箇所存在する（モバイルレイアウト用のL808-815とデスクトップレイアウト用のL1572-1578）。Issueの影響範囲テーブルではWorktreeDetailRefactored.tsxが1行で記載されているが、実際には2箇所のHistoryPane呼び出しそれぞれにshowToastをprops伝搬する必要がある。片方だけ対応するとレイアウトによってコピー機能が動作しない不具合となる。",
+        "location": "## 影響範囲 / ### 変更対象ファイル",
+        "recommendation": "WorktreeDetailRefactored.tsxの変更内容に「モバイルレイアウト用（renderMobileLeftPaneContent内 L809）とデスクトップレイアウト用（L1573）の2箇所のHistoryPane呼び出しの両方にshowToast propsを追加」と明記すべき。",
+        "evidence": "WorktreeDetailRefactored.tsx L808-815（renderMobileLeftPaneContent内のHistoryPane呼び出し）およびL1572-1578（WorktreeDesktopLayout内のHistoryPane呼び出し）の2箇所。現在どちらもmessages, worktreeId, onFilePathClick, classNameのみをpropsとして渡しており、showToastは渡されていない。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "依存関係",
+        "issue": "ConversationPairCard内のサブコンポーネント（UserMessageSection、AssistantMessageItem、AssistantMessagesSection）は全てmemo化されており、カスタムの比較関数は使っていないがpropsの変更で再レンダリングされる。onCopyコールバックを新たにpropsとして追加する場合、各render時に新しいコールバック参照が生成されるとmemo化の効果が無効化される可能性がある。特にAssistantMessageItemはmessageごとに生成されるため、パフォーマンスへの影響が大きい。",
+        "location": "## 提案する解決策 / ## 実装タスク",
+        "recommendation": "コピーコールバックのprops伝搬設計に、useCallbackを用いた参照安定化の考慮を実装タスクに含めるべき。ConversationPairCardでuseCallbackでラップしたonCopyハンドラーをサブコンポーネントに渡すパターンが望ましい（既存のhandleToggle/handleFilePathClickと同様のパターン）。",
+        "evidence": "ConversationPairCard.tsx L126（MessageContent - memo）、L194（UserMessageSection - memo）、L229（AssistantMessageItem - memo）、L283（AssistantMessagesSection - memo）、L366（ConversationPairCard - memo）。既存のonFilePathClickはL196-199でuseCallback化されている（HistoryPane.tsx）。"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "既存テストファイルとして以下の3つが存在するが、Issueの実装タスクではコピーユーティリティとConversationPairCardのテストのみ言及されている。HistoryPaneのprops変更（showToast追加）に伴い、既存の結合テスト（HistoryPane.integration.test.tsx）と単体テスト（HistoryPane.test.tsx）が破損する可能性がある。また、MessageListへのコピーボタン追加で既存テスト（MessageListOptimistic.test.tsx）のReact.memoカスタム比較関数が影響を受ける可能性がある。",
+        "location": "## 実装タスク / ## 受入条件",
+        "recommendation": "以下の既存テストファイルの修正が必要になる可能性がある旨を実装タスクに追記すべき：(1) src/components/worktree/__tests__/HistoryPane.integration.test.tsx - HistoryPanePropsの変更に伴うテスト修正、(2) tests/unit/components/HistoryPane.test.tsx - 同上、(3) tests/unit/components/worktree/MessageListOptimistic.test.tsx - MessageBubbleのReact.memoカスタム比較関数（L362-371）がコピー関連propsを考慮していない場合の修正。",
+        "evidence": "src/components/worktree/__tests__/HistoryPane.integration.test.tsx、tests/unit/components/HistoryPane.test.tsx、tests/unit/components/worktree/MessageListOptimistic.test.tsx が既存テスト。MessageList.tsx L362-371のReact.memoカスタム比較関数はid, content, promptData.status, promptData.answerのみ比較しており、onCopy系propsは含まれていない。"
+      },
+      {
+        "id": "SF-3",
+        "category": "破壊的変更",
+        "issue": "HistoryPanePropsにshowToastコールバックを必須プロパティとして追加すると、HistoryPaneの全呼び出し元で対応が必要となり、既存テストも全て修正が必要になる。オプショナルプロパティ（showToast?:）にするか必須にするかの方針がIssueに明記されていない。",
+        "location": "## 提案する解決策 / ### Toast通知の統合方針",
+        "recommendation": "HistoryPaneProps、ConversationPairCardPropsに追加する新しいpropsはオプショナル（?:）にすることを推奨する。これにより既存のテストコードや呼び出し元を壊さず段階的に対応できる。コピーボタンはshowToastが提供されていない場合は非表示にするか、コピーのみ実行してToast通知を省略する。",
+        "evidence": "HistoryPaneの呼び出し箇所：WorktreeDetailRefactored.tsx L809とL1573の2箇所。既存テスト：HistoryPane.integration.test.tsx、HistoryPane.test.tsxがshowToast propsなしでHistoryPaneをレンダリングしている。ConversationPairCard.test.tsx（L86-89等）もonCopy propsなしでレンダリングしている。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "移行考慮",
+        "issue": "Clipboard APIはセキュアコンテキスト（HTTPS）でのみ動作する。CommandMateは開発用ツールとしてlocalhost（HTTP）で動作する場合が多いが、localhost はセキュアコンテキストとして扱われるため通常は問題ない。ただし、リモートサーバーからHTTPでアクセスする場合はClipboard APIが利用できない。",
+        "location": "## 提案する解決策",
+        "recommendation": "フォールバック処理として document.execCommand('copy')（非推奨ではあるが広くサポートされている）を検討するか、Clipboard API非対応時の挙動をコピーユーティリティ関数内で明示的にハンドリングすることを推奨する。受入条件にも「コピー失敗時のエラーToast」が含まれているが、具体的なフォールバック手段を明記するとよい。",
+        "evidence": "Issueの受入条件に「コピー失敗時（Clipboard API非対応等）にエラーToastが表示されること」が含まれている。CommandMateはcommandmate startでlocalhostサーバーとして起動する（src/cli/commands/start.ts）。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdの主要機能モジュールセクションにConversationPairCard.tsxやHistoryPane.tsxの説明がないが、今回の変更でこれらのコンポーネントに新しい機能（コピー）が追加される。ドキュメントの更新は必須ではないが、今後の参照のために追加を検討してもよい。",
+        "location": "## 影響範囲",
+        "recommendation": "CLAUDE.mdの主要機能モジュールセクションへの追加は今回のスコープ外として問題ないが、実装完了後にdocs/implementation-history.mdへのIssue #211の記録追加は行うべき。",
+        "evidence": "CLAUDE.mdの主要機能モジュールテーブルにConversationPairCard、HistoryPaneは未記載。docs/implementation-history.mdが実装機能一覧として存在する。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "影響ファイル",
+        "issue": "新規作成するコピーユーティリティ関数の配置先ファイルが未定義。プロジェクトの既存構成では汎用ユーティリティはsrc/lib/utils.ts、ファイル操作はsrc/lib/file-operations.tsに配置されている。コピーユーティリティの配置先を明確にすることで実装時の迷いを減らせる。",
+        "location": "## 影響範囲 / ### 変更対象ファイル",
+        "recommendation": "以下のいずれかを推奨する：(1) src/lib/clipboard-utils.ts を新規作成（関心の分離を重視）、(2) src/lib/utils.ts に追加（少量のコードの場合）。ANSIコード除去も含むため、(1)の独立ファイルが望ましい。テストファイルは src/lib/__tests__/clipboard-utils.test.ts に配置。",
+        "evidence": "Issueの影響範囲テーブルでは「新規: コピーユーティリティ関数」「新規: テストファイル」とあるがファイルパスが未指定。既存パターン：src/lib/utils.ts（汎用ユーティリティ）、src/lib/url-normalizer.ts（独立ユーティリティ）。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/components/worktree/ConversationPairCard.tsx",
+        "change_type": "modify",
+        "impact": "Props型にonCopyコールバック追加、UserMessageSectionとAssistantMessageItemにコピーボタンUI追加。memo化されたサブコンポーネントへのprops追加によるレンダリングパフォーマンスへの考慮が必要。"
+      },
+      {
+        "file": "src/components/worktree/HistoryPane.tsx",
+        "change_type": "modify",
+        "impact": "HistoryPanePropsにshowToast（またはonCopyMessage）コールバック追加。ConversationPairCardへのprops中継処理追加。"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change_type": "modify",
+        "impact": "2箇所のHistoryPane呼び出し（L809モバイル用、L1573デスクトップ用）にshowToast propsを追加。"
+      },
+      {
+        "file": "src/components/worktree/MessageList.tsx",
+        "change_type": "modify",
+        "impact": "MessageBubbleにコピーボタン追加。React.memoカスタム比較関数（L362-371）の更新が必要になる可能性あり。"
+      },
+      {
+        "file": "新規: src/lib/clipboard-utils.ts（推定）",
+        "change_type": "create",
+        "impact": "navigator.clipboard.writeTextラッパー、ANSIエスケープコード除去関数を含むユーティリティモジュール。"
+      },
+      {
+        "file": "新規: src/lib/__tests__/clipboard-utils.test.ts（推定）",
+        "change_type": "create",
+        "impact": "コピーユーティリティ関数の単体テスト。"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+        "change_type": "modify",
+        "impact": "ConversationPairCardPropsの変更に伴い、テストのprops更新が必要。コピーボタンのテストケース追加。"
+      },
+      {
+        "file": "src/components/worktree/__tests__/HistoryPane.integration.test.tsx",
+        "change_type": "modify",
+        "impact": "HistoryPanePropsの変更に伴い、テストのprops更新が必要になる可能性あり（propsがオプショナルなら不要）。"
+      },
+      {
+        "file": "tests/unit/components/HistoryPane.test.tsx",
+        "change_type": "modify",
+        "impact": "同上。HistoryPanePropsの変更に伴うテスト修正。"
+      },
+      {
+        "file": "tests/unit/components/worktree/MessageListOptimistic.test.tsx",
+        "change_type": "modify",
+        "impact": "MessageBubbleにコピーボタンを追加した場合、React.memoカスタム比較関数の修正やテスト修正が必要になる可能性あり。"
+      }
+    ],
+    "unaffected_files": [
+      {
+        "file": "src/components/common/Toast.tsx",
+        "reason": "既存のuseToast hookとToastContainerコンポーネントをそのまま利用。変更不要。"
+      },
+      {
+        "file": "src/types/conversation.ts",
+        "reason": "ConversationPair型定義に変更不要。コピーはUI層の機能。"
+      },
+      {
+        "file": "src/types/models.ts",
+        "reason": "ChatMessage型定義に変更不要。message.contentをそのままコピーするため。"
+      },
+      {
+        "file": "src/hooks/useConversationHistory.ts",
+        "reason": "会話グルーピングロジックに変更不要。コピーは表示層の機能。"
+      },
+      {
+        "file": "src/lib/conversation-grouper.ts",
+        "reason": "メッセージグルーピングロジックに変更不要。"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetail.tsx",
+        "reason": "レガシーコンポーネント。MessageListの変更は反映されるが、WorktreeDetail.tsx自体の修正は不要（MessageListが独自にコピー処理を持つ場合）。"
+      }
+    ],
+    "breaking_changes": {
+      "exists": false,
+      "details": "HistoryPaneProps、ConversationPairCardPropsへの新しいpropsはオプショナルとして追加すれば破壊的変更なし。必須プロパティとして追加した場合は既存テストとWorktreeDetailRefactored.tsxの修正が必要。"
+    },
+    "dependency_impact": {
+      "new_dependencies": "なし。lucide-react（既存）、navigator.clipboard API（ブラウザネイティブ）のみ使用。",
+      "affected_dependencies": "ansi-to-html パッケージ（既存、MessageList.tsxで使用中）のANSI除去ロジックが新規コピーユーティリティと重複する可能性あり。stripAnsi的な処理を独自実装するか、正規表現ベースで実装するかの選択が必要。"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/ConversationPairCard.tsx",
+      "relevance": "主要な変更対象。コピーボタンUI追加先。memo化サブコンポーネント（L126, L194, L229, L283, L366）への影響考慮が必要。"
+    },
+    {
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "relevance": "Props変更によるConversationPairCardへのprops中継。HistoryPaneProps（L34-45）の修正。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "showToast伝搬元。2箇所のHistoryPane呼び出し（L809, L1573）の両方に対応が必要。"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "relevance": "レガシー表示のコピーボタン追加先。React.memoカスタム比較関数（L362-371）の更新考慮。ANSIコード処理（L76-88）の参考。"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "既存のToast通知インフラ。useToast hook（L242）、showToast関数のシグネチャ確認。"
+    },
+    {
+      "file": "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+      "relevance": "既存テスト。Props変更とコピーボタンテスト追加で修正が必要。"
+    },
+    {
+      "file": "src/components/worktree/__tests__/HistoryPane.integration.test.tsx",
+      "relevance": "既存結合テスト。HistoryPanePropsの変更で修正が必要になる可能性あり。"
+    },
+    {
+      "file": "tests/unit/components/HistoryPane.test.tsx",
+      "relevance": "既存単体テスト。HistoryPanePropsの変更で修正が必要になる可能性あり。"
+    },
+    {
+      "file": "tests/unit/components/worktree/MessageListOptimistic.test.tsx",
+      "relevance": "既存テスト。MessageBubbleの変更で修正が必要になる可能性あり。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・品質担保ルール確認。主要機能モジュールセクションの更新検討。"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "実装完了後のIssue #211記録追加先。"
+    }
+  ]
+}

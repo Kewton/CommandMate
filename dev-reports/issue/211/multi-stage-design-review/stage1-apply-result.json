@@ -1,0 +1,79 @@
+{
+  "issue_number": 211,
+  "stage": 1,
+  "stage_name": "通常レビュー - 指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "item": "clipboard-utils.tsの責務二重化（DRY違反）-- HistoryPaneのonCopyからcopyToClipboard関数を呼ぶ形に統一",
+        "sections_updated": ["Section 2 レイヤー構成", "Section 4.2 Callback合成パターン", "Section 5.1 clipboard-utils.ts", "Section 8 変更対象ファイル一覧", "Section 9 設計上の決定事項", "Section 14 実装チェックリスト", "Section 16 レビュー指摘事項サマリー"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "item": "ConversationPairCard handleCopy useCallback不要 -- 直接onCopy?.(message.content)を呼ぶ設計に変更",
+        "sections_updated": ["Section 5.3 コピーボタンコンポーネント仕様", "Section 6 メモ化戦略", "Section 9 設計上の決定事項", "Section 12 実装順序", "Section 14 実装チェックリスト", "Section 16 レビュー指摘事項サマリー"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-2",
+        "item": "Phase 2 MessageList.tsx設計詳細不足 -- Phase 2を別Issue化、本設計書スコープをPhase 1のみに限定",
+        "sections_updated": ["Section 1 スコープ", "Section 8 変更対象ファイル一覧", "Section 12 実装順序", "Section 14 実装チェックリスト", "Section 16 レビュー指摘事項サマリー"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-3",
+        "item": "showToast未提供時のサイレントフェイル -- catch句内でconsole.warnフォールバック方針を明記",
+        "sections_updated": ["Section 4.2 Callback合成パターン", "Section 4.3 Optional Propsパターン", "Section 9 設計上の決定事項", "Section 14 実装チェックリスト", "Section 16 レビュー指摘事項サマリー"],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-1",
+        "item": "CopyButton独立コンポーネント抽出",
+        "sections_updated": ["Section 13 将来の検討事項", "Section 16 レビュー指摘事項サマリー"],
+        "status": "noted_for_future"
+      },
+      {
+        "id": "C-2",
+        "item": "MobileContentProps showToast追加",
+        "sections_updated": ["Section 13 将来の検討事項", "Section 16 レビュー指摘事項サマリー"],
+        "status": "noted_for_future"
+      },
+      {
+        "id": "C-3",
+        "item": "aria-label言語統一",
+        "sections_updated": ["Section 5.3 コピーボタンコンポーネント仕様", "Section 13 将来の検討事項", "Section 14 実装チェックリスト", "Section 16 レビュー指摘事項サマリー"],
+        "status": "reflected_in_design"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-211-history-copy-button-design-policy.md",
+  "sections_updated": [
+    "Section 1 概要（スコープ修正）",
+    "Section 2 レイヤー構成（責務説明修正）",
+    "Section 4.2 Callback合成パターン（MF-1: copyToClipboard使用に統一、SF-3: console.warnフォールバック追加）",
+    "Section 4.3 Optional Propsパターン（SF-3: エラー時挙動明記）",
+    "Section 5.1 clipboard-utils.ts（MF-1: 唯一のエントリポイント明記）",
+    "Section 5.2 コピーボタン配置（絵文字をASCIIに変更）",
+    "Section 5.3 コピーボタンコンポーネント仕様（SF-1: useCallback不使用、C-3: 英語aria-label）",
+    "Section 6 メモ化戦略（SF-1: handleCopy削除、簡素化）",
+    "Section 8 変更対象ファイル一覧（SF-2: MessageList.txt別Issue化）",
+    "Section 9 設計上の決定事項（MF-1/SF-1/SF-2追加）",
+    "Section 11 パフォーマンス考慮（copyToClipboard反映）",
+    "Section 12 実装順序（SF-1/SF-2反映）",
+    "Section 13 将来の検討事項（新規追加: C-1/C-2/C-3）",
+    "Section 14 実装チェックリスト（新規追加）",
+    "Section 15 レビュー履歴（新規追加）",
+    "Section 16 レビュー指摘事項サマリー（新規追加）",
+    "制約条件の確認（更新）"
+  ],
+  "timestamp": "2026-02-10T12:00:00Z"
+}

@@ -338,4 +338,99 @@ describe('ConversationPairCard', () => {
       expect(fileLinks).toHaveLength(2);
     });
   });
+
+  // ===== Copy button =====
+
+  describe('copy button', () => {
+    it('should show copy button for user message when onCopy is provided', () => {
+      const pair = createCompletedPair();
+      const mockOnCopy = vi.fn();
+
+      render(
+        <ConversationPairCard
+          pair={pair}
+          onFilePathClick={mockOnFilePathClick}
+          onCopy={mockOnCopy}
+        />
+      );
+
+      expect(screen.getByTestId('copy-user-message')).toBeInTheDocument();
+    });
+
+    it('should show copy button for assistant message when onCopy is provided', () => {
+      const pair = createCompletedPair();
+      const mockOnCopy = vi.fn();
+
+      render(
+        <ConversationPairCard
+          pair={pair}
+          onFilePathClick={mockOnFilePathClick}
+          onCopy={mockOnCopy}
+        />
+      );
+
+      expect(screen.getByTestId('copy-assistant-message')).toBeInTheDocument();
+    });
+
+    it('should not show copy buttons when onCopy is not provided', () => {
+      const pair = createCompletedPair();
+
+      render(
+        <ConversationPairCard pair={pair} onFilePathClick={mockOnFilePathClick} />
+      );
+
+      expect(screen.queryByTestId('copy-user-message')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('copy-assistant-message')).not.toBeInTheDocument();
+    });
+
+    it('should call onCopy with user message content when user copy button is clicked', () => {
+      const pair = createCompletedPair('Hello World', 'Response');
+      const mockOnCopy = vi.fn();
+
+      render(
+        <ConversationPairCard
+          pair={pair}
+          onFilePathClick={mockOnFilePathClick}
+          onCopy={mockOnCopy}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('copy-user-message'));
+      expect(mockOnCopy).toHaveBeenCalledWith('Hello World');
+    });
+
+    it('should call onCopy with assistant message content when assistant copy button is clicked', () => {
+      const pair = createCompletedPair('Hello', 'Assistant Response');
+      const mockOnCopy = vi.fn();
+
+      render(
+        <ConversationPairCard
+          pair={pair}
+          onFilePathClick={mockOnFilePathClick}
+          onCopy={mockOnCopy}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('copy-assistant-message'));
+      expect(mockOnCopy).toHaveBeenCalledWith('Assistant Response');
+    });
+
+    it('should not show copy buttons for pending pairs', () => {
+      const pair = createPendingPair();
+      const mockOnCopy = vi.fn();
+
+      render(
+        <ConversationPairCard
+          pair={pair}
+          onFilePathClick={mockOnFilePathClick}
+          onCopy={mockOnCopy}
+        />
+      );
+
+      // User message copy button should exist
+      expect(screen.getByTestId('copy-user-message')).toBeInTheDocument();
+      // No assistant copy button since pending has no assistant messages
+      expect(screen.queryByTestId('copy-assistant-message')).not.toBeInTheDocument();
+    });
+  });
 });

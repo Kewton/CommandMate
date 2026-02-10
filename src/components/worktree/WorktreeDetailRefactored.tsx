@@ -766,6 +766,8 @@ interface MobileContentProps {
   refreshTrigger: number;
   /** [Issue #21] File search hook return object */
   fileSearch: UseFileSearchReturn;
+  /** [Issue #211] Toast notification callback for copy feedback */
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 /** [Issue #21] Type for file search hook return */
@@ -790,6 +792,7 @@ const MobileContent = memo(function MobileContent({
   onUpload,
   refreshTrigger,
   fileSearch,
+  showToast,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -811,6 +814,7 @@ const MobileContent = memo(function MobileContent({
             worktreeId={worktreeId}
             onFilePathClick={onFilePathClick}
             className="h-full"
+            showToast={showToast}
           />
         </ErrorBoundary>
       );
@@ -1575,6 +1579,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                         worktreeId={worktreeId}
                         onFilePathClick={handleFilePathClick}
                         className="h-full"
+                        showToast={showToast}
                       />
                     )}
                     {leftPaneTab === 'files' && (
@@ -1847,6 +1852,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onUpload={handleUpload}
             refreshTrigger={fileTreeRefresh}
             fileSearch={fileSearch}
+            showToast={showToast}
           />
         </main>
 

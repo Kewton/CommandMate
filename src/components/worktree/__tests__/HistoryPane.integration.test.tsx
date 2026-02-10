@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { HistoryPane } from '../HistoryPane';
 import type { ChatMessage } from '@/types/models';
 
@@ -235,6 +235,106 @@ describe('HistoryPane Integration', () => {
       expect(allText.indexOf('Second message')).toBeLessThan(
         allText.indexOf('Third message')
       );
+    });
+  });
+
+  describe('copy functionality', () => {
+    it('should show copy buttons when showToast is provided', () => {
+      const mockShowToast = vi.fn();
+      const messages = [
+        createTestMessage('user', 'Hello', T1),
+        createTestMessage('assistant', 'Hi there!', T2),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          showToast={mockShowToast}
+        />
+      );
+
+      expect(screen.getByTestId('copy-user-message')).toBeInTheDocument();
+      expect(screen.getByTestId('copy-assistant-message')).toBeInTheDocument();
+    });
+
+    it('should call showToast with success on copy button click', async () => {
+      const mockShowToast = vi.fn();
+      // Mock clipboard API
+      Object.assign(navigator, {
+        clipboard: {
+          writeText: vi.fn().mockResolvedValue(undefined),
+        },
+      });
+
+      const messages = [
+        createTestMessage('user', 'Hello', T1),
+        createTestMessage('assistant', 'Hi there!', T2),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          showToast={mockShowToast}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('copy-user-message'));
+
+      await waitFor(() => {
+        expect(mockShowToast).toHaveBeenCalledWith('Copied to clipboard', 'success');
+      });
+    });
+
+    it('should call showToast with error when clipboard fails', async () => {
+      const mockShowToast = vi.fn();
+      Object.assign(navigator, {
+        clipboard: {
+          writeText: vi.fn().mockRejectedValue(new Error('Clipboard denied')),
+        },
+      });
+
+      const messages = [
+        createTestMessage('user', 'Hello', T1),
+        createTestMessage('assistant', 'Hi there!', T2),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+          showToast={mockShowToast}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('copy-user-message'));
+
+      await waitFor(() => {
+        expect(mockShowToast).toHaveBeenCalledWith('Failed to copy', 'error');
+      });
+    });
+
+    it('should work without showToast (no toast feedback)', () => {
+      const messages = [
+        createTestMessage('user', 'Hello', T1),
+        createTestMessage('assistant', 'Hi there!', T2),
+      ];
+
+      render(
+        <HistoryPane
+          messages={messages}
+          worktreeId="test"
+          onFilePathClick={mockOnFilePathClick}
+        />
+      );
+
+      // Copy buttons should still be present (onCopy is always provided by handleCopy)
+      expect(screen.getByTestId('copy-user-message')).toBeInTheDocument();
+      expect(screen.getByTestId('copy-assistant-message')).toBeInTheDocument();
     });
   });
 });

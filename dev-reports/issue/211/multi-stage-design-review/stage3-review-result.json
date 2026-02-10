@@ -1,0 +1,183 @@
+{
+  "issue_number": 211,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-S3-1",
+        "title": "ConversationPairCardテスト -- onCopy追加後のaria-labelクエリ競合リスク",
+        "description": "ConversationPairCard.test.tsxではscreen.getByRole('button', { name: /expand|collapse/i })でボタンを特定している。コピーボタン追加後、aria-label='Copy message'が加わり、もしregex /copy/i等で検索するテストが将来追加された場合にユーザーメッセージ側とアシスタント側の2つのコピーボタンが衝突する可能性がある。現行テストは直接的には破損しないが、コピーボタンのテスト追加時にgetAllByRoleの使い分けを意識する必要がある。",
+        "severity": "low",
+        "category": "影響範囲",
+        "recommendation": "コピーボタンテスト追加時はdata-testid(例: 'copy-user-message', 'copy-assistant-message')を活用して各ボタンを一意に特定できる設計にすること。設計書のSection 5.3にdata-testid付与の指針を追記することを推奨する。"
+      },
+      {
+        "id": "SF-S3-2",
+        "title": "HistoryPane.integration.test.tsx -- showToastなしのテストがデフォルト動作確認として不十分",
+        "description": "HistoryPane.integration.test.tsxの全テストケースでshowToast propsは渡されていない。showToastはオプショナルであるため既存テストは破損しないが、コピーボタン追加後のHistoryPaneの統合テストとして、showToast提供時のToast表示確認テストが存在しない状態になる。テスト戦略(Section 7.2)で影響度'低'としているが、onCopyコールバック合成の統合テストの欠如は品質保証上のギャップとなる。",
+        "severity": "low",
+        "category": "影響範囲",
+        "recommendation": "HistoryPane.integration.test.tsxにshowToast提供時のコピー機能統合テストを1-2ケース追加することを推奨する。具体的には: (1) showToast付きでHistoryPaneをレンダリングし、コピーボタンクリック後にshowToastが呼ばれることを確認、(2) showToastなしでもコピーボタンが表示されることを確認。"
+      },
+      {
+        "id": "SF-S3-3",
+        "title": "WorktreeDetailRefactored -- showToastのuseCallback依存配列空による安定性は確認済みだが、MobileContent Props追加時のReact.memo影響",
+        "description": "MobileContentPropsにshowToastを追加すると、MobileContentはReact.memoで包まれているため、showToastの参照が変わるたびに再レンダリングが発生する。useToast内のshowToastは空の依存配列のuseCallbackで安定化されているため問題ないが、これはToast.tsxの実装詳細に依存している。将来useToastの実装が変わった場合にMobileContentの不要な再レンダリングが発生するリスクがある。",
+        "severity": "low",
+        "category": "影響範囲",
+        "recommendation": "現時点では問題ないが、設計書にshowToastの参照安定性がuseToastのuseCallback([])に依存している旨を注記として残しておくことを推奨する(既にSection 6で言及済みのため、リスクは十分認識されている)。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S3-1",
+        "title": "clipboard-utils.tsの新規作成がテスト環境でのClipboard APIモック要件を生む",
+        "description": "clipboard-utils.tsのテストではnavigator.clipboard.writeTextのモックが必要。jsdom環境ではClipboard APIがデフォルトで存在しないため、テストセットアップでグローバルモックを設定する必要がある。これはプロジェクト全体のテスト基盤に影響しないが、clipboard-utils.test.ts固有のセットアップとして認識が必要。",
+        "category": "影響範囲"
+      },
+      {
+        "id": "C-S3-2",
+        "title": "lucide-react Copyアイコンのバンドルサイズへの影響",
+        "description": "lucide-reactはtree-shakingに対応しており、Copyアイコンの追加はバンドルサイズに対して最小限の影響(数百バイト程度)しかない。ただし、現在のコードベースでCopyアイコンの使用実績がないため、バンドルに新しいアイコンが追加される。",
+        "category": "影響範囲"
+      },
+      {
+        "id": "C-S3-3",
+        "title": "UserMessageSectionへのrelativeクラス追加がレイアウトに与える影響",
+        "description": "UserMessageSectionのルートdivにrelativeクラスを追加する必要がある(C-S2-2)。現在のUserMessageSectionのルートdivはposition: staticであり、relativeに変更することで子要素のz-indexスタッキングコンテキストが変わる。現時点ではUserMessageSection内にabsolute配置の子要素はないため影響はないが、コピーボタン追加と同時にrelativeを設定することで意図した動作になることを実装時に視覚確認する必要がある。",
+        "category": "影響範囲"
+      },
+      {
+        "id": "C-S3-4",
+        "title": "AssistantMessagesSection内のexpand/collapseボタンとコピーボタンの共存によるタッチターゲットの密接",
+        "description": "設計書ではコピーボタンをright-10 top-2、展開ボタンをright-2 top-2に配置する。2つのボタン間の距離は約32px(right-2 = 8px, right-10 = 40px, 差分32px)で、タッチターゲットの最小推奨サイズ(44x44px)との関係から、モバイルデバイスで誤タップのリスクがある。ただし設計書でコピーボタンのサイズはp-1(4px padding) + 14pxアイコン = 約22pxであり、展開ボタンもpx-2 py-1と小さいため、実際の距離は十分確保される可能性が高い。",
+        "category": "影響範囲"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_matrix": [
+    {
+      "category": "直接変更",
+      "file": "src/lib/clipboard-utils.ts",
+      "change": "新規作成: stripAnsi + navigator.clipboard.writeText ラッパー関数",
+      "risk": "low",
+      "notes": "依存先(cli-patterns.ts)は変更なし。Clipboard APIはブラウザ標準で安定。"
+    },
+    {
+      "category": "直接変更",
+      "file": "src/lib/__tests__/clipboard-utils.test.ts",
+      "change": "新規作成: copyToClipboard関数のユニットテスト",
+      "risk": "low",
+      "notes": "navigator.clipboard.writeTextのモックが必要。プロジェクト全体のテスト基盤には影響しない。"
+    },
+    {
+      "category": "直接変更",
+      "file": "src/components/worktree/ConversationPairCard.tsx",
+      "change": "Props型にonCopy追加、UserMessageSection/AssistantMessageItem内にコピーボタンUI追加、UserMessageSectionにrelativeクラス追加",
+      "risk": "low",
+      "notes": "onCopyはオプショナルのため後方互換性あり。React.memoパターンはonCopy参照が安定であれば影響なし。UserMessageSectionへのrelative追加は既存レイアウトに影響しない(absolute子要素なし)。"
+    },
+    {
+      "category": "直接変更",
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "change": "Props型にshowToast追加、onCopyコールバック作成(useCallback)、ConversationPairCardへのonCopy伝搬",
+      "risk": "low",
+      "notes": "showToastはオプショナルのため後方互換性あり。onCopyコールバックはuseCallback([showToast])で安定化。"
+    },
+    {
+      "category": "直接変更",
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx (デスクトップ)",
+      "change": "HistoryPaneにshowToast propsを追加(L1573付近のHistoryPane呼出箇所)",
+      "risk": "low",
+      "notes": "既にuseToast()でshowToastを保持しているため、props追加のみ。"
+    },
+    {
+      "category": "直接変更",
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx (MobileContent)",
+      "change": "MobileContentPropsにshowToast追加、MobileContent内のhistoryタブでHistoryPaneにshowToast中継",
+      "risk": "low",
+      "notes": "MobileContentPropsのインターフェース拡張が必要。React.memoのshallowCompareでshowToast参照が安定なら再レンダリング影響なし。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+      "change": "既存テストは破損しない(onCopyオプショナル)。但し、コピーボタン追加によりボタン総数が増えるため、getAllByRole('button')の結果数が変わる可能性がある。",
+      "risk": "low",
+      "notes": "既存テストは名前指定(expand/collapse, file path)でボタンを特定しているため影響なし。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/components/worktree/__tests__/HistoryPane.integration.test.tsx",
+      "change": "既存テストは破損しない(showToastオプショナル)。コピーボタンUIが増えるが既存テストは特定のUI要素を検証しているため影響なし。",
+      "risk": "low",
+      "notes": "コピー機能の統合テスト追加が推奨される(SF-S3-2)。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/hooks/useConversationHistory.ts",
+      "change": "変更なし",
+      "risk": "none",
+      "notes": "ConversationPairの型定義変更なし、グルーピングロジック変更なし。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/types/conversation.ts",
+      "change": "変更なし",
+      "risk": "none",
+      "notes": "ConversationPair/ConversationStatus型は変更不要。"
+    },
+    {
+      "category": "依存(変更なし)",
+      "file": "src/lib/cli-patterns.ts",
+      "change": "変更なし。stripAnsi関数がclipboard-utils.tsから新たにインポートされる。",
+      "risk": "none",
+      "notes": "stripAnsiは既にサーバーサイド6箇所で使用されている。クライアントサイドでの使用は初めてだが、関数自体はピュアな文字列操作でありサーバー/クライアント問わず使用可能。"
+    },
+    {
+      "category": "依存(変更なし)",
+      "file": "src/components/common/Toast.tsx",
+      "change": "変更なし。useToastフック/ToastContainerを既存活用。",
+      "risk": "none",
+      "notes": "showToastのuseCallback([])による安定参照に依存している。"
+    },
+    {
+      "category": "依存(変更なし)",
+      "file": "src/types/markdown-editor.ts",
+      "change": "変更なし。ToastType型を既存活用。",
+      "risk": "none",
+      "notes": ""
+    },
+    {
+      "category": "スコープ外(Phase 2)",
+      "file": "src/components/worktree/MessageList.tsx",
+      "change": "Phase 2で対応(別Issue)。本Issueでは変更しない。",
+      "risk": "none",
+      "notes": "MessageListはReactMarkdown/AnsiToHtml/MessageBubble(customCompare)等の独自構造を持ち、ConversationPairCardとは異なる設計が必要。"
+    }
+  ],
+  "reviewed_files": [
+    "dev-reports/design/issue-211-history-copy-button-design-policy.md",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+    "src/components/worktree/__tests__/HistoryPane.integration.test.tsx",
+    "src/components/worktree/MessageList.tsx",
+    "src/components/common/Toast.tsx",
+    "src/lib/cli-patterns.ts",
+    "src/types/conversation.ts",
+    "src/types/markdown-editor.ts",
+    "src/hooks/useConversationHistory.ts"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}

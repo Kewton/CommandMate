@@ -1,0 +1,72 @@
+{
+  "issue_number": 211,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（影響範囲分析）",
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "WorktreeDetailRefactored.tsxにおける2箇所のHistoryPane呼び出し（モバイルレイアウト用L809付近、デスクトップレイアウト用L1573付近）への対応を、Toast通知の統合方針セクション・実装タスク・影響範囲テーブル・受入条件の4箇所に明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "「コールバック参照の安定化（メモ化考慮）」セクションを新設し、useCallbackによる参照安定化方針を明記。実装タスクの各UI実装項目にもuseCallbackの使用を明記。受入条件にuseCallbackによる参照安定化の確認項目を追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "既存テストファイル4件（HistoryPane.integration.test.tsx、HistoryPane.test.tsx、MessageListOptimistic.test.tsx、ConversationPairCard.test.tsx）の修正確認を実装タスクのテストセクションに追加。影響範囲に「修正確認が必要な既存テスト」テーブルを新設。受入条件に既存テスト全パスの条件を追加"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "「Props設計方針」セクションを新設し、全新規propsをオプショナル（?:）として定義する方針を明記。showToast未提供時の挙動（コピーのみ実行、Toast省略）を明記。実装タスクのProps型定義変更にオプショナルの指定を明記。影響範囲テーブルにオプショナルの記載を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "Clipboard APIフォールバックの詳細設計は実装フェーズで検討する。受入条件に「コピー失敗時のエラーToast」は既に含まれており、要件レベルでは十分カバーされている"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "docs/implementation-history.mdへの記録は実装完了後のタスクであり、Issue本文への追記は不要"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "コピーユーティリティのファイルパスを具体的に指定: src/lib/clipboard-utils.ts（新規作成）、src/lib/__tests__/clipboard-utils.test.ts（テスト）。実装タスクと影響範囲テーブルの両方に反映"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 5,
+    "skipped": 2
+  },
+  "changes_made": [
+    "Toast通知の統合方針セクションに2箇所のHistoryPane呼び出しに関する重要注記を追加",
+    "「Props設計方針」セクションを新設（オプショナルprops方針、未提供時の挙動）",
+    "「コールバック参照の安定化（メモ化考慮）」セクションを新設（useCallback方針）",
+    "実装タスクを「コピーユーティリティ」「Props型定義変更」「UI実装」「テスト」の4カテゴリに再構成",
+    "実装タスクに具体的なファイルパス、useCallback指定、2箇所対応の注記を追加",
+    "テストセクションに既存テスト4件の修正確認タスクを追加",
+    "受入条件に「モバイル/デスクトップ両方での動作確認」「useCallback参照安定化」「既存テスト全パス」を追加",
+    "影響範囲テーブルにオプショナル・useCallbackの記載を追加",
+    "「修正確認が必要な既存テスト」テーブルを新設",
+    "新規ファイルのパスを具体的に指定（src/lib/clipboard-utils.ts、src/lib/__tests__/clipboard-utils.test.ts）",
+    "レビュー履歴セクションにStage 3の全反映項目を記録"
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/211"
+  }
+}

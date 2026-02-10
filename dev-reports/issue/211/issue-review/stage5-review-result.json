@@ -1,0 +1,118 @@
+{
+  "issue_number": 211,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-10",
+  "previous_review_verification": {
+    "stage1_findings_addressed": {
+      "MF-1": {
+        "status": "resolved",
+        "detail": "Toast通知の統合方針セクションが追加され、C案（親コンポーネントからのprops伝搬）が明記されている。WorktreeDetailRefactored.tsxの2箇所のHistoryPane呼び出しへの対応も明記済み。"
+      },
+      "SF-1": {
+        "status": "resolved",
+        "detail": "ConversationPairCardでは「メッセージセクション」、MessageListでは「メッセージバブル」と用語が明確に区別されている。"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "detail": "「コピー内容の仕様」セクションが新設され、message.contentの生テキストコピー、ANSIコード除去、Markdownソースそのままの方針が明記されている。"
+      },
+      "SF-3": {
+        "status": "resolved",
+        "detail": "HistoryPane.tsxが変更対象ファイルテーブルに含まれ、Props型変更とコールバック中継の変更内容が明記されている。"
+      },
+      "SF-4": {
+        "status": "resolved",
+        "detail": "受入条件にテスト要件3件（ユーティリティテスト、コンポーネントテスト、既存テスト全パス）が追加されている。実装タスクにもテストセクションが設けられている。"
+      },
+      "NTH-1": {
+        "status": "resolved",
+        "detail": "lucide-reactのCopy / ClipboardCopyアイコンが明記されている。"
+      },
+      "NTH-2": {
+        "status": "resolved",
+        "detail": "コピーボタン配置について既存ボタンとの非重複を考慮した具体的な位置指定が記載されている。"
+      },
+      "NTH-3": {
+        "status": "resolved",
+        "detail": "MessageListがレガシーであること、ConversationPairCardが主要な変更対象であることが明記されている。"
+      }
+    },
+    "all_stage1_findings_resolved": true
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "技術的妥当性",
+        "issue": "Issueでは showToast をpropsとして HistoryPane → ConversationPairCard へ伝搬する設計だが、showToast の型シグネチャ（(message: string, type?: ToastType, duration?: number) => string）がIssueに明記されていない。HistoryPanePropsに showToast?: ... を追加する際の型定義が不明確で、実装者が useToast の返り値の型を推測する必要がある。また、ConversationPairCardPropsでは onCopy コールバックが提案されているが、HistoryPanePropsでは showToast を直接受け取る設計であり、HistoryPaneでのコピーロジック（showToast呼び出し + クリップボード操作）の責務配置が2コンポーネントに分散する可能性がある。",
+        "location": "## 提案する解決策 / ### Toast通知の統合方針 および ### Props設計方針",
+        "recommendation": "showToast の型を明記すべき。例: showToast?: (message: string, type?: 'success' | 'error' | 'info', duration?: number) => string。または、型定義を @/types/markdown-editor の ToastType を参照する形で記載。あわせて、HistoryPaneが受け取るのが showToast（Toast表示関数）で、ConversationPairCardが受け取るのが onCopy（コピー実行コールバック）であることを踏まえ、HistoryPane内で showToast + clipboard操作を組み合わせた onCopy コールバックを useCallback で作成してConversationPairCardに渡す、というデータフローを明確に記載するとよい。",
+        "evidence": "Toast.tsx L249-261の showToast は useCallback でラップされた (message: string, type: ToastType = 'info', duration: number = DEFAULT_DURATION) => string 型。Issueの Props設計方針セクションでは showToast と onCopy が別々に言及されているが、HistoryPaneでこの2つをどう橋渡しするかの具体的なフローが不足している。"
+      },
+      {
+        "id": "SF-2",
+        "category": "整合性",
+        "issue": "Issueの「コピーボタンの配置」セクションで「absolute top-2 right-2」の展開ボタンの隣（例: right-10 top-2）にコピーボタンを配置する案が記載されているが、実際のコード構造では展開ボタンは AssistantMessagesSection を囲む relative div（L432）内の absolute 配置（L440）であり、UserMessageSection（L206-216）には展開ボタンが存在しない。UserMessageSectionへのコピーボタン追加は展開ボタンとの位置競合がなく配置方針が異なる可能性があるが、Issueではこの区別が明記されていない。",
+        "location": "## 提案する解決策 / ### ConversationPairCard（現行表示）",
+        "recommendation": "UserMessageSection と AssistantMessagesSection でコピーボタンの配置方針が異なる可能性を明記すべき。UserMessageSection: 展開ボタンが存在しないためシンプルに右上配置が可能（例: ヘッダー行の右端）。AssistantMessagesSection: 既存の展開ボタン（absolute top-2 right-2）との共存が必要。それぞれの配置方針を区別して記載すると実装の迷いが減る。",
+        "evidence": "ConversationPairCard.tsx L206-216（UserMessageSection）には展開ボタンがない。L432-466のrelative div内に展開ボタンがabsolute top-2 right-2で配置されている。コピーボタンの配置はこの2つのセクションで別々に考える必要がある。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "Issueの実装タスクにはANSIコード除去処理を clipboard-utils.ts に含める旨が記載されているが、MessageList.tsx で既に使用されている AnsiToHtml ライブラリ（L18: import AnsiToHtml from 'ansi-to-html'）との関係が不明確。ANSIコード除去にはAnsiToHtmlとは別の正規表現ベースのstrip処理が必要であり、既存ライブラリの再利用ではないことを明記すると実装時の混乱を避けられる。",
+        "location": "## 実装タスク / ### コピーユーティリティ",
+        "recommendation": "clipboard-utils.ts のANSI除去は、AnsiToHtml（HTMLに変換）ではなく、正規表現ベースのANSIエスケープシーケンス除去（例: text.replace(/\\x1b\\[[0-9;]*m/g, '')）を新規実装する旨を明記するとよい。または、strip-ansi 等の既存パッケージの使用検討も記載できる。",
+        "evidence": "MessageList.tsx L18でAnsiToHtmlをインポートし、L76-88でANSIコードのHTML変換に使用。これはコピー用途（プレーンテキスト出力）には適さない。clipboard-utils.tsでは別のアプローチが必要。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "Issueの受入条件12項目は網羅的だが、実装の優先度順に並んでいない。ConversationPairCard（主要）とMessageList（副次的）の受入条件が混在しており、段階的な実装・レビューの際にどこまでが最低限の完了条件かが分かりにくい。",
+        "location": "## 受入条件",
+        "recommendation": "受入条件を「Phase 1: ConversationPairCard（必須）」と「Phase 2: MessageList（副次的）」に分割して記載すると、PRの段階的レビューが容易になる。Phase 1の完了でIssueの主要目的は達成される。",
+        "evidence": "受入条件の12項目中、MessageList関連は「MessageList（レガシー表示）にもコピーボタンが追加されていること」の1項目。Issueの提案する解決策セクションではConversationPairCardが主要、MessageListが副次的と明確にされているが、受入条件ではこの優先度が反映されていない。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/ConversationPairCard.tsx",
+      "relevance": "主要変更対象。UserMessageSection（L194-217）とAssistantMessageItem（L229-273）のコピーボタン配置方針の違いを確認。展開ボタン（L440-465）はAssistantMessagesSection囲みのrelative div内のみ。"
+    },
+    {
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "relevance": "Props変更対象。showToast → onCopyのブリッジロジック作成場所。既存のhandleFilePathClick（L196-198）と同様のuseCallbackパターンを踏襲。"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "showToast関数の型シグネチャ確認（L249-261）。ToastType型は@/types/markdown-editor.tsで定義（L96）。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "showToast伝搬元（L1309）。2箇所のHistoryPane呼び出し（L809, L1573）への対応。ToastContainer配置（L1738, L1950）。"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "relevance": "AnsiToHtmlインポート（L18）。hasAnsiCodes/convertAnsiToHtml（L76-88）。React.memoカスタム比較関数（L362-371）。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト品質担保ルール確認。コーディング規約との整合性確認済み。"
+    }
+  ],
+  "overall_assessment": "Stage 1の全8件の指摘事項は全てIssue本文に適切に反映されている。Stage 3（影響範囲分析）の指摘も反映済み。Issueは非常に詳細で実装可能な品質に達している。残る指摘はShould Fix 2件（showToast型シグネチャの明記とコピーボタン配置方針のセクション別区別）とNice to Have 2件（ANSI除去のアプローチ明記と受入条件のフェーズ分割）のみで、いずれもIssueの根本的な問題ではなく実装時の効率向上に資する改善提案である。"
+}
