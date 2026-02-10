@@ -1,0 +1,88 @@
+{
+  "issue_number": 211,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "title": "clipboard-utils.tsの責務が過小 -- copyToClipboard関数の存在意義再検討",
+        "description": "clipboard-utils.tsはstripAnsi + navigator.clipboard.writeTextの2行のラッパーだが、設計上HistoryPaneのonCopyコールバック内で直接stripAnsi + writeTextを呼んでいる。clipboard-utils.tsを新規作成しつつHistoryPaneでも同様のロジックを記述すると、責務が二重化する。clipboard-utils.tsを作るなら、HistoryPaneのonCopyはcopyToClipboardを呼ぶべき。作らないなら、HistoryPaneに直接記述で十分。設計書内で矛盾がある。",
+        "principle": "DRY / Single Responsibility",
+        "severity": "medium",
+        "recommendation": "clipboard-utils.tsのcopyToClipboard関数をHistoryPaneのonCopyコールバックから呼び出す形に統一する。Section 4.2のコード例をcopyToClipboardを使用する形に修正すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "title": "ConversationPairCard内のhandleCopyメモ化設計にcontent依存があり不安定",
+        "description": "Section 6のメモ化戦略でConversationPairCardのhandleCopyをuseCallback([onCopy, content])としているが、ConversationPairCardはpairプロパティ内に複数のメッセージ(userMessage + assistantMessages)を持つ。個別のmessage.contentを依存配列に入れるのは不明確。実際にはコピーボタンのonClickハンドラに直接onCopy?.(message.content)を渡すだけで十分であり、handleCopyというuseCallbackは不要な複雑さを追加している。",
+        "principle": "KISS / YAGNI",
+        "severity": "low",
+        "recommendation": "ConversationPairCardレベルでのhandleCopy useCallbackを削除し、UserMessageSection/AssistantMessageItemの各コピーボタンのonClickで直接onCopy?.(message.content)を呼ぶシンプルな設計にする。Section 5.3のコード例通りで十分。"
+      },
+      {
+        "id": "SF-2",
+        "title": "Phase 2のMessageList.tsx対応の設計詳細が不足",
+        "description": "設計書はPhase 2としてMessageList.tsxへのコピーボタン追加を記載しているが、MessageListコンポーネントの構造はConversationPairCardと大きく異なる（ReactMarkdown使用、AnsiToHtml使用、MessageBubbleのカスタム比較関数など）。Phase 2の設計詳細がないまま変更対象ファイルに含まれており、スコープの曖昧さを生んでいる。",
+        "principle": "YAGNI / KISS",
+        "severity": "low",
+        "recommendation": "Phase 2を別Issue化するか、本設計書のスコープをPhase 1のみに限定する。MessageList.tsxのコピー機能が必要になった時点で、その構造に適した設計を行う方がYAGNI原則に沿う。"
+      },
+      {
+        "id": "SF-3",
+        "title": "showToastのオプショナル化で生じるサイレントフェイルの懸念",
+        "description": "Section 4.3でshowToast未提供時は「コピーボタンは表示するが、Toast通知は省略（クリップボードコピーのみ実行）」としている。Clipboard APIがエラーを投げた場合、showToastが未提供だとユーザーにエラーが全く伝わらない。clipboard-utils.tsのcopyToClipboardはエラーを呼び出し元に伝搬する設計だが、showToastがない場合のフォールバックUI（例えばconsole.warnなど）が未定義。",
+        "principle": "Single Responsibility / Robustness",
+        "severity": "low",
+        "recommendation": "showToast未提供時のエラーハンドリング方針を明記する。例: catch句内でshowToastがなければconsole.warnでログ出力する等。もしくは、showToastを必須propにしてオプショナル化をやめる（コピーボタンの存在とToast通知は本質的にセット）。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-1",
+        "title": "コピーボタンを独立コンポーネントとして抽出する可能性",
+        "description": "設計書ではコピーボタンをConversationPairCard内のインラインJSXとして記述しているが、将来的にMessageListやコードブロック等、他箇所でも同様のコピーボタンが必要になる可能性がある。現時点ではインラインで十分だが、再利用可能なCopyButtonコンポーネントとして抽出する余地がある。",
+        "principle": "Open/Closed Principle",
+        "severity": "info",
+        "recommendation": "Phase 1ではインラインで進め、Phase 2実装時にCopyButtonの共通化を検討する。これはYAGNI原則に沿った段階的アプローチ。"
+      },
+      {
+        "id": "C-2",
+        "title": "MobileContentPropsにshowToastが含まれていない",
+        "description": "現在のMobileContentPropsインターフェースにshowToastは含まれていない。Props Drillingパターンを採用する場合、モバイルレイアウトではMobileContent→HistoryPaneの経路でも伝搬が必要になる。設計書のデータフローダイアグラムでは両レイアウト経由を記述しているが、モバイル側のMobileContent intermediary layerの追加propsについて明示されていない。",
+        "principle": "Consistency / Interface Segregation",
+        "severity": "info",
+        "recommendation": "MobileContentPropsへのshowToast追加も変更対象として明記する。もしくは、MobileContentを経由せずHistoryPane内でuseToastを直接使うことも検討対象に（ただしToastContainer二重配置リスクに注意）。"
+      },
+      {
+        "id": "C-3",
+        "title": "アクセシビリティのaria-label言語の統一",
+        "description": "Section 5.3でaria-labelに日本語（'メッセージをコピー'）を使用し、titleには英語（'コピー'）を使用している。既存コードベースでは英語のaria-label（'Open file: ...', 'Collapse message'等）が標準。一方、Toast通知は日本語（'コピーしました'）を使用。言語混在が発生する。",
+        "principle": "Consistency",
+        "severity": "info",
+        "recommendation": "既存コードベースのaria-label言語（英語）に合わせ、aria-label='Copy message'、title='Copy'とする。Toast通知の日本語は既存パターンに合わせて維持で問題ない。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-211-history-copy-button-design-policy.md",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/MessageList.tsx",
+    "src/components/common/Toast.tsx",
+    "src/lib/cli-patterns.ts",
+    "src/types/markdown-editor.ts"
+  ],
+  "timestamp": "2026-02-10T12:00:00Z"
+}

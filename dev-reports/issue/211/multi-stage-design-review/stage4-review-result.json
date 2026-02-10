@@ -1,0 +1,129 @@
+{
+  "issue_number": 211,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-S4-1",
+        "title": "clipboard-utils.ts -- copyToClipboard should validate input is non-empty string to prevent unnecessary Clipboard API calls",
+        "description": "The design specifies copyToClipboard(text: string) with no input validation. If message.content is an empty string or undefined/null (despite TypeScript types, runtime data from tmux capture could theoretically be unexpected), the function would call navigator.clipboard.writeText('') or throw. While TypeScript types provide compile-time safety, a defensive runtime guard in clipboard-utils.ts for empty/whitespace-only content would improve robustness. This is a defense-in-depth measure rather than a critical vulnerability.",
+        "severity": "low",
+        "category": "セキュリティ",
+        "owasp_category": "A03:2021 Injection (input validation)",
+        "recommendation": "Add a guard in copyToClipboard to handle empty or whitespace-only strings gracefully -- either return early (no-op) or throw a descriptive error. Example: if (!text || text.trim().length === 0) return; This prevents calling stripAnsi and writeText on meaningless input."
+      },
+      {
+        "id": "SF-S4-2",
+        "title": "stripAnsi known limitations (SEC-002) -- incomplete ANSI stripping could leave residual escape sequences in clipboard content",
+        "description": "The existing stripAnsi function in cli-patterns.ts documents known limitations under SEC-002: 8-bit CSI (0x9B), DEC private modes (ESC[?25h), character set switching (ESC(0), and some RGB color forms are not fully matched. When copying message content to clipboard, residual ANSI escape sequences could appear as garbled text in the user's paste target. While this is not a direct security vulnerability (writeText treats content as plain text), it is a data integrity concern and could cause confusion when content is pasted into another application.",
+        "severity": "low",
+        "category": "セキュリティ",
+        "owasp_category": "A03:2021 Injection (output encoding)",
+        "recommendation": "Document this known limitation in clipboard-utils.ts with a comment referencing SEC-002 in cli-patterns.ts. For the current scope this is acceptable because: (1) tmux capture-pane output rarely contains these sequences, (2) writeText only writes plain text (no HTML injection risk), and (3) adopting the strip-ansi npm package is noted as future consideration in cli-patterns.ts. No code change required for Phase 1."
+      },
+      {
+        "id": "SF-S4-3",
+        "title": "Error handling in onCopy callback -- Clipboard API permission errors should not leak sensitive information",
+        "description": "The design shows that on error, when showToast is unavailable, the code falls back to console.warn('Clipboard copy failed:', error). The error object from navigator.clipboard.writeText rejection may contain browser-specific details. While console.warn in a localhost tool is low-risk, the error message shown in Toast ('コピーに失敗しました') is appropriately generic. The console.warn path should ensure it does not log the full message content (which could contain sensitive user data or assistant responses) alongside the error.",
+        "severity": "low",
+        "category": "セキュリティ",
+        "owasp_category": "A09:2021 Security Logging and Monitoring Failures",
+        "recommendation": "In the onCopy catch clause, ensure console.warn logs only the error itself without including the message content being copied. The current design code example 'console.warn(\"Clipboard copy failed:\", error)' is acceptable as it only logs the error, not the content parameter. Add a comment to emphasize this intentional omission of content from error logs."
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S4-1",
+        "title": "Clipboard API permissions and browser compatibility -- no feature detection guard in clipboard-utils.ts",
+        "description": "The design correctly notes that navigator.clipboard.writeText requires a secure context (HTTPS/localhost) and that CommandMate runs on localhost. However, clipboard-utils.ts does not include feature detection (e.g., checking if navigator.clipboard exists). In older browsers or restricted environments, the API may not be available, causing an unhandled exception. The design deliberately excludes document.execCommand('copy') fallback, which is reasonable for the target audience. A simple feature detection guard (if (!navigator?.clipboard?.writeText) throw new Error('...')) would provide a clearer error message.",
+        "category": "セキュリティ",
+        "owasp_category": "A05:2021 Security Misconfiguration"
+      },
+      {
+        "id": "C-S4-2",
+        "title": "Content rendered via React auto-escaping is XSS-safe; clipboard copy path does not introduce new XSS vectors",
+        "description": "The ConversationPairCard renders message.content through React JSX ({part.content} inside <span> and <button> elements), which auto-escapes HTML entities. The new copy functionality passes message.content to navigator.clipboard.writeText (plain text only, no HTML). This data flow does not introduce any new XSS attack surface. The existing MessageList.tsx (Phase 2) uses dangerouslySetInnerHTML with convertAnsiToHtml, but that component is explicitly out of scope for Phase 1 and correctly identified for separate security review.",
+        "category": "セキュリティ",
+        "owasp_category": "A03:2021 Injection (XSS)"
+      },
+      {
+        "id": "C-S4-3",
+        "title": "No CSRF risk -- copy operation is purely client-side with no server-side state change",
+        "description": "The copy-to-clipboard functionality is entirely client-side (Clipboard API call), involves no API requests, and does not modify any server-side state. There is no CSRF attack surface. The user action (button click) triggers only a browser API call.",
+        "category": "セキュリティ",
+        "owasp_category": "A01:2021 Broken Access Control"
+      },
+      {
+        "id": "C-S4-4",
+        "title": "Content Security Policy -- existing CSP allows Clipboard API usage without modification",
+        "description": "The existing CSP in next.config.js does not restrict Clipboard API usage (no clipboard-read/clipboard-write Permission-Policy restrictions). The Permissions-Policy header currently restricts camera, microphone, and geolocation but does not restrict clipboard-write. This is correct for the feature to work. No CSP changes required.",
+        "category": "セキュリティ",
+        "owasp_category": "A05:2021 Security Misconfiguration"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "notes": "Copy operation is client-side only. No server-side resources accessed. No authorization bypass possible."
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "No cryptographic operations involved. Clipboard content is not encrypted (standard browser behavior)."
+    },
+    "A03_injection": {
+      "status": "pass",
+      "notes": "writeText uses plain text (no HTML injection). React auto-escaping prevents XSS in UI rendering. stripAnsi removes ANSI codes from copied content. No SQL/command injection vectors."
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "Design follows defense-in-depth: stripAnsi sanitization before clipboard write, optional props for backward compatibility, single entry point for clipboard operations (clipboard-utils.ts)."
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "Existing CSP and security headers in next.config.js are compatible. No new security header changes required. Clipboard API works within localhost secure context."
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "notes": "No new dependencies added. stripAnsi is existing code. lucide-react Copy icon is from an existing dependency. No known vulnerabilities in the proposed changes."
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "notes": "Copy functionality does not involve authentication. CommandMate is a local development tool."
+    },
+    "A08_software_data_integrity": {
+      "status": "pass",
+      "notes": "No serialization/deserialization of untrusted data. Content is read from existing ChatMessage objects and written as plain text to clipboard."
+    },
+    "A09_logging_monitoring": {
+      "status": "pass_with_note",
+      "notes": "Error logging via console.warn does not include message content (only error object). This is appropriate for a localhost tool. See SF-S4-3 for recommendation."
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "No server-side requests involved. Copy operation is entirely client-side."
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-211-history-copy-button-design-policy.md",
+    "src/lib/cli-patterns.ts",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/common/Toast.tsx",
+    "src/types/conversation.ts",
+    "src/types/models.ts",
+    "src/lib/sanitize.ts",
+    "next.config.js"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}

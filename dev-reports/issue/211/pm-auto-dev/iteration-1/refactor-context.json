@@ -1,0 +1,20 @@
+{
+  "issue_number": 211,
+  "refactor_targets": [
+    "src/lib/clipboard-utils.ts",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "test_count": 46
+  },
+  "improvement_goals": [
+    "SOLID原則（特にSRP）の遵守確認",
+    "KISS原則の遵守確認（不要な複雑さの排除）",
+    "DRY原則の遵守確認（重複コードの排除）",
+    "コピーボタンのアクセシビリティ改善（aria-label, data-testid統一）",
+    "型安全性の確認"
+  ]
+}

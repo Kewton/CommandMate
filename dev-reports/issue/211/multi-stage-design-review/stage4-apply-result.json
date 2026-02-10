@@ -1,0 +1,68 @@
+{
+  "issue_number": 211,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー - 指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-S4-1",
+        "item": "clipboard-utils.ts -- copyToClipboardの空文字列・空白入力バリデーション",
+        "section_updated": "Section 5.1, 10, 14",
+        "status": "reflected",
+        "details": "copyToClipboard関数の設計コードに防御的ガード（空文字列・空白のみチェック）を追加。設計判断セクションに根拠を明記。セキュリティ考慮表にOWASP A03参照を追加。実装チェックリストに具体的なアクション3件を追加（ガード実装、空文字列テスト、空白テスト）"
+      },
+      {
+        "id": "SF-S4-2",
+        "item": "stripAnsi既知制限（SEC-002）のドキュメント化",
+        "section_updated": "Section 5.1, 10, 13",
+        "status": "reflected",
+        "details": "clipboard-utils.tsのJSDocコメントにSEC-002既知制限への参照を追加。設計判断にSEC-002ドキュメント化方針を明記。セキュリティ考慮表にANSI除去制限の行を追加。将来検討事項にPhase 2 MessageListセキュリティレビュー項目を追加"
+      },
+      {
+        "id": "SF-S4-3",
+        "item": "エラーログにコピー対象メッセージ内容を含めない方針の明確化",
+        "section_updated": "Section 4.2, 10, 14",
+        "status": "reflected",
+        "details": "onCopyコールバック例のconsole.warnにSF-S4-3参照コメントを追加。エラーログセキュリティに関する注意事項を新規段落として追加。セキュリティ考慮表にOWASP A09参照を追加。実装チェックリストのconsole.warn項目にSF-S4-3参照を追記"
+      }
+    ]
+  },
+  "skipped": [],
+  "consider_items_documented": [
+    {
+      "id": "C-S4-1",
+      "item": "Clipboard API機能検出ガード",
+      "section": "Section 13, 19"
+    },
+    {
+      "id": "C-S4-2",
+      "item": "XSS安全性確認（React auto-escaping + writeText）",
+      "section": "Section 10, 19"
+    },
+    {
+      "id": "C-S4-3",
+      "item": "CSRF非該当確認",
+      "section": "Section 10, 19"
+    },
+    {
+      "id": "C-S4-4",
+      "item": "CSP互換性確認",
+      "section": "Section 10, 19"
+    }
+  ],
+  "owasp_checklist_added": true,
+  "design_doc_path": "dev-reports/design/issue-211-history-copy-button-design-policy.md",
+  "sections_updated": [
+    "Section 4.2 (Callback合成パターン - エラーログセキュリティ注記追加)",
+    "Section 5.1 (clipboard-utils.ts - 入力バリデーション・SEC-002参照追加)",
+    "Section 10 (セキュリティ考慮 - OWASP Top 10チェックリスト追加)",
+    "Section 13 (将来の検討事項 - C-S4-1, C-S4-2追加)",
+    "Section 14 (実装チェックリスト - SF-S4-1/2/3アクション追加)",
+    "Section 15 (レビュー履歴 - Stage 4追加)",
+    "Section 19 (新規: Stage 4レビュー指摘事項サマリー)"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}

@@ -12,6 +12,7 @@ import React, { useMemo, useCallback, memo, useRef, useLayoutEffect } from 'reac
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { ConversationPairCard } from './ConversationPairCard';
+import { copyToClipboard } from '@/lib/clipboard-utils';
 
 // ============================================================================
 // Constants
@@ -42,6 +43,8 @@ export interface HistoryPaneProps {
   isLoading?: boolean;
   /** Additional CSS classes */
   className?: string;
+  /** Toast notification callback for copy feedback (optional) */
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 // ============================================================================
@@ -144,6 +147,7 @@ export const HistoryPane = memo(function HistoryPane({
   onFilePathClick,
   isLoading = false,
   className = '',
+  showToast,
 }: HistoryPaneProps) {
   // worktreeId is kept in props for future use (e.g., filtering, fetching)
   // Using underscore prefix to indicate intentionally unused parameter
@@ -204,6 +208,21 @@ export const HistoryPane = memo(function HistoryPane({
     [toggleExpand]
   );
 
+  // Copy message handler - uses copyToClipboard utility (SF-S4-1, MF-1 DRY)
+  const handleCopy = useCallback(
+    async (content: string) => {
+      try {
+        await copyToClipboard(content);
+        showToast?.('Copied to clipboard', 'success');
+      } catch {
+        // SF-S4-3: Error log excludes message content
+        console.error('[HistoryPane] Failed to copy to clipboard');
+        showToast?.('Failed to copy', 'error');
+      }
+    },
+    [showToast]
+  );
+
   // Render content based on state
   const renderContent = () => {
     if (isLoading) {
@@ -219,6 +238,7 @@ export const HistoryPane = memo(function HistoryPane({
         onFilePathClick={handleFilePathClick}
         isExpanded={isExpanded(pair.id)}
         onToggleExpand={createToggleHandler(pair.id)}
+        onCopy={handleCopy}
       />
     ));
   };

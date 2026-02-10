@@ -1,0 +1,117 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: clipboard-utils.test.ts all tests (9) pass",
+      "result": "passed",
+      "evidence": "9 tests passed (plain text, ANSI strip, multiple ANSI codes, empty string, whitespace-only, clipboard API failure, line breaks, special characters, whitespace preservation)"
+    },
+    {
+      "scenario": "Scenario 2: ConversationPairCard.test.tsx all tests (24) pass (including 6 copy button tests)",
+      "result": "passed",
+      "evidence": "24 tests passed including: copy button visible with onCopy, hidden without onCopy, user message content passed, assistant message content passed, no assistant copy button for pending pairs"
+    },
+    {
+      "scenario": "Scenario 3: HistoryPane.integration.test.tsx all tests (13) pass (including 4 copy functionality tests)",
+      "result": "passed",
+      "evidence": "13 tests passed including: copy buttons shown with showToast, success toast on copy, error toast on clipboard failure, copy buttons present without showToast"
+    },
+    {
+      "scenario": "Scenario 4: TypeScript type check (npx tsc --noEmit) has 0 errors",
+      "result": "passed",
+      "evidence": "npx tsc --noEmit completed with zero output (no errors)"
+    },
+    {
+      "scenario": "Scenario 5: ESLint (npm run lint) has 0 warnings/errors",
+      "result": "passed",
+      "evidence": "npm run lint output: 'No ESLint warnings or errors'"
+    },
+    {
+      "scenario": "Scenario 6: Full unit test suite (npm run test:unit) passes (excluding pre-existing failure)",
+      "result": "passed",
+      "evidence": "142 test files passed, 2900 tests passed, 7 skipped. 1 pre-existing failure in tests/unit/lib/cli-patterns.test.ts ('should detect thinking for claude') is unrelated to Issue #211"
+    },
+    {
+      "scenario": "Scenario 7: copyToClipboard uses stripAnsi to remove ANSI codes (code inspection)",
+      "result": "passed",
+      "evidence": "src/lib/clipboard-utils.ts line 1: imports stripAnsi from '@/lib/cli-patterns'; line 23: calls 'const cleanText = stripAnsi(text)' before navigator.clipboard.writeText(cleanText)"
+    },
+    {
+      "scenario": "Scenario 8: onCopy is optional prop; copy buttons hidden when not provided",
+      "result": "passed",
+      "evidence": "ConversationPairCardProps.onCopy has type '(content: string) => void' with '?' optional marker. UserMessageSection and AssistantMessageItem render copy button conditionally with '{onCopy && (...)}'. Test 'should not show copy buttons when onCopy is not provided' passes."
+    },
+    {
+      "scenario": "Scenario 9: showToast is optional prop; copy still works without it",
+      "result": "passed",
+      "evidence": "HistoryPaneProps.showToast has '?' optional marker. handleCopy uses optional chaining 'showToast?.()'. Integration test 'should work without showToast (no toast feedback)' passes - copy buttons are present and handleCopy works via copyToClipboard."
+    },
+    {
+      "scenario": "Scenario 10: Desktop (WorktreeDesktopLayout HistoryPane) receives showToast",
+      "result": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx line 1577-1583: HistoryPane inside desktop leftPane passes showToast={showToast} from useToast() hook (line 1313)"
+    },
+    {
+      "scenario": "Scenario 11: Mobile (MobileContent HistoryPane) receives showToast",
+      "result": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx line 1855: MobileContent receives showToast={showToast}. MobileContent component (line 810-818) passes showToast to HistoryPane in 'history' tab case"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "HistoryPane's UserMessageSection and AssistantMessageItem display copy buttons",
+      "verified": true
+    },
+    {
+      "criterion": "Copy button click copies message content to clipboard as plain text",
+      "verified": true
+    },
+    {
+      "criterion": "ANSI escape codes are stripped using stripAnsi() from src/lib/cli-patterns.ts before copying",
+      "verified": true
+    },
+    {
+      "criterion": "Toast notification displayed on copy success",
+      "verified": true
+    },
+    {
+      "criterion": "Error Toast displayed on copy failure (Clipboard API unsupported etc.)",
+      "verified": true
+    },
+    {
+      "criterion": "Copy button positioned at top-right of UserMessageSection",
+      "verified": true
+    },
+    {
+      "criterion": "Copy button in AssistantMessagesSection does not overlap with expand/collapse button",
+      "verified": true
+    },
+    {
+      "criterion": "Copy functionality works in both mobile and desktop layouts",
+      "verified": true
+    },
+    {
+      "criterion": "Copy callback stabilized with useCallback to prevent unnecessary re-renders",
+      "verified": true
+    },
+    {
+      "criterion": "Clipboard utility unit tests (src/lib/__tests__/clipboard-utils.test.ts) exist and pass",
+      "verified": true
+    },
+    {
+      "criterion": "ConversationPairCard copy button display and click event tests exist and pass",
+      "verified": true
+    },
+    {
+      "criterion": "All existing tests (HistoryPane, ConversationPairCard, etc.) pass",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "src/lib/__tests__/clipboard-utils.test.ts (9 tests passed)",
+    "src/components/worktree/__tests__/ConversationPairCard.test.tsx (24 tests passed)",
+    "src/components/worktree/__tests__/HistoryPane.integration.test.tsx (13 tests passed)",
+    "npm run test:unit (142 files passed, 2900 tests passed, 1 pre-existing failure unrelated to Issue #211)"
+  ],
+  "message": "All acceptance criteria are satisfied. All 11 test scenarios pass. The copy button feature for HistoryPane messages is correctly implemented with ANSI stripping, toast feedback, optional prop handling, useCallback stabilization, and both desktop/mobile layout support."
+}

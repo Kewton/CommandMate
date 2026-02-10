@@ -1,0 +1,119 @@
+{
+  "issue_number": 211,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-10",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "完全性",
+        "issue": "Toast通知の統合方法が未記載。ConversationPairCard/MessageListにはToast機能がなく、HistoryPaneにもToastContainerが含まれていないため、Toast表示をどのコンポーネント階層で管理するかの設計が欠如している。",
+        "location": "## 提案する解決策 / ## 実装タスク",
+        "recommendation": "Toast管理の選択肢を明記すべき。(A) ConversationPairCard内でuseToastを呼びToastContainerを内包する、(B) HistoryPaneでuseToastを使いコールバック経由でConversationPairCardに渡す、(C) 親コンポーネントWorktreeDetailRefactored.tsx（既にuseToast利用済み）のshowToastをprops経由で子に伝搬する。(C)が既存パターンとの一貫性が最も高い。",
+        "evidence": "WorktreeDetailRefactored.tsx（L1309）は既にuseToastを使用しshowToastを内部で利用しているが、HistoryPaneにはToastのpropsもcontextも渡されていない（L808-815）。ConversationPairCard.tsxのPropsにもToast関連の定義はない（L21-30）。HistoryPaneProps（HistoryPane.tsx L34-45）にもToastコールバックは存在しない。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "整合性",
+        "issue": "Issueでは「各メッセージバブル」と記載しているが、ConversationPairCardはバブルUIではなくカード形式（border + rounded-lg + overflow-hidden）である。MessageListのMessageBubbleは実際にバブル形式だが、名称の混在が実装時の混乱を招く可能性がある。",
+        "location": "## 提案する解決策",
+        "recommendation": "ConversationPairCardについては「各メッセージセクション（UserMessageSection / AssistantMessageItem）」、MessageListについては「各メッセージバブル（MessageBubble）」と明確に区別して記載すべき。",
+        "evidence": "ConversationPairCard.tsx L206-216（UserMessageSection）、L254-272（AssistantMessageItem）はカード内のセクションで、バブルではない。MessageList.tsx L49（MessageBubble）は実際にバブル形式。"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "issue": "コピー対象のコンテンツ形式が曖昧。ConversationPairCardのメッセージはプレーンテキスト（message.content）だが、MessageListのメッセージはMarkdownレンダリング済みやANSIコード含有の場合がある。「プレーンテキストとしてコピー」の際、ANSIエスケープコードやMarkdownソースをどう扱うか未定義。",
+        "location": "## 提案する解決策",
+        "recommendation": "コピー内容の仕様を明確化すべき。例：(1) message.contentの生テキストをそのままコピー、(2) ANSIコードを除去してからコピー、(3) Markdownレンダリング結果のテキストをコピー。推奨は(1)でシンプルにmessage.contentを使用し、ANSIコードが含まれる場合は除去処理を行う。",
+        "evidence": "MessageList.tsx L76-88（hasAnsiCodes/convertAnsiToHtml関数の存在がANSIコードを含むメッセージの存在を示す）。ConversationPairCard.tsxにはANSI処理はない。"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "影響範囲で「変更不要の見込み」とされているHistoryPane.tsxは、Toast通知のための変更が必要になる可能性が高い。HistoryPanePropsにコピー用コールバックまたはToast管理を追加する必要がある。",
+        "location": "## 影響範囲 / ### 関連コンポーネント",
+        "recommendation": "HistoryPane.tsxを変更対象ファイルに追加すべき。また、ConversationPairCardProps（ConversationPairCard.tsx L21-30）にもonCopyコールバックの追加が必要になるため、型定義の変更も明記すべき。",
+        "evidence": "HistoryPane.tsx L34-45のHistoryPanePropsにはToast関連のpropsがなく、L141-147のコンポーネント実装にもToast機能がない。ConversationPairCard.tsx L21-30のPropsにもコピー関連のコールバックがない。"
+      },
+      {
+        "id": "SF-4",
+        "category": "受け入れ条件",
+        "issue": "受け入れ条件にテスト要件が含まれていない。プロジェクトのCLAUDE.mdでは品質担保としてUnit Testが必須チェックに含まれているため、テストに関する受け入れ条件を含めるべき。",
+        "location": "## 受入条件",
+        "recommendation": "以下の受け入れ条件を追加すべき：(1) コピーユーティリティ関数の単体テストが存在すること、(2) ConversationPairCardのコピーボタン表示とクリックイベントのテストが存在すること。",
+        "evidence": "CLAUDE.md の品質担保セクションで「Unit Test: npm run test:unit」が必須チェックとして定義されている。既存テストファイル src/components/worktree/__tests__/HistoryPane.integration.test.tsx が存在し、テストパターンが確立されている。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "コピーアイコンの選定について「ClipboardCopyアイコン」と記載があるが、プロジェクトではlucide-reactを使用している（Toast.tsx L13: import { CheckCircle, XCircle, Info, X } from 'lucide-react'）。lucide-reactの具体的なアイコン名を記載するとよい。",
+        "location": "## 実装タスク",
+        "recommendation": "「lucide-reactのClipboard / ClipboardCopy / Copy アイコンを使用」と明記すると実装時の迷いを減らせる。",
+        "evidence": "Toast.tsx L13でlucide-reactが既に使用されており、プロジェクトのアイコンライブラリとして確立されている。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "コピーボタンの表示位置・スタイルに関する具体的な指定がない。「常時表示」とあるが、既存の展開/折りたたみボタン（ConversationPairCard.tsx L440-465、absolute top-2 right-2配置）との位置の競合を考慮する必要がある。",
+        "location": "## 提案する解決策",
+        "recommendation": "コピーボタンの配置について「展開/折りたたみボタンの隣（例：right-10 top-2）」や「各メッセージセクションのヘッダー行に配置」など具体的な位置を指定するとよい。",
+        "evidence": "ConversationPairCard.tsx L440-441で展開ボタンが absolute top-2 right-2 に配置されている。コピーボタンも同様の位置に配置すると重なる。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "WorktreeDetail.tsx（レガシーコンポーネント）とWorktreeDetailRefactored.tsx（現行コンポーネント）の両方にMessageListが関係する旨の説明がない。現在のページ（page.tsx）はWorktreeDetailRefactored.tsxを使用しており、WorktreeDetail.tsxはレガシーである。",
+        "location": "## 影響範囲",
+        "recommendation": "MessageList.tsxがレガシーコンポーネント（WorktreeDetail.tsx）で使用されていることを明記し、対応優先度を明確にするとよい。現行のHistoryPane+ConversationPairCardを主要な変更対象とし、MessageListは副次的な対応とする方針が望ましい。",
+        "evidence": "src/app/worktrees/[id]/page.tsx L10でWorktreeDetailRefactoredがインポートされており、WorktreeDetailRefactored.tsx L809でHistoryPaneを使用。WorktreeDetail.tsx L756でMessageListを使用するが、page.tsxからは参照されていない。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/ConversationPairCard.tsx",
+      "relevance": "主要な変更対象。コピーボタンUI追加先。現在のPropsにはcopy関連なし。"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "relevance": "レガシー表示のコピーボタン追加先。MessageBubbleコンポーネント内。"
+    },
+    {
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "relevance": "ConversationPairCardの親コンポーネント。Toast通知のためにProps変更が必要になる可能性が高い。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "現行のメインコンポーネント。既にuseToast利用済みで、showToastの伝搬元として有力。"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "既存のToast通知コンポーネント。useToast hookを提供。"
+    },
+    {
+      "file": "src/types/conversation.ts",
+      "relevance": "ConversationPair型定義。変更不要の見込み。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトコーディング規約・品質担保ルール。テスト必須の確認。"
+    },
+    {
+      "file": "docs/architecture.md",
+      "relevance": "アーキテクチャ設計書。コンポーネント階層の確認。"
+    }
+  ]
+}

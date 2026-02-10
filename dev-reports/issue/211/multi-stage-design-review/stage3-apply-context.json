@@ -1,0 +1,9 @@
+{
+  "issue_number": 211,
+  "review_result_path": "dev-reports/issue/211/multi-stage-design-review/stage3-review-result.json",
+  "stage": 3,
+  "stage_name": "影響分析レビュー - 指摘事項対応",
+  "target_files": [
+    "dev-reports/design/issue-211-history-copy-button-design-policy.md"
+  ]
+}

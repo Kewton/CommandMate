@@ -1,0 +1,33 @@
+{
+  "issue_number": 211,
+  "feature_summary": "履歴メッセージコピーボタン機能",
+  "acceptance_criteria": [
+    "HistoryPaneの各メッセージセクション（UserMessageSection / AssistantMessageItem）にコピーボタンが表示されること",
+    "コピーボタンクリックでメッセージ内容がクリップボードにプレーンテキストとしてコピーされること",
+    "ANSIエスケープコードを含むメッセージの場合、既存の stripAnsi() 関数（src/lib/cli-patterns.ts）を使用してコード除去後のテキストがコピーされること",
+    "コピー成功時にToast通知が表示されること",
+    "コピー失敗時（Clipboard API非対応等）にエラーToastが表示されること",
+    "UserMessageSectionではコピーボタンが右上に配置されていること",
+    "AssistantMessagesSectionではコピーボタンが既存の展開/折りたたみボタンと重ならないこと",
+    "モバイルレイアウトとデスクトップレイアウトの両方でコピー機能が動作すること",
+    "コピーコールバックが useCallback で参照安定化されており、不要な再レンダリングが発生しないこと",
+    "コピーユーティリティ関数の単体テスト（src/lib/__tests__/clipboard-utils.test.ts）が存在し、パスすること",
+    "ConversationPairCardのコピーボタン表示とクリックイベントのテストが存在し、パスすること",
+    "既存テスト（HistoryPane、ConversationPairCard、MessageListOptimistic、conversation-pair-card結合テスト）が全てパスすること"
+  ],
+  "implementation_tasks": [
+    "clipboard-utils.ts 新規作成: copyToClipboard関数（stripAnsi利用、空文字バリデーション、SEC-002 JSDocドキュメント）",
+    "clipboard-utils.test.ts 作成: Clipboard API呼出確認、stripAnsi適用確認、空文字テスト、エラーハンドリング",
+    "HistoryPanePropsにshowToast追加（オプショナル）、MobileContentPropsにshowToast追加、ConversationPairCardPropsにonCopy追加",
+    "HistoryPane onCopyコールバック作成: copyToClipboard使用、useCallback参照安定化、エラーログからcontent除外",
+    "WorktreeDetailRefactored showToast伝搬: デスクトップレイアウト（WorktreeDesktopLayout内HistoryPane）、モバイルレイアウト（MobileContent経由HistoryPane）",
+    "ConversationPairCard コピーボタンUI追加: UserMessageSection（absolute top-2 right-2）、AssistantMessageItem（right-10 top-2）",
+    "data-testid追加（copy-user-message / copy-assistant-message）、aria-label/title英語統一（Copy message / Copy）",
+    "ConversationPairCard.test.tsx コピーボタンテスト追加: ボタン表示確認、onCopy呼出確認、onCopy未提供時テスト",
+    "HistoryPane.integration.test.tsx 統合テスト追加: showToast提供時Toast呼出確認、showToast未提供時ボタン動作確認",
+    "既存テスト確認: ConversationPairCard.test.tsx、HistoryPane.integration.test.tsx、HistoryPane.test.tsx、MessageListOptimistic.test.tsx、conversation-pair-card.test.tsx"
+  ],
+  "design_policy_path": "dev-reports/design/issue-211-history-copy-button-design-policy.md",
+  "work_plan_path": "dev-reports/issue/211/work-plan.md",
+  "target_coverage": 80
+}

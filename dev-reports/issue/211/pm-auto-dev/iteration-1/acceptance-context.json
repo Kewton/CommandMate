@@ -1,0 +1,31 @@
+{
+  "issue_number": 211,
+  "feature_summary": "履歴メッセージコピーボタン機能",
+  "acceptance_criteria": [
+    "HistoryPaneの各メッセージセクション（UserMessageSection / AssistantMessageItem）にコピーボタンが表示されること",
+    "コピーボタンクリックでメッセージ内容がクリップボードにプレーンテキストとしてコピーされること",
+    "ANSIエスケープコードを含むメッセージの場合、既存の stripAnsi() 関数（src/lib/cli-patterns.ts）を使用してコード除去後のテキストがコピーされること",
+    "コピー成功時にToast通知が表示されること",
+    "コピー失敗時（Clipboard API非対応等）にエラーToastが表示されること",
+    "UserMessageSectionではコピーボタンが右上に配置されていること",
+    "AssistantMessagesSectionではコピーボタンが既存の展開/折りたたみボタンと重ならないこと",
+    "モバイルレイアウトとデスクトップレイアウトの両方でコピー機能が動作すること",
+    "コピーコールバックが useCallback で参照安定化されており、不要な再レンダリングが発生しないこと",
+    "コピーユーティリティ関数の単体テスト（src/lib/__tests__/clipboard-utils.test.ts）が存在し、パスすること",
+    "ConversationPairCardのコピーボタン表示とクリックイベントのテストが存在し、パスすること",
+    "既存テスト（HistoryPane、ConversationPairCard、MessageListOptimistic、conversation-pair-card結合テスト）が全てパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: clipboard-utils.test.ts の全テスト（9件）がパスすること",
+    "シナリオ2: ConversationPairCard.test.tsx の全テスト（24件）がパスすること（コピーボタン6件含む）",
+    "シナリオ3: HistoryPane.integration.test.tsx の全テスト（13件）がパスすること（コピー機能4件含む）",
+    "シナリオ4: TypeScript型チェック（npx tsc --noEmit）がエラー0件であること",
+    "シナリオ5: ESLint（npm run lint）が警告・エラー0件であること",
+    "シナリオ6: 既存テスト全体（npm run test:unit）がパスすること（Issue #211に関係ない既存失敗を除く）",
+    "シナリオ7: copyToClipboard関数がstripAnsiを使用してANSIコードを除去していること（コード確認）",
+    "シナリオ8: onCopyがオプショナルPropsで、未提供時にコピーボタンが表示されないこと",
+    "シナリオ9: showToastがオプショナルPropsで、未提供時もコピー動作が正常であること",
+    "シナリオ10: デスクトップ（WorktreeDesktopLayout内HistoryPane）にshowToastが伝搬されていること",
+    "シナリオ11: モバイル（MobileContent経由HistoryPane）にshowToastが伝搬されていること"
+  ]
+}

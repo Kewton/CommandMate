@@ -1,0 +1,62 @@
+{
+  "issue_number": 211,
+  "iteration": 1,
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "Toast通知の統合方針セクションを追加。推奨方針（C案）としてWorktreeDetailRefactored.tsxからHistoryPane経由でConversationPairCardへshowToastをprops伝搬する方式を明記。実装タスクにHistoryPaneProps・ConversationPairCardPropsの型定義変更、WorktreeDetailRefactoredからのprops伝搬タスクを追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "「各メッセージバブル」の表現をConversationPairCardについては「各メッセージセクション（UserMessageSection / AssistantMessageItem）」に、MessageListについては「各メッセージバブル（MessageBubble）」に明確に区別して記載。受入条件も同様に修正。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "「コピー内容の仕様」セクションを新設。message.contentの生テキストをコピー、ANSIエスケープコード除去処理、Markdownソースはそのままコピーする方針を明記。コピーユーティリティ関数のタスクにもANSIコード除去処理を含む旨を追加。受入条件にもANSIコード除去後のテキストコピー条件を追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "HistoryPane.tsxを「変更不要の見込み」から変更対象ファイルに移動。Props型にshowToastコールバック追加とConversationPairCardへのコピーコールバック中継を変更内容として明記。WorktreeDetailRefactored.tsxも変更対象に追加。ConversationPairCardの変更内容にProps型変更を追記。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "受入条件にテスト要件を2件追加：(1)コピーユーティリティ関数の単体テストが存在しパスすること、(2)ConversationPairCardのコピーボタン表示とクリックイベントのテストが存在しパスすること。実装タスクにもテスト作成タスクを2件追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "lucide-reactのCopy / ClipboardCopyアイコンを使用する旨を明記。プロジェクトで既にlucide-reactを採用済みであることも補足。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "コピーボタンの配置について、既存の展開/折りたたみボタン（absolute top-2 right-2）と重ならないよう隣（例: right-10 top-2）またはヘッダー行に配置する旨を明記。受入条件にも既存ボタンとの非重複条件を追加。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "MessageListがレガシーコンポーネント（WorktreeDetail.tsx）で使用されていることを明記。ConversationPairCardを主要な変更対象、MessageListを副次的対応と位置付けを明確化。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/211"
+  }
+}

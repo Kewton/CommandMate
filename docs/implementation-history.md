@@ -5,6 +5,7 @@
 | Issue | 種別 | 概要 | 主要変更ファイル | 設計書 |
 |-------|------|------|-----------------|--------|
 | #212 | fix | 複数行メッセージのPasted text検知+Enter自動送信（共通ヘルパー、skipPatterns拡張） | `pasted-text-helper.ts`, `cli-patterns.ts`, `claude-session.ts`, `codex.ts`, `response-poller.ts` | [link](../dev-reports/design/issue-212-pasted-text-detection-design-policy.md) |
+| #211 | feat | 履歴メッセージコピーボタン（stripAnsi利用、Toast通知） | `clipboard-utils.ts`, `ConversationPairCard.tsx`, `HistoryPane.tsx`, `WorktreeDetailRefactored.tsx` | [link](../dev-reports/design/issue-211-history-copy-button-design-policy.md) |
 | #201 | feat | Trust dialog自動応答（Claude CLI v2.x） | `claude-session.ts`, `cli-patterns.ts` | [link](../dev-reports/design/issue-201-trust-dialog-auto-response-design-policy.md) |
 | #188 | fix | Thinking誤検出によるスピナー残留修正（5行ウィンドウ化、末尾空行トリム、インデント質問対応） | `status-detector.ts`, `response-poller.ts`, `current-output/route.ts`, `prompt-detector.ts` | [link](../dev-reports/design/issue-188-thinking-indicator-false-detection-design-policy.md) |
 | #193 | fix | 複数選択肢プロンプト検出（DetectPromptOptions, requireDefaultIndicator） | `prompt-detector.ts`, `cli-patterns.ts`, `response-poller.ts` | [link](../dev-reports/design/issue-193-multiple-choice-prompt-detection-design-policy.md) |

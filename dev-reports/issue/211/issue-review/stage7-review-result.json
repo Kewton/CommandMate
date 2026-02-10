@@ -1,0 +1,252 @@
+{
+  "issue_number": 211,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-02-10",
+  "previous_review_verification": {
+    "stage3_findings_addressed": {
+      "MF-1": {
+        "status": "resolved",
+        "detail": "WorktreeDetailRefactored.tsxにおける2箇所のHistoryPane呼び出し（モバイルレイアウト用L809付近、デスクトップレイアウト用L1573付近）への対応がIssue本文の複数箇所で明確に記載されている。提案する解決策、実装タスク、影響範囲テーブルの全てで2箇所対応の必要性が太字で強調されており、実装漏れリスクは十分に低減されている。"
+      },
+      "SF-1": {
+        "status": "resolved",
+        "detail": "「コールバック参照の安定化（メモ化考慮）」セクションが追加され、useCallbackでラップしたonCopyハンドラーをサブコンポーネントに渡す方針が明記されている。既存のhandleToggle/handleFilePathClickと同様のパターンに従う旨も記載済み。実装タスクのUI実装セクションにも「コピーハンドラーはuseCallbackで参照安定化すること」と明記されている。"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "detail": "既存テストファイル4件（HistoryPane.integration.test.tsx、HistoryPane.test.tsx、MessageListOptimistic.test.tsx、ConversationPairCard.test.tsx）の修正確認が実装タスクのテストセクションと影響範囲の「修正確認が必要な既存テスト」テーブルの両方に記載されている。propsをオプショナルにすることで破損回避の見込みである旨も付記されている。"
+      },
+      "SF-3": {
+        "status": "resolved",
+        "detail": "「Props設計方針」セクションが追加され、新規propsは全てオプショナル（?:）として定義する方針が明記されている。showToastが提供されていない場合の挙動（コピーのみ実行しToast省略）も記載済み。これにより破壊的変更は回避される。"
+      },
+      "NTH-1": {
+        "status": "resolved",
+        "detail": "「Clipboard APIはセキュアコンテキスト（HTTPS）でのみ動作する」という考慮点はIssueの受入条件に「コピー失敗時（Clipboard API非対応等）にエラーToastが表示されること」として反映されている。"
+      },
+      "NTH-2": {
+        "status": "resolved",
+        "detail": "CLAUDE.mdの更新は今回のスコープ外として問題ないが、docs/implementation-history.mdへの記録追加は暗黙的に期待されている。"
+      },
+      "NTH-3": {
+        "status": "resolved",
+        "detail": "新規作成ファイルのパスが明確に指定されている: src/lib/clipboard-utils.ts（コピーユーティリティ）、src/lib/__tests__/clipboard-utils.test.ts（テスト）。"
+      }
+    },
+    "all_stage3_findings_resolved": true,
+    "stage5_findings_addressed": {
+      "SF-1": {
+        "status": "resolved",
+        "detail": "showToastの型シグネチャが明記されている（(message: string, type?: ToastType, duration?: number) => string）。HistoryPaneでshowToast + クリップボード操作を組み合わせたonCopyコールバックをuseCallbackで作成するデータフローがコード例付きで記載されている。"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "detail": "UserMessageSection（展開ボタンなし、シンプル右上配置）とAssistantMessagesSection（展開ボタンとの共存配置、例: right-10 top-2）でコピーボタン配置方針が異なることが「コピーボタンの配置（セクション別方針）」として明記されている。"
+      },
+      "NTH-1": {
+        "status": "resolved",
+        "detail": "ANSIコード除去は正規表現ベースの新規実装であり、既存のAnsiToHtmlライブラリは使用しないことがIssue本文に明記されている。"
+      },
+      "NTH-2": {
+        "status": "resolved",
+        "detail": "受入条件がPhase 1（ConversationPairCard、必須）とPhase 2（MessageList、副次的）に分割されている。"
+      }
+    },
+    "all_stage5_findings_resolved": true
+  },
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "依存関係",
+        "issue": "Issueではsrc/lib/clipboard-utils.tsにANSIエスケープコード除去処理を正規表現ベースで新規実装すると記載されているが、プロジェクトには既にsrc/lib/cli-patterns.tsにstripAnsi()関数（L203-207）が存在し、同じ正規表現ベースのANSIエスケープシーケンス除去を行っている。この関数はプロジェクト全体で広く使用されている（assistant-response-saver.ts、claude-session.ts、status-detector.ts、response-poller.ts等、少なくとも8ファイルがインポート）。clipboard-utils.tsで同じロジックを新規実装すると、同一目的の処理が2箇所に重複し、保守上の問題（バグ修正が片方のみに適用されるリスク）が生じる。",
+        "location": "## 実装タスク / ### コピーユーティリティ および ## 提案する解決策 / ### コピー内容の仕様",
+        "recommendation": "clipboard-utils.tsでのANSI除去処理は、既存のstripAnsi()関数（src/lib/cli-patterns.ts L205-207）を再利用すべき。具体的には「import { stripAnsi } from '@/lib/cli-patterns'」としてインポートし、clipboard-utils.ts内でのANSI正規表現の再実装は行わない。Issueの実装タスクを「ANSIコード除去は既存のstripAnsi()関数（src/lib/cli-patterns.ts）を利用する」に変更すべき。",
+        "evidence": "src/lib/cli-patterns.ts L203: const ANSI_PATTERN = /\\x1b\\[[0-9;]*[a-zA-Z]|\\x1b\\][^\\x07]*\\x07|\\[[0-9;]*m/g; L205-207: export function stripAnsi(str: string): string { return str.replace(ANSI_PATTERN, ''); }。Issueの記載: 「正規表現ベースのANSIエスケープシーケンス除去（例: text.replace(/\\x1b\\[[0-9;]*m/g, '')）を clipboard-utils.ts に新規実装する」。既存のstripAnsi()はより包括的なパターン（SGR、OSC、CSIシーケンス対応）であり、Issue記載の簡易パターンよりも網羅性が高い。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "tests/integration/conversation-pair-card.test.tsx（結合テスト）がIssueの「修正確認が必要な既存テスト」テーブルに含まれていない。このテストファイルはConversationPairCardPropsを使用してコンポーネントをレンダリングしており（L10でインポート）、onCopyプロパティ追加の影響を受ける可能性がある。propsがオプショナルであるため破損しない見込みだが、確認対象として記載すべき。",
+        "location": "## 影響範囲 / ### 修正確認が必要な既存テスト",
+        "recommendation": "「修正確認が必要な既存テスト」テーブルに tests/integration/conversation-pair-card.test.tsx を追加すべき。確認内容は「onCopy propsの追加に伴う既存テスト確認。propsはオプショナルのため破損しない見込み」。",
+        "evidence": "tests/integration/conversation-pair-card.test.tsx L10: import { ConversationPairCard } from '@/components/worktree/ConversationPairCard'; L14: const mockOnFilePathClick = vi.fn(); L16-38: createMockPair()でConversationPairCardをレンダリング。Issueの影響範囲テーブルには src/components/worktree/__tests__/ConversationPairCard.test.tsx のみ記載されており、tests/integration/配下のテストが漏れている。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響ファイル",
+        "issue": "MessageBubbleコンポーネント（MessageList.tsx内、L362-371のReact.memoカスタム比較関数）にコピーボタンを追加する場合、現在の比較関数はmessage.id、message.content、promptData.status、promptData.answerの4プロパティのみを比較しており、onFilePathClickなどのコールバック系propsは比較対象に含まれていない。コピーボタンのonClickイベントはmessage.contentをコピーするだけであればコールバックpropsの比較は不要であり、現在の比較関数で問題ない可能性がある。ただし、MessageBubbleにonCopyプロパティを追加する場合のカスタム比較関数の扱いについて、Issueではmemo比較関数の更新が必要「になる可能性あり」と記載されているが、実際には不要な可能性が高い（onCopyがonFilePathClickと同様に比較対象外であれば問題ない）。",
+        "location": "## 影響範囲 / ### 修正確認が必要な既存テスト",
+        "recommendation": "MessageList.tsxのReact.memoカスタム比較関数について、「onCopy系propsは既存のonFilePathClickと同様に比較関数の対象外とする方針で問題ない」旨を明記するとよい。これにより実装者がカスタム比較関数の修正要否を判断しやすくなる。",
+        "evidence": "MessageList.tsx L362-371: React.memoカスタム比較関数はmessage.id、message.content、promptData.status、promptData.answerのみ比較。onFilePathClickは比較対象外だが問題なく動作している。onCopyも同様に比較対象外で問題ないはず。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "依存関係",
+        "issue": "IssueのConversationPairCard変更では、UserMessageSection（L194）とAssistantMessageItem（L229）にonCopyコールバックをpropsとして追加する必要がある。これらは個別のmemo化されたサブコンポーネントだが、カスタム比較関数は使用していない（デフォルトの浅い比較）。onCopyをuseCallbackで安定化する方針はIssueに明記されているが、ConversationPairCard本体（L366）のmemoも同様にデフォルトの浅い比較であり、HistoryPaneからonCopyが毎回新しい参照で渡されるとConversationPairCard自体の再レンダリングが発生する。HistoryPaneでuseCallbackを使用する方針は記載されているが、onCopyのuseCallbackの依存配列にshowToastが含まれる設計であり、showToastの参照安定性（WorktreeDetailRefactored.tsx内のuseToast hookの返り値）にも依存する。",
+        "location": "## 提案する解決策 / ### コールバック参照の安定化",
+        "recommendation": "showToastはuseToast hookのuseCallback内で空の依存配列（[]）で定義されているため（Toast.tsx L249, L261の[]）、参照は安定している。したがってHistoryPaneでのuseCallback([showToast])の依存配列も安定し、onCopyの参照安定性は保たれる。この点を確認済みであることをIssueに注記すると実装者の安心材料になるが、必須ではない。",
+        "evidence": "Toast.tsx L249-261: showToastはuseCallback(..., [])で定義されており、コンポーネントの全ライフサイクルで参照が安定。HistoryPaneのonCopyをuseCallback([showToast])とすると、showToast参照が変わらないためonCopyも安定する。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/components/worktree/ConversationPairCard.tsx",
+        "change_type": "modify",
+        "impact": "ConversationPairCardPropsにonCopyコールバック追加（オプショナル）。UserMessageSection（L194）とAssistantMessageItem（L229）にコピーボタンUI追加。配置方針がセクション別に異なる（UserMessage: 右上シンプル配置、Assistant: 展開ボタンとの共存配置）。メモ化への影響はuseCallbackパターンで回避。",
+        "status": "Issueに適切に記載済み"
+      },
+      {
+        "file": "src/components/worktree/HistoryPane.tsx",
+        "change_type": "modify",
+        "impact": "HistoryPanePropsにshowToastコールバック追加（オプショナル）。showToast + stripAnsi + clipboard操作を組み合わせたonCopyコールバックをuseCallbackで作成しConversationPairCardへ中継。",
+        "status": "Issueに適切に記載済み"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change_type": "modify",
+        "impact": "2箇所のHistoryPane呼び出し（L809モバイル用、L1573デスクトップ用）にshowToast propsを追加。showToastはL1309のuseToastから取得済みで参照安定。",
+        "status": "Issueに適切に記載済み（2箇所対応が太字で強調）"
+      },
+      {
+        "file": "src/components/worktree/MessageList.tsx",
+        "change_type": "modify",
+        "impact": "MessageBubbleにコピーボタン追加（副次的対応）。React.memoカスタム比較関数（L362-371）はonCopy系propsの追加では修正不要の可能性が高い（既存のonFilePathClickも比較対象外で問題なく動作している）。",
+        "status": "Issueに記載済み（カスタム比較関数の修正要否の判断材料が不足）"
+      },
+      {
+        "file": "新規: src/lib/clipboard-utils.ts",
+        "change_type": "create",
+        "impact": "navigator.clipboard.writeTextラッパー。ANSIコード除去は既存のstripAnsi()（src/lib/cli-patterns.ts）を再利用すべき（Issueの新規実装方針は修正が必要）。",
+        "status": "Issueに記載済みだが、既存stripAnsi()関数の再利用が欠落（MF-1）"
+      },
+      {
+        "file": "新規: src/lib/__tests__/clipboard-utils.test.ts",
+        "change_type": "create",
+        "impact": "clipboard-utils.tsの単体テスト。ANSI除去テストはstripAnsi()の再利用に合わせた内容とすべき。",
+        "status": "Issueに記載済み"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/components/worktree/__tests__/ConversationPairCard.test.tsx",
+        "change_type": "modify",
+        "impact": "onCopy propsの追加。オプショナルのため既存テスト破損なし。コピーボタンのテストケース追加。",
+        "status": "Issueに記載済み"
+      },
+      {
+        "file": "tests/integration/conversation-pair-card.test.tsx",
+        "change_type": "modify",
+        "impact": "ConversationPairCardPropsの変更。オプショナルのため既存テスト破損なし。",
+        "status": "Issueに未記載（SF-1）"
+      },
+      {
+        "file": "src/components/worktree/__tests__/HistoryPane.integration.test.tsx",
+        "change_type": "modify",
+        "impact": "showToast propsの追加。オプショナルのため既存テスト破損なし。",
+        "status": "Issueに記載済み"
+      },
+      {
+        "file": "tests/unit/components/HistoryPane.test.tsx",
+        "change_type": "modify",
+        "impact": "showToast propsの追加。オプショナルのため既存テスト破損なし。",
+        "status": "Issueに記載済み"
+      },
+      {
+        "file": "tests/unit/components/worktree/MessageListOptimistic.test.tsx",
+        "change_type": "modify",
+        "impact": "MessageBubbleのReact.memoカスタム比較関数がonCopy系propsを考慮していない場合の確認。実際には修正不要の可能性が高い。",
+        "status": "Issueに記載済み"
+      }
+    ],
+    "unaffected_files": [
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "reason": "既存のstripAnsi()関数を変更なしで再利用する。clipboard-utils.tsからインポートするのみ。"
+      },
+      {
+        "file": "src/components/common/Toast.tsx",
+        "reason": "既存のuseToast hookとToastContainerコンポーネントをそのまま利用。変更不要。showToastの参照安定性はuseCallback([])により保証済み。"
+      },
+      {
+        "file": "src/types/conversation.ts",
+        "reason": "ConversationPair型定義に変更不要。コピーはUI層の機能。"
+      },
+      {
+        "file": "src/types/markdown-editor.ts",
+        "reason": "ToastType型定義は参照のみ。変更不要。"
+      },
+      {
+        "file": "src/hooks/useConversationHistory.ts",
+        "reason": "会話グルーピングロジックに変更不要。"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetail.tsx",
+        "reason": "レガシーコンポーネント。現在のpage.tsxはWorktreeDetailRefactored.tsxを使用しており、このファイルは変更不要。"
+      }
+    ],
+    "breaking_changes": {
+      "exists": false,
+      "details": "全ての新規propsがオプショナル（?:）として追加されるため、破壊的変更なし。既存のテストコードと呼び出し元はそのまま動作する。Stage 3のSF-3指摘を受けて方針がIssueに明記されており、適切に対応されている。"
+    },
+    "dependency_impact": {
+      "new_dependencies": "なし。lucide-react（既存）、navigator.clipboard API（ブラウザネイティブ）のみ使用。stripAnsi()は既存のsrc/lib/cli-patterns.tsから再利用。",
+      "affected_dependencies": "新規パッケージの追加は不要。ansi-to-htmlパッケージ（既存）との関係はIssueで明確化済み（コピー用途では不使用）。strip-ansiパッケージの検討も不要（既存のstripAnsi()で十分）。"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "既存のstripAnsi()関数（L203-207）。clipboard-utils.tsからの再利用を推奨。ANSI_PATTERNはIssue記載の簡易パターンよりも包括的（SGR、OSC、CSIシーケンス対応）。"
+    },
+    {
+      "file": "src/components/worktree/ConversationPairCard.tsx",
+      "relevance": "主要変更対象。UserMessageSection（L194-217）とAssistantMessageItem（L229-273）のコピーボタン配置。展開ボタン（L440-465）はrelative div内のAssistantMessagesSection囲みのみに存在。"
+    },
+    {
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "relevance": "Props変更対象。showToast受け取り、onCopy作成場所。既存のhandleFilePathClick（L196-198）と同様のuseCallbackパターン踏襲。"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "showToast関数の型シグネチャ（L249-261）。useCallback([])で参照安定性が保証されている点が重要。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "showToast伝搬元（L1309）。2箇所のHistoryPane呼び出し（L809、L1573）。"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "relevance": "副次的対応。MessageBubble React.memoカスタム比較関数（L362-371）。hasAnsiCodes（L76）、AnsiToHtml（L18）は既存のANSI処理だがコピー用途では不使用。"
+    },
+    {
+      "file": "tests/integration/conversation-pair-card.test.tsx",
+      "relevance": "Issueの影響範囲テーブルから漏れている結合テスト（SF-1）。ConversationPairCardPropsの変更影響を受ける。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "src/lib/cli-patterns.tsがStripAnsi関連として記載されている（主要機能モジュールテーブルには直接記載なし）。"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "実装完了後のIssue #211記録追加先。"
+    }
+  ],
+  "overall_assessment": "Stage 3（影響範囲レビュー1回目）の全7件の指摘事項は全てIssue本文に適切に反映されている。Stage 5（通常レビュー2回目）の全4件の指摘事項も全て反映済み。Issue本文は非常に高い品質に達しており、コンポーネント間のデータフロー、Props設計方針、セクション別のUI配置方針、メモ化考慮が全て明確に記載されている。今回新たに発見されたMust Fix 1件は、既存のstripAnsi()関数（src/lib/cli-patterns.ts）との重複実装リスクであり、Issueにはこの既存関数への言及が完全に欠落している。これは影響範囲分析として重要な見落としであり、clipboard-utils.tsの設計に直接影響するため必須対応とする。Should Fix 1件はtests/integration/配下のテストファイルの漏れであり、Nice to Have 2件はMessageList.tsxのカスタム比較関数の修正要否の明確化とshowToastの参照安定性の確認済み注記である。"
+}

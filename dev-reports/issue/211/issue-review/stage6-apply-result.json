@@ -1,0 +1,43 @@
+{
+  "issue_number": 211,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "showToastの型シグネチャ（(message: string, type?: ToastType, duration?: number) => string）を新セクション「showToast 型シグネチャとデータフロー」として明記。HistoryPaneでshowToast + クリップボード操作を組み合わせたonCopyコールバックをuseCallbackで作成しConversationPairCardに渡すデータフローを図示・コード例付きで追加。Toast通知の統合方針セクションの手順2も更新して責務配置を明確化。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "コピーボタン配置をセクション別方針として記載。UserMessageSection（展開ボタンなし、シンプル右上配置）とAssistantMessagesSection（展開ボタンとの共存、right-10 top-2で左隣配置）の区別を明記。実装タスク・受入条件・影響範囲テーブルにもそれぞれの配置方針の違いを反映。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "コピー内容の仕様セクションにANSIコード除去のアプローチを追記。正規表現ベースの新規実装であり、既存のAnsiToHtmlライブラリ（HTML変換用途）は使用しないことを明記。strip-ansiパッケージの検討も記載。実装タスクと影響範囲テーブルにも同様の注記を追加。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "受入条件をPhase 1: ConversationPairCard（必須 - 主要目的の達成、12項目）とPhase 2: MessageList（副次的 - レガシーコンポーネント対応、1項目）に分割。Phase 1の完了でIssueの主要目的は達成されることが明確になり、段階的なPRレビューが容易に。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/211"
+  }
+}

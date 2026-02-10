@@ -1,0 +1,78 @@
+{
+  "issue_number": 211,
+  "stage": 2,
+  "stage_name": "整合性レビュー - 指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-S2-1",
+        "item": "設計書のHistoryPane行番号がソースコードと不一致リスク",
+        "section_updated": "Section 2 (アーキテクチャ設計)",
+        "status": "reflected",
+        "changes": "Mermaidダイアグラムから行番号参照(L809, L1573)を削除し、コンポーネント名ベースの参照に変更。行番号の揮発性に関する注意書きを追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S2-1",
+        "item": "showToast型シグネチャの設計書記載が実装と微差あり",
+        "section_updated": "Section 4.3 (Optional Propsパターン)",
+        "status": "reflected",
+        "changes": "showToastの引数デフォルト値(type='info', duration=DEFAULT_DURATION)と戻り値(string=Toast ID)の説明をSection 4.3に追記"
+      },
+      {
+        "id": "SF-S2-2",
+        "item": "MobileContentPropsにshowToast伝搬の記述が設計書に不足",
+        "section_updated": "Section 2, 4.1, 4.3, 8, 9, 12, 14",
+        "status": "reflected",
+        "changes": "Mermaidダイアグラムにモバイル3段伝搬(WDR->MobileContent->HistoryPane)を追加。レイヤー構成表にデスクトップ/モバイル分離を明記。Section 4.1にモバイル3段伝搬の詳細説明と重要注記を追加。MobileContentPropsの型定義をSection 4.3に追加。変更対象ファイル一覧にMobileContent変更を追加。実装順序にステップ4a/4bとしてデスクトップ/モバイル分離を明記。実装チェックリストにMobileContent対応項目を追加。不採用代替案にMobileContent内useToast直接使用を追加。Stage 1のC-2をSF-S2-2で対応済みに更新"
+      },
+      {
+        "id": "SF-S2-3",
+        "item": "MessageBubbleがConversationPairCard内に存在しない",
+        "section_updated": "Section 6 (メモ化戦略)",
+        "status": "reflected",
+        "changes": "Phase 1メモ化戦略表からMessageBubble行を削除。MessageBubbleがMessageList.tsx内コンポーネントでPhase 2スコープである旨の注記を追加。セクション見出しに'Phase 1スコープのみ'を明記。実装チェックリストにメモ化スコープ確認項目を追加"
+      }
+    ]
+  },
+  "consider_items_noted": [
+    {
+      "id": "C-S2-1",
+      "item": "lucide-react v0.554.0でのCopyアイコン存在確認",
+      "noted_in": "Section 3, 13, 14"
+    },
+    {
+      "id": "C-S2-2",
+      "item": "UserMessageSectionのposition: relative未設定",
+      "noted_in": "Section 5.2, 13, 14"
+    },
+    {
+      "id": "C-S2-3",
+      "item": "AssistantMessageItemのabsolute配置がAssistantMessagesSectionレベルで競合",
+      "noted_in": "Section 5.2, 13, 14"
+    }
+  ],
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-211-history-copy-button-design-policy.md",
+  "sections_updated": [
+    "Section 2: アーキテクチャ設計 (Mermaidダイアグラム更新、行番号削除、レイヤー構成表更新)",
+    "Section 3: 技術選定 (Copyアイコン確認注記追加)",
+    "Section 4.1: Props Drilling パターン (モバイル3段伝搬明確化)",
+    "Section 4.3: Optional Propsパターン (MobileContentProps追加、showToastデフォルト値補足)",
+    "Section 5.2: コピーボタン配置 (position: relative注記、ボタン配置競合注記追加)",
+    "Section 6: メモ化戦略 (MessageBubble削除、Phase 1スコープ限定)",
+    "Section 7.2: 既存テストへの影響 (テストファイルパス修正)",
+    "Section 8: 変更対象ファイル一覧 (MobileContent変更追加)",
+    "Section 9: 設計上の決定事項 (MobileContent伝搬追加、不採用代替案追加)",
+    "Section 12: 実装順序 (ステップ4a/4b分離)",
+    "Section 13: 将来の検討事項 (C-S2-1, C-S2-2, C-S2-3追加、C-2解決済み)",
+    "Section 14: 実装チェックリスト (7項目追加)",
+    "Section 15: レビュー履歴 (Stage 2追加)",
+    "Section 16: Stage 1サマリー (C-2をSF-S2-2対応済みに更新)",
+    "Section 17: Stage 2サマリー (新規セクション追加)"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}

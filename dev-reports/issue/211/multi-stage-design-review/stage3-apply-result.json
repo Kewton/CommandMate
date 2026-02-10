@@ -1,0 +1,41 @@
+{
+  "issue_number": 211,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-S3-1",
+        "item": "ConversationPairCardテスト -- onCopy追加後のaria-labelクエリ競合リスク: data-testid付与の指針追加",
+        "section_updated": "Section 5.3, Section 14",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-S3-2",
+        "item": "HistoryPane.integration.test.tsx -- showToast提供時のコピー機能統合テスト推奨を追加",
+        "section_updated": "Section 7.3 (新規), Section 14",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-S3-3",
+        "item": "showToastのuseCallback依存配列空による安定性とMobileContent React.memo影響のドキュメント化",
+        "section_updated": "Section 6, Section 14",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-211-history-copy-button-design-policy.md",
+  "sections_updated": [
+    "Section 5.3 - テスト識別用data-testid指針追加",
+    "Section 6 - showToast参照安定性の依存関係注意事項追加",
+    "Section 7.3 - 追加推奨テスト(新規セクション)",
+    "Section 14 - 実装チェックリスト(3項目追加)",
+    "Section 15 - レビュー履歴(Stage 3追加)",
+    "Section 18 - レビュー指摘事項サマリー Stage 3(新規セクション)"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}
