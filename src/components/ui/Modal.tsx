@@ -6,6 +6,7 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -80,7 +81,8 @@ export function Modal({
     full: 'max-w-[calc(100vw-2rem)] sm:max-w-[95vw]',
   };
 
-  return (
+  // Use portal to render at document.body level, escaping any parent stacking context
+  return createPortal(
     <div className="fixed inset-0 z-[9999] overflow-y-auto">
       {/* Backdrop - Issue #104: skip onClick if disableClose is true */}
       <div
@@ -125,6 +127,7 @@ export function Modal({
           <div className="px-4 sm:px-6 py-3 sm:py-4 overflow-y-auto flex-1 min-h-0">{children}</div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
