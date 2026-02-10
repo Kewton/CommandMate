@@ -41,6 +41,7 @@ import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
 import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { MemoPane } from '@/components/worktree/MemoPane';
+import { LogViewer } from '@/components/worktree/LogViewer';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
@@ -321,6 +322,7 @@ const DesktopHeader = memo(function DesktopHeader({
 
 /** Props for InfoModal component */
 interface InfoModalProps {
+  worktreeId: string;
   worktree: Worktree | null;
   isOpen: boolean;
   onClose: () => void;
@@ -329,6 +331,7 @@ interface InfoModalProps {
 
 /** Modal displaying worktree information with description editing */
 const InfoModal = memo(function InfoModal({
+  worktreeId,
   worktree,
   isOpen,
   onClose,
@@ -337,6 +340,7 @@ const InfoModal = memo(function InfoModal({
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [descriptionText, setDescriptionText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
 
   // Track previous isOpen state to detect modal opening
   const prevIsOpenRef = useRef(isOpen);
@@ -493,6 +497,21 @@ const InfoModal = memo(function InfoModal({
           <h2 className="text-sm font-medium text-gray-500 mb-1">Version</h2>
           <p className="text-sm text-gray-700">{APP_VERSION_DISPLAY}</p>
         </div>
+
+        {/* Logs */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-medium text-gray-500">Logs</h2>
+            <button
+              type="button"
+              onClick={() => setShowLogs(!showLogs)}
+              className="text-sm text-blue-600 hover:text-blue-800"
+            >
+              {showLogs ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          {showLogs && <LogViewer worktreeId={worktreeId} />}
+        </div>
       </div>
     </Modal>
   );
@@ -571,18 +590,21 @@ const ErrorDisplay = memo(function ErrorDisplay({
 
 /** Props for MobileInfoContent component */
 interface MobileInfoContentProps {
+  worktreeId: string;
   worktree: Worktree | null;
   onWorktreeUpdate: (updated: Worktree) => void;
 }
 
 /** Mobile Info tab content with description editing */
 const MobileInfoContent = memo(function MobileInfoContent({
+  worktreeId,
   worktree,
   onWorktreeUpdate,
 }: MobileInfoContentProps) {
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [descriptionText, setDescriptionText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
 
   // Track previous worktree ID to detect worktree changes
   const prevWorktreeIdRef = useRef(worktree?.id);
@@ -743,6 +765,21 @@ const MobileInfoContent = memo(function MobileInfoContent({
         <h2 className="text-sm font-medium text-gray-500 mb-1">Version</h2>
         <p className="text-sm text-gray-700">{APP_VERSION_DISPLAY}</p>
       </div>
+
+      {/* Logs */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-medium text-gray-500">Logs</h2>
+          <button
+            type="button"
+            onClick={() => setShowLogs(!showLogs)}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            {showLogs ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        {showLogs && <LogViewer worktreeId={worktreeId} />}
+      </div>
     </div>
   );
 });
@@ -862,6 +899,7 @@ const MobileContent = memo(function MobileContent({
     case 'info':
       return (
         <MobileInfoContent
+          worktreeId={worktreeId}
           worktree={worktree}
           onWorktreeUpdate={onWorktreeUpdate}
         />
@@ -1669,6 +1707,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           )}
           {/* Info Modal */}
           <InfoModal
+            worktreeId={worktreeId}
             worktree={worktree}
             isOpen={isInfoModalOpen}
             onClose={handleInfoModalClose}
