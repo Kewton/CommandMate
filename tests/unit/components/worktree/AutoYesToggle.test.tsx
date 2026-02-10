@@ -50,9 +50,8 @@ describe('AutoYesToggle', () => {
       render(<AutoYesToggle {...defaultProps} enabled={false} />);
       fireEvent.click(screen.getByRole('switch'));
 
-      // Select 3時間 radio button
-      const radioButtons = screen.getAllByRole('radio') as HTMLInputElement[];
-      fireEvent.click(radioButtons[1]);
+      // Select 3時間 duration button
+      fireEvent.click(screen.getByText('3時間'));
 
       fireEvent.click(screen.getByText('同意して有効化'));
 

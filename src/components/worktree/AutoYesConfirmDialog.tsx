@@ -62,26 +62,24 @@ export function AutoYesConfirmDialog({
           )}
         </div>
 
-        {/* Duration selection radio buttons */}
+        {/* Duration selection - horizontal button group */}
         <div className="text-sm text-gray-700">
           <p className="font-medium mb-2">有効時間</p>
-          <div className="space-y-2">
+          <div className="flex gap-2">
             {ALLOWED_DURATIONS.map((duration) => (
-              <label
+              <button
                 key={duration}
-                className="flex items-center gap-2 cursor-pointer py-1"
+                type="button"
+                onClick={() => setSelectedDuration(duration)}
+                className={`flex-1 py-2 px-3 text-sm font-medium rounded-md border-2 transition-colors ${
+                  selectedDuration === duration
+                    ? 'border-blue-600 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                }`}
                 style={{ minHeight: '44px' }}
               >
-                <input
-                  type="radio"
-                  name="auto-yes-duration"
-                  value={duration}
-                  checked={selectedDuration === duration}
-                  onChange={() => setSelectedDuration(duration)}
-                  className="w-4 h-4 text-blue-600"
-                />
-                <span>{DURATION_LABELS[duration]}</span>
-              </label>
+                {DURATION_LABELS[duration]}
+              </button>
             ))}
           </div>
         </div>

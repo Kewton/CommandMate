@@ -61,27 +61,18 @@ describe('AutoYesConfirmDialog', () => {
     });
   });
 
-  describe('Duration Radio Buttons', () => {
-    it('should display three radio buttons for duration selection', () => {
-      render(<AutoYesConfirmDialog {...defaultProps} />);
-      const radioButtons = screen.getAllByRole('radio');
-      expect(radioButtons).toHaveLength(3);
-    });
-
-    it('should display duration labels', () => {
+  describe('Duration Selection Buttons', () => {
+    it('should display three duration buttons', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
       expect(screen.getByText('1時間')).toBeDefined();
       expect(screen.getByText('3時間')).toBeDefined();
       expect(screen.getByText('8時間')).toBeDefined();
     });
 
-    it('should have 1 hour selected by default', () => {
+    it('should have 1 hour selected by default (highlighted style)', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      const radioButtons = screen.getAllByRole('radio') as HTMLInputElement[];
-      // 1時間 (3600000) should be checked
-      expect(radioButtons[0].checked).toBe(true);
-      expect(radioButtons[1].checked).toBe(false);
-      expect(radioButtons[2].checked).toBe(false);
+      const btn1h = screen.getByText('1時間');
+      expect(btn1h.className).toContain('border-blue-600');
     });
 
     it('should display "有効時間" section header', () => {
@@ -91,12 +82,13 @@ describe('AutoYesConfirmDialog', () => {
 
     it('should allow changing duration selection', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      const radioButtons = screen.getAllByRole('radio') as HTMLInputElement[];
+      const btn3h = screen.getByText('3時間');
 
-      // Click 3時間 radio
-      fireEvent.click(radioButtons[1]);
-      expect(radioButtons[1].checked).toBe(true);
-      expect(radioButtons[0].checked).toBe(false);
+      fireEvent.click(btn3h);
+      expect(btn3h.className).toContain('border-blue-600');
+
+      const btn1h = screen.getByText('1時間');
+      expect(btn1h.className).not.toContain('border-blue-600');
     });
   });
 
@@ -108,21 +100,13 @@ describe('AutoYesConfirmDialog', () => {
 
     it('should update duration text when 3 hours is selected', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      const radioButtons = screen.getAllByRole('radio') as HTMLInputElement[];
-
-      // Select 3時間
-      fireEvent.click(radioButtons[1]);
-
+      fireEvent.click(screen.getByText('3時間'));
       expect(screen.getByText(/3時間後に自動でOFFになります/)).toBeDefined();
     });
 
     it('should update duration text when 8 hours is selected', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      const radioButtons = screen.getAllByRole('radio') as HTMLInputElement[];
-
-      // Select 8時間
-      fireEvent.click(radioButtons[2]);
-
+      fireEvent.click(screen.getByText('8時間'));
       expect(screen.getByText(/8時間後に自動でOFFになります/)).toBeDefined();
     });
   });
@@ -137,24 +121,16 @@ describe('AutoYesConfirmDialog', () => {
 
     it('should call onConfirm with selected 3-hour duration', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      const radioButtons = screen.getAllByRole('radio') as HTMLInputElement[];
-
-      // Select 3時間
-      fireEvent.click(radioButtons[1]);
+      fireEvent.click(screen.getByText('3時間'));
       fireEvent.click(screen.getByText('同意して有効化'));
-
       expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
       expect(defaultProps.onConfirm).toHaveBeenCalledWith(10800000);
     });
 
     it('should call onConfirm with selected 8-hour duration', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      const radioButtons = screen.getAllByRole('radio') as HTMLInputElement[];
-
-      // Select 8時間
-      fireEvent.click(radioButtons[2]);
+      fireEvent.click(screen.getByText('8時間'));
       fireEvent.click(screen.getByText('同意して有効化'));
-
       expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
       expect(defaultProps.onConfirm).toHaveBeenCalledWith(28800000);
     });
