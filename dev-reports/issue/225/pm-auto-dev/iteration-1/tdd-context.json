@@ -1,0 +1,50 @@
+{
+  "issue_number": 225,
+  "title": "auto yesオンに設定時、1時間、3時間、8時間から選択可能にしたい",
+  "acceptance_criteria": [
+    "Auto-Yes有効化ダイアログに1時間/3時間/8時間のラジオボタンが表示されること",
+    "デフォルト選択が1時間であること",
+    "選択した時間に応じてexpiresAtが正しく設定されること",
+    "カウントダウンタイマーが選択時間に基づいて動作すること",
+    "3時間/8時間選択時のカウントダウン表示がHH:MM:SS形式で視認しやすいこと（1時間未満はMM:SS形式を維持）",
+    "許可されていないduration値がAPIで拒否されること（400レスポンス）",
+    "duration未指定時にデフォルト値（3600000）が適用されること（後方互換性）",
+    "AutoYesConfirmDialogの説明テキストが選択時間に応じて動的に変わること",
+    "既存のAuto-Yes動作（自動応答、ポーリング、重複防止）に影響がないこと",
+    "モバイル表示でもラジオボタンが正しく表示されること"
+  ],
+  "implementation_tasks": [
+    "src/config/auto-yes-config.ts新規作成（ALLOWED_DURATIONS, AutoYesDuration型, DEFAULT_AUTO_YES_DURATION, DURATION_LABELS定義）",
+    "src/lib/auto-yes-manager.ts: AUTO_YES_TIMEOUT_MS削除、DEFAULT_AUTO_YES_DURATIONをimport、setAutoYesEnabled()にdurationパラメータ追加、AutoYesState JSDocコメント更新",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts: isValidWorktreeId()追加、JSON parseエラーハンドリング、durationフィールド追加・バリデーション",
+    "src/components/worktree/AutoYesConfirmDialog.tsx: ラジオボタンUI追加、onConfirm型を(duration: AutoYesDuration) => void に変更、固定テキスト動的化",
+    "src/components/worktree/AutoYesToggle.tsx: onToggle型にduration追加、handleConfirmでduration伝搬、formatTimeRemaining()をHH:MM:SS対応",
+    "src/components/worktree/WorktreeDetailRefactored.tsx: handleAutoYesToggleにduration引数追加、API送信時にdurationを含める",
+    "tests/unit/lib/auto-yes-manager.test.ts: 既存テスト更新、デフォルトduration/duration指定/後方互換性/AUTO_YES_TIMEOUT_MS不存在テスト追加",
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx: onConfirmのduration引数検証、ラジオボタンUIテスト、動的テキストテスト追加",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx: onToggle引数更新、formatTimeRemaining HH:MM:SSフォーマットテスト追加",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx: AutoYesToggleモック更新",
+    "tests/integration/auto-yes-persistence.test.ts: カスタムduration永続性テスト追加",
+    "docs/user-guide/webapp-guide.md: Auto Yesモードセクションに有効時間選択の記述追加",
+    "docs/TRUST_AND_SAFETY.md: 8時間リスク評価・ベストプラクティス追加"
+  ],
+  "target_coverage": 80,
+  "work_plan_file": "dev-reports/issue/225/work-plan.md",
+  "design_policy_file": "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md",
+  "implementation_order": [
+    "1. src/config/auto-yes-config.ts（新規）",
+    "2. src/lib/auto-yes-manager.ts（duration対応 + AUTO_YES_TIMEOUT_MS削除）",
+    "3. src/app/api/worktrees/[id]/auto-yes/route.ts（バリデーション追加）",
+    "4. src/components/worktree/AutoYesConfirmDialog.tsx（ラジオボタンUI）",
+    "5. src/components/worktree/AutoYesToggle.tsx（duration伝搬 + HH:MM:SS）",
+    "6. src/components/worktree/WorktreeDetailRefactored.tsx（API呼び出し変更）",
+    "7. テスト更新・追加",
+    "8. ドキュメント更新"
+  ],
+  "security_requirements": [
+    "[SEC-MF-001] route.ts先頭でisValidWorktreeId()呼び出し（format validation）",
+    "[SEC-SF-001] JSON parseエラーハンドリング（400レスポンス）",
+    "[SEC-SF-002] typeof body.duration === 'number' チェック追加",
+    "ALLOWED_DURATIONS.includes(body.duration) ホワイトリストチェック"
+  ]
+}

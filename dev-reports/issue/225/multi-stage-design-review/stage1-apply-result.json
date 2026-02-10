@@ -1,0 +1,64 @@
+{
+  "issue_number": 225,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "AUTO_YES_TIMEOUT_MS定数とALLOWED_DURATIONSの重複 - 明示的な削除と移行の設計",
+        "sections_updated": ["6-5. auto-yes-manager.ts", "10. 設計上の決定事項とトレードオフ", "11. 実装順序", "9. テスト設計", "14. 実装チェックリスト", "制約条件"],
+        "status": "reflected",
+        "details": "AUTO_YES_TIMEOUT_MSの完全削除をセクション6-5に明記。実装順序ステップ2に削除手順を追加。テスト設計に回帰テストを追加。実装チェックリストに5項目のMF-001対応項目を追加。制約条件のDRY原則にMF-001を反映。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "formatTimeRemainingの配置場所の設計判断と抽出基準の明文化",
+        "sections_updated": ["6-3. formatTimeRemaining", "10. 設計上の決定事項とトレードオフ", "11. 実装順序", "14. 実装チェックリスト"],
+        "status": "reflected",
+        "details": "セクション6-3に配置場所の設計判断と抽出基準（2箇所以上で必要になった時点）を追記。決定事項テーブルにSF-001行を追加。実装順序ステップ5にSF-001注記を追加。"
+      },
+      {
+        "id": "SF-002",
+        "item": "Record<AutoYesDuration, string>によるコンパイル時キー補完保証の明文化",
+        "sections_updated": ["4. データモデル設計", "制約条件"],
+        "status": "reflected",
+        "details": "セクション4の型定義直後にSF-002注記ブロックを追加。制約条件セクションにSF-002の補足を追加。"
+      },
+      {
+        "id": "SF-003",
+        "item": "onConfirmコールバック型をnumberからAutoYesDurationに変更",
+        "sections_updated": ["6-1. AutoYesConfirmDialog", "6-2. AutoYesToggle", "6-4. WorktreeDetailRefactored", "6-5. auto-yes-manager.ts", "10. 設計上の決定事項とトレードオフ", "11. 実装順序", "14. 実装チェックリスト"],
+        "status": "reflected",
+        "details": "セクション6-1のonConfirm型をAutoYesDurationに変更。セクション6-2のonToggle/handleConfirm型を更新。セクション6-4のhandleAutoYesToggle型を更新。セクション6-5のsetAutoYesEnabledのdurationパラメータ型を更新。各セクションにSF-003注記を追加。実装チェックリストに4項目のSF-003対応項目を追加。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md",
+  "sections_updated": [
+    "4. データモデル設計",
+    "6-1. AutoYesConfirmDialog",
+    "6-2. AutoYesToggle",
+    "6-3. formatTimeRemaining",
+    "6-4. WorktreeDetailRefactored",
+    "6-5. auto-yes-manager.ts",
+    "9. テスト設計",
+    "10. 設計上の決定事項とトレードオフ",
+    "11. 実装順序",
+    "13. レビュー指摘事項サマリー (新規追加)",
+    "14. 実装チェックリスト (新規追加)",
+    "15. レビュー履歴 (新規追加)",
+    "制約条件"
+  ],
+  "sections_added": [
+    "13. レビュー指摘事項サマリー",
+    "14. 実装チェックリスト",
+    "15. レビュー履歴"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}

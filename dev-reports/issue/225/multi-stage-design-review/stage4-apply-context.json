@@ -1,0 +1,7 @@
+{
+  "issue_number": 225,
+  "review_result_path": "dev-reports/issue/225/multi-stage-design-review/stage4-review-result.json",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "target_document": "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md"
+}

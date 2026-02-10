@@ -1,0 +1,174 @@
+{
+  "issue_number": 225,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "title": "route.ts の worktreeId に対する isValidWorktreeId() バリデーション未適用",
+        "owasp_category": "A03:2021 Injection",
+        "severity": "medium",
+        "description": "route.ts の validateWorktreeExists() は DB 検索のみで worktreeId 形式検証を行っていない。auto-yes-manager.ts の startAutoYesPolling() 内では isValidWorktreeId() が適用されているが、route.ts の POST ハンドラで setAutoYesEnabled() を呼び出す前に params.id の形式検証が行われていない。設計書の Section 7 でも worktreeId 形式検証は「既存の isValidWorktreeId()」に依拠しているが、route.ts レベルでの明示的呼び出しが設計書に記載されていない。",
+        "recommendation": "route.ts の POST ハンドラの先頭で isValidWorktreeId(params.id) を呼び出し、不正な形式の場合は 400 エラーを返す。設計書 Section 7 の入力バリデーションテーブルに route.ts レベルの worktreeId 形式検証を追記する。",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/auto-yes/route.ts"
+        ]
+      },
+      {
+        "id": "SEC-MF-002",
+        "title": "404 エラーレスポンスでの worktreeId 反射による情報漏洩リスク",
+        "owasp_category": "A01:2021 Broken Access Control / A05:2021 Security Misconfiguration",
+        "severity": "low",
+        "description": "validateWorktreeExists() は 404 エラーレスポンスに worktreeId を含めて返している: `Worktree '${worktreeId}' not found`。これはユーザー入力の反射であり、潜在的な情報漏洩パターンである。これは既存コードの問題であり Issue #225 に固有ではないが、本変更で duration 値が 400 エラーメッセージに 'Allowed values: 3600000, 10800000, 28800000' として露出する設計となっている。ホワイトリスト値の露出は攻撃者にとって有益な情報ではないが、一貫したエラーメッセージポリシーが望まれる。",
+        "recommendation": "新規追加する duration バリデーションエラーは設計書通り 'Invalid duration value. Allowed values: ...' で問題ない（ホワイトリスト値は公開情報と同等）。ただし、worktreeId の反射パターンについてはプロジェクト全体の方針として別途検討を推奨する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "title": "request.json() のパースエラーハンドリング不足",
+        "owasp_category": "A03:2021 Injection",
+        "severity": "low",
+        "description": "route.ts の POST ハンドラで `await request.json()` を呼び出しているが、不正な JSON（例: 空ボディ、テキスト）を送信された場合に try-catch の外側で例外が発生する可能性がある。現在のコードでは try-catch ブロック内で呼び出されているため致命的ではないが、パースエラーが 500 として返される。設計書では body.duration の検証のみ記載されており、JSON パース失敗時の明示的な 400 レスポンスが設計されていない。",
+        "recommendation": "request.json() のパースエラーをキャッチして明示的に 400 レスポンスを返す。または、現在の try-catch で 500 が返る動作が許容範囲であることを設計書に明記する。",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/auto-yes/route.ts"
+        ]
+      },
+      {
+        "id": "SEC-SF-002",
+        "title": "duration の型チェック不足（typeof 検証なし）",
+        "owasp_category": "A03:2021 Injection",
+        "severity": "low",
+        "description": "設計書 Section 5 のバリデーションルールでは `ALLOWED_DURATIONS.includes(body.duration)` のみでホワイトリスト検証を行う設計だが、body.duration が数値型であることの事前検証（typeof body.duration === 'number'）が設計されていない。JavaScript の Array.includes() は厳密等価（===）を使用するため、文字列 '3600000' はホワイトリストにマッチしないが、型強制が行われる可能性のある中間処理がある場合のリスクを考慮し、明示的な型チェックを追加することでより堅牢になる。",
+        "recommendation": "duration バリデーションに typeof チェックを追加する: `if (body.duration !== undefined && (typeof body.duration !== 'number' || !ALLOWED_DURATIONS.includes(body.duration))) { return 400; }`。設計書 Section 5 のバリデーションルールに typeof チェックを追記する。",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/auto-yes/route.ts"
+        ]
+      },
+      {
+        "id": "SEC-SF-003",
+        "title": "TRUST_AND_SAFETY.md の更新に 8 時間リスクの具体的緩和策が不十分",
+        "owasp_category": "Security documentation",
+        "severity": "low",
+        "description": "設計書 Section 7 [Stage 3 SF-003] で TRUST_AND_SAFETY.md の更新内容が具体化されているが、8 時間の Auto-Yes 有効化による実際のリスクシナリオ（例: 離席中に Claude が広範なファイル削除を承認）についての具体的な記述が不足している。ユーザーが長時間 Auto-Yes を使用する際のベストプラクティスが明確でない。",
+        "recommendation": "TRUST_AND_SAFETY.md の更新内容に以下を追加する: (1) 長時間 Auto-Yes 使用時のベストプラクティス（例: CM_ROOT_DIR を限定的に設定する）、(2) 8 時間使用が想定されるユースケースの例示、(3) 離席時に Auto-Yes を手動 OFF にすることの推奨。"
+      },
+      {
+        "id": "SEC-SF-004",
+        "title": "AutoYesToggle 通知における lastAutoResponse の表示",
+        "owasp_category": "A03:2021 Injection (XSS)",
+        "severity": "low",
+        "description": "AutoYesToggle.tsx L78 で `setNotification(`Auto responded: \"${lastAutoResponse}\"`)`  として lastAutoResponse 値をそのまま通知テキストに組み込んでいる。React の JSX レンダリング（L143: `{notification}`）はデフォルトでエスケープされるため、XSS の直接的なリスクはない。ただし、lastAutoResponse は resolveAutoAnswer() から返される値（'y' または番号文字列）に限定されるため、実質的な攻撃面は存在しない。設計書でこのデータフローのセキュリティが明示的に分析されていない。",
+        "recommendation": "設計書 Section 7 のリスク評価テーブルに「UI 表示における自動応答内容の安全性」を追加し、React JSX のデフォルトエスケープと resolveAutoAnswer() の出力制約により XSS リスクがないことを明記する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-CO-001",
+        "title": "Auto-Yes 有効化の監査ログ（セキュリティイベントログ）",
+        "owasp_category": "A09:2021 Security Logging and Monitoring Failures",
+        "severity": "info",
+        "description": "Auto-Yes の有効化・無効化は console.info でログ出力されているが、セキュリティイベントとしての構造化ログは出力されていない。特に 8 時間の長時間有効化は、高権限操作の自動承認が長時間継続するため、セキュリティ監査の観点から構造化されたイベントログが有用。",
+        "recommendation": "将来的に、Auto-Yes の有効化/無効化を security-logger.ts の仕組みでイベントログとして記録することを検討する。特に duration 値を含めたログ記録が推奨される。"
+      },
+      {
+        "id": "SEC-CO-002",
+        "title": "DoS 保護: 短期間での Auto-Yes ON/OFF 連打によるリソース消費",
+        "owasp_category": "Availability / DoS",
+        "severity": "info",
+        "description": "Auto-Yes の POST エンドポイントに対してレートリミットが設定されていない。短期間での ON/OFF 連打により、startAutoYesPolling/stopAutoYesPolling が頻繁に呼ばれるとタイマーの生成・破棄が繰り返される。MAX_CONCURRENT_POLLERS の制限はあるが、同一 worktreeId に対する頻繁な切り替えに対する保護はない。",
+        "recommendation": "ローカルアプリケーションであるため緊急度は低いが、将来的にレートリミットまたは最小間隔制限（例: 2 秒以内の再有効化をブロック）の導入を検討する。"
+      },
+      {
+        "id": "SEC-CO-003",
+        "title": "duration 値の将来的な拡張時のセキュリティレビュープロセス",
+        "owasp_category": "Security process",
+        "severity": "info",
+        "description": "ALLOWED_DURATIONS に新しい値を追加する場合のセキュリティレビュープロセスが未定義。例えば 24 時間や 48 時間の追加は、セキュリティリスクプロファイルが大きく変わる。",
+        "recommendation": "ALLOWED_DURATIONS の変更（特に上限値の拡大）にはセキュリティレビューを必須とするチームルールを検討する。config ファイルに変更影響のコメントを追加することも有効。"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_Broken_Access_Control": {
+      "status": "pass",
+      "notes": "Auto-Yes API は worktree 存在確認を行い、ローカルアプリケーションのため認証は対象外。worktreeId のDB存在確認は既存パターンに準拠。"
+    },
+    "A02_Cryptographic_Failures": {
+      "status": "not_applicable",
+      "notes": "本変更では暗号化関連の処理は含まれない。duration 値は平文で十分。"
+    },
+    "A03_Injection": {
+      "status": "conditional_pass",
+      "notes": "ホワイトリストバリデーションによる duration 検証は適切。worktreeId の形式検証が route.ts レベルで未適用（SEC-MF-001）。typeof チェックの追加推奨（SEC-SF-002）。React JSX によるデフォルトエスケープにより XSS リスクはない。"
+    },
+    "A04_Insecure_Design": {
+      "status": "pass",
+      "notes": "設計パターン（ホワイトリスト、型安全コールバック、最大上限 8 時間）は適切。ユーザー確認ダイアログによるインフォームドコンセントが組み込まれている。"
+    },
+    "A05_Security_Misconfiguration": {
+      "status": "pass",
+      "notes": "デフォルト値（1 時間）が最小値であり、安全なデフォルト設定。エラーメッセージにおけるホワイトリスト値の露出は許容範囲。"
+    },
+    "A06_Vulnerable_Outdated_Components": {
+      "status": "not_applicable",
+      "notes": "本変更では新しい依存ライブラリの追加はない。"
+    },
+    "A07_Authentication_Failures": {
+      "status": "not_applicable",
+      "notes": "ローカルアプリケーションのため認証は対象外。"
+    },
+    "A08_Software_Data_Integrity_Failures": {
+      "status": "pass",
+      "notes": "サーバー側ホワイトリストにより、不正な duration 値の注入はブロックされる。クライアント側の AutoYesDuration 型制約とサーバー側検証の二重防御。"
+    },
+    "A09_Security_Logging": {
+      "status": "conditional_pass",
+      "notes": "基本的なログ出力（console.info/warn）は存在するが、セキュリティイベントとしての構造化ログは未実装（SEC-CO-001）。"
+    },
+    "A10_SSRF": {
+      "status": "not_applicable",
+      "notes": "本変更ではサーバー側からの外部リクエストは発生しない。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useAutoYes.ts",
+    "docs/TRUST_AND_SAFETY.md"
+  ],
+  "design_doc_security_section_evaluation": {
+    "section_7_completeness": "mostly_complete",
+    "covered_topics": [
+      "duration ホワイトリストバリデーション",
+      "worktreeId 形式検証（既存参照）",
+      "cliToolId ホワイトリスト（既存参照）",
+      "クライアント型制約",
+      "最大 8 時間の上限設定",
+      "デフォルト値のフォールバック"
+    ],
+    "missing_topics": [
+      "route.ts レベルでの worktreeId 形式検証の明示的記載",
+      "JSON パースエラーハンドリング",
+      "duration の typeof チェック",
+      "UI 表示内容（lastAutoResponse）の安全性分析",
+      "セキュリティイベントログの方針"
+    ]
+  },
+  "timestamp": "2026-02-10T12:00:00Z"
+}

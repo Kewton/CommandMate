@@ -1,12 +1,14 @@
 /**
  * Tests for AutoYesConfirmDialog component
  *
+ * Issue #225: Updated for duration selection feature
  * @vitest-environment jsdom
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { AutoYesConfirmDialog } from '@/components/worktree/AutoYesConfirmDialog';
+import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config';
 
 describe('AutoYesConfirmDialog', () => {
   const defaultProps = {
@@ -59,11 +61,78 @@ describe('AutoYesConfirmDialog', () => {
     });
   });
 
+  describe('Duration Selection Buttons', () => {
+    it('should display three duration buttons', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      expect(screen.getByText('1時間')).toBeDefined();
+      expect(screen.getByText('3時間')).toBeDefined();
+      expect(screen.getByText('8時間')).toBeDefined();
+    });
+
+    it('should have 1 hour selected by default (highlighted style)', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      const btn1h = screen.getByText('1時間');
+      expect(btn1h.className).toContain('border-blue-600');
+    });
+
+    it('should display "有効時間" section header', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      expect(screen.getByText('有効時間')).toBeDefined();
+    });
+
+    it('should allow changing duration selection', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      const btn3h = screen.getByText('3時間');
+
+      fireEvent.click(btn3h);
+      expect(btn3h.className).toContain('border-blue-600');
+
+      const btn1h = screen.getByText('1時間');
+      expect(btn1h.className).not.toContain('border-blue-600');
+    });
+  });
+
+  describe('Dynamic Text', () => {
+    it('should display default duration text initially', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      expect(screen.getByText(/1時間後に自動でOFFになります/)).toBeDefined();
+    });
+
+    it('should update duration text when 3 hours is selected', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      fireEvent.click(screen.getByText('3時間'));
+      expect(screen.getByText(/3時間後に自動でOFFになります/)).toBeDefined();
+    });
+
+    it('should update duration text when 8 hours is selected', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      fireEvent.click(screen.getByText('8時間'));
+      expect(screen.getByText(/8時間後に自動でOFFになります/)).toBeDefined();
+    });
+  });
+
   describe('Interactions', () => {
-    it('should call onConfirm when confirm button is clicked', () => {
+    it('should call onConfirm with default duration when confirm button is clicked', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
       fireEvent.click(screen.getByText('同意して有効化'));
       expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION);
+    });
+
+    it('should call onConfirm with selected 3-hour duration', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      fireEvent.click(screen.getByText('3時間'));
+      fireEvent.click(screen.getByText('同意して有効化'));
+      expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(10800000);
+    });
+
+    it('should call onConfirm with selected 8-hour duration', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      fireEvent.click(screen.getByText('8時間'));
+      fireEvent.click(screen.getByText('同意して有効化'));
+      expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(28800000);
     });
 
     it('should call onCancel when cancel button is clicked', () => {

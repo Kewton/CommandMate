@@ -151,4 +151,35 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
     expect(globalThis.__autoYesStates).toBeInstanceOf(Map);
     expect(globalThis.__autoYesPollerStates).toBeInstanceOf(Map);
   });
+
+  // Issue #225 [Stage 3 SF-004]: Custom duration persistence across module reload
+  test('should persist 3-hour duration in-memory state after module reload', async () => {
+    // 1. Initial module load - set state with custom 3-hour duration
+    const { setAutoYesEnabled, getAutoYesState, clearAllAutoYesStates, clearAllPollerStates } =
+      await import('@/lib/auto-yes-manager');
+
+    // Clear any existing state
+    clearAllAutoYesStates();
+    clearAllPollerStates();
+
+    // Set auto-yes enabled with 3-hour duration (10800000ms)
+    const stateBeforeReload = setAutoYesEnabled('test-duration-reload', true, 10800000);
+    expect(stateBeforeReload.enabled).toBe(true);
+    const expectedExpiresAt = stateBeforeReload.expiresAt;
+
+    // Verify expiresAt reflects 3-hour duration (not default 1-hour)
+    expect(expectedExpiresAt - stateBeforeReload.enabledAt).toBe(10800000);
+
+    // 2. Simulate module reload
+    vi.resetModules();
+
+    // 3. Reimport the module
+    const { getAutoYesState: getAutoYesStateAfter } =
+      await import('@/lib/auto-yes-manager');
+
+    // 4. Verify state persists with correct expiresAt after reload
+    const stateAfterReload = getAutoYesStateAfter('test-duration-reload');
+    expect(stateAfterReload?.enabled).toBe(true);
+    expect(stateAfterReload?.expiresAt).toBe(expectedExpiresAt);
+  });
 });

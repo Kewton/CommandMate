@@ -1,0 +1,105 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "シナリオ1: ユーザーがAuto-Yes有効化ダイアログを開き、デフォルトで1時間が選択されていることを確認する",
+      "result": "passed",
+      "evidence": "AutoYesConfirmDialog.test.tsx: 'should have 1 hour selected by default' - PASSED. useState(DEFAULT_AUTO_YES_DURATION) initializes to 3600000 (1 hour). Radio buttons confirm [0].checked=true, [1].checked=false, [2].checked=false."
+    },
+    {
+      "scenario": "シナリオ2: ユーザーが3時間を選択し、確認ボタンを押すとexpiresAtが現在時刻+3時間に設定される",
+      "result": "passed",
+      "evidence": "AutoYesConfirmDialog.test.tsx: 'should call onConfirm with selected 3-hour duration' - PASSED. auto-yes-manager.test.ts: 'should enable with specified duration (3 hours)' - PASSED. expiresAt = now + 10800000."
+    },
+    {
+      "scenario": "シナリオ3: ユーザーが8時間を選択し、カウントダウン表示がH:MM:SS形式で表示される",
+      "result": "passed",
+      "evidence": "AutoYesToggle.test.tsx: 'should display multi-hour format for 8 hours' - PASSED. timeDisplay matches /^[78]:\\d{2}:\\d{2}$/ (H:MM:SS format). auto-yes-manager.test.ts: 'should enable with specified duration (8 hours)' - PASSED."
+    },
+    {
+      "scenario": "シナリオ4: APIに不正なduration値（例: 999999）を送信すると400エラーが返される",
+      "result": "passed",
+      "evidence": "Static code analysis of route.ts lines 120-129: ALLOWED_DURATIONS.includes() whitelist check rejects any value not in [3600000, 10800000, 28800000]. typeof body.duration !== 'number' type guard also present. Returns 400 with error message 'Invalid duration value. Allowed values: 3600000, 10800000, 28800000'."
+    },
+    {
+      "scenario": "シナリオ5: 既存のクライアントがdurationフィールドを省略してAPIを呼び出すとデフォルト1時間が適用される",
+      "result": "passed",
+      "evidence": "route.ts line 120-121: duration defaults to DEFAULT_AUTO_YES_DURATION when body.duration is undefined. auto-yes-manager.test.ts: 'should use default duration when duration is undefined (backward compatibility)' - PASSED. expiresAt = now + 3600000."
+    },
+    {
+      "scenario": "シナリオ6: ラジオボタン選択を変更すると、説明テキストが「X時間後に自動でOFFになります。」と動的に変わる",
+      "result": "passed",
+      "evidence": "AutoYesConfirmDialog.test.tsx Dynamic Text tests all PASSED: 'should display default duration text initially' (1時間後に自動でOFF), 'should update duration text when 3 hours is selected' (3時間後に自動でOFF), 'should update duration text when 8 hours is selected' (8時間後に自動でOFF). Template: DURATION_LABELS[selectedDuration] + '後に自動でOFFになります。'"
+    },
+    {
+      "scenario": "シナリオ7: AUTO_YES_TIMEOUT_MS定数がコードベースから完全に削除されている",
+      "result": "passed",
+      "evidence": "grep for 'AUTO_YES_TIMEOUT_MS' in src/ returns 0 matches. Only references are in tests/unit/lib/auto-yes-manager.test.ts as a regression test verifying the constant is NOT exported ('AUTO_YES_TIMEOUT_MS' in managerModule === false). TypeScript compilation passes cleanly (npx tsc --noEmit)."
+    },
+    {
+      "scenario": "シナリオ8: 既存のAuto-Yes自動応答機能が引き続き正常に動作する",
+      "result": "passed",
+      "evidence": "auto-yes-manager.test.ts: All 53 tests PASSED including polling, prompt detection, auto-response, thinking state skip, cursor-based navigation, backoff, and duplicate prevention. auto-yes-persistence.test.ts: All 6 integration tests PASSED including state persistence across module reloads. useAutoYes.ts hook unchanged - resolveAutoAnswer, DUPLICATE_PREVENTION_WINDOW_MS, prompt-response API call all intact."
+    },
+    {
+      "scenario": "シナリオ9: formatTimeRemaining関数が59分59秒の場合はMM:SS形式、1時間0秒の場合はH:MM:SS形式で表示する",
+      "result": "passed",
+      "evidence": "AutoYesToggle.test.tsx formatTimeRemaining tests all PASSED: 'should display MM:SS format when under 1 hour' matches /^\\d{2}:\\d{2}$/, 'should display H:MM:SS format when 1 hour or more' matches /^\\d+:\\d{2}:\\d{2}$/. Code analysis: hours > 0 triggers H:MM:SS branch, otherwise MM:SS."
+    },
+    {
+      "scenario": "シナリオ10: モバイル画面（size=sm Modal）でラジオボタンUIが正しく表示され、タッチターゲットが44px以上確保されている",
+      "result": "passed",
+      "evidence": "AutoYesConfirmDialog.tsx line 46: Modal size='sm'. Line 73: each radio label has style={{ minHeight: '44px' }} ensuring 44px touch targets per WCAG 2.5.5 guidelines. AutoYesConfirmDialog.test.tsx: 'should display three radio buttons for duration selection' - PASSED (3 radios rendered). Mobile layout in WorktreeDetailRefactored.tsx uses AutoYesToggle with inline prop, which renders AutoYesConfirmDialog inside a Modal."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Auto-Yes有効化ダイアログに1時間/3時間/8時間のラジオボタンが表示されること",
+      "verified": true
+    },
+    {
+      "criterion": "デフォルト選択が1時間であること",
+      "verified": true
+    },
+    {
+      "criterion": "選択した時間に応じてexpiresAtが正しく設定されること",
+      "verified": true
+    },
+    {
+      "criterion": "カウントダウンタイマーが選択時間に基づいて動作すること",
+      "verified": true
+    },
+    {
+      "criterion": "3時間/8時間選択時のカウントダウン表示がHH:MM:SS形式で視認しやすいこと（1時間未満はMM:SS形式を維持）",
+      "verified": true
+    },
+    {
+      "criterion": "許可されていないduration値がAPIで拒否されること（400レスポンス）",
+      "verified": true
+    },
+    {
+      "criterion": "duration未指定時にデフォルト値（3600000）が適用されること（後方互換性）",
+      "verified": true
+    },
+    {
+      "criterion": "AutoYesConfirmDialogの説明テキストが選択時間に応じて動的に変わること",
+      "verified": true
+    },
+    {
+      "criterion": "既存のAuto-Yes動作（自動応答、ポーリング、重複防止）に影響がないこと",
+      "verified": true
+    },
+    {
+      "criterion": "モバイル表示でもラジオボタンが正しく表示されること",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/lib/auto-yes-manager.test.ts (53 tests PASSED)",
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx (18 tests PASSED)",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx (9 tests PASSED)",
+    "tests/integration/auto-yes-persistence.test.ts (6 tests PASSED)",
+    "npx tsc --noEmit (0 errors)"
+  ],
+  "message": "すべての受入条件を満たしています。全86テストケースが成功し、10件の受入条件すべてが検証済みです。"
+}

@@ -1,0 +1,171 @@
+{
+  "issue_number": 225,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-10",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "current-output/route.ts が影響範囲の「関連コンポーネント（変更不要の見込み）」にも「変更対象ファイル」にも記載されていないが、AutoYesStateのexpiresAtコメント（L26: 'enabledAt + 3600000ms = 1 hour'）が不正確になる。またGETレスポンスの autoYes.expiresAt 値はsetAutoYesEnabledの戻り値に依存しており、duration変更の影響を間接的に受ける。このルートは変更不要だが、影響範囲として認識すべき",
+        "location": "影響範囲 セクション",
+        "recommendation": "「関連コンポーネント（変更不要の見込み）」セクションに src/app/api/worktrees/[id]/current-output/route.ts を追加し、「Auto-Yes状態をGETレスポンスに含めるが、getAutoYesState()経由のため変更不要」と注記する。また、AutoYesState interfaceのJSDocコメント（auto-yes-manager.ts L26: 'enabledAt + 3600000ms = 1 hour'）をduration可変に対応した記述に更新するタスクを実装タスクに追加すべき",
+        "evidence": "src/app/api/worktrees/[id]/current-output/route.ts L15: import { getAutoYesState, getLastServerResponseTimestamp } from '@/lib/auto-yes-manager'; L105-106: const autoYesState = getAutoYesState(params.id); L128-130: autoYes: { enabled: autoYesState?.enabled ?? false, expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null }。src/lib/auto-yes-manager.ts L26: '/** Timestamp when auto-yes expires (enabledAt + 3600000ms = 1 hour) */' が固定値前提のコメント"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "既存のコンポーネントテスト（AutoYesToggle.test.tsx, AutoYesConfirmDialog.test.tsx）の更新タスクがIssueに記載されていない。シグネチャ変更（onConfirm: (duration: number) => void, onToggle: (enabled: boolean, duration?: number) => Promise<void>）により既存テストが破壊される",
+        "location": "実装タスク セクション",
+        "recommendation": "実装タスクに以下を追加すべき: (1) tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx の更新（onConfirmコールバックがduration引数を渡すことの検証追加、ラジオボタン選択UIのテスト追加）、(2) tests/unit/components/worktree/AutoYesToggle.test.tsx の更新（onToggle(true)の呼び出しがonToggle(true, duration)に変わることの検証、handleConfirmでのduration伝搬テスト追加）",
+        "evidence": "tests/unit/components/worktree/AutoYesToggle.test.tsx L43: expect(defaultProps.onToggle).toHaveBeenCalledWith(true) -- duration引数なしのアサーション。tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx L66: expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1) -- 引数チェックなし。これらのテストはシグネチャ変更後にアサーションが不正確になる"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "integration/auto-yes-persistence.test.tsがsetAutoYesEnabledを2引数(worktreeId, enabled)で呼び出しており、シグネチャ変更（3引数: worktreeId, enabled, duration?）後に影響を受ける可能性がある。後方互換性があるため動作は維持されるが、テストファイルリストとして認識すべき",
+        "location": "影響範囲 セクション",
+        "recommendation": "影響範囲テーブルにtests/integration/auto-yes-persistence.test.tsを追加し、「setAutoYesEnabledの呼び出しがデフォルトdurationで動作することの確認が必要（既存テストはそのまま動作する見込み）」と注記する。また、duration指定ありでの永続化テストケースの追加も検討すべき",
+        "evidence": "tests/integration/auto-yes-persistence.test.ts L39: setAutoYesEnabled('test-worktree-reload', true) -- 2引数呼び出し。tests/integration/auto-yes-persistence.test.ts L73: setAutoYesEnabled('test-poller-reload', true) -- 同様"
+      },
+      {
+        "id": "SF-3",
+        "category": "ドキュメント更新",
+        "issue": "docs/user-guide/webapp-guide.md のAuto Yesモードセクションに有効時間の選択に関する記載がない。現在は「トグルをオンにする」としか記載されておらず、有効時間の選択UIが追加される変更に対応する更新が必要",
+        "location": "影響範囲 セクション",
+        "recommendation": "実装タスクまたは影響範囲にドキュメント更新タスクを追加: docs/user-guide/webapp-guide.md の「Auto Yesモード」セクションに「有効時間を1時間/3時間/8時間から選択可能」の記述を追加。また docs/TRUST_AND_SAFETY.md にも最大有効時間が8時間に拡大されたことの注記が望ましい",
+        "evidence": "docs/user-guide/webapp-guide.md L161-176: Auto Yesモードの説明に有効時間の記載なし。docs/TRUST_AND_SAFETY.md L42-49: Auto Yesモードのリスク説明に時間制限の記載なし"
+      },
+      {
+        "id": "SF-4",
+        "category": "テスト範囲",
+        "issue": "auto-yes/route.ts のPOSTハンドラにdurationバリデーションを追加するが、このルートのAPIテスト（単体/統合テスト）が存在しない。バリデーションロジック（ALLOWED_DURATIONSチェック、不正値の400レスポンス、デフォルト値適用）のテスト方針が不明確",
+        "location": "実装タスク セクション",
+        "recommendation": "route.tsのAPIハンドラのテスト方針を明示すべき。選択肢は: (1) auto-yes-manager.tsのユニットテストでdurationバリデーションロジックをカバーする（バリデーション関数をmanagerに切り出す場合）、(2) route.tsの統合テストを新規追加する、(3) 受入条件「許可されていないduration値がAPIで拒否されること」をE2E/手動テストで確認する。現在のIssueではどのアプローチを取るか未記載",
+        "evidence": "tests/ ディレクトリにroute.ts関連のテストファイルが存在しない。ALLOWED_DURATIONSバリデーションはroute.ts内で実施予定だが、テストカバレッジの方針が未定義"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdのモジュール説明テーブルにauto-yes-manager.tsのdurationパラメータ関連の更新が必要になる。現在の説明は「Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161）」のみ",
+        "location": "CLAUDE.md 主要機能モジュール テーブル",
+        "recommendation": "実装完了後にCLAUDE.mdのauto-yes-manager.tsの説明を更新し、Issue #225の変更（duration選択機能、ALLOWED_DURATIONS定数）を追記する。docs/implementation-history.mdへのIssue #225エントリ追加も望ましい",
+        "evidence": "CLAUDE.md内のauto-yes-manager.ts説明にduration/ALLOWED_DURATIONSの記載なし"
+      },
+      {
+        "id": "NTH-2",
+        "category": "破壊的変更",
+        "issue": "AUTO_YES_TIMEOUT_MS定数がprivate（モジュール内const、export無し）のため、外部からの参照はなく削除/置き換えによる破壊的変更リスクは低い。ただし、ALLOWED_DURATIONSとDEFAULT_AUTO_YES_DURATIONに置き換える際のAUTO_YES_TIMEOUT_MSの扱い（削除 or 維持）を明示するとよい",
+        "location": "ALLOWED_DURATIONS定数と型定義 セクション",
+        "recommendation": "AUTO_YES_TIMEOUT_MS定数をDEFAULT_AUTO_YES_DURATIONに置き換え、AUTO_YES_TIMEOUT_MSは削除する方針を明記するとよい。setAutoYesEnabled内のexpiresAt計算（L187: now + AUTO_YES_TIMEOUT_MS）がnow + (duration ?? DEFAULT_AUTO_YES_DURATION)に変更されることを確認",
+        "evidence": "src/lib/auto-yes-manager.ts L68: const AUTO_YES_TIMEOUT_MS = 3600000; -- 非exportのmodule-scoped定数。L187: expiresAt: now + AUTO_YES_TIMEOUT_MS -- 唯一の使用箇所"
+      },
+      {
+        "id": "NTH-3",
+        "category": "移行考慮",
+        "issue": "ALLOWED_DURATIONSをクライアントコンポーネント（AutoYesConfirmDialog.tsx）からimportする設計について、Next.jsのServer/Client Component境界の考慮が記載されていない。auto-yes-manager.tsはサーバーサイドモジュール（Node.js API、tmux操作等）だが、ALLOWED_DURATIONS定数のみクライアントで使用する",
+        "location": "ALLOWED_DURATIONS定数と型定義 セクション",
+        "recommendation": "ALLOWED_DURATIONSの定義場所について、クライアントからのimportが tree-shaking で問題ないか確認する方針を記載するとよい。選択肢: (1) auto-yes-manager.tsからexportし、Next.jsバンドラのtree-shakingに頼る（サーバー専用関数はクライアントバンドルに含まれない想定）、(2) 共有configファイル（例: src/config/auto-yes-durations.ts）に分離する。Issue記載の(1)の方針は現実的だが、auto-yes-manager.tsがglobalThisやtmux操作をimportしているため、バンドルサイズへの影響を確認すべき",
+        "evidence": "src/lib/auto-yes-manager.ts L1-17: import { captureSessionOutput } from './cli-session'; import { sendKeys, sendSpecialKeys } from './tmux'; 等のサーバー専用importが多数。AutoYesConfirmDialog.tsx は 'use client' コンポーネント"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "主要変更対象。setAutoYesEnabled()にdurationパラメータ追加、ALLOWED_DURATIONS/DEFAULT_AUTO_YES_DURATION定数追加、AUTO_YES_TIMEOUT_MS削除/置換、AutoYesState interfaceのJSDocコメント更新"
+    },
+    {
+      "file": "src/components/worktree/AutoYesConfirmDialog.tsx",
+      "relevance": "ラジオボタンUI追加、onConfirm型変更。'use client'コンポーネントからALLOWED_DURATIONSをimportする設計"
+    },
+    {
+      "file": "src/components/worktree/AutoYesToggle.tsx",
+      "relevance": "onToggleシグネチャ変更、handleConfirmでduration伝搬。formatTimeRemaining()のHH:MM:SS対応検討"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "handleAutoYesToggle(L1149-1164)にduration引数追加、API送信bodyにduration含める"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "POSTハンドラにdurationフィールド追加・ALLOWED_DURATIONSバリデーション追加"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "影響範囲（変更不要）: getAutoYesState()経由でautoYes.expiresAtをGETレスポンスに含める。duration変更の間接的影響"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "relevance": "既存テスト更新必要（L64のexpiresAt固定値テスト分割）。Issueに記載済み"
+    },
+    {
+      "file": "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+      "relevance": "既存テスト更新必要（L43のonToggle(true)アサーションがduration追加で不正確になる）。Issueに未記載"
+    },
+    {
+      "file": "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+      "relevance": "既存テスト更新必要（onConfirmの引数チェック追加、ラジオボタンUIテスト追加）。Issueに未記載"
+    },
+    {
+      "file": "tests/integration/auto-yes-persistence.test.ts",
+      "relevance": "setAutoYesEnabledの2引数呼び出し。後方互換性により動作維持の見込みだが影響範囲として認識すべき"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/user-guide/webapp-guide.md",
+      "relevance": "Auto Yesモードセクションに有効時間選択の記述追加が必要"
+    },
+    {
+      "file": "docs/TRUST_AND_SAFETY.md",
+      "relevance": "Auto Yesモードのリスク説明に最大有効時間の拡大を注記すべき"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "auto-yes-manager.tsモジュール説明にduration機能の追記が必要"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "Issue #225のエントリ追加が必要"
+    }
+  ],
+  "impact_analysis": {
+    "breaking_changes": {
+      "status": "none",
+      "detail": "全ての関数シグネチャ変更はオプショナルパラメータ（duration?）の追加であり、後方互換性は維持される。AUTO_YES_TIMEOUT_MSは非exportのためモジュール外への影響なし"
+    },
+    "db_migration": {
+      "status": "not_required",
+      "detail": "Auto-Yes状態はインメモリ管理（globalThis Map）のため、DB変更は不要。Issue記載通り"
+    },
+    "deployment": {
+      "status": "no_special_steps",
+      "detail": "新規環境変数・設定ファイルの追加なし。ビルド・デプロイの特別な手順は不要"
+    },
+    "security": {
+      "status": "acceptable_with_note",
+      "detail": "ALLOWED_DURATIONSホワイトリスト方式によるサーバー側バリデーションが設計されており、任意のduration値の注入は防止される。最大8時間のAuto-Yes有効化は既存の1時間と比べリスク増大するが、上限設定により許容範囲"
+    },
+    "performance": {
+      "status": "no_impact",
+      "detail": "ポーリング間隔・バックオフロジックに変更なし。UIのラジオボタン追加のみでレンダリングへの影響は軽微"
+    },
+    "mobile_responsiveness": {
+      "status": "needs_verification",
+      "detail": "ラジオボタン3つの追加によりAutoYesConfirmDialogの高さが増加する。受入条件に「モバイル表示でもラジオボタンが正しく表示されること」が記載されているが、Modal size='sm'での表示確認が必要"
+    }
+  }
+}

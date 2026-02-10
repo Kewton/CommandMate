@@ -1,0 +1,43 @@
+{
+  "issue_number": 225,
+  "feature_summary": "Auto-Yesモード有効化時に、1時間/3時間/8時間から有効時間を選択できる機能",
+  "acceptance_criteria": [
+    "Auto-Yes有効化ダイアログに1時間/3時間/8時間のラジオボタンが表示されること",
+    "デフォルト選択が1時間であること",
+    "選択した時間に応じてexpiresAtが正しく設定されること",
+    "カウントダウンタイマーが選択時間に基づいて動作すること",
+    "3時間/8時間選択時のカウントダウン表示がHH:MM:SS形式で視認しやすいこと（1時間未満はMM:SS形式を維持）",
+    "許可されていないduration値がAPIで拒否されること（400レスポンス）",
+    "duration未指定時にデフォルト値（3600000）が適用されること（後方互換性）",
+    "AutoYesConfirmDialogの説明テキストが選択時間に応じて動的に変わること",
+    "既存のAuto-Yes動作（自動応答、ポーリング、重複防止）に影響がないこと",
+    "モバイル表示でもラジオボタンが正しく表示されること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: ユーザーがAuto-Yes有効化ダイアログを開き、デフォルトで1時間が選択されていることを確認する",
+    "シナリオ2: ユーザーが3時間を選択し、確認ボタンを押すとexpiresAtが現在時刻+3時間に設定される",
+    "シナリオ3: ユーザーが8時間を選択し、カウントダウン表示がH:MM:SS形式で表示される",
+    "シナリオ4: APIに不正なduration値（例: 999999）を送信すると400エラーが返される",
+    "シナリオ5: 既存のクライアントがdurationフィールドを省略してAPIを呼び出すとデフォルト1時間が適用される",
+    "シナリオ6: ラジオボタン選択を変更すると、説明テキストが「X時間後に自動でOFFになります。」と動的に変わる",
+    "シナリオ7: AUTO_YES_TIMEOUT_MS定数がコードベースから完全に削除されている",
+    "シナリオ8: 既存のAuto-Yes自動応答機能が引き続き正常に動作する",
+    "シナリオ9: formatTimeRemaining関数が59分59秒の場合はMM:SS形式、1時間0秒の場合はH:MM:SS形式で表示する",
+    "シナリオ10: モバイル画面（size=sm Modal）でラジオボタンUIが正しく表示され、タッチターゲットが44px以上確保されている"
+  ],
+  "implemented_files": [
+    "src/config/auto-yes-config.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "test_files": [
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+    "tests/integration/auto-yes-persistence.test.ts",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ]
+}

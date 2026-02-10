@@ -50,6 +50,7 @@ import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import type { Worktree, ChatMessage, PromptData, GitStatus } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { deriveCliStatus } from '@/types/sidebar';
+import type { AutoYesDuration } from '@/config/auto-yes-config';
 
 // ============================================================================
 // Types
@@ -1145,13 +1146,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     [fetchMessages, fetchCurrentOutput]
   );
 
-  /** Handle auto-yes toggle */
-  const handleAutoYesToggle = useCallback(async (enabled: boolean): Promise<void> => {
+  /** Handle auto-yes toggle (Issue #225: duration parameter added) */
+  const handleAutoYesToggle = useCallback(async (enabled: boolean, duration?: AutoYesDuration): Promise<void> => {
     try {
       const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, cliToolId: activeCliTab }),
+        body: JSON.stringify({ enabled, cliToolId: activeCliTab, duration }),
       });
       if (response.ok) {
         const data = await response.json();

@@ -15,6 +15,7 @@ import { resolveAutoAnswer } from './auto-yes-resolver';
 import { sendKeys, sendSpecialKeys } from './tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, detectThinking, buildDetectPromptOptions } from './cli-patterns';
+import { DEFAULT_AUTO_YES_DURATION, type AutoYesDuration } from '@/config/auto-yes-config';
 
 /** Auto yes state for a worktree */
 export interface AutoYesState {
@@ -22,7 +23,7 @@ export interface AutoYesState {
   enabled: boolean;
   /** Timestamp when auto-yes was enabled (Date.now()) */
   enabledAt: number;
-  /** Timestamp when auto-yes expires (enabledAt + 3600000ms = 1 hour) */
+  /** Timestamp when auto-yes expires (enabledAt + selected duration) */
   expiresAt: number;
 }
 
@@ -63,9 +64,6 @@ export const MAX_CONSECUTIVE_ERRORS = 5;
 
 /** Maximum concurrent pollers (DoS protection) */
 export const MAX_CONCURRENT_POLLERS = 50;
-
-/** Timeout duration: 1 hour in milliseconds */
-const AUTO_YES_TIMEOUT_MS = 3600000;
 
 /**
  * Number of lines from the end to check for thinking indicators (Issue #191)
@@ -177,14 +175,17 @@ export function getAutoYesState(worktreeId: string): AutoYesState | null {
 
 /**
  * Set the auto-yes enabled state for a worktree
+ * @param duration - Optional duration in milliseconds (must be an ALLOWED_DURATIONS value).
+ *                   Defaults to DEFAULT_AUTO_YES_DURATION (1 hour) when omitted.
  */
-export function setAutoYesEnabled(worktreeId: string, enabled: boolean): AutoYesState {
+export function setAutoYesEnabled(worktreeId: string, enabled: boolean, duration?: AutoYesDuration): AutoYesState {
   if (enabled) {
     const now = Date.now();
+    const effectiveDuration = duration ?? DEFAULT_AUTO_YES_DURATION;
     const state: AutoYesState = {
       enabled: true,
       enabledAt: now,
-      expiresAt: now + AUTO_YES_TIMEOUT_MS,
+      expiresAt: now + effectiveDuration,
     };
     autoYesStates.set(worktreeId, state);
     return state;

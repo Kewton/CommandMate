@@ -1,0 +1,59 @@
+{
+  "issue_number": 225,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "「データフロー（duration伝搬経路）」セクションを追加。AutoYesConfirmDialog -> AutoYesToggle -> WorktreeDetailRefactored -> API -> auto-yes-managerの全経路をASCIIフロー図で明示。各コンポーネントの具体的な型変更（onConfirm, onToggle, handleAutoYesToggle, setAutoYesEnabled）を列挙"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "実装タスクにAutoYesConfirmDialog.tsxの固定テキスト「1時間後に自動でOFFになります。」を選択時間に応じた動的テキストに変更するタスクを追加。影響範囲テーブルにも「固定テキスト動的化」を追記。受入条件に「AutoYesConfirmDialogの説明テキストが選択時間に応じて動的に変わること」を追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "「ALLOWED_DURATIONS定数と型定義」セクションを追加。定義場所をsrc/lib/auto-yes-manager.ts（既存のAUTO_YES_TIMEOUT_MSと同じファイル）に指定。ALLOWED_DURATIONS, AutoYesDuration型, DEFAULT_AUTO_YES_DURATION定数のTypeScriptコード例を記載。サーバー/クライアント両方からの参照方針を明示"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "実装タスクに「既存テストの更新（tests/unit/lib/auto-yes-manager.test.ts L64のexpiresAt固定値テストをデフォルトdurationテスト+duration指定テストに分割）」を追加。影響範囲テーブルにtests/unit/lib/auto-yes-manager.test.tsを追加"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "「APIリクエスト/レスポンススキーマ」セクションを追加。POSTリクエストボディの具体例・フィールド定義テーブル（型、必須、デフォルト値、説明）・成功レスポンス(200)・バリデーションエラーレスポンス(400)を記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "「関連Issue」セクションを追加。#61 Auto-Yesモード追加、#138 バックグラウンドポーリング、#153 ホットリロード状態不整合へのリンクを記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "受入条件に「3時間/8時間選択時のカウントダウン表示が視認しやすいこと（HH:MM:SS形式の検討）」を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/225"
+  }
+}

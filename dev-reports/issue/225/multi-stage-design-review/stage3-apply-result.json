@@ -1,0 +1,63 @@
+{
+  "issue_number": 225,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "間接依存ファイル4件（current-output/route.ts、session-cleanup.ts、useAutoYes.ts、auto-yes-resolver.ts）の影響なし確認を設計書に追加",
+        "section_updated": "セクション2: 影響範囲分析（影響なし確認済み間接依存ファイル）",
+        "status": "reflected"
+      },
+      {
+        "id": "MF-002",
+        "item": "既存テストアサーション（AutoYesConfirmDialog.test.tsx L66、AutoYesToggle.test.tsx L43）の破壊的変更を設計書に明記",
+        "section_updated": "セクション9: 既存テスト破壊的変更の影響、セクション15: 実装チェックリスト",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "WorktreeDetailRefactored.test.tsxのAutoYesToggleモック更新をテスト対象表とチェックリストに追加",
+        "section_updated": "セクション9: テスト対象と方針、セクション15: 実装チェックリスト",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "session-cleanup.tsを影響なし確認済みリストに追加（MF-001と統合）",
+        "section_updated": "セクション2: 影響範囲分析（影響なし確認済み間接依存ファイル）",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-003",
+        "item": "TRUST_AND_SAFETY.md更新の具体的な内容ガイダンス（最大8時間拡張、リスク評価、推奨事項）を追加",
+        "section_updated": "セクション7: セキュリティドキュメント更新",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-004",
+        "item": "カスタムduration永続性の結合テストケースをテスト設計に追加",
+        "section_updated": "セクション9: テスト対象と方針、セクション9: カスタムduration永続性の結合テスト、セクション15: 実装チェックリスト",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md",
+  "sections_updated": [
+    "セクション2: 影響範囲分析（新規サブセクション: 直接変更対象ファイル、影響なし確認済み間接依存ファイル）",
+    "セクション7: セキュリティドキュメント更新（TRUST_AND_SAFETY.md具体的更新内容追加）",
+    "セクション9: テスト設計（既存テスト破壊的変更の影響、テスト対象表更新、カスタムduration永続性テスト追加）",
+    "セクション13: 実装ステータス（Stage 3反映済みに更新）",
+    "セクション14: レビュー指摘事項サマリー（Stage 3セクション追加）",
+    "セクション14: レビュー評価（Stage 3スコア追加）",
+    "セクション15: 実装チェックリスト（影響分析対応セクション追加）",
+    "セクション16: レビュー履歴（Stage 3行追加）",
+    "フッター（Stage 3タイムスタンプ追加）"
+  ],
+  "timestamp": "2026-02-10T12:30:00Z"
+}

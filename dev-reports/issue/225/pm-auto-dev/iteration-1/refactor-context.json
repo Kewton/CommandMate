@@ -1,0 +1,37 @@
+{
+  "issue_number": 225,
+  "refactor_targets": [
+    "src/config/auto-yes-config.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "before_tests": 113,
+    "before_coverage": 85.0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（変数名の明確化、コメントの追加）",
+    "重複コードの削除（DRY原則）",
+    "関数の単一責任原則（SRP）確認",
+    "エッジケースのテストカバレッジ向上",
+    "TypeScript型の厳密性向上",
+    "セキュリティチェックの強化確認"
+  ],
+  "refactoring_constraints": [
+    "既存のテストを壊さないこと",
+    "API仕様を変更しないこと",
+    "パフォーマンスを悪化させないこと",
+    "後方互換性を維持すること"
+  ],
+  "completed_features": [
+    "1時間/3時間/8時間のduration選択UI",
+    "AutoYesDuration型による型安全性",
+    "ALLOWED_DURATIONSホワイトリスト",
+    "formatTimeRemaining HH:MM:SS対応",
+    "AUTO_YES_TIMEOUT_MS削除",
+    "セキュリティ5層防御（format→JSON→type→whitelist→default）"
+  ]
+}

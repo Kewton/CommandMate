@@ -1,0 +1,64 @@
+{
+  "issue_number": 225,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "影響範囲レビュー反映（1回目）",
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "current-output/route.tsを「関連コンポーネント（変更不要の見込み）」セクションに追加（getAutoYesState()経由のため変更不要と注記）。AutoYesState interfaceのJSDocコメント（enabledAt + 3600000ms = 1 hour）をduration可変に対応した記述に更新するタスクを実装タスクに追加。auto-yes-manager.tsの変更対象ファイルテーブルにもJSDocコメント更新を追記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "AutoYesConfirmDialog.test.tsx（onConfirmのduration引数検証、ラジオボタンUIテスト追加）とAutoYesToggle.test.tsx（onToggle(true, duration)アサーション更新、handleConfirmのduration伝搬テスト追加）の更新タスクを実装タスクセクションに追加。影響範囲の変更対象ファイルテーブルにも両テストファイルを追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "tests/integration/auto-yes-persistence.test.tsを「関連コンポーネント（変更不要の見込み）」セクションに追加。2引数呼び出しがデフォルトduration適用で動作維持すること、およびduration指定ありテストケース追加の検討を注記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "docs/user-guide/webapp-guide.md（Auto Yesモードセクションに有効時間選択記述追加）とdocs/TRUST_AND_SAFETY.md（最大有効時間8時間拡大の注記追加）のドキュメント更新タスクを実装タスクに追加。影響範囲の変更対象ファイルテーブルにも両ドキュメントを追加"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "auto-yes/route.tsのdurationバリデーションテスト方針を実装タスクに明記: auto-yes-manager.test.tsのユニットテストでデフォルトduration適用・duration指定動作をカバーし、ALLOWED_DURATIONSバリデーション（不正値の400レスポンス）はE2Eまたは手動テストで確認するアプローチを採用"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "CLAUDE.mdのモジュール説明更新は実装完了後に行うべき項目であり、Issue記載段階では時期尚早"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "AUTO_YES_TIMEOUT_MSの削除/置換方針は実装詳細であり、既にsetAutoYesEnabled()のdurationパラメータ追加とDEFAULT_AUTO_YES_DURATION定数追加のタスクで暗黙的にカバーされている"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "ALLOWED_DURATIONSのServer/Client Component境界の考慮は実装時に判断すべき設計詳細。Issue本文にはauto-yes-manager.tsからexportする方針が既に記載されており、バンドルサイズ影響は実装時に確認する"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 5,
+    "skipped": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/225"
+  }
+}

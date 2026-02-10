@@ -6,6 +6,7 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -80,8 +81,9 @@ export function Modal({
     full: 'max-w-[calc(100vw-2rem)] sm:max-w-[95vw]',
   };
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+  // Use portal to render at document.body level, escaping any parent stacking context
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] overflow-y-auto">
       {/* Backdrop - Issue #104: skip onClick if disableClose is true */}
       <div
         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
@@ -89,14 +91,14 @@ export function Modal({
       />
 
       {/* Modal */}
-      <div className="flex min-h-full items-center justify-center p-2 sm:p-4">
+      <div className="relative flex min-h-full items-center justify-center p-2 sm:p-4">
         <div
           ref={modalRef}
-          className={`relative w-full ${sizeClasses[size]} bg-white rounded-lg shadow-xl transform transition-all`}
+          className={`relative w-full ${sizeClasses[size]} max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] flex flex-col bg-white rounded-lg shadow-xl transform transition-all`}
         >
           {/* Header */}
           {(title || showCloseButton) && (
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 flex-shrink-0">
               <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate pr-2">{title}</h3>
               {showCloseButton && (
                 <button
@@ -122,9 +124,10 @@ export function Modal({
           )}
 
           {/* Content */}
-          <div className="px-4 sm:px-6 py-3 sm:py-4">{children}</div>
+          <div className="px-4 sm:px-6 py-3 sm:py-4 overflow-y-auto flex-1 min-h-0">{children}</div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

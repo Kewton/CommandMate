@@ -1,0 +1,43 @@
+{
+  "issue_number": 225,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "formatTimeRemaining()関数のHH:MM:SS対応を5箇所に反映: (1) 実装タスクにformatTimeRemaining HH:MM:SS対応タスク追加、(2) ユニットテスト追加タスク追加（MM:SS/HH:MM:SS形式検証）、(3) 影響範囲テーブルのAutoYesToggle.tsx行に「formatTimeRemaining HH:MM:SS対応」追記、(4) AutoYesToggle.test.tsx行に「formatTimeRemaining HH:MM:SSフォーマットテスト追加」追記、(5) 受入条件のカウントダウン表示を「検討」から具体的仕様に更新、(6) 主要な変更点のAutoYesToggle.tsx説明にformatTimeRemaining対応を追記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "auto-yes-config.tsの定数値はauto-yes-manager.test.ts等で間接的にカバーされるため、専用ユニットテストの優先度は低い"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "session-cleanup.tsはstopAutoYesPolling()のみ使用しており、シグネチャに変更がないため影響なし。関連コンポーネント一覧への追加は低優先度"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "CLAUDE.mdの更新は実装完了後に行う慣例があり、Issue内のタスクとしての優先度は低い。実装時に併せて対応可能"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 1,
+    "skipped": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/225"
+  }
+}

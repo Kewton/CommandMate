@@ -1,0 +1,121 @@
+{
+  "issue_number": 225,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-10",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "AutoYesToggle.tsxのonToggleシグネチャ変更がIssueに記載されているが、duration引数を追加するならonToggle型も(enabled: boolean, duration?: number) => Promise<void>に変更が必要。しかしAutoYesToggle自体はduration選択UIを持たず、AutoYesConfirmDialogがduration選択を担う設計。両者の責務とデータフローがIssue内で曖昧であり、handleConfirmからonToggleへdurationを渡す経路が明示されていない",
+        "location": "影響範囲テーブル: AutoYesToggle.tsx行",
+        "recommendation": "データフローを明確化すべき。AutoYesConfirmDialogでdurationを選択 -> onConfirmコールバックでdurationを受け取り -> AutoYesToggleのhandleConfirm内でonToggle(true, duration)を呼ぶ、という流れを明示的に記載する。現在のAutoYesToggle.tsxのhandleConfirmは単にonToggle(true)を呼ぶだけなので、ここにduration引数を伝搬させる変更が必要",
+        "evidence": "AutoYesToggle.tsx L94-98: handleConfirmはonConfirmをコールバックで呼ぶが、duration引数なし。AutoYesConfirmDialog.tsxのonConfirmは引数なしの() => void型。Issueの実装タスクではAutoYesConfirmDialogにonConfirmへのduration追加とAutoYesToggleのonToggleシグネチャ変更を別々に記載しており、両者の接続が未定義"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "AutoYesConfirmDialog.tsxのUI表示テキスト「1時間後に自動でOFFになります。」の更新がIssueの実装タスクに含まれていない",
+        "location": "実装タスク セクション",
+        "recommendation": "AutoYesConfirmDialog.tsx L46の固定テキスト「1時間後に自動でOFFになります。」を選択された時間に応じて動的に変更するタスクを追加すべき。現在のIssueではAutoYesToggle.tsxの表示テキスト動的変更のみ記載されているが、ダイアログ内の説明テキストも同様に更新が必要",
+        "evidence": "AutoYesConfirmDialog.tsx L46: <p className=\"mt-1\">1時間後に自動でOFFになります。</p> がハードコードされている"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "issue": "duration値の型定義と定数定義の配置場所が未指定",
+        "location": "実装タスク: 許可されるduration値のバリデーション定数追加",
+        "recommendation": "ALLOWED_DURATIONS定数（例: [3600000, 10800000, 28800000]）の定義場所を明示すべき。auto-yes-manager.tsに定義してサーバー側バリデーションとクライアント側UIの両方から参照するか、共有のconfigファイルに配置するか設計方針を記載する。TypeScriptの型定義（type AutoYesDuration = 3600000 | 10800000 | 28800000）も推奨",
+        "evidence": "Issueでは「ホワイトリスト方式」と記載しているが、定義場所や型レベルの制約について言及がない"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "既存テストの更新に関する記載が不足",
+        "location": "実装タスク: ユニットテスト追加",
+        "recommendation": "新規テスト追加だけでなく、既存テストの更新も必要。特にtests/unit/lib/auto-yes-manager.test.tsのsetAutoYesEnabled テスト（L56-65: expiresAt=now+3600000を期待）はdurationパラメータ追加後にデフォルト値テストとduration指定テストの両方が必要。route.tsのテスト（存在する場合）も更新が必要",
+        "evidence": "tests/unit/lib/auto-yes-manager.test.ts L64: expect(state.expiresAt).toBe(now + 3600000) はduration固定を前提としたテスト"
+      },
+      {
+        "id": "SF-4",
+        "category": "明確性",
+        "issue": "APIリクエスト/レスポンスの具体的なスキーマが未記載",
+        "location": "提案する解決策 セクション",
+        "recommendation": "POSTリクエストボディの具体例（例: { enabled: true, cliToolId: 'claude', duration: 10800000 }）とレスポンスボディの例を記載すべき。特にdurationフィールドのデフォルト値（省略時は3600000）と不正値送信時のエラーレスポンス形式を明示すると実装が迷わない",
+        "evidence": "Issueでは「POSTリクエストにdurationフィールドを追加・バリデーション」と記載しているが、フィールド名、型、デフォルト値、エラーレスポンスの詳細が未定義"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "関連Issueへのリンクが不足",
+        "location": "Issue本文",
+        "recommendation": "Auto-Yes関連の過去Issue（#61 auto yesモード追加、#138 バックグラウンドポーリング、#153 ホットリロード状態不整合）へのリンクを追加すると、レビュアーが文脈を把握しやすくなる",
+        "evidence": "Auto-Yes機能は複数のIssueで段階的に改善されており、歴史的な文脈が重要"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "タイムゾーン/時刻表示に関する考慮が未記載",
+        "location": "受入条件 セクション",
+        "recommendation": "カウントダウンタイマーは既存のformatTimeRemaining関数（AutoYesToggle.tsx L32-37）を使用しており、MM:SS形式で表示される。3時間以上の場合はHH:MM:SS形式が望ましい可能性がある。UIの表示形式について検討結果を記載するとよい",
+        "evidence": "現在のformatTimeRemaining関数はMM:SS形式のみ対応。3時間=180分、8時間=480分のカウントダウンが分表示のみだと視認性が低い可能性"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "AUTO_YES_TIMEOUT_MS定数（L68: 3600000）の定義場所。setAutoYesEnabled()関数（L181-201）がdurationパラメータ追加対象"
+    },
+    {
+      "file": "src/components/worktree/AutoYesConfirmDialog.tsx",
+      "relevance": "ラジオボタンUI追加対象。L46に「1時間後に自動でOFF」の固定テキスト。onConfirm: () => void型がduration追加で変更必要"
+    },
+    {
+      "file": "src/components/worktree/AutoYesToggle.tsx",
+      "relevance": "onToggle: (enabled: boolean) => Promise<void>のシグネチャ変更対象。handleConfirm（L94-98）でduration伝搬必要。formatTimeRemaining（L32-37）の表示形式検討"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "handleAutoYesToggle（L1149-1164）でAPIへのduration送信追加対象"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "POSTハンドラ（L83-126）でdurationフィールドのバリデーション追加対象"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "relevance": "既存テスト（L64: expiresAt=now+3600000）の更新が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "auto-yes-manager.tsのモジュール説明にdurationパラメータ追加後の更新が必要になる可能性あり"
+    }
+  ],
+  "verification_results": {
+    "current_behavior_accuracy": {
+      "status": "confirmed",
+      "detail": "Issue記載の「AUTO_YES_TIMEOUT_MS = 3600000（1時間固定）」はsrc/lib/auto-yes-manager.ts L68と完全に一致。expiresAt = now + AUTO_YES_TIMEOUT_MSの計算もL187で確認"
+    },
+    "file_identification_accuracy": {
+      "status": "confirmed",
+      "detail": "Issue記載の5ファイル全てが存在し、変更内容の記載も正確。変更不要と記載された3ファイル（auto-yes-resolver.ts, useAutoYes.ts, prompt-detector.ts）も変更不要であることを確認"
+    },
+    "architecture_alignment": {
+      "status": "confirmed_with_notes",
+      "detail": "インメモリ管理のアーキテクチャ（DB変更なし）は正しい。ただしコンポーネント間のデータフロー設計（MF-1）に曖昧さがある"
+    }
+  }
+}

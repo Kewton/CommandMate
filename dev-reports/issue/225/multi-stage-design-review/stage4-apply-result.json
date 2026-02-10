@@ -1,0 +1,92 @@
+{
+  "issue_number": 225,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "item": "route.tsのworktreeIdに対するisValidWorktreeId()バリデーション未適用",
+        "sections_updated": ["セクション5 バリデーションルール", "セクション7 入力バリデーション", "セクション14 レビュー指摘事項サマリー", "セクション15 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-MF-002",
+        "item": "404エラーレスポンスでのworktreeId反射による情報漏洩リスク",
+        "sections_updated": ["セクション7 リスク評価", "セクション14 レビュー指摘事項サマリー", "セクション15 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "item": "request.json()のパースエラーハンドリング不足",
+        "sections_updated": ["セクション5 バリデーションルール", "セクション7 入力バリデーション", "セクション14 レビュー指摘事項サマリー", "セクション15 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-002",
+        "item": "durationの型チェック不足（typeof検証なし）",
+        "sections_updated": ["セクション5 バリデーションルール", "セクション7 入力バリデーション", "セクション14 レビュー指摘事項サマリー", "セクション15 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-003",
+        "item": "TRUST_AND_SAFETY.mdの更新に8時間リスクの具体的緩和策が不十分",
+        "sections_updated": ["セクション7 セキュリティドキュメント更新", "セクション14 レビュー指摘事項サマリー", "セクション15 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-004",
+        "item": "AutoYesToggle通知におけるlastAutoResponseの表示のUI安全性分析",
+        "sections_updated": ["セクション7 リスク評価", "セクション14 レビュー指摘事項サマリー", "セクション15 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-CO-001",
+        "item": "Auto-Yes有効化の監査ログ（セキュリティイベントログ）",
+        "sections_updated": ["セクション14 レビュー指摘事項サマリー", "セクション15 参考対応チェックリスト"],
+        "status": "noted"
+      },
+      {
+        "id": "SEC-CO-002",
+        "item": "DoS保護: Auto-Yes ON/OFF連打によるリソース消費",
+        "sections_updated": ["セクション14 レビュー指摘事項サマリー", "セクション15 参考対応チェックリスト"],
+        "status": "noted"
+      },
+      {
+        "id": "SEC-CO-003",
+        "item": "duration値の将来的な拡張時のセキュリティレビュープロセス",
+        "sections_updated": ["セクション14 レビュー指摘事項サマリー", "セクション15 参考対応チェックリスト"],
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md",
+  "sections_updated": [
+    "セクション5 API設計 - バリデーションルール",
+    "セクション7 セキュリティ設計 - 入力バリデーション",
+    "セクション7 セキュリティ設計 - リスク評価",
+    "セクション7 セキュリティ設計 - セキュリティドキュメント更新",
+    "セクション13 実装ステータス",
+    "セクション14 レビュー指摘事項サマリー - Stage 4",
+    "セクション15 実装チェックリスト - セキュリティ対応",
+    "セクション15 実装チェックリスト - 参考対応",
+    "セクション16 レビュー履歴"
+  ],
+  "summary": {
+    "must_fix_reflected": 2,
+    "must_fix_total": 2,
+    "should_fix_reflected": 4,
+    "should_fix_total": 4,
+    "consider_noted": 3,
+    "consider_total": 3,
+    "skipped_count": 0
+  },
+  "timestamp": "2026-02-10T12:30:00Z"
+}

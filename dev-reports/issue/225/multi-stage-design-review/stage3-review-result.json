@@ -1,0 +1,247 @@
+{
+  "issue_number": 225,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "useAutoYes hook is not listed as an impacted file but requires signature update",
+        "description": "The design policy (section 6-4) modifies WorktreeDetailRefactored's handleAutoYesToggle to accept duration, but the useAutoYes hook (src/hooks/useAutoYes.ts) is not listed in the implementation order or impacted files. While useAutoYes itself does not need to pass duration (it uses the prompt-response API, not the auto-yes API), the hook's UseAutoYesParams should be verified for consistency. More critically, the current-output route (src/app/api/worktrees/[id]/current-output/route.ts) imports getAutoYesState from auto-yes-manager.ts, and its response includes autoYes state. If the AutoYesState JSDoc changes, or if the client needs to display the selected duration, this route would need updates. The design policy does not mention this route as an impacted file.",
+        "affected_files": [
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/src/app/api/worktrees/[id]/current-output/route.ts",
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/src/hooks/useAutoYes.ts"
+        ],
+        "recommendation": "Add src/app/api/worktrees/[id]/current-output/route.ts to the impact analysis. Verify that the current-output response's autoYes field does not need to include duration or selected time label for the countdown display. Currently the client uses expiresAt for countdown, so the data flow is likely adequate, but this should be explicitly documented."
+      },
+      {
+        "id": "MF-002",
+        "title": "Existing tests will break due to onConfirm/onToggle signature changes",
+        "description": "The existing test files contain assertions that will fail after the signature changes: (1) AutoYesConfirmDialog.test.tsx L66 asserts onConfirm is called with no arguments (expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1)), but after the change onConfirm will be called with (duration: AutoYesDuration). (2) AutoYesToggle.test.tsx L43 asserts onToggle is called with (true), but after the change it will be called with (true, duration). The design policy section 9 mentions test updates but does not explicitly call out these breaking changes to the existing test assertions.",
+        "affected_files": [
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/tests/unit/components/worktree/AutoYesToggle.test.tsx"
+        ],
+        "recommendation": "Add explicit test migration items: (1) AutoYesConfirmDialog.test.tsx: update onConfirm assertions to expect(defaultProps.onConfirm).toHaveBeenCalledWith(3600000) (default duration). (2) AutoYesToggle.test.tsx: update onToggle assertions to expect(defaultProps.onToggle).toHaveBeenCalledWith(true, 3600000). Add new test cases for non-default duration selection."
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "WorktreeDetailRefactored.test.tsx mock for AutoYesToggle may need update",
+        "description": "WorktreeDetailRefactored.test.tsx mocks the AutoYesToggle component. If the AutoYesToggle props interface changes (onToggle signature), the mock may need updating to match the new signature. The design policy does not mention this test file in the impact analysis.",
+        "affected_files": [
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/tests/unit/components/WorktreeDetailRefactored.test.tsx"
+        ],
+        "recommendation": "Review WorktreeDetailRefactored.test.tsx to ensure AutoYesToggle mocks are compatible with the new onToggle signature. Since this test mocks child components, the mock interface should be updated if it validates prop types."
+      },
+      {
+        "id": "SF-002",
+        "title": "session-cleanup.ts is an indirect dependency not mentioned in impact analysis",
+        "description": "src/lib/session-cleanup.ts imports stopAutoYesPolling from auto-yes-manager.ts. While the stopAutoYesPolling function signature is not changing, the design policy should document this as a verified-no-impact dependency for completeness.",
+        "affected_files": [
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/src/lib/session-cleanup.ts"
+        ],
+        "recommendation": "Add session-cleanup.ts to the impact analysis as a 'verified no change needed' item, to confirm that stopAutoYesPolling's interface remains unchanged."
+      },
+      {
+        "id": "SF-003",
+        "title": "TRUST_AND_SAFETY.md update is mentioned but lacks specific content",
+        "description": "The design policy section 7 mentions updating docs/TRUST_AND_SAFETY.md with the maximum 8-hour auto-yes duration, but the current TRUST_AND_SAFETY.md does not mention any specific timeout duration (only references auto-yes mode in general). The update content should be specified more precisely.",
+        "affected_files": [
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/docs/TRUST_AND_SAFETY.md"
+        ],
+        "recommendation": "Specify the exact update: Add a note in the 'Auto Yes mode' section (around line 48-49) that the maximum selectable duration is 8 hours, and recommend using shorter durations when possible."
+      },
+      {
+        "id": "SF-004",
+        "title": "Integration test (auto-yes-persistence.test.ts) uses setAutoYesEnabled with 2-arg signature",
+        "description": "The integration test at tests/integration/auto-yes-persistence.test.ts calls setAutoYesEnabled('test-worktree-reload', true) (2 arguments). Since the new duration parameter is optional, these calls will continue to work. However, the integration test should also verify that a custom duration survives module reload to ensure the persistence behavior is consistent.",
+        "affected_files": [
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/tests/integration/auto-yes-persistence.test.ts"
+        ],
+        "recommendation": "Add an integration test case: setAutoYesEnabled('test-duration-reload', true, 10800000), then reload module and verify state.expiresAt reflects the 3-hour duration. This confirms that in-memory state correctly persists custom durations across hot reloads."
+      }
+    ],
+    "consider": [
+      {
+        "id": "CO-001",
+        "title": "auto-yes-resolver.ts is not impacted but should be verified",
+        "description": "src/lib/auto-yes-resolver.ts is called during the auto-yes polling cycle. The duration change does not affect the resolver's behavior (it resolves prompt answers, not timing), but this should be documented as verified.",
+        "affected_files": [
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/src/lib/auto-yes-resolver.ts"
+        ],
+        "recommendation": "No changes needed. Document as verified-no-impact in the impact matrix."
+      },
+      {
+        "id": "CO-002",
+        "title": "Mobile layout countdown display may need visual testing for HH:MM:SS format",
+        "description": "The formatTimeRemaining change from MM:SS to H:MM:SS for durations over 1 hour may affect the layout width on mobile (inline mode). The AutoYesToggle is rendered with inline={true} on mobile (WorktreeDetailRefactored.tsx line 1776-1783), which uses a compact flex layout. The wider time string (e.g., '8:00:00' vs '59:59') could potentially push elements or overflow.",
+        "affected_files": [
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/src/components/worktree/WorktreeDetailRefactored.tsx"
+        ],
+        "recommendation": "Add manual testing for mobile layout with 3-hour and 8-hour durations to confirm the countdown timer does not cause overflow in the inline AutoYesToggle bar."
+      },
+      {
+        "id": "CO-003",
+        "title": "CLAUDE.md module documentation should be updated",
+        "description": "CLAUDE.md lists module descriptions including auto-yes-manager.ts. After this change, the description should mention duration selection capability. Additionally, the new src/config/auto-yes-config.ts file should be added to the module table.",
+        "affected_files": [
+          "/Users/maenokota/share/work/github_kewton/commandmate-issue-225/CLAUDE.md"
+        ],
+        "recommendation": "Add src/config/auto-yes-config.ts to the CLAUDE.md module table with description: 'Auto-Yes共有設定（ALLOWED_DURATIONS、AutoYesDuration型、DURATION_LABELS）'. Update auto-yes-manager.ts description to mention duration support."
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/config/auto-yes-config.ts",
+        "change": "New file: ALLOWED_DURATIONS, AutoYesDuration, DEFAULT_AUTO_YES_DURATION, DURATION_LABELS",
+        "risk": "low",
+        "status": "identified_in_design"
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "change": "Delete AUTO_YES_TIMEOUT_MS, add duration parameter to setAutoYesEnabled, import DEFAULT_AUTO_YES_DURATION",
+        "risk": "low",
+        "status": "identified_in_design"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+        "change": "Add duration validation (ALLOWED_DURATIONS whitelist), pass duration to setAutoYesEnabled",
+        "risk": "low",
+        "status": "identified_in_design"
+      },
+      {
+        "file": "src/components/worktree/AutoYesConfirmDialog.tsx",
+        "change": "Add radio button UI, selectedDuration state, update onConfirm signature to (duration: AutoYesDuration) => void",
+        "risk": "low",
+        "status": "identified_in_design"
+      },
+      {
+        "file": "src/components/worktree/AutoYesToggle.tsx",
+        "change": "Update onToggle signature, update handleConfirm to pass duration, extend formatTimeRemaining for H:MM:SS",
+        "risk": "low",
+        "status": "identified_in_design"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change": "Update handleAutoYesToggle to accept and pass duration to API",
+        "risk": "low",
+        "status": "identified_in_design"
+      }
+    ],
+    "indirect_dependencies": [
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "dependency": "Imports getAutoYesState, getLastServerResponseTimestamp from auto-yes-manager.ts",
+        "impact": "No functional change needed - uses getAutoYesState which returns AutoYesState (unchanged interface)",
+        "risk": "none",
+        "status": "NOT_in_design_should_be_verified"
+      },
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "dependency": "Imports stopAutoYesPolling from auto-yes-manager.ts",
+        "impact": "No change needed - stopAutoYesPolling signature unchanged",
+        "risk": "none",
+        "status": "NOT_in_design_should_be_verified"
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "dependency": "Client-side auto-yes hook, uses prompt-response API (not auto-yes API)",
+        "impact": "No change needed - does not interact with duration",
+        "risk": "none",
+        "status": "NOT_in_design_should_be_verified"
+      },
+      {
+        "file": "src/lib/auto-yes-resolver.ts",
+        "dependency": "Called by pollAutoYes in auto-yes-manager.ts",
+        "impact": "No change needed - resolves prompt answers, unrelated to duration",
+        "risk": "none",
+        "status": "NOT_in_design_should_be_verified"
+      }
+    ],
+    "test_impact": [
+      {
+        "file": "tests/unit/lib/auto-yes-manager.test.ts",
+        "change_needed": "Add duration parameter tests, update L64 hardcoded 3600000 assertion, add AUTO_YES_TIMEOUT_MS migration regression test",
+        "status": "identified_in_design"
+      },
+      {
+        "file": "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+        "change_needed": "Update onConfirm assertion to expect duration argument, add radio button interaction tests, add dynamic text tests",
+        "status": "MISSING_from_design"
+      },
+      {
+        "file": "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+        "change_needed": "Update onToggle assertion to expect (true, duration) instead of (true), add H:MM:SS format tests",
+        "status": "MISSING_from_design"
+      },
+      {
+        "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "change_needed": "Verify AutoYesToggle mock compatibility with new props interface",
+        "status": "MISSING_from_design"
+      },
+      {
+        "file": "tests/integration/auto-yes-persistence.test.ts",
+        "change_needed": "Add test for custom duration persistence across module reload",
+        "status": "partially_identified_in_design"
+      }
+    ],
+    "documentation_impact": [
+      {
+        "file": "docs/TRUST_AND_SAFETY.md",
+        "change_needed": "Add maximum 8-hour duration note",
+        "status": "identified_in_design"
+      },
+      {
+        "file": "CLAUDE.md",
+        "change_needed": "Add auto-yes-config.ts to module table, update auto-yes-manager.ts description",
+        "status": "MISSING_from_design"
+      }
+    ]
+  },
+  "backward_compatibility": {
+    "api": {
+      "status": "maintained",
+      "details": "duration field is optional in POST request. Omitting it defaults to 3600000 (1 hour). Response schema unchanged."
+    },
+    "internal_api": {
+      "status": "maintained",
+      "details": "setAutoYesEnabled's new duration parameter is optional. All existing callers (route.ts) will continue to work without changes during incremental implementation."
+    },
+    "state": {
+      "status": "maintained",
+      "details": "AutoYesState interface unchanged. expiresAt continues to be the only timing field. No DB migration needed."
+    }
+  },
+  "reviewed_files": [
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/session-cleanup.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "tests/integration/auto-yes-persistence.test.ts",
+    "docs/TRUST_AND_SAFETY.md",
+    "CLAUDE.md",
+    "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md"
+  ],
+  "timestamp": "2026-02-10T12:00:00Z"
+}

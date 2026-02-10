@@ -1,0 +1,263 @@
+{
+  "issue_number": 225,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "needs_major_changes",
+  "score": 2,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "src/config/auto-yes-config.ts が未作成",
+        "description": "設計書のセクション2,4,11で定義されているコアConfigファイル src/config/auto-yes-config.ts が存在しない。ALLOWED_DURATIONS, AutoYesDuration型, DEFAULT_AUTO_YES_DURATION, DURATION_LABELSの全てが未実装。このファイルは設計の中核であり、全レイヤー（Client/API/Server）がimportする共有定数を提供する。",
+        "design_spec": "セクション4: ALLOWED_DURATIONS = [3600000, 10800000, 28800000] as const; AutoYesDuration = typeof ALLOWED_DURATIONS[number]; DEFAULT_AUTO_YES_DURATION = 3600000; DURATION_LABELS: Record<AutoYesDuration, string>",
+        "actual_impl": "ファイル自体が存在しない",
+        "gap": "完全不一致 - 設計の基盤となる共有定数/型ファイルが未作成",
+        "affected_files": [
+          "src/config/auto-yes-config.ts"
+        ]
+      },
+      {
+        "id": "MF-002",
+        "title": "auto-yes-manager.ts の setAutoYesEnabled() に duration パラメータが未追加",
+        "description": "設計書セクション6-5では setAutoYesEnabled(worktreeId, enabled, duration?: AutoYesDuration) と定義されているが、実際のコード (L181) では setAutoYesEnabled(worktreeId: string, enabled: boolean) のままで、duration パラメータが存在しない。",
+        "design_spec": "setAutoYesEnabled(worktreeId: string, enabled: boolean, duration?: AutoYesDuration): AutoYesState",
+        "actual_impl": "setAutoYesEnabled(worktreeId: string, enabled: boolean): AutoYesState (L181)",
+        "gap": "関数シグネチャ不一致 - オプショナル duration パラメータが未追加",
+        "affected_files": [
+          "src/lib/auto-yes-manager.ts"
+        ]
+      },
+      {
+        "id": "MF-003",
+        "title": "AUTO_YES_TIMEOUT_MS 定数が未削除",
+        "description": "設計書セクション6-5 [MF-001] では AUTO_YES_TIMEOUT_MS を完全に削除し DEFAULT_AUTO_YES_DURATION に一本化する方針だが、auto-yes-manager.ts L68 に const AUTO_YES_TIMEOUT_MS = 3600000 が残存している。L187 で expiresAt: now + AUTO_YES_TIMEOUT_MS として使用されており、設計書の duration ?? DEFAULT_AUTO_YES_DURATION パターンと不一致。",
+        "design_spec": "[MF-001] AUTO_YES_TIMEOUT_MS を削除し、import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config' に置換",
+        "actual_impl": "const AUTO_YES_TIMEOUT_MS = 3600000 (L68) がそのまま残存、expiresAt: now + AUTO_YES_TIMEOUT_MS (L187)",
+        "gap": "DRY違反 - 旧定数が残存、新定数への移行が未実施",
+        "affected_files": [
+          "src/lib/auto-yes-manager.ts"
+        ]
+      },
+      {
+        "id": "MF-004",
+        "title": "AutoYesConfirmDialog の onConfirm 型が未変更",
+        "description": "設計書セクション6-1 [SF-003] では onConfirm: (duration: AutoYesDuration) => void と定義されているが、実際のコード (L18) では onConfirm: () => void のまま。ダイアログからduration選択値を伝搬する仕組みが完全に欠落している。",
+        "design_spec": "onConfirm: (duration: AutoYesDuration) => void",
+        "actual_impl": "onConfirm: () => void (L18)",
+        "gap": "インターフェース不一致 - duration引数が未追加",
+        "affected_files": [
+          "src/components/worktree/AutoYesConfirmDialog.tsx"
+        ]
+      },
+      {
+        "id": "MF-005",
+        "title": "AutoYesConfirmDialog にラジオボタンUI / duration選択機能が未実装",
+        "description": "設計書セクション6-1ではALLOWED_DURATIONS.map()によるラジオボタンUI、selectedDuration内部状態、DURATION_LABELSによる動的テキスト表示が設計されているが、現在のコンポーネントにはこれらの機能が一切存在しない。固定テキスト「1時間後に自動でOFFになります。」(L46) がハードコードされたまま。",
+        "design_spec": "ラジオボタン3択UI、useState<AutoYesDuration>(DEFAULT_AUTO_YES_DURATION)、DURATION_LABELS[selectedDuration]による動的テキスト、onClick={() => onConfirm(selectedDuration)}",
+        "actual_impl": "ラジオボタンなし、duration選択状態なし、固定テキスト「1時間後に...」(L46)、onClick={onConfirm} (L81, 引数なし)",
+        "gap": "Issue #225の中核機能が未実装",
+        "affected_files": [
+          "src/components/worktree/AutoYesConfirmDialog.tsx"
+        ]
+      },
+      {
+        "id": "MF-006",
+        "title": "AutoYesToggle の onToggle 型が未変更",
+        "description": "設計書セクション6-2 [SF-003] では onToggle: (enabled: boolean, duration?: AutoYesDuration) => Promise<void> と定義されているが、実際のコード (L20) では onToggle: (enabled: boolean) => Promise<void> のまま。handleConfirmも duration を受け取らず、onToggle(true) のみを呼び出している (L97)。",
+        "design_spec": "onToggle: (enabled: boolean, duration?: AutoYesDuration) => Promise<void>; handleConfirm = useCallback((duration: AutoYesDuration) => { onToggle(true, duration) })",
+        "actual_impl": "onToggle: (enabled: boolean) => Promise<void> (L20); handleConfirm = useCallback(() => { onToggle(true) }) (L94-98)",
+        "gap": "インターフェース不一致 - duration パラメータが伝搬チェーン全体で欠落",
+        "affected_files": [
+          "src/components/worktree/AutoYesToggle.tsx"
+        ]
+      },
+      {
+        "id": "MF-007",
+        "title": "formatTimeRemaining が HH:MM:SS 未対応",
+        "description": "設計書セクション6-3では1時間以上の場合 H:MM:SS フォーマットを使用する設計だが、現在の実装 (L32-37) は MM:SS のみで、hours の計算とH:MM:SS分岐が存在しない。3時間/8時間選択時にカウントダウンが正しく表示されない。",
+        "design_spec": "if (hours > 0) return `${hours}:${minutes.padStart(2,'0')}:${seconds.padStart(2,'0')}`; else return MM:SS",
+        "actual_impl": "return `${minutes.padStart(2,'0')}:${seconds.padStart(2,'0')}` (L36) - hours分岐なし",
+        "gap": "フォーマットロジック不一致 - 1時間超の表示に対応できない",
+        "affected_files": [
+          "src/components/worktree/AutoYesToggle.tsx"
+        ]
+      },
+      {
+        "id": "MF-008",
+        "title": "WorktreeDetailRefactored の handleAutoYesToggle に duration パラメータが未追加",
+        "description": "設計書セクション6-4では handleAutoYesToggle が (enabled: boolean, duration?: AutoYesDuration) を受け取り、API呼び出し時にbody.durationとして送信する設計だが、現在のコード (L1149) は (enabled: boolean) のみで、durationをAPIに送信しない。",
+        "design_spec": "handleAutoYesToggle = async (enabled: boolean, duration?: AutoYesDuration) => { body: JSON.stringify({ enabled, cliToolId, duration }) }",
+        "actual_impl": "handleAutoYesToggle = async (enabled: boolean) => { body: JSON.stringify({ enabled, cliToolId: activeCliTab }) } (L1149-1154) - duration フィールドなし",
+        "gap": "API呼び出しにdurationが含まれない",
+        "affected_files": [
+          "src/components/worktree/WorktreeDetailRefactored.tsx"
+        ]
+      },
+      {
+        "id": "MF-009",
+        "title": "route.ts に duration バリデーションが未追加",
+        "description": "設計書セクション5ではPOSTハンドラに duration のホワイトリストバリデーション（ALLOWED_DURATIONS.includes(body.duration)）と setAutoYesEnabled への duration 伝搬が設計されているが、現在の route.ts にはdurationに関する処理が一切存在しない。",
+        "design_spec": "enabled=true時にbody.durationを検証し、ALLOWED_DURATIONSに含まれない場合は400エラー。有効な場合は setAutoYesEnabled(params.id, body.enabled, duration) として伝搬。",
+        "actual_impl": "setAutoYesEnabled(params.id, body.enabled) (L104) - durationパラメータなし、バリデーションなし",
+        "gap": "サーバー側バリデーション・伝搬の両方が未実装",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/auto-yes/route.ts"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "AutoYesState インターフェースの JSDoc コメントがハードコード値を参照",
+        "description": "設計書セクション4ではAutoYesStateのexpiresAtコメントを「計算値のみ保持、durationは保持しない」と記載。現在の実装 (L25) では 'enabledAt + 3600000ms = 1 hour' というハードコードされた値が JSDoc に記載されており、durationが可変になった後は不正確になる。",
+        "design_spec": "expiresAt: number; // 計算値のみ保持、durationは保持しない",
+        "actual_impl": "expiresAt: number; // Timestamp when auto-yes expires (enabledAt + 3600000ms = 1 hour) (L25)",
+        "gap": "JSDocが固定値を前提としている",
+        "affected_files": [
+          "src/lib/auto-yes-manager.ts"
+        ]
+      },
+      {
+        "id": "SF-002",
+        "title": "テストコードに duration 指定テストが未追加",
+        "description": "設計書セクション9では、duration指定・デフォルトduration・後方互換性・AUTO_YES_TIMEOUT_MS不使用確認のテストケースが計画されているが、現在のテストファイルにはこれらが存在しない。既存テスト (L64) では expiresAt == now + 3600000 をハードコードで検証している。",
+        "design_spec": "setAutoYesEnabled('wt-1', true, 10800000) -> state.expiresAt == now + 10800000; setAutoYesEnabled('wt-1', true) -> state.expiresAt == now + 3600000 (後方互換); AUTO_YES_TIMEOUT_MS migration回帰テスト",
+        "actual_impl": "setAutoYesEnabled('wt-1', true) -> expect(state.expiresAt).toBe(now + 3600000) (L64) - マジックナンバー使用、duration指定テストなし",
+        "gap": "テスト計画の大部分が未実装",
+        "affected_files": [
+          "tests/unit/lib/auto-yes-manager.test.ts"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "CO-001",
+        "title": "useAutoYes フックが duration を伝搬しない設計",
+        "description": "useAutoYes.ts はクライアント側のauto-yes自動応答フックであり、duration情報を直接扱わない。これは設計書でも言及されていないため、現在の設計意図通り。ただし、将来的にクライアント側で残り時間に応じた警告表示等を行う場合はduration情報が必要になる可能性がある。",
+        "design_spec": "設計書にuseAutoYesの変更記載なし（変更不要）",
+        "actual_impl": "useAutoYes はduration関連のプロパティなし",
+        "gap": "なし（設計通り）"
+      },
+      {
+        "id": "CO-002",
+        "title": "integration test (auto-yes-persistence.test.ts) の duration 対応",
+        "description": "設計書セクション9のテスト設計では integration テストとして「デフォルトduration適用の確認（既存テスト動作維持）」が記載されている。現在の persistence テストは duration に依存しないが、setAutoYesEnabled のシグネチャ変更後にコンパイルが通ることを確認する必要がある。",
+        "design_spec": "既存テスト動作維持の確認",
+        "actual_impl": "setAutoYesEnabled('test-worktree-reload', true) (L39) - durationなしの呼び出し",
+        "gap": "後方互換性テストとして動作するが、明示的な検証がない"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "src/config/auto-yes-config.ts (新規ファイル)",
+      "design_spec": "ALLOWED_DURATIONS, AutoYesDuration, DEFAULT_AUTO_YES_DURATION, DURATION_LABELS",
+      "implementation_status": "未実装",
+      "gap": "ファイル自体が存在しない"
+    },
+    {
+      "design_item": "auto-yes-manager.ts - setAutoYesEnabled シグネチャ",
+      "design_spec": "(worktreeId: string, enabled: boolean, duration?: AutoYesDuration)",
+      "implementation_status": "未変更",
+      "gap": "duration パラメータ未追加"
+    },
+    {
+      "design_item": "auto-yes-manager.ts - AUTO_YES_TIMEOUT_MS 削除",
+      "design_spec": "定数削除、DEFAULT_AUTO_YES_DURATION に一本化",
+      "implementation_status": "未実施",
+      "gap": "旧定数が残存 (L68, L187)"
+    },
+    {
+      "design_item": "auto-yes-manager.ts - AutoYesState インターフェース",
+      "design_spec": "変更なし（JSDocコメント更新のみ）",
+      "implementation_status": "未更新",
+      "gap": "JSDocがハードコード値を参照"
+    },
+    {
+      "design_item": "route.ts - duration バリデーション",
+      "design_spec": "ALLOWED_DURATIONS.includes() + 400エラー + duration伝搬",
+      "implementation_status": "未実装",
+      "gap": "duration 関連処理が一切なし"
+    },
+    {
+      "design_item": "AutoYesConfirmDialog - ラジオボタンUI",
+      "design_spec": "ラジオボタン3択、selectedDuration状態、動的テキスト",
+      "implementation_status": "未実装",
+      "gap": "固定テキスト「1時間後に...」のまま"
+    },
+    {
+      "design_item": "AutoYesConfirmDialog - onConfirm 型",
+      "design_spec": "(duration: AutoYesDuration) => void",
+      "implementation_status": "未変更",
+      "gap": "() => void のまま"
+    },
+    {
+      "design_item": "AutoYesToggle - onToggle 型",
+      "design_spec": "(enabled: boolean, duration?: AutoYesDuration) => Promise<void>",
+      "implementation_status": "未変更",
+      "gap": "(enabled: boolean) => Promise<void> のまま"
+    },
+    {
+      "design_item": "AutoYesToggle - formatTimeRemaining HH:MM:SS",
+      "design_spec": "hours > 0 時に H:MM:SS フォーマット",
+      "implementation_status": "未実装",
+      "gap": "MM:SS のみ"
+    },
+    {
+      "design_item": "WorktreeDetailRefactored - handleAutoYesToggle",
+      "design_spec": "(enabled: boolean, duration?: AutoYesDuration) + API body に duration 含む",
+      "implementation_status": "未変更",
+      "gap": "(enabled: boolean) のまま、API body に duration なし"
+    },
+    {
+      "design_item": "テスト - duration指定テスト",
+      "design_spec": "3時間/8時間テスト、デフォルト後方互換テスト、AUTO_YES_TIMEOUT_MS回帰テスト",
+      "implementation_status": "未実装",
+      "gap": "テスト計画が未着手"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "high",
+    "security": "low",
+    "operational": "medium"
+  },
+  "risk_details": [
+    {
+      "type": "技術的リスク",
+      "description": "Issue #225の全機能が未実装。設計書が存在するが、コードベースは変更前の状態のまま。設計書とコードの乖離が100%。",
+      "impact": "High",
+      "probability": "High",
+      "priority": "P1"
+    },
+    {
+      "type": "セキュリティリスク",
+      "description": "duration バリデーション未実装だが、機能自体が未実装のため現時点で脆弱性は存在しない。実装時にサーバー側ホワイトリストバリデーションが必要。",
+      "impact": "Medium",
+      "probability": "Low",
+      "priority": "P2"
+    },
+    {
+      "type": "運用リスク",
+      "description": "設計書の完成度は高く（Stage 1レビュー済み、全指摘反映済み）、実装チェックリストも明確。ただし実装が完全に未着手のため、設計と実装の乖離が広がるリスクがある。",
+      "impact": "Medium",
+      "probability": "Medium",
+      "priority": "P2"
+    }
+  ],
+  "reviewed_files": [
+    "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md",
+    "src/config/auto-yes-config.ts (not found)",
+    "src/lib/auto-yes-manager.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/integration/auto-yes-persistence.test.ts"
+  ],
+  "summary": "Issue #225の設計書（auto-yes有効時間選択機能）は Stage 1 レビューの指摘事項が全て反映された完成度の高い状態だが、ソースコードへの実装は完全に未着手。設計書で定義されている全11項目の変更が未実施であり、整合性スコアは2/5（needs_major_changes）。設計書の実装チェックリスト（セクション14）に従い、ボトムアップで実装を開始する必要がある。",
+  "timestamp": "2026-02-10T00:00:00Z"
+}

@@ -1,0 +1,31 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_tests": 2944,
+    "after_tests": 2971,
+    "before_coverage": 85.0,
+    "after_coverage": 85.0
+  },
+  "refactorings_applied": [
+    "Extract formatTimeRemaining from AutoYesToggle.tsx to auto-yes-config.ts for direct testability and reuse",
+    "Add isAllowedDuration type guard to replace unsafe `as AutoYesDuration` casts in route.ts",
+    "Replace magic numbers (3600000, 60000, 1000) with named constants (MS_PER_HOUR, MS_PER_MINUTE, MS_PER_SECOND)",
+    "Add 27 new unit tests for auto-yes-config.ts covering ALLOWED_DURATIONS, DURATION_LABELS, isAllowedDuration edge cases, and formatTimeRemaining boundary conditions"
+  ],
+  "files_changed": [
+    "src/config/auto-yes-config.ts",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "tests/unit/config/auto-yes-config.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "afb3c0a: refactor(auto-yes): improve type safety and testability for Issue #225"
+  ],
+  "message": "Refactoring complete. Improved type safety by replacing unsafe type assertions with a proper type guard (isAllowedDuration). Improved testability by extracting formatTimeRemaining to a shared module with 27 new edge-case tests. Replaced magic numbers with named constants. All 2971 tests pass, zero lint/type errors."
+}

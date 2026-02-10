@@ -19,6 +19,7 @@ import {
   THINKING_CHECK_LINE_COUNT,
   type AutoYesState,
 } from '@/lib/auto-yes-manager';
+import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config';
 
 // Mock modules for pollAutoYes testing (Issue #161)
 vi.mock('@/lib/cli-session', () => ({
@@ -52,7 +53,7 @@ describe('auto-yes-manager', () => {
   });
 
   describe('setAutoYesEnabled', () => {
-    it('should enable auto-yes with correct timestamps', () => {
+    it('should enable auto-yes with default duration (1 hour)', () => {
       vi.useFakeTimers();
       const now = 1700000000000;
       vi.setSystemTime(now);
@@ -61,6 +62,40 @@ describe('auto-yes-manager', () => {
 
       expect(state.enabled).toBe(true);
       expect(state.enabledAt).toBe(now);
+      expect(state.expiresAt).toBe(now + DEFAULT_AUTO_YES_DURATION);
+    });
+
+    it('should enable with specified duration (3 hours)', () => {
+      vi.useFakeTimers();
+      const now = 1700000000000;
+      vi.setSystemTime(now);
+
+      const state = setAutoYesEnabled('wt-1', true, 10800000);
+
+      expect(state.enabled).toBe(true);
+      expect(state.enabledAt).toBe(now);
+      expect(state.expiresAt).toBe(now + 10800000);
+    });
+
+    it('should enable with specified duration (8 hours)', () => {
+      vi.useFakeTimers();
+      const now = 1700000000000;
+      vi.setSystemTime(now);
+
+      const state = setAutoYesEnabled('wt-1', true, 28800000);
+
+      expect(state.enabled).toBe(true);
+      expect(state.enabledAt).toBe(now);
+      expect(state.expiresAt).toBe(now + 28800000);
+    });
+
+    it('should use default duration when duration is undefined (backward compatibility)', () => {
+      vi.useFakeTimers();
+      const now = 1700000000000;
+      vi.setSystemTime(now);
+
+      const state = setAutoYesEnabled('wt-1', true);
+
       expect(state.expiresAt).toBe(now + 3600000);
     });
 
@@ -77,6 +112,19 @@ describe('auto-yes-manager', () => {
       expect(state.enabled).toBe(false);
       expect(state.enabledAt).toBe(0);
       expect(state.expiresAt).toBe(0);
+    });
+  });
+
+  // [MF-001] AUTO_YES_TIMEOUT_MS deletion regression test
+  describe('AUTO_YES_TIMEOUT_MS migration', () => {
+    it('should not export AUTO_YES_TIMEOUT_MS from auto-yes-manager', async () => {
+      const managerModule = await import('@/lib/auto-yes-manager');
+      // Verify AUTO_YES_TIMEOUT_MS is not exported
+      expect('AUTO_YES_TIMEOUT_MS' in managerModule).toBe(false);
+    });
+
+    it('should use DEFAULT_AUTO_YES_DURATION from auto-yes-config', () => {
+      expect(DEFAULT_AUTO_YES_DURATION).toBe(3600000);
     });
   });
 

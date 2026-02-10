@@ -1,0 +1,80 @@
+{
+  "issue_number": 225,
+  "status": "success",
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "item": "MF-001: src/config/auto-yes-config.ts が未作成",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task",
+        "note": "設計書の不備ではなく実装未着手のため、検証チェックリストとして反映"
+      },
+      {
+        "item": "MF-002: setAutoYesEnabled() に duration パラメータが未追加",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      },
+      {
+        "item": "MF-003: AUTO_YES_TIMEOUT_MS 定数が未削除",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      },
+      {
+        "item": "MF-004: AutoYesConfirmDialog の onConfirm 型が未変更",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      },
+      {
+        "item": "MF-005: ラジオボタンUI / duration選択機能が未実装",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      },
+      {
+        "item": "MF-006: AutoYesToggle の onToggle 型が未変更",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      },
+      {
+        "item": "MF-007: formatTimeRemaining が HH:MM:SS 未対応",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      },
+      {
+        "item": "MF-008: handleAutoYesToggle に duration パラメータが未追加",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      },
+      {
+        "item": "MF-009: route.ts に duration バリデーションが未追加",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      }
+    ],
+    "should_fix": [
+      {
+        "item": "SF-001: AutoYesState の JSDoc コメントがハードコード値を参照",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      },
+      {
+        "item": "SF-002: テストコードに duration 指定テストが未追加",
+        "section_updated": "レビュー指摘事項サマリー (Stage 2), 整合性マトリクス, 実装チェックリスト (検証ステップ)",
+        "status": "reflected_as_implementation_task"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md",
+  "sections_updated": [
+    "11. 実装順序 (プレ実装ノート追加)",
+    "13. 実装ステータス (新規セクション)",
+    "14. レビュー指摘事項サマリー (Stage 2サブセクション追加, 整合性マトリクス追加, レビュー評価更新)",
+    "15. 実装チェックリスト (実装後の整合性検証サブセクション追加)",
+    "16. レビュー履歴 (Stage 2エントリ追加)"
+  ],
+  "notes": "Stage 2整合性レビューの全指摘事項（MF 9件、SF 2件）はソースコード実装タスクであり、設計書の不備ではない。設計書には実装状態の記録、整合性マトリクス、実装後の検証チェックリストとして反映した。",
+  "timestamp": "2026-02-10T00:00:00Z"
+}

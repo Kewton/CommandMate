@@ -1,0 +1,48 @@
+{
+  "issue_number": 225,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "データフロー図を修正: setAutoYesEnabled(worktreeId, cliToolId, duration)をsetAutoYesEnabled(worktreeId, true, duration) + startAutoYesPolling(worktreeId, cliToolId)に分離。cliToolIdがsetAutoYesEnabledの引数ではない旨の注記を追加。型変更セクションもsetAutoYesEnabled(worktreeId, enabled) -> setAutoYesEnabled(worktreeId, enabled, duration?)に修正"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "ALLOWED_DURATIONS定数の定義場所をauto-yes-manager.ts（サーバー専用モジュール）からsrc/config/auto-yes-config.ts（共有configファイル新規作成）に変更。バンドル問題の理由説明を追加。実装タスクの先頭にconfig作成タスクを追加、各タスクのimport元を明記。影響範囲テーブルにsrc/config/auto-yes-config.tsを追加し、auto-yes-manager.tsの変更内容を更新"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "実装タスクに後方互換性テスト（durationフィールド未指定でのデフォルト値適用テスト）を明示的に追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "実装タスクにAUTO_YES_TIMEOUT_MS定数の削除とDEFAULT_AUTO_YES_DURATION（src/config/auto-yes-config.tsからimport）への置き換えタスクを明記"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "成功レスポンススキーマをbuildAutoYesResponse関数のAutoYesResponse型（enabled, expiresAt, pollingStarted?）に合わせて修正。フィールド定義テーブルも追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/225"
+  }
+}

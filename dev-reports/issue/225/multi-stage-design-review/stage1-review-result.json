@@ -1,0 +1,142 @@
+{
+  "issue_number": 225,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "DRY",
+        "title": "AUTO_YES_TIMEOUT_MS定数とALLOWED_DURATIONSの重複",
+        "description": "現在auto-yes-manager.tsにハードコードされているAUTO_YES_TIMEOUT_MS = 3600000は、新設するALLOWED_DURATIONS[0] = 3600000およびDEFAULT_AUTO_YES_DURATION = 3600000と意味的に同一の値。設計書ではauto-yes-manager.tsがauto-yes-config.tsからDEFAULT_AUTO_YES_DURATIONをimportする計画だが、既存のAUTO_YES_TIMEOUT_MS定数の削除が明示的に記載されていない。実装時にAUTO_YES_TIMEOUT_MSが残存すると、同じ値が2箇所に定義される状態になる。",
+        "recommendation": "実装時にAUTO_YES_TIMEOUT_MS定数を完全に削除し、DEFAULT_AUTO_YES_DURATIONに一本化すること。設計書のセクション6-5のコード例はこれを暗黙的に実現しているが、削除対象として明示すべき。",
+        "affected_files": [
+          "src/lib/auto-yes-manager.ts",
+          "src/config/auto-yes-config.ts"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "SOLID/SRP",
+        "title": "formatTimeRemainingの配置場所の曖昧さ",
+        "description": "設計書セクション6-3でformatTimeRemainingのHH:MM:SS対応が記述されているが、この関数は現在AutoYesToggle.tsx内のモジュールスコープ関数として定義されている。コンポーネントファイル内にフォーマットロジックが含まれるのはSRP観点で若干の懸念がある。ただし、この関数はAutoYesToggle専用であり、現時点で他から参照する計画はないため、現在の配置は許容範囲。",
+        "recommendation": "現状維持で問題ないが、将来的に時間フォーマットを他の箇所でも使う場合はsrc/lib/utils.tsへの抽出を検討。設計書にこの判断根拠を注記として追記するとよい。",
+        "affected_files": [
+          "src/components/worktree/AutoYesToggle.tsx"
+        ]
+      },
+      {
+        "id": "SF-002",
+        "principle": "SOLID/OCP",
+        "title": "DURATION_LABELSとALLOWED_DURATIONSの同期が手動",
+        "description": "ALLOWED_DURATIONSとDURATION_LABELSは別々の定義であり、ALLOWED_DURATIONSに値を追加してもDURATION_LABELSに対応するラベルを追加し忘れる可能性がある。TypeScriptのRecord<AutoYesDuration, string>型によりコンパイル時にはキーの不足が検出されるため、型安全性は確保されている。ただし、選択肢追加のワークフローが2ステップになる。",
+        "recommendation": "型安全性が確保されているため、現在の設計で問題ない。ただし、設計書の制約条件セクションに「ALLOWED_DURATIONSに値を追加した場合、DURATION_LABELSへの対応追加はTypeScriptコンパイラが強制する」旨を補足するとよい。",
+        "affected_files": [
+          "src/config/auto-yes-config.ts"
+        ]
+      },
+      {
+        "id": "SF-003",
+        "principle": "KISS",
+        "title": "onConfirmコールバックの型がnumberではなくAutoYesDurationであるべき",
+        "description": "設計書セクション6-1ではonConfirmの型が(duration: number) => voidとなっている。AutoYesDuration型（リテラルユニオン）で定義すれば、ダイアログからの戻り値が型レベルでALLOWED_DURATIONSのいずれかであることが保証される。numberだと、中間レイヤーで不正な値が混入する余地が残る。",
+        "recommendation": "onConfirmの型を(duration: AutoYesDuration) => voidに変更し、AutoYesToggle.tsxのonToggleも(enabled: boolean, duration?: AutoYesDuration)とする。これにより、クライアント側のデータフロー全体で型安全性が向上する。",
+        "affected_files": [
+          "src/components/worktree/AutoYesConfirmDialog.tsx",
+          "src/components/worktree/AutoYesToggle.tsx",
+          "src/components/worktree/WorktreeDetailRefactored.tsx"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "CO-001",
+        "principle": "YAGNI",
+        "title": "選択肢の妥当性（1時間/3時間/8時間）",
+        "description": "3つの選択肢は実用的だが、ユーザーの実際の利用パターンに基づく根拠が設計書に記載されていない。YAGNI原則の観点からは、最初は1時間と3時間の2択で十分かもしれない。ただし、8時間は長時間バッチ処理のユースケースに対応しており、Issueの要件に含まれているため追加自体は正当。",
+        "recommendation": "選択肢の根拠（ユーザーフィードバック、想定ユースケース等）を設計書に追記。追加のduration値が必要になった場合の拡張手順も明記するとよい。",
+        "affected_files": [
+          "src/config/auto-yes-config.ts"
+        ]
+      },
+      {
+        "id": "CO-002",
+        "principle": "SOLID/DIP",
+        "title": "route.tsのALLOWED_DURATIONS.includes()によるバリデーション",
+        "description": "設計書ではroute.ts内でALLOWED_DURATIONS.includes(body.duration)による直接的なバリデーションを行う。これは簡潔で適切だが、バリデーション関数（isValidDuration()等）として抽出すれば、テスト容易性が向上し、auto-yes-config.tsの責務がより明確になる。",
+        "recommendation": "auto-yes-config.tsにisValidDuration()ヘルパー関数を追加し、route.tsから呼び出す形にすることを検討。ただし、KISS原則とのバランスで、現在の設計でも十分にシンプルで問題ない。",
+        "affected_files": [
+          "src/config/auto-yes-config.ts",
+          "src/app/api/worktrees/[id]/auto-yes/route.ts"
+        ]
+      },
+      {
+        "id": "CO-003",
+        "principle": "DRY",
+        "title": "ハードコードされた「1時間後に自動でOFFになります」テキスト",
+        "description": "現在のAutoYesConfirmDialog.tsxのL46に「1時間後に自動でOFFになります。」というハードコードされたテキストがある。設計書ではこれを動的テキスト（DURATION_LABELS[selectedDuration]を使用）に変更する計画。この変更が漏れないよう注意が必要。",
+        "recommendation": "テスト計画に、ダイアログのテキストがselectedDurationに応じて動的に変化することの検証を含めること。",
+        "affected_files": [
+          "src/components/worktree/AutoYesConfirmDialog.tsx"
+        ]
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principles_checklist": {
+    "single_responsibility": {
+      "status": "pass",
+      "note": "Config/Presentation/API/Business Logicの明確なレイヤー分離。共有ConfigファイルはServer/Client境界問題を適切に解決。"
+    },
+    "open_closed": {
+      "status": "pass",
+      "note": "ALLOWED_DURATIONS配列への追加で選択肢拡張が可能。Record型によりDURATION_LABELSの同期もコンパイラが強制。"
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "note": "継承関係なし。AutoYesStateインターフェースの互換性は維持される。"
+    },
+    "interface_segregation": {
+      "status": "pass",
+      "note": "既存インターフェースにdurationフィールドを追加せず、関数パラメータとして渡す設計。AutoYesStateの最小性を維持。"
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "note": "共有config定数への依存で、Server/Clientモジュールが直接依存しない設計。"
+    },
+    "kiss": {
+      "status": "pass",
+      "note": "DB変更なし、既存のインメモリパターン維持、ラジオボタン3択というシンプルなUI。全体的に最小限の変更量。"
+    },
+    "yagni": {
+      "status": "pass",
+      "note": "自由入力、無制限オプション、DB永続化などの過剰機能を明示的に排除。"
+    },
+    "dry": {
+      "status": "conditional_pass",
+      "note": "ALLOWED_DURATIONS/DURATION_LABELSの一元管理は適切。ただしAUTO_YES_TIMEOUT_MSの削除が明示されていない点に注意（MF-001）。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md",
+    "src/lib/auto-yes-manager.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/config/status-colors.ts",
+    "src/config/z-index.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}

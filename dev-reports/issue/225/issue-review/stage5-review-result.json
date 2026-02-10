@@ -1,0 +1,138 @@
+{
+  "issue_number": 225,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-10",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 3
+  },
+  "previous_findings_resolution": {
+    "MF-1": {
+      "status": "resolved",
+      "detail": "データフロー（duration伝搬経路）セクションが追加され、AutoYesConfirmDialog -> AutoYesToggle -> WorktreeDetailRefactored -> API -> auto-yes-managerの全経路がASCIIフロー図で明示された。具体的な型変更（onConfirm: (duration: number) => void, onToggle: (enabled: boolean, duration?: number) => Promise<void>等）も列挙されており、Stage 1で指摘したデータフローの曖昧さは完全に解消されている"
+    },
+    "SF-1": {
+      "status": "resolved",
+      "detail": "実装タスクに「AutoYesConfirmDialog.tsxの固定テキスト『1時間後に自動でOFFになります。』を選択時間に応じた動的テキストに変更」が明示的に追加された。影響範囲テーブルのAutoYesConfirmDialog.tsx行にも「固定テキスト動的化」が記載されている"
+    },
+    "SF-2": {
+      "status": "resolved",
+      "detail": "「ALLOWED_DURATIONS定数と型定義」セクションが新設され、定義場所（src/lib/auto-yes-manager.ts）、コード例（ALLOWED_DURATIONS, AutoYesDuration型, DEFAULT_AUTO_YES_DURATION）、サーバー側・クライアント側での使用方法が明確に記載された"
+    },
+    "SF-3": {
+      "status": "resolved",
+      "detail": "実装タスクに以下が追加された: (1) 既存テストの更新（tests/unit/lib/auto-yes-manager.test.ts L64のexpiresAt固定値テストをデフォルトdurationテスト+duration指定テストに分割）、(2) 既存コンポーネントテストの更新（AutoYesConfirmDialog.test.tsx, AutoYesToggle.test.tsx）。影響範囲テーブルにも3つのテストファイルが追加されている"
+    },
+    "SF-4": {
+      "status": "resolved",
+      "detail": "「APIリクエスト/レスポンススキーマ」セクションが新設され、POSTリクエストボディ（JSON例、フィールド定義表、デフォルト値）、成功レスポンス(200)、バリデーションエラーレスポンス(400)が具体的に記載されている"
+    },
+    "NTH-1": {
+      "status": "resolved",
+      "detail": "「関連Issue」セクションが追加され、#61, #138, #153へのリンクが記載されている"
+    },
+    "NTH-2": {
+      "status": "resolved",
+      "detail": "受入条件に「3時間/8時間選択時のカウントダウン表示が視認しやすいこと（HH:MM:SS形式の検討）」が追加されている"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "整合性",
+        "issue": "Issueの「データフロー」セクションでsetAutoYesEnabledの引数が(worktreeId, cliToolId, duration)の3引数として記載されているが、現在のsetAutoYesEnabled関数シグネチャはsetAutoYesEnabled(worktreeId: string, enabled: boolean)の2引数であり、cliToolIdは引数に含まれていない。実際のroute.tsの呼び出し(L104)もsetAutoYesEnabled(params.id, body.enabled)であり、cliToolIdはstartAutoYesPollingに別途渡される構造。Issueのデータフロー図では「setAutoYesEnabled(worktreeId, cliToolId, duration)」と記載しており、実際のコード構造と不整合",
+        "location": "データフロー（duration伝搬経路）セクションの最後の行",
+        "recommendation": "データフロー図を修正すべき。現在の記載「setAutoYesEnabled(worktreeId, cliToolId, duration)」を「setAutoYesEnabled(worktreeId, enabled, duration)」に修正する。cliToolIdはsetAutoYesEnabledの引数ではなく、route.ts内でstartAutoYesPolling(worktreeId, cliToolId)に別途渡される。フロー図の最終行を正確に表すなら「auto-yes/route.ts → setAutoYesEnabled(worktreeId, true, duration) + startAutoYesPolling(worktreeId, cliToolId)」のように分離して記載するのが正確",
+        "evidence": "Issue記載: 「setAutoYesEnabled(worktreeId, cliToolId, duration)」。実コード src/lib/auto-yes-manager.ts L181: setAutoYesEnabled(worktreeId: string, enabled: boolean): AutoYesState。src/app/api/worktrees/[id]/auto-yes/route.ts L104: const state = setAutoYesEnabled(params.id, body.enabled); -- 第2引数はenabledであってcliToolIdではない"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "issue": "IssueではALLOWED_DURATIONSをauto-yes-manager.tsからexportしてクライアントコンポーネント(AutoYesConfirmDialog.tsx)からimportする設計だが、auto-yes-manager.tsはサーバー専用モジュール（tmux操作、cli-session、prompt-detector等のNode.js依存モジュールをトップレベルでimport）であり、'use client'コンポーネントからのimportでNext.jsバンドルエラーまたはバンドルサイズ肥大のリスクがある。Stage 3のNTH-3で既に指摘されているが、解決策がIssueに反映されていない",
+        "location": "ALLOWED_DURATIONS定数と型定義 セクション",
+        "recommendation": "以下のいずれかの方針を実装タスクに明記すべき: (A) ALLOWED_DURATIONSとAutoYesDuration型を共有configファイル(例: src/config/auto-yes-durations.ts)に分離し、auto-yes-manager.tsとAutoYesConfirmDialog.tsxの両方からimportする。(B) auto-yes-manager.tsからexportしつつ、Next.jsのtree-shakingで問題ないことを確認するタスクを追加する。auto-yes-manager.tsのL1-17のimport群（cli-session, tmux, prompt-detector等）がクライアントバンドルに含まれると実行時エラーになる可能性が高い",
+        "evidence": "src/lib/auto-yes-manager.ts L1-17: import { captureSessionOutput } from './cli-session'; import { detectPrompt } from './prompt-detector'; import { sendKeys, sendSpecialKeys } from './tmux'; -- 全てNode.js/サーバー専用。src/components/worktree/AutoYesConfirmDialog.tsx L8: 'use client' -- クライアントコンポーネント"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "受入条件「duration未指定時にデフォルト値（3600000）が適用されること（後方互換性）」は記載されているが、APIの後方互換性テスト（durationフィールドなしでPOSTした場合の動作）が実装タスクのテスト項目に明示されていない",
+        "location": "実装タスク セクション - テスト関連タスク",
+        "recommendation": "実装タスクのユニットテスト追加項目に「durationフィールド未指定でのPOSTリクエスト時にデフォルト値(3600000)が適用されるテスト」を明示すると、後方互換性の担保がより確実になる",
+        "evidence": "既存のroute.ts L91-97はbody.enabledのバリデーションのみで、body.durationの取り扱いは未実装。durationフィールドが省略された場合のデフォルト挙動テストが重要"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "AUTO_YES_TIMEOUT_MS定数の扱い（削除 or DEFAULT_AUTO_YES_DURATIONに置換）が実装タスクに明記されていない",
+        "location": "実装タスク セクション",
+        "recommendation": "Stage 3のNTH-2で指摘された通り、AUTO_YES_TIMEOUT_MS定数(L68)をDEFAULT_AUTO_YES_DURATIONに置き換えて削除する方針を実装タスクに追加するとよい。現在の実装タスクでは「setAutoYesEnabled()にdurationパラメータ追加（デフォルト: DEFAULT_AUTO_YES_DURATION）」と記載されているが、既存のAUTO_YES_TIMEOUT_MS定数の削除が暗黙的になっている",
+        "evidence": "src/lib/auto-yes-manager.ts L68: const AUTO_YES_TIMEOUT_MS = 3600000; -- 非exportだが、Issue実装後はDEFAULT_AUTO_YES_DURATIONに置き換わるため不要になる"
+      },
+      {
+        "id": "NTH-3",
+        "category": "明確性",
+        "issue": "APIレスポンスの「success」フィールドについて、Issueの成功レスポンス例では{ success: true, expiresAt: ... }と記載されているが、現在のroute.tsのbuildAutoYesResponse関数はAutoYesResponse型（enabled, expiresAt, pollingStarted?）を返しており、successフィールドは含まれていない。Issueのスキーマと現在のレスポンス形式が一致していない",
+        "location": "APIリクエスト/レスポンススキーマ セクション - 成功レスポンス",
+        "recommendation": "成功レスポンスのスキーマを実際のbuildAutoYesResponse関数の出力形式に合わせるか、あるいはレスポンス形式を変更する方針を明記するとよい。現在のレスポンス形式は{ enabled: true, expiresAt: 1739232000000, pollingStarted: true }であり、Issueの{ success: true, expiresAt: ... }とは異なる",
+        "evidence": "src/app/api/worktrees/[id]/auto-yes/route.ts L24-28: interface AutoYesResponse { enabled: boolean; expiresAt: number | null; pollingStarted?: boolean; } -- successフィールドなし"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "L68: AUTO_YES_TIMEOUT_MS定数の削除/置換方針。L181: setAutoYesEnabled(worktreeId, enabled)の現在のシグネチャ（Issueのデータフロー図と不整合）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "L24-28: 現在のAutoYesResponse型がIssueのレスポンススキーマ（successフィールド）と不一致。L104: setAutoYesEnabled呼び出し時の引数がIssueのデータフロー図と不一致"
+    },
+    {
+      "file": "src/components/worktree/AutoYesConfirmDialog.tsx",
+      "relevance": "L8: 'use client'コンポーネント。auto-yes-manager.tsからのALLOWED_DURATIONSインポートにバンドル問題の懸念"
+    },
+    {
+      "file": "src/components/worktree/AutoYesToggle.tsx",
+      "relevance": "L20: 現在のonToggle型。L32-37: formatTimeRemaining関数のMM:SS形式"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "L1149-1164: handleAutoYesToggle関数。duration引数追加対象"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "relevance": "L60-64: setAutoYesEnabledテスト。duration追加後の更新対象（Issueに記載済み）"
+    },
+    {
+      "file": "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+      "relevance": "L63-66: onConfirmコールバックテスト。duration引数追加後の更新対象（Issueに記載済み）"
+    },
+    {
+      "file": "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+      "relevance": "L42-43: onToggle(true)アサーション。duration引数追加後の更新対象（Issueに記載済み）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/user-guide/webapp-guide.md",
+      "relevance": "Auto Yesモードの有効時間選択に関するドキュメント更新タスクがIssueに記載済み"
+    },
+    {
+      "file": "docs/TRUST_AND_SAFETY.md",
+      "relevance": "最大有効時間拡大の注記タスクがIssueに記載済み"
+    }
+  ],
+  "overall_assessment": {
+    "quality": "good",
+    "detail": "Stage 1で指摘した全7件（MF-1, SF-1~SF-4, NTH-1~NTH-2）が適切に対応されている。データフロー図の追加、APIスキーマの明記、ALLOWED_DURATIONS定数の定義場所と型の明示、既存テスト更新タスクの追加、関連Issueリンクの追加、カウントダウン表示形式の検討項目追加、全て確認できた。Stage 3の影響範囲レビュー結果も適切に反映されている（current-output/route.tsの追加、コンポーネントテスト更新タスク、ドキュメント更新タスク、テスト方針）。残存する指摘は軽微なものが中心であり、実装に着手可能な品質に達している"
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "issue_number": 225,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 85.0,
+      "tests_passed": 113,
+      "tests_skipped": 1,
+      "typescript_errors": 0,
+      "eslint_errors": 0,
+      "commit": "82a4411",
+      "files_created": [
+        "src/config/auto-yes-config.ts"
+      ],
+      "files_modified": [
+        "src/lib/auto-yes-manager.ts",
+        "src/app/api/worktrees/[id]/auto-yes/route.ts",
+        "src/components/worktree/AutoYesConfirmDialog.tsx",
+        "src/components/worktree/AutoYesToggle.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "tests_created": [
+        "tests/unit/lib/auto-yes-manager.test.ts",
+        "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+        "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+        "tests/integration/auto-yes-persistence.test.ts",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 10,
+      "criteria_total": 10,
+      "scenarios_passed": 10,
+      "scenarios_total": 10,
+      "verification_details": {
+        "ui": "ラジオボタン表示、デフォルト選択、動的テキスト変更確認",
+        "api": "duration検証、ホワイトリスト、後方互換性確認",
+        "timer": "HH:MM:SS形式カウントダウン確認",
+        "security": "不正duration拒否、入力検証確認",
+        "mobile": "モバイル表示、44pxタッチターゲット確認"
+      }
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "formatTimeRemaining関数をsrc/config/auto-yes-config.tsに抽出（テスタビリティ向上）",
+        "isAllowedDuration型ガード関数追加（unsafe castを削除）",
+        "マジックナンバーを名前付き定数に置換（MS_PER_HOUR等）",
+        "tests/unit/config/auto-yes-config.test.ts作成（27テスト追加）"
+      ],
+      "tests_before": 2944,
+      "tests_after": 2971,
+      "tests_added": 27,
+      "typescript_errors": 0,
+      "eslint_errors": 0,
+      "commit": "pending"
+    },
+    "documentation": {
+      "status": "success",
+      "files_updated": [
+        "docs/user-guide/webapp-guide.md",
+        "docs/TRUST_AND_SAFETY.md"
+      ],
+      "sections_added": [
+        "有効時間選択（1h/3h/8h）の説明",
+        "API仕様（開発者向け）",
+        "セキュリティベストプラクティス",
+        "技術的安全性（5層防御）",
+        "カウントダウンタイマー形式（HH:MM:SS）"
+      ]
+    }
+  },
+  "design_reviews": {
+    "issue_review": {
+      "status": "completed",
+      "stages": 8,
+      "iterations": 2,
+      "findings_total": 24,
+      "findings_addressed": 24,
+      "report": "dev-reports/issue/225/issue-review/summary-report.md"
+    },
+    "design_review": {
+      "status": "completed",
+      "stages": 4,
+      "average_score": 3.5,
+      "findings_total": 38,
+      "findings_addressed": 27,
+      "report": "dev-reports/issue/225/multi-stage-design-review/summary-report.md",
+      "design_policy": "dev-reports/design/issue-225-auto-yes-duration-selection-design-policy.md"
+    }
+  },
+  "work_plan": {
+    "status": "completed",
+    "total_hours_estimated": 14,
+    "total_phases": 4,
+    "total_tasks": 9,
+    "file": "dev-reports/issue/225/work-plan.md"
+  },
+  "next_steps": [
+    "最終commit作成",
+    "PR作成"
+  ]
+}
