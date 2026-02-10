@@ -7,21 +7,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { listLogs } from '@/lib/log-manager';
+import { withLogging } from '@/lib/api-logger';
 import fs from 'fs/promises';
 import path from 'path';
 
-export async function GET(
+export const GET = withLogging<{ id: string }>(async (
   request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+  { params }: { params: { id: string } | Promise<{ id: string }> }
+) => {
   try {
+    const resolvedParams = await Promise.resolve(params);
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, resolvedParams.id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${resolvedParams.id}' not found` },
         { status: 404 }
       );
     }
@@ -31,7 +33,7 @@ export async function GET(
     const cliToolFilter = searchParams?.get('cliTool') || 'all';
 
     // Get log files using log-manager
-    const logPaths = await listLogs(params.id, cliToolFilter);
+    const logPaths = await listLogs(resolvedParams.id, cliToolFilter);
 
     // Extract filenames from full paths and get file info
     const logFiles = await Promise.all(
@@ -64,4 +66,4 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});

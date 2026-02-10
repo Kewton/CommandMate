@@ -43,9 +43,10 @@ export function debounce<T extends (...args: Parameters<T>) => void>(
  * Escape special characters in a string for use in RegExp
  * [Issue #21] File tree search functionality
  *
- * NOTE: This function is for CLIENT-SIDE highlight rendering only.
- * Server-side search MUST NOT use RegExp (ReDoS prevention - SEC-MF-001).
- * Server-side uses indexOf/includes for string matching.
+ * Used by both client-side (highlight rendering) and server-side (path sanitization).
+ * NOTE: Server-side search should still use indexOf/includes for user input matching (SEC-MF-001).
+ * NOTE: Building RegExp from trusted sources (e.g., environment variables via escapeRegExp) is safe
+ *       as ReDoS risk applies only to untrusted user input (S4-C-004).
  *
  * @param str - String to escape
  * @returns String with RegExp special characters escaped
@@ -109,4 +110,28 @@ export function computeMatchedPaths(filePaths: string[]): Set<string> {
 export function truncateString(str: string, maxLength: number = 30): string {
   if (str.length <= maxLength) return str;
   return `${str.substring(0, maxLength - 3)}...`;
+}
+
+/**
+ * Escape HTML special characters to prevent XSS
+ * Issue #11: Used by LogViewer.tsx for safe dangerouslySetInnerHTML rendering (S4-MF-001)
+ *
+ * Escapes the 5 HTML special characters: & < > " '
+ *
+ * @param text - Text to escape
+ * @returns HTML-safe string
+ *
+ * @example
+ * ```typescript
+ * escapeHtml('<script>alert("xss")</script>');
+ * // '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
+ * ```
+ */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }

@@ -1,20 +1,24 @@
 /**
  * LogViewer Component
  * Displays log files for a worktree with search functionality
+ * Issue #11: Added log export button with sanitization
  */
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge } from '@/components/ui';
+import { ToastContainer, useToast } from '@/components/common/Toast';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
+import { copyToClipboard } from '@/lib/clipboard-utils';
+import { escapeRegExp, escapeHtml } from '@/lib/utils';
 
 export interface LogViewerProps {
   worktreeId: string;
 }
 
 /**
- * Log file viewer component with search
+ * Log file viewer component with search and export
  *
  * @example
  * ```tsx
@@ -30,6 +34,8 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState<number>(0);
   const [cliToolFilter, setCliToolFilter] = useState<'all' | 'claude' | 'codex' | 'gemini'>('all');
+  const [exporting, setExporting] = useState(false);
+  const { toasts, showToast, removeToast } = useToast();
 
   /**
    * Fetch log files list
@@ -85,12 +91,31 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
   };
 
   /**
+   * Export sanitized log to clipboard
+   * Issue #11: Fetches sanitized version from server and copies to clipboard
+   */
+  const handleExport = useCallback(async () => {
+    if (!selectedFile) return;
+
+    try {
+      setExporting(true);
+      const data = await worktreeApi.getLogFile(worktreeId, selectedFile, { sanitize: true });
+      await copyToClipboard(data.content);
+      showToast('Log copied to clipboard (sanitized)', 'success');
+    } catch (err) {
+      showToast(`Failed to export log: ${handleApiError(err)}`, 'error');
+    } finally {
+      setExporting(false);
+    }
+  }, [worktreeId, selectedFile, showToast]);
+
+  /**
    * Find all matches in content
    */
   const matches = useMemo(() => {
     if (!searchQuery || !fileContent) return [];
 
-    const regex = new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const regex = new RegExp(escapeRegExp(searchQuery), 'gi');
     const allMatches: { index: number; length: number }[] = [];
     let match;
 
@@ -130,7 +155,7 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
   };
 
   /**
-   * Highlight matches in content
+   * Highlight matches in content with HTML escaping (XSS prevention - S4-MF-001)
    */
   const highlightedContent = useMemo(() => {
     if (!fileContent || !searchQuery || matches.length === 0) {
@@ -141,19 +166,19 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
     let lastIndex = 0;
 
     matches.forEach((match, idx) => {
-      // Add text before match
-      result += fileContent.substring(lastIndex, match.index);
+      // Add escaped text before match
+      result += escapeHtml(fileContent.substring(lastIndex, match.index));
 
-      // Add highlighted match
+      // Add highlighted match (escaped)
       const matchText = fileContent.substring(match.index, match.index + match.length);
       const isCurrent = idx === currentMatchIndex;
-      result += `<mark class="${isCurrent ? 'bg-yellow-400 text-black' : 'bg-yellow-200 text-black'}" data-match-index="${idx}">${matchText}</mark>`;
+      result += `<mark class="${isCurrent ? 'bg-yellow-400 text-black' : 'bg-yellow-200 text-black'}" data-match-index="${idx}">${escapeHtml(matchText)}</mark>`;
 
       lastIndex = match.index + match.length;
     });
 
-    // Add remaining text
-    result += fileContent.substring(lastIndex);
+    // Add remaining escaped text
+    result += escapeHtml(fileContent.substring(lastIndex));
 
     return result;
   }, [fileContent, searchQuery, matches, currentMatchIndex]);
@@ -277,18 +302,29 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="font-mono text-base">{selectedFile}</CardTitle>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedFile(null);
-                    setFileContent(null);
-                    setSearchQuery('');
-                    setCurrentMatchIndex(0);
-                  }}
-                >
-                  Close
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleExport}
+                    disabled={!selectedFile || exporting}
+                    title="Copy sanitized log to clipboard"
+                  >
+                    {exporting ? 'Exporting...' : 'Export'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedFile(null);
+                      setFileContent(null);
+                      setSearchQuery('');
+                      setCurrentMatchIndex(0);
+                    }}
+                  >
+                    Close
+                  </Button>
+                </div>
               </div>
 
               {/* Search Controls */}
@@ -363,6 +399,9 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* Toast notifications */}
+      <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
   );
 }

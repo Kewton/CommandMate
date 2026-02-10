@@ -1,0 +1,17 @@
+{
+  "issue_number": 11,
+  "phase": "Phase 3: テスト・ドキュメント",
+  "tasks": ["Task 3.1", "Task 3.2"],
+  "acceptance_criteria": [
+    "Task 3.1: tests/unit/log-manager.test.ts が新規作成され、createLog/readLog/listLogs/appendToLog の回帰テストがパスすること",
+    "Task 3.2: CLAUDE.md の主要機能モジュールテーブルに log-config.ts, log-export-sanitizer.ts, api-logger.ts の記載があること",
+    "全体: npm run test:unit が全パスすること"
+  ],
+  "implementation_tasks": [
+    "Task 3.1: tests/unit/log-manager.test.ts を新規作成 - createLog(), readLog(), listLogs(), appendToLog() の回帰テスト。fs/promisesをモックし、基本的なCRUD操作が正常に動作することを確認",
+    "Task 3.2: CLAUDE.md の主要機能モジュールテーブルに以下を追記: src/config/log-config.ts（LOG_DIR定数の一元管理、SF-004対応）、src/lib/log-export-sanitizer.ts（エクスポート用パス・環境情報・機密データサニタイズ、Issue #11）、src/lib/api-logger.ts（共通withLogging()ヘルパー、開発環境APIロギング、Issue #11）"
+  ],
+  "design_doc_path": "dev-reports/design/issue-11-data-collection-design-policy.md",
+  "work_plan_path": "dev-reports/issue/11/work-plan.md",
+  "target_coverage": 80
+}

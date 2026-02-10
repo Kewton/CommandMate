@@ -1,0 +1,157 @@
+{
+  "issue_number": 11,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "withLogging()のApiHandler型が既存route.tsのハンドラーシグネチャと不一致",
+        "section_updated": "3-1 (Decoratorパターン), 8 (設計決定事項 D-3), 9 (テスト戦略), 11 (制約事項 C-7)",
+        "status": "reflected",
+        "changes": [
+          "ApiHandler型をジェネリクス ApiHandler<P> で再定義",
+          "context.paramsを P | Promise<P> で定義し将来のasync params対応を追加",
+          "withLogging()関数にジェネリクス型パラメータを追加",
+          "具体的な適用例を型パラメータ指定付きで記載",
+          "設計根拠セクションを追加",
+          "D-3のトレードオフ記述を更新",
+          "LSP原則の説明をジェネリクス対応に更新",
+          "withLogging()テストケースにジェネリクス型推論テストを追加",
+          "制約事項C-7（params Promise化）を追加"
+        ]
+      },
+      {
+        "id": "MF-002",
+        "item": "統合テストが現行実装と大幅に乖離",
+        "section_updated": "9 (テスト戦略), 10 (実装順序 T1)",
+        "status": "reflected",
+        "changes": [
+          "統合テスト修正方針セクションを新規追加（fsモック戦略、拡張子統一、プレフィクス検証、テスト構造整理）",
+          "T1の具体的修正方針テーブルを追加",
+          "制約事項C-3の説明にMF-002参照を追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "sanitizeクエリパラメータによるSRP希薄化",
+        "section_updated": "3-3 (APIクライアント拡張), 5-1 (API設計), 8 (設計決定事項 D-2)",
+        "status": "reflected",
+        "changes": [
+          "ハンドラー内のSRP維持方針セクションを追加（条件分岐1行限定、ロジック完全分離、フロー明確化）",
+          "API設計セクションに責務分離のコード例を追加",
+          "D-2のトレードオフ記述にSRP最小化方針を追記",
+          "SRP原則の説明にSF-001参照を追加"
+        ]
+      },
+      {
+        "id": "SF-002",
+        "item": "SanitizeRuleのStrategyパターン命名が実態と乖離",
+        "section_updated": "3-2 (設計パターン)",
+        "status": "reflected",
+        "changes": [
+          "セクションタイトルを「Strategyパターン」から「ルールベースパターン」に変更",
+          "パターン名変更の設計根拠をblockquoteで明記",
+          "Strategyパターンの適切な使用場面を注記"
+        ]
+      },
+      {
+        "id": "SF-003",
+        "item": "withLogging()段階的適用におけるYAGNI考慮",
+        "section_updated": "10 (実装順序), 8 (設計決定事項 D-10), 13 (実装チェックリスト)",
+        "status": "reflected",
+        "changes": [
+          "Phase 2（旧T8: 残りroute.tsに適用）をスコープから除外",
+          "Phase 1をログ関連API+バグ調査必要APIに限定",
+          "設計決定事項D-10を新規追加",
+          "実装チェックリストに別Issue起票タスクを追加",
+          "mermaidダイアグラムからPhase 2を削除"
+        ]
+      },
+      {
+        "id": "SF-004",
+        "item": "LOG_DIRの重複定義",
+        "section_updated": "1 (アーキテクチャ), 2 (技術選定), 8 (設計決定事項 D-8), 10 (実装順序 T0), 13 (実装チェックリスト)",
+        "status": "reflected",
+        "changes": [
+          "システム構成図にlog-config.tsノードを追加",
+          "レイヤー構成に共通設定層を追加",
+          "新規モジュール配置にsrc/config/log-config.tsを追加",
+          "log-manager.tsの説明をLOG_DIR移行に更新",
+          "代替案比較にLOG_DIR管理の行を追加",
+          "設計決定事項D-8を新規追加",
+          "新規前提タスクT0を追加（mermaidダイアグラム、テーブル、チェックリスト）"
+        ]
+      },
+      {
+        "id": "SF-005",
+        "item": "escapeRegexユーティリティの所在が不明",
+        "section_updated": "2 (技術選定), 3-2 (ルールベースパターン), 8 (設計決定事項 D-9), 9 (テスト戦略), 1 (モジュール配置)",
+        "status": "reflected",
+        "changes": [
+          "技術選定テーブルに正規表現エスケープの行を追加",
+          "escapeRegex()の配置と実装をコード例付きで明記",
+          "LogViewer.tsxのインラインエスケープとの将来統合を注記",
+          "設計決定事項D-9を新規追加",
+          "テスト対象テーブルにescapeRegex()を追加",
+          "新規モジュール配置にutils.tsのescapeRegex()追加を記載"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "item": "withLogging()の本番環境バイパスがNODE_ENVのみに依存",
+        "section_updated": "6-4 (APIロギングのセキュリティ)",
+        "status": "noted",
+        "changes": [
+          "将来の拡張ポイントとしてCM_API_LOGGING環境変数による制御の注記を追加",
+          "WithLoggingOptionsへのenabledフラグ追加可能性を記載"
+        ]
+      },
+      {
+        "id": "C-002",
+        "item": "Facadeパターンの命名について",
+        "section_updated": "3-3 (設計パターン)",
+        "status": "reflected",
+        "changes": [
+          "セクションタイトルを「Facadeパターン」から「APIクライアント拡張」に変更",
+          "パターン名変更の設計根拠をblockquoteで明記"
+        ]
+      },
+      {
+        "id": "C-003",
+        "item": "サニタイズルールのユーザー名パターンの堅牢性",
+        "section_updated": "4-3 (サニタイズ済みログ出力例)",
+        "status": "noted",
+        "changes": [
+          "マスキングマッピング表からユーザー名個別ルール([USER])を削除",
+          "HOMEパスマスキングでカバーされる旨の注記を追加",
+          "必要時の追加Issue対応方針を記載"
+        ]
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-11-data-collection-design-policy.md",
+  "sections_updated": [
+    "1. アーキテクチャ設計（システム構成図、レイヤー構成、モジュール配置）",
+    "2. 技術選定（escapeRegex追加、LOG_DIR管理追加）",
+    "3. 設計パターン（3-1: ジェネリクス型、3-2: ルールベースパターン改名、3-3: APIクライアント拡張改名+SRP方針）",
+    "4. データモデル設計（ユーザー名パターン注記）",
+    "5. API設計（SRP責務分離方針）",
+    "6. セキュリティ設計（将来拡張ポイント注記）",
+    "8. 設計上の決定事項（D-8, D-9, D-10追加、D-2, D-3更新、SOLID原則更新）",
+    "9. テスト戦略（統合テスト修正方針、テスト対象追加）",
+    "10. 実装順序と依存関係（T0追加、Phase 2スコープ除外、T1方針明記）",
+    "11. 制約事項（C-7追加、C-3更新）",
+    "12. レビュー指摘事項サマリー（新規セクション）",
+    "13. 実装チェックリスト（新規セクション）",
+    "14. レビュー履歴（新規セクション）"
+  ],
+  "timestamp": "2026-02-10T12:30:00Z"
+}

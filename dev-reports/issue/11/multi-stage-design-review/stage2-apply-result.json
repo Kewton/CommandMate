@@ -1,0 +1,140 @@
+{
+  "issue_number": 11,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "S2-MF-001",
+        "item": "escapeRegex()と既存escapeRegExp()の命名不整合 -- 既存関数再利用に方針変更",
+        "sections_updated": ["1 (モジュール配置)", "2 (技術選定)", "3-2 (サニタイズルール)", "8 (D-9)", "10 (T2)", "13 (チェックリスト)"],
+        "changes": [
+          "モジュール配置のutils.ts記述を 'escapeRegExp()が既に存在（再利用する）' に変更",
+          "技術選定テーブルを既存escapeRegExp()再利用に変更",
+          "サニタイズルールのコード例でescapeRegExp()をインポートする形に変更",
+          "S2-MF-001対応の注記ブロックを追加（JSDocコメント更新の必要性を明記）",
+          "D-9の決定事項を既存escapeRegExp()再利用に変更",
+          "T2チェックリストからescapeRegex()新規追加を削除、JSDocコメント更新に変更"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "S2-MF-002",
+        "item": "withLogging()のApiHandler型におけるparams型のPromise/非Promise混在対応",
+        "sections_updated": ["3-1 (Decoratorパターン)", "8 (D-3)", "9 (テストケース)", "11 (C-7)"],
+        "changes": [
+          "セクション3-1にparams型混在状況の詳細説明を追加（非Promise版多数派/Promise版一部の具体例）",
+          "withLogging()内部でparamsに直接アクセスしない方針を明記（URL pathname使用）",
+          "設計根拠 (S2-MF-002) ブロックを追加",
+          "コード例にパスパラメータ不使用のコメントを追加",
+          "D-3のトレードオフにS2-MF-002対応を追記",
+          "withLogging()テストケースにparamsアクセス不使用テストを追加",
+          "C-7の制約事項にparams混在の具体的状況と対処方針を追記"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S2-SF-001",
+        "item": "api-client.ts getLogFile()のcliToolId欠落の記述を正確化（型定義のみ欠落）",
+        "sections_updated": ["5-1 (API設計)", "11 (C-4)", "13 (チェックリスト)"],
+        "changes": [
+          "レスポンス定義のcliToolIdコメントを 'APIレスポンスには既に含まれている（api-client.ts側の型定義のみ欠落）' に変更",
+          "C-4の表現を型定義のみ欠落であることが明確になるよう修正",
+          "T4チェックリストのcliToolId項目に '（APIレスポンスには既に含まれている）' を追記"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "S2-SF-002",
+        "item": "統合テストのfsモック戦略にlog-manager.ts経由の考慮を追加",
+        "sections_updated": ["9 (テスト戦略)", "10 (T1テーブル)", "11 (C-3)"],
+        "changes": [
+          "MF-002修正方針に新規項目2を追加: ログ一覧API (logs/route.ts) のモック戦略詳細",
+          "log-manager.tsのlistLogs()経由であることの説明と、テスト戦略(a)(b)の選択肢提示",
+          "推奨方針として(b) fs/promisesモックを明記",
+          "T1テーブルにlogs/route.tsのアクセス経路行を追加",
+          "C-3にlog-manager.ts経由の留意点を追記",
+          "T1チェックリストにlog-manager.ts経由のコメント記載項目を追加"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "S2-SF-003",
+        "item": "withLogging()のNODE_ENVチェック条件でtest環境の扱いを明確化",
+        "sections_updated": ["6-4 (APIロギングセキュリティ)", "11 (C-6)"],
+        "changes": [
+          "セクション6-4の記述を 'NODE_ENV === development の場合のみログ出力。test/production環境ではバイパス' に変更",
+          "C-6の記述を具体化: withLogging()がtest環境で自動バイパスされること、開発環境テストではNODE_ENV一時変更が必要な旨を明記"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "S2-SF-004",
+        "item": "LogViewer.tsxのインライン正規表現エスケープを既知の技術的負債として認識",
+        "sections_updated": ["3-2 (サニタイズルール)", "13 (チェックリスト)"],
+        "changes": [
+          "セクション3-2にS2-SF-004対応の注記ブロックを追加（将来課題ではなく既知の技術的負債として明示）",
+          "T5チェックリストにインライン正規表現エスケープのescapeRegExp()置き換え項目を追加"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "S2-SF-005",
+        "item": "MarkdownログのヘッダーFormを実装の実態に合わせて修正",
+        "sections_updated": ["4-2 (Markdown構造)", "4-3 (サニタイズ済みログ例)"],
+        "changes": [
+          "セクション4-2のMarkdown例を log-manager.ts の実際の出力形式に修正（ヘッダー、Created行、セクション見出し）",
+          "S2-SF-005対応の注記を追加",
+          "ToolName動的変更とCreated行の出力条件を注記",
+          "セクション4-3のサニタイズ済み例も修正後の形式に合わせて更新"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "S2-C-001",
+        "item": "route.tsのhandler型の将来的統一をPhase 2前提条件に追加",
+        "sections_updated": ["3-1 (設計根拠)", "13 (T7チェックリスト)"],
+        "status": "noted"
+      },
+      {
+        "id": "S2-C-002",
+        "item": "mermaid図のタスク番号とチェックリスト内番号の不一致を修正",
+        "sections_updated": ["10 (実装順序)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S2-C-003",
+        "item": "ホスト名マスキングの取得方法（os.hostname()）を設計書に明記",
+        "sections_updated": ["3-2 (buildSanitizeRules)", "4-3 (注記)", "6-1 (セキュリティ)", "13 (T2チェックリスト)"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-11-data-collection-design-policy.md",
+  "sections_updated": [
+    "1. アーキテクチャ設計 (モジュール配置、S2-MF-001注記)",
+    "2. 技術選定 (escapeRegExp再利用)",
+    "3-1. Decoratorパターン (S2-MF-002 params混在対応)",
+    "3-2. ルールベースパターン (escapeRegExp使用、S2-SF-004技術的負債注記、S2-C-003ホスト名)",
+    "4-2. Markdown構造 (S2-SF-005実態合わせ修正)",
+    "4-3. サニタイズ済みログ例 (S2-SF-005合わせ修正、S2-C-003ホスト名注記)",
+    "5-1. API設計 (S2-SF-001 cliToolId記述正確化)",
+    "6-1. セキュリティ (ホスト名行追加)",
+    "6-4. APIロギングセキュリティ (S2-SF-003 NODE_ENV明確化)",
+    "8. 設計上の決定事項 (D-3 S2-MF-002、D-9 S2-MF-001)",
+    "9. テスト戦略 (S2-SF-002モック戦略、S2-MF-002テストケース追加)",
+    "10. 実装順序 (S2-MF-001 T2変更、S2-C-002 mermaid修正、S2-SF-002 T1テーブル)",
+    "11. 制約事項 (C-3, C-4, C-6, C-7更新)",
+    "12. レビュー指摘事項サマリー (Stage 2セクション追加)",
+    "13. 実装チェックリスト (全Stage 2項目反映)",
+    "14. レビュー履歴 (Stage 2行追加)"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}

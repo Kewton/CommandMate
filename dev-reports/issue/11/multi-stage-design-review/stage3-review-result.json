@@ -1,0 +1,243 @@
+{
+  "issue_number": 11,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "S3-MF-001",
+        "title": "withLogging()のPhase 1適用範囲が不明確 -- 具体的なroute.tsファイルリストが未記載",
+        "description": "設計方針書のT7では「ログ関連API + バグ調査に必要なAPI」にwithLogging()を適用するとあるが、具体的にどのroute.tsファイルに適用するかの明示的なリストがない。現在25ファイルに48ハンドラーが存在し、ログ関連APIだけでも logs/route.ts と logs/[filename]/route.ts の2ファイル3ハンドラーが対象となるが、「バグ調査に必要なAPI」の範囲が曖昧である。実装時にスコープクリープが発生するリスクがある。",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/logs/route.ts",
+          "src/app/api/worktrees/[id]/logs/[filename]/route.ts"
+        ],
+        "recommendation": "設計方針書のT7の説明に、Phase 1で適用する具体的なroute.tsファイル名を列挙する。最小限の場合は logs/route.ts と logs/[filename]/route.ts の2ファイルに限定し、追加対象がある場合はファイル名を明示する。"
+      },
+      {
+        "id": "S3-MF-002",
+        "title": "統合テスト修正(T1)の波及リスクの過小評価 -- logs/route.tsがlog-manager.tsの listLogs() を経由している事実の影響",
+        "description": "T1では統合テストのfsモックをfs/promisesに変更するが、logs/route.tsは log-manager.ts の listLogs() を経由しているため、log-manager.ts内部のfsアクセス（readdir, stat, access, mkdir）もモック対象に含まれる。log-manager.ts は ensureLogDirectory() でディレクトリ作成まで行うため、fs/promisesのモックが不完全だとテストが予期しない挙動を示す。設計方針書ではS2-SF-002でこの点に触れているが、具体的にモックすべきfs/promisesの関数リスト（stat, readFile, readdir, access, mkdir）が未整理であり、実装時にモック漏れが発生するリスクがある。",
+        "affected_files": [
+          "tests/integration/api-logs.test.ts",
+          "src/lib/log-manager.ts",
+          "src/app/api/worktrees/[id]/logs/route.ts"
+        ],
+        "recommendation": "T1の修正方針セクション（セクション9/10）に、logs/route.ts経由でlog-manager.tsが呼び出すfs/promisesの全関数リスト（readdir, stat, readFile, access, mkdir, writeFile, unlink）を明記し、テストケースごとにどの関数のモックが必要かを整理する。最低限、listLogs()が呼び出す access, mkdir, readdir とfs.statが必要。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-SF-001",
+        "title": "log-config.ts導入(T0)によるlog-manager.tsのインポート変更がconversation-logger.tsに間接波及する可能性",
+        "description": "T0でlog-manager.tsのLOG_DIR定義をlog-config.tsからのインポートに変更する。log-manager.tsをインポートしているのはconversation-logger.ts（createLog関数を利用）とlogs/route.ts（listLogs関数を利用）の2箇所。log-manager.ts内部のLOG_DIR参照元を変更するだけなので直接のインターフェース変更はないが、log-manager.tsの初期化時にlog-config.tsが先にロードされる必要がある。モジュール初期化順序の問題が発生しないことを確認する必要がある。",
+        "affected_files": [
+          "src/config/log-config.ts",
+          "src/lib/log-manager.ts",
+          "src/lib/conversation-logger.ts",
+          "src/app/api/worktrees/[id]/logs/[filename]/route.ts"
+        ],
+        "recommendation": "log-config.tsはgetEnvByKey()を使用するため、env.tsに依存する。この依存チェーン（log-config.ts -> env.ts -> db-path-resolver.ts）が循環依存を起こさないことを設計方針書に明記する。また、T0の実施後にnpm run buildが成功することを検証ステップとして追加する。"
+      },
+      {
+        "id": "S3-SF-002",
+        "title": "api-client.tsのgetLogFile()型変更がLogViewer.tsx以外の呼び出し元に影響しないことの確認不足",
+        "description": "T4でapi-client.tsのgetLogFile()にsanitizeオプションと cliToolId フィールドを追加する。現在getLogFile()を呼び出しているのはLogViewer.tsx（line 75）のみであるが、将来的に他のコンポーネントが利用する可能性がある。オプショナルパラメータの追加は後方互換性があるものの、戻り値型にcliToolIdを追加する変更は、現在の呼び出し元（LogViewer.tsx）では利用していないフィールドの追加であり、TypeScript上は問題ないが、テスト側のモック定義が不完全になるリスクがある。",
+        "affected_files": [
+          "src/lib/api-client.ts",
+          "src/components/worktree/LogViewer.tsx"
+        ],
+        "recommendation": "影響範囲分析の結果として、現在getLogFile()の呼び出し元はLogViewer.tsx（line 75）の1箇所のみであることを設計方針書に明記する。これにより実装者がgrep漏れで他の呼び出し元を見落とすリスクを排除する。"
+      },
+      {
+        "id": "S3-SF-003",
+        "title": "escapeRegExp()のJSDocコメント変更(T2)がFileTreeView.tsxの利用者に誤解を与えないことの確認",
+        "description": "T2で escapeRegExp() のJSDocコメントから 'CLIENT-SIDE highlight rendering only' の制限を削除し、サーバーサイドでも利用可能な旨に変更する。現在 escapeRegExp() を利用しているのは FileTreeView.tsx（line 208）のみだが、JSDocに 'Server-side search MUST NOT use RegExp (ReDoS prevention - SEC-MF-001)' という注記も含まれている。この注記はescapeRegExp()関数自体の制限ではなく、サーバーサイド検索でのRegExp利用全般に対するガイドラインである。コメント更新時に、この重要なセキュリティ注記が失われないようにする必要がある。",
+        "affected_files": [
+          "src/lib/utils.ts",
+          "src/components/worktree/FileTreeView.tsx"
+        ],
+        "recommendation": "T2のJSDocコメント更新時に、SEC-MF-001のReDoS防止注記を保持しつつ、escapeRegExp()自体の利用範囲をクライアント/サーバー双方に拡大する旨を記載する。例: 'Used by both client-side (highlight rendering) and server-side (path sanitization). NOTE: Server-side search should still use indexOf/includes for user input matching (SEC-MF-001).'"
+      },
+      {
+        "id": "S3-SF-004",
+        "title": "withLogging()のparams型問題(S2-MF-002)による将来的な全API型統一コストの見積もり不足",
+        "description": "現在のコードベースで params: Promise<...> を使用しているのは7箇所（external-apps/[id] x3, external-apps/[id]/health, repositories/clone/[jobId], worktrees/[id]/interrupt, worktrees/[id]/slash-commands）であり、残り41ハンドラーは非Promise版を使用している。Phase 2で全APIにwithLogging()を適用する場合、この型の不整合を解決する必要がある。別Issueとして起票する際の作業量見積もりに、この7ファイルの型統一コストを含める必要がある。",
+        "affected_files": [
+          "src/app/api/external-apps/[id]/route.ts",
+          "src/app/api/external-apps/[id]/health/route.ts",
+          "src/app/api/repositories/clone/[jobId]/route.ts",
+          "src/app/api/worktrees/[id]/interrupt/route.ts",
+          "src/app/api/worktrees/[id]/slash-commands/route.ts"
+        ],
+        "recommendation": "設計方針書のT7（Phase 2別Issue起票）の説明に、Promise params版の7箇所のファイルリストを記載し、Phase 2の前提条件として型統一コストの見積もりを含めることを推奨事項として追記する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "S3-C-001",
+        "title": "log-export-sanitizer.tsが新たにos.hostname()を使用することによるテスト環境の考慮",
+        "description": "buildSanitizeRules()はos.hostname()を呼び出してホスト名を取得する。テスト環境（CI/CD含む）ではホスト名が開発環境と異なるため、テストではos.hostname()のモックが必要になる。この点はテストケースの記述（セクション9）では言及されているが、CI環境でのホスト名のバリエーション（例: Docker内では短縮ホスト名になることがある）への考慮は不足している。",
+        "affected_files": [
+          "src/lib/log-export-sanitizer.ts",
+          "tests/unit/log-export-sanitizer.test.ts"
+        ],
+        "recommendation": "テスト戦略にos.hostname()モックの方針を追加するか、少なくともCI環境での挙動について注意事項を記載する。"
+      },
+      {
+        "id": "S3-C-002",
+        "title": "LogViewer.tsxへのエクスポートボタン追加(T5)によるUIレイアウトへの影響",
+        "description": "LogViewer.tsxのCardHeaderにはすでに「Close」ボタンと検索コントロールが配置されている。エクスポート（クリップボードコピー）ボタンを追加する場合、既存のレイアウト（flex配置）に収まるかどうかの確認が必要。特にモバイル表示時の横幅不足でボタンが折り返される可能性がある。",
+        "affected_files": [
+          "src/components/worktree/LogViewer.tsx"
+        ],
+        "recommendation": "T5実装時にモバイル表示のレスポンシブデザインを確認すること。必要に応じてボタンのサイズ・配置の調整を検討する。これは実装時の判断事項として留保可能。"
+      },
+      {
+        "id": "S3-C-003",
+        "title": "worktreeApi.getLogFile()のsanitize=true時のレスポンスサイズが通常時と同等であることの確認",
+        "description": "サニタイズ処理はパス文字列を短いプレースホルダに置換するため、レスポンスサイズは通常時と同等かやや小さくなる。パフォーマンス上の懸念はないが、極端に長いパスが大量に含まれるログファイルではサニタイズ処理の正規表現適用回数が増加する。現時点ではルール数が最大4-5個と少ないため実用上の問題はないが、将来ルールを増やす場合は考慮が必要。",
+        "affected_files": [
+          "src/lib/log-export-sanitizer.ts"
+        ],
+        "recommendation": "現時点では対応不要。将来ルール数が大幅に増加する場合（10個超）にパフォーマンス計測を実施する旨を設計方針書に注記してもよい。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_modified_files": [
+      {
+        "file": "src/config/log-config.ts",
+        "change_type": "新規作成",
+        "risk": "Low",
+        "description": "LOG_DIR定数の一元管理モジュール。getEnvByKey()に依存。"
+      },
+      {
+        "file": "src/lib/log-export-sanitizer.ts",
+        "change_type": "新規作成",
+        "risk": "Low",
+        "description": "エクスポート用パスサニタイズモジュール。escapeRegExp(), getEnv(), os.hostname()に依存。"
+      },
+      {
+        "file": "src/lib/api-logger.ts",
+        "change_type": "新規作成",
+        "risk": "Medium",
+        "description": "withLogging()ヘルパー。ジェネリクス型ApiHandler<P>の導入。createLogger()に依存。"
+      },
+      {
+        "file": "src/lib/log-manager.ts",
+        "change_type": "修正（LOG_DIRインポート変更）",
+        "risk": "Low",
+        "description": "LOG_DIR定義をlog-config.tsからのインポートに変更。関数インターフェースの変更なし。"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+        "change_type": "修正（LOG_DIRインポート変更 + sanitizeオプション追加）",
+        "risk": "Medium",
+        "description": "LOG_DIR参照先変更 + ?sanitize=trueクエリパラメータ対応。サニタイズ呼び出しは1行。"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/logs/route.ts",
+        "change_type": "修正（withLogging()適用）",
+        "risk": "Low",
+        "description": "Phase 1でのwithLogging()ラッパー適用。ハンドラーロジックの変更なし。"
+      },
+      {
+        "file": "src/lib/api-client.ts",
+        "change_type": "修正（getLogFile()拡張）",
+        "risk": "Low",
+        "description": "sanitizeオプション追加、LogFileResponse型にcliToolId追加。後方互換性あり。"
+      },
+      {
+        "file": "src/components/worktree/LogViewer.tsx",
+        "change_type": "修正（エクスポートボタン追加 + インライン正規表現置換）",
+        "risk": "Medium",
+        "description": "UIにエクスポートボタン追加。インライン正規表現エスケープをescapeRegExp()インポートに置換。"
+      },
+      {
+        "file": "src/lib/utils.ts",
+        "change_type": "修正（JSDocコメント更新のみ）",
+        "risk": "Low",
+        "description": "escapeRegExp()のJSDocコメントをサーバーサイド利用も含む記述に更新。ロジック変更なし。"
+      },
+      {
+        "file": "tests/integration/api-logs.test.ts",
+        "change_type": "大幅修正",
+        "risk": "High",
+        "description": "fsモックをfs/promisesに変更、.jsonlを.mdに統一、worktreeIdプレフィクス検証追加。テスト基盤の変更。"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/lib/conversation-logger.ts",
+        "impact": "log-manager.tsのLOG_DIR参照元変更による間接的影響。createLog()の呼び出し元として、log-manager.ts内部の変更が正常に動作することへの依存。",
+        "risk": "Low"
+      },
+      {
+        "file": "src/lib/env.ts",
+        "impact": "log-export-sanitizer.tsからgetEnv()を呼び出す。新規の依存元が追加されるが、env.ts自体の変更はなし。",
+        "risk": "Low"
+      },
+      {
+        "file": "src/lib/logger.ts",
+        "impact": "api-logger.tsからcreateLogger()をインポート。新規の依存元が追加されるが、logger.ts自体の変更はなし。",
+        "risk": "Low"
+      },
+      {
+        "file": "src/components/worktree/FileTreeView.tsx",
+        "impact": "escapeRegExp()のJSDocコメント変更のみ。関数ロジックは不変のためFileTreeView.tsxへの影響なし。",
+        "risk": "Low"
+      },
+      {
+        "file": "src/lib/clipboard-utils.ts",
+        "impact": "LogViewer.tsxのエクスポートボタンからcopyToClipboard()が呼ばれる。clipboard-utils.ts自体の変更はなし。",
+        "risk": "Low"
+      }
+    ],
+    "unaffected_modules": [
+      "src/lib/sanitize.ts (XSSサニタイズ -- 目的が異なる別モジュールとして完全分離)",
+      "src/lib/db-instance.ts / src/lib/db.ts (データベース層 -- 変更なし)",
+      "src/cli/ (CLIモジュール全体 -- 変更なし)",
+      "src/components/sidebar/ (サイドバーコンポーネント -- 変更なし)",
+      "src/components/mobile/ (モバイルコンポーネント -- 変更なし)",
+      "src/hooks/ (カスタムフック -- 変更なし。useFileSearch等)",
+      "src/contexts/ (Reactコンテキスト -- 変更なし)",
+      "src/config/status-colors.ts, z-index.ts等 (他の設定ファイル -- 変更なし)"
+    ],
+    "handler_count_analysis": {
+      "total_route_files": 25,
+      "total_handlers": 48,
+      "promise_params_handlers": 7,
+      "non_promise_params_handlers": 41,
+      "phase1_target_handlers": "2-4 (logs関連のみ)",
+      "phase2_remaining_handlers": "44-46 (別Issue)"
+    }
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-11-data-collection-design-policy.md",
+    "src/lib/log-manager.ts",
+    "src/lib/env.ts",
+    "src/lib/utils.ts",
+    "src/lib/logger.ts",
+    "src/lib/sanitize.ts",
+    "src/lib/clipboard-utils.ts",
+    "src/lib/api-client.ts",
+    "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+    "src/app/api/worktrees/[id]/logs/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/interrupt/route.ts",
+    "src/components/worktree/LogViewer.tsx",
+    "tests/integration/api-logs.test.ts",
+    "tests/unit/lib/utils.test.ts"
+  ],
+  "timestamp": "2026-02-10T21:45:00+09:00"
+}

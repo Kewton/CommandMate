@@ -1,0 +1,207 @@
+{
+  "issue_number": 11,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "S2-MF-001",
+        "title": "escapeRegex() と既存 escapeRegExp() の命名不整合",
+        "description": "設計書セクション3-2, 8(D-9)では utils.ts に escapeRegex() を新規追加すると記載しているが、実際の src/lib/utils.ts には既に escapeRegExp() (末尾 'p' 大文字) が同一の実装で存在する。新規関数を追加すると同一機能が2つ共存する。設計書を修正し、既存の escapeRegExp() を再利用する方針に変更すべき。",
+        "severity": "high",
+        "affected_sections": ["3-2", "8 (D-9)", "9", "13"],
+        "affected_files": ["src/lib/utils.ts", "src/lib/log-export-sanitizer.ts (planned)"],
+        "recommendation": "設計書内の escapeRegex() の記述を全て escapeRegExp() に変更し、T2チェックリストから 'escapeRegex()をutils.tsに追加' を削除する。代わりに既存の escapeRegExp() をインポートして使用する。また、escapeRegExp() のJSDocコメントには 'CLIENT-SIDE highlight rendering only' と記載されておりサーバーサイド利用を想定外としているため、コメントの更新が必要。"
+      },
+      {
+        "id": "S2-MF-002",
+        "title": "withLogging() の ApiHandler 型における params 型が既存ハンドラーと不整合",
+        "description": "設計書セクション3-1では params を P | Promise<P> で定義しているが、実際のコードベースでは2つのスタイルが混在している。多くの既存ハンドラー(worktrees/[id]配下の大半)は { params: { id: string } } (非Promise) を使用し、一部の新しいハンドラー(external-apps, interrupt, slash-commands等)は { params: Promise<{ id: string }> } (Promise) を使用している。P | Promise<P> の union型を使えば両方をカバーできるが、withLogging()内部で params を使用する場合に await が必要かどうかの判定が困難になる。設計書にこの混在状況と具体的な対処方針を明記すべき。",
+        "severity": "high",
+        "affected_sections": ["3-1", "8 (D-3)", "11 (C-7)"],
+        "affected_files": ["src/lib/api-logger.ts (planned)", "src/app/api/**/route.ts"],
+        "recommendation": "制約事項C-7にこの混在状況を具体的に記載し、withLogging()内部でparamsに直接アクセスしない方針(ログにはURLのみを使用)を明記するか、もしくは内部で const resolvedParams = await Promise.resolve(context.params) のパターンを標準化する旨を設計書に追記する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S2-SF-001",
+        "title": "api-client.ts getLogFile() の戻り値型に cliToolId が欠落している旨の記述が実態と不一致",
+        "description": "設計書セクション5-1とC-4では 'api-client.tsのgetLogFile()型にcliToolId欠落' と記載しているが、実際の route.ts のレスポンスには既に cliToolId フィールドが含まれている(line 91)。実際に欠落しているのは api-client.ts 側の TypeScript 型定義(line 194-199)のみ。設計書の表現を正確にすべき。",
+        "severity": "medium",
+        "affected_sections": ["5-1", "11 (C-4)", "13"],
+        "affected_files": ["src/lib/api-client.ts"],
+        "recommendation": "C-4の表現を 'api-client.tsのgetLogFile()の戻り値型定義にcliToolIdフィールドが欠落（APIレスポンス自体には含まれている）' に修正する。"
+      },
+      {
+        "id": "S2-SF-002",
+        "title": "統合テスト乖離の説明に fs モック方式の記述漏れ",
+        "description": "設計書セクション9(MF-002)では統合テストが fs の同期API (existsSync, readdirSync, readFileSync) をモックしていると正しく指摘しているが、実際の logs/route.ts は listLogs() (log-manager.ts) を使用しており、直接fsにアクセスしていない。つまりテスト修正では fs/promises のモックだけでなく、log-manager.ts のモック戦略も検討が必要。現在のテストはlog-manager.tsをモックせず直接 fs をモックしているが、route.ts は log-manager.ts 経由でファイルにアクセスしている。",
+        "severity": "medium",
+        "affected_sections": ["9", "10 (T1)"],
+        "affected_files": ["tests/integration/api-logs.test.ts", "src/app/api/worktrees/[id]/logs/route.ts"],
+        "recommendation": "MF-002の修正方針に、logs/route.ts (一覧取得) のテストでは log-manager.ts の listLogs() を通じたfsアクセスであることを明記し、テスト戦略として (a) log-manager.tsをモックする、もしくは (b) fs/promisesをモックしてlog-manager.ts経由のアクセスもカバーする、のいずれかの方針を記載する。"
+      },
+      {
+        "id": "S2-SF-003",
+        "title": "withLogging() の NODE_ENV チェック条件が test 環境を考慮していない記述",
+        "description": "設計書セクション3-1のコード例では process.env.NODE_ENV !== 'development' でバイパスとしているが、テストケース(セクション9)では 'NODE_ENV=testではログ出力しない' が含まれている。これは整合的であるが、制約C-6では 'VitestのNODE_ENVデフォルトがtest' と記載しつつ '本番環境ログ非出力テスト' のみを言及しており、test環境=ログ無効がデフォルトであることの設計上の意図が不明確。",
+        "severity": "low",
+        "affected_sections": ["3-1", "6-4", "9", "11 (C-6)"],
+        "affected_files": ["src/lib/api-logger.ts (planned)"],
+        "recommendation": "セクション6-4またはC-6に、withLogging()は NODE_ENV === 'development' の場合のみログ出力し、test/production 環境ではバイパスされることを明記する。C-6の記述を 'Vitestの NODE_ENV デフォルトが test のため、withLogging()は自動的にバイパスされる。開発環境のログ出力を検証するテストでは process.env.NODE_ENV を一時的に development に変更する必要がある' に修正する。"
+      },
+      {
+        "id": "S2-SF-004",
+        "title": "LogViewer.tsx のインライン正規表現エスケープと escapeRegExp() の関係",
+        "description": "設計書セクション3-2の末尾で '将来的に LogViewer.tsx 内のインライン正規表現エスケープ処理もこの共通関数に統合可能' と記載しているが、LogViewer.tsx (line 93) の処理は escapeRegExp() と全く同一のロジックである。同じファイル内の FileTreeView.tsx は既に escapeRegExp() を使用している。これは将来課題ではなく、既知の技術的負債として明示すべき。",
+        "severity": "low",
+        "affected_sections": ["3-2"],
+        "affected_files": ["src/components/worktree/LogViewer.tsx", "src/lib/utils.ts"],
+        "recommendation": "設計書にこの既知の重複を注記として明記し、T5(LogViewer.tsx修正)の実施時にインラインの正規表現エスケープを escapeRegExp() のインポートに置き換えることをチェックリストに追加する。"
+      },
+      {
+        "id": "S2-SF-005",
+        "title": "Markdown ログ構造の設計書記述が実装と微妙に異なる",
+        "description": "設計書セクション4-2のMarkdown構造例では '# Session Log - {date}' で始まるヘッダーを示しているが、実際の log-manager.ts (line 96-99) では '# Claude Code Conversation Log: {worktreeId}' の形式でヘッダーを生成している。セクション見出しも 'Conversation at ...' ではあるが、Created行の有無やフッター形式が微妙に異なる。",
+        "severity": "low",
+        "affected_sections": ["4-2"],
+        "affected_files": ["src/lib/log-manager.ts"],
+        "recommendation": "セクション4-2のMarkdown構造例を log-manager.ts の実際の出力形式に合わせて修正する。具体的には: ヘッダーを '# {ToolName} Conversation Log: {worktreeId}' に、Created行を追加する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "S2-C-001",
+        "title": "route.ts の handler 型の将来的統一",
+        "description": "現在のコードベースでは params の型に Promise 版と非Promise 版が混在している。Next.js の将来バージョンでは全て Promise 版に統一される可能性がある。Issue #11 のスコープ外だが、withLogging() を広く適用する際にはこの統一が前提となる可能性がある。",
+        "affected_sections": ["3-1", "10 (T7)"],
+        "recommendation": "Phase 2 (別Issue) でwithLogging()を全APIに適用する際の前提条件として、params型の統一を検討事項に含める。"
+      },
+      {
+        "id": "S2-C-002",
+        "title": "設計書内のタスク番号とチェックリスト内の番号の不一致",
+        "description": "セクション10の実装順序図では T9 が 'CLAUDE.md更新' となっているが、セクション13のチェックリストでは T8 が回帰テスト、T9 が CLAUDE.md更新 と記載。一方、セクション10の図中のノードラベルでは T9 (varname) が T10[9. CLAUDE.md更新] となっており、ラベルテキストの番号(9)とmermaidノードID(T10)が一致しない。",
+        "affected_sections": ["10", "13"],
+        "recommendation": "mermaidノードIDを T8, T9 に修正するか、チェックリスト側をT9=回帰テスト、T10=CLAUDE.md更新に合わせる。"
+      },
+      {
+        "id": "S2-C-003",
+        "title": "ホスト名マスキングの取得方法未記載",
+        "description": "設計書セクション4-3のマスキングマッピングに 'ホスト名 -> [HOST]' が記載されているが、セクション3-2のbuildSanitizeRules()コード例にはホスト名ルールの実装が含まれていない。os.hostname()の使用等、ホスト名取得方法を設計書に明記すべき。",
+        "affected_sections": ["3-2", "4-3"],
+        "recommendation": "buildSanitizeRules()のコード例にホスト名ルール(os.hostname()使用)を追加するか、初期実装スコープ外であればその旨を注記する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "escapeRegex() を utils.ts に新規追加",
+      "design_section": "3-2, 8(D-9)",
+      "implementation_status": "escapeRegExp() が既に同一実装で存在",
+      "gap": "重複関数が生まれる (CRITICAL)"
+    },
+    {
+      "design_item": "ApiHandler型の P | Promise<P> 対応",
+      "design_section": "3-1",
+      "implementation_status": "既存ハンドラーの大半は非Promise、一部はPromise",
+      "gap": "混在状況の具体的記載なし (CRITICAL)"
+    },
+    {
+      "design_item": "LOG_DIR の重複定義を log-config.ts に一元化",
+      "design_section": "1, 8(D-8), 10(T0)",
+      "implementation_status": "log-manager.ts と [filename]/route.ts に重複あり (確認済み)",
+      "gap": "なし (設計書の記載は正確)"
+    },
+    {
+      "design_item": "api-client.ts の getLogFile() 型に cliToolId 欠落",
+      "design_section": "5-1, 11(C-4)",
+      "implementation_status": "APIレスポンスには cliToolId あり、型定義のみ欠落",
+      "gap": "表現の不正確さ (MINOR)"
+    },
+    {
+      "design_item": "統合テストが同期fs APIをモック",
+      "design_section": "9 (MF-002)",
+      "implementation_status": "テストは確かに fs.existsSync/readdirSync/readFileSync を使用 (確認済み)",
+      "gap": "logs/route.ts が log-manager.ts 経由の点が未記載 (MODERATE)"
+    },
+    {
+      "design_item": "route.ts のハンドラーシグネチャ { params: { id: string; filename: string } }",
+      "design_section": "3-1",
+      "implementation_status": "実際のroute.tsは非Promiseの { params: { id: string; filename: string } } (確認済み)",
+      "gap": "なし (設計書の記載は正確)"
+    },
+    {
+      "design_item": "route.ts は fs/promises を使用",
+      "design_section": "9 (MF-002)",
+      "implementation_status": "[filename]/route.ts は import fs from 'fs/promises' を使用 (確認済み)",
+      "gap": "なし (設計書の記載は正確)"
+    },
+    {
+      "design_item": "route.ts レスポンスに cliToolId フィールドあり",
+      "design_section": "5-1",
+      "implementation_status": "route.ts line 91 で cliToolId: foundCliTool を返している (確認済み)",
+      "gap": "なし (設計書の記載は正確)"
+    },
+    {
+      "design_item": "LogViewer.tsx は 'use client'",
+      "design_section": "1, 11(C-2)",
+      "implementation_status": "'use client' 指示あり (確認済み)",
+      "gap": "なし (設計書の記載は正確)"
+    },
+    {
+      "design_item": "既存のcopyToClipboard() を活用",
+      "design_section": "2",
+      "implementation_status": "clipboard-utils.ts に存在 (確認済み)",
+      "gap": "なし (設計書の記載は正確)"
+    },
+    {
+      "design_item": "sanitize.ts (DOMPurify) は変更なし",
+      "design_section": "6-3",
+      "implementation_status": "sanitize.ts 存在確認済み",
+      "gap": "なし (設計書の記載は正確)"
+    },
+    {
+      "design_item": "logger.ts の SENSITIVE_PATTERNS は変更なし",
+      "design_section": "6-3",
+      "implementation_status": "logger.ts 内の SENSITIVE_PATTERNS 確認済み",
+      "gap": "なし (設計書の記載は正確)"
+    },
+    {
+      "design_item": "Markdown ログのヘッダー形式",
+      "design_section": "4-2",
+      "implementation_status": "log-manager.ts は '# {ToolName} Conversation Log: {worktreeId}' 形式",
+      "gap": "設計書の例示と実装の形式が不一致 (MINOR)"
+    },
+    {
+      "design_item": "mermaid図のタスク番号 T9/T10",
+      "design_section": "10",
+      "implementation_status": "N/A (設計書内の自己整合性)",
+      "gap": "mermaidノードIDとラベル番号の不一致 (MINOR)"
+    }
+  ],
+  "reviewed_files": [
+    "dev-reports/design/issue-11-data-collection-design-policy.md",
+    "src/lib/env.ts",
+    "src/lib/logger.ts",
+    "src/lib/log-manager.ts",
+    "src/lib/sanitize.ts",
+    "src/lib/clipboard-utils.ts",
+    "src/lib/utils.ts",
+    "src/lib/api-client.ts",
+    "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+    "src/app/api/worktrees/[id]/logs/route.ts",
+    "src/components/worktree/LogViewer.tsx",
+    "tests/integration/api-logs.test.ts",
+    "src/config/*.ts (directory listing)"
+  ],
+  "timestamp": "2026-02-10T00:00:00Z"
+}

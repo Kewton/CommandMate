@@ -1,0 +1,54 @@
+{
+  "issue_number": 11,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "既存結合テスト（api-logs.test.ts）の修正タスクを実装タスクの先頭に追加。テストがroute.ts実装と乖離している4つの具体的問題点（同期/非同期fs、.jsonl/.md、エラーメッセージ不一致、worktree IDバリデーション未反映）を注記として記載。影響範囲テーブルにapi-logs.test.tsを追加。受入条件のテストセクションに「既存結合テストが現在のroute.ts実装と整合した状態でパスすること」を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "ハンドラー総数を「計46ハンドラー」から「計48ハンドラー」に修正。HTTPメソッド別の分布（GET 19、POST 16、PATCH 6、PUT 3、DELETE 4）を追記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "api-client.tsの実装タスクに、既存getLogFile()戻り値型のcliToolId欠落の乖離を記載。サニタイズオプション追加時の具体的変更内容（メソッドシグネチャへのoptionsパラメータ追加、URLクエリパラメータ付加ロジック、戻り値型修正）を3項目で明記。影響範囲テーブルにもcliToolId欠落修正を追記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "export const dynamic = 'force-dynamic'を持つ4ファイルを具体的に列挙（external-apps/[id]/route.ts、external-apps/route.ts、external-apps/[id]/health/route.ts、worktrees/route.ts）。特にworktrees/route.tsがPhase 1適用候補かつポーリング対象であることの注記を追加。影響範囲セクションにも注記として追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "HOMEがgetEnv()のスコープ外（Env interfaceにはCM_ROOT_DIR, CM_PORT, CM_BIND, CM_DB_PATHのみ定義）であることをアーキテクチャ設計セクションに明記。process.env.HOMEからの直接取得の必要性を実装タスク（log-export-sanitizer.ts）の注記に追加。関連コンポーネントのenv.ts説明にも反映。CM_ROOT_DIR未設定時のフォールバック値テストケースをサニタイズテスト項目に追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "withLogging()ヘルパーの設計考慮事項に第5項「NODE_ENV=production でのログ非出力テスト」を追加。VitestのデフォルトNODE_ENVが'test'であること、process.env.NODE_ENVの一時変更またはモック可能設計が必要であることを記載"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/11"
+  }
+}

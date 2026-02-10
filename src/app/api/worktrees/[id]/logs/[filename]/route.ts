@@ -6,34 +6,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { getEnvByKey } from '@/lib/env';
+import { getLogDir } from '@/config/log-config';
+import { sanitizeForExport } from '@/lib/log-export-sanitizer';
+import { withLogging } from '@/lib/api-logger';
 import fs from 'fs/promises';
 import path from 'path';
 
-// Issue #76: Environment variable fallback support
-const LOG_DIR = getEnvByKey('CM_LOG_DIR') || path.join(process.cwd(), 'data', 'logs');
-
-export async function GET(
+export const GET = withLogging<{ id: string; filename: string }>(async (
   request: NextRequest,
-  { params }: { params: { id: string; filename: string } }
-) {
+  { params }: { params: { id: string; filename: string } | Promise<{ id: string; filename: string }> }
+) => {
   try {
+    const resolvedParams = await Promise.resolve(params);
     const db = getDbInstance();
 
     // Check if worktree exists
-    const worktree = getWorktreeById(db, params.id);
+    const worktree = getWorktreeById(db, resolvedParams.id);
     if (!worktree) {
       return NextResponse.json(
-        { error: `Worktree '${params.id}' not found` },
+        { error: `Worktree '${resolvedParams.id}' not found` },
         { status: 404 }
       );
     }
 
     // Validate filename to prevent path traversal attacks
-    const filename = params.filename;
+    const filename = resolvedParams.filename;
 
     // Only allow .md files and ensure it starts with the worktree ID
-    if (!filename.endsWith('.md') || !filename.startsWith(`${params.id}-`)) {
+    if (!filename.endsWith('.md') || !filename.startsWith(`${resolvedParams.id}-`)) {
       return NextResponse.json(
         { error: 'Invalid filename' },
         { status: 400 }
@@ -56,7 +56,7 @@ export async function GET(
     let foundCliTool = '';
 
     for (const cliTool of cliTools) {
-      const filePath = path.join(LOG_DIR, cliTool, filename);
+      const filePath = path.join(getLogDir(), cliTool, filename);
 
       try {
         const stat = await fs.stat(filePath);
@@ -85,6 +85,10 @@ export async function GET(
       );
     }
 
+    // Apply sanitization if requested (Issue #11: log export feature)
+    const sanitize = request.nextUrl?.searchParams?.get('sanitize') === 'true';
+    if (sanitize) fileContent = sanitizeForExport(fileContent);
+
     return NextResponse.json(
       {
         filename,
@@ -102,4 +106,4 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+}, { skipResponseBody: true });

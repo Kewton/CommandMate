@@ -1,0 +1,109 @@
+{
+  "issue_number": 11,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "withLogging() の ApiHandler 型が既存 route.ts のハンドラーシグネチャと不一致",
+        "description": "設計書の ApiHandler 型は `(request: NextRequest, context: { params: Record<string, string> }) => Promise<NextResponse>` だが、既存の route.ts ハンドラーは `{ params: { id: string } }` や `{ params: { id: string; filename: string } }` のように具体的な params 型を使用している。Record<string, string> では型安全性が失われ、既存ハンドラーをラップする際にTypeScriptの型推論エラーが発生する可能性がある。また、Next.js App Router では params オブジェクトが async Promise として渡される仕様変更の可能性もあり、将来互換性に懸念がある。",
+        "principle": "Liskov Substitution / Type Safety",
+        "recommendation": "ApiHandler 型をジェネリクスで定義し `ApiHandler<P extends Record<string, string> = Record<string, string>>` とするか、型制約を緩くして既存ハンドラーと互換性を持たせるべき。具体的には `context: { params: Promise<Record<string, string>> | Record<string, string> }` のような柔軟な型定義を検討する。"
+      },
+      {
+        "id": "MF-002",
+        "title": "統合テストが現行実装と大幅に乖離",
+        "description": "既存の tests/integration/api-logs.test.ts は同期 fs モジュール（fs.existsSync, fs.readdirSync, fs.readFileSync）をモックしているが、実際の route.ts は非同期 fs/promises（fs.stat, fs.readFile）を使用している。またテストはファイル名を `.jsonl` 拡張子で期待しているが、実際のAPIは `.md` 拡張子のみを受け付ける。設計書では C-3 として認識されているが、この乖離の修正は本 Issue の前提条件であり、修正方針（同期/非同期の切り替え方針）を設計書に明記すべき。",
+        "principle": "Design Consistency / DRY",
+        "recommendation": "設計書のセクション10（実装順序）T1の説明に、テスト修正の具体的方針（fs/promises のモック戦略、.md 拡張子への統一、worktreeId プレフィクス検証の追加）を記載する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "sanitize クエリパラメータによる Single Responsibility 原則の希薄化",
+        "description": "D-2 の決定により既存の GET ログファイルAPIに `?sanitize=true` を追加するが、1つのハンドラーが「通常のログ取得」と「サニタイズ済みエクスポート」という2つの責務を持つことになる。設計書でもトレードオフとして「1つのAPIに2つの責務」と明記されているが、これは SRP 違反であり、ハンドラー内の条件分岐が複雑化するリスクがある。",
+        "principle": "Single Responsibility",
+        "recommendation": "ハンドラー内でサニタイズロジックを呼び出す部分を、条件分岐1行（`if (sanitize) content = sanitizeForExport(content);`）に留める設計指針を明記する。あるいは、内部的にプライベートヘルパー関数に分離して可読性を維持する方針を示す。"
+      },
+      {
+        "id": "SF-002",
+        "title": "SanitizeRule の Strategy パターン命名が実態と乖離",
+        "description": "設計書セクション3-2では Strategy パターンと記載しているが、実際の実装は SanitizeRule 配列を buildSanitizeRules() で生成して順次適用するだけであり、Strategy パターン（アルゴリズムの切り替え）の本質的な特徴を持たない。これは Chain of Responsibility パターンまたは単純なルールベース処理に近い。パターン名の誤用は開発者の理解を妨げる。",
+        "principle": "KISS / Design Pattern Appropriateness",
+        "recommendation": "セクション3-2のタイトルを「ルールベースパターン」または「ルール配列による拡張可能なサニタイズ」に修正し、実態に即した説明にする。Strategy パターンはアルゴリズムの切り替えが必要な場合（例：異なるサニタイズ戦略をコンテキストに応じて選択する場合）に使用される。"
+      },
+      {
+        "id": "SF-003",
+        "title": "withLogging() の段階的適用における YAGNI 考慮",
+        "description": "設計書では Phase 1 で主要 route.ts、Phase 2 で残り route.ts への適用を計画しているが、Issue #11 の目的は「バグ原因調査目的のデータ収集機能強化」であり、全 37 ファイル 48 ハンドラーへの withLogging() 適用は本 Issue のスコープを超えている可能性がある。YAGNI 原則に基づき、まず必要最小限（ログ関連API のみ）に適用し、他のAPIへの拡大は別Issueで管理すべき。",
+        "principle": "YAGNI",
+        "recommendation": "Phase 2（T8: 残り route.ts に適用）をスコープ外とし、別 Issue として切り出す方針を設計書に明記する。Phase 1 も「ログ関連 API + バグ調査に必要な API」に限定する。"
+      },
+      {
+        "id": "SF-004",
+        "title": "LOG_DIR の重複定義",
+        "description": "LOG_DIR 定数が src/app/api/worktrees/[id]/logs/[filename]/route.ts と src/lib/log-manager.ts の両方で同じロジック（`getEnvByKey('CM_LOG_DIR') || path.join(process.cwd(), 'data', 'logs')`）で定義されている。DRY 原則に違反しており、将来のパス変更時に整合性が崩れるリスクがある。サニタイズ機能追加時にこのパスを参照する箇所が増える可能性もある。",
+        "principle": "DRY",
+        "recommendation": "LOG_DIR を log-manager.ts からエクスポートするか、共通設定モジュール（例：config/log-config.ts）に一元化する。route.ts は log-manager.ts の関数を経由してファイルにアクセスする設計に変更する。"
+      },
+      {
+        "id": "SF-005",
+        "title": "escapeRegex ユーティリティの所在が不明",
+        "description": "設計書のコード例で `escapeRegex()` 関数が使用されているが、この関数の定義場所・既存の有無が記載されていない。新規作成する場合は src/lib/utils.ts に追加するのが適切だが、既存の正規表現エスケープ処理（LogViewer.tsx の検索機能で同様のインラインエスケープが存在）との整合性も考慮すべき。",
+        "principle": "DRY / Explicit Design",
+        "recommendation": "escapeRegex() の定義場所を設計書に明記する。src/lib/utils.ts にユーティリティとして配置し、LogViewer.tsx のインラインエスケープ処理も将来的にこの関数を使用できることを注記する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "withLogging() の本番環境バイパスが NODE_ENV のみに依存",
+        "description": "withLogging() は NODE_ENV !== 'development' で即座にバイパスするが、ステージング環境やデバッグが必要な本番環境でのログ取得手段がない。将来的には環境変数（CM_API_LOGGING=true）等で制御可能にすることを検討する価値がある。",
+        "principle": "Open/Closed",
+        "recommendation": "現時点では NODE_ENV チェックで十分だが、将来の拡張ポイントとしてオプションに `enabled` フラグを追加可能な設計にしておく（現在の WithLoggingOptions にプロパティを追加するだけで対応可能であることを確認する）。"
+      },
+      {
+        "id": "C-002",
+        "title": "Facade パターンの命名について",
+        "description": "設計書セクション3-3では api-client.ts のオプション追加を Facade パターンと説明しているが、既存 api-client.ts は単なる API クライアントラッパーであり、複数のサブシステムの統一インターフェースを提供する Facade の本質とは異なる。オプション引数の追加は API 拡張に過ぎない。",
+        "principle": "Design Pattern Appropriateness",
+        "recommendation": "セクション3-3のタイトルから「Facade パターン」を外し、「API クライアント拡張」等の平易な表現にする。パターン名の乱用を避けることで設計書の品質が向上する。"
+      },
+      {
+        "id": "C-003",
+        "title": "サニタイズルールのユーザー名パターンの堅牢性",
+        "description": "マスキングマッピング表で `/Users/john/` -> `/Users/[USER]/` のユーザー名検出が定義されているが、Linux 環境（/home/username/）やカスタムホームディレクトリのケースでの動作保証が不明。HOME 環境変数からの動的検出で十分なケースが多く、ユーザー名パターンの独立ルールが本当に必要か検討の余地がある。",
+        "principle": "YAGNI / KISS",
+        "recommendation": "HOME パスのマスキングで十分な場合はユーザー名の個別ルールを省略し、必要になった時点で追加する方針を検討する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-11-data-collection-design-policy.md",
+    "src/lib/env.ts",
+    "src/lib/logger.ts",
+    "src/lib/sanitize.ts",
+    "src/lib/clipboard-utils.ts",
+    "src/lib/log-manager.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/api-client.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+    "src/app/api/worktrees/[id]/logs/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/messages/route.ts",
+    "src/components/worktree/LogViewer.tsx",
+    "tests/integration/api-logs.test.ts"
+  ],
+  "timestamp": "2026-02-10T12:00:00Z"
+}

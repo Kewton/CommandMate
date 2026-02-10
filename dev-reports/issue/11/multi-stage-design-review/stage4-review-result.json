@@ -1,0 +1,158 @@
+{
+  "issue_number": 11,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "S4-MF-001",
+        "title": "LogViewer.tsx の dangerouslySetInnerHTML による XSS リスク -- サニタイズ済みコンテンツ挿入時の未エスケープ",
+        "description": "LogViewer.tsx (line 350) は highlightedContent を dangerouslySetInnerHTML で挿入している。現在この highlightedContent は fileContent（APIから取得したログファイルの生のMarkdownテキスト）を正規表現で分割し、<mark> タグでラップして構築している。searchQuery はクライアント側で escapeRegExp 相当の処理を経ているが、matchText（fileContent由来の部分文字列）はHTMLエスケープされずにそのまま <mark> タグ内に埋め込まれている。もしログファイルのテキスト中に <script> や <img onerror=> 等のHTML特殊文字が含まれていた場合、XSSが成立する可能性がある。エクスポート用サニタイズ（log-export-sanitizer.ts）はパス情報のマスキングを行うが、XSS対策は目的外である。Issue #11 でエクスポートボタンを追加する際、サニタイズ済みコンテンツも同じ highlightedContent パスを通る可能性があるため、この既存のXSS脆弱性を認識し、highlight処理時にHTMLエスケープを適用する必要がある。",
+        "severity": "high",
+        "owasp_category": "A03:2021 - Injection (XSS)",
+        "recommendation": "highlightedContent 構築時に、matchText および非マッチ部分の fileContent.substring() 結果に対して HTMLエスケープ（< > & \" ' の変換）を適用してから <mark> タグで囲む。既存の sanitize.ts の DOMPurify を使うか、シンプルなエスケープ関数を導入する。設計方針書の T5（LogViewer.tsx修正）のチェックリストに「highlightedContent構築時のHTMLエスケープ適用」を追加すること。",
+        "affected_sections": ["3-3", "13 (T5)"]
+      },
+      {
+        "id": "S4-MF-002",
+        "title": "log-export-sanitizer.ts のサニタイズルール不足 -- 環境変数値やAPIキーが会話ログ内に残存する可能性",
+        "description": "設計方針書のサニタイズルールは HOME、CM_ROOT_DIR、CM_DB_PATH、ホスト名の4パターンのみ定義している。しかし会話ログにはユーザーがClaude CLIに送信したメッセージとClaudeの応答が記録されており、環境変数の値（GITHUB_TOKEN、AWS_SECRET_ACCESS_KEY等）、APIキー、SSHキーのパスフレーズ、.envファイルの内容等がログに含まれる可能性がある。既存の logger.ts の SENSITIVE_PATTERNS はログ出力時の即時マスキング用であり、既にファイルに書き込まれた会話ログには適用されない。エクスポート用サニタイズでも、logger.ts の SENSITIVE_PATTERNS と同等のパターン（Bearer トークン、password=xxx、token=xxx、SSH秘密鍵等）を適用すべきである。",
+        "severity": "high",
+        "owasp_category": "A02:2021 - Cryptographic Failures / Sensitive Data Exposure",
+        "recommendation": "log-export-sanitizer.ts の buildSanitizeRules() に、logger.ts の SENSITIVE_PATTERNS と同等のルール（Bearer トークン、パスワード、トークン/シークレット、Authorization ヘッダー、SSH秘密鍵）をエクスポート用サニタイズルールとして追加する。既存の SENSITIVE_PATTERNS を共通モジュールに抽出してインポートするか、log-export-sanitizer.ts 側で同一パターンを定義する。設計方針書の Section 3-2 と Section 6-1 にこれらのルール追加を明記すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S4-SF-001",
+        "title": "withLogging() のレスポンスボディログ出力における機密データ漏洩リスク",
+        "description": "withLogging() はレスポンスボディを最大1KBまでログに出力する設計。createLogger() 経由の SENSITIVE_PATTERNS が自動適用されるとあるが、response.clone().text() で取得したレスポンスボディ文字列をログの data フィールドに渡す際、SENSITIVE_PATTERNS はオブジェクトのキー名ベースのマスキング（SENSITIVE_KEY_PATTERN）と文字列中のパターンマッチの両方を行う。しかし、レスポンスボディがJSON文字列としてログに渡される場合、ネストされた文字列中の機密データが SENSITIVE_PATTERNS の正規表現でマッチしないケースがある（例：JSONエンコード済みの改行を含むSSH鍵）。",
+        "severity": "medium",
+        "owasp_category": "A09:2021 - Security Logging and Monitoring Failures",
+        "recommendation": "withLogging() のレスポンスボディログ出力について、(1) ログファイル取得API（logs/[filename]/route.ts）のようにファイルコンテンツを返すAPIでは、レスポンスボディのログ出力を省略するオプション（skipResponseBody: true）を WithLoggingOptions に追加する、(2) または、withLogging()内でレスポンスボディをログ出力する前に、sanitize() 関数を文字列引数で明示的に呼び出す。設計方針書 Section 3-1 の WithLoggingOptions インターフェースに skipResponseBody オプションの追加を記載すること。"
+      },
+      {
+        "id": "S4-SF-002",
+        "title": "sanitize クエリパラメータのバイパスリスク -- sanitize=false の明示的送信による情報漏洩",
+        "description": "API設計では ?sanitize=true の場合にサニタイズ済みコンテンツを返す仕様だが、デフォルト（パラメータなし）では生データを返す。エクスポートボタンのクライアント実装が sanitize=true を正しく付与することに依存しており、ユーザーがブラウザのDevToolsやcurl等でsanitizeパラメータなしでAPIを直接呼び出した場合、サニタイズされていない生ログが取得できる。これはCommandMateがローカル開発ツールであることを考慮すると低リスクだが、設計方針書にこの意図的な仕様（デフォルト=非サニタイズ）の根拠を明記すべきである。",
+        "severity": "low",
+        "owasp_category": "A01:2021 - Broken Access Control",
+        "recommendation": "設計方針書 Section 6-1 に、「デフォルト（sanitize パラメータなし）では非サニタイズの生データを返す仕様は意図的であり、通常の LogViewer.tsx 表示には生データが必要なためである。サニタイズはエクスポート（外部共有）時のみ適用される」という注記を追加する。将来的に外部ユーザーがアクセス可能な環境で運用する場合は、認証/認可の導入と合わせてデフォルトサニタイズの検討が必要である旨も記載する。"
+      },
+      {
+        "id": "S4-SF-003",
+        "title": "エラーレスポンスにおける内部情報漏洩",
+        "description": "route.ts の 404 エラーレスポンスで params.id をそのまま含めて返している（line 28: Worktree '${params.id}' not found）。また、500 エラー時には console.error で error オブジェクト全体を出力している。エラーメッセージに内部ID値を含めることはInformation Disclosureのリスクがある。現在のコードベースでは他のAPIルートでも同様のパターンが使われているため、本Issueのスコープ内ではログ関連APIの3ハンドラーのみを対象とする。",
+        "severity": "low",
+        "owasp_category": "A05:2021 - Security Misconfiguration",
+        "recommendation": "設計方針書 Section 5-1 のエラーレスポンス仕様に「エラーメッセージには内部パスや詳細なスタックトレースを含めない方針」を注記として追加する。本Issueのスコープでは既存のエラーレスポンス形式を維持するが、将来的なセキュリティ強化として一般的なエラーメッセージへの統一を検討事項として記載する。"
+      },
+      {
+        "id": "S4-SF-004",
+        "title": "os.hostname() で取得するホスト名のサニタイズ対象の網羅性不足",
+        "description": "os.hostname() はシステムのホスト名のみを返す。macOSでは 'MacBook-Pro.local' のような形式だが、ネットワーク設定によっては 'MacBook-Pro' のような短縮形や FQDN が異なる場合がある。また、ログ内にIPアドレス（ローカルIPやVPN IP）が含まれる可能性があるが、設計方針書ではIPアドレスのマスキングは対象外となっている。",
+        "severity": "medium",
+        "owasp_category": "A02:2021 - Cryptographic Failures / Sensitive Data Exposure",
+        "recommendation": "設計方針書 Section 3-2 または Section 6-1 に、「ホスト名はos.hostname()で取得される値のみをマスキング対象とする。IPアドレスやFQDN全体のマスキングは初期スコープ外とし、必要に応じて追加Issueで対応する」という制約を明記する。将来の拡張として、ローカルIPアドレスパターン（192.168.x.x、10.x.x.x 等）のマスキングルール追加を検討事項に含める。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "S4-C-001",
+        "title": "認証/認可メカニズムの不在",
+        "description": "CommandMateはローカル開発ツールとして設計されており、API認証/認可メカニズムは存在しない。next.config.js で CM_BIND のデフォルトが 127.0.0.1 に設定されているため、リモートからのアクセスはブロックされるが、同一ホスト上の他のプロセスからのAPI呼び出しは制限されない。Issue #11 で追加するサニタイズ機能はパス情報の保護を目的としているが、根本的なアクセス制御は認証で担保すべきものである。",
+        "owasp_category": "A07:2021 - Identification and Authentication Failures",
+        "recommendation": "本Issueのスコープ外だが、将来的にチーム共有やリモートアクセスに対応する場合は、APIトークンベースの認証導入を検討する。設計方針書にローカルツールとしての前提条件を明記する。"
+      },
+      {
+        "id": "S4-C-002",
+        "title": "レスポンスボディ clone() によるメモリ使用量の二重化",
+        "description": "withLogging() 設計では response.clone() でストリームを複製してからボディを読み取る。大きなログファイル（数MB級）のレスポンスでは、clone時にメモリ使用量が一時的に倍増する。1KBでtruncateするためログに書き出される量は少ないが、clone()自体はレスポンス全体をバッファリングする必要がある。本番環境ではバイパスされるため実害は小さいが、開発環境でのDoSリスクとして認識しておくべきである。",
+        "owasp_category": "A06:2021 - Vulnerable and Outdated Components (Resource Exhaustion)",
+        "recommendation": "ログファイル取得APIのような大きなレスポンスを返すハンドラーでは、withLogging() のオプションでレスポンスボディの読み取りをスキップすることを検討する。WithLoggingOptions に maxResponseSize を追加し、Content-Lengthが閾値を超える場合はボディ読み取りをスキップする設計も有効。"
+      },
+      {
+        "id": "S4-C-003",
+        "title": "CSP ポリシーにおける unsafe-inline / unsafe-eval の存在",
+        "description": "next.config.js の Content-Security-Policy で 'unsafe-inline' と 'unsafe-eval' が script-src に指定されている。これは Next.js の開発モードで必要だが、本番環境では XSS 攻撃のリスクを高める。Issue #11 の dangerouslySetInnerHTML 使用箇所と組み合わせると、XSSのインパクトが増大する。",
+        "owasp_category": "A03:2021 - Injection (XSS)",
+        "recommendation": "本Issueのスコープ外だが、将来的に CSP を強化する場合は nonce ベースの script-src 制御への移行を検討する。コメントに「Next.js dev mode 用」とあるため、本番ビルドではより厳格なCSPを適用することを推奨する。"
+      },
+      {
+        "id": "S4-C-004",
+        "title": "サニタイズルールの正規表現 ReDoS リスク評価",
+        "description": "log-export-sanitizer.ts の buildSanitizeRules() は escapeRegExp() でエスケープした文字列から正規表現を構築するため、ユーザー入力に基づく ReDoS リスクは低い。しかし、マスキング対象値（HOME パスや CM_ROOT_DIR 等）が極端に長い場合や、特殊なUnicodeパスを含む場合のパフォーマンス特性は未検証である。escapeRegExp() の JSDoc に SEC-MF-001 の ReDoS 防止注記があるが、これは検索機能のユーザー入力に対する警告であり、サーバー側の環境変数値からの正規表現構築は安全性が高い。",
+        "owasp_category": "A03:2021 - Injection (ReDoS)",
+        "recommendation": "現状の設計は安全であるため、追加対策は不要。escapeRegExp() のJSDoc更新時に、「環境変数値からの正規表現構築は信頼できる入力元であるためReDoSリスクは低い」旨をコメントに含めることを推奨する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "medium",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "acceptable",
+      "notes": "ローカルツールとして127.0.0.1バインドで運用。パストラバーサル対策は既存route.tsに実装済み。sanitizeパラメータのデフォルト非適用は意図的仕様だが明記が必要。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "needs_improvement",
+      "notes": "エクスポート用サニタイズでパスとホスト名はマスキングされるが、会話ログ内のトークン/パスワード/SSH鍵等の機密データパターンが未対応（S4-MF-002）。IPアドレスも未対応（S4-SF-004）。"
+    },
+    "A03_injection": {
+      "status": "needs_improvement",
+      "notes": "LogViewer.tsx の dangerouslySetInnerHTML に未エスケープのファイルコンテンツが渡るXSSリスクあり（S4-MF-001）。DOMPurify は TerminalDisplay 等には適用済みだが LogViewer の highlight パスは未保護。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "サニタイズのサーバーサイド実行、ルールベースの拡張可能な設計、既存セキュリティ機構との共存は適切に設計されている。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "acceptable",
+      "notes": "NODE_ENV による withLogging() 制御は適切。CSP ヘッダーが設定されている。ただし unsafe-inline/unsafe-eval は残存。エラーメッセージに内部IDが含まれる点は軽微。"
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "notes": "外部依存の追加なし。既存の DOMPurify、better-sqlite3 等は変更なし。"
+    },
+    "A07_identification_authentication": {
+      "status": "not_applicable",
+      "notes": "ローカル開発ツールとして認証は意図的にスコープ外。127.0.0.1バインドで外部アクセスを制限。"
+    },
+    "A08_software_data_integrity": {
+      "status": "pass",
+      "notes": "サニタイズは読み取り専用操作であり、元のログファイルは変更されない。withLogging() もリードオンリー。"
+    },
+    "A09_logging_monitoring": {
+      "status": "acceptable",
+      "notes": "withLogging() の導入でAPI監視が改善。SENSITIVE_PATTERNS が自動適用されるが、レスポンスボディの機密データ完全マスキングは保証されない（S4-SF-001）。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "Issue #11 の変更にサーバーサイドのHTTPリクエスト送信は含まれない。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-11-data-collection-design-policy.md",
+    "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+    "src/app/api/worktrees/[id]/logs/route.ts",
+    "src/lib/env.ts",
+    "src/lib/sanitize.ts",
+    "src/lib/logger.ts",
+    "src/lib/utils.ts",
+    "src/lib/clipboard-utils.ts",
+    "src/lib/log-manager.ts",
+    "src/lib/api-client.ts",
+    "src/lib/db-path-resolver.ts",
+    "src/config/system-directories.ts",
+    "src/cli/utils/security-logger.ts",
+    "src/components/worktree/LogViewer.tsx",
+    "next.config.js"
+  ],
+  "timestamp": "2026-02-10T12:00:00Z"
+}

@@ -1,0 +1,112 @@
+{
+  "issue_number": 11,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "S4-MF-001",
+        "title": "LogViewer.tsx の dangerouslySetInnerHTML による XSS リスク",
+        "sections_updated": ["2 (技術選定)", "3-4 (新規セクション: XSS防止)", "6-1 (サニタイズ情報漏洩防止テーブル)", "6-3 (既存セキュリティ機構テーブル)", "6-5 (新規セクション: XSS防止)", "6-6 (OWASP チェックリスト A03)", "8 (D-13)", "9 (テストケース追加)", "13 (T5チェックリスト)"],
+        "status": "reflected",
+        "summary": "Section 3-4を新設しescapeHtml()関数によるXSS防止策を設計。Section 6-5でXSS防止のリスクテーブルを追加。T5チェックリストにhighlightedContent構築時のHTMLエスケープ適用、escapeHtml()関数の配置、XSS対策テストケース追加を記載。"
+      },
+      {
+        "id": "S4-MF-002",
+        "title": "log-export-sanitizer.ts のサニタイズルール不足 -- 機密データパターン未対応",
+        "sections_updated": ["1 (システム構成図ラベル更新)", "3-2 (buildSanitizeRulesに機密データパターン追加)", "4-3 (マスキングマッピングテーブル拡充)", "6-1 (リスクテーブルに機密データ行追加)", "6-2 (適用順序に機密データパターンの説明追加)", "6-3 (既存セキュリティ機構テーブル更新)", "7-1 (ルール数更新)", "8 (D-12)", "9 (テストケース追加)", "11 (C-11)", "13 (T2チェックリスト)"],
+        "status": "reflected",
+        "summary": "buildSanitizeRules()にBearer トークン、Authorizationヘッダー、password/token/secretキーバリューペア、SSH秘密鍵、既知の環境変数名の5カテゴリの機密データパターンを追加。logger.ts SENSITIVE_PATTERNSとの役割分担を明確化。テストケースとチェックリストに7項目を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S4-SF-001",
+        "title": "withLogging() のレスポンスボディログ出力における機密データ漏洩リスク",
+        "sections_updated": ["3-1 (WithLoggingOptionsにskipResponseBody追加、設計根拠追加、適用例更新)", "6-4 (レスポンスボディの選択的省略追加)", "7-2 (skipResponseBodyによるclone省略の記載)", "8 (D-14)", "9 (withLogging()テストケース2件追加)", "10 (Phase 1テーブルにskipResponseBody列追加)", "13 (T6, T7チェックリスト)"],
+        "status": "reflected",
+        "summary": "WithLoggingOptionsにskipResponseBody?: booleanオプションを追加。ログ個別取得API (GET) にskipResponseBody: trueを指定する設計を明記。テストケースにskipResponseBody関連の2件を追加。"
+      },
+      {
+        "id": "S4-SF-002",
+        "title": "sanitize クエリパラメータのバイパスリスク",
+        "sections_updated": ["6-1 (デフォルト仕様の注記追加)", "8 (D-2トレードオフ更新)", "11 (C-9)"],
+        "status": "reflected",
+        "summary": "Section 6-1にデフォルト非サニタイズが意図的設計である旨の注記を追加。ローカルツール前提、127.0.0.1バインド、将来的な認証導入の検討事項を記載。"
+      },
+      {
+        "id": "S4-SF-003",
+        "title": "エラーレスポンスにおける内部情報漏洩",
+        "sections_updated": ["5-1 (エラーレスポンスセキュリティ方針の注記追加)"],
+        "status": "reflected",
+        "summary": "Section 5-1にエラーレスポンスのセキュリティ方針を注記として追加。本Issueスコープでは既存形式維持、将来的な一般メッセージ統一を検討事項として記載。"
+      },
+      {
+        "id": "S4-SF-004",
+        "title": "os.hostname() で取得するホスト名のサニタイズ対象の網羅性不足",
+        "sections_updated": ["3-2 (ホスト名マスキング対象範囲の注記追加)", "4-3 (ホスト名マスキング制約の注記追加)", "6-1 (ホスト名マスキング対象範囲制約の注記追加)", "11 (C-10)"],
+        "status": "reflected",
+        "summary": "os.hostname()の返却値のみをマスキング対象とする制約を明記。IPアドレスマスキングは初期スコープ外、将来の拡張としてローカルIPパターン追加を検討事項に記載。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "S4-C-001",
+        "title": "認証/認可メカニズムの不在",
+        "sections_updated": ["6-6 (OWASP A07)", "11 (C-9)", "12 (Stage 4 Consider テーブル)"],
+        "status": "noted",
+        "summary": "OWASPチェックリストのA07にnot_applicableとして記載。制約事項C-9にローカルツール前提と将来的な認証導入の検討を記載。"
+      },
+      {
+        "id": "S4-C-002",
+        "title": "レスポンスボディ clone() によるメモリ使用量の二重化",
+        "sections_updated": ["7-2 (response.clone()メモリ使用量の注記追加)", "12 (Stage 4 Consider テーブル)"],
+        "status": "noted",
+        "summary": "Section 7-2にresponse.clone()のメモリ使用量に関する注記を追加。skipResponseBody: trueオプションによる回避策を明記。"
+      },
+      {
+        "id": "S4-C-003",
+        "title": "CSP ポリシーにおける unsafe-inline / unsafe-eval の存在",
+        "sections_updated": ["6-6 (OWASP A03, A05)", "12 (Stage 4 Consider テーブル)"],
+        "status": "noted",
+        "summary": "OWASPチェックリストのA03にCSP強化を将来課題として記載。"
+      },
+      {
+        "id": "S4-C-004",
+        "title": "サニタイズルールの正規表現 ReDoS リスク評価",
+        "sections_updated": ["3-2 (JSDocコメント更新ガイダンスにReDoSリスク評価を追記)", "13 (T2チェックリスト)", "12 (Stage 4 Consider テーブル)"],
+        "status": "noted",
+        "summary": "escapeRegExp()のJSDocコメント更新ガイダンスに、環境変数値からの正規表現構築が安全である旨の注記を追加。T2チェックリストにも反映。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-11-data-collection-design-policy.md",
+  "sections_updated": [
+    "1. アーキテクチャ設計 (システム構成図ラベル更新、モジュール説明更新)",
+    "2. 技術選定 (HTMLエスケープ追加、代替案比較追加)",
+    "3-1. Decorator パターン (WithLoggingOptions skipResponseBody追加、設計根拠追加、適用例更新)",
+    "3-2. ルールベースパターン (機密データパターン追加、SENSITIVE_PATTERNSとの関係説明、ホスト名マスキング制約、ReDoS評価)",
+    "3-4. XSS防止 (新規セクション)",
+    "4-3. サニタイズ済みログ出力例 (マスキングマッピングテーブル拡充、ホスト名マスキング制約)",
+    "5-1. 既存API拡張 (エラーレスポンスセキュリティ方針追加)",
+    "6-1. サニタイズによる情報漏洩防止 (OWASP列追加、機密データ行追加、sanitizeデフォルト仕様注記、ホスト名制約注記)",
+    "6-2. サニタイズルール適用順序 (機密データパターンの適用順序説明追加)",
+    "6-3. 既存セキュリティ機構との共存 (テーブル更新、SENSITIVE_PATTERNS役割分担説明)",
+    "6-4. APIロギングのセキュリティ (skipResponseBody記載追加)",
+    "6-5. XSS防止 (新規セクション)",
+    "6-6. OWASP Top 10 チェックリスト (新規セクション)",
+    "7-1. サニタイズ処理のパフォーマンス (ルール数更新、SSH鍵パターン追加)",
+    "7-2. withLogging()のパフォーマンス (skipResponseBody記載、response.clone()メモリ注記)",
+    "8. 設計上の決定事項 (D-12, D-13, D-14追加、D-2更新、SOLID原則更新)",
+    "9. テスト戦略 (sanitizer テストケース7件追加、withLogging テストケース2件追加)",
+    "10. 実装順序と依存関係 (mermaidノードラベル更新、Phase 1テーブルにskipResponseBody列追加)",
+    "11. 制約事項 (C-9, C-10, C-11追加)",
+    "12. レビュー指摘事項サマリー (Stage 4セクション追加、リスク評価テーブルにStage 4列追加)",
+    "13. 実装チェックリスト (T2: 4項目追加、T5: 3項目追加、T6: 3項目追加、T7: 1項目追加)",
+    "14. レビュー履歴 (Stage 4行追加)"
+  ],
+  "timestamp": "2026-02-10T12:30:00Z"
+}

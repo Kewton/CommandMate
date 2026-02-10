@@ -1,0 +1,83 @@
+{
+  "issue_number": 11,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "「用語定義」セクションを新設し、会話ログ（log-manager.ts）・構造化ログ（logger.ts）・APIログの3種を明確に区別。エクスポート対象が「会話ログ（Markdownファイル）」であることを明記。log-manager.tsの変更内容を「エラーログ抽出機能の追加」から「会話ログ取得用のエクスポート向けAPI追加」に修正。"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "エクスポート対象のデータソースを「log-manager.tsが管理するMarkdownファイル（ファイルシステム上に永続化済み）」と明記。logger.tsの構造化ログ（console出力のみ）とは別物であることを用語定義で明確化。ログ永続化機構の追加は不要であることが明示された。"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "Issueタイトルを「操作性改善およびバグ原因調査目的のデータ収集機能強化」から「バグ原因調査目的のデータ収集機能強化」に変更。本文に操作性改善の記述がないため、タイトルから削除。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "サニタイズ対象を「網羅リスト」として7項目に具体化。(1)ホームディレクトリパス, (2)CM_ROOT_DIRパス, (3)ワークツリー絶対パス, (4)DB絶対パス, (5)環境変数実値, (6)ホスト名・ユーザー名, (7)tmuxセッション名内パス。さらに「サニタイズ対象外」セクションも追加し、保持すべき情報を明記。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "APIログの実装方式を「共通のwithLogging()ヘルパー関数を作成し各route.tsのハンドラーをラップ」と明記。方式選定理由（Next.js App Router middleware.tsの制約、36ファイル存在による保守性考慮）も記載。新規ファイルsrc/lib/api-logger.tsを変更対象に追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "エクスポート対象の時間範囲を「現在LogViewerで選択・表示中のログファイルの内容全体」と明記。ユーザーが閲覧しているログをそのままコピーする方式であることを説明。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "受入条件のサニタイズセクションに具体的な検証方法を追加。「/Users/*, /home/* パターン（HOME由来）」「環境変数 HOME, CM_ROOT_DIR, CM_DB_PATH の実値」がエクスポート結果に含まれないことを正規表現で検証するユニットテストの要件を明記。"
+      },
+      {
+        "id": "SF-5",
+        "status": "applied",
+        "change_summary": "clipboard-utils.tsを変更対象ファイルから削除。関連コンポーネント欄に「そのまま利用、変更不要」と明記。提案する解決策にも「既存のcopyToClipboard()関数をそのまま活用（拡張不要）」と記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "エクスポートボタンの配置場所を「Logタブ内（LogViewer.tsx）」と明記。変更対象ファイルもWorktreeDetail.tsxからLogViewer.tsxに変更。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "受入条件に「ログデータが存在しない場合、ボタンが無効化されるか適切なメッセージが表示されること」を追加。受入条件を「会話ログエクスポート」「サニタイズ」「開発環境APIログ」の3カテゴリに構造化。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "「関連Issue」セクションを追加。#41（構造化ログ導入）と#211（clipboard-utils.ts）へのリンクを記載。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 11,
+    "skipped": 0
+  },
+  "title_change": {
+    "before": "操作性改善およびバグ原因調査目的のデータ収集機能強化",
+    "after": "バグ原因調査目的のデータ収集機能強化"
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/11"
+  }
+}
