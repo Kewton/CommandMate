@@ -17,7 +17,7 @@ import {
   type AutoYesState,
 } from '@/lib/auto-yes-manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { ALLOWED_DURATIONS, DEFAULT_AUTO_YES_DURATION, type AutoYesDuration } from '@/config/auto-yes-config';
+import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, type AutoYesDuration } from '@/config/auto-yes-config';
 
 /** Allowed CLI tool IDs */
 const ALLOWED_CLI_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
@@ -119,13 +119,13 @@ export async function POST(
     // [SEC-SF-002] Validate duration if provided (whitelist check with type guard)
     let duration: AutoYesDuration = DEFAULT_AUTO_YES_DURATION;
     if (body.enabled && body.duration !== undefined) {
-      if (typeof body.duration !== 'number' || !ALLOWED_DURATIONS.includes(body.duration as AutoYesDuration)) {
+      if (!isAllowedDuration(body.duration)) {
         return NextResponse.json(
           { error: 'Invalid duration value. Allowed values: 3600000, 10800000, 28800000' },
           { status: 400 }
         );
       }
-      duration = body.duration as AutoYesDuration;
+      duration = body.duration;
     }
 
     // Validate cliToolId if provided (default: 'claude')

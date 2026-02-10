@@ -11,6 +11,7 @@
 
 import React, { memo, useEffect, useState, useCallback } from 'react';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
+import { formatTimeRemaining } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
 
 /** Props for AutoYesToggle component */
@@ -27,22 +28,6 @@ export interface AutoYesToggleProps {
   cliToolName?: string;
   /** If true, render without outer container styles (for inline embedding) */
   inline?: boolean;
-}
-
-/**
- * Format remaining time as MM:SS (under 1 hour) or H:MM:SS (1 hour or more)
- * [SF-001] Kept in AutoYesToggle.tsx as module-scope function (single usage location)
- */
-function formatTimeRemaining(expiresAt: number): string {
-  const remaining = Math.max(0, expiresAt - Date.now());
-  const hours = Math.floor(remaining / 3600000);
-  const minutes = Math.floor((remaining % 3600000) / 60000);
-  const seconds = Math.floor((remaining % 60000) / 1000);
-
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  }
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
 /** Capitalize CLI tool name for display */
