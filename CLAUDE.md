@@ -130,15 +130,17 @@ src/
 | `src/lib/db-instance.ts` | DBインスタンス管理（getEnv().CM_DB_PATH使用） |
 | `src/config/system-directories.ts` | システムディレクトリ定数（SYSTEM_DIRECTORIES、isSystemDirectory()） |
 | `src/config/status-colors.ts` | ステータス色の一元管理 |
-| `src/lib/cli-patterns.ts` | CLIツール別パターン定義 |
+| `src/lib/cli-patterns.ts` | CLIツール別パターン定義（Issue #212: PASTED_TEXT_PATTERN定数追加、skipPatterns拡張） |
+| `src/lib/pasted-text-helper.ts` | Pasted text検知とEnter再送の共通ヘルパー（Issue #212: detectAndResendIfPastedText関数、リトライロジック、構造化ログ） |
 | `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行プロンプト検出ウィンドウイング。Issue #188: STATUS_THINKING_LINE_COUNT=5追加、thinking/prompt優先順位統一、SF-001/SF-002/SF-004設計根拠ドキュメント化） |
-| `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数） |
-| `src/lib/response-poller.ts` | レスポンスポーリングとthinking検出（Issue #188: L353/L547-554ウィンドウ化、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数、detectPromptWithOptions()ヘルパー、Gemini LOADING_INDICATORS配列抽出） |
+| `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数。Issue #212: 複数行メッセージのPasted text検知+Enter再送） |
+| `src/lib/response-poller.ts` | レスポンスポーリングとthinking検出（Issue #188: L353/L547-554ウィンドウ化、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数、detectPromptWithOptions()ヘルパー、Gemini LOADING_INDICATORS配列抽出。Issue #212: cleanClaudeResponse skipPatternsにPASTED_TEXT_PATTERN追加） |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証。Issue #193: DetectPromptOptions interface追加、requireDefaultIndicatorフラグによる❯なし形式対応、Layer 5 SEC-001ガード。Issue #208: SEC-001b質問行妥当性検証追加、isQuestionLikeLine()による番号付きリスト誤検出防止） |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応） |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
+| `src/lib/cli-tools/codex.ts` | Codex CLI tmuxセッション管理（Issue #212: 複数行メッセージのPasted text検知+Enter再送、getErrorMessage()ヘルパー抽出） |
 | `src/lib/session-cleanup.ts` | セッション/ポーラー停止の一元管理（Facade パターン） |
 | `src/lib/url-normalizer.ts` | Git URL正規化（重複検出用） |
 | `src/lib/clone-manager.ts` | クローン処理管理（DBベース排他制御） |
