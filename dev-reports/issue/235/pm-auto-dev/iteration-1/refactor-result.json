@@ -1,0 +1,36 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 98.51,
+    "after_coverage": 98.51
+  },
+  "refactorings_applied": [
+    "prompt-detector.ts: Extract yesNoPromptResult() helper to eliminate duplicated yes_no result construction (DRY)",
+    "prompt-detector.ts: Use .test() instead of .match() in isContinuationLine for semantic correctness (KISS)",
+    "response-poller.ts: Extract ExtractionResult interface and incompleteResult() helper to eliminate 7 duplicated incomplete result constructions (DRY)",
+    "response-poller.ts: Extract GEMINI_LOADING_INDICATORS to module-level constant for clarity and to avoid re-creation on each call",
+    "PromptMessage.tsx: Extract SendingIndicator component to eliminate duplicated spinner markup between yes_no and multiple_choice prompts (DRY)",
+    "PromptMessage.tsx: Extract BUTTON_BASE_CLASSES constant to eliminate duplicated button styling across prompt types (DRY)"
+  ],
+  "files_changed": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/components/worktree/PromptMessage.tsx"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "0b32b1e: refactor(#235): improve code quality with DRY/SOLID principles"
+  ],
+  "test_results": {
+    "total_tests": 3062,
+    "passed": 3062,
+    "failed": 0,
+    "skipped": 7
+  },
+  "message": "リファクタリング完了。DRY原則に基づき重複コードを削除し、可読性と保守性を向上。全3062テストパス、静的解析エラー0件を維持。"
+}

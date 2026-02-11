@@ -1,0 +1,62 @@
+{
+  "issue_number": 235,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-11",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "response-poller.test.ts テスト戦略に extractResponse() 内の早期プロンプト検出パス（L298-311, cliToolId === 'claude'）の統合フロー検証を注意書きとして追加。stripAnsi() の冪等性と rawContent 変更が prompt-detector.ts 側であることを注記し、[Stage7-SF-1] タグを付与"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "auto-yes-manager リグレッション確認テストタスクを任意（optional）項目として新規セクションに追加。detectPrompt() が rawContent を返しても判定ロジックに影響しないことの間接検証。[Stage7-NTH-1] タグを付与"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "レビュー履歴セクションに Stage 7 影響範囲レビュー 2回目の結果サマリー（SF-1, NTH-1, NTH-2 の各対応内容）を追加。全4段階レビュー完了の記録"
+      }
+    ]
+  },
+  "additional_changes": [
+    "Issue冒頭の Note にレビュー反映ステージとして Stage 7 を追加（Stage 1, Stage 3, Stage 5, Stage 7）"
+  ],
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/235"
+  },
+  "review_completion": {
+    "all_stages_completed": true,
+    "stages": [
+      { "stage": 1, "type": "通常レビュー", "iteration": 1 },
+      { "stage": 2, "type": "指摘事項反映", "iteration": 1 },
+      { "stage": 3, "type": "影響範囲レビュー", "iteration": 1 },
+      { "stage": 4, "type": "指摘事項反映", "iteration": 1 },
+      { "stage": 5, "type": "通常レビュー", "iteration": 2 },
+      { "stage": 6, "type": "指摘事項反映", "iteration": 2 },
+      { "stage": 7, "type": "影響範囲レビュー", "iteration": 2 },
+      { "stage": 8, "type": "指摘事項反映", "iteration": 2 }
+    ],
+    "total_findings_across_all_stages": {
+      "stage1": 9,
+      "stage3": 9,
+      "stage5": 5,
+      "stage7": 3,
+      "grand_total": 26
+    },
+    "readiness_for_implementation": true
+  }
+}

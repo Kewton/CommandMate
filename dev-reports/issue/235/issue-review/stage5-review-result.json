@@ -1,0 +1,194 @@
+{
+  "issue_number": 235,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-02-11",
+  "previous_review_verification": {
+    "stage1_findings_total": 7,
+    "stage1_findings_applied": 7,
+    "stage3_findings_total": 9,
+    "stage3_findings_applied": 9,
+    "all_previous_findings_addressed": true,
+    "verification_details": [
+      {
+        "original_id": "Stage1-MF-1",
+        "description": "claude-poller.ts の実装タスク・影響範囲への記載漏れ",
+        "status": "resolved",
+        "evidence": "Issue本文に「claude-poller.ts について」セクション新設済み。影響なし確認済みテーブルにも追加済み"
+      },
+      {
+        "original_id": "Stage1-SF-1",
+        "description": "Approveパターンの rawContent 返却タスク欠如",
+        "status": "resolved",
+        "evidence": "実装タスク prompt-detector.ts セクションに「Approveパターン検出で rawContent: lastLines.trim() を返却」追加済み"
+      },
+      {
+        "original_id": "Stage1-SF-2",
+        "description": "PromptMessage.tsx の指示テキスト表示方法が不明確",
+        "status": "resolved",
+        "evidence": "「PromptMessage.tsx UI仕様」サブセクション新設済み。表示方針・レイアウト・重複回避・セキュリティの4項目を具体的に記載"
+      },
+      {
+        "original_id": "Stage1-SF-3",
+        "description": "rawContent の内容ソースがパターンで異なることの未定義",
+        "status": "resolved",
+        "evidence": "「rawContent の定義」サブセクションにパターン別テーブル追加済み。末尾10行制限の注意事項も記載"
+      },
+      {
+        "original_id": "Stage1-SF-4",
+        "description": "current-output/route.ts の影響分析欠如",
+        "status": "resolved",
+        "evidence": "影響なし確認済みテーブルに追加済み。L91の独自設定とPromptDetectionResult型非参照を明記"
+      },
+      {
+        "original_id": "Stage1-NTH-1",
+        "description": "rawContent フォールバック動作のテスト条件欠如",
+        "status": "resolved",
+        "evidence": "受入条件「rawContent フォールバック」セクションに追加済み"
+      },
+      {
+        "original_id": "Stage1-NTH-2",
+        "description": "Codex のプロンプト検出パスの変更要否不明確",
+        "status": "resolved",
+        "evidence": "影響なし確認済みテーブルのcodex.ts行で間接的恩恵と直接参照なしを明記済み"
+      },
+      {
+        "original_id": "Stage3-MF-1",
+        "description": "prompt-detector.test.ts の rawContent テスト未明記",
+        "status": "resolved",
+        "evidence": "実装タスク「テスト（prompt-detector.test.ts）」セクション新設。5項目の具体的テストケースを記載"
+      },
+      {
+        "original_id": "Stage3-MF-2",
+        "description": "response-poller.test.ts のDB保存フォールバックテスト欠如",
+        "status": "resolved",
+        "evidence": "実装タスク「テスト（response-poller.test.ts）」セクション新設。2項目 + モック/統合テスト考慮の注意書きを記載"
+      },
+      {
+        "original_id": "Stage3-SF-1",
+        "description": "ANSI エスケープコード残留への対処方針未記載",
+        "status": "resolved",
+        "evidence": "「rawContent と ANSI エスケープコード」サブセクション新設済み。stripAnsi() 適用タイミングとUnicode文字の注意事項を明記"
+      },
+      {
+        "original_id": "Stage3-SF-2",
+        "description": "既存DBデータとの後方互換性未分析",
+        "status": "resolved",
+        "evidence": "受入条件「後方互換性」セクション新設。既存/新規データ3項目を記載"
+      },
+      {
+        "original_id": "Stage3-SF-3",
+        "description": "auto-yes-manager.ts の TypeScript 型互換性分析不足",
+        "status": "resolved",
+        "evidence": "影響なし確認済みテーブルの auto-yes-manager.ts 行を拡充。型互換性分析を明記"
+      },
+      {
+        "original_id": "Stage3-SF-4",
+        "description": "PromptMessage.tsx のUIテスト未検討",
+        "status": "resolved",
+        "evidence": "実装タスク「テスト（PromptMessage UIテスト）」セクション新設。3項目のテストケースを記載"
+      },
+      {
+        "original_id": "Stage3-NTH-1",
+        "description": "CLAUDE.md のドキュメント更新タスク欠如",
+        "status": "resolved",
+        "evidence": "実装タスク「ドキュメント更新（実装完了時）」セクション新設"
+      },
+      {
+        "original_id": "Stage3-NTH-2",
+        "description": "rawContent サイズのパフォーマンス考慮未記載",
+        "status": "resolved",
+        "evidence": "「rawContent のサイズに関するパフォーマンス考慮」サブセクション新設済み"
+      },
+      {
+        "original_id": "Stage3-NTH-3",
+        "description": "prompt-response/route.ts の影響範囲テーブル欠如",
+        "status": "resolved",
+        "evidence": "影響なし確認済みテーブルに追加済み"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "正確性",
+        "issue": "問題箇所セクションの行番号がソースコードと一致しない",
+        "location": "## 問題箇所",
+        "recommendation": "以下の行番号を実際のソースコードと照合して修正する: (1) 項目1「471-486行目: extractQuestionText()」-- extractQuestionText() という関数はソースコード内に存在しない。該当ロジックは detectMultipleChoicePrompt() 内の L471-486（question text extraction ループ）にインラインで記述されている。関数名の誤記を修正するか、「detectMultipleChoicePrompt() 内の質問テキスト抽出ロジック（471-486行目）」と記載する。(2) 項目2「488-509行目: cleanContent: question.trim()」-- 実際には L488 は return 文の開始、L508 が cleanContent: question.trim() の行であり、509 は「}; (return ブロック閉じ)」。範囲表記としては概ね正しいが、項目1 で extractQuestionText() が存在しない以上、項目2 の「5行制限」も extractQuestionText 内ではなく detectMultipleChoicePrompt() 内の L476 の `questionEndIndex - 5` に由来することを明記すべき",
+        "evidence": "src/lib/prompt-detector.ts に extractQuestionText() 関数は存在しない（Grep で 0 件）。L471-486 は detectMultipleChoicePrompt() 内のインライン質問テキスト抽出ロジック。L508 が cleanContent: question.trim()"
+      },
+      {
+        "id": "SF-2",
+        "category": "正確性",
+        "issue": "multiple_choice の rawContent が output.trim()（全tmux出力）となるのは意図通りか、scope が広すぎないかの確認が必要",
+        "location": "## rawContent の定義 / ## rawContent のサイズに関するパフォーマンス考慮",
+        "recommendation": "Issue のパフォーマンス考慮セクションでは「プロンプト検出は末尾50行ウィンドウで処理されるため、rawContent が極端に大きくなるケースは限定的」と記載しているが、これは矛盾している。rawContent = output.trim() は detectMultipleChoicePrompt() に渡される output パラメータ全体であり、50行ウィンドウはスキャン範囲であって output 自体のサイズ制限ではない。response-poller.ts L100 で stripAnsi(output) 後の全文が detectPrompt() に渡され、detectPrompt() L105 でそのまま detectMultipleChoicePrompt(output, options) に渡される。captureSessionOutput(worktreeId, cliToolId, 10000) の出力全体が rawContent に入る可能性がある。パフォーマンス考慮の記載を正確に修正し、「rawContent は最大で captureSessionOutput の 10000 行分の出力全体を含む可能性がある。ただし prompt メッセージの頻度は低く、SQLite TEXT 型に制限はないため問題ない」と実態に合わせるべき",
+        "evidence": "detectMultipleChoicePrompt(output, options) の output パラメータは detectPrompt() から渡される全出力。末尾50行ウィンドウ (scanStart 〜 effectiveEnd) はスキャン範囲であり、output 変数自体は全出力を保持したまま。rawContent: output.trim() は全出力のtrimを返す"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "整合性",
+        "issue": "current-output/route.ts の L91 のローカル型注釈に rawContent が含まれていないことの影響明記が望ましい",
+        "location": "## 影響範囲 > 影響なしの確認済みコンポーネント > current-output/route.ts",
+        "recommendation": "current-output/route.ts L91 の型注釈 `{ isPrompt: boolean; cleanContent: string; promptData?: unknown }` は PromptDetectionResult を直接使用せず手動で定義している。detectPrompt() が rawContent を返しても、この型注釈により rawContent は破棄される。これは「影響なし」であること自体は正しいが、影響なしの理由を「PromptDetectionResult 型を直接参照していない」だけでなく「ローカル型注釈で rawContent を受け取らない構造」と具体的に記載するとより正確",
+        "evidence": "current-output/route.ts L91: `let promptDetection: { isPrompt: boolean; cleanContent: string; promptData?: unknown } = { ... }` -- L94 で detectPrompt() を呼び出すが、戻り値がローカル型に代入されるため rawContent フィールドは TypeScript の構造的型付けにより無視される"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "PromptMessage.tsx UI仕様の「message.content が空または prompt.question と同一の場合は従来通り prompt.question を表示するフォールバック」の具体的な比較ロジックが未定義",
+        "location": "## PromptMessage.tsx UI仕様",
+        "recommendation": "フォールバック条件の比較ロジックを具体化するとよい。例: (1) message.content が空文字列または undefined の場合 prompt.question を表示、(2) message.content.trim() === prompt.question.trim() の場合は message.content のみ表示（重複回避）、(3) message.content に prompt.question が含まれる場合は message.content 全体を表示。これは実装時に詳細化すれば十分だが、Issue 段階で方針を記載しておくと実装者の判断が容易になる",
+        "evidence": "現在の UI 仕様は「message.content が空または prompt.question と同一の場合は従来通り prompt.question を表示するフォールバックを設ける」としか記載しておらず、実装者が比較方法を判断する必要がある"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "レビュー履歴セクションに Stage 5（本レビュー）の結果記録を追加する指示が必要",
+        "location": "## レビュー履歴",
+        "recommendation": "Stage 5 の反映時にレビュー履歴セクションに本レビューの結果サマリーを追加すること。これは Issue の自己参照的な記録のため必須ではないが、4段階レビューの完了を記録する意味で有用",
+        "evidence": "現在のレビュー履歴には Stage 1 と Stage 3 のみ記載"
+      }
+    ]
+  },
+  "overall_assessment": {
+    "quality": "high",
+    "completeness": "high",
+    "readiness_for_implementation": true,
+    "notes": "前回の Stage 1（7件）および Stage 3（9件）の全16件の指摘事項が全て適切に反映されている。Issue の品質は高く、根本原因分析・修正方針・実装タスク・受入条件・影響範囲が体系的に整理されている。新たに検出された問題は Must Fix レベルではなく、主にソースコードとの行番号/関数名の不一致（SF-1）と、パフォーマンス考慮の記述精度（SF-2）の2件の Should Fix にとどまる。実装着手に十分な品質である"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "relevance": "PromptDetectionResult 型定義（L40-47）、detectPrompt()（L93）、detectMultipleChoicePrompt()（L357）、質問テキスト抽出ロジック（L471-486）、cleanContent返却（L508）。extractQuestionText() 関数は存在しない"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "detectPromptWithOptions()（L95-101）でstripAnsi後にdetectPrompt呼び出し。L618 でDB保存時の content 値設定"
+    },
+    {
+      "file": "src/components/worktree/PromptMessage.tsx",
+      "relevance": "現在は prompt.question のみ表示（L52）。message.content は未使用"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "L91 でローカル型注釈により rawContent を受け取らない構造。detectPrompt() を L94 で呼び出すが rawContent は TypeScript の構造的型付けで無視される"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "prompt-detector.ts / response-poller.ts モジュール説明。実装完了時に rawContent 関連の更新が必要（Issue の実装タスクに記載済み）"
+    }
+  ]
+}

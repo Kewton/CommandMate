@@ -1,0 +1,59 @@
+{
+  "issue_number": 235,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-11",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "claude-poller.ts が response-poller.ts に統合済み（到達不能コード）であることを明記し、本Issueの変更対象外であることを「claude-poller.ts について」セクションおよび影響なし確認済みコンポーネント表に追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "Approveパターン（prompt-detector.ts:134-153）を問題箇所リストの4番目に追加し、実装タスクに「Approveパターン検出で rawContent: lastLines.trim() を返却」を追加。受入条件にも「Approveパターンのプロンプトでも rawContent が設定されること」を追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "「PromptMessage.tsx UI仕様」サブセクションを新設し、message.content の表示方針（全体をプレーンテキスト表示）、レイアウト（上部に指示テキスト、下部にプロンプト操作UI）、重複回避（prompt.questionとの関係・フォールバック）を具体的に記載"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "「rawContent の定義」サブセクションを新設し、パターン別のソース（multiple_choice: output.trim()全出力、Yes/No: lastLines.trim()末尾10行、Approve: lastLines.trim()末尾10行）をテーブル形式で明記。末尾10行制限の注意事項と将来Issueでの行数拡張検討についても追記"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "影響なし確認済みコンポーネント表に current-output/route.ts を追加し、L91で独自にデフォルト値を設定しておりPromptDetectionResult型を直接参照していないためrawContent追加の影響を受けないことを明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "受入条件に「rawContent 未設定時に cleanContent へフォールバックしてDB保存されること」を追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "関連コンポーネント欄の codex.ts 説明を更新し、response-poller.ts の detectPromptWithOptions() 経由で処理されるためrawContent追加の恩恵を間接的に受けること、codex.ts自体にdetectPrompt/cleanContentの直接参照がないことを明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/235"
+  }
+}

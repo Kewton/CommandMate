@@ -1,0 +1,121 @@
+{
+  "issue_number": 235,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "multiple_choiceパターンのrawContentサイズ制限欠如",
+        "description": "multiple_choiceパターンでoutput.trim()をそのままrawContentに格納する設計だが、captureSessionOutput()の最大10000行がそのままDBに保存される可能性がある。KISS原則の観点から、rawContentに対する上限サイズの制約を設計書に明記すべき。",
+        "principle": "KISS",
+        "severity": "medium",
+        "recommendation": "rawContentの最大行数または最大文字数を設計レベルで定義し、truncateロジックを明示する（例: 最大200行または5000文字）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "claude-poller.tsへのrawContent対応の欠落",
+        "description": "設計書のSection 11でclaude-poller.tsは到達不能コードとして影響なし確認済みとしているが、実コードではL245でpromptDetection.cleanContentをDB保存しており、response-poller.tsと同じ変更が必要になる可能性がある。到達不能コードであることの根拠を明示するか、同様の変更を計画すべき。",
+        "principle": "DRY / 整合性",
+        "severity": "low",
+        "recommendation": "claude-poller.tsが到達不能であることのコメントは既存（L234のTODO）で確認済み。設計書に当該TODOコメントへの参照を追記し、到達不能であることの技術的根拠を補強する。"
+      },
+      {
+        "id": "SF-002",
+        "title": "getDisplayContent関数のテスト不足",
+        "description": "PromptMessage.tsxに導入されるgetDisplayContent関数のロジック分岐は4パターンあるが、テスト戦略(Section 6.2)では3項目のみ記載。contentにquestionが含まれるケース（分岐3）の明示的テストが不足している。",
+        "principle": "テスト設計の網羅性",
+        "severity": "low",
+        "recommendation": "テスト項目にcontentがquestionを含むケースを追加する（例: content='指示テキスト\\n質問文'、question='質問文'のとき、content全体が表示される）"
+      },
+      {
+        "id": "SF-003",
+        "title": "Yes/No・ApproveパターンのrawContentソースの一貫性",
+        "description": "multiple_choiceパターンではoutput全体（完全な出力）をrawContentとするが、Yes/NoとApproveパターンではlastLines（末尾10行）のみをrawContentとする。設計書のSection 3.2に理由が表形式で記載されているが、この不一致がUIに表示される際にユーザーから見た体験の差異を生む可能性がある。",
+        "principle": "一貫性 / KISS",
+        "severity": "low",
+        "recommendation": "Yes/No・ApproveパターンでもrawContentにより広い範囲（例: lastLines=末尾20-30行）を採用するか、理由をより詳細にドキュメント化する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "cleanContentとrawContentの命名の明確化",
+        "description": "cleanContentとrawContentという命名について、rawContentが実際にはstripAnsi済みであり真の'raw'ではない。displayContentやfullContentの方がセマンティクスとして正確。",
+        "principle": "命名の明確性",
+        "severity": "info",
+        "recommendation": "将来的に混乱を避けるため、rawContentのJSDocコメントに'stripAnsi適用済みの完全出力'と明記する（設計書Section 3.1で既にstripAnsi済みと記載あり、実装時にJSDocに反映）"
+      },
+      {
+        "id": "C-002",
+        "title": "将来的なcleanContentフィールドの廃止検討",
+        "description": "rawContentとcleanContentの2つの類似フィールドが共存する設計は、Section 9.1でトレードオフとして認識されている。長期的にはPromptDetectionResult内部でrawContentのみに統一し、cleanContentをdeprecatedとする方向性を検討してもよい。",
+        "principle": "YAGNI / DRY",
+        "severity": "info",
+        "recommendation": "現時点では後方互換性のため現設計を維持。将来のIssueとして検討事項に記録。"
+      },
+      {
+        "id": "C-003",
+        "title": "noPromptResult()へのrawContent非設定の明示",
+        "description": "noPromptResult()ヘルパー関数ではrawContentを設定しないが、テスト項目(Section 6.1)のnoPromptResult()テストケースで'rawContentが含まれない'を検証する点は適切。設計上の意図として、isPrompt=falseの場合にrawContent=undefinedであることのドキュメントが明確。",
+        "principle": "設計の明確性",
+        "severity": "info",
+        "recommendation": "現設計で十分。特に変更不要。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-235-prompt-rawcontent-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/components/worktree/PromptMessage.tsx",
+    "src/types/models.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/claude-poller.ts"
+  ],
+  "checklist": {
+    "single_responsibility": {
+      "status": "pass",
+      "detail": "各モジュールの責務が明確。prompt-detector.tsは検出、response-poller.tsはDB保存、PromptMessage.tsxは表示。rawContent追加は各モジュールの既存責務の範囲内。"
+    },
+    "open_closed": {
+      "status": "pass",
+      "detail": "PromptDetectionResultにoptionalフィールドを追加する設計は、既存コードの修正を最小限にしつつ拡張可能。openに対してopenであり、closedに対してclosed。"
+    },
+    "liskov_substitution": {
+      "status": "pass",
+      "detail": "rawContentはoptionalフィールドのため、既存のPromptDetectionResultを受け取るコードはrawContentの有無に関係なく正常に動作する。"
+    },
+    "interface_segregation": {
+      "status": "pass",
+      "detail": "PromptDetectionResult型にrawContentを追加してもauto-yes-manager等のクライアントはisPromptとpromptDataのみを使用しており、不要なフィールドへの依存は発生しない。"
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "detail": "変更は具象実装レベルのみで完結。抽象インターフェースへの依存関係に変更なし。"
+    },
+    "kiss": {
+      "status": "conditional_pass",
+      "detail": "optionalフィールド追加+フォールバックの設計はシンプルだが、multiple_choiceパターンのrawContentサイズが制御されていない点(MF-001)で懸念あり。"
+    },
+    "yagni": {
+      "status": "pass",
+      "detail": "DBスキーマ変更なし、新コンポーネント作成なし、必要最小限の変更のみ。設計書明記のYAGNI原則に忠実。"
+    },
+    "dry": {
+      "status": "pass",
+      "detail": "rawContent返却ロジックは各パターン固有のソースから取得するため重複ではない。response-pollerでの 'rawContent || cleanContent' は単一箇所での判定。"
+    }
+  },
+  "timestamp": "2026-02-11T12:00:00Z"
+}

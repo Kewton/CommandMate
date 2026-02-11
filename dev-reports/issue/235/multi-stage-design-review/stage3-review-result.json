@@ -1,0 +1,169 @@
+{
+  "issue_number": 235,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-S3-001",
+        "title": "response-poller.ts内の2箇所目のプロンプト検出パスでrawContent反映漏れ",
+        "severity": "medium",
+        "description": "設計書Section 4.2はresponse-poller.ts L615-623（checkForResponse内）の変更のみ記載しているが、同ファイル内extractResponse()のL296-310（claude用の早期プロンプト検出パス）でもdetectPromptWithOptionsが呼び出され、その結果はextractResponseの戻り値としてcheckForResponseに返される。checkForResponseのL609でdetectPromptWithOptionsが再度呼ばれるため実質的に問題は発生しないが、L296-310のパスで返されるresponse（stripAnsi(fullOutput)）とL609のpromptDetection.rawContentが異なる値になる可能性がある。設計書にこのフローの分析が明示されていない。",
+        "recommendation": "設計書Section 11に、extractResponse()内L296-310のclaude早期プロンプト検出パスの分析を追記すること。具体的には、このパスでextractResponseが返すresponseはfullOutput全体であり、checkForResponseのL609で再度detectPromptWithOptionsが呼ばれてrawContentが生成されるため、DB保存時のcontent値は正しくrawContent || cleanContentとなることを明記する。",
+        "affected_file": "src/lib/response-poller.ts",
+        "line_range": "L296-310, L609-623"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S3-001",
+        "title": "MessageList.tsxのMessageBubbleコンポーネントにおけるpromptData表示の影響評価不足",
+        "severity": "low",
+        "description": "MessageList.tsx内のMessageBubbleコンポーネント（L234-357）もpromptメッセージのquestion/optionsを表示しており、message.contentが変更されるとReactMarkdownで表示される内容が変わる。設計書Section 4.3はPromptMessage.tsxの変更のみを記載しているが、promptメッセージの表示パスがPromptMessage.tsx（MessageListのL536-544）とMessageBubble内のpromptData表示（L234-357）の2系統存在する。MessageBubbleのpromptData表示はprompt.questionとprompt.optionsを直接使用しているため、message.contentの変更によるレンダリング内容の変化は無いが、MessageBubbleのL196-217でmessage.contentがReactMarkdownで表示されるため、rawContent（完全出力）がMarkdownとして描画される影響を設計書で評価すべき。",
+        "recommendation": "設計書Section 11に、MessageList.tsx内のMessageBubbleコンポーネントがpromptメッセージのmessage.contentをReactMarkdownで表示する点を分析に追加すること。promptメッセージはmessageType='prompt'の場合PromptMessageコンポーネントが使用される（L536-544）ため、MessageBubbleのReactMarkdown表示パスは通常到達しないことを明記する。",
+        "affected_file": "src/components/worktree/MessageList.tsx",
+        "line_range": "L534-545"
+      },
+      {
+        "id": "SF-S3-002",
+        "title": "lastLines変更（10行→20行）がYes/Noパターン検出精度に与える影響の分析不足",
+        "severity": "low",
+        "description": "設計書Section 3.2 [MF-S2-001]でlastLinesを10行から20行に拡張することが記載されているが、Yes/Noパターンのregexマッチ範囲が広がることにより、テキスト中間部分に偶然存在する(y/n)パターンを誤検出するリスクが微増する。例えば、出力の末尾11-20行目に「The answer is (y/n) for yes or no」のような記述があった場合、従来は10行ウィンドウの外のため検出されなかったが、20行に拡張すると検出される可能性がある。現在のテストケースでは末尾11-20行での誤検出テストが存在しない。",
+        "recommendation": "prompt-detector.test.tsに、lastLines拡張（10→20行）に伴う回帰テストを1件追加すること。例：末尾15行目に(y/n)パターンを含むテキストがある場合の動作確認。なお、YES_NO_PATTERNSの正規表現は行頭アンカー(^)を使用しているため、行中パターンの誤検出リスクは低いが、行頭に出現するケースのテストは有用。",
+        "affected_file": "src/lib/prompt-detector.ts",
+        "line_range": "L97"
+      },
+      {
+        "id": "SF-S3-003",
+        "title": "getDisplayContent関数の2回呼び出しによるパフォーマンスの非効率",
+        "severity": "low",
+        "description": "設計書Section 4.3.2のJSX例では、getDisplayContent()が条件判定とレンダリングの2箇所で呼び出されている。この関数は文字列比較を行うため計算量は軽微だが、DRY原則の観点から変数にキャッシュすべき。",
+        "recommendation": "PromptMessage.tsx実装時に、getDisplayContent()の結果をローカル変数にキャッシュして使用するよう設計書のJSXコード例を修正すること。例：const displayContent = getDisplayContent(message.content, prompt.question); のように変数化し、条件判定とレンダリングの両方で使用する。"
+      },
+      {
+        "id": "SF-S3-004",
+        "title": "既存DBデータとの表示一貫性に関するエッジケース",
+        "severity": "low",
+        "description": "設計書Section 5.2で「既存データ: content = cleanContent -> そのまま表示可能」と記載されているが、既存データでは message.content = prompt.question（cleanContent）であるため、getDisplayContent()のcontent.trim() === question.trim()条件によりnullが返され、指示テキスト領域は表示されない。これは正しい動作だが、Approve?パターンでcleanContent='Approve?'（L151）かつcontent='Approve?'（既存DB）の場合と、content=lastLines（新規DB、末尾20行）の場合で、同じApprove?プロンプトでもUI表示が異なる。この動作差異が設計書で明示されていない。",
+        "recommendation": "設計書Section 5.2にデータ移行期の表示差異を明記すること。具体的には、同一プロンプトタイプでも既存データ（content=cleanContent）と新規データ（content=rawContent）でUI表示が異なる期間が存在すること、これが意図的な動作であり、時間経過とともに自然に解消されることを記載する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S3-001",
+        "title": "codex.tsのPromptDetectionResult使用に関する間接影響",
+        "severity": "info",
+        "description": "設計書Section 11に「cli-tools/codex.ts: response-poller.ts 経由で間接的に恩恵を受ける」と記載されているが、codex.tsが独自にdetectPromptを呼び出すパスがある場合、同様のrawContent反映が必要になる可能性がある。現在のコードではcodex.tsはresponse-poller.tsのcheckForResponse経由でのみプロンプト検出が行われるため問題ない。",
+        "recommendation": "現時点では変更不要。将来codex.ts内で独自にdetectPromptを呼び出すパスが追加された場合にrawContent対応を検討する。"
+      },
+      {
+        "id": "C-S3-002",
+        "title": "prompt-response/route.tsのpromptCheck変数のrawContent利用可能性",
+        "severity": "info",
+        "description": "prompt-response/route.tsのL72-88でdetectPrompt()を呼び出してpromptCheckに格納しているが、現在はisPromptフラグとpromptDataのみを使用している。rawContentフィールドが追加されても参照されないが、将来的にこのルートがレスポンスを返す際にrawContentを含める可能性がある。",
+        "recommendation": "現時点では変更不要。prompt-response/route.tsのレスポンスにrawContentを含める必要が生じた場合に対応する。"
+      },
+      {
+        "id": "C-S3-003",
+        "title": "truncateRawContentの末尾切り出しにおける文字列途中切断",
+        "severity": "info",
+        "description": "truncateRawContent関数で5000文字超の場合にresult.slice(-RAW_CONTENT_MAX_CHARS)で末尾を切り出すが、マルチバイト文字（日本語等）の途中で切断される場合、表示上は問題ない（JavaScriptのString.sliceはUTF-16コードユニット単位）がサロゲートペアの途中で切断されると文字化けが発生する可能性がある。ただし、通常のClaude出力にサロゲートペアが含まれるケースは極めて稀。",
+        "recommendation": "現時点では対応不要。サロゲートペア切断が実際に問題になった場合にのみ対応を検討する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "change": "PromptDetectionResult型にrawContent追加、truncateRawContent関数追加、lastLines 10→20行拡張、3パターンのreturn文にrawContent追加",
+        "risk": "low"
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "change": "L618のcontent値をrawContent || cleanContentに変更",
+        "risk": "low"
+      },
+      {
+        "file": "src/components/worktree/PromptMessage.tsx",
+        "change": "getDisplayContent関数追加、指示テキスト表示JSX追加",
+        "risk": "low"
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "impact": "detectPromptの戻り値にrawContentが追加されるが、isPromptとpromptDataのみ使用しているため影響なし",
+        "risk": "none"
+      },
+      {
+        "file": "src/lib/auto-yes-resolver.ts",
+        "impact": "PromptData型のみ使用、PromptDetectionResult未参照。影響なし",
+        "risk": "none"
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "impact": "detectPrompt結果のisPromptのみ参照。rawContent追加による影響なし",
+        "risk": "none"
+      },
+      {
+        "file": "src/lib/claude-poller.ts",
+        "impact": "到達不能コード。L245でdetectPrompt().cleanContentを使用するがrawContentは無視される。影響なし",
+        "risk": "none"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "impact": "L91のローカル型注釈にrawContentは含まれないが、TypeScript構造的部分型により代入は安全。DB保存なし。影響なし",
+        "risk": "none"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "impact": "detectPrompt結果のisPromptとpromptDataのみ使用。rawContent未参照。影響なし",
+        "risk": "none"
+      },
+      {
+        "file": "src/components/worktree/MessageList.tsx",
+        "impact": "promptメッセージはPromptMessageコンポーネントで描画されるため（L536-544）、MessageBubbleのReactMarkdown表示パスは到達しない。影響なし",
+        "risk": "none"
+      }
+    ],
+    "test_coverage_assessment": {
+      "covered": [
+        "prompt-detector.ts: rawContent返却テスト（7項目）",
+        "prompt-detector.ts: truncateRawContent境界テスト（2項目）",
+        "response-poller.ts: DB保存フォールバックテスト（2項目）",
+        "PromptMessage.tsx: コンポーネントテスト（4項目）"
+      ],
+      "gaps": [
+        "lastLines拡張（10→20行）に伴うYes/Noパターン誤検出回帰テストが未定義",
+        "extractResponse内claude早期プロンプト検出パス（L296-310）経由のフローの統合テストが未定義",
+        "既存DBデータ（content=cleanContent）と新規DBデータ（content=rawContent）の混在時のPromptMessage表示テストが未定義"
+      ]
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-235-prompt-rawcontent-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/components/worktree/PromptMessage.tsx",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/claude-poller.ts",
+    "src/types/models.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/components/worktree/MessageList.tsx",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/response-poller.test.ts"
+  ],
+  "timestamp": "2026-02-11T00:00:00Z"
+}

@@ -1,0 +1,130 @@
+{
+  "issue_number": 235,
+  "stage": 1,
+  "stage_name": "指摘事項対応（設計原則）",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "multiple_choiceパターンのrawContentサイズ制限欠如",
+        "sections_updated": [
+          "1.3 設計原則",
+          "2.1 データフロー",
+          "2.2 変更範囲",
+          "2.3 レイヤー構成",
+          "3.2 rawContentのソース定義",
+          "4.1.1 detectMultipleChoicePrompt()の変更",
+          "4.1.5 truncateRawContentヘルパー関数",
+          "5.1 DBスキーマ",
+          "6.1 ユニットテスト",
+          "7.1 rawContentのサイズ",
+          "7.2 影響評価",
+          "8.3 データ整合性",
+          "9.1 採用した設計",
+          "10. 実装順序",
+          "14. 実装チェックリスト"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "claude-poller.tsへのrawContent対応の欠落",
+        "sections_updated": [
+          "11. 影響なし確認済みコンポーネント",
+          "14. 実装チェックリスト"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "getDisplayContent関数のテスト不足",
+        "sections_updated": [
+          "6.2 コンポーネントテスト",
+          "10. 実装順序",
+          "14. 実装チェックリスト"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-003",
+        "item": "Yes/No・ApproveパターンのrawContentソースの一貫性",
+        "sections_updated": [
+          "3.2 rawContentのソース定義",
+          "4.1.2 Yes/Noパターンの変更",
+          "4.1.3 Approveパターンの変更",
+          "7.1 rawContentのサイズ",
+          "9.1 採用した設計",
+          "10. 実装順序",
+          "14. 実装チェックリスト"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "item": "cleanContentとrawContentの命名の明確化",
+        "sections_updated": [
+          "3.1 PromptDetectionResult拡張",
+          "10. 実装順序",
+          "14. 実装チェックリスト"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "C-002",
+        "item": "将来的なcleanContentフィールドの廃止検討",
+        "sections_updated": [
+          "9.1 採用した設計",
+          "13. レビュー指摘事項サマリー"
+        ],
+        "status": "noted"
+      },
+      {
+        "id": "C-003",
+        "item": "noPromptResult()へのrawContent非設定の明示",
+        "sections_updated": [
+          "13. レビュー指摘事項サマリー"
+        ],
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-235-prompt-rawcontent-design-policy.md",
+  "sections_updated": [
+    "1.3 設計原則",
+    "2.1 データフロー",
+    "2.2 変更範囲",
+    "2.3 レイヤー構成",
+    "3.1 PromptDetectionResult拡張",
+    "3.2 rawContentのソース定義",
+    "4.1.1 detectMultipleChoicePrompt()の変更",
+    "4.1.2 Yes/Noパターンの変更",
+    "4.1.3 Approveパターンの変更",
+    "4.1.5 truncateRawContentヘルパー関数（新規）",
+    "5.1 DBスキーマ",
+    "5.2 後方互換性",
+    "6.1 ユニットテスト",
+    "6.2 コンポーネントテスト",
+    "7.1 rawContentのサイズ",
+    "7.2 影響評価",
+    "8.3 データ整合性",
+    "9.1 採用した設計",
+    "10. 実装順序",
+    "11. 影響なし確認済みコンポーネント",
+    "12. レビュー履歴（新規）",
+    "13. レビュー指摘事項サマリー（新規）",
+    "14. 実装チェックリスト（新規）"
+  ],
+  "sections_added": [
+    "12. レビュー履歴",
+    "13. レビュー指摘事項サマリー",
+    "14. 実装チェックリスト"
+  ],
+  "timestamp": "2026-02-11T12:00:00Z"
+}

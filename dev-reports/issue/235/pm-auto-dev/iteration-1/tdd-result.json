@@ -1,0 +1,36 @@
+{
+  "status": "success",
+  "coverage": 98.51,
+  "unit_tests": {
+    "total": 14,
+    "passed": 14,
+    "failed": 0,
+    "breakdown": {
+      "prompt_detector_rawContent": 8,
+      "response_poller_fallback": 2,
+      "promptMessage_component": 4
+    }
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/components/worktree/PromptMessage.tsx",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/response-poller.test.ts",
+    "tests/unit/components/worktree/PromptMessage.test.tsx"
+  ],
+  "commits": [
+    "4a9205e: fix(#235): preserve complete prompt output with rawContent field"
+  ],
+  "regression_tests": {
+    "total": 3062,
+    "passed": 3062,
+    "failed": 0,
+    "skipped": 7
+  },
+  "message": "TDD implementation complete. rawContent field added to PromptDetectionResult with truncation limits (200 lines / 5000 chars). DB save logic updated to prefer rawContent. PromptMessage UI displays instruction text. 14 new tests added, all passing. Coverage: prompt-detector.ts 98.51% statements, 100% lines. Zero static analysis errors."
+}
