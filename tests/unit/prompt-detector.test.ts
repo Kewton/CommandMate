@@ -1656,7 +1656,7 @@ Are you sure you want to continue? (yes/no)
     });
 
     describe('instructionText in promptData', () => {
-      it('should set instructionText for multiple_choice prompts with context lines', () => {
+      it('should set instructionText including full prompt block for multiple_choice', () => {
         const output = [
           'Here is some instruction text for the user.',
           'Please review the following changes:',
@@ -1673,6 +1673,9 @@ Are you sure you want to continue? (yes/no)
         expect(result.promptData?.instructionText).toBeDefined();
         expect(result.promptData?.instructionText).toContain('Here is some instruction text');
         expect(result.promptData?.instructionText).toContain('Do you want to proceed?');
+        // Should also include option lines
+        expect(result.promptData?.instructionText).toContain('1. Yes');
+        expect(result.promptData?.instructionText).toContain('3. Cancel');
       });
 
       it('should set instructionText for yes_no prompts using rawContent', () => {
@@ -1711,6 +1714,32 @@ Are you sure you want to continue? (yes/no)
 
         expect(result.isPrompt).toBe(false);
         expect(result.promptData).toBeUndefined();
+      });
+
+      it('should set instructionText including option descriptions for AskUserQuestion format', () => {
+        // Claude Code AskUserQuestion format: question + options with descriptions
+        const output = [
+          '\u2190 \u25a1 \u80cc\u666f  \u25a1 \u5b9f\u88c5\u65b9\u91dd  \u2714 Submit',
+          '',
+          '  \u3053\u306e\u82f1\u8a9e\u5bfe\u5fdc\u304c\u5fc5\u8981\u306b\u306a\u3063\u305f\u80cc\u666f\u30fb\u8ab2\u984c\u306f\u4f55\u3067\u3059\u304b\uff1f',
+          '',
+          '\u276f 1.  [ ] \u6d77\u5916\u30e6\u30fc\u30b6\u30fc\u5bfe\u5fdc',
+          '    \u82f1\u8a9e\u570f\u306e\u30e6\u30fc\u30b6\u30fc\u306b\u3082\u4f7f\u3063\u3066\u3082\u3089\u3044\u305f\u3044',
+          '  2.  [ ] OSS\u516c\u958b\u306b\u5411\u3051\u3066',
+          '    OSS\u3068\u3057\u3066\u306e\u8a8d\u77e5\u62e1\u5927\u306e\u305f\u3081\u82f1\u8a9e\u5bfe\u5fdc\u304c\u5fc5\u8981',
+          '  3.  [ ] Type something',
+          '    Next',
+        ].join('\n');
+        const options: DetectPromptOptions = { requireDefaultIndicator: false };
+        const result = detectPrompt(output, options);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.instructionText).toBeDefined();
+        // Should include tab navigation
+        expect(result.promptData?.instructionText).toContain('\u80cc\u666f');
+        // Should include option descriptions
+        expect(result.promptData?.instructionText).toContain('\u82f1\u8a9e\u570f\u306e\u30e6\u30fc\u30b6\u30fc\u306b\u3082\u4f7f\u3063\u3066\u3082\u3089\u3044\u305f\u3044');
+        expect(result.promptData?.instructionText).toContain('OSS\u3068\u3057\u3066\u306e\u8a8d\u77e5\u62e1\u5927');
       });
 
       it('should set instructionText for multiple_choice without cursor (requireDefaultIndicator: false)', () => {

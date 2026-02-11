@@ -545,15 +545,16 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
     question = 'Please select an option:';
   }
 
-  // Extract instruction text: lines up to questionEndIndex (max 20 lines of context)
+  // Extract instruction text: full prompt block (context before question through all options/descriptions)
+  // Captures the complete AskUserQuestion block including option descriptions and navigation hints.
   let instructionText: string | undefined;
   if (questionEndIndex >= 0) {
     const contextStart = Math.max(0, questionEndIndex - 19);
-    const contextLines = lines.slice(contextStart, questionEndIndex + 1)
-      .map(l => l.trim())
-      .filter(l => l.length > 0);
-    if (contextLines.length > 0) {
-      instructionText = contextLines.join('\n');
+    const blockLines = lines.slice(contextStart, effectiveEnd)
+      .map(l => l.trimEnd());
+    const joined = blockLines.join('\n').trim();
+    if (joined.length > 0) {
+      instructionText = joined;
     }
   }
 
