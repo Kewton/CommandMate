@@ -47,8 +47,10 @@ export interface StatusDetectionResult {
   /** Reason for the detection (for debugging) */
   reason: string;
   /**
-   * Whether an active interactive prompt (y/n, multiple choice) was detected
-   * in the last STATUS_CHECK_LINE_COUNT (15) lines.
+   * Whether an active interactive prompt (y/n, multiple choice) was detected.
+   * Issue #235: Uses full output (detectPrompt's internal 50-line window)
+   * instead of STATUS_CHECK_LINE_COUNT (15) lines to support long prompts
+   * like AskUserQuestion format with option descriptions.
    *
    * Used by callers as the source of truth for isPromptWaiting (SF-004).
    * Does NOT expose internal PromptDetectionResult details (encapsulation).
@@ -131,8 +133,13 @@ export function detectSessionStatus(
 
   // 1. Interactive prompt detection (highest priority)
   // This includes yes/no prompts, multiple choice, and approval prompts
+  // Issue #235: Pass full cleanOutput instead of 15-line window.
+  // detectPrompt() has its own internal 50-line scan window for multiple_choice
+  // and 20-line window for yes/no patterns. Passing only 15 lines caused
+  // AskUserQuestion-format prompts (>15 lines with option descriptions) to be
+  // missed, preventing MobilePromptSheet from appearing.
   const promptOptions = buildDetectPromptOptions(cliToolId);
-  const promptDetection = detectPrompt(lastLines, promptOptions);
+  const promptDetection = detectPrompt(cleanOutput, promptOptions);
   if (promptDetection.isPrompt) {
     return {
       status: 'waiting',
