@@ -1,0 +1,8 @@
+{
+  "issue_number": 237,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_policy_path": "dev-reports/design/issue-237-dead-code-removal-design-policy.md",
+  "previous_stages": ["stage1", "stage2", "stage3"]
+}

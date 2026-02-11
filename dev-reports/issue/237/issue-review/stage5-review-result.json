@@ -1,0 +1,88 @@
+{
+  "issue_number": 237,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-02-11",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "previous_fix_verification": {
+    "stage1_must_fix": {
+      "MF-1_LOC_WorktreeDetail": "RESOLVED - ~937に修正済み",
+      "MF-2_LOC_terminal_websocket": "RESOLVED - ~222に修正済み",
+      "MF-3_session_cleanup_manager_修正内容具体化": "RESOLVED - import削除だけでなく関数呼び出しブロック削除・JSDocコメント更新が明記されている"
+    },
+    "stage1_should_fix": {
+      "SF-1_SimpleTerminal_LOC": "RESOLVED - ~253に修正済み",
+      "SF-2_architecture_md": "RESOLVED - 影響範囲の変更対象ファイルに追加済み",
+      "SF-3_index_ts_export検討": "RESOLVED - barrel exportの一貫性の観点からの検討事項が記載済み",
+      "SF-4_総LOC修正": "RESOLVED - 約1,900行以上に修正済み"
+    },
+    "stage3_must_fix": {
+      "MF-1_テストファイル6件追加": "RESOLVED - 6件すべてが影響範囲の変更対象ファイルに追加済み"
+    },
+    "stage3_should_fix": {
+      "SF-1_session_cleanup_test_テストケース削除明記": "RESOLVED - 受入条件にもテストケース1件の削除が明記されている",
+      "SF-2_manager_stop_pollers_test_テストケース3件削除明記": "RESOLVED - 受入条件にもテストケース3件の削除が明記されている",
+      "SF-3_JSDocコメント更新": "RESOLVED - session-cleanup.tsの修正内容にL7・L54のJSDocコメント更新が具体的に記載されている"
+    }
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "完全性",
+        "issue": "api-prompt-handling.test.tsの修正内容がvi.mock行の削除（L53-57）のみ記載されているが、L240にclaude-pollerのインライン動的importとL267のアサーションが存在する。vi.mock削除だけでは不十分で、テストケース「should resume polling after responding」(L239-268)も削除または修正が必要",
+        "location": "## 影響範囲 > 変更対象ファイル テーブル > tests/integration/api-prompt-handling.test.ts",
+        "recommendation": "変更対象ファイルテーブルのapi-prompt-handling.test.tsの変更内容を「vi.mock('@/lib/claude-poller')行の削除（L53-57）および、L239-268の'should resume polling after responding'テストケースの削除または修正（L240: await import('@/lib/claude-poller'), L267: expect(startPolling)のアサーション）」に更新する。受入条件にも「api-prompt-handling.test.tsのclaude-poller参照テストケースが削除/修正されていること」を追加する",
+        "evidence": "tests/integration/api-prompt-handling.test.ts L240: const { startPolling } = await import('@/lib/claude-poller'); L267: expect(startPolling).toHaveBeenCalledWith('test-worktree'); -- vi.mockの削除だけではこのテストケース内のimportが解決できずテスト実行時にエラーとなる"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "session-cleanup.tsの修正後、cleanupWorktreeSessions関数のステップ番号（コメントL100「// 2. Stop claude-poller」とL110「// 3. Stop auto-yes-poller」）が変更される点が明記されていない。claude-pollerブロック削除後、auto-yes-pollerのコメントが「// 3.」のままだと不整合が生じる",
+        "location": "## リファクタリング方針 > 修正が必要なファイル > src/lib/session-cleanup.ts",
+        "recommendation": "session-cleanup.tsの修正内容に「L110のコメント番号を// 3.から// 2.に更新」を追加するか、auto-yes-pollerのコメント更新も含めた修正内容を明記する",
+        "evidence": "src/lib/session-cleanup.ts L100: // 2. Stop claude-poller (削除対象), L110: // 3. Stop auto-yes-poller (Issue #138) -- claude-pollerブロック削除後、auto-yes-pollerは実質ステップ2となる"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "明確性",
+        "issue": "manager.tsのL179のコメント「// Future: Add other tool-specific pollers here if needed」はclaude-pollerの条件分岐が削除された後も残すかどうかの判断が明記されていない",
+        "location": "## リファクタリング方針 > 修正が必要なファイル > src/lib/cli-tools/manager.ts",
+        "recommendation": "manager.tsのstopPollers()メソッドからclaude-poller呼び出し(L175-178)を削除した場合、L179のFutureコメントをどうするか（残す/削除する/修正する）を実装者の判断に委ねる旨を記載してもよい",
+        "evidence": "src/lib/cli-tools/manager.ts L179: // Future: Add other tool-specific pollers here if needed"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "Issueの影響範囲テーブルにおけるテストファイルの行番号は現時点のスナップショットであり、他のブランチからの変更がマージされた場合にずれる可能性がある。行番号は参考値である旨を付記すると丁寧",
+        "location": "## 影響範囲 > 変更対象ファイル テーブル",
+        "recommendation": "影響範囲テーブルの注釈として「行番号はmainブランチ c20b609時点の参考値」などの補足を追加することを検討する",
+        "evidence": "複数のテストファイルで具体的な行番号（L15-17, L26, L58-66等）が記載されているが、これらは他のPRマージにより変動し得る"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "tests/integration/api-prompt-handling.test.ts",
+      "relevance": "L240: await import('@/lib/claude-poller')のインライン動的importとL267のstartPollingアサーションがIssueに記載漏れ"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "L100-108: claude-pollerブロック削除後、L110のauto-yes-pollerコメント番号が不整合となる"
+    },
+    {
+      "file": "src/lib/cli-tools/manager.ts",
+      "relevance": "L179: Futureコメントの扱いが未定義"
+    }
+  ],
+  "doc_references": []
+}

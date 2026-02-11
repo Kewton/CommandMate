@@ -1,0 +1,140 @@
+{
+  "issue_number": 237,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-02-11",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 2
+  },
+  "previous_fix_verification": {
+    "stage3_must_fix": {
+      "MF-1_テストファイル6件追加": "VERIFIED - 6件すべてが影響範囲の変更対象ファイルに追加済み。各ファイルの修正内容（vi.mock行番号、テストケース削除）も正確に記載されている"
+    },
+    "stage3_should_fix": {
+      "SF-1_session_cleanup_test_テストケース削除明記": "VERIFIED - session-cleanup.test.tsのL58-66テストケース削除が変更対象ファイルテーブルと受入条件に明記済み",
+      "SF-2_manager_stop_pollers_test_テストケース3件削除明記": "VERIFIED - manager-stop-pollers.test.tsのL43-71の3テストケース削除が変更対象ファイルテーブルと受入条件に明記済み",
+      "SF-3_JSDocコメント更新": "VERIFIED - session-cleanup.tsのL7（claude-poller言及削除）とL54（ステップ3記述削除）の更新が修正内容に記載済み"
+    },
+    "stage5_must_fix": {
+      "MF-1_api_prompt_handling_test_テストケース削除": "VERIFIED - api-prompt-handling.test.tsの変更内容にL239-268の'should resume polling after responding'テストケース削除が追加済み。受入条件にも反映されている"
+    },
+    "stage5_should_fix": {
+      "SF-1_session_cleanup_コメント番号更新": "VERIFIED - session-cleanup.tsの修正内容にL110のコメント番号「// 3.」から「// 2.」への更新が追加済み。修正が必要なファイルテーブル、影響範囲テーブル、受入条件の3箇所に反映されている"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md がclaude-poller.tsとWorktreeDetail.tsxに複数箇所で言及している（L456, L589, L870, L872, L875, L1137, L1149）が、影響範囲に含まれていない",
+        "location": "## 影響範囲 > 変更対象ファイル テーブル",
+        "recommendation": "Stage 1のNTH-1で対応不要と判断済みの内容であり、内部ドキュメント（docs/internal/）は過去の実装計画書であるため、削除対象ファイルとの齟齬が生じても実害はない。ただし、将来的に内部ドキュメントの整理を行う際には更新候補とすることを推奨する",
+        "evidence": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md L456: 'src/lib/claude-poller.ts (MODIFY)', L872: 'src/components/worktree/WorktreeDetail.tsx (MODIFY)', L1137: 'Update src/lib/claude-poller.ts'"
+      },
+      {
+        "id": "NTH-2",
+        "category": "整合性",
+        "issue": "manager-stop-pollers.test.tsのclaude-poller関連3テストケース削除後、残存テスト（L31-41: 'should have stopPollers method', 'should stop response-poller for any CLI tool'）はresponse-pollerの動作のみを検証することになり、テストファイル名の'stop-pollers'（複数形）との意味的な齟齬がわずかに生じる",
+        "location": "tests/unit/cli-tools/manager-stop-pollers.test.ts",
+        "recommendation": "テストファイル名の変更は本Issueのスコープ外であり、現状のまま問題ない。将来的にリネームする場合はmanager-stop-poller.test.ts（単数形）などが候補となるが、response-pollerを「停止する」という意味で複数形が適切とも解釈できるため、変更は不要と判断する",
+        "evidence": "claude-poller関連3テスト削除後、残存テストは2件（L31-33のメソッド存在確認、L35-41のresponse-pollerテスト）のみとなる"
+      }
+    ]
+  },
+  "impact_scope_summary": {
+    "deletion_targets": {
+      "count": 5,
+      "files": [
+        "src/lib/claude-poller.ts",
+        "src/lib/terminal-websocket.ts",
+        "src/components/worktree/WorktreeDetail.tsx",
+        "src/app/worktrees/[id]/simple-terminal/page.tsx",
+        "src/components/SimpleTerminal.tsx"
+      ],
+      "cross_references": "削除対象ファイル間にはWorktreeDetail.tsx内のsimple-terminalへのリンク（L652, L678）のみ。両方同時に削除されるため問題なし"
+    },
+    "modification_targets": {
+      "count": 9,
+      "files": [
+        "src/lib/session-cleanup.ts",
+        "src/lib/cli-tools/manager.ts",
+        "src/components/worktree/index.ts",
+        "docs/architecture.md",
+        "tests/unit/session-cleanup.test.ts",
+        "tests/unit/cli-tools/manager-stop-pollers.test.ts",
+        "tests/integration/api-kill-session-cli-tool.test.ts",
+        "tests/integration/api-prompt-handling.test.ts",
+        "tests/integration/api-respond-cli-tool.test.ts",
+        "tests/integration/api-send-cli-tool.test.ts"
+      ]
+    },
+    "unaffected_related_files": [
+      "src/lib/response-poller.ts (後継、変更なし)",
+      "src/components/worktree/WorktreeDetailRefactored.tsx (後継、変更なし)",
+      "src/app/worktrees/[id]/page.tsx (WorktreeDetailRefactoredを直接import、影響なし)",
+      "src/app/page.tsx (index.tsからWorktreeListをimport、WorktreeDetail削除の影響なし)",
+      "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md (内部ドキュメント、更新不要)"
+    ],
+    "config_files_impact": "なし（tsconfig, next.config, package.json, vitest.config等に削除対象への参照なし）",
+    "breaking_changes": "なし（削除対象は全て未使用コードであり、外部公開APIの変更なし）"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "L7, L11, L54, L100-108のclaude-poller関連コード削除、L110のコメント番号更新。全て正確にIssueに記載済み"
+    },
+    {
+      "file": "src/lib/cli-tools/manager.ts",
+      "relevance": "L11のimport、L175-178のclaude-poller呼び出しブロック削除。全て正確にIssueに記載済み"
+    },
+    {
+      "file": "tests/unit/session-cleanup.test.ts",
+      "relevance": "L15-17のvi.mock、L26のimport、L58-66のテストケース削除。全て正確にIssueに記載済み"
+    },
+    {
+      "file": "tests/unit/cli-tools/manager-stop-pollers.test.ts",
+      "relevance": "L14-17のvi.mock、L43-71の3テストケース削除。全て正確にIssueに記載済み"
+    },
+    {
+      "file": "tests/integration/api-prompt-handling.test.ts",
+      "relevance": "L53-57のvi.mock削除、L239-268のテストケース削除。全て正確にIssueに記載済み"
+    },
+    {
+      "file": "tests/integration/api-kill-session-cli-tool.test.ts",
+      "relevance": "L19-22のvi.mock削除。正確にIssueに記載済み"
+    },
+    {
+      "file": "tests/integration/api-respond-cli-tool.test.ts",
+      "relevance": "L18-21のvi.mock削除。正確にIssueに記載済み"
+    },
+    {
+      "file": "tests/integration/api-send-cli-tool.test.ts",
+      "relevance": "L49-51のvi.mock削除。正確にIssueに記載済み"
+    },
+    {
+      "file": "src/components/worktree/index.ts",
+      "relevance": "L12-13のWorktreeDetail/WorktreeDetailPropsエクスポート削除。正確にIssueに記載済み"
+    },
+    {
+      "file": "docs/architecture.md",
+      "relevance": "L569のclaude-poller言及更新。正確にIssueに記載済み"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/architecture.md",
+      "relevance": "L569: 'response-poller / claude-pollerを停止' -> 'response-pollerを停止' に更新（Issueに記載済み）"
+    },
+    {
+      "file": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md",
+      "relevance": "claude-poller.ts, WorktreeDetail.tsx に言及（内部ドキュメント、更新不要と判断済み）"
+    }
+  ],
+  "conclusion": "全ての前回指摘事項（Stage 3: MF-1, SF-1~3、Stage 5: MF-1, SF-1）が適切に反映されていることを確認した。削除対象ファイル5件、修正対象ファイル9件の影響範囲は網羅的で、新たなMust FixおよびShould Fixの指摘事項は発見されなかった。Issueは実装着手可能な状態にある。"
+}

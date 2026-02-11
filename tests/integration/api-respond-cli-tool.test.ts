@@ -15,11 +15,6 @@ vi.mock('@/lib/tmux', () => ({
   sendKeys: vi.fn(() => Promise.resolve()),
 }));
 
-// Mock claude-poller
-vi.mock('@/lib/claude-poller', () => ({
-  startPolling: vi.fn(),
-}));
-
 // Mock ws-server
 vi.mock('@/lib/ws-server', () => ({
   broadcastMessage: vi.fn(),

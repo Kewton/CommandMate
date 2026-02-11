@@ -4,11 +4,10 @@
  * Issue #138: Added auto-yes-poller cleanup
  *
  * Provides a unified interface for cleaning up CLI tool sessions and pollers.
- * Abstracts the differences between response-poller and claude-poller.
+ * Uses response-poller for CLI tool sessions.
  */
 
 import { stopPolling as stopResponsePolling } from './response-poller';
-import { stopPolling as stopClaudePolling } from './claude-poller';
 import { stopAutoYesPolling } from './auto-yes-manager';
 import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
 
@@ -51,7 +50,6 @@ const LOG_PREFIX = '[Session Cleanup]';
  * This function:
  * 1. Kills all CLI tool sessions (claude, codex, gemini) using the provided killSessionFn
  * 2. Stops response-poller for each CLI tool
- * 3. Stops claude-poller for the worktree
  *
  * Errors are collected but do not stop the cleanup process (partial success is allowed).
  *
@@ -97,17 +95,7 @@ export async function cleanupWorktreeSessions(
     }
   }
 
-  // 2. Stop claude-poller (once per worktree, not per CLI tool)
-  try {
-    stopClaudePolling(worktreeId);
-    result.pollersStopped.push('claude-poller');
-  } catch (error) {
-    const errorMsg = `claude-poller: ${error instanceof Error ? error.message : String(error)}`;
-    result.pollerErrors.push(errorMsg);
-    console.warn(`${LOG_PREFIX} Failed to stop claude-poller ${worktreeId}:`, error);
-  }
-
-  // 3. Stop auto-yes-poller (Issue #138)
+  // 2. Stop auto-yes-poller (Issue #138)
   try {
     stopAutoYesPolling(worktreeId);
     result.pollersStopped.push('auto-yes-poller');

@@ -7,12 +7,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
-// Mock response-poller and claude-poller before importing
+// Mock response-poller before importing
 vi.mock('@/lib/response-poller', () => ({
-  stopPolling: vi.fn(),
-}));
-
-vi.mock('@/lib/claude-poller', () => ({
   stopPolling: vi.fn(),
 }));
 
@@ -23,7 +19,6 @@ import {
   type WorktreeCleanupResult,
 } from '@/lib/session-cleanup';
 import { stopPolling as stopResponsePolling } from '@/lib/response-poller';
-import { stopPolling as stopClaudePolling } from '@/lib/claude-poller';
 
 describe('Session Cleanup Utility', () => {
   beforeEach(() => {
@@ -55,15 +50,6 @@ describe('Session Cleanup Utility', () => {
       expect(stopResponsePolling).toHaveBeenCalledWith('wt-1', 'gemini');
     });
 
-    it('should stop claude-poller', async () => {
-      const killSessionFn = vi.fn().mockResolvedValue(true);
-
-      await cleanupWorktreeSessions('wt-1', killSessionFn);
-
-      // Should call stopClaudePolling once per worktree
-      expect(stopClaudePolling).toHaveBeenCalledTimes(1);
-      expect(stopClaudePolling).toHaveBeenCalledWith('wt-1');
-    });
 
     it('should return killed sessions list', async () => {
       const killSessionFn = vi.fn()

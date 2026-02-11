@@ -1,0 +1,125 @@
+{
+  "issue_number": 237,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "CS-008",
+        "category": "セキュリティ改善",
+        "issue": "terminal-websocket.ts の削除により、潜在的セキュリティ弱点が除去される",
+        "detail": "terminal-websocket.ts には以下のセキュリティ上の問題が存在していた: (1) L200にハードコードされたファイルパス (/Users/maenokota/...) が含まれ、情報漏洩リスクがあった。(2) WebSocket接続にOriginチェックや認証機構がなかった。(3) sendToTmux()関数でユーザー入力がサニタイズなしにtmux send-keysに渡されており、コマンドインジェクションの潜在的リスクがあった。(4) worktreeIdとcliToolIdがURLパスから無検証で取得されていた。ただし、このモジュールは完全なデッドコード（一度もインポートされていない）であるため、実際のリスクは存在しなかった。削除により、将来誤って利用されるリスクも消える",
+        "severity": "info",
+        "recommendation": "削除により改善される。追加対応不要"
+      },
+      {
+        "id": "CS-009",
+        "category": "セキュリティ改善",
+        "issue": "claude-poller.ts の削除により、stripAnsi未適用のプロンプト検出パスが除去される",
+        "detail": "claude-poller.ts のL162-163およびL234-235に 'TODO [Issue #193]: This code path is unreachable... apply stripAnsi() + buildDetectPromptOptions() here' というコメントが存在した。このコメントが示す通り、detectPrompt()呼び出し前にstripAnsi()が適用されていない箇所があり、ANSIエスケープシーケンスを含む入力による誤検出の可能性があった（ただしデッドコードのため実害なし）。response-poller.ts では stripAnsi() が正しく適用されている（L33のimport）。削除により、この未修正コードパスが完全に除去される",
+        "severity": "info",
+        "recommendation": "削除により改善される。追加対応不要"
+      }
+    ]
+  },
+  "owasp_assessment": {
+    "A01_broken_access_control": {
+      "status": "no_impact",
+      "detail": "削除対象に認証・認可ロジックは含まれない。terminal-websocket.tsにWebSocket接続の認証不備があったが、完全なデッドコードであり実害なし。削除により将来の誤用リスクが除去される"
+    },
+    "A02_cryptographic_failures": {
+      "status": "no_impact",
+      "detail": "削除対象に暗号化処理や機密データの直接的な取り扱いは含まれない"
+    },
+    "A03_injection": {
+      "status": "positive_impact",
+      "detail": "terminal-websocket.ts のsendToTmux()関数がspawn('tmux', ['send-keys', '-t', sessionName, input])でユーザー入力を受け取る構造だったが、デッドコード削除により除去される。claude-poller.tsでのdetectPrompt()呼び出しにstripAnsi()未適用の箇所も除去される。いずれもデッドコードのため実際のインジェクションリスクはなかったが、削除は防御的に正しい"
+    },
+    "A04_insecure_design": {
+      "status": "positive_impact",
+      "detail": "未使用コードの削除はセキュアデザインの原則（攻撃対象面の最小化）に合致する。約1,900行のデッドコード削除によりコードベースの監査対象が縮小し、セキュリティレビューの効率が向上する"
+    },
+    "A05_security_misconfiguration": {
+      "status": "no_impact",
+      "detail": "設定ファイル（tsconfig.json, next.config.js, vitest.config等）への変更なし。セキュリティ関連の設定は影響を受けない"
+    },
+    "A06_vulnerable_components": {
+      "status": "no_impact",
+      "detail": "terminal-websocket.ts は 'ws' ライブラリをimportしていたが、当該ファイル削除後も他のモジュール（ws-server.ts等）が 'ws' を使用しているため、依存ライブラリの追加・削除は発生しない"
+    },
+    "A07_authentication_failures": {
+      "status": "no_impact",
+      "detail": "削除対象に認証機構は含まれない。terminal-websocket.tsのWebSocket接続には認証がなかったが、デッドコードであり実際には利用されていなかった"
+    },
+    "A08_software_data_integrity": {
+      "status": "no_impact",
+      "detail": "claude-poller.tsはcreateMessage()やupdateSessionState()でDB操作を行っていたが、これらはデッドコードパスであり、response-poller.tsが同等の処理を正しく実行している。削除によるデータ整合性への影響なし"
+    },
+    "A09_security_logging": {
+      "status": "no_impact",
+      "detail": "削除対象のconsole.log/warn/error呼び出しは全てデッドコードパスにあるため、実際のセキュリティログ出力には影響しない。session-cleanup.tsとmanager.tsの修正はclaude-poller関連のログ出力削除のみであり、response-pollerとauto-yes-pollerのログは維持される"
+    },
+    "A10_ssrf": {
+      "status": "no_impact",
+      "detail": "削除対象にサーバーサイドHTTPリクエストの発行はない。SimpleTerminal.tsxのfetch呼び出しはクライアントサイド（'use client'）であり、サーバーから外部サービスへのリクエストではない"
+    }
+  },
+  "deletion_security_analysis": {
+    "known_vulnerabilities_in_deleted_code": [
+      {
+        "file": "src/lib/terminal-websocket.ts",
+        "issues": [
+          "L200: ハードコードされたユーザーホームディレクトリパス（情報漏洩リスク）",
+          "L31-46: WebSocket接続に認証・Originチェックなし",
+          "L169-186: sendToTmux()でユーザー入力のサニタイズなし",
+          "L48-49: URLパスからのworktreeId/cliToolIdに入力バリデーションなし"
+        ],
+        "actual_risk": "none - 完全なデッドコード（インポートされていない）",
+        "impact_of_deletion": "positive - 将来の誤用リスク除去"
+      },
+      {
+        "file": "src/lib/claude-poller.ts",
+        "issues": [
+          "L162-176, L234-236: detectPrompt()呼び出し前にstripAnsi()未適用"
+        ],
+        "actual_risk": "none - デッドコードパス（response-poller.tsが稼働中）",
+        "impact_of_deletion": "positive - 安全でないコードパスの除去"
+      }
+    ],
+    "new_security_holes_from_deletion": "none - 全削除対象は未使用コードであり、削除により新たなセキュリティホールは発生しない",
+    "attack_surface_change": "reduced - 約1,900行のコード削除により攻撃対象面が縮小。/worktrees/[id]/simple-terminal ルートが消滅し、不要なエンドポイントが除去される"
+  },
+  "data_protection_assessment": {
+    "sensitive_data_exposure": "no_risk - 削除対象に機密情報の直接的な取り扱いはない。terminal-websocket.ts L200のハードコードパスは開発者のローカルパスだが、デッドコードのためリスクなし。削除により除去される",
+    "personal_information": "no_risk - 削除対象に個人情報の処理は含まれない",
+    "database_operations": "no_impact - claude-poller.tsのDB操作（createMessage, getSessionState, updateSessionState, getWorktreeById）はデッドコードパス。response-poller.tsが同等のDB操作を正しく実行中"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low",
+    "detail": {
+      "technical": "全削除対象は未使用コード。後継実装（response-poller.ts, WorktreeDetailRefactored.tsx, xterm.jsベースTerminal）が稼働中",
+      "security": "セキュリティリスクは増大しない。むしろ潜在的弱点（terminal-websocket.tsの未認証WebSocket、ハードコードパス、入力サニタイズ欠如）が除去される。攻撃対象面が縮小する",
+      "operational": "デッドコード削除のみ。運用中のサービスへの影響なし"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-237-dead-code-removal-design-policy.md",
+    "src/lib/claude-poller.ts",
+    "src/lib/terminal-websocket.ts",
+    "src/components/worktree/WorktreeDetail.tsx",
+    "src/components/SimpleTerminal.tsx",
+    "src/app/worktrees/[id]/simple-terminal/page.tsx",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/components/worktree/index.ts",
+    "src/lib/response-poller.ts"
+  ],
+  "timestamp": "2026-02-11T16:00:00Z"
+}

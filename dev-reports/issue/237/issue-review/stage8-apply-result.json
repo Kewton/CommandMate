@@ -1,0 +1,12 @@
+{
+  "issue_number": 237,
+  "review_result_path": "dev-reports/issue/237/issue-review/stage7-review-result.json",
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "status": "skipped",
+  "reason": "Stage 7で Must Fix / Should Fix の指摘が0件のため、反映作業は不要",
+  "applied_count": 0,
+  "skipped_count": 0,
+  "date": "2026-02-11"
+}

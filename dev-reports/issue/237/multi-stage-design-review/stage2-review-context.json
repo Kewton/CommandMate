@@ -1,0 +1,8 @@
+{
+  "issue_number": 237,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_policy_path": "dev-reports/design/issue-237-dead-code-removal-design-policy.md",
+  "previous_stage": "stage1"
+}

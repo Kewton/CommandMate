@@ -1,0 +1,61 @@
+{
+  "issue_number": 237,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-11",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "claude-pollerをvi.mockしているテストファイル6件を影響範囲の変更対象ファイルテーブルに追加。各ファイルの修正内容（vi.mock削除の行番号、import削除、テストケース削除）を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "session-cleanup.test.tsの'should stop claude-poller'テストケース（L58-66）の削除を変更対象ファイルテーブルに明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "manager-stop-pollers.test.tsのclaude-poller関連テストケース3件（L43-71）の削除を変更対象ファイルテーブルに明記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "session-cleanup.tsのJSDocコメント更新（L7: claude-poller言及削除、L54: ステップ3記述削除）を修正が必要なファイルテーブルと変更対象ファイルテーブルの両方に追加。受入条件にも専用チェック項目を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "削除順序は現在のIssue記載（一括削除前提）で十分であり、追記の必要性は低い"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "WorktreeDetailProps型の外部参照がないことはレビューで確認済み。Issueの記載通りの対応で十分"
+      }
+    ]
+  },
+  "additional_changes": [
+    "受入条件にテスト関連のチェック項目3件を追加（vi.mock削除6件、session-cleanup.test.tsテストケース1件削除、manager-stop-pollers.test.tsテストケース3件削除）",
+    "受入条件に`npm run test:integration`のチェック項目を追加（元はtest:unitのみだった）",
+    "受入条件にsession-cleanup.tsのJSDocコメント更新チェック項目を追加",
+    "レビュー履歴にStage 3の反映内容を追記"
+  ],
+  "summary": {
+    "total_findings": 7,
+    "applied": 4,
+    "skipped": 2,
+    "not_applicable": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/237"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "issue_number": 237,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-11",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "WorktreeDetail.tsx のLOCを~200から~937に修正（削除対象テーブル）"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "terminal-websocket.ts のLOCを~150から~222に修正（削除対象テーブル）"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "session-cleanup.ts の修正内容を「L100-108のstopClaudePolling呼び出しとtry/catchブロック全体を削除」に具体化。manager.ts の修正内容を「L175-178のif (cliToolId === 'claude') { stopClaudePolling(worktreeId); }呼び出しブロックを削除」に具体化。影響範囲テーブルにも具体的な行番号を追記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "SimpleTerminal.tsx のLOCを「-」から~253に修正（削除対象テーブル）"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "docs/architecture.md を影響範囲の変更対象ファイルテーブルに追加。変更内容として「L569の response-poller / claude-pollerを停止 を response-pollerを停止 に更新」と記載。受入条件にもドキュメント更新の確認項目を追加"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "index.ts の修正内容にWorktreeDetailRefactoredのexport追加の検討事項を記載。worktrees/[id]/page.tsxが直接importしているため必須ではないが、barrel exportの一貫性の観点から実装時に検討する旨を明記"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "After セクションの総LOC削減数を「約840行以上」から「約1,900行以上」に修正"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "内部設計ドキュメント（PROMPT_HANDLING_IMPLEMENTATION_PLAN.md）の更新は影響が限定的であり、本Issueのスコープ外として扱う"
+      },
+      {
+        "id": "NTH-2",
+        "status": "partially_applied",
+        "reason": "docs/architecture.md の更新確認は受入条件に追加済み（SF-2対応の一環）。ただし全内部ドキュメントの網羅的確認項目は追加していない"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 7,
+    "partially_applied": 1,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/237"
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "issue_number": 237,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-11",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "テスト範囲",
+        "issue": "テストファイル6件がclaude-pollerをvi.mockしており、claude-poller.ts削除後にモジュール解決エラーでテストが失敗する",
+        "location": "## 影響範囲 > 変更対象ファイル テーブル / ## 受入条件",
+        "recommendation": "以下のテストファイルの修正を影響範囲の変更対象ファイルに追加すること。(1) tests/unit/session-cleanup.test.ts: vi.mock('@/lib/claude-poller')の削除、stopClaudePollingのimport・アサーションの削除（L15-17, L26, L58-66）。(2) tests/unit/cli-tools/manager-stop-pollers.test.ts: vi.mock('@/lib/claude-poller')の削除、claude-pollerインポートとアサーションの全面修正（L14-17, L43-71）。(3) tests/integration/api-kill-session-cli-tool.test.ts: vi.mock('@/lib/claude-poller')行の削除（L19-22）。(4) tests/integration/api-prompt-handling.test.ts: vi.mock('@/lib/claude-poller')行の削除（L53-57）。(5) tests/integration/api-respond-cli-tool.test.ts: vi.mock('@/lib/claude-poller')行の削除（L18-21）。(6) tests/integration/api-send-cli-tool.test.ts: vi.mock('@/lib/claude-poller')行の削除（L49-51）。これらを修正しないとnpm run test:unitおよびnpm run test:integrationが失敗する",
+        "evidence": "grep結果: tests/unit/session-cleanup.test.ts L15, tests/unit/cli-tools/manager-stop-pollers.test.ts L15, tests/integration/api-kill-session-cli-tool.test.ts L20, tests/integration/api-prompt-handling.test.ts L54, tests/integration/api-respond-cli-tool.test.ts L19, tests/integration/api-send-cli-tool.test.ts L49 にvi.mock('@/lib/claude-poller')が存在"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "tests/unit/session-cleanup.test.tsのclaude-poller関連テストケース ('should stop claude-poller') はsession-cleanup.tsのclaude-poller呼び出しブロック削除に伴い不要になるが、Issueに明記されていない",
+        "location": "## 影響範囲 > 変更対象ファイル テーブル",
+        "recommendation": "session-cleanup.test.ts L58-66の'should stop claude-poller'テストケースを削除対象として明記する。また、session-cleanup.tsのコメント（L7: 'Abstracts the differences between response-poller and claude-poller'、L54: 'Stops claude-poller for the worktree'）も更新が必要",
+        "evidence": "tests/unit/session-cleanup.test.ts L58-66: it('should stop claude-poller', ...) テストケースがstopClaudePolling呼び出しを検証している。この検証はsession-cleanup.ts L100-108の削除に伴い不要となる"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "tests/unit/cli-tools/manager-stop-pollers.test.tsのclaude-poller関連テストケース3件がmanager.tsの修正に伴い不要/修正が必要になるが、Issueに明記されていない",
+        "location": "## 影響範囲 > 変更対象ファイル テーブル",
+        "recommendation": "manager-stop-pollers.test.ts L43-71の3テストケース（'should stop claude-poller only for claude tool', 'should NOT stop claude-poller for codex tool', 'should NOT stop claude-poller for gemini tool'）を削除/修正対象として明記する。manager.tsからclaude-poller呼び出しを削除する以上、これらのテストは不要となる",
+        "evidence": "tests/unit/cli-tools/manager-stop-pollers.test.ts L43-71: claude-pollerの呼び出し有無を検証する3つのテストケースが存在。これらはmanager.ts L175-178の削除に伴い無効となる"
+      },
+      {
+        "id": "SF-3",
+        "category": "ドキュメント更新",
+        "issue": "session-cleanup.tsのJSDocコメントがclaude-pollerに言及しており、ファイル削除後に陳腐化する",
+        "location": "## リファクタリング方針 > 修正が必要なファイル",
+        "recommendation": "session-cleanup.tsの以下のコメントを更新対象に追加する: (1) L7: 'Abstracts the differences between response-poller and claude-poller.' -> claude-poller言及を削除、(2) L54: '3. Stops claude-poller for the worktree' -> この行を削除。修正が必要なファイルの修正内容欄に含めることを推奨",
+        "evidence": "src/lib/session-cleanup.ts L7: 'Abstracts the differences between response-poller and claude-poller.' / L54: '3. Stops claude-poller for the worktree'"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "削除順序",
+        "issue": "削除順序の明記がないが、依存関係上は一括削除で問題ない",
+        "location": "## リファクタリング方針",
+        "recommendation": "削除は一括で実施して問題ない。理由: (1) claude-poller.tsを参照するのはsession-cleanup.tsとmanager.tsのみで、両方同時に修正すれば問題ない。(2) SimpleTerminal.tsxはsimple-terminal/page.tsxからのみ参照され、両方同時に削除すれば問題ない。(3) WorktreeDetail.tsxはindex.tsからのみexportされ、他からはimportされていない。(4) terminal-websocket.tsは完全なデッドコード。段階的削除は不要と判断できることをIssueに追記するとよい",
+        "evidence": "全削除対象ファイルの参照関係を調査した結果、循環依存や他モジュールへの波及的影響がないことを確認"
+      },
+      {
+        "id": "NTH-2",
+        "category": "型定義",
+        "issue": "WorktreeDetailPropsがindex.tsからre-exportされているが、外部からのimportは確認されない",
+        "location": "## リファクタリング方針 > 修正が必要なファイル",
+        "recommendation": "src/components/worktree/index.ts L13のtype exportはWorktreeDetail削除と同時に問題なく削除できる。Issueの記載通りの対応で十分であり、追加の型参照の問題はない。src/app/page.tsxがindex.tsからWorktrreeListをimportしているが、WorktreeDetailとは無関係であるため影響なし",
+        "evidence": "grep 'import.*WorktreeDetail[^R]' src/ の結果: index.ts内のexport以外にインポート箇所なし。grep 'import.*from.*@/components/worktree' の結果: src/app/page.tsxのWorktrreeListインポートのみ"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "tests/unit/session-cleanup.test.ts",
+      "relevance": "claude-pollerをmock・import・テスト。L15-17のvi.mock、L26のimport、L58-66のテストケースの修正/削除が必要"
+    },
+    {
+      "file": "tests/unit/cli-tools/manager-stop-pollers.test.ts",
+      "relevance": "claude-pollerをmock・テスト。L14-17のvi.mock、L43-71のテストケース3件の修正/削除が必要"
+    },
+    {
+      "file": "tests/integration/api-kill-session-cli-tool.test.ts",
+      "relevance": "claude-pollerをmock（L19-22）。mock行の削除が必要"
+    },
+    {
+      "file": "tests/integration/api-prompt-handling.test.ts",
+      "relevance": "claude-pollerをmock（L53-57）。mock行の削除が必要"
+    },
+    {
+      "file": "tests/integration/api-respond-cli-tool.test.ts",
+      "relevance": "claude-pollerをmock（L18-21）。mock行の削除が必要"
+    },
+    {
+      "file": "tests/integration/api-send-cli-tool.test.ts",
+      "relevance": "claude-pollerをmock（L49-51）。mock行の削除が必要"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "JSDocコメント（L7, L54）にclaude-poller言及があり、更新が必要"
+    },
+    {
+      "file": "src/components/worktree/index.ts",
+      "relevance": "WorktreeDetail/WorktreeDetailPropsのexport（L12-13）。削除で問題なし"
+    },
+    {
+      "file": "src/app/page.tsx",
+      "relevance": "index.tsからWorktreeListをimport。WorktreeDetail削除の影響なし"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/architecture.md",
+      "relevance": "L569: claude-poller言及（Stage2で反映済み）"
+    },
+    {
+      "file": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md",
+      "relevance": "claude-poller.ts, WorktreeDetail.tsx に言及（内部ドキュメント、Stage1でNTH-1として対応不要と判断済み）"
+    }
+  ]
+}

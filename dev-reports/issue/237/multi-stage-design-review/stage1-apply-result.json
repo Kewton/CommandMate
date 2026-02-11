@@ -1,0 +1,54 @@
+{
+  "issue_number": 237,
+  "stage": 1,
+  "stage_name": "設計原則レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "simple-terminal/page.tsx の参照元に WorktreeDetail.tsx (L652, L678) のリンク参照を追記",
+        "section_updated": "3-4 (削除対象の詳細設計: simple-terminal/page.tsx)",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "manager.ts L179 の Future コメントを削除対象に含める (L175-178 -> L175-179)",
+        "section_updated": "4-2 (修正対象の詳細設計: manager.ts)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "PROMPT_HANDLING_IMPLEMENTATION_PLAN.md の claude-poller 参照を本 Issue スコープ外として明記",
+        "section_updated": "1 (概要: スコープ外)",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "CS-001",
+        "item": "WorktreeDetailRefactored の barrel export 未追加の長期的一貫性",
+        "status": "noted_in_summary"
+      },
+      {
+        "id": "CS-002",
+        "item": "session-cleanup.ts の Facade パターン簡素化後の JSDoc 整合性",
+        "status": "noted_in_summary"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-237-dead-code-removal-design-policy.md",
+  "sections_updated": [
+    "1 (スコープ外追加 - SF-002)",
+    "3-4 (参照元テーブル更新 - MF-001)",
+    "4-2 (削除範囲拡張 L175-179 + SF-001注記)",
+    "12 (レビュー履歴 - 新規追加)",
+    "13 (レビュー指摘事項サマリー - 新規追加)",
+    "14 (実装チェックリスト - 新規追加)"
+  ],
+  "timestamp": "2026-02-11T00:00:00Z"
+}

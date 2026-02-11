@@ -1,0 +1,245 @@
+{
+  "issue_number": 237,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "CS-005",
+        "category": "影響範囲",
+        "issue": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md に WorktreeDetail.tsx 参照も残存する（L870, L872, L875, L1149）",
+        "detail": "SF-002 で claude-poller 参照の除外は明記されているが、同ドキュメント内の WorktreeDetail.tsx 参照（L870, L872, L875, L1149）も削除後に陳腐化する。これは claude-poller 参照と同じく内部設計記録の履歴的価値があり、SF-002 の方針（別途 Issue 対応）でカバーされる範囲だが、明示的には記載されていない",
+        "severity": "info",
+        "recommendation": "SF-002 の方針がそのまま適用可能。内部ドキュメントの参照更新は別途 Issue でまとめて対応する際に WorktreeDetail.tsx 参照も含めるとよい"
+      },
+      {
+        "id": "CS-006",
+        "category": "テスト影響",
+        "issue": "api-prompt-handling.test.ts の削除対象テストケース（L239-268）は claude-poller.startPolling を検証しているが、実際の route.ts は response-poller.startPolling を使用している",
+        "detail": "テストケース「should resume polling after responding」は claude-poller の startPolling が呼ばれることを検証しているが、実際の respond/route.ts（L11, L178）では response-poller の startPolling を使用している。つまり、このテストケースは既にテスト対象とソースコードの乖離があり、削除は正しい判断。ただし、response-poller.startPolling が呼ばれることを検証する代替テストが存在するか確認が望ましい",
+        "severity": "info",
+        "recommendation": "テスト削除後、response-poller.startPolling の呼び出しが他のテストで検証されているか確認する。api-respond-cli-tool.test.ts で同等のカバレッジがあれば問題なし"
+      },
+      {
+        "id": "CS-007",
+        "category": "影響範囲",
+        "issue": "他 Issue の設計方針書に claude-poller への参照が多数残存する（約20ファイル）",
+        "detail": "dev-reports/design/ 配下の過去 Issue 設計方針書（#4, #69, #152, #153, #161, #180, #181, #187, #188, #193, #201, #208, #212, #235 等）に claude-poller への言及が多数残る。これらは全て履歴的設計文書であり、実装コードへの影響はないが、Issue #237 完了後に文脈が変わることを認識しておく",
+        "severity": "info",
+        "recommendation": "対応不要。設計方針書は作成時点の設計記録であり、過去の参照を更新する必要はない"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "source_code_references": {
+      "claude_poller": {
+        "total_references_in_src": 2,
+        "references": [
+          {
+            "file": "src/lib/session-cleanup.ts",
+            "line": 11,
+            "type": "import",
+            "covered_in_design": true
+          },
+          {
+            "file": "src/lib/cli-tools/manager.ts",
+            "line": 11,
+            "type": "import",
+            "covered_in_design": true
+          }
+        ],
+        "dynamic_imports": 0,
+        "require_calls": 0,
+        "string_references": 0,
+        "completeness": "complete"
+      },
+      "terminal_websocket": {
+        "total_references_in_src": 0,
+        "references": [],
+        "completeness": "complete_dead_code"
+      },
+      "worktree_detail": {
+        "barrel_export_references": 1,
+        "references": [
+          {
+            "file": "src/components/worktree/index.ts",
+            "lines": "12-13",
+            "type": "barrel_export",
+            "covered_in_design": true
+          }
+        ],
+        "page_tsx_reference": false,
+        "completeness": "complete"
+      },
+      "simple_terminal": {
+        "total_references_in_src": 2,
+        "references": [
+          {
+            "file": "src/app/worktrees/[id]/simple-terminal/page.tsx",
+            "line": 9,
+            "type": "import_SimpleTerminal",
+            "covered_in_design": true,
+            "note": "co-deleted"
+          },
+          {
+            "file": "src/components/worktree/WorktreeDetail.tsx",
+            "lines": "652, 678",
+            "type": "link_href",
+            "covered_in_design": true,
+            "note": "co-deleted (MF-001)"
+          }
+        ],
+        "completeness": "complete"
+      }
+    },
+    "test_references": {
+      "total_test_files_affected": 6,
+      "files": [
+        {
+          "file": "tests/unit/session-cleanup.test.ts",
+          "mock_lines": "15-17",
+          "import_lines": "26",
+          "test_cases_to_delete": 1,
+          "covered_in_design": true
+        },
+        {
+          "file": "tests/unit/cli-tools/manager-stop-pollers.test.ts",
+          "mock_lines": "14-17",
+          "test_cases_to_delete": 3,
+          "covered_in_design": true
+        },
+        {
+          "file": "tests/integration/api-kill-session-cli-tool.test.ts",
+          "mock_lines": "19-22",
+          "test_cases_to_delete": 0,
+          "covered_in_design": true
+        },
+        {
+          "file": "tests/integration/api-prompt-handling.test.ts",
+          "mock_lines": "53-57",
+          "test_cases_to_delete": 1,
+          "covered_in_design": true,
+          "note": "L239-268 test verifies claude-poller.startPolling but route.ts uses response-poller.startPolling"
+        },
+        {
+          "file": "tests/integration/api-respond-cli-tool.test.ts",
+          "mock_lines": "18-21",
+          "test_cases_to_delete": 0,
+          "covered_in_design": true
+        },
+        {
+          "file": "tests/integration/api-send-cli-tool.test.ts",
+          "mock_lines": "49-51",
+          "test_cases_to_delete": 0,
+          "covered_in_design": true
+        }
+      ],
+      "completeness": "complete"
+    },
+    "documentation_references": {
+      "architecture_md": {
+        "line": 569,
+        "covered_in_design": true
+      },
+      "internal_docs_excluded": {
+        "PROMPT_HANDLING_IMPLEMENTATION_PLAN.md": {
+          "claude_poller_lines": [456, 589, 1137],
+          "worktree_detail_lines": [870, 872, 875, 1149],
+          "exclusion_rationale": "SF-002: 内部設計記録の履歴的価値を考慮し別途 Issue 対応"
+        }
+      },
+      "other_design_docs": "20+ files in dev-reports/design/ - historical references, no action needed"
+    },
+    "build_config_impact": {
+      "tsconfig_json": "no_impact",
+      "next_config_js": "no_impact",
+      "vitest_config": "no_impact",
+      "detail": "tsconfig.json uses glob include patterns (**/*.ts, **/*.tsx). No explicit file references to deleted files. Next.js App Router automatically handles route removal via file system"
+    },
+    "readme_claude_md_impact": {
+      "README.md": "no_references_found",
+      "CLAUDE.md": "no_references_found"
+    }
+  },
+  "deletion_order_assessment": {
+    "phase1_test_modification": {
+      "status": "correct",
+      "rationale": "テスト修正を先に行うことで、フェーズ2のソースコード修正後もテストが通ることを保証する。vi.mock が残存したまま対象モジュールが削除されると、Vitest のモジュール解決エラーが発生するため、mock 削除が先行する必要がある"
+    },
+    "phase2_reference_removal": {
+      "status": "correct",
+      "rationale": "import と呼び出しコードの削除をファイル削除前に行うことで、TypeScript コンパイラが各段階で整合性を検証可能。session-cleanup.ts -> manager.ts -> index.ts の順序は依存関係的に問題なし（相互依存なし）"
+    },
+    "phase3_file_deletion": {
+      "status": "correct",
+      "rationale": "参照が全て除去された後のファイル削除。5ファイルの削除順序に依存関係あり: WorktreeDetail.tsx が simple-terminal/page.tsx へのリンクを持つが、同フェーズで同時削除されるため問題なし。simple-terminal/page.tsx が SimpleTerminal.tsx を import しているが、同時削除のため問題なし"
+    },
+    "phase4_documentation": {
+      "status": "correct",
+      "rationale": "機能変更完了後のドキュメント更新。ビルド・テストに影響しない最後のステップとして適切"
+    },
+    "circular_dependency_check": "none_detected",
+    "inter_phase_dependency_check": "all_dependencies_are_forward_only"
+  },
+  "test_coverage_assessment": {
+    "deleted_test_cases": {
+      "total": 5,
+      "details": [
+        "session-cleanup.test.ts: 'should stop claude-poller' (1 case)",
+        "manager-stop-pollers.test.ts: claude-poller specific tests (3 cases)",
+        "api-prompt-handling.test.ts: 'should resume polling after responding' (1 case, already stale)"
+      ]
+    },
+    "remaining_coverage": {
+      "session_cleanup": "response-poller stopping and auto-yes-poller stopping remain tested. Kill session flow remains tested",
+      "manager_stop_pollers": "response-poller stopping via stopPollers() remains tested. Method existence test remains",
+      "api_prompt_handling": "Core prompt handling flow (respond, broadcast, tmux sendKeys) remains tested",
+      "overall_assessment": "acceptable - deleted tests only verified behavior of code being deleted"
+    }
+  },
+  "backward_compatibility": {
+    "external_api_impact": "none",
+    "url_routes_removed": ["/worktrees/[id]/simple-terminal"],
+    "route_removal_impact": "low - simple-terminal route was superseded by xterm.js terminal. No external links expected. WorktreeDetail.tsx (which linked to it) is also being deleted",
+    "npm_package_exports_impact": "none",
+    "database_schema_impact": "none",
+    "websocket_protocol_impact": "none"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-237-dead-code-removal-design-policy.md",
+    "src/lib/claude-poller.ts",
+    "src/lib/terminal-websocket.ts",
+    "src/components/worktree/WorktreeDetail.tsx",
+    "src/components/SimpleTerminal.tsx",
+    "src/app/worktrees/[id]/simple-terminal/page.tsx",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/components/worktree/index.ts",
+    "src/app/worktrees/[id]/page.tsx",
+    "src/app/api/worktrees/[id]/respond/route.ts",
+    "src/lib/response-poller.ts",
+    "docs/architecture.md",
+    "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md",
+    "tests/unit/session-cleanup.test.ts",
+    "tests/unit/cli-tools/manager-stop-pollers.test.ts",
+    "tests/integration/api-prompt-handling.test.ts",
+    "tests/integration/api-kill-session-cli-tool.test.ts",
+    "tests/integration/api-respond-cli-tool.test.ts",
+    "tests/integration/api-send-cli-tool.test.ts",
+    "tsconfig.json",
+    "next.config.js",
+    "CLAUDE.md",
+    "README.md"
+  ],
+  "timestamp": "2026-02-11T14:00:00Z"
+}

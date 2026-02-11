@@ -1,0 +1,215 @@
+{
+  "issue_number": 237,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "CS-003",
+        "category": "整合性",
+        "issue": "Issue本文のLOC合計値（約840行以上）と設計方針書の値（約1,900行）に差異がある",
+        "detail": "Issue本文ではWorktreeDetail.tsxを~200行、terminal-websocket.tsを~150行と見積もっていたが、実測値はそれぞれ937行、222行。設計方針書は実測値で正しく記載されている。Issue本文の修正は必須ではないが、認識に齟齬がある点に留意",
+        "evidence": "wc -l合計: claude-poller.ts=400, terminal-websocket.ts=222, WorktreeDetail.tsx=937, simple-terminal/page.tsx=91, SimpleTerminal.tsx=253. 合計=1,903行",
+        "recommendation": "設計方針書の値が正確であるため実装に影響なし。Issue本文の更新は任意"
+      },
+      {
+        "id": "CS-004",
+        "category": "整合性",
+        "issue": "session-cleanup.test.ts にauto-yes-managerのmockが存在しない",
+        "detail": "session-cleanup.tsはauto-yes-managerをimportしているが、テストファイルにはauto-yes-managerのmockが設定されていない。本Issueのスコープ外だが、claude-pollerのmock削除後にauto-yes-manager関連のテストが正しく動作するか注意が必要",
+        "evidence": "session-cleanup.ts L12にstopAutoYesPollingのimportがあるが、session-cleanup.test.tsにvi.mock('@/lib/auto-yes-manager')が存在しない",
+        "recommendation": "テスト修正フェーズ1の検証時にテストが全パスすることで問題ないことを確認可能"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "consistency_checks": {
+    "deletion_targets": {
+      "status": "all_verified",
+      "details": [
+        {
+          "file": "src/lib/claude-poller.ts",
+          "exists": true,
+          "loc": 400,
+          "exports_match": true
+        },
+        {
+          "file": "src/lib/terminal-websocket.ts",
+          "exists": true,
+          "loc": 222,
+          "exports_match": true
+        },
+        {
+          "file": "src/components/worktree/WorktreeDetail.tsx",
+          "exists": true,
+          "loc": 937,
+          "exports_match": true
+        },
+        {
+          "file": "src/app/worktrees/[id]/simple-terminal/page.tsx",
+          "exists": true,
+          "loc": 91,
+          "exports_match": true
+        },
+        {
+          "file": "src/components/SimpleTerminal.tsx",
+          "exists": true,
+          "loc": 253,
+          "exports_match": true
+        }
+      ],
+      "total_loc": 1903
+    },
+    "modification_targets": {
+      "status": "all_line_numbers_verified",
+      "details": [
+        {
+          "file": "src/lib/session-cleanup.ts",
+          "checks": [
+            { "description": "import at L11", "expected": "L11", "actual": "L11", "match": true },
+            { "description": "JSDoc L7", "expected": "L7", "actual": "L7", "match": true },
+            { "description": "JSDoc L54", "expected": "L54", "actual": "L54", "match": true },
+            { "description": "call block L100-108", "expected": "L100-108", "actual": "L100-108", "match": true },
+            { "description": "comment number L110", "expected": "L110", "actual": "L110", "match": true }
+          ]
+        },
+        {
+          "file": "src/lib/cli-tools/manager.ts",
+          "checks": [
+            { "description": "import at L11", "expected": "L11", "actual": "L11", "match": true },
+            { "description": "conditional block L175-179", "expected": "L175-179", "actual": "L175-179", "match": true }
+          ]
+        },
+        {
+          "file": "src/components/worktree/index.ts",
+          "checks": [
+            { "description": "export lines L12-13", "expected": "L12-13", "actual": "L12-13", "match": true }
+          ]
+        },
+        {
+          "file": "docs/architecture.md",
+          "checks": [
+            { "description": "claude-poller mention L569", "expected": "L569", "actual": "L569", "match": true }
+          ]
+        }
+      ]
+    },
+    "test_targets": {
+      "status": "all_line_numbers_verified",
+      "details": [
+        {
+          "file": "tests/unit/session-cleanup.test.ts",
+          "checks": [
+            { "description": "vi.mock L15-17", "expected": "L15-17", "actual": "L15-17", "match": true },
+            { "description": "import L26", "expected": "L26", "actual": "L26", "match": true },
+            { "description": "test case L58-66", "expected": "L58-66", "actual": "L58-66", "match": true }
+          ]
+        },
+        {
+          "file": "tests/unit/cli-tools/manager-stop-pollers.test.ts",
+          "checks": [
+            { "description": "vi.mock L14-17", "expected": "L14-17", "actual": "L14-17", "match": true },
+            { "description": "3 test cases L43-71", "expected": "L43-71", "actual": "L43-71", "match": true }
+          ]
+        },
+        {
+          "file": "tests/integration/api-kill-session-cli-tool.test.ts",
+          "checks": [
+            { "description": "vi.mock L19-22", "expected": "L19-22", "actual": "L19-22", "match": true }
+          ]
+        },
+        {
+          "file": "tests/integration/api-prompt-handling.test.ts",
+          "checks": [
+            { "description": "vi.mock L53-57", "expected": "L53-57", "actual": "L53-57", "match": true },
+            { "description": "test case L239-268", "expected": "L239-268", "actual": "L239-268", "match": true }
+          ]
+        },
+        {
+          "file": "tests/integration/api-respond-cli-tool.test.ts",
+          "checks": [
+            { "description": "vi.mock L18-21", "expected": "L18-21", "actual": "L18-21", "match": true }
+          ]
+        },
+        {
+          "file": "tests/integration/api-send-cli-tool.test.ts",
+          "checks": [
+            { "description": "vi.mock L49-51", "expected": "L49-51", "actual": "L49-51", "match": true }
+          ]
+        }
+      ]
+    },
+    "reference_completeness": {
+      "status": "complete",
+      "details": {
+        "claude_poller_references_in_src": 2,
+        "claude_poller_references_in_tests": 6,
+        "claude_poller_references_in_docs": 1,
+        "claude_poller_internal_docs_excluded": 3,
+        "all_src_references_covered": true,
+        "all_test_references_covered": true,
+        "all_doc_references_covered": true,
+        "internal_docs_explicitly_excluded_sf002": true
+      }
+    },
+    "issue_vs_design": {
+      "status": "consistent_with_corrections",
+      "details": [
+        "Issue LOC estimates corrected in design doc (total ~840 -> 1,903)",
+        "Design doc adds test modifications (6 files) not in original Issue",
+        "Design doc adds docs/architecture.md update not in original Issue",
+        "Design doc adds phase-based execution plan not in original Issue",
+        "All additions are legitimate design elaboration within Issue scope"
+      ]
+    },
+    "claude_md_consistency": {
+      "status": "consistent",
+      "details": [
+        "Technology stack (Next.js 14, TypeScript, SQLite) correctly applied",
+        "File structure conventions followed",
+        "Coding conventions (strict TypeScript, Server Components) consistent",
+        "Quality checks (lint, tsc, test, build) all specified in acceptance criteria",
+        "Commit message convention compatible with feat/refactor type"
+      ]
+    },
+    "internal_consistency": {
+      "status": "consistent",
+      "details": [
+        "Section 3 (deletion targets) and Section 6 (execution order) align",
+        "Section 4 (modifications) references match Section 3 exports",
+        "Section 5 (test modifications) covers all vi.mock('@/lib/claude-poller') occurrences",
+        "Phase order is logically sound: tests first, then references, then files, then docs",
+        "MF-001/SF-001/SF-002 from Stage 1 all properly reflected",
+        "Section 7 design decisions align with implementation approach",
+        "Section 10 acceptance criteria match actual verification commands"
+      ]
+    }
+  },
+  "reviewed_files": [
+    "src/lib/claude-poller.ts",
+    "src/lib/terminal-websocket.ts",
+    "src/components/worktree/WorktreeDetail.tsx",
+    "src/app/worktrees/[id]/simple-terminal/page.tsx",
+    "src/components/SimpleTerminal.tsx",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/components/worktree/index.ts",
+    "docs/architecture.md",
+    "tests/unit/session-cleanup.test.ts",
+    "tests/unit/cli-tools/manager-stop-pollers.test.ts",
+    "tests/integration/api-kill-session-cli-tool.test.ts",
+    "tests/integration/api-prompt-handling.test.ts",
+    "tests/integration/api-respond-cli-tool.test.ts",
+    "tests/integration/api-send-cli-tool.test.ts"
+  ],
+  "timestamp": "2026-02-11T12:00:00Z"
+}
