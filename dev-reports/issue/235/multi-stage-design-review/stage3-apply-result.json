@@ -1,0 +1,77 @@
+{
+  "issue_number": 235,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-S3-001",
+        "item": "response-poller.ts内の2箇所目のプロンプト検出パス（extractResponse L296-310）でrawContent反映漏れの分析欠如",
+        "sections_updated": ["Section 4.2.2（新設）", "Section 11（extractResponse追加）"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S3-001",
+        "item": "MessageList.tsxのMessageBubbleコンポーネントにおけるpromptData表示の影響評価不足",
+        "sections_updated": ["Section 11（MessageList.tsx追加）"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-S3-002",
+        "item": "lastLines変更（10行->20行）がYes/Noパターン検出精度に与える影響の分析不足",
+        "sections_updated": ["Section 6.1（回帰テスト1件追加、7項目->8項目）", "Section 10（テスト項目数更新）", "Section 14（チェックリスト追加）"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-S3-003",
+        "item": "getDisplayContent関数の2回呼び出しによるパフォーマンスの非効率（DRY原則違反）",
+        "sections_updated": ["Section 4.3.2（JSXコード例をローカル変数キャッシュ方式に修正）"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-S3-004",
+        "item": "既存DBデータとの表示一貫性に関するエッジケース（データ移行期の表示差異未記載）",
+        "sections_updated": ["Section 5.2（データ移行期の表示差異を新設）"],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S3-001",
+        "item": "codex.tsのPromptDetectionResult使用に関する間接影響",
+        "sections_updated": ["Section 11（codex.ts記載を詳細化）", "Section 13（Consider記載追加）"],
+        "status": "noted"
+      },
+      {
+        "id": "C-S3-002",
+        "item": "prompt-response/route.tsのpromptCheck変数のrawContent利用可能性",
+        "sections_updated": ["Section 13（Consider記載追加）"],
+        "status": "noted"
+      },
+      {
+        "id": "C-S3-003",
+        "item": "truncateRawContentの末尾切り出しにおけるサロゲートペア文字列途中切断",
+        "sections_updated": ["Section 13（Consider記載追加）"],
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-235-prompt-rawcontent-design-policy.md",
+  "sections_updated": [
+    "Section 4.2.2（新設: extractResponse早期プロンプト検出パスの影響分析）",
+    "Section 4.3.2（JSXコード例のgetDisplayContentローカル変数キャッシュ化）",
+    "Section 5.2（データ移行期の表示差異追記）",
+    "Section 6.1（lastLines回帰テスト追加、7項目->8項目）",
+    "Section 10（テスト項目数更新）",
+    "Section 11（extractResponse L296-310、MessageList.tsx、codex.ts詳細化）",
+    "Section 12（Stage 3レビュー履歴追加）",
+    "Section 13（Stage 3指摘事項サマリー追加）",
+    "Section 14（Stage 3チェックリスト項目追加）"
+  ],
+  "timestamp": "2026-02-11T00:00:00Z"
+}

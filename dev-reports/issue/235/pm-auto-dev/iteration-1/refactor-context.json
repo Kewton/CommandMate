@@ -1,0 +1,28 @@
+{
+  "issue_number": 235,
+  "refactor_targets": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/components/worktree/PromptMessage.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 98.51,
+    "test_count": 3062,
+    "typescript_errors": 0,
+    "eslint_errors": 0
+  ],
+  "improvement_goals": [
+    "コードの可読性向上",
+    "SOLID原則への準拠確認",
+    "DRY原則の遵守（重複コードの削除）",
+    "適切なコメント・JSDocの追加",
+    "エッジケースのテストカバレッジ向上（可能であれば）"
+  ],
+  "constraints": [
+    "既存テスト3062件がすべてパスすること",
+    "TypeScript型エラー0件を維持すること",
+    "ESLintエラー0件を維持すること",
+    "後方互換性を維持すること",
+    "パフォーマンスを劣化させないこと"
+  ]
+}

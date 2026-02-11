@@ -1,0 +1,58 @@
+{
+  "issue_number": 235,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-11",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "問題箇所セクションの項目1を修正: 存在しない関数名 extractQuestionText() を「detectMultipleChoicePrompt() 内の質問テキスト抽出ロジック（インライン実装）」に修正。5行制限が L476 の questionEndIndex - 5 に由来することを明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "rawContent パフォーマンス考慮セクションを全面修正: output が captureSessionOutput の最大10000行全体を含む可能性があること、50行ウィンドウはスキャン範囲の制限であり output 自体のサイズ制限ではないことを正確に記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "current-output/route.ts の影響なし理由を具体化: 「ローカル型注釈に rawContent フィールドが含まれないため TypeScript の構造的型付けにより rawContent は無視される」と記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "PromptMessage.tsx UI仕様に「フォールバック比較ロジック（実装ガイドライン）」サブセクションを新設。4パターンの判定条件（空/undefined/null、trim一致、包含、それ以外）を明記"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "レビュー履歴セクションに Stage 5 の結果サマリーを追加（SF-1, SF-2, NTH-1, NTH-2, NTH-3 の5項目）"
+      }
+    ]
+  },
+  "additional_changes": [
+    {
+      "location": "Issue冒頭 Note",
+      "change": "レビュー反映記録に Stage 5 を追加（Stage 1, Stage 3, Stage 5）"
+    },
+    {
+      "location": "rawContent の定義テーブル",
+      "change": "multiple_choice パターンの内容列を「detectPrompt() 経由で受け取る output パラメータ全体」と補足追記"
+    }
+  ],
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/235"
+  }
+}

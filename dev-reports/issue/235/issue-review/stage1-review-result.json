@@ -1,0 +1,119 @@
+{
+  "issue_number": 235,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-11",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "完全性",
+        "issue": "claude-poller.ts にも同一の cleanContent によるDB保存箇所が存在するが、実装タスクおよび影響範囲テーブルに記載がない",
+        "location": "## 実装タスク / ## 影響範囲",
+        "recommendation": "src/lib/claude-poller.ts:245 の `content: promptDetection.cleanContent` も rawContent 優先に変更するタスクを追加するか、claude-poller.ts が廃止済み（response-poller.ts に統合済み）であることを明記する",
+        "evidence": "src/lib/claude-poller.ts:245 で `content: promptDetection.cleanContent` を使用してDB保存している。response-poller.ts:618 と同一パターンだがIssueの変更対象テーブルに含まれていない。ただしコード内コメント（L234）に 'TODO [Issue #193]: This code path is unreachable (claude-poller.ts is superseded by response-poller.ts)' とあり、実質的に到達不能コードの可能性がある"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "Approveパターン（prompt-detector.ts:134-153）もcleanContentに質問のみ設定しているが、実装タスクに言及がない",
+        "location": "## 実装タスク",
+        "recommendation": "ApproveパターンにもrawContent返却を追加するタスクを明記。cleanContent: content || 'Approve?' の箇所にも rawContent: lastLines.trim() を設定する必要がある",
+        "evidence": "prompt-detector.ts:151 で `cleanContent: content || 'Approve?'` としており、完全な出力は含まれていない。Issueでは Yes/No パターンと multiple_choice パターンのみ記載"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "PromptMessage.tsx での指示テキスト表示方法が具体的に記載されていない",
+        "location": "## 実装タスク（最後のタスク）",
+        "recommendation": "message.content に rawContent が格納されるため、prompt.question（選択肢直前の質問文）との差分として上部に指示テキストを表示するUIレイアウトを具体的に記載する。例: message.content 全体を表示するか、message.content から prompt.question を除いた部分を指示テキストとして表示するか",
+        "evidence": "現在のIssueでは `message.content（指示テキスト）の表示を追加` とだけ記載。PromptMessage.tsx は現在 prompt.question のみ表示しており、message.content を追加表示する場合のUI設計（位置・スタイル・重複回避）が未定義"
+      },
+      {
+        "id": "SF-3",
+        "category": "技術的妥当性",
+        "issue": "rawContent の内容ソースが multiple_choice と Yes/No で異なるが、統一的な扱いが未定義",
+        "location": "## 実装タスク",
+        "recommendation": "multiple_choice: rawContent = output.trim()（全出力）、Yes/No: rawContent = lastLines.trim()（末尾10行）と異なるソースからの取得になるため、rawContentの定義を明確化する。lastLinesは末尾10行のため、10行を超える指示テキストが存在する場合は同様に切り捨てが発生する可能性がある",
+        "evidence": "prompt-detector.ts:97 で `const lastLines = lines.slice(-10).join('\\n')` としてYes/Noパターンには末尾10行のみ使用。multiple_choiceでは output 全体を使用（detectMultipleChoicePrompt に output が渡される）"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "current-output API (route.ts:91) でも cleanContent を使用しているが影響分析に含まれていない",
+        "location": "## 影響範囲",
+        "recommendation": "src/app/api/worktrees/[id]/current-output/route.ts:91 で `cleanContent: cleanOutput` として独自に設定しているケースを影響範囲テーブルの「影響なし確認済み」セクションに追加し、rawContent変更の影響を受けないことを明記する",
+        "evidence": "route.ts:91 で `let promptDetection: { isPrompt: boolean; cleanContent: string; promptData?: unknown } = { isPrompt: false, cleanContent: cleanOutput }` と独自にデフォルト値を設定。PromptDetectionResult型を直接参照していないため、型変更の影響は受けないが、明示的な確認記載が望ましい"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "受入条件に rawContent のフォールバック動作のテスト条件がない",
+        "location": "## 受入条件",
+        "recommendation": "rawContent が undefined の場合（既存のプロンプト検出パス等）に cleanContent にフォールバックする動作の検証条件を追加。例: 「rawContent 未設定時に cleanContent が DB 保存されること」",
+        "evidence": "response-poller.ts:618 の変更で `promptDetection.rawContent || promptDetection.cleanContent` を使用する設計だが、rawContent が未設定のケース（noPromptResult 等）のフォールバック動作の検証が受入条件に含まれていない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "関連コンポーネントに Codex のプロンプト検出パス（cli-tools/codex.ts）が記載されているが、変更の要否が不明確",
+        "location": "## 影響範囲 > 関連コンポーネント",
+        "recommendation": "codex.ts 自体は detectPrompt/cleanContent を直接使用していないことを確認済みだが、Codex のプロンプトが response-poller.ts 経由で処理される場合の rawContent 動作について補足すると、影響範囲の理解が深まる",
+        "evidence": "Issue本文に `src/lib/cli-tools/codex.ts - Codexセッションでも同様のプロンプト検出を使用` と記載があるが、Grep結果ではcodex.ts内にdetectPrompt/cleanContentの直接参照なし。response-poller.ts の detectPromptWithOptions() 経由でCodexプロンプトも処理されるため、間接的に rawContent の恩恵を受ける"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "relevance": "PromptDetectionResult 型定義およびcleanContent生成ロジックの変更対象"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "DB保存時の content 値の変更対象（L618）"
+    },
+    {
+      "file": "src/lib/claude-poller.ts",
+      "relevance": "同一パターンのDB保存箇所（L245）- Issueに記載なし"
+    },
+    {
+      "file": "src/components/worktree/PromptMessage.tsx",
+      "relevance": "指示テキスト表示追加の変更対象"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "cleanContent を独自設定しているAPI（影響確認が必要）"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "promptData のみ使用 - 影響なし確認済み"
+    },
+    {
+      "file": "src/lib/auto-yes-resolver.ts",
+      "relevance": "promptData のみ使用 - 影響なし確認済み"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "relevance": "isPrompt フラグのみ参照 - 影響なし確認済み"
+    },
+    {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "relevance": "既存テストでcleanContentを検証 - rawContent追加時にテスト更新が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "prompt-detector.ts, response-poller.ts のモジュール説明が記載されており、rawContent追加後の更新検討が必要"
+    }
+  ]
+}

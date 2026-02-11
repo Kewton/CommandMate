@@ -1,0 +1,50 @@
+{
+  "issue_number": 235,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 98.51,
+      "test_count": 3062,
+      "new_tests": 14,
+      "typescript_errors": 0,
+      "eslint_errors": 0,
+      "commit": "4a9205e"
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_passed": 12,
+      "scenarios_total": 12,
+      "criteria_verified": 12,
+      "criteria_total": 12
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "yesNoPromptResult() ヘルパー抽出 (DRY)",
+        "ExtractionResult インターフェース抽出",
+        "incompleteResult() ヘルパー抽出 (DRY)",
+        "SendingIndicator コンポーネント抽出 (DRY)",
+        "BUTTON_BASE_CLASSES 定数抽出 (DRY)"
+      ],
+      "coverage": 98.51,
+      "test_count": 3062,
+      "commit": "0b32b1e"
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": [
+        "CLAUDE.md"
+      ]
+    }
+  },
+  "implementation_summary": {
+    "files_changed": 6,
+    "lines_added": 170,
+    "tests_added": 14,
+    "commits": [
+      "4a9205e: fix(#235): preserve complete prompt output with rawContent field",
+      "0b32b1e: refactor(#235): improve code quality with DRY/SOLID principles"
+    ]
+  }
+}

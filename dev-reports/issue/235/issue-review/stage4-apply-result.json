@@ -1,0 +1,115 @@
+{
+  "issue_number": 235,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-11",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "prompt-detector.test.ts に rawContent 検証テストケースを5項目に具体化して実装タスクに追加（multiple_choice, Yes/No, Approve, 非検出時, noPromptResult）。受入条件にもテスト項目を追加"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "response-poller.test.ts に DB 保存フォールバックロジックのテストタスクを追加（rawContent設定時/undefined時の2パターン + モック/統合テスト考慮の注意書き）。受入条件にもテスト項目を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "修正方針セクションに「rawContent と ANSI エスケープコード」サブセクションを新設。stripAnsi() の適用タイミング、PromptMessage.tsx での追加sanitization不要の根拠、Unicode ボックス描画文字の注意事項を明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "受入条件に「後方互換性」サブセクションを新設。既存DBメッセージ表示、新規メッセージ表示、両ケースの表示破綻なし確認の3項目を追加"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "影響なし確認済みテーブルの auto-yes-manager.ts 行を拡充。detectPrompt() インポート、PromptDetectionResult 型消費、isPrompt/promptData のみ使用、optional フィールド追加による TypeScript 型互換性影響なしを明記"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "実装タスクに「テスト（PromptMessage UIテスト）」セクションを新設。コンポーネントレンダリングテスト、フォールバック動作テスト、長文表示確認の3項目を追加。受入条件にもレンダリングテスト項目を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "実装タスクに「ドキュメント更新（実装完了時）」セクションを追加。CLAUDE.md の prompt-detector.ts と response-poller.ts のモジュール説明更新タスクを明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "修正方針セクションに「rawContent のサイズに関するパフォーマンス考慮」サブセクションを新設。captureSessionOutput 10000行制限、末尾50行ウィンドウ処理、SQLite TEXT型制限なし、WebSocket broadcastペイロード影響評価を記載"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "影響なし確認済みテーブルに prompt-response/route.ts を追加。PromptDetectionResult 型のインポート（L14, L72-78）、isPrompt のみ参照（L79）、rawContent/cleanContent 非使用を明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 9,
+    "skipped": 0
+  },
+  "changes_made": [
+    {
+      "section": "修正方針",
+      "changes": [
+        "「rawContent と ANSI エスケープコード」サブセクション新設 [SF-1]",
+        "「rawContent のサイズに関するパフォーマンス考慮」サブセクション新設 [NTH-2]"
+      ]
+    },
+    {
+      "section": "実装タスク",
+      "changes": [
+        "テスト（prompt-detector.test.ts）セクション新設: rawContent 検証5項目 [MF-1]",
+        "テスト（response-poller.test.ts）セクション新設: DB保存フォールバック検証2項目 + 注意書き [MF-2]",
+        "テスト（PromptMessage UIテスト）セクション新設: レンダリング/フォールバック/長文表示3項目 [SF-4]",
+        "ドキュメント更新セクション新設: CLAUDE.md 更新2項目 [NTH-1]",
+        "PromptMessage.tsx タスクに dangerouslySetInnerHTML 不使用の明示追加 [SF-1]",
+        "PromptMessage.tsx UI仕様にセキュリティ項目追加 [SF-1]"
+      ]
+    },
+    {
+      "section": "受入条件",
+      "changes": [
+        "「後方互換性」サブセクション新設: 既存/新規データ表示互換性3項目 [SF-2]",
+        "「テスト」サブセクション新設: MF-1, MF-2, SF-4 のテスト項目3件 [MF-1, MF-2, SF-4]"
+      ]
+    },
+    {
+      "section": "影響範囲 > 影響なしの確認済みコンポーネント",
+      "changes": [
+        "auto-yes-manager.ts の説明拡充: TypeScript 型互換性分析追記 [SF-3]",
+        "prompt-response/route.ts 行を新規追加 [NTH-3]"
+      ]
+    },
+    {
+      "section": "影響範囲 > 変更対象ファイル",
+      "changes": [
+        "リスク列を追加し各ファイルのリスクレベルと注意事項を明記"
+      ]
+    },
+    {
+      "section": "レビュー履歴",
+      "changes": [
+        "Stage 3 影響範囲レビューの履歴を追加（全9件の反映内容を記録）"
+      ]
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/235"
+  }
+}

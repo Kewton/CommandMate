@@ -1,0 +1,128 @@
+{
+  "issue_number": 235,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-S4-001",
+        "title": "stripAnsi()の既知の制限によるANSIエスケープコード残留リスク",
+        "severity": "medium",
+        "category": "XSS対策",
+        "description": "設計方針書ではrawContentが「stripAnsi適用済み」であることを前提にReactのデフォルトエスケープのみで安全としている。しかし、cli-patterns.tsのstripAnsi()にはSEC-002として8-bit CSI (0x9B)、DEC private modes等の既知の制限が文書化されている。rawContentはmultiple_choiceパターンで最大5000文字という従来のcleanContent（質問テキストのみ数行）よりも大幅に大きなデータ量を扱うため、残留制御文字が含まれる確率が相対的に高くなる。Reactのエスケープはテキストノードに対してはHTMLエンティティのみエスケープするため、制御文字自体はそのまま出力される可能性がある。設計書Section 8.2で「Unicode ボックス描画文字はReactエスケープで安全に表示される」と記載しているが、残留制御文字（特にC1制御コード0x80-0x9F範囲）についての分析が不足している。",
+        "recommendation": "設計書Section 8.2に以下を追記すること: (1) stripAnsi()のSEC-002制限を明示的に参照し、rawContentに残留する可能性のある制御文字の種類を列挙する。(2) C1制御文字（0x80-0x9F）がHTML出力に含まれた場合の影響分析を記載する（結論：Reactのテキストノードレンダリングでは制御文字はDOMテキストとして扱われ、HTMLタグ生成には至らないため、XSSリスクは発生しない。ただし表示の乱れは起こりうる）。(3) 将来的にstrip-ansiパッケージの採用を検討する旨を記載する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S4-001",
+        "title": "rawContent経由のログインジェクション・情報漏洩リスクの評価不足",
+        "severity": "low",
+        "category": "情報漏洩",
+        "description": "rawContentはtmux出力の末尾最大200行/5000文字を保持する。tmux出力にはファイルパス、環境変数、ユーザー名等の機密情報が含まれうる。これがDBに保存され、WebSocket経由でブラウザクライアントにブロードキャストされる。設計書ではtruncateのサイズ制限については記載があるが、rawContentに含まれうる機密情報の種類と、それがクライアントに露出するリスクについての分析が不足している。",
+        "recommendation": "設計書Section 8に「8.4 情報漏洩リスク」を新設し、以下を記載すること: (1) rawContentに含まれうる情報（ファイルパス、ユーザー名、セッション情報等）の列挙。(2) 既存のcleanContentでも同様のリスクが存在すること（rawContentは既存リスクの延長であり新規リスクではない）。(3) 本アプリケーションがローカル開発ツールであり、同一マシン上でのみ動作するため、ネットワーク越しの情報漏洩リスクは限定的であること。(4) log-export-sanitizer.tsによるエクスポート時のサニタイズが既存で提供されていること。"
+      },
+      {
+        "id": "SF-S4-002",
+        "title": "truncateRawContent関数のReDoSリスク評価の欠如",
+        "severity": "low",
+        "category": "Denial of Service",
+        "description": "prompt-detector.ts内の既存パターン（DEFAULT_OPTION_PATTERN、NORMAL_OPTION_PATTERN等）にはReDoSセーフのアノテーション（S4-001）が付与されているが、truncateRawContent()内のcontent.split('\\n')やresult.slice()はReDoSリスクのない安全な操作である旨が明記されていない。truncateRawContent自体は正規表現を使用しないため実際のリスクはないが、設計書のセキュリティ設計セクションでtruncateに関するセキュリティ考慮が記載されていない。",
+        "recommendation": "設計書Section 4.1.5のtruncateRawContent定義に「ReDoSリスク: 正規表現を使用しないため該当なし」のコメントを追加すること。これは既存コードベースのセキュリティアノテーション規約（S4-001）との一貫性のためである。"
+      },
+      {
+        "id": "SF-S4-003",
+        "title": "getDisplayContent関数における文字列比較の厳密性不足",
+        "severity": "low",
+        "category": "入力バリデーション",
+        "description": "Section 4.3.1のgetDisplayContent()では、content.trim() === question.trim()による厳密等価比較で重複を判定している。しかし、rawContentにstripAnsi()残留文字やUnicodeの正規化差異（NFC/NFD等）が含まれる場合、目視上は同一に見えるが文字列比較では一致しないケースが生じ、UIで意図しない重複表示となる可能性がある。セキュリティリスクとしては低いが、UIの予期せぬ表示につながりうる。",
+        "recommendation": "設計書Section 4.3.1に注記を追加し、stripAnsi残留文字やUnicode正規化による比較不一致の可能性と、その場合はcontent全体が表示される（=情報の欠落は起きない）ことを明記すること。現時点での追加対策は不要（YAGNI原則）。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S4-001",
+        "title": "rawContentの将来的なサニタイズパイプライン拡張",
+        "severity": "info",
+        "description": "現在のサニタイズパイプラインはstripAnsi()のみだが、将来的にrawContentの表示用途が拡大した場合（例：ReactMarkdownでのレンダリング、HTML出力等）、追加のサニタイズレイヤーが必要になる可能性がある。現時点ではプレーンテキスト表示のみのため対策不要。",
+        "recommendation": "PromptMessage.tsxでrawContentを表示する場合、将来的にもdangerouslySetInnerHTMLやReactMarkdownを使用しない方針をJSDocコメントで明示することを検討。"
+      },
+      {
+        "id": "C-S4-002",
+        "title": "WebSocket broadcast経由でのrawContent送信時のサイズ考慮",
+        "severity": "info",
+        "description": "rawContent（最大5000文字）がWebSocket broadcastで送信される。1クライアントあたりのメッセージサイズとしては問題ないが、同時接続クライアント数が多い場合の帯域使用量については設計書に記載がない。ローカル開発ツールとして通常1-2クライアント接続のため現実的なリスクは極めて低い。",
+        "recommendation": "現時点での対策不要。将来的にマルチユーザー対応を検討する場合に再評価。"
+      },
+      {
+        "id": "C-S4-003",
+        "title": "DB保存contentカラムのサイズ上限のドキュメント化",
+        "severity": "info",
+        "description": "SQLiteのTEXT型は理論上2GBまで格納可能で、5000文字のrawContentは問題ない。ただし、contentカラムにCHECK制約がなく、将来的にtruncateロジックにバグが混入した場合に大量データが保存される可能性がゼロではない。",
+        "recommendation": "将来検討として、chat_messagesテーブルのcontentカラムにCHECK(length(content) <= 10000)等のDB制約追加を検討。現時点ではtruncateRawContentのユニットテスト（設計書Section 6.1の2項目）が防御ラインとして十分。"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "not_applicable",
+      "notes": "本変更はアクセス制御に関与しない。rawContentはサーバーサイドで生成されクライアントに送信されるのみ"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "暗号化処理の変更なし"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "notes": "createMessage()はbetter-sqlite3のパラメタライズドクエリ（prepared statement + ?プレースホルダ）を使用。rawContentが直接SQLに組み込まれることはない"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "rawContentのサイズ制限（200行/5000文字）、stripAnsiによるサニタイズ、Reactデフォルトエスケープの3層防御が設計されている"
+    },
+    "A05_security_misconfiguration": {
+      "status": "not_applicable",
+      "notes": "設定変更なし"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "新規依存パッケージの追加なし"
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "notes": "認証・認可の変更なし"
+    },
+    "A08_software_data_integrity": {
+      "status": "pass",
+      "notes": "rawContentのソースはtmux captureSession出力のみ。外部ユーザー入力を直接受け付けるパスはない"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass",
+      "notes": "既存のlogger機構を継承。rawContentはDB保存されるため監査証跡あり"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "サーバーサイドリクエストの変更なし"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-235-prompt-rawcontent-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/components/worktree/PromptMessage.tsx",
+    "src/lib/cli-patterns.ts",
+    "src/lib/clipboard-utils.ts",
+    "src/lib/db.ts",
+    "src/lib/ws-server.ts",
+    "src/types/models.ts"
+  ],
+  "timestamp": "2026-02-11T12:00:00Z"
+}

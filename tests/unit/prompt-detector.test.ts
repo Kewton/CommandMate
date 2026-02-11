@@ -1526,4 +1526,170 @@ Are you sure you want to continue? (yes/no)
       expect(result).toBeUndefined();
     });
   });
+
+  // ==========================================================================
+  // Issue #235: rawContent field tests
+  // Tests for preserving complete prompt output in rawContent field
+  // ==========================================================================
+  describe('Issue #235: rawContent field', () => {
+    describe('rawContent for multiple_choice pattern', () => {
+      it('should set rawContent with truncated output.trim() for multiple_choice prompts', () => {
+        const output = [
+          'Here is some instruction text for the user.',
+          'Please review the following changes:',
+          'Do you want to proceed?',
+          '\u276F 1. Yes',
+          '  2. No',
+          '  3. Cancel',
+        ].join('\n');
+
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('multiple_choice');
+        expect(result.rawContent).toBeDefined();
+        // rawContent should contain the full output (truncated)
+        expect(result.rawContent).toContain('Here is some instruction text');
+        expect(result.rawContent).toContain('Do you want to proceed?');
+      });
+    });
+
+    describe('rawContent for Yes/No pattern', () => {
+      it('should set rawContent with lastLines.trim() (20 lines) for Yes/No prompts', () => {
+        // Build output with 25 lines so we can verify the last 20 lines are kept
+        const earlyLines = Array.from({ length: 5 }, (_, i) => `Early line ${i + 1}`);
+        const middleLines = Array.from({ length: 19 }, (_, i) => `Context line ${i + 1}`);
+        const promptLine = 'Do you want to continue? (y/n)';
+        const output = [...earlyLines, ...middleLines, promptLine].join('\n');
+
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('yes_no');
+        expect(result.rawContent).toBeDefined();
+        // rawContent should contain the prompt line
+        expect(result.rawContent).toContain('Do you want to continue? (y/n)');
+        // rawContent should be the last 20 lines joined and trimmed
+        expect(typeof result.rawContent).toBe('string');
+      });
+    });
+
+    describe('rawContent for Approve pattern', () => {
+      it('should set rawContent for Approve prompts', () => {
+        const output = [
+          'I will execute the following command:',
+          '  rm -rf /tmp/cache',
+          'Approve?',
+        ].join('\n');
+
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.promptData?.type).toBe('yes_no');
+        expect(result.rawContent).toBeDefined();
+        expect(result.rawContent).toContain('Approve?');
+        expect(result.rawContent).toContain('rm -rf /tmp/cache');
+      });
+    });
+
+    describe('rawContent for non-prompt detection', () => {
+      it('should not set rawContent when no prompt is detected', () => {
+        const output = 'This is just normal output without any prompt';
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(false);
+        expect(result.rawContent).toBeUndefined();
+      });
+
+      it('should not set rawContent for noPromptResult() - multiple_choice non-detection', () => {
+        // A numbered list without cursor indicator should not have rawContent
+        const output = '1. Create file\n2. Run tests';
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(false);
+        expect(result.rawContent).toBeUndefined();
+      });
+    });
+
+    describe('truncateRawContent limits [MF-001]', () => {
+      it('should truncate rawContent to last 200 lines for large multiple_choice output', () => {
+        // Generate 250-line output with a valid multiple_choice prompt at the end
+        const fillerLines = Array.from({ length: 247 }, (_, i) => `Filler line ${i + 1}`);
+        const promptLines = [
+          'Do you want to proceed?',
+          '\u276F 1. Yes',
+          '  2. No',
+        ];
+        const output = [...fillerLines, ...promptLines].join('\n');
+
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.rawContent).toBeDefined();
+        // rawContent should be at most 200 lines
+        const rawContentLines = result.rawContent!.split('\n');
+        expect(rawContentLines.length).toBeLessThanOrEqual(200);
+        // The prompt lines should be preserved (they are at the end)
+        expect(result.rawContent).toContain('Do you want to proceed?');
+      });
+
+      it('should truncate rawContent to last 5000 characters for large multiple_choice output', () => {
+        // Generate output exceeding 5000 characters
+        const longLine = 'A'.repeat(100);
+        const fillerLines = Array.from({ length: 60 }, () => longLine);
+        const promptLines = [
+          'Do you want to proceed?',
+          '\u276F 1. Yes',
+          '  2. No',
+        ];
+        const output = [...fillerLines, ...promptLines].join('\n');
+
+        const result = detectPrompt(output);
+
+        expect(result.isPrompt).toBe(true);
+        expect(result.rawContent).toBeDefined();
+        // rawContent should be at most 5000 characters
+        expect(result.rawContent!.length).toBeLessThanOrEqual(5000);
+        // The prompt lines should be preserved (they are at the end)
+        expect(result.rawContent).toContain('Do you want to proceed?');
+      });
+    });
+
+    describe('lastLines expansion regression [SF-S3-002]', () => {
+      it('should not false-detect (y/n) pattern appearing in lines 11-20 from end', () => {
+        // The (y/n) pattern should only match when it is at the END of a line
+        // as per YES_NO_PATTERNS regex anchoring with ^...$m
+        // Even with lastLines expanded to 20 lines, patterns in the middle
+        // of the content (not at line end) should not be detected
+        const lines = [
+          'Line 1 of content',
+          'Line 2 of content',
+          'Line 3 of content',
+          'Line 4 of content',
+          'Line 5 of content',
+          'Line 6 has some text (y/n) but not at line end position',
+          'Line 7 of content',
+          'Line 8 of content',
+          'Line 9 of content',
+          'Line 10 of content',
+          'Line 11 of content',
+          'Line 12 of content',
+          'Line 13 of content',
+          'Line 14 of content',
+          'Line 15 of content',
+          'Line 16 of content',
+          'Line 17 of content',
+          'Line 18 of content',
+          'Line 19 of content',
+          'Line 20 is just normal text',
+        ];
+        const output = lines.join('\n');
+        const result = detectPrompt(output);
+
+        // The (y/n) on line 6 is not at the end of the line (more text follows),
+        // so it should NOT match any YES_NO_PATTERNS
+        expect(result.isPrompt).toBe(false);
+      });
+    });
+  });
 });

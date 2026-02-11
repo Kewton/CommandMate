@@ -44,6 +44,51 @@ export interface PromptDetectionResult {
   promptData?: PromptData;
   /** Clean content without prompt suffix */
   cleanContent: string;
+  /**
+   * Complete prompt output (stripAnsi applied, truncated) - Issue #235
+   * Note: "raw" does not mean ANSI escape codes are present.
+   * This field holds the complete prompt output after stripAnsi() processing,
+   * truncated to RAW_CONTENT_MAX_LINES / RAW_CONTENT_MAX_CHARS limits.
+   * undefined when no prompt is detected.
+   */
+  rawContent?: string;
+}
+
+/**
+ * Maximum number of lines to retain in rawContent.
+ * Tail lines are preserved (instruction text typically appears just before the prompt).
+ * @see truncateRawContent
+ */
+const RAW_CONTENT_MAX_LINES = 200;
+
+/**
+ * Maximum number of characters to retain in rawContent.
+ * Tail characters are preserved.
+ * @see truncateRawContent
+ */
+const RAW_CONTENT_MAX_CHARS = 5000;
+
+/**
+ * Truncate raw content to fit within size limits.
+ * Preserves the tail (end) of the content since instruction text
+ * typically appears just before the prompt at the end of output.
+ *
+ * Security: No regular expressions used -- no ReDoS risk. [SF-S4-002]
+ * String.split('\n') and String.slice() are literal string operations only.
+ *
+ * @param content - The content to truncate
+ * @returns Truncated content (last RAW_CONTENT_MAX_LINES lines, max RAW_CONTENT_MAX_CHARS characters)
+ */
+function truncateRawContent(content: string): string {
+  const lines = content.split('\n');
+  const truncatedLines = lines.length > RAW_CONTENT_MAX_LINES
+    ? lines.slice(-RAW_CONTENT_MAX_LINES)
+    : lines;
+  let result = truncatedLines.join('\n');
+  if (result.length > RAW_CONTENT_MAX_CHARS) {
+    result = result.slice(-RAW_CONTENT_MAX_CHARS);
+  }
+  return result;
 }
 
 /**
@@ -70,6 +115,37 @@ const YES_NO_PATTERNS: ReadonlyArray<{
 ];
 
 /**
+ * Creates a yes/no prompt detection result.
+ * Centralizes the repeated construction of yes_no PromptDetectionResult objects
+ * used by both YES_NO_PATTERNS matching and Approve pattern matching.
+ *
+ * @param question - The question text
+ * @param cleanContent - The clean content string
+ * @param rawContent - The raw content string (last 20 lines, trimmed)
+ * @param defaultOption - Optional default option ('yes' or 'no')
+ * @returns PromptDetectionResult with isPrompt: true and yes_no prompt data
+ */
+function yesNoPromptResult(
+  question: string,
+  cleanContent: string,
+  rawContent: string,
+  defaultOption?: 'yes' | 'no',
+): PromptDetectionResult {
+  return {
+    isPrompt: true,
+    promptData: {
+      type: 'yes_no',
+      question,
+      options: ['yes', 'no'],
+      status: 'pending',
+      ...(defaultOption !== undefined && { defaultOption }),
+    },
+    cleanContent,
+    rawContent,
+  };
+}
+
+/**
  * Detect if output contains an interactive prompt
  *
  * Supports the following patterns:
@@ -94,7 +170,8 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
   logger.debug('detectPrompt:start', { outputLength: output.length });
 
   const lines = output.split('\n');
-  const lastLines = lines.slice(-10).join('\n');
+  // [SF-003] [MF-S2-001] Expanded from 10 to 20 lines for rawContent coverage
+  const lastLines = lines.slice(-20).join('\n');
 
   // Pattern 0: Multiple choice (numbered options with ❯ indicator)
   // Example:
@@ -113,21 +190,12 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
   }
 
   // Patterns 1-4: Yes/no patterns (data-driven matching)
+  const trimmedLastLines = lastLines.trim();
   for (const pattern of YES_NO_PATTERNS) {
     const match = lastLines.match(pattern.regex);
     if (match) {
       const question = match[1].trim();
-      return {
-        isPrompt: true,
-        promptData: {
-          type: 'yes_no',
-          question,
-          options: ['yes', 'no'],
-          status: 'pending',
-          ...(pattern.defaultOption !== undefined && { defaultOption: pattern.defaultOption }),
-        },
-        cleanContent: question,
-      };
+      return yesNoPromptResult(question, question, trimmedLastLines, pattern.defaultOption);
     }
   }
 
@@ -140,16 +208,7 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
     const content = approveMatch[1].trim();
     // If there's content before "Approve?", include it in the question
     const question = content ? `${content} Approve?` : 'Approve?';
-    return {
-      isPrompt: true,
-      promptData: {
-        type: 'yes_no',
-        question: question,
-        options: ['yes', 'no'],
-        status: 'pending',
-      },
-      cleanContent: content || 'Approve?',
-    };
+    return yesNoPromptResult(question, content || 'Approve?', trimmedLastLines);
   }
 
   // No prompt detected
@@ -326,7 +385,7 @@ function isContinuationLine(rawLine: string, line: string): boolean {
   // the question line would be misclassified as a continuation line, causing
   // questionEndIndex to remain -1 and Layer 5 SEC-001 to block detection.
   const endsWithQuestion = line.endsWith('?') || line.endsWith('\uff1f');
-  const hasLeadingSpaces = rawLine.match(/^\s{2,}[^\d]/) && !rawLine.match(/^\s*\d+\./) && !endsWithQuestion;
+  const hasLeadingSpaces = /^\s{2,}[^\d]/.test(rawLine) && !/^\s*\d+\./.test(rawLine) && !endsWithQuestion;
   // Short fragment (< 5 chars, excluding question-ending lines)
   const isShortFragment = line.length < 5 && !endsWithQuestion;
   // Path string continuation: lines starting with / or ~, or alphanumeric-only fragments (2+ chars)
@@ -506,6 +565,7 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
       status: 'pending',
     },
     cleanContent: question.trim(),
+    rawContent: truncateRawContent(output.trim()),  // Issue #235: complete prompt output (truncated) [MF-001]
   };
 }
 
