@@ -52,6 +52,7 @@ import type { Worktree, ChatMessage, PromptData, GitStatus } from '@/types/model
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { deriveCliStatus } from '@/types/sidebar';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
+import { useTranslations } from 'next-intl';
 
 // ============================================================================
 // Types
@@ -928,6 +929,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const isMobile = useIsMobile();
   const { toggle, openMobileDrawer } = useSidebarContext();
   const { state, actions } = useWorktreeUIState();
+  const tWorktree = useTranslations('worktree');
+  const tError = useTranslations('error');
+  const tCommon = useTranslations('common');
 
   // Local state for worktree data and loading status
   const [worktree, setWorktree] = useState<Worktree | null>(null);
@@ -1264,9 +1268,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to create file:', err);
-      window.alert('ファイルの作成に失敗しました');
+      window.alert(tError('fileOps.failedToCreateFile'));
     }
-  }, [worktreeId]);
+  }, [worktreeId, tError]);
 
   /** Handle new directory creation in FileTreeView */
   const handleNewDirectory = useCallback(async (parentPath: string) => {
@@ -1291,9 +1295,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to create directory:', err);
-      window.alert('ディレクトリの作成に失敗しました');
+      window.alert(tError('fileOps.failedToCreateDirectory'));
     }
-  }, [worktreeId]);
+  }, [worktreeId, tError]);
 
   /** Handle file/directory rename in FileTreeView */
   const handleRename = useCallback(async (path: string) => {
@@ -1317,14 +1321,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to rename:', err);
-      window.alert('リネームに失敗しました');
+      window.alert(tError('fileOps.failedToRename'));
     }
-  }, [worktreeId]);
+  }, [worktreeId, tError]);
 
   /** Handle file/directory delete in FileTreeView */
   const handleDelete = useCallback(async (path: string) => {
     const name = path.split('/').pop() || path;
-    if (!window.confirm(`"${name}" を削除しますか？`)) return;
+    if (!window.confirm(tCommon('confirmDelete', { name }))) return;
 
     try {
       const response = await fetch(
@@ -1344,9 +1348,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
-      window.alert('削除に失敗しました');
+      window.alert(tError('fileOps.failedToDelete'));
     }
-  }, [worktreeId, editorFilePath]);
+  }, [worktreeId, editorFilePath, tCommon, tError]);
 
   // Toast state for upload notifications
   const { toasts, showToast, removeToast } = useToast();
@@ -1753,13 +1757,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <Modal
             isOpen={showKillConfirm}
             onClose={handleKillCancel}
-            title={`${activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1)} セッションを終了しますか？`}
+            title={tWorktree('session.confirmEnd', { tool: activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1) })}
             size="sm"
             showCloseButton={true}
           >
             <div className="space-y-4">
               <p className="text-sm text-gray-700">
-                セッションを終了すると、チャット履歴がクリアされます。
+                {tWorktree('session.endWarning')}
               </p>
               <div className="flex justify-end gap-3 pt-2">
                 <button
@@ -1767,14 +1771,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   onClick={handleKillCancel}
                   className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
                 >
-                  キャンセル
+                  {tCommon('cancel')}
                 </button>
                 <button
                   type="button"
                   onClick={handleKillConfirm}
                   className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
                 >
-                  終了する
+                  {tCommon('end')}
                 </button>
               </div>
             </div>
@@ -1966,13 +1970,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <Modal
           isOpen={showKillConfirm}
           onClose={handleKillCancel}
-          title={`${activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1)} セッションを終了しますか？`}
+          title={tWorktree('session.confirmEnd', { tool: activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1) })}
           size="sm"
           showCloseButton={true}
         >
           <div className="space-y-4">
             <p className="text-sm text-gray-700">
-              セッションを終了すると、チャット履歴がクリアされます。
+              {tWorktree('session.endWarning')}
             </p>
             <div className="flex justify-end gap-3 pt-2">
               <button
@@ -1980,14 +1984,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 onClick={handleKillCancel}
                 className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
               >
-                キャンセル
+                {tCommon('cancel')}
               </button>
               <button
                 type="button"
                 onClick={handleKillConfirm}
                 className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
               >
-                終了する
+                {tCommon('end')}
               </button>
             </div>
           </div>

@@ -1,0 +1,13 @@
+{
+  "confirmationFromClaude": "Confirmation from Claude",
+  "sending": "Sending...",
+  "failedToRespond": "Failed to send response. Please try again.",
+  "default": "Default",
+  "answered": "Answered",
+  "awaitingSelection": "Awaiting selection",
+  "yes": "Yes",
+  "no": "No",
+  "enterCustomMessage": "Enter custom message",
+  "enterMessageHere": "Enter message here...",
+  "enterValuePlaceholder": "Enter a value..."
+}

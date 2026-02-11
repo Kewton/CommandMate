@@ -700,7 +700,7 @@ describe('WorktreeDetailRefactored', () => {
       const deleteBtn = screen.getByTestId('delete-btn');
       fireEvent.click(deleteBtn);
 
-      expect(window.confirm).toHaveBeenCalledWith('"test.ts" を削除しますか？');
+      expect(window.confirm).toHaveBeenCalledWith('common.confirmDelete');
     });
 
     it('calls DELETE API when deleting a file', async () => {

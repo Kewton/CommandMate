@@ -1,0 +1,13 @@
+{
+  "confirmationFromClaude": "Claudeからの確認",
+  "sending": "送信中...",
+  "failedToRespond": "応答の送信に失敗しました。もう一度お試しください。",
+  "default": "デフォルト",
+  "answered": "回答済み",
+  "awaitingSelection": "選択待ち",
+  "yes": "はい / Yes",
+  "no": "いいえ / No",
+  "enterCustomMessage": "カスタムメッセージを入力してください",
+  "enterMessageHere": "ここにメッセージを入力...",
+  "enterValuePlaceholder": "値を入力してください..."
+}

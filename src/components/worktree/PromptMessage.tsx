@@ -6,9 +6,11 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
+import { useLocale } from 'next-intl';
 import type { ChatMessage } from '@/types/models';
 import { format } from 'date-fns';
-import { ja } from 'date-fns/locale';
+import { getDateFnsLocale } from '@/lib/date-locale';
 
 export interface PromptMessageProps {
   message: ChatMessage;
@@ -52,19 +54,23 @@ const BUTTON_BASE_CLASSES = 'rounded-lg font-medium transition-all disabled:opac
  * @param className - Optional additional CSS classes
  */
 function SendingIndicator({ className = '' }: { className?: string }) {
+  const t = useTranslations('prompt');
   return (
     <div className={`flex items-center gap-2 text-sm text-gray-500 ${className}`.trim()}>
       <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" />
-      <span>送信中...</span>
+      <span>{t('sending')}</span>
     </div>
   );
 }
 
 export function PromptMessage({ message, onRespond }: PromptMessageProps) {
+  const t = useTranslations('prompt');
+  const locale = useLocale();
+  const dateFnsLocale = getDateFnsLocale(locale);
   const [responding, setResponding] = useState(false);
   const prompt = message.promptData!;
   const isPending = prompt.status === 'pending';
-  const timestamp = format(new Date(message.timestamp), 'PPp', { locale: ja });
+  const timestamp = format(new Date(message.timestamp), 'PPp', { locale: dateFnsLocale });
   // [SF-S3-003] Cache getDisplayContent result for DRY principle
   const displayContent = getDisplayContent(message.content, prompt.question);
 
@@ -74,7 +80,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
       await onRespond(answer);
     } catch (error) {
       console.error('Failed to respond:', error);
-      alert('応答の送信に失敗しました。もう一度お試しください。');
+      alert(t('failedToRespond'));
     } finally {
       setResponding(false);
     }
@@ -87,7 +93,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className="text-2xl">⚠️</span>
-            <span className="font-bold text-yellow-800">Claudeからの確認</span>
+            <span className="font-bold text-yellow-800">{t('confirmationFromClaude')}</span>
           </div>
           <span className="text-xs text-yellow-600">{timestamp}</span>
         </div>
@@ -153,7 +159,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
                       </span>
                       <span className="flex-1">{option.label}</span>
                       {option.isDefault && (
-                        <span className="text-blue-100 text-sm">❯ デフォルト</span>
+                        <span className="text-blue-100 text-sm">❯ {t('default')}</span>
                       )}
                     </div>
                   </button>
@@ -165,7 +171,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
         ) : (
           <div className="bg-white border border-gray-300 rounded-lg px-4 py-2 inline-block">
             <span className="text-sm text-gray-600">
-              ✅ 回答済み: <strong className="text-gray-900">{prompt.answer}</strong>
+              ✅ {t('answered')}: <strong className="text-gray-900">{prompt.answer}</strong>
             </span>
           </div>
         )}

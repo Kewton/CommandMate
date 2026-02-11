@@ -1,0 +1,16 @@
+{
+  "cancel": "キャンセル",
+  "send": "送信",
+  "end": "終了する",
+  "ending": "終了中...",
+  "retry": "再試行",
+  "reload": "再読み込み",
+  "reconnect": "再接続",
+  "close": "閉じる",
+  "back": "戻る",
+  "confirmDelete": "「{name}」を削除しますか？",
+  "favorites": {
+    "add": "お気に入りに追加",
+    "remove": "お気に入りを解除"
+  }
+}

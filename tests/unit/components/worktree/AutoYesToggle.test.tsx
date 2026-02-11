@@ -32,14 +32,14 @@ describe('AutoYesToggle', () => {
       const toggle = screen.getByRole('switch');
       fireEvent.click(toggle);
 
-      expect(screen.getByText('Auto Yesモードを有効にしますか？')).toBeDefined();
+      expect(screen.getByText('autoYes.enableTitle')).toBeDefined();
       expect(defaultProps.onToggle).not.toHaveBeenCalled();
     });
 
     it('should call onToggle(true, defaultDuration) when dialog is confirmed with default', async () => {
       render(<AutoYesToggle {...defaultProps} enabled={false} />);
       fireEvent.click(screen.getByRole('switch'));
-      fireEvent.click(screen.getByText('同意して有効化'));
+      fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
 
       await waitFor(() => {
         expect(defaultProps.onToggle).toHaveBeenCalledWith(true, DEFAULT_AUTO_YES_DURATION);
@@ -50,10 +50,10 @@ describe('AutoYesToggle', () => {
       render(<AutoYesToggle {...defaultProps} enabled={false} />);
       fireEvent.click(screen.getByRole('switch'));
 
-      // Select 3時間 duration button
-      fireEvent.click(screen.getByText('3時間'));
+      // Select 3h duration button
+      fireEvent.click(screen.getByText('autoYes.durations.3h'));
 
-      fireEvent.click(screen.getByText('同意して有効化'));
+      fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
 
       await waitFor(() => {
         expect(defaultProps.onToggle).toHaveBeenCalledWith(true, 10800000);
@@ -63,7 +63,7 @@ describe('AutoYesToggle', () => {
     it('should not call onToggle when dialog is cancelled', () => {
       render(<AutoYesToggle {...defaultProps} enabled={false} />);
       fireEvent.click(screen.getByRole('switch'));
-      fireEvent.click(screen.getByText('キャンセル'));
+      fireEvent.click(screen.getByText('common.cancel'));
 
       expect(defaultProps.onToggle).not.toHaveBeenCalled();
     });
@@ -71,9 +71,9 @@ describe('AutoYesToggle', () => {
     it('should close dialog after cancel', () => {
       render(<AutoYesToggle {...defaultProps} enabled={false} />);
       fireEvent.click(screen.getByRole('switch'));
-      fireEvent.click(screen.getByText('キャンセル'));
+      fireEvent.click(screen.getByText('common.cancel'));
 
-      expect(screen.queryByText('Auto Yesモードを有効にしますか？')).toBeNull();
+      expect(screen.queryByText('autoYes.enableTitle')).toBeNull();
     });
   });
 
@@ -85,7 +85,7 @@ describe('AutoYesToggle', () => {
       await waitFor(() => {
         expect(defaultProps.onToggle).toHaveBeenCalledWith(false);
       });
-      expect(screen.queryByText('Auto Yesモードを有効にしますか？')).toBeNull();
+      expect(screen.queryByText('autoYes.enableTitle')).toBeNull();
     });
   });
 

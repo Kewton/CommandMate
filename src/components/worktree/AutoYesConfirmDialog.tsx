@@ -10,6 +10,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Modal } from '@/components/ui/Modal';
 import {
   ALLOWED_DURATIONS,
@@ -36,35 +37,40 @@ export function AutoYesConfirmDialog({
   onCancel,
   cliToolName,
 }: AutoYesConfirmDialogProps) {
+  const t = useTranslations('autoYes');
+  const tCommon = useTranslations('common');
   const [selectedDuration, setSelectedDuration] = useState<AutoYesDuration>(DEFAULT_AUTO_YES_DURATION);
+
+  /** Resolve a DURATION_LABELS value (e.g. 'autoYes.durations.1h') to a translated string */
+  const durationLabel = (duration: AutoYesDuration): string =>
+    t(DURATION_LABELS[duration].replace('autoYes.', ''));
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onCancel}
-      title={`Auto Yesモードを有効にしますか？${cliToolName ? `（${cliToolName}）` : ''}`}
+      title={cliToolName ? t('enableTitleWithTool', { toolName: cliToolName }) : t('enableTitle')}
       size="sm"
       showCloseButton={true}
     >
       <div className="space-y-4">
         <div className="text-sm text-gray-700">
-          <p className="font-medium mb-2">機能説明</p>
+          <p className="font-medium mb-2">{t('featureDescription')}</p>
           <ul className="list-disc list-inside space-y-1">
-            <li>yes/no確認 → 自動で「yes」を送信</li>
-            <li>複数選択肢 → デフォルトまたは先頭の選択肢を自動選択</li>
+            <li>{t('yesNoAutoResponse')}</li>
+            <li>{t('multipleChoiceAutoSelect')}</li>
           </ul>
-          <p className="mt-1">{DURATION_LABELS[selectedDuration]}後に自動でOFFになります。</p>
+          <p className="mt-1">{t('autoDisableAfter', { duration: durationLabel(selectedDuration) })}</p>
           {cliToolName && (
             <p className="mt-2 text-gray-500">
-              ※ Auto Yesは現在選択中の <span className="font-medium text-gray-700">{cliToolName}</span> セッションのみに適用されます。
-              他のCLIツールには影響しません。
+              {t('appliesOnlyToCurrent', { toolName: cliToolName })}
             </p>
           )}
         </div>
 
         {/* Duration selection - horizontal button group */}
         <div className="text-sm text-gray-700">
-          <p className="font-medium mb-2">有効時間</p>
+          <p className="font-medium mb-2">{t('duration')}</p>
           <div className="flex gap-2">
             {ALLOWED_DURATIONS.map((duration) => (
               <button
@@ -78,25 +84,23 @@ export function AutoYesConfirmDialog({
                 }`}
                 style={{ minHeight: '44px' }}
               >
-                {DURATION_LABELS[duration]}
+                {durationLabel(duration)}
               </button>
             ))}
           </div>
         </div>
 
         <div className="text-sm text-gray-700">
-          <p className="font-medium mb-2">リスクについて</p>
+          <p className="font-medium mb-2">{t('aboutRisks')}</p>
           <p>
-            自動応答により、意図しない操作（ファイルの削除・上書き等）が
-            実行される可能性があります。内容を十分に理解した上でご利用ください。
+            {t('riskWarning')}
           </p>
         </div>
 
         <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3">
           <p className="text-sm text-yellow-800">
-            <span className="font-medium">免責事項：</span>
-            Auto Yesモードの使用により発生した問題について、
-            開発者は一切の責任を負いません。自己責任でご利用ください。
+            <span className="font-medium">{t('disclaimer')}</span>
+            {t('disclaimerText')}
           </p>
         </div>
 
@@ -106,14 +110,14 @@ export function AutoYesConfirmDialog({
             onClick={onCancel}
             className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
           >
-            キャンセル
+            {tCommon('cancel')}
           </button>
           <button
             type="button"
             onClick={() => onConfirm(selectedDuration)}
             className="px-4 py-2 text-sm font-medium rounded-md bg-yellow-600 hover:bg-yellow-700 text-white"
           >
-            同意して有効化
+            {t('agreeAndEnable')}
           </button>
         </div>
       </div>

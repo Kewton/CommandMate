@@ -1,0 +1,20 @@
+{
+  "enableTitle": "Enable Auto Yes mode?",
+  "enableTitleWithTool": "Enable Auto Yes mode? ({toolName})",
+  "featureDescription": "Feature description",
+  "yesNoAutoResponse": "yes/no confirmation → Automatically sends \"yes\"",
+  "multipleChoiceAutoSelect": "Multiple choice → Automatically selects default or first option",
+  "autoDisableAfter": "Will automatically turn OFF after {duration}.",
+  "appliesOnlyToCurrent": "* Auto Yes applies only to the currently selected {toolName} session. It does not affect other CLI tools.",
+  "duration": "Duration",
+  "durations": {
+    "1h": "1 hour",
+    "3h": "3 hours",
+    "8h": "8 hours"
+  },
+  "aboutRisks": "About risks",
+  "riskWarning": "Automatic responses may result in unintended operations (such as file deletion or overwriting). Please use only after fully understanding the implications.",
+  "disclaimer": "Disclaimer:",
+  "disclaimerText": "The developers assume no responsibility for any issues arising from the use of Auto Yes mode. Use at your own risk.",
+  "agreeAndEnable": "Agree and enable"
+}

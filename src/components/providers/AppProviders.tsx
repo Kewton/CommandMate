@@ -4,16 +4,21 @@
  * Client-side providers wrapper for the application.
  * This component wraps the app with all necessary context providers
  * so they persist across client-side navigation.
+ *
+ * [SF-S2-003] NextIntlClientProvider added for i18n support.
  */
 
 'use client';
 
 import { type ReactNode } from 'react';
+import { NextIntlClientProvider } from 'next-intl';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 
 interface AppProvidersProps {
   children: ReactNode;
+  locale: string;
+  messages: Record<string, unknown>;
 }
 
 /**
@@ -21,17 +26,19 @@ interface AppProvidersProps {
  *
  * @example
  * ```tsx
- * <AppProviders>
+ * <AppProviders locale="en" messages={messages}>
  *   <App />
  * </AppProviders>
  * ```
  */
-export function AppProviders({ children }: AppProvidersProps) {
+export function AppProviders({ children, locale, messages }: AppProvidersProps) {
   return (
-    <SidebarProvider>
-      <WorktreeSelectionProvider>
-        {children}
-      </WorktreeSelectionProvider>
-    </SidebarProvider>
+    <NextIntlClientProvider locale={locale} messages={messages}>
+      <SidebarProvider>
+        <WorktreeSelectionProvider>
+          {children}
+        </WorktreeSelectionProvider>
+      </SidebarProvider>
+    </NextIntlClientProvider>
   );
 }

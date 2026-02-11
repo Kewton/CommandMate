@@ -9,8 +9,10 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from '@/components/ui';
 import type { Worktree } from '@/types/models';
+import { useTranslations } from 'next-intl';
+import { useLocale } from 'next-intl';
 import { formatDistanceToNow } from 'date-fns';
-import { ja } from 'date-fns/locale';
+import { getDateFnsLocale } from '@/lib/date-locale';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 
 export interface WorktreeCardProps {
@@ -35,9 +37,13 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
   const [currentStatus, setCurrentStatus] = useState<'todo' | 'doing' | 'done' | null>(status || null);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
+  const t = useTranslations();
+  const locale = useLocale();
+  const dateFnsLocale = getDateFnsLocale(locale);
+
   // Format relative time for last update
   const relativeTime = updatedAt
-    ? formatDistanceToNow(new Date(updatedAt), { addSuffix: true, locale: ja })
+    ? formatDistanceToNow(new Date(updatedAt), { addSuffix: true, locale: dateFnsLocale })
     : null;
 
   // Determine if this is the main branch
@@ -51,7 +57,7 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
     e.preventDefault();
     e.stopPropagation();
 
-    if (!confirm(`「${name}」のセッションを終了しますか？\n\n※全てのメッセージ履歴が削除されます。ログファイルは保持されます。`)) {
+    if (!confirm(t('worktree.session.confirmKill', { name }))) {
       return;
     }
 
@@ -65,7 +71,7 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
       }
     } catch (err) {
       const errorMessage = handleApiError(err);
-      alert(`セッションの終了に失敗しました: ${errorMessage}`);
+      alert(`${t('worktree.session.failedToKill')}: ${errorMessage}`);
     } finally {
       setIsKilling(false);
     }
@@ -85,7 +91,7 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
       setIsFavorite(newFavorite);
     } catch (err) {
       const errorMessage = handleApiError(err);
-      alert(`お気に入りの更新に失敗しました: ${errorMessage}`);
+      alert(`${t('worktree.errors.failedToUpdateFavorite')}: ${errorMessage}`);
     } finally {
       setIsTogglingFavorite(false);
     }
@@ -109,7 +115,7 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
       }
     } catch (err) {
       const errorMessage = handleApiError(err);
-      alert(`ステータスの更新に失敗しました: ${errorMessage}`);
+      alert(`${t('worktree.errors.failedToUpdateStatus')}: ${errorMessage}`);
     } finally {
       setIsUpdatingStatus(false);
     }
@@ -138,7 +144,7 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
                 onClick={handleToggleFavorite}
                 disabled={isTogglingFavorite}
                 className="flex-shrink-0 transition-colors hover:scale-110"
-                title={isFavorite ? 'お気に入りを解除' : 'お気に入りに追加'}
+                title={isFavorite ? t('common.favorites.remove') : t('common.favorites.add')}
               >
                 <svg
                   className={`w-5 h-5 ${
@@ -159,12 +165,12 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
               {isMain && <Badge variant="info">Main</Badge>}
               {isSessionRunning && isWaitingForResponse && (
                 <Badge variant="warning" dot>
-                  レスポンス待ち
+                  {t('worktree.status.waitingForResponse')}
                 </Badge>
               )}
               {isSessionRunning && !isWaitingForResponse && (
                 <Badge variant="success" dot>
-                  レスポンス完了
+                  {t('worktree.status.responseCompleted')}
                 </Badge>
               )}
             </CardTitle>
@@ -176,7 +182,7 @@ export function WorktreeCard({ worktree, onSessionKilled, onStatusChanged }: Wor
                 disabled={isKilling}
                 className="flex-shrink-0"
               >
-                {isKilling ? '終了中...' : '終了'}
+                {isKilling ? t('common.ending') : t('common.end')}
               </Button>
             )}
           </div>

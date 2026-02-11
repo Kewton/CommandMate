@@ -1,0 +1,26 @@
+{
+  "session": {
+    "confirmKill": "End session for \"{name}\"?\n\nAll message history will be deleted. Log files will be retained.",
+    "failedToKill": "Failed to end session",
+    "confirmEnd": "End {tool} session?",
+    "endWarning": "Ending the session will clear chat history.",
+    "running": "Session running",
+    "starting": "Starting session",
+    "startingEllipsis": "Starting session..."
+  },
+  "status": {
+    "waitingForResponse": "Waiting for response",
+    "responseCompleted": "Response completed",
+    "thinking": "Thinking...",
+    "thinkingStatus": "Thinking",
+    "claudeIsThinking": "Claude is thinking..."
+  },
+  "output": {
+    "latest": "Latest output",
+    "realtimeUpdate": "Real-time update"
+  },
+  "errors": {
+    "failedToUpdateFavorite": "Failed to update favorite",
+    "failedToUpdateStatus": "Failed to update status"
+  }
+}

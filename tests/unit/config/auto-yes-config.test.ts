@@ -66,10 +66,10 @@ describe('auto-yes-config', () => {
       }
     });
 
-    it('should have correct Japanese labels', () => {
-      expect(DURATION_LABELS[3600000]).toBe('1\u6642\u9593');   // 1時間
-      expect(DURATION_LABELS[10800000]).toBe('3\u6642\u9593');  // 3時間
-      expect(DURATION_LABELS[28800000]).toBe('8\u6642\u9593');  // 8時間
+    it('should have correct i18n translation keys', () => {
+      expect(DURATION_LABELS[3600000]).toBe('autoYes.durations.1h');
+      expect(DURATION_LABELS[10800000]).toBe('autoYes.durations.3h');
+      expect(DURATION_LABELS[28800000]).toBe('autoYes.durations.8h');
     });
   });
 
