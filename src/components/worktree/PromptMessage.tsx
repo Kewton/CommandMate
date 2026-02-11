@@ -39,6 +39,27 @@ function getDisplayContent(content: string | undefined | null, question: string)
   return content;
 }
 
+/**
+ * Shared base classes for prompt action buttons.
+ * Extracted to avoid duplicating disabled/focus styles across Yes/No/Choice buttons.
+ */
+const BUTTON_BASE_CLASSES = 'rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2';
+
+/**
+ * Sending indicator shown while a response is being submitted.
+ * Extracted to eliminate duplication between yes_no and multiple_choice prompt types.
+ *
+ * @param className - Optional additional CSS classes
+ */
+function SendingIndicator({ className = '' }: { className?: string }) {
+  return (
+    <div className={`flex items-center gap-2 text-sm text-gray-500 ${className}`.trim()}>
+      <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" />
+      <span>送信中...</span>
+    </div>
+  );
+}
+
 export function PromptMessage({ message, onRespond }: PromptMessageProps) {
   const [responding, setResponding] = useState(false);
   const prompt = message.promptData!;
@@ -94,33 +115,18 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
                 <button
                   onClick={() => handleRespond('yes')}
                   disabled={responding}
-                  className={`
-                    px-6 py-2 rounded-lg font-medium transition-all
-                    bg-blue-600 text-white hover:bg-blue-700
-                    disabled:opacity-50 disabled:cursor-not-allowed
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-                  `}
+                  className={`px-6 py-2 ${BUTTON_BASE_CLASSES} bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500`}
                 >
                   Yes
                 </button>
                 <button
                   onClick={() => handleRespond('no')}
                   disabled={responding}
-                  className={`
-                    px-6 py-2 rounded-lg font-medium transition-all
-                    bg-white border-2 border-gray-300 hover:bg-gray-50
-                    disabled:opacity-50 disabled:cursor-not-allowed
-                    focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2
-                  `}
+                  className={`px-6 py-2 ${BUTTON_BASE_CLASSES} bg-white border-2 border-gray-300 hover:bg-gray-50 focus:ring-gray-500`}
                 >
                   No
                 </button>
-                {responding && (
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" />
-                    <span>送信中...</span>
-                  </div>
-                )}
+                {responding && <SendingIndicator />}
               </div>
             )}
 
@@ -133,13 +139,12 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
                     onClick={() => handleRespond(option.number.toString())}
                     disabled={responding}
                     className={`
-                      w-full text-left px-4 py-3 rounded-lg font-medium transition-all
+                      w-full text-left px-4 py-3 ${BUTTON_BASE_CLASSES}
                       ${option.isDefault
                         ? 'bg-blue-600 text-white hover:bg-blue-700 border-2 border-blue-600'
                         : 'bg-white border-2 border-gray-300 hover:bg-gray-50 text-gray-900'
                       }
-                      disabled:opacity-50 disabled:cursor-not-allowed
-                      focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+                      focus:ring-blue-500
                     `}
                   >
                     <div className="flex items-start gap-3">
@@ -153,12 +158,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
                     </div>
                   </button>
                 ))}
-                {responding && (
-                  <div className="flex items-center gap-2 text-sm text-gray-500 pt-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" />
-                    <span>送信中...</span>
-                  </div>
-                )}
+                {responding && <SendingIndicator className="pt-2" />}
               </div>
             )}
           </div>

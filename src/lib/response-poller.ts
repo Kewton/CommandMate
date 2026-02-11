@@ -60,6 +60,36 @@ const MAX_POLLING_DURATION = 5 * 60 * 1000;
 const RESPONSE_THINKING_TAIL_LINE_COUNT = 5;
 
 /**
+ * Gemini auth/loading state indicators that should not be treated as complete responses.
+ * Braille spinner characters are shared with CLAUDE_SPINNER_CHARS in cli-patterns.ts.
+ * Extracted to module level for clarity and to avoid re-creation on each call.
+ */
+const GEMINI_LOADING_INDICATORS: readonly string[] = [
+  'Waiting for auth',
+  '\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f',
+];
+
+/**
+ * Return type for extractResponse(), representing partial or complete response extraction.
+ */
+interface ExtractionResult {
+  response: string;
+  isComplete: boolean;
+  lineCount: number;
+}
+
+/**
+ * Creates an incomplete extraction result with empty response.
+ * Centralizes the repeated pattern of returning an in-progress/incomplete state.
+ *
+ * @param lineCount - Current line count for state tracking
+ * @returns ExtractionResult with empty response and isComplete: false
+ */
+function incompleteResult(lineCount: number): ExtractionResult {
+  return { response: '', isComplete: false, lineCount };
+}
+
+/**
  * Active pollers map: "worktreeId:cliToolId" -> NodeJS.Timeout
  */
 const activePollers = new Map<string, NodeJS.Timeout>();
@@ -245,7 +275,7 @@ function extractResponse(
   output: string,
   lastCapturedLine: number,
   cliToolId: CLIToolType
-): { response: string; isComplete: boolean; lineCount: number } | null {
+): ExtractionResult | null {
   // Trim trailing empty lines from the output before processing
   // This prevents the "last 20 lines" from being all empty due to tmux buffer padding
   const rawLines = output.split('\n');
@@ -388,11 +418,7 @@ function extractResponse(
     // Prevents false blocking when completed thinking summaries appear in the response body.
     const responseTailLines = response.split('\n').slice(-RESPONSE_THINKING_TAIL_LINE_COUNT).join('\n');
     if (thinkingPattern.test(responseTailLines)) {
-      return {
-        response: '',
-        isComplete: false,
-        lineCount: totalLines,
-      };
+      return incompleteResult(totalLines);
     }
 
     // CRITICAL FIX: Detect and skip Claude Code startup banner/screen
@@ -425,19 +451,11 @@ function extractResponse(
         });
 
         if (contentLines.length === 0) {
-          return {
-            response: '',
-            isComplete: false,
-            lineCount: totalLines,
-          };
+          return incompleteResult(totalLines);
         }
       } else if ((hasBannerArt || hasVersionInfo || hasStartupTips || hasProjectInit) && response.length < 2000) {
         // No user prompt found, but has banner characteristics - likely initial startup
-        return {
-          response: '',
-          isComplete: false,
-          lineCount: totalLines,
-        };
+        return incompleteResult(totalLines);
       }
     }
 
@@ -447,33 +465,15 @@ function extractResponse(
       const bannerCharCount = (response.match(/[░███]/g) || []).length;
       const totalChars = response.length;
       if (bannerCharCount > totalChars * 0.3) {
-        return {
-          response: '',
-          isComplete: false,
-          lineCount: totalLines,
-        };
+        return incompleteResult(totalLines);
       }
 
-      // Check for auth/loading states that should not be treated as complete responses.
-      // Braille spinner characters are shared with CLAUDE_SPINNER_CHARS in cli-patterns.ts.
-      const LOADING_INDICATORS = [
-        'Waiting for auth',
-        '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏',
-      ];
-      if (LOADING_INDICATORS.some(indicator => response.includes(indicator))) {
-        return {
-          response: '',
-          isComplete: false,
-          lineCount: totalLines,
-        };
+      if (GEMINI_LOADING_INDICATORS.some(indicator => response.includes(indicator))) {
+        return incompleteResult(totalLines);
       }
 
       if (!response.includes('✦') && response.length < 10) {
-        return {
-          response: '',
-          isComplete: false,
-          lineCount: totalLines,
-        };
+        return incompleteResult(totalLines);
       }
     }
 
@@ -530,11 +530,7 @@ function extractResponse(
   }
 
   // Response not yet complete (or is in thinking state)
-  return {
-    response: '',
-    isComplete: false,
-    lineCount: totalLines,
-  };
+  return incompleteResult(totalLines);
 }
 
 /**
