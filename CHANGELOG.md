@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-02-13
+
+### Added
+- i18n support with next-intl for English and Japanese (Issue #124)
+  - Locale-based routing (`/en`, `/ja`)
+  - Document translations and integration/e2e tests
+- Log export feature with LogViewer (Issue #11)
+  - `LogViewer` component in Info screen (desktop modal & mobile)
+  - `withLogging()` API logger middleware applied to log routes
+  - `log-config.ts` for centralized LOG_DIR constant
+  - Log-manager regression tests
+- Prompt instructionText display in active prompt UI (Issue #235)
+  - `PromptPanel` and `MobilePromptSheet` show instruction text
+  - Complete prompt output preserved with `rawContent` field
+
+### Fixed
+- Full prompt block included in instructionText for multiple_choice prompts (Issue #235)
+- Full output passed to detectPrompt in status-detector for long prompts (Issue #235)
+- next-intl middleware removed to fix redirect loop with custom server (Issue #124)
+- Image and document links corrected in README files (Issue #124)
+- Rebuild skill branch specification to prevent worktree misexecution
+
+### Removed
+- Dead code: claude-poller, terminal-websocket, WorktreeDetail legacy code, simple-terminal (Issue #237)
+
 ## [0.2.2] - 2026-02-10
 
 _No changes recorded._
@@ -339,7 +364,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.2...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/Kewton/CommandMate/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Kewton/CommandMate/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Kewton/CommandMate/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Kewton/CommandMate/compare/v0.1.12...v0.2.0
