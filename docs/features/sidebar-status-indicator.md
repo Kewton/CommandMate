@@ -1,3 +1,5 @@
+[English](../en/features/sidebar-status-indicator.md)
+
 # サイドバー ステータスインジケーター
 
 > Issue #31「サイドバーのUX改善」で実装されたリアルタイムステータス検出機能

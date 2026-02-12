@@ -1,3 +1,5 @@
+[English](../en/user-guide/workflow-examples.md)
+
 # ワークフロー例
 
 CommandMateのコマンドとエージェントを使った実践的なワークフロー例です。

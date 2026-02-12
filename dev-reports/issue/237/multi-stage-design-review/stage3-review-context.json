@@ -1,0 +1,8 @@
+{
+  "issue_number": 237,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_policy_path": "dev-reports/design/issue-237-dead-code-removal-design-policy.md",
+  "previous_stages": ["stage1", "stage2"]
+}

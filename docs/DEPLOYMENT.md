@@ -1,3 +1,5 @@
+[English](./en/DEPLOYMENT.md)
+
 # CommandMate デプロイメントガイド
 
 本ドキュメントは、CommandMate をプロダクション環境にデプロイする手順を説明します。

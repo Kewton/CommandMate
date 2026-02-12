@@ -1,3 +1,5 @@
+[English](./en/migration-to-commandmate.md)
+
 # CommandMate 移行ガイド
 
 このドキュメントでは、MyCodeBranchDesk から CommandMate への移行手順を説明します。

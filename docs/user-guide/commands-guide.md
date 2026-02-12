@@ -1,3 +1,5 @@
+[English](../en/user-guide/commands-guide.md)
+
 # コマンド利用ガイド
 
 CommandMateで使用できるスラッシュコマンドの詳細ガイドです。

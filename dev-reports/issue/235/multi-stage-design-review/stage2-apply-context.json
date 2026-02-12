@@ -1,0 +1,7 @@
+{
+  "issue_number": 235,
+  "review_result_path": "dev-reports/issue/235/multi-stage-design-review/stage2-review-result.json",
+  "stage": 2,
+  "stage_name": "指摘事項対応（整合性）",
+  "target_document": "dev-reports/design/issue-235-prompt-rawcontent-design-policy.md"
+}

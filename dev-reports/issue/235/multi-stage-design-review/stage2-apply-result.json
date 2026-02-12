@@ -1,0 +1,103 @@
+{
+  "issue_number": 235,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-S2-001",
+        "item": "設計書の行番号参照と実装の不一致（Yes/No return文） - lastLines変数のスコープ変更方針の明確化",
+        "sections_updated": ["Section 3.2 ([MF-S2-001])", "Section 4.1.2", "Section 4.1.3", "Section 9.1", "Section 10 (Step 3)", "Section 14 (チェックリスト)"],
+        "status": "reflected",
+        "details": "Section 3.2に[MF-S2-001]サブセクションを新設し、L97の共有変数を直接変更する方針を明記。各パターンの設計(4.1.2, 4.1.3)にlastLines共有変数への参照注記を追加。実装順序Step 3に具体的な変更箇所を明記。チェックリストにL97変更項目を追加。"
+      },
+      {
+        "id": "MF-S2-002",
+        "item": "current-output/route.ts のローカル型注釈が rawContent を含まない場合のTypeScript整合性",
+        "sections_updated": ["Section 11 (current-output/route.ts)", "Section 14 (チェックリスト)"],
+        "status": "reflected",
+        "details": "Section 11のcurrent-output/route.ts説明を拡充し、DB非保存の技術的根拠とTypeScript構造的部分型による型安全性の説明を追加。チェックリストに設計書記載完了項目を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S2-001",
+        "item": "detectMultipleChoicePromptのreturn文のコード例精度向上",
+        "sections_updated": ["Section 4.1.1"],
+        "status": "reflected",
+        "details": "コード例が簡略表現であることの注釈を追加し、promptData内のoptions map処理への言及を追記。"
+      },
+      {
+        "id": "SF-S2-002",
+        "item": "Approveパターンの変更前行番号の修正",
+        "sections_updated": ["Section 4.1.3"],
+        "status": "reflected",
+        "details": "行番号をL143-153からL143-152に修正し、「approveMatch検出後のreturn文」という位置記述を併記。"
+      },
+      {
+        "id": "SF-S2-003",
+        "item": "非検出パスのnoPromptResult()への言及追加",
+        "sections_updated": ["Section 4.1.4"],
+        "status": "reflected",
+        "details": "noPromptResult()ヘルパー関数の説明をSection 4.1.4に追加。呼び出し箇所(L390, L441, L448, L459, L467)を明記し、rawContentを含まない設計が意図的であることとテスト戦略Section 6.1との整合性を記載。"
+      },
+      {
+        "id": "SF-S2-004",
+        "item": "PromptMessage.tsx のJSX挿入位置の明確化",
+        "sections_updated": ["Section 4.3.2", "Section 10 (Step 8)", "Section 14 (チェックリスト)"],
+        "status": "reflected",
+        "details": "Section 4.3.2のタイトルを「UIレイアウトとJSX挿入位置」に変更し、既存Questionセクション(L49-54)の前に挿入することを明記。JSX変更概要のコード例を追加。"
+      },
+      {
+        "id": "SF-S2-005",
+        "item": "response-poller.ts 変更箇所への実装コメント推奨",
+        "sections_updated": ["Section 4.2.1", "Section 10 (Step 6)", "Section 14 (チェックリスト)"],
+        "status": "reflected",
+        "details": "Section 4.2.1に実装時注意事項として変更理由コメント追加を推奨する記述を追加。実装順序Step 6とチェックリストにもコメント追加項目を反映。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S2-001",
+        "item": "auto-yes-manager.ts の detectPrompt 呼び出しにおける rawContent の扱い",
+        "status": "noted",
+        "details": "現状の記載で十分と判断。Stage 2 Consider事項サマリーに記載。"
+      },
+      {
+        "id": "C-S2-002",
+        "item": "claude-poller.ts の到達不能コードに関する記載の正確性",
+        "status": "noted",
+        "details": "現状の記載で十分と判断。Stage 2 Consider事項サマリーに記載。"
+      },
+      {
+        "id": "C-S2-003",
+        "item": "テスト戦略と既存テストファイルの整合性",
+        "sections_updated": ["Section 6.1", "Section 6.2", "Section 10 (Step 5, 7, 9)"],
+        "status": "reflected",
+        "details": "テストファイルのフルパスを各セクションに追記。PromptMessage.test.tsxが新規作成であることを明記。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-235-prompt-rawcontent-design-policy.md",
+  "sections_updated": [
+    "Section 3.2 ([MF-S2-001] lastLines変数スコープ変更方針 追加)",
+    "Section 4.1.1 (コード例簡略表現の注釈追加)",
+    "Section 4.1.2 (lastLines共有変数への参照注記追加)",
+    "Section 4.1.3 (行番号修正L143-152、位置記述併記)",
+    "Section 4.1.4 (noPromptResult()ヘルパー関数の説明追加)",
+    "Section 4.2.1 (実装時コメント追加の注意事項追記)",
+    "Section 4.3.2 (タイトル変更、JSX挿入位置明確化、JSX変更概要追加)",
+    "Section 6.1 (テストファイルフルパス追記)",
+    "Section 6.2 (テストファイルフルパス追記、新規作成明記)",
+    "Section 9.1 (lastLines共有変数の決定事項追加)",
+    "Section 10 (実装順序 Step 3, 5, 6, 7, 8, 9 にフルパス・詳細追記)",
+    "Section 11 (current-output/route.ts 技術的根拠拡充)",
+    "Section 12 (Stage 2レビュー履歴追加)",
+    "Section 13 (Stage 2指摘事項サマリー追加)",
+    "Section 14 (チェックリスト拡充: L97変更、コメント追加、JSX挿入位置、フルパス)"
+  ],
+  "timestamp": "2026-02-11T12:00:00Z"
+}

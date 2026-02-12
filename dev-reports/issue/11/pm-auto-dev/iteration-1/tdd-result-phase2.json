@@ -1,0 +1,52 @@
+{
+  "status": "success",
+  "phase": "Phase 2: API Logging Feature",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "build": "success",
+  "files_changed": [
+    "src/lib/api-logger.ts",
+    "tests/unit/api-logger.test.ts",
+    "src/app/api/worktrees/[id]/logs/route.ts",
+    "src/app/api/worktrees/[id]/logs/[filename]/route.ts"
+  ],
+  "commits": [
+    "e9328eb: feat(#11): add withLogging() API logger and apply to log routes (Phase 2)"
+  ],
+  "tasks_completed": [
+    {
+      "task": "Task 2.1",
+      "description": "Create withLogging() helper (src/lib/api-logger.ts)",
+      "files_created": [
+        "src/lib/api-logger.ts",
+        "tests/unit/api-logger.test.ts"
+      ],
+      "test_count": 10,
+      "notes": "All 10 test cases pass: dev env logging, production bypass, test bypass, debug level, truncation, skipResponseBody, unchanged response, error propagation, generic type inference, params non-access"
+    },
+    {
+      "task": "Task 2.2",
+      "description": "Apply withLogging() to log API routes",
+      "files_modified": [
+        "src/app/api/worktrees/[id]/logs/route.ts",
+        "src/app/api/worktrees/[id]/logs/[filename]/route.ts"
+      ],
+      "notes": "GET handlers wrapped with withLogging. Filename route uses skipResponseBody:true. No DELETE handler exists in current codebase, so only GET handlers were wrapped. Handler logic unchanged - only wrapped with withLogging and params resolved via Promise.resolve()."
+    }
+  ],
+  "quality_gates": {
+    "tsc_no_emit": "0 errors",
+    "eslint": "0 errors",
+    "unit_tests": "3015 passed, 7 skipped (10 new tests for api-logger)",
+    "build": "success"
+  },
+  "message": "Phase 2 TDD implementation complete. withLogging() HOF created with 10 unit tests (100% branch coverage). Applied to logs/route.ts (GET) and logs/[filename]/route.ts (GET with skipResponseBody). All quality gates passed."
+}

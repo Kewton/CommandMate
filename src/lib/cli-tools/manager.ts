@@ -8,7 +8,6 @@ import { ClaudeTool } from './claude';
 import { CodexTool } from './codex';
 import { GeminiTool } from './gemini';
 import { stopPolling as stopResponsePolling } from '../response-poller';
-import { stopPolling as stopClaudePolling } from '../claude-poller';
 
 /**
  * CLI Tool Manager (Singleton)
@@ -171,11 +170,5 @@ export class CLIToolManager {
   stopPollers(worktreeId: string, cliToolId: CLIToolType): void {
     // Stop response-poller for all tools
     stopResponsePolling(worktreeId, cliToolId);
-
-    // claude-poller is Claude-specific
-    if (cliToolId === 'claude') {
-      stopClaudePolling(worktreeId);
-    }
-    // Future: Add other tool-specific pollers here if needed
   }
 }

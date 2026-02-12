@@ -1,0 +1,38 @@
+{
+  "issue_number": 11,
+  "feature_summary": "バグ原因調査目的のデータ収集機能強化",
+  "acceptance_criteria": [
+    "AC-1: LogViewer内のエクスポートボタンから、現在表示中の会話ログをクリップボードにコピーできること",
+    "AC-2: コピーされたログがMarkdown形式で、GitHub Issueにそのまま貼り付け可能であること",
+    "AC-3: ログデータが存在しない場合、ボタンが無効化されるか適切なメッセージが表示されること",
+    "AC-4: サニタイズ済みログはサーバーサイドAPI経由で取得し、クライアントにHOME/CM_ROOT_DIR等の生の値が送信されないこと",
+    "AC-5: エクスポートされたログにルートディレクトリ（CM_ROOT_DIR）・ホームディレクトリ（HOME）の絶対パスが含まれないこと",
+    "AC-6: エクスポートされたログにデータベース絶対パス（CM_DB_PATH値）が含まれないこと",
+    "AC-7: エクスポートされたログにホスト名・ユーザー名等の環境固有情報が含まれないこと",
+    "AC-8: サニタイズ後もエラーの原因調査に必要な情報（相対パス・ファイル名・エラーメッセージ）が保持されていること",
+    "AC-9: サニタイズのユニットテストで、/Users/*, /home/*パターンがエクスポート結果に含まれないことを正規表現で検証すること",
+    "AC-10: サニタイズ処理がサーバーサイドAPIハンドラー内で実行されること（クライアントコンポーネントから直接呼び出されないこと）",
+    "AC-11: 開発環境でAPIリクエスト/レスポンスの詳細ログが記録されること",
+    "AC-12: 本番環境ではAPIリクエスト/レスポンスの詳細ログが出力されないこと",
+    "AC-13: ポーリング系APIのログがdebugレベルで出力され、通常のinfoレベルでは大量出力されないこと",
+    "AC-14: 大きなレスポンスボディが適切にtruncateされてログ出力されること",
+    "AC-15: withLogging()の適用がlogger.tsの既存動作に影響しないこと",
+    "AC-16: 既存結合テスト（api-logs.test.ts）が現在のroute.ts実装と整合した状態でパスすること",
+    "AC-17: log-export-sanitizer.tsの新規テストがパスすること",
+    "AC-18: log-manager.tsの既存機能の回帰テストがパスすること",
+    "AC-19: api-logger.ts（withLoggingヘルパー）のテストがパスすること"
+  ],
+  "test_scenarios": [
+    "S-1: sanitizeForExport()にHOMEパスを含むテキストを渡し、[HOME]に置換されることを確認",
+    "S-2: sanitizeForExport()にCM_ROOT_DIRを含むテキストを渡し、[PROJECT]に置換されることを確認",
+    "S-3: sanitizeForExport()にBearerトークンを含むテキストを渡し、[REDACTED_TOKEN]に置換されることを確認",
+    "S-4: GET /api/worktrees/:id/logs/:filename?sanitize=true でサニタイズ済みコンテンツが返ることを確認",
+    "S-5: GET /api/worktrees/:id/logs/:filename でサニタイズなしのコンテンツが返ることを確認",
+    "S-6: api-client.tsのgetLogFile()にsanitize:trueを渡してクエリパラメータが付加されることを確認",
+    "S-7: withLogging()がNODE_ENV=developmentでのみログ出力することを確認",
+    "S-8: withLogging()のskipResponseBody=trueでボディがスキップされることを確認",
+    "S-9: escapeHtml()が<script>タグを無害化することを確認",
+    "S-10: 全テストスイート（unit, integration）がパスすることを確認",
+    "S-11: TypeScript型チェック、ESLint、ビルドが全パスすることを確認"
+  ]
+}

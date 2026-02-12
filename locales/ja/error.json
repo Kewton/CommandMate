@@ -1,0 +1,28 @@
+{
+  "boundary": {
+    "errorOccurredIn": "{componentName}でエラーが発生しました",
+    "errorOccurred": "エラーが発生しました"
+  },
+  "fileOps": {
+    "failedToCreateFile": "ファイルの作成に失敗しました",
+    "failedToCreateDirectory": "ディレクトリの作成に失敗しました",
+    "failedToRename": "リネームに失敗しました",
+    "failedToDelete": "削除に失敗しました"
+  },
+  "terminal": {
+    "displayError": "ターミナル表示エラー",
+    "outputError": "ターミナル出力の表示中にエラーが発生しました"
+  },
+  "history": {
+    "loadError": "メッセージ履歴の読み込みエラー",
+    "displayError": "履歴の表示中にエラーが発生しました"
+  },
+  "prompt": {
+    "responseError": "プロンプト応答エラー",
+    "choiceDisplayError": "選択肢の表示中にエラーが発生しました"
+  },
+  "connection": {
+    "error": "接続エラー",
+    "serverError": "サーバーへの接続に問題が発生しました"
+  }
+}

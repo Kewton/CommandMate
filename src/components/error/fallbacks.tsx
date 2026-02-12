@@ -6,6 +6,7 @@
 'use client';
 
 import React from 'react';
+import { useTranslations } from 'next-intl';
 
 interface ErrorFallbackProps {
   componentName?: string;
@@ -21,6 +22,9 @@ export function TerminalErrorFallback({
   error,
   onRetry,
 }: ErrorFallbackProps) {
+  const tError = useTranslations('error');
+  const tCommon = useTranslations('common');
+
   return (
     <div className="h-full flex items-center justify-center bg-gray-900 text-gray-100 p-4">
       <div className="text-center">
@@ -34,16 +38,16 @@ export function TerminalErrorFallback({
             />
           </svg>
         </div>
-        <h3 className="text-lg font-medium mb-2">ターミナル表示エラー</h3>
+        <h3 className="text-lg font-medium mb-2">{tError('terminal.displayError')}</h3>
         <p className="text-sm text-gray-400 mb-4">
-          {error?.message || 'ターミナル出力の表示中にエラーが発生しました'}
+          {error?.message || tError('terminal.outputError')}
         </p>
         {onRetry && (
           <button
             onClick={onRetry}
             className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600 transition-colors text-sm"
           >
-            再読み込み
+            {tCommon('reload')}
           </button>
         )}
       </div>
@@ -59,6 +63,9 @@ export function HistoryErrorFallback({
   error,
   onRetry,
 }: ErrorFallbackProps) {
+  const tError = useTranslations('error');
+  const tCommon = useTranslations('common');
+
   return (
     <div className="h-full flex items-center justify-center bg-gray-50 p-4">
       <div className="text-center">
@@ -72,16 +79,16 @@ export function HistoryErrorFallback({
             />
           </svg>
         </div>
-        <h3 className="text-lg font-medium text-gray-800 mb-2">メッセージ履歴の読み込みエラー</h3>
+        <h3 className="text-lg font-medium text-gray-800 mb-2">{tError('history.loadError')}</h3>
         <p className="text-sm text-gray-600 mb-4">
-          {error?.message || '履歴の表示中にエラーが発生しました'}
+          {error?.message || tError('history.displayError')}
         </p>
         {onRetry && (
           <button
             onClick={onRetry}
             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm"
           >
-            再読み込み
+            {tCommon('reload')}
           </button>
         )}
       </div>
@@ -97,6 +104,9 @@ export function PromptErrorFallback({
   error,
   onRetry,
 }: ErrorFallbackProps) {
+  const tError = useTranslations('error');
+  const tCommon = useTranslations('common');
+
   return (
     <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
       <div className="flex items-center gap-2 text-yellow-800 mb-2">
@@ -107,17 +117,17 @@ export function PromptErrorFallback({
             clipRule="evenodd"
           />
         </svg>
-        <span className="font-medium">プロンプト応答エラー</span>
+        <span className="font-medium">{tError('prompt.responseError')}</span>
       </div>
       <p className="text-sm text-yellow-700 mb-3">
-        {error?.message || '選択肢の表示中にエラーが発生しました'}
+        {error?.message || tError('prompt.choiceDisplayError')}
       </p>
       {onRetry && (
         <button
           onClick={onRetry}
           className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 transition-colors text-sm"
         >
-          再試行
+          {tCommon('retry')}
         </button>
       )}
     </div>
@@ -132,6 +142,9 @@ export function ConnectionErrorFallback({
   error,
   onRetry,
 }: ErrorFallbackProps) {
+  const tError = useTranslations('error');
+  const tCommon = useTranslations('common');
+
   return (
     <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
       <div className="flex items-center gap-2 text-orange-800 mb-2">
@@ -143,17 +156,17 @@ export function ConnectionErrorFallback({
             d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"
           />
         </svg>
-        <span className="font-medium">接続エラー</span>
+        <span className="font-medium">{tError('connection.error')}</span>
       </div>
       <p className="text-sm text-orange-700 mb-3">
-        {error?.message || 'サーバーへの接続に問題が発生しました'}
+        {error?.message || tError('connection.serverError')}
       </p>
       {onRetry && (
         <button
           onClick={onRetry}
           className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors text-sm"
         >
-          再接続
+          {tCommon('reconnect')}
         </button>
       )}
     </div>

@@ -1,3 +1,5 @@
+[English](./en/TRUST_AND_SAFETY.md)
+
 # Trust & Safety
 
 CommandMate のセキュリティモデルと安全な利用方法について説明します。

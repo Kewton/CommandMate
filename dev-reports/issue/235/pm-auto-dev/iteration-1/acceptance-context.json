@@ -1,0 +1,42 @@
+{
+  "issue_number": 235,
+  "feature_summary": "プロンプト検出時にClaudeの指示メッセージが切り捨てられる問題を修正",
+  "acceptance_criteria": [
+    "プロンプト検出時にClaudeの指示メッセージがDBに保存されること",
+    "PromptMessage UIで指示テキストが表示されること",
+    "既存のプロンプト検出・応答機能（Auto-Yes含む）に影響がないこと",
+    "既存テストがすべてパスすること",
+    "rawContent 未設定時に cleanContent へフォールバックしてDB保存されること",
+    "Approveパターンのプロンプトでも rawContent が設定されること",
+    "rawContent 導入前の既存DBメッセージでは content = 旧 cleanContent（質問のみ）が表示されること",
+    "新規メッセージでは content = rawContent（完全出力）が表示されること",
+    "既存データ・新規データの両方のケースで表示が破綻しないこと",
+    "prompt-detector.test.ts に rawContent の検証テストが追加されていること",
+    "response-poller.test.ts に DB 保存フォールバックロジックのテストが追加されていること",
+    "PromptMessage.tsx のレンダリングテストが追加されていること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: multiple_choice パターンでプロンプト検出時、rawContent に完全な出力（truncate済み）が設定され、DB に保存されること",
+    "シナリオ2: Yes/No パターンでプロンプト検出時、rawContent に末尾20行が設定され、DB に保存されること",
+    "シナリオ3: Approve パターンでプロンプト検出時、rawContent が設定され、DB に保存されること",
+    "シナリオ4: プロンプト非検出時、rawContent が undefined のままで cleanContent にフォールバックされること",
+    "シナリオ5: PromptMessage コンポーネントで、message.content が空でない場合に指示テキストが表示されること",
+    "シナリオ6: PromptMessage コンポーネントで、message.content が空の場合に question のみ表示されること（従来動作）",
+    "シナリオ7: PromptMessage コンポーネントで、content に question が含まれる場合に content 全体が表示されること",
+    "シナリオ8: truncateRawContent 関数が200行超の入力を末尾200行に truncate すること",
+    "シナリオ9: truncateRawContent 関数が5000文字超の入力を末尾5000文字に truncate すること",
+    "シナリオ10: lastLines 拡張により、末尾11-20行目の Yes/No パターンが検出されること",
+    "シナリオ11: 既存テスト（3062テスト）がすべてパスすること",
+    "シナリオ12: 影響なし確認済みコンポーネント（auto-yes-manager等）が正常に動作すること"
+  ],
+  "implementation_files": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/components/worktree/PromptMessage.tsx"
+  ],
+  "test_files": [
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/response-poller.test.ts",
+    "tests/unit/components/worktree/PromptMessage.test.tsx"
+  ]
+}

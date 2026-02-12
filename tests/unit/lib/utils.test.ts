@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { debounce, escapeRegExp, computeMatchedPaths, truncateString } from '@/lib/utils';
+import { debounce, escapeRegExp, computeMatchedPaths, truncateString, escapeHtml } from '@/lib/utils';
 
 describe('debounce', () => {
   beforeEach(() => {
@@ -336,5 +336,58 @@ describe('truncateString', () => {
 
   it('should handle special characters in branch names', () => {
     expect(truncateString('feature/special_chars.v1', 20)).toBe('feature/special_c...');
+  });
+});
+
+/**
+ * escapeHtml Tests
+ * Issue #11: XSS prevention for dangerouslySetInnerHTML (S4-MF-001)
+ */
+describe('escapeHtml', () => {
+  it('should escape ampersand', () => {
+    expect(escapeHtml('a&b')).toBe('a&amp;b');
+  });
+
+  it('should escape less-than sign', () => {
+    expect(escapeHtml('a<b')).toBe('a&lt;b');
+  });
+
+  it('should escape greater-than sign', () => {
+    expect(escapeHtml('a>b')).toBe('a&gt;b');
+  });
+
+  it('should escape double quotes', () => {
+    expect(escapeHtml('a"b')).toBe('a&quot;b');
+  });
+
+  it('should escape single quotes', () => {
+    expect(escapeHtml("a'b")).toBe('a&#039;b');
+  });
+
+  it('should escape all special characters in combination', () => {
+    expect(escapeHtml('<script>alert("xss")</script>')).toBe(
+      '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
+    );
+  });
+
+  it('should handle strings without special characters', () => {
+    expect(escapeHtml('hello world')).toBe('hello world');
+    expect(escapeHtml('src/lib/utils.ts')).toBe('src/lib/utils.ts');
+  });
+
+  it('should handle empty string', () => {
+    expect(escapeHtml('')).toBe('');
+  });
+
+  it('should escape img onerror XSS pattern', () => {
+    const input = '<img src="x" onerror="alert(1)">';
+    const result = escapeHtml(input);
+    expect(result).not.toContain('<img');
+    expect(result).toContain('&lt;img');
+  });
+
+  it('should escape multiple occurrences', () => {
+    expect(escapeHtml('a&b&c')).toBe('a&amp;b&amp;c');
+    expect(escapeHtml('<<>>')).toBe('&lt;&lt;&gt;&gt;');
   });
 });

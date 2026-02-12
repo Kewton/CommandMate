@@ -1,0 +1,16 @@
+{
+  "cancel": "Cancel",
+  "send": "Send",
+  "end": "End",
+  "ending": "Ending...",
+  "retry": "Retry",
+  "reload": "Reload",
+  "reconnect": "Reconnect",
+  "close": "Close",
+  "back": "Back",
+  "confirmDelete": "Delete \"{name}\"?",
+  "favorites": {
+    "add": "Add to favorites",
+    "remove": "Remove from favorites"
+  }
+}

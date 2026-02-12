@@ -1,0 +1,135 @@
+{
+  "issue_number": 237,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-11",
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "WorktreeDetail.tsx のLOC見積もりが大幅に誤っている（~200 vs 実際937行）",
+        "location": "## リファクタリング方針 > 削除対象テーブル",
+        "recommendation": "LOCを~200から~937に修正する。総削除LOCも「約840行以上」から「約1,900行以上」に更新する",
+        "evidence": "wc -l src/components/worktree/WorktreeDetail.tsx の結果が937行。Issueでは~200と記載されている"
+      },
+      {
+        "id": "MF-2",
+        "category": "正確性",
+        "issue": "terminal-websocket.ts のLOC見積もりが誤っている（~150 vs 実際222行）",
+        "location": "## リファクタリング方針 > 削除対象テーブル",
+        "recommendation": "LOCを~150から~222に修正する",
+        "evidence": "wc -l src/lib/terminal-websocket.ts の結果が222行。Issueでは~150と記載されている"
+      },
+      {
+        "id": "MF-3",
+        "category": "完全性",
+        "issue": "session-cleanup.ts と manager.ts の修正内容が「importを削除・代替」と記載されているが、実際にはimportだけでなく関数呼び出しロジックの削除・修正も必要",
+        "location": "## リファクタリング方針 > 修正が必要なファイル（参照の更新）テーブル",
+        "recommendation": "修正内容を具体化する。session-cleanup.ts: L100-108のstopClaudePolling呼び出しブロック全体を削除。manager.ts: L171-178のstopPollers()メソッド内のclaude-poller呼び出しロジックを削除。単なるimport削除ではなく、機能ロジックの修正であることを明記する",
+        "evidence": "session-cleanup.ts L100-108: stopClaudePolling(worktreeId)呼び出しとtry/catchブロック。manager.ts L175-178: if (cliToolId === 'claude') { stopClaudePolling(worktreeId); } ブロック"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "SimpleTerminal.tsx のLOCが「-」となっており見積もりが欠落している",
+        "location": "## リファクタリング方針 > 削除対象テーブル",
+        "recommendation": "LOCを~253に設定する。削除対象としてリストされているのにLOCが省略されているのは不整合",
+        "evidence": "wc -l src/components/SimpleTerminal.tsx の結果が253行"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "ドキュメント更新が影響範囲に含まれていない。docs/architecture.md がclaude-pollerに言及しており、削除後に陳腐化する",
+        "location": "## 影響範囲 > 変更対象ファイル テーブル",
+        "recommendation": "docs/architecture.md L569 の「response-poller / claude-pollerを停止」を「response-pollerを停止」に更新する作業を影響範囲に追加する",
+        "evidence": "docs/architecture.md L569: 「3. response-poller / claude-pollerを停止」"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "index.ts修正後にWorktreeDetailRefactoredのexportを追加すべきか検討が必要。現在index.tsはWorktreeDetailをexportしているが、WorktreeDetailRefactoredはexportされていない",
+        "location": "## リファクタリング方針 > 修正が必要なファイル",
+        "recommendation": "WorktreeDetail削除時に、index.tsでWorktreeDetailRefactoredのexportを追加するかどうかの判断を明記する。現状worktrees/[id]/page.tsxは直接importしているため必須ではないが、barrel exportの一貫性の観点から検討すべき",
+        "evidence": "src/components/worktree/index.ts L12-13がWorktreeDetailをexportしている。src/app/worktrees/[id]/page.tsx L10はWorktreeDetailRefactoredを直接importしている"
+      },
+      {
+        "id": "SF-4",
+        "category": "明確性",
+        "issue": "削除後の総LOC削減数が「約840行以上」と記載されているが、実際は約1,900行以上（400+222+937+91+253）であり2倍以上過小評価されている",
+        "location": "## リファクタリング方針 > After",
+        "recommendation": "「約840行以上のデッドコードを削減」を「約1,900行以上のデッドコードを削減」に修正する",
+        "evidence": "各ファイルの実測値: claude-poller.ts=400, terminal-websocket.ts=222, WorktreeDetail.tsx=937, simple-terminal/page.tsx=91, SimpleTerminal.tsx=253. 合計=1,903行"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md がclaude-poller.tsとWorktreeDetail.tsxに言及しているが、内部ドキュメントであるため影響は限定的",
+        "location": "## 影響範囲",
+        "recommendation": "内部設計ドキュメントの更新を任意対応として記載することを検討する",
+        "evidence": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md L456, L589, L872, L1137, L1149"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "受入条件にドキュメント更新の確認項目がない",
+        "location": "## 受入条件",
+        "recommendation": "「関連ドキュメント（docs/architecture.md等）が更新されていること」を受入条件に追加することを検討する",
+        "evidence": "現在の受入条件はビルド・テスト・リントのみで、ドキュメント整合性の確認が含まれていない"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/claude-poller.ts",
+      "relevance": "削除対象ファイル（400行）。stopPolling関数がsession-cleanup.tsとmanager.tsから参照されている"
+    },
+    {
+      "file": "src/lib/terminal-websocket.ts",
+      "relevance": "削除対象ファイル（222行）。コードベース内で一切インポートされていないデッドコード"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "relevance": "削除対象ファイル（937行）。index.tsからexportされているが、実際にはどこからもインポートされていない"
+    },
+    {
+      "file": "src/app/worktrees/[id]/simple-terminal/page.tsx",
+      "relevance": "削除対象ファイル（91行）。SimpleTerminal.tsxをインポートしている"
+    },
+    {
+      "file": "src/components/SimpleTerminal.tsx",
+      "relevance": "削除対象ファイル（253行）。simple-terminal/page.tsxからのみインポートされている"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "修正対象ファイル。claude-pollerのstopPolling関数をインポート・使用している（L11, L100-108）"
+    },
+    {
+      "file": "src/lib/cli-tools/manager.ts",
+      "relevance": "修正対象ファイル。claude-pollerのstopPolling関数をインポート・使用している（L11, L175-178）"
+    },
+    {
+      "file": "src/components/worktree/index.ts",
+      "relevance": "修正対象ファイル。WorktreeDetailのexport文がある（L12-13）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/architecture.md",
+      "relevance": "L569でclaude-pollerに言及。削除後に更新が必要"
+    },
+    {
+      "file": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md",
+      "relevance": "claude-poller.tsとWorktreeDetail.tsxに言及する内部ドキュメント。更新は任意"
+    }
+  ]
+}

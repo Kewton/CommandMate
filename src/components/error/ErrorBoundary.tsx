@@ -6,6 +6,7 @@
 'use client';
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { useTranslations } from 'next-intl';
 
 interface Props {
   children: ReactNode;
@@ -80,6 +81,9 @@ function DefaultErrorFallback({
   error,
   onRetry,
 }: ErrorFallbackProps) {
+  const tError = useTranslations('error');
+  const tCommon = useTranslations('common');
+
   return (
     <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
       <div className="flex items-center gap-2 text-red-800 mb-2">
@@ -91,7 +95,7 @@ function DefaultErrorFallback({
           />
         </svg>
         <span className="font-medium">
-          {componentName ? `${componentName}でエラーが発生しました` : 'エラーが発生しました'}
+          {componentName ? tError('boundary.errorOccurredIn', { componentName }) : tError('boundary.errorOccurred')}
         </span>
       </div>
       {error && (
@@ -102,7 +106,7 @@ function DefaultErrorFallback({
           onClick={onRetry}
           className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-sm"
         >
-          再試行
+          {tCommon('retry')}
         </button>
       )}
     </div>

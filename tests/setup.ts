@@ -1,6 +1,24 @@
 // Vitest setup file
-import { beforeAll, afterAll, afterEach } from 'vitest';
+import { beforeAll, afterAll, afterEach, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
+
+// Mock next-intl for all component tests
+vi.mock('next-intl', () => ({
+  useTranslations: (namespace?: string) => {
+    return (key: string, params?: Record<string, string | number>) => {
+      const fullKey = namespace ? `${namespace}.${key}` : key;
+      if (params) {
+        return Object.entries(params).reduce(
+          (str, [k, v]) => str.replace(`{${k}}`, String(v)),
+          fullKey
+        );
+      }
+      return fullKey;
+    };
+  },
+  useLocale: () => 'en',
+  NextIntlClientProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
 
 // グローバルなテスト設定
 

@@ -1,0 +1,11 @@
+{
+  "issue_number": 237,
+  "review_result_path": "dev-reports/issue/237/multi-stage-design-review/stage3-review-result.json",
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘事項対応",
+  "status": "skipped",
+  "reason": "Stage 3で Must Fix / Should Fix の指摘が0件のため、対応作業は不要",
+  "applied_count": 0,
+  "skipped_count": 0,
+  "date": "2026-02-11"
+}

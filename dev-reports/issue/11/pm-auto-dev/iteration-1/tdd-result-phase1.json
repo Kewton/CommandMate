@@ -1,0 +1,42 @@
+{
+  "status": "success",
+  "phase": "Phase 1: Log Export Feature",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 70,
+    "passed": 70,
+    "failed": 0,
+    "breakdown": {
+      "log-export-sanitizer.test.ts": { "total": 18, "passed": 18 },
+      "api-logs.test.ts (integration)": { "total": 7, "passed": 7 },
+      "utils.test.ts": { "total": 45, "passed": 45 }
+    }
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "build": "success",
+  "files_changed": [
+    "src/lib/log-export-sanitizer.ts",
+    "src/lib/utils.ts",
+    "src/lib/api-client.ts",
+    "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+    "src/components/worktree/LogViewer.tsx",
+    "tests/unit/log-export-sanitizer.test.ts",
+    "tests/unit/lib/utils.test.ts",
+    "tests/integration/api-logs.test.ts"
+  ],
+  "tasks_completed": [
+    "Task 1.1: Fix existing integration tests (fs/promises mocks, .md extensions, worktreeId prefix validation)",
+    "Task 1.2: Implement log-export-sanitizer.ts with 18 unit tests (HOME/CM_ROOT_DIR/CM_DB_PATH/hostname/tokens/passwords/SSH keys masking)",
+    "Task 1.3: Add sanitize query parameter to log API route",
+    "Task 1.4: Extend api-client.ts (sanitize option, cliToolId type)",
+    "Task 1.5: Add export button to LogViewer.tsx with clipboard copy and toast",
+    "Task 1.6: Add escapeHtml() to utils.ts with 10 unit tests, apply XSS prevention in LogViewer"
+  ],
+  "commits": [
+    "490c59f: feat(#11): implement log export feature (Phase 1)"
+  ],
+  "message": "Phase 1 TDD implementation complete. All 6 tasks implemented. 70 tests passing. ESLint 0 errors, TypeScript 0 errors, build success."
+}

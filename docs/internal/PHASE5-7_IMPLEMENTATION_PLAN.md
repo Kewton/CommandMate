@@ -1,3 +1,5 @@
+[English](../en/internal/PHASE5-7_IMPLEMENTATION_PLAN.md)
+
 # Phase 5-7 実装計画書
 
 CommandMate の tmux/Claude CLI 統合機能の詳細実装計画。

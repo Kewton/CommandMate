@@ -1,0 +1,31 @@
+{
+  "issue_number": 11,
+  "phase": "Phase 2: APIロギング機能",
+  "tasks": ["Task 2.1", "Task 2.2"],
+  "acceptance_criteria": [
+    "Task 2.1: src/lib/api-logger.ts が新規作成され、withLogging<P>()がジェネリクス型でエクスポートされること",
+    "Task 2.1: WithLoggingOptionsインターフェース（logLevel, maxResponseBodyLength, skipResponseBody）が定義されること",
+    "Task 2.1: NODE_ENV !== 'development'の場合はログ出力なしで即座にハンドラーを実行すること",
+    "Task 2.1: request.nextUrl.pathnameからパス情報を取得すること（params非依存）",
+    "Task 2.1: response.clone()でレスポンスボディを読み取り、1KB超はtruncateすること",
+    "Task 2.1: skipResponseBody=trueの場合はボディログ出力をスキップすること",
+    "Task 2.1: tests/unit/api-logger.test.ts の全テストがパスすること",
+    "Task 2.2: src/app/api/worktrees/[id]/logs/route.ts のGETハンドラーがwithLoggingでラップされること",
+    "Task 2.2: src/app/api/worktrees/[id]/logs/[filename]/route.ts のGET/DELETEハンドラーがwithLoggingでラップされること",
+    "Task 2.2: GETハンドラー（ファイルコンテンツ）にskipResponseBody: trueが設定されること",
+    "全体: npm run build が成功すること",
+    "全体: npm run lint がエラー0件であること",
+    "全体: npx tsc --noEmit が型エラー0件であること",
+    "全体: npm run test:unit が全パスすること"
+  ],
+  "implementation_tasks": [
+    "Task 2.1: src/lib/api-logger.ts を新規作成 - ジェネリクス型ApiHandler<P>定義、WithLoggingOptionsインターフェース（logLevel:'debug'|'info'デフォルトinfo, maxResponseBodyLength:numberデフォルト1024, skipResponseBody:boolean）、withLogging<P>(handler, options?)関数（NODE_ENV!='development'でバイパス、request.nextUrl.pathname使用、createLogger('api')利用、response.clone()でボディ読み取り、truncate実装）",
+    "Task 2.1: tests/unit/api-logger.test.ts を新規作成（10テストケース: 開発環境ログ出力、本番環境非出力、NODE_ENV=test非出力、debugレベル、truncate、skipResponseBody、レスポンスそのまま返却、エラー伝播、ジェネリクス型推論、paramsアクセスなし）",
+    "Task 2.2: src/app/api/worktrees/[id]/logs/route.ts のGETハンドラーをwithLogging<{id:string}>()でラップ",
+    "Task 2.2: src/app/api/worktrees/[id]/logs/[filename]/route.ts のGETハンドラーをwithLogging<{id:string;filename:string}>(handler, {skipResponseBody:true})でラップ",
+    "Task 2.2: src/app/api/worktrees/[id]/logs/[filename]/route.ts のDELETEハンドラーをwithLogging<{id:string;filename:string}>()でラップ"
+  ],
+  "design_doc_path": "dev-reports/design/issue-11-data-collection-design-policy.md",
+  "work_plan_path": "dev-reports/issue/11/work-plan.md",
+  "target_coverage": 80
+}

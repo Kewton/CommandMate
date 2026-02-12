@@ -1,0 +1,34 @@
+{
+  "issue_number": 11,
+  "phase": "Phase 1: ログエクスポート機能",
+  "tasks": ["Task 1.1", "Task 1.2", "Task 1.3", "Task 1.4", "Task 1.5", "Task 1.6"],
+  "acceptance_criteria": [
+    "Task 1.1: tests/integration/api-logs.test.ts がfs/promises対応、.md統一、worktreeIdプレフィックス検証に修正され、全テストがパスすること",
+    "Task 1.2: src/lib/log-export-sanitizer.ts が新規作成され、sanitizeForExport()が HOME/CM_ROOT_DIR/CM_DB_PATH/ホスト名/Bearerトークン/パスワード等を適切にマスクすること",
+    "Task 1.2: escapeRegExp()のJSDocが更新され、サーバーサイド利用も想定している旨が記載されること",
+    "Task 1.2: tests/unit/log-export-sanitizer.test.ts の全テストがパスすること",
+    "Task 1.3: GET /api/worktrees/:id/logs/:filename?sanitize=true でサニタイズ済みコンテンツが返ること",
+    "Task 1.3: デフォルト（sanitizeなし）は通常コンテンツを返すこと",
+    "Task 1.4: api-client.ts の getLogFile() にoptions?.sanitizeパラメータが追加され、LogFileResponse型にcliToolIdが追加されること",
+    "Task 1.5: LogViewer.tsx にエクスポートボタンが表示され、押下でサニタイズ済みログがクリップボードにコピーされること",
+    "Task 1.5: ログ未選択時はボタンが無効化されること",
+    "Task 1.6: src/lib/utils.ts に escapeHtml() が追加され、LogViewer.tsxのhighlightedContentでHTML特殊文字がエスケープされること",
+    "全体: npm run build が成功すること",
+    "全体: npm run lint がエラー0件であること",
+    "全体: npx tsc --noEmit が型エラー0件であること",
+    "全体: npm run test:unit が全パスすること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: tests/integration/api-logs.test.ts を修正 - fsモックをfs/promises(stat,readFile,readdir,access,mkdir)に変更、.jsonl→.md統一、エラーメッセージ修正、worktreeIdプレフィックス検証追加",
+    "Task 1.2: src/lib/log-export-sanitizer.ts を新規作成 - buildSanitizeRules()でルール生成(HOMEパス→[HOME], CM_ROOT_DIR→[PROJECT], CM_DB_PATH→[DB_PATH], os.hostname()→[HOST], Bearerトークン→[REDACTED_TOKEN], Authorization→[REDACTED_AUTH], password/token/secret key-value→[REDACTED], SSH private key→[REDACTED_KEY], 環境変数名→[REDACTED_ENV])、sanitizeForExport(content)関数、最長一致優先ソート、escapeRegExp()をutilsからインポート、process.env.HOME直接取得",
+    "Task 1.2: src/lib/utils.ts の escapeRegExp() JSDocを更新（CLIENT-SIDE only → client-side highlighting and server-side sanitization）、SEC-MF-001 ReDoS prevention note保持",
+    "Task 1.2: tests/unit/log-export-sanitizer.test.ts を新規作成（17テストケース: HOMEマスク、CM_ROOT_DIRマスク、CM_DB_PATHマスク、ホスト名マスク、Bearerトークンマスク、パスワードマスク、SSHキーマスク、相対パス保持、エラーメッセージ保持、最長一致テスト、CM_ROOT_DIR未設定フォールバック、HOME未設定安全性、/Users/*パターン検証、/home/*パターン検証、環境変数実値検証）",
+    "Task 1.3: src/app/api/worktrees/[id]/logs/[filename]/route.ts にサニタイズオプション追加 - request.nextUrl.searchParamsからsanitize取得、sanitizeForExport()をインポート、条件分岐1行（if (sanitize) content = sanitizeForExport(content);）",
+    "Task 1.4: src/lib/api-client.ts のgetLogFile()修正 - options?: { sanitize?: boolean }パラメータ追加、URLにクエリパラメータ付加、LogFileResponse型にcliToolId:string追加",
+    "Task 1.5: src/components/worktree/LogViewer.tsx にエクスポートボタン追加 - handleExport()関数（api-client.getLogFile(worktreeId, selectedFile, {sanitize:true})でサニタイズ済みログ取得、copyToClipboard()でコピー、トースト通知）、ログ未選択時disabled",
+    "Task 1.6: src/lib/utils.ts に escapeHtml() 関数追加（&→&amp;, <→&lt;, >→&gt;, \"→&quot;, '→&#039;）、LogViewer.tsxのhighlightedContent生成でescapeHtml()適用"
+  ],
+  "design_doc_path": "dev-reports/design/issue-11-data-collection-design-policy.md",
+  "work_plan_path": "dev-reports/issue/11/work-plan.md",
+  "target_coverage": 80
+}

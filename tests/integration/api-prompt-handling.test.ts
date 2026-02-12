@@ -50,12 +50,6 @@ vi.mock('@/lib/claude-session', () => ({
   isClaudeRunning: vi.fn().mockResolvedValue(true),
 }));
 
-// Mock claude-poller module
-vi.mock('@/lib/claude-poller', () => ({
-  startPolling: vi.fn(),
-  stopPolling: vi.fn(),
-}));
-
 // Mock ws-server module
 vi.mock('@/lib/ws-server', () => ({
   broadcastMessage: vi.fn(),
@@ -234,37 +228,6 @@ describe('POST /api/worktrees/:id/respond', () => {
       await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
 
       expect(sendKeys).toHaveBeenCalledWith('mcbd-test-worktree', 'n', true);
-    });
-
-    it('should resume polling after responding', async () => {
-      const { startPolling } = await import('@/lib/claude-poller');
-
-      const message = createMessage(db, {
-        worktreeId: 'test-worktree',
-        role: 'assistant',
-        content: 'Continue?',
-        messageType: 'prompt',
-        promptData: {
-          type: 'yes_no',
-          question: 'Continue?',
-          options: ['yes', 'no'],
-          status: 'pending',
-        },
-        timestamp: new Date(),
-      });
-
-      const request = new Request('http://localhost:3000/api/worktrees/test-worktree/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messageId: message.id,
-          answer: 'yes',
-        }),
-      });
-
-      await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: { id: 'test-worktree' } });
-
-      expect(startPolling).toHaveBeenCalledWith('test-worktree');
     });
 
     it('should broadcast updated message via WebSocket', async () => {

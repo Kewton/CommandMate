@@ -190,14 +190,19 @@ export const worktreeApi = {
 
   /**
    * Get content of a specific log file
+   * @param id - Worktree ID
+   * @param filename - Log filename
+   * @param options - Optional parameters (sanitize: apply privacy sanitization)
    */
-  async getLogFile(id: string, filename: string): Promise<{
+  async getLogFile(id: string, filename: string, options?: { sanitize?: boolean }): Promise<{
     filename: string;
+    cliToolId: string;
     content: string;
     size: number;
     modifiedAt: string;
   }> {
-    return fetchApi(`/api/worktrees/${id}/logs/${filename}`);
+    const queryParams = options?.sanitize ? '?sanitize=true' : '';
+    return fetchApi(`/api/worktrees/${id}/logs/${filename}${queryParams}`);
   },
 
   /**

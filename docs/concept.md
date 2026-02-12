@@ -1,3 +1,5 @@
+[English](./en/concept.md)
+
 # CommandMate - Concept
 
 ## Vibe Coder のための並行開発プラットフォーム

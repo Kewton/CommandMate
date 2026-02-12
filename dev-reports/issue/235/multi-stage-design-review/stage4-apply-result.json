@@ -1,0 +1,71 @@
+{
+  "issue_number": 235,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-S4-001",
+        "item": "stripAnsi()の既知の制限によるANSIエスケープコード残留リスク",
+        "sections_updated": ["Section 4.3.3", "Section 8.2 ([MF-S4-001])"],
+        "status": "reflected",
+        "details": "Section 8.2にSEC-002制限の詳細分析を新設。C1制御文字の種類列挙、HTML出力への影響分析（XSSリスクなし、表示乱れの可能性）、strip-ansiパッケージの将来検討を記載。Section 4.3.3にSEC-002参照とdangerouslySetInnerHTML/ReactMarkdown不使用方針を明記。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S4-001",
+        "item": "rawContent経由のログインジェクション・情報漏洩リスクの評価不足",
+        "sections_updated": ["Section 8.4 (新設)"],
+        "status": "reflected",
+        "details": "Section 8.4を新設し、rawContentに含まれうる情報の列挙、既存cleanContentとの比較（新規リスクではない）、ローカル開発ツールとしてのリスク軽減要因、log-export-sanitizer.tsによるエクスポート時サニタイズを記載。"
+      },
+      {
+        "id": "SF-S4-002",
+        "item": "truncateRawContent関数のReDoSリスク評価の欠如",
+        "sections_updated": ["Section 4.1.5"],
+        "status": "reflected",
+        "details": "truncateRawContent定義にReDoSリスクなしのセキュリティアノテーションコメントを追加。String.split('\\n')とString.slice()はリテラル文字列操作のみであることを明記。"
+      },
+      {
+        "id": "SF-S4-003",
+        "item": "getDisplayContent関数における文字列比較の厳密性不足",
+        "sections_updated": ["Section 4.3.1"],
+        "status": "reflected",
+        "details": "getDisplayContent()のコード例の後に注記を追加。stripAnsi残留文字やUnicode正規化差異による比較不一致の可能性と、その場合でも情報欠落は発生しないことを明記。YAGNI原則により現時点での追加対策は不要とした。"
+      }
+    ]
+  },
+  "consider_items_noted": [
+    {
+      "id": "C-S4-001",
+      "item": "rawContentの将来的なサニタイズパイプライン拡張",
+      "noted_in": "Section 4.3.3, Section 13 (Stage 4 Consider)"
+    },
+    {
+      "id": "C-S4-002",
+      "item": "WebSocket broadcast経由でのrawContent送信時のサイズ考慮",
+      "noted_in": "Section 13 (Stage 4 Consider)"
+    },
+    {
+      "id": "C-S4-003",
+      "item": "DB保存contentカラムのサイズ上限のドキュメント化",
+      "noted_in": "Section 13 (Stage 4 Consider)"
+    }
+  ],
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-235-prompt-rawcontent-design-policy.md",
+  "sections_updated": [
+    "Section 4.1.5 (truncateRawContent ReDoSアノテーション追加)",
+    "Section 4.3.1 (getDisplayContent 文字列比較注記追加)",
+    "Section 4.3.3 (セキュリティ方針強化)",
+    "Section 8.2 ([MF-S4-001] stripAnsi SEC-002制限分析 新設)",
+    "Section 8.4 ([SF-S4-001] 情報漏洩リスク 新設)",
+    "Section 12 (レビュー履歴にStage 4追加)",
+    "Section 13 (Stage 4レビュー指摘事項サマリー追加)",
+    "Section 14 (Stage 4チェックリスト項目追加)"
+  ],
+  "timestamp": "2026-02-11T12:00:00Z"
+}

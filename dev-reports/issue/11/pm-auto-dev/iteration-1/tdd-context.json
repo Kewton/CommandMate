@@ -1,0 +1,25 @@
+{
+  "issue_number": 11,
+  "phase": "Phase 0: 前提タスク",
+  "task_id": "Task 0.1",
+  "task_name": "LOG_DIR定数の一元管理",
+  "acceptance_criteria": [
+    "src/config/log-config.ts が新規作成され、getLogDir()関数がエクスポートされること",
+    "src/lib/log-manager.ts のLOG_DIR定義（14行目）がlog-configからのインポートに変更されること",
+    "src/app/api/worktrees/[id]/logs/[filename]/route.ts のLOG_DIR定義（14行目）がlog-configからのインポートに変更されること",
+    "src/app/api/worktrees/[id]/logs/route.ts のLOG_DIR参照もlog-configからのインポートに変更されること",
+    "npm run build が成功すること（循環依存がないこと）",
+    "npm run test:unit が全パスすること",
+    "npm run test:integration が全パスすること"
+  ],
+  "implementation_tasks": [
+    "src/config/log-config.ts を新規作成し、getLogDir()関数を実装する。LOG_DIRはprocess.env.CM_LOG_DIR || `${getEnv().CM_ROOT_DIR}/data/logs` で算出",
+    "src/lib/log-manager.ts のLOG_DIR定義を削除し、log-configのgetLogDir()をインポートして使用",
+    "src/app/api/worktrees/[id]/logs/[filename]/route.ts のLOG_DIR定義を削除し、log-configのgetLogDir()をインポートして使用",
+    "src/app/api/worktrees/[id]/logs/route.ts のLOG_DIR参照もlog-configのgetLogDir()に変更",
+    "依存関係チェーン（log-config.ts → env.ts → db-path-resolver.ts）に循環依存がないことを確認"
+  ],
+  "design_doc_path": "dev-reports/design/issue-11-data-collection-design-policy.md",
+  "work_plan_path": "dev-reports/issue/11/work-plan.md",
+  "target_coverage": 80
+}

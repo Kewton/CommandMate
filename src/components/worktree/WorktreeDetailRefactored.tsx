@@ -41,6 +41,7 @@ import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
 import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { MemoPane } from '@/components/worktree/MemoPane';
+import { LogViewer } from '@/components/worktree/LogViewer';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
@@ -51,6 +52,7 @@ import type { Worktree, ChatMessage, PromptData, GitStatus } from '@/types/model
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { deriveCliStatus } from '@/types/sidebar';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
+import { useTranslations } from 'next-intl';
 
 // ============================================================================
 // Types
@@ -321,6 +323,7 @@ const DesktopHeader = memo(function DesktopHeader({
 
 /** Props for InfoModal component */
 interface InfoModalProps {
+  worktreeId: string;
   worktree: Worktree | null;
   isOpen: boolean;
   onClose: () => void;
@@ -329,6 +332,7 @@ interface InfoModalProps {
 
 /** Modal displaying worktree information with description editing */
 const InfoModal = memo(function InfoModal({
+  worktreeId,
   worktree,
   isOpen,
   onClose,
@@ -337,6 +341,7 @@ const InfoModal = memo(function InfoModal({
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [descriptionText, setDescriptionText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
 
   // Track previous isOpen state to detect modal opening
   const prevIsOpenRef = useRef(isOpen);
@@ -493,6 +498,21 @@ const InfoModal = memo(function InfoModal({
           <h2 className="text-sm font-medium text-gray-500 mb-1">Version</h2>
           <p className="text-sm text-gray-700">{APP_VERSION_DISPLAY}</p>
         </div>
+
+        {/* Logs */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-medium text-gray-500">Logs</h2>
+            <button
+              type="button"
+              onClick={() => setShowLogs(!showLogs)}
+              className="text-sm text-blue-600 hover:text-blue-800"
+            >
+              {showLogs ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          {showLogs && <LogViewer worktreeId={worktreeId} />}
+        </div>
       </div>
     </Modal>
   );
@@ -571,18 +591,21 @@ const ErrorDisplay = memo(function ErrorDisplay({
 
 /** Props for MobileInfoContent component */
 interface MobileInfoContentProps {
+  worktreeId: string;
   worktree: Worktree | null;
   onWorktreeUpdate: (updated: Worktree) => void;
 }
 
 /** Mobile Info tab content with description editing */
 const MobileInfoContent = memo(function MobileInfoContent({
+  worktreeId,
   worktree,
   onWorktreeUpdate,
 }: MobileInfoContentProps) {
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [descriptionText, setDescriptionText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
 
   // Track previous worktree ID to detect worktree changes
   const prevWorktreeIdRef = useRef(worktree?.id);
@@ -743,6 +766,21 @@ const MobileInfoContent = memo(function MobileInfoContent({
         <h2 className="text-sm font-medium text-gray-500 mb-1">Version</h2>
         <p className="text-sm text-gray-700">{APP_VERSION_DISPLAY}</p>
       </div>
+
+      {/* Logs */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-medium text-gray-500">Logs</h2>
+          <button
+            type="button"
+            onClick={() => setShowLogs(!showLogs)}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            {showLogs ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        {showLogs && <LogViewer worktreeId={worktreeId} />}
+      </div>
     </div>
   );
 });
@@ -862,6 +900,7 @@ const MobileContent = memo(function MobileContent({
     case 'info':
       return (
         <MobileInfoContent
+          worktreeId={worktreeId}
           worktree={worktree}
           onWorktreeUpdate={onWorktreeUpdate}
         />
@@ -890,6 +929,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const isMobile = useIsMobile();
   const { toggle, openMobileDrawer } = useSidebarContext();
   const { state, actions } = useWorktreeUIState();
+  const tWorktree = useTranslations('worktree');
+  const tError = useTranslations('error');
+  const tCommon = useTranslations('common');
 
   // Local state for worktree data and loading status
   const [worktree, setWorktree] = useState<Worktree | null>(null);
@@ -1226,9 +1268,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to create file:', err);
-      window.alert('ファイルの作成に失敗しました');
+      window.alert(tError('fileOps.failedToCreateFile'));
     }
-  }, [worktreeId]);
+  }, [worktreeId, tError]);
 
   /** Handle new directory creation in FileTreeView */
   const handleNewDirectory = useCallback(async (parentPath: string) => {
@@ -1253,9 +1295,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to create directory:', err);
-      window.alert('ディレクトリの作成に失敗しました');
+      window.alert(tError('fileOps.failedToCreateDirectory'));
     }
-  }, [worktreeId]);
+  }, [worktreeId, tError]);
 
   /** Handle file/directory rename in FileTreeView */
   const handleRename = useCallback(async (path: string) => {
@@ -1279,14 +1321,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to rename:', err);
-      window.alert('リネームに失敗しました');
+      window.alert(tError('fileOps.failedToRename'));
     }
-  }, [worktreeId]);
+  }, [worktreeId, tError]);
 
   /** Handle file/directory delete in FileTreeView */
   const handleDelete = useCallback(async (path: string) => {
     const name = path.split('/').pop() || path;
-    if (!window.confirm(`"${name}" を削除しますか？`)) return;
+    if (!window.confirm(tCommon('confirmDelete', { name }))) return;
 
     try {
       const response = await fetch(
@@ -1306,9 +1348,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
-      window.alert('削除に失敗しました');
+      window.alert(tError('fileOps.failedToDelete'));
     }
-  }, [worktreeId, editorFilePath]);
+  }, [worktreeId, editorFilePath, tCommon, tError]);
 
   // Toast state for upload notifications
   const { toasts, showToast, removeToast } = useToast();
@@ -1669,6 +1711,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           )}
           {/* Info Modal */}
           <InfoModal
+            worktreeId={worktreeId}
             worktree={worktree}
             isOpen={isInfoModalOpen}
             onClose={handleInfoModalClose}
@@ -1714,13 +1757,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <Modal
             isOpen={showKillConfirm}
             onClose={handleKillCancel}
-            title={`${activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1)} セッションを終了しますか？`}
+            title={tWorktree('session.confirmEnd', { tool: activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1) })}
             size="sm"
             showCloseButton={true}
           >
             <div className="space-y-4">
               <p className="text-sm text-gray-700">
-                セッションを終了すると、チャット履歴がクリアされます。
+                {tWorktree('session.endWarning')}
               </p>
               <div className="flex justify-end gap-3 pt-2">
                 <button
@@ -1728,14 +1771,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   onClick={handleKillCancel}
                   className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
                 >
-                  キャンセル
+                  {tCommon('cancel')}
                 </button>
                 <button
                   type="button"
                   onClick={handleKillConfirm}
                   className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
                 >
-                  終了する
+                  {tCommon('end')}
                 </button>
               </div>
             </div>
@@ -1927,13 +1970,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <Modal
           isOpen={showKillConfirm}
           onClose={handleKillCancel}
-          title={`${activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1)} セッションを終了しますか？`}
+          title={tWorktree('session.confirmEnd', { tool: activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1) })}
           size="sm"
           showCloseButton={true}
         >
           <div className="space-y-4">
             <p className="text-sm text-gray-700">
-              セッションを終了すると、チャット履歴がクリアされます。
+              {tWorktree('session.endWarning')}
             </p>
             <div className="flex justify-end gap-3 pt-2">
               <button
@@ -1941,14 +1984,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 onClick={handleKillCancel}
                 className="px-4 py-2 text-sm font-medium rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
               >
-                キャンセル
+                {tCommon('cancel')}
               </button>
               <button
                 type="button"
                 onClick={handleKillConfirm}
                 className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
               >
-                終了する
+                {tCommon('end')}
               </button>
             </div>
           </div>

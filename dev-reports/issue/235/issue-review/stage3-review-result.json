@@ -1,0 +1,214 @@
+{
+  "issue_number": 235,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-11",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "テスト範囲",
+        "issue": "prompt-detector.ts の既存テストが全て cleanContent のみを検証しており、rawContent に関するテストが実装タスクで明記されていない",
+        "location": "## 実装タスク / tests/unit/prompt-detector.test.ts",
+        "recommendation": "以下のテストケースを明示的にタスク化する: (1) multiple_choice パターンで rawContent に output.trim() 全体が設定されること、(2) Yes/No パターンで rawContent に lastLines.trim() が設定されること、(3) Approve パターンで rawContent が設定されること、(4) プロンプト非検出時に rawContent が undefined であること、(5) noPromptResult() から返される結果に rawContent が含まれないこと。現在の tests/unit/prompt-detector.test.ts には rawContent に関する検証が一切存在しないため、新フィールドのリグレッション検知ができない",
+        "evidence": "tests/unit/prompt-detector.test.ts の全テストは result.cleanContent のみを assert している（L34, L129, L151, L177, L207, L508 等）。rawContent の追加に伴いテストの新規追加が必須だが、Issue の実装タスクでは「既存テストの確認・必要に応じて更新」と曖昧な表現にとどまっている"
+      },
+      {
+        "id": "MF-2",
+        "category": "テスト範囲",
+        "issue": "response-poller.ts でのDB保存フォールバックロジック（rawContent || cleanContent）のユニットテストが存在しない",
+        "location": "## 実装タスク / tests/unit/lib/response-poller.test.ts",
+        "recommendation": "response-poller.ts の checkForResponse() 内 L618 の変更に対するテストを追加する。具体的には: (1) rawContent が設定されている場合に rawContent が content として保存されること、(2) rawContent が undefined の場合に cleanContent にフォールバックすること。現在の tests/unit/lib/response-poller.test.ts は cleanClaudeResponse() のみをテストしており、checkForResponse() やDB保存ロジックのテストは含まれていない。checkForResponse() のテストは外部依存が多いため統合テストが必要になる可能性がある",
+        "evidence": "tests/unit/lib/response-poller.test.ts は cleanClaudeResponse() の Pasted text filtering のみ（34行、Issue #212）。checkForResponse() は DB, tmux, WebSocket に依存するため、モック付きのユニットテストまたは統合テストが必要"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響ファイル",
+        "issue": "PromptMessage.tsx の UI 変更で message.content 全体をプレーンテキスト表示する際、rawContent に含まれる ANSI エスケープコード残留・制御文字への対処方針が未記載",
+        "location": "## 実装タスク > PromptMessage.tsx UI仕様",
+        "recommendation": "rawContent は prompt-detector.ts 経由で設定されるが、その呼び出し元 detectPromptWithOptions() 内で stripAnsi() が適用されるため、rawContent には ANSI コードは含まれない。しかし、今後の保守性のため、この前提を Issue 内で明記し、PromptMessage.tsx 側で追加の sanitization が不要である理由を記載する。また、rawContent にはターミナルのボックス描画文字やスピナー文字（Unicode）が含まれうるため、UI 上の表示品質への影響も考慮が必要",
+        "evidence": "response-poller.ts の detectPromptWithOptions() (L95-101) で stripAnsi() を適用してから detectPrompt() を呼ぶため、rawContent には ANSI エスケープコードは含まれない。ただし Unicode のボックス描画文字（U+2500 等）やスピナー文字は stripAnsi() では除去されない"
+      },
+      {
+        "id": "SF-2",
+        "category": "破壊的変更",
+        "issue": "PromptMessage.tsx の UI 変更で prompt.question の表示を message.content に置き換える場合、既存の DB に保存済みの prompt メッセージとの後方互換性への影響が未分析",
+        "location": "## PromptMessage.tsx UI仕様",
+        "recommendation": "既存DBの prompt メッセージは content に cleanContent（質問テキストのみ）が保存されている。修正後は rawContent（完全出力）が保存される。PromptMessage.tsx を message.content 全体表示に変更した場合、古いメッセージでは content = cleanContent = prompt.question とほぼ同内容になるため実質影響は少ないが、このフォールバック動作を Issue の受入条件に明記すべき。具体的には: (1) rawContent 導入前の既存メッセージでは content = 旧 cleanContent（質問のみ）が表示されること、(2) 新規メッセージでは content = rawContent（完全出力）が表示されること、(3) 両方のケースで表示が破綻しないこと",
+        "evidence": "DB schema の content TEXT NOT NULL (db.ts:68) には文字数制限がなく、rawContent に全出力が入ってもスキーマ変更は不要。ただし、既存データとの表示互換性の確認が必要"
+      },
+      {
+        "id": "SF-3",
+        "category": "依存関係",
+        "issue": "auto-yes-manager.ts が detectPrompt() を直接呼び出しており、rawContent 追加が Auto-Yes のサーバーサイドポーリング処理に間接的に影響する可能性の分析が不足",
+        "location": "## 影響範囲 > 影響なしの確認済みコンポーネント",
+        "recommendation": "auto-yes-manager.ts:321 で promptDetection.isPrompt と promptDetection.promptData のみ使用していることは確認済みだが、auto-yes-manager.ts 内でも detectPrompt() を呼び出しているため（L14 で import, auto-yes polling 内で使用）、PromptDetectionResult 型に rawContent が追加されることの TypeScript 型互換性を明示的に確認する。optional フィールド（rawContent?: string）のため型エラーは発生しないが、Issue の影響範囲テーブルで「auto-yes-manager.ts は PromptDetectionResult 型を消費するが rawContent は参照しないため影響なし」と明記すべき",
+        "evidence": "auto-yes-manager.ts L1-14 で detectPrompt をインポート、L321 で promptDetection.isPrompt / promptDetection.promptData を使用。rawContent / cleanContent は直接参照していない"
+      },
+      {
+        "id": "SF-4",
+        "category": "テスト範囲",
+        "issue": "PromptMessage.tsx の UI 変更に対する E2E テストまたはスナップショットテストの必要性が未検討",
+        "location": "## 実装タスク",
+        "recommendation": "PromptMessage.tsx の表示ロジック変更は UI 層のため、既存のユニットテストだけでは検証が困難。少なくとも以下を検討すべき: (1) message.content が表示されるか（従来は prompt.question のみ）、(2) message.content が空の場合のフォールバック動作、(3) 長いテキストの表示崩れがないか。Playwright E2E テストが推奨されるが、最低限コンポーネントのレンダリングテスト（React Testing Library）を実装タスクに含めることを推奨",
+        "evidence": "現在の tests/ ディレクトリに PromptMessage.tsx のテストは存在しない（Glob で **/*PromptMessage*test* が0件）"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.md の prompt-detector.ts / response-poller.ts モジュール説明に rawContent の追加が反映されていない",
+        "location": "CLAUDE.md > 主要機能モジュール",
+        "recommendation": "CLAUDE.md の prompt-detector.ts 行に rawContent フィールドの説明を追加。response-poller.ts 行に rawContent 優先 DB 保存の旨を追加。実装完了時に合わせて更新する",
+        "evidence": "CLAUDE.md には prompt-detector.ts の説明として「2パス検出方式」「SEC-001ガード」等が記載されているが、rawContent については未記載。実装後のドキュメント不整合を防ぐため、タスクに含めることが望ましい"
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "issue": "rawContent のサイズが大きくなる可能性に対するパフォーマンス考慮が未記載",
+        "location": "## 修正方針",
+        "recommendation": "multiple_choice パターンでは rawContent = output.trim() で tmux 出力全体を保持するため、大量のスクロールバック出力がある場合に content カラムのサイズが増大する。extractResponse() 内で tmux 出力は最大10000行（captureSessionOutput の引数）で取得されるため、理論的な最大サイズを見積もり、パフォーマンスへの影響が無視できることを確認した旨を Issue に記載すると安心。SQLite の TEXT 型には理論上の制限はないが、WebSocket 経由の broadcastMessage で巨大な content が送信される点も考慮",
+        "evidence": "response-poller.ts:570 で captureSessionOutput(worktreeId, cliToolId, 10000) と最大10000行を取得。rawContent がこの全出力を含む場合、通常の cleanContent（数行の質問テキスト）と比較してデータサイズが大幅に増加する可能性がある"
+      },
+      {
+        "id": "NTH-3",
+        "category": "ドキュメント更新",
+        "issue": "prompt-response API (route.ts) でも detectPrompt() の戻り値を使用しているが影響範囲テーブルに記載がない",
+        "location": "## 影響範囲 > 影響なしの確認済みコンポーネント",
+        "recommendation": "src/app/api/worktrees/[id]/prompt-response/route.ts:72-78 で PromptDetectionResult 型を import し、detectPrompt() を呼び出して promptCheck.isPrompt のみ参照している。rawContent は参照しないため影響なしだが、影響範囲テーブルの「影響なし確認済み」セクションに追加すべき",
+        "evidence": "prompt-response/route.ts L14 で `import { detectPrompt, type PromptDetectionResult } from '@/lib/prompt-detector'` を使用。L72 で `let promptCheck: PromptDetectionResult | null = null`、L79 で `promptCheck.isPrompt` のみ参照"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "change_type": "型拡張 + rawContent返却追加",
+        "risk": "low",
+        "reason": "optional フィールド追加のため既存コードの型互換性を破壊しない。rawContent 未設定時のフォールバックも設計済み"
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "change_type": "DB保存時の content 値変更（L618）",
+        "risk": "medium",
+        "reason": "promptDetection.rawContent || promptDetection.cleanContent のフォールバック。rawContent が巨大な場合の WebSocket broadcast のペイロードサイズに注意"
+      },
+      {
+        "file": "src/components/worktree/PromptMessage.tsx",
+        "change_type": "message.content 表示追加",
+        "risk": "medium",
+        "reason": "UI 層の変更。既存データとの後方互換性、長文テキストの表示品質、重複表示の回避ロジックが必要"
+      }
+    ],
+    "unaffected_files_verified": [
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "reason": "promptData のみ使用（L321）。cleanContent / rawContent を参照しない"
+      },
+      {
+        "file": "src/lib/auto-yes-resolver.ts",
+        "reason": "PromptData 型のみ使用。PromptDetectionResult を import していない"
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "reason": "isPrompt フラグのみ参照。cleanContent / rawContent に依存しない"
+      },
+      {
+        "file": "src/lib/claude-session.ts",
+        "reason": "セッション管理のみ。プロンプト検出に非関与"
+      },
+      {
+        "file": "src/lib/claude-poller.ts",
+        "reason": "response-poller.ts に統合済み（到達不能コード、L234 TODO コメント参照）。変更対象外"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "reason": "L91 で独自に { isPrompt: false, cleanContent: cleanOutput } を設定。PromptDetectionResult 型を直接参照しておらず、rawContent 追加の影響なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "reason": "PromptDetectionResult 型を import するが、isPrompt フラグのみ参照（L79）。rawContent / cleanContent を使用しない"
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "reason": "PromptData のみ使用。サーバー側で処理された結果を受け取るのみ"
+      },
+      {
+        "file": "src/lib/cli-tools/codex.ts",
+        "reason": "detectPrompt / cleanContent の直接参照なし。response-poller.ts 経由で間接的に rawContent の恩恵を受ける"
+      }
+    ],
+    "db_schema_change_required": false,
+    "db_schema_analysis": "chat_messages.content は TEXT NOT NULL で文字数制限なし。rawContent が格納されてもスキーマ変更は不要。既存データの content には cleanContent（質問テキストのみ）が保存されており、新データでは rawContent（完全出力）が保存される。DB マイグレーション不要",
+    "backward_compatibility": {
+      "breaking_changes": false,
+      "notes": "PromptDetectionResult に optional フィールド (rawContent?: string) を追加するのみで、既存コードの型互換性を破壊しない。DB スキーマ変更不要。既存の DB データも正常に表示される（content = cleanContent のまま）"
+    },
+    "performance_impact": {
+      "risk": "low",
+      "notes": "rawContent は multiple_choice パターンで output.trim() 全体を保持するため、従来の cleanContent（数行）と比較してサイズ増加の可能性あり。ただし tmux 出力は最大10000行で captureSessionOutput が制限しており、prompt 検出は末尾50行ウィンドウで処理されるため、rawContent が極端に大きくなるケースは限定的。WebSocket broadcast のペイロードが増加するが、prompt メッセージの頻度は低い"
+    },
+    "security_impact": {
+      "risk": "low",
+      "notes": "rawContent は stripAnsi() 済みの出力を保持。XSS リスクは PromptMessage.tsx でプレーンテキスト表示する限り低い。ただし dangerouslySetInnerHTML を使用しないこと、および React のデフォルトエスケープに依存することを確認する必要がある"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "relevance": "PromptDetectionResult 型に rawContent?: string を追加。detectMultipleChoicePrompt(), Yes/No, Approve の全パターンで rawContent を設定"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "L618 の content: promptDetection.cleanContent を rawContent || cleanContent に変更"
+    },
+    {
+      "file": "src/components/worktree/PromptMessage.tsx",
+      "relevance": "message.content（rawContent 由来）の表示を追加。既存の prompt.question のみ表示から変更"
+    },
+    {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "relevance": "rawContent の検証テスト追加が必要（1529行、既存テストは cleanContent のみ検証）"
+    },
+    {
+      "file": "tests/unit/lib/response-poller.test.ts",
+      "relevance": "DB保存フォールバックロジックのテスト追加が必要（現在34行のみ）"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "detectPrompt() をインポートし PromptDetectionResult を消費。isPrompt/promptData のみ使用で影響なし"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "独自に cleanContent を設定（L91）。PromptDetectionResult 型非参照で影響なし"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "PromptDetectionResult 型を使用するが isPrompt のみ参照（L79）。影響なし"
+    },
+    {
+      "file": "src/lib/db.ts",
+      "relevance": "chat_messages.content TEXT NOT NULL。スキーマ変更不要を確認"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "relevance": "PromptMessage を呼び出す親コンポーネント。message オブジェクトをそのまま渡しており、props 変更なし"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "prompt-detector.ts / response-poller.ts のモジュール説明に rawContent の記載追加が必要"
+    }
+  ]
+}

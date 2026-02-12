@@ -1,0 +1,44 @@
+{
+  "issue_number": 237,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-11",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "api-prompt-handling.test.tsの変更内容にL239-268の'should resume polling after responding'テストケース削除を追加（L240の動的import、L267のstartPollingアサーションがclaude-pollerに依存）。影響範囲テーブルと受入条件の両方に反映"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "session-cleanup.tsの修正内容にL110のコメント番号「// 3.」から「// 2.」への更新を追加（claude-pollerブロック削除後のステップ番号整合性）。修正が必要なファイルテーブル、影響範囲テーブル、受入条件の3箇所に反映"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "manager.tsのL179 Futureコメントの扱いは実装者判断に委ねるのが妥当と判断し、Issueへの明記は省略"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "行番号が参考値である旨の注釈追加はIssue全体の可読性を考慮して省略（レビュー履歴で経緯は追跡可能）"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 2,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/237"
+  }
+}

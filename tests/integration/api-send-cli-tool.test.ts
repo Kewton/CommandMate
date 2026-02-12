@@ -46,10 +46,6 @@ vi.mock('@/lib/cli-tools/gemini', () => ({
   }
 }));
 
-vi.mock('@/lib/claude-poller', () => ({
-  startPolling: vi.fn(),
-}));
-
 // Declare mock function type
 declare module '@/lib/db-instance' {
   export function setMockDb(db: Database.Database): void;

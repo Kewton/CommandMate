@@ -1,0 +1,28 @@
+{
+  "boundary": {
+    "errorOccurredIn": "An error occurred in {componentName}",
+    "errorOccurred": "An error occurred"
+  },
+  "fileOps": {
+    "failedToCreateFile": "Failed to create file",
+    "failedToCreateDirectory": "Failed to create directory",
+    "failedToRename": "Failed to rename",
+    "failedToDelete": "Failed to delete"
+  },
+  "terminal": {
+    "displayError": "Terminal display error",
+    "outputError": "An error occurred while displaying terminal output"
+  },
+  "history": {
+    "loadError": "Message history loading error",
+    "displayError": "An error occurred while displaying history"
+  },
+  "prompt": {
+    "responseError": "Prompt response error",
+    "choiceDisplayError": "An error occurred while displaying choices"
+  },
+  "connection": {
+    "error": "Connection error",
+    "serverError": "A problem occurred connecting to the server"
+  }
+}

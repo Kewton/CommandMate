@@ -7,6 +7,7 @@
 'use client';
 
 import { useState, useCallback, useId, useMemo, useRef, useEffect, memo } from 'react';
+import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
@@ -204,6 +205,7 @@ function PromptContent({
   onRespond,
   labelId,
 }: PromptContentProps) {
+  const t = useTranslations('prompt');
   const [selectedOption, setSelectedOption] = useState<number | null>(() => {
     if (promptData.type === 'multiple_choice') {
       const defaultOpt = promptData.options.find(opt => opt.isDefault);
@@ -256,8 +258,15 @@ function PromptContent({
     <div className="space-y-4">
       {/* Header */}
       <h3 id={labelId} className="text-lg font-semibold text-gray-900">
-        Claudeからの確認
+        {t('confirmationFromClaude')}
       </h3>
+
+      {/* Instruction Text (context preceding the prompt) */}
+      {promptData.instructionText && (
+        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-gray-600 bg-gray-50 rounded p-2 border border-gray-200">
+          {promptData.instructionText}
+        </div>
+      )}
 
       {/* Question */}
       <p className="text-gray-700 leading-relaxed">{promptData.question}</p>
@@ -266,7 +275,7 @@ function PromptContent({
       {isDisabled && (
         <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-gray-500" role="status" aria-live="polite">
           <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" aria-hidden="true" />
-          <span>送信中...</span>
+          <span>{t('sending')}</span>
         </div>
       )}
 
@@ -316,6 +325,7 @@ const YesNoActions = memo(function YesNoActions({
   onYes,
   onNo,
 }: YesNoActionsProps) {
+  const t = useTranslations('prompt');
   const isYesDefault = promptData.defaultOption === 'yes';
   const isNoDefault = promptData.defaultOption === 'no';
 
@@ -327,7 +337,7 @@ const YesNoActions = memo(function YesNoActions({
         disabled={disabled}
         className={`flex-1 ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary} ${isYesDefault ? 'ring-2 ring-blue-300' : ''}`}
       >
-        Yes
+        {t('yes')}
       </button>
       <button
         type="button"
@@ -335,7 +345,7 @@ const YesNoActions = memo(function YesNoActions({
         disabled={disabled}
         className={`flex-1 ${BUTTON_STYLES.base} ${isNoDefault ? BUTTON_STYLES.defaultSelected : BUTTON_STYLES.secondary}`}
       >
-        No
+        {t('no')}
       </button>
     </div>
   );
@@ -369,6 +379,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
   onSubmit,
 }: MultipleChoiceActionsProps) {
   const groupName = useId();
+  const t = useTranslations('prompt');
 
   return (
     <div className="space-y-3">
@@ -399,7 +410,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
                   <span className="font-medium">{option.number}. {option.label}</span>
                   {option.isDefault && (
                     <span className="ml-2 text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
-                      デフォルト
+                      {t('default')}
                     </span>
                   )}
                 </div>
@@ -419,7 +430,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
             value={textInputValue}
             onChange={(e) => onTextInputChange(e.target.value)}
             disabled={disabled}
-            placeholder="値を入力してください..."
+            placeholder={t('enterValuePlaceholder')}
             className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50"
           />
         </div>
@@ -432,7 +443,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
         disabled={disabled || selectedOption === null}
         className={`w-full ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary}`}
       >
-        Submit
+        {t('submit')}
       </button>
     </div>
   );

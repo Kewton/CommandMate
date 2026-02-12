@@ -1,3 +1,5 @@
+[English](./en/release-guide.md)
+
 # リリースガイド
 
 このドキュメントでは、CommandMateのバージョンアップとリリース手順を説明します。

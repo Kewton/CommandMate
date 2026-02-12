@@ -135,8 +135,8 @@ src/
 | `src/lib/clipboard-utils.ts` | クリップボードコピーユーティリティ（stripAnsi利用、空文字バリデーション、Issue #211） |
 | `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行プロンプト検出ウィンドウイング。Issue #188: STATUS_THINKING_LINE_COUNT=5追加、thinking/prompt優先順位統一、SF-001/SF-002/SF-004設計根拠ドキュメント化） |
 | `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数。Issue #212: 複数行メッセージのPasted text検知+Enter再送） |
-| `src/lib/response-poller.ts` | レスポンスポーリングとthinking検出（Issue #188: L353/L547-554ウィンドウ化、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数、detectPromptWithOptions()ヘルパー、Gemini LOADING_INDICATORS配列抽出。Issue #212: cleanClaudeResponse skipPatternsにPASTED_TEXT_PATTERN追加） |
-| `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証。Issue #193: DetectPromptOptions interface追加、requireDefaultIndicatorフラグによる❯なし形式対応、Layer 5 SEC-001ガード。Issue #208: SEC-001b質問行妥当性検証追加、isQuestionLikeLine()による番号付きリスト誤検出防止） |
+| `src/lib/response-poller.ts` | レスポンスポーリングとthinking検出（Issue #188: L353/L547-554ウィンドウ化、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数、detectPromptWithOptions()ヘルパー、Gemini LOADING_INDICATORS配列抽出。Issue #212: cleanClaudeResponse skipPatternsにPASTED_TEXT_PATTERN追加。**Issue #235: rawContent優先DB保存** - DB保存時にrawContent || cleanContentを使用し、完全なプロンプト出力を保持） |
+| `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証。Issue #193: DetectPromptOptions interface追加、requireDefaultIndicatorフラグによる❯なし形式対応、Layer 5 SEC-001ガード。Issue #208: SEC-001b質問行妥当性検証追加、isQuestionLikeLine()による番号付きリスト誤検出防止。**Issue #235: rawContentフィールド追加** - PromptDetectionResultにrawContent?:stringを追加し、truncateRawContent()で最大200行/5000文字に制限。lastLinesを末尾20行に拡張） |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応） |
@@ -150,7 +150,7 @@ src/
 | `src/types/clone.ts` | クローン関連型定義（CloneJob, CloneError等） |
 | `src/lib/file-operations.ts` | ファイル操作（読取/更新/作成/削除/リネーム） |
 | `src/lib/git-utils.ts` | Git情報取得（getGitStatus関数、execFile使用、1秒タイムアウト） |
-| `src/lib/utils.ts` | 汎用ユーティリティ関数（debounce、truncateString等） |
+| `src/lib/utils.ts` | 汎用ユーティリティ関数（debounce、truncateString、escapeHtml等） |
 | `src/config/editable-extensions.ts` | 編集可能ファイル拡張子設定 |
 | `src/config/file-operations.ts` | 再帰削除の安全設定 |
 | `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義 |
@@ -169,6 +169,15 @@ src/
 | `src/components/worktree/ImageViewer.tsx` | 画像表示コンポーネント |
 | `src/components/worktree/MermaidDiagram.tsx` | mermaidダイアグラム描画コンポーネント |
 | `src/components/worktree/MermaidCodeBlock.tsx` | mermaidコードブロックラッパー |
+| `src/config/log-config.ts` | LOG_DIR定数の一元管理（getLogDir()関数、DRY原則対応） |
+| `src/lib/log-export-sanitizer.ts` | エクスポート用パス・環境情報・機密データサニタイズ（Issue #11: sanitizeForExport()関数、HOME/CM_ROOT_DIR/CM_DB_PATH/ホスト名/トークン/パスワード/SSHキーのマスキング） |
+| `src/lib/api-logger.ts` | 共通withLogging()ヘルパー（Issue #11: 開発環境APIリクエスト/レスポンスロギング、ジェネリクス型ApiHandler、skipResponseBodyオプション） |
+| `src/config/i18n-config.ts` | i18n設定の一元管理（SUPPORTED_LOCALES, DEFAULT_LOCALE, LOCALE_LABELS, LOCALE_COOKIE_NAME） |
+| `src/i18n.ts` | next-intl getRequestConfig（Cookie→Accept-Language→DEFAULT_LOCALEフォールバック、全名前空間マージ） |
+| `src/lib/locale-cookie.ts` | ロケールCookieユーティリティ（SameSite=Lax、条件付きSecure、1年有効期限） |
+| `src/hooks/useLocaleSwitch.ts` | ロケール切替フック（バリデーション、Cookie/localStorage永続化、reload） |
+| `src/components/common/LocaleSwitcher.tsx` | 言語切替ドロップダウンコンポーネント（Sidebar下部配置） |
+| `src/lib/date-locale.ts` | date-fnsロケールマッピング（getDateFnsLocale()、enUS/jaサポート） |
 
 ### CLIモジュール（Issue #96, #136）
 

@@ -1,0 +1,20 @@
+{
+  "enableTitle": "Auto Yesモードを有効にしますか？",
+  "enableTitleWithTool": "Auto Yesモードを有効にしますか？（{toolName}）",
+  "featureDescription": "機能説明",
+  "yesNoAutoResponse": "yes/no確認 → 自動で「yes」を送信",
+  "multipleChoiceAutoSelect": "複数選択肢 → デフォルトまたは先頭の選択肢を自動選択",
+  "autoDisableAfter": "{duration}後に自動でOFFになります。",
+  "appliesOnlyToCurrent": "※ Auto Yesは現在選択中の{toolName}セッションのみに適用されます。他のCLIツールには影響しません。",
+  "duration": "有効時間",
+  "durations": {
+    "1h": "1時間",
+    "3h": "3時間",
+    "8h": "8時間"
+  },
+  "aboutRisks": "リスクについて",
+  "riskWarning": "自動応答により、意図しない操作（ファイルの削除・上書き等）が実行される可能性があります。内容を十分に理解した上でご利用ください。",
+  "disclaimer": "免責事項：",
+  "disclaimerText": "Auto Yesモードの使用により発生した問題について、開発者は一切の責任を負いません。自己責任でご利用ください。",
+  "agreeAndEnable": "同意して有効化"
+}

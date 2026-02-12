@@ -1,0 +1,171 @@
+{
+  "issue_number": 11,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-10",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "withLogging()ヘルパーの適用対象が36ファイル・46ハンドラー関数であり、影響範囲テーブルに具体的な適用計画が記載されていない",
+        "location": "影響範囲 - 変更対象ファイル テーブル: src/app/api/ (各route.ts)",
+        "recommendation": "withLogging()を適用するAPIルート36ファイル・46ハンドラー（GET/POST/PATCH/PUT/DELETE）の具体的なリストを記載するか、段階的適用計画（Phase 1: 主要APIのみ、Phase 2: 残り全て等）を明記すべき。全APIルートに一括適用する場合、各ハンドラーの戻り値の型・エラーハンドリングパターンが統一されていないため（例: /api/worktrees/route.tsはWorktreesResponseを返し、/api/worktrees/[id]/send/route.tsはmessageオブジェクトを返す）、withLoggingヘルパーの型設計に影響する。また、route.tsファイルの中にはexport const dynamic = 'force-dynamic'のような設定エクスポートを持つものもあり、ヘルパーの適用方法に注意が必要。",
+        "evidence": "src/app/api/ 配下に36のroute.tsファイル、計46のハンドラー関数（GET/POST/PATCH/PUT/DELETE）が存在。各ハンドラーの構造は統一されておらず、レスポンスの型も多様。"
+      },
+      {
+        "id": "MF-2",
+        "category": "依存関係",
+        "issue": "新規log-sanitizer.tsがsrc/lib/env.tsのgetEnv()に依存するが、getEnv()はサーバーサイド専用でpathモジュールを使用しており、LogViewer.tsx（クライアントコンポーネント）からの呼び出し方法が未定義",
+        "location": "提案する解決策 - 2. エクスポート時の機密情報サニタイズ",
+        "recommendation": "サニタイズ処理のアーキテクチャを明確にすべき。選択肢: (A) サニタイズをサーバーサイドAPI（新規エンドポイント）で実行し、LogViewerからAPIを呼び出す方式、(B) LogViewerが既にAPIからログコンテンツを取得しているため、ログ取得APIのレスポンスにサニタイズ済みバージョンを含める方式、(C) env.tsの値をAPIレスポンス経由でクライアントに渡してクライアント側でサニタイズする方式。(A)または(B)が推奨される。(C)はCM_ROOT_DIRやHOMEなどの機密値をクライアントに送信することになりセキュリティ上問題がある。",
+        "evidence": "LogViewer.tsxは'use client'コンポーネント。getEnv()はpathモジュールをimportしておりサーバーサイド専用。clipboard-utils.tsもクライアントサイド用（navigator.clipboard使用）。サニタイズはサーバー/クライアントの境界をまたぐ処理であり、実行場所の設計が必要。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "log-manager.tsの既存テストが存在せず、変更後の回帰テスト基盤がない",
+        "location": "実装タスク - ユニットテストの追加",
+        "recommendation": "log-manager.tsには既存のユニットテストが存在しない（tests/unit/ およびsrc/lib/__tests__/ 内に該当テストなし）。新機能（エクスポート向けAPI）の追加と同時に、既存機能（createLog, readLog, listLogs, appendToLog）の回帰テストも追加すべき。テスト計画に以下を含めることを推奨: (1) log-sanitizer.tsの新規テスト（サニタイズ処理）、(2) log-manager.tsの既存機能の回帰テスト、(3) api-logger.ts（withLoggingヘルパー）のテスト、(4) LogViewer.tsxのコンポーネントテスト（エクスポートボタンのインタラクション）。",
+        "evidence": "tests/unit/ 内のテストファイル一覧にlog-manager関連のテストは存在しない。src/lib/__tests__/ にも該当なし。log-manager.tsの既存関数（createLog, readLog, listLogs等）は直接テストされていない。"
+      },
+      {
+        "id": "SF-2",
+        "category": "破壊的変更",
+        "issue": "logger.tsへの変更がAPIログ出力機能の追加として記載されているが、既存のログ出力に影響する可能性がある",
+        "location": "影響範囲 - 変更対象ファイル: src/lib/logger.ts",
+        "recommendation": "変更対象ファイルに「src/lib/logger.ts - APIログ出力機能の追加」と記載されているが、logger.tsの変更内容を具体化すべき。withLoggingヘルパーがlogger.tsのcreateLogger()を使用するだけであれば、logger.ts自体の変更は不要の可能性がある。logger.tsに新しいログレベルやフォーマットを追加する場合、既存の16モジュール（response-poller.ts, prompt-detector.ts, cli-session.ts等）のログ出力にも影響する。logger.tsを変更する場合と変更しない場合を明確に区別すべき。",
+        "evidence": "logger.tsのcreateLogger()を使用している既存モジュールが16ファイル存在。logger.tsのSENSITIVE_PATTERNSやformatLogEntryの変更は全利用箇所に波及する。"
+      },
+      {
+        "id": "SF-3",
+        "category": "影響ファイル",
+        "issue": "サニタイズ処理のアーキテクチャ上、新規APIエンドポイントが必要となる可能性があるが、変更対象に含まれていない",
+        "location": "影響範囲 - 変更対象ファイル テーブル",
+        "recommendation": "MF-2で指摘した通り、サニタイズ処理をサーバーサイドで実行する場合、以下の追加ファイルが必要: (A) 既存の /api/worktrees/[id]/logs/[filename]/route.ts にサニタイズ済みレスポンスのオプションを追加（例: ?sanitize=true クエリパラメータ）、または (B) 新規 /api/worktrees/[id]/logs/[filename]/export/route.ts を作成。また、api-client.ts にも対応するクライアントメソッド（例: exportLog()）の追加が必要となる。これらを影響範囲テーブルに含めるべき。",
+        "evidence": "現在の影響範囲テーブルにはAPIエンドポイントの変更（ログ取得API）が含まれていない。LogViewer.tsxはworktreeApi.getLogFile()を使用してAPIからログを取得しており、サニタイズ済みログもAPIを通じて取得する必要がある。"
+      },
+      {
+        "id": "SF-4",
+        "category": "移行考慮",
+        "issue": "withLogging()ヘルパーの全API適用による開発環境でのログ出力量増加に対する考慮が不足",
+        "location": "提案する解決策 - 3. APIリクエスト/レスポンスログ",
+        "recommendation": "36ファイル46ハンドラーに一括適用する場合、開発環境でのconsoleログ出力量が大幅に増加する。特に、/api/worktrees のGETは数秒間隔でポーリングされており、/api/worktrees/[id]/current-output も高頻度で呼ばれる。以下を考慮すべき: (1) レスポンスボディのログ出力サイズ制限（大きなレスポンスのtruncation）、(2) 高頻度API（ポーリング系）のログ除外またはサンプリング、(3) ログ出力先の切替（consoleのみか、ファイル出力も可能にするか）。これらの設計判断をIssueに記載することを推奨。",
+        "evidence": "src/app/api/worktrees/route.ts のGETはworktreeリスト取得で、サイドバーのポーリングにより高頻度で呼ばれる。current-output, capture等も同様。logger.tsは現在console出力のみ。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "新規ファイル（log-sanitizer.ts, api-logger.ts）のCLAUDE.md・architecture.mdへの反映が必要",
+        "location": "Issue本文全体",
+        "recommendation": "新規モジュール2つ（log-sanitizer.ts, api-logger.ts）とLogViewer.tsxの機能拡張はCLAUDE.mdの「主要機能モジュール」テーブルに追記が必要。また、docs/architecture.mdにAPIログの仕組み（withLoggingヘルパーパターン）を追記することを推奨。実装タスクにドキュメント更新タスクを追加するとよい。",
+        "evidence": "CLAUDE.mdの主要機能モジュールテーブルにlog-sanitizer.ts、api-logger.tsは未記載。docs/architecture.mdにもAPIログ機能の記載なし。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "テスト範囲",
+        "issue": "E2Eテストの考慮がない",
+        "location": "実装タスク",
+        "recommendation": "ユニットテストの追加は記載されているが、E2Eテスト（Playwright）の考慮がない。LogViewer内のエクスポートボタンの操作フロー（ボタン押下 -> クリップボードコピー -> 成功メッセージ表示）はE2Eテストの対象候補。ただし、Clipboard APIのテストはPlaywrightでの実装が技術的に制約があるため、E2Eテストの要否を判断した上で、必要であれば実装タスクに追加するとよい。",
+        "evidence": "CLAUDE.mdの品質担保セクションに「E2E Test: npm run test:e2e」が記載されている。プロジェクトはPlaywrightをE2Eテストフレームワークとして使用。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/LogViewer.tsx",
+      "relevance": "エクスポートボタン追加先。'use client'コンポーネント。fileContentステートに現在表示中のログが保持されている。"
+    },
+    {
+      "file": "src/lib/log-manager.ts",
+      "relevance": "会話ログのCRUD管理。既存テストなし。readLog(), listLogs()がエクスポート機能のデータソース。"
+    },
+    {
+      "file": "src/lib/logger.ts",
+      "relevance": "既存構造化ログシステム。createLogger()を16モジュールが使用。SENSITIVE_PATTERNSは認証情報用。変更の波及リスクあり。"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "getEnv()でCM_ROOT_DIR, CM_DB_PATH等を取得。サニタイズ対象値の取得元。サーバーサイド専用（pathモジュール使用）。"
+    },
+    {
+      "file": "src/lib/clipboard-utils.ts",
+      "relevance": "クライアントサイドのクリップボードコピー。変更不要と明記済み。copyToClipboard()をそのまま利用。"
+    },
+    {
+      "file": "src/lib/sanitize.ts",
+      "relevance": "既存のXSS防止用サニタイズ。DOMPurify使用。新規log-sanitizer.tsとの名前の類似性に注意。目的は異なる（XSS vs パス情報除去）。"
+    },
+    {
+      "file": "src/lib/conversation-logger.ts",
+      "relevance": "log-manager.tsのcreateLog()を使用。会話ログ記録の参考実装。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+      "relevance": "個別ログファイル取得API。サニタイズ済みレスポンスのオプション追加が必要になる可能性あり。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/logs/route.ts",
+      "relevance": "ログファイル一覧API。log-manager.tsのlistLogs()を使用。"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "フロントエンドAPIクライアント。exportLog()等の新規メソッド追加が必要になる可能性あり。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "relevance": "LogViewerの親コンポーネント。activeTab === 'logs' でLogViewerを表示。直接変更は不要だが影響確認対象。"
+    },
+    {
+      "file": "src/components/worktree/index.ts",
+      "relevance": "worktreeコンポーネントのバレルエクスポート。LogViewerのAPIが変更されない限り影響なし。"
+    },
+    {
+      "file": "src/lib/errors.ts",
+      "relevance": "AppErrorクラス。withLoggingヘルパーでのエラーログ出力時に参照される可能性あり。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "主要機能モジュールテーブルの更新が必要（log-sanitizer.ts, api-logger.ts追加）。"
+    },
+    {
+      "file": "docs/architecture.md",
+      "relevance": "APIログ機能（withLoggingパターン）の追記が必要。ログ永続化の全体像に関する記述の更新。"
+    }
+  ],
+  "impact_analysis": {
+    "total_files_affected": {
+      "direct_changes": 5,
+      "new_files": 2,
+      "indirect_impact": 38,
+      "notes": "直接変更: LogViewer.tsx, log-manager.ts, logger.ts(要否確認), + 新規2ファイル。間接影響: 36 API route.ts + api-client.ts + 既存テスト"
+    },
+    "breaking_changes": {
+      "has_breaking_changes": false,
+      "notes": "全ての変更は追加的であり、既存APIの破壊的変更はない。ただしlogger.tsの変更範囲によっては既存ログ出力に副作用の可能性あり。"
+    },
+    "security_implications": [
+      "サニタイズ処理のクライアント/サーバー実行場所の設計により、機密情報（HOME, CM_ROOT_DIR等）がクライアントに漏洩するリスク",
+      "サニタイズの抜け漏れにより、エクスポートされたログにローカル環境情報が含まれるリスク",
+      "withLoggingヘルパーが開発環境以外で誤って有効化された場合のリクエスト/レスポンスログ漏洩リスク"
+    ],
+    "performance_implications": [
+      "開発環境でのAPIログ出力量増加（46ハンドラー全てにログ追加）によるconsole出力のパフォーマンス影響",
+      "高頻度ポーリングAPI（worktrees一覧, current-output等）へのログ適用による出力量急増",
+      "大きなログファイルのサニタイズ処理によるレスポンス時間増加の可能性"
+    ]
+  }
+}

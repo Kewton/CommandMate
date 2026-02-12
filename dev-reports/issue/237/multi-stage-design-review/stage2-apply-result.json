@@ -1,0 +1,11 @@
+{
+  "issue_number": 237,
+  "review_result_path": "dev-reports/issue/237/multi-stage-design-review/stage2-review-result.json",
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "status": "skipped",
+  "reason": "Stage 2で Must Fix / Should Fix の指摘が0件のため、対応作業は不要",
+  "applied_count": 0,
+  "skipped_count": 0,
+  "date": "2026-02-11"
+}

@@ -1,0 +1,64 @@
+{
+  "issue_number": 11,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（影響範囲レビュー）",
+  "apply_date": "2026-02-10",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "withLogging()の段階的適用計画を追加。Phase 1（主要API 10-15ハンドラー）とPhase 2（残り全ハンドラー計46）に分割。高頻度APIへの対策（ポーリング系APIはdebugレベル、レスポンスボディのtruncation）を記載。型設計の考慮事項（汎用型、戻り値型の保持、設定エクスポートへの非影響）を追加。影響範囲テーブルの適用対象記述を段階的適用に更新。"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "サニタイズ処理のアーキテクチャ設計セクションを新設。サーバーサイド実行を明記し、理由（getEnv()のサーバーサイド専用、LogViewer.tsxのuse client制約、機密情報クライアント送信リスク）を記載。実装方式として(A)既存APIにオプション追加と(B)新規エクスポートAPIの2案を提示し、(A)を推奨。受入条件にサーバーサイドAPI経由取得の要件を追加。実装タスクにAPI変更・api-client.ts変更を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "テスト計画を詳細化。実装タスクのユニットテスト項目を4つのサブタスクに分割: (1)log-sanitizer.tsのサニタイズ処理テスト、(2)log-manager.tsの既存機能回帰テスト（createLog, readLog, listLogs, appendToLog）、(3)api-logger.ts（withLogging）のテスト、(4)LogViewer.tsxのコンポーネントテスト。受入条件にもテストカテゴリを追加。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "logger.tsを変更対象ファイルテーブルから削除。影響範囲テーブルの下に注記として「logger.tsへの変更は不要。withLogging()はcreateLogger()を利用するのみで、SENSITIVE_PATTERNSやformatLogEntryへの変更は行わない。既存の16モジュールが使用するログ出力には影響しない」と明記。提案する解決策セクション3にもlogger.ts変更不要の設計ポイントを追加。受入条件に「既存16モジュールのログ出力が変化しないこと」を追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルに2ファイルを追加: (1) src/app/api/worktrees/[id]/logs/[filename]/route.ts（サニタイズオプション追加）、(2) src/lib/api-client.ts（サニタイズ済みログ取得メソッド追加）。実装タスクにも「既存ログ取得APIにサニタイズオプション追加」「api-client.tsにサニタイズ済みログ取得メソッド追加」を新規タスクとして追加。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "提案する解決策セクション3に「withLogging()ヘルパーの設計考慮事項」を新設。高頻度APIへの対策として(1)ポーリング系APIのログレベルをdebugに設定、(2)レスポンスボディのログ出力サイズ上限（1KB以上はtruncation）を記載。ログ出力先はconsoleのみとし、ファイル出力はスコープ外と明記。受入条件に「ポーリング系APIのログがdebugレベルで出力されること」「大きなレスポンスボディが適切にtruncateされること」を追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "実装タスクにドキュメント更新タスクを追加: 「CLAUDE.mdの主要機能モジュールテーブルにlog-sanitizer.ts、api-logger.tsを追記」。architecture.mdへの追記はIssueスコープが大きくなりすぎるため、別途対応とした。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "E2Eテスト（Playwright）はClipboard APIのテスト制約があり、レビュー指摘でも「要否を判断した上で」と記載されている。本Issueのスコープが既に大きいため、E2Eテストは実装時に判断する方針とし、Issueへの明記は見送り。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 7,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/11"
+  }
+}

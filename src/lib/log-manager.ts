@@ -6,12 +6,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { format } from 'date-fns';
-import { getEnvByKey } from './env';
-
-/**
- * Log directory configuration (with fallback support - Issue #76)
- */
-const LOG_DIR = getEnvByKey('CM_LOG_DIR') || path.join(process.cwd(), 'data', 'logs');
+import { getLogDir } from '@/config/log-config';
 
 /**
  * Get log directory for a CLI tool
@@ -20,7 +15,7 @@ const LOG_DIR = getEnvByKey('CM_LOG_DIR') || path.join(process.cwd(), 'data', 'l
  * @returns Log directory path
  */
 function getCliToolLogDir(cliToolId: string = 'claude'): string {
-  return path.join(LOG_DIR, cliToolId);
+  return path.join(getLogDir(), cliToolId);
 }
 
 /**

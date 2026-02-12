@@ -9,8 +9,10 @@ import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
+import { useTranslations } from 'next-intl';
+import { useLocale } from 'next-intl';
 import { format } from 'date-fns';
-import { ja } from 'date-fns/locale';
+import { getDateFnsLocale } from '@/lib/date-locale';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -52,7 +54,11 @@ const MessageBubble = React.memo(function MessageBubble({
   onPromptRespond
 }: MessageBubbleProps) {
   const isUser = message.role === 'user';
-  const timestamp = format(new Date(message.timestamp), 'PPp', { locale: ja });
+  const locale = useLocale();
+  const dateFnsLocale = getDateFnsLocale(locale);
+  const tPrompt = useTranslations('prompt');
+  const tCommon = useTranslations('common');
+  const timestamp = format(new Date(message.timestamp), 'PPp', { locale: dateFnsLocale });
 
   // State for handling text input options
   const [selectedTextInputOption, setSelectedTextInputOption] = React.useState<number | null>(null);
@@ -236,7 +242,7 @@ const MessageBubble = React.memo(function MessageBubble({
             <div className="mt-3 pt-3 border-t border-gray-200">
               <div className="flex items-center gap-2 mb-3">
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                  選択待ち
+                  {tPrompt('awaitingSelection')}
                 </span>
                 <div className="text-sm text-gray-700 font-medium">
                   {message.promptData.question}
@@ -253,7 +259,7 @@ const MessageBubble = React.memo(function MessageBubble({
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
-                      はい / Yes
+                      {tPrompt('yes')}
                     </button>
                     <button
                       onClick={() => onPromptRespond(message.id, 'no')}
@@ -263,7 +269,7 @@ const MessageBubble = React.memo(function MessageBubble({
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       </svg>
-                      いいえ / No
+                      {tPrompt('no')}
                     </button>
                   </>
                 ) : message.promptData.type === 'multiple_choice' ? (
@@ -307,12 +313,12 @@ const MessageBubble = React.memo(function MessageBubble({
                     {selectedTextInputOption !== null && message.promptData?.status === 'pending' && (
                       <div className="w-full mt-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          カスタムメッセージを入力してください:
+                          {tPrompt('enterCustomMessage')}:
                         </label>
                         <textarea
                           value={textInputValue}
                           onChange={(e) => setTextInputValue(e.target.value)}
-                          placeholder="ここにメッセージを入力..."
+                          placeholder={tPrompt('enterMessageHere')}
                           rows={3}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 text-sm"
                         />
@@ -328,7 +334,7 @@ const MessageBubble = React.memo(function MessageBubble({
                             disabled={!textInputValue.trim()}
                             className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium text-sm shadow-sm hover:shadow-md"
                           >
-                            送信
+                            {tCommon('send')}
                           </button>
                           <button
                             onClick={() => {
@@ -337,7 +343,7 @@ const MessageBubble = React.memo(function MessageBubble({
                             }}
                             className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all font-medium text-sm"
                           >
-                            キャンセル
+                            {tCommon('cancel')}
                           </button>
                         </div>
                       </div>
@@ -350,7 +356,7 @@ const MessageBubble = React.memo(function MessageBubble({
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  回答済み: {message.promptData.answer}
+                  {tPrompt('answered')}: {message.promptData.answer}
                 </div>
               )}
             </div>
@@ -393,6 +399,7 @@ export function MessageList({
 }: MessageListProps) {
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const tWorktree = useTranslations('worktree');
 
   // Get CLI tool display name
   const getToolName = (cliToolId?: string) => {
@@ -566,7 +573,7 @@ export function MessageList({
                   <div className="flex gap-1">
                     <div className="w-1.5 h-1.5 bg-green-600 rounded-full animate-pulse" />
                   </div>
-                  <span className="text-xs text-green-600 font-medium">セッション実行中</span>
+                  <span className="text-xs text-green-600 font-medium">{tWorktree('session.running')}</span>
                 </div>
 
                 {/* Progress indicator - fixed at top */}
@@ -575,8 +582,8 @@ export function MessageList({
                   {isThinking && (
                     <div className="flex items-center gap-2 mb-2">
                       <div className="w-2 h-2 rounded-full bg-purple-600 animate-pulse" />
-                      <span className="text-sm font-medium text-purple-700">考え中...</span>
-                      <span className="text-xs text-purple-500 ml-auto">思考中</span>
+                      <span className="text-sm font-medium text-purple-700">{tWorktree('status.thinking')}</span>
+                      <span className="text-xs text-purple-500 ml-auto">{tWorktree('status.thinkingStatus')}</span>
                     </div>
                   )}
 
@@ -584,8 +591,8 @@ export function MessageList({
                   {!isThinking && realtimeOutput && (
                     <div className="flex items-center gap-2 mb-2">
                       <div className="w-2 h-2 rounded-full bg-green-600 animate-pulse" />
-                      <span className="text-sm font-medium text-green-700">最新の出力</span>
-                      <span className="text-xs text-green-500 ml-auto">リアルタイム更新</span>
+                      <span className="text-sm font-medium text-green-700">{tWorktree('output.latest')}</span>
+                      <span className="text-xs text-green-500 ml-auto">{tWorktree('output.realtimeUpdate')}</span>
                     </div>
                   )}
 
@@ -593,7 +600,7 @@ export function MessageList({
                   {!isThinking && !realtimeOutput && (
                     <div className="flex items-center gap-2 mb-2">
                       <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
-                      <span className="text-sm font-medium text-gray-700">セッション起動中</span>
+                      <span className="text-sm font-medium text-gray-700">{tWorktree('session.starting')}</span>
                       <span className="text-xs text-gray-500 ml-auto">...</span>
                     </div>
                   )}
@@ -609,9 +616,9 @@ export function MessageList({
                           <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
                           </svg>
-                          最新の出力
+                          {tWorktree('output.latest')}
                         </span>
-                        <span className="text-xs text-green-500">{new Date().toLocaleTimeString('ja-JP')}</span>
+                        <span className="text-xs text-green-500">{new Date().toLocaleTimeString()}</span>
                       </div>
                       <div className="prose prose-sm max-w-none break-words overflow-wrap-anywhere">
                         {/\x1b\[[0-9;]*m|\[[0-9;]*m/.test(realtimeOutput) ? (
@@ -639,14 +646,14 @@ export function MessageList({
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                       </svg>
-                      <p className="text-sm font-medium">Claude が考え中です...</p>
+                      <p className="text-sm font-medium">{tWorktree('status.claudeIsThinking')}</p>
                     </div>
                   </div>
                 ) : (
                   <div className="text-center py-6">
                     <div className="inline-flex items-center gap-2 text-gray-500">
                       <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
-                      <p className="text-sm">セッション起動中...</p>
+                      <p className="text-sm">{tWorktree('session.startingEllipsis')}</p>
                     </div>
                   </div>
                 )}

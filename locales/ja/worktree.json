@@ -1,0 +1,26 @@
+{
+  "session": {
+    "confirmKill": "「{name}」のセッションを終了しますか？\n\n※全てのメッセージ履歴が削除されます。ログファイルは保持されます。",
+    "failedToKill": "セッションの終了に失敗しました",
+    "confirmEnd": "{tool} セッションを終了しますか？",
+    "endWarning": "セッションを終了すると、チャット履歴がクリアされます。",
+    "running": "セッション実行中",
+    "starting": "セッション起動中",
+    "startingEllipsis": "セッション起動中..."
+  },
+  "status": {
+    "waitingForResponse": "レスポンス待ち",
+    "responseCompleted": "レスポンス完了",
+    "thinking": "考え中...",
+    "thinkingStatus": "思考中",
+    "claudeIsThinking": "Claude が考え中です..."
+  },
+  "output": {
+    "latest": "最新の出力",
+    "realtimeUpdate": "リアルタイム更新"
+  },
+  "errors": {
+    "failedToUpdateFavorite": "お気に入りの更新に失敗しました",
+    "failedToUpdateStatus": "ステータスの更新に失敗しました"
+  }
+}

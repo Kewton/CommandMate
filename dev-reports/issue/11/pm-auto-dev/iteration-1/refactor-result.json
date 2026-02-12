@@ -1,0 +1,50 @@
+{
+  "status": "partial",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "analysis_completed": true,
+  "refactorings_identified": [
+    {
+      "id": "R1",
+      "file": "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+      "title": "Extract findLogFileInCliToolDirs and eliminate non-null assertions",
+      "priority": "high"
+    },
+    {
+      "id": "R2",
+      "file": "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+      "title": "Replace console.error with structured logger",
+      "priority": "high"
+    },
+    {
+      "id": "R3",
+      "file": "src/app/api/worktrees/[id]/logs/route.ts",
+      "title": "Replace console.error with structured logger and remove dead code",
+      "priority": "medium"
+    },
+    {
+      "id": "R4",
+      "file": "src/lib/log-export-sanitizer.ts",
+      "title": "Cross-reference comment for duplicate sensitive patterns",
+      "priority": "low"
+    },
+    {
+      "id": "R5",
+      "file": "src/lib/api-client.ts",
+      "title": "Extract LogFileResponse type",
+      "priority": "low"
+    }
+  ],
+  "refactorings_applied": [],
+  "files_changed": [],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [],
+  "message": "Refactoring analysis completed. 5 improvements identified (2 high, 1 medium, 2 low). No critical issues found - all are optional quality improvements. Current code quality is acceptable with all tests passing."
+}

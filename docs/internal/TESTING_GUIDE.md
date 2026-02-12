@@ -1,3 +1,5 @@
+[English](../en/internal/TESTING_GUIDE.md)
+
 # CommandMate 動作確認ガイド
 
 このガイドでは、CommandMate の動作確認方法を説明します。

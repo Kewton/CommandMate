@@ -1,3 +1,5 @@
+[English](../en/user-guide/quick-start.md)
+
 # クイックスタートガイド
 
 CommandMateでClaude Codeのスラッシュコマンドとエージェントを使った開発フローを始めましょう。

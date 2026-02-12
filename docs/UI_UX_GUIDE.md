@@ -1,3 +1,5 @@
+[English](./en/UI_UX_GUIDE.md)
+
 # CommandMate UI/UX ガイド
 
 本ドキュメントは、CommandMate の現在の UI/UX 実装について説明します。

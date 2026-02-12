@@ -1,0 +1,93 @@
+{
+  "issue_number": 11,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "S3-MF-001",
+        "item": "withLogging()のPhase 1適用範囲が不明確 -- 具体的なroute.tsファイルリストが未記載",
+        "sections_updated": ["8 (D-11追加)", "10 (T7詳細化)", "13 (T7チェックリスト更新)"],
+        "status": "reflected",
+        "details": "Phase 1適用対象を2ファイル3ハンドラー(logs/route.ts GET, logs/[filename]/route.ts GET/DELETE)に明示的に限定。スコープクリープ防止の注記追加。"
+      },
+      {
+        "id": "S3-MF-002",
+        "item": "統合テスト修正(T1)の波及リスクの過小評価 -- log-manager.tsのfs/promises関数リスト未整理",
+        "sections_updated": ["9 (テスト戦略)", "10 (T1詳細化)", "13 (T1チェックリスト更新)"],
+        "status": "reflected",
+        "details": "APIルートごとのfs/promisesモック対象関数テーブル(access/mkdir/readdir/stat/readFile)を追加。テストケースごとのモック要件を整理。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-SF-001",
+        "item": "log-config.ts導入(T0)によるモジュール初期化順序・循環依存リスク",
+        "sections_updated": ["10 (T0依存チェーン分析追加)", "11 (C-8追加)", "13 (T0チェックリスト更新)"],
+        "status": "reflected",
+        "details": "log-config.ts -> env.ts -> db-path-resolver.tsの依存チェーンを分析し、循環依存が発生しないことを確認。npm run buildの検証ステップを追加。"
+      },
+      {
+        "id": "S3-SF-002",
+        "item": "api-client.tsのgetLogFile()呼び出し元の影響分析結果の明記",
+        "sections_updated": ["5-1 (注記追加)", "13 (T4チェックリスト更新)"],
+        "status": "reflected",
+        "details": "getLogFile()の呼び出し元がLogViewer.tsx (line 75)の1箇所のみであることを明記。grep確認ステップをチェックリストに追加。"
+      },
+      {
+        "id": "S3-SF-003",
+        "item": "escapeRegExp()のJSDoc更新時にSEC-MF-001 ReDoS防止注記を保持すること",
+        "sections_updated": ["3-2 (具体的JSDoc記述例追加)", "13 (T2チェックリスト更新)"],
+        "status": "reflected",
+        "details": "JSDocコメント更新時にSEC-MF-001のReDoS防止注記を必ず保持する旨と、具体的な記述例を追加。"
+      },
+      {
+        "id": "S3-SF-004",
+        "item": "Phase 2別Issue起票時のPromise params型統一コスト見積もり",
+        "sections_updated": ["8 (D-10更新)", "10 (Phase 2前提条件セクション追加)", "11 (C-7更新)", "13 (T7チェックリスト更新)"],
+        "status": "reflected",
+        "details": "Promise params型の7箇所のファイルリストを明記。Phase 2別Issue起票時に型統一コスト見積もりを含めることを推奨事項として追記。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "S3-C-001",
+        "item": "os.hostname()のテスト環境（CI/CD含む）でのモック方針",
+        "sections_updated": ["9 (テストケースセクションに注記追加)", "13 (T2チェックリスト更新)"],
+        "status": "noted",
+        "details": "vi.mock('node:os')でos.hostname()をモックする方針と、CI環境での注意事項を追記。"
+      },
+      {
+        "id": "S3-C-002",
+        "item": "LogViewer.tsxエクスポートボタン追加時のモバイルUIレイアウト確認",
+        "sections_updated": ["13 (T5チェックリスト更新)"],
+        "status": "noted",
+        "details": "T5実装時にモバイル表示のレスポンシブデザイン確認をチェックリストに追加。"
+      },
+      {
+        "id": "S3-C-003",
+        "item": "サニタイズルール数増加時のパフォーマンス考慮",
+        "sections_updated": ["7-1 (注記追加)"],
+        "status": "noted",
+        "details": "将来ルール数が10個超に増加する場合のパフォーマンス計測注記を追加。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-11-data-collection-design-policy.md",
+  "sections_updated": [
+    "3-2 (escapeRegExp JSDoc保持ガイダンス追加)",
+    "5-1 (getLogFile()呼び出し元分析追加)",
+    "7-1 (パフォーマンス注記追加)",
+    "8 (D-10更新、D-11追加)",
+    "9 (fs/promisesモック詳細テーブル追加、os.hostname()モック方針追加)",
+    "10 (Phase 1ファイルリスト追加、Phase 2前提条件追加、T0依存チェーン分析追加、T1モック要件整理)",
+    "11 (C-7更新、C-8追加)",
+    "12 (Stage 3レビュー指摘事項サマリー追加)",
+    "13 (T0/T1/T2/T4/T5/T7チェックリスト更新)",
+    "14 (レビュー履歴にStage 3追加)"
+  ],
+  "timestamp": "2026-02-10T22:00:00+09:00"
+}

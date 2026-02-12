@@ -1,0 +1,26 @@
+{
+  "issue_number": 11,
+  "refactor_targets": [
+    "src/config/log-config.ts",
+    "src/lib/log-export-sanitizer.ts",
+    "src/lib/api-logger.ts",
+    "src/app/api/worktrees/[id]/logs/[filename]/route.ts",
+    "src/app/api/worktrees/[id]/logs/route.ts",
+    "src/lib/api-client.ts",
+    "src/components/worktree/LogViewer.tsx",
+    "src/lib/utils.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "unit_tests_passed": 3048,
+    "integration_tests_passed": 7,
+    "type_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "コード品質の向上（SOLID原則準拠確認）",
+    "重複コードの削除",
+    "エラーハンドリングの改善",
+    "型安全性の強化"
+  ]
+}

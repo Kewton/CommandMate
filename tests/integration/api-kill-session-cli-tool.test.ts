@@ -16,11 +16,6 @@ vi.mock('@/lib/tmux', () => ({
   hasSession: vi.fn(() => Promise.resolve(true)),
 }));
 
-// Mock claude-poller
-vi.mock('@/lib/claude-poller', () => ({
-  stopPolling: vi.fn(),
-}));
-
 // Mock ws-server
 vi.mock('@/lib/ws-server', () => ({
   broadcast: vi.fn(),

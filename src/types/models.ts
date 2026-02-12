@@ -134,6 +134,8 @@ export interface BasePromptData {
   answer?: string;
   /** Timestamp when answered (ISO 8601) */
   answeredAt?: string;
+  /** Instruction text preceding the prompt (context for the user) - Issue #235 */
+  instructionText?: string;
 }
 
 /**

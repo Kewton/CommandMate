@@ -1,0 +1,170 @@
+{
+  "issue_number": 235,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-S2-001",
+        "title": "設計書の行番号参照と実装の不一致（Yes/No return文）",
+        "severity": "medium",
+        "description": "設計書 Section 4.1.2 では Yes/No パターンの変更前コードを「L120-131」と記載しているが、実装では return 文は L120-131 に位置する。ただし設計書のコード例は lines.slice(-10) のままの lastLines を使って rawContent を設定するよう記述している一方、設計書 Section 3.2 の [SF-003] では末尾20行に拡張すると明記している。実装コードでは L97 で `lines.slice(-10)` が使われており、設計書 Section 4.1.2 の変更後コードでは `lines.slice(-20)` に変更すると記載されている。この変更は lastLines 変数の再定義を要するが、lastLines は L97 で定義された後、Yes/No パターン（L117）とApproveパターン（L137）の両方で共有されているため、変更時にスコープの影響を明記すべきである。",
+        "location": "src/lib/prompt-detector.ts L97",
+        "recommendation": "設計書の実装手順（Section 10 Step 4）に、L97 の `lines.slice(-10)` を `lines.slice(-20)` に変更すると明記すること。または、Yes/No パターンとApproveパターンで個別に lastLines を再定義する場合はそのスコープ変更を明示すること。現在の設計書では各パターンごとに `const lastLines = lines.slice(-20).join('\\n');` を新規追加するように読めるが、既存の L97 の lastLines との関係が不明確。"
+      },
+      {
+        "id": "MF-S2-002",
+        "title": "current-output/route.ts のローカル型注釈が rawContent を含まない場合のTypeScript整合性",
+        "severity": "medium",
+        "description": "設計書 Section 11 では current-output/route.ts について「ローカル型注釈に rawContent が含まれないため無視される」と記載している。しかし実装を確認すると L91 で `let promptDetection: { isPrompt: boolean; cleanContent: string; promptData?: unknown }` というローカル型注釈を使用しており、L94 で `detectPrompt()` の戻り値を代入している。PromptDetectionResult に rawContent?: string が追加された場合、detectPrompt() の戻り値に rawContent が含まれるが、ローカル型注釈には rawContent がないため、代入自体は TypeScript の構造的部分型により問題ない（余分なプロパティは無視される）。しかし、もしこのルートが将来 rawContent を使用したい場合に気づきにくくなるリスクがある。設計書の「無視される」という記載は技術的に正確だが、このルートがDBに保存する処理を持たないことの確認が設計書に欠けている。",
+        "location": "src/app/api/worktrees/[id]/current-output/route.ts L91",
+        "recommendation": "設計書 Section 11 の current-output/route.ts の説明に「このルートは promptDetection の結果をDB保存に使用しない（isPromptWaiting と promptData のみAPI応答に含める）ため、rawContent の有無は動作に影響しない」という技術的根拠を補足すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S2-001",
+        "title": "detectMultipleChoicePrompt の return 文の行番号ずれ",
+        "severity": "low",
+        "description": "設計書 Section 4.1.1 では変更前コードを「L488-509」と記載しているが、実装では return 文は L488-509 に位置する。しかしコード例で return { isPrompt: true, promptData: { ... }, cleanContent: question.trim() }; としており、実装の L488-509 の内容と一致はしている。ただし promptData の中身が省略されている（ '...' と記載）ため、実装コードで options の map 処理が含まれていることが設計書からは読み取りにくい。設計書のコード例の精度向上が望ましい。",
+        "location": "設計書 Section 4.1.1",
+        "recommendation": "設計書のコード例が実装の簡略表現であることを明記するか、主要なフィールド（options map を含むこと）を記載する。"
+      },
+      {
+        "id": "SF-S2-002",
+        "title": "Approve パターンの変更前行番号と実装の不一致",
+        "severity": "low",
+        "description": "設計書 Section 4.1.3 では Approve パターンの変更前を「L143-153」と記載している。実装を確認すると、Approve パターンの return 文は L143-152 に位置しており、1行のずれがある。",
+        "location": "設計書 Section 4.1.3 vs src/lib/prompt-detector.ts L143-152",
+        "recommendation": "行番号を実装に合わせて修正する（L143-152）。なお行番号は実装変更で変動するため、「approveMatch 検出後の return 文」のような位置記述も併記すると保守性が上がる。"
+      },
+      {
+        "id": "SF-S2-003",
+        "title": "非検出パスの行番号不一致",
+        "severity": "low",
+        "description": "設計書 Section 4.1.4 では「L157-160」と記載しているが、detectPrompt 関数内の非検出 return は L157-160 に位置する（isPrompt: false を返す箇所）。一方、detectMultipleChoicePrompt 内の noPromptResult() 呼び出しが複数存在し（L390, L441, L448, L459, L467）、これらも非検出パスであるが設計書では言及されていない。noPromptResult() が rawContent を含まないことは設計意図通りだが、noPromptResult() の存在を Section 4.1.4 に明記すべき。",
+        "location": "src/lib/prompt-detector.ts noPromptResult()",
+        "recommendation": "Section 4.1.4 に noPromptResult() ヘルパー関数が rawContent を含まないことを明記する。テスト戦略 Section 6.1 の「noPromptResult()」テストケースとの整合性も確認すること。"
+      },
+      {
+        "id": "SF-S2-004",
+        "title": "PromptMessage.tsx の表示ロジックと既存実装の整合性",
+        "severity": "low",
+        "description": "設計書 Section 4.3.1 では getDisplayContent() 関数の追加を記載しており、message.content を指示テキストとして表示するとしている。しかし既存の PromptMessage.tsx（L51-53）では prompt.question のみをテキスト表示している。設計書では「message.content 表示追加」としているが、message.content は rawContent が DB 保存される新仕様では「rawContent or cleanContent」の値を持つ。既存の prompt.question は PromptData.question であり、これは cleanContent と同一の値になることが多い。getDisplayContent() のロジックは content と question の比較を行うが、rawContent が question を含むケース（content に question テキストが含まれる場合）の表示ロジックが適切に設計されているものの、既存 PromptMessage.tsx のレイアウトにどの位置に新しい表示要素を挿入するかの具体的な JSX 変更が設計書に欠けている。",
+        "location": "src/components/worktree/PromptMessage.tsx L49-54, 設計書 Section 4.3",
+        "recommendation": "Section 4.3.2 の UIレイアウト図を JSX 変更差分に対応させ、{/* Question */} セクション（L49-54）の前後どちらに message.content を表示するのか明確にすること。"
+      },
+      {
+        "id": "SF-S2-005",
+        "title": "response-poller.ts の行番号「L615-623」は実際にはL615-623",
+        "severity": "info",
+        "description": "設計書 Section 4.2.1 では「L615-623」と記載しており、実装の L615-623 と一致している。L618 の content 値変更も正確。ただし設計書ではコード例でコメントとして「L618」と明記しているが、実装でコメント追加の記述がない。",
+        "location": "src/lib/response-poller.ts L618",
+        "recommendation": "実装時に変更理由のコメント（Issue #235 参照等）を L618 付近に追加することを検討する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S2-001",
+        "title": "auto-yes-manager.ts の detectPrompt 呼び出しにおける rawContent の扱い",
+        "severity": "info",
+        "description": "設計書 Section 11 では auto-yes-manager.ts は「isPrompt / promptData のみ使用。rawContent/cleanContent を直接参照しない」と記載。実装を確認すると auto-yes-manager.ts L319 付近で detectPrompt() を呼び出しており、戻り値の promptDetection.isPrompt と promptDetection.promptData のみを使用していることが確認できた。設計書の記載は正確。ただし、detectPrompt() の戻り値に rawContent が追加されることで、将来の開発者が auto-yes-manager で rawContent を使用し始める可能性がある。設計書の「影響なし」の記載自体は現時点で正確であり、将来リスクは低い。",
+        "location": "src/lib/auto-yes-manager.ts",
+        "recommendation": "現状の記載で十分。将来的に auto-yes-manager が content 保存に関与する場合のみ再検討が必要。"
+      },
+      {
+        "id": "C-S2-002",
+        "title": "claude-poller.ts の到達不能コードに関する記載の正確性",
+        "severity": "info",
+        "description": "設計書 Section 11 [SF-001] では claude-poller.ts が到達不能コードであると記載し、L234付近にTODOコメントがあると述べている。実装を確認すると L162（extractClaudeResponse内）と L234（checkForResponse内）にそれぞれ `// TODO [Issue #193]` コメントが存在し、到達不能であることが記載されている。設計書の記載は正確。L245付近の content: promptDetection.cleanContent も実装の L245 と一致する。",
+        "location": "src/lib/claude-poller.ts L162, L234, L245",
+        "recommendation": "現状の記載で十分。将来到達可能になった場合の対応方針も記載済み。"
+      },
+      {
+        "id": "C-S2-003",
+        "title": "テスト戦略と既存テストファイルの整合性",
+        "severity": "info",
+        "description": "設計書 Section 6 では prompt-detector.test.ts に7項目、response-poller.test.ts に2項目、PromptMessage.test.tsx に4項目のテスト追加を計画している。既存テストファイルとして tests/unit/prompt-detector.test.ts と tests/unit/lib/response-poller.test.ts が存在する。PromptMessage.test.tsx は存在しないため新規作成が必要。テストファイルのパス規約（tests/unit/ ディレクトリ直下 vs tests/unit/lib/ 以下）がファイルによって異なるが、設計書ではテストファイルのフルパスを記載していない。",
+        "location": "tests/unit/prompt-detector.test.ts, tests/unit/lib/response-poller.test.ts",
+        "recommendation": "設計書のテスト戦略セクションに、テストファイルのフルパスとPromptMessage.test.tsx の新規作成が必要であることを明記すること。"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "category": "型定義とコード実装",
+      "design_description": "PromptDetectionResult に rawContent?: string 追加",
+      "implementation_status": "未実装（設計段階）",
+      "gap": "なし - 既存の PromptDetectionResult (L40-47) に optional フィールド追加は後方互換"
+    },
+    {
+      "category": "データフロー",
+      "design_description": "detectPrompt -> rawContent 生成 -> response-poller で rawContent || cleanContent -> DB保存",
+      "implementation_status": "response-poller.ts L618 で現在 cleanContent を使用。設計書記載の変更点と一致",
+      "gap": "なし - 設計書のデータフロー図は実装の変更箇所と整合"
+    },
+    {
+      "category": "行番号の正確性",
+      "design_description": "L488-509 (multiple_choice), L120-131 (Yes/No), L143-153 (Approve), L157-160 (非検出), L615-623 (response-poller)",
+      "implementation_status": "multiple_choice: L488-509 正確、Yes/No: L120-131 正確、Approve: L143-152 (1行ずれ)、非検出: L157-160 正確、response-poller: L615-623 正確",
+      "gap": "Approve パターンのみ1行のずれあり（L143-153 vs L143-152）"
+    },
+    {
+      "category": "影響範囲の正確性",
+      "design_description": "auto-yes-manager, auto-yes-resolver, status-detector, claude-session 等は影響なし",
+      "implementation_status": "確認済み - いずれも rawContent/cleanContent を直接使用していない",
+      "gap": "なし"
+    },
+    {
+      "category": "truncateRawContent 設計",
+      "design_description": "RAW_CONTENT_MAX_LINES=200, RAW_CONTENT_MAX_CHARS=5000, 末尾優先のtruncate",
+      "implementation_status": "未実装（新規追加）",
+      "gap": "なし - 新規コードとして整合性問題なし"
+    },
+    {
+      "category": "PromptMessage.tsx UIレイアウト",
+      "design_description": "message.content を指示テキストとして表示、getDisplayContent() 関数追加",
+      "implementation_status": "現在は prompt.question のみ表示（L51-53）",
+      "gap": "設計書の UIレイアウト変更と既存 JSX 構造の対応関係が不明確"
+    },
+    {
+      "category": "DBスキーマ",
+      "design_description": "変更なし。content カラムに格納される値のみ変更",
+      "implementation_status": "messages テーブルの content TEXT NOT NULL に格納",
+      "gap": "なし"
+    },
+    {
+      "category": "セキュリティ設計",
+      "design_description": "dangerouslySetInnerHTML 不使用、React デフォルトエスケープ、stripAnsi() 適用済み",
+      "implementation_status": "現在の PromptMessage.tsx で React エスケープのみ使用（セキュアな実装）",
+      "gap": "なし"
+    },
+    {
+      "category": "lastLines スコープ変更",
+      "design_description": "Yes/No・Approve で末尾20行に拡張 [SF-003]",
+      "implementation_status": "現在 L97 で lines.slice(-10) を使用。Yes/No と Approve の両方で共有",
+      "gap": "設計書のコード例では各パターンごとに const lastLines を再定義するが、既存実装では L97 の共有変数を使用 - スコープ変更方法の明確化が必要"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/components/worktree/PromptMessage.tsx",
+    "src/lib/claude-poller.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/types/models.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/response-poller.test.ts",
+    "dev-reports/design/issue-235-prompt-rawcontent-design-policy.md"
+  ],
+  "timestamp": "2026-02-11T12:00:00Z"
+}

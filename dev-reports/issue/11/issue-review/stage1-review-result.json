@@ -1,0 +1,153 @@
+{
+  "issue_number": 11,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-10",
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "log-manager.tsの既存機能と「エラーログ抽出機能の追加」の整合性が不明確",
+        "location": "影響範囲 - 変更対象ファイル テーブル: src/lib/log-manager.ts",
+        "recommendation": "log-manager.tsは現在「会話ログ（Markdownファイル）」のCRUD管理を担当しているが、Issueでは「エラーログ抽出機能の追加」と記載されている。structuredログ（logger.tsが出力するconsole.log/error）とファイルベースの会話ログ（log-manager.ts）は別物であり、「エラーログ」が何を指すのか（構造化ログなのか、会話ログ内のエラーなのか）を明確に定義する必要がある。具体的には、(1) エクスポート対象が logger.ts の構造化ログであれば、ログの永続化先（現在はconsole出力のみでファイル保存されていない）を明記する必要がある。(2) log-manager.ts の会話ログが対象であれば「エラーログ」ではなく「会話ログ」と記載すべきである。",
+        "evidence": "src/lib/logger.ts は console.log/error に出力するのみでファイル保存機能がない。src/lib/log-manager.ts は会話ログ（Claude/Codex/Gemini の応答）のMarkdownファイル管理のみを行っている。両者にはエラーレベルのログをファイルから抽出する機能は存在しない。"
+      },
+      {
+        "id": "MF-2",
+        "category": "技術的妥当性",
+        "issue": "エクスポート対象の「エラーログ」のデータソースが未定義",
+        "location": "提案する解決策 - 1. ログエクスポート機能",
+        "recommendation": "「ボタン押下でエラーレベルのログを抽出」と記載されているが、現在のlogger.tsは構造化ログをconsoleに出力するのみで、ファイルやDBに永続化していない。エクスポートするためには、(A) logger.tsにファイル出力機能を追加するか、(B) ブラウザのconsoleバッファから取得するか、(C) ログの永続化ストアを新設するか、のいずれかが必要。Issueの実装タスクにログの永続化機構の追加が含まれていない。",
+        "evidence": "src/lib/logger.ts の log() 関数（198-246行目）はサーバーサイドで console.error/warn/log に出力し、クライアントサイドで console[method] に出力するのみ。ファイルやDBへの永続化処理は存在しない。"
+      },
+      {
+        "id": "MF-3",
+        "category": "完全性",
+        "issue": "Issueタイトルの「操作性改善」に対応する内容が本文にない",
+        "location": "Issueタイトル: 操作性改善およびバグ原因調査目的のデータ収集機能強化",
+        "recommendation": "タイトルに「操作性改善」と記載されているが、Issue本文は全てログエクスポート機能とAPIロギングに関する内容であり、操作性改善に関する具体的な記述がない。タイトルを「バグ原因調査目的のデータ収集機能強化」に修正するか、操作性改善の具体的な内容を追加すべき。",
+        "evidence": "Issue本文の「概要」「背景・課題」「提案する解決策」「実装タスク」「受入条件」の全セクションを確認したが、操作性改善に関する記述は見当たらない。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "サニタイズ対象範囲が曖昧 - 「その他環境固有の情報」が不明確",
+        "location": "提案する解決策 - 2. エクスポート時の機密情報サニタイズ - サニタイズ対象",
+        "recommendation": "「その他環境固有の情報（DB絶対パス等）」の「等」が何を含むか具体的にリストアップすべき。例: (1) 環境変数値 (CM_ROOT_DIR, CM_DB_PATH), (2) IPアドレス/ポート, (3) プロセスID, (4) tmuxセッション名に含まれるワークツリーパスなど。実装者が判断に迷わないよう網羅的に記載することを推奨。",
+        "evidence": "サニタイズ対象として明示されているのは4項目のみで、最後の項目が「その他環境固有の情報（DB絶対パス等）」と曖昧な記述になっている。"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "issue": "APIミドルウェアの実装方式が不明確",
+        "location": "提案する解決策 - 3. APIリクエスト/レスポンスログ および 主要な変更点",
+        "recommendation": "「APIミドルウェアまたは各route.tsにリクエスト/レスポンスログ追加」と記載されているが、Next.js App RouterではAPIルート用のミドルウェア（Express風のミドルウェア）がサポートされていない。middleware.tsはリクエストのインターセプトは可能だがレスポンスボディの読み取りは困難。実装方式を明確にすべき。選択肢: (A) Next.js middleware.ts（レスポンスボディ取得に制限あり）、(B) 各route.tsにラッパー関数を適用、(C) 共通のwithLoggingヘルパーを作成して各route.tsで使用。現在のAPI route数が36ファイルあるため、(C)のアプローチが現実的。",
+        "evidence": "src/app/middleware.ts は存在しない。src/app/api/ 配下に36のroute.tsファイルが存在する。Next.js App Router の middleware.ts は Edge Runtime で動作し、レスポンスボディの完全な読み取りには制約がある。"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "エクスポートするログの時間範囲が未定義",
+        "location": "提案する解決策 - 1. ログエクスポート機能",
+        "recommendation": "「ボタン押下でエラーレベルのログを抽出」と記載されているが、どの期間のログをエクスポートするかが未定義。例: (A) 直近N分/N時間のログ, (B) 選択したワークツリーの全ログ, (C) ユーザーが期間を指定, (D) 最新セッションのログのみ。時間範囲によって実装の複雑さとUXが大きく変わるため明記すべき。",
+        "evidence": "Issue本文内に時間範囲に関する記述が存在しない。"
+      },
+      {
+        "id": "SF-4",
+        "category": "受け入れ条件",
+        "issue": "サニタイズの検証方法が具体的でない",
+        "location": "受入条件",
+        "recommendation": "「エクスポートされたログにルートディレクトリ・ホームディレクトリの絶対パスが含まれないこと」はテスト可能だが、検証方法を具体化すべき。例: (1) 特定のパスパターン（/Users/*, /home/*, C:\\Users\\*）が出力に含まれないことを正規表現で検証するユニットテスト、(2) 環境変数 HOME, CM_ROOT_DIR, CM_DB_PATH の値がエクスポート結果に含まれないことの検証。",
+        "evidence": "受入条件の3-5番目はサニタイズに関するものだが、具体的なテスト方法やパスパターンが記載されていない。"
+      },
+      {
+        "id": "SF-5",
+        "category": "整合性",
+        "issue": "clipboard-utils.tsの変更必要性の判断根拠が不足",
+        "location": "影響範囲 - 変更対象ファイル テーブル: src/lib/clipboard-utils.ts",
+        "recommendation": "「ログ用コピー機能の拡張（必要に応じて）」と記載されているが、現在のcopyToClipboard関数は文字列を受け取りANSIコードを除去してコピーするシンプルな関数であり、ログエクスポートでもそのまま利用可能に見える。拡張が必要な具体的ケースがあれば明記し、なければ変更対象から外すべき。",
+        "evidence": "src/lib/clipboard-utils.ts の copyToClipboard 関数は text: string を受け取り、ANSIエスケープコードを除去して navigator.clipboard.writeText で書き込む。Markdown文字列のコピーに特別な拡張は不要に見える。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "エクスポートボタンの配置場所が「ワークツリー詳細画面」のみで曖昧",
+        "location": "提案する解決策 - 1. ログエクスポート機能",
+        "recommendation": "WorktreeDetail.tsxには複数のタブ（Claude, Codex, Log, Information, Description）が存在する。エクスポートボタンを配置する具体的なタブ・位置を明記するとよい。例: 「Logタブ内のログファイル表示エリアにエクスポートボタンを追加」など。LogViewer.tsxが既にログ表示を担っているため、LogViewer内への配置が自然と思われる。",
+        "evidence": "WorktreeDetail.tsx の TabView 型は 'claude' | 'codex' | 'logs' | 'info' | 'description' の5タブを定義している。LogViewer.tsx が既にログファイル一覧とコンテンツ表示機能を持っている。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "エラーハンドリングの記載がない",
+        "location": "受入条件",
+        "recommendation": "以下のエラーケースに対する受け入れ条件の追加を検討: (1) ログデータが存在しない場合の挙動、(2) クリップボードAPIが利用できない環境での挙動（HTTP環境など）、(3) エクスポート対象のログが大量の場合の制限。",
+        "evidence": "既存のclipboard-utils.tsは空文字チェックのみで、Clipboard API失敗時のフォールバックは実装されていない。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "関連Issueへのリンクがない",
+        "location": "Issue本文全体",
+        "recommendation": "logger.tsのIssue #41（構造化ログ導入）やclipboard-utils.tsのIssue #211に関連があるため、関連Issueとしてリンクを追加するとよい。",
+        "evidence": "logger.tsのコメントに「Issue #41: Structured logging + log level control」、clipboard-utils.tsの説明にIssue #211が記載されている。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/logger.ts",
+      "relevance": "既存の構造化ログシステム。console出力のみでファイル永続化なし。SENSITIVE_PATTERNSは認証情報対象。"
+    },
+    {
+      "file": "src/lib/log-manager.ts",
+      "relevance": "会話ログ（Markdown）のCRUD管理。エラーログ抽出機能は存在しない。"
+    },
+    {
+      "file": "src/lib/clipboard-utils.ts",
+      "relevance": "既存のクリップボードコピー関数。ANSIコード除去機能付き。"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "環境変数取得。CM_ROOT_DIR, CM_DB_PATH等のサニタイズ対象値の取得元。"
+    },
+    {
+      "file": "src/lib/errors.ts",
+      "relevance": "AppErrorクラス。エラー情報の構造化。"
+    },
+    {
+      "file": "src/lib/conversation-logger.ts",
+      "relevance": "会話ログ記録ヘルパー。log-manager.tsを使用。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetail.tsx",
+      "relevance": "エクスポートボタン追加先のメインコンポーネント。5タブ構成。"
+    },
+    {
+      "file": "src/components/worktree/LogViewer.tsx",
+      "relevance": "既存のログ表示コンポーネント。検索機能付き。エクスポートボタンの自然な配置先候補。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/architecture.md",
+      "relevance": "システムアーキテクチャ。ログ永続化はMarkdownファイルのみ記載。構造化ログのファイル保存は言及なし。"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトガイドライン。log-manager.tsの説明が「エラーログ抽出機能の追加」先と矛盾する可能性。"
+    }
+  ]
+}

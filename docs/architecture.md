@@ -1,3 +1,5 @@
+[English](./en/architecture.md)
+
 # docs/architecture.md
 
 # CommandMate Architecture
@@ -566,7 +568,7 @@ feature/foo
 **削除処理フロー:**
 1. リポジトリに属する全worktree IDを取得
 2. 各worktreeのtmuxセッションをkill（失敗してもwarningsに記録して続行）
-3. response-poller / claude-pollerを停止
+3. response-pollerを停止
 4. WebSocket購読状態をクリーンアップ
 5. DBからworktreeレコードをCASCADE削除
 6. `repository_deleted` イベントをbroadcast

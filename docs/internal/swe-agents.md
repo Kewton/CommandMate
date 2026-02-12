@@ -1,3 +1,5 @@
+[English](../en/internal/swe-agents.md)
+
 # Guide for SWE Agents (Claude Code / OpenHands / Others)
 
 このドキュメントは、Claude Code や OpenHands などの **SWE エージェント** が  

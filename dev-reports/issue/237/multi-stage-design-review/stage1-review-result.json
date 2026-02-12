@@ -1,0 +1,128 @@
+{
+  "issue_number": 237,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "DRY",
+        "issue": "WorktreeDetail.tsx 内の simple-terminal リンク参照が設計方針書に記載されていない",
+        "detail": "WorktreeDetail.tsx の L652 および L678 に `/worktrees/${worktreeId}/simple-terminal` へのリンクが存在する。WorktreeDetail.tsx 自体が削除対象のため実害はないが、設計方針書のセクション3-4「参照元: ルーティングのみ」という記述は不正確。simple-terminal ルートを参照する箇所として WorktreeDetail.tsx のリンクも明記すべき。削除順序においてフェーズ3で同時削除されるため実装上の問題はないが、設計文書の正確性の観点で修正が必要",
+        "severity": "low",
+        "file": "dev-reports/design/issue-237-dead-code-removal-design-policy.md",
+        "recommendation": "セクション3-4の参照元に 'WorktreeDetail.tsx (L652, L678) - 同時削除対象' を追記する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "SRP",
+        "issue": "manager.ts の stopPollers メソッド内コメント「Future: Add other tool-specific pollers here if needed」が YAGNI 違反的記述",
+        "detail": "manager.ts L179 のコメントは将来の拡張を示唆しているが、claude-poller の条件分岐自体が削除されるため、このコメントも合わせて削除すべき。設計方針書では L175-178 の削除のみ記載されているが、L179 のコメントも削除対象に含めるべき",
+        "severity": "low",
+        "file": "src/lib/cli-tools/manager.ts",
+        "recommendation": "設計方針書のセクション4-2に L179 のコメント削除も明記する"
+      },
+      {
+        "id": "SF-002",
+        "principle": "DRY",
+        "issue": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md 内の claude-poller 参照が設計方針書の更新対象に含まれていない",
+        "detail": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md の L456, L589, L1137 に claude-poller.ts への参照が残存する。ドキュメント更新対象が architecture.md のみとなっているが、内部設計ドキュメントの整合性維持のため、少なくとも認識しておく必要がある",
+        "severity": "low",
+        "file": "docs/internal/PROMPT_HANDLING_IMPLEMENTATION_PLAN.md",
+        "recommendation": "本Issueの対象外とする場合は、設計方針書に「内部ドキュメント（PROMPT_HANDLING_IMPLEMENTATION_PLAN.md等）の更新は別途対応」と明記する。または対象に含める"
+      }
+    ],
+    "consider": [
+      {
+        "id": "CS-001",
+        "principle": "KISS",
+        "issue": "WorktreeDetailRefactored の barrel export 未追加について、長期的な一貫性の観点",
+        "detail": "設計方針書のYAGNI判断（barrel export追加なし）は現時点で妥当。ただし、index.ts から WorktreeDetail のexportを削除した後、barrel export ファイルに WorktreeDetailRefactored が含まれないことで、将来的に他モジュールからのimport時に一貫性の問題が発生する可能性がある。現時点では page.tsx からの直接importで問題ないため、この判断を支持する",
+        "severity": "info",
+        "file": "src/components/worktree/index.ts",
+        "recommendation": "将来の Issue でコンポーネント再構成を行う際に検討事項として記録する"
+      },
+      {
+        "id": "CS-002",
+        "principle": "SOLID-SRP",
+        "issue": "session-cleanup.ts の Facade パターンが claude-poller 削除後にシンプルになる",
+        "detail": "claude-poller の削除後、session-cleanup.ts は response-poller と auto-yes-poller の2つのみを管理することになる。Facade パターンの価値は維持されるが、JSDoc の '差異を抽象化' という記述は実態と合わなくなる。設計方針書のJSDoc更新（セクション4-1）で適切に対処されている",
+        "severity": "info",
+        "file": "src/lib/session-cleanup.ts",
+        "recommendation": "設計方針書の対応で十分。追加対応不要"
+      }
+    ]
+  },
+  "design_principles_assessment": {
+    "SRP": {
+      "score": 5,
+      "assessment": "PASS",
+      "detail": "各削除対象モジュールの責任は明確に識別されており、削除によって残存モジュールの単一責任がより明確になる。claude-poller.ts（ポーリング）と response-poller.ts（ポーリング）の責任重複が解消される。session-cleanup.ts の Facade 責任が簡素化される"
+    },
+    "OCP": {
+      "score": 4,
+      "assessment": "PASS",
+      "detail": "削除は既存の拡張ポイントに影響しない。manager.ts の stopPollers メソッドは claude-poller 固有の条件分岐削除後もresponse-poller の停止機能を維持する。CLI Tool Strategy パターン（ClaudeTool, CodexTool, GeminiTool）への影響なし"
+    },
+    "LSP": {
+      "score": 5,
+      "assessment": "PASS - 該当なし",
+      "detail": "削除対象に継承関係はない。CLITool の Strategy パターンの型契約（ICLITool インターフェース）への影響なし"
+    },
+    "ISP": {
+      "score": 5,
+      "assessment": "PASS",
+      "detail": "claude-poller.ts は 4 つの関数（startPolling, stopPolling, stopAllPolling, getActivePollers）をエクスポートしていたが、外部から使用されていたのは stopPolling のみ（session-cleanup.ts と manager.ts）。過剰なインターフェース公開が削除により解消される"
+    },
+    "DIP": {
+      "score": 4,
+      "assessment": "PASS",
+      "detail": "session-cleanup.ts は KillSessionFn 型を通じた依存性注入パターンを使用しており、この設計は claude-poller 削除後も維持される。manager.ts の stopPollers メソッドは具象モジュールへの直接依存を持っているが、これは本 Issue の範囲外"
+    },
+    "KISS": {
+      "score": 5,
+      "assessment": "PASS",
+      "detail": "高優先度の明確な削除対象に限定する方針は KISS 原則に完全に準拠している。4フェーズの段階的削除手順は各ステップを単純に保ちながら安全性を確保している。テスト先行の修正順序も理解しやすい"
+    },
+    "YAGNI": {
+      "score": 5,
+      "assessment": "PASS",
+      "detail": "barrel export 追加見送りの判断（セクション7）は YAGNI 原則に厳密に従っている。空ファイル化による互換性維持も正しく不採用としている。不要なフォールバック手段（simple-terminal）の保持を回避している"
+    },
+    "DRY": {
+      "score": 5,
+      "assessment": "PASS",
+      "detail": "claude-poller.ts と response-poller.ts の機能重複が解消される。WorktreeDetail.tsx と WorktreeDetailRefactored.tsx の重複コンポーネントが統一される。これがまさに DRY 原則適用の好例"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low",
+    "detail": {
+      "technical": "全削除対象は未使用コード。response-poller.ts が claude-poller.ts の完全な後継として稼働中。WorktreeDetailRefactored.tsx が WorktreeDetail.tsx を完全に置き換え済み。4フェーズ段階的削除で各段階での検証が可能",
+      "security": "削除対象は内部モジュール。外部インターフェース、認証、入力バリデーションへの影響なし",
+      "operational": "約1,900行のデッドコード削除。ビルド・テスト全パスを各フェーズで検証する計画"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-237-dead-code-removal-design-policy.md",
+    "src/lib/claude-poller.ts",
+    "src/lib/terminal-websocket.ts",
+    "src/components/worktree/WorktreeDetail.tsx",
+    "src/components/SimpleTerminal.tsx",
+    "src/app/worktrees/[id]/simple-terminal/page.tsx",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/components/worktree/index.ts",
+    "src/app/worktrees/[id]/page.tsx",
+    "src/lib/response-poller.ts",
+    "docs/architecture.md"
+  ],
+  "timestamp": "2026-02-11T00:00:00Z"
+}
