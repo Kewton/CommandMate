@@ -172,6 +172,12 @@ src/
 | `src/config/log-config.ts` | LOG_DIR定数の一元管理（getLogDir()関数、DRY原則対応） |
 | `src/lib/log-export-sanitizer.ts` | エクスポート用パス・環境情報・機密データサニタイズ（Issue #11: sanitizeForExport()関数、HOME/CM_ROOT_DIR/CM_DB_PATH/ホスト名/トークン/パスワード/SSHキーのマスキング） |
 | `src/lib/api-logger.ts` | 共通withLogging()ヘルパー（Issue #11: 開発環境APIリクエスト/レスポンスロギング、ジェネリクス型ApiHandler、skipResponseBodyオプション） |
+| `src/config/i18n-config.ts` | i18n設定の一元管理（SUPPORTED_LOCALES, DEFAULT_LOCALE, LOCALE_LABELS, LOCALE_COOKIE_NAME） |
+| `src/i18n.ts` | next-intl getRequestConfig（Cookie→Accept-Language→DEFAULT_LOCALEフォールバック、全名前空間マージ） |
+| `src/lib/locale-cookie.ts` | ロケールCookieユーティリティ（SameSite=Lax、条件付きSecure、1年有効期限） |
+| `src/hooks/useLocaleSwitch.ts` | ロケール切替フック（バリデーション、Cookie/localStorage永続化、reload） |
+| `src/components/common/LocaleSwitcher.tsx` | 言語切替ドロップダウンコンポーネント（Sidebar下部配置） |
+| `src/lib/date-locale.ts` | date-fnsロケールマッピング（getDateFnsLocale()、enUS/jaサポート） |
 
 ### CLIモジュール（Issue #96, #136）
 

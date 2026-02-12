@@ -1,3 +1,5 @@
+[English](./en/architecture.md)
+
 # docs/architecture.md
 
 # CommandMate Architecture

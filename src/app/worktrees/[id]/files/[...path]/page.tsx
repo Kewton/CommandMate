@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -22,6 +23,7 @@ interface FileContent {
 export default function FileViewerPage() {
   const router = useRouter();
   const params = useParams();
+  const tCommon = useTranslations('common');
   const worktreeId = params.id as string;
   const filePath = (params.path as string[]).join('/');
 
@@ -67,7 +69,7 @@ export default function FileViewerPage() {
           <button
             onClick={() => router.back()}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
-            aria-label="戻る"
+            aria-label={tCommon('back')}
           >
             <svg
               className="w-6 h-6"
@@ -82,7 +84,7 @@ export default function FileViewerPage() {
                 d="M10 19l-7-7m0 0l7-7m-7 7h18"
               />
             </svg>
-            <span className="hidden sm:inline">戻る</span>
+            <span className="hidden sm:inline">{tCommon('back')}</span>
           </button>
           <div className="flex-1 min-w-0">
             <h1 className="text-lg font-semibold text-gray-900 truncate">

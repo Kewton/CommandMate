@@ -1,61 +1,61 @@
-[English](../en/internal/PHASE5-7_IMPLEMENTATION_PLAN.md)
+[日本語版](../../internal/PHASE5-7_IMPLEMENTATION_PLAN.md)
 
-# Phase 5-7 実装計画書
+# Phase 5-7 Implementation Plan
 
-CommandMate の tmux/Claude CLI 統合機能の詳細実装計画。
+Detailed implementation plan for CommandMate's tmux/Claude CLI integration features.
 
-## 📋 目次
-3. [Phase 6: Claude CLI 統合](#phase-6-claude-cli-統合)
-5. [統合テスト計画](#統合テスト計画)
-6. [リスクと対策](#リスクと対策)
+## Table of Contents
+3. [Phase 6: Claude CLI Integration](#phase-6-claude-cli-integration)
+5. [Integration Test Plan](#integration-test-plan)
+6. [Risks and Mitigations](#risks-and-mitigations)
 
 ---
 
-## 概要
+## Overview
 
-worktree ごとに独立した tmux + Claude CLI セッションを管理し、ブラウザ UI からのメッセージ送信と Claude からの応答取得を実現する。
+Manage independent tmux + Claude CLI sessions per worktree, enabling message sending from the browser UI and response retrieval from Claude.
 
 - **1 worktree = 1 tmux session = 1 Claude CLI process**
-- **差分抽出**: tmux の scrollback から `lastCapturedLine` 以降のみを取得
+- **Diff extraction**: Retrieve only lines after `lastCapturedLine` from tmux scrollback
 
-**実装済み:**
-- ✅ データベース（SQLite）
-- ✅ WebSocket サーバー
-- ✅ フロントエンド UI
-- ✅ Worktree スキャン
-- ✅ メッセージの DB 保存（`POST /api/worktrees/:id/send`）
+**Implemented:**
+- tmux Database (SQLite)
+- WebSocket server
+- Frontend UI
+- Worktree scanning
+- Message DB persistence (`POST /api/worktrees/:id/send`)
 
-**未実装（Phase 5-7）:**
-- ❌ tmux セッション管理
-- ❌ Claude CLI の起動と通信
-- ❌ Stop フック処理
-- ❌ scrollback からの差分抽出
-- ❌ Markdown ログ保存
+**Not yet implemented (Phase 5-7):**
+- tmux session management
+- Claude CLI startup and communication
+- Stop hook processing
+- Diff extraction from scrollback
+- Markdown log saving
 
 ---
 
-## Phase 5: tmux セッション管理
+## Phase 5: tmux Session Management
 
-### 目標
+### Goal
 
-tmux セッションを作成・管理し、worktree のワーキングディレクトリで操作できるようにする。
+Create and manage tmux sessions, enabling operations in the worktree's working directory.
 
-### タスク分解
+### Task Breakdown
 
-#### 5.1 tmux ラッパーライブラリの拡張
+#### 5.1 Extending the tmux Wrapper Library
 
-**ファイル**: `src/lib/tmux.ts`
+**File**: `src/lib/tmux.ts`
 
-**実装内容:**
+**Implementation:**
 
-1. **セッション存在チェック**
+1. **Session existence check**
    ```typescript
    async function hasSession(sessionName: string): Promise<boolean>
    ```
-   - `tmux has-session -t {sessionName}` を実行
-   - 戻り値で存在を判定
+   - Execute `tmux has-session -t {sessionName}`
+   - Determine existence from return value
 
-2. **セッション作成**
+2. **Session creation**
    ```typescript
    async function createSession(options: {
      sessionName: string;
@@ -63,28 +63,28 @@ tmux セッションを作成・管理し、worktree のワーキングディレ
    }): Promise<void>
    ```
    - `tmux new-session -d -s {sessionName} -c {workingDirectory}`
-   - detached モードで作成
+   - Create in detached mode
 
-3. **セッション一覧取得**
+3. **Session list retrieval**
    ```typescript
    async function listSessions(): Promise<TmuxSession[]>
    ```
    - `tmux list-sessions -F "#{session_name}"`
-   - パース処理
+   - Parse processing
 
-4. **セッション削除**
+4. **Session deletion**
    ```typescript
    async function killSession(sessionName: string): Promise<void>
    ```
    - `tmux kill-session -t {sessionName}`
 
-5. **コマンド送信**
+5. **Command sending**
    ```typescript
    async function sendKeys(sessionName: string, command: string): Promise<void>
    ```
    - `tmux send-keys -t {sessionName} "{command}" C-m`
 
-6. **scrollback 取得**
+6. **Scrollback retrieval**
    ```typescript
    async function capturePane(sessionName: string, options?: {
      startLine?: number;
@@ -92,9 +92,9 @@ tmux セッションを作成・管理し、worktree のワーキングディレ
    }): Promise<string>
    ```
    - `tmux capture-pane -p -S {start} -E {end} -t {sessionName}`
-   - scrollback バッファ全体を取得
+   - Retrieve the entire scrollback buffer
 
-**型定義:**
+**Type definitions:**
 
 ```typescript
 interface TmuxSession {
@@ -104,52 +104,52 @@ interface TmuxSession {
 }
 
 interface TmuxCaptureOptions {
-  startLine?: number;  // -S オプション（デフォルト: -10000）
-  endLine?: number;    // -E オプション（デフォルト: -）
+  startLine?: number;  // -S option (default: -10000)
+  endLine?: number;    // -E option (default: -)
 }
 ```
 
-#### 5.2 エラーハンドリング
+#### 5.2 Error Handling
 
-- tmux が起動していない場合のエラー処理
-- セッション名の衝突チェック
-- コマンド実行タイムアウト（デフォルト: 5秒）
+- Error handling when tmux is not running
+- Session name collision checking
+- Command execution timeout (default: 5 seconds)
 
-#### 5.3 ユニットテスト
+#### 5.3 Unit Tests
 
-**ファイル**: `tests/unit/tmux.test.ts`
+**File**: `tests/unit/tmux.test.ts`
 
-**テストケース:**
+**Test cases:**
 
-1. `hasSession` - セッションの存在チェック
-2. `createSession` - セッション作成
-3. `listSessions` - セッション一覧取得
-4. `killSession` - セッション削除
-5. `sendKeys` - コマンド送信
-6. `capturePane` - scrollback 取得
-7. エラーケース（tmux 未起動、セッション不在など）
+1. `hasSession` - Session existence check
+2. `createSession` - Session creation
+3. `listSessions` - Session list retrieval
+4. `killSession` - Session deletion
+5. `sendKeys` - Command sending
+6. `capturePane` - Scrollback retrieval
+7. Error cases (tmux not running, session not found, etc.)
 
-**モック化:**
-- `child_process.exec` をモック
-- tmux コマンドの出力をシミュレート
+**Mocking:**
+- Mock `child_process.exec`
+- Simulate tmux command output
 
 ---
 
-## Phase 6: Claude CLI 統合
+## Phase 6: Claude CLI Integration
 
-### 目標
+### Goal
 
-tmux セッション内で Claude CLI を起動し、Stop フックを設定する。メッセージを送信できるようにする。
+Start Claude CLI within a tmux session and set up the Stop hook. Enable message sending.
 
-### タスク分解
+### Task Breakdown
 
-#### 6.1 Claude セッション管理
+#### 6.1 Claude Session Management
 
-**ファイル**: `src/lib/claude-session.ts`
+**File**: `src/lib/claude-session.ts`
 
-**実装内容:**
+**Implementation:**
 
-1. **Claude セッション起動**
+1. **Claude session startup**
    ```typescript
    async function startClaudeSession(options: {
      worktreeId: string;
@@ -158,47 +158,47 @@ tmux セッション内で Claude CLI を起動し、Stop フックを設定す�
    }): Promise<void>
    ```
 
-   **実行手順:**
+   **Execution steps:**
    ```bash
-   # セッション作成
+   # Create session
    tmux new-session -d -s "cw_{worktreeId}" -c "{worktreePath}"
 
-   # Stop フック設定
+   # Set Stop hook
    HOOK_CMD="curl -X POST {hookUrl} -H 'Content-Type: application/json' -d '{\"worktreeId\":\"{worktreeId}\"}'"
    tmux send-keys -t "cw_{worktreeId}" "export CLAUDE_HOOKS_STOP='${HOOK_CMD}'" C-m
 
-   # Claude CLI 起動
+   # Start Claude CLI
    tmux send-keys -t "cw_{worktreeId}" "claude" C-m
    ```
 
-2. **Claude セッション状態チェック**
+2. **Claude session state check**
    ```typescript
    async function isClaudeRunning(sessionName: string): Promise<boolean>
    ```
-   - セッション内のプロセス一覧を取得
-   - `claude` プロセスの存在を確認
+   - Get process list within the session
+   - Confirm existence of `claude` process
 
-3. **メッセージ送信**
+3. **Message sending**
    ```typescript
    async function sendMessageToClaude(
      worktreeId: string,
      message: string
    ): Promise<void>
    ```
-   - `tmux send-keys` でメッセージを送信
-   - エスケープ処理（改行、特殊文字）
+   - Send message via `tmux send-keys`
+   - Escape handling (newlines, special characters)
 
-#### 6.2 API エンドポイントの拡張
+#### 6.2 API Endpoint Extension
 
-**ファイル**: `src/app/api/worktrees/[id]/send/route.ts`
+**File**: `src/app/api/worktrees/[id]/send/route.ts`
 
-**現在の実装:**
+**Current implementation:**
 ```typescript
-// メッセージを DB に保存するだけ
+// Only saves message to DB
 createMessage(db, { worktreeId, role: 'user', content });
 ```
 
-**拡張内容:**
+**Extended content:**
 
 ```typescript
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -214,7 +214,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ error: 'Message content is required' }, { status: 400 });
     }
 
-    // 1. ユーザーメッセージを DB に保存
+    // 1. Save user message to DB
     const userMessage = createMessage(db, {
       worktreeId: params.id,
       role: 'user',
@@ -222,12 +222,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       timestamp: new Date(),
     });
 
-    // 2. tmux セッションの確認・起動
+    // 2. Check/start tmux session
     const sessionName = `cw_${params.id}`;
     const sessionExists = await hasSession(sessionName);
 
     if (!sessionExists) {
-      // セッションが存在しない場合、Claude セッションを起動
+      // If session doesn't exist, start Claude session
       const hookUrl = `${process.env.MCBD_BASE_URL || 'http://localhost:3000'}/api/hooks/claude-done`;
       await startClaudeSession({
         worktreeId: params.id,
@@ -235,13 +235,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         hookUrl,
       });
 
-      // Claude の起動待ち（2秒）
+      // Wait for Claude startup (2 seconds)
       await new Promise(resolve => setTimeout(resolve, 2000));
     } else {
-      // セッションが存在する場合、Claude が動作しているか確認
+      // If session exists, check if Claude is running
       const isRunning = await isClaudeRunning(sessionName);
       if (!isRunning) {
-        // Claude が停止している場合、再起動
+        // If Claude is stopped, restart
         await startClaudeSession({
           worktreeId: params.id,
           worktreePath: worktree.path,
@@ -251,13 +251,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       }
     }
 
-    // 3. メッセージを Claude に送信
+    // 3. Send message to Claude
     await sendMessageToClaude(params.id, body.content);
 
-    // 4. WebSocket でユーザーメッセージを配信
+    // 4. Distribute user message via WebSocket
     broadcastMessage(params.id, userMessage);
 
-    // 5. 202 Accepted で即座に応答
+    // 5. Respond immediately with 202 Accepted
     return NextResponse.json(userMessage, { status: 202 });
 
   } catch (error) {
@@ -267,52 +267,52 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 }
 ```
 
-#### 6.3 環境変数の追加
+#### 6.3 Adding Environment Variables
 
-**ファイル**: `.env.example`, `.env.production.example`
+**Files**: `.env.example`, `.env.production.example`
 
 ```env
 # Base URL for hook callbacks
 MCBD_BASE_URL=http://localhost:3000
 ```
 
-#### 6.4 統合テスト
+#### 6.4 Integration Tests
 
-**ファイル**: `tests/integration/claude-session.test.ts`
+**File**: `tests/integration/claude-session.test.ts`
 
-**テストケース:**
+**Test cases:**
 
-1. Claude セッションの起動
-2. メッセージ送信
-3. セッションの再起動
-4. エラーハンドリング（tmux 未起動、Claude 未インストール）
+1. Claude session startup
+2. Message sending
+3. Session restart
+4. Error handling (tmux not running, Claude not installed)
 
-**モック化:**
-- tmux コマンドをモック
-- Claude CLI の動作をシミュレート
+**Mocking:**
+- Mock tmux commands
+- Simulate Claude CLI behavior
 
 ---
 
-## Phase 7: Stop フック処理
+## Phase 7: Stop Hook Processing
 
-### 目標
+### Goal
 
-Claude CLI の Stop フックを受け取り、scrollback から差分を抽出してログとメッセージを保存する。
+Receive Claude CLI's Stop hook, extract diffs from scrollback, and save logs and messages.
 
-### タスク分解
+### Task Breakdown
 
-#### 7.1 Stop フック API の実装
+#### 7.1 Stop Hook API Implementation
 
-**ファイル**: `src/app/api/hooks/claude-done/route.ts`
+**File**: `src/app/api/hooks/claude-done/route.ts`
 
-**現在の状態**: 実装されていない
+**Current state**: Not implemented
 
-**実装内容:**
+**Implementation:**
 
 ```typescript
 /**
  * API Route: POST /api/hooks/claude-done
- * Claude CLI の Stop フックから呼び出される
+ * Called from Claude CLI's Stop hook
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -341,17 +341,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Worktree not found' }, { status: 404 });
     }
 
-    // 1. セッション状態を取得
+    // 1. Get session state
     const sessionState = getSessionState(db, worktreeId);
     const lastCapturedLine = sessionState?.lastCapturedLine || 0;
 
-    // 2. tmux から scrollback 全体を取得
+    // 2. Get full scrollback from tmux
     const sessionName = `cw_${worktreeId}`;
     const fullOutput = await capturePane(sessionName, {
-      startLine: -10000,  // 十分に大きな値
+      startLine: -10000,  // Sufficiently large value
     });
 
-    // 3. 差分を抽出（lastCapturedLine 以降）
+    // 3. Extract diff (after lastCapturedLine)
     const lines = fullOutput.split('\n');
     const newLines = lines.slice(lastCapturedLine);
     const newOutput = newLines.join('\n');
@@ -361,7 +361,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'No new output' }, { status: 200 });
     }
 
-    // 4. Markdown ログとして保存
+    // 4. Save as Markdown log
     const logFileName = await saveLogFile({
       worktreeId,
       worktreePath: worktree.path,
@@ -369,33 +369,33 @@ export async function POST(request: NextRequest) {
       timestamp: new Date(),
     });
 
-    // 5. ChatMessage を作成
+    // 5. Create ChatMessage
     const claudeMessage = createMessage(db, {
       worktreeId,
       role: 'claude',
       content: newOutput,
-      summary: extractSummary(newOutput),  // 要約を抽出（オプション）
+      summary: extractSummary(newOutput),  // Extract summary (optional)
       logFileName,
       timestamp: new Date(),
     });
 
-    // 6. Worktree の lastMessageSummary と updatedAt を更新
+    // 6. Update Worktree's lastMessageSummary and updatedAt
     updateWorktree(db, {
       id: worktreeId,
       lastMessageSummary: claudeMessage.summary,
       updatedAt: claudeMessage.timestamp,
     });
 
-    // 7. セッション状態を更新（lastCapturedLine）
+    // 7. Update session state (lastCapturedLine)
     updateSessionState(db, {
       worktreeId,
       lastCapturedLine: lines.length,
     });
 
-    // 8. WebSocket でメッセージを配信
+    // 8. Distribute message via WebSocket
     broadcastMessage(worktreeId, claudeMessage);
 
-    console.log(`✓ Processed Stop hook for worktree ${worktreeId}, saved to ${logFileName}`);
+    console.log(`Processed Stop hook for worktree ${worktreeId}, saved to ${logFileName}`);
 
     return NextResponse.json({
       message: 'Stop hook processed',
@@ -410,20 +410,20 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * 応答から要約を抽出（簡易実装）
+ * Extract summary from response (simple implementation)
  */
 function extractSummary(content: string): string {
-  // 最初の100文字を要約として使用
+  // Use the first 100 characters as the summary
   const summary = content.trim().split('\n')[0];
   return summary.substring(0, 100) + (summary.length > 100 ? '...' : '');
 }
 ```
 
-#### 7.2 ログ管理機能
+#### 7.2 Log Management Feature
 
-**ファイル**: `src/lib/log-manager.ts`
+**File**: `src/lib/log-manager.ts`
 
-**実装内容:**
+**Implementation:**
 
 ```typescript
 import fs from 'fs/promises';
@@ -431,7 +431,7 @@ import path from 'path';
 import { format } from 'date-fns';
 
 /**
- * Markdown ログファイルを保存
+ * Save a Markdown log file
  */
 export async function saveLogFile(options: {
   worktreeId: string;
@@ -441,17 +441,17 @@ export async function saveLogFile(options: {
 }): Promise<string> {
   const { worktreeId, worktreePath, content, timestamp } = options;
 
-  // ログディレクトリ: {worktreePath}/.claude_logs/
+  // Log directory: {worktreePath}/.claude_logs/
   const logsDir = path.join(worktreePath, '.claude_logs');
   await fs.mkdir(logsDir, { recursive: true });
 
-  // ファイル名: YYYYMMDD-HHMMSS-{worktreeId}-{uuid}.md
+  // File name: YYYYMMDD-HHMMSS-{worktreeId}-{uuid}.md
   const dateStr = format(timestamp, 'yyyyMMdd-HHmmss');
   const uuid = generateShortUuid();
   const fileName = `${dateStr}-${worktreeId}-${uuid}.md`;
   const filePath = path.join(logsDir, fileName);
 
-  // Markdown フォーマットでログを保存
+  // Save log in Markdown format
   const logContent = `# Claude Response - ${format(timestamp, 'yyyy-MM-dd HH:mm:ss')}
 
 Worktree: ${worktreeId}
@@ -467,7 +467,7 @@ ${content}
 }
 
 /**
- * ログファイル一覧を取得
+ * Get log file list
  */
 export async function listLogFiles(worktreePath: string): Promise<string[]> {
   const logsDir = path.join(worktreePath, '.claude_logs');
@@ -477,7 +477,7 @@ export async function listLogFiles(worktreePath: string): Promise<string[]> {
     return files
       .filter(f => f.endsWith('.md'))
       .sort()
-      .reverse();  // 新しい順
+      .reverse();  // Newest first
   } catch (error) {
     if ((error as any).code === 'ENOENT') {
       return [];
@@ -487,7 +487,7 @@ export async function listLogFiles(worktreePath: string): Promise<string[]> {
 }
 
 /**
- * ログファイルの内容を取得
+ * Get log file content
  */
 export async function readLogFile(
   worktreePath: string,
@@ -496,7 +496,7 @@ export async function readLogFile(
   const logsDir = path.join(worktreePath, '.claude_logs');
   const filePath = path.join(logsDir, fileName);
 
-  // パストラバーサル対策
+  // Path traversal protection
   if (!filePath.startsWith(logsDir)) {
     throw new Error('Invalid file path');
   }
@@ -505,22 +505,22 @@ export async function readLogFile(
 }
 
 /**
- * 短い UUID を生成（8文字）
+ * Generate a short UUID (8 characters)
  */
 function generateShortUuid(): string {
   return Math.random().toString(36).substring(2, 10);
 }
 ```
 
-#### 7.3 データベース関数の追加
+#### 7.3 Database Function Additions
 
-**ファイル**: `src/lib/db.ts`
+**File**: `src/lib/db.ts`
 
-**追加する関数:**
+**Functions to add:**
 
 ```typescript
 /**
- * セッション状態を取得
+ * Get session state
  */
 export function getSessionState(
   db: Database.Database,
@@ -541,7 +541,7 @@ export function getSessionState(
 }
 
 /**
- * セッション状態を更新
+ * Update session state
  */
 export function updateSessionState(
   db: Database.Database,
@@ -559,7 +559,7 @@ export function updateSessionState(
 }
 
 /**
- * Worktree の lastMessageSummary と updatedAt を更新
+ * Update Worktree's lastMessageSummary and updatedAt
  */
 export function updateWorktree(
   db: Database.Database,
@@ -596,15 +596,15 @@ export function updateWorktree(
 }
 ```
 
-#### 7.4 WebSocket メッセージ配信
+#### 7.4 WebSocket Message Distribution
 
-**ファイル**: `src/lib/ws-server.ts`
+**File**: `src/lib/ws-server.ts`
 
-**追加する関数:**
+**Function to add:**
 
 ```typescript
 /**
- * 特定の worktree にメッセージを配信
+ * Distribute message to a specific worktree
  */
 export function broadcastMessage(worktreeId: string, message: ChatMessage): void {
   const messageData = JSON.stringify({
@@ -613,18 +613,18 @@ export function broadcastMessage(worktreeId: string, message: ChatMessage): void
     message,
   });
 
-  // worktreeId を購読している全クライアントに配信
+  // Distribute to all clients subscribed to the worktreeId
   broadcast(worktreeId, messageData);
 }
 ```
 
-#### 7.5 ログ API エンドポイントの修正
+#### 7.5 Log API Endpoint Fix
 
-**ファイル**: `src/app/api/worktrees/[id]/logs/route.ts`
+**File**: `src/app/api/worktrees/[id]/logs/route.ts`
 
-**現在の実装**: ハードコードされたモックデータ
+**Current implementation**: Hard-coded mock data
 
-**修正内容:**
+**Modified content:**
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -644,7 +644,7 @@ export async function GET(
       return NextResponse.json({ error: 'Worktree not found' }, { status: 404 });
     }
 
-    // ログファイル一覧を取得
+    // Get log file list
     const logFiles = await listLogFiles(worktree.path);
 
     return NextResponse.json(logFiles, { status: 200 });
@@ -655,7 +655,7 @@ export async function GET(
 }
 ```
 
-**ファイル**: `src/app/api/worktrees/[id]/logs/[filename]/route.ts`
+**File**: `src/app/api/worktrees/[id]/logs/[filename]/route.ts`
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -675,7 +675,7 @@ export async function GET(
       return NextResponse.json({ error: 'Worktree not found' }, { status: 404 });
     }
 
-    // ログファイルの内容を取得
+    // Get log file content
     const content = await readLogFile(worktree.path, params.filename);
 
     return new NextResponse(content, {
@@ -691,190 +691,190 @@ export async function GET(
 }
 ```
 
-#### 7.6 統合テスト
+#### 7.6 Integration Tests
 
-**ファイル**: `tests/integration/stop-hook.test.ts`
+**File**: `tests/integration/stop-hook.test.ts`
 
-**テストケース:**
+**Test cases:**
 
-1. Stop フック API の呼び出し
-2. scrollback からの差分抽出
-3. ログファイルの保存
-4. ChatMessage の作成
-5. WebSocket メッセージの配信
-6. エラーハンドリング
-
----
-
-## 統合テスト計画
-
-### E2E テスト
-
-**ファイル**: `tests/e2e/message-flow.spec.ts`
-
-**テストシナリオ:**
-
-1. **基本的なメッセージ送受信フロー**
-   - ブラウザから worktree 詳細ページにアクセス
-   - メッセージ入力欄に "Hello Claude" と入力
-   - 送信ボタンをクリック
-   - ユーザーメッセージが表示されることを確認
-   - （モック）Stop フックをトリガー
-   - Claude の応答が表示されることを確認
-
-2. **ログファイルの確認**
-   - Log Files タブをクリック
-   - ログファイル一覧が表示されることを確認
-   - ログファイルをクリック
-   - Markdown 形式で内容が表示されることを確認
-
-3. **セッション再起動**
-   - tmux セッションを手動で kill
-   - 新しいメッセージを送信
-   - セッションが自動的に再作成されることを確認
-
-### マニュアルテスト
-
-**テスト環境:**
-- 実際の tmux と Claude CLI を使用
-- 実際の git worktree を使用
-
-**テスト手順:**
-
-1. サーバーを起動
-2. ブラウザで worktree 詳細ページにアクセス
-3. 実際にメッセージを送信
-4. tmux セッションを確認（`tmux list-sessions`）
-5. Claude の応答を確認
-6. ログファイルが作成されることを確認（`.claude_logs/`）
-7. WebSocket でリアルタイム更新されることを確認
+1. Stop hook API invocation
+2. Diff extraction from scrollback
+3. Log file saving
+4. ChatMessage creation
+5. WebSocket message distribution
+6. Error handling
 
 ---
 
-## リスクと対策
+## Integration Test Plan
 
-### リスク 1: Claude CLI のインストール
+### E2E Tests
 
-**問題**: Claude CLI がインストールされていない、またはバージョンが古い
+**File**: `tests/e2e/message-flow.spec.ts`
 
-**対策**:
-- 起動時に `claude --version` で確認
-- エラーメッセージでインストール手順を案内
-- README に前提条件として明記
+**Test scenarios:**
 
-### リスク 2: tmux の動作不良
+1. **Basic message send/receive flow**
+   - Access worktree detail page from browser
+   - Enter "Hello Claude" in the message input field
+   - Click the send button
+   - Verify user message is displayed
+   - (Mock) Trigger the Stop hook
+   - Verify Claude's response is displayed
 
-**問題**: tmux が起動していない、またはセッションが異常終了
+2. **Log file verification**
+   - Click the Log Files tab
+   - Verify log file list is displayed
+   - Click a log file
+   - Verify content is displayed in Markdown format
 
-**対策**:
-- tmux の起動確認（`tmux -V`）
-- セッション状態の定期的なヘルスチェック（オプション）
-- エラー時の自動再起動
+3. **Session restart**
+   - Manually kill the tmux session
+   - Send a new message
+   - Verify the session is automatically recreated
 
-### リスク 3: Stop フックの遅延・失敗
+### Manual Tests
 
-**問題**: Claude の処理が長時間かかる、Stop フックが呼ばれない
+**Test environment:**
+- Using actual tmux and Claude CLI
+- Using actual git worktrees
 
-**対策**:
-- UI 側でタイムアウト表示（120秒）
-- ログファイルから手動確認できる仕組み
-- エラーログの充実
+**Test procedure:**
 
-### リスク 4: scrollback の容量制限
+1. Start the server
+2. Access the worktree detail page from a browser
+3. Actually send a message
+4. Check the tmux session (`tmux list-sessions`)
+5. Verify Claude's response
+6. Verify a log file is created (`.claude_logs/`)
+7. Verify real-time updates via WebSocket
 
-**問題**: tmux の scrollback バッファが制限を超える
+---
 
-**対策**:
-- tmux の `history-limit` 設定を大きくする（デフォルト: 2000 → 10000+）
-- セッション作成時に設定
+## Risks and Mitigations
+
+### Risk 1: Claude CLI Installation
+
+**Problem**: Claude CLI is not installed or the version is outdated
+
+**Mitigations**:
+- Check with `claude --version` at startup
+- Guide installation steps in error messages
+- Document as prerequisites in README
+
+### Risk 2: tmux Malfunction
+
+**Problem**: tmux is not running or sessions terminate abnormally
+
+**Mitigations**:
+- Verify tmux startup (`tmux -V`)
+- Periodic health checking of session state (optional)
+- Automatic restart on errors
+
+### Risk 3: Stop Hook Delay/Failure
+
+**Problem**: Claude processing takes a long time, or the Stop hook is not called
+
+**Mitigations**:
+- Display timeout on the UI side (120 seconds)
+- Mechanism for manual verification from log files
+- Comprehensive error logging
+
+### Risk 4: Scrollback Capacity Limits
+
+**Problem**: tmux scrollback buffer exceeds its limit
+
+**Mitigations**:
+- Increase tmux `history-limit` setting (default: 2000 -> 10000+)
+- Set during session creation
   ```bash
   tmux set-option -t {sessionName} history-limit 50000
   ```
 
-### リスク 5: 特殊文字のエスケープ
+### Risk 5: Special Character Escaping
 
-**問題**: メッセージに改行や特殊文字が含まれる場合の処理
+**Problem**: Handling when messages contain newlines or special characters
 
-**対策**:
-- `sendMessageToClaude` 関数で適切なエスケープ
-- シェルスクリプトのクォート処理
-- テストで特殊文字のケースを網羅
+**Mitigations**:
+- Proper escaping in the `sendMessageToClaude` function
+- Shell script quoting
+- Cover special character cases in tests
 
 ---
 
-## 実装順序の推奨
+## Recommended Implementation Order
 
 ### Week 1: Phase 5
 
-1. Day 1-2: `tmux.ts` の実装
-2. Day 3: ユニットテスト
-3. Day 4: 統合テストとデバッグ
+1. Day 1-2: Implement `tmux.ts`
+2. Day 3: Unit tests
+3. Day 4: Integration tests and debugging
 
 ### Week 2: Phase 6
 
-1. Day 1-2: `claude-session.ts` の実装
-2. Day 3: `send/route.ts` の拡張
-3. Day 4: 統合テストとデバッグ
+1. Day 1-2: Implement `claude-session.ts`
+2. Day 3: Extend `send/route.ts`
+3. Day 4: Integration tests and debugging
 
 ### Week 3: Phase 7
 
-1. Day 1-2: `log-manager.ts` と `claude-done/route.ts` の実装
-2. Day 3: ログ API の修正
-3. Day 4: 統合テストとデバッグ
+1. Day 1-2: Implement `log-manager.ts` and `claude-done/route.ts`
+2. Day 3: Fix log API
+3. Day 4: Integration tests and debugging
 
-### Week 4: 統合とポリッシュ
+### Week 4: Integration and Polish
 
-1. Day 1-2: E2E テスト
-2. Day 3: マニュアルテスト
-3. Day 4: ドキュメント更新とリリース準備
-
----
-
-## チェックリスト
-
-### Phase 5 完了条件
-
-- [ ] `tmux.ts` の全関数が実装され、テストがパス
-- [ ] エラーハンドリングが適切に実装されている
-- [ ] ユニットテストカバレッジ 80% 以上
-
-### Phase 6 完了条件
-
-- [ ] `claude-session.ts` の全関数が実装され、テストがパス
-- [ ] `send/route.ts` が Claude にメッセージを送信できる
-- [ ] セッションの自動起動・再起動が動作する
-- [ ] 統合テストがパス
-
-### Phase 7 完了条件
-
-- [ ] `claude-done/route.ts` が Stop フックを処理できる
-- [ ] scrollback からの差分抽出が正確
-- [ ] ログファイルが正しく保存される
-- [ ] WebSocket で応答が配信される
-- [ ] E2E テストがパス
-
-### 全体完了条件
-
-- [ ] すべてのユニットテストがパス
-- [ ] すべての統合テストがパス
-- [ ] E2E テストがパス
-- [ ] マニュアルテストで実際に動作確認
-- [ ] ドキュメントが更新されている
-- [ ] プロダクション環境でデプロイ可能
+1. Day 1-2: E2E tests
+2. Day 3: Manual tests
+3. Day 4: Documentation updates and release preparation
 
 ---
 
-## 次のステップ
+## Checklist
 
-Phase 5-7 の実装を開始する準備ができました。
+### Phase 5 Completion Criteria
 
-**開始コマンド:**
+- [ ] All `tmux.ts` functions implemented and tests pass
+- [ ] Error handling is properly implemented
+- [ ] Unit test coverage 80% or higher
+
+### Phase 6 Completion Criteria
+
+- [ ] All `claude-session.ts` functions implemented and tests pass
+- [ ] `send/route.ts` can send messages to Claude
+- [ ] Session auto-start and restart work
+- [ ] Integration tests pass
+
+### Phase 7 Completion Criteria
+
+- [ ] `claude-done/route.ts` can process Stop hooks
+- [ ] Diff extraction from scrollback is accurate
+- [ ] Log files are saved correctly
+- [ ] Responses are distributed via WebSocket
+- [ ] E2E tests pass
+
+### Overall Completion Criteria
+
+- [ ] All unit tests pass
+- [ ] All integration tests pass
+- [ ] E2E tests pass
+- [ ] Operation verified through manual testing
+- [ ] Documentation is updated
+- [ ] Ready for production deployment
+
+---
+
+## Next Steps
+
+Ready to begin Phase 5-7 implementation.
+
+**Starting command:**
 ```bash
-# Phase 5 の実装を開始
+# Start Phase 5 implementation
 git checkout -b feature/phase5-tmux-session-management
 ```
 
-**参考資料:**
-- [Architecture Document](./architecture.md)
-- [README](../README.md)
-- [Deployment Guide](./DEPLOYMENT.md)
+**References:**
+- [Architecture Document](../architecture.md)
+- [README](../../README.md)
+- [Deployment Guide](../DEPLOYMENT.md)

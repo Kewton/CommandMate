@@ -325,6 +325,7 @@ const YesNoActions = memo(function YesNoActions({
   onYes,
   onNo,
 }: YesNoActionsProps) {
+  const t = useTranslations('prompt');
   const isYesDefault = promptData.defaultOption === 'yes';
   const isNoDefault = promptData.defaultOption === 'no';
 
@@ -336,7 +337,7 @@ const YesNoActions = memo(function YesNoActions({
         disabled={disabled}
         className={`flex-1 ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary} ${isYesDefault ? 'ring-2 ring-blue-300' : ''}`}
       >
-        Yes
+        {t('yes')}
       </button>
       <button
         type="button"
@@ -344,7 +345,7 @@ const YesNoActions = memo(function YesNoActions({
         disabled={disabled}
         className={`flex-1 ${BUTTON_STYLES.base} ${isNoDefault ? BUTTON_STYLES.defaultSelected : BUTTON_STYLES.secondary}`}
       >
-        No
+        {t('no')}
       </button>
     </div>
   );
@@ -442,7 +443,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
         disabled={disabled || selectedOption === null}
         className={`w-full ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary}`}
       >
-        Submit
+        {t('submit')}
       </button>
     </div>
   );

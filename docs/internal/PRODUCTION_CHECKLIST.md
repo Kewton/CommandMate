@@ -1,3 +1,5 @@
+[English](../en/internal/PRODUCTION_CHECKLIST.md)
+
 # CommandMate プロダクション環境チェックリスト
 
 本番環境にデプロイする前に、このチェックリストを確認してください。

@@ -1,3 +1,5 @@
+[English](../en/features/issue-3-mit-license.md)
+
 # Issue #3: MITライセンスの適用
 
 ## 概要

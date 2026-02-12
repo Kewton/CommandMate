@@ -1,3 +1,5 @@
+[English](../en/user-guide/cli-setup-guide.md)
+
 # CommandMate CLI セットアップガイド
 
 このガイドでは、CommandMate を npm でインストールして使い始める方法を説明します。

@@ -9,5 +9,6 @@
   "no": "No",
   "enterCustomMessage": "Enter custom message",
   "enterMessageHere": "Enter message here...",
-  "enterValuePlaceholder": "Enter a value..."
+  "enterValuePlaceholder": "Enter a value...",
+  "submit": "Submit"
 }

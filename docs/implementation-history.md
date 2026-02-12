@@ -1,9 +1,12 @@
+[English](./en/implementation-history.md)
+
 # 実装機能一覧
 
 各Issueの詳細（根本原因、修正方針、セキュリティ対策、テスト等）は設計書リンクを参照。
 
 | Issue | 種別 | 概要 | 主要変更ファイル | 設計書 |
 |-------|------|------|-----------------|--------|
+| #124 | feat | i18n対応（next-intl、en/ja切替UI、ドキュメント英語化） | `i18n-config.ts`, `i18n.ts`, `locale-cookie.ts`, `useLocaleSwitch.ts`, `LocaleSwitcher.tsx`, `date-locale.ts`, `locales/`, `README.md`, `docs/en/` | - |
 | #212 | fix | 複数行メッセージのPasted text検知+Enter自動送信（共通ヘルパー、skipPatterns拡張） | `pasted-text-helper.ts`, `cli-patterns.ts`, `claude-session.ts`, `codex.ts`, `response-poller.ts` | [link](../dev-reports/design/issue-212-pasted-text-detection-design-policy.md) |
 | #211 | feat | 履歴メッセージコピーボタン（stripAnsi利用、Toast通知） | `clipboard-utils.ts`, `ConversationPairCard.tsx`, `HistoryPane.tsx`, `WorktreeDetailRefactored.tsx` | [link](../dev-reports/design/issue-211-history-copy-button-design-policy.md) |
 | #201 | feat | Trust dialog自動応答（Claude CLI v2.x） | `claude-session.ts`, `cli-patterns.ts` | [link](../dev-reports/design/issue-201-trust-dialog-auto-response-design-policy.md) |

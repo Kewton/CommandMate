@@ -206,6 +206,7 @@ function YesNoPromptActions({
   onYes,
   onNo,
 }: YesNoPromptActionsProps) {
+  const t = useTranslations('prompt');
   const isYesDefault = promptData.defaultOption === 'yes';
   const isNoDefault = promptData.defaultOption === 'no';
 
@@ -220,7 +221,7 @@ function YesNoPromptActions({
         disabled={disabled}
         className={yesButtonClasses}
       >
-        Yes
+        {t('yes')}
       </button>
       <button
         type="button"
@@ -228,7 +229,7 @@ function YesNoPromptActions({
         disabled={disabled}
         className={noButtonClasses}
       >
-        No
+        {t('no')}
       </button>
     </div>
   );
@@ -328,7 +329,7 @@ function MultipleChoicePromptActions({
         disabled={disabled || selectedOption === null}
         className={`w-full ${BUTTON_BASE_STYLES} ${BUTTON_PRIMARY_STYLES}`}
       >
-        Submit
+        {t('submit')}
       </button>
     </div>
   );

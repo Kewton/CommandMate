@@ -9,5 +9,6 @@
   "no": "いいえ / No",
   "enterCustomMessage": "カスタムメッセージを入力してください",
   "enterMessageHere": "ここにメッセージを入力...",
-  "enterValuePlaceholder": "値を入力してください..."
+  "enterValuePlaceholder": "値を入力してください...",
+  "submit": "送信"
 }

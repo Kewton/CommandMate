@@ -1,3 +1,5 @@
+[English](../en/user-guide/agents-guide.md)
+
 # エージェント利用ガイド
 
 CommandMateで使用できるサブエージェントの詳細ガイドです。

@@ -123,14 +123,14 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
                   disabled={responding}
                   className={`px-6 py-2 ${BUTTON_BASE_CLASSES} bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500`}
                 >
-                  Yes
+                  {t('yes')}
                 </button>
                 <button
                   onClick={() => handleRespond('no')}
                   disabled={responding}
                   className={`px-6 py-2 ${BUTTON_BASE_CLASSES} bg-white border-2 border-gray-300 hover:bg-gray-50 focus:ring-gray-500`}
                 >
-                  No
+                  {t('no')}
                 </button>
                 {responding && <SendingIndicator />}
               </div>

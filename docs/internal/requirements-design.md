@@ -1,3 +1,5 @@
+[English](../en/internal/requirements-design.md)
+
 # CommandMate Requirements & Design
 
 > git worktree ごとに Claude Code / tmux セッションを張り、スマホブラウザからチャット操作できる開発コンパニオンツールの「要求・要件・設計方針」をまとめたドキュメント。
