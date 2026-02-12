@@ -83,7 +83,7 @@ See the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) for details.
 
 ### Mobile Access
 
-Enabling external access via `commandmate init` sets `CM_BIND=0.0.0.0`. Access from the same LAN at `http://<your PC's IP>:3000`. For external access, we recommend authentication via a reverse proxy. See the [Security Guide](./docs/security-guide.md) for details.
+Enabling external access via `commandmate init` sets `CM_BIND=0.0.0.0`. Access from the same LAN at `http://<your PC's IP>:3000`. For external access, we recommend authentication via a reverse proxy. See the [Security Guide](./docs/en/security-guide.md) for details.
 
 ## Developer Setup
 
@@ -121,7 +121,7 @@ A: The app, database, and sessions all run entirely locally. The only external c
 A: You can use tunneling services like Cloudflare Tunnel. Within your home, simply connect your phone to the same Wi-Fi as your PC.
 
 **Q: What about Claude Code's permissions?**
-A: Claude Code's own permission settings apply as-is. This tool does not expand permissions. See [Trust & Safety](./docs/TRUST_AND_SAFETY.md) for details.
+A: Claude Code's own permission settings apply as-is. This tool does not expand permissions. See [Trust & Safety](./docs/en/TRUST_AND_SAFETY.md) for details.
 
 **Q: Does it work on Windows?**
 A: Not currently supported. macOS / Linux is required due to the tmux dependency. WSL2 has not been tested.
@@ -139,12 +139,12 @@ A: Currently designed for individual use. Simultaneous multi-user access is not 
 | [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) | Installation and initial setup |
 | [Web App Guide](./docs/en/user-guide/webapp-guide.md) | Basic web app operations |
 | [Quick Start](./docs/en/user-guide/quick-start.md) | Using Claude Code commands |
-| [Concept](./docs/concept.md) | Vision and problems solved |
-| [Architecture](./docs/architecture.md) | System design |
-| [Deployment Guide](./docs/DEPLOYMENT.md) | Production environment setup |
-| [Migration Guide](./docs/migration-to-commandmate.md) | Migrating from MyCodeBranchDesk |
-| [UI/UX Guide](./docs/UI_UX_GUIDE.md) | UI implementation details |
-| [Trust & Safety](./docs/TRUST_AND_SAFETY.md) | Security and permissions |
+| [Concept](./docs/en/concept.md) | Vision and problems solved |
+| [Architecture](./docs/en/architecture.md) | System design |
+| [Deployment Guide](./docs/en/DEPLOYMENT.md) | Production environment setup |
+| [Migration Guide](./docs/en/migration-to-commandmate.md) | Migrating from MyCodeBranchDesk |
+| [UI/UX Guide](./docs/en/UI_UX_GUIDE.md) | UI implementation details |
+| [Trust & Safety](./docs/en/TRUST_AND_SAFETY.md) | Security and permissions |
 
 ## Contributing
 

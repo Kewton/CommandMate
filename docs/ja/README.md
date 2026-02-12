@@ -5,7 +5,7 @@
 > 「入力待ちを見逃さない、開発の相棒。」
 > 「軽量。その場で完結。Claude Codeを、どこからでも動かす。」
 
-![PC表示](./docs/images/screenshot-desktop.png)
+![PC表示](../../docs/images/screenshot-desktop.png)
 
 ## これは何か
 
@@ -39,11 +39,11 @@ Claude Code での開発経験があり、本業の傍らで個人開発を続�
 
 | PC表示 | スマホ（History） | スマホ（Terminal） |
 |--------|-------------------|-------------------|
-| ![PC - ワークツリー詳細](./docs/images/screenshot-worktree-desktop.png) | ![スマホ - History](./docs/images/screenshot-worktree-mobile.png) | ![スマホ - Terminal](./docs/images/screenshot-worktree-mobile-terminal.png) |
+| ![PC - ワークツリー詳細](../../docs/images/screenshot-worktree-desktop.png) | ![スマホ - History](../../docs/images/screenshot-worktree-mobile.png) | ![スマホ - Terminal](../../docs/images/screenshot-worktree-mobile-terminal.png) |
 
 ### トップ画面（スマホ）
 
-![スマホ表示](./docs/images/screenshot-mobile.png)
+![スマホ表示](../../docs/images/screenshot-mobile.png)
 
 ## Quick Start
 
@@ -79,11 +79,11 @@ commandmate start --daemon    # バックグラウンドで起動
 | `commandmate stop` | サーバー停止 |
 | `commandmate status` | 状態確認 |
 
-詳しくは [CLI セットアップガイド](./docs/user-guide/cli-setup-guide.md) を参照してください。
+詳しくは [CLI セットアップガイド](../user-guide/cli-setup-guide.md) を参照してください。
 
 ### モバイルからのアクセス
 
-`commandmate init` で外部アクセスを有効にすると、`CM_BIND=0.0.0.0` が設定されます。同一LAN内から `http://<PCのIP>:3000` にアクセスします。外部公開時はリバースプロキシでの認証を推奨します。詳細は [セキュリティガイド](./docs/security-guide.md) を参照してください。
+`commandmate init` で外部アクセスを有効にすると、`CM_BIND=0.0.0.0` が設定されます。同一LAN内から `http://<PCのIP>:3000` にアクセスします。外部公開時はリバースプロキシでの認証を推奨します。詳細は [セキュリティガイド](../security-guide.md) を参照してください。
 
 ## 開発者向けセットアップ
 
@@ -121,7 +121,7 @@ A: アプリ本体・DB・セッションはすべてローカルで完結しま
 A: Cloudflare Tunnel などのトンネリングサービスを活用することで利用できます。室内であればローカル PC と同じ Wi-Fi に接続するだけでスマホから利用可能です。
 
 **Q: Claude Code の権限はどうなる？**
-A: Claude Code 自体の権限設定がそのまま適用されます。本ツールが権限を拡張することはありません。詳しくは [Trust & Safety](./docs/TRUST_AND_SAFETY.md) を参照してください。
+A: Claude Code 自体の権限設定がそのまま適用されます。本ツールが権限を拡張することはありません。詳しくは [Trust & Safety](../TRUST_AND_SAFETY.md) を参照してください。
 
 **Q: Windows で使える？**
 A: 現時点では非対応です。tmux に依存しているため macOS / Linux が必要です。WSL2 上での動作は未検証です。
@@ -136,20 +136,20 @@ A: 現時点では個人利用を想定しています。複数人での同時�
 
 | ドキュメント | 説明 |
 |-------------|------|
-| [CLI セットアップガイド](./docs/user-guide/cli-setup-guide.md) | インストールと初期設定 |
-| [Webアプリ操作ガイド](./docs/user-guide/webapp-guide.md) | Webアプリの基本操作 |
-| [クイックスタート](./docs/user-guide/quick-start.md) | Claude Codeコマンドの使い方 |
-| [コンセプト](./docs/concept.md) | ビジョンと解決する課題 |
-| [アーキテクチャ](./docs/architecture.md) | システム設計 |
-| [デプロイガイド](./docs/DEPLOYMENT.md) | 本番環境構築手順 |
-| [移行ガイド](./docs/migration-to-commandmate.md) | MyCodeBranchDesk からの移行手順 |
-| [UI/UXガイド](./docs/UI_UX_GUIDE.md) | UI実装の詳細 |
-| [Trust & Safety](./docs/TRUST_AND_SAFETY.md) | セキュリティと権限の考え方 |
+| [CLI セットアップガイド](../user-guide/cli-setup-guide.md) | インストールと初期設定 |
+| [Webアプリ操作ガイド](../user-guide/webapp-guide.md) | Webアプリの基本操作 |
+| [クイックスタート](../user-guide/quick-start.md) | Claude Codeコマンドの使い方 |
+| [コンセプト](../concept.md) | ビジョンと解決する課題 |
+| [アーキテクチャ](../architecture.md) | システム設計 |
+| [デプロイガイド](../DEPLOYMENT.md) | 本番環境構築手順 |
+| [移行ガイド](../migration-to-commandmate.md) | MyCodeBranchDesk からの移行手順 |
+| [UI/UXガイド](../UI_UX_GUIDE.md) | UI実装の詳細 |
+| [Trust & Safety](../TRUST_AND_SAFETY.md) | セキュリティと権限の考え方 |
 
 ## Contributing
 
-バグ報告・機能提案・ドキュメント改善を歓迎します。詳しくは [CONTRIBUTING.md](./CONTRIBUTING.md) を参照してください。
+バグ報告・機能提案・ドキュメント改善を歓迎します。詳しくは [CONTRIBUTING.md](../../CONTRIBUTING.md) を参照してください。
 
 ## License
 
-[MIT License](./LICENSE) - Copyright (c) 2026 Kewton
+[MIT License](../../LICENSE) - Copyright (c) 2026 Kewton
