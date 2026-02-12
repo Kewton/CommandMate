@@ -11,6 +11,8 @@ export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export const DEFAULT_LOCALE: SupportedLocale = 'en';
 
+export const LOCALE_COOKIE_NAME = 'locale';
+
 export const LOCALE_LABELS: Record<SupportedLocale, string> = {
   en: 'English',
   ja: '日本語',

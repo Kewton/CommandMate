@@ -21,6 +21,11 @@ describe('i18n-config', () => {
     expect(LOCALE_LABELS['ja']).toBe('日本語');
   });
 
+  it('should export LOCALE_COOKIE_NAME as locale', async () => {
+    const { LOCALE_COOKIE_NAME } = await import('@/config/i18n-config');
+    expect(LOCALE_COOKIE_NAME).toBe('locale');
+  });
+
   it('should have SupportedLocale type matching SUPPORTED_LOCALES', async () => {
     const { SUPPORTED_LOCALES } = await import('@/config/i18n-config');
     // Type check: SUPPORTED_LOCALES should be a readonly tuple
