@@ -497,3 +497,43 @@ export function handleApiError(error: unknown): string {
   }
   return 'An unknown error occurred';
 }
+
+/**
+ * Update check response type
+ * Issue #257: Version update notification feature
+ */
+export interface UpdateCheckResponse {
+  status: 'success' | 'degraded';
+  hasUpdate: boolean;
+  currentVersion: string;
+  latestVersion: string | null;
+  releaseUrl: string | null;
+  releaseName: string | null;
+  publishedAt: string | null;
+  installType: 'global' | 'local' | 'unknown';
+  updateCommand: string | null;
+}
+
+/**
+ * App-level API client
+ * Issue #257: Application-wide endpoints (not worktree-specific)
+ */
+export const appApi = {
+  /**
+   * Check for application updates via GitHub Releases API.
+   * Issue #257: Version update notification feature
+   *
+   * Note: fetchApi attaches Content-Type: application/json to all requests
+   * including GET (CONS-004, IMP-SF-001). This is functionally harmless for
+   * GET requests. Future developers: be aware of this behavior when adding
+   * POST endpoints to /api/app/
+   *
+   * @returns Update check response with version info and install type
+   */
+  async checkForUpdate(): Promise<UpdateCheckResponse> {
+    return fetchApi<UpdateCheckResponse>('/api/app/update-check', {
+      method: 'GET',
+    });
+  },
+};
+

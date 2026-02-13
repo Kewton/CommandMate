@@ -6,6 +6,7 @@
 
 | Issue | 種別 | 概要 | 主要変更ファイル | 設計書 |
 |-------|------|------|-----------------|--------|
+| #257 | feat | バージョンアップ通知機能（GitHub Releases API、semver比較、globalThisキャッシュ、Silent Failure、OWASP Top 10準拠、i18n対応） | `version-checker.ts`, `useUpdateCheck.ts`, `UpdateNotificationBanner.tsx`, `VersionSection.tsx`, `update-check/route.ts`, `api-client.ts`, `WorktreeDetailRefactored.tsx` | [link](../dev-reports/design/issue-257-version-update-notification-design-policy.md) |
 | #256 | fix | 選択メッセージ検出精度向上（複数行質問対応、isQuestionLikeLine Pattern 2/4追加、SEC-001b上方走査、MF-001 SRP遵守、リファクタリング） | `prompt-detector.ts`, `prompt-type-guards.ts`, unit/integration tests | [link](../dev-reports/design/issue-256-multiple-choice-prompt-detection-design-policy.md) |
 | #246 | fix | スマホバックグラウンド復帰時のエラー自動回復（visibilitychange、timestampガード） | `WorktreeDetailRefactored.tsx`, `WorktreeList.tsx`, `WorktreeDetailRefactored.test.tsx` | [link](../dev-reports/design/issue-246-visibility-recovery-design-policy.md) |
 | #124 | feat | i18n対応（next-intl、en/ja切替UI、ドキュメント英語化） | `i18n-config.ts`, `i18n.ts`, `locale-cookie.ts`, `useLocaleSwitch.ts`, `LocaleSwitcher.tsx`, `date-locale.ts`, `locales/`, `README.md`, `docs/en/` | - |

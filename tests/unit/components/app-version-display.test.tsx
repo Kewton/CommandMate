@@ -5,6 +5,9 @@
  * Uses vi.resetModules() + dynamic import to test the module-level constant APP_VERSION_DISPLAY
  * which is evaluated at module load time.
  *
+ * Issue #257: Updated to account for VersionSection component extraction (SF-001).
+ * The "Version" heading is now rendered via i18n as "worktree.update.version".
+ *
  * @vitest-environment jsdom
  */
 
@@ -62,6 +65,15 @@ vi.mock('@/hooks/useSlashCommands', () => ({
     filter: '',
     setFilter: vi.fn(),
     refresh: vi.fn(),
+  }),
+}));
+
+// Mock useUpdateCheck hook (Issue #257)
+vi.mock('@/hooks/useUpdateCheck', () => ({
+  useUpdateCheck: () => ({
+    data: null,
+    loading: false,
+    error: null,
   }),
 }));
 
@@ -229,9 +241,10 @@ describe('APP_VERSION_DISPLAY', () => {
       const infoButton = screen.getByLabelText('View worktree information');
       fireEvent.click(infoButton);
 
-      // Check for version display
+      // Check for version display (i18n mock returns key path)
       await waitFor(() => {
-        expect(screen.getByText('Version')).toBeInTheDocument();
+        // Issue #257: VersionSection uses i18n key "worktree.update.version"
+        expect(screen.getByText('worktree.update.version')).toBeInTheDocument();
         expect(screen.getByText('v0.1.12')).toBeInTheDocument();
       });
     });
@@ -254,7 +267,8 @@ describe('APP_VERSION_DISPLAY', () => {
       fireEvent.click(infoButton);
 
       await waitFor(() => {
-        const versionHeadings = screen.getAllByText('Version');
+        // Issue #257: VersionSection uses i18n key
+        const versionHeadings = screen.getAllByText('worktree.update.version');
         expect(versionHeadings.length).toBeGreaterThan(0);
         // Find the Version section and check value is "-"
         const versionSection = versionHeadings[0].closest('div');
@@ -290,9 +304,10 @@ describe('APP_VERSION_DISPLAY', () => {
       const infoTab = screen.getByTestId('tab-info');
       fireEvent.click(infoTab);
 
-      // Check for version display
+      // Check for version display (i18n mock returns key path)
       await waitFor(() => {
-        expect(screen.getByText('Version')).toBeInTheDocument();
+        // Issue #257: VersionSection uses i18n key
+        expect(screen.getByText('worktree.update.version')).toBeInTheDocument();
         expect(screen.getByText('v0.1.12')).toBeInTheDocument();
       });
     });
@@ -316,7 +331,8 @@ describe('APP_VERSION_DISPLAY', () => {
       fireEvent.click(infoTab);
 
       await waitFor(() => {
-        const versionHeadings = screen.getAllByText('Version');
+        // Issue #257: VersionSection uses i18n key
+        const versionHeadings = screen.getAllByText('worktree.update.version');
         expect(versionHeadings.length).toBeGreaterThan(0);
         const versionSection = versionHeadings[0].closest('div');
         expect(versionSection).not.toBeNull();

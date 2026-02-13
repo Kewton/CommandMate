@@ -42,6 +42,7 @@ import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { LogViewer } from '@/components/worktree/LogViewer';
+import { VersionSection } from '@/components/worktree/VersionSection';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
@@ -504,11 +505,8 @@ const InfoModal = memo(function InfoModal({
           </div>
         )}
 
-        {/* Version */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Version</h2>
-          <p className="text-sm text-gray-700">{APP_VERSION_DISPLAY}</p>
-        </div>
+        {/* Version - Issue #257: VersionSection component (SF-001 DRY) */}
+        <VersionSection version={APP_VERSION_DISPLAY} className="bg-gray-50 rounded-lg p-4" />
 
         {/* Logs */}
         <div className="bg-gray-50 rounded-lg p-4">
@@ -772,11 +770,8 @@ const MobileInfoContent = memo(function MobileInfoContent({
         </div>
       )}
 
-      {/* Version */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <h2 className="text-sm font-medium text-gray-500 mb-1">Version</h2>
-        <p className="text-sm text-gray-700">{APP_VERSION_DISPLAY}</p>
-      </div>
+      {/* Version - Issue #257: VersionSection component (SF-001 DRY) */}
+      <VersionSection version={APP_VERSION_DISPLAY} className="bg-white rounded-lg border border-gray-200 p-4" />
 
       {/* Logs */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">

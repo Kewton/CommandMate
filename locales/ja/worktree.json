@@ -22,5 +22,15 @@
   "errors": {
     "failedToUpdateFavorite": "お気に入りの更新に失敗しました",
     "failedToUpdateStatus": "ステータスの更新に失敗しました"
+  },
+  "update": {
+    "available": "新しいバージョンが利用可能です",
+    "latestVersion": "最新: v{version}",
+    "updateCommand": "更新コマンド:",
+    "viewRelease": "リリースを表示",
+    "dataPreserved": "アップデートによりデータベースのデータは保持されます。",
+    "version": "バージョン",
+    "installTypeGlobal": "npm（グローバル）",
+    "installTypeLocal": "ローカル（git pull）"
   }
 }

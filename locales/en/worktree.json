@@ -22,5 +22,15 @@
   "errors": {
     "failedToUpdateFavorite": "Failed to update favorite",
     "failedToUpdateStatus": "Failed to update status"
+  },
+  "update": {
+    "available": "A new version is available",
+    "latestVersion": "Latest: v{version}",
+    "updateCommand": "Update command:",
+    "viewRelease": "View Release",
+    "dataPreserved": "Your database data will be preserved during the update.",
+    "version": "Version",
+    "installTypeGlobal": "npm (global)",
+    "installTypeLocal": "Local (git pull)"
   }
 }
