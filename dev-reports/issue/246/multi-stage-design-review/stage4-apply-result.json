@@ -1,0 +1,53 @@
+{
+  "issue_number": 246,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "item": "APIエラーレスポンスにおけるparams.id反映",
+        "section_updated": "Section 8-4, Section 15 (Stage 4), Section 16 (将来検討)",
+        "status": "reflected",
+        "note": "Issue #246スコープ外の既存課題として記録。将来検討チェックリストに追加"
+      },
+      {
+        "id": "SEC-SF-002",
+        "item": "Content-Security-Policyにおけるunsafe-inline/unsafe-eval",
+        "section_updated": "Section 8-4, Section 15 (Stage 4), Section 16 (将来検討)",
+        "status": "reflected",
+        "note": "Issue #246スコープ外の既存課題として記録。将来検討チェックリストに追加"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "item": "visibilitychangeイベントの人為的高頻度発火に対する二重防御",
+        "section_updated": "Section 8-5, Section 15 (Stage 4), Section 16 (将来検討)",
+        "status": "reflected",
+        "note": "現在の設計で十分。将来的なAPI側レートリミット導入を検討事項として記録"
+      },
+      {
+        "id": "SEC-C-002",
+        "item": "lastServerResponseTimestampのクライアント側未接続（IC-002）のセキュリティ影響",
+        "section_updated": "Section 15 (Stage 4), Section 16 (将来検討 IC-002にSEC-C-002を統合)",
+        "status": "reflected",
+        "note": "IC-002として既に記録済み。SEC-C-002として追加参照を記載"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-246-visibility-recovery-design-policy.md",
+  "sections_updated": [
+    "Section 8-3: OWASP Top 10 チェックリスト",
+    "Section 8-4: 既存のセキュリティ課題（Issue #246スコープ外）",
+    "Section 8-5: DoS防御の評価",
+    "Section 14: レビュー履歴（Stage 4追加）",
+    "Section 15: レビュー指摘事項サマリー（Stage 4追加）",
+    "Section 16: 実装チェックリスト（将来検討にSEC-SF-001, SEC-SF-002, SEC-C-001追加、IC-002にSEC-C-002統合）"
+  ],
+  "timestamp": "2026-02-13T12:30:00Z"
+}

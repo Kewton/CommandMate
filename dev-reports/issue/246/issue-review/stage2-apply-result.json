@@ -1,0 +1,58 @@
+{
+  "issue_number": 246,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-13",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "WorktreeList.tsxへの対応内容を「バックグラウンド復帰時にsetIntervalタイマーを再設定する対応」と明記し、WorktreeDetailRefactored.tsxの「エラー状態からの自動復帰」とは異なる問題であることを実装タスクと変更対象ファイルの両方で区別して記載した"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "受入条件の「既存のポーリング動作に影響がない」を具体的な2つの検証基準に置き換えた: (1)visibilitychangeによる再取得とsetIntervalポーリングが同時発火してもデータ整合性が保たれる、(2)setIntervalのタイミングやインターバル値が変更されていない"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "「エラーリセットの詳細仕様」セクションを新規追加し、handleRetry関数（L1434-1442）と同等のフローを5ステップで明記した: setError(null) -> setLoading(true) -> fetch実行 -> 失敗時error再設定 -> setLoading(false)"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "根本原因の仮説セクションに「補足: エラーハンドリングの非対称性について」を追加し、fetchWorktreeのみがsetError()を呼ぶ点とfetchMessages/fetchCurrentOutputはconsole.errorのみである点を明記。検討事項にfetchWorktree失敗時のリトライ戦略（指数バックオフ、最大リトライ回数）を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "関連コンポーネント欄のuseWorktreeUIState.tsの説明を拡充し、clearErrorアクション（L118,L200,L270）とローカルstate（setError、L939）の使い分けを明記。本Issue対応ではローカルstateのsetError(null)を使用する旨を記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "ユニットテストの実装タスクに具体的なテスト方法を追記: document.dispatchEvent(new Event('visibilitychange'))のモック、Object.definePropertyによるvisibilityState制御、エラー状態からの復帰シナリオのテスト"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "検討事項セクションを新規追加し、debounce/throttle考慮（連続発火防止、src/lib/utils.tsの既存debounce関数活用）を記載。関連コンポーネントにsrc/lib/utils.tsを追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/246"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "issue_number": 246,
+  "iteration": 1,
+  "phase_results": {
+    "issue_collection": {
+      "status": "success",
+      "title": "スマホにて再開時Error loading worktreeとなる",
+      "acceptance_criteria_count": 7,
+      "implementation_tasks_count": 6
+    },
+    "tdd": {
+      "status": "success",
+      "files_changed": 3,
+      "lines_added": 285,
+      "lines_deleted": 1,
+      "new_tests": 4,
+      "test_results": {
+        "total": 32,
+        "passed": 31,
+        "skipped": 1
+      },
+      "coverage": 80.0,
+      "typescript_errors": 0,
+      "eslint_errors": 0,
+      "commit": "689cfd2"
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_total": 8,
+      "scenarios_passed": 8,
+      "criteria_verified": 7
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "handleVisibilityChange JSDocを5行から15行に拡張（MF-001, IA-001, IA-002設計根拠追加）",
+        "WorktreeList.tsx visibilitychangeコメントにSF-003, IA-002タグ追加",
+        "テストケースにTC-1～TC-4のID追加、設計方針書参照の追記"
+      ],
+      "quality_metrics": {
+        "typescript_errors": 0,
+        "eslint_errors": 0,
+        "tests_passed": 31,
+        "tests_skipped": 1
+      },
+      "commit": "94c1c2d"
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": [
+        "docs/implementation-history.md"
+      ]
+    }
+  },
+  "next_actions": [
+    "PR作成（/create-pr）",
+    "スマートフォン実機テスト（手動）"
+  ]
+}

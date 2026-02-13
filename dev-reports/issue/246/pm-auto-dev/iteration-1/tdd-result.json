@@ -1,0 +1,46 @@
+{
+  "status": "success",
+  "coverage": 57.42,
+  "new_code_coverage": 100,
+  "unit_tests": {
+    "total": 32,
+    "passed": 31,
+    "failed": 0,
+    "skipped": 1
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeList.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "commits": [
+    "689cfd2: fix(#246): add visibilitychange recovery for mobile background resume"
+  ],
+  "test_cases": [
+    {
+      "name": "triggers data re-fetch when visibilitychange fires with visible state",
+      "status": "passed",
+      "description": "Verifies that handleRetry flow (fetchWorktree etc.) is executed when visibilitychange fires with visible state"
+    },
+    {
+      "name": "resets error state when visibilitychange fires during error",
+      "status": "passed",
+      "description": "Verifies that error display is cleared and data is re-fetched when visibilitychange fires while in error state"
+    },
+    {
+      "name": "does not trigger data re-fetch when visibilityState is hidden",
+      "status": "passed",
+      "description": "Verifies that no fetch calls are made when visibilityState is hidden"
+    },
+    {
+      "name": "throttles rapid visibilitychange events within 5 seconds",
+      "status": "passed",
+      "description": "Verifies that RECOVERY_THROTTLE_MS (5000ms) guard prevents duplicate API calls within the throttle window"
+    }
+  ],
+  "message": "TDD implementation complete. All 4 new visibility change recovery tests pass. New code coverage 100%. Full file coverage 57.42% (2000+ line file). 0 ESLint errors, 0 TypeScript errors. All 3091 existing unit tests continue to pass."
+}

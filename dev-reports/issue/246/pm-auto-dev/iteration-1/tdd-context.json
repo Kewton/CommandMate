@@ -1,0 +1,24 @@
+{
+  "issue_number": 246,
+  "title": "スマホにて再開時Error loading worktreeとなる",
+  "acceptance_criteria": [
+    "スマートフォンでバックグラウンド復帰時にエラーが表示されず、自動的にデータが再取得される",
+    "visibilitychangeイベントで適切にデータ再取得がトリガーされる",
+    "visibilitychangeによる再取得と既存のsetIntervalポーリングが同時発火しても、データの整合性が保たれる",
+    "visibilitychange復帰時にAPI呼び出しが不必要に重複しないこと（timestampガードが機能していること）",
+    "visibilitychange復帰時のfetchCurrentOutputによるprompt状態更新がauto-yes hookの誤動作を引き起こさないこと",
+    "setIntervalのタイミングやインターバル値が変更されていない",
+    "既存テストがすべてパスする"
+  ],
+  "implementation_tasks": [
+    "WorktreeDetailRefactored.tsxにvisibilitychangeイベントリスナーを追加",
+    "ページ復帰時のエラーリセット＆データ再取得ロジックを実装（handleRetry直接呼び出し）",
+    "timestampガードを実装（5秒以内は再実行をスキップ）",
+    "WorktreeList.tsxのバックグラウンド復帰時にsetIntervalタイマーを再設定する対応を追加",
+    "ユニットテストの追加（WorktreeDetailRefactored.test.tsx）",
+    "スマートフォン実機での動作確認"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-246-visibility-recovery-design-policy.md",
+  "work_plan_path": "dev-reports/issue/246/work-plan.md"
+}

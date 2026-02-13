@@ -1,0 +1,109 @@
+{
+  "issue_number": 246,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "category": "情報漏洩",
+        "title": "APIエラーレスポンスにおけるparams.id反映",
+        "description": "既存のAPI実装（/api/worktrees/[id]/route.tsなど）において、404レスポンスにparams.idをそのまま埋め込んでいる（例: `Worktree '${params.id}' not found`）。Issue #246の変更自体は新たなAPIを追加しないため直接のリスクではないが、visibilitychange復帰時にAPIエラーが返却された場合、ErrorDisplay経由でユーザー画面にparams.idが表示される。React JSX内でのテキスト表示のため、XSSリスクはないが、内部ID情報がクライアントに露出する。これは既存の問題であり本Issueスコープ外だが、記録として残す。",
+        "severity": "low",
+        "owasp_category": "A01:2021 - Broken Access Control / A05:2021 - Security Misconfiguration"
+      },
+      {
+        "id": "SEC-SF-002",
+        "category": "CSP設定",
+        "title": "Content-Security-Policyにおけるunsafe-inline/unsafe-eval",
+        "description": "next.config.jsのCSPにおいて'unsafe-inline'（script-src/style-src）と'unsafe-eval'（script-src）が使用されている。Next.js開発モードの要件として記載されているが、本番環境でもこの設定が適用される。Issue #246はvisibilitychangeイベント（ブラウザネイティブAPI）のみを使用するため新たなCSPリスクは追加しないが、既存の設定としてnonceベースCSPへの移行を将来検討事項として記録する。",
+        "severity": "low",
+        "owasp_category": "A05:2021 - Security Misconfiguration"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "category": "DoS防御",
+        "title": "visibilitychangeイベントの人為的高頻度発火に対する二重防御",
+        "description": "timestampガード（5秒間隔）で連続発火を防止しているが、悪意あるブラウザ拡張やDevToolsスクリプトがdocument.dispatchEvent(new Event('visibilitychange'))を繰り返し発火させた場合でも、timestampガードによりAPI呼び出しは5秒に1回に制限される。現在の設計で十分だが、将来的にAPI側でクライアント毎のレートリミットを導入する場合は包括的な保護が可能になる。"
+      },
+      {
+        "id": "SEC-C-002",
+        "category": "auto-yes安全性",
+        "title": "lastServerResponseTimestampのクライアント側未接続（IC-002）のセキュリティ影響",
+        "description": "設計書Section 6-2で記録されている通り、lastServerResponseTimestampがCurrentOutputResponseインターフェースに定義されておらず、クライアント側のuseAutoYesに渡されていない。サーバー側の保護は機能しているため直接のセキュリティリスクではないが、クライアント側での二重応答防止が不完全な状態である。本Issue #246のスコープ外として適切に記録されている。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "notes": "既存APIと同一権限で呼び出し、新規APIエンドポイント追加なし。GETリクエストのみ使用で状態変更操作なし。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "暗号化処理の変更なし。機密データの新規取り扱いなし。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "notes": "visibilitychangeハンドラはブラウザネイティブAPIでユーザー入力を含まない。既存のworktreeIdはSQLパラメータバインドで使用され、tmuxセッション名はvalidateSessionName()でバリデーション済み。新たなインジェクションベクトルの導入なし。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "timestampガードによるAPI過負荷防止、冪等なGETリクエストのみ使用、handleRetry()の直接呼び出しによるDRY原則遵守。設計は安全。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "既存のセキュリティヘッダー（X-Frame-Options、X-Content-Type-Options、CSP等）が適用される。新たな設定変更なし。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "新たな依存パッケージの追加なし。Page Visibility APIはW3C標準のブラウザネイティブAPI。"
+    },
+    "A07_identification_authentication": {
+      "status": "not_applicable",
+      "notes": "認証機構の変更なし。本ツールはローカル開発ツールであり、認証は現在のアーキテクチャのスコープ外。"
+    },
+    "A08_software_data_integrity": {
+      "status": "pass",
+      "notes": "全APIがGET冪等。visibilitychangeとsetIntervalの同時発火によるデータ破損リスクなし。"
+    },
+    "A09_security_logging_monitoring": {
+      "status": "pass",
+      "notes": "既存のconsole.errorによるエラーログは維持。visibilitychangeイベントのthrottleスキップ時のログも設計に含まれている。"
+    },
+    "A10_server_side_request_forgery": {
+      "status": "not_applicable",
+      "notes": "visibilitychangeハンドラからの外部URLリクエストなし。APIエンドポイントは全て自サーバー内。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-246-visibility-recovery-design-policy.md",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeList.tsx",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/messages/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/hooks/useWebSocket.ts",
+    "src/lib/api-client.ts",
+    "src/lib/db.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-session.ts",
+    "next.config.js"
+  ],
+  "timestamp": "2026-02-13T12:00:00Z"
+}

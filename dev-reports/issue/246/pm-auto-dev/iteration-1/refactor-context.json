@@ -1,0 +1,32 @@
+{
+  "issue_number": 246,
+  "refactor_targets": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeList.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "test_results": {
+      "total": 32,
+      "passed": 31,
+      "skipped": 1
+    },
+    "static_analysis": {
+      "typescript_errors": 0,
+      "eslint_errors": 0
+    }
+  },
+  "improvement_goals": [
+    "コードの可読性向上（コメントの追加・明確化）",
+    "テストの可読性向上",
+    "設計方針書の指摘事項（SF-001, IC-001, IA-001等）への対応確認"
+  ],
+  "design_policy_checklist": [
+    "MF-001: handleRetry()を直接呼び出す（フローの再実装は行わない）",
+    "SF-001: RECOVERY_THROTTLE_MS定数を定義し、IDLE_POLLING_INTERVAL_MSとの関係性をコメントで明記",
+    "SF-003: WorktreeList.tsxのvisibilitychangeハンドラに、WorktreeDetailRefactored.tsxとの実装差異の理由コメントを記載",
+    "IA-001: handleRetry()呼び出し箇所にsetInterval再生成の副作用コメントを記載",
+    "IA-002: WebSocket再接続との3方向オーバーラップの可能性をコメントで注記"
+  ]
+}

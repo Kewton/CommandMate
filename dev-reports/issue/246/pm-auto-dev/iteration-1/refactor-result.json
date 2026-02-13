@@ -1,0 +1,44 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [
+    "Enhanced handleVisibilityChange JSDoc with structured design rationale (MF-001, IA-001, IA-002)",
+    "Added SF-003 cross-reference between WorktreeList.tsx and WorktreeDetailRefactored.tsx visibilitychange patterns",
+    "Added IA-002 WebSocket overlap annotation to WorktreeDetailRefactored.tsx",
+    "Added design policy reference (SF-003, IA-001) to visibilitychange useEffect registration comment",
+    "Prefixed test cases with TC-1..TC-4 IDs matching the work plan test case numbering",
+    "Added describe-level JSDoc summarizing design policy coverage (MF-001, SF-001, IA-001, IA-002)",
+    "Improved test helper and step comments for readability"
+  ],
+  "files_changed": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeList.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "design_policy_checklist": {
+    "MF-001": "DONE - handleRetry() called directly with DRY rationale in JSDoc",
+    "SF-001": "DONE - RECOVERY_THROTTLE_MS defined with relationship comment, test TC-4 references SF-001",
+    "SF-003": "DONE - Both files now cross-reference each other's visibilitychange pattern with reasoning",
+    "IA-001": "DONE - setInterval re-creation side-effect documented in handleVisibilityChange JSDoc and useEffect comment",
+    "IA-002": "DONE - 3-way overlap (visibility + polling + WebSocket) documented in both WorktreeDetailRefactored.tsx and WorktreeList.tsx"
+  },
+  "test_results": {
+    "total": 32,
+    "passed": 31,
+    "skipped": 1,
+    "failed": 0
+  },
+  "commits": [
+    "94c1c2d: refactor(#246): enhance design rationale comments and test readability"
+  ],
+  "message": "Refactoring complete. All design policy checklist items (MF-001, SF-001, SF-003, IA-001, IA-002) are addressed with structured code comments and test readability improvements. No logic changes. All tests pass. Static analysis clean."
+}

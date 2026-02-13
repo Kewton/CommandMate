@@ -1,0 +1,74 @@
+{
+  "issue_number": 246,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IA-001",
+        "item": "handleRetry()呼び出し時のloading=true状態がポーリングuseEffectのガードを再トリガーする副作用",
+        "sections_updated": ["Section 4-2", "Section 9-2"],
+        "status": "reflected",
+        "details": "Section 4-2にポーリングuseEffectライフサイクルへの影響を追記。Section 9-2にhandleRetry()実行時のsetIntervalライフサイクル（cleanup→再作成→interval待機）を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IA-002",
+        "item": "WebSocket再接続とvisibilitychangeの同時発火による一時的なAPI集中",
+        "sections_updated": ["Section 9-1", "Section 9-3"],
+        "status": "reflected",
+        "details": "Section 9-3を新規追加。三者間競合シナリオ（visibilitychange + setInterval + WebSocket再接続）の詳細テーブルと安全性根拠を記載。Section 9-1のAPI呼び出し最適化テーブルにもシナリオを追加"
+      },
+      {
+        "id": "IA-003",
+        "item": "ExternalAppsManager/ExternalAppStatusのvisibilitychange未対応がスコープ外であることの明示不足",
+        "sections_updated": ["Section 1-3"],
+        "status": "reflected",
+        "details": "Section 1-3にスコープ外コンポーネントの除外根拠テーブルを追加。ExternalAppsManager(60秒)、ExternalAppStatus(可変)、AutoYesToggle(1秒)それぞれの除外理由を明記"
+      },
+      {
+        "id": "IA-004",
+        "item": "loading=true中のUI表示がvisibilitychange復帰時のUXに与える影響",
+        "sections_updated": ["Section 4-2"],
+        "status": "reflected",
+        "details": "C-003注意事項を拡充。LoadingIndicatorによる全画面置換、ターミナル出力・メッセージ履歴の一瞬の消失と再表示（画面フラッシュ）の具体的UI影響を明記。将来的なサイレント更新分岐の改善案も追記"
+      }
+    ]
+  },
+  "consider_items": [
+    {
+      "id": "IA-005",
+      "item": "AutoYesToggle.tsxのsetInterval(1000ms)はvisibilitychange復帰時に残り時間表示がズレる可能性",
+      "status": "recorded",
+      "sections_updated": ["Section 1-3", "Section 16"]
+    },
+    {
+      "id": "IA-006",
+      "item": "handleRetry依存配列変更時のvisibilitychangeハンドラへの波及",
+      "status": "recorded",
+      "sections_updated": ["Section 16"]
+    },
+    {
+      "id": "IA-007",
+      "item": "fetchCurrentOutput内のstate.prompt.visible参照によるuseCallback再生成チェーン",
+      "status": "recorded",
+      "sections_updated": ["Section 16"]
+    }
+  ],
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-246-visibility-recovery-design-policy.md",
+  "sections_updated": [
+    "Section 1-3 (スコープ外コンポーネント除外根拠追加)",
+    "Section 4-2 (IA-004 UI影響詳細、IA-001 useEffectライフサイクル追記)",
+    "Section 9-1 (三者間競合シナリオ追加)",
+    "Section 9-2 (handleRetry実行時のsetIntervalライフサイクル追記)",
+    "Section 9-3 (新規: WebSocket再接続との三者間競合)",
+    "Section 14 (レビュー履歴にStage 3追加)",
+    "Section 15 (Stage 3レビュー指摘事項サマリー追加)",
+    "Section 16 (Stage 3追加分のコードコメント・テスト・将来検討チェックリスト追加)"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}

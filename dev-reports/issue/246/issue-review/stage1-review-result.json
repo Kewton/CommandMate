@@ -1,0 +1,100 @@
+{
+  "issue_number": 246,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-13",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "WorktreeList.tsxのポーリングはerror状態でブロックされない設計であり、WorktreeDetailRefactored.tsxとは異なる問題構造を持つ。Issueでは両者を同列に扱っているが、WorktreeList.tsxのsetInterval（L122-129）はerror/loading条件なしで常時動作し、fetchWorktrees(true)でsilentモードが使われるため、エラー時にもポーリングは継続する。対応の必要性と対応内容を区別して記載すべき。",
+        "location": "## 実装タスク セクション - 3つ目のタスク",
+        "recommendation": "WorktreeList.tsxへの対応は「バックグラウンド復帰時にsetIntervalが正常に再開しない可能性への対処（タイマー再設定）」と明記し、WorktreeDetailRefactored.tsxの「エラー状態からの自動復帰」とは別の問題であることを示す。",
+        "evidence": "WorktreeList.tsx L122-129: setIntervalにはloading/errorガードがない。fetchWorktrees(true)はsilent=trueで呼ばれ、エラー時もsetError()はするがポーリング自体は止まらない。"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "受入条件「既存のポーリング動作に影響がない」が曖昧。visibilitychangeイベントでデータ再取得をトリガーする場合、既存のsetIntervalポーリングとの並行動作（競合状態）をどう扱うかの基準がない。",
+        "location": "## 受入条件 セクション - 3つ目の条件",
+        "recommendation": "「visibilitychangeによる再取得と、既存のsetIntervalポーリングが競合（同時発火）しても、データの整合性が保たれる」「setIntervalのタイミングやインターバル値が変更されていない」など、具体的な検証基準を追加する。",
+        "evidence": "WorktreeDetailRefactored.tsx L1479-1493のsetIntervalポーリングと、新規追加されるvisibilitychangeハンドラが同時にfetchを発行する可能性がある。"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "「エラー状態のリセットタイミング」が未定義。ページ復帰時に即座にerrorをnullにリセットするのか、データ取得成功後にリセットするのかで、ユーザー体験とエラーハンドリングの堅牢性が大きく異なる。",
+        "location": "## 対策案 セクション",
+        "recommendation": "エラーリセットの詳細仕様を追加する。例: 「visibilitychange検知時に(1)error状態を即座にnullにリセットし、(2)loading状態にしてデータ再取得を開始し、(3)再取得が失敗した場合は再度errorを設定する」など、ステップを明記する。既存のhandleRetry関数（L1434-1442）と同等のフローを採用するかどうかも明記するとよい。",
+        "evidence": "仮説検証レポートの「追加確認が必要な点」でも同様の指摘あり。handleRetry（L1434-1442）は setError(null) -> setLoading(true) -> fetch -> setLoading(false) のフロー。"
+      },
+      {
+        "id": "SF-4",
+        "category": "技術的妥当性",
+        "issue": "fetchWorktree関数（L984-998）はエラー時にsetError()を呼ぶが、fetchMessages（L1002-1013）とfetchCurrentOutput（L1017-1053）はconsole.errorのみでsetError()を呼ばない。Issueの根本原因分析ではfetchWorktreeのエラーがerror状態を引き起こすことが主因と読み取れるが、この非対称なエラーハンドリングについて明示的に言及されていない。",
+        "location": "## 根本原因の仮説 セクション",
+        "recommendation": "fetchWorktreeのみがsetError()を呼ぶ点を明記し、visibilitychange復帰時にfetchWorktreeが失敗した場合のリトライ戦略（例: 指数バックオフ、最大リトライ回数）についても検討事項として追加する。",
+        "evidence": "fetchWorktree (L994-995): setError(message); / fetchMessages (L1011): console.error only / fetchCurrentOutput (L1051): console.error only"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "useWorktreeUIStateフックにclearErrorアクションが既に存在するが（useWorktreeUIState.ts L118, L200, L270）、Issueの影響範囲の「関連コンポーネント」欄にuseWorktreeUIState.tsは「エラーリセットアクション」として記載されているものの、実装タスクではこの既存アクションの活用が明示されていない。",
+        "location": "## 影響範囲 セクション - 関連コンポーネント",
+        "recommendation": "実装タスクまたは対策案の中で、useWorktreeUIState.tsのclearErrorアクションと、WorktreeDetailRefactored.tsxのローカルstate(setError)の使い分けを明確にする。現在のエラー状態はローカルstateのsetError（L939, L995）で管理されており、useReducerのerror状態とは別系統である点に注意が必要。",
+        "evidence": "useWorktreeUIState.ts L270: clearError: () => dispatch({ type: 'CLEAR_ERROR' }) / WorktreeDetailRefactored.tsx L939: const [error, setError] = useState<string | null>(null)"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "テストに関する記載が「ユニットテストの追加」「スマートフォン実機での動作確認」のみで、visibilitychangeイベントのテスト方法が具体的でない。",
+        "location": "## 実装タスク セクション",
+        "recommendation": "テスト戦略を具体化する。例: 「Vitestでdocument.dispatchEvent(new Event('visibilitychange'))をモックし、Object.definePropertyでdocument.visibilityStateを制御してテストする」「エラー状態からの復帰シナリオをテストする」など。",
+        "evidence": "仮説検証レポートの「追加確認が必要な点」でも、visibilitychangeイベントのテスト方法について具体的な方針が必要と指摘されている。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "debounce/throttle考慮の記載がない。ユーザーがアプリを短時間で繰り返しバックグラウンド/フォアグラウンド切り替えした場合、visibilitychangeイベントが連続発火してAPI呼び出しが多重に行われる可能性がある。",
+        "location": "## 対策案 セクション",
+        "recommendation": "visibilitychangeハンドラ内でデータ再取得をthrottle/debounceする考慮（例: 前回取得から一定時間内は再取得をスキップ）について、検討事項として追加する。",
+        "evidence": "src/lib/utils.tsにdebounce関数が既に存在し、プロジェクト内でdebounceパターンが利用されている。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "主要変更対象。ポーリングエフェクト(L1479-1493)、初期化ガード(L1449-1476)、エラー表示(L1535-1537)、handleRetry(L1434-1442)、fetchWorktree(L984-998)"
+    },
+    {
+      "file": "src/components/worktree/WorktreeList.tsx",
+      "relevance": "副次的変更対象。ポーリング(L122-129)はerror/loadingガードなしのsetIntervalで、WorktreeDetailRefactoredとは異なる問題構造"
+    },
+    {
+      "file": "src/hooks/useWorktreeUIState.ts",
+      "relevance": "clearErrorアクション(L118,L200,L270)が存在するが、WorktreeDetailRefactoredのerrorはローカルstateで管理されている"
+    },
+    {
+      "file": "src/lib/utils.ts",
+      "relevance": "debounce関数が存在し、visibilitychangeハンドラの連続発火防止に活用可能"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトのコーディング規約・ファイル構成・テスト戦略の参照ドキュメント"
+    }
+  ]
+}

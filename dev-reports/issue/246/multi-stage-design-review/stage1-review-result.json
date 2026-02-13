@@ -1,0 +1,122 @@
+{
+  "issue_number": 246,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "DRY",
+        "title": "handleRetry と visibilitychange 復帰フローの重複",
+        "description": "設計方針書の Section 4-2 では handleRetry 同等フロー（setError(null) -> setLoading(true) -> fetchWorktree -> Promise.all([fetchMessages, fetchCurrentOutput]) -> setLoading(false)）を visibilitychange ハンドラに再実装すると記載されている。これは既存の handleRetry（L1434-L1442）のロジックをほぼそのまま複製することになり、DRY 原則に明確に違反する。Section 13 の制約条件で DRY について「handleRetryと同等のフローを再利用（ただし直接の関数呼び出しを検討）」と記載されているが、直接呼び出しの具体的設計が示されていない。",
+        "recommendation": "visibilitychange ハンドラから既存の handleRetry 関数を直接呼び出す設計にすべきである。handleRetry は既に useCallback でメモ化されており、依存配列も適切であるため、そのまま呼び出し可能。timestampガードの後に handleRetry() を呼ぶだけで、フロー全体の重複を排除できる。",
+        "severity": "medium"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "DRY",
+        "title": "RECOVERY_THROTTLE_MS 定数と IDLE_POLLING_INTERVAL_MS の値の重複",
+        "description": "RECOVERY_THROTTLE_MS（5000ms）の値は IDLE_POLLING_INTERVAL_MS（5000ms）と同一であり、設計方針書 Section 4-1 でも「既存のIDLE_POLLING_INTERVAL_MS（5秒）と同等」と記載されている。同じ意味的根拠を持つ値が別の定数名で二重定義される。",
+        "recommendation": "RECOVERY_THROTTLE_MS を IDLE_POLLING_INTERVAL_MS を参照して定義する（例: const RECOVERY_THROTTLE_MS = IDLE_POLLING_INTERVAL_MS;）か、あるいはコメントで両者の関係性を明記する。ただし、将来的に独立して変更する可能性がある場合は別定数のままでもよいが、その設計判断を明示的に文書化すべきである。"
+      },
+      {
+        "id": "SF-002",
+        "principle": "SRP (Single Responsibility)",
+        "title": "WorktreeDetailRefactored.tsx の責務過多（2006行）",
+        "description": "WorktreeDetailRefactored.tsx は既に 2006 行あり、API フェッチ、状態管理、ポーリング、エラーハンドリング、レイアウト制御、イベントハンドリングなど多数の責務を持っている。ここに visibilitychange ハンドラを追加すると、責務がさらに増加する。本 Issue のスコープ外ではあるが、設計方針書として認識しておくべきリスクである。",
+        "recommendation": "本 Issue では直接対応不要だが、将来的に useVisibilityRecovery のようなカスタムフックへの抽出を検討すべきであることを設計方針書に明記するとよい。これは YAGNI 原則に基づく現時点での判断と、SRP に基づく将来の改善方向の両方を記録する意味がある。"
+      },
+      {
+        "id": "SF-003",
+        "principle": "KISS",
+        "title": "WorktreeList.tsx と WorktreeDetailRefactored.tsx の visibilitychange パターンの差異",
+        "description": "WorktreeDetailRefactored.tsx には timestampガード付きの復帰フローが必要であるのに対し、WorktreeList.tsx では単純な fetchWorktrees(true) 呼び出しのみとなる。2つのコンポーネントで visibilitychange の実装パターンが異なり、コードの一貫性が低下する可能性がある。",
+        "recommendation": "設計方針書で両コンポーネントの実装パターンの差異とその根拠（error状態によるポーリング停止の有無）を並べて明記し、将来のメンテナ向けにパターンの差異が意図的であることを文書化すべきである。現在の Section 4-3 の記載で概ね説明されているが、「なぜ2つのパターンが異なるのか」を一目で理解できる比較表があると更に明確になる。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "YAGNI",
+        "title": "usePageVisibility カスタムフック化の将来判断基準",
+        "description": "設計方針書では YAGNI 原則に基づき usePageVisibility カスタムフック化を不採用としている。この判断は適切であるが、「3箇所目の利用が発生した場合にフック化する」などの具体的な判断基準があるとよい。",
+        "recommendation": "設計方針書の Section 3-2 不採用理由に「今後 visibilitychange 対応が3箇所以上必要になった場合はカスタムフックへの抽出を再検討する」といった将来の判断基準を追記するとよい。"
+      },
+      {
+        "id": "C-002",
+        "principle": "OCP (Open/Closed)",
+        "title": "ポーリング制御とイベントハンドリングの分離",
+        "description": "現在の設計では setInterval ポーリングと visibilitychange ハンドラが同じ useEffect 群の中に独立して配置される。将来、ポーリング戦略の変更（例: 指数バックオフ、WebSocket への完全移行）が必要になった場合、visibilitychange ハンドラも連動して修正が必要になる可能性がある。",
+        "recommendation": "現時点での対応は不要だが、将来のリファクタリング検討時に、ポーリング制御を統合的に管理する仕組み（カスタムフックやポーリングマネージャー）を検討するとよい。"
+      },
+      {
+        "id": "C-003",
+        "principle": "KISS",
+        "title": "setLoading(true) による一瞬のローディング表示",
+        "description": "設計方針書 Section 10-1 で「エラーリセット方式: 即時リセット」を選択し、setError(null) + setLoading(true) を行う設計である。これにより、正常状態からの復帰時にも一瞬ローディングインジケーターが表示される可能性がある。正常状態からの復帰ではローディング表示なしでサイレント更新する方がUXが良い場合がある。",
+        "recommendation": "error 状態の場合のみ setLoading(true) を設定し、正常状態からの復帰時はサイレント更新（WorktreeList.tsx と同等のパターン）とする案も検討に値する。ただし、handleRetry を直接呼び出す設計（MF-001）を採用する場合は、handleRetry の挙動をそのまま維持する方が一貫性がある。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principles_evaluation": {
+    "single_responsibility": {
+      "score": 3,
+      "status": "partial",
+      "note": "visibilitychange ハンドラ自体は復帰処理のみを担当し SRP を守っているが、追加先の WorktreeDetailRefactored.tsx が既に 2006 行と大きく、ファイルレベルの SRP が弱い"
+    },
+    "open_closed": {
+      "score": 4,
+      "status": "good",
+      "note": "既存の handleRetry パターンの再利用により、既存コードの変更を最小限に抑えている"
+    },
+    "liskov_substitution": {
+      "score": 5,
+      "status": "not_applicable",
+      "note": "本設計にはサブタイプ/継承の構造が含まれないため該当なし"
+    },
+    "interface_segregation": {
+      "score": 5,
+      "status": "not_applicable",
+      "note": "新規インターフェースの追加がないため該当なし"
+    },
+    "dependency_inversion": {
+      "score": 4,
+      "status": "good",
+      "note": "document.visibilitychange というブラウザ API への直接依存があるが、テストでモック可能なレベル。カスタムフック化すればより DI しやすくなるが、現時点では YAGNI 判断が妥当"
+    },
+    "kiss": {
+      "score": 5,
+      "status": "excellent",
+      "note": "timestampガードは useRef + Date.now() のみで実装可能。debounce/throttle ライブラリを使わない判断は KISS に忠実。SWR/React Query 不採用も適切"
+    },
+    "yagni": {
+      "score": 5,
+      "status": "excellent",
+      "note": "usePageVisibility カスタムフック化の不採用、setInterval 停止/再開ロジックの不採用、auto-yes 追加対策の不採用はいずれも YAGNI 原則に忠実な適切な判断"
+    },
+    "dry": {
+      "score": 3,
+      "status": "needs_improvement",
+      "note": "handleRetry 同等フローの再実装は DRY 違反。handleRetry を直接呼び出す設計に変更すべき"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-246-visibility-recovery-design-policy.md",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeList.tsx",
+    "src/hooks/useAutoYes.ts",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/lib/utils.ts"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}

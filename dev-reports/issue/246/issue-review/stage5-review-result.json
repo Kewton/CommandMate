@@ -1,0 +1,265 @@
+{
+  "issue_number": 246,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-13",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 2
+  },
+  "previous_stages_verification": {
+    "stage1_findings": {
+      "SF-1": {
+        "status": "resolved",
+        "verification": "WorktreeList.tsxへの対応が「バックグラウンド復帰時にsetIntervalタイマーを再設定する対応を追加」と明記され、実装タスクにも「WorktreeDetailRefactored.tsxの「エラー状態からの自動復帰」とは異なる問題」と注釈が追加されている。変更対象ファイル表にも区別が反映されている。"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "verification": "受入条件が「visibilitychangeによる再取得と既存のsetIntervalポーリングが同時発火しても、データの整合性が保たれる」「setIntervalのタイミングやインターバル値が変更されていない」という2つの具体的基準に置き換えられている。"
+      },
+      "SF-3": {
+        "status": "resolved",
+        "verification": "「エラーリセットの詳細仕様」セクションが追加され、handleRetry同等の5ステップフロー（setError(null) -> setLoading(true) -> fetch -> error再設定 -> setLoading(false)）が明記されている。"
+      },
+      "SF-4": {
+        "status": "resolved",
+        "verification": "「補足: エラーハンドリングの非対称性について」セクションが根本原因の仮説に追加され、fetchWorktreeのみがsetError()を呼ぶ点、fetchMessages/fetchCurrentOutputはconsole.errorのみである点が明記されている。検討事項にリトライ戦略も追加されている。"
+      },
+      "NTH-1": {
+        "status": "resolved",
+        "verification": "関連コンポーネント欄でuseWorktreeUIState.tsのclearErrorアクション（L118, L200, L270）とローカルstate（setError、L939）の使い分けが明記され、「本Issue対応ではローカルstateのsetError(null)を使用する」と方針が明確化されている。"
+      },
+      "NTH-2": {
+        "status": "resolved",
+        "verification": "テスト実装タスクに4つの具体的テストケース、テスト手法（document.dispatchEvent + Object.defineProperty）、WorktreeList.tsxのテストファイル不在と対応方針が記載されている。"
+      },
+      "NTH-3": {
+        "status": "resolved",
+        "verification": "検討事項にthrottle/timestampガード考慮が追加され、debounceパターンが不向きである理由、timestampベースの簡易ガードが適切である理由が明記されている。関連コンポーネントにもsrc/lib/utils.tsの既存debounce関数が不向きである旨が記載されている。"
+      }
+    },
+    "stage3_findings": {
+      "MF-1": {
+        "status": "resolved",
+        "verification": "影響範囲の関連コンポーネントにsrc/hooks/useAutoYes.tsが追加され、visibilitychange復帰時のfetchCurrentOutputがprompt状態を更新しauto-yes hookが自動応答を発火する可能性が記載されている。DUPLICATE_PREVENTION_WINDOW_MS（3秒）の保護範囲外のリスクも明記。実装タスクと受入条件にもauto-yes連動確認が追加されている。"
+      },
+      "SF-1": {
+        "status": "resolved",
+        "verification": "対策案セクションに「visibilitychangeハンドラとsetIntervalの同時発火について」サブセクションが追加され、GETリクエストの冪等性、state更新バッチングによる同時発火窓、対処オプション（setInterval一時停止 or 冪等性による許容）が分析されている。受入条件に「API呼び出しが不必要に重複しないこと」も追加されている。"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "verification": "テスト計画がWorktreeDetailRefactored.test.tsxに追加すべき4つのテストケース（visibilitychange発火時fetch、error復帰、hidden時のfetch抑制、throttleガード動作）として具体化されている。WorktreeList.tsxのテストファイル不在と手動テスト代替も記載されている。"
+      },
+      "SF-3": {
+        "status": "resolved",
+        "verification": "検討事項のdebounce/throttle記載がthrottle/timestampガードに修正され、visibilitychangeの即時実行要件にdebounceが不向きである理由が明記されている。src/lib/utils.tsの既存debounce関数がこの用途に不向きであることが影響範囲の関連コンポーネントにも反映されている。"
+      },
+      "NTH-1": {
+        "status": "resolved",
+        "verification": "「将来的な横展開候補（本Issueスコープ外）」セクションが追加され、usePageVisibilityカスタムフック化の検討とExternalAppsManager.tsx/ExternalAppStatus.tsxへの適用可能性が記載されている。本Issueでは最小限実装で十分と明記。"
+      },
+      "NTH-2": {
+        "status": "resolved",
+        "verification": "WorktreeList.tsxの実装タスクと変更対象ファイル表にWebSocket接続（useWebSocket）のreconnect処理とsetInterval再設定の復帰タイミングのずれへの留意が追記されている。"
+      }
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "正確性",
+        "issue": "将来的な横展開候補セクションの末尾に「WorktreeList.tx」という拡張子の脱字がある。正しくは「WorktreeList.tsx」。",
+        "location": "## 影響範囲 - 将来的な横展開候補セクション末尾",
+        "recommendation": "「WorktreeList.tx」を「WorktreeList.tsx」に修正する。",
+        "evidence": "Issue本文: 「WorktreeDetailRefactored.tsx / WorktreeList.txへの直接追加」 -- .tsxの「s」が欠落している。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "レビュー履歴セクションに、Stage 2（指摘反映）とStage 4（指摘反映）の反映内容がイテレーション1として一括で記載されているが、通常レビュー由来の反映と影響範囲レビュー由来の反映がどのステージで適用されたかの区別がない。現在の記載でも実用上問題はないが、トレーサビリティの観点からは「Stage 2で適用」「Stage 4で適用」と分けた方が追跡しやすい。",
+        "location": "## レビュー履歴 セクション",
+        "recommendation": "現在のレビュー履歴の構造を維持しつつ、各反映項目にStage番号（Stage 2 / Stage 4）を注記するか、あるいはイテレーション1の2つのセクション内で項目をStage由来に分類する。ただし、現在の記載でもイテレーション1-通常/イテレーション1-影響範囲として分かれており、大きな問題ではない。"
+      }
+    ]
+  },
+  "consistency_check": {
+    "line_references": {
+      "status": "all_accurate",
+      "details": [
+        {
+          "reference": "WorktreeDetailRefactored.tsx L939: useState<string | null>(null)",
+          "actual": "L939: const [error, setError] = useState<string | null>(null)",
+          "match": true
+        },
+        {
+          "reference": "WorktreeDetailRefactored.tsx L984-998: fetchWorktree",
+          "actual": "L984-998: fetchWorktree function with setError(message) at L995",
+          "match": true
+        },
+        {
+          "reference": "WorktreeDetailRefactored.tsx L1002-1013: fetchMessages",
+          "actual": "L1002-1013: fetchMessages with console.error at L1011",
+          "match": true
+        },
+        {
+          "reference": "WorktreeDetailRefactored.tsx L1017-1053: fetchCurrentOutput",
+          "actual": "L1017-1053: fetchCurrentOutput with console.error at L1051",
+          "match": true
+        },
+        {
+          "reference": "WorktreeDetailRefactored.tsx L1039-1043: prompt state transition",
+          "actual": "L1039-1043: if/else for showPrompt/clearPrompt",
+          "match": true
+        },
+        {
+          "reference": "WorktreeDetailRefactored.tsx L1425-1431: useAutoYes hook",
+          "actual": "L1425-1431: useAutoYes with isPromptWaiting: state.prompt.visible",
+          "match": true
+        },
+        {
+          "reference": "WorktreeDetailRefactored.tsx L1434-1442: handleRetry",
+          "actual": "L1434-1442: handleRetry function with setError(null)->setLoading(true)->fetch->setLoading(false)",
+          "match": true
+        },
+        {
+          "reference": "WorktreeDetailRefactored.tsx L1449-1476: initial load effect",
+          "actual": "L1449-1476: useEffect with initialLoadCompletedRef guard",
+          "match": true
+        },
+        {
+          "reference": "WorktreeDetailRefactored.tsx L1479-1493: polling useEffect",
+          "actual": "L1479-1493: useEffect with loading||error guard and setInterval",
+          "match": true
+        },
+        {
+          "reference": "WorktreeDetailRefactored.tsx L1535-1537: error display",
+          "actual": "L1535-1537: if (error) return <ErrorDisplay>",
+          "match": true
+        },
+        {
+          "reference": "WorktreeList.tsx L103-106: broadcast message handler",
+          "actual": "L103-106: if message.type === 'broadcast' fetchWorktrees(true)",
+          "match": true
+        },
+        {
+          "reference": "WorktreeList.tsx L110-112: useWebSocket",
+          "actual": "L110-112: const { status: wsStatus } = useWebSocket",
+          "match": true
+        },
+        {
+          "reference": "WorktreeList.tsx L122-129: setInterval polling",
+          "actual": "L122-129: setInterval fetchWorktrees(true) every 5000ms",
+          "match": true
+        },
+        {
+          "reference": "useWorktreeUIState.ts L118: CLEAR_ERROR case",
+          "actual": "L118: case 'CLEAR_ERROR'",
+          "match": true
+        },
+        {
+          "reference": "useWorktreeUIState.ts L200: clearError interface",
+          "actual": "L200: clearError: () => void",
+          "match": true
+        },
+        {
+          "reference": "useWorktreeUIState.ts L270: clearError dispatch",
+          "actual": "L270: clearError: () => dispatch({ type: 'CLEAR_ERROR' })",
+          "match": true
+        },
+        {
+          "reference": "useAutoYes.ts L18: DUPLICATE_PREVENTION_WINDOW_MS = 3000",
+          "actual": "L19: const DUPLICATE_PREVENTION_WINDOW_MS = 3000 (line 19, not 18)",
+          "match": false,
+          "severity": "trivial",
+          "note": "DUPLICATE_PREVENTION_WINDOW_MS is at L19 not L18. L18 is the comment. This is a 1-line offset but the constant value (3000) and variable name are accurate."
+        },
+        {
+          "reference": "ExternalAppsManager.tsx L56-57: setInterval",
+          "actual": "L56: const interval = setInterval(fetchApps, 60000)",
+          "match": true
+        },
+        {
+          "reference": "ExternalAppStatus.tsx L72-74: setInterval",
+          "actual": "L72: const interval = setInterval(checkHealth, pollInterval)",
+          "match": true
+        },
+        {
+          "reference": "src/lib/utils.ts debounce function",
+          "actual": "L25-40: debounce function (delay-based, last-call execution)",
+          "match": true
+        }
+      ]
+    },
+    "cross_section_consistency": {
+      "status": "consistent",
+      "details": [
+        "対策案のhandleRetryフローと実装タスクのhandleRetry同等フロー記載が一致している",
+        "受入条件の7項目が実装タスクの各項目と整合している",
+        "影響範囲の変更対象ファイル表と実装タスクのファイル参照が一致している",
+        "検討事項のthrottle/timestampガード方針が、テストケース4番目（throttleガード動作テスト）と整合している",
+        "関連コンポーネントのuseAutoYes記載と、実装タスクのauto-yes連動確認タスク、受入条件のauto-yes誤動作防止条件が整合している",
+        "WorktreeList.tsxのWebSocket留意事項が実装タスクと変更対象ファイル表の両方で一貫して記載されている"
+      ]
+    },
+    "technical_accuracy": {
+      "status": "accurate",
+      "details": [
+        "fetchWorktreeのみがsetError()を呼ぶ（fetchMessages/fetchCurrentOutputはconsole.errorのみ）-- コード照合で確認",
+        "ポーリングuseEffectの依存配列にloading, errorが含まれる -- コード照合で確認",
+        "handleRetryのフロー（setError(null)->setLoading(true)->fetch->setLoading(false)）-- コード照合で確認",
+        "WorktreeList.tsxのsetIntervalにloading/errorガードがない -- コード照合で確認",
+        "useAutoYesがstate.prompt.visibleを監視している -- コード照合で確認",
+        "src以下にvisibilitychangeリスナーが存在しない -- grep結果0件で確認",
+        "src以下にthrottle関数が存在しない -- grep結果0件で確認",
+        "src/lib/utils.tsのdebounce関数はdelay後の最後呼び出し実行パターン -- コード照合で確認"
+      ]
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "主要変更対象。全行参照がコード照合で正確であることを確認済み"
+    },
+    {
+      "file": "src/components/worktree/WorktreeList.tsx",
+      "relevance": "副次的変更対象。setInterval(L122-129)、WebSocket(L110-112)の行参照が正確であることを確認済み"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "影響範囲。DUPLICATE_PREVENTION_WINDOW_MSの行番号がL18ではなくL19だが、定数名・値は正確"
+    },
+    {
+      "file": "src/hooks/useWorktreeUIState.ts",
+      "relevance": "関連コンポーネント。clearError(L118, L200, L270)の行参照が全て正確"
+    },
+    {
+      "file": "src/lib/utils.ts",
+      "relevance": "debounce関数(L25-40)の行参照と動作説明が正確"
+    },
+    {
+      "file": "src/components/external-apps/ExternalAppsManager.tsx",
+      "relevance": "横展開候補。setInterval(L56-57)の行参照が正確"
+    },
+    {
+      "file": "src/components/external-apps/ExternalAppStatus.tsx",
+      "relevance": "横展開候補。setInterval(L72-74)の行参照が正確"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトのコーディング規約・ファイル構成の参照ドキュメント"
+    },
+    {
+      "file": "dev-reports/issue/246/issue-review/hypothesis-verification.md",
+      "relevance": "仮説検証レポート。Issueの根本原因分析の正確性を裏付け"
+    }
+  ]
+}

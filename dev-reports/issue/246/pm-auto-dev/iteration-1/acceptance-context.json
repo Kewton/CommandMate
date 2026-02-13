@@ -1,0 +1,34 @@
+{
+  "issue_number": 246,
+  "feature_summary": "スマートフォンでのバックグラウンド復帰時に「Error loading worktree」エラーが表示される問題を修正。visibilitychangeイベントリスナーを追加し、ページ復帰時に自動的にデータを再取得する。",
+  "acceptance_criteria": [
+    "スマートフォンでバックグラウンド復帰時にエラーが表示されず、自動的にデータが再取得される",
+    "visibilitychangeイベントで適切にデータ再取得がトリガーされる",
+    "visibilitychangeによる再取得と既存のsetIntervalポーリングが同時発火しても、データの整合性が保たれる",
+    "visibilitychange復帰時にAPI呼び出しが不必要に重複しないこと（timestampガードが機能していること）",
+    "visibilitychange復帰時のfetchCurrentOutputによるprompt状態更新がauto-yes hookの誤動作を引き起こさないこと",
+    "setIntervalのタイミングやインターバル値が変更されていない",
+    "既存テストがすべてパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: WorktreeDetailRefactored.tsx - visibilitychange(visible)発火時にhandleRetryフローが実行される",
+    "シナリオ2: WorktreeDetailRefactored.tsx - error状態からvisibilitychange復帰でエラーがリセットされる",
+    "シナリオ3: WorktreeDetailRefactored.tsx - visibilityState='hidden'時にはfetch呼び出しが行われない",
+    "シナリオ4: WorktreeDetailRefactored.tsx - 5秒以内の連続visibilitychange発火でthrottleガードが機能する",
+    "シナリオ5: WorktreeList.tsx - visibilitychange復帰時にfetchWorktrees(true)が呼ばれる",
+    "シナリオ6: 既存テストがすべてパスする（3091 passed, 7 skipped）",
+    "シナリオ7: TypeScript型チェックがパスする（0 errors）",
+    "シナリオ8: ESLintがパスする（0 errors）"
+  ],
+  "implementation_summary": {
+    "files_changed": 3,
+    "lines_added": 285,
+    "lines_deleted": 1,
+    "new_tests": 4,
+    "test_results": {
+      "total": 32,
+      "passed": 31,
+      "skipped": 1
+    }
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "issue_number": 246,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IC-001",
+        "title": "handleRetry行番号の記載が正確（L1434-1442）だが、handleRetry内のフローの記載に不正確な点がある",
+        "description": "設計書Section 4-2でhandleRetry()のフローを「1. setError(null) 2. setLoading(true) 3. fetchWorktree() 4. fetchMessages()（並列） 5. fetchCurrentOutput()（並列） 6. setLoading(false)」と記載している。実装（L1434-1442）を確認すると、fetchWorktreeが成功した場合にPromise.all([fetchMessages(), fetchCurrentOutput()])を実行するため、4と5は並列実行で正しい。しかし設計書Section 10-2の既存パターン欄にある「Promise.all並列取得」の記載は正確である一方、Section 4-2のフロー記載がステップ3,4,5の依存関係を完全に正しく表現していない。fetchWorktreeが失敗した場合はfetchMessages/fetchCurrentOutputがスキップされる点はフローに含まれているが、この分岐がフローの番号付きリスト上で明示されていない。",
+        "severity": "low",
+        "recommendation": "Section 4-2のフロー記載を、条件分岐を明示した形式に修正する。例: 3. fetchWorktree() → 成功時のみ 4,5 を実行。現在の記載は誤解を招く可能性は低いが、厳密な整合性の観点から修正が望ましい。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IC-002",
+        "title": "useAutoYesへのlastServerResponseTimestamp未渡しの記載漏れ",
+        "description": "設計書Section 6.2でuseAutoYesの保護機構として「lastServerResponseTimestamp（サーバー側重複防止）」を列挙しているが、実装上のWorktreeDetailRefactored.tsx L1424-1431のuseAutoYes呼び出しではlastServerResponseTimestampパラメータが渡されていない。APIの/api/worktrees/:id/current-outputレスポンスにはlastServerResponseTimestampフィールドが含まれているが、CurrentOutputResponseインターフェース（L68-81）にこのフィールドが定義されておらず、fetchCurrentOutput内でも受け取っていない。設計書がこの保護機構を有効と記載しているのは、実装の現状と整合していない。",
+        "severity": "medium",
+        "recommendation": "設計書Section 6.2の安全性評価表において、lastServerResponseTimestampの有効範囲を「現在の実装では未接続（CurrentOutputResponseインターフェースに未定義）」と注記するか、または本Issue対応外であることを明記する。Issue #246のスコープではuseAutoYesの変更は対象外であるため、既存の不整合として記録する形が適切。"
+      },
+      {
+        "id": "IC-003",
+        "title": "clearError行番号の不正確な記載",
+        "description": "設計書Section 5-2で「clearError (useReducer) | useWorktreeUIState.ts L270」と記載しているが、実装ではuseWorktreeUIState.tsのL270はactions.clearErrorのアクションクリエータ定義（dispatch呼び出し）であり、reducerでのCLEAR_ERRORハンドリングはL118-119に位置する。行番号が指すのはアクションクリエータ側であり、reducer側ではないことを明確にすべき。",
+        "severity": "low",
+        "recommendation": "L270の記載自体は間違いではない（clearErrorアクションクリエータの定義位置として正確）が、「useReducer」と記載しているならreducer内のCLEAR_ERRORハンドリング位置（L118-119）も併記するか、「アクションクリエータ L270」と明記する方が正確。"
+      },
+      {
+        "id": "IC-004",
+        "title": "WorktreeList.tsxのerror状態に関する設計記載の不完全さ",
+        "description": "設計書Section 4-4で「WorktreeList.tsxではerror状態が発生しない」と記載しているが、実装ではWorktreeList.tsx L35にerror useState、L75にsetError(handleApiError(err))、L422-426にerror表示UIが存在する。正確には「error状態によるポーリング停止が発生しない」（setIntervalにerrorガードがない）であり、error状態自体は発生し得る。",
+        "severity": "medium",
+        "recommendation": "Section 4-4の比較表「エラーによるポーリング停止 | なし（常時ポーリング動作）」の記載は正確だが、「復帰時のエラーリセット | 不要（error状態が発生しない）」の記載は不正確。WorktreeList.tsxでもfetchWorktrees失敗時にerror状態は発生するが、setIntervalにerrorガードがないためポーリングは停止しない。したがってvisibilitychange復帰時のエラーリセットが「不要」である理由は「error状態が発生しないから」ではなく「ポーリングがerror状態に関わらず継続するから」である。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IC-005",
+        "title": "WorktreeList.tsxへのvisibilitychange追加時のfetchWorktrees二重発火の考慮",
+        "description": "WorktreeList.tsxは既にWebSocket broadcastメッセージ受信時にfetchWorktrees(true)を呼び出している（L103-106）。visibilitychange復帰時にもfetchWorktrees(true)を呼び出す設計だが、WebSocket再接続とvisibilitychangeが近いタイミングで発火した場合の二重呼び出しについて、設計書では「WebSocket再接続とは独立して動作させる」とのみ記載。WorktreeDetailRefactored.tsxにはtimestampガードが設計されているが、WorktreeList.tsxにはガードなし。軽量なGET APIであるため問題は小さいが、設計根拠としての記載があると良い。",
+        "severity": "low",
+        "recommendation": "Section 4-3の設計根拠に「WorktreeList.tsxのfetchWorktrees(true)は軽量なGETリクエストであり、WebSocket broadcastとの二重発火が発生しても冪等性により安全であるため、timestampガードは不要と判断」のような補足を追加するとより堅牢な設計根拠となる。"
+      },
+      {
+        "id": "IC-006",
+        "title": "initialLoadCompletedRefとvisibilitychange復帰の相互作用",
+        "description": "WorktreeDetailRefactored.tsxのL959にinitialLoadCompletedRefが存在し、L1451でinitialLoadCompletedRef.currentがtrueの場合に初期ロードをスキップする。handleRetry()はinitialLoadCompletedRefをリセットしない。visibilitychange復帰でhandleRetry()を呼ぶ場合、initialLoadCompletedRefはtrueのままであるため初期ロードのuseEffectは再実行されない。この動作は正しいが、設計書ではinitialLoadCompletedRefとの相互作用について言及がない。",
+        "severity": "low",
+        "recommendation": "将来のメンテナンス性のため、設計書のSection 4-2に「handleRetry()はinitialLoadCompletedRefをリセットしないため、visibilitychange復帰後も初期ロードのuseEffectは再実行されない（これは意図した動作）」という注記を追加することを検討。"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "handleRetry()の位置（L1434-1442）",
+      "design_description": "handleRetry関数はL1434-1442に存在",
+      "implementation_status": "一致",
+      "discrepancy": "なし - 実際にL1434-1442に存在を確認"
+    },
+    {
+      "design_item": "error useState（L939）",
+      "design_description": "error stateはL939で定義",
+      "implementation_status": "一致",
+      "discrepancy": "なし - L939にconst [error, setError] = useState<string | null>(null)を確認"
+    },
+    {
+      "design_item": "loading useState（L938）",
+      "design_description": "loading stateはL938で定義",
+      "implementation_status": "一致",
+      "discrepancy": "なし - L938にconst [loading, setLoading] = useState(true)を確認"
+    },
+    {
+      "design_item": "IDLE_POLLING_INTERVAL_MS定数",
+      "design_description": "5000msでL91に定義",
+      "implementation_status": "一致",
+      "discrepancy": "なし - L91にconst IDLE_POLLING_INTERVAL_MS = 5000を確認"
+    },
+    {
+      "design_item": "ポーリングのloading/errorガード",
+      "design_description": "L1480でif (loading || error) return;によりポーリング停止",
+      "implementation_status": "一致",
+      "discrepancy": "なし - L1480にif (loading || error) return;を確認"
+    },
+    {
+      "design_item": "WorktreeList.tsxのsetIntervalにerrorガードなし",
+      "design_description": "setInterval自体にerror/loadingガードがない",
+      "implementation_status": "一致",
+      "discrepancy": "なし - L123-128でガードなしのsetIntervalを確認"
+    },
+    {
+      "design_item": "fetchWorktrees(true)サイレント更新",
+      "design_description": "WorktreeList.tsxでfetchWorktrees(true)をサイレント呼び出し",
+      "implementation_status": "一致",
+      "discrepancy": "なし - L65のfetchWorktrees関数にsilentパラメータが存在し、L125でfetchWorktrees(true)が呼ばれている"
+    },
+    {
+      "design_item": "handleRetryのuseCallback依存配列",
+      "design_description": "handleRetryはuseCallbackでメモ化されている",
+      "implementation_status": "一致",
+      "discrepancy": "なし - L1434でuseCallback、L1442で[fetchWorktree, fetchMessages, fetchCurrentOutput]を確認"
+    },
+    {
+      "design_item": "clearError (useWorktreeUIState.ts L270)",
+      "design_description": "UIState内のエラークリアアクション",
+      "implementation_status": "部分一致",
+      "discrepancy": "L270はアクションクリエータ定義。reducerでのCLEAR_ERRORハンドリングはL118-119。機能的には正確だが行番号の指す対象が曖昧"
+    },
+    {
+      "design_item": "DUPLICATE_PREVENTION_WINDOW_MS (3秒)",
+      "design_description": "useAutoYes.tsに定義されている重複防止ウィンドウ",
+      "implementation_status": "一致",
+      "discrepancy": "なし - useAutoYes.ts L19にconst DUPLICATE_PREVENTION_WINDOW_MS = 3000を確認"
+    },
+    {
+      "design_item": "ファイル総行数2006行",
+      "design_description": "WorktreeDetailRefactored.tsxは2006行",
+      "implementation_status": "一致",
+      "discrepancy": "なし - wc -lで2006行を確認"
+    },
+    {
+      "design_item": "APIエンドポイント（4種）",
+      "design_description": "/api/worktrees/:id, /api/worktrees/:id/current-output, /api/worktrees/:id/messages, /api/worktrees",
+      "implementation_status": "一致",
+      "discrepancy": "なし - 全4エンドポイントのroute.tsファイルの存在を確認"
+    },
+    {
+      "design_item": "lastServerResponseTimestamp保護機構",
+      "design_description": "useAutoYesの二重応答防止機構として有効と記載",
+      "implementation_status": "不一致",
+      "discrepancy": "APIレスポンスにはフィールドが含まれるが、CurrentOutputResponseインターフェースに未定義。WorktreeDetailRefactored.tsxからuseAutoYesへの渡し時にも未使用"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeList.tsx",
+    "src/hooks/useAutoYes.ts",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "src/lib/utils.ts",
+    "dev-reports/design/issue-246-visibility-recovery-design-policy.md"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}

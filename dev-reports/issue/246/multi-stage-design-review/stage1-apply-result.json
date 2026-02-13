@@ -1,0 +1,121 @@
+{
+  "issue_number": 246,
+  "stage": 1,
+  "stage_name": "指摘事項対応（設計原則）",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "handleRetryとvisibilitychange復帰フローの重複（DRY原則違反）",
+        "section_updated": "Section 2-2, 3-1, 3-2, 4-1, 4-2, 5-1, 5-2, 6-1, 8-2, 10-1, 10-2, 11, 13, 16",
+        "status": "reflected",
+        "changes": [
+          "Section 2-2: シーケンス図にhandleRetry()参加者を追加し、直接呼び出しフローに変更",
+          "Section 3-1: エラー復帰フローの選定理由をhandleRetry()直接呼び出しに変更",
+          "Section 3-2: handleRetry同等フローの再実装を不採用代替案として追加",
+          "Section 4-1: 擬似コードをhandleRetry()直接呼び出しに変更",
+          "Section 4-2: タイトルをhandleRetry直接呼び出しパターンに変更し、設計根拠を更新",
+          "Section 5-1: 状態遷移図のRecovery→Loading遷移をhandleRetry()呼び出しに変更",
+          "Section 5-2: handleRetry()による状態管理一元化を記載",
+          "Section 6-1: Mermaid図にhandleRetry経由のフローを追加",
+          "Section 8-2: handleRetry関数のみを呼び出す原則に更新",
+          "Section 10-1: 復帰フロー実装方式の設計決定を追加",
+          "Section 10-2: DRY対応として直接呼び出しを明記",
+          "Section 11: 変更内容にhandleRetry()直接呼び出しを明記",
+          "Section 13: DRY原則の適用をhandleRetry()直接呼び出しに更新",
+          "Section 16: 実装チェックリストにhandleRetry()直接呼び出し項目を追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "RECOVERY_THROTTLE_MSとIDLE_POLLING_INTERVAL_MSの値の重複",
+        "section_updated": "Section 4-1, 10-1, 11, 16",
+        "status": "reflected",
+        "changes": [
+          "Section 4-1: 両定数の関係性と意味的差異の説明を追加",
+          "Section 10-1: RECOVERY_THROTTLE_MS定義の設計決定を追加",
+          "Section 11: 定数追加テーブルに備考列を追加",
+          "Section 16: コメント記載のチェックリスト項目を追加"
+        ]
+      },
+      {
+        "id": "SF-002",
+        "item": "WorktreeDetailRefactored.tsxの責務過多（2006行）",
+        "section_updated": "Section 13, 16",
+        "status": "reflected",
+        "changes": [
+          "Section 13: SRPに関する将来の改善方向サブセクションを新規追加",
+          "Section 16: 将来検討チェックリストにuseVisibilityRecovery抽出を追加"
+        ]
+      },
+      {
+        "id": "SF-003",
+        "item": "WorktreeList.tsxとWorktreeDetailRefactored.tsxのvisibilitychangeパターン差異",
+        "section_updated": "Section 4-4, 16",
+        "status": "reflected",
+        "changes": [
+          "Section 4-4: visibilitychangeパターン差異の設計根拠サブセクションを新規追加（比較表付き）",
+          "Section 16: WorktreeList.tsxのコメント記載チェックリスト項目を追加"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "item": "usePageVisibilityカスタムフック化の将来判断基準",
+        "section_updated": "Section 3-2, 10-1, 13",
+        "status": "reflected",
+        "changes": [
+          "Section 3-2: 不採用理由に3箇所目での再検討基準を追加",
+          "Section 10-1: カスタムフック化の設計決定に3箇所目で再検討と明記",
+          "Section 13: YAGNI原則の適用にC-001参照を追加"
+        ]
+      },
+      {
+        "id": "C-002",
+        "item": "ポーリング制御とイベントハンドリングの分離",
+        "section_updated": "Section 13",
+        "status": "reflected",
+        "changes": [
+          "Section 13: ポーリング制御の将来検討サブセクションを新規追加"
+        ]
+      },
+      {
+        "id": "C-003",
+        "item": "setLoading(true)による一瞬のローディング表示",
+        "section_updated": "Section 4-2, 10-1",
+        "status": "reflected",
+        "changes": [
+          "Section 4-2: handleRetry()直接呼び出しによる一貫性優先の注意事項を追加",
+          "Section 10-1: エラーリセット方式のトレードオフにローディング表示の説明を追加"
+        ]
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-246-visibility-recovery-design-policy.md",
+  "sections_updated": [
+    "Section 2-2: 処理フロー（シーケンス図更新）",
+    "Section 3-1: 使用技術（選定理由更新）",
+    "Section 3-2: 不採用とした代替案（追加）",
+    "Section 4-1: timestampガードパターン（擬似コード・定数関係性更新）",
+    "Section 4-2: handleRetry直接呼び出しパターン（タイトル・内容刷新）",
+    "Section 4-4: visibilitychangeパターン差異の設計根拠（新規追加）",
+    "Section 5-1: 状態遷移図（更新）",
+    "Section 5-2: エラー状態の管理体系（更新）",
+    "Section 6-1: リスク分析（Mermaid図更新）",
+    "Section 8-2: 安全設計の原則（更新）",
+    "Section 10-1: 主要な設計決定（行追加・更新）",
+    "Section 10-2: 既存コードとの一貫性（更新）",
+    "Section 11: 変更対象ファイル一覧（更新）",
+    "Section 13: 制約条件（SRP将来改善・ポーリング将来検討追加）",
+    "Section 14: レビュー履歴（新規追加）",
+    "Section 15: レビュー指摘事項サマリー（新規追加）",
+    "Section 16: 実装チェックリスト（新規追加）"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}

@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
 
 // Mock next/navigation
@@ -791,6 +791,214 @@ describe('WorktreeDetailRefactored', () => {
         (call) => call[0].includes('/files/') && call[1]?.method === 'DELETE'
       );
       expect(deleteCall).toBeUndefined();
+    });
+  });
+
+  describe('Visibility Change Recovery (Issue #246)', () => {
+    /**
+     * Tests for the visibilitychange-based recovery mechanism.
+     *
+     * When a smartphone browser puts a page in the background, network requests
+     * are suspended and polling timers drift. Upon foreground restoration, the
+     * component must re-fetch data to clear stale errors and restore the UI.
+     *
+     * Design policy references:
+     * - MF-001: handleRetry() is called directly (DRY principle)
+     * - SF-001: RECOVERY_THROTTLE_MS prevents rapid re-fetches
+     * - IA-001: handleRetry() causes setInterval re-creation as a side-effect
+     * - IA-002: Concurrent fetches from visibility + polling + WebSocket are safe
+     */
+
+    /**
+     * Helper to set document.visibilityState for testing.
+     * Uses Object.defineProperty to override the readonly property because
+     * visibilityState is a read-only getter on the Document prototype.
+     */
+    let visibilityStateSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+    function setVisibilityState(state: DocumentVisibilityState) {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => state,
+      });
+    }
+
+    afterEach(() => {
+      // Restore original visibilityState
+      if (visibilityStateSpy) {
+        visibilityStateSpy.mockRestore();
+        visibilityStateSpy = null;
+      }
+      // Restore default 'visible' state
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+    });
+
+    it('TC-1: triggers data re-fetch when visibilitychange fires with visible state (MF-001)', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Wait for initial load to complete
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+
+      // Clear fetch call history after initial load
+      mockFetch.mockClear();
+
+      // Set visible state and dispatch visibilitychange event
+      setVisibilityState('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      // handleRetry() should trigger fetchWorktree (GET /api/worktrees/:id)
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+        const anyWorktreeCall = mockFetch.mock.calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('/api/worktrees/test-worktree-123')
+        );
+        expect(anyWorktreeCall).toBe(true);
+      });
+    });
+
+    it('TC-2: resets error state when visibilitychange fires during error (MF-001)', async () => {
+      // First, make fetch fail to trigger error state
+      mockFetch.mockImplementation(() =>
+        Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({ error: 'Server error' }),
+        })
+      );
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Wait for error state to appear
+      await waitFor(() => {
+        expect(screen.getByText(/error/i)).toBeInTheDocument();
+      });
+
+      // Now fix the fetch to succeed
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/messages')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockMessages),
+          });
+        }
+        if (url.includes('/current-output')) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                isRunning: true,
+                isGenerating: false,
+                content: 'Terminal output',
+                thinking: false,
+              }),
+          });
+        }
+        if (url.includes('/api/worktrees/')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockWorktree),
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      // Dispatch visibilitychange to trigger recovery
+      setVisibilityState('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      // Error should be cleared and data should load
+      await waitFor(() => {
+        expect(screen.queryByText(/error loading worktree/i)).not.toBeInTheDocument();
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+    });
+
+    it('TC-3: does not trigger data re-fetch when visibilityState is hidden', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Wait for initial load to complete
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+
+      // Clear fetch call history after initial load
+      mockFetch.mockClear();
+
+      // Set hidden state and dispatch visibilitychange event
+      setVisibilityState('hidden');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      // Wait a bit to ensure no fetch is triggered
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // No fetch calls should have been made
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('TC-4: throttles rapid visibilitychange events within RECOVERY_THROTTLE_MS (SF-001)', async () => {
+      // Mock Date.now to control timestamps for throttle testing.
+      // RECOVERY_THROTTLE_MS = 5000ms, so events within 5 seconds should be skipped.
+      const originalDateNow = Date.now;
+      let currentTime = 1000000;
+      Date.now = vi.fn(() => currentTime);
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Wait for initial load to complete
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+
+      // Clear fetch call history after initial load
+      mockFetch.mockClear();
+
+      // --- 1st visibilitychange: should trigger fetch ---
+      setVisibilityState('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+
+      // --- 2nd visibilitychange at +2s: should be throttled (within 5s window) ---
+      mockFetch.mockClear();
+      currentTime += 2000;
+
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      // Wait a bit to confirm no fetch is triggered
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      // --- 3rd visibilitychange at +6s total: should trigger fetch (past 5s window) ---
+      currentTime += 4000;
+      mockFetch.mockClear();
+
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+
+      // Restore Date.now
+      Date.now = originalDateNow;
     });
   });
 });

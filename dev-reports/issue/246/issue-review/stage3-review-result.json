@@ -1,0 +1,117 @@
+{
+  "issue_number": 246,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-13",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "Issueの影響範囲に記載されていない隠れた影響対象がある。useAutoYes hookはstate.prompt.visibleをwatchしてauto-responseをトリガーする（useAutoYes.ts）。visibilitychange復帰時にfetchCurrentOutputが呼ばれると、prompt状態が変更される可能性があり（WorktreeDetailRefactored.tsx L1039-1043のprompt state transition）、auto-yes hookが連動して自動応答を発火する可能性がある。バックグラウンド中にpromptが到着していた場合、復帰時のfetchCurrentOutputがprompt状態を更新し、auto-yes hookが重複応答を送る危険がある。",
+        "location": "## 影響範囲 セクション - 関連コンポーネント",
+        "recommendation": "影響範囲の関連コンポーネントに`src/hooks/useAutoYes.ts`を追加し、「visibilitychange復帰時のfetchCurrentOutputがprompt状態を更新した場合、auto-yes hookが自動応答を発火する可能性がある。useAutoYesのDUPLICATE_PREVENTION_WINDOW_MS（3秒）によりある程度保護されるが、バックグラウンドから復帰までの時間が3秒を超える場合は重複とみなされないため、復帰時の自動応答動作の妥当性を確認する必要がある」と記載する。",
+        "evidence": "useAutoYes.ts L18: DUPLICATE_PREVENTION_WINDOW_MS = 3000; WorktreeDetailRefactored.tsx L1425-1431: useAutoYes hookはisPromptWaiting=state.prompt.visibleを監視; L1039-1043: fetchCurrentOutput内でprompt状態遷移が発生する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "破壊的変更",
+        "issue": "visibilitychangeハンドラとsetIntervalポーリング（L1479-1493）の同時発火による競合状態の具体的な影響が分析されていない。setIntervalは`loading || error`の条件でguardされている（L1480）。visibilitychange復帰時にerrorをnullにリセットし、loadingをtrueに設定するhandleRetry同等フローを実行する場合、そのタイミングでsetIntervalのuseEffectが再実行される（依存配列にloading, errorが含まれるため）。setError(null)+setLoading(true)の後、fetchが完了してsetLoading(false)が呼ばれると、再度useEffectが発火してsetIntervalが新規作成される。これ自体は正常動作だが、React state更新のバッチングにより、visibilitychangeハンドラ内のfetchとsetIntervalのfetchが同時に走る窓が存在する。",
+        "location": "## 対策案 セクション / ## 受入条件 セクション",
+        "recommendation": "実装タスクまたは対策案に「visibilitychangeハンドラ実行中はsetIntervalを一時停止するか、あるいはfetchの冪等性により同時発火しても安全であることを確認する」という検討事項を追加する。現在のfetchWorktree/fetchMessages/fetchCurrentOutputは全てGETリクエストで冪等であるため、同時発火してもデータ破損は起きないが、不要なAPI負荷が発生する。受入条件に「visibilitychange復帰時にAPI呼び出しが不必要に重複しないこと」を追加することを推奨する。",
+        "evidence": "WorktreeDetailRefactored.tsx L1479-1493: useEffect依存配列は[loading, error, fetchCurrentOutput, fetchWorktree, fetchMessages, state.terminal.isActive]。L1480: if (loading || error) return; によりloading中/error中はsetIntervalがsetされない。"
+      },
+      {
+        "id": "SF-2",
+        "category": "テスト範囲",
+        "issue": "テスト範囲の特定が不十分。既存のWorktreeDetailRefactored.test.tsxの構成を考慮した具体的なテストケースの列挙がない。また、WorktreeList.tsxにはテストファイルが存在しないため（`tests/unit/components/WorktreeList*.test.*`が見つからない）、WorktreeList.tsxのsetInterval再設定対応のテストをどうするかの方針も未記載。",
+        "location": "## 実装タスク セクション - テスト関連タスク",
+        "recommendation": "テスト計画を以下のように具体化する: (1) WorktreeDetailRefactored.test.tsxに追加すべきテストケース: a) visibilitychange発火時にfetchWorktreeが呼ばれること、b) error状態からvisibilitychangeで復帰できること、c) visibilityState='hidden'時にはfetch呼び出しが行われないこと、d) 短時間の連続visibilitychange発火でdebounce/throttleが機能すること。(2) WorktreeList.tsxのテストファイルが存在しない点について、新規テストファイルの作成方針を明記するか、手動テストで代替する旨を記載する。",
+        "evidence": "tests/unit/components/WorktreeDetailRefactored.test.tsx: 既存テストファイルが存在。tests/unit/components/WorktreeList*.test.*: テストファイルが存在しない。"
+      },
+      {
+        "id": "SF-3",
+        "category": "依存関係",
+        "issue": "Issueで言及されている`src/lib/utils.ts`のdebounce関数はdebounceパターン（最後の呼び出しからN ms後に実行）であり、visibilitychangeの連続発火防止にはthrottleパターン（最初の呼び出しから即座に実行し、N ms間は再実行を抑制）の方が適切な場合がある。visibilitychange復帰時にユーザーはすぐにデータを見たいため、debounceだと遅延が発生する。現在のコードベースにthrottle関数が存在しないため、新規実装が必要になるか、あるいはtimestampベースの簡易ガード（前回fetch時刻と比較）で実装するかの判断が必要。",
+        "location": "## 検討事項 セクション - debounce/throttle考慮",
+        "recommendation": "検討事項のdebounce/throttle記載を修正し、「visibilitychangeハンドラでは即座にデータ再取得を行いたいため、debounceではなくthrottleまたはtimestampベースのガード（例: 前回取得から5秒以内は再取得をスキップ）が適切」と明記する。`src/lib/utils.ts`のdebounce関数はこの用途には不向きであることを注記する。",
+        "evidence": "src/lib/utils.ts L25-40: debounce関数は最後の呼び出しからdelay ms後に実行する設計。src内にthrottle関数の実装は存在しない。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "ドキュメント更新",
+        "issue": "本Issue対応で新しいパターン（visibilitychangeイベントリスナー）がコードベースに導入される。現在、src以下のどのファイルにもvisibilitychangeイベントリスナーが存在しない（検索結果0件）。この新パターンは今後ExternalAppsManager.tsxやExternalAppStatus.tsx等のポーリングコンポーネントにも適用可能であり、プロジェクト共通のパターンとして定義することを検討してもよい。",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "Nice to haveとして「visibilitychangeハンドラのカスタムフック化（例: usePageVisibility）を検討し、将来的にExternalAppsManager.tsx等のポーリング系コンポーネントにも適用できるようにする」を追記する。ただし本Issueのスコープでは最小限の実装（WorktreeDetailRefactored.tsx直接追加）で十分。",
+        "evidence": "grep -r 'visibilitychange' src/ の結果が0件。ExternalAppsManager.tsx L56-57, ExternalAppStatus.tsx L72-74にもsetIntervalポーリングパターンが存在する。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "issue": "WorktreeList.tsxのsetInterval再設定対応について、Issue本文で「バックグラウンド復帰時にタイマーが正常に再開しない可能性への対処」と記載されているが、WorktreeList.tsxはWebSocket接続（useWebSocket L110-112）も利用しており、WebSocketの再接続動作との関係が未分析。WebSocket接続もバックグラウンド復帰時に切断されている可能性があり、reconnect処理とsetInterval再設定の相互作用を考慮する必要がある。",
+        "location": "## 実装タスク セクション - WorktreeList.tsx関連タスク",
+        "recommendation": "WorktreeList.tsxの分析に「WebSocket接続（useWebSocket）もバックグラウンド中に切断される可能性がある。WebSocketのreconnect処理がsetIntervalの再設定と独立して動作するため、両者の復帰タイミングのずれについて留意する」を追記する。",
+        "evidence": "WorktreeList.tsx L110-112: const { status: wsStatus } = useWebSocket({ onMessage: handleWebSocketMessage }); L103-106: broadcastメッセージ受信時にfetchWorktrees(true)が呼ばれる。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "主要変更対象。ポーリングuseEffect(L1479-1493)の依存配列にloading/errorが含まれ、visibilitychangeによるstate変更で再実行される。handleRetry(L1434-1442)が復帰フローのベース。fetchCurrentOutput(L1017-1053)のprompt状態遷移がauto-yesに影響。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeList.tsx",
+      "relevance": "副次的変更対象。setInterval(L122-129)はerror/loadingガードなし。WebSocket(L110-112)との復帰タイミング相互作用あり。"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "影響範囲に未記載だが影響を受ける。prompt状態変更時に自動応答を発火。DUPLICATE_PREVENTION_WINDOW_MS(3秒)の保護範囲外で復帰時に誤応答の可能性あり。"
+    },
+    {
+      "file": "src/hooks/useWorktreeUIState.ts",
+      "relevance": "clearError(L270)が存在するが、WorktreeDetailRefactored.tsxのerrorはローカルstateで管理。直接的な変更不要だが2系統のエラー管理に留意。"
+    },
+    {
+      "file": "src/lib/utils.ts",
+      "relevance": "debounce関数(L25-40)が存在するが、visibilitychangeにはthrottleパターンが適切。debounce関数はそのまま活用不可。"
+    },
+    {
+      "file": "src/hooks/useWebSocket.ts",
+      "relevance": "WorktreeList.tsxで利用。バックグラウンド復帰時のWebSocket再接続動作がsetInterval再設定と相互作用する可能性。"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "サーバーサイドのポーリング。setInterval(L725)で動作するが、クライアント側visibilitychangeの影響は受けない。"
+    },
+    {
+      "file": "src/components/external-apps/ExternalAppsManager.tsx",
+      "relevance": "類似のsetIntervalポーリングパターン(L56-57)を持ち、将来的にvisibilitychangeパターンの横展開候補。"
+    },
+    {
+      "file": "src/components/external-apps/ExternalAppStatus.tsx",
+      "relevance": "類似のsetIntervalポーリングパターン(L72-74)を持ち、将来的にvisibilitychangeパターンの横展開候補。"
+    },
+    {
+      "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "relevance": "既存テストファイル。visibilitychangeテストケースの追加先。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトのコーディング規約・ファイル構成・テスト戦略の参照ドキュメント"
+    }
+  ]
+}

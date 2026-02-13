@@ -1,0 +1,71 @@
+{
+  "issue_number": 246,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IC-001",
+        "item": "handleRetryフロー記載の条件分岐未明示",
+        "section_updated": "Section 4-2",
+        "status": "reflected",
+        "details": "フロー記載を条件分岐付きに修正。fetchWorktree成功時のみfetchMessages/fetchCurrentOutputを実行する旨を明示"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IC-002",
+        "item": "lastServerResponseTimestampのuseAutoYes未渡し",
+        "section_updated": "Section 6-2, 6-3, 16(将来検討)",
+        "status": "reflected",
+        "details": "安全性評価表にCurrentOutputResponseインターフェース未定義の注記を追加。Section 6-3の記述を修正。将来検討チェックリストに追加"
+      },
+      {
+        "id": "IC-003",
+        "item": "clearError行番号の指す対象の曖昧さ",
+        "section_updated": "Section 5-2",
+        "status": "reflected",
+        "details": "アクションクリエータL270とreducerハンドリングL118-119の両方を併記"
+      },
+      {
+        "id": "IC-004",
+        "item": "WorktreeList.tsxのerror状態に関する記載不正確",
+        "section_updated": "Section 4-3, 4-4",
+        "status": "reflected",
+        "details": "error状態は発生し得るがポーリング停止に至らない点を正確に記載。比較表と設計根拠を修正"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IC-005",
+        "item": "WorktreeList.tsxのfetchWorktrees二重発火のtimestampガード不要根拠",
+        "section_updated": "Section 4-3",
+        "status": "reflected",
+        "details": "timestampガード不要の設計根拠を追記（軽量GETリクエストかつ冪等性により安全）"
+      },
+      {
+        "id": "IC-006",
+        "item": "initialLoadCompletedRefとvisibilitychange復帰の相互作用",
+        "section_updated": "Section 4-2",
+        "status": "reflected",
+        "details": "handleRetryがinitialLoadCompletedRefをリセットしない旨（意図した動作）を注記"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-246-visibility-recovery-design-policy.md",
+  "sections_updated": [
+    "Section 4-2 (handleRetry直接呼び出しパターン - IC-001, IC-006対応)",
+    "Section 4-3 (WorktreeList.tsxタイマー再設定パターン - IC-004, IC-005対応)",
+    "Section 4-4 (visibilitychangeパターン差異の設計根拠 - IC-004対応)",
+    "Section 5-2 (エラー状態の管理体系 - IC-003対応)",
+    "Section 6-2 (安全性評価 - IC-002対応)",
+    "Section 6-3 (設計判断 - IC-002対応)",
+    "Section 14 (レビュー履歴 - Stage 2追加)",
+    "Section 15 (レビュー指摘事項サマリー - Stage 2追加)",
+    "Section 16 (実装チェックリスト - IC-001, IC-002, IC-004追加)"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}

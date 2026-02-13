@@ -1,0 +1,54 @@
+{
+  "issue_number": 246,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "影響範囲の関連コンポーネントに`src/hooks/useAutoYes.ts`を追加。visibilitychange復帰時のfetchCurrentOutputがprompt状態を更新し、auto-yes hookが自動応答を発火する可能性を記載。DUPLICATE_PREVENTION_WINDOW_MS（3秒）の保護範囲外のリスクを明記。実装タスクにauto-yes hook連動確認タスクを追加。受入条件にauto-yes誤動作防止の条件を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "対策案セクションに「visibilitychangeハンドラとsetIntervalの同時発火について」サブセクションを追加。GETリクエストの冪等性による安全性と不要なAPI負荷の分析を記載。受入条件に「API呼び出しが不必要に重複しないこと」を追加。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "テスト計画を具体化。WorktreeDetailRefactored.test.tsxに追加すべき4つのテストケース（visibilitychange発火時のfetch呼び出し、error状態からの復帰、hidden時のfetch抑制、連続発火時のthrottle動作）を列挙。WorktreeList.tsxのテストファイル不在と対応方針を明記。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "検討事項のdebounce/throttle記載をthrottle/timestampガードに修正。visibilitychangeの即時実行要件にdebounceが不適切である理由を明記。既存debounce関数がこの用途に不向きであることを影響範囲の関連コンポーネントにも反映。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「将来的な横展開候補（本Issueスコープ外）」サブセクションを追加。usePageVisibilityカスタムフック化の検討とExternalAppsManager.tsx/ExternalAppStatus.tsxへの適用可能性を記載。本Issueでは最小限実装で十分と明記。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "WorktreeList.tsxの実装タスクにWebSocket接続（useWebSocket）のreconnect処理とsetInterval再設定の復帰タイミングのずれへの留意事項を追記。変更対象ファイル表にもWebSocket関連の留意を追記。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/246"
+  }
+}

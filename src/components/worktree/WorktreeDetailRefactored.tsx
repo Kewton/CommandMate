@@ -90,6 +90,17 @@ const ACTIVE_POLLING_INTERVAL_MS = 2000;
 /** Polling interval when terminal is idle (ms) */
 const IDLE_POLLING_INTERVAL_MS = 5000;
 
+/**
+ * Throttle interval for visibilitychange recovery (ms).
+ * Prevents excessive API calls when the page rapidly transitions between
+ * visible and hidden states.
+ * Same value as IDLE_POLLING_INTERVAL_MS but semantically independent:
+ * - IDLE_POLLING_INTERVAL_MS: steady-state polling frequency
+ * - RECOVERY_THROTTLE_MS: visibilitychange burst prevention threshold
+ * (Issue #246, SF-001)
+ */
+const RECOVERY_THROTTLE_MS = 5000;
+
 /** Default worktree name when not loaded */
 const DEFAULT_WORKTREE_NAME = 'Unknown';
 
@@ -1442,6 +1453,56 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   }, [fetchWorktree, fetchMessages, fetchCurrentOutput]);
 
   // ========================================================================
+  // Visibility Change Recovery (Issue #246)
+  // ========================================================================
+
+  /**
+   * Timestamp of the last visibilitychange recovery to prevent rapid re-fetches.
+   * Used as a throttle guard: if less than RECOVERY_THROTTLE_MS has elapsed
+   * since the last recovery, the handler skips execution.
+   */
+  const lastRecoveryTimestampRef = useRef<number>(0);
+
+  /**
+   * Handle page visibility change for background recovery.
+   * When the page becomes visible again (e.g., smartphone foreground restoration),
+   * calls handleRetry() to reset errors and re-fetch data.
+   *
+   * Design rationale (Issue #246):
+   *
+   * [MF-001] DRY: handleRetry() is called directly rather than re-implementing
+   *   the same error-reset + data-fetch flow. This ensures any future changes
+   *   to the retry logic automatically apply to visibility recovery.
+   *
+   * [IA-001] Side-effect: handleRetry() calls setLoading(true), which causes
+   *   the polling useEffect (line ~1538) to run its cleanup (clearInterval).
+   *   When handleRetry() finishes and calls setLoading(false), the polling
+   *   useEffect re-runs and creates a new setInterval. This means there is
+   *   a brief gap where no polling occurs (up to IDLE_POLLING_INTERVAL_MS).
+   *   This is acceptable because visibilitychange itself fetches fresh data.
+   *
+   * [IA-002] Overlap: When the page becomes visible, up to 3 data-fetch
+   *   sources may fire concurrently:
+   *   1. This visibilitychange handler (handleRetry)
+   *   2. The setInterval polling timer (if it fires during the same tick)
+   *   3. WebSocket reconnection triggering a broadcast-based fetch
+   *   All fetches are idempotent GET requests, so concurrent execution is
+   *   safe -- it may cause redundant network calls but no data corruption.
+   */
+  const handleVisibilityChange = useCallback(() => {
+    if (document.visibilityState !== 'visible') return;
+
+    const now = Date.now();
+    if (now - lastRecoveryTimestampRef.current < RECOVERY_THROTTLE_MS) {
+      return;
+    }
+    lastRecoveryTimestampRef.current = now;
+
+    // [MF-001] Call handleRetry() directly (DRY principle)
+    handleRetry();
+  }, [handleRetry]);
+
+  // ========================================================================
   // Effects
   // ========================================================================
 
@@ -1474,6 +1535,24 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       isMounted = false;
     };
   }, [fetchWorktree, fetchMessages, fetchCurrentOutput]);
+
+  /**
+   * Register visibilitychange event listener for background recovery (Issue #246).
+   * When the page becomes visible, triggers handleRetry() to re-fetch all data.
+   * This handles the case where the browser suspended network requests while
+   * the page was in the background (common on mobile browsers).
+   *
+   * Unlike WorktreeList.tsx (SF-003), this component needs:
+   * - Error state reset (via handleRetry's setError(null))
+   * - Throttle guard (RECOVERY_THROTTLE_MS) because handleRetry triggers
+   *   a loading indicator and setInterval re-creation (IA-001)
+   */
+  useEffect(() => {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [handleVisibilityChange]);
 
   /** Poll for current output and worktree status at adaptive intervals */
   useEffect(() => {

@@ -1,0 +1,154 @@
+{
+  "issue_number": 246,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IA-001",
+        "category": "影響範囲",
+        "title": "handleRetry()呼び出し時のloading=true状態がポーリングuseEffectのガードを再トリガーする副作用",
+        "description": "visibilitychange復帰時にhandleRetry()が呼ばれると、setLoading(true)が実行される。これによりuseEffect(L1479-1493)のreturn cleanup(clearInterval)が実行され、handleRetry完了後にsetLoading(false)でuseEffectが再実行されてsetIntervalが再作成される。設計書Section 2-2のシーケンス図にて「useEffect再実行→setInterval再開」と記載されているが、このuseEffect cleanup→再作成サイクル中にhandleRetry内のfetchCurrentOutput/fetchMessagesとの競合タイミングについて言及がない。handleRetryの非同期処理中にuseEffect cleanupが走りsetIntervalがクリアされるため実害はないが、handleRetry完了直後にsetIntervalが再作成され即座にpollDataが実行されるわけではない(interval待ちが発生する)点を設計書に明記すべき。",
+        "severity": "medium",
+        "recommendation": "設計書Section 4-2またはSection 9-2に、handleRetry()実行中のポーリングuseEffectライフサイクル(cleanup→再作成)の挙動と、handleRetry完了後のsetInterval再開タイミング(次のinterval発火まで待機)を明記すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IA-002",
+        "category": "影響範囲",
+        "title": "WebSocket再接続とvisibilitychangeの同時発火による一時的なAPI集中",
+        "description": "useWebSocket.tsのauto-reconnect(L136-141)はoncloseイベント後にreconnectDelay後にconnect()を再実行する。バックグラウンド中にWebSocket接続が切断されると、復帰時に(1)visibilitychangeハンドラのhandleRetry(3 API calls)、(2)WebSocket再接続成功後のbroadcastによるfetchWorktrees(true)、(3)setIntervalの通常ポーリング(3 API calls)が同時または近接して発火する可能性がある。設計書Section 9-2ではsetIntervalとvisibilitychangeの競合のみ記載しているが、WebSocket再接続との三者間競合も考慮すべき。",
+        "severity": "low",
+        "recommendation": "設計書Section 9-2にWebSocket再接続イベントとの三者間競合シナリオを追記し、全てがGET冪等であるため安全である旨を明記すること。影響は最大9回程度のGETリクエストの一時集中であり、実害は軽微。"
+      },
+      {
+        "id": "IA-003",
+        "category": "影響範囲",
+        "title": "ExternalAppsManager/ExternalAppStatusのvisibilitychange未対応がスコープ外であることの明示不足",
+        "description": "ExternalAppsManager.tsx(setInterval 60秒)とExternalAppStatus.tsx(setInterval可変)も同様にバックグラウンド復帰時のタイマー精度低下の影響を受ける可能性がある。設計書Section 1-3のスコープ外にWorktreeDetailRefactoredとWorklistList以外のコンポーネントが含まれないことが記載されているが、ExternalApps系コンポーネントのリスク評価が行われていない。",
+        "severity": "low",
+        "recommendation": "設計書Section 1-3のスコープ外セクションに、ExternalAppsManager/ExternalAppStatusについてはポーリング間隔が60秒以上と長く、バックグラウンド復帰時のタイマー精度低下の影響が軽微(次のinterval発火で自然回復)であるため対象外とする旨を記載すること。"
+      },
+      {
+        "id": "IA-004",
+        "category": "影響範囲",
+        "title": "loading=true中のUI表示がvisibilitychange復帰時のUXに与える影響",
+        "description": "handleRetry()はsetLoading(true)を実行するため、WorktreeDetailRefactored.tsx L1530-1532のif(loading)ガードによりLoadingIndicator全画面表示に切り替わる。正常動作中(error=null)からのvisibilitychange復帰でも、API応答まで一瞬ローディングスピナーが表示される。設計書Section 4-2のC-003注意事項に記載はあるが、具体的なUX影響(画面フラッシュ、コンテンツ消失の一瞬)の説明が不足している。",
+        "severity": "low",
+        "recommendation": "設計書Section 4-2のC-003関連注意事項に、loading=true時にコンポーネント全体がLoadingIndicatorに置き換わるため、正常状態からの復帰時にターミナル出力やメッセージ履歴が一瞬消えて再表示される挙動になる点を明記すること。将来的にはerror状態の有無でhandleRetry/サイレント更新を分岐する改善が有効。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IA-005",
+        "category": "影響範囲",
+        "title": "AutoYesToggle.tsxのsetInterval(1000ms)はvisibilitychange復帰時に残り時間表示がズレる可能性",
+        "description": "AutoYesToggle.tsx L64のsetInterval(updateTime, 1000)はauto-yesの残り時間を表示する。バックグラウンド中にタイマー精度が低下すると、復帰時に残り時間表示が実際の値とズレる可能性がある。ただし、表示用途のみであり機能的影響はない。",
+        "severity": "info",
+        "recommendation": "本Issueのスコープ外として記録のみ。残り時間表示のズレは次のsetInterval発火(1秒以内)で自動修正される。"
+      },
+      {
+        "id": "IA-006",
+        "category": "影響範囲",
+        "title": "handleRetry依存配列変更時のvisibilitychangeハンドラへの波及",
+        "description": "handleRetryのuseCallback依存配列は[fetchWorktree, fetchMessages, fetchCurrentOutput]であり、visibilitychangeハンドラのuseCallback依存配列にhandleRetryを含める設計。fetchWorktree/fetchMessages/fetchCurrentOutputのいずれかが再生成されるとhandleRetryも再生成され、visibilitychangeハンドラも再生成される。これによりuseEffectのcleanupで旧リスナーが除去され新リスナーが登録される。React 18のStrictModeではdevelopmentモードで二重マウントが発生するため、リスナーの登録/解除が正しく動作することを確認すべき。",
+        "severity": "info",
+        "recommendation": "テストケースでReact StrictMode下でのvisibilitychangeリスナー二重登録/解除が正常に動作することを確認するテストケースの追加を検討。useEffect cleanupパターン自体は既存コード(L1478-1493)と同一のため、新たなリスクは低い。"
+      },
+      {
+        "id": "IA-007",
+        "category": "影響範囲",
+        "title": "fetchCurrentOutput内のstate.prompt.visible参照によるuseCallback再生成チェーン",
+        "description": "fetchCurrentOutput(L1017)はuseCallback依存配列に[worktreeId, actions, state.prompt.visible]を含む。prompt状態が変化するたびにfetchCurrentOutputが再生成され、handleRetryも再生成され、visibilitychangeハンドラも再生成される。これは既存のポーリングuseEffect(L1478-1493)と同じ問題を共有しており、本Issue固有の新規リスクではないが、visibilitychangeリスナーの頻繁な再登録/解除が発生する点を認識しておくべき。",
+        "severity": "info",
+        "recommendation": "将来的にhandleRetryを安定した参照にするためにuseRefパターンの採用を検討可能。ただし既存コードと同じパターンを踏襲しているため、本Issueでは対応不要。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change": "visibilitychangeイベントリスナー追加、RECOVERY_THROTTLE_MS定数追加、lastRecoveryTimestampRef追加、handleVisibilityChange useCallback追加、useEffect追加",
+        "risk": "low",
+        "side_effects": [
+          "handleRetry()呼び出しによるloading状態遷移がポーリングuseEffectのcleanup/再作成を誘発",
+          "正常状態からの復帰時にLoadingIndicator全画面表示が一瞬発生",
+          "prompt状態更新によるuseAutoYes自動応答発火の可能性(既存保護機構で対処済み)"
+        ]
+      },
+      {
+        "file": "src/components/worktree/WorktreeList.tsx",
+        "change": "visibilitychangeイベントリスナー追加、useEffect追加",
+        "risk": "low",
+        "side_effects": [
+          "fetchWorktrees(true)とsetInterval/WebSocket broadcastの同時発火による一時的なAPI集中",
+          "error状態が発生していてもsetIntervalが継続するため、復帰時のfetchWorktrees(true)で二重更新が発生し得る"
+        ]
+      },
+      {
+        "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "change": "visibilitychangeテストケース4件追加",
+        "risk": "low",
+        "side_effects": []
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "impact": "visibilitychange復帰時のfetchCurrentOutputがprompt状態を更新し、auto-yes有効時に自動応答が発火する可能性。DUPLICATE_PREVENTION_WINDOW_MS(3秒)とサーバー側保護により安全",
+        "risk": "low"
+      },
+      {
+        "file": "src/hooks/useWorktreeUIState.ts",
+        "impact": "handleRetry→fetchCurrentOutput経由でactions.showPrompt/clearPrompt等が呼ばれる。既存フローと同一であり新規リスクなし",
+        "risk": "low"
+      },
+      {
+        "file": "src/hooks/useWebSocket.ts",
+        "impact": "バックグラウンド中のWebSocket切断→復帰時のauto-reconnect→broadcast→fetchWorktrees(true)がvisibilitychangeハンドラと同時発火する可能性。GET冪等のため安全",
+        "risk": "low"
+      },
+      {
+        "file": "src/components/external-apps/ExternalAppsManager.tsx",
+        "impact": "スコープ外。60秒ポーリングのため影響軽微",
+        "risk": "info"
+      },
+      {
+        "file": "src/components/external-apps/ExternalAppStatus.tsx",
+        "impact": "スコープ外。ヘルスチェックポーリングのため影響軽微",
+        "risk": "info"
+      },
+      {
+        "file": "src/components/worktree/AutoYesToggle.tsx",
+        "impact": "スコープ外。残り時間表示のみ。タイマー精度低下による表示ズレは1秒以内に自動修正",
+        "risk": "info"
+      }
+    ],
+    "breaking_changes": [],
+    "deployment_impact": "なし。フロントエンドのみの変更であり、API/DB/バックエンドへの変更は不要。ビルド・デプロイの追加手順も不要"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-246-visibility-recovery-design-policy.md",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/WorktreeList.tsx",
+    "src/hooks/useAutoYes.ts",
+    "src/hooks/useWorktreeUIState.ts",
+    "src/hooks/useWebSocket.ts",
+    "src/components/external-apps/ExternalAppsManager.tsx",
+    "src/components/external-apps/ExternalAppStatus.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/lib/api-client.ts",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}

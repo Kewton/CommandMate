@@ -1,0 +1,234 @@
+{
+  "issue_number": 246,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-02-13",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 2
+  },
+  "previous_stages_verification": {
+    "stage3_findings": {
+      "MF-1": {
+        "original_issue": "useAutoYes hookがvisibilitychange復帰時にauto-yes誤動作を起こす可能性が影響範囲に未記載",
+        "status": "resolved",
+        "verification": "影響範囲の関連コンポーネントにsrc/hooks/useAutoYes.tsが追加されている。DUPLICATE_PREVENTION_WINDOW_MS（3秒）の保護範囲外のリスクが明記されている。実装タスクに「visibilitychange復帰時のauto-yes hook連動を確認する」が追加されている。受入条件に「visibilitychange復帰時のfetchCurrentOutputによるprompt状態更新がauto-yes hookの誤動作を引き起こさないこと」が追加されている。コードベース照合: useAutoYes.ts L57-93のuseEffectはisPromptWaiting/promptDataの変更で発火し、promptKeyベースの重複防止とDUPLICATE_PREVENTION_WINDOW_MSの時間ベース防止を持つ。Issueの分析と完全に一致している。"
+      },
+      "SF-1": {
+        "original_issue": "visibilitychangeハンドラとsetIntervalの同時発火による競合状態分析の欠如",
+        "status": "resolved",
+        "verification": "対策案セクションに「visibilitychangeハンドラとsetIntervalの同時発火について」サブセクションが追加されている。GETリクエストの冪等性、React state更新のバッチングによる同時発火窓、setInterval一時停止 or 冪等性許容の2つの対処オプションが分析されている。受入条件に「visibilitychange復帰時にAPI呼び出しが不必要に重複しないこと（throttle/timestampガードが機能していること）」が追加されている。"
+      },
+      "SF-2": {
+        "original_issue": "テスト範囲の具体的なテストケース列挙がない",
+        "status": "resolved",
+        "verification": "実装タスクのテスト項目に4つの具体的テストケース（visibilitychange発火時fetch、error復帰、hidden時のfetch抑制、throttleガード動作）が列挙されている。WorktreeList.tsxのテストファイル不在と「手動テストで代替するか、新規テストファイル作成の方針を実装時に判断する」という対応方針が明記されている。テスト手法（document.dispatchEvent + Object.defineProperty）も記載されている。"
+      },
+      "SF-3": {
+        "original_issue": "debounce関数がvisibilitychangeに不向きであることが未記載",
+        "status": "resolved",
+        "verification": "検討事項がthrottle/timestampガードに修正されている。「debounceパターン（最後の呼び出しからN ms後に実行）ではなく、throttleまたはtimestampベースのガード（例: 前回取得から5秒以内は再取得をスキップ）が適切」と明記されている。影響範囲の関連コンポーネントにもsrc/lib/utils.tsの既存debounce関数が不向きである旨が記載されている。"
+      },
+      "NTH-1": {
+        "original_issue": "将来的な横展開候補（usePageVisibilityカスタムフック化）の未記載",
+        "status": "resolved",
+        "verification": "「将来的な横展開候補（本Issueスコープ外）」セクションが追加されている。ExternalAppsManager.tsx（L56-57）とExternalAppStatus.tsx（L72-74）が横展開候補として列挙されている。本Issueでは最小限実装で十分と明記されている。"
+      },
+      "NTH-2": {
+        "original_issue": "WorktreeList.tsxのWebSocket再接続とsetInterval再設定の相互作用が未分析",
+        "status": "resolved",
+        "verification": "実装タスクと変更対象ファイル表にWebSocket接続（useWebSocket）のreconnect処理との復帰タイミングのずれへの留意が追記されている。コードベース照合: useWebSocket.ts L132-141のautoReconnect機能（ws.oncloseでreconnectDelay=3000ms後にconnect()を再実行）がvisibilitychange復帰時にも独立して動作する仕様が確認できる。"
+      }
+    },
+    "stage5_findings": {
+      "NTH-1": {
+        "original_issue": "将来的な横展開候補セクションの「WorktreeList.tx」拡張子脱字",
+        "status": "resolved",
+        "verification": "現在のIssue本文では「WorktreeDetailRefactored.tsx / WorktreeList.txへの直接追加」ではなく「WorktreeDetailRefactored.tsx / WorktreeList.tsxへの直接追加」と正しく記載されている。"
+      },
+      "NTH-2": {
+        "original_issue": "レビュー履歴のStage番号トレーサビリティ不足",
+        "status": "resolved",
+        "verification": "レビュー履歴の各エントリにStage番号（Stage 2 / Stage 4 / Stage 6）が追記されており、どのステージで何が適用されたかが追跡可能になっている。"
+      }
+    },
+    "stage6_applied_changes": {
+      "NTH-1_typo_fix": {
+        "status": "verified_in_issue",
+        "verification": "Issue本文で「WorktreeList.tsx」と正しく記載されていることを確認。"
+      },
+      "NTH-2_stage_numbers": {
+        "status": "verified_in_issue",
+        "verification": "レビュー履歴に「（Stage 2）」「（Stage 4）」「（Stage 6）」が付記されていることを確認。"
+      }
+    }
+  },
+  "impact_scope_completeness": {
+    "affected_files_coverage": {
+      "status": "complete",
+      "details": [
+        {
+          "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "listed_in_issue": true,
+          "assessment": "主要変更対象として正しく記載。visibilitychangeリスナー追加、エラーリセット、データ再取得ロジックの変更内容が具体的。"
+        },
+        {
+          "file": "src/components/worktree/WorktreeList.tsx",
+          "listed_in_issue": true,
+          "assessment": "副次的変更対象として正しく記載。setInterval再設定対応とWebSocket再接続との相互作用が留意事項として含まれている。"
+        },
+        {
+          "file": "src/hooks/useAutoYes.ts",
+          "listed_in_issue": true,
+          "assessment": "関連コンポーネントとして正しく記載。visibilitychange復帰時のprompt状態更新によるauto-yes発火リスクが分析されている。"
+        },
+        {
+          "file": "src/hooks/useWorktreeUIState.ts",
+          "listed_in_issue": true,
+          "assessment": "関連コンポーネントとして正しく記載。clearErrorアクションとローカルstateの使い分けが明確化されている。"
+        },
+        {
+          "file": "src/lib/utils.ts",
+          "listed_in_issue": true,
+          "assessment": "関連コンポーネントとして正しく記載。既存debounce関数がこの用途に不向きである旨が明記されている。"
+        },
+        {
+          "file": "src/app/api/worktrees/[id]/route.ts",
+          "listed_in_issue": true,
+          "assessment": "関連APIとして記載。変更不要だが影響範囲として認識されている。"
+        },
+        {
+          "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+          "listed_in_issue": true,
+          "assessment": "関連APIとして記載。変更不要だが影響範囲として認識されている。"
+        },
+        {
+          "file": "src/app/api/worktrees/[id]/messages/route.ts",
+          "listed_in_issue": true,
+          "assessment": "関連APIとして記載。変更不要だが影響範囲として認識されている。"
+        },
+        {
+          "file": "src/hooks/useWebSocket.ts",
+          "listed_in_issue": false,
+          "assessment": "影響範囲の関連コンポーネントには未記載だが、WorktreeList.tsxの実装タスク内でWebSocket再接続との相互作用として言及されている。autoReconnect機能（ws.oncloseで3秒後にconnect()再実行）がvisibilitychange復帰時に独立動作するため、直接の変更は不要。実装タスク内の言及で十分。"
+        },
+        {
+          "file": "src/components/external-apps/ExternalAppsManager.tsx",
+          "listed_in_issue": true,
+          "assessment": "将来的な横展開候補として正しく記載。本Issueスコープ外として明記されている。"
+        },
+        {
+          "file": "src/components/external-apps/ExternalAppStatus.tsx",
+          "listed_in_issue": true,
+          "assessment": "将来的な横展開候補として正しく記載。本Issueスコープ外として明記されている。"
+        },
+        {
+          "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+          "listed_in_issue": true,
+          "assessment": "テスト追加先として正しく記載。4つの具体的テストケースが列挙されている。"
+        }
+      ]
+    },
+    "dependency_analysis": {
+      "status": "complete",
+      "details": [
+        "fetchWorktree/fetchMessages/fetchCurrentOutput -> 各API route: GETリクエストの冪等性が分析済み",
+        "useAutoYes hook -> state.prompt.visible: visibilitychange復帰時の連動リスクが分析済み",
+        "useWebSocket -> WebSocket autoReconnect: setInterval再設定との独立動作が留意事項として記載済み",
+        "useWorktreeUIState clearError vs ローカルsetError: 使い分け方針が明確化済み",
+        "src/lib/utils.ts debounce: 不向きであることが明記済み。代替としてthrottle/timestampガードが提案済み"
+      ]
+    },
+    "breaking_changes": {
+      "status": "none_identified",
+      "details": "visibilitychangeリスナーの追加はaddEventListenerによる純粋な追加であり、既存のsetIntervalポーリング動作には変更を加えない。受入条件に「setIntervalのタイミングやインターバル値が変更されていない」が明記されている。破壊的変更は発生しない。"
+    },
+    "test_scope": {
+      "status": "adequate",
+      "details": [
+        "WorktreeDetailRefactored.test.tsxへの4つのテストケース追加が計画されている",
+        "テスト手法（document.dispatchEvent + Object.defineProperty）が具体的に記載されている",
+        "WorktreeList.tsxのテストファイル不在に対する方針（手動テスト代替 or 新規作成を実装時判断）が記載されている",
+        "スマートフォン実機での動作確認が実装タスクに含まれている"
+      ]
+    },
+    "migration_considerations": {
+      "status": "not_applicable",
+      "details": "本Issueはバグ修正であり、ユーザー向けのAPI変更やデータ構造変更を伴わない。既存ユーザーへの移行パスは不要。"
+    },
+    "documentation_updates": {
+      "status": "not_required",
+      "details": "本Issueはクライアントサイドのバグ修正であり、ユーザー向けドキュメントの更新は不要。CLAUDE.mdへの新モジュール追記も不要（新しいファイル追加ではなく既存ファイルの修正のため）。"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響ファイル",
+        "issue": "useAutoSave hookがMemoCardコンポーネントで使用されており（MemoCard.tsx L71, L83）、内部的にsetTimeout（debounce）を使用している。バックグラウンド遷移時にメモ編集中の場合、useAutoSaveのdebounce timerがブラウザによって一時停止される可能性がある。ただし、useAutoSaveにはsaveNow関数（onBlurトリガー）とmountedRefガードがあるため、データ喪失の実害は極めて低い。また本Issueのスコープ（WorktreeDetailRefactored.tsx / WorktreeList.tsx）からは外れている。",
+        "location": "## 影響範囲 - 関連コンポーネント セクション",
+        "recommendation": "影響範囲分析の完全性として認識しておく程度でよい。Issueへの追記は不要。useAutoSaveのtimerはdebounceMs=300msと短く、復帰後に即座に再開されるため、ユーザーが認識可能な問題は発生しない。将来的にusePageVisibilityカスタムフックを導入する際に、useAutoSaveのsaveNow()を復帰時に呼び出すことを検討してもよいが、本Issueのスコープ外。",
+        "evidence": "useAutoSave.ts L190-192: timerRef.current = setTimeout(() => void executeSave(valueRef.current), debounceMs); MemoCard.tsx L71-88: useAutoSaveをtitleとcontentに使用。debounceMs未指定のためデフォルト300ms。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "依存関係",
+        "issue": "useWebSocket hookのautoReconnect機能（useWebSocket.ts L136-141: ws.oncloseでreconnectDelay=3000ms後にconnect()を再実行）は、バックグラウンド中にWebSocket接続が切断された場合、復帰時にautoReconnectのsetTimeout（reconnectDelay=3000ms）がブラウザのバックグラウンドタイマー制約を受ける可能性がある。Issueでは「WebSocketのreconnect処理がsetIntervalの再設定と独立して動作するため、両者の復帰タイミングのずれについて留意する」と記載されているが、autoReconnectのsetTimeout自体がバックグラウンドで一時停止される可能性については言及されていない。ただし、WebSocket接続が復帰すればonMessageでfetchWorktrees(true)がトリガーされるため、最終的にはデータ同期が回復する。影響は軽微。",
+        "location": "## 実装タスク セクション - WorktreeList.tsx関連タスク",
+        "recommendation": "現在の記載で実用上は十分であるが、精度を上げるなら「WebSocketのautoReconnectに使用されているsetTimeout（reconnectDelay=3000ms）もバックグラウンド中はブラウザにより遅延される可能性があるが、フォアグラウンド復帰後に再接続が完了すればbroadcastメッセージによるデータ同期が回復する」と補足できる。ただし、この詳細は実装フェーズの設計判断に委ねてよい。",
+        "evidence": "useWebSocket.ts L132-141: ws.onclose内でautoReconnect=trueの場合にsetTimeout(connect, reconnectDelay=3000)が実行される。L103-106のonMessage経由でWorktreeList.tsxのfetchWorktrees(true)がトリガーされる。"
+      }
+    ]
+  },
+  "overall_assessment": {
+    "impact_scope_quality": "high",
+    "details": "Stage 3の全指摘事項（MF-1, SF-1~3, NTH-1~2）が適切に反映されており、Stage 5のNice to Have 2件も反映済み。影響範囲の網羅性は高く、変更対象ファイル、関連コンポーネント、依存関係、破壊的変更の有無、テスト範囲、将来的な横展開候補が体系的に整理されている。受入条件と実装タスクの整合性も取れている。新たなMust Fix/Should Fix事項は発見されなかった。",
+    "remaining_risks": [
+      "useAutoYes hookのDUPLICATE_PREVENTION_WINDOW_MS（3秒）がバックグラウンド長期滞在後の復帰で保護範囲外になるリスクは認識・記載済み。実装時の判断に委ねられている。",
+      "WebSocket autoReconnectのsetTimeoutがバックグラウンドで遅延するリスクは軽微であり、最終的にはbroadcastメッセージで同期回復する。",
+      "実装フェーズでthrottle/timestampガードの具体的な閾値（例: 5秒）を決定する必要がある。Issueでは「例: 前回取得から5秒以内は再取得をスキップ」と参考値が示されているが、最終決定は実装者に委ねられている。"
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "主要変更対象。全行参照がコード照合で正確であることをStage 5で確認済み。Stage 7でも再確認: L939(setError), L984-998(fetchWorktree), L1002-1013(fetchMessages), L1017-1053(fetchCurrentOutput), L1039-1043(prompt state transition), L1425-1431(useAutoYes), L1434-1442(handleRetry), L1479-1493(polling useEffect), L1535-1537(error display) -- 全て正確。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeList.tsx",
+      "relevance": "副次的変更対象。L103-106(broadcast handler), L110-112(useWebSocket), L122-129(setInterval) -- 全て正確。"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "影響範囲。L19(DUPLICATE_PREVENTION_WINDOW_MS=3000, IssueではL18と記載だがL19が正確 -- 1行オフセット、軽微), L57-93(useEffect with isPromptWaiting/promptData依存) -- 動作分析は正確。"
+    },
+    {
+      "file": "src/hooks/useWebSocket.ts",
+      "relevance": "間接的影響。L132-141(autoReconnect with setTimeout(connect, reconnectDelay=3000)), L110-116(ws.onopen re-subscribe) -- WorktreeList.tsxとの相互作用分析の裏付け。"
+    },
+    {
+      "file": "src/hooks/useAutoSave.ts",
+      "relevance": "軽微な関連。L190-192(setTimeout debounce) -- バックグラウンド中のtimer一時停止の可能性があるが、debounceMs=300msと短く実害なし。本Issueスコープ外。"
+    },
+    {
+      "file": "src/hooks/useWorktreeUIState.ts",
+      "relevance": "関連コンポーネント。L118(CLEAR_ERROR), L200(clearError interface), L270(clearError dispatch) -- ローカルstateとの使い分けが明確化済み。"
+    },
+    {
+      "file": "src/lib/utils.ts",
+      "relevance": "debounce関数(L25-40) -- visibilitychangeに不向きであることが明記済み。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトのコーディング規約・ファイル構成の参照ドキュメント"
+    }
+  ]
+}

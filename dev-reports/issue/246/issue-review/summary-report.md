@@ -1,0 +1,195 @@
+# Issue #246 マルチステージレビュー完了報告
+
+## レビュー日時
+- 開始: 2026-02-13
+- 完了: 2026-02-13
+
+## Issue情報
+- **番号**: #246
+- **タイトル**: スマホにて再開時Error loading worktreeとなる
+- **URL**: https://github.com/Kewton/CommandMate/issues/246
+
+---
+
+## 仮説検証結果（Phase 0.5）
+
+| # | 仮説/主張 | 判定 |
+|---|----------|------|
+| 1 | `visibilitychange`イベントリスナーの欠如 | ✅ Confirmed |
+| 2 | ポーリングタイマーの停止 | ⚠️ Partially Confirmed |
+| 3 | エラー状態からの自動復帰なし | ✅ Confirmed |
+| 4 | 初期化ガードの影響 | ✅ Confirmed |
+
+**結果**: すべての仮説が確認され、根本原因分析は正確であることが検証されました。
+
+---
+
+## ステージ別結果
+
+| Stage | レビュー種別 | 指摘数 | 対応数 | ステータス |
+|-------|------------|-------|-------|----------|
+| 1 | 通常レビュー（1回目） | 7 (MF:0, SF:4, NTH:3) | - | ✅ |
+| 2 | 指摘事項反映（1回目） | - | 7/7 | ✅ |
+| 3 | 影響範囲レビュー（1回目） | 6 (MF:1, SF:3, NTH:2) | - | ✅ |
+| 4 | 指摘事項反映（1回目） | - | 6/6 | ✅ |
+| 5 | 通常レビュー（2回目） | 2 (MF:0, SF:0, NTH:2) | - | ✅ |
+| 6 | 指摘事項反映（2回目） | - | 2/2 | ✅ |
+| 7 | 影響範囲レビュー（2回目） | 2 (MF:0, SF:0, NTH:2) | - | ✅ |
+| 8 | 指摘事項反映（2回目） | - | 0/2 (スキップ) | ✅ |
+
+---
+
+## 統計
+
+- **総指摘数**: 17件
+  - Must Fix: 1件
+  - Should Fix: 7件
+  - Nice to Have: 9件
+- **対応完了**: 15件
+- **スキップ**: 2件（影響軽微のため）
+
+---
+
+## 主な改善点
+
+### 1回目イテレーション（Stage 1-4）
+
+#### Stage 1-2（通常レビュー）で追加された内容
+1. **WorktreeList.tsxとWorktreeDetailRefactored.tsxの問題の区別**
+   - WorktreeList.tsxは「タイマー再設定」が主な問題
+   - WorktreeDetailRefactored.tsxは「エラー状態からの自動復帰」が問題
+
+2. **受入基準の具体化**
+   - visibilitychangeとsetIntervalの同時発火に関する具体的な基準を追加
+   - setIntervalのタイミングやインターバル値が変更されていないことを確認
+
+3. **エラーリセットの詳細仕様**
+   - 5ステップのフローを明記（setError(null) → setLoading(true) → fetch → エラー時再設定 → setLoading(false)）
+   - handleRetry関数（L1434-1442）を参考にした仕様
+
+4. **エラーハンドリングの非対称性のドキュメント化**
+   - fetchWorktreeのみがsetError()を呼ぶ点を明記
+   - リトライ戦略の検討事項を追加
+
+5. **テスト戦略の具体化**
+   - Vitestでdocument.dispatchEventをモックする方法を明記
+   - Object.definePropertyでvisibilityStateを制御する方法を追加
+
+6. **debounce/throttleの明確化**
+   - debounceではなくthrottleまたはtimestampベースのガードが適切と明記
+   - 既存のdebounce関数（src/lib/utils.ts）は不適切と注記
+
+#### Stage 3-4（影響範囲レビュー）で追加された内容
+7. **useAutoYesフックの影響を追加（Must Fix）**
+   - visibilitychange復帰時のfetchCurrentOutputがprompt状態を更新する可能性
+   - auto-yes hookが自動応答を発火するリスク
+   - DUPLICATE_PREVENTION_WINDOW_MS（3秒）の保護範囲の制限
+
+8. **setInterval同時発火の分析**
+   - visibilitychangeハンドラとsetIntervalの競合状態の窓を分析
+   - fetchの冪等性により同時発火しても安全だが、不要なAPI負荷が発生する点を明記
+
+9. **テスト計画の具体化**
+   - WorktreeDetailRefactored.test.tsxに追加すべき4つのテストケースを列挙
+   - WorktreeList.tsxにテストファイルがない点を指摘し、方針の明記を推奨
+
+10. **debounce vs throttleの修正**
+    - 「debounce/throttle考慮」を「throttle/timestampガード考慮」に修正
+    - debounce関数が不適切な理由を詳細に説明
+
+11. **カスタムフック抽出の将来展望**
+    - usePageVisibilityフックとして抽出を検討
+    - ExternalAppsManager.tsxやExternalAppStatus.tsxへの横展開候補を記載
+
+12. **WebSocket再接続との相互作用**
+    - WorktreeList.tsxのWebSocket再接続とsetInterval再設定のタイミング相互作用を考慮
+
+### 2回目イテレーション（Stage 5-8）
+
+#### Stage 5-6（通常レビュー）で追加された内容
+13. **タイポ修正**
+    - "WorktreeList.tx" → "WorktreeList.tsx"
+
+14. **レビュー履歴のトレーサビリティ向上**
+    - レビュー履歴にステージ番号（Stage 2, Stage 4, Stage 6, Stage 8）を追加
+
+#### Stage 7-8（影響範囲レビュー）
+15. **追加の影響箇所を確認**
+    - useAutoSaveフック（影響軽微、スキップ）
+    - useWebSocketのautoReconnect（影響軽微、スキップ）
+
+---
+
+## Issue差分サマリー
+
+### 追加されたセクション
+1. **エラーリセット詳細仕様**
+   - visibilitychange検知時の5ステップフローを明記
+
+2. **エラーハンドリングの非対称性に関する補足**
+   - fetchWorktreeのみがsetError()を呼ぶ点を明記
+   - リトライ戦略の検討事項
+
+3. **visibilitychangeハンドラとsetIntervalの同時発火について**
+   - 競合状態の分析
+   - 冪等性による安全性の確認
+   - API負荷の最小化策
+
+4. **検討事項**
+   - throttle/timestampガード考慮
+   - debounce関数の不適切性の注記
+
+5. **将来的な横展開候補**
+   - usePageVisibilityフックとしての抽出を検討
+   - ExternalAppsManager.tsx、ExternalAppStatus.tsxへの適用可能性
+
+6. **レビュー履歴**
+   - 各イテレーション（Stage 2, 4, 6, 8）の対応内容を記録
+
+### 修正されたセクション
+1. **実装タスク**
+   - WorktreeList.tsxとWorktreeDetailRefactored.tsxの対応内容を区別
+   - auto-yes hookの動作検証タスクを追加
+   - テスト計画を具体化（4つのテストケースを明記）
+
+2. **受入条件**
+   - 「既存のポーリング動作に影響がない」を具体化
+   - 「visibilitychange復帰時にAPI呼び出しが不必要に重複しないこと」を追加
+   - 「auto-yes hookの誤発火がないこと」を追加
+
+3. **影響範囲 - 関連コンポーネント**
+   - useAutoYes.tsを追加（Must Fix対応）
+   - useWorktreeUIState.tsとローカルstateのerrorの使い分けを明確化
+   - utils.tsのdebounce関数の不適切性を注記
+
+4. **変更対象ファイル**
+   - WorktreeList.tsxの対応内容を「タイマー再設定」に明確化
+   - WebSocket再接続との相互作用を追記
+
+---
+
+## 次のアクション
+
+- [x] Issueの最終確認
+- [ ] 実装開始（/work-plan または /pm-auto-dev）
+
+---
+
+## 関連ファイル
+
+- 元のIssue: `dev-reports/issue/246/issue-review/original-issue.json`
+- 仮説検証: `dev-reports/issue/246/issue-review/hypothesis-verification.md`
+- レビュー結果:
+  - Stage 1: `dev-reports/issue/246/issue-review/stage1-review-result.json`
+  - Stage 3: `dev-reports/issue/246/issue-review/stage3-review-result.json`
+  - Stage 5: `dev-reports/issue/246/issue-review/stage5-review-result.json`
+  - Stage 7: `dev-reports/issue/246/issue-review/stage7-review-result.json`
+- 反映結果:
+  - Stage 2: `dev-reports/issue/246/issue-review/stage2-apply-result.json`
+  - Stage 4: `dev-reports/issue/246/issue-review/stage4-apply-result.json`
+  - Stage 6: `dev-reports/issue/246/issue-review/stage6-apply-result.json`
+  - Stage 8: `dev-reports/issue/246/issue-review/stage8-apply-result.json`
+
+---
+
+*Generated by multi-stage-issue-review command - 2026-02-13*
