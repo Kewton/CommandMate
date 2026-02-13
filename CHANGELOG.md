@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-02-13
+
+### Added
+- Version update notification feature (Issue #257)
+  - `UpdateNotificationBanner` component for new version alerts
+  - `VersionSection` component for Info screen
+  - `useUpdateCheck` hook and `version-checker.ts` library
+  - `/api/app/update-check` API endpoint
+
+### Fixed
+- Multiple choice prompt detection for wrapped questions (Issue #256)
+  - `isQuestionLikeLine()` now handles multi-line question wrapping (trailing `。` / `.`)
+  - Keyword-based detection for non-question prompts (model selection, etc.)
+  - Added `questionBlockScan()` for multi-line question block analysis
+- Mobile background resume error "Error loading worktree" (Issue #246)
+  - Added `visibilitychange` event listener for automatic data recovery
+  - Error state reset and data re-fetch on page visibility restore
+
 ## [0.2.3] - 2026-02-13
 
 ### Added
@@ -364,7 +382,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.3...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/Kewton/CommandMate/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Kewton/CommandMate/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Kewton/CommandMate/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Kewton/CommandMate/compare/v0.2.0...v0.2.1
