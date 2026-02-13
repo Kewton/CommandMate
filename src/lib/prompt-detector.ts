@@ -255,6 +255,29 @@ const NORMAL_OPTION_PATTERN = /^\s*(\d+)\.\s*(.+)$/;
 const SEPARATOR_LINE_PATTERN = /^[-─]+$/;
 
 /**
+ * Maximum number of lines to scan upward from questionEndIndex
+ * when the questionEndIndex line itself is not a question-like line.
+ *
+ * Design rationale (IC-256-001):
+ * - model selection prompts have 1-2 lines between "Select model" and first option
+ * - multi-line question wrapping typically produces 2-3 continuation lines
+ * - value of 3 covers these cases while minimizing False Positive surface
+ *
+ * [SF-002] Change guidelines:
+ * - Increase this value ONLY if real-world prompts are discovered where
+ *   the question line is more than 3 lines above questionEndIndex
+ * - Before increasing, verify that the new value does not cause
+ *   T11h-T11m False Positive tests to fail
+ * - Consider that larger values increase the False Positive surface area
+ * - If increasing beyond 5, consider whether the detection approach
+ *   itself needs to be redesigned (e.g., pattern-based instead of scan-based)
+ * - Document the specific prompt pattern that necessitated the change
+ *
+ * @see Issue #256: multiple_choice prompt detection improvement
+ */
+const QUESTION_SCAN_RANGE = 3;
+
+/**
  * Creates a "no prompt detected" result.
  * Centralizes the repeated pattern of returning isPrompt: false with trimmed content.
  *
@@ -322,12 +345,83 @@ function isQuestionLikeLine(line: string): boolean {
   // and third-party tool integration.
   if (line.endsWith('?') || line.endsWith('\uff1f')) return true;
 
-  // Pattern 2: Lines ending with colon that contain a selection/input keyword
+  // Pattern 2 (Issue #256): Lines containing question mark anywhere in the line.
+  // Handles multi-line question wrapping where '?' appears mid-line due to
+  // terminal width causing the question text to wrap.
+  //
+  // [SF-001] Scope constraints:
+  // - This pattern is effective without False Positive risk only within
+  //   SEC-001b guard context (questionEndIndex vicinity and upward scan range).
+  // - isQuestionLikeLine() is currently module-private (no export).
+  // - If this function is exported for external use in the future, consider:
+  //   (a) Providing a stricter variant (e.g., isStrictQuestionLikeLine()) without Pattern 2
+  //   (b) Separating Pattern 2 into a SEC-001b-specific helper function
+  //   (c) Adding URL exclusion logic (/[?&]\w+=/.test(line) to exclude)
+  if (line.includes('?') || line.includes('\uff1f')) return true;
+
+  // Pattern 3: Lines ending with colon that contain a selection/input keyword
   // Examples: "Select an option:", "Choose a mode:", "Pick one:"
+  // (Renumbered from Pattern 2 to Pattern 3 due to new Pattern 2 above)
   if (line.endsWith(':')) {
     if (QUESTION_KEYWORD_PATTERN.test(line)) return true;
   }
 
+  // Pattern 4 (Issue #256): Lines containing a selection/input keyword without colon.
+  // Handles model selection prompts like "Select model" where the line does not end
+  // with ':' or '?'. This pattern works in conjunction with Pattern 3 (colon + keyword)
+  // to broaden detection for CLI prompts that use keyword-only headings.
+  //
+  // [SF-001] Same scope constraints as Pattern 2 apply:
+  // - Effective without False Positive risk only within SEC-001b guard context.
+  // - T11h-T11m False Positive lines do not contain QUESTION_KEYWORD_PATTERN keywords.
+  // - If this function is exported, consider restricting Pattern 4 to SEC-001b context.
+  if (QUESTION_KEYWORD_PATTERN.test(line)) return true;
+
+  return false;
+}
+
+/**
+ * Search upward from a given line index to find a question-like line.
+ * Skips empty lines and separator lines (horizontal rules).
+ *
+ * This function is used by SEC-001b guard to find a question line above
+ * questionEndIndex when the questionEndIndex line itself is not a question-like line.
+ * This handles cases where the question text wraps across multiple lines or
+ * where description lines appear between the question and the numbered options.
+ *
+ * @param lines - Array of output lines
+ * @param startIndex - Starting line index (exclusive, searches startIndex-1 and above)
+ * @param scanRange - Maximum number of lines to scan upward (must be >= 0, clamped to MAX_SCAN_RANGE=10)
+ * @param lowerBound - Minimum line index (inclusive, scan will not go below this)
+ * @returns true if a question-like line is found within the scan range
+ *
+ * @see IC-256-002: SEC-001b upward scan implementation
+ * @see SF-003: Function extraction for readability
+ * @see SF-S4-001: scanRange input validation (defensive clamping)
+ *
+ * ReDoS safe: Uses SEPARATOR_LINE_PATTERN (existing ReDoS safe pattern) and
+ * isQuestionLikeLine() (literal character checks + simple alternation pattern).
+ * No new regex patterns introduced. (C-S4-001)
+ */
+function findQuestionLineInRange(
+  lines: string[],
+  startIndex: number,
+  scanRange: number,
+  lowerBound: number
+): boolean {
+  // [SF-S4-001] Defensive input validation: clamp scanRange to safe bounds.
+  // Currently only called with QUESTION_SCAN_RANGE=3, but guards against
+  // future misuse if the function is refactored or exported.
+  const safeScanRange = Math.min(Math.max(scanRange, 0), 10);
+  const scanLimit = Math.max(lowerBound, startIndex - safeScanRange);
+  for (let i = startIndex - 1; i >= scanLimit; i--) {
+    const candidateLine = lines[i]?.trim() ?? '';
+    // Skip empty lines and separator lines (horizontal rules)
+    if (!candidateLine || SEPARATOR_LINE_PATTERN.test(candidateLine)) continue;
+    if (isQuestionLikeLine(candidateLine)) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -481,6 +575,21 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
 
     // Non-option line handling
     if (collectedOptions.length > 0 && line && !SEPARATOR_LINE_PATTERN.test(line)) {
+      // [MF-001 / Issue #256] Check if line is a question-like line BEFORE
+      // continuation check. This preserves isContinuationLine()'s SRP by not
+      // mixing question detection into it. Without this pre-check, indented
+      // question lines (e.g., "  Select model") could be misclassified as
+      // continuation lines by isContinuationLine()'s hasLeadingSpaces check.
+      //
+      // [SF-S4-003] Both this pre-check and SEC-001b upward scan use the same
+      // isQuestionLikeLine() function intentionally (DRY). If a question line is
+      // caught here, SEC-001b upward scan is not needed (questionEndIndex line
+      // itself passes isQuestionLikeLine()).
+      if (isQuestionLikeLine(line)) {
+        questionEndIndex = i;
+        break;
+      }
+
       // Check if this is a continuation line (indented line between options,
       // or path/filename fragments from terminal width wrapping - Issue #181)
       const rawLine = lines[i]; // Original line with indentation preserved
@@ -522,9 +631,18 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
     // SEC-001b: Question line exists but is not actually a question/selection request.
     // Validates that the question line contains a question mark or a selection keyword
     // with colon, distinguishing "Select an option:" from "Recommendations:".
+    //
+    // [Issue #256] Enhanced with upward scan via findQuestionLineInRange() (SF-003).
+    // When questionEndIndex line itself is not a question-like line, scan upward
+    // within QUESTION_SCAN_RANGE to find a question line above it. This handles:
+    // - Multi-line question wrapping where ? is on a line above questionEndIndex
+    // - Model selection prompts where "Select model" is above description lines
     const questionLine = lines[questionEndIndex]?.trim() ?? '';
     if (!isQuestionLikeLine(questionLine)) {
-      return noPromptResult(output);
+      // Upward scan: look for a question-like line above questionEndIndex
+      if (!findQuestionLineInRange(lines, questionEndIndex, QUESTION_SCAN_RANGE, scanStart)) {
+        return noPromptResult(output);
+      }
     }
   }
 
