@@ -1,0 +1,42 @@
+{
+  "issue_number": 257,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-13",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "アップデート時のDB動作テーブルのdb:reset行を修正。「DBファイル削除+再作成」を「開発用DBファイル（db.sqlite）を削除+再作成。グローバルインストール時の本番DB（~/.commandmate/data/cm.db）には影響しない」に変更。データ列も「消失」から「消失（開発DBのみ）」に修正。シナリオ列も「手動実行のみ」から「開発用コマンド、手動実行のみ」に補足追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "semver比較ロジックの実装方針（自作 vs ライブラリ利用）は実装時の判断に委ねる。ユーザー指示によりスキップ。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "同一バージョン通知の再表示制御は初回実装のスコープ外。ユーザー指示によりスキップ。"
+      }
+    ]
+  },
+  "additional_changes": [
+    "Issue冒頭のNote行をStage 5反映に更新",
+    "レビュー履歴セクションにStage 5エントリを追加（SF-1適用、NTH-1/NTH-2スキップ）"
+  ],
+  "summary": {
+    "total_findings": 3,
+    "applied": 1,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/257"
+  }
+}

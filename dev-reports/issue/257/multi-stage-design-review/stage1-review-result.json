@@ -1,0 +1,89 @@
+{
+  "issue_number": 257,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "SRP (Single Responsibility)",
+        "title": "WorktreeDetailRefactored.tsx is already 2085 lines -- adding update notification UI directly further violates SRP",
+        "description": "The design specifies modifying WorktreeDetailRefactored.tsx to add update notification UI inside both InfoModal and MobileInfoContent. This file is already 2085 lines and contains multiple sub-components (InfoModal, MobileInfoContent, MobileContent, etc.). Adding yet another UI concern (update notification) directly into this file worsens the SRP violation. The update notification section should be extracted as a separate component (e.g., UpdateNotificationBanner.tsx) that is composed into InfoModal and MobileInfoContent.",
+        "recommendation": "Create a dedicated component src/components/worktree/UpdateNotificationBanner.tsx that encapsulates the update notification UI. Import and render it in the Version section of InfoModal and MobileInfoContent. This keeps the new feature self-contained and testable in isolation."
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "DRY",
+        "title": "Version section with update notification will be duplicated across InfoModal and MobileInfoContent",
+        "description": "Currently, the Version display is duplicated in both InfoModal (line 507-511) and MobileInfoContent (line 775-779) within WorktreeDetailRefactored.tsx. The design plans to add update notification UI below both Version sections, which means the same useUpdateCheck hook call, conditional rendering, and notification markup will be duplicated. This violates DRY.",
+        "recommendation": "Extract a VersionSection component that includes both the version display and the update notification. Render this single component in both InfoModal and MobileInfoContent. This eliminates the current duplication and prevents doubling it."
+      },
+      {
+        "id": "SF-002",
+        "principle": "DRY / KISS",
+        "title": "UpdateCheckResult and UpdateCheckResponse have overlapping fields with subtle nullable differences",
+        "description": "The design defines UpdateCheckResult (returned from version-checker.ts) and UpdateCheckResponse (returned from the API route). These types share most fields (hasUpdate, currentVersion, latestVersion, releaseUrl, releaseName, publishedAt) but UpdateCheckResponse makes some nullable and adds installType/updateCommand. This creates a mapping layer in the API route that is easy to get wrong. The two types are tightly coupled but defined separately.",
+        "recommendation": "Consider making UpdateCheckResponse extend or compose UpdateCheckResult, or use a single type with a clear mapping function. Alternatively, keep only UpdateCheckResponse as the public type and make checkForUpdate() return data in the final response shape directly, since the API route is the only consumer."
+      },
+      {
+        "id": "SF-003",
+        "principle": "Open/Closed Principle",
+        "title": "isNewerVersion function does not handle edge cases in the design specification",
+        "description": "The design shows isNewerVersion parsing versions with v.replace(/^v/, '').split('.').map(Number). If tag_name from GitHub has unexpected formats (e.g., 'v0.3.0-beta', '0.3', 'release-0.3.0'), the function will produce NaN values from Number() or incorrect comparisons from missing segments. While the design mentions regex validation (/^v?\\d+\\.\\d+\\.\\d+$/) in the security section (6-2), this validation is not shown in the isNewerVersion function itself. The function should either do its own validation or be guaranteed to only receive pre-validated input.",
+        "recommendation": "Add explicit validation inside isNewerVersion (or a wrapper) that returns false if either version string does not match /^v?\\d+\\.\\d+\\.\\d+$/. This makes the function defensive without requiring callers to remember to validate. Document this contract in the function's JSDoc."
+      },
+      {
+        "id": "SF-004",
+        "principle": "KISS",
+        "title": "Error-time HTTP 200 response complicates future extensibility and debugging",
+        "description": "The design decision to always return HTTP 200 even for errors (Section 5, Error Handling table) simplifies the client but makes server-side debugging and monitoring harder. If metrics or logging are added later, distinguishing between 'successfully checked, no update' and 'failed to reach GitHub API' becomes impossible without inspecting the response body. The latestVersion: null convention is fragile.",
+        "recommendation": "Consider returning HTTP 200 for business logic responses and a distinct status (e.g., 503) for infrastructure failures, while still having the client treat them gracefully. Alternatively, add a 'status' field to the response (e.g., 'success' | 'degraded') so monitoring tools can distinguish states without changing the HTTP status code approach."
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "YAGNI",
+        "title": "rateLimitResetAt field in VersionCache may be over-engineering",
+        "description": "The design includes a dedicated rateLimitResetAt field in the VersionCache and specific rate limit handling (handleRateLimit/isRateLimited functions). Since the cache TTL is already 1 hour and GitHub's unauthenticated rate limit is 60 req/hour, the cache itself largely prevents hitting the rate limit. The rate limit handling adds complexity for a scenario that the TTL cache already mitigates.",
+        "recommendation": "Evaluate whether the simpler approach of just relying on the 1-hour cache TTL is sufficient. If rate limit handling is kept, it could be simplified to just extending the cache TTL when a 403 is received, rather than maintaining a separate rateLimitResetAt field."
+      },
+      {
+        "id": "C-002",
+        "principle": "Interface Segregation",
+        "title": "i18n keys in worktree namespace may grow beyond worktree scope",
+        "description": "Adding update.* keys to the worktree namespace (which is about session, status, output, and errors for worktree operations) creates a conceptual mismatch. Version update notification is an application-level concern, not a worktree concern. While the design acknowledges this trade-off, as more app-level features are added, the worktree namespace risks becoming a dumping ground.",
+        "recommendation": "For this issue, the worktree namespace approach is acceptable given the small number of keys. However, consider establishing a guideline for when to create a new namespace (e.g., when keys exceed a threshold or when the concept is clearly outside the namespace's domain). An 'app' namespace for application-level messages could be created in a follow-up."
+      },
+      {
+        "id": "C-003",
+        "principle": "Dependency Inversion",
+        "title": "version-checker.ts directly calls fetch to GitHub API without abstraction",
+        "description": "The design has version-checker.ts directly calling fetch('https://api.github.com/...'). If in the future the update source changes (e.g., npm registry, self-hosted), or if testing requires mocking, the direct fetch coupling makes this harder. However, given YAGNI and KISS, adding an abstraction layer now may be premature.",
+        "recommendation": "No action needed now. If the project later needs to support alternative update sources (npm registry check, etc.), extract an interface like UpdateSourceProvider with a fetchLatestVersion() method. The current design's mention of strategy pattern for future extensibility (Section 11) acknowledges this potential."
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-257-version-update-notification-design-policy.md",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/lib/api-client.ts",
+    "src/cli/utils/install-context.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/db-path-resolver.ts",
+    "src/i18n.ts",
+    "locales/en/worktree.json",
+    "next.config.js"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}

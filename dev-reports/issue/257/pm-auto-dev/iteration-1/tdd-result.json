@@ -1,0 +1,73 @@
+{
+  "status": "success",
+  "coverage": 98.01,
+  "unit_tests": {
+    "total": 89,
+    "passed": 89,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/version-checker.ts",
+    "src/app/api/app/update-check/route.ts",
+    "src/lib/api-client.ts",
+    "src/hooks/useUpdateCheck.ts",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/VersionSection.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "locales/en/worktree.json",
+    "locales/ja/worktree.json",
+    "tests/unit/lib/version-checker.test.ts",
+    "tests/unit/api/update-check.test.ts",
+    "tests/unit/hooks/useUpdateCheck.test.ts",
+    "tests/unit/components/worktree/update-notification-banner.test.tsx",
+    "tests/unit/components/worktree/version-section.test.tsx",
+    "tests/unit/components/app-version-display.test.tsx",
+    "CLAUDE.md",
+    "docs/implementation-history.md"
+  ],
+  "commits": [
+    "c64096c: feat(#257): add version update notification feature"
+  ],
+  "existing_tests": {
+    "total": 3196,
+    "passed": 3196,
+    "failed": 0,
+    "skipped": 7
+  },
+  "design_compliance": {
+    "must_fix": {
+      "MF-001": "done - UpdateNotificationBanner.tsx separated from WorktreeDetailRefactored.tsx",
+      "CONS-001": "done - isGlobalInstall() cross-layer reference documented in route.ts",
+      "IMP-001": "done - WorktreeDetailWebSocket.test.tsx has no version refs, app-version-display.test.tsx updated",
+      "SEC-001": "done - GITHUB_API_URL hardcoded as const, SSRF prevention"
+    },
+    "should_fix": {
+      "SF-001": "done - VersionSection.tsx shared between InfoModal and MobileInfoContent",
+      "SF-002": "done - toUpdateCheckResponse() mapping function in route.ts",
+      "SF-003": "done - isNewerVersion() with built-in SEMVER_PATTERN validation",
+      "SF-004": "done - status: 'success' | 'degraded' field in response",
+      "CONS-002": "done - getCurrentVersion() uses process.env.NEXT_PUBLIC_APP_VERSION",
+      "CONS-003": "done - test at tests/unit/api/update-check.test.ts (no app/ subdirectory)",
+      "CONS-004": "done - Content-Type auto-attach documented in api-client.ts JSDoc",
+      "CONS-005": "done - className prop on VersionSection for style absorption",
+      "IMP-SF-001": "done - JSDoc in api-client.ts about fetchApi Content-Type behavior",
+      "IMP-SF-003": "done - eslint-disable-next-line no-var matching auto-yes-manager.ts pattern",
+      "SEC-SF-001": "done - validateReleaseUrl() and sanitizeReleaseName() implemented and tested",
+      "SEC-SF-002": "done - User-Agent header CommandMate/<version> in GitHub API requests",
+      "SEC-SF-003": "done - Cache-Control: no-store, no-cache, must-revalidate headers",
+      "SEC-SF-004": "done - updateCommand fixed to 'npm install -g commandmate@latest'"
+    },
+    "owasp_top10": {
+      "A03_injection": "PASS - semver validation, URL prefix validation, release name sanitization",
+      "A04_insecure_design": "PASS - updateCommand fixed string, silent failure pattern",
+      "A05_security_misconfiguration": "PASS - Cache-Control headers explicitly set",
+      "A07_identification": "PASS - User-Agent header on GitHub API requests",
+      "A10_ssrf": "PASS - GITHUB_API_URL hardcoded as const"
+    }
+  },
+  "message": "TDD implementation complete. 89 new tests across 5 test files with 98.01% statement coverage. All 3196 existing tests pass. ESLint and TypeScript clean. All Must Fix (4) and Should Fix (15) items from design review addressed. OWASP Top 10:2021 compliant."
+}

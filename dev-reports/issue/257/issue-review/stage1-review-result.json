@@ -1,0 +1,144 @@
+{
+  "issue_number": 257,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-13",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "isGlobalInstall()の判定方法の説明が不正確",
+        "location": "## インストール方式別のアップデート方法 > ### 判定方法 テーブル",
+        "recommendation": "「`__dirname`がnode_modules配下か」を「`dirname(__dirname)`がグローバルnode_modulesパターン（`/lib/node_modules/`、`\\\\node_modules\\\\`、`/node_modules/commandmate`）にマッチするか」に修正",
+        "evidence": "src/cli/utils/install-context.ts:39-44 の実際のコードでは `dirname(__dirname)` を使用し、3パターンの文字列マッチ（`/lib/node_modules/`、`\\\\node_modules\\\\`、`/node_modules/commandmate`）で判定している。単に「node_modules配下か」ではなくグローバルインストール固有のパスパターンにマッチするかの判定であり、ローカルのnode_modules配下を誤判定しないための設計。仮説検証レポートでも Partially Confirmed と判定済み。"
+      },
+      {
+        "id": "MF-2",
+        "category": "正確性",
+        "issue": "背景・課題セクションに文章の途切れ（欠損）がある",
+        "location": "## 背景・課題 セクション 2つ目の箇条書き",
+        "recommendation": "途切れた文章を修復する。現在「ユーザーは手動でGitHub ReleasesやnpmをチェックしないとアップデートのVSCodeのように...」となっており、「アップデートの」と「VSCodeのように」の間で文意が断絶している。おそらく「ユーザーは手動でGitHub Releasesやnpmをチェックしないとアップデートの有無を把握できない」で一文が終わり、次に「VSCodeのようにアプリ内で新バージョンの存在を通知することで、ユーザーが常に最新バージョンを利用できるようにしたい」が続く構成と推測される。",
+        "evidence": "Issue本文の原文: 「ユーザーは手動でGitHub ReleasesやnpmをチェックしないとアップデートのVSCodeのようにアプリ内で新バージョンの存在を通知することで、ユーザーが常に最新バージョンを利用できるようにしたい」- 文法的に不自然で、課題の記述と解決策の記述が混在している。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "技術的妥当性",
+        "issue": "isGlobalInstall()のNext.js API Route内での動作保証についての記述が不足",
+        "location": "## インストール方式別のアップデート方法 > 通知UI出し分け セクションの注記",
+        "recommendation": "isGlobalInstall()は`__dirname`ベースの判定であり、Next.js API Route（Server Component）から呼び出す場合、ビルド後のファイル配置（.next/server/）におけるパス構造がCLIモジュール直接実行時と異なる可能性がある。既にdb-path-resolver.tsがsrc/cli/utils/install-context.tsからimportして動作しているため問題はない可能性が高いが、新規APIエンドポイントから参照する場合の動作確認をテスト項目に明記すべき。",
+        "evidence": "src/lib/db-path-resolver.ts:14 で既に `import { isGlobalInstall } from '../cli/utils/install-context'` として利用されているが、API Routeからの呼び出しパスでの__dirname値が期待通りかの検証が受け入れ条件に含まれていない。"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "GitHub APIレート制限対策の具体的な設計が記載されていない",
+        "location": "## 実装タスク セクション「APIレート制限対策（キャッシュ、チェック間隔の制御）」",
+        "recommendation": "GitHub Releases API（未認証）のレート制限は60リクエスト/時間。具体的なキャッシュ戦略を明記すべき。例：(1) サーバーサイドのインメモリキャッシュのTTL（例: 1時間）、(2) クライアント側のチェック頻度制限（例: ページロード時のみ or 1日1回）、(3) キャッシュの永続化要否（サーバー再起動時にリセットで良いか）。",
+        "evidence": "GitHub REST API rate limit for unauthenticated requests: 60 requests per hour per IP. 複数ブラウザタブや頻繁なページリロードによる制限到達リスクがある。"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "GitHub Releases APIのリポジトリURL/エンドポイントが明記されていない",
+        "location": "## 提案する解決策 セクション",
+        "recommendation": "使用するAPIエンドポイントを明記する。例: `GET https://api.github.com/repos/Kewton/CommandMate/releases/latest` 。また、プロキシ環境やファイアウォール環境でapi.github.comにアクセスできない場合のフォールバック動作（静かに失敗）も設計に含めるべき。",
+        "evidence": "package.json の repository.url は `https://github.com/Kewton/CommandMate.git` であり、APIエンドポイントは `https://api.github.com/repos/Kewton/CommandMate/releases/latest` となるが、Issue内で明示されていない。"
+      },
+      {
+        "id": "SF-4",
+        "category": "技術的妥当性",
+        "issue": "CSP（Content Security Policy）でapi.github.comへの接続が許可されていない",
+        "location": "## 影響範囲 > ### 関連コンポーネント セクション",
+        "recommendation": "next.config.js の CSP connect-src ディレクティブに `https://api.github.com` を追加する必要がある。現在の設定は `connect-src 'self' ws: wss:` のみ。ただし、API呼び出しがサーバーサイド（API Route）のみで行われる場合はCSP変更不要。API呼び出しの実行場所（サーバーサイドのみかクライアントサイドも含むか）を明確にし、サーバーサイドのみの場合はnext.config.jsの変更は不要であることを影響範囲に明記すべき。",
+        "evidence": "next.config.js:64 の connect-src は `'self' ws: wss:` のみ。提案されたAPIエンドポイント `/api/app/update-check` がサーバーサイドでGitHub APIを呼び出す設計であれば問題ないが、影響範囲の変更対象ファイルにnext.config.jsが含まれていない点を明確化する必要がある。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "関連Issue #159（バージョン表示機能）への参照リンクがない",
+        "location": "Issue本文全体",
+        "recommendation": "本Issueは Issue #159（Infoタブにアプリバージョンを表示）の機能を拡張するものであり、関連Issueとしてリンクを追加すると背景の理解が容易になる。",
+        "evidence": "Issue #159で実装されたAPP_VERSION_DISPLAY、NEXT_PUBLIC_APP_VERSION環境変数、InfoModal/MobileInfoContentのバージョン表示を本Issueが拡張する。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "明確性",
+        "issue": "semver比較ロジックの実装方針（自作 vs ライブラリ利用）が未記載",
+        "location": "## 実装タスク セクション 1番目のタスク",
+        "recommendation": "セマンティックバージョニングの比較にnpmの`semver`パッケージを利用するか、自前実装するかを明記すると実装方針が明確になる。`semver`パッケージは広く使われており、プレリリースバージョン（例: 1.0.0-beta.1）の比較も正しく処理できる。",
+        "evidence": "現在package-lock.jsonにsemverパッケージはnpm内部依存としてのみ存在。直接依存として追加するか自作するかの判断材料があるとよい。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "通知の非表示・再表示の制御に関する記載がない",
+        "location": "## 受入条件 セクション",
+        "recommendation": "ユーザーが通知を確認した後の挙動について検討を推奨。例: (1) 通知を閉じた後、同じバージョンの通知は再表示しないか、(2) 新しいバージョンがリリースされたら再度表示するか、(3) localStorageに既読バージョンを保存するかなど。初回実装のスコープ外であれば「将来的な検討事項」として記載する方法もある。",
+        "evidence": "受け入れ条件には通知の表示/非表示条件はあるが、同じ通知の再表示制御についての記述がない。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/cli/utils/install-context.ts",
+      "lines": "33-45",
+      "relevance": "isGlobalInstall()の実装 - Issue内の説明と実際のロジックに乖離がある"
+    },
+    {
+      "file": "src/lib/db-path-resolver.ts",
+      "lines": "14, 33, 82",
+      "relevance": "isGlobalInstall()をNext.jsモジュールから参照している既存パターン"
+    },
+    {
+      "file": "src/lib/db-instance.ts",
+      "lines": "30-50",
+      "relevance": "runMigrations()自動実行の実装 - Issue記載の正確性確認"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "lines": "14",
+      "relevance": "CURRENT_SCHEMA_VERSION = 16 の確認"
+    },
+    {
+      "file": "server.ts",
+      "lines": "46",
+      "relevance": "NODE_ENV判定の実装 - Issue記載の正確性確認"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "108-110, 335-351, 506-511, 603-615, 773-779",
+      "relevance": "既存のInfoModal/MobileInfoContent/APP_VERSION_DISPLAY - 変更対象コンポーネント"
+    },
+    {
+      "file": "next.config.js",
+      "lines": "10, 57-66",
+      "relevance": "NEXT_PUBLIC_APP_VERSION設定とCSP connect-srcディレクティブ"
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "info通知のToastコンポーネント - 既存で活用可能（Issue記載通り）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成とモジュール一覧の整合性確認"
+    },
+    {
+      "file": "CHANGELOG.md",
+      "relevance": "Issue #159でのNEXT_PUBLIC_APP_VERSION追加の履歴確認"
+    }
+  ]
+}

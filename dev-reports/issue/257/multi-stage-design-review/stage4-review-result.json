@@ -1,0 +1,144 @@
+{
+  "issue_number": 257,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-001",
+        "category": "OWASP A10:2021 - Server-Side Request Forgery (SSRF)",
+        "title": "GitHub API URL must be hardcoded constant, not configurable",
+        "description": "The design specifies calling GitHub Releases API (api.github.com) from the server side. The target URL MUST be a hardcoded constant (e.g., `const GITHUB_API_URL = 'https://api.github.com/repos/Kewton/CommandMate/releases/latest'`) and must never be derived from user input, environment variables, or configuration that could be tampered with. The design document shows GITHUB_API_URL being used but does not explicitly declare it as a hardcoded constant or forbid external configuration.",
+        "recommendation": "Add an explicit implementation note in version-checker.ts design: `const GITHUB_API_URL = 'https://api.github.com/repos/Kewton/CommandMate/releases/latest' as const;` with a comment stating this value must never be made configurable to prevent SSRF attacks.",
+        "severity": "high",
+        "owasp_category": "A10:2021 SSRF"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "category": "OWASP A03:2021 - Injection",
+        "title": "GitHub API response tag_name should be validated before use in releaseUrl construction",
+        "description": "The design validates tag_name against /^v?\\d+\\.\\d+\\.\\d+$/ for semver comparison in isNewerVersion() (SF-003). However, the `html_url` and `releaseName` fields from the GitHub API response are passed through to the client without explicit validation or sanitization. If the GitHub API response were to be tampered with (e.g., via DNS poisoning or MITM), these values could contain malicious content.",
+        "recommendation": "Add validation for `html_url` (must match `https://github.com/Kewton/CommandMate/releases/` prefix) and sanitize `releaseName` by limiting character set. Document that releaseUrl is validated against a known URL prefix pattern before inclusion in the API response.",
+        "severity": "medium",
+        "owasp_category": "A03:2021 Injection"
+      },
+      {
+        "id": "SEC-SF-002",
+        "category": "OWASP A07:2021 - Identification and Authentication Failures",
+        "title": "GitHub API calls should use User-Agent header",
+        "description": "The design shows GitHub API calls with only `Accept: application/vnd.github+json` header. GitHub API requires or strongly recommends a User-Agent header. Without it, requests may be rejected or deprioritized. More importantly, this is a best practice to identify the calling application and enables GitHub to contact the maintainer if abuse is detected.",
+        "recommendation": "Add `'User-Agent': 'CommandMate/<version>'` header to the GitHub API fetch request. This aligns with GitHub's API requirements and is a security best practice for API identification.",
+        "severity": "low",
+        "owasp_category": "A07:2021 Identification and Authentication Failures"
+      },
+      {
+        "id": "SEC-SF-003",
+        "category": "OWASP A05:2021 - Security Misconfiguration",
+        "title": "API Route should have explicit Cache-Control headers to prevent proxy caching of version info",
+        "description": "The GET /api/app/update-check endpoint returns version information that is cached server-side for 1 hour. However, the design does not specify HTTP response caching headers. Without explicit Cache-Control: no-store headers, intermediate proxies or CDNs could cache the response, potentially serving stale version information or creating a mismatch between server-side and client-side cache TTLs.",
+        "recommendation": "Add `Cache-Control: no-store, no-cache, must-revalidate` and `Pragma: no-cache` response headers to the API route. The server-side globalThis cache already manages caching; HTTP-level caching should be disabled to prevent interference.",
+        "severity": "low",
+        "owasp_category": "A05:2021 Security Misconfiguration"
+      },
+      {
+        "id": "SEC-SF-004",
+        "category": "OWASP A04:2021 - Insecure Design",
+        "title": "updateCommand field exposes installation path inference",
+        "description": "The `updateCommand` field (e.g., 'npm install -g commandmate@latest') combined with `installType` reveals the installation method. While the design correctly avoids exposing internal file paths, the combination of installType and updateCommand could aid an attacker in understanding the deployment topology. This is a minor information disclosure concern given the tool runs locally.",
+        "recommendation": "Document in the design that `updateCommand` is intentionally limited to the fixed string 'npm install -g commandmate@latest' and must never include dynamic path information. Add a comment in the implementation noting this constraint. Current design is acceptable given the local-only deployment model.",
+        "severity": "low",
+        "owasp_category": "A04:2021 Insecure Design"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "category": "OWASP A08:2021 - Software and Data Integrity Failures",
+        "title": "No integrity verification of GitHub API response",
+        "description": "The design trusts the GitHub API response content without verifying its integrity beyond TLS. If GitHub's CDN were compromised or DNS was poisoned, the version information could be manipulated to direct users to a malicious release. This is a low-probability but high-impact scenario.",
+        "recommendation": "For a future enhancement, consider pinning the expected GitHub API TLS certificate or implementing response integrity checks. Currently acceptable given the local development tool context and the fact that the response is display-only (no automatic installation)."
+      },
+      {
+        "id": "SEC-C-002",
+        "category": "OWASP A09:2021 - Security Logging and Monitoring Failures",
+        "title": "No logging of failed version check attempts or rate limit hits",
+        "description": "The design specifies silent failure for all error cases. While this is correct for UX, repeated failures (especially 403 rate limits) could indicate a security issue (e.g., another process on the machine exhausting GitHub API limits). There is no logging of these failures for security monitoring.",
+        "recommendation": "Consider logging failed version check attempts at debug/info level (not error) using the existing api-logger pattern. This would aid in diagnosing potential abuse without impacting UX. Related to CONS-C02 withLogging() consideration."
+      },
+      {
+        "id": "SEC-C-003",
+        "category": "Defense in Depth",
+        "title": "Consider adding HTTP method restriction to the API route",
+        "description": "The design only specifies a GET handler. Next.js App Router automatically returns 405 for unsupported methods. However, explicitly documenting this and verifying it in tests provides defense in depth and prevents accidental exposure of other HTTP methods in future modifications.",
+        "recommendation": "Add a test case verifying that POST, PUT, DELETE to /api/app/update-check return 405 Method Not Allowed. Document in the design that only GET is supported."
+      }
+    ]
+  },
+  "owasp_top10_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "notes": "API endpoint is read-only, no authentication required (acceptable for version check on local tool). No user-specific data exposed."
+    },
+    "A02_cryptographic_failures": {
+      "status": "pass",
+      "notes": "GitHub API is called over HTTPS. No sensitive data stored or transmitted. No cryptographic operations in this feature."
+    },
+    "A03_injection": {
+      "status": "conditional_pass",
+      "notes": "semver input validated with regex (SF-003). GitHub API response fields (html_url, releaseName) need additional validation before passing to client (SEC-SF-001). No SQL injection risk (no DB changes). No command injection (no exec/spawn)."
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "Silent failure pattern prevents feature from degrading core functionality. Server-side-only API calls prevent CSP issues. installType disclosure is minimal and acceptable for local tool."
+    },
+    "A05_security_misconfiguration": {
+      "status": "conditional_pass",
+      "notes": "CSP correctly not modified (server-side fetch only). Cache-Control headers should be explicitly set (SEC-SF-003). next.config.js security headers are adequate."
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "pass",
+      "notes": "No new dependencies added. Self-implemented semver comparison avoids dependency supply chain risk. Uses built-in Node.js fetch."
+    },
+    "A07_identification_authentication_failures": {
+      "status": "conditional_pass",
+      "notes": "GitHub API called without authentication (acceptable for public repos). User-Agent header should be included (SEC-SF-002)."
+    },
+    "A08_software_data_integrity_failures": {
+      "status": "pass",
+      "notes": "Version information is display-only. No automatic installation triggered. Users must manually run update command. TLS protects data in transit."
+    },
+    "A09_security_logging_monitoring_failures": {
+      "status": "conditional_pass",
+      "notes": "Silent failure is correct for UX but may mask security issues (SEC-C-002). Consider debug-level logging."
+    },
+    "A10_server_side_request_forgery": {
+      "status": "conditional_pass",
+      "notes": "GitHub API URL must be hardcoded constant (SEC-001). Current design does not explicitly enforce this constraint. No user input influences the outbound request URL."
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-257-version-update-notification-design-policy.md",
+    "src/lib/api-client.ts",
+    "src/cli/utils/install-context.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/sanitize.ts",
+    "src/lib/path-validator.ts",
+    "src/lib/clone-manager.ts",
+    "src/app/api/external-apps/[id]/health/route.ts",
+    "src/app/api/slash-commands/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "next.config.js"
+  ],
+  "timestamp": "2026-02-13T21:15:00+09:00"
+}

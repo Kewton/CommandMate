@@ -1,0 +1,167 @@
+{
+  "issue_number": 257,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "CONS-001",
+        "category": "整合性",
+        "title": "install-context.ts のモジュール境界違反: CLI層からの直接importがAPI Route層で必要",
+        "description": "設計書はAPI Route (src/app/api/app/update-check/route.ts) から isGlobalInstall() を呼び出すことを前提としているが、isGlobalInstall() は src/cli/utils/install-context.ts に定義されている。CLI層のユーティリティをAPI Route層から直接importするとレイヤー構成の整合性が崩れる。既存コードでは db-path-resolver.ts が同様のimportを行っている前例はあるが、設計書のレイヤー構成図（Section 1）ではInstallCtxを明示的にServer層の一部として記載しており、実際のファイル配置（src/cli/utils/）との不一致がある。",
+        "recommendation": "設計書Section 1のシステム構成図において、InstallCtxの実体が src/cli/utils/install-context.ts であることを明記し、CLIモジュールからのimportであることをドキュメント化する。あるいは、isGlobalInstall()をCLI層から独立したユーティリティ（例: src/lib/install-context.ts）に移設する案を検討する。ただし既存のdb-path-resolver.tsの前例があるため、即座の移設は必須ではない。",
+        "severity": "medium",
+        "affected_sections": ["Section 1", "Section 3-3", "Section 5"]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CONS-002",
+        "category": "整合性",
+        "title": "getCurrentVersion() のバージョン取得方式がクライアント側と異なる",
+        "description": "クライアント側(WorktreeDetailRefactored.tsx:108)は process.env.NEXT_PUBLIC_APP_VERSION でバージョンを取得する（ビルド時にnext.config.jsが package.json から埋め込む）。しかし設計書はサーバー側の version-checker.ts 内の getCurrentVersion() でもバージョンを取得する必要があるが、その取得方式が明記されていない。サーバーサイドでは NEXT_PUBLIC_APP_VERSION は利用可能だが、直接 package.json を require する方法もあり得る。方式の不統一はバージョン不一致のリスクを生む。",
+        "recommendation": "version-checker.ts の getCurrentVersion() がサーバーサイドで process.env.NEXT_PUBLIC_APP_VERSION を使用するのか、直接 require('../../../package.json').version を使用するのかを設計書に明記する。next.config.js で設定済みのため NEXT_PUBLIC_APP_VERSION の利用が整合的だが、サーバーサイドでは直接 package.json を読むことも可能であり、方針を統一する必要がある。",
+        "severity": "medium",
+        "affected_sections": ["Section 2", "Section 4"]
+      },
+      {
+        "id": "CONS-003",
+        "category": "整合性",
+        "title": "テストディレクトリ構造が既存パターンと不一致",
+        "description": "設計書Section 10のテストファイル配置では tests/unit/components/worktree/update-notification-banner.test.tsx と tests/unit/components/worktree/version-section.test.tsx を提案している。しかし既存のworktreeコンポーネントテストは tests/unit/components/worktree/ に配置されているパターン（AutoYesToggle.test.tsx等）と、tests/unit/components/ 直下に配置されるパターン（app-version-display.test.tsx等）が混在している。また、APIテストは tests/unit/api/app/update-check.test.ts として提案されているが、既存のAPIテストは tests/unit/api/ 直下に1件のみ（prompt-response-verification.test.ts）で、api/app/ サブディレクトリの前例がない。",
+        "recommendation": "テストファイル配置を既存パターンに合わせる。コンポーネントテストは tests/unit/components/worktree/ が妥当（既存の AutoYesToggle.test.tsx 等と同レベル）。APIテストは tests/unit/api/update-check.test.ts（app/ サブディレクトリなし）、または既存パターンに合わせて tests/unit/lib/version-checker.test.ts にロジックテストを集約し、route.tsのテストは簡素化する方式を検討する。",
+        "severity": "low",
+        "affected_sections": ["Section 10"]
+      },
+      {
+        "id": "CONS-004",
+        "category": "整合性",
+        "title": "api-client.ts の appApi 名前空間が新規パターンであり既存構造との整合性の確認が必要",
+        "description": "設計書は api-client.ts に appApi.checkForUpdate() を追加すると記載している。既存の api-client.ts は worktreeApi、repositoryApi、slashCommandApi、memoApi の4つのAPI客体を定義している。appApi は新規追加であり、命名規則・構造は既存パターンに沿っている。ただし、既存のAPIはすべて fetchApi<T>() ヘルパーを使用しており、エラー時にApiErrorをthrowする設計だが、update-check APIはHTTP 200を常に返す設計のため、fetchApi のエラーハンドリングとの整合性は問題ない。",
+        "recommendation": "appApi の追加自体は既存パターンに準拠しており問題ない。ただし、fetchApi のContent-Typeヘッダ自動付与（line 46: headers.set('Content-Type', 'application/json')）がGETリクエストでも付与される点を認識しておく。GETリクエストでContent-Typeを送信すること自体は問題ないが、記録として設計書に記載しておくことが望ましい。",
+        "severity": "low",
+        "affected_sections": ["Section 1", "Section 10"]
+      },
+      {
+        "id": "CONS-005",
+        "category": "整合性",
+        "title": "VersionSection コンポーネントのスタイル差異（InfoModal vs MobileInfoContent）の扱いが未定義",
+        "description": "既存コードでは InfoModal 内のVersionセクション(line 508)は bg-gray-50 rounded-lg p-4 を使用し、MobileInfoContent(line 776)は bg-white rounded-lg border border-gray-200 p-4 を使用している。共通の VersionSection コンポーネント(SF-001)で両方を置換する場合、このスタイル差異をどう吸収するかが設計書に明記されていない。",
+        "recommendation": "VersionSection コンポーネントが className prop を受け取りスタイルの差異を吸収するか、内部でモバイル/デスクトップ判定を行うかを設計書に明記する。既存パターンではuseIsMobile()フックによる判定やclassName prop渡しの両方のパターンが存在する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "CONS-C01",
+        "category": "整合性",
+        "title": "API Route の /api/app/ パスが新規ドメインとして初出",
+        "description": "既存のAPI Routeは /api/worktrees/、/api/repositories/、/api/slash-commands/、/api/hooks/、/api/external-apps/ の5ドメイン。/api/app/ は新規ドメインとなる。アプリケーション全体に関わる機能を /api/app/ 以下に配置する方針は妥当だが、今後の拡張（ヘルスチェック、設定取得等）も含めた命名ガイドラインを設けておくとよい。"
+      },
+      {
+        "id": "CONS-C02",
+        "category": "整合性",
+        "title": "withLogging() ラッパーの適用有無",
+        "description": "既存のAPI RouteにはwithLogging()ヘルパー（src/lib/api-logger.ts）が利用可能だが、設計書のroute.tsコード例では使用されていない。update-check APIは外部API呼び出しを含むため、開発時のデバッグにwithLogging()が有用な可能性がある。適用するかどうかを実装時に判断する。"
+      },
+      {
+        "id": "CONS-C03",
+        "category": "整合性",
+        "title": "i18n worktree名前空間の構造整合性",
+        "description": "設計書はworktree名前空間に update.* キーを追加する方針だが、既存のworktree.jsonはsession/status/output/errorsのトップレベルキーを持ち、これらはすべてworktreeドメインに直接関連している。updateキーはアプリケーションレベルの概念であり、conceptual mismatchがある。C-002で将来検討と記載済みだが、整合性観点から再確認が望ましい。"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "globalThis キャッシュパターン (Section 3-1)",
+      "design_description": "declare global + eslint-disable-next-line no-var + globalThis.__versionCheckCache",
+      "implementation_reference": "src/lib/auto-yes-manager.ts:99-112",
+      "consistency": "consistent",
+      "notes": "設計書のコード例は既存パターンと完全に一致する。declare global、eslint-disable、nullish coalescing代入のすべてが同一形式。"
+    },
+    {
+      "design_item": "API Route 構造 (Section 3-3)",
+      "design_description": "NextResponse.json()、エラーハンドリング、薄いハンドラ",
+      "implementation_reference": "src/app/api/slash-commands/route.ts、src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "consistency": "consistent",
+      "notes": "既存API Routeパターン（NextRequest/NextResponse import、try-catch、NextResponse.json()）に準拠。"
+    },
+    {
+      "design_item": "api-client.ts のAPIクライアント追加 (Section 10)",
+      "design_description": "appApi オブジェクトの新規追加",
+      "implementation_reference": "src/lib/api-client.ts (worktreeApi, repositoryApi, slashCommandApi, memoApi)",
+      "consistency": "consistent",
+      "notes": "既存のオブジェクトリテラル+async メソッドパターンに準拠。fetchApi<T>()ヘルパーの利用も一致。"
+    },
+    {
+      "design_item": "カスタムフック (Section 1)",
+      "design_description": "useUpdateCheck - 'use client' ディレクティブ + React hooks",
+      "implementation_reference": "src/hooks/useFileSearch.ts、src/hooks/useAutoYes.ts",
+      "consistency": "consistent",
+      "notes": "既存フックパターン（'use client'、export interface、定数定義、JSDoc）に合致。"
+    },
+    {
+      "design_item": "i18n キー追加 (Section 10)",
+      "design_description": "locales/{locale}/worktree.json に update.* キーを追加",
+      "implementation_reference": "src/i18n.ts (5名前空間の動的import)",
+      "consistency": "consistent",
+      "notes": "src/i18n.ts の変更は不要。既存の worktree.json のimportでカバーされる。ネストキーは既存JSONの構造（session.*, status.* 等）と同一パターン。"
+    },
+    {
+      "design_item": "コンポーネント配置 (Section 10)",
+      "design_description": "src/components/worktree/ に UpdateNotificationBanner.tsx、VersionSection.tsx",
+      "implementation_reference": "src/components/worktree/ (30+既存コンポーネント)",
+      "consistency": "consistent",
+      "notes": "既存のworktreeコンポーネントディレクトリへの追加は既存パターンに合致。"
+    },
+    {
+      "design_item": "バージョン表示 (Section 9)",
+      "design_description": "VersionSection で APP_VERSION_DISPLAY を使用",
+      "implementation_reference": "WorktreeDetailRefactored.tsx:108 (process.env.NEXT_PUBLIC_APP_VERSION)",
+      "consistency": "partially_consistent",
+      "notes": "クライアント側はNEXT_PUBLIC_APP_VERSIONで取得。サーバー側のversion-checker.tsでのバージョン取得方式が未定義（CONS-002）。"
+    },
+    {
+      "design_item": "CSP設定 (Section 6-1)",
+      "design_description": "connect-src 変更不要（GitHub API呼び出しはサーバーサイドのみ）",
+      "implementation_reference": "next.config.js:64 (connect-src 'self' ws: wss:)",
+      "consistency": "consistent",
+      "notes": "サーバーサイドからのfetchはCSPの対象外であるため、設計判断は正確。"
+    },
+    {
+      "design_item": "isGlobalInstall() 利用 (Section 5)",
+      "design_description": "API Route から isGlobalInstall() を呼び出し installType を判定",
+      "implementation_reference": "src/cli/utils/install-context.ts:33、src/lib/db-path-resolver.ts:14 (既存import先例)",
+      "consistency": "partially_consistent",
+      "notes": "db-path-resolver.tsが同様のimportを行う前例あり。動作上は問題ないが、レイヤー構成図との不一致がある（CONS-001）。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-257-version-update-notification-design-policy.md",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/api-client.ts",
+    "src/cli/utils/install-context.ts",
+    "src/i18n.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/slash-commands/route.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/lib/api-logger.ts",
+    "src/lib/db-instance.ts",
+    "src/lib/db-path-resolver.ts",
+    "src/hooks/useFileSearch.ts",
+    "next.config.js",
+    "package.json",
+    "tsconfig.json",
+    "locales/en/worktree.json",
+    "locales/ja/worktree.json"
+  ],
+  "timestamp": "2026-02-13T12:00:00Z"
+}

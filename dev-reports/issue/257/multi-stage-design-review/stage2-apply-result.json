@@ -1,0 +1,100 @@
+{
+  "issue_number": 257,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項反映",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "CONS-001",
+        "item": "install-context.ts のモジュール境界違反: CLI層からAPI Route層への直接importがレイヤー構成図と不一致",
+        "sections_updated": ["Section 1 (システム構成図)", "Section 1 (レイヤー構成表)", "Section 3-3", "Section 5", "Section 6-4", "Section 14", "Section 15"],
+        "status": "reflected",
+        "changes": [
+          "システム構成図のInstallCtxノードにCLI層配置を明記",
+          "レイヤー構成表にCLIユーティリティ参照行を追加（クロスレイヤー参照の説明、前例、将来移設検討）",
+          "Section 3-3にクロスレイヤー参照の設計判断コメントを追加",
+          "Section 6-4のisGlobalInstall()説明にCLI層実体パスを追記",
+          "実装チェックリストにimport文コメント記載の項目を追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CONS-002",
+        "item": "getCurrentVersion() のサーバーサイドでのバージョン取得方式が未定義",
+        "sections_updated": ["Section 2 (技術選定表)", "Section 4 (getCurrentVersion()仕様)", "Section 14", "Section 15"],
+        "status": "reflected",
+        "changes": [
+          "技術選定表にバージョン取得行を追加（NEXT_PUBLIC_APP_VERSION使用を明記）",
+          "Section 4にgetCurrentVersion()の実装仕様・コード例・代替案却下理由を追加",
+          "実装チェックリストにgetCurrentVersion()実装項目を追加"
+        ]
+      },
+      {
+        "id": "CONS-003",
+        "item": "テストディレクトリ構造が既存パターンと不一致（api/app/サブディレクトリの前例なし）",
+        "sections_updated": ["Section 10 (テストファイル配置)", "Section 14", "Section 15"],
+        "status": "reflected",
+        "changes": [
+          "APIテストパスをtests/unit/api/update-check.test.tsに変更（app/サブディレクトリ削除）",
+          "実装チェックリストに修正後のテストファイルパスを明記"
+        ]
+      },
+      {
+        "id": "CONS-004",
+        "item": "fetchApiのContent-TypeヘッダがGETリクエストでも自動付与される点の記録",
+        "sections_updated": ["Section 1 (レイヤー構成表)", "Section 14", "Section 15"],
+        "status": "reflected",
+        "changes": [
+          "レイヤー構成表のAPIクライアント層にContent-Type自動付与の注記を追加",
+          "実装チェックリストに認識事項として記載"
+        ]
+      },
+      {
+        "id": "CONS-005",
+        "item": "VersionSectionのスタイル差異（InfoModal vs MobileInfoContent）の吸収方法が未定義",
+        "sections_updated": ["Section 9 (VersionSection仕様)", "Section 14", "Section 15"],
+        "status": "reflected",
+        "changes": [
+          "VersionSectionのProps定義にclassName?: stringを追加",
+          "InfoModal/MobileInfoContentそれぞれのclassName利用例を追加",
+          "実装チェックリストにclassName prop実装項目を追加"
+        ]
+      }
+    ]
+  },
+  "skipped": [],
+  "consider_items_noted": [
+    {
+      "id": "CONS-C01",
+      "item": "/api/app/ パスが新規ドメインとして初出",
+      "status": "noted_in_section_14_and_15"
+    },
+    {
+      "id": "CONS-C02",
+      "item": "withLogging() ラッパーの適用有無",
+      "status": "noted_in_section_14_and_15"
+    },
+    {
+      "id": "CONS-C03",
+      "item": "i18n worktree名前空間のupdate.*キー概念不一致",
+      "status": "noted_in_section_14"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-257-version-update-notification-design-policy.md",
+  "sections_updated": [
+    "Section 1 (システム構成図・レイヤー構成表)",
+    "Section 2 (技術選定表)",
+    "Section 3-3 (API Route + サービス層の分離)",
+    "Section 4 (getCurrentVersion()仕様追加)",
+    "Section 6-4 (サーバーサイドのみ)",
+    "Section 9 (VersionSection Props・className)",
+    "Section 10 (テストファイル配置修正)",
+    "Section 13 (レビュー履歴)",
+    "Section 14 (Stage 2レビュー指摘事項サマリー)",
+    "Section 15 (Stage 2実装チェックリスト)"
+  ],
+  "timestamp": "2026-02-13T12:30:00Z"
+}

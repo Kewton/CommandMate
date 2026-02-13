@@ -1,0 +1,83 @@
+{
+  "issue_number": 257,
+  "stage": 1,
+  "stage_name": "指摘事項対応（設計原則）",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "WorktreeDetailRefactored.tsx (2085 lines) - SRP violation: extract UpdateNotificationBanner as separate component",
+        "section_updated": "Section 1 (Architecture), Section 3-4 (Component Separation Pattern), Section 9 (UI Design), Section 10 (File Structure), Section 11 (Constraints), Section 12 (Implementation Priority), Section 15 (Implementation Checklist)",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "DRY violation: Version section duplicated across InfoModal and MobileInfoContent - extract VersionSection component",
+        "section_updated": "Section 1 (Architecture), Section 3-4 (Component Separation Pattern), Section 9 (UI Design), Section 10 (File Structure), Section 11 (Constraints), Section 12 (Implementation Priority), Section 15 (Implementation Checklist)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "UpdateCheckResult and UpdateCheckResponse overlapping fields - add explicit toUpdateCheckResponse() mapping function",
+        "section_updated": "Section 4 (Data Model Design), Section 8 (Design Decisions), Section 11 (Constraints), Section 12 (Implementation Priority), Section 15 (Implementation Checklist)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-003",
+        "item": "isNewerVersion lacks defensive validation for edge cases - add inline validation with regex pattern",
+        "section_updated": "Section 2 (Technical Selection - semver), Section 6-2 (Input Validation), Section 8 (Design Decisions), Section 11 (Constraints), Section 12 (Implementation Priority), Section 15 (Implementation Checklist)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-004",
+        "item": "Error-time HTTP 200 complicates debugging - add status field to response",
+        "section_updated": "Section 4 (Data Model), Section 5 (API Design), Section 8 (Design Decisions), Section 9 (UI Design), Section 11 (Constraints), Section 12 (Implementation Priority), Section 15 (Implementation Checklist)",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "item": "rateLimitResetAt field may be over-engineering - added simplification guidance",
+        "section_updated": "Section 3-1 (globalThis Cache), Section 7-2 (Rate Limit), Section 15 (Implementation Checklist)",
+        "status": "noted"
+      },
+      {
+        "id": "C-002",
+        "item": "i18n keys in worktree namespace may grow beyond scope - added namespace guideline",
+        "section_updated": "Section 8 (Design Decisions - i18n comparison)",
+        "status": "noted"
+      },
+      {
+        "id": "C-003",
+        "item": "version-checker.ts directly calls fetch without abstraction - acknowledged as acceptable",
+        "section_updated": "Section 14 (Review Findings Summary)",
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-257-version-update-notification-design-policy.md",
+  "sections_updated": [
+    "1. アーキテクチャ設計 (System diagram, Data flow, Layer structure)",
+    "2. 技術選定 (semver implementation with validation)",
+    "3. 設計パターン (3-4 Component Separation Pattern added)",
+    "4. データモデル設計 (UpdateCheckResponse status field, toUpdateCheckResponse mapping)",
+    "5. API設計 (status field in responses, error handling table)",
+    "6. セキュリティ設計 (6-2 isNewerVersion inline validation)",
+    "7. パフォーマンス設計 (7-2 simplification guidance for rate limit)",
+    "8. 設計上の決定事項とトレードオフ (Updated decisions table, i18n guideline)",
+    "9. UI設計 (Component hierarchy, UpdateNotificationBanner/VersionSection specs)",
+    "10. ファイル構成 (New component files and test files added)",
+    "11. 制約条件の確認 (Updated with new component SRP entries)",
+    "12. 実装優先順位 (Updated with review finding annotations)",
+    "13. レビュー履歴 (New section)",
+    "14. レビュー指摘事項サマリー (New section)",
+    "15. 実装チェックリスト (New section)"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}

@@ -1,0 +1,82 @@
+{
+  "issue_number": 257,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "i18n対応セクションを新設。翻訳キーの例示テーブル（update.available, update.npmCommand, update.gitMessage, update.viewReleases, update.dbSafe）を追加。locales/en/worktree.jsonおよびlocales/ja/worktree.jsonを変更対象ファイルテーブルに追加。受入条件に「通知メッセージがi18n対応されていること」を追加。実装タスクに「i18n対応: 翻訳キーをlocales/en/およびlocales/ja/に追加」を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "テスト計画セクションを新設。3つのテストファイル（version-checker.test.ts、update-check.test.ts、app-version-display.test.tsx拡張）の具体的なテスト項目（正常系・異常系・キャッシュ）を明記。テストファイルテーブルを影響範囲に追加。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "API呼び出しクライアント設計セクションを新設。3つの方式（api-client.ts追加/コンポーネント内直接fetch/カスタムフック）を比較テーブルで提示。api-client.tsとuseUpdateCheck.tsを影響ファイルテーブルに追加（方式選択に応じて）。実装タスクに追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "ドキュメント更新テーブルを影響範囲セクションに新設。CLAUDE.mdの主要機能モジュールテーブルへのversion-checker.tsエントリ追加とdocs/implementation-history.mdへのIssue #257エントリ追加を明記。実装タスクに「ドキュメント更新」を追加。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "キャッシュ設計セクションに「開発モードでのキャッシュ挙動」サブセクションを追加。ホットリロード時のキャッシュ消失リスクと3つの対策方針（無効化/長TTL/globalThis）を記載。受入条件に「開発モードでのホットリロード時にGitHub APIへの過剰リクエストが発生しないこと」を追加。version-checker.tsの説明に「開発モード対策」を追記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "テスト計画セクションに「将来的なテスト拡張（本Issue スコープ外）」としてE2Eテスト（Playwright + GitHub APIモック戦略）の方針を記載。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "本Issueのスコープ外。既存の「静かに失敗する」フォールバック動作で基本的なユースケースはカバーされている。将来課題としてレビュー履歴に記録済み。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "型定義セクションを新設。UpdateCheckResponse等の型配置方針（src/types/update-check.ts or version-checker.ts内）を記載。影響ファイルテーブルにsrc/types/update-check.tsを追加。"
+      }
+    ]
+  },
+  "issue_changes_summary": {
+    "new_sections": [
+      "i18n対応（翻訳キー例示テーブル含む）",
+      "開発モードでのキャッシュ挙動（キャッシュ設計内サブセクション）",
+      "API呼び出しクライアント設計（方式比較テーブル）",
+      "型定義（配置方針）",
+      "テスト計画（3テストファイルの詳細テスト項目）",
+      "テストファイルテーブル（影響範囲内）",
+      "ドキュメント更新テーブル（影響範囲内）",
+      "レビュー履歴（Stage 3）"
+    ],
+    "modified_sections": [
+      "変更対象ファイルテーブル: locales、api-client.ts、useUpdateCheck.ts、types/update-check.tsを追加",
+      "実装タスク: i18n対応、API呼び出しクライアント実装、ドキュメント更新を追加",
+      "受入条件: i18n対応要件、開発モードでの過剰リクエスト防止要件を追加",
+      "version-checker.ts説明: 「開発モード対策」を追記"
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 7,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/257"
+  }
+}

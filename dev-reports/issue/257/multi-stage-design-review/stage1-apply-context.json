@@ -1,0 +1,7 @@
+{
+  "issue_number": 257,
+  "review_result_path": "dev-reports/issue/257/multi-stage-design-review/stage1-review-result.json",
+  "stage": 1,
+  "stage_name": "指摘事項対応（設計原則）",
+  "design_doc_path": "dev-reports/design/issue-257-version-update-notification-design-policy.md"
+}

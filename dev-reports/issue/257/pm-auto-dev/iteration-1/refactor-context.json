@@ -1,0 +1,43 @@
+{
+  "issue_number": 257,
+  "refactor_targets": [
+    "src/lib/version-checker.ts",
+    "src/app/api/app/update-check/route.ts",
+    "src/hooks/useUpdateCheck.ts",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/VersionSection.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 98.01,
+    "target_coverage": 98.5,
+    "current_tests": 89,
+    "existing_tests_passed": 3196
+  },
+  "improvement_goals": [
+    "カバレッジを98.5%以上に向上（現在98.01%）",
+    "コードの重複を削除",
+    "関数の複雑度を削減",
+    "JSDocコメントの充実化",
+    "型安全性の向上",
+    "エラーハンドリングの改善",
+    "テストケースの追加（エッジケース）"
+  ],
+  "review_findings": {
+    "must_fix_items_completed": 4,
+    "should_fix_items_completed": 15,
+    "consider_items_addressed": 12
+  },
+  "design_principles": {
+    "SOLID": "SRP, DRY, OCP準拠済み（MF-001, SF-001, SF-002, SF-003）",
+    "KISS": "シンプル設計（SF-004, C-001）",
+    "YAGNI": "必要最小限の実装（C-002, C-003）",
+    "DRY": "重複コード削除（SF-001, SF-002）"
+  },
+  "focus_areas": [
+    "version-checker.ts: 関数の単一責任原則の徹底",
+    "update-check/route.ts: toUpdateCheckResponse()のエラーハンドリング強化",
+    "useUpdateCheck.ts: 状態管理の最適化",
+    "UpdateNotificationBanner.tsx: アクセシビリティの向上",
+    "VersionSection.tsx: パフォーマンス最適化（useMemo等）"
+  ]
+}

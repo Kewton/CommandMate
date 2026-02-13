@@ -1,0 +1,146 @@
+{
+  "issue_number": 257,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IMP-001",
+        "category": "影響範囲",
+        "title": "WorktreeDetailRefactored.tsx の VersionSection 置換に伴うテスト影響の未記載",
+        "description": "WorktreeDetailRefactored.tsx からバージョン表示セクション（507-511行, 775-779行）を VersionSection コンポーネントに置換する際、既存テスト tests/unit/components/worktree/WorktreeDetailWebSocket.test.tsx がバージョン表示のDOMを参照している場合にテストが壊れる。設計書には WorktreeDetailRefactored.tsx のテスト影響が未記載。",
+        "recommendation": "WorktreeDetailWebSocket.test.tsx をレビューし、Version表示に関連するアサーションがあれば影響ファイルリストに追加する。実装チェックリストにも既存テストの修正項目を追加すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IMP-SF-001",
+        "category": "影響範囲",
+        "title": "fetchApi の Content-Type ヘッダが GET リクエストで付与される影響の深堀り不足",
+        "description": "設計書 CONS-004 で「動作上問題なし」と記録しているが、GitHub API への fetch はサーバーサイドの version-checker.ts 内で独立して行われるため、fetchApi 経由ではない。しかしクライアント側の appApi.checkForUpdate() は fetchApi 経由で GET /api/app/update-check を呼ぶ。API Route 側が Content-Type ヘッダを参照してバリデーションしていないことを前提としているが、将来 POST エンドポイントが /api/app/ 以下に追加された場合の影響を考慮すべき。",
+        "recommendation": "現時点では問題ないが、Content-Type 自動付与の事実を api-client.ts の JSDoc または README に記録し、将来の開発者への注意喚起とすること。"
+      },
+      {
+        "id": "IMP-SF-002",
+        "category": "影響範囲",
+        "title": "新規ディレクトリ src/app/api/app/ の作成が ESLint / TypeScript ビルドに影響しないことの確認",
+        "description": "src/app/api/app/update-check/route.ts は新規ディレクトリパスに配置される。既存の API ルートは src/app/api/{worktrees,repositories,hooks,slash-commands,external-apps}/ に配置されている。app/ という名前は Next.js の App Router のルートディレクトリと同名であり、path alias や Next.js のルーティング規則上の衝突リスクはないが、混同を招く可能性がある。",
+        "recommendation": "/api/app/ パス名の妥当性を再確認する。Next.js の App Router では src/app/ がルートだが、/api/app/ は API Route としてのパス（URL）であり、ファイルシステム上は src/app/api/app/ となるため実質的に問題はない。ただし、CONS-C01 で将来のガイドライン策定が記録されていることを確認済み。現時点での対応は不要だが、PR レビュー時に指摘される可能性がある点を認識すること。"
+      },
+      {
+        "id": "IMP-SF-003",
+        "category": "影響範囲",
+        "title": "globalThis 型宣言の declare global が TypeScript strict モードとの互換性",
+        "description": "version-checker.ts に追加される declare global { var __versionCheckCache: VersionCache | undefined; } は、auto-yes-manager.ts の前例に準拠している。しかし、eslint-disable-next-line no-var コメントが必要であり、ESLint ルール設定によっては CI パイプラインで警告が出る可能性がある。",
+        "recommendation": "auto-yes-manager.ts の既存パターン（99-103行）と完全に同じ eslint-disable コメントを使用すること。CI で no-var ルールが error レベルでないことを確認済みだが、実装時に lint チェック（npm run lint）を必ず実行すること。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IMP-C01",
+        "category": "影響範囲",
+        "title": "useUpdateCheck フックのテストファイルが設計書のファイル構成に記載されていない",
+        "description": "設計書 Section 10 の新規ファイルリストにはフックのテストファイル（tests/unit/hooks/useUpdateCheck.test.ts）が含まれていない。既存の hooks ディレクトリには 18 個のテストファイルがあり、全フックにテストが存在するパターンが確立されている。",
+        "recommendation": "tests/unit/hooks/useUpdateCheck.test.ts をファイル構成に追加し、実装チェックリストにも含めること。"
+      },
+      {
+        "id": "IMP-C02",
+        "category": "影響範囲",
+        "title": "CLAUDE.md への version-checker.ts 追記の影響",
+        "description": "CLAUDE.md の主要機能モジュール表は Claude Code が参照するコンテキスト情報であり、新しいモジュールの追記は Claude Code の将来のコード生成に影響する。useUpdateCheck フック、VersionSection コンポーネント、UpdateNotificationBanner コンポーネントも同様に追記すべき。",
+        "recommendation": "version-checker.ts だけでなく、useUpdateCheck.ts、VersionSection.tsx、UpdateNotificationBanner.tsx も CLAUDE.md の該当テーブルに追記すること。"
+      },
+      {
+        "id": "IMP-C03",
+        "category": "影響範囲",
+        "title": "worktree.json の i18n キー追加が既存コンポーネントの名前空間利用に影響しないことの確認",
+        "description": "worktree.json に update.* キーを追加すると、useTranslations('worktree') を使用している全コンポーネントのメッセージバンドルサイズが増加する。現在 worktree 名前空間は session, status, output, errors の 4 カテゴリ（計 15 キー）であり、update.* の追加で約 20-30% 増加する見込み。",
+        "recommendation": "worktree 名前空間の現在のキー数（15 キー）に対して追加される update.* キー数は推定 5-8 個程度であり、バンドルサイズへの影響は軽微。C-002 のガイドラインに従い、ドメイン外キーが 5 つ以上になった場合に app 名前空間の分離を検討する方針は妥当。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": {
+      "new_files": [
+        "src/lib/version-checker.ts",
+        "src/hooks/useUpdateCheck.ts",
+        "src/components/worktree/UpdateNotificationBanner.tsx",
+        "src/components/worktree/VersionSection.tsx",
+        "src/app/api/app/update-check/route.ts",
+        "tests/unit/lib/version-checker.test.ts",
+        "tests/unit/api/update-check.test.ts",
+        "tests/unit/components/worktree/update-notification-banner.test.tsx",
+        "tests/unit/components/worktree/version-section.test.tsx"
+      ],
+      "modified_files": [
+        "src/lib/api-client.ts",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "locales/en/worktree.json",
+        "locales/ja/worktree.json",
+        "CLAUDE.md",
+        "docs/implementation-history.md"
+      ]
+    },
+    "indirect_impacts": [
+      {
+        "file": "tests/unit/components/worktree/WorktreeDetailWebSocket.test.tsx",
+        "reason": "WorktreeDetailRefactored.tsx のバージョン表示 DOM 構造変更により、既存テストのアサーションが壊れる可能性",
+        "risk": "medium"
+      },
+      {
+        "file": "src/cli/utils/install-context.ts",
+        "reason": "API Route からのクロスレイヤー import が追加される（CONS-001）。関数自体は変更なし",
+        "risk": "low"
+      },
+      {
+        "file": "next.config.js",
+        "reason": "CSP connect-src の変更は不要と設計書で確認済み（GitHub API 呼び出しはサーバーサイドのみ）。変更なし",
+        "risk": "low"
+      },
+      {
+        "file": "src/i18n.ts",
+        "reason": "既存 worktree 名前空間にキーを追加するため変更不要。新規名前空間を作成しないことで影響を回避",
+        "risk": "low"
+      },
+      {
+        "file": "package.json",
+        "reason": "新規依存パッケージの追加なし（semver 自前実装）。変更なし",
+        "risk": "low"
+      }
+    ],
+    "no_impact": [
+      "src/lib/db-instance.ts",
+      "src/lib/db-path-resolver.ts",
+      "src/lib/auto-yes-manager.ts",
+      "src/lib/claude-session.ts",
+      "src/lib/response-poller.ts",
+      "src/lib/prompt-detector.ts",
+      "src/lib/status-detector.ts",
+      "src/cli/commands/*",
+      "src/contexts/*",
+      "src/types/models.ts"
+    ]
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-257-version-update-notification-design-policy.md",
+    "src/lib/api-client.ts",
+    "src/cli/utils/install-context.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/db-path-resolver.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/i18n.ts",
+    "next.config.js",
+    "locales/en/worktree.json",
+    "locales/ja/worktree.json",
+    "package.json"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}

@@ -1,0 +1,145 @@
+{
+  "issue_number": 257,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-13",
+  "previous_review_stage": "stage1",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2,
+    "stage1_must_fix_resolved": 2,
+    "stage1_should_fix_resolved": 4,
+    "stage1_nice_to_have_resolved": 1
+  },
+  "stage1_resolution_status": {
+    "MF-1": {
+      "status": "resolved",
+      "verification": "Issue本文の判定方法テーブルが「`dirname(__dirname)` がグローバルnode_modulesパターン（`/lib/node_modules/`、`\\\\node_modules\\\\`、`/node_modules/commandmate`）にマッチするかで判定」に修正済み。src/cli/utils/install-context.ts:39-44の実装と完全一致。"
+    },
+    "MF-2": {
+      "status": "resolved",
+      "verification": "背景・課題セクションの文章が3つの箇条書きに正しく分割された。(1)「バージョン表示機能はあるが...確認する手段がない」(2)「ユーザーは手動で...アップデートの有無を把握できない」(3)「VSCodeのように...最新バージョンを利用できるようにしたい」。文意の断絶は解消されている。"
+    },
+    "SF-1": {
+      "status": "resolved",
+      "verification": "「通知UI出し分け」セクション末尾に注記が追加され、isGlobalInstall()の__dirnameベース判定とAPI Routeからの呼び出し時のパス構造リスクが記載。db-path-resolver.tsの先行事例への言及、および新規APIエンドポイントでの動作検証をテスト項目に含める旨も明記済み。受け入れ条件にも「isGlobalInstall()が新規APIエンドポイント（/api/app/update-check）から呼び出された場合に正しく動作すること」が追加されている。"
+    },
+    "SF-2": {
+      "status": "resolved",
+      "verification": "「GitHub APIレート制限対策」セクションが新設され、キャッシュ場所（サーバーサイドインメモリ）、TTL（1時間）、永続化不要、クライアント側制限不要、複数タブ対策、開発モード挙動、レート制限到達時のX-RateLimit-Reset参照による抑制が具体的に記載されている。"
+    },
+    "SF-3": {
+      "status": "resolved",
+      "verification": "「提案する解決策」セクションにGitHub Releases APIのエンドポイント（`GET https://api.github.com/repos/Kewton/CommandMate/releases/latest`）が明記された。プロキシ・ファイアウォール環境でのフォールバック動作（静かに失敗）も記載済み。"
+    },
+    "SF-4": {
+      "status": "resolved",
+      "verification": "「提案する解決策」セクションに「GitHub API呼び出しはサーバーサイド（API Route）のみで行う設計とする」と明記。CSP connect-srcへのapi.github.com追加が不要であることが根拠とともに説明されている。影響範囲の「関連コンポーネント（変更不要）」にnext.config.jsとCSP変更不要の理由が記載済み。受け入れ条件にも「GitHub API呼び出しがサーバーサイドのみで行われ、next.config.jsのCSP変更が不要であること」が追加されている。"
+    },
+    "NTH-1": {
+      "status": "resolved",
+      "verification": "影響範囲セクション末尾に「関連Issue」として「#159 - Infoタブにアプリバージョンを表示（本Issueはその拡張）」が追加されている。背景・課題セクションにも「Issue #159 で実装」への言及がある。"
+    },
+    "NTH-2": {
+      "status": "not_resolved",
+      "verification": "semver比較ロジックの実装方針（自作 vs ライブラリ利用）は依然として未記載。ただし Nice to Have であり、実装時の判断に委ねるのは妥当。"
+    },
+    "NTH-3": {
+      "status": "not_resolved",
+      "verification": "通知の非表示・再表示制御に関する記載は依然としてない。ただし Nice to Have であり、初回実装のスコープ外として扱うのは合理的。"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "正確性",
+        "issue": "db:resetコマンドの記述が実際の挙動と若干乖離している",
+        "location": "## データベースの安全性 > ### アップデート時のDB動作 テーブル",
+        "recommendation": "db:resetの行に「DBファイル削除+再作成」と記載されているが、package.jsonの実際のコマンドは `rm -f db.sqlite && npm run db:init` であり、削除対象は `db.sqlite`（レガシーパス）である。一方、本番環境（グローバルインストール）のDBパスは `~/.commandmate/data/cm.db` であり、`db:reset` は本番DBファイルを削除しない。これは安全性の説明としてはむしろ良い方向のズレだが、正確を期すならdb:resetの説明に「開発用DBファイル（db.sqlite）を削除」と補足するか、あるいはdb:resetは開発用コマンドである旨を明記すると理解しやすくなる。重大な問題ではないため Should Fix とする。",
+        "evidence": "package.json:36 の `\"db:reset\": \"rm -f db.sqlite && npm run db:init\"` は db.sqlite のみを対象とする。グローバルインストール時のDBパスは src/lib/db-path-resolver.ts:34 の `path.join(homedir(), '.commandmate', 'data', 'cm.db')` であり、db:resetコマンドの影響を受けない。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "semver比較ロジックの実装方針（自作 vs ライブラリ利用）が未記載（Stage 1 NTH-2の継続）",
+        "location": "## 実装タスク セクション 1番目のタスク「semver比較」",
+        "recommendation": "セマンティックバージョニングの比較にnpmの`semver`パッケージを利用するか、自前実装するかを明記すると実装方針が明確になる。現在のpackage.jsonにsemverは直接依存として含まれていないため、追加する場合はpackage.jsonへの変更も影響範囲に含まれる。自前実装の場合はプレリリースバージョンの比較対応範囲を明記するとよい。ただし、実装担当者の判断に委ねても支障はない。",
+        "evidence": "Stage 1 NTH-2 からの継続事項。実装タスクには「semver比較」の記載があるが、実装手段は未決定。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "同一バージョン通知の再表示制御が未記載（Stage 1 NTH-3の継続）",
+        "location": "## 受入条件 セクション",
+        "recommendation": "ユーザーが通知を確認した後、同じバージョンの通知を次回ページロード時にも表示するか、localStorageに既読バージョンを保存して非表示にするかの方針があると実装の指針になる。初回実装のスコープ外であれば「将来的な検討事項」として言及する方法もある。",
+        "evidence": "Stage 1 NTH-3 からの継続事項。受け入れ条件には通知の表示条件（新バージョンあり/最新バージョン時は非表示/API失敗時は静かに失敗）は網羅されているが、同一通知の再表示制御については未記載。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/cli/utils/install-context.ts",
+      "lines": "33-45",
+      "relevance": "isGlobalInstall()の実装 - Stage 1 MF-1修正の検証対象。Issue記述と完全一致を確認。"
+    },
+    {
+      "file": "src/lib/db-instance.ts",
+      "lines": "46",
+      "relevance": "runMigrations()自動実行の実装 - Issue記載「db-instance.ts:46」と一致を確認。"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "lines": "14",
+      "relevance": "CURRENT_SCHEMA_VERSION = 16 - Issue記載「現在: v16」と一致を確認。"
+    },
+    {
+      "file": "src/lib/db-path-resolver.ts",
+      "lines": "14, 33-34",
+      "relevance": "isGlobalInstall()のAPI Route内利用の先行事例。グローバルインストール時DBパス ~/.commandmate/data/cm.db の確認。"
+    },
+    {
+      "file": "server.ts",
+      "lines": "46",
+      "relevance": "NODE_ENV判定の実装 - Issue記載「server.ts:46」と一致を確認。"
+    },
+    {
+      "file": "next.config.js",
+      "lines": "10, 57-66",
+      "relevance": "NEXT_PUBLIC_APP_VERSION設定とCSP connect-src。Issue記載通りconnect-srcは'self' ws: wss:のみ。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "46, 55, 108-110, 335-351, 507-511, 603-615, 773-779, 943-945",
+      "relevance": "変更対象コンポーネント。api-client import(行46)、useTranslations(行55, 943-945)、APP_VERSION_DISPLAY(行108-110)、InfoModal(行335-351, 507-511)、MobileInfoContent(行603-615, 773-779)。全てIssue記載と一致。"
+    },
+    {
+      "file": "package.json",
+      "lines": "2, 36",
+      "relevance": "version: 0.2.3（行2）、db:reset: rm -f db.sqlite（行36）。db:resetの対象がdb.sqliteであることの確認。"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "lines": "1-60",
+      "relevance": "既存のtype-safe fetchラッパー。API呼び出しクライアント設計セクションの方式(a)の参照対象。"
+    },
+    {
+      "file": "scripts/build-and-start.sh",
+      "lines": "61",
+      "relevance": "npm run db:initの実行。Issue記載「build-and-start.sh含む」と一致。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成とモジュール一覧の整合性確認。Issue記載の全ファイルパス・行番号を検証。"
+    }
+  ],
+  "overall_assessment": "Stage 1の Must Fix 2件（isGlobalInstall()の説明不正確、背景・課題の文章断絶）は完全に解消されている。Should Fix 4件（API Route動作保証、レート制限対策、APIエンドポイント明記、CSP影響範囲）も全て適切に対処済み。Nice to Have 3件のうち1件（関連Issue #159へのリンク）が対処済み、残り2件（semver実装方針、通知再表示制御）は未対処だが実装時の判断に委ねても問題ないレベル。Stage 3の影響範囲レビュー指摘（i18n対応、テスト計画、api-client.ts、ドキュメント更新、開発モードキャッシュ）も全て反映されている。新規の指摘はdb:resetの説明精度に関するShould Fix 1件のみ。Issueは実装可能な品質に達している。"
+}

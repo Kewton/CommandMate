@@ -1,0 +1,69 @@
+{
+  "issue_number": 257,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-13",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "isGlobalInstall()の判定方法の説明を修正。「__dirnameがnode_modules配下か」を「dirname(__dirname)がグローバルnode_modulesパターン（/lib/node_modules/、\\\\node_modules\\\\、/node_modules/commandmate）にマッチするかで判定」に修正し、ソースコード参照（src/cli/utils/install-context.ts:39-44）を明記"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "背景・課題セクションの途切れた文章を修復。1つの混在文を3つの独立した箇条書きに分割：(1) アップデート確認手段がない現状、(2) 手動チェックの課題、(3) アプリ内通知による解決策"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "isGlobalInstall()のNext.js API Route内での動作保証に関する注記を「通知UI出し分け」セクション末尾に追加。db-path-resolver.tsでの先行事例に言及しつつ、新規APIエンドポイントでの検証をテスト項目に含める旨を記載。受け入れ条件にも対応するテスト項目を追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "「GitHub APIレート制限対策」セクションを新規追加。インメモリキャッシュ（TTL 1時間）、永続化不要、複数タブ対策、レート制限到達時のX-RateLimit-Resetヘッダ参照による抑制を具体的に記載。受け入れ条件にレート制限設計の検証項目を追加"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "GitHub Releases APIエンドポイント（GET https://api.github.com/repos/Kewton/CommandMate/releases/latest）を「提案する解決策」セクションと影響範囲テーブルに明記。プロキシ・ファイアウォール環境でのフォールバック動作（静かに失敗）を提案する解決策セクションに追加。受け入れ条件にもプロキシ・ファイアウォール環境を含む旨を追記"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "GitHub API呼び出しがサーバーサイド（API Route）のみである設計を「提案する解決策」セクションに明記し、CSP変更が不要である理由を説明。関連コンポーネントのnext.config.js記述にCSP変更不要の注記を追加。受け入れ条件に「GitHub API呼び出しがサーバーサイドのみで行われ、next.config.jsのCSP変更が不要であること」を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "Issue #159 への関連Issueリンクを追加（背景・課題セクション内と末尾の「関連Issue」セクション）"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "semver比較の実装方針（ライブラリ vs 自作）は実装時の判断事項であり、Issueレベルで規定する必要性が低い"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "通知の再表示制御は初回実装のスコープを超えるため、将来のIssueとして別途検討する方が適切"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 7,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/257"
+  }
+}

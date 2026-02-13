@@ -1,0 +1,81 @@
+{
+  "issue_number": 257,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "SEC-001",
+        "item": "GitHub API URL must be hardcoded constant, not configurable (SSRF prevention)",
+        "section_updated": "Section 3-2, 6-5, 8, 15",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "item": "GitHub API response html_url and releaseName validation against injection",
+        "section_updated": "Section 3-2, 4, 6-6, 8, 15",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-002",
+        "item": "GitHub API calls should use User-Agent header",
+        "section_updated": "Section 3-2, 6-7, 8, 15",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-003",
+        "item": "API Route should have explicit Cache-Control headers",
+        "section_updated": "Section 5, 6-8, 8, 15",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-004",
+        "item": "updateCommand field fixed string constraint",
+        "section_updated": "Section 4, 6-3, 8, 15",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "item": "No integrity verification of GitHub API response",
+        "section_updated": "Section 6-9, 14, 15",
+        "status": "reflected_as_future"
+      },
+      {
+        "id": "SEC-C-002",
+        "item": "No logging of failed version check attempts",
+        "section_updated": "Section 6-9, 14, 15",
+        "status": "reflected_as_future"
+      },
+      {
+        "id": "SEC-C-003",
+        "item": "HTTP method restriction test",
+        "section_updated": "Section 5, 14, 15",
+        "status": "reflected_as_future"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-257-version-update-notification-design-policy.md",
+  "sections_updated": [
+    "Section 3-2 (Silent Failureパターン - SEC-001 URL定数化, SEC-SF-002 User-Agent追加)",
+    "Section 4 (データモデル設計 - SEC-SF-001 レスポンスバリデーション注記, SEC-SF-004 updateCommand制約)",
+    "Section 5 (API設計 - SEC-SF-003 Cache-Controlヘッダ, SEC-C-003 HTTPメソッド制限)",
+    "Section 6-3 (情報漏洩防止 - SEC-SF-004 updateCommand固定文字列制約)",
+    "Section 6-5 (SSRF防止 - SEC-001 新規セクション)",
+    "Section 6-6 (APIレスポンスバリデーション - SEC-SF-001 新規セクション)",
+    "Section 6-7 (API識別ヘッダ - SEC-SF-002 新規セクション)",
+    "Section 6-8 (HTTPキャッシュ制御 - SEC-SF-003 新規セクション)",
+    "Section 6-9 (OWASP Top 10チェックリスト - 新規セクション)",
+    "Section 8 (設計上の決定事項 - セキュリティ関連決定6件追加)",
+    "Section 13 (レビュー履歴 - Stage 4追加)",
+    "Section 14 (レビュー指摘事項サマリー - Stage 4セクション追加)",
+    "Section 15 (実装チェックリスト - Stage 4 Must Fix/Should Fix/Consider追加)"
+  ],
+  "timestamp": "2026-02-13T21:30:00+09:00"
+}

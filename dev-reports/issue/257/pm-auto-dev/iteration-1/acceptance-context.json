@@ -1,0 +1,38 @@
+{
+  "issue_number": 257,
+  "feature_summary": "バージョンアップを知らせる機能",
+  "acceptance_criteria": [
+    "新しいバージョンがGitHub Releasesに公開されている場合、Infoタブ/モーダルにinfo通知が表示される",
+    "通知からGitHub Releasesページへのリンクが機能する",
+    "インストール方式（npm/git）に応じた適切なアップデート案内が表示される",
+    "最新バージョンを使用している場合は通知が表示されない",
+    "GitHub APIへのアクセス失敗時にエラーが表示されず、静かに失敗する（プロキシ・ファイアウォール環境を含む）",
+    "レート制限（60リクエスト/時間）に到達しない設計であること（インメモリキャッシュTTL 1時間）",
+    "アップデートによりデータベースが初期化されないことが確認できる",
+    "isGlobalInstall()が新規APIエンドポイント（/api/app/update-check）から呼び出された場合に正しく動作すること",
+    "GitHub API呼び出しがサーバーサイドのみで行われ、next.config.jsのCSP変更が不要であること",
+    "既存テストがすべてパスする",
+    "通知メッセージがi18n対応されていること（ハードコード文字列がないこと）",
+    "開発モード（npm run dev）でのホットリロード時にGitHub APIへの過剰リクエストが発生しないこと"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 新しいバージョンが公開されている場合、WorktreeDetailRefactored内のVersionSectionにUpdateNotificationBannerが表示され、GitHub Releasesリンクが正しく機能する",
+    "シナリオ2: 最新バージョンを使用している場合、UpdateNotificationBannerが表示されない",
+    "シナリオ3: GitHub APIエラー時、エラー通知が表示されず、バージョン表示のみが表示される（Silent Failure）",
+    "シナリオ4: インストール方式に応じて、npm install コマンド案内またはGitHubリンクのみが表示される",
+    "シナリオ5: 1時間以内の再リクエストはキャッシュされた結果を返し、GitHub APIを再呼び出ししない（レート制限対策）",
+    "シナリオ6: isGlobalInstall()がAPI Route内で正しく動作し、installTypeフィールドがレスポンスに含まれる",
+    "シナリオ7: 既存テストがすべてパスし、実装によってテストが壊れていない",
+    "シナリオ8: i18n翻訳キーがハードコードなしで正しく適用され、英語/日本語で表示される",
+    "シナリオ9: 開発モード（globalThisキャッシュ）でホットリロード後もキャッシュが保持される"
+  ],
+  "tdd_result_path": "dev-reports/issue/257/pm-auto-dev/iteration-1/tdd-result.json",
+  "implementation_summary": {
+    "new_files": 10,
+    "modified_files": 7,
+    "new_tests": 89,
+    "test_coverage": 98.01,
+    "existing_tests_passed": 3196,
+    "commit": "c64096c"
+  }
+}

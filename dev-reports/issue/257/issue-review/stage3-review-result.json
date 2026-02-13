@@ -1,0 +1,190 @@
+{
+  "issue_number": 257,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-13",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "i18n対応が影響範囲に含まれていない - 通知メッセージのハードコード問題",
+        "location": "## 影響範囲 > ### 変更対象ファイル テーブル",
+        "recommendation": "WorktreeDetailRefactored.tsxは既にnext-intlの`useTranslations`を使用しており（行55, 943-945）、worktree/common/error名前空間でローカライズされている。新規に追加するアップデート通知メッセージ（「新しいバージョンがあります」「npm install -g commandmate@latestで更新できます」「GitHub Releasesで新しいバージョンが利用可能です」「データベースのデータは保持されます」等）も同様にi18n対応が必要。影響ファイルに`locales/en/worktree.json`（または新規名前空間）と`locales/ja/worktree.json`を追加すべき。",
+        "evidence": "WorktreeDetailRefactored.tsx:55で`import { useTranslations } from 'next-intl'`、行943-945で`const tWorktree = useTranslations('worktree')`, `const tError = useTranslations('error')`, `const tCommon = useTranslations('common')`が使用されている。locales/en/worktree.jsonおよびlocales/ja/worktree.jsonに対応する翻訳キーが存在する。新規通知文言がi18n対応なしにハードコードされると、既存のi18n設計と矛盾する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "テスト計画の具体性が不足 - 必要なテストファイルとテスト項目が未特定",
+        "location": "## 実装タスク セクション「ユニットテストの追加」",
+        "recommendation": "以下のテストファイルと項目を明記すべき: (1) `tests/unit/lib/version-checker.test.ts` - semver比較ロジック（正常系: 新バージョンあり/最新/プレリリース、異常系: APIエラー/タイムアウト/不正レスポンス、キャッシュ: TTL期限内はキャッシュ使用/期限切れで再取得/レート制限時のX-RateLimit-Reset参照）、(2) `tests/unit/api/app/update-check.test.ts` - APIエンドポイントのレスポンス形式・インストール方式情報の返却・エラーハンドリング、(3) `tests/unit/components/app-version-display.test.tsx`の拡張 - 既存テスト（行195-329）にアップデート通知UI表示/非表示/リンク動作のテストケースを追加。",
+        "evidence": "既存テストパターン: tests/unit/components/app-version-display.test.tsxに4テストケース（Desktop/Mobile x バージョンあり/なし）が存在。tests/unit/cli/utils/install-context.test.tsにisGlobalInstall()のテストが存在。これらのパターンに準拠した新規テスト設計が必要。"
+      },
+      {
+        "id": "SF-2",
+        "category": "依存関係",
+        "issue": "api-client.tsへの変更が影響範囲に含まれていない",
+        "location": "## 影響範囲 > ### 変更対象ファイル テーブル",
+        "recommendation": "WorktreeDetailRefactored.tsxは既存のAPIクライアント（src/lib/api-client.ts）のworktreeApiを使用してバックエンドと通信している（行46: `import { worktreeApi } from '@/lib/api-client'`）。新規の`/api/app/update-check`エンドポイントを呼び出す際、(a) api-client.tsにupdateCheckApi関数を追加するか、(b) コンポーネント内で直接fetchするか、(c) 新規カスタムフック（例: `useUpdateCheck`）を作成するか、の方針を決定し影響ファイルを追加すべき。既存パターンに合わせるなら(a)または(c)が推奨される。",
+        "evidence": "src/lib/api-client.tsはtype-safe fetchラッパーを提供しており、worktreeApiとしてエクスポートされている。WorktreeDetailRefactored.tsx:46で使用。新規API呼び出しを同ファイルに追加するか、独立したクライアント関数を用意するかで影響ファイルが変わる。"
+      },
+      {
+        "id": "SF-3",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdとdocs/implementation-history.mdへの更新が影響範囲に記載されていない",
+        "location": "## 影響範囲 セクション全体",
+        "recommendation": "CLAUDE.mdの「主要機能モジュール」テーブルに`src/lib/version-checker.ts`の説明を追加する必要がある。また`docs/implementation-history.md`に本Issueのエントリを追加する必要がある。これらはプロジェクトの標準的な運用フローであり、影響範囲に明記すべき。",
+        "evidence": "CLAUDE.mdの「主要機能モジュール」テーブルには全てのlib/モジュールが記載されている（例: `src/lib/clipboard-utils.ts`, `src/lib/status-detector.ts`等）。docs/implementation-history.mdにはIssue #159のエントリ（行19: `| #159 | feat | infoタブにアプリバージョン表示 |...`）が存在し、本Issueも同様のエントリが必要。"
+      },
+      {
+        "id": "SF-4",
+        "category": "影響ファイル",
+        "issue": "インメモリキャッシュのサーバー再起動・ホットリロード時の挙動が未考慮",
+        "location": "## GitHub APIレート制限対策 > ### キャッシュ設計 テーブル",
+        "recommendation": "version-checker.tsのモジュールレベル変数によるインメモリキャッシュは、Next.js開発モード（`npm run dev`）ではホットリロード時にモジュールが再読み込みされ、キャッシュが失われる。これ自体は問題ないが、開発中にGitHub APIへの頻繁なリクエストが発生するリスクがある。開発モードでのキャッシュ戦略（例: 開発中はバージョンチェック無効化、または開発中はより長いTTL）を検討すべき。本番モード（`commandmate start`）ではサーバー再起動時のみキャッシュがリセットされるため問題は小さい。",
+        "evidence": "server.ts:46で`const dev = process.env.NODE_ENV !== 'production'`が定義されており、開発モードではNext.jsのホットリロードが動作する。db-instance.tsはシングルトンパターン（行14: `let dbInstance: Database.Database | null = null`）でモジュールレベルキャッシュを使用しており、同様のパターンがversion-checker.tsにも適用される見込み。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "E2Eテストの考慮が記載されていない",
+        "location": "## 受入条件 セクション",
+        "recommendation": "Playwrightを使ったE2Eテスト（InfoModal表示 -> アップデート通知確認 -> リンククリック）の追加を検討。初回スコープ外であっても将来のテスト方針として言及すると良い。ただし、GitHub APIへの外部依存があるためE2Eテストではモック戦略が必要になる点も考慮が必要。",
+        "evidence": "package.json:33に`\"test:e2e\": \"playwright test\"`が定義されている。ただしE2Eテストは外部API依存があるためモック設定が複雑になる可能性がある。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "issue": "環境変数によるバージョンチェック無効化オプションが未検討",
+        "location": "## 提案する解決策 セクション",
+        "recommendation": "企業のプロキシ/ファイアウォール環境での運用を考慮すると、環境変数（例: `CM_DISABLE_UPDATE_CHECK=true`）でバージョンチェックを明示的に無効化するオプションがあると便利。Issue記載の「静かに失敗する」フォールバックで基本的には対応できるが、不要な外部リクエストを完全に抑止したいケースへの対応として有用。将来的な改善として言及する形でもよい。",
+        "evidence": "src/lib/env.tsのENV_MAPPINGパターン（行24-33: CM_ROOT_DIR, CM_PORT, CM_BIND等）に沿って新規環境変数を追加できる。フォールバック動作は記載済みだが、明示的な無効化オプションはない。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "影響ファイル",
+        "issue": "TypeScript型定義ファイルの追加が影響範囲に含まれていない",
+        "location": "## 影響範囲 > ### 変更対象ファイル テーブル",
+        "recommendation": "APIレスポンスの型定義（UpdateCheckResponse等）をsrc/types/配下に追加するか、version-checker.ts内に定義するか方針を明記するとよい。既存パターンではsrc/types/clone.ts（クローン関連型定義）やsrc/types/sidebar.ts（サイドバーステータス判定）のように機能別の型ファイルが存在する。",
+        "evidence": "src/types/ディレクトリにclone.ts、sidebar.ts、markdown-editor.ts、slash-commands.ts等の型定義ファイルが存在。新規のバージョンチェック機能にも同様の型定義ファイルが必要になる可能性がある。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "55, 107-110, 507-511, 775-779, 943-945",
+      "relevance": "変更対象 - 既存のAPP_VERSION_DISPLAY、InfoModal/MobileInfoContentのバージョン表示セクション、i18n useTranslations使用箇所"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "lines": "1-50",
+      "relevance": "影響候補 - 既存のtype-safe fetchラッパー。新規API呼び出しのクライアント関数追加が必要になる可能性"
+    },
+    {
+      "file": "src/cli/utils/install-context.ts",
+      "lines": "33-45",
+      "relevance": "参照対象 - isGlobalInstall()の実装。API Routeからの呼び出しパスでの動作検証が必要"
+    },
+    {
+      "file": "src/lib/db-path-resolver.ts",
+      "lines": "14",
+      "relevance": "先行事例 - isGlobalInstall()のAPI Route内利用パターン"
+    },
+    {
+      "file": "locales/en/worktree.json",
+      "relevance": "影響対象（Issueに未記載）- 通知メッセージの英語翻訳キー追加が必要"
+    },
+    {
+      "file": "locales/ja/worktree.json",
+      "relevance": "影響対象（Issueに未記載）- 通知メッセージの日本語翻訳キー追加が必要"
+    },
+    {
+      "file": "tests/unit/components/app-version-display.test.tsx",
+      "lines": "195-329",
+      "relevance": "拡張対象 - 既存のバージョン表示テスト。アップデート通知のテストケース追加が必要"
+    },
+    {
+      "file": "src/lib/db-instance.ts",
+      "lines": "14, 30-50",
+      "relevance": "参考パターン - シングルトン+モジュールレベルキャッシュの実装例"
+    },
+    {
+      "file": "next.config.js",
+      "lines": "10, 57-66",
+      "relevance": "確認対象 - NEXT_PUBLIC_APP_VERSION設定（変更不要）とCSP connect-src（変更不要）"
+    },
+    {
+      "file": "server.ts",
+      "lines": "46",
+      "relevance": "参照対象 - NODE_ENV判定パターン"
+    },
+    {
+      "file": "src/config/i18n-config.ts",
+      "relevance": "参照対象 - i18n設定（en/jaサポート）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "更新対象（Issueに未記載）- 主要機能モジュールテーブルへのversion-checker.tsエントリ追加"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "更新対象（Issueに未記載）- Issue #257のエントリ追加"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "主要機能モジュールテーブル - version-checker.tsの追加が必要"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "実装履歴 - Issue #257のエントリ追加が必要"
+    },
+    {
+      "file": "docs/architecture.md",
+      "relevance": "アーキテクチャ設計書 - 外部API連携の新パターン追加の可能性"
+    }
+  ],
+  "impact_summary": {
+    "new_files": [
+      "src/lib/version-checker.ts",
+      "src/app/api/app/update-check/route.ts",
+      "tests/unit/lib/version-checker.test.ts",
+      "tests/unit/api/app/update-check.test.ts"
+    ],
+    "modified_files": [
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "locales/en/worktree.json（またはlocales/en/update.json）",
+      "locales/ja/worktree.json（またはlocales/ja/update.json）",
+      "tests/unit/components/app-version-display.test.tsx",
+      "CLAUDE.md",
+      "docs/implementation-history.md"
+    ],
+    "potentially_modified_files": [
+      "src/lib/api-client.ts",
+      "src/types/（新規型定義ファイル）"
+    ],
+    "no_change_confirmed": [
+      "next.config.js",
+      "package.json",
+      "server.ts",
+      "src/lib/db-instance.ts",
+      "src/lib/db-migrations.ts"
+    ],
+    "breaking_changes": "なし - 新規追加機能のみ。既存のInfoModal/MobileInfoContentのバージョン表示は保持され、追加の通知UIが拡張される形",
+    "backward_compatibility": "完全に後方互換。GitHub APIアクセス不可の場合は静かに失敗し、既存機能に影響しない"
+  }
+}

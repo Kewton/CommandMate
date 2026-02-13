@@ -1,0 +1,73 @@
+{
+  "issue_number": 257,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-13",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "i18n対応セクションの対象ファイルにsrc/i18n.tsを条件付きで追加（新規名前空間方式選択時のみ変更が必要であること、getRequestConfig内のPromise.all配列とmessagesオブジェクトへの追加が必要であること、既存worktree名前空間方式なら変更不要であることを明記）。影響範囲テーブルにもsrc/i18n.tsを条件付きエントリとして追加。実装タスクのi18n項目に新規名前空間方式の場合のsrc/i18n.ts更新を注記として追加。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "開発モードでのキャッシュ挙動セクションのglobalThis選択肢にauto-yes-manager.tsの先行パターン参照を追記（declare global { var __versionCheckCache: ...; } 形式の型宣言、eslint-disable-next-line no-varの必要性、実装例としてsrc/lib/auto-yes-manager.ts:99-112の行番号を明記）。関連コンポーネント（変更不要）セクションにsrc/lib/auto-yes-manager.tsをglobalThisキャッシュパターンの先行事例として追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "InfoModal/MobileInfoContent内の既存ハードコード文字列のi18n状態は本Issueのスコープ外（既存コードの改善であり、#257の新規機能追加とは別の関心事）"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "withLogging()パターンの新規APIルートへの適用は本Issueのスコープ外（開発デバッグ品質の改善であり、実装時に自然に判断されるべき事項）"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 2,
+    "skipped": 2
+  },
+  "changes_made": [
+    {
+      "section": "Note（冒頭）",
+      "change": "Stage 5からStage 7への参照更新"
+    },
+    {
+      "section": "i18n対応 > 対象ファイル",
+      "change": "src/i18n.tsを条件付きで追加（新規名前空間方式選択時のみ、getRequestConfig内の変更が必要な旨を明記）"
+    },
+    {
+      "section": "GitHub APIレート制限対策 > 開発モードでのキャッシュ挙動",
+      "change": "globalThis選択肢にauto-yes-manager.tsの先行パターン参照を追記（declare global型宣言、eslint-disable、行番号参照）"
+    },
+    {
+      "section": "実装タスク",
+      "change": "i18n対応タスクに新規名前空間方式の場合のsrc/i18n.ts更新を注記として追加"
+    },
+    {
+      "section": "影響範囲 > 変更対象ファイル",
+      "change": "src/i18n.ts（新規名前空間方式選択時のみ）をテーブルに追加"
+    },
+    {
+      "section": "影響範囲 > 関連コンポーネント（変更不要）",
+      "change": "src/lib/auto-yes-manager.tsをglobalThisパターンの先行事例として追加。i18n-config.tsの説明に名前空間管理はsrc/i18n.ts側である旨を追記"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "Stage 7 影響範囲レビュー 2回目のエントリを追加（SF-1, SF-2の対応内容とNTH-1, NTH-2のスキップ理由を記載）"
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/257"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "issue_number": 257,
+  "title": "バージョンアップを知らせる機能",
+  "acceptance_criteria": [
+    "新しいバージョンがGitHub Releasesに公開されている場合、Infoタブ/モーダルにinfo通知が表示される",
+    "通知からGitHub Releasesページへのリンクが機能する",
+    "インストール方式（npm/git）に応じた適切なアップデート案内が表示される",
+    "最新バージョンを使用している場合は通知が表示されない",
+    "GitHub APIへのアクセス失敗時にエラーが表示されず、静かに失敗する（プロキシ・ファイアウォール環境を含む）",
+    "レート制限（60リクエスト/時間）に到達しない設計であること（インメモリキャッシュTTL 1時間）",
+    "アップデートによりデータベースが初期化されないことが確認できる",
+    "isGlobalInstall()が新規APIエンドポイント（/api/app/update-check）から呼び出された場合に正しく動作すること",
+    "GitHub API呼び出しがサーバーサイドのみで行われ、next.config.jsのCSP変更が不要であること",
+    "既存テストがすべてパスする",
+    "通知メッセージがi18n対応されていること（ハードコード文字列がないこと）",
+    "開発モード（npm run dev）でのホットリロード時にGitHub APIへの過剰リクエストが発生しないこと"
+  ],
+  "implementation_tasks": [
+    "src/lib/version-checker.ts を新規作成（GitHub Releases API呼び出し、semver比較、インメモリキャッシュ、開発モード対策）",
+    "GET /api/app/update-check APIエンドポイントを新規作成（インストール方式情報を含む）",
+    "WorktreeDetailRefactored.tsx のInfoModal/MobileInfoContentにアップデート通知UIを追加",
+    "インストール方式に応じた通知メッセージの出し分けを実装",
+    "バージョン表示の横に「新しいバージョンがあります」メッセージとReleasesリンクを追加",
+    "APIレート制限対策（インメモリキャッシュ、TTL 1時間、レート制限到達時の抑制）",
+    "i18n対応: 翻訳キーをlocales/en/およびlocales/ja/に追加（新規名前空間方式の場合はsrc/i18n.tsの更新も含む）",
+    "API呼び出しクライアント実装（api-client.tsへの追加 or カスタムフック作成）",
+    "ユニットテストの追加（下記テスト計画参照）",
+    "ドキュメント更新（CLAUDE.md、docs/implementation-history.md）"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-257-version-update-notification-design-policy.md",
+  "work_plan_path": "dev-reports/issue/257/work-plan.md",
+  "technical_requirements": {
+    "github_api": "GET https://api.github.com/repos/Kewton/CommandMate/releases/latest",
+    "server_side_only": true,
+    "cache_strategy": "インメモリキャッシュ、TTL 1時間、globalThisパターン（ホットリロード耐性）",
+    "silent_failure": true,
+    "i18n_namespaces": ["worktree"],
+    "semver_comparison": "自前実装（依存追加なし）",
+    "install_type_detection": "isGlobalInstall()関数を使用",
+    "security": {
+      "ssrf_prevention": "GITHUB_API_URL as const でハードコード",
+      "response_validation": "validateReleaseUrl(), sanitizeReleaseName()",
+      "cache_control_headers": "no-store, no-cache, must-revalidate",
+      "user_agent_header": "CommandMate/<version>",
+      "owasp_top10_compliance": true
+    }
+  },
+  "files_to_create": [
+    "src/lib/version-checker.ts",
+    "src/hooks/useUpdateCheck.ts",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/VersionSection.tsx",
+    "src/app/api/app/update-check/route.ts",
+    "tests/unit/lib/version-checker.test.ts",
+    "tests/unit/hooks/useUpdateCheck.test.ts",
+    "tests/unit/api/update-check.test.ts",
+    "tests/unit/components/worktree/update-notification-banner.test.tsx",
+    "tests/unit/components/worktree/version-section.test.tsx"
+  ],
+  "files_to_modify": [
+    "src/lib/api-client.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/WorktreeDetailWebSocket.test.tsx",
+    "locales/en/worktree.json",
+    "locales/ja/worktree.json",
+    "CLAUDE.md",
+    "docs/implementation-history.md"
+  ]
+}

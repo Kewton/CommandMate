@@ -1,0 +1,183 @@
+{
+  "issue_number": 257,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-02-13",
+  "previous_review_stage": "stage3",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2,
+    "stage3_must_fix_resolved": 1,
+    "stage3_should_fix_resolved": 4,
+    "stage3_nice_to_have_resolved": 2
+  },
+  "stage3_resolution_status": {
+    "MF-1": {
+      "status": "resolved",
+      "verification": "i18n対応が影響範囲に追加済み。Issueに「## i18n対応」セクションが新設され、翻訳キーの例（update.available, update.npmCommand, update.gitMessage, update.viewReleases, update.dbSafe）が英語・日本語の両方で記載されている。対象ファイルとして `locales/en/worktree.json`（または locales/en/update.json）と `locales/ja/worktree.json`（同上）が明記されている。影響範囲テーブルにもlocalesファイルが追加されている。受け入れ条件にも「通知メッセージがi18n対応されていること（ハードコード文字列がないこと）」が追加されている。"
+    },
+    "SF-1": {
+      "status": "resolved",
+      "verification": "テスト計画セクションが新設され、3つのテストファイル（version-checker.test.ts, update-check.test.ts, app-version-display.test.tsx拡張）とそれぞれのテスト項目が具体的に記載されている。正常系・異常系・キャッシュのテスト項目が網羅されている。"
+    },
+    "SF-2": {
+      "status": "resolved",
+      "verification": "「API呼び出しクライアント設計」セクションが新設され、3つの方式（(a) api-client.tsに追加、(b) コンポーネント内直接fetch、(c) カスタムフック）が比較検討されている。影響範囲テーブルにも api-client.ts（方式(a)選択時）と useUpdateCheck.ts（方式(c)選択時）が条件付きで追加されている。"
+    },
+    "SF-3": {
+      "status": "resolved",
+      "verification": "影響範囲に「ドキュメント更新」テーブルが追加され、CLAUDE.md（主要機能モジュールテーブルへのversion-checker.tsエントリ追加）とdocs/implementation-history.md（Issue #257のエントリ追加）が明記されている。実装タスクにも「ドキュメント更新（CLAUDE.md、docs/implementation-history.md）」が追加されている。"
+    },
+    "SF-4": {
+      "status": "resolved",
+      "verification": "「開発モードでのキャッシュ挙動」サブセクションが追加され、問題（ホットリロードでキャッシュが失われる）と3つの対策方針（バージョンチェック無効化、長いTTL、globalThis）が記載されている。受け入れ条件にも「開発モード（npm run dev）でのホットリロード時にGitHub APIへの過剰リクエストが発生しないこと」が追加されている。"
+    },
+    "NTH-1": {
+      "status": "resolved",
+      "verification": "テスト計画に「将来的なテスト拡張（本Issue スコープ外）」としてE2EテストのPlaywright利用とGitHub APIモック戦略の必要性が記載されている。"
+    },
+    "NTH-2": {
+      "status": "not_resolved",
+      "verification": "環境変数によるバージョンチェック無効化オプション（CM_DISABLE_UPDATE_CHECK）は依然として未記載。ただしNice to Haveであり、スコープ外として妥当。フォールバック動作（静かに失敗）で基本的な要件は満たされている。"
+    },
+    "NTH-3": {
+      "status": "resolved",
+      "verification": "「型定義」セクションが新設され、UpdateCheckResponse等の型定義の配置方針（src/types/update-check.ts または version-checker.ts内）が記載されている。影響範囲テーブルにも src/types/update-check.ts が「必要に応じて」として追加されている。"
+    }
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響ファイル",
+        "issue": "新規i18n名前空間を追加する場合、src/i18n.tsの名前空間読み込み処理への変更が影響範囲に含まれていない",
+        "location": "## i18n対応 > ### 対象ファイル",
+        "recommendation": "Issue本文の「対象ファイル」セクションではlocalesのJSONファイルのみが記載されているが、もし新規名前空間（例: locales/en/update.json）を作成する方式を選択した場合、src/i18n.tsのgetRequestConfig内のPromise.all配列（行25-31）に新しいimportを追加し、messagesオブジェクト（行35-41）にも新しいキーを追加する必要がある。既存のworktree名前空間にupdate.*キーを追加する方式なら変更不要だが、いずれの方式でもこの判断基準と影響ファイルの分岐を明記すべき。影響範囲テーブルにsrc/i18n.tsを条件付きで追加するか、i18n対応セクション内で方式選択による影響差分を明記することを推奨する。",
+        "evidence": "src/i18n.ts:25-31で名前空間ごとにdynamic importが行われている（common, worktree, autoYes, error, prompt の5つ）。行35-41のmessagesオブジェクトにも同じ5つのキーが設定されている。新規名前空間を追加する場合はこの両箇所の変更が必要になる。"
+      },
+      {
+        "id": "SF-2",
+        "category": "影響ファイル",
+        "issue": "version-checker.tsのインメモリキャッシュにglobalThisパターンを適用する場合の型宣言影響が未記載",
+        "location": "## GitHub APIレート制限対策 > ### 開発モードでのキャッシュ挙動",
+        "recommendation": "開発モード対策の3つ目の選択肢として「globalThisを使用してホットリロード耐性のあるキャッシュを実装する」が記載されているが、この方式を選択した場合、TypeScriptのdeclare global文（global変数の型宣言）が必要になる。既存の先行事例（src/lib/auto-yes-manager.ts:99-104）では `declare global { var __autoYesStates: ...; }` のパターンが使用されている。version-checker.tsにも同様のglobal型宣言（例: `var __versionCheckCache: ...`）が必要になり、eslint-disable-next-line（no-var）も必要になる。この技術的な詳細を開発モード対策セクションに追記するか、少なくとも「auto-yes-manager.tsのglobalThisパターンに準拠する」ことを明記すると実装者が迷わない。",
+        "evidence": "src/lib/auto-yes-manager.ts:99-104で `declare global { var __autoYesStates: Map<string, AutoYesState> | undefined; var __autoYesPollerStates: Map<string, AutoYesPollerState> | undefined; }` のパターンが使用されている。行107-112で `globalThis.__autoYesStates ?? (globalThis.__autoYesStates = new Map<string, AutoYesState>())` の形式でキャッシュが初期化されている。ESLint no-varルールの無効化も必要（行100, 102）。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響ファイル",
+        "issue": "InfoModal/MobileInfoContentの既存ハードコード文字列とi18n方針の整合性",
+        "location": "## i18n対応 セクション",
+        "recommendation": "現在のInfoModal/MobileInfoContent内には「Version」「Description」「Status」「Edit」「Save」「Cancel」「Show」「Hide」「Last Updated」「Link」「Logs」「Saving...」「No description added yet」「Add notes about this branch...」等のハードコードされた英語文字列が多数存在する（WorktreeDetailRefactored.tsx:418-526, 693-789）。Issue #257ではアップデート通知メッセージのi18n対応が要件として記載されているが、同じコンポーネント内の既存文字列がハードコードされたままになる。実装時に、追加する通知文字列だけがi18n化されて既存文字列がハードコードのままだと、コンポーネント内で混在した状態になる。本Issueのスコープ外ではあるが、この状況を認識した上で実装するか、あるいは既存文字列のi18n化も合わせて行うかの判断を明記すると良い。",
+        "evidence": "WorktreeDetailRefactored.tsx:509で `<h2 ...>Version</h2>` がハードコード。行432で `<h2 ...>Description</h2>`、行439で `Edit`、行459で `'Saving...' : 'Save'`、行467で `Cancel`、行476で `No description added yet`、行516で `Logs`、行522で `showLogs ? 'Hide' : 'Show'` 等、InfoModal内の文字列はi18n未対応。一方で行943-945ではuseTranslations('worktree')/'error'/'common'がインポートされており、同一コンポーネント内でi18n対応と非対応が混在している。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "テスト範囲",
+        "issue": "api-logger.ts withLogging()パターンの新規APIルートへの適用が未記載",
+        "location": "## 影響範囲 > ### 変更対象ファイル テーブル",
+        "recommendation": "既存のAPIルートではsrc/lib/api-logger.tsのwithLogging()高階関数でリクエスト/レスポンスロギングをラップするパターンが使用されている。新規の `/api/app/update-check/route.ts` でも同様にwithLogging()を使用するかどうかの方針を記載すると良い。これはAPIルートの開発時デバッグに有用であり、既存パターンに準拠するなら適用が自然だが、バージョンチェックAPIは外部API呼び出しを含むため、レスポンスボディのログにGitHub APIのレスポンスが含まれる点を考慮する必要がある（skipResponseBody オプションの利用等）。",
+        "evidence": "src/lib/api-logger.tsにwithLogging()高階関数が定義されている（行55-60）。skipResponseBodyオプション（行42）が利用可能。開発環境のみで動作する設計（行1-8）。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/i18n.ts",
+      "lines": "25-31, 33-42",
+      "relevance": "影響候補 - 新規i18n名前空間追加時にdynamic import配列とmessagesオブジェクトへの追加が必要"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "83-112",
+      "relevance": "先行パターン - globalThisによるホットリロード耐性キャッシュの実装例。declare globalとno-var eslint-disable含む"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "418-526, 693-789, 943-945",
+      "relevance": "変更対象 - InfoModal/MobileInfoContent内のハードコード文字列（Version, Description等）とuseTranslationsの混在状態"
+    },
+    {
+      "file": "src/lib/api-logger.ts",
+      "lines": "28-43, 55-60",
+      "relevance": "参照対象 - withLogging()パターン。新規APIルートへの適用検討"
+    },
+    {
+      "file": "src/config/i18n-config.ts",
+      "lines": "1-19",
+      "relevance": "参照対象 - SUPPORTED_LOCALES定義。名前空間追加時の変更は不要（名前空間管理はsrc/i18n.ts側）"
+    },
+    {
+      "file": "locales/en/worktree.json",
+      "relevance": "変更対象 - update.*キーの追加。既存のworktree名前空間はsession/status/output/errorsの4グループで構成"
+    },
+    {
+      "file": "locales/ja/worktree.json",
+      "relevance": "変更対象 - update.*キーの日本語翻訳の追加"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "lines": "1-500",
+      "relevance": "影響候補 - 方式(a)選択時にupdateCheckApi関数を追加。fetchApi<T>ラッパーとApiError型の利用"
+    },
+    {
+      "file": "src/lib/db-path-resolver.ts",
+      "lines": "14",
+      "relevance": "先行事例 - isGlobalInstall()のsrc/lib/配下からのimportパターン。CLI utils→lib間のimportパス"
+    },
+    {
+      "file": "tests/unit/components/app-version-display.test.tsx",
+      "lines": "1-329",
+      "relevance": "拡張対象 - vi.resetModules()+dynamic importパターンの既存テスト。アップデート通知テスト追加時にmockFetchの拡張（/api/app/update-check レスポンスの追加）が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "更新対象 - 主要機能モジュールテーブルへのversion-checker.tsエントリ追加（確認済み）"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "更新対象 - Issue #257のエントリ追加（確認済み）"
+    }
+  ],
+  "impact_summary": {
+    "new_files": [
+      "src/lib/version-checker.ts",
+      "src/app/api/app/update-check/route.ts",
+      "tests/unit/lib/version-checker.test.ts",
+      "tests/unit/api/app/update-check.test.ts",
+      "src/hooks/useUpdateCheck.ts（方式(c)選択時）",
+      "src/types/update-check.ts（型の利用範囲に応じて）",
+      "locales/en/update.json（新規名前空間方式選択時）",
+      "locales/ja/update.json（新規名前空間方式選択時）"
+    ],
+    "modified_files": [
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "locales/en/worktree.json（既存名前空間方式選択時）",
+      "locales/ja/worktree.json（既存名前空間方式選択時）",
+      "tests/unit/components/app-version-display.test.tsx",
+      "CLAUDE.md",
+      "docs/implementation-history.md",
+      "src/lib/api-client.ts（方式(a)選択時）",
+      "src/i18n.ts（新規名前空間方式選択時）"
+    ],
+    "no_change_confirmed": [
+      "next.config.js",
+      "package.json",
+      "server.ts",
+      "src/lib/db-instance.ts",
+      "src/lib/db-migrations.ts",
+      "src/config/i18n-config.ts"
+    ],
+    "breaking_changes": "なし - 新規追加機能のみ。既存のInfoModal/MobileInfoContentのバージョン表示は保持され、追加の通知UIが拡張される形",
+    "backward_compatibility": "完全に後方互換。GitHub APIアクセス不可の場合は静かに失敗し、既存機能に影響しない"
+  },
+  "overall_assessment": "Stage 3の影響範囲レビュー指摘は全て適切に反映されている。MF-1（i18n対応の欠如）は「i18n対応」セクション新設と翻訳キー定義により完全に解消。SF-1-4の全指摘（テスト計画、api-client.ts、ドキュメント更新、開発モードキャッシュ）も適切に対処済み。NTH-3（型定義ファイル）も「型定義」セクションの追加で解消。新規の指摘は、(1) 新規i18n名前空間追加時のsrc/i18n.ts変更の漏れ（SF-1）と (2) globalThisパターン適用時の技術的詳細の記載不足（SF-2）の2点のみで、いずれもShould Fixレベル。NTH指摘はInfoModal既存文字列のi18n状態の認識（NTH-1）とwithLogging()パターンの適用検討（NTH-2）で、いずれも実装品質向上のための参考情報。影響範囲の網羅性は前回Stage 3から大幅に改善されており、Issueは実装可能な品質に達している。"
+}

@@ -1,0 +1,69 @@
+{
+  "issue_number": 257,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IMP-001",
+        "item": "WorktreeDetailWebSocket.test.tsx のバージョン表示DOM変更による既存テスト影響の記載",
+        "section_updated": "Section 10 (ファイル構成), Section 12 (実装優先順位), Section 14 (レビュー指摘事項サマリー), Section 15 (実装チェックリスト)",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IMP-SF-001",
+        "item": "fetchApi Content-Type自動付与のJSDoc記録による将来の開発者への注意喚起",
+        "section_updated": "Section 1 (レイヤー構成), Section 10 (変更ファイル), Section 12 (実装優先順位), Section 14 (レビュー指摘事項サマリー), Section 15 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "IMP-SF-002",
+        "item": "/api/app/ パス命名のPRレビュー時の妥当性説明準備",
+        "section_updated": "Section 14 (レビュー指摘事項サマリー), Section 15 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "IMP-SF-003",
+        "item": "declare global eslint-disable パターンの auto-yes-manager.ts 準拠と lint 確認",
+        "section_updated": "Section 3-1 (globalThisキャッシュパターン), Section 12 (実装優先順位), Section 14 (レビュー指摘事項サマリー), Section 15 (実装チェックリスト)",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IMP-C01",
+        "item": "useUpdateCheck.test.ts をファイル構成に追加",
+        "section_updated": "Section 10 (新規ファイル), Section 12 (実装優先順位), Section 14 (レビュー指摘事項サマリー), Section 15 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "IMP-C02",
+        "item": "CLAUDE.md に4モジュール全て追記する方針を記録",
+        "section_updated": "Section 10 (ドキュメント更新), Section 12 (実装優先順位), Section 14 (レビュー指摘事項サマリー), Section 15 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "IMP-C03",
+        "item": "worktree.json i18nキー追加のバンドルサイズ影響（軽微、アクション不要）",
+        "section_updated": "Section 14 (レビュー指摘事項サマリー)",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-257-version-update-notification-design-policy.md",
+  "sections_updated": [
+    "Section 1 (レイヤー構成) - IMP-SF-001 JSDoc記録の注記追加",
+    "Section 3-1 (globalThisキャッシュパターン) - IMP-SF-003 eslint-disableコメント強化",
+    "Section 10 (ファイル構成) - IMP-001 影響テストファイル追加, IMP-C01 hooksテスト追加, IMP-C02 CLAUDE.md更新範囲拡張",
+    "Section 12 (実装優先順位) - IMP-001/IMP-SF-001/IMP-SF-003/IMP-C01/IMP-C02 反映",
+    "Section 13 (レビュー履歴) - Stage 3 追加",
+    "Section 14 (レビュー指摘事項サマリー) - Stage 3 全findings追加",
+    "Section 15 (実装チェックリスト) - Stage 3 Must Fix/Should Fix/Consider項目追加"
+  ],
+  "timestamp": "2026-02-13T00:00:00Z"
+}
