@@ -1087,10 +1087,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setEditorFilePath(null);
   }, []);
 
-  /** Handle file save in editor - can refresh tree if needed */
-  const handleEditorSave = useCallback((savedPath: string) => {
-    // File was saved - could trigger tree refresh here if needed
-    console.log('[WorktreeDetailRefactored] File saved:', savedPath);
+  /** Handle file save in editor - refresh tree to reflect changes */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- savedPath accepted for callback interface compatibility
+  const handleEditorSave = useCallback((_savedPath: string) => {
+    setFileTreeRefresh(prev => prev + 1);
   }, []);
 
   /** Handle left pane tab change */

@@ -575,7 +575,7 @@ describe('version-checker', () => {
       expect(result).toBeNull();
     });
 
-    it('should pass cache: no-store to fetch to prevent Next.js Data Cache [SEC-SF-002]', async () => {
+    it('should pass cache: no-store to fetch to prevent Next.js Data Cache [Issue #278]', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,

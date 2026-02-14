@@ -104,16 +104,6 @@ export function MobileTabBar({
   hasUpdate = false,
 }: MobileTabBarProps) {
   /**
-   * Handle tab click
-   */
-  const handleTabClick = useCallback(
-    (tab: MobileTab) => {
-      onTabChange(tab);
-    },
-    [onTabChange]
-  );
-
-  /**
    * Get tab styles based on active state
    */
   const getTabStyles = useCallback(
@@ -166,7 +156,7 @@ export function MobileTabBar({
           role="tab"
           aria-selected={activeTab === tab.id}
           aria-label={tab.label}
-          onClick={() => handleTabClick(tab.id)}
+          onClick={() => onTabChange(tab.id)}
           className={getTabStyles(tab.id)}
         >
           {tab.icon}
