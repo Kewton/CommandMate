@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-02-14
+
+### Fixed
+- Claude CLI session recovery: cache invalidation, health check, and CLAUDECODE env removal (Issue #265)
+  - `clearCachedClaudePath()` for automatic recovery on CLI update
+  - `isSessionHealthy()` / `ensureHealthySession()` for broken session detection and recreation
+  - `sanitizeSessionEnvironment()` to remove CLAUDECODE environment variable
+  - `getCleanPaneOutput()` common helper and `isValidClaudePath()` validation
+  - Session error pattern detection via `CLAUDE_SESSION_ERROR_PATTERNS` / `CLAUDE_SESSION_ERROR_REGEX_PATTERNS`
+- Preserve input content on browser tab visibility change (Issue #266)
+  - Input field content no longer cleared when switching browser tabs
+
+### Changed
+- Refactored `WorktreeDetailRefactored` component for DRY compliance (Issue #266)
+  - Extracted shared hooks and components
+
 ## [0.2.6] - 2026-02-14
 
 ### Fixed
@@ -409,7 +425,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.6...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/Kewton/CommandMate/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/Kewton/CommandMate/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Kewton/CommandMate/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Kewton/CommandMate/compare/v0.2.3...v0.2.4
