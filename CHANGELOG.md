@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-02-14
+
+### Added
+- User feedback links in Info modal (Issue #264)
+  - `FeedbackSection` component with bug report, feature request, question links
+  - Desktop (InfoModal) and mobile (MobileInfoContent) support
+  - i18n support (en/ja)
+- `commandmate issue` CLI command with gh CLI integration (Issue #264)
+  - `commandmate issue create --bug/--feature/--question` for templated issue creation
+  - `commandmate issue search <query>` for issue search
+  - `commandmate issue list` for issue listing
+- `commandmate docs` CLI command for RAG-like documentation access (Issue #264)
+  - `commandmate docs --section <name>` for specific documentation sections
+  - `commandmate docs --search <query>` for documentation search
+  - `commandmate docs --all` for full documentation output
+- AI tool integration guide displayed after `commandmate init` (Issue #264)
+- GitHub URL constants centralized in `src/config/github-links.ts` (Issue #264)
+
+### Fixed
+- docs-reader path resolution for built CLI (Issue #264)
+
 ## [0.2.4] - 2026-02-13
 
 ### Added
@@ -382,7 +403,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.4...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/Kewton/CommandMate/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Kewton/CommandMate/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Kewton/CommandMate/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Kewton/CommandMate/compare/v0.2.1...v0.2.2
