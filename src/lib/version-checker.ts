@@ -164,8 +164,14 @@ export function sanitizeReleaseName(name: string, tagName: string): string {
 
 /**
  * Check GitHub Releases for newer versions.
- * Uses in-memory cache (globalThis) with 1-hour TTL.
+ * Uses in-memory cache (globalThis.__versionCheckCache) with 1-hour TTL.
  * Silently fails on network errors, timeouts, or API issues.
+ *
+ * [SF-002] Multiple calls within the same process are safe: the globalThis cache
+ * (1-hour TTL) ensures that only the first call triggers a network request.
+ * Subsequent calls within the TTL window return the cached result without
+ * network overhead. The cache is stored in globalThis.__versionCheckCache
+ * and automatically invalidated after CACHE_TTL_MS (1 hour).
  *
  * @returns Update check result, or null on failure
  */
@@ -186,6 +192,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult | null> {
         'Accept': 'application/vnd.github+json',
         'User-Agent': `CommandMate/${getCurrentVersion()}`, // [SEC-SF-002]
       },
+      cache: 'no-store', // Issue #278: Prevent Next.js Data Cache from caching GitHub API responses
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 

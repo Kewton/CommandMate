@@ -62,6 +62,12 @@ vi.mock('@/hooks/useSlashCommands', () => ({
   }),
 }));
 
+// Mock useUpdateCheck hook (Issue #278: IMP-SF-001)
+const mockUseUpdateCheck = vi.fn();
+vi.mock('@/hooks/useUpdateCheck', () => ({
+  useUpdateCheck: () => mockUseUpdateCheck(),
+}));
+
 // Mock child components to isolate unit tests
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
   WorktreeDesktopLayout: ({ leftPane, rightPane }: { leftPane: React.ReactNode; rightPane: React.ReactNode }) => (
@@ -111,7 +117,7 @@ vi.mock('@/components/mobile/MobileHeader', () => ({
 }));
 
 vi.mock('@/components/mobile/MobileTabBar', () => ({
-  MobileTabBar: ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => (
+  MobileTabBar: ({ activeTab, onTabChange, hasUpdate }: { activeTab: string; onTabChange: (tab: string) => void; hasUpdate?: boolean }) => (
     <nav data-testid="mobile-tab-bar" role="tablist">
       <button role="tab" aria-selected={activeTab === 'terminal'} aria-label="Terminal" onClick={() => onTabChange('terminal')}>
         Terminal
@@ -119,6 +125,7 @@ vi.mock('@/components/mobile/MobileTabBar', () => ({
       <button role="tab" aria-selected={activeTab === 'history'} aria-label="History" onClick={() => onTabChange('history')}>
         History
       </button>
+      {hasUpdate && <span data-testid="mobile-update-indicator">Update</span>}
     </nav>
   ),
 }));
@@ -211,6 +218,13 @@ describe('WorktreeDetailRefactored', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsMobile.mockReturnValue(false);
+
+    // Default useUpdateCheck mock: no update available (Issue #278)
+    mockUseUpdateCheck.mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+    });
 
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/messages')) {
@@ -1203,6 +1217,87 @@ describe('WorktreeDetailRefactored', () => {
         expect(screen.queryByText(/error loading worktree/i)).not.toBeInTheDocument();
         expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Update Notification Indicator (Issue #278, IMP-SF-001)', () => {
+    it('should show info-update-indicator when update is available (Desktop)', async () => {
+      mockIsMobile.mockReturnValue(false);
+      mockUseUpdateCheck.mockReturnValue({
+        data: { hasUpdate: true, latestVersion: '2.0.0', currentVersion: '1.0.0' },
+        loading: false,
+        error: null,
+      });
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('info-update-indicator')).toBeInTheDocument();
+      });
+    });
+
+    it('should not show info-update-indicator when no update is available (Desktop)', async () => {
+      mockIsMobile.mockReturnValue(false);
+      mockUseUpdateCheck.mockReturnValue({
+        data: { hasUpdate: false },
+        loading: false,
+        error: null,
+      });
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('info-update-indicator')).not.toBeInTheDocument();
+    });
+
+    it('should not show info-update-indicator when data is null (Desktop)', async () => {
+      mockIsMobile.mockReturnValue(false);
+      mockUseUpdateCheck.mockReturnValue({
+        data: null,
+        loading: false,
+        error: null,
+      });
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('info-update-indicator')).not.toBeInTheDocument();
+    });
+
+    it('should pass hasUpdate prop to MobileTabBar when update is available (Mobile)', async () => {
+      mockIsMobile.mockReturnValue(true);
+      mockUseUpdateCheck.mockReturnValue({
+        data: { hasUpdate: true, latestVersion: '2.0.0', currentVersion: '1.0.0' },
+        loading: false,
+        error: null,
+      });
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        // The mocked MobileTabBar renders a mobile-update-indicator when hasUpdate is true
+        expect(screen.getByTestId('mobile-update-indicator')).toBeInTheDocument();
+      });
+    });
+
+    it('should not pass hasUpdate to MobileTabBar when no update is available (Mobile)', async () => {
+      mockIsMobile.mockReturnValue(true);
+      mockUseUpdateCheck.mockReturnValue({
+        data: { hasUpdate: false },
+        loading: false,
+        error: null,
+      });
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('mobile-tab-bar')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('mobile-update-indicator')).not.toBeInTheDocument();
     });
   });
 });
