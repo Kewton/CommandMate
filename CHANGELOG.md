@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-02-14
+
+### Fixed
+- Update check API fetch caching issue with `cache: 'no-store'` (Issue #278)
+- Update notification indicator dot on Info tab and mobile tab bar (Issue #278)
+  - `NotificationDot` reusable component for visual update alerts
+
 ## [0.2.7] - 2026-02-14
 
 ### Fixed
@@ -425,7 +432,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.7...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/Kewton/CommandMate/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/Kewton/CommandMate/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/Kewton/CommandMate/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Kewton/CommandMate/compare/v0.2.4...v0.2.5

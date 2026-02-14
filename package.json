@@ -1,6 +1,6 @@
 {
   "name": "commandmate",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Git worktree management with Claude CLI and tmux sessions",
   "repository": {
     "type": "git",
