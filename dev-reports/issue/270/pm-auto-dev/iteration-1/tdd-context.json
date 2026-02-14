@@ -1,0 +1,18 @@
+{
+  "issue_number": 270,
+  "title": "fix(#257): update-checkルートが静的プリレンダリングされGitHub APIが呼ばれない",
+  "acceptance_criteria": [
+    "ビルド出力で /api/app/update-check が ƒ (Dynamic) になっていること",
+    ".next/server/app/api/app/update-check.body がビルド後に存在しないこと",
+    "サーバー起動後に curl /api/app/update-check でリアルタイムのGitHub API結果が返ること",
+    "新バージョンリリース後に hasUpdate: true が返ること"
+  ],
+  "implementation_tasks": [
+    "src/app/api/app/update-check/route.ts に export const dynamic = 'force-dynamic' を追加",
+    "コメントで Issue #270 と変更理由を記載",
+    "dynamic export のリグレッション防止テストを追加"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-270-update-check-static-prerender-design-policy.md",
+  "work_plan_path": "dev-reports/issue/270/work-plan.md"
+}

@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 17,
+    "passed": 17,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/app/api/app/update-check/route.ts",
+    "tests/unit/api/update-check.test.ts"
+  ],
+  "commits": [
+    "6f4e6d9: fix(#270): add force-dynamic to update-check route"
+  ],
+  "message": "TDD implementation complete. Added `export const dynamic = 'force-dynamic'` to prevent static prerendering. Regression test added. All 17 tests pass, 0 ESLint errors, 0 TypeScript errors."
+}

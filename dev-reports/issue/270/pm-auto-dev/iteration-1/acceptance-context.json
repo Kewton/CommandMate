@@ -1,0 +1,23 @@
+{
+  "issue_number": 270,
+  "feature_summary": "fix(#257): update-checkルートが静的プリレンダリングされGitHub APIが呼ばれない",
+  "acceptance_criteria": [
+    "ビルド出力で /api/app/update-check が ƒ (Dynamic) になっていること",
+    ".next/server/app/api/app/update-check.body がビルド後に存在しないこと",
+    "サーバー起動後に curl /api/app/update-check でリアルタイムのGitHub API結果が返ること",
+    "新バージョンリリース後に hasUpdate: true が返ること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: ビルド出力の確認 - npm run build 実行後に /api/app/update-check が ƒ (Dynamic) と表示される",
+    "シナリオ2: 静的ファイル非生成の確認 - .next/server/app/api/app/update-check.body が存在しない",
+    "シナリオ3: ユニットテストの確認 - dynamic export のテストが存在し、パスする",
+    "シナリオ4: リグレッション防止 - 既存の全テストがパスする"
+  ],
+  "implementation_result": {
+    "files_changed": [
+      "src/app/api/app/update-check/route.ts",
+      "tests/unit/api/update-check.test.ts"
+    ],
+    "test_status": "17/17 passed"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "issue_number": 270,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SEC-S4-001",
+        "item": "publishedAt field passes through without validation",
+        "section_updated": "既存の潜在的セキュリティ問題",
+        "status": "reflected_as_out_of_scope",
+        "reason": "Pre-existing issue from Issue #257, not introduced by Issue #270"
+      },
+      {
+        "id": "SEC-S4-002",
+        "item": "latestVersion field passes through without sanitization after v-prefix stripping",
+        "section_updated": "既存の潜在的セキュリティ問題",
+        "status": "reflected_as_out_of_scope",
+        "reason": "Pre-existing issue from Issue #257, not introduced by Issue #270"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-S4-C01",
+        "item": "Content-Type/X-Content-Type-Options headers",
+        "section_updated": "既存の潜在的セキュリティ問題 > 将来改善候補",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-S4-C02",
+        "item": "dynamic exportのテスト追加",
+        "section_updated": "既存の潜在的セキュリティ問題 > 将来改善候補",
+        "status": "reflected",
+        "note": "Already planned in section 6 (テスト戦略)"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-270-update-check-static-prerender-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー",
+    "既存の潜在的セキュリティ問題"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

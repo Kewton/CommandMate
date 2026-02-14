@@ -1,0 +1,165 @@
+{
+  "issue_number": 270,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "IMP-C-001",
+        "title": "Other API routes potentially affected by the same static prerendering issue",
+        "description": "The /api/repositories/excluded route (GET handler without NextRequest parameter or dynamic export) and /api/slash-commands route (uses NextRequest but reads from filesystem) could theoretically be statically prerendered at build time. These routes read from database/filesystem, so they implicitly become dynamic, but lack the explicit force-dynamic safeguard. This is outside Issue #270 scope but represents a latent risk. This aligns with Stage 1 finding C-002.",
+        "category": "indirect_impact",
+        "severity": "info"
+      },
+      {
+        "id": "IMP-C-002",
+        "title": "Rollback is trivially safe with zero migration needed",
+        "description": "The rollback strategy (removing a single export const line) restores the original static prerendering behavior. Since this is a bug fix rather than a data model or schema change, no migration strategy is needed. The design policy could explicitly document this rollback path for completeness, but it is straightforward enough that the omission is not a concern.",
+        "category": "rollback",
+        "severity": "info"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/app/api/app/update-check/route.ts",
+        "change": "Add export const dynamic = 'force-dynamic' after imports",
+        "risk": "low",
+        "rationale": "Single line addition. Does not modify any function logic, type definitions, or exports. The GET handler, helper functions, types, and constants remain unchanged."
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "src/lib/version-checker.ts",
+        "impact": "none",
+        "rationale": "This module provides checkForUpdate() and getCurrentVersion() consumed by the route handler. The change does not alter how these functions are called. The globalThis cache with 1-hour TTL continues to rate-limit GitHub API calls regardless of dynamic vs static rendering."
+      },
+      {
+        "file": "src/hooks/useUpdateCheck.ts",
+        "impact": "none",
+        "rationale": "Client-side hook that calls /api/app/update-check via fetchApi. The API contract (request/response shape, HTTP status codes) is unchanged. The hook will now receive fresh data instead of stale build-time data, which is the desired behavior."
+      },
+      {
+        "file": "src/components/worktree/VersionSection.tsx",
+        "impact": "none (positive behavioral change)",
+        "rationale": "Consumes useUpdateCheck hook output. The component will now correctly show update notifications when new versions exist, instead of always displaying the build-time result. No code change required in this file."
+      },
+      {
+        "file": "src/components/worktree/UpdateNotificationBanner.tsx",
+        "impact": "none (positive behavioral change)",
+        "rationale": "Renders update notification when hasUpdate is true. With the fix, this component will actually function as intended when new versions are released."
+      },
+      {
+        "file": "src/lib/api-client.ts",
+        "impact": "none",
+        "rationale": "The appApi.checkForUpdate() method makes a GET request to the endpoint. The API contract is unchanged."
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact": "none",
+        "rationale": "Contains VersionSection at two locations (lines 510, 778). No code change required; behavior improvement is inherited through VersionSection."
+      },
+      {
+        "file": "tests/unit/api/update-check.test.ts",
+        "impact": "none",
+        "rationale": "Tests import and call the GET function directly with mocked dependencies. Module-level const exports do not affect function-level test execution. The design proposes adding a new test for the dynamic export, which is additive only."
+      }
+    ],
+    "unaffected_modules": [
+      {
+        "category": "Other API routes",
+        "rationale": "The 35 other API route files are completely independent. The dynamic export is scoped to a single route module."
+      },
+      {
+        "category": "Database layer",
+        "rationale": "No database schema, migration, or query changes. The update-check endpoint does not interact with the database."
+      },
+      {
+        "category": "CLI modules",
+        "rationale": "src/cli/ modules are unaffected. The isGlobalInstall() cross-layer import is read-only and unchanged."
+      },
+      {
+        "category": "Build configuration",
+        "rationale": "next.config.js requires no changes. The dynamic export is a per-route Next.js mechanism."
+      },
+      {
+        "category": "Internationalization",
+        "rationale": "i18n translation keys for update notifications are unchanged."
+      },
+      {
+        "category": "Security infrastructure",
+        "rationale": "Cache-Control headers (SEC-SF-003), SSRF prevention (SEC-001), response validation (SEC-SF-001), and CSP headers in next.config.js are all unaffected."
+      }
+    ]
+  },
+  "dependency_chain": {
+    "upstream": [
+      "GitHub Releases API (external, unchanged)",
+      "src/lib/version-checker.ts (unchanged)",
+      "src/cli/utils/install-context.ts (unchanged)"
+    ],
+    "downstream": [
+      "src/lib/api-client.ts (appApi.checkForUpdate, unchanged)",
+      "src/hooks/useUpdateCheck.ts (unchanged)",
+      "src/components/worktree/VersionSection.tsx (unchanged)",
+      "src/components/worktree/UpdateNotificationBanner.tsx (unchanged)",
+      "src/components/worktree/WorktreeDetailRefactored.tsx (unchanged)"
+    ]
+  },
+  "rollback_strategy": {
+    "complexity": "trivial",
+    "steps": [
+      "Remove the single line: export const dynamic = 'force-dynamic'",
+      "Remove the associated comment block",
+      "Run npm run build to verify route returns to static (circle symbol)",
+      "Remove the dynamic export unit test if added"
+    ],
+    "data_migration_required": false,
+    "breaking_changes": false,
+    "downtime_required": false
+  },
+  "build_impact": {
+    "before": "/api/app/update-check rendered as static (circle symbol) in build output",
+    "after": "/api/app/update-check rendered as dynamic (f symbol) in build output",
+    "bundle_size_impact": "negligible (single const export)",
+    "build_time_impact": "none"
+  },
+  "runtime_impact": {
+    "before": "Route handler never executes at runtime; cached build-time response served",
+    "after": "Route handler executes on each request; version-checker.ts globalThis cache limits GitHub API calls to 1/hour",
+    "performance_concern": "minimal - cache ensures at most 1 external API call per hour with 5-second timeout",
+    "memory_impact": "none (globalThis cache already exists and is used in dev mode)"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-270-update-check-static-prerender-design-policy.md",
+    "src/app/api/app/update-check/route.ts",
+    "src/lib/version-checker.ts",
+    "src/hooks/useUpdateCheck.ts",
+    "src/components/worktree/VersionSection.tsx",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/lib/api-client.ts",
+    "tests/unit/api/update-check.test.ts",
+    "next.config.js",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/external-apps/route.ts",
+    "src/app/api/external-apps/[id]/route.ts",
+    "src/app/api/external-apps/[id]/health/route.ts",
+    "src/app/proxy/[...path]/route.ts",
+    "src/app/api/repositories/excluded/route.ts",
+    "src/app/api/slash-commands/route.ts",
+    "src/app/api/hooks/claude-done/route.ts"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

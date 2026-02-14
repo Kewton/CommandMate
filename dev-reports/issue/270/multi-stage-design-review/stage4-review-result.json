@@ -1,0 +1,102 @@
+{
+  "issue_number": 270,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SEC-S4-001",
+        "title": "publishedAt field passes through without validation",
+        "description": "The published_at field from GitHub API response is passed directly to the client without any format validation or sanitization. While React auto-escapes text content preventing XSS, a malformed string could cause unexpected client-side behavior if parsed as a date.",
+        "severity": "low",
+        "owasp": "A03:2021 - Injection",
+        "recommendation": "Add ISO 8601 date format validation for published_at similar to how tag_name, html_url, and name are validated."
+      },
+      {
+        "id": "SEC-S4-002",
+        "title": "latestVersion field passes through without sanitization after v-prefix stripping",
+        "description": "In version-checker.ts line 205, latestVersion is derived via data.tag_name.replace(/^v/, '') and included in the response. While tag_name is validated by SEMVER_PATTERN in isNewerVersion(), the latestVersion string itself is stored in the result without explicit validation before being sent to the client.",
+        "severity": "low",
+        "owasp": "A03:2021 - Injection",
+        "recommendation": "Add explicit SEMVER_PATTERN validation for latestVersion before including it in the UpdateCheckResult. If tag_name does not match semver, set latestVersion to a safe fallback."
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-S4-C01",
+        "title": "Consider adding Content-Type and X-Content-Type-Options headers explicitly",
+        "description": "While NextResponse.json() sets Content-Type automatically, explicitly setting X-Content-Type-Options: nosniff on the API response would provide defense-in-depth against MIME type confusion attacks.",
+        "owasp": "A05:2021 - Security Misconfiguration"
+      },
+      {
+        "id": "SEC-S4-C02",
+        "title": "Consider adding a test for dynamic export in route.ts",
+        "description": "The design policy mentions adding a test to verify the dynamic export equals 'force-dynamic'. This is the core change of Issue #270 and should have explicit test coverage to prevent regression.",
+        "owasp": "N/A - Test coverage"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "notes": "Endpoint is public by design (version check does not require auth). No authorization needed."
+    },
+    "A02_cryptographic_failures": {
+      "status": "pass",
+      "notes": "No sensitive data handled. GitHub API uses HTTPS. No encryption needed."
+    },
+    "A03_injection": {
+      "status": "pass_with_notes",
+      "notes": "Release URL validated (validateReleaseUrl), release name sanitized (sanitizeReleaseName), semver validated. Minor: publishedAt and latestVersion pass through without explicit format validation."
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "Silent failure pattern (always HTTP 200) is intentional for non-critical feature. Cache with TTL prevents abuse."
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "Cache-Control: no-store headers applied (SEC-SF-003). force-dynamic prevents stale cached responses. Pragma: no-cache for legacy proxy support."
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "pass",
+      "notes": "Uses Next.js built-in NextResponse and standard fetch API. No additional dependencies introduced."
+    },
+    "A07_identification_auth_failures": {
+      "status": "not_applicable",
+      "notes": "Public endpoint. No authentication required."
+    },
+    "A08_software_data_integrity_failures": {
+      "status": "pass",
+      "notes": "GITHUB_API_URL is hardcoded (SEC-001 SSRF prevention). Response data validated before use. No CI/CD pipeline changes."
+    },
+    "A09_security_logging_monitoring_failures": {
+      "status": "pass",
+      "notes": "Silent failure is acceptable for non-critical version check. Errors do not leak internal details. Status field (success/degraded) enables monitoring."
+    },
+    "A10_server_side_request_forgery": {
+      "status": "pass",
+      "notes": "GITHUB_API_URL is a hardcoded constant (SEC-001). Not derived from user input, environment variables, or configuration files."
+    }
+  },
+  "reviewed_files": [
+    "src/app/api/app/update-check/route.ts",
+    "src/lib/version-checker.ts",
+    "src/hooks/useUpdateCheck.ts",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/VersionSection.tsx",
+    "src/config/github-links.ts",
+    "src/lib/api-client.ts",
+    "tests/unit/api/update-check.test.ts",
+    "tests/unit/lib/version-checker.test.ts"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

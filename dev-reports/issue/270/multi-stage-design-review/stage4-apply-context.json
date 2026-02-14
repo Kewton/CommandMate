@@ -1,0 +1,22 @@
+{
+  "issue_number": 270,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_result_path": "dev-reports/issue/270/multi-stage-design-review/stage4-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-270-update-check-static-prerender-design-policy.md",
+  "action": "update_design_policy_only",
+  "should_fix_items": [
+    {
+      "id": "SEC-S4-001",
+      "title": "publishedAt field passes through without validation",
+      "is_pre_existing": true,
+      "introduced_in": "Issue #257"
+    },
+    {
+      "id": "SEC-S4-002",
+      "title": "latestVersion field passes through without sanitization after v-prefix stripping",
+      "is_pre_existing": true,
+      "introduced_in": "Issue #257"
+    }
+  ]
+}

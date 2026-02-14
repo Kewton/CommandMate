@@ -6,6 +6,7 @@
 
 | Issue | 種別 | 概要 | 主要変更ファイル | 設計書 |
 |-------|------|------|-----------------|--------|
+| #270 | fix | update-checkルート静的プリレンダリング修正（force-dynamic追加、リグレッション防止テスト） | `update-check/route.ts`, `update-check.test.ts` | [link](../dev-reports/design/issue-270-update-check-static-prerender-design-policy.md) |
 | #264 | feat | ユーザーからの問い合わせリンク（FeedbackSection UI、issue/docs CLIコマンド、gh CLI統合、GitHub URL一元管理、AIツール統合ガイド） | `github-links.ts`, `FeedbackSection.tsx`, `issue.ts`, `docs.ts`, `docs-reader.ts`, `input-validators.ts`, `cli-dependencies.ts`, `init.ts`, `cli/index.ts` | [link](../dev-reports/design/issue-264-feedback-and-docs-design-policy.md) |
 | #257 | feat | バージョンアップ通知機能（GitHub Releases API、semver比較、globalThisキャッシュ、Silent Failure、OWASP Top 10準拠、i18n対応） | `version-checker.ts`, `useUpdateCheck.ts`, `UpdateNotificationBanner.tsx`, `VersionSection.tsx`, `update-check/route.ts`, `api-client.ts`, `WorktreeDetailRefactored.tsx` | [link](../dev-reports/design/issue-257-version-update-notification-design-policy.md) |
 | #256 | fix | 選択メッセージ検出精度向上（複数行質問対応、isQuestionLikeLine Pattern 2/4追加、SEC-001b上方走査、MF-001 SRP遵守、リファクタリング） | `prompt-detector.ts`, `prompt-type-guards.ts`, unit/integration tests | [link](../dev-reports/design/issue-256-multiple-choice-prompt-detection-design-policy.md) |

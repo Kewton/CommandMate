@@ -1,0 +1,76 @@
+{
+  "issue_number": 270,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "dynamic export placement convention consistency",
+        "description": "The design policy specifies placing `export const dynamic` after imports and before type definitions, which matches external-apps/route.ts. However, worktrees/route.ts places it between import statements. The design doc should note this minor inconsistency in the existing codebase and confirm which convention to follow.",
+        "principle": "DRY/Consistency",
+        "severity": "low"
+      },
+      {
+        "id": "C-002",
+        "title": "Consider broader audit of API routes missing force-dynamic",
+        "description": "Only 5 out of 36 API route files use `export const dynamic = 'force-dynamic'`. While this issue only addresses the update-check route (correctly following YAGNI), a future audit could identify other routes that may suffer from the same static prerendering issue.",
+        "principle": "YAGNI (acceptable scope limitation)",
+        "severity": "info"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principles_evaluation": {
+    "single_responsibility": {
+      "status": "pass",
+      "comment": "The change is scoped to a single concern: preventing static prerendering. The route handler maintains its existing SRP with well-separated helpers (detectInstallType, buildResponse, toUpdateCheckResponse)."
+    },
+    "open_closed": {
+      "status": "pass",
+      "comment": "Adding the dynamic export extends route behavior without modifying any existing function signatures or logic. The existing code is open for this kind of behavioral extension."
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "comment": "No inheritance or polymorphism involved in this change."
+    },
+    "interface_segregation": {
+      "status": "pass",
+      "comment": "The UpdateCheckResponse interface remains focused and cohesive. No unnecessary fields are added."
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "comment": "The route handler depends on abstractions (checkForUpdate, isGlobalInstall) via imports, not concrete implementations. The existing design properly separates the API layer from the version-checking logic."
+    },
+    "kiss": {
+      "status": "pass",
+      "comment": "The fix is a single line addition. This is the simplest possible solution to the problem. The design doc correctly evaluated and rejected more complex alternatives."
+    },
+    "yagni": {
+      "status": "pass",
+      "comment": "No unnecessary features are introduced. The change addresses exactly one problem. No speculative additions such as configurable caching strategies or ISR revalidation."
+    },
+    "dry": {
+      "status": "pass",
+      "comment": "The solution reuses the established project pattern used in 5 other route files. The inline comment with issue number follows the project convention for traceability."
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-270-update-check-static-prerender-design-policy.md",
+    "src/app/api/app/update-check/route.ts",
+    "src/lib/version-checker.ts",
+    "tests/unit/api/update-check.test.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/external-apps/route.ts"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

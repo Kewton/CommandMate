@@ -1,0 +1,131 @@
+{
+  "issue_number": 270,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "CON-001",
+        "title": "Placement convention minor inconsistency in existing codebase",
+        "description": "The design doc specifies placement 'after imports, before type definitions' following the external-apps pattern. However, worktrees/route.ts places the dynamic export between import statements (line 10, before subsequent imports). This is a pre-existing inconsistency in the codebase, not introduced by this design. The design correctly follows the majority pattern (4 of 5 prior examples place it after all imports). Stage 1 review also noted this as C-001.",
+        "category": "consistency",
+        "severity": "info"
+      },
+      {
+        "id": "CON-002",
+        "title": "Comment style differs slightly across prior examples",
+        "description": "The design proposes a multi-line comment with Issue number reference: '// [FIX-270] Force dynamic route to prevent static prerendering at build time.' Existing routes use shorter inline comments: '// Force dynamic rendering - this route uses searchParams and database access' (worktrees) or '// Force dynamic rendering' (external-apps). The proposed comment is more detailed and includes the issue number for traceability, which is an improvement over existing conventions rather than a deviation. This is acceptable and beneficial.",
+        "category": "consistency",
+        "severity": "info"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "Target file",
+      "design_spec": "src/app/api/app/update-check/route.ts",
+      "actual_state": "File exists at specified path. Currently does NOT contain dynamic export.",
+      "gap": "none (change not yet applied; design correctly identifies the target)"
+    },
+    {
+      "design_item": "Change content",
+      "design_spec": "Add export const dynamic = 'force-dynamic'",
+      "actual_state": "The export does not exist in the current file. The route is currently statically renderable.",
+      "gap": "none (this is the intended fix)"
+    },
+    {
+      "design_item": "Placement position",
+      "design_spec": "After import statements, before type definitions (Section 4)",
+      "actual_state": "Current file has imports on lines 18-22, then type definitions starting at line 29. The proposed placement between line 22 and line 24 is correct.",
+      "gap": "none"
+    },
+    {
+      "design_item": "Prior examples count",
+      "design_spec": "5 prior examples listed in Section 3",
+      "actual_state": "All 5 files verified: worktrees/route.ts, external-apps/route.ts, external-apps/[id]/route.ts, external-apps/[id]/health/route.ts, proxy/[...path]/route.ts. All contain export const dynamic = 'force-dynamic'.",
+      "gap": "none (all 5 accurately documented)"
+    },
+    {
+      "design_item": "Import statements in code example",
+      "design_spec": "Section 4 shows: NextResponse, checkForUpdate/getCurrentVersion, isGlobalInstall, UpdateCheckResult type",
+      "actual_state": "route.ts lines 18-22 contain exactly these imports in the same order.",
+      "gap": "none"
+    },
+    {
+      "design_item": "Security impact assessment",
+      "design_spec": "No security risk. Existing SEC-SF-003 (Cache-Control), SEC-001 (SSRF), SEC-SF-001 (response validation) maintained.",
+      "actual_state": "Verified: NO_CACHE_HEADERS const (line 71-74), GITHUB_API_URL hardcoded in version-checker.ts (line 27), validateReleaseUrl/sanitizeReleaseName functions present. All security measures are in separate modules and unaffected.",
+      "gap": "none"
+    },
+    {
+      "design_item": "Performance impact assessment",
+      "design_spec": "globalThis cache with 1-hour TTL limits actual GitHub API requests",
+      "actual_state": "Verified: version-checker.ts has CACHE_TTL_MS = 60 * 60 * 1000 (line 47), globalThis cache pattern (lines 86-96), isCacheValid() function (line 243-244).",
+      "gap": "none"
+    },
+    {
+      "design_item": "Existing test impact",
+      "design_spec": "tests/unit/api/update-check.test.ts unaffected because tests mock and call GET() directly",
+      "actual_state": "Verified: Test file (297 lines) imports GET directly and mocks all dependencies. Adding a module-level export const has no effect on test execution.",
+      "gap": "none"
+    },
+    {
+      "design_item": "Additional test: dynamic export verification",
+      "design_spec": "Add unit test verifying dynamic === 'force-dynamic'",
+      "actual_state": "Test does not yet exist (implementation not started).",
+      "gap": "none (pre-implementation review)"
+    },
+    {
+      "design_item": "Alternative analysis: revalidate = 0",
+      "design_spec": "Rejected due to semantic mismatch (ISR vs dynamic route)",
+      "actual_state": "Correct assessment. Next.js docs confirm revalidate = 0 controls ISR, while dynamic = 'force-dynamic' is the explicit opt-out from static generation.",
+      "gap": "none"
+    },
+    {
+      "design_item": "Alternative analysis: cookies()/headers()",
+      "design_spec": "Rejected as inappropriate side-effect usage",
+      "actual_state": "Correct assessment. Using dynamic functions purely as side effects for opt-out is an anti-pattern.",
+      "gap": "none"
+    },
+    {
+      "design_item": "Alternative analysis: unstable_noStore()",
+      "design_spec": "Rejected due to stability concerns",
+      "actual_state": "Correct assessment. This API is marked unstable in Next.js 14.",
+      "gap": "none"
+    },
+    {
+      "design_item": "Acceptance criteria completeness",
+      "design_spec": "5 acceptance criteria listed in Section 7",
+      "actual_state": "All criteria are verifiable: (1) build output check, (2) .next/server file absence check, (3) test pass, (4) tsc check, (5) lint check. All are concrete and measurable.",
+      "gap": "none"
+    },
+    {
+      "design_item": "CLAUDE.md compliance",
+      "design_spec": "Section 9 confirms KISS, YAGNI, DRY",
+      "actual_state": "Verified: single-line addition (KISS), no extraneous changes (YAGNI), reuses established pattern (DRY).",
+      "gap": "none"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-270-update-check-static-prerender-design-policy.md",
+    "src/app/api/app/update-check/route.ts",
+    "src/lib/version-checker.ts",
+    "tests/unit/api/update-check.test.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/external-apps/route.ts",
+    "src/app/api/external-apps/[id]/route.ts",
+    "src/app/api/external-apps/[id]/health/route.ts",
+    "src/app/proxy/[...path]/route.ts"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}
