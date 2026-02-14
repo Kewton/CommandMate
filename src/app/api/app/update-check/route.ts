@@ -21,6 +21,11 @@ import { checkForUpdate, getCurrentVersion } from '@/lib/version-checker';
 import { isGlobalInstall } from '@/cli/utils/install-context';
 import type { UpdateCheckResult } from '@/lib/version-checker';
 
+// [FIX-270] Force dynamic route to prevent static prerendering at build time.
+// Without this, Next.js caches the GitHub API response during `npm run build`
+// and the route handler is never called at runtime.
+export const dynamic = 'force-dynamic';
+
 // =============================================================================
 // Types
 // =============================================================================

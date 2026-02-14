@@ -23,10 +23,26 @@ vi.mock('@/cli/utils/install-context', () => ({
   isGlobalInstall: vi.fn().mockReturnValue(false),
 }));
 
-import { GET } from '@/app/api/app/update-check/route';
+import { GET, dynamic } from '@/app/api/app/update-check/route';
 import { checkForUpdate, getCurrentVersion } from '@/lib/version-checker';
 import { isGlobalInstall } from '@/cli/utils/install-context';
 import type { UpdateCheckResult } from '@/lib/version-checker';
+
+// =============================================================================
+// Route configuration [FIX-270]
+// =============================================================================
+
+describe('Route configuration', () => {
+  it('should export dynamic as force-dynamic to prevent static prerendering', () => {
+    // [FIX-270] Regression test: ensures Next.js treats this route as dynamic,
+    // not statically prerendered at build time.
+    expect(dynamic).toBe('force-dynamic');
+  });
+});
+
+// =============================================================================
+// GET handler
+// =============================================================================
 
 describe('GET /api/app/update-check', () => {
   beforeEach(() => {
