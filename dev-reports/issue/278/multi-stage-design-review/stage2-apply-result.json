@@ -1,0 +1,55 @@
+{
+  "issue_number": 278,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "CONS-SF-001",
+        "item": "DesktopHeader Infoボタンに relative クラスが不足 - absolute配置のNotificationDotが正しく表示されない",
+        "section_updated": "Section 4-2 (Desktop: DesktopHeader コンポーネント), Section 10 (受入条件), Section 11 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "CONS-SF-002",
+        "item": "MobileTabBar バッジ描画パターンの不整合 - 既存inline spanとNotificationDotの混在",
+        "section_updated": "Section 4-2 (Mobile: MobileTabBar コンポーネント), Section 11 (実装チェックリスト)",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "CONS-C-001",
+        "item": "aria-label英語固定は既存パターンと一致",
+        "section_updated": "Section 13 (レビュー指摘事項サマリー)",
+        "status": "noted"
+      },
+      {
+        "id": "CONS-C-002",
+        "item": "NotificationDot の common/ 配置は既存パターンと一致",
+        "section_updated": "Section 13 (レビュー指摘事項サマリー)",
+        "status": "noted"
+      },
+      {
+        "id": "CONS-C-003",
+        "item": "設計書の行番号参照は概算値",
+        "section_updated": "Section 13 (レビュー指摘事項サマリー)",
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+  "sections_updated": [
+    "Section 4-2: CONS-SF-001 DesktopHeader relative クラス追加の注記",
+    "Section 4-2: CONS-SF-002 MobileTabBar バッジパターン不整合の注記",
+    "Section 10: 受入条件に CONS-SF-001 関連項目追加",
+    "Section 11: 実装チェックリストに CONS-SF-001, CONS-SF-002 追加",
+    "Section 12: レビュー履歴に Stage 2 追加",
+    "Section 13: Stage 2 レビュー指摘事項サマリー追加"
+  ],
+  "timestamp": "2026-02-14T12:30:00Z"
+}

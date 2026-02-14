@@ -1,0 +1,57 @@
+{
+  "issue_number": 278,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "ドットバッジUIパターンの重複定義リスク (DRY)",
+        "section_updated": "4-2. アップデート通知インジケーター",
+        "status": "reflected",
+        "detail": "NotificationDot共通コンポーネントの抽出を設計に追加。アプローチA（共通コンポーネント）とアプローチB（定数定義）の比較を記載し、アプローチAを推奨。DesktopHeader/MobileTabBarのコード例をNotificationDot使用に変更。変更対象ファイルにNotificationDot.tsxとそのテストを追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "WorktreeDetailRefactored の責務過多へのさらなる追加 (SRP)",
+        "section_updated": "4-3. データの流れ（Props Drilling）",
+        "status": "reflected",
+        "detail": "WorktreeDetailRefactoredの責務過多に関する注記セクションを追加。現時点の許容判断理由と将来の責務分割計画（Issue起票推奨）を記載。"
+      },
+      {
+        "id": "SF-002",
+        "item": "useUpdateCheck の二重呼び出しに関する設計根拠の明確化 (DRY)",
+        "section_updated": "7. パフォーマンス設計",
+        "status": "reflected",
+        "detail": "useUpdateCheck二重呼び出しのキャッシュ動作セクションを追加。version-checker.tsのJSDocドキュメント化要件を明記。"
+      },
+      {
+        "id": "SF-003",
+        "item": "aria-label の言語一貫性 (KISS)",
+        "section_updated": "9. i18n対応",
+        "status": "reflected",
+        "detail": "aria-labelの言語方針セクションを拡充。実装前に既存コードベースとの一貫性確認手順を記載。確認対象ファイルを具体的に列挙。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+  "sections_updated": [
+    "3. 技術選定 - 通知UIの選定理由をMF-001対応に更新",
+    "4-2. アップデート通知インジケーター - NotificationDot共通コンポーネント設計追加 (MF-001)",
+    "4-3. データの流れ - WorktreeDetailRefactored責務過多の注記追加 (SF-001)",
+    "5. 変更対象ファイル - NotificationDot.tsx/テスト追加、version-checker.tsにJSDoc追記を追加",
+    "7. パフォーマンス設計 - useUpdateCheck二重呼び出しキャッシュ動作セクション追加 (SF-002)",
+    "8. 設計上の決定事項とトレードオフ - NotificationDot行追加、代替案3追加 (MF-001)",
+    "9. i18n対応 - aria-label言語方針の確認手順追加 (SF-003)",
+    "10. 受入条件 - MF-001/SF-002/SF-003の条件追加",
+    "11. 実装チェックリスト - 新規セクション追加",
+    "12. レビュー履歴 - 新規セクション追加",
+    "13. レビュー指摘事項サマリー - 新規セクション追加"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

@@ -1,0 +1,30 @@
+{
+  "issue_number": 278,
+  "refactor_targets": [
+    "src/lib/version-checker.ts",
+    "src/components/common/NotificationDot.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "tests/unit/lib/version-checker.test.ts",
+    "tests/unit/components/common/notification-dot.test.tsx",
+    "tests/unit/components/mobile/MobileTabBar.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "tests/integration/issue-278-acceptance.test.ts"
+  ],
+  "quality_metrics": {
+    "before_tests": 3342,
+    "before_passed": 3342,
+    "before_lint_errors": 0,
+    "before_type_errors": 0
+  },
+  "improvement_goals": [
+    "コード重複の削除",
+    "テストカバレッジの維持または向上",
+    "コードの可読性向上",
+    "SOLID原則の準拠確認",
+    "DRY原則の準拠確認（NotificationDot共通化による改善確認）",
+    "セキュリティ注記の適切性確認（SEC-SF-001）"
+  ],
+  "tdd_result_path": "dev-reports/issue/278/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/278/pm-auto-dev/iteration-1/acceptance-result.json"
+}

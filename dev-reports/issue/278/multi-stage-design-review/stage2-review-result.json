@@ -1,0 +1,115 @@
+{
+  "issue_number": 278,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "CONS-SF-001",
+        "title": "DesktopHeader Info button lacks 'relative' class for absolute-positioned NotificationDot",
+        "description": "The design specifies adding NotificationDot with 'className=\"absolute top-0 right-0\"' inside the Info button. However, the existing Info button (WorktreeDetailRefactored.tsx L550-571) does not have the 'relative' CSS class. Without 'relative' on the parent, absolute positioning will anchor to the nearest positioned ancestor, not the button. The MobileTabBar buttons already have 'relative' in their baseStyles (L118), so MobileTabBar is consistent. Implementation must add 'relative' to the DesktopHeader Info button className.",
+        "severity": "medium",
+        "category": "CSS positioning consistency"
+      },
+      {
+        "id": "CONS-SF-002",
+        "title": "MobileTabBar badge pattern inconsistency: existing badges use inline <span>, design uses NotificationDot component",
+        "description": "The existing terminal tab badges (hasNewOutput: bg-green-500, hasPrompt: bg-yellow-500) at MobileTabBar.tsx L133-148 use inline <span> elements with raw className strings. The new hasUpdate badge for the info tab will use the NotificationDot component. This creates a mixed pattern within the same component. This is acceptable for Issue #278 scope since the NotificationDot component is being introduced, but a future cleanup task should unify all badge rendering to use NotificationDot (as the design already notes for BranchListItem).",
+        "severity": "low",
+        "category": "component pattern consistency"
+      }
+    ],
+    "consider": [
+      {
+        "id": "CONS-C-001",
+        "title": "aria-label language consistency confirmed: English-only is correct",
+        "description": "All existing aria-label values across src/components/ use English strings (e.g., 'Has unread messages', 'Toggle sidebar', 'New output available', 'Stop processing'). The only exception is UpdateNotificationBanner.tsx which uses t('update.available') via next-intl. The design's decision to use English-fixed aria-labels ('Update available') for NotificationDot is consistent with the dominant codebase pattern. The UpdateNotificationBanner's i18n approach is the outlier.",
+        "severity": "info",
+        "category": "i18n consistency"
+      },
+      {
+        "id": "CONS-C-002",
+        "title": "NotificationDot placement within common/ directory is consistent with existing patterns",
+        "description": "The src/components/common/ directory already contains reusable components (Toast.tsx, LocaleSwitcher.tsx). Adding NotificationDot.tsx here follows the existing convention for shared UI primitives.",
+        "severity": "info",
+        "category": "directory structure consistency"
+      },
+      {
+        "id": "CONS-C-003",
+        "title": "Design document line references may be outdated",
+        "description": "The design references 'version-checker.ts L184-190' for the fetch call, but the actual line is L184-190 in the current codebase. Similarly, 'BranchListItem.tsx L109-116' is referenced but the actual unread indicator is at L110-116. These are close but implementation should verify exact locations rather than rely on line numbers.",
+        "severity": "info",
+        "category": "documentation accuracy"
+      }
+    ]
+  },
+  "consistency_matrix": {
+    "fetch_cache_fix": {
+      "design_description": "Add cache: 'no-store' to fetch call in version-checker.ts",
+      "implementation_status": "not_yet_implemented",
+      "consistency": "high",
+      "notes": "Design accurately describes the existing fetch call at L184-190. The fix is minimal and well-scoped. The distinction between Next.js Data Cache and globalThis cache is correctly documented."
+    },
+    "notification_dot_component": {
+      "design_description": "Create NotificationDot in src/components/common/ with data-testid, aria-label, className props",
+      "implementation_status": "not_yet_implemented",
+      "consistency": "high",
+      "notes": "Props interface is consistent with existing patterns (BranchListItem unread indicator). Using 'span' element matches existing dot elements. bg-blue-500 matches the unread indicator color in BranchListItem."
+    },
+    "desktop_header_modification": {
+      "design_description": "Add hasUpdate prop to DesktopHeaderProps, display NotificationDot in Info button",
+      "implementation_status": "not_yet_implemented",
+      "consistency": "high",
+      "notes": "Adding optional boolean props follows the same pattern as MobileTabBar (hasNewOutput, hasPrompt). DesktopHeader is defined internally in WorktreeDetailRefactored.tsx as described."
+    },
+    "mobile_tab_bar_modification": {
+      "design_description": "Add hasUpdate prop to MobileTabBarProps, display NotificationDot on Info tab",
+      "implementation_status": "not_yet_implemented",
+      "consistency": "high",
+      "notes": "The existing badge pattern (terminal tab) provides a clear precedent. Tab buttons already have 'relative' class. New badge on info tab follows the same conditional rendering pattern."
+    },
+    "props_drilling_pattern": {
+      "design_description": "Pass hasUpdate from WorktreeDetailRefactored to DesktopHeader and MobileTabBar via props",
+      "implementation_status": "not_yet_implemented",
+      "consistency": "high",
+      "notes": "Consistent with existing patterns: hasNewOutput and hasPrompt are already passed from WorktreeDetailRefactored to MobileTabBar via props (L1994-1995)."
+    },
+    "use_update_check_integration": {
+      "design_description": "Call useUpdateCheck() in WorktreeDetailRefactored, VersionSection keeps its own call",
+      "implementation_status": "not_yet_implemented",
+      "consistency": "high",
+      "notes": "VersionSection already calls useUpdateCheck() at L40. Adding a second call in WorktreeDetailRefactored is documented with SF-002 explaining globalThis cache behavior. This is pragmatic and avoids breaking VersionSection's encapsulation."
+    },
+    "testing_approach": {
+      "design_description": "Add tests for cache: no-store, NotificationDot, MobileTabBar hasUpdate",
+      "implementation_status": "not_yet_implemented",
+      "consistency": "high",
+      "notes": "Testing patterns match existing: version-checker.test.ts uses vi.stubGlobal('fetch'), MobileTabBar.test.tsx uses render/screen/fireEvent from @testing-library/react. Adding notification-dot.test.tsx in tests/unit/components/common/ follows directory conventions."
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+    "src/lib/version-checker.ts",
+    "src/hooks/useUpdateCheck.ts",
+    "src/components/worktree/VersionSection.tsx",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/sidebar/BranchListItem.tsx",
+    "src/components/common/Toast.tsx",
+    "src/components/common/LocaleSwitcher.tsx",
+    "src/app/api/app/update-check/route.ts",
+    "tests/unit/lib/version-checker.test.ts",
+    "tests/unit/components/mobile/MobileTabBar.test.tsx"
+  ],
+  "timestamp": "2026-02-14T12:00:00Z"
+}
