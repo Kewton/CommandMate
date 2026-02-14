@@ -1,0 +1,9 @@
+{
+  "issue_number": 266,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_result_path": "dev-reports/issue/266/multi-stage-design-review/stage4-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md",
+  "target": "design_policy_only",
+  "no_should_fix": true
+}

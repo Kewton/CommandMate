@@ -1,0 +1,87 @@
+{
+  "issue_number": 266,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-DRY-001",
+        "category": "DRY",
+        "title": "fetchWorktree/fetchMessages/fetchCurrentOutputの3連呼び出しの繰り返し",
+        "description": "handleRetry()内のPromise.all([fetchMessages(), fetchCurrentOutput()])と、修正後handleVisibilityChangeのPromise.all([fetchWorktree(), fetchMessages(), fetchCurrentOutput()])で同じfetch群の呼び出しパターンが重複する。設計書4-2でDRY原則の一部緩和として明示的にトレードオフを認識しているが、将来fetchの追加・変更時に同期漏れが発生するリスクがある。",
+        "recommendation": "軽量リカバリ用のrefreshData()のようなヘルパー関数を抽出し、handleRetryから呼び出す形でDRY原則の緩和を最小限にすることを検討。ただし現状の変更範囲では影響は軽微であり、過度な抽象化はKISSに反するため、コメントで依存関係を明示することでも十分。",
+        "severity": "low",
+        "principle": "DRY"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-KISS-001",
+        "category": "KISS",
+        "title": "async useCallbackのエラーハンドリング方針",
+        "description": "修正後のhandleVisibilityChangeはasync関数に変更されるが、catch内でサイレント無視としている。設計書4-2で次回ポーリングで自然回復するためと理由付けされており合理的だが、開発環境でのデバッグ時にconsole.warnを出す選択肢も検討可能。",
+        "recommendation": "現状のサイレント無視は適切。必要に応じてNODE_ENV=development時のみwarnを追加する拡張を将来検討。",
+        "principle": "KISS"
+      },
+      {
+        "id": "C-YAGNI-001",
+        "category": "YAGNI",
+        "title": "軽量リカバリのリトライ機構は不要",
+        "description": "設計書では軽量リカバリ失敗時にサイレント無視としており、追加のリトライ機構を導入していない。これはYAGNI原則に正しく従っている。ポーリング(setInterval)が既に存在するため、可視性変更時のリカバリ失敗は自然にカバーされる。",
+        "recommendation": "現状維持。YAGNI遵守の好例。",
+        "principle": "YAGNI"
+      }
+    ]
+  },
+  "design_principles_checklist": {
+    "single_responsibility": {
+      "status": "pass",
+      "detail": "handleVisibilityChangeはバックグラウンド復帰時のデータ同期に責務を限定。handleRetryはエラーリカバリに専念。SF-001で明示。"
+    },
+    "open_closed": {
+      "status": "pass",
+      "detail": "既存のhandleRetry()を変更せず、handleVisibilityChangeのみにガード条件を追加する設計。既存コードの変更は最小限。"
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "detail": "継承関係が存在しないため適用外。"
+    },
+    "interface_segregation": {
+      "status": "not_applicable",
+      "detail": "インターフェース設計の変更なし。"
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "detail": "fetchWorktree/fetchMessages/fetchCurrentOutputは既にuseCallbackで抽象化されたフック関数であり、具体的なAPIコールの詳細から分離されている。"
+    },
+    "simplicity_kiss": {
+      "status": "pass",
+      "detail": "エラー有無で分岐するシンプルなガード条件のみ。SF-002で設計根拠を明示。"
+    },
+    "no_premature_optimization_yagni": {
+      "status": "pass",
+      "detail": "必要最小限の変更のみ。入力状態のlift-upやuseRefによる保持など過剰な対策を回避。根本原因を直接修正。"
+    },
+    "no_code_duplication_dry": {
+      "status": "conditional_pass",
+      "detail": "fetch3連呼び出しの重複は設計書で意図的トレードオフとして認識。handleRetryの責務を汚さないための判断は妥当。SF-DRY-001で改善提案あり。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/PromptPanel.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

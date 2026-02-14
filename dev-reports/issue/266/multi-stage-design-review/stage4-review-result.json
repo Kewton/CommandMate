@@ -1,0 +1,88 @@
+{
+  "issue_number": 266,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "C-SEC-001",
+        "category": "エラー情報露出",
+        "title": "fetchWorktree()のエラーメッセージが軽量リカバリのsetError(null)で抑制されることのセキュリティ副次効果",
+        "description": "SF-IMP-001の対策としてcatch内でsetError(null)を呼ぶ設計は、セキュリティ観点では好ましい副次効果がある。fetchWorktree失敗時のHTTPステータスコードを含むエラーメッセージがUI上に一時的にも表示されない。ただし、開発時のデバッグ容易性とのバランスに注意。",
+        "severity": "info",
+        "recommendation": "現状の設計で問題なし。C-KISS-001で将来検討されているNODE_ENV=development時のconsole.warn追加と整合する方向性。"
+      },
+      {
+        "id": "C-SEC-002",
+        "category": "レースコンディション",
+        "title": "軽量リカバリとポーリングの並行fetch実行におけるレースコンディション",
+        "description": "C-IMP-003で記載されている通り、軽量リカバリのfetchとポーリングのfetchが同時実行される可能性がある。全てべき等なGETリクエストのためデータ整合性リスクはないが、React state更新のタイミングによって一時的に古いデータが表示される可能性がゼロではない。セキュリティ上は問題なし。",
+        "severity": "info",
+        "recommendation": "対応不要。既存のポーリング設計でも同様のレースコンディションが存在しており、新規リスクではない。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "detail": "変更は既存のfetch関数(fetchWorktree/fetchMessages/fetchCurrentOutput)の呼び出し条件変更のみ。新規APIエンドポイントの追加なし。worktreeIdベースのアクセス制御に変更なし。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "detail": "暗号化関連の変更なし。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "detail": "新規のユーザー入力処理なし。既存のfetch URLはテンプレートリテラルでworktreeIdを埋め込んでおり、worktreeIdはprops経由で受け取ったもの。APIルート側ではbetter-sqlite3のプリペアドステートメント(?)を使用しておりSQLインジェクション対策済み。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "detail": "軽量リカバリパターンの設計は、エラー状態時のみフルリカバリを行い、正常時はsetLoading変更なしのバックグラウンドfetchに限定する。サイレント失敗時のsetError(null)によるエラー状態リセットは、ポーリングによる自然回復を前提とした防御的設計。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "detail": "next.config.jsにCSP、X-Frame-Options(DENY)、X-Content-Type-Options(nosniff)、X-XSS-Protection、Referrer-Policy、Permissions-Policyが設定済み。本変更による設定への影響なし。"
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "not_applicable",
+      "detail": "新規依存パッケージの追加なし。"
+    },
+    "A07_identification_authentication_failures": {
+      "status": "not_applicable",
+      "detail": "認証/認可フローへの変更なし。本アプリケーションはローカル開発ツールであり、認証機構を持たない設計。"
+    },
+    "A08_software_data_integrity_failures": {
+      "status": "pass",
+      "detail": "APIレスポンスの処理ロジックに変更なし。既存のfetch関数がレスポンスをパースしてstate更新する流れはそのまま維持。"
+    },
+    "A09_security_logging_monitoring_failures": {
+      "status": "pass",
+      "detail": "軽量リカバリの失敗をサイレント無視する設計だが、これは意図的な設計判断(次回ポーリングで回復)。既存のfetchMessages/fetchCurrentOutputのcatchブロック内ではconsole.errorでログ出力が行われる。"
+    },
+    "A10_server_side_request_forgery": {
+      "status": "not_applicable",
+      "detail": "新規の外部リクエスト先の追加なし。全てのfetchは自サーバーの/api/エンドポイントへの相対パスリクエスト。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/messages/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/api-client.ts",
+    "src/lib/db.ts",
+    "next.config.js"
+  ],
+  "timestamp": "2026-02-14T12:00:00Z"
+}

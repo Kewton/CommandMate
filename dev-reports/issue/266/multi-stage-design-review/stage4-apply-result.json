@@ -1,0 +1,35 @@
+{
+  "issue_number": 266,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "C-SEC-001",
+        "item": "fetchWorktree()のエラーメッセージが軽量リカバリのsetError(null)で抑制されることのセキュリティ副次効果",
+        "section_updated": "レビュー指摘事項サマリー, セキュリティ設計",
+        "status": "reflected"
+      },
+      {
+        "id": "C-SEC-002",
+        "item": "軽量リカバリとポーリングの並行fetch実行におけるレースコンディション",
+        "section_updated": "レビュー指摘事項サマリー",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー (Stage 4)",
+    "セキュリティ設計",
+    "リスク評価"
+  ],
+  "owasp_checklist_added": true,
+  "timestamp": "2026-02-14T12:30:00Z"
+}

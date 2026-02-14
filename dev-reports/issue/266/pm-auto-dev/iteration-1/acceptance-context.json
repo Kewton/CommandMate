@@ -1,0 +1,24 @@
+{
+  "issue_number": 266,
+  "feature_summary": "ブラウザのタブを切り替えると入力途中の内容がクリアされる問題を修正",
+  "acceptance_criteria": [
+    "デスクトップブラウザでタブ切替後にメッセージ入力内容が保持される",
+    "デスクトップブラウザでタブ切替後にPromptPanelの入力内容が保持される",
+    "visibilitychangeによるデータ再取得が引き続き動作する",
+    "エラー状態からのタブ復帰時は従来通りhandleRetry()で完全リカバリされる",
+    "既存のメッセージ送信フローに影響がない"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 正常時のタブ切替でloading状態が変化せず、MessageInputの入力が保持される",
+    "シナリオ2: 正常時のタブ切替でfetchWorktree/fetchMessages/fetchCurrentOutputが並行実行される",
+    "シナリオ3: fetchWorktree失敗時にsetError(null)が呼ばれ、コンポーネントツリーが維持される",
+    "シナリオ4: エラー状態でのタブ切替でhandleRetryが呼ばれ、フルリカバリされる",
+    "シナリオ5: スロットルガード（5000ms）が正しく機能する"
+  ],
+  "implementation_files": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "test_files": [
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ]
+}

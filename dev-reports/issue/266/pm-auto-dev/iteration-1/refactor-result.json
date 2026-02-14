@@ -1,0 +1,37 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 57.93,
+    "after_coverage": 60.68
+  },
+  "refactorings_applied": [
+    "Extract capitalizeFirst helper function (DRY: eliminated 4 inline charAt/slice patterns)",
+    "Extract useDescriptionEditor custom hook (DRY: eliminated duplicated description editing state and handlers between InfoModal and MobileInfoContent)",
+    "Extract WorktreeInfoFields shared presentational component (DRY: eliminated duplicated info field rendering between InfoModal and MobileInfoContent)",
+    "Verified SF-DRY-001, SF-CONS-001, SF-IMP-001, SF-IMP-002 comment annotations are clear and accurate"
+  ],
+  "files_changed": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "line_count": {
+    "before": 2123,
+    "after": 2081,
+    "reduction": 42
+  },
+  "test_results": {
+    "total": 36,
+    "passed": 35,
+    "skipped": 1,
+    "failed": 0
+  },
+  "commits": [
+    "c163603: refactor(worktree): extract shared hooks and components for DRY compliance"
+  ],
+  "message": "Refactoring completed. Extracted useDescriptionEditor hook, WorktreeInfoFields component, and capitalizeFirst helper to eliminate code duplication. All tests pass, coverage improved from 57.93% to 60.68%, zero static analysis errors."
+}

@@ -1,0 +1,49 @@
+{
+  "issue_number": 266,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-DRY-001",
+        "item": "fetchWorktree/fetchMessages/fetchCurrentOutputの3連呼び出しの繰り返し",
+        "sections_updated": [
+          "4-1. handleVisibilityChange の変更（Afterコードサンプルにコメント追加）",
+          "4-2. 設計上の決定事項（トレードオフにSF-DRY-001対応追記）",
+          "4-3. 代替案との比較（refreshData()抽出案追加）",
+          "11. 実装タスク（コメント追加チェックリスト項目追加）",
+          "13. レビュー指摘事項サマリー（詳細記載）"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-KISS-001",
+        "item": "async useCallbackのエラーハンドリング方針",
+        "section_updated": "13. レビュー指摘事項サマリー",
+        "status": "noted"
+      },
+      {
+        "id": "C-YAGNI-001",
+        "item": "軽量リカバリのリトライ機構は不要",
+        "section_updated": "13. レビュー指摘事項サマリー",
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md",
+  "sections_updated": [
+    "4-1. handleVisibilityChange の変更",
+    "4-2. 設計上の決定事項",
+    "4-3. 代替案との比較",
+    "11. 実装タスク",
+    "12. レビュー履歴",
+    "13. レビュー指摘事項サマリー"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

@@ -1,0 +1,21 @@
+{
+  "issue_number": 266,
+  "refactor_targets": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 90.0,
+    "test_count": 36
+  },
+  "improvement_goals": [
+    "コメントの明確化（SF-DRY-001, SF-CONS-001, SF-IMP-001, SF-IMP-002）",
+    "コードの可読性向上",
+    "既存のコーディング規約準拠確認"
+  ],
+  "constraints": [
+    "機能の動作を変更しない",
+    "既存テストが全パスすること",
+    "TypeScript型エラー0件",
+    "ESLintエラー0件"
+  ]
+}
