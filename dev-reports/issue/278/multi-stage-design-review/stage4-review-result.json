@@ -1,0 +1,112 @@
+{
+  "issue_number": 278,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "category": "Input validation",
+        "title": "NotificationDot className prop injection prevention",
+        "severity": "low",
+        "description": "NotificationDot accepts a className prop that is concatenated directly into the className string. While this is a common React pattern and the component is only used internally (not exposed to user input), a defensive approach would be to document that className must never be derived from user input.",
+        "recommendation": "Add a JSDoc comment on the className prop noting it must only accept hardcoded string values, not user-supplied data."
+      },
+      {
+        "id": "SEC-SF-002",
+        "category": "Test coverage",
+        "title": "cache: 'no-store' security test should verify the exact fetch option",
+        "severity": "low",
+        "description": "The design specifies adding cache: 'no-store' to the fetch call. The existing test for SEC-SF-002 (User-Agent header) verifies fetch call options but does not currently check for the cache option. A test verifying that cache: 'no-store' is passed would prevent regression.",
+        "recommendation": "Add a test assertion in version-checker.test.ts verifying that fetch is called with { cache: 'no-store' } as specified in the design document Section 5 change list."
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "category": "XSS prevention",
+        "title": "hasUpdate boolean-only UI rendering is the correct approach",
+        "severity": "info",
+        "description": "The design correctly uses only a boolean (hasUpdate) to drive the NotificationDot visibility, avoiding any rendering of external API data in the new indicator UI. This is the ideal pattern for XSS prevention."
+      },
+      {
+        "id": "SEC-C-002",
+        "category": "SSRF prevention",
+        "title": "Existing SEC-001 SSRF controls remain unmodified and adequate",
+        "severity": "info",
+        "description": "The GITHUB_API_URL remains hardcoded as a constant with explicit security documentation. The only change is adding cache: 'no-store', which does not affect the SSRF protection."
+      },
+      {
+        "id": "SEC-C-003",
+        "category": "External link security",
+        "title": "Existing rel='noopener noreferrer' on GitHub Release links is maintained",
+        "severity": "info",
+        "description": "UpdateNotificationBanner already uses target='_blank' rel='noopener noreferrer' for the release URL link. The new NotificationDot component does not introduce any external links."
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "not_applicable",
+      "notes": "No access control changes. The update-check API is a read-only, unauthenticated endpoint by design (checks public GitHub Releases)."
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "No cryptographic operations involved. Fetch uses HTTPS to GitHub API (transport encryption handled by Node.js TLS)."
+    },
+    "A03_injection": {
+      "status": "pass",
+      "notes": "Existing SEC-SF-001 controls (validateReleaseUrl, sanitizeReleaseName, SEMVER_PATTERN, RELEASE_NAME_PATTERN) remain unchanged and effective. New UI changes use boolean-only rendering, not external string data."
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "Design follows defense-in-depth: hardcoded API URL (SEC-001), response validation (SEC-SF-001), fixed update command string (SEC-SF-004), cache headers (SEC-SF-003). No design-level security issues introduced."
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "Cache-Control: no-store, no-cache, must-revalidate headers are correctly applied. Adding cache: 'no-store' to the fetch call corrects the Next.js Data Cache misconfiguration (the core bug fix)."
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "No new dependencies introduced. NotificationDot is a pure React component with no external library dependencies."
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "notes": "No authentication mechanism involved. GitHub API is accessed without authentication (public endpoint)."
+    },
+    "A08_data_integrity_failures": {
+      "status": "pass",
+      "notes": "Response data from GitHub API is validated (URL prefix check, release name sanitization, semver pattern validation) before use. The new changes do not modify this pipeline."
+    },
+    "A09_logging_monitoring": {
+      "status": "not_applicable",
+      "notes": "No changes to logging or monitoring. Silent failure pattern is maintained for network errors."
+    },
+    "A10_ssrf": {
+      "status": "pass",
+      "notes": "GITHUB_API_URL remains a hardcoded constant (SEC-001). Adding cache: 'no-store' does not introduce any SSRF vector."
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+    "src/lib/version-checker.ts",
+    "src/hooks/useUpdateCheck.ts",
+    "src/app/api/app/update-check/route.ts",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/VersionSection.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/config/github-links.ts",
+    "src/lib/api-client.ts",
+    "tests/unit/lib/version-checker.test.ts"
+  ],
+  "timestamp": "2026-02-14T12:00:00Z"
+}

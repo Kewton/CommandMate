@@ -1,0 +1,124 @@
+{
+  "issue_number": 278,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "DRY",
+        "title": "ドットバッジUIパターンの重複定義リスク",
+        "description": "設計書では BranchListItem.tsx の既存ドットバッジパターンを「踏襲」するとしているが、className文字列(w-2 h-2 rounded-full bg-blue-500)をコピーペーストで3箇所(BranchListItem, DesktopHeader, MobileTabBar)に分散させることになる。将来ドットバッジの色やサイズを変更する際に全箇所の同期が必要。共通コンポーネントまたは定数として抽出すべき。",
+        "recommendation": "NotificationDot のような小さな共通コンポーネントを作成し、3箇所すべてで再利用する。あるいは BADGE_CLASSES 定数を src/config/ 配下に定義して一元管理する。",
+        "severity": "medium"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "SRP (Single Responsibility)",
+        "title": "WorktreeDetailRefactored の責務過多へのさらなる追加",
+        "description": "WorktreeDetailRefactored.tsx は既に2082行を超える大規模コンポーネントであり、多数の状態管理・イベントハンドラ・子コンポーネントを含む。ここに useUpdateCheck() フックの呼び出しと hasUpdate の状態伝搬を追加すると、責務がさらに増大する。設計書はこの点を認識しつつ「1階層のみの伝搬」として許容しているが、中長期的にはコンポーネントの分割検討が必要。",
+        "recommendation": "現時点での追加は許容できるが、WorktreeDetailRefactored の責務を将来的に分割する計画(例: レイアウト責務とデータフェッチ責務の分離)を Issue として起票することを推奨。",
+        "severity": "low"
+      },
+      {
+        "id": "SF-002",
+        "principle": "DRY",
+        "title": "useUpdateCheck の二重呼び出しに関する設計根拠の明確化",
+        "description": "設計書の Section 8 で、WorktreeDetailRefactored と VersionSection の両方で useUpdateCheck() を呼ぶことによる二重API呼び出しの可能性に言及し、globalThis キャッシュにより実質コストなしと判断している。この判断は技術的に正しいが、将来の開発者が globalThis キャッシュの存在を知らない場合にパフォーマンス問題として誤認する可能性がある。",
+        "recommendation": "version-checker.ts の JSDoc またはコード内コメントに「同一プロセス内での複数呼び出しは globalThis キャッシュによりネットワーク負荷なし」と明記する。あるいは useUpdateCheck を WorktreeDetailRefactored で一度だけ呼び、VersionSection には結果を props で渡す設計に変更する。",
+        "severity": "low"
+      },
+      {
+        "id": "SF-003",
+        "principle": "KISS",
+        "title": "aria-label の言語一貫性",
+        "description": "設計書 Section 9 で aria-label は英語固定としている。これは KISS 原則に沿った判断だが、既存コードベースで一部の aria-label が i18n 対応されている可能性がある場合、一貫性の問題が生じうる。",
+        "recommendation": "既存の aria-label の i18n 方針を確認し、一貫した方針であることを設計書に明記する。英語固定が全体方針であれば問題なし。",
+        "severity": "low"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "YAGNI",
+        "title": "hasUpdate の optional prop 設計は適切",
+        "description": "DesktopHeaderProps と MobileTabBarProps に hasUpdate?: boolean を optional として追加する設計は、既存コードへの影響を最小化しつつ拡張性を確保しており、YAGNI 原則に沿っている。Context API を使わない判断も正しい。",
+        "recommendation": "現行設計を維持。将来的に通知種別が増えた場合(例: お知らせ、障害情報)にのみ Context 導入を検討する。",
+        "severity": "info"
+      },
+      {
+        "id": "C-002",
+        "principle": "Open/Closed",
+        "title": "MobileTabBar のバッジ表示パターンの拡張性",
+        "description": "現在の MobileTabBar は terminal タブにのみ hasNewOutput/hasPrompt バッジを表示するハードコードパターンを持つ。今回 info タブにも hasUpdate バッジを追加するが、同じ条件分岐パターン(tab.id === 'info' && hasUpdate)が増えていく。将来さらにバッジ対象タブが増えた場合、TabConfig に badge 属性を持たせるなど、より拡張に開いた設計を検討できる。",
+        "recommendation": "今回の scope では現行パターンで十分。3つ以上のタブがバッジを持つようになった時点でリファクタリングを検討する。",
+        "severity": "info"
+      },
+      {
+        "id": "C-003",
+        "principle": "DRY / Interface Segregation",
+        "title": "DesktopHeader の内部定義 vs 外部分離",
+        "description": "DesktopHeader は WorktreeDetailRefactored.tsx ファイル内に定義されている(411行目)。今回 hasUpdate prop を追加するが、DesktopHeader を独立ファイルに分離すれば、テスタビリティが向上し、DesktopHeader 単体のユニットテストが書きやすくなる。ただし現時点では設計書に新規テストとして DesktopHeader のテストは含まれていない。",
+        "recommendation": "将来的に DesktopHeader を独立コンポーネントファイルとして分離することを検討。ただし Issue #278 の scope では不要。",
+        "severity": "info"
+      }
+    ]
+  },
+  "design_principles_checklist": {
+    "single_responsibility": {
+      "status": "pass_with_note",
+      "note": "各変更対象ファイルの責務は明確。ただし WorktreeDetailRefactored への責務追加は蓄積的な懸念あり。version-checker.ts の修正は fetch キャッシュ制御という単一の責務変更。DesktopHeader/MobileTabBar へのインジケーター追加はUI表示の責務拡張として妥当。"
+    },
+    "open_closed": {
+      "status": "pass",
+      "note": "既存コンポーネントの Props interface を optional で拡張しており、既存機能に影響なし。version-checker.ts は fetch オプションの追加のみで関数シグネチャは不変。"
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "note": "本設計には継承関係がなく、Liskov 置換原則の適用対象なし。"
+    },
+    "interface_segregation": {
+      "status": "pass",
+      "note": "DesktopHeaderProps と MobileTabBarProps にそれぞれ hasUpdate?: boolean を追加。クライアントは不要なら無視できる optional prop として適切に分離されている。"
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "note": "useUpdateCheck フックが具体的な API クライアント(appApi)に依存しているが、これは既存パターンの踏襲であり、今回の変更で新たな依存の問題は生じない。"
+    },
+    "kiss": {
+      "status": "pass",
+      "note": "cache: 'no-store' の1行追加は最もシンプルなバグ修正。ドットバッジUI は既存パターンのコピーで学習コストが低い。Props drilling は Context API より簡潔。全体的に過度な抽象化を避けた設計。"
+    },
+    "yagni": {
+      "status": "pass",
+      "note": "Context API を使わない判断、グローバル通知システムを構築しない判断、いずれも現在の要件に対して最小限の実装を目指しており YAGNI に適合。"
+    },
+    "dry": {
+      "status": "pass_with_note",
+      "note": "ドットバッジの className 文字列が3箇所に分散するリスクあり(MF-001)。ただし既存パターン(BranchListItem)の踏襲という合理的な理由がある。useUpdateCheck の二重呼び出しについてはキャッシュにより実害なしだが、ドキュメント化が望ましい(SF-002)。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+    "src/lib/version-checker.ts",
+    "src/hooks/useUpdateCheck.ts",
+    "src/components/worktree/VersionSection.tsx",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/sidebar/BranchListItem.tsx",
+    "src/app/api/app/update-check/route.ts",
+    "tests/unit/lib/version-checker.test.ts"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

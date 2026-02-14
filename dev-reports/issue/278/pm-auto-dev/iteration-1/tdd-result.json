@@ -1,0 +1,28 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 146,
+    "passed": 145,
+    "failed": 0,
+    "skipped": 1
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/components/common/NotificationDot.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/lib/version-checker.ts",
+    "tests/unit/components/common/notification-dot.test.tsx",
+    "tests/unit/components/mobile/MobileTabBar.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "tests/unit/lib/version-checker.test.ts"
+  ],
+  "commits": [
+    "90c9ffc: fix(#278): add cache: no-store to fetch and update notification indicator"
+  ],
+  "message": "TDD implementation complete. All acceptance criteria met: cache: 'no-store' added to fetch, NotificationDot shared component created (MF-001), DesktopHeader and MobileTabBar have hasUpdate indicator, 'relative' class added (CONS-SF-001), JSDoc updated (SF-002), security notes added (SEC-SF-001, SEC-SF-002), all tests pass, 0 lint errors, 0 type errors."
+}

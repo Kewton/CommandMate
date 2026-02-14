@@ -48,7 +48,9 @@ import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
 import { useAutoYes } from '@/hooks/useAutoYes';
+import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
+import { NotificationDot } from '@/components/common/NotificationDot';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import type { Worktree, ChatMessage, PromptData, GitStatus } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -417,6 +419,8 @@ interface DesktopHeaderProps {
   onBackClick: () => void;
   onInfoClick: () => void;
   onMenuClick: () => void;
+  /** Whether an app update is available (shows notification dot on Info button) - Issue #278 */
+  hasUpdate?: boolean;
 }
 
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
@@ -431,6 +435,7 @@ const DesktopHeader = memo(function DesktopHeader({
   onBackClick,
   onInfoClick,
   onMenuClick,
+  hasUpdate,
 }: DesktopHeaderProps) {
   const statusConfig = DESKTOP_STATUS_CONFIG[status];
   // Issue #111: DRY - Use shared truncateString utility
@@ -550,7 +555,7 @@ const DesktopHeader = memo(function DesktopHeader({
       <button
         type="button"
         onClick={onInfoClick}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+        className="relative flex items-center gap-1.5 px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
         aria-label="View worktree information"
       >
         <svg
@@ -568,6 +573,13 @@ const DesktopHeader = memo(function DesktopHeader({
           />
         </svg>
         <span className="text-sm font-medium">Info</span>
+        {hasUpdate && (
+          <NotificationDot
+            data-testid="info-update-indicator"
+            className="absolute top-0 right-0"
+            aria-label="Update available"
+          />
+        )}
       </button>
     </div>
   );
@@ -1075,10 +1087,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setEditorFilePath(null);
   }, []);
 
-  /** Handle file save in editor - can refresh tree if needed */
-  const handleEditorSave = useCallback((savedPath: string) => {
-    // File was saved - could trigger tree refresh here if needed
-    console.log('[WorktreeDetailRefactored] File saved:', savedPath);
+  /** Handle file save in editor - refresh tree to reflect changes */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- savedPath accepted for callback interface compatibility
+  const handleEditorSave = useCallback((_savedPath: string) => {
+    setFileTreeRefresh(prev => prev + 1);
   }, []);
 
   /** Handle left pane tab change */
@@ -1393,6 +1405,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
   }, [worktreeId, showToast]);
 
+  // Update check hook (Issue #278: hasUpdate state for DesktopHeader/MobileTabBar)
+  const { data: updateCheckData } = useUpdateCheck();
+  const hasUpdate = updateCheckData?.hasUpdate ?? false;
+
   // Auto-yes hook
   const { lastAutoResponse } = useAutoYes({
     worktreeId,
@@ -1626,6 +1642,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onBackClick={handleBackClick}
             onInfoClick={handleInfoClick}
             onMenuClick={toggle}
+            hasUpdate={hasUpdate}
           />
           {/* Issue #4: CLI Tool Tab Switcher (Claude/Codex) */}
           <div className="px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between">
@@ -1993,6 +2010,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onTabChange={handleMobileTabChange}
           hasNewOutput={false}
           hasPrompt={state.prompt.visible}
+          hasUpdate={hasUpdate}
         />
 
         {!autoYesEnabled && (

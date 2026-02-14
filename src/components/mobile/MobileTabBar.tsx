@@ -7,6 +7,7 @@
 'use client';
 
 import { useCallback, useMemo, memo } from 'react';
+import { NotificationDot } from '@/components/common/NotificationDot';
 
 /**
  * Tab type for mobile view
@@ -25,6 +26,8 @@ export interface MobileTabBarProps {
   hasNewOutput?: boolean;
   /** Whether there is a prompt waiting (shows badge) */
   hasPrompt?: boolean;
+  /** Whether an app update is available (shows badge on Info tab) - Issue #278 */
+  hasUpdate?: boolean;
 }
 
 /**
@@ -98,17 +101,8 @@ export function MobileTabBar({
   onTabChange,
   hasNewOutput = false,
   hasPrompt = false,
+  hasUpdate = false,
 }: MobileTabBarProps) {
-  /**
-   * Handle tab click
-   */
-  const handleTabClick = useCallback(
-    (tab: MobileTab) => {
-      onTabChange(tab);
-    },
-    [onTabChange]
-  );
-
   /**
    * Get tab styles based on active state
    */
@@ -162,12 +156,19 @@ export function MobileTabBar({
           role="tab"
           aria-selected={activeTab === tab.id}
           aria-label={tab.label}
-          onClick={() => handleTabClick(tab.id)}
+          onClick={() => onTabChange(tab.id)}
           className={getTabStyles(tab.id)}
         >
           {tab.icon}
           <span className="text-xs mt-1">{tab.label}</span>
           {tab.id === 'terminal' && renderBadges}
+          {tab.id === 'info' && hasUpdate && (
+            <NotificationDot
+              data-testid="info-update-badge"
+              className="absolute top-1 right-1"
+              aria-label="Update available"
+            />
+          )}
         </button>
       ))}
     </nav>

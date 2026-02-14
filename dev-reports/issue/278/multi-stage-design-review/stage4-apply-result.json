@@ -1,0 +1,59 @@
+{
+  "issue_number": 278,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "item": "NotificationDot className prop injection prevention - JSDoc security annotation",
+        "section_updated": "セキュリティ設計 (Section 6), NotificationDot定義 (Section 4-2), 実装チェックリスト (Section 11), 受入条件 (Section 10)",
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-002",
+        "item": "cache: 'no-store' regression prevention test assertion",
+        "section_updated": "セキュリティ設計 (Section 6), 変更対象ファイル (Section 5), 実装チェックリスト (Section 11), 受入条件 (Section 10)",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "item": "hasUpdate boolean-only UI rendering is the correct XSS prevention approach",
+        "status": "noted_in_summary"
+      },
+      {
+        "id": "SEC-C-002",
+        "item": "Existing SEC-001 SSRF controls remain unmodified and adequate",
+        "status": "noted_in_summary"
+      },
+      {
+        "id": "SEC-C-003",
+        "item": "Existing rel='noopener noreferrer' on GitHub Release links is maintained",
+        "status": "noted_in_summary"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+  "sections_updated": [
+    "Section 4-2: NotificationDot className prop JSDoc (SEC-SF-001)",
+    "Section 5: 変更対象ファイル (SEC-SF-002 test annotation)",
+    "Section 6: セキュリティ設計 (SEC-SF-001, SEC-SF-002, SEC-C-001/002/003)",
+    "Section 10: 受入条件 (SEC-SF-001, SEC-SF-002)",
+    "Section 11: 実装チェックリスト (SEC-SF-001, SEC-SF-002)",
+    "Section 12: レビュー履歴 (Stage 4 追加)",
+    "Section 13: レビュー指摘事項サマリー (Stage 4 追加, OWASP Top 10チェック結果)"
+  ],
+  "owasp_checklist_summary": "All 10 categories reviewed: 4 Pass, 6 N/A, 0 Fail",
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "timestamp": "2026-02-14T12:00:00Z"
+}

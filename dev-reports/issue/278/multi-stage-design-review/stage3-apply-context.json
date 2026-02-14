@@ -1,0 +1,8 @@
+{
+  "issue_number": 278,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_policy_path": "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+  "review_result_path": "dev-reports/issue/278/multi-stage-design-review/stage3-review-result.json",
+  "instruction": "Update design policy with Stage 3 review findings (Should Fix items only). Do NOT modify source code."
+}
