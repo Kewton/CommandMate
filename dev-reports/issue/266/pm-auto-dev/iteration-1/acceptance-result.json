@@ -1,0 +1,107 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: Normal tab switch does not change loading state, preserving MessageInput",
+      "result": "passed",
+      "evidence": "TC passes: visibilitychange in normal state does not trigger setLoading(true/false), so loading indicator does not appear, desktop-layout remains, and MessageInput is NOT unmounted/remounted. Mount/unmount counts remain unchanged."
+    },
+    {
+      "scenario": "Scenario 2: Normal tab switch triggers parallel fetch calls (fetchWorktree, fetchMessages, fetchCurrentOutput)",
+      "result": "passed",
+      "evidence": "TC passes: After visibilitychange event, all three fetch endpoints (/api/worktrees/:id, /messages, /current-output) are called via Promise.all in parallel (SF-CONS-001)."
+    },
+    {
+      "scenario": "Scenario 3: fetchWorktree failure during lightweight recovery does not collapse UI (setError(null) in finally block)",
+      "result": "passed",
+      "evidence": "TC passes: When fetchWorktree returns 500 during lightweight recovery, the finally block calls setError(null) (SF-IMP-001), preventing ErrorDisplay from replacing the normal UI. Desktop-layout and MessageInput remain visible."
+    },
+    {
+      "scenario": "Scenario 4: Error state triggers handleRetry (full recovery) on tab return",
+      "result": "passed",
+      "evidence": "TC passes: When error state is active, visibilitychange triggers handleRetry() which calls setLoading(true), fetchWorktree, fetchMessages, fetchCurrentOutput, then setLoading(false). Error state is cleared and desktop-layout appears."
+    },
+    {
+      "scenario": "Scenario 5: Throttle guard (5000ms RECOVERY_THROTTLE_MS) prevents rapid re-fetches",
+      "result": "passed",
+      "evidence": "TC passes: 1st event triggers fetch, 2nd event at +2s is throttled (no fetch), 3rd event at +6s triggers fetch (past 5s window). Uses Date.now mock for deterministic testing."
+    },
+    {
+      "scenario": "Acceptance Criterion: Existing message send flow not affected",
+      "result": "passed",
+      "evidence": "TC passes: Initial data fetches (worktree, messages, current-output) work correctly. After visibilitychange, all fetches still fire. Component remains functional with desktop-layout and message-input visible."
+    },
+    {
+      "scenario": "Acceptance Criterion: PromptPanel content preserved during tab switch",
+      "result": "passed",
+      "evidence": "TC passes: When prompt is active and visibilitychange fires, prompt-panel remains visible and loading indicator does NOT appear. Lightweight recovery preserves the component tree including PromptPanel."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Desktop browser tab switch preserves MessageInput content",
+      "verified": true,
+      "evidence": "Scenario 1 and acceptance test verify MessageInput is NOT unmounted/remounted during visibilitychange. No loading state change occurs in normal state (lightweight recovery)."
+    },
+    {
+      "criterion": "Desktop browser tab switch preserves PromptPanel content",
+      "verified": true,
+      "evidence": "PromptPanel preservation test verifies prompt-panel remains visible during lightweight recovery. No component tree teardown occurs."
+    },
+    {
+      "criterion": "visibilitychange data re-fetch continues to work",
+      "verified": true,
+      "evidence": "Scenario 2 verifies all three fetch functions (fetchWorktree, fetchMessages, fetchCurrentOutput) are called in parallel via Promise.all on visibilitychange."
+    },
+    {
+      "criterion": "Error state tab return triggers handleRetry() for full recovery",
+      "verified": true,
+      "evidence": "Scenario 4 verifies error state uses handleRetry() path which calls setLoading(true/false) for full UI recovery from ErrorDisplay back to normal layout."
+    },
+    {
+      "criterion": "Existing message send flow is not affected",
+      "verified": true,
+      "evidence": "Acceptance criterion test verifies initial data fetches work correctly, and component remains functional after visibilitychange with all fetch endpoints active."
+    }
+  ],
+  "evidence_files": [
+    "tests/integration/issue-266-acceptance.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "test_summary": {
+    "acceptance_tests": {
+      "file": "tests/integration/issue-266-acceptance.test.tsx",
+      "total": 7,
+      "passed": 7,
+      "failed": 0
+    },
+    "unit_tests": {
+      "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "total": 36,
+      "passed": 35,
+      "skipped": 1,
+      "skipped_reason": "Pre-existing flaky test (TC for terminal output state update timing)"
+    },
+    "type_check": "passed (npx tsc --noEmit: no errors)"
+  },
+  "implementation_review": {
+    "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "key_changes": [
+      "handleVisibilityChange uses lightweight recovery (no setLoading) for normal state",
+      "Error state branches to handleRetry() for full recovery",
+      "Promise.all parallel execution in lightweight recovery path (SF-CONS-001)",
+      "setError(null) in finally block to prevent component tree collapse (SF-IMP-001)",
+      "RECOVERY_THROTTLE_MS (5000ms) throttle guard prevents rapid re-fetches",
+      "visibilitychange listener registered/cleaned up via useEffect"
+    ],
+    "design_references": [
+      "SF-001: SRP - handleVisibilityChange for background recovery only",
+      "SF-002: KISS - simple error guard condition",
+      "SF-DRY-001: fetch duplication documented with comments",
+      "SF-CONS-001: Promise.all for parallel lightweight recovery",
+      "SF-IMP-001: setError(null) in finally block",
+      "SF-IMP-002: error dependency acknowledged"
+    ]
+  },
+  "message": "All acceptance criteria are met. The fix correctly prevents component tree teardown during normal tab switching by using lightweight recovery (no loading state change), while maintaining full recovery for error states via handleRetry()."
+}

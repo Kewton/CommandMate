@@ -1,0 +1,122 @@
+{
+  "issue_number": 266,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-IMP-001",
+        "category": "影響範囲",
+        "title": "fetchWorktree()内のsetError()が軽量リカバリ時にコンポーネントアンマウントを誘発するリスク",
+        "severity": "medium",
+        "description": "軽量リカバリのPromise.all内でfetchWorktree()が失敗した場合、fetchWorktree()(L1006-1008)は内部でsetError(message)を呼び出す。これによりerror状態がセットされ、レンダリング時にif (error)ガード(L1616)によりErrorDisplayが表示される。結果としてMessageInputがアンマウントされ、軽量リカバリの設計意図（コンポーネントツリー維持）が達成されない。設計書のtry-catchでサイレント無視する意図は、fetchWorktree内部のsetError呼び出しにより無効化される。",
+        "recommendation": "軽量リカバリ専用のfetchWorktreeラッパーを使用するか、軽量リカバリのtry-catch内でsetError(null)を呼び出してエラー状態を復元する。または、軽量リカバリではfetchWorktreeのエラーハンドリングを個別にラップして、setError呼び出しが伝播しないようにする。具体的には、軽量リカバリのPromise.all内の各fetchを個別のtry-catchで囲み、fetchWorktreeの失敗がsetError経由でコンポーネントツリーに影響しないよう防御する。"
+      },
+      {
+        "id": "SF-IMP-002",
+        "category": "影響範囲",
+        "title": "useCallbackのerror依存追加によるポーリングuseEffectへの連鎖影響",
+        "severity": "low",
+        "description": "修正後のhandleVisibilityChangeはuseCallbackの依存配列に[error, handleRetry, fetchWorktree, fetchMessages, fetchCurrentOutput]を持つ。error状態が変化するたびにhandleVisibilityChangeが再生成される。handleVisibilityChangeはuseEffect([handleVisibilityChange])で使用されるため、error変化ごとにイベントリスナーの再登録が発生する。ただし、visibilitychangeイベントリスナーはremoveEventListener/addEventListenerの連続実行であり、パフォーマンスへの影響は極小。",
+        "recommendation": "設計書に、error依存追加によるuseCallback再生成とuseEffectリスナー再登録の影響を注記として追加することを推奨。影響は軽微であるが、将来の開発者が依存関係の理由を理解できるようにするため。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-IMP-001",
+        "category": "影響範囲",
+        "title": "既存テストTC-1の動作変更",
+        "description": "既存テストTC-1（'triggers data re-fetch when visibilitychange fires with visible state'）は、正常時にvisibilitychangeでfetchが呼ばれることを検証している。修正後はhandleRetry経由ではなく軽量リカバリ経由でfetchが呼ばれるため、テストの検証内容（fetch呼び出しの有無）自体は引き続きPASSするが、内部経路が変わる。テスト名のMF-001参照コメントは更新が必要。"
+      },
+      {
+        "id": "C-IMP-002",
+        "category": "影響範囲",
+        "title": "WorktreeList.tsxのvisibilitychangeパターンとの整合",
+        "description": "WorktreeList.tsx(L137-161)はvisibilitychangeで軽量な(silent) fetchを使用している。修正後のWorktreeDetailRefactored.tsxも正常時は軽量リカバリを使用するようになり、両コンポーネントのvisibilitychangeパターンが類似性を増す。将来的にvisibilitychange復帰パターンを共通化する際の基盤となる。対応不要。"
+      },
+      {
+        "id": "C-IMP-003",
+        "category": "影響範囲",
+        "title": "ポーリングuseEffect(L1560-1574)との並行実行の変化",
+        "description": "修正前はhandleRetry()がsetLoading(true)を呼び出し、ポーリングuseEffectがif (loading) returnで一時停止した。修正後の軽量リカバリではloadingを変更しないため、ポーリングのsetIntervalが中断されずに動作し続ける。結果として軽量リカバリのfetchとポーリングのfetchが同時実行される可能性がある。設計書IA-002で述べている通り全てべき等なGETリクエストのため安全だが、修正前との振る舞いの違いを認識しておく必要がある。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "function": "handleVisibilityChange",
+        "change": "handleRetry()直接呼び出しからerrorガード付き軽量リカバリに変更",
+        "risk": "medium"
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "src/components/worktree/MessageInput.tsx",
+        "impact": "アンマウント/再マウントが発生しなくなるため、useState('')による入力クリアが解消される",
+        "risk": "low"
+      },
+      {
+        "file": "src/components/worktree/PromptPanel.tsx",
+        "impact": "同様にアンマウントが発生しなくなり、selectedOption/textInputValueの状態が保持される",
+        "risk": "low"
+      },
+      {
+        "file": "src/components/mobile/MobilePromptSheet.tsx",
+        "impact": "モバイル版プロンプトの入力状態も保持される。ポジティブな影響",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "impact": "TC-1の内部経路変更（handleRetry経由からfetch直接呼び出し経由へ）。テスト結果はPASSだが、コメント更新が望ましい。TC-2はerrorガード経由でhandleRetryが呼ばれるため動作変更なし。",
+        "risk": "low"
+      }
+    ],
+    "no_impact": [
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "reason": "APIエンドポイントは変更なし。GETリクエストのみ"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/messages/route.ts",
+        "reason": "APIエンドポイントは変更なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "reason": "APIエンドポイントは変更なし"
+      },
+      {
+        "file": "src/hooks/useWorktreeUIState.ts",
+        "reason": "状態管理フックは変更なし"
+      },
+      {
+        "file": "src/components/worktree/WorktreeList.tsx",
+        "reason": "独自のvisibilitychangeパターンを持つ。本変更の影響なし"
+      },
+      {
+        "file": "src/lib/api-client.ts",
+        "reason": "APIクライアントは変更なし"
+      }
+    ]
+  },
+  "reviewed_files": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/PromptPanel.tsx",
+    "src/components/worktree/WorktreeList.tsx",
+    "src/app/worktrees/[id]/page.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md"
+  ],
+  "timestamp": "2026-02-14T12:00:00Z"
+}

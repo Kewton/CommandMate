@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-02-14
+
+### Fixed
+- Update-check API route static prerender error (Issue #270)
+  - Added `force-dynamic` export to prevent Next.js static generation at build time
+
 ## [0.2.5] - 2026-02-14
 
 ### Added
@@ -403,7 +409,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.5...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/Kewton/CommandMate/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Kewton/CommandMate/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Kewton/CommandMate/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Kewton/CommandMate/compare/v0.2.2...v0.2.3

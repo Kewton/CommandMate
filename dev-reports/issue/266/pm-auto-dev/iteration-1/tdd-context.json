@@ -1,0 +1,25 @@
+{
+  "issue_number": 266,
+  "title": "ブラウザのタブを切り替えると入力途中の内容がクリアされる",
+  "acceptance_criteria": [
+    "デスクトップブラウザでタブ切替後にメッセージ入力内容が保持される",
+    "デスクトップブラウザでタブ切替後にPromptPanelの入力内容が保持される",
+    "visibilitychangeによるデータ再取得が引き続き動作する",
+    "エラー状態からのタブ復帰時は従来通りhandleRetry()で完全リカバリされる",
+    "既存のメッセージ送信フローに影響がない"
+  ],
+  "implementation_tasks": [
+    "handleVisibilityChange()をhandleRetry()呼び出しから軽量リカバリに変更",
+    "エラー状態の場合のみhandleRetry()を呼び出すガード追加",
+    "軽量リカバリのcatch内でsetError(null)を呼び出し、fetchWorktree()内部のsetError()によるコンポーネントツリー崩壊を防御する",
+    "useCallbackの依存配列にerror, setError, fetchWorktree, fetchMessages, fetchCurrentOutputを追加",
+    "軽量リカバリのfetch呼び出し箇所にコメントで依存関係を明示（SF-DRY-001, SF-CONS-001, SF-IMP-001, SF-IMP-002）",
+    "ユニットテスト追加（visibilitychange時にloading状態が変化しないことを検証）",
+    "ユニットテスト追加（軽量リカバリ失敗時にsetError(null)が呼ばれコンポーネントツリーが維持されることを検証）",
+    "既存テストTC-1のコメントをhandleRetry経由から軽量リカバリ経由に更新",
+    "既存テストTC-2がerrorガード経由で正しく動作することを確認"
+  ],
+  "target_coverage": 90,
+  "design_policy_path": "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md",
+  "work_plan_path": "dev-reports/issue/266/work-plan.md"
+}

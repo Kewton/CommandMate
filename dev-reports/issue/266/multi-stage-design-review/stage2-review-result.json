@@ -1,0 +1,79 @@
+{
+  "issue_number": 266,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-CONS-001",
+        "category": "整合性",
+        "title": "handleRetryのfetchパターン差異: 設計書After側はPromise.all([fetchWorktree(), fetchMessages(), fetchCurrentOutput()])だが、既存handleRetryはfetchWorktree()の結果を条件に後続fetchを実行",
+        "severity": "medium",
+        "description": "設計書Section 4-1のAfterコードでは軽量リカバリとして3つのfetchをPromise.allで並行実行するが、既存handleRetry(L1447-1455)ではfetchWorktreeの戻り値を確認してから残り2つを実行する逐次パターンを使用している。軽量リカバリ側ではworktreeDataの存在確認なしに3つ全てを並行実行するため、worktreeが取得できない場合にも不要なfetchMessages/fetchCurrentOutputが実行される。ただしGETリクエストのためデータ破損リスクはなく、実害は小さい。",
+        "recommendation": "軽量リカバリでもfetchWorktreeの成否を確認する逐次パターンにするか、設計書にて並行実行を選択した理由（コンポーネントツリー維持のためsetLoading不使用、かつ軽量リカバリ失敗時はサイレント無視するためworktreeチェック不要）を明示的に記載する。"
+      },
+      {
+        "id": "SF-CONS-002",
+        "category": "整合性",
+        "title": "設計書Section 4-2のDRYトレードオフ記述とhandleRetryの実際のfetchパターンが不一致",
+        "severity": "low",
+        "description": "設計書のSF-DRY-001指摘サマリー(Section 13)では、handleRetry内のfetchパターンを「Promise.all([fetchMessages(), fetchCurrentOutput()])」と記述しているが、実際のhandleRetry(L1450-1453)では「fetchWorktree()を先に呼び、結果がある場合のみPromise.all([fetchMessages(), fetchCurrentOutput()])」という条件付きパターンになっている。fetchWorktreeも含む3並行と、fetchWorktree条件付き2並行では重複の範囲が異なる。",
+        "recommendation": "設計書Section 13のSF-DRY-001記述を、handleRetryの実際のコード構造(fetchWorktree条件付き + fetchMessages/fetchCurrentOutput並行)に正確に合わせる。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-CONS-001",
+        "category": "整合性",
+        "title": "設計書Before側のコード行番号はスナップショット時点のもの",
+        "description": "設計書Section 4-1のBeforeコードに「L1494-1505」と記載されている。現時点の実装と一致しているが、他の修正によりズレる可能性がある。行番号はあくまで参考情報として扱うべき。",
+        "recommendation": "特に対応不要。実装時に実際の行番号を確認すれば問題ない。"
+      },
+      {
+        "id": "C-CONS-002",
+        "category": "整合性",
+        "title": "テストケースTC-2(エラー状態からの回復)はhandleRetry直接呼び出しをテストしており、修正後のerrorガード分岐を正しくテストできるか確認が必要",
+        "description": "既存テストTC-2はfetchを一旦失敗させてエラー状態にした後、visibilitychangeで回復するテストだが、修正後はerrorガードによりhandleRetry()が呼ばれるパスとなる。テストのassertionがhandleRetry経由の挙動を正しく検証できるかは実装時に確認が必要。",
+        "recommendation": "実装時に既存テストTC-2が修正後のerrorガード経由で正しく動作するか確認する。新規テストケースとして「正常時にsetLoadingが呼ばれないこと」「正常時にfetch群が呼ばれること」を追加する（設計書Section 9に記載済み）。"
+      },
+      {
+        "id": "C-CONS-003",
+        "category": "整合性",
+        "title": "設計書はuseCallback依存配列の変更を明記しているが、useCallbackのasync化に伴うReact動作への注記がない",
+        "description": "設計書のAfterコードではuseCallbackをasyncに変更している。React公式ではuseCallbackのasync使用は直接的にはサポートドキュメントに記載がないが、実際にはPromiseを返す関数をラップするだけなので問題なく動作する。ただし、visibilitychangeイベントハンドラとして登録される際にPromiseの戻り値が無視される点は認識しておくべき。",
+        "recommendation": "特に対応不要。async useCallbackのパターンは本プロジェクトの他の箇所(handleRetry等)でも使用されている。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "consistency_check": {
+    "design_vs_implementation_before": {
+      "status": "consistent",
+      "details": "設計書のBeforeコード(Section 4-1)は現在の実装(L1494-1505)と完全に一致している"
+    },
+    "design_vs_implementation_after": {
+      "status": "not_yet_implemented",
+      "details": "Afterコードは未実装（設計レビュー段階）。設計書の記述は実装可能であり、大きな整合性問題はないが、handleRetryとのfetchパターン差異(SF-CONS-001)について明確化が望ましい"
+    },
+    "design_vs_existing_architecture": {
+      "status": "consistent",
+      "details": "変更範囲がプレゼンテーション層のみであること、既存fetch関数・状態管理・イベントリスナーパターンとの整合性は確認済み"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/PromptPanel.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "timestamp": "2026-02-14T11:45:00Z"
+}

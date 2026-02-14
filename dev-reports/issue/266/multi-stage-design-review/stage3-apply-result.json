@@ -1,0 +1,89 @@
+{
+  "issue_number": 266,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-IMP-001",
+        "item": "fetchWorktree()内のsetError()が軽量リカバリ時にコンポーネントアンマウントを誘発するリスク",
+        "severity": "medium",
+        "sections_updated": [
+          "4-1 (Afterコード: SF-IMP-001コメント + catch内setError(null)追加)",
+          "4-2 (決定事項テーブル: 軽量リカバリの失敗時行にSF-IMP-001対応統合)",
+          "8 (パフォーマンス設計: ポーリングとの並行実行注記)",
+          "9 (テスト設計: 軽量リカバリ失敗時テストケース追加)",
+          "10 (影響範囲: テストへの影響セクション追加)",
+          "11 (実装チェックリスト: setError(null)タスク・テスト追加タスク追記)",
+          "13 (レビュー指摘事項サマリー: Stage 3 SF-IMP-001詳細追加)"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IMP-002",
+        "item": "useCallbackのerror依存追加によるポーリングuseEffectへの連鎖影響",
+        "severity": "low",
+        "sections_updated": [
+          "4-1 (Afterコード: SF-IMP-002注記コメント追加)",
+          "4-2 (決定事項テーブル: SF-IMP-002対応行追加)",
+          "8 (パフォーマンス設計: イベントリスナー再登録セクション追加)",
+          "11 (実装チェックリスト: コメント注記タスク追記)",
+          "13 (レビュー指摘事項サマリー: Stage 3 SF-IMP-002詳細追加)"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-IMP-001",
+        "item": "既存テストTC-1の動作変更",
+        "sections_updated": [
+          "10 (影響範囲: テストへの影響セクション追加)",
+          "11 (実装チェックリスト: TC-1コメント更新タスク追記)",
+          "13 (レビュー指摘事項サマリー: Stage 3 Consider追加)"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "C-IMP-002",
+        "item": "WorktreeList.tsxのvisibilitychangeパターンとの整合",
+        "sections_updated": [
+          "13 (レビュー指摘事項サマリー: Stage 3 Consider追加)"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "C-IMP-003",
+        "item": "ポーリングuseEffectとの並行実行の変化",
+        "sections_updated": [
+          "8 (パフォーマンス設計: ポーリングとの並行実行セクション追加)",
+          "10 (影響範囲: ポーリングuseEffectの影響注記追加)",
+          "13 (レビュー指摘事項サマリー: Stage 3 Consider追加)"
+        ],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md",
+  "sections_updated": [
+    "4-1 (Afterコード)",
+    "4-2 (設計上の決定事項)",
+    "8 (パフォーマンス設計)",
+    "9 (テスト設計)",
+    "10 (影響範囲)",
+    "11 (実装チェックリスト)",
+    "12 (レビュー履歴)",
+    "13 (レビュー指摘事項サマリー)",
+    "リスク評価"
+  ],
+  "risk_assessment_updated": {
+    "technical": "medium (from low)",
+    "security": "low (unchanged)",
+    "operational": "low (unchanged)"
+  },
+  "timestamp": "2026-02-14T12:00:00Z"
+}

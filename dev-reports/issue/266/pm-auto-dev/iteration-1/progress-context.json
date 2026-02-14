@@ -1,0 +1,46 @@
+{
+  "issue_number": 266,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "test_count": 36,
+      "tests_passed": 35,
+      "tests_failed": 0,
+      "tests_skipped": 1,
+      "static_analysis": {
+        "eslint_errors": 0,
+        "typescript_errors": 0
+      },
+      "commits": ["73e4dd9"]
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_total": 7,
+      "scenarios_passed": 7,
+      "criteria_met": 5,
+      "criteria_total": 5
+    },
+    "refactor": {
+      "status": "success",
+      "coverage_before": 57.93,
+      "coverage_after": 60.68,
+      "coverage_improvement": 2.75,
+      "file_lines_before": 2123,
+      "file_lines_after": 2081,
+      "lines_reduced": 42,
+      "refactorings": [
+        "capitalizeFirstヘルパー関数抽出",
+        "useDescriptionEditorカスタムフック抽出",
+        "WorktreeInfoFields共有コンポーネント抽出"
+      ],
+      "commits": ["c163603"]
+    },
+    "documentation": {
+      "status": "success",
+      "files_updated": [
+        "docs/implementation-history.md"
+      ]
+    }
+  }
+}

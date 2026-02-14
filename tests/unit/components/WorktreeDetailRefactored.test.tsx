@@ -794,7 +794,7 @@ describe('WorktreeDetailRefactored', () => {
     });
   });
 
-  describe('Visibility Change Recovery (Issue #246)', () => {
+  describe('Visibility Change Recovery (Issue #246, Issue #266)', () => {
     /**
      * Tests for the visibilitychange-based recovery mechanism.
      *
@@ -802,10 +802,19 @@ describe('WorktreeDetailRefactored', () => {
      * are suspended and polling timers drift. Upon foreground restoration, the
      * component must re-fetch data to clear stale errors and restore the UI.
      *
+     * Issue #266 update: Normal (non-error) state now uses lightweight recovery
+     * (direct fetch calls without setLoading) to preserve component tree and
+     * prevent input field content from being cleared. Error state still uses
+     * handleRetry() for full recovery.
+     *
      * Design policy references:
-     * - MF-001: handleRetry() is called directly (DRY principle)
-     * - SF-001: RECOVERY_THROTTLE_MS prevents rapid re-fetches
-     * - IA-001: handleRetry() causes setInterval re-creation as a side-effect
+     * - SF-001 (Issue #266): SRP - handleVisibilityChange uses lightweight recovery for normal state
+     * - SF-002 (Issue #266): KISS - simple error guard condition
+     * - SF-DRY-001: fetch duplication acknowledged with comment documentation
+     * - SF-CONS-001: Promise.all parallel execution in lightweight recovery
+     * - SF-IMP-001: setError(null) in catch to prevent component tree collapse
+     * - SF-IMP-002: error dependency in useCallback acknowledged
+     * - SF-001 (Issue #246): RECOVERY_THROTTLE_MS prevents rapid re-fetches
      * - IA-002: Concurrent fetches from visibility + polling + WebSocket are safe
      */
 
@@ -836,7 +845,10 @@ describe('WorktreeDetailRefactored', () => {
       });
     });
 
-    it('TC-1: triggers data re-fetch when visibilitychange fires with visible state (MF-001)', async () => {
+    it('TC-1: triggers data re-fetch when visibilitychange fires with visible state (lightweight recovery, Issue #266)', async () => {
+      // [C-IMP-001] Updated: After Issue #266, normal state uses lightweight recovery
+      // (direct fetch calls via Promise.all) instead of handleRetry().
+      // The fetch calls are the same, but loading state is NOT toggled.
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       // Wait for initial load to complete
@@ -853,7 +865,7 @@ describe('WorktreeDetailRefactored', () => {
         document.dispatchEvent(new Event('visibilitychange'));
       });
 
-      // handleRetry() should trigger fetchWorktree (GET /api/worktrees/:id)
+      // Lightweight recovery should trigger fetchWorktree, fetchMessages, fetchCurrentOutput
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalled();
         const anyWorktreeCall = mockFetch.mock.calls.some(
@@ -863,7 +875,7 @@ describe('WorktreeDetailRefactored', () => {
       });
     });
 
-    it('TC-2: resets error state when visibilitychange fires during error (MF-001)', async () => {
+    it('TC-2: resets error state when visibilitychange fires during error (error guard -> handleRetry, Issue #266 C-CONS-002)', async () => {
       // First, make fetch fail to trigger error state
       mockFetch.mockImplementation(() =>
         Promise.resolve({
@@ -999,6 +1011,198 @@ describe('WorktreeDetailRefactored', () => {
 
       // Restore Date.now
       Date.now = originalDateNow;
+    });
+
+    it('TC-5: lightweight recovery does not trigger loading state change (Issue #266)', async () => {
+      // Issue #266: The core fix - visibilitychange in normal state should NOT
+      // call setLoading(true/false), which would cause component tree unmount/remount
+      // and clear MessageInput content.
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Wait for initial load to complete
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+
+      // Verify loading indicator is NOT shown (component tree is stable)
+      expect(screen.queryByText(/loading worktree/i)).not.toBeInTheDocument();
+
+      // Clear fetch call history after initial load
+      mockFetch.mockClear();
+
+      // Dispatch visibilitychange event
+      setVisibilityState('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      // After visibility change, loading indicator should NOT appear
+      // This is the key assertion: if setLoading(true) were called,
+      // the component tree would re-render with LoadingIndicator
+      expect(screen.queryByText(/loading worktree/i)).not.toBeInTheDocument();
+      // Desktop layout should remain visible (component tree maintained)
+      expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+
+      // Fetch calls should still occur (lightweight recovery fetches data)
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+    });
+
+    it('TC-6: lightweight recovery calls all three fetch functions in parallel (Issue #266 SF-CONS-001)', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Wait for initial load to complete
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+
+      // Clear fetch call history after initial load
+      mockFetch.mockClear();
+
+      // Dispatch visibilitychange event
+      setVisibilityState('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      // All three fetch endpoints should be called
+      await waitFor(() => {
+        const worktreeCall = mockFetch.mock.calls.some(
+          (call) => typeof call[0] === 'string' &&
+            call[0].includes('/api/worktrees/test-worktree-123') &&
+            !call[0].includes('/messages') &&
+            !call[0].includes('/current-output')
+        );
+        const messagesCall = mockFetch.mock.calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('/messages')
+        );
+        const currentOutputCall = mockFetch.mock.calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('/current-output')
+        );
+        expect(worktreeCall).toBe(true);
+        expect(messagesCall).toBe(true);
+        expect(currentOutputCall).toBe(true);
+      });
+    });
+
+    it('TC-7: lightweight recovery failure calls setError(null) to maintain component tree (Issue #266 SF-IMP-001)', async () => {
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Wait for initial load to complete
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+
+      // Make fetchWorktree fail to simulate network error during lightweight recovery
+      // fetchWorktree internally calls setError(message) on failure,
+      // so the catch block should call setError(null) to counter it.
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/messages')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockMessages),
+          });
+        }
+        if (url.includes('/current-output')) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                isRunning: true,
+                isGenerating: false,
+                content: 'Terminal output',
+                thinking: false,
+              }),
+          });
+        }
+        // Make worktree fetch fail (triggers setError inside fetchWorktree)
+        if (url.includes('/api/worktrees/')) {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            json: () => Promise.resolve({ error: 'Server error' }),
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      // Dispatch visibilitychange event - lightweight recovery should handle failure silently
+      setVisibilityState('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      // Wait for the async lightweight recovery to complete
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      });
+
+      // SF-IMP-001: The component tree should be maintained even after fetch failure.
+      // setError(null) in catch block should prevent ErrorDisplay from being shown.
+      // The desktop layout should still be visible.
+      expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      expect(screen.queryByText(/error loading worktree/i)).not.toBeInTheDocument();
+    });
+
+    it('TC-8: error state uses handleRetry (full recovery) on visibilitychange (Issue #266 SF-001)', async () => {
+      // First, make fetch fail to trigger error state
+      mockFetch.mockImplementation(() =>
+        Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({ error: 'Server error' }),
+        })
+      );
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      // Wait for error state to appear
+      await waitFor(() => {
+        expect(screen.getByText(/error/i)).toBeInTheDocument();
+      });
+
+      // Now fix the fetch to succeed
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/messages')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockMessages),
+          });
+        }
+        if (url.includes('/current-output')) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                isRunning: true,
+                isGenerating: false,
+                content: 'Terminal output',
+                thinking: false,
+              }),
+          });
+        }
+        if (url.includes('/api/worktrees/')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockWorktree),
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      // Dispatch visibilitychange to trigger error-path recovery (handleRetry)
+      setVisibilityState('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      // Error should be cleared and loading should briefly appear (handleRetry calls setLoading)
+      // then data should load and desktop layout should appear
+      await waitFor(() => {
+        expect(screen.queryByText(/error loading worktree/i)).not.toBeInTheDocument();
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
     });
   });
 });

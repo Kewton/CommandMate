@@ -115,6 +115,11 @@ const APP_VERSION_DISPLAY = process.env.NEXT_PUBLIC_APP_VERSION
 // Helper Functions
 // ============================================================================
 
+/** Capitalize first character of a string (e.g., 'claude' -> 'Claude') */
+function capitalizeFirst(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
 /** Convert worktree data to WorktreeStatus - consistent with sidebar */
 function deriveWorktreeStatus(
   worktree: Worktree | null,
@@ -163,6 +168,240 @@ function parseMessageTimestamps(messages: ChatMessage[]): ChatMessage[] {
     timestamp: new Date(msg.timestamp),
   }));
 }
+
+// ============================================================================
+// Custom Hooks (extracted for DRY)
+// ============================================================================
+
+/**
+ * useDescriptionEditor - Shared hook for worktree description editing state.
+ *
+ * Extracted from InfoModal and MobileInfoContent to eliminate duplicated
+ * description editing logic (state management, save/cancel handlers, API call).
+ *
+ * @param worktree - Current worktree data (may be null during loading)
+ * @param onWorktreeUpdate - Callback to update parent worktree state after save
+ * @param syncTrigger - When this value changes (and reset conditions are met),
+ *   the description text is re-synced from the worktree. InfoModal passes
+ *   a boolean derived from isOpen; MobileInfoContent passes worktree?.id.
+ * @param shouldReset - Predicate controlling when description text should be
+ *   re-synced (e.g., modal just opened, worktree ID changed).
+ */
+function useDescriptionEditor(
+  worktree: Worktree | null,
+  onWorktreeUpdate: (updated: Worktree) => void,
+  syncTrigger: unknown,
+  shouldReset: () => boolean,
+) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [text, setText] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (shouldReset() && worktree) {
+      setText(worktree.description || '');
+      setIsEditing(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncTrigger, worktree]);
+
+  const handleSave = useCallback(async () => {
+    if (!worktree) return;
+    setIsSaving(true);
+    try {
+      const updated = await worktreeApi.updateDescription(worktree.id, text);
+      onWorktreeUpdate(updated);
+      setIsEditing(false);
+    } catch (err) {
+      console.error('Failed to save description:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [worktree, text, onWorktreeUpdate]);
+
+  const handleCancel = useCallback(() => {
+    setText(worktree?.description || '');
+    setIsEditing(false);
+  }, [worktree]);
+
+  const startEditing = useCallback(() => {
+    setIsEditing(true);
+  }, []);
+
+  return { isEditing, text, setText, isSaving, handleSave, handleCancel, startEditing };
+}
+
+// ============================================================================
+// Shared Presentational Components (extracted for DRY)
+// ============================================================================
+
+/** Props for WorktreeInfoFields component */
+interface WorktreeInfoFieldsProps {
+  worktreeId: string;
+  worktree: Worktree;
+  /** CSS class for each info card container (varies between desktop/mobile) */
+  cardClassName: string;
+  /** Description editor state from useDescriptionEditor hook */
+  descriptionEditor: ReturnType<typeof useDescriptionEditor>;
+  /** Whether to show the logs section */
+  showLogs: boolean;
+  /** Toggle logs visibility */
+  onToggleLogs: () => void;
+}
+
+/**
+ * WorktreeInfoFields - Shared info fields rendered in both InfoModal and MobileInfoContent.
+ *
+ * Extracted to eliminate duplicated field rendering (Worktree name, Repository, Path,
+ * Status, Description, Link, LastUpdated, Version, Feedback, Logs). The only difference
+ * between desktop and mobile was the card container className, now passed as a prop.
+ */
+const WorktreeInfoFields = memo(function WorktreeInfoFields({
+  worktreeId,
+  worktree,
+  cardClassName,
+  descriptionEditor,
+  showLogs,
+  onToggleLogs,
+}: WorktreeInfoFieldsProps) {
+  const { isEditing, text, setText, isSaving, handleSave, handleCancel, startEditing } = descriptionEditor;
+
+  return (
+    <>
+      {/* Worktree Name */}
+      <div className={cardClassName}>
+        <h2 className="text-sm font-medium text-gray-500 mb-1">Worktree</h2>
+        <p className="text-lg font-semibold text-gray-900">{worktree.name}</p>
+      </div>
+
+      {/* Repository Info */}
+      <div className={cardClassName}>
+        <h2 className="text-sm font-medium text-gray-500 mb-1">Repository</h2>
+        <p className="text-base text-gray-900">{worktree.repositoryName}</p>
+        <p className="text-xs text-gray-500 mt-1 break-all">{worktree.repositoryPath}</p>
+      </div>
+
+      {/* Path */}
+      <div className={cardClassName}>
+        <h2 className="text-sm font-medium text-gray-500 mb-1">Path</h2>
+        <p className="text-sm text-gray-700 break-all font-mono">{worktree.path}</p>
+      </div>
+
+      {/* Status */}
+      {worktree.status && (
+        <div className={cardClassName}>
+          <h2 className="text-sm font-medium text-gray-500 mb-1">Status</h2>
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+            worktree.status === 'done' ? 'bg-green-100 text-green-800' :
+            worktree.status === 'doing' ? 'bg-blue-100 text-blue-800' :
+            'bg-gray-100 text-gray-800'
+          }`}>
+            {worktree.status.toUpperCase()}
+          </span>
+        </div>
+      )}
+
+      {/* Description - Editable */}
+      <div className={cardClassName}>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-medium text-gray-500">Description</h2>
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={startEditing}
+              className="text-sm text-blue-600 hover:text-blue-800"
+            >
+              Edit
+            </button>
+          )}
+        </div>
+        {isEditing ? (
+          <div className="space-y-3">
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Add notes about this branch..."
+              className="w-full min-h-[150px] p-3 border border-gray-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+              >
+                {isSaving ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={isSaving}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 text-sm font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="min-h-[50px]">
+            {worktree.description ? (
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{worktree.description}</p>
+            ) : (
+              <p className="text-sm text-gray-400 italic">No description added yet</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Link */}
+      {worktree.link && (
+        <div className={cardClassName}>
+          <h2 className="text-sm font-medium text-gray-500 mb-1">Link</h2>
+          <a
+            href={worktree.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-blue-600 hover:underline break-all"
+          >
+            {worktree.link}
+          </a>
+        </div>
+      )}
+
+      {/* Last Updated */}
+      {worktree.updatedAt && (
+        <div className={cardClassName}>
+          <h2 className="text-sm font-medium text-gray-500 mb-1">Last Updated</h2>
+          <p className="text-sm text-gray-700">
+            {new Date(worktree.updatedAt).toLocaleString()}
+          </p>
+        </div>
+      )}
+
+      {/* Version - Issue #257: VersionSection component (SF-001 DRY) */}
+      <VersionSection version={APP_VERSION_DISPLAY} className={cardClassName} />
+
+      {/* Feedback - Issue #264: FeedbackSection component */}
+      <FeedbackSection className={cardClassName} />
+
+      {/* Logs */}
+      <div className={cardClassName}>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-medium text-gray-500">Logs</h2>
+          <button
+            type="button"
+            onClick={onToggleLogs}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            {showLogs ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        {showLogs && <LogViewer worktreeId={worktreeId} />}
+      </div>
+    </>
+  );
+});
 
 // ============================================================================
 // Sub-components
@@ -343,7 +582,10 @@ interface InfoModalProps {
   onWorktreeUpdate: (updated: Worktree) => void;
 }
 
-/** Modal displaying worktree information with description editing */
+/**
+ * Modal displaying worktree information with description editing.
+ * Uses useDescriptionEditor hook and WorktreeInfoFields for DRY compliance.
+ */
 const InfoModal = memo(function InfoModal({
   worktreeId,
   worktree,
@@ -351,181 +593,35 @@ const InfoModal = memo(function InfoModal({
   onClose,
   onWorktreeUpdate,
 }: InfoModalProps) {
-  const [isEditingDescription, setIsEditingDescription] = useState(false);
-  const [descriptionText, setDescriptionText] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
 
   // Track previous isOpen state to detect modal opening
   const prevIsOpenRef = useRef(isOpen);
 
-  // Only sync description text when modal opens (not on every worktree poll)
-  useEffect(() => {
-    const wasOpened = isOpen && !prevIsOpenRef.current;
-    prevIsOpenRef.current = isOpen;
-
-    // Only reset description text when modal first opens, not during editing
-    if (wasOpened && worktree) {
-      setDescriptionText(worktree.description || '');
-      setIsEditingDescription(false);
-    }
-  }, [worktree, isOpen]);
-
-  const handleSaveDescription = useCallback(async () => {
-    if (!worktree) return;
-    setIsSaving(true);
-    try {
-      const updated = await worktreeApi.updateDescription(worktree.id, descriptionText);
-      onWorktreeUpdate(updated);
-      setIsEditingDescription(false);
-    } catch (err) {
-      console.error('Failed to save description:', err);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [worktree, descriptionText, onWorktreeUpdate]);
-
-  const handleCancelDescription = useCallback(() => {
-    setDescriptionText(worktree?.description || '');
-    setIsEditingDescription(false);
-  }, [worktree]);
+  const descriptionEditor = useDescriptionEditor(
+    worktree,
+    onWorktreeUpdate,
+    isOpen,
+    () => {
+      const wasOpened = isOpen && !prevIsOpenRef.current;
+      prevIsOpenRef.current = isOpen;
+      return wasOpened;
+    },
+  );
 
   if (!worktree) return null;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Worktree Information" size="md">
       <div className="space-y-4 max-h-[70vh] overflow-y-auto">
-        {/* Worktree Name */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Worktree</h2>
-          <p className="text-lg font-semibold text-gray-900">{worktree.name}</p>
-        </div>
-
-        {/* Repository Info */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Repository</h2>
-          <p className="text-base text-gray-900">{worktree.repositoryName}</p>
-          <p className="text-xs text-gray-500 mt-1 break-all">{worktree.repositoryPath}</p>
-        </div>
-
-        {/* Path */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Path</h2>
-          <p className="text-sm text-gray-700 break-all font-mono">{worktree.path}</p>
-        </div>
-
-        {/* Status */}
-        {worktree.status && (
-          <div className="bg-gray-50 rounded-lg p-4">
-            <h2 className="text-sm font-medium text-gray-500 mb-1">Status</h2>
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-              worktree.status === 'done' ? 'bg-green-100 text-green-800' :
-              worktree.status === 'doing' ? 'bg-blue-100 text-blue-800' :
-              'bg-gray-100 text-gray-800'
-            }`}>
-              {worktree.status.toUpperCase()}
-            </span>
-          </div>
-        )}
-
-        {/* Description - Editable */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-medium text-gray-500">Description</h2>
-            {!isEditingDescription && (
-              <button
-                type="button"
-                onClick={() => setIsEditingDescription(true)}
-                className="text-sm text-blue-600 hover:text-blue-800"
-              >
-                Edit
-              </button>
-            )}
-          </div>
-          {isEditingDescription ? (
-            <div className="space-y-3">
-              <textarea
-                value={descriptionText}
-                onChange={(e) => setDescriptionText(e.target.value)}
-                placeholder="Add notes about this branch..."
-                className="w-full min-h-[150px] p-3 border border-gray-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                autoFocus
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleSaveDescription}
-                  disabled={isSaving}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
-                >
-                  {isSaving ? 'Saving...' : 'Save'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCancelDescription}
-                  disabled={isSaving}
-                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 text-sm font-medium"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="min-h-[50px]">
-              {worktree.description ? (
-                <p className="text-sm text-gray-700 whitespace-pre-wrap">{worktree.description}</p>
-              ) : (
-                <p className="text-sm text-gray-400 italic">No description added yet</p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Link */}
-        {worktree.link && (
-          <div className="bg-gray-50 rounded-lg p-4">
-            <h2 className="text-sm font-medium text-gray-500 mb-1">Link</h2>
-            <a
-              href={worktree.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-600 hover:underline break-all"
-            >
-              {worktree.link}
-            </a>
-          </div>
-        )}
-
-        {/* Last Updated */}
-        {worktree.updatedAt && (
-          <div className="bg-gray-50 rounded-lg p-4">
-            <h2 className="text-sm font-medium text-gray-500 mb-1">Last Updated</h2>
-            <p className="text-sm text-gray-700">
-              {new Date(worktree.updatedAt).toLocaleString()}
-            </p>
-          </div>
-        )}
-
-        {/* Version - Issue #257: VersionSection component (SF-001 DRY) */}
-        <VersionSection version={APP_VERSION_DISPLAY} className="bg-gray-50 rounded-lg p-4" />
-
-        {/* Feedback - Issue #264: FeedbackSection component */}
-        <FeedbackSection className="bg-gray-50 rounded-lg p-4" />
-
-        {/* Logs */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-medium text-gray-500">Logs</h2>
-            <button
-              type="button"
-              onClick={() => setShowLogs(!showLogs)}
-              className="text-sm text-blue-600 hover:text-blue-800"
-            >
-              {showLogs ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          {showLogs && <LogViewer worktreeId={worktreeId} />}
-        </div>
+        <WorktreeInfoFields
+          worktreeId={worktreeId}
+          worktree={worktree}
+          cardClassName="bg-gray-50 rounded-lg p-4"
+          descriptionEditor={descriptionEditor}
+          showLogs={showLogs}
+          onToggleLogs={() => setShowLogs(!showLogs)}
+        />
       </div>
     </Modal>
   );
@@ -609,49 +705,35 @@ interface MobileInfoContentProps {
   onWorktreeUpdate: (updated: Worktree) => void;
 }
 
-/** Mobile Info tab content with description editing */
+/**
+ * Mobile Info tab content with description editing.
+ * Uses useDescriptionEditor hook and WorktreeInfoFields for DRY compliance.
+ */
 const MobileInfoContent = memo(function MobileInfoContent({
   worktreeId,
   worktree,
   onWorktreeUpdate,
 }: MobileInfoContentProps) {
-  const [isEditingDescription, setIsEditingDescription] = useState(false);
-  const [descriptionText, setDescriptionText] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
 
   // Track previous worktree ID to detect worktree changes
   const prevWorktreeIdRef = useRef(worktree?.id);
+  // Track editing state via ref to avoid circular dependency with useDescriptionEditor
+  const isEditingRef = useRef(false);
 
-  // Only sync description text when worktree changes (not during editing due to polling)
-  useEffect(() => {
-    const worktreeChanged = worktree?.id !== prevWorktreeIdRef.current;
-    prevWorktreeIdRef.current = worktree?.id;
+  const descriptionEditor = useDescriptionEditor(
+    worktree,
+    onWorktreeUpdate,
+    worktree?.id,
+    () => {
+      const worktreeChanged = worktree?.id !== prevWorktreeIdRef.current;
+      prevWorktreeIdRef.current = worktree?.id;
+      return worktreeChanged && !isEditingRef.current;
+    },
+  );
 
-    // Only reset description text when worktree changes, not during editing
-    if (worktreeChanged && worktree && !isEditingDescription) {
-      setDescriptionText(worktree.description || '');
-    }
-  }, [worktree, isEditingDescription]);
-
-  const handleSaveDescription = useCallback(async () => {
-    if (!worktree) return;
-    setIsSaving(true);
-    try {
-      const updated = await worktreeApi.updateDescription(worktree.id, descriptionText);
-      onWorktreeUpdate(updated);
-      setIsEditingDescription(false);
-    } catch (err) {
-      console.error('Failed to save description:', err);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [worktree, descriptionText, onWorktreeUpdate]);
-
-  const handleCancelDescription = useCallback(() => {
-    setDescriptionText(worktree?.description || '');
-    setIsEditingDescription(false);
-  }, [worktree]);
+  // Keep ref in sync with hook state
+  isEditingRef.current = descriptionEditor.isEditing;
 
   if (!worktree) {
     return (
@@ -663,137 +745,14 @@ const MobileInfoContent = memo(function MobileInfoContent({
 
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full">
-      {/* Worktree Name */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <h2 className="text-sm font-medium text-gray-500 mb-1">Worktree</h2>
-        <p className="text-lg font-semibold text-gray-900">{worktree.name}</p>
-      </div>
-
-      {/* Repository Info */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <h2 className="text-sm font-medium text-gray-500 mb-1">Repository</h2>
-        <p className="text-base text-gray-900">{worktree.repositoryName}</p>
-        <p className="text-xs text-gray-500 mt-1 break-all">{worktree.repositoryPath}</p>
-      </div>
-
-      {/* Path */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <h2 className="text-sm font-medium text-gray-500 mb-1">Path</h2>
-        <p className="text-sm text-gray-700 break-all font-mono">{worktree.path}</p>
-      </div>
-
-      {/* Status */}
-      {worktree.status && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Status</h2>
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-            worktree.status === 'done' ? 'bg-green-100 text-green-800' :
-            worktree.status === 'doing' ? 'bg-blue-100 text-blue-800' :
-            'bg-gray-100 text-gray-800'
-          }`}>
-            {worktree.status.toUpperCase()}
-          </span>
-        </div>
-      )}
-
-      {/* Description - Editable */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-gray-500">Description</h2>
-          {!isEditingDescription && (
-            <button
-              type="button"
-              onClick={() => setIsEditingDescription(true)}
-              className="text-sm text-blue-600 hover:text-blue-800"
-            >
-              Edit
-            </button>
-          )}
-        </div>
-        {isEditingDescription ? (
-          <div className="space-y-3">
-            <textarea
-              value={descriptionText}
-              onChange={(e) => setDescriptionText(e.target.value)}
-              placeholder="Add notes about this branch..."
-              className="w-full min-h-[150px] p-3 border border-gray-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleSaveDescription}
-                disabled={isSaving}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
-              >
-                {isSaving ? 'Saving...' : 'Save'}
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelDescription}
-                disabled={isSaving}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 text-sm font-medium"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="min-h-[50px]">
-            {worktree.description ? (
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{worktree.description}</p>
-            ) : (
-              <p className="text-sm text-gray-400 italic">No description added yet</p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Link */}
-      {worktree.link && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Link</h2>
-          <a
-            href={worktree.link}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-blue-600 hover:underline break-all"
-          >
-            {worktree.link}
-          </a>
-        </div>
-      )}
-
-      {/* Last Updated */}
-      {worktree.updatedAt && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <h2 className="text-sm font-medium text-gray-500 mb-1">Last Updated</h2>
-          <p className="text-sm text-gray-700">
-            {new Date(worktree.updatedAt).toLocaleString()}
-          </p>
-        </div>
-      )}
-
-      {/* Version - Issue #257: VersionSection component (SF-001 DRY) */}
-      <VersionSection version={APP_VERSION_DISPLAY} className="bg-white rounded-lg border border-gray-200 p-4" />
-
-      {/* Feedback - Issue #264: FeedbackSection component */}
-      <FeedbackSection className="bg-white rounded-lg border border-gray-200 p-4" />
-
-      {/* Logs */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-gray-500">Logs</h2>
-          <button
-            type="button"
-            onClick={() => setShowLogs(!showLogs)}
-            className="text-sm text-blue-600 hover:text-blue-800"
-          >
-            {showLogs ? 'Hide' : 'Show'}
-          </button>
-        </div>
-        {showLogs && <LogViewer worktreeId={worktreeId} />}
-      </div>
+      <WorktreeInfoFields
+        worktreeId={worktreeId}
+        worktree={worktree}
+        cardClassName="bg-white rounded-lg border border-gray-200 p-4"
+        descriptionEditor={descriptionEditor}
+        showLogs={showLogs}
+        onToggleLogs={() => setShowLogs(!showLogs)}
+      />
     </div>
   );
 });
@@ -1455,7 +1414,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   }, [fetchWorktree, fetchMessages, fetchCurrentOutput]);
 
   // ========================================================================
-  // Visibility Change Recovery (Issue #246)
+  // Visibility Change Recovery (Issue #246, Issue #266)
   // ========================================================================
 
   /**
@@ -1468,30 +1427,25 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   /**
    * Handle page visibility change for background recovery.
    * When the page becomes visible again (e.g., smartphone foreground restoration),
-   * calls handleRetry() to reset errors and re-fetch data.
+   * performs data re-fetch to synchronize stale state.
    *
-   * Design rationale (Issue #246):
+   * Design rationale (Issue #246, Issue #266):
    *
-   * [MF-001] DRY: handleRetry() is called directly rather than re-implementing
-   *   the same error-reset + data-fetch flow. This ensures any future changes
-   *   to the retry logic automatically apply to visibility recovery.
+   * [SF-001] SRP: handleVisibilityChange is responsible for "background recovery
+   *   data sync" only. Full recovery (handleRetry) is a separate concern.
    *
-   * [IA-001] Side-effect: handleRetry() calls setLoading(true), which causes
-   *   the polling useEffect (line ~1538) to run its cleanup (clearInterval).
-   *   When handleRetry() finishes and calls setLoading(false), the polling
-   *   useEffect re-runs and creates a new setInterval. This means there is
-   *   a brief gap where no polling occurs (up to IDLE_POLLING_INTERVAL_MS).
-   *   This is acceptable because visibilitychange itself fetches fresh data.
+   * [SF-002] KISS: Simple error guard - error state uses handleRetry (full recovery),
+   *   normal state uses lightweight recovery (no loading state change).
    *
    * [IA-002] Overlap: When the page becomes visible, up to 3 data-fetch
    *   sources may fire concurrently:
-   *   1. This visibilitychange handler (handleRetry)
+   *   1. This visibilitychange handler (lightweight recovery)
    *   2. The setInterval polling timer (if it fires during the same tick)
    *   3. WebSocket reconnection triggering a broadcast-based fetch
    *   All fetches are idempotent GET requests, so concurrent execution is
    *   safe -- it may cause redundant network calls but no data corruption.
    */
-  const handleVisibilityChange = useCallback(() => {
+  const handleVisibilityChange = useCallback(async () => {
     if (document.visibilityState !== 'visible') return;
 
     const now = Date.now();
@@ -1500,9 +1454,49 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     }
     lastRecoveryTimestampRef.current = now;
 
-    // [MF-001] Call handleRetry() directly (DRY principle)
-    handleRetry();
-  }, [handleRetry]);
+    // [SF-001] Error state requires full recovery (handleRetry) to reset
+    // loading state and rebuild the UI from ErrorDisplay back to normal.
+    if (error) {
+      handleRetry();
+      return;
+    }
+
+    // [SF-002] Normal state uses lightweight recovery (loading state unchanged).
+    // This preserves the component tree, preventing MessageInput/PromptPanel
+    // content from being cleared by unmount/remount caused by setLoading(true/false).
+    //
+    // [SF-DRY-001] Note: These fetch calls duplicate the data retrieval done by
+    // handleRetry(). handleRetry uses setLoading(true/false) for full recovery,
+    // while this path intentionally omits loading state changes for lightweight
+    // recovery. When adding/changing fetch functions, update handleRetry() as well.
+    //
+    // [SF-CONS-001] handleRetry uses a sequential pattern (fetchWorktree first,
+    // then conditionally fetchMessages/fetchCurrentOutput). Lightweight recovery
+    // uses Promise.all for parallel execution because: failure is silently ignored
+    // (next polling cycle recovers), all requests are idempotent GETs (no data
+    // corruption risk), and parallel execution improves response time.
+    try {
+      await Promise.all([
+        fetchWorktree(),
+        fetchMessages(),
+        fetchCurrentOutput(),
+      ]);
+    } finally {
+      // [SF-IMP-001] fetchWorktree() internally catches errors and calls
+      // setError(message) without rethrowing. This means Promise.all resolves
+      // successfully even when fetchWorktree fails, but error state has already
+      // been set internally. Call setError(null) unconditionally to counter any
+      // internal setError() calls and maintain the component tree.
+      // On success, this is a no-op (error is already null).
+      // On failure, this prevents ErrorDisplay from replacing the normal UI,
+      // allowing the next polling cycle to recover naturally.
+      setError(null);
+    }
+    // [SF-IMP-002] Note: error in the dependency array causes useCallback to
+    // regenerate when error state changes, triggering useEffect listener
+    // re-registration (removeEventListener/addEventListener). Performance impact
+    // is negligible as these are synchronous lightweight operations.
+  }, [error, handleRetry, fetchWorktree, fetchMessages, fetchCurrentOutput]);
 
   // ========================================================================
   // Effects
@@ -1539,15 +1533,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   }, [fetchWorktree, fetchMessages, fetchCurrentOutput]);
 
   /**
-   * Register visibilitychange event listener for background recovery (Issue #246).
-   * When the page becomes visible, triggers handleRetry() to re-fetch all data.
+   * Register visibilitychange event listener for background recovery (Issue #246, #266).
+   * When the page becomes visible, performs lightweight recovery (normal state)
+   * or full recovery via handleRetry() (error state) to re-fetch all data.
    * This handles the case where the browser suspended network requests while
    * the page was in the background (common on mobile browsers).
    *
    * Unlike WorktreeList.tsx (SF-003), this component needs:
-   * - Error state reset (via handleRetry's setError(null))
-   * - Throttle guard (RECOVERY_THROTTLE_MS) because handleRetry triggers
-   *   a loading indicator and setInterval re-creation (IA-001)
+   * - Error state branching: full recovery (handleRetry) vs lightweight recovery
+   * - Throttle guard (RECOVERY_THROTTLE_MS) to prevent rapid re-fetches
    */
   useEffect(() => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -1663,7 +1657,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                         aria-label={`${tool} status: ${statusConfig.label}`}
                       />
                     )}
-                    {tool.charAt(0).toUpperCase() + tool.slice(1)}
+                    {capitalizeFirst(tool)}
                   </button>
                 );
               })}
@@ -1838,7 +1832,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <Modal
             isOpen={showKillConfirm}
             onClose={handleKillCancel}
-            title={tWorktree('session.confirmEnd', { tool: activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1) })}
+            title={tWorktree('session.confirmEnd', { tool: capitalizeFirst(activeCliTab) })}
             size="sm"
             showCloseButton={true}
           >
@@ -1934,7 +1928,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                         title={statusConfig.label}
                       />
                     )}
-                    {tool.charAt(0).toUpperCase() + tool.slice(1)}
+                    {capitalizeFirst(tool)}
                   </button>
                 );
               })}
@@ -2051,7 +2045,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <Modal
           isOpen={showKillConfirm}
           onClose={handleKillCancel}
-          title={tWorktree('session.confirmEnd', { tool: activeCliTab.charAt(0).toUpperCase() + activeCliTab.slice(1) })}
+          title={tWorktree('session.confirmEnd', { tool: capitalizeFirst(activeCliTab) })}
           size="sm"
           showCloseButton={true}
         >

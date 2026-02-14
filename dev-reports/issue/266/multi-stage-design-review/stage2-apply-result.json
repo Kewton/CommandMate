@@ -1,0 +1,54 @@
+{
+  "issue_number": 266,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-CONS-001",
+        "item": "handleRetryの条件付きfetchパターンと軽量リカバリのPromise.all並行パターンの差異を明示",
+        "sections_updated": ["4-1 (Afterコードコメント)", "4-2 (決定事項テーブル)", "11 (実装チェックリスト)", "13 (レビュー指摘事項サマリー)"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-CONS-002",
+        "item": "Section 13のSF-DRY-001記述をhandleRetryの実際のfetchパターンに修正",
+        "sections_updated": ["13 (SF-DRY-001詳細)"],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-CONS-001",
+        "item": "設計書Before側のコード行番号はスナップショット時点のもの",
+        "sections_updated": ["13 (Consider項目)"],
+        "status": "noted"
+      },
+      {
+        "id": "C-CONS-002",
+        "item": "テストケースTC-2のerrorガード分岐対応確認",
+        "sections_updated": ["11 (実装チェックリスト)", "13 (Consider項目)"],
+        "status": "noted"
+      },
+      {
+        "id": "C-CONS-003",
+        "item": "useCallbackのasync化に伴うReact動作への注記",
+        "sections_updated": ["13 (Consider項目)"],
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md",
+  "sections_updated": [
+    "4-1 (handleVisibilityChange After コード - SF-CONS-001コメント追加)",
+    "4-2 (設計上の決定事項 - SF-CONS-001行追加)",
+    "11 (実装チェックリスト - SF-CONS-001/C-CONS-002追加)",
+    "12 (レビュー履歴 - Stage 2追加)",
+    "13 (レビュー指摘事項サマリー - Stage 2セクション追加、SF-DRY-001記述修正)"
+  ],
+  "timestamp": "2026-02-14T12:00:00Z"
+}
