@@ -277,6 +277,12 @@ export function stripAnsi(str: string): string {
  *   consider switching to exit code-based detection as a more robust alternative.
  * - Pattern additions should be accompanied by corresponding test cases in
  *   claude-session.test.ts.
+ *
+ * C-S3-001: Codex/Gemini monitoring note:
+ * These patterns are currently Claude-specific. If Codex or Gemini exhibit similar
+ * "nested session" or startup failure behaviors, analogous error patterns should be
+ * added to their respective tool configurations (codex.ts, gemini.ts) rather than
+ * extending these arrays, to maintain SRP per CLI tool type.
  */
 export const CLAUDE_SESSION_ERROR_PATTERNS: readonly string[] = [
   'Claude Code cannot be launched inside another Claude Code session',

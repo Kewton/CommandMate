@@ -46,6 +46,14 @@ function getErrorMessage(error: unknown): string {
  * - '$': bash/sh default prompt
  * - '%': zsh default prompt
  * - '#': root prompt (bash/zsh)
+ *
+ * C-S2-002: False positive risk assessment:
+ * These characters are checked only at the END of trimmed output. This limits false
+ * positives to cases where Claude CLI output ends with one of these characters
+ * (e.g., output containing "$" at end of a code block). The risk is acceptable because:
+ * (1) Claude CLI output typically ends with a prompt (❯) or thinking indicator, not shell chars
+ * (2) A false positive triggers session recreation, which is a safe recovery action
+ * (3) The check is combined with error pattern detection for multiple signals
  */
 const SHELL_PROMPT_ENDINGS: readonly string[] = ['$', '%', '#'] as const;
 
@@ -421,8 +429,17 @@ export async function isClaudeRunning(worktreeId: string): Promise<boolean> {
 /**
  * Get Claude session state
  *
+ * C-S3-002: This function checks tmux session existence via hasSession() but
+ * does NOT perform health checks (unlike isClaudeRunning()). This is intentional:
+ * getClaudeSessionState() is a lightweight status query for UI display purposes,
+ * while isClaudeRunning() performs the more expensive health check for operational
+ * decisions (e.g., whether to recreate a session).
+ *
+ * If health-aware state is needed, callers should use isClaudeRunning() instead
+ * or call ensureHealthySession() separately.
+ *
  * @param worktreeId - Worktree ID
- * @returns Session state information
+ * @returns Session state information (existence-based, not health-based)
  */
 export async function getClaudeSessionState(
   worktreeId: string
