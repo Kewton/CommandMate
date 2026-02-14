@@ -1,0 +1,71 @@
+{
+  "issue_number": 264,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "item": "issueコマンドの--title/--body入力に対する最大長バリデーション追加（title=256文字、body=65536文字）",
+        "sections_updated": ["Section 5-1 issueコマンド セキュリティ設計", "Section 6-1 セキュリティ要件", "Section 7-2 テスト方針", "Section 10 セキュリティ制約", "Section 13 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "item": "--labelsオプションの制御文字・ゼロ幅文字サニタイゼーション",
+        "sections_updated": ["Section 5-1 issueコマンド セキュリティ設計", "Section 6-1 セキュリティ要件", "Section 7-2 テスト方針", "Section 10 セキュリティ制約", "Section 13 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-002",
+        "item": "searchDocs()のクエリ最大長制限（256文字）追加",
+        "sections_updated": ["Section 3-6 DocsReaderユーティリティ", "Section 6-1 セキュリティ要件", "Section 7-2 テスト方針", "Section 10 セキュリティ制約", "Section 13 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-003",
+        "item": "FeedbackSectionのURL不変性の明示的保証ドキュメント追加",
+        "sections_updated": ["Section 4-1 FeedbackSection", "Section 6-1 セキュリティ要件", "Section 10 セキュリティ制約", "Section 13 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "item": "gh auth status事前チェックとユーザーフレンドリーなエラーメッセージ",
+        "sections_updated": ["Section 13 将来検討項目"],
+        "status": "recorded"
+      },
+      {
+        "id": "SEC-C-002",
+        "item": "docs/以下の機密情報確認プロセス",
+        "sections_updated": ["Section 13 将来検討項目"],
+        "status": "recorded"
+      },
+      {
+        "id": "SEC-C-003",
+        "item": "issue createアクションのlogSecurityEvent()使用検討",
+        "sections_updated": ["Section 13 将来検討項目"],
+        "status": "recorded"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-264-feedback-and-docs-design-policy.md",
+  "sections_updated": [
+    "Section 3-6 DocsReaderユーティリティ (SEC-SF-002: クエリ長制限追加)",
+    "Section 4-1 FeedbackSection (SEC-SF-003: URL不変性保証追加)",
+    "Section 5-1 issueコマンド (SEC-MF-001: 入力長バリデーション, SEC-SF-001: ラベルサニタイゼーション追加)",
+    "Section 6-1 セキュリティ要件 (4項目追加)",
+    "Section 7-2 テスト方針 (セキュリティテストケース追加)",
+    "Section 10 制約条件 (セキュリティ制約4項目追加, CLAUDE.md準拠セキュリティ行追加)",
+    "Section 11 レビュー履歴 (Stage 4追加)",
+    "Section 12 レビュー指摘事項サマリー (Stage 4テーブル+OWASPチェックリスト追加)",
+    "Section 13 実装チェックリスト (Must Fix 1項目, Should Fix 3項目, Consider 3項目追加)"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

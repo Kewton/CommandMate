@@ -1,0 +1,53 @@
+{
+  "issue_number": 264,
+  "iteration": 2,
+  "stage": 6,
+  "apply_date": "2026-02-14",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "--template 引数マッピングをファイル名からテンプレート名に修正（bug_report.md -> \"Bug Report\", feature_request.md -> \"Feature Request\", question.md -> \"Question\"）。オプション一覧表、実装タスク、受入条件、テスト計画のすべてに反映。gh CLIのテンプレート照合仕様に関する注記も追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "src/cli/config/security-messages.ts を変更対象ファイルテーブルに追加。REVERSE_PROXY_WARNING内のSecurity Guide URLをgithub-links.tsの定数から派生させる実装タスクを追加。受入条件にも検証項目を追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "gh CLIのDependencyCheckエントリを具体的に記載: { name: 'gh CLI', command: 'gh', versionArg: '--version', required: false }。gh --versionの出力形式とextractVersion()互換性の説明も追加。実装タスクと変更対象ファイルテーブルの両方に反映"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "-i/--issue オプション description の更新がstart/stop/statusの3箇所（line 44, 62, 75）すべてに必要であることを実装タスクに明記。混同防止セクションの本文にも3箇所の行番号を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "GITHUB_API_URLはSSRF防止（SEC-001）のためversion-checker.ts内にハードコード維持し、GITHUB_REPO_BASE_URLからの派生対象外であることを、主要な変更点セクション、実装タスク、受入条件、変更対象ファイルテーブルに注記を追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "関連コンポーネントの影響確認対象をtests/unit/api/update-check.test.tsからtests/unit/lib/version-checker.test.tsに修正。GITHUB_RELEASE_URL_PREFIXを直接importしている正しいファイルを参照するように変更"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/264"
+  }
+}

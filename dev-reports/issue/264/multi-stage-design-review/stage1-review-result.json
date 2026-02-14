@@ -1,0 +1,136 @@
+{
+  "issue_number": 264,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "YAGNI",
+        "title": "IssueOptions interface is empty and premature",
+        "description": "IssueOptions interface is defined as an empty interface with a comment 'future extension'. This violates YAGNI. Interfaces should be added when actually needed, not preemptively.",
+        "location": "dev-reports/design/issue-264-feedback-and-docs-design-policy.md Section 5-1",
+        "recommendation": "Remove the IssueOptions interface. Add it only when a concrete use case requires it."
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "DRY",
+        "title": "compareVersions duplication between version-checker.ts and preflight.ts",
+        "description": "The design policy introduces GITHUB_REPO_BASE_URL to centralize URLs (good DRY), but does not address the existing compareVersions logic duplication between version-checker.ts (isNewerVersion) and preflight.ts (compareVersions). While not introduced by this issue, the URL centralization effort would be a good opportunity to note this for future cleanup.",
+        "location": "src/lib/version-checker.ts lines 108-121, src/cli/utils/preflight.ts lines 117-130",
+        "recommendation": "Consider noting this as a known DRY violation for a future refactoring issue. Not blocking for Issue #264."
+      },
+      {
+        "id": "SF-002",
+        "principle": "DRY",
+        "title": "Security Guide URL string literal in security-messages.ts should reference github-links.ts",
+        "description": "The design policy correctly plans to move GITHUB_SECURITY_GUIDE_URL to github-links.ts, but the design shows this URL embedded as a template literal inside REVERSE_PROXY_WARNING. Ensure the actual implementation uses string interpolation with the constant rather than leaving the hardcoded string.",
+        "location": "src/cli/config/security-messages.ts line 26",
+        "recommendation": "The implementation must import GITHUB_SECURITY_GUIDE_URL from github-links.ts and use template string interpolation in REVERSE_PROXY_WARNING."
+      },
+      {
+        "id": "SF-003",
+        "principle": "SRP",
+        "title": "docs command mixes file I/O, search, and presentation logic",
+        "description": "The docs command design appears to handle section lookup, file reading, content searching, and output formatting within a single command handler. Consider extracting file reading and search logic into a separate utility to maintain SRP.",
+        "location": "dev-reports/design/issue-264-feedback-and-docs-design-policy.md Section 5-2",
+        "recommendation": "Extract a DocsReader utility class or module that handles file resolution and content searching, keeping the command handler focused on argument parsing and output."
+      },
+      {
+        "id": "SF-004",
+        "principle": "KISS",
+        "title": "path.join(__dirname, '../../../docs/') is fragile",
+        "description": "The relative path from dist/cli/commands/docs.js to docs/ relies on knowing the exact compilation output structure. This approach works but is fragile. A simpler approach would resolve the package root directory first.",
+        "location": "dev-reports/design/issue-264-feedback-and-docs-design-policy.md Section 5-2",
+        "recommendation": "Consider using require.resolve or path.resolve from the package.json location to find the docs directory, which is more resilient to structural changes."
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "OCP",
+        "title": "getInstallHint uses hardcoded Record instead of data-driven approach",
+        "description": "PreflightChecker.getInstallHint() uses a static Record for install hints. When adding gh CLI to DEPENDENCIES, the install hint must be added separately in a different location. Consider co-locating hints with dependency definitions.",
+        "location": "src/cli/utils/preflight.ts lines 135-145",
+        "recommendation": "Consider adding an optional 'installHint' field to the DependencyCheck interface so hints are co-located with dependency definitions. This would better support OCP."
+      },
+      {
+        "id": "C-002",
+        "principle": "ISP",
+        "title": "DocsOptions has mutually exclusive fields",
+        "description": "DocsOptions interface has section, search, and all fields, but these are mutually exclusive operations. Consider using discriminated unions for clearer type safety.",
+        "location": "dev-reports/design/issue-264-feedback-and-docs-design-policy.md Section 5-1",
+        "recommendation": "Consider using a discriminated union type: { mode: 'section'; name: string } | { mode: 'search'; query: string } | { mode: 'list' }. This makes mutual exclusivity explicit at the type level."
+      },
+      {
+        "id": "C-003",
+        "principle": "DRY",
+        "title": "Template name mapping exists in two places (CLI gh CLI args vs UI URL params)",
+        "description": "Bug report template is referenced as 'Bug Report' (gh CLI name) and 'bug_report.md' (URL filename). While the design correctly documents this difference, having a single source mapping between template types and their CLI/URL representations would reduce risk of divergence.",
+        "location": "dev-reports/design/issue-264-feedback-and-docs-design-policy.md Section 5-1",
+        "recommendation": "Consider a TEMPLATE_CONFIG constant mapping each type to both its gh CLI name and its URL filename, ensuring changes are synchronized."
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-264-feedback-and-docs-design-policy.md",
+    "src/lib/version-checker.ts",
+    "src/cli/config/cli-dependencies.ts",
+    "src/cli/config/security-messages.ts",
+    "src/cli/types/index.ts",
+    "src/cli/index.ts",
+    "src/cli/commands/init.ts",
+    "src/cli/utils/preflight.ts",
+    "src/cli/utils/port-allocator.ts",
+    "src/components/worktree/VersionSection.tsx",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tsconfig.cli.json",
+    "package.json"
+  ],
+  "checklist": {
+    "single_responsibility": {
+      "status": "pass_with_notes",
+      "notes": "FeedbackSection follows VersionSection SRP pattern (good). docs command could benefit from SRP extraction of file I/O logic."
+    },
+    "open_closed": {
+      "status": "pass",
+      "notes": "cli-dependencies.ts array extension pattern is well-designed for OCP. Adding gh CLI requires minimal code changes."
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "notes": "No inheritance hierarchies introduced in this design."
+    },
+    "interface_segregation": {
+      "status": "pass_with_notes",
+      "notes": "DocsOptions combines mutually exclusive concerns. IssueCreateOptions is appropriately focused."
+    },
+    "dependency_inversion": {
+      "status": "pass",
+      "notes": "CLI commands depend on config constants (github-links.ts) rather than hardcoded values. Cross-boundary import pattern from port-allocator.ts is a validated precedent."
+    },
+    "simplicity_kiss": {
+      "status": "pass",
+      "notes": "gh CLI delegation instead of direct HTTP API is a good KISS decision. Whitelist pattern for docs sections is simple and effective. Path resolution with __dirname is functional but could be more resilient."
+    },
+    "no_premature_optimization_yagni": {
+      "status": "pass_with_notes",
+      "notes": "IssueOptions empty interface violates YAGNI. Otherwise well-constrained scope with no unnecessary ExitCode additions."
+    },
+    "no_code_duplication_dry": {
+      "status": "pass",
+      "notes": "GITHUB_REPO_BASE_URL centralization is a strong DRY improvement. FeedbackSection shared across InfoModal/MobileInfoContent eliminates duplication. re-export pattern maintains backward compatibility."
+    }
+  },
+  "timestamp": "2026-02-14T00:00:00Z"
+}

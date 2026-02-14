@@ -6,6 +6,7 @@ For details on each Issue (root cause, fix approach, security measures, tests, e
 
 | Issue | Type | Summary | Key Changed Files | Design Doc |
 |-------|------|---------|-------------------|------------|
+| #264 | feat | User feedback links (FeedbackSection UI, issue/docs CLI commands, gh CLI integration, centralized GitHub URLs, AI tool integration guide) | `github-links.ts`, `FeedbackSection.tsx`, `issue.ts`, `docs.ts`, `docs-reader.ts`, `input-validators.ts`, `cli-dependencies.ts`, `init.ts`, `cli/index.ts` | [link](../../dev-reports/design/issue-264-feedback-and-docs-design-policy.md) |
 | #256 | fix | Multiple choice prompt detection accuracy improvement (multi-line question support, isQuestionLikeLine Pattern 2/4 addition, SEC-001b upward scan, MF-001 SRP compliance, refactoring) | `prompt-detector.ts`, `prompt-type-guards.ts`, unit/integration tests | [link](../../dev-reports/design/issue-256-multiple-choice-prompt-detection-design-policy.md) |
 | #124 | feat | i18n support (next-intl, en/ja switching UI, document English translation) | `i18n-config.ts`, `i18n.ts`, `locale-cookie.ts`, `useLocaleSwitch.ts`, `LocaleSwitcher.tsx`, `date-locale.ts`, `locales/`, `README.md`, `docs/en/` | - |
 | #212 | fix | Multi-line message Pasted text detection + auto Enter (shared helper, skipPatterns extension) | `pasted-text-helper.ts`, `cli-patterns.ts`, `claude-session.ts`, `codex.ts`, `response-poller.ts` | [link](../../dev-reports/design/issue-212-pasted-text-detection-design-policy.md) |

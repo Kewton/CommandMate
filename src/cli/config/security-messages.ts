@@ -2,7 +2,11 @@
  * Security Messages
  * Issue #179: Reverse proxy authentication recommendation
  * Shared warning constants for CLI commands (DRY principle)
+ *
+ * [SF-002] GitHub URLs imported from github-links.ts (DRY)
  */
+
+import { GITHUB_SECURITY_GUIDE_URL } from '../../config/github-links';
 
 /**
  * Warning message displayed when CM_BIND=0.0.0.0
@@ -23,5 +27,5 @@ is a serious security risk.
   - Cloudflare Access
   - Tailscale
 
-Details: https://github.com/Kewton/CommandMate/blob/main/docs/security-guide.md
+Details: ${GITHUB_SECURITY_GUIDE_URL}
 `;

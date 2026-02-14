@@ -174,6 +174,31 @@ export interface ConfirmOptions {
 }
 
 /**
+ * Options for issue create subcommand
+ * Issue #264: gh CLI integration
+ * [MF-001 YAGNI] IssueOptions interface is NOT defined.
+ * Only IssueCreateOptions and DocsOptions are added.
+ */
+export interface IssueCreateOptions {
+  bug?: boolean;
+  feature?: boolean;
+  question?: boolean;
+  title?: string;
+  body?: string;
+  labels?: string;
+}
+
+/**
+ * Options for docs command
+ * Issue #264: Documentation retrieval
+ */
+export interface DocsOptions {
+  section?: string;
+  search?: string;
+  all?: boolean;
+}
+
+/**
  * Extract error message from unknown error
  * Issue #125: DRY - centralized error message extraction
  *

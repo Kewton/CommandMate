@@ -1,0 +1,80 @@
+{
+  "issue_number": 264,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-14",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "tests/unit/cli/config/cli-dependencies.test.ts を変更対象ファイル表とテストタスクに追加。gh CLI追加に伴う getOptionalDependencies テスト更新を明記"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "翻訳キー追加タスクに「en/ja 両方に同一キー構造で追加すること」の注意事項を追加。受入条件にi18n-translation-keys.test.tsパリティチェックのパスを追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "docsコマンドのファイルパス解決方針を明記（path.join(__dirname, '../../docs/')）。package.jsonのfilesフィールドにdocs/を追加するタスクと受入条件を追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "GITHUB_RELEASE_URL_PREFIXの移設方針を明確化: github-links.tsからのre-exportで破壊的変更を回避。GITHUB_REPO_BASE_URLから全URL派生の設計を採用。既存importパス維持の受入条件を追加"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "issueコマンドと-i/--issueオプションの命名重複対策を追加。ヘルプテキストでの区別明確化タスクと受入条件を追加"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "CLIコマンドの記載先をcommands-guide.mdからcli-setup-guide.mdに変更。commands-guide.mdからは参照リンクのみ追加する方針に変更"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "テスト計画を具体化: issue.test.ts（gh CLI連携モック、テンプレート選択、エラーハンドリング）、docs.test.ts（セクション表示、検索、ファイル読み込みエラー）のテスト観点を明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "src/cli/utils/preflight.tsのgetInstallHint()にgh CLI用ヒントを追加するタスクを追加。影響範囲の変更対象ファイルにpreflight.tsを追加"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "GITHUB_REPO_BASE_URLから全GitHub URLを派生させる設計を採用し、主要な変更点セクションとgithub-links.tsの説明に反映"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 9,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/264"
+  },
+  "key_changes": [
+    "影響範囲の変更対象ファイル表にテストファイル（cli-dependencies.test.ts, preflight.ts）を追加",
+    "テストファイル専用セクションを新設（5つの新規テストファイル + 1つの既存テスト更新）",
+    "docsコマンドのパス解決方針とpackage.json files更新を明記",
+    "GITHUB_RELEASE_URL_PREFIXのre-export方針を明確化（破壊的変更回避）",
+    "GITHUB_REPO_BASE_URL定数によるURL一元管理設計を採用",
+    "issueコマンドと-i/--issueオプションの区別明確化タスクを追加",
+    "CLIコマンドドキュメントの配置先をcli-setup-guide.mdに変更",
+    "翻訳キーパリティ注意事項を追加",
+    "レビュー履歴セクションにStage 3-4の変更内容を記録"
+  ]
+}

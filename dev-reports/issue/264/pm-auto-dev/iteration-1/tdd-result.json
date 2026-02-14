@@ -1,0 +1,59 @@
+{
+  "issue_number": 264,
+  "status": "success",
+  "iteration": 1,
+  "test_results": {
+    "total_tests": 3264,
+    "passed": 3264,
+    "failed": 0,
+    "skipped": 7,
+    "new_tests_added": 66,
+    "test_files_added": [
+      "tests/unit/config/github-links.test.ts (10 tests)",
+      "tests/unit/components/worktree/feedback-section.test.tsx (7 tests)",
+      "tests/unit/cli/commands/issue.test.ts (13 tests)",
+      "tests/unit/cli/commands/docs.test.ts (7 tests)",
+      "tests/unit/cli/utils/docs-reader.test.ts (14 tests)"
+    ],
+    "test_files_modified": [
+      "tests/unit/cli/config/cli-dependencies.test.ts (+4 tests for gh CLI)"
+    ],
+    "existing_tests_verified": [
+      "tests/unit/lib/version-checker.test.ts (56/56 pass, SF-IMP-001 re-export verified)",
+      "tests/unit/cli/commands/init.test.ts (4/4 pass after import fix)"
+    ]
+  },
+  "quality_checks": {
+    "typescript": "pass (npx tsc --noEmit: 0 errors)",
+    "eslint": "pass (npm run lint: 0 warnings/errors)",
+    "build": "pass (npm run build: success)",
+    "build_cli": "pass (npm run build:cli: success)"
+  },
+  "files_created": [
+    "src/config/github-links.ts",
+    "src/cli/config/ai-integration-messages.ts",
+    "src/cli/utils/docs-reader.ts",
+    "src/cli/commands/issue.ts",
+    "src/cli/commands/docs.ts",
+    "src/components/worktree/FeedbackSection.tsx"
+  ],
+  "files_modified": [
+    "src/lib/version-checker.ts (GITHUB_RELEASE_URL_PREFIX re-export from github-links.ts)",
+    "src/cli/config/cli-dependencies.ts (added gh CLI entry)",
+    "src/cli/config/security-messages.ts (import from github-links.ts)",
+    "src/cli/utils/preflight.ts (gh CLI install hint)",
+    "src/cli/utils/input-validators.ts (validateIssueTitle, validateIssueBody, sanitizeLabel)",
+    "src/cli/types/index.ts (IssueCreateOptions, DocsOptions interfaces)",
+    "src/cli/commands/init.ts (AI integration guide display)",
+    "src/cli/index.ts (registered issue/docs commands)",
+    "src/components/worktree/WorktreeDetailRefactored.tsx (FeedbackSection in InfoModal/MobileInfoContent)",
+    "locales/en/worktree.json (feedback section i18n)",
+    "locales/ja/worktree.json (feedback section i18n)"
+  ],
+  "bugs_fixed_during_tdd": [
+    "Commander.js test parsing: Changed from {from:'user'} with 'node','test' prefix to clean args only",
+    "vi.restoreAllMocks() removing module-level spies: Changed to vi.clearAllMocks() in beforeEach only",
+    "export { X } from 'Y' not creating local binding: Changed to import + re-export for version-checker.ts",
+    "Dynamic require('../config/ai-integration-messages') failing in test: Changed to static import"
+  ]
+}

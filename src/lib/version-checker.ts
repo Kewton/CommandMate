@@ -29,8 +29,10 @@ export const GITHUB_API_URL = 'https://api.github.com/repos/Kewton/CommandMate/r
 /**
  * [SEC-SF-001] GitHub Releases URL allowed prefix for validation.
  * Used to verify html_url from API responses.
+ * Imported from github-links.ts (Issue #264 DRY) and re-exported for backward compatibility.
  */
-export const GITHUB_RELEASE_URL_PREFIX = 'https://github.com/Kewton/CommandMate/releases/' as const;
+import { GITHUB_RELEASE_URL_PREFIX } from '@/config/github-links';
+export { GITHUB_RELEASE_URL_PREFIX };
 
 /** Semver pattern: optional v-prefix followed by major.minor.patch */
 const SEMVER_PATTERN = /^v?\d+\.\d+\.\d+$/;

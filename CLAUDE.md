@@ -187,6 +187,8 @@ tests/
 | `src/hooks/useLocaleSwitch.ts` | ロケール切替フック（バリデーション、Cookie/localStorage永続化、reload） |
 | `src/components/common/LocaleSwitcher.tsx` | 言語切替ドロップダウンコンポーネント（Sidebar下部配置） |
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング（getDateFnsLocale()、enUS/jaサポート） |
+| `src/config/github-links.ts` | GitHub URL定数の一元管理（Issue #264: GITHUB_REPO_BASE_URL派生、DRY原則対応、SSRF防止のためGITHUB_API_URLは除外） |
+| `src/components/worktree/FeedbackSection.tsx` | フィードバックリンクセクション（Issue #264: Bug Report/Feature Request/Question/View Issues、noopener noreferrer、i18n対応） |
 
 ### CLIモジュール（Issue #96, #136）
 
@@ -209,8 +211,12 @@ tests/
 | `src/cli/utils/port-allocator.ts` | ポート自動割り当て（MAX_WORKTREES=10制限）（Issue #136） |
 | `src/cli/utils/worktree-detector.ts` | Worktree検出ユーティリティ（Issue #136） |
 | `src/cli/utils/daemon-factory.ts` | DaemonManagerファクトリー（Issue #136） |
-| `src/cli/config/cli-dependencies.ts` | 依存関係定義 |
-| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum、StartOptions、StopOptions、StatusOptions） |
+| `src/cli/commands/issue.ts` | issueコマンド（Issue #264: gh CLI連携、create/search/listサブコマンド、テンプレートマッピング、入力バリデーション） |
+| `src/cli/commands/docs.ts` | docsコマンド（Issue #264: ドキュメント参照、--section/--search/--all、DocsReaderに委譲） |
+| `src/cli/utils/docs-reader.ts` | ドキュメント読み取りユーティリティ（Issue #264: SECTION_MAPホワイトリスト、パストラバーサル防止、検索クエリ長制限） |
+| `src/cli/config/cli-dependencies.ts` | 依存関係定義（Issue #264: gh CLIをオプション依存として追加） |
+| `src/cli/config/ai-integration-messages.ts` | AIツール統合ガイドメッセージ（Issue #264: init完了後に表示） |
+| `src/cli/types/index.ts` | CLI共通型定義（ExitCode enum、StartOptions、StopOptions、StatusOptions、IssueCreateOptions、DocsOptions） |
 
 ### テストヘルパー（Issue #256）
 

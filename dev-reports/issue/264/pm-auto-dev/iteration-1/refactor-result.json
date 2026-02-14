@@ -1,0 +1,37 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 99.0,
+    "after_coverage": 99.0
+  },
+  "refactorings_applied": [
+    "DRY: Extracted requireGhCli() guard function to eliminate 3x duplicated gh CLI availability check in issue.ts (create/search/list subcommands)",
+    "DRY: Replaced 2x inline error instanceof Error pattern with centralized getErrorMessage() in docs.ts (consistent with CLI codebase conventions)"
+  ],
+  "files_changed": [
+    "src/cli/commands/issue.ts",
+    "src/cli/commands/docs.ts"
+  ],
+  "files_reviewed_no_changes_needed": [
+    "src/config/github-links.ts",
+    "src/cli/utils/docs-reader.ts",
+    "src/cli/utils/input-validators.ts",
+    "src/cli/config/ai-integration-messages.ts",
+    "src/components/worktree/FeedbackSection.tsx"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "test_results": {
+    "total": 66,
+    "passed": 66,
+    "failed": 0
+  },
+  "commits": [
+    "d09eb22: refactor(#264): improve code quality in issue and docs commands"
+  ],
+  "message": "Refactoring complete. Applied DRY improvements to issue.ts (extracted requireGhCli guard) and docs.ts (use centralized getErrorMessage). All 66 tests pass, 0 ESLint errors, 0 TypeScript errors. Other 5 files reviewed and found to be clean with no actionable improvements."
+}

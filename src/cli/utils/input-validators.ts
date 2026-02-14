@@ -178,3 +178,56 @@ export function isValidBranchName(value: unknown): value is string {
     return false;
   }
 }
+
+// =============================================================================
+// Issue #264: Issue command input validators
+// =============================================================================
+
+/**
+ * [SEC-MF-001] Maximum issue title length (DoS prevention)
+ */
+export const MAX_TITLE_LENGTH = 256;
+
+/**
+ * [SEC-MF-001] Maximum issue body length (64KB, DoS prevention)
+ */
+export const MAX_BODY_LENGTH = 65536;
+
+/**
+ * Validate issue title length.
+ * [SEC-MF-001] Prevents DoS via extremely long input to gh CLI.
+ *
+ * @param title - Issue title to validate
+ * @returns Validation result with error message if invalid
+ */
+export function validateIssueTitle(title: string): IssueValidationResult {
+  if (title.length > MAX_TITLE_LENGTH) {
+    return { valid: false, error: `Title exceeds maximum length of ${MAX_TITLE_LENGTH} characters` };
+  }
+  return { valid: true };
+}
+
+/**
+ * Validate issue body length.
+ * [SEC-MF-001] Prevents DoS via extremely long input to gh CLI.
+ *
+ * @param body - Issue body to validate
+ * @returns Validation result with error message if invalid
+ */
+export function validateIssueBody(body: string): IssueValidationResult {
+  if (body.length > MAX_BODY_LENGTH) {
+    return { valid: false, error: `Body exceeds maximum length of ${MAX_BODY_LENGTH} characters` };
+  }
+  return { valid: true };
+}
+
+/**
+ * Sanitize a label string by removing control characters and zero-width characters.
+ * [SEC-SF-001] Follows env-setup.ts sanitizeInput() pattern.
+ *
+ * @param label - Label string to sanitize
+ * @returns Sanitized label string
+ */
+export function sanitizeLabel(label: string): string {
+  return label.replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\uFEFF]/g, '').trim();
+}

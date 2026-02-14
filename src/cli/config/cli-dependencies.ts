@@ -41,6 +41,12 @@ export const DEPENDENCIES: DependencyCheck[] = [
     versionArg: '--version',
     required: false,
   },
+  {
+    name: 'gh CLI',
+    command: 'gh',
+    versionArg: '--version',
+    required: false,
+  },
 ];
 
 /**

@@ -1,0 +1,197 @@
+{
+  "issue_number": 264,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-CONS-001",
+        "title": "CLIコマンド登録パターンの不整合",
+        "description": "設計方針書Section 5-3で `createIssueCommand()` / `createDocsCommand()` ファクトリ関数と `program.addCommand()` を使用する設計だが、既存のCLIコマンド（init/start/stop/status）は全て `export async function xxxCommand(options)` パターンを使用し、`src/cli/index.ts` でインラインに `program.command('xxx').action()` で登録している。`new Command('issue')` を使ったサブコマンド方式と既存パターンが不一致。",
+        "design_section": "Section 5-3, 3-4",
+        "existing_pattern": "src/cli/index.ts: program.command('xxx').action(async (options) => { await xxxCommand(options); })",
+        "proposed_pattern": "createIssueCommand() returning new Command('issue'), then program.addCommand()",
+        "recommendation": "既存パターンに合わせて、issueコマンドもexport async function issueCommand(options)形式にし、index.tsでprogram.command('issue').addCommand()によるサブコマンド登録に統一するか、またはcommander.jsのサブコマンドが必要な場合はaddCommandパターンの採用理由を設計書に明記すること。issueコマンドがサブコマンド（create/search/list）を持つため、addCommandパターンの使用自体は技術的に妥当だが、既存パターンとの差異を設計書で説明する必要がある。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-CONS-001",
+        "title": "i18n翻訳キー構造の不一致",
+        "description": "設計方針書Section 4-2のi18n翻訳キー設計で、JSON構造に titleJa / bugReportJa など別言語用のサフィックスキーが含まれているが、既存のlocalesはen/jaフォルダごとに分離しており、同一キーに対して言語別の値を提供するパターンである。設計書のJSON例は誤解を招く。",
+        "design_section": "Section 4-2",
+        "existing_pattern": "locales/en/worktree.json と locales/ja/worktree.json で同一キー構造、値のみ異なる",
+        "recommendation": "Section 4-2のJSON例を、en用とja用に分けて記載するか、既存パターンに準拠していることを明示的に説明すること。現在の記述では1つのJSONに英語・日本語が混在しているように読める。"
+      },
+      {
+        "id": "SF-CONS-002",
+        "title": "FeedbackSectionテストファイルパスの拡張子不一致",
+        "description": "設計方針書Section 7-1で `tests/unit/components/FeedbackSection.test.ts` としているが、既存のコンポーネントテストは全て `.test.tsx` 拡張子を使用している（例: version-section.test.tsx, update-notification-banner.test.tsx）。React コンポーネントのテストにはJSXが必要なため .tsx が正しい。",
+        "design_section": "Section 7-1",
+        "existing_pattern": "tests/unit/components/worktree/*.test.tsx",
+        "recommendation": "テストファイルパスを `tests/unit/components/worktree/FeedbackSection.test.tsx`（もしくは `feedback-section.test.tsx`）に修正すること。"
+      },
+      {
+        "id": "SF-CONS-003",
+        "title": "FeedbackSectionテストファイルのディレクトリパス不一致",
+        "description": "設計方針書Section 7-1で `tests/unit/components/FeedbackSection.test.ts` とフラットパスになっているが、既存のworktreeコンポーネントテストは `tests/unit/components/worktree/` サブディレクトリに配置されている（例: tests/unit/components/worktree/version-section.test.tsx）。",
+        "design_section": "Section 7-1",
+        "existing_pattern": "tests/unit/components/worktree/ ディレクトリ配置",
+        "recommendation": "テストファイルパスを `tests/unit/components/worktree/FeedbackSection.test.tsx` に修正すること。"
+      },
+      {
+        "id": "SF-CONS-004",
+        "title": "FeedbackSectionのProps設計がVersionSectionと微妙に異なる",
+        "description": "設計方針書Section 3-2で FeedbackSectionProps は className? のみだが、VersionSectionProps は version: string と className? を持つ。設計書で「VersionSectionパターンに準拠」と記載しているが、propsのインターフェース差異についての説明がない。FeedbackSectionがversionのようなデータpropsを持たないことは妥当だが、「準拠」の範囲を明確にすべき。",
+        "design_section": "Section 3-2",
+        "existing_pattern": "VersionSectionProps: { version: string; className?: string }",
+        "recommendation": "設計書で「CONS-005パターン（className prop）に準拠し、データ依存性がないため最小限のProps設計とした」旨を追記すること。"
+      },
+      {
+        "id": "SF-CONS-005",
+        "title": "docsコマンドのconsole.log使用とCLILogger使用の混在",
+        "description": "設計方針書Section 3-6のdocsコマンドコード例で console.log を直接使用している。既存のinit/start/stop コマンドは CLILogger を使用するパターンだが、status コマンドは console.log を直接使用。統一されていないが、docs/issueコマンドがどちらのパターンに従うかを設計方針書で明示すべき。",
+        "design_section": "Section 3-6, 5-1",
+        "existing_pattern": "init.ts/start.ts/stop.ts: CLILogger使用。status.ts: console.log直接使用",
+        "recommendation": "設計方針書で、docs/issueコマンドのログ出力方針（CLILoggerまたはconsole.log直接使用）を明記すること。statusコマンドと同様に出力のみのコマンドはconsole.log直接使用が妥当であれば、その旨を記載する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-CONS-001",
+        "title": "テストファイル命名規則の不統一（ケバブケース vs パスカルケース）",
+        "description": "設計方針書Section 7-1で `FeedbackSection.test.ts` とパスカルケースだが、既存のコンポーネントテストファイルは `version-section.test.tsx`、`update-notification-banner.test.tsx` のようにケバブケースを使用している。",
+        "existing_pattern": "ケバブケース: version-section.test.tsx, update-notification-banner.test.tsx",
+        "recommendation": "既存パターンに合わせてケバブケース（feedback-section.test.tsx）を使用するのが望ましいが、強制ではない。"
+      },
+      {
+        "id": "C-CONS-002",
+        "title": "tsconfig.cli.json の include スコープと cross-boundary import の明示的文書化",
+        "description": "設計方針書Section 6-2で cross-boundary import の前例（port-allocator.ts）を示しているが、tsconfig.cli.json の include は src/cli/**/* のみである。実際にビルドが通ることは前例で確認済みだが、tsconfig.cli.json の rootDir が ./src であるためファイル自体は含まれる。この挙動の根拠を補足すると設計書の品質が向上する。",
+        "recommendation": "tsconfig.cli.json の rootDir: './src' により src/config/ のファイルもコンパイル対象に含まれることを設計書で補足すると、実装者の混乱を防げる。"
+      },
+      {
+        "id": "C-CONS-003",
+        "title": "SECTION_MAPの定義箇所がSection 3-5とSection 3-6で重複記載",
+        "description": "設計方針書Section 3-5（docsコマンドのセクション検証）で SECTION_MAP を docs.ts 内に記載しているが、Section 3-6（DocsReader分離）では docs-reader.ts に移動している。最終的にdocs-reader.tsに配置されるべきだが、Section 3-5の記載が古い情報のまま残っている。",
+        "recommendation": "Section 3-5の SECTION_MAP 定義場所を docs-reader.ts に修正し、Section 3-6と整合させること。"
+      }
+    ]
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "GitHub URL一元管理 (SF-001)",
+      "design_spec": "src/config/github-links.ts に GITHUB_REPO_BASE_URL から全URL派生",
+      "existing_implementation": "version-checker.ts に GITHUB_RELEASE_URL_PREFIX ハードコード、security-messages.ts にURL文字列ハードコード",
+      "consistency": "consistent",
+      "notes": "既存のURL分散問題を解消する設計であり、re-export による後方互換性維持も妥当。security-messages.ts の GITHUB_SECURITY_GUIDE_URL 参照は既存ハードコード行（line 26）の置換として整合する。"
+    },
+    {
+      "design_item": "FeedbackSection コンポーネント (MF-001)",
+      "design_spec": "VersionSectionパターンに準拠、className propsで親の背景差異吸収",
+      "existing_implementation": "VersionSection: version + className props、InfoModal(bg-gray-50) / MobileInfoContent(bg-white border)で使用",
+      "consistency": "consistent",
+      "notes": "CONS-005パターン（className prop）の準拠は確認済み。InfoModal(line 509付近)とMobileInfoContent(line 774付近)の配置位置も既存パターンに合致。"
+    },
+    {
+      "design_item": "cli-dependencies.ts 拡張 (SF-2 OCP)",
+      "design_spec": "gh CLI エントリ追加 { name: 'gh CLI', command: 'gh', versionArg: '--version', required: false }",
+      "existing_implementation": "DEPENDENCIES 配列に Claude CLI を optional で追加済み。DependencyCheck 型に必要なフィールドは全て定義済み。",
+      "consistency": "consistent",
+      "notes": "既存パターンに完全準拠。PreflightChecker.getInstallHint() へのgh CLIエントリ追加も preflight.ts line 136-144 の既存 hints パターンに合致。"
+    },
+    {
+      "design_item": "CLI型定義 IssueCreateOptions / DocsOptions",
+      "design_spec": "src/cli/types/index.ts に追加。IssueOptions interfaceは追加しない (MF-001 YAGNI)",
+      "existing_implementation": "既存型: InitOptions, StartOptions, StopOptions, StatusOptions が同ファイルに定義",
+      "consistency": "consistent",
+      "notes": "インターフェースの定義パターンは既存に完全準拠。オプションのboolean/string型使用パターンも一致。"
+    },
+    {
+      "design_item": "ExitCode方針",
+      "design_spec": "新規ExitCode追加なし。SUCCESS(0), DEPENDENCY_ERROR(1), UNEXPECTED_ERROR(99) を使用",
+      "existing_implementation": "ExitCode enum: SUCCESS=0, DEPENDENCY_ERROR=1, CONFIG_ERROR=2, START_FAILED=3, STOP_FAILED=4, UNEXPECTED_ERROR=99",
+      "consistency": "consistent",
+      "notes": "既存のExitCode値で十分カバー可能。gh CLI未インストール時にDEPENDENCY_ERROR使用は init コマンドの preflight失敗パターンと一致。"
+    },
+    {
+      "design_item": "CLIコマンド登録パターン",
+      "design_spec": "createIssueCommand() / createDocsCommand() ファクトリ + program.addCommand()",
+      "existing_implementation": "export async function xxxCommand(options) + index.ts でインライン program.command('xxx').action()",
+      "consistency": "inconsistent",
+      "notes": "MF-CONS-001として指摘。issueコマンドがサブコマンド(create/search/list)を持つためaddCommandパターン自体は技術的に妥当だが、差異の根拠を設計書で説明すべき。"
+    },
+    {
+      "design_item": "外部リンクセキュリティ",
+      "design_spec": "target='_blank' rel='noopener noreferrer' + UpdateNotificationBannerパターン準拠",
+      "existing_implementation": "UpdateNotificationBanner.tsx line 77-80: 同パターンを使用",
+      "consistency": "consistent",
+      "notes": "className / arrow表示パターンも完全一致。"
+    },
+    {
+      "design_item": "セキュリティ: execFile配列引数使用",
+      "design_spec": "shell: true 禁止、execFile / spawnSync で配列引数使用",
+      "existing_implementation": "preflight.ts line 25: spawnSync(dep.command, [dep.versionArg]) パターン",
+      "consistency": "consistent",
+      "notes": "MF-SEC-1として既存コードベースで確立されたパターン。"
+    },
+    {
+      "design_item": "gh CLIテンプレート名マッピング",
+      "design_spec": "--bug: 'Bug Report', --feature: 'Feature Request', --question: 'Question'",
+      "existing_implementation": "ISSUE_TEMPLATE front matter: name: Bug Report, name: Feature Request, name: Question",
+      "consistency": "consistent",
+      "notes": "テンプレートのfront matter name値と設計方針書の gh CLI --template 引数が完全一致。"
+    },
+    {
+      "design_item": "i18n翻訳キー パリティ保証",
+      "design_spec": "en/ja worktree.json に feedback キー追加",
+      "existing_implementation": "i18n-translation-keys.test.ts が en/ja キー一致を自動検証",
+      "consistency": "consistent",
+      "notes": "既存の自動検証テストにより、パリティ違反は自動検出される。"
+    },
+    {
+      "design_item": "SECTION_MAP ドキュメントパス",
+      "design_spec": "quick-start, commands, webapp, workflow-examples, cli-setup, agents, architecture, readme の8セクション",
+      "existing_implementation": "docs/user-guide/ に quick-start.md, commands-guide.md, webapp-guide.md, workflow-examples.md, cli-setup-guide.md, agents-guide.md が存在。docs/architecture.md と README.md も存在。",
+      "consistency": "consistent",
+      "notes": "SECTION_MAPで参照される全ファイルが実際に存在することを確認。support-and-feedback.md は新規作成予定のため未存在は想定通り。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-264-feedback-and-docs-design-policy.md",
+    "src/lib/version-checker.ts",
+    "src/cli/config/security-messages.ts",
+    "src/cli/config/cli-dependencies.ts",
+    "src/cli/types/index.ts",
+    "src/cli/index.ts",
+    "src/cli/commands/init.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/utils/preflight.ts",
+    "src/cli/utils/port-allocator.ts",
+    "src/components/worktree/VersionSection.tsx",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "locales/en/worktree.json",
+    "locales/ja/worktree.json",
+    "tests/unit/components/worktree/version-section.test.tsx",
+    "tests/unit/components/worktree/update-notification-banner.test.tsx",
+    "tests/unit/cli/config/cli-dependencies.test.ts",
+    "tests/unit/cli/commands/init.test.ts",
+    "tests/integration/i18n-translation-keys.test.ts",
+    ".github/ISSUE_TEMPLATE/bug_report.md",
+    ".github/ISSUE_TEMPLATE/feature_request.md",
+    ".github/ISSUE_TEMPLATE/question.md",
+    "tsconfig.cli.json",
+    "tsconfig.base.json",
+    "package.json"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

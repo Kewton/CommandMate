@@ -1,0 +1,55 @@
+{
+  "issue_number": 264,
+  "iteration": 2,
+  "stage": 8,
+  "apply_date": "2026-02-14",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "CLI ビルドにおける cross-boundary import 方針を「設計判断」セクションとして新設。src/config/github-links.ts を src/cli/config/security-messages.ts から参照する際の tsconfig.cli.json スコープ外アクセスについて、port-allocator.ts の前例を根拠に設計判断を明示。build:cli 動作確認タスクを実装タスクに追加。フォールバック案（CLI用に別途定数ファイルを配置する選択肢）も記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "受入条件に「tests/unit/lib/version-checker.test.ts の既存テスト（GITHUB_RELEASE_URL_PREFIX 定数テスト、validateReleaseUrl テスト）が修正なしですべてパスすること」を追加。関連コンポーネントセクションにも version-checker.test.ts の line 22/238-243 での厳密比較の詳細を追記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "ExitCode方針を「②CLIにissueコマンドを追加」セクションに新設。既存の DEPENDENCY_ERROR(1) と UNEXPECTED_ERROR(99) を流用し、新規 ExitCode は追加しない方針を明記。実装タスク（issue.ts のエラー処理、types/index.ts の変更不要）、受入条件（DEPENDENCY_ERROR(1) で終了）、テスト（ExitCode 検証）、影響範囲テーブル（ExitCode enumの変更は不要の注記）すべてに反映"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "docs コマンドの __dirname 基準パスを path.join(__dirname, '../../docs/') から path.join(__dirname, '../../../docs/') に修正。tsconfig.cli.json の outDir/rootDir 設定に基づく根拠（src/cli/commands/docs.ts → dist/cli/commands/docs.js → 3階層上で docs/）を④ドキュメント取得コマンドセクション、実装タスク、影響範囲テーブルの3箇所に記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "cli-setup-guide.md への追記セクションのアウトラインを「⑤ドキュメント整備」セクションに追加。Issue Management（Prerequisites, Subcommands, Options Reference, Usage Examples）と Documentation Access（Subcommands and Options, Available Sections, AI Integration Examples）の2セクション構成をマークダウン形式で定義。ドキュメント実装タスクにもアウトライン参照の指示を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "key_changes": [
+    "新規「設計判断」セクションを追加（cross-boundary import 方針の文書化）",
+    "ExitCode 方針を明記（既存コード流用、新規追加なし）",
+    "docs コマンドの相対パスを ../../docs/ から ../../../docs/ に修正",
+    "version-checker.test.ts の既存テスト維持を受入条件に追加",
+    "cli-setup-guide.md 追記セクションのアウトラインを定義"
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/264"
+  }
+}

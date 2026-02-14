@@ -1,0 +1,214 @@
+{
+  "issue_number": 264,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-02-14",
+  "previous_findings_status": {
+    "stage3_must_fix": {
+      "MF-1": {
+        "status": "resolved",
+        "detail": "tests/unit/cli/config/cli-dependencies.test.ts が変更対象ファイルテーブルとテストファイルテーブルの両方に追加された。getOptionalDependencies テストでの 'gh' 検証追加が実装タスクに含まれている"
+      },
+      "MF-2": {
+        "status": "resolved",
+        "detail": "翻訳キー追加タスクに「en/ja 両方に同一キー構造で追加すること」の注意事項が追加された。i18n-translation-keys.test.ts のパリティチェックへの言及も明記されている"
+      }
+    },
+    "stage3_should_fix": {
+      "SF-1": {
+        "status": "resolved",
+        "detail": "docsコマンドのパス解決方針が path.join(__dirname, '../../docs/') で明記された。package.json の files フィールドに docs/ を追加する実装タスクも追加されている"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "detail": "GITHUB_RELEASE_URL_PREFIX の移設方針が明確化された。github-links.ts からの re-export で既存 import パスを維持し破壊的変更を回避する設計が採用されている。受入条件にも既存 import パス維持の検証項目がある"
+      },
+      "SF-3": {
+        "status": "resolved",
+        "detail": "issue コマンドと -i/--issue オプションの混同防止がヘルプテキストでの区別明確化と、start/stop/status 3箇所の description 統一として実装タスクに含まれている"
+      },
+      "SF-4": {
+        "status": "resolved",
+        "detail": "CLIコマンドの記載先が commands-guide.md から cli-setup-guide.md に変更された。commands-guide.md からは参照リンクのみ追加する方針が明記されている"
+      }
+    },
+    "stage3_nice_to_have": {
+      "NTH-1": {
+        "status": "resolved",
+        "detail": "テスト計画が具体化された。issue.test.ts と docs.test.ts のテスト観点（テンプレート名検証、セクション検証等）が実装タスクに含まれている"
+      },
+      "NTH-2": {
+        "status": "resolved",
+        "detail": "preflight.ts の getInstallHint() に gh CLI用ヒントを追加する実装タスクが追加されている"
+      },
+      "NTH-3": {
+        "status": "resolved",
+        "detail": "GITHUB_REPO_BASE_URL から全 GitHub URL を派生させる設計が採用されている。ただし GITHUB_API_URL は SEC-001 のためハードコード維持で対象外と明記されている"
+      }
+    }
+  },
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "依存関係",
+        "issue": "src/config/github-links.ts を src/cli/config/security-messages.ts から import する際の CLI ビルドスコープ問題 -- tsconfig.cli.json の include は 'src/cli/**/*' のみであり、src/config/ は含まれていない。security-messages.ts が github-links.ts から GitHub URL 定数を import する場合、相対パスは '../../config/github-links' となり src/cli/ の外部に出る。TypeScript は参照先を解決できるが、paths: {} で @/ エイリアスが無効化されているため、この cross-boundary import の動作保証を設計として明示する必要がある。加えて、同じ github-links.ts を Next.js ビルド側（FeedbackSection.tsx）と CLI ビルド側（security-messages.ts）の双方から参照するため、TypeScript の module/moduleResolution 互換性が必要",
+        "location": "## 実装タスク > CLIコマンド > src/cli/config/security-messages.ts / ## 影響範囲 > 変更対象ファイル",
+        "recommendation": "2つの選択肢を検討し、Issue に方針を明記する: (A) github-links.ts を src/config/ に配置して CLI/Next.js 双方から import する（既存の port-allocator.ts が src/lib/errors を ../../lib/errors で import する前例に準拠。ただし tsconfig.cli.json の include 拡張、または rootDir 設定の確認が必要）。(B) CLI 用の GitHub URL 定数は src/cli/config/github-links.ts に別途配置し、src/config/github-links.ts（UI用）と定数値を共有する（DRY 違反だが CLI ビルドの独立性を維持）。現実的には選択肢 (A) が適切で、既に port-allocator.ts が同パターンを使用しているが、設計判断として明記すべき",
+        "evidence": "tsconfig.cli.json: include は ['src/cli/**/*']、paths は {} (空)。src/cli/utils/port-allocator.ts line 12 が import { AppError, ErrorCode } from '../../lib/errors' で src/cli/ 外のモジュールを参照する前例が存在する。しかしこのパターンが意図的な設計判断か偶発的かは不明であり、github-links.ts を同パターンで追加する場合は build:cli の動作確認が必要"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "version-checker.ts の GITHUB_RELEASE_URL_PREFIX を re-export に変更した際、validateReleaseUrl() のテスト（version-checker.test.ts line 238-244）が re-export 後の値の同一性を正しく検証できることの確認が受入条件に不足 -- 受入条件には「src/lib/version-checker.ts の既存 import パスが維持されていること」とあるが、re-export の値が github-links.ts の元定数と一致することの具体的なテスト観点が不足",
+        "location": "## 受入条件 / ## テスト > tests/unit/lib/version-checker.test.ts",
+        "recommendation": "受入条件に「tests/unit/lib/version-checker.test.ts の既存テスト（GITHUB_RELEASE_URL_PREFIX 定数テスト、validateReleaseUrl テスト）が修正なしですべてパスすること」を追加する。既存テストが re-export 後も正しく動作すれば、import パス維持と値の同一性が同時に保証される",
+        "evidence": "tests/unit/lib/version-checker.test.ts line 238-243: describe('GITHUB_RELEASE_URL_PREFIX constant [SEC-SF-001]') で定数値を 'https://github.com/Kewton/CommandMate/releases/' と厳密比較している。re-export が正しければこのテストは修正なしでパスする"
+      },
+      {
+        "id": "SF-2",
+        "category": "影響ファイル",
+        "issue": "ExitCode enum に issue/docs コマンド用の新規エラーコードが未定義 -- 既存コマンドは DEPENDENCY_ERROR(1), CONFIG_ERROR(2), START_FAILED(3), STOP_FAILED(4), UNEXPECTED_ERROR(99) を使用している。issue コマンドの gh CLI 未インストール時や docs コマンドのファイル読み込み失敗時にどの ExitCode を返すか未定義",
+        "location": "## 実装タスク > CLIコマンド / src/cli/types/index.ts",
+        "recommendation": "issue/docs コマンドのエラー時に使用する ExitCode を明示する。選択肢: (A) 既存の DEPENDENCY_ERROR(1) を gh CLI 未インストール時に流用し、新規コード不要とする。(B) ISSUE_FAILED(5), DOCS_FAILED(6) 等を追加する。いずれにせよ方針を実装タスクに記載し、src/cli/types/index.ts の更新要否を明確にする",
+        "evidence": "src/cli/types/index.ts の ExitCode enum: SUCCESS=0, DEPENDENCY_ERROR=1, CONFIG_ERROR=2, START_FAILED=3, STOP_FAILED=4, UNEXPECTED_ERROR=99。既存のエラーコードはコマンド固有のもの（START_FAILED, STOP_FAILED）が存在するため、issue/docs 固有のエラーコードも検討すべき"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響ファイル",
+        "issue": "commandmate docs コマンドの __dirname 基準パスが CLI ビルド後の dist/ ディレクトリからの相対パスになる件の明示 -- 実装タスクに path.join(__dirname, '../../docs/') と記載されているが、build:cli 後のファイル配置は dist/cli/commands/docs.js となり、__dirname は dist/cli/commands/ になる。package root からの docs/ へのパスは '../../../docs/' (3階層上) であって '../../docs/' (2階層上) ではない可能性がある",
+        "location": "## 実装タスク > CLIコマンド > src/cli/commands/docs.ts",
+        "recommendation": "build:cli 後のディレクトリ構造を確認し、正しい相対パス階層数を明記する。tsconfig.cli.json の outDir は './dist'、rootDir は './src' であるため、src/cli/commands/docs.ts は dist/cli/commands/docs.js にコンパイルされる。dist/cli/commands/ から package root の docs/ へは path.join(__dirname, '../../../docs/') が正しい。または path.join(__dirname, '..', '..', '..', 'docs') と明示的に記載する。代替として require.resolve('commandmate/package.json') でパッケージルートを取得する方法もある（既存の bin/commandmate.js の __dirname パターン確認を推奨）",
+        "evidence": "tsconfig.cli.json: outDir='./dist', rootDir='./src', include=['src/cli/**/*']。コンパイル後: src/cli/commands/docs.ts -> dist/cli/commands/docs.js。dist/cli/commands/ から docs/ への階層: dist -> (project root) -> docs = 3階層上。Issue 記載の '../../docs/' は src/ 環境前提の2階層であり、ビルド後の dist/ 環境では不正確"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント更新",
+        "issue": "影響範囲テーブルに docs/user-guide/cli-setup-guide.md の変更内容が「issue/docsコマンドの使い方を追記」と記載されているが、具体的な追記セクション構造（コマンド一覧、オプション説明、使用例）が未定義",
+        "location": "## 影響範囲 > 変更対象ファイル > docs/user-guide/cli-setup-guide.md",
+        "recommendation": "cli-setup-guide.md への追記内容のアウトラインを定義する: 「## Issue Management (commandmate issue)」セクション（create/search/list サブコマンド、オプション表、使用例）と「## Documentation Access (commandmate docs)」セクション（--section/--search/--all オプション、利用可能セクション一覧、AI連携例）。既存の cli-setup-guide.md のフォーマットに合わせた構成にすることで実装時の判断負荷を軽減できる",
+        "evidence": "docs/user-guide/cli-setup-guide.md は既存ドキュメントだが、現在の内容構造（セクション構成、記法パターン）に合わせて追記する必要がある。実装タスクに「追記する」とだけあり、具体的な記載項目が未定義"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": {
+      "new_files": [
+        "src/config/github-links.ts",
+        "src/components/worktree/FeedbackSection.tsx",
+        "src/cli/commands/issue.ts",
+        "src/cli/commands/docs.ts",
+        "src/cli/config/ai-integration-messages.ts",
+        "docs/user-guide/support-and-feedback.md"
+      ],
+      "modified_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/cli/index.ts",
+        "src/cli/types/index.ts",
+        "src/cli/config/cli-dependencies.ts",
+        "src/cli/config/security-messages.ts",
+        "src/cli/utils/preflight.ts",
+        "src/cli/commands/init.ts",
+        "src/lib/version-checker.ts",
+        "locales/en/worktree.json",
+        "locales/ja/worktree.json",
+        "docs/user-guide/cli-setup-guide.md",
+        "docs/user-guide/commands-guide.md",
+        "package.json",
+        "CLAUDE.md"
+      ],
+      "potentially_affected_files": [
+        "tests/unit/cli/config/cli-dependencies.test.ts",
+        "tests/unit/lib/version-checker.test.ts",
+        "tests/integration/i18n-translation-keys.test.ts",
+        "tsconfig.cli.json"
+      ],
+      "test_files_to_create": [
+        "tests/unit/cli/commands/issue.test.ts",
+        "tests/unit/cli/commands/docs.test.ts",
+        "tests/unit/config/github-links.test.ts",
+        "tests/unit/components/FeedbackSection.test.ts"
+      ]
+    },
+    "cross_build_dependency": {
+      "issue": "src/config/github-links.ts is consumed by both Next.js build (FeedbackSection.tsx via @/ alias) and CLI build (security-messages.ts via relative path). Port-allocator.ts establishes precedent for cross-boundary imports in CLI build.",
+      "risk": "low-medium",
+      "mitigation": "Verify build:cli works correctly with the cross-boundary import by running npm run build:cli after implementation"
+    },
+    "dependency_impact": {
+      "new_external_dependencies": [],
+      "existing_dependency_changes": [
+        {
+          "name": "commander",
+          "impact": "2 new subcommands (issue, docs) plus addHelpText('after', ...) call. Follows existing patterns."
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "name": "gh CLI",
+          "type": "optional_external",
+          "impact": "Required only for 'commandmate issue' subcommand. registered as required: false in cli-dependencies.ts."
+        }
+      ]
+    },
+    "breaking_changes": {
+      "has_breaking_changes": false,
+      "details": "All changes are additive. GITHUB_RELEASE_URL_PREFIX re-export preserves existing import paths. No existing CLI options or UI behaviors are modified (only additions). start/stop/status -i/--issue option description text change is non-breaking."
+    },
+    "build_process_impact": {
+      "cli_build": "src/cli/commands/issue.ts and docs.ts are auto-included by tsconfig.cli.json. However, if security-messages.ts imports from src/config/github-links.ts, the CLI build must resolve a cross-boundary module reference (precedent: port-allocator.ts imports from ../../lib/errors).",
+      "nextjs_build": "FeedbackSection.tsx and github-links.ts are in src/ and auto-included in Next.js build.",
+      "package_distribution": "package.json files field must include docs/ for commandmate docs to work after npm install -g."
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/cli/utils/port-allocator.ts",
+      "relevance": "Line 12: Existing precedent for cross-boundary import from src/cli/ to src/lib/ (import from '../../lib/errors'). Validates that github-links.ts import pattern is feasible (MF-1)"
+    },
+    {
+      "file": "tsconfig.cli.json",
+      "relevance": "include: ['src/cli/**/*'], paths: {}. Defines CLI build scope that excludes src/config/ (MF-1)"
+    },
+    {
+      "file": "tests/unit/lib/version-checker.test.ts",
+      "relevance": "Lines 22, 238-243: Directly imports GITHUB_RELEASE_URL_PREFIX and validates its value. Must pass unchanged after re-export (SF-1)"
+    },
+    {
+      "file": "src/cli/types/index.ts",
+      "relevance": "ExitCode enum lacks issue/docs specific error codes (SF-2)"
+    },
+    {
+      "file": "src/cli/commands/init.ts",
+      "relevance": "Lines 244-253: AI tool integration guide insertion point after 'Next steps' section"
+    },
+    {
+      "file": "src/cli/config/security-messages.ts",
+      "relevance": "Line 26: Hardcoded GitHub URL to be derived from github-links.ts. Cross-boundary import required (MF-1)"
+    },
+    {
+      "file": "src/lib/version-checker.ts",
+      "relevance": "Line 33: GITHUB_RELEASE_URL_PREFIX to become re-export from github-links.ts. Line 27: GITHUB_API_URL stays hardcoded (SEC-001)"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/user-guide/cli-setup-guide.md",
+      "relevance": "Target for issue/docs command documentation (NTH-2)"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "New module entries to add for github-links.ts, FeedbackSection.tsx, issue.ts, docs.ts"
+    }
+  ]
+}

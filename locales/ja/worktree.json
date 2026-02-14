@@ -23,6 +23,13 @@
     "failedToUpdateFavorite": "お気に入りの更新に失敗しました",
     "failedToUpdateStatus": "ステータスの更新に失敗しました"
   },
+  "feedback": {
+    "title": "フィードバック・サポート",
+    "bugReport": "バグを報告",
+    "featureRequest": "機能を提案",
+    "question": "質問する",
+    "viewIssues": "Issue一覧を見る"
+  },
   "update": {
     "available": "新しいバージョンが利用可能です",
     "latestVersion": "最新: v{version}",

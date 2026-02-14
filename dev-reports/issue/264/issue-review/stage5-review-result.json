@@ -1,0 +1,166 @@
+{
+  "issue_number": 264,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-02-14",
+  "previous_findings_status": {
+    "stage1_must_fix": {
+      "MF-1": {
+        "status": "resolved",
+        "detail": "gh CLIがcli-dependencies.tsにrequired: falseで追加される実装タスクと受入条件が明記された。preflight.tsへのインストールヒント追加も含まれている"
+      },
+      "MF-2": {
+        "status": "resolved",
+        "detail": "Issueタイトルが「ユーザーからの問い合わせリンク」に修正済み"
+      },
+      "MF-3": {
+        "status": "resolved",
+        "detail": "CLIコマンドの出力言語方針が英語固定と明記され、既存CLIコマンドとの一貫性根拠も記載されている"
+      }
+    },
+    "stage1_should_fix": {
+      "SF-1": {
+        "status": "resolved",
+        "detail": "対象ドキュメントリストにcli-setup-guide.mdとagents-guide.mdの両方が追加された"
+      },
+      "SF-2": {
+        "status": "resolved",
+        "detail": "issue createのオプション一覧表がgh CLIへの引数マッピング付きで明記された"
+      },
+      "SF-3": {
+        "status": "resolved",
+        "detail": "FeedbackSectionの配置先がWorktreeDetailRefactored.tsx内のローカルmemoコンポーネントであることと、具体的な行番号（line 509/774）が明記された"
+      },
+      "SF-4": {
+        "status": "resolved",
+        "detail": "CLAUDE.mdの更新タスクが実装タスクと受入条件の両方に追加された"
+      },
+      "SF-5": {
+        "status": "resolved",
+        "detail": "受入条件にGitHub Issue URLのテンプレートパラメータ検証が追加された"
+      }
+    },
+    "stage1_nice_to_have": {
+      "NTH-1": {
+        "status": "resolved",
+        "detail": "agents-guide.mdが対象ドキュメントリストに追加された"
+      },
+      "NTH-2": {
+        "status": "resolved",
+        "detail": "GITHUB_REPO_BASE_URLから全URL派生の設計が採用され、version-checker.tsからのre-export方針が明記された"
+      },
+      "NTH-3": {
+        "status": "resolved",
+        "detail": "addHelpText('after', ...) APIの使用が明記された"
+      },
+      "NTH-4": {
+        "status": "resolved",
+        "detail": "関連IssueセクションにIssue #124が追加された"
+      }
+    }
+  },
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "gh CLI --template オプションへの引数マッピングが不正確 -- オプション一覧表で --bug を --template bug_report.md にマッピングしているが、gh CLI の --template フラグはテンプレートファイル名ではなくテンプレート名（front matter の name フィールド値）を受け取る",
+        "location": "## 提案する解決策 > (2)CLIにissueコマンドを追加 > commandmate issue create のオプション一覧",
+        "recommendation": "マッピングを以下に修正する: --bug -> --template \"Bug Report\", --feature -> --template \"Feature Request\", --question -> --template \"Question\"。テンプレート名は .github/ISSUE_TEMPLATE/ 配下の各ファイルの front matter name フィールド値に一致させる",
+        "evidence": "gh issue create --help の出力: '-T, --template name Template name to use as starting body text'、例: 'gh issue create --template \"Bug Report\"'。一方、.github/ISSUE_TEMPLATE/bug_report.md の front matter: 'name: Bug Report'。gh CLIはテンプレートのname値で照合するためファイル名ではなくテンプレート名を渡す必要がある"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "影響範囲テーブルにsrc/cli/config/security-messages.tsが欠落 -- Issue本文で「Security Guide URLをすべてGITHUB_REPO_BASE_URLから派生させる」と記載しているが、security-messages.ts内のGitHub URLのハードコード（line 26）も移設対象となるはず",
+        "location": "## 影響範囲 > 変更対象ファイル / ## 実装タスク > UI",
+        "recommendation": "変更対象ファイルにsrc/cli/config/security-messages.tsを追加し、REVERSE_PROXY_WARNING内のsecurity-guide URLをgithub-links.tsの定数から派生させるタスクを追加する。もしくは、security-messages.tsは今回のスコープ外とする場合はその旨を明記する",
+        "evidence": "src/cli/config/security-messages.ts line 26: 'Details: https://github.com/Kewton/CommandMate/blob/main/docs/security-guide.md' がハードコードされている。Issue本文の主要な変更点では「Security Guide URL をすべてこの定数から派生させる」と記載しているため、このファイルも変更対象のはず"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "cli-dependencies.tsへのgh CLI追加時のversionArgが未指定 -- 実装タスクではghをrequired: falseで追加すると記載しているが、DependencyCheck型に必須のversionArgフィールドの値が定義されていない",
+        "location": "## 実装タスク > CLIコマンド > cli-dependencies.ts",
+        "recommendation": "gh CLIのDependencyCheckエントリを具体的に記載する: { name: 'gh CLI', command: 'gh', versionArg: '--version', required: false }。gh --version の出力形式は 'gh version 2.86.0 (2026-01-21)' であり、既存のextractVersion()のパターン（/version\\s+(\\d+\\.\\d+\\.\\d+)/i）でバージョン抽出可能",
+        "evidence": "src/cli/types/index.ts のDependencyCheck型はversionArgが必須フィールド（string型、optional指定なし）。既存5件の依存関係はすべてversionArgを指定している（-v, -V, --version）"
+      },
+      {
+        "id": "SF-3",
+        "category": "明確性",
+        "issue": "-i/--issueオプションのdescription更新箇所が3箇所あることが未明示 -- 実装タスクで「-i, --issue オプションの description を明確化する」と記載しているが、start/stop/statusの3コマンドそれぞれに同一オプションが定義されており、全3箇所の更新が必要",
+        "location": "## 実装タスク > CLIコマンド > src/cli/index.ts",
+        "recommendation": "「src/cli/index.ts の start/stop/status 各コマンドの -i, --issue オプション description をすべて 'Specify worktree by issue number' に統一する」と明記する",
+        "evidence": "src/cli/index.ts line 44: start コマンド '.option(\"-i, --issue <number>\", \"Start worktree server for specific issue\")', line 62: stop コマンド '.option(\"-i, --issue <number>\", \"Stop worktree server for specific issue\")', line 75: status コマンド '.option(\"-i, --issue <number>\", \"Show status for specific issue worktree\")' の3箇所"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "GITHUB_API_URLのURL一元管理方針が未記載 -- GITHUB_REPO_BASE_URLから全GitHub URLを派生させる設計を採用しているが、version-checker.tsのGITHUB_API_URL（api.github.com/repos/Kewton/CommandMate/...）にもKewton/CommandMateが含まれている。セキュリティ上の理由（SEC-001 SSRF防止）でハードコード維持とする場合、その判断根拠を明記するとよい",
+        "location": "## 主要な変更点 / ## 実装タスク > UI > github-links.ts",
+        "recommendation": "github-links.tsのセクションに「GITHUB_API_URLはSSRF防止（SEC-001）のためversion-checker.ts内にハードコード維持。GITHUB_REPO_BASE_URLからの派生対象外」と注記を追加する"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "tests/unit/lib/version-checker.test.tsがre-export変更の影響確認対象として未記載 -- 影響範囲の関連コンポーネントでtests/unit/api/update-check.test.tsの影響確認が必要と記載しているが、GITHUB_RELEASE_URL_PREFIXを直接importしているのはtests/unit/lib/version-checker.test.tsの方。update-check.test.tsはGITHUB_RELEASE_URL_PREFIXをimportしていない",
+        "location": "## 影響範囲 > 関連コンポーネント",
+        "recommendation": "関連コンポーネントの「tests/unit/api/update-check.test.ts -- GITHUB_RELEASE_URL_PREFIXのre-export変更による影響確認が必要」を「tests/unit/lib/version-checker.test.ts -- GITHUB_RELEASE_URL_PREFIXを直接import（line 22）しているため、re-exportが正しく機能することの確認が必要」に修正する。update-check.test.tsはcheckForUpdateとgetCurrentVersionのみをimportしており、定数のre-exportによる影響はない"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/cli/config/security-messages.ts",
+      "relevance": "line 26にGitHub URL（security-guide）がハードコードされている。GITHUB_REPO_BASE_URL一元管理の対象漏れ（SF-1）"
+    },
+    {
+      "file": "src/cli/types/index.ts",
+      "relevance": "DependencyCheck型のversionArgフィールドが必須（SF-2）"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "relevance": "-i/--issueオプションがstart(line 44), stop(line 62), status(line 75)の3箇所に定義（SF-3）"
+    },
+    {
+      "file": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "relevance": "front matter name: 'Bug Report' -- gh CLI --templateの正しい引数値（MF-1）"
+    },
+    {
+      "file": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "relevance": "front matter name: 'Feature Request' -- gh CLI --templateの正しい引数値（MF-1）"
+    },
+    {
+      "file": ".github/ISSUE_TEMPLATE/question.md",
+      "relevance": "front matter name: 'Question' -- gh CLI --templateの正しい引数値（MF-1）"
+    },
+    {
+      "file": "src/lib/version-checker.ts",
+      "relevance": "GITHUB_API_URL（line 27）にもKewton/CommandMateが含まれるがSEC-001でハードコード維持（NTH-1）"
+    },
+    {
+      "file": "tests/unit/lib/version-checker.test.ts",
+      "relevance": "GITHUB_RELEASE_URL_PREFIXを直接import（line 22）。re-export変更の実際の影響対象（NTH-2）"
+    },
+    {
+      "file": "tests/unit/api/update-check.test.ts",
+      "relevance": "GITHUB_RELEASE_URL_PREFIXをimportしていない。Issueの影響確認記載が不正確（NTH-2）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "DependencyCheck型の構造確認（versionArg必須フィールド）"
+    }
+  ]
+}

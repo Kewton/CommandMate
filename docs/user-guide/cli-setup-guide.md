@@ -31,6 +31,7 @@ CommandMate を使用するには、以下のツールが必要です。
 | tmux | - | ✓ | `tmux -V` |
 | openssl | - | ✓ | `openssl version` |
 | Claude CLI | - | △（オプション） | `claude --version` |
+| gh CLI | - | △（オプション） | `gh --version` |
 
 ### 前提条件の確認
 
@@ -221,6 +222,47 @@ commandmate stop [options]
 ```bash
 commandmate status
 ```
+
+### commandmate issue
+
+GitHub Issue管理コマンドです（gh CLIが必要）。
+
+```bash
+commandmate issue create [options]
+commandmate issue search <query>
+commandmate issue list
+```
+
+| サブコマンド | 説明 |
+|-------------|------|
+| `create` | 新規Issue作成 |
+| `search <query>` | Issue検索 |
+| `list` | Issue一覧表示 |
+
+#### create オプション
+
+| オプション | 説明 |
+|-----------|------|
+| `--title <title>` | Issueタイトル |
+| `--body <body>` | Issue本文 |
+| `--bug` | Bug Reportテンプレートを使用 |
+| `--feature` | Feature Requestテンプレートを使用 |
+| `--question` | Questionテンプレートを使用 |
+| `--labels <labels>` | ラベル（カンマ区切り） |
+
+### commandmate docs
+
+CommandMateのドキュメントを表示します。
+
+```bash
+commandmate docs [options]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--section <name>` | 指定セクションの内容を表示 |
+| `--search <query>` | ドキュメント内を検索 |
+| `--all` | 利用可能なセクション一覧を表示 |
 
 ---
 

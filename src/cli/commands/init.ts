@@ -10,6 +10,7 @@ import { homedir } from 'os';
 import { InitOptions, ExitCode, EnvConfig } from '../types';
 import { CLILogger } from '../utils/logger';
 import { PreflightChecker } from '../utils/preflight';
+import { AI_INTEGRATION_GUIDE } from '../config/ai-integration-messages';
 import {
   EnvSetup,
   ENV_DEFAULTS,
@@ -251,6 +252,9 @@ export async function initCommand(options: InitOptions): Promise<void> {
       logger.info('  1. Run "commandmate start" to start the server');
     }
     logger.blank();
+
+    // Issue #264: Display AI tool integration guide
+    console.log(AI_INTEGRATION_GUIDE);
 
     logSecurityEvent({
       timestamp: new Date().toISOString(),

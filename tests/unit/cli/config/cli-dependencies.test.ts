@@ -85,4 +85,29 @@ describe('getOptionalDependencies', () => {
     const names = optional.map(d => d.name);
     expect(names).toContain('Claude CLI');
   });
+
+  // [SF-IMP-003] Issue #264: gh CLI verification tests
+  it('should include gh CLI as optional', () => {
+    const optional = getOptionalDependencies();
+    const names = optional.map(d => d.name);
+    expect(names).toContain('gh CLI');
+  });
+
+  it('gh CLI should have required: false', () => {
+    const ghCli = DEPENDENCIES.find(d => d.name === 'gh CLI');
+    expect(ghCli).toBeDefined();
+    expect(ghCli?.required).toBe(false);
+  });
+
+  it('gh CLI should have command: "gh"', () => {
+    const ghCli = DEPENDENCIES.find(d => d.name === 'gh CLI');
+    expect(ghCli).toBeDefined();
+    expect(ghCli?.command).toBe('gh');
+  });
+
+  it('gh CLI should have versionArg: "--version"', () => {
+    const ghCli = DEPENDENCIES.find(d => d.name === 'gh CLI');
+    expect(ghCli).toBeDefined();
+    expect(ghCli?.versionArg).toBe('--version');
+  });
 });

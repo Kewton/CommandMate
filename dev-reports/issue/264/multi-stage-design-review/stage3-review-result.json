@@ -1,0 +1,151 @@
+{
+  "issue_number": 264,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-IMP-001",
+        "category": "ビルドプロセス",
+        "title": "tsconfig.cli.json の cross-boundary import コンパイル検証が未実施",
+        "description": "設計方針書 Section 6-2 では src/cli/config/security-messages.ts から ../../config/github-links への相対パスimportが可能と記載され、前例として port-allocator.ts -> ../../lib/errors が挙げられている。しかし、github-links.ts は新規ファイルであり、tsconfig.cli.json の include: ['src/cli/**/*'] スコープ外にある src/config/ ディレクトリに配置される。rootDir: './src' により理論上はコンパイル対象になるが、新規ファイル追加時は実際に build:cli コマンドでコンパイルエラーが発生しないことを実装段階で必ず検証すべき。フォールバック戦略（src/cli/config/github-links.ts への配置）を実装チェックリストのブロッカーとして明記することを推奨する。",
+        "risk": "Medium",
+        "affected_files": [
+          "src/config/github-links.ts",
+          "src/cli/config/security-messages.ts",
+          "tsconfig.cli.json"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-IMP-001",
+        "category": "テスト範囲",
+        "title": "version-checker.ts の re-export 変更に対する既存テストの影響確認が必要",
+        "description": "GITHUB_RELEASE_URL_PREFIX は現在 version-checker.ts で直接定義・exportされている。これを github-links.ts からの re-export に変更する際、既存のテストファイル（tests/unit/lib/version-checker.test.ts 等）で GITHUB_RELEASE_URL_PREFIX を直接importしているケースがあれば、re-export後もimportパスが変わらないことを確認する必要がある。現在の使用箇所は validateReleaseUrl() 関数内のみ（version-checker.ts:141）で外部importは確認されないが、テスト側でのモック定義への影響を検証すべき。",
+        "risk": "Low",
+        "affected_files": [
+          "src/lib/version-checker.ts",
+          "src/config/github-links.ts"
+        ]
+      },
+      {
+        "id": "SF-IMP-002",
+        "category": "ビルドプロセス",
+        "title": "package.json files フィールドへの docs/ 追加によるパッケージサイズ増加",
+        "description": "package.json の files に docs/ を追加することで、npm パッケージに docs ディレクトリ全体が含まれる。現在の files は bin/, dist/, .next/, public/, .env.example のみ。docs/ ディレクトリのサイズが大きい場合、npm パッケージのダウンロードサイズが増加する。docsコマンドのオフライン動作要件のために必要だが、パッケージサイズへの影響を認識し、不要なファイル（設計書や開発用ドキュメントなど dev-reports/ やスクリーンショット等）が docs/ 以下に含まれていないことを確認すべき。",
+        "risk": "Low",
+        "affected_files": [
+          "package.json"
+        ]
+      },
+      {
+        "id": "SF-IMP-003",
+        "category": "テスト範囲",
+        "title": "cli-dependencies.test.ts の getOptionalDependencies テストが gh CLI 追加後に暗黙的に通る",
+        "description": "既存の cli-dependencies.test.ts では getOptionalDependencies() が 'Claude CLI' を含むことのみを検証している（line 83-87）。gh CLI を optional で追加した場合、既存テストは自動的にパスするが、gh CLI がオプショナルとして正しく登録されていることの明示的な検証が欠如する。テスト更新計画（Section 7-1）で cli-dependencies.test.ts の更新が言及されているが、具体的に追加すべきテストケース（gh CLI が optional であること、command が 'gh' であること等）を明確にすべき。",
+        "risk": "Low",
+        "affected_files": [
+          "tests/unit/cli/config/cli-dependencies.test.ts",
+          "src/cli/config/cli-dependencies.ts"
+        ]
+      },
+      {
+        "id": "SF-IMP-004",
+        "category": "既存機能への影響",
+        "title": "preflight.ts getInstallHint() に gh CLI のヒントが追加されていない",
+        "description": "設計方針書 Section 9-2 では preflight.ts の変更内容に 'getInstallHint() にgh CLIヒント追加' と記載されている。しかし Section 5 の詳細設計にはこのヒント文面が明記されていない。現在の getInstallHint() は hints Record に5つのエントリ（Node.js, npm, tmux, git, Claude CLI）を持っており、gh CLI のエントリが追加されないと、依存チェックで missing 時にフォールバックの 'Please install gh CLI' が表示される。具体的なインストールヒント文面を設計書に明記すべき。",
+        "risk": "Low",
+        "affected_files": [
+          "src/cli/utils/preflight.ts"
+        ]
+      },
+      {
+        "id": "SF-IMP-005",
+        "category": "テスト範囲",
+        "title": "i18n 翻訳キー追加の自動検証カバレッジ確認",
+        "description": "i18n-translation-keys.test.ts（結合テスト）が en/ja の翻訳キーパリティを自動検証するため、feedback キーの追加漏れは CI で検出される。これは適切な安全網だが、テスト計画において feedback-section.test.tsx のテストが i18n モックを使用する場合、モックが実際の翻訳キー構造と一致することの保証方法を明確にすべき。VersionSection テストパターンの確認を推奨する。",
+        "risk": "Low",
+        "affected_files": [
+          "locales/en/worktree.json",
+          "locales/ja/worktree.json",
+          "tests/integration/i18n-translation-keys.test.ts"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-IMP-001",
+        "category": "間接影響",
+        "title": "WorktreeDetailRefactored.tsx のファイルサイズとコンポーネント複雑度",
+        "description": "WorktreeDetailRefactored.tsx は現在 2081 行と非常に大きなファイルである。FeedbackSection を InfoModal と MobileInfoContent の両方に追加することでさらに import 文とレンダリング箇所が増加する。FeedbackSection は独立コンポーネントのためインパクトは最小限だが、将来的に InfoModal と MobileInfoContent を別ファイルに分離するリファクタリングを検討する価値がある。"
+      },
+      {
+        "id": "C-IMP-002",
+        "category": "間接影響",
+        "title": "CLI index.ts のコマンド登録パターン混在",
+        "description": "src/cli/index.ts は現在4つのコマンド（init/start/stop/status）をインラインパターンで登録している。issue/docs の addCommand パターン追加後、同一ファイルに2つの登録パターンが混在する。MF-CONS-001 で理由は文書化されているが、将来コマンドが増えた際に統一すべきか検討する余地がある。"
+      },
+      {
+        "id": "C-IMP-003",
+        "category": "間接影響",
+        "title": "docs コマンドの SECTION_MAP と実ファイルの同期維持",
+        "description": "SECTION_MAP は docs-reader.ts にハードコードされるため、docs/ 以下のファイル追加・リネーム・削除時に SECTION_MAP の更新を忘れるリスクがある。CLAUDE.md の主要機能モジュール一覧への docs-reader.ts 追記は計画されているが、SECTION_MAP の更新手順を開発ガイドに含めることを検討すべき。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": {
+      "new_files": 7,
+      "modified_files": 14,
+      "new_test_files": 5,
+      "modified_test_files": 1,
+      "total_scope": 27
+    },
+    "layer_impact": {
+      "presentation": "FeedbackSection 新規追加、WorktreeDetailRefactored.tsx にimport + 2箇所組込み",
+      "config": "github-links.ts 新規、cli-dependencies.ts 更新、ai-integration-messages.ts 新規",
+      "cli_commands": "issue.ts, docs.ts 新規追加、index.ts にコマンド登録追加",
+      "cli_utils": "docs-reader.ts 新規追加、preflight.ts 更新",
+      "i18n": "en/ja worktree.json に feedback キー追加",
+      "build": "package.json files に docs/ 追加",
+      "documentation": "support-and-feedback.md 新規、cli-setup-guide.md 更新、commands-guide.md 更新"
+    },
+    "backward_compatibility": {
+      "version_checker_re_export": "GITHUB_RELEASE_URL_PREFIX の re-export により既存 import パスは維持される",
+      "security_messages_import_change": "ハードコード URL をimport定数に変更するが外部 API は不変",
+      "gh_cli_optional": "required: false のため既存 preflight チェックに影響なし",
+      "cli_command_registration": "addCommand パターンは既存コマンドの動作に影響しない"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-264-feedback-and-docs-design-policy.md",
+    "src/lib/version-checker.ts",
+    "src/cli/config/security-messages.ts",
+    "src/cli/config/cli-dependencies.ts",
+    "src/cli/index.ts",
+    "src/cli/types/index.ts",
+    "src/cli/utils/preflight.ts",
+    "src/cli/commands/init.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/VersionSection.tsx",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "locales/en/worktree.json",
+    "locales/ja/worktree.json",
+    "package.json",
+    "tsconfig.cli.json",
+    "tsconfig.base.json",
+    "tests/unit/cli/config/cli-dependencies.test.ts",
+    "tests/integration/i18n-translation-keys.test.ts",
+    "docs/user-guide/cli-setup-guide.md"
+  ],
+  "timestamp": "2026-02-14T12:00:00Z"
+}

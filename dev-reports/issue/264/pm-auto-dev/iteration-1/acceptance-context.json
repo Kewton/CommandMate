@@ -1,0 +1,33 @@
+{
+  "issue_number": 264,
+  "feature_summary": "ユーザーからの問い合わせリンク (User Feedback Links)",
+  "acceptance_criteria": [
+    "AC-1: FeedbackSection UI component renders 4 feedback links (Bug Report, Feature Request, Question, View Issues) in InfoModal and MobileInfoContent",
+    "AC-2: All feedback links point to correct GitHub template URLs defined in src/config/github-links.ts",
+    "AC-3: All links have rel='noopener noreferrer' and target='_blank' for security",
+    "AC-4: commandmate issue create supports --bug/--feature/--question flags with correct gh CLI template name mapping",
+    "AC-5: commandmate issue create validates title (max 256 chars) and body (max 65536 chars)",
+    "AC-6: commandmate issue create sanitizes labels (strips control characters, zero-width characters)",
+    "AC-7: commandmate issue search passes query to gh issue list --search",
+    "AC-8: commandmate issue list calls gh issue list",
+    "AC-9: commandmate docs --section shows documentation section content",
+    "AC-10: commandmate docs --search performs case-insensitive search across sections",
+    "AC-11: commandmate docs --all lists all available sections",
+    "AC-12: commandmate docs rejects path traversal attempts",
+    "AC-13: commandmate docs --search rejects queries exceeding 256 characters (SEC-SF-002)",
+    "AC-14: gh CLI is registered as optional dependency in cli-dependencies.ts",
+    "AC-15: issue/docs commands exit with DEPENDENCY_ERROR (1) when gh CLI is not installed",
+    "AC-16: GitHub URLs are centralized in src/config/github-links.ts (DRY principle)",
+    "AC-17: commandmate init displays AI tool integration guide after success",
+    "AC-18: i18n keys exist for en and ja locales (feedback.title, feedback.bugReport, feedback.featureRequest, feedback.question, feedback.viewIssues)"
+  ],
+  "test_scenarios": [
+    "Scenario 1: Verify FeedbackSection renders correctly with all 4 links and correct URLs",
+    "Scenario 2: Verify issue create command template mapping (--bug -> Bug Report, --feature -> Feature Request, --question -> Question)",
+    "Scenario 3: Verify input validation rejects oversized title/body and sanitizes labels",
+    "Scenario 4: Verify docs command retrieves sections, searches, and prevents path traversal",
+    "Scenario 5: Verify gh CLI dependency check and graceful degradation",
+    "Scenario 6: Verify GitHub URL constants are consistent and correctly derived from base URL",
+    "Scenario 7: Verify existing tests (version-checker, init, cli-dependencies) remain passing"
+  ]
+}

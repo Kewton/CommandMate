@@ -31,6 +31,7 @@ The following tools are required to use CommandMate.
 | tmux | - | Yes | `tmux -V` |
 | openssl | - | Yes | `openssl version` |
 | Claude CLI | - | Optional | `claude --version` |
+| gh CLI | - | Optional | `gh --version` |
 
 ### Checking Prerequisites
 
@@ -221,6 +222,47 @@ Display server status.
 ```bash
 commandmate status
 ```
+
+### commandmate issue
+
+GitHub Issue management command (requires gh CLI).
+
+```bash
+commandmate issue create [options]
+commandmate issue search <query>
+commandmate issue list
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `create` | Create a new Issue |
+| `search <query>` | Search Issues |
+| `list` | List Issues |
+
+#### create options
+
+| Option | Description |
+|--------|-------------|
+| `--title <title>` | Issue title |
+| `--body <body>` | Issue body |
+| `--bug` | Use Bug Report template |
+| `--feature` | Use Feature Request template |
+| `--question` | Use Question template |
+| `--labels <labels>` | Labels (comma-separated) |
+
+### commandmate docs
+
+Display CommandMate documentation.
+
+```bash
+commandmate docs [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--section <name>` | Display specified section content |
+| `--search <query>` | Search within documentation |
+| `--all` | List all available sections |
 
 ---
 

@@ -1,0 +1,136 @@
+{
+  "issue_number": 264,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "category": "コマンドインジェクション (A03:2021)",
+        "description": "issueコマンドの --title/--body 入力に対する長さ制限が設計方針書に未定義。gh CLIへの配列引数渡しによりシェルインジェクションは防止されるが、極端に長い入力によるDoSリスクが考慮されていない",
+        "recommendation": "IssueCreateOptionsの--titleと--bodyに最大長バリデーション（例: title=256文字、body=65536文字）を追加する。既存のinput-validators.tsのMAX_BRANCH_NAME_LENGTHパターンに準拠すること",
+        "owasp_reference": "A03:2021 - Injection",
+        "risk_level": "medium"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "category": "入力バリデーション (A03:2021)",
+        "description": "issueコマンドの --labels オプションがカンマ区切りの文字列として受け取られるが、各ラベル値に対するバリデーションが設計方針書に記載されていない。gh CLIの配列引数渡しで安全性は担保されるが、制御文字やゼロ幅文字を含むラベル名の防御が明示されていない",
+        "recommendation": "labelsオプションに対してsanitizeInput()（env-setup.tsで既存実装あり）と同等の制御文字除去を適用する方針を設計方針書に明記すること",
+        "owasp_reference": "A03:2021 - Injection",
+        "risk_level": "low"
+      },
+      {
+        "id": "SEC-SF-002",
+        "category": "パストラバーサル (A01:2021)",
+        "description": "docsコマンドのsearchDocs()関数において、検索クエリ(query)のバリデーションが設計方針書に記載されていない。queryはファイル内容のテキスト検索にのみ使用されるためパストラバーサルリスクは低いが、ReDoS防止の観点から正規表現メタ文字のエスケープまたはクエリ長制限が望ましい",
+        "recommendation": "searchDocs()のqueryパラメータに最大長制限（例: 256文字）を設け、String.prototype.includes()の使用を維持すること（正規表現検索への変更を行わない限りReDoSリスクなし）。この方針を設計方針書Section 3-6に追記すること",
+        "owasp_reference": "A01:2021 - Broken Access Control",
+        "risk_level": "low"
+      },
+      {
+        "id": "SEC-SF-003",
+        "category": "セキュリティ設定 (A05:2021)",
+        "description": "FeedbackSection.tsxのリンクURLがgithub-links.tsの定数から取得されるが、テンプレートURL（?template=bug_report.md等）のクエリパラメータにユーザー入力が混入する可能性の有無が設計方針書で明確に否定されていない",
+        "recommendation": "設計方針書Section 4-1に「FeedbackSectionのリンクURLは全てgithub-links.tsの定数で完全定義され、ユーザー入力によるURL動的構築は一切行わない」旨を明記すること。現在の設計で実質安全だが、将来の変更時に意図が伝わるようドキュメントで明示するのが望ましい",
+        "owasp_reference": "A05:2021 - Security Misconfiguration",
+        "risk_level": "low"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "category": "認証/認可 (A07:2021)",
+        "description": "issueコマンドはgh CLIに認証を委譲しているが、gh auth statusの事前チェックとユーザーフレンドリーなエラーメッセージの設計が方針書に明示されていない",
+        "recommendation": "issue createアクション内でgh auth statusを事前実行し、未認証の場合は'Please run gh auth login first'のようなメッセージを表示してDEPENDENCY_ERRORで終了するフローを検討する",
+        "owasp_reference": "A07:2021 - Identification and Authentication Failures",
+        "risk_level": "low"
+      },
+      {
+        "id": "SEC-C-002",
+        "category": "機密データ保護 (A02:2021)",
+        "description": "docsコマンドで配信されるドキュメントファイル（docs/以下）にAPIキー、認証情報、内部IPアドレス等の機密情報が含まれていないことの確認プロセスが設計方針書に記載されていない",
+        "recommendation": "実装チェックリストに「docs/以下のファイルに機密情報が含まれていないことの目視確認」を追加することを検討する。npm配布時にdocs/がパッケージに含まれる点を考慮した確認フロー",
+        "owasp_reference": "A02:2021 - Cryptographic Failures",
+        "risk_level": "low"
+      },
+      {
+        "id": "SEC-C-003",
+        "category": "ログ記録 (A09:2021)",
+        "description": "issueコマンドのcreate/search/listアクションに対するセキュリティイベントログが設計方針書に記載されていない。既存のinit/start/stopコマンドはlogSecurityEvent()を使用しているが、issueコマンドは情報表示コマンドとしてconsole.logを使用する設計のため、セキュリティログとの整合性を検討する余地がある",
+        "recommendation": "issue createは外部サービス（GitHub）への書き込み操作を伴うため、最低限createアクションにlogSecurityEvent()の使用を検討する。search/listは読み取り操作のため不要",
+        "owasp_reference": "A09:2021 - Security Logging and Monitoring Failures",
+        "risk_level": "low"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "notes": "パストラバーサル防止はSECTION_MAPホワイトリスト方式で適切に対策済み。resolveSecurePath()の既存パターンとも整合性あり"
+    },
+    "A02_cryptographic_failures": {
+      "status": "pass",
+      "notes": "機密データの送受信なし。github-links.tsの定数はすべてパブリックURL"
+    },
+    "A03_injection": {
+      "status": "conditional_pass",
+      "notes": "execFile/spawnSync配列引数使用でシェルインジェクション防止。ただし--title/--bodyの長さ制限が未定義（SEC-MF-001）"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "gh CLI委譲パターンは既存のCLIツール連携パターン（execFile使用）に準拠。設計上の脆弱性なし"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "gh CLIをrequired:falseで追加し、既存機能への影響なし。GITHUB_API_URLのハードコード維持によりSSRF防止"
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "notes": "新規外部依存の追加なし。gh CLIはシステム依存として利用"
+    },
+    "A07_identification_authentication": {
+      "status": "pass",
+      "notes": "認証はgh CLIに委譲。外部リンクにrel='noopener noreferrer'を付与してtabnabbing防止"
+    },
+    "A08_software_data_integrity": {
+      "status": "pass",
+      "notes": "URLテンプレートはハードコード定数。動的URL構築なし"
+    },
+    "A09_security_logging": {
+      "status": "pass",
+      "notes": "既存のlogSecurityEvent()パターンあり。issue createへの適用は推奨（SEC-C-003）"
+    },
+    "A10_ssrf": {
+      "status": "pass",
+      "notes": "GITHUB_API_URLはversion-checker.ts内にハードコード維持（SEC-001）。GITHUB_REPO_BASE_URLも定数。環境変数からのURL構築なし"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-264-feedback-and-docs-design-policy.md",
+    "src/lib/version-checker.ts",
+    "src/cli/config/security-messages.ts",
+    "src/cli/utils/preflight.ts",
+    "src/cli/config/cli-dependencies.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/cli/utils/input-validators.ts",
+    "src/cli/index.ts",
+    "src/cli/commands/init.ts",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/lib/utils.ts",
+    "src/lib/git-utils.ts",
+    "src/cli/utils/worktree-detector.ts"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

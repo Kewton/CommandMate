@@ -43,6 +43,7 @@ import { ToastContainer, useToast } from '@/components/common/Toast';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
+import { FeedbackSection } from '@/components/worktree/FeedbackSection';
 import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
@@ -508,6 +509,9 @@ const InfoModal = memo(function InfoModal({
         {/* Version - Issue #257: VersionSection component (SF-001 DRY) */}
         <VersionSection version={APP_VERSION_DISPLAY} className="bg-gray-50 rounded-lg p-4" />
 
+        {/* Feedback - Issue #264: FeedbackSection component */}
+        <FeedbackSection className="bg-gray-50 rounded-lg p-4" />
+
         {/* Logs */}
         <div className="bg-gray-50 rounded-lg p-4">
           <div className="flex items-center justify-between mb-2">
@@ -772,6 +776,9 @@ const MobileInfoContent = memo(function MobileInfoContent({
 
       {/* Version - Issue #257: VersionSection component (SF-001 DRY) */}
       <VersionSection version={APP_VERSION_DISPLAY} className="bg-white rounded-lg border border-gray-200 p-4" />
+
+      {/* Feedback - Issue #264: FeedbackSection component */}
+      <FeedbackSection className="bg-white rounded-lg border border-gray-200 p-4" />
 
       {/* Logs */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">

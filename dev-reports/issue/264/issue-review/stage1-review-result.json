@@ -1,0 +1,171 @@
+{
+  "issue_number": 264,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-14",
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "整合性",
+        "issue": "gh CLIが依存関係に未登録 -- issueコマンドはgh CLIに依存するが、cli-dependencies.tsに登録されていないため、preflight checkで検出できない",
+        "location": "## 提案する解決策 > ②CLIにissueコマンドを追加 / ## 実装タスク",
+        "recommendation": "実装タスクに「src/cli/config/cli-dependencies.tsにgh CLIを追加（required: false）」を追加する。またgh CLIが未インストールの場合のフォールバック動作（エラーメッセージ表示）をissueコマンドの受入条件に含める",
+        "evidence": "src/cli/config/cli-dependencies.tsにはNode.js, npm, tmux, git, Claude CLIのみ登録されている。ghコマンドは未登録"
+      },
+      {
+        "id": "MF-2",
+        "category": "整合性",
+        "issue": "Issueタイトルに誤字 -- 「ユーザのからの問い合わせリンク」は「ユーザからの問い合わせリンク」が正しい",
+        "location": "Issueタイトル",
+        "recommendation": "Issueタイトルを「ユーザーからの問い合わせリンク」に修正する",
+        "evidence": "GitHubのIssueタイトル: 「ユーザのからの問い合わせリンク」-- 「の」が余分"
+      },
+      {
+        "id": "MF-3",
+        "category": "完全性",
+        "issue": "CLIコマンドのi18n方針が未定義 -- UI側はi18n対応（en/ja）が受入条件に含まれているが、CLIコマンド（issue/docs）の出力メッセージのi18n対応方針が明記されていない",
+        "location": "## 受入条件 / ## 実装タスク > CLIコマンド",
+        "recommendation": "CLIコマンドの出力は英語固定とするか、i18n対応するかを明記する。現在の既存CLIコマンド（init/start/stop/status）は全て英語固定であるため、整合性を保つなら英語固定が妥当",
+        "evidence": "既存CLIコマンド（src/cli/commands/init.ts等）は全て英語ハードコードで出力している。一方、Issueの受入条件にはi18n対応が含まれるが、CLIとUIの区別がない"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "docsコマンドの対象ドキュメントリストにdocs/user-guide/cli-setup-guide.mdが欠落している",
+        "location": "## 提案する解決策 > ④ドキュメント取得コマンド > 対象ドキュメント",
+        "recommendation": "docs/user-guide/cli-setup-guide.mdを対象ドキュメントリストに追加する。または、意図的に除外しているならその理由を記載する",
+        "evidence": "docs/user-guide/配下にはquick-start.md, commands-guide.md, webapp-guide.md, workflow-examples.md, agents-guide.md, cli-setup-guide.mdの6ファイルがあるが、Issueの対象リストにはcli-setup-guide.mdとagents-guide.mdが含まれていない"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "commandmate issue createの--title/--bodyオプションの仕様が曖昧 -- AIツールからの利用例では--title/--bodyが使われているが、CLIコマンド定義には明記されていない",
+        "location": "## 提案する解決策 > ②CLIにissueコマンドを追加",
+        "recommendation": "commandmate issue createのオプション一覧を明示する（--bug/--feature/--question, --title, --body, --labels等）。特にgh issue createに渡す引数のマッピングを定義すると実装しやすくなる",
+        "evidence": "コマンド定義セクションでは 'commandmate issue create --bug' のみだが、AI利用例では 'commandmate issue create --bug --title \"...\" --body \"...\"' と記載されている"
+      },
+      {
+        "id": "SF-3",
+        "category": "技術的妥当性",
+        "issue": "FeedbackSectionの配置先として記載されている「WorktreeDetailRefactored.tsx のInfoModal/MobileInfoContent」は同一ファイル内のローカルコンポーネントであり、FeedbackSectionの追加箇所がVersionSectionの下であることを明記すべき",
+        "location": "## 提案する解決策 > ①UIにフィードバックリンクを追加 / ## 実装タスク > UI",
+        "recommendation": "InfoModalとMobileInfoContentはWorktreeDetailRefactored.tsx内に定義されたローカルコンポーネントであることを明記し、VersionSectionの直下（line 509付近とline 774付近）にFeedbackSectionを配置することを具体的に記載する",
+        "evidence": "InfoModal（line 346-528）とMobileInfoContent（line 609-792）はWorktreeDetailRefactored.tsx内のmemoコンポーネント。VersionSectionはInfoModal line 509、MobileInfoContent line 774で使用されている"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "CLAUDE.mdの更新タスクが欠落 -- 新規CLIコマンド（issue, docs）と新規コンポーネント（FeedbackSection）の追加に伴い、CLAUDE.mdの主要機能モジュール表とCLIモジュール表の更新が必要",
+        "location": "## 実装タスク > ドキュメント",
+        "recommendation": "実装タスクのドキュメントセクションに「CLAUDE.mdに新規モジュール情報（src/cli/commands/issue.ts, src/cli/commands/docs.ts, src/config/github-links.ts, src/components/worktree/FeedbackSection.tsx）を追記」を追加する",
+        "evidence": "CLAUDE.mdのCLIモジュール表にはinit/start/stop/statusのみ、主要機能モジュール表にもFeedbackSectionやgithub-linksの記載はない。既存のIssue実装時にはCLAUDE.mdの更新が慣例的に行われている"
+      },
+      {
+        "id": "SF-5",
+        "category": "受け入れ条件",
+        "issue": "GitHub Issue URL生成の正確性テストが受入条件に欠落 -- テンプレートURLが正しいフォーマット（https://github.com/Kewton/CommandMate/issues/new?template=...）で生成されることの検証が必要",
+        "location": "## 受入条件",
+        "recommendation": "受入条件に「GitHub Issue URLが正しいテンプレートパラメータ（template=bug_report.md等）で生成されること」を追加する。テンプレートファイル名はbug_report.md, feature_request.md, question.mdであることを確認済み",
+        "evidence": ".github/ISSUE_TEMPLATE/配下にbug_report.md, feature_request.md, question.mdが存在する。URLテンプレートの形式が正しくないとリンク先でテンプレートが適用されない"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "docsコマンドの対象ドキュメントにdocs/user-guide/agents-guide.mdが含まれていない",
+        "location": "## 提案する解決策 > ④ドキュメント取得コマンド > 対象ドキュメント",
+        "recommendation": "agents-guide.mdはClaude Code/Codexユーザーにとって有用なドキュメントであるため、対象リストへの追加を検討する"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "既存のGitHub URL定数との一元管理方針が明記されていない",
+        "location": "## 実装タスク > UI > src/config/github-links.ts",
+        "recommendation": "src/lib/version-checker.tsに既にGITHUB_RELEASE_URL_PREFIXが定義されている。新規のgithub-links.tsとの関係（統合するか別管理か）を検討・明記するとよい"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "commandmate --helpの出力イメージに記載されている'AI Tool Integration'セクションの実装方法が未定義",
+        "location": "## 提案する解決策 > ②CLIにissueコマンドを追加 > --helpの出力イメージ",
+        "recommendation": "commanderライブラリのaddHelpText() APIを使うか、helpCommandをオーバーライドするか、実装方針を記載するとよい"
+      },
+      {
+        "id": "NTH-4",
+        "category": "完全性",
+        "issue": "関連Issue #124（メッセージとドキュメントの英語対応）との関係性が未記載",
+        "location": "Issue本文",
+        "recommendation": "Issue #124はi18n対応に関連するIssueであるため、関連Issueとしてリンクを追加するとよい"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "FeedbackSectionの組み込み先（InfoModal: line 509, MobileInfoContent: line 774のVersionSectionの下に配置）"
+    },
+    {
+      "file": "src/components/worktree/VersionSection.tsx",
+      "relevance": "FeedbackSectionの隣接コンポーネント（同じパターンでclassName propsを受け取る設計）"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "relevance": "issue/docsコマンドの登録先。commanderベースの既存パターンに従う必要あり"
+    },
+    {
+      "file": "src/cli/types/index.ts",
+      "relevance": "IssueOptions/DocsOptions型の追加先。既存のStartOptions等と同じパターン"
+    },
+    {
+      "file": "src/cli/config/cli-dependencies.ts",
+      "relevance": "gh CLIの依存関係登録先（MF-1: 現在未登録）"
+    },
+    {
+      "file": "src/cli/commands/init.ts",
+      "relevance": "AIツール連携ガイドの追加先（line 244-253の'Next steps'セクションの後に配置）"
+    },
+    {
+      "file": "src/lib/version-checker.ts",
+      "relevance": "既存のGitHub URL定数（GITHUB_RELEASE_URL_PREFIX）が定義されている（NTH-2参照）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "relevance": "UIフィードバックリンクのテンプレート参照先（存在確認済み）"
+    },
+    {
+      "file": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "relevance": "UIフィードバックリンクのテンプレート参照先（存在確認済み）"
+    },
+    {
+      "file": ".github/ISSUE_TEMPLATE/question.md",
+      "relevance": "UIフィードバックリンクのテンプレート参照先（存在確認済み）"
+    },
+    {
+      "file": "docs/user-guide/commands-guide.md",
+      "relevance": "issue/docsコマンドの追記先（Issueで言及済み）"
+    },
+    {
+      "file": "docs/user-guide/cli-setup-guide.md",
+      "relevance": "docsコマンド対象リストからの欠落候補（SF-1参照）"
+    },
+    {
+      "file": "docs/user-guide/agents-guide.md",
+      "relevance": "docsコマンド対象リストからの欠落候補（NTH-1参照）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "新規モジュール情報の追記が必要（SF-4参照）"
+    }
+  ]
+}

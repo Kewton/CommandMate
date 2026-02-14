@@ -139,6 +139,7 @@ export class PreflightChecker {
       tmux: 'Install with: brew install tmux (macOS) or apt install tmux (Linux)',
       git: 'Install with: brew install git (macOS) or apt install git (Linux)',
       'Claude CLI': 'Install with: npm install -g @anthropic-ai/claude-cli',
+      'gh CLI': 'Install GitHub CLI: https://cli.github.com/ or brew install gh',
     };
 
     return hints[name] || `Please install ${name}`;

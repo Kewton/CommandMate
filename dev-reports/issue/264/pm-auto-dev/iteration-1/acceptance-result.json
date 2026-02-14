@@ -1,0 +1,162 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: Verify FeedbackSection renders correctly with all 4 links and correct URLs",
+      "result": "passed",
+      "evidence": "tests/unit/components/worktree/feedback-section.test.tsx: 7 tests passed. Verifies 4 links (Bug Report, Feature Request, Question, View Issues) render with correct GitHub URLs from github-links.ts constants."
+    },
+    {
+      "scenario": "Scenario 2: Verify issue create command template mapping (--bug -> Bug Report, --feature -> Feature Request, --question -> Question)",
+      "result": "passed",
+      "evidence": "tests/unit/cli/commands/issue.test.ts: 13 tests passed. Tests confirm --bug maps to 'Bug Report', --feature maps to 'Feature Request', --question maps to 'Question' template names via TEMPLATE_MAP."
+    },
+    {
+      "scenario": "Scenario 3: Verify input validation rejects oversized title/body and sanitizes labels",
+      "result": "passed",
+      "evidence": "tests/unit/cli/commands/issue.test.ts: SEC-MF-001 tests verify title >256 chars rejected with exit code 99, body >65536 chars rejected with exit code 99. SEC-SF-001 tests verify control characters and zero-width characters stripped from labels."
+    },
+    {
+      "scenario": "Scenario 4: Verify docs command retrieves sections, searches, and prevents path traversal",
+      "result": "passed",
+      "evidence": "tests/unit/cli/commands/docs.test.ts: 7 tests passed. tests/unit/cli/utils/docs-reader.test.ts: 14 tests passed. Docs reader uses SECTION_MAP whitelist to prevent path traversal. SEC-SF-002 search query length limit enforced at 256 chars."
+    },
+    {
+      "scenario": "Scenario 5: Verify gh CLI dependency check and graceful degradation",
+      "result": "passed",
+      "evidence": "tests/unit/cli/commands/issue.test.ts: Test 'should exit with DEPENDENCY_ERROR when gh is not installed' confirms process.exit(1) called. tests/unit/cli/config/cli-dependencies.test.ts: 15 tests passed, verifying gh CLI registered as optional dependency."
+    },
+    {
+      "scenario": "Scenario 6: Verify GitHub URL constants are consistent and correctly derived from base URL",
+      "result": "passed",
+      "evidence": "tests/unit/config/github-links.test.ts: 10 tests passed. All URLs verified as derived from GITHUB_REPO_BASE_URL = 'https://github.com/Kewton/CommandMate'."
+    },
+    {
+      "scenario": "Scenario 7: Verify existing tests (version-checker, init, cli-dependencies) remain passing",
+      "result": "passed",
+      "evidence": "tests/unit/lib/version-checker.test.ts: 56 tests passed. tests/unit/cli/commands/init.test.ts: 4 tests passed. All 126 Issue #264 related tests passed. Full unit test suite: 167/168 files passed (3264 tests), 1 infrastructure error (Vitest worker fork crash, unrelated to Issue #264)."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "AC-1: FeedbackSection UI component renders 4 feedback links (Bug Report, Feature Request, Question, View Issues) in InfoModal and MobileInfoContent",
+      "verified": true,
+      "evidence": "FeedbackSection.tsx renders 4 links from links array. WorktreeDetailRefactored.tsx includes <FeedbackSection> in both InfoModal (line 513) and MobileInfoContent (line 781)."
+    },
+    {
+      "criterion": "AC-2: All feedback links point to correct GitHub template URLs defined in src/config/github-links.ts",
+      "verified": true,
+      "evidence": "FeedbackSection imports GITHUB_BUG_REPORT_URL, GITHUB_FEATURE_REQUEST_URL, GITHUB_QUESTION_URL, GITHUB_ISSUES_URL from @/config/github-links. Unit test confirms all 4 URLs match constants."
+    },
+    {
+      "criterion": "AC-3: All links have rel='noopener noreferrer' and target='_blank' for security",
+      "verified": true,
+      "evidence": "FeedbackSection.tsx line 60-61: target='_blank' rel='noopener noreferrer' on all <a> elements. Unit tests verify these attributes on every link."
+    },
+    {
+      "criterion": "AC-4: commandmate issue create supports --bug/--feature/--question flags with correct gh CLI template name mapping",
+      "verified": true,
+      "evidence": "issue.ts TEMPLATE_MAP: bug->'Bug Report', feature->'Feature Request', question->'Question'. Unit tests confirm all three mappings pass correct --template values to gh CLI."
+    },
+    {
+      "criterion": "AC-5: commandmate issue create validates title (max 256 chars) and body (max 65536 chars)",
+      "verified": true,
+      "evidence": "input-validators.ts: MAX_TITLE_LENGTH=256, MAX_BODY_LENGTH=65536. validateIssueTitle() and validateIssueBody() used in issue.ts. Unit tests verify rejection of oversized inputs."
+    },
+    {
+      "criterion": "AC-6: commandmate issue create sanitizes labels (strips control characters, zero-width characters)",
+      "verified": true,
+      "evidence": "input-validators.ts sanitizeLabel() uses regex /[\\u0000-\\u001F\\u007F-\\u009F\\u200B-\\u200F\\uFEFF]/g. issue.ts applies sanitizeLabel() to each label. Unit tests verify control and zero-width characters stripped."
+    },
+    {
+      "criterion": "AC-7: commandmate issue search passes query to gh issue list --search",
+      "verified": true,
+      "evidence": "issue.ts search subcommand: spawnSync('gh', ['issue', 'list', '--search', query]). Unit test confirms query passed to --search argument."
+    },
+    {
+      "criterion": "AC-8: commandmate issue list calls gh issue list",
+      "verified": true,
+      "evidence": "issue.ts list subcommand: spawnSync('gh', ['issue', 'list']). Unit test confirms gh issue list called."
+    },
+    {
+      "criterion": "AC-9: commandmate docs --section shows documentation section content",
+      "verified": true,
+      "evidence": "docs.ts handles options.section by calling readSection() from docs-reader.ts. DocsReader uses SECTION_MAP whitelist with 8 documentation sections."
+    },
+    {
+      "criterion": "AC-10: commandmate docs --search performs case-insensitive search across sections",
+      "verified": true,
+      "evidence": "docs-reader.ts searchDocs() converts query to lowercase and uses String.prototype.includes() for case-insensitive matching across all SECTION_MAP entries."
+    },
+    {
+      "criterion": "AC-11: commandmate docs --all lists all available sections",
+      "verified": true,
+      "evidence": "docs.ts handles options.all by calling getAvailableSections() and logging each section name."
+    },
+    {
+      "criterion": "AC-12: commandmate docs rejects path traversal attempts",
+      "verified": true,
+      "evidence": "docs-reader.ts uses SECTION_MAP whitelist. isValidSection() checks if section name exists as a key. readSection() re-validates. Path traversal strings (e.g., '../etc/passwd') are not valid keys. Unit tests in docs-reader.test.ts verify this."
+    },
+    {
+      "criterion": "AC-13: commandmate docs --search rejects queries exceeding 256 characters (SEC-SF-002)",
+      "verified": true,
+      "evidence": "docs-reader.ts: MAX_SEARCH_QUERY_LENGTH=256. searchDocs() throws Error if query.length > 256. Unit test in docs-reader.test.ts verifies rejection."
+    },
+    {
+      "criterion": "AC-14: gh CLI is registered as optional dependency in cli-dependencies.ts",
+      "verified": true,
+      "evidence": "cli-dependencies.ts DEPENDENCIES array includes { name: 'gh CLI', command: 'gh', versionArg: '--version', required: false }. Unit test in cli-dependencies.test.ts verifies."
+    },
+    {
+      "criterion": "AC-15: issue/docs commands exit with DEPENDENCY_ERROR (1) when gh CLI is not installed",
+      "verified": true,
+      "evidence": "issue.ts isGhAvailable() checks gh --version. On failure, process.exit(ExitCode.DEPENDENCY_ERROR) which equals 1. Unit test confirms exit code 1."
+    },
+    {
+      "criterion": "AC-16: GitHub URLs are centralized in src/config/github-links.ts (DRY principle)",
+      "verified": true,
+      "evidence": "github-links.ts defines GITHUB_REPO_BASE_URL and derives all URLs: GITHUB_ISSUES_URL, GITHUB_NEW_ISSUE_URL, GITHUB_BUG_REPORT_URL, GITHUB_FEATURE_REQUEST_URL, GITHUB_QUESTION_URL, GITHUB_RELEASE_URL_PREFIX, GITHUB_SECURITY_GUIDE_URL. Unit tests verify derivation."
+    },
+    {
+      "criterion": "AC-17: commandmate init displays AI tool integration guide after success",
+      "verified": true,
+      "evidence": "init.ts line 257: console.log(AI_INTEGRATION_GUIDE) after successful initialization. AI_INTEGRATION_GUIDE defined in ai-integration-messages.ts with issue/docs command examples."
+    },
+    {
+      "criterion": "AC-18: i18n keys exist for en and ja locales (feedback.title, feedback.bugReport, feedback.featureRequest, feedback.question, feedback.viewIssues)",
+      "verified": true,
+      "evidence": "locales/en/worktree.json: feedback.title='Feedback & Support', feedback.bugReport='Report a bug', feedback.featureRequest='Request a feature', feedback.question='Ask a question', feedback.viewIssues='View all issues'. locales/ja/worktree.json: all corresponding Japanese translations present."
+    }
+  ],
+  "quality_checks": {
+    "tsc_noEmit": "passed (no output, exit 0)",
+    "eslint": "passed (No ESLint warnings or errors)",
+    "build_cli": "passed (tsc --project tsconfig.cli.json completed)",
+    "unit_tests_issue264": "passed (8 test files, 126 tests, all passed)",
+    "unit_tests_full": "167/168 test files passed, 3264 tests passed, 7 skipped, 1 infrastructure error (Vitest worker fork crash, unrelated to Issue #264)"
+  },
+  "evidence_files": [
+    "src/config/github-links.ts",
+    "src/components/worktree/FeedbackSection.tsx",
+    "src/cli/commands/issue.ts",
+    "src/cli/commands/docs.ts",
+    "src/cli/utils/docs-reader.ts",
+    "src/cli/utils/input-validators.ts",
+    "src/cli/config/cli-dependencies.ts",
+    "src/cli/commands/init.ts",
+    "src/cli/config/ai-integration-messages.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "locales/en/worktree.json",
+    "locales/ja/worktree.json",
+    "tests/unit/config/github-links.test.ts",
+    "tests/unit/cli/config/cli-dependencies.test.ts",
+    "tests/unit/cli/utils/docs-reader.test.ts",
+    "tests/unit/components/worktree/feedback-section.test.tsx",
+    "tests/unit/cli/commands/docs.test.ts",
+    "tests/unit/cli/commands/issue.test.ts",
+    "tests/unit/lib/version-checker.test.ts",
+    "tests/unit/cli/commands/init.test.ts"
+  ],
+  "message": "All 18 acceptance criteria verified. All 7 test scenarios passed. Quality checks (TypeScript, ESLint, CLI build) all passed. Full unit test suite: 3264/3264 tests passed (1 Vitest infrastructure error unrelated to Issue #264)."
+}

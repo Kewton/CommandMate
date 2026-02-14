@@ -23,6 +23,13 @@
     "failedToUpdateFavorite": "Failed to update favorite",
     "failedToUpdateStatus": "Failed to update status"
   },
+  "feedback": {
+    "title": "Feedback & Support",
+    "bugReport": "Report a bug",
+    "featureRequest": "Request a feature",
+    "question": "Ask a question",
+    "viewIssues": "View all issues"
+  },
   "update": {
     "available": "A new version is available",
     "latestVersion": "Latest: v{version}",

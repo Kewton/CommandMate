@@ -1,0 +1,86 @@
+{
+  "issue_number": 264,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-14",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "gh CLIの依存関係登録（cli-dependencies.tsにrequired: falseで追加）を実装タスクに追加。gh CLI未インストール時のエラーメッセージ・コマンド中断処理を実装タスクと受入条件に追加"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "Issueタイトルを「ユーザのからの問い合わせリンク」から「ユーザーからの問い合わせリンク」に修正（gh issue edit --title使用）"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "CLIコマンド出力は英語固定、i18n対応はUI側のみという方針を明記。提案する解決策セクション、実装タスク、受入条件の全てに反映"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "docsコマンドの対象ドキュメントリストにdocs/user-guide/cli-setup-guide.mdを追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "commandmate issue createのオプション一覧表（--bug/--feature/--question/--title/--body/--labels）とgh issue createへの引数マッピングを追加"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "FeedbackSectionの配置先詳細を明記（InfoModal/MobileInfoContentがWorktreeDetailRefactored.tsx内のローカルmemoコンポーネントであること、VersionSection直下のline 509/774付近に配置すること）"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "実装タスクのドキュメントセクションにCLAUDE.md更新タスクを追加。受入条件にもCLAUDE.md更新の確認項目を追加。変更対象ファイル表にCLAUDE.mdを追加"
+      },
+      {
+        "id": "SF-5",
+        "status": "applied",
+        "change_summary": "受入条件にGitHub Issue URLの正しいテンプレートパラメータ（template=bug_report.md等）検証を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "docsコマンドの対象ドキュメントリストにdocs/user-guide/agents-guide.mdを追加"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "src/lib/version-checker.tsの既存GITHUB_RELEASE_URL_PREFIX定数との関係を主要な変更点セクションと実装タスクに記載。github-links.tsへの集約方針を明記"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "commanderライブラリのaddHelpText('after', ...) APIを使用する実装方針をヘルプ出力イメージセクションと実装タスクに明記"
+      },
+      {
+        "id": "NTH-4",
+        "status": "applied",
+        "change_summary": "関連Issueセクションを追加し、Issue #124（メッセージとドキュメントの英語対応）へのリンクを記載"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 12,
+    "applied": 12,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "title_updated": true,
+    "body_updated": true,
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/264"
+  }
+}

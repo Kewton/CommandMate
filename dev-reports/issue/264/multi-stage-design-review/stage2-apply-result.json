@@ -1,0 +1,98 @@
+{
+  "issue_number": 264,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-CONS-001",
+        "item": "CLIコマンド登録パターンの不整合（addCommand vs インラインパターン）",
+        "section_updated": "Section 5-3, Section 8-1, Section 13 実装チェックリスト",
+        "status": "reflected",
+        "details": "Section 5-3にaddCommandパターン採用理由と既存パターンとの差異を詳細に説明。比較表を追加。実装チェックリストにMust Fix項目として追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-CONS-001",
+        "item": "i18n翻訳キー構造の不一致（1 JSONに複数言語混在の記載）",
+        "section_updated": "Section 4-2",
+        "status": "reflected",
+        "details": "翻訳キー設計をen/ja別記載に修正。既存パターン準拠の説明を追加。"
+      },
+      {
+        "id": "SF-CONS-002",
+        "item": "FeedbackSectionテストファイルの拡張子不一致（.ts -> .tsx）",
+        "section_updated": "Section 7-1, Section 7-2, Section 9-3, Section 13",
+        "status": "reflected",
+        "details": "全テストファイル参照箇所の拡張子を.tsxに修正。"
+      },
+      {
+        "id": "SF-CONS-003",
+        "item": "FeedbackSectionテストファイルのディレクトリパス不一致",
+        "section_updated": "Section 7-1, Section 9-3, Section 13",
+        "status": "reflected",
+        "details": "テストファイルパスをtests/unit/components/worktree/ディレクトリに修正。"
+      },
+      {
+        "id": "SF-CONS-004",
+        "item": "FeedbackSectionのProps設計がVersionSectionと微妙に異なる",
+        "section_updated": "Section 3-2, Section 13",
+        "status": "reflected",
+        "details": "データ依存性なしの最小Props設計の根拠を追記。VersionSectionパターン準拠の範囲を明確化。"
+      },
+      {
+        "id": "SF-CONS-005",
+        "item": "docsコマンドのconsole.log使用とCLILogger使用の混在",
+        "section_updated": "Section 3-6, Section 5-1, Section 8-1, Section 13",
+        "status": "reflected",
+        "details": "docs/issueコマンドのログ出力方針（console.log直接使用、statusコマンドパターン準拠）を明記。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-CONS-001",
+        "item": "テストファイル命名規則の不統一（ケバブケース vs パスカルケース）",
+        "section_updated": "Section 7-1, Section 9-3, Section 13",
+        "status": "reflected",
+        "details": "テストファイル名をfeedback-section.test.tsx（ケバブケース）に修正。既存パターン準拠の説明を追加。"
+      },
+      {
+        "id": "C-CONS-002",
+        "item": "tsconfig.cli.json の include スコープと cross-boundary import の明示的文書化",
+        "section_updated": "Section 6-2",
+        "status": "reflected",
+        "details": "rootDir: './src' によりsrc/config/がコンパイル対象に含まれる技術的根拠を追記。"
+      },
+      {
+        "id": "C-CONS-003",
+        "item": "SECTION_MAPの定義箇所がSection 3-5とSection 3-6で重複記載",
+        "section_updated": "Section 3-5",
+        "status": "reflected",
+        "details": "Section 3-5のSECTION_MAP配置先をdocs-reader.tsに修正し、Section 3-6との整合性を確保。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-264-feedback-and-docs-design-policy.md",
+  "sections_updated": [
+    "Section 3-2 (SRP原則: FeedbackSection Props設計補足)",
+    "Section 3-5 (ホワイトリストパターン: SECTION_MAP配置先修正)",
+    "Section 3-6 (DocsReader: ログ出力方針追加)",
+    "Section 4-2 (i18n翻訳キー設計: en/ja別記載に修正)",
+    "Section 5-1 (issueコマンド: ログ出力方針追加)",
+    "Section 5-3 (コマンド登録: addCommandパターン根拠追加)",
+    "Section 6-2 (Cross-Boundary Import: rootDir根拠追加)",
+    "Section 7-1 (テストファイル一覧: パス・拡張子・命名修正)",
+    "Section 7-2 (テスト方針: ファイル名修正)",
+    "Section 8-1 (設計決定事項: Stage 2項目追加)",
+    "Section 9-3 (テストファイル: パス修正)",
+    "Section 10 (制約条件: 整合性行追加)",
+    "Section 11 (レビュー履歴: Stage 2追加)",
+    "Section 12 (レビュー指摘事項サマリー: Stage 2テーブル追加)",
+    "Section 13 (実装チェックリスト: Stage 2項目追加)"
+  ],
+  "timestamp": "2026-02-14T00:00:00Z"
+}

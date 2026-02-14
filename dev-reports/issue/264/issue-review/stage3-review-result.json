@@ -1,0 +1,218 @@
+{
+  "issue_number": 264,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-14",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "テスト範囲",
+        "issue": "既存テスト cli-dependencies.test.ts が gh CLI 追加により破壊される -- 現在のテストはDEPENDENCIES配列の要素数・内容を厳密にアサートしている（getOptionalDependencies で Claude CLI のみを期待）。gh CLI を required: false で追加すると、getOptionalDependencies のテストが失敗する",
+        "location": "tests/unit/cli/config/cli-dependencies.test.ts (line 77-88)",
+        "recommendation": "影響範囲の「変更対象ファイル」表に tests/unit/cli/config/cli-dependencies.test.ts を追加し、gh CLI追加に伴うテスト更新を実装タスクに含める。具体的には getOptionalDependencies テストで 'gh' を含む検証を追加する必要がある",
+        "evidence": "tests/unit/cli/config/cli-dependencies.test.ts line 82-88: getOptionalDependencies のテストは optional 依存が Claude CLI のみであることを前提としている。gh CLI を追加すると optional は2件になりテストが不正確になる"
+      },
+      {
+        "id": "MF-2",
+        "category": "テスト範囲",
+        "issue": "i18n翻訳キーパリティテストが新規翻訳キー追加により影響を受ける可能性 -- tests/integration/i18n-translation-keys.test.ts は en/ja の翻訳キーの一致を自動検証している。worktree.json に feedback セクションを追加する際、en/ja 両方に同一構造のキーを追加しないとテストが失敗する",
+        "location": "tests/integration/i18n-translation-keys.test.ts / locales/en/worktree.json / locales/ja/worktree.json",
+        "recommendation": "実装タスクの翻訳キー追加項目に「en/ja 両方に同一キー構造で追加すること（i18n-translation-keys.test.ts のパリティチェック対応）」という注意事項を追加する",
+        "evidence": "tests/integration/i18n-translation-keys.test.ts は NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt'] の全キーを en/ja で比較する。locales/en/worktree.json と locales/ja/worktree.json に非対称な翻訳キーがあると CI が失敗する"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響ファイル",
+        "issue": "tsconfig.cli.json の include パスにより新規 CLI コマンドのビルド対象包含は自動的だが、docsコマンドがfsモジュールでdocs/配下のファイルを読み込む場合のパス解決方法が未定義 -- npm グローバルインストール時とローカル実行時でdocsファイルの相対パスが異なる",
+        "location": "## 提案する解決策 > (4)ドキュメント取得コマンド",
+        "recommendation": "docsコマンドのドキュメントファイル読み込みパス解決方針を明記する。npm グローバルインストール時は require.resolve() やpath.join(__dirname, '../../docs/') 等でパッケージルートからの相対パスを使用する必要がある。package.json の files フィールドに docs/ を追加して配布対象に含める必要もある",
+        "evidence": "package.json の files フィールドは [\"bin/\", \"dist/\", \".next/\", \"public/\", \".env.example\"] であり docs/ が含まれていない。グローバルインストール時に docs/ が配布されないと commandmate docs コマンドが動作しない"
+      },
+      {
+        "id": "SF-2",
+        "category": "依存関係",
+        "issue": "version-checker.ts の GITHUB_RELEASE_URL_PREFIX を github-links.ts に移設する場合、既存の import パスが変更され version-checker.ts とそのテスト (tests/unit/api/update-check.test.ts) に影響する",
+        "location": "## 主要な変更点 / ## 実装タスク > UI > github-links.ts",
+        "recommendation": "GITHUB_RELEASE_URL_PREFIX の移設は破壊的変更となるため、移設する場合は version-checker.ts 内で re-export するか、移設を見送って github-links.ts に Issue URL 定数のみを定義する方針を明確にする。Issue文面では「移設も検討」と曖昧なため、判断基準を記載する",
+        "evidence": "src/lib/version-checker.ts line 33 で export const GITHUB_RELEASE_URL_PREFIX が定義されており、同ファイル line 141 で validateReleaseUrl() 内で使用。tests/unit/api/update-check.test.ts がこの定数を参照している可能性がある"
+      },
+      {
+        "id": "SF-3",
+        "category": "破壊的変更",
+        "issue": "commandmate issue サブコマンドが commander の既存 -i/--issue オプション (start/stop/status) と名前衝突する可能性 -- 'issue' はコマンド名として使用されるが、既存コマンドでは -i が --issue の短縮形として定義されている",
+        "location": "## 提案する解決策 > (2)CLIにissueコマンドを追加 / src/cli/index.ts",
+        "recommendation": "commander ライブラリでは command と option は別スコープで管理されるため直接衝突はしないが、ユーザーの混乱を避けるために commandmate --help の出力で 'issue' コマンドと '-i, --issue' オプションが混在する点を認識し、ヘルプテキストで区別を明確にすることを検討する",
+        "evidence": "src/cli/index.ts: start/stop/status コマンドはすべて '-i, --issue <number>' オプションを持つ。新規 'issue' コマンドとの命名の重複がユーザー混乱を招く可能性がある"
+      },
+      {
+        "id": "SF-4",
+        "category": "ドキュメント更新",
+        "issue": "commands-guide.md の更新範囲が不十分 -- 現在の commands-guide.md はClaude Code のスラッシュコマンドやスキルを記載しているが、commandmate CLI コマンドの一覧セクションが存在しない。issue/docs コマンドを追記する際に、既存の init/start/stop/status コマンドも含めた CLI コマンドセクションの新設が必要",
+        "location": "## 実装タスク > ドキュメント > commands-guide.md",
+        "recommendation": "commands-guide.md への追記ではなく、docs/user-guide/cli-setup-guide.md への追記、または commands-guide.md に 'CommandMate CLI Commands' セクションを新設する方針を明記する。現在の commands-guide.md はスラッシュコマンド専門であり、CLI コマンド追記の適切な配置先を再検討する",
+        "evidence": "docs/user-guide/commands-guide.md は /work-plan, /create-pr, /progress-report, /tdd-impl 等のスラッシュコマンドガイドであり、commandmate CLI コマンドの記載場所としては cli-setup-guide.md のほうが適切な可能性がある"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "新規コマンド（issue, docs）のテスト方針が具体化されていない -- 既存CLIコマンドには各々テストファイルが存在する（init.test.ts, start.test.ts, stop.test.ts, status.test.ts）が、issue/docs コマンドのテストファイル名・テスト観点が未定義",
+        "location": "## 実装タスク > ドキュメント > ユニットテスト追加",
+        "recommendation": "テスト計画を具体化する: tests/unit/cli/commands/issue.test.ts（gh CLI連携のモック、テンプレート選択、エラーハンドリング）、tests/unit/cli/commands/docs.test.ts（セクション表示、検索、ファイル読み込みエラー）を明記する",
+        "evidence": "既存テスト構造: tests/unit/cli/commands/ に init.test.ts, start.test.ts, start-issue.test.ts, stop.test.ts, stop-issue.test.ts, status.test.ts, status-issue.test.ts が存在。同パターンで issue.test.ts, docs.test.ts が必要"
+      },
+      {
+        "id": "NTH-2",
+        "category": "影響ファイル",
+        "issue": "PreflightChecker.getInstallHint() に gh CLI のヒントが未追加 -- preflight.ts の静的メソッド getInstallHint() は依存関係名ごとのインストールヒントを返すが、gh CLI 用のヒントが追加されていない",
+        "location": "src/cli/utils/preflight.ts (line 135-145)",
+        "recommendation": "影響ファイルに src/cli/utils/preflight.ts を追加し、getInstallHint() の hints に 'gh': 'Install with: brew install gh (macOS) or visit https://cli.github.com/' を追加する実装タスクを含める",
+        "evidence": "src/cli/utils/preflight.ts line 136-144: hints は Node.js, npm, tmux, git, Claude CLI のみ。gh CLI 未インストール時に issueコマンドがエラーを返す際、適切なインストールヒントを表示するために更新が必要"
+      },
+      {
+        "id": "NTH-3",
+        "category": "移行考慮",
+        "issue": "FeedbackSection の外部 URL がハードコードの場合、リポジトリ名やオーナー名が変更された際に複数箇所の修正が必要 -- version-checker.ts の GITHUB_API_URL/GITHUB_RELEASE_URL_PREFIX とgithub-links.ts の Issue URL を合わせると、GitHub URL が3箇所以上に分散する",
+        "recommendation": "github-links.ts に GITHUB_REPO_BASE_URL = 'https://github.com/Kewton/CommandMate' を定数として定義し、Issue URL, Release URL, Security Guide URL をすべてこの定数から派生させる設計を検討する。これにより将来のリポジトリ移転時の変更箇所を1箇所に集約できる",
+        "evidence": "GitHub URL は現在 src/lib/version-checker.ts (2箇所: API URL, Release URL prefix), src/cli/config/security-messages.ts (1箇所: security-guide URL) に分散。Issue #264 で更に Issue URL が追加される"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": {
+      "new_files": [
+        "src/config/github-links.ts",
+        "src/components/worktree/FeedbackSection.tsx",
+        "src/cli/commands/issue.ts",
+        "src/cli/commands/docs.ts",
+        "src/cli/config/ai-integration-messages.ts",
+        "docs/user-guide/support-and-feedback.md"
+      ],
+      "modified_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/cli/index.ts",
+        "src/cli/types/index.ts",
+        "src/cli/config/cli-dependencies.ts",
+        "src/cli/commands/init.ts",
+        "locales/en/worktree.json",
+        "locales/ja/worktree.json",
+        "docs/user-guide/commands-guide.md",
+        "CLAUDE.md",
+        "package.json"
+      ],
+      "potentially_affected_files": [
+        "src/lib/version-checker.ts",
+        "src/cli/utils/preflight.ts",
+        "tests/unit/cli/config/cli-dependencies.test.ts",
+        "tests/integration/i18n-translation-keys.test.ts",
+        "tests/unit/api/update-check.test.ts"
+      ],
+      "test_files_to_create": [
+        "tests/unit/cli/commands/issue.test.ts",
+        "tests/unit/cli/commands/docs.test.ts",
+        "tests/unit/config/github-links.test.ts",
+        "tests/unit/components/FeedbackSection.test.ts"
+      ]
+    },
+    "dependency_impact": {
+      "new_external_dependencies": [],
+      "existing_dependency_changes": [
+        {
+          "name": "commander",
+          "impact": "2つの新規サブコマンド（issue, docs）の登録。既存の commander 設定パターンに従うため互換性リスクは低い"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "name": "gh CLI",
+          "type": "optional_external",
+          "impact": "issue コマンドの実行時依存。required: false で登録されるため、他機能への影響なし"
+        }
+      ]
+    },
+    "breaking_changes": {
+      "has_breaking_changes": false,
+      "details": "全ての変更は追加的（additive）であり、既存の API、CLI オプション、UI 動作に破壊的変更はない。ただし GITHUB_RELEASE_URL_PREFIX を移設する場合は破壊的変更となる"
+    },
+    "security_considerations": [
+      {
+        "area": "外部URL生成",
+        "risk": "低",
+        "detail": "FeedbackSection で生成される GitHub Issue URL はハードコード定数から構築されるため、SSRF やオープンリダイレクトのリスクはない。target='_blank' には rel='noopener noreferrer' を付与する必要がある（既存の UpdateNotificationBanner パターンに準拠）"
+      },
+      {
+        "area": "gh CLI 実行",
+        "risk": "中",
+        "detail": "commandmate issue create が gh コマンドを実行する際、--title/--body オプションの値にユーザー入力が含まれる。コマンドインジェクション防止のため、execFile（配列引数）または spawnSync（配列引数）を使用し、shell: true を避ける必要がある。既存の preflight.ts のパターン（spawnSync + 配列引数）に準拠すべき"
+      },
+      {
+        "area": "ドキュメントファイル読み込み",
+        "risk": "低",
+        "detail": "docs コマンドの --section/--search パラメータからファイルパスを構築する場合、パストラバーサル攻撃を防止する必要がある。セクション名をホワイトリストで管理し、ユーザー入力から直接ファイルパスを構築しない設計が必要"
+      }
+    ],
+    "build_process_impact": {
+      "cli_build": "tsconfig.cli.json の include: ['src/cli/**/*'] により、src/cli/commands/issue.ts と src/cli/commands/docs.ts は自動的にビルド対象に含まれる",
+      "nextjs_build": "FeedbackSection.tsx は src/components/ 配下のため Next.js ビルドに自動包含。github-links.ts は src/config/ 配下のため同様",
+      "package_distribution": "package.json の files フィールドに docs/ が含まれていないため、npm publish 時に docs/ が配布されない。commandmate docs コマンドが docs/ 配下を読み込む場合、files フィールドの更新が必要"
+    }
+  },
+  "code_references": [
+    {
+      "file": "tests/unit/cli/config/cli-dependencies.test.ts",
+      "relevance": "gh CLI 追加により既存テストが影響を受ける（MF-1）"
+    },
+    {
+      "file": "tests/integration/i18n-translation-keys.test.ts",
+      "relevance": "翻訳キー追加時の en/ja パリティチェック（MF-2）"
+    },
+    {
+      "file": "package.json",
+      "relevance": "files フィールドに docs/ 未包含（SF-1）"
+    },
+    {
+      "file": "src/lib/version-checker.ts",
+      "relevance": "GITHUB_RELEASE_URL_PREFIX 移設の影響元（SF-2）"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "relevance": "issue コマンド名と -i/--issue オプションの命名重複（SF-3）"
+    },
+    {
+      "file": "docs/user-guide/commands-guide.md",
+      "relevance": "スラッシュコマンド専門ガイドへの CLI コマンド追記の適切性（SF-4）"
+    },
+    {
+      "file": "src/cli/utils/preflight.ts",
+      "relevance": "getInstallHint() への gh CLI ヒント追加（NTH-2）"
+    },
+    {
+      "file": "src/cli/config/security-messages.ts",
+      "relevance": "GitHub URL の分散状況の証拠（NTH-3）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/user-guide/cli-setup-guide.md",
+      "relevance": "CLI コマンド追記の代替配置先候補（SF-4）"
+    },
+    {
+      "file": "docs/user-guide/commands-guide.md",
+      "relevance": "issue/docs コマンド追記先（現状スラッシュコマンド専門）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "新規モジュール情報追記対象"
+    }
+  ]
+}

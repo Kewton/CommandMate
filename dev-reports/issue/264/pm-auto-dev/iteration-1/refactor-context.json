@@ -1,0 +1,23 @@
+{
+  "issue_number": 264,
+  "refactor_targets": [
+    "src/config/github-links.ts",
+    "src/cli/commands/issue.ts",
+    "src/cli/commands/docs.ts",
+    "src/cli/utils/docs-reader.ts",
+    "src/cli/utils/input-validators.ts",
+    "src/cli/config/ai-integration-messages.ts",
+    "src/components/worktree/FeedbackSection.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 99.0,
+    "test_count": 3264,
+    "new_tests": 66
+  },
+  "improvement_goals": [
+    "Ensure SOLID principles are followed in new code",
+    "Remove any code duplication",
+    "Verify consistent error handling patterns",
+    "Check for unused imports or dead code"
+  ]
+}

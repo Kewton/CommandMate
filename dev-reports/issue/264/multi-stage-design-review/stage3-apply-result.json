@@ -1,0 +1,83 @@
+{
+  "issue_number": 264,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-IMP-001",
+        "item": "tsconfig.cli.json の cross-boundary import コンパイル検証ブロッカー",
+        "section_updated": "Section 6-2 (Cross-Boundary Import方針), Section 13 (実装チェックリスト)",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-IMP-001",
+        "item": "version-checker.ts の re-export 変更に対する既存テスト影響確認",
+        "section_updated": "Section 7-2 (テスト方針), Section 13 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IMP-002",
+        "item": "package.json files docs/ 追加によるパッケージサイズ確認",
+        "section_updated": "Section 5-2 (docsコマンド), Section 13 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IMP-003",
+        "item": "cli-dependencies.test.ts の gh CLI 検証テストケース明確化",
+        "section_updated": "Section 7-2 (テスト方針), Section 13 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IMP-004",
+        "item": "preflight.ts getInstallHint() gh CLI インストールヒント文面",
+        "section_updated": "Section 5-1 (issueコマンド), Section 9-2 (変更ファイル), Section 13 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-IMP-005",
+        "item": "feedback-section.test.tsx i18n モック方針の明確化",
+        "section_updated": "Section 7-2 (テスト方針), Section 13 (実装チェックリスト)",
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-IMP-001",
+        "item": "WorktreeDetailRefactored.tsx のファイルサイズとコンポーネント複雑度",
+        "section_updated": "Section 12 (レビュー指摘事項サマリー), Section 13 (将来検討項目)",
+        "status": "noted"
+      },
+      {
+        "id": "C-IMP-002",
+        "item": "CLI index.ts のコマンド登録パターン混在",
+        "section_updated": "Section 12 (レビュー指摘事項サマリー), Section 13 (将来検討項目)",
+        "status": "noted"
+      },
+      {
+        "id": "C-IMP-003",
+        "item": "docs コマンドの SECTION_MAP と実ファイルの同期維持",
+        "section_updated": "Section 12 (レビュー指摘事項サマリー), Section 13 (将来検討項目)",
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-264-feedback-and-docs-design-policy.md",
+  "sections_updated": [
+    "Section 5-1 (issueコマンド) - SF-IMP-004 getInstallHint追記",
+    "Section 5-2 (docsコマンド) - SF-IMP-002 パッケージサイズ影響追記",
+    "Section 6-2 (Cross-Boundary Import方針) - MF-IMP-001 ビルド検証ブロッカー追記",
+    "Section 7-2 (テスト方針) - SF-IMP-001/003/005 テスト影響確認・テストケース・i18nモック方針追記",
+    "Section 9-2 (変更ファイル) - SF-IMP-004 preflight.ts詳細追記",
+    "Section 10 (制約条件) - 影響分析行追加",
+    "Section 11 (レビュー履歴) - Stage 3追加",
+    "Section 12 (レビュー指摘事項サマリー) - Stage 3指摘事項テーブル追加",
+    "Section 13 (実装チェックリスト) - MF-IMP-001/SF-IMP-001~005追加、将来検討項目追加"
+  ],
+  "timestamp": "2026-02-14T12:30:00Z"
+}
