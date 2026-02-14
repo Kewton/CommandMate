@@ -264,6 +264,41 @@ export function stripAnsi(str: string): string {
  * @param cliToolId - CLI tool identifier
  * @returns DetectPromptOptions for the tool, or undefined for default behavior
  */
+/**
+ * Error patterns that indicate a Claude session failed to start properly
+ * Used by isSessionHealthy() to detect broken sessions (MF-001: SRP)
+ * Style: readonly + as const for type safety (SF-S2-001: follows response-poller.ts precedent)
+ *
+ * SEC-SF-004: Pattern maintenance process:
+ * - When Claude CLI is updated, verify that error messages still match these patterns.
+ * - Test procedure: Intentionally trigger each error condition (e.g., nested session launch)
+ *   and confirm the error message is captured by the patterns.
+ * - If Claude CLI introduces localized error messages, add locale-aware patterns or
+ *   consider switching to exit code-based detection as a more robust alternative.
+ * - Pattern additions should be accompanied by corresponding test cases in
+ *   claude-session.test.ts.
+ *
+ * C-S3-001: Codex/Gemini monitoring note:
+ * These patterns are currently Claude-specific. If Codex or Gemini exhibit similar
+ * "nested session" or startup failure behaviors, analogous error patterns should be
+ * added to their respective tool configurations (codex.ts, gemini.ts) rather than
+ * extending these arrays, to maintain SRP per CLI tool type.
+ */
+export const CLAUDE_SESSION_ERROR_PATTERNS: readonly string[] = [
+  'Claude Code cannot be launched inside another Claude Code session',
+] as const;
+
+/**
+ * Regex patterns for Claude session errors requiring context matching
+ * Used by isSessionHealthy() for multi-condition error detection (MF-001: SRP)
+ * Style: readonly + as const for type safety (SF-S2-001: follows response-poller.ts precedent)
+ *
+ * SEC-SF-004: See CLAUDE_SESSION_ERROR_PATTERNS JSDoc for pattern maintenance process.
+ */
+export const CLAUDE_SESSION_ERROR_REGEX_PATTERNS: readonly RegExp[] = [
+  /Error:.*Claude/,
+] as const;
+
 export function buildDetectPromptOptions(
   cliToolId: CLIToolType
 ): DetectPromptOptions | undefined {

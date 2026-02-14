@@ -1,0 +1,164 @@
+{
+  "issue_number": 265,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-S2-001",
+        "title": "getCleanPaneOutput() の lines デフォルト値が既存実装と不整合",
+        "description": "設計方針書では getCleanPaneOutput() のデフォルト lines を 50 としているが、既存の claude-session.ts 内の capturePane 呼び出しは全て { startLine: -50 } を使用している。設計書のヘルパー関数シグネチャは capturePane(sessionName, { startLine: -lines }) としており、lines=50 で startLine=-50 となるため数値上は整合するが、waitForPrompt() では capturePane(sessionName, { startLine: -50 }) を直接呼んでおり、getCleanPaneOutput() に置換する設計方針の適用範囲が不明確。waitForPrompt() も getCleanPaneOutput() を使うべきかどうかを設計書で明示する必要がある。",
+        "severity": "medium",
+        "existing_code_reference": "src/lib/claude-session.ts L271 (waitForPrompt), L343 (startClaudeSession), L410 (sendMessageToClaude)",
+        "recommendation": "設計方針書に getCleanPaneOutput() の適用対象を明記する。waitForPrompt() の capturePane + stripAnsi パターン（L271-274）も置換対象に含めるべき。また sendMessageToClaude() の capturePane + stripAnsi（L410-411）も同様。全4箇所の capturePane+stripAnsi パターンの統一方針を明確化すること。"
+      },
+      {
+        "id": "MF-S2-002",
+        "title": "startClaudeSession() の catch ブロックでのキャッシュクリア位置が既存エラーハンドリングと不整合",
+        "description": "設計方針書では startClaudeSession() の catch ブロック内で clearCachedClaudePath() を呼び出すと記載しているが、現在の catch ブロック（L378-380）は try ブロック全体をラップしており、getClaudePath() 以外の失敗（createSession, capturePane, sendKeys 等）でもキャッシュがクリアされてしまう。getClaudePath() は try ブロック内の L326 で呼ばれるが、その後の初期化ポーリングタイムアウト（L374）も同じ catch でハンドルされる。キャッシュクリアはパス解決失敗時のみに限定すべきであり、catch ブロック全体でのクリアは不適切な可能性がある。",
+        "severity": "medium",
+        "existing_code_reference": "src/lib/claude-session.ts L317-380 (try-catch structure)",
+        "recommendation": "キャッシュクリアを外側の catch ブロックに一律追加するのではなく、getClaudePath() の呼び出しを個別の try-catch で囲んでキャッシュクリアするか、もしくは catch ブロック内でエラー種別を判定してからクリアする設計とすべき。代替案として、全失敗時にクリアすることが許容可能であれば（次回の成功時に再キャッシュされるため無害）、その判断根拠を設計書に明記すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S2-001",
+        "title": "CLAUDE_SESSION_ERROR_PATTERNS の型宣言が既存 cli-patterns.ts のスタイルと不一致",
+        "description": "設計方針書では CLAUDE_SESSION_ERROR_PATTERNS を readonly string[] + as const として定義しているが、既存の cli-patterns.ts の定数はこのスタイルを使っていない。既存パターン定数（CLAUDE_SPINNER_CHARS 等）は型注釈なしの配列リテラルで定義されている。一方、response-poller.ts の GEMINI_LOADING_INDICATORS は readonly string[] を使用している。cli-patterns.ts 内の既存定数と一貫した定義スタイルを使うべき。",
+        "severity": "low",
+        "existing_code_reference": "src/lib/cli-patterns.ts L16 (CLAUDE_SPINNER_CHARS - 型注釈なし), src/lib/response-poller.ts L67 (GEMINI_LOADING_INDICATORS - readonly string[])",
+        "recommendation": "cli-patterns.ts に追加する新定数は、同ファイル内の既存スタイルに合わせるか、もしくは readonly string[] スタイルを採用する場合はその選択理由を明記する。推奨は readonly string[] + as const（response-poller.ts の先例あり、型安全性が高い）。"
+      },
+      {
+        "id": "SF-S2-002",
+        "title": "SHELL_PROMPT_ENDINGS の配置先が未確定",
+        "description": "設計方針書 Section 3 MF-002 で SHELL_PROMPT_ENDINGS の定義先を「cli-patterns.ts（または claude-session.ts 内定数）」と記載しており未確定。Section 3 の isSessionHealthy() コード例では cli-patterns.ts からのインポートを前提としているが、実装チェックリスト（Section 14）では「cli-patterns.ts（または claude-session.ts 内）」と2箇所の可能性を残している。配置先を確定させるべき。",
+        "severity": "low",
+        "existing_code_reference": "設計方針書 Section 3 MF-002, Section 14 MF-002チェックリスト",
+        "recommendation": "SHELL_PROMPT_ENDINGS は isSessionHealthy() でのみ使用されるため、claude-session.ts 内のプライベート定数として定義する方がスコープが狭くて適切（ISP/最小公開原則）。ただし、将来的に他のCLIツールでも使う可能性があれば cli-patterns.ts に配置する。設計書で明確に決定すること。"
+      },
+      {
+        "id": "SF-S2-003",
+        "title": "sanitizeSessionEnvironment() の呼び出しタイミングが startClaudeSession() のフローと不整合",
+        "description": "設計方針書では sanitizeSessionEnvironment() を startClaudeSession() 内で呼び出すとしているが、具体的な呼び出し位置（createSession の前か後か、sendKeys(claudePath) の前か後か）が明示されていない。既存の startClaudeSession() フローは「createSession → getClaudePath → sendKeys(claudePath) → ポーリング」の順だが、sanitizeSessionEnvironment() は sendKeys(sessionName, 'unset CLAUDECODE', true) を使うため、少なくとも createSession の後でないと動作しない。また sendKeys(claudePath) の前に実行しないとClaude起動時に CLAUDECODE が残る可能性がある。",
+        "severity": "medium",
+        "existing_code_reference": "src/lib/claude-session.ts L317-329 (createSession -> getClaudePath -> sendKeys)",
+        "recommendation": "設計方針書のタスク9（startClaudeSession() で各ヘルパー呼び出し統合）に、sanitizeSessionEnvironment() の呼び出し位置を明示する。推奨は createSession() の直後、sendKeys(claudePath) の直前。"
+      },
+      {
+        "id": "SF-S2-004",
+        "title": "ensureHealthySession() の戻り値使用フローが既存セッション再利用ロジックと不整合",
+        "description": "既存の startClaudeSession() は hasSession() が true を返した場合、即座に return して終了する（L312-315）。設計方針書では hasSession() が true の場合に isSessionHealthy() → 異常なら killSession → 再作成するとしているが、再作成のフローが既存の try ブロック内のロジック（L317-380）をどのように再利用するかが不明確。ensureHealthySession() が false を返した場合（killSession 後）、残りのフローにフォールスルーさせるのか、それとも新しいセッション作成ロジックを別途呼ぶのかが設計書に記載されていない。",
+        "severity": "medium",
+        "existing_code_reference": "src/lib/claude-session.ts L310-315 (existing early return)",
+        "recommendation": "設計方針書のタスク9に具体的なフロー制御を記載する。推奨実装パターン: hasSession が true → ensureHealthySession() → true なら return（既存動作）、false なら既存の return を削除して try ブロックの作成フロー（L317以降）にフォールスルーする。"
+      },
+      {
+        "id": "SF-S2-005",
+        "title": "@internal JSDoc タグの使用パターンが既存実装で限定的",
+        "description": "設計方針書 C-002 で clearCachedClaudePath() に @internal JSDoc タグを追加するとしているが、既存コードベースで @internal を使用しているのは version-checker.ts の resetCacheForTesting() の1箇所のみ。パターンとしては確立されているが、claude-session.ts 内で新たに使用する際は version-checker.ts の実装と一貫した使い方をすべき。",
+        "severity": "low",
+        "existing_code_reference": "src/lib/version-checker.ts L230 (@internal usage)",
+        "recommendation": "version-checker.ts の先例に合わせて、関数名にも ForTesting サフィックスを検討する（例: clearCachedClaudePathForTesting()）。または現在の clearCachedClaudePath() という関数名を維持する場合は、@internal タグだけで十分とする判断を設計書に明記すること。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S2-001",
+        "title": "isSessionHealthy() の空出力チェックが初期化中のセッションを誤判定する可能性",
+        "description": "設計方針書では trimmed === '' の場合に false を返すとしているが、tmux セッション作成直後でClaude CLI がまだ何も出力していない場合も空出力になりうる。startClaudeSession() のフローでは createSession 直後に isSessionHealthy を呼ぶことはないが、ensureHealthySession() が hasSession() == true のときに呼ばれるため、Claude CLI が起動直後で出力が空の極めて短いウィンドウで問題になる可能性は低いものの、考慮に値する。",
+        "recommendation": "空出力判定の false 返却は問題ないと判断できるが、コード内コメントで「tmux は存在するが Claude CLI の出力がない場合は異常とみなす」旨を明記しておくと保守性が向上する。"
+      },
+      {
+        "id": "C-S2-002",
+        "title": "SHELL_PROMPT_ENDINGS のシェルプロンプト誤検出リスク",
+        "description": "SHELL_PROMPT_ENDINGS で末尾が '$', '%', '#' の場合を異常セッションと判定するが、Claude CLI の出力にこれらの文字で終わる行が含まれる可能性がゼロではない（例: マークダウン内のシェル出力例示）。ただし capturePane で取得する最後の50行の末尾がこれらの文字で終わるケースはClaude CLI が正常動作している場合は極めて稀であり、実用上問題ない。",
+        "recommendation": "将来的に誤検出が報告された場合は、より精密な判定（最終行のみでなく、複数行のコンテキストを考慮する）に変更することを検討。"
+      },
+      {
+        "id": "C-S2-003",
+        "title": "テストファイルの命名パターンとテスト追加方針",
+        "description": "既存テスト tests/unit/lib/claude-session.test.ts は Issue #152/#187 の改善テストとして構成されている。Issue #265 のテスト追加は同ファイルに describe ブロックを追加する方針が自然だが、設計方針書では tests/unit/lib/claude-session.test.ts への追加としか記載しておらず、テストの構造化方針（既存 describe への追加 vs 新規 describe ブロック）が不明確。",
+        "recommendation": "既存テストファイルのパターンに合わせて、'claude-session - Issue #265 fixes' のような新規トップレベル describe ブロックを追加する方針を設計書に明記することを推奨。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "Bug 1: clearCachedClaudePath() の追加",
+      "design_spec": "startClaudeSession() の catch ブロック内でキャッシュクリア",
+      "implementation_status": "設計のみ（未実装）",
+      "gap": "catch ブロックの粒度が粗い（全エラーでキャッシュクリアされる）- MF-S2-002 で指摘"
+    },
+    {
+      "design_item": "Bug 2: isSessionHealthy() の追加",
+      "design_spec": "capturePane + stripAnsi でエラーパターン検出",
+      "implementation_status": "設計のみ（未実装）",
+      "gap": "getCleanPaneOutput() ヘルパーの適用範囲が不明確 - MF-S2-001 で指摘"
+    },
+    {
+      "design_item": "Bug 2: ensureHealthySession() フロー統合",
+      "design_spec": "hasSession() true の場合にヘルスチェック実行",
+      "implementation_status": "設計のみ（未実装）",
+      "gap": "既存の early return パターンとの統合フローが不明確 - SF-S2-004 で指摘"
+    },
+    {
+      "design_item": "Bug 3: sanitizeSessionEnvironment() の追加",
+      "design_spec": "tmux env 除去 + unset コマンド送信",
+      "implementation_status": "設計のみ（未実装）",
+      "gap": "呼び出しタイミングが未確定 - SF-S2-003 で指摘"
+    },
+    {
+      "design_item": "Bug 3: daemon.ts env オブジェクト修正",
+      "design_spec": "spawn 用 env から CLAUDECODE を除去",
+      "implementation_status": "設計のみ（未実装）",
+      "gap": "整合性問題なし。既存の env 構築パターン（L59-67）と一致"
+    },
+    {
+      "design_item": "MF-001: エラーパターン定数の cli-patterns.ts 配置",
+      "design_spec": "CLAUDE_SESSION_ERROR_PATTERNS / CLAUDE_SESSION_ERROR_REGEX_PATTERNS",
+      "implementation_status": "設計のみ（未実装）",
+      "gap": "型宣言スタイルの不一致 - SF-S2-001 で指摘"
+    },
+    {
+      "design_item": "MF-002: SHELL_PROMPT_ENDINGS 定数",
+      "design_spec": "cli-patterns.ts または claude-session.ts に配置",
+      "implementation_status": "設計のみ（未実装）",
+      "gap": "配置先が未確定 - SF-S2-002 で指摘"
+    },
+    {
+      "design_item": "SF-001: getCleanPaneOutput() ヘルパー",
+      "design_spec": "capturePane + stripAnsi の共通化",
+      "implementation_status": "設計のみ（未実装）",
+      "gap": "適用範囲（4箇所中何箇所に適用するか）が不明確 - MF-S2-001 で指摘"
+    },
+    {
+      "design_item": "テストパターン整合性",
+      "design_spec": "claude-session.test.ts への追加",
+      "implementation_status": "設計のみ（未実装）",
+      "gap": "既存テスト構造との統合方針が不明確 - C-S2-003 で指摘"
+    }
+  ],
+  "reviewed_files": [
+    "src/lib/claude-session.ts",
+    "src/lib/cli-patterns.ts",
+    "src/cli/utils/daemon.ts",
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/version-checker.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/lib/cli-patterns.test.ts"
+  ],
+  "timestamp": "2026-02-14T12:00:00Z"
+}

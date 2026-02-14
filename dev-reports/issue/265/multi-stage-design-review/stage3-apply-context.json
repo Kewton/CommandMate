@@ -1,0 +1,9 @@
+{
+  "issue_number": 265,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_result_path": "dev-reports/issue/265/multi-stage-design-review/stage3-review-result.json",
+  "design_policy_path": "dev-reports/design/issue-265-claude-session-recovery-design-policy.md",
+  "target_files": ["dev-reports/design/issue-265-claude-session-recovery-design-policy.md"],
+  "instruction": "IMPORTANT: Only update design policy documents. Do NOT modify source code."
+}

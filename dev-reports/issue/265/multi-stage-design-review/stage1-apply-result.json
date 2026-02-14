@@ -1,0 +1,145 @@
+{
+  "issue_number": 265,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "isSessionHealthy() のエラーパターン判定がハードコードされている",
+        "principle": "SRP",
+        "section_updated": "設計パターン > Bug 2: エラーパターン定数の定義",
+        "status": "reflected",
+        "changes": [
+          "cli-patterns.ts に CLAUDE_SESSION_ERROR_PATTERNS / CLAUDE_SESSION_ERROR_REGEX_PATTERNS 定数を定義",
+          "isSessionHealthy() で定数を参照するように疑似コードを更新",
+          "実装タスクにタスク3を追加",
+          "テスト方針にエラーパターン個別テストケースを追加",
+          "実装チェックリストに4項目追加"
+        ]
+      },
+      {
+        "id": "MF-002",
+        "item": "isSessionHealthy() のシェルプロンプト検出が拡張に閉じていない",
+        "principle": "OCP",
+        "section_updated": "設計パターン > Bug 2: シェルプロンプト検出パターンの定義",
+        "status": "reflected",
+        "changes": [
+          "SHELL_PROMPT_ENDINGS 定数配列を定義（$, %, #）",
+          "isSessionHealthy() で SHELL_PROMPT_ENDINGS.some() による判定に変更",
+          "実装タスクにタスク4を追加",
+          "テスト方針にシェルプロンプトの各パターンテストケースを追加",
+          "実装チェックリストに3項目追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "capturePane + stripAnsi の呼び出しパターンが重複",
+        "principle": "DRY",
+        "section_updated": "設計パターン > 共通ヘルパー: getCleanPaneOutput()",
+        "status": "reflected",
+        "changes": [
+          "getCleanPaneOutput() ヘルパー関数の設計を新セクションとして追加",
+          "isSessionHealthy() で getCleanPaneOutput() を使用するように変更",
+          "実装タスクにタスク5を追加",
+          "テスト方針に getCleanPaneOutput 動作確認テストケースを追加",
+          "実装チェックリストに3項目追加"
+        ]
+      },
+      {
+        "id": "SF-002",
+        "item": "startClaudeSession() の責務が過大になるリスク",
+        "principle": "SRP",
+        "section_updated": "設計パターン > Bug 2 補足: startClaudeSession() の責務分離",
+        "status": "reflected",
+        "changes": [
+          "ensureHealthySession() ヘルパー関数の設計を追加",
+          "sanitizeSessionEnvironment() ヘルパー関数の設計を追加",
+          "startClaudeSession() の責務分離方針を明記",
+          "実装タスクにタスク7, 8, 9を追加",
+          "100行未満の確認を実装チェックリストに追加"
+        ]
+      },
+      {
+        "id": "SF-003",
+        "item": "daemon.ts での CLAUDECODE 除去が process.env への直接操作に依存",
+        "principle": "DIP",
+        "section_updated": "設計パターン > Bug 3: daemon.ts での補助対策",
+        "status": "reflected",
+        "changes": [
+          "daemon.ts の設計を env オブジェクト経由の除去に変更",
+          "process.env への直接操作を回避する方針を明記",
+          "テスト方針に process.env 非変更の検証テストケースを追加",
+          "実装チェックリストに2項目追加"
+        ]
+      },
+      {
+        "id": "SF-004",
+        "item": "Bug 3 の2段階対策が過剰防御の可能性",
+        "principle": "KISS",
+        "section_updated": "設計パターン > Bug 3: SF-004 検証方針",
+        "status": "reflected",
+        "changes": [
+          "SF-004 検証方針セクションを追加",
+          "100ms 待機の理由と根拠をコード内コメントに明記",
+          "対策 3-1 のみの検証テストケースを追加",
+          "パフォーマンス設計で SF-004 検証結果依存の記載を追加",
+          "実装チェックリストに3項目追加"
+        ]
+      }
+    ]
+  },
+  "skipped": [],
+  "consider_items_noted": [
+    {
+      "id": "C-001",
+      "item": "ICLITool インターフェースへのヘルスチェック追加の検討",
+      "judgment": "現時点では不要（YAGNI）"
+    },
+    {
+      "id": "C-002",
+      "item": "clearCachedClaudePath() の export 範囲",
+      "judgment": "現設計維持、@internal JSDoc タグを追加"
+    },
+    {
+      "id": "C-003",
+      "item": "startClaudeSession() の戻り値型の整合性",
+      "judgment": "現時点では Promise<void> のまま"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-265-claude-session-recovery-design-policy.md",
+  "sections_updated": [
+    "1. 概要 > 変更対象ファイル（cli-patterns.ts 追加）",
+    "2. アーキテクチャ設計 > 影響範囲（cli-patterns.ts 依存追加）",
+    "2. アーキテクチャ設計 > レイヤー構成（パターン定義層追加）",
+    "3. 設計パターン > Bug 1（@internal JSDoc 追加）",
+    "3. 設計パターン > 共通ヘルパー: getCleanPaneOutput()（新規セクション）",
+    "3. 設計パターン > Bug 2: エラーパターン定数の定義（新規サブセクション）",
+    "3. 設計パターン > Bug 2: シェルプロンプト検出パターンの定義（新規サブセクション）",
+    "3. 設計パターン > Bug 2: isSessionHealthy() の実装方針（全面更新）",
+    "3. 設計パターン > Bug 2 補足: startClaudeSession() の責務分離（新規セクション）",
+    "3. 設計パターン > Bug 3（daemon.ts 設計変更、SF-004 検証方針追加）",
+    "7. パフォーマンス設計（SF-004 検証結果依存の記載追加）",
+    "8. 設計上の決定事項（レビュー対応の決定事項追加）",
+    "9. 実装タスク（タスク数 8→12 に拡張、レビュー対応列追加）",
+    "10. テスト方針（テストケース 7→12 に拡張、レビュー対応列追加）",
+    "11. 制約条件の確認（OCP/DIP/KISS/DRY の詳細追加）",
+    "12. レビュー履歴（新規セクション）",
+    "13. レビュー指摘事項サマリー（新規セクション）",
+    "14. 実装チェックリスト（新規セクション）"
+  ],
+  "summary": {
+    "must_fix_reflected": "2/2",
+    "should_fix_reflected": "4/4",
+    "consider_noted": "3/3",
+    "skipped": 0,
+    "total_checklist_items": 22,
+    "total_tasks": 12,
+    "total_test_cases": 12
+  },
+  "timestamp": "2026-02-14T12:30:00Z"
+}

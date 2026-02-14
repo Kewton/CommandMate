@@ -1,0 +1,275 @@
+{
+  "issue_number": 265,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-S3-001",
+        "title": "isClaudeRunning() がヘルスチェックなしで hasSession() のみに依存 - API レイヤーとの不整合リスク",
+        "description": "isClaudeRunning() (L224-227) は hasSession() のみで判定しており、Bug 2 修正後も壊れたセッションを「実行中」と報告し続ける。startClaudeSession() 内部にのみヘルスチェックが追加される設計のため、API ルート（worktrees/[id]/route.ts L48、worktrees/route.ts L48、send/route.ts L95、prompt-response/route.ts L57、current-output/route.ts L47、kill-session/route.ts L61、interrupt/route.ts L67、repositories/route.ts L33）が isRunning() を呼んで true を受け取った後に、壊れたセッションに対して captureSessionOutput() や sendMessage() を試みて予期しないエラーが発生する可能性がある。特に send/route.ts L95-100 では isRunning() が true のときは startSession() をスキップするため、壊れたセッションが自動回復されないパスが存在する。",
+        "severity": "high",
+        "affected_files": [
+          "src/lib/claude-session.ts (isClaudeRunning L224-227)",
+          "src/lib/cli-tools/claude.ts (isRunning L40-42)",
+          "src/app/api/worktrees/[id]/send/route.ts (L95-100)",
+          "src/app/api/worktrees/[id]/route.ts (L48)",
+          "src/app/api/worktrees/route.ts (L48)",
+          "src/app/api/worktrees/[id]/current-output/route.ts (L47)",
+          "src/app/api/worktrees/[id]/prompt-response/route.ts (L57)",
+          "src/app/api/worktrees/[id]/kill-session/route.ts (L61)",
+          "src/app/api/worktrees/[id]/interrupt/route.ts (L67)",
+          "src/app/api/repositories/route.ts (L33)"
+        ],
+        "recommendation": "send/route.ts のフローでは isRunning() が true でも startSession() が呼ばれないため、Bug 2 のヘルスチェック回復が発動しない。以下のいずれかの対策が必要: (A) isClaudeRunning() 内でもヘルスチェックを実施し、壊れたセッションでは false を返す（推奨）。(B) send/route.ts で isRunning() が true の場合にも ensureHealthySession() を呼ぶガード処理を追加する。(A) はシンプルだが全 isRunning() 呼び出しにヘルスチェックのオーバーヘッド（~50ms）が加わる点に注意。ただし各 API ルートのレスポンスタイムに対して十分小さいため許容範囲。"
+      },
+      {
+        "id": "MF-S3-002",
+        "title": "tmux set-environment -g -u のグローバルスコープが他ツール（Codex/Gemini）のセッションに波及",
+        "description": "sanitizeSessionEnvironment() の対策 3-1 で tmux set-environment -g -u CLAUDECODE を実行するが、-g フラグは tmux のグローバル環境に作用する。CommandMate は Claude/Codex/Gemini の3つの CLI ツールを同時に tmux セッションで管理しており（CLI_TOOL_IDS: ['claude', 'codex', 'gemini']）、グローバル環境の変更は同一 tmux サーバー上の全セッション（Codex/Gemini セッション含む）に影響する。CLAUDECODE 変数は Claude Code 固有のものなので Codex/Gemini セッションには影響しないが、将来的に tmux グローバル環境を変更するパターンが他の CLI ツールでも使われた場合に競合リスクがある。また、複数の Claude セッションが同時にサニタイズを実行した場合の競合状態（Race Condition）も考慮が必要。",
+        "severity": "medium",
+        "affected_files": [
+          "src/lib/claude-session.ts (sanitizeSessionEnvironment)",
+          "src/lib/cli-tools/codex.ts (CodexTool.startSession)",
+          "src/lib/cli-tools/types.ts (CLI_TOOL_IDS)"
+        ],
+        "recommendation": "設計方針書に以下を明記すること: (1) tmux set-environment -g -u の影響範囲がグローバルであることの明示と、CLAUDECODE は Claude Code 固有のためCodex/Gemini に実害なしという判断根拠。(2) 複数 Claude セッション同時起動時の -g -u 競合は unset 操作の冪等性により安全であることの確認。(3) 将来 tmux グローバル環境を操作するパターンが増えた場合は、セッション単位の set-environment（-g なし）への移行を検討する旨の注記。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S3-001",
+        "title": "restartClaudeSession() が Bug 2 修正後のフローと二重回復パスを持つ",
+        "description": "既存の restartClaudeSession() (L522-535) は stopClaudeSession() + 1000ms wait + startClaudeSession() を実行する。Bug 2 修正後、startClaudeSession() 自体がヘルスチェック + kill + 再作成のフローを持つため、restartClaudeSession() が呼ばれた場合は stop (kill) -> 1000ms wait -> start (hasSession=false なので新規作成) となり正常動作する。しかし、stop が失敗しセッションが残った場合は start 内で ensureHealthySession() → kill → 再作成が再試行される二重パスが存在する。動作上は問題ないが、設計書でこの相互作用を確認済みであることを記載すべき。",
+        "severity": "low",
+        "affected_files": [
+          "src/lib/claude-session.ts (restartClaudeSession L522-535)"
+        ],
+        "recommendation": "設計方針書の Section 8（設計上の決定事項とトレードオフ）に restartClaudeSession() との相互作用について記載する。二重 kill は killSession() の冪等性（tmux セッション未存在時は false を返す）により安全であることを確認すること。"
+      },
+      {
+        "id": "SF-S3-002",
+        "title": "getCleanPaneOutput() 導入による既存テストのモック構造変更の影響",
+        "description": "既存の claude-session.test.ts では capturePane を直接モック（vi.mock('@/lib/tmux')）してテストしている。getCleanPaneOutput() が capturePane + stripAnsi を内部で呼ぶヘルパーとして導入されると、既存テスト25件以上が capturePane のモック返り値に ANSI エスケープシーケンスを含まない前提で動作しているため、getCleanPaneOutput() 経由では stripAnsi が追加で適用される。現在のテストは ANSI コードを含まない文字列をモック返り値としているため stripAnsi の適用は無害だが、テストの意図が不明瞭になる可能性がある。",
+        "severity": "medium",
+        "affected_files": [
+          "tests/unit/lib/claude-session.test.ts (25+ existing test cases)",
+          "tests/integration/trust-dialog-auto-response.test.ts"
+        ],
+        "recommendation": "以下の対応を推奨: (1) 既存テストはそのまま動作するため修正不要だが、Issue #265 の新規テストでは ANSI コード入りのモック値を用意して getCleanPaneOutput() の stripAnsi 効果を検証するテストケースを追加する。(2) テストファイルの冒頭コメントに、既存テストが ANSI コードなしの単純文字列を使用していることと、getCleanPaneOutput() 経由でも動作に問題ないことを注記する。"
+      },
+      {
+        "id": "SF-S3-003",
+        "title": "clearCachedClaudePath() の export が claude-session モジュールの公開 API を拡張する",
+        "description": "clearCachedClaudePath() を export するが、ClaudeTool (src/lib/cli-tools/claude.ts) は claude-session.ts から startClaudeSession, sendMessageToClaude, stopClaudeSession, isClaudeRunning, isClaudeInstalled, ClaudeSessionOptions のみをインポートしている。新しい export を追加すると、他モジュール（テスト以外）が不正にキャッシュをクリアするリスクがある。@internal タグは TypeScript の型チェックでは強制されないため、ランタイム保護にはならない。",
+        "severity": "low",
+        "affected_files": [
+          "src/lib/claude-session.ts (new export: clearCachedClaudePath)",
+          "src/lib/cli-tools/claude.ts (potential import)",
+          "tests/unit/lib/claude-session.test.ts (test import)"
+        ],
+        "recommendation": "設計方針書の通り @internal JSDoc タグで対処するのは妥当。追加の保護策として、ESLint の no-restricted-imports ルール等で test ファイル以外からの clearCachedClaudePath import を禁止することを将来検討課題として記載する。"
+      },
+      {
+        "id": "SF-S3-004",
+        "title": "sanitizeSessionEnvironment() の 100ms 待機がセッション初期化のタイムアウトマージンを圧迫",
+        "description": "CLAUDE_INIT_TIMEOUT は 15000ms だが、sanitizeSessionEnvironment() が対策 3-1 (~50ms) + 対策 3-2 (sendKeys + 100ms wait = ~200ms) で合計 ~250ms を消費する。この後に getClaudePath() (~数ms、キャッシュヒット時) + sendKeys(claudePath) + ポーリングループが続く。15秒のタイムアウトに対して 250ms は 1.7% であり十分小さいが、遅いネットワーク環境やコンテナ環境ではタイムアウトマージンが狭くなる。SF-004 の検証で対策 3-2 を削除できれば ~50ms に削減される。",
+        "severity": "low",
+        "affected_files": [
+          "src/lib/claude-session.ts (sanitizeSessionEnvironment, CLAUDE_INIT_TIMEOUT)"
+        ],
+        "recommendation": "SF-004 の検証テスト結果を優先的に確認し、対策 3-2 が不要であれば削除して 100ms の待機を除去する。対策 3-2 を残す場合は、CLAUDE_INIT_TIMEOUT に対する影響が十分小さいことを設計書のパフォーマンス設計セクション（Section 7）に明記する。"
+      },
+      {
+        "id": "SF-S3-005",
+        "title": "cli-patterns.ts への新定数追加が下流モジュールの import ツリーに影響しない確認",
+        "description": "CLAUDE_SESSION_ERROR_PATTERNS と CLAUDE_SESSION_ERROR_REGEX_PATTERNS を cli-patterns.ts に追加する。cli-patterns.ts は 9 モジュールからインポートされている（response-poller, auto-yes-manager, status-detector, claude-session, pasted-text-helper, assistant-response-saver, cli-patterns.test, prompt-response route, current-output route）。定数追加のみで既存 export には変更がないため、バンドルサイズと tree-shaking の観点では影響なし。ただし cli-patterns.ts が肥大化する傾向があるため注意が必要。",
+        "severity": "low",
+        "affected_files": [
+          "src/lib/cli-patterns.ts",
+          "src/lib/response-poller.ts (imports from cli-patterns)",
+          "src/lib/auto-yes-manager.ts (imports from cli-patterns)",
+          "src/lib/status-detector.ts (imports from cli-patterns)",
+          "src/lib/pasted-text-helper.ts (imports from cli-patterns)",
+          "src/lib/assistant-response-saver.ts (imports from cli-patterns)",
+          "src/app/api/worktrees/[id]/prompt-response/route.ts",
+          "src/app/api/worktrees/[id]/current-output/route.ts"
+        ],
+        "recommendation": "現時点では問題なし。cli-patterns.ts のエクスポート数を監視し、将来的にファイルが過大になった場合はカテゴリ別の分割（例: cli-error-patterns.ts）を検討する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S3-001",
+        "title": "CodexTool/GeminiTool の同種バグの潜在リスク",
+        "description": "Bug 1（CLIパスキャッシュ無効化）はClaude固有だが、Bug 2（壊れたセッションの放置）と Bug 3（環境変数の継承）は Codex/Gemini でも理論上発生しうる。CodexTool.startSession() (codex.ts L61-112) は hasSession() が true なら早期 return するが、ヘルスチェックはない。設計方針書の C-001 で「他 CLITool で問題が報告された場合に検討」としているが、影響範囲分析の観点では潜在リスクとして記録すべき。",
+        "recommendation": "現時点では対応不要（C-001 の判断を支持）。ただし Issue #265 の修正完了後に、Codex/Gemini での同種問題の有無をテスト観点に含め、問題が確認された場合は ICLITool インターフェースへの isSessionHealthy() 追加を検討する。"
+      },
+      {
+        "id": "C-S3-002",
+        "title": "getClaudeSessionState() が isSessionHealthy を考慮しない",
+        "description": "getClaudeSessionState() (L235-246) は hasSession() の結果を isRunning フィールドに設定するが、ヘルスチェックは実施しない。この関数の呼び出し元が存在するか確認が必要だが、export されているため外部から呼ばれる可能性がある。壊れたセッションでも isRunning: true を返す。",
+        "recommendation": "getClaudeSessionState() の呼び出し元を確認し、実際に使用されていれば isClaudeRunning() と同様のヘルスチェック考慮を検討する。未使用であれば deprecation を検討。"
+      },
+      {
+        "id": "C-S3-003",
+        "title": "build-and-start.sh 経由の起動における CLAUDECODE 環境変数の伝搬パス",
+        "description": "build-and-start.sh は nohup npm start で直接プロセスを起動するため、daemon.ts の env オブジェクト経由の除去（SF-003）が適用されない。ただし sanitizeSessionEnvironment() の対策 3-1（tmux set-environment -g -u）がカバーするため、実質的な影響はない。設計書はこの点を考慮して tmux レベルの対策を根本対策としている。",
+        "recommendation": "現時点では問題なし。設計方針書の Section 8 の代替案比較（Bug 3: daemon.ts のみでの除去の却下理由）に build-and-start.sh パスの存在を根拠として追加すると、判断の妥当性が強化される。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_matrix": [
+    {
+      "category": "直接変更",
+      "file": "src/lib/claude-session.ts",
+      "change": "getCleanPaneOutput(), clearCachedClaudePath(), isSessionHealthy(), ensureHealthySession(), sanitizeSessionEnvironment() 追加、startClaudeSession() フロー変更、waitForPrompt()/sendMessageToClaude() のcapturePane+stripAnsi置換",
+      "risk": "medium",
+      "impact_detail": "最大の変更対象。startClaudeSession()のフロー変更は ClaudeTool.startSession() 経由で API ルート全体に波及。既存テスト25件以上の動作互換性を維持する必要あり。"
+    },
+    {
+      "category": "直接変更",
+      "file": "src/lib/cli-patterns.ts",
+      "change": "CLAUDE_SESSION_ERROR_PATTERNS, CLAUDE_SESSION_ERROR_REGEX_PATTERNS 定数追加",
+      "risk": "low",
+      "impact_detail": "新規定数追加のみ。9モジュールがインポートしているが、既存エクスポートに変更なし。"
+    },
+    {
+      "category": "直接変更",
+      "file": "src/cli/utils/daemon.ts",
+      "change": "DaemonManager.start() の env オブジェクトから CLAUDECODE を delete",
+      "risk": "low",
+      "impact_detail": "spawn に渡す env オブジェクトのみ変更。process.env は不変。stop/start/status コマンドに影響なし。"
+    },
+    {
+      "category": "直接変更",
+      "file": "tests/unit/lib/claude-session.test.ts",
+      "change": "Issue #265 テスト追加（新規 describe ブロック）",
+      "risk": "low",
+      "impact_detail": "既存テストブロックとの独立性を維持。既存テスト動作に影響なし。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/lib/cli-tools/claude.ts",
+      "change": "ClaudeTool.startSession() 経由で startClaudeSession() のフロー変更が波及",
+      "risk": "medium",
+      "impact_detail": "startClaudeSession() の内部動作変更（ヘルスチェック追加、環境サニタイズ追加）がそのまま反映。エラーハンドリングのcatch全体でのキャッシュクリアにより、startSession()失敗時の挙動が微妙に変化（次回呼び出し時にclaudeパス再解決が発生）。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "change": "isRunning() true の場合にヘルスチェックが発動しないパスが残る（MF-S3-001）",
+      "risk": "high",
+      "impact_detail": "壊れたセッションでも isRunning() が true を返し、startSession() をスキップするため、sendMessage() が壊れたセッションに送信を試みてエラーになる可能性。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "change": "isRunning() で壊れたセッションも true と報告される（MF-S3-001）",
+      "risk": "medium",
+      "impact_detail": "UIが壊れたセッションを「実行中」と表示し続ける。captureSessionOutput() によるステータス検出がエラーを返す可能性。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/app/api/worktrees/route.ts",
+      "change": "ワークツリー一覧 API で isRunning が不正確になる可能性（MF-S3-001）",
+      "risk": "medium",
+      "impact_detail": "サイドバーのステータスインジケータが壊れたセッションを正常と表示。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/lib/session-cleanup.ts",
+      "change": "影響なし（killSession を直接使用、claude-session.ts に依存しない）",
+      "risk": "low",
+      "impact_detail": "セッションクリーンアップは tmux.killSession() を直接呼ぶため、Bug 2 修正の影響を受けない。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/lib/response-poller.ts",
+      "change": "cli-patterns.ts への新定数追加による間接的な依存追加",
+      "risk": "low",
+      "impact_detail": "新定数は response-poller からインポートされないため影響なし。"
+    },
+    {
+      "category": "間接影響",
+      "file": "tests/integration/trust-dialog-auto-response.test.ts",
+      "change": "startClaudeSession() の内部フロー変更によるテスト互換性",
+      "risk": "medium",
+      "impact_detail": "既存の capturePane モックが getCleanPaneOutput() 経由でも動作するが、sanitizeSessionEnvironment() 内の sendKeys('unset CLAUDECODE') 呼び出しが新たに追加されるため、sendKeys のモック呼び出し回数の検証が失敗する可能性がある。child_process モック経由の execAsync('tmux set-environment -g -u CLAUDECODE ...') も追加されるため、exec モックの対応が必要。"
+    },
+    {
+      "category": "間接影響",
+      "file": "src/lib/cli-tools/codex.ts",
+      "change": "同種バグの潜在リスク（現時点では影響なし）",
+      "risk": "low",
+      "impact_detail": "Bug 2 / Bug 3 がCodexでも発生する可能性があるが、本Issue のスコープ外。"
+    }
+  ],
+  "backward_compatibility": {
+    "api_compatibility": "完全互換。APIエンドポイントの入出力形式に変更なし。",
+    "behavior_changes": [
+      "startClaudeSession(): 既存セッションが壊れている場合に kill + 再作成が実行される（以前は return で再利用していた）",
+      "startClaudeSession(): 新規セッション作成時に ~100-300ms の追加遅延（sanitizeSessionEnvironment()）",
+      "startClaudeSession(): 失敗時にcachedClaudePathがクリアされる（以前は残り続けた）",
+      "daemon.ts start(): CLAUDECODE環境変数がspawn対象プロセスに渡されなくなる"
+    ],
+    "breaking_changes": "なし"
+  },
+  "test_coverage_assessment": {
+    "adequate": [
+      "Bug 1: キャッシュクリア系テスト（clearCachedClaudePath, catch ブロック内クリア）",
+      "Bug 2: isSessionHealthy() のパターンマッチテスト（エラーパターン、シェルプロンプト、空出力）",
+      "Bug 2: ensureHealthySession() のフロー制御テスト",
+      "Bug 3: sanitizeSessionEnvironment() のコマンド送信テスト",
+      "Bug 3: daemon.ts env オブジェクト除去テスト"
+    ],
+    "gaps": [
+      "MF-S3-001: isClaudeRunning() / ClaudeTool.isRunning() が壊れたセッションで true を返す場合のAPIレベルの統合テストが欠如",
+      "既存 integration/trust-dialog-auto-response.test.ts への影響（sendKeys/exec モック呼び出し回数変化）の確認テストが未計画",
+      "restartClaudeSession() 経由での二重回復パスの動作テストが未計画",
+      "複数 Claude セッション同時起動時の tmux set-environment -g -u 競合テストが未計画"
+    ]
+  },
+  "performance_impact": {
+    "normal_path_new_session": "+100-300ms (sanitizeSessionEnvironment: tmux set-environment ~50ms + unset sendKeys ~200ms)",
+    "normal_path_existing_healthy_session": "+50ms (isSessionHealthy: capturePane + パターンマッチ)",
+    "recovery_path_broken_session": "+1-2s (killSession + 新規セッション作成)",
+    "cache_clear_path": "+数ms (次回 getClaudePath() で which コマンド再実行)",
+    "summary": "通常パスで最大 300ms の追加。15s の初期化タイムアウトに対して十分小さい。SF-004 検証で対策 3-2 を削除できれば ~100ms に削減。"
+  },
+  "reviewed_files": [
+    "src/lib/claude-session.ts",
+    "src/lib/cli-patterns.ts",
+    "src/cli/utils/daemon.ts",
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/kill-session/route.ts",
+    "src/app/api/worktrees/[id]/interrupt/route.ts",
+    "src/app/api/repositories/route.ts",
+    "src/app/api/hooks/claude-done/route.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/integration/trust-dialog-auto-response.test.ts",
+    "scripts/build-and-start.sh",
+    "dev-reports/design/issue-265-claude-session-recovery-design-policy.md"
+  ],
+  "timestamp": "2026-02-14T14:00:00Z"
+}

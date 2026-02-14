@@ -1,0 +1,25 @@
+{
+  "issue_number": 265,
+  "feature_summary": "Claude CLIパスキャッシュの無効化と壊れたtmuxセッションの自動回復",
+  "acceptance_criteria": [
+    "CLIパスが変更されてもセッション開始が自動回復する",
+    "壊れたtmuxセッションが検出され自動的に再作成される",
+    "Claude Codeセッション内からサーバーを起動しても、tmux内のclaudeが正常に起動する",
+    "既存のセッション開始フローに大きな遅延を加えない"
+  ],
+  "test_scenarios": [
+    "シナリオ1: CLIパス変更時の自動回復 - cachedClaudePathがクリアされ、次回呼び出しで再検索が行われること",
+    "シナリオ2: 壊れたセッション検出 - isSessionHealthy()がエラーパターンを検出し、ensureHealthySession()がセッションを削除すること",
+    "シナリオ3: CLAUDECODE環境変数除去 - sanitizeSessionEnvironment()が tmux グローバル環境とセッション内から除去すること",
+    "シナリオ4: パフォーマンス - 新規セッション作成時の追加遅延が250ms以下であること"
+  ],
+  "implementation_files": [
+    "src/lib/claude-session.ts",
+    "src/lib/cli-patterns.ts",
+    "src/cli/utils/daemon.ts"
+  ],
+  "test_files": [
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/cli/utils/daemon.test.ts"
+  ]
+}

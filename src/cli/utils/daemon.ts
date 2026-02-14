@@ -61,6 +61,10 @@ export class DaemonManager {
       ...(envResult.parsed || {}),
     };
 
+    // SF-003: Remove CLAUDECODE from env object to prevent nested session detection
+    // Uses env object (not process.env) to avoid global side effects (DIP)
+    delete env.CLAUDECODE;
+
     // Command line options override .env values
     if (options.port) {
       env.CM_PORT = String(options.port);

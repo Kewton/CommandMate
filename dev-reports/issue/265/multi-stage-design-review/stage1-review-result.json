@@ -1,0 +1,143 @@
+{
+  "issue_number": 265,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "principle": "SRP (Single Responsibility Principle)",
+        "title": "isSessionHealthy() のエラーパターン判定がハードコードされている",
+        "description": "isSessionHealthy() 内のエラーメッセージ文字列（'Claude Code cannot be launched inside another Claude Code session', 'Error:' && 'Claude'）がハードコードされており、cli-patterns.ts の既存パターン管理方式と一貫性がない。将来エラーメッセージが変更された場合にメンテナンスコストが増加する。",
+        "recommendation": "エラー検出パターンを cli-patterns.ts に定数として定義し、isSessionHealthy() から参照する。例: CLAUDE_SESSION_ERROR_PATTERNS: RegExp[] を新設。これにより、パターン管理の責務が cli-patterns.ts に一元化され、SRP と DRY の両方が満たされる。",
+        "severity": "medium",
+        "affected_files": ["src/lib/claude-session.ts", "src/lib/cli-patterns.ts"]
+      },
+      {
+        "id": "MF-002",
+        "principle": "OCP (Open/Closed Principle)",
+        "title": "isSessionHealthy() のシェルプロンプト検出が拡張に閉じていない",
+        "description": "設計方針書の isSessionHealthy() で `trimmed.endsWith('$')` によるシェルプロンプト判定がハードコードされている。bash以外のシェル（zsh の '%', fish の '>'）でも同様の状態が発生し得るが、現在の設計では新シェルへの対応に関数本体の変更が必要になる。",
+        "recommendation": "シェルプロンプトの検出パターンを定数配列（例: SHELL_PROMPT_ENDINGS = ['$', '%', '#']）として切り出し、isSessionHealthy() では配列を使ったチェックに変更する。OCP に準拠し、パターン追加で対応可能にする。",
+        "severity": "medium",
+        "affected_files": ["src/lib/claude-session.ts"]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "principle": "DRY (Don't Repeat Yourself)",
+        "title": "isSessionHealthy() と startClaudeSession() で capturePane + stripAnsi の呼び出しパターンが重複",
+        "description": "isSessionHealthy() の `capturePane(sessionName, { startLine: -50 })` + `stripAnsi(output)` パターンは startClaudeSession() 内の初期化ポーリングループと同一。同じ「tmux出力を取得しANSIを除去する」処理が複数箇所に分散している。",
+        "recommendation": "共通ヘルパー関数 `getCleanPaneOutput(sessionName: string, lines?: number): Promise<string>` を claude-session.ts 内に追加し、capturePane + stripAnsi を一元化する。テスト時のモック対象も減少する。",
+        "severity": "low",
+        "affected_files": ["src/lib/claude-session.ts"]
+      },
+      {
+        "id": "SF-002",
+        "principle": "SRP (Single Responsibility Principle)",
+        "title": "startClaudeSession() の責務が過大になるリスク",
+        "description": "Bug 2（ヘルスチェック + kill + 再作成）と Bug 3（CLAUDECODE除去の2段階処理）が追加されることで、startClaudeSession() の行数と責務が大幅に増加する。現在でも約80行あり、信頼ダイアログ処理も含んでいるため、追加後は100行超の巨大関数になる可能性がある。",
+        "recommendation": "Bug 3 の CLAUDECODE 除去処理を独立した private 関数（例: `sanitizeSessionEnvironment(sessionName: string): Promise<void>`）に切り出す。Bug 2 のセッション再作成フローも `ensureHealthySession(sessionName: string, options: ClaudeSessionOptions): Promise<boolean>` のようなヘルパーに分離することを推奨。",
+        "severity": "medium",
+        "affected_files": ["src/lib/claude-session.ts"]
+      },
+      {
+        "id": "SF-003",
+        "principle": "DIP (Dependency Inversion Principle)",
+        "title": "daemon.ts での CLAUDECODE 除去が process.env への直接操作に依存",
+        "description": "設計方針書のタスク7で daemon.ts に `delete process.env.CLAUDECODE` を追加する計画だが、DaemonManager.start() 内で既に env オブジェクトを構築するパターンが確立されている。process.env を直接変更するよりも、構築中の env オブジェクトから除去する方が安全で予測可能。",
+        "recommendation": "daemon.ts の start() メソッド内で env オブジェクト構築後に `delete env.CLAUDECODE` とする。process.env への直接操作は避け、spawn に渡す env オブジェクトのみを制御する。",
+        "severity": "low",
+        "affected_files": ["src/cli/utils/daemon.ts"]
+      },
+      {
+        "id": "SF-004",
+        "principle": "KISS (Keep It Simple, Stupid)",
+        "title": "Bug 3 の2段階対策が過剰防御の可能性",
+        "description": "対策 3-1（tmux set-environment -g -u）と対策 3-2（unset CLAUDECODE）の2段階は多層防御として理解できるが、根本原因が CLAUDECODE 環境変数の継承であるなら、tmux セッション作成時に env オプションで制御する方がシンプル。対策 3-2 の 100ms sleep は経験的な値であり、信頼性の根拠が弱い。",
+        "recommendation": "対策 3-1 のみで十分かどうかを検証するテストケースを追加し、不要であれば対策 3-2 を削除して KISS を優先する。残す場合は、100ms の待機理由と根拠をコメントに明記する（DOC パターンを踏襲）。",
+        "severity": "low",
+        "affected_files": ["src/lib/claude-session.ts"]
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "principle": "ISP (Interface Segregation Principle)",
+        "title": "ICLITool インターフェースへのヘルスチェック追加の検討",
+        "description": "isSessionHealthy() は claude-session.ts の内部関数として設計されているが、将来 codex.ts や gemini のセッションでも類似のヘルスチェックが必要になる可能性がある。現時点では ICLITool に含めないのは YAGNI に適合するが、将来の拡張ポイントとして認識しておくべき。",
+        "recommendation": "現時点では内部関数のままで良い（YAGNI）。ただし、他の CLITool でも壊れたセッションの問題が報告された場合、ICLITool に `isSessionHealthy?(worktreeId: string): Promise<boolean>` をオプショナルメソッドとして追加することを検討する。"
+      },
+      {
+        "id": "C-002",
+        "principle": "YAGNI (You Aren't Gonna Need It)",
+        "title": "clearCachedClaudePath() の export 範囲",
+        "description": "設計方針書で clearCachedClaudePath() を export する理由は「テスト可能性の確保」とされている。テスト以外の外部呼び出し元が存在しない場合、内部関数として保持し、テストでは vi.mock によるモジュールモックで対応する選択肢もある。ただし、export する方がテストの明示性が高く、現在のプロジェクトの慣習（定数の export 等）とも合致するため、設計方針書の判断は妥当。",
+        "recommendation": "現在の設計方針（export）を維持。JSDoc に @internal タグを付けて「テスト用途での公開」であることを明記すると意図が明確になる。"
+      },
+      {
+        "id": "C-003",
+        "principle": "SOLID - LSP (Liskov Substitution Principle)",
+        "title": "startClaudeSession() の戻り値型の整合性",
+        "description": "現在の startClaudeSession() は `Promise<void>` を返すが、Bug 2 の修正により「既存セッションを kill して再作成した」ケースと「新規作成した」ケースの区別がつかない。呼び出し元が再作成を認識する必要がある場合は戻り値の拡張が必要になるが、現設計では不要。",
+        "recommendation": "現時点では `Promise<void>` のままで良い。将来的にセッション作成の詳細情報が必要になった場合、`Promise<SessionStartResult>` 型への変更を検討する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principles_checklist": {
+    "SRP": {
+      "status": "conditionally_pass",
+      "notes": "isSessionHealthy() の責務分離は良好。ただし startClaudeSession() の責務肥大化リスクあり（SF-002）。エラーパターンのハードコードは cli-patterns.ts への移動が必要（MF-001）。"
+    },
+    "OCP": {
+      "status": "conditionally_pass",
+      "notes": "既存の定数パターン（CLAUDE_INIT_TIMEOUT 等）を踏襲している点は良好。isSessionHealthy() のシェルプロンプト判定が拡張に閉じていない（MF-002）。"
+    },
+    "LSP": {
+      "status": "pass",
+      "notes": "ICLITool インターフェースへの影響なし。ClaudeTool の振る舞いの変更は内部的であり、LSP 違反のリスクは低い。"
+    },
+    "ISP": {
+      "status": "pass",
+      "notes": "ヘルスチェックを ICLITool に追加しない判断は YAGNI/ISP に合致。将来の拡張ポイントとして認識（C-001）。"
+    },
+    "DIP": {
+      "status": "pass",
+      "notes": "既存の依存関係構造（claude-session -> tmux, cli-patterns）を踏襲。daemon.ts での process.env 直接操作に改善余地あり（SF-003）。"
+    },
+    "KISS": {
+      "status": "pass",
+      "notes": "TTL ベースのキャッシュ無効化を却下した判断は KISS に合致。Bug 3 の2段階対策は過剰の可能性あり（SF-004）。"
+    },
+    "YAGNI": {
+      "status": "pass",
+      "notes": "TTL キャッシュの却下、ICLITool へのヘルスチェック非追加など、YAGNI への意識が高い設計。"
+    },
+    "DRY": {
+      "status": "conditionally_pass",
+      "notes": "既存の stripAnsi(), capturePane() を活用している点は良好。capturePane + stripAnsi パターンの重複（SF-001）とエラーパターンのハードコード（MF-001）に改善余地。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-265-claude-session-recovery-design-policy.md",
+    "src/lib/claude-session.ts",
+    "src/cli/utils/daemon.ts",
+    "src/lib/tmux.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/session-cleanup.ts",
+    "tests/unit/lib/claude-session.test.ts"
+  ],
+  "timestamp": "2026-02-14T12:00:00Z"
+}

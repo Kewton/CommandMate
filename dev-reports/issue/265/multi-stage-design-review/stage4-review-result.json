@@ -1,0 +1,166 @@
+{
+  "issue_number": 265,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "category": "コマンドインジェクション",
+        "title": "CLAUDE_PATH 環境変数の未検証使用によるコマンドインジェクションリスク",
+        "description": "getClaudePath() は process.env.CLAUDE_PATH の値を検証せずにそのまま cachedClaudePath に格納し、sendKeys() 経由で tmux コマンドとして実行される。悪意のある環境変数値（例: '/bin/sh -c \"malicious command\" #'）が設定された場合、任意コマンド実行が可能。設計方針書では「セッション名は既存の getSessionName() でサニタイズ済み」と記載しているが、CLAUDE_PATH のバリデーションには言及がない。",
+        "owasp_category": "A03:2021 - Injection",
+        "severity": "High",
+        "impact": "High",
+        "probability": "Low",
+        "priority": "P1",
+        "recommendation": "getClaudePath() 内で CLAUDE_PATH 環境変数の値に対して、(1) パストラバーサル文字列（../ 等）の排除、(2) 実行可能ファイルであることの確認（fs.access で X_OK チェック）、(3) シェルメタ文字（;, |, &, $, `, 改行等）の排除、を実施すること。既存の fallbackPaths と同様に test -x による検証を適用するか、正規表現ベースのホワイトリスト（例: /^[\\/a-zA-Z0-9._-]+$/）でバリデーションすること。",
+        "affected_files": ["src/lib/claude-session.ts"],
+        "design_doc_section": "Section 6: セキュリティ設計"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "category": "コマンドインジェクション",
+        "title": "sanitizeSessionEnvironment() 内の execAsync 呼び出しにおけるシェルコマンド構成の安全性確認",
+        "description": "設計方針書では sanitizeSessionEnvironment() 内で execAsync('tmux set-environment -g -u CLAUDECODE 2>/dev/null || true') を使用する。この呼び出し自体は固定文字列であり安全だが、同関数内の sendKeys(sessionName, 'unset CLAUDECODE', true) は sessionName を tmux コマンドに埋め込む。sessionName は getSessionName() 経由で生成されるが、claude-session.ts 内の getSessionName() には validateSessionName() 呼び出しがない（BaseCLITool.getSessionName() にのみ存在）。",
+        "owasp_category": "A03:2021 - Injection",
+        "severity": "Medium",
+        "impact": "Medium",
+        "probability": "Low",
+        "priority": "P2",
+        "recommendation": "claude-session.ts 内の getSessionName() にも validateSessionName() を追加するか、sendKeys() / capturePane() の呼び出し前に sessionName のバリデーションを一元的に実施する仕組みを導入すること。tmux.ts 内の各関数で sessionName を受け取る際にバリデーションを実施するのが最も効果的。",
+        "affected_files": ["src/lib/claude-session.ts", "src/lib/tmux.ts"],
+        "design_doc_section": "Section 6: セキュリティ設計"
+      },
+      {
+        "id": "SEC-SF-002",
+        "category": "エラー情報漏洩",
+        "title": "エラーメッセージにおける内部パス情報の露出リスク",
+        "description": "startClaudeSession() の catch ブロックで throw new Error('Failed to start Claude session: ' + getErrorMessage(error)) としており、内部のファイルパス（cachedClaudePath の値）やシステム情報がエラーメッセージに含まれる可能性がある。これらのエラーは API ルート経由でクライアントに返却される（send/route.ts L120）。設計方針書の Bug 1 修正で catch ブロックに clearCachedClaudePath() を追加するが、エラーメッセージのサニタイズは考慮されていない。",
+        "owasp_category": "A04:2021 - Insecure Design",
+        "severity": "Low",
+        "impact": "Low",
+        "probability": "Medium",
+        "priority": "P2",
+        "recommendation": "API レイヤー（send/route.ts 等）でクライアントに返すエラーメッセージから内部パスやシステム情報を除去すること。サーバーサイドでは詳細ログを保持しつつ、クライアント向けには汎用メッセージ（例: 'Failed to start Claude session'）のみを返す設計を検討すること。これは Issue #265 のスコープ外だが、新規の catch ブロック変更に合わせて対応するのが効率的。",
+        "affected_files": ["src/lib/claude-session.ts", "src/app/api/worktrees/[id]/send/route.ts"],
+        "design_doc_section": "Section 6: セキュリティ設計"
+      },
+      {
+        "id": "SEC-SF-003",
+        "category": "環境変数の安全な取り扱い",
+        "title": "tmux set-environment -g -u のグローバルスコープによる環境汚染リスク",
+        "description": "設計方針書では MF-S3-002 として「CLAUDECODEはClaude固有で他ツール影響なし、unset操作の冪等性で安全」と分析済みだが、tmux set-environment -g -u はグローバル tmux 環境に影響を与える。将来的に CLAUDECODE 以外の環境変数のサニタイズが必要になった場合、グローバル操作のままでは他セッションへの予期しない影響が生じる。設計書には「将来的にセッション単位への移行検討」と記載があるが、移行トリガーが不明確。",
+        "owasp_category": "A05:2021 - Security Misconfiguration",
+        "severity": "Low",
+        "impact": "Medium",
+        "probability": "Low",
+        "priority": "P3",
+        "recommendation": "sanitizeSessionEnvironment() のコードコメントに、セッション単位の set-environment（-g フラグなし）への移行を検討すべきトリガー条件を明記すること。例: 「他の環境変数（例: CODEX_*, GEMINI_*）のサニタイズ要件が追加された場合はセッションスコープに移行する」。現時点の CLAUDECODE のみの除去であればグローバルスコープで許容範囲。",
+        "affected_files": ["src/lib/claude-session.ts"],
+        "design_doc_section": "Section 3: sanitizeSessionEnvironment()"
+      },
+      {
+        "id": "SEC-SF-004",
+        "category": "入力バリデーション",
+        "title": "isSessionHealthy() のパターンマッチング回避による検出漏れリスク",
+        "description": "isSessionHealthy() はエラーパターン文字列マッチング（includes, regex.test）に依存する。Claude CLI のエラーメッセージが変更された場合やロケールによって異なるメッセージが出力された場合、壊れたセッションを健全と誤判定する可能性がある。SHELL_PROMPT_ENDINGS による判定も、Claude CLI の出力末尾が偶然 $, %, # で終わるエッジケースで誤判定のリスクがある（設計書 C-S2-002 で言及済みだが、セキュリティ観点での補足が必要）。",
+        "owasp_category": "A04:2021 - Insecure Design",
+        "severity": "Medium",
+        "impact": "Medium",
+        "probability": "Low",
+        "priority": "P2",
+        "recommendation": "エラーパターンの検出漏れに対する防御的設計として、(1) CLAUDE_SESSION_ERROR_PATTERNS の更新プロセス（Claude CLI アップデート時にパターン確認を行う手順）をドキュメント化する、(2) isSessionHealthy() が false-positive（壊れたセッションを健全と判定）した場合の影響を限定するフォールバックメカニズム（例: セッション開始後の応答タイムアウトで再試行）が既存の CLAUDE_INIT_TIMEOUT で提供されていることを設計書に明記する。",
+        "affected_files": ["src/lib/claude-session.ts", "src/lib/cli-patterns.ts"],
+        "design_doc_section": "Section 3: isSessionHealthy()"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "category": "環境変数の安全な取り扱い",
+        "title": "CLAUDE_PATH 環境変数のドキュメント化とセキュリティガイドライン",
+        "description": "CLAUDE_PATH は信頼された管理者のみが設定すべき環境変数だが、そのセキュリティ上の注意事項がドキュメント化されていない。共有サーバー環境では他ユーザーが環境変数を操作できる可能性がある。",
+        "recommendation": "README.md または環境変数のドキュメントに CLAUDE_PATH の用途と信頼境界（trusted boundary）を記載し、信頼された環境でのみ使用すべきことを注記する。"
+      },
+      {
+        "id": "SEC-C-002",
+        "category": "セキュリティ設計",
+        "title": "stopClaudeSession() 内の execAsync でのセッション名引用",
+        "description": "stopClaudeSession() (L489) で execAsync(`tmux send-keys -t \"${sessionName}\" C-d`) を使用している。sessionName はダブルクォートで囲まれているが、sessionName にダブルクォートやバックスラッシュが含まれる場合のエスケープが不足している。現在は getSessionName() の出力が英数字とハイフンのみであるため実害はないが、防御的プログラミングの観点からは tmux.ts の sendKeys() を使用すべき。",
+        "recommendation": "Issue #265 のスコープ外だが、stopClaudeSession() の execAsync 呼び出しを sendKeys(sessionName, '', false) + sendSpecialKey(sessionName, 'C-d') に置き換えることを将来検討すること。"
+      },
+      {
+        "id": "SEC-C-003",
+        "category": "エラーハンドリング",
+        "title": "isSessionHealthy() の例外抑制が障害検知を遅延させるリスク",
+        "description": "isSessionHealthy() の catch ブロックは全ての例外を握りつぶして false を返す。これによりセッションが kill + 再作成されるため機能的には問題ないが、繰り返し発生する異常（tmux デーモンのクラッシュ等）のログ記録が欠如し、運用上の障害検知が遅延する可能性がある。",
+        "recommendation": "catch ブロック内で console.warn 等によるログ出力を追加し、繰り返し発生する場合は検知できるようにすること。ただし既存の console.log パターンとの統一は別Issue で対応。"
+      }
+    ]
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "not_applicable",
+      "note": "本変更は認証・認可に関する変更を含まない。セッション管理は tmux のローカルプロセス管理であり、ネットワーク経由のアクセス制御は変更範囲外。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "note": "暗号化処理の変更なし。"
+    },
+    "A03_injection": {
+      "status": "conditionally_pass",
+      "note": "新規 execAsync 呼び出し（tmux set-environment -g -u CLAUDECODE）は固定文字列で安全。ただし CLAUDE_PATH 環境変数のバリデーション不足（SEC-MF-001）と claude-session.ts 内 getSessionName() のバリデーション欠如（SEC-SF-001）が要対応。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "note": "ヘルスチェックパターンの設計は防御的。パターンマッチング依存のリスクは認識済み（SEC-SF-004）だが、既存のタイムアウト機構によるフォールバックがある。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "note": "環境変数操作はグローバル tmux 環境に影響するが、CLAUDECODE 限定かつ冪等操作のため現時点では安全。移行トリガーのドキュメント化を推奨（SEC-SF-003）。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "note": "外部ライブラリの追加なし。"
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "note": "認証・セッション管理（HTTP）の変更なし。"
+    },
+    "A08_software_data_integrity": {
+      "status": "pass",
+      "note": "キャッシュクリア（clearCachedClaudePath）は null 代入のみで安全。デシリアライゼーション処理なし。"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass",
+      "note": "既存の console.log パターンを踏襲。isSessionHealthy() の例外抑制についてはログ追加を推奨（SEC-C-003）。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "note": "サーバーサイドリクエスト発行の変更なし。execAsync 呼び出しはローカルプロセス操作のみ。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/claude-session.ts",
+    "src/lib/cli-patterns.ts",
+    "src/cli/utils/daemon.ts",
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "dev-reports/design/issue-265-claude-session-recovery-design-policy.md"
+  ],
+  "timestamp": "2026-02-14T12:00:00Z"
+}

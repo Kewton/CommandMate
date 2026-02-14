@@ -1,0 +1,42 @@
+{
+  "status": "success",
+  "coverage": 90.64,
+  "unit_tests": {
+    "total": 94,
+    "passed": 94,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/claude-session.ts",
+    "src/lib/cli-patterns.ts",
+    "src/cli/utils/daemon.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/cli/utils/daemon.test.ts"
+  ],
+  "commits": [
+    "41fef12: fix(claude-session): add cache invalidation, health check, and CLAUDECODE removal"
+  ],
+  "message": "TDD implementation complete for Issue #265. All 3 bugs fixed: (1) Cache invalidation with clearCachedClaudePath() and CLAUDE_PATH validation, (2) Health check with isSessionHealthy()/ensureHealthySession() for broken session auto-recovery, (3) CLAUDECODE environment variable removal via sanitizeSessionEnvironment() and daemon.ts env cleanup. Coverage 90.64% statements, 96.36% branches for claude-session.ts. 94 tests pass, 0 ESLint errors, 0 TypeScript errors.",
+  "implementation_details": {
+    "bug_1_cache_invalidation": {
+      "new_functions": ["clearCachedClaudePath()", "isValidClaudePath()"],
+      "changes": ["getClaudePath() now validates CLAUDE_PATH with whitelist regex and fs.access(X_OK)", "startClaudeSession() catch block calls clearCachedClaudePath()"],
+      "tests_added": 8
+    },
+    "bug_2_health_check": {
+      "new_functions": ["isSessionHealthy()", "ensureHealthySession()", "getCleanPaneOutput()"],
+      "new_constants": ["SHELL_PROMPT_ENDINGS", "CLAUDE_SESSION_ERROR_PATTERNS", "CLAUDE_SESSION_ERROR_REGEX_PATTERNS"],
+      "changes": ["isClaudeRunning() now includes health check (MF-S3-001)", "startClaudeSession() checks health before reusing existing sessions"],
+      "tests_added": 14
+    },
+    "bug_3_claudecode_removal": {
+      "new_functions": ["sanitizeSessionEnvironment()"],
+      "changes": ["startClaudeSession() calls sanitizeSessionEnvironment() after createSession()", "daemon.ts deletes CLAUDECODE from spawn env object"],
+      "tests_added": 5
+    }
+  }
+}

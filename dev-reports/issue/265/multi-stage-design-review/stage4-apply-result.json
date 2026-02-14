@@ -1,0 +1,119 @@
+{
+  "issue_number": 265,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "SEC-MF-001",
+        "item": "CLAUDE_PATH 環境変数の未検証使用によるコマンドインジェクションリスク",
+        "sections_updated": [
+          "Section 3: getClaudePath() の CLAUDE_PATH バリデーション",
+          "Section 6: CLAUDE_PATH 環境変数のバリデーション",
+          "Section 8: 採用した設計テーブル",
+          "Section 9: タスク16/17追加",
+          "Section 10: セキュリティテストケース追加",
+          "Section 11: セキュリティ原則追加",
+          "Section 13: Stage 4 Must Fix サマリー",
+          "Section 14: Must Fix 対応（Stage 4）チェックリスト"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-SF-001",
+        "item": "sanitizeSessionEnvironment() 内の sendKeys 呼び出しにおける sessionName バリデーション",
+        "sections_updated": [
+          "Section 3: sanitizeSessionEnvironment() JSDoc追記",
+          "Section 6: sessionName のバリデーション一元化",
+          "Section 9: タスク18追加",
+          "Section 10: テストカバレッジギャップ追加",
+          "Section 11: セキュリティ原則追加",
+          "Section 13: Stage 4 Should Fix サマリー",
+          "Section 14: Should Fix 対応（Stage 4）チェックリスト"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-002",
+        "item": "エラーメッセージにおける内部パス情報の露出リスク",
+        "sections_updated": [
+          "Section 3: catch ブロック設計変更（MF-S2-002 + SF-S2-004）",
+          "Section 6: エラーメッセージの情報漏洩防止",
+          "Section 8: 採用した設計テーブル",
+          "Section 9: タスク19追加",
+          "Section 10: セキュリティテストケース追加",
+          "Section 11: セキュリティ原則追加",
+          "Section 13: Stage 4 Should Fix サマリー",
+          "Section 14: Should Fix 対応（Stage 4）チェックリスト"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-003",
+        "item": "tmux set-environment -g -u のグローバルスコープによる環境汚染リスク",
+        "sections_updated": [
+          "Section 3: sanitizeSessionEnvironment() JSDoc追記",
+          "Section 6: tmux set-environment グローバルスコープの移行トリガー明確化",
+          "Section 9: タスク18追加",
+          "Section 11: セキュリティ原則追加",
+          "Section 13: Stage 4 Should Fix サマリー",
+          "Section 14: Should Fix 対応（Stage 4）チェックリスト"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC-SF-004",
+        "item": "isSessionHealthy() のパターンマッチング回避による検出漏れリスク",
+        "sections_updated": [
+          "Section 3: エラーパターン定数 JSDoc追記、isSessionHealthy() 設計根拠追記",
+          "Section 6: isSessionHealthy() のパターンマッチング回避リスクへの防御設計",
+          "Section 8: 採用した設計テーブル",
+          "Section 9: タスク20/21追加",
+          "Section 10: テストカバレッジギャップ追加",
+          "Section 11: セキュリティ原則追加",
+          "Section 13: Stage 4 Should Fix サマリー",
+          "Section 14: Should Fix 対応（Stage 4）チェックリスト"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-C-001",
+        "item": "CLAUDE_PATH 環境変数のドキュメント化とセキュリティガイドライン",
+        "status": "noted_for_future",
+        "reason": "SEC-MF-001 のバリデーション追加により技術的防御は完了。ドキュメント化は別途検討"
+      },
+      {
+        "id": "SEC-C-002",
+        "item": "stopClaudeSession() 内の execAsync でのセッション名引用",
+        "status": "noted_for_future",
+        "reason": "Issue #265 スコープ外。現在は実害なし"
+      },
+      {
+        "id": "SEC-C-003",
+        "item": "isSessionHealthy() の例外抑制が障害検知を遅延させるリスク",
+        "status": "noted_for_future",
+        "reason": "catch ブロック内のログ追加は別 Issue で対応"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-265-claude-session-recovery-design-policy.md",
+  "sections_updated": [
+    "Section 3: 設計パターン（getClaudePath() バリデーション追加、sanitizeSessionEnvironment() JSDoc追記、エラーパターン定数 JSDoc追記、catch ブロック設計変更、isSessionHealthy() 設計根拠追記）",
+    "Section 6: セキュリティ設計（CLAUDE_PATH バリデーション、sessionName バリデーション一元化、エラーメッセージ情報漏洩防止、tmux グローバルスコープ移行トリガー、パターンマッチング防御設計、OWASP チェックリスト、リスク評価）",
+    "Section 8: 設計上の決定事項とトレードオフ（セキュリティ関連設計決定3件追加）",
+    "Section 9: 実装タスク（タスク16-21追加、依存関係更新）",
+    "Section 10: テスト方針（セキュリティテストケース7件追加、テストカバレッジギャップ3件追加）",
+    "Section 11: 制約条件の確認（セキュリティ原則5項目追加）",
+    "Section 12: レビュー履歴（Stage 4 追加）",
+    "Section 13: レビュー指摘事項サマリー（Stage 4 Must Fix 1件、Should Fix 4件、Consider 3件追加）",
+    "Section 14: 実装チェックリスト（Must Fix Stage 4: 7項目、Should Fix Stage 4: 11項目、Consider: 3項目追加）"
+  ],
+  "timestamp": "2026-02-14T12:30:00Z"
+}

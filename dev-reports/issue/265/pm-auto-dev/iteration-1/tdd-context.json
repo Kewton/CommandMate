@@ -1,0 +1,39 @@
+{
+  "issue_number": 265,
+  "title": "fix: Claude CLIパスキャッシュの無効化と壊れたtmuxセッションの自動回復",
+  "acceptance_criteria": [
+    "CLIパスが変更されてもセッション開始が自動回復する",
+    "壊れたtmuxセッションが検出され自動的に再作成される",
+    "Claude Codeセッション内からサーバーを起動しても、tmux内のclaudeが正常に起動する",
+    "既存のセッション開始フローに大きな遅延を加えない"
+  ],
+  "implementation_tasks": [
+    "cli-patterns.ts にエラーパターン定数追加 (CLAUDE_SESSION_ERROR_PATTERNS, CLAUDE_SESSION_ERROR_REGEX_PATTERNS)",
+    "claude-session.ts に SHELL_PROMPT_ENDINGS 定数追加",
+    "getCleanPaneOutput() 共通ヘルパー追加",
+    "isValidClaudePath() 検証関数追加 (CLAUDE_PATH バリデーション)",
+    "clearCachedClaudePath() 関数追加",
+    "isSessionHealthy() 関数追加 (エラーパターン・シェルプロンプト検出)",
+    "ensureHealthySession() ヘルパー追加",
+    "sanitizeSessionEnvironment() ヘルパー追加 (CLAUDECODE 除去)",
+    "startClaudeSession() 統合更新 (ヘルスチェック・環境サニタイズ・キャッシュクリア)",
+    "isClaudeRunning() にヘルスチェック追加",
+    "getClaudePath() にバリデーション追加",
+    "daemon.ts での env オブジェクト経由 CLAUDECODE 除去",
+    "waitForPrompt() / sendMessageToClaude() での getCleanPaneOutput() 適用"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-265-claude-session-recovery-design-policy.md",
+  "work_plan_path": "dev-reports/issue/265/work-plan.md",
+  "review_findings": {
+    "total_findings": 37,
+    "must_fix": 7,
+    "should_fix": 18,
+    "consider": 12
+  },
+  "technical_context": {
+    "bug_1": "cachedClaudePath が無効化されず、CLI更新後も古いパスを使い続ける",
+    "bug_2": "壊れたtmuxセッションが自動回復されず、手動削除が必要",
+    "bug_3": "CLAUDECODE 環境変数がtmuxセッションに継承され、ネストセッション検出で起動拒否"
+  }
+}

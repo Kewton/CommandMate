@@ -132,6 +132,12 @@ A: It supports Claude Code and Codex CLI. Thanks to the extensible Strategy patt
 **Q: Can multiple people use it?**
 A: Currently designed for individual use. Simultaneous multi-user access is not supported.
 
+**Q: Session start fails after updating Claude CLI. What should I do?**
+A: If you switch between npm and standalone versions of Claude CLI, the path may change. CommandMate will automatically detect the new path on the next session start attempt. If you want to specify a custom path, set the `CLAUDE_PATH` environment variable in `.env` (e.g., `CLAUDE_PATH=/opt/homebrew/bin/claude`).
+
+**Q: Sessions fail to start when launching CommandMate from within Claude Code. Why?**
+A: Claude Code sets the `CLAUDECODE=1` environment variable to prevent nested sessions. CommandMate automatically removes this variable from tmux sessions, so sessions should start normally. If the issue persists, manually run `tmux set-environment -g -u CLAUDECODE` to clear it from tmux's global environment.
+
 ## Documentation
 
 | Document | Description |

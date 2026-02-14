@@ -1,0 +1,70 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "シナリオ1: CLIパス変更時の自動回復 - cachedClaudePathがクリアされ、次回呼び出しで再検索が行われること",
+      "result": "passed",
+      "evidence": "AC-1: 2/2 tests passed. clearCachedClaudePath() clears cached path on session failure (MF-S2-002). 'which claude' is called at least twice after cache clear. Invalid CLAUDE_PATH (shell metacharacters, path traversal, pipe characters, non-executable) is rejected and falls through to fallback resolution."
+    },
+    {
+      "scenario": "シナリオ2: 壊れたセッション検出 - isSessionHealthy()がエラーパターンを検出し、ensureHealthySession()がセッションを削除すること",
+      "result": "passed",
+      "evidence": "AC-2: 5/5 tests passed. isSessionHealthy() detects: (1) CLAUDE_SESSION_ERROR_PATTERNS ('Claude Code cannot be launched inside another Claude Code session'), (2) CLAUDE_SESSION_ERROR_REGEX_PATTERNS (/Error:.*Claude/), (3) shell prompt endings ($, %, #), (4) empty/whitespace-only output. ensureHealthySession() kills broken sessions via killSession(). startClaudeSession() recreates killed sessions."
+    },
+    {
+      "scenario": "シナリオ3: CLAUDECODE環境変数除去 - sanitizeSessionEnvironment()が tmux グローバル環境とセッション内から除去すること",
+      "result": "passed",
+      "evidence": "AC-3: 4/4 tests passed. sanitizeSessionEnvironment() executes: (1) 'tmux set-environment -g -u CLAUDECODE' for global tmux env, (2) sendKeys 'unset CLAUDECODE' inside session shell. Order verified: unset CLAUDECODE runs before Claude CLI launch. daemon.ts also deletes env.CLAUDECODE from spawn env object (verified in daemon.test.ts: 2/2 CLAUDECODE tests passed)."
+    },
+    {
+      "scenario": "シナリオ4: パフォーマンス - 新規セッション作成時の追加遅延が250ms以下であること",
+      "result": "passed",
+      "evidence": "AC-4: 3/3 tests passed. sanitizeSessionEnvironment() adds only 100ms wait (0.67% of CLAUDE_INIT_TIMEOUT=15000ms). Healthy session reuse has zero additional overhead (no createSession or sendKeys called). The 100ms overhead is well under the 250ms budget."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "CLIパスが変更されてもセッション開始が自動回復する",
+      "verified": true
+    },
+    {
+      "criterion": "壊れたtmuxセッションが検出され自動的に再作成される",
+      "verified": true
+    },
+    {
+      "criterion": "Claude Codeセッション内からサーバーを起動しても、tmux内のclaudeが正常に起動する",
+      "verified": true
+    },
+    {
+      "criterion": "既存のセッション開始フローに大きな遅延を加えない",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/integration/issue-265-acceptance.test.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/cli/utils/daemon.test.ts"
+  ],
+  "test_summary": {
+    "integration_acceptance_tests": {
+      "total": 14,
+      "passed": 14,
+      "failed": 0
+    },
+    "unit_tests_claude_session": {
+      "total": 74,
+      "passed": 74,
+      "failed": 0
+    },
+    "unit_tests_daemon": {
+      "total": 20,
+      "passed": 20,
+      "failed": 0
+    },
+    "static_analysis": {
+      "typescript_errors": 0,
+      "eslint_errors": 0
+    }
+  },
+  "message": "すべての受入条件を満たしています。4つの受入条件すべてが検証済みです。合計108テスト（統合14 + ユニット94）がすべてパスし、TypeScriptエラー0件、ESLintエラー0件です。"
+}

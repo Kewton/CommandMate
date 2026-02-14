@@ -303,6 +303,75 @@ describe('DaemonManager', () => {
     });
   });
 
+  describe('CLAUDECODE environment variable removal (Issue #265, SF-003)', () => {
+    it('should remove CLAUDECODE from spawn env object', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.openSync).mockReturnValue(3);
+      vi.mocked(fs.writeSync).mockReturnValue(5);
+      vi.mocked(fs.closeSync).mockReturnValue(undefined);
+      vi.mocked(dotenv.config).mockReturnValue({ parsed: {} });
+
+      // Simulate CLAUDECODE being set in process.env
+      const originalClaudeCode = process.env.CLAUDECODE;
+      process.env.CLAUDECODE = '1';
+
+      const mockChild = {
+        pid: 12345,
+        unref: vi.fn(),
+        on: vi.fn(),
+      };
+      vi.mocked(childProcess.spawn).mockReturnValue(mockChild as unknown as childProcess.ChildProcess);
+
+      await daemonManager.start({});
+
+      // Verify spawn was called with env that does NOT contain CLAUDECODE
+      const spawnCall = vi.mocked(childProcess.spawn).mock.calls[0];
+      const spawnEnv = (spawnCall[2] as { env: NodeJS.ProcessEnv }).env;
+      expect(spawnEnv.CLAUDECODE).toBeUndefined();
+
+      // Restore original value
+      if (originalClaudeCode === undefined) {
+        delete process.env.CLAUDECODE;
+      } else {
+        process.env.CLAUDECODE = originalClaudeCode;
+      }
+    });
+
+    it('should not affect other environment variables when removing CLAUDECODE', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.openSync).mockReturnValue(3);
+      vi.mocked(fs.writeSync).mockReturnValue(5);
+      vi.mocked(fs.closeSync).mockReturnValue(undefined);
+      vi.mocked(dotenv.config).mockReturnValue({
+        parsed: { CM_PORT: '3000' },
+      });
+
+      const originalClaudeCode = process.env.CLAUDECODE;
+      process.env.CLAUDECODE = '1';
+
+      const mockChild = {
+        pid: 12345,
+        unref: vi.fn(),
+        on: vi.fn(),
+      };
+      vi.mocked(childProcess.spawn).mockReturnValue(mockChild as unknown as childProcess.ChildProcess);
+
+      await daemonManager.start({});
+
+      // Verify CLAUDECODE is removed but other env vars preserved
+      const spawnCall = vi.mocked(childProcess.spawn).mock.calls[0];
+      const spawnEnv = (spawnCall[2] as { env: NodeJS.ProcessEnv }).env;
+      expect(spawnEnv.CLAUDECODE).toBeUndefined();
+      expect(spawnEnv.CM_PORT).toBe('3000');
+
+      if (originalClaudeCode === undefined) {
+        delete process.env.CLAUDECODE;
+      } else {
+        process.env.CLAUDECODE = originalClaudeCode;
+      }
+    });
+  });
+
   describe('start with .env loading (Issue #125)', () => {
     it('should load .env file using dotenv', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);

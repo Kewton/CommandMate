@@ -1,0 +1,28 @@
+{
+  "issue_number": 265,
+  "refactor_targets": [
+    "src/lib/claude-session.ts",
+    "src/lib/cli-patterns.ts",
+    "src/cli/utils/daemon.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 90.64,
+    "target_coverage": 92.0
+  },
+  "improvement_goals": [
+    "カバレッジを92%以上に向上",
+    "コード重複の削減（既に getCleanPaneOutput() で対応済み）",
+    "JSDocコメントの充実",
+    "エッジケースのテストカバレッジ向上"
+  ],
+  "review_findings": {
+    "consider_items": [
+      "C-S2-001: isSessionHealthy() の空出力判定コメント追加",
+      "C-S2-002: シェルプロンプト誤検出リスクのコメント追加",
+      "C-S3-001: Codex/Gemini の同種バグモニタリング",
+      "C-S3-002: getClaudeSessionState() のヘルスチェック未対応"
+    ]
+  },
+  "tdd_result_path": "dev-reports/issue/265/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/265/pm-auto-dev/iteration-1/acceptance-result.json"
+}

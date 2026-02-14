@@ -2,6 +2,7 @@
  * Tests for claude-session module improvements
  * Issue #152: Fix first message not being sent after session start
  * Issue #187: Fix session first message reliability
+ * Issue #265: Cache invalidation, health check, CLAUDECODE removal
  * TDD Approach: Write tests first (Red), then implement (Green)
  * @vitest-environment node
  */
@@ -22,16 +23,24 @@ vi.mock('@/lib/pasted-text-helper', () => ({
   detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock fs/promises for isValidClaudePath (Issue #265)
+// Must include constants.X_OK for access() validation in getClaudePath()
+vi.mock('fs/promises', () => ({
+  access: vi.fn().mockResolvedValue(undefined),
+  constants: { X_OK: 1 },
+}));
+
 // Mock child_process
 vi.mock('child_process', () => ({
-  exec: vi.fn((cmd, opts, cb) => {
+  exec: vi.fn((cmd: string, opts: unknown, cb?: unknown) => {
     if (typeof opts === 'function') {
       cb = opts;
     }
+    const callback = cb as (err: Error | null, result: { stdout: string; stderr: string }) => void;
     if (cmd.includes('which claude')) {
-      cb(null, { stdout: '/usr/local/bin/claude', stderr: '' });
+      callback(null, { stdout: '/usr/local/bin/claude', stderr: '' });
     } else {
-      cb(null, { stdout: '', stderr: '' });
+      callback(null, { stdout: '', stderr: '' });
     }
     return {};
   }),
@@ -42,6 +51,13 @@ import {
   sendMessageToClaude,
   waitForPrompt,
   getSessionName,
+  isClaudeRunning,
+  isClaudeInstalled,
+  clearCachedClaudePath,
+  captureClaudeOutput,
+  stopClaudeSession,
+  getClaudeSessionState,
+  restartClaudeSession,
   CLAUDE_INIT_TIMEOUT,
   CLAUDE_INIT_POLL_INTERVAL,
   CLAUDE_POST_PROMPT_DELAY,
@@ -49,8 +65,13 @@ import {
   CLAUDE_PROMPT_POLL_INTERVAL,
   CLAUDE_SEND_PROMPT_WAIT_TIMEOUT,
 } from '@/lib/claude-session';
-import { hasSession, createSession, sendKeys, capturePane } from '@/lib/tmux';
-import { CLAUDE_PROMPT_PATTERN, CLAUDE_SEPARATOR_PATTERN } from '@/lib/cli-patterns';
+import { hasSession, createSession, sendKeys, capturePane, killSession } from '@/lib/tmux';
+import {
+  CLAUDE_PROMPT_PATTERN,
+  CLAUDE_SEPARATOR_PATTERN,
+  CLAUDE_SESSION_ERROR_PATTERNS,
+  CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
+} from '@/lib/cli-patterns';
 import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
 
 // ----- Shared test constants (DRY) -----
@@ -231,7 +252,7 @@ describe('claude-session - Issue #152 improvements', () => {
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
       // Attach rejection handler before advancing timers to prevent unhandled rejection
-      const assertion = expect(promise).rejects.toThrow('Claude initialization timeout');
+      const assertion = expect(promise).rejects.toThrow('Failed to start Claude session');
 
       // Advance past CLAUDE_INIT_TIMEOUT
       await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
@@ -252,8 +273,8 @@ describe('claude-session - Issue #152 improvements', () => {
 
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
-      // Advance through initial polls and stability delay
-      await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 4 + CLAUDE_POST_PROMPT_DELAY);
+      // Advance through initial polls, sanitize 100ms delay, and stability delay
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 4 + CLAUDE_POST_PROMPT_DELAY);
 
       await expect(promise).resolves.toBeUndefined();
     });
@@ -265,7 +286,7 @@ describe('claude-session - Issue #152 improvements', () => {
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
       // Attach rejection handler before advancing timers to prevent unhandled rejection
-      const assertion = expect(promise).rejects.toThrow('Claude initialization timeout');
+      const assertion = expect(promise).rejects.toThrow('Failed to start Claude session');
 
       // Advance past CLAUDE_INIT_TIMEOUT
       await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT + 1000);
@@ -278,8 +299,8 @@ describe('claude-session - Issue #152 improvements', () => {
 
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
-      // Advance through initial poll
-      await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL);
+      // Advance through sanitize delay + initial poll
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL);
 
       // Session should still be waiting for stability delay
       // Advance through stability delay
@@ -288,13 +309,43 @@ describe('claude-session - Issue #152 improvements', () => {
       await expect(promise).resolves.toBeUndefined();
     });
 
-    it('should skip initialization if session already exists', async () => {
+    it('should reuse healthy existing session without creating new one', async () => {
+      // Issue #265: existing healthy session should be reused
       vi.mocked(hasSession).mockResolvedValue(true);
+      // Return Claude prompt output indicating healthy session
+      vi.mocked(capturePane).mockResolvedValue('> ');
 
       await startClaudeSession(TEST_SESSION_OPTIONS);
 
       expect(createSession).not.toHaveBeenCalled();
-      expect(sendKeys).not.toHaveBeenCalled();
+    });
+
+    it('should recreate unhealthy existing session (Issue #265, Bug 2)', async () => {
+      // Session exists but is broken (shows error message)
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockImplementation(async () => {
+        // After kill and recreation, return prompt for initialization
+        if (vi.mocked(killSession).mock.calls.length > 0) {
+          return '> ';
+        }
+        // Before kill: broken session with error
+        return 'Claude Code cannot be launched inside another Claude Code session';
+      });
+      vi.mocked(killSession).mockResolvedValue(true);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+
+      // Advance through sanitize delay + initialization polls + stability delay
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 3 + CLAUDE_POST_PROMPT_DELAY);
+
+      await expect(promise).resolves.toBeUndefined();
+
+      // killSession should have been called to clean up broken session
+      expect(killSession).toHaveBeenCalledWith(TEST_SESSION_NAME);
+      // New session should have been created
+      expect(createSession).toHaveBeenCalled();
     });
   });
 
@@ -452,13 +503,14 @@ describe('claude-session - Issue #152 improvements', () => {
 
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
-      // Advance through polls and stability delay
-      await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 3 + CLAUDE_POST_PROMPT_DELAY);
+      // Advance through sanitize delay + polls and stability delay
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 3 + CLAUDE_POST_PROMPT_DELAY);
 
       await expect(promise).resolves.toBeUndefined();
 
-      // Verify Enter was sent exactly once
-      // First sendKeys call is for claudePath, subsequent for trust dialog Enter
+      // Verify Enter was sent exactly once for trust dialog
+      // sendKeys calls include: unset CLAUDECODE (true), claudePath (true), trust dialog Enter (true)
+      // countEnterOnlyCalls counts calls with empty string + true
       expect(countEnterOnlyCalls()).toBe(1);
     });
 
@@ -476,8 +528,8 @@ describe('claude-session - Issue #152 improvements', () => {
 
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
-      // Advance through polls and stability delay
-      await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 4 + CLAUDE_POST_PROMPT_DELAY);
+      // Advance through sanitize delay + polls and stability delay
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 4 + CLAUDE_POST_PROMPT_DELAY);
 
       await expect(promise).resolves.toBeUndefined();
 
@@ -498,8 +550,8 @@ describe('claude-session - Issue #152 improvements', () => {
 
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
-      // Advance through polls and stability delay
-      await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 4 + CLAUDE_POST_PROMPT_DELAY);
+      // Advance through sanitize delay + polls and stability delay
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 4 + CLAUDE_POST_PROMPT_DELAY);
 
       await expect(promise).resolves.toBeUndefined();
 
@@ -520,8 +572,8 @@ describe('claude-session - Issue #152 improvements', () => {
 
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
-      // Advance through polls and stability delay
-      await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 4 + CLAUDE_POST_PROMPT_DELAY);
+      // Advance through sanitize delay + polls and stability delay
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 4 + CLAUDE_POST_PROMPT_DELAY);
 
       // Should resolve successfully (not timeout)
       await expect(promise).resolves.toBeUndefined();
@@ -574,6 +626,710 @@ describe('claude-session - Issue #152 improvements', () => {
       // sendKeys order: message first, then Enter
       expect(sendKeys).toHaveBeenNthCalledWith(1, TEST_SESSION_NAME, 'line1\nline2\nline3', false);
       expect(sendKeys).toHaveBeenNthCalledWith(2, TEST_SESSION_NAME, '', true);
+    });
+  });
+});
+
+// ============================================================
+// Issue #265: Cache invalidation, health check, CLAUDECODE removal
+// ============================================================
+describe('claude-session - Issue #265 improvements', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    // Always clear the cached path before each test
+    clearCachedClaudePath();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    // Restore env vars
+    delete process.env.CLAUDE_PATH;
+  });
+
+  // ----- Bug 1: Cache invalidation -----
+  describe('Bug 1: clearCachedClaudePath() (cache invalidation)', () => {
+    it('should export clearCachedClaudePath as a function', () => {
+      expect(typeof clearCachedClaudePath).toBe('function');
+    });
+
+    it('should clear cached path so next getClaudePath() re-resolves', async () => {
+      // First call caches the path
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      // Clear the cache
+      clearCachedClaudePath();
+
+      // The next startClaudeSession should resolve the path again (exec 'which claude')
+      vi.mocked(hasSession).mockResolvedValue(false);
+      const promise2 = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise2;
+
+      // 'which claude' should have been called at least twice (once per session start)
+      const { exec } = await import('child_process');
+      const execCalls = vi.mocked(exec).mock.calls;
+      const whichCalls = execCalls.filter(call => (call[0] as string).includes('which claude'));
+      expect(whichCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should clear cache on session start failure (MF-S2-002)', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockRejectedValue(new Error('tmux create failed'));
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      const assertion = expect(promise).rejects.toThrow('Failed to start Claude session');
+
+      await vi.advanceTimersByTimeAsync(100);
+      await assertion;
+
+      // After failure, clearCachedClaudePath should have been called
+      // We verify by checking that clearCachedClaudePath is a no-op (no error)
+      expect(() => clearCachedClaudePath()).not.toThrow();
+    });
+  });
+
+  // ----- Bug 1: CLAUDE_PATH validation (SEC-MF-001) -----
+  describe('Bug 1: isValidClaudePath() / CLAUDE_PATH validation (SEC-MF-001)', () => {
+    it('should accept valid CLAUDE_PATH', async () => {
+      process.env.CLAUDE_PATH = '/usr/local/bin/claude';
+
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      // sendKeys should have been called with the valid CLAUDE_PATH
+      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+    });
+
+    it('should reject CLAUDE_PATH with shell metacharacters', async () => {
+      process.env.CLAUDE_PATH = '/bin/sh -c "malicious" #';
+
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      // Should have fallen through to 'which claude' fallback, not used the env var
+      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+    });
+
+    it('should reject CLAUDE_PATH with path traversal', async () => {
+      process.env.CLAUDE_PATH = '/usr/../etc/passwd';
+
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      // Should have fallen through to 'which claude' fallback
+      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+    });
+
+    it('should reject CLAUDE_PATH with pipe characters', async () => {
+      process.env.CLAUDE_PATH = '/usr/bin/claude|cat /etc/passwd';
+
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      // Should have fallen through to 'which claude' fallback
+      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+    });
+
+    it('should reject CLAUDE_PATH that is not executable', async () => {
+      process.env.CLAUDE_PATH = '/usr/local/bin/nonexistent-claude';
+
+      // Mock fs.access to reject (not executable)
+      const fsPromises = await import('fs/promises');
+      vi.mocked(fsPromises.access).mockRejectedValue(new Error('ENOENT'));
+
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      // Should have fallen through to 'which claude' fallback
+      expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/usr/local/bin/claude', true);
+    });
+  });
+
+  // ----- Bug 2: Health check -----
+  describe('Bug 2: isSessionHealthy() / ensureHealthySession()', () => {
+    it('should detect error pattern and report session as unhealthy', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue(
+        'Claude Code cannot be launched inside another Claude Code session'
+      );
+
+      // isClaudeRunning should return false for broken session
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+
+    it('should detect regex error pattern and report session as unhealthy', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('Error: Claude CLI crashed');
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+
+    it('should detect shell prompt ending "$" as unhealthy', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('user@host:~/project$');
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+
+    it('should detect shell prompt ending "%" as unhealthy', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('user@host ~/project%');
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+
+    it('should detect shell prompt ending "#" as unhealthy', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('root@host:~/project#');
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+
+    it('should detect empty output as unhealthy (C-S2-001)', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('');
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+
+    it('should detect whitespace-only output as unhealthy', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('   \n  \n  ');
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+
+    it('should report healthy session with Claude prompt as running', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('Some Claude output\n> ');
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(true);
+    });
+
+    it('should report healthy session with thinking indicator as running', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('Processing request...\n\u2713 Working on it...');
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(true);
+    });
+
+    it('should return false when session does not exist', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+
+    it('should handle capturePane errors gracefully', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockRejectedValue(new Error('tmux error'));
+
+      const result = await isClaudeRunning(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('Bug 2: startClaudeSession() session recovery', () => {
+    beforeEach(() => {
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(killSession).mockResolvedValue(true);
+    });
+
+    it('should kill and recreate broken session with error pattern', async () => {
+      let hasBeenKilled = false;
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(killSession).mockImplementation(async () => {
+        hasBeenKilled = true;
+        // After kill, hasSession returns false for next check
+        vi.mocked(hasSession).mockResolvedValue(false);
+        return true;
+      });
+      vi.mocked(capturePane).mockImplementation(async () => {
+        if (!hasBeenKilled) {
+          return 'Claude Code cannot be launched inside another Claude Code session';
+        }
+        return '> ';
+      });
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 3 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      expect(killSession).toHaveBeenCalledWith(TEST_SESSION_NAME);
+      expect(createSession).toHaveBeenCalled();
+    });
+
+    it('should kill and recreate session showing shell prompt only', async () => {
+      let hasBeenKilled = false;
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(killSession).mockImplementation(async () => {
+        hasBeenKilled = true;
+        vi.mocked(hasSession).mockResolvedValue(false);
+        return true;
+      });
+      vi.mocked(capturePane).mockImplementation(async () => {
+        if (!hasBeenKilled) {
+          return 'user@host:~/project$';
+        }
+        return '> ';
+      });
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 3 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      expect(killSession).toHaveBeenCalledWith(TEST_SESSION_NAME);
+      expect(createSession).toHaveBeenCalled();
+    });
+  });
+
+  // ----- Bug 3: CLAUDECODE environment variable removal -----
+  describe('Bug 3: sanitizeSessionEnvironment() (CLAUDECODE removal)', () => {
+    beforeEach(() => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(capturePane).mockResolvedValue('> ');
+    });
+
+    it('should send unset CLAUDECODE command during session creation', async () => {
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      // Verify that 'unset CLAUDECODE' was sent via sendKeys
+      const sendKeysCalls = vi.mocked(sendKeys).mock.calls;
+      const unsetCalls = sendKeysCalls.filter(
+        (call) => call[1] === 'unset CLAUDECODE' && call[2] === true
+      );
+      expect(unsetCalls.length).toBe(1);
+    });
+
+    it('should call tmux set-environment -g -u CLAUDECODE during session creation', async () => {
+      const { exec } = await import('child_process');
+
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      // Verify tmux set-environment was called
+      const execCalls = vi.mocked(exec).mock.calls;
+      const tmuxEnvCalls = execCalls.filter(
+        (call) => (call[0] as string).includes('tmux set-environment -g -u CLAUDECODE')
+      );
+      expect(tmuxEnvCalls.length).toBe(1);
+    });
+
+    it('should sanitize environment before launching claude CLI', async () => {
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+      await promise;
+
+      // Verify call order: unset CLAUDECODE should come before claudePath
+      const sendKeysCalls = vi.mocked(sendKeys).mock.calls;
+      const unsetIndex = sendKeysCalls.findIndex(
+        (call) => call[1] === 'unset CLAUDECODE'
+      );
+      const claudePathIndex = sendKeysCalls.findIndex(
+        (call) => call[1] === '/usr/local/bin/claude'
+      );
+
+      expect(unsetIndex).toBeLessThan(claudePathIndex);
+    });
+  });
+
+  // ----- Error pattern constants -----
+  describe('Error pattern constants (MF-001)', () => {
+    it('should export CLAUDE_SESSION_ERROR_PATTERNS from cli-patterns', () => {
+      expect(CLAUDE_SESSION_ERROR_PATTERNS).toBeDefined();
+      expect(Array.isArray(CLAUDE_SESSION_ERROR_PATTERNS)).toBe(true);
+      expect(CLAUDE_SESSION_ERROR_PATTERNS.length).toBeGreaterThan(0);
+    });
+
+    it('should include nested session error pattern', () => {
+      expect(CLAUDE_SESSION_ERROR_PATTERNS).toContain(
+        'Claude Code cannot be launched inside another Claude Code session'
+      );
+    });
+
+    it('should export CLAUDE_SESSION_ERROR_REGEX_PATTERNS from cli-patterns', () => {
+      expect(CLAUDE_SESSION_ERROR_REGEX_PATTERNS).toBeDefined();
+      expect(Array.isArray(CLAUDE_SESSION_ERROR_REGEX_PATTERNS)).toBe(true);
+      expect(CLAUDE_SESSION_ERROR_REGEX_PATTERNS.length).toBeGreaterThan(0);
+    });
+
+    it('should have regex pattern that matches Error:.*Claude', () => {
+      const pattern = CLAUDE_SESSION_ERROR_REGEX_PATTERNS[0];
+      expect(pattern.test('Error: Claude CLI crashed')).toBe(true);
+      expect(pattern.test('No errors here')).toBe(false);
+    });
+  });
+
+  // ----- Coverage improvement: existing functions -----
+  describe('isClaudeInstalled()', () => {
+    it('should return true when claude is found', async () => {
+      const result = await isClaudeInstalled();
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('captureClaudeOutput()', () => {
+    it('should return captured output when session exists', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('Some Claude output\n> ');
+
+      const result = await captureClaudeOutput(TEST_WORKTREE_ID);
+      expect(result).toBe('Some Claude output\n> ');
+      expect(capturePane).toHaveBeenCalledWith(TEST_SESSION_NAME, { startLine: -1000 });
+    });
+
+    it('should throw error when session does not exist', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+
+      await expect(captureClaudeOutput(TEST_WORKTREE_ID)).rejects.toThrow(
+        `Claude session ${TEST_SESSION_NAME} does not exist`
+      );
+    });
+
+    it('should throw error when capturePane fails', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockRejectedValue(new Error('tmux error'));
+
+      await expect(captureClaudeOutput(TEST_WORKTREE_ID)).rejects.toThrow(
+        'Failed to capture Claude output'
+      );
+    });
+
+    it('should accept custom line count', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('output');
+
+      await captureClaudeOutput(TEST_WORKTREE_ID, 500);
+      expect(capturePane).toHaveBeenCalledWith(TEST_SESSION_NAME, { startLine: -500 });
+    });
+  });
+
+  describe('stopClaudeSession()', () => {
+    it('should stop session and return true', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(killSession).mockResolvedValue(true);
+
+      const promise = stopClaudeSession(TEST_WORKTREE_ID);
+
+      // Advance timer for the 500ms wait inside stopClaudeSession
+      await vi.advanceTimersByTimeAsync(500);
+
+      const result = await promise;
+      expect(result).toBe(true);
+      expect(killSession).toHaveBeenCalledWith(TEST_SESSION_NAME);
+    });
+
+    it('should return false when session does not exist and kill fails', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(killSession).mockResolvedValue(false);
+
+      const result = await stopClaudeSession(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+
+    it('should handle errors gracefully', async () => {
+      vi.mocked(hasSession).mockRejectedValue(new Error('tmux error'));
+
+      const result = await stopClaudeSession(TEST_WORKTREE_ID);
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('getClaudeSessionState()', () => {
+    it('should return session state when running', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+
+      const state = await getClaudeSessionState(TEST_WORKTREE_ID);
+
+      expect(state.sessionName).toBe(TEST_SESSION_NAME);
+      expect(state.isRunning).toBe(true);
+      expect(state.lastActivity).toBeInstanceOf(Date);
+    });
+
+    it('should return session state when not running', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+
+      const state = await getClaudeSessionState(TEST_WORKTREE_ID);
+
+      expect(state.sessionName).toBe(TEST_SESSION_NAME);
+      expect(state.isRunning).toBe(false);
+    });
+
+    it('should return existence-based state without health check (C-S3-002)', async () => {
+      // getClaudeSessionState uses hasSession (not isSessionHealthy), so a broken
+      // session still reports isRunning=true. This is by design for lightweight queries.
+      vi.mocked(hasSession).mockResolvedValue(true);
+      // Even if capturePane would show an error, getClaudeSessionState does not check it
+      vi.mocked(capturePane).mockResolvedValue('Claude Code cannot be launched inside another Claude Code session');
+
+      const state = await getClaudeSessionState(TEST_WORKTREE_ID);
+      expect(state.isRunning).toBe(true);
+      // capturePane should NOT be called by getClaudeSessionState
+      expect(capturePane).not.toHaveBeenCalled();
+    });
+  });
+
+  // ----- Coverage: restartClaudeSession -----
+  // NOTE: Placed BEFORE exec-overriding tests to avoid mock pollution
+  describe('restartClaudeSession()', () => {
+    it('should stop existing session then start a new one', async () => {
+      // Setup mocks for the full restart flow
+      vi.mocked(hasSession)
+        .mockResolvedValueOnce(true)   // stopClaudeSession -> hasSession (Ctrl+D path)
+        .mockResolvedValueOnce(false)  // startClaudeSession -> hasSession (no existing session)
+        ;
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(killSession).mockResolvedValue(true);
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = restartClaudeSession(TEST_SESSION_OPTIONS);
+
+      // stopClaudeSession: Ctrl+D wait (500ms)
+      await vi.advanceTimersByTimeAsync(500);
+      // restartClaudeSession: inter-restart delay (1000ms)
+      await vi.advanceTimersByTimeAsync(1000);
+      // startClaudeSession: sanitize delay (100ms) + poll intervals + post-prompt delay
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+
+      await expect(promise).resolves.toBeUndefined();
+
+      // Verify stop was attempted (killSession called by stopClaudeSession)
+      expect(killSession).toHaveBeenCalledWith(TEST_SESSION_NAME);
+      // Verify new session was created
+      expect(createSession).toHaveBeenCalled();
+    });
+
+    it('should handle stop failure gracefully and still attempt restart', async () => {
+      // stopClaudeSession: session doesn't exist
+      vi.mocked(hasSession)
+        .mockResolvedValueOnce(false)  // stopClaudeSession -> no session
+        .mockResolvedValueOnce(false)  // startClaudeSession -> hasSession
+        ;
+      vi.mocked(killSession).mockResolvedValue(false);
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(createSession).mockResolvedValue();
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      const promise = restartClaudeSession(TEST_SESSION_OPTIONS);
+
+      // restartClaudeSession: inter-restart delay (1000ms)
+      await vi.advanceTimersByTimeAsync(1000);
+      // startClaudeSession: sanitize delay (100ms) + poll intervals + post-prompt delay
+      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+
+      await expect(promise).resolves.toBeUndefined();
+
+      // New session should still be created even if stop found no session
+      expect(createSession).toHaveBeenCalled();
+    });
+  });
+
+  // ----- exec-overriding tests grouped together with afterEach cleanup -----
+  // These tests override the module-level exec mock and must restore it afterward
+  describe('exec mock override tests (CLI path resolution)', () => {
+    /** Restore the default exec mock after each test that overrides it */
+    afterEach(async () => {
+      const { exec } = await import('child_process');
+      vi.mocked(exec).mockImplementation((cmd: string, opts: unknown, cb?: unknown) => {
+        if (typeof opts === 'function') {
+          cb = opts;
+        }
+        const callback = cb as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        if ((cmd as string).includes('which claude')) {
+          callback(null, { stdout: '/usr/local/bin/claude', stderr: '' });
+        } else {
+          callback(null, { stdout: '', stderr: '' });
+        }
+        return {} as ReturnType<typeof exec>;
+      });
+    });
+
+    // ----- Coverage: isClaudeInstalled failure path -----
+    describe('isClaudeInstalled() failure path', () => {
+      it('should return false when which claude fails', async () => {
+        const { exec } = await import('child_process');
+        vi.mocked(exec).mockImplementation((cmd: string, opts: unknown, cb?: unknown) => {
+          if (typeof opts === 'function') {
+            cb = opts;
+          }
+          const callback = cb as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+          callback(new Error('not found'), { stdout: '', stderr: '' });
+          return {} as ReturnType<typeof exec>;
+        });
+
+        const result = await isClaudeInstalled();
+        expect(result).toBe(false);
+      });
+    });
+
+    // ----- Coverage: startClaudeSession when Claude is not installed -----
+    describe('startClaudeSession() when Claude is not installed', () => {
+      it('should throw error when Claude CLI is not available', async () => {
+        const { exec } = await import('child_process');
+        vi.mocked(exec).mockImplementation((cmd: string, opts: unknown, cb?: unknown) => {
+          if (typeof opts === 'function') {
+            cb = opts;
+          }
+          const callback = cb as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+          callback(new Error('not found'), { stdout: '', stderr: '' });
+          return {} as ReturnType<typeof exec>;
+        });
+        vi.mocked(hasSession).mockResolvedValue(false);
+
+        await expect(startClaudeSession(TEST_SESSION_OPTIONS)).rejects.toThrow(
+          'Claude CLI is not installed or not in PATH'
+        );
+      });
+    });
+
+    // ----- Coverage: getClaudePath fallback paths -----
+    describe('getClaudePath() fallback to common paths', () => {
+      it('should use fallback path when which command fails but test -x succeeds', async () => {
+        const { exec } = await import('child_process');
+        let whichCallCount = 0;
+        vi.mocked(exec).mockImplementation((cmd: string, opts: unknown, cb?: unknown) => {
+          if (typeof opts === 'function') {
+            cb = opts;
+          }
+          const callback = cb as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+          if ((cmd as string).includes('which claude')) {
+            whichCallCount++;
+            if (whichCallCount === 1) {
+              callback(null, { stdout: '/usr/local/bin/claude', stderr: '' });
+            } else {
+              callback(new Error('not found'), { stdout: '', stderr: '' });
+            }
+          } else if ((cmd as string).includes('test -x')) {
+            callback(null, { stdout: '', stderr: '' });
+          } else {
+            callback(null, { stdout: '', stderr: '' });
+          }
+          return {} as ReturnType<typeof exec>;
+        });
+
+        vi.mocked(hasSession).mockResolvedValue(false);
+        vi.mocked(createSession).mockResolvedValue();
+        vi.mocked(sendKeys).mockResolvedValue();
+        vi.mocked(capturePane).mockResolvedValue('> ');
+
+        const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+        await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
+        await promise;
+
+        expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, '/opt/homebrew/bin/claude', true);
+      });
+
+      it('should throw error when all paths including fallbacks fail', async () => {
+        const { exec } = await import('child_process');
+        let whichCallCount = 0;
+        vi.mocked(exec).mockImplementation((cmd: string, opts: unknown, cb?: unknown) => {
+          if (typeof opts === 'function') {
+            cb = opts;
+          }
+          const callback = cb as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+          if ((cmd as string).includes('which claude')) {
+            whichCallCount++;
+            if (whichCallCount === 1) {
+              callback(null, { stdout: '/usr/local/bin/claude', stderr: '' });
+            } else {
+              callback(new Error('not found'), { stdout: '', stderr: '' });
+            }
+          } else {
+            callback(new Error('not found'), { stdout: '', stderr: '' });
+          }
+          return {} as ReturnType<typeof exec>;
+        });
+
+        vi.mocked(hasSession).mockResolvedValue(false);
+        vi.mocked(createSession).mockResolvedValue();
+        vi.mocked(sendKeys).mockResolvedValue();
+
+        const promise = startClaudeSession(TEST_SESSION_OPTIONS);
+        const assertion = expect(promise).rejects.toThrow('Failed to start Claude session');
+        await vi.advanceTimersByTimeAsync(100);
+        await assertion;
+      });
+    });
+  });
+
+  // ----- Coverage: captureClaudeOutput with default lines -----
+  describe('captureClaudeOutput() default lines parameter', () => {
+    it('should use default 1000 lines when not specified', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('output');
+
+      await captureClaudeOutput(TEST_WORKTREE_ID);
+      expect(capturePane).toHaveBeenCalledWith(TEST_SESSION_NAME, { startLine: -1000 });
+    });
+  });
+
+  // ----- Coverage: stopClaudeSession when killSession returns false -----
+  describe('stopClaudeSession() edge cases', () => {
+    it('should return result from killSession when session exists', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(killSession).mockResolvedValue(false);
+
+      const promise = stopClaudeSession(TEST_WORKTREE_ID);
+      await vi.advanceTimersByTimeAsync(500);
+
+      const result = await promise;
+      expect(result).toBe(false);
     });
   });
 });

@@ -13,11 +13,14 @@ import {
 import {
   CLAUDE_PROMPT_PATTERN,
   CLAUDE_TRUST_DIALOG_PATTERN,
+  CLAUDE_SESSION_ERROR_PATTERNS,
+  CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
   stripAnsi,
 } from './cli-patterns';
 import { detectAndResendIfPastedText } from './pasted-text-helper';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { access, constants } from 'fs/promises';
 
 const execAsync = promisify(exec);
 
@@ -33,6 +36,26 @@ const execAsync = promisify(exec);
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+// ----- Shell Prompt Detection Constants -----
+
+/**
+ * Shell prompt ending characters for detecting shell-only tmux sessions
+ * Extensible array to support multiple shell types (MF-002: OCP)
+ * Placed in claude-session.ts as private constant (SF-S2-002: ISP - used only by isSessionHealthy())
+ * - '$': bash/sh default prompt
+ * - '%': zsh default prompt
+ * - '#': root prompt (bash/zsh)
+ *
+ * C-S2-002: False positive risk assessment:
+ * These characters are checked only at the END of trimmed output. This limits false
+ * positives to cases where Claude CLI output ends with one of these characters
+ * (e.g., output containing "$" at end of a code block). The risk is acceptable because:
+ * (1) Claude CLI output typically ends with a prompt (❯) or thinking indicator, not shell chars
+ * (2) A false positive triggers session recreation, which is a safe recovery action
+ * (3) The check is combined with error pattern detection for multiple signals
+ */
+const SHELL_PROMPT_ENDINGS: readonly string[] = ['$', '%', '#'] as const;
 
 // ----- Timeout and Polling Constants (OCP-001) -----
 // These constants are exported to allow configuration and testing.
@@ -119,8 +142,49 @@ export const CLAUDE_PROMPT_POLL_INTERVAL = 200;
 let cachedClaudePath: string | null = null;
 
 /**
+ * Clear cached Claude CLI path
+ * Called when session start fails to allow path re-resolution
+ * on next attempt (e.g., after CLI update or path change)
+ * @internal Exported for testing purposes only.
+ * Follows the same pattern as version-checker.ts resetCacheForTesting().
+ * Function name clearCachedClaudePath() is retained (without ForTesting suffix)
+ * because it is also called in production code (catch block), not only in tests.
+ * (SF-S2-005: Consistent @internal usage with version-checker.ts precedent)
+ */
+export function clearCachedClaudePath(): void {
+  cachedClaudePath = null;
+}
+
+/**
+ * Validate CLAUDE_PATH environment variable to prevent command injection
+ * SEC-MF-001: OWASP A03:2021 - Injection prevention
+ *
+ * @param claudePath - Value from process.env.CLAUDE_PATH
+ * @returns true if the path is safe to use
+ */
+function isValidClaudePath(claudePath: string): boolean {
+  // (1) Whitelist validation: only allow alphanumeric, path separators, dots, hyphens, underscores
+  // SEC-MF-001: Rejects shell metacharacters (;, |, &, $, `, newlines, spaces in dangerous positions, etc.)
+  const SAFE_PATH_PATTERN = /^[/a-zA-Z0-9._-]+$/;
+  if (!SAFE_PATH_PATTERN.test(claudePath)) {
+    console.log(`[claude-session] CLAUDE_PATH contains invalid characters, ignoring: ${claudePath.substring(0, 50)}`);
+    return false;
+  }
+
+  // (2) Path traversal prevention: reject ../ sequences
+  // SEC-MF-001: Prevents path traversal attacks
+  if (claudePath.includes('..')) {
+    console.log('[claude-session] CLAUDE_PATH contains path traversal sequence, ignoring');
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Get Claude CLI path dynamically
  * Uses CLAUDE_PATH environment variable if set, otherwise finds via 'which'
+ * SEC-MF-001: Validates CLAUDE_PATH before caching
  */
 async function getClaudePath(): Promise<string> {
   // Return cached path if available
@@ -128,10 +192,20 @@ async function getClaudePath(): Promise<string> {
     return cachedClaudePath;
   }
 
-  // Check environment variable first
-  if (process.env.CLAUDE_PATH) {
-    cachedClaudePath = process.env.CLAUDE_PATH;
-    return cachedClaudePath;
+  // Check environment variable first with validation (SEC-MF-001)
+  const envClaudePath = process.env.CLAUDE_PATH;
+  if (envClaudePath) {
+    if (isValidClaudePath(envClaudePath)) {
+      try {
+        await access(envClaudePath, constants.X_OK);
+        cachedClaudePath = envClaudePath;
+        return cachedClaudePath;
+      } catch {
+        console.log(`[claude-session] CLAUDE_PATH is not executable: ${envClaudePath}`);
+        // Fall through to fallback paths
+      }
+    }
+    // If validation fails, ignore CLAUDE_PATH and proceed with fallback resolution
   }
 
   // Find claude via 'which' command
@@ -159,6 +233,121 @@ async function getClaudePath(): Promise<string> {
 
     throw new Error('Claude CLI not found. Set CLAUDE_PATH environment variable or install Claude CLI.');
   }
+}
+
+// ----- Common Helper Functions (SF-001) -----
+
+/**
+ * Capture tmux pane output and strip ANSI escape sequences
+ * Consolidates the common capturePane + stripAnsi pattern (SF-001: DRY)
+ *
+ * @param sessionName - tmux session name
+ * @param lines - Number of lines to capture (default: 50, captures from -lines)
+ * @returns Clean pane output with ANSI codes removed
+ */
+async function getCleanPaneOutput(sessionName: string, lines: number = 50): Promise<string> {
+  const output = await capturePane(sessionName, { startLine: -lines });
+  return stripAnsi(output);
+}
+
+// ----- Health Check Functions (Bug 2) -----
+
+/**
+ * Verify that Claude CLI is actually running inside a tmux session
+ * Detects broken sessions where tmux exists but Claude failed to start
+ *
+ * @param sessionName - tmux session name
+ * @returns true if Claude CLI is responsive (prompt detected or initializing)
+ */
+async function isSessionHealthy(sessionName: string): Promise<boolean> {
+  try {
+    // SF-001: Use shared helper instead of inline capturePane + stripAnsi
+    const cleanOutput = await getCleanPaneOutput(sessionName);
+
+    // MF-001: Check error patterns from cli-patterns.ts (SRP - pattern management centralized)
+    for (const pattern of CLAUDE_SESSION_ERROR_PATTERNS) {
+      if (cleanOutput.includes(pattern)) {
+        return false;
+      }
+    }
+    for (const regex of CLAUDE_SESSION_ERROR_REGEX_PATTERNS) {
+      if (regex.test(cleanOutput)) {
+        return false;
+      }
+    }
+
+    // MF-002: Check shell prompt endings from extensible array (OCP)
+    const trimmed = cleanOutput.trim();
+    // C-S2-001: Empty output means tmux session exists but Claude CLI has no output.
+    // This is treated as unhealthy because a properly running Claude CLI always
+    // produces output (prompt, spinner, or response). An empty pane indicates
+    // the CLI process has exited or failed to start.
+    if (trimmed === '') {
+      return false;
+    }
+    if (SHELL_PROMPT_ENDINGS.some(ending => trimmed.endsWith(ending))) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ensure the existing tmux session has a healthy Claude CLI process
+ * If unhealthy, kill the session so it can be recreated
+ * (SF-002: SRP - session health management separated from session creation)
+ *
+ * @param sessionName - tmux session name
+ * @returns true if session is healthy and can be reused, false if it was killed
+ */
+async function ensureHealthySession(sessionName: string): Promise<boolean> {
+  const healthy = await isSessionHealthy(sessionName);
+  if (!healthy) {
+    await killSession(sessionName);
+    return false;
+  }
+  return true;
+}
+
+// ----- Environment Sanitization (Bug 3) -----
+
+/**
+ * Remove CLAUDECODE environment variable from tmux session environment
+ * Prevents Claude Code from detecting nested session and refusing to start
+ * (SF-002: SRP - environment sanitization separated from session creation)
+ *
+ * MF-S3-002: tmux set-environment -g -u operates on the global tmux environment.
+ * Impact analysis:
+ * - CLAUDECODE is a Claude Code-specific variable, so Codex/Gemini sessions
+ *   (CLI_TOOL_IDS: ['claude', 'codex', 'gemini']) are NOT affected by its removal.
+ * - Multiple Claude sessions concurrently calling unset (-g -u) is safe because
+ *   the unset operation is idempotent (unsetting an already-unset variable is a no-op).
+ *
+ * SEC-SF-001: sessionName is validated by the caller chain:
+ * ClaudeTool.startSession() -> BaseCLITool.getSessionName() -> validateSessionName()
+ * This ensures sessionName contains only safe characters (alphanumeric + hyphen).
+ *
+ * SEC-SF-003: Migration trigger for session-scoped set-environment (without -g flag):
+ * - When sanitization of additional environment variables (e.g., CODEX_*, GEMINI_*)
+ *   is required, migrate to session-scoped operations to prevent cross-session side effects.
+ * - Current scope (CLAUDECODE only) is safe with global scope due to idempotent unset.
+ *
+ * @param sessionName - tmux session name
+ */
+async function sanitizeSessionEnvironment(sessionName: string): Promise<void> {
+  // 3-1: Remove from tmux global environment
+  // MF-S3-002: -g flag affects global tmux environment.
+  // Safe because: (1) CLAUDECODE is Claude-specific, (2) unset is idempotent.
+  await execAsync('tmux set-environment -g -u CLAUDECODE 2>/dev/null || true');
+
+  // 3-2: Unset inside the session shell (safety net)
+  // 100ms wait: empirically determined time for sendKeys command to reach the shell
+  // SF-S3-004: 100ms is 0.67% of CLAUDE_INIT_TIMEOUT (15000ms), acceptable overhead
+  await sendKeys(sessionName, 'unset CLAUDECODE', true);
+  await new Promise(resolve => setTimeout(resolve, 100));
 }
 
 /**
@@ -209,9 +398,15 @@ export async function isClaudeInstalled(): Promise<boolean> {
 
 /**
  * Check if Claude session is running
+ * MF-S3-001: Includes health check to prevent reporting broken sessions as running.
+ * Without this, API routes (especially send/route.ts) would skip startSession()
+ * for broken sessions and attempt to send messages to a non-functional CLI.
+ *
+ * Performance: adds ~50ms overhead (capturePane + pattern match) per call.
+ * This is acceptable given that API route response times are typically 100-500ms.
  *
  * @param worktreeId - Worktree ID
- * @returns True if Claude session exists and is running
+ * @returns True if Claude session exists AND Claude CLI is healthy
  *
  * @example
  * ```typescript
@@ -223,14 +418,28 @@ export async function isClaudeInstalled(): Promise<boolean> {
  */
 export async function isClaudeRunning(worktreeId: string): Promise<boolean> {
   const sessionName = getSessionName(worktreeId);
-  return await hasSession(sessionName);
+  const exists = await hasSession(sessionName);
+  if (!exists) {
+    return false;
+  }
+  // MF-S3-001: Verify session health to avoid reporting broken sessions as running
+  return isSessionHealthy(sessionName);
 }
 
 /**
  * Get Claude session state
  *
+ * C-S3-002: This function checks tmux session existence via hasSession() but
+ * does NOT perform health checks (unlike isClaudeRunning()). This is intentional:
+ * getClaudeSessionState() is a lightweight status query for UI display purposes,
+ * while isClaudeRunning() performs the more expensive health check for operational
+ * decisions (e.g., whether to recreate a session).
+ *
+ * If health-aware state is needed, callers should use isClaudeRunning() instead
+ * or call ensureHealthySession() separately.
+ *
  * @param worktreeId - Worktree ID
- * @returns Session state information
+ * @returns Session state information (existence-based, not health-based)
  */
 export async function getClaudeSessionState(
   worktreeId: string
@@ -267,11 +476,10 @@ export async function waitForPrompt(
   const pollInterval = CLAUDE_PROMPT_POLL_INTERVAL;
 
   while (Date.now() - startTime < timeout) {
-    // Use -50 lines to capture more context including status bars
-    const output = await capturePane(sessionName, { startLine: -50 });
+    // SF-001: Use getCleanPaneOutput helper (DRY)
+    const cleanOutput = await getCleanPaneOutput(sessionName);
     // DRY-001: Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts
-    // Strip ANSI escape sequences before pattern matching (Issue #152)
-    if (CLAUDE_PROMPT_PATTERN.test(stripAnsi(output))) {
+    if (CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
       return; // Prompt detected
     }
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
@@ -310,8 +518,15 @@ export async function startClaudeSession(
   // Check if session already exists
   const exists = await hasSession(sessionName);
   if (exists) {
-    console.log(`Claude session ${sessionName} already exists`);
-    return;
+    // SF-S2-004: Health check on existing session
+    const healthy = await ensureHealthySession(sessionName);
+    if (healthy) {
+      console.log(`Claude session ${sessionName} already exists and is healthy`);
+      return;
+    }
+    // If not healthy, ensureHealthySession() already killed the session.
+    // Fall through to the session creation logic below.
+    // (SF-S2-004: Explicit fall-through instead of hidden re-entry)
   }
 
   try {
@@ -321,6 +536,9 @@ export async function startClaudeSession(
       workingDirectory: worktreePath,
       historyLimit: 50000,
     });
+
+    // SF-S2-003: Sanitize environment after createSession, before launching Claude CLI
+    await sanitizeSessionEnvironment(sessionName);
 
     // Get Claude CLI path dynamically
     const claudePath = await getClaudePath();
@@ -340,13 +558,11 @@ export async function startClaudeSession(
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
       try {
-        const output = await capturePane(sessionName, { startLine: -50 });
+        // SF-001: Use getCleanPaneOutput helper (DRY)
+        const cleanOutput = await getCleanPaneOutput(sessionName);
         // Claude is ready when we see the prompt (DRY-001)
         // Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts for consistency
-        // Strip ANSI escape sequences before pattern matching (Issue #152)
         // Note: CLAUDE_SEPARATOR_PATTERN was removed from initialization check (Issue #187, P1-1)
-        // because separator early-detection caused premature returns before prompt was ready
-        const cleanOutput = stripAnsi(output);
         if (CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
           // Wait for stability after prompt detection (CONS-007, DOC-001)
           await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
@@ -360,7 +576,6 @@ export async function startClaudeSession(
         if (!trustDialogHandled && CLAUDE_TRUST_DIALOG_PATTERN.test(cleanOutput)) {
           await sendKeys(sessionName, '', true);
           trustDialogHandled = true;
-          // TODO: Log output method unification (console.log vs createLogger) to be addressed in a separate Issue (SF-002)
           console.log('Trust dialog detected, sending Enter to confirm');
           // Continue polling to wait for prompt detection
         }
@@ -376,7 +591,11 @@ export async function startClaudeSession(
 
     console.log(`Started Claude session: ${sessionName}`);
   } catch (error: unknown) {
-    throw new Error(`Failed to start Claude session: ${getErrorMessage(error)}`);
+    // MF-S2-002: Clear cached path on all failures (harmless for non-path failures)
+    clearCachedClaudePath();
+    // SEC-SF-002: Log detailed error server-side, throw generic message to client
+    console.log(`[claude-session] Session start failed: ${getErrorMessage(error)}`);
+    throw new Error('Failed to start Claude session');
   }
 }
 
@@ -407,18 +626,14 @@ export async function sendMessageToClaude(
   }
 
   // Verify prompt state before sending (CONS-006, DRY-001)
-  const output = await capturePane(sessionName, { startLine: -50 });
-  if (!CLAUDE_PROMPT_PATTERN.test(stripAnsi(output))) {
+  // SF-001: Use getCleanPaneOutput helper (DRY)
+  const cleanOutput = await getCleanPaneOutput(sessionName);
+  if (!CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
     // Path B: Prompt not detected - wait for it (P1: throw on timeout)
     await waitForPrompt(sessionName, CLAUDE_SEND_PROMPT_WAIT_TIMEOUT);
   }
 
   // P0: Stability delay after prompt detection (both Path A and Path B)
-  // Same delay as startClaudeSession() to ensure Claude CLI input handler is ready
-  // NOTE: This 500ms delay also applies to 2nd+ messages. Currently acceptable since
-  // Claude CLI response time (seconds to tens of seconds) dwarfs this overhead.
-  // If future batch-send use cases arise, this could be optimized to first-message-only,
-  // but that optimization is deferred per YAGNI principle. (ref: F-3)
   await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
 
   // Send message using sendKeys consistently (CONS-001)
@@ -496,7 +711,7 @@ export async function stopClaudeSession(worktreeId: string): Promise<boolean> {
     const killed = await killSession(sessionName);
 
     if (killed) {
-      console.log(`✓ Stopped Claude session: ${sessionName}`);
+      console.log(`Stopped Claude session: ${sessionName}`);
     }
 
     return killed;

@@ -1,0 +1,138 @@
+{
+  "issue_number": 265,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-S3-001",
+        "item": "isClaudeRunning() がヘルスチェックなしで hasSession() のみに依存 - APIレイヤーとの不整合リスク",
+        "sections_updated": [
+          "Section 2 - アーキテクチャ設計（影響範囲図、影響マトリクス、後方互換性）",
+          "Section 3 - 設計パターン（isClaudeRunning()ヘルスチェック統合、コード例、影響APIルート一覧、方式(B)却下理由）",
+          "Section 7 - パフォーマンス設計（isClaudeRunning()オーバーヘッド分析テーブル）",
+          "Section 8 - 設計上の決定事項（採用設計テーブル、代替案比較に方式(B)追加）",
+          "Section 9 - 実装タスク（タスク13: isClaudeRunning変更、タスク14: テスト追加）",
+          "Section 10 - テスト方針（isClaudeRunningテストケース3件追加）",
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Must Fix Stage 3）"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "MF-S3-002",
+        "item": "tmux set-environment -g -u のグローバルスコープが他ツール（Codex/Gemini）のセッションに波及",
+        "sections_updated": [
+          "Section 3 - 設計パターン（sanitizeSessionEnvironment() JSDocに影響分析コメント追加）",
+          "Section 8 - 設計上の決定事項（採用設計テーブルに追加）",
+          "Section 9 - 実装タスク（タスク8にMF-S3-002追加）",
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Must Fix Stage 3）"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S3-001",
+        "item": "restartClaudeSession() が Bug 2 修正後のフローと二重回復パスを持つ",
+        "sections_updated": [
+          "Section 8 - 設計上の決定事項（restartClaudeSession()との相互作用、二重kill安全性確認）",
+          "Section 10 - テスト方針（結合テストにrestartClaudeSession二重回復パス追加）",
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Should Fix Stage 3）"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-S3-002",
+        "item": "getCleanPaneOutput() 導入による既存テストのモック構造変更の影響",
+        "sections_updated": [
+          "Section 9 - 実装タスク（タスク15: ANSIコード入りテスト追加）",
+          "Section 10 - テスト方針（テストモック構造の注意事項セクション追加、ANSIコードテストケース追加、結合テスト注意事項追加）",
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Should Fix Stage 3）"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-S3-003",
+        "item": "clearCachedClaudePath() の export が claude-session モジュールの公開 API を拡張する",
+        "sections_updated": [
+          "Section 11 - 制約条件の確認（ISP準拠に@internalタグ追記）",
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Should Fix Stage 3、ESLint no-restricted-imports将来検討）"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-S3-004",
+        "item": "sanitizeSessionEnvironment() の 100ms 待機がセッション初期化のタイムアウトマージンを圧迫",
+        "sections_updated": [
+          "Section 3 - 設計パターン（sanitizeSessionEnvironment()コード内コメントにSF-S3-004追加）",
+          "Section 7 - パフォーマンス設計（タイムアウトマージン分析テーブル追加）",
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Should Fix Stage 3）"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-S3-005",
+        "item": "cli-patterns.ts への新定数追加が下流モジュールの import ツリーに影響しない確認",
+        "sections_updated": [
+          "Section 11 - 制約条件の確認（モジュール管理の注記追加）",
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Should Fix Stage 3）"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S3-001",
+        "item": "CodexTool/GeminiTool の同種バグの潜在リスク",
+        "sections_updated": [
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Consider対応）"
+        ],
+        "status": "noted"
+      },
+      {
+        "id": "C-S3-002",
+        "item": "getClaudeSessionState() が isSessionHealthy を考慮しない",
+        "sections_updated": [
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Consider対応）"
+        ],
+        "status": "noted"
+      },
+      {
+        "id": "C-S3-003",
+        "item": "build-and-start.sh 経由の起動における CLAUDECODE 環境変数の伝搬パス",
+        "sections_updated": [
+          "Section 8 - 設計上の決定事項（代替案比較 Bug 3: daemon.tsのみ却下理由にbuild-and-start.sh根拠追加）",
+          "Section 13 - レビュー指摘事項サマリー",
+          "Section 14 - 実装チェックリスト（Consider対応）"
+        ],
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-265-claude-session-recovery-design-policy.md",
+  "sections_updated": [
+    "Section 2 - アーキテクチャ設計（影響範囲図拡張、影響マトリクス追加、後方互換性追加）",
+    "Section 3 - 設計パターン（isClaudeRunning()ヘルスチェック統合、sanitizeSessionEnvironment() MF-S3-002コメント追加）",
+    "Section 7 - パフォーマンス設計（タイムアウトマージン分析、isClaudeRunningオーバーヘッド分析、キャッシュクリアパス追加）",
+    "Section 8 - 設計上の決定事項（採用設計テーブル拡張、restartClaudeSession相互作用、代替案比較拡張）",
+    "Section 9 - 実装タスク（タスク13/14/15追加、依存関係更新）",
+    "Section 10 - テスト方針（テストケース追加、モック構造注意事項、テストカバレッジギャップ）",
+    "Section 11 - 制約条件の確認（ISP・モジュール管理追記）",
+    "Section 12 - レビュー履歴（Stage 3追加）",
+    "Section 13 - レビュー指摘事項サマリー（Stage 3全10件追加）",
+    "Section 14 - 実装チェックリスト（Must Fix Stage 3、Should Fix Stage 3、Consider Stage 3追加）"
+  ],
+  "timestamp": "2026-02-14T15:00:00Z"
+}

@@ -1,0 +1,155 @@
+{
+  "issue_number": 265,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-S2-001",
+        "item": "getCleanPaneOutput() の適用範囲が不明確 - 全4箇所の capturePane+stripAnsi パターン統一方針",
+        "section_updated": "設計パターン - 共通ヘルパー: getCleanPaneOutput()",
+        "status": "reflected",
+        "changes": [
+          "適用対象テーブル（全4箇所: waitForPrompt, startClaudeSession, sendMessageToClaude, isSessionHealthy）を追加",
+          "全箇所で lines=50 を使用していることを明記",
+          "タスク5 の説明に全4箇所の置換を明記",
+          "実装チェックリストに MF-S2-001 専用項目を追加",
+          "テスト方針に全4箇所適用確認のテストケースを追加"
+        ]
+      },
+      {
+        "id": "MF-S2-002",
+        "item": "startClaudeSession() の catch ブロックでのキャッシュクリア位置が既存エラーハンドリングと不整合",
+        "section_updated": "設計パターン - Bug 1: キャッシュ再検証",
+        "status": "reflected",
+        "changes": [
+          "キャッシュクリアの適用箇所と粒度セクション（MF-S2-002）を新規追加",
+          "全エラー時一律クリアの設計決定と判断根拠を明記",
+          "代替案（getClaudePath 個別 try-catch）を Section 8 に追加",
+          "コード例にMF-S2-002判断根拠コメントを追加",
+          "タスク2 にMF-S2-002 準拠を明記",
+          "実装チェックリストに MF-S2-002 専用項目を追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S2-001",
+        "item": "CLAUDE_SESSION_ERROR_PATTERNS の型宣言が既存 cli-patterns.ts のスタイルと不一致",
+        "section_updated": "設計パターン - エラーパターン定数の定義",
+        "status": "reflected",
+        "changes": [
+          "型宣言スタイル選択の明示的セクションを追加",
+          "response-poller.ts の先例を根拠として記載",
+          "既存定数のスタイル変更はスコープ外であることを明記",
+          "コード例のJSDocに SF-S2-001 準拠を追加",
+          "実装チェックリストに SF-S2-001 専用項目を追加"
+        ]
+      },
+      {
+        "id": "SF-S2-002",
+        "item": "SHELL_PROMPT_ENDINGS の配置先が未確定",
+        "section_updated": "設計パターン - シェルプロンプト検出パターンの定義",
+        "status": "reflected",
+        "changes": [
+          "配置先を claude-session.ts 内プライベート定数に確定",
+          "ISP/最小公開原則を選択理由として明記",
+          "将来の cli-patterns.ts への移動条件を記載",
+          "コード例を export なしに変更",
+          "import 文から SHELL_PROMPT_ENDINGS を除外",
+          "タスク4 の説明を更新（cli-patterns.ts から claude-session.ts に変更）",
+          "実装チェックリストの曖昧表記を解消",
+          "代替案セクション（Section 8）に cli-patterns.ts 配置案を追加"
+        ]
+      },
+      {
+        "id": "SF-S2-003",
+        "item": "sanitizeSessionEnvironment() の呼び出しタイミングが不明確",
+        "section_updated": "設計パターン - sanitizeSessionEnvironment()",
+        "status": "reflected",
+        "changes": [
+          "呼び出し位置セクション（SF-S2-003）を新規追加",
+          "createSession() 直後、sendKeys(claudePath) 直前と明示",
+          "呼び出し位置の根拠を3点で説明",
+          "フロー図を追加",
+          "タスク9 に SF-S2-003 呼出位置を明記",
+          "startClaudeSession() のコード例に呼出位置を反映",
+          "テスト方針に呼出位置検証テストケースを追加"
+        ]
+      },
+      {
+        "id": "SF-S2-004",
+        "item": "ensureHealthySession() の戻り値使用フローが既存セッション再利用ロジックと不整合",
+        "section_updated": "設計パターン - ensureHealthySession()",
+        "status": "reflected",
+        "changes": [
+          "ensureHealthySession() のフロー制御セクション（SF-S2-004）を新規追加",
+          "具体的なフロー制御コード例を追加（startClaudeSession 全体像）",
+          "hasSession true時の分岐（healthy→return、unhealthy→フォールスルー）を明示",
+          "フォールスルーの意図をコメントで明記する方針を記載",
+          "設計根拠を4点で説明",
+          "タスク9 に SF-S2-004 フロー制御を明記",
+          "テスト方針にフォールスルー動作テストケースを追加"
+        ]
+      },
+      {
+        "id": "SF-S2-005",
+        "item": "@internal JSDoc タグの使用パターンが既存実装で限定的",
+        "section_updated": "設計パターン - Bug 1: キャッシュ再検証",
+        "status": "reflected",
+        "changes": [
+          "clearCachedClaudePath() の JSDoc を拡張（version-checker.ts 先例準拠を明記）",
+          "ForTesting サフィックスを付けない理由（本番コードでも使用）を明記",
+          "タスク1 に SF-S2-005 準拠を追加",
+          "実装チェックリストに SF-S2-005 専用項目を追加"
+        ]
+      }
+    ]
+  },
+  "consider_items_noted": [
+    {
+      "id": "C-S2-001",
+      "item": "isSessionHealthy() の空出力チェックが初期化中セッションを誤判定する可能性",
+      "action": "空出力判定の意図をコード内コメントで明記。isSessionHealthy() のコード例にコメント追加済み。実装チェックリストに確認項目追加"
+    },
+    {
+      "id": "C-S2-002",
+      "item": "SHELL_PROMPT_ENDINGS のシェルプロンプト誤検出リスク",
+      "action": "実用上問題なしと判断。設計根拠セクションに記載。将来対応の Consider 項目として実装チェックリストに追加"
+    },
+    {
+      "id": "C-S2-003",
+      "item": "テストファイルの命名パターンとテスト追加方針",
+      "action": "テスト構造方針セクション（C-S2-003）を Section 10 に新規追加。describe ブロック構造をコード例で明示。タスク12 に C-S2-003 準拠を追加"
+    }
+  ],
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-265-claude-session-recovery-design-policy.md",
+  "sections_updated": [
+    "Section 3: 設計パターン - Bug 1 キャッシュクリア粒度（MF-S2-002）追加",
+    "Section 3: 設計パターン - getCleanPaneOutput 適用範囲テーブル（MF-S2-001）追加",
+    "Section 3: 設計パターン - エラーパターン型宣言スタイル（SF-S2-001）追加",
+    "Section 3: 設計パターン - SHELL_PROMPT_ENDINGS 配置先確定（SF-S2-002）",
+    "Section 3: 設計パターン - isSessionHealthy import文更新（SF-S2-002）",
+    "Section 3: 設計パターン - isSessionHealthy 空出力コメント（C-S2-001）追加",
+    "Section 3: 設計パターン - ensureHealthySession フロー制御（SF-S2-004）追加",
+    "Section 3: 設計パターン - sanitizeSessionEnvironment 呼出位置（SF-S2-003）追加",
+    "Section 3: 設計パターン - clearCachedClaudePath JSDoc更新（SF-S2-005）",
+    "Section 3: 設計パターン - startClaudeSession 統合コード例追加",
+    "Section 8: 設計上の決定事項 - 採用設計テーブルに5項目追加",
+    "Section 8: 代替案 - getClaudePath個別try-catch（MF-S2-002）追加",
+    "Section 8: 代替案 - SHELL_PROMPT_ENDINGS cli-patterns配置（SF-S2-002）追加",
+    "Section 9: 実装タスク - タスク1-5,9,12 の説明をレビュー指摘反映で更新",
+    "Section 10: テスト方針 - テスト構造方針（C-S2-003）セクション追加",
+    "Section 10: テスト方針 - テストケース3件追加（空出力、全4箇所適用、呼出位置）",
+    "Section 11: 制約条件 - ISP項目追加（SF-S2-002）、DRY記述更新（MF-S2-001）",
+    "Section 12: レビュー履歴 - Stage 2 行追加",
+    "Section 13: レビュー指摘事項サマリー - Stage 2 セクション全体追加",
+    "Section 14: 実装チェックリスト - Must Fix Stage 2 セクション追加",
+    "Section 14: 実装チェックリスト - Should Fix Stage 2 セクション追加",
+    "Section 14: 実装チェックリスト - Consider項目3件追加（C-S2-001/002/003）"
+  ],
+  "timestamp": "2026-02-14T12:30:00Z"
+}
