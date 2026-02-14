@@ -1,0 +1,41 @@
+{
+  "issue_number": 278,
+  "title": "fix(#257): fetch Data Cacheによりバージョンチェックが機能しない＋Info通知表示",
+  "acceptance_criteria": [
+    "fetch に cache: \"no-store\" が指定されていること",
+    ".next/cache/fetch-cache/ にGitHub APIレスポンスがキャッシュされないこと",
+    "サーバー起動後に curl /api/app/update-check でリアルタイムのGitHub API結果が返ること",
+    "新バージョンリリース後に hasUpdate: true が返ること",
+    "アップデート対象バージョンが存在する場合、Infoボタン/タブに通知インジケーターが表示されること",
+    "アップデートがない場合（最新バージョン）には通知インジケーターが表示されないこと",
+    "既存テストがすべてパスすること"
+  ],
+  "implementation_tasks": [
+    "NotificationDot共通コンポーネントを作成する（src/components/common/NotificationDot.tsx）",
+    "version-checker.ts の fetch に cache: 'no-store' を追加する",
+    "checkForUpdate() の JSDoc に globalThis キャッシュの説明を追記する",
+    "WorktreeDetailRefactored に useUpdateCheck フック呼び出しを追加する",
+    "DesktopHeader に hasUpdate prop を追加し、Infoボタンに通知インジケーターを表示する",
+    "DesktopHeader Infoボタンに relative class を追加する",
+    "MobileTabBar に hasUpdate prop を追加し、Infoタブに通知インジケーターを表示する",
+    "version-checker.test.ts に cache: 'no-store' 検証テストを追加する",
+    "MobileTabBar.test.tsx に hasUpdate インジケーターテストを追加する",
+    "NotificationDot.test.tsx を作成する",
+    "WorktreeDetailRefactored.test.tsx に useUpdateCheck mock とDesktopHeaderバッジテストを追加する"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+  "work_plan_path": "dev-reports/issue/278/work-plan.md",
+  "review_findings": {
+    "must_fix": [
+      "MF-001: NotificationDot共通コンポーネントの作成（DRY原則）"
+    ],
+    "should_fix": [
+      "SF-002: checkForUpdate() JSDocにglobalThisキャッシュの説明を明記",
+      "CONS-SF-001: DesktopHeader Info buttonに'relative' class追加",
+      "IMP-SF-001: WorktreeDetailRefactored.test.tsxにDesktopHeaderバッジテスト追加",
+      "SEC-SF-001: NotificationDot className propのJSDocにセキュリティ注記追加",
+      "SEC-SF-002: version-checker.test.tsに cache: 'no-store' 検証テスト追加"
+    ]
+  }
+}

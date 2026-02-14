@@ -291,4 +291,42 @@ describe('MobileTabBar', () => {
       });
     });
   });
+
+  describe('Update Notification Badge (Issue #278)', () => {
+    it('should show info-update-badge when hasUpdate is true', () => {
+      render(<MobileTabBar {...defaultProps} hasUpdate={true} />);
+
+      const badge = screen.getByTestId('info-update-badge');
+      expect(badge).toBeInTheDocument();
+    });
+
+    it('should not show info-update-badge when hasUpdate is false', () => {
+      render(<MobileTabBar {...defaultProps} hasUpdate={false} />);
+
+      expect(screen.queryByTestId('info-update-badge')).not.toBeInTheDocument();
+    });
+
+    it('should not show info-update-badge when hasUpdate is undefined', () => {
+      render(<MobileTabBar {...defaultProps} />);
+
+      expect(screen.queryByTestId('info-update-badge')).not.toBeInTheDocument();
+    });
+
+    it('should display info-update-badge on the info tab', () => {
+      render(<MobileTabBar {...defaultProps} hasUpdate={true} />);
+
+      const infoTab = screen.getByRole('tab', { name: /info/i });
+      const badge = screen.getByTestId('info-update-badge');
+
+      // Badge should be inside the info tab button
+      expect(infoTab.contains(badge)).toBe(true);
+    });
+
+    it('should have aria-label on info-update-badge for accessibility', () => {
+      render(<MobileTabBar {...defaultProps} hasUpdate={true} />);
+
+      const badge = screen.getByTestId('info-update-badge');
+      expect(badge).toHaveAttribute('aria-label', 'Update available');
+    });
+  });
 });

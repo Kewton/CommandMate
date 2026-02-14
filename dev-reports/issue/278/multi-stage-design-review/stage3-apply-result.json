@@ -1,0 +1,62 @@
+{
+  "issue_number": 278,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "IMP-SF-001",
+        "item": "WorktreeDetailRefactored のユニットテストで DesktopHeader の hasUpdate props 伝搬を検証するテストが未定義",
+        "sections_updated": [
+          "Section 4-2 (DesktopHeader テスト方針追加)",
+          "Section 10 (受入条件追加)",
+          "Section 11 (実装チェックリスト追加)",
+          "Section 13 (レビュー指摘事項サマリー追加)"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "IMP-SF-002",
+        "item": "useUpdateCheck() の追加による WorktreeDetailRefactored の再レンダリング影響の明示化",
+        "sections_updated": [
+          "Section 7 (パフォーマンス設計に再レンダリング影響分析追加)",
+          "Section 10 (受入条件追加)",
+          "Section 11 (実装チェックリスト追加)",
+          "Section 13 (レビュー指摘事項サマリー追加)"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IMP-C-001",
+        "item": "MobileTabBarProps の hasUpdate optional prop は後方互換",
+        "status": "noted in review summary"
+      },
+      {
+        "id": "IMP-C-002",
+        "item": "既存 MobileTabBar テストは hasUpdate 未指定のケースを暗黙的にカバー",
+        "status": "noted in review summary"
+      },
+      {
+        "id": "IMP-C-003",
+        "item": "cache: no-store 追加後のネットワーク動作変化",
+        "status": "noted in review summary"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+  "sections_updated": [
+    "Section 4-2 (DesktopHeader テスト方針 IMP-SF-001)",
+    "Section 7 (パフォーマンス設計 IMP-SF-002)",
+    "Section 10 (受入条件)",
+    "Section 11 (実装チェックリスト)",
+    "Section 12 (レビュー履歴)",
+    "Section 13 (レビュー指摘事項サマリー)"
+  ],
+  "timestamp": "2026-02-14T22:30:00+09:00"
+}

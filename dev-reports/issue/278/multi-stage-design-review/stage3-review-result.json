@@ -1,0 +1,146 @@
+{
+  "issue_number": 278,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "IMP-SF-001",
+        "category": "test coverage gap",
+        "title": "WorktreeDetailRefactored にはユニットテストで DesktopHeader の props 伝搬を網羅的にテストする仕組みがない",
+        "description": "DesktopHeader は WorktreeDetailRefactored.tsx 内で定義された内部コンポーネントであり、外部からの単体テストが困難。hasUpdate prop の伝搬が正しく動作するかは結合的なテストでしか検証できない。設計書では tests/unit/components/mobile/mobile-tab-bar.test.tsx のテスト追加は明記されているが、DesktopHeader 側のテスト方針は明示されていない。",
+        "severity": "low",
+        "recommendation": "WorktreeDetailRefactored のユニットテスト（tests/unit/components/WorktreeDetailRefactored.test.tsx）にて、info-update-indicator の data-testid が特定条件下で表示されることを検証するテストケースの追加を検討する。"
+      },
+      {
+        "id": "IMP-SF-002",
+        "category": "re-render scope",
+        "title": "useUpdateCheck() の追加による WorktreeDetailRefactored の再レンダリング影響の明示化",
+        "description": "WorktreeDetailRefactored に useUpdateCheck() を追加すると、loading/data/error の3つの state 変化で再レンダリングが発生する。DesktopHeader と MobileTabBar は memo() でラップされているため子コンポーネントへの伝搬は適切に制御されるが、WorktreeDetailRefactored 自体のレンダリングコスト（2081行のコンポーネント）について設計書で考慮が述べられていない。",
+        "severity": "low",
+        "recommendation": "設計書 Section 7 パフォーマンス設計に、useUpdateCheck の state 変更が WorktreeDetailRefactored の再レンダリングをトリガーするが、useUpdateCheck は mount 時に1回のみ fetch するため state 変化は最大2回（loading: true -> false + data 設定）であり、パフォーマンスへの影響は無視可能である旨を補足することを推奨する。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IMP-C-001",
+        "category": "backward compatibility",
+        "title": "MobileTabBarProps の hasUpdate optional prop は後方互換",
+        "description": "MobileTabBarProps に hasUpdate?: boolean を追加する変更は optional prop であるため、既存の呼び出し元（WorktreeDetailRefactored.tsx L1991-1996）への影響はない。未指定時は undefined となり、条件付きレンダリングで falsy として処理されるため安全。",
+        "severity": "info"
+      },
+      {
+        "id": "IMP-C-002",
+        "category": "existing test stability",
+        "title": "既存 MobileTabBar テストは hasUpdate 未指定のケースを暗黙的にカバー",
+        "description": "tests/unit/components/mobile/MobileTabBar.test.tsx の defaultProps には hasUpdate が含まれていないため、現行テストは全て hasUpdate=undefined のケースで実行される。新しいプロパティ追加後も既存テストは変更不要で全てパスする。",
+        "severity": "info"
+      },
+      {
+        "id": "IMP-C-003",
+        "category": "version-checker fetch behavior",
+        "title": "cache: no-store 追加後のネットワーク動作変化",
+        "description": "cache: 'no-store' の追加により、Next.js ビルド時の Data Cache が無効化される。本番環境では globalThis キャッシュ（1時間 TTL）が引き続き有効なため、GitHub API への実際のリクエスト頻度は変化しない。開発サーバー（npm run dev）ではホットリロード時に globalThis が保持されるため同様に影響なし。唯一の行動変化は、npm run build 時にビルドキャッシュされた結果が使用されなくなることだが、これは本修正の目的そのものである。",
+        "severity": "info"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "directly_changed_files": [
+      {
+        "file": "src/lib/version-checker.ts",
+        "change": "fetch に cache: 'no-store' を1行追加",
+        "risk": "low",
+        "rationale": "既存の fetch 呼び出しへの最小限の変更。globalThis キャッシュ層は影響なし。"
+      },
+      {
+        "file": "src/components/common/NotificationDot.tsx",
+        "change": "新規ファイル作成",
+        "risk": "low",
+        "rationale": "新規コンポーネントのため既存コードへの影響なし。"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change": "useUpdateCheck フック追加、DesktopHeaderProps に hasUpdate 追加、MobileTabBar に hasUpdate prop 伝搬",
+        "risk": "low",
+        "rationale": "DesktopHeader は内部コンポーネントのため API 変更の外部影響なし。MobileTabBar は optional prop 追加のため後方互換。"
+      },
+      {
+        "file": "src/components/mobile/MobileTabBar.tsx",
+        "change": "MobileTabBarProps に hasUpdate?: boolean 追加、info タブにドットバッジ条件付き表示",
+        "risk": "low",
+        "rationale": "optional prop のため既存の import/使用箇所に影響なし。"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/components/worktree/VersionSection.tsx",
+        "impact": "useUpdateCheck の二重呼び出し（globalThis キャッシュで吸収）",
+        "risk": "low"
+      },
+      {
+        "file": "src/hooks/useUpdateCheck.ts",
+        "impact": "変更なし。新たに WorktreeDetailRefactored からも呼ばれるが、フック自体の変更は不要。",
+        "risk": "low"
+      },
+      {
+        "file": "src/app/api/app/update-check/route.ts",
+        "impact": "変更なし。cache: no-store は version-checker.ts 内の fetch に適用され、API ルート自体には影響しない。",
+        "risk": "low"
+      },
+      {
+        "file": "src/components/sidebar/BranchListItem.tsx",
+        "impact": "変更なし。将来的に NotificationDot に置き換え可能だが、Issue #278 のスコープ外。",
+        "risk": "low"
+      }
+    ],
+    "test_impact": [
+      {
+        "file": "tests/unit/lib/version-checker.test.ts",
+        "impact": "cache: no-store の検証テスト追加が必要。既存テストは fetch mock を使用しており、cache オプションの有無で動作は変わらないため既存テストは全てパス。",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/mobile/MobileTabBar.test.tsx",
+        "impact": "hasUpdate インジケーターテスト追加が必要。defaultProps に hasUpdate が含まれていないため既存テストは全てパス。",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/common/notification-dot.test.tsx",
+        "impact": "新規テストファイル作成。既存テストへの影響なし。",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "impact": "useUpdateCheck の mock 追加が必要になる可能性がある。WorktreeDetailRefactored に新しいフック呼び出しが追加されるため、既存テストが useUpdateCheck を mock していない場合にテスト失敗のリスクがある。",
+        "risk": "medium"
+      }
+    ]
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md",
+    "src/lib/version-checker.ts",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/VersionSection.tsx",
+    "src/components/worktree/UpdateNotificationBanner.tsx",
+    "src/hooks/useUpdateCheck.ts",
+    "src/app/api/app/update-check/route.ts",
+    "src/components/sidebar/BranchListItem.tsx",
+    "src/components/common/Toast.tsx",
+    "src/components/common/LocaleSwitcher.tsx",
+    "tests/unit/lib/version-checker.test.ts",
+    "tests/unit/components/mobile/MobileTabBar.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "timestamp": "2026-02-14T22:00:00+09:00"
+}

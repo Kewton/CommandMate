@@ -142,7 +142,7 @@ tests/
 | `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数。Issue #212: 複数行メッセージのPasted text検知+Enter再送。**Issue #265: キャッシュ無効化・ヘルスチェック・CLAUDECODE除去** - clearCachedClaudePath()でCLI更新時の自動回復、isSessionHealthy()/ensureHealthySession()で壊れたセッション検出・再作成、sanitizeSessionEnvironment()でCLAUDECODE環境変数除去、getCleanPaneOutput()共通ヘルパー、isValidClaudePath()でCLAUDE_PATHバリデーション） |
 | `src/lib/response-poller.ts` | レスポンスポーリングとthinking検出（Issue #188: L353/L547-554ウィンドウ化、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数、detectPromptWithOptions()ヘルパー、Gemini LOADING_INDICATORS配列抽出。Issue #212: cleanClaudeResponse skipPatternsにPASTED_TEXT_PATTERN追加。**Issue #235: rawContent優先DB保存** - DB保存時にrawContent || cleanContentを使用し、完全なプロンプト出力を保持） |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証。Issue #193: DetectPromptOptions interface追加、requireDefaultIndicatorフラグによる❯なし形式対応、Layer 5 SEC-001ガード。Issue #208: SEC-001b質問行妥当性検証追加、isQuestionLikeLine()による番号付きリスト誤検出防止。**Issue #235: rawContentフィールド追加** - PromptDetectionResultにrawContent?:stringを追加し、truncateRawContent()で最大200行/5000文字に制限。lastLinesを末尾20行に拡張。**Issue #256: isQuestionLikeLine()の複数行質問対応**（行内?チェック、キーワード単独マッチ）、SEC-001b上方走査（findQuestionLineInRange()関数、SF-S4-001 scanRangeバリデーション）、Pass 2ループ内isQuestionLikeLine()先行チェック（MF-001: isContinuationLine SRP維持）、QUESTION_SCAN_RANGE=3） |
-| `src/lib/version-checker.ts` | GitHub API呼び出し、semver比較、globalThisキャッシュ（Issue #257: バージョンアップ通知機能。SEC-001 SSRF防止、SEC-SF-001レスポンスバリデーション） |
+| `src/lib/version-checker.ts` | GitHub API呼び出し、semver比較、globalThisキャッシュ（Issue #257: バージョンアップ通知機能。Issue #278: cache: 'no-store'追加でNext.js Data Cache無効化。SEC-001 SSRF防止、SEC-SF-001レスポンスバリデーション、JSDocでglobalThisキャッシュ動作を明記） |
 | `src/hooks/useUpdateCheck.ts` | アップデートチェック用カスタムフック（Issue #257: /api/app/update-check呼び出し、loading/error/data状態管理） |
 | `src/components/worktree/VersionSection.tsx` | バージョン表示+通知統合コンポーネント（Issue #257: SF-001 DRY準拠、InfoModal/MobileInfoContent共通化） |
 | `src/components/worktree/UpdateNotificationBanner.tsx` | アップデート通知バナーUI（Issue #257: MF-001 SRP準拠、i18n対応、GitHub Releasesリンク） |
@@ -186,6 +186,7 @@ tests/
 | `src/lib/locale-cookie.ts` | ロケールCookieユーティリティ（SameSite=Lax、条件付きSecure、1年有効期限） |
 | `src/hooks/useLocaleSwitch.ts` | ロケール切替フック（バリデーション、Cookie/localStorage永続化、reload） |
 | `src/components/common/LocaleSwitcher.tsx` | 言語切替ドロップダウンコンポーネント（Sidebar下部配置） |
+| `src/components/common/NotificationDot.tsx` | 通知ドットバッジ共通コンポーネント（Issue #278: DRY原則準拠、w-2 h-2 rounded-full bg-blue-500、Desktop/Mobile通知インジケーター統一） |
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング（getDateFnsLocale()、enUS/jaサポート） |
 | `src/config/github-links.ts` | GitHub URL定数の一元管理（Issue #264: GITHUB_REPO_BASE_URL派生、DRY原則対応、SSRF防止のためGITHUB_API_URLは除外） |
 | `src/components/worktree/FeedbackSection.tsx` | フィードバックリンクセクション（Issue #264: Bug Report/Feature Request/Question/View Issues、noopener noreferrer、i18n対応） |

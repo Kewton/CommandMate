@@ -574,5 +574,29 @@ describe('version-checker', () => {
       // Should silently fail and return null
       expect(result).toBeNull();
     });
+
+    it('should pass cache: no-store to fetch to prevent Next.js Data Cache [Issue #278]', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          tag_name: 'v0.3.0',
+          html_url: 'https://github.com/Kewton/CommandMate/releases/tag/v0.3.0',
+          name: 'v0.3.0',
+          published_at: '2026-02-10T00:00:00Z',
+        }),
+        headers: new Headers(),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      await checkForUpdate();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          cache: 'no-store',
+        })
+      );
+    });
   });
 });

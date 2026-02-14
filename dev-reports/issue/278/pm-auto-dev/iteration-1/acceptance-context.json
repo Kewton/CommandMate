@@ -1,0 +1,23 @@
+{
+  "issue_number": 278,
+  "feature_summary": "fetch Data Cacheによりバージョンチェックが機能しない問題の修正とInfo通知インジケーター表示",
+  "acceptance_criteria": [
+    "fetch に cache: \"no-store\" が指定されていること",
+    ".next/cache/fetch-cache/ にGitHub APIレスポンスがキャッシュされないこと",
+    "サーバー起動後に curl /api/app/update-check でリアルタイムのGitHub API結果が返ること",
+    "新バージョンリリース後に hasUpdate: true が返ること",
+    "アップデート対象バージョンが存在する場合、Infoボタン/タブに通知インジケーターが表示されること",
+    "アップデートがない場合（最新バージョン）には通知インジケーターが表示されないこと",
+    "既存テストがすべてパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: fetch cache設定の検証 - version-checker.ts の fetch呼び出しに cache: 'no-store' が指定されているか確認する",
+    "シナリオ2: Desktop版アップデート通知インジケーターの表示 - hasUpdate=true の場合、DesktopHeader Infoボタンに data-testid='info-update-indicator' が表示されることを確認する",
+    "シナリオ3: Desktop版アップデート通知インジケーターの非表示 - hasUpdate=false の場合、インジケーターが表示されないことを確認する",
+    "シナリオ4: Mobile版アップデート通知インジケーターの表示 - hasUpdate=true の場合、MobileTabBar Infoタブに data-testid='info-update-badge' が表示されることを確認する",
+    "シナリオ5: Mobile版アップデート通知インジケーターの非表示 - hasUpdate=false の場合、インジケーターが表示されないことを確認する",
+    "シナリオ6: NotificationDot共通コンポーネントのprops渡し - data-testid, aria-label, className が正しく渡されることを確認する",
+    "シナリオ7: 既存テストの互換性 - 全ての既存テストがパスすることを確認する"
+  ],
+  "tdd_result_path": "dev-reports/issue/278/pm-auto-dev/iteration-1/tdd-result.json"
+}

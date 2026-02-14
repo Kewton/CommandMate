@@ -1,0 +1,7 @@
+{
+  "issue_number": 278,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_policy_path": "dev-reports/design/issue-278-fetch-cache-fix-and-update-indicator-design-policy.md"
+}
