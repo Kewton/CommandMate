@@ -148,7 +148,8 @@ tests/
 | `src/components/worktree/UpdateNotificationBanner.tsx` | アップデート通知バナーUI（Issue #257: MF-001 SRP準拠、i18n対応、GitHub Releasesリンク） |
 | `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
-| `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応） |
+| `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応。**Issue #287: promptType/defaultOptionNumber送信** - prompt-response APIリクエストにpromptType/defaultOptionNumberを含め、promptCheck再検証失敗時のフォールバック対応） |
+| `src/lib/prompt-response-body-builder.ts` | プロンプト応答リクエストボディ構築ユーティリティ（Issue #287: buildPromptResponseBody()関数でpromptType/defaultOptionNumberを含むリクエストボディを生成、DRY原則対応、useAutoYes/WorktreeDetailRefactoredから共通化） |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/codex.ts` | Codex CLI tmuxセッション管理（Issue #212: 複数行メッセージのPasted text検知+Enter再送、getErrorMessage()ヘルパー抽出） |
 | `src/lib/session-cleanup.ts` | セッション/ポーラー停止の一元管理（Facade パターン） |

@@ -1,0 +1,122 @@
+{
+  "issue_number": 287,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC-S4-001",
+        "title": "prompt-response route.ts の promptType / defaultOptionNumber バリデーション不足",
+        "description": "設計方針書 Section 9 では promptType を 'yes_no' | 'multiple_choice' | undefined のみ許可と記載しているが、route.ts 側で実際のランタイムバリデーション（不正な文字列の拒否またはフォールバック）の具体的な実装が明記されていない。JSON.parse 後の body.promptType が任意の文字列である可能性があり、effectivePromptType に不正な値が入った場合の動作を明示的にガードすべき。defaultOptionNumber についても非整数（float、負数、NaN）のバリデーションが必要。",
+        "severity": "medium",
+        "recommendation": "route.ts の POST 関数内で body.promptType と body.defaultOptionNumber のランタイムバリデーションを追加する。promptType は ['yes_no', 'multiple_choice'] に含まれない場合は undefined として扱う。defaultOptionNumber は Number.isInteger() かつ正の整数であることを検証し、不正な場合は undefined として扱う。",
+        "owasp_category": "A03:2021 - Injection"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC-S4-002",
+        "title": "route.ts の params.id がバリデーションなしで使用されている",
+        "description": "prompt-response/route.ts では params.id が getWorktreeById() と captureSessionOutput() に直接渡されている。auto-yes-manager.ts には isValidWorktreeId() バリデーションがあるが、route.ts にはない。getWorktreeById は prepared statement 経由で SQL インジェクションは防止されているが、params.id は getSessionName() 経由で tmux コマンドに使用されるため、validateSessionName() による間接的な防御に依存している。route.ts のエントリーポイントで明示的なバリデーションを行うことが防御の深化として望ましい。",
+        "severity": "low",
+        "recommendation": "route.ts の POST 関数冒頭で params.id に対して isValidWorktreeId() 相当のバリデーションを追加する。これは既存の問題であり Issue #287 のスコープ外だが、本 Issue での修正時に合わせて対応することを推奨する。",
+        "owasp_category": "A03:2021 - Injection"
+      },
+      {
+        "id": "SEC-S4-003",
+        "title": "エラーレスポンスに params.id をそのまま含めている",
+        "description": "route.ts L44 で Worktree '${params.id}' not found とユーザー入力をエラーメッセージに含めている。これは XSS には直接つながらない（JSON レスポンスのため）が、ログインジェクションや情報漏洩のリスクがある。既存の問題であるが、設計方針書で新規に追加される sendPromptAnswer() のエラーハンドリングでも同様のパターンを踏襲しないよう注意が必要。",
+        "severity": "low",
+        "recommendation": "エラーメッセージに params.id を含める場合は、ログ出力時にサニタイズするか、固定メッセージ（Worktree not found）にしてユーザー入力を除外する。新規のエラーハンドリングコードでは固定メッセージパターンを採用する。",
+        "owasp_category": "A09:2021 - Security Logging and Monitoring Failures"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC-S4-C01",
+        "title": "answer フィールドの長さ制限の検討",
+        "description": "PromptResponseRequest.answer は string 型で長さ制限がない。通常のプロンプト応答は短いが、悪意のある長大な文字列が tmux sendKeys に渡された場合のリソース消費を考慮する。sendKeys は execAsync 経由でシェルコマンドを実行するため、極端に長い文字列はコマンドラインバッファを超過する可能性がある。",
+        "severity": "low",
+        "recommendation": "answer フィールドに合理的な最大長（例: 1000文字）を設定する。これは本 Issue のスコープ外だが、将来の改善として検討する。"
+      },
+      {
+        "id": "SEC-S4-C02",
+        "title": "buildPromptResponseBody の入力がクライアントサイドのみで構築される前提の確認",
+        "description": "prompt-response-utils.ts はクライアントサイドに配置され、buildPromptResponseBody() が構築したリクエストボディは fetch でサーバーに送信される。クライアントサイドのバリデーションは回避可能であるため、サーバーサイド（route.ts）でのバリデーションが最終防衛ラインとなる。SEC-S4-001 のバリデーション実装が本 Consider の前提条件となる。",
+        "severity": "low",
+        "recommendation": "クライアントサイドのバリデーションはユーザビリティ目的と位置づけ、セキュリティバリデーションはサーバーサイドで必ず実行する設計方針を維持する。"
+      },
+      {
+        "id": "SEC-S4-C03",
+        "title": "cursor-key-sender.ts の offset 計算のバウンドチェック",
+        "description": "buildCursorKeys() で計算される offset (targetNum - effectiveDefaultNum) に上限・下限がない。極端な offset 値（例: targetNum=999999, effectiveDefaultNum=1）の場合、大量のキー入力が生成される可能性がある。tmux sendSpecialKeys はキーごとに 100ms の遅延があるため、999998回のキー送信は約28時間かかる計算になる。",
+        "severity": "low",
+        "recommendation": "offset の絶対値に上限（例: 100）を設けるか、keys 配列の最大長を制限する。ただし、現実的なプロンプト選択肢数は多くて10程度であるため、リスクは極めて低い。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "notes": "認証・認可のチェックは既存のアーキテクチャ（ローカルアプリケーション）に準拠。外部アクセスを想定しない設計。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "本変更では暗号化処理は含まれない。新規フィールド（promptType, defaultOptionNumber）は機密情報ではない。"
+    },
+    "A03_injection": {
+      "status": "conditional_pass",
+      "notes": "tmux コマンドインジェクション防止は validateSessionName() と ALLOWED_SPECIAL_KEYS で実装済み。sendKeys の quote エスケープも対応済み。ただし、新規フィールドのランタイムバリデーション追加が必要（SEC-S4-001）。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "promptCheck 優先のフォールバック設計は安全側に倒す設計。multi-select フォールバック非対応は安全側の制限。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "新規設定項目なし。既存のセキュリティ設定に影響なし。"
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "notes": "新規依存ライブラリの追加なし。"
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "notes": "本アプリケーションはローカル実行を前提としており、認証機能は対象外。"
+    },
+    "A08_data_integrity": {
+      "status": "pass",
+      "notes": "リクエストボディの JSON パースは Next.js の req.json() 経由で安全に処理。デシリアライゼーション脆弱性なし。"
+    },
+    "A09_logging_monitoring": {
+      "status": "conditional_pass",
+      "notes": "エラーログに params.id を含めるパターンが存在（SEC-S4-003）。新規コードでは固定メッセージパターンの採用を推奨。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "本変更ではサーバーサイドのHTTPリクエスト発行なし。"
+    }
+  },
+  "reviewed_files": [
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/types/models.ts",
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-session.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useAutoYes.ts",
+    "dev-reports/design/issue-287-prompt-response-fallback-design-policy.md"
+  ],
+  "timestamp": "2026-02-15T12:00:00Z"
+}
