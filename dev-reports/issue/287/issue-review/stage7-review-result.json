@@ -1,0 +1,190 @@
+{
+  "issue_number": 287,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-02-15",
+  "previous_review_comparison": {
+    "stage3_findings_status": {
+      "MF-1": {
+        "original_issue": "useAutoYes.tsのprompt-response API呼び出しがアプローチBの型変更に追従できない可能性がある",
+        "status": "resolved",
+        "evidence": "Issue本文の「影響を受けるAPIクライアント」セクションにuseAutoYes.tsが2番目のクライアントとして明記され、L85-89のfetch呼び出しの修正内容が具体的に記載されている。修正ファイル一覧にもuseAutoYes.tsが含まれ、promptType/defaultOptionNumberの追加方法が詳述されている。受け入れ条件にも「useAutoYes.ts の prompt-response API呼び出しに promptType/defaultOptionNumber が含まれること」が追加されている。Stage 5のSF-2指摘（L76→L30の行番号修正）も反映済み"
+      },
+      "SF-1": {
+        "original_issue": "PromptMessage.tsxのonRespondコールバックも同一APIを呼び出すパスに含まれるが、修正箇所リストに含まれていない",
+        "status": "resolved",
+        "evidence": "「UI側で変更不要なファイル（非破壊的アプローチの場合）」セクションが追加され、PromptMessage.tsx, MobilePromptSheet.tsx, PromptPanel.tsxの3ファイルがonRespondシグネチャ不変のため修正不要であることが明記されている。非破壊的アプローチの推奨理由（handlePromptRespond内部でstate.prompt.dataから取得）も記載済み"
+      },
+      "SF-2": {
+        "original_issue": "onRespondシグネチャの変更方針（破壊的 vs 非破壊的）が明示されていない",
+        "status": "resolved",
+        "evidence": "「推奨する実装戦略: 非破壊的アプローチ」サブセクションが追加され、onRespondのシグネチャ(answer: string) => Promise<void>は変更しない方針が明記されている。根拠として、handlePromptRespond内部でstate.prompt.dataにアクセスすることが可能（dependency配列への追加が必要）であること、破壊的アプローチではPromptMessage.tsx(L18), MobilePromptSheet.tsx(L44), PromptPanel.tsx(L46)の全てのonRespond型定義の同期が必要になり修正範囲が拡大することが記載されている"
+      },
+      "SF-3": {
+        "original_issue": "結合テスト（worktree-detail-integration.test.tsx）でprompt-response呼び出しのリクエストボディ検証が不十分",
+        "status": "resolved",
+        "evidence": "修正ファイル一覧にtests/integration/worktree-detail-integration.test.tsxが追加され、「prompt-response API呼び出しのリクエストボディ内容（answer, cliTool, promptType, defaultOptionNumber）を検証するテストケースを追加」と修正内容が記載されている。受け入れ条件にも「結合テスト（worktree-detail-integration.test.tsx）で prompt-response リクエストボディの内容が検証されること」が含まれている"
+      },
+      "NTH-1": {
+        "original_issue": "route.tsのPromptResponseRequestインターフェースがローカル定義であり、src/types/models.tsと二重管理になる可能性がある",
+        "status": "resolved",
+        "evidence": "修正ファイル一覧のroute.ts修正内容に「PromptResponseRequest型はこのIssueではroute.ts内のローカル定義のまま拡張し、src/types/models.tsへの共有化は別Issueとする」とスコープ方針が明記されている。Stage 5のNTH-2指摘が反映された結果"
+      },
+      "NTH-2": {
+        "original_issue": "CLAUDE.mdのモジュール説明にprompt-response route.tsの変更が反映される必要がある",
+        "status": "acknowledged_not_in_scope",
+        "evidence": "Issueに明示的な記載はないが、ドキュメント更新は実装完了後の作業として暗黙的にスコープ外。本Issueの修正ファイル一覧にCLAUDE.mdは含まれておらず、実装後のCLAUDE.md更新は開発者判断に委ねられている。影響度は低いため問題なし"
+      }
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "promptCheck=null時にbody.promptTypeからフォールバックでカーソルキー方式を決定するロジックにおいて、defaultOptionNumberが0の場合のエッジケースが未考慮",
+        "location": "## 修正方針案 > アプローチBの修正箇所 > フォールバック判定ロジックの疑似コード",
+        "recommendation": "フォールバック判定の疑似コードでは isClaudeMultiChoice 判定後に body.defaultOptionNumber を使ってカーソルキーのoffsetを計算するが、defaultOptionNumber が undefined の場合のフォールバック値が明示されていない。route.ts の既存コードでは defaultNum = defaultOption?.number ?? 1 としてフォールバック値1を使用している（L104）。アプローチBのフォールバックパスでも同様の ?? 1 フォールバックが必要であることをIssueに明記すべき。特に、UIが古いバージョン（promptType/defaultOptionNumberを送信しない）でAPIが新バージョンの場合、body.defaultOptionNumber は undefined となるため、このケースのテストも受け入れ条件に含めるのが望ましい",
+        "evidence": "route.ts:L103-104で const defaultOption = mcOptions.find(o => o.isDefault); const defaultNum = defaultOption?.number ?? 1; としてフォールバック値1を使用している。フォールバックパスでは promptCheck が null のため mcOptions も利用不可であり、body.defaultOptionNumber のみが情報源となる。body.defaultOptionNumber が undefined の場合のデフォルト値1の使用を明示する必要がある"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "auto-yes-manager.tsのカーソルキーロジックがroute.tsと重複しているが、auto-yes-manager経由のパスはpromptDetectionが常に存在するため本バグの影響を受けない旨の根拠がIssueに記載済みであることを確認。ただし、リファクタリングIssueへのリンクがない",
+        "location": "## 影響範囲",
+        "recommendation": "Issue本文でauto-yes-manager.tsが影響範囲外である理由が「L318-321でpromptDetection.isPromptがfalseの場合は早期リターンする設計であり、promptDetectionがnullになるケースは発生しない」と具体的に説明されており、実際のコード（L319-325: if (!promptDetection.isPrompt || !promptDetection.promptData) return）と一致している。影響範囲の分析は正確。ただし、route.tsとauto-yes-manager.tsのカーソルキーロジック重複（L343-399とroute.ts L96-148）のリファクタリングについて「別Issue」と言及しているが、該当Issueが未作成の場合は作成を検討してもよい",
+        "evidence": "auto-yes-manager.ts:L319-325のコードを確認。promptDetectionはdetectPrompt()の戻り値であり、PromptDetectionResult型（{ isPrompt: boolean; promptData?: PromptData; ... }）。detectPrompt()はnullを返さない（常にオブジェクトを返す）ため、promptDetectionがnullになるケースは発生しない。route.tsのようにtry-catchでnullフォールバックする構造ではない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "影響ファイル",
+        "issue": "handlePromptRespondのuseCallback dependency配列にstate.prompt.dataを追加する必要があるが、これによるパフォーマンス影響の記載がない",
+        "location": "## 修正方針案 > アプローチBの修正箇所 > 修正ファイル一覧 > WorktreeDetailRefactored.tsx",
+        "recommendation": "handlePromptRespondのuseCallback dependency配列（現在: [worktreeId, actions, fetchCurrentOutput, activeCliTab]）にstate.prompt.dataを追加すると、promptDataが変化するたびに関数が再生成され、PromptPanel/MobilePromptSheet/AutoYesToggleなどのonRespondプロパティが更新される。promptDataはポーリング（2秒/5秒間隔）の度に更新される可能性があるため、理論的には関数の再生成頻度が上がる。ただし、React.memoで保護されているPromptPanel/MobilePromptSheetは他のpropsも同時に変わるため、実質的なパフォーマンス影響は無視できるレベル。記載は必須ではないが、実装時の注意点として認識しておくと良い",
+        "evidence": "WorktreeDetailRefactored.tsx:L1126-1148のhandlePromptRespond。現在のdependency配列はL1147: [worktreeId, actions, fetchCurrentOutput, activeCliTab]。state.prompt.dataはポーリングのfetchCurrentOutput内（L1029-1033）でshowPrompt/clearPromptを通じて更新される"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "impact": "主要修正対象。PromptResponseRequest型拡張（promptType?: string, defaultOptionNumber?: number）、promptCheck=null時のフォールバック判定ロジック追加。既存のisClaudeMultiChoice判定（L96-98）を拡張し、promptCheck===null && body.promptType==='multiple_choice'の条件を追加",
+        "risk": "medium",
+        "change_type": "modify",
+        "lines_affected": "L17-20, L96-98, L100-148"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact": "handlePromptRespond内部修正。state.prompt.dataからpromptType/defaultOptionNumberを導出しリクエストボディに含める。useCallback dependency配列にstate.prompt.data追加",
+        "risk": "medium",
+        "change_type": "modify",
+        "lines_affected": "L1126-1148"
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "impact": "L86-89のfetch呼び出しでpromptType/defaultOptionNumberをリクエストボディに追加。promptDataは関数パラメータ（L30）で受け取り済みのため変更は容易",
+        "risk": "low",
+        "change_type": "modify",
+        "lines_affected": "L85-92"
+      },
+      {
+        "file": "tests/unit/api/prompt-response-verification.test.ts",
+        "impact": "L163-177のcaptureSessionOutput失敗テスト更新。promptType付きリクエストのテスト追加。defaultOptionNumber=undefinedのケースのテスト追加が望ましい",
+        "risk": "low",
+        "change_type": "modify",
+        "lines_affected": "L75-84, L163-177"
+      },
+      {
+        "file": "tests/integration/worktree-detail-integration.test.tsx",
+        "impact": "L392-427のprompt-responseリクエストボディ検証追加。call[1].bodyの内容（answer, cliTool, promptType, defaultOptionNumber）を検証するアサーション追加",
+        "risk": "low",
+        "change_type": "modify",
+        "lines_affected": "L392-427"
+      }
+    ],
+    "not_affected_files": [
+      {
+        "file": "src/components/worktree/PromptPanel.tsx",
+        "reason": "非破壊的アプローチにより onRespond: (answer: string) => Promise<void> シグネチャは不変。L46で定義されたonRespondの型は変更不要"
+      },
+      {
+        "file": "src/components/mobile/MobilePromptSheet.tsx",
+        "reason": "同上。L44のonRespondシグネチャは不変"
+      },
+      {
+        "file": "src/components/worktree/PromptMessage.tsx",
+        "reason": "同上。onRespondコールバック経由でAPIを呼び出すが、handlePromptRespondの内部修正で対応完了"
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "reason": "サーバー側ポーリング。detectPrompt()は常にPromptDetectionResultオブジェクトを返し、nullにならない。try-catchでnullフォールバックするroute.tsとは異なる構造。L319-325の早期リターンにより、promptDetectionがnullになるケースは構造的に発生しない"
+      },
+      {
+        "file": "src/lib/auto-yes-resolver.ts",
+        "reason": "Auto-Yes回答判定ロジック。PromptDataからanswerを導出する純粋関数であり、API呼び出しパスには関与しない"
+      },
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "reason": "プロンプト検出ロジック自体は変更不要"
+      },
+      {
+        "file": "src/lib/cli-session.ts",
+        "reason": "captureSessionOutput自体は修正不要。例外発生パターンの理解のために参照するが、コード変更なし"
+      },
+      {
+        "file": "src/lib/tmux.ts",
+        "reason": "sendKeys/sendSpecialKeysの実装は変更不要"
+      },
+      {
+        "file": "src/types/models.ts",
+        "reason": "PromptData/MultipleChoiceOption型は既存のまま。PromptResponseRequest型はroute.tsローカル定義を拡張する方針のため、models.tsへの移動は別Issue"
+      }
+    ],
+    "breaking_changes": {
+      "has_breaking_changes": false,
+      "details": "promptType/defaultOptionNumberフィールドはオプショナル（?）として設計される。フィールド未送信時は従来通りpromptCheckベースの判定が行われ、後方互換性が保たれる。UIが古いバージョンでAPIが新バージョンの場合でも、body.promptTypeがundefinedとなりフォールバック条件が発動しないため、従来動作（sendKeysによるテキスト送信）が維持される。これはpromptCheck=null時の既存バグ動作と同じであり、新たな破壊は発生しない"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "主要修正対象。L17-20のPromptResponseRequest型拡張、L86-89のcatch節でpromptCheck=null、L96-98/L100-148のisClaudeMultiChoice判定とカーソルキー送信ロジック。L103-104のdefaultNum = defaultOption?.number ?? 1がフォールバックパスでも必要"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "L1126-1148のhandlePromptRespond。L1133でJSON.stringify({ answer, cliTool: activeCliTab })にpromptType/defaultOptionNumberを追加。L1437でstate.prompt.dataがuseAutoYesに渡されていることを確認（同じstateからhandlePromptRespondでもアクセス可能）"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "L85-92のfetch呼び出し。L30のpromptData: PromptData | nullパラメータからpromptType/defaultOptionNumberを導出して送信"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "L319-325のpromptDetection nullチェック、L343-399のカーソルキー送信ロジック。route.tsとの重複が存在するが本Issue影響範囲外（detectPromptが常にオブジェクトを返すため）"
+    },
+    {
+      "file": "tests/unit/api/prompt-response-verification.test.ts",
+      "relevance": "L163-177のcaptureSessionOutput失敗テスト。L75-84のcreateRequest関数にpromptType/defaultOptionNumberパラメータの追加が必要"
+    },
+    {
+      "file": "tests/integration/worktree-detail-integration.test.tsx",
+      "relevance": "L392-427のprompt-response API呼び出し検証。L423-426で存在確認のみ行っている箇所にリクエストボディ検証を追加"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "prompt-response route.tsのエントリは現在未記載。実装完了後にモジュール説明の追加・更新が望ましいが、本Issueスコープ外"
+    }
+  ]
+}

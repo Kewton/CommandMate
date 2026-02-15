@@ -1,0 +1,82 @@
+{
+  "issue_number": 287,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-S2-001",
+        "item": "handlePromptRespond の cliTool 取得方法が不明確",
+        "section_updated": "Section 10 (パフォーマンス設計), Section 12 (D-11), Section 16 (実装チェックリスト Phase 3)",
+        "status": "reflected",
+        "details": "activeCliTabRef.current からの取得を明記。依存配列から activeCliTab を除外。fetchMessages/fetchCurrentOutput との一貫性を確保。コードサンプル更新済み。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S2-001",
+        "item": "行番号参照が実装後に無効化される可能性",
+        "section_updated": "Section 7.1 (cursor-key-sender.ts)",
+        "status": "reflected",
+        "details": "ベースライン行番号である旨の注記を追加。実装時はロジック内容を基準にコード特定することを明記。"
+      },
+      {
+        "id": "SF-S2-002",
+        "item": "useAutoYes.ts の promptData アクセス方法が不明確",
+        "section_updated": "Section 10 (パフォーマンス設計), Section 16 (実装チェックリスト Phase 3)",
+        "status": "reflected",
+        "details": "C-004 は WorktreeDetailRefactored.tsx のみに適用し、useAutoYes.ts ではフック引数の promptData を直接使用する旨を明記。コードサンプル追加。"
+      },
+      {
+        "id": "SF-S2-003",
+        "item": "buildCursorKeys の CursorKeySendOptions に cliToolId が不足",
+        "section_updated": "Section 7.1 (cursor-key-sender.ts), Section 6 (コア判定ロジック), Section 12 (D-12), Section 16 (実装チェックリスト Phase 1)",
+        "status": "reflected",
+        "details": "CursorKeySendOptions に cliToolId: CLIToolType フィールドを追加。isClaudeMultiChoice 判定をヘルパー内部で完結させる設計に変更。JSDoc 責務説明を更新。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S2-001",
+        "item": "PromptType の型定義の整合性確認",
+        "section_updated": "Section 4 (データモデル設計)",
+        "status": "reflected",
+        "details": "promptType フィールドの型拡張性に関する注記を追加。PromptData union 型との関係、フォールバック動作（未知の値はテキスト送信方式）、将来の拡張時の対応方針を明記。"
+      },
+      {
+        "id": "C-S2-002",
+        "item": "sendPromptAnswer() の責務範囲が曖昧",
+        "section_updated": "Section 7.2 (sendPromptAnswer), Section 2 (データフロー図), Section 8 (修正ファイル一覧), Section 12 (D-13), Section 16 (実装チェックリスト Phase 2)",
+        "status": "reflected",
+        "details": "sendPromptAnswer() のインターフェース定義を追加。buildCursorKeys() との責務分担表を記載。route.ts ローカル関数として定義する設計に変更。データフロー図を更新。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-287-prompt-response-fallback-design-policy.md",
+  "sections_updated": [
+    "Section 2: アーキテクチャ設計 (データフロー図更新、レイヤー構成表更新)",
+    "Section 4: データモデル設計 (C-S2-001 promptType 型拡張性注記追加)",
+    "Section 6: コア判定ロジック設計 (SF-S2-003 cliToolId コメント追加)",
+    "Section 7.1: cursor-key-sender.ts (SF-S2-001 行番号注記, SF-S2-003 cliToolId追加)",
+    "Section 7.2: sendPromptAnswer() 責務範囲定義 (C-S2-002 新規追加)",
+    "Section 7.3: prompt-response-utils.ts (番号繰り上げ)",
+    "Section 8: 修正ファイル一覧 (C-S2-002, MF-S2-001 反映)",
+    "Section 10: パフォーマンス設計 (MF-S2-001 cliTool取得方法, SF-S2-002 useAutoYes.ts注記)",
+    "Section 12: 設計上の決定事項 (D-11, D-12, D-13 追加)",
+    "Section 13: 制約条件の確認 (SRP説明更新)",
+    "Section 15: レビュー指摘事項サマリー Stage 2 (新規追加)",
+    "Section 16: 実装チェックリスト (Stage 2 指摘事項反映)"
+  ],
+  "consistency_improvements": [
+    "handlePromptRespond の cliTool 取得方法を activeCliTabRef.current に統一 (MF-S2-001)",
+    "CursorKeySendOptions に cliToolId を追加し isClaudeMultiChoice 判定をヘルパー内部に完結 (SF-S2-003)",
+    "sendPromptAnswer() と buildCursorKeys() の責務分担を明確化 (C-S2-002)",
+    "useAutoYes.ts での useRef 不要を明記し C-004 適用範囲を限定 (SF-S2-002)",
+    "行番号参照をベースライン参照として注記 (SF-S2-001)",
+    "promptType 型の拡張性とフォールバック動作を明記 (C-S2-001)"
+  ],
+  "timestamp": "2026-02-15T12:30:00Z"
+}

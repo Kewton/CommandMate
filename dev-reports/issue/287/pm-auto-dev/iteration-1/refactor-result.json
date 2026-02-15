@@ -1,0 +1,48 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": {
+      "route_ts_lines": 73.84,
+      "route_ts_branches": 69.04,
+      "route_ts_functions": 80.0,
+      "route_ts_statements": 69.62
+    },
+    "after_coverage": {
+      "route_ts_lines": 100.0,
+      "route_ts_branches": 92.1,
+      "route_ts_functions": 100.0,
+      "route_ts_statements": 100.0
+    }
+  },
+  "refactorings_applied": [
+    "Extract shared buildPromptResponseBody() utility from useAutoYes and WorktreeDetailRefactored (DRY)",
+    "Extract buildNavigationKeys() helper to eliminate duplicated cursor offset logic in route.ts (DRY)",
+    "Extract CHECKBOX_OPTION_PATTERN constant to replace inline regex duplication (DRY)",
+    "Improve type safety with PromptResponseBody interface for request body shape",
+    "Add JSDoc documentation to new utility functions and constants"
+  ],
+  "files_changed": [
+    "src/lib/prompt-response-body-builder.ts (new - shared utility)",
+    "src/hooks/useAutoYes.ts (refactored to use shared builder)",
+    "src/components/worktree/WorktreeDetailRefactored.tsx (refactored to use shared builder)",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts (extracted helpers, added constant)",
+    "tests/unit/lib/prompt-response-body-builder.test.ts (new - 5 tests)",
+    "tests/unit/api/prompt-response-verification.test.ts (added 8 new tests for uncovered paths)"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "test_results": {
+    "total_tests_before": 3404,
+    "total_tests_after": 3417,
+    "new_tests_added": 13,
+    "all_existing_tests_pass": true
+  },
+  "commits": [
+    "d70888c2: refactor(#287): extract shared prompt-response body builder and improve coverage"
+  ],
+  "message": "Refactoring complete. Extracted shared buildPromptResponseBody() utility (DRY), buildNavigationKeys() helper, and CHECKBOX_OPTION_PATTERN constant. Coverage for route.ts improved from 73.84% to 100% lines. All 3417 tests pass. Zero ESLint/TypeScript errors."
+}
