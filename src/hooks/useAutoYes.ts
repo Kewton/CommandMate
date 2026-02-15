@@ -82,11 +82,21 @@ export function useAutoYes({
     lastAutoRespondedRef.current = promptKey;
     setLastAutoResponse(answer);
 
+    // Issue #287: Include promptType and defaultOptionNumber in the request body
+    // so the API can use cursor-key navigation even when promptCheck re-verification fails.
+    const requestBody: Record<string, unknown> = { answer, cliTool, promptType: promptData.type };
+    if (promptData.type === 'multiple_choice') {
+      const defaultOption = promptData.options.find(o => o.isDefault);
+      if (defaultOption) {
+        requestBody.defaultOptionNumber = defaultOption.number;
+      }
+    }
+
     // Send auto-response via existing prompt-response API
     fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answer, cliTool }),
+      body: JSON.stringify(requestBody),
     }).catch((err) => {
       console.error('[useAutoYes] Failed to send auto-response:', err);
     });

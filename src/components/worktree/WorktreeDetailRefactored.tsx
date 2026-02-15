@@ -1127,10 +1127,25 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     async (answer: string): Promise<void> => {
       actions.setPromptAnswering(true);
       try {
+        // Issue #287: Include promptType and defaultOptionNumber in the request body
+        // so the API can use cursor-key navigation even when promptCheck re-verification fails.
+        const promptData = state.prompt.data;
+        const requestBody: Record<string, unknown> = { answer, cliTool: activeCliTab };
+
+        if (promptData) {
+          requestBody.promptType = promptData.type;
+          if (promptData.type === 'multiple_choice') {
+            const defaultOption = promptData.options.find(o => o.isDefault);
+            if (defaultOption) {
+              requestBody.defaultOptionNumber = defaultOption.number;
+            }
+          }
+        }
+
         const response = await fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ answer, cliTool: activeCliTab }),
+          body: JSON.stringify(requestBody),
         });
         if (!response.ok) {
           throw new Error(`Failed to send prompt response: ${response.status}`);
@@ -1144,7 +1159,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         actions.setPromptAnswering(false);
       }
     },
-    [worktreeId, actions, fetchCurrentOutput, activeCliTab]
+    [worktreeId, actions, fetchCurrentOutput, activeCliTab, state.prompt.data]
   );
 
   /** Handle prompt dismiss without response */
