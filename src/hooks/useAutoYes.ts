@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { resolveAutoAnswer } from '@/lib/auto-yes-resolver';
+import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import type { PromptData } from '@/types/models';
 
 /** Duplicate prevention window in milliseconds (3 seconds) */
@@ -82,11 +83,15 @@ export function useAutoYes({
     lastAutoRespondedRef.current = promptKey;
     setLastAutoResponse(answer);
 
+    // Issue #287: Use shared builder to include promptType and defaultOptionNumber
+    // so the API can use cursor-key navigation even when promptCheck re-verification fails.
+    const requestBody = buildPromptResponseBody(answer, cliTool, promptData);
+
     // Send auto-response via existing prompt-response API
     fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answer, cliTool }),
+      body: JSON.stringify(requestBody),
     }).catch((err) => {
       console.error('[useAutoYes] Failed to send auto-response:', err);
     });

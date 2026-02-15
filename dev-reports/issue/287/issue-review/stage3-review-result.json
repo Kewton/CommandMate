@@ -1,0 +1,194 @@
+{
+  "issue_number": 287,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-15",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "テスト範囲",
+        "issue": "useAutoYes.tsのprompt-response API呼び出しがアプローチBの型変更に追従できない可能性がある",
+        "location": "src/hooks/useAutoYes.ts:L85-89",
+        "recommendation": "useAutoYes.tsはprompt-response APIのクライアントであり、現在 { answer, cliTool } のみをリクエストボディに含めている。アプローチBでAPIがpromptType/defaultOptionフィールドを期待する設計になった場合、useAutoYes.tsも同様にpromptData情報を送信する必要がある。影響範囲セクションまたは修正箇所リストにuseAutoYes.tsのfetch呼び出し（L86-89）を追加すべき。useAutoYes.tsはpromptDataをpropsとして受け取っているため修正自体は容易だが、漏れると同一バグがAuto-Yesパスで再発する",
+        "evidence": "useAutoYes.ts:L86-89で fetch(`/api/worktrees/${worktreeId}/prompt-response`, { body: JSON.stringify({ answer, cliTool }) }) と呼び出しており、promptType/defaultOptionが含まれていない。一方、同ファイルL76では promptData を参照しているため追加は可能"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響ファイル",
+        "issue": "PromptMessage.tsxのonRespondコールバックも同一APIを呼び出すパスに含まれるが、修正箇所リストに含まれていない",
+        "location": "src/components/worktree/PromptMessage.tsx:L145",
+        "recommendation": "PromptMessage.tsxの multiple_choice ボタン（L145: handleRespond(option.number.toString())）は、WorktreeDetailRefactored.tsxのhandlePromptRespondを経由してprompt-response APIを呼び出す。PromptMessage自体にはpromptDataが既に存在する（L71: message.promptData）ため、handlePromptRespondのシグネチャを変更する場合、PromptMessage経由の呼び出しパスも考慮する必要がある。ただし、PromptMessage.tsxはonRespondコールバックの呼び出し元であり直接APIを呼ばないため、handlePromptRespondの修正で対応可能。影響範囲として明記が望ましい",
+        "evidence": "PromptMessage.tsx:L18で onRespond: (answer: string) => Promise<void> と定義されている。アプローチBでhandlePromptRespondのシグネチャが変更される場合（例: promptData情報を含むオブジェクトを受け取る）、PromptMessage.tsx/MobilePromptSheet.tsx/PromptPanel.tsxの全てのonRespondの型も同期する必要がある"
+      },
+      {
+        "id": "SF-2",
+        "category": "破壊的変更",
+        "issue": "onRespondシグネチャの変更方針（破壊的 vs 非破壊的）が明示されていない",
+        "location": "## 修正方針案 セクション",
+        "recommendation": "アプローチBの修正には2つの実装戦略がある: (A) onRespondのシグネチャを変更せず、handlePromptRespond内部でstate.prompt.dataから直接promptData情報を取得してリクエストボディに含める（非破壊的）。(B) onRespondのシグネチャを (answer: string, promptData?: PromptData) に変更し、全呼び出し元を修正する（破壊的）。戦略(A)であればUI側の変更はhandlePromptRespondの内部修正のみで済み、MobilePromptSheet/PromptPanel/PromptMessageのインターフェースは不変。Issueに推奨する実装戦略を明記すべき",
+        "evidence": "WorktreeDetailRefactored.tsx:L1126-1147のhandlePromptRespondはuseCallbackで定義され、dependenciesにstate.prompt.dataは含まれていないが、関数内部でstate.prompt.dataにアクセスすることは可能（クロージャ経由またはdependency追加）。この戦略であれば、MobilePromptSheet/PromptPanel/PromptMessageのonRespondシグネチャは (answer: string) => Promise<void> のまま変更不要"
+      },
+      {
+        "id": "SF-3",
+        "category": "テスト範囲",
+        "issue": "結合テスト（worktree-detail-integration.test.tsx）でprompt-response呼び出しのリクエストボディ検証が不十分",
+        "location": "tests/integration/worktree-detail-integration.test.tsx:L392-427",
+        "recommendation": "既存の結合テスト（L392-427）はprompt-response APIが呼び出されたことのみを検証しており、リクエストボディの内容（answer, cliTool, 新規追加のpromptType/defaultOption）は検証していない。アプローチBの修正後、新規フィールドが正しくリクエストボディに含まれることを検証するテストケースを追加すべき。受け入れ条件の「既存テストが引き続きパスすること」に加え、結合テストの拡充についても言及が必要",
+        "evidence": "L423-426で promptResponseCall の存在確認のみ行っており、call[1]（RequestInit）のbody内容は未検証"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "依存関係",
+        "issue": "route.tsのPromptResponseRequestインターフェースがローカル定義であり、src/types/models.tsと二重管理になる可能性がある",
+        "location": "src/app/api/worktrees/[id]/prompt-response/route.ts:L17-20",
+        "recommendation": "現在、PromptResponseRequestはroute.ts内にローカル定義されている（L17-20）。アプローチBでpromptType/defaultOptionフィールドを追加する際、この型をsrc/types/models.tsに移動し、クライアント側（handlePromptRespond, useAutoYes）とサーバー側（route.ts）で型を共有すると型安全性が向上する。ただし、スコープ拡大になるため、本Issue内ではローカル定義のまま拡張し、リファクタリングは別Issueとする判断も妥当",
+        "evidence": "route.ts:L17-20の interface PromptResponseRequest { answer: string; cliTool?: CLIToolType; } はroute.ts内でのみ使用されている。クライアント側ではJSON.stringify()で直接オブジェクトリテラルを構築しており、型共有されていない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdのモジュール説明にprompt-response route.tsの変更が反映される必要がある",
+        "location": "CLAUDE.md",
+        "recommendation": "修正完了後、CLAUDE.mdの主要機能モジュール一覧に prompt-response/route.ts のエントリを追加するか、既存の関連モジュール（auto-yes-manager.ts等）の説明を更新して、promptTypeフォールバック対応について記載すると保守性が向上する。ただし、これは実装完了後のドキュメント整備であり、Issue本文に記載するほどの優先度ではない",
+        "evidence": "CLAUDE.mdには prompt-response/route.ts のエントリが存在しない"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "impact": "主要修正対象。PromptResponseRequestインターフェース拡張、promptCheck=null時のフォールバック判定ロジック追加",
+        "risk": "medium",
+        "change_type": "modify"
+      },
+      {
+        "file": "src/types/models.ts",
+        "impact": "PromptResponseRequestの型定義追加または修正（route.tsローカル定義を共有化する場合）",
+        "risk": "low",
+        "change_type": "modify"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact": "handlePromptRespond内でstate.prompt.dataからpromptType/defaultOptionを取得しリクエストボディに含める修正",
+        "risk": "medium",
+        "change_type": "modify"
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "impact": "prompt-response API呼び出し時にpromptData情報（promptType, defaultOption）をリクエストボディに追加",
+        "risk": "medium",
+        "change_type": "modify"
+      },
+      {
+        "file": "tests/unit/api/prompt-response-verification.test.ts",
+        "impact": "captureSessionOutput失敗時（L163-177）のテストケース更新。promptType付きリクエストのテスト追加",
+        "risk": "low",
+        "change_type": "modify"
+      }
+    ],
+    "potentially_affected_files": [
+      {
+        "file": "src/components/mobile/MobilePromptSheet.tsx",
+        "impact": "onRespondシグネチャが変更される場合のみ影響。handlePromptRespond内部でstate.prompt.dataを使用する戦略なら変更不要",
+        "risk": "low",
+        "change_type": "potentially_modify"
+      },
+      {
+        "file": "src/components/worktree/PromptPanel.tsx",
+        "impact": "同上。onRespondシグネチャ変更時のみ影響",
+        "risk": "low",
+        "change_type": "potentially_modify"
+      },
+      {
+        "file": "src/components/worktree/PromptMessage.tsx",
+        "impact": "同上。onRespondシグネチャ変更時のみ影響",
+        "risk": "low",
+        "change_type": "potentially_modify"
+      },
+      {
+        "file": "tests/integration/worktree-detail-integration.test.tsx",
+        "impact": "prompt-responseリクエストボディの検証追加が望ましい",
+        "risk": "low",
+        "change_type": "potentially_modify"
+      }
+    ],
+    "not_affected_files": [
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "reason": "サーバー側ポーリング。promptDetectionが常にnull以外で動作するため、本バグの影響範囲外。ただしカーソルキーロジックの重複が存在する（リファクタリングは別Issue）"
+      },
+      {
+        "file": "src/lib/cli-session.ts",
+        "reason": "captureSessionOutput自体は修正不要。例外発生パターンの理解のために参照するが、コード変更なし"
+      },
+      {
+        "file": "src/lib/tmux.ts",
+        "reason": "sendKeys/sendSpecialKeysの実装は変更不要"
+      },
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "reason": "プロンプト検出ロジック自体は変更不要"
+      }
+    ],
+    "breaking_changes": {
+      "has_breaking_changes": false,
+      "details": "アプローチBで追加されるpromptType/defaultOptionフィールドはオプショナル（?）として設計すべき。これにより、既存のクライアントコード（フィールド未送信）でも後方互換性が保たれる。route.ts側ではpromptTypeが未送信の場合は従来通りの動作（promptCheckベースの判定）を行う"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "主要修正対象。L17-20のPromptResponseRequest型拡張、L86-89のcatch節内フォールバック、L96-98のisClaudeMultiChoice判定が変更対象"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "L1126-1147のhandlePromptRespond。state.prompt.dataからpromptType/defaultOptionを取得しリクエストボディに含める修正が必要"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "L85-89のfetch呼び出し。Issueの修正箇所リストに含まれていないが、同一APIを呼び出すためpromptData情報の追加が必要"
+    },
+    {
+      "file": "src/components/worktree/PromptMessage.tsx",
+      "relevance": "L18のonRespondシグネチャ。実装戦略によっては影響を受ける"
+    },
+    {
+      "file": "src/components/mobile/MobilePromptSheet.tsx",
+      "relevance": "L44のonRespondシグネチャ。実装戦略によっては影響を受ける"
+    },
+    {
+      "file": "src/components/worktree/PromptPanel.tsx",
+      "relevance": "L46のonRespondシグネチャ。実装戦略によっては影響を受ける"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "L343-399のカーソルキー送信ロジック。route.tsと重複するが、本Issue範囲外（別Issueでのリファクタリング推奨）"
+    },
+    {
+      "file": "tests/unit/api/prompt-response-verification.test.ts",
+      "relevance": "L163-177のcapture失敗テスト。修正後はsendKeysではなくpromptTypeに基づく動作を検証するよう更新が必要"
+    },
+    {
+      "file": "tests/integration/worktree-detail-integration.test.tsx",
+      "relevance": "L392-427のprompt-response API呼び出し検証。リクエストボディの検証追加が望ましい"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール説明の整合性確認。prompt-response route.tsのエントリは現在未記載"
+    }
+  ]
+}

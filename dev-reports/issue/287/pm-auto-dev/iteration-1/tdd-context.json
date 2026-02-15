@@ -1,0 +1,34 @@
+{
+  "issue_number": 287,
+  "issue_title": "fix: 選択肢プロンプトの送信がClaude Codeに認識されない（promptCheck再検証失敗時のフォールバック不備）",
+  "acceptance_criteria": [
+    "promptCheck再検証が失敗した場合（promptCheck=null）でも、Claude Codeの複数選択肢プロンプト（AskUserQuestion）にカーソルキー方式で正しく応答できること",
+    "Yes/Noプロンプトの既存動作に影響がないこと",
+    "Codexの既存動作に影響がないこと",
+    "既存テスト（tests/unit/api/prompt-response-verification.test.ts）が引き続きパスすること（必要に応じてテスト更新）",
+    "promptCheck再検証が失敗するケースのテストが追加されていること",
+    "useAutoYes.tsのprompt-response API呼び出しにpromptType/defaultOptionNumberが含まれること（Auto-Yesパスでの同一バグ再発防止）",
+    "結合テスト（worktree-detail-integration.test.tsx）でprompt-responseリクエストボディの内容（answer, cliTool, promptType, defaultOptionNumber）が検証されること",
+    "promptType/defaultOptionNumberフィールドはオプショナル（?）として設計され、フィールド未送信時の後方互換性が保たれること",
+    "defaultOptionNumberがundefinedの場合にフォールバック値1が使用されること（?? 1）。UIが古いバージョンでAPIが新バージョンの場合のテストを含むこと"
+  ],
+  "implementation_tasks": [
+    "src/app/api/worktrees/[id]/prompt-response/route.ts: PromptResponseRequestにpromptType?, defaultOptionNumber?を追加。promptCheck=null時にbody.promptTypeを参照してカーソルキー方式を判定。フォールバックパスではbody.defaultOptionNumber ?? 1でデフォルト値を使用",
+    "src/components/worktree/WorktreeDetailRefactored.tsx: handlePromptRespond内部でstate.prompt.dataからpromptTypeを取得し、multiple_choice型の場合はoptions.find(o => o.isDefault)?.numberでdefaultOptionNumberを導出。リクエストボディに含める。useCallbackのdependency配列にstate.prompt.dataを追加",
+    "src/hooks/useAutoYes.ts: L85-89のfetch呼び出しで{ answer, cliTool }にpromptType（promptData.type）とdefaultOptionNumber（multiple_choice型の場合のみpromptData.options.find(o => o.isDefault)?.number）を追加",
+    "tests/unit/api/prompt-response-verification.test.ts: promptCheck失敗時のテストケース更新。promptType付きリクエストのテスト追加。defaultOptionNumberがundefinedのケースのテスト追加（?? 1フォールバック動作の検証）",
+    "tests/integration/worktree-detail-integration.test.tsx: prompt-response API呼び出しのリクエストボディ内容（answer, cliTool, promptType, defaultOptionNumber）を検証するテストケースを追加"
+  ],
+  "target_coverage": 80,
+  "approach": "アプローチB（非破壊的実装戦略）: onRespondシグネチャは変更せず、handlePromptRespond内部でstate.prompt.dataから直接promptType/defaultOptionNumberを取得してリクエストボディに含める",
+  "related_files": [
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useAutoYes.ts",
+    "src/lib/cli-session.ts",
+    "src/lib/tmux.ts",
+    "src/types/models.ts",
+    "tests/unit/api/prompt-response-verification.test.ts",
+    "tests/integration/worktree-detail-integration.test.tsx"
+  ]
+}

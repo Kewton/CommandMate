@@ -1,0 +1,79 @@
+{
+  "issue_number": 287,
+  "stage": 1,
+  "stage_name": "指摘事項対応",
+  "status": "completed",
+  "target_file": "dev-reports/design/issue-287-prompt-response-fallback-design-policy.md",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "route.ts と auto-yes-manager.ts のカーソルキー送信ロジックの重複",
+        "action": "cursor-key-sender.ts 共通ヘルパー抽出を設計方針書に追加。セクション7.1に詳細設計、セクション8に修正ファイル、セクション11にテストケース、セクション15にチェックリスト追加。D-7として決定事項に記載。",
+        "sections_updated": ["1 (スコープ)", "2 (アーキテクチャ)", "7.1", "8", "11", "12 (D-7)", "13 (DRY)", "14", "15"]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "route.ts の POST 関数が複数の責務を持つ",
+        "action": "sendPromptAnswer() 関数抽出を設計方針書に追加。cursor-key-sender.ts への委譲と合わせてroute.tsの責務を分離。セクション8のroute.ts変更内容に反映。セクション13のSRP評価を更新。",
+        "sections_updated": ["2 (レイヤー構成)", "7.1", "8", "13 (SRP)", "14", "15"]
+      },
+      {
+        "id": "SF-002",
+        "title": "isClaudeMultiChoice の二重条件チェック",
+        "action": "effectivePromptType / effectiveDefaultNum の2段階分離をセクション6のコア判定ロジックに反映。旧来のOR条件式を置換。D-8として決定事項に記載。",
+        "sections_updated": ["2 (データフロー図)", "6", "12 (D-8)", "13 (KISS)", "14", "15"]
+      },
+      {
+        "id": "SF-003",
+        "title": "handlePromptRespond と useAutoYes のリクエストボディ構築の重複",
+        "action": "prompt-response-utils.ts に buildPromptResponseBody() を抽出する設計を追加。セクション7.2に詳細設計、セクション8に修正ファイル、セクション11にテストケース追加。D-9として決定事項に記載。",
+        "sections_updated": ["1 (スコープ)", "2 (アーキテクチャ)", "4 (導出ロジック)", "7.2", "8", "11", "12 (D-9)", "13 (DRY)", "14", "15"]
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "PromptResponseRequest のローカル定義維持",
+        "action": "将来検討事項としてセクション4に注記を追加。現状維持の方針を明記。",
+        "sections_updated": ["4", "12 (D-4)", "14"]
+      },
+      {
+        "id": "C-002",
+        "title": "defaultOptionNumber ?? 1 のフォールバックデフォルト値",
+        "action": "既存のD-5トレードオフ記載を維持。レビューサマリーに記載。",
+        "sections_updated": ["12 (D-5)", "14"]
+      },
+      {
+        "id": "C-003",
+        "title": "multi-select フォールバック非対応",
+        "action": "D-6補足に根本対策の方向性(captureSessionOutputの安定性向上)を追記。",
+        "sections_updated": ["12 (D-6)", "14"]
+      },
+      {
+        "id": "C-004",
+        "title": "useCallback dependency への state.prompt.data 追加の影響",
+        "action": "useRef パターンを採用。セクション10のパフォーマンス設計を全面更新。コード例追加。D-10として決定事項に記載。実装チェックリストに反映。",
+        "sections_updated": ["2 (レイヤー構成)", "3 (実装戦略)", "10", "12 (D-10)", "14", "15"]
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0,
+    "new_sections_added": ["7 (共通ヘルパー設計)", "14 (レビュー指摘事項サマリー)", "15 (実装チェックリスト)"],
+    "major_changes": [
+      "スコープ拡大: カーソルキー送信ロジック共通化(MF-001)とリクエストボディ構築共通化(SF-003)を追加",
+      "新規ファイル2つ(cursor-key-sender.ts, prompt-response-utils.ts)の設計を追加",
+      "コア判定ロジックをeffectivePromptType 2段階分離に変更(SF-002)",
+      "auto-yes-manager.ts を修正対象に追加(MF-001)",
+      "useRef パターンの採用によるパフォーマンス設計改善(C-004)",
+      "DRY準拠状況が警告から合格に改善",
+      "SRP準拠状況が部分的から合格に改善"
+    ]
+  },
+  "timestamp": "2026-02-15T12:30:00Z"
+}
