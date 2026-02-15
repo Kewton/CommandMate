@@ -1,0 +1,24 @@
+{
+  "bug_id": "20260215_162_ui_fixes",
+  "bug_description": "Issue #162 UIバグ2件: (1) birthtimeがモバイルで非表示 (2) MarkdownEditorにコピーボタンがない",
+  "fix_summary": "BUG-1: FileTreeView.tsxのbirthtime spanからhidden sm:inlineクラスを削除。BUG-2: MarkdownEditor.tsxにcopyToClipboard()を使用したコピーボタンを追加（Copy/Checkアイコン切替、2秒フィードバック）",
+  "acceptance_criteria": [
+    "モバイル画面（640px未満）でファイルツリーにbirthtimeが表示されること",
+    "birthtimeのspanにhiddenクラスが含まれないこと",
+    "MarkdownEditorにdata-testid='copy-content-button'のコピーボタンが表示されること",
+    "コピーボタンがMaximizeボタンの前に配置されていること",
+    "コピーボタンクリックでcopyToClipboard()が呼び出されること",
+    "コピー成功時にCopy→Checkアイコンが切り替わること",
+    "2秒後にCheckアイコンがCopyアイコンに戻ること",
+    "既存テストがすべてパスすること（3392件以上）",
+    "TypeScript型チェックがエラー0であること",
+    "ESLintがエラー0であること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: FileTreeViewのbirthtimeがhiddenクラスなしで表示されること",
+    "シナリオ2: MarkdownEditorにコピーボタンが表示されること",
+    "シナリオ3: コピーボタンクリックでクリップボードにコピーされること",
+    "シナリオ4: コピー成功後のアイコンフィードバック動作",
+    "シナリオ5: 全テスト・静的解析パス"
+  ]
+}

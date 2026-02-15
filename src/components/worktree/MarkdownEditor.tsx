@@ -32,8 +32,9 @@ import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
-import { Save, X, Columns, FileText, Eye, AlertTriangle, Maximize2, Minimize2 } from 'lucide-react';
+import { Save, X, Columns, FileText, Eye, AlertTriangle, Maximize2, Minimize2, Copy, Check } from 'lucide-react';
 import { debounce } from '@/lib/utils';
+import { copyToClipboard } from '@/lib/clipboard-utils';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
@@ -121,6 +122,9 @@ export function MarkdownEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
+
+  // [Issue #162] Copy to clipboard state
+  const [copied, setCopied] = useState(false);
 
   // Mobile tab state (for portrait mode)
   const [mobileTab, setMobileTab] = useState<MobileTab>('editor');
@@ -310,6 +314,19 @@ export function MarkdownEditor({
       onClose();
     }
   }, [isDirty, onClose]);
+
+  /**
+   * [Issue #162] Handle copy content to clipboard
+   */
+  const handleCopy = useCallback(async () => {
+    try {
+      await copyToClipboard(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Silently fail - clipboard may not be available
+    }
+  }, [content]);
 
   /**
    * Handle resize from PaneResizer (delta in pixels)
@@ -647,6 +664,22 @@ export function MarkdownEditor({
               </button>
             </div>
           )}
+
+          {/* [Issue #162] Copy content button */}
+          <button
+            data-testid="copy-content-button"
+            onClick={handleCopy}
+            className={`p-1.5 hover:bg-gray-100 rounded ${
+              copied ? 'text-green-500' : 'text-gray-500 hover:text-gray-700'
+            }`}
+            title="Copy content"
+          >
+            {copied ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <Copy className="h-4 w-4" />
+            )}
+          </button>
 
           {/* Maximize button */}
           <button
