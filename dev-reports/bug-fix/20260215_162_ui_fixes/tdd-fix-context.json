@@ -1,0 +1,62 @@
+{
+  "bug_id": "20260215_162_ui_fixes",
+  "bug_description": "Issue #162 UIバグ2件: (1) birthtimeがモバイルで非表示 (2) MarkdownEditorにコピーボタンがない",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "birthtime表示のモバイル対応",
+      "description": "FileTreeView.tsx:427 の CSS クラス 'hidden sm:inline' を 'inline' に変更して全画面サイズで表示する",
+      "files_to_modify": ["src/components/worktree/FileTreeView.tsx"],
+      "specific_changes": [
+        {
+          "file": "src/components/worktree/FileTreeView.tsx",
+          "line": 427,
+          "old": "className=\"text-xs text-gray-400 flex-shrink-0 hidden sm:inline\"",
+          "new": "className=\"text-xs text-gray-400 flex-shrink-0\""
+        }
+      ]
+    },
+    {
+      "action_id": "2",
+      "title": "MarkdownEditorにコピーボタン追加",
+      "description": "MarkdownEditorのヘッダーControls部に、ファイル内容全文をクリップボードにコピーするボタンを追加。既存のcopyToClipboard()を活用し、FileViewerと同じCopy→Checkアイコン切替フィードバックを実装。",
+      "files_to_modify": ["src/components/worktree/MarkdownEditor.tsx"],
+      "specific_changes": [
+        {
+          "file": "src/components/worktree/MarkdownEditor.tsx",
+          "description": "1. import に Copy, Check を追加（lucide-react）",
+          "detail": "既存の import { Save, X, ... } from 'lucide-react' に Copy, Check を追加"
+        },
+        {
+          "file": "src/components/worktree/MarkdownEditor.tsx",
+          "description": "2. import に copyToClipboard を追加",
+          "detail": "import { copyToClipboard } from '@/lib/clipboard-utils'"
+        },
+        {
+          "file": "src/components/worktree/MarkdownEditor.tsx",
+          "description": "3. copied ステートを追加",
+          "detail": "const [copied, setCopied] = useState(false);"
+        },
+        {
+          "file": "src/components/worktree/MarkdownEditor.tsx",
+          "description": "4. handleCopy コールバックを追加",
+          "detail": "copyToClipboard(content) を呼び出し、成功時にcoped=true設定、2秒後リセット"
+        },
+        {
+          "file": "src/components/worktree/MarkdownEditor.tsx",
+          "description": "5. コピーボタンUI追加（Maximize ボタンの前に配置）",
+          "detail": "Copy/Check アイコン切替、data-testid='copy-content-button'"
+        }
+      ]
+    }
+  ],
+  "target_coverage": 80,
+  "acceptance_criteria": [
+    "モバイル画面でファイルツリーにbirthtimeが表示されること",
+    "MarkdownEditorでコピーボタンが表示されること",
+    "コピーボタンクリックでファイル内容がクリップボードにコピーされること",
+    "コピー成功時にCopy→Checkアイコンが2秒間表示されること",
+    "既存テストがすべてパスすること",
+    "TypeScript型チェック・ESLintがエラー0であること"
+  ]
+}

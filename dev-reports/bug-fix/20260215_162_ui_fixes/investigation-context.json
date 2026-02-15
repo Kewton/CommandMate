@@ -1,0 +1,22 @@
+{
+  "issue_description": "Issue #162 UIバグ2件: (1) birthtimeがモバイルで非表示 (2) MarkdownEditorにコピーボタンがない",
+  "bugs": [
+    {
+      "id": "BUG-1",
+      "title": "作成日時がモバイルで表示されない",
+      "root_cause": "FileTreeView.tsx:427 の CSS クラス 'hidden sm:inline' により画面幅640px未満で display:none",
+      "affected_file": "src/components/worktree/FileTreeView.tsx",
+      "affected_line": 427,
+      "fix": "CSS 'hidden sm:inline' を 'inline' に変更してモバイルでも表示"
+    },
+    {
+      "id": "BUG-2",
+      "title": "MarkdownEditorにコピーボタンがない",
+      "root_cause": "WorktreeDetailRefactored.tsx:1077 で .md ファイルは MarkdownEditor に振り分けられるが、MarkdownEditor にはコピーボタンが実装されていない",
+      "affected_file": "src/components/worktree/MarkdownEditor.tsx",
+      "affected_line_range": "604-692 (Controls セクション)",
+      "fix": "MarkdownEditor のヘッダーにコピーボタンを追加（既存の copyToClipboard 活用）"
+    }
+  ],
+  "severity_hint": "medium"
+}

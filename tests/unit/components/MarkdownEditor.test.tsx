@@ -880,6 +880,96 @@ describe('MarkdownEditor', () => {
     });
   });
 
+  describe('Copy Content Button (Issue #162)', () => {
+    it('should render copy content button', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('copy-content-button')).toBeInTheDocument();
+      });
+    });
+
+    it('should copy content to clipboard when copy button is clicked', async () => {
+      // Mock clipboard API
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: writeTextMock },
+        writable: true,
+        configurable: true,
+      });
+
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+      });
+
+      const copyButton = screen.getByTestId('copy-content-button');
+      fireEvent.click(copyButton);
+
+      await waitFor(() => {
+        expect(writeTextMock).toHaveBeenCalledWith(mockFileContent);
+      });
+    });
+
+    it('should show check icon after successful copy (2 second feedback)', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+
+      // Mock clipboard API
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: writeTextMock },
+        writable: true,
+        configurable: true,
+      });
+
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('copy-content-button')).toBeInTheDocument();
+      });
+
+      const copyButton = screen.getByTestId('copy-content-button');
+
+      // Click copy button
+      await act(async () => {
+        fireEvent.click(copyButton);
+      });
+
+      // After copy, the button should have a green check icon (text-green-500)
+      await waitFor(() => {
+        const buttonInner = copyButton.querySelector('svg');
+        expect(buttonInner?.parentElement).toHaveClass('text-green-500');
+      });
+
+      // After 2 seconds, should revert back
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      await waitFor(() => {
+        const buttonInner = copyButton.querySelector('svg');
+        expect(buttonInner?.parentElement).not.toHaveClass('text-green-500');
+      });
+    });
+
+    it('should be placed before the maximize button in the controls section', async () => {
+      render(<MarkdownEditor {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('copy-content-button')).toBeInTheDocument();
+      });
+
+      const copyButton = screen.getByTestId('copy-content-button');
+      const maximizeButton = screen.getByTestId('maximize-button');
+
+      // Copy button should appear before maximize button in the DOM
+      const result = copyButton.compareDocumentPosition(maximizeButton);
+      // Node.DOCUMENT_POSITION_FOLLOWING = 4
+      expect(result & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
   describe('Mermaid Diagram Integration (Issue #100)', () => {
     it('should render mermaid code block with MermaidCodeBlock component', async () => {
       const contentWithMermaid = `# Test Document

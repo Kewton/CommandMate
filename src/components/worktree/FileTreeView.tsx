@@ -424,7 +424,7 @@ const TreeNode = memo(function TreeNode({
         {/* [Issue #162] File birthtime display */}
         {!isDirectory && item.birthtime && (
           <span
-            className="text-xs text-gray-400 flex-shrink-0 hidden sm:inline"
+            className="text-xs text-gray-400 flex-shrink-0"
             title={item.birthtime}
           >
             {formatRelativeTime(item.birthtime, dateFnsLocaleStr ? getDateFnsLocale(dateFnsLocaleStr) : undefined)}

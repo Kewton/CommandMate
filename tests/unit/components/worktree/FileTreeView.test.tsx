@@ -1341,6 +1341,44 @@ describe('FileTreeView', () => {
       expect(fetchCount).toBeLessThan(10);
     });
 
+    it('should display birthtime without hidden class (visible on all screen sizes)', async () => {
+      // [Issue #162] birthtime should be visible on all screen sizes (no hidden sm:inline)
+      const birthtimeData: TreeResponse = {
+        path: '',
+        name: '',
+        items: [
+          {
+            name: 'test-file.ts',
+            type: 'file',
+            size: 512,
+            extension: 'ts',
+            birthtime: '2026-02-10T10:00:00Z',
+          },
+        ],
+        parentPath: null,
+      };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(birthtimeData),
+      });
+
+      render(<FileTreeView worktreeId="test-worktree" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('test-file.ts')).toBeInTheDocument();
+      });
+
+      // Find the birthtime span by its title attribute
+      const birthtimeSpan = screen.getByTitle('2026-02-10T10:00:00Z');
+      expect(birthtimeSpan).toBeInTheDocument();
+
+      // Bug fix: birthtime should NOT have 'hidden' class (was 'hidden sm:inline')
+      expect(birthtimeSpan).not.toHaveClass('hidden');
+      // It should also NOT have 'sm:inline' class
+      expect(birthtimeSpan.className).not.toContain('sm:inline');
+    });
+
     it('should cancel previous reload when refreshTrigger changes rapidly', async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url.includes('/tree/src')) {

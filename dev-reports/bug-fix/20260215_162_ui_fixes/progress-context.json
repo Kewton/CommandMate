@@ -1,0 +1,34 @@
+{
+  "bug_id": "20260215_162_ui_fixes",
+  "bug_description": "Issue #162 UIバグ2件修正",
+  "phase_results": {
+    "investigation": {
+      "status": "success",
+      "bugs_found": 2,
+      "root_causes": [
+        "BUG-1: FileTreeView.tsx:427のCSS hidden sm:inlineでモバイル非表示",
+        "BUG-2: .mdファイルはMarkdownEditorで開かれるがコピーボタン未実装"
+      ]
+    },
+    "tdd_fix": {
+      "status": "success",
+      "tests_total": 3392,
+      "tests_passed": 3392,
+      "tests_failed": 0,
+      "new_tests_added": 5,
+      "typescript_errors": 0,
+      "eslint_errors": 0
+    },
+    "acceptance_test": {
+      "status": "passed",
+      "criteria_verified": 10,
+      "criteria_total": 10
+    }
+  },
+  "files_changed": [
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "tests/unit/components/worktree/FileTreeView.test.tsx",
+    "tests/unit/components/MarkdownEditor.test.tsx"
+  ]
+}
