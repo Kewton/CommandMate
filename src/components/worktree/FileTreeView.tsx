@@ -23,6 +23,9 @@ import { useContextMenu } from '@/hooks/useContextMenu';
 import { useLongPress } from '@/hooks/useLongPress';
 import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { escapeRegExp, computeMatchedPaths } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/date-utils';
+import { getDateFnsLocale } from '@/lib/date-locale';
+import { useLocale } from 'next-intl';
 import { FilePlus, FolderPlus } from 'lucide-react';
 
 // ============================================================================
@@ -44,6 +47,8 @@ export interface FileTreeViewProps {
   onDelete?: (path: string) => void;
   /** Callback when file should be uploaded [IMPACT-002] */
   onUpload?: (targetDir: string) => void;
+  /** Callback when item should be moved [Issue #162] */
+  onMove?: (path: string, type: 'file' | 'directory') => void;
   /** Additional CSS classes */
   className?: string;
   /** Trigger to refresh the tree (increment to refresh) */
@@ -103,6 +108,8 @@ interface TreeNodeProps {
   searchMode?: SearchMode;
   /** [Issue #21] Set of matched file/directory paths for content search filtering */
   matchedPaths?: Set<string>;
+  /** [Issue #162] date-fns locale string for formatRelativeTime */
+  dateFnsLocaleStr?: string;
 }
 
 /** Maximum number of concurrent directory fetches during tree reload */
@@ -113,7 +120,10 @@ const CONCURRENT_LIMIT = 5;
 // ============================================================================
 
 /**
- * Format file size for display
+ * Format file size into a human-readable string.
+ *
+ * @param bytes - File size in bytes, or undefined for directories
+ * @returns Formatted string (e.g., "1.2 KB", "3.5 MB"), or empty string if undefined
  */
 function formatFileSize(bytes: number | undefined): string {
   if (bytes === undefined) return '';
@@ -281,6 +291,7 @@ const TreeNode = memo(function TreeNode({
   searchQuery,
   searchMode,
   matchedPaths,
+  dateFnsLocaleStr,
 }: TreeNodeProps) {
   const [loading, setLoading] = useState(false);
   const fullPath = path ? `${path}/${item.name}` : item.name;
@@ -409,6 +420,16 @@ const TreeNode = memo(function TreeNode({
             ? item.itemCount !== undefined && `${item.itemCount} items`
             : formatFileSize(item.size)}
         </span>
+
+        {/* [Issue #162] File birthtime display */}
+        {!isDirectory && item.birthtime && (
+          <span
+            className="text-xs text-gray-400 flex-shrink-0 hidden sm:inline"
+            title={item.birthtime}
+          >
+            {formatRelativeTime(item.birthtime, dateFnsLocaleStr ? getDateFnsLocale(dateFnsLocaleStr) : undefined)}
+          </span>
+        )}
       </div>
 
       {/* Children */}
@@ -472,6 +493,7 @@ const TreeNode = memo(function TreeNode({
                 searchQuery={searchQuery}
                 searchMode={searchMode}
                 matchedPaths={matchedPaths}
+                dateFnsLocaleStr={dateFnsLocaleStr}
               />
             ))}
         </div>
@@ -507,6 +529,7 @@ export const FileTreeView = memo(function FileTreeView({
   onRename,
   onDelete,
   onUpload,
+  onMove,
   className = '',
   refreshTrigger = 0,
   searchQuery,
@@ -514,6 +537,8 @@ export const FileTreeView = memo(function FileTreeView({
   searchResults,
   onSearchResultSelect,
 }: FileTreeViewProps) {
+  // [Issue #162] Get locale for date formatting
+  const locale = useLocale();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rootItems, setRootItems] = useState<TreeItem[]>([]);
@@ -872,6 +897,7 @@ export const FileTreeView = memo(function FileTreeView({
           searchQuery={searchQuery}
           searchMode={searchMode}
           matchedPaths={matchedPaths}
+          dateFnsLocaleStr={locale}
         />
       ))}
 
@@ -887,6 +913,7 @@ export const FileTreeView = memo(function FileTreeView({
         onRename={onRename}
         onDelete={onDelete}
         onUpload={onUpload}
+        onMove={onMove}
       />
     </div>
   );

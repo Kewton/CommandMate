@@ -1,20 +1,29 @@
 /**
  * FileViewer Component
- * Displays file contents in a modal with syntax highlighting
- * Supports both text files and image files
+ *
+ * Displays file contents in a modal with syntax highlighting.
+ * Supports both text files and image files.
  *
  * Image file handling flow:
  * 1. API returns isImage: true for image files
  * 2. FileViewer detects isImage flag
  * 3. ImageViewer component renders the Base64 data URI
+ *
+ * Text file features:
+ * - Syntax highlighting via language-specific CSS classes
+ * - Copy to clipboard with visual feedback (Copy -> Check icon, 2s)
+ *
+ * @module components/worktree/FileViewer
  */
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Modal } from '@/components/ui';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
+import { copyToClipboard } from '@/lib/clipboard-utils';
+import { Copy, Check } from 'lucide-react';
 
 export interface FileViewerProps {
   isOpen: boolean;
@@ -40,11 +49,35 @@ export function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewer
   const [content, setContent] = useState<FileContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  /** Whether the current content supports clipboard copy (text files only) */
+  const canCopy = useMemo(
+    () => Boolean(content?.content && !content.isImage),
+    [content]
+  );
+
+  /**
+   * [Issue #162] Copy file content to clipboard.
+   * Icon changes from Copy to Check for 2 seconds on success.
+   * Failure is silently handled (icon remains unchanged).
+   */
+  const handleCopy = useCallback(async () => {
+    if (!canCopy || !content?.content) return;
+    try {
+      await copyToClipboard(content.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Failure is indicated by icon not changing
+    }
+  }, [canCopy, content]);
 
   useEffect(() => {
     if (!isOpen || !filePath) {
       setContent(null);
       setError(null);
+      setCopied(false);
       return;
     }
 
@@ -112,10 +145,25 @@ export function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewer
 
         {content && !loading && !error && (
           <div className="bg-gray-50 rounded-lg overflow-hidden">
-            <div className="bg-gray-100 px-4 py-2 border-b border-gray-200">
-              <p className="text-xs text-gray-600 font-mono">
+            <div className="bg-gray-100 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
+              <p className="text-xs text-gray-600 font-mono truncate">
                 {content.worktreePath}/{content.path}
               </p>
+              {/* [Issue #162] Copy button for text files */}
+              {canCopy && (
+                <button
+                  data-testid="copy-content-button"
+                  onClick={handleCopy}
+                  className="flex-shrink-0 ml-2 p-1 rounded hover:bg-gray-200 transition-colors text-gray-500 hover:text-gray-700"
+                  aria-label="Copy file content"
+                >
+                  {copied ? (
+                    <Check className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                </button>
+              )}
             </div>
             {/* Image file: render with ImageViewer */}
             {content.isImage ? (

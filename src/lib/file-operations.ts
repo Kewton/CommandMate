@@ -10,8 +10,8 @@
  */
 
 import { readFile, writeFile, mkdir, rm, rename, stat, readdir } from 'fs/promises';
-import { existsSync } from 'fs';
-import { join, extname, dirname } from 'path';
+import { existsSync, realpathSync, statSync } from 'fs';
+import { join, extname, dirname, basename, sep, resolve } from 'path';
 import { isPathSafe } from './path-validator';
 import { isEditableExtension } from '@/config/editable-extensions';
 import { DELETE_SAFETY_CONFIG, isProtectedDirectory } from '@/config/file-operations';
@@ -52,7 +52,10 @@ export type FileOperationErrorCode =
   | 'INVALID_MAGIC_BYTES'
   | 'FILE_TOO_LARGE'
   | 'INVALID_FILENAME'
-  | 'INVALID_FILE_CONTENT';
+  | 'INVALID_FILE_CONTENT'
+  // Move-specific error codes
+  | 'MOVE_SAME_PATH'
+  | 'MOVE_INTO_SELF';
 
 /**
  * Error messages for each error code
@@ -76,12 +79,19 @@ const ERROR_MESSAGES: Record<FileOperationErrorCode, string> = {
   FILE_TOO_LARGE: 'File size exceeds limit',
   INVALID_FILENAME: 'Invalid filename',
   INVALID_FILE_CONTENT: 'Invalid file content',
+  // Move-specific error messages
+  MOVE_SAME_PATH: 'Source and destination are the same',
+  MOVE_INTO_SELF: 'Cannot move a directory into itself',
 };
 
 /**
  * Create an error result
  * [SEC-SF-002] Does not include absolute paths
  * Exported for use in API routes
+ *
+ * @param code - Error code from FileOperationErrorCode
+ * @param customMessage - Optional custom message to override the default
+ * @returns FileOperationResult with success=false and error details
  */
 export function createErrorResult(code: FileOperationErrorCode, customMessage?: string): FileOperationResult {
   return {
@@ -91,6 +101,36 @@ export function createErrorResult(code: FileOperationErrorCode, customMessage?: 
       message: customMessage || ERROR_MESSAGES[code],
     },
   };
+}
+
+/**
+ * Map a Node.js filesystem error to a FileOperationResult.
+ * [DRY-003] Extracted from repeated error handling patterns in file operation functions.
+ *
+ * Handles common filesystem error codes:
+ * - EACCES -> PERMISSION_DENIED
+ * - ENOSPC -> DISK_FULL
+ * - ENOTEMPTY -> DIRECTORY_NOT_EMPTY
+ * - EEXIST -> FILE_EXISTS
+ * - Everything else -> INTERNAL_ERROR
+ *
+ * @param error - The caught error (typically from fs/promises)
+ * @returns FileOperationResult with the appropriate error code
+ */
+function mapFsError(error: unknown): FileOperationResult {
+  const nodeError = error as NodeJS.ErrnoException;
+  switch (nodeError.code) {
+    case 'EACCES':
+      return createErrorResult('PERMISSION_DENIED');
+    case 'ENOSPC':
+      return createErrorResult('DISK_FULL');
+    case 'ENOTEMPTY':
+      return createErrorResult('DIRECTORY_NOT_EMPTY');
+    case 'EEXIST':
+      return createErrorResult('FILE_EXISTS');
+    default:
+      return createErrorResult('INTERNAL_ERROR');
+  }
 }
 
 /**
@@ -206,11 +246,7 @@ export async function readFileContent(
       content,
     };
   } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === 'EACCES') {
-      return createErrorResult('PERMISSION_DENIED');
-    }
-    return createErrorResult('INTERNAL_ERROR');
+    return mapFsError(error);
   }
 }
 
@@ -246,14 +282,7 @@ export async function updateFileContent(
       path: relativePath,
     };
   } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === 'EACCES') {
-      return createErrorResult('PERMISSION_DENIED');
-    }
-    if (nodeError.code === 'ENOSPC') {
-      return createErrorResult('DISK_FULL');
-    }
-    return createErrorResult('INTERNAL_ERROR');
+    return mapFsError(error);
   }
 }
 
@@ -301,14 +330,7 @@ export async function createFileOrDirectory(
       path: relativePath,
     };
   } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === 'EACCES') {
-      return createErrorResult('PERMISSION_DENIED');
-    }
-    if (nodeError.code === 'ENOSPC') {
-      return createErrorResult('DISK_FULL');
-    }
-    return createErrorResult('INTERNAL_ERROR');
+    return mapFsError(error);
   }
 }
 
@@ -409,20 +431,184 @@ export async function deleteFileOrDirectory(
       path: relativePath,
     };
   } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === 'EACCES') {
-      return createErrorResult('PERMISSION_DENIED');
+    return mapFsError(error);
+  }
+}
+
+/**
+ * Common validation helper for file operations [MF-001]
+ *
+ * Validates source path safety (via isPathSafe) and existence.
+ * [SF-S2-003] Only validates source path; destination validation is the caller's responsibility.
+ *
+ * Used by: renameFileOrDirectory, moveFileOrDirectory
+ *
+ * @param worktreeRoot - Root directory of the worktree (absolute path)
+ * @param sourcePath - Relative path to the source file/directory
+ * @returns Discriminated union:
+ *   - `{ success: true, resolvedSource: string }` - Absolute path to the validated source
+ *   - `{ success: false, error: FileOperationResult }` - Error result (INVALID_PATH or FILE_NOT_FOUND)
+ *
+ * @example
+ * ```ts
+ * const result = validateFileOperation('/path/to/worktree', 'src/file.ts');
+ * if (!result.success) return result.error;
+ * // result.resolvedSource is the absolute path
+ * ```
+ */
+export function validateFileOperation(
+  worktreeRoot: string,
+  sourcePath: string
+): { success: true; resolvedSource: string } | { success: false; error: FileOperationResult } {
+  // 1. isPathSafe() for source path safety
+  if (!isPathSafe(sourcePath, worktreeRoot)) {
+    return { success: false, error: createErrorResult('INVALID_PATH') };
+  }
+
+  const fullPath = join(worktreeRoot, sourcePath);
+
+  // 2. Source path existence check
+  if (!existsSync(fullPath)) {
+    return { success: false, error: createErrorResult('FILE_NOT_FOUND') };
+  }
+
+  // 3. Return resolved absolute path
+  return { success: true, resolvedSource: fullPath };
+}
+
+/**
+ * Move a file or directory to a different directory.
+ *
+ * Performs a 12-step validation and move sequence:
+ * 1. Source path validation (via validateFileOperation)
+ * 2. [SEC-005] Protected directory check (source)
+ * 3. Destination path safety check
+ * 4. Destination existence and type (must be directory)
+ * 5. Protected directory check (destination)
+ * 6. [SEC-006] Symlink validation (prevents escape via symlinks)
+ * 7. Final destination path calculation
+ * 8. MOVE_SAME_PATH check (resolves symlinks for accuracy)
+ * 9. [SEC-007] MOVE_INTO_SELF check (with path separator to avoid false positives)
+ * 10. [SEC-008] Final destination path isPathSafe() validation
+ * 11. Protected directory check (final destination)
+ * 12. [SEC-009] Pre-check existence + TOCTOU defense in catch
+ *
+ * @param worktreeRoot - Root directory of the worktree (absolute path)
+ * @param sourcePath - Relative path of the file/directory to move
+ * @param destinationDir - Relative path of the destination directory (empty string for root)
+ * @returns FileOperationResult with the new relative path on success
+ */
+export async function moveFileOrDirectory(
+  worktreeRoot: string,
+  sourcePath: string,
+  destinationDir: string
+): Promise<FileOperationResult> {
+  // 1. Validate source using common helper [MF-001]
+  const sourceValidation = validateFileOperation(worktreeRoot, sourcePath);
+  if (!sourceValidation.success) {
+    return sourceValidation.error;
+  }
+  const resolvedSource = sourceValidation.resolvedSource;
+
+  // 2. [SEC-005] Source path protected directory check
+  if (isProtectedDirectory(sourcePath)) {
+    return createErrorResult('PROTECTED_DIRECTORY');
+  }
+
+  // 3. Validate destination path safety
+  // Allow empty string for root directory
+  if (destinationDir !== '' && !isPathSafe(destinationDir, worktreeRoot)) {
+    return createErrorResult('INVALID_PATH');
+  }
+
+  // 4. Validate destination directory exists and is a directory
+  const destFullPath = destinationDir ? join(worktreeRoot, destinationDir) : worktreeRoot;
+  if (!existsSync(destFullPath)) {
+    return createErrorResult('INVALID_PATH');
+  }
+
+  try {
+    const destStat = statSync(destFullPath);
+    if (!destStat.isDirectory()) {
+      return createErrorResult('INVALID_PATH');
     }
-    if (nodeError.code === 'ENOTEMPTY') {
-      return createErrorResult('DIRECTORY_NOT_EMPTY');
+  } catch {
+    return createErrorResult('INVALID_PATH');
+  }
+
+  // 5. Protected directory check for destination [SF-S2-005]
+  if (destinationDir && isProtectedDirectory(destinationDir)) {
+    return createErrorResult('PROTECTED_DIRECTORY');
+  }
+
+  // 6. [SEC-006] Symlink validation for destination directory
+  try {
+    const resolvedDest = realpathSync(destFullPath);
+    const resolvedRoot = realpathSync(worktreeRoot);
+    if (!resolvedDest.startsWith(resolvedRoot + sep) && resolvedDest !== resolvedRoot) {
+      return createErrorResult('INVALID_PATH');
     }
-    return createErrorResult('INTERNAL_ERROR');
+  } catch {
+    return createErrorResult('INVALID_PATH');
+  }
+
+  // 7. Calculate final destination path
+  const sourceBaseName = basename(sourcePath);
+  const newRelativePath = destinationDir
+    ? join(destinationDir, sourceBaseName)
+    : sourceBaseName;
+
+  // 8. MOVE_SAME_PATH check
+  // Use realpathSync to resolve any symlinks in tmp directories (e.g., macOS /var -> /private/var)
+  let resolvedSourceReal: string;
+  try {
+    resolvedSourceReal = realpathSync(resolvedSource);
+  } catch {
+    resolvedSourceReal = resolve(resolvedSource);
+  }
+  const resolvedNewFull = resolve(realpathSync(worktreeRoot), newRelativePath);
+  if (resolvedNewFull === resolvedSourceReal) {
+    return createErrorResult('MOVE_SAME_PATH');
+  }
+
+  // 9. [SEC-007] MOVE_INTO_SELF check with path separator
+  if (resolvedNewFull.startsWith(resolvedSourceReal + sep)) {
+    return createErrorResult('MOVE_INTO_SELF');
+  }
+
+  // 10. [SEC-008] Final destination path isPathSafe() validation
+  if (!isPathSafe(newRelativePath, worktreeRoot)) {
+    return createErrorResult('INVALID_PATH');
+  }
+
+  // 11. Protected directory check for final destination path [SF-S2-005]
+  if (isProtectedDirectory(newRelativePath)) {
+    return createErrorResult('PROTECTED_DIRECTORY');
+  }
+
+  // 12. [SEC-009] Pre-check: destination file/directory existence (UX)
+  const newFullPath = join(worktreeRoot, newRelativePath);
+  if (existsSync(newFullPath)) {
+    return createErrorResult('FILE_EXISTS');
+  }
+
+  try {
+    await rename(resolvedSource, newFullPath);
+
+    return {
+      success: true,
+      path: newRelativePath,
+    };
+  } catch (error) {
+    // [SEC-009] TOCTOU defense: mapFsError handles EEXIST and ENOTEMPTY -> FILE_EXISTS
+    return mapFsError(error);
   }
 }
 
 /**
  * Rename a file or directory
  * [SEC-SF-003] New name validation
+ * [MF-001] Uses validateFileOperation() for common validation
  *
  * @param worktreeRoot - Root directory of the worktree
  * @param relativePath - Relative path of the file/directory to rename
@@ -434,9 +620,10 @@ export async function renameFileOrDirectory(
   relativePath: string,
   newName: string
 ): Promise<FileOperationResult> {
-  // Validate source path
-  if (!isPathSafe(relativePath, worktreeRoot)) {
-    return createErrorResult('INVALID_PATH');
+  // [MF-001] Use common validation helper for source path
+  const sourceValidation = validateFileOperation(worktreeRoot, relativePath);
+  if (!sourceValidation.success) {
+    return sourceValidation.error;
   }
 
   // Validate new name
@@ -445,12 +632,7 @@ export async function renameFileOrDirectory(
     return createErrorResult('INVALID_NAME', nameValidation.error);
   }
 
-  const fullPath = join(worktreeRoot, relativePath);
-
-  // Check if source exists
-  if (!existsSync(fullPath)) {
-    return createErrorResult('FILE_NOT_FOUND');
-  }
+  const fullPath = sourceValidation.resolvedSource;
 
   // Calculate new path
   const parentDir = dirname(relativePath);
@@ -475,11 +657,7 @@ export async function renameFileOrDirectory(
       path: newRelativePath,
     };
   } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === 'EACCES') {
-      return createErrorResult('PERMISSION_DENIED');
-    }
-    return createErrorResult('INTERNAL_ERROR');
+    return mapFsError(error);
   }
 }
 
@@ -526,13 +704,6 @@ export async function writeBinaryFile(
       size: buffer.length,
     };
   } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === 'EACCES') {
-      return createErrorResult('PERMISSION_DENIED');
-    }
-    if (nodeError.code === 'ENOSPC') {
-      return createErrorResult('DISK_FULL');
-    }
-    return createErrorResult('INTERNAL_ERROR');
+    return mapFsError(error);
   }
 }
