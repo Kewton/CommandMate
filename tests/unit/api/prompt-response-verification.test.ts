@@ -62,16 +62,17 @@ vi.mock('@/lib/cli-patterns', () => ({
   buildDetectPromptOptions: vi.fn().mockReturnValue({ requireDefaultIndicator: false }),
 }));
 
-// Mock CLIToolManager
+// Mock CLIToolManager - uses vi.fn() for getInstance so it can be overridden in tests
+const mockIsRunning = vi.fn().mockResolvedValue(true);
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
-    getInstance: () => ({
+    getInstance: vi.fn(() => ({
       getTool: () => ({
         name: 'Claude',
-        isRunning: vi.fn().mockResolvedValue(true),
+        isRunning: mockIsRunning,
         getSessionName: (id: string) => `claude-${id}`,
       }),
-    }),
+    })),
   },
 }));
 
@@ -394,5 +395,272 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
     // offset = 2 - 1 = 1 -> 1 Down + Enter
     const sentKeys = vi.mocked(sendSpecialKeys).mock.calls[0][1];
     expect(sentKeys).toEqual(['Down', 'Enter']);
+  });
+});
+
+describe('POST /api/worktrees/:id/prompt-response - Error handling and edge cases', () => {
+  let db: Database.Database;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    runMigrations(db);
+
+    const { setMockDb } = await import('@/lib/db-instance');
+    setMockDb(db);
+
+    const worktree: Worktree = {
+      id: 'test-wt',
+      name: 'Test Worktree',
+      path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+      cliToolId: 'claude',
+    };
+    upsertWorktree(db, worktree);
+
+    vi.clearAllMocks();
+  });
+
+  it('should return 400 when session is not running', async () => {
+    // Override the shared mockIsRunning to return false for this test
+    mockIsRunning.mockResolvedValueOnce(false);
+
+    const request = createRequest('test-wt', 'y');
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toContain('session is not running');
+  });
+
+  it('should return 500 when sendKeys throws an error', async () => {
+    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { sendKeys } = await import('@/lib/tmux');
+
+    // Prompt check passes with a yes_no prompt (triggers sendKeys path)
+    vi.mocked(captureSessionOutput).mockResolvedValue('Continue? (y/n)');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: {
+        type: 'yes_no',
+        question: 'Continue?',
+        options: ['yes', 'no'],
+        status: 'pending',
+      },
+      cleanContent: 'Continue? (y/n)',
+    });
+
+    // sendKeys fails
+    vi.mocked(sendKeys).mockRejectedValue(new Error('tmux send-keys failed'));
+
+    const request = createRequest('test-wt', 'y');
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.error).toContain('Failed to send answer to tmux');
+    expect(data.error).toContain('tmux send-keys failed');
+  });
+
+  it('should return 500 when sendSpecialKeys throws an error', async () => {
+    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { sendSpecialKeys } = await import('@/lib/tmux');
+
+    vi.mocked(captureSessionOutput).mockResolvedValue('Q?\n\u276F 1. Yes\n  2. No');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: {
+        type: 'multiple_choice',
+        question: 'Q?',
+        options: [
+          { number: 1, label: 'Yes', isDefault: true },
+          { number: 2, label: 'No', isDefault: false },
+        ],
+        status: 'pending',
+      },
+      cleanContent: 'Q?',
+    });
+
+    // sendSpecialKeys fails
+    vi.mocked(sendSpecialKeys).mockRejectedValue(new Error('tmux special-keys failed'));
+
+    const request = createRequest('test-wt', '2');
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.error).toContain('Failed to send answer to tmux');
+  });
+
+  it('should return 500 with generic message for non-Error thrown from sendKeys', async () => {
+    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { sendKeys } = await import('@/lib/tmux');
+
+    vi.mocked(captureSessionOutput).mockResolvedValue('Continue?');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: {
+        type: 'yes_no',
+        question: 'Continue?',
+        options: ['yes', 'no'],
+        status: 'pending',
+      },
+      cleanContent: 'Continue?',
+    });
+
+    // Throw a non-Error value
+    vi.mocked(sendKeys).mockRejectedValue('unexpected string error');
+
+    const request = createRequest('test-wt', 'y');
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.error).toContain('Unknown error');
+  });
+
+  it('should return 500 for malformed JSON body (outer catch)', async () => {
+    // Create a request with invalid JSON body
+    const request = new Request('http://localhost:3000/api/worktrees/test-wt/prompt-response', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'this is not valid JSON',
+    }) as unknown as NextRequest;
+
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+
+    expect(response.status).toBe(500);
+  });
+});
+
+describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prompts', () => {
+  let db: Database.Database;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    runMigrations(db);
+
+    const { setMockDb } = await import('@/lib/db-instance');
+    setMockDb(db);
+
+    const worktree: Worktree = {
+      id: 'test-wt',
+      name: 'Test Worktree',
+      path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+      cliToolId: 'claude',
+    };
+    upsertWorktree(db, worktree);
+
+    vi.clearAllMocks();
+
+    // Reset tmux mock implementations (may have been set to reject by error handling tests)
+    const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux');
+    vi.mocked(sendKeys).mockResolvedValue(undefined);
+    vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+    // Reset isRunning (may have been set to false by error handling tests)
+    mockIsRunning.mockResolvedValue(true);
+  });
+
+  it('should use Space+Down+Enter for multi-select checkbox prompts', async () => {
+    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { sendSpecialKeys } = await import('@/lib/tmux');
+
+    // Multi-select prompt with checkbox-style options
+    vi.mocked(captureSessionOutput).mockResolvedValue('Select tools:\n\u276F [ ] Option A\n  [ ] Option B\n  [ ] Option C');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: {
+        type: 'multiple_choice',
+        question: 'Select tools:',
+        options: [
+          { number: 1, label: '[ ] Option A', isDefault: true },
+          { number: 2, label: '[ ] Option B', isDefault: false },
+          { number: 3, label: '[ ] Option C', isDefault: false },
+        ],
+        status: 'pending',
+      },
+      cleanContent: 'Select tools:',
+    });
+
+    // Select option 2: offset=2-1=1 Down, Space, then 3-2+1=2 Downs to "Next", Enter
+    const request = createRequest('test-wt', '2');
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    expect(sendSpecialKeys).toHaveBeenCalled();
+
+    const sentKeys = vi.mocked(sendSpecialKeys).mock.calls[0][1];
+    // 1 Down (navigate to option 2), Space (toggle), 2 Down (to "Next"), Enter
+    expect(sentKeys).toEqual(['Down', 'Space', 'Down', 'Down', 'Enter']);
+  });
+
+  it('should navigate Up for multi-select when target is above default', async () => {
+    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { sendSpecialKeys } = await import('@/lib/tmux');
+
+    // Default is option 3, selecting option 1
+    vi.mocked(captureSessionOutput).mockResolvedValue('Select:\n  [x] A\n  [ ] B\n\u276F [ ] C');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: {
+        type: 'multiple_choice',
+        question: 'Select:',
+        options: [
+          { number: 1, label: '[x] A', isDefault: false },
+          { number: 2, label: '[ ] B', isDefault: false },
+          { number: 3, label: '[ ] C', isDefault: true },
+        ],
+        status: 'pending',
+      },
+      cleanContent: 'Select:',
+    });
+
+    // Select option 1: offset=1-3=-2 -> 2 Up, Space, then 3-1+1=3 Downs to "Next", Enter
+    const request = createRequest('test-wt', '1');
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    const sentKeys = vi.mocked(sendSpecialKeys).mock.calls[0][1];
+    expect(sentKeys).toEqual(['Up', 'Up', 'Space', 'Down', 'Down', 'Down', 'Enter']);
+  });
+
+  it('should handle selecting the default option in multi-select (offset=0)', async () => {
+    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { sendSpecialKeys } = await import('@/lib/tmux');
+
+    vi.mocked(captureSessionOutput).mockResolvedValue('Pick:\n\u276F [ ] Alpha\n  [ ] Beta');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: {
+        type: 'multiple_choice',
+        question: 'Pick:',
+        options: [
+          { number: 1, label: '[ ] Alpha', isDefault: true },
+          { number: 2, label: '[ ] Beta', isDefault: false },
+        ],
+        status: 'pending',
+      },
+      cleanContent: 'Pick:',
+    });
+
+    // Select option 1 (default): offset=0 -> no navigation, Space, 2-1+1=2 Downs, Enter
+    const request = createRequest('test-wt', '1');
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    const sentKeys = vi.mocked(sendSpecialKeys).mock.calls[0][1];
+    // No navigation (offset=0), Space, 2 Downs to "Next", Enter
+    expect(sentKeys).toEqual(['Space', 'Down', 'Down', 'Enter']);
   });
 });

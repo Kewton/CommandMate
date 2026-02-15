@@ -48,6 +48,7 @@ import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
 import { useAutoYes } from '@/hooks/useAutoYes';
+import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { NotificationDot } from '@/components/common/NotificationDot';
@@ -1127,20 +1128,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     async (answer: string): Promise<void> => {
       actions.setPromptAnswering(true);
       try {
-        // Issue #287: Include promptType and defaultOptionNumber in the request body
+        // Issue #287: Use shared builder to include promptType and defaultOptionNumber
         // so the API can use cursor-key navigation even when promptCheck re-verification fails.
-        const promptData = state.prompt.data;
-        const requestBody: Record<string, unknown> = { answer, cliTool: activeCliTab };
-
-        if (promptData) {
-          requestBody.promptType = promptData.type;
-          if (promptData.type === 'multiple_choice') {
-            const defaultOption = promptData.options.find(o => o.isDefault);
-            if (defaultOption) {
-              requestBody.defaultOptionNumber = defaultOption.number;
-            }
-          }
-        }
+        const requestBody = buildPromptResponseBody(answer, activeCliTab, state.prompt.data);
 
         const response = await fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
           method: 'POST',

@@ -24,6 +24,23 @@ interface PromptResponseRequest {
   defaultOptionNumber?: number;
 }
 
+/** Regex pattern to detect checkbox-style multi-select options (e.g., "[ ] Option" or "[x] Option") */
+const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
+
+/**
+ * Build an array of directional key names ('Up' or 'Down') to navigate
+ * from the current cursor position to the target option.
+ *
+ * @param offset - Number of positions to move (positive = Down, negative = Up)
+ * @returns Array of 'Up' or 'Down' strings
+ */
+function buildNavigationKeys(offset: number): string[] {
+  if (offset === 0) return [];
+  const direction = offset > 0 ? 'Down' : 'Up';
+  const count = Math.abs(offset);
+  return Array.from({ length: count }, () => direction);
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -131,27 +148,20 @@ export async function POST(
         // Multi-select prompts require: Space to toggle checkbox -> navigate to "Next" -> Enter.
         // Single-select prompts require: navigate to option -> Enter.
         // Note: multi-select detection is only possible when promptCheck succeeded (mcOptions available).
-        const isMultiSelect = mcOptions !== null && mcOptions.some(o => /^\[[ x]\] /.test(o.label));
+        const isMultiSelect = mcOptions !== null && mcOptions.some(o => CHECKBOX_OPTION_PATTERN.test(o.label));
 
         if (isMultiSelect && mcOptions !== null) {
           // Multi-select: toggle checkbox, then navigate to "Next" and submit
-          const checkboxCount = mcOptions.filter(o => /^\[[ x]\] /.test(o.label)).length;
+          const checkboxCount = mcOptions.filter(o => CHECKBOX_OPTION_PATTERN.test(o.label)).length;
 
-          const keys: string[] = [];
-
-          // 1. Navigate to target option
-          if (offset > 0) {
-            for (let i = 0; i < offset; i++) keys.push('Down');
-          } else if (offset < 0) {
-            for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
-          }
-
-          // 2. Space to toggle checkbox
-          keys.push('Space');
+          const keys: string[] = [
+            ...buildNavigationKeys(offset),  // 1. Navigate to target option
+            'Space',                          // 2. Toggle checkbox
+          ];
 
           // 3. Navigate to "Next" button (positioned right after all checkbox options)
           const downToNext = checkboxCount - targetNum + 1;
-          for (let i = 0; i < downToNext; i++) keys.push('Down');
+          keys.push(...buildNavigationKeys(downToNext));
 
           // 4. Enter to submit
           keys.push('Enter');
@@ -159,15 +169,10 @@ export async function POST(
           await sendSpecialKeys(sessionName, keys);
         } else {
           // Single-select: navigate and Enter to select
-          const keys: string[] = [];
-
-          if (offset > 0) {
-            for (let i = 0; i < offset; i++) keys.push('Down');
-          } else if (offset < 0) {
-            for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
-          }
-
-          keys.push('Enter');
+          const keys: string[] = [
+            ...buildNavigationKeys(offset),
+            'Enter',
+          ];
           await sendSpecialKeys(sessionName, keys);
         }
       } else {

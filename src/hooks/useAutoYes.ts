@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { resolveAutoAnswer } from '@/lib/auto-yes-resolver';
+import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import type { PromptData } from '@/types/models';
 
 /** Duplicate prevention window in milliseconds (3 seconds) */
@@ -82,15 +83,9 @@ export function useAutoYes({
     lastAutoRespondedRef.current = promptKey;
     setLastAutoResponse(answer);
 
-    // Issue #287: Include promptType and defaultOptionNumber in the request body
+    // Issue #287: Use shared builder to include promptType and defaultOptionNumber
     // so the API can use cursor-key navigation even when promptCheck re-verification fails.
-    const requestBody: Record<string, unknown> = { answer, cliTool, promptType: promptData.type };
-    if (promptData.type === 'multiple_choice') {
-      const defaultOption = promptData.options.find(o => o.isDefault);
-      if (defaultOption) {
-        requestBody.defaultOptionNumber = defaultOption.number;
-      }
-    }
+    const requestBody = buildPromptResponseBody(answer, cliTool, promptData);
 
     // Send auto-response via existing prompt-response API
     fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
