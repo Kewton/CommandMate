@@ -116,13 +116,14 @@ export async function POST(
       // (Arrow/Space/Enter), not number input. Detect this format and send
       // the appropriate key sequence instead of typing the number.
       //
-      // Issue #287: When promptCheck is null (capture failed), fall back to
+      // Issue #287: When promptCheck is null (capture failed) or promptCheck
+      // type does not match multiple_choice (type mismatch), fall back to
       // body.promptType to determine if cursor-key navigation is needed.
-      // This prevents the bug where a failed re-verification causes
-      // multiple_choice prompts to be sent as plain text.
+      // This prevents the bug where re-verification returns a different type
+      // or fails, causing multiple_choice prompts to be sent as plain text.
       const isClaudeMultiChoice = cliToolId === 'claude'
         && (promptCheck?.promptData?.type === 'multiple_choice'
-            || (promptCheck === null && bodyPromptType === 'multiple_choice'))
+            || bodyPromptType === 'multiple_choice')
         && /^\d+$/.test(answer);
 
       if (isClaudeMultiChoice) {
@@ -138,7 +139,7 @@ export async function POST(
           const defaultOption = mcOptions.find(o => o.isDefault);
           defaultNum = defaultOption?.number ?? 1;
         } else {
-          // Fallback path (Issue #287): promptCheck is null, use body fields
+          // Fallback path (Issue #287): promptCheck is null or type mismatch, use body fields
           defaultNum = bodyDefaultOptionNumber ?? 1;
         }
 

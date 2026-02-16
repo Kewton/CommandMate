@@ -364,6 +364,75 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
     expect(sentKeys).toEqual(['Up', 'Enter']);
   });
 
+  it('should use cursor-key navigation when promptCheck is non-null with type=yes_no but bodyPromptType=multiple_choice (type mismatch fallback)', async () => {
+    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux');
+
+    // promptCheck succeeds but returns a yes_no type (re-verification detected different prompt type)
+    vi.mocked(captureSessionOutput).mockResolvedValue('Continue? (y/n)');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: {
+        type: 'yes_no',
+        question: 'Continue?',
+        options: ['yes', 'no'],
+        status: 'pending',
+      },
+      cleanContent: 'Continue? (y/n)',
+    });
+
+    // Body says multiple_choice (from original UI detection)
+    const request = createRequest('test-wt', {
+      answer: '2',
+      promptType: 'multiple_choice',
+      defaultOptionNumber: 1,
+    });
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    // Should use cursor navigation (fallback to body.promptType)
+    expect(sendSpecialKeys).toHaveBeenCalled();
+    expect(sendKeys).not.toHaveBeenCalled();
+
+    // offset = 2 - 1 = 1 -> 1 Down + Enter
+    const sentKeys = vi.mocked(sendSpecialKeys).mock.calls[0][1];
+    expect(sentKeys).toEqual(['Down', 'Enter']);
+  });
+
+  it('should use cursor-key navigation when promptCheck is non-null with promptData=undefined but bodyPromptType=multiple_choice', async () => {
+    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { detectPrompt } = await import('@/lib/prompt-detector');
+    const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux');
+
+    // promptCheck succeeds but has no promptData (edge case)
+    vi.mocked(captureSessionOutput).mockResolvedValue('Some prompt output');
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      cleanContent: 'Some prompt output',
+      // promptData is undefined
+    });
+
+    // Body says multiple_choice
+    const request = createRequest('test-wt', {
+      answer: '3',
+      promptType: 'multiple_choice',
+      defaultOptionNumber: 2,
+    });
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    // Should use cursor navigation (fallback to body.promptType)
+    expect(sendSpecialKeys).toHaveBeenCalled();
+    expect(sendKeys).not.toHaveBeenCalled();
+
+    // offset = 3 - 2 = 1 -> 1 Down + Enter
+    const sentKeys = vi.mocked(sendSpecialKeys).mock.calls[0][1];
+    expect(sentKeys).toEqual(['Down', 'Enter']);
+  });
+
   it('should handle promptType/defaultOptionNumber as optional fields (backward compatibility)', async () => {
     const { captureSessionOutput } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
