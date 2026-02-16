@@ -1,0 +1,84 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: prompt-answer-sender.test.ts 16 tests pass",
+      "result": "passed",
+      "evidence": "16 tests passed (516ms) - All cursor-key navigation, fallback, text send, multi-select, and priority tests verified"
+    },
+    {
+      "scenario": "Scenario 2: auto-yes-manager.test.ts 53 tests pass (existing behavior preserved)",
+      "result": "passed",
+      "evidence": "53 tests passed (17ms) - All existing auto-yes state, polling, thinking skip, cursor navigation, and globalThis tests verified"
+    },
+    {
+      "scenario": "Scenario 3: prompt-response-verification.test.ts 21 tests pass (existing behavior preserved)",
+      "result": "passed",
+      "evidence": "21 tests passed (405ms) - All prompt re-verification, fallback, error handling, and multi-select tests verified"
+    },
+    {
+      "scenario": "Scenario 4: TypeScript type check (npx tsc --noEmit) has 0 errors",
+      "result": "passed",
+      "evidence": "npx tsc --noEmit completed with no output (0 errors)"
+    },
+    {
+      "scenario": "Scenario 5: ESLint (npm run lint) has 0 errors/warnings",
+      "result": "passed",
+      "evidence": "npm run lint: 'No ESLint warnings or errors'"
+    },
+    {
+      "scenario": "Scenario 6: Build (npm run build) succeeds",
+      "result": "passed",
+      "evidence": "npm run build: 'Compiled successfully', all routes generated without errors"
+    },
+    {
+      "scenario": "Scenario 7: route.ts uses sendPromptAnswer and has no direct buildNavigationKeys/CHECKBOX_OPTION_PATTERN",
+      "result": "passed",
+      "evidence": "route.ts imports sendPromptAnswer from '@/lib/prompt-answer-sender' (line 15), calls it at line 100. No direct imports of sendKeys/sendSpecialKeys. No buildNavigationKeys or CHECKBOX_OPTION_PATTERN found."
+    },
+    {
+      "scenario": "Scenario 8: auto-yes-manager.ts uses sendPromptAnswer and has no direct cursor-key logic",
+      "result": "passed",
+      "evidence": "auto-yes-manager.ts imports sendPromptAnswer from './prompt-answer-sender' (line 15), calls it at line 343. No direct imports of sendKeys/sendSpecialKeys. No buildNavigationKeys or CHECKBOX_OPTION_PATTERN definitions. Only cursor-related text is in a code comment."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "route.ts and auto-yes-manager.ts cursor-key sending logic is unified in sendPromptAnswer()",
+      "verified": true
+    },
+    {
+      "criterion": "route.ts bodyPromptType fallback (Bug1 fix) continues to work",
+      "verified": true
+    },
+    {
+      "criterion": "auto-yes-manager.ts correctly calls sendPromptAnswer()",
+      "verified": true
+    },
+    {
+      "criterion": "Existing tests (auto-yes-manager.test.ts, prompt-response-verification.test.ts) all pass",
+      "verified": true
+    },
+    {
+      "criterion": "New test cases (prompt-answer-sender.test.ts) are added for the shared function",
+      "verified": true
+    },
+    {
+      "criterion": "ESLint/TypeScript errors are 0",
+      "verified": true
+    },
+    {
+      "criterion": "Build succeeds",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/lib/prompt-answer-sender.test.ts (16 tests passed)",
+    "tests/unit/lib/auto-yes-manager.test.ts (53 tests passed)",
+    "tests/unit/api/prompt-response-verification.test.ts (21 tests passed)",
+    "npx tsc --noEmit (0 errors)",
+    "npm run lint (0 warnings/errors)",
+    "npm run build (compiled successfully)"
+  ],
+  "message": "All acceptance criteria are satisfied. The sendPromptAnswer() shared function in src/lib/prompt-answer-sender.ts correctly unifies the cursor-key sending logic previously duplicated in route.ts and auto-yes-manager.ts. All 90 tests pass across the three test suites, TypeScript and ESLint checks are clean, and the build succeeds."
+}

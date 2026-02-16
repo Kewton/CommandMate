@@ -1,0 +1,69 @@
+{
+  "bug_id": "287-bug2",
+  "bug_description": "auto-yes-manager.ts と route.ts のカーソルキー送信ロジック重複を共通関数に抽出し、フォールバックを統一する",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "カーソルキー送信ロジックの共通関数抽出",
+      "description": "src/lib/prompt-answer-sender.ts に sendPromptAnswer() を新規作成。route.ts と auto-yes-manager.ts の重複ロジックをこの関数に統一する。",
+      "files_to_modify": [
+        "src/lib/prompt-answer-sender.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/lib/auto-yes-manager.ts"
+      ]
+    }
+  ],
+  "target_coverage": 80,
+  "implementation_details": {
+    "step1_new_module": {
+      "file": "src/lib/prompt-answer-sender.ts",
+      "description": "Create shared module with sendPromptAnswer() function",
+      "function_signature": "export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<void>",
+      "params_interface": {
+        "sessionName": "string",
+        "answer": "string",
+        "cliToolId": "CLIToolType",
+        "promptData": "PromptData | undefined (from detectPrompt result)",
+        "fallbackPromptType": "PromptType | undefined (from client body for route.ts, undefined for auto-yes)"
+      },
+      "internal_logic": [
+        "1. Determine isClaudeMultiChoice: cliToolId === 'claude' && (promptData?.type === 'multiple_choice' || fallbackPromptType === 'multiple_choice') && /^\\d+$/.test(answer)",
+        "2. If isClaudeMultiChoice: calculate offset from defaultNum, build navigation keys, handle multi-select vs single-select",
+        "3. If not: send text answer + Enter (standard path)",
+        "Move buildNavigationKeys() and CHECKBOX_OPTION_PATTERN from route.ts into this module"
+      ]
+    },
+    "step2_route_ts": {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "description": "Replace L114-187 cursor key block with sendPromptAnswer() call",
+      "changes": [
+        "Import sendPromptAnswer from prompt-answer-sender",
+        "Replace entire try block (L114-187) with: await sendPromptAnswer({ sessionName, answer, cliToolId, promptData: promptCheck?.promptData, fallbackPromptType: bodyPromptType })",
+        "Remove buildNavigationKeys() and CHECKBOX_OPTION_PATTERN (moved to shared module)",
+        "Remove sendKeys/sendSpecialKeys imports if no longer needed directly"
+      ]
+    },
+    "step3_auto_yes_manager": {
+      "file": "src/lib/auto-yes-manager.ts",
+      "description": "Replace L340-399 cursor key block with sendPromptAnswer() call",
+      "changes": [
+        "Import sendPromptAnswer from prompt-answer-sender",
+        "Replace L340-399 with: await sendPromptAnswer({ sessionName, answer, cliToolId, promptData: promptDetection.promptData, fallbackPromptType: undefined })",
+        "Remove sendKeys/sendSpecialKeys imports if no longer needed directly"
+      ]
+    }
+  },
+  "test_scenarios": [
+    "sendPromptAnswer with cliToolId=claude, promptData.type=multiple_choice → cursor keys",
+    "sendPromptAnswer with cliToolId=claude, promptData.type=yes_no, fallbackPromptType=multiple_choice → cursor keys (fallback)",
+    "sendPromptAnswer with cliToolId=claude, promptData=undefined, fallbackPromptType=multiple_choice → cursor keys (fallback)",
+    "sendPromptAnswer with cliToolId=claude, promptData=undefined, fallbackPromptType=undefined → text send",
+    "sendPromptAnswer with cliToolId=codex → text send (regardless of type)",
+    "sendPromptAnswer with multi-select checkbox options → Space + navigate to Next + Enter",
+    "sendPromptAnswer with offset=0 (default option) → just Enter",
+    "sendPromptAnswer with offset>0 → Down keys + Enter",
+    "sendPromptAnswer with offset<0 → Up keys + Enter",
+    "Existing route.ts tests should still pass",
+    "Existing auto-yes-manager behavior should be preserved"
+  ]
+}

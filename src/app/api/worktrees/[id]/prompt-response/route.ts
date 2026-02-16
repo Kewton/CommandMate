@@ -7,12 +7,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { sendKeys, sendSpecialKeys } from '@/lib/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/prompt-detector';
 import { stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
+import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import type { PromptType } from '@/types/models';
 
 interface PromptResponseRequest {
@@ -22,23 +22,6 @@ interface PromptResponseRequest {
   promptType?: PromptType;
   /** Issue #287: Default option number from client-side detection (fallback when promptCheck fails) */
   defaultOptionNumber?: number;
-}
-
-/** Regex pattern to detect checkbox-style multi-select options (e.g., "[ ] Option" or "[x] Option") */
-const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
-
-/**
- * Build an array of directional key names ('Up' or 'Down') to navigate
- * from the current cursor position to the target option.
- *
- * @param offset - Number of positions to move (positive = Down, negative = Up)
- * @returns Array of 'Up' or 'Down' strings
- */
-function buildNavigationKeys(offset: number): string[] {
-  if (offset === 0) return [];
-  const direction = offset > 0 ? 'Down' : 'Up';
-  const count = Math.abs(offset);
-  return Array.from({ length: count }, () => direction);
 }
 
 export async function POST(
@@ -111,81 +94,17 @@ export async function POST(
     }
 
     // Send answer to tmux
+    // Issue #287 Bug2: Uses shared sendPromptAnswer() to unify logic
+    // with auto-yes-manager.ts, including fallback handling.
     try {
-      // Issue #193: Claude Code AskUserQuestion uses cursor-based navigation
-      // (Arrow/Space/Enter), not number input. Detect this format and send
-      // the appropriate key sequence instead of typing the number.
-      //
-      // Issue #287: When promptCheck is null (capture failed) or promptCheck
-      // type does not match multiple_choice (type mismatch), fall back to
-      // body.promptType to determine if cursor-key navigation is needed.
-      // This prevents the bug where re-verification returns a different type
-      // or fails, causing multiple_choice prompts to be sent as plain text.
-      const isClaudeMultiChoice = cliToolId === 'claude'
-        && (promptCheck?.promptData?.type === 'multiple_choice'
-            || bodyPromptType === 'multiple_choice')
-        && /^\d+$/.test(answer);
-
-      if (isClaudeMultiChoice) {
-        const targetNum = parseInt(answer, 10);
-
-        // Issue #287: Use promptCheck data when available, fall back to body fields
-        let defaultNum: number;
-        let mcOptions: Array<{ number: number; label: string; isDefault?: boolean }> | null = null;
-
-        if (promptCheck?.promptData?.type === 'multiple_choice') {
-          // Primary path: use fresh promptCheck data
-          mcOptions = promptCheck.promptData.options;
-          const defaultOption = mcOptions.find(o => o.isDefault);
-          defaultNum = defaultOption?.number ?? 1;
-        } else {
-          // Fallback path (Issue #287): promptCheck is null or type mismatch, use body fields
-          defaultNum = bodyDefaultOptionNumber ?? 1;
-        }
-
-        const offset = targetNum - defaultNum;
-
-        // Detect multi-select (checkbox) prompts by checking for [ ] in option labels.
-        // Multi-select prompts require: Space to toggle checkbox -> navigate to "Next" -> Enter.
-        // Single-select prompts require: navigate to option -> Enter.
-        // Note: multi-select detection is only possible when promptCheck succeeded (mcOptions available).
-        const isMultiSelect = mcOptions !== null && mcOptions.some(o => CHECKBOX_OPTION_PATTERN.test(o.label));
-
-        if (isMultiSelect && mcOptions !== null) {
-          // Multi-select: toggle checkbox, then navigate to "Next" and submit
-          const checkboxCount = mcOptions.filter(o => CHECKBOX_OPTION_PATTERN.test(o.label)).length;
-
-          const keys: string[] = [
-            ...buildNavigationKeys(offset),  // 1. Navigate to target option
-            'Space',                          // 2. Toggle checkbox
-          ];
-
-          // 3. Navigate to "Next" button (positioned right after all checkbox options)
-          const downToNext = checkboxCount - targetNum + 1;
-          keys.push(...buildNavigationKeys(downToNext));
-
-          // 4. Enter to submit
-          keys.push('Enter');
-
-          await sendSpecialKeys(sessionName, keys);
-        } else {
-          // Single-select: navigate and Enter to select
-          const keys: string[] = [
-            ...buildNavigationKeys(offset),
-            'Enter',
-          ];
-          await sendSpecialKeys(sessionName, keys);
-        }
-      } else {
-        // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
-        await sendKeys(sessionName, answer, false);
-
-        // Wait a moment for the input to be processed
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Send Enter
-        await sendKeys(sessionName, '', true);
-      }
+      await sendPromptAnswer({
+        sessionName,
+        answer,
+        cliToolId,
+        promptData: promptCheck?.promptData,
+        fallbackPromptType: bodyPromptType,
+        fallbackDefaultOptionNumber: bodyDefaultOptionNumber,
+      });
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(

@@ -1,0 +1,41 @@
+{
+  "status": "completed",
+  "bug_id": "287-bug2",
+  "fix_summary": "auto-yes-manager.ts と route.ts に重複していたカーソルキー送信ロジックを src/lib/prompt-answer-sender.ts に共通関数 sendPromptAnswer() として抽出。DRY原則を遵守し、Bug1修正のフォールバック（fallbackPromptType/fallbackDefaultOptionNumber）も統一的に適用されるようにした。",
+  "files_created": [
+    "src/lib/prompt-answer-sender.ts",
+    "tests/unit/lib/prompt-answer-sender.test.ts"
+  ],
+  "files_modified": [
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/lib/auto-yes-manager.ts"
+  ],
+  "test_results": {
+    "prompt_answer_sender_tests": {
+      "total": 16,
+      "passed": 16,
+      "failed": 0
+    },
+    "auto_yes_manager_tests": {
+      "total": 53,
+      "passed": 53,
+      "failed": 0
+    },
+    "prompt_response_verification_tests": {
+      "total": 21,
+      "passed": 21,
+      "failed": 0
+    }
+  },
+  "quality_checks": {
+    "typescript": "no errors",
+    "eslint": "no warnings or errors",
+    "build": "pending verification"
+  },
+  "key_changes": [
+    "sendPromptAnswer() 共通関数: cliToolId, answer, promptData, fallbackPromptType, fallbackDefaultOptionNumber を受け取り、カーソルキーまたはテキスト送信を統一的に実行",
+    "buildNavigationKeys() と CHECKBOX_OPTION_PATTERN を prompt-answer-sender.ts に移動",
+    "route.ts: L114-187 のカーソルキーブロック全体を sendPromptAnswer() 呼び出しに置換",
+    "auto-yes-manager.ts: L340-399 のカーソルキーブロック全体を sendPromptAnswer() 呼び出しに置換"
+  ]
+}

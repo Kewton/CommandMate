@@ -1,0 +1,51 @@
+{
+  "bug_id": "287-bug2",
+  "bug_description": "auto-yes-manager.ts L343-345 のカーソルキー判定にフォールバックが無い。route.ts との間でカーソルキー送信ロジックが完全に重複しており、Bug1 修正が auto-yes-manager に反映されなかった。",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "カーソルキー送信ロジックの共通関数抽出",
+      "description": "route.ts (L114-187) と auto-yes-manager.ts (L340-399) で重複しているカーソルキー送信ロジックを src/lib/prompt-answer-sender.ts に抽出する。isClaudeMultiChoice 判定、ナビゲーションキー構築、マルチセレクト/シングルセレクト/テキスト送信を共通化。fallbackPromptType パラメータでフォールバックを統一。",
+      "files_to_modify": [
+        "src/lib/prompt-answer-sender.ts (新規)",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/lib/auto-yes-manager.ts"
+      ],
+      "details": {
+        "new_module": {
+          "file": "src/lib/prompt-answer-sender.ts",
+          "exports": [
+            {
+              "name": "sendPromptAnswer",
+              "params": {
+                "sessionName": "string - tmux session name",
+                "answer": "string - user answer",
+                "cliToolId": "CLIToolType - CLI tool identifier",
+                "promptData": "PromptData | undefined - from detectPrompt result",
+                "fallbackPromptType": "PromptType | undefined - from client body (route.ts) or undefined (auto-yes)"
+              },
+              "description": "Determines whether to use cursor-key or text-based input, then sends keys via tmux"
+            }
+          ]
+        },
+        "route_ts_changes": "L114-187 のカーソルキー送信ブロック全体を sendPromptAnswer() 呼び出しに置換。bodyPromptType を fallbackPromptType として渡す。buildNavigationKeys と CHECKBOX_OPTION_PATTERN は prompt-answer-sender.ts に移動。",
+        "auto_yes_manager_changes": "L340-399 のカーソルキー送信ブロック全体を sendPromptAnswer() 呼び出しに置換。fallbackPromptType は undefined を渡す（クライアント情報なし）。"
+      }
+    }
+  ],
+  "deliverables": [
+    "src/lib/prompt-answer-sender.ts（新規共通モジュール）",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts（共通関数呼び出しに置換）",
+    "src/lib/auto-yes-manager.ts（共通関数呼び出しに置換）",
+    "tests/unit/lib/prompt-answer-sender.test.ts（共通関数のテスト）"
+  ],
+  "definition_of_done": [
+    "route.ts と auto-yes-manager.ts のカーソルキー送信ロジックが sendPromptAnswer() に統一されていること",
+    "route.ts の bodyPromptType フォールバック（Bug1修正）が引き続き動作すること",
+    "auto-yes-manager.ts から sendPromptAnswer() が正しく呼び出されること",
+    "既存テストが全てパスすること",
+    "新規テストケースが共通関数に対して追加されていること",
+    "ESLint/TypeScript エラーが 0 件であること",
+    "ビルドが成功すること"
+  ]
+}

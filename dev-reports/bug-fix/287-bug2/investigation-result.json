@@ -1,0 +1,140 @@
+{
+  "status": "completed",
+  "investigation_summary": {
+    "issue_description": "auto-yes-manager.ts L343-345 の isClaudeMultiChoice 判定が promptDetection.promptData?.type === 'multiple_choice' のみに依存しており、detectPrompt が multiple_choice 以外のタイプを返した場合のフォールバックが存在しない。route.ts (Bug1) では bodyPromptType によるクライアントフォールバックが追加済みだが、auto-yes-manager はサーバーサイドポーリングであるためクライアント情報を利用できない。",
+    "error_type": "LogicError (missing fallback)",
+    "affected_files": [
+      "src/lib/auto-yes-manager.ts",
+      "src/app/api/worktrees/[id]/prompt-response/route.ts"
+    ],
+    "reproduction_confirmed": true
+  },
+  "root_cause_analysis": {
+    "category": "code_bug",
+    "primary_cause": "auto-yes-manager.ts の isClaudeMultiChoice 判定 (L343-345) が detectPrompt の結果のみに依存しており、タイミングや部分レンダリングで type が multiple_choice にならない場合にテキスト送信パスにフォールバックする。Claude Code はカーソルキーナビゲーションを期待するため、sendKeys('1') + Enter は無視される。",
+    "secondary_cause": "auto-yes-manager.ts (L340-399) と route.ts (L114-187) にカーソルキー送信ロジックが重複しており、route.ts に Bug1 修正 (bodyPromptType フォールバック) が適用されたが auto-yes-manager.ts には同等の修正が適用されていない。",
+    "evidence": [
+      "auto-yes-manager.ts L343-345: isClaudeMultiChoice は promptDetection.promptData?.type === 'multiple_choice' のみで判定し、フォールバック条件がない",
+      "route.ts L124-127: Bug1 修正済み。promptCheck?.promptData?.type === 'multiple_choice' || bodyPromptType === 'multiple_choice' の OR 条件で bodyPromptType フォールバックあり",
+      "auto-yes-manager.ts はサーバーサイドポーリングのため bodyPromptType 相当の外部情報を受け取る経路がない",
+      "resolveAutoAnswer() は PromptData を受け取り answer 文字列を返すのみ。promptType を保持・返却する仕組みがない",
+      "auto-yes-manager.ts の pollAutoYes() は detectPrompt を直前のキャプチャ結果に対して実行するため、route.ts (client -> server 間のタイムラグ) よりタイミング問題は少ないが、部分レンダリングの可能性は残る",
+      "カーソルキー送信ロジック (navigation keys 計算、multi-select checkbox 処理、single-select 処理) が auto-yes-manager.ts と route.ts に完全に重複している"
+    ],
+    "detailed_analysis": {
+      "question_1_isClaudeMultiChoice_fallback": {
+        "description": "isClaudeMultiChoice 条件の問題点",
+        "current_code": "const isClaudeMultiChoice = cliToolId === 'claude' && promptDetection.promptData?.type === 'multiple_choice' && /^\\d+$/.test(answer);",
+        "problem": "promptDetection.promptData?.type が multiple_choice にならない場合 (例: 部分レンダリングで yes_no と判定、または promptData が undefined)、isClaudeMultiChoice は false になり、L394-398 のテキスト送信パス (sendKeys + Enter) に落ちる。Claude Code のカーソルベース UI ではテキスト入力は無視される。",
+        "comparison_with_route_ts": "route.ts L124-127 は bodyPromptType === 'multiple_choice' による OR フォールバックがあり、promptCheck が失敗しても bodyPromptType から判定できる。auto-yes-manager にはこの経路がない。"
+      },
+      "question_2_available_fallback_info": {
+        "description": "auto-yes-manager 内で利用可能なフォールバック情報",
+        "analysis": "auto-yes-manager.ts は以下の情報を持つ: (1) cliToolId - 常に利用可能。(2) answer - resolveAutoAnswer() の戻り値。(3) promptDetection.promptData - detectPrompt の結果 (type が不正確な可能性あり)。外部から promptType を受け取る経路はない。",
+        "key_insight": "ただし、auto-yes-manager の pollAutoYes() は detectPrompt を自ら実行した直後にその結果を使うため、route.ts のように client -> server 間で時間が経過するケースとは異なる。promptDetection が isPrompt=true を返して promptData が存在する場合、そのタイプ情報は route.ts の promptCheck よりも信頼性が高い。問題は promptData.type が multiple_choice にならないケース (部分レンダリング) だが、この場合でも answer が数値文字列であること自体が multiple_choice の強いヒントになる。"
+      },
+      "question_3_resolveAutoAnswer_info": {
+        "description": "resolveAutoAnswer が保持する情報",
+        "analysis": "resolveAutoAnswer(promptData) は promptData.type が yes_no なら 'y'、multiple_choice ならデフォルトオプションの番号文字列を返す。つまり、answer が数値文字列 (/^\\d+$/) である時点で、resolveAutoAnswer は multiple_choice タイプの PromptData を受け取ったことが確実。auto-yes-manager では resolveAutoAnswer の入力 promptData をそのまま保持しているので、answer が数値文字列ならば promptData.type は必ず multiple_choice である。",
+        "conclusion": "auto-yes-manager の場合、resolveAutoAnswer を呼んだ時点の promptData.type は正確。問題は L343 の isClaudeMultiChoice で再度 promptDetection.promptData?.type をチェックしているが、これは冗長。resolveAutoAnswer に渡した promptData と同じオブジェクトなので、answer が /^\\d+$/ にマッチするなら type は必ず multiple_choice。つまり auto-yes-manager では実質的にフォールバック問題は発生しない可能性が高い。"
+      },
+      "question_4_answer_plus_cliToolId_sufficiency": {
+        "description": "answer (数値文字列) + cliToolId === 'claude' でカーソルキーナビゲーション判定は十分か",
+        "analysis": "auto-yes-manager の文脈では answer は resolveAutoAnswer() の戻り値であり、answer が /^\\d+$/ にマッチするのは promptData.type === 'multiple_choice' の場合のみ (yes_no は 'y' を返す)。したがって cliToolId === 'claude' && /^\\d+$/.test(answer) の2条件だけで isClaudeMultiChoice を判定することは理論上安全。ただし、将来 resolveAutoAnswer が別のタイプでも数値文字列を返す可能性がゼロではないため、promptData.type チェックを残しつつフォールバックを追加する方が防御的。",
+        "recommendation": "promptData.type === 'multiple_choice' チェックは維持しつつ、auto-yes-manager 特有の追加フォールバック (answer が数値 && cliToolId === 'claude' && promptData が存在する) を検討。ただし、実質的には現行コードでも auto-yes-manager 内では resolveAutoAnswer → isClaudeMultiChoice の流れで type の不整合は起きない。"
+      },
+      "question_5_code_duplication": {
+        "description": "auto-yes-manager.ts (L340-399) と route.ts (L114-187) のカーソルキーロジック重複",
+        "duplicated_logic": [
+          "isClaudeMultiChoice 判定条件",
+          "targetNum / defaultNum / offset 計算",
+          "multi-select (checkbox) 検出: mcOptions.some(o => /^\\[[ x]\\] /.test(o.label))",
+          "multi-select キーシーケンス構築: navigation + Space + Down to Next + Enter",
+          "single-select キーシーケンス構築: navigation + Enter",
+          "standard prompt パス: sendKeys(text) + 100ms wait + sendKeys(Enter)"
+        ],
+        "differences": [
+          "route.ts は buildNavigationKeys() ヘルパー関数を使用、auto-yes-manager は for ループで直接構築",
+          "route.ts は CHECKBOX_OPTION_PATTERN 定数を使用、auto-yes-manager はインラインの正規表現",
+          "route.ts は bodyPromptType / bodyDefaultOptionNumber フォールバックあり、auto-yes-manager はなし",
+          "route.ts は mcOptions の null チェックでフォールバックパスを分岐、auto-yes-manager は promptDetection.promptData を直接参照"
+        ],
+        "risk": "一方に修正を加えた際にもう一方への反映が漏れる (今回の Bug2 がまさにその例)。DRY 原則違反。"
+      },
+      "question_6_shared_function_extraction": {
+        "description": "カーソルキー送信ロジックの共通関数化の検討",
+        "feasibility": "高い。両方のモジュールで同じ入力 (cliToolId, answer, promptData, sessionName) から同じ出力 (sendSpecialKeys/sendKeys の呼び出し) を生成している。",
+        "proposed_approach": "新しいモジュール (例: src/lib/cursor-key-sender.ts) または既存モジュール (例: prompt-response-body-builder.ts の隣) に共通関数を配置。入力として cliToolId, answer, promptData (または type, options, defaultOptionNumber), sessionName を受け取り、適切な sendKeys/sendSpecialKeys を呼び出す。",
+        "benefits": [
+          "DRY 原則の遵守: 修正が1箇所で済む",
+          "Bug1 のフォールバックロジックを auto-yes-manager にも自然に適用できる",
+          "テストの集約: カーソルキーロジックのテストが1箇所に集まる",
+          "将来の CLI ツール追加時にもロジックの再利用が容易"
+        ],
+        "suggested_interface": {
+          "function_name": "sendPromptAnswer",
+          "parameters": {
+            "sessionName": "string - tmux セッション名",
+            "cliToolId": "CLIToolType - CLI ツール識別子",
+            "answer": "string - 送信する回答",
+            "promptData": "PromptData | null - プロンプトデータ (detectPrompt の結果)",
+            "fallbackPromptType": "PromptType | undefined - フォールバック用プロンプトタイプ (route.ts の bodyPromptType 相当)",
+            "fallbackDefaultOptionNumber": "number | undefined - フォールバック用デフォルトオプション番号"
+          },
+          "returns": "Promise<void>"
+        }
+      }
+    }
+  },
+  "severity_assessment": {
+    "severity": "medium",
+    "impact": "auto-yes-manager のサーバーサイドポーリングにおいて、Claude Code の複数選択肢プロンプトに対するカーソルキーナビゲーションのフォールバックが欠如している。ただし、auto-yes-manager は detectPrompt を直前のキャプチャ結果に対して実行し、resolveAutoAnswer が数値文字列を返すのは promptData.type === 'multiple_choice' の場合のみであるため、実際に type が不正確になるケースは route.ts より少ない。主な問題はコード重複による保守性の低下。",
+    "data_loss_risk": "none",
+    "user_impact": "Auto-Yes モード使用中、ごく稀に Claude Code の複数選択肢プロンプトへの自動応答が失敗し、プロンプトが未回答のまま残る可能性がある。手動操作でリカバリ可能。"
+  },
+  "recommended_actions": [
+    {
+      "action_id": "1",
+      "priority": "high",
+      "title": "カーソルキー送信ロジックを共通関数に抽出 (DRY 原則)",
+      "description": "auto-yes-manager.ts (L340-399) と route.ts (L114-187) に重複しているカーソルキー送信ロジックを共通関数 (例: sendPromptAnswer) として抽出する。この関数は cliToolId, answer, promptData, sessionName, およびオプションの fallbackPromptType/fallbackDefaultOptionNumber を受け取り、適切な sendKeys/sendSpecialKeys を呼び出す。route.ts の buildNavigationKeys() ヘルパーと CHECKBOX_OPTION_PATTERN 定数も共通モジュールに移動する。",
+      "files_to_modify": [
+        "src/lib/prompt-answer-sender.ts (新規作成)",
+        "src/lib/auto-yes-manager.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ],
+      "risk_level": "low",
+      "rationale": "今回のバグの根本原因はコード重複。共通関数化により、将来の修正が1箇所で済むようになり、同種のバグ再発を防止できる。"
+    },
+    {
+      "action_id": "2",
+      "priority": "medium",
+      "title": "auto-yes-manager に answer ベースのフォールバック判定を追加",
+      "description": "共通関数内で、auto-yes-manager のような外部情報なしのケースに対応するフォールバックを実装する。具体的には: (1) promptData?.type === 'multiple_choice' を最優先で使用 (2) フォールバックとして fallbackPromptType を使用 (route.ts の bodyPromptType) (3) 最終フォールバックとして cliToolId === 'claude' && /^\\d+$/.test(answer) && promptData !== null の条件で multiple_choice と推定。auto-yes-manager は resolveAutoAnswer が数値を返す = multiple_choice が確定しているため、(3) のフォールバックで安全にカバーできる。",
+      "files_to_modify": [
+        "src/lib/prompt-answer-sender.ts"
+      ],
+      "risk_level": "low",
+      "rationale": "auto-yes-manager ではクライアント情報がないため、answer の形式と cliToolId から推定するフォールバックが必要。resolveAutoAnswer の仕様上、数値文字列 answer は multiple_choice タイプからのみ生成されるため安全。"
+    },
+    {
+      "action_id": "3",
+      "priority": "medium",
+      "title": "共通関数のユニットテスト追加",
+      "description": "抽出した共通関数 (sendPromptAnswer) に対して以下のテストケースを追加: (1) Claude + multiple_choice -> sendSpecialKeys (2) Claude + yes_no -> sendKeys (3) 非Claude + multiple_choice -> sendKeys (4) promptData=null + fallbackPromptType=multiple_choice -> sendSpecialKeys (5) promptData=null + answer=数値 + cliToolId=claude -> sendSpecialKeys (auto-yes-manager フォールバック) (6) multi-select checkbox 処理 (7) offset 計算 (Up/Down/zero)",
+      "files_to_modify": [
+        "tests/unit/lib/prompt-answer-sender.test.ts (新規作成)"
+      ],
+      "risk_level": "low",
+      "rationale": "共通関数化に伴い、テストも一元化することで品質を担保する。"
+    }
+  ],
+  "next_steps": [
+    "1. src/lib/prompt-answer-sender.ts を新規作成し、sendPromptAnswer 共通関数と buildNavigationKeys ヘルパー、CHECKBOX_OPTION_PATTERN 定数を配置する",
+    "2. route.ts の L114-187 を sendPromptAnswer 呼び出しに置き換える (bodyPromptType/bodyDefaultOptionNumber をフォールバック引数として渡す)",
+    "3. auto-yes-manager.ts の L340-399 を sendPromptAnswer 呼び出しに置き換える (フォールバック引数なし、ただし共通関数内の answer ベース推定で対応)",
+    "4. tests/unit/lib/prompt-answer-sender.test.ts を作成し、全パターンのテストを追加",
+    "5. 既存テスト (auto-yes-manager.test.ts, prompt-response-verification.test.ts) が引き続き PASS することを確認",
+    "6. npm run lint && npx tsc --noEmit && npm run test:unit で品質チェック"
+  ]
+}

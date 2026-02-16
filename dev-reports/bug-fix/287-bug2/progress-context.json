@@ -1,0 +1,52 @@
+{
+  "project_name": "CommandMate",
+  "report_type": "bug-fix",
+  "bug_id": "287-bug2",
+  "issue_number": 287,
+  "branch": "feature/287-worktree",
+  "phases": [
+    {
+      "phase": "Phase 1: 不具合調査",
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/287-bug2/investigation-result.json",
+      "summary": "根本原因特定: auto-yes-manager.ts と route.ts にカーソルキー送信ロジックが完全に重複しており、Bug1修正（fallbackPromptType）が auto-yes-manager に反映されなかった。DRY原則違反。"
+    },
+    {
+      "phase": "Phase 2: 対策案提示",
+      "status": "completed",
+      "summary": "対策案1（カーソルキー送信ロジックの共通関数抽出）を選択。sendPromptAnswer() 共通関数をsrc/lib/prompt-answer-sender.ts に新規作成し、両方のモジュールから呼び出す。"
+    },
+    {
+      "phase": "Phase 3: 作業計画",
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/287-bug2/work-plan-context.json",
+      "summary": "3ファイルの変更計画。新規モジュール作成→route.ts置換→auto-yes-manager.ts置換→テスト追加。"
+    },
+    {
+      "phase": "Phase 4: TDD修正",
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/287-bug2/tdd-fix-result.json",
+      "summary": "sendPromptAnswer()共通関数を実装。16テスト全パス。既存テスト（auto-yes-manager 53件、prompt-response 21件）も全パス。TypeScript/ESLintエラー0件。"
+    },
+    {
+      "phase": "Phase 5: 受入テスト",
+      "status": "completed",
+      "result_file": "dev-reports/bug-fix/287-bug2/acceptance-result.json",
+      "summary": "全8シナリオ・全7受入基準パス。ビルド成功確認済み。コード構造検証（共通関数使用、重複なし）も確認。"
+    }
+  ],
+  "files_created": [
+    "src/lib/prompt-answer-sender.ts",
+    "tests/unit/lib/prompt-answer-sender.test.ts"
+  ],
+  "files_modified": [
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/lib/auto-yes-manager.ts"
+  ],
+  "test_summary": {
+    "new_tests": 16,
+    "existing_tests_verified": 74,
+    "total_passed": 90,
+    "total_failed": 0
+  }
+}

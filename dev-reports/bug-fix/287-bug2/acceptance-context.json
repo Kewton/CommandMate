@@ -1,0 +1,32 @@
+{
+  "bug_id": "287-bug2",
+  "bug_description": "auto-yes-manager.ts と route.ts のカーソルキー送信ロジック重複を共通関数に抽出し、フォールバックを統一する（DRY原則）",
+  "fix_summary": "src/lib/prompt-answer-sender.ts に sendPromptAnswer() 共通関数を新規作成。route.ts と auto-yes-manager.ts の重複カーソルキー送信ロジックをこの共通関数に置換。fallbackPromptType/fallbackDefaultOptionNumber によるフォールバック機構を統一。",
+  "acceptance_criteria": [
+    "route.ts と auto-yes-manager.ts のカーソルキー送信ロジックが sendPromptAnswer() に統一されていること",
+    "route.ts の bodyPromptType フォールバック（Bug1修正）が引き続き動作すること",
+    "auto-yes-manager.ts から sendPromptAnswer() が正しく呼び出されること",
+    "既存テスト（auto-yes-manager.test.ts, prompt-response-verification.test.ts）が全てパスすること",
+    "新規テストケース（prompt-answer-sender.test.ts）が共通関数に対して追加されていること",
+    "ESLint/TypeScript エラーが 0 件であること",
+    "ビルドが成功すること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: prompt-answer-sender.test.ts の全16テストがパスすること",
+    "シナリオ2: auto-yes-manager.test.ts の全53テストがパスすること（既存動作保持）",
+    "シナリオ3: prompt-response-verification.test.ts の全21テストがパスすること（既存動作保持）",
+    "シナリオ4: TypeScript型チェック（npx tsc --noEmit）がエラー0件であること",
+    "シナリオ5: ESLint（npm run lint）がエラー・警告0件であること",
+    "シナリオ6: ビルド（npm run build）が成功すること",
+    "シナリオ7: route.ts が sendPromptAnswer を呼び出しており、buildNavigationKeys/CHECKBOX_OPTION_PATTERN の直接定義がないこと",
+    "シナリオ8: auto-yes-manager.ts が sendPromptAnswer を呼び出しており、カーソルキーロジックの直接実装がないこと"
+  ],
+  "related_files": [
+    "src/lib/prompt-answer-sender.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/lib/auto-yes-manager.ts",
+    "tests/unit/lib/prompt-answer-sender.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/api/prompt-response-verification.test.ts"
+  ]
+}

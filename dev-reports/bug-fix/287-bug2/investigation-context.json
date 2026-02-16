@@ -1,0 +1,32 @@
+{
+  "issue_description": "auto-yes-manager.ts L343-345 の isClaudeMultiChoice 判定にフォールバックが一切ない。promptDetection.promptData?.type が multiple_choice にならない場合（タイミングや部分レンダリングによる誤判定）、テキスト送信パスに落ちて Claude Code が入力を認識しない。route.ts の Bug1 と同じパターンの問題だが、auto-yes-manager はサーバーサイドポーリングであるため bodyPromptType のようなクライアント送信情報は利用できない。",
+  "error_logs": [],
+  "affected_files": [
+    "src/lib/auto-yes-manager.ts"
+  ],
+  "reproduction_steps": [
+    "1. Auto-Yes が有効な状態で Claude Code セッションに AskUserQuestion（複数選択肢プロンプト）が表示される",
+    "2. auto-yes-manager のポーリングが captureSessionOutput + detectPrompt を実行",
+    "3. detectPrompt が multiple_choice 以外のタイプを返す（タイミングによる誤判定）",
+    "4. isClaudeMultiChoice が false → テキスト送信パスに落ちる",
+    "5. sendKeys('1') + Enter が送信されるが Claude Code はカーソルキーを期待 → 無視"
+  ],
+  "environment": {
+    "os": "macOS",
+    "node_version": "18.x",
+    "framework": "Next.js 14"
+  },
+  "severity_hint": "high",
+  "related_issue": 287,
+  "bug_location": {
+    "file": "src/lib/auto-yes-manager.ts",
+    "lines": "343-345",
+    "current_code": "const isClaudeMultiChoice = cliToolId === 'claude' && promptDetection.promptData?.type === 'multiple_choice' && /^\\d+$/.test(answer);",
+    "issue": "route.ts とは異なり、クライアント送信の bodyPromptType を利用できないため、detectPrompt の結果のみに依存している。promptDetection.promptData?.type が multiple_choice にならない場合のフォールバックが無い。"
+  },
+  "context": {
+    "difference_from_route_ts": "route.ts はクライアントから bodyPromptType を受け取れるが、auto-yes-manager.ts はサーバーサイドポーリングのため外部からの型情報がない",
+    "auto_yes_flow": "captureSessionOutput → stripAnsi → detectPrompt → resolveAutoAnswer → sendKeys/sendSpecialKeys",
+    "note": "auto-yes-manager.ts の detectPrompt は直前のキャプチャ結果を使うため route.ts よりタイミング問題は少ないが、ゼロではない"
+  }
+}

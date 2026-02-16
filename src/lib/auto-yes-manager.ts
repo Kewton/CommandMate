@@ -12,7 +12,7 @@ import type { CLIToolType } from './cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectPrompt } from './prompt-detector';
 import { resolveAutoAnswer } from './auto-yes-resolver';
-import { sendKeys, sendSpecialKeys } from './tmux';
+import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, detectThinking, buildDetectPromptOptions } from './cli-patterns';
 import { DEFAULT_AUTO_YES_DURATION, type AutoYesDuration } from '@/config/auto-yes-config';
@@ -337,66 +337,15 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId);
 
-    // Issue #193: Claude Code AskUserQuestion uses cursor-based navigation
-    // (Arrow/Space/Enter), not number input. Detect multi-choice and send
-    // appropriate key sequence instead of typing the number.
-    const isClaudeMultiChoice = cliToolId === 'claude'
-      && promptDetection.promptData?.type === 'multiple_choice'
-      && /^\d+$/.test(answer);
-
-    if (isClaudeMultiChoice && promptDetection.promptData?.type === 'multiple_choice') {
-      const targetNum = parseInt(answer, 10);
-      const mcOptions = promptDetection.promptData.options;
-      const defaultOption = mcOptions.find(o => o.isDefault);
-      const defaultNum = defaultOption?.number ?? 1;
-      const offset = targetNum - defaultNum;
-
-      // Detect multi-select (checkbox) prompts by checking for [ ] in option labels.
-      const isMultiSelect = mcOptions.some(o => /^\[[ x]\] /.test(o.label));
-
-      if (isMultiSelect) {
-        // Multi-select: toggle checkbox, then navigate to "Next" and submit
-        const checkboxCount = mcOptions.filter(o => /^\[[ x]\] /.test(o.label)).length;
-
-        const keys: string[] = [];
-
-        // 1. Navigate to target option
-        if (offset > 0) {
-          for (let i = 0; i < offset; i++) keys.push('Down');
-        } else if (offset < 0) {
-          for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
-        }
-
-        // 2. Space to toggle checkbox
-        keys.push('Space');
-
-        // 3. Navigate to "Next" button (positioned right after all checkbox options)
-        const downToNext = checkboxCount - targetNum + 1;
-        for (let i = 0; i < downToNext; i++) keys.push('Down');
-
-        // 4. Enter to submit
-        keys.push('Enter');
-
-        await sendSpecialKeys(sessionName, keys);
-      } else {
-        // Single-select: navigate and Enter to select
-        const keys: string[] = [];
-
-        if (offset > 0) {
-          for (let i = 0; i < offset; i++) keys.push('Down');
-        } else if (offset < 0) {
-          for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
-        }
-
-        keys.push('Enter');
-        await sendSpecialKeys(sessionName, keys);
-      }
-    } else {
-      // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
-      await sendKeys(sessionName, answer, false);
-      await new Promise(resolve => setTimeout(resolve, 100));
-      await sendKeys(sessionName, '', true);
-    }
+    // Issue #287 Bug2: Uses shared sendPromptAnswer() to unify logic
+    // with route.ts, including cursor-key navigation for Claude Code
+    // multiple-choice prompts and fallback handling.
+    await sendPromptAnswer({
+      sessionName,
+      answer,
+      cliToolId,
+      promptData: promptDetection.promptData,
+    });
 
     // 6. Update timestamp
     updateLastServerResponseTimestamp(worktreeId, Date.now());
