@@ -1,0 +1,105 @@
+{
+  "issue_number": 287,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-S2-001",
+        "title": "handlePromptRespond が activeCliTab を直接使用しているが useRef 経由に統一すべき",
+        "description": "設計方針書 C-004 では state.prompt.data を useRef 経由でアクセスすることを提案しているが、handlePromptRespond (L1133) は activeCliTab を直接 useCallback の依存配列に含めている。一方、fetchMessages/fetchCurrentOutput (L994, L1009) では activeCliTabRef を使用している。設計方針書では promptDataRef の追加を提案しているが、cliTool の取得方法との一貫性が不明確。handlePromptRespond 内で buildPromptResponseBody() を呼び出す際に cliTool をどちらから取得するか（activeCliTab vs activeCliTabRef.current）を設計方針書内で明示すべき。",
+        "severity": "medium",
+        "recommendation": "設計方針書 Section 10 のコードサンプルに cliTool の取得方法を明記する。handlePromptRespond 内では activeCliTabRef.current を使用するか、現行通り activeCliTab を依存配列に含めるかを決定し、buildPromptResponseBody() の第2引数の渡し方を確定させる。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-S2-001",
+        "title": "設計方針書の route.ts 行番号参照が今後の実装で無効化される可能性",
+        "description": "設計方針書 Section 7.1 で「route.ts (L96-158)」「auto-yes-manager.ts (L343-399)」と行番号を参照している。現時点では正確だが、カーソルキーロジックを buildCursorKeys() に置換する実装を行うと、これらの行番号は大幅に変わる。実装チェックリスト (Section 15) はフェーズ別に分かれているが、行番号がどの時点のものかが不明確。",
+        "severity": "low",
+        "recommendation": "行番号参照はあくまでレビュー時点の参考として注記を付けるか、コメントで「実装前のベースライン行番号」と明記する。"
+      },
+      {
+        "id": "SF-S2-002",
+        "title": "useAutoYes.ts の promptData アクセス方法が設計方針書で不明確",
+        "description": "設計方針書 Section 8 のレイヤー構成表で useAutoYes.ts は「fetch リクエストボディを buildPromptResponseBody() 経由で構築」とあるが、useAutoYes.ts は既にパラメータとして promptData を受け取っている (L30, L64)。buildPromptResponseBody(answer, cliTool, promptData) の呼び出しは自然に行えるが、WorktreeDetailRefactored.tsx 側の useRef パターン (C-004) との整合性について、useAutoYes.ts 側では ref 化が不要であることを明記すべき。",
+        "severity": "low",
+        "recommendation": "設計方針書 Section 10 に「useAutoYes.ts では promptData がフック引数として渡されるため、useRef 化は不要。C-004 は WorktreeDetailRefactored.tsx の handlePromptRespond のみに適用」という注記を追加する。"
+      },
+      {
+        "id": "SF-S2-003",
+        "title": "buildCursorKeys の cliToolId パラメータが CursorKeySendOptions に含まれていない",
+        "description": "設計方針書 Section 7.1 の CursorKeySendOptions インターフェースには sessionName, answer, effectivePromptType, effectiveDefaultNum, options が定義されているが、isClaudeMultiChoice 判定に必要な cliToolId が含まれていない。Section 6 のコア判定ロジックでは cliToolId === 'claude' が条件に含まれているため、この判定を buildCursorKeys 内部で行うなら cliToolId が必要。",
+        "severity": "medium",
+        "recommendation": "CursorKeySendOptions に cliToolId: CLIToolType フィールドを追加するか、isClaudeMultiChoice 判定は呼び出し側の責務とし buildCursorKeys は純粋にキー配列構築のみを担当するかを明確にする。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-S2-001",
+        "title": "PromptType の型定義の整合性確認",
+        "description": "設計方針書の PromptResponseRequest.promptType は 'yes_no' | 'multiple_choice' と定義されている。一方、src/types/models.ts の PromptType は 'yes_no' | 'multiple_choice' | 'approval' | 'choice' | 'input' | 'continue' と定義されている。現行の PromptData union 型は YesNoPromptData | MultipleChoicePromptData のみであり、PromptType の 'approval' 等は BasePromptData に含まれるが PromptData union には含まれない。設計方針書の promptType フィールドは PromptData.type と一致するため問題はないが、将来 PromptData に新しい型が追加された場合の拡張性について考慮が必要。",
+        "recommendation": "promptType のバリデーションで PromptData.type 以外の値が来た場合のフォールバック動作を明記する（現状はフォールバック不使用で問題なし）。"
+      },
+      {
+        "id": "C-S2-002",
+        "title": "sendPromptAnswer() の責務範囲が曖昧",
+        "description": "設計方針書で SF-001 対応として route.ts の POST 関数から sendPromptAnswer() を抽出するとあるが、この関数の具体的なインターフェース（引数、戻り値、エラーハンドリング）が定義されていない。buildCursorKeys() とは別に sendPromptAnswer() が必要かどうか、あるいは buildCursorKeys() + 既存の sendKeys/sendSpecialKeys の組み合わせで十分かを検討すべき。",
+        "recommendation": "Section 7 に sendPromptAnswer() のインターフェース定義を追加するか、buildCursorKeys() で十分であればレイヤー構成表から sendPromptAnswer() への言及を整理する。"
+      }
+    ]
+  },
+  "consistency_check": {
+    "data_flow_accuracy": {
+      "status": "accurate",
+      "details": "Mermaid データフロー図は実際のコード構造と一致している。UI -> handlePromptRespond -> API -> 判定ロジック -> 送信方式の流れは正確。useAutoYes -> API の経路も正しい。"
+    },
+    "file_paths_accuracy": {
+      "status": "accurate",
+      "details": "設計方針書記載の全ファイルパスが実在する。src/app/api/worktrees/[id]/prompt-response/route.ts, src/lib/auto-yes-manager.ts, src/hooks/useAutoYes.ts, src/components/worktree/WorktreeDetailRefactored.tsx, src/types/models.ts 全て確認済み。"
+    },
+    "line_numbers_accuracy": {
+      "status": "accurate",
+      "details": "route.ts L96-158 (カーソルキー送信ロジック), L110 (multi-select判定), auto-yes-manager.ts L343-399 (重複ロジック), route.ts L17-20 (PromptResponseRequest), L86-89 (catch節) 全て正確。"
+    },
+    "type_definitions_consistency": {
+      "status": "accurate_with_notes",
+      "details": "PromptResponseRequest の現行定義 (answer: string, cliTool?: CLIToolType) は route.ts L17-20 と一致。拡張予定の promptType, defaultOptionNumber フィールドは PromptData 型構造と整合している。MultipleChoiceOption.isDefault (boolean), MultipleChoiceOption.number (number) から defaultOptionNumber を導出するロジックは型レベルで正しい。"
+    },
+    "design_decisions_consistency": {
+      "status": "consistent",
+      "details": "D-1 (アプローチB) は handlePromptRespond が state.prompt.data にアクセス可能であることから実行可能。D-2 (非破壊的) は onRespond シグネチャが (answer: string) => Promise<void> で統一されていることを確認。D-3 (promptCheck優先) は route.ts L72-89 の既存 try-catch 構造と整合。D-10 (useRef化) は activeCliTabRef パターン (L940-941) との一貫性あり。"
+    },
+    "code_duplication_verification": {
+      "status": "confirmed",
+      "details": "route.ts L96-158 と auto-yes-manager.ts L343-399 のカーソルキー送信ロジックが実際に重複していることを確認。offset計算、multi-select判定、keys配列構築ロジックが同一。MF-001 による共通化の根拠は正当。"
+    },
+    "unchanged_files_verification": {
+      "status": "confirmed",
+      "details": "PromptMessage.tsx, PromptPanel.tsx, MobilePromptSheet.tsx の onRespond シグネチャは全て (answer: string) => Promise<void> で統一されており、変更不要であることを確認。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-287-prompt-response-fallback-design-policy.md",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/types/models.ts",
+    "src/lib/prompt-detector.ts",
+    "src/components/worktree/PromptPanel.tsx",
+    "src/components/worktree/PromptMessage.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "tests/unit/api/prompt-response-verification.test.ts"
+  ],
+  "timestamp": "2026-02-15T12:00:00Z"
+}

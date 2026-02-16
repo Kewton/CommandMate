@@ -1,0 +1,25 @@
+{
+  "bug_id": "287-bug1",
+  "bug_description": "route.ts の isClaudeMultiChoice フォールバック条件が不十分。promptCheck が非null だが type が multiple_choice でない場合にフォールバックが発動しない。",
+  "fix_summary": "L125 の条件を (promptCheck === null && bodyPromptType === 'multiple_choice') から bodyPromptType === 'multiple_choice' に簡略化。promptCheck?.promptData?.type === 'multiple_choice' が false の場合は常に bodyPromptType でフォールバック判定される。",
+  "acceptance_criteria": [
+    "promptCheck が非null で promptData.type が yes_no の場合、bodyPromptType === 'multiple_choice' でカーソルキーパスが使用されること",
+    "promptCheck が非null で promptData が undefined の場合、bodyPromptType === 'multiple_choice' でカーソルキーパスが使用されること",
+    "promptCheck が null の場合（既存動作）、bodyPromptType === 'multiple_choice' でカーソルキーパスが使用されること",
+    "promptCheck?.promptData?.type === 'multiple_choice' の場合は promptCheck を優先すること（既存動作維持）",
+    "bodyPromptType が undefined の場合はテキスト送信パスに落ちること（Yes/No 等の既存動作維持）",
+    "全ユニットテストがパスすること",
+    "ESLint/TypeScript エラーが 0 件であること",
+    "ビルドが成功すること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: promptCheck 非null + type=yes_no + bodyPromptType=multiple_choice → カーソルキー",
+    "シナリオ2: promptCheck 非null + promptData=undefined + bodyPromptType=multiple_choice → カーソルキー",
+    "シナリオ3: promptCheck null + bodyPromptType=multiple_choice → カーソルキー（既存動作）",
+    "シナリオ4: promptCheck 非null + type=multiple_choice → promptCheck 優先（既存動作）",
+    "シナリオ5: Claude 以外の cliTool → テキスト送信パス",
+    "シナリオ6: 全テストスイート実行",
+    "シナリオ7: ESLint + TypeScript チェック",
+    "シナリオ8: ビルド成功確認"
+  ]
+}

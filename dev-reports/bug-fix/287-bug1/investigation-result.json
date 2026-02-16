@@ -1,0 +1,121 @@
+{
+  "status": "completed",
+  "investigation_summary": {
+    "issue_description": "route.ts L123-126 の isClaudeMultiChoice フォールバック条件が不十分。promptCheck が非null（captureSessionOutput 成功、detectPrompt が isPrompt:true を返す）だが promptData.type が multiple_choice でない場合（例: yes_no と誤検出、または将来の新タイプ）、bodyPromptType === 'multiple_choice' のフォールバック分岐に到達しない。その結果、テキスト送信パス (L178-186) に落ち、Claude Code の AskUserQuestion（カーソルキーナビゲーション必須）に対してテキスト '1' + Enter が送信され、Claude Code が入力を認識しない。",
+    "error_type": "LogicError",
+    "affected_files": [
+      "src/app/api/worktrees/[id]/prompt-response/route.ts"
+    ],
+    "reproduction_confirmed": true
+  },
+  "root_cause_analysis": {
+    "category": "コードバグ",
+    "primary_cause": "isClaudeMultiChoice のフォールバック条件が promptCheck === null のケースのみをカバーしており、promptCheck が非null だが type が一致しないケースをカバーしていない",
+    "detailed_analysis": {
+      "current_condition_logic": {
+        "description": "L123-126 の isClaudeMultiChoice は OR 条件で2つのケースを扱う: (A) promptCheck?.promptData?.type === 'multiple_choice' (サーバー再検証成功かつ multiple_choice), (B) promptCheck === null && bodyPromptType === 'multiple_choice' (captureSessionOutput 例外でpromptCheck が null のまま残った場合)。",
+        "problem": "ケース (C) が欠落: promptCheck !== null (captureSessionOutput 成功、detectPrompt が isPrompt:true を返した) だが promptData.type !== 'multiple_choice' (例えば yes_no と誤検出された場合)。この場合、(A) は type 不一致で false、(B) は promptCheck !== null で false、結果として isClaudeMultiChoice が false になりテキスト送信パスに落ちる。"
+      },
+      "scenario_trace": {
+        "step_1": "クライアント側で promptData.type === 'multiple_choice' を検出、buildPromptResponseBody() で bodyPromptType='multiple_choice', bodyDefaultOptionNumber=N をリクエストボディに含める",
+        "step_2": "API route L96: captureSessionOutput() が成功",
+        "step_3": "API route L99: detectPrompt() が isPrompt:true を返すが、promptData.type が 'yes_no' 等の multiple_choice 以外のタイプを返す（プロンプトの出力タイミングによる誤検出）",
+        "step_4": "API route L101: promptCheck.isPrompt === true なのでガードを通過、promptCheck は非null の PromptDetectionResult",
+        "step_5": "API route L123-126: (A) promptCheck.promptData.type !== 'multiple_choice' -> false, (B) promptCheck !== null -> false. isClaudeMultiChoice = false",
+        "step_6": "API route L178-186: テキスト送信パスに落ち、sendKeys(sessionName, '1', false) + sendKeys(sessionName, '', true) が実行される",
+        "step_7": "Claude Code はカーソルキーを期待しているためテキスト入力 '1' + Enter は認識されない"
+      },
+      "why_detectPrompt_may_return_different_type": [
+        "detectPrompt() は最初に detectMultipleChoicePrompt() を試し、失敗すると YES_NO_PATTERNS と Approve? パターンを試す",
+        "AskUserQuestion の出力がターミナル上でまだ完全にレンダリングされていない場合、出力の末尾だけ取得され、数字付きオプションリストが見えない状態で yes_no パターンにマッチする可能性がある",
+        "tmux capturePane のタイミングにより、前回の prompt 残りが yes_no として検出される可能性がある",
+        "Claude Code の requireDefaultIndicator=false 設定で detectMultipleChoicePrompt が Layer 5 SEC-001 により拒否され、後続の yes_no パターンにフォールバックする可能性がある"
+      ]
+    },
+    "evidence": [
+      "L123-126 の条件分岐: promptCheck?.promptData?.type === 'multiple_choice' || (promptCheck === null && bodyPromptType === 'multiple_choice') -- 非null かつ type不一致ケースが網羅されていない",
+      "L108-111 の catch ブロック: captureSessionOutput が例外をスローした場合のみ promptCheck が null のまま残る。captureSessionOutput 成功時は必ず detectPrompt の結果（非null）が代入される",
+      "L101-107 のガード: isPrompt === false の場合は early return するため、L123 に到達する promptCheck は必ず isPrompt === true だが、type は multiple_choice とは限らない",
+      "buildDetectPromptOptions(cliToolId) で requireDefaultIndicator=false が設定されているため（L62 のモック確認）、detectMultipleChoicePrompt は Layer 5 SEC-001 の厳しい検証を通る必要があり、タイミングによって失敗する可能性がある"
+    ]
+  },
+  "severity_assessment": {
+    "severity": "high",
+    "impact": "Claude Code の AskUserQuestion（複数選択肢プロンプト）に対する自動応答・手動応答が機能しなくなる。特に Auto-Yes モードでの自動応答が無限ループに陥る可能性がある（応答が認識されないため同じプロンプトが再検出され続ける）。",
+    "data_loss_risk": "なし（データの破損や消失は発生しない）",
+    "user_experience_impact": "Claude Code セッションのプロンプト応答操作が失敗し、ユーザーが手動で tmux セッションに入って操作する必要がある"
+  },
+  "recommended_actions": [
+    {
+      "action_id": "1",
+      "priority": "high",
+      "title": "isClaudeMultiChoice フォールバック条件を拡張: promptCheck 非null かつ type 不一致ケースを追加",
+      "description": "L123-126 の条件を変更し、promptCheck が非null でも promptData.type が multiple_choice でない場合に bodyPromptType === 'multiple_choice' をフォールバックとして使用する。具体的には (promptCheck === null && bodyPromptType === 'multiple_choice') を (promptCheck?.promptData?.type !== 'multiple_choice' && bodyPromptType === 'multiple_choice') に変更する。これにより、(1) promptCheck===null (capture失敗)、(2) promptCheck非null かつ type不一致、の両方のケースでフォールバックが発動する。",
+      "files_to_modify": [
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ],
+      "code_change": {
+        "before": "const isClaudeMultiChoice = cliToolId === 'claude'\n  && (promptCheck?.promptData?.type === 'multiple_choice'\n      || (promptCheck === null && bodyPromptType === 'multiple_choice'))\n  && /^\\d+$/.test(answer);",
+        "after": "const isClaudeMultiChoice = cliToolId === 'claude'\n  && (promptCheck?.promptData?.type === 'multiple_choice'\n      || (promptCheck?.promptData?.type !== 'multiple_choice' && bodyPromptType === 'multiple_choice'))\n  && /^\\d+$/.test(answer);",
+        "explanation": "promptCheck?.promptData?.type !== 'multiple_choice' は promptCheck===null (type が undefined) のケースも true を返すため、既存の promptCheck===null フォールバックも維持される。promptCheck が非null で type が 'yes_no' 等の場合も bodyPromptType を参照してフォールバックが発動する。"
+      },
+      "risk_level": "low",
+      "risk_detail": "条件分岐の拡張のみで既存のフローに副作用なし。promptCheck?.promptData?.type === 'multiple_choice' の場合は最初の条件で true になるため、フォールバック分岐には到達しない。"
+    },
+    {
+      "action_id": "2",
+      "priority": "high",
+      "title": "defaultNum 計算のフォールバックパスも調整: promptCheck 非null かつ type 不一致時に body fields を使用",
+      "description": "L131-143 の defaultNum 計算において、else ブロック (L140-142) は現在のコメントで 'promptCheck is null' と記述されているが、action_id=1 の修正後は promptCheck が非null のケースもここに到達する。コメントを更新し、else ブロックの条件が promptCheck===null と promptCheck非null かつ type不一致の両方をカバーすることを明記する。ロジック自体は bodyDefaultOptionNumber ?? 1 を使用するため変更不要。",
+      "files_to_modify": [
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ],
+      "code_change": {
+        "before": "        } else {\n          // Fallback path (Issue #287): promptCheck is null, use body fields\n          defaultNum = bodyDefaultOptionNumber ?? 1;\n        }",
+        "after": "        } else {\n          // Fallback path (Issue #287): promptCheck is null or type mismatch, use body fields\n          defaultNum = bodyDefaultOptionNumber ?? 1;\n        }"
+      },
+      "risk_level": "low",
+      "risk_detail": "コメント変更のみ。ロジックに変更なし。"
+    },
+    {
+      "action_id": "3",
+      "priority": "medium",
+      "title": "テストケース追加: promptCheck 非null かつ type 不一致のフォールバックシナリオ",
+      "description": "新しいテストケースを追加: detectPrompt が isPrompt:true + type:'yes_no' を返す（multiple_choice と異なるタイプ）が、body.promptType='multiple_choice' かつ body.defaultOptionNumber が指定されている場合に、sendSpecialKeys（カーソルキーナビゲーション）が使用されることを検証する。",
+      "files_to_modify": [
+        "tests/unit/api/prompt-response-verification.test.ts"
+      ],
+      "risk_level": "low",
+      "risk_detail": "テスト追加のみ。既存テストに影響なし。"
+    }
+  ],
+  "additional_findings": {
+    "callers_analysis": {
+      "description": "buildPromptResponseBody() の呼び出し元は2箇所。いずれもクライアント側で正しく promptType と defaultOptionNumber を送信している。",
+      "callers": [
+        {
+          "file": "src/hooks/useAutoYes.ts",
+          "line": 88,
+          "description": "Auto-Yes 自動応答: buildPromptResponseBody(answer, cliTool, promptData) -- promptData はクライアント側の最新検出結果"
+        },
+        {
+          "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "line": 1133,
+          "description": "手動応答: buildPromptResponseBody(answer, activeCliTab, state.prompt.data) -- state.prompt.data はクライアント側の最新検出結果"
+        }
+      ],
+      "conclusion": "クライアント側は正しく promptType='multiple_choice' を送信するため、サーバー側のフォールバック条件の修正のみで十分。"
+    },
+    "multi_select_checkbox_impact": {
+      "description": "L147-151 の isMultiSelect 検出は mcOptions !== null を前提条件としている。action_id=1 の修正後、フォールバックパスでは mcOptions が null のまま残るため、isMultiSelect は必ず false になる。これは意図通り: bodyPromptType からのフォールバックではオプション詳細が不明なため、チェックボックスかどうかを判定できない。単純な single-select（Down/Up + Enter）として処理される。",
+      "risk": "なし。multi-select 対応はサーバー再検証成功時（mcOptions が取得できた場合）のみ機能する設計で問題ない。"
+    }
+  },
+  "next_steps": [
+    "action_id=1: L123-126 の isClaudeMultiChoice フォールバック条件を拡張する",
+    "action_id=2: L140-142 のコメントを更新する",
+    "action_id=3: promptCheck 非null + type不一致のテストケースを追加する",
+    "テスト実行: npm run test:unit -- tests/unit/api/prompt-response-verification.test.ts で全テスト通過を確認",
+    "npm run lint と npx tsc --noEmit で品質チェック"
+  ]
+}

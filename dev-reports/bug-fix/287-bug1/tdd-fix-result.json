@@ -1,0 +1,34 @@
+{
+  "status": "success",
+  "coverage": {
+    "statements": 100,
+    "branches": 92.1,
+    "functions": 100,
+    "lines": 100
+  },
+  "unit_tests": {
+    "total": 21,
+    "passed": 21,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "tests/unit/api/prompt-response-verification.test.ts"
+  ],
+  "commits": [
+    "70f8663: fix(#287): broaden isClaudeMultiChoice fallback for type mismatch case"
+  ],
+  "message": "TDD bug fix complete. Changed fallback condition from (promptCheck === null && bodyPromptType === 'multiple_choice') to (|| bodyPromptType === 'multiple_choice') to cover type mismatch cases. Added 2 new test cases. Coverage 100% statements/lines, 92.1% branches. All 21 tests pass. 0 ESLint/TypeScript errors.",
+  "bug_fix_summary": {
+    "root_cause": "The isClaudeMultiChoice fallback condition (promptCheck === null && bodyPromptType === 'multiple_choice') only activated when promptCheck was null. When promptCheck was non-null but its promptData.type was not 'multiple_choice' (e.g., 'yes_no'), or when promptData was undefined, the fallback did not trigger, causing cursor-key navigation to be incorrectly skipped.",
+    "fix_applied": "Simplified the second OR branch from (promptCheck === null && bodyPromptType === 'multiple_choice') to just (bodyPromptType === 'multiple_choice'). This is safe because the inner if-else (L136) still prioritizes promptCheck data when promptCheck?.promptData?.type === 'multiple_choice', and falls back to body fields otherwise.",
+    "tests_added": [
+      "promptCheck non-null with type=yes_no but bodyPromptType=multiple_choice (type mismatch fallback)",
+      "promptCheck non-null with promptData=undefined but bodyPromptType=multiple_choice"
+    ]
+  }
+}

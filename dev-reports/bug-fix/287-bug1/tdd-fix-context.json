@@ -1,0 +1,34 @@
+{
+  "bug_id": "287-bug1",
+  "bug_description": "route.ts L123-126 の isClaudeMultiChoice フォールバック条件が不十分。promptCheck === null のみ対応で、promptCheck が非null だが type が multiple_choice でない場合にフォールバックが発動しない。",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "フォールバック条件の拡張",
+      "description": "L125の条件を (promptCheck === null && bodyPromptType === 'multiple_choice') から (promptCheck?.promptData?.type !== 'multiple_choice' && bodyPromptType === 'multiple_choice') に変更する。L140-141のコメントも更新する。",
+      "files_to_modify": [
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ]
+    }
+  ],
+  "target_coverage": 80,
+  "test_file": "tests/unit/api/prompt-response-verification.test.ts",
+  "implementation_details": {
+    "change_1": {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "description": "L125: (promptCheck === null && bodyPromptType === 'multiple_choice') を (promptCheck?.promptData?.type !== 'multiple_choice' && bodyPromptType === 'multiple_choice') に変更",
+      "rationale": "promptCheck?.promptData?.type !== 'multiple_choice' は以下の全ケースで true: (1) promptCheck === null (type は undefined → !== 'multiple_choice'), (2) promptCheck 非null だが type が 'yes_no' 等, (3) promptCheck 非null だが promptData が undefined"
+    },
+    "change_2": {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "description": "L140-141: コメントを 'promptCheck is null, use body fields' から 'promptCheck is null or type mismatch, use body fields' に更新"
+    }
+  },
+  "test_scenarios": [
+    "promptCheck が非null で promptData.type が 'yes_no' の場合、bodyPromptType === 'multiple_choice' でカーソルキーパスに入ること",
+    "promptCheck が非null で promptData が undefined の場合、bodyPromptType === 'multiple_choice' でカーソルキーパスに入ること",
+    "promptCheck が null の場合（既存動作）、bodyPromptType === 'multiple_choice' でカーソルキーパスに入ること",
+    "promptCheck?.promptData?.type === 'multiple_choice' の場合は promptCheck を優先すること（既存動作維持）",
+    "bodyPromptType が undefined の場合はテキスト送信パスに落ちること"
+  ]
+}

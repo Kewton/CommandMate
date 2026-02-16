@@ -1,0 +1,127 @@
+{
+  "issue_number": 287,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-15",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "完全性",
+        "issue": "修正方針案が不完全 -- promptCheck=null時のフォールバック方式が具体的に定義されていない",
+        "location": "## 修正方針案 セクション",
+        "recommendation": "promptCheck=null時にカーソルキー方式を適用するための具体的な条件分岐と、UI側から送信すべき追加データ（promptData.type, defaultOption番号）の設計を明記すべき。現在のUIコンポーネント（MobilePromptSheet.tsx, PromptPanel.tsx）は既にpromptDataを保持しているため、handlePromptRespondでリクエストボディにpromptData情報を含めるアプローチが有力",
+        "evidence": "現在のIssueは『defaultOption情報もリクエストに含める設計変更が必要になる可能性がある』と曖昧に記載しているが、これがバグ修正の核心部分であり、具体的な設計判断が必要。WorktreeDetailRefactored.tsx:1130-1133のfetch呼び出しではbody: JSON.stringify({ answer, cliTool: activeCliTab })のみを送信しており、promptDataの型情報やdefaultOption情報は含まれていない"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "再現手順でpromptCheck再検証が失敗する条件が明示されていない",
+        "location": "## 再現手順 セクション",
+        "recommendation": "promptCheck再検証が失敗（例外発生）する具体的な条件を再現手順に追記すべき。例: tmuxセッション出力のキャプチャがタイムアウトする場合、セッション名が不正な場合など。現在の手順では『選択肢を選んで送信すると認識されない』としか書かれておらず、これが常時発生するのか、特定条件下でのみ発生するのかが不明",
+        "evidence": "route.ts:73のcaptureSessionOutput()は5000msタイムアウトで呼び出されており、この関数が例外をスローする条件（tmuxセッションが見つからない、タイムアウト等）が再現手順に含まれていない"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "受け入れ条件が記載されていない",
+        "location": "Issue本文全体",
+        "recommendation": "以下のような受け入れ条件を追加すべき: (1) promptCheck再検証が失敗した場合でも、Claude Codeの複数選択肢プロンプトにカーソルキー方式で正しく応答できること、(2) Yes/Noプロンプトの既存動作に影響がないこと、(3) Codexの既存動作に影響がないこと、(4) 既存テスト（prompt-response-verification.test.ts）が引き続きパスすること",
+        "evidence": "Issue本文に受け入れ条件セクションが存在しない"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "関連ファイルリストにsrc/lib/cli-session.tsが欠落している",
+        "location": "## 関連ファイル セクション",
+        "recommendation": "src/lib/cli-session.tsを関連ファイルに追加すべき。route.tsのimportでcaptureSessionOutputがcli-sessionからインポートされており、例外発生の根本原因であるcaptureSessionOutputの実装を理解する必要がある",
+        "evidence": "route.ts:13に import { captureSessionOutput } from '@/lib/cli-session' があり、L74で captureSessionOutput(params.id, cliToolId, 5000) を呼び出している。この関数の例外発生パターンを把握することが修正方針の検討に不可欠"
+      },
+      {
+        "id": "SF-4",
+        "category": "技術的妥当性",
+        "issue": "修正方針案で2つのアプローチの比較・選定基準が示されていない",
+        "location": "## 修正方針案 セクション",
+        "recommendation": "以下の2つの修正アプローチを明示的に比較すべき: (A) API側で promptCheck=null 時にフォールバック処理を追加（cliToolId='claude' かつ answer が数値の場合にカーソルキー方式を仮定）。リスク: promptTypeが不明なため誤送信の可能性。(B) UI側からpromptData情報（type, defaultOption番号）をリクエストボディに含め、API側でその情報を利用してカーソルキー方式を決定。メリット: 正確な判定が可能。デメリット: PromptResponseRequest型の変更とUI側の修正が必要",
+        "evidence": "Issue本文では『UI側からdefaultOption情報もリクエストに含める設計変更が必要になる可能性がある』と記載しているが、アプローチAの検討やトレードオフの分析が不足している"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "auto-yes-manager.tsとの関連性・影響有無が明記されていない",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "auto-yes-manager.ts:343-399に同様のisClaudeMultiChoice判定とカーソルキー送信ロジックが存在するが、auto-yes-managerではpromptDetectionが常に成功した場合のみ処理が進むため、本Issueのバグは影響しないことを明記すると良い。また、修正時にauto-yes-managerとロジックの重複を解消するリファクタリングの検討にも言及できる",
+        "evidence": "auto-yes-manager.ts:318-321で promptDetection.isPrompt が false の場合は早期リターンしており、promptDetection は null にならない設計。route.ts とは異なる構造"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "関連Issueへのリンクが不足",
+        "location": "Issue本文",
+        "recommendation": "Issue #193（Claude Code AskUserQuestion のカーソルキー方式導入）、Issue #161（プロンプト再検証の導入）への参照リンクを追加すべき。これらが本バグの前提となる実装を導入しており、経緯の理解に役立つ",
+        "evidence": "route.ts:93にIssue #193、route.ts:68にIssue #161のコメントが記載されているが、Issue本文からはリンクされていない"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "src/types/models.tsが関連ファイルに含まれていない",
+        "location": "## 関連ファイル セクション",
+        "recommendation": "修正方針でUI側からpromptData情報をリクエストに含める場合、PromptResponseRequest型の拡張やMultipleChoiceOption型の参照が必要になるため、src/types/models.tsも関連ファイルに追加すると良い",
+        "evidence": "route.ts:17-20の PromptResponseRequest インターフェースには現在 answer と cliTool のみが定義されている。修正方針Bを採用する場合、この型を拡張する必要がある"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "主要修正対象。L72-89のpromptCheck再検証失敗時のフォールバック不備が根本原因"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "L1126-1141のhandlePromptRespond関数。リクエストボディにpromptData情報を追加する場合の修正対象"
+    },
+    {
+      "file": "src/components/mobile/MobilePromptSheet.tsx",
+      "relevance": "L242-249のhandleMultipleChoiceSubmit。selectedOption.toString()をonRespondに渡す箇所"
+    },
+    {
+      "file": "src/components/worktree/PromptPanel.tsx",
+      "relevance": "L107-123のhandleMultipleChoiceSubmit。MobilePromptSheetと同様のロジック"
+    },
+    {
+      "file": "src/lib/cli-session.ts",
+      "relevance": "captureSessionOutput関数の実装元。例外発生パターンの理解に必要"
+    },
+    {
+      "file": "src/lib/tmux.ts",
+      "relevance": "sendKeys/sendSpecialKeys実装。カーソルキー方式の送信処理"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "L343-399に同様のisClaudeMultiChoice判定ロジックが存在。本Issueのバグは影響しないが、ロジック重複解消の検討対象"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "PromptData, MultipleChoicePromptData, MultipleChoiceOption型定義。修正方針Bの場合に参照が必要"
+    },
+    {
+      "file": "tests/unit/api/prompt-response-verification.test.ts",
+      "relevance": "既存テスト。L163-177のcapture失敗時テストが本Issueのシナリオに該当（ただし、sendKeysがcalledであることを期待しており、修正後はこのテストの更新が必要になる可能性あり）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール説明の整合性確認に使用"
+    }
+  ]
+}

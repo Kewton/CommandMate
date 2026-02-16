@@ -1,0 +1,127 @@
+{
+  "issue_number": 287,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "review_date": "2026-02-15",
+  "previous_review_comparison": {
+    "stage1_findings_status": {
+      "MF-1": {
+        "original_issue": "修正方針案が不完全 -- promptCheck=null時のフォールバック方式が具体的に定義されていない",
+        "status": "resolved",
+        "evidence": "Issueにアプローチ比較セクションが追加され、アプローチA（API側のみ）とアプローチB（UI側からpromptData送信）のメリット・デメリット・リスクが詳細に記載されている。アプローチBの推奨方針と非破壊的実装戦略（handlePromptRespond内部でstate.prompt.dataからpromptType/defaultOptionを取得）が具体的に記載されている"
+      },
+      "SF-1": {
+        "original_issue": "再現手順でpromptCheck再検証が失敗する条件が明示されていない",
+        "status": "resolved",
+        "evidence": "再現手順に「promptCheck再検証が失敗する条件」サブセクションが追加され、tmuxセッション出力のキャプチャが5000msタイムアウトする場合、tmuxセッション名が不正または存在しない場合、セッションが既に終了している場合の3条件が明示されている。「本バグは上記条件下でのみ発生」という補足も追記されている"
+      },
+      "SF-2": {
+        "original_issue": "受け入れ条件が記載されていない",
+        "status": "resolved",
+        "evidence": "8項目の受け入れ条件がチェックリスト形式で追加されている。promptCheck再検証失敗時のカーソルキー方式、Yes/Noプロンプト非影響、Codex非影響、既存テストパス、新規テスト追加、useAutoYes対応、結合テスト拡充、後方互換性の各条件が含まれている"
+      },
+      "SF-3": {
+        "original_issue": "関連ファイルリストにsrc/lib/cli-session.tsが欠落している",
+        "status": "resolved",
+        "evidence": "関連ファイルセクションにsrc/lib/cli-session.tsが「captureSessionOutputの実装元。例外発生パターンの理解に必要」として追加されている"
+      },
+      "SF-4": {
+        "original_issue": "修正方針案で2つのアプローチの比較・選定基準が示されていない",
+        "status": "resolved",
+        "evidence": "アプローチ比較セクションでアプローチA/Bの詳細な比較表がメリット・デメリット・リスクを含めて記載されている。推奨方針としてアプローチBが選定されている"
+      },
+      "NTH-1": {
+        "original_issue": "auto-yes-manager.tsとの関連性・影響有無が明記されていない",
+        "status": "resolved",
+        "evidence": "影響範囲セクションに「src/lib/auto-yes-manager.tsには影響なし」と具体的な根拠（L318-321のpromptDetection.isPromptチェック）が明記されている"
+      },
+      "NTH-2": {
+        "original_issue": "関連Issueへのリンクが不足",
+        "status": "resolved",
+        "evidence": "関連Issueセクションが追加され、#193（Claude Code AskUserQuestionのカーソルキー方式導入）と#161（プロンプト再検証の導入）が明記されている"
+      },
+      "NTH-3": {
+        "original_issue": "src/types/models.tsが関連ファイルに含まれていない",
+        "status": "resolved",
+        "evidence": "関連ファイルセクションにsrc/types/models.tsが「PromptResponseRequest, PromptData, MultipleChoiceOption型定義」として追加されている"
+      }
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "正確性",
+        "issue": "修正ファイル一覧のdefaultOption送信設計がPromptData型構造と不整合",
+        "location": "## 修正方針案 > アプローチBの修正箇所 > 修正ファイル一覧",
+        "recommendation": "Issueでは「リクエストボディに promptType と defaultOption（番号）を含める」と記載しているが、PromptData型にはトップレベルの defaultOption フィールドは存在しない。MultipleChoicePromptData.options配列の各MultipleChoiceOptionの isDefault: boolean フィールドから番号を導出する必要がある（例: options.find(o => o.isDefault)?.number）。また、YesNoPromptDataの場合は defaultOption?: 'yes' | 'no' であり number 型ではない。Issueの修正ファイル一覧で「defaultOption?: number」と型を明記している箇所は、実際には multiple_choice 型専用のフィールドであることを補足するか、あるいは PromptResponseRequest に追加するフィールド設計を「promptType?: string, defaultOptionNumber?: number」のように明確化すべき",
+        "evidence": "route.ts の修正内容欄で「PromptResponseRequestに promptType?: string, defaultOption?: number を追加」と記載しているが、MultipleChoiceOption.isDefault は boolean であり、defaultOption の number はoptions.find(o => o.isDefault)?.number で導出される。YesNoPromptDataの defaultOption は 'yes' | 'no' 型であり number ではない。handlePromptRespond から送信する際の変換ロジックの明示があるとよい"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "useAutoYes.tsのpromptData参照箇所の行番号がIssue本文と実際のコードで不一致",
+        "location": "## 影響範囲 > 影響を受けるAPIクライアント",
+        "recommendation": "Issueの影響範囲セクションで「promptDataは既にpropsとして受け取っている（L76）ため修正は容易」と記載しているが、L76は promptKey 生成行（const promptKey = `${promptData.type}:${promptData.question}`）であり、promptData を props として受け取っている箇所ではない。promptData は useAutoYes 関数のパラメータ（L30: promptData: PromptData | null）として受け取り、useEffect 内（L64: if (!promptData || !autoYesEnabled) return）で使用されている。行番号の修正、または「関数パラメータとして受け取っている」に表現を修正すべき",
+        "evidence": "useAutoYes.ts:L30 で promptData: PromptData | null がパラメータとして定義されている。L76 は const promptKey = `${promptData.type}:${promptData.question}` であり、promptData の受け取り箇所ではなく使用箇所"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "明確性",
+        "issue": "route.tsのPromptResponseRequest拡張後のフォールバック判定ロジックの疑似コードがない",
+        "location": "## 修正方針案 > アプローチBの修正箇所",
+        "recommendation": "修正ファイル一覧では「promptCheck=null時にリクエストボディのpromptTypeを参照してカーソルキー方式を判定」と説明しているが、具体的な判定ロジックの疑似コードがあると実装者にとって分かりやすい。例: const isClaudeMultiChoice = cliToolId === 'claude' && (promptCheck?.promptData?.type === 'multiple_choice' || (promptCheck === null && body.promptType === 'multiple_choice')) && /^\\d+$/.test(answer); このような判定順序（promptCheckが存在する場合はそちらを優先し、nullの場合のみリクエストボディのpromptTypeにフォールバック）を明示すると、実装の意図が明確になる",
+        "evidence": "現在のIssueはファイル別の修正内容を簡潔に記載しているが、route.ts内でのpromptCheckとbody.promptTypeの優先順位や組み合わせパターンは明示されていない"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "PromptResponseRequestの型をsrc/types/models.tsに移動するかroute.ts内に留めるかの方針が未記載",
+        "location": "## 修正方針案 > アプローチBの修正箇所 > 修正ファイル一覧",
+        "recommendation": "Stage 3レビューのNTH-1で指摘された「PromptResponseRequestのローカル定義 vs 共有化」について、修正ファイル一覧ではroute.tsの修正内容として型拡張を記載しているが、src/types/models.tsへの移動については未判断。本Issue内ではローカル定義のまま拡張し、型共有化は別Issueとする方針を明記すると、スコープが明確になる",
+        "evidence": "修正ファイル一覧にsrc/types/models.tsは含まれているが、修正内容は「PromptResponseRequest, PromptData, MultipleChoiceOption型定義」と参照用としての記載のみ。関連ファイルセクションでも同様の記載。PromptResponseRequest型の配置方針は未決定"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "主要修正対象。L17-20のPromptResponseRequest型拡張、L86-89のcatch節内フォールバック、L96-98のisClaudeMultiChoice判定が変更対象。行番号はIssueの記載と一致を確認"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "L1126-1147のhandlePromptRespond。state.prompt.dataにアクセス可能であることを確認（L1436-1437でuseAutoYesに渡している）。useCallbackのdependency配列（L1147）にstate.prompt.dataは未含有で、Issue記載のdependency追加が必要"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "L86-89のfetch呼び出しでpromptType/defaultOption未送信。L30でpromptDataをパラメータとして受け取っており修正は容易。Issueの「L76でpropsとして受け取っている」は行番号が不正確"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "L155-164のMultipleChoiceOption型（isDefault: boolean）、L169-173のMultipleChoicePromptData型。defaultOptionはnumber型のトップレベルフィールドではなく、options配列から導出が必要"
+    },
+    {
+      "file": "tests/unit/api/prompt-response-verification.test.ts",
+      "relevance": "L163-177のcaptureSessionOutput失敗テスト。Issue記載の既存テスト更新対象として確認"
+    },
+    {
+      "file": "tests/integration/worktree-detail-integration.test.tsx",
+      "relevance": "L392-427のprompt-response API呼び出し検証。リクエストボディ検証の追加が受け入れ条件に含まれている"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール説明の整合性確認に使用"
+    }
+  ]
+}
