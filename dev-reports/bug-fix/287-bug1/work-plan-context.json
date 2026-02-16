@@ -1,0 +1,41 @@
+{
+  "bug_id": "287-bug1",
+  "bug_description": "route.ts L123-126 の isClaudeMultiChoice フォールバック条件が不十分。promptCheck === null のみ対応で、promptCheck が非null だが type が multiple_choice でない場合にフォールバックが発動しない。",
+  "selected_actions": [
+    {
+      "action_id": "1",
+      "title": "フォールバック条件の拡張",
+      "description": "promptCheck === null を promptCheck?.promptData?.type !== 'multiple_choice' に変更し、promptCheck が非null でもタイプが異なる場合にクライアント送信の bodyPromptType でフォールバックできるようにする",
+      "files_to_modify": [
+        "src/app/api/worktrees/[id]/prompt-response/route.ts"
+      ],
+      "changes": [
+        {
+          "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+          "line": "125",
+          "old": "|| (promptCheck === null && bodyPromptType === 'multiple_choice')",
+          "new": "|| (promptCheck?.promptData?.type !== 'multiple_choice' && bodyPromptType === 'multiple_choice')",
+          "reason": "フォールバック条件を拡張し、promptCheck が非null でも promptData.type が multiple_choice でない場合に bodyPromptType を参照する"
+        },
+        {
+          "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+          "line": "140-141",
+          "old": "// Fallback path (Issue #287): promptCheck is null, use body fields",
+          "new": "// Fallback path (Issue #287): promptCheck is null or type mismatch, use body fields",
+          "reason": "コメントを実態に合わせて更新"
+        }
+      ]
+    }
+  ],
+  "deliverables": [
+    "src/app/api/worktrees/[id]/prompt-response/route.ts（フォールバック条件修正）",
+    "tests/unit/api/prompt-response-verification.test.ts（テスト追加・更新）"
+  ],
+  "definition_of_done": [
+    "promptCheck が非null で promptData.type が multiple_choice でない場合に bodyPromptType フォールバックが発動すること",
+    "promptCheck が null の場合の既存フォールバックが引き続き動作すること",
+    "promptCheck?.promptData?.type === 'multiple_choice' の場合は promptCheck を優先すること",
+    "既存テストが全てパスすること",
+    "新規テストケースが追加されていること"
+  ]
+}

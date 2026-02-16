@@ -1,0 +1,11 @@
+{
+  "bug_id": "287-bug1",
+  "phases": {
+    "investigation": "dev-reports/bug-fix/287-bug1/investigation-result.json",
+    "work_plan": "dev-reports/bug-fix/287-bug1/work-plan-context.json",
+    "tdd_fix": "dev-reports/bug-fix/287-bug1/tdd-fix-result.json",
+    "acceptance": "dev-reports/bug-fix/287-bug1/acceptance-result.json"
+  },
+  "related_issue": 287,
+  "branch": "feature/287-worktree"
+}

@@ -1,0 +1,26 @@
+{
+  "issue_description": "route.ts L123-126 の isClaudeMultiChoice フォールバック条件が不十分。promptCheck が非null だが promptData.type が multiple_choice でない場合、bodyPromptType フォールバックが発動せずテキスト送信パスに落ちる。Claude Code の AskUserQuestion（カーソルキーナビゲーション必須）に対してテキスト '1' + Enter が送信され、Claude Code が入力を認識しない。",
+  "error_logs": [],
+  "affected_files": [
+    "src/app/api/worktrees/[id]/prompt-response/route.ts"
+  ],
+  "reproduction_steps": [
+    "1. Claude Code セッションで AskUserQuestion（複数選択肢プロンプト）が表示される",
+    "2. captureSessionOutput() が成功するが detectPrompt() が multiple_choice 以外のタイプを返す",
+    "3. isClaudeMultiChoice が false になり、テキスト送信パス (L178-186) に落ちる",
+    "4. sendKeys('1') + Enter が送信されるが、Claude Code はカーソルキーを期待しているため無視する"
+  ],
+  "environment": {
+    "os": "macOS",
+    "node_version": "18.x",
+    "framework": "Next.js 14"
+  },
+  "severity_hint": "high",
+  "related_issue": 287,
+  "bug_location": {
+    "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "lines": "123-126",
+    "current_code": "const isClaudeMultiChoice = cliToolId === 'claude' && (promptCheck?.promptData?.type === 'multiple_choice' || (promptCheck === null && bodyPromptType === 'multiple_choice')) && /^\\d+$/.test(answer);",
+    "issue": "フォールバック条件 (promptCheck === null) が狭すぎる。promptCheck が非nullで promptData.type が multiple_choice でない場合にフォールバックが発動しない。"
+  }
+}
