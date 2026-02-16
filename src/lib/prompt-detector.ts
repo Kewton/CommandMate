@@ -669,6 +669,16 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
       continue;
     }
 
+    // [Issue #287 Bug3] User input prompt barrier:
+    // When no options have been collected yet and the line starts with ❯ (U+276F)
+    // but did NOT match DEFAULT_OPTION_PATTERN above, this line is a Claude Code
+    // user input prompt (e.g., "❯ 1", "❯ /command") or idle prompt ("❯").
+    // Anything above this line in the scrollback is historical conversation text,
+    // not an active prompt. Stop scanning to prevent false positives.
+    if (collectedOptions.length === 0 && line.startsWith('\u276F')) {
+      return noPromptResult(output);
+    }
+
     // Non-option line handling
     if (collectedOptions.length > 0 && line && !SEPARATOR_LINE_PATTERN.test(line)) {
       // [MF-001 / Issue #256] Check if line is a question-like line BEFORE

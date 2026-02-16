@@ -2070,4 +2070,77 @@ Are you sure you want to continue? (yes/no)
       });
     });
   });
+
+  // ========================================================================
+  // Issue #287 Bug3: Pass 2 user input prompt barrier (U+276F)
+  // Prevents false positive detection when historical conversation text
+  // contains numbered lists above a user input prompt (❯).
+  // ========================================================================
+  describe('Issue #287 Bug3: Pass 2 user input prompt barrier', () => {
+    it('should NOT detect numbered list after user typed at prompt as multiple choice', () => {
+      // Scenario: Claude showed numbered options, user typed "1" at ❯ prompt,
+      // Claude processed it, and session returned to idle ❯.
+      // The numbered list is historical, not an active prompt.
+      const output = [
+        '  Select an approach:',
+        '',
+        '  1. Issue #286\u306E\u30B3\u30E1\u30F3\u30C8\u306B\u6C7A\u5B9A\u4E8B\u9805\u3092\u8A18\u9332 \u2014',
+        '  2. /issue-enhance \u2014 Issue\u5185\u5BB9\u81EA\u4F53\u3092\u66F4\u65B0\u3057\u3066\u4E0D\u8DB3\u60C5\u5831\u3092\u88DC\u5B8C',
+        '',
+        '  \u3069\u3061\u3089\u304B\u3001\u307E\u305F\u306F\u4E21\u65B9\u9032\u3081\u307E\u3059\u304B\uFF1F',
+        '',
+        '\u276F 1',
+        '',
+        '\u23FA Done.',
+        '',
+        '\u276F ',
+      ].join('\n');
+      const result = detectPrompt(output, { requireDefaultIndicator: false });
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should NOT detect numbered list above idle prompt as multiple choice', () => {
+      // Scenario: Claude showed numbered options, then session returned to
+      // idle ❯ prompt. The numbered list is historical.
+      const output = [
+        '  Select an approach:',
+        '',
+        '  1. Option A \u2014 description',
+        '  2. Option B \u2014 description',
+        '',
+        '  Which one?',
+        '',
+        '\u276F ',
+      ].join('\n');
+      const result = detectPrompt(output, { requireDefaultIndicator: false });
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should still detect active prompt without marker', () => {
+      // Active prompt without ❯ marker should still be detected
+      const output = [
+        '  Which file?',
+        '  1. src/main.ts',
+        '  2. src/app.ts',
+      ].join('\n');
+      const result = detectPrompt(output, { requireDefaultIndicator: false });
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+    });
+
+    it('should still detect active prompt with default indicator', () => {
+      // Active prompt WITH ❯ marker on an option line
+      const output = [
+        '  Select an option:',
+        '  \u276F 1. Yes',
+        '    2. No',
+      ].join('\n');
+      const result = detectPrompt(output, { requireDefaultIndicator: true });
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options[0].isDefault).toBe(true);
+      }
+    });
+  });
 });
