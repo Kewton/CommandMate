@@ -2,6 +2,7 @@
  * Tests for MessageInput component
  *
  * Tests keyboard behavior for message submission on desktop and mobile devices
+ * Tests free input mode behavior (Issue #288)
  * @vitest-environment jsdom
  */
 
@@ -17,10 +18,26 @@ vi.mock('@/lib/api-client', () => ({
   handleApiError: vi.fn((err) => err?.message || 'Unknown error'),
 }));
 
-// Mock the slash commands hook
+// Mock command groups for slash command selector tests
+const mockCommandGroups = [
+  {
+    category: 'standard-session' as const,
+    label: 'Standard (Session)',
+    commands: [
+      {
+        name: 'test-command',
+        description: 'A test command',
+        category: 'standard-session' as const,
+        filePath: '/test',
+      },
+    ],
+  },
+];
+
+// Mock the slash commands hook - returns command groups so SlashCommandSelector renders
 vi.mock('@/hooks/useSlashCommands', () => ({
   useSlashCommands: vi.fn(() => ({
-    groups: [],
+    groups: mockCommandGroups,
   })),
 }));
 
@@ -247,6 +264,193 @@ describe('MessageInput', () => {
 
       const sendButton = screen.getByRole('button', { name: /send message/i });
       expect(sendButton).not.toBeDisabled();
+    });
+  });
+
+  // ===== Free Input Mode (Issue #288) =====
+
+  describe('Free Input Mode (Issue #288)', () => {
+    describe('Desktop', () => {
+      beforeEach(() => {
+        setMobileMode(false);
+      });
+
+      it('TC-1: should keep selector hidden after handleFreeInput and custom command input', async () => {
+        render(<MessageInput {...defaultProps} />);
+
+        const textarea = screen.getByPlaceholderText(/Type your message/i);
+
+        // Type '/' to open the selector
+        fireEvent.change(textarea, { target: { value: '/' } });
+
+        // Selector should be open (desktop renders as listbox)
+        expect(screen.getByRole('listbox')).toBeInTheDocument();
+
+        // Click the free input button
+        const freeInputButton = screen.getByTestId('free-input-button');
+        fireEvent.click(freeInputButton);
+
+        // After free input, selector should be closed
+        expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+        // Type a custom command (e.g., '/model') - selector should remain hidden
+        fireEvent.change(textarea, { target: { value: '/model' } });
+
+        // Selector should remain hidden (the bug fix)
+        expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+      });
+
+      it('TC-2: should submit message with Enter key after handleFreeInput', async () => {
+        const { worktreeApi } = await import('@/lib/api-client');
+
+        render(<MessageInput {...defaultProps} />);
+
+        const textarea = screen.getByPlaceholderText(/Type your message/i);
+
+        // Type '/' to open selector
+        fireEvent.change(textarea, { target: { value: '/' } });
+
+        // Click free input button
+        const freeInputButton = screen.getByTestId('free-input-button');
+        fireEvent.click(freeInputButton);
+
+        // Type a custom command with a space (so it is a sendable message)
+        fireEvent.change(textarea, { target: { value: '/model gpt-4o' } });
+
+        // Press Enter to submit
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+
+        await waitFor(() => {
+          expect(worktreeApi.sendMessage).toHaveBeenCalledWith(
+            'test-worktree',
+            '/model gpt-4o',
+            'claude'
+          );
+        });
+      });
+
+      it('TC-3: should show selector again after clearing message in free input mode', async () => {
+        render(<MessageInput {...defaultProps} />);
+
+        const textarea = screen.getByPlaceholderText(/Type your message/i);
+
+        // Type '/' to open the selector
+        fireEvent.change(textarea, { target: { value: '/' } });
+
+        // Click the free input button
+        const freeInputButton = screen.getByTestId('free-input-button');
+        fireEvent.click(freeInputButton);
+
+        // Type a custom command
+        fireEvent.change(textarea, { target: { value: '/model' } });
+
+        // Clear the message entirely
+        fireEvent.change(textarea, { target: { value: '' } });
+
+        // Type '/' again - selector should reappear
+        fireEvent.change(textarea, { target: { value: '/' } });
+
+        expect(screen.getByRole('listbox')).toBeInTheDocument();
+      });
+
+      it('TC-4: should reset isFreeInputMode after submitMessage', async () => {
+        const { worktreeApi } = await import('@/lib/api-client');
+
+        render(<MessageInput {...defaultProps} />);
+
+        const textarea = screen.getByPlaceholderText(/Type your message/i);
+
+        // Type '/' to open the selector
+        fireEvent.change(textarea, { target: { value: '/' } });
+
+        // Click the free input button
+        const freeInputButton = screen.getByTestId('free-input-button');
+        fireEvent.click(freeInputButton);
+
+        // Type and submit a custom command
+        fireEvent.change(textarea, { target: { value: '/test command' } });
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+
+        await waitFor(() => {
+          expect(worktreeApi.sendMessage).toHaveBeenCalled();
+        });
+
+        // After submit, typing '/' should show selector again
+        // (message is cleared after submit, so type '/')
+        fireEvent.change(textarea, { target: { value: '/' } });
+        expect(screen.getByRole('listbox')).toBeInTheDocument();
+      });
+
+      it('TC-5: should reset isFreeInputMode after handleCommandCancel (Escape key)', async () => {
+        render(<MessageInput {...defaultProps} />);
+
+        const textarea = screen.getByPlaceholderText(/Type your message/i);
+
+        // Type '/' to open the selector
+        fireEvent.change(textarea, { target: { value: '/' } });
+        expect(screen.getByRole('listbox')).toBeInTheDocument();
+
+        // Press Escape to close selector (triggers handleCommandCancel)
+        // The SlashCommandSelector's onClose callback fires handleCommandCancel
+        // which sets showCommandSelector=false and isFreeInputMode=false
+        fireEvent.keyDown(textarea, { key: 'Escape' });
+
+        // Selector should be closed
+        expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+        // Clear the message and type '/' again to verify handleCommandCancel
+        // properly resets isFreeInputMode and selector can reopen
+        fireEvent.change(textarea, { target: { value: '' } });
+        fireEvent.change(textarea, { target: { value: '/' } });
+        expect(screen.getByRole('listbox')).toBeInTheDocument();
+      });
+
+      it('TC-6: should show selector on normal "/" input (not in free input mode)', async () => {
+        render(<MessageInput {...defaultProps} />);
+
+        const textarea = screen.getByPlaceholderText(/Type your message/i);
+
+        // Type '/' without entering free input mode
+        fireEvent.change(textarea, { target: { value: '/' } });
+
+        // Selector should appear (normal behavior preserved)
+        expect(screen.getByRole('listbox')).toBeInTheDocument();
+      });
+    });
+
+    describe('Mobile', () => {
+      beforeEach(() => {
+        setMobileMode(true);
+      });
+
+      it('TC-7: should reset isFreeInputMode when mobile command button is clicked during free input mode', async () => {
+        render(<MessageInput {...defaultProps} />);
+
+        // Click the mobile command button to open selector
+        const mobileButton = screen.getByTestId('mobile-command-button');
+        fireEvent.click(mobileButton);
+
+        // Selector should be open (mobile renders as bottom sheet)
+        expect(screen.getByTestId('slash-command-bottom-sheet')).toBeInTheDocument();
+
+        // Click the free input button
+        const freeInputButton = screen.getByTestId('free-input-button');
+        fireEvent.click(freeInputButton);
+
+        // Selector should be closed after free input
+        expect(screen.queryByTestId('slash-command-bottom-sheet')).not.toBeInTheDocument();
+
+        // Type a custom command
+        const textarea = screen.getByPlaceholderText(/Type your message/i);
+        fireEvent.change(textarea, { target: { value: '/custom' } });
+
+        // Click mobile command button again during free input mode
+        // This should reset isFreeInputMode and show selector
+        fireEvent.click(mobileButton);
+
+        // Selector should appear (isFreeInputMode was reset)
+        expect(screen.getByTestId('slash-command-bottom-sheet')).toBeInTheDocument();
+      });
     });
   });
 });
