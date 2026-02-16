@@ -1,0 +1,37 @@
+{
+  "issue_number": 288,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘事項対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "モバイルコマンドボタンによる isFreeInputMode バイパス経路の未記載",
+        "sections_updated": ["Section 3 (状態遷移図)", "Section 4-3 (経路分析コメント)", "Section 4-6 (新規: モバイルボタンガード)", "Section 5 (TC-7追加)", "Section 6 (変更内容更新)", "Section 11 (サマリー)", "Section 12 (チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "SlashCommandSelector ガード行番号の参照先不正確",
+        "sections_updated": ["Section 6 (変更不要ファイル)", "Section 11 (サマリー)", "Section 12 (チェックリスト)"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-288-free-input-mode-fix-design-policy.md",
+  "sections_updated": [
+    "Section 3 - 状態遷移設計 (showCommandSelector変更経路の網羅分析追加、FreeInput状態にモバイルボタン経路追加)",
+    "Section 4-3 - handleMessageChange (経路分析コメント修正)",
+    "Section 4-6 - モバイルコマンドボタンのisFreeInputModeガード追加 (新規セクション)",
+    "Section 5 - テスト設計 (TC-7追加)",
+    "Section 6 - 影響範囲 (SlashCommandSelectorガード行番号修正、MessageInput変更内容更新)",
+    "Section 10 - レビュー履歴 (Stage 2追加)",
+    "Section 11 - レビュー指摘事項サマリー (Stage 2セクション追加)",
+    "Section 12 - 実装チェックリスト (モバイルボタンガード、TC-7、設計根拠確認項目追加)"
+  ],
+  "timestamp": "2026-02-17T00:00:00Z"
+}

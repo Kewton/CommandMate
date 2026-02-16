@@ -1,0 +1,107 @@
+{
+  "issue_number": 288,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "モバイルコマンドボタンによる isFreeInputMode バイパス経路の未記載",
+        "description": "設計書 Section 3 の状態遷移図および Section 4-3 の経路分析コメントでは「フリー入力モード中に showCommandSelector が true になる経路は存在しない」と断言しているが、MessageInput.tsx L218 のモバイルコマンドボタン onClick={() => setShowCommandSelector(true) が isFreeInputMode をチェックせずに直接 showCommandSelector を true にセットする経路が存在する。モバイルでフリー入力モード中にコマンドボタンをタップした場合、セレクターが再表示される。設計書の経路分析に当該経路を追加し、対応方針（モバイルボタンにもガードを追加するか、フリー入力モードリセット後にセレクター表示するか）を明記すべき。",
+        "severity": "medium",
+        "principle": "整合性",
+        "design_section": "Section 3, Section 4-3 (SF-002-response)",
+        "code_reference": "src/components/worktree/MessageInput.tsx L218"
+      },
+      {
+        "id": "SF-002",
+        "title": "SlashCommandSelector ガード行番号の参照先不正確",
+        "description": "設計書 Section 6 の変更不要ファイル欄で「L95: if (!isOpen) return」と記載されているが、L95 は handleKeyDown コールバック内の早期リターンであり、コンポーネントのレンダリングガード（return null）は L131 に存在する。設計書が意図しているのはレンダリングガードであると推測されるため、行番号を L131 に修正するか、両方のガード（L95 のキーボードハンドラ + L131 のレンダリング）を明記すべき。",
+        "severity": "low",
+        "principle": "整合性",
+        "design_section": "Section 6",
+        "code_reference": "src/components/worktree/SlashCommandSelector.tsx L95, L131"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "handleKeyDown 内の showCommandSelector チェックとの整合性ドキュメント化",
+        "description": "MessageInput.tsx L192 の handleKeyDown では showCommandSelector が true の場合に Enter による送信をスキップしている。フリー入力モードでは showCommandSelector は false のままなので、Enter キーは正常にsubmitMessage に到達する。この経路は正しく動作するが、設計書の状態遷移図（Section 3）に handleKeyDown のキーイベント処理経路が含まれていない。テスト TC-2 でカバーされるため実装上の問題はないが、設計ドキュメントの完全性のために FreeInput 状態での Enter キー処理フローを記載することを検討できる。",
+        "principle": "整合性/ドキュメント品質"
+      },
+      {
+        "id": "C-002",
+        "title": "コンポーネント関係図における InterruptButton の記載",
+        "description": "設計書 Section 2 のコンポーネント関係図に InterruptButton が含まれているが、InterruptButton は本修正の影響を受けないため、図中に含めることの妥当性は問題ない。ただし、図中に worktreeApi.sendMessage への依存が点線で示されているが、実際の import は worktreeApi と handleApiError の両方を使用している。この点は些末であり修正不要だが、正確性のために記載。",
+        "principle": "整合性"
+      }
+    ]
+  },
+  "consistency_evaluation": {
+    "problem_description": {
+      "status": "consistent",
+      "detail": "設計書 Section 1 の問題記述は、実装コード MessageInput.tsx L158 の条件 (newValue.startsWith('/') && !newValue.includes(' ')) と完全に一致する。handleFreeInput() で '/' をセットした後のカスタムコマンド入力で条件に合致しセレクターが再表示される問題の分析は正確。"
+    },
+    "component_relationship": {
+      "status": "consistent",
+      "detail": "設計書 Section 2 の関係図は実装と一致する。MessageInput は SlashCommandSelector, InterruptButton, worktreeApi, useSlashCommands, useIsMobile に依存し、WorktreeDetailRefactored から props を受け取る構造は現在のコード（MessageInput.tsx L1-280, WorktreeDetailRefactored.tsx L1802-1807/L2038-2043）と整合する。"
+    },
+    "props_interface": {
+      "status": "consistent",
+      "detail": "設計書では MessageInputProps インターフェースに変更を加えないと明記。現在の MessageInputProps（worktreeId, onMessageSent, cliToolId, isSessionRunning）は設計書の前提と一致。SlashCommandSelectorProps の onFreeInput も既存（L29）で追加不要。"
+    },
+    "state_transition": {
+      "status": "mostly_consistent",
+      "detail": "設計書 Section 3 の状態遷移図は大部分が正確だが、モバイルコマンドボタン（L218）経由の showCommandSelector 変更経路が FreeInput 状態遷移図に含まれていない（SF-001 参照）。Desktop のセレクター表示ロジック経路のみに焦点を当てている。"
+    },
+    "function_modifications": {
+      "handleFreeInput": {
+        "status": "consistent",
+        "detail": "設計書 Section 4-2 の修正案と現在の handleFreeInput（L141-148）の差分は setIsFreeInputMode(true) の追加のみ。既存コードの setShowCommandSelector(false), setMessage('/'), setTimeout/focus() は設計書と完全一致。"
+      },
+      "handleMessageChange": {
+        "status": "mostly_consistent",
+        "detail": "設計書 Section 4-3 の修正案は現在の handleMessageChange（L153-163）に対して空文字チェック→isFreeInputModeチェック→通常ロジックの順序で変更を追加する。既存の条件式 (newValue === '/' || ...) は設計書と一致。ただし、設計書のセレクター表示条件で newValue === '/' を独立条件として記載しているが、実装では (newValue.startsWith('/') && !newValue.includes(' ')) の OR 条件で newValue === '/' もカバーされる。設計書の記載は冗長だが実装上は同一動作であり問題なし。"
+      },
+      "submitMessage": {
+        "status": "consistent",
+        "detail": "設計書 Section 4-4 の修正案と現在の submitMessage（L66-83）の差分は setIsFreeInputMode(false) の追加のみ。try/catch/finally 構造、ガード条件、API 呼び出しは設計書と完全一致。"
+      },
+      "handleCommandCancel": {
+        "status": "consistent",
+        "detail": "設計書 Section 4-5 の修正案と現在の handleCommandCancel（L132-135）の差分は setIsFreeInputMode(false) の追加のみ。既存の setShowCommandSelector(false) と focus() は一致。"
+      }
+    },
+    "test_design": {
+      "status": "consistent",
+      "detail": "設計書 Section 5 のテスト設計は既存テストファイル（tests/unit/components/worktree/MessageInput.test.tsx）の構造を踏襲。既存テストでは useSlashCommands のモックが groups: [] を返すが、設計書ではコマンドグループを返すように修正する方針を示しており、整合的。TC-1 から TC-6 はすべて新規追加テストケースであり、既存テストとの衝突なし。"
+    },
+    "change_scope": {
+      "status": "consistent",
+      "detail": "設計書 Section 6 の変更ファイル一覧（MessageInput.tsx 修正、MessageInput.test.tsx 追加）は適切。変更不要ファイルとして列挙された SlashCommandSelector.tsx、WorktreeDetailRefactored.tsx、standard-commands.ts はすべて確認済みで変更不要であることが整合する。"
+    },
+    "security_consideration": {
+      "status": "consistent",
+      "detail": "設計書 Section 7 のセキュリティ考慮は適切。本修正は UIステート管理のみであり、ユーザー入力の処理パスに変更はない。既存の message.trim() ガードおよび worktreeApi.sendMessage の API 呼び出しは変更されない。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-288-free-input-mode-fix-design-policy.md",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useSlashCommands.ts",
+    "tests/unit/components/worktree/MessageInput.test.tsx"
+  ],
+  "timestamp": "2026-02-17T00:00:00Z"
+}

@@ -1,0 +1,137 @@
+{
+  "issue_number": 288,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "既存テストのモック変更による潜在的テスト不安定性",
+        "description": "既存の MessageInput.test.tsx では useSlashCommands モックが groups: [] を返す設定になっている。新規テストケース TC-1 から TC-7 の実装では groups にコマンドデータを含むモックが必要となる。既存テストケースとの共存において、describe ブロック単位でモック設定を切り替える構成を慎重に設計する必要がある。テスト間でモック状態がリークしないよう、beforeEach/afterEach でのリセットを徹底すること。",
+        "principle": "テスト品質"
+      },
+      {
+        "id": "C-002",
+        "title": "WorktreeDetailRefactored における MessageInput の2箇所のレンダリング",
+        "description": "WorktreeDetailRefactored.tsx は MessageInput を L1802（デスクトップレイアウト）と L2038（モバイルレイアウト）の2箇所でレンダリングしている。両方とも同一の props（worktreeId, onMessageSent, cliToolId, isSessionRunning）を受け取っており、isFreeInputMode はコンポーネント内部状態であるため、各インスタンスで独立した状態管理が行われる。この点は意図通りの動作であり問題ないが、将来のデバッグ時に認識しておくべき構造的特性として記録する。",
+        "principle": "影響範囲/メンテナンス性"
+      },
+      {
+        "id": "C-003",
+        "title": "e2e テストにおけるフリー入力モードのカバレッジ不在",
+        "description": "現在の e2e テスト（tests/e2e/）にはスラッシュコマンドやフリー入力モードに関するテストが存在しない。Issue #288 のバグ修正はユニットテストで十分にカバーされるが、将来的にフリー入力モードを含む e2e シナリオの追加を検討する価値がある。ただし、本修正のスコープ外である。",
+        "principle": "テスト品質"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/components/worktree/MessageInput.tsx",
+        "change_type": "修正",
+        "change_description": "isFreeInputMode useState 追加、handleFreeInput/handleMessageChange/submitMessage/handleCommandCancel の4関数修正、モバイルコマンドボタンの onClick ハンドラにガード追加",
+        "risk": "low",
+        "detail": "全変更がコンポーネント内部状態の追加と既存関数への条件分岐追加に限定される。MessageInputProps インターフェースに変更なし。"
+      },
+      {
+        "file": "tests/unit/components/worktree/MessageInput.test.tsx",
+        "change_type": "追加",
+        "change_description": "フリー入力モード関連の新規テストケース TC-1 から TC-7 を追加。useSlashCommands モックの拡張が必要。",
+        "risk": "low",
+        "detail": "テストコードの追加のみ。既存テストケースに破壊的変更なし。"
+      }
+    ],
+    "indirect_impact": [
+      {
+        "file": "src/components/worktree/SlashCommandSelector.tsx",
+        "impact_type": "なし（変更不要）",
+        "reason": "isOpen prop が false に維持されるため、L95 の handleKeyDown 早期リターンおよび L131 のレンダリングガード（return null）により正常動作が保証される。onFreeInput コールバックは MessageInput 側の handleFreeInput を呼び出すのみであり、SlashCommandSelector 内部のロジックに変更は不要。",
+        "risk": "none"
+      },
+      {
+        "file": "src/components/worktree/SlashCommandList.tsx",
+        "impact_type": "なし（変更不要）",
+        "reason": "SlashCommandSelector の子コンポーネントであり、isOpen=false 時は親がレンダリングされないため影響なし。",
+        "risk": "none"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact_type": "なし（変更不要）",
+        "reason": "MessageInput を L1802 と L2038 の2箇所でレンダリングしているが、MessageInputProps インターフェースに変更がないため、呼び出し側の修正は不要。isFreeInputMode は各 MessageInput インスタンスの内部状態として独立管理される。",
+        "risk": "none"
+      },
+      {
+        "file": "src/hooks/useSlashCommands.ts",
+        "impact_type": "なし（変更不要）",
+        "reason": "MessageInput が内部で呼び出す hook だが、groups データの提供のみを担っており、isFreeInputMode の導入は hook の動作に影響しない。",
+        "risk": "none"
+      },
+      {
+        "file": "src/lib/standard-commands.ts",
+        "impact_type": "なし（変更不要）",
+        "reason": "コマンド定義データのみ。UI ステート管理の変更は影響しない。",
+        "risk": "none"
+      },
+      {
+        "file": "src/components/worktree/InterruptButton.tsx",
+        "impact_type": "なし（変更不要）",
+        "reason": "MessageInput 内に配置されているが、独立した props（worktreeId, cliToolId, disabled）で動作する。isFreeInputMode との相互作用なし。",
+        "risk": "none"
+      },
+      {
+        "file": "src/components/worktree/index.ts",
+        "impact_type": "なし（変更不要）",
+        "reason": "MessageInput と MessageInputProps の re-export のみ。インターフェース変更がないため影響なし。",
+        "risk": "none"
+      },
+      {
+        "file": "tests/unit/components/SlashCommandSelector.test.tsx",
+        "impact_type": "なし（変更不要）",
+        "reason": "SlashCommandSelector のユニットテスト。isOpen=false 時のレンダリング非表示テストが既存で存在し、Issue #288 の修正と整合する。",
+        "risk": "none"
+      },
+      {
+        "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "impact_type": "なし（変更不要）",
+        "reason": "MessageInput を子コンポーネントとしてモックしているテスト。MessageInputProps の変更がないため影響なし。",
+        "risk": "none"
+      },
+      {
+        "file": "tests/integration/issue-266-acceptance.test.tsx",
+        "impact_type": "なし（変更不要）",
+        "reason": "MessageInput をモックしており、マウント/アンマウントのカウントのみを追跡する。MessageInput 内部状態の変更は影響しない。",
+        "risk": "none"
+      }
+    ],
+    "breaking_changes": [],
+    "api_changes": [],
+    "database_changes": [],
+    "configuration_changes": []
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-288-free-input-mode-fix-design-policy.md",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/SlashCommandList.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/InterruptButton.tsx",
+    "src/components/worktree/index.ts",
+    "src/hooks/useSlashCommands.ts",
+    "src/lib/standard-commands.ts",
+    "tests/unit/components/worktree/MessageInput.test.tsx",
+    "tests/unit/components/SlashCommandSelector.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "tests/integration/issue-266-acceptance.test.tsx"
+  ],
+  "timestamp": "2026-02-17T00:00:00Z"
+}

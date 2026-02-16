@@ -1,0 +1,95 @@
+{
+  "issue_number": 288,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "useState vs useRef の設計根拠における YAGNI 考慮",
+        "description": "設計書 SF-001 で useState を採用した根拠に「将来的にフリー入力モードのUI表示が必要になった場合に再レンダリングが必要」と記載されている。この理由は YAGNI 原則に抵触する可能性がある。useState の採用自体は妥当だが、根拠は「テスト容易性」と「React慣例」に限定し、将来的な拡張性への言及は削除を推奨する。",
+        "severity": "low",
+        "principle": "YAGNI"
+      },
+      {
+        "id": "SF-002",
+        "title": "handleMessageChange 内の isFreeInputMode チェックにおける早期リターン後のコメント明確化",
+        "description": "設計書 4-3 の handleMessageChange 修正案で、isFreeInputMode が true の場合に早期リターンしている。この動作は正しいが、リターン時に showCommandSelector を明示的に false にセットする操作が不要であることの設計根拠をコード内コメントとして残すことを推奨する。handleFreeInput 内で既に setShowCommandSelector(false) を実行済みであるため冗長だが、防御的プログラミングの観点で検討の余地がある。",
+        "severity": "low",
+        "principle": "KISS"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "SlashCommandSelector の global keydown リスナーと handleKeyDown の責務分離",
+        "description": "SlashCommandSelector.tsx L93-121 でグローバルな keydown イベントリスナーが登録されており、isOpen 時に Enter キーを e.preventDefault() で消費する。MessageInput の handleKeyDown でも showCommandSelector を確認して Enter の送信をスキップしている。2つの独立したリスナーが同じキーイベントを制御している点は、将来のメンテナンスで混乱を招く可能性がある。今回の修正範囲外だが、責務の重複として認識しておくべき。",
+        "principle": "SRP"
+      },
+      {
+        "id": "C-002",
+        "title": "テスト設計における handleCommandCancel のカバレッジ優先度",
+        "description": "テスト設計 TC-5 の handleCommandCancel テストが Should 優先度になっている。handleCommandCancel はフラグリセットのエッジケースであり、Escape キー操作はユーザーの自然な操作フローに含まれるため、Must 優先度への昇格を検討する価値がある。",
+        "principle": "テスト品質"
+      },
+      {
+        "id": "C-003",
+        "title": "isFreeInputMode フラグ名の明確性",
+        "description": "isFreeInputMode という命名は設計の意図を適切に表現しているが、「セレクターの再表示を抑制する」という実際の振る舞いをより明確に示す名前（例: isSelectorSuppressed, isCustomCommandEntry）も検討の余地がある。現在の名前で十分に理解可能であるため、変更は必須ではない。",
+        "principle": "KISS/可読性"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "design_principle_evaluation": {
+    "single_responsibility": {
+      "status": "pass",
+      "detail": "変更は MessageInput.tsx のセレクター表示ロジックに限定。SlashCommandSelector、WorktreeDetailRefactored 等の外部コンポーネントに変更なし。MessageInputProps インターフェースも不変。"
+    },
+    "open_closed": {
+      "status": "pass",
+      "detail": "既存の MessageInputProps インターフェースに変更なし。内部ステート追加のみで既存の動作を拡張。SlashCommandSelectorProps にも変更不要。"
+    },
+    "liskov_substitution": {
+      "status": "not_applicable",
+      "detail": "本修正にはクラス継承やポリモーフィズムが関与しないため、LSP は適用外。"
+    },
+    "interface_segregation": {
+      "status": "pass",
+      "detail": "MessageInputProps に不要なプロパティを追加していない。SlashCommandSelectorProps にも onFreeInput が既に存在し、新規プロパティ追加なし。"
+    },
+    "dependency_inversion": {
+      "status": "not_applicable",
+      "detail": "本修正はコンポーネント内部状態の追加であり、依存関係の方向性に変更なし。"
+    },
+    "kiss": {
+      "status": "pass",
+      "detail": "boolean フラグ1つの追加で問題を解決。正規表現パターンマッチやメッセージ内特殊プレフィックスなどの複雑な代替案を不採用とした判断は適切。"
+    },
+    "yagni": {
+      "status": "pass_with_note",
+      "detail": "現在の問題解決に必要な最小限の変更のみ実施。ただし SF-001 の useState 採用根拠に将来の拡張性への言及がある点は YAGNI と軽微に矛盾。実装自体は問題ない。"
+    },
+    "dry": {
+      "status": "pass",
+      "detail": "フラグリセットロジックは各関数（submitMessage, handleMessageChange, handleCommandCancel）の責務に合わせて個別に配置。共通のリセット関数抽出は4箇所の単純なセッター呼び出しに対して過剰な抽象化となるため、現状が適切。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-288-free-input-mode-fix-design-policy.md",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useSlashCommands.ts",
+    "tests/unit/components/worktree/MessageInput.test.tsx"
+  ],
+  "timestamp": "2026-02-17T00:00:00Z"
+}

@@ -1,0 +1,91 @@
+{
+  "issue_number": 288,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-17",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "明確性",
+        "issue": "Issueタイトルが本文の内容と一致していない。タイトルは「Codexにてカスタムモデルが利用出来ない」だが、本文では「スラッシュコマンドセレクターの『Enter custom command...』選択後にカスタムコマンドを送信できない」というUI操作の問題を報告している。さらに本文では「CodexとClaude Codeの両方で発生する」と記載されており、Codex限定の問題ではない。",
+        "location": "Issueタイトル",
+        "recommendation": "タイトルを問題の本質に合わせて修正する。例: 「Enter custom command選択後、カスタムコマンド入力中にセレクターが再表示されEnterで送信できない」",
+        "evidence": "タイトル: 「Codexにてカスタムモデルが利用出来ない」、本文: 「CodexとClaude Codeの両方で発生する」、問題は/modelコマンドに限らずすべてのカスタムコマンドで発生する"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "対策案において、handleMessageChange内のフラグチェック時の具体的なロジックが記載されていない。特に、ユーザーが手動でメッセージを全削除した後に再度 / を入力した場合のフラグリセットタイミングが明記されていない。",
+        "location": "## 対策案 セクション",
+        "recommendation": "handleMessageChange内でisFreeInputModeがtrueの場合にどう処理するか（セレクター表示をスキップするだけか、他にも影響があるか）、およびフラグリセット条件を明示する。少なくとも以下のリセット条件を明記: (1) submitMessage()時、(2) メッセージが空文字になった時（手動削除含む）、(3) handleCommandCancel()時。",
+        "evidence": "対策案では「フラグはメッセージ送信時またはメッセージがクリアされた時にリセットする」とあるが、handleMessageChange内でnewValue === ''のチェックでリセットするのか、useEffectでmessage変更を監視するのか、具体的な実装方針が不明"
+      },
+      {
+        "id": "SF-3",
+        "category": "技術的妥当性",
+        "issue": "SlashCommandSelectorのdocument.addEventListener('keydown', handleKeyDown)（L124-129）がEnterキーイベントを横取りする点について言及がない。MessageInput側のhandleKeyDown（L192）の!showCommandSelectorガードだけでなく、SlashCommandSelector側のグローバルイベントリスナーも問題に寄与している。対策案でisFreeInputModeフラグによりセレクター非表示にすればSlashCommandSelectorのisOpenがfalseになりグローバルリスナーも無効化されるため結果的に解決されるが、根本原因の説明として不完全。",
+        "location": "## 根本原因の仮説 セクション",
+        "recommendation": "根本原因の説明にSlashCommandSelector側のグローバルキーボードリスナー（document.addEventListener）がEnterキーをe.preventDefault()で消費する点も補足すると、問題の全容がより明確になる。",
+        "evidence": "SlashCommandSelector.tsx L112-117でEnterキー押下時にe.preventDefault()とhandleSelect()が呼ばれ、MessageInput.tsx L192の!showCommandSelectorガードと合わせてダブルブロックになっている"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "関連IssueへのリンクがないIssue #56（フリー入力機能の追加元）やIssue #4（Codex CLI対応）への参照があると、機能の経緯を把握しやすい。",
+        "location": "Issue本文",
+        "recommendation": "「関連Issue: #56（フリー入力機能追加）、#4（Codex CLI対応）」のように参照リンクを追加する。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "既存テスト（tests/unit/components/worktree/MessageInput.test.tsx）にフリー入力モードのテストケースが存在しないことへの言及がない。受入条件に「テスト追加」の項目がない。",
+        "location": "## 受入条件 セクション",
+        "recommendation": "受入条件に「isFreeInputModeの動作を検証するユニットテストが追加されている」を追加することを検討する。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "明確性",
+        "issue": "受入条件の「Codex・Claude Code両方で正常に動作する」は、実質的にcliToolIdの違いによる動作差異がないことの確認だが、手動テスト手順が明記されていない。",
+        "location": "## 受入条件 セクション",
+        "recommendation": "受入条件に具体的なテストシナリオ（例: 「/model gpt-4o を入力してEnterで送信できること」「/compact のようなスペースなしコマンドも引き続きセレクターから選択可能なこと」）を追加すると検証しやすい。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MessageInput.tsx",
+      "relevance": "バグの発生箇所。handleFreeInput(L141-148)、handleMessageChange(L153-163)、submitMessage(L66-83)、handleKeyDown(L168-203)が修正対象"
+    },
+    {
+      "file": "src/components/worktree/SlashCommandSelector.tsx",
+      "relevance": "関連コンポーネント。グローバルkeydownリスナー(L124-129)がEnterキーイベントを消費する。isOpenがfalseになれば無効化される"
+    },
+    {
+      "file": "src/lib/standard-commands.ts",
+      "relevance": "スラッシュコマンド定義。変更不要だが/modelコマンドなどカスタムコマンドの背景参照"
+    },
+    {
+      "file": "tests/unit/components/worktree/MessageInput.test.tsx",
+      "relevance": "既存テスト。フリー入力モードのテストケースが未存在"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/user-guide/commands-guide.md",
+      "relevance": "スラッシュコマンド利用ガイド。カスタムコマンド入力の手順記載あり"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトガイドライン。MessageInput.tsxの記載はないが、SlashCommandSelector関連モジュール一覧を確認"
+    }
+  ]
+}

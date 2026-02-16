@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "coverage": 89.36,
+  "unit_tests": {
+    "total": 18,
+    "passed": 18,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/components/worktree/MessageInput.tsx",
+    "tests/unit/components/worktree/MessageInput.test.tsx"
+  ],
+  "commits": [
+    "58c3b3f: fix(#288): add isFreeInputMode flag to prevent selector re-display during custom command input"
+  ],
+  "message": "TDD implementation complete. Added isFreeInputMode flag to MessageInput component to prevent command selector from re-displaying during custom command input. Coverage 89.36% on MessageInput.tsx (target 80%). All 18 tests pass including 7 new test cases (TC-1 through TC-7). Zero ESLint and TypeScript errors."
+}

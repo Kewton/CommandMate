@@ -1,0 +1,107 @@
+{
+  "issue_number": 288,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "tmux sendKeys における既存のコマンドインジェクションリスクの認識",
+        "description": "Issue #288 の変更自体はセキュリティリスクを増加させないが、フリー入力モードではユーザーが任意のテキストを入力し tmux sendKeys 経由で CLI セッションに送信される。既存の sendKeys 関数 (src/lib/tmux.ts L207-225) はシングルクォートのエスケープのみ実施しており、tmux の特殊シーケンスに対する追加防御はない。ただし、送信先は Claude/Codex/Gemini CLI セッション内であり、OS シェルへの直接実行ではないため、リスクは限定的。本修正の範囲外だが、認識すべき既存の構造的特性として記録する。",
+        "principle": "セキュリティ/入力バリデーション",
+        "owasp_category": "A03:2021-Injection"
+      },
+      {
+        "id": "C-002",
+        "title": "フリー入力モード固有のセキュリティ境界の明確化",
+        "description": "通常のコマンド選択モードでは STANDARD_COMMANDS に定義された固定コマンドセットからの選択に限定されるが、フリー入力モードでは任意のスラッシュコマンド文字列の入力が可能となる。セキュリティ境界としては (1) フロントエンドの message.trim() ガード、(2) API 側の body.content バリデーション、(3) sendKeys のシングルクォートエスケープ、(4) CLI ツール自体の入力パース の4層が存在する。Issue #288 の修正はこれらの層に変更を加えないため、既存のセキュリティ境界は維持される。将来的にフリー入力の制限ポリシーが必要になった場合は、層 (2) でのサーバーサイドバリデーション追加が適切な実装箇所となる。",
+        "principle": "セキュリティ/Defense in Depth",
+        "owasp_category": "A03:2021-Injection"
+      }
+    ]
+  },
+  "security_evaluation": {
+    "owasp_checklist": {
+      "A01_broken_access_control": {
+        "status": "not_applicable",
+        "detail": "本修正は認証・認可に関わらない。MessageInput は既にアクセス可能なユーザーのみが操作するクライアントサイドコンポーネントであり、isFreeInputMode ステートの追加はアクセス制御に影響しない。API エンドポイント /api/worktrees/:id/send の認可ロジックに変更なし。"
+      },
+      "A02_cryptographic_failures": {
+        "status": "not_applicable",
+        "detail": "本修正は暗号化やデータ保護に関わらない。メッセージ送信はローカル tmux セッションへの転送であり、暗号化通信の要件はない。"
+      },
+      "A03_injection": {
+        "status": "pass",
+        "detail": "フリー入力モードではユーザーが任意テキストを入力可能だが、この機能は Issue #288 以前から handleFreeInput() として実装済みであり、本修正はセレクター再表示バグの UI ステート修正のみ。入力データの処理パス (MessageInput -> worktreeApi.sendMessage -> /api/worktrees/:id/send -> cliTool.sendMessage -> tmux sendKeys) に変更なし。既存の防御層として、API 側の body.content バリデーション (空文字・型チェック)、tmux sendKeys のシングルクォートエスケープが維持される。"
+      },
+      "A04_insecure_design": {
+        "status": "pass",
+        "detail": "isFreeInputMode フラグの設計はセキュリティ上の問題を導入しない。フラグは UI 表示制御のみに使用され、サーバーサイドのデータフローや認可判定には関与しない。フラグの ON/OFF がセキュリティバイパスにつながる経路は存在しない。"
+      },
+      "A05_security_misconfiguration": {
+        "status": "not_applicable",
+        "detail": "本修正はサーバー設定、セキュリティヘッダー、CORS ポリシー等に変更を加えない。"
+      },
+      "A06_vulnerable_components": {
+        "status": "not_applicable",
+        "detail": "本修正は新規ライブラリの追加や既存ライブラリのバージョン変更を伴わない。React useState のみを使用。"
+      },
+      "A07_auth_failures": {
+        "status": "not_applicable",
+        "detail": "本修正は認証メカニズムに関わらない。CommandMate は現時点でローカルツールとして動作し、ネットワーク認証は対象外。"
+      },
+      "A08_data_integrity_failures": {
+        "status": "pass",
+        "detail": "isFreeInputMode フラグはクライアントサイドの React ステートとして管理され、シリアライズやデシリアライズは発生しない。メッセージ送信時の body.content はサーバーサイドで型チェック済み。"
+      },
+      "A09_logging_monitoring": {
+        "status": "not_applicable",
+        "detail": "本修正はログ出力やモニタリングに変更を加えない。既存の console.log によるセッション操作ログは維持される。"
+      },
+      "A10_ssrf": {
+        "status": "not_applicable",
+        "detail": "本修正は外部サーバーへのリクエスト送信に関わらない。メッセージ送信先はローカル tmux セッションであり、URL 入力や外部 API 呼び出しは含まれない。"
+      }
+    },
+    "additional_security_analysis": {
+      "xss_prevention": {
+        "status": "pass",
+        "detail": "MessageInput コンポーネントは React の JSX テンプレートを使用しており、dangerouslySetInnerHTML や innerHTML の使用はない。ユーザー入力は React のデフォルトエスケープメカニズムにより XSS から保護される。isFreeInputMode フラグの追加はレンダリングロジックに影響しない。"
+      },
+      "state_manipulation": {
+        "status": "pass",
+        "detail": "isFreeInputMode は React の useState で管理され、コンポーネント内部に閉じている。外部からの直接操作は React のコンポーネントモデルにより防止される。フラグの値がセキュリティ判定に使用されることはない（UI 表示制御のみ）。"
+      },
+      "input_validation_chain": {
+        "status": "pass",
+        "detail": "入力バリデーションチェーン: (1) クライアント側 - message.trim() による空文字ガード、sending フラグによる二重送信防止、(2) サーバー側 - body.content の存在・型・空文字チェック、cliToolId の VALID_CLI_TOOL_IDS ホワイトリスト検証、(3) tmux 層 - シングルクォートエスケープ。本修正はこれらの層に変更を加えない。"
+      },
+      "race_condition": {
+        "status": "pass",
+        "detail": "isFreeInputMode と showCommandSelector の状態更新は全て React のバッチ更新メカニズム内で行われる。submitMessage の sending フラグによる二重送信防止も維持される。フリー入力モードのフラグ操作が競合状態を生む経路は特定されなかった。"
+      }
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-288-free-input-mode-fix-design-policy.md",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/lib/api-client.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/tmux.ts",
+    "src/lib/standard-commands.ts",
+    "tests/unit/components/worktree/MessageInput.test.tsx"
+  ],
+  "timestamp": "2026-02-17T00:00:00Z"
+}

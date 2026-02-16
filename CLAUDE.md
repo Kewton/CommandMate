@@ -199,6 +199,8 @@ tests/
 | `src/lib/date-locale.ts` | date-fnsロケールマッピング（getDateFnsLocale()、enUS/jaサポート） |
 | `src/config/github-links.ts` | GitHub URL定数の一元管理（Issue #264: GITHUB_REPO_BASE_URL派生、DRY原則対応、SSRF防止のためGITHUB_API_URLは除外） |
 | `src/components/worktree/FeedbackSection.tsx` | フィードバックリンクセクション（Issue #264: Bug Report/Feature Request/Question/View Issues、noopener noreferrer、i18n対応） |
+| `src/components/worktree/MessageInput.tsx` | メッセージ入力コンポーネント（Issue #288: isFreeInputModeフラグ追加、フリー入力モード中のセレクター再表示防止、モバイルボタンガード、経路分析コメント） |
+| `tests/helpers/message-input-test-utils.ts` | MessageInputテスト共通ヘルパー（Issue #288: モック定数、props factory、DOM queries、interaction helpers、DRY原則対応） |
 
 ### CLIモジュール（Issue #96, #136）
 

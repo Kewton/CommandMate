@@ -1,0 +1,22 @@
+{
+  "issue_number": 288,
+  "acceptance_criteria": [
+    "「Enter custom command...」選択後、カスタムコマンドを入力してEnterキーで送信できる",
+    "カスタムコマンド入力中にコマンドセレクターが再表示されない",
+    "通常の / 入力時のコマンドセレクター表示は従来通り動作する",
+    "Codex・Claude Code両方で正常に動作する",
+    "既存のスラッシュコマンド選択機能に影響がない",
+    "フリー入力モード中にメッセージを全削除した場合、再度 / を入力するとセレクターが正常に表示される"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: isFreeInputMode ステート追加（useState<boolean>(false)）",
+    "Task 1.2: handleFreeInput() の修正（setIsFreeInputMode(true) 追加）",
+    "Task 1.3: handleMessageChange() の修正（空文字時フラグリセット、フリー入力モード中の早期リターン、経路分析コメント）",
+    "Task 1.4: submitMessage() の修正（setIsFreeInputMode(false) 追加）",
+    "Task 1.5: handleCommandCancel() の修正（setIsFreeInputMode(false) 追加）",
+    "Task 1.6: モバイルコマンドボタンのガード追加（onClick内でフラグリセット）"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-288-free-input-mode-fix-design-policy.md",
+  "work_plan_path": "dev-reports/issue/288/work-plan.md"
+}

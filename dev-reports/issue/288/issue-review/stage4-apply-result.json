@@ -1,0 +1,48 @@
+{
+  "issue_number": 288,
+  "iteration": 2,
+  "stage": 4,
+  "stage_name": "指摘事項反映（影響範囲レビュー）",
+  "apply_date": "2026-02-17",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "受入条件に「テスト要件」セクションを新設し、isFreeInputModeフラグの動作を検証する具体的なユニットテストケース4項目（handleFreeInput後のセレクター非表示、Enterキー送信、全削除後の再表示、submitMessage後のリセット）を明記"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「テスト観点の影響」サブセクションを追加。MessageInput.test.tsxのテスト追加必要性と、SlashCommandSelector.test.tsxのisOpen=false時のEnterキー透過テスト推奨を記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "影響範囲の関連コンポーネントにWorkTreeDetailRefactored.tsxを追加し、propsインターフェース変更なし・isFreeInputModeは内部状態のため破壊的変更なしと明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "CLAUDE.mdへのMessageInput.tsxエントリ追加は実装完了後に行うべきであり、Issue本文の変更ではないためスキップ"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "e2eテスト追加は本Issue範囲外。将来のIssueとして別途検討する内容であり、本Issueの受入条件には含めない"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 3,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/288"
+  }
+}

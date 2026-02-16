@@ -1,0 +1,101 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: Desktop - click free input button, type /model gpt-4o, press Enter to send",
+      "result": "passed",
+      "evidence": "AC-1: Custom command entry and Enter submission - worktreeApi.sendMessage called with '/model gpt-4o'"
+    },
+    {
+      "scenario": "Scenario 2: Typing additional characters in free input mode does not re-display selector",
+      "result": "passed",
+      "evidence": "AC-2: queryByRole('listbox') returns null at each input step (/m, /model, /model gpt-4o, /model gpt-4o --temp 0.5)"
+    },
+    {
+      "scenario": "Scenario 3: After clearing all text in free input mode, typing '/' shows selector again",
+      "result": "passed",
+      "evidence": "AC-6: After clearing message and re-typing '/', getByRole('listbox') succeeds"
+    },
+    {
+      "scenario": "Scenario 4: Normal '/' input without free input mode shows selector",
+      "result": "passed",
+      "evidence": "AC-3: getByRole('listbox') present after typing '/' and '/te', hidden after '/test '"
+    },
+    {
+      "scenario": "Scenario 5: isFreeInputMode resets after message submission",
+      "result": "passed",
+      "evidence": "After submitMessage completes, typing '/' shows selector (getByRole('listbox') succeeds)"
+    },
+    {
+      "scenario": "Scenario 6: Escape key resets isFreeInputMode via handleCommandCancel",
+      "result": "passed",
+      "evidence": "After Escape keyDown, selector closes; after clear and re-type '/', selector reappears"
+    },
+    {
+      "scenario": "Scenario 7: Mobile command button resets isFreeInputMode and shows selector",
+      "result": "passed",
+      "evidence": "After clicking mobile-command-button during free input mode, slash-command-bottom-sheet appears"
+    },
+    {
+      "scenario": "AC-4 (Claude): Free input flow works with claude cliToolId",
+      "result": "passed",
+      "evidence": "worktreeApi.sendMessage called with cliToolId='claude'"
+    },
+    {
+      "scenario": "AC-4 (Codex): Free input flow works with codex cliToolId",
+      "result": "passed",
+      "evidence": "worktreeApi.sendMessage called with cliToolId='codex'"
+    },
+    {
+      "scenario": "AC-5: Existing slash command selection unaffected",
+      "result": "passed",
+      "evidence": "Clicking /test-command sets message to '/test-command ' and closes selector"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Enter custom command... 選択後、カスタムコマンドを入力してEnterキーで送信できる",
+      "verified": true,
+      "evidence": "Scenario 1: Desktop free input -> /model gpt-4o -> Enter -> sendMessage called"
+    },
+    {
+      "criterion": "カスタムコマンド入力中にコマンドセレクターが再表示されない",
+      "verified": true,
+      "evidence": "Scenario 2: After free input button, typing /m, /model, /model gpt-4o never triggers selector"
+    },
+    {
+      "criterion": "通常の / 入力時のコマンドセレクター表示は従来通り動作する",
+      "verified": true,
+      "evidence": "Scenario 4: '/' and '/te' show selector; '/test ' hides selector (normal behavior preserved)"
+    },
+    {
+      "criterion": "Codex・Claude Code両方で正常に動作する",
+      "verified": true,
+      "evidence": "AC-4: Both cliToolId='claude' and cliToolId='codex' tested and pass"
+    },
+    {
+      "criterion": "既存のスラッシュコマンド選択機能に影響がない",
+      "verified": true,
+      "evidence": "AC-5: Clicking existing command still sets message and closes selector; 15 SlashCommandSelector tests + 18 MessageInput tests all pass"
+    },
+    {
+      "criterion": "フリー入力モード中にメッセージを全削除した場合、再度 / を入力するとセレクターが正常に表示される",
+      "verified": true,
+      "evidence": "Scenario 3: Clear message in free input mode -> type '/' -> selector reappears"
+    }
+  ],
+  "evidence_files": [
+    "tests/integration/issue-288-acceptance.test.tsx",
+    "tests/unit/components/worktree/MessageInput.test.tsx",
+    "tests/unit/components/SlashCommandSelector.test.tsx"
+  ],
+  "test_summary": {
+    "acceptance_tests": "10/10 passed",
+    "unit_tests_MessageInput": "18/18 passed",
+    "unit_tests_SlashCommandSelector": "15/15 passed",
+    "total": "43/43 passed",
+    "typescript_check": "passed (no errors)",
+    "eslint_check": "passed (no warnings)"
+  },
+  "message": "All acceptance criteria are verified. The isFreeInputMode flag in MessageInput correctly prevents selector re-display during custom command input, resets on submit/cancel/clear, and preserves backward compatibility for normal slash command usage."
+}

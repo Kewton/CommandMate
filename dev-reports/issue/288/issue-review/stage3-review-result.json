@@ -1,0 +1,143 @@
+{
+  "issue_number": 288,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-02-17",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "既存のMessageInput.test.tsxにはスラッシュコマンドセレクターの表示/非表示や、handleFreeInput後のEnter送信を検証するテストケースが存在しない。現行テストはすべてshowCommandSelector=falseの状態でのみ動作検証しており、今回の修正対象であるisFreeInputModeフラグの動作を検証するテストが追加されないと、リグレッション検出が不可能である。",
+        "location": "## 受入条件 セクション / tests/unit/components/worktree/MessageInput.test.tsx",
+        "recommendation": "受入条件に「isFreeInputModeフラグの動作を検証するユニットテストが追加されていること」を明記する。具体的には以下のテストケースが必要: (1) handleFreeInput呼び出し後にカスタムコマンド入力してもshowCommandSelectorがfalseのままであること、(2) handleFreeInput後にEnterキーでsubmitMessageが呼ばれること、(3) メッセージ全削除後に再度/入力でセレクターが表示されること、(4) submitMessage後にisFreeInputModeがリセットされること。",
+        "evidence": "tests/unit/components/worktree/MessageInput.test.tsxの全テストケースを確認: Desktop/Mobile/IME/Accessibility/Basic renderingの5カテゴリのみ。スラッシュコマンド関連テストはSlashCommandSelector.test.tsxにあるが、MessageInput統合テスト（セレクター表示条件、フリー入力モード遷移）は存在しない"
+      },
+      {
+        "id": "SF-2",
+        "category": "影響ファイル",
+        "issue": "Issueの影響範囲セクションでは変更対象をMessageInput.tsxのみとしているが、SlashCommandSelector.tsxのグローバルkeydownリスナー（L93-121, L124-129）の動作がisFreeInputModeの有無で間接的に変わる点について、テスト観点での影響が記載されていない。SlashCommandSelector.test.tsxにもフリー入力モード遷移後のキーボードナビゲーションテスト（Enter/ArrowDown/ArrowUp）が含まれていないため、isOpen=false時のリスナー無効化が意図通り機能する保証がない。",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "影響範囲セクションの関連コンポーネントにSlashCommandSelector.tsxのテスト観点を追加する。具体的には「SlashCommandSelector.test.tsxにisOpen=false時にグローバルkeydownリスナーがEnterイベントを消費しないことを検証するテストケースの追加を推奨」と記載する。",
+        "evidence": "SlashCommandSelector.tsx L93-121: handleKeyDown内で`if (!isOpen) return;`によりisOpen=false時は早期リターンする。L124-129: ただしaddEventListenerは常に登録されている。SlashCommandSelector.test.tsxにはisOpen=true時のEscapeキーテストのみ（L203-217）で、isOpen=false時のEnterキー透過テストは未存在"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "移行考慮",
+        "issue": "isFreeInputModeはuseState<boolean>で管理される内部状態であり、propsやコンテキスト経由で外部に公開されないため、WorktreeDetailRefactored.tsxやその他親コンポーネントへの破壊的変更は発生しない。この点はIssue本文で明示されていないが、レビューアが安心できる情報として記載があると望ましい。",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "影響範囲セクションに「MessageInputのpropsインターフェースに変更なし。isFreeInputModeは内部状態のため、親コンポーネント（WorktreeDetailRefactored.tsx）への破壊的変更なし」と明記する。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "ドキュメント更新",
+        "issue": "CLAUDE.mdの主要機能モジュール一覧にMessageInput.tsxやSlashCommandSelector.tsxの記載がない。今回の修正でisFreeInputModeという新たな状態管理パターンが追加されるため、将来のメンテナンスを考慮するとCLAUDE.mdへの追記が望ましい。",
+        "location": "CLAUDE.md",
+        "recommendation": "CLAUDE.mdの主要機能モジュール一覧に`src/components/worktree/MessageInput.tsx`のエントリを追加することを検討する（例: 「メッセージ入力コンポーネント（Issue #288: isFreeInputModeフラグ追加、カスタムコマンド入力対応）」）。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "テスト範囲",
+        "issue": "e2eテスト（tests/e2e/worktree-detail.spec.ts）にはMessageInputの存在確認とテキスト入力のテストのみ存在し、スラッシュコマンドセレクターとの統合テストは含まれていない。フリー入力モードのe2eテスト追加は本Issue範囲外だが、将来的なカバレッジ拡大の検討材料として認識しておくべき。",
+        "location": "tests/e2e/worktree-detail.spec.ts",
+        "recommendation": "今回のスコープ外だが、将来のIssueとして「スラッシュコマンド操作のe2eテスト追加」を検討する。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "file": "src/components/worktree/MessageInput.tsx",
+        "change_type": "modify",
+        "description": "isFreeInputModeステート追加、handleFreeInput/handleMessageChange/submitMessage/handleCommandCancelの修正",
+        "risk": "low",
+        "risk_reason": "変更はコンポーネント内部のstate追加と既存関数の条件分岐追加のみ。propsインターフェースに変更なし"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/components/worktree/SlashCommandSelector.tsx",
+        "change_type": "none",
+        "description": "変更不要。isOpen=falseによりグローバルkeydownリスナーのhandleKeyDown内で早期リターンされ、Enterキーイベントが消費されなくなる",
+        "risk": "none",
+        "risk_reason": "コード変更なし。既存のisOpenチェック（L95: if (!isOpen) return）で正しく動作する"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change_type": "none",
+        "description": "MessageInputの利用箇所（L1802-1808, L2038-2043）。propsインターフェース変更なしのため影響なし",
+        "risk": "none",
+        "risk_reason": "MessageInputのpropsが変更されないため"
+      },
+      {
+        "file": "src/lib/standard-commands.ts",
+        "change_type": "none",
+        "description": "スラッシュコマンド定義。変更不要",
+        "risk": "none",
+        "risk_reason": "コマンド定義自体には影響なし"
+      },
+      {
+        "file": "src/components/worktree/index.ts",
+        "change_type": "none",
+        "description": "MessageInputのre-export。インターフェース変更なしのため影響なし",
+        "risk": "none",
+        "risk_reason": "export対象の型に変更なし"
+      }
+    ],
+    "test_files_requiring_update": [
+      {
+        "file": "tests/unit/components/worktree/MessageInput.test.tsx",
+        "reason": "isFreeInputModeフラグの動作検証テストケースの追加が必要"
+      }
+    ],
+    "test_files_optionally_updated": [
+      {
+        "file": "tests/unit/components/SlashCommandSelector.test.tsx",
+        "reason": "isOpen=false時のグローバルkeydownリスナーのEnterキー透過テスト追加を推奨"
+      }
+    ],
+    "breaking_changes": false,
+    "breaking_change_details": "propsインターフェースに変更なし。内部状態の追加のみのため破壊的変更なし",
+    "dependency_impact": "なし。新しいライブラリやモジュールの追加は不要",
+    "migration_needed": false,
+    "migration_details": "既存ユーザーへの移行パス不要。UI動作の改善のみ",
+    "documentation_updates_needed": false,
+    "documentation_details": "CLAUDE.mdへのMessageInput.tsxエントリ追加は推奨だが必須ではない（NTH-2参照）"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MessageInput.tsx",
+      "relevance": "変更対象ファイル。L37(showCommandSelector state), L66-83(submitMessage), L132-135(handleCommandCancel), L141-148(handleFreeInput), L153-163(handleMessageChange), L192(Enter送信のshowCommandSelectorガード)が修正対象"
+    },
+    {
+      "file": "src/components/worktree/SlashCommandSelector.tsx",
+      "relevance": "間接影響ファイル。L93-121(handleKeyDown: isOpenチェックによる早期リターン), L124-129(グローバルkeydownリスナー登録), L131-133(isOpen=falseでnull返却)"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "MessageInput利用箇所（Desktop: L1802-1808, Mobile: L2038-2043）。propsインターフェース変更なしのため修正不要"
+    },
+    {
+      "file": "tests/unit/components/worktree/MessageInput.test.tsx",
+      "relevance": "既存テスト。フリー入力モードのテストケースが未存在。テスト追加が必要"
+    },
+    {
+      "file": "tests/unit/components/SlashCommandSelector.test.tsx",
+      "relevance": "既存テスト。Free input modeテスト(L219-299)はonFreeInputコールバック呼び出しの検証のみ。isOpen=false時のキーイベント透過テストは未存在"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトガイドライン。MessageInput.tsxのエントリなし。NTH-2で追加を推奨"
+    }
+  ]
+}

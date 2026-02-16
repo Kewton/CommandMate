@@ -1,0 +1,60 @@
+{
+  "issue_number": 288,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-17",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "Issueタイトルを「Codexにてカスタムモデルが利用出来ない」から「Enter custom command選択後、カスタムコマンド入力中にセレクターが再表示されEnterで送信できない」に修正。問題の本質（Codex限定ではなくCodex・Claude Code両方で発生するUI操作の問題）を正確に反映。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "対策案セクションにisFreeInputModeフラグの具体的なリセット条件3つ（submitMessage時・メッセージ空文字時・handleCommandCancel時）を明記。handleMessageChange内の処理フローを擬似コード付きで追加し、フラグチェックの具体的なロジックを明確化。主な変更点リストにhandleCommandCancel()を追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "根本原因の仮説セクションに、SlashCommandSelector.tsxのグローバルkeydownリスナー（document.addEventListener）がEnterキーをe.preventDefault()で消費する点を補足。MessageInput.tsx側の!showCommandSelectorガードとのダブルブロック構造を説明し、isFreeInputModeフラグによる解決メカニズム（isOpen=falseでグローバルリスナーも無効化）を明記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "今回のスコープはShould Fix項目の反映のため見送り"
+      },
+      {
+        "id": "NTH-2",
+        "status": "partially_applied",
+        "change_summary": "受入条件にフリー入力モードのフラグリセット動作を検証する条件（メッセージ全削除後のセレクター再表示）を追加。ユニットテスト追加の明示的な受入条件は次回イテレーションで検討。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "今回のスコープはShould Fix項目の反映のため見送り。具体的なテストシナリオの追加は次回イテレーションで検討。"
+      }
+    ]
+  },
+  "additional_changes": [
+    "受入条件に「フリー入力モード中にメッセージを全削除した場合、再度 / を入力するとセレクターが正常に表示される」を追加（SF-2対応に伴うエッジケースのカバー）",
+    "影響範囲セクションの関連コンポーネント説明にSlashCommandSelectorのisOpen=false時のグローバルリスナー無効化について注記を追加",
+    "レビュー履歴セクションを新規追加（イテレーション1の変更内容を記録）"
+  ],
+  "summary": {
+    "total_findings": 6,
+    "applied": 4,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/288",
+    "title_updated": true,
+    "body_updated": true
+  }
+}

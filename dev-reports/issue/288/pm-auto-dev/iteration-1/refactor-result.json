@@ -1,0 +1,46 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 89.36,
+    "after_coverage": 100.0,
+    "before_statement_coverage": 93.61,
+    "after_statement_coverage": 100.0,
+    "before_branch_coverage": 86.20,
+    "after_branch_coverage": 96.55,
+    "before_function_coverage": 92.85,
+    "after_function_coverage": 100.0,
+    "before_line_coverage": 93.61,
+    "after_line_coverage": 100.0,
+    "before_test_count": 28,
+    "after_test_count": 33
+  },
+  "refactorings_applied": [
+    "Extract shared test helper module (tests/helpers/message-input-test-utils.ts) with mockCommandGroups, createDefaultProps, DOM query helpers (getTextarea, getSendButton, queryDesktopSelector, queryMobileSheet), and user interaction helpers (typeMessage, openSelector, enterFreeInputMode, pressEnter, pressEscape, pressKey, clickMobileCommandButton, simulateIMEComposition, delay)",
+    "Refactor unit tests to use shared helpers, eliminating duplicated mock data and interaction sequences",
+    "Refactor acceptance tests to use shared helpers, eliminating duplicated mock data and interaction sequences",
+    "Add @tests path alias to tsconfig.json and vitest.config.ts for clean imports from tests/ directory",
+    "Fix onMessageSent mock typing with vi.fn<(cliToolId: CLIToolType) => void>() for strict TypeScript compliance",
+    "Add IME composition timeout clearing test (covers handleCompositionStart/handleCompositionEnd clearTimeout branches)",
+    "Add justFinishedComposing timeout expiry test using vi.useFakeTimers (covers setTimeout callback line 118)",
+    "Add error handling test (API failure displays error message)",
+    "Add whitespace-only message guard test",
+    "Add default cliToolId fallback test (when cliToolId prop is omitted)"
+  ],
+  "files_changed": [
+    "tests/helpers/message-input-test-utils.ts",
+    "tests/unit/components/worktree/MessageInput.test.tsx",
+    "tests/integration/issue-288-acceptance.test.tsx",
+    "tsconfig.json",
+    "vitest.config.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "253cc7b: refactor(#288): extract shared test helpers and improve MessageInput coverage"
+  ],
+  "message": "Refactoring complete. Test code DRY improvements achieved by extracting shared helper module. MessageInput.tsx coverage improved from 93.61% to 100% (statements/lines), 86.20% to 96.55% (branch), 92.85% to 100% (functions). 5 new tests added covering IME composition edge cases, error handling, and default prop fallback."
+}

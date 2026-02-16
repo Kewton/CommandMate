@@ -1,0 +1,18 @@
+{
+  "issue_number": 288,
+  "refactor_targets": [
+    "src/components/worktree/MessageInput.tsx",
+    "tests/unit/components/worktree/MessageInput.test.tsx",
+    "tests/integration/issue-288-acceptance.test.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 89.36,
+    "before_test_count": 18
+  },
+  "improvement_goals": [
+    "カバレッジを90%以上に向上",
+    "テストコードの重複削減（ヘルパー関数の抽出）",
+    "コメントの明確化（経路分析の詳細化）",
+    "テストケースのグループ化改善"
+  ]
+}
