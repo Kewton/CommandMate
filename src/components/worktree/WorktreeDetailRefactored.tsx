@@ -48,7 +48,6 @@ import { Modal } from '@/components/ui/Modal';
 import { worktreeApi } from '@/lib/api-client';
 import { truncateString } from '@/lib/utils';
 import { useAutoYes } from '@/hooks/useAutoYes';
-import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { NotificationDot } from '@/components/common/NotificationDot';
@@ -1128,14 +1127,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     async (answer: string): Promise<void> => {
       actions.setPromptAnswering(true);
       try {
-        // Issue #287: Use shared builder to include promptType and defaultOptionNumber
-        // so the API can use cursor-key navigation even when promptCheck re-verification fails.
-        const requestBody = buildPromptResponseBody(answer, activeCliTab, state.prompt.data);
-
         const response = await fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
+          body: JSON.stringify({ answer, cliTool: activeCliTab }),
         });
         if (!response.ok) {
           throw new Error(`Failed to send prompt response: ${response.status}`);
@@ -1149,7 +1144,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         actions.setPromptAnswering(false);
       }
     },
-    [worktreeId, actions, fetchCurrentOutput, activeCliTab, state.prompt.data]
+    [worktreeId, actions, fetchCurrentOutput, activeCliTab]
   );
 
   /** Handle prompt dismiss without response */

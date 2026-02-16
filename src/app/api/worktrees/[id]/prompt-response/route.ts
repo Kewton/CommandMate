@@ -13,32 +13,10 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/prompt-detector';
 import { stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
-import type { PromptType } from '@/types/models';
 
 interface PromptResponseRequest {
   answer: string;
   cliTool?: CLIToolType;
-  /** Issue #287: Prompt type from client-side detection (fallback when promptCheck fails) */
-  promptType?: PromptType;
-  /** Issue #287: Default option number from client-side detection (fallback when promptCheck fails) */
-  defaultOptionNumber?: number;
-}
-
-/** Regex pattern to detect checkbox-style multi-select options (e.g., "[ ] Option" or "[x] Option") */
-const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
-
-/**
- * Build an array of directional key names ('Up' or 'Down') to navigate
- * from the current cursor position to the target option.
- *
- * @param offset - Number of positions to move (positive = Down, negative = Up)
- * @returns Array of 'Up' or 'Down' strings
- */
-function buildNavigationKeys(offset: number): string[] {
-  if (offset === 0) return [];
-  const direction = offset > 0 ? 'Down' : 'Up';
-  const count = Math.abs(offset);
-  return Array.from({ length: count }, () => direction);
 }
 
 export async function POST(
@@ -47,7 +25,7 @@ export async function POST(
 ): Promise<NextResponse> {
   try {
     const body: PromptResponseRequest = await req.json();
-    const { answer, cliTool: cliToolParam, promptType: bodyPromptType, defaultOptionNumber: bodyDefaultOptionNumber } = body;
+    const { answer, cliTool: cliToolParam } = body;
 
     // Validation
     if (!answer) {
@@ -115,53 +93,41 @@ export async function POST(
       // Issue #193: Claude Code AskUserQuestion uses cursor-based navigation
       // (Arrow/Space/Enter), not number input. Detect this format and send
       // the appropriate key sequence instead of typing the number.
-      //
-      // Issue #287: When promptCheck is null (capture failed), fall back to
-      // body.promptType to determine if cursor-key navigation is needed.
-      // This prevents the bug where a failed re-verification causes
-      // multiple_choice prompts to be sent as plain text.
       const isClaudeMultiChoice = cliToolId === 'claude'
-        && (promptCheck?.promptData?.type === 'multiple_choice'
-            || (promptCheck === null && bodyPromptType === 'multiple_choice'))
+        && promptCheck?.promptData?.type === 'multiple_choice'
         && /^\d+$/.test(answer);
 
-      if (isClaudeMultiChoice) {
+      if (isClaudeMultiChoice && promptCheck?.promptData?.type === 'multiple_choice') {
         const targetNum = parseInt(answer, 10);
-
-        // Issue #287: Use promptCheck data when available, fall back to body fields
-        let defaultNum: number;
-        let mcOptions: Array<{ number: number; label: string; isDefault?: boolean }> | null = null;
-
-        if (promptCheck?.promptData?.type === 'multiple_choice') {
-          // Primary path: use fresh promptCheck data
-          mcOptions = promptCheck.promptData.options;
-          const defaultOption = mcOptions.find(o => o.isDefault);
-          defaultNum = defaultOption?.number ?? 1;
-        } else {
-          // Fallback path (Issue #287): promptCheck is null, use body fields
-          defaultNum = bodyDefaultOptionNumber ?? 1;
-        }
-
+        const mcOptions = promptCheck.promptData.options;
+        const defaultOption = mcOptions.find(o => o.isDefault);
+        const defaultNum = defaultOption?.number ?? 1;
         const offset = targetNum - defaultNum;
 
         // Detect multi-select (checkbox) prompts by checking for [ ] in option labels.
-        // Multi-select prompts require: Space to toggle checkbox -> navigate to "Next" -> Enter.
-        // Single-select prompts require: navigate to option -> Enter.
-        // Note: multi-select detection is only possible when promptCheck succeeded (mcOptions available).
-        const isMultiSelect = mcOptions !== null && mcOptions.some(o => CHECKBOX_OPTION_PATTERN.test(o.label));
+        // Multi-select prompts require: Space to toggle checkbox → navigate to "Next" → Enter.
+        // Single-select prompts require: navigate to option → Enter.
+        const isMultiSelect = mcOptions.some(o => /^\[[ x]\] /.test(o.label));
 
-        if (isMultiSelect && mcOptions !== null) {
+        if (isMultiSelect) {
           // Multi-select: toggle checkbox, then navigate to "Next" and submit
-          const checkboxCount = mcOptions.filter(o => CHECKBOX_OPTION_PATTERN.test(o.label)).length;
+          const checkboxCount = mcOptions.filter(o => /^\[[ x]\] /.test(o.label)).length;
 
-          const keys: string[] = [
-            ...buildNavigationKeys(offset),  // 1. Navigate to target option
-            'Space',                          // 2. Toggle checkbox
-          ];
+          const keys: string[] = [];
+
+          // 1. Navigate to target option
+          if (offset > 0) {
+            for (let i = 0; i < offset; i++) keys.push('Down');
+          } else if (offset < 0) {
+            for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
+          }
+
+          // 2. Space to toggle checkbox
+          keys.push('Space');
 
           // 3. Navigate to "Next" button (positioned right after all checkbox options)
           const downToNext = checkboxCount - targetNum + 1;
-          keys.push(...buildNavigationKeys(downToNext));
+          for (let i = 0; i < downToNext; i++) keys.push('Down');
 
           // 4. Enter to submit
           keys.push('Enter');
@@ -169,10 +135,15 @@ export async function POST(
           await sendSpecialKeys(sessionName, keys);
         } else {
           // Single-select: navigate and Enter to select
-          const keys: string[] = [
-            ...buildNavigationKeys(offset),
-            'Enter',
-          ];
+          const keys: string[] = [];
+
+          if (offset > 0) {
+            for (let i = 0; i < offset; i++) keys.push('Down');
+          } else if (offset < 0) {
+            for (let i = 0; i < Math.abs(offset); i++) keys.push('Up');
+          }
+
+          keys.push('Enter');
           await sendSpecialKeys(sessionName, keys);
         }
       } else {

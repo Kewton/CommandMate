@@ -6,7 +6,6 @@
 
 | Issue | 種別 | 概要 | 主要変更ファイル | 設計書 |
 |-------|------|------|-----------------|--------|
-| #287 | fix | promptCheck再検証失敗時のフォールバック不備修正（promptType/defaultOptionNumber送信、buildPromptResponseBody()共通化、100%カバレッジ達成） | `prompt-response/route.ts`, `prompt-response-body-builder.ts`, `WorktreeDetailRefactored.tsx`, `useAutoYes.ts`, `prompt-response-verification.test.ts`, `useAutoYes.test.ts`, `worktree-detail-integration.test.tsx` | [link](../dev-reports/issue/287/issue-review/) |
 | #266 | fix | ブラウザタブ切替時の入力内容クリア修正（軽量リカバリパターン、setError(null)対策、コンポーネントツリー維持） | `WorktreeDetailRefactored.tsx`, `WorktreeDetailRefactored.test.tsx`, `issue-266-acceptance.test.tsx` | [link](../dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md) |
 | #270 | fix | update-checkルート静的プリレンダリング修正（force-dynamic追加、リグレッション防止テスト） | `update-check/route.ts`, `update-check.test.ts` | [link](../dev-reports/design/issue-270-update-check-static-prerender-design-policy.md) |
 | #264 | feat | ユーザーからの問い合わせリンク（FeedbackSection UI、issue/docs CLIコマンド、gh CLI統合、GitHub URL一元管理、AIツール統合ガイド） | `github-links.ts`, `FeedbackSection.tsx`, `issue.ts`, `docs.ts`, `docs-reader.ts`, `input-validators.ts`, `cli-dependencies.ts`, `init.ts`, `cli/index.ts` | [link](../dev-reports/design/issue-264-feedback-and-docs-design-policy.md) |
