@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-02-17
+
+### Fixed
+- Prompt-response API fallback for promptType mismatch (Issue #287)
+  - `promptType` / `defaultOptionNumber` sent from client for server-side re-verification fallback
+  - `isClaudeMultiChoice` broadened for type mismatch edge cases
+  - User input prompt barrier to prevent false positive detection
+  - `prompt-answer-sender.ts` shared module to eliminate cursor-key logic duplication
+  - `prompt-response-body-builder.ts` shared utility for DRY request body construction
+- Slash command selector re-display during free input mode (Issue #288)
+  - `isFreeInputMode` flag prevents selector from re-appearing after custom command input
+  - Enter key interception fix and filter text carry-over to free input mode
+  - Mobile send button guard during free input mode
+
+### Changed
+- README improved as project landing page with complete CLI command reference (Issue #286)
+
 ## [0.2.9] - 2026-02-15
 
 ### Added
@@ -443,7 +460,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.9...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/Kewton/CommandMate/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/Kewton/CommandMate/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/Kewton/CommandMate/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/Kewton/CommandMate/compare/v0.2.6...v0.2.7
