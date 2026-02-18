@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
+import { getEnv } from '@/lib/env';
 import { CloneManager } from '@/lib/clone-manager';
 import type { CloneError } from '@/types/clone';
 
@@ -67,8 +68,28 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
       );
     }
 
+    // [D4-002] Validate targetDir type (prevent object/array injection)
+    if (targetDir !== undefined && typeof targetDir !== 'string') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            category: 'validation',
+            code: 'INVALID_TARGET_PATH',
+            message: 'targetDir must be a string',
+            recoverable: true,
+            suggestedAction: 'Provide a valid string path for targetDir',
+          },
+        },
+        { status: 400 }
+      );
+    }
+
     const db = getDbInstance();
-    const cloneManager = new CloneManager(db);
+    // [D2-001] getEnv().CM_ROOT_DIR is already an absolute path via path.resolve() in env.ts L234.
+    // Do not apply additional path.resolve() to avoid double resolution.
+    const { CM_ROOT_DIR } = getEnv();
+    const cloneManager = new CloneManager(db, { basePath: CM_ROOT_DIR });
 
     console.info(`${LOG_PREFIX} Starting clone job for: ${cloneUrl}`);
 
