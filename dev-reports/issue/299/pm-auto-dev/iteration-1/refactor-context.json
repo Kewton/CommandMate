@@ -1,0 +1,26 @@
+{
+  "issue_number": 299,
+  "refactor_targets": [
+    "src/config/z-index.ts",
+    "src/components/ui/Modal.tsx",
+    "src/components/common/Toast.tsx",
+    "src/components/worktree/ContextMenu.tsx",
+    "src/hooks/useSwipeGesture.ts",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/SearchBar.tsx",
+    "tests/unit/config/z-index.test.ts",
+    "tests/unit/hooks/useSwipeGesture.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "typescript_errors": 0,
+    "eslint_errors": 0,
+    "tests_passed": 3510
+  },
+  "improvement_goals": [
+    "コードの可読性・保守性向上",
+    "SOLID原則・DRY原則の徹底確認",
+    "不要なコメントや冗長なコードの除去",
+    "テストの品質向上（isInsideScrollableElement単体テスト確認）"
+  ]
+}

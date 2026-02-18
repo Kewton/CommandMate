@@ -1,0 +1,249 @@
+{
+  "issue_number": 299,
+  "review_stage": "stage5",
+  "focus_area": "通常",
+  "iteration": 2,
+  "review_date": "2026-02-18",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2,
+    "overall_quality": "high"
+  },
+  "previous_findings_addressed": [
+    {
+      "stage": "stage1",
+      "id": "MF-1",
+      "description": "z-index値がコード実態と不一致",
+      "status": "addressed",
+      "notes": "Modal.tsxのz-[9999]とz-index.tsのMODAL:50の乖離が根本原因の仮説セクションに正確に記載されている。白画面メカニズムの因果関係も修正済み。"
+    },
+    {
+      "stage": "stage1",
+      "id": "MF-2",
+      "description": "iPad breakpointの記載が不正確",
+      "status": "addressed",
+      "notes": "MOBILE_BREAKPOINT=768によりiPad全般でデスクトップ扱いになる旨が正確に記載されている。768 < 768 = falseの説明も追加済み。"
+    },
+    {
+      "stage": "stage1",
+      "id": "MF-3",
+      "description": "スワイプ解除対策が不十分",
+      "status": "addressed",
+      "notes": "scrollable要素内でのスワイプ検出無効化が主要対策として記載されている。threshold引き上げは補助的対策に格下げ済み。"
+    },
+    {
+      "stage": "stage1",
+      "id": "SF-1",
+      "description": "navigator.platform非推奨問題の未記載",
+      "status": "addressed",
+      "notes": "根本原因の仮説セクションにnavigator.platform非推奨問題が詳細に記載されている。navigator.userAgentDataのSafari非対応の注意点も追記済み。"
+    },
+    {
+      "stage": "stage1",
+      "id": "SF-2",
+      "description": "受け入れ条件が未定義",
+      "status": "addressed",
+      "notes": "機能要件8項目、z-indexスタッキング順序検証、テスト要件5項目の3セクションに分けて具体的な受け入れ条件が追加済み。"
+    },
+    {
+      "stage": "stage1",
+      "id": "SF-3",
+      "description": "症状3のPortal/Modalメカニズムの説明不足",
+      "status": "addressed",
+      "notes": "再現手順セクションに白画面の発生メカニズム(仮説)として4段階の因果関係が明記されている。"
+    },
+    {
+      "stage": "stage1",
+      "id": "SF-4",
+      "description": "影響範囲にModal.tsxが含まれていない",
+      "status": "addressed",
+      "notes": "変更対象ファイルテーブルにModal.tsxとz-index.tsが追加されている。リスク評価も「高」として適切に記載。"
+    },
+    {
+      "stage": "stage1",
+      "id": "NTH-1",
+      "description": "スマホのスクリーンショットがない",
+      "status": "partially_addressed",
+      "notes": "スクリーンショットセクションに「スクリーンショットなし - 再現時のスクリーンショットまたは画面収録の追加が望ましい」と明記されている。スクリーンショット自体は未追加だが、不足の認識は記載済み。"
+    },
+    {
+      "stage": "stage1",
+      "id": "NTH-2",
+      "description": "iPadモデル・バージョン情報がない",
+      "status": "addressed",
+      "notes": "環境セクションの補足に「iPadのモデル名、iPadOSバージョン、Chromeバージョンの詳細は未確認」と追記されている。iPad Air vs iPad Proの画面サイズ差も言及済み。"
+    },
+    {
+      "stage": "stage1",
+      "id": "NTH-3",
+      "description": "関連Issue #104へのリンクがない",
+      "status": "addressed",
+      "notes": "関連Issueセクションに#104が追加されている。"
+    },
+    {
+      "stage": "stage3",
+      "id": "MF-1",
+      "description": "Modal z-index変更の波及効果が未記載",
+      "status": "addressed",
+      "notes": "Modal利用コンポーネント8箇所の全リスト、z-40/z-50ハードコードコンポーネント7つの全リスト、受け入れ条件のz-indexスタッキング順序検証セクションが追加済み。"
+    },
+    {
+      "stage": "stage3",
+      "id": "MF-2",
+      "description": "useIsMobile変更の波及範囲が過小評価",
+      "status": "addressed",
+      "notes": "useIsMobile依存5コンポーネントの全リスト、SearchBar.tsxの独自breakpoint問題、MessageInput.tsxへの影響の可能性が全て記載済み。"
+    },
+    {
+      "stage": "stage3",
+      "id": "SF-1",
+      "description": "Tailwind md:breakpointとの乖離リスク",
+      "status": "addressed",
+      "notes": "対策案に方針(A)(B)の選択肢として具体的に記載されている。"
+    },
+    {
+      "stage": "stage3",
+      "id": "SF-2",
+      "description": "Portal脱出条件とz-index再設計の相互依存",
+      "status": "addressed",
+      "notes": "根本原因の仮説セクションに設計方針として3つの考慮事項が記載されている。対策案にも推奨設計方針が追記済み。"
+    },
+    {
+      "stage": "stage3",
+      "id": "SF-3",
+      "description": "テスト要件の不足",
+      "status": "addressed",
+      "notes": "受け入れ条件にテスト要件サブセクションが新設され、5項目の具体的なテスト要件が追加されている。"
+    },
+    {
+      "stage": "stage3",
+      "id": "SF-4",
+      "description": "z-40/z-50ハードコードコンポーネントの統一スコープ",
+      "status": "addressed",
+      "notes": "対策案に最小スコープ/拡張スコープの判断基準が追記されている。"
+    },
+    {
+      "stage": "stage3",
+      "id": "NTH-1",
+      "description": "WorktreeListグリッドレイアウトの検証",
+      "status": "not_addressed",
+      "notes": "受け入れ条件に「Worktree一覧画面のレイアウトが正常表示される」は含まれているが、グリッドカラム数(md:grid-cols-2/lg:grid-cols-3)の適切性については具体的に言及されていない。Nice to Haveのため影響は軽微。"
+    },
+    {
+      "stage": "stage3",
+      "id": "NTH-2",
+      "description": "ExternalAppForm.tsxの関連コンポーネント追加",
+      "status": "addressed",
+      "notes": "Modal利用コンポーネントリストにExternalAppForm.tsxが含まれている。"
+    },
+    {
+      "stage": "stage3",
+      "id": "NTH-3",
+      "description": "navigator.userAgentDataのSafari非対応の注記",
+      "status": "addressed",
+      "notes": "根本原因の仮説セクションに注意事項として追記されている。"
+    }
+  ],
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "z-index.tsのJSDocコメント(L17)に「Modal dialogs (9999)」と記載されているが、実際の定数値はMODAL: 50(L32)である。Issue #299では「z-index.tsではMODAL: 50と定義されている」と正しく記載しているが、z-index.ts内部のJSDocコメントが9999と記述している点については言及がない。この内部矛盾はIssue #225で意図的にModal.tsxをz-9999に変更した際にz-index.tsのコメントだけ更新し定数値を更新し忘れた可能性が高い。z-index体系再設計の際にコメントと定数値の不整合を解消する必要がある旨をIssueに追記すべき。",
+        "location": "根本原因の仮説 > 症状3: 全画面表示時の白画面 / 対策案 > 症状3",
+        "recommendation": "z-index.tsのJSDocコメント(L17)が「Modal dialogs (9999)」と記載されていることを追記し、z-index体系再設計時にコメント・定数値・Modal.tsx実装の3箇所を全て統一する必要がある旨を明記すべき。現状はコメントが9999、定数が50、実装が9999と3箇所が不整合。",
+        "evidence": "src/config/z-index.ts:17 '4. Modal dialogs (9999) - Issue #225' vs src/config/z-index.ts:32 MODAL: 50 vs src/components/ui/Modal.tsx:86 z-[9999]"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "z-40/z-50ハードコードコンポーネントリストにHeader.tsx(z-50, L25)とWorktreeDetailRefactored.tsx(z-50, L1819)が含まれていない。Header.tsxはstickyヘッダーでz-50を使用し、WorktreeDetailRefactored.tsxはPromptPanel用のfixed overlayでz-50を使用している。Stage 3のSF-4でHeader.tsxが証拠として言及されていたが、Issue本文のテーブルには反映されていない。",
+        "location": "影響範囲 > z-40/z-50ハードコードコンポーネント",
+        "recommendation": "z-40/z-50ハードコードコンポーネントテーブルに以下を追加: (1) Header.tsx z-50(L25) - デスクトップstickyヘッダー、(2) WorktreeDetailRefactored.tsx z-50(L1819) - PromptPanel fixed overlay。受け入れ条件のスタッキング順序検証対象にも追加。",
+        "evidence": "src/components/layout/Header.tsx:25 z-50, src/components/worktree/WorktreeDetailRefactored.tsx:1819 z-50"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "z-index.tsのMAXIMIZED_EDITORコメント(L34)に「above Modal for iPad fullscreen support」と記載されているが、これはMODAL定数値(50)に対してのみ成立する。Modal.txの実装値(9999)に対してはMAXIMIZED_EDITOR(55)は遥かに下であり、このコメント自体が現状では誤りである。Issue #299ではz-index乖離問題を正しく分析しているが、z-index.ts内のMAXIMIZED_EDITORコメントが実態と矛盾していることへの言及がない。",
+        "location": "根本原因の仮説 > 症状3",
+        "recommendation": "z-index体系の不整合箇所として、MAXIMIZED_EDITORのコメント「above Modal for iPad fullscreen support」が現状のModal.tsx実装(z-9999)に対して機能していない点を追記すべき。これにより、z-index体系再設計の必要性がより明確になる。",
+        "evidence": "src/config/z-index.ts:34 'Maximized editor overlay - above Modal for iPad fullscreen support' MAXIMIZED_EDITOR: 55, but Modal.tsx uses z-[9999]"
+      },
+      {
+        "id": "SF-3",
+        "category": "正確性",
+        "issue": "Issueの再現手順セクション(症状3)で「MarkdownEditor は Portal（z-55 = Z_INDEX.MAXIMIZED_EDITOR）で document.body に脱出」と記載されているが、Portal自体にz-indexは付与されない。z-55はMarkdownEditorのcontainerStyle(L494)で設定されるもので、Portalの属性ではない。PortalはcreatePortal()でdocument.bodyにDOMノードを移動するだけであり、z-indexはPortal経由で移動したコンテンツのcontainerStyleが担う。表現として「Portal(z-55)」は厳密には不正確。",
+        "location": "再現手順 > 症状3: iPad 全画面表示時に真っ白 > 白画面の発生メカニズム（仮説）",
+        "recommendation": "「Portal（z-55 = Z_INDEX.MAXIMIZED_EDITOR）で document.body に脱出」を「Portal で document.body に脱出するが、コンテナのz-index（55 = Z_INDEX.MAXIMIZED_EDITOR）はModal backdrop（z-9999）より低い」のように修正すると、z-indexがPortalではなくコンテナスタイルに由来することが明確になる。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "対策案の症状3セクションで「推奨設計方針(2)」に「MODAL値をMAXIMIZED_EDITOR(55)未満に設定（現在の50でも可）」と記載されているが、定数値50を維持する場合でも、TOAST(60)とCONTEXT_MENU(70)がMODAL(50)より上になるため、Modalが開いている状態でToastやContextMenuがModal上に表示される現状の挙動が維持される。この動作が意図的かどうかの確認が実装時に必要。",
+        "location": "対策案 > 症状3 > 推奨設計方針",
+        "recommendation": "z-index体系再設計時に、MODAL(50) < MAXIMIZED_EDITOR(55) < TOAST(60) < CONTEXT_MENU(70)というスタッキング順序が意図的であることを設計判断として明記すると、実装者の判断が容易になる。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "テスト要件に「z-index.tsテスト新規: Z_INDEX定数のスタッキング順序テスト（MODAL < MAXIMIZED_EDITOR の関係性等）」と記載されているが、具体的にどのような順序関係をテストするかが不明確。MODAL < MAXIMIZED_EDITOR < TOAST < CONTEXT_MENUの全順序を検証すべきか、またはMODAL < MAXIMIZED_EDITORのみで十分かが実装者の判断に委ねられている。",
+        "location": "受け入れ条件 > テスト要件",
+        "recommendation": "テスト要件を「MODAL < MAXIMIZED_EDITOR < TOAST < CONTEXT_MENU の全順序関係テスト」と明確化すると、テスト実装時の曖昧さが解消される。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/config/z-index.ts",
+      "relevance": "z-index定数管理。JSDocコメント(L17)が9999と記載しているが定数値(L32)は50。MAXIMIZED_EDITOR(L34-35)のコメントも実態と矛盾。",
+      "key_lines": [17, 32, 34, 35]
+    },
+    {
+      "file": "src/components/ui/Modal.tsx",
+      "relevance": "z-[9999]ハードコード(L86)。Z_INDEX.MODAL(50)と乖離。",
+      "key_lines": [86]
+    },
+    {
+      "file": "src/components/layout/Header.tsx",
+      "relevance": "z-50ハードコード(L25)。Issueのz-40/z-50リストに含まれていない。",
+      "key_lines": [25]
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "z-50ハードコード(L1819 PromptPanel overlay)。Issueのz-40/z-50リストに含まれていない。",
+      "key_lines": [1819, 1847, 1875, 2073, 2101]
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "containerStyle z-index設定(L494)。Portal脱出条件(L886)。swipe設定(L178-186)。",
+      "key_lines": [145, 178, 494, 886]
+    },
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "MOBILE_BREAKPOINT=768(L15)。5コンポーネントが依存。",
+      "key_lines": [15, 62]
+    },
+    {
+      "file": "src/hooks/useFullscreen.ts",
+      "relevance": "isIOSDevice()のnavigator.platform依存(L67)。",
+      "key_lines": [57, 67]
+    },
+    {
+      "file": "src/hooks/useSwipeGesture.ts",
+      "relevance": "DEFAULT_THRESHOLD=50(L49)。scrollable要素判定なし。",
+      "key_lines": [49, 104, 136]
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "z-index.ts、useFullscreen.ts等のモジュール説明"
+    }
+  ]
+}

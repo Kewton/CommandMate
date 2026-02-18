@@ -1,0 +1,41 @@
+{
+  "issue_number": 299,
+  "feature_summary": "iPad/スマホ レイアウト崩れ・全画面表示不具合修正",
+  "acceptance_criteria": [
+    "iPad Chrome横置きでWorktree一覧画面のレイアウトが正常表示される",
+    "iPad Chrome縦置きでWorktree一覧画面のレイアウトが正常表示される",
+    "iPad ChromeでMarkdownエディタ全画面表示が白画面にならない（z-index統一によりMAXIMIZED_EDITOR=55 > MODAL=50が保証される）",
+    "スマホChrome全画面表示中の上方向スクロールで全画面が解除されない（scrollable要素内でのスワイプ抑制）",
+    "z-index.ts のJSDocコメントがModal(50)を正しく反映している",
+    "Modal.tsx が z-[9999] ではなく Z_INDEX.MODAL を使用している",
+    "Toast.tsx が z-50 ではなく Z_INDEX.TOAST を使用している",
+    "ContextMenu.tsx が z-50 ではなく Z_INDEX.CONTEXT_MENU を使用している",
+    "useSwipeGesture.ts が scrollable要素内でのタッチをスワイプとして検出しない",
+    "SearchBar.tsx が MOBILE_BREAKPOINT 定数を使用している",
+    "既存のデスクトップレイアウトが破壊されていないこと",
+    "既存のモバイルレイアウトが破壊されていないこと"
+  ],
+  "test_scenarios": [
+    "シナリオ1: z-index.tsのJSDocコメントがModal dialogs (50)と正しく記載されていることを確認",
+    "シナリオ2: Modal.tsxがZ_INDEX.MODALを使用しz-[9999]ハードコードがないことを確認",
+    "シナリオ3: Toast.tsxがZ_INDEX.TOASTを使用しz-50ハードコードがないことを確認",
+    "シナリオ4: ContextMenu.tsxがZ_INDEX.CONTEXT_MEMUを使用しz-50ハードコードがないことを確認",
+    "シナリオ5: useSwipeGesture.tsにisInsideScrollableElement関数が追加されていることを確認",
+    "シナリオ6: MarkdownEditor.tsxのswipe thresholdが150であることを確認",
+    "シナリオ7: SearchBar.tsxがMOBILE_BREAKPOINTを使用していることを確認",
+    "シナリオ8: z-index順序テスト（MODAL < MAXIMIZED_EDITOR < TOAST < CONTEXT_MENU）が通過することを確認",
+    "シナリオ9: useSwipeGestureのscrollable要素内スワイプ抑制テストが通過することを確認",
+    "シナリオ10: TypeScriptエラー0件、ESLintエラー0件、ユニットテスト全パスを確認"
+  ],
+  "implemented_files": [
+    "src/config/z-index.ts",
+    "src/components/ui/Modal.tsx",
+    "src/components/common/Toast.tsx",
+    "src/components/worktree/ContextMenu.tsx",
+    "src/hooks/useSwipeGesture.ts",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/SearchBar.tsx",
+    "tests/unit/config/z-index.test.ts",
+    "tests/unit/hooks/useSwipeGesture.test.ts"
+  ]
+}

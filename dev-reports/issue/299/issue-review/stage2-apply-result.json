@@ -1,0 +1,75 @@
+{
+  "apply_stage": "stage2",
+  "issue_number": 299,
+  "iteration": 1,
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "z-index値の実態との不一致を修正。Modal.tsx の z-[9999] と z-index.ts の MODAL:50 の乖離を明記し、白画面メカニズムの因果関係（Portal z-55 < Modal backdrop z-9999）を根本原因仮説・再現手順・対策案・影響範囲に反映"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "iPad breakpoint記載を修正。MOBILE_BREAKPOINT=768により「iPad全般でデスクトップ扱い」に修正。症状タイトルを「横置きのみ」から「横置きで顕著、縦置きでも発生の可能性あり」に変更。縦置きで報告されていない理由の考察を追加"
+      },
+      {
+        "id": "MF-3",
+        "status": "applied",
+        "change_summary": "スワイプ解除対策を修正。scrollable要素内でのスワイプ検出無効化を主要対策として追記。threshold引き上げは補助的対策に位置付け変更。touchstart時のscrollable要素判定ロジックの必要性を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "navigator.platform非推奨問題を根本原因の仮説セクション（症状3）に追記。navigator.userAgentDataへの移行検討を技術的負債として記載"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "受け入れ条件（Acceptance Criteria）セクションを新設。iPad横置き・縦置き各デバイスでのレイアウト確認、全画面白画面解消、スマホスクロール解除防止、z-index統一、リグレッション確認の8項目を追加"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "症状3の因果関係を再現手順セクションに「白画面の発生メカニズム（仮説）」として4ステップで明記。WorktreeDetailRefactored → Modal(z-9999) → MarkdownEditor Portal(z-55) → backdrop残留 → 白画面"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "影響範囲の変更対象ファイルに src/components/ui/Modal.tsx（z-[9999]ハードコード解消）と src/config/z-index.ts（z-index定数体系見直し）を追加。関連コンポーネントにWorktreeDetailRefactored.tsxを追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "partially_applied",
+        "change_summary": "スマホスクリーンショットのプレースホルダーに補足コメント追加（再現時のスクリーンショット追加が望ましい旨）"
+      },
+      {
+        "id": "NTH-2",
+        "status": "partially_applied",
+        "change_summary": "環境セクションに補足として、iPadモデル名・iPadOSバージョン・Chromeバージョン未確認である旨とiPad Air vs iPad Proでの差異可能性を追記"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "関連Issueセクションを新設し、#104（iOS全画面表示対応 - CSS fallback/Portal機構の導入元）へのリンクを追加"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 10,
+    "applied": 10,
+    "skipped": 0
+  },
+  "update_summary": "Stage 1レビューの全指摘事項（MF-1,MF-2,MF-3,SF-1,SF-2,SF-3,SF-4,NTH-1,NTH-2,NTH-3）をIssue #299に反映。z-index実態との不一致修正、iPad breakpoint正確化、スワイプ対策の主要/補助の位置付け明確化、受け入れ条件新設、白画面メカニズムの因果関係明記、Modal.tsxの影響範囲追加を実施。",
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/299"
+  }
+}

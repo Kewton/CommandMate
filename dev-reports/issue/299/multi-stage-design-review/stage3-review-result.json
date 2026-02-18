@@ -1,0 +1,106 @@
+{
+  "review_stage": "stage3",
+  "focus_area": "影響範囲",
+  "issue_number": 299,
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "location": "設計方針書 3.1 z-index体系の統一 / Toast.tsx影響分析",
+      "issue": "Toast.tsx(L205)のz-50をZ_INDEX.TOAST(60)に変更すると、ToastContainerはMarkdownEditor内部にレンダリングされており(L880)、MarkdownEditorが全画面モード(z-55)でPortal経由でdocument.bodyに配置される場合、ToastContainerはPortal内のDOM子要素となる。このとき、Toast(z-60)はPortalの親であるMaximizedEditor(z-55)のスタッキングコンテキスト内に閉じ込められ、ToastがModalや他のz-50コンポーネントより上に表示されることは保証される。しかし、MarkdownEditorが全画面でない通常モード時にModal内に表示されている場合(WorktreeDetailRefactored L1875でModal内にMarkdownEditorを配置)、Modal(z-50)のスタッキングコンテキスト内にToast(z-60)が存在するため、Modal外のContextMenu(z-70)やToast(z-60)との重なりに影響しない。設計方針書にはこのPortal/スタッキングコンテキストの詳細な分析が欠けている。",
+      "suggestion": "設計方針書の3.1競合分析セクションに、ToastContainerがMarkdownEditor内(Modal内)にレンダリングされるケースのスタッキングコンテキスト分析を追加する。具体的には、(1) Modal内のMarkdownEditor内のToast: Modalのz-[9999]がz-50に下がっても、Toast(z-60)はModal内部の相対z-indexとして機能し、Modalのスタッキングコンテキスト内でのみ有効となる点を明記する。(2) Portal経由の全画面時: ToastはPortal内に含まれ、Z_INDEX.MAXIMIZED_EDITOR(55)のスタッキングコンテキスト内でz-60として正常動作する点を明記する。"
+    },
+    {
+      "id": "F002",
+      "severity": "should_fix",
+      "category": "波及効果",
+      "location": "設計方針書 3.1 / ContextMenu.tsx(L228)",
+      "issue": "ContextMenu.tsxのz-50をZ_INDEX.CONTEXT_MENU(70)に変更すると、ContextMenuはfixed positionで画面座標上に直接配置されるため、同じくfixed positionの他z-50コンポーネント（MobilePromptSheet z-50, SlashCommandSelector z-50, AppShell drawer z-50）と表示順序が逆転する可能性がある。現在z-50で統一されていたものがz-70に上がることで、ContextMenuがMobilePromptSheetやSlashCommandSelectorのオーバーレイ(z-50)の上に表示されるようになる。設計方針書ではContextMenu変更を「推奨」としているが、この波及効果の分析が不足している。",
+      "suggestion": "設計方針書にContextMenu(z-70)変更後の表示順序影響分析を追加する。具体的には、ContextMenuとMobilePromptSheet/SlashCommandSelectorが同時表示されるシナリオがあるかを確認し、(1) ContextMenuはファイルツリーの右クリックでのみ表示され、MobilePromptSheetやSlashCommandSelectorとの同時表示は通常発生しないこと、(2) 万が一同時表示された場合、ContextMenu(z-70)がオーバーレイ(z-50)の上に出るが、操作上は問題ないことを明記する。"
+    },
+    {
+      "id": "F003",
+      "severity": "should_fix",
+      "category": "リグレッション",
+      "location": "設計方針書 9 テスト戦略 / Toast.test.tsx",
+      "issue": "既存のToast.test.tsx(L296-304)の「should position container at bottom-right」テストでは、ToastContainerがz-50クラスを持つことを暗黙的にテストしていないが、className全体を取得して'fixed','bottom-4','right-4'を検証している。Toast.tsxのz-50をZ_INDEX.TOAST(style属性)に変更する場合、classNameから'z-50'が消え、style属性に移行するため、既存テストのアサーション自体は直接影響を受けない。ただし、設計方針書にはToast.tsxの変更方法として「z-50をZ_INDEX.TOASTに統一する」としか記載されておらず、classNameベースの変更(z-50 -> z-[60])なのかstyle属性ベースの変更なのかが明確でない。Modal.tsxではstyle属性を使用する方針であるが、Toast.tsxでも同じ方式か統一されていない。",
+      "suggestion": "設計方針書のPhase 1チェックリストまたは3.1セクションに、Toast.tsx/ContextMenu.tsxのz-index変更方式を明示する。選択肢は(A) Tailwindクラスz-[60]を使用、(B) style={{ zIndex: Z_INDEX.TOAST }}を使用。Modal.tsxとの一貫性を考慮するとstyle属性(B)が推奨されるが、どちらを採用するか明記することで実装時の判断ブレを防ぐ。"
+    },
+    {
+      "id": "F004",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "location": "設計方針書 3.3 useSwipeGesture.ts / isInsideScrollableElement",
+      "issue": "useSwipeGestureフックの使用箇所はMarkdownEditor.tsx(L178)のみであり、設計方針書の分析は正確である。しかし、isInsideScrollableElementをuseSwipeGesture.tsのモジュール内関数として追加する設計において、この関数がexportされないことが明示されていない。将来他のコンポーネントからこの関数を再利用したい場合のことを考えると、可視性の設計判断を明記すべきである。また、既存のuseSwipeGesture.test.tsは初期化とクリーンアップのみのテストであり、isInsideScrollableElementのロジックテストを追加する必要がある。設計方針書のテスト戦略(セクション9)では「scrollable要素内でのスワイプ抑制テスト」と記載されているが、テスト実装方式（DOMのモック方法など）が未定義である。",
+      "suggestion": "設計方針書に以下を追記する: (1) isInsideScrollableElementはexportしないモジュール内ヘルパー関数とする（SRP維持）。(2) テスト戦略に具体的な検証方法を追加する。jsdomではgetComputedStyleが制限されるため、isInsideScrollableElementの単体テストは関数をexportしてテストするか、handleTouchStartの統合テストとしてDOM要素をセットアップしてスワイプイベントを発火する形式とするか方針を明記する。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "location": "設計方針書 3.2 / AppShell.tsx md:pl-72",
+      "issue": "AppShell.tsxのmd:pl-72(L120)はTailwindのmdブレークポイント(768px)で適用される。useIsMobileも768px未満をmobileとするため、768px以上ではデスクトップレイアウト(サイドバー表示 + pl-72パディング)が適用される。iPad横置き(1024px)ではデスクトップレイアウトが表示され、サイドバー幅w-72(288px)を引いたコンテンツ領域は736pxとなる。この736pxはWorktreeDesktopLayout内の2カラムレイアウト(minLeftWidth=20%, maxLeftWidth=80%)で使用される。最小幅20%=147px, 最大幅80%=589pxとなるが、これはiPadでの実用に十分である。設計方針書ではAppShell.tsxの「必要に応じてサイドバー幅の調整」と記載しているが、調整が不要である数値的根拠が不足している。",
+      "suggestion": "設計方針書のセクション3.2に、iPad横置き(1024px)での具体的なレイアウト計算を追加する: コンテンツ領域 = 1024px - 288px(w-72) = 736px。2カラムレイアウトの各ペインは最小147px(20%)で実用上問題なし。iPad縦置き(768px)ではコンテンツ領域 = 768px - 288px = 480px。この480pxで2カラムレイアウト(最小96px)は狭い可能性があるため、iPad縦置き時の2カラムレイアウト体験についても検討すべき。この計算を設計方針書に明記することで、Phase 3での判断基準が明確になる。"
+    },
+    {
+      "id": "F006",
+      "severity": "nice_to_have",
+      "category": "リグレッション",
+      "location": "設計方針書 10 変更ファイル一覧 / 既存テスト影響",
+      "issue": "既存テストのリグレッションリスクは以下の通り低い: (1) Toast.test.tsxはz-indexクラスを直接検証していないため、Toast.tsxのz-index変更方式に関わらず既存テストは通過する。(2) AppShell.test.tsxはuseIsMobileをモックしており、breakpointの実値は参照していないため、useIsMobile自体に変更がない本設計では影響なし。(3) useSwipeGesture.test.tsは初期化テストのみでDOMイベントテストがないため、isInsideScrollableElement追加は既存テストに影響しない。ただし、設計方針書のセクション13「既存テストの破壊禁止」制約を満たすことを明示的に確認するチェックリスト項目がPhase 4に欠けている。",
+      "suggestion": "設計方針書のPhase 4テストチェックリストに「既存テスト全通過確認(npm run test:unit)」を明示的に追加する。現在Phase 4はz-index順序テスト、useSwipeGestureテスト更新、iPad E2Eテスト、手動テストのみ記載されており、既存テストスイート全体の回帰確認が明示されていない。"
+    },
+    {
+      "id": "F007",
+      "severity": "nice_to_have",
+      "category": "波及効果",
+      "location": "設計方針書 3.2 / SearchBar.tsx MOBILE_BREAKPOINT",
+      "issue": "SearchBar.tsx(L158)のwindow.innerWidth < 768をMOBILE_BREAKPOINTに置換する変更は、useIsMobile.tsからMOBILE_BREAKPOINTをimportする必要がある。MOBILE_BREAKPOINTはuseIsMobile.tsでexportされており(L15)、他のコンポーネントではまだimportされていない。この変更は純粋な定数参照の統一であり、動作に変更はない。ただし、SearchBar.tsxはuseEffectの初回実行時にのみ使用しており、リサイズイベントに追従しない。この非追従はStage 1でF005として認識済みだが、MOBILE_BREAKPOINTを使うことで「フックを使っている」という誤解を生む可能性がある点は留意事項として設計方針書に記載すべきである。",
+      "suggestion": "設計方針書のSearchBar.tsx変更部分のコードコメントに、MOBILE_BREAKPOINTは定数値としてのみ使用し、useIsMobileフック自体は使用しない理由（autofocus制御の初回判定のみでリサイズ追従不要）を明記する。実装時のコードコメントとしても同様の注釈を推奨する。"
+    },
+    {
+      "id": "F008",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "location": "設計方針書 10 変更ファイル一覧 / Header.tsx",
+      "issue": "設計方針書のz-50ハードコードコンポーネント一覧(3.1)にHeader.tsx(L25)が含まれているが、Header.tsxは現在どのコンポーネントからもimportされておらず、実質的に未使用コンポーネントである。Header.tsxのz-50はIssue #299のスコープ外(z-40/z-50全統一は別Issue)だが、未使用であることを認識しておくことで、一覧の正確性が向上する。",
+      "suggestion": "設計方針書の3.1コンポーネント一覧のHeader.tsx行に「(現在未使用コンポーネント)」の注記を追加する。これにより、影響分析の精度が向上する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "overall_quality": "high"
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/components/common/Toast.tsx",
+    "src/components/ui/Modal.tsx",
+    "src/components/worktree/ContextMenu.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/SearchBar.tsx",
+    "src/components/worktree/WorktreeDesktopLayout.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/components/mobile/MobileHeader.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/layout/AppShell.tsx",
+    "src/components/layout/Header.tsx",
+    "src/config/z-index.ts",
+    "src/hooks/useSwipeGesture.ts",
+    "src/hooks/useIsMobile.ts",
+    "tests/unit/components/Toast.test.tsx",
+    "tests/unit/components/layout/AppShell.test.tsx",
+    "tests/unit/hooks/useSwipeGesture.test.ts"
+  ],
+  "timestamp": "2026-02-18T12:00:00Z"
+}

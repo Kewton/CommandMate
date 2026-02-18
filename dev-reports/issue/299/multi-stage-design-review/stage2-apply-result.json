@@ -1,0 +1,54 @@
+{
+  "apply_stage": "stage2",
+  "design_doc_updated": true,
+  "applied_findings": ["F001", "F002", "F003", "F004"],
+  "skipped_findings": [],
+  "update_summary": "Stage 2整合性レビューの指摘事項F001-F004を設計方針書に反映。(1) F001: Toast.tsx/ContextMenu.tsxのz-50ハードコード事実を競合分析に反映し、Toast.tsxのZ_INDEX.TOAST統一をPhase 1必須対応としてスコープに追加、ContextMenu.tsxのZ_INDEX.CONTEXT_MENU統一を推奨として追加。(2) F002: z-50ハードコードコンポーネント一覧にSortSelector.tsx, MobilePromptSheet.tsx, Header.tsx, WorktreeDetailRefactored.tsx, ContextMenu.tsxを追加し網羅的な一覧に更新。(3) F003: MAXIMIZED_EDITORコメントが既に正しいことを確認し、チェックリストを「確認済み（変更不要）」に変更、スコープ判定をOutに変更。(4) F004: JSDocコメント修正案に現在のJSDocと修正後の差分を明示し、MAXIMIZED_EDITOR(55)のLayer 5挿入に伴うToast(Layer 5→6)、Context menus(Layer 6→7)の番号繰り上げを明記。変更ファイル一覧・実装順序・実装チェックリスト・スコープ判定もすべて更新済み。",
+  "changes_made": [
+    {
+      "section": "レビュー履歴",
+      "change": "Stage 2行を追加（整合性レビュー、条件付き承認、4/5）"
+    },
+    {
+      "section": "レビュー指摘事項サマリー",
+      "change": "Stage 2: 整合性レビューセクションを追加（F001-F008の全8件を記載）"
+    },
+    {
+      "section": "3.1 z-index体系の統一 - z-index.tsコード例",
+      "change": "F003対応: MAXIMIZEDEDITORコメントが既に正しいことを注記"
+    },
+    {
+      "section": "3.1 z-index体系の統一 - JSDocコメント修正",
+      "change": "F004対応: 現在のJSDocと修正後の差分を明示。Layer番号繰り上げ（Toast: 5→6、Context menus: 6→7）を明記"
+    },
+    {
+      "section": "3.1 z-index体系の統一 - z-50/z-40コンポーネント一覧",
+      "change": "F001/F002対応: Toast.tsx/ContextMenu.tsxのZ_INDEX定数未使用を明記。SortSelector.tsx, MobilePromptSheet.tsx, Header.tsx, WorktreeDetailRefactored.tsx, ContextMenu.tsxを追加。Z_INDEX定数使用列を追加"
+    },
+    {
+      "section": "3.1 z-index体系の統一 - 競合分析",
+      "change": "F001対応: Toast(z-50ハードコード)との表示順序リスクとContextMenu(z-50ハードコード)との表示順序リスクを新規追加。対策としてToast.tsxのZ_INDEX.TOAST統一を必須、ContextMenu.tsxのZ_INDEX.CONTEXT_MENU統一を推奨として記載。結論を更新"
+    },
+    {
+      "section": "8. スコープ判定",
+      "change": "Toast.tsx/ContextMenu.tsxのZ_INDEX統一をIn（スコープ内）に追加。MAXIMIZEDEDITORコメント修正をOut（変更不要）に変更"
+    },
+    {
+      "section": "10. 変更ファイル一覧",
+      "change": "Toast.tsx、ContextMenu.tsxを追加。z-index.tsの変更内容を更新"
+    },
+    {
+      "section": "11. 実装順序",
+      "change": "Phase 1にToast.tsx/ContextMenu.tsx追加。Phase 3説明にF008補足。Phase 4テスト順序を詳細化"
+    },
+    {
+      "section": "12. 実装チェックリスト - Phase 1",
+      "change": "F001対応: Toast.tsx/ContextMenu.txのZ_INDEX統一チェック項目追加。F003対応: MAXIMIZEDEDITORを確認済みに変更。F004対応: JSDoc修正にLayer番号繰り上げを含む記述に更新。全体z-index階層確認項目追加"
+    },
+    {
+      "section": "フッター",
+      "change": "Stage 2 Review Applied日付を追加"
+    }
+  ],
+  "timestamp": "2026-02-18T00:00:00Z"
+}
