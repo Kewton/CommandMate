@@ -181,7 +181,7 @@ export function MarkdownEditor({
         exitFullscreen();
       }
     },
-    threshold: 100,
+    threshold: 150,
     enabled: isMaximized && isMobile,
   });
 

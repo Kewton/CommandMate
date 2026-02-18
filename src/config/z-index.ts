@@ -14,9 +14,10 @@
  * 1. Base content (default stacking)
  * 2. Dropdown menus (10)
  * 3. Sidebar (30) - Desktop layout only
- * 4. Modal dialogs (9999) - Issue #225: Must be above all fixed elements (message input, tab bar)
- * 5. Toast notifications (60)
- * 6. Context menus (70)
+ * 4. Modal dialogs (50)
+ * 5. Maximized editor overlay (55)
+ * 6. Toast notifications (60)
+ * 7. Context menus (70)
  */
 export const Z_INDEX = {
   /** Dropdown menus and select options */

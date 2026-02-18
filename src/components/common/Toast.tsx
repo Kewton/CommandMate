@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { CheckCircle, XCircle, Info, X } from 'lucide-react';
+import { Z_INDEX } from '@/config/z-index';
 import type { ToastType, ToastItem } from '@/types/markdown-editor';
 
 /** Default duration for auto-dismiss (3 seconds) */
@@ -202,7 +203,8 @@ export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
     <div
       data-testid="toast-container"
       aria-live="polite"
-      className="fixed bottom-4 right-4 z-50 flex flex-col gap-2"
+      className="fixed bottom-4 right-4 flex flex-col gap-2"
+      style={{ zIndex: Z_INDEX.TOAST }}
     >
       {toasts.map((toast) => (
         <Toast

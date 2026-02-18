@@ -48,6 +48,31 @@ export interface UseSwipeGestureReturn {
 /** Default swipe threshold in pixels */
 const DEFAULT_THRESHOLD = 50;
 
+/**
+ * Check if an element is inside a scrollable container.
+ * Used to suppress swipe gesture detection when the user is scrolling
+ * within a scrollable element (e.g., preview pane, code editor).
+ *
+ * Issue #299: Prevents fullscreen exit when scrolling up in maximized editor.
+ *
+ * @param element - The target element to check
+ * @returns true if the element is inside a vertically scrollable container
+ */
+function isInsideScrollableElement(element: HTMLElement): boolean {
+  let current: HTMLElement | null = element;
+  while (current) {
+    const { overflowY } = getComputedStyle(current);
+    if (
+      (overflowY === 'auto' || overflowY === 'scroll') &&
+      current.scrollHeight > current.clientHeight
+    ) {
+      return true;
+    }
+    current = current.parentElement;
+  }
+  return false;
+}
+
 /** Touch start coordinates type */
 interface TouchPosition {
   x: number;
@@ -103,6 +128,13 @@ export function useSwipeGesture(options: UseSwipeGestureOptions = {}): UseSwipeG
    */
   const handleTouchStart = useCallback((e: TouchEvent) => {
     if (!enabled) return;
+
+    // Issue #299: Suppress swipe detection inside scrollable elements
+    // to prevent unintended fullscreen exit when scrolling content
+    if (e.target instanceof HTMLElement && isInsideScrollableElement(e.target)) {
+      touchStartRef.current = null;
+      return;
+    }
 
     const touch = e.touches[0];
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
