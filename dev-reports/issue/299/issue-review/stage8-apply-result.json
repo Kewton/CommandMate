@@ -1,0 +1,77 @@
+{
+  "apply_stage": "stage8",
+  "issue_number": 299,
+  "iteration": 2,
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "SortSelector.tsx（z-50, L142, absolute配置ドロップダウン）をz-40/z-50ハードコードコンポーネントテーブルに追加。受け入れ条件のスタッキング順序検証対象にも追加（影響度低の注記付き）。対策案の統一スコープリストにも追加。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "useVirtualKeyboard.tsを関連コンポーネントセクションに追加（MarkdownEditor.tsx L148で使用、visualViewport高さ調整の競合可能性の説明付き）。テスト要件にiPad全画面エディタ+仮想キーボード表示時の動作確認項目を追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "PaneResizer.tsxはz-indexやbreakpointに非依存であり、直接的な影響がないためIssue記載不要。手動テストで確認する程度で十分。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "z-index.tsのJSDocコメント変更のテスト影響はゼロ（既存テストなし、純粋なコメント修正）。現状のテスト要件記載で十分。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "SlashCommandSelector.tsxのL223（デスクトップ版z-50、absolute配置）はfixed配置のModalとのスタッキング競合リスクが低いため、行番号追記は省略。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 2,
+    "skipped": 3
+  },
+  "changes_applied": [
+    {
+      "section": "対策案 > 症状3 > z-40/z-50ハードコードコンポーネントの統一スコープ",
+      "change": "コンポーネントリストにSortSelector.tsxを追加"
+    },
+    {
+      "section": "受け入れ条件 > z-indexスタッキング順序検証",
+      "change": "スタッキング順序検証対象にSortSelector.tsx（z-50、サイドバー内absolute配置ドロップダウン。影響度低の注記付き）を追加"
+    },
+    {
+      "section": "影響範囲 > z-40/z-50ハードコードコンポーネント",
+      "change": "テーブルにSortSelector.tsx（z-50, L142, absolute配置、スタッキング競合リスク限定的の備考付き）を追加"
+    },
+    {
+      "section": "影響範囲 > 関連コンポーネント",
+      "change": "useVirtualKeyboard.ts（MarkdownEditor.tsx L148で使用、iPad全画面エディタ+仮想キーボード時のvisualViewport高さ競合の可能性）を追加"
+    },
+    {
+      "section": "受け入れ条件 > テスト要件",
+      "change": "iPad全画面エディタ+仮想キーボード表示時の動作確認（手動テスト）項目を追加"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "イテレーション4（Stage 7影響範囲レビュー反映）を追加。SF-1（SortSelector.tsx追加）とSF-2（useVirtualKeyboard追加）の対応内容を記録"
+    },
+    {
+      "section": "Note（冒頭）",
+      "change": "更新日時と反映元をStage 7影響範囲レビュー結果に更新"
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/299"
+  }
+}

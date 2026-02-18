@@ -17,6 +17,7 @@
 
 import React, { memo, useCallback, useEffect, useRef } from 'react';
 import { FilePlus, FolderPlus, Pencil, Trash2, Upload, FolderInput } from 'lucide-react';
+import { Z_INDEX } from '@/config/z-index';
 
 /**
  * Props for ContextMenu component
@@ -225,8 +226,9 @@ export const ContextMenu = memo(function ContextMenu({
       data-testid="context-menu"
       role="menu"
       aria-label="File actions"
-      className="fixed z-50 min-w-[160px] py-1 bg-white rounded-lg shadow-lg border border-gray-200 animate-in fade-in-0 zoom-in-95 duration-100"
+      className="fixed min-w-[160px] py-1 bg-white rounded-lg shadow-lg border border-gray-200 animate-in fade-in-0 zoom-in-95 duration-100"
       style={{
+        zIndex: Z_INDEX.CONTEXT_MENU,
         left: `${position.x}px`,
         top: `${position.y}px`,
       }}

@@ -1,0 +1,48 @@
+{
+  "apply_stage": "stage1",
+  "issue_number": 299,
+  "status": "success",
+  "design_doc_updated": true,
+  "applied_findings": ["F007", "F001", "F002"],
+  "skipped_findings": [],
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "F007",
+        "item": "Modal.tsxのz-index変更時のz-50競合分析が不足",
+        "section_updated": "3.1 z-index体系の統一",
+        "status": "reflected",
+        "detail": "z-50ハードコードコンポーネント一覧表、createPortalによるDOM順序保証、body.style.overflow='hidden'による操作競合防止、Toast(60)>Modal(50)の表示順序確認を追加。実装チェックリストにも反映。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F001",
+        "item": "MOBILE_HEADER/MOBILE_DRAWER定数追加がスコープ外と矛盾",
+        "section_updated": "3.1 z-index体系の統一, 8 設計上の決定事項, 10 変更ファイル一覧",
+        "status": "reflected",
+        "detail": "z-index.tsコード例からMOBILE_HEADER/MOBILE_DRAWERを削除。スコープ外として定数追加しない方針を明記。設計決定事項テーブル・スコープ判定テーブル・変更ファイル一覧・実装チェックリストに[F001]タグ付きで反映。"
+      },
+      {
+        "id": "F002",
+        "item": "MODAL=50とMOBILE_DRAWER=50の値重複の設計根拠不足",
+        "section_updated": "3.1 z-index体系の統一",
+        "status": "reflected",
+        "detail": "F001の解消（MOBILE_DRAWER定数の削除）により自動解決。値重複自体が存在しなくなった。"
+      }
+    ]
+  },
+  "nice_to_have_acknowledged": ["F003", "F004", "F005", "F006"],
+  "design_doc_path": "dev-reports/design/issue-299-ipad-layout-fix-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴（新規追加）",
+    "レビュー指摘事項サマリー（新規追加）",
+    "3.1 z-index体系の統一（F007競合分析追加、F001定数削除）",
+    "8 設計上の決定事項とトレードオフ（F001追記）",
+    "10 変更ファイル一覧（F001/F007注記追加）",
+    "11 実装順序（F001/F007注記追加）",
+    "12 実装チェックリスト（新規追加）"
+  ],
+  "update_summary": "Stage 1設計原則レビューの指摘3件(F007/F001/F002)を設計方針書に反映。F007: Modal(z-50)変更後のz-index競合分析セクションを3.1に追加し、createPortal DOM順序保証・body overflow hidden・Toast優先順位の設計根拠を明記。F001: MOBILE_HEADER/MOBILE_DRAWER定数追加をスコープ外として削除し、YAGNI違反を解消。F002: F001の解消により自動解決。Nice to Have 4件(F003-F006)はレビュー指摘事項サマリーに認識済みとして記録。実装チェックリスト(セクション12)を新規追加。",
+  "timestamp": "2026-02-18T00:00:00Z"
+}

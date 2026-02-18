@@ -1,0 +1,69 @@
+{
+  "apply_stage": "stage4",
+  "issue_number": 299,
+  "iteration": 2,
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "Modal利用コンポーネント8箇所の全リストを影響範囲セクションに「Modal利用コンポーネント（z-index変更の波及範囲）」サブセクションとして追加。z-40/z-50ハードコードコンポーネント7つを「z-40/z-50ハードコードコンポーネント（スタッキング順序検証対象）」サブセクションとして追加（ファイル名・z-index値・行番号を明記）。受け入れ条件に「z-indexスタッキング順序検証」セクションを新設し、Modal利用8箇所とz-40/z-50ハードコード7コンポーネントの個別検証項目を追加。"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "useIsMobile依存5コンポーネントの全リストを影響範囲セクションに「useIsMobile依存コンポーネント（波及範囲）」サブセクションとして追加（各ファイルの依存内容を表形式で明記）。SearchBar.tsxのwindow.innerWidth < 768独自breakpoint問題を注意事項として明記し、useIsMobile使用への統一または同一値への修正が必要である旨を記載。MessageInput.tsxのiPad入力操作への影響可能性も追記。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "対策案の症状1・2セクションに「Tailwind CSSのbreakpointとの整合性確保」を追記。AppShell.tsxのmd:pl-72とuseIsMobile breakpointの乖離リスクを具体例（768px-1024px範囲の矛盾）で説明し、方針A（breakpoint維持+CSS調整）と方針B（breakpoint変更+Tailwind設定変更）の選択肢を記載。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "根本原因の仮説セクション（症状3）に「Portal脱出条件とz-index体系の相互依存」を追記。isFallbackMode条件とz-index値の関係（MODAL値がMAXIMIZED_EDITORより低い場合/高い場合のリスク）を設計方針として記載。対策案にも推奨設計方針（3段階）を追加。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "受け入れ条件に「テスト要件」サブセクションを新設。5項目の具体的なテスト要件を追加: (1) useIsMobileテスト更新（iPad portrait/landscape境界値）、(2) useFullscreenテスト更新（navigator.platform代替）、(3) useSwipeGestureテスト更新（scrollable要素内スワイプ抑制）、(4) z-index.tsテスト新規（スタッキング順序）、(5) iPad E2Eテスト新規（Playwright device emulation）。既存テストファイルパスも明記。"
+      },
+      {
+        "id": "SF-4",
+        "status": "applied",
+        "change_summary": "対策案の症状3セクションに「z-40/z-50ハードコードコンポーネントの統一スコープ」を追記。最小スコープ（Modal.tsxのz-[9999]解消+z-index.tsのMODAL値調整のみ）と拡張スコープ（全コンポーネントのZ_INDEX定数統一）を明確化し、規模に応じた別Issue分割の検討を記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "WorktreeListグリッドレイアウトの確認はiPad対応時の検証で自然にカバーされる。受け入れ条件のiPad横置き/縦置きレイアウト正常表示チェックに含まれる。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "ExternalAppForm.tsxをModal利用コンポーネントのリスト（8箇所目）に追加済み。"
+      },
+      {
+        "id": "NTH-3",
+        "status": "applied",
+        "change_summary": "根本原因の仮説セクション（症状3）のnavigator.platform非推奨の記述に、Safariがnavigator.userAgentData非対応でありUA文字列解析やmaxTouchPoints判定との組み合わせが必要である注意書きを追記。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 8,
+    "skipped": 1
+  },
+  "update_summary": "Stage 3影響範囲レビューの全Must Fix(2件)・全Should Fix(4件)をIssue #299に反映。影響範囲セクションにuseIsMobile依存5コンポーネント・Modal利用8箇所・z-40/z-50ハードコード7コンポーネントの完全なリストを追加。受け入れ条件をz-indexスタッキング順序検証・テスト要件の3サブセクション構成に拡張。対策案にTailwind breakpoint整合性方針・Portal脱出条件設計方針・z-indexスコープ判断基準を追記。Nice to Have 3件中2件も反映済み。",
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/299"
+  }
+}

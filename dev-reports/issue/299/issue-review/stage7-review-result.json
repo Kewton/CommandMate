@@ -1,0 +1,301 @@
+{
+  "issue_number": 299,
+  "review_stage": "stage7",
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_date": "2026-02-18",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 3,
+    "overall_quality": "high"
+  },
+  "previous_findings_addressed": [
+    {
+      "stage": "stage3",
+      "id": "MF-1",
+      "description": "Modal z-index変更の波及効果が未記載",
+      "status": "addressed",
+      "notes": "Modal利用コンポーネント8箇所の全リスト、z-40/z-50ハードコードコンポーネント9つの全リスト（Stage 6でHeader.tsx, WorktreeDetailRefactored.tsxを追加）、受け入れ条件のz-indexスタッキング順序検証セクションが全て記載済み。"
+    },
+    {
+      "stage": "stage3",
+      "id": "MF-2",
+      "description": "useIsMobile変更の波及範囲が過小評価",
+      "status": "addressed",
+      "notes": "useIsMobile依存5コンポーネントの全リスト、SearchBar.tsxの独自breakpoint問題、MessageInput.tsxへの影響の可能性が全て記載済み。"
+    },
+    {
+      "stage": "stage3",
+      "id": "SF-1",
+      "description": "AppShell.tsxのTailwind md:breakpointとuseIsMobile breakpoint変更の乖離リスク",
+      "status": "addressed",
+      "notes": "対策案に方針(A)(B)の選択肢として具体的に記載されている。AppShell.tsx L120のmd:pl-72との整合性が明確。"
+    },
+    {
+      "stage": "stage3",
+      "id": "SF-2",
+      "description": "Portal脱出条件とz-index再設計の相互依存",
+      "status": "addressed",
+      "notes": "根本原因の仮説セクションに設計方針として3つの考慮事項が記載。対策案にも推奨設計方針(3項目)が追記済み。"
+    },
+    {
+      "stage": "stage3",
+      "id": "SF-3",
+      "description": "テスト要件の不足",
+      "status": "addressed",
+      "notes": "受け入れ条件にテスト要件サブセクションが新設され、5項目の具体的なテスト要件が追加されている。"
+    },
+    {
+      "stage": "stage3",
+      "id": "SF-4",
+      "description": "z-40/z-50ハードコードコンポーネントの統一スコープ",
+      "status": "addressed",
+      "notes": "対策案に最小スコープ/拡張スコープの判断基準が追記されている。"
+    },
+    {
+      "stage": "stage5",
+      "id": "MF-1",
+      "description": "z-index.ts内部のJSDocコメント(9999)と定数値(50)の不整合",
+      "status": "addressed",
+      "notes": "Stage 6で反映済み。根本原因の仮説セクションに3箇所の不整合（JSDocコメント/定数値/Modal.tsx実装値）が明記されている。対策案にも4箇所統一の記載あり。"
+    },
+    {
+      "stage": "stage5",
+      "id": "SF-1",
+      "description": "Header.txとWorktreeDetailRefactored.tsxのz-50ハードコード漏れ",
+      "status": "addressed",
+      "notes": "Stage 6で反映済み。z-40/z-50ハードコードコンポーネントテーブルにHeader.tsx(z-50)とWorktreeDetailRefactored.tsx(z-50)が追加されている。受け入れ条件のスタッキング順序検証対象にも追加済み。"
+    },
+    {
+      "stage": "stage5",
+      "id": "SF-2",
+      "description": "MAXIMIZED_EDITORコメントの実態矛盾",
+      "status": "addressed",
+      "notes": "Stage 6で反映済み。根本原因の仮説セクションにz-index.ts内部の追加の不整合として追記されている。"
+    },
+    {
+      "stage": "stage5",
+      "id": "SF-3",
+      "description": "Portal(z-55)表現の不正確さ",
+      "status": "addressed",
+      "notes": "Stage 6で反映済み。再現手順のメカニズム説明がcontainerStyle由来であることを明確化する形に修正されている。"
+    }
+  ],
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "影響範囲",
+        "issue": "SortSelector.tsx(L142)がz-50をハードコードしているが、Issueのz-40/z-50ハードコードコンポーネントテーブルに含まれていない。SortSelectorはサイドバー内のドロップダウンであり、absolute配置のためfixed配置コンポーネントよりスタッキング影響は限定的だが、z-index体系の完全な棚卸しの観点からは漏れている。同様にWorktreeDetailRefactored.tsxにはz-50(L1819 PromptPanel)以外にもz-35(L1937)、z-30(L1947, L2035)がハードコードされているが、z-30/z-35についてはIssueで言及がない。",
+        "location": "影響範囲 > z-40/z-50ハードコードコンポーネント",
+        "recommendation": "SortSelector.tsx(z-50, L142, absolute配置ドロップダウン)をz-40/z-50テーブルに追加。影響度は低(サイドバー内のabsolute配置のため、fixed配置コンポーネントとの重なりは通常発生しない)であることを備考に記載。WorktreeDetailRefactored.tsxのz-35/z-30についてはZ_INDEX.SIDEBARの30付近であり、z-index体系再設計の拡張スコープとして認識する程度で良い。",
+        "evidence": "src/components/sidebar/SortSelector.tsx:142 z-50, src/components/worktree/WorktreeDetailRefactored.tsx:1937 z-35, :1947 z-30, :2035 z-30"
+      },
+      {
+        "id": "SF-2",
+        "category": "影響範囲",
+        "issue": "useVirtualKeyboardフック(useVirtualKeyboard.ts)がMarkdownEditor.tsx(L148)で使用されており、仮想キーボード表示時のレイアウト調整に関与しているが、Issueの影響範囲に含まれていない。iPad Chrome横置きで仮想キーボードが表示された場合、useVirtualKeyboardのvisualViewport APIによる高さ計算とMarkdownEditorの全画面モード(fixed inset-0 + z-55)が競合する可能性がある。特にiPadで全画面エディタ使用中にテキスト入力すると仮想キーボードが表示され、visualViewportの高さが変化するケースが想定される。",
+        "location": "影響範囲 > 変更対象ファイル（候補）/ 関連コンポーネント",
+        "recommendation": "useVirtualKeyboard.tsを関連コンポーネントセクションに追加し、iPad全画面エディタ+仮想キーボード表示時の動作確認を受け入れ条件またはテスト要件の手動テスト項目に含めることを推奨。useVirtualKeyboard自体の変更は不要だが、MarkdownEditorの全画面モード修正時にkeyboardHeight考慮の動作確認が必要。",
+        "evidence": "src/hooks/useVirtualKeyboard.ts:54-101 visualViewport API, src/components/worktree/MarkdownEditor.tsx:148 useVirtualKeyboard使用"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響範囲",
+        "issue": "PaneResizer.tsxはMarkdownEditor.tsx(L835)とWorktreeDesktopLayout.tsx(L189)で使用されている。PaneResizer自体はz-indexやbreakpointに依存しないが、iPadでのタッチ操作(ドラッグリサイズ)にはiPadレイアウト変更が間接的に影響する可能性がある。ただし、PaneResizerはtouchイベントを直接処理しており、useIsMobileやz-indexに依存しないため、Issue #299の変更による直接的な影響は低い。",
+        "location": "影響範囲 > 関連コンポーネント",
+        "recommendation": "PaneResizer.tsxは直接的な変更対象ではなく、影響も低いため、現状の記載で十分。iPad横置きでの分割ビューリサイズ動作を手動テストで確認する程度で良い。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "影響範囲",
+        "issue": "z-index.tsのJSDocコメント変更(L17の9999修正)は純粋なコメント修正であり、テストファイルには直接影響しない。z-index.tsに対する既存テストは存在しないため(確認済み)、コメント変更によるテスト失敗のリスクはゼロ。新規テスト(Z_INDEX定数のスタッキング順序テスト)はIssueのテスト要件に既に含まれている。",
+        "location": "受け入れ条件 > テスト要件",
+        "recommendation": "テストへの影響は無い。現状の記載で十分。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "影響範囲",
+        "issue": "SlashCommandSelector.tsx(L223)のデスクトップ版はabsolute配置でz-50を使用しているが、L143/L151のモバイル版はfixed配置でz-40/z-50を使用している。Issueのz-40/z-50テーブルにはSlashCommandSelector.tsxが「z-40/z-50（L143/L151）」として記載されているが、L223のデスクトップ版z-50は言及されていない。ただし、L223はabsolute配置であり、fixed配置のModalとのスタッキング競合リスクは低い。",
+        "location": "影響範囲 > z-40/z-50ハードコードコンポーネント",
+        "recommendation": "SlashCommandSelector.tsxのテーブル行のz-index値列を「z-40/z-50（L143/L151/L223）」に更新すると完全性が向上するが、影響度は低い。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "stage3_findings_verification": {
+      "mf1_modal_z_index_ripple": {
+        "status": "fully_addressed",
+        "details": "8箇所のModal利用コンポーネント全てがリスト化されている。z-40/z-50ハードコードコンポーネントは9件がリスト化されている（Stage 6でHeader.tsx, WorktreeDetailRefactored.tsxを追加）。受け入れ条件にスタッキング順序検証セクションが設置済み。"
+      },
+      "mf2_use_is_mobile_scope": {
+        "status": "fully_addressed",
+        "details": "useIsMobile依存5コンポーネントが全てリスト化。SearchBar.tsxの独自breakpoint問題が注意事項として明記。MessageInput.tsxのiPadでの入力操作への影響可能性も記載済み。"
+      },
+      "sf1_tailwind_breakpoint": {
+        "status": "fully_addressed",
+        "details": "方針(A)(B)の選択肢として具体的に記載。AppShell.tsxのmd:pl-72との整合性問題が明確。"
+      },
+      "sf2_portal_z_index_interplay": {
+        "status": "fully_addressed",
+        "details": "推奨設計方針の3項目(Modal.tsx置換、MODAL値設定、Portal条件判断)が記載済み。"
+      },
+      "sf3_test_plan": {
+        "status": "fully_addressed",
+        "details": "5項目のテスト要件が具体的に記載済み。"
+      },
+      "sf4_hardcoded_scope": {
+        "status": "fully_addressed",
+        "details": "最小スコープ/拡張スコープの判断基準が記載済み。"
+      }
+    },
+    "stage5_6_update_verification": {
+      "z_index_ts_jsdoc_inconsistency": {
+        "status": "fully_addressed",
+        "details": "根本原因の仮説セクションに3箇所の不整合（JSDocコメント:9999/定数値:50/Modal.tsx実装:9999）が明記。対策案にJSDocコメント・定数値・実装値・MAXIMIZED_EDITORコメントの4箇所統一が記載。受け入れ条件の機能要件にJSDocと定数値の矛盾解消が追加。変更対象ファイルテーブルのz-index.ts説明にも反映済み。"
+      },
+      "header_tsx_addition": {
+        "status": "fully_addressed",
+        "details": "z-40/z-50テーブルにHeader.tsx(z-50, L25)が追加済み。受け入れ条件のスタッキング順序検証対象にも追加済み。"
+      },
+      "worktree_detail_refactored_addition": {
+        "status": "fully_addressed",
+        "details": "z-40/z-50テーブルにWorktreeDetailRefactored.tsx(z-50, L1819)が追加済み。受け入れ条件のスタッキング順序検証対象にも追加済み。"
+      },
+      "maximized_editor_comment_mismatch": {
+        "status": "fully_addressed",
+        "details": "根本原因の仮説セクションにz-index.ts内部の追加の不整合として追記。対策案の最小スコープにMAXIMIZED_EDITORコメントの正確性確認が含まれている。"
+      },
+      "portal_z55_expression_fix": {
+        "status": "fully_addressed",
+        "details": "再現手順の表現がcontainerStyle由来であることを明確化する形に修正済み。"
+      }
+    },
+    "newly_discovered_gaps": [
+      {
+        "id": "GAP-1",
+        "severity": "should_fix",
+        "description": "SortSelector.tsx(z-50)がz-40/z-50ハードコードコンポーネントテーブルに未記載",
+        "risk": "low",
+        "reason": "absolute配置のため、fixed配置コンポーネントとのスタッキング競合リスクは限定的"
+      },
+      {
+        "id": "GAP-2",
+        "severity": "should_fix",
+        "description": "useVirtualKeyboard.tsがiPad全画面エディタ+仮想キーボード表示時の影響範囲として未記載",
+        "risk": "low",
+        "reason": "useVirtualKeyboard自体の変更は不要だが、iPad全画面モードの動作確認時に考慮すべき"
+      },
+      {
+        "id": "GAP-3",
+        "severity": "nice_to_have",
+        "description": "WorktreeDetailRefactored.tsxのz-30/z-35ハードコード(L1937, L1947, L2035)が影響範囲に含まれていない",
+        "risk": "low",
+        "reason": "z-30はZ_INDEX.SIDEBAR相当、z-35はその直上であり、Modal(z-50/z-9999)やMAXIMIZED_EDITOR(z-55)との直接的な競合は発生しにくい"
+      }
+    ],
+    "additional_impact_checks": {
+      "z_index_ts_comment_test_impact": "影響なし。z-index.tsに対する既存テストは存在しない。コメント変更は純粋なドキュメント修正でありexportされる値に変更はないため、テスト失敗のリスクはゼロ。",
+      "use_virtual_keyboard_impact": "間接影響あり。useVirtualKeyboard自体はz-indexやbreakpointに依存しないが、MarkdownEditorの全画面モードと仮想キーボード表示の組み合わせで動作確認が必要。",
+      "pane_resizer_impact": "影響なし。PaneResizerはz-indexやuseIsMobileに依存せず、タッチイベントを独自に処理する純粋なUI部品。iPad横置きでのリサイズ動作は手動テストレベルで十分。"
+    },
+    "regression_risks": [
+      {
+        "id": "RR-1",
+        "description": "useIsMobile breakpoint変更でデスクトップユーザーのレイアウトが崩れる",
+        "probability": "medium",
+        "impact": "high",
+        "mitigation": "Issue記載の方針(A)(B)の選択。breakpoint変更前後で768px-1024px範囲での表示確認。",
+        "issue_coverage": "十分。方針(A)(B)の選択肢、5コンポーネントの依存リスト、SearchBar.tsx独自判定の注意事項が全て記載。"
+      },
+      {
+        "id": "RR-2",
+        "description": "Modal z-index変更でスタッキング順序が壊れる",
+        "probability": "low",
+        "impact": "medium",
+        "mitigation": "Issue記載の推奨設計方針(MODAL < MAXIMIZED_EDITOR)に従いz-index体系を維持。",
+        "issue_coverage": "十分。8箇所のModal利用コンポーネント、9件のz-40/z-50コンポーネント、スタッキング順序検証の受け入れ条件が全て記載。"
+      },
+      {
+        "id": "RR-3",
+        "description": "useSwipeGesture変更でスマホの通常操作に影響",
+        "probability": "low",
+        "impact": "low",
+        "mitigation": "変更はenabled条件(isMaximized && isMobile)が真の場合のみ有効。",
+        "issue_coverage": "十分。scrollable要素内のスワイプ無効化が主要対策として記載。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/config/z-index.ts",
+      "relevance": "z-index定数管理。JSDocコメント(L17: 9999)、定数値(L32: MODAL:50)、MAXIMIZED_EDITOR(L34-35: 55+コメント)の3箇所不整合がIssueに正確に記載済み。",
+      "key_lines": [17, 32, 34, 35]
+    },
+    {
+      "file": "src/components/ui/Modal.tsx",
+      "relevance": "z-[9999]ハードコード(L86)。8箇所のModal利用コンポーネントへの波及がIssueに網羅的に記載済み。",
+      "key_lines": [86]
+    },
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "MOBILE_BREAKPOINT=768(L15)。5コンポーネント依存がIssueに全て記載済み。",
+      "key_lines": [15, 50, 62]
+    },
+    {
+      "file": "src/hooks/useVirtualKeyboard.ts",
+      "relevance": "MarkdownEditor.tsx(L148)で使用。iPad全画面+仮想キーボード時の動作確認が影響範囲に未記載。",
+      "key_lines": [54, 66, 69]
+    },
+    {
+      "file": "src/components/sidebar/SortSelector.tsx",
+      "relevance": "z-50ハードコード(L142, absolute配置)。Issueのz-40/z-50テーブルに未記載。",
+      "key_lines": [142]
+    },
+    {
+      "file": "src/components/worktree/PaneResizer.tsx",
+      "relevance": "z-indexやbreakpointに非依存。iPad横置きタッチリサイズに間接影響の可能性はあるが、直接的な影響はなし。",
+      "key_lines": []
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "全画面表示の中核。containerStyle z-55(L495)、Portal脱出(L886)、swipe(L178)、useVirtualKeyboard(L148)の統合ポイント。Issueに正確に記載済み。",
+      "key_lines": [145, 148, 178, 495, 886]
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "z-50(L1819)、z-35(L1937)、z-30(L1947, L2035)のハードコード。z-50はIssueに記載済み。z-30/z-35は未記載だが影響度は低い。",
+      "key_lines": [1819, 1847, 1875, 1937, 1947, 2035, 2073, 2101]
+    },
+    {
+      "file": "src/components/layout/Header.tsx",
+      "relevance": "z-50ハードコード(L25)。Stage 6でIssueのz-40/z-50テーブルに追加済み。",
+      "key_lines": [25]
+    },
+    {
+      "file": "src/components/worktree/SearchBar.tsx",
+      "relevance": "独自breakpoint window.innerWidth < 768(L158)。Issueに注意事項として記載済み。",
+      "key_lines": [158]
+    },
+    {
+      "file": "src/hooks/useSwipeGesture.ts",
+      "relevance": "scrollable要素判定なし(L104-110)。Issueに改善方針が記載済み。",
+      "key_lines": [104, 136]
+    },
+    {
+      "file": "src/hooks/useFullscreen.ts",
+      "relevance": "isIOSDevice()のnavigator.platform依存(L67)。Issueに非推奨問題が記載済み。",
+      "key_lines": [57, 67]
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "z-index.ts、useFullscreen.ts、useVirtualKeyboard等のモジュール説明"
+    }
+  ]
+}

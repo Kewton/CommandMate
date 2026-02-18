@@ -6,6 +6,7 @@
 
 | Issue | 種別 | 概要 | 主要変更ファイル | 設計書 |
 |-------|------|------|-----------------|--------|
+| #299 | fix | iPad/スマホ レイアウト崩れ・全画面表示不具合修正（z-index体系統一、scrollable要素内スワイプ抑制、MOBILE_BREAKPOINT定数化） | `z-index.ts`, `Modal.tsx`, `Toast.tsx`, `ContextMenu.tsx`, `useSwipeGesture.ts`, `MarkdownEditor.tsx`, `SearchBar.tsx`, `z-index.test.ts`, `useSwipeGesture.test.ts` | [link](../dev-reports/design/issue-299-ipad-layout-fix-design-policy.md) |
 | #287 | fix | promptCheck再検証失敗時のフォールバック不備修正（promptType/defaultOptionNumber送信、buildPromptResponseBody()共通化、100%カバレッジ達成） | `prompt-response/route.ts`, `prompt-response-body-builder.ts`, `WorktreeDetailRefactored.tsx`, `useAutoYes.ts`, `prompt-response-verification.test.ts`, `useAutoYes.test.ts`, `worktree-detail-integration.test.tsx` | [link](../dev-reports/issue/287/issue-review/) |
 | #266 | fix | ブラウザタブ切替時の入力内容クリア修正（軽量リカバリパターン、setError(null)対策、コンポーネントツリー維持） | `WorktreeDetailRefactored.tsx`, `WorktreeDetailRefactored.test.tsx`, `issue-266-acceptance.test.tsx` | [link](../dev-reports/design/issue-266-visibility-change-input-clear-design-policy.md) |
 | #270 | fix | update-checkルート静的プリレンダリング修正（force-dynamic追加、リグレッション防止テスト） | `update-check/route.ts`, `update-check.test.ts` | [link](../dev-reports/design/issue-270-update-check-static-prerender-design-policy.md) |

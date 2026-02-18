@@ -1,0 +1,390 @@
+{
+  "issue_number": 299,
+  "review_stage": "stage3",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-02-18",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "overall_quality": "medium"
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響範囲",
+        "issue": "z-index体系再設計時にModal.tsxを使用する全コンポーネントへの波及効果がIssueに記載されていない。Modal.tsxのz-[9999]を変更した場合、以下の6つのModal利用箇所すべてに影響する: (1) WorktreeDetailRefactored.tsx デスクトップ版 MarkdownEditorモーダル(L1847), (2) WorktreeDetailRefactored.tsx モバイル版 MarkdownEditorモーダル(L2073), (3) WorktreeDetailRefactored.tsx デスクトップ版 killConfirmモーダル(L1875), (4) WorktreeDetailRefactored.tsx モバイル版 killConfirmモーダル(L2101), (5) FileViewer.tsx ファイルプレビューモーダル(L112), (6) AutoYesConfirmDialog.tsx Auto-Yes確認ダイアログ, (7) MoveDialog.tsx 移動先選択ダイアログ, (8) ExternalAppForm.tsx 外部アプリ登録ダイアログ。z-index値を変更する場合、Toast(z-50実装)やContextMenu(z-50実装)、MobilePromptSheet(z-50)、SlashCommandSelector(z-50)、MobileHeader(z-40)、MobileTabBar(z-40)とのスタッキング順序が正しいことを確認する必要がある。",
+        "location": "影響範囲 > 変更対象ファイル（候補） / 対策案 > 症状3",
+        "recommendation": "Issueの影響範囲セクションにModal.tsxのz-index変更で影響を受ける全コンポーネント（上記8箇所）を明記すべき。また、z-index.tsとModal.tsx以外にz-40/z-50をハードコードしている以下のコンポーネントとのスタッキング順序検証を受け入れ条件に追加すべき: Toast.tsx(z-50), MobilePromptSheet.tsx(z-50), MobileHeader.tsx(z-40), MobileTabBar.tsx(z-40), SlashCommandSelector.tsx(z-50), ContextMenu.tsx(z-50), AppShell.tsx(z-40/z-50)。",
+        "evidence": "src/components/common/Toast.tsx:205 z-50, src/components/mobile/MobilePromptSheet.tsx:148 z-50, src/components/mobile/MobileHeader.tsx:103 z-40, src/components/mobile/MobileTabBar.tsx:150 z-40, src/components/worktree/SlashCommandSelector.tsx:143 z-40 / :151 z-50, src/components/worktree/ContextMenu.tsx:228 z-50, src/components/layout/AppShell.tsx:69 z-40 / :79 z-50"
+      },
+      {
+        "id": "MF-2",
+        "category": "波及効果",
+        "issue": "useIsMobile変更の波及範囲が過小評価されている。useIsMobileは5つのコンポーネントで使用されており、breakpoint変更やタブレット判定追加はそのすべてに影響する: (1) AppShell.tsx: モバイル/デスクトップレイアウト切替の根幹, (2) WorktreeDesktopLayout.tsx: 2カラム/タブ切替, (3) WorktreeDetailRefactored.tsx: layoutMode(tabs/split)とレイアウト分岐, (4) MarkdownEditor.tsx: モバイルタブ表示・スワイプ有効化・ESCヒント表示, (5) MessageInput.tsx: モバイルUIとプレースホルダー文言・Enter動作の分岐。加えてSearchBar.tsx(L158)は独自にwindow.innerWidth < 768で判定しておりuseIsMobileを使っていない。もしbreakpointを変更する場合、SearchBar.tsxの独自判定も同時に修正しなければ不整合が発生する。",
+        "location": "影響範囲 > 変更対象ファイル（候補）",
+        "recommendation": "Issueの影響範囲にuseIsMobileの全利用箇所5ファイルを明記し、加えてSearchBar.tsxの独自breakpoint(768px)もuseIsMobile使用に統一するか同時修正する必要がある旨を記載すべき。特にMessageInput.tsxはEnterキーの動作がisMobileで分岐するため、iPadでの入力操作にも影響する可能性がある。",
+        "evidence": "src/components/worktree/MessageInput.tsx:46 useIsMobile(), :216 isMobile判定でEnter動作分岐, src/components/worktree/SearchBar.tsx:158 独自判定 window.innerWidth < 768"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "リグレッション",
+        "issue": "useIsMobileのbreakpoint変更時、AppShell.tsxのTailwind md:breakpoint(768px)との乖離リスクがある。AppShell.tsxはデスクトップレイアウトでmd:pl-72を使用しているが、このmd:プレフィックスはTailwindのデフォルト768px breakpointに対応する。もしuseIsMobileのbreakpointを例えば1024pxに変更した場合、JavaScriptのisMobile判定(1024px)とCSSのmd:breakpoint(768px)が不一致になり、768px-1024pxの範囲でデスクトップのpaddingが適用されるがモバイルレイアウトが表示されるという矛盾が発生する。",
+        "location": "対策案 > 症状1・2",
+        "recommendation": "Issueの対策案にbreakpoint変更時のCSS breakpoint(Tailwind md:)との整合性確保を明記すべき。方針として: (A) useIsMobileのbreakpointとTailwind md:を同じ768pxに維持しつつ、タブレット向けレイアウト調整をCSS側で対応する、または (B) breakpointを変更する場合はTailwindの設定も同時に変更する、のいずれかを選択する旨を記載。",
+        "evidence": "src/components/layout/AppShell.tsx:120 md:pl-72, Tailwind default md: = 768px"
+      },
+      {
+        "id": "SF-2",
+        "category": "リグレッション",
+        "issue": "MarkdownEditorのPortal脱出ロジックはisFallbackMode時のみ有効(L886)だが、z-index.tsのMODAL値を変更してMAXIMIZED_EDITOR(55)より低くする場合、Portal脱出なしでも全画面が見える可能性がある。逆に、MODAL値を現在のz-[9999]に合わせて引き上げる場合、MAXIMIZED_EDITOR(55)がMODALより低くなるため、Fullscreen API使用時(isFallbackMode=false)でも白画面が再発するリスクがある。z-index体系再設計時に、MarkdownEditorのPortal脱出ロジック(L884-892)の条件分岐を含めた総合的な検討が必要。",
+        "location": "対策案 > 症状3",
+        "recommendation": "z-index体系再設計の方針をIssueに明記すべき。推奨案: (1) Modal.tsxのz-[9999]をZ_INDEX.MODALで置き換え、(2) MODAL値をMAXIMIZED_EDITOR(55)未満に設定(現在の50でも可)、(3) PortalのisFallbackMode条件を維持するか、常にPortalで脱出するかの設計判断を記載。",
+        "evidence": "src/components/worktree/MarkdownEditor.tsx:884-892 Portal条件: isMaximized && isFallbackMode && portalContainer, src/config/z-index.ts MODAL:50 MAXIMIZED_EDITOR:55"
+      },
+      {
+        "id": "SF-3",
+        "category": "テスト範囲",
+        "issue": "受け入れ条件にテスト要件が含まれているが、影響範囲に対する具体的なテスト計画が不足している。特に: (1) useIsMobile既存テスト(tests/unit/hooks/useIsMobile.test.ts)のbreakpoint境界値テストがiPadシナリオを含まない, (2) useFullscreen既存テスト(tests/unit/hooks/useFullscreen.test.ts)のiOS検出テストがnavigator.platform変更後のテストケースを含まない, (3) useSwipeGesture既存テスト(tests/unit/hooks/useSwipeGesture.test.ts)は構造テストのみでスクロール内スワイプ抑制テストがない, (4) Modal.tsxのz-indexに関するテストがない。",
+        "location": "受け入れ条件",
+        "recommendation": "Issueのテスト要件に以下を追加: (1) useIsMobileテスト: iPad portrait(768px)とiPad landscape(1024px)での判定結果テスト, (2) useFullscreenテスト: navigator.platform代替実装のテスト, (3) useSwipeGestureテスト: scrollable要素内でのスワイプ抑制テスト, (4) Modal.tsxテスト: z-indexがZ_INDEX.MODAL定数を使用していることのテストまたはlint規則。",
+        "evidence": "tests/unit/hooks/useIsMobile.test.ts, tests/unit/hooks/useFullscreen.test.ts, tests/unit/hooks/useSwipeGesture.test.ts"
+      },
+      {
+        "id": "SF-4",
+        "category": "影響範囲",
+        "issue": "z-50をハードコードしているコンポーネント群がz-index.tsの定数を使用しておらず、Issue #299のz-index管理統一の対象から漏れている可能性がある。現在z-40/z-50をハードコードしているファイル: Toast.tsx, MobilePromptSheet.tsx, MobileHeader.tsx, MobileTabBar.tsx, SlashCommandSelector.tsx, ContextMenu.tsx, AppShell.tsx, WorktreeDetailRefactored.tsx, Header.tsx。これらは全てZ_INDEX定数を使用していないが、z-index体系を再設計する際には一貫性のために統一を検討すべき。",
+        "location": "対策案 > 症状3 > z-index管理の統一",
+        "recommendation": "Issue #299の範囲を明確にする: (a) 最小スコープ: Modal.tsxのz-[9999]をZ_INDEX.MODALに置き換え+z-index.tsのMODAL値調整のみ, (b) 拡張スコープ: z-40/z-50をハードコードしている全コンポーネントもZ_INDEX定数に統一。(b)はIssue #299で扱うか別Issueに分割するかの判断を記載すべき。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "影響範囲",
+        "issue": "WorktreeListのグリッドレイアウト(md:grid-cols-2 lg:grid-cols-3)がiPad横置きで3カラム(lg breakpoint 1024px)、iPad縦置きで2カラム(md breakpoint 768px)と表示されるが、この表示がiPadの画面幅で適切かの検証がIssueの受け入れ条件に含まれていない。直接的なバグ報告ではないが、iPad対応を行う際に確認すべき関連箇所。",
+        "location": "受け入れ条件",
+        "recommendation": "iPad横置き・縦置きでWorktreeList(トップ画面)のグリッド表示を確認することを受け入れ条件または検証チェックリストに追加を検討。",
+        "evidence": "src/components/worktree/WorktreeList.tsx:508 md:grid-cols-2 lg:grid-cols-3"
+      },
+      {
+        "id": "NTH-2",
+        "category": "影響範囲",
+        "issue": "ExternalAppForm.tsxもModalを使用しているが、Issue #299の関連コンポーネント一覧に含まれていない。直接的な影響は低いが、z-index変更時の確認対象として認識しておくべき。",
+        "location": "影響範囲 > 関連コンポーネント",
+        "recommendation": "関連コンポーネントにExternalAppForm.tsxを追加。",
+        "evidence": "src/components/external-apps/ExternalAppForm.tsx:12 import { Button, Modal } from '@/components/ui'"
+      },
+      {
+        "id": "NTH-3",
+        "category": "影響範囲",
+        "issue": "useFullscreen.tsのisIOSDevice()関数がnavigator.userAgentDataに移行する場合、Chromium系ブラウザのみがnavigator.userAgentDataをサポートするため、Safari(WebKitベース)ではフォールバックが必要。Issue #299の報告環境はChrome(Chromium系)であるが、Safariでの動作も考慮すべき。ただし、報告がiPad Chrome限定であるため、優先度は低い。",
+        "location": "対策案 > 症状3 > navigator.platform非推奨対応",
+        "recommendation": "navigator.platform非推奨対応を行う場合、Safari非対応のnavigator.userAgentDataだけでなく、UA文字列解析やmaxTouchPoints判定との組み合わせが必要であることをIssueに注記。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "affected_files": {
+      "direct_changes": [
+        {
+          "file": "src/hooks/useIsMobile.ts",
+          "change_type": "breakpoint変更またはタブレット判定追加",
+          "risk": "high",
+          "reason": "5コンポーネントが依存。breakpoint変更はアプリ全体のレイアウト切替に影響"
+        },
+        {
+          "file": "src/hooks/useFullscreen.ts",
+          "change_type": "navigator.platform代替、iPad Chrome対応",
+          "risk": "medium",
+          "reason": "MarkdownEditorのみが依存。iOS検出ロジック変更はiPad/iPhone全体に影響"
+        },
+        {
+          "file": "src/hooks/useSwipeGesture.ts",
+          "change_type": "scrollable要素内スワイプ無効化",
+          "risk": "low",
+          "reason": "MarkdownEditorのみが依存。変更はスマホ全画面モード限定"
+        },
+        {
+          "file": "src/config/z-index.ts",
+          "change_type": "MODAL値とMAXIMIZED_EDITOR値の関係再設計",
+          "risk": "high",
+          "reason": "Z_INDEX定数を使用するAppShell.tsx、MarkdownEditor.tsxに直接影響。z-40/z-50ハードコードコンポーネントとの整合性も必要"
+        },
+        {
+          "file": "src/components/ui/Modal.tsx",
+          "change_type": "z-[9999]をZ_INDEX.MODAL定数に置換",
+          "risk": "high",
+          "reason": "8箇所のModal利用コンポーネント全てに波及。z-index値の変更でスタッキング順序が変わる"
+        },
+        {
+          "file": "src/components/worktree/MarkdownEditor.tsx",
+          "change_type": "全画面表示・Portal条件・スワイプ修正",
+          "risk": "medium",
+          "reason": "複数の修正が集中するファイル。Portal/z-index/swipe の3つの変更が相互に影響"
+        },
+        {
+          "file": "src/components/layout/AppShell.tsx",
+          "change_type": "iPad向けレイアウト調整",
+          "risk": "medium",
+          "reason": "Tailwind md:breakpointとuseIsMobile breakpointの整合性が必要"
+        },
+        {
+          "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+          "change_type": "タブレット向けレイアウト調整",
+          "risk": "medium",
+          "reason": "useIsMobileの判定結果変更で2カラム/タブ切替が変わる"
+        }
+      ],
+      "indirect_impact": [
+        {
+          "file": "src/components/worktree/MessageInput.tsx",
+          "impact": "useIsMobile判定変更によりEnterキー動作・プレースホルダー・スラッシュコマンドUIが変わる可能性",
+          "risk": "medium"
+        },
+        {
+          "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+          "impact": "useIsMobile判定変更でlayoutMode(tabs/split)が変わる。Modal z-index変更でMarkdownEditor・killConfirmの表示に影響",
+          "risk": "medium"
+        },
+        {
+          "file": "src/components/worktree/SearchBar.tsx",
+          "impact": "独自の768px breakpoint判定がuseIsMobileと不整合になるリスク",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/worktree/FileViewer.tsx",
+          "impact": "Modal z-index変更で表示順序に影響",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/worktree/AutoYesConfirmDialog.tsx",
+          "impact": "Modal z-index変更で表示順序に影響",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/worktree/MoveDialog.tsx",
+          "impact": "Modal z-index変更で表示順序に影響",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/external-apps/ExternalAppForm.tsx",
+          "impact": "Modal z-index変更で表示順序に影響",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/common/Toast.tsx",
+          "impact": "z-50ハードコード。z-index体系変更時にModal/Toast/ContextMenuのスタッキング順序検証必要",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/mobile/MobilePromptSheet.tsx",
+          "impact": "z-50ハードコード。Modal z-index変更でオーバーラップリスク",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/mobile/MobileHeader.tsx",
+          "impact": "z-40ハードコード。z-index体系変更時のスタッキング順序検証必要",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/mobile/MobileTabBar.tsx",
+          "impact": "z-40ハードコード。z-index体系変更時のスタッキング順序検証必要",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/worktree/SlashCommandSelector.tsx",
+          "impact": "z-40/z-50ハードコード。Modal z-index変更でモバイル版のオーバーラップリスク",
+          "risk": "low"
+        },
+        {
+          "file": "src/components/worktree/ContextMenu.tsx",
+          "impact": "z-50ハードコード。z-index体系変更時のスタッキング順序検証必要",
+          "risk": "low"
+        }
+      ]
+    },
+    "regression_risks": [
+      {
+        "id": "RR-1",
+        "description": "useIsMobile breakpoint変更でデスクトップユーザーのレイアウトが崩れる",
+        "probability": "medium",
+        "impact": "high",
+        "mitigation": "breakpoint変更前後で768px-1024px範囲のwindow幅での表示確認。Tailwind md:breakpointとの整合性テスト。"
+      },
+      {
+        "id": "RR-2",
+        "description": "Modal z-index変更でToast/ContextMenu/MobilePromptSheetがModalの上に表示されなくなる",
+        "probability": "medium",
+        "impact": "medium",
+        "mitigation": "z-index変更後に全レイヤーのスタッキング順序を視覚的に検証。z-index.tsの定数ヒエラルキーを更新しコメントに反映。"
+      },
+      {
+        "id": "RR-3",
+        "description": "useSwipeGesture変更でスマホの通常スワイプ操作（全画面モード以外）が影響を受ける",
+        "probability": "low",
+        "impact": "low",
+        "mitigation": "変更はenabled条件(isMaximized && isMobile)が真の場合のみ有効。スマホの通常画面でスワイプ操作が正常に動作することを確認。"
+      },
+      {
+        "id": "RR-4",
+        "description": "useFullscreenのiOS検出ロジック変更でデスクトップMacの全画面が誤ってfallbackモードになる",
+        "probability": "low",
+        "impact": "high",
+        "mitigation": "navigator.platform代替ロジックでmaxTouchPoints判定を維持。デスクトップMac(maxTouchPoints=0)でのFullscreen API動作テスト。"
+      },
+      {
+        "id": "RR-5",
+        "description": "MarkdownEditor Portal脱出条件変更で、非iPad環境でPortalが意図せず使用/不使用になる",
+        "probability": "low",
+        "impact": "medium",
+        "mitigation": "Portal脱出条件(isFallbackMode)の変更有無を明確にし、変更する場合はデスクトップ/モバイル/iPadの各環境でテスト。"
+      }
+    ],
+    "test_requirements": [
+      {
+        "id": "TR-1",
+        "type": "unit",
+        "target": "useIsMobile",
+        "description": "iPad portrait(768px)/landscape(1024px)境界値テスト。breakpoint変更時の新旧値テスト。",
+        "existing_test": "tests/unit/hooks/useIsMobile.test.ts",
+        "update_needed": true
+      },
+      {
+        "id": "TR-2",
+        "type": "unit",
+        "target": "useFullscreen",
+        "description": "navigator.platform代替実装のテスト。iPad Pro(MacIntel+touch)判定テストの更新。",
+        "existing_test": "tests/unit/hooks/useFullscreen.test.ts",
+        "update_needed": true
+      },
+      {
+        "id": "TR-3",
+        "type": "unit",
+        "target": "useSwipeGesture",
+        "description": "scrollable要素内でのスワイプ抑制テスト。touchstart位置がscrollable要素内かの判定テスト。",
+        "existing_test": "tests/unit/hooks/useSwipeGesture.test.ts",
+        "update_needed": true
+      },
+      {
+        "id": "TR-4",
+        "type": "unit",
+        "target": "z-index.ts",
+        "description": "Z_INDEX定数のスタッキング順序テスト（MODAL < MAXIMIZED_EDITOR < TOAST < CONTEXT_MENU）",
+        "existing_test": null,
+        "update_needed": true
+      },
+      {
+        "id": "TR-5",
+        "type": "integration",
+        "target": "Modal + MarkdownEditor",
+        "description": "Modal内MarkdownEditorの全画面→Portal脱出→z-index確認。白画面が発生しないことの検証。",
+        "existing_test": null,
+        "update_needed": true
+      },
+      {
+        "id": "TR-6",
+        "type": "e2e",
+        "target": "iPad Chrome エミュレーション",
+        "description": "iPad viewport(768px/1024px)でのレイアウト表示、全画面表示、スクロール操作のE2Eテスト。Playwright device emulation推奨。",
+        "existing_test": null,
+        "update_needed": true
+      },
+      {
+        "id": "TR-7",
+        "type": "manual",
+        "target": "実機確認",
+        "description": "iPad実機(Chrome)での横置き・縦置きレイアウト、全画面表示、スマホ実機での全画面スクロール操作。自動テストでカバーしきれない実デバイス固有の挙動確認。",
+        "existing_test": null,
+        "update_needed": true
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "変更対象。MOBILE_BREAKPOINT=768, 5コンポーネントが依存。",
+      "key_lines": [15, 50, 62]
+    },
+    {
+      "file": "src/hooks/useFullscreen.ts",
+      "relevance": "変更対象。isIOSDevice()のnavigator.platform依存。MarkdownEditorが依存。",
+      "key_lines": [57, 67]
+    },
+    {
+      "file": "src/hooks/useSwipeGesture.ts",
+      "relevance": "変更対象。scrollable要素判定なし。MarkdownEditorが依存。",
+      "key_lines": [104, 136]
+    },
+    {
+      "file": "src/config/z-index.ts",
+      "relevance": "変更対象。MODAL:50 vs Modal.tsx実装:9999の乖離。AppShellとMarkdownEditorが参照。",
+      "key_lines": [32, 35]
+    },
+    {
+      "file": "src/components/ui/Modal.tsx",
+      "relevance": "変更対象。z-[9999]ハードコード。8箇所のModal利用コンポーネントに波及。",
+      "key_lines": [86]
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "変更対象。全画面Portal脱出(L886)、z-index(L495)、スワイプ(L178)の統合ポイント。",
+      "key_lines": [145, 164, 178, 495, 886]
+    },
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "変更対象。useIsMobile依存、md:pl-72(Tailwind breakpoint)、z-40/z-50ハードコード。",
+      "key_lines": [59, 69, 79, 108, 120]
+    },
+    {
+      "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+      "relevance": "変更対象。useIsMobile依存でMobile/Desktopレイアウト分岐。",
+      "key_lines": [238, 267]
+    },
+    {
+      "file": "src/components/worktree/MessageInput.tsx",
+      "relevance": "間接影響。useIsMobile依存でEnterキー動作・UIが変わる。",
+      "key_lines": [46, 216, 238, 264]
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "間接影響。useIsMobile依存+Modal使用(MarkdownEditor/killConfirm)。",
+      "key_lines": [920, 1613, 1847, 1875, 2073, 2101]
+    },
+    {
+      "file": "src/components/worktree/SearchBar.tsx",
+      "relevance": "間接影響。独自のwindow.innerWidth < 768判定(useIsMobile未使用)。",
+      "key_lines": [158]
+    },
+    {
+      "file": "src/components/common/Toast.tsx",
+      "relevance": "間接影響。z-50ハードコード。z-index体系変更時のスタッキング検証対象。",
+      "key_lines": [205]
+    },
+    {
+      "file": "tests/unit/hooks/useIsMobile.test.ts",
+      "relevance": "既存テスト。iPadシナリオ追加が必要。",
+      "key_lines": [47, 53, 59, 65]
+    },
+    {
+      "file": "tests/unit/hooks/useFullscreen.test.ts",
+      "relevance": "既存テスト。navigator.platform代替のテスト追加が必要。",
+      "key_lines": [265, 333, 365]
+    },
+    {
+      "file": "tests/unit/hooks/useSwipeGesture.test.ts",
+      "relevance": "既存テスト。scrollable要素内スワイプ抑制テスト追加が必要。",
+      "key_lines": []
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "z-index.ts、useFullscreen.ts等のモジュール説明。z-index管理方針の更新が必要。"
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "review_stage": "stage4",
+  "focus_area": "セキュリティ",
+  "issue_number": 299,
+  "status": "approved",
+  "score": 5,
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "nice_to_have",
+      "category": "情報漏洩",
+      "location": "設計方針書 セクション6.2 / src/hooks/useFullscreen.ts L67",
+      "issue": "navigator.platformはUser-Agent Client Hints仕様により非推奨化されており、将来的にブラウザから削除される可能性がある。フィンガープリンティングに利用可能なAPIだが、本プロジェクトはローカル開発ツールであり外部ユーザーのトラッキングリスクは存在しない。設計方針書でスコープ外とした判断は適切",
+      "suggestion": "将来の別Issueでnavigator.userAgentDataへの移行を検討する（設計方針書の方針と一致）。現時点ではセキュリティリスクなし"
+    },
+    {
+      "id": "F002",
+      "severity": "nice_to_have",
+      "category": "DOM操作",
+      "location": "設計方針書 セクション3.3 / src/hooks/useSwipeGesture.ts handleTouchStart",
+      "issue": "isInsideScrollableElementでのDOM走査はevent.targetからparentElementを辿る読み取り専用操作であり、XSSやDOM clobberingのリスクはない。ただし、event.targetがSVGElementなどHTMLElement以外の場合にinstanceof HTMLElementガードが必要。設計方針書でe.target instanceof HTMLElementの型ガードを明示しており適切",
+      "suggestion": "実装時にinstanceof HTMLElementガードが確実に適用されていることをテストで検証する。Stage 2レビューのF007で認識済み"
+    },
+    {
+      "id": "F003",
+      "severity": "nice_to_have",
+      "category": "Clickjacking",
+      "location": "設計方針書 セクション3.1 / src/components/ui/Modal.tsx",
+      "issue": "Modal.tsxのz-[9999]からZ_INDEX.MODAL(50)への変更はClickjackingリスクを増加させない。Modal backdropはfixed inset-0で画面全体を覆い、onClick/body.style.overflow='hidden'により背面操作を遮断する。z-indexの絶対値はClickjacking防御に関係しない（Clickjacking防御はX-Frame-Options/CSP frame-ancestorsで行うべき）。設計方針書の競合分析が十分",
+      "suggestion": "追加対策不要。Clickjacking防御が必要な場合はHTTPヘッダー（X-Frame-Options, CSP frame-ancestors）で対応すべきだが、ローカル開発ツールのため優先度は低い"
+    },
+    {
+      "id": "F004",
+      "severity": "nice_to_have",
+      "category": "XSS",
+      "location": "設計方針書 セクション3.1 / src/components/worktree/MarkdownEditor.tsx L541",
+      "issue": "MarkdownEditorのXSS保護はrehype-sanitize[SEC-MF-001]で担保されており、z-index変更やfixed inset-0のCSSフォールバックモードはXSS保護に影響しない。Mermaid図のセキュリティもsecurityLevel='strict'[SEC-001]で保護されている。全画面モードへの遷移はXSS攻撃面を増加させない",
+      "suggestion": "追加対策不要。現在のrehype-sanitize + mermaid securityLevel='strict'の二重防御が適切に維持される"
+    },
+    {
+      "id": "F005",
+      "severity": "nice_to_have",
+      "category": "DOM操作",
+      "location": "設計方針書 セクション3.1 / src/components/worktree/MarkdownEditor.tsx L417-436",
+      "issue": "document.bodyへのPortal追加（markdown-editor-portal div）はReactの標準パターンであり、セキュリティリスクはない。createElement/appendChildは信頼されたコード内で固定ID文字列を使用しており、ユーザー入力に依存しない。cleanup処理でchildNodes.length===0の場合のみ削除するため、DOM汚染リスクもない",
+      "suggestion": "追加対策不要。Portal IDはハードコードされた定数であり安全"
+    }
+  ],
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "not_applicable",
+      "note": "UI層の変更のみ。アクセス制御ロジックへの変更なし"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "note": "暗号化処理への変更なし"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "note": "DOM操作はすべて信頼されたコード内の固定値を使用。ユーザー入力はrehype-sanitizeでサニタイズされ、z-index変更はサニタイズ処理に影響しない"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "note": "z-index体系の統一は安全な設計。Modal backdropの操作遮断機能が維持される"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "note": "z-index値の変更はセキュリティ設定に影響しない。mermaid securityLevel='strict'は変更されない"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "note": "サードパーティコンポーネントの追加・更新なし"
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "note": "認証・セッション管理への変更なし"
+    },
+    "A08_data_integrity": {
+      "status": "not_applicable",
+      "note": "データ整合性チェックへの変更なし"
+    },
+    "A09_logging_monitoring": {
+      "status": "not_applicable",
+      "note": "ログ・モニタリングへの変更なし"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "note": "サーバーサイドリクエストへの変更なし"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 5,
+    "overall_quality": "high"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-299-ipad-layout-fix-design-policy.md",
+    "src/hooks/useSwipeGesture.ts",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/ui/Modal.tsx",
+    "src/config/z-index.ts",
+    "src/components/common/Toast.tsx",
+    "src/components/worktree/ContextMenu.tsx",
+    "src/hooks/useFullscreen.ts",
+    "src/hooks/useIsMobile.ts",
+    "src/components/layout/AppShell.tsx",
+    "src/components/worktree/SearchBar.tsx",
+    "src/config/mermaid-config.ts",
+    "src/components/worktree/MermaidCodeBlock.tsx"
+  ],
+  "timestamp": "2026-02-18T00:00:00Z"
+}

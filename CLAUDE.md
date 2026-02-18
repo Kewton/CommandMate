@@ -169,19 +169,22 @@ tests/
 | `src/hooks/useContextMenu.ts` | コンテキストメニュー状態管理フック（MouseEvent/TouchEvent対応） |
 | `src/hooks/useFileOperations.ts` | ファイル操作フック（Issue #162: move操作の状態管理、MoveTarget型、UIロジック分離） |
 | `src/hooks/useLongPress.ts` | タッチ長押し検出フック（Issue #123、500ms閾値、10px移動キャンセル） |
+| `src/hooks/useSwipeGesture.ts` | スワイプジェスチャー検出フック（Issue #299: isInsideScrollableElement追加でscrollable要素内スワイプを抑制） |
 | `src/hooks/useFullscreen.ts` | Fullscreen API ラッパー（CSSフォールバック対応） |
 | `src/hooks/useLocalStorageState.ts` | localStorage永続化フック（バリデーション対応） |
-| `src/config/z-index.ts` | z-index値の一元管理 |
+| `src/config/z-index.ts` | z-index値の一元管理（Issue #299: JSDocコメント修正、レイヤー番号繰り上げ MODAL=50, MAXIMIZED_EDITOR=55, TOAST=60, CONTEXT_MENU=70） |
 | `src/config/uploadable-extensions.ts` | アップロード可能拡張子・MIMEタイプ・マジックバイト検証（Issue #302: mp4バリデータ追加、15MB上限、ftypシグネチャ検証） |
 | `src/config/image-extensions.ts` | 画像ファイル拡張子・マジックバイト・SVG XSS検証 |
 | `src/config/video-extensions.ts` | 動画ファイル拡張子・マジックバイト・MIME定義（Issue #302: VIDEO_EXTENSIONS、isVideoExtension()、getMimeTypeByVideoExtension()、validateVideoContent()） |
 | `src/config/mermaid-config.ts` | mermaid設定定数（securityLevel='strict'） |
 | `src/config/binary-extensions.ts` | バイナリファイル拡張子設定（検索除外用） |
 | `src/lib/file-search.ts` | ファイル内容検索ロジック（EXCLUDED_PATTERNSフィルタ、AbortControllerタイムアウト） |
-| `src/components/worktree/SearchBar.tsx` | 検索UIコンポーネント（検索入力、モード切替、ローディング表示） |
+| `src/components/worktree/SearchBar.tsx` | 検索UIコンポーネント（検索入力、モード切替、ローディング表示。Issue #299: MOBILE_BREAKPOINT定数使用） |
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック（debounce処理、API呼び出し、結果管理） |
 | `src/components/worktree/MoveDialog.tsx` | ファイル移動先選択ダイアログ（Issue #162: ディレクトリツリーブラウザ、ルート選択、ネスト対応、updateTreeNode/findNodeByPath抽出） |
-| `src/components/worktree/ContextMenu.tsx` | ファイル/ディレクトリコンテキストメニュー（Issue #162: 「移動」メニュー項目追加、FolderInputアイコン、onMoveコールバック） |
+| `src/components/ui/Modal.tsx` | モーダルダイアログコンポーネント（Issue #299: z-[9999]ハードコード除去、Z_INDEX.MODAL使用に統一） |
+| `src/components/common/Toast.tsx` | トースト通知コンポーネント（Issue #299: z-50ハードコード除去、Z_INDEX.TOAST使用に統一） |
+| `src/components/worktree/ContextMenu.tsx` | ファイル/ディレクトリコンテキストメニュー（Issue #162: 「移動」メニュー項目追加、FolderInputアイコン、onMoveコールバック。Issue #299: z-50除去、Z_INDEX.CONTEXT_MENU使用） |
 | `src/components/worktree/FileViewer.tsx` | ファイルビューア（Issue #162: コピーボタン追加、Copy/Checkアイコン切替、useMemo最適化、画像ファイル非表示。**Issue #302: 動画表示分岐追加、canCopyロジック修正（isVideo除外）**） |
 | `src/components/worktree/FileTreeView.tsx` | ファイルツリー表示（Issue #162: birthtime表示、formatRelativeTime()ロケール対応、sm:inline条件表示） |
 | `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（Issue #162: handleMoveハンドラー追加、MoveDialog統合、useFileOperations呼び出し） |

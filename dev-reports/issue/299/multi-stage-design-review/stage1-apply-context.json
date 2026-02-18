@@ -1,0 +1,7 @@
+{
+  "issue_number": 299,
+  "stage": 1,
+  "review_result_path": "dev-reports/issue/299/multi-stage-design-review/stage1-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-299-ipad-layout-fix-design-policy.md",
+  "target": "design_policy_only"
+}

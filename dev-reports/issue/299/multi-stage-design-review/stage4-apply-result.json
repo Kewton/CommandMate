@@ -1,0 +1,86 @@
+{
+  "apply_stage": "stage4",
+  "issue_number": 299,
+  "status": "success",
+  "design_doc_updated": true,
+  "summary_report_created": true,
+  "applied_findings": [
+    {
+      "id": "F001",
+      "severity": "nice_to_have",
+      "category": "情報漏洩",
+      "status": "noted",
+      "section_updated": "レビュー指摘事項サマリー (Stage 4)"
+    },
+    {
+      "id": "F002",
+      "severity": "nice_to_have",
+      "category": "DOM操作",
+      "status": "noted",
+      "section_updated": "レビュー指摘事項サマリー (Stage 4), セキュリティ設計 6.4"
+    },
+    {
+      "id": "F003",
+      "severity": "nice_to_have",
+      "category": "Clickjacking",
+      "status": "noted",
+      "section_updated": "レビュー指摘事項サマリー (Stage 4), セキュリティ設計 6.4"
+    },
+    {
+      "id": "F004",
+      "severity": "nice_to_have",
+      "category": "XSS",
+      "status": "noted",
+      "section_updated": "レビュー指摘事項サマリー (Stage 4), セキュリティ設計 6.4"
+    },
+    {
+      "id": "F005",
+      "severity": "nice_to_have",
+      "category": "DOM操作",
+      "status": "noted",
+      "section_updated": "レビュー指摘事項サマリー (Stage 4), セキュリティ設計 6.4"
+    }
+  ],
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "item": "F001: navigator.platform非推奨API（情報漏洩リスクなし）",
+        "section_updated": "レビュー指摘事項サマリー",
+        "status": "noted"
+      },
+      {
+        "item": "F002: DOM走査の読み取り専用安全性確認",
+        "section_updated": "セキュリティ設計 6.4",
+        "status": "noted"
+      },
+      {
+        "item": "F003: z-index変更のClickjacking影響なし確認",
+        "section_updated": "セキュリティ設計 6.4",
+        "status": "noted"
+      },
+      {
+        "item": "F004: XSS保護が全画面モードで維持される確認",
+        "section_updated": "セキュリティ設計 6.4",
+        "status": "noted"
+      },
+      {
+        "item": "F005: Portal追加のDOM安全性確認",
+        "section_updated": "セキュリティ設計 6.4",
+        "status": "noted"
+      }
+    ]
+  },
+  "skipped": [],
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー (Stage 4)",
+    "セキュリティ設計 6.4",
+    "フッター"
+  ],
+  "design_doc_path": "dev-reports/design/issue-299-ipad-layout-fix-design-policy.md",
+  "summary_report_path": "dev-reports/issue/299/multi-stage-design-review/summary-report.md",
+  "update_summary": "Stage 4セキュリティレビュー承認を設計方針書に記録、サマリーレポート作成完了",
+  "timestamp": "2026-02-18T00:00:00Z"
+}

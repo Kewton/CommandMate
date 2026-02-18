@@ -1,0 +1,150 @@
+{
+  "issue_number": 299,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-18",
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "overall_quality": "medium"
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "z-indexの記載がコード実態と不一致。Issueの仮説および影響範囲の記載ではModal=z-50（Z_INDEX.MODAL）として分析しているが、実際のModal.tsxはz-[9999]をハードコードしている。このため、MAXIMIZED_EDITOR(z-55)がModalの上に来るという前提が誤りであり、白画面問題（症状3）の根本原因分析が不正確になっている。",
+        "location": "根本原因の仮説 > 症状3: 全画面表示時の白画面",
+        "recommendation": "Modal.tsxの実際のz-index（9999）を明記し、Portal経由のMaximized Editor（z-55）がModalのbackdrop（z-9999）より下に位置するため白画面になる、というメカニズムに修正する。z-index.tsのMODAL定数(50)とModal.tsxの実装値(9999)の乖離も根本課題として記載すべき。",
+        "evidence": "src/config/z-index.ts:32 MODAL: 50 vs src/components/ui/Modal.tsx:86 z-[9999]"
+      },
+      {
+        "id": "MF-2",
+        "category": "正確性",
+        "issue": "iPad横置き時のbreakpoint記載が不正確。IssueではiPad横置きを「1024px以上」と記載しているが、実際の判定ロジックはMOBILE_BREAKPOINT=768で、iPad portrait(768px)でも `768 < 768 = false` となりデスクトップ扱いになる。横置きに限らず縦置きでもデスクトップレイアウトが適用される点を正確に記載すべき。",
+        "location": "根本原因の仮説 > 症状1・2: iPad横置きレイアウト崩れ",
+        "recommendation": "MOBILE_BREAKPOINT=768であること、iPad portraitでも768pxなのでisMobile=falseになることを明記し、「横置きのみ」ではなく「iPad全般でデスクトップ扱い」であることを正確に記載。症状1・2が「横置きのみ」と報告されている理由（縦置きではレイアウトが偶然崩れにくい可能性）も考察を追加すべき。",
+        "evidence": "src/hooks/useIsMobile.ts:15 MOBILE_BREAKPOINT = 768, line:62 window.innerWidth < breakpoint"
+      },
+      {
+        "id": "MF-3",
+        "category": "正確性",
+        "issue": "症状4のスワイプ解除問題で記載されているthresholdの値と条件が不正確。MarkdownEditor.tsxではthreshold=100で、swipeの有効条件は `enabled: isMaximized && isMobile` である。iPadではisMobile=falseのため無効。症状4はスマホのみで発生するが、根本原因として「コンテンツ内スクロールとスワイプジェスチャーの判定ロジック」が区別されていない問題が核心であり、threshold引き上げだけでは解決しない点が対策案に不足している。",
+        "location": "根本原因の仮説 > 症状4: スマホ全画面スクロール解除 / 対策案 > 症状4",
+        "recommendation": "対策案に「scrollable要素内でのスワイプ検出無効化」を主要対策として明記し、threshold引き上げは補助的対策とする。具体的にはtouchstart時にevent.targetがscrollable要素内かを判定し、スクロール可能領域ではswipe検出を抑制するロジックが必要。",
+        "evidence": "src/components/worktree/MarkdownEditor.tsx:178-186, src/hooks/useSwipeGesture.ts:160-171"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "navigator.platformの非推奨問題がIssue本文に記載されていない。useFullscreen.tsのisIOSDevice()はnavigator.platform（MDNで非推奨）を使用しており、将来のブラウザバージョンで動作しなくなるリスクがある。Issue #299の修正スコープにこの技術的負債を含めるか明示的に判断すべき。",
+        "location": "根本原因の仮説 > 症状3 / 影響範囲",
+        "recommendation": "navigator.platform非推奨の問題を対策案に追記する。代替案として navigator.userAgentData（Chromium系）やUA文字列解析の改善を検討。現時点でnavigator.userAgentDataは未使用（codebase検索で0件）。",
+        "evidence": "src/hooks/useFullscreen.ts:67 navigator.platform === 'MacIntel'"
+      },
+      {
+        "id": "SF-2",
+        "category": "明確性",
+        "issue": "受け入れ条件（Acceptance Criteria）が明示的に定義されていない。「期待する動作」はあるが、具体的なテスト可能な受け入れ条件がないため、修正完了の判定基準が曖昧。",
+        "location": "Issue全体",
+        "recommendation": "以下のような受け入れ条件を追加すべき: (1) iPad Chrome横置き・縦置きでWorktree一覧画面のレイアウトが正常表示される (2) iPad Chrome横置き・縦置きでMarkdownファイル表示が正常 (3) iPad Chrome縦・横でMarkdownエディタ全画面表示が白画面にならない (4) スマホChrome全画面表示中の上スクロールで全画面が解除されない (5) 既存のデスクトップ・モバイルのレイアウトが破壊されていない",
+        "evidence": "Issue本文に「受け入れ条件」セクションなし"
+      },
+      {
+        "id": "SF-3",
+        "category": "完全性",
+        "issue": "症状3（白画面）のPortalとModalの相互作用メカニズムの説明が不十分。MarkdownEditorはModal内部で使用されており、全画面モード時にPortal（z-55）で脱出するが、Modalのbackdrop（z-9999）が上に残るため白画面になるという因果関係が記載されていない。",
+        "location": "根本原因の仮説 > 症状3",
+        "recommendation": "MarkdownEditorのレンダリングパスを明確に記載: (1) WorktreeDetailRefactored.tsx → Modal(z-9999) → MarkdownEditor (2) 全画面時: Portal(z-55)で脱出 → ただしModal backdrop(z-9999)が上に残留 → 白画面。これが白画面の直接的メカニズムと考えられる。",
+        "evidence": "src/components/worktree/WorktreeDetailRefactored.tsx:1847-1863 Modal内でMarkdownEditor使用, src/components/ui/Modal.tsx:86 z-[9999], src/components/worktree/MarkdownEditor.tsx:886 Portal z-55"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "影響範囲の変更対象ファイルにModal.tsxが含まれていない。z-index管理の見直し（z-index.tsのMODAL定数とModal.tsxの実装値の統一）が必要であり、Modal.tsxも変更対象候補に含めるべき。",
+        "location": "影響範囲 > 変更対象ファイル（候補）",
+        "recommendation": "変更対象ファイルに `src/components/ui/Modal.tsx` を追加。z-index.tsの定数とModal.tsxの実装値の乖離解消も対策案に含める。",
+        "evidence": "src/components/ui/Modal.tsx:86 z-[9999] vs src/config/z-index.ts:32 MODAL: 50"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "スマホ（症状4）のスクリーンショットがない。再現状況の視覚的な証拠がないため、レビュアーや実装者が問題を正確に把握しにくい。",
+        "location": "スクリーンショット > スマホ",
+        "recommendation": "可能であればスマホでの再現時のスクリーンショットまたは画面収録を追加。特にスクロール操作で全画面が解除される瞬間のキャプチャがあると有用。"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "iPadのモデル・iPadOSバージョン・Chromeバージョンの記載がない。iPad Air、iPad Pro等でViewportサイズが異なるため、具体的な環境情報があると再現しやすい。",
+        "location": "環境",
+        "recommendation": "iPadモデル名、iPadOSバージョン、Chromeバージョンを追記。iPad Air 768px vs iPad Pro 1024px等でレイアウト崩れの程度が異なる可能性がある。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "完全性",
+        "issue": "関連Issue（#104: iOS全画面表示対応）へのリンクがない。Issue #104で導入されたCSS fallback/Portal機構がこの問題の前提であるため、関連として明示すべき。",
+        "location": "Issue全体",
+        "recommendation": "Related: #104 を追記し、iOS全画面対応で導入された機構がベースであることを明示。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/hooks/useIsMobile.ts",
+      "relevance": "MOBILE_BREAKPOINT=768の判定ロジック。iPad全般でisMobile=false。",
+      "key_lines": [15, 62]
+    },
+    {
+      "file": "src/hooks/useFullscreen.ts",
+      "relevance": "isIOSDevice()検出ロジック（navigator.platform非推奨）、CSS fallback制御",
+      "key_lines": [57, 67, 219]
+    },
+    {
+      "file": "src/hooks/useSwipeGesture.ts",
+      "relevance": "スワイプ検出ロジック。コンテンツスクロールとスワイプの区別なし。",
+      "key_lines": [49, 160, 167]
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "全画面表示、Portal機構、スワイプ検出、z-index制御の統合ポイント",
+      "key_lines": [178, 185, 476, 493, 886]
+    },
+    {
+      "file": "src/components/ui/Modal.tsx",
+      "relevance": "z-[9999]ハードコード。Z_INDEX.MODAL(50)と乖離。白画面問題の直接要因。",
+      "key_lines": [86]
+    },
+    {
+      "file": "src/config/z-index.ts",
+      "relevance": "z-index定数管理。MODAL=50が実態と不一致。MAXIMIZED_EDITOR=55。",
+      "key_lines": [32, 35]
+    },
+    {
+      "file": "src/components/layout/AppShell.tsx",
+      "relevance": "レスポンシブレイアウト切替。isMobile判定でDesktop/Mobile分岐。",
+      "key_lines": [59, 62, 98]
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "MarkdownEditorをModal内でレンダリング。白画面問題の起点。",
+      "key_lines": [1847, 1855, 2073, 2081]
+    },
+    {
+      "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+      "relevance": "2カラムレイアウト。iPad横置き時のデスクトップレイアウト。",
+      "key_lines": [238, 267]
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "z-index.ts、useFullscreen.ts、MarkdownEditor.tsx等のモジュール説明"
+    }
+  ]
+}
