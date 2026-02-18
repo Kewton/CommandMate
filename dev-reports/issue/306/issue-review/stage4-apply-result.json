@@ -1,0 +1,79 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 306,
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "status": "applied",
+        "change_summary": "isSessionHealthy()戻り値変更がisClaudeRunning()に波及する破壊的変更の防止策を反映。対策4に「破壊的変更の防止」セクションを追加し、isClaudeRunning()での.healthy取り出しとensureHealthySession()の修正を明記。実装タスクに2項目追加。受入条件に「isClaudeRunning()のboolean戻り値維持」を追加。変更対象ファイル表にisClaudeRunning()/ensureHealthySession()の修正を追記。"
+      },
+      {
+        "id": "MF-002",
+        "status": "applied",
+        "change_summary": "isSessionHealthy()のreason値テストのためのexport戦略を設計判断として明記。対策4に「isSessionHealthy()のexport戦略」セクションを追加し、@internalアノテーション付きexportパターン（clearCachedClaudePath()の既存慣例に従う）を推奨案として記載。実装タスクに@internal export項目を追加。テスト影響の整理（既存11+3ケースは修正不要、新規reason検証テスト追加）を実装タスクに追記。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "status": "applied",
+        "change_summary": "CodexTool/GeminiToolのヘルスチェック非対称性を関連コンポーネントセクションに追記。Issue #306のスコープ外であることを明記しつつ、将来的なヘルスチェック導入の別Issue候補として認識。"
+      },
+      {
+        "id": "SF-002",
+        "status": "applied",
+        "change_summary": "対策2にstartAutoYesPolling()のpollerState初期化コード修正を追加。lastAnsweredPromptKey: null の初期値追加のコード例を明記。実装タスクに初期化修正項目を追加。変更対象ファイル表にstartAutoYesPolling()の初期化修正を追記。"
+      },
+      {
+        "id": "SF-003",
+        "status": "applied",
+        "change_summary": "対策5にCOOLDOWN_INTERVAL_MS定数化とexportの具体例を追加。実装タスクのクールダウン項目にCOOLDOWN_INTERVAL_MS定数化とscheduleNextPoll()でのinterval切り替えを明記。テスト項目に既存テスト影響の整理（応答を伴わないパスは影響なし）とCOOLDOWN_INTERVAL_MS使用によるタイミング値ハードコーディング回避を追記。"
+      },
+      {
+        "id": "SF-004",
+        "status": "applied",
+        "change_summary": "対策3のスコープをcli-patterns.tsへのパターン追加のみに限定する旨を明記。response-poller.tsでの利用やUI通知メカニズムの実装は別Issueとして切り出すことを記載。実装タスクとコンテキスト残量低下UI通知項目に「別Issue候補」を追記。"
+      },
+      {
+        "id": "SF-005",
+        "status": "applied",
+        "change_summary": "対策1のコード例に空行フィルタリングロジックを追加。lines.filter(l => l.trim() !== '').pop()で非空の最後の行を使用するパターンに変更。「実装上の注意」ノートを追加してtmux capture-pane出力の末尾空行問題を明記。実装タスクにも空行フィルタリングの注意を追記。"
+      },
+      {
+        "id": "SF-006",
+        "status": "applied",
+        "change_summary": "isSessionHealthy()を@internal exportする設計判断を対策4に新セクションとして追加。clearCachedClaudePath()の既存慣例への参照、他案（isClaudeRunning()戻り値変更、console.warnスパイ）の非推奨理由を明記。コード例付きで@internalアノテーションのパターンを示した。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "status": "applied",
+        "change_summary": "src/lib/session-cleanup.tsを関連コンポーネントセクションに追加。stopAutoYesPollingのインターフェース変更なしで変更不要だが、pollerステート管理の一部として認識する旨を記載。"
+      },
+      {
+        "id": "NTH-002",
+        "status": "applied",
+        "change_summary": "getClaudeSessionState()のヘルスチェック非対称性を「設計メモ」セクションとして影響範囲に追加。変更不要であり、軽量UIクエリ用の設計意図（JSDoc C-S3-002文書化済み）であることを記載。"
+      },
+      {
+        "id": "NTH-003",
+        "status": "skipped",
+        "reason": "Issue分割は見送り。対策間の独立性は認識した上で、現状のまま1 Issueで進行する判断。レビュー履歴に記録済み。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 10,
+    "skipped": 1
+  },
+  "changes_summary": "Stage 3影響範囲レビューの全11件（Must Fix 2件、Should Fix 6件、Nice to Have 3件）のうち10件を反映、1件（NTH-003: Issue分割）はスキップ。主な変更: (1) isSessionHealthy()戻り値変更に伴うisClaudeRunning()とensureHealthySession()の修正を実装タスクに明記、(2) @internal exportパターンによるreason値テスト戦略を設計判断として記載、(3) pollerState初期化コード修正・COOLDOWN_INTERVAL_MS定数化・空行フィルタリング等の実装詳細を追加、(4) CodexTool/GeminiTool非対称性・session-cleanup.ts・getClaudeSessionState()を関連コンポーネントに追記、(5) 対策3のスコープをcli-patterns.tsのみに限定。",
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/306"
+  }
+}

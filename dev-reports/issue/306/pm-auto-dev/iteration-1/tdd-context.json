@@ -1,0 +1,33 @@
+{
+  "issue_number": 306,
+  "acceptance_criteria": [
+    "Claude CLIのステータスバー 'Context left until auto-compact: N%' がシェルプロンプトと誤判定されないこと",
+    "サーバー側Auto-Yes Pollerが同一プロンプトに対して1回のみ応答を送信すること",
+    "応答送信後にクールダウン期間（5秒）が適用されること",
+    "ヘルスチェックによるセッションkill時にreason付きログが出力されること",
+    "既存のAuto-Yesテストが全てパスすること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/lib/prompt-key.ts を新規作成（generatePromptKey共通ユーティリティ）",
+    "Task 2.1: src/lib/claude-session.ts にHealthCheckResult interfaceを@internal exportで追加、isSessionHealthy()の戻り値をPromise<HealthCheckResult>に変更、全returnパスをHealthCheckResult形式に変更（empty output / error pattern / shell prompt ending / capture error / healthy）",
+    "Task 2.2: src/lib/claude-session.ts のSHELL_PROMPT_ENDINGS多段防御実装（行長チェック先行→SHELL_PROMPT_ENDINGS判定の順）",
+    "Task 2.3: src/lib/claude-session.ts のisClaudeRunning()にawait追加しresult.healthyを返すよう修正、ensureHealthySession()にreason付きconsole.warnログを追加",
+    "Task 3.1: src/lib/auto-yes-manager.ts のAutoYesPollerStateにlastAnsweredPromptKey: string | nullフィールドを追加、startAutoYesPolling()の初期化コードに lastAnsweredPromptKey: null を追加",
+    "Task 3.2: src/lib/auto-yes-manager.ts にisDuplicatePrompt()privateヘルパーを追加、pollAutoYes()にプロンプト非検出時のnullリセットと重複チェックロジックを追加",
+    "Task 3.3: src/lib/auto-yes-manager.ts にCOOLDOWN_INTERVAL_MS=5000定数を追加、scheduleNextPoll()にoverride_intervalオプションパラメータ（下限値ガード付き）を追加、応答成功後にCOOLDOWN_INTERVAL_MSでearly return",
+    "Task 3.4: src/hooks/useAutoYes.ts のpromptKey生成をgeneratePromptKey()に置換",
+    "Task 4.1: tests/unit/lib/prompt-key.test.ts を新規作成",
+    "Task 4.2: tests/unit/lib/claude-session.test.ts に偽陽性防止テスト・reason検証テストを追加",
+    "Task 4.3: tests/unit/lib/auto-yes-manager.test.ts に重複防止テスト・クールダウンテストを追加"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-306-session-stability-design-policy.md",
+  "work_plan_path": "dev-reports/issue/306/work-plan.md",
+  "key_files": [
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/hooks/useAutoYes.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ]
+}

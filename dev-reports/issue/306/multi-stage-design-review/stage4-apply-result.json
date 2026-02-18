@@ -1,0 +1,16 @@
+{
+  "stage": 4,
+  "applied_findings": ["S4-F001", "S4-F002", "S4-F003"],
+  "skipped_findings": [],
+  "changes_summary": "セキュリティレビュー（Stage 4）の3件のShould Fix指摘事項を設計方針書に反映。S4-F001: generatePromptKey()の用途制限（インメモリ文字列比較専用、ログ/DB/HTML出力時のサニタイズ要件）をセクション4に追加。S4-F002: ensureHealthySession()のログ出力安全性補足（lastLineのtrim処理によるログインジェクション防御、MAX_SHELL_PROMPT_LENGTH=40による長さ制限）をセクション4の情報漏洩行に追記。S4-F003: scheduleNextPoll()のoverrideInterval下限値ガード（Math.max(interval, POLLING_INTERVAL_MS)）をセクション3.4のコード例に追加し、セクション4にDoS防止の設計根拠を記載。テスト設計（セクション6.4）にoverrideInterval=0/負値のガードテストケースを追加。レビュー履歴、指摘事項サマリー（11d）、実装チェックリストも更新。",
+  "design_doc_updated": true,
+  "sections_updated": [
+    "3.4 クールダウンパターン（scheduleNextPollコード例にS4-F003下限値ガード追加）",
+    "4 セキュリティ設計（S4-F001用途制限、S4-F002ログ安全性補足、S4-F003下限値ガード設計根拠）",
+    "6.4 対策5テスト（S4-F003テストケース追加）",
+    "10 レビュー履歴（Stage 4追加）",
+    "11d レビュー指摘事項サマリー（Stage 4新規セクション）",
+    "12 実装チェックリスト（S4-F001/S4-F002/S4-F003追加）"
+  ],
+  "timestamp": "2026-02-18T23:45:00Z"
+}

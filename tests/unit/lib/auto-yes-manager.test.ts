@@ -17,6 +17,7 @@ import {
   MAX_BACKOFF_MS,
   MAX_CONSECUTIVE_ERRORS,
   THINKING_CHECK_LINE_COUNT,
+  COOLDOWN_INTERVAL_MS,
   type AutoYesState,
 } from '@/lib/auto-yes-manager';
 import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config';
@@ -947,6 +948,226 @@ describe('auto-yes-manager', () => {
       // Cleanup
       stopAutoYesPolling('wt-offset-zero');
       vi.mocked(autoYesResolver.resolveAutoAnswer).mockRestore();
+    });
+  });
+
+  // ==========================================================================
+  // Issue #306: Duplicate prevention, cooldown, and initialization
+  // ==========================================================================
+  describe('Issue #306: pollAutoYes - duplicate prevention', () => {
+    it('should not send duplicate response for same prompt', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-dup', true);
+      startAutoYesPolling('wt-dup', 'claude');
+
+      // Mock: same yes/no prompt every time
+      const promptOutput = 'Do you want to proceed? (y/n)';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+
+      // First poll - should respond
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      expect(sendKeys).toHaveBeenCalledTimes(2); // 'y' + Enter
+
+      vi.mocked(sendKeys).mockClear();
+
+      // Second poll with same prompt - should be skipped (duplicate)
+      await vi.advanceTimersByTimeAsync(COOLDOWN_INTERVAL_MS + 100);
+      expect(sendKeys).not.toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-dup');
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+    });
+
+    it('should reset lastAnsweredPromptKey when no prompt detected', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-reset', true);
+      startAutoYesPolling('wt-reset', 'claude');
+
+      // First poll - prompt detected, responds
+      const promptOutput = 'Do you want to proceed? (y/n)';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      expect(sendKeys).toHaveBeenCalled();
+      vi.mocked(sendKeys).mockClear();
+
+      // Second poll - no prompt (processing)
+      vi.mocked(captureSessionOutput).mockResolvedValue('Processing...');
+      await vi.advanceTimersByTimeAsync(COOLDOWN_INTERVAL_MS + 100);
+
+      // Third poll - same prompt again after reset, should respond
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      expect(sendKeys).toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-reset');
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+    });
+
+    it('should skip response when same promptKey detected consecutively without reset (F009)', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-f009', true);
+      startAutoYesPolling('wt-f009', 'claude');
+
+      // Same prompt every time (no non-prompt phase in between)
+      const promptOutput = 'Do you want to proceed? (y/n)';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+
+      // First poll - responds
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      const firstCallCount = vi.mocked(sendKeys).mock.calls.length;
+      expect(firstCallCount).toBeGreaterThan(0);
+
+      vi.mocked(sendKeys).mockClear();
+
+      // Second poll - same prompt key, no reset -> should skip
+      await vi.advanceTimersByTimeAsync(COOLDOWN_INTERVAL_MS + 100);
+      expect(sendKeys).not.toHaveBeenCalled();
+
+      // Third poll - still same prompt key, still no reset -> should skip
+      vi.mocked(sendKeys).mockClear();
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      expect(sendKeys).not.toHaveBeenCalled();
+
+      // Cleanup
+      stopAutoYesPolling('wt-f009');
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+    });
+  });
+
+  describe('Issue #306: pollAutoYes - cooldown', () => {
+    it('should use cooldown interval after successful response', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-cool', true);
+      startAutoYesPolling('wt-cool', 'claude');
+
+      // First poll - prompt detected, responds
+      const promptOutput = 'Do you want to proceed? (y/n)';
+      vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      expect(sendKeys).toHaveBeenCalled();
+
+      // Verify COOLDOWN_INTERVAL_MS constant value
+      expect(COOLDOWN_INTERVAL_MS).toBe(5000);
+
+      // After response, next poll should be scheduled at COOLDOWN_INTERVAL_MS.
+      // Track how many captureSessionOutput calls happen after this point.
+      const callCountAfterFirstResponse = vi.mocked(captureSessionOutput).mock.calls.length;
+
+      // Advance by less than COOLDOWN_INTERVAL_MS but more than POLLING_INTERVAL_MS.
+      // If cooldown is working, no poll should happen at POLLING_INTERVAL_MS.
+      vi.mocked(captureSessionOutput).mockResolvedValue('Processing...');
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      // Should NOT have polled yet (cooldown is 5s, we advanced only ~2.1s)
+      const callsAfter2s = vi.mocked(captureSessionOutput).mock.calls.length - callCountAfterFirstResponse;
+      expect(callsAfter2s).toBe(0);
+
+      // Advance the remaining cooldown time to trigger the next poll
+      await vi.advanceTimersByTimeAsync(COOLDOWN_INTERVAL_MS - POLLING_INTERVAL_MS);
+      const callsAfterCooldown = vi.mocked(captureSessionOutput).mock.calls.length - callCountAfterFirstResponse;
+      expect(callsAfterCooldown).toBeGreaterThan(0);
+
+      // Cleanup
+      stopAutoYesPolling('wt-cool');
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+    });
+
+    it('should use default interval when no response sent', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      vi.mocked(captureSessionOutput).mockReset();
+
+      // Setup
+      setAutoYesEnabled('wt-default-int', true);
+      startAutoYesPolling('wt-default-int', 'claude');
+
+      // No prompt detected
+      vi.mocked(captureSessionOutput).mockResolvedValue('Processing...');
+
+      // First poll triggers at POLLING_INTERVAL_MS
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      expect(vi.mocked(captureSessionOutput).mock.calls.length).toBe(1);
+
+      // Next poll should also be at POLLING_INTERVAL_MS (not COOLDOWN_INTERVAL_MS)
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(captureSessionOutput).mockResolvedValue('Still processing...');
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      expect(vi.mocked(captureSessionOutput).mock.calls.length).toBe(1);
+
+      // Cleanup
+      stopAutoYesPolling('wt-default-int');
+      vi.mocked(captureSessionOutput).mockReset();
+    });
+  });
+
+  describe('Issue #306: startAutoYesPolling - initialization', () => {
+    it('should initialize lastAnsweredPromptKey as null', () => {
+      setAutoYesEnabled('wt-init', true);
+      startAutoYesPolling('wt-init', 'claude');
+
+      // Access poller state through globalThis
+      const pollerState = globalThis.__autoYesPollerStates?.get('wt-init');
+      expect(pollerState).toBeDefined();
+      expect(pollerState?.lastAnsweredPromptKey).toBeNull();
+
+      // Cleanup
+      stopAutoYesPolling('wt-init');
+    });
+  });
+
+  describe('Issue #306: COOLDOWN_INTERVAL_MS constant', () => {
+    it('should export COOLDOWN_INTERVAL_MS as 5000ms', () => {
+      expect(COOLDOWN_INTERVAL_MS).toBe(5000);
     });
   });
 });

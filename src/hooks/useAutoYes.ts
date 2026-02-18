@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { resolveAutoAnswer } from '@/lib/auto-yes-resolver';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import { generatePromptKey } from '@/lib/prompt-key';
 import type { PromptData } from '@/types/models';
 
 /** Duplicate prevention window in milliseconds (3 seconds) */
@@ -42,7 +43,13 @@ export interface UseAutoYesReturn {
 }
 
 /**
- * Hook that automatically responds to prompts when auto-yes is enabled
+ * Hook that automatically responds to prompts when auto-yes is enabled.
+ *
+ * Uses a ref-based duplicate prevention mechanism combined with server-side
+ * timestamp checking to avoid sending the same response multiple times.
+ *
+ * @param params - Hook parameters including worktree context and prompt state
+ * @returns Object containing the last auto-response answer for UI display
  */
 export function useAutoYes({
   worktreeId,
@@ -73,8 +80,8 @@ export function useAutoYes({
       }
     }
 
-    // Generate composite key for duplicate prevention
-    const promptKey = `${promptData.type}:${promptData.question}`;
+    // Generate composite key for duplicate prevention (F002: DRY - shared utility)
+    const promptKey = generatePromptKey({ type: promptData.type, question: promptData.question });
     if (lastAutoRespondedRef.current === promptKey) return;
 
     const answer = resolveAutoAnswer(promptData);

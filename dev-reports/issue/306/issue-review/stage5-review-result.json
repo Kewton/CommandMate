@@ -1,0 +1,205 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 306,
+  "review_focus": "通常",
+  "review_date": "2026-02-18",
+  "previous_findings_addressed": {
+    "stage1_findings": [
+      {
+        "id": "MF-001",
+        "addressed": true,
+        "note": "対策1のコード例が現行コード構造に合致するよう修正済み。全体末尾から最終行末尾への変更の意図・設計根拠が明記されている。空行フィルタリングロジック（lines.filter(l => l.trim() !== '').pop()）も追加済み。"
+      },
+      {
+        "id": "MF-002",
+        "addressed": true,
+        "note": "3文字全て（$, %, #）の偽陽性リスク分析テーブルと多段防御（案A個別パターン除外 + 案B行長チェック40文字）の推奨方式・コード例が記載済み。"
+      },
+      {
+        "id": "MF-003",
+        "addressed": true,
+        "note": "lastAnsweredPromptKeyのリセット条件（プロンプト非検出時にnullリセット）が明記済み。リセットロジックのコード例が追加済み。クライアント側（useAutoYes.ts:60-62）との対称性が記載済み。startAutoYesPolling()の初期化コード修正も追加済み。"
+      },
+      {
+        "id": "SF-001",
+        "addressed": true,
+        "note": "対策4がisSessionHealthy()の戻り値拡張方式（HealthCheckResult interface）に変更済み。テスト容易性の設計根拠も記載済み。"
+      },
+      {
+        "id": "SF-002",
+        "addressed": true,
+        "note": "対策2（主防御: 論理的重複防止）と対策5（副防御: Claude CLI処理時間確保）の役割分担・動作関係が明確に記載済み。"
+      },
+      {
+        "id": "SF-003",
+        "addressed": true,
+        "note": "受入条件が「自動テスト可能な条件」（12項目）と「手動検証項目」（1項目）に分離済み。vi.useFakeTimersやCOOLDOWN_INTERVAL_MS定数を使った具体的テスト方法が記載されている。"
+      },
+      {
+        "id": "SF-004",
+        "addressed": true,
+        "note": "関連コンポーネントにsrc/lib/prompt-answer-sender.tsとsrc/lib/cli-session.tsが追加済み。"
+      },
+      {
+        "id": "SF-005",
+        "addressed": true,
+        "note": "概要が「主に3つの原因と1つのデバッグ改善点」に修正済み。原因4が「付帯的な改善点」として分離され、直接原因ではないことが明記されている。"
+      },
+      {
+        "id": "SF-006",
+        "addressed": true,
+        "note": "テストファイルパスがtests/unit/lib/claude-session.test.ts、tests/unit/lib/auto-yes-manager.test.tsに正確に修正済み。"
+      },
+      {
+        "id": "NTH-001",
+        "addressed": true,
+        "note": "対策3にCONTEXT_REMAINING_PATTERNの正規表現パターンとextractContextRemaining()ヘルパー関数のコード例が追加済み。"
+      },
+      {
+        "id": "NTH-002",
+        "addressed": false,
+        "note": "タイトル変更は影響範囲レビュー（Stage 3-4）でのIssue分割検討と合わせて見送り。Stage 4でNTH-003としてIssue分割自体も見送り判断。現状のタイトルのまま進行する判断は記録されており、意図的なスキップとして妥当。"
+      },
+      {
+        "id": "NTH-003",
+        "addressed": true,
+        "note": "パターンBに/pm-auto-issue2devの補足説明が追加済み。パターンCに再現目安（20-30分以上実行）が追加済み。"
+      }
+    ],
+    "stage3_findings": [
+      {
+        "id": "MF-001",
+        "addressed": true,
+        "note": "isSessionHealthy()戻り値変更がisClaudeRunning()に波及する破壊的変更の防止策が詳細に記載済み。isClaudeRunning()での.healthy取り出し修正コード例、ensureHealthySession()の修正、注意書き（オブジェクトは常にtruthyであるため全てtrue扱いになる問題）が全て含まれている。受入条件にも「isClaudeRunning()のboolean戻り値維持」が追加済み。"
+      },
+      {
+        "id": "MF-002",
+        "addressed": true,
+        "note": "isSessionHealthy()のexport戦略として@internalアノテーション付きexportが設計判断として明記済み。clearCachedClaudePath()の既存慣例への参照、他案の非推奨理由（テスト影響の網羅: 既存11+3ケースは修正不要、新規reason検証テスト追加）が記載済み。"
+      },
+      {
+        "id": "SF-001",
+        "addressed": true,
+        "note": "CodexTool/GeminiToolのヘルスチェック非対称性が関連コンポーネントセクションに記載済み。スコープ外・将来の別Issue候補であることも明記済み。"
+      },
+      {
+        "id": "SF-002",
+        "addressed": true,
+        "note": "startAutoYesPolling()のpollerState初期化コードにlastAnsweredPromptKey: null追加のコード例が対策2に明記済み。"
+      },
+      {
+        "id": "SF-003",
+        "addressed": true,
+        "note": "COOLDOWN_INTERVAL_MS定数化とexportの具体例が追加済み。既存テストへの影響整理（応答を伴わないパスは影響なし）も記載済み。"
+      },
+      {
+        "id": "SF-004",
+        "addressed": true,
+        "note": "対策3のスコープがcli-patterns.tsへのパターン追加のみに限定されることが明記済み。response-poller.tsでの利用は別Issueとして切り出す旨が記載済み。"
+      },
+      {
+        "id": "SF-005",
+        "addressed": true,
+        "note": "対策1のコード例に空行フィルタリングロジックが追加済み。実装上の注意ノートにtmux capture-pane出力の末尾空行問題が明記済み。"
+      },
+      {
+        "id": "SF-006",
+        "addressed": true,
+        "note": "@internal exportパターンの設計根拠と既存慣例（clearCachedClaudePath()）が対策4に追記済み。コード例付きで@internalアノテーションのパターンが示されている。"
+      },
+      {
+        "id": "NTH-001",
+        "addressed": true,
+        "note": "src/lib/session-cleanup.tsが関連コンポーネントに追加済み。"
+      },
+      {
+        "id": "NTH-002",
+        "addressed": true,
+        "note": "getClaudeSessionState()のヘルスチェック非対称性が設計メモセクションとして追記済み。"
+      },
+      {
+        "id": "NTH-003",
+        "addressed": false,
+        "note": "Issue分割は意図的に見送り。1 Issueで進行する判断がレビュー履歴に記録済み。妥当な判断。"
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "SF-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "対策1のコード例でisSessionHealthy()がasyncでなくなっている",
+      "description": "対策1のコード例では `return { healthy: false, reason: 'empty_output' }` や `return { healthy: false, reason: 'shell_prompt' }` を直接返しているが、現行のisSessionHealthy()はasync関数であり、getCleanPaneOutput()をawaitしている。対策4のコード例では `async function isSessionHealthy(sessionName: string): Promise<HealthCheckResult>` と正しくasync宣言されているが、対策1のコード例は関数の一部のみを示しているため、async/awaitの文脈が明確でない。対策1のコード例だけを見て実装した場合、関数全体のasync性質を見落とす可能性は低いが、対策1と対策4のコード例が同一関数の修正を示しているにもかかわらず、戻り値の型が対策1では暗黙的（HealthCheckResult型への言及なし）、対策4では明示的（HealthCheckResult interfaceを定義）という不整合がある。",
+      "location": "## 対策案 > 対策1 vs 対策4",
+      "suggestion": "対策1のコード例の先頭にコメントを追加して、対策4のHealthCheckResult型を使用することを明示する。例: `// 注: 戻り値型は対策4のHealthCheckResult（{ healthy: boolean; reason?: string }）を使用`。または、対策1と対策4のコード例を統合して1つの修正案として提示する。"
+    },
+    {
+      "id": "SF-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "対策1の$に対する偽陽性除外パターンが行長チェックのみで個別パターンが未定義",
+      "description": "偽陽性防止戦略テーブルでは `$` の個別除外パターンとして「行が長い場合（例: 40文字以上）はシェルプロンプトではない可能性が高いため除外」と記載されているが、対策1のコード例では `%` の個別パターン（`/\\d+%$/.test(lastLine)` で除外）のみが実装されている。`$` と `#` に対する個別パターン除外が第1段階のコードに含まれていない。行長チェック（第2段階）で `$` と `#` の大部分はカバーされるが、テーブルの記載とコード例の間に差異がある。特に `$` について、短い行で `$` で終わるケース（例: Bashプロンプトの `user@host ~$` vs Claude出力内の短い `echo $`）を区別する個別パターンが示されていない。",
+      "location": "## 対策案 > 対策1 > 3文字全てに対する偽陽性防止戦略",
+      "suggestion": "以下のいずれかを対応する: (A) テーブルの `$` と `#` の「個別除外パターン」列を「第2段階（行長チェック）で対応」に修正し、現時点で個別パターンは不要であることを明記する。(B) `$` と `#` にも個別パターンをコード例に追加する（例: `$` の場合 `if (ending === '$' && /\\w+\\$\\w/.test(lastLine)) return false;` 等）。推奨は案A -- 行長チェックで十分カバーされ、個別パターンの過剰設計を避けるため。"
+    },
+    {
+      "id": "SF-003",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "対策5のscheduleNextPoll()修正が現行コードの構造に合致していない",
+      "description": "Issueの対策5のコード例では `scheduleNextPoll(worktreeId, cliToolId, afterResponse: boolean = false)` と第3引数を追加しているが、現行のscheduleNextPoll()（auto-yes-manager.ts:374-381）は `pollerState.currentInterval` を使用してsetTimeoutを設定している。コード例のinterval切り替えロジック `const interval = afterResponse ? COOLDOWN_INTERVAL_MS : pollerState.currentInterval;` は正しいが、pollAutoYes()内でscheduleNextPollを呼び出す全箇所（L313, L323, L331, L368）のうち、応答送信後の呼び出し（L368付近）のみが `afterResponse: true` で呼ばれるべきことが明確でない。L368の `scheduleNextPoll(worktreeId, cliToolId)` は try-catch の外側にあり、成功時もエラー時も同じ引数で呼ばれるため、応答送信成功後とエラー後のクールダウン適用の違いを整理すべき。",
+      "location": "## 対策案 > 対策5",
+      "suggestion": "pollAutoYes()内でのscheduleNextPoll呼び出しパターンを明確化する。推奨: 応答送信成功後のみクールダウンを適用し、L368の共通scheduleNextPollは使用しない。代わりに:\n```typescript\n// 5. Send answer (成功時)\nawait sendPromptAnswer({...});\nscheduleNextPoll(worktreeId, cliToolId, true); // クールダウン適用\nreturn; // L368の共通scheduleNextPollをスキップ\n```\ncatchブロック内とtryブロック外のscheduleNextPollはデフォルト（afterResponse: false）のまま。"
+    },
+    {
+      "id": "NTH-001",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "HealthCheckResult interfaceの定義場所が未指定",
+      "description": "対策4で導入されるHealthCheckResult interfaceがどこに定義されるか明記されていない。src/lib/claude-session.ts内にインラインで定義するのか、src/types/に新ファイルを作成するのか、既存の型定義ファイルに追加するのかが不明。isSessionHealthy()が@internal exportで外部テストから使用される場合、HealthCheckResultもexportが必要になる。",
+      "location": "## 対策案 > 対策4",
+      "suggestion": "HealthCheckResultの定義場所を明記する。推奨: isSessionHealthy()と同じファイル（claude-session.ts）内にexport interfaceとして定義する。理由: (1) 使用範囲がclaude-session.ts内部とテストのみ、(2) 別ファイルに分離するほどの汎用性はない、(3) @internal exportの慣例（clearCachedClaudePath()）と合わせてファイル内に閉じる方が分かりやすい。"
+    },
+    {
+      "id": "NTH-002",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "レビュー履歴のNoteタグにStage 2/Stage 4の反映結果サマリーがない",
+      "description": "Issue本文冒頭のNoteタグは「Stage 3: 影響範囲レビュー」反映までしか言及していない。Stage 4の反映も実施済みであるが、Noteには反映されていない。レビュー履歴セクションにはStage 1とStage 3の指摘内容が詳細に記載されているが、各Stageの反映日時やステータスが一覧できる形式になっていない。",
+      "location": "Issue本文冒頭のNoteタグ / ## レビュー履歴",
+      "suggestion": "Noteタグを「Stage 4: 影響範囲指摘反映」まで更新する。例: 「このIssueは 2026-02-18 にレビュー結果（Stage 1-4: 通常レビュー・影響範囲レビュー・指摘反映）を反映して更新されました。」"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "total": 5,
+    "overall_quality": "high"
+  },
+  "overall_assessment": "Issue #306は4段階のレビュー（Stage 1-4）を経て大幅に改善されている。Stage 1の Must Fix 3件（コード例の現行コード整合、3文字全偽陽性対策、リセット条件明記）、Stage 3の Must Fix 2件（破壊的変更防止、@internal export戦略）は全て適切に反映されており、技術的な正確性・完全性が高いレベルに達している。今回のStage 5では Must Fix は0件で、残りの指摘は対策間のコード例の整合性（対策1と対策4の戻り値型の明示性の差）、テーブル記載とコード例の細部差異、pollAutoYes()内のscheduleNextPoll呼び出しパターンの明確化など、実装者が迷いにくくなるための改善提案にとどまる。Issue全体として、再現手順・根本原因分析・対策案・実装タスク・受入条件・影響範囲が網羅的に記載されており、実装に着手可能な状態である。",
+  "code_references": [
+    {
+      "file": "src/lib/claude-session.ts",
+      "lines": "58, 262-296, 306-313, 419-427",
+      "relevance": "SHELL_PROMPT_ENDINGS、isSessionHealthy()、ensureHealthySession()、isClaudeRunning() - 対策1・4の主要変更対象"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "31-42, 274-369, 374-381, 414-420",
+      "relevance": "AutoYesPollerState型、pollAutoYes()、scheduleNextPoll()、startAutoYesPolling() - 対策2・5の主要変更対象"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "対策3のCONTEXT_REMAINING_PATTERN追加先"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトのモジュール一覧との整合性確認"
+    }
+  ]
+}

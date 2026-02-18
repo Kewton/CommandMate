@@ -1,0 +1,33 @@
+{
+  "issue_number": 306,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_total": 163,
+      "tests_passed": 163,
+      "tests_failed": 0,
+      "new_tests_added": 27,
+      "typescript": "pass",
+      "lint": "pass"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 5,
+      "criteria_total": 5
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "PromptKeyInput interface抽出（ISP準拠）",
+        "MAX_SHELL_PROMPT_LENGTHをモジュールレベル定数に昇格",
+        "getErrorMessage()ヘルパー抽出（DRY）",
+        "15+関数にJSDoc追加"
+      ]
+    },
+    "docs": {
+      "status": "updated",
+      "files_updated": ["CLAUDE.md"]
+    }
+  }
+}

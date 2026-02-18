@@ -1,0 +1,97 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "issue_number": 306,
+  "timestamp": "2026-02-18T23:30:00Z",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S4-F001",
+      "severity": "should_fix",
+      "category": "OWASP-A03",
+      "title": "generatePromptKey()の入力にサニタイズが未適用",
+      "description": "generatePromptKey()は `${promptData.type}:${promptData.question}` を単純連結してキーを生成する。promptData.questionはtmuxペイン出力からの正規表現マッチにより抽出されるため、直接的なユーザー入力ではないが、Claude CLIの出力内容に依存する。生成されたキーはAutoYesPollerStateのlastAnsweredPromptKeyフィールド（インメモリMapの値のプロパティ）に保存され、文字列比較のみに使用される。現在の設計では、このキーがSQLクエリ、HTMLレンダリング、シェルコマンド構築に使用されることはない。しかし、将来的にキーがログ出力やDB保存に使用される場合に備え、設計書のセキュリティ設計セクション（セクション4）にpromptKeyの用途制限を明記すべきである。",
+      "suggestion": "セクション4のセキュリティ設計に以下を追加: 「generatePromptKey()の戻り値はインメモリの文字列比較にのみ使用する。ログ出力、DB保存、HTML表示に使用する場合はサニタイズを適用すること」"
+    },
+    {
+      "id": "S4-F002",
+      "severity": "should_fix",
+      "category": "ログ安全性",
+      "title": "ensureHealthySession()のログにセッション名が含まれる安全性確認",
+      "description": "設計書セクション3.1のensureHealthySession()で `console.warn(`[health-check] Session ${sessionName} unhealthy: ${result.reason}`)` というログ出力が追加される。sessionNameはgetSessionName()により `mcbd-claude-${worktreeId}` 形式で生成され、worktreeIdはisValidWorktreeId()（/^[a-zA-Z0-9_-]+$/）でバリデーション済みである。reasonフィールドは固定文字列（'empty output', 'capture error'）またはパターン由来文字列（'error pattern: ...'、'shell prompt ending detected: ...'）である。'shell prompt ending detected: ${lastLine}' の場合、lastLineはtmuxペイン出力の最終行であり、MAX_SHELL_PROMPT_LENGTH=40により40文字未満に制限されているが、tmuxペイン出力にはClaude CLIの応答内容が含まれる可能性がある。ログインジェクション（改行文字によるログ偽装）のリスクは低いが、設計書に明記されていない。",
+      "suggestion": "セクション4のセキュリティ設計テーブルの「情報漏洩」行に補足を追加: 「reason内のlastLineはtmuxペイン出力由来だが、MAX_SHELL_PROMPT_LENGTH=40により長さが制限されており、sensitive情報の漏洩リスクは限定的。lastLineにCR/LF文字が含まれる可能性は理論上あるが、.trim()処理により除去される」"
+    },
+    {
+      "id": "S4-F003",
+      "severity": "should_fix",
+      "category": "DoS",
+      "title": "COOLDOWN_INTERVAL_MSの下限値バリデーション未設計",
+      "description": "設計書ではCOOLDOWN_INTERVAL_MS=5000をexport constとして定義している。この値はscheduleNextPoll()のoverrideIntervalパラメータとして渡される。overrideIntervalはnumber型で、0や負の値が渡された場合にsetTimeoutの動作が変化する（0やマイナス値はほぼ即時実行となる）。現在のコードパスではCOOLDOWN_INTERVAL_MSは定数として使用され、外部入力から直接設定されることはないが、将来的にscheduleNextPoll()のoverrideIntervalに不正な値が渡された場合、事実上のビジーループとなりDoSリスクが生じる。",
+      "suggestion": "scheduleNextPoll()内でoverrideIntervalの下限値ガードを追加: `const interval = Math.max(overrideInterval ?? pollerState.currentInterval, POLLING_INTERVAL_MS)` とし、ポーリング間隔がPOLLING_INTERVAL_MS未満にならないことを保証する。設計書セクション3.4のscheduleNextPoll()コード例を更新すること。"
+    },
+    {
+      "id": "S4-F004",
+      "severity": "nice_to_have",
+      "category": "OWASP-A04",
+      "title": "lastAnsweredPromptKeyリセット条件の競合状態への耐性",
+      "description": "設計書セクション3.3では、プロンプト非検出時にlastAnsweredPromptKey=nullにリセットする設計である。pollAutoYes()はsetTimeoutによる再帰的ポーリングであり、Node.jsのシングルスレッドモデルにより同一worktreeIdに対する並行実行は発生しない。しかし、startAutoYesPolling()が同一worktreeIdに対して連続呼び出しされた場合、stopAutoYesPolling()で旧pollerを停止してから新pollerを開始する設計となっている（既存実装L408-411）。これにより旧pollerのsetTimeoutが発火するタイミングとpollerState.delete()のタイミングにごく短い窓が存在する可能性があるが、pollAutoYes()冒頭のpollerState存在チェックで安全にreturnされる。この安全性は既存設計で確保されており、Issue #306の変更では追加リスクは発生しない。",
+      "suggestion": "セクション4のセキュリティ設計に「Node.jsシングルスレッドモデルにより、同一worktreeIdの並行ポーリングは発生しない。startAutoYesPolling()の再呼び出し時は既存pollerの停止が先行する」と明記し、競合状態が設計上排除されていることを文書化する。"
+    },
+    {
+      "id": "S4-F005",
+      "severity": "nice_to_have",
+      "category": "OWASP-A04",
+      "title": "SHELL_PROMPT_ENDINGSの偽陽性を攻撃に利用するリスクは極めて低い",
+      "description": "設計書の多段防御パターン（セクション3.2）は、SHELL_PROMPT_ENDINGSの偽陽性防止に対して適切に設計されている。攻撃シナリオとして、攻撃者がClaude CLIの出力を制御してシェルプロンプト風の文字列を末尾に配置し、セッション再作成を意図的にトリガーするケースが考えられる。しかし、(1) セッション再作成は安全なリカバリアクションであり、データ損失や権限昇格は発生しない、(2) 攻撃者がClaude CLIの出力を制御するにはAPIレベルのアクセスが必要であり、既にそのレベルのアクセスがあれば他の攻撃ベクトルの方が有効、(3) MAX_SHELL_PROMPT_LENGTH=40により40文字以上の出力は無条件で健全判定される。よって実質的な攻撃リスクはない。",
+      "suggestion": "対応不要。設計書セクション4の「DoS防止: 改善」の評価は妥当。"
+    },
+    {
+      "id": "S4-F006",
+      "severity": "nice_to_have",
+      "category": "OWASP-A09",
+      "title": "エラーパターン検出のreason出力にregex.sourceが含まれる",
+      "description": "設計書セクション3.2（第0段階）で `return { healthy: false, reason: 'error pattern: ${regex.source}' }` が定義されている。regex.sourceはCLAUDE_SESSION_ERROR_REGEX_PATTERNSの正規表現ソース文字列であり、現在は `/Error:.*Claude/` のみ。この値はソースコードにハードコードされた定数であり、機密情報は含まない。将来的にエラーパターンが追加される場合も、パターン定数はソースコードに定義されるため、ログへのsensitive情報漏洩リスクはない。",
+      "suggestion": "対応不要。現在の設計で安全。パターン追加時にsensitive情報を含めないことをCLAUDE_SESSION_ERROR_REGEX_PATTERNSのJSDocに注記することを推奨。"
+    },
+    {
+      "id": "S4-F007",
+      "severity": "nice_to_have",
+      "category": "DoS",
+      "title": "重複応答防止メカニズムのバイパスリスク評価",
+      "description": "サーバー側のlastAnsweredPromptKeyによる重複防止は、プロンプト非検出時にnullリセットされる設計である。理論的には、tmux出力が非常に高速に切り替わり（例: Claude CLIの高速なエラーリトライ）、ポーリング間隔内にプロンプト検出→応答送信→非プロンプト状態→同一プロンプト再表示が完了する場合、同一プロンプトへの2回目の応答が送信される可能性がある。しかし、(1) ポーリング間隔は最低2秒（応答後5秒）、(2) Claude CLI処理時間は通常5秒以上、(3) sendPromptAnswer()の実行時間も考慮すると、この窓は実質的に発生しない。また、仮に2回応答が送信されても、Claude CLIは1回目の応答でプロンプト状態を抜けるため、2回目はプロンプト非検出で無視される。",
+      "suggestion": "対応不要。設計書の重複応答防止メカニズムは実用上十分に堅牢。"
+    },
+    {
+      "id": "S4-F008",
+      "severity": "nice_to_have",
+      "category": "OWASP-A03",
+      "title": "tmux sendKeys経由の入力サニタイズは既存の防御に依拠",
+      "description": "Issue #306の変更範囲では、tmux sendKeysへの入力パスに変更はない。既存のsendKeys()関数（tmux.ts L207-225）ではシングルクォートのエスケープ処理のみが実施されている。auto-yes-manager.tsのpollAutoYes()から呼び出されるsendPromptAnswer()は、resolveAutoAnswer()が返す値（'y'またはオプション番号の文字列）を使用する。resolveAutoAnswer()の戻り値は 'y' または `target.number.toString()` であり、これらは英数字のみで構成されるため、コマンドインジェクションのリスクはない。設計書セクション4の「コマンドインジェクション: 変更なし（tmux操作の既存パターン継続）」の評価は正確である。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 5,
+    "overall_quality": "high"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-306-session-stability-design-policy.md",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/tmux.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts"
+  ]
+}

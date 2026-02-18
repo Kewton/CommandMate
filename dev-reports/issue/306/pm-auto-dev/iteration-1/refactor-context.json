@@ -1,0 +1,22 @@
+{
+  "issue_number": 306,
+  "refactor_targets": [
+    "src/lib/prompt-key.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/hooks/useAutoYes.ts",
+    "tests/unit/lib/prompt-key.test.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "test_count": 163
+  },
+  "improvement_goals": [
+    "コードの可読性向上（JSDocコメントの充実）",
+    "SOLID原則の遵守確認",
+    "不要なコード・デッドコードの除去",
+    "テストの品質確認（境界値・エッジケースのカバレッジ）"
+  ]
+}

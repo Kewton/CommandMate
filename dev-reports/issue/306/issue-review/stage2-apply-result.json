@@ -1,0 +1,84 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 306,
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "status": "applied",
+        "change_summary": "対策1の案Aコード例を現行コード構造（cleanOutput.trim()全体末尾）に合致するよう修正。全体末尾→最終行末尾への変更の意図・設計根拠を明記"
+      },
+      {
+        "id": "MF-002",
+        "status": "applied",
+        "change_summary": "SHELL_PROMPT_ENDINGS 3文字全て（$, %, #）の偽陽性リスク分析テーブルを追加。多段防御（案A個別パターン除外 + 案B行長チェック40文字）の推奨方式とコード例を記載"
+      },
+      {
+        "id": "MF-003",
+        "status": "applied",
+        "change_summary": "対策2に lastAnsweredPromptKey のリセット条件（プロンプト非検出時にnullリセット）を明記。リセットロジックのコード例を追加。クライアント側（useAutoYes.ts:60-62）との対称性を記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "status": "applied",
+        "change_summary": "対策4をisSessionHealthy()の戻り値拡張方式（{ healthy: boolean; reason?: string }）に変更。HealthCheckResult interfaceのコード例を追加。テスト容易性の設計根拠を記載"
+      },
+      {
+        "id": "SF-002",
+        "status": "applied",
+        "change_summary": "対策2（主防御: 論理的重複防止）と対策5（副防御: Claude CLI処理時間確保）の役割分担を明確化。多段防御の設計意図と両者の動作関係を記載"
+      },
+      {
+        "id": "SF-003",
+        "status": "applied",
+        "change_summary": "受入条件を「自動テスト可能な条件」（10項目）と「手動検証項目」（1項目）に分離。vi.useFakeTimersによる高速テスト等の具体的テスト方法を記載"
+      },
+      {
+        "id": "SF-004",
+        "status": "applied",
+        "change_summary": "関連コンポーネントに src/lib/prompt-answer-sender.ts（テスト呼び出し検証対象）と src/lib/cli-session.ts（captureSessionOutput提供）を追加"
+      },
+      {
+        "id": "SF-005",
+        "status": "applied",
+        "change_summary": "概要を「主に3つの原因と1つのデバッグ改善点が特定されている」に修正。根本原因セクションの原因4を「付帯的な改善点」として分離し、直接原因ではないことを明記"
+      },
+      {
+        "id": "SF-006",
+        "status": "applied",
+        "change_summary": "テストファイルパスを tests/unit/lib/claude-session.test.ts、tests/unit/lib/auto-yes-manager.test.ts に修正（lib/ ディレクトリを含む正しいパス）"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "status": "applied",
+        "change_summary": "対策3にCONTEXT_REMAINING_PATTERNの具体的正規表現パターンとextractContextRemaining()ヘルパー関数のコード例を追加"
+      },
+      {
+        "id": "NTH-002",
+        "status": "skipped",
+        "reason": "タイトル変更はIssue分割の判断と合わせて影響範囲レビュー（Stage 3-4）で判断するため保留"
+      },
+      {
+        "id": "NTH-003",
+        "status": "applied",
+        "change_summary": "パターンBに /pm-auto-issue2dev の補足説明（自動開発ワークフローコマンドで多数ファイル変更を伴う長時間タスク）を追加。パターンCに再現目安（20-30分以上実行）を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 12,
+    "applied": 11,
+    "skipped": 1
+  },
+  "changes_summary": "Must Fix 3件全て反映（対策1コード例の現行コード整合、3文字全偽陽性対策の多段防御追加、lastAnsweredPromptKeyリセット条件明記）、Should Fix 6件全て反映（isSessionHealthy戻り値拡張、対策2/5関係明確化、受入条件の自動/手動分離、関連コンポーネント追加、概要と原因4の整合修正、テストパス修正）、Nice to Have 2件反映・1件保留（タイトル変更は影響範囲レビューで判断）",
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/306"
+  }
+}

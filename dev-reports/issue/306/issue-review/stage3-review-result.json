@@ -1,0 +1,323 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 306,
+  "review_focus": "影響範囲",
+  "review_date": "2026-02-18",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "severity": "must_fix",
+        "category": "破壊的変更",
+        "title": "isSessionHealthy()の戻り値変更はisClaudeRunning()の戻り値型を変更する破壊的変更",
+        "description": "Issue対策4でisSessionHealthy()の戻り値をboolean から { healthy: boolean; reason?: string } に変更する提案があるが、isClaudeRunning() (claude-session.ts:426) は直接 `return isSessionHealthy(sessionName)` としている。isSessionHealthy()の戻り値がオブジェクトに変わると、isClaudeRunning()はオブジェクトを返すことになり、呼び出し元のClaudeTool.isRunning() (claude.ts:41)、API routes (worktrees/[id]/route.ts:48, worktrees/route.ts:48)、send/route.ts:95、統合テスト (issue-265-acceptance.test.ts:149,157,165) の全てで truthy 判定が壊れる（オブジェクトは常にtruthyなので全てtrue扱いになる）。",
+        "location": "src/lib/claude-session.ts L419-427 (isClaudeRunning), L306-313 (ensureHealthySession)",
+        "suggestion": "isClaudeRunning()を修正して戻り値からhealthyフィールドを抽出する必要がある: `const result = await isSessionHealthy(sessionName); return result.healthy;`。ensureHealthySession()も同様: `const result = await isSessionHealthy(sessionName); if (!result.healthy) { console.warn(...result.reason...); ... }`。この修正をIssueの実装タスクに明記すべき。変更対象ファイルの表にもclaude-session.ts内の isClaudeRunning() / ensureHealthySession() の修正が必要であることを追記すべき。",
+        "evidence": "claude-session.ts:426 `return isSessionHealthy(sessionName);` は現在boolean直接返却。戻り値型変更時にこの行の修正が漏れると、isClaudeRunning()がHealthCheckResultオブジェクトを返し、全ての呼び出し元（6箇所以上）で不正な結果となる。"
+      },
+      {
+        "id": "MF-002",
+        "severity": "must_fix",
+        "category": "影響範囲",
+        "title": "isSessionHealthy()の戻り値変更に伴うテストモック修正が網羅されていない",
+        "description": "isClaudeRunning()の戻り値型は変わらない（boolean維持）が、テストではisClaudeRunningのモックが直接使われている箇所が多数ある。一方、isSessionHealthy()はprivate関数（非export）であるため直接テストできず、isClaudeRunning()経由で間接的にテストされている。isSessionHealthy()内部のreturn文が全て `return { healthy: false, reason: 'xxx' }` 形式に変わった場合、isClaudeRunning()内で `.healthy` を取り出す修正が必要になり、claude-session.test.ts:787-877 の全11テストケースが影響を受ける。特に、capturePane()のモック戻り値とisClaudeRunning()の期待結果の関係が間接的であるため、テスト修正漏れのリスクが高い。",
+        "location": "tests/unit/lib/claude-session.test.ts L787-877, tests/integration/issue-265-acceptance.test.ts L142-165",
+        "suggestion": "Issueの実装タスクに以下を追加: 「isSessionHealthy()の戻り値拡張に伴い、isClaudeRunning()内で `.healthy` フィールドを取り出す修正を行う。既存テスト（claude-session.test.ts Bug 2セクション全11ケース、issue-265-acceptance.test.ts 3ケース）は戻り値型が変わらないため修正不要だが、新規テストでreason値を検証するケースを追加する」。reason検証には、isSessionHealthy()をexportするか、内部でconsole.warnに出力するかの設計判断が必要。",
+        "evidence": "tests/unit/lib/claude-session.test.ts にはisClaudeRunning()の結果がtrue/falseであることを検証するテストが11件、integration/issue-265-acceptance.test.tsに3件ある。isSessionHealthy()はexportされていないため、reason値の直接テストは不可能。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "severity": "should_fix",
+        "category": "影響範囲",
+        "title": "CodexToolとGeminiToolのisRunning()にはヘルスチェックがなく非対称",
+        "description": "ClaudeTool.isRunning()はisClaudeRunning()を呼び、ヘルスチェック(isSessionHealthy)を実施する。一方、CodexTool.isRunning()(codex.ts:50-53)とGeminiTool.isRunning()(gemini.ts:34-37)はhasSession()のみで、ヘルスチェックを行わない。Issue #306で偽陽性防止ロジックを改善した場合、Claude以外のCLIツールでも同様の問題（tmuxセッションは存在するがCLIプロセスが終了済み）が発生する可能性がある。Issueの影響範囲セクションではこの非対称性に触れていない。",
+        "location": "src/lib/cli-tools/codex.ts L50-53, src/lib/cli-tools/gemini.ts L34-37",
+        "suggestion": "影響範囲の関連コンポーネントセクションに以下を追記: 「CodexTool.isRunning()とGeminiTool.isRunning()はhasSession()のみでヘルスチェックなし。Issue #306のスコープ外だが、将来的にCodex/Geminiでも同様のヘルスチェック導入を検討（別Issue候補）」。Issueのスコープ拡大は不要だが、意識的なスコープ限定であることを明記すべき。",
+        "evidence": "codex.ts:50-53 `return await hasSession(sessionName);`, gemini.ts:34-37 同様。claude.ts:40-42 `return await isClaudeRunning(worktreeId);` はヘルスチェック込み。"
+      },
+      {
+        "id": "SF-002",
+        "severity": "should_fix",
+        "category": "波及効果",
+        "title": "AutoYesPollerStateへのlastAnsweredPromptKey追加がglobalThis宣言にも影響",
+        "description": "AutoYesPollerState interfaceにlastAnsweredPromptKeyフィールドを追加する場合、auto-yes-manager.ts:99-104のglobalThis型宣言（`var __autoYesPollerStates: Map<string, AutoYesPollerState>`）は自動的に新しい型を参照するため問題ない。しかし、startAutoYesPolling()でpollerStateを初期化する箇所（auto-yes-manager.ts:414-420）に `lastAnsweredPromptKey: null` の初期値追加が必要。Issueのコード例では `pollAutoYes()` 内の利用コードのみ示されており、初期化コードの変更が明示されていない。",
+        "location": "src/lib/auto-yes-manager.ts L414-420 (startAutoYesPolling内のpollerState初期化)",
+        "suggestion": "Issueの対策2のコード例に、AutoYesPollerState初期化コードの修正を追加:\n```typescript\nconst pollerState: AutoYesPollerState = {\n  timerId: null,\n  cliToolId,\n  consecutiveErrors: 0,\n  currentInterval: POLLING_INTERVAL_MS,\n  lastServerResponseTimestamp: null,\n  lastAnsweredPromptKey: null,  // 追加\n};\n```",
+        "evidence": "auto-yes-manager.ts:414-420 の初期化コードにlastAnsweredPromptKeyが含まれていない。TypeScriptコンパイラが初期化時のプロパティ不足を検出するため、ビルドエラーとして顕在化する。"
+      },
+      {
+        "id": "SF-003",
+        "severity": "should_fix",
+        "category": "テスト影響",
+        "title": "クールダウン期間追加（2秒→5秒）のテスト影響が具体化されていない",
+        "description": "対策5で応答後のポーリング間隔を2秒から5秒に変更する場合、既存テスト（auto-yes-manager.test.ts:477-703）のvi.advanceTimersByTime()呼び出しで使用されているタイミング値に影響がある。現在のテストはPOLLING_INTERVAL_MS(2000)を前提にタイマーを進めている。クールダウン期間を条件分岐で変えた場合（通常: 2秒、応答後: 5秒）、テストでは応答送信後に5秒以上タイマーを進める必要がある。Issueには「クールダウン動作のテスト追加」とあるが、既存テストへの影響は記載されていない。",
+        "location": "tests/unit/lib/auto-yes-manager.test.ts L477-703 (pollAutoYesテスト群)",
+        "suggestion": "以下をIssueの実装タスクに追加: 「応答送信後のクールダウン期間（5秒）は新しい定数 COOLDOWN_INTERVAL_MS として定義し、scheduleNextPoll()で応答直後かどうかによってintervalを切り替える。既存テストでは応答を伴わないpollAutoYesパス（thinking状態スキップ等）はPOLLING_INTERVAL_MSのまま影響なし。新規テストで応答後のクールダウン検証を追加」。COOLDOWN_INTERVAL_MS定数化とexportにより、テストでのタイミング値ハードコーディングを回避する。",
+        "evidence": "auto-yes-manager.test.ts:497 `vi.advanceTimersByTime(POLLING_INTERVAL_MS)` が複数箇所で使用されている。応答後のスケジュールがPOLLING_INTERVAL_MSと異なる値を使う場合、これらのテストタイミングに影響する可能性がある。"
+      },
+      {
+        "id": "SF-004",
+        "severity": "should_fix",
+        "category": "影響範囲",
+        "title": "CONTEXT_REMAINING_PATTERNの利用先（response-poller.ts）での連携設計が未記載",
+        "description": "Issueの影響範囲セクションで「src/lib/response-poller.ts（コンテキスト残量検出の連携先候補）」とあるが、実際にresponse-poller.tsでCONTEXT_REMAINING_PATTERNをどのように使用するかの設計が不明確。response-poller.tsはcli-patterns.tsから既にパターンをimportしている（cli-patterns.ts:33行参照）ため、パターン追加自体は互換性の問題はないが、検出後のアクション（UI通知への連携）の実装経路が示されていない。対策3は「推奨」ステータスなので実装しない可能性もあるが、パターン追加だけ先行実装した場合、未使用コードが残る。",
+        "location": "src/lib/cli-patterns.ts (パターン追加先), src/lib/response-poller.ts (連携候補)",
+        "suggestion": "以下のいずれかを選択し、Issueに明記する:\n案A: 対策3のスコープを「cli-patterns.tsへのパターン追加のみ」に限定し、response-poller.tsでの利用は別Issueとして切り出す\n案B: 対策3を丸ごと別Issueに分離し、Issue #306のスコープから除外する\n案Aが最小変更で推奨。パターン追加だけなら破壊的変更なし。",
+        "evidence": "response-poller.ts:17 で cli-session.ts からimport、response-poller.ts:33 で cli-patterns.ts からimport。パターン追加は互換性問題なし。ただしUI通知の連携先（WebSocket等）の設計はIssueに含まれていない。"
+      },
+      {
+        "id": "SF-005",
+        "severity": "should_fix",
+        "category": "波及効果",
+        "title": "SHELL_PROMPT_ENDINGS判定の最終行抽出方式への変更がgetCleanPaneOutput()の行数に依存",
+        "description": "現行の isSessionHealthy() は getCleanPaneOutput(sessionName) でデフォルト50行を取得し、cleanOutput.trim() 全体の末尾で SHELL_PROMPT_ENDINGS を判定している。対策1で「最終行の末尾」に変更する場合、tmux capture-pane出力の最終行がステータスバー行かプロンプト行かはtmuxペインの状態に依存する。50行取得の場合、末尾にtmuxステータスバー行と空行が含まれる可能性があり、`trimmed.split('\\n').pop()?.trim()` で取得した最終行が期待通りの行にならないケースがある。特に、Claude CLIの出力が長い場合、ステータスバーは最後から2行目以降に位置する可能性がある。",
+        "location": "src/lib/claude-session.ts L248-251 (getCleanPaneOutput), L262-296 (isSessionHealthy)",
+        "suggestion": "対策1のコード例に注記を追加: 「tmux capture-pane出力の末尾には空行が含まれることがあるため、trimmed.split('\\n').pop()?.trim()で取得した最終行が空の場合は1つ前の行を検査する必要がある。ただし、先行のtrimmed === '' チェック（L285）で全行空のケースはカバーされているため、最終行が空の場合は非空の最後の行をフォールバックとして検査するロジックが必要」。具体的には:\n```typescript\nconst lines = trimmed.split('\\n');\nconst lastLine = lines.filter(l => l.trim() !== '').pop()?.trim() ?? '';\n```",
+        "evidence": "getCleanPaneOutput()はstripAnsi(capturePane(sessionName, {startLine: -50}))を返す。tmux capture-paneの出力には末尾に空行が含まれることがあり、trimした後でも空行が混在する可能性がある。"
+      },
+      {
+        "id": "SF-006",
+        "severity": "should_fix",
+        "category": "テスト影響",
+        "title": "isSessionHealthy()のreason値テストのためにexport戦略が未決定",
+        "description": "Issueの対策4では isSessionHealthy() の戻り値に reason フィールドを追加し、テストで検証可能にすることを推奨している。しかし、isSessionHealthy() は現在 non-export の内部関数（claude-session.ts:262）。reason値をテストするには: (A) isSessionHealthy()をexportする、(B) isClaudeRunning()の戻り値もHealthCheckResultに変更する、(C) console.warnの出力をスパイしてテストする、のいずれかが必要。Issueではこの設計判断が未記載。",
+        "location": "src/lib/claude-session.ts L262 (isSessionHealthy - non-export)",
+        "suggestion": "以下の設計判断をIssueに追記:\n推奨: 案A - isSessionHealthy()を`@internal`アノテーション付きでexportする（clearCachedClaudePath()と同じパターン、claude-session.ts:149-153参照）。テストで直接reason値を検証可能にしつつ、公開APIの意図しない利用を抑止する。案Bは破壊的変更が大きすぎるため非推奨。案Cはテストの脆弱性が高い。",
+        "evidence": "claude-session.ts:154 `export function clearCachedClaudePath()` に `@internal Exported for testing purposes only.` のパターンが既に存在する。isSessionHealthy()も同じパターンを踏襲可能。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "severity": "nice_to_have",
+        "category": "影響範囲",
+        "title": "session-cleanup.tsへの影響が関連コンポーネントに含まれていない",
+        "description": "session-cleanup.ts は stopAutoYesPolling() をimportし使用している（session-cleanup.ts:11,100）。Issue #306 でAutoYesPollerStateにフィールドを追加しても、stopAutoYesPolling()のインターフェースは変わらないため直接的な影響はない。ただし、関連コンポーネントとして認識しておくことで、将来的にクリーンアップ処理にlastAnsweredPromptKeyのリセットが必要になった場合の参照先になる。",
+        "location": "src/lib/session-cleanup.ts L11, L100",
+        "suggestion": "影響範囲の関連コンポーネントに追加: 「src/lib/session-cleanup.ts（stopAutoYesPollingをimport、変更不要だがpollerステート管理の一部として認識）」",
+        "evidence": "session-cleanup.ts:11 `import { stopAutoYesPolling } from './auto-yes-manager';`"
+      },
+      {
+        "id": "NTH-002",
+        "severity": "nice_to_have",
+        "category": "影響範囲",
+        "title": "getClaudeSessionState()とisClaudeRunning()のヘルスチェック非対称性の文書化",
+        "description": "claude-session.ts:431-455の getClaudeSessionState() はヘルスチェックを行わない（hasSessionのみ）ことが明示的にJSDocコメント（C-S3-002）で文書化されている。Issue #306のヘルスチェックロジック変更後も、この非対称性は維持されるが、対策1でSHELL_PROMPT_ENDINGSの判定が厳密になることで、isClaudeRunning()とgetClaudeSessionState()の結果が乖離するケースが減少する可能性がある（偽陽性が減るため）。",
+        "location": "src/lib/claude-session.ts L431-455 (getClaudeSessionState)",
+        "suggestion": "特に変更不要だが、Issue #306の設計書を作成する際に「getClaudeSessionState()はヘルスチェックなし（設計意図: 軽量UIクエリ）のため変更不要」と記載すると実装者に分かりやすい。",
+        "evidence": "claude-session.ts:433-439 JSDocコメントで非対称性が明記されている。"
+      },
+      {
+        "id": "NTH-003",
+        "severity": "nice_to_have",
+        "category": "影響範囲",
+        "title": "Issue分割の検討（NTH-002引き継ぎ: タイトルの包括性）",
+        "description": "Stage 1のNTH-002で保留されたIssueタイトル問題。3つの独立した原因に対する修正が1つのIssueに含まれている。影響範囲分析の結果、対策1（SHELL_PROMPT_ENDINGS）、対策2+5（重複防止+クールダウン）、対策3（コンテキスト残量検出）は互いに独立して実装可能。ただし、対策4（ログ強化）は対策1と密結合（isSessionHealthy()の戻り値変更）。分割するなら「対策1+4」と「対策2+5」と「対策3」の3 Issueに分割可能。",
+        "location": "Issue全体",
+        "suggestion": "Issue分割は必須ではないが、以下の分割が有効:\n- Issue #306A: SHELL_PROMPT_ENDINGS偽陽性防止 + ヘルスチェックログ強化（対策1+4）\n- Issue #306B: Auto-Yes重複応答防止 + クールダウン（対策2+5）\n- Issue #306C: コンテキスト残量検出・通知（対策3）\n各Issueが独立してマージ可能で、レビュー負荷も分散できる。現状のまま1 Issueで進める場合は、タイトルを「fix: tmuxセッションの安定性改善（ヘルスチェック偽陽性防止・Auto-Yes重複応答防止）」に修正を検討。",
+        "evidence": "対策1はclaude-session.ts、対策2+5はauto-yes-manager.ts、対策3はcli-patterns.tsが主対象で、ファイルレベルでの独立性がある。"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/lib/claude-session.ts",
+        "changes": "isSessionHealthy()戻り値変更、SHELL_PROMPT_ENDINGS判定ロジック改善、ensureHealthySession()ログ追加、isClaudeRunning()の.healthy取り出し",
+        "risk": "high",
+        "reason": "isClaudeRunning()経由で全API routes・CLI tools・テストに波及"
+      },
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "changes": "AutoYesPollerState型拡張、pollAutoYes()重複防止・リセット・クールダウン追加、startAutoYesPolling()初期化修正",
+        "risk": "medium",
+        "reason": "pollAutoYes()は内部関数、型拡張はstartAutoYesPolling()の初期化に影響"
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "changes": "CONTEXT_REMAINING_PATTERN追加、extractContextRemaining()ヘルパー追加",
+        "risk": "low",
+        "reason": "追加のみ、既存コードに影響なし"
+      },
+      {
+        "file": "tests/unit/lib/claude-session.test.ts",
+        "changes": "偽陽性防止テスト追加、reason値検証テスト追加",
+        "risk": "medium",
+        "reason": "既存テスト11件は影響なし（isClaudeRunning()戻り値型不変）、新規テスト追加"
+      },
+      {
+        "file": "tests/unit/lib/auto-yes-manager.test.ts",
+        "changes": "重複防止テスト、リセット条件テスト、クールダウンテスト追加",
+        "risk": "medium",
+        "reason": "既存テストのタイミング値にクールダウン変更が影響する可能性あり"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/lib/cli-tools/claude.ts",
+        "changes": "変更不要",
+        "risk": "low",
+        "reason": "isClaudeRunning()のbooleanインターフェースは維持される"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "changes": "変更不要",
+        "risk": "low",
+        "reason": "cliTool.isRunning()経由で呼ばれるが、boolean戻り値は不変"
+      },
+      {
+        "file": "src/app/api/worktrees/route.ts",
+        "changes": "変更不要",
+        "risk": "low",
+        "reason": "同上"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/send/route.ts",
+        "changes": "変更不要",
+        "risk": "low",
+        "reason": "同上"
+      },
+      {
+        "file": "src/hooks/useAutoYes.ts",
+        "changes": "変更不要",
+        "risk": "low",
+        "reason": "クライアント側の重複防止ロジックは既に存在、サーバー側変更の影響なし"
+      },
+      {
+        "file": "src/lib/prompt-answer-sender.ts",
+        "changes": "変更不要",
+        "risk": "low",
+        "reason": "インターフェース変更なし、テストでの呼び出し回数検証対象"
+      },
+      {
+        "file": "src/lib/cli-session.ts",
+        "changes": "変更不要",
+        "risk": "low",
+        "reason": "captureSessionOutput提供、インターフェース変更なし"
+      },
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "changes": "変更不要",
+        "risk": "low",
+        "reason": "stopAutoYesPollingのインターフェースは不変"
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "changes": "変更不要（対策3でパターン連携する場合は別Issue）",
+        "risk": "low",
+        "reason": "CONTEXT_REMAINING_PATTERN追加は既存動作に影響なし"
+      },
+      {
+        "file": "tests/integration/issue-265-acceptance.test.ts",
+        "changes": "変更不要",
+        "risk": "low",
+        "reason": "isClaudeRunning()のboolean戻り値は維持される"
+      }
+    ],
+    "breaking_changes": [
+      {
+        "description": "isSessionHealthy()の戻り値をboolean -> HealthCheckResultに変更",
+        "scope": "claude-session.ts内部のみ（isSessionHealthyは非export）",
+        "mitigation": "isClaudeRunning()とensureHealthySession()で.healthyフィールドを取り出すことで、外部インターフェースはboolean維持"
+      }
+    ],
+    "non_breaking_changes": [
+      "AutoYesPollerStateへのlastAnsweredPromptKeyフィールド追加（TypeScript型拡張、初期化値追加で対応）",
+      "SHELL_PROMPT_ENDINGS判定ロジック改善（判定がより厳密になるが、正しいシェルプロンプトは引き続き検出される）",
+      "CONTEXT_REMAINING_PATTERNの追加（新規export、既存コードに影響なし）",
+      "scheduleNextPoll()のinterval値変更（応答後のみ5秒、それ以外は2秒のまま）"
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/claude-session.ts",
+      "lines": "58, 248-251, 262-296, 306-313, 419-427, 444-455",
+      "relevance": "SHELL_PROMPT_ENDINGS、getCleanPaneOutput、isSessionHealthy、ensureHealthySession、isClaudeRunning、getClaudeSessionState - 全てヘルスチェック変更の影響範囲"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "31-42, 274-369, 374-381, 386-430",
+      "relevance": "AutoYesPollerState型、pollAutoYes()、scheduleNextPoll()、startAutoYesPolling() - 重複防止・クールダウン変更の影響範囲"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "lines": "全体",
+      "relevance": "CONTEXT_REMAINING_PATTERN追加先"
+    },
+    {
+      "file": "src/lib/cli-tools/claude.ts",
+      "lines": "10, 40-42",
+      "relevance": "isClaudeRunningをimport、isRunning()で使用 - 間接影響"
+    },
+    {
+      "file": "src/lib/cli-tools/codex.ts",
+      "lines": "50-53",
+      "relevance": "ヘルスチェックなしのisRunning() - 非対称性の記録"
+    },
+    {
+      "file": "src/lib/cli-tools/gemini.ts",
+      "lines": "34-37",
+      "relevance": "ヘルスチェックなしのisRunning() - 非対称性の記録"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "48, 176",
+      "relevance": "cliTool.isRunning()呼び出し（GET, PATCH） - 間接影響"
+    },
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "lines": "48",
+      "relevance": "cliTool.isRunning()呼び出し（GET） - 間接影響"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/send/route.ts",
+      "lines": "95",
+      "relevance": "cliTool.isRunning()呼び出し - 間接影響"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "lines": "60-62, 68-78",
+      "relevance": "クライアント側重複防止の参照実装"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "11, 100",
+      "relevance": "stopAutoYesPollingのimport - 間接影響"
+    },
+    {
+      "file": "tests/unit/lib/claude-session.test.ts",
+      "lines": "787-877",
+      "relevance": "Bug 2テストセクション（11ケース） - 変更の直接的テスト対象"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "lines": "475-703",
+      "relevance": "pollAutoYesテスト群 - クールダウン変更の影響対象"
+    },
+    {
+      "file": "tests/integration/issue-265-acceptance.test.ts",
+      "lines": "142-165, 312-313",
+      "relevance": "isClaudeRunning統合テスト - 間接影響"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構造・モジュール一覧との整合性確認"
+    },
+    {
+      "file": "dev-reports/design/issue-265-claude-session-recovery-design-policy.md",
+      "relevance": "Issue #265の設計方針（SHELL_PROMPT_ENDINGS配置決定、C-S2-002偽陽性リスク評価）"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 6,
+    "nice_to_have": 3,
+    "total": 11,
+    "overall_quality": "high"
+  }
+}

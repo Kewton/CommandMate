@@ -1,0 +1,96 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 306,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["S3-F001", "S3-F002", "S3-F003", "S3-F004", "S3-F005", "S3-F006"],
+  "skipped_findings": [],
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "S3-F001",
+        "item": "isSessionHealthy()のcatchブロック戻り値がHealthCheckResult形式に変更必要",
+        "sections_updated": ["3.1", "6.2", "12"],
+        "status": "reflected",
+        "details": "セクション3.1にcatchブロックのHealthCheckResult変換コード例と設計根拠を追加。セクション6.2にcaptureエラー時のreason検証テストを追加。セクション12のMust Fixチェックリストに項目追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-F002",
+        "item": "ClaudeTool.isRunning()が関連コンポーネント表に未記載",
+        "sections_updated": ["9", "12"],
+        "status": "reflected",
+        "details": "セクション9の関連コンポーネント表にsrc/lib/cli-tools/claude.tsを追加。8つのAPI routeファイルへの呼び出しチェーン情報を記載。セクション12のShould Fixチェックリストに確認項目追加。"
+      },
+      {
+        "id": "S3-F003",
+        "item": "COOLDOWN_INTERVAL_MS導入が既存テストに影響しない根拠が不明確",
+        "sections_updated": ["6.6", "12"],
+        "status": "reflected",
+        "details": "セクション6.6のauto-yes-manager.test.ts影響列を詳細な分析結果に更新。既存10箇所のvi.advanceTimersByTimeAsyncが初回ポーリングのみをトリガーするため影響なしであることを明記。セクション12のShould Fixチェックリストに確認項目追加。"
+      },
+      {
+        "id": "S3-F004",
+        "item": "pollAutoYes()のearly return追加でcatchブロック後のfallthrough動作補足必要",
+        "sections_updated": ["3.4", "12"],
+        "status": "reflected",
+        "details": "セクション3.4の制御フロー図の経路(3)説明を更新し、catchブロック後のfallthrough動作を明記。S3-F004補足ブロックを追加。セクション12のShould Fixチェックリストに確認項目追加。"
+      },
+      {
+        "id": "S3-F005",
+        "item": "useAutoYes.test.tsがテスト影響テーブルに未記載",
+        "sections_updated": ["6.6", "12"],
+        "status": "reflected",
+        "details": "セクション6.6の既存テスト影響テーブルにtests/unit/hooks/useAutoYes.test.tsを追加。prompt-key.ts作成順序依存関係とテストアサーション不変の分析を記載。セクション12のShould Fixチェックリストに確認項目追加。"
+      },
+      {
+        "id": "S3-F006",
+        "item": "auto-yes-persistence.test.tsがテスト影響テーブルに未記載",
+        "sections_updated": ["6.6", "12"],
+        "status": "reflected",
+        "details": "セクション6.6の既存テスト影響テーブルにtests/integration/auto-yes-persistence.test.tsを追加。getActivePollerCount()経由の間接検証のみで影響なしの分析を記載。セクション12のShould Fixチェックリストに確認項目追加。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-F007",
+        "item": "prompt-key.ts新規追加がクライアントバンドルに与える影響は最小限",
+        "status": "noted",
+        "details": "レビューサマリーテーブル（セクション11c）に記載。現状の設計で問題なし。"
+      },
+      {
+        "id": "S3-F008",
+        "item": "AutoYesPollerState変更がglobalThis型宣言と既存テストに影響しないことの確認",
+        "status": "noted",
+        "details": "レビューサマリーテーブル（セクション11c）に記載。TypeScriptの型システムが初期化漏れを検出するため安全。"
+      },
+      {
+        "id": "S3-F009",
+        "item": "ensureHealthySession()のconsole.warn追加とsession-cleanup.tsへの影響なし",
+        "status": "noted",
+        "details": "レビューサマリーテーブル（セクション11c）に記載。関連モジュールのインターフェースは全て維持。"
+      },
+      {
+        "id": "S3-F010",
+        "item": "COOLDOWN_INTERVAL_MS=5000による応答レイテンシ増加の実際の影響は限定的",
+        "status": "noted",
+        "details": "レビューサマリーテーブル（セクション11c）に記載。セクション5のトレードオフ分析は適切。"
+      }
+    ]
+  },
+  "design_doc_path": "dev-reports/design/issue-306-session-stability-design-policy.md",
+  "sections_updated": [
+    "3.1 (catchブロックのHealthCheckResult変換追加)",
+    "3.4 (catchブロックfallthrough動作の補足追加)",
+    "6.2 (capture errorのreason検証テスト追加)",
+    "6.6 (既存テスト影響テーブル拡充: 4ファイルに拡張)",
+    "9 (関連コンポーネント表にClaudeTool追加)",
+    "10 (レビュー履歴にStage 3追加)",
+    "11c (Stage 3レビュー指摘事項サマリー新規追加)",
+    "12 (実装チェックリストにS3-F001〜S3-F006追加)"
+  ],
+  "changes_summary": "Stage 3影響分析レビューの全6件（Must Fix 1件 + Should Fix 5件）を設計方針書に反映。S3-F001: isSessionHealthy()のcatchブロックをHealthCheckResult形式に変換するコード例と設計根拠を追加。S3-F002: ClaudeTool.isRunning()を関連コンポーネント表に追加。S3-F003: COOLDOWN_INTERVAL_MSが既存テストに影響しない詳細な根拠を記載。S3-F004: catchブロック後のfallthrough動作を制御フロー図に補足。S3-F005/S3-F006: useAutoYes.test.tsとauto-yes-persistence.test.tsをテスト影響テーブルに追加。Nice to Have 4件はサマリーテーブルに記載。",
+  "timestamp": "2026-02-18T17:30:00Z"
+}
