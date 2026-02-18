@@ -1,0 +1,110 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "issue_number": 306,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["F006", "F001", "F002", "F005", "F009", "F003", "F004", "F007", "F008", "F010"],
+  "skipped_findings": [],
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "F006",
+        "title": "多段防御の適用順序の設計不備",
+        "sections_updated": ["3.2", "2", "5", "6.1", "7", "8", "12"],
+        "status": "reflected",
+        "description": "行長チェックをSHELL_PROMPT_ENDINGSチェックの前に移動。擬似コード、コンポーネント図、偽陽性防止戦略テーブル、パフォーマンス設計、テスト設計、実装順序、実装チェックリストを更新"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F001",
+        "title": "HealthCheckResult interfaceの@internal export",
+        "sections_updated": ["3.1", "6.2", "9", "12"],
+        "status": "reflected",
+        "description": "HealthCheckResult interfaceに@internal JSDocを付与してexportする設計に変更。テスト設計とファイル一覧を更新"
+      },
+      {
+        "id": "F002",
+        "title": "promptKey生成ロジックの重複",
+        "sections_updated": ["2", "3.3", "6.5", "8", "9", "12"],
+        "status": "reflected",
+        "description": "src/lib/prompt-key.tsを新規作成してgeneratePromptKey()を定義。レイヤー構成、コンポーネント図、テスト設計、実装順序、ファイル一覧を更新"
+      },
+      {
+        "id": "F005",
+        "title": "pollAutoYes()の責務集中",
+        "sections_updated": ["3.3", "9", "12"],
+        "status": "reflected",
+        "description": "isDuplicatePrompt()ヘルパー関数抽出の設計を追加。設計根拠をSRP原則に基づいて記載"
+      },
+      {
+        "id": "F009",
+        "title": "lastAnsweredPromptKeyリセット条件のエッジケース",
+        "sections_updated": ["3.3", "6.3", "7"],
+        "status": "reflected",
+        "description": "同一promptKeyの連続検出は意図的にスキップする旨を明示的に記載。エッジケーステストを追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F003",
+        "title": "SHELL_PROMPT_ENDINGS拡張方針コメント",
+        "sections_updated": ["3.2", "7"],
+        "status": "reflected",
+        "description": "将来の拡張方針（exclusionPattern構造体化）をコメントとして記載。YAGNI原則との関係を明記"
+      },
+      {
+        "id": "F004",
+        "title": "MAX_SHELL_PROMPT_LENGTH境界値テスト",
+        "sections_updated": ["6.1", "12"],
+        "status": "reflected",
+        "description": "39文字/40文字/41文字の境界値テストケースを追加。JSDocコメントの根拠記載を実装チェックリストに追加"
+      },
+      {
+        "id": "F007",
+        "title": "reason string型の妥当性確認",
+        "sections_updated": ["3.1", "7"],
+        "status": "reflected",
+        "description": "現状維持（YAGNI原則に合致）。設計決定事項テーブルにレビューIDを追加"
+      },
+      {
+        "id": "F008",
+        "title": "scheduleNextPoll overrideInterval設計確認",
+        "sections_updated": ["3.4"],
+        "status": "reflected",
+        "description": "現状維持（OCP準拠の良い拡張）。コメントを追加"
+      },
+      {
+        "id": "F010",
+        "title": "対策3スコープ外判断の妥当性確認",
+        "sections_updated": ["7"],
+        "status": "reflected",
+        "description": "現状維持。設計決定事項テーブルにレビューIDを追加"
+      }
+    ]
+  },
+  "sections_updated": [
+    "2. アーキテクチャ設計（コンポーネント図・レイヤー構成）",
+    "3.1 HealthCheckResult（@internal export追加）",
+    "3.2 多段防御パターン（適用順序修正）",
+    "3.3 重複応答防止パターン（promptKey共通化・ヘルパー抽出・F009明記）",
+    "3.4 クールダウンパターン（F008コメント追加）",
+    "5. パフォーマンス設計（F006改善記載）",
+    "6.1 対策1テスト（境界値テスト追加）",
+    "6.2 対策4テスト（HealthCheckResult import追加）",
+    "6.3 対策2テスト（F009エッジケース追加）",
+    "6.5 promptKey共通ユーティリティテスト（新規追加）",
+    "6.6 既存テストへの影響（F001対応追記）",
+    "7. 設計上の決定事項とトレードオフ（レビューID列追加・F009明示記述・F003拡張方針）",
+    "8. 実装順序（F002・F005ステップ追加）",
+    "9. 変更対象ファイル一覧（新規ファイル・レビューID列追加）",
+    "10. レビュー履歴（新規セクション）",
+    "11. レビュー指摘事項サマリー（新規セクション）",
+    "12. 実装チェックリスト（新規セクション）"
+  ],
+  "design_doc_path": "dev-reports/design/issue-306-session-stability-design-policy.md",
+  "changes_summary": "Stage 1（設計原則）レビューの全10件の指摘事項を設計方針書に反映。Must Fix 1件（F006: 多段防御の適用順序修正）、Should Fix 4件（F001: HealthCheckResult @internal export、F002: promptKey共通ユーティリティ化、F005: isDuplicatePromptヘルパー抽出、F009: 同一promptKeyエッジケース明記）、Nice to Have 5件（F003/F004/F007/F008/F010）を反映。新規セクションとしてレビュー履歴、指摘事項サマリー、実装チェックリストを追加。",
+  "timestamp": "2026-02-18T12:00:00Z"
+}

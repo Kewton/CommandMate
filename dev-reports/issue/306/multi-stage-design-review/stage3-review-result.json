@@ -1,0 +1,116 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "issue_number": 306,
+  "timestamp": "2026-02-18T17:00:00Z",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S3-F001",
+      "severity": "must_fix",
+      "category": "テスト影響",
+      "title": "isSessionHealthy()のcatchブロック戻り値がHealthCheckResult形式に変更される必要があるが、設計書に記載がない",
+      "description": "現在のisSessionHealthy()実装（claude-session.ts L293-295）にはcatchブロック `catch { return false; }` が存在する。設計変更によりisSessionHealthy()の戻り値がPromise<boolean>からPromise<HealthCheckResult>に変わるため、このcatchブロックも `return { healthy: false, reason: 'capture error' }` に変更が必要である。設計書セクション3.2のコード例にはcatchブロックの変更が含まれておらず、テスト設計セクション6.2にもcaptureエラー時のreason検証テストが含まれていない。既存テスト claude-session.test.ts L870-876 で isClaudeRunning() のcapturePane error graceful handling を検証しており、このテスト自体は isClaudeRunning() の戻り値（boolean false）を確認しているため壊れないが、isSessionHealthy() を直接テストする新規テスト設計にはcatch経路のカバレッジが欠落している。",
+      "suggestion": "設計書セクション3.1または3.2にisSessionHealthy()のcatchブロックのHealthCheckResult変換を追記する。具体的には `catch { return { healthy: false, reason: 'capture error' }; }` を明記する。テスト設計セクション6.2に capture error 時のreason検証テストを追加する。"
+    },
+    {
+      "id": "S3-F002",
+      "severity": "should_fix",
+      "category": "API影響",
+      "title": "isClaudeRunning()の呼び出しチェーンにClaudeTool.isRunning()が中間層として存在するが設計書の関連コンポーネント表に未記載",
+      "description": "設計書セクション2のコンポーネント図とセクション9の関連コンポーネント表では、API routeがisClaudeRunning()を直接呼び出すように記載されている。しかし実際の呼び出しチェーンは API route -> cliTool.isRunning() -> ClaudeTool.isRunning() (src/lib/cli-tools/claude.ts L40-42) -> isClaudeRunning() である。ClaudeTool.isRunning()は `return await isClaudeRunning(worktreeId)` で直接delegateしているため変更不要だが、中間層の存在を認識しないと実装者が影響範囲を見誤る可能性がある。API routeの呼び出し箇所は少なくとも8ファイル（worktrees/route.ts, [id]/route.ts, [id]/send/route.ts, [id]/current-output/route.ts, [id]/kill-session/route.ts, [id]/prompt-response/route.ts, [id]/interrupt/route.ts, repositories/route.ts）に及ぶ。isClaudeRunning()がboolean戻り値を維持する設計のため、これら全てのAPI routeへの影響はないが、確認対象として記載すべきである。",
+      "suggestion": "設計書セクション9の関連コンポーネント表に src/lib/cli-tools/claude.ts を追加する。確認内容は「ClaudeTool.isRunning()がisClaudeRunning()に直接delegate。戻り値型 Promise<boolean> は維持されるため変更不要」とする。"
+    },
+    {
+      "id": "S3-F003",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "COOLDOWN_INTERVAL_MS導入が既存テストに影響を与えないことの根拠が設計書で不明確",
+      "description": "auto-yes-manager.test.tsの全ポーリングテストは `vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100)` を使用しており（10箇所: L498, L534, L596, L636, L732, L773, L811, L851, L894, L937）、全て初回ポーリングサイクルのトリガーである。COOLDOWN_INTERVAL_MSは応答送信成功後の2回目以降のポーリング間隔を変更するため、初回ポーリングのみを検証する既存テストには影響しない。設計書セクション6.6では「vi.advanceTimersByTime の値を確認・修正」と記載されているが、実際には既存テストの修正は不要で、新規テスト（セクション6.4）のみがCOOLDOWN_INTERVAL_MSを使用すれば良い。この分析結果を設計書に明記すべきである。また、scheduleNextPoll()のシグネチャ変更（overrideIntervalパラメータ追加）はオプションパラメータのため、既存の呼び出し `scheduleNextPoll(worktreeId, cliToolId)` はそのまま動作する。",
+      "suggestion": "設計書セクション6.6の既存テスト影響テーブルを更新する。auto-yes-manager.test.tsの影響列を「既存10箇所のvi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100)は初回ポーリングのみをトリガーするため影響なし。新規テスト（セクション6.4）でCOOLDOWN_INTERVAL_MS定数を使用」に修正する。"
+    },
+    {
+      "id": "S3-F004",
+      "severity": "should_fix",
+      "category": "破壊的変更",
+      "title": "pollAutoYes()の制御フロー変更で応答送信成功パスのearly return追加が既存動作を変える",
+      "description": "現在のpollAutoYes()実装を詳細分析すると、L313(thinking), L324(非検出), L332(応答不可)では全てreturnで抜けているが、L335-357の応答送信成功パスにはreturnがなく、L368のscheduleNextPoll()に到達する。つまり現在は「応答送信成功 -> L354 resetErrorCount() -> L357 console.info -> L368 scheduleNextPoll(通常間隔)」という経路が存在する。設計変更により応答送信成功後にearly return + COOLDOWN_INTERVAL_MSで抜ける設計に変わるため、2つの動作変更がある: (1) ポーリング間隔がPOLLING_INTERVAL_MS(2秒)からCOOLDOWN_INTERVAL_MS(5秒)に延長、(2) L368のscheduleNextPoll()に到達しなくなる。(2)はcatchブロック通過後のみL368に到達する動作に変わるが、catchブロック内のincrementErrorCount()後にはreturnがないため、L368にfallthrough到達する既存動作は維持される。この制御フロー変更は意図的であるが、設計書の制御フロー図（セクション3.4）とcatchブロックのfallthrough動作の正確な対応を確認すべきである。",
+      "suggestion": "設計書セクション3.4の制御フロー図の経路(3)にcatchブロック後のfallthrough動作を補足する。具体的には「経路(3): catchブロック -> incrementErrorCount() -> catchブロック終了後にL368相当のscheduleNextPoll()にfallthrough到達」と明記する。"
+    },
+    {
+      "id": "S3-F005",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "useAutoYes.test.tsへの影響とprompt-key.tsの実装順序依存関係が設計書のテスト影響テーブルに未記載",
+      "description": "useAutoYes.test.ts（tests/unit/hooks/useAutoYes.test.ts）には重複防止テスト（L139-173）が存在し、同一promptDataのrerenderでfetchが1回のみ呼ばれることを検証している。generatePromptKey()への置換は内部実装の変更であり、テストのアサーションに影響しない。しかし、useAutoYes.tsに `import { generatePromptKey } from '@/lib/prompt-key'` を追加した場合、prompt-key.tsが存在しない状態でテスト実行するとimportエラーが発生する。設計書セクション8の実装順序ではステップ4でprompt-key.ts作成後にuseAutoYes.ts修正の順序が正しく記載されているが、テスト影響テーブル（セクション6.6）にuseAutoYes.test.tsが含まれていない。",
+      "suggestion": "設計書セクション6.6の既存テスト影響テーブルに tests/unit/hooks/useAutoYes.test.ts を追加する。影響: 「prompt-key.ts新規ファイルへのimport追加。ファイル未作成時はimportエラー。実装順序ステップ4の依存関係を厳守。テストアサーション自体は変更不要。」"
+    },
+    {
+      "id": "S3-F006",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "tests/integration/auto-yes-persistence.test.tsへの影響確認が設計書に未記載",
+      "description": "tests/integration/auto-yes-persistence.test.tsが存在し、globalThisの永続化テスト（module reload後のpoller state永続化）を含む。テスト内でAutoYesPollerStateの内部フィールドを直接検証していない（getActivePollerCount()経由の間接検証のみ）ため、lastAnsweredPromptKeyフィールド追加による影響はない。しかし設計書セクション6.6のテスト影響テーブルに含まれていないため、実装者が確認を怠るリスクがある。",
+      "suggestion": "設計書セクション6.6の既存テスト影響テーブルに tests/integration/auto-yes-persistence.test.ts を追加する。影響: 「AutoYesPollerStateの内部フィールドを直接参照していないため影響なし。getActivePollerCount()経由の間接検証のみ。」"
+    },
+    {
+      "id": "S3-F007",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "title": "prompt-key.ts新規追加がクライアントバンドルに与える影響は最小限",
+      "description": "src/lib/prompt-key.ts は純粋な文字列結合関数のみを含む新規ファイルであり、fs/child_process等のサーバー専用importを持たない。useAutoYes.ts（'use client'コンポーネント）からimportされるため、クライアントバンドルに含まれるが、関数の実装が1行の文字列テンプレートリテラルのみであり、バンドルサイズへの影響は無視可能。tsconfig.jsonの@/lib/パスエイリアスにより、import解決も既存のパターンと一致する。",
+      "suggestion": "現状の設計で問題ない。prompt-key.tsがサーバー専用のimportを持たないことを実装時に確認すれば、クライアント・サーバー両方からの使用に問題はない。"
+    },
+    {
+      "id": "S3-F008",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "title": "AutoYesPollerState変更がglobalThis型宣言と既存テストに影響しないことの確認",
+      "description": "AutoYesPollerState（auto-yes-manager.ts L31-42）にlastAnsweredPromptKeyフィールドを追加すると、globalThis.__autoYesPollerStatesのMap型パラメータは自動的に新フィールドを含む。TypeScriptの参照型であるため、declare global内の型宣言の修正は不要。startAutoYesPolling()内の初期化コード（L414-420）にlastAnsweredPromptKey: nullを追加しないとTypeScriptコンパイルエラーとなるため、追加漏れはビルド時に捕捉される。既存のglobalThisテスト（auto-yes-manager.test.ts L399-471）はpollerStateの内部フィールドを直接検証していないため影響はない。",
+      "suggestion": "現状の設計で問題ない。TypeScriptの型システムが初期化漏れを検出するため安全性は担保されている。"
+    },
+    {
+      "id": "S3-F009",
+      "severity": "nice_to_have",
+      "category": "API影響",
+      "title": "ensureHealthySession()のconsole.warn追加とsession-cleanup.tsのstopAutoYesPolling()呼び出しへの影響なし",
+      "description": "session-cleanup.ts（src/lib/session-cleanup.ts L100）がstopAutoYesPolling()をimportして使用している。AutoYesPollerStateへのlastAnsweredPromptKeyフィールド追加はstopAutoYesPolling()の動作（タイマークリア + Map deleteのみ）に影響しない。ensureHealthySession()のconsole.warn追加も、session-cleanup.tsが使用するstopAutoYesPolling()とは別の呼び出しパスであるため影響なし。prompt-answer-sender.tsもインターフェース変更なしのため影響なし。",
+      "suggestion": "現状の設計で問題ない。関連モジュールのインターフェースは全て維持される。"
+    },
+    {
+      "id": "S3-F010",
+      "severity": "nice_to_have",
+      "category": "API影響",
+      "title": "COOLDOWN_INTERVAL_MS=5000による応答レイテンシ増加の実際の影響は限定的",
+      "description": "設計書セクション5で分析されている通り、応答送信後の次回ポーリング間隔が2秒から5秒に延長される。最悪ケースでは連続する異なるプロンプトの検出が+3秒遅延する。しかしClaude CLIの処理時間（通常5秒以上）を考慮すると、連続プロンプト間に十分なバッファがあるため実影響は限定的である。現在のAPI route（8箇所）はisClaudeRunning()のboolean戻り値を使用するだけでポーリング間隔に依存しないため、API応答時間には影響しない。"  ,
+      "suggestion": "現状の設計で問題ない。トレードオフ分析は適切に行われている。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 4,
+    "overall_quality": "high"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-306-session-stability-design-policy.md",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/prompt-response-body-builder.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/hooks/useAutoYes.test.ts",
+    "tests/integration/auto-yes-persistence.test.ts"
+  ]
+}

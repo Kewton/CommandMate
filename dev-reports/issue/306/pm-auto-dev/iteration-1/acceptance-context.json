@@ -1,0 +1,29 @@
+{
+  "issue_number": 306,
+  "feature_summary": "tmuxセッション安定性改善: SHELL_PROMPT_ENDINGS偽陽性防止、Auto-Yes重複応答防止、クールダウン追加、ヘルスチェックログ改善",
+  "acceptance_criteria": [
+    "Claude CLIのステータスバー 'Context left until auto-compact: N%' がシェルプロンプトと誤判定されないこと",
+    "サーバー側Auto-Yes Pollerが同一プロンプトに対して1回のみ応答を送信すること",
+    "応答送信後にクールダウン期間（5秒）が適用されること",
+    "ヘルスチェックによるセッションkill時にreason付きログが出力されること",
+    "既存のAuto-Yesテストが全てパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 'Context left until auto-compact: 7%' を含むtmux出力でisSessionHealthy()がtrueを返すこと",
+    "シナリオ2: 実際のzshプロンプト（user@host%）でisSessionHealthy()がfalseを返すこと",
+    "シナリオ3: 同一プロンプトキーで2回目のpollAutoYes()が応答送信をスキップすること",
+    "シナリオ4: 応答送信成功後、COOLDOWN_INTERVAL_MS(5000ms)で次回ポーリングがスケジュールされること",
+    "シナリオ5: ensureHealthySession()がセッションをkillする際にconsole.warnでreasonが出力されること",
+    "シナリオ6: useAutoYes.tsがgeneratePromptKey()を使用してpromptKeyを生成すること",
+    "シナリオ7: 既存の全ユニットテストがパスすること"
+  ],
+  "implemented_files": [
+    "src/lib/prompt-key.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/hooks/useAutoYes.ts",
+    "tests/unit/lib/prompt-key.test.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ]
+}

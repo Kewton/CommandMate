@@ -1,0 +1,109 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "issue_number": 306,
+  "timestamp": "2026-02-18T12:00:00Z",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "should_fix",
+      "principle": "SRP",
+      "title": "HealthCheckResult interfaceをclaude-session.ts内に定義している点の再検討",
+      "description": "設計方針書ではHealthCheckResultをclaude-session.ts内に定義し、exportしない方針としている。しかし同時に@internalでisSessionHealthy()をexportしてテストからreason検証を行う設計となっている。interfaceをファイル内に閉じつつ関数だけexportすると、テスト側でHealthCheckResultの型を直接参照できず、型安全性が低下する。テストでresult.reasonを検証する場合、返却値の型が不明確になる。",
+      "suggestion": "HealthCheckResult interfaceも@internal exportとしてテストファイルからimportできるようにするか、あるいはsrc/types/配下に型定義を切り出してテストの型安全性を確保する。ファイル内定義のままでもTypeScriptの構造的型付けにより動作はするが、明示的なexportの方がテストの意図が明確になる。"
+    },
+    {
+      "id": "F002",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "promptKey生成ロジックがクライアント(useAutoYes)とサーバー(pollAutoYes)で重複",
+      "description": "設計方針書セクション3.3で、pollAutoYes()内でpromptKeyを`${promptData.type}:${promptData.question}`で生成する設計となっている。同一のpromptKey生成ロジックがuseAutoYes.ts:77にも存在する（`${promptData.type}:${promptData.question}`）。クライアントとサーバーで同じキー生成ロジックが重複しており、将来的にキー構成を変更する場合に不整合リスクがある。",
+      "suggestion": "promptKey生成関数を共通ユーティリティとして切り出す。例: `src/lib/prompt-key.ts`にgeneratePromptKey(promptData)を定義し、useAutoYes.tsとauto-yes-manager.tsの両方から使用する。これはDRY原則の厳密な適用であり、現時点ではキー生成が1行のため優先度は中程度。"
+    },
+    {
+      "id": "F003",
+      "severity": "nice_to_have",
+      "principle": "OCP",
+      "title": "SHELL_PROMPT_ENDINGS個別パターン除外のスケーラビリティ",
+      "description": "設計方針書セクション3.2の多段防御パターンで、%に対してのみ個別パターン除外（/\\d+%$/）をインラインで記述している。今後新たな偽陽性パターンが発見された場合、if分岐が増加する構造になっている。現在は%のみだが、将来的な拡張性の観点で検討の余地がある。",
+      "suggestion": "各SHELL_PROMPT_ENDINGSエントリに除外パターン（exclusionPattern）を関連付けた構造体にリファクタリングする案がある。ただし現時点では%のみの除外でありYAGNI原則とのトレードオフがあるため、現在の実装でも十分。コメントで拡張方針を記載しておけば良い。"
+    },
+    {
+      "id": "F004",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "title": "MAX_SHELL_PROMPT_LENGTH=40のマジックナンバーに対するドキュメンテーション",
+      "description": "設計方針書で40文字の閾値が経験値として定義されている。設計書内には根拠が記載されているが、コード上での定数定義時にも十分なJSDocコメントが必要。また40文字という値の妥当性を検証するテストケース（境界値テスト）が設計書のテスト計画に明示的に記載されていない。",
+      "suggestion": "テスト設計(セクション6.1)に39文字/40文字/41文字の境界値テストケースを追加する。JSDocコメントで「典型的なシェルプロンプト（user@host:~/project$）は30文字前後、40文字は安全マージン」の根拠を記載する。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "principle": "SRP",
+      "title": "pollAutoYes()の責務過多リスク",
+      "description": "設計方針書の変更により、pollAutoYes()に(1)thinking検出、(2)プロンプト検出、(3)重複チェック（promptKey）、(4)自動応答解決、(5)応答送信、(6)タイムスタンプ更新、(7)クールダウン制御の7つの責務が集中する。対策2（重複応答防止）と対策5（クールダウン）の追加により、単一関数の複雑度がさらに増加する。",
+      "suggestion": "重複チェックロジック（promptKeyの生成・比較・リセット）をprivateヘルパー関数（例: isDuplicatePrompt()）として抽出することを検討する。pollAutoYes()のメイン処理フローは明確に保ちつつ、各ステップの詳細をヘルパーに委譲するパターンが望ましい。ただし現状の変更量は小さいため、次のリファクタリング機会での対応でも可。"
+    },
+    {
+      "id": "F006",
+      "severity": "must_fix",
+      "principle": "DIP",
+      "title": "isSessionHealthy()の行長チェックと個別パターン除外の適用順序に関する設計不備",
+      "description": "設計方針書セクション3.2では、第1段階（個別パターン除外）が先に実行され、第2段階（行長チェック）が後に実行される。しかし擬似コードの構造を見ると、SHELL_PROMPT_ENDINGSのsome()ループ内で%の個別除外を行った後、行長チェックはループ外で独立して実行される。これは論理的に問題がある：行長チェック（第2段階）はSHELL_PROMPT_ENDINGSのsome()が真を返した場合に不健全判定を下した後には実行されない。つまり、長い行で末尾が$や#の場合、some()内でtrueが返り、行長チェックに到達する前にunhealthy判定される可能性がある。設計書の意図（長い行は除外）を実現するには、行長チェックをsome()ループ内に統合するか、some()の前に配置する必要がある。",
+      "suggestion": "行長チェックをSHELL_PROMPT_ENDINGSチェックの前に移動する。具体的には：(1) lastLineを抽出、(2) lastLine.length >= MAX_SHELL_PROMPT_LENGTH なら healthy:true を即座に返す、(3) その後でSHELL_PROMPT_ENDINGSチェックと%個別除外を実行する。この順序であれば、長い行は$/#/%すべてで確実に除外される。これは設計書セクション3.2の偽陽性防止戦略テーブルの意図と一致する。"
+    },
+    {
+      "id": "F007",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "title": "HealthCheckResult.reasonのstring型は適切（enumは過剰）",
+      "description": "設計方針書でreason を string のみとし enum を使わない判断はYAGNI原則に合致している。現時点ではログ出力が主な用途であり、reasonの種類に基づく分岐処理は不要。この設計判断は妥当である。",
+      "suggestion": "現状維持で問題ない。将来reasonに基づいた条件分岐が必要になった時点でenum化を検討する。これは正しいYAGNI適用。"
+    },
+    {
+      "id": "F008",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "title": "scheduleNextPoll()のoverrideIntervalパラメータは適切な拡張",
+      "description": "設計方針書セクション3.4のscheduleNextPoll()へのoverrideIntervalオプションパラメータ追加は、既存の呼び出し箇所に影響を与えずクールダウン機能を追加する良い設計。OCPにも準拠。",
+      "suggestion": "現状の設計で問題ない。"
+    },
+    {
+      "id": "F009",
+      "severity": "should_fix",
+      "principle": "other",
+      "title": "lastAnsweredPromptKeyのリセット条件と同一プロンプト再表示のエッジケース",
+      "description": "設計方針書セクション3.3で、プロンプト非検出時にlastAnsweredPromptKeyをnullリセットする設計となっている。しかし、Claude CLIが同一プロンプトを短時間で連続表示するケース（例：ネットワークエラーによるリトライ）では、非検出フェーズを経ずに同じpromptKeyが連続する可能性がある。この場合、2回目の応答がスキップされることが設計上意図的かどうかが明示されていない。",
+      "suggestion": "設計書のセクション7（設計上の決定事項とトレードオフ）に、「同一promptKeyの連続検出時は意図的にスキップする（これが重複応答防止の本来の目的）」という明示的な記述を追加する。また、Claude CLIがエラーリトライで同一プロンプトを再表示するケースでは、一旦非プロンプト状態（エラー表示）を経由するため、リセットが正常に機能することを補足する。"
+    },
+    {
+      "id": "F010",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "title": "対策3のスコープ外判断は適切",
+      "description": "コンテキスト残量検出・通知（対策3）をスコープ外とした判断は、KISS原則とスコープ管理の観点から妥当。UI変更を伴う大きな変更を分離することで、本Issueの変更リスクを最小化している。",
+      "suggestion": "現状維持。対策3用の別Issueを作成する旨を設計書に記載済みであることを確認する。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 5,
+    "overall_quality": "high"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-306-session-stability-design-policy.md",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/lib/cli-patterns.ts"
+  ]
+}

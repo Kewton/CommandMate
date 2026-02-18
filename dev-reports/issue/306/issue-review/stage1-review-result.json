@@ -1,0 +1,181 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 306,
+  "review_focus": "通常",
+  "review_date": "2026-02-18",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "severity": "must_fix",
+        "category": "正確性",
+        "title": "対策1の案Aに endsWith 判定の論理的欠陥がある",
+        "description": "Issue記載の対策1案Aは `trimmed.split('\\n').pop()?.trim()` で最終行を取得し、`endsWith(ending)` を再チェックしているが、現行コード（claude-session.ts:280,288）は `cleanOutput.trim()` 全体の末尾文字を見ている。つまり Issue は「最終行の末尾」と「出力全体の末尾」の区別を正しくしておらず、案Aのコード例は現行コードの修正箇所を誤って表現している。実際には `trimmed` は既に `cleanOutput.trim()` 結果であり、複数行の場合は最後の行だけでなく全体の末尾文字がチェック対象。tmux capture-pane の出力はステータスバー行が最終行になりうるため、案Aの修正自体は有効だが、Issue本文のコード例がそのまま適用できない。修正案コード例を現行コードのコンテキストに合わせて更新すべき。",
+        "location": "## 対策案 > 対策1: SHELL_PROMPT_ENDINGSの判定ロジック改善",
+        "suggestion": "案Aのコード例を以下のように修正して、現行コードの構造に合致させる:\n```typescript\n// claude-session.ts:280-290 の修正案\nconst trimmed = cleanOutput.trim();\nif (trimmed === '') { return false; }\nconst lastLine = trimmed.split('\\n').pop()?.trim() ?? '';\nif (SHELL_PROMPT_ENDINGS.some(ending => {\n  if (!lastLine.endsWith(ending)) return false;\n  if (ending === '%' && /\\d+%$/.test(lastLine)) return false;\n  return true;\n})) {\n  return false;\n}\n```\nまた、`lastLine` による判定への変更自体が意味のある改善（全体末尾ではなく行末で判定する方がより正確）であることを明記すべき。",
+        "evidence": "claude-session.ts:280の `const trimmed = cleanOutput.trim()` は出力全体をtrimしており、L288の `trimmed.endsWith(ending)` は全出力の最終文字をチェック。Issueの案Aは `trimmed.split('\\n').pop()` を使って最終行に切り替えているが、この変更が持つ意味（全体末尾→最終行末尾への変更）が明確に記述されていない。"
+      },
+      {
+        "id": "MF-002",
+        "severity": "must_fix",
+        "category": "完全性",
+        "title": "SHELL_PROMPT_ENDINGS の `$` も偽陽性リスクがあるが対策に含まれていない",
+        "description": "Issue は `%` の偽陽性のみを対策しているが、`$` にも同様のリスクがある。Claude CLI のステータスバーやレスポンス内容が `$` で終わるケース（例: コード例中のシェル変数 `$HOME`、コマンド出力中の `$`、金額表示 `100$`）は現実的に発生しうる。`#` もMarkdownの見出し行やコメント行で出力末尾に来る可能性がある。対策1で `%` のみを除外するのではなく、全てのSHELL_PROMPT_ENDINGS文字について偽陽性のリスク分析と対策を記載すべき。",
+        "location": "## 対策案 > 対策1",
+        "suggestion": "対策1を拡張し、3文字全てに対する偽陽性防止戦略を記載する。例えば:\n- `%`: `\\d+%$` パターンを除外（コンテキスト残量表示）\n- `$`: 行が長い場合（例: 40文字以上）はシェルプロンプトではない可能性が高いため除外\n- `#`: 同上、または行頭が `#` でない場合（rootプロンプトは通常短い）\nまたは、案Bの「最終行が短い（例: 40文字以下）ことも条件に加える」を全文字共通の防御として採用し、案Aの個別パターン除外と組み合わせる「多段防御」を推奨する。",
+        "evidence": "claude-session.ts:58の SHELL_PROMPT_ENDINGS は ['$', '%', '#'] の3文字。Issueは `%` の偽陽性のみ詳述しているが、C-S2-002コメント（L50-56）でも「Claude CLI output ends with one of these characters」の偽陽性リスクを認識しつつ「acceptable risk」としている。Issue #306で偽陽性が顕在化した以上、3文字全てを再評価すべき。"
+      },
+      {
+        "id": "MF-003",
+        "severity": "must_fix",
+        "category": "完全性",
+        "title": "対策2のpromptKey生成ロジックが堅牢でない",
+        "description": "Issue記載の重複防止用promptKeyは `${promptDetection.promptData.type}:${promptDetection.promptData.question}` だが、同一プロンプトが再表示された場合（例: Claude CLIが応答を処理した後に同じ質問を再度表示するケース）に正規の再応答もブロックされてしまう。クライアント側(useAutoYes.ts:60-62)では `isPromptWaiting` が false になった時に `lastAutoRespondedRef.current = null` にリセットしているが、サーバー側のpollAutoYes()にはリセットタイミングの記述がない。",
+        "location": "## 対策案 > 対策2: サーバー側Auto-Yes Pollerに重複応答防止を追加",
+        "suggestion": "以下を追加で記載すべき:\n1. `lastAnsweredPromptKey` のリセット条件を明確化（例: プロンプト非検出時にnullリセット、または応答送信後一定時間経過でリセット）\n2. リセットロジックのコード例を追加:\n```typescript\nif (!promptDetection.isPrompt || !promptDetection.promptData) {\n  // プロンプトが消えたらリセット（正規の再表示に対応）\n  pollerState.lastAnsweredPromptKey = null;\n  scheduleNextPoll(worktreeId, cliToolId);\n  return;\n}\n```\n3. この動作がクライアント側(useAutoYes.ts:60-62)のリセットロジックと一致していることを明記する。",
+        "evidence": "useAutoYes.ts:60-62では `if (!isPromptWaiting) { lastAutoRespondedRef.current = null; return; }` でリセットしている。サーバー側のpollAutoYes()ではプロンプト非検出時（L321-325）に `scheduleNextPoll` を呼ぶだけで、lastAnsweredPromptKeyのリセットが記述されていない。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "severity": "should_fix",
+        "category": "整合性",
+        "title": "対策4のログ出力コード例がisSessionHealthy()の構造と不整合",
+        "description": "Issue記載の対策4コード例では `ensureHealthySession()` にログを追加しているが、不健全判定の「理由」は `isSessionHealthy()` 内部でしか判定できない（エラーパターンマッチ、空出力、シェルプロンプト検出のいずれかが原因）。`ensureHealthySession()` は `isSessionHealthy()` の bool 結果しか受け取らないため、「なぜ不健全か」をログに出力するには `isSessionHealthy()` の戻り値を拡張するか、`isSessionHealthy()` 内部でログを出力する必要がある。",
+        "location": "## 対策案 > 対策4",
+        "suggestion": "以下のいずれかのアプローチを実装タスクに追記する:\n案A: isSessionHealthy()の戻り値を `{ healthy: boolean; reason?: string }` に拡張し、ensureHealthySession()でreasonをログ出力\n案B: isSessionHealthy()の各return false箇所にconsole.warnを追加し、ensureHealthySession()はkill時のみログ出力\n案Aの方がテスト容易性が高い（reasonを検証可能）。既に実装タスクの最後に「isSessionHealthy()に不健全判定理由の構造化ログを追加」とあるが、対策4のコード例とも合致させるべき。",
+        "evidence": "claude-session.ts:262-296のisSessionHealthy()は複数箇所でreturn falseするが、どの条件でfalseになったかの情報は呼び出し元に伝わらない。対策4コード例の `console.warn('Session is unhealthy, killing...')` だけでは原因特定に不十分。"
+      },
+      {
+        "id": "SF-002",
+        "severity": "should_fix",
+        "category": "完全性",
+        "title": "対策5のクールダウン期間が対策2の重複防止と役割重複している",
+        "description": "対策5「応答送信後のクールダウン期間追加」と対策2「lastAnsweredPromptKeyによる重複防止」は、いずれも同一プロンプトへの重複送信を防ぐ目的。両方実装した場合の動作関係が明確でない。クールダウン（5秒）と重複防止keyチェックが共存する場合、一方が不要になる可能性がある。",
+        "location": "## 対策案 > 対策5 / 対策2",
+        "suggestion": "対策2と対策5の関係を明確化する。推奨: 対策2（promptKey比較）を「主防御」、対策5（クールダウン）を「副防御」として位置付け、両方を組み合わせる理由（クールダウンはClaude CLIの処理時間確保目的、promptKey比較は論理的重複防止目的で、役割が異なる）を明記する。",
+        "evidence": "対策2ではpromptKeyの一致で重複をブロック。対策5では時間ベースでポーリング自体をスキップ。両方あると、クールダウン中はpromptKeyチェックに到達しないため、実質的にクールダウンが優先される。"
+      },
+      {
+        "id": "SF-003",
+        "severity": "should_fix",
+        "category": "テスト可能性",
+        "title": "受入条件「長時間（30分以上）のAuto-Yesセッションでセッションが安定維持されること」が自動テストできない",
+        "description": "この受入条件は手動テストを前提としており、CI/CDでの自動検証が不可能。30分のタイムアウトはユニットテストやインテグレーションテストでシミュレートする方法が記載されていない。",
+        "location": "## 受入条件",
+        "suggestion": "以下に分解して自動テスト可能な条件にする:\n1. 「1000回のポーリングサイクルで重複応答が発生しないこと」（vi.useFakeTimersで高速テスト可能）\n2. 「promptKeyが変わらない間は応答が1回のみ送信されること」（ユニットテスト可能）\n3. 「Claude CLIステータスバー出力パターンでisSessionHealthy()がtrueを返すこと」（ユニットテスト可能）\n手動テスト用の受入条件は別途「手動検証項目」セクションに分離する。",
+        "evidence": "受入条件の6項目中、5項目はユニットテストで検証可能だが、最後の「30分以上のセッション安定性」はCI/CDでは検証できない。"
+      },
+      {
+        "id": "SF-004",
+        "severity": "should_fix",
+        "category": "完全性",
+        "title": "影響範囲ファイルにsrc/lib/prompt-answer-sender.tsが含まれていない",
+        "description": "対策2の重複防止ロジック追加により、`pollAutoYes()` から `sendPromptAnswer()` を呼ぶ前の判定ロジックが変わる。sendPromptAnswer()自体の変更は不要かもしれないが、テストではsendPromptAnswer()の呼び出し回数を検証する必要があるため、関連コンポーネントに含めるべき。また、`src/lib/cli-session.ts`（captureSessionOutput関数を提供）も関連コンポーネントに含まれていない。",
+        "location": "## 影響範囲 > 関連コンポーネント",
+        "suggestion": "関連コンポーネントに以下を追加:\n- `src/lib/prompt-answer-sender.ts`（変更不要、テストでの呼び出し検証対象）\n- `src/lib/cli-session.ts`（captureSessionOutput を提供、変更不要）",
+        "evidence": "auto-yes-manager.ts:12でcli-sessionからcaptureSessionOutputをimport。auto-yes-manager.ts:343-348でsendPromptAnswerを呼び出し。いずれもIssue #306の対策影響を受ける可能性がある。"
+      },
+      {
+        "id": "SF-005",
+        "severity": "should_fix",
+        "category": "明確性",
+        "title": "「原因4」がIssue概要と対策案で不整合",
+        "description": "Issueの概要セクションでは「主に3つの原因が特定されている」と記載されているが、根本原因セクションには「原因4: ヘルスチェックのkill時ログ不足」が存在する。原因4は原因1-3の結果として発生する問題（デバッグ困難性）であり、セッション削除の直接原因ではない。概要の記載と根本原因セクションの記載が食い違っている。",
+        "location": "## 概要 / ## 根本原因 > 原因4",
+        "suggestion": "選択肢1: 概要を「主に3つの原因と1つのデバッグ改善点が特定されている」に修正\n選択肢2: 原因4を根本原因から分離し、「付帯的な改善点」として別セクションに移動\n選択肢2を推奨（原因4は障害の直接原因ではないため）。",
+        "evidence": "概要: 「主に3つの原因が特定されている」、根本原因セクション: 原因1, 原因2, 原因3, 原因4の4つが列挙されている。"
+      },
+      {
+        "id": "SF-006",
+        "severity": "should_fix",
+        "category": "テスト可能性",
+        "title": "既存テストファイルのパスがIssue記載と異なる",
+        "description": "Issueの影響範囲セクションでは `tests/unit/claude-session.test.ts` と `tests/unit/auto-yes-manager.test.ts` を変更対象として記載しているが、実際のファイルパスは `tests/unit/lib/claude-session.test.ts` と `tests/unit/lib/auto-yes-manager.test.ts`（`lib/` ディレクトリが含まれる）。",
+        "location": "## 影響範囲 > 変更対象ファイル",
+        "suggestion": "テストファイルパスを正確に修正する:\n- `tests/unit/claude-session.test.ts` -> `tests/unit/lib/claude-session.test.ts`\n- `tests/unit/auto-yes-manager.test.ts` -> `tests/unit/lib/auto-yes-manager.test.ts`",
+        "evidence": "実際のテストファイルパス: tests/unit/lib/claude-session.test.ts, tests/unit/lib/auto-yes-manager.test.ts"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "severity": "nice_to_have",
+        "category": "完全性",
+        "title": "対策3のコンテキスト枯渇検出パターンの具体的な正規表現が未記載",
+        "description": "対策3で「tmux出力から `Context left until auto-compact: N%` パターンを検出」と記載されているが、具体的な正規表現パターンや、cli-patterns.tsへの追加コード例が示されていない。",
+        "location": "## 対策案 > 対策3",
+        "suggestion": "以下のようなパターン定義のコード例を追加:\n```typescript\n// cli-patterns.ts に追加\nexport const CONTEXT_REMAINING_PATTERN = /Context left until auto-compact:\\s*(\\d+)%/;\n```\n閾値検出のヘルパー関数例も含めると実装者に親切。",
+        "evidence": "cli-patterns.tsにContext left until auto-compactに関連するパターンは現在存在しない（grep確認済み）。"
+      },
+      {
+        "id": "NTH-002",
+        "severity": "nice_to_have",
+        "category": "完全性",
+        "title": "Issueタイトルが原因1のみを反映しており、原因2・3が含まれていない",
+        "description": "Issueタイトルは「fix: Auto-Yes Pollerの重複応答によりtmuxセッションが定期的に削除される」だが、実際には3つの独立した原因が記載されている。タイトルだけでは原因2（コンテキスト枯渇）と原因3（SHELL_PROMPT_ENDINGS偽陽性）の存在がわからない。",
+        "location": "Issue タイトル",
+        "suggestion": "タイトルを包括的に修正: 例 `fix: tmuxセッションが定期的に削除される（Auto-Yes重複・コンテキスト枯渇・ヘルスチェック偽陽性）`\nまたは、原因ごとにIssueを分割することを検討（Issue分割は影響範囲レビューで判断）。",
+        "evidence": "タイトル: 「fix: Auto-Yes Pollerの重複応答によりtmuxセッションが定期的に削除される」。本文では3つの原因を記載。"
+      },
+      {
+        "id": "NTH-003",
+        "severity": "nice_to_have",
+        "category": "明確性",
+        "title": "パターンBとパターンCの再現手順に前提条件が不足",
+        "description": "パターンBの再現手順では `/pm-auto-issue2dev` コマンドの使用が前提だが、このコマンドの概要説明がない。パターンCでは「コンテキスト残量が低下し」とあるが、どの程度の操作で低下するかの目安がない。再現手順としての具体性が不足している。",
+        "location": "## 再現手順 > パターンB / パターンC",
+        "suggestion": "パターンBに「/pm-auto-issue2devは自動開発ワークフローコマンドで、多数のファイル変更を伴う長時間タスク」の補足を追加。パターンCに「任意のタスクを20-30分以上実行するとステータスバーが表示される」等の目安を追加。",
+        "evidence": "再現手順の実際の確認例にはトークン消費やファイル数の具体値があるが、再現手順自体の記述は抽象的。"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix": 3,
+    "should_fix": 6,
+    "nice_to_have": 3,
+    "total": 12,
+    "overall_quality": "high"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/claude-session.ts",
+      "lines": "58, 262-296, 306-313",
+      "relevance": "SHELL_PROMPT_ENDINGS定義、isSessionHealthy()、ensureHealthySession() - 全3原因の主要変更対象"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "31-42, 274-369",
+      "relevance": "AutoYesPollerState型定義、pollAutoYes() - 重複防止ロジック追加対象"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "コンテキスト残量検出パターン追加候補"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "lines": "60-62, 68-78",
+      "relevance": "クライアント側重複防止の参照実装（サーバー側との対称性確認）"
+    },
+    {
+      "file": "src/lib/prompt-answer-sender.ts",
+      "relevance": "sendPromptAnswer() - pollAutoYes()から呼ばれる応答送信関数（影響範囲の関連コンポーネント候補）"
+    },
+    {
+      "file": "tests/unit/lib/claude-session.test.ts",
+      "relevance": "既存テスト - SHELL_PROMPT_ENDINGSテスト追加対象（正しいパス: tests/unit/lib/）"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "relevance": "既存テスト - 重複防止テスト追加対象（正しいパス: tests/unit/lib/）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトの技術スタック・モジュール一覧との整合性確認"
+    }
+  ]
+}

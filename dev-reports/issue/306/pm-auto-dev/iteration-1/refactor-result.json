@@ -1,0 +1,38 @@
+{
+  "issue_number": 306,
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [
+    "Extract PromptKeyInput interface (ISP) for generatePromptKey parameter type instead of inline anonymous type",
+    "Promote MAX_SHELL_PROMPT_LENGTH from function-local to module-level constant with comprehensive JSDoc",
+    "Extract getErrorMessage() helper in auto-yes-manager.ts for DRY consistency with claude-session.ts pattern",
+    "Add comprehensive JSDoc (@param, @returns, @example) to all public and internal functions in auto-yes-manager.ts",
+    "Add @internal annotations to testing-only exports (clearAllAutoYesStates, clearAllPollerStates)",
+    "Enhance JSDoc on useAutoYes hook with @param and @returns tags",
+    "Add JSDoc to isDuplicatePrompt with @param/@returns documentation"
+  ],
+  "files_changed": [
+    "src/lib/prompt-key.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/hooks/useAutoYes.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "test_results": {
+    "total": 163,
+    "passed": 163,
+    "failed": 0
+  },
+  "commits": [
+    "3c5e0c8: refactor(#306): improve JSDoc, extract constants, and apply DRY/ISP principles"
+  ],
+  "notes": "All refactorings are documentation and structural improvements only. No functional changes were made. All 163 tests continue to pass. ESLint and TypeScript checks remain clean for all target files. Pre-existing TypeScript errors in unrelated test files (testing-library imports) and test failures (env.test.ts) were not introduced by this change."
+}
