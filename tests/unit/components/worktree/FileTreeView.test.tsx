@@ -1432,4 +1432,122 @@ describe('FileTreeView', () => {
       expect(screen.queryByTestId('file-tree-error')).not.toBeInTheDocument();
     });
   });
+
+  /**
+   * Issue #300: Toolbar for root-level file/directory creation
+   *
+   * When the file tree is non-empty and onNewFile/onNewDirectory callbacks
+   * are provided, a toolbar should appear above the tree items with buttons
+   * to create files and directories at the root level.
+   */
+  describe('Toolbar - non-empty state (Issue #300)', () => {
+    it('should show toolbar-new-directory-button when onNewDirectory is provided', async () => {
+      const onNewDirectory = vi.fn();
+      render(
+        <FileTreeView
+          worktreeId="test-worktree"
+          onNewDirectory={onNewDirectory}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('toolbar-new-directory-button')).toBeInTheDocument();
+    });
+
+    it('should show toolbar-new-file-button when onNewFile is provided', async () => {
+      const onNewFile = vi.fn();
+      render(
+        <FileTreeView
+          worktreeId="test-worktree"
+          onNewFile={onNewFile}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('toolbar-new-file-button')).toBeInTheDocument();
+    });
+
+    it('should call onNewDirectory with empty string when toolbar button is clicked', async () => {
+      const onNewDirectory = vi.fn();
+      render(
+        <FileTreeView
+          worktreeId="test-worktree"
+          onNewDirectory={onNewDirectory}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      const button = screen.getByTestId('toolbar-new-directory-button');
+      fireEvent.click(button);
+
+      expect(onNewDirectory).toHaveBeenCalledWith('');
+    });
+
+    it('should call onNewFile with empty string when toolbar button is clicked', async () => {
+      const onNewFile = vi.fn();
+      render(
+        <FileTreeView
+          worktreeId="test-worktree"
+          onNewFile={onNewFile}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      const button = screen.getByTestId('toolbar-new-file-button');
+      fireEvent.click(button);
+
+      expect(onNewFile).toHaveBeenCalledWith('');
+    });
+
+    it('should not show file-tree-toolbar when neither onNewFile nor onNewDirectory is provided', async () => {
+      render(
+        <FileTreeView worktreeId="test-worktree" />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByTestId('file-tree-toolbar')).not.toBeInTheDocument();
+    });
+
+    it('should still show empty-new-directory-button in empty state', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            path: '',
+            name: '',
+            items: [],
+            parentPath: null,
+          }),
+      });
+
+      const onNewDirectory = vi.fn();
+      render(
+        <FileTreeView
+          worktreeId="test-worktree"
+          onNewDirectory={onNewDirectory}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-empty')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('empty-new-directory-button')).toBeInTheDocument();
+    });
+  });
 });
