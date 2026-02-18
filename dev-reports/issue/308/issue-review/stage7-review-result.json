@@ -1,0 +1,132 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 308,
+  "review_focus": "影響範囲（2回目）",
+  "review_date": "2026-02-19",
+  "previous_findings_check": {
+    "S3-001": {
+      "status": "反映済み",
+      "evidence": "関連コンポーネントセクションに「src/components/repository/RepositoryManager.tsx - clone機能のフロントエンド呼び出し元（コード変更不要。ただしclone先パスがCM_ROOT_DIR配下として表示されるようになるため、サイドバーのリポジトリ一覧で新規cloneリポジトリのパス表記が変わる）」が追加されている。コード変更不要であること、パス表記の変化についての説明が適切に記載されている。"
+    },
+    "S3-002": {
+      "status": "反映済み",
+      "evidence": "「既存データへの影響」サブセクションが影響範囲セクションに追加されている。以下の4点がすべて記載されている: (1) 既存の/tmp/repos配下のリポジトリのDBレコードがそのまま残ること、(2) サーバー再起動時のworktreeスキャン対象がCM_ROOT_DIR配下のみであるためworktree情報が更新されなくなる可能性、(3) 既存データのマイグレーションが本Issueのスコープ外であることの明示、(4) 将来的な移行手順ガイドの検討。S3-002の指摘内容を忠実に反映している。"
+    },
+    "S3-003": {
+      "status": "反映済み",
+      "evidence": "関連コンポーネントセクションに「src/app/api/repositories/scan/route.ts - 既にgetEnv().CM_ROOT_DIRをisPathSafeの基準として使用（L26-29）。今回の修正によりclone APIも同じ基準を使用することになり、scan/clone間のパス検証の整合性が向上する（変更不要）」が追加されている。scan APIとの整合性が本修正の設計判断を支持する根拠として明記されている。"
+    },
+    "S3-004": {
+      "status": "反映済み",
+      "evidence": "実装タスクの「WORKTREE_BASE_PATHの非推奨化対応」が以下の4点で具体化されている: (1) 警告出力場所はCloneManagerコンストラクタ内、(2) 重複防止はモジュールスコープのwarnedWorktreeBasePath: booleanで初回のみ出力、(3) ENV_MAPPINGには追加しない（issue-76の設計方針に準拠）、(4) UI通知は本Issueのスコープ外。さらに対策案セクションにbasePath決定ロジックの優先順位が擬似コードで明示されている（Stage 5 S5-004の反映）。"
+    },
+    "S3-006": {
+      "status": "反映済み",
+      "evidence": "テスト更新タスクに以下がすべて明記されている: (1) clone-manager.test.tsにvi.spyOn(process, 'cwd').mockReturnValue('/test/base')のprocess.cwdモック方針、(2) api-clone.test.tsにvi.mock('@/lib/env', ...)のgetEnvモック追加、(3) 各テストのbeforeEachでprocess.env.WORKTREE_BASE_PATHをクリアし環境変数リーク防止。テスト環境でのモック方針が十分に具体化されている。"
+    },
+    "S3-007": {
+      "status": "反映済み",
+      "evidence": "「ユーザー影響」セクションが影響範囲セクション内に追加されている。以下の3点が記載されている: (1) CM_ROOT_DIRを既に設定しているユーザーにとってはバグ修正であり特別な移行手順不要、(2) WORKTREE_BASE_PATHのみを使用している既存ユーザー向けの移行手順（.envでの置き換え、値が異なる場合の注意点）、(3) リリースノートにWORKTREE_BASE_PATHの非推奨化の告知を含めることを推奨。"
+    }
+  },
+  "stage5_findings_check": {
+    "S5-001": {
+      "status": "反映済み",
+      "evidence": "実装タスクのclone APIルート修正タスクに「getEnv() のエラーハンドリングは scan/route.ts と同様にtry-catchなしで呼び出す（サーバー起動時点でバリデーション済みのため）」が追記されている。"
+    },
+    "S5-002": {
+      "status": "反映済み",
+      "evidence": "関連コンポーネントセクションに「server.ts L83 - 起動時警告メッセージのMCBD_ROOT_DIR表記をCM_ROOT_DIRに修正（任意、本Issueの一環として対応可能）」が追加されている。"
+    },
+    "S5-003": {
+      "status": "反映済み",
+      "evidence": "受入条件に「WORKTREE_BASE_PATH 非推奨警告は CloneManager の複数回インスタンス化でも初回のみ出力される」が追加されている。"
+    },
+    "S5-004": {
+      "status": "反映済み",
+      "evidence": "対策案の「CloneManagerのデフォルト値改善」セクションに修正後のbasePath決定ロジック優先順位が擬似コードで明記されている: 「basePath = config.basePath || (process.env.WORKTREE_BASE_PATH ? [非推奨警告を出力し使用] : process.cwd())」。3段階の優先順位（1. config.basePath、2. WORKTREE_BASE_PATH（非推奨）、3. process.cwd()）が明確に示されている。"
+    }
+  },
+  "findings": [
+    {
+      "id": "S7-001",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "location": "影響範囲 - 関連コンポーネント - [jobId]/route.ts の副作用",
+      "description": "[jobId]/route.ts (L61) では new CloneManager(db) を basePath なしで呼び出しており、本修正後はコンストラクタ内で WORKTREE_BASE_PATH の存在チェックと非推奨警告が実行される。getCloneJobStatus() は basePath を使用しないため機能的な影響はないが、ジョブステータスを取得するたびに CloneManager コンストラクタが呼ばれ、非推奨警告ロジック（warnedWorktreeBasePath フラグの参照）が走る。これはパフォーマンスに実質的な影響はないが、実装タスクで「一貫性維持のため basePath を渡す（任意）」と記載されている変更を行う場合、getEnv() をこのルートでも呼ぶ必要があり、scan/route.ts と同様のパターンになる。この観点は Issue 本文で十分に網羅されているが、「任意」とされている変更を行わない場合のデフォルト値 (process.cwd()) が getCloneJobStatus のみのルートで使われることの是非について補足があると、実装判断の参考になる。",
+      "suggestion": "現在の記載で実装に十分な情報が含まれているため対応は不要。ただし、実装者向けの補足として、[jobId]/route.ts で basePath を渡さない場合でも getCloneJobStatus() は basePath を参照しないため、process.cwd() がデフォルト値として設定されること自体に副作用はない旨を「Note」に付記しても良い。"
+    },
+    {
+      "id": "S7-002",
+      "severity": "nice_to_have",
+      "category": "test_coverage",
+      "location": "影響範囲 - テスト範囲 - 既存テストの basePath='/tmp/repos' 依存",
+      "description": "既存の clone-manager.test.ts L208-225 に「should use custom target path if provided (within basePath)」テストがあり、customPath を '/tmp/repos/custom/target/path' としてハードコードしている（L213）。このテストは CloneManager を new CloneManager(db) で basePath 指定なしで生成しており、現在のデフォルト値 '/tmp/repos' に暗黙的に依存している。修正後はデフォルト値が process.cwd() に変わるため、このテストの customPath が process.cwd() 配下にないと isPathSafe でリジェクトされる可能性がある。テスト更新タスクに「basePathデフォルト値変更に伴うアサーション更新」は含まれているが、この特定のテストケース（customTargetPath のパストラバーサル検証）が basePath 変更の影響を受けることが明示されていない。",
+      "suggestion": "テスト更新タスクの clone-manager.test.ts 項目に「customTargetPath テスト（L208-225）の basePath 依存を解消する必要あり。テスト内で明示的に basePath を指定するか、customPath を process.cwd() 配下のパスに変更する」を補足すると良い。ただし「basePathデフォルト値変更に伴うアサーション更新」の記載で包含されているとも解釈でき、対応は任意。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "previous_findings_addressed": "Stage 3 の6件（S3-001, S3-002, S3-003, S3-004, S3-006, S3-007）およびStage 5の4件（S5-001, S5-002, S5-003, S5-004）がすべて適切にIssue本文に反映されている",
+    "overall_assessment": "Issue #308 の影響範囲分析は、2回のイテレーションを経て非常に充実した状態に達している。Stage 3 で指摘された must_fix 2件（S3-001: RepositoryManager.tsx の関連コンポーネント追加、S3-002: 既存データへの影響セクション追加）はいずれも的確に反映されている。should_fix 4件（S3-003: scan/route.ts との整合性、S3-004: WORKTREE_BASE_PATH 非推奨化の実装詳細、S3-006: テスト環境でのモック方針、S3-007: ユーザー影響セクション）もすべて反映済みである。Stage 5 の指摘4件もすべて反映されている。新規の影響範囲問題は nice_to_have レベルの2件のみであり、いずれも実装判断に委ねられる軽微な補足事項である。影響範囲セクションは変更対象ファイル、セキュリティ考慮、関連コンポーネント、既存データへの影響、ユーザー影響の5つの観点から網羅的に記載されており、実装時に想定外の副作用を防ぐのに十分な情報が含まれている。本Issueは実装開始可能な品質に達している。"
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/app/api/repositories/clone/[jobId]/route.ts",
+      "relevance": "L61で new CloneManager(db) を basePath なしで呼び出し。修正後の非推奨警告ロジックとデフォルト値 process.cwd() の影響分析（S7-001）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/tests/unit/lib/clone-manager.test.ts",
+      "relevance": "L208-225 の customTargetPath テストが basePath デフォルト値 '/tmp/repos' に暗黙的に依存（S7-002）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/clone-manager.ts",
+      "relevance": "L193 basePath デフォルト値、L251-252 getTargetPath()、L303 isPathSafe() パストラバーサル検証"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/app/api/repositories/clone/route.ts",
+      "relevance": "L71 CloneManager 初期化。basePath 渡しの修正対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/app/api/repositories/scan/route.ts",
+      "relevance": "L26 getEnv().CM_ROOT_DIR の使用パターン。clone API との整合性確認済み"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/env.ts",
+      "relevance": "L200 CM_ROOT_DIR のフォールバック (process.cwd())、L57-73 warnedKeys パターン"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/worktrees.ts",
+      "relevance": "L122-139 getRepositoryPaths() の CM_ROOT_DIR フォールバック。clone basePath との統一確認"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/server.ts",
+      "relevance": "L83 起動時警告メッセージ MCBD_ROOT_DIR 残存（S5-002で反映済み、関連コンポーネントに記載）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/components/repository/RepositoryManager.tsx",
+      "relevance": "clone 機能のフロントエンド呼び出し元（コード変更不要、関連コンポーネントとして記載済み）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/path-validator.ts",
+      "relevance": "isPathSafe() のロジック。basePath 変更後のパストラバーサル検証への影響確認"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/dev-reports/issue/308/issue-review/stage3-review-result.json",
+      "relevance": "Stage 3 影響範囲レビュー結果。全9件の指摘事項の反映確認元"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/dev-reports/issue/308/issue-review/stage5-review-result.json",
+      "relevance": "Stage 5 通常レビュー結果。S5-001〜S5-004の反映確認元"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/dev-reports/design/issue-76-env-fallback-design-policy.md",
+      "relevance": "WORKTREE_BASE_PATH が ENV_MAPPING 対象外であることの設計方針根拠（L234, L238）"
+    }
+  ]
+}

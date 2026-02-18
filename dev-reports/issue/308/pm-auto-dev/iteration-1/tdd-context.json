@@ -1,0 +1,56 @@
+{
+  "issue_number": 308,
+  "acceptance_criteria": [
+    ".envにCM_ROOT_DIRを設定した状態で、UIからcloneするとCM_ROOT_DIR配下にリポジトリが作成される",
+    "CM_ROOT_DIR未設定時はprocess.cwd()をフォールバック値として使用する",
+    "WORKTREE_BASE_PATHのみ設定時: そのパスがbasePath として使用され、console.warnで非推奨警告が出力される",
+    "WORKTREE_BASE_PATH非推奨警告はCloneManagerの複数回インスタンス化でも初回のみ出力される",
+    "CM_ROOT_DIRとWORKTREE_BASE_PATHの両方が設定された場合: CM_ROOT_DIRが優先される",
+    "どちらも未設定の場合: process.cwd()がフォールバック値として使用される",
+    "既存テストがすべてパスする",
+    "新規テストでCM_ROOT_DIR反映を検証する"
+  ],
+  "implementation_tasks": [
+    "src/lib/clone-manager.ts: モジュールスコープにlet warnedWorktreeBasePath = false を追加（クラス定義の直前）",
+    "src/lib/clone-manager.ts: コンストラクタのbasePath決定を config.basePath || this.resolveDefaultBasePath() に変更",
+    "src/lib/clone-manager.ts: private resolveDefaultBasePath() メソッドを追加（WORKTREE_BASE_PATH非推奨警告+path.resolve()正規化+process.cwd()フォールバック）",
+    "src/lib/clone-manager.ts: export function resetWorktreeBasePathWarning() をファイル末尾に追加（@internal JSDocタグ付き）",
+    "src/lib/clone-manager.ts: L307-308のエラーメッセージからbasePath値を除去（ERROR_DEFINITIONS.INVALID_TARGET_PATHのデフォルトメッセージ使用）",
+    "src/lib/clone-manager.ts: L319のエラーメッセージからtargetPathの完全パスを除去（ERROR_DEFINITIONS.DIRECTORY_EXISTSのデフォルトメッセージ使用）",
+    "src/app/api/repositories/clone/route.ts: import { getEnv } from '@/lib/env' を追加",
+    "src/app/api/repositories/clone/route.ts: const { CM_ROOT_DIR } = getEnv() を追加（getEnv().CM_ROOT_DIRはenv.tsでpath.resolve()適用済みのため追加のpath.resolve()は不要）",
+    "src/app/api/repositories/clone/route.ts: targetDirの型検証を追加（typeof targetDir !== 'string'の場合400エラー）",
+    "src/app/api/repositories/clone/route.ts: new CloneManager(db, { basePath: CM_ROOT_DIR }) に変更",
+    "src/app/api/repositories/clone/[jobId]/route.ts: import { getEnv } from '@/lib/env' を追加",
+    "src/app/api/repositories/clone/[jobId]/route.ts: const { CM_ROOT_DIR } = getEnv() を追加",
+    "src/app/api/repositories/clone/[jobId]/route.ts: new CloneManager(db, { basePath: CM_ROOT_DIR }) に変更（getCloneJobStatus()はbasePath未使用だが一貫性維持と不要な非推奨警告防止のため）",
+    ".env.example: CM_ROOT_DIRのコメントにclone先ディレクトリとしての役割を追記",
+    "tests/unit/lib/clone-manager.test.ts: resetWorktreeBasePathWarning のimportを追加",
+    "tests/unit/lib/clone-manager.test.ts: beforeEachにdelete process.env.WORKTREE_BASE_PATH とresetWorktreeBasePathWarning()を追加",
+    "tests/unit/lib/clone-manager.test.ts: 既存テスト（L208-225付近）の new CloneManager(db) を new CloneManager(db, { basePath: '/tmp/repos' }) に変更",
+    "tests/unit/lib/clone-manager.test.ts: basePath resolution の新規テストを追加（config.basePath優先、WORKTREE_BASE_PATH非推奨警告、path.resolve()正規化、process.cwd()フォールバック、警告重複防止）",
+    "tests/integration/api-clone.test.ts: vi.mock('@/lib/env', ...) をファイル冒頭に追加（CM_ROOT_DIR: '/test/clone-root' を返す）"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+  "work_plan_path": "dev-reports/issue/308/work-plan.md",
+  "key_files": {
+    "main_fix": "src/lib/clone-manager.ts",
+    "route_fix_1": "src/app/api/repositories/clone/route.ts",
+    "route_fix_2": "src/app/api/repositories/clone/[jobId]/route.ts",
+    "env_doc": ".env.example",
+    "unit_test": "tests/unit/lib/clone-manager.test.ts",
+    "integration_test": "tests/integration/api-clone.test.ts"
+  },
+  "security_notes": {
+    "D4-001": "clone-manager.ts L307-308: message: `Target path must be within ${this.config.basePath}` を削除。ERROR_DEFINITIONS.INVALID_TARGET_PATHのデフォルトメッセージをそのまま使用",
+    "D4-002": "clone/route.ts: targetDirの型検証（typeof !== 'string'）を startCloneJob()呼び出し前に追加",
+    "D4-003": "clone-manager.ts L319: message: `Target directory already exists: ${targetPath}` を削除。ERROR_DEFINITIONS.DIRECTORY_EXISTSのデフォルトメッセージをそのまま使用"
+  },
+  "implementation_notes": {
+    "no_double_path_resolve": "getEnv().CM_ROOT_DIRはenv.ts L234でpath.resolve()適用済み。追加のpath.resolve()は不要",
+    "warnedWorktreeBasePath_location": "CloneManagerクラス定義の直前（L183の前）、importブロックの後に宣言",
+    "server_ts_out_of_scope": "server.ts L83のMCBD_ROOT_DIR警告メッセージ修正はIssue #308のスコープ外",
+    "jobId_route_purpose": "[jobId]/route.tsの変更はコード一貫性と不要な非推奨警告防止が目的。getCloneJobStatus()はbasePath未使用"
+  }
+}

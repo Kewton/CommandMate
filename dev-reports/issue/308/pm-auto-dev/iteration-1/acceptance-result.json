@@ -1,0 +1,139 @@
+{
+  "issue_number": 308,
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "CM_ROOT_DIR反映: clone/route.ts がgetEnv().CM_ROOT_DIRをbasePath として CloneManager に渡しているか",
+      "status": "passed",
+      "evidence": "src/app/api/repositories/clone/route.ts L91-92: 'const { CM_ROOT_DIR } = getEnv();' の後に 'const cloneManager = new CloneManager(db, { basePath: CM_ROOT_DIR });' で渡している。getEnv()はsrc/lib/env.ts L234でpath.resolve(rootDir)を適用済みの絶対パスを返す。"
+    },
+    {
+      "criterion": "process.cwd()フォールバック: resolveDefaultBasePath()がWORKTREE_BASE_PATH未設定時にprocess.cwd()を返すか",
+      "status": "passed",
+      "evidence": "src/lib/clone-manager.ts L220-232: resolveDefaultBasePath()はWORKTREE_BASE_PATHが未設定の場合、L231で'return process.cwd()'を返す。テストでも検証済み(clone-manager.test.ts L401-410: 'should fall back to process.cwd() when neither config.basePath nor WORKTREE_BASE_PATH is set')。"
+    },
+    {
+      "criterion": "WORKTREE_BASE_PATH非推奨警告: WORKTREE_BASE_PATH設定時にconsole.warnで警告が出力されるか",
+      "status": "passed",
+      "evidence": "src/lib/clone-manager.ts L222-228: WORKTREE_BASE_PATHが設定されている場合、console.warn('[DEPRECATED] WORKTREE_BASE_PATH is deprecated. Set CM_ROOT_DIR in your .env file instead.')が出力される。テストで検証済み(clone-manager.test.ts L373-386: 'should use WORKTREE_BASE_PATH when config.basePath is not provided and emit deprecation warning')。"
+    },
+    {
+      "criterion": "警告重複防止: warnedWorktreeBasePathフラグで複数インスタンス化でも初回のみ警告が出るか",
+      "status": "passed",
+      "evidence": "src/lib/clone-manager.ts L176: モジュールスコープの'let warnedWorktreeBasePath = false;'、L223: 'if (!warnedWorktreeBasePath)'で初回のみ実行、L227: 'warnedWorktreeBasePath = true;'でフラグ設定。テストで検証済み(clone-manager.test.ts L412-427: 'should emit deprecation warning only once across multiple instantiations'で2回インスタンス化しても警告は1回のみ)。"
+    },
+    {
+      "criterion": "CM_ROOT_DIR優先: config.basePath(CM_ROOT_DIR)がWORKTREE_BASE_PATHより優先されるか",
+      "status": "passed",
+      "evidence": "src/lib/clone-manager.ts L204: 'basePath: config.basePath || this.resolveDefaultBasePath()'の実装でconfig.basePathが存在する場合はresolveDefaultBasePath()が呼ばれない。テストで検証済み(clone-manager.test.ts L429-441: 'should prefer config.basePath (CM_ROOT_DIR) over WORKTREE_BASE_PATH when both are available'でWORKTREE_BASE_PATH設定かつconfig.basePath指定時にconfig.basePathが使われ、警告も出ない)。"
+    },
+    {
+      "criterion": "D4-001: パストラバーサルエラーメッセージにbasePath値が含まれていないか",
+      "status": "passed",
+      "evidence": "src/lib/clone-manager.ts L339-341: パストラバーサル検出時に'return { success: false, error: ERROR_DEFINITIONS.INVALID_TARGET_PATH };'で定義済みのエラーメッセージ('Target path is invalid or outside allowed directory')を返し、basePath値を含まない。テストで検証済み(clone-manager.test.ts L459-472: secretBasePath='/secret/internal/path'がエラーメッセージに含まれないことを確認)。"
+    },
+    {
+      "criterion": "D4-002: targetDirの型検証(typeof !== 'string')が追加されているか",
+      "status": "passed",
+      "evidence": "src/app/api/repositories/clone/route.ts L71-86: 'if (targetDir !== undefined && typeof targetDir !== 'string')'で型チェックし、400エラーを返す。テストで検証済み(api-clone.test.ts L164-180: 'should return 400 when targetDir is not a string (D4-002)'でオブジェクト送信時に400エラーとINVALID_TARGET_PATHコードを確認)。"
+    },
+    {
+      "criterion": "D4-003: ディレクトリ存在エラーメッセージにtargetPath完全パスが含まれていないか",
+      "status": "passed",
+      "evidence": "src/lib/clone-manager.ts L344-347: ディレクトリ存在時に'return { success: false, error: ERROR_DEFINITIONS.DIRECTORY_EXISTS };'で定義済みメッセージ('Target directory already exists')を返し、targetPath完全パスを含まない。テストで検証済み(clone-manager.test.ts L474-488: エラーメッセージに'/test/base/newrepo'が含まれないことを確認)。"
+    },
+    {
+      "criterion": "D1-007: WORKTREE_BASE_PATHにpath.resolve()が適用されているか",
+      "status": "passed",
+      "evidence": "src/lib/clone-manager.ts L229: 'return path.resolve(worktreeBasePath);'で相対パスを絶対パスに変換。テストで検証済み(clone-manager.test.ts L388-399: 'should normalize WORKTREE_BASE_PATH with path.resolve() for relative paths (D1-007)'で相対パス'relative/path'が絶対パスに変換されることを確認)。"
+    },
+    {
+      "criterion": "テスト品質: テストが意味のある検証を行っているか",
+      "status": "passed",
+      "evidence": "clone-manager.test.ts: 47テスト全パス。basePath解決テスト6件(config.basePath優先、WORKTREE_BASE_PATHフォールバック、相対パス正規化、process.cwd()フォールバック、警告重複防止、CM_ROOT_DIR優先)。セキュリティテスト2件(D4-001パストラバーサルメッセージ非含有、D4-003ディレクトリ存在メッセージ非含有)。api-clone.test.ts: 12テスト全パス。D4-002型検証テスト1件追加。getEnvモック正常(CM_ROOT_DIR: '/test/clone-root')。全テストがresetWorktreeBasePathWarning()でbeforeEach初期化し、テスト間干渉を防止。"
+    },
+    {
+      "criterion": ".envにCM_ROOT_DIRを設定した状態で、UIからcloneするとCM_ROOT_DIR配下にリポジトリが作成される",
+      "status": "passed",
+      "evidence": "clone/route.ts L91-92でgetEnv().CM_ROOT_DIRを取得しCloneManagerのbasePathに渡す。CloneManager.getTargetPath()はL287でpath.join(basePath, repoName)を返す。startCloneJob()はL335でgetTargetPath()を使用。これによりCM_ROOT_DIR配下にリポジトリが作成される設計。api-clone.test.tsの'should start clone job for valid HTTPS URL'テスト(L144-162)でモックCM_ROOT_DIR='/test/clone-root'による正常フロー確認済み。"
+    },
+    {
+      "criterion": "CM_ROOT_DIR未設定時はprocess.cwd()をフォールバック値として使用する",
+      "status": "passed",
+      "evidence": "二重のフォールバック機構: (1) env.ts L200でCM_ROOT_DIR未設定時はprocess.cwd()を返す。(2) clone-manager.ts L204でconfig.basePath未指定時はresolveDefaultBasePath()が呼ばれ、L231でprocess.cwd()を返す。テストで検証済み。"
+    },
+    {
+      "criterion": "WORKTREE_BASE_PATHのみ設定時: そのパスがbasePath として使用され、console.warnで非推奨警告が出力される",
+      "status": "passed",
+      "evidence": "clone-manager.ts L222-229で実装。テストclone-manager.test.ts L373-386で'WORKTREE_BASE_PATH=/legacy/worktree/path'設定時にbasePathが'/legacy/worktree/path'になり、非推奨警告が出力されることを確認済み。"
+    },
+    {
+      "criterion": "WORKTREE_BASE_PATH非推奨警告はCloneManagerの複数回インスタンス化でも初回のみ出力される",
+      "status": "passed",
+      "evidence": "clone-manager.ts L176のwarnedWorktreeBasePathフラグ。テストclone-manager.test.ts L412-427で2回インスタンス化して警告が1回のみであることを確認済み。"
+    },
+    {
+      "criterion": "CM_ROOT_DIRとWORKTREE_BASE_PATHの両方が設定された場合: CM_ROOT_DIRが優先される",
+      "status": "passed",
+      "evidence": "clone/route.ts L91-92でgetEnv().CM_ROOT_DIRをCloneManagerのconfig.basePathに渡す。clone-manager.ts L204で'config.basePath || this.resolveDefaultBasePath()'のためconfig.basePathが存在すればresolveDefaultBasePath()は呼ばれない。テストclone-manager.test.ts L429-441で両方設定時にCM_ROOT_DIRが優先されることを確認済み。"
+    },
+    {
+      "criterion": "どちらも未設定の場合: process.cwd()がフォールバック値として使用される",
+      "status": "passed",
+      "evidence": "テストclone-manager.test.ts L401-410で環境変数未設定・config.basePath未指定時にprocess.cwd()がbasePathになることを確認済み。"
+    },
+    {
+      "criterion": "既存テストがすべてパスする",
+      "status": "passed",
+      "evidence": "unit tests: 47 tests passed (clone-manager.test.ts)。integration tests: 12 tests passed (api-clone.test.ts)。TypeScript型チェック: npx tsc --noEmit 成功（エラーなし）。"
+    },
+    {
+      "criterion": "新規テストでCM_ROOT_DIR反映を検証する",
+      "status": "passed",
+      "evidence": "clone-manager.test.ts L350-442: 'CloneManager - basePath resolution'セクションに6つの新規テスト追加。clone-manager.test.ts L444-489: 'CloneManager - security (D4-001)'セクションに2つの新規セキュリティテスト追加。api-clone.test.ts L18-25: getEnvモックにCM_ROOT_DIR: '/test/clone-root'を設定。api-clone.test.ts L164-180: D4-002テスト追加。"
+    }
+  ],
+  "test_execution": {
+    "unit_tests": "passed (47/47)",
+    "integration_tests": "passed (12/12)",
+    "typescript": "passed (no errors)"
+  },
+  "test_scenarios": [
+    {
+      "scenario": "CM_ROOT_DIR='/custom/path'設定時にcloneするとbasePath='/custom/path'が使用される",
+      "status": "passed",
+      "evidence": "clone-manager.test.ts L366-371: config.basePath='/custom/clone/root'でgetTargetPathが'/custom/clone/root/my-repo'を返す。api-clone.test.ts L18-25: getEnvモックでCM_ROOT_DIR='/test/clone-root'設定。"
+    },
+    {
+      "scenario": "CM_ROOT_DIR未設定、WORKTREE_BASE_PATH未設定時にbasePath=process.cwd()が使用される",
+      "status": "passed",
+      "evidence": "clone-manager.test.ts L401-410: process.cwd()モック='/test/cwd/fallback'で、getTargetPathが'/test/cwd/fallback/my-repo'を返す。"
+    },
+    {
+      "scenario": "WORKTREE_BASE_PATHのみ設定時にそのパスが使用され非推奨警告が出力される",
+      "status": "passed",
+      "evidence": "clone-manager.test.ts L373-386: WORKTREE_BASE_PATH='/legacy/worktree/path'でgetTargetPathが'/legacy/worktree/path/my-repo'を返し、console.warnが呼ばれる。"
+    },
+    {
+      "scenario": "CM_ROOT_DIRとWORKTREE_BASE_PATH両方設定時にCM_ROOT_DIRが優先される",
+      "status": "passed",
+      "evidence": "clone-manager.test.ts L429-441: WORKTREE_BASE_PATH設定下でconfig.basePath='/cm/root/dir'が優先され、警告は出力されない。"
+    },
+    {
+      "scenario": "targetDirにオブジェクトを送信した場合に400エラーが返る(D4-002)",
+      "status": "passed",
+      "evidence": "api-clone.test.ts L164-180: targetDir: { malicious: true }で400エラー、code='INVALID_TARGET_PATH'。"
+    },
+    {
+      "scenario": "パストラバーサル試みのエラーメッセージにbasePath値が含まれない(D4-001)",
+      "status": "passed",
+      "evidence": "clone-manager.test.ts L459-472: secretBasePath='/secret/internal/path'がエラーメッセージに含まれないことを検証。"
+    },
+    {
+      "scenario": "ディレクトリ存在エラーのメッセージにtargetPath完全パスが含まれない(D4-003)",
+      "status": "passed",
+      "evidence": "clone-manager.test.ts L474-488: '/test/base/newrepo'がエラーメッセージに含まれないことを検証。"
+    }
+  ],
+  "overall_assessment": "Issue #308の全受入条件を満たしている。CloneManagerのbasePath決定ロジックがCM_ROOT_DIRを優先し、WORKTREE_BASE_PATHフォールバック（非推奨警告付き）、process.cwd()最終フォールバックの3段階で正しく動作する。セキュリティ面ではD4-001（パストラバーサルエラーのbasePath非漏洩）、D4-002（targetDirの型検証）、D4-003（ディレクトリ存在エラーのtargetPath非漏洩）、D1-007（WORKTREE_BASE_PATHのpath.resolve正規化）が全て実装・テスト済み。clone/route.tsとclone/[jobId]/route.tsの両方でgetEnv()からCM_ROOT_DIRを取得してCloneManagerに渡している。.env.exampleにもCM_ROOT_DIRのclone先としての役割が明記されている。ユニットテスト47件、インテグレーションテスト12件が全てパス、TypeScript型チェックもエラーなし。"
+}

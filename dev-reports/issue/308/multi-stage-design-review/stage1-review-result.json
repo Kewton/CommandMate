@@ -1,0 +1,97 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 308,
+  "review_focus": "設計原則",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "D1-001",
+      "severity": "nice_to_have",
+      "principle": "SRP",
+      "location": "Section 4.2.2 - resolveDefaultBasePath() extraction",
+      "description": "resolveDefaultBasePath()のプライベートメソッド抽出はSRPに準拠している。コンストラクタからbasePath決定ロジックを分離することで、コンストラクタの責務がインスタンス初期化に限定される。ただし、非推奨警告のロジック（console.warn + モジュールスコープ変数の更新）もこのメソッド内に含まれており、「デフォルトパス解決」と「非推奨警告」の2つの責務が混在している。現時点では過度な分離は不要だが、将来的にWORKTREE_BASE_PATHが完全削除される際にはメソッドごと削除できるため、実用的な判断である。",
+      "suggestion": "現設計で問題なし。WORKTREE_BASE_PATH完全削除時にresolveDefaultBasePath()を簡素化（process.cwd()のみ返却）することを将来のタスクとして記録しておくとよい。"
+    },
+    {
+      "id": "D1-002",
+      "severity": "nice_to_have",
+      "principle": "DIP",
+      "location": "Section 3.1 - Dependency Injection pattern",
+      "description": "API RouteでgetEnv().CM_ROOT_DIRを取得しCloneManagerのconfig引数として注入する設計は、DIPに良く準拠している。CloneManager（下位モジュール）が環境変数取得（getEnv()）に直接依存しないため、テスト容易性が向上する。scan/route.tsと同じパターンを採用しており、プロジェクト全体での一貫性も確保されている。ただし、CloneManagerConfig.basePathがoptionalであるため、呼び出し側がbasePathを渡し忘れた場合にprocess.cwd()にフォールバックする点は注意が必要である。",
+      "suggestion": "現設計で適切。呼び出し側がbasePathを渡し忘れるリスクについては、テストケースで「basePath未指定時にprocess.cwd()が使用される」ことを明示的に検証する設計（Section 6.1に記載済み）で十分カバーされている。将来的にCloneManagerの利用箇所が増えた場合、ファクトリ関数（createCloneManager()）の導入を検討してもよい。"
+    },
+    {
+      "id": "D1-003",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "location": "Section 4.2.2 - warnedWorktreeBasePath module-scope variable",
+      "description": "非推奨警告の重複防止にモジュールスコープのboolean変数（warnedWorktreeBasePath）を使用する設計は、env.tsのwarnedKeys Setパターンと類似しているが、完全には一致しない。env.tsではSet<string>を使い複数キーを管理しているのに対し、clone-manager.tsでは単一のboolean変数を使用している。機能としては同等だが、パターンの統一性がやや低い。また、resetWorktreeBasePathWarning()を別途exportする必要がある点で、env.tsのresetWarnedKeys()と異なるAPI形態になっている。",
+      "suggestion": "WORKTREE_BASE_PATHは1つしかないため、booleanで十分であり、Setを使う必要はない。ただし、テスト用リセット関数名をenv.tsのパターンに揃えて「resetDeprecationWarning」のようなより汎用的な命名にすることを検討するとよい。あるいは、JSDocコメントで@internalタグを付与し、テスト専用であることを明示することを推奨する。"
+    },
+    {
+      "id": "D1-004",
+      "severity": "should_fix",
+      "principle": "KISS",
+      "location": "Section 4.2.3 - [jobId]/route.ts optional change",
+      "description": "[jobId]/route.tsの修正が「任意」と位置づけられているが、修正しない場合にCloneManager(db)（basePathなし）でインスタンス化され、resolveDefaultBasePath()が呼ばれる。getCloneJobStatus()はbasePathを使用しないため機能上は問題ないが、WORKTREE_BASE_PATHが設定されている環境では不要な非推奨警告がログに出力される副作用がある。また、コードレビュー時に「なぜこちらはbasePathを渡していないのか」という疑問を生む可能性がある。",
+      "suggestion": "[jobId]/route.tsも必須変更に格上げし、一貫してbasePath引数を渡すことを推奨する。変更量はわずか2行であり、一貫性による理解容易性のメリットが上回る。"
+    },
+    {
+      "id": "D1-005",
+      "severity": "nice_to_have",
+      "principle": "OCP",
+      "location": "Section 3.2 - Deprecation Warning pattern",
+      "description": "CloneManagerConfigのinterface設計はOCPに準拠している。basePath, timeoutに加え、将来的に新しい設定項目を追加する場合もinterfaceの拡張で対応でき、既存コードへの影響が最小限である。resolveDefaultBasePath()がprivateメソッドであるため、サブクラスでのオーバーライドはできないが、CloneManagerは継承を前提としていないためこれは適切な設計判断である。",
+      "suggestion": "現設計で問題なし。"
+    },
+    {
+      "id": "D1-006",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "location": "Section 4.1 - basePath fallback chain (3段階)",
+      "description": "basePath決定ロジックの3段階優先順位（config.basePath -> WORKTREE_BASE_PATH -> process.cwd()）は、後方互換性を考慮した現実的な設計である。WORKTREE_BASE_PATHの段階は既存ユーザー向けの移行パスであり、不要な機能追加（YAGNI違反）ではない。ただし、非推奨化の期限（いつまでサポートするか）が設計書に記載されていない。",
+      "suggestion": "非推奨化の期限（例: v2.0リリース時に削除、次のメジャーバージョンで削除等）を設計書に追記するか、Issueとして起票することを推奨する。期限が未定のまま非推奨コードが残り続けるリスクを回避できる。"
+    },
+    {
+      "id": "D1-007",
+      "severity": "must_fix",
+      "principle": "DIP",
+      "location": "Section 5.2 - WORKTREE_BASE_PATH security validation",
+      "description": "WORKTREE_BASE_PATHからの入力に対してパスバリデーション（path.resolve()による絶対パス化、isPathSafe()による安全性検証）が行われない。getEnv().CM_ROOT_DIRはpath.resolve()で正規化されるが、WORKTREE_BASE_PATHはprocess.envから直接読み取るため、相対パスやシンボリックリンクを含むパスが使用される可能性がある。設計書のSection 5.2にも「パスバリデーションなし -> 既存動作を維持（後方互換）」と記載されているが、basePathが変わることでisPathSafe()の基準ディレクトリが変わるセキュリティ上の影響がある。",
+      "suggestion": "resolveDefaultBasePath()内でWORKTREE_BASE_PATHの値にpath.resolve()を適用し、絶対パスに正規化することを推奨する。例: return path.resolve(worktreeBasePath); これにより、相対パスが指定された場合の予期しないbasePath解決を防止できる。既存動作との後方互換性も保たれる（path.resolve()は絶対パスに対しては何もしない）。"
+    },
+    {
+      "id": "D1-008",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "location": "Section 4.2.1, 4.2.3 - getEnv() call in multiple route files",
+      "description": "clone/route.tsと[jobId]/route.tsの両方でgetEnv().CM_ROOT_DIRを取得してCloneManagerに渡す同一パターンが繰り返される。現時点では2箇所のみであり、DRY違反というほどではないが、CloneManagerを使用するAPI Routeが今後増える場合、ファクトリ関数による共通化が有効になる可能性がある。",
+      "suggestion": "現時点では許容範囲。CloneManagerの利用箇所が3箇所以上になった場合に、createCloneManagerFromEnv(db: Database.Database): CloneManagerのようなファクトリ関数の導入を検討するとよい。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 2,
+    "nice_to_have": 5,
+    "overall_assessment": "設計方針書はSOLID原則に概ね良く準拠している。特にDIPパターン（API RouteからCloneManagerへのbasePath注入）とSRP（resolveDefaultBasePath()の抽出）は適切な設計判断である。must_fixは1件（WORKTREE_BASE_PATHのパス正規化不足）のみで、セキュリティ面の軽微な改善が必要。should_fixの2件（[jobId]/route.tsの一貫性、テスト用リセット関数の命名）も対応容易である。全体として品質の高い設計であり、指摘事項を反映すれば実装に進めるレベルである。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+    "src/lib/clone-manager.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "src/app/api/repositories/clone/[jobId]/route.ts",
+    "src/lib/env.ts",
+    "src/lib/path-validator.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "tests/unit/lib/clone-manager.test.ts",
+    "tests/integration/api-clone.test.ts"
+  ],
+  "timestamp": "2026-02-19T00:00:00Z"
+}

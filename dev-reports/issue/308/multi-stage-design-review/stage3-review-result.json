@@ -1,0 +1,99 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 308,
+  "review_focus": "影響範囲",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "D3-001",
+      "severity": "must_fix",
+      "category": "indirect_impact",
+      "location": "Section 6.2 (統合テスト設計)",
+      "description": "統合テスト api-clone.test.ts に getEnv() モックが存在しない。clone/route.ts に getEnv() 呼び出しを追加すると、テスト実行環境で CM_ROOT_DIR/CM_PORT/CM_BIND 等の環境変数が未設定のため getEnv() がデフォルト値で動作する。具体的には CM_ROOT_DIR が process.cwd() にフォールバックし、テストの暗黙的な動作が変わる。設計書 Section 6.2 で getEnv モック追加の方針は記載されているが、[jobId]/route.ts 側も同テストファイルでインポートされており、そちらへの getEnv() 追加による影響にも言及が必要。",
+      "suggestion": "Section 6.2 の統合テスト設計に以下を追加すること: (1) api-clone.test.ts のモックセットアップセクションの冒頭に vi.mock('@/lib/env') を追加すること。(2) POST /api/repositories/clone テストと GET /api/repositories/clone/[jobId] テストの両方に影響することを明記すること。(3) モック定義例を以下のように記載すること: vi.mock('@/lib/env', () => ({ getEnv: () => ({ CM_ROOT_DIR: '/test/clone-root', CM_PORT: 3000, CM_BIND: '127.0.0.1', CM_DB_PATH: '/test/db' }) }))"
+    },
+    {
+      "id": "D3-002",
+      "severity": "should_fix",
+      "category": "indirect_impact",
+      "location": "Section 9 (影響範囲サマリー)",
+      "description": "getTargetPath() メソッド(L251-253)は this.config.basePath をベースにリポジトリ名を結合してパスを生成し、startCloneJob() 内(L300)で使用される。basePath が '/tmp/repos' から CM_ROOT_DIR に変わることで、clone 先のディレクトリが変わり、onCloneSuccess()(L452-488)で createRepository() に渡される targetPath(=DBに永続化されるリポジトリパス)も変わる。この DB レコードへの影響が設計書の影響範囲サマリーに明記されていない。",
+      "suggestion": "Section 9 の「変更なし（既存機能で対応）」セクションに以下の注記を追加すること: 「onCloneSuccess() で createRepository(db, { path: targetPath }) により DB に保存されるリポジトリパスが、修正後は CM_ROOT_DIR/repo-name となる。既存の clone 済みリポジトリの DB レコード（旧パス /tmp/repos/xxx）は変更されない（Out of scope として Section 1 で定義済み）。」"
+    },
+    {
+      "id": "D3-003",
+      "severity": "should_fix",
+      "category": "indirect_impact",
+      "location": "Section 9 (影響範囲サマリー)",
+      "description": "統合テスト api-clone.test.ts は clone/route.ts と [jobId]/route.ts の両方をインポートしている（L47-48）。両ルートファイルへの getEnv() 追加は、このテストファイルに対して二重の影響を持つ。しかし設計書 Section 9 のテスト変更セクションでは api-clone.test.ts への変更を「getEnvモック・CM_ROOT_DIR検証追加」とのみ記載しており、[jobId]/route.ts 側の変更に起因するテスト影響について明記されていない。",
+      "suggestion": "Section 9 のテスト変更セクションの api-clone.test.ts の説明を以下に拡充すること: 「getEnvモック追加（POST clone/route.ts と GET [jobId]/route.ts の両方で使用）、CM_ROOT_DIR が basePath として CloneManager に渡されることの検証追加」"
+    },
+    {
+      "id": "D3-004",
+      "severity": "should_fix",
+      "category": "backward_compat",
+      "location": "Section 4.1 (basePath決定ロジック)",
+      "description": "WORKTREE_BASE_PATH 非推奨化の移行ガイダンスが設計書に不足している。WORKTREE_BASE_PATH を使用中のユーザーに対して、具体的な移行手順（.env ファイルの変更方法）や、非推奨警告メッセージに移行手順のヒントを含めるかどうかの検討がない。現在の警告メッセージ '[DEPRECATED] WORKTREE_BASE_PATH is deprecated. Use CM_ROOT_DIR instead.' はどこに設定すべきかは示しているが、.env ファイルで WORKTREE_BASE_PATH を CM_ROOT_DIR に変更すればよいという具体的なアクションが読み取りにくい。",
+      "suggestion": "以下のいずれかを検討すること: (1) 非推奨警告メッセージを '[DEPRECATED] WORKTREE_BASE_PATH is deprecated. Set CM_ROOT_DIR in your .env file instead.' のように具体的にする。(2) .env.example の Legacy Environment Variables セクションに WORKTREE_BASE_PATH のコメントを追加し、CM_ROOT_DIR への移行を案内する。"
+    },
+    {
+      "id": "D3-005",
+      "severity": "should_fix",
+      "category": "performance",
+      "location": "Section 4.2.1, 4.2.3",
+      "description": "clone/route.ts と [jobId]/route.ts の両方で毎リクエスト getEnv() が呼ばれる設計となっている。getEnv() は内部で getEnvByKey() を複数回呼び、getDefaultDbPath() や validateDbPath() も実行する。ただし、getEnv() は process.env の読み取りと軽量なバリデーションのみであり、I/O は伴わない。scan/route.ts でも同じパターンで getEnv() を毎リクエスト呼んでおり、既存の設計パターンと一致している。パフォーマンス上の実質的な問題はないが、設計書でこの判断根拠が明記されていない。",
+      "suggestion": "Section 7 の設計決定事項に以下を追記すること: 「getEnv() を API Route の各リクエストで呼ぶ設計は scan/route.ts と同一パターンであり、process.env 読み取り＋軽量バリデーションのみのため性能影響は無視できるレベル。環境変数の動的変更にも追従できるメリットがある。」"
+    },
+    {
+      "id": "D3-006",
+      "severity": "nice_to_have",
+      "category": "operational",
+      "location": "Section 4.1, Section 9",
+      "description": "CM_ROOT_DIR 未設定の場合、getEnv() は process.cwd() にフォールバックし、CloneManager にはその値が basePath として渡される。一方、resolveDefaultBasePath()（config.basePath 未指定時のフォールバック）も process.cwd() を返す。つまり CM_ROOT_DIR 未設定時は、API Route 経由でも直接インスタンス化でも同じ process.cwd() が使われるため、設定なしでも動作する。ただし、process.cwd() は Next.js サーバーのカレントディレクトリであり、ユーザーが意図したクローン先とは異なる可能性がある。この挙動は既存の env.ts のフォールバック設計と一貫しているが、ユーザー向けの注意喚起があると親切。",
+      "suggestion": "README.md や .env.example のコメントで、CM_ROOT_DIR を明示的に設定することを推奨する旨の記載を検討すること。"
+    },
+    {
+      "id": "D3-007",
+      "severity": "nice_to_have",
+      "category": "indirect_impact",
+      "location": "Section 9 (影響範囲サマリー)",
+      "description": "worktrees.ts の getRepositoryPaths() は CM_ROOT_DIR（getEnvByKey経由）を参照し、サーバー起動時の worktree スキャン対象ディレクトリを決定する。clone 時の basePath も同じ CM_ROOT_DIR を使うようになることで、「worktree スキャン対象ディレクトリ」と「clone 先ディレクトリ」の不整合が解消される。この改善効果が設計書の影響範囲サマリーに記載されていない。",
+      "suggestion": "Section 9 の「変更なし（既存機能で対応）」セクションに以下の注記を追加すること: 「src/lib/worktrees.ts - getRepositoryPaths() の CM_ROOT_DIR 参照は変更不要。修正により、worktree スキャン対象と clone 先ディレクトリが同じ CM_ROOT_DIR に統一され、従来の WORKTREE_BASE_PATH と CM_ROOT_DIR の二系統の不整合が解消される。」"
+    },
+    {
+      "id": "D3-008",
+      "severity": "nice_to_have",
+      "category": "direct_impact",
+      "location": "Section 4.2.2",
+      "description": "warnedWorktreeBasePath のモジュールスコープ変数は、Node.js のモジュールキャッシュにより、サーバープロセスの生存期間中は状態が保持される。これは env.ts の warnedKeys Set と同じパターンであり問題はない。ただし、テスト間での状態リークを防ぐための resetWorktreeBasePathWarning() の呼び出しタイミングについて、beforeEach で呼ぶべきことが設計書の Section 6.1 で暗黙的にしか記載されていない。",
+      "suggestion": "Section 6.1 のモック方針に「各テストの beforeEach で resetWorktreeBasePathWarning() を呼び出し、モジュールスコープの状態をリセットすること」を明記すること。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+    "src/lib/clone-manager.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "src/app/api/repositories/clone/[jobId]/route.ts",
+    "src/lib/env.ts",
+    "src/lib/path-validator.ts",
+    "src/lib/worktrees.ts",
+    "src/app/api/repositories/scan/route.ts",
+    ".env.example",
+    "tests/unit/lib/clone-manager.test.ts",
+    "tests/integration/api-clone.test.ts"
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 4,
+    "nice_to_have": 3,
+    "overall_assessment": "設計方針書の影響分析は概ね適切であり、直接的な変更対象ファイルの特定と変更内容の定義は明確である。CloneManager の使用箇所は src/app/api/repositories/clone/route.ts と [jobId]/route.ts の2箇所のみであり、間接的な影響範囲も限定的。ただし、統合テスト api-clone.test.ts に getEnv() モックが未設定であることが必須修正事項として残る。後方互換性については WORKTREE_BASE_PATH の非推奨警告で適切に対応されており、パフォーマンスやデプロイ上の重大なリスクはない。全体として条件付き承認とし、D3-001 の統合テストモック問題の解決を条件とする。"
+  },
+  "timestamp": "2026-02-19T12:00:00Z"
+}
