@@ -1,0 +1,15 @@
+{
+  "issue_number": 300,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_doc_path": "dev-reports/design/issue-300-root-directory-creation-design-policy.md",
+  "review_points": [
+    "設計方針書と実際のコードの整合性",
+    "設計方針書とIssue要件の整合性",
+    "設計方針書と既存アーキテクチャの整合性",
+    "CLAUDE.mdのガイドラインとの整合性",
+    "APIインターフェースの整合性",
+    "テスト設計と実装設計の整合性"
+  ]
+}

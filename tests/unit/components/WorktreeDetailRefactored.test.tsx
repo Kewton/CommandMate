@@ -1300,4 +1300,54 @@ describe('WorktreeDetailRefactored', () => {
       expect(screen.queryByTestId('mobile-update-indicator')).not.toBeInTheDocument();
     });
   });
+
+  describe('Path encoding for file operations (Issue #300)', () => {
+    beforeEach(() => {
+      mockIsMobile.mockReturnValue(false);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('should encode path segments individually without encoding slashes when creating a directory', async () => {
+      // When handleNewDirectory is called with parentPath='src',
+      // and user enters 'newdir', the resulting path 'src/newdir'
+      // should be encoded as 'src/newdir' (not 'src%2Fnewdir')
+      vi.spyOn(window, 'prompt').mockImplementation(() => 'newdir');
+      vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('left-pane-tab-switcher')).toBeInTheDocument();
+      });
+
+      // Switch to files tab
+      const filesButton = screen.getByText('Files');
+      fireEvent.click(filesButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+
+      // Click new directory button (mock passes parentPath='src')
+      const newDirBtn = screen.getByTestId('new-dir-btn');
+      fireEvent.click(newDirBtn);
+
+      await waitFor(() => {
+        const createCall = mockFetch.mock.calls.find(
+          (call) => call[0].includes('/files/') && call[1]?.method === 'POST'
+        );
+        expect(createCall).toBeDefined();
+        if (createCall) {
+          const url = createCall[0] as string;
+          // The URL should contain 'src/newdir' (slashes preserved)
+          expect(url).toContain('/files/src/newdir');
+          // The URL should NOT contain %2F (encoded slash)
+          expect(url).not.toContain('%2F');
+        }
+      });
+    });
+  });
 });

@@ -1,0 +1,24 @@
+{
+  "issue_number": 300,
+  "refactor_targets": [
+    "src/lib/url-path-encoder.ts",
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/lib/url-path-encoder.test.ts"
+  ],
+  "quality_metrics": {
+    "typescript_errors": 0,
+    "lint_errors": 0,
+    "url_path_encoder_tests": "11/11 pass"
+  },
+  "improvement_goals": [
+    "コードの可読性向上",
+    "不要なコードの削除",
+    "ドキュメントコメントの確認"
+  ],
+  "constraints": [
+    "既存のdata-testidは変更しない",
+    "受け入れ条件を満たす動作を変更しない",
+    "encodePathForUrl()の実装を変更しない（テストが依存している）"
+  ]
+}

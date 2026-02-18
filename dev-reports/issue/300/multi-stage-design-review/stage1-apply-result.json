@@ -1,0 +1,65 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 300,
+  "apply_date": "2026-02-18",
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_count": 3,
+  "skipped_count": 0,
+  "results": [
+    {
+      "finding_id": "SF-1",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "空状態ボタンとツールバーボタンの共通化をYAGNI原則に基づき見送る設計判断を明記。Section 3.1に[SF-1]設計判断セクションを追加し、スタイル差異・レイアウト差異・YAGNI根拠を記載。Section 5の決定事項テーブルにD-7として記録。",
+      "location": "Section 3.1 [SF-1]ボタン共通化に関する設計判断、Section 5 決定事項D-7"
+    },
+    {
+      "finding_id": "SF-2",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "encodePathForUrlのセキュリティ責務境界を明確化。Section 3.2に[SF-2]責務境界テーブルと設計意図を追記。Section 6にアスキーアート図による責務分離図を追加し、クライアント側=URLエンコードのみ、サーバー側=パストラバーサル防御という境界を明記。",
+      "location": "Section 3.2 [SF-2]責務境界の明確化、Section 6 [SF-2]セキュリティ責務境界"
+    },
+    {
+      "finding_id": "SF-3",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "encodePathForUrlのエッジケース動作契約を定義。Section 3.2に[SF-3]エッジケース動作契約テーブル（空文字列・先頭スラッシュ・連続スラッシュ・末尾スラッシュ）を追加。Section 4.1のテストケーステーブルに3つのエッジケーステストを追加。Section 8の受け入れ条件にエッジケーステスト項目を追加。",
+      "location": "Section 3.2 [SF-3]エッジケースの動作契約、Section 4.1テストケース追加、Section 8受け入れ条件追加"
+    }
+  ],
+  "nice_to_have_recorded": [
+    {
+      "finding_id": "NTH-1",
+      "status": "recorded",
+      "description": "ツールバーアクション配列のprops化を将来課題として決定事項D-8に記録"
+    },
+    {
+      "finding_id": "NTH-2",
+      "status": "recorded",
+      "description": "URL構築パターンの共通ヘルパー化を将来課題として決定事項D-9に記録"
+    },
+    {
+      "finding_id": "NTH-3",
+      "status": "recorded",
+      "description": "WorktreeDetailRefactored統合テストのコスト対効果注記をSection 4.3に追加"
+    }
+  ],
+  "sections_updated": [
+    "Section 3.1 - [SF-1]ボタン共通化に関する設計判断を追加",
+    "Section 3.2 - [SF-2]責務境界の明確化を追加",
+    "Section 3.2 - [SF-3]エッジケースの動作契約を追加",
+    "Section 4.1 - エッジケーステストケース3件を追加",
+    "Section 4.3 - [NTH-3]テスト戦略注記を修正",
+    "Section 5 - 決定事項D-7/D-8/D-9を追加",
+    "Section 6 - [SF-2]セキュリティ責務境界図と説明を追加",
+    "Section 8 - エッジケーステスト受け入れ条件を追加",
+    "Section 9 - レビュー履歴を新規追加",
+    "Section 10 - レビュー指摘事項サマリーを新規追加",
+    "Section 11 - レビュー指摘に基づく実装チェックリストを新規追加"
+  ],
+  "design_doc_path": "dev-reports/design/issue-300-root-directory-creation-design-policy.md",
+  "timestamp": "2026-02-18T00:00:00Z"
+}

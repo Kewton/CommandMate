@@ -1,0 +1,123 @@
+{
+  "issue_number": 300,
+  "focus_area": "通常",
+  "iteration": 1,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-18",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "再現手順が実際の動作と矛盾している -- 「ルートレベルのNew Directoryボタンをクリックする」は非空状態では不可能",
+        "location": "## 再現手順 セクション（ステップ3）",
+        "recommendation": "再現手順を以下のように修正する: (1) Worktree詳細画面でファイルツリーを表示する (2) ルートディレクトリに1つ以上のディレクトリが既に存在する状態にする (3) ルートレベルに新しいディレクトリを作成しようとする -- しかしNew Directoryボタンが表示されていないため、ルートレベルへのディレクトリ作成手段がない。コンテキストメニューの「New Directory」は右クリックしたディレクトリの配下に作成される。",
+        "evidence": "FileTreeView.tsx:827-861 の空状態チェック: `if (rootItems.length === 0)` でのみNew Directoryボタンを表示。非空状態ではこのボタンは描画されないため、ステップ3の「ボタンをクリックする」は実行不可能。"
+      },
+      {
+        "id": "MF-2",
+        "category": "正確性",
+        "issue": "根本原因の仮説1-3がバックエンドロジックの問題に焦点を当てているが、実際の根本原因はフロントエンドのUI欠落である",
+        "location": "## 根本原因の仮説 セクション",
+        "recommendation": "仮説の優先順位を再構成する。主要な根本原因は「非空状態でルートレベルのNew Directory/New Fileボタンが存在しない」というUI問題。仮説1（isPathSafe）と仮説2（existsSync）はバックエンドが正常動作しているため削除または優先度を下げる。代わりに、FileTreeView.tsx:827-861の条件分岐をメイン仮説として記載する。",
+        "evidence": "仮説検証レポートで仮説4（追加発見）として確認済み: FileTreeView.tsx:827-861は空状態のみNew Directoryを表示。仮説2（existsSync）は検証により棄却（Rejected）。仮説1（isPathSafe）は部分的にのみ確認され、根本原因ではない。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "encodeURIComponentによるパスエンコードの問題がコンテキストメニュー経由の操作に影響する可能性が十分に記載されていない",
+        "location": "## 根本原因の仮説 セクション（仮説3）",
+        "recommendation": "encodeURIComponent('src/newdir')が'src%2Fnewdir'を生成し、Next.jsのcatch-all route [...path]では1つのセグメントとして扱われる問題を明記する。WorktreeDetailRefactored.tsx:1279で`encodeURIComponent(newPath)`を使用しているが、newPathが'src/newdir'の場合、APIルートの params.path は ['src%2Fnewdir'] となり、pathSegments.join('/')で'src%2Fnewdir'という不正なパスが生成される。正しくは各セグメントを個別にエンコードするか、スラッシュはエンコードしないようにすべき。",
+        "evidence": "WorktreeDetailRefactored.tsx:1275-1279: `const newPath = parentPath ? parentPath + '/' + dirName : dirName;` → `encodeURIComponent(newPath)` で 'src/newdir' が 'src%2Fnewdir' になる。route.ts:112: `pathSegments.join('/')` はcatch-allの各セグメントを結合するが、%2Fを含む単一セグメントは正しく展開されない。"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "影響範囲の変更対象ファイル一覧にFileTreeView.tsxが「関連コンポーネント」としてのみ記載され、変更対象に含まれていない",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "FileTreeView.tsxを変更対象ファイルの最上位に移動する。主要な修正はFileTreeView.tsx内のUIロジック（非空状態でもルートレベルのNew Directory/New Fileボタンを表示するツールバーの追加）であるため。逆にpath-validator.tsとfile-operations.tsは変更不要の可能性が高いため、候補から除外するか優先度を下げる。",
+        "evidence": "仮説検証でpath-validator.tsは正常動作（isPathSafe('newdir', root)はtrue）、file-operations.tsのexistsSyncも正常動作と確認済み。一方、FileTreeView.tsx:827-861が空状態でのみNew Directoryを表示する条件が根本原因。"
+      },
+      {
+        "id": "SF-3",
+        "category": "明確性",
+        "issue": "対策案がエラーの調査手順にフォーカスしており、具体的な修正方針が不明確",
+        "location": "## 対策案 セクション",
+        "recommendation": "具体的な修正方針を記載する。例: (1) FileTreeView.tsx:877-919の非空状態ツリー描画部分に、ルートレベルの「New File」「New Directory」ボタンを含むツールバーを追加する。(2) encodeURIComponent問題の修正: newPathのスラッシュをエンコードしないよう、パスセグメントを個別にエンコードしてスラッシュで結合する。(3) 空状態のNew Directoryボタン（L827-861）は既存のままで良い。",
+        "evidence": "現在の対策案3項目は全て調査・確認フェーズの内容（エラーレスポンス確認、パス検証修正、エラーハンドリング改善）であり、FileTreeView.tsxへのUI追加という本質的な対策が含まれていない。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "受け入れ条件（Acceptance Criteria）が明示されていない",
+        "location": "Issue本文全体",
+        "recommendation": "以下の受け入れ条件を追加する: (1) 非空状態のルートディレクトリでNew Directoryボタンが表示される (2) そのボタンからルートレベルにディレクトリを作成できる (3) 同名ディレクトリが存在する場合のみFILE_EXISTSエラーとなる (4) 既存のNew Fileボタンも同様に非空状態で利用可能 (5) コンテキストメニューからのサブディレクトリ作成が引き続き正常動作する"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "New Fileボタンも同様にルートレベルで非空状態では使用不可能だが、Issue内で言及されていない",
+        "location": "## 概要 セクション",
+        "recommendation": "FileTreeView.tsx:827-861の条件分岐はNew FileボタンとNew Directoryボタンの両方に影響する。同一の修正で両方が解決されるため、Issue概要にNew Fileも同様の問題がある旨を記載し、スコープを明確にする。"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "827-861",
+      "relevance": "根本原因: 空状態のみNew Directory/New Fileボタンを表示する条件分岐"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "877-919",
+      "relevance": "修正対象: 非空状態のツリー描画部分にツールバー追加が必要"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1271-1295",
+      "relevance": "handleNewDirectory関数 - encodeURIComponentの使用箇所"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1242-1268",
+      "relevance": "handleNewFile関数 - 同様のencodeURIComponent問題あり"
+    },
+    {
+      "file": "src/components/worktree/ContextMenu.tsx",
+      "lines": "100-108",
+      "relevance": "handleItemClickがtargetPathを渡す - コンテキストメニューのNew Directoryは対象ディレクトリ配下に作成"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "96-123",
+      "relevance": "getWorktreeAndValidatePath - catch-allルートのpathSegments処理"
+    },
+    {
+      "file": "src/lib/path-validator.ts",
+      "lines": "29-68",
+      "relevance": "isPathSafe関数 - 正常動作確認済み、変更不要"
+    },
+    {
+      "file": "src/lib/file-operations.ts",
+      "lines": "298-335",
+      "relevance": "createFileOrDirectory関数 - 正常動作確認済み、変更不要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "FileTreeView.tsx, ContextMenu.tsx, WorktreeDetailRefactored.tsxの機能説明が記載"
+    }
+  ]
+}

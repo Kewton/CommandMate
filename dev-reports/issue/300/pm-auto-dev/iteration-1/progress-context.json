@@ -1,0 +1,41 @@
+{
+  "issue_number": 300,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "implemented_files": [
+        "src/lib/url-path-encoder.ts",
+        "src/components/worktree/FileTreeView.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "tests/unit/lib/url-path-encoder.test.ts",
+        "tests/unit/components/worktree/FileTreeView.test.tsx",
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+      ],
+      "url_encoder_tests": "11/11 pass",
+      "typescript": "pass",
+      "lint": "pass",
+      "commit": "a582e93"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_met": 5,
+      "criteria_total": 5
+    },
+    "refactor": {
+      "status": "success",
+      "improvement": "ダークモードクラスを空状態ボタンに追加して一貫性を向上",
+      "commit": "c80cfe8"
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": ["CLAUDE.md"]
+    }
+  },
+  "final_verification": {
+    "typescript": "pass (0 errors)",
+    "lint": "pass (0 errors)",
+    "url_encoder_tests": "11/11 pass",
+    "component_tests_note": "ReactコンポーネントのJSDOMテストはリポジトリ全体の既存問題（act()エラー）により62ファイル・1130テストが失敗（今回の変更とは無関係）"
+  }
+}

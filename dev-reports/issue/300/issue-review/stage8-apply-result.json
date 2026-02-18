@@ -1,0 +1,47 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 300,
+  "iteration": 2,
+  "apply_date": "2026-02-18",
+  "status": "completed",
+  "changes_applied": [
+    {
+      "finding_id": "SF-1",
+      "severity": "should_fix",
+      "category": "影響範囲の網羅性",
+      "action": "applied",
+      "description": "useFileOperations.ts (L71)、FileViewer.tsx (L91)、MarkdownEditor.tsx (L216/L252) のencodeURIComponentを使用しないパスエンコード問題を影響範囲セクションに注記として追加",
+      "location": "Issue #300 本文 > 影響範囲 > 注記（encodePathForUrl適用範囲）",
+      "content_added": "> **注記（encodePathForUrl適用範囲）**: `useFileOperations.ts` (L71) の `/api/worktrees/${worktreeId}/files/${moveTarget.path}` はencodeURIComponentを使用していない。同様にFileViewer.tsx (L91)、MarkdownEditor.tsx (L216/L252) も同パターン。encodePathForUrl()導入時の適用範囲候補として認識しておくこと（本Issue内での修正は任意）。"
+    }
+  ],
+  "github_issue_update": {
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/300",
+    "update_method": "gh issue edit 300 --body",
+    "update_timestamp": "2026-02-18T00:00:00Z",
+    "verification": "verified"
+  },
+  "issue_sections_updated": [
+    {
+      "section": "影響範囲",
+      "subsection": "注記（encodePathForUrl適用範囲）",
+      "type": "新規追加",
+      "position": "影響範囲セクション内、変更対象ファイル表とi18n注記の間"
+    }
+  ],
+  "summary": {
+    "must_fix_applied": 0,
+    "should_fix_applied": 1,
+    "nice_to_have_applied": 0,
+    "total_changes": 1,
+    "all_findings_resolved": true
+  },
+  "notes": [
+    "Stage 7で検出されたShould Fix 1件（SF-1）が正常に適用された",
+    "SF-1は影響範囲セクションに新規注記として追加され、encodePathForUrl()導入時の適用候補ファイルを明示化した",
+    "NiceToHave 1件（NTH-1: encodePathForUrl()の配置先明記）は、Issue記載時点では実装者の判断に委ねる方針のため、反映しない",
+    "全前回レビュー指摘（Stage 3, 5）の反映状況も確認済み：全て正確に記載されている",
+    "Issue本文にレビュー履歴セクションが追加され、イテレーション2のStage 7修正内容も記載された"
+  ]
+}

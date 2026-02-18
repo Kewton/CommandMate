@@ -1,0 +1,59 @@
+{
+  "issue_number": 300,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "再現手順を修正 -- 「ルートレベルのNew Directoryボタンをクリックする」から「ルートレベルにNew Directoryボタンが表示されていないため追加手段がない」に変更。コンテキストメニューはサブディレクトリ配下への作成であることも明記。"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "根本原因セクションを全面再構成。バックエンド仮説1-3を廃止し、主要原因をFileTreeView.tsx:827-861のUI欠落（非空状態でNew Directory/New Fileボタンを表示しない条件分岐）に変更。path-validator.tsとfile-operations.tsは検証済み（問題なし）として記載。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "encodeURIComponentによるパスエンコード問題を二次的問題として新規追記。WorktreeDetailRefactored.tsxのhandleNewDirectory/handleNewFileでencodeURIComponent(newPath)がスラッシュをエンコードし、Next.js catch-all routeで単一セグメントとして処理される問題を詳述。修正方針（セグメント個別エンコード）も記載。"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "変更対象ファイル一覧を修正。FileTreeView.tsxを最上位（高優先度）に移動。path-validator.tsとfile-operations.tsを変更対象から除外。テストファイル（FileTreeView.test.ts, WorktreeDetailRefactored.test.ts）を追加。優先度カラムを新設。"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "対策案を調査フェーズの内容から具体的な修正方針に更新。(1) FileTreeView.tsxへのルートレベルツールバー追加、(2) encodeURIComponent問題のセグメント個別エンコード修正、(3) テスト追加の3項目に再構成。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "受け入れ条件セクションを新規追加。7項目のチェックリスト形式: 非空状態でのNew Directory/New File表示、ルートレベル作成、FILE_EXISTSエラー条件、コンテキストメニュー正常動作、encodeURIComponent問題解消。"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "New Fileボタンも同様の問題がある旨をIssueスコープに追加。概要、再現手順、期待する動作、実際の動作、受け入れ条件の各セクションにNew File関連の記述を含めた。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/300"
+  }
+}

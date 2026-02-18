@@ -1,0 +1,61 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 300,
+  "apply_date": "2026-02-18",
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_count": 3,
+  "skipped_count": 0,
+  "results": [
+    {
+      "finding_id": "SF-1",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "encodeURIComponent→encodePathForUrl変更を検出するための2層テスト戦略（url-path-encoder.test.ts単体テスト + WorktreeDetailRefactored.test.tsxモックテスト）をSection 4.3に追記。テスト層ごとの検証内容・優先度を明示したテーブルを追加。",
+      "location": "設計方針書 Section 4.3 既存テスト影響（[Stage3 SF-1]セクション追加）、Section 11 Stage 3対応チェックリスト"
+    },
+    {
+      "finding_id": "SF-2",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "MobileContent経由のツールバー表示確認をSection 4.2テスト設計に検証方針として追記し、Section 8受け入れ条件にモバイル表示確認項目を追加。",
+      "location": "設計方針書 Section 4.2（[Stage3 SF-2]セクション追加）、Section 8 受け入れ条件 UI項目追加、Section 11 Stage 3対応チェックリスト"
+    },
+    {
+      "finding_id": "SF-3",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "ツールバーボタンのタッチターゲットサイズ（py-1 px-2、約24x32px）がWCAG推奨44x44pxを下回ることに対する設計判断を明記。デスクトップ向けUIとして設計し、モバイルではコンテキストメニュー経由の操作を推奨する方針を記載。",
+      "location": "設計方針書 Section 3.1 スタイリング方針（[Stage3 SF-3]セクション追加）、Section 11 Stage 3対応チェックリスト"
+    }
+  ],
+  "nice_to_have_notes": [
+    {
+      "finding_id": "NTH-1",
+      "status": "noted",
+      "description": "encodePathForUrlの将来的な適用候補一覧は既にSection 4.3に記載済み。追加対応不要。"
+    },
+    {
+      "finding_id": "NTH-2",
+      "status": "noted",
+      "description": "Before/AfterのURL文字列変化の具体例追記を将来課題として記録。"
+    },
+    {
+      "finding_id": "NTH-3",
+      "status": "noted",
+      "description": "パフォーマンス影響は無視できるレベル。レビュー結果でも追記不要と判定。対応不要。"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-300-root-directory-creation-design-policy.md",
+  "sections_updated": [
+    "Section 3.1 スタイリング方針（[Stage3 SF-3] タッチターゲットサイズ設計判断追加）",
+    "Section 4.2 コンポーネントテスト（[Stage3 SF-2] MobileContent経由確認方針追加）",
+    "Section 4.3 既存テスト影響（[Stage3 SF-1] 2層テスト戦略追加）",
+    "Section 8 受け入れ条件（モバイル表示確認項目追加）",
+    "Section 9 レビュー履歴（Stage 3行追加）",
+    "Section 10 レビュー指摘事項サマリー（Stage 3テーブル追加）",
+    "Section 11 実装チェックリスト（Stage 3対応チェックリスト追加）"
+  ],
+  "timestamp": "2026-02-18T13:30:00Z"
+}

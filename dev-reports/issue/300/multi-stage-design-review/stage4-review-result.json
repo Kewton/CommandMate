@@ -1,0 +1,115 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "issue_number": 300,
+  "review_date": "2026-02-18",
+  "review_summary": "Issue #300の設計方針書に対するセキュリティレビューを実施した。設計方針書はセキュリティ責務境界（SF-2）を明確に定義しており、パストラバーサル防御をサーバー側のisPathSafe()に一元化する方針は適切である。encodePathForUrl()からisPathSafe()に至る検証チェーンをトレースした結果、通常のファイル操作フローでは二重エンコード問題は発生しない。ただし、isPathSafe()内のdecodeURIComponentが既にデコード済みのパスに対して再適用される既存設計（route.tsのgetWorktreeAndValidatePathで受け取るpathSegmentsはNext.jsにより自動デコード済み）について、ファイル名にリテラル%文字が含まれる場合のエッジケースに関する注記が設計方針書に不足している。また、window.prompt()からの入力に対するクライアント側バリデーションの不在は、既存実装の問題であるが設計方針書で言及すべきである。Must Fix: 0件、Should Fix: 3件、Nice to Have: 3件。",
+  "findings": [
+    {
+      "id": "SF-1",
+      "severity": "should_fix",
+      "category": "二重デコード・エッジケース",
+      "issue": "isPathSafe()内のdecodeURIComponent適用が、既にNext.jsにより自動デコードされたパスに対して二重デコードを行うエッジケースについて、設計方針書での分析が不十分。具体的には、ファイル名にリテラル%文字が含まれる場合（例: 'report%20v2.md'というファイル名が実際に%20をリテラル文字として持つ場合）、isPathSafe()がそれを空白にデコードしてしまい、バリデーション対象パスと実際のファイル操作パスに不一致が生じる可能性がある。",
+      "location": "設計方針書 Section 6 セキュリティ設計 > 検証チェーンの詳細、およびSection 3.2 SF-2責務境界",
+      "recommendation": "設計方針書のSection 6に以下の分析を追記すべきである: (1) Next.js catch-all routeがpathSegmentsを自動デコードするため、getWorktreeAndValidatePath()に渡される時点でパスは既にデコード済みである。(2) isPathSafe()内のdecodeURIComponentは冪等性を持つ（既にデコード済みの通常文字列に対しては無変化）が、リテラル%文字を含むファイル名では挙動が変わる。(3) これは既存実装の設計であり、Issue #300の変更（encodeURIComponent→encodePathForUrl）はこの挙動を変更しないため、本Issue のスコープ外である旨を明記する。",
+      "evidence": "path-validator.ts L40-47: decodeURIComponent()の適用。route.ts L112: pathSegments.join('/')ではNext.jsが自動デコード済みのセグメントを結合。encodePathForUrl()で'file%20name.md'をエンコードすると'file%2520name.md'となり、Next.jsが'file%20name.md'にデコード、isPathSafe()が更に'file name.md'にデコードするが、実際のファイル操作はデコード前の'file%20name.md'で実行される。"
+    },
+    {
+      "id": "SF-2",
+      "severity": "should_fix",
+      "category": "入力バリデーション（クライアント側）",
+      "issue": "設計方針書Section 6の入力バリデーションセクションで「window.promptの戻り値が空の場合は早期リターン」と記載されているが、悪意のある文字（'..', ヌルバイト'\\x00', 制御文字、OSの禁止文字'<>:\"|?*'）に対するクライアント側バリデーションが存在しない。サーバー側のisPathSafe()およびisValidNewName()で防御されるため実害はないが、Defense-in-Depthの観点からクライアント側でも基本的なバリデーションを行うべきか否かの設計判断が設計方針書に記載されていない。",
+      "location": "設計方針書 Section 6 セキュリティ設計 > 入力バリデーション",
+      "recommendation": "設計方針書のSection 6入力バリデーションに以下を追記すべきである: (1) window.prompt()からの入力に対し、クライアント側でのファイル名バリデーション（'..'を含まない、パス区切り'/'を含まない、制御文字を含まない等）を実装しない設計判断とその理由（サーバー側のisPathSafe()/isValidNewName()による防御で十分、クライアント側バリデーションはUX向上目的のみ）を明記する。(2) handleNewFile/handleNewDirectoryではパス全体がwindow.prompt()から入力されるのではなく、ファイル名のみが入力されparentPathと結合されるため、パストラバーサルリスクは限定的である旨を記載する。ただし、ユーザーが'../malicious'のようなファイル名を入力した場合、現在はサーバーエラーで返却されるだけでクライアント側でのフィードバックがない点をUX課題として記録する。",
+      "evidence": "WorktreeDetailRefactored.tsx L1243: window.prompt('Enter file name (e.g., document.md):')で入力を受け取り、L1244でnull/空チェックのみ実施。L1247で拡張子の付与、L1248でparentPathとの結合を行うが、ファイル名自体のバリデーションは行わない。L1272: ディレクトリ名入力も同様にバリデーションなし。file-operations.ts L177-194: isValidNewName()はrenameFileOrDirectory()からのみ呼ばれ、createFileOrDirectory()からは呼ばれない（L298-335参照）。"
+    },
+    {
+      "id": "SF-3",
+      "severity": "should_fix",
+      "category": "createFileOrDirectoryのバリデーション不足",
+      "issue": "createFileOrDirectory()（file-operations.ts L298-335）はisPathSafe()のみを呼び出し、isValidNewName()を呼び出していない。これにより、renameFileOrDirectory()では拒否されるファイル名（制御文字、OS禁止文字等を含むもの）がcreateFileOrDirectory()経由では受け入れられてしまう。これは既存実装の問題であり、Issue #300の変更で新たに導入される問題ではないが、新規のツールバーボタンによりルートレベルでのファイル/ディレクトリ作成の機会が増えるため、影響範囲が拡大する。",
+      "location": "設計方針書 Section 6 セキュリティ設計 > 入力バリデーション。関連コード: file-operations.ts L298-335",
+      "recommendation": "設計方針書のSection 6に以下の既知の課題として追記すべきである: (1) createFileOrDirectory()はisValidNewName()を呼び出しておらず、制御文字やOS禁止文字を含むファイル名が作成可能である。(2) これは既存実装の問題であり、Issue #300のスコープ外とする。(3) 将来的にcreateFileOrDirectory()にもisValidNewName()呼び出しを追加することを推奨する（別Issueで対応）。",
+      "evidence": "file-operations.ts L298-335: createFileOrDirectory()のコード。L305でisPathSafe()を呼び出すが、isValidNewName()は呼び出されない。L618-662: renameFileOrDirectory()ではL630でisValidNewName()が呼び出されている。非対称なバリデーション。"
+    },
+    {
+      "id": "NTH-1",
+      "severity": "nice_to_have",
+      "category": "XSS対策",
+      "issue": "設計方針書にXSS対策に関する分析が記載されていない。encodePathForUrl()の出力はfetch()のURL構築にのみ使用され、HTMLに直接挿入されることはないが、将来的な使用拡大を考慮すると、encodePathForUrl()の出力がHTML安全ではない旨を明記しておくとよい。また、window.prompt()で入力された文字列がwindow.alert()のエラーメッセージに含まれる場合、ブラウザのネイティブダイアログを使用しているためXSSリスクはないが、将来的にカスタムUIに置き換えた場合のリスクを認識しておくべきである。",
+      "location": "設計方針書 Section 6 セキュリティ設計（XSS対策セクションが存在しない）",
+      "recommendation": "設計方針書のSection 6に「XSS対策」サブセクションを追加し、以下を記載: (1) encodePathForUrl()はURL構築専用であり、HTML出力には使用しない。(2) ツールバーボタンのイベントハンドラは静的なonClick関数バインドであり、DOMインジェクションのリスクはない。(3) ファイル名の入力/表示にはブラウザネイティブダイアログ（window.prompt/alert/confirm）を使用しており、XSSリスクはない。",
+      "evidence": "WorktreeDetailRefactored.tsx L1251-1258: fetch()のURL引数でのみencodePathForUrl()を使用。L1243: window.prompt()使用。L1266: window.alert()使用。FileTreeView.tsx L109-115: onClickは静的コールバックバインド。"
+    },
+    {
+      "id": "NTH-2",
+      "severity": "nice_to_have",
+      "category": "アクセス制御（OWASP A01）",
+      "issue": "設計方針書にアクセス制御に関する分析が記載されていない。ツールバーの「新規ディレクトリ/ファイル」操作に対する認証・認可の確認が設計方針書に含まれていない。CommandMateはローカルホスト専用ツールであり、認証機構は不要という前提があると思われるが、その前提の明記がない。",
+      "location": "設計方針書 Section 6 セキュリティ設計（アクセス制御セクションが存在しない）",
+      "recommendation": "設計方針書のSection 6に短い注記を追加: 「CommandMateはlocalhostで動作するローカル開発ツールであり、認証・認可機構は設けていない。Issue #300で追加されるツールバーボタンは既存のコンテキストメニュー操作と同一のAPIエンドポイントを使用するため、アクセス制御の観点で新たなリスクは生じない。」",
+      "evidence": "設計方針書 Section 2: APIルート層は変更なし。FileTreeView.tsxのツールバーはonNewFile('')/onNewDirectory('')コールバックを呼び出し、最終的にWorktreeDetailRefactored.tsxのhandleNewFile/handleNewDirectoryが既存APIを使用する。"
+    },
+    {
+      "id": "NTH-3",
+      "severity": "nice_to_have",
+      "category": "OWASP A03 インジェクション",
+      "issue": "encodePathForUrl()のドットに関する挙動が設計方針書Section 3.2で言及されている（ドットはRFC 3986のunreserved characterであるためencodeURIComponentでエンコードされない）が、これをOWASP A03の観点から体系的に整理した記述がない。パスインジェクション（パストラバーサル）に対する防御チェーンは適切に設計されているが、OWASP Top 10準拠の観点でのチェックリスト形式の記述があるとレビュー性が向上する。",
+      "location": "設計方針書 Section 6 セキュリティ設計",
+      "recommendation": "設計方針書のSection 6にOWASP Top 10チェックリストを追加する: A01 Broken Access Control（localhost専用、既存APIと同一）、A03 Injection（isPathSafe()によるパストラバーサル防御、path.resolve()+path.relative()による正規化）、A05 Security Misconfiguration（バックエンド変更なし、既存設定維持）、A06 Vulnerable Components（新規依存追加なし）。各項目について「対応状況: 既存実装で対応済み / Issue #300で変更なし」の形式で記載。",
+      "evidence": "設計方針書 Section 6: パストラバーサル防止の記述はあるが、OWASP Top 10の体系的マッピングは存在しない。"
+    }
+  ],
+  "security_chain_analysis": {
+    "description": "encodePathForUrl()からisPathSafe()に至る検証チェーンのトレース結果",
+    "normal_flow": {
+      "step1_client": "encodePathForUrl('src/file #1.md') -> 'src/file%20%231.md'",
+      "step2_nextjs_catchall": "params.path = ['src', 'file #1.md']（Next.jsが各セグメントを自動デコード）",
+      "step3_join": "pathSegments.join('/') -> 'src/file #1.md'",
+      "step4_normalize": "normalize('src/file #1.md') -> 'src/file #1.md'",
+      "step5_isPathSafe": "decodeURIComponent('src/file #1.md') -> 'src/file #1.md'（変化なし）、path.resolve(rootDir, 'src/file #1.md')で検証 -> true",
+      "step6_file_operation": "join(worktreeRoot, 'src/file #1.md')で実際のファイル操作",
+      "result": "正常動作。バリデーション対象パスとファイル操作パスが一致。"
+    },
+    "traversal_attack_flow": {
+      "step1_client": "encodePathForUrl('../../etc/passwd') -> '..%2F..%2Fetc%2Fpasswd' ではなく '../../etc/passwd'（ドットとスラッシュはエンコードされない）",
+      "step2_nextjs_catchall": "params.path = ['..', '..', 'etc', 'passwd']",
+      "step3_join": "pathSegments.join('/') -> '../../etc/passwd'",
+      "step4_normalize": "normalize('../../etc/passwd') -> '../../etc/passwd'",
+      "step5_isPathSafe": "path.resolve(rootDir, '../../etc/passwd') -> rootDir外のパス、path.relative()が'..'で始まる -> false",
+      "result": "パストラバーサル攻撃が適切にブロックされる。"
+    },
+    "double_encode_edge_case": {
+      "scenario": "ファイル名にリテラル%文字が含まれる場合（例: 'report%20v2.md'）",
+      "step1_client": "encodePathForUrl('report%20v2.md') -> 'report%2520v2.md'",
+      "step2_nextjs_catchall": "params.path = ['report%20v2.md']（%25がデコードされて%20になる）",
+      "step3_isPathSafe": "decodeURIComponent('report%20v2.md') -> 'report v2.md'",
+      "step4_file_operation": "join(worktreeRoot, 'report%20v2.md')でリテラル%20のファイルに操作",
+      "result": "バリデーション対象は'report v2.md'だが実際のファイル操作は'report%20v2.md'に対して行われる。パス安全性チェックはパス、ディレクトリレベルではなくファイル名レベルの不一致のため、セキュリティ上の実害はない（rootDir外への脱出は不可能）。ただし、既存の設計上の不整合である。"
+    },
+    "conclusion": "Issue #300の変更（encodeURIComponent -> encodePathForUrl）はセキュリティ検証チェーンの動作を変更しない。encodePathForUrlはスラッシュを保持することで正しいパスセグメント分割を実現し、isPathSafe()による防御は引き続き有効である。"
+  },
+  "owasp_top10_assessment": {
+    "A01_broken_access_control": {
+      "status": "acceptable",
+      "note": "CommandMateはlocalhost専用ツール。新規ツールバーは既存APIエンドポイントを使用し、新たなアクセス制御の問題は生じない。"
+    },
+    "A03_injection": {
+      "status": "acceptable",
+      "note": "パスインジェクション（パストラバーサル）はisPathSafe()のpath.resolve()+path.relative()チェーンで防御。encodePathForUrl()はこのチェーンに影響しない。createFileOrDirectory()がisValidNewName()を呼ばない既存の不整合があるが、isPathSafe()で基本的な防御は維持。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "acceptable",
+      "note": "バックエンドは変更なし。既存設定が維持される。"
+    },
+    "A06_vulnerable_components": {
+      "status": "acceptable",
+      "note": "新規外部依存なし。encodePathForUrl()はビルトインのencodeURIComponentのみを使用。"
+    }
+  },
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_quality": "good"
+}

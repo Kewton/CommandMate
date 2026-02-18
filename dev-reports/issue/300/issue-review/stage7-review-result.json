@@ -1,0 +1,115 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "issue_number": 300,
+  "iteration": 2,
+  "review_date": "2026-02-18",
+  "review_summary": "Stage 3で指摘した2件のMust Fix（encodeURIComponent全5箇所の修正、ツールバーと空状態ボタンの共存方針）は全てIssue本文に正しく反映されている。Stage 5で指摘したhandleFileInputChangeへの関数名修正も反映済み。影響範囲の記載は概ね適切だが、新たに1件のShould Fixを検出した。useFileOperations.ts（handleMoveConfirm L71）がencodeURIComponentを使用せずにパスをURLに埋め込んでおり、encodePathForUrl()ヘルパー導入時の適用範囲が不完全になるリスクがある。また、FileViewer.tsx/MarkdownEditor.tsxでも同様にパスを直接URLに埋め込むパターンが存在し、encodePathForUrl()ヘルパーの適用範囲を明確にすべきである。",
+  "findings": [
+    {
+      "id": "SF-1",
+      "severity": "should_fix",
+      "category": "影響範囲の網羅性",
+      "issue": "useFileOperations.ts (handleMoveConfirm L71) がencodeURIComponentを使用せずにパスをURLに直接埋め込んでおり、encodePathForUrl()ヘルパー導入時の適用対象として記載されていない",
+      "location": "src/hooks/useFileOperations.ts:71, Issue本文の「二次的問題: encodeURIComponentによるパスエンコード問題」セクション",
+      "recommendation": "Issueの影響範囲に以下を追記すべき: (1) useFileOperations.ts L71の `/api/worktrees/${worktreeId}/files/${moveTarget.path}` はencodeURIComponentを使用していないが、moveTarget.pathにはスラッシュが含まれる可能性があるため、パスに特殊文字（#, ?, %等）が含まれる場合に不正なURLが生成されるリスクがある。(2) 同様にFileViewer.tsx L91、MarkdownEditor.tsx L216/L252も直接パスをURLに埋め込んでいる。(3) encodePathForUrl()ヘルパーを導入する場合、WorktreeDetailRefactored.tsxの5箇所だけでなく、これらの箇所も適用対象として検討すべき。ただし現時点では#や?を含むファイル名は一般的ではないため、本Issue内での修正は任意であり、影響範囲の「注記」として認識しておけば十分",
+      "evidence": "useFileOperations.ts L71: `/api/worktrees/${worktreeId}/files/${moveTarget.path}` -- moveTarget.pathは ContextMenu.tsx経由でツリーのパス（例: 'src/components/foo.tsx'）が渡される。スラッシュはcatch-all routeで正しくセグメント分割されるため通常動作に問題はないが、'file#1.txt'や'file?.md'のような特殊文字を含むファイル名ではURLが破壊される。FileViewer.tsx L91、MarkdownEditor.tsx L216/L252、page.tsx L40も同一パターン。WorktreeDetailRefactored.tsxの5箇所がencodeURIComponent()を使用しているのとは異なるパターンが混在しており、コードベース全体でのエンコーディング戦略が不統一"
+    },
+    {
+      "id": "NTH-1",
+      "severity": "nice_to_have",
+      "category": "影響範囲の明確性",
+      "issue": "encodePathForUrl()ヘルパーの配置先ファイルが明記されていない",
+      "location": "Issue本文の「対策案」セクション、「受け入れ条件 > パスエンコード」セクション",
+      "recommendation": "encodePathForUrl()ヘルパー関数の配置先として src/lib/url-utils.ts（新規）または既存の src/lib/utils.ts のいずれかを推奨として明記すると、実装者の判断負荷を軽減できる。プロジェクトには既にsrc/lib/url-normalizer.ts（Git URL正規化用）が存在するが、用途が異なるため別ファイルが望ましい",
+      "evidence": "Issue本文では「共通ヘルパー関数 encodePathForUrl() を抽出し、全5箇所で使用する」と記載されているが、配置先のファイルパスが未指定。CLAUDE.mdのファイル構成ルールでは src/lib/ にユーティリティ・ビジネスロジックを配置する方針"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 1,
+  "nice_to_have_count": 1,
+  "overall_quality": "good",
+  "previous_findings_verification": {
+    "stage3_MF-1_encodeURIComponent_5_locations": {
+      "status": "resolved",
+      "detail": "全5箇所（handleNewFile L1252, handleNewDirectory L1279, handleRename L1305, handleDelete L1330, handleFileInputChange L1408）が正確にIssue本文の表に記載されている。5番目の関数名もStage 5のSF-1指摘を受けてhandleUploadからhandleFileInputChangeに修正済み。共通ヘルパーencodePathForUrl()の抽出も対策案・受け入れ条件の両方に記載されている"
+    },
+    "stage3_MF-2_toolbar_empty_state_coexistence": {
+      "status": "resolved",
+      "detail": "Option A（空状態ボタン維持+非空状態ツールバー追加）が明確に記載されている。data-testid命名規則（empty-new-directory-button, toolbar-new-directory-button, toolbar-new-file-button）が受け入れ条件に含まれている。「空状態ボタン（data-testid='empty-new-directory-button'）は残存させ」と方針が明記されている"
+    },
+    "stage3_SF-1_test_cases": {
+      "status": "resolved",
+      "detail": "受け入れ条件のテストセクションに4つのテストケース（ツールバー表示、クリック時コールバック、コールバック未指定時の非表示、パスエンコード）が具体的に記載されている"
+    },
+    "stage3_SF-2_i18n": {
+      "status": "resolved",
+      "detail": "影響範囲の注記として「FileTreeViewは現在i18n未対応」「新規ツールバーも英語ハードコードとする」「将来i18n対応する際には空状態ボタンとツールバーボタンの両方を同時に修正する必要がある」が明記されている"
+    },
+    "stage3_SF-3_security": {
+      "status": "resolved",
+      "detail": "根本原因セクションに「セキュリティ確認」として、encodeURIComponent修正後もisPathSafe()による検証が維持される旨が記載されている。path-validator.ts L41-47のdecodeURIComponent処理についても言及されている"
+    },
+    "stage5_SF-1_function_name_correction": {
+      "status": "resolved",
+      "detail": "影響箇所テーブル、コード参照テーブル、受け入れ条件の全てでhandleFileInputChangeに統一されている"
+    }
+  },
+  "impact_analysis_verification": {
+    "affected_files_completeness": {
+      "status": "mostly_complete",
+      "detail": "変更対象4ファイル（FileTreeView.tsx, WorktreeDetailRefactored.tsx, 各テストファイル）は適切。ただしuseFileOperations.ts/FileViewer.tsx/MarkdownEditor.tsxのエンコーディング不統一が影響範囲として未記載（SF-1として指摘）"
+    },
+    "unaffected_files_correctness": {
+      "status": "correct",
+      "detail": "route.ts, path-validator.ts, file-operations.ts, ContextMenu.tsxが変更不要とされている理由が妥当。各ファイルの除外理由が明確に記載されている"
+    },
+    "breaking_changes": {
+      "status": "correct",
+      "detail": "破壊的変更なし。空状態の既存UIは維持され、新規ツールバーの追加のみ。encodeURIComponent修正もAPIルート側の変更は不要"
+    },
+    "test_scope": {
+      "status": "adequate",
+      "detail": "FileTreeView.test.tsxの非空状態テスト追加、WorktreeDetailRefactored.test.tsxのパスエンコードテスト追加が受け入れ条件に含まれている。既存テストへの影響がない旨も確認済み"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/hooks/useFileOperations.ts",
+      "lines": "66-80",
+      "relevance": "handleMoveConfirm: moveTarget.pathを直接URLに埋め込み（encodeURIComponent未使用）。encodePathForUrl()適用候補"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "lines": "90-92",
+      "relevance": "filePathを直接URLに埋め込み（encodeURIComponent未使用）。encodePathForUrl()適用候補"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "215-217, 251-253",
+      "relevance": "filePathを直接URLに埋め込み（encodeURIComponent未使用）。encodePathForUrl()適用候補"
+    },
+    {
+      "file": "src/app/worktrees/[id]/files/[...path]/page.tsx",
+      "lines": "24, 39-41",
+      "relevance": "params.path.join('/')でfilePathを構築し直接URLに埋め込み。サーバーレンダリングのためパターンが異なるが同一の課題"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1252, 1279, 1305, 1330, 1408",
+      "relevance": "Issue記載済みのencodeURIComponent使用5箇所。全て正確に記載されている"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "827-861, 877-919",
+      "relevance": "主要修正対象。空状態ボタンと非空状態ツリー描画部分。Issue記載と実コードが一致"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "FileTreeView.tsx, WorktreeDetailRefactored.tsx, useFileOperations.ts, FileViewer.tsx, MarkdownEditor.tsxの機能説明が記載。Issue内容と矛盾なし"
+    }
+  ]
+}

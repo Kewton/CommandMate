@@ -1,0 +1,15 @@
+{
+  "issue_number": 300,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_doc_path": "dev-reports/design/issue-300-root-directory-creation-design-policy.md",
+  "review_points": [
+    "SOLID原則（特にSRP, OCP）への準拠",
+    "KISS原則（シンプルさ）への準拠",
+    "YAGNI原則（過剰設計の排除）への準拠",
+    "DRY原則（コード重複の排除）への準拠",
+    "設計パターンの適切な適用",
+    "モジュール間の依存関係の適切さ"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "issue_number": 300,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目 - 影響範囲）",
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "encodeURIComponentの影響範囲を全5箇所に拡大。handleRename(L1305)/handleDelete(L1330)/handleUpload(L1408)を二次的問題の表に追加。共通ヘルパー関数encodePathForUrl()の抽出を対策案・受け入れ条件に明記。コード参照にも全5箇所の行番号を追記"
+      },
+      {
+        "id": "MF-2",
+        "status": "applied",
+        "change_summary": "設計方針としてOption A（空状態ボタン維持+非空状態ツールバー追加）を対策案に明記。受け入れ条件にdata-testid命名規則（empty-new-directory-button, toolbar-new-directory-button, toolbar-new-file-button）と空状態ボタン残存条件を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "受け入れ条件のテストセクションに具体的なテストケース3件を追加: (1)非空状態でツールバーボタン表示、(2)ボタンクリックでonNewDirectory('')/onNewFile('')呼び出し、(3)コールバック未指定時にボタン非表示"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "影響範囲の変更対象ファイルテーブル下部にi18n注記を追加。FileTreeViewのi18n未対応状況と新規ツールバーの英語ハードコード方針を明記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "根本原因セクションの二次的問題（encodeURIComponent）内にセキュリティ確認blockquoteを追加。path-validator.ts L41-47のdecodeURIComponent処理により、個別セグメントエンコード方式でもパストラバーサル検証が維持される旨を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "モバイルレスポンシブ対応のタッチターゲットサイズ考慮は実装時の詳細設計に委ねる。FileTreeView内にツールバーを追加すればMobileContent側の変更は不要であることはIssue構造から自明"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "WorktreeDetailRefactored.test.tsxのモック更新はテスト実装時に対応すべき事項。受け入れ条件のテストセクションでカバー済み"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "ContextMenuとツールバーの動作差異のツールチップ追加はUX改善であり、本バグ修正Issueのスコープ外。必要に応じて別Issueで対応"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 5,
+    "skipped": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/300"
+  }
+}

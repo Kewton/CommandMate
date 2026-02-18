@@ -60,6 +60,7 @@ import type { AutoYesDuration } from '@/config/auto-yes-config';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
+import { encodePathForUrl } from '@/lib/url-path-encoder';
 
 // ============================================================================
 // Types
@@ -1249,7 +1250,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
     try {
       const response = await fetch(
-        `/api/worktrees/${worktreeId}/files/${encodeURIComponent(newPath)}`,
+        `/api/worktrees/${worktreeId}/files/${encodePathForUrl(newPath)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1276,7 +1277,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
     try {
       const response = await fetch(
-        `/api/worktrees/${worktreeId}/files/${encodeURIComponent(newPath)}`,
+        `/api/worktrees/${worktreeId}/files/${encodePathForUrl(newPath)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1302,7 +1303,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
     try {
       const response = await fetch(
-        `/api/worktrees/${worktreeId}/files/${encodeURIComponent(path)}`,
+        `/api/worktrees/${worktreeId}/files/${encodePathForUrl(path)}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -1327,7 +1328,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
     try {
       const response = await fetch(
-        `/api/worktrees/${worktreeId}/files/${encodeURIComponent(path)}?recursive=true`,
+        `/api/worktrees/${worktreeId}/files/${encodePathForUrl(path)}?recursive=true`,
         {
           method: 'DELETE',
         }
@@ -1405,7 +1406,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     try {
       const uploadPath = targetDir || '.';
       const response = await fetch(
-        `/api/worktrees/${worktreeId}/upload/${encodeURIComponent(uploadPath)}`,
+        `/api/worktrees/${worktreeId}/upload/${encodePathForUrl(uploadPath)}`,
         {
           method: 'POST',
           body: formData,

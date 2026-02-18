@@ -1,0 +1,32 @@
+{
+  "issue_number": 300,
+  "feature_summary": "ルートディレクトリにディレクトリ/ファイルを追加出来ない問題の修正",
+  "implemented_files": [
+    "src/lib/url-path-encoder.ts",
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/lib/url-path-encoder.test.ts",
+    "tests/unit/components/worktree/FileTreeView.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ],
+  "acceptance_criteria": [
+    "非空状態のルートディレクトリで「New Directory」ボタン（data-testid='toolbar-new-directory-button'）が表示される",
+    "そのボタンからルートレベルにディレクトリを作成できる（onNewDirectory('')が呼ばれる）",
+    "非空状態のルートディレクトリで「New File」ボタン（data-testid='toolbar-new-file-button'）が表示される",
+    "そのボタンからルートレベルにファイルを作成できる（onNewFile('')が呼ばれる）",
+    "空状態ボタン（data-testid='empty-new-directory-button'）は残存し、空状態で引き続き表示される",
+    "onNewFile / onNewDirectory コールバック未指定時にツールバーボタンが表示されない",
+    "共通ヘルパー関数 encodePathForUrl() が src/lib/url-path-encoder.ts に存在する",
+    "handleNewFile, handleNewDirectory, handleRename, handleDelete, handleFileInputChange の全5箇所で encodePathForUrl() を使用している",
+    "スラッシュを含むパス（例: src/newdir）が正しくエンコードされる（%2F にならない）",
+    "isPathSafe() によるパストラバーサル検証が引き続き機能する（バックエンドは変更なし）"
+  ],
+  "test_scenarios": [
+    "シナリオ1: url-path-encoder.ts の encodePathForUrl() が11のテストケースを通過する",
+    "シナリオ2: FileTreeView.tsx に toolbar-new-directory-button と toolbar-new-file-button が存在する",
+    "シナリオ3: WorktreeDetailRefactored.tsx で encodeURIComponent の直接使用がなく encodePathForUrl を使用している",
+    "シナリオ4: TypeScript コンパイルエラーがない",
+    "シナリオ5: ESLint エラーがない"
+  ],
+  "note": "ReactコンポーネントのJSDOMテストはリポジトリ全体に既存のact()問題があり、全62ファイルが失敗している。この問題は今回の変更と無関係。コードレビューとurl-path-encoder.test.tsの単体テストで受け入れ条件を検証する。"
+}
