@@ -69,8 +69,8 @@ function getToastStyles(type: ToastType): {
 }
 
 /**
- * Get icon component based on type
- * [REFACTOR] Performance: Accepts iconColor as prop to avoid duplicate getToastStyles call
+ * Get icon component based on type.
+ * Accepts iconColor as prop to avoid duplicate getToastStyles call.
  */
 function ToastIcon({ type, iconColor }: { type: ToastType; iconColor: string }) {
   const iconClass = `h-5 w-5 ${iconColor}`;

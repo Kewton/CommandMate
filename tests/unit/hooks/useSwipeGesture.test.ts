@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
-import { useSwipeGesture } from '@/hooks/useSwipeGesture';
+import { useSwipeGesture, isInsideScrollableElement } from '@/hooks/useSwipeGesture';
 
 describe('useSwipeGesture', () => {
   beforeEach(() => {
@@ -429,6 +429,86 @@ describe('useSwipeGesture', () => {
       expect(onSwipeDown).toHaveBeenCalled();
 
       document.body.removeChild(container);
+    });
+  });
+
+  describe('isInsideScrollableElement (direct unit tests)', () => {
+    it('should return false for an element with no scrollable ancestor', () => {
+      const element = document.createElement('div');
+      document.body.appendChild(element);
+
+      expect(isInsideScrollableElement(element)).toBe(false);
+
+      document.body.removeChild(element);
+    });
+
+    it('should return true when the element itself is scrollable', () => {
+      const element = document.createElement('div');
+      element.style.overflowY = 'auto';
+      Object.defineProperty(element, 'scrollHeight', { value: 500, configurable: true });
+      Object.defineProperty(element, 'clientHeight', { value: 200, configurable: true });
+      document.body.appendChild(element);
+
+      expect(isInsideScrollableElement(element)).toBe(true);
+
+      document.body.removeChild(element);
+    });
+
+    it('should return true when a parent element is scrollable', () => {
+      const parent = document.createElement('div');
+      parent.style.overflowY = 'scroll';
+      Object.defineProperty(parent, 'scrollHeight', { value: 800, configurable: true });
+      Object.defineProperty(parent, 'clientHeight', { value: 300, configurable: true });
+
+      const child = document.createElement('span');
+      parent.appendChild(child);
+      document.body.appendChild(parent);
+
+      expect(isInsideScrollableElement(child)).toBe(true);
+
+      document.body.removeChild(parent);
+    });
+
+    it('should return false when overflow-y is auto but content does not overflow', () => {
+      const element = document.createElement('div');
+      element.style.overflowY = 'auto';
+      Object.defineProperty(element, 'scrollHeight', { value: 100, configurable: true });
+      Object.defineProperty(element, 'clientHeight', { value: 100, configurable: true });
+      document.body.appendChild(element);
+
+      expect(isInsideScrollableElement(element)).toBe(false);
+
+      document.body.removeChild(element);
+    });
+
+    it('should return false when overflow-y is hidden even with overflow content', () => {
+      const element = document.createElement('div');
+      element.style.overflowY = 'hidden';
+      Object.defineProperty(element, 'scrollHeight', { value: 500, configurable: true });
+      Object.defineProperty(element, 'clientHeight', { value: 200, configurable: true });
+      document.body.appendChild(element);
+
+      expect(isInsideScrollableElement(element)).toBe(false);
+
+      document.body.removeChild(element);
+    });
+
+    it('should traverse multiple ancestors to find scrollable parent', () => {
+      const grandparent = document.createElement('div');
+      grandparent.style.overflowY = 'auto';
+      Object.defineProperty(grandparent, 'scrollHeight', { value: 600, configurable: true });
+      Object.defineProperty(grandparent, 'clientHeight', { value: 200, configurable: true });
+
+      const parent = document.createElement('div');
+      const child = document.createElement('span');
+
+      parent.appendChild(child);
+      grandparent.appendChild(parent);
+      document.body.appendChild(grandparent);
+
+      expect(isInsideScrollableElement(child)).toBe(true);
+
+      document.body.removeChild(grandparent);
     });
   });
 });

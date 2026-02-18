@@ -138,7 +138,6 @@ export const SearchBar = memo(function SearchBar({
     inputRef.current?.focus();
   }, [onClear]);
 
-
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {

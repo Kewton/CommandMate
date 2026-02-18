@@ -58,7 +58,7 @@ const DEFAULT_THRESHOLD = 50;
  * @param element - The target element to check
  * @returns true if the element is inside a vertically scrollable container
  */
-function isInsideScrollableElement(element: HTMLElement): boolean {
+export function isInsideScrollableElement(element: HTMLElement): boolean {
   let current: HTMLElement | null = element;
   while (current) {
     const { overflowY } = getComputedStyle(current);
