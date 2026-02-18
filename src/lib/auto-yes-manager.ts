@@ -16,6 +16,7 @@ import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, detectThinking, buildDetectPromptOptions } from './cli-patterns';
 import { DEFAULT_AUTO_YES_DURATION, type AutoYesDuration } from '@/config/auto-yes-config';
+import { generatePromptKey } from './prompt-key';
 
 /** Auto yes state for a worktree */
 export interface AutoYesState {
@@ -39,6 +40,8 @@ export interface AutoYesPollerState {
   currentInterval: number;
   /** Last server-side response timestamp */
   lastServerResponseTimestamp: number | null;
+  /** Last answered prompt key for duplicate prevention (Issue #306) */
+  lastAnsweredPromptKey: string | null;
 }
 
 /** Result of starting a poller */
@@ -55,6 +58,9 @@ export interface StartPollingResult {
 
 /** Polling interval in milliseconds */
 export const POLLING_INTERVAL_MS = 2000;
+
+/** Cooldown interval after successful response (milliseconds) (Issue #306) */
+export const COOLDOWN_INTERVAL_MS = 5000;
 
 /** Maximum backoff interval in milliseconds (60 seconds) */
 export const MAX_BACKOFF_MS = 60000;
@@ -269,6 +275,17 @@ function incrementErrorCount(worktreeId: string): void {
 }
 
 /**
+ * Check if the given prompt has already been answered.
+ * Extracted from pollAutoYes() to reduce responsibility concentration (F005/SRP).
+ */
+function isDuplicatePrompt(
+  pollerState: AutoYesPollerState,
+  promptKey: string
+): boolean {
+  return pollerState.lastAnsweredPromptKey === promptKey;
+}
+
+/**
  * Internal polling function (setTimeout recursive)
  */
 async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<void> {
@@ -295,7 +312,7 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     // while Claude is actively processing (thinking/planning).
     //
     // Issue #191: Apply windowing to detectThinking() to prevent stale thinking
-    // summary lines (e.g., "· Simmering…") from blocking prompt detection.
+    // summary lines (e.g., "· Simmering...") from blocking prompt detection.
     // Window size matches detectPrompt()'s multiple_choice scan range (50 lines).
     //
     // Safety: Claude CLI does not emit prompts during thinking, so narrowing
@@ -319,7 +336,15 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     const promptDetection = detectPrompt(cleanOutput, promptOptions);
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
-      // No prompt detected, schedule next poll
+      // No prompt detected - reset lastAnsweredPromptKey (Issue #306)
+      pollerState.lastAnsweredPromptKey = null;
+      scheduleNextPoll(worktreeId, cliToolId);
+      return;
+    }
+
+    // Issue #306: Check for duplicate prompt before responding
+    const promptKey = generatePromptKey(promptDetection.promptData);
+    if (isDuplicatePrompt(pollerState, promptKey)) {
       scheduleNextPoll(worktreeId, cliToolId);
       return;
     }
@@ -353,8 +378,15 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     // 7. Reset error count on success
     resetErrorCount(worktreeId);
 
+    // Issue #306: Record answered prompt key and apply cooldown
+    pollerState.lastAnsweredPromptKey = promptKey;
+
     // Log success (without sensitive content)
     console.info(`[Auto-Yes Poller] Sent response for worktree: ${worktreeId}`);
+
+    // Issue #306: Apply cooldown interval after successful response (early return)
+    scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS);
+    return;
   } catch (error) {
     // Increment error count on failure
     incrementErrorCount(worktreeId);
@@ -364,20 +396,29 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     console.warn(`[Auto-Yes Poller] Error for worktree ${worktreeId}: ${errorMessage}`);
   }
 
-  // Schedule next poll
+  // Schedule next poll (catch block fallthrough or other paths)
   scheduleNextPoll(worktreeId, cliToolId);
 }
 
 /**
  * Schedule the next polling iteration
+ * @param overrideInterval - Optional interval in milliseconds (S2-F009: type definition).
+ *   When provided (e.g., COOLDOWN_INTERVAL_MS), overrides pollerState.currentInterval.
+ *   Type: number | undefined (optional parameter).
  */
-function scheduleNextPoll(worktreeId: string, cliToolId: CLIToolType): void {
+function scheduleNextPoll(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  overrideInterval?: number
+): void {
   const pollerState = autoYesPollerStates.get(worktreeId);
   if (!pollerState) return;
 
+  // S4-F003: Floor guard - polling interval must not be below POLLING_INTERVAL_MS
+  const interval = Math.max(overrideInterval ?? pollerState.currentInterval, POLLING_INTERVAL_MS);
   pollerState.timerId = setTimeout(() => {
     pollAutoYes(worktreeId, cliToolId);
-  }, pollerState.currentInterval);
+  }, interval);
 }
 
 /**
@@ -417,6 +458,7 @@ export function startAutoYesPolling(
     consecutiveErrors: 0,
     currentInterval: POLLING_INTERVAL_MS,
     lastServerResponseTimestamp: null,
+    lastAnsweredPromptKey: null,  // S2-F003: initialized to null
   };
   autoYesPollerStates.set(worktreeId, pollerState);
 

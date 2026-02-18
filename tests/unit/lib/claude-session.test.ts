@@ -58,6 +58,8 @@ import {
   stopClaudeSession,
   getClaudeSessionState,
   restartClaudeSession,
+  isSessionHealthy,
+  type HealthCheckResult,
   CLAUDE_INIT_TIMEOUT,
   CLAUDE_INIT_POLL_INTERVAL,
   CLAUDE_POST_PROMPT_DELAY,
@@ -1330,6 +1332,159 @@ describe('claude-session - Issue #265 improvements', () => {
 
       const result = await promise;
       expect(result).toBe(false);
+    });
+  });
+});
+
+// ============================================================
+// Issue #306: Session stability improvements
+// ============================================================
+describe('claude-session - Issue #306 improvements', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearCachedClaudePath();
+  });
+
+  // ----- Task 4.2: False positive prevention tests (Section 6.1) -----
+  describe('isSessionHealthy - false positive prevention', () => {
+    it('should treat "Context left until auto-compact: 7%" as healthy', async () => {
+      vi.mocked(capturePane).mockResolvedValue('Context left until auto-compact: 7%');
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+    });
+
+    it('should treat "Context left until auto-compact: 100%" as healthy', async () => {
+      vi.mocked(capturePane).mockResolvedValue('Context left until auto-compact: 100%');
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+    });
+
+    it('should still detect real zsh prompt ending with %', async () => {
+      // Short shell prompt (under 40 chars) ending with %
+      vi.mocked(capturePane).mockResolvedValue('user@host%');
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(false);
+      expect(result.reason).toContain('shell prompt ending detected');
+    });
+
+    it('should treat long lines ending with $ as healthy', async () => {
+      // 50 characters ending with $ - line length check should exclude
+      const longLine = 'a'.repeat(49) + '$';
+      vi.mocked(capturePane).mockResolvedValue(longLine);
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+    });
+
+    it('should treat long lines ending with # as healthy', async () => {
+      // 50 characters ending with # - line length check should exclude
+      const longLine = 'a'.repeat(49) + '#';
+      vi.mocked(capturePane).mockResolvedValue(longLine);
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+    });
+
+    it('should filter trailing empty lines before checking last line', async () => {
+      // Claude output followed by trailing empty lines
+      vi.mocked(capturePane).mockResolvedValue('Some Claude output\n\n\n');
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+    });
+
+    // F004: MAX_SHELL_PROMPT_LENGTH boundary value tests
+    it('should treat 39-char line ending with $ as unhealthy (below threshold)', async () => {
+      // 39 characters (below threshold): shell prompt detection -> unhealthy
+      const line = 'a'.repeat(38) + '$';
+      expect(line.length).toBe(39);
+      vi.mocked(capturePane).mockResolvedValue(line);
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(false);
+      expect(result.reason).toContain('shell prompt ending detected');
+    });
+
+    it('should treat 40-char line ending with $ as healthy (at threshold)', async () => {
+      // 40 characters (at threshold): line length check excludes -> healthy
+      const line = 'a'.repeat(39) + '$';
+      expect(line.length).toBe(40);
+      vi.mocked(capturePane).mockResolvedValue(line);
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+    });
+
+    it('should treat 41-char line ending with $ as healthy (above threshold)', async () => {
+      // 41 characters (above threshold): line length check excludes -> healthy
+      const line = 'a'.repeat(40) + '$';
+      expect(line.length).toBe(41);
+      vi.mocked(capturePane).mockResolvedValue(line);
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+    });
+
+    // F006: Line length check before SHELL_PROMPT_ENDINGS check
+    it('should apply line length check before SHELL_PROMPT_ENDINGS check', async () => {
+      // 50-char line ending with $ should be healthy due to line length early return
+      const longLine = 'a'.repeat(49) + '$';
+      expect(longLine.length).toBe(50);
+      vi.mocked(capturePane).mockResolvedValue(longLine);
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+      // No reason should be set for healthy results
+      expect(result.reason).toBeUndefined();
+    });
+  });
+
+  // ----- Task 4.2: Reason reporting tests (Section 6.2) -----
+  describe('isSessionHealthy - reason reporting', () => {
+    it('should include reason for error pattern detection', async () => {
+      vi.mocked(capturePane).mockResolvedValue(
+        'Claude Code cannot be launched inside another Claude Code session'
+      );
+
+      const result: HealthCheckResult = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(false);
+      expect(result.reason).toMatch(/^error pattern: /);
+    });
+
+    it('should include reason for shell prompt ending', async () => {
+      vi.mocked(capturePane).mockResolvedValue('user@host:~$');
+
+      const result: HealthCheckResult = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(false);
+      expect(result.reason).toMatch(/^shell prompt ending detected: /);
+    });
+
+    it('should include reason for empty output', async () => {
+      vi.mocked(capturePane).mockResolvedValue('');
+
+      const result: HealthCheckResult = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(false);
+      expect(result.reason).toBe('empty output');
+    });
+
+    // S3-F001: capturePane exception reason test
+    it('should include reason "capture error" when capturePane throws', async () => {
+      vi.mocked(capturePane).mockRejectedValue(new Error('tmux pane error'));
+
+      const result: HealthCheckResult = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(false);
+      expect(result.reason).toBe('capture error');
+    });
+
+    it('should not include reason for healthy sessions', async () => {
+      vi.mocked(capturePane).mockResolvedValue('Some Claude output\n> ');
+
+      const result: HealthCheckResult = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+      expect(result.reason).toBeUndefined();
     });
   });
 });
