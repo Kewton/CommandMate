@@ -1,0 +1,7 @@
+{
+  "issue_number": 302,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "review_result_path": "dev-reports/issue/302/multi-stage-design-review/stage1-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-302-mp4-upload-design-policy.md"
+}

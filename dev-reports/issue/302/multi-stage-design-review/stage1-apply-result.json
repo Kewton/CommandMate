@@ -1,0 +1,100 @@
+{
+  "stage": 1,
+  "issue_number": 302,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": [
+    "DR-001",
+    "DR-002",
+    "DR-003",
+    "DR-004",
+    "DR-006",
+    "DR-008",
+    "DR-009"
+  ],
+  "skipped_findings": [
+    {
+      "id": "DR-005",
+      "severity": "nice_to_have",
+      "reason": "Nice to Have - VideoViewerPropsのalt命名は現時点で対応不要"
+    },
+    {
+      "id": "DR-007",
+      "severity": "nice_to_have",
+      "reason": "Nice to Have - 現設計で問題なし確認済み"
+    },
+    {
+      "id": "DR-010",
+      "severity": "nice_to_have",
+      "reason": "Nice to Have - 性能受け入れ基準は実装時に判断"
+    },
+    {
+      "id": "DR-011",
+      "severity": "nice_to_have",
+      "reason": "Nice to Have - 配列設計は問題なし確認済み"
+    }
+  ],
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DR-001",
+        "item": "normalizeExtension()の重複定義リスク - image-extensions.tsからimportして共通化に確定",
+        "section_updated": "section 3-2",
+        "status": "reflected"
+      },
+      {
+        "id": "DR-009",
+        "item": "ERROR_CODE_TO_HTTP_STATUS マッピングの重複 - 既知の技術的負債セクションに記載",
+        "section_updated": "section 10-1（新規）",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR-002",
+        "item": "FileViewerのisImage/isVideo条件分岐がOCPに反する - 将来拡張方針を追記",
+        "section_updated": "section 3-7",
+        "status": "reflected"
+      },
+      {
+        "id": "DR-003",
+        "item": "ImageExtensionValidatorとVideoExtensionValidatorの重複インターフェース - 共通化検討を追記",
+        "section_updated": "section 3-2",
+        "status": "reflected"
+      },
+      {
+        "id": "DR-004",
+        "item": "GET APIの画像/動画処理ロジック重複 - 共通ヘルパー関数抽出検討を追記",
+        "section_updated": "section 3-5",
+        "status": "reflected"
+      },
+      {
+        "id": "DR-006",
+        "item": "page.tsxの型統一は独立した改善 - コミット分離推奨を追記",
+        "section_updated": "section 7",
+        "status": "reflected"
+      },
+      {
+        "id": "DR-008",
+        "item": "binary-extensions.tsへのVIDEO_EXTENSIONSのspread追加が未記載 - 変更ファイル一覧・実装順序に追加",
+        "section_updated": "section 2, section 9",
+        "status": "reflected"
+      }
+    ]
+  },
+  "updated_sections": [
+    "section 2（レイヤー構成 - binary-extensions.ts追加）",
+    "section 3-2（normalizeExtension共通化確定、共通インターフェース検討）",
+    "section 3-5（共通ヘルパー関数抽出検討）",
+    "section 3-7（OCP将来拡張方針）",
+    "section 7（page.tsx型統一のコミット分離推奨）",
+    "section 9（実装順序にbinary-extensions.ts追加、DR-006/DR-008タグ付与）",
+    "section 10（新規 - 既知の技術的負債）",
+    "section 11（新規 - レビュー履歴）",
+    "section 12（新規 - レビュー指摘事項サマリー）",
+    "section 13（新規 - 実装チェックリスト）"
+  ],
+  "design_doc_path": "dev-reports/design/issue-302-mp4-upload-design-policy.md",
+  "update_status": "success",
+  "timestamp": "2026-02-18T00:00:00Z"
+}

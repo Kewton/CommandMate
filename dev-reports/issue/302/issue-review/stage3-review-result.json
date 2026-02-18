@@ -1,0 +1,162 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 302,
+  "review_date": "2026-02-18",
+  "findings": [
+    {
+      "id": "FINDING-S3-001",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "bodySizeLimit は Server Actions 専用であり、Route Handler（upload API）には適用されない",
+      "description": "next.config.js の experimental.serverActions.bodySizeLimit は Next.js の Server Actions のリクエストボディサイズ制限であり、Route Handler（/api/worktrees/[id]/upload/[...path]/route.ts）には直接適用されない。Next.js 14 の Route Handler は formData() を使用しており、デフォルトのボディサイズ制限はフレームワーク側では 4MB 程度（Node.js のデフォルト）だが、Next.js の内部処理で制御されている。現在 6mb に設定されている bodySizeLimit を 16mb に変更しても、upload Route Handler に対しては効果がない可能性がある。ただし Next.js 14.2.x では serverActions.bodySizeLimit が Route Handler にも影響する挙動が報告されているため、バージョンによって異なる。実装時に 15MB のファイルで実際にアップロードテストを行い、制限に達する場合は Route Handler 固有の設定（route segment config）を検討する必要がある。",
+      "affected_files": [
+        "next.config.js",
+        "src/app/api/worktrees/[id]/upload/[...path]/route.ts"
+      ],
+      "suggestion": "Issue の実装タスクに「15MB mp4 ファイルの実アップロードテストを行い、bodySizeLimit の適用範囲を検証する」ことを追記する。もし Route Handler に適用されない場合は、upload API の route.ts に `export const config = { api: { bodyParser: { sizeLimit: '16mb' } } }` を追加するか、Next.js 14 の公式な Route Handler 用サイズ設定方法を適用する。"
+    },
+    {
+      "id": "FINDING-S3-002",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "title": "FileViewerPage（src/app/worktrees/[id]/files/[...path]/page.tsx）がローカル FileContent 型を定義しており、isVideo に未対応",
+      "description": "FileViewerPage コンポーネント（L16-21）は models.ts の FileContent 型を import せず、独自のローカル FileContent インターフェースを定義している。このローカル型には isImage も isVideo も含まれていない。mp4 ファイルを直接 URL でアクセスした場合（/worktrees/[id]/files/path/to/video.mp4）、API は isVideo: true を返すが、FileViewerPage はこのフラグを認識できず、Base64 data URI のテキストがそのまま code ブロックとして表示されてしまう。Issue の変更対象ファイルにこのページが含まれていない。",
+      "affected_files": [
+        "src/app/worktrees/[id]/files/[...path]/page.tsx",
+        "src/types/models.ts"
+      ],
+      "suggestion": "変更対象ファイルに src/app/worktrees/[id]/files/[...path]/page.tsx を追加する。ローカル FileContent 型を models.ts からの import に置き換えるか、isImage/isVideo フラグを追加して適切な分岐処理を実装する。または、このページが実運用で使われていない場合はその旨を記載する。"
+    },
+    {
+      "id": "FINDING-S3-003",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "テスト対象の網羅性が不十分 - 具体的なテストケースが実装タスクに未記載",
+      "description": "Issue の実装タスクには「ユニットテスト・結合テストを追加」とあるが、具体的にどのテストファイルにどのようなテストケースを追加するかが明記されていない。既存のテスト構造を分析すると、最低限以下のテストが必要: (1) tests/unit/config/uploadable-extensions.test.ts - mp4 拡張子の isUploadableExtension/validateMimeType/validateMagicBytes/getMaxFileSize テスト、(2) tests/unit/config/video-extensions.test.ts - 新規作成、isVideoExtension/getMimeTypeByVideoExtension テスト、(3) tests/integration/api/file-upload.test.ts - mp4 アップロードのバリデーションテスト、(4) tests/integration/api-file-operations.test.ts - GET API での動画ファイル取得テスト。FileViewer/VideoViewer のコンポーネントテストは既存パターンに合わせて追加すべき。",
+      "affected_files": [
+        "tests/unit/config/uploadable-extensions.test.ts",
+        "tests/unit/config/video-extensions.test.ts",
+        "tests/integration/api/file-upload.test.ts",
+        "tests/integration/api-file-operations.test.ts"
+      ],
+      "suggestion": "実装タスクのテスト項目を具体化し、以下を明記する: (1) uploadable-extensions.test.ts に mp4 バリデーションテスト追加、(2) video-extensions.test.ts を新規作成（image-extensions.test.ts パターン準拠）、(3) file-upload.test.ts に mp4 アップロードの結合テスト追加、(4) api-file-operations.test.ts に動画ファイル GET テスト追加。"
+    },
+    {
+      "id": "FINDING-S3-004",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "FileTreeView.tsx の FileIcon コンポーネントに mp4 用アイコン色が未定義",
+      "description": "FileTreeView.tsx の FileIcon コンポーネント（L236-274）は拡張子に基づいてアイコン色を切り替えているが、colorMap に mp4 が含まれていない。デフォルト色 'text-gray-400' が適用されるため表示自体は問題ないが、動画ファイルであることを視覚的に区別できない。FileTreeView 自体は変更不要としてリストアップされているが、FileIcon に動画拡張子用のアイコン色（例: 'text-purple-500'）を追加することで UX が向上する。ただし、FileIcon は汎用的なファイルアイコンであり mp4 固有のアイコンは必須ではないため should_fix とする。",
+      "affected_files": [
+        "src/components/worktree/FileTreeView.tsx"
+      ],
+      "suggestion": "影響範囲の「変更不要だが確認が必要」セクションの FileTreeView.tsx の記載を更新し、FileIcon の colorMap への mp4 エントリ追加を Nice to Have として記載する。"
+    },
+    {
+      "id": "FINDING-S3-005",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "CSP の media-src に blob: URI が不要であることの確認",
+      "description": "Issue では media-src に 'self' data: を追加する方針だが、HTML5 video 要素が blob: URI を使用するケースがある（例: MediaSource API、URL.createObjectURL()）。現在の設計では Base64 data URI 方式を使用するため blob: は不要だが、将来的にストリーミング方式に移行する場合は blob: が必要になる可能性がある。img-src には blob: が含まれている（'self' data: blob:）ため、一貫性の観点から media-src にも blob: を含めるかどうかを検討すべき。ただし、不要な権限を付与しない最小権限原則に従えば、現時点では data: のみで正しい。",
+      "affected_files": [
+        "next.config.js"
+      ],
+      "suggestion": "Issue の設計方針に「現時点では Base64 data URI 方式のため media-src に blob: は不要。将来ストリーミング方式に移行する場合は blob: の追加を検討する」旨のコメントを追記する。"
+    },
+    {
+      "id": "FINDING-S3-006",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "FileContent 型の isVideo フラグ追加による既存テスト・コンポーネントへの後方互換性",
+      "description": "FileContent インターフェース（src/types/models.ts L280-293）に isVideo?: boolean をオプショナルフィールドとして追加する方針は後方互換性を維持するため問題ない。しかし、FileContent 型を使用している箇所が複数存在する: (1) FileViewer.tsx（L49: useState<FileContent | null>）、(2) src/app/worktrees/[id]/files/[...path]/page.tsx（ローカル FileContent 型、FINDING-S3-002 で指摘済み）、(3) FileContentResponse 型（L299: { success: true } & FileContent）。オプショナルフィールド追加のため TypeScript のコンパイルエラーは発生しないが、FileViewer.tsx の canCopy ロジック修正（!content.isImage && !content.isVideo）は確実に行う必要がある。Issue にはこの修正が記載されているため、本件はリマインダーとしての指摘。",
+      "affected_files": [
+        "src/types/models.ts",
+        "src/components/worktree/FileViewer.tsx",
+        "src/app/worktrees/[id]/files/[...path]/page.tsx"
+      ],
+      "suggestion": "isVideo がオプショナルフィールドであることを Issue に明記し、既存コードの TypeScript コンパイルに影響がないことを確認する。FileViewer.tsx の canCopy 修正は実装タスクで対応済みであることを確認。"
+    },
+    {
+      "id": "FINDING-S3-007",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "upload API の file.size 検証タイミングと formData() のメモリ消費",
+      "description": "upload Route Handler（route.ts L150-161）では、formData() でファイル全体をメモリに読み込んだ後にサイズ検証を行っている（L149-151: file.arrayBuffer() -> Buffer.from() の後に L159: fileSize > maxSize チェック）。15MB のファイルでは formData() 呼び出し時点で約 15MB のメモリを消費し、さらに Buffer.from(arrayBuffer) で追加の 15MB が発生する。現状の 5MB 上限では問題にならなかったが、15MB に引き上げると同時アップロード時のメモリ使用量が増加する。サイズ検証を file.size チェック（L136: const fileSize = file.size）として formData() 直後・arrayBuffer() 前に行うことで、大きすぎるファイルを早期に拒否できる。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/upload/[...path]/route.ts"
+      ],
+      "suggestion": "upload API のサイズ検証順序を最適化し、file.size チェックを arrayBuffer()/Buffer.from() の前に移動することを検討する。具体的には L136 の fileSize 取得後、L149 の arrayBuffer() 呼び出し前にサイズ検証を行う。Issue の影響範囲に upload API の検証順序最適化を追記する。"
+    },
+    {
+      "id": "FINDING-S3-008",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "CLAUDE.md のモジュール一覧に video-extensions.ts と VideoViewer.tsx の追記が必要",
+      "description": "プロジェクトの CLAUDE.md には主要モジュールの一覧が詳細に記載されている。video-extensions.ts の新規作成と VideoViewer.tsx の追加後、CLAUDE.md のモジュール一覧にこれらを追記しないと、プロジェクトドキュメントとの不整合が発生する。",
+      "affected_files": [
+        "CLAUDE.md"
+      ],
+      "suggestion": "実装完了後、CLAUDE.md の主要機能モジュール一覧に video-extensions.ts と VideoViewer.tsx のエントリを追加する。これは実装タスクとしてではなく、実装完了時のドキュメント更新チェックリストとして記録する。"
+    },
+    {
+      "id": "FINDING-S3-009",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "モバイルレイアウトでの動画再生の動作確認",
+      "description": "WorktreeDetailRefactored.tsx はデスクトップとモバイルの両方で FileViewer コンポーネントを使用しており（デスクトップ: L1839-1844、モバイル: L2065-2070）、FileViewer は同一の実装で両方のレイアウトに対応している。モバイルコンポーネント（MobileHeader, MobileTabBar, MobilePromptSheet）自体にはファイル表示ロジックが含まれていないため、モバイル固有の変更は不要。ただし、VideoViewer の max-height 設定（ImageViewer は 500px）がモバイル画面で適切かどうかの確認が必要。FileViewer の max-h-[60vh] sm:max-h-[70vh] 制約内で動画プレーヤーが適切に表示されることを確認すべき。",
+      "affected_files": [
+        "src/components/worktree/VideoViewer.tsx",
+        "src/components/worktree/FileViewer.tsx"
+      ],
+      "suggestion": "受入条件または実装タスクに「モバイル画面（FileViewer の 60vh 制約内）で動画プレーヤーが適切に表示されること」の確認を追記する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 2,
+    "overall_assessment": "要改善"
+  },
+  "code_references": [
+    {
+      "file": "next.config.js",
+      "lines": "17-22",
+      "relevance": "experimental.serverActions.bodySizeLimit は Server Actions 専用。Route Handler への適用は保証されない"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+      "lines": "100-210",
+      "relevance": "upload Route Handler - formData() 使用、サイズ検証順序の最適化が必要"
+    },
+    {
+      "file": "src/app/worktrees/[id]/files/[...path]/page.tsx",
+      "lines": "16-21",
+      "relevance": "ローカル FileContent 型に isImage/isVideo が未定義"
+    },
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "236-274",
+      "relevance": "FileIcon の colorMap に mp4 が未定義"
+    },
+    {
+      "file": "src/types/models.ts",
+      "lines": "280-293",
+      "relevance": "FileContent 型への isVideo フラグ追加箇所"
+    },
+    {
+      "file": "tests/unit/config/uploadable-extensions.test.ts",
+      "relevance": "mp4 バリデーションテストの追加が必要"
+    },
+    {
+      "file": "tests/integration/api/file-upload.test.ts",
+      "relevance": "mp4 アップロードの結合テストの追加が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール一覧への video-extensions.ts/VideoViewer.tsx 追記が必要"
+    }
+  ]
+}

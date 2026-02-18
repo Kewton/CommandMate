@@ -1,0 +1,132 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 302,
+  "review_date": "2026-02-18",
+  "findings": [
+    {
+      "id": "FINDING-001",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "next.config.js の bodySizeLimit 更新が実装タスクに未記載",
+      "description": "現在の next.config.js では experimental.serverActions.bodySizeLimit が '6mb' に設定されている（コメントに '5MB + overhead' と記載）。15MB の mp4 ファイルをアップロードするには、この値を '16mb' 程度に引き上げる必要がある。しかし Issue の実装タスクおよび影響範囲の変更対象ファイルに next.config.js が含まれていない。この設定変更がなければ、15MB の mp4 アップロードは Next.js のリクエストボディサイズ制限により失敗する。",
+      "suggestion": "実装タスクに「next.config.js の bodySizeLimit を 16mb（15MB + overhead）に更新する」を追加し、影響範囲の変更対象ファイルにも next.config.js を含める。"
+    },
+    {
+      "id": "FINDING-002",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "Content-Security-Policy に media-src ディレクティブが未設定",
+      "description": "next.config.js の CSP ヘッダーには img-src に 'self' data: blob: が設定されているが、media-src ディレクティブが存在しない。CSP の仕様上、media-src が未指定の場合は default-src（現在 'self'）にフォールバックする。VideoViewer で data: URI 方式を使用する場合、media-src に 'self' data: を追加しないと、ブラウザが video 要素の data: URI ソースをブロックする可能性がある。Issue にこの対応が記載されていない。",
+      "suggestion": "実装タスクに「next.config.js の CSP ヘッダーに media-src 'self' data: を追加する」を追加する。影響範囲にも next.config.js を含める。"
+    },
+    {
+      "id": "FINDING-003",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "FileViewer.tsx の canCopy ロジックに isVideo 除外が受入条件に含まれていない",
+      "description": "現在の FileViewer.tsx の canCopy は `Boolean(content?.content && !content.isImage)` で判定している。isVideo フラグ追加後、動画ファイルに対してもコピーボタンが表示されてしまう（Base64 data URI がコピーされても無意味）。これは受入条件「既存のアップロード機能（画像、テキスト等）に影響がないこと」に含まれるかもしれないが、明示的に canCopy の修正（`!content.isImage && !content.isVideo`）を実装タスクまたは受入条件に記載すべき。",
+      "suggestion": "実装タスクの「FileViewer に動画表示分岐を追加」の項目に、canCopy ロジックの修正（isVideo 除外）を明記する。または受入条件に「動画ファイルにコピーボタンが表示されないこと」を追加する。"
+    },
+    {
+      "id": "FINDING-004",
+      "severity": "should_fix",
+      "category": "correctness",
+      "title": "MP4 magic bytes 検証の仕様詳細が不足",
+      "description": "Issue には「magic bytes検証」と記載されているが、MP4 ファイルの magic bytes 仕様が明記されていない。仮説検証結果で「offset 4 で ftyp 文字列を検証すべき」と記載されているが、これが Issue 本文に反映されていない。MP4 は先頭 4 バイトがボックスサイズ、offset 4-7 が 'ftyp' (0x66, 0x74, 0x79, 0x70) という ISOBMFF 構造を持つ。既存の uploadable-extensions.ts の MagicBytesDefinition は offset フィールドをサポートしているため実装は可能だが、仕様が曖昧なまま実装すると誤った検証ロジックになる恐れがある。",
+      "suggestion": "Issue の実装タスクにおける mp4 バリデータ追加の箇所に、magic bytes の具体的仕様を追記する: `magicBytes: [{ bytes: [0x66, 0x74, 0x79, 0x70], offset: 4 }]` (offset 4 で 'ftyp' シグネチャを検証)。"
+    },
+    {
+      "id": "FINDING-005",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "video-extensions.ts 新規作成の必要性について設計根拠が不明確",
+      "description": "Issue では「新規作成ファイル（候補）」として src/config/video-extensions.ts を挙げつつ、実装タスクでは src/config/uploadable-extensions.ts への直接追加を記載している。既存の image-extensions.ts は、uploadable-extensions.ts とは別に独立した画像判定ユーティリティ（isImageExtension, validateImageMagicBytes, getMimeTypeByExtension 等）を提供しており、GET API ルート（route.ts）で isImageExtension() を使った画像判定分岐に利用されている。動画判定でも同様のパターン（isVideoExtension, getMimeTypeByVideoExtension 等）が必要であり、これを uploadable-extensions.ts に直接追加するとファイルの責務が拡大する。",
+      "suggestion": "image-extensions.ts との整合性を考慮し、video-extensions.ts を新規作成する方針を明確にする。最低限 isVideoExtension()、VIDEO_EXTENSIONS 定数、getMimeTypeByVideoExtension() を含める。これにより route.ts の GET ハンドラーで isVideoExtension(ext) による分岐を image パターンと同じ構造で実装できる。"
+    },
+    {
+      "id": "FINDING-006",
+      "severity": "should_fix",
+      "category": "performance",
+      "title": "15MB Base64 data URI 方式の性能・UX 影響に関する注意事項が未記載",
+      "description": "15MB のバイナリファイルを Base64 エンコードすると約 20MB の文字列になる。これを JSON レスポンスに含めて返却すると、(1) サーバー側のメモリ消費が増加し、(2) クライアント側でも 20MB の JSON をパースする必要があり、(3) ブラウザの DOM に 20MB の data URI が埋め込まれる。画像の場合は最大 5MB（Base64 で約 6.7MB）なので問題にならなかったが、15MB は約 3 倍のサイズになる。デモ動画が主な用途であり頻度は低いと想定されるが、UX 上の注意事項（読み込み時間、低スペック端末での動作等）を設計方針に記載しておくべき。",
+      "suggestion": "Issue の設計方針セクションに「15MB Base64 エンコード時の注意事項」を追記する。(1) Base64 変換で約 1.33 倍のデータ量になること、(2) レスポンスの読み込みに数秒かかる可能性があること、(3) VideoViewer にローディングインジケーターを実装すること、(4) 将来的に頻繁な利用が想定される場合はストリーミング方式への移行を検討すること。"
+    },
+    {
+      "id": "FINDING-007",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "binary-extensions.ts への影響確認が不十分",
+      "description": "Issue では「mp4 は既に登録済み（変更不要）」と記載しているが、binary-extensions.ts は IMAGE_EXTENSIONS を import して BINARY_EXTENSIONS にスプレッドしている。もし video-extensions.ts を新規作成し VIDEO_EXTENSIONS を定義する場合、binary-extensions.ts も VIDEO_EXTENSIONS を import してスプレッドする形に更新すべきか検討が必要。現状 mp4 は直接リテラルで記載されているため変更不要だが、将来的に webm 等を追加する場合の一貫性を考慮すると、image-extensions.ts と同じパターンで統合する方が望ましい。",
+      "suggestion": "影響範囲の「変更不要だが確認が必要」セクションに、binary-extensions.ts について video-extensions.ts 新規作成時の統合パターン（VIDEO_EXTENSIONS のスプレッド）を検討事項として追記する。"
+    },
+    {
+      "id": "FINDING-008",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "i18n 対応に関する記載がない",
+      "description": "VideoViewer コンポーネントを新規作成する際、エラーメッセージ（「動画の読み込みに失敗しました」等）やアクセシビリティラベルの i18n 対応が必要。既存の ImageViewer はハードコードされた英語メッセージを使用しているため同じパターンで問題ないが、プロジェクトは next-intl を使用した i18n 対応を行っているため、新規コンポーネントでの対応方針を明記しておくと実装時の判断が容易になる。",
+      "suggestion": "実装タスクの VideoViewer 新規作成の箇所に「ImageViewer と同等の i18n 対応方針（現時点では英語ハードコード、将来的に next-intl 対応検討）」を付記する。"
+    },
+    {
+      "id": "FINDING-009",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "アクセシビリティ要件が明示されていない",
+      "description": "VideoViewer で HTML5 <video> タグを使用する際、アクセシビリティ面の考慮（controls 属性の有無、aria-label、キーボード操作対応等）が Issue に記載されていない。受入条件に「再生/停止コントロール付き」とあるが、controls 属性の使用やカスタムコントロールの判断が明確でない。",
+      "suggestion": "設計方針に「HTML5 <video> タグの controls 属性を使用し、ブラウザネイティブの再生コントロールを利用する」旨を明記する。カスタムコントロールは不要であることを明確にする。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 2,
+    "overall_assessment": "要改善"
+  },
+  "code_references": [
+    {
+      "file": "next.config.js",
+      "line": 20,
+      "relevance": "bodySizeLimit が '6mb' に設定されており、15MB アップロードに対して不足"
+    },
+    {
+      "file": "next.config.js",
+      "lines": "58-66",
+      "relevance": "CSP ヘッダーに media-src ディレクティブが未設定"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "line": 56,
+      "relevance": "canCopy ロジックが !content.isImage のみで isVideo を考慮していない"
+    },
+    {
+      "file": "src/config/uploadable-extensions.ts",
+      "lines": "14-19",
+      "relevance": "MagicBytesDefinition の offset フィールドが MP4 検証に利用可能"
+    },
+    {
+      "file": "src/config/image-extensions.ts",
+      "relevance": "video-extensions.ts の設計パターン参考元"
+    },
+    {
+      "file": "src/config/binary-extensions.ts",
+      "line": 55,
+      "relevance": "mp4 が直接リテラルとして登録済み"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "146-191",
+      "relevance": "画像ファイル判定・Base64変換ロジック（動画でも同様のパターンが必要）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+      "relevance": "アップロード API（mp4 バリデータ追加後に自動対応）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール一覧の参照"
+    }
+  ]
+}

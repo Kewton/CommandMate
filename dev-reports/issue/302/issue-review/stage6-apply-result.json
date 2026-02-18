@@ -1,0 +1,67 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 302,
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "FINDING-S5-001",
+        "status": "applied",
+        "change_summary": "page.tsxのローカルFileContent型をmodels.tsのimportに切り替える方針を明確化。設計方針に「page.tsxの型統一方針」セクションを追加、実装タスクを「ローカル型にisVideo追加」から「models.tsのFileContentインポートに切り替え」に変更、変更対象ファイルのpage.tsx説明を更新"
+      },
+      {
+        "id": "FINDING-S5-002",
+        "status": "applied",
+        "change_summary": "page.tsxでの動画・画像ファイル両方の表示分岐対応を明確化。実装タスクにVideoViewer/ImageViewer両方の統合を明記、受入条件に「画像ファイルの直接URLアクセスで正しく表示されること（ImageViewer統合）」を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "FINDING-S5-003",
+        "status": "applied",
+        "change_summary": "WorktreeDetailRefactored.tsxの関連コンポーネント説明に、input accept属性でモバイルブラウザ問題が見つかった場合のMIMEタイプ併記検討を実装時テスト確認事項として追記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "changes_applied": [
+    {
+      "section": "Note（冒頭）",
+      "change": "レビュー反映ステージをStage 1, Stage 3からStage 1, Stage 3, Stage 5に更新"
+    },
+    {
+      "section": "設計方針",
+      "change": "「page.tsxの型統一方針」セクションを新規追加。models.tsのFileContentインポートへの切り替え方針とその利点を明記"
+    },
+    {
+      "section": "実装タスク（page.tsx項目）",
+      "change": "「ローカルFileContent型にisVideoフラグを追加し、動画ファイルの表示分岐を実装する」を「ローカルFileContent型をsrc/types/models.tsのFileContent型のimportに切り替え、動画・画像ファイルの両方に対してVideoViewer/ImageViewerを使った表示分岐を実装する」に変更"
+    },
+    {
+      "section": "受入条件",
+      "change": "画像ファイルの直接URLアクセスでの表示確認条件を追加（ImageViewer統合対応）"
+    },
+    {
+      "section": "変更対象ファイル（page.tsx）",
+      "change": "変更内容をmodels.tsのimport切り替え・動画/画像両方のViewer統合に更新"
+    },
+    {
+      "section": "関連コンポーネント（WorktreeDetailRefactored.tsx）",
+      "change": "accept属性のMIMEタイプ併記検討を実装時テスト確認事項として追記"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "Stage 5レビューセクションを追加（FINDING-S5-001, S5-002, S5-003の対応内容を記録）"
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/302"
+  }
+}

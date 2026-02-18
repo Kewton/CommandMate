@@ -1,0 +1,23 @@
+{
+  "issue_number": 302,
+  "refactor_targets": [
+    "src/config/video-extensions.ts",
+    "src/components/worktree/VideoViewer.tsx",
+    "src/config/uploadable-extensions.ts",
+    "src/types/models.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/app/worktrees/[id]/files/[...path]/page.tsx",
+    "src/components/worktree/FileViewer.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "コードの一貫性チェック（image-extensions.tsとvideo-extensions.tsのパターン統一）",
+    "不要なコードや重複の除去",
+    "適切なJSDocコメントの追加（既存パターンに準拠）",
+    "型安全性の確認（any型使用がないか）",
+    "セキュリティ観点のレビュー（magic bytes検証、XSS防止）",
+    "エラーハンドリングの一貫性確認"
+  ]
+}

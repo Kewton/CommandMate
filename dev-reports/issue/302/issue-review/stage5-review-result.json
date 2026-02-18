@@ -1,0 +1,152 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 302,
+  "review_date": "2026-02-18",
+  "previous_findings_addressed": true,
+  "previous_findings_verification": {
+    "stage1_findings": {
+      "total": 9,
+      "all_addressed": true,
+      "details": [
+        { "id": "FINDING-001", "status": "verified", "note": "next.config.jsのbodySizeLimit更新がIssueの実装タスク・影響範囲・設計方針に反映されている" },
+        { "id": "FINDING-002", "status": "verified", "note": "CSP media-src 'self' data:の追加がIssueの実装タスク・影響範囲に反映されている" },
+        { "id": "FINDING-003", "status": "verified", "note": "canCopyロジック修正（!content.isImage && !content.isVideo）が実装タスクと受入条件に明記されている" },
+        { "id": "FINDING-004", "status": "verified", "note": "MP4 magic bytes仕様（offset 4でftyp [0x66, 0x74, 0x79, 0x70]）が設計方針と実装タスクに詳細記載されている" },
+        { "id": "FINDING-005", "status": "verified", "note": "video-extensions.tsの新規作成がimage-extensions.tsパターン準拠として確定・明記されている" },
+        { "id": "FINDING-006", "status": "verified", "note": "15MB Base64の性能注意事項（約20MBデータ量、ローディングインジケーター、将来のストリーミング検討）が設計方針に追記されている" },
+        { "id": "FINDING-007", "status": "verified", "note": "binary-extensions.tsのVIDEO_EXTENSIONSスプレッド統合パターン検討が影響範囲に記載されている" },
+        { "id": "FINDING-008", "status": "skipped_acceptable", "note": "Nice to Have - i18n対応方針の明記。ImageViewerと同等パターンで実装時に判断される" },
+        { "id": "FINDING-009", "status": "skipped_acceptable", "note": "Nice to Have - controls属性の使用が設計方針に明記済み" }
+      ]
+    },
+    "stage3_findings": {
+      "total": 9,
+      "all_addressed": true,
+      "details": [
+        { "id": "FINDING-S3-001", "status": "verified", "note": "bodySizeLimitのRoute Handler適用範囲の注意事項が設計方針に追記。実装タスクに15MB実アップロードテストを追加済み" },
+        { "id": "FINDING-S3-002", "status": "verified", "note": "page.tsxが変更対象ファイルに追加。ローカルFileContent型のisVideo対応が実装タスクに追加済み" },
+        { "id": "FINDING-S3-003", "status": "verified", "note": "テスト項目が4ファイルの具体的なテストケースに分解済み" },
+        { "id": "FINDING-S3-004", "status": "verified", "note": "FileTreeView.tsxのFileIcon colorMapがNice to Haveとして影響確認セクションに記載済み" },
+        { "id": "FINDING-S3-005", "status": "verified", "note": "CSP media-srcにblob:が不要な根拠と将来方針が設計方針に追記済み" },
+        { "id": "FINDING-S3-006", "status": "verified", "note": "isVideoフラグのオプショナル性と後方互換性維持が実装タスクと変更対象ファイルに明記済み" },
+        { "id": "FINDING-S3-007", "status": "verified", "note": "upload APIのサイズ検証順序最適化が設計方針・実装タスク・主要な変更点・変更対象ファイルに反映済み" },
+        { "id": "FINDING-S3-008", "status": "skipped_acceptable", "note": "Nice to Have - CLAUDE.md更新は実装完了後に対応" },
+        { "id": "FINDING-S3-009", "status": "skipped_acceptable", "note": "Nice to Have - モバイルレイアウト確認はテスト時に実施" }
+      ]
+    }
+  },
+  "findings": [
+    {
+      "id": "FINDING-S5-001",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "page.tsxのローカルFileContent型をmodels.tsのimportに統一する方針が実装タスクに未記載",
+      "description": "実装タスクには「ローカルFileContent型にisVideoフラグを追加」と記載されているが、page.tsx（L16-21）のローカルFileContent型にはisImageも含まれていないため、isVideoだけを追加してもisImageの画像表示分岐が欠落したままになる。FileViewer.tsx（L23）は既にmodels.tsのFileContentをimportしているが、page.tsxは独自定義を使用している。実装タスクでは「ローカル型がmodels.tsのFileContentと乖離しているため」と注記があるものの、対応方針が2つ考えられる: (A) ローカル型にisImage/isVideoの両方を追加する、(B) models.tsのFileContentをimportに切り替える。方針(B)の方がDRY原則に沿い今後の型追加にも対応できるが、page.tsxではextensionやworktreePathのみを使用しているため(A)でも問題ない。どちらの方針で対応するかを明記すべき。",
+      "suggestion": "実装タスクの「page.tsxのローカルFileContent型にisVideoフラグを追加」の項目に、対応方針を明記する。推奨: 「ローカルFileContent型をsrc/types/models.tsのFileContentインポートに切り替え、型の乖離を解消する」。これにより今後新しいフラグが追加された場合も自動的に追従される。"
+    },
+    {
+      "id": "FINDING-S5-002",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "page.tsxでの画像・動画ファイル表示のUI実装方針が不明確",
+      "description": "page.tsx（FileViewerPage）は現在テキストファイルとMarkdownファイルの表示のみに対応しており、画像ファイル（isImage）の表示分岐も実装されていない。Issue実装タスクには「動画ファイルの表示分岐を実装する」と記載されているが、page.tsxにはImageViewerのimportもVideoViewerのimportも存在しない。受入条件に「直接URLアクセスで動画が正しく再生されること」があるため、page.tsxにImageViewer/VideoViewerの統合が必要になるが、現在の画像未対応状態を考慮すると、動画対応と同時に画像表示対応も行うかどうかの判断が必要。動画のみ対応して画像を放置すると不整合が生じる。",
+      "suggestion": "実装タスクのpage.tsx対応項目を拡充し、「page.tsxにVideoViewerの表示分岐を追加する。同時に、現在未対応のImageViewer表示分岐も追加する（画像ファイルの直接URLアクセス対応）」とする。または、画像の直接URLアクセスが既知の制約として許容されている場合は、その旨をIssueに注記する。"
+    },
+    {
+      "id": "FINDING-S5-003",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "WorktreeDetailRefactored.tsxのinput accept属性にmp4のMIMEタイプも追加する検討",
+      "description": "WorktreeDetailRefactored.tsx（L1869, L2095）でファイルアップロードのinput要素のaccept属性にUPLOADABLE_EXTENSIONS.join(',')を使用している。UPLOADABLE_EXTENSIONS配列にmp4拡張子が追加されると、accept属性に'.mp4'が含まれるようになる。ほとんどのブラウザではこれで動作するが、一部のモバイルブラウザではMIMEタイプ（'video/mp4'）も併記した方がファイル選択ダイアログでの動画ファイル表示が確実になる場合がある。ただし、現在の画像拡張子も拡張子のみで指定されており動作に問題はないため、優先度は低い。",
+      "suggestion": "現状の拡張子のみのaccept属性で問題ないが、モバイルでのファイル選択に問題が見つかった場合は、accept属性にMIMEタイプも追加する（例: UPLOADABLE_EXTENSIONS + MIMEタイプの配列を結合）。これは実装時のテストで確認する事項として記録する。"
+    }
+  ],
+  "consistency_check": {
+    "issue_sections_consistent": true,
+    "details": [
+      "主要な変更点 <-> 実装タスク: 全項目が対応している",
+      "実装タスク <-> 変更対象ファイル: 全ファイルが対応している",
+      "実装タスク <-> 受入条件: 各タスクの成果が受入条件でカバーされている",
+      "変更対象ファイル <-> 新規作成ファイル: 重複なし、明確に分離されている",
+      "設計方針 <-> 実装タスク: 設計方針の決定事項が実装タスクに反映されている",
+      "影響範囲 <-> 関連コンポーネント: 変更不要の根拠が明記されている"
+    ]
+  },
+  "implementation_feasibility": {
+    "assessment": "実行可能",
+    "details": [
+      "既存のimage-extensions.tsパターンが明確で、video-extensions.tsの実装テンプレートとして十分",
+      "uploadable-extensions.tsのMagicBytesDefinitionインターフェースがoffsetフィールドをサポート済みで、MP4のoffset 4検証に対応可能",
+      "FileViewer.tsxのisImage分岐パターンが存在し、isVideo分岐を同じ構造で追加可能",
+      "ImageViewerコンポーネントのパターンがVideoViewerの実装テンプレートとして利用可能",
+      "upload APIのサイズ検証順序変更は、既存のfile.size参照（L136）とarrayBuffer()呼び出し（L150）の順序入れ替えで対応可能",
+      "bodySizeLimitのRoute Handler適用検証は実装テスト時に確認する方針が明記されている"
+    ]
+  },
+  "acceptance_criteria_coverage": {
+    "assessment": "十分",
+    "details": [
+      "機能要件: アップロード、ファイルツリー表示、ブラウザ再生、サイズ制限、magic bytes検証がカバー",
+      "UI要件: コピーボタン非表示、ローディングインジケーター、直接URLアクセスがカバー",
+      "互換性: 既存機能への影響なし、全既存テストパスがカバー",
+      "セキュリティ: magic bytes検証、ファイルサイズ制限がカバー"
+    ]
+  },
+  "test_plan_assessment": {
+    "assessment": "十分",
+    "details": [
+      "ユニットテスト: uploadable-extensions.test.ts（mp4追加）、video-extensions.test.ts（新規）が具体的に記載",
+      "結合テスト: file-upload.test.ts（アップロード）、api-file-operations.test.ts（GET取得）が具体的に記載",
+      "テストパターン: image-extensions.test.tsが参考パターンとして存在し、video-extensions.test.tsの実装が容易"
+    ]
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 1,
+    "overall_assessment": "良好"
+  },
+  "code_references": [
+    {
+      "file": "src/app/worktrees/[id]/files/[...path]/page.tsx",
+      "lines": "16-21",
+      "relevance": "ローカルFileContent型がmodels.tsと乖離しており、isImage/isVideoの両方が未定義"
+    },
+    {
+      "file": "src/app/worktrees/[id]/files/[...path]/page.tsx",
+      "lines": "131-200",
+      "relevance": "テキスト/Markdownのみの表示分岐。ImageViewer/VideoViewerの統合が必要"
+    },
+    {
+      "file": "src/types/models.ts",
+      "lines": "280-293",
+      "relevance": "FileContent型のisImage/mimeTypeの既存定義。isVideoを追加する箇所"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "lines": "23",
+      "relevance": "models.tsからFileContentをimportしている（page.tsxとの対比）"
+    },
+    {
+      "file": "src/components/worktree/ImageViewer.tsx",
+      "relevance": "VideoViewerの実装パターン参考元"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1869, 2095",
+      "relevance": "input accept属性でUPLOADABLE_EXTENSIONS.join(',')を使用"
+    },
+    {
+      "file": "src/config/uploadable-extensions.ts",
+      "lines": "14-19",
+      "relevance": "MagicBytesDefinitionのoffsetフィールドがMP4検証に利用可能"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール一覧の参照"
+    }
+  ]
+}

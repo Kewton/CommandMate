@@ -1,0 +1,102 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 302,
+  "review_date": "2026-02-18",
+  "findings": [
+    {
+      "id": "DC-001",
+      "severity": "must_fix",
+      "category": "type_consistency",
+      "title": "FileContent型のextensionフィールド形式不整合: 設計書はドット付きだが実際はドットなし",
+      "description": "設計方針書 section 3-4 に記載されたFileContent型定義では `extension: string` のコメントが省略されているが、section 6 のデータモデル設計では `extension: string  // 拡張子（ドットなし）` と「ドットなし」と正しく記載されている。一方、設計書 section 3-5 の GET API 動画分岐のコードでは `isVideoExtension(ext)` を `extname()` の結果（ドット付き: '.mp4'）で呼び出す設計になっている。これ自体は正しい。しかし、GET APIのレスポンスで返される `extension` フィールドは実コード（route.ts L142: `const extension = relativePath.split('.').pop() || ''`）においてドットなしで返している。設計書 section 3-7 の FileViewer 動画分岐では `content.isVideo` フラグで判定しているため直接の問題にはならないが、video-extensions.ts の `isVideoExtension()` がどちらの形式を受け取るかの明示が設計書に欠けている。image-extensions.ts の `isImageExtension()` は内部で `normalizeExtension()` を通すため両方に対応しているが、これが設計書に明記されていないため実装時の混乱リスクがある。",
+      "suggestion": "設計方針書 section 3-2 の `isVideoExtension()` の説明に「ドット付き・ドットなし両方を受け付ける（normalizeExtension()経由）」ことを明記する。また、GET APIレスポンスの extension フィールドがドットなしであることを section 3-5 に注記する。"
+    },
+    {
+      "id": "DC-002",
+      "severity": "must_fix",
+      "category": "api_consistency",
+      "title": "upload APIのサイズ検証順序: 設計書の最適化方針と実コードの検証手順の不整合",
+      "description": "設計方針書 section 5-2 では「サイズ検証をメモリ消費前に行う最適化」を提案し、file.arrayBuffer() の前にサイズ検証を行う方針を示している。しかし実コード（upload/route.ts）では file.size は L136 で取得済みであり、L150-151 で arrayBuffer/Buffer.from を行った後、L159-161 でサイズ検証を行っている。設計書の 'After' コードサンプルでは `const maxSize = getMaxFileSize(ext)` → `if (fileSize > maxSize)` → `const arrayBuffer = await file.arrayBuffer()` の順序だが、実際の upload API では L136 の `file.size` は FormData パース時点で既に利用可能であるため、サイズ検証を L139（拡張子検証）の直後、L150（arrayBuffer取得）の前に移動するのが設計書の意図と合致する。現在の実コードではサイズ検証が magic bytes 検証（L154）の後にあり、設計方針書と実コードの検証順序が異なる。",
+      "suggestion": "実装時に検証順序を以下の通り統一する: (1) 拡張子検証、(2) MIME検証、(3) サイズ検証（file.size ベース、arrayBuffer取得前）、(4) arrayBuffer取得、(5) magic bytes検証、(6) ファイル名検証。設計方針書の section 5-2 にこの完全な検証順序を明記する。"
+    },
+    {
+      "id": "DC-003",
+      "severity": "must_fix",
+      "category": "code_consistency",
+      "title": "CSPにmedia-srcが未設定: 動画のBase64 data URI再生がブロックされる可能性",
+      "description": "設計方針書 section 4-3 では CSP に `media-src 'self' data:` を追加すると記載している。実際の next.config.js（L58-66）の CSP には `img-src 'self' data: blob:` は存在するが `media-src` ディレクティブは設定されていない。CSPにおいて `media-src` が未設定の場合、`default-src 'self'` にフォールバックするため、`data:` スキームの動画ソース（Base64 data URI）は `default-src 'self'` によりブロックされる。これは設計書の section 4-3 の記載と整合しており、実装時に必ず `media-src 'self' data:` を追加する必要がある。設計書には現行の CSP 設定状況の記載がなく、具体的にどの行の後に追加するかが不明確である。",
+      "suggestion": "設計書 section 4-3 に現行 CSP の状態（media-src 未設定、default-src 'self' へのフォールバック）を明記し、next.config.js の CSP 配列に `\"media-src 'self' data:\"` を追加する実装指示を具体化する。"
+    },
+    {
+      "id": "DC-004",
+      "severity": "should_fix",
+      "category": "pattern_consistency",
+      "title": "VideoExtensionValidatorのmagicBytesフィールド形式がuploadable-extensions.tsのMagicBytesDefinitionと不整合",
+      "description": "設計方針書 section 3-2 の VideoExtensionValidator では `magicBytes?: number[]` と `magicBytesOffset?: number` を別フィールドとして定義している（image-extensions.ts の ImageExtensionValidator と同一パターン）。一方、uploadable-extensions.ts の MagicBytesDefinition は `{ bytes: number[], offset?: number }` というオブジェクト形式で、かつ配列（MagicBytesDefinition[]）を受け付ける。設計方針書 section 3-3 の uploadable-extensions.ts への mp4 追加では MagicBytesDefinition 形式 `[{ bytes: [0x66, 0x74, 0x79, 0x70], offset: 4 }]` を正しく使用しているが、同じ mp4 の magic bytes が video-extensions.ts と uploadable-extensions.ts で異なる形式で定義される。DR-003 で将来的な共通インターフェース化に言及しているが、magic bytes 定義の形式差異（フラットフィールド vs オブジェクト配列）が具体的に指摘されていない。",
+      "suggestion": "設計方針書 section 3-2 の DR-003 反映注記に、magicBytes 定義形式の差異（ImageExtensionValidator: フラットフィールド / UploadableExtensionValidator: MagicBytesDefinition 配列）を明記し、将来の共通化時にどちらの形式に統一するかの方針を追加する。現時点では既存パターンとの整合性を優先し、video-extensions.ts は ImageExtensionValidator のフラット形式を採用する設計で問題ない。"
+    },
+    {
+      "id": "DC-005",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "binary-extensions.tsのVIDEO_EXTENSIONS spread追加で既存のハードコード .mp4 との重複が発生する",
+      "description": "設計方針書 section 2 のレイヤー構成で [DR-008] として binary-extensions.ts に `VIDEO_EXTENSIONS` の spread 追加を記載している。しかし実際の binary-extensions.ts（L55）には `.mp4` が既にハードコードで存在する。同ファイルの L54-60 のメディアファイルセクションには `.mp4`, `.avi`, `.mov`, `.mkv`, `.wav`, `.flac`, `.ogg` 等が個別に記載されている。設計書 section 13 のチェックリストでは「既存のハードコード .mp4 エントリを置き換える」と記載されているが、VIDEO_EXTENSIONS は `.mp4` のみの配列であるため、spread 後も `.avi`, `.mov` 等は個別記載が残る。この結果、メディアセクション内で IMAGE_EXTENSIONS の spread パターンと VIDEO_EXTENSIONS の spread パターンが混在し、残りの個別エントリ（.avi, .mov 等）との不整合が生じる。",
+      "suggestion": "以下の2つの選択肢を設計書に明記する: (A) VIDEO_EXTENSIONS に現時点では .mp4 のみを含め、binary-extensions.ts のメディアセクションから .mp4 のみ削除して `...VIDEO_EXTENSIONS` で置き換える。他の動画拡張子（.avi, .mov 等）はハードコードのまま残す。(B) binary-extensions.ts の変更は行わず、.mp4 は既に存在するため追加不要とする。VIDEO_EXTENSIONS の spread は将来複数の動画拡張子を管理する時点で実施する。コスト対効果の観点から (B) を推奨する。"
+    },
+    {
+      "id": "DC-006",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "page.tsx（ファイルビューアページ）の参照パスが設計書と実コードで異なる",
+      "description": "設計方針書 section 3-8 では page.tsx を `src/app/worktrees/.../page.tsx` と記載し、ローカル FileContent 型を models.ts からの import に統一する設計を示している。実際のファイルは `src/app/worktrees/[id]/files/[...path]/page.tsx` に存在する。このページではローカル FileContent 型（L16-21）が定義されており、`isImage` や `isVideo`, `mimeType` フィールドが含まれていない。設計書の指摘通り型統一が必要だが、このページは ImageViewer/VideoViewer コンポーネントを import しておらず、画像/動画ファイルへの直接 URL アクセス時にはテキストとしてレンダリングされる（Base64文字列がコードブロックに表示される）。設計書では「ImageViewer/VideoViewer 統合」と記載しているが、具体的な実装方法が不足している。",
+      "suggestion": "設計方針書 section 3-8 にファイルパスを正確に `src/app/worktrees/[id]/files/[...path]/page.tsx` と記載する。また、このページでの画像/動画表示対応の具体的な実装方針を追記する: (1) models.ts から FileContent を import、(2) isImage/isVideo フラグに基づく条件分岐を追加、(3) ImageViewer/VideoViewer コンポーネントの import と表示ロジックを追加。"
+    },
+    {
+      "id": "DC-007",
+      "severity": "should_fix",
+      "category": "api_consistency",
+      "title": "ERROR_CODE_TO_HTTP_STATUS の重複: 設計書はスコープ外としているがファイル間で既に差異がある",
+      "description": "設計方針書 section 10-1 で ERROR_CODE_TO_HTTP_STATUS の重複を技術的負債として認識し、Issue #302 のスコープ外としている。しかし、実際のコードを比較すると、files/route.ts（L46-71）には MOVE_SAME_PATH, MOVE_INTO_SELF, NOT_EDITABLE, INVALID_CONTENT, DIRECTORY_NOT_EMPTY, DELETE_LIMIT_EXCEEDED, INVALID_NAME 等のエラーコードが存在するが、upload/route.ts（L41-57）にはこれらが含まれていない。逆に upload/route.ts 側にしかないコードはない（全て files/route.ts に統合済み）。設計書は「両 route.ts のマッピングに差異が生じないよう注意すること」と記載しているが、既に差異が存在している状態であり、この認識が設計書に反映されていない。",
+      "suggestion": "設計方針書 section 10-1 の記述を修正し、「両 route.ts のマッピングは既に差異が存在している（files/route.ts がスーパーセット）」ことを明記する。Issue #302 で upload/route.ts にサイズ検証順序の変更を行う際、files/route.ts 側の ERROR_CODE_TO_HTTP_STATUS がスーパーセットとして機能していることを確認する。"
+    },
+    {
+      "id": "DC-008",
+      "severity": "should_fix",
+      "category": "api_consistency",
+      "title": "bodySizeLimit の値: 設計書は15MB対応だが現行設定は6mbでServer Actions専用",
+      "description": "設計方針書 section 4-4 では bodySizeLimit について「Server Actions 専用設定であり Route Handler への適用は保証されない」と正しく注記している。現行の next.config.js（L21）では `bodySizeLimit: '6mb'` と設定されている。15MB の mp4 ファイルをアップロードする場合、Route Handler（upload API）が Server Actions ではないため、bodySizeLimit 設定の変更だけでは不十分な可能性がある。設計書ではこの点を認識しているが、具体的な代替策（Route Handler でのリクエストサイズ制限の方法）が記載されていない。Next.js 14 の Route Handler では formData のパースに制限がかかる場合があり、実装時の検証が重要である。",
+      "suggestion": "設計方針書 section 4-4 に以下を追記する: (1) 現行の bodySizeLimit は '6mb' であること、(2) Route Handler の場合は Next.js のデフォルト制限（通常4MB）が適用される可能性があること、(3) 15MB対応の具体策として `export const config = { api: { bodyParser: { sizeLimit: '20mb' } } }` 相当の設定を Route Handler に適用する方法の検討、(4) formData パースでは bodyParser 設定が直接適用されないため、実テストで動作確認を行うことを必須要件とする。"
+    },
+    {
+      "id": "DC-009",
+      "severity": "nice_to_have",
+      "category": "pattern_consistency",
+      "title": "VideoViewerPropsのaltプロパティ: ImageViewerPropsとの命名は整合しているが動画の用途としてはlabelが適切",
+      "description": "設計方針書 section 3-6 の VideoViewerProps は ImageViewerProps と同一構造で `alt: string` を定義している。ImageViewerProps では `alt` はHTMLの `<img alt>` 属性として直接使用される（ImageViewer.tsx L76）。一方、VideoViewer では `<video>` タグに `alt` 属性は存在しないため、`alt` プロパティの用途が異なる（エラー表示時のファイル名表示やaria-label等に使用される見込み）。設計書の Stage 1 レビューで DR-005 として指摘済みだが「スキップ」判定されている。両コンポーネントのインターフェース整合性の観点からは同名にすることも合理的だが、セマンティクスの正確性とは相反する。",
+      "suggestion": "現状の `alt` 命名を維持しつつ、VideoViewerProps の `alt` プロパティの JSDoc に「HTMLの alt 属性ではなく、エラー表示時およびアクセシビリティ用途のファイル識別名として使用」と明記する。"
+    },
+    {
+      "id": "DC-010",
+      "severity": "nice_to_have",
+      "category": "code_consistency",
+      "title": "FileViewer.tsx のcanCopy修正方針が設計書と実コードの構造で微妙に異なる",
+      "description": "設計方針書 section 3-7 では canCopy を `!content.isImage && !content.isVideo` に修正すると記載している。実コードの FileViewer.tsx（L55-58）では `canCopy` は `useMemo(() => Boolean(content?.content && !content.isImage), [content])` として実装されている。設計書の修正方針を適用すると `Boolean(content?.content && !content.isImage && !content.isVideo)` となるが、依存配列の `[content]` は FileContent 型のオブジェクト参照であるため、isVideo フィールドの追加自体は正しく動作する。ただし、設計書の記載は単純化されており、`content?.content` の存在チェックが省略されている。",
+      "suggestion": "設計書 section 3-7 の canCopy 修正を `Boolean(content?.content && !content.isImage && !content.isVideo)` と完全な形で記載し、既存の useMemo パターンを維持することを明示する。"
+    },
+    {
+      "id": "DC-011",
+      "severity": "nice_to_have",
+      "category": "pattern_consistency",
+      "title": "normalizeExtension() の import パスが設計書で未指定",
+      "description": "設計方針書 section 3-2 では「normalizeExtension() は image-extensions.ts からimportして共通化する」と記載しているが、import 文のサンプルコードが含まれていない。image-extensions.ts の normalizeExtension() は名前付きエクスポートとして定義されている（L104）。video-extensions.ts からの import パスは `@/config/image-extensions` となるが、循環依存のリスクがないか（video-extensions.ts が image-extensions.ts に依存するのみで逆方向の依存はない）の確認が設計書に記載されていない。",
+      "suggestion": "設計書 section 3-2 のコードサンプルに `import { normalizeExtension } from '@/config/image-extensions';` を追記し、循環依存が発生しないことを注記する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "overall_assessment": "条件付き承認 - must_fix 3件の対応が必要"
+  }
+}
