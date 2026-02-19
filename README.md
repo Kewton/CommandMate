@@ -8,220 +8,125 @@
 
 [English](./README.md) | [日本語](./docs/ja/README.md)
 
-<!-- TODO: Add a 30-second demo GIF here to boost adoption -->
-<!-- Example: ![CommandMate Demo](./docs/assets/demo.gif) -->
+<p align="center">
+  <img src="./docs/images/demo-mobile.gif" alt="CommandMate mobile demo" width="300">
+</p>
 
-> **Your AI coding companion — never miss a prompt, work from anywhere.**
+> **Claude Code keeps coding while you're away. Check in from your phone.**
 
-- **Detect prompt/confirmation state** in real-time
-- **Send instructions from mobile or desktop** — no need to sit at your PC
-- **Manage sessions per Git worktree** — run parallel tasks with ease
+Not a "remote control" — a **mobile dev cockpit**.
+
+CommandMate manages Claude Code and Codex CLI sessions per Git worktree and gives you a Web UI you can operate from any browser, including your phone. Auto Yes keeps the agent running autonomously while you monitor progress, review code changes, edit instructions, and send screenshot-based directions — all from your pocket.
 
 ```bash
-npm install -g commandmate
+npx commandmate
 ```
 
-![Desktop view](./docs/images/screenshot-desktop.png)
+---
 
-## Table of Contents
+## The 6 Pillars
 
-- [What is this?](#what-is-this)
-- [Who is this for?](#who-is-this-for)
-- [What makes it unique?](#what-makes-it-unique)
-- [Quick Start](#quick-start-3-steps)
-- [Troubleshooting](#troubleshooting)
-- [How it works](#how-it-works)
-- [Key Features](#key-features)
-- [Use Cases](#use-cases)
-- [Security](#security)
-- [CLI Commands](#cli-commands)
-- [Developer Setup](#developer-setup)
-- [FAQ](#faq)
-- [Documentation](#documentation)
-- [Contributing](#contributing)
+| Pillar | What it does | Why it matters |
+|--------|-------------|----------------|
+| **Auto Yes Mode** | Agent runs without stopping for confirmations | No babysitting — Claude Code keeps working while you're away |
+| **Git Worktree Sessions** | One session per worktree, parallel execution | Multiple tasks progress simultaneously |
+| **Mobile Web UI** | Full session control from any browser | Monitor and steer from your phone |
+| **File Viewer** | Browse worktree files from the browser | Review code changes without touching your PC |
+| **Markdown Editor** | Edit Markdown files in the browser | Update AI instructions on the go |
+| **Screenshot Instructions** | Attach images to your prompts | Snap a bug → "Fix this" — the agent sees the screenshot |
 
 ---
 
-## What is this?
-
-A development companion tool that manages Claude Code sessions per Git worktree and lets you send instructions from your browser.
-
-During your commute, childcare breaks, or lunch — send the next instruction as easily as replying to an email, and keep your side projects moving forward.
-
-## Who is this for?
-
-**Great fit:**
-- Developers juggling childcare, commutes, or meetings — can't sit at the PC all day
-- Users who miss Claude Code's input prompts and lose flow
-- Teams using Git worktree for parallel development but finding tmux management tedious
-
-**Not ideal for:**
-- GUI IDE-only workflows (CommandMate is terminal/CLI-based)
-- Multi-user SaaS expectations (CommandMate is designed for local, individual use)
-
-## What makes it unique?
-
-CommandMate is not a terminal replacement. It **complements** Claude Code by focusing on three things:
-
-- **Prompt detection** — know instantly when Claude Code needs your input
-- **Response UI** — reply from any browser, including your phone
-- **Worktree organization** — manage multiple sessions in one place
-
-Supports **Claude Code**, **Codex CLI**, and **Gemini CLI**. Built with the Strategy pattern for extensibility — adding new CLI tools is straightforward.
-
----
-
-## Quick Start (3 Steps)
+## Quick Start
 
 **Prerequisites:** macOS / Linux, Node.js v20+, npm, git, tmux, openssl
 
-> Windows is not supported due to the tmux dependency. WSL2 has not been tested.
-
 ```bash
-# 1. Install
+# Install & start in one command
+npx commandmate
+
+# Or install globally
 npm install -g commandmate
-
-# 2. Initialize (dependency check, environment setup, DB init)
 commandmate init
-
-# 3. Start
 commandmate start --daemon
 ```
 
 Open http://localhost:3000 in your browser.
 
-**Useful commands:**
-
-```bash
-commandmate status    # Check server status
-commandmate stop      # Stop the server
-```
-
 See the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) for details.
 
 ---
 
-## Troubleshooting
+## Comparison
 
-**Claude CLI not found / path changed?**
-If you switch between npm and standalone versions of Claude CLI, the path may change. CommandMate auto-detects the new path on the next session start. To set a custom path, add `CLAUDE_PATH=/path/to/claude` to `.env`.
-
-**Port conflict?**
-```bash
-commandmate start -p 3001
-```
-
-**Session stuck or not responding?**
-Check tmux sessions directly. CommandMate manages sessions with the naming format `mcbd-{tool}-{worktree}`:
-
-```bash
-# List all CommandMate sessions
-tmux list-sessions | grep mcbd
-
-# View session output (without attaching)
-tmux capture-pane -t "mcbd-claude-feature-123" -p
-
-# Attach to inspect (detach with Ctrl+b then d)
-tmux attach -t "mcbd-claude-feature-123"
-
-# Kill a broken session
-tmux kill-session -t "mcbd-claude-feature-123"
-```
-
-> **Note:** When attached, avoid typing directly into the session — this can interfere with CommandMate's session management. Use `Ctrl+b` then `d` to detach and operate through the CommandMate UI instead.
-
-**Sessions fail when launching from within Claude Code?**
-Claude Code sets `CLAUDECODE=1` to prevent nesting. CommandMate removes this automatically, but if it persists, run: `tmux set-environment -g -u CLAUDECODE`
+| Feature | CommandMate | Happy Coder | claude-squad | Omnara |
+|---------|:-----------:|:-----------:|:------------:|:------:|
+| Auto Yes Mode | Yes | No | Yes (TUI only) | No |
+| Git Worktree Management | Yes | No | Yes (TUI only) | No |
+| Mobile Web UI | Yes | Yes | **No** | Yes |
+| File Viewer | Yes | No | No | No |
+| Markdown Editor | Yes | No | No | No |
+| Screenshot Instructions | Yes | No | Not possible | No |
+| Free / OSS | Yes | Free + Paid | Yes | $20/mo |
+| Runs 100% Locally | Yes | Server-routed | Yes | Cloud fallback |
 
 ---
 
-## How it works
+## Workflow
 
-CommandMate treats Claude Code (CLI) as a managed "execution session", making its state (running / waiting for input / idle) visible through a web UI.
-
-```mermaid
-flowchart LR
-    A["Browser / Phone"] -->|HTTP| B["CommandMate Server"]
-    B --> C["Session Manager"]
-    C -->|"spawn / attach"| D["tmux sessions<br/>(per worktree)"]
-    D --> E["Claude Code CLI"]
-    C <-->|"read / write"| F[("Local DB<br/>& State")]
 ```
+1. Start tasks on your PC
+   $ commandmate start --daemon
+   → Claude Code begins working with Auto Yes
 
-Each Git worktree gets its own tmux session, so you can run multiple tasks in parallel without interference.
+2. Close your laptop and go
 
----
+3. Check in from your phone
+   → Web UI shows all sessions at a glance
 
-## Key Features
+4. Review code changes
+   → File Viewer lets you read diffs on mobile
 
-- **Prompt/confirmation detection** — Real-time status display in the sidebar (idle/ready/running/waiting)
-- **Send instructions from browser** — Operate via message UI from both mobile and desktop
-- **Execution history & notes** — Retains conversation history per branch with note-taking support
-- **Markdown log viewer** — View Claude's detailed output in Markdown format
-- **File viewer** — Browse worktree files from the browser with file operations (move, copy, delete)
-- **File timestamps** — Display file creation time in the file tree
-- **Auto Yes mode** — Control automatic approval with a confirmation dialog
-- **Repository management** — Remove repositories from app management (actual files are not deleted)
-- **Clone URL registration** — Clone and register repositories by specifying HTTPS/SSH URLs
-- **Multi-CLI support** — Optimized for Claude Code, with Codex CLI and Gemini CLI support
-- **Responsive UI** — Two-column layout on desktop, tab-based layout on mobile
+5. Adjust direction
+   → Edit a Markdown instruction file, or type a new prompt
 
-<details>
-<summary>Screenshots</summary>
+6. Snap a bug
+   → Screenshot Instructions: attach a photo and say "Fix this"
 
-### Worktree Detail View (Message / Console / History)
-
-| Desktop | Mobile (History) | Mobile (Terminal) |
-|---------|-----------------|-------------------|
-| ![Desktop - Worktree detail](./docs/images/screenshot-worktree-desktop.png) | ![Mobile - History](./docs/images/screenshot-worktree-mobile.png) | ![Mobile - Terminal](./docs/images/screenshot-worktree-mobile-terminal.png) |
-
-### Top Page (Mobile)
-
-![Mobile view](./docs/images/screenshot-mobile.png)
-
-</details>
-
----
-
-## Use Cases
-
-### 1. Commute — pick up where you left off
-
-- **Morning:** Kick off a task with Claude Code before leaving
-- **Commute:** Check status on your phone, send the next instruction
-- **Evening:** Review the results and merge when you get home
-
-### 2. Childcare — 5-minute windows add up
-
-- Split tasks across worktrees so each runs independently
-- Check which sessions are waiting via CommandMate
-- In a 5-minute break, send the next instruction and keep things moving
-
-### 3. Parallel development — one UI for all your worktrees
-
-- No need to juggle tmux panes manually
-- See status of all worktrees at a glance in the sidebar
-- Focus on decisions, not terminal management
+7. Claude Code sees the image and starts fixing
+```
 
 ---
 
 ## Security
 
-CommandMate runs **entirely locally** — the app, database, and sessions all stay on your machine. The only external communication is Claude CLI's own API calls.
+Runs **100% locally**. No external server, no cloud relay, no account required. The only network traffic is Claude CLI's own API calls.
 
-**Recommended setup:**
-- Use on `localhost` or within the same LAN
-- For remote access, use a VPN or authenticated reverse proxy (Basic Auth, OIDC, etc.)
-- Enabling external access via `commandmate init` sets `CM_BIND=0.0.0.0` — access from the same LAN at `http://<your-PC-IP>:3000`
-
-**Do NOT:**
-- Expose to the internet without authentication (never bind `0.0.0.0` without a reverse proxy)
+- Fully open-source ([MIT License](./LICENSE))
+- Local database, local sessions
+- For remote access, use a VPN or authenticated reverse proxy
 
 See the [Security Guide](./docs/security-guide.md) and [Trust & Safety](./docs/en/TRUST_AND_SAFETY.md) for details.
 
 ---
 
-## CLI Commands
+## How it works
+
+```mermaid
+flowchart LR
+    A["Browser / Phone"] -->|HTTP| B["CommandMate Server"]
+    B --> C["Session Manager"]
+    C -->|"spawn / attach"| D["tmux sessions\n(per worktree)"]
+    D --> E["Claude Code CLI"]
+    C <-->|"read / write"| F[("Local DB\n& State")]
+```
+
+Each Git worktree gets its own tmux session, so multiple tasks run in parallel without interference.
+
+---
+
+<details>
+<summary><strong>CLI Commands</strong></summary>
 
 ### Basic
 
@@ -278,11 +183,81 @@ Requires [gh CLI](https://cli.github.com/) to be installed.
 
 See `commandmate --help` for all options.
 
----
+</details>
 
-## Developer Setup
+<details>
+<summary><strong>Screenshots</strong></summary>
 
-For contributors or those building a development environment, use git clone.
+### Desktop
+
+![Desktop view](./docs/images/screenshot-desktop.png)
+
+### Worktree Detail View (Message / Console / History)
+
+| Desktop | Mobile (History) | Mobile (Terminal) |
+|---------|-----------------|-------------------|
+| ![Desktop - Worktree detail](./docs/images/screenshot-worktree-desktop.png) | ![Mobile - History](./docs/images/screenshot-worktree-mobile.png) | ![Mobile - Terminal](./docs/images/screenshot-worktree-mobile-terminal.png) |
+
+### Top Page (Mobile)
+
+![Mobile view](./docs/images/screenshot-mobile.png)
+
+</details>
+
+<details>
+<summary><strong>Troubleshooting & FAQ</strong></summary>
+
+### Claude CLI not found / path changed?
+
+If you switch between npm and standalone versions of Claude CLI, the path may change. CommandMate auto-detects the new path on the next session start. To set a custom path, add `CLAUDE_PATH=/path/to/claude` to `.env`.
+
+### Port conflict?
+
+```bash
+commandmate start -p 3001
+```
+
+### Session stuck or not responding?
+
+Check tmux sessions directly. CommandMate manages sessions with the naming format `mcbd-{tool}-{worktree}`:
+
+```bash
+# List all CommandMate sessions
+tmux list-sessions | grep mcbd
+
+# View session output (without attaching)
+tmux capture-pane -t "mcbd-claude-feature-123" -p
+
+# Attach to inspect (detach with Ctrl+b then d)
+tmux attach -t "mcbd-claude-feature-123"
+
+# Kill a broken session
+tmux kill-session -t "mcbd-claude-feature-123"
+```
+
+> **Note:** When attached, avoid typing directly into the session — this can interfere with CommandMate's session management. Use `Ctrl+b` then `d` to detach and operate through the CommandMate UI instead.
+
+### Sessions fail when launching from within Claude Code?
+
+Claude Code sets `CLAUDECODE=1` to prevent nesting. CommandMate removes this automatically, but if it persists, run: `tmux set-environment -g -u CLAUDECODE`
+
+### FAQ
+
+**Q: Is tmux required?**
+A: CommandMate uses tmux internally to manage CLI sessions. You don't need to operate tmux directly — CommandMate handles it for you.
+
+**Q: What about Claude Code's permissions?**
+A: Claude Code's own permission settings apply as-is. CommandMate does not expand permissions. See [Trust & Safety](./docs/en/TRUST_AND_SAFETY.md) for details.
+
+**Q: Can multiple people use it?**
+A: Currently designed for individual use. Simultaneous multi-user access is not supported.
+
+</details>
+
+<details>
+<summary><strong>Developer Setup</strong></summary>
+
+For contributors or those building a development environment:
 
 ```bash
 git clone https://github.com/Kewton/CommandMate.git
@@ -290,8 +265,7 @@ cd CommandMate
 ./scripts/setup.sh  # Auto-runs dependency check, env setup, build, and launch
 ```
 
-<details>
-<summary>Manual Setup (for customization)</summary>
+### Manual Setup (for customization)
 
 ```bash
 git clone https://github.com/Kewton/CommandMate.git
@@ -306,22 +280,7 @@ npm start
 
 > **Note**: `./scripts/*` scripts are only available in the development environment. For global installs (`npm install -g`), use the `commandmate` CLI.
 
-> **Note**: Legacy environment variable names (`MCBD_*`) are still supported for backward compatibility, but using the new names (`CM_*`) is recommended.
-
 </details>
-
----
-
-## FAQ
-
-**Q: Is tmux required?**
-A: CommandMate uses tmux internally to manage CLI sessions. You don't need to operate tmux directly — CommandMate handles it for you. If something goes wrong, you can inspect sessions via tmux commands (see [Troubleshooting](#troubleshooting)).
-
-**Q: What about Claude Code's permissions?**
-A: Claude Code's own permission settings apply as-is. CommandMate does not expand permissions. See [Trust & Safety](./docs/en/TRUST_AND_SAFETY.md) for details.
-
-**Q: Can multiple people use it?**
-A: Currently designed for individual use. Simultaneous multi-user access is not supported.
 
 ---
 
@@ -335,7 +294,6 @@ A: Currently designed for individual use. Simultaneous multi-user access is not 
 | [Concept](./docs/en/concept.md) | Vision and problems solved |
 | [Architecture](./docs/en/architecture.md) | System design |
 | [Deployment Guide](./docs/en/DEPLOYMENT.md) | Production environment setup |
-| [Migration Guide](./docs/en/migration-to-commandmate.md) | Migrating from MyCodeBranchDesk |
 | [UI/UX Guide](./docs/en/UI_UX_GUIDE.md) | UI implementation details |
 | [Trust & Safety](./docs/en/TRUST_AND_SAFETY.md) | Security and permissions |
 
