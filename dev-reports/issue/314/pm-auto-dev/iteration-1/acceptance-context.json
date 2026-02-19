@@ -1,0 +1,44 @@
+{
+  "issue_number": 314,
+  "feature_summary": "Auto-Yesにターミナル出力のStop条件（正規表現）を追加",
+  "acceptance_criteria": [
+    "Auto-Yes確認ダイアログにStop条件入力フィールドが表示される",
+    "Stop条件が空の場合は従来通りの動作（時間ベースのみで停止）",
+    "Stop条件に正規表現を入力でき、ターミナル出力がマッチした場合にAuto-Yesが自動停止する",
+    "Auto-Yesが停止した際にユーザーに通知される（stopReasonフィールドによるトースト通知）",
+    "不正な正規表現パターン入力時にバリデーションエラーが表示される",
+    "正規表現のReDoS対策が施されている（safe-regex2ライブラリ使用）",
+    "既存のAuto-Yes機能（時間ベース停止、プロンプト自動応答）に影響しない",
+    "既存テストがすべてパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: validateStopPattern()が有効な正規表現を受け入れる",
+    "シナリオ2: validateStopPattern()がReDoSパターン(a+)+$を拒否する",
+    "シナリオ3: validateStopPattern()が500文字超のパターンを拒否する",
+    "シナリオ4: validateStopPattern()が無効な構文を拒否する",
+    "シナリオ5: disableAutoYes()がstopPattern/stopReasonを保持する",
+    "シナリオ6: disableAutoYes('stop_pattern_matched')がstopReasonを設定する",
+    "シナリオ7: checkStopCondition()がパターンマッチ時にdisableAutoYes()を呼び出す",
+    "シナリオ8: checkStopCondition()がstopPatternなし時にfalseを返す",
+    "シナリオ9: setAutoYesEnabled(true, duration, stopPattern)でstopPatternが保存される",
+    "シナリオ10: setAutoYesEnabled(true)でstopReason/stopPatternがクリアされる",
+    "シナリオ11: auto-yes/route.tsのPOSTが有効なstopPatternを受け入れる",
+    "シナリオ12: auto-yes/route.tsのPOSTがReDoSパターンを400で拒否する",
+    "シナリオ13: current-output/route.tsのGETがstopReasonを返却する",
+    "シナリオ14: AutoYesConfirmDialogにstopPattern入力フィールドが表示される",
+    "シナリオ15: 無効な正規表現入力時にボタンが無効化される",
+    "シナリオ16: AutoYesToggleがAutoYesToggleParamsオブジェクトをonToggleに渡す",
+    "シナリオ17: 全156テストがパスする"
+  ],
+  "implemented_files": [
+    "src/config/auto-yes-config.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "locales/ja/autoYes.json",
+    "locales/en/autoYes.json"
+  ]
+}

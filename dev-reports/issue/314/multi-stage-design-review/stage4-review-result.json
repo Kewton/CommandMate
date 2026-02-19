@@ -1,0 +1,144 @@
+{
+  "issue_number": 314,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_date": "2026-02-19",
+  "status": "conditionally_approved",
+  "score": 3,
+  "findings": [
+    {
+      "id": "DS4-F001",
+      "severity": "must_fix",
+      "category": "redos",
+      "owasp_reference": "A06",
+      "title": "ReDoS対策が長さ制限とtry-catchのみでカタストロフィックバックトラッキングを防止できない",
+      "description": "設計書のReDoS対策はMAX_STOP_PATTERN_LENGTH=500とnew RegExp()構文検証のみである。try-catchはシンタックスエラーのみを検出し、ReDoSの原因となるカタストロフィックバックトラッキングパターン（例: '(a+)+$', '(a|a)+$', '([a-zA-Z]+)*$'）を検出できない。500文字のパターンと5000文字の入力の組み合わせでも、悪意あるパターンではO(2^n)の計算時間が発生し、Node.jsイベントループがブロックされる可能性がある。pollAutoYes()は2秒間隔で実行されるため、1回のReDoSで後続の全てのポーリングサイクルがブロックされ、Auto-Yes機能全体が停止する。",
+      "location": "設計書セクション7 ReDoS対策 / checkStopCondition()関数",
+      "suggestion": "以下の多層防御を実装すること: (1) regex.test()実行にタイムアウトを設ける（AbortControllerまたはsetTimeout+Promiseでの100msタイムアウトラッパー）。(2) safe-regex2またはre2ライブラリによるパターン安全性チェックをvalidateStopPattern()に追加する。最低限、(1)のタイムアウト保護は必須である。設計書で'safe-regex2は将来検討'としている判断はリスク評価が甘い。実装コストの低いタイムアウト保護を初期実装に含めるべきである。"
+    },
+    {
+      "id": "DS4-F002",
+      "severity": "must_fix",
+      "category": "redos",
+      "owasp_reference": "A06",
+      "title": "checkStopCondition()のRegExp.test()にタイムアウトが設計されていない",
+      "description": "checkStopCondition()内のregex.test(cleanOutput)は同期的に実行され、タイムアウト機構が存在しない。Node.jsはシングルスレッドであるため、ReDoS攻撃によりイベントループが長時間ブロックされると、APIリクエスト処理を含む全てのサーバー機能が停止する。設計書セクション8ではRegExpマッチを'数マイクロ秒'としているが、これは安全なパターンの場合のみである。",
+      "location": "設計書セクション6 checkStopCondition() / セクション8 パフォーマンス設計",
+      "suggestion": "checkStopCondition()にタイムアウト保護を追加する。Node.jsのvm.runInNewContextでタイムアウト付きRegExp実行を行うか、Worker threadで実行してメインスレッドを保護する方式を検討する。最もシンプルな対策として、パターン検証段階でsafe-regex2によるカタストロフィックバックトラッキング検出を行い、危険なパターンの登録自体を拒否する方式を推奨する。"
+    },
+    {
+      "id": "DS4-F003",
+      "severity": "should_fix",
+      "category": "injection",
+      "owasp_reference": "A03",
+      "title": "validateStopPattern()がnew RegExp()の構文検証のみでフラグインジェクションを検証しない",
+      "description": "validateStopPattern()はnew RegExp(pattern)で構文検証を行うが、パターン文字列のみを受け取る設計である。ユーザーが正規表現内にフラグに相当する制御文字やバックスラッシュシーケンスを含めることによる予期しない動作は、new RegExp()のデフォルト動作で制限されるため直接的なフラグインジェクションリスクは低い。ただし、(?:)や(?=)などの高度な正規表現機能（先読み、後読み）が許可されており、これらが組み合わさるとパフォーマンス問題を引き起こす可能性がある。",
+      "location": "設計書セクション7 validateStopPattern()",
+      "suggestion": "validateStopPattern()にパターンの複雑性チェックを追加することを検討する。具体的には、ネストされた量指定子（(a+)+など）、再帰的な後方参照、過度にネストされたグルーピングの検出を行う。safe-regex2ライブラリはこれらを検出可能であり、依存関係追加のコストを再評価すべきである。"
+    },
+    {
+      "id": "DS4-F004",
+      "severity": "should_fix",
+      "category": "information_disclosure",
+      "owasp_reference": "A05",
+      "title": "stopReasonフィールドがAuto-Yesの停止原因をAPIレスポンスで公開する",
+      "description": "current-output/route.tsのGETレスポンスでstopReason('expired'|'stop_pattern_matched')を返却する設計である。stopReason自体は定型文字列のenum値であり、直接的な機密情報漏洩のリスクは低い。しかし、stopReasonが'stop_pattern_matched'であることをAPIレスポンスから検知することで、攻撃者がstopPatternの存在やマッチ状態を推測できる情報経路となる。",
+      "location": "設計書セクション4 GET /api/worktrees/[id]/current-output",
+      "suggestion": "現在の設計は許容範囲内だが、将来的にstopPatternの内容やマッチ詳細（マッチ位置、マッチ文字列など）をAPIレスポンスに含めないことを設計方針として明記すること。JSDocのAPI解釈ルールに「stopReasonはenum値のみを返し、パターン内容やマッチ詳細は一切返却しない」旨を追記することを推奨する。"
+    },
+    {
+      "id": "DS4-F005",
+      "severity": "should_fix",
+      "category": "logging",
+      "owasp_reference": "A09",
+      "title": "console.warnログにworktreeIdが直接出力されログインジェクションのリスクがある",
+      "description": "checkStopCondition()のconsole.warnで`[Auto-Yes] Stop condition matched for worktree: ${worktreeId}`をログ出力する設計だが、worktreeIdはWORKTREE_ID_PATTERN（/^[a-zA-Z0-9_-]+$/）で検証済みのためインジェクションリスクは低い。しかし、無効パターン検出時のログ`[Auto-Yes] Invalid stop pattern for worktree: ${worktreeId}`では、stopPatternの内容がログに含まれないことは良い設計である。一方で、pollAutoYes()のcatchブロックのgetErrorMessage(error)経由でstopPatternの内容がエラーメッセージに含まれる可能性がある。",
+      "location": "設計書セクション6 checkStopCondition() console.warn",
+      "suggestion": "ログ出力に構造化ログ形式を採用し、ユーザー入力値（worktreeId、stopPattern）がログメッセージ文字列に直接連結されないようにすること。例: `console.warn('[Auto-Yes] Stop condition matched', { worktreeId })` の形式。また、catch内のgetErrorMessage()がstopPattern内容を含むエラーメッセージを漏洩しないことを確認するテストケースを追加すること。"
+    },
+    {
+      "id": "DS4-F006",
+      "severity": "should_fix",
+      "category": "access_control",
+      "owasp_reference": "A01",
+      "title": "current-output/route.tsにworktreeIdフォーマット検証がない",
+      "description": "auto-yes/route.tsのPOSTハンドラにはisValidWorktreeId(params.id)による入力検証が実装されているが、current-output/route.tsのGETハンドラにはworktreeIdフォーマット検証がない。getWorktreeById()でDB検索前にparams.idが検証されないため、不正なフォーマットのIDがDB層まで到達する。SQLiteのプリペアドステートメントによりSQLインジェクションは防止されるが、Defense in Depthの観点から入力検証を追加すべきである。",
+      "location": "src/app/api/worktrees/[id]/current-output/route.ts GET関数",
+      "suggestion": "current-output/route.tsのGET関数冒頭にisValidWorktreeId(params.id)チェックを追加すること。設計書のセクション4にはcurrent-output/route.tsの変更がstopReason返却とJSDoc追加のみ記載されているが、既存の入力検証不備の修正も同時に実施することを推奨する。"
+    },
+    {
+      "id": "DS4-F007",
+      "severity": "should_fix",
+      "category": "data_persistence",
+      "owasp_reference": "A05",
+      "title": "globalThisに保持されるstopPatternが他のworktreeスコープから参照不可であることの保証",
+      "description": "autoYesStatesはMap<string, AutoYesState>でworktreeIdをキーとしてスコープされており、異なるworktreeのstopPatternを参照・変更するにはworktreeIdを知る必要がある。auto-yes/route.tsではparams.id（URLパスパラメータ）をworktreeIdとして使用し、validateWorktreeExists()でDB上の存在確認を行っている。これにより、存在しないworktreeIdへのアクセスは404で拒否される。ただし、認証・認可メカニズムは存在しないため、URLのworktreeIdを変更するだけで他のworktreeのAuto-Yes状態を操作可能である。",
+      "location": "設計書セクション3 AutoYesState / auto-yes/route.ts",
+      "suggestion": "現在のCommandMateはローカルツールであり認証は不要という前提だが、将来的にマルチユーザー対応を行う場合はworktreeIdに対するオーナーシップ検証が必須となる。現時点では設計方針書にこの前提（ローカル単一ユーザー環境での使用を前提とし、worktreeIdによるスコープ分離のみで十分とする）を明記すること。"
+    },
+    {
+      "id": "DS4-F008",
+      "severity": "should_fix",
+      "category": "xss",
+      "owasp_reference": "A03",
+      "title": "AutoYesConfirmDialogのstopPattern入力のXSSリスク評価",
+      "description": "AutoYesConfirmDialogでユーザーが入力するstopPatternはReactのJSX式（{value}）を通じてレンダリングされるため、React標準のエスケーピングによりXSSは防止される。regexErrorメッセージもvalidateStopPattern()の固定文字列（'Invalid regular expression syntax'、'Pattern must be 500 characters or less'）であり、ユーザー入力を含まないためXSSリスクは低い。ただし、将来的にvalidateStopPattern()がnew RegExp()のエラーメッセージ（ユーザー入力を含む可能性がある）を返却するように変更された場合、XSSリスクが発生する。",
+      "location": "設計書セクション5 AutoYesConfirmDialog / セクション7 validateStopPattern()",
+      "suggestion": "validateStopPattern()がnew RegExp()のcatchブロックでerror.messageを返却しない設計を維持すること。設計書のセクション7にあるように固定メッセージ'Invalid regular expression syntax'を返却する方式は安全である。将来のリファクタリングでerror.messageを返却するように変更しないよう、コードコメントに注記を追加すること。"
+    },
+    {
+      "id": "DS4-F009",
+      "severity": "nice_to_have",
+      "category": "rate_limit",
+      "owasp_reference": "A04",
+      "title": "Stop条件マッチング評価のレートリミットが未設計",
+      "description": "checkStopCondition()はpollAutoYes()内で2秒間隔で実行される。この間隔はPOLLING_INTERVAL_MSで制御されており、連続的な高頻度評価は発生しない。ただし、MAX_CONCURRENT_POLLERS=50の制限下で50個のworktreeが同時にstopPatternを持つ場合、サーバー全体で2秒あたり50回のRegExp評価が発生する。通常使用では問題ないが、ReDoSパターンが設定された場合に50並列で影響が拡大する。",
+      "location": "設計書セクション8 パフォーマンス設計",
+      "suggestion": "DS4-F001/F002のReDoS対策が実装されればこのリスクは軽減される。追加対策として、checkStopCondition()でReDoS検出時（タイムアウト発生時）に当該worktreeのstopPatternを自動無効化するフェイルセーフ機構を設けることを検討する。"
+    },
+    {
+      "id": "DS4-F010",
+      "severity": "nice_to_have",
+      "category": "data_persistence",
+      "owasp_reference": "A05",
+      "title": "サーバー再起動時のstopPattern状態クリアに関する明示的なドキュメント",
+      "description": "globalThisによるインメモリ管理のため、サーバー再起動時にstopPatternを含むAutoYesState全体がクリアされる。これはセキュリティ上望ましい動作（残留リスクの排除）だが、設計書に明示的な記載がない。ユーザー観点では、サーバー再起動後にAuto-Yesが無効になっていることは既存の動作と一致するため、Stop条件のみが消失する特殊なケースは発生しない。",
+      "location": "設計書セクション3 データモデル設計",
+      "suggestion": "セクション3に「サーバー再起動時にglobalThis.__autoYesStatesがクリアされ、全てのstopPattern/stopReasonが初期化される。これはセキュリティ上の正しい動作であり、残留パターンによるリスクを排除する。」の旨を追記すること。"
+    },
+    {
+      "id": "DS4-F011",
+      "severity": "nice_to_have",
+      "category": "injection",
+      "owasp_reference": "A03",
+      "title": "stopPatternが正規表現として使用される際のフラグ制御",
+      "description": "checkStopCondition()でnew RegExp(autoYesState.stopPattern)を使用するが、フラグ引数が省略されている。これによりデフォルトフラグ（フラグなし）で正規表現が構築される。ユーザーがグローバルフラグ(g)やマルチラインフラグ(m)を期待する場合、想定外の動作となる可能性があるが、セキュリティ上のリスクは低い。regex.test()は単一マッチの検出に使用されるため、gフラグの有無は結果に影響しない。",
+      "location": "設計書セクション6 checkStopCondition()",
+      "suggestion": "設計書にRegExpフラグの方針を明記すること。「checkStopCondition()ではフラグなしでRegExpを構築する。test()メソッドによる真偽判定のみを行うため、g/m/sフラグは不要である。ユーザーがインラインフラグ(?i)等を使用することは許容される。」の旨を追加することを推奨する。"
+    }
+  ],
+  "summary": {
+    "total_findings": 11,
+    "must_fix": 2,
+    "should_fix": 6,
+    "nice_to_have": 3
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "high",
+    "operational": "medium"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-314-auto-yes-stop-condition-design-policy.md",
+    "src/lib/auto-yes-manager.ts",
+    "src/config/auto-yes-config.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/lib/sanitize.ts",
+    "src/lib/utils.ts"
+  ],
+  "timestamp": "2026-02-19T12:00:00Z"
+}

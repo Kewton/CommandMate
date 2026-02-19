@@ -1,0 +1,78 @@
+{
+  "issue_number": 314,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目・影響範囲）",
+  "apply_date": "2026-02-19",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S7-F001",
+        "status": "applied",
+        "change_summary": "setAutoYesEnabled()のdisableパスコードイメージを修正。existing未定義時のフォールバック処理（enabledAt/expiresAtの`?? 0`フォールバック + stopReason/stopPatternの条件付きスプレッド）を追記。既存テスト互換性の注記を追加。影響範囲テーブル・実装タスクにもS7-F001参照を追加"
+      },
+      {
+        "id": "S7-F002",
+        "status": "applied",
+        "change_summary": "AutoYesConfirmDialog.test.tsxの既存テスト修正が必要であることを実装タスクのユニットテストセクションに追記。Interactionsセクション（lines 115-143）の3テストケース（line 119, 127, 135）でonConfirm引数数変更への対応方法を具体的に記載。影響範囲テーブルにAutoYesConfirmDialog.test.tsxを新規行として追加"
+      },
+      {
+        "id": "S7-F003",
+        "status": "applied",
+        "change_summary": "AutoYesToggle.test.tsxの既存テスト修正が必要であることを実装タスクのユニットテストセクションに追記。OFF->ONセクション（lines 39-62）の修正方法、ON->OFFテスト（line 81-88）は変更不要である旨を記載。影響範囲テーブルにAutoYesToggle.test.tsxを新規行として追加"
+      },
+      {
+        "id": "S7-F004",
+        "status": "applied",
+        "change_summary": "current-output/route.tsのstopReasonフィールド返却条件を明記。クライアント通知メカニズムの項目2にenabledの値に関わらずautoYesState?.stopReasonをそのまま返却する旨を追加。実装タスク・影響範囲テーブルにも同様の記載を追加"
+      },
+      {
+        "id": "S7-F005",
+        "status": "applied",
+        "change_summary": "auto-yes/route.tsのsetAutoYesEnabled()呼び出しでstopPatternをenabled=true時のみ渡す設計をstopPatternデータフローの項目4に追記。実装タスク・影響範囲テーブルにも具体的なコードイメージ（`body.enabled ? stopPattern : undefined`）を追加"
+      },
+      {
+        "id": "S7-F006",
+        "status": "applied",
+        "change_summary": "WorktreeDetailRefactored.tsxのfetchCurrentOutputのuseCallback依存配列にshowToastを追加する必要があることをクライアント通知メカニズムの項目3に追記。代替アプローチ（useEffectによるautoYes状態変更監視）も実装注記として記載。実装タスク・影響範囲テーブルにも反映"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S7-F007",
+        "status": "skipped",
+        "reason": "auto-yes-persistence.test.tsのstopPatternフィールド永続化テストケース構造は、実装タスクに概要が記載済みのため追加対応は見送り"
+      },
+      {
+        "id": "S7-F008",
+        "status": "skipped",
+        "reason": "globalThis型宣言はAutoYesState型参照のため自動反映。追加変更不要を確認済み"
+      },
+      {
+        "id": "S7-F009",
+        "status": "skipped",
+        "reason": "handleAutoYesToggle()のfetch body拡張はIssue本文に既に記載済み。追加対応不要"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 6,
+    "skipped": 3
+  },
+  "changes_applied": {
+    "note_section": "Stage 7影響範囲レビュー（2回目）結果を反映に更新",
+    "code_image_update": "setAutoYesEnabled() disableパスのコードイメージをexisting未定義時のフォールバック付き実装に修正（S7-F001）",
+    "client_notification": "current-output/route.tsのstopReasonフィールド返却条件を明記（S7-F004）、fetchCurrentOutputのuseCallback依存配列にshowToast追加の実装注記を追加（S7-F006）",
+    "data_flow": "auto-yes/route.tsのsetAutoYesEnabled()呼び出しでstopPatternをenabled=true時のみ渡す設計を追記（S7-F005）",
+    "test_tasks": "AutoYesConfirmDialog.test.tsxとAutoYesToggle.test.tsxの既存テスト修正が必要であることを具体的な行番号・修正方法付きで追記（S7-F002, S7-F003）",
+    "impact_table": "AutoYesConfirmDialog.test.tsxとAutoYesToggle.test.tsxを変更対象ファイルテーブルに新規行として追加（S7-F002, S7-F003）",
+    "acceptance_criteria": "既存テストのシグネチャ変更対応を受入条件に追加（S7-F002, S7-F003）",
+    "review_history": "イテレーション4（Stage 7影響範囲レビュー）のレビュー履歴テーブルを追加"
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/314"
+  }
+}

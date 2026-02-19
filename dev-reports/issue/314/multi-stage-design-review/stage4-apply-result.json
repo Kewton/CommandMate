@@ -1,0 +1,102 @@
+{
+  "issue_number": 314,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘反映",
+  "apply_date": "2026-02-19",
+  "status": "completed",
+  "applied_findings": [
+    {
+      "finding_id": "DS4-F001",
+      "severity": "must_fix",
+      "status": "applied",
+      "changes_made": "セクション7 ReDoS対策を多層防御に全面改訂。safe-regex2による第3層パターン安全性検証を初期実装に含める設計に変更。validateStopPattern()にsafe-regex2チェックを追加。旧設計の「実用的なReDoSリスクは低い」という記述を正確なリスク評価に修正。セクション10の代替案比較・設計判断を更新。セクション11のYAGNI制約を更新。セクション12にpackage.json変更とauto-yes-config.ts変更を追記。セクション13にStage 4 Must Fixチェックリスト追加。セクション9にsafe-regex2テストケース追加"
+    },
+    {
+      "finding_id": "DS4-F002",
+      "severity": "must_fix",
+      "status": "applied",
+      "changes_made": "セクション6にexecuteRegexWithTimeout()ヘルパー関数設計とisRegexTimeoutError()を追加。checkStopCondition()にvm.runInNewContext方式の100msタイムアウト保護を追加。REGEX_EXECUTION_TIMEOUT_MS定数をauto-yes-config.tsに追加。セクション8のポーリング負荷表にタイムアウト上限行を追加、RegExpマッチの記述を修正。セクション13の実装順序を更新。セクション9にタイムアウト保護テストケース追加"
+    },
+    {
+      "finding_id": "DS4-F003",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "DS4-F001のsafe-regex2導入に含まれる形で反映。safe-regex2がネストされた量指定子・再帰的パターン・過度にネストされたグルーピングを検出する旨をセクション7に記載。セクション13にStage 4 Should Fixチェックリスト追加"
+    },
+    {
+      "finding_id": "DS4-F004",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション4にAPIレスポンスセキュリティ方針を追記。stopReasonはenum値のみ返却し、パターン内容・マッチ詳細・ターミナル出力内容はAPIレスポンスに含めない方針を明記。JSDocへの反映指示を追記。セクション12のcurrent-output/route.ts変更概要を更新"
+    },
+    {
+      "finding_id": "DS4-F005",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション6のcheckStopCondition()のconsole.warnを構造化ログ形式に変更（3箇所全て）。ユーザー入力値をメッセージ文字列に直接連結しない方針を反映。stopPattern内容はログに出力しない方針を明記。セクション10の設計判断表に構造化ログ形式の行を追加。セクション13にチェックリスト追加。セクション9にログテストケース追加"
+    },
+    {
+      "finding_id": "DS4-F006",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション4にcurrent-output/route.tsのGET関数にisValidWorktreeId()チェック追加する設計を追記（コード例含む）。セクション12の変更概要を更新。セクション13にチェックリスト追加"
+    },
+    {
+      "finding_id": "DS4-F007",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3にローカル単一ユーザー環境前提とスコープ分離方針を追記。認証・認可メカニズムは実装せず、worktreeIdによるスコープ分離のみで十分とする設計前提を明記。将来マルチユーザー対応時のオーナーシップ検証必要性を注記"
+    },
+    {
+      "finding_id": "DS4-F008",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション7のvalidateStopPattern()にDS4-F008 SECURITY NOTEコメントを追加。エラーメッセージセキュリティ方針セクションを新設（固定メッセージのみ返却、ユーザー入力非反映、将来リファクタリング防止の3原則）。catchブロックにDS4-F008コメント追加。セクション10の設計判断表にエラーメッセージ固定文字列方針の行を追加。セクション9にエラーメッセージテストケース追加。セクション13にチェックリスト追加"
+    },
+    {
+      "finding_id": "DS4-F009",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "changes_made": "セクション6のcheckStopCondition()のcatchブロックにタイムアウト検出時のstopPattern自動無効化フェイルセーフを追加。セクション7のReDoS対策表に第6層フェイルセーフ自動無効化を追加。セクション8にフェイルセーフ動作の注記を追加。セクション13のNice to Haveに追加の自動通知UI将来検討を追記"
+    },
+    {
+      "finding_id": "DS4-F010",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "changes_made": "セクション3にサーバー再起動時の状態クリア動作を追記。globalThisクリアがセキュリティ上の正しい動作であり残留パターンリスクを排除する旨を明記。データ永続化を行わない設計方針を明記"
+    },
+    {
+      "finding_id": "DS4-F011",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "changes_made": "セクション6のcheckStopCondition()にRegExpフラグ方針コメントを追加（フラグなし構築、test()のみ使用、インラインフラグ(?i)等の許容）。セクション13のNice to Haveにフラグ方針コメント追加を追記"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": {
+    "total": 11,
+    "applied": 11,
+    "skipped": 0,
+    "must_fix_applied": 2,
+    "must_fix_total": 2,
+    "should_fix_applied": 6,
+    "should_fix_total": 6,
+    "nice_to_have_applied": 3,
+    "nice_to_have_total": 3
+  },
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー (Stage 4)",
+    "セクション3: データモデル設計 (DS4-F007, DS4-F010)",
+    "セクション4: API設計 (DS4-F004, DS4-F006)",
+    "セクション6: サーバーサイド処理設計 (DS4-F002, DS4-F005, DS4-F009, DS4-F011)",
+    "セクション7: セキュリティ設計 (DS4-F001, DS4-F003, DS4-F008)",
+    "セクション8: パフォーマンス設計 (DS4-F002)",
+    "セクション9: テスト設計 (DS4-F001, DS4-F002, DS4-F005, DS4-F008)",
+    "セクション10: 設計上の決定事項とトレードオフ (DS4-F001, DS4-F002, DS4-F005, DS4-F008)",
+    "セクション11: 制約条件 (DS4-F001)",
+    "セクション12: 変更対象ファイル一覧 (DS4-F001, DS4-F002, DS4-F004, DS4-F006)",
+    "セクション13: 実装チェックリスト (全Stage 4項目)"
+  ],
+  "timestamp": "2026-02-19T12:00:00Z"
+}

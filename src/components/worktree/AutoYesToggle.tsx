@@ -5,6 +5,7 @@
  * and a notification when auto-response occurs.
  *
  * Issue #225: Added duration propagation and HH:MM:SS countdown format
+ * Issue #314: Added AutoYesToggleParams interface with stopPattern support
  */
 
 'use client';
@@ -14,14 +15,21 @@ import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
 import { formatTimeRemaining } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
 
+/** Parameters for auto-yes toggle callback (Issue #314) */
+export interface AutoYesToggleParams {
+  enabled: boolean;
+  duration?: AutoYesDuration;
+  stopPattern?: string;
+}
+
 /** Props for AutoYesToggle component */
 export interface AutoYesToggleProps {
   /** Whether auto-yes is currently enabled */
   enabled: boolean;
   /** Expiration timestamp (ms since epoch) */
   expiresAt: number | null;
-  /** Callback when toggle is clicked */
-  onToggle: (enabled: boolean, duration?: AutoYesDuration) => Promise<void>;
+  /** Callback when toggle is clicked (Issue #314: object parameter pattern) */
+  onToggle: (params: AutoYesToggleParams) => Promise<void>;
   /** Last auto-response answer (for notification) */
   lastAutoResponse: string | null;
   /** Currently active CLI tool name (e.g. 'claude', 'codex') */
@@ -78,17 +86,17 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     if (enabled) {
       // OFF: execute directly
       setToggling(true);
-      onToggle(false).finally(() => setToggling(false));
+      onToggle({ enabled: false }).finally(() => setToggling(false));
     } else {
       // ON: show confirmation dialog
       setShowConfirmDialog(true);
     }
   }, [enabled, onToggle]);
 
-  const handleConfirm = useCallback((duration: AutoYesDuration) => {
+  const handleConfirm = useCallback((duration: AutoYesDuration, stopPattern?: string) => {
     setShowConfirmDialog(false);
     setToggling(true);
-    onToggle(true, duration).finally(() => setToggling(false));
+    onToggle({ enabled: true, duration, stopPattern }).finally(() => setToggling(false));
   }, [onToggle]);
 
   const handleCancel = useCallback(() => {
@@ -147,5 +155,3 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     </div>
   );
 });
-
-export default AutoYesToggle;

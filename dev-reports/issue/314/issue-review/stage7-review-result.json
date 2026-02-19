@@ -1,0 +1,226 @@
+{
+  "issue_number": 314,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-02-19",
+  "findings": [
+    {
+      "id": "S7-F001",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "setAutoYesEnabled()のspread operator化による既存テストへの影響 -- disable後のenabledat/expiresAtの保持動作変更",
+      "description": "S5-F001によりsetAutoYesEnabled()のdisableパスが `{ ...existing, enabled: false }` に変更される設計が追加された。現在のコード（auto-yes-manager.ts line 224-233）はdisable時に `enabledAt: existing?.enabledAt ?? 0, expiresAt: existing?.expiresAt ?? 0` と明示的にフォールバックを行っている。spread operatorに変更した場合、existingがundefinedの場合（事前にset されていないworktreeIdに対してsetAutoYesEnabled(false)を呼んだ場合）にspread演算子が正常に動作するかが論点となる。現在のテスト `should disable auto-yes even when no prior state exists` (auto-yes-manager.test.ts line 110-116) は `enabledAt: 0, expiresAt: 0` を期待しているが、spread operator化後は `existing` がundefinedの場合のフォールバック処理が必要（`existing ?? { enabledAt: 0, expiresAt: 0 }` など）。この点がIssue本文のコードイメージでは考慮されていない。",
+      "location": "## 提案する解決策 > ### setAutoYesEnabled() の disable パス修正 コードイメージ / tests/unit/lib/auto-yes-manager.test.ts (line 110-116)",
+      "suggestion": "Issue本文のsetAutoYesEnabled() disableパスのコードイメージを以下のように修正する:\n```typescript\nconst existing = autoYesStates.get(worktreeId);\nautoYesStates.set(worktreeId, {\n  enabled: false,\n  enabledAt: existing?.enabledAt ?? 0,\n  expiresAt: existing?.expiresAt ?? 0,\n  ...(existing && { stopReason: existing.stopReason, stopPattern: existing.stopPattern }),\n});\n```\nまたは、disableパスのコードイメージにexistingがundefinedの場合のフォールバック処理を明記する。「existing存在時のみspread、未存在時はリテラル構築」という条件分岐を実装タスクの注記に追加すべき。"
+    },
+    {
+      "id": "S7-F002",
+      "severity": "should_fix",
+      "category": "test",
+      "title": "AutoYesConfirmDialog.test.tsxのonConfirm引数検証が新シグネチャに未対応 -- テストは壊れないが検証が不完全になる",
+      "description": "AutoYesConfirmDialog.test.tsx (line 115-143) のInteractionsテストケースでは `expect(defaultProps.onConfirm).toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION)` と1引数のみを検証している。Issue #314の変更後、onConfirmは `(duration: AutoYesDuration, stopPattern: string)` の2引数になるため、既存テストは `toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION)` で引数数が合わなくなる。Vitestの `toHaveBeenCalledWith` はexact matchのため、2引数で呼ばれた場合に1引数のexpectは **失敗する**。これは既存テストのbreak pointであり、Issueの実装タスクにAutoYesConfirmDialogテストの修正が含まれているものの、具体的にどのテストケースが壊れるかの特定がない。",
+      "location": "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx (lines 115-143 Interactions section)",
+      "suggestion": "Issue #314の実装タスク内のAutoYesConfirmDialogテスト項目に、既存テストの修正が必要であることを明記する。具体的には、Interactions セクションの3つのテストケース（default/3h/8h duration）で `toHaveBeenCalledWith(duration)` を `toHaveBeenCalledWith(duration, '')` または `toHaveBeenCalledWith(duration, expect.any(String))` に修正する必要がある。さらに、新規テストとして「stopPatternが入力された場合のonConfirm呼び出し引数検証」を追加する。この修正が必要なテストケースの具体的な行番号（line 119, 127, 135）を実装タスクに含めることを推奨。"
+    },
+    {
+      "id": "S7-F003",
+      "severity": "should_fix",
+      "category": "test",
+      "title": "AutoYesToggle.test.tsxのonToggle引数検証が新シグネチャに未対応 -- テストは壊れないがstopPattern伝達の検証が不足",
+      "description": "AutoYesToggle.test.tsx (line 39-62) のOFF->ONテストケースでは `expect(defaultProps.onToggle).toHaveBeenCalledWith(true, DEFAULT_AUTO_YES_DURATION)` と2引数を検証している。Issue #314の変更後、onToggleは `(enabled: boolean, duration?: AutoYesDuration, stopPattern?: string)` の3引数になる。VitestのtoHaveBeenCalledWithはexact matchだが、第3引数がオプショナルの場合、AutoYesToggleのhandleConfirmが `onToggle(true, duration, stopPattern)` を呼ぶ実装では3引数で呼ばれるため、2引数のexpectは **失敗する**（空文字列 '' が第3引数として渡される場合）。AutoYesToggleProps.onToggleの型が `(enabled: boolean, duration?: AutoYesDuration, stopPattern?: string) => Promise<void>` に変更され、handleConfirmが常にstopPatternを渡す実装の場合、既存テストのbreak pointとなる。",
+      "location": "tests/unit/components/worktree/AutoYesToggle.test.tsx (lines 39-62 OFF to ON section)",
+      "suggestion": "Issue #314の実装タスク内のAutoYesToggleテスト項目に、既存テストの修正が必要であることを明記する。具体的にはOFF->ONセクションの2つのテストケース（default/3h duration）で `toHaveBeenCalledWith(true, duration)` を `toHaveBeenCalledWith(true, duration, expect.any(String))` に修正する必要がある。ON->OFFテスト（line 81-88の`toHaveBeenCalledWith(false)`）は、disable時にstopPatternを渡さないためそのまま通過する。"
+    },
+    {
+      "id": "S7-F004",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "current-output/route.tsのautoYesレスポンス構築にstopReasonフィールド追加の具体的なコード変更箇所が未特定",
+      "description": "current-output/route.ts (line 128-131) では `autoYes: { enabled: autoYesState?.enabled ?? false, expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null }` と直接オブジェクトリテラルでレスポンスを構築している。stopReasonフィールドの追加は、このリテラル内に `stopReason: autoYesState?.stopReason` を追加するだけだが、Issue本文では変更対象ファイルテーブルに `stopReason`フィールド追加` と記載しているのみで、**autoYesState?.enabledがfalseの場合にstopReasonを返すかどうか**が未明確。現在のコード（line 129）はenabled=falseの場合にexpiresAtをnullにしているが、stopReasonはenabled=false時にこそ必要な情報（なぜ無効化されたかの理由）。stopReasonの返却条件をIssueに明記すべき。",
+      "location": "src/app/api/worktrees/[id]/current-output/route.ts (lines 128-131)",
+      "suggestion": "Issue本文のcurrent-output/route.ts変更内容に以下を追記する：「autoYesレスポンスのstopReasonフィールドはautoYesState?.stopReasonをそのまま返す（enabledがtrueでもfalseでも常に返却する）。クライアント側のWorktreeDetailRefactored.tsxでenabled遷移時のみstopReasonをチェックするため、サーバー側でフィルタリングする必要はない」。これにより、実装時の判断ポイントが明確になる。"
+    },
+    {
+      "id": "S7-F005",
+      "severity": "should_fix",
+      "category": "compatibility",
+      "title": "auto-yes/route.ts POSTハンドラーでstopPatternパラメータの受け渡し -- setAutoYesEnabled()シグネチャ変更の全呼び出し元への影響",
+      "description": "auto-yes/route.ts (line 136) では `setAutoYesEnabled(params.id, body.enabled, body.enabled ? duration : undefined)` を呼び出している。setAutoYesEnabled()のシグネチャに第4引数 `stopPattern?: string` を追加する場合、この呼び出し箇所を `setAutoYesEnabled(params.id, body.enabled, body.enabled ? duration : undefined, stopPattern)` に修正する必要がある。Issue本文の影響範囲テーブルには「stopPatternパラメータの受け渡し」と記載されているが、具体的にenabled=false時にstopPatternを渡すかどうか（手動OFF時はstopPattern不要）の判断が未明記。また、S5-F001のspread operator化により、enabled=false時はstopPatternパラメータが不要（既存stateのstopPatternがspreadで保持される）であることとの整合性も確認が必要。",
+      "location": "src/app/api/worktrees/[id]/auto-yes/route.ts (line 136) / ## 実装タスク",
+      "suggestion": "setAutoYesEnabled()のシグネチャ変更とroute.ts呼び出し元の修正を実装タスクに具体的に記載する。推奨: enabled=true時のみstopPatternを渡す。`setAutoYesEnabled(params.id, body.enabled, body.enabled ? duration : undefined, body.enabled ? stopPattern : undefined)`。enabled=false時のsetAutoYesEnabled()はspread operatorで既存stateを保持するためstopPatternパラメータは不要。"
+    },
+    {
+      "id": "S7-F006",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "WorktreeDetailRefactored.tsxのfetchCurrentOutput()でstopReasonを受け取るためのdata.autoYes型の暗黙的拡張",
+      "description": "WorktreeDetailRefactored.tsx (line 1037-1041) のfetchCurrentOutput()内でautoYes状態を更新する処理は `setAutoYesEnabled(data.autoYes.enabled)` と `setAutoYesExpiresAt(data.autoYes.expiresAt)` のみ。Issue #314の変更では、ここにstopReasonのチェック処理（useRefによるenabled遷移検出+トースト表示）を追加する必要がある。しかし、現在のfetchCurrentOutput()はuseCallbackで `[worktreeId, actions, state.prompt.visible]` を依存配列としており、showToast（useToast由来）は依存配列に含まれていない。showToast関数自体はuseToast()の戻り値でstable referenceだが、fetchCurrentOutput()内でshowToastを使用するためには依存配列への追加が必要。useCallbackの依存配列変更はレンダリング頻度に影響する可能性がある。",
+      "location": "src/components/worktree/WorktreeDetailRefactored.tsx (lines 1009-1045, 1352)",
+      "suggestion": "fetchCurrentOutput()のuseCallback依存配列にshowToastを追加する必要がある。ただしshowToastはuseToastフックの戻り値であり通常stable referenceのため、実際のレンダリング頻度への影響は最小限。あるいは、トースト表示ロジックをfetchCurrentOutput()内ではなく、autoYesEnabledのuseEffect監視で実装する方法もある。Issue本文の実装タスクに「fetchCurrentOutput()の依存配列へのshowToast追加」または「useEffectによるautoYes状態変更監視」のどちらのアプローチを採用するかの判断を追記することを推奨。"
+    },
+    {
+      "id": "S7-F007",
+      "severity": "nice_to_have",
+      "category": "test",
+      "title": "auto-yes-persistence.test.tsへのstopPatternフィールド永続化テストの具体的なテストケース構造が未記載",
+      "description": "Issue本文の実装タスクに「tests/integration/auto-yes-persistence.test.tsにstopPatternフィールドの永続化テスト追加」が記載されている（S3-F004反映済み）。ただし、テストケースの具体的な構造が未記載。既存のduration永続化テスト（auto-yes-persistence.test.ts line 156-184）は `setAutoYesEnabled('test-duration-reload', true, 10800000)` を呼び出して`expiresAt`の保持を検証している。stopPattern永続化テストでは `setAutoYesEnabled('test-stoppattern-reload', true, duration, 'rm -rf')` を呼び出し、モジュールリロード後にstopPatternが保持されていることを検証する必要があるが、getAutoYesState()の戻り値にstopPatternフィールドが含まれることの検証方法がIssueに明示されていない。",
+      "location": "tests/integration/auto-yes-persistence.test.ts / ## 実装タスク > 結合テスト追加",
+      "suggestion": "テストケースの概要をIssue本文に追記する。例: 「setAutoYesEnabled(id, true, duration, stopPattern)呼び出し後、vi.resetModules()によるモジュールリロードを経てgetAutoYesState(id)?.stopPatternが保持されていることを検証」。AutoYesStateインターフェースにstopPatternフィールドが追加されるため、getAutoYesState()の戻り値から直接アクセスできることを明記。"
+    },
+    {
+      "id": "S7-F008",
+      "severity": "nice_to_have",
+      "category": "impact",
+      "title": "auto-yes-manager.tsのglobalThis型宣言 -- AutoYesState型変更は自動反映されるため追加変更不要（確認済み）",
+      "description": "auto-yes-manager.ts (line 116-121) のglobalThis型宣言は `var __autoYesStates: Map<string, AutoYesState> | undefined` と定義されている。AutoYesStateインターフェースにstopPattern/stopReasonフィールドを追加した場合、globalThis型宣言はAutoYesState型の参照を使用しているため自動的に新フィールドを含む型になる。追加の型宣言変更は不要。Stage 3 (S3-F004) で指摘された「globalThis型宣言の更新が必要」は、この確認により変更不要と確定する。",
+      "location": "src/lib/auto-yes-manager.ts (lines 116-121)",
+      "suggestion": "追加対応不要。Impact scope的に影響なし確認済み。"
+    },
+    {
+      "id": "S7-F009",
+      "severity": "nice_to_have",
+      "category": "compatibility",
+      "title": "handleAutoYesToggle()のfetch body拡張 -- cliToolIdとの同列配置の確認",
+      "description": "WorktreeDetailRefactored.tsx (line 1193) のfetch bodyは `JSON.stringify({ enabled, cliToolId: activeCliTab, duration })` で構築されている。stopPatternを追加すると `JSON.stringify({ enabled, cliToolId: activeCliTab, duration, stopPattern })` となる。route.ts側のbody解析（line 102-128）は現在 `body.enabled`、`body.duration`、`body.cliToolId` を個別に検証しているため、`body.stopPattern` の検証コードの追加が必要。Issue本文にはこの点が記載済み（サーバーサイドバリデーション）であり、具体的なコード変更箇所も影響範囲テーブルに含まれている。追加の指摘は不要。",
+      "location": "src/components/worktree/WorktreeDetailRefactored.tsx (line 1193) / src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "suggestion": "追加対応不要。Issue本文に既に記載済み。"
+    }
+  ],
+  "summary": {
+    "total_findings": 9,
+    "must_fix": 0,
+    "should_fix": 6,
+    "nice_to_have": 3
+  },
+  "previous_findings_verification": {
+    "stage3_findings_status": {
+      "total": 14,
+      "all_addressed_in_current_issue": true,
+      "details": {
+        "S3-F001": "VERIFIED - 実装タスクにsetAutoYesEnabled/getAutoYesStateテスト追加が明記。Stage 5で更にS5-F002（再有効化時のクリア確認テスト）が追加済み",
+        "S3-F002": "VERIFIED - getAutoYesState()期限切れ無効化時のstopPattern保持・stopReason='expired'設定がコードイメージ付きで記載済み",
+        "S3-F003": "VERIFIED - CurrentOutputResponse.autoYes型にstopReasonフィールド追加が変更対象ファイルテーブルと実装タスクの両方に明記済み。型は 'expired' | 'stop_pattern_matched'（S5-F003で'manual'を除去済み）",
+        "S3-F004": "VERIFIED - tests/integration/auto-yes-persistence.test.tsへのstopPattern永続化テスト追加が実装タスクに記載済み",
+        "S3-F005": "VERIFIED - AutoYesConfirmDialog stopPattern入力フィールドテスト追加が実装タスクに記載済み",
+        "S3-F006": "VERIFIED - AutoYesToggle onToggle stopPattern引数テスト追加が実装タスクに記載済み",
+        "S3-F007": "VERIFIED - Desktop/Mobile両方のAutoYesToggleが同一handleAutoYesToggleを参照する旨がstopPatternデータフローに追記済み",
+        "S3-F008": "VERIFIED - auto-yes GETレスポンスへのstopReason追加は将来検討として記録済み",
+        "S3-F009": "VERIFIED - 初期実装は全文照合、差分照合は将来最適化として明記済み",
+        "S3-F010": "VERIFIED - 関連コンポーネントにsession-cleanup.ts変更不要が追記済み",
+        "S3-F011": "VERIFIED - useAutoYes.tsの変更不要判断が維持",
+        "S3-F012": "VERIFIED - auto-yes-resolver.testへの影響なし確認済み",
+        "S3-F013": "VERIFIED - auto-yes-config.testへのテストは暗黙的に含まれる",
+        "S3-F014": "VERIFIED - useAutoYes.testへの影響なし確認済み"
+      }
+    },
+    "stage5_findings_status": {
+      "total": 7,
+      "all_addressed_in_current_issue": true,
+      "details": {
+        "S5-F001": "VERIFIED - setAutoYesEnabled()のdisableパスspread operator化がIssue本文に反映済み。新規指摘S7-F001でexisting=undefined時のフォールバック処理を追加指摘",
+        "S5-F002": "VERIFIED - 再有効化時のstopReasonクリア確認テストが実装タスクに追加済み",
+        "S5-F003": "VERIFIED - stopReason型が 'expired' | 'stop_pattern_matched' に確定、undefinedは手動OFF/初期状態として扱う方針が全セクションに一貫して反映済み",
+        "S5-F004": "VERIFIED - トースト重複防止メカニズム（useRef + enabled遷移検出）がIssue本文に設計根拠付きで反映済み。新規指摘S7-F006でfetchCurrentOutput依存配列の影響を追加指摘",
+        "S5-F005": "VERIFIED - safe-regex2見送り、パターン長制限+try-catch構文検証のみの方針が確定し、Issue本文に反映済み",
+        "S5-F006": "VERIFIED - 判定タイミングの番号についての注記が追加済み",
+        "S5-F007": "VERIFIED - 空文字列正規化処理がstopPatternデータフローに追記済み"
+      }
+    }
+  },
+  "additional_impact_check": {
+    "spread_operator_change": {
+      "affected_callers": [
+        {
+          "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+          "line": 136,
+          "current_call": "setAutoYesEnabled(params.id, body.enabled, body.enabled ? duration : undefined)",
+          "required_change": "Add 4th argument: stopPattern (only when enabled=true)",
+          "impact": "should_fix (S7-F005)"
+        },
+        {
+          "file": "src/lib/auto-yes-manager.ts",
+          "line": "197-201 (getAutoYesState expire path)",
+          "current_call": "Uses spread operator already, no setAutoYesEnabled call",
+          "required_change": "Add stopReason: 'expired' to spread result",
+          "impact": "Already documented in Issue"
+        },
+        {
+          "file": "src/lib/auto-yes-manager.ts",
+          "line": "pollAutoYes (new code)",
+          "current_call": "N/A - new code path",
+          "required_change": "Set stopReason on state, then call setAutoYesEnabled(false)",
+          "impact": "Already documented in Issue"
+        }
+      ]
+    },
+    "stopReason_type_change": {
+      "type": "'expired' | 'stop_pattern_matched' (undefined = manual/initial)",
+      "affected_locations": [
+        "AutoYesState interface (auto-yes-manager.ts)",
+        "CurrentOutputResponse.autoYes type (WorktreeDetailRefactored.tsx line 85-89)",
+        "current-output/route.ts autoYes response (line 128-131)"
+      ],
+      "no_impact_on": [
+        "useAutoYes.ts - does not use stopReason",
+        "auto-yes-resolver.ts - independent of stopReason",
+        "session-cleanup.ts - only calls stopAutoYesPolling()",
+        "prompt-detector.ts - independent module",
+        "prompt-answer-sender.ts - independent module"
+      ]
+    },
+    "currentOutputResponse_type_change": {
+      "current_type": "autoYes?: { enabled: boolean; expiresAt: number | null }",
+      "new_type": "autoYes?: { enabled: boolean; expiresAt: number | null; stopReason?: 'expired' | 'stop_pattern_matched' }",
+      "consumers": [
+        {
+          "file": "WorktreeDetailRefactored.tsx",
+          "usage": "fetchCurrentOutput() line 1037-1041",
+          "impact": "Must add stopReason handling + toast logic"
+        },
+        {
+          "file": "useAutoYes.ts",
+          "usage": "Does not directly consume CurrentOutputResponse",
+          "impact": "No change needed"
+        }
+      ]
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "224-233",
+      "relevance": "setAutoYesEnabled() disableパスのspread operator化。existing=undefined時のフォールバック処理が課題（S7-F001）"
+    },
+    {
+      "file": "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+      "lines": "115-143",
+      "relevance": "onConfirm引数のexact match検証が新シグネチャで壊れる（S7-F002）"
+    },
+    {
+      "file": "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+      "lines": "39-62",
+      "relevance": "onToggle引数のexact match検証が新シグネチャで壊れる可能性（S7-F003）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "128-131",
+      "relevance": "autoYesレスポンスへのstopReasonフィールド追加の具体的な返却条件が未明記（S7-F004）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "lines": "136",
+      "relevance": "setAutoYesEnabled()呼び出しへのstopPatternパラメータ追加（S7-F005）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1009-1045, 1352",
+      "relevance": "fetchCurrentOutput()のuseCallback依存配列にshowToast追加が必要（S7-F006）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト設計パターン・モジュール配置規約の参照元"
+    }
+  ]
+}

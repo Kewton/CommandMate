@@ -1,0 +1,115 @@
+{
+  "issue_number": 314,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "review_date": "2026-02-19",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "DS1-F001",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "SRP: pollAutoYes()への責務追加が過度に集中",
+      "description": "pollAutoYes()はすでに出力キャプチャ、ANSI除去、thinking検出、プロンプト検出、重複防止、応答送信、エラーハンドリングの7つの責務を持つ。ここにStop条件チェックを追加すると8つ目の責務となる。設計書では挿入ポイントとして「thinking後、プロンプト検出前」と明記しているが、Stop条件マッチングロジック（RegExp生成・テスト・状態更新・ポーラー停止・ログ出力）は独立した関数として抽出すべきである。",
+      "location": "設計方針書 セクション6「pollAutoYes() 内のStop条件チェック（挿入ポイント）」",
+      "suggestion": "Stop条件チェックロジックをcheckStopCondition(worktreeId: string, cleanOutput: string): boolean のような独立関数に抽出する。pollAutoYes()内では if (checkStopCondition(worktreeId, cleanOutput)) { return; } のように呼び出すことで、SRP準拠かつテスタビリティも向上する。"
+    },
+    {
+      "id": "DS1-F002",
+      "severity": "should_fix",
+      "category": "dry",
+      "title": "DRY: 正規表現バリデーションロジックの重複",
+      "description": "設計書ではクライアント側（AutoYesConfirmDialog内のuseEffect）とサーバー側（auto-yes/route.ts内のバリデーション）の両方で new RegExp(pattern) による構文検証を行うが、バリデーション条件（パターン長チェック MAX_STOP_PATTERN_LENGTH + 構文検証）が2箇所に分散する。Defense in Depthの観点では正しいが、バリデーション条件が変更された場合に不整合リスクがある。",
+      "location": "設計方針書 セクション5「AutoYesConfirmDialog 変更」およびセクション7「バリデーション（Defense in Depth）」",
+      "suggestion": "validateStopPattern(pattern: string): { valid: boolean; error?: string } のような共通バリデーション関数を auto-yes-config.ts に定義し、クライアント・サーバー双方から利用する。MAX_STOP_PATTERN_LENGTHと構文検証を一元管理できる。"
+    },
+    {
+      "id": "DS1-F003",
+      "severity": "must_fix",
+      "category": "solid",
+      "title": "OCP: setAutoYesEnabled()のdisableパスでspread operatorによる暗黙的フィールド保持は脆弱",
+      "description": "設計書のsetAutoYesEnabled()のdisableパスでは、spread operatorで既存のstopReason/stopPatternを保持する設計だが、...(existing && { stopReason: existing.stopReason, stopPattern: existing.stopPattern }) という条件付きspreadは、将来のAutoYesStateフィールド追加時に保持漏れを起こしやすい。また、pollAutoYes()内のStep 1でautoYesStates.set()を直接呼び、Step 2でsetAutoYesEnabled(worktreeId, false)を呼ぶ2段階更新は、setAutoYesEnabled内で再度existingを取得してspreadするため一見正しく動作するが、状態変更の順序依存性が高く、将来のリファクタリングで壊れやすい。",
+      "location": "設計方針書 セクション6「pollAutoYes()内のStop条件チェック」Step 1-2、セクション6「setAutoYesEnabled() disableパス修正」",
+      "suggestion": "方法1: setAutoYesEnabled()にstopReasonパラメータを追加し、disable時の理由を明示的に渡す設計にする（例: setAutoYesEnabled(id, false, undefined, undefined, 'stop_pattern_matched')）。方法2: disableAutoYes(worktreeId: string, reason?: StopReason)のような専用関数を設ける。いずれの方法でもpollAutoYes()内での直接的なautoYesStates.set()呼び出し（Step 1）を不要にできる。"
+    },
+    {
+      "id": "DS1-F004",
+      "severity": "nice_to_have",
+      "category": "kiss",
+      "title": "KISS: prevAutoYesEnabledRefによるトースト重複防止の複雑性",
+      "description": "設計書ではWorktreeDetailRefactored内でprevAutoYesEnabledRefを使い、enabled: true -> false遷移時のみstopReasonをチェックしてトースト表示する設計である。既に巨大なWorktreeDetailRefactoredコンポーネント（2150行）にRef管理を追加するのは複雑性を微増させる。ただし設計書自身がこれをトレードオフとして認識しているため、代替案の優先度は低い。",
+      "location": "設計方針書 セクション5「WorktreeDetailRefactored 変更」",
+      "suggestion": "stopReasonの検出とトースト表示ロジックをカスタムフック（例: useAutoYesStopNotification）に抽出し、WorktreeDetailRefactoredの責務を軽減する。"
+    },
+    {
+      "id": "DS1-F005",
+      "severity": "nice_to_have",
+      "category": "yagni",
+      "title": "YAGNI: stopReason 'expired'の新規追加は現時点で必要か",
+      "description": "現行のgetAutoYesState()では期限切れ時にenabledをfalseにするだけでstopReasonは設定していない。設計書ではstopReason: 'expired'を追加しているが、クライアント側で期限切れトーストを表示する設計は記載されていない。stopReason='stop_pattern_matched'のみが今回のユースケースであり、'expired'は将来拡張のための事前設計に見える。",
+      "location": "設計方針書 セクション3「設計判断: stopReasonの型」およびセクション6「getAutoYesState() 期限切れ処理修正」",
+      "suggestion": "初期実装ではstopReasonを'stop_pattern_matched'のみに限定し、'expired'は将来のIssueで対応する方針も検討に値する。ただし、対称性の観点から'expired'を同時に実装するメリットもあるため、実装コストが低ければ現設計でも許容可能。"
+    },
+    {
+      "id": "DS1-F006",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "ISP: AutoYesToggle.onToggleシグネチャの肥大化",
+      "description": "AutoYesToggleのonToggleプロパティが (enabled: boolean, duration?: AutoYesDuration, stopPattern?: string) => Promise<void> に変更される設計だが、optional引数が増えるたびにシグネチャが肥大化する。現在3つ目のoptionalパラメータ追加であり、今後の拡張（例: stop条件の種類追加）でさらに増加する可能性がある。",
+      "location": "設計方針書 セクション5「AutoYesToggle 変更」",
+      "suggestion": "onToggleのシグネチャをオブジェクト引数に変更する: onToggle: (params: { enabled: boolean; duration?: AutoYesDuration; stopPattern?: string }) => Promise<void>。これによりOCPに準拠し、将来の拡張でもシグネチャの変更が不要になる。ただし既存テストへの影響が大きいため、コスト評価が必要。"
+    },
+    {
+      "id": "DS1-F007",
+      "severity": "nice_to_have",
+      "category": "api_design",
+      "title": "API設計: stopReasonフィールドがenabled状態と独立して返却される",
+      "description": "設計書ではcurrent-output APIのレスポンスでstopReasonをenabledの値に関わらずそのまま返却する設計。これはクライアント側でenabled遷移検出を必要とし、APIレスポンスの自己完結性が低い。enabled=falseかつstopReason='stop_pattern_matched'の組み合わせが「Stop条件で自動停止された」を意味するが、この解釈がAPI利用者に暗黙的に要求される。",
+      "location": "設計方針書 セクション4「GET /api/worktrees/[id]/current-output（既存拡張）」",
+      "suggestion": "現設計でも動作上は問題ないが、APIドキュメント（JSDocまたはOpenAPI）でstopReasonの解釈ルールを明記しておくことを推奨する。"
+    },
+    {
+      "id": "DS1-F008",
+      "severity": "nice_to_have",
+      "category": "component_design",
+      "title": "コンポーネント設計: AutoYesConfirmDialogのstopPattern状態がダイアログ再表示時にリセットされない可能性",
+      "description": "設計書のAutoYesConfirmDialogではstopPatternをuseState('')で初期化するが、ダイアログがisOpen=falseで非表示→再表示された際に、前回入力したstopPatternがクリアされるかは、Modalコンポーネントの実装（アンマウント vs CSS非表示）に依存する。Reactの一般的なModalパターンでは、条件付きレンダリング（{isOpen && <Dialog />}）でない限り状態は保持される。",
+      "location": "設計方針書 セクション5「AutoYesConfirmDialog 変更」",
+      "suggestion": "isOpen変更時にstopPatternとregexErrorをリセットするuseEffectを追加する: useEffect(() => { if (isOpen) { setStopPattern(''); setRegexError(null); } }, [isOpen]); これによりダイアログ表示のたびにクリーンな状態で開始できる。"
+    },
+    {
+      "id": "DS1-F009",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "DIP: pollAutoYes()内でautoYesStates Mapを直接操作",
+      "description": "設計書のpollAutoYes()のStop条件マッチ処理（Step 1）ではautoYesStates.set()でMapを直接操作している。これはauto-yes-manager.tsモジュール内部であるため厳密にはDIP違反ではないが、setAutoYesEnabled()やgetAutoYesState()といった公開API関数が存在する中でMapを直接操作するパスが増えると、状態管理の一貫性が損なわれる。特にstopReasonの設定がMap直接操作でのみ行われ、公開APIでは設定できない設計は将来的な保守性の課題となる。",
+      "location": "設計方針書 セクション6「pollAutoYes() 内のStop条件チェック」Step 1",
+      "suggestion": "DS1-F003の改善提案と連動して、setAutoYesEnabled()またはdisableAutoYes()関数内でstopReasonの設定を完結させ、pollAutoYes()からはMap直接操作を排除する。"
+    }
+  ],
+  "summary": {
+    "total_findings": 9,
+    "must_fix": 1,
+    "should_fix": 4,
+    "nice_to_have": 4
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-314-auto-yes-stop-condition-design-policy.md",
+    "src/lib/auto-yes-manager.ts",
+    "src/config/auto-yes-config.ts",
+    "src/lib/auto-yes-resolver.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/hooks/useAutoYes.ts"
+  ],
+  "timestamp": "2026-02-19T12:00:00Z"
+}

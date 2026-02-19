@@ -67,6 +67,7 @@
     "rehype-highlight": "^7.0.2",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "safe-regex2": "^5.0.0",
     "uuid": "^13.0.0",
     "ws": "^8.18.3",
     "xterm": "^5.3.0",

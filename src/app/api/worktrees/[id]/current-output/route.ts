@@ -12,7 +12,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
 import { detectSessionStatus } from '@/lib/status-detector';
-import { getAutoYesState, getLastServerResponseTimestamp } from '@/lib/auto-yes-manager';
+import { getAutoYesState, getLastServerResponseTimestamp, isValidWorktreeId } from '@/lib/auto-yes-manager';
 
 const SUPPORTED_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
 
@@ -25,6 +25,14 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    // [SEC-DS4-F006] Validate worktree ID format (Issue #314)
+    if (!isValidWorktreeId(params.id)) {
+      return NextResponse.json(
+        { error: 'Invalid worktree ID format' },
+        { status: 400 }
+      );
+    }
+
     const db = getDbInstance();
 
     // Check if worktree exists
@@ -124,10 +132,11 @@ export async function GET(
       // Prompt detection results
       isPromptWaiting,
       promptData: isPromptWaiting ? promptDetection.promptData : null,
-      // Auto-yes state
+      // Auto-yes state (Issue #314: stopReason added for stop condition notification)
       autoYes: {
         enabled: autoYesState?.enabled ?? false,
         expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
+        stopReason: autoYesState?.stopReason,
       },
       // Issue #138: Server-side response timestamp for duplicate prevention
       lastServerResponseTimestamp,

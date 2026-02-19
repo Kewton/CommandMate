@@ -1,0 +1,156 @@
+{
+  "issue_number": 314,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_date": "2026-02-19",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "DS2-F001",
+      "severity": "must_fix",
+      "category": "consistency",
+      "title": "AutoYesState型: 設計書のstopPattern/stopReasonフィールドが既存インターフェースに未定義",
+      "description": "設計書セクション3ではAutoYesStateに stopPattern?: string と stopReason?: 'expired' | 'stop_pattern_matched' を追加する設計だが、現在の src/lib/auto-yes-manager.ts (L21-29) のAutoYesStateインターフェースには enabled, enabledAt, expiresAt の3フィールドのみが定義されている。設計書の記載は「既存拡張」として正確であり、追加フィールドはoptionalであるため既存コードに破壊的影響はない。ただし、globalThisの型宣言 (L116-121) も更新が必要であり、この点は設計書に明記されていない。",
+      "location": "設計方針書 セクション3「AutoYesState インターフェース拡張」 vs src/lib/auto-yes-manager.ts L21-29, L116-121",
+      "suggestion": "設計書に globalThis.__autoYesStates の型宣言更新が必要である旨を明記する。実装時に declare global ブロック内の Map<string, AutoYesState> は自動的に新しいAutoYesStateインターフェースを参照するため、コード変更は不要だが、設計書の変更対象セクションに記載すべき。"
+    },
+    {
+      "id": "DS2-F002",
+      "severity": "must_fix",
+      "category": "consistency",
+      "title": "setAutoYesEnabled()シグネチャ: 設計書の4引数と現在の3引数の差異が正確に記述されているが、呼び出し元の全箇所が特定されていない",
+      "description": "設計書ではsetAutoYesEnabled()に第4引数 stopPattern?: string を追加する設計 (セクション6) だが、現在のシグネチャは setAutoYesEnabled(worktreeId: string, enabled: boolean, duration?: AutoYesDuration) の3引数 (L213)。設計書のAPI設計セクション4では setAutoYesEnabled(params.id, body.enabled, body.enabled ? duration : undefined, body.enabled ? stopPattern : undefined) と4引数呼び出しを記載している。しかし、auto-yes/route.ts L136 の現在の呼び出し setAutoYesEnabled(params.id, body.enabled, body.enabled ? duration : undefined) も変更が必要である。この呼び出し箇所の変更は設計書に記載されているが、他にsetAutoYesEnabled()を呼び出している箇所がないか確認が必要。",
+      "location": "設計方針書 セクション6「setAutoYesEnabled() 修正」 vs src/lib/auto-yes-manager.ts L213, src/app/api/worktrees/[id]/auto-yes/route.ts L136",
+      "suggestion": "テストファイル tests/unit/lib/auto-yes-manager.test.ts および tests/integration/auto-yes-persistence.test.ts でもsetAutoYesEnabled()を多数呼び出しており(約15箇所)、3引数のままでも動作するが、テスト設計セクション9にこれらの既存テストへの影響を明記すべき。"
+    },
+    {
+      "id": "DS2-F003",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "getAutoYesState()期限切れ処理: 設計書の disableAutoYes() 委譲と現在のspread operator実装の差異",
+      "description": "設計書セクション6ではgetAutoYesState()の期限切れ処理を disableAutoYes(worktreeId, 'expired') に委譲する設計だが、現在の実装 (L196-203) では spread operator で { ...state, enabled: false } とする方式。disableAutoYes()はstopPatternを明示的に保持する設計であるため、期限切れ時もstopPatternが保持される。しかし、現在の実装では期限切れ後にstopPatternフィールドが存在しない（現状のAutoYesStateにstopPatternがない）ため、この差異は新フィールド追加後に初めて表出する。設計書の記述は正確であり実装可能だが、disableAutoYes()が未作成の状態で段階的に実装する場合の実装順序に注意が必要。",
+      "location": "設計方針書 セクション6「getAutoYesState() 期限切れ処理修正」 vs src/lib/auto-yes-manager.ts L191-206",
+      "suggestion": "実装チェックリストに実装順序の明記を推奨: (1) AutoYesState型拡張 -> (2) disableAutoYes()関数追加 -> (3) setAutoYesEnabled()修正 -> (4) getAutoYesState()修正 -> (5) checkStopCondition()追加 -> (6) pollAutoYes()修正"
+    },
+    {
+      "id": "DS2-F004",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "auto-yes/route.ts: stopPatternバリデーション挿入位置と既存コードフローの整合性",
+      "description": "設計書セクション4ではPOSTハンドラにstopPatternバリデーション（空文字正規化 + validateStopPattern()呼び出し）を追加する設計。現在のauto-yes/route.ts (L85-158) では、body.enabled検証 -> duration検証 -> cliToolId検証 -> setAutoYesEnabled() の順序。設計書のstopPatternバリデーションの挿入位置は明確に記述されていない。duration検証の後、cliToolId検証の前または後に挿入するのが自然だが、enabled=true時のみstopPatternが意味を持つため、duration検証と同じスコープ（body.enabled条件内）に配置すべき。",
+      "location": "設計方針書 セクション4「POST /api/worktrees/[id]/auto-yes」 vs src/app/api/worktrees/[id]/auto-yes/route.ts L85-158",
+      "suggestion": "設計書のサーバーサイドバリデーションセクションに、stopPatternバリデーションの挿入位置を明示する。具体的には L120-129 のduration検証ブロックの直後、かつ body.enabled=true のスコープ内に配置することを推奨。"
+    },
+    {
+      "id": "DS2-F005",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "current-output/route.ts: stopReasonフィールド追加箇所の整合性",
+      "description": "設計書セクション4ではcurrent-output APIのautoYesオブジェクトに stopReason?: 'expired' | 'stop_pattern_matched' を追加する設計。現在の実装 (L128-131) では autoYes: { enabled: ..., expiresAt: ... } の2フィールドのみ。設計書では「stopReasonはenabledの値に関わらずautoYesState?.stopReasonをそのまま返却」と記載しており、実装としては L128-131 に stopReason: autoYesState?.stopReason を1行追加するだけで実現可能。しかし、autoYesStateがnullの場合（L105でnullが返る可能性）、stopReasonはundefinedになるため設計書の意図と一致する。",
+      "location": "設計方針書 セクション4「GET /api/worktrees/[id]/current-output」 vs src/app/api/worktrees/[id]/current-output/route.ts L128-131",
+      "suggestion": "整合性は問題ないが、設計書のJSDoc API解釈ルール（セクション4）をcurrent-output/route.tsのGET関数のJSDocに追加する実装漏れがないよう、変更対象ファイル一覧の変更概要に「JSDoc追加」を明記することを推奨。"
+    },
+    {
+      "id": "DS2-F006",
+      "severity": "should_fix",
+      "category": "accuracy",
+      "title": "AutoYesConfirmDialog: onConfirmシグネチャ変更と既存テストの正確な影響範囲",
+      "description": "設計書セクション5ではonConfirmのシグネチャを (duration: AutoYesDuration) から (duration: AutoYesDuration, stopPattern?: string) に変更する設計。現在の AutoYesConfirmDialogProps (L27) は onConfirm: (duration: AutoYesDuration) => void であり、テストファイル (tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx) のL119, L127, L135 で onConfirm の呼び出し引数を検証している。設計書セクション9のテスト設計では「既存テスト修正（lines 119, 127, 135）」と正確な行番号を記載しており、実装との整合性は高い。ただし、stopPatternがundefinedの場合（入力なし）のonConfirm呼び出し引数が onConfirm(selectedDuration, undefined) なのか onConfirm(selectedDuration) なのかが設計書で明確でない。",
+      "location": "設計方針書 セクション5「AutoYesConfirmDialog 変更」 vs src/components/worktree/AutoYesConfirmDialog.tsx L27, L117, tests L119/127/135",
+      "suggestion": "設計書のonConfirm呼び出し実装例に、stopPattern入力が空の場合の呼び出し: onConfirm(selectedDuration, stopPattern.trim() || undefined) を明示することを推奨。これにより空文字列がundefinedに正規化されることが設計レベルで保証される。"
+    },
+    {
+      "id": "DS2-F007",
+      "severity": "must_fix",
+      "category": "consistency",
+      "title": "AutoYesToggle: onToggleの現在のシグネチャ (enabled, duration?) と設計書のオブジェクト引数パターンの大きな乖離",
+      "description": "設計書セクション5ではAutoYesToggleのonToggleをオブジェクト引数パターン { enabled, duration?, stopPattern? } に変更する設計だが、現在の実装 (L24) は onToggle: (enabled: boolean, duration?: AutoYesDuration) => Promise<void> のpositional引数。handleToggle (L77-86) は onToggle(false) を直接呼び、handleConfirm (L88-92) は onToggle(true, duration) を呼んでいる。この変更はAutoYesTogglePropsインターフェースの破壊的変更であり、全呼び出し元（WorktreeDetailRefactored L1188のhandleAutoYesToggle）と全テスト（AutoYesToggle.test.tsx L45, L59, L81, L86）の同時修正が必要。設計書にはこの影響が記載されているが、具体的な既存テスト行番号（L45: onToggle(true, DEFAULT_AUTO_YES_DURATION) -> onToggle({ enabled: true, duration: DEFAULT_AUTO_YES_DURATION })等）までの対応表がない。",
+      "location": "設計方針書 セクション5「AutoYesToggle 変更」 vs src/components/worktree/AutoYesToggle.tsx L24/L77-92, tests/unit/components/worktree/AutoYesToggle.test.tsx L39-89",
+      "suggestion": "設計書のテスト設計セクション9に、AutoYesToggle.test.tsxの各テストケースでの具体的な変更内容を対応表として追加する。特に L45 の toHaveBeenCalledWith(true, DEFAULT_AUTO_YES_DURATION) を toHaveBeenCalledWith({ enabled: true, duration: DEFAULT_AUTO_YES_DURATION }) に変更する必要がある点を明示すべき。"
+    },
+    {
+      "id": "DS2-F008",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "WorktreeDetailRefactored: handleAutoYesToggleの現在のシグネチャとオブジェクト引数パターンの整合性",
+      "description": "設計書セクション5ではhandleAutoYesToggleをオブジェクト引数パターンに対応させる設計。現在の実装 (L1188) は handleAutoYesToggle = useCallback(async (enabled: boolean, duration?: AutoYesDuration) で、fetch body に { enabled, cliToolId: activeCliTab, duration } を送信 (L1193)。設計書ではfetch bodyに stopPattern: params.stopPattern を追加する。この変更は現在のコードに対して実装可能だが、CurrentOutputResponse型 (L76-89) のautoYesオブジェクトにもstopReasonフィールドの追加が必要であり、設計書セクション5の「CurrentOutputResponse型変更」と整合する。",
+      "location": "設計方針書 セクション5「WorktreeDetailRefactored 変更」 vs src/components/worktree/WorktreeDetailRefactored.tsx L76-89/L1188-1203",
+      "suggestion": "整合性は概ね問題ないが、fetchCurrentOutput() (L1009-1045) 内でstopReasonを読み取りトースト表示するロジックの挿入位置を設計書でより具体的に記述すべき。現在のL1037-1041でdata.autoYesの処理を行っている箇所に追加する形になる。"
+    },
+    {
+      "id": "DS2-F009",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "auto-yes-config.ts: validateStopPattern()追加は既存エクスポートへの影響なし、整合性良好",
+      "description": "設計書セクション7ではauto-yes-config.tsにMAX_STOP_PATTERN_LENGTH定数とvalidateStopPattern()関数を追加する設計。現在のauto-yes-config.ts (全59行) はALLOWED_DURATIONS, AutoYesDuration, DEFAULT_AUTO_YES_DURATION, DURATION_LABELS, isAllowedDuration, formatTimeRemaining をエクスポートしており、新規エクスポートの追加は既存コードに影響しない。validateStopPattern()の戻り値型 { valid: boolean; error?: string } はisAllowedDuration()の boolean 戻り値より情報量が多いが、用途が異なるため問題ない。",
+      "location": "設計方針書 セクション7「validateStopPattern()」 vs src/config/auto-yes-config.ts",
+      "suggestion": "設計書のauto-yes-config.tsモジュールJSDocに、validateStopPattern()がクライアント・サーバー共用である旨を追記すると良い（現在のモジュールJSDocは「Shared config for Auto-Yes duration settings」であり、バリデーション関数の記載がない）。"
+    },
+    {
+      "id": "DS2-F010",
+      "severity": "should_fix",
+      "category": "accuracy",
+      "title": "pollAutoYes()内のcheckStopCondition挿入位置: 設計書の「thinking後、プロンプト検出前」は正確だが、cleanOutput全体 vs recentLinesの使い分けに注意",
+      "description": "設計書セクション6ではcheckStopCondition()にcleanOutput（全体出力）を渡す設計。pollAutoYes()の現在の実装 (L361-389) では、cleanOutput (L361) でANSI除去した全体出力を生成し、recentLines (L381) で末尾50行を抽出してthinking検出に使用した後、cleanOutput全体でプロンプト検出を行う。設計書の挿入位置「2.5 thinking check後」は正確で、L385のreturnとL388のプロンプト検出の間に挿入する形になる。checkStopCondition()にcleanOutput全体を渡す設計は、Stop条件が「ターミナル出力全体」に対するマッチングであるため合理的だが、パフォーマンス設計セクション8の「照合対象: cleanOutput全体（最大5000文字）」と一致する。ただし、captureSessionOutput (L358) の第3引数は5000であり、これは5000行ではなく5000バッファサイズ（文字数）であることを設計書で明確にすべき。",
+      "location": "設計方針書 セクション6「pollAutoYes()内のStop条件チェック」 vs src/lib/auto-yes-manager.ts L344-453",
+      "suggestion": "設計書のパフォーマンス設計セクション8にcaptureSessionOutput()の第3引数が文字数上限であること、およびStop条件チェックの照合対象がこの上限以内であることを明記する。"
+    },
+    {
+      "id": "DS2-F011",
+      "severity": "nice_to_have",
+      "category": "internal_consistency",
+      "title": "i18n: 設計書にStop条件関連の翻訳キーの具体的一覧が未記載",
+      "description": "設計書セクション2のレイヤー構成表でi18n層の変更を記載し、変更対象ファイル一覧 (セクション12) で locales/ja/autoYes.json と locales/en/autoYes.json を列挙しているが、追加すべき具体的な翻訳キー（例: stopPattern入力ラベル、バリデーションエラーメッセージ、Stop条件マッチ通知トースト等）の一覧が設計書に記載されていない。現在のautoYes.json (ja/en) には19個のキーがあり、新規キーの命名規則との整合性を確認できない。",
+      "location": "設計方針書 セクション12「変更対象ファイル一覧」 vs locales/ja/autoYes.json, locales/en/autoYes.json",
+      "suggestion": "設計書にi18n翻訳キーの具体的一覧を追加する。最低限以下のキーが必要: stopPattern入力ラベル、stopPatternプレースホルダー、invalidRegexPattern（バリデーションエラー）、patternTooLong（長さ超過エラー）、stopPatternMatched（トースト通知メッセージ）。"
+    },
+    {
+      "id": "DS2-F012",
+      "severity": "nice_to_have",
+      "category": "internal_consistency",
+      "title": "設計書内部整合性: セクション5のvalidateStopPatternエラーメッセージとセクション7のエラーメッセージが一致",
+      "description": "設計書セクション5のAutoYesConfirmDialog変更で result.error ?? t('invalidRegexPattern') と記載しており、i18nフォールバックを使用。セクション7のvalidateStopPattern()のコードでは error: 'Invalid regular expression syntax' (英語ハードコード) と error: `Pattern must be ${MAX_STOP_PATTERN_LENGTH} characters or less` (英語ハードコード) を返す設計。クライアント側ではi18n翻訳を使い、サーバー側では英語ハードコードという使い分けは、validateStopPattern()がクライアント・サーバー共用であることと矛盾する。共用関数のエラーメッセージをi18nキーにすべきか、英語ハードコードのままにすべきかの方針が明確でない。",
+      "location": "設計方針書 セクション5 vs セクション7「validateStopPattern()」",
+      "suggestion": "validateStopPattern()のエラーメッセージは英語ハードコードのままとし（サーバーサイドのAPIレスポンスで使用されるため）、クライアント側のAutoYesConfirmDialogではvalidateStopPattern()のerrorメッセージをそのまま表示するか、i18nキーにマッピングするかを設計書で明確にする。推奨は、validateStopPattern()がエラー種別コード（例: 'too_long', 'invalid_syntax'）を返し、UI側でi18nキーにマッピングする方式。"
+    },
+    {
+      "id": "DS2-F013",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "disableAutoYes()のエクスポート: 外部テストからのアクセス可否",
+      "description": "設計書セクション6ではdisableAutoYes()をexport functionとして定義する設計だが、checkStopCondition()はmodule-privateの function（exportなし）として定義されている。disableAutoYes()がexportされることで、テストファイルから直接インポートしてテスト可能になるが、checkStopCondition()はprivateであるためpollAutoYes()経由でしかテストできない。設計書のテスト設計セクション9では「checkStopCondition()のマッチ/不マッチテスト」を記載しており、private関数の直接テスト方法が不明確。",
+      "location": "設計方針書 セクション6「disableAutoYes()」「checkStopCondition()」 vs セクション9「テスト設計」",
+      "suggestion": "checkStopCondition()をテスト用に@internal exportする（clearAllAutoYesStates()と同様のパターン）か、pollAutoYes()経由の統合テストのみで検証する方針かを設計書に明記する。"
+    }
+  ],
+  "summary": {
+    "total_findings": 13,
+    "must_fix": 3,
+    "should_fix": 6,
+    "nice_to_have": 4
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-314-auto-yes-stop-condition-design-policy.md",
+    "src/lib/auto-yes-manager.ts",
+    "src/config/auto-yes-config.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "locales/ja/autoYes.json",
+    "locales/en/autoYes.json",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+    "tests/integration/auto-yes-persistence.test.ts"
+  ],
+  "timestamp": "2026-02-19T13:00:00Z"
+}

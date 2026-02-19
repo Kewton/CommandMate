@@ -1,0 +1,7 @@
+{
+  "issue_number": 314,
+  "stage": 1,
+  "review_result_path": "dev-reports/issue/314/multi-stage-design-review/stage1-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-314-auto-yes-stop-condition-design-policy.md",
+  "note": "設計方針書のみ更新。ソースコードは変更しない。"
+}

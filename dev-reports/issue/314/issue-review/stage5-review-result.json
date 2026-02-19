@@ -1,0 +1,141 @@
+{
+  "issue_number": 314,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-19",
+  "findings": [
+    {
+      "id": "S5-F001",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "setAutoYesEnabled()のdisable側パスでstopPattern/stopReasonが消失する",
+      "description": "Issue本文では「getAutoYesState()内の期限切れ無効化時にstopPatternをスプレッド演算子で保持」と設計されているが、setAutoYesEnabled()のdisable側パス（auto-yes-manager.ts line 224-233）ではスプレッド演算子を使用していない。現在のコードは `{ enabled: false, enabledAt: existing?.enabledAt ?? 0, expiresAt: existing?.expiresAt ?? 0 }` というリテラルオブジェクトで新しいAutoYesStateを構築しているため、stopPattern/stopReasonフィールドが消失する。手動OFF時（handleAutoYesToggle(false)経由）にstopReasonを'manual'に設定する場合、setAutoYesEnabled()のdisableパスでもスプレッド演算子またはstopReason/stopPatternの明示的な設定が必要。Issue本文のstopPatternデータフローおよびStop条件マッチ時処理フローでは、stopReasonの設定はpollAutoYes()内で行われAutoYesStateに直接設定した後にsetAutoYesEnabled()で無効化するとされているが、setAutoYesEnabled(false)がstopReasonを上書きしてしまう。",
+      "location": "## 提案する解決策 > ### Stop条件マッチ時の処理フロー / src/lib/auto-yes-manager.ts (lines 224-233)",
+      "suggestion": "以下のいずれかの対応をIssue本文に追記する:\n(A) setAutoYesEnabled()のdisableパスをスプレッド演算子に変更: `{ ...existing, enabled: false }` とすることで、stopPattern/stopReasonフィールドを保持する。stopReasonは呼び出し元で事前に設定済みであることを前提とする。\n(B) setAutoYesEnabled()にstopReason?パラメータを追加して、disable時に明示的にstopReasonを設定する。\n(C) Stop条件マッチ時の処理フローの順序を修正: stopReason設定 → setAutoYesEnabled(false) の後にAutoYesStateを直接更新してstopReasonを再設定する。\n推奨は(A)。setAutoYesEnabled()のdisableパスの変更を変更対象ファイルテーブルのauto-yes-manager.tsの説明に追記すべき。"
+    },
+    {
+      "id": "S5-F002",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "stopReasonのライフサイクル管理が不完全 -- 再有効化時のクリア処理が実装タスクに欠落",
+      "description": "Issue本文のクライアント通知メカニズムセクションに「stopReasonはAuto-Yesが再度有効化された際にクリアされる」と記載されているが、実装タスクリストにこの処理が明示されていない。setAutoYesEnabled(true)パス（auto-yes-manager.ts line 214-223）では新しいAutoYesStateオブジェクトをリテラルで構築しており `{ enabled: true, enabledAt: now, expiresAt: now + effectiveDuration }` のみを設定するため、stopReasonフィールドは自然にundefinedになり、結果的にクリアされる。動作としては問題ないが、stopPatternフィールドも同様にクリアされるため、再有効化時のstopPatternの再設定が正しく行われるかの整合性確認が必要。実装タスクに「再有効化時のstopReason/stopPatternクリア動作の確認」を追加すべき。",
+      "location": "## 提案する解決策 > ### クライアント通知メカニズム > 4番目の項目 / ## 実装タスク",
+      "suggestion": "setAutoYesEnabled(true)パスでは新しいAutoYesStateをリテラルで構築するため、stopReason/stopPatternは自然にundefinedとなる。これは期待動作だが、setAutoYesEnabled()にstopPatternパラメータを追加する実装タスクと整合させる必要がある。実装タスクに「setAutoYesEnabled(true, duration, stopPattern)呼び出し時にstopReasonがクリアされ、新しいstopPatternが設定されることの確認テスト」を追加することを推奨。"
+    },
+    {
+      "id": "S5-F003",
+      "severity": "should_fix",
+      "category": "clarity",
+      "title": "stopReason='manual'の設定タイミング・経路が未定義",
+      "description": "AutoYesStateのstopReasonは 'expired' | 'stop_pattern_matched' | 'manual' の3値を取り得るが、'expired'はgetAutoYesState()内の期限切れ処理で、'stop_pattern_matched'はpollAutoYes()内のStop条件マッチ処理で設定される設計が明記されている。一方、'manual'（ユーザーがトグルOFFした場合）の設定タイミングが未記載。手動OFFのフローはAutoYesToggle → onToggle(false) → handleAutoYesToggle(false) → fetch POST → setAutoYesEnabled(false) だが、この経路のどこでstopReason='manual'を設定するかが不明確。route.tsのPOSTハンドラー内で判定するのか、setAutoYesEnabled()にパラメータとして渡すのかの設計が必要。",
+      "location": "## 提案する解決策 > ### クライアント通知メカニズム > 1番目の項目",
+      "suggestion": "以下のいずれかを明記する:\n(A) route.tsのPOSTハンドラーで enabled=false の場合に stopReason='manual' を設定してからsetAutoYesEnabled()を呼ぶ\n(B) setAutoYesEnabled()のシグネチャにstopReason?パラメータを追加し、呼び出し元から明示的に渡す\n(C) 'manual'は初期バージョンでは設定しない（stopReasonがundefinedの場合はmanualとみなす）\n推奨は(C)。stopReasonが存在しない=手動OFFまたは初期状態、と暗黙的に扱うことで実装を簡素化できる。ただし、その場合はstopReasonの型を 'expired' | 'stop_pattern_matched' に変更し、undefinedをmanualの意味として定義すべき。"
+    },
+    {
+      "id": "S5-F004",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "stopReason通知のトースト表示ロジックの具体的な実装箇所が曖昧",
+      "description": "Issue本文では「WorktreeDetailRefactored.tsxのautoYesポーリングでstopReason === 'stop_pattern_matched'を検出した場合にトースト通知を表示」と記載されているが、具体的な実装箇所が不明確。fetchCurrentOutput()関数（line 1009-1045）内のautoYes状態更新処理（line 1037-1041）でstopReasonをチェックする必要があるが、トースト通知の重複防止（同じstopReasonに対して複数回トーストを表示しない）メカニズムが設計されていない。stopReason='stop_pattern_matched'は、Auto-Yesが再有効化されるまでautoYesレスポンスに含まれ続けるため、ポーリングごとにトーストが表示されてしまう。",
+      "location": "## 提案する解決策 > ### クライアント通知メカニズム > 3番目の項目 / src/components/worktree/WorktreeDetailRefactored.tsx (lines 1037-1041)",
+      "suggestion": "トースト通知の重複防止として以下のいずれかを明記する:\n(A) useRefで「前回のautoYes.enabled状態」を保持し、enabled=true → false への遷移時のみstopReasonをチェックしてトースト表示する（推奨）\n(B) stopReasonをサーバーサイドで一度だけ返し、読み取り後にクリアする（実装が複雑）\n(C) トーストIDにstopReasonを含め、Toastコンポーネント側で同一IDの重複表示を防止する\n推奨は(A)。実装タスクにこの重複防止ロジックを追加すべき。"
+    },
+    {
+      "id": "S5-F005",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "safe-regex2ライブラリの依存追加がIssue本文に未記載",
+      "description": "セキュリティ考慮でReDoS対策として「safe-regex2等のライブラリでパターン安全性を検証」と記載されているが、npm依存パッケージの追加がIssue本文に明示されていない。safe-regex2はdevDependenciesではなくdependenciesに追加する必要があり（サーバーサイドのランタイムで使用するため）、package.jsonの変更が変更対象ファイルテーブルに含まれていない。また、safe-regex2のAPI（`safe(pattern)`が`true`/`false`を返す）の具体的な使用方法も未記載。",
+      "location": "## セキュリティ考慮 > ReDoS対策 / ## 影響範囲 > ### 変更対象ファイル テーブル",
+      "suggestion": "以下を検討する:\n(A) 変更対象ファイルテーブルに `package.json` を追加（safe-regex2のdependencies追加）\n(B) または、safe-regex2を使用せず `new RegExp(pattern)` try-catch + MAX_STOP_PATTERN_LENGTH制限のみで対応する方針に変更する。500文字以下のパターンに対する実用的なReDoSリスクは低く、外部依存追加のコストと比較衡量すべき。\n推奨は(B)。safe-regex2の追加は依存関係の増加・メンテナンスコストが発生する。初期実装ではパターン長制限+構文検証で十分であり、ReDoS対策の強化は将来の改善として検討する方が妥当。Issue本文の「safe-regex2等」の「等」を活かして方針を明確化すべき。"
+    },
+    {
+      "id": "S5-F006",
+      "severity": "nice_to_have",
+      "category": "consistency",
+      "title": "Issue本文内のstopPattern照合タイミング記述に微妙な不整合",
+      "description": "Issue本文の「判定タイミング」セクションでは処理順序を (1)キャプチャ → (2)ANSI除去 → (3)thinking → (4)Stop条件チェック → (5)プロンプト検出 → (6)自動応答 と記載している。一方、「サーバーサイド」セクションでは「プロンプト検出前にターミナル出力をStop条件パターンと照合する」と記載しており、これ自体は一貫している。しかし、実際のpollAutoYes()のコード（line 356-396）では (1)キャプチャ → (2)ANSI除去 → (2.5)thinking → (3)プロンプト検出 → ... という順序でナンバリングが異なる。Issue本文の番号付けとコードの既存コメント番号に差異がある。",
+      "location": "## 提案する解決策 > ### 判定タイミング",
+      "suggestion": "Issue本文の番号付けはIssueの設計ドキュメントとしての独立した番号であり、実装コードのステップ番号と一致する必要はない。特に修正の必要はないが、実装時に混乱を避けるため、Issue本文に「番号はIssue内の参照用であり、コード内のコメント番号とは対応しない」と注記を加えることを推奨。"
+    },
+    {
+      "id": "S5-F007",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "stopPatternが空文字列の場合のサーバーサイド処理が未明記",
+      "description": "Issue本文では「空欄の場合はStop条件なし（従来通りの動作）」と記載されているが、クライアントから空文字列 '' が送信された場合のサーバーサイド処理が未明記。AutoYesConfirmDialogのstopPattern stateのデフォルト値は空文字列('')であり、ユーザーが何も入力せずに確認した場合、fetch bodyには `stopPattern: ''` が含まれる。route.tsでは '' をundefinedと同等に扱うべきか、それともstopPatternキー自体を送信しないべきかの判断が必要。",
+      "location": "## 提案する解決策 > ### UX > 4番目の項目 / ## 実装タスク > route.tsのバリデーション",
+      "suggestion": "route.tsのPOSTハンドラーで `body.stopPattern` が空文字列またはundefinedの場合はstopPatternなし（undefined）として扱う正規化処理を追加する。例: `const stopPattern = body.stopPattern?.trim() || undefined;` これにより空文字列と未入力の両方を統一的に処理できる。"
+    }
+  ],
+  "summary": {
+    "total_findings": 7,
+    "must_fix": 0,
+    "should_fix": 5,
+    "nice_to_have": 2
+  },
+  "previous_findings_verification": {
+    "stage1_findings": {
+      "total": 12,
+      "properly_reflected": 12,
+      "details": {
+        "S1-F001": "REFLECTED - i18nファイル（locales/ja/autoYes.json, locales/en/autoYes.json）が変更対象ファイルテーブルに追加済み",
+        "S1-F002": "REFLECTED - クライアント通知メカニズムセクションが新規追加、AutoYesStateにstopReason追加、current-output API変更、トースト通知設計が記載済み",
+        "S1-F003": "REFLECTED - useAutoYes.tsについてのセクションが追加され、変更不要の判断と根拠が明記済み",
+        "S1-F004": "REFLECTED - safe-regex2+MAX_STOP_PATTERN_LENGTH方針が明記済み（ただしS5-F005の新規指摘あり）",
+        "S1-F005": "REFLECTED - Stop条件マッチ時の処理フローが具体的に記載済み（stopReason設定→無効化→ポーラー停止→ログ）（ただしS5-F001の新規指摘あり）",
+        "S1-F006": "REFLECTED - stopPatternのデータフローセクションが新規追加、4ステップの伝達経路が明記済み",
+        "S1-F007": "REFLECTED - auto-yes-config.tsが変更対象ファイルテーブルに追加済み（関連コンポーネントから移動）",
+        "S1-F008": "REFLECTED - current-output/route.tsが変更対象ファイルテーブルに追加済み",
+        "S1-F009": "REFLECTED - 照合対象範囲をcleanOutput全体に明確化、初期実装は全文照合、差分照合は将来最適化として記載済み",
+        "S1-F010": "REFLECTED - バリデーションUI仕様が具体化（クライアント: インラインエラー+ボタン無効化、サーバー: 400レスポンス）",
+        "S1-F011": "REFLECTED - 将来検討として記録（スコープ外）",
+        "S1-F012": "REFLECTED - 将来のエンハンスメントとして明記"
+      }
+    },
+    "stage3_findings": {
+      "total": 14,
+      "properly_reflected": 14,
+      "details": {
+        "S3-F001": "REFLECTED - 実装タスクにsetAutoYesEnabled/getAutoYesStateテスト追加が明記済み",
+        "S3-F002": "REFLECTED - getAutoYesState()期限切れ無効化時のstopPattern保持・stopReason設定の設計が追加済み、コードイメージ付き",
+        "S3-F003": "REFLECTED - WorktreeDetailRefactored.tsxの変更内容にCurrentOutputResponse.autoYes型変更が明記済み",
+        "S3-F004": "REFLECTED - 実装タスクにauto-yes-persistence.test.tsへのstopPattern永続化テスト追加が追記済み",
+        "S3-F005": "REFLECTED - 実装タスクにAutoYesConfirmDialog stopPattern入力テスト追加が追記済み",
+        "S3-F006": "REFLECTED - 実装タスクにAutoYesToggle onToggle stopPattern引数テスト追加が追記済み",
+        "S3-F007": "REFLECTED - Desktop/Mobile両方のAutoYesToggleが同一handleAutoYesToggleを参照する旨がstopPatternデータフローに追記済み",
+        "S3-F008": "REFLECTED - auto-yes GETレスポンスへのstopReason追加は将来検討として記録済み（初期実装はcurrent-output API経由のみ）",
+        "S3-F009": "REFLECTED - 初期実装は全文照合、差分照合は将来最適化として明記済み",
+        "S3-F010": "REFLECTED - 関連コンポーネントにsession-cleanup.ts変更不要が追記済み",
+        "S3-F011": "REFLECTED - useAutoYes.tsの競合ウィンドウは実害なし、変更不要判断が維持",
+        "S3-F012": "REFLECTED - auto-yes-resolver.testへの影響なし確認済み",
+        "S3-F013": "REFLECTED - auto-yes-config.testへのテストは暗黙的に含まれる",
+        "S3-F014": "REFLECTED - useAutoYes.testへの影響なし確認済み"
+      }
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "setAutoYesEnabled()のdisableパス（line 224-233）でstopPattern/stopReasonがリテラル構築により消失する問題（S5-F001）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "fetchCurrentOutput()内のautoYes状態更新処理（line 1037-1041）でstopReason通知の重複防止が必要（S5-F004）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "POSTハンドラー（line 85-158）でstopReason='manual'の設定経路が未定義（S5-F003）"
+    },
+    {
+      "file": "src/config/auto-yes-config.ts",
+      "relevance": "MAX_STOP_PATTERN_LENGTH追加先。safe-regex2依存追加の要否判断に関連（S5-F005）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト設計パターン・モジュール配置規約の参照元"
+    }
+  ]
+}

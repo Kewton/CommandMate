@@ -116,7 +116,7 @@ describe('AutoYesConfirmDialog', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
       fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
       expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
-      expect(defaultProps.onConfirm).toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION);
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION, undefined);
     });
 
     it('should call onConfirm with selected 3-hour duration', () => {
@@ -124,7 +124,7 @@ describe('AutoYesConfirmDialog', () => {
       fireEvent.click(screen.getByText('autoYes.durations.3h'));
       fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
       expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
-      expect(defaultProps.onConfirm).toHaveBeenCalledWith(10800000);
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(10800000, undefined);
     });
 
     it('should call onConfirm with selected 8-hour duration', () => {
@@ -132,13 +132,94 @@ describe('AutoYesConfirmDialog', () => {
       fireEvent.click(screen.getByText('autoYes.durations.8h'));
       fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
       expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
-      expect(defaultProps.onConfirm).toHaveBeenCalledWith(28800000);
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(28800000, undefined);
     });
 
     it('should call onCancel when cancel button is clicked', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
       fireEvent.click(screen.getByText('common.cancel'));
       expect(defaultProps.onCancel).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #314: Stop Pattern Tests
+  // ==========================================================================
+  describe('Stop Pattern (Issue #314)', () => {
+    it('should display stop pattern input field', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      expect(screen.getByTestId('stop-pattern-input')).toBeDefined();
+      expect(screen.getByText('autoYes.stopPatternLabel')).toBeDefined();
+      expect(screen.getByText('autoYes.stopPatternDescription')).toBeDefined();
+    });
+
+    it('should call onConfirm with stopPattern when valid pattern is entered', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      const input = screen.getByTestId('stop-pattern-input');
+      fireEvent.change(input, { target: { value: 'error|fatal' } });
+      fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
+
+      expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION, 'error|fatal');
+    });
+
+    it('should call onConfirm with undefined stopPattern when input is empty', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
+
+      expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION, undefined);
+    });
+
+    it('should call onConfirm with undefined when input is only whitespace', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      const input = screen.getByTestId('stop-pattern-input');
+      fireEvent.change(input, { target: { value: '   ' } });
+      fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
+
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION, undefined);
+    });
+
+    it('should show validation error for invalid regex and disable confirm button', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      const input = screen.getByTestId('stop-pattern-input');
+      fireEvent.change(input, { target: { value: '[invalid' } });
+
+      // Error should be displayed
+      expect(screen.getByTestId('stop-pattern-error')).toBeDefined();
+
+      // Confirm button should be disabled
+      const confirmButton = screen.getByTestId('confirm-button');
+      expect(confirmButton).toHaveProperty('disabled', true);
+    });
+
+    it('should clear error when input is corrected', () => {
+      render(<AutoYesConfirmDialog {...defaultProps} />);
+      const input = screen.getByTestId('stop-pattern-input');
+
+      // Enter invalid pattern
+      fireEvent.change(input, { target: { value: '[invalid' } });
+      expect(screen.getByTestId('stop-pattern-error')).toBeDefined();
+
+      // Correct the pattern
+      fireEvent.change(input, { target: { value: 'valid' } });
+      expect(screen.queryByTestId('stop-pattern-error')).toBeNull();
+    });
+
+    it('should reset stopPattern when dialog reopens', () => {
+      const { rerender } = render(<AutoYesConfirmDialog {...defaultProps} />);
+      const input = screen.getByTestId('stop-pattern-input');
+      fireEvent.change(input, { target: { value: 'some-pattern' } });
+
+      // Close dialog
+      rerender(<AutoYesConfirmDialog {...defaultProps} isOpen={false} />);
+
+      // Reopen dialog
+      rerender(<AutoYesConfirmDialog {...defaultProps} isOpen={true} />);
+
+      // Input should be cleared
+      const resetInput = screen.getByTestId('stop-pattern-input') as HTMLInputElement;
+      expect(resetInput.value).toBe('');
     });
   });
 });

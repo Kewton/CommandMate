@@ -1,0 +1,55 @@
+{
+  "issue_number": 314,
+  "status": "success",
+  "changes_made": [
+    {
+      "file": "src/config/auto-yes-config.ts",
+      "changes": "Added AutoYesStopReason type definition to the shared config module (DRY: single source of truth for server and client)"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "changes": "Replaced local AutoYesStopReason definition with import from shared config; added re-export for backward compatibility"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "changes": "Replaced inline literal union 'expired' | 'stop_pattern_matched' with imported AutoYesStopReason type from shared config"
+    },
+    {
+      "file": "src/components/worktree/AutoYesConfirmDialog.tsx",
+      "changes": "Removed unused default export (only named export is consumed)"
+    },
+    {
+      "file": "src/components/worktree/AutoYesToggle.tsx",
+      "changes": "Removed unused default export (only named export is consumed)"
+    }
+  ],
+  "refactorings_applied": [
+    "DRY: Move AutoYesStopReason to shared config module to eliminate type duplication between server and client",
+    "Unused code removal: Remove default exports never consumed by any importer",
+    "Type safety: Replace inline literal union with shared type import in client component"
+  ],
+  "quality_after": {
+    "lint_errors": 0,
+    "type_errors": 0,
+    "test_passed": 115
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "verification_checklist": {
+    "disableAutoYes_all_fields_explicit": true,
+    "checkStopCondition_has_internal_tag": true,
+    "executeRegexWithTimeout_has_timeout_protection": true,
+    "AutoYesToggleParams_exported": true,
+    "validateStopPattern_no_error_message_leak": true,
+    "no_any_types": true
+  },
+  "commits": [
+    "6327e18: refactor(#314): move AutoYesStopReason to shared config and remove unused default exports"
+  ],
+  "message": "Refactoring completed. AutoYesStopReason type moved to shared config for DRY compliance. Unused default exports removed. All 115 tests pass. Zero lint and type errors.",
+  "timestamp": "2026-02-19T21:26:00+09:00"
+}

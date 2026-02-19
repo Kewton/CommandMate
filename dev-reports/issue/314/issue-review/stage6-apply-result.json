@@ -1,0 +1,58 @@
+{
+  "issue_number": 314,
+  "iteration": 3,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目） -- Stage 5通常レビュー結果",
+  "apply_date": "2026-02-19",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S5-F001",
+        "status": "applied",
+        "change_summary": "setAutoYesEnabled()のdisableパスをスプレッド演算子 `{ ...existing, enabled: false }` に変更する設計を追記。Stop条件マッチ時処理フロー・変更対象ファイルテーブル・実装タスク・ユニットテストに反映。コードイメージ付き設計根拠セクションを追加"
+      },
+      {
+        "id": "S5-F002",
+        "status": "applied",
+        "change_summary": "実装タスクのユニットテスト項目に「setAutoYesEnabled(true, duration, stopPattern)呼び出し時にstopReasonがクリア(undefined)され、新しいstopPatternが設定されることの確認テスト」を追加"
+      },
+      {
+        "id": "S5-F003",
+        "status": "applied",
+        "change_summary": "stopReasonの型を 'expired' | 'stop_pattern_matched' に変更（'manual'を除去）。undefinedを手動OFF/初期状態として扱う方針を明記。AutoYesState定義・クライアント通知メカニズム・CurrentOutputResponse型・変更対象ファイルテーブル・実装タスクに一貫して反映。設計根拠セクションを追加"
+      },
+      {
+        "id": "S5-F004",
+        "status": "applied",
+        "change_summary": "WorktreeDetailRefactored.tsxにトースト重複表示防止メカニズム（useRefで前回autoYes.enabled状態を保持、enabled: true -> false遷移時のみstopReasonチェック+トースト表示）の設計を追加。クライアント通知メカニズム・実装タスク・受入条件・変更対象ファイルテーブルに反映。設計根拠セクションを追加"
+      },
+      {
+        "id": "S5-F005",
+        "status": "applied",
+        "change_summary": "ReDoS対策を「MAX_STOP_PATTERN_LENGTH制限 + new RegExp(pattern) try-catch構文検証」のみに変更。safe-regex2等の外部ライブラリ追加は初期バージョンでは見送り、将来の改善として検討する方針を明記。セキュリティ考慮・実装タスク・受入条件に反映。package.json変更は不要"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S5-F006",
+        "status": "applied",
+        "change_summary": "判定タイミングセクションに「番号はIssue内の参照用であり、コード内のコメント番号とは対応しない」旨の注記を追加"
+      },
+      {
+        "id": "S5-F007",
+        "status": "applied",
+        "change_summary": "auto-yes/route.tsのstopPatternデータフローに空文字列正規化処理（body.stopPattern?.trim() || undefined）を追記。変更対象ファイルテーブルと実装タスクにも反映"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/314"
+  }
+}

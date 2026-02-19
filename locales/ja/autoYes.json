@@ -16,5 +16,11 @@
   "riskWarning": "自動応答により、意図しない操作（ファイルの削除・上書き等）が実行される可能性があります。内容を十分に理解した上でご利用ください。",
   "disclaimer": "免責事項：",
   "disclaimerText": "Auto Yesモードの使用により発生した問題について、開発者は一切の責任を負いません。自己責任でご利用ください。",
-  "agreeAndEnable": "同意して有効化"
+  "agreeAndEnable": "同意して有効化",
+  "stopPatternLabel": "Stop条件（正規表現）",
+  "stopPatternPlaceholder": "例: rm -rf|DROP TABLE|force push",
+  "stopPatternDescription": "ターミナル出力がこのパターンにマッチした場合、Auto-Yesを自動停止します",
+  "invalidRegexPattern": "無効な正規表現パターンです",
+  "patternTooLong": "パターンは500文字以内で入力してください",
+  "stopPatternMatched": "Stop条件にマッチしたためAuto-Yesを自動停止しました"
 }

@@ -1,0 +1,8 @@
+{
+  "issue_number": 314,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-314-auto-yes-stop-condition-design-policy.md",
+  "previous_stages": ["stage1", "stage2", "stage3"]
+}

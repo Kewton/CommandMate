@@ -1,0 +1,140 @@
+{
+  "issue_number": 314,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-19",
+  "findings": [
+    {
+      "id": "S3-F001",
+      "severity": "must_fix",
+      "category": "test",
+      "title": "AutoYesState型変更によりisAutoYesExpired()テストが破壊される可能性",
+      "description": "tests/unit/lib/auto-yes-manager.test.ts内のisAutoYesExpired()テスト（line 176-212）でAutoYesStateオブジェクトをリテラルで構築している。AutoYesStateにstopPattern・stopReasonフィールドを追加した場合、これらはoptionalフィールドであるためTypeScriptコンパイルエラーは発生しないが、テストが暗黙的にstopPattern未設定のAutoYesStateを使用することになる。テストの明示性の観点から問題はないが、新フィールドを含むテストケースの追加が必要。既存テストの通過自体は保証されるため、破壊的影響はない。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/tests/unit/lib/auto-yes-manager.test.ts (lines 176-212)",
+      "suggestion": "AutoYesStateに新フィールド（stopPattern?, stopReason?）を追加する際、既存テストはoptionalフィールドのためそのまま通過する。ただし、Issueの実装タスクに「既存テストの通過確認」だけでなく「stopPatternフィールド追加後のsetAutoYesEnabled/getAutoYesStateテスト追加」を明記すべき。"
+    },
+    {
+      "id": "S3-F002",
+      "severity": "must_fix",
+      "category": "compatibility",
+      "title": "setAutoYesEnabled()のシグネチャ変更が既存の全呼び出し元に影響",
+      "description": "setAutoYesEnabled(worktreeId, enabled, duration?)に新たにstopPatternパラメータを追加する必要がある。現在この関数は3箇所から呼び出されている: (1) auto-yes/route.ts line 136, (2) auto-yes-manager.ts内部のgetAutoYesState() line 197-201（期限切れ時の無効化）, (3) pollAutoYes()内からstop条件マッチ時に呼び出される予定。Issue本文ではsetAutoYesEnabled()へのstopPattern追加は記載されているが、getAutoYesState()内の期限切れ無効化パス（line 197）がsetAutoYesEnabled()を直接呼ばず、Mapに直接AutoYesStateを設定している点に注意が必要。stopPattern付きでAuto-Yesが有効化された後、期限切れ時の無効化でstopPatternがクリアされる動作の整合性をIssueで明確にすべき。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/src/lib/auto-yes-manager.ts (line 191-206, line 213, line 136 in route.ts)",
+      "suggestion": "Issueに「getAutoYesState()内の期限切れ無効化時にstopPatternフィールドをどう扱うか（保持 vs クリア）」を明記する。推奨: 無効化時はスプレッド演算子で既存stateを展開しているため（line 197-201）、stopPatternは自然に保持される。stopReasonは'expired'に設定すべき。"
+    },
+    {
+      "id": "S3-F003",
+      "severity": "must_fix",
+      "category": "impact",
+      "title": "CurrentOutputResponseインターフェースのstopReason追加が未記載",
+      "description": "WorktreeDetailRefactored.tsx内のCurrentOutputResponse型（line 76-89）にautoYesオブジェクトが定義されているが、現在は{ enabled: boolean; expiresAt: number | null }のみ。Issue本文ではcurrent-output/route.tsのレスポンスにstopReasonフィールドを追加すると記載しているが、クライアント側のCurrentOutputResponseインターフェースの更新が変更対象ファイルテーブルに明示されていない。WorktreeDetailRefactored.tsxの変更内容説明にも「stopReason検出時のトースト通知」は記載されているが、型定義変更は暗黙的。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/src/components/worktree/WorktreeDetailRefactored.tsx (lines 76-89, 1037-1041)",
+      "suggestion": "影響範囲テーブルのWorktreeDetailRefactored.tsxの変更内容に「CurrentOutputResponse.autoYes型にstopReasonフィールドを追加」を明記する。具体的には: autoYes?: { enabled: boolean; expiresAt: number | null; stopReason?: 'expired' | 'stop_pattern_matched' | 'manual'; }"
+    },
+    {
+      "id": "S3-F004",
+      "severity": "must_fix",
+      "category": "impact",
+      "title": "globalThis型宣言の更新が必要",
+      "description": "auto-yes-manager.ts line 116-121でglobalThis.__autoYesStatesの型がMap<string, AutoYesState>として宣言されている。AutoYesStateインターフェースにstopPattern・stopReasonフィールドを追加した場合、globalThisの型宣言は自動的にAutoYesStateの変更を反映するため、型定義自体の追加変更は不要。しかし、hot-reload永続化テスト（tests/integration/auto-yes-persistence.test.ts）において、stopPatternフィールドがglobalThis経由で正しく永続化されるかのテストケースが必要。Issue #225の3時間duration永続化テスト（line 156-184）と同様のパターンで追加すべき。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/tests/integration/auto-yes-persistence.test.ts",
+      "suggestion": "Issueの実装タスクに「tests/integration/auto-yes-persistence.test.ts にstopPatternフィールドの永続化テストを追加」を追記する。既存テストが壊れることはないが（optionalフィールドのため）、新機能の永続化を保証するテストが不足している。"
+    },
+    {
+      "id": "S3-F005",
+      "severity": "should_fix",
+      "category": "test",
+      "title": "AutoYesConfirmDialogテストのonConfirmシグネチャ変更への対応",
+      "description": "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx内のonConfirmモック（line 16: onConfirm: vi.fn()）は現在(duration: AutoYesDuration) => voidを期待している。Issueの変更により(duration: AutoYesDuration, stopPattern?: string) => voidに変更される。既存テストはstopPatternを渡さないケース（空欄=Stop条件なし）のテストとして有効だが、stopPatternが空文字列またはundefinedで渡されることの検証が暗黙的になる。テストの意図を明確にするため、既存テストにstopPattern引数のアサーション追加が推奨される。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx (lines 115-143)",
+      "suggestion": "既存テスト修正例: expect(defaultProps.onConfirm).toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION) を expect(defaultProps.onConfirm).toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION, expect.any(String)) or undefined に更新。新規テストとして「Stop条件入力時のonConfirm呼び出し」テストを追加。"
+    },
+    {
+      "id": "S3-F006",
+      "severity": "should_fix",
+      "category": "test",
+      "title": "AutoYesToggleテストのonToggleシグネチャ変更への対応",
+      "description": "tests/unit/components/worktree/AutoYesToggle.test.tsx内のonToggleモック（line 17）は現在(enabled: boolean, duration?: AutoYesDuration) => Promise<void>を期待。Issueの変更により第3引数stopPattern?が追加される。既存テスト（line 44: expect(defaultProps.onToggle).toHaveBeenCalledWith(true, DEFAULT_AUTO_YES_DURATION)）はstopPattern引数の検証をしていないため、引数の数が変わっても既存テストはtoHaveBeenCalledWith()の部分マッチング動作により失敗しない。ただし、新引数の網羅的テストが必要。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/tests/unit/components/worktree/AutoYesToggle.test.tsx (lines 39-62)",
+      "suggestion": "Issueの実装タスクの「ユニットテスト追加」に「AutoYesToggle: onToggle呼び出し時のstopPattern引数テスト」「AutoYesConfirmDialog: stopPattern入力フィールドのレンダリング・バリデーションテスト」を具体的に列挙する。"
+    },
+    {
+      "id": "S3-F007",
+      "severity": "should_fix",
+      "category": "compatibility",
+      "title": "handleAutoYesToggle()のシグネチャ変更がDesktop/Mobile両方のAutoYesToggle呼び出しに影響",
+      "description": "WorktreeDetailRefactored.tsxのhandleAutoYesToggle（line 1188）は現在(enabled: boolean, duration?: AutoYesDuration)シグネチャ。stopPattern?を第3引数に追加する場合、Desktop（line 1814）とMobile（line 1953）の両方のAutoYesToggle.onToggleプロップが自動的に新シグネチャを受け取る。handleAutoYesToggle内のfetch body（line 1193）にstopPatternを追加する必要がある。Issue本文に「handleAutoYesToggleにstopPattern引数追加、fetch bodyへのstopPattern追加」は記載されているが、Desktop/Mobileの2箇所のAutoYesToggleが同一のhandleAutoYesToggleを使用していることの確認が明示されていない。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/src/components/worktree/WorktreeDetailRefactored.tsx (lines 1188-1203, 1811-1817, 1950-1957)",
+      "suggestion": "Issue本文のstopPatternデータフローセクションに「Desktop/Mobileの両AutoYesToggleが同一のhandleAutoYesToggleを参照」という点を補足するか、テスト計画に「Desktop/Mobileレイアウト両方でstopPatternが正しく伝達されることの確認」を追加する。"
+    },
+    {
+      "id": "S3-F008",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "auto-yes/route.tsのbuildAutoYesResponse()にstopReasonを含める必要",
+      "description": "auto-yes/route.ts内のbuildAutoYesResponse()関数（line 33-45）とAutoYesResponseインターフェース（line 26-30）がPOST応答を構築している。stopPatternでAuto-Yesが停止した場合、このAPIのレスポンスにもstopReasonを含める必要があるか、またはcurrent-output APIのみで通知するかの設計判断が必要。Issue本文では「current-output APIレスポンス変更」のみ記載しており、auto-yes APIのレスポンス変更は触れていない。auto-yes POSTの応答は有効化/無効化の即座のレスポンスであるため、stopPatternマッチによる自動停止の通知はcurrent-output経由で行うのが正しい設計だが、GETエンドポイント（line 66-83）でもstopReasonが返ると利便性が高い。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/src/app/api/worktrees/[id]/auto-yes/route.ts (lines 26-45, 66-83)",
+      "suggestion": "auto-yes/route.tsのGETエンドポイントのAutoYesResponseにもstopReason?フィールドを追加することを検討。少なくともIssueに「auto-yes GETレスポンスにstopReasonを含めるか否かの判断」を明記すべき。"
+    },
+    {
+      "id": "S3-F009",
+      "severity": "should_fix",
+      "category": "performance",
+      "title": "pollAutoYes()内の正規表現マッチングによるポーリング負荷",
+      "description": "pollAutoYes()は2秒間隔（POLLING_INTERVAL_MS=2000）で実行され、各サイクルでcaptureSessionOutput()の出力（最大5000文字）に対してstopPatternの正規表現マッチングを行う。ReDoS対策として safe-regex2 によるパターン安全性検証が記載されているが、正常な正規表現でも5000文字のテキストに対する2秒ごとのマッチングのCPU影響を考慮すべき。Issue本文の「差分照合方式」（前回との差分のみ照合）が実装されれば負荷は軽減されるが、lastCheckedOutputフィールドのメモリ消費（最大5000文字を毎回保持）とのトレードオフがある。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/src/lib/auto-yes-manager.ts (pollAutoYes function, lines 344-453)",
+      "suggestion": "差分照合方式は「検討する」と記載されているが、初期実装では全文照合でも5000文字程度のRegExpマッチは数マイクロ秒で完了するため、パフォーマンス上の問題はない。ただし、Issue内で「初期実装は全文照合、差分照合は将来最適化」と明確に判断を記載することを推奨。"
+    },
+    {
+      "id": "S3-F010",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "session-cleanup.tsへの影響なし（確認済み）",
+      "description": "session-cleanup.ts（line 98-106）はstopAutoYesPolling(worktreeId)を呼び出してポーラーを停止する。stopAutoYesPolling()の内部実装（line 538-550）はpollerStateのtimerIdをクリアしてMapからエントリを削除するのみで、AutoYesStateのstopPattern/stopReasonフィールドには一切触れない。したがってsession-cleanup.tsの変更は不要。ただし、Stop条件によるAuto-Yes停止時にsession-cleanup経由でクリーンアップされた場合と、stopPattern マッチによる自動停止の競合を考慮すべき。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/src/lib/session-cleanup.ts (lines 98-106)",
+      "suggestion": "session-cleanup.tsの変更は不要。Issue本文のStop条件マッチ時処理フロー（stopReason設定 -> 無効化 -> ポーラー停止）が正しく実装されれば、session-cleanup.tsとの競合は発生しない（stopAutoYesPollingの冪等性により）。影響範囲テーブルに「session-cleanup.ts -- 変更不要（確認済み）」と明記することを推奨。"
+    },
+    {
+      "id": "S3-F011",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "useAutoYes.tsのlastServerResponseTimestamp連携への潜在的影響",
+      "description": "useAutoYes.ts（line 74-81）はlastServerResponseTimestampを用いてサーバーが3秒以内に応答した場合にクライアント側応答をスキップする。Stop条件によりAuto-Yesが停止された場合、サーバー側pollerは停止するがlastServerResponseTimestampは更新されない。クライアント側のuseAutoYesはautoYesEnabled=falseとなるため応答自体がスキップされるので実害はないが、stopReason通知のタイミングによってはautoYesEnabled=trueのまま一瞬残る可能性がある。Issue本文ではuseAutoYes.tsは「変更不要」と正しく記載されているが、この競合ウィンドウの考慮が必要。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/src/hooks/useAutoYes.ts (lines 54-108)",
+      "suggestion": "current-output APIのポーリングでautoYes.enabled=falseが返った時点でクライアント側のautoYesEnabled stateが更新されるため、useAutoYes内の自動応答は速やかに停止する。最悪ケースでも1ポーリングサイクル（2-5秒）の遅延で済むため、Issue本文のuseAutoYes.ts変更不要の判断は妥当。追加対応不要だが、設計ドキュメントに「クライアント通知の遅延ウィンドウ（最大1ポーリングサイクル）」を記載しておくと良い。"
+    },
+    {
+      "id": "S3-F012",
+      "severity": "nice_to_have",
+      "category": "test",
+      "title": "auto-yes-resolver.testへの影響なし（確認済み）",
+      "description": "tests/unit/lib/auto-yes-resolver.test.tsはresolveAutoAnswer()関数の単体テストのみを含む。Stop条件チェックはpollAutoYes()内のresolveAutoAnswer()呼び出し前に行われるため、auto-yes-resolver.tsおよびそのテストに変更は不要。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/tests/unit/lib/auto-yes-resolver.test.ts",
+      "suggestion": "影響なし。Issueの「関連コンポーネント」セクションに既に「auto-yes-resolver.ts -- 変更なし」と記載されており正確。"
+    },
+    {
+      "id": "S3-F013",
+      "severity": "nice_to_have",
+      "category": "impact",
+      "title": "auto-yes-config.testへの新テストケース追加の明示",
+      "description": "tests/unit/config/auto-yes-config.test.tsは現在ALLOWED_DURATIONS、DEFAULT_AUTO_YES_DURATION、DURATION_LABELS、isAllowedDuration、formatTimeRemainingのテストを含む。auto-yes-config.tsにMAX_STOP_PATTERN_LENGTH等の定数を追加する場合、対応するテストケースの追加が必要。Issueの実装タスクには「ユニットテスト追加」と記載されているが、auto-yes-config.testへの追加が具体的に記載されていない。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/tests/unit/config/auto-yes-config.test.ts",
+      "suggestion": "Issueの実装タスクに「tests/unit/config/auto-yes-config.test.ts にMAX_STOP_PATTERN_LENGTH定数のテストを追加」を追記するか、テスト追加は暗黙的に含まれるものとして受入条件に「新規定数のテストカバレッジ」を含める。"
+    },
+    {
+      "id": "S3-F014",
+      "severity": "nice_to_have",
+      "category": "compatibility",
+      "title": "useAutoYes.testへの影響なし（確認済み）",
+      "description": "tests/unit/hooks/useAutoYes.test.tsはuseAutoYesフックの単体テストを含む。Issueの判断通りuseAutoYes.ts自体は変更不要であり、テストへの影響もない。autoYesEnabled=falseとなった後のフック動作は既存テスト（line 118-137）でカバーされている。",
+      "location": "/Users/maenokota/share/work/github_kewton/commandmate-issue-314/tests/unit/hooks/useAutoYes.test.ts",
+      "suggestion": "影響なし。追加対応不要。"
+    }
+  ],
+  "summary": {
+    "total_findings": 14,
+    "must_fix": 4,
+    "should_fix": 7,
+    "nice_to_have": 3
+  }
+}

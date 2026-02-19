@@ -1,0 +1,9 @@
+{
+  "issue_number": 314,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_doc_path": "dev-reports/design/issue-314-auto-yes-stop-condition-design-policy.md",
+  "previous_stage_result": "dev-reports/issue/314/multi-stage-design-review/stage1-review-result.json",
+  "previous_stage_apply_result": "dev-reports/issue/314/multi-stage-design-review/stage1-apply-result.json"
+}

@@ -1,0 +1,114 @@
+{
+  "issue_number": 314,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘反映",
+  "apply_date": "2026-02-19",
+  "status": "completed",
+  "applied_findings": [
+    {
+      "finding_id": "DS2-F001",
+      "severity": "must_fix",
+      "status": "applied",
+      "changes_made": "セクション3「AutoYesState インターフェース拡張」にglobalThis型宣言（declare global ブロック L116-121）への影響注記を追加。AutoYesState拡張後もMap<string, AutoYesState>が自動的に新インターフェースを参照するためコード変更不要であることを明記。セクション13にTypeScriptコンパイル確認チェックリストを追加。"
+    },
+    {
+      "finding_id": "DS2-F002",
+      "severity": "must_fix",
+      "status": "applied",
+      "changes_made": "セクション9「テスト設計」に「既存テストへのsetAutoYesEnabled()影響」サブセクションを追加。tests/unit/lib/auto-yes-manager.test.ts（約10箇所）とtests/integration/auto-yes-persistence.test.ts（約5箇所）の影響範囲を対応表で明記。第4引数がoptionalであるため既存3引数呼び出しは動作するが確認が必要である旨を記載。セクション13にテスト全パス確認チェックリストを追加。"
+    },
+    {
+      "finding_id": "DS2-F003",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション13「実装チェックリスト」に実装順序表（10ステップ）を追加。AutoYesState型拡張 -> disableAutoYes() -> setAutoYesEnabled() -> getAutoYesState() -> checkStopCondition() -> pollAutoYes() -> API層 -> UI層 -> テストの順序と依存関係を明記。"
+    },
+    {
+      "finding_id": "DS2-F004",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション4「POST /api/worktrees/[id]/auto-yes」のサーバーサイドバリデーションに、stopPatternバリデーションの挿入位置をコード例付きで明記。duration検証ブロック(L120-129)の直後、かつbody.enabled=trueのスコープ内に配置する方針を記載。"
+    },
+    {
+      "finding_id": "DS2-F005",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション12の変更対象ファイル一覧で、current-output/route.tsの変更概要に「GET関数のJSDoc API解釈ルール追加（DS1-F007/DS2-F005）」と具体的な変更内容（L128-131に1行追加）を明記。"
+    },
+    {
+      "finding_id": "DS2-F006",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション5「AutoYesConfirmDialog 変更」にonConfirm呼び出し時のstopPattern正規化コード例を追加。stopPattern.trim() || undefinedにより空文字列がundefinedに正規化される実装を明記。設計根拠として空文字列がサーバーまで伝播することの防止を説明。"
+    },
+    {
+      "finding_id": "DS2-F007",
+      "severity": "must_fix",
+      "status": "applied",
+      "changes_made": "セクション9「テスト設計」に「AutoYesToggle.test.tsx テスト変更 Before/After 対応表」サブセクションを追加。L45/L59/L81の既存テスト修正とL86の新規テスト追加について、具体的なBefore/After引数形式を対応表で明記。mockのonToggle関数シグネチャ変更にも言及。"
+    },
+    {
+      "finding_id": "DS2-F008",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション5「WorktreeDetailRefactored 変更」にfetchCurrentOutput()内のstopReason検出ロジック挿入位置の詳細をコード例付きで追加。L1037-1041の既存autoYes処理の直後に挿入する方針を明記。enabled: true -> false遷移検出とトースト表示のコード例を記載。"
+    },
+    {
+      "finding_id": "DS2-F009",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "changes_made": "セクション7「セキュリティ設計」のvalidateStopPattern()関数の直前に、auto-yes-config.tsのモジュールJSDoc更新方針を追加。'Shared configuration for Auto-Yes settings. Includes duration settings and stop pattern validation. Used by both client and server.'の具体的JSDoc文を記載。"
+    },
+    {
+      "finding_id": "DS2-F010",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション8「パフォーマンス設計」に「captureSessionOutput()のバッファサイズについて」サブセクションを追加。第3引数5000が文字数上限（行数ではない）であることを明記。ReDoS緩和策としてパターン長500文字 x 照合対象5000文字の制限が機能することを説明。"
+    },
+    {
+      "finding_id": "DS2-F011",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "changes_made": "セクション12の変更対象ファイル一覧の直後に「i18n翻訳キー一覧」サブセクションを追加。stopPatternLabel, stopPatternPlaceholder, stopPatternDescription, invalidRegexPattern, patternTooLong, stopPatternMatchedの6キーについて、英語/日本語/使用箇所の対応表を記載。camelCase命名規則の注記も追加。"
+    },
+    {
+      "finding_id": "DS2-F012",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "changes_made": "セクション7「セキュリティ設計」に「validateStopPattern()のエラーメッセージ方針」サブセクションを追加。サーバー側は英語エラーメッセージをそのまま使用、クライアント側もvalidateStopPattern()のerrorメッセージを直接表示する方針を対応表で明記。将来のエラー種別コード化（'too_long', 'invalid_syntax'）によるi18nマッピング方式への移行を将来検討として記載。"
+    },
+    {
+      "finding_id": "DS2-F013",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "changes_made": "セクション9「テスト設計」に「checkStopCondition()のテスト戦略」サブセクションを追加。@internal exportパターン（clearAllAutoYesStates()と同様）を採用する方針を明記。セクション6のcheckStopCondition()関数定義にも@internal export annotationとDS2-F013参照を追加。セクション13のNice to Haveチェックリストに対応項目を追加。"
+    }
+  ],
+  "skipped_findings": [],
+  "summary": {
+    "total": 13,
+    "applied": 13,
+    "skipped": 0,
+    "must_fix_applied": 3,
+    "must_fix_total": 3,
+    "should_fix_applied": 6,
+    "should_fix_total": 6,
+    "nice_to_have_applied": 4,
+    "nice_to_have_total": 4
+  },
+  "design_doc_path": "dev-reports/design/issue-314-auto-yes-stop-condition-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー（Stage 2追加）",
+    "セクション3: データモデル設計（globalThis型宣言注記追加）",
+    "セクション4: API設計（stopPatternバリデーション挿入位置追加）",
+    "セクション5: コンポーネント設計（onConfirm正規化、fetchCurrentOutput挿入位置追加）",
+    "セクション6: サーバーサイド処理設計（checkStopCondition @internal export追加）",
+    "セクション7: セキュリティ設計（モジュールJSDoc方針、エラーメッセージ方針追加）",
+    "セクション8: パフォーマンス設計（バッファサイズ説明追加）",
+    "セクション9: テスト設計（既存テスト影響、Before/After対応表、テスト戦略追加）",
+    "セクション12: 変更対象ファイル一覧（JSDoc追加明記、i18n翻訳キー一覧追加）",
+    "セクション13: 実装チェックリスト（実装順序、Stage 2 Must Fix/Should Fix/Nice to Have追加）"
+  ],
+  "timestamp": "2026-02-19T14:00:00Z"
+}

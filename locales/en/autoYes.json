@@ -16,5 +16,11 @@
   "riskWarning": "Automatic responses may result in unintended operations (such as file deletion or overwriting). Please use only after fully understanding the implications.",
   "disclaimer": "Disclaimer:",
   "disclaimerText": "The developers assume no responsibility for any issues arising from the use of Auto Yes mode. Use at your own risk.",
-  "agreeAndEnable": "Agree and enable"
+  "agreeAndEnable": "Agree and enable",
+  "stopPatternLabel": "Stop condition (regex)",
+  "stopPatternPlaceholder": "e.g. rm -rf|DROP TABLE|force push",
+  "stopPatternDescription": "Auto-Yes will be automatically stopped when terminal output matches this pattern",
+  "invalidRegexPattern": "Invalid regular expression pattern",
+  "patternTooLong": "Pattern must be 500 characters or less",
+  "stopPatternMatched": "Auto-Yes was automatically stopped because the stop condition was matched"
 }

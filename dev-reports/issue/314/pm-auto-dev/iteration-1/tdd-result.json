@@ -1,0 +1,51 @@
+{
+  "issue_number": 314,
+  "iteration": 1,
+  "status": "success",
+  "coverage": 85.0,
+  "unit_tests": {
+    "total": 156,
+    "passed": 156,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "implemented_files": [
+    "package.json",
+    "package-lock.json",
+    "src/config/auto-yes-config.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "locales/ja/autoYes.json",
+    "locales/en/autoYes.json",
+    "tests/unit/config/auto-yes-config.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx"
+  ],
+  "test_results": {
+    "total": 156,
+    "passed": 156,
+    "failed": 0,
+    "breakdown": {
+      "auto-yes-config.test.ts": 36,
+      "auto-yes-manager.test.ts": 79,
+      "AutoYesConfirmDialog.test.tsx": 24,
+      "AutoYesToggle.test.tsx": 11,
+      "auto-yes-persistence.test.ts": 6
+    }
+  },
+  "lint_errors": 0,
+  "type_errors": 0,
+  "commits": [
+    "0a456e8: feat(auto-yes): add stop condition (regex) for Auto-Yes mode"
+  ],
+  "message": "TDD implementation complete. All 156 tests pass. ESLint: 0 errors. TypeScript: 0 new errors. Implementation includes safe-regex2 for ReDoS prevention, validateStopPattern(), disableAutoYes(), checkStopCondition(), executeRegexWithTimeout(), API route updates, UI components with stop pattern input, i18n translations, and comprehensive test coverage.",
+  "timestamp": "2026-02-19T21:15:00+09:00"
+}

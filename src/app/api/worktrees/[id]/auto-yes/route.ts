@@ -17,7 +17,7 @@ import {
   type AutoYesState,
 } from '@/lib/auto-yes-manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, type AutoYesDuration } from '@/config/auto-yes-config';
+import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration } from '@/config/auto-yes-config';
 
 /** Allowed CLI tool IDs */
 const ALLOWED_CLI_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
@@ -128,12 +128,33 @@ export async function POST(
       duration = body.duration;
     }
 
+    // [SEC-SF-003] Validate stopPattern if provided (Issue #314)
+    let stopPattern: string | undefined;
+    if (body.enabled && body.stopPattern !== undefined) {
+      const trimmed = typeof body.stopPattern === 'string' ? body.stopPattern.trim() : '';
+      if (trimmed) {
+        const validation = validateStopPattern(trimmed);
+        if (!validation.valid) {
+          return NextResponse.json(
+            { error: validation.error },
+            { status: 400 }
+          );
+        }
+        stopPattern = trimmed;
+      }
+    }
+
     // Validate cliToolId if provided (default: 'claude')
     const cliToolId: CLIToolType = isValidCliTool(body.cliToolId)
       ? body.cliToolId
       : 'claude';
 
-    const state = setAutoYesEnabled(params.id, body.enabled, body.enabled ? duration : undefined);
+    const state = setAutoYesEnabled(
+      params.id,
+      body.enabled,
+      body.enabled ? duration : undefined,
+      body.enabled ? stopPattern : undefined
+    );
 
     // Issue #138: Start or stop server-side polling
     let pollingStarted = false;

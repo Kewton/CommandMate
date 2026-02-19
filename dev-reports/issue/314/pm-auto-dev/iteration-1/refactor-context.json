@@ -1,0 +1,24 @@
+{
+  "issue_number": 314,
+  "refactor_targets": [
+    "src/config/auto-yes-config.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "test_results": "115/115 passed (non-React unit tests)",
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性向上",
+    "SOLID原則準拠の確認",
+    "不要なコードの除去",
+    "コメントの整理"
+  ],
+  "notes": "React component test failures (AutoYesConfirmDialog/AutoYesToggle) are pre-existing environment issues, not caused by Issue #314 changes"
+}

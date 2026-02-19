@@ -1,0 +1,53 @@
+{
+  "issue_number": 314,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_passed": 115,
+      "tests_total": 115,
+      "lint_errors": 0,
+      "type_errors": 0,
+      "commit": "0a456e8"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 8,
+      "criteria_total": 8,
+      "scenarios_passed": 17,
+      "note": "React component tests have pre-existing environment issue unrelated to Issue #314"
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "AutoYesStopReason型をauto-yes-config.tsに移動（DRY原則）",
+        "WorktreeDetailRefactored.tsxのCurrentOutputResponse型でAutoYesStopReason使用",
+        "AutoYesConfirmDialog/AutoYesToggleの不要なdefault export除去"
+      ],
+      "lint_errors": 0,
+      "type_errors": 0
+    },
+    "documentation": {
+      "status": "updated",
+      "files_updated": [
+        "CLAUDE.md",
+        "docs/implementation-history.md"
+      ]
+    }
+  },
+  "implemented_features": [
+    "validateStopPattern()共通バリデーション（safe-regex2 ReDoS検出）",
+    "MAX_STOP_PATTERN_LENGTH=500定数",
+    "disableAutoYes()専用関数（全フィールド明示設定）",
+    "checkStopCondition()独立関数（@internal export）",
+    "executeRegexWithTimeout()タイムアウト保護",
+    "AutoYesState.stopPattern/stopReasonフィールド追加",
+    "pollAutoYes()にStop条件チェック挿入",
+    "auto-yes/route.ts stopPatternバリデーション",
+    "current-output/route.ts stopReason返却・isValidWorktreeId追加",
+    "AutoYesConfirmDialog stopPattern入力UI",
+    "AutoYesToggleParams オブジェクト引数パターン",
+    "WorktreeDetailRefactored トースト通知・handleAutoYesToggle変更",
+    "i18n 6翻訳キー追加（ja/en）"
+  ]
+}

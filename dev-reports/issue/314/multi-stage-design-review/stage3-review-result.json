@@ -1,0 +1,166 @@
+{
+  "issue_number": 314,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_date": "2026-02-19",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "DS3-F001",
+      "severity": "must_fix",
+      "category": "type_impact",
+      "title": "AutoYesToggleProps.onToggle positional -> object pattern changes TWO call sites in WorktreeDetailRefactored",
+      "description": "The design documents the change of AutoYesToggle.onToggle from positional to object pattern (DS1-F006), and WorktreeDetailRefactored.handleAutoYesToggle must also change its signature. However, WorktreeDetailRefactored renders AutoYesToggle TWICE (desktop L1811-1817 and mobile L1950-1957), both passing onToggle={handleAutoYesToggle}. This is handled by changing the single handleAutoYesToggle function. The real risk is that handleAutoYesToggle at L1188 currently has signature (enabled: boolean, duration?: AutoYesDuration) which must change to (params: AutoYesToggleParams). The design document correctly describes this change. However, the design doc does not list this file in the Before/After test change table (DS2-F007), and the WorktreeDetailRefactored component has no dedicated unit test file. If integration tests or e2e tests rely on the handleAutoYesToggle signature indirectly, they could break.",
+      "location": "src/components/worktree/WorktreeDetailRefactored.tsx L1188, L1811-1817, L1950-1957",
+      "suggestion": "Confirm that no other test files (e2e, integration) invoke or mock handleAutoYesToggle directly. Add a note to the design doc's impact section explicitly listing WorktreeDetailRefactored L1188 signature change."
+    },
+    {
+      "id": "DS3-F002",
+      "severity": "must_fix",
+      "category": "type_impact",
+      "title": "CurrentOutputResponse type in WorktreeDetailRefactored must add stopReason field",
+      "description": "The CurrentOutputResponse interface (L76-89 in WorktreeDetailRefactored.tsx) is a client-local type definition, not shared. It currently defines autoYes as { enabled: boolean; expiresAt: number | null }. The design adds stopReason to the API response, so this local type must be updated to include stopReason?: 'expired' | 'stop_pattern_matched'. Without this update, TypeScript compilation will succeed (extra fields are ignored in runtime JSON parsing), but the stopReason field will be inaccessible in a type-safe manner, causing the toast notification logic to fail at compile time or require 'as any' casts.",
+      "location": "src/components/worktree/WorktreeDetailRefactored.tsx L85-88",
+      "suggestion": "Design doc Section 5 documents this change but does not specify the exact line numbers. Add explicit mention that CurrentOutputResponse at L85-88 must be updated with the stopReason field."
+    },
+    {
+      "id": "DS3-F003",
+      "severity": "must_fix",
+      "category": "api_impact",
+      "title": "AutoYesConfirmDialog.onConfirm signature change propagates to AutoYesToggle.handleConfirm",
+      "description": "AutoYesConfirmDialog.onConfirm changes from (duration: AutoYesDuration) to (duration: AutoYesDuration, stopPattern?: string). This directly affects AutoYesToggle.handleConfirm (L88-92) which currently calls onToggle(true, duration). The new version must call onToggle({ enabled: true, duration, stopPattern }). Both changes must be made atomically. If AutoYesConfirmDialog is updated first but AutoYesToggle.handleConfirm is not, the stopPattern will be lost at the boundary. The design doc describes the correct flow but does not emphasize the atomicity requirement in the implementation checklist.",
+      "location": "src/components/worktree/AutoYesConfirmDialog.tsx (onConfirm props), src/components/worktree/AutoYesToggle.tsx L88-92",
+      "suggestion": "In the implementation checklist (Section 13), group steps for AutoYesConfirmDialog.onConfirm change and AutoYesToggle.handleConfirm change as a single atomic step, or at minimum note the dependency."
+    },
+    {
+      "id": "DS3-F004",
+      "severity": "should_fix",
+      "category": "test_impact",
+      "title": "AutoYesConfirmDialog.test.tsx has 3 test cases with onConfirm assertions that need updating",
+      "description": "Current test assertions at L119, L127, L135 call toHaveBeenCalledWith(DEFAULT_AUTO_YES_DURATION), toHaveBeenCalledWith(10800000), toHaveBeenCalledWith(28800000) respectively. After the change, onConfirm will accept a second optional parameter (stopPattern). Existing tests with single-argument expectations will still pass because toHaveBeenCalledWith checks only the specified arguments. However, new tests must verify that when stopPattern is entered, it is passed as the second argument. The design doc mentions this in Section 9 but the specific test file line numbers for AutoYesConfirmDialog are listed as 'lines 119, 127, 135' which align correctly. Verify that the mock onConfirm signature is compatible.",
+      "location": "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx L119, L127, L135",
+      "suggestion": "Existing tests remain valid due to optional parameter backward compatibility. Add new test cases for: (1) onConfirm called with stopPattern when entered, (2) onConfirm called with undefined when stopPattern is empty, (3) validation error prevents confirmation."
+    },
+    {
+      "id": "DS3-F005",
+      "severity": "should_fix",
+      "category": "test_impact",
+      "title": "AutoYesToggle.test.tsx L45, L59, L81 assertions MUST change for object argument pattern",
+      "description": "The AutoYesToggle.test.tsx file has 3 existing assertions that will BREAK after the onToggle signature change from positional to object pattern: L45 expects toHaveBeenCalledWith(true, DEFAULT_AUTO_YES_DURATION), L59 expects toHaveBeenCalledWith(false), L81 expects positional form. These tests will fail because onToggle will now receive a single object argument. This is a breaking change in the test suite. The design doc (DS2-F007) correctly documents the Before/After table.",
+      "location": "tests/unit/components/worktree/AutoYesToggle.test.tsx L45, L59, L81",
+      "suggestion": "Ensure these 3 test modifications are implemented synchronously with the source code change. The defaultProps mock (L17) must also be updated to match the new signature: onToggle: vi.fn<[AutoYesToggleParams], Promise<void>>()."
+    },
+    {
+      "id": "DS3-F006",
+      "severity": "should_fix",
+      "category": "test_impact",
+      "title": "auto-yes-manager.test.ts setAutoYesEnabled calls are backward compatible but new tests needed",
+      "description": "The test file has ~10 calls to setAutoYesEnabled with 2-3 arguments. Adding the 4th optional parameter (stopPattern) maintains backward compatibility. However, the following new test scenarios must be added: (1) setAutoYesEnabled with stopPattern, (2) disableAutoYes() with various reasons, (3) checkStopCondition() matching and non-matching, (4) re-enable clears stopPattern/stopReason, (5) getAutoYesState expired returns stopReason='expired'. The design doc Section 9 lists these but does not estimate the test count (approximately 10-15 new test cases).",
+      "location": "tests/unit/lib/auto-yes-manager.test.ts",
+      "suggestion": "Estimate ~12-15 new test cases for auto-yes-manager.test.ts. Consider organizing them under a new describe block 'Issue #314: Stop condition' for clarity."
+    },
+    {
+      "id": "DS3-F007",
+      "severity": "should_fix",
+      "category": "backward_compatibility",
+      "title": "globalThis cached AutoYesState instances missing new fields after hot reload",
+      "description": "During development with Next.js hot reload, the globalThis.__autoYesStates Map may contain AutoYesState objects created before the code change (old format without stopPattern/stopReason). When getAutoYesState() reads these old-format objects, the new optional fields will be undefined, which is the correct behavior for the initial state. However, checkStopCondition() reads autoYesState.stopPattern which will be undefined for pre-existing states, causing it to return false (skip check). This is CORRECT behavior -- old states without stopPattern should not trigger stop condition checks. The disableAutoYes() function explicitly sets all fields, so states transitioning through disableAutoYes() will have the correct format. No action required, but this analysis should be documented.",
+      "location": "src/lib/auto-yes-manager.ts (globalThis.__autoYesStates)",
+      "suggestion": "Add a brief note in the design doc acknowledging that pre-existing globalThis state entries without stopPattern/stopReason are handled correctly by optional field access. No migration logic is needed."
+    },
+    {
+      "id": "DS3-F008",
+      "severity": "should_fix",
+      "category": "concurrency",
+      "title": "checkStopCondition() and pollAutoYes() share autoYesStates Map without lock, but risk is low",
+      "description": "checkStopCondition() calls getAutoYesState() then disableAutoYes(), both of which access autoYesStates Map. pollAutoYes() also accesses the Map. Node.js is single-threaded, so there is no true data race. However, between an async yield point (await captureSessionOutput) and the subsequent checkStopCondition() call, another request could call setAutoYesEnabled() through the API route, potentially re-enabling auto-yes for the same worktree. The sequence would be: (1) pollAutoYes captures output, (2) API route re-enables auto-yes with new stopPattern, (3) checkStopCondition runs with stale autoYesState from step 1 (because it calls getAutoYesState() freshly). Actually, since checkStopCondition calls getAutoYesState() fresh, it will get the re-enabled state with the new pattern. The output being checked is from step 1. This is acceptable behavior -- the latest stopPattern will be checked against the current output buffer.",
+      "location": "src/lib/auto-yes-manager.ts pollAutoYes() and checkStopCondition()",
+      "suggestion": "No code change needed. Document that checkStopCondition() always reads fresh state via getAutoYesState(), so concurrent state changes through the API are handled correctly."
+    },
+    {
+      "id": "DS3-F009",
+      "severity": "should_fix",
+      "category": "performance",
+      "title": "RegExp object created on every pollAutoYes cycle when stopPattern is set",
+      "description": "checkStopCondition() creates a new RegExp(autoYesState.stopPattern) on every 2-second poll cycle. For a 500-character pattern against 5000-character output, this is approximately 1 microsecond of overhead, which is negligible. However, RegExp compilation could be cached in the AutoYesState or in a module-level WeakMap keyed by worktreeId. The design doc correctly identifies this as acceptable for the initial version.",
+      "location": "Design doc Section 8 (Performance), checkStopCondition() in Section 6",
+      "suggestion": "No change for initial implementation. If performance profiling shows regex compilation overhead, consider caching compiled RegExp objects in a Map<string, RegExp> indexed by worktreeId, invalidated when stopPattern changes."
+    },
+    {
+      "id": "DS3-F010",
+      "severity": "should_fix",
+      "category": "i18n",
+      "title": "Six new i18n keys must be added to both locale files without breaking existing key structure",
+      "description": "The design doc (DS2-F011) lists 6 new keys: stopPatternLabel, stopPatternPlaceholder, stopPatternDescription, invalidRegexPattern, patternTooLong, stopPatternMatched. Current autoYes.json files have 19 keys. Adding 6 more brings the total to 25. The keys use camelCase which is consistent with existing keys. The nested 'durations' object exists as a precedent for grouping. The new keys are at the top level which is consistent with other non-grouped keys. No structural changes to the i18n loading mechanism (next-intl getRequestConfig) are needed since all keys are in the same namespace.",
+      "location": "locales/ja/autoYes.json, locales/en/autoYes.json",
+      "suggestion": "Group the 6 new keys together at the end of the JSON file with a comment (if JSON5 is used) or place them alphabetically. Verify that next-intl's getRequestConfig correctly loads the expanded file."
+    },
+    {
+      "id": "DS3-F011",
+      "severity": "nice_to_have",
+      "category": "type_impact",
+      "title": "AutoYesToggleParams interface should be exported from AutoYesToggle.tsx for reuse",
+      "description": "The design introduces AutoYesToggleParams interface in AutoYesToggle.tsx. WorktreeDetailRefactored.tsx imports AutoYesDuration from auto-yes-config but will need to reference AutoYesToggleParams for the handleAutoYesToggle signature. The interface should be exported from AutoYesToggle.tsx. If not exported, WorktreeDetailRefactored would need to define its own compatible type or use inline typing, violating DRY.",
+      "location": "src/components/worktree/AutoYesToggle.tsx, src/components/worktree/WorktreeDetailRefactored.tsx",
+      "suggestion": "Ensure AutoYesToggleParams is exported from AutoYesToggle.tsx and imported in WorktreeDetailRefactored.tsx."
+    },
+    {
+      "id": "DS3-F012",
+      "severity": "nice_to_have",
+      "category": "api_impact",
+      "title": "auto-yes/route.ts buildAutoYesResponse helper does not include stopReason",
+      "description": "The current buildAutoYesResponse() helper (L33-45) in auto-yes/route.ts builds the AutoYesResponse which does not include stopReason. While the POST endpoint does not need to return stopReason (it is only read via the GET current-output endpoint), the GET endpoint of auto-yes/route.ts also uses buildAutoYesResponse. If clients in the future expect stopReason from the GET /auto-yes endpoint, this helper would need updating. For consistency, consider whether the GET /auto-yes endpoint should also return stopReason.",
+      "location": "src/app/api/worktrees/[id]/auto-yes/route.ts L33-45",
+      "suggestion": "Keep current behavior (stopReason only from current-output endpoint) for simplicity, as documented in the design. No change needed for initial implementation."
+    },
+    {
+      "id": "DS3-F013",
+      "severity": "nice_to_have",
+      "category": "backward_compatibility",
+      "title": "useAutoYes hook does not need changes but should be verified",
+      "description": "The useAutoYes hook (src/hooks/useAutoYes.ts) handles client-side auto-response logic independently from the server-side pollAutoYes(). It does not reference stopPattern or stopReason. When server-side checkStopCondition() triggers disableAutoYes(), the next current-output polling cycle will return enabled=false, and the client-side useAutoYes hook will stop responding (because autoYesEnabled becomes false via state update from fetchCurrentOutput). This flow is correct and requires no changes to useAutoYes.",
+      "location": "src/hooks/useAutoYes.ts",
+      "suggestion": "No changes needed. Verify during implementation that the enabled=false propagation via current-output polling correctly disables client-side auto-response."
+    },
+    {
+      "id": "DS3-F014",
+      "severity": "nice_to_have",
+      "category": "type_impact",
+      "title": "session-cleanup.ts stopAutoYesPolling import is unaffected",
+      "description": "session-cleanup.ts imports stopAutoYesPolling from auto-yes-manager. This function's signature (worktreeId: string) does not change. No impact on session cleanup logic.",
+      "location": "src/lib/session-cleanup.ts L11",
+      "suggestion": "No action needed."
+    }
+  ],
+  "summary": {
+    "total_findings": 14,
+    "must_fix": 3,
+    "should_fix": 7,
+    "nice_to_have": 4
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/auto-yes-manager.ts",
+    "src/config/auto-yes-config.ts",
+    "src/components/worktree/AutoYesConfirmDialog.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/lib/session-cleanup.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "tests/unit/config/auto-yes-config.test.ts",
+    "tests/unit/components/worktree/AutoYesToggle.test.tsx",
+    "tests/unit/components/worktree/AutoYesConfirmDialog.test.tsx",
+    "tests/integration/auto-yes-persistence.test.ts",
+    "locales/ja/autoYes.json",
+    "locales/en/autoYes.json"
+  ],
+  "timestamp": "2026-02-19T12:00:00Z"
+}

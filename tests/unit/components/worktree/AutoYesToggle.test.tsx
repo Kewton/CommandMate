@@ -2,19 +2,20 @@
  * Tests for AutoYesToggle component - confirm dialog integration
  *
  * Issue #225: Updated for duration propagation and HH:MM:SS format
+ * Issue #314: Updated for AutoYesToggleParams interface (object parameter pattern)
  * @vitest-environment jsdom
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
+import { AutoYesToggle, type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config';
 
 describe('AutoYesToggle', () => {
   const defaultProps = {
     enabled: false,
     expiresAt: null,
-    onToggle: vi.fn().mockResolvedValue(undefined),
+    onToggle: vi.fn<(params: AutoYesToggleParams) => Promise<void>>().mockResolvedValue(undefined),
     lastAutoResponse: null,
   };
 
@@ -36,17 +37,21 @@ describe('AutoYesToggle', () => {
       expect(defaultProps.onToggle).not.toHaveBeenCalled();
     });
 
-    it('should call onToggle(true, defaultDuration) when dialog is confirmed with default', async () => {
+    it('should call onToggle with enabled:true and default duration when dialog is confirmed', async () => {
       render(<AutoYesToggle {...defaultProps} enabled={false} />);
       fireEvent.click(screen.getByRole('switch'));
       fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
 
       await waitFor(() => {
-        expect(defaultProps.onToggle).toHaveBeenCalledWith(true, DEFAULT_AUTO_YES_DURATION);
+        expect(defaultProps.onToggle).toHaveBeenCalledWith({
+          enabled: true,
+          duration: DEFAULT_AUTO_YES_DURATION,
+          stopPattern: undefined,
+        });
       });
     });
 
-    it('should call onToggle(true, 10800000) when 3-hour duration is selected', async () => {
+    it('should call onToggle with enabled:true and 3-hour duration when selected', async () => {
       render(<AutoYesToggle {...defaultProps} enabled={false} />);
       fireEvent.click(screen.getByRole('switch'));
 
@@ -56,7 +61,11 @@ describe('AutoYesToggle', () => {
       fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
 
       await waitFor(() => {
-        expect(defaultProps.onToggle).toHaveBeenCalledWith(true, 10800000);
+        expect(defaultProps.onToggle).toHaveBeenCalledWith({
+          enabled: true,
+          duration: 10800000,
+          stopPattern: undefined,
+        });
       });
     });
 
@@ -78,12 +87,12 @@ describe('AutoYesToggle', () => {
   });
 
   describe('ON to OFF (no dialog)', () => {
-    it('should call onToggle(false) directly without showing dialog', async () => {
+    it('should call onToggle with enabled:false directly without showing dialog', async () => {
       render(<AutoYesToggle {...defaultProps} enabled={true} />);
       fireEvent.click(screen.getByRole('switch'));
 
       await waitFor(() => {
-        expect(defaultProps.onToggle).toHaveBeenCalledWith(false);
+        expect(defaultProps.onToggle).toHaveBeenCalledWith({ enabled: false });
       });
       expect(screen.queryByText('autoYes.enableTitle')).toBeNull();
     });
@@ -133,6 +142,44 @@ describe('AutoYesToggle', () => {
       const timeDisplay = screen.getByLabelText('Time remaining');
       // Should start with 7 or 8 (depending on exact timing)
       expect(timeDisplay.textContent).toMatch(/^[78]:\d{2}:\d{2}$/);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #314: stopPattern propagation tests
+  // ==========================================================================
+  describe('Issue #314: stopPattern propagation', () => {
+    it('should pass stopPattern through onToggle when entered in dialog', async () => {
+      render(<AutoYesToggle {...defaultProps} enabled={false} />);
+      fireEvent.click(screen.getByRole('switch'));
+
+      // Enter stop pattern
+      const input = screen.getByTestId('stop-pattern-input');
+      fireEvent.change(input, { target: { value: 'error|fatal' } });
+
+      fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
+
+      await waitFor(() => {
+        expect(defaultProps.onToggle).toHaveBeenCalledWith({
+          enabled: true,
+          duration: DEFAULT_AUTO_YES_DURATION,
+          stopPattern: 'error|fatal',
+        });
+      });
+    });
+
+    it('should pass undefined stopPattern when no pattern entered', async () => {
+      render(<AutoYesToggle {...defaultProps} enabled={false} />);
+      fireEvent.click(screen.getByRole('switch'));
+      fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
+
+      await waitFor(() => {
+        expect(defaultProps.onToggle).toHaveBeenCalledWith({
+          enabled: true,
+          duration: DEFAULT_AUTO_YES_DURATION,
+          stopPattern: undefined,
+        });
+      });
     });
   });
 });

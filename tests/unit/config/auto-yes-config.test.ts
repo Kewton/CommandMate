@@ -12,6 +12,8 @@ import {
   DURATION_LABELS,
   isAllowedDuration,
   formatTimeRemaining,
+  validateStopPattern,
+  MAX_STOP_PATTERN_LENGTH,
   type AutoYesDuration,
 } from '@/config/auto-yes-config';
 
@@ -200,6 +202,73 @@ describe('auto-yes-config', () => {
       const now = 1700000000000;
       vi.setSystemTime(now);
       expect(formatTimeRemaining(0)).toBe('00:00');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #314: validateStopPattern tests
+  // ==========================================================================
+  describe('MAX_STOP_PATTERN_LENGTH', () => {
+    it('should be 500', () => {
+      expect(MAX_STOP_PATTERN_LENGTH).toBe(500);
+    });
+  });
+
+  describe('validateStopPattern', () => {
+    it('should accept valid regex patterns', () => {
+      expect(validateStopPattern('rm -rf')).toEqual({ valid: true });
+      expect(validateStopPattern('DROP TABLE')).toEqual({ valid: true });
+      expect(validateStopPattern('error|warning|fatal')).toEqual({ valid: true });
+      expect(validateStopPattern('^test$')).toEqual({ valid: true });
+      expect(validateStopPattern('\\d+')).toEqual({ valid: true });
+    });
+
+    it('should accept empty string as valid (empty pattern means no stop condition)', () => {
+      expect(validateStopPattern('')).toEqual({ valid: true });
+    });
+
+    it('should reject patterns exceeding MAX_STOP_PATTERN_LENGTH', () => {
+      const longPattern = 'a'.repeat(MAX_STOP_PATTERN_LENGTH + 1);
+      const result = validateStopPattern(longPattern);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe(`Pattern must be ${MAX_STOP_PATTERN_LENGTH} characters or less`);
+    });
+
+    it('should accept patterns at exactly MAX_STOP_PATTERN_LENGTH', () => {
+      const exactPattern = 'a'.repeat(MAX_STOP_PATTERN_LENGTH);
+      expect(validateStopPattern(exactPattern)).toEqual({ valid: true });
+    });
+
+    it('should reject invalid regex syntax', () => {
+      // Note: safe-regex2 may also detect some invalid patterns as unsafe.
+      // The important thing is that the pattern is rejected.
+      const result = validateStopPattern('[invalid');
+      expect(result.valid).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    it('should reject ReDoS patterns (catastrophic backtracking)', () => {
+      // Classic ReDoS pattern: (a+)+ with exponential backtracking
+      const result = validateStopPattern('(a+)+$');
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Pattern may cause performance issues (catastrophic backtracking detected)');
+    });
+
+    it('should reject nested quantifier ReDoS pattern', () => {
+      // Another classic ReDoS: (a+)+ without anchor
+      const result = validateStopPattern('(a+)+b');
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Pattern may cause performance issues (catastrophic backtracking detected)');
+    });
+
+    it('should use fixed error messages only (XSS prevention)', () => {
+      // Verify that error messages do not contain user input
+      const maliciousPattern = '<script>alert("xss")</script>[invalid';
+      const result = validateStopPattern(maliciousPattern);
+      expect(result.valid).toBe(false);
+      // Error should be a fixed string, not containing the malicious input
+      expect(result.error).not.toContain('<script>');
+      expect(result.error).not.toContain('alert');
     });
   });
 });

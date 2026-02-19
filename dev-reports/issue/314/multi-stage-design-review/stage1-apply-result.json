@@ -1,0 +1,120 @@
+{
+  "issue_number": 314,
+  "stage": 1,
+  "stage_name": "設計原則レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DS1-F003",
+        "item": "OCP: setAutoYesEnabled()のdisableパスでspread operatorによる暗黙的フィールド保持は脆弱",
+        "section_updated": "セクション6（サーバーサイド処理設計）、セクション3（状態遷移図）、セクション12（変更対象ファイル一覧）、セクション13（実装チェックリスト）",
+        "changes": [
+          "disableAutoYes(worktreeId, reason?) 専用関数の設計を新規追加",
+          "setAutoYesEnabled()のdisableパスをdisableAutoYes()への委譲に変更",
+          "getAutoYesState()の期限切れ処理をdisableAutoYes(id, 'expired')呼び出しに変更",
+          "pollAutoYes()内のautoYesStates.set()直接操作を完全に排除",
+          "状態遷移図をdisableAutoYes()ベースに更新"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DS1-F001",
+        "item": "SRP: pollAutoYes()への責務追加が過度に集中",
+        "section_updated": "セクション6（サーバーサイド処理設計）、セクション2（レイヤー構成）、セクション9（テスト設計）、セクション11（制約条件）、セクション13（実装チェックリスト）",
+        "changes": [
+          "checkStopCondition(worktreeId, cleanOutput): boolean 独立関数の設計を新規追加",
+          "pollAutoYes()内でcheckStopCondition()を呼び出す形に簡略化",
+          "checkStopCondition()の単体テスト項目を追加",
+          "SRP準拠の記述を制約条件セクションに追加"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "DS1-F002",
+        "item": "DRY: 正規表現バリデーションロジックの重複",
+        "section_updated": "セクション7（セキュリティ設計）、セクション5（コンポーネント設計）、セクション2（アーキテクチャ設計図）、セクション9（テスト設計）、セクション12（変更対象ファイル一覧）、セクション13（実装チェックリスト）",
+        "changes": [
+          "validateStopPattern()共通バリデーション関数のコード設計を追加",
+          "AutoYesConfirmDialogのバリデーションをvalidateStopPattern()使用に変更",
+          "サーバーサイドバリデーションをvalidateStopPattern()使用に変更",
+          "バリデーション表にvalidateStopPattern()関数参照を追加",
+          "auto-yes-config.tsの責務にvalidateStopPattern()を追加"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "DS1-F006",
+        "item": "ISP: AutoYesToggle.onToggleシグネチャの肥大化",
+        "section_updated": "セクション5（コンポーネント設計）、セクション2（アーキテクチャ設計図）、セクション10（トレードオフ）、セクション11（制約条件）、セクション13（実装チェックリスト）",
+        "changes": [
+          "AutoYesToggleParamsインターフェース定義を追加",
+          "onToggleをオブジェクト引数パターンに変更",
+          "handleConfirm/handleDisableのコード例を更新",
+          "WorktreeDetailRefactored.handleAutoYesToggleをオブジェクト引数対応に更新",
+          "ISP/OCP準拠の設計根拠を追記",
+          "既存テスト修正の必要性を明記"
+        ],
+        "status": "reflected"
+      },
+      {
+        "id": "DS1-F009",
+        "item": "DIP: pollAutoYes()内でautoYesStates Mapを直接操作",
+        "section_updated": "セクション6（サーバーサイド処理設計）、セクション11（制約条件）、セクション13（実装チェックリスト）",
+        "changes": [
+          "DS1-F003のdisableAutoYes()と連動してMap直接操作を排除",
+          "checkStopCondition()内でdisableAutoYes()を使用する設計に変更",
+          "DIP準拠の記述を制約条件セクションに追加"
+        ],
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DS1-F004",
+        "item": "KISS: prevAutoYesEnabledRefによるトースト重複防止の複雑性",
+        "section_updated": "セクション5（WorktreeDetailRefactored変更）、セクション13（実装チェックリスト：将来検討）",
+        "status": "noted_for_future"
+      },
+      {
+        "id": "DS1-F005",
+        "item": "YAGNI: stopReason 'expired'の新規追加は現時点で必要か",
+        "section_updated": "セクション3（設計判断追記）、セクション10（トレードオフ表）",
+        "status": "noted_with_rationale"
+      },
+      {
+        "id": "DS1-F007",
+        "item": "API設計: stopReasonフィールドがenabled状態と独立して返却される",
+        "section_updated": "セクション4（API設計：JSDoc解釈ルール追加）、セクション13（実装チェックリスト：将来検討）",
+        "status": "reflected"
+      },
+      {
+        "id": "DS1-F008",
+        "item": "コンポーネント設計: AutoYesConfirmDialogのstopPattern状態がダイアログ再表示時にリセットされない可能性",
+        "section_updated": "セクション5（AutoYesConfirmDialog変更：isOpenリセットuseEffect追加）、セクション9（テスト設計）、セクション13（実装チェックリスト：将来検討）",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-314-auto-yes-stop-condition-design-policy.md",
+  "sections_updated": [
+    "1.5. レビュー指摘事項サマリー（新規追加）",
+    "レビュー履歴（新規追加）",
+    "2. アーキテクチャ設計（システム構成図・レイヤー構成更新）",
+    "3. データモデル設計（状態遷移図更新、stopReason expired設計判断追記）",
+    "4. API設計（validateStopPattern使用、JSDoc解釈ルール追加）",
+    "5. コンポーネント設計（validateStopPattern使用、オブジェクト引数パターン、isOpenリセット）",
+    "6. サーバーサイド処理設計（disableAutoYes新規、checkStopCondition新規、setAutoYesEnabled/getAutoYesState修正、pollAutoYes簡略化）",
+    "7. セキュリティ設計（validateStopPattern共通関数、バリデーション表更新）",
+    "9. テスト設計（disableAutoYes/checkStopCondition/validateStopPatternテスト追加）",
+    "10. 設計上の決定事項とトレードオフ（レビュー指摘関連列追加、代替案追加）",
+    "11. 制約条件（SRP/OCP/DIP/ISP/DRY準拠記述更新）",
+    "12. 変更対象ファイル一覧（DS1指摘反映）",
+    "13. 実装チェックリスト（新規追加）"
+  ],
+  "timestamp": "2026-02-19T12:30:00Z"
+}

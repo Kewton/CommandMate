@@ -1,0 +1,95 @@
+{
+  "issue_number": 314,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-19",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S1-F001",
+        "status": "applied",
+        "change_summary": "変更対象ファイルテーブルに `locales/ja/autoYes.json` と `locales/en/autoYes.json` を追加。i18n対応の実装タスクにもファイル名を明記"
+      },
+      {
+        "id": "S1-F002",
+        "status": "applied",
+        "change_summary": "「クライアント通知メカニズム」セクションを新設。AutoYesStateに `stopReason` フィールド追加の設計、current-output APIレスポンス変更、WorktreeDetailRefactored.tsxでのトースト通知ロジックを記述。変更対象テーブルに `src/app/api/worktrees/[id]/current-output/route.ts` を追加"
+      },
+      {
+        "id": "S1-F003",
+        "status": "applied",
+        "change_summary": "変更対象テーブルから `useAutoYes.ts` を除去し、「useAutoYes.tsについて」セクションで変更不要の根拠とstopPatternの伝達経路（WorktreeDetailRefactored経由）を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S1-F004",
+        "status": "applied",
+        "change_summary": "ReDoS対策を `safe-regex2` 等によるパターン安全性検証 + MAX_STOP_PATTERN_LENGTH制限に具体化。セキュリティ考慮セクションと受入条件を更新"
+      },
+      {
+        "id": "S1-F005",
+        "status": "applied",
+        "change_summary": "「Stop条件マッチ時の処理フロー」サブセクションを新設。stopReason設定 → 無効化 → ポーラー停止 → ログ出力の具体的処理フローを明記"
+      },
+      {
+        "id": "S1-F006",
+        "status": "applied",
+        "change_summary": "「stopPatternのデータフロー」サブセクションを新設。AutoYesConfirmDialog → AutoYesToggle → WorktreeDetailRefactored → route.ts の伝達経路を4ステップで具体的に記述"
+      },
+      {
+        "id": "S1-F007",
+        "status": "applied",
+        "change_summary": "`auto-yes-config.ts` を関連コンポーネントから変更対象ファイルテーブルに移動。MAX_STOP_PATTERN_LENGTH等のStop条件関連定数追加として記載"
+      },
+      {
+        "id": "S1-F008",
+        "status": "applied",
+        "change_summary": "変更対象ファイルテーブルに `src/app/api/worktrees/[id]/current-output/route.ts` を追加。autoYesレスポンスにstopReasonフィールド追加として記載"
+      },
+      {
+        "id": "S1-F009",
+        "status": "applied",
+        "change_summary": "「stopPatternの照合対象範囲」サブセクションを新設。cleanOutput全体（直近5000文字）を照合対象とし、前回キャプチャとの差分照合方式で重複停止を防ぐ方針を明記"
+      },
+      {
+        "id": "S1-F010",
+        "status": "applied",
+        "change_summary": "バリデーションの具体的記述を追加。クライアント: AutoYesConfirmDialog内リアルタイム検証（try-catch + インラインエラー + ボタン無効化）。サーバー: route.tsで再バリデーション（400レスポンス）。UXセクション・実装タスク・受入条件・セキュリティ考慮を更新"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-F011",
+        "status": "acknowledged",
+        "reason": "Auto-Yes有効中のstopPattern表示（ツールチップ等）は将来検討事項としてレビュー履歴に記録。初期バージョンでは明示的にスコープ外"
+      },
+      {
+        "id": "S1-F012",
+        "status": "applied",
+        "change_summary": "UXセクションに将来の検討事項としてデフォルトプリセット機能を明記。初期バージョンではスコープ外と明示"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 12,
+    "applied": 11,
+    "acknowledged": 1,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/314"
+  },
+  "key_changes": [
+    "クライアント通知メカニズム（stopReasonフィールド）の設計を追加",
+    "stopPatternの具体的なデータフロー（伝達経路）を記述",
+    "Stop条件マッチ時の処理フロー（無効化→ポーラー停止→ログ）を明記",
+    "照合対象範囲（差分照合方式）を明確化",
+    "バリデーション仕様を具体化（クライアント+サーバー両方、インラインエラーUI）",
+    "ReDoS対策をsafe-regex2ベースに具体化",
+    "変更対象ファイルテーブルにi18n/current-output/auto-yes-configを追加、useAutoYes.tsを除外",
+    "レビュー履歴セクションを追加"
+  ]
+}

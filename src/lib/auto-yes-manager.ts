@@ -15,8 +15,11 @@ import { resolveAutoAnswer } from './auto-yes-resolver';
 import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, detectThinking, buildDetectPromptOptions } from './cli-patterns';
-import { DEFAULT_AUTO_YES_DURATION, type AutoYesDuration } from '@/config/auto-yes-config';
+import { DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
 import { generatePromptKey } from './prompt-key';
+
+// Re-export from shared config for backward compatibility (Issue #314)
+export type { AutoYesStopReason } from '@/config/auto-yes-config';
 
 /** Auto yes state for a worktree */
 export interface AutoYesState {
@@ -26,6 +29,10 @@ export interface AutoYesState {
   enabledAt: number;
   /** Timestamp when auto-yes expires (enabledAt + selected duration) */
   expiresAt: number;
+  /** Optional regex pattern for stop condition (Issue #314) */
+  stopPattern?: string;
+  /** Reason why auto-yes was stopped (Issue #314) */
+  stopReason?: AutoYesStopReason;
 }
 
 /** Poller state for a worktree (Issue #138) */
@@ -192,14 +199,9 @@ export function getAutoYesState(worktreeId: string): AutoYesState | null {
   const state = autoYesStates.get(worktreeId);
   if (!state) return null;
 
-  // Auto-disable if expired
+  // Auto-disable if expired (Issue #314: delegate to disableAutoYes)
   if (isAutoYesExpired(state)) {
-    const disabledState: AutoYesState = {
-      ...state,
-      enabled: false,
-    };
-    autoYesStates.set(worktreeId, disabledState);
-    return disabledState;
+    return disableAutoYes(worktreeId, 'expired');
   }
 
   return state;
@@ -209,8 +211,15 @@ export function getAutoYesState(worktreeId: string): AutoYesState | null {
  * Set the auto-yes enabled state for a worktree
  * @param duration - Optional duration in milliseconds (must be an ALLOWED_DURATIONS value).
  *                   Defaults to DEFAULT_AUTO_YES_DURATION (1 hour) when omitted.
+ * @param stopPattern - Optional regex pattern for stop condition (Issue #314).
+ *                      When terminal output matches this pattern, auto-yes is automatically disabled.
  */
-export function setAutoYesEnabled(worktreeId: string, enabled: boolean, duration?: AutoYesDuration): AutoYesState {
+export function setAutoYesEnabled(
+  worktreeId: string,
+  enabled: boolean,
+  duration?: AutoYesDuration,
+  stopPattern?: string
+): AutoYesState {
   if (enabled) {
     const now = Date.now();
     const effectiveDuration = duration ?? DEFAULT_AUTO_YES_DURATION;
@@ -218,19 +227,40 @@ export function setAutoYesEnabled(worktreeId: string, enabled: boolean, duration
       enabled: true,
       enabledAt: now,
       expiresAt: now + effectiveDuration,
+      stopPattern,
     };
     autoYesStates.set(worktreeId, state);
     return state;
   } else {
-    const existing = autoYesStates.get(worktreeId);
-    const state: AutoYesState = {
-      enabled: false,
-      enabledAt: existing?.enabledAt ?? 0,
-      expiresAt: existing?.expiresAt ?? 0,
-    };
-    autoYesStates.set(worktreeId, state);
-    return state;
+    // Issue #314: Delegate disable path to disableAutoYes()
+    return disableAutoYes(worktreeId);
   }
+}
+
+/**
+ * Disable auto-yes for a worktree with an optional reason.
+ * Preserves existing state fields (enabledAt, expiresAt, stopPattern) for inspection.
+ *
+ * Issue #314: Centralized disable logic for expiration, stop pattern match, and manual disable.
+ *
+ * @param worktreeId - Worktree identifier
+ * @param reason - Optional reason for disabling ('expired' | 'stop_pattern_matched')
+ * @returns Updated auto-yes state
+ */
+export function disableAutoYes(
+  worktreeId: string,
+  reason?: AutoYesStopReason
+): AutoYesState {
+  const existing = autoYesStates.get(worktreeId);
+  const state: AutoYesState = {
+    enabled: false,
+    enabledAt: existing?.enabledAt ?? 0,
+    expiresAt: existing?.expiresAt ?? 0,
+    stopPattern: existing?.stopPattern,
+    stopReason: reason,
+  };
+  autoYesStates.set(worktreeId, state);
+  return state;
 }
 
 /**
@@ -330,6 +360,85 @@ function isDuplicatePrompt(
   return pollerState.lastAnsweredPromptKey === promptKey;
 }
 
+// =============================================================================
+// Stop Condition (Issue #314)
+// =============================================================================
+
+/**
+ * Execute a regex test with timeout protection.
+ * Uses synchronous execution with safe-regex2 pre-validation as the primary defense.
+ *
+ * Note: Node.js is single-threaded, so true async timeout requires Worker threads.
+ * The safe-regex2 pre-validation in validateStopPattern() prevents catastrophic
+ * backtracking patterns from reaching this function. The timeoutMs parameter is
+ * reserved for future Worker thread implementation.
+ *
+ * @internal Exported for testing purposes only.
+ * @param regex - Pre-compiled RegExp to test
+ * @param text - Text to test against
+ * @param _timeoutMs - Reserved for future timeout implementation (default: 100ms)
+ * @returns true/false for match result, null if execution failed
+ */
+export function executeRegexWithTimeout(
+  regex: RegExp,
+  text: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _timeoutMs: number = 100
+): boolean | null {
+  try {
+    return regex.test(text);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if the terminal output matches the stop condition pattern.
+ * If matched, disables auto-yes and stops polling for the worktree.
+ *
+ * Security: Pattern is re-validated before execution to handle cases where
+ * a previously valid pattern becomes invalid (e.g., state corruption).
+ *
+ * @internal Exported for testing purposes only.
+ * @param worktreeId - Worktree identifier
+ * @param cleanOutput - ANSI-stripped terminal output to check
+ * @returns true if stop condition matched and auto-yes was disabled
+ */
+export function checkStopCondition(worktreeId: string, cleanOutput: string): boolean {
+  const autoYesState = getAutoYesState(worktreeId);
+  if (!autoYesState?.stopPattern) return false;
+
+  const validation = validateStopPattern(autoYesState.stopPattern);
+  if (!validation.valid) {
+    console.warn('[Auto-Yes] Invalid stop pattern, disabling', { worktreeId });
+    disableAutoYes(worktreeId);
+    return false;
+  }
+
+  try {
+    const regex = new RegExp(autoYesState.stopPattern);
+    const matched = executeRegexWithTimeout(regex, cleanOutput);
+
+    if (matched === null) {
+      // Execution failed - disable to prevent future errors
+      console.warn('[Auto-Yes] Stop condition check failed, disabling pattern', { worktreeId });
+      disableAutoYes(worktreeId);
+      return false;
+    }
+
+    if (matched) {
+      disableAutoYes(worktreeId, 'stop_pattern_matched');
+      stopAutoYesPolling(worktreeId);
+      console.warn('[Auto-Yes] Stop condition matched, auto-yes disabled', { worktreeId });
+      return true;
+    }
+  } catch {
+    console.warn('[Auto-Yes] Stop condition check error', { worktreeId });
+  }
+
+  return false;
+}
+
 /**
  * Internal polling function that recursively schedules itself via setTimeout.
  * Captures tmux output, detects prompts, and sends auto-responses when appropriate.
@@ -381,6 +490,13 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     const recentLines = cleanOutput.split('\n').slice(-THINKING_CHECK_LINE_COUNT).join('\n');
     if (detectThinking(cliToolId, recentLines)) {
       scheduleNextPoll(worktreeId, cliToolId);
+      return;
+    }
+
+    // 2.7. Check stop condition (Issue #314)
+    // After thinking check, before prompt detection: if terminal output matches
+    // the stop pattern, disable auto-yes and stop polling immediately.
+    if (checkStopCondition(worktreeId, cleanOutput)) {
       return;
     }
 

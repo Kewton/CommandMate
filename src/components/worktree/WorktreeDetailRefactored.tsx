@@ -50,13 +50,13 @@ import { truncateString } from '@/lib/utils';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
-import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
+import { AutoYesToggle, type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
+import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import type { Worktree, ChatMessage, PromptData, GitStatus } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { deriveCliStatus } from '@/types/sidebar';
-import type { AutoYesDuration } from '@/config/auto-yes-config';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
@@ -85,6 +85,7 @@ interface CurrentOutputResponse {
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
+    stopReason?: AutoYesStopReason;
   };
 }
 
@@ -924,6 +925,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const tWorktree = useTranslations('worktree');
   const tError = useTranslations('error');
   const tCommon = useTranslations('common');
+  const tAutoYes = useTranslations('autoYes');
 
   // Local state for worktree data and loading status
   const [worktree, setWorktree] = useState<Worktree | null>(null);
@@ -936,6 +938,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [isEditorMaximized, setIsEditorMaximized] = useState(false);
   const [autoYesEnabled, setAutoYesEnabled] = useState(false);
   const [autoYesExpiresAt, setAutoYesExpiresAt] = useState<number | null>(null);
+  // Issue #314: Track previous auto-yes enabled state for stop reason toast
+  const prevAutoYesEnabledRef = useRef<boolean>(false);
+  // Issue #314: Pending stop reason toast (deferred until showToast is available)
+  const [stopReasonPending, setStopReasonPending] = useState(false);
   // Issue #4: CLI tool tab state (Claude/Codex)
   const [activeCliTab, setActiveCliTab] = useState<CLIToolType>('claude');
   // Issue #4: Ref to avoid polling callback recreation on tab switch
@@ -1034,10 +1040,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         actions.clearPrompt();
       }
 
-      // Update auto-yes state from server
+      // Update auto-yes state from server (Issue #314: stopReason tracking)
       if (data.autoYes) {
+        const wasEnabled = prevAutoYesEnabledRef.current;
         setAutoYesEnabled(data.autoYes.enabled);
         setAutoYesExpiresAt(data.autoYes.expiresAt);
+        prevAutoYesEnabledRef.current = data.autoYes.enabled;
+
+        // Issue #314: Detect stop condition match (enabled -> disabled transition)
+        if (wasEnabled && !data.autoYes.enabled && data.autoYes.stopReason === 'stop_pattern_matched') {
+          setStopReasonPending(true);
+        }
       }
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
@@ -1184,18 +1197,24 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     [fetchMessages, fetchCurrentOutput]
   );
 
-  /** Handle auto-yes toggle (Issue #225: duration parameter added) */
-  const handleAutoYesToggle = useCallback(async (enabled: boolean, duration?: AutoYesDuration): Promise<void> => {
+  /** Handle auto-yes toggle (Issue #225: duration, Issue #314: stopPattern) */
+  const handleAutoYesToggle = useCallback(async (params: AutoYesToggleParams): Promise<void> => {
     try {
       const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, cliToolId: activeCliTab, duration }),
+        body: JSON.stringify({
+          enabled: params.enabled,
+          cliToolId: activeCliTab,
+          duration: params.duration,
+          stopPattern: params.stopPattern,
+        }),
       });
       if (response.ok) {
         const data = await response.json();
         setAutoYesEnabled(data.enabled);
         setAutoYesExpiresAt(data.expiresAt);
+        prevAutoYesEnabledRef.current = data.enabled;
       }
     } catch (err) {
       console.error('[WorktreeDetailRefactored] Error toggling auto-yes:', err);
@@ -1350,6 +1369,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
   // Toast state for upload notifications
   const { toasts, showToast, removeToast } = useToast();
+
+  // Issue #314: Show stop reason toast when pending (deferred from fetchCurrentOutput)
+  useEffect(() => {
+    if (stopReasonPending) {
+      showToast(tAutoYes('stopPatternMatched'), 'info');
+      setStopReasonPending(false);
+    }
+  }, [stopReasonPending, showToast, tAutoYes]);
 
   // [Issue #162] File operations hook (move dialog state management)
   const {

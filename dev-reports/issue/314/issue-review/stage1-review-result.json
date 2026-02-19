@@ -1,0 +1,170 @@
+{
+  "issue_number": 314,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-19",
+  "findings": [
+    {
+      "id": "S1-F001",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "変更対象ファイルテーブルにi18nファイルが未記載",
+      "description": "実装タスクに「i18n対応（ja/en: ラベル、プレースホルダー、通知メッセージ）」と明記されているが、変更対象ファイルテーブルに `locales/ja/autoYes.json` と `locales/en/autoYes.json` が記載されていない。既存のautoYes名前空間にStop条件のラベル（例: stopCondition, stopConditionPlaceholder, stoppedByPattern等）を追加する必要がある。変更対象テーブルから漏れていると実装時の作業漏れにつながる。",
+      "location": "## 影響範囲 > ### 変更対象ファイル テーブル",
+      "suggestion": "変更対象ファイルテーブルに以下2行を追加:\n| `locales/ja/autoYes.json` | Stop条件ラベル・プレースホルダー・停止通知メッセージの日本語翻訳キー追加 |\n| `locales/en/autoYes.json` | Stop条件ラベル・プレースホルダー・停止通知メッセージの英語翻訳キー追加 |"
+    },
+    {
+      "id": "S1-F002",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "Stop条件によるAuto-Yes停止時のクライアント通知メカニズムが未設計",
+      "description": "受入条件に「Auto-Yesが停止した際にユーザーに通知される（トースト or AutoYesToggle上の通知）」とあるが、現在のアーキテクチャではクライアントがAuto-Yesの停止「理由」を知る手段がない。現在のcurrent-output APIレスポンスは `autoYes: { enabled, expiresAt }` のみを返しており、停止理由（時間切れ / Stop条件マッチ / 手動OFF）を区別できない。Stop条件でサーバーサイドが停止した場合、クライアントは次回ポーリングで `enabled: false` を受け取るが、トースト通知を表示するためにはstopReason（例: 'expired' | 'stop_pattern_matched' | 'manual'）のようなフィールドが必要。この設計が欠如しているため、受入条件を満たせない。",
+      "location": "## 受入条件 > 4番目の項目 / ## 提案する解決策 > ### サーバーサイド",
+      "suggestion": "以下を追加設計する:\n1. AutoYesStateインターフェースに `stopReason?: 'expired' | 'stop_pattern_matched' | 'manual'` フィールドを追加\n2. current-output APIレスポンスの `autoYes` オブジェクトに `stopReason` を含める\n3. WorktreeDetailRefactored側で `stopReason === 'stop_pattern_matched'` を検出してトースト通知を表示するロジックを記述\n4. 変更対象ファイルテーブルに `src/app/api/worktrees/[id]/current-output/route.ts` を追加（autoYesレスポンス形状変更）"
+    },
+    {
+      "id": "S1-F003",
+      "severity": "must_fix",
+      "category": "correctness",
+      "title": "useAutoYes.tsの変更有無が変更対象テーブルに未記載だが、テーブル内には記載あり（矛盾あり）",
+      "description": "変更対象ファイルテーブルに `src/hooks/useAutoYes.ts` は「stopPatternの状態管理追加」として記載されているが、useAutoYes.tsはクライアントサイドの自動応答フックであり、stopPatternの「状態管理」を行う場所としては不適切。stopPatternはサーバーサイド（auto-yes-manager.ts）で管理され、クライアント→API→サーバーの伝達経路ではWorktreeDetailRefactored.tsx→handleAutoYesToggle→fetch API呼び出しで直接送信される。useAutoYes.tsはプロンプト検出後の自動応答ロジックであり、Stop条件とは無関係。変更対象テーブルの記載内容が実際のデータフローと矛盾している。",
+      "location": "## 影響範囲 > ### 変更対象ファイル テーブル > `src/hooks/useAutoYes.ts`",
+      "suggestion": "useAutoYes.tsの変更内容を再検討する。stopPatternはサーバーサイドのみで管理されるため、useAutoYes.tsの変更は不要の可能性が高い。もし変更が必要な場合は、具体的に何を変更するのか（例: stopReasonの受け取りと通知トリガー）を明記する。不要であれば「変更なし」に修正する。"
+    },
+    {
+      "id": "S1-F004",
+      "severity": "should_fix",
+      "category": "clarity",
+      "title": "ReDoS対策の具体的な実装方針が曖昧",
+      "description": "セキュリティ考慮に「タイムアウト付き実行またはパターン複雑度チェックを適用する」と記載されているが、どちらの手法を採用するかが曖昧。Node.jsにはネイティブの正規表現タイムアウト機能がなく、「タイムアウト付き実行」にはWorkerスレッドやvm.runInNewContextなどの複雑な実装が必要。一方「パターン複雑度チェック」は外部ライブラリ（safe-regex2等）で比較的簡単に実現可能。また、最大長制限（500文字）の定数をどこに配置するかも不明確。",
+      "location": "## セキュリティ考慮 > ReDoS対策",
+      "suggestion": "以下のいずれかを明示する:\n- 方針A（推奨）: `safe-regex2`等のライブラリでパターン安全性を検証 + 最大長500文字制限\n- 方針B: `new RegExp(pattern)` を try-catch で構文検証 + 最大長制限 + マッチ対象文字列の行数制限\n\nまた、MAX_STOP_PATTERN_LENGTH定数は `src/config/auto-yes-config.ts` に配置する（既存の設計パターンに準拠: Auto-Yes関連定数の一元管理）。"
+    },
+    {
+      "id": "S1-F005",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "stopPatternのサーバーサイドでの永続化方法が未記述",
+      "description": "stopPatternは `AutoYesState` インターフェースに追加される計画だが、現在のAutoYesStateはインメモリ（globalThisのMap）で管理されている。これ自体は問題ないが、Auto-Yes有効化後にstopPatternがどのタイミングで照合されるか（pollAutoYes内）と、停止時にどのようにAutoYesStateを更新するかの具体的な処理フローが欠けている。特に、stopPatternマッチ時に `setAutoYesEnabled(worktreeId, false)` を呼ぶのか、それとも `AutoYesState` に `stopReason` を設定してから無効化するのかが不明。",
+      "location": "## 実装タスク > 3番目（pollAutoYes内にStop条件チェックロジック追加）",
+      "suggestion": "以下の処理フローを明記する:\n1. `pollAutoYes()` 内、thinkingチェック後にstopPattern照合\n2. マッチ時: `setAutoYesEnabled(worktreeId, false)` で無効化 + `stopAutoYesPolling(worktreeId)` でポーラー停止\n3. 停止理由の記録方法（AutoYesStateに `stopReason` フィールドを追加するか、別のMapで管理するか）"
+    },
+    {
+      "id": "S1-F006",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "WorktreeDetailRefactored.tsxのstopPattern伝達経路の具体的記述が不足",
+      "description": "変更対象テーブルに「stopPatternの受け渡し追加」とのみ記載されているが、具体的なデータフローが不明確。現在のhandleAutoYesToggleは `(enabled: boolean, duration?: AutoYesDuration)` 型で、fetch呼び出しで `{ enabled, cliToolId, duration }` を送信している。stopPatternを追加する場合、AutoYesToggle.onToggle → handleAutoYesToggle → fetch API のチェーン全体にstopPatternを通す必要がある。また、AutoYesConfirmDialog内でstopPatternのstateを管理する必要があるが、これらの具体的な変更箇所が未記述。",
+      "location": "## 影響範囲 > ### 変更対象ファイル > `src/components/worktree/WorktreeDetailRefactored.tsx`",
+      "suggestion": "以下のデータフローを明記する:\n1. AutoYesConfirmDialog: `useState<string>('')` でstopPattern入力を管理、`onConfirm(duration, stopPattern)` で親に渡す\n2. AutoYesToggle: `handleConfirm` で `onToggle(true, duration, stopPattern)` を呼び出し\n3. WorktreeDetailRefactored: `handleAutoYesToggle(enabled, duration?, stopPattern?)` でfetch bodyに `stopPattern` を含める\n4. route.ts: `body.stopPattern` を検証して `setAutoYesEnabled()` に渡す"
+    },
+    {
+      "id": "S1-F007",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "auto-yes-config.tsの変更要否判定が変更対象テーブルと矛盾",
+      "description": "変更対象テーブルの関連コンポーネントセクションで `src/config/auto-yes-config.ts` は「設定定数（変更不要）」と記載されているが、セキュリティ考慮でstopPatternの最大長制限（500文字）が要件として記述されている。CLAUDE.mdの設計パターンに従えば、Auto-Yes関連の定数は `auto-yes-config.ts` に一元管理すべき（既存: ALLOWED_DURATIONS, DEFAULT_AUTO_YES_DURATION等）。MAX_STOP_PATTERN_LENGTH のような定数をここに追加するなら「変更不要」は不正確。",
+      "location": "## 影響範囲 > ### 関連コンポーネント > `src/config/auto-yes-config.ts`",
+      "suggestion": "以下のいずれかに修正:\n- (A) `auto-yes-config.ts` を変更対象ファイルテーブルに移動し、「MAX_STOP_PATTERN_LENGTH等のStop条件関連定数追加」と記載\n- (B) Stop条件関連定数を `auto-yes-manager.ts` のモジュール内定数として定義する場合は、その旨を明記し「変更不要」の判定根拠を追加"
+    },
+    {
+      "id": "S1-F008",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "current-output APIルートの変更がテーブルに未記載",
+      "description": "Stop条件によるAuto-Yes停止時の通知をクライアントに伝えるためには、`/api/worktrees/[id]/current-output/route.ts` のautoYesレスポンス形状を変更する必要がある（stopReasonフィールド追加等）。また、stopPatternの照合対象であるターミナル出力は `current-output` ルートで既にキャプチャされているが、pollAutoYes内で別途キャプチャされるため、同じ出力の二重キャプチャが発生する可能性がある。変更対象テーブルにこのファイルが含まれていない。",
+      "location": "## 影響範囲 > ### 変更対象ファイル テーブル",
+      "suggestion": "変更対象ファイルテーブルに追加:\n| `src/app/api/worktrees/[id]/current-output/route.ts` | autoYesレスポンスにstopReasonフィールド追加（クライアント通知用） |"
+    },
+    {
+      "id": "S1-F009",
+      "severity": "should_fix",
+      "category": "correctness",
+      "title": "stopPatternの照合対象範囲が曖昧",
+      "description": "「ターミナル出力をStop条件パターンと照合する」と記載されているが、照合対象が全出力（cleanOutput全体）なのか、直近N行（recentLines相当）なのかが不明確。全出力に対して照合すると、過去の出力に含まれるパターンに毎回マッチしてAuto-Yesが即座に停止してしまう。一方、直近N行のみでは見逃しが発生する可能性がある。pollAutoYes内のcaptureSessionOutputは毎回最新5000文字をキャプチャするが、この中にマッチ対象があるかどうかの判定基準が必要。",
+      "location": "## 提案する解決策 > ### 判定タイミング > ステップ4",
+      "suggestion": "照合対象を明確にする:\n- 推奨: `cleanOutput` 全体（captureSessionOutputで取得した直近5000文字分）に対して照合。過去の出力は次回キャプチャ時に含まれない可能性があるため、全キャプチャ範囲を照合対象とするのが安全。\n- ただし、以前のポーリングサイクルで既にマッチした出力が残っている場合の重複停止を防ぐ仕組み（例: 前回のキャプチャとの差分のみ照合）も検討が必要。"
+    },
+    {
+      "id": "S1-F010",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "実装タスクにバリデーションエラーUI表示の具体的記述が不足",
+      "description": "実装タスクに「正規表現バリデーション（不正なパターン入力時のエラーハンドリング）」があり、受入条件にも「不正な正規表現パターン入力時にバリデーションエラーが表示される」とあるが、バリデーションをどこで行うか（クライアントサイドのみ / サーバーサイドのみ / 両方）が未明記。また、AutoYesConfirmDialogでのインラインエラー表示かトーストかの具体的なUI仕様も欠けている。",
+      "location": "## 実装タスク > 正規表現バリデーション / ## 受入条件 > 5番目",
+      "suggestion": "以下を明記する:\n1. クライアントサイド: AutoYesConfirmDialog内でリアルタイムバリデーション（`new RegExp(pattern)` try-catch）。無効な場合は「同意して有効化」ボタンを無効化し、入力フィールド下にインラインエラーメッセージ表示\n2. サーバーサイド: route.tsのPOSTハンドラーで再バリデーション（Defense in Depth）。無効な場合は400レスポンス\n3. i18nキー: `invalidRegexPattern` 等をlocalesファイルに追加"
+    },
+    {
+      "id": "S1-F011",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "Auto-Yes有効中のstopPatternの表示・確認手段が未記載",
+      "description": "Auto-Yes有効化後に、現在設定されているstopPatternをユーザーが確認する手段が記載されていない。AutoYesToggleにはカウントダウンタイマーと最新の自動応答通知が表示されるが、stopPatternの表示は計画されていない。ユーザーがどのStop条件を設定したか忘れた場合に確認できないため、UX上の懸念がある。",
+      "location": "## 提案する解決策 > ### UX",
+      "suggestion": "AutoYesToggle有効時にstopPatternを表示する小さなインジケーター（例: ツールチップ、または「Stop: /pattern/」のような簡潔なテキスト）を検討。Nice to Haveとして将来Issueに追加してもよい。"
+    },
+    {
+      "id": "S1-F012",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "デフォルトstopPattern（プリセット）の検討が未記載",
+      "description": "Issue背景で「rm -rf、DROP TABLE、force push」が例として挙げられている。これらをデフォルトのプリセットとしてワンクリックで設定できる機能や、プレースホルダーに表示するだけでなく実際のデフォルト値として提供する検討がない。ユーザーが毎回手動で入力するのは面倒であり、よくある危険パターンのプリセットがあればUXが向上する。",
+      "location": "## 提案する解決策 > ### UX > ステップ4",
+      "suggestion": "初期バージョンではスコープ外として明記し、将来のエンハンスメントとして「デフォルトプリセット（rm -rf|DROP TABLE|force push）をワンクリックで適用するボタン」を検討事項に追加。"
+    }
+  ],
+  "summary": {
+    "total_findings": 12,
+    "must_fix": 3,
+    "should_fix": 7,
+    "nice_to_have": 2
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "AutoYesState/AutoYesPollerState定義、pollAutoYes()処理順序、stopPattern挿入ポイント（L385-387間）"
+    },
+    {
+      "file": "src/config/auto-yes-config.ts",
+      "relevance": "Auto-Yes設定定数の一元管理（ALLOWED_DURATIONS等）。MAX_STOP_PATTERN_LENGTH追加候補"
+    },
+    {
+      "file": "src/components/worktree/AutoYesConfirmDialog.tsx",
+      "relevance": "onConfirm型定義（L27）、stopPattern入力フィールド追加先"
+    },
+    {
+      "file": "src/components/worktree/AutoYesToggle.tsx",
+      "relevance": "onToggle型定義（L24）、handleConfirm（L88-92）のstopPattern伝達"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "POSTハンドラー（L85-158）、stopPatternバリデーション追加先"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "クライアントサイド自動応答フック。stopPatternとは直接無関係の可能性"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "handleAutoYesToggle（L1188-1203）、autoYes状態ポーリング（L1037-1041）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "autoYesレスポンス形状（L128-131）、stopReason追加候補"
+    },
+    {
+      "file": "locales/ja/autoYes.json",
+      "relevance": "Auto-Yes日本語翻訳キー。Stop条件関連キー追加必要"
+    },
+    {
+      "file": "locales/en/autoYes.json",
+      "relevance": "Auto-Yes英語翻訳キー。Stop条件関連キー追加必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト設計パターン・モジュール配置規約の参照元"
+    }
+  ]
+}
