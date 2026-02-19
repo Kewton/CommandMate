@@ -15,11 +15,30 @@ import {
   ENV_MAPPING,
 } from '@/lib/env';
 
+/**
+ * Issue #304: Environment variables to clean before each test
+ * Ensures tests are not affected by shell environment (.env, NODE_ENV=production, etc.)
+ */
+const ENV_VARS_TO_CLEAN = [
+  'CM_ROOT_DIR', 'CM_PORT', 'CM_BIND', 'CM_DB_PATH',
+  'CM_LOG_LEVEL', 'CM_LOG_FORMAT', 'CM_LOG_DIR',
+  'MCBD_ROOT_DIR', 'MCBD_PORT', 'MCBD_BIND', 'MCBD_DB_PATH',
+  'MCBD_LOG_LEVEL', 'MCBD_LOG_FORMAT', 'MCBD_LOG_DIR',
+  'DATABASE_PATH',
+] as const;
+
+function cleanEnvVars(): void {
+  for (const key of ENV_VARS_TO_CLEAN) {
+    delete process.env[key];
+  }
+}
+
 describe('getEnvWithFallback', () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    cleanEnvVars();
     resetWarnedKeys();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
@@ -100,6 +119,7 @@ describe('getEnvByKey', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    cleanEnvVars();
     resetWarnedKeys();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
@@ -126,6 +146,7 @@ describe('resetWarnedKeys', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    cleanEnvVars();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
@@ -152,6 +173,7 @@ describe('getEnv with fallback', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    cleanEnvVars();
     resetWarnedKeys();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
@@ -191,6 +213,7 @@ describe('getLogConfig with fallback', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    cleanEnvVars();
     resetWarnedKeys();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
@@ -254,6 +277,7 @@ describe('getDatabasePathWithDeprecationWarning', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    cleanEnvVars();
     resetDatabasePathWarning();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
@@ -319,6 +343,7 @@ describe('getEnv with DB path resolution (Issue #135)', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    cleanEnvVars();
     resetWarnedKeys();
     resetDatabasePathWarning();
     vi.spyOn(console, 'warn').mockImplementation(() => {});

@@ -13,6 +13,7 @@ describe('isValidWorktreePath', () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
+    delete process.env.ALLOWED_WORKTREE_PATHS;
   });
 
   afterEach(() => {
