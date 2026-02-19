@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-02-19
+
+### Added
+- MP4 video file upload and browser playback support (Issue #302)
+  - Video security validation aligned with image upload pattern
+- Root-level file/directory creation toolbar (Issue #300)
+  - Dark mode support for empty state buttons
+  - Path encoding fix for special characters
+- Session stability improvements with duplicate prevention (Issue #306)
+  - JSDoc improvements, constant extraction, DRY/ISP principles applied
+- npm keywords for package discoverability
+
+### Fixed
+- Clone basePath now uses `CM_ROOT_DIR` instead of hardcoded `/tmp/repos` (Issue #308)
+- iPad layout: unified z-index system, swipe/scroll separation, layout fixes (Issue #299)
+  - Unreachable code fix in MarkdownEditor
+
 ## [0.2.10] - 2026-02-17
 
 ### Fixed
@@ -460,7 +477,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.10...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.11...HEAD
+[0.2.11]: https://github.com/Kewton/CommandMate/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/Kewton/CommandMate/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/Kewton/CommandMate/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/Kewton/CommandMate/compare/v0.2.7...v0.2.8
