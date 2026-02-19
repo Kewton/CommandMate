@@ -1,0 +1,67 @@
+{
+  "stage": 2,
+  "issue_number": 302,
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "FINDING-001",
+        "status": "applied",
+        "change_summary": "next.config.jsのbodySizeLimitを'16mb'に更新するタスクを実装タスクに追加。影響範囲の変更対象ファイルテーブルにnext.config.js行を追加。主要な変更点にも記載。"
+      },
+      {
+        "id": "FINDING-002",
+        "status": "applied",
+        "change_summary": "next.config.jsのCSPヘッダーにmedia-src 'self' data:を追加するタスクを実装タスクに追加。影響範囲の変更対象ファイルテーブルにnext.config.js行を追加（FINDING-001と統合）。主要な変更点にも記載。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "FINDING-003",
+        "status": "applied",
+        "change_summary": "FileViewer.tsxの実装タスクにcanCopyロジック修正（!content.isImage && !content.isVideo）を明記。受入条件に「動画ファイル選択時にコピーボタンが表示されないこと」を追加。影響範囲のFileViewer.tsx行にcanCopyロジック修正を追記。"
+      },
+      {
+        "id": "FINDING-004",
+        "status": "applied",
+        "change_summary": "設計方針にMP4 magic bytes仕様を追記（ISOBMFF構造、offset 4でftypシグネチャ、magicBytes: [{ bytes: [0x66, 0x74, 0x79, 0x70], offset: 4 }]）。実装タスクのuploadable-extensions.ts項目にもmagic bytes仕様を明記。"
+      },
+      {
+        "id": "FINDING-005",
+        "status": "applied",
+        "change_summary": "新規作成ファイルセクションのタイトルを「候補」から確定に変更。video-extensions.tsの内容説明にimage-extensions.tsパターン準拠を明記（VIDEO_EXTENSIONS定数、isVideoExtension()、getMimeTypeByVideoExtension()）。設計方針にも独立管理の方針を追記。実装タスクの先頭にvideo-extensions.ts新規作成タスクを追加。"
+      },
+      {
+        "id": "FINDING-006",
+        "status": "applied",
+        "change_summary": "設計方針のBase64 data URI方式の記述に性能注意事項を追記（約1.33倍のデータ量、読み込み時間、ローディングインジケーター実装、将来的なストリーミング方式検討）。受入条件に「動画読み込み中にローディングインジケーターが表示されること」を追加。"
+      },
+      {
+        "id": "FINDING-007",
+        "status": "applied",
+        "change_summary": "影響範囲のbinary-extensions.tsの説明を更新。video-extensions.ts新規作成に伴うVIDEO_EXTENSIONSスプレッド統合パターンの将来的な検討事項を追記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "FINDING-008",
+        "status": "skipped",
+        "reason": "ユーザーの反映方針指示に含まれていないためスキップ。現時点ではImageViewerと同等の方針（英語ハードコード）で十分。"
+      },
+      {
+        "id": "FINDING-009",
+        "status": "partially_applied",
+        "change_summary": "設計方針にHTML5 videoタグのcontrols属性使用とブラウザネイティブコントロール利用を明記。Nice to Haveだがユーザー指示には含まれていなかったものの、設計方針の明確化として反映。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 8,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/302"
+  }
+}

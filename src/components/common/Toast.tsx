@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { CheckCircle, XCircle, Info, X } from 'lucide-react';
+import { Z_INDEX } from '@/config/z-index';
 import type { ToastType, ToastItem } from '@/types/markdown-editor';
 
 /** Default duration for auto-dismiss (3 seconds) */
@@ -68,8 +69,8 @@ function getToastStyles(type: ToastType): {
 }
 
 /**
- * Get icon component based on type
- * [REFACTOR] Performance: Accepts iconColor as prop to avoid duplicate getToastStyles call
+ * Get icon component based on type.
+ * Accepts iconColor as prop to avoid duplicate getToastStyles call.
  */
 function ToastIcon({ type, iconColor }: { type: ToastType; iconColor: string }) {
   const iconClass = `h-5 w-5 ${iconColor}`;
@@ -202,7 +203,8 @@ export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
     <div
       data-testid="toast-container"
       aria-live="polite"
-      className="fixed bottom-4 right-4 z-50 flex flex-col gap-2"
+      className="fixed bottom-4 right-4 flex flex-col gap-2"
+      style={{ zIndex: Z_INDEX.TOAST }}
     >
       {toasts.map((toast) => (
         <Toast

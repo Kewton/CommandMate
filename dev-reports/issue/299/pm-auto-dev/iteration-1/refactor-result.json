@@ -1,0 +1,36 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [
+    "Fix unreachable portal code in MarkdownEditor.tsx (lines 884-892 were after unconditional return)",
+    "Export isInsideScrollableElement from useSwipeGesture.ts for direct unit testing",
+    "Add 6 direct unit tests for isInsideScrollableElement edge cases",
+    "Remove [REFACTOR] comment tag in Toast.tsx (describe current state, not pending action)",
+    "Remove extra blank line in SearchBar.tsx"
+  ],
+  "files_changed": [
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/hooks/useSwipeGesture.ts",
+    "src/components/common/Toast.tsx",
+    "src/components/worktree/SearchBar.tsx",
+    "tests/unit/hooks/useSwipeGesture.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "tests": {
+    "z_index_tests": "15 passed",
+    "useSwipeGesture_tests": "32 passed (26 existing + 6 new isInsideScrollableElement tests)",
+    "total_target_tests": "47 passed"
+  },
+  "commits": [
+    "7aa8b19: refactor(#299): fix unreachable code in MarkdownEditor and improve testability"
+  ],
+  "message": "Refactoring complete. Fixed unreachable portal code in MarkdownEditor, exported isInsideScrollableElement for testability with 6 new direct unit tests, and cleaned up minor code style issues. All static analysis checks pass with 0 errors."
+}

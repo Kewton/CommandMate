@@ -1,0 +1,60 @@
+{
+  "stage": 4,
+  "issue_number": 308,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["D4-001", "D4-002", "D4-003", "D4-004", "D4-005"],
+  "skipped_findings": ["D4-006", "D4-007", "D4-008"],
+  "skip_reasons": {
+    "D4-006": "Nice to Have - 非推奨警告メッセージはAPIレスポンスに含まれず低リスク",
+    "D4-007": "Nice to Have - ローカル開発ツール前提で認証不要の設計は許容範囲",
+    "D4-008": "Nice to Have - git cloneプロトコル特性上SSRFリスクは限定的"
+  },
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "D4-001",
+        "item": "パストラバーサル検証失敗時のエラーメッセージからbasePath値を除去（情報漏洩防止）",
+        "sections_updated": ["Section 5.1", "Section 10 Must Fix"],
+        "status": "reflected"
+      },
+      {
+        "id": "D4-002",
+        "item": "targetDirパラメータの型検証追加（オブジェクト/配列インジェクション防止）",
+        "sections_updated": ["Section 4.2.1", "Section 10 Must Fix"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "D4-003",
+        "item": "ディレクトリ存在チェックのエラーメッセージからtargetPathの完全パスを除去",
+        "sections_updated": ["Section 5.1", "Section 10 Should Fix"],
+        "status": "reflected"
+      },
+      {
+        "id": "D4-004",
+        "item": "コマンドインジェクション防止の設計根拠を明文化",
+        "sections_updated": ["Section 5.3（新規追加）"],
+        "status": "reflected"
+      },
+      {
+        "id": "D4-005",
+        "item": "シンボリックリンクのリスク評価を記載",
+        "sections_updated": ["Section 5.1", "Section 10 Should Fix"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "design_doc_path": "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+  "sections_updated": [
+    "Section 1.1 レビュー履歴（Stage 4行追加）",
+    "レビュー指摘事項サマリー（Stage 4）（新規追加）",
+    "Section 4.2.1 clone/route.ts（D4-002 targetDir型検証コード例・説明追加）",
+    "Section 5.1 パストラバーサル防止（D4-001 エラーメッセージ情報漏洩防止、D4-003 ディレクトリ存在チェック情報漏洩防止、D4-005 シンボリックリンクリスク評価）",
+    "Section 5.3 コマンドインジェクション防止（D4-004 新規追加）",
+    "Section 10 実装チェックリスト（D4-001, D4-002 Must Fix追加、D4-003, D4-005 Should Fix追加）"
+  ],
+  "summary": "Stage 4セキュリティレビューの全5件（Must Fix 2件、Should Fix 3件）を設計方針書に反映完了。D4-001: エラーメッセージからbasePath値を除去する実装指示をSection 5.1に追加。D4-002: targetDirの型検証コード例をSection 4.2.1のAfterブロックに追加。D4-003: ディレクトリ存在チェックのエラーメッセージ情報漏洩防止をSection 5.1に追加。D4-004: コマンドインジェクション防止の多層防御設計根拠をSection 5.3として新規追加。D4-005: シンボリックリンクのリスク評価と将来検討事項をSection 5.1に追加。Nice to Have 3件（D4-006, D4-007, D4-008）はスキップ。",
+  "timestamp": "2026-02-19T12:30:00Z"
+}

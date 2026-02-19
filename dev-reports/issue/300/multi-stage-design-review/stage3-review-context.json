@@ -1,0 +1,16 @@
+{
+  "issue_number": 300,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_doc_path": "dev-reports/design/issue-300-root-directory-creation-design-policy.md",
+  "review_points": [
+    "変更の波及効果分析",
+    "既存機能への影響",
+    "既存テストへの影響",
+    "破壊的変更の有無",
+    "下位互換性の確保",
+    "パフォーマンスへの影響",
+    "他コンポーネントとの相互作用"
+  ]
+}

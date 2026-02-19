@@ -1,0 +1,80 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）- 影響範囲レビュー",
+  "issue_number": 308,
+  "iteration": 1,
+  "apply_date": "2026-02-19",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S3-001",
+        "status": "applied",
+        "change_summary": "影響範囲の「関連コンポーネント」にsrc/components/repository/RepositoryManager.tsxを追加。clone先パスがCM_ROOT_DIR配下として表示されるようになることを明記"
+      },
+      {
+        "id": "S3-002",
+        "status": "applied",
+        "change_summary": "影響範囲に「既存データへの影響」サブセクションを追加。既存clone済みリポジトリのDBレコード残存、worktreeスキャン対象外の可能性、本Issueのスコープ外であることを明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-003",
+        "status": "applied",
+        "change_summary": "関連コンポーネントにsrc/app/api/repositories/scan/route.tsを追加。既にCM_ROOT_DIRを使用しておりscan/clone間の整合性が向上する旨を記載"
+      },
+      {
+        "id": "S3-004",
+        "status": "applied",
+        "change_summary": "WORKTREE_BASE_PATH非推奨化の実装タスクを具体化。CloneManagerコンストラクタ内でのconsole.warn出力、モジュールスコープ変数による重複防止、ENV_MAPPING非対象、UI通知スコープ外を明記"
+      },
+      {
+        "id": "S3-006",
+        "status": "applied",
+        "change_summary": "テスト更新タスクにvi.spyOn(process, 'cwd')モック方針、vi.mock('@/lib/env')でのgetEnvモック追加、beforeEachでのprocess.env.WORKTREE_BASE_PATHクリアによる環境変数リーク防止を追記"
+      },
+      {
+        "id": "S3-007",
+        "status": "applied",
+        "change_summary": "影響範囲に「ユーザー影響」サブセクションを追加。CM_ROOT_DIR設定済みユーザー、WORKTREE_BASE_PATHのみ使用ユーザーの移行手順、リリースノートへの非推奨化告知推奨を記載"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-005",
+        "status": "skipped",
+        "reason": "server.ts L83の警告メッセージ修正は本Issueの直接的なスコープ外。環境変数系統の不整合解消は対策案で既にCM_ROOT_DIR統一として言及されており、追加記載は冗長"
+      },
+      {
+        "id": "S3-008",
+        "status": "skipped",
+        "reason": "フロントエンドがtargetDirを送信しないことの確認はS3-001のRepositoryManager.tsx追記で間接的にカバー済み。補足として追記する優先度は低い"
+      },
+      {
+        "id": "S3-009",
+        "status": "skipped",
+        "reason": "onCloneSuccess()でのDB永続化の因果関係は、S3-002の「既存データへの影響」セクションで既にbasePath変更後のDB影響を記載しており、重複する内容"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 6,
+    "skipped": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/308"
+  },
+  "sections_added": [
+    "影響範囲 > 既存データへの影響",
+    "影響範囲 > ユーザー影響"
+  ],
+  "sections_updated": [
+    "影響範囲 > 関連コンポーネント（RepositoryManager.tsx、scan/route.ts追加）",
+    "実装タスク > WORKTREE_BASE_PATH非推奨化対応（詳細化）",
+    "実装タスク > テスト更新（モック方針追記）",
+    "レビュー履歴（Stage 3エントリ追加）",
+    "冒頭Note（Stage 3反映に更新）"
+  ]
+}

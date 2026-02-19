@@ -1,0 +1,24 @@
+{
+  "issue_number": 308,
+  "feature_summary": "git clone時のbasePath修正 - CloneManagerがCM_ROOT_DIRを使用するよう修正",
+  "acceptance_criteria": [
+    ".envにCM_ROOT_DIRを設定した状態で、UIからcloneするとCM_ROOT_DIR配下にリポジトリが作成される",
+    "CM_ROOT_DIR未設定時はprocess.cwd()をフォールバック値として使用する",
+    "WORKTREE_BASE_PATHのみ設定時: そのパスがbasePath として使用され、console.warnで非推奨警告が出力される",
+    "WORKTREE_BASE_PATH非推奨警告はCloneManagerの複数回インスタンス化でも初回のみ出力される",
+    "CM_ROOT_DIRとWORKTREE_BASE_PATHの両方が設定された場合: CM_ROOT_DIRが優先される",
+    "どちらも未設定の場合: process.cwd()がフォールバック値として使用される",
+    "既存テストがすべてパスする",
+    "新規テストでCM_ROOT_DIR反映を検証する"
+  ],
+  "test_scenarios": [
+    "シナリオ1: CM_ROOT_DIR='/custom/path'設定時にcloneするとbasePath='/custom/path'が使用される",
+    "シナリオ2: CM_ROOT_DIR未設定、WORKTREE_BASE_PATH未設定時にbasePath=process.cwd()が使用される",
+    "シナリオ3: WORKTREE_BASE_PATHのみ設定時にそのパスが使用され非推奨警告が出力される",
+    "シナリオ4: CM_ROOT_DIRとWORKTREE_BASE_PATH両方設定時にCM_ROOT_DIRが優先される",
+    "シナリオ5: targetDirにオブジェクトを送信した場合に400エラーが返る（D4-002）",
+    "シナリオ6: パストラバーサル試みのエラーメッセージにbasePath値が含まれない（D4-001）",
+    "シナリオ7: ディレクトリ存在エラーのメッセージにtargetPath完全パスが含まれない（D4-003）"
+  ],
+  "test_results_file": "dev-reports/issue/308/pm-auto-dev/iteration-1/tdd-result.json"
+}

@@ -1,0 +1,123 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 302,
+  "review_date": "2026-02-18",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "DR-001",
+      "severity": "must_fix",
+      "principle": "DRY",
+      "title": "normalizeExtension() の重複定義リスク",
+      "description": "設計方針書のsection 3-2で video-extensions.ts に normalizeExtension() を定義する計画だが、同一関数が既に image-extensions.ts (L104-107) に存在する。設計方針書には「image-extensions.tsからimportして共通化するか、同一実装を持つ」と曖昧に記載されており、重複実装の余地が残っている。また binary-extensions.ts (L99) でも同一ロジックがインラインで書かれている。uploadable-extensions.ts (L143, L155) も独自に .toLowerCase() 処理を行っている。",
+      "suggestion": "normalizeExtension() を src/lib/utils.ts または新規 src/lib/extension-utils.ts に抽出し、image-extensions.ts, video-extensions.ts, binary-extensions.ts, uploadable-extensions.ts の全てからimportする共通ユーティリティとして一元化すべき。設計方針書の「共通化するか、同一実装を持つ」という曖昧な表現を「image-extensions.tsからimportして共通化する」に確定させること。"
+    },
+    {
+      "id": "DR-002",
+      "severity": "should_fix",
+      "principle": "OCP",
+      "title": "FileViewer の isImage/isVideo 条件分岐がOCPに反する",
+      "description": "設計方針書のsection 3-7 で FileViewer.tsx に content.isVideo の分岐を追加する計画だが、現在の FileViewer (L56, L169) は content.isImage のみをハードコードしている。isVideo 追加で既存コードを直接変更する必要があり、将来 isAudio, isPdf 等が追加されるたびに FileViewer を修正し続ける必要がある。canCopy のロジックも !content.isImage && !content.isVideo と否定条件の連鎖になる。",
+      "suggestion": "FileContent型にメディアタイプを判別するフィールド（例: mediaType?: 'image' | 'video' | 'audio' | 'text'）を導入し、FileViewer内でswitch文やマッピングテーブルで対応するViewerコンポーネントを選択するパターンを検討する。ただし現時点ではmp4のみの追加であり、YAGNI原則との兼ね合いで if-else追加は許容範囲内。将来のメディアタイプ追加が見込まれる場合に限りリファクタリングを行う方針をコメントとして記載すること。"
+    },
+    {
+      "id": "DR-003",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "ImageExtensionValidator と VideoExtensionValidator の重複インターフェース",
+      "description": "設計方針書のsection 3-2 で VideoExtensionValidator インターフェースを定義しているが、image-extensions.ts (L38-47) の ImageExtensionValidator と完全に同一構造（extension, mimeType, magicBytes?, magicBytesOffset?）である。また uploadable-extensions.ts (L27-36) の UploadableExtensionValidator も類似構造を持つ。3つの類似インターフェースが存在することになる。",
+      "suggestion": "共通の BaseMediaExtensionValidator インターフェースを src/types/models.ts または新規の src/types/media.ts に定義し、ImageExtensionValidator と VideoExtensionValidator はそれをextend（または直接使用）する形に統一する。UploadableExtensionValidator は maxFileSize, allowedMimeTypes 等の追加フィールドがあるため別インターフェースのままで良いが、magicBytes の定義方法は統一する方が望ましい（現状 image-extensions.ts は magicBytesOffset, uploadable-extensions.ts は MagicBytesDefinition.offset と異なる表現）。"
+    },
+    {
+      "id": "DR-004",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "GET API route.ts の画像/動画処理ロジック重複",
+      "description": "設計方針書のsection 3-5 で、既存の画像分岐と「同じ構造で」動画分岐を追加するとしている。route.ts (L146-191) の画像処理ブロック（readFile -> validate -> Base64変換 -> JSON応答）と同一パターンが動画にもコピーされることになり、Base64変換ロジック・エラーハンドリング・レスポンス構築が重複する。",
+      "suggestion": "共通のメディアファイル処理ヘルパー関数を抽出する。例えば processMediaFile(absolutePath, ext, mediaType) のような関数で、readFile -> validate -> Base64変換 -> レスポンスオブジェクト構築を一元化する。画像と動画で異なるのはバリデーション関数とisImage/isVideoフラグだけなので、パラメータで切り替え可能。"
+    },
+    {
+      "id": "DR-005",
+      "severity": "nice_to_have",
+      "principle": "ISP",
+      "title": "VideoViewerProps の alt プロパティの命名",
+      "description": "設計方針書のsection 3-6 で VideoViewerProps に alt: string を定義しているが、alt属性はHTMLの img 要素のアクセシビリティ仕様に由来する名称であり、video 要素には alt 属性は存在しない。ImageViewer (L22) との整合性は保たれるが、セマンティクスとしては不正確。",
+      "suggestion": "VideoViewerProps では alt の代わりに fileName や title など、video要素として適切な名称を使用するか、共通の MediaViewerProps として label や name のような中立的な名称を採用する。ただし ImageViewer との一貫性を優先する判断も妥当であり、JSDocで「ファイル名（アクセシビリティ用ラベルとして使用）」と説明を付記すれば十分。"
+    },
+    {
+      "id": "DR-006",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "page.tsx の型統一は独立した改善であり Issue #302 に含めるべきか検討が必要",
+      "description": "設計方針書のsection 3-8 で page.tsx のローカル FileContent 型 (page.tsx L16-21) を models.ts からの import に変更する計画がある。これは正しいDRY改善だが、Issue #302（mp4アップロード機能）の直接的なスコープではなく、既存の画像表示の不具合修正でもある。page.tsx ではローカル FileContent に isImage が含まれておらず、画像ファイルの直接URL表示が正しく動作しない可能性がある。",
+      "suggestion": "page.tsx の型統一はIssue #302に含めて実施して問題ないが、コミットメッセージで「refactor: unify FileContent type in page.tsx (DRY)」と「feat: add mp4 video support」を分けるか、PRの説明で明示的に言及すること。これにより変更理由の追跡性が向上する。"
+    },
+    {
+      "id": "DR-007",
+      "severity": "nice_to_have",
+      "principle": "SRP",
+      "title": "video-extensions.ts のSRP準拠は適切",
+      "description": "設計方針書では video-extensions.ts を image-extensions.ts と同一パターンで独立ファイルとして作成する方針であり、これはSRPに準拠している。動画拡張子の判定・バリデーション責務がimage-extensions.tsの画像責務と分離されている点は良い。",
+      "suggestion": "現在の設計で問題なし。ただし将来のメディアタイプ追加に備え、image-extensions.ts と video-extensions.ts のエクスポート関数名を統一パターン（isXxxExtension, getMimeTypeByXxxExtension, validateXxxMagicBytes）で揃える方針を CLAUDE.md のモジュール一覧に記載しておくとよい。"
+    },
+    {
+      "id": "DR-008",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "binary-extensions.ts に VIDEO_EXTENSIONS のspread追加が未記載",
+      "description": "binary-extensions.ts (L20) では IMAGE_EXTENSIONS を spread して BINARY_EXTENSIONS に含めている。mp4 は既にハードコード (L55) されているが、video-extensions.ts に VIDEO_EXTENSIONS 配列を定義する以上、binary-extensions.ts でも IMAGE_EXTENSIONS と同様に VIDEO_EXTENSIONS を import して spread するのが DRY 原則に適う。設計方針書にはこの変更が記載されていない。",
+      "suggestion": "binary-extensions.ts の変更を設計方針書の変更ファイル一覧に追加し、`...VIDEO_EXTENSIONS` を含める形に修正する。既存のハードコード `.mp4` エントリは VIDEO_EXTENSIONS からの import に置き換える。これにより将来 webm 等を VIDEO_EXTENSIONS に追加した場合に binary-extensions.ts の追従が不要になる。"
+    },
+    {
+      "id": "DR-009",
+      "severity": "must_fix",
+      "principle": "DRY",
+      "title": "ERROR_CODE_TO_HTTP_STATUS マッピングの重複",
+      "description": "files/route.ts (L46-71) と upload/route.ts (L41-57) に同一の ERROR_CODE_TO_HTTP_STATUS マッピングが重複定義されている。設計方針書では files/route.ts に動画分岐を追加するが、この既存の重複問題には触れていない。Issue #302 で upload/route.ts のサイズ検証順序を変更する際に、この重複がさらに乖離するリスクがある。",
+      "suggestion": "ERROR_CODE_TO_HTTP_STATUS を src/lib/api-error-codes.ts 等の共通モジュールに抽出し、両route.tsからimportする形に統一する。Issue #302 のスコープ外であれば、少なくとも設計方針書のトレードオフ/既知の技術的負債セクションに記載すべき。"
+    },
+    {
+      "id": "DR-010",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "title": "Base64 data URI方式はシンプルで適切だが、15MBでの性能影響を明記すべき",
+      "description": "設計方針書のsection 5-1 で Base64 data URI 方式を採用しているが、15MBファイルが約20MBのJSONレスポンスとなり、ブラウザのJSONパースとDOM上のdata URI処理にメモリ負荷がかかる。これはKISS原則に基づくトレードオフとして妥当だが、実装時の性能テスト基準が不明確。",
+      "suggestion": "設計方針書のパフォーマンス設計セクションに「15MBファイルアップロード・再生の受け入れ基準（例: レスポンス時間3秒以内、メモリ使用量100MB以内）」を追記する。これにより実装・テスト時の判断基準が明確になる。"
+    },
+    {
+      "id": "DR-011",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "title": "video-extensions.ts の VIDEO_EXTENSIONS 配列が将来拡張を暗示する設計",
+      "description": "VIDEO_EXTENSIONS を readonly string[] の配列として定義し、mp4のみを含める計画だが、配列形式にすること自体が複数動画形式対応の含みを持つ。YAGNI原則の観点では、現時点で mp4 のみなら配列にする必要はないとも言えるが、image-extensions.ts との一貫性を考えると配列形式が妥当。",
+      "suggestion": "現在の配列設計で問題なし。image-extensions.ts との一貫性（IMAGE_EXTENSIONS配列パターン）を優先する判断は正しい。YAGNI違反には該当しない。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-302-mp4-upload-design-policy.md",
+    "src/config/image-extensions.ts",
+    "src/config/uploadable-extensions.ts",
+    "src/config/binary-extensions.ts",
+    "src/components/worktree/ImageViewer.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/types/models.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+    "src/app/worktrees/[id]/files/[...path]/page.tsx",
+    "next.config.js"
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4,
+    "overall_assessment": "条件付き承認（must_fix 2件を修正後に承認）"
+  },
+  "timestamp": "2026-02-18T00:00:00Z"
+}

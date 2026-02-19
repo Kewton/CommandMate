@@ -16,8 +16,8 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      // [CONS-006] Increased from 2mb to 6mb for file upload support (5MB + overhead)
-      bodySizeLimit: '6mb',
+      // [CONS-006] Increased to 16mb for video file upload support (15MB + overhead) - Issue #302
+      bodySizeLimit: '16mb',
     },
   },
   async headers() {
@@ -60,6 +60,7 @@ const nextConfig = {
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // unsafe-eval needed for Next.js dev
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob:",
+              "media-src 'self' data:", // Allow video playback with data URIs (Issue #302)
               "font-src 'self' data:",
               "connect-src 'self' ws: wss:", // Allow WebSocket connections
               "frame-ancestors 'none'",

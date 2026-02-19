@@ -1,0 +1,57 @@
+{
+  "issue_number": 302,
+  "iteration": 1,
+  "title": "mp4ファイルをアップロード可能にしたい",
+  "branch": "feature/302-worktree",
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "files_created": [
+        "src/config/video-extensions.ts",
+        "src/components/worktree/VideoViewer.tsx",
+        "tests/unit/config/video-extensions.test.ts"
+      ],
+      "files_modified": [
+        "src/config/uploadable-extensions.ts",
+        "src/types/models.ts",
+        "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+        "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+        "src/app/worktrees/[id]/files/[...path]/page.tsx",
+        "src/components/worktree/FileViewer.tsx",
+        "next.config.js",
+        "tests/unit/config/uploadable-extensions.test.ts",
+        "tests/integration/api-file-operations.test.ts"
+      ],
+      "test_count_added": 34,
+      "unit_tests": "passed",
+      "integration_tests": "passed",
+      "lint": "passed",
+      "type_check": "passed",
+      "build": "passed"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 9,
+      "criteria_total": 9,
+      "issues_found": []
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "video-extensions.tsにvalidateVideoContent()/validateVideoMagicBytes()を追加（image-extensions.tsとの一貫性）",
+        "VideoViewer.tsxの冗長な<source>要素を除去",
+        "ファイル取得APIのGETルートで動画ファイルにもmagic bytes検証を追加（セキュリティ強化）",
+        "video-extensions.tsのテストを22→33件に拡充"
+      ],
+      "unit_tests": "passed",
+      "lint": "passed",
+      "type_check": "passed"
+    },
+    "documentation": {
+      "status": "completed",
+      "updated_files": [
+        "CLAUDE.md (video-extensions.ts追加、FileViewer.tsx・VideoViewer.tsx更新)"
+      ]
+    }
+  }
+}

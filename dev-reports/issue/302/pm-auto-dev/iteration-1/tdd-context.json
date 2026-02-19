@@ -1,0 +1,60 @@
+{
+  "issue_number": 302,
+  "title": "mp4ファイルをアップロード可能にしたい",
+  "branch": "feature/302-worktree",
+  "acceptance_criteria": [
+    "mp4ファイルをUIからアップロードできること",
+    "アップロードしたmp4ファイルがファイルツリーに表示されること",
+    "mp4ファイルをクリックするとブラウザ内で再生（プレビュー）できること（再生/停止コントロール付き）",
+    "15MBを超えるmp4ファイルのアップロードが拒否されること",
+    "不正なファイル（拡張子をmp4に偽装した非動画ファイル）がmagic bytes検証（offset 4でftypシグネチャ）で拒否されること",
+    "動画ファイル選択時にコピーボタンが表示されないこと",
+    "動画読み込み中にローディングインジケーターが表示されること",
+    "/worktrees/[id]/files/path/to/video.mp4への直接URLアクセスで動画が正しく再生されること（FileViewerPage対応）",
+    "/worktrees/[id]/files/path/to/image.pngへの直接URLアクセスで画像が正しく表示されること（page.tsxのローカル型をmodels.tsのimportに切り替えることで対応）",
+    "既存のアップロード機能（画像、テキスト等）に影響がないこと",
+    "全既存テストがパスすること"
+  ],
+  "implementation_tasks": [
+    "src/config/video-extensions.ts を新規作成（image-extensions.tsパターンに準拠: VIDEO_EXTENSIONS定数、isVideoExtension()、getMimeTypeByVideoExtension()、magic bytes定義 { bytes: [0x66, 0x74, 0x79, 0x70], offset: 4 }）",
+    "src/config/uploadable-extensions.ts にmp4バリデータを追加（maxFileSize: 15MB=15728640bytes、magic bytes: offset 4でftyp [0x66, 0x74, 0x79, 0x70]を検証）",
+    "src/types/models.ts のFileContentインターフェースにisVideo?: booleanフラグを追加（オプショナル、後方互換性維持）",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts に動画ファイル表示ロジックを追加（isVideoExtension()による分岐、画像パターンと同じ構造）",
+    "src/app/worktrees/[id]/files/[...path]/page.tsx のローカルFileContent型をsrc/types/models.tsのFileContent型のimportに切り替え（DRY原則・型乖離解消）、動画・画像ファイルの両方に対してVideoViewer/ImageViewerを使った表示分岐を実装する",
+    "src/components/worktree/VideoViewer.tsx を新規作成（ローディングインジケーター付き、HTML5 <video>タグ、controls属性、maxWidth:100%、maxHeight:500px）",
+    "src/components/worktree/FileViewer.tsx に動画表示分岐を追加し、canCopyロジックを修正（!content.isImage && !content.isVideoで動画ファイルにコピーボタンが表示されないようにする）",
+    "next.config.js の experimental.serverActions.bodySizeLimitを'16mb'（15MB + overhead）に更新する",
+    "next.config.js の CSPヘッダーに media-src 'self' data: を追加する",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts でupload APIのサイズ検証順序を最適化する（file.sizeチェックをarrayBuffer()前に移動し、サイズ超過ファイルの早期拒否でメモリ効率を改善）",
+    "tests/unit/config/uploadable-extensions.test.ts にmp4バリデーションテスト追加（isUploadableExtension、validateMimeType、validateMagicBytes、getMaxFileSize）",
+    "tests/unit/config/video-extensions.test.ts を新規作成（image-extensions.test.tsパターン準拠: isVideoExtension、getMimeTypeByVideoExtensionテスト）",
+    "tests/integration/api/file-upload.test.ts にmp4アップロードのバリデーション結合テスト追加",
+    "tests/integration/api-file-operations.test.ts にGET APIでの動画ファイル取得テスト追加"
+  ],
+  "target_coverage": 80,
+  "design_notes": {
+    "file_size_limit": "15MB (video/mp4 専用、既存画像等は5MBのまま)",
+    "delivery_method": "Base64 data URI方式（15MB以下のためストリーミング不要）",
+    "magic_bytes": "offset 4でftyp = [0x66, 0x74, 0x79, 0x70]を検証（ISOBMFFフォーマット）",
+    "csp_media_src": "blob: URIは不要（Base64 data URI方式のため）。data:のみ追加",
+    "bodySizeLimit": "Server Actions専用のためRoute Handlerには適用されない可能性あり。実装時に検証し、必要であればRoute Segment Configを追加",
+    "backward_compatibility": "FileContentのisVideoはオプショナル（?）フィールドで既存コードへの影響なし",
+    "pattern_reference": "ImageViewer/image-extensions.tsのパターンを踏襲して統一性を確保"
+  },
+  "files_to_create": [
+    "src/config/video-extensions.ts",
+    "src/components/worktree/VideoViewer.tsx",
+    "tests/unit/config/video-extensions.test.ts"
+  ],
+  "files_to_modify": [
+    "src/config/uploadable-extensions.ts",
+    "src/types/models.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+    "src/app/worktrees/[id]/files/[...path]/page.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "next.config.js",
+    "tests/unit/config/uploadable-extensions.test.ts",
+    "tests/integration/api-file-operations.test.ts"
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "stage": 1,
+  "issue_number": 308,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["D1-007", "D1-003", "D1-004"],
+  "skipped_findings": ["D1-001", "D1-002", "D1-005", "D1-006", "D1-008"],
+  "skip_reasons": {
+    "D1-001": "Nice to Have - resolveDefaultBasePath()の責務分離は将来課題",
+    "D1-002": "Nice to Have - ファクトリ関数の導入は将来検討",
+    "D1-005": "Nice to Have - CloneManagerConfig設計は変更不要",
+    "D1-006": "Nice to Have - 非推奨化の期限記載は将来検討",
+    "D1-008": "Nice to Have - getEnv()パターン共通化は3箇所以上時に検討"
+  },
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "D1-007",
+        "item": "WORKTREE_BASE_PATHのパス正規化（path.resolve()適用）",
+        "sections_updated": ["4.2.2", "5.2", "9", "10"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "D1-003",
+        "item": "resetWorktreeBasePathWarning()に@internal JSDocタグ追加",
+        "sections_updated": ["4.2.2", "10"],
+        "status": "reflected"
+      },
+      {
+        "id": "D1-004",
+        "item": "[jobId]/route.tsの修正を任意から必須に格上げ",
+        "sections_updated": ["4.2.3", "7", "9", "10"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "design_doc_path": "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+  "sections_updated": [
+    "1.1 レビュー履歴",
+    "レビュー指摘事項サマリー（Stage 1）",
+    "4.2.2 src/lib/clone-manager.ts（コード例・設計判断）",
+    "4.2.3 src/app/api/repositories/clone/[jobId]/route.ts（任意→必須）",
+    "5.2 環境変数の取り扱い",
+    "7 設計上の決定事項とトレードオフ",
+    "9 影響範囲サマリー",
+    "10 実装チェックリスト（新規追加）"
+  ],
+  "summary": "Stage 1レビューの3件の指摘事項を設計方針書に反映。Must Fix 1件（D1-007: WORKTREE_BASE_PATHのpath.resolve()正規化）をSection 4.2.2のコード例・設計判断とSection 5.2のセキュリティ設計に追記。Should Fix 2件（D1-003: @internal JSDocタグ、D1-004: [jobId]/route.tsの必須変更格上げ）を関連セクションに反映。レビュー履歴・指摘事項サマリー・実装チェックリスト（Section 10）を新規追加。Nice to Have 5件はスキップ。",
+  "timestamp": "2026-02-19T00:00:00Z"
+}

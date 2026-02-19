@@ -1,0 +1,98 @@
+{
+  "review_stage": "stage1",
+  "focus_area": "設計原則",
+  "issue_number": 299,
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "should_fix",
+      "category": "DRY",
+      "location": "設計方針書 3.1 z-index体系の統一 / z-index.ts 新規定数",
+      "issue": "MOBILE_HEADER と MOBILE_DRAWER の z-index 定数が設計方針書のコード例に追加されている（MOBILE_HEADER: 40, MOBILE_DRAWER: 50）が、変更ファイル一覧（セクション10）では z-index.ts の変更内容が「JSDocコメント修正、MAXIMIZEDEDITORコメント修正」のみとなっており、新規定数の追加が記載されていない。また、既存コードで z-40/z-50 のハードコード統一はスコープ外と宣言（セクション8）しながら、z-index.ts にのみ定数を追加して実際のコンポーネント（AppShell.tsx z-40/z-50, MobileHeader.tsx z-40, MobileTabBar.tsx z-40）は変更しない中途半端な状態になる。定数を追加するなら利用箇所も統一すべきであり、追加しないなら定数定義自体がYAGNI違反になる。",
+      "suggestion": "方針を明確に二択とする。(A) MOBILE_HEADER/MOBILE_DRAWER 定数追加はスコープ外として z-index.ts のコード例から削除し、JSDocコメント修正のみに留める。(B) 定数追加と同時にAppShell.tsx/MobileHeader.tsx/MobileTabBar.tsx の z-40/z-50 を Z_INDEX 定数に置換する（スコープ内に含める）。現在の4症状修正という目的を考慮すると (A) が推奨。"
+    },
+    {
+      "id": "F002",
+      "severity": "should_fix",
+      "category": "DRY",
+      "location": "設計方針書 3.1 z-index.ts / MODAL と MOBILE_DRAWER の値重複",
+      "issue": "設計方針書のコード例で MODAL: 50 と MOBILE_DRAWER: 50 が同じ値を持つ。同一の値に異なる意味を持つ2つの定数を定義すると、将来いずれかの値を変更する際に影響判断が困難になる。また、JSDoc のレイヤー階層説明に MOBILE_HEADER/MOBILE_DRAWER が含まれておらず、追加するなら階層ドキュメントの更新も必要。",
+      "suggestion": "MOBILE_HEADER/MOBILE_DRAWER を追加する場合は、MODAL との値重複について設計方針書にコメントとして理由を明記する（例: モバイルではModalとDrawerが同時表示されないため同値で問題ない等）。F001 の提案通り追加自体をスコープ外とする場合は、この問題は解消される。"
+    },
+    {
+      "id": "F003",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "location": "設計方針書 3.3 isInsideScrollableElement 関数",
+      "issue": "isInsideScrollableElement 関数の設計は KISS 原則に概ね準拠しているが、overflowX 方向のスクロール（横スクロール可能なコードブロック等）を考慮していない。現在は overflowY のみチェックしており、横スクロール領域での水平スワイプとの干渉は考慮されていない。ただし、現在の症状4（下スワイプによる全画面解除）の修正としては overflowY のみで十分であり、過度に汎用化すると YAGNI に反する。",
+      "suggestion": "現時点では overflowY のみで問題ない。ただし関数名が isInsideScrollableElement と汎用的であるため、JSDoc コメントで「垂直方向のスクロール可能性のみを判定する」旨を明記するか、関数名を isInsideVerticallyScrollableElement に変更して意図を明確化する。"
+    },
+    {
+      "id": "F004",
+      "severity": "nice_to_have",
+      "category": "SRP",
+      "location": "設計方針書 3.3 useSwipeGesture.ts への isInsideScrollableElement 追加",
+      "issue": "isInsideScrollableElement は DOM ユーティリティ関数であり、useSwipeGesture.ts フック内にヘルパーとして定義する設計が提示されている。SRP の観点では、DOM 走査ロジックをフック内に含めると、フックの責務が「スワイプ検出」と「スクロール可能要素の判定」の2つに広がる。ただし、この関数は現時点で useSwipeGesture からのみ呼ばれるため、別ファイルに分離するとファイル数が増えてKISSに反する。",
+      "suggestion": "現時点ではフック内のプライベートヘルパーとして定義する設計で問題ない。将来、他のフックやコンポーネントからも呼ばれる場合は src/lib/dom-utils.ts 等に抽出することを検討する旨をコードコメントに記載する。"
+    },
+    {
+      "id": "F005",
+      "severity": "nice_to_have",
+      "category": "設計方針",
+      "location": "設計方針書 3.2 SearchBar.tsx の MOBILE_BREAKPOINT 使用",
+      "issue": "SearchBar.tsx の修正方針として useIsMobile フックの使用は不要とし、MOBILE_BREAKPOINT 定数のインポートのみを提案している。これは autofocus 制御のみの用途であるため妥当だが、useEffect 内で window.innerWidth を直接参照する方式はリサイズ時に追従しない点が残る。設計方針書でこの制約について明示的な言及がない。",
+      "suggestion": "設計方針書に「SearchBar.tsx の isMobile 判定はマウント時の1回限りの autofocus 制御であり、リサイズ追従は不要」という理由を明記する。これにより、将来のレビュアーがフックへの置換を不必要に検討することを防げる。"
+    },
+    {
+      "id": "F006",
+      "severity": "nice_to_have",
+      "category": "設計方針",
+      "location": "設計方針書 11 実装順序",
+      "issue": "Phase 1 から Phase 4 の実装順序は依存関係的に適切である。Phase 1（z-index統一）は独立しており最優先、Phase 2（スワイプ分離）も独立、Phase 3（iPad CSS調整）は Phase 1 の z-index 修正後に確認すべきであり自然な順序。Phase 4（テスト）は最後で正しい。ただし、Phase 3 の内容に「必要に応じて」という曖昧な表現が含まれており（AppShell.tsx、WorktreeDesktopLayout.tsx）、実装時に作業範囲が不明確になるリスクがある。",
+      "suggestion": "Phase 3 の AppShell.tsx と WorktreeDesktopLayout.tsx について、iPad 横置き（1024px）でのレイアウト確認を Phase 1 完了後に実施し、CSS 調整が実際に必要かどうかを判定するステップを Phase 2 と Phase 3 の間に挿入する。判定基準（例: サイドバー開閉時のコンテンツ領域が最小何 px 必要か）を定義すると、スコープの明確化に寄与する。"
+    },
+    {
+      "id": "F007",
+      "severity": "must_fix",
+      "category": "設計方針",
+      "location": "設計方針書 3.1 Modal.tsx inline style 変更",
+      "issue": "Modal.tsx の z-[9999] を style={{ zIndex: Z_INDEX.MODAL }} に変更する方針は正しいが、設計方針書の変更ファイル一覧（セクション10）で Modal.tsx のリスクが「高（8箇所の利用コンポーネント）」と記載されているにもかかわらず、影響を受ける8つのコンポーネントの具体的な列挙がない。z-index を 9999 から 50 に下げる変更は、Modal が他の z-40/z-50 要素（MobileHeader z-40、MobileTabBar z-40、AppShell drawer z-50、Toast z-50、SlashCommandSelector z-50）と競合する可能性がある。特にモバイル環境では Modal(z-50) と MobileDrawer(z-50)、Toast(z-50) が同一レイヤーになり、DOM 順序に依存する表示順序となる。",
+      "suggestion": "設計方針書に Modal(Z_INDEX.MODAL=50) 変更後の z-index 競合分析セクションを追加する。特に以下を明記すべき: (1) Modal は createPortal で document.body に配置されるため、同一 z-index でも DOM 順序で最後に描画されModalが上に表示される理由。(2) Modalが開いている時に body.style.overflow='hidden' が設定されるため、背面の z-50 要素との操作競合が発生しない理由。(3) Toast(Z_INDEX.TOAST=60) は Modal(50) より上であるため、Modal 表示中の Toast が正しく表示されることの確認。この分析を追加することで、高リスク変更への設計根拠が明確になる。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 2,
+    "nice_to_have_count": 4,
+    "overall_quality": "high"
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-299-ipad-layout-fix-design-policy.md",
+    "src/config/z-index.ts",
+    "src/components/ui/Modal.tsx",
+    "src/hooks/useSwipeGesture.ts",
+    "src/hooks/useIsMobile.ts",
+    "src/hooks/useFullscreen.ts",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/SearchBar.tsx",
+    "src/components/layout/AppShell.tsx"
+  ],
+  "design_principles_checklist": {
+    "single_responsibility": "pass",
+    "open_closed": "pass",
+    "liskov_substitution": "not_applicable",
+    "interface_segregation": "pass",
+    "dependency_inversion": "pass",
+    "kiss": "pass",
+    "yagni": "conditional_pass",
+    "dry": "conditional_pass"
+  },
+  "timestamp": "2026-02-18T00:00:00Z"
+}

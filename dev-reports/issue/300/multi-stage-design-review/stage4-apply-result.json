@@ -1,0 +1,52 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 300,
+  "apply_date": "2026-02-18",
+  "applied_count": 3,
+  "skipped_count": 0,
+  "results": [
+    {
+      "finding_id": "SF-1",
+      "status": "applied",
+      "description": "isPathSafe()内のdecodeURIComponentがNext.jsにより既に自動デコードされたパスに再適用される二重デコードのエッジケースについて、リテラル%文字を含むファイル名での挙動分析と、Issue #300スコープ外であることの明記を追加した。具体的な4ステップの挙動フロー（encodePathForUrl -> Next.jsデコード -> isPathSafe()デコード -> ファイル操作）を記載し、セキュリティ上の実害がないことを根拠とともに説明した。",
+      "location": "設計方針書 Section 6 セキュリティ設計 > [Stage4 SF-1] isPathSafe() の二重デコードに関するスコープ外注記（新規サブセクション）"
+    },
+    {
+      "finding_id": "SF-2",
+      "status": "applied",
+      "description": "window.prompt()入力に対するクライアント側での悪意ある文字バリデーション（.., ヌルバイト, 制御文字, OS禁止文字）を実施しない設計判断を追記した。理由として、サーバー側isPathSafe()による多層防御で十分であること、ファイル名のみの入力でありパストラバーサルリスクが限定的であること、責務境界の一貫性を記載した。UX上の課題（サーバーエラーのみのフィードバック）も将来検討事項として記録した。",
+      "location": "設計方針書 Section 6 セキュリティ設計 > 入力バリデーション > [Stage4 SF-2] クライアント側バリデーション非実施の設計判断（新規サブセクション）"
+    },
+    {
+      "finding_id": "SF-3",
+      "status": "applied",
+      "description": "createFileOrDirectory()がisPathSafe()のみを呼び出しisValidNewName()を呼ばない既知の課題を追記した。renameFileOrDirectory()との非対称性を比較テーブルで可視化し、Issue #300のツールバー追加によりルート作成機会が増えるため影響範囲が拡大することを記載。既存実装の問題でありIssue #300スコープ外とし、別Issueでの将来対応を推奨した。",
+      "location": "設計方針書 Section 6 セキュリティ設計 > [Stage4 SF-3] createFileOrDirectory() の isValidNewName() 非呼出に関する既知の課題（新規サブセクション）"
+    }
+  ],
+  "sections_updated": [
+    "Section 6 セキュリティ設計（SF-1: 二重デコードスコープ外注記、SF-2: クライアント側バリデーション設計判断、SF-3: createFileOrDirectory既知課題）",
+    "Section 9 レビュー履歴（Stage 4行追加）",
+    "Section 10 レビュー指摘事項サマリー（Stage 4テーブル追加）",
+    "Section 11 実装チェックリスト（Stage 4 Should Fix / Nice to Have追加）"
+  ],
+  "nice_to_have_recorded": [
+    {
+      "finding_id": "NTH-1",
+      "description": "XSS対策サブセクション追加（encodePathForUrl()はHTML安全ではない旨の明記）",
+      "status": "recorded_as_future_task"
+    },
+    {
+      "finding_id": "NTH-2",
+      "description": "localhost専用ツールの前提と認証・認可不要の明記",
+      "status": "recorded_as_future_task"
+    },
+    {
+      "finding_id": "NTH-3",
+      "description": "OWASP Top 10チェックリスト形式の体系的整理",
+      "status": "recorded_as_future_task"
+    }
+  ],
+  "timestamp": "2026-02-18T00:00:00Z"
+}

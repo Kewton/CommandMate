@@ -14,6 +14,16 @@ import {
   getCloneJob,
 } from '@/lib/db-repository';
 
+// Mock environment variables (must be before route imports)
+vi.mock('@/lib/env', () => ({
+  getEnv: () => ({
+    CM_ROOT_DIR: '/test/clone-root',
+    CM_PORT: 3000,
+    CM_BIND: '127.0.0.1',
+    CM_DB_PATH: '/test/db',
+  }),
+}));
+
 // Mock database instance
 let mockDb: Database.Database;
 
@@ -149,6 +159,24 @@ describe('Clone API', () => {
       const job = getCloneJob(mockDb, data.jobId);
       expect(job).not.toBeNull();
       expect(job?.cloneUrl).toBe('https://github.com/test/new-repo.git');
+    });
+
+    it('should return 400 when targetDir is not a string (D4-002)', async () => {
+      const request = new NextRequest('http://localhost/api/repositories/clone', {
+        method: 'POST',
+        body: JSON.stringify({
+          cloneUrl: 'https://github.com/test/repo.git',
+          targetDir: { malicious: true },
+        }),
+      });
+
+      const response = await postClone(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.success).toBe(false);
+      expect(data.error.code).toBe('INVALID_TARGET_PATH');
+      expect(data.error.message).toBe('targetDir must be a string');
     });
 
     it('should start clone job for valid SSH URL', async () => {

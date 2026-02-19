@@ -1,0 +1,7 @@
+{
+  "apply_stage": "stage3",
+  "design_doc_updated": true,
+  "applied_findings": ["F001", "F002", "F003", "F004", "F005"],
+  "skipped_findings": [],
+  "update_summary": "Stage 3影響分析レビューの5件の指摘事項を設計方針書に反映。F001: 3.1競合分析にToastContainerのスタッキングコンテキスト詳細分析(通常Modal内/全画面Portal時)を追加。F002: ContextMenu z-70変更後のMobilePromptSheet/SlashCommandSelector/AppShell drawerとの表示順序分析およびUIの相互排他性の明記を追加。F003: Toast.tsx/ContextMenu.tsxのz-index変更方式をinline style方式(style={{ zIndex: Z_INDEX.* }})に統一する方針を追加、Phase 1チェックリストを具体的なinline style記法に更新。F004: isInsideScrollableElementのexport不要方針を3.3に追記、テスト戦略セクション9にjsdom環境でのモック方法を含む統合テスト実装方式を追加、Phase 2/4チェックリスト更新。F005: 3.2にiPad portrait(768px)/landscape(1024px)のコンテンツ幅数値分析テーブルを追加、portrait時の480px(最小ペイン96px)の検討事項と判断基準を明記。Nice to Have 3件(F006-F008)のうちF006はPhase 4チェックリストに既存テスト全通過確認を追加して対応。レビュー履歴テーブルにStage 3行を追加。"
+}

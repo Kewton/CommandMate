@@ -139,22 +139,24 @@ tests/
 | `src/lib/pasted-text-helper.ts` | Pasted text検知とEnter再送の共通ヘルパー（Issue #212: detectAndResendIfPastedText関数、リトライロジック、構造化ログ） |
 | `src/lib/clipboard-utils.ts` | クリップボードコピーユーティリティ（stripAnsi利用、空文字バリデーション、Issue #211） |
 | `src/lib/status-detector.ts` | セッションステータス検出の共通関数（Issue #180: route.tsインラインロジック統合、hasActivePrompt、15行プロンプト検出ウィンドウイング。Issue #188: STATUS_THINKING_LINE_COUNT=5追加、thinking/prompt優先順位統一、SF-001/SF-002/SF-004設計根拠ドキュメント化） |
-| `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数。Issue #212: 複数行メッセージのPasted text検知+Enter再送。**Issue #265: キャッシュ無効化・ヘルスチェック・CLAUDECODE除去** - clearCachedClaudePath()でCLI更新時の自動回復、isSessionHealthy()/ensureHealthySession()で壊れたセッション検出・再作成、sanitizeSessionEnvironment()でCLAUDECODE環境変数除去、getCleanPaneOutput()共通ヘルパー、isValidClaudePath()でCLAUDE_PATHバリデーション） |
+| `src/lib/claude-session.ts` | Claude CLI tmuxセッション管理（Issue #152で改善: プロンプト検出強化、タイムアウトエラー、waitForPrompt()、Issue #187: sendMessageToClaude安定化待機・セパレータパターン除外・エラー伝播・CLAUDE_SEND_PROMPT_WAIT_TIMEOUT定数。Issue #212: 複数行メッセージのPasted text検知+Enter再送。**Issue #265: キャッシュ無効化・ヘルスチェック・CLAUDECODE除去** - clearCachedClaudePath()でCLI更新時の自動回復、isSessionHealthy()/ensureHealthySession()で壊れたセッション検出・再作成、sanitizeSessionEnvironment()でCLAUDECODE環境変数除去、getCleanPaneOutput()共通ヘルパー、isValidClaudePath()でCLAUDE_PATHバリデーション。**Issue #306: セッション安定性改善** - HealthCheckResult interface（@internal export）でisSessionHealthy()戻り値をreason付き構造化、SHELL_PROMPT_ENDINGS多段防御（行長チェック先行+N%個別除外）でコンテキスト残量表示の誤検出防止、ensureHealthySession()にreason付きconsole.warnログ追加、MAX_SHELL_PROMPT_LENGTH=40定数） |
 | `src/lib/response-poller.ts` | レスポンスポーリングとthinking検出（Issue #188: L353/L547-554ウィンドウ化、RESPONSE_THINKING_TAIL_LINE_COUNT=5定数、detectPromptWithOptions()ヘルパー、Gemini LOADING_INDICATORS配列抽出。Issue #212: cleanClaudeResponse skipPatternsにPASTED_TEXT_PATTERN追加。**Issue #235: rawContent優先DB保存** - DB保存時にrawContent || cleanContentを使用し、完全なプロンプト出力を保持） |
 | `src/lib/prompt-detector.ts` | プロンプト検出ロジック（Issue #161: 2パス❯検出方式で誤検出防止、連番検証。Issue #193: DetectPromptOptions interface追加、requireDefaultIndicatorフラグによる❯なし形式対応、Layer 5 SEC-001ガード。Issue #208: SEC-001b質問行妥当性検証追加、isQuestionLikeLine()による番号付きリスト誤検出防止。**Issue #235: rawContentフィールド追加** - PromptDetectionResultにrawContent?:stringを追加し、truncateRawContent()で最大200行/5000文字に制限。lastLinesを末尾20行に拡張。**Issue #256: isQuestionLikeLine()の複数行質問対応**（行内?チェック、キーワード単独マッチ）、SEC-001b上方走査（findQuestionLineInRange()関数、SF-S4-001 scanRangeバリデーション）、Pass 2ループ内isQuestionLikeLine()先行チェック（MF-001: isContinuationLine SRP維持）、QUESTION_SCAN_RANGE=3） |
 | `src/lib/version-checker.ts` | GitHub API呼び出し、semver比較、globalThisキャッシュ（Issue #257: バージョンアップ通知機能。Issue #278: cache: 'no-store'追加でNext.js Data Cache無効化。SEC-001 SSRF防止、SEC-SF-001レスポンスバリデーション、JSDocでglobalThisキャッシュ動作を明記） |
 | `src/hooks/useUpdateCheck.ts` | アップデートチェック用カスタムフック（Issue #257: /api/app/update-check呼び出し、loading/error/data状態管理） |
 | `src/components/worktree/VersionSection.tsx` | バージョン表示+通知統合コンポーネント（Issue #257: SF-001 DRY準拠、InfoModal/MobileInfoContent共通化） |
 | `src/components/worktree/UpdateNotificationBanner.tsx` | アップデート通知バナーUI（Issue #257: MF-001 SRP準拠、i18n対応、GitHub Releasesリンク） |
-| `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161） |
+| `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161）。**Issue #306: 重複応答防止** - AutoYesPollerStateにlastAnsweredPromptKey追加、isDuplicatePrompt()ヘルパー、プロンプト非検出時nullリセット、COOLDOWN_INTERVAL_MS=5000クールダウン、scheduleNextPoll()にoverride_interval下限値ガード付き） |
+| `src/lib/prompt-key.ts` | promptKeyデduplication共通ユーティリティ（Issue #306: generatePromptKey()でtype:questionキー生成、クライアント/サーバー間DRY原則対応、PromptKeyInput interface） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
-| `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応。**Issue #287: promptType/defaultOptionNumber送信** - prompt-response APIリクエストにpromptType/defaultOptionNumberを含め、promptCheck再検証失敗時のフォールバック対応） |
+| `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応。**Issue #287: promptType/defaultOptionNumber送信** - prompt-response APIリクエストにpromptType/defaultOptionNumberを含め、promptCheck再検証失敗時のフォールバック対応。**Issue #306: generatePromptKey()使用** - promptKey生成をprompt-key.tsの共通ユーティリティに統一） |
 | `src/lib/prompt-response-body-builder.ts` | プロンプト応答リクエストボディ構築ユーティリティ（Issue #287: buildPromptResponseBody()関数でpromptType/defaultOptionNumberを含むリクエストボディを生成、DRY原則対応、useAutoYes/WorktreeDetailRefactoredから共通化） |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/codex.ts` | Codex CLI tmuxセッション管理（Issue #212: 複数行メッセージのPasted text検知+Enter再送、getErrorMessage()ヘルパー抽出） |
 | `src/lib/session-cleanup.ts` | セッション/ポーラー停止の一元管理（Facade パターン） |
 | `src/lib/url-normalizer.ts` | Git URL正規化（重複検出用） |
-| `src/lib/clone-manager.ts` | クローン処理管理（DBベース排他制御） |
+| `src/lib/url-path-encoder.ts` | ファイルパスのURLエンコード（Issue #300: encodePathForUrl()関数、スラッシュを保護しながら各セグメントを個別にencodeURIComponent、catch-allルートのパス分割を維持） |
+| `src/lib/clone-manager.ts` | クローン処理管理（DBベース排他制御。**Issue #308: basePath修正** - resolveDefaultBasePath()でCM_ROOT_DIR/WORKTREE_BASE_PATH/process.cwd()優先順位制御、WORKTREE_BASE_PATH非推奨警告（モジュールスコープwarnedWorktreeBasePathフラグで初回のみ出力）、path.resolve()による絶対パス正規化、resetWorktreeBasePathWarning()テスト用エクスポート） |
 | `src/lib/db-repository.ts` | リポジトリDB操作関数群（Issue #190: 除外・復活・パス正規化・バリデーション関数追加、Issue #202: registerAndFilterRepositories統合関数追加） |
 | `src/types/sidebar.ts` | サイドバーステータス判定 |
 | `src/types/clone.ts` | クローン関連型定義（CloneJob, CloneError等） |
@@ -169,22 +171,27 @@ tests/
 | `src/hooks/useContextMenu.ts` | コンテキストメニュー状態管理フック（MouseEvent/TouchEvent対応） |
 | `src/hooks/useFileOperations.ts` | ファイル操作フック（Issue #162: move操作の状態管理、MoveTarget型、UIロジック分離） |
 | `src/hooks/useLongPress.ts` | タッチ長押し検出フック（Issue #123、500ms閾値、10px移動キャンセル） |
+| `src/hooks/useSwipeGesture.ts` | スワイプジェスチャー検出フック（Issue #299: isInsideScrollableElement追加でscrollable要素内スワイプを抑制） |
 | `src/hooks/useFullscreen.ts` | Fullscreen API ラッパー（CSSフォールバック対応） |
 | `src/hooks/useLocalStorageState.ts` | localStorage永続化フック（バリデーション対応） |
-| `src/config/z-index.ts` | z-index値の一元管理 |
-| `src/config/uploadable-extensions.ts` | アップロード可能拡張子・MIMEタイプ・マジックバイト検証 |
+| `src/config/z-index.ts` | z-index値の一元管理（Issue #299: JSDocコメント修正、レイヤー番号繰り上げ MODAL=50, MAXIMIZED_EDITOR=55, TOAST=60, CONTEXT_MENU=70） |
+| `src/config/uploadable-extensions.ts` | アップロード可能拡張子・MIMEタイプ・マジックバイト検証（Issue #302: mp4バリデータ追加、15MB上限、ftypシグネチャ検証） |
 | `src/config/image-extensions.ts` | 画像ファイル拡張子・マジックバイト・SVG XSS検証 |
+| `src/config/video-extensions.ts` | 動画ファイル拡張子・マジックバイト・MIME定義（Issue #302: VIDEO_EXTENSIONS、isVideoExtension()、getMimeTypeByVideoExtension()、validateVideoContent()） |
 | `src/config/mermaid-config.ts` | mermaid設定定数（securityLevel='strict'） |
 | `src/config/binary-extensions.ts` | バイナリファイル拡張子設定（検索除外用） |
 | `src/lib/file-search.ts` | ファイル内容検索ロジック（EXCLUDED_PATTERNSフィルタ、AbortControllerタイムアウト） |
-| `src/components/worktree/SearchBar.tsx` | 検索UIコンポーネント（検索入力、モード切替、ローディング表示） |
+| `src/components/worktree/SearchBar.tsx` | 検索UIコンポーネント（検索入力、モード切替、ローディング表示。Issue #299: MOBILE_BREAKPOINT定数使用） |
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック（debounce処理、API呼び出し、結果管理） |
 | `src/components/worktree/MoveDialog.tsx` | ファイル移動先選択ダイアログ（Issue #162: ディレクトリツリーブラウザ、ルート選択、ネスト対応、updateTreeNode/findNodeByPath抽出） |
-| `src/components/worktree/ContextMenu.tsx` | ファイル/ディレクトリコンテキストメニュー（Issue #162: 「移動」メニュー項目追加、FolderInputアイコン、onMoveコールバック） |
-| `src/components/worktree/FileViewer.tsx` | ファイルビューア（Issue #162: コピーボタン追加、Copy/Checkアイコン切替、useMemo最適化、画像ファイル非表示） |
-| `src/components/worktree/FileTreeView.tsx` | ファイルツリー表示（Issue #162: birthtime表示、formatRelativeTime()ロケール対応、sm:inline条件表示） |
-| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（Issue #162: handleMoveハンドラー追加、MoveDialog統合、useFileOperations呼び出し） |
+| `src/components/ui/Modal.tsx` | モーダルダイアログコンポーネント（Issue #299: z-[9999]ハードコード除去、Z_INDEX.MODAL使用に統一） |
+| `src/components/common/Toast.tsx` | トースト通知コンポーネント（Issue #299: z-50ハードコード除去、Z_INDEX.TOAST使用に統一） |
+| `src/components/worktree/ContextMenu.tsx` | ファイル/ディレクトリコンテキストメニュー（Issue #162: 「移動」メニュー項目追加、FolderInputアイコン、onMoveコールバック。Issue #299: z-50除去、Z_INDEX.CONTEXT_MENU使用） |
+| `src/components/worktree/FileViewer.tsx` | ファイルビューア（Issue #162: コピーボタン追加、Copy/Checkアイコン切替、useMemo最適化、画像ファイル非表示。**Issue #302: 動画表示分岐追加、canCopyロジック修正（isVideo除外）**） |
+| `src/components/worktree/FileTreeView.tsx` | ファイルツリー表示（Issue #162: birthtime表示、formatRelativeTime()ロケール対応、sm:inline条件表示。Issue #300: 非空状態にツールバー追加、data-testid=file-tree-toolbar/toolbar-new-file-button/toolbar-new-directory-button、onNewFile('')/onNewDirectory('')でルートレベル作成） |
+| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（Issue #162: handleMoveハンドラー追加、MoveDialog統合、useFileOperations呼び出し。Issue #300: handleNewFile/handleNewDirectory/handleRename/handleDelete/handleFileInputChangeの5箇所でencodeURIComponentをencodePathForUrl()に置換） |
 | `src/components/worktree/ImageViewer.tsx` | 画像表示コンポーネント |
+| `src/components/worktree/VideoViewer.tsx` | 動画再生コンポーネント（Issue #302: HTML5 videoタグ、controls属性、ローディングインジケーター、エラーフォールバックUI） |
 | `src/components/worktree/MermaidDiagram.tsx` | mermaidダイアグラム描画コンポーネント |
 | `src/components/worktree/MermaidCodeBlock.tsx` | mermaidコードブロックラッパー |
 | `src/config/log-config.ts` | LOG_DIR定数の一元管理（getLogDir()関数、DRY原則対応） |

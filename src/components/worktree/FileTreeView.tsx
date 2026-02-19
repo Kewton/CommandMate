@@ -838,7 +838,7 @@ export const FileTreeView = memo(function FileTreeView({
               <button
                 data-testid="empty-new-file-button"
                 onClick={() => onNewFile('')}
-                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 <FilePlus className="w-4 h-4" aria-hidden="true" />
                 <span>New File</span>
@@ -848,7 +848,7 @@ export const FileTreeView = memo(function FileTreeView({
               <button
                 data-testid="empty-new-directory-button"
                 onClick={() => onNewDirectory('')}
-                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 <FolderPlus className="w-4 h-4" aria-hidden="true" />
                 <span>New Directory</span>
@@ -881,6 +881,34 @@ export const FileTreeView = memo(function FileTreeView({
       aria-label="File tree"
       className={`overflow-auto bg-white ${className}`}
     >
+      {/* [Issue #300] Toolbar for root-level file/directory creation */}
+      {(onNewFile || onNewDirectory) && (
+        <div
+          data-testid="file-tree-toolbar"
+          className="flex items-center gap-1 p-1 border-b border-gray-200 dark:border-gray-700"
+        >
+          {onNewFile && (
+            <button
+              data-testid="toolbar-new-file-button"
+              onClick={() => onNewFile('')}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            >
+              <FilePlus className="w-4 h-4" aria-hidden="true" />
+              <span>New File</span>
+            </button>
+          )}
+          {onNewDirectory && (
+            <button
+              data-testid="toolbar-new-directory-button"
+              onClick={() => onNewDirectory('')}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            >
+              <FolderPlus className="w-4 h-4" aria-hidden="true" />
+              <span>New Directory</span>
+            </button>
+          )}
+        </div>
+      )}
       {filteredRootItems.map((item) => (
         <TreeNode
           key={item.name}

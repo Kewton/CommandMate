@@ -1,0 +1,52 @@
+{
+  "issue_number": 300,
+  "issue_title": "ルートディレクトリにディレクトリを追加出来ない",
+  "work_plan_path": "dev-reports/issue/300/work-plan.md",
+  "design_doc_path": "dev-reports/design/issue-300-root-directory-creation-design-policy.md",
+  "acceptance_criteria": [
+    "非空状態のルートディレクトリで「New Directory」ボタン（data-testid='toolbar-new-directory-button'）が表示される",
+    "そのボタンからルートレベルにディレクトリを作成できる（onNewDirectory('')が呼ばれる）",
+    "非空状態のルートディレクトリで「New File」ボタン（data-testid='toolbar-new-file-button'）が表示される",
+    "そのボタンからルートレベルにファイルを作成できる（onNewFile('')が呼ばれる）",
+    "空状態ボタン（data-testid='empty-new-directory-button'）は残存し、空状態で引き続き表示される",
+    "onNewFile / onNewDirectory コールバック未指定時にツールバーボタンが表示されない",
+    "共通ヘルパー関数 encodePathForUrl() が src/lib/url-path-encoder.ts に作成されている",
+    "handleNewFile, handleNewDirectory, handleRename, handleDelete, handleFileInputChange の全5箇所で encodePathForUrl() を使用している",
+    "スラッシュを含むパス（例: src/newdir）が正しくエンコードされる（%2F にならない）",
+    "isPathSafe() によるパストラバーサル検証が引き続き正常動作する"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/lib/url-path-encoder.ts を新規作成する。encodePathForUrl(path: string): string 関数を実装。path.split('/').map(encodeURIComponent).join('/') で各セグメントを個別にエンコード",
+    "Task 2.1: src/components/worktree/FileTreeView.tsx の非空状態（rootItems.length > 0）のreturnブロックにツールバーを追加。(onNewFile || onNewDirectory) の場合のみ表示。data-testid: file-tree-toolbar, toolbar-new-file-button, toolbar-new-directory-button",
+    "Task 2.2: src/components/worktree/WorktreeDetailRefactored.tsx の5箇所（handleNewFile L1252, handleNewDirectory L1279, handleRename L1305, handleDelete L1330, handleFileInputChange L1408）で encodeURIComponent を encodePathForUrl に置換",
+    "Task 3.1: tests/unit/lib/url-path-encoder.test.ts を新規作成。基本ケース、スラッシュ保護、エッジケース（空文字、先頭スラッシュ、連続スラッシュ、末尾スラッシュ）をテスト",
+    "Task 3.2: tests/unit/components/worktree/FileTreeView.test.tsx にツールバーテストを追加。非空状態でのボタン表示、クリック動作、コールバック未指定時の非表示、空状態ボタン維持を確認",
+    "Task 3.3: tests/unit/components/WorktreeDetailRefactored.test.tsx にパスエンコードテストを追加。fetchのURLに%2Fが含まれないことを検証"
+  ],
+  "target_coverage": 80,
+  "key_files": {
+    "new_files": [
+      "src/lib/url-path-encoder.ts",
+      "tests/unit/lib/url-path-encoder.test.ts"
+    ],
+    "modified_files": [
+      "src/components/worktree/FileTreeView.tsx",
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "tests/unit/components/worktree/FileTreeView.test.tsx",
+      "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+    ],
+    "unchanged_files": [
+      "src/lib/path-validator.ts",
+      "src/lib/file-operations.ts",
+      "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "src/components/worktree/ContextMenu.tsx"
+    ]
+  },
+  "design_decisions": {
+    "toolbar_placement": "非空状態のfile-tree-viewコンテナ内、ツリーアイテムの上部",
+    "empty_state_buttons": "既存の空状態ボタン（L827-861）は維持する",
+    "encode_function": "path.split('/').map(encodeURIComponent).join('/')",
+    "security": "encodePathForUrl()はURLエンコードのみ担当。パストラバーサル防御はサーバー側isPathSafe()が担当",
+    "mobile": "ツールバーはデスクトップ向け。モバイルはコンテキストメニュー経由を推奨"
+  }
+}

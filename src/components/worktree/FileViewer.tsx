@@ -22,6 +22,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Modal } from '@/components/ui';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
+import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { Copy, Check } from 'lucide-react';
 
@@ -51,9 +52,9 @@ export function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewer
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  /** Whether the current content supports clipboard copy (text files only) */
+  /** Whether the current content supports clipboard copy (text files only, not image/video) */
   const canCopy = useMemo(
-    () => Boolean(content?.content && !content.isImage),
+    () => Boolean(content?.content && !content.isImage && !content.isVideo),
     [content]
   );
 
@@ -170,6 +171,12 @@ export function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewer
               <ImageViewer
                 src={content.content}
                 alt={content.path}
+                mimeType={content.mimeType}
+              />
+            ) : content.isVideo ? (
+              /* Video file: render with VideoViewer (Issue #302) */
+              <VideoViewer
+                src={content.content}
                 mimeType={content.mimeType}
               />
             ) : (

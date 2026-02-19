@@ -1,0 +1,8 @@
+{
+  "stage": 8,
+  "issue_number": 302,
+  "applied_findings": [],
+  "skipped_findings": [],
+  "note": "Stage 7（影響範囲レビュー2回目）の指摘が0件のためStage 8は自動スキップ",
+  "github_update_status": "skipped"
+}

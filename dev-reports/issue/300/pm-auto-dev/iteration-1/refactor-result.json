@@ -1,0 +1,52 @@
+{
+  "issue_number": 300,
+  "status": "success",
+  "refactored_files": [
+    "src/components/worktree/FileTreeView.tsx"
+  ],
+  "reviewed_files_no_changes_needed": [
+    "src/lib/url-path-encoder.ts",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/lib/url-path-encoder.test.ts"
+  ],
+  "improvements": [
+    "FileTreeView.tsx: Added dark mode classes to empty state buttons (empty-new-file-button, empty-new-directory-button) to match the toolbar buttons pattern added in Issue #300"
+  ],
+  "review_findings": {
+    "url-path-encoder.ts": "No changes needed. JSDoc is comprehensive, function follows SRP and KISS, export is clean.",
+    "url-path-encoder.test.ts": "No changes needed. 11 test cases cover all edge cases (empty string, alphanumeric, spaces, hash, question mark, percent, deep nesting, slash preservation, single segment, leading slash, trailing slash). Naming follows project conventions.",
+    "FileTreeView.tsx": "Toolbar section (L884-911) is well-structured with proper data-testids, dark mode support, and lucide-react icon imports. Found inconsistency: empty state buttons lacked dark mode classes that toolbar had. Fixed by adding dark: variant classes.",
+    "WorktreeDetailRefactored.tsx": "Import at L63 is correctly positioned at end of @/lib/* import group. All 5 encodePathForUrl usages (L1253, L1280, L1306, L1331, L1409) are correct and consistent."
+  },
+  "recommendations": [
+    "Out of scope: useFileOperations.ts L71 uses raw moveTarget.path without encodePathForUrl - potential encoding bug for paths with special characters. Consider applying encodePathForUrl in a follow-up issue.",
+    "Out of scope: FileViewer.tsx L91, MarkdownEditor.tsx L216/L252, and page.tsx L40 also use raw paths in API URLs. A broader cleanup to use encodePathForUrl consistently across all file API calls would improve robustness."
+  ],
+  "verification": {
+    "typescript": "pass (0 errors)",
+    "lint": "pass (0 errors/warnings)",
+    "tests": "11/11 pass"
+  },
+  "quality_metrics": {
+    "before": {
+      "typescript_errors": 0,
+      "lint_errors": 0,
+      "url_path_encoder_tests": "11/11 pass"
+    },
+    "after": {
+      "typescript_errors": 0,
+      "lint_errors": 0,
+      "url_path_encoder_tests": "11/11 pass"
+    }
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "c80cfe8: refactor(#300): add dark mode classes to empty state buttons for consistency"
+  ],
+  "message": "Refactoring complete. All 4 target files reviewed. 1 file modified (FileTreeView.tsx - dark mode consistency). 3 files confirmed as already well-structured. All tests pass, no static analysis errors."
+}

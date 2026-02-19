@@ -1,0 +1,17 @@
+{
+  "issue_number": 300,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-300-root-directory-creation-design-policy.md",
+  "review_points": [
+    "OWASP Top 10準拠",
+    "パストラバーサル攻撃の防御",
+    "URLエンコーディングの適切な処理",
+    "入力バリデーション",
+    "アクセス制御",
+    "XSS対策",
+    "二重エンコーディングの問題",
+    "セキュリティ責務境界の適切さ"
+  ]
+}

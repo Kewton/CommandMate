@@ -1,0 +1,123 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 308,
+  "review_focus": "整合性",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "D2-001",
+      "severity": "must_fix",
+      "category": "code_consistency",
+      "location": "Section 4.2.1 (clone/route.ts Before code)",
+      "description": "設計方針書のBefore例はL70-71と記載しているが、実際のコードはL70がdb取得、L71がCloneManager生成で一致。ただし、After例でgetEnv importを追加する記述があるが、clone/route.tsの既存import一覧にgetEnvは含まれていない。After例は正確。しかし、getEnv()が返すCM_ROOT_DIRはpath.resolve()済みの絶対パスである点を設計方針書Section 4.2.1のコメントに明記すべきである。scan/route.tsでは同パターンでCM_ROOT_DIRをisPathSafe()の第2引数として使用しており、clone/route.tsでbasePathとして渡した場合もisPathSafe()の基準ディレクトリとして使用される。getEnv()が既にpath.resolve()を適用していることの確認コメントがAfterコードに無いため、実装者が二重にresolve()を適用するリスクがある。",
+      "suggestion": "Section 4.2.1のAfterコード例に「getEnv().CM_ROOT_DIRはpath.resolve()適用済みの絶対パス」というコメントを追加し、実装者が不要なpath.resolve()を重複適用しないよう明示すること。"
+    },
+    {
+      "id": "D2-002",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "location": "Section 4.2.2 (clone-manager.ts Before code)",
+      "description": "設計方針書のBeforeコードはL189-196と記載されている。実際のclone-manager.tsを確認すると、L189がconstructor行、L193がbasePathデフォルト値行であり、行番号は正確。Beforeコードの内容（basePath: config.basePath || process.env.WORKTREE_BASE_PATH || '/tmp/repos'）も実際のL193と完全一致。整合性は良好。ただし、Afterコードで「let warnedWorktreeBasePath = false;  // モジュールスコープ」とあるが、この変数宣言の追加位置（クラス定義の前、importブロックの後）が明示されていない。",
+      "suggestion": "Afterコード例でwarnedWorktreeBasePathの宣言位置を「CloneManagerクラス定義の直前（L183の前）」のように具体的に指定すること。"
+    },
+    {
+      "id": "D2-003",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "location": "Section 4.2.3 ([jobId]/route.ts Before code)",
+      "description": "設計方針書のBefore例はL60-61と記載。実際のコードを確認すると、L60がdb取得、L61がCloneManager生成で一致。After例でgetEnvのimportを追加し、CM_ROOT_DIRを取得してbasePathとして渡す変更も明確。ただし、[jobId]/route.tsのgetCloneJobStatus()はbasePath/configを全く使用しないため、CloneManagerの生成時にbasePathを渡す意義について、設計書には「一貫性のため」と記載されているが、getCloneJobStatus()内でconfigが参照されない事実が明記されていない。",
+      "suggestion": "Section 4.2.3の注記（D1-004）に「getCloneJobStatus()はthis.config.basePathを参照しない」という事実を明確に追記し、この変更が純粋にコード一貫性と不要な非推奨警告防止のためであることを強調すること。実装者がgetCloneJobStatus()でbasePathが使われると誤解しないようにする。"
+    },
+    {
+      "id": "D2-004",
+      "severity": "should_fix",
+      "category": "doc_accuracy",
+      "location": "Section 9 (影響範囲サマリー) - server.ts",
+      "description": "Section 9の「コード変更（任意）」にserver.ts L83のMCBD_ROOT_DIR警告メッセージ修正が記載されている。実際のserver.ts L83は「Set WORKTREE_REPOS (comma-separated) or MCBD_ROOT_DIR」となっている。これはWORKTREE_BASE_PATHではなくMCBD_ROOT_DIRであり、Issue #308のスコープ（WORKTREE_BASE_PATHの非推奨化）とは直接関係がない。MCBD_ROOT_DIRの非推奨化はIssue #76で対応済み（ENV_MAPPINGで定義）。また、server.tsのこの行はWORKTREE_REPOSという別の環境変数も参照しており、Issue #308の修正対象として適切かどうか再検討が必要。",
+      "suggestion": "server.ts L83の修正をIssue #308のスコープから除外するか、または修正内容を「MCBD_ROOT_DIR → CM_ROOT_DIR」への更新と明確に定義すること。WORKTREE_BASE_PATHの非推奨化とは別の問題であるため混同を避けるべき。"
+    },
+    {
+      "id": "D2-005",
+      "severity": "should_fix",
+      "category": "test_consistency",
+      "location": "Section 6.1 (ユニットテスト設計) vs tests/unit/lib/clone-manager.test.ts",
+      "description": "設計方針書Section 6.1には6つのテストケースが記載されている。既存のclone-manager.test.tsを確認すると、(1) basePath指定時のテストは「getTargetPath > should use custom base path if provided」(L302-307)に対応、(2) customTargetPath検証テストは「startCloneJob > should reject custom target path outside basePath」(L227-235)に対応。しかし、以下のテストケースは既存テストに存在しない: a) WORKTREE_BASE_PATHのみ設定時の非推奨パス使用+警告出力テスト、b) CM_ROOT_DIR+WORKTREE_BASE_PATH両方設定時の優先順位テスト、c) どちらも未設定時のprocess.cwd()フォールバックテスト、d) 非推奨警告の重複防止テスト。これらは全て新規追加が必要。設計書の記載は正確であり、テスト追加の方向性は適切。",
+      "suggestion": "テスト設計は新規テストケースとして適切に定義されている。実装時にdescribeブロック「basePath resolution」等を新規追加し、process.envのモック/クリーンアップを確実に行うこと。既存のbeforeEachにprocess.env.WORKTREE_BASE_PATHのdelete処理を追加する必要がある点も明記すべき。"
+    },
+    {
+      "id": "D2-006",
+      "severity": "should_fix",
+      "category": "test_consistency",
+      "location": "Section 6.2 (統合テスト設計) vs tests/integration/api-clone.test.ts",
+      "description": "設計方針書Section 6.2のモック方針では「vi.mock('@/lib/env', () => ({ getEnv: () => ({ CM_ROOT_DIR: '/test/root', CM_PORT: 3000, CM_BIND: '127.0.0.1', CM_DB_PATH: '/test/db' }) }))」を指定。しかし既存の統合テストにはgetEnvのモックが存在しない。clone/route.tsにgetEnv()呼び出しを追加した場合、統合テストがgetEnv()を実際に呼び出し、CM_ROOT_DIR未設定の場合はprocess.cwd()がフォールバックとして使われる。テストの予測可能性のためにgetEnvモックの追加は必須。ただし、モック定義にCM_BINDやCM_DB_PATHまで含めているが、clone APIテストではこれらの値は直接使用されない点は冗長だが問題にはならない。",
+      "suggestion": "統合テストへのgetEnvモック追加は必須。モック定義はgetEnv()が返すEnv interfaceの全プロパティを含むべき（型安全性のため）なので、現在の設計方針書の記載は適切。"
+    },
+    {
+      "id": "D2-007",
+      "severity": "nice_to_have",
+      "category": "doc_accuracy",
+      "location": "Section 3.1 (Dependency Injection パターン)",
+      "description": "Section 3.1で「getEnv()はCM_PORT等の不要なバリデーションも実行する」と記載。env.tsのgetEnv()を確認すると、CM_PORT (isNaN/範囲チェック)、CM_BIND (値チェック)、CM_DB_PATH (validateDbPath)のバリデーションも実行される。これはDI採用の根拠として正確。getEnv()がpath.resolve(rootDir)でCM_ROOT_DIRを正規化して返す点(L234)も設計書Section 5.2と整合。",
+      "suggestion": "変更不要。記載内容は正確。"
+    },
+    {
+      "id": "D2-008",
+      "severity": "nice_to_have",
+      "category": "code_consistency",
+      "location": "Section 5.1 (パストラバーサル防止)",
+      "description": "設計方針書では「CloneManager.startCloneJob()のL303でパストラバーサル検証を実施」と記載。実際のコードを確認するとL303にisPathSafe呼び出しがあり正確。isPathSafe()の実装もSection 5.1の記述通り、path.resolve()とpath.relative()で検証しており整合性がある。",
+      "suggestion": "変更不要。記載内容は正確。"
+    },
+    {
+      "id": "D2-009",
+      "severity": "nice_to_have",
+      "category": "code_consistency",
+      "location": "Section 4.2.2 - pathモジュールのimport確認",
+      "description": "設計方針書Section 10のチェックリストで「pathモジュールのimportが必要（既にimport済みか確認）」と記載。clone-manager.tsのL15で「import path from 'path';」が確認でき、追加のimportは不要。設計書の注意喚起は適切。",
+      "suggestion": "変更不要。実装時にimport追加が不要であることを確認済み。"
+    },
+    {
+      "id": "D2-010",
+      "severity": "nice_to_have",
+      "category": "doc_accuracy",
+      "location": "Section 9 (影響範囲サマリー) - 網羅性",
+      "description": "Section 9の「変更なし」リストにsrc/components/repository/RepositoryManager.tsxが含まれている。フロントエンドコンポーネントがcloneUrlのみをPOSTし、basePath決定はサーバー側で行われるため変更不要は正確。ただし、Section 9に.env.exampleの変更が「コード変更（必須）」に含まれているが、これはコードではなく設定ファイルのドキュメント更新であり、カテゴリが若干不適切。",
+      "suggestion": "Section 9で.env.exampleを「ドキュメント変更」等の別カテゴリに分類するとより正確になる。軽微な分類の問題であり実装には影響しない。"
+    },
+    {
+      "id": "D2-011",
+      "severity": "should_fix",
+      "category": "test_consistency",
+      "location": "Section 6.1 - 既存テストとの整合性",
+      "description": "既存のclone-manager.test.tsのbeforeEachでは「cloneManager = new CloneManager(db)」とbasePath未指定で生成している。Issue #308の変更後、basePath未指定時のデフォルト値が'/tmp/repos'からprocess.cwd()に変わる。既存テストの「should use custom target path if provided (within basePath)」(L213)では'/tmp/repos/custom/target/path'をカスタムパスとして使用しているが、basePath変更後はこのテストが失敗する可能性がある（basePathがprocess.cwd()になるため、/tmp/repos配下のパスはisPathSafe()チェックに通らない）。",
+      "suggestion": "既存テストの修正計画をSection 6.1に追記すること。具体的には、(1) 既存のCloneManager(db)呼び出しにbasePath指定を追加するか、(2) process.cwd()をモックして既存テストとの互換性を維持するか、の方針を明確にすべき。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 6,
+    "nice_to_have": 4,
+    "overall_assessment": "設計方針書の内容は実際のコードベースと概ね整合しており、行番号・コード例の正確性は高い。主要な指摘はD2-001（getEnv()のpath.resolve()適用済みの明示不足）とD2-011（既存テストへの影響分析不足）である。D2-011は実装時にテストが予期せず失敗するリスクがあるため、テスト修正計画の追記を推奨する。全体的に設計方針書の品質は良好であり、条件付き承認とする。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+    "src/lib/clone-manager.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "src/app/api/repositories/clone/[jobId]/route.ts",
+    "src/lib/env.ts",
+    "src/lib/path-validator.ts",
+    "tests/unit/lib/clone-manager.test.ts",
+    "tests/integration/api-clone.test.ts",
+    "src/app/api/repositories/scan/route.ts",
+    ".env.example",
+    "server.ts"
+  ],
+  "timestamp": "2026-02-19T00:00:00Z"
+}

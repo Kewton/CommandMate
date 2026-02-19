@@ -49,6 +49,10 @@ describe('UPLOADABLE_EXTENSIONS', () => {
     expect(UPLOADABLE_EXTENSIONS).toContain('.yml');
   });
 
+  it('should include video extensions (Issue #302)', () => {
+    expect(UPLOADABLE_EXTENSIONS).toContain('.mp4');
+  });
+
   it('[SEC-002] should NOT include .svg (XSS risk)', () => {
     expect(UPLOADABLE_EXTENSIONS).not.toContain('.svg');
   });
@@ -109,8 +113,14 @@ describe('isUploadableExtension', () => {
     );
   });
 
+  describe('should accept video extensions (Issue #302)', () => {
+    it('.mp4 is uploadable', () => {
+      expect(isUploadableExtension('.mp4')).toBe(true);
+    });
+  });
+
   describe('should be case-insensitive', () => {
-    test.each(['.PNG', '.Jpg', '.JPEG', '.TXT', '.MD'])(
+    test.each(['.PNG', '.Jpg', '.JPEG', '.TXT', '.MD', '.MP4'])(
       '%s is uploadable (case-insensitive)',
       (ext) => {
         expect(isUploadableExtension(ext)).toBe(true);
@@ -193,6 +203,20 @@ describe('validateMimeType', () => {
 
     it('should accept text/yaml for .yml', () => {
       expect(validateMimeType('.yml', 'text/yaml')).toBe(true);
+    });
+  });
+
+  describe('video MIME types (Issue #302)', () => {
+    it('should accept video/mp4 for .mp4', () => {
+      expect(validateMimeType('.mp4', 'video/mp4')).toBe(true);
+    });
+
+    it('should reject video/webm for .mp4', () => {
+      expect(validateMimeType('.mp4', 'video/webm')).toBe(false);
+    });
+
+    it('should reject text/plain for .mp4', () => {
+      expect(validateMimeType('.mp4', 'text/plain')).toBe(false);
     });
   });
 
@@ -288,6 +312,36 @@ describe('[SEC-001] validateMagicBytes', () => {
     });
   });
 
+  describe('MP4 validation (Issue #302)', () => {
+    it('should accept valid MP4 magic bytes (ftyp at offset 4)', () => {
+      // MP4 files have 'ftyp' at offset 4
+      const mp4Buffer = Buffer.from([
+        0x00, 0x00, 0x00, 0x20, // box size (32 bytes)
+        0x66, 0x74, 0x79, 0x70, // 'ftyp'
+        0x69, 0x73, 0x6F, 0x6D, // 'isom' brand
+      ]);
+      expect(validateMagicBytes('.mp4', mp4Buffer)).toBe(true);
+    });
+
+    it('should reject invalid MP4 magic bytes', () => {
+      const invalidBuffer = Buffer.from([
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+      ]);
+      expect(validateMagicBytes('.mp4', invalidBuffer)).toBe(false);
+    });
+
+    it('should reject buffer too small for MP4', () => {
+      const smallBuffer = Buffer.from([0x00, 0x00, 0x00]);
+      expect(validateMagicBytes('.mp4', smallBuffer)).toBe(false);
+    });
+
+    it('should reject text content disguised as MP4', () => {
+      const textBuffer = Buffer.from('This is not a video file');
+      expect(validateMagicBytes('.mp4', textBuffer)).toBe(false);
+    });
+  });
+
   describe('text files (no magic bytes required)', () => {
     it('should skip validation for .txt', () => {
       const textBuffer = Buffer.from('Hello World');
@@ -338,6 +392,10 @@ describe('getMaxFileSize', () => {
     expect(getMaxFileSize('.png')).toBe(5 * 1024 * 1024);
     expect(getMaxFileSize('.txt')).toBe(5 * 1024 * 1024);
     expect(getMaxFileSize('.json')).toBe(5 * 1024 * 1024);
+  });
+
+  it('should return 15MB for .mp4 (Issue #302)', () => {
+    expect(getMaxFileSize('.mp4')).toBe(15 * 1024 * 1024);
   });
 
   it('should be case-insensitive', () => {

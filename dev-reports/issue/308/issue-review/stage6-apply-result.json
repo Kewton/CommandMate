@@ -1,0 +1,44 @@
+{
+  "stage": 6,
+  "issue_number": 308,
+  "iteration": 2,
+  "apply_date": "2026-02-19",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S5-001",
+        "status": "applied",
+        "change_summary": "clone APIルート修正タスクにgetEnv()のエラーハンドリング方針を追記（scan/route.tsと同様にtry-catchなし、サーバー起動時点でバリデーション済み）"
+      },
+      {
+        "id": "S5-002",
+        "status": "applied",
+        "change_summary": "影響範囲の関連コンポーネントセクションにserver.ts L83の起動時警告メッセージ（MCBD_ROOT_DIR表記をCM_ROOT_DIRに修正）を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S5-003",
+        "status": "applied",
+        "change_summary": "受入条件にWORKTREE_BASE_PATH非推奨警告の重複防止（CloneManagerの複数回インスタンス化でも初回のみ出力）を追加"
+      },
+      {
+        "id": "S5-004",
+        "status": "applied",
+        "change_summary": "対策案のCloneManagerデフォルト値改善セクションに修正後のbasePath決定ロジック優先順位を擬似コード付きで追記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/308"
+  },
+  "review_history_updated": true,
+  "note_header_updated": true
+}

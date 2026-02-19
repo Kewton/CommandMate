@@ -181,7 +181,7 @@ export function MarkdownEditor({
         exitFullscreen();
       }
     },
-    threshold: 100,
+    threshold: 150,
     enabled: isMaximized && isMobile,
   });
 
@@ -883,9 +883,7 @@ export function MarkdownEditor({
 
   // Issue #104: Use Portal for maximized mode in CSS fallback
   // This breaks out of Modal's transform stacking context
-  const usePortal = isMaximized && isFallbackMode && portalContainer;
-
-  if (usePortal) {
+  if (isMaximized && isFallbackMode && portalContainer) {
     return createPortal(editorContent, portalContainer);
   }
 

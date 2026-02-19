@@ -12,13 +12,9 @@ import { Card } from '@/components/ui';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-
-interface FileContent {
-  path: string;
-  content: string;
-  extension: string;
-  worktreePath: string;
-}
+import { FileContent } from '@/types/models';
+import { ImageViewer } from '@/components/worktree/ImageViewer';
+import { VideoViewer } from '@/components/worktree/VideoViewer';
 
 export default function FileViewerPage() {
   const router = useRouter();
@@ -136,7 +132,20 @@ export default function FileViewerPage() {
               </p>
             </div>
             <div className="p-6 sm:p-8 bg-white">
-              {isMarkdown ? (
+              {content.isVideo ? (
+                // Video rendering (Issue #302)
+                <VideoViewer
+                  src={content.content}
+                  mimeType={content.mimeType}
+                />
+              ) : content.isImage ? (
+                // Image rendering
+                <ImageViewer
+                  src={content.content}
+                  alt={content.path}
+                  mimeType={content.mimeType}
+                />
+              ) : isMarkdown ? (
                 // Markdown rendering with GitHub-like styling
                 <div className="prose prose-slate max-w-none prose-headings:font-semibold prose-h1:text-3xl prose-h1:border-b prose-h1:pb-2 prose-h2:text-2xl prose-h2:border-b prose-h2:pb-2 prose-h3:text-xl prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline prose-pre:bg-gray-100 prose-pre:border prose-pre:border-gray-200 prose-code:text-sm prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-img:rounded-lg prose-img:shadow-md">
                   <ReactMarkdown

@@ -137,6 +137,18 @@ export const CLAUDE_SEND_PROMPT_WAIT_TIMEOUT = 10000;
 export const CLAUDE_PROMPT_POLL_INTERVAL = 200;
 
 /**
+ * Maximum expected length of a shell prompt line (characters)
+ *
+ * Shell prompts are typically under 40 characters (e.g., "user@host:~/project$" ~30 chars).
+ * Lines at or above this threshold are not considered shell prompts, preventing
+ * false positives from Claude CLI output that happens to end with $, %, or #.
+ *
+ * Used by isSessionHealthy() to distinguish shell prompts from CLI output.
+ * 40 is an empirical threshold with safety margin.
+ */
+const MAX_SHELL_PROMPT_LENGTH = 40;
+
+/**
  * Cached Claude CLI path
  */
 let cachedClaudePath: string | null = null;
@@ -253,45 +265,81 @@ async function getCleanPaneOutput(sessionName: string, lines: number = 50): Prom
 // ----- Health Check Functions (Bug 2) -----
 
 /**
+ * @internal Exported for testing purposes only.
+ * Enables type-safe reason validation in unit tests.
+ */
+export interface HealthCheckResult {
+  healthy: boolean;
+  reason?: string;
+}
+
+/**
  * Verify that Claude CLI is actually running inside a tmux session
  * Detects broken sessions where tmux exists but Claude failed to start
  *
+ * @internal Exported for testing purposes only.
+ * Follows clearCachedClaudePath() precedent (L148-156).
+ *
  * @param sessionName - tmux session name
- * @returns true if Claude CLI is responsive (prompt detected or initializing)
+ * @returns HealthCheckResult with healthy status and optional reason
  */
-async function isSessionHealthy(sessionName: string): Promise<boolean> {
+export async function isSessionHealthy(sessionName: string): Promise<HealthCheckResult> {
   try {
     // SF-001: Use shared helper instead of inline capturePane + stripAnsi
     const cleanOutput = await getCleanPaneOutput(sessionName);
 
-    // MF-001: Check error patterns from cli-patterns.ts (SRP - pattern management centralized)
-    for (const pattern of CLAUDE_SESSION_ERROR_PATTERNS) {
-      if (cleanOutput.includes(pattern)) {
-        return false;
-      }
-    }
-    for (const regex of CLAUDE_SESSION_ERROR_REGEX_PATTERNS) {
-      if (regex.test(cleanOutput)) {
-        return false;
-      }
-    }
-
     // MF-002: Check shell prompt endings from extensible array (OCP)
     const trimmed = cleanOutput.trim();
+
+    // S2-F010: Empty output judgment (HealthCheckResult format)
     // C-S2-001: Empty output means tmux session exists but Claude CLI has no output.
     // This is treated as unhealthy because a properly running Claude CLI always
     // produces output (prompt, spinner, or response). An empty pane indicates
     // the CLI process has exited or failed to start.
     if (trimmed === '') {
-      return false;
-    }
-    if (SHELL_PROMPT_ENDINGS.some(ending => trimmed.endsWith(ending))) {
-      return false;
+      return { healthy: false, reason: 'empty output' };
     }
 
-    return true;
+    // S2-F010: Error pattern detection (HealthCheckResult format)
+    // MF-001: Check error patterns from cli-patterns.ts (SRP - pattern management centralized)
+    for (const pattern of CLAUDE_SESSION_ERROR_PATTERNS) {
+      if (trimmed.includes(pattern)) {
+        return { healthy: false, reason: `error pattern: ${pattern}` };
+      }
+    }
+    for (const regex of CLAUDE_SESSION_ERROR_REGEX_PATTERNS) {
+      if (regex.test(trimmed)) {
+        return { healthy: false, reason: `error pattern: ${regex.source}` };
+      }
+    }
+
+    // S2-F002: Extract last line after empty line filtering
+    const lines = trimmed.split('\n').filter(line => line.trim() !== '');
+    const lastLine = lines[lines.length - 1]?.trim() ?? '';
+
+    // F006: Line length check BEFORE SHELL_PROMPT_ENDINGS check (early return)
+    if (lastLine.length >= MAX_SHELL_PROMPT_LENGTH) {
+      // Long lines are not shell prompts -> treat as healthy (early return)
+      return { healthy: true };
+    }
+
+    // F003: Individual pattern exclusions for SHELL_PROMPT_ENDINGS
+    // NOTE(F003): If new false positive patterns are found in the future,
+    // consider refactoring to a structure that associates exclusionPattern
+    // with each SHELL_PROMPT_ENDINGS entry. Currently only % needs exclusion (YAGNI).
+    if (SHELL_PROMPT_ENDINGS.some(ending => {
+      if (!lastLine.endsWith(ending)) return false;
+      // Exclude N% pattern (e.g., "Context left until auto-compact: 7%")
+      if (ending === '%' && /\d+%$/.test(lastLine)) return false;
+      return true;
+    })) {
+      return { healthy: false, reason: `shell prompt ending detected: ${lastLine}` };
+    }
+
+    return { healthy: true };
   } catch {
-    return false;
+    // S3-F001: Catch block also returns HealthCheckResult format
+    return { healthy: false, reason: 'capture error' };
   }
 }
 
@@ -304,8 +352,9 @@ async function isSessionHealthy(sessionName: string): Promise<boolean> {
  * @returns true if session is healthy and can be reused, false if it was killed
  */
 async function ensureHealthySession(sessionName: string): Promise<boolean> {
-  const healthy = await isSessionHealthy(sessionName);
-  if (!healthy) {
+  const result = await isSessionHealthy(sessionName);
+  if (!result.healthy) {
+    console.warn(`[health-check] Session ${sessionName} unhealthy: ${result.reason}`);
     await killSession(sessionName);
     return false;
   }
@@ -423,7 +472,9 @@ export async function isClaudeRunning(worktreeId: string): Promise<boolean> {
     return false;
   }
   // MF-S3-001: Verify session health to avoid reporting broken sessions as running
-  return isSessionHealthy(sessionName);
+  // S2-F001: await + extract .healthy to maintain boolean return type
+  const result = await isSessionHealthy(sessionName);
+  return result.healthy;
 }
 
 /**

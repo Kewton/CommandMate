@@ -146,19 +146,19 @@ export async function POST(
       return createUploadErrorResponse(createErrorResult('INVALID_MIME_TYPE'));
     }
 
-    // 3. Get file content as buffer
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // 4. Magic bytes validation [SEC-001]
-    if (!validateMagicBytes(ext, buffer)) {
-      return createUploadErrorResponse(createErrorResult('INVALID_MAGIC_BYTES'));
-    }
-
-    // 5. File size validation
+    // 3. File size validation (before reading buffer for memory efficiency - Issue #302)
     const maxSize = getMaxFileSize(ext);
     if (fileSize > maxSize) {
       return createUploadErrorResponse(createErrorResult('FILE_TOO_LARGE'));
+    }
+
+    // 4. Get file content as buffer
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // 5. Magic bytes validation [SEC-001]
+    if (!validateMagicBytes(ext, buffer)) {
+      return createUploadErrorResponse(createErrorResult('INVALID_MAGIC_BYTES'));
     }
 
     // 6. Filename validation [SEC-004]

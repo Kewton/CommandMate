@@ -1,0 +1,49 @@
+{
+  "issue_number": 302,
+  "feature_summary": "mp4ファイルのアップロードとブラウザ内再生機能の追加",
+  "acceptance_criteria": [
+    "mp4ファイルをUIからアップロードできること",
+    "アップロードしたmp4ファイルがファイルツリーに表示されること",
+    "mp4ファイルをクリックするとブラウザ内で再生（プレビュー）できること（再生/停止コントロール付き）",
+    "15MBを超えるmp4ファイルのアップロードが拒否されること",
+    "不正なファイル（拡張子をmp4に偽装した非動画ファイル）がmagic bytes検証（offset 4でftypシグネチャ）で拒否されること",
+    "動画ファイル選択時にコピーボタンが表示されないこと",
+    "動画読み込み中にローディングインジケーターが表示されること",
+    "/worktrees/[id]/files/path/to/video.mp4への直接URLアクセスで動画が正しく再生されること（FileViewerPage対応）",
+    "/worktrees/[id]/files/path/to/image.pngへの直接URLアクセスで画像が正しく表示されること",
+    "既存のアップロード機能（画像、テキスト等）に影響がないこと",
+    "全既存テストがパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: mp4ファイルアップロードUI - UPLOADABLE_EXTENSIONSに.mp4が含まれていること",
+    "シナリオ2: アップロードバリデーション - 15MB超過ファイルがFILE_TOO_LARGEエラーで拒否されること",
+    "シナリオ3: magic bytes検証 - offset 4にftyp [0x66,0x74,0x79,0x70]がないファイルがINVALID_MAGIC_BYTESエラーで拒否されること",
+    "シナリオ4: ファイル取得API - mp4ファイルがisVideo:true、Base64 data URIで返却されること",
+    "シナリオ5: VideoViewerコンポーネント - src/components/worktree/VideoViewer.tsxが存在し、VideoViewerProps型、controls属性、ローディングインジケーター、エラーフォールバックが実装されていること",
+    "シナリオ6: FileViewerコンポーネント - isVideo:trueの時にVideoViewerが使われ、コピーボタンが非表示になること",
+    "シナリオ7: page.tsx型統一 - ローカルFileContent型が削除され、models.tsからimportされていること",
+    "シナリオ8: page.tsxでの動画・画像表示 - isVideo/isImageフラグに基づいてVideoViewer/ImageViewerが条件分岐で表示されること",
+    "シナリオ9: next.config.js更新 - bodySizeLimitが'16mb'でCSPにmedia-srcが含まれていること",
+    "シナリオ10: upload APIサイズ検証最適化 - file.sizeチェックがarrayBuffer()より前にあること",
+    "シナリオ11: 既存テスト継続パス - npm run test:unitとnpm run test:integrationが全てパスすること",
+    "シナリオ12: TypeScript型チェック - npx tsc --noEmitでエラー0件"
+  ],
+  "implementation_files": {
+    "new_files": [
+      "src/config/video-extensions.ts",
+      "src/components/worktree/VideoViewer.tsx",
+      "tests/unit/config/video-extensions.test.ts"
+    ],
+    "modified_files": [
+      "src/config/uploadable-extensions.ts",
+      "src/types/models.ts",
+      "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+      "src/app/worktrees/[id]/files/[...path]/page.tsx",
+      "src/components/worktree/FileViewer.tsx",
+      "next.config.js",
+      "tests/unit/config/uploadable-extensions.test.ts",
+      "tests/integration/api-file-operations.test.ts"
+    ]
+  }
+}

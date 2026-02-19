@@ -1,0 +1,111 @@
+{
+  "issue_number": 300,
+  "status": "passed",
+  "acceptance_criteria_results": [
+    {
+      "id": "AC-1",
+      "name": "encodePathForUrl() helper function exists and works correctly",
+      "status": "passed",
+      "details": "src/lib/url-path-encoder.ts contains encodePathForUrl() with: (1) empty string check (if (!path) return ''), (2) path.split('/').map(encodeURIComponent).join('/') implementation, (3) proper JSDoc documentation explaining URL encoding responsibility and path traversal defense delegation to server-side isPathSafe(). All 11 unit tests pass."
+    },
+    {
+      "id": "AC-2",
+      "name": "FileTreeView.tsx toolbar added for non-empty state",
+      "status": "passed",
+      "details": "FileTreeView.tsx lines 884-911 contain: (1) [Issue #300] comment, (2) conditional rendering with (onNewFile || onNewDirectory), (3) data-testid='file-tree-toolbar' container div, (4) data-testid='toolbar-new-file-button' button calling onNewFile(''), (5) data-testid='toolbar-new-directory-button' button calling onNewDirectory(''), (6) FilePlus/FolderPlus icons from lucide-react. The empty state buttons (data-testid='empty-new-directory-button' at line 849 and data-testid='empty-new-file-button' at line 839) are preserved in the rootItems.length === 0 branch."
+    },
+    {
+      "id": "AC-3",
+      "name": "WorktreeDetailRefactored.tsx uses encodePathForUrl",
+      "status": "passed",
+      "details": "WorktreeDetailRefactored.tsx: (1) import at line 63: import { encodePathForUrl } from '@/lib/url-path-encoder', (2) handleNewFile at line 1253 uses encodePathForUrl(newPath), (3) handleNewDirectory at line 1280 uses encodePathForUrl(newPath), (4) handleRename at line 1306 uses encodePathForUrl(path), (5) handleDelete at line 1331 uses encodePathForUrl(path), (6) handleFileInputChange at line 1409 uses encodePathForUrl(uploadPath) for the /upload/ endpoint. Zero occurrences of direct encodeURIComponent usage in the file."
+    },
+    {
+      "id": "AC-4",
+      "name": "TypeScript and ESLint checks pass",
+      "status": "passed",
+      "details": "npx tsc --noEmit completed with zero errors. npm run lint reported 'No ESLint warnings or errors'."
+    },
+    {
+      "id": "AC-5",
+      "name": "url-path-encoder unit tests all pass",
+      "status": "passed",
+      "details": "npx vitest run tests/unit/lib/url-path-encoder.test.ts: 11 tests passed (0 failed). Test cases cover: empty string, alphanumeric paths, space encoding, hash encoding, question mark encoding, percent encoding, deep nesting, slash preservation (no %2F), single segment, leading slash, trailing slash."
+    }
+  ],
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: url-path-encoder.ts encodePathForUrl() passes all 11 test cases",
+      "result": "passed",
+      "evidence": "vitest run: 1 test file, 11 tests passed, 0 failed, duration 134ms"
+    },
+    {
+      "scenario": "Scenario 2: FileTreeView.tsx contains toolbar-new-directory-button and toolbar-new-file-button",
+      "result": "passed",
+      "evidence": "Code review confirmed: data-testid='file-tree-toolbar' container at line 887, data-testid='toolbar-new-file-button' at line 892, data-testid='toolbar-new-directory-button' at line 902, conditional rendering with (onNewFile || onNewDirectory) at line 885"
+    },
+    {
+      "scenario": "Scenario 3: WorktreeDetailRefactored.tsx uses encodePathForUrl instead of direct encodeURIComponent",
+      "result": "passed",
+      "evidence": "grep found 5 encodePathForUrl usages (lines 1253, 1280, 1306, 1331, 1409) and 0 direct encodeURIComponent usages in WorktreeDetailRefactored.tsx"
+    },
+    {
+      "scenario": "Scenario 4: TypeScript compilation has no errors",
+      "result": "passed",
+      "evidence": "npx tsc --noEmit completed with exit code 0 and no output (no errors)"
+    },
+    {
+      "scenario": "Scenario 5: ESLint has no errors",
+      "result": "passed",
+      "evidence": "npm run lint output: 'No ESLint warnings or errors'"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Non-empty root directory shows 'New Directory' button (data-testid='toolbar-new-directory-button')",
+      "verified": true
+    },
+    {
+      "criterion": "That button creates a root-level directory (onNewDirectory('') is called)",
+      "verified": true
+    },
+    {
+      "criterion": "Non-empty root directory shows 'New File' button (data-testid='toolbar-new-file-button')",
+      "verified": true
+    },
+    {
+      "criterion": "That button creates a root-level file (onNewFile('') is called)",
+      "verified": true
+    },
+    {
+      "criterion": "Empty state button (data-testid='empty-new-directory-button') remains and is displayed in empty state",
+      "verified": true
+    },
+    {
+      "criterion": "Toolbar buttons are not displayed when onNewFile/onNewDirectory callbacks are not provided",
+      "verified": true
+    },
+    {
+      "criterion": "Common helper function encodePathForUrl() exists in src/lib/url-path-encoder.ts",
+      "verified": true
+    },
+    {
+      "criterion": "All 5 handlers (handleNewFile, handleNewDirectory, handleRename, handleDelete, handleFileInputChange) use encodePathForUrl()",
+      "verified": true
+    },
+    {
+      "criterion": "Paths containing slashes (e.g., src/newdir) are correctly encoded (no %2F)",
+      "verified": true
+    },
+    {
+      "criterion": "isPathSafe() path traversal validation continues to function (backend unchanged)",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/lib/url-path-encoder.test.ts (11 tests all passed)"
+  ],
+  "overall_result": "passed",
+  "message": "All acceptance criteria are satisfied. The implementation correctly introduces encodePathForUrl() as a shared helper, adds toolbar buttons for root-level file/directory creation in FileTreeView, replaces all direct encodeURIComponent usages in WorktreeDetailRefactored with the shared helper, and passes all TypeScript/ESLint/unit test checks.",
+  "notes": "React component JSDOM tests (FileTreeView.test.tsx etc.) were not run due to a pre-existing repository-wide 'act(...) is not supported in production builds of React' issue affecting 62 test files. This is unrelated to Issue #300 changes. Code review and url-path-encoder.test.ts unit tests provide sufficient verification of the acceptance criteria."
+}

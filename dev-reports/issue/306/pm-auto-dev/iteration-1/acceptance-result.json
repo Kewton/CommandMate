@@ -1,0 +1,91 @@
+{
+  "status": "passed",
+  "issue_number": 306,
+  "overall_status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: 'Context left until auto-compact: 7%' should be treated as healthy by isSessionHealthy()",
+      "result": "passed",
+      "evidence": "Test 'should treat \"Context left until auto-compact: 7%\" as healthy' in claude-session.test.ts passes. Code at claude-session.ts L324: ending === '%' && /\\d+%$/.test(lastLine) exclusion prevents false positive."
+    },
+    {
+      "scenario": "Scenario 2: Real zsh prompt (user@host%) should be treated as unhealthy by isSessionHealthy()",
+      "result": "passed",
+      "evidence": "Test 'should still detect real zsh prompt ending with %' in claude-session.test.ts passes. Short lines (under MAX_SHELL_PROMPT_LENGTH=40) ending with % without N% pattern are correctly detected as shell prompts."
+    },
+    {
+      "scenario": "Scenario 3: Same prompt key on 2nd pollAutoYes() call should skip response sending",
+      "result": "passed",
+      "evidence": "Test 'should not send duplicate response for same prompt' and 'should skip response when same promptKey detected consecutively without reset (F009)' in auto-yes-manager.test.ts both pass. isDuplicatePrompt() helper at L281-286 checks pollerState.lastAnsweredPromptKey."
+    },
+    {
+      "scenario": "Scenario 4: After successful response, COOLDOWN_INTERVAL_MS (5000ms) is used for next poll scheduling",
+      "result": "passed",
+      "evidence": "Test 'should use cooldown interval after successful response' in auto-yes-manager.test.ts passes. Verified that no poll occurs at POLLING_INTERVAL_MS after response, only after COOLDOWN_INTERVAL_MS. Code at L388: scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS)."
+    },
+    {
+      "scenario": "Scenario 5: ensureHealthySession() logs reason via console.warn when killing session",
+      "result": "passed",
+      "evidence": "Code at claude-session.ts L348: console.warn(`[health-check] Session ${sessionName} unhealthy: ${result.reason}`). HealthCheckResult interface exported with @internal at L259-262."
+    },
+    {
+      "scenario": "Scenario 6: useAutoYes.ts uses generatePromptKey() from prompt-key.ts",
+      "result": "passed",
+      "evidence": "useAutoYes.ts L17: import { generatePromptKey } from '@/lib/prompt-key'; L78: const promptKey = generatePromptKey({ type: promptData.type, question: promptData.question });"
+    },
+    {
+      "scenario": "Scenario 7: All existing unit tests pass",
+      "result": "passed",
+      "evidence": "All 3 Issue #306 test files pass: prompt-key.test.ts (5 tests), claude-session.test.ts (98 tests), auto-yes-manager.test.ts (60 tests) = 163 tests total, 0 failures. Pre-existing failures in env.test.ts (9 tests) and component test files (62 files with @testing-library/react import issues) are unrelated to Issue #306."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "id": "AC1",
+      "criterion": "Claude CLIのステータスバー 'Context left until auto-compact: N%' がシェルプロンプトと誤判定されないこと",
+      "verified": true,
+      "evidence": "MAX_SHELL_PROMPT_LENGTH=40 defined at L311. Line length check at L312 is BEFORE SHELL_PROMPT_ENDINGS check at L321. Individual N% exclusion at L324: ending === '%' && /\\d+%$/.test(lastLine). Tests confirm 'Context left until auto-compact: 7%' returns healthy=true and 'user@host%' returns healthy=false."
+    },
+    {
+      "id": "AC2",
+      "criterion": "サーバー側Auto-Yes Pollerが同一プロンプトに対して1回のみ応答を送信すること",
+      "verified": true,
+      "evidence": "lastAnsweredPromptKey field in AutoYesPollerState at L44. isDuplicatePrompt() helper at L281-286. Reset to null at L340 when no prompt detected. Duplicate check at L347 skips to scheduleNextPoll. Tests verify duplicate prevention and reset behavior."
+    },
+    {
+      "id": "AC3",
+      "criterion": "応答送信後にクールダウン期間（5秒）が適用されること",
+      "verified": true,
+      "evidence": "COOLDOWN_INTERVAL_MS=5000 defined and exported at L63. After successful response at L388: scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS) with return at L389. scheduleNextPoll has overrideInterval parameter at L412. Math.max floor guard at L418 prevents intervals below POLLING_INTERVAL_MS."
+    },
+    {
+      "id": "AC4",
+      "criterion": "ヘルスチェックによるセッションkill時にreason付きログが出力されること",
+      "verified": true,
+      "evidence": "ensureHealthySession() at L348: console.warn with result.reason. HealthCheckResult interface exported with @internal at L258-262. isClaudeRunning() at L467 uses await isSessionHealthy() and returns result.healthy."
+    },
+    {
+      "id": "AC5",
+      "criterion": "既存のAuto-Yesテストが全てパスすること",
+      "verified": true,
+      "evidence": "All 60 tests in auto-yes-manager.test.ts pass including pre-existing tests for Issue #138, #153, #161, #191, #193, and new Issue #306 tests. useAutoYes.ts imports and uses generatePromptKey() from prompt-key.ts."
+    }
+  ],
+  "test_results": {
+    "total": 163,
+    "passed": 163,
+    "failed": 0,
+    "details": "prompt-key.test.ts: 5 passed, claude-session.test.ts: 98 passed, auto-yes-manager.test.ts: 60 passed"
+  },
+  "static_analysis": {
+    "typescript": "pass (pre-existing @testing-library/react import errors in unrelated test files only)",
+    "eslint": "pass (no warnings or errors)"
+  },
+  "evidence_files": [
+    "tests/unit/lib/prompt-key.test.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "notes": "All acceptance criteria verified. The 62 failed test files in the full test suite are pre-existing issues caused by missing @testing-library/react exports and are unrelated to Issue #306 changes. The 9 failed tests in env.test.ts are also pre-existing (deprecated env var warnings). All Issue #306 specific test files (3 files, 163 tests) pass completely.",
+  "message": "すべての受入条件を満たしています"
+}

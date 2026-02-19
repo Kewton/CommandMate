@@ -1,0 +1,63 @@
+{
+  "stage": 3,
+  "issue_number": 308,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["D3-001", "D3-002", "D3-003", "D3-004", "D3-005"],
+  "skipped_findings": ["D3-006", "D3-007", "D3-008"],
+  "skip_reasons": {
+    "D3-006": "Nice to Have - CM_ROOT_DIR未設定時のフォールバック注意喚起はREADME/.env.exampleの改善であり、設計方針書のスコープ外",
+    "D3-007": "Nice to Have - worktrees.tsのスキャン対象統一効果の記載は改善だが必須ではない",
+    "D3-008": "Nice to Have - beforeEachでのresetWorktreeBasePathWarning()呼び出しはD2-005/Section 6.1で既にカバー済み"
+  },
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "D3-001",
+        "item": "Section 6.2の統合テスト設計にgetEnvモックの詳細（両route.tsへの影響、モック定義例）を追記",
+        "sections_updated": ["Section 6.2", "Section 10 (実装チェックリスト)"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "D3-002",
+        "item": "Section 9にDBレコード（createRepository経由のtargetPath）への間接的影響を追記",
+        "sections_updated": ["Section 9", "Section 10 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "D3-003",
+        "item": "Section 9のapi-clone.test.ts説明を拡充（POST/GET両方への影響を明記）",
+        "sections_updated": ["Section 9", "Section 10 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "D3-004",
+        "item": "非推奨警告メッセージを具体的なアクション（.envファイル設定）を含む形式に変更",
+        "sections_updated": ["Section 3.2", "Section 4.2.2", "Section 10 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "D3-005",
+        "item": "Section 7にgetEnv()毎リクエスト呼び出しの設計根拠を追記",
+        "sections_updated": ["Section 7", "Section 10 (実装チェックリスト)"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "design_doc_path": "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+  "sections_updated": [
+    "Section 1.1 (レビュー履歴テーブル - Stage 3行追加)",
+    "レビュー指摘事項サマリー（Stage 3）新規追加",
+    "Section 3.2 (非推奨警告メッセージ更新 - D3-004)",
+    "Section 4.2.2 (resolveDefaultBasePath()内の警告メッセージ更新 - D3-004)",
+    "Section 6.2 (統合テストモック方針の大幅拡充 - D3-001)",
+    "Section 7 (getEnv()毎リクエスト呼び出しの設計根拠行追加 - D3-005)",
+    "Section 9 (テスト変更セクションのapi-clone.test.ts説明拡充 - D3-003)",
+    "Section 9 (変更なしセクションにDBレコード影響追記 - D3-002)",
+    "Section 10 (実装チェックリストにD3-001~D3-005追加)"
+  ],
+  "summary": "Stage 3影響分析レビューの全5件（Must Fix 1件、Should Fix 4件）を設計方針書に反映完了。D3-001: 統合テストのgetEnvモック詳細（両route.tsへの影響、モック定義例、POST/GET各テストでの検証内容）をSection 6.2に大幅追記。D3-002: DBレコードへの間接的影響（onCloneSuccess経由のtargetPath変更）をSection 9に追記。D3-003: api-clone.test.tsの説明をPOST/GET両方への影響を含む形に拡充。D3-004: 非推奨警告メッセージを'.env file'への具体的移行アクションを含む形式に変更（Section 3.2, 4.2.2の全コード例を更新）。D3-005: getEnv()毎リクエスト呼び出しの設計根拠（scan/route.ts同一パターン、性能影響無視可能、動的変更追従）をSection 7に追記。Nice to Have 3件（D3-006~D3-008）はスキップ。",
+  "timestamp": "2026-02-19T12:30:00Z"
+}

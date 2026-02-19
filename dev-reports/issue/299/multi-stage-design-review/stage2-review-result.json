@@ -1,0 +1,176 @@
+{
+  "review_stage": "stage2",
+  "focus_area": "整合性",
+  "issue_number": 299,
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "category": "コード整合",
+      "location": "設計方針書 3.1 [F007対応] Modal(z-50)変更後のz-index競合分析",
+      "issue": "設計方針書ではToastが「Z_INDEX.TOAST=60で管理」と記載しているが、実際のToast.tsx (L205)ではz-50をハードコードしており、Z_INDEX.TOASTを使用していない。同様にContextMenu.tsx (L228)もz-50をハードコードしており、Z_INDEX.CONTEXT_MENU=70を使用していない。競合分析の前提「Toast(Z_INDEX.TOAST=60)がModal(50)より上に表示される」は実装と不整合であり、Modal.tsxをz-50に変更した場合、ToastがModal背後に隠れるリスクがある。",
+      "suggestion": "競合分析セクションを実際の実装に合わせて修正する。具体的には、(1) Toast.tsxのz-50ハードコードの事実を記載し、Modal(z-50)と同値になることを明記、(2) createPortalのDOM順序でToastがModal上に表示される保証がない場合の対策を検討、(3) Issue #299のスコープとしてToast.tsxのZ_INDEX.TOAST統一を含めるか、競合が問題ないことの根拠を補強する。"
+    },
+    {
+      "id": "F002",
+      "severity": "should_fix",
+      "category": "コード整合",
+      "location": "設計方針書 3.1 [F007対応] z-50/z-40ハードコードコンポーネント一覧",
+      "issue": "z-50をハードコードしているコンポーネントの一覧が不完全。設計方針書にはAppShell.tsx (drawer)、MobileHeader.tsx、MobileTabBar.tsx、Toast、SlashCommandSelectorの5つが記載されているが、実際にはさらに以下がz-50をハードコードしている: SortSelector.tsx (L142)、MobilePromptSheet.tsx (L148, L164)、Header.tsx (L25)、WorktreeDetailRefactored.tsx (L1819)、ContextMenu.tsx (L228)。網羅性が不足しており、競合分析の信頼性に影響する。",
+      "suggestion": "z-50ハードコードコンポーネント一覧を網羅的に更新する。特にHeader.tsx (sticky header z-50)とMobilePromptSheet.tsx (fixed overlay z-50)はModal表示時に表示順序の競合が懸念されるため、createPortalのDOM順序による表示保証の分析を追加する。"
+    },
+    {
+      "id": "F003",
+      "severity": "should_fix",
+      "category": "コード整合",
+      "location": "設計方針書 3.1 z-index.ts変更内容",
+      "issue": "設計方針書では「z-index.ts JSDocコメントの修正のみ」と記載し、提示されたコード例でMAXIMIZED_EDITORのコメントを「Maximized editor overlay - above Modal for iPad fullscreen support」としている。しかし、現在の実装(z-index.ts L34)では既にそのコメントが存在している。つまり設計方針書が記載する「MAXIMIZED_EDITORコメント修正」は既に反映済みの可能性が高く、変更不要である。",
+      "suggestion": "現在のz-index.tsのMAXIMIZED_EDITORコメント(L34)を確認し、設計方針書の「変更前→変更後」を明確にする。既に目的のコメントが存在するなら、変更ファイル一覧とチェックリストから該当項目を除外するか、「確認のみ」に変更する。"
+    },
+    {
+      "id": "F004",
+      "severity": "should_fix",
+      "category": "コード整合",
+      "location": "設計方針書 3.1 JSDocコメント修正",
+      "issue": "設計方針書のJSDoc修正案ではレイヤー5を「Maximized editor overlay (55)」としているが、現在のz-index.ts (L18)のJSDocにはMAXIMIZED_EDITORがレイヤー一覧に含まれていない(Layer 4がModal(9999)で終わり、5がToast(60)、6がContext menus(70))。設計方針書の修正案はレイヤー番号を5としてMAXIMIZED_EDITORを追加しているが、既存のLayer 5(Toast)、Layer 6(Context menus)との番号ずれが生じる。",
+      "suggestion": "JSDocコメント修正案を現在の実装の番号体系と照合し、Layer 4をModal(50)に修正するだけでなく、Layer 5にMAXIMIZED_EDITOR(55)を挿入し、既存のLayer 5(Toast)をLayer 6に、Layer 6(Context menus)をLayer 7に繰り上げた完全な修正案を提示する。"
+    },
+    {
+      "id": "F005",
+      "severity": "nice_to_have",
+      "category": "テスト整合",
+      "location": "設計方針書 9. テスト戦略 - E2Eテスト",
+      "issue": "設計方針書では「Playwright device emulationでiPad viewportでのレイアウト確認」を記載しているが、現在のplaywright.config.ts (L17-26)にはDesktop ChromeとiPhone 13の2プロジェクトのみが定義されており、iPadデバイスプロファイルが含まれていない。E2Eテスト実施にはplaywright.config.tsへのiPadプロジェクト追加が必要になる。",
+      "suggestion": "設計方針書のテスト戦略セクションに、playwright.config.tsへのiPadプロジェクト追加(例: devices['iPad Pro 11'])が実装Phase 4の前提作業として必要であることを明記する。"
+    },
+    {
+      "id": "F006",
+      "severity": "nice_to_have",
+      "category": "テスト整合",
+      "location": "設計方針書 9. テスト戦略 - ユニットテスト",
+      "issue": "設計方針書では「useSwipeGesture: scrollable要素内でのスワイプ抑制テスト(既存更新)」と記載しているが、既存のuseSwipeGesture.test.ts (179行)は基本的なフック初期化とオプション設定のテストのみで、実際のタッチイベントシミュレーションテストは含まれていない。isInsideScrollableElement関数のDOM走査テストを追加するには、テストファイルの構造を大幅に拡張する必要がある。",
+      "suggestion": "設計方針書に、useSwipeGestureテスト更新の具体的な手法(DOMモック設定、getComputedStyleモック、scrollHeight/clientHeight制御方法)を補足として追加する。"
+    },
+    {
+      "id": "F007",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "location": "設計方針書 3.3 スワイプ/スクロール分離 - handleTouchStart実装例",
+      "issue": "設計方針書のhandleTouchStart実装例ではuseCallbackの依存配列に[enabled]のみを記載しているが、isInsideScrollableElement関数をtouchstart内で呼び出す場合、e.targetのHTMLElement型チェックが必要となる。現在の実装(useSwipeGesture.ts L104-110)のhandleTouchStartシグネチャはCallback((e: TouchEvent)で、TouchEventのtargetはEventTarget | nullであり、HTMLElementへの型ガードが正しい。設計方針書の実装例は型的に正しいが、TypeScript strictモードでe.target instanceof HTMLElementの型ガードが必要であることが暗黙的であり、明示的に説明があるとよい。",
+      "suggestion": "小さな指摘だが、設計方針書の実装例コメントに「TouchEvent.targetはEventTarget型のため、HTMLElementの型ガードが必要」と注記を追加する。"
+    },
+    {
+      "id": "F008",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "location": "設計方針書 11. 実装順序",
+      "issue": "Phase 3でSearchBar.tsxのMOBILE_BREAKPOINT使用が「iPadレスポンシブ対応」カテゴリに含まれているが、この変更はiPad固有の問題ではなく、マジックナンバー統一の汎用的な改善である。分類としては独立した小修正の方が適切。",
+      "suggestion": "実装順序の観点では問題ないが、SearchBar.tsx変更の目的が「iPadレスポンシブ対応」ではなく「定数統一」であることをPhase 3の説明に補足する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 4,
+    "overall_quality": "medium"
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "Z_INDEX定数値 (MODAL:50, MAXIMIZED_EDITOR:55)",
+      "design_description": "MODAL=50, MAXIMIZED_EDITOR=55の既存値を維持",
+      "implementation_status": "一致",
+      "gap": "なし。z-index.ts L30: MODAL=50, L35: MAXIMIZED_EDITOR=55で設計方針書と一致。"
+    },
+    {
+      "design_item": "Modal.tsx z-[9999]ハードコード",
+      "design_description": "z-[9999]をstyle={{ zIndex: Z_INDEX.MODAL }}に置換",
+      "implementation_status": "未実装(現状確認一致)",
+      "gap": "なし。Modal.tsx L86でz-[9999]が存在しており、設計方針書の「現状」記述と一致。"
+    },
+    {
+      "design_item": "MOBILE_BREAKPOINT export",
+      "design_description": "useIsMobile.tsからMOBILE_BREAKPOINTをexport",
+      "implementation_status": "一致",
+      "gap": "なし。useIsMobile.ts L15: export const MOBILE_BREAKPOINT = 768; が存在。"
+    },
+    {
+      "design_item": "SearchBar.tsx 768ハードコード",
+      "design_description": "window.innerWidth < 768をMOBILE_BREAKPOINTに置換",
+      "implementation_status": "未実装(現状確認一致)",
+      "gap": "なし。SearchBar.tsx L158: window.innerWidth < 768がハードコードされており、設計方針書の「現状」記述と一致。"
+    },
+    {
+      "design_item": "Toast z-index管理",
+      "design_description": "競合分析で「Z_INDEX.TOAST=60で管理」と記載",
+      "implementation_status": "不整合",
+      "gap": "Toast.tsx L205はz-50ハードコード。Z_INDEX.TOASTを使用していない。競合分析の前提が実装と不一致。"
+    },
+    {
+      "design_item": "ContextMenu z-index管理",
+      "design_description": "z-index.tsにCONTEXT_MENU=70を定義",
+      "implementation_status": "不整合",
+      "gap": "ContextMenu.tsx L228はz-50ハードコード。Z_INDEX.CONTEXT_MENUを使用していない。"
+    },
+    {
+      "design_item": "isInsideScrollableElement実装",
+      "design_description": "overflowY + scrollHeight > clientHeight判定",
+      "implementation_status": "統合可能",
+      "gap": "なし。useSwipeGesture.ts現在の実装にはscrollable判定がなく、handleTouchStart (L104-110)に追加可能。"
+    },
+    {
+      "design_item": "swipe threshold 100→150",
+      "design_description": "MarkdownEditor.tsxのthresholdを150に引き上げ",
+      "implementation_status": "未実装(現状確認一致)",
+      "gap": "なし。MarkdownEditor.tsx L184: threshold: 100が現在値。"
+    },
+    {
+      "design_item": "body.style.overflow='hidden'",
+      "design_description": "Modal表示時にbody scrollを抑制",
+      "implementation_status": "一致",
+      "gap": "なし。Modal.tsx L64: document.body.style.overflow = 'hidden'が存在。"
+    },
+    {
+      "design_item": "createPortal使用",
+      "design_description": "Modal.tsxがcreatePortalでdocument.bodyに配置",
+      "implementation_status": "一致",
+      "gap": "なし。Modal.tsx L85, L131: createPortal(..., document.body)が存在。"
+    },
+    {
+      "design_item": "Playwright iPad device emulation",
+      "design_description": "E2Eテストでdevice emulationを利用",
+      "implementation_status": "要追加",
+      "gap": "playwright.config.tsにはDesktop ChromeとiPhone 13のみ。iPadプロファイルの追加が必要。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-299-ipad-layout-fix-design-policy.md",
+    "src/config/z-index.ts",
+    "src/components/ui/Modal.tsx",
+    "src/hooks/useSwipeGesture.ts",
+    "src/hooks/useIsMobile.ts",
+    "src/components/worktree/SearchBar.tsx",
+    "src/components/layout/AppShell.tsx",
+    "src/components/worktree/WorktreeDesktopLayout.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/common/Toast.tsx",
+    "src/components/worktree/ContextMenu.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/mobile/MobileHeader.tsx",
+    "src/components/mobile/MobileTabBar.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/components/layout/Header.tsx",
+    "src/components/sidebar/SortSelector.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/hooks/useSwipeGesture.test.ts",
+    "tests/unit/hooks/useIsMobile.test.ts",
+    "playwright.config.ts"
+  ],
+  "timestamp": "2026-02-18T00:00:00Z"
+}

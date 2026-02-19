@@ -1,0 +1,115 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "issue_number": 306,
+  "timestamp": "2026-02-18T14:00:00Z",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S2-F001",
+      "severity": "must_fix",
+      "category": "設計-実装整合性",
+      "title": "isClaudeRunning()の現在の戻り値がisSessionHealthy()のboolean戻り値に直接依存しており、設計書のHealthCheckResult拡張との整合に注意が必要",
+      "description": "設計方針書セクション3.1では、isClaudeRunning()がisSessionHealthy()から返されるHealthCheckResult.healthyを取り出す設計（result.healthy）を示している。しかし現在の実装（claude-session.ts L426）では`return isSessionHealthy(sessionName);`と直接boolean戻り値を返している。設計書のコード例では`const result = isSessionHealthy(sessionName);`と一旦変数に格納し`return result.healthy;`で取り出す形だが、現在の実装には`await`が欠落している。設計書コード例のL96-97も同様に`const result = isSessionHealthy(sessionName);`でawaitが記載されていない。実際のisSessionHealthy()はasync関数（内部でgetCleanPaneOutput()をawaitする）であるため、awaitなしではPromise<HealthCheckResult>がresultに入り、`.healthy`アクセスが意図通りに動作しない。",
+      "suggestion": "設計方針書セクション3.1のisClaudeRunning()コード例を`const result = await isSessionHealthy(sessionName);`に修正する。ensureHealthySession()のコード例も同様。現在の実装側は`return isSessionHealthy(sessionName)`が正しくawaitされている（async関数のreturn文でPromiseが自動的にunwrapされる）ため動作上問題ないが、設計書の変更後コード例ではresult変数を取り出す形になるためawaitが必須。この不整合は実装時のバグを誘発する可能性がある。"
+    },
+    {
+      "id": "S2-F002",
+      "severity": "should_fix",
+      "category": "設計-実装整合性",
+      "title": "isSessionHealthy()がtrimmed全体のendsWith()を使用しているが、設計書は最終行ベースの判定に変更する",
+      "description": "現在の実装（claude-session.ts L288）では`SHELL_PROMPT_ENDINGS.some(ending => trimmed.endsWith(ending))`でtrimmed出力全体の末尾文字をチェックしている。設計方針書セクション3.2では、空行をフィルタリングした上で最終行を抽出し、その最終行に対して行長チェックとSHELL_PROMPT_ENDINGSチェックを適用する設計に変更している。この変更は意味的に異なる：trimmed全体のendsWith()は最終行が空行でない場合にtrimmed全体末尾と等しくなるため通常は同等だが、設計書のアプローチは空行フィルタリングを明示的に行う点でより堅牢である。設計書と実装の差異は把握されているが、実装時にtrimmed.endsWith()から最終行ベースへの切り替え漏れが生じないよう明確にすべきである。",
+      "suggestion": "設計書の「変更前/変更後」の比較を明示的にセクション3.2に追加し、「現在の実装ではtrimmed.endsWith()を使用しているが、変更後はlastLine.endsWith()に変更する」と記載する。これにより実装者が変更箇所を見落とすリスクを低減できる。"
+    },
+    {
+      "id": "S2-F003",
+      "severity": "should_fix",
+      "category": "設計-実装整合性",
+      "title": "AutoYesPollerState初期化コードにlastAnsweredPromptKeyフィールドが不足する記載漏れ",
+      "description": "設計方針書セクション3.3でAutoYesPollerStateにlastAnsweredPromptKeyフィールドを追加する設計だが、startAutoYesPolling()内の初期化オブジェクト（auto-yes-manager.ts L414-420）にこのフィールドの初期値（null）を追加する必要がある。設計書セクション9の変更対象ファイル一覧には「startAutoYesPolling()初期化修正」と記載があるが、具体的な初期化コード例が設計書内に示されていない。",
+      "suggestion": "設計方針書セクション3.3に、startAutoYesPolling()での初期化コード例を追加する。例: `const pollerState: AutoYesPollerState = { ...既存フィールド, lastAnsweredPromptKey: null };`。あるいはセクション9の変更内容説明を「startAutoYesPolling()で初期オブジェクトにlastAnsweredPromptKey: nullを追加」と具体化する。"
+    },
+    {
+      "id": "S2-F004",
+      "severity": "should_fix",
+      "category": "設計内部整合性",
+      "title": "scheduleNextPoll()のシグネチャ変更が設計書セクション3.3のコード例と3.4の定義で重複的に記述されている",
+      "description": "設計方針書セクション3.3のコード例では`scheduleNextPoll(worktreeId, cliToolId)`を既存シグネチャで呼び出しており、セクション3.4で初めてoverrideIntervalパラメータ追加が提示されている。一方、セクション3.4のパターンB（クールダウン）では`scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS)`が示されている。問題は、セクション3.3の「応答送信後に記録」のコード例にはクールダウン呼び出しが含まれておらず、セクション3.4との間でpollAutoYes()内の完全な処理フローが分断されている点である。実装者がセクション3.3のコード例だけを参照すると、応答送信後のクールダウンを見落とす可能性がある。",
+      "suggestion": "セクション3.3の「応答送信後に記録」コード例の直後に、クールダウンパターン（セクション3.4参照）への相互参照コメントを追加する。例: `// 応答送信成功後はクールダウン間隔で次回ポーリング（セクション3.4参照）`、`scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS); return;`。"
+    },
+    {
+      "id": "S2-F005",
+      "severity": "should_fix",
+      "category": "設計-実装整合性",
+      "title": "pollAutoYes()の現在のフロー末尾にあるscheduleNextPoll()呼び出しとクールダウンearly returnの共存設計",
+      "description": "現在のpollAutoYes()実装（auto-yes-manager.ts L368）では、try-catchブロック後に無条件で`scheduleNextPoll(worktreeId, cliToolId)`が呼び出される。設計書セクション3.4パターンBでは、応答送信成功後にearly returnして関数末尾のscheduleNextPoll()に到達させない設計となっている。しかし、現在の実装ではtry内のステップ5-7の後にreturnがなく、try-catch後のL368でscheduleNextPoll()が実行される。設計変更では、応答送信成功後のパスにearly return + COOLDOWN_INTERVAL_MS指定のscheduleNextPoll()を挿入し、既存のL368のscheduleNextPoll()はthinking中やプロンプト非検出時に使用される。この構造変更はpollAutoYes()の制御フローの大きな変更であり、設計書で「catchブロック/共通パス」でのscheduleNextPoll()との関係を明確にすべきである。",
+      "suggestion": "設計方針書にpollAutoYes()の変更後の完全な制御フロー図またはコード例を追加する。特に、(1)応答送信成功->early return with COOLDOWN、(2)thinking/非検出/応答不可->通常パスのscheduleNextPoll()、(3)catchブロック->incrementErrorCount+scheduleNextPoll()、の3つの経路を明示する。現在のcatchブロック後のL368のscheduleNextPoll()が、応答成功時にはearly returnで到達しない点を図示すると実装者に分かりやすい。"
+    },
+    {
+      "id": "S2-F006",
+      "severity": "nice_to_have",
+      "category": "パターン整合性",
+      "title": "clearCachedClaudePath()の@internalパターンとisSessionHealthy()の@internalパターンの命名規則整合性",
+      "description": "設計方針書では、isSessionHealthy()とHealthCheckResultを@internal exportするパターンを、clearCachedClaudePath()の先例（claude-session.ts L148-156）に倣うとしている。clearCachedClaudePath()のJSDocコメント（L148-152）では`@internal Exported for testing purposes only.`と記載されており、`version-checker.ts resetCacheForTesting()`との一貫性にも言及している。設計書のisSessionHealthy()のJSDoc例（L128-130）でも同様のフォーマットが使用されており、パターンは整合している。ただし、clearCachedClaudePath()は「also called in production code (catch block)」のため純粋なテスト用ではないが、isSessionHealthy()はensureHealthySession()やisClaudeRunning()から本番コードで呼び出されるためexportの必要性自体はテスト用に限定される。この差異は@internalの使い方として正確であり問題はない。",
+      "suggestion": "現状の設計で問題ない。@internalの使い分け（テスト用export vs テスト+本番用export）について、将来的にJSDocで`@internal - production callers are within this module`のような補足を追加すると、より明確になる。"
+    },
+    {
+      "id": "S2-F007",
+      "severity": "nice_to_have",
+      "category": "設計-実装整合性",
+      "title": "useAutoYes.tsの既存重複防止メカニズムとpollAutoYes()の新規重複防止の対称性が高い",
+      "description": "useAutoYes.ts（L55-78）では`lastAutoRespondedRef`をRefで管理し、`!isPromptWaiting`時にnullリセットする。設計書の`lastAnsweredPromptKey`は`AutoYesPollerState`のフィールドとして管理し、`!promptDetection.isPrompt`時にnullリセットする。両者の対称性は高く、リセット条件も論理的に等価（クライアント側の`isPromptWaiting=false`はサーバー側の`promptDetection.isPrompt=false`に相当）。F002対応でpromptKey生成を共通化することで、キー生成ロジックの整合性も確保される。",
+      "suggestion": "現状の設計で問題ない。useAutoYes.tsとpollAutoYes()の対称性は良好。ただし、useAutoYes.tsの既存コード（L77: `const promptKey = ...`）をgeneratePromptKey()に置換する変更が、設計書セクション9には記載されているがセクション3.3のコード例内には明示されていない。実装時の見落とし防止のため、セクション3.3のuseAutoYes.ts使用箇所にコード例を追加するとよい。"
+    },
+    {
+      "id": "S2-F008",
+      "severity": "nice_to_have",
+      "category": "設計内部整合性",
+      "title": "テスト設計セクション6.2のimport文で`isSessionHealthy`がnamed exportとして参照されているが、現在は非export",
+      "description": "設計方針書セクション6.2のコード例（L434）に`import { isSessionHealthy, type HealthCheckResult } from '@/lib/claude-session';`と記載されている。これは設計変更後の状態を前提としたものであり、現在の実装ではisSessionHealthy()はexportされていない。設計書内部の整合性としては正しい（セクション3.1で@internal export化する設計のため）。既存テスト（claude-session.test.ts）のimport文（L49-67）にはisSessionHealthyは含まれておらず、設計変更後に追加が必要。設計書のテスト設計は変更後の状態を正しく記載している。",
+      "suggestion": "現状の設計で問題ない。テスト設計と@internal export設計は整合している。"
+    },
+    {
+      "id": "S2-F009",
+      "severity": "nice_to_have",
+      "category": "設計内部整合性",
+      "title": "実装順序（セクション8）のステップ3がisClaudeRunning()の修正としてawait追加を暗示するが明示的でない",
+      "description": "セクション8のステップ3「対策4続き: isClaudeRunning() + ensureHealthySession()の修正」は、これらの関数がisSessionHealthy()の新しいHealthCheckResult戻り値に対応する変更を意味する。isClaudeRunning()の現在の実装（L426）は`return isSessionHealthy(sessionName);`であり、変更後は`const result = await isSessionHealthy(sessionName); return result.healthy;`になる。この変更はawait追加と`.healthy`アクセスの2つの変更を含むが、セクション8では「修正」としか記載されていない。",
+      "suggestion": "セクション8のステップ3に「isClaudeRunning()でawait + .healthy取り出し、ensureHealthySession()でawait + .healthy/.reason使用」と具体的な変更内容を追記すると、実装者にとって分かりやすい。"
+    },
+    {
+      "id": "S2-F010",
+      "severity": "must_fix",
+      "category": "設計-実装整合性",
+      "title": "設計書コード例のisSessionHealthy()がempty output判定でHealthCheckResultのreasonを返していない",
+      "description": "設計方針書セクション3.2のコード例では最終行抽出と行長チェックのみが示されており、empty output（trimmed === ''）のケースでのHealthCheckResult返却が記載されていない。しかし、現在の実装（L285-287）にはempty outputの判定が存在し、セクション6.2のテスト設計（L445-447）では`reason: \"empty output\"`の検証が含まれている。セクション3.1-3.2のコード例で、empty output判定がHealthCheckResult形式に更新されていない。テスト設計（6.2）はreason付きを期待しているため、コード例との間に不整合がある。",
+      "suggestion": "セクション3.2のコード例の冒頭（最終行抽出の前）に、empty output判定のHealthCheckResult版を追加する。例: `if (trimmed === '') { return { healthy: false, reason: 'empty output' }; }`。同様に、エラーパターン検出のコード例もHealthCheckResult版（`return { healthy: false, reason: 'error pattern: ...' }`）をセクション3.1または3.2に追加する。これにより、テスト設計セクション6.2との整合性が確保される。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "overall_quality": "high"
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-306-session-stability-design-policy.md",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/hooks/useAutoYes.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/cli-session.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-patterns.ts",
+    "src/types/models.ts",
+    "tests/unit/lib/claude-session.test.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ]
+}

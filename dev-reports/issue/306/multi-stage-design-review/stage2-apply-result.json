@@ -1,0 +1,92 @@
+{
+  "issue_number": 306,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "S2-F001",
+        "item": "isClaudeRunning()コード例のawait欠落修正",
+        "section_updated": "3.1",
+        "status": "reflected"
+      },
+      {
+        "id": "S2-F010",
+        "item": "empty output/error patternのHealthCheckResult形式コード例追加",
+        "section_updated": "3.2",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S2-F002",
+        "item": "trimmed.endsWith()からlastLine.endsWith()への変更の明示、変更前/変更後比較テーブル追加",
+        "section_updated": "3.2",
+        "status": "reflected"
+      },
+      {
+        "id": "S2-F003",
+        "item": "startAutoYesPolling()初期化コードのlastAnsweredPromptKey追加、useAutoYes.tsのgeneratePromptKey置換コード例追加",
+        "section_updated": "3.3",
+        "status": "reflected"
+      },
+      {
+        "id": "S2-F004",
+        "item": "セクション3.3-3.4間のクールダウン相互参照追加",
+        "section_updated": "3.3",
+        "status": "reflected"
+      },
+      {
+        "id": "S2-F005",
+        "item": "pollAutoYes()の変更後制御フロー図追加（3経路明示）",
+        "section_updated": "3.4",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S2-F006",
+        "item": "@internalパターンの命名規則整合性確認",
+        "section_updated": "3.1",
+        "status": "confirmed_no_change_needed"
+      },
+      {
+        "id": "S2-F007",
+        "item": "useAutoYes.tsのgeneratePromptKey置換コード例追加",
+        "section_updated": "3.3",
+        "status": "reflected"
+      },
+      {
+        "id": "S2-F008",
+        "item": "テスト設計のimport文とexport設計の整合性確認",
+        "section_updated": "6.2",
+        "status": "confirmed_no_change_needed"
+      },
+      {
+        "id": "S2-F009",
+        "item": "実装順序ステップ3の具体性向上、scheduleNextPollのoverrideInterval型定義明記",
+        "section_updated": "8, 3.4",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "applied_findings": ["S2-F001", "S2-F010", "S2-F002", "S2-F003", "S2-F004", "S2-F005", "S2-F006", "S2-F007", "S2-F008", "S2-F009"],
+  "skipped_findings": [],
+  "changes_summary": "Stage 2整合性レビューの全10件の指摘事項を設計方針書に反映。Must Fix 2件（await欠落修正、HealthCheckResult形式コード例追加）、Should Fix 4件（trimmed->lastLine変更の明示化、初期化コード追加、クールダウン相互参照、制御フロー図追加）、Nice to Have 4件（うち2件は確認済み変更不要、2件は明示化改善）。",
+  "design_doc_path": "dev-reports/design/issue-306-session-stability-design-policy.md",
+  "sections_updated": [
+    "3.1 HealthCheckResult - 構造化戻り値パターン",
+    "3.2 多段防御パターン",
+    "3.3 重複応答防止パターン",
+    "3.4 クールダウンパターン",
+    "8 実装順序",
+    "10 レビュー履歴",
+    "11b レビュー指摘事項サマリー（Stage 2）",
+    "12 実装チェックリスト"
+  ],
+  "design_doc_updated": true,
+  "timestamp": "2026-02-18T14:30:00Z"
+}

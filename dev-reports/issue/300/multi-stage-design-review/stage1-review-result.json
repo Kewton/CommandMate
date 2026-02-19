@@ -1,0 +1,62 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "issue_number": 300,
+  "review_date": "2026-02-18",
+  "review_summary": "設計方針書は全体として高品質であり、SOLID/KISS/YAGNI/DRY原則に概ね準拠している。encodePathForUrlの新規ファイル分離はSRP準拠の良い判断であり、ツールバーのFileTreeView内部配置もモバイル自動対応の観点から合理的である。must_fix事項はないが、DRY原則に関して空状態ボタンとツールバーボタンのイベントハンドラ共通化の機会、およびセキュリティ記述に関する補足が推奨される。encodePathForUrlのエッジケース（連続スラッシュ、先頭/末尾スラッシュ）に対する設計上の考慮も明記されると望ましい。",
+  "findings": [
+    {
+      "id": "SF-1",
+      "severity": "should_fix",
+      "category": "DRY原則",
+      "issue": "空状態ボタンとツールバーボタンのJSX構造が重複する設計になっている。設計方針書のSection 3.1に記載された非空状態ツールバーのボタン（FilePlus/FolderPlus + テキスト + onClickハンドラ）と、既存の空状態ボタン（L837-L858）は、アイコン・テキスト・コールバック呼び出しパターンが同一である。Option Aの採用理由（レイアウト差異）は妥当だが、ボタン自体を共通化するサブコンポーネント（例: CreateItemButton）の抽出が検討されていない。",
+      "location": "設計方針書 Section 3.1 UI配置 / 実装方針",
+      "recommendation": "ボタンのJSXを共通化するヘルパーコンポーネントまたはrenderヘルパー関数の抽出を検討する。スタイリング差異（text-xs vs text-sm、py-1 vs py-2等）はprops経由で制御可能。ただし、差異が小さいため現行設計でも許容範囲内であり、将来的なリファクタリング候補として記録する程度で良い。"
+    },
+    {
+      "id": "SF-2",
+      "severity": "should_fix",
+      "category": "セキュリティ設計",
+      "issue": "encodePathForUrlのセキュリティ考慮事項（Section 6）において、encodeURIComponentが '..'をエンコードしないことが記載されているが、これは正確ではない。encodeURIComponent('..') は '..' を返す（ドットはRFC 3986のunreserved characterであるため）。設計書の記述 'encodeURIComponent(\"..\") = \"..\"でエンコードされず' は事実として正しいが、文脈上 '防御されない' と誤解される可能性がある。isPathSafeでの検証チェーンが機能する旨はより明確に記載すべき。",
+      "location": "設計方針書 Section 6 セキュリティ設計 / パストラバーサル防止",
+      "recommendation": "セキュリティ考慮事項の記述を以下のように明確化する: (1) encodePathForUrlはパストラバーサル防御を担わない（責務外）、(2) 防御は全てサーバー側のisPathSafe()に委譲される、(3) この責務分離は意図的な設計判断であること。SRP準拠の観点からも、各レイヤーの責務境界を明示するのが望ましい。"
+    },
+    {
+      "id": "SF-3",
+      "severity": "should_fix",
+      "category": "エッジケース考慮",
+      "issue": "encodePathForUrlの実装仕様において、エッジケースの動作定義が不足している。具体的には: (1) 先頭スラッシュ付きパス('/src/file.ts')の場合、split('/')の結果に空文字列要素が含まれ、encodeURIComponent('') = '' となるため結果が '//src/file.ts' のように空セグメントを含む可能性がある。(2) 連続スラッシュ('src//file.ts')も同様。(3) 末尾スラッシュ('src/')の扱い。テスト設計（Section 4.1）にはこれらのケースが含まれていない。",
+      "location": "設計方針書 Section 3.2 encodePathForUrl ヘルパー / Section 4.1 ユニットテスト",
+      "recommendation": "以下のエッジケースをテスト設計に追加する: (1) 先頭スラッシュ '/src/file' の動作定義、(2) 連続スラッシュ 'src//file' の動作定義、(3) 末尾スラッシュ 'src/' の動作定義。実際の呼び出し元（WorktreeDetailRefactored.tsx）では相対パスのみが渡されるため問題にならない可能性が高いが、汎用ヘルパーとして新規ファイルに切り出す以上、契約としてのエッジケース動作を明文化しておくべき。"
+    },
+    {
+      "id": "NTH-1",
+      "severity": "nice_to_have",
+      "category": "OCP（開放閉鎖原則）",
+      "issue": "ツールバーに表示するボタンがonNewFile/onNewDirectoryの2つにハードコードされている。将来的にツールバーにボタンを追加する場合（例: New from Template、Import）、FileTreeView.tsx内部のJSXを直接修正する必要がある。",
+      "location": "設計方針書 Section 3.1 実装方針",
+      "recommendation": "現時点ではYAGNI原則に基づきハードコードで問題ないが、将来的にツールバーアクションが増加する場合は、toolbarActions配列をprops経由で受け取る設計にリファクタリングすることを検討する。現在のスコープでは不要であり、過剰設計にあたるため、将来課題として記録するのみで良い。"
+    },
+    {
+      "id": "NTH-2",
+      "severity": "nice_to_have",
+      "category": "DRY原則",
+      "issue": "設計方針書Section 3.3で、WorktreeDetailRefactored.tsxの5箇所全てが同一パターン（encodeURIComponent -> encodePathForUrl置換）であることが明記されているが、5箇所のURL構築パターン自体にも重複がある。例えば `/api/worktrees/${worktreeId}/files/${encode(path)}` というパターンが4箇所で使用されている。",
+      "location": "設計方針書 Section 3.3 WorktreeDetailRefactored.tsx 修正",
+      "recommendation": "URL構築自体を共通ヘルパー（例: buildFileApiUrl(worktreeId, path)）に抽出することで、エンコードロジックの一元管理とURL構造変更時の修正箇所削減が可能。ただし、これはIssue #300のスコープ外であり、各ハンドラのHTTPメソッドやクエリパラメータが異なるため、過度な抽象化になる可能性もある。将来的なリファクタリング候補として記録する。"
+    },
+    {
+      "id": "NTH-3",
+      "severity": "nice_to_have",
+      "category": "テスト設計",
+      "issue": "Section 4.3の既存テスト影響分析で、WorktreeDetailRefactored.testにencodePathForUrl適用の確認テストを追加する旨が記載されているが、具体的なテスト戦略（モック方法、検証ポイント）が未定義。WorktreeDetailRefactoredは多数の外部依存を持つ大型コンポーネントであり、encodePathForUrl関数の適用確認をこのレベルでテストするコスト対効果は低い可能性がある。",
+      "location": "設計方針書 Section 4.3 既存テスト影響",
+      "recommendation": "encodePathForUrl自体の単体テスト（Section 4.1）で十分なカバレッジが得られるため、WorktreeDetailRefactored.testでの確認テストは優先度を下げても良い。統合テストが必要であれば、E2Eテスト（Playwright）でルートディレクトリへのファイル/ディレクトリ作成シナリオを検証する方が効果的。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_quality": "good"
+}

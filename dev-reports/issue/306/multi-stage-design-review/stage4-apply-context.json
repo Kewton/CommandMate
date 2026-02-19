@@ -1,0 +1,7 @@
+{
+  "issue_number": 306,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_result_path": "dev-reports/issue/306/multi-stage-design-review/stage4-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-306-session-stability-design-policy.md"
+}

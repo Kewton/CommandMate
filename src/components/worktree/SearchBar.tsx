@@ -12,6 +12,7 @@
 'use client';
 
 import React, { memo, useCallback, useRef, useEffect } from 'react';
+import { MOBILE_BREAKPOINT } from '@/hooks/useIsMobile';
 import type { SearchMode } from '@/types/models';
 
 // ============================================================================
@@ -137,7 +138,6 @@ export const SearchBar = memo(function SearchBar({
     inputRef.current?.focus();
   }, [onClear]);
 
-
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -155,7 +155,7 @@ export const SearchBar = memo(function SearchBar({
   // Focus input on mount (optional, can be controlled via prop)
   useEffect(() => {
     // Don't auto-focus on mobile to prevent keyboard popup
-    const isMobile = window.innerWidth < 768;
+    const isMobile = window.innerWidth < MOBILE_BREAKPOINT;
     if (!isMobile) {
       // Small delay to prevent focus-related layout shifts
       const timer = setTimeout(() => {

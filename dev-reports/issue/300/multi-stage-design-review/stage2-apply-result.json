@@ -1,0 +1,43 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 300,
+  "apply_date": "2026-02-18",
+  "applied_count": 3,
+  "skipped_count": 0,
+  "results": [
+    {
+      "finding_id": "SF-1",
+      "status": "applied",
+      "description": "handleFileInputChange (L1408) のAPIエンドポイントが /upload/ であることを設計方針書の3箇所に反映: (1) Section 3.3修正箇所テーブルの5番目エントリのAPI Pathを '/api/.../upload/' に修正し備考列を追加、(2) Section 3.3のBefore/Afterコード例に /upload/ エンドポイントのパターンを追加、(3) Section 2コンポーネント関係図の handleFileInputChange に '/upload/ EP' 注記を追加",
+      "location": "設計方針書 Section 2 コンポーネント関係図、Section 3.3 修正箇所テーブル・コード例"
+    },
+    {
+      "finding_id": "SF-2",
+      "status": "applied",
+      "description": "handleNewFile (L1246-1247) の .md 拡張子自動付与ロジックの存在を設計方針書の2箇所に反映: (1) Section 3.3修正箇所テーブルの handleNewFile 備考列に '.md拡張子の自動付与後のパスにencodePathForUrl()を適用' と注記、(2) Section 2コンポーネント関係図の handleNewFile に '.md自動付与後に encodePathForUrl() 使用' と注記",
+      "location": "設計方針書 Section 2 コンポーネント関係図、Section 3.3 修正箇所テーブル"
+    },
+    {
+      "finding_id": "SF-3",
+      "status": "applied",
+      "description": "useFileOperations.ts L71 のパスエンコード未使用を設計方針書 Section 4.3 に既知の課題として追加。コード例付きで問題を説明し、本Issue (#300) のスコープ外であることを明記。Issue本文の影響範囲セクションとの整合性を確保",
+      "location": "設計方針書 Section 4.3 既存テスト影響（新規サブセクション '[SF-3] 既知の課題'）"
+    }
+  ],
+  "additional_updates": [
+    {
+      "section": "Section 9 レビュー履歴",
+      "description": "Stage 2 整合性レビューのエントリを追加（Must Fix: 0件, Should Fix: 3件, Nice to Have: 3件）"
+    },
+    {
+      "section": "Section 10 レビュー指摘事項サマリー",
+      "description": "Stage 2 整合性レビューの全6件（SF-1, SF-2, SF-3, NTH-1, NTH-2, NTH-3）をサマリーテーブルに追加"
+    },
+    {
+      "section": "Section 11 実装チェックリスト",
+      "description": "Stage 2 対応の Should Fix チェックリスト（7項目、全て完了）と Nice to Have チェックリスト（3項目、将来課題）を追加"
+    }
+  ],
+  "timestamp": "2026-02-18T12:30:00Z"
+}

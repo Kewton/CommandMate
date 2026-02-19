@@ -7,6 +7,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Z_INDEX } from '@/config/z-index';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -83,7 +84,7 @@ export function Modal({
 
   // Use portal to render at document.body level, escaping any parent stacking context
   return createPortal(
-    <div className="fixed inset-0 z-[9999] overflow-y-auto">
+    <div className="fixed inset-0 overflow-y-auto" style={{ zIndex: Z_INDEX.MODAL }}>
       {/* Backdrop - Issue #104: skip onClick if disableClose is true */}
       <div
         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"

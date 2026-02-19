@@ -84,6 +84,15 @@ export const UPLOADABLE_EXTENSION_VALIDATORS: UploadableExtensionValidator[] = [
   // [SEC-002] SVG removed: XSS risk due to embedded JavaScript capability
   // { extension: '.svg', maxFileSize: DEFAULT_MAX_FILE_SIZE, allowedMimeTypes: ['image/svg+xml'] },
 
+  // Video (binary - magic bytes validation required)
+  // [Issue #302] MP4 support with 15MB limit and ftyp magic bytes at offset 4
+  {
+    extension: '.mp4',
+    maxFileSize: 15 * 1024 * 1024, // 15MB
+    allowedMimeTypes: ['video/mp4'],
+    magicBytes: [{ bytes: [0x66, 0x74, 0x79, 0x70], offset: 4 }], // 'ftyp' at offset 4 (ISOBMFF)
+  },
+
   // Text (no magic bytes validation - content validation is separate)
   {
     extension: '.txt',

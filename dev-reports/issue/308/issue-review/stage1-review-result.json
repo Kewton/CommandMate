@@ -1,0 +1,162 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 308,
+  "review_focus": "通常",
+  "review_date": "2026-02-19",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "category": "accuracy",
+      "location": "対策案 - 方針: CM_ROOT_DIR への統一 / 実装タスク",
+      "description": "[jobId]/route.ts への修正は技術的に不要。仮説検証で Partially Confirmed と判定された通り、このルートは getCloneJobStatus() のみを呼び出しており basePath を使用しない。Issue本文の対策案と実装タスクでは '[jobId]/route.ts: 同上' と記載されており、修正が必要であるかのような印象を与える。",
+      "suggestion": "[jobId]/route.ts の修正タスクを「一貫性維持のため basePath を渡すが、バグへの実影響はない」と明記するか、もしくは実装タスクから除外して影響範囲セクションで「変更不要（basePath 未使用のため）」と明記する。仮説検証の Partially Confirmed の結果と整合させること。",
+      "evidence": {
+        "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/app/api/repositories/clone/[jobId]/route.ts",
+        "lines": "L60-63",
+        "code": "const cloneManager = new CloneManager(db);\nconst status = cloneManager.getCloneJobStatus(jobId);",
+        "analysis": "getCloneJobStatus() は this.config.basePath を参照しないため、basePath のデフォルト値が何であっても動作に影響しない"
+      }
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "category": "completeness",
+      "location": "受入条件",
+      "description": "WORKTREE_BASE_PATH の後方互換性テストについて、受入条件の記述が抽象的。「WORKTREE_BASE_PATH 設定時は非推奨警告を出力しつつ動作する」とあるが、具体的なテストケース（例: WORKTREE_BASE_PATH のみ設定した場合にそのパスが使用されるか、CM_ROOT_DIR と WORKTREE_BASE_PATH の両方が設定された場合の優先順位）が明記されていない。",
+      "suggestion": "受入条件に以下の具体的なケースを追加する:\n- WORKTREE_BASE_PATH のみ設定時: そのパスが basePath として使用され、console.warn で非推奨警告が出力される\n- CM_ROOT_DIR と WORKTREE_BASE_PATH の両方が設定された場合: CM_ROOT_DIR が優先される\n- どちらも未設定の場合: process.cwd() がフォールバック値として使用される",
+      "evidence": {
+        "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/clone-manager.ts",
+        "lines": "L193",
+        "analysis": "現在の優先順位は config.basePath > WORKTREE_BASE_PATH > '/tmp/repos' だが、修正後の優先順位（CM_ROOT_DIR vs WORKTREE_BASE_PATH）が明示されていない"
+      }
+    },
+    {
+      "id": "S1-003",
+      "severity": "should_fix",
+      "category": "consistency",
+      "location": "対策案 - CloneManagerのデフォルト値改善",
+      "description": "Issue は「basePath のフォールバックを getEnv().CM_ROOT_DIR に変更」と記載しているが、getEnv() は内部で path.resolve() を適用して絶対パスに変換する（env.ts L234）。一方で CloneManager のコンストラクタは複数回呼び出される可能性があり、呼び出しのたびに getEnv() を実行すると環境変数の再解析とバリデーションが繰り返される。clone APIルートで basePath を渡す方式（対策案1）と、CloneManager 内部で getEnv() を呼ぶ方式（対策案2）の両方が記載されているが、実装時にどちらを主とするかの設計判断が不明確。",
+      "suggestion": "推奨アプローチを明確にする。例: 「clone APIルートで getEnv().CM_ROOT_DIR を取得して basePath として渡す（対策案1）を主とし、CloneManager のデフォルト値は安全なフォールバック（process.cwd()）に変更する（対策案2）」のように、両方の修正の関係性を明記する。getEnv() を CloneManager コンストラクタ内部で呼ぶ場合は循環依存やテスト時のモック複雑化に注意が必要。",
+      "evidence": {
+        "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/env.ts",
+        "lines": "L198-238",
+        "analysis": "getEnv() は CM_ROOT_DIR の取得だけでなく、CM_PORT, CM_BIND, CM_DB_PATH のバリデーションも実行する。CloneManager が basePath だけ必要なのに getEnv() 全体を呼ぶのはオーバーヘッドとなりうる"
+      }
+    },
+    {
+      "id": "S1-004",
+      "severity": "must_fix",
+      "category": "completeness",
+      "location": "影響範囲 - 変更対象ファイル",
+      "description": ".env.example のドキュメント整備が対策案には記載されている（「.env.example に CM_ROOT_DIR の clone 先としての役割を明記」）が、影響範囲の変更対象ファイル表には含まれていない。また実装タスクのチェックリストにも .env.example は含まれていない。",
+      "suggestion": "影響範囲の変更対象ファイル表に `.env.example` を追加し、変更内容を「CM_ROOT_DIR の説明にクローン先ディレクトリとしての役割を追記」と記載する。実装タスクのチェックリストにも追加する。現在の .env.example (L8-10) には 'Root directory for worktree scanning' としか記載されておらず、clone先の用途が記されていない。",
+      "evidence": {
+        "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/.env.example",
+        "lines": "L8-10",
+        "code": "# Root directory for worktree scanning\n# This is the base directory that contains your git worktrees\nCM_ROOT_DIR=/path/to/your/worktrees",
+        "analysis": "clone先としての役割が記載されていないため、ユーザーが CM_ROOT_DIR を設定しても clone 先が CM_ROOT_DIR になることに気づかない可能性がある"
+      }
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "category": "clarity",
+      "location": "根本原因の仮説 - 行番号の正確性",
+      "description": "Issue本文では「CloneManager のコンストラクタ（src/lib/clone-manager.ts L193）」と記載しており、実際にコード上でも L193 に basePath のデフォルト値があることを確認した。ただし、Issue本文では「getTargetPath L251-253」への言及がなく、basePath が実際に clone 先パスの決定に使われる箇所（getTargetPath メソッド）の説明が不足している。",
+      "suggestion": "根本原因の説明に getTargetPath() メソッド（L251-252）への言及を追加すると、basePath がどのように clone 先ディレクトリに影響するかの因果関係がより明確になる。",
+      "evidence": {
+        "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/clone-manager.ts",
+        "lines": "L251-252",
+        "code": "getTargetPath(repoName: string): string {\n  return path.join(this.config.basePath!, repoName);\n}"
+      }
+    },
+    {
+      "id": "S1-006",
+      "severity": "should_fix",
+      "category": "completeness",
+      "location": "実装タスク",
+      "description": "既存テストの更新が「ユニットテスト・統合テストの更新」と一括記載されているが、具体的にどのテストファイルを更新し、何を検証するかが不明確。特に、既存テストの中に basePath のデフォルト値 '/tmp/repos' に依存しているケースがある（clone-manager.test.ts L213: '/tmp/repos/custom/target/path'）。",
+      "suggestion": "テスト更新のタスクを以下のように具体化する:\n- tests/unit/lib/clone-manager.test.ts: basePath デフォルト値の変更に伴うアサーション更新（L213 のカスタムパスパスバリデーション等）、CM_ROOT_DIR 反映テスト追加、WORKTREE_BASE_PATH 後方互換テスト追加\n- tests/integration/api-clone.test.ts: clone API で CM_ROOT_DIR が basePath として使用されることの検証追加",
+      "evidence": {
+        "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/tests/unit/lib/clone-manager.test.ts",
+        "lines": "L213",
+        "code": "const customPath = '/tmp/repos/custom/target/path';",
+        "analysis": "このテストは basePath が '/tmp/repos' であることを前提としたパスを使用しており、デフォルト値の変更に伴い更新が必要"
+      }
+    },
+    {
+      "id": "S1-007",
+      "severity": "nice_to_have",
+      "category": "consistency",
+      "location": "受入条件",
+      "description": "受入条件の「CM_ROOT_DIR 未設定時は process.cwd() をフォールバック値として使用する」は env.ts L200 の getEnv() 実装（getEnvByKey('CM_ROOT_DIR') || process.cwd()）と整合している。ただし、getEnv() 経由で取得した場合は path.resolve() が適用されるため（L234）、process.cwd() が直接使用されるわけではなく path.resolve(process.cwd()) が返される。この差異は通常影響しないが、正確性のため明記すると良い。",
+      "suggestion": "受入条件を「CM_ROOT_DIR 未設定時は getEnv().CM_ROOT_DIR のフォールバック動作に従い、process.cwd() の絶対パスを使用する」のように修正して、既存の env.ts のフォールバック機構と一致させる。",
+      "evidence": {
+        "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/env.ts",
+        "lines": "L200, L234",
+        "code": "const rootDir = getEnvByKey('CM_ROOT_DIR') || process.cwd();\n...\nCM_ROOT_DIR: path.resolve(rootDir),"
+      }
+    },
+    {
+      "id": "S1-008",
+      "severity": "should_fix",
+      "category": "completeness",
+      "location": "影響範囲 - セキュリティ考慮",
+      "description": "CloneManager.startCloneJob() の L303 で isPathSafe(customTargetPath, this.config.basePath!) によるパストラバーサル防止が行われている。basePath が '/tmp/repos' から CM_ROOT_DIR に変更されることで、パストラバーサル検証の基準ディレクトリが変わる。この変更がセキュリティ上のパストラバーサル防止ロジックに与える影響について、Issue 本文に言及がない。",
+      "suggestion": "影響範囲セクションに「パストラバーサル防止ロジック（startCloneJob L303）の検証基準ディレクトリが basePath に連動して変更されるため、isPathSafe の動作が意図通りであることを確認するテストケースを追加する」旨を記載する。",
+      "evidence": {
+        "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/clone-manager.ts",
+        "lines": "L302-311",
+        "code": "if (customTargetPath && !isPathSafe(customTargetPath, this.config.basePath!)) {\n  return {\n    success: false,\n    error: {\n      ...ERROR_DEFINITIONS.INVALID_TARGET_PATH,\n      message: `Target path must be within ${this.config.basePath}`,\n    },\n  };\n}"
+      }
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 2,
+    "overall_assessment": "Issue #308 の根本原因分析は正確であり、仮説検証で全仮説が Confirmed/Partially Confirmed と判定されたことと整合している。対策の方向性（CM_ROOT_DIR への統一）も技術的に妥当である。主な改善点は、(1) .env.example の更新が実装タスクに含まれていない、(2) [jobId]/route.ts の修正必要性の判断が不明確、(3) WORKTREE_BASE_PATH 後方互換の具体的テストケース不足、(4) basePath 変更に伴うパストラバーサル検証への影響の未言及、(5) 対策案1と対策案2の関係性の明確化が必要な点である。これらを補完することで、実装時の判断に迷いがなくなり、テスト漏れも防止できる。"
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/clone-manager.ts",
+      "relevance": "バグの根本原因ファイル。basePath デフォルト値のハードコード（L193）、getTargetPath()（L251-252）、パストラバーサル防止（L303）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/app/api/repositories/clone/route.ts",
+      "relevance": "CloneManager を basePath なしで初期化している呼び出し元（L71）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/app/api/repositories/clone/[jobId]/route.ts",
+      "relevance": "CloneManager を basePath なしで初期化しているが、basePath を使用する機能は呼び出していない（L61）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/env.ts",
+      "relevance": "getEnv() による CM_ROOT_DIR 取得とフォールバック処理（L200, L234）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/.env.example",
+      "relevance": "CM_ROOT_DIR の説明更新が必要（L8-10）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/tests/unit/lib/clone-manager.test.ts",
+      "relevance": "basePath デフォルト値 '/tmp/repos' に依存するテストケースあり（L213）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/tests/integration/api-clone.test.ts",
+      "relevance": "clone API 統合テスト。CM_ROOT_DIR 反映の検証追加が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/dev-reports/design/issue-76-env-fallback-design-policy.md",
+      "relevance": "WORKTREE_BASE_PATH がフォールバック対象外と記録された設計方針ドキュメント"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/dev-reports/review/2026-01-29-issue76-architecture-review.md",
+      "relevance": "WORKTREE_BASE_PATH のフォールバック対象外判定のアーキテクチャレビュー記録"
+    }
+  ]
+}

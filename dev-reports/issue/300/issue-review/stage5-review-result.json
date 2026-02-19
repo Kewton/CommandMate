@@ -1,0 +1,114 @@
+{
+  "issue_number": 300,
+  "focus_area": "通常",
+  "iteration": 2,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-18",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "正確性",
+        "issue": "encodeURIComponent影響箇所の5番目（L1408）がhandleUploadと記載されているが、実際にはhandleFileInputChange関数内にある",
+        "location": "## 根本原因 > 二次的問題 の表、および ## コード参照 の表",
+        "recommendation": "影響箇所テーブルの5行目を「handleUpload()」から「handleFileInputChange()」に修正する。handleUpload (L1372-1375) は fileInputRef.current?.click() を呼ぶだけの関数で、encodeURIComponentはhandleFileInputChange (L1378-1431) 内のL1408で使用されている。コード参照テーブルの「handleUpload関数 - encodeURIComponent使用箇所（L1408）」行も同様に「handleFileInputChange関数」に修正する。現状の記載では実装者がhandleUpload関数内を探してしまい混乱する可能性がある",
+        "evidence": "WorktreeDetailRefactored.tsx L1372-1375: handleUploadはuploadTargetPathRef.currentにtargetDirを設定しfileInputRef.current?.click()を呼ぶだけ。L1378-1431: handleFileInputChangeがフォームデータ構築とfetch呼び出し（L1408のencodeURIComponent使用箇所）を含む"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "正確性",
+        "issue": "コード参照テーブルのhandleDelete行番号がL1320-1348だが、実際のhandleDelete関数はL1324-1348",
+        "location": "## コード参照 の表",
+        "recommendation": "L1320-1348をL1324-1348に修正する。L1320-1321はhandleRename関数の末尾（catch/useCallbackの閉じ括弧）であり、handleDelete本体はL1324から始まる。ただし行番号はコード変更で容易にずれるため、修正の優先度は低い",
+        "evidence": "WorktreeDetailRefactored.tsx L1320: handleRenameの`}`閉じ括弧。L1321: `}, [worktreeId, tError]);`。L1322: 空行。L1323: handleDeleteのJSDocコメント開始。L1324: `const handleDelete = useCallback(...`"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "upload APIエンドポイントがfiles APIとは異なるルート（/api/worktrees/:id/upload/[...path]）であることの明記がない",
+        "location": "## 根本原因 > 二次的問題 セクション",
+        "recommendation": "handleFileInputChange (L1408) のencodeURIComponentは `/api/worktrees/${worktreeId}/upload/${encodeURIComponent(uploadPath)}` を生成するが、他の4箇所は `/api/worktrees/${worktreeId}/files/${encodeURIComponent(path)}` を生成する。修正時にencodePathForUrl()ヘルパーを適用するURLテンプレートが2種類（files/とupload/）あることを明示しておくと、実装者がAPIルートの違いを見落とさない。ただし、いずれもcatch-all route [...path]を使用しておりパス処理は同一パターンのため、ヘルパー関数の適用方法に差異はない",
+        "evidence": "src/app/api/worktrees/[id]/files/[...path]/route.ts と src/app/api/worktrees/[id]/upload/[...path]/route.ts の2つのAPIルートが存在。両方ともparams.path.join('/')でパスを結合する同一パターン（files: L112, upload: L114）"
+      }
+    ]
+  },
+  "previous_findings_verification": {
+    "stage1_must_fix": {
+      "MF-1_reproduction_steps": {
+        "status": "verified",
+        "detail": "再現手順がUI欠落の事実を正確に反映している。ステップ3で「New Directoryボタンが表示されていないため、ルートへのディレクトリ追加手段がない」と記載。ステップ4でNew Fileも同様に不可能と記載"
+      },
+      "MF-2_root_cause": {
+        "status": "verified",
+        "detail": "根本原因がFileTreeView.tsxのUI欠落として正確に記述されている。バックエンド仮説は除去され、主要原因セクションにFileTreeView.tsx:827-861の空状態チェック条件を明記。検証済み（問題なし）セクションでpath-validator.tsとfile-operations.tsの正常動作を確認"
+      }
+    },
+    "stage3_must_fix": {
+      "MF-1_encodeURIComponent_5_locations": {
+        "status": "verified_with_minor_issue",
+        "detail": "全5箇所（L1252, L1279, L1305, L1330, L1408）が適切に記載されている。ただし5番目の関数名がhandleUploadと記載されているが実際にはhandleFileInputChangeである（SF-1として指摘）"
+      },
+      "MF-2_toolbar_empty_state_coexistence": {
+        "status": "verified",
+        "detail": "Option A（空状態ボタン維持+非空状態ツールバー追加）が明確に記載されている。data-testid命名規則（empty-new-directory-button, toolbar-new-directory-button, toolbar-new-file-button）も受け入れ条件に含まれている"
+      }
+    },
+    "overall_consistency": {
+      "acceptance_criteria_vs_overview": {
+        "status": "consistent",
+        "detail": "受け入れ条件がUI（FileTreeViewツールバー）、パスエンコード（encodeURIComponent修正）、テストの3セクションに分かれており、概要・修正方針と整合している"
+      },
+      "impact_scope_vs_countermeasures": {
+        "status": "consistent",
+        "detail": "影響範囲の変更対象ファイル4件（FileTreeView.tsx, WorktreeDetailRefactored.tsx, 各テストファイル）が対策案3項目と一致している"
+      },
+      "excluded_files": {
+        "status": "verified",
+        "detail": "path-validator.ts, file-operations.ts, route.tsは変更対象に含まれていない。検証済み（問題なし）セクションに正常動作確認の記載があり、影響範囲テーブルからも正しく除外されている"
+      }
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "827-861, 877-919",
+      "relevance": "根本原因の空状態条件分岐と非空状態ツリー描画部分。Issue記載と実コードが一致"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1242-1268, 1271-1295, 1298-1321, 1324-1348, 1378-1431",
+      "relevance": "encodeURIComponent使用5箇所。Issue記載のL1252,L1279,L1305,L1330,L1408は全て正確"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "96-123",
+      "relevance": "catch-all routeのpathSegments処理。L112のpathSegments.join('/')はIssue記載と一致"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+      "lines": "100-119",
+      "relevance": "upload APIルート。L114のparams.path.join('/')はfiles APIと同一パターン"
+    },
+    {
+      "file": "src/lib/path-validator.ts",
+      "lines": "29-68",
+      "relevance": "isPathSafe関数。L41-47のdecodeURIComponent処理はIssue記載と一致。変更不要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "FileTreeView.tsx, WorktreeDetailRefactored.tsx, ContextMenu.tsxの機能説明が記載。Issue内容と矛盾なし"
+    }
+  ],
+  "overall_quality": "good"
+}

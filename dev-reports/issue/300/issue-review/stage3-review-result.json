@@ -1,0 +1,175 @@
+{
+  "issue_number": 300,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-18",
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "API影響",
+        "issue": "encodeURIComponent問題はhandleNewFile/handleNewDirectory固有ではなく、handleRename/handleDeleteにも同一パターンが存在する",
+        "location": "WorktreeDetailRefactored.tsx:1305, 1330",
+        "recommendation": "全5箇所の encodeURIComponent(path) を newPath.split('/').map(encodeURIComponent).join('/') に統一修正するか、共通ヘルパー関数 encodePathSegments(path) を抽出する。handleRename（L1305）とhandleDelete（L1330）は既存ファイルのパスを受け取るため現状でも動作している可能性があるが、特殊文字を含むファイル名（例: スペース、#）ではバグが顕在化するリスクがある",
+        "evidence": "WorktreeDetailRefactored.tsx L1252, L1279, L1305, L1330, L1408 の5箇所すべてで encodeURIComponent(path) を使用。route.ts L112 の pathSegments.join('/') は catch-all route の params.path（配列）を結合するが、%2F を含む単一セグメントが渡されるとパス解決が不正になる"
+      },
+      {
+        "id": "MF-2",
+        "category": "UI影響",
+        "issue": "FileTreeViewツールバー追加時、空状態ボタン（L827-861）との動作重複・混乱リスク",
+        "location": "FileTreeView.tsx:827-861, 877-919",
+        "recommendation": "設計方針として、(A) 空状態ボタンはそのまま残して非空状態ツールバーを追加、(B) 空状態ボタンを統一ツールバーに置き換え、のどちらかを明示的に選択すべき。Issue本文は(A)を示唆しているが、ユーザーがツリーの最後のファイルを削除して空状態に遷移した場合のUI切り替えの一貫性を考慮し、方針を受け入れ条件に追記すべき",
+        "evidence": "Issue本文に「空状態のNew Directoryボタン（L827-861）は既存のまま維持」と記載されているが、両方のUIが共存する場合のdata-testidの命名規則やスタイルの一貫性に関する記述がない。テストでは data-testid='empty-new-directory-button' が使用されており（FileTreeView.test.tsx L608）、非空状態のボタンとの区別が必要"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト影響",
+        "issue": "既存テストが非空状態でのルートレベルボタン非表示を前提としている可能性",
+        "location": "tests/unit/components/worktree/FileTreeView.test.tsx",
+        "recommendation": "現在のFileTreeView.test.tsxには非空状態でルートレベルの New File/New Directory ボタンが「表示されないこと」を検証するテストはないため、既存テストは壊れない。ただし、新規追加するツールバーに対して以下のテストケースが必要: (1) 非空状態でツールバーボタンが表示されること、(2) ボタンクリックで onNewFile('') / onNewDirectory('') が呼ばれること、(3) onNewFile/onNewDirectory が undefined の場合ボタンが表示されないこと、(4) モバイル（MobileContent経由）でも同様に機能すること",
+        "evidence": "FileTreeView.test.tsx L577-665 の 'Empty state with action buttons' セクションは空状態のみテスト。非空状態でのボタンテストは存在しない"
+      },
+      {
+        "id": "SF-2",
+        "category": "i18n",
+        "issue": "FileTreeViewの空状態ボタンラベルがハードコードされており、新規ツールバーも同様にi18n未対応になるリスク",
+        "location": "FileTreeView.tsx:844, 854",
+        "recommendation": "空状態ボタンの 'New File' / 'New Directory' ラベルがハードコードされている（L844, L854）。新規ツールバーのラベルも同様にハードコードされる可能性が高い。既存の空状態ボタンとの一貫性は保たれるが、将来的にi18n対応する際には両方を同時に修正する必要がある。本Issue内でのi18n対応は必須ではないが、Issueの影響範囲として認識しておくべき",
+        "evidence": "FileTreeView.tsx L844: <span>New File</span>、L854: <span>New Directory</span> はハードコード。ContextMenu.tsx L116-127 の 'New File' / 'New Directory' も同様にハードコード。プロジェクトのi18n対応はnext-intlベースだが、FileTreeView内部ではuseTranslationsを使用していない"
+      },
+      {
+        "id": "SF-3",
+        "category": "セキュリティ",
+        "issue": "encodeURIComponent修正に伴うセキュリティ影響の確認",
+        "location": "src/lib/path-validator.ts, route.ts:96-123",
+        "recommendation": "encodeURIComponent の修正（個別セグメントエンコード方式への変更）が、path-validator.ts の isPathSafe() によるパストラバーサル検証を回避しないことを確認するテストを追加すべき。isPathSafe() はL41-47で decodeURIComponent(targetPath) を実行しているため、個別エンコードされたパスも正しくデコード・検証される。ただし、route.ts L112 の pathSegments.join('/') がどのように%エンコードされたセグメントを処理するかの統合テストが必要",
+        "evidence": "path-validator.ts L41-47: decodeURIComponent() でURLエンコードを解除してからパス検証を行う。route.ts L112: requestedPath = pathSegments.join('/') は Next.js が自動デコードした配列を受け取る（catch-all route の params.path は各セグメントが既にデコード済み）"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "UI影響",
+        "issue": "ツールバー追加によるモバイルレスポンシブ対応",
+        "location": "WorktreeDetailRefactored.tsx:850-881, FileTreeView.tsx:877-919",
+        "recommendation": "MobileContent（WorktreeDetailRefactored.tsx L850-881）でFileTreeViewを使用しているため、ツールバーはデスクトップ・モバイル両方で自動的に表示される。モバイルではタッチターゲットサイズ（最小44x44px推奨）を考慮したスタイリングが望ましい。具体的には、py-2以上のパディングと十分な gap を確保すること",
+        "evidence": "MobileContent L864: <FileTreeView ... /> はデスクトップと同じコンポーネントを使用。FileTreeView内部にツールバーを追加すれば、MobileContent側の変更は不要"
+      },
+      {
+        "id": "NTH-2",
+        "category": "テスト影響",
+        "issue": "WorktreeDetailRefactored.test.tsxのモック更新が必要",
+        "location": "tests/unit/components/WorktreeDetailRefactored.test.tsx:146-171",
+        "recommendation": "WorktreeDetailRefactored.test.tsxのFileTreeViewモック（L146-171）はツールバーUIを含んでいないため、encodeURIComponent修正のテストを追加する場合はモックを更新するか、統合テストレベルで検証する必要がある。現状のモックはonNewFile/onNewDirectoryコールバックの接続をテストしており（L543-646）、この範囲は壊れない",
+        "evidence": "WorktreeDetailRefactored.test.tsx L146-171: FileTreeViewをモックコンポーネントに置き換え。L581-593: handleNewFileのPOST APIコールテストは encodeURIComponent(newPath) の結果をURLに含むfetchコールを検証しているが、パスにスラッシュが含まれるケースは未テスト（テストデータの parentPath='src' + fileName='newfile.md' = 'src/newfile.md'）"
+      },
+      {
+        "id": "NTH-3",
+        "category": "UI影響",
+        "issue": "ContextMenuの 'New Directory' と ツールバーの 'New Directory' の動作差異をユーザーに伝える仕組み",
+        "location": "ContextMenu.tsx:100-108, FileTreeView.tsx（新規ツールバー）",
+        "recommendation": "コンテキストメニューの 'New Directory' は右クリックしたディレクトリの配下に作成（handleItemClick が targetPath を渡す）、ツールバーの 'New Directory' はルートレベルに作成（onNewDirectory('') を呼ぶ）。動作差異はUIの配置から自然に理解できるが、ツールバーボタンに「ルートに作成」であることを示すツールチップ（title属性）を追加するとユーザビリティが向上する",
+        "evidence": "ContextMenu.tsx L100-108: handleItemClick は handler(targetPath) を呼ぶ（targetPath は右クリック対象のディレクトリパス）。FileTreeView.tsx L848-856: 空状態の onNewDirectory('') は空文字列を渡す = ルートレベル"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/FileTreeView.tsx",
+      "lines": "827-861, 877-919",
+      "relevance": "主要修正対象: 空状態ボタンと非空状態ツリー描画部分"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1242-1295, 1298-1348, 1371-1431",
+      "relevance": "handleNewFile/handleNewDirectory/handleRename/handleDelete/handleUpload の encodeURIComponent 使用箇所"
+    },
+    {
+      "file": "src/components/worktree/ContextMenu.tsx",
+      "lines": "100-108, 113-161",
+      "relevance": "コンテキストメニュー経由のNew Directory動作（targetPathを渡す）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "96-123, 330-377",
+      "relevance": "APIルートのパス処理（pathSegments.join, isPathSafe検証）"
+    },
+    {
+      "file": "src/lib/path-validator.ts",
+      "lines": "29-68",
+      "relevance": "パストラバーサル防止のisPathSafe関数（decodeURIComponent処理あり）"
+    },
+    {
+      "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+      "lines": "577-665",
+      "relevance": "空状態ボタンの既存テスト（非空状態テストは存在しない）"
+    },
+    {
+      "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "lines": "530-808",
+      "relevance": "ファイル操作ハンドラーの既存テスト"
+    }
+  ],
+  "doc_references": [],
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "file": "src/components/worktree/FileTreeView.tsx",
+        "change_type": "修正",
+        "impact": "high",
+        "description": "非空状態にNew File/New Directoryツールバーを追加。空状態のUIは維持"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change_type": "修正",
+        "impact": "medium",
+        "description": "handleNewFile/handleNewDirectoryのencodeURIComponent修正。handleRename/handleDelete/handleUploadも同一パターンのため修正検討"
+      },
+      {
+        "file": "tests/unit/components/worktree/FileTreeView.test.tsx",
+        "change_type": "追加",
+        "impact": "medium",
+        "description": "非空状態でのルートレベルボタン表示・操作テストを追加"
+      },
+      {
+        "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "change_type": "追加（任意）",
+        "impact": "low",
+        "description": "パスにスラッシュを含む場合のencodeURIComponentテスト追加"
+      }
+    ],
+    "unaffected_files": [
+      {
+        "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+        "reason": "APIルート側の変更は不要。Next.jsのcatch-all routeはURL内のスラッシュを自動的にセグメント分割する。フロントエンド側のエンコード修正のみで対応可能"
+      },
+      {
+        "file": "src/lib/path-validator.ts",
+        "reason": "decodeURIComponentによるURL解除処理が既にあり、個別セグメントエンコード方式でも正常動作する"
+      },
+      {
+        "file": "src/lib/file-operations.ts",
+        "reason": "Issue検証済み: createFileOrDirectory関数のパス処理は正常動作"
+      },
+      {
+        "file": "src/components/worktree/ContextMenu.tsx",
+        "reason": "コンテキストメニューの動作変更は不要。既存のNew Directory機能は対象ディレクトリ配下への作成として維持"
+      },
+      {
+        "file": "tests/unit/lib/file-operations.test.ts",
+        "reason": "バックエンドのファイル操作ロジックは変更なし。既存テストは影響を受けない"
+      }
+    ],
+    "breaking_changes": false,
+    "migration_needed": false
+  }
+}

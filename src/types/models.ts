@@ -288,7 +288,9 @@ export interface FileContent {
   worktreePath: string;
   /** Whether the file is an image (optional, for image files) */
   isImage?: boolean;
-  /** MIME type (optional, for image files) */
+  /** Whether the file is a video (optional, for video files) - Issue #302 */
+  isVideo?: boolean;
+  /** MIME type (optional, for image/video files) */
   mimeType?: string;
 }
 

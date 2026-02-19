@@ -1,0 +1,111 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "issue_number": 300,
+  "review_date": "2026-02-18",
+  "review_summary": "設計方針書と実装コード・Issue要件・既存アーキテクチャの整合性を精査した結果、全体的に高い整合性が確認された。行番号の参照は全5箇所のencodeURIComponent使用箇所（L1252, L1279, L1305, L1330, L1408）が実際のコードと完全一致し、FileTreeView.tsxの空状態（L827-861）・非空状態（L877-919）の構造も正確に記述されている。path-validator.tsのdecodeURIComponent（L41-47）、route.tsのpathSegments.join（L112）も設計書の記載通りである。ただし、5番目のencodeURIComponent箇所（handleFileInputChange L1408）がupload APIエンドポイント（/upload/）を使用しており、他の4箇所（/files/）とは異なるAPIパスを対象としている点について設計方針書の記載がやや曖昧である。また、useFileOperations.ts（L71）がencodeURIComponentもencodePathForUrlも使用していない点は設計方針書のスコープ外としつつもIssueの注記に記載済みであり整合している。テスト設計もdata-testid命名規則が設計方針書とコードの既存パターンに一致している。",
+  "findings": [
+    {
+      "id": "SF-1",
+      "severity": "should_fix",
+      "category": "設計方針書 ↔ 実装コード: APIエンドポイント整合性",
+      "issue": "設計方針書Section 3.3の修正箇所テーブル（5箇所）で、5番目のhandleFileInputChange (L1408)のAPI PathがAPIパス列で '/api/.../files/' と記載されているが、実際のコードは '/api/worktrees/${worktreeId}/upload/${encodeURIComponent(uploadPath)}' であり、エンドポイントが '/upload/' である。他の4箇所は '/files/' エンドポイントを使用しているため、この差異は実装者に混乱を招く可能性がある。",
+      "location": "設計方針書 Section 3.3 修正箇所テーブル #5",
+      "recommendation": "5番目のAPI Pathを '/api/.../upload/' に修正し、handleFileInputChangeがuploadエンドポイントを使用することを明確にする。これにより、encodePathForUrl適用時のURLパターンの違い（/files/ vs /upload/）を実装者が認識できる。",
+      "evidence": "WorktreeDetailRefactored.tsx L1408: `/api/worktrees/${worktreeId}/upload/${encodeURIComponent(uploadPath)}`。設計方針書では全5箇所共通で '/api/.../files/' と記載されているが、5番目のみ '/api/.../upload/' が正しい。"
+    },
+    {
+      "id": "SF-2",
+      "severity": "should_fix",
+      "category": "設計方針書 ↔ 実装コード: handleNewFileの.md自動付与",
+      "issue": "設計方針書ではhandleNewFile (L1242)の動作として 'handleNewFile(parentPath) <- encodePathForUrl() 使用' とのみ記載しているが、実際のhandleNewFile実装にはL1246-1247で '.md拡張子の自動付与ロジック' が含まれている。encodePathForUrl()はnewPath（拡張子付与後のパス）に対して適用されるが、この自動付与ロジックの存在が設計方針書に記載されていない。設計方針書の目的からすると直接的な影響はないが、handleNewFileの動作契約として認識しておくべき情報である。",
+      "location": "設計方針書 Section 2 コンポーネント関係図、Section 3.3",
+      "recommendation": "設計方針書のスコープ外情報ではあるが、Section 3.3の修正箇所テーブルの備考列にhandleNewFileの特殊動作（.md自動付与後のパスに対してエンコード）を注記として追加することを推奨する。これにより、将来のレビューアや実装者がコンテキストを把握しやすくなる。",
+      "evidence": "WorktreeDetailRefactored.tsx L1246-1248: `const finalName = fileName.endsWith('.md') ? fileName : '${fileName}.md'; const newPath = parentPath ? '${parentPath}/${finalName}' : finalName;`"
+    },
+    {
+      "id": "SF-3",
+      "severity": "should_fix",
+      "category": "テスト設計 ↔ 実装設計: useFileOperations.tsのencodePathForUrl未適用",
+      "issue": "Issueの注記に記載されている通り、useFileOperations.ts (L71) は `/api/worktrees/${worktreeId}/files/${moveTarget.path}` でパスエンコードなし（encodeURIComponentもencodePathForUrlも未使用）でAPIを呼び出している。設計方針書はこれをスコープ外としているが、テスト設計（Section 4.3）で '既存テスト影響' として useFileOperations に関する言及がない。useFileOperationsのmove操作でパスにスペースや特殊文字が含まれる場合の潜在的問題を認識すべきである。",
+      "location": "設計方針書 Section 4.3 既存テスト影響",
+      "recommendation": "Section 4.3にuseFileOperations.ts (L71)のパスエンコード未使用について注記を追加し、本Issueスコープ外であることを明示しつつ、将来のリスクとして記録する。Issue本文の影響範囲セクションには既に注記があるため、設計方針書側にも同様の注記を追加して整合性を取る。",
+      "evidence": "useFileOperations.ts L70-71: `const response = await fetch('/api/worktrees/${worktreeId}/files/${moveTarget.path}', ...)` -- encodeURIComponentもencodePathForUrlも使用されていない。"
+    },
+    {
+      "id": "NTH-1",
+      "severity": "nice_to_have",
+      "category": "設計方針書 ↔ 実装コード: FileTreeViewの行番号の精度",
+      "issue": "設計方針書Section 3.1で '非空状態レンダリング（L877付近）' と記載している。実際のコードではL877がreturn文の開始であり、ツールバーは L877のreturn文直後（L878-883のdiv開始タグの後）に挿入される。'L877付近' という表現は正確であるが、ツールバーの挿入位置はより具体的にはL883（className属性の閉じ '>' の後、L884のfilteredRootItems.mapの前）に挿入すべきであることを明記すると更に明確になる。",
+      "location": "設計方針書 Section 3.1 実装方針",
+      "recommendation": "挿入位置をL883-884間と具体的に記載する。現在の 'L877付近' でも十分に特定可能であるため、優先度は低い。",
+      "evidence": "FileTreeView.tsx L877-884: return文 (L877) -> div開始タグ (L878-883) -> filteredRootItems.map (L884)。ツールバーはL883とL884の間に挿入される。"
+    },
+    {
+      "id": "NTH-2",
+      "severity": "nice_to_have",
+      "category": "設計方針書 ↔ Issue要件: 同名ファイルのエラーハンドリング",
+      "issue": "Issue要件の受け入れ条件に '同名のディレクトリ/ファイルが存在する場合のみFILE_EXISTSエラーとなる' と記載があるが、設計方針書のSection 8受け入れ条件にはこの項目が含まれていない。設計方針書はフロントエンド変更のみをスコープとしており、FILE_EXISTSエラーはバックエンド（file-operations.ts createFileOrDirectory内のexistsSyncチェック）で処理済みのため、設計方針書のスコープからは外れているが、明示的に記載があるとIssue要件との整合性が明確になる。",
+      "location": "設計方針書 Section 8 受け入れ条件",
+      "recommendation": "Section 8に '同名ファイル/ディレクトリの重複チェックは既存バックエンドロジック（file-operations.ts createFileOrDirectory）により処理されており、本変更で影響を受けない' という確認項目を追加する。",
+      "evidence": "Issue要件: '同名のディレクトリ/ファイルが存在する場合のみFILE_EXISTSエラーとなる'。route.ts POST -> createFileOrDirectory -> existsSync(fullPath) で処理済み。設計方針書Section 8には対応する項目なし。"
+    },
+    {
+      "id": "NTH-3",
+      "severity": "nice_to_have",
+      "category": "設計方針書 ↔ 既存アーキテクチャ: 空状態ボタンの行番号",
+      "issue": "設計方針書Section 3.1 [SF-1]で空状態ボタンの行を 'L837-L858' と記載しているが、実際のコードでは空状態ボタンのdiv要素はL836で開始し、L858で閉じる。ボタン要素自体はL838-855の範囲にある。L837はonNewFileのチェック行ではなくL835の '(onNewFile || onNewDirectory) &&' の条件部分であり、若干のずれがある。",
+      "location": "設計方針書 Section 3.1 [SF-1]",
+      "recommendation": "行番号をL835-858またはL836-858に修正する。実装への影響はないため優先度は低い。",
+      "evidence": "FileTreeView.tsx: L835 = `{(onNewFile || onNewDirectory) && (`, L836 = `<div className=\"flex flex-col gap-2 mt-4\">`, L837 = `{onNewFile && (`, L858 = `)}` (divの閉じ括弧)。"
+    }
+  ],
+  "consistency_matrix": {
+    "design_vs_code": {
+      "line_numbers_accuracy": "high",
+      "behavior_description_accuracy": "high",
+      "change_targets_accuracy": "high",
+      "details": "全5箇所のencodeURIComponent行番号（L1252, L1279, L1305, L1330, L1408）は実際のコードと完全一致。FileTreeViewの空状態（L827-861）と非空状態（L877-919）の構造記述も正確。path-validator.tsのdecodeURIComponent（L41-47）、route.tsのpathSegments.join（L112）も一致。唯一、5番目のAPIエンドポイントが/files/ではなく/upload/である点が設計書で不正確。"
+    },
+    "design_vs_issue": {
+      "acceptance_criteria_coverage": "high",
+      "priority_alignment": "high",
+      "scope_alignment": "high",
+      "details": "Issue要件の主要な受け入れ条件（ツールバー追加、encodeURIComponent修正、テスト追加）は設計方針書で全てカバーされている。Issueのdata-testid命名規則（toolbar-new-directory-button等）も設計方針書と一致。FILE_EXISTSエラーの受け入れ条件のみ設計書から欠落しているが、バックエンドスコープ外のため影響は軽微。"
+    },
+    "design_vs_architecture": {
+      "file_placement": "compliant",
+      "component_pattern": "compliant",
+      "type_definitions": "compliant",
+      "details": "新規ファイル src/lib/url-path-encoder.ts はCLAUDE.mdの src/lib/ ルール（ユーティリティ・ビジネスロジック）に従っている。既存の src/lib/url-normalizer.ts がGit URL正規化用として別ファイルで存在することと一貫しており、URL固有ロジックを分離する設計判断はSRP準拠。テストファイルの配置（tests/unit/lib/url-path-encoder.test.ts）も既存パターンに従っている。"
+    },
+    "test_vs_implementation": {
+      "coverage": "high",
+      "testid_naming": "consistent",
+      "details": "テスト設計はencodePathForUrlの基本/エッジケース（SF-3追加分含む9ケース）とFileTreeViewツールバーの6ケースを網羅。data-testidの命名（empty-new-file-button, toolbar-new-file-button等）は既存コードの命名規則と一致。WorktreeDetailRefactored統合テストの省略判断（NTH-3）も合理的。"
+    }
+  },
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_quality": "good",
+  "status": "conditionally_approved",
+  "score": 4,
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-300-root-directory-creation-design-policy.md",
+    "src/components/worktree/FileTreeView.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useFileOperations.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/lib/path-validator.ts",
+    "src/lib/url-normalizer.ts",
+    "tests/unit/components/worktree/FileTreeView.test.tsx"
+  ],
+  "timestamp": "2026-02-18T12:00:00Z"
+}

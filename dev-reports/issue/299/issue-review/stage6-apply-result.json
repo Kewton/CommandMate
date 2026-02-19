@@ -1,0 +1,54 @@
+{
+  "apply_stage": "stage6",
+  "issue_number": 299,
+  "iteration": 2,
+  "apply_date": "2026-02-18",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "z-index.ts内部のJSDocコメント(L17: 9999)と定数値(L32: 50)の不整合を根本原因の仮説セクションに追記。3箇所の不整合（JSDocコメント/定数値/Modal.tsx実装値）を明記。対策案にJSDocコメント・定数値・実装値・MAXIMIZED_EDITORコメントの4箇所統一を追記。受け入れ条件の機能要件にJSDocコメントと定数値の矛盾解消を追加。変更対象ファイルのz-index.ts説明にJSDocコメント不整合解消を追記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "z-40/z-50ハードコードコンポーネントテーブルにHeader.tsx(z-50, L25)とWorktreeDetailRefactored.tsx(z-50, L1819)を追加。受け入れ条件のスタッキング順序検証対象リストにも追加。対策案の統一スコープリストにも追加"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "MAXIMIZED_EDITORコメント「above Modal for iPad fullscreen support」がModal.tsx実装値(z-9999)に対して機能しない点を根本原因の仮説セクションにz-index.ts内部の追加の不整合として追記。対策案の最小スコープにMAXIMIZED_EDITORコメントの正確性確認を追加"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "再現手順の白画面メカニズム(仮説)セクションで「Portal（z-55 = Z_INDEX.MAXIMIZED_EDITOR）で document.body に脱出」を「Portal で document.body に脱出するが、コンテナのz-index（55 = Z_INDEX.MAXIMIZED_EDITOR、containerStyle由来）はModal backdrop（z-9999）より低い」に修正。z-55がPortalではなくcontainerStyleに由来することを明確化"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "MODAL(50) < MAXIMIZED_EDITOR(55) < TOAST(60) < CONTEXT_MENU(70)のスタッキング順序の意図的設計明記は、z-index体系再設計の実装時に判断すべき事項であり、Issueレベルでは現在の記載で十分"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "テスト要件の全順序関係テストの具体化は、テスト実装時の詳細設計で決定すべき事項。現在の「MODAL < MAXIMIZED_EDITOR の関係性等」の記載で方向性は示されている"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 4,
+    "skipped": 2
+  },
+  "update_summary": "Stage 5レビューの全Must Fix(1件)と全Should Fix(3件)を反映。MF-1: z-index.ts内部のJSDocコメント(9999)と定数値(50)の3箇所不整合を根本原因・対策案・受け入れ条件に追記。SF-1: Header.txとWorktreeDetailRefactored.tsxをz-40/z-50ハードコードリストに追加。SF-2: MAXIMIZED_EDITORコメントの実態矛盾を追記。SF-3: Portal(z-55)表現をcontainerStyle由来に修正。Nice to Have 2件はIssueレベルでは不要と判断しスキップ。",
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/299"
+  }
+}

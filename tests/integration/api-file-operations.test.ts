@@ -398,6 +398,44 @@ describe('File Operations API', () => {
     });
   });
 
+  describe('GET /api/worktrees/:id/files/:path (video files - Issue #302)', () => {
+    it('should return video content as Base64 data URI with isVideo flag', async () => {
+      // Create a minimal valid MP4 file (ftyp box)
+      const mp4Header = Buffer.from([
+        0x00, 0x00, 0x00, 0x14, // box size (20 bytes)
+        0x66, 0x74, 0x79, 0x70, // 'ftyp'
+        0x69, 0x73, 0x6F, 0x6D, // 'isom' brand
+        0x00, 0x00, 0x00, 0x00, // minor version
+        0x69, 0x73, 0x6F, 0x6D, // compatible brand
+      ]);
+      writeFileSync(join(testDir, 'test-video.mp4'), mp4Header);
+
+      const request = createRequest('GET', 'test-video.mp4');
+      const params = { params: { id: 'test-worktree', path: ['test-video.mp4'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.isVideo).toBe(true);
+      expect(data.mimeType).toBe('video/mp4');
+      expect(data.content).toMatch(/^data:video\/mp4;base64,/);
+    });
+
+    it('should return 404 for non-existent video file', async () => {
+      const request = createRequest('GET', 'nonexistent.mp4');
+      const params = { params: { id: 'test-worktree', path: ['nonexistent.mp4'] } };
+
+      const response = await GET(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(404);
+      expect(data.success).toBe(false);
+      expect(data.error.code).toBe('FILE_NOT_FOUND');
+    });
+  });
+
   describe('Worktree not found', () => {
     it('should return 404 for non-existent worktree', async () => {
       const request = createRequest('GET', 'test.md');
