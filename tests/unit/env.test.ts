@@ -15,18 +15,45 @@ import {
   ENV_MAPPING,
 } from '@/lib/env';
 
+/**
+ * Issue #304: Environment variables to clean before each test
+ * Ensures tests are not affected by shell environment (.env, NODE_ENV=production, etc.)
+ */
+const ENV_VARS_TO_CLEAN = [
+  'CM_ROOT_DIR', 'CM_PORT', 'CM_BIND', 'CM_DB_PATH',
+  'CM_LOG_LEVEL', 'CM_LOG_FORMAT', 'CM_LOG_DIR',
+  'MCBD_ROOT_DIR', 'MCBD_PORT', 'MCBD_BIND', 'MCBD_DB_PATH',
+  'MCBD_LOG_LEVEL', 'MCBD_LOG_FORMAT', 'MCBD_LOG_DIR',
+  'DATABASE_PATH',
+] as const;
+
+function cleanEnvVars(): void {
+  for (const key of ENV_VARS_TO_CLEAN) {
+    delete process.env[key];
+  }
+}
+
+/**
+ * Common test setup/teardown shared by all describe blocks.
+ * Each describe block only needs to add its own specific reset calls
+ * (e.g. resetWarnedKeys, resetDatabasePathWarning) in a nested beforeEach.
+ */
+const originalEnv = process.env;
+
+beforeEach(() => {
+  process.env = { ...originalEnv };
+  cleanEnvVars();
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  process.env = originalEnv;
+  vi.restoreAllMocks();
+});
+
 describe('getEnvWithFallback', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
-    process.env = { ...originalEnv };
     resetWarnedKeys();
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
   });
 
   it('should return new key value when only new key is set', () => {
@@ -96,17 +123,8 @@ describe('getEnvWithFallback', () => {
 });
 
 describe('getEnvByKey', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
-    process.env = { ...originalEnv };
     resetWarnedKeys();
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
   });
 
   it('should use ENV_MAPPING for fallback correctly', () => {
@@ -122,18 +140,6 @@ describe('getEnvByKey', () => {
 });
 
 describe('resetWarnedKeys', () => {
-  const originalEnv = process.env;
-
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
-  });
-
   it('should allow warning again after reset', () => {
     process.env.MCBD_ROOT_DIR = '/old/path';
 
@@ -148,17 +154,8 @@ describe('resetWarnedKeys', () => {
 });
 
 describe('getEnv with fallback', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
-    process.env = { ...originalEnv };
     resetWarnedKeys();
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
   });
 
   it('should work without warning when new names are used', () => {
@@ -187,17 +184,8 @@ describe('getEnv with fallback', () => {
 });
 
 describe('getLogConfig with fallback', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
-    process.env = { ...originalEnv };
     resetWarnedKeys();
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
   });
 
   it('should work without warning when new names are used', () => {
@@ -250,17 +238,8 @@ describe('ENV_MAPPING', () => {
 
 // Issue #135: DATABASE_PATH deprecation tests
 describe('getDatabasePathWithDeprecationWarning', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
-    process.env = { ...originalEnv };
     resetDatabasePathWarning();
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
   });
 
   it('should return DATABASE_PATH value when set', () => {
@@ -315,18 +294,9 @@ describe('getDatabasePathWithDeprecationWarning', () => {
 
 // Issue #135: getEnv uses getDefaultDbPath tests
 describe('getEnv with DB path resolution (Issue #135)', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
-    process.env = { ...originalEnv };
     resetWarnedKeys();
     resetDatabasePathWarning();
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
   });
 
   it('should use CM_DB_PATH when set', () => {

@@ -1,0 +1,69 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "review_items": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "description": "ENV_VARS_TO_CLEAN リストが env.test.ts, worktree-path-validator.test.ts, db-migration-path.test.ts の3ファイルに分散して重複定義される設計になっている。設計方針書では YAGNI を理由にヘルパー関数化を不採用としているが、リスト自体の重複は将来的な変数追加時にファイル間の同期漏れを招く。特に env.test.ts の15変数リストは保守コストが高い。",
+      "suggestion": "ヘルパー関数化は見送るとしても、ENV_VARS_TO_CLEAN 定数を tests/helpers/env-test-constants.ts 等に一元定義し、各テストファイルからインポートする方式を検討すべき。これは関数の抽象化ではなく、単なるデータ定数の共有であり YAGNI に反しない。ただし対象3ファイルが限定的であり各ファイルで必要な変数が異なる（env.test.ts は全15変数、worktree-path-validator.test.ts は2変数、db-migration-path.test.ts は5変数）ため、現行の個別定義でも許容範囲ではある。設計方針書にこのトレードオフを明記することを推奨する。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "principle": "整合性",
+      "description": "設計方針書 Section 4.2 では env.test.ts の「全7 describe ブロック」の beforeEach に環境変数 delete を追加するとあるが、実際の env.test.ts を確認すると describe ブロックは8つ存在する（getEnvWithFallback, getEnvByKey, resetWarnedKeys, getEnv with fallback, getLogConfig with fallback, ENV_MAPPING, getDatabasePathWithDeprecationWarning, getEnv with DB path resolution）。ENV_MAPPING ブロックは process.env を操作しないため delete 不要だが、設計書の「7箇所」という記述と実際のブロック数が一致しない。",
+      "suggestion": "設計方針書の「全7 describeブロック」を「process.env を操作する7つの describe ブロック」と明確化するか、ENV_MAPPING を除く理由を明記する。あるいは、ENV_MAPPING ブロックにも beforeEach/afterEach パターンが存在しないことを確認し、実際に修正が必要なブロック名を列挙すべき。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "description": "vitest.config.ts の test.env オプション（{ NODE_ENV: 'test' }）を使えば、package.json の6スクリプトそれぞれに NODE_ENV=test を追加する必要がなくなり、よりシンプルかつ設定漏れのリスクがゼロになる。設計方針書では「vitest仕様依存、他ツール非対応」を不採用理由としているが、本プロジェクトのテストランナーは vitest 一本であり、他ツール非対応は実質的なデメリットではない。",
+      "suggestion": "vitest.config.ts に test.env = { NODE_ENV: 'test' } を追加する方式を再検討すべき。package.json プレフィックス方式と vitest.config.ts 方式は排他ではなく併用可能（Defense in Depth）であり、将来の新スクリプト追加時の設定漏れ防止にもなる。ただし、設計方針書で「フォローアップ Issue で検討」と明記されているため、今回は現行設計を維持し、フォローアップ Issue の優先度を明確にすることでも問題ない。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "must_fix",
+      "principle": "整合性",
+      "description": "設計方針書の変更対象ファイル一覧に app-version-display.test.tsx が含まれていない。このファイル（tests/unit/components/app-version-display.test.tsx:216行目）も process.env = { ...originalEnv } パターンを使用しており、.env 由来の NEXT_PUBLIC_APP_VERSION が残留する可能性がある。ただし、このファイルは NEXT_PUBLIC_APP_VERSION のみを操作しており、CM_* / MCBD_* 変数の影響は受けない可能性が高い。設計方針書で「パターンB/Cのテストファイル修正（現時点で影響なし）」としてスコープ外とするのであれば、その判断根拠を明記すべき。",
+      "suggestion": "app-version-display.test.tsx を精査し、.env ファイルの CM_* 変数が該当テストの挙動に影響しないことを確認した上で、設計方針書の「スコープ外」セクションに明示的に記載する。同様に version-checker.test.ts と api-logger.test.ts も process.env を操作しているため、これらがスコープ外である理由を設計方針書に追記する。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "should_fix",
+      "principle": "整合性",
+      "description": "CI ワークフロー（.github/workflows/ci-pr.yml）の test-unit ジョブでは NODE_ENV が明示的に設定されていない。設計方針書は「npm script経由のため自動カバー」としているが、CI 環境では NODE_ENV が未設定（undefined）の状態で npm run test:unit が実行される。package.json に NODE_ENV=test を追加すれば CI も自動的にカバーされるという記述は正しいが、CI ワークフローで NODE_ENV=production が設定されるケース（将来的な CI 設定変更など）への防御が明示されていない。",
+      "suggestion": "設計方針書の「変更なし」セクションにある CI ワークフローの説明を拡充し、npm script のプレフィックスが CI 環境の NODE_ENV を上書きする動作を明記する（Unix では NODE_ENV=test vitest の形式でコマンド直前の変数設定が子プロセスの環境変数を上書きするため）。これにより、レビュアーが「CI でも安全」と確信できる。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "principle": "SOLID",
+      "description": "env.test.ts の各 describe ブロックが独立して同じ beforeEach/afterEach パターンを持つ設計は SRP の観点では適切だが、同一のクリーンアップロジック（15変数の delete）を7箇所に複製することは、env.test.ts 内部での DRY 違反になる。ファイルが長大化し、変数追加時の修正箇所が増大する。",
+      "suggestion": "env.test.ts 内でファイルローカルのヘルパー関数（例: cleanEnvVars()）を定義し、各 describe ブロックの beforeEach から呼び出す方式を検討する。これはファイル内の重複排除であり、外部モジュールへの抽象化とは異なるため YAGNI に反しない。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "description": "env.test.ts の ENV_VARS_TO_CLEAN リストにレガシー MCBD_* 変数（7つ）が含まれている。現在の .env ファイルには CM_* 変数のみが定義されており、MCBD_* 変数は .env から読み込まれる可能性がない。ただし、テスト対象のコードが MCBD_* のフォールバックを実装しているため、テスト前のクリーン対象として含めることは防御的プログラミングとして妥当。",
+      "suggestion": "現行の設計（MCBD_* を含む）は防御的であり妥当。変更不要。ただし、設計方針書にレガシー変数を含める理由（将来の .env 変更や外部環境からの混入に備えた防御的設計）を一行コメントとして追記すると、レビュアーの理解が容易になる。"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "should_fix",
+      "principle": "実装可能性",
+      "description": "設計方針書 Section 4.1 で cross-env パッケージを「Unix前提プロジェクト（tmux依存）、不要」として不採用としているが、NODE_ENV=test vitest の形式は Windows 環境では動作しない。プロジェクトが tmux 依存であることから Unix 限定は妥当な判断だが、package.json の engines フィールドや README にプラットフォーム制約が明記されていない場合、Windows ユーザーがテスト実行に失敗する可能性がある。",
+      "suggestion": "本修正のスコープ内で cross-env を導入する必要はないが、package.json の engines フィールドや README に Unix/macOS 限定であることが既に明記されているか確認すべき。明記されていない場合は、フォローアップで対応を検討する旨を設計方針書に追記する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 4,
+    "total": 8
+  }
+}

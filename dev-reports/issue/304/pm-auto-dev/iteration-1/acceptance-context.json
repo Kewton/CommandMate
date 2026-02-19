@@ -1,0 +1,20 @@
+{
+  "issue_number": 304,
+  "feature_summary": "fix: テスト実行時にNODE_ENVが明示されず本番ビルドのReactが使用される",
+  "acceptance_criteria": [
+    "NODE_ENV=production が設定されたシェルで npm run test:unit を実行しても全テストがパスすること",
+    "NODE_ENV=production が設定されたシェルで npm run test:integration を実行しても全テストがパスすること",
+    "全テストスクリプト（test, test:unit, test:integration, test:watch, test:coverage, test:ui）が外部の NODE_ENV 設定に依存しないこと",
+    "env.test.ts のテストがシェル環境の .env に依存せずパスすること",
+    "既存テストに影響がないこと"
+  ],
+  "test_scenarios": [
+    "シナリオ1: NODE_ENV=production な環境で npm run test:unit を実行し、全テストがパスすること",
+    "シナリオ2: NODE_ENV=production な環境で npm run test:integration を実行し、全テストがパスすること",
+    "シナリオ3: npm run test:unit (通常実行) が全テストパスすること",
+    "シナリオ4: tests/unit/env.test.ts の全25テストがNODE_ENV=productionでもパスすること",
+    "シナリオ5: TypeScript型チェック（npx tsc --noEmit）がエラー0件であること",
+    "シナリオ6: ESLint（npm run lint）がエラー0件であること"
+  ],
+  "tdd_result_path": "dev-reports/issue/304/pm-auto-dev/iteration-1/tdd-result.json"
+}

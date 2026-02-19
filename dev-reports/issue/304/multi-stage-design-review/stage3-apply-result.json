@@ -1,0 +1,7 @@
+{
+  "stage": 3,
+  "applied_items": ["DR3-006", "DR3-015"],
+  "skipped_items": ["DR3-001"],
+  "design_doc_updated": true,
+  "summary": "Should Fix 2件を設計方針書に反映。DR3-006: Section 4.2のdescribeブロック一覧の項目4（getEnv with fallback）に、CM_DB_PATH未設定時のgetDefaultDbPath()フォールバックへの暗黙的依存に関する注記を追加。DR3-015: Section 1のスコープ外テーブルのapi-logger.test.ts行に、対策1適用後にoriginalEnvが常に'test'となりフォールバックが実質不要になるが動作変化なしである旨を補記。Nice to Have 1件（DR3-001）は任意対応のため見送り。info 12件は全て対応不要と確認済み。Stage 3レビュー指摘反映サマリーをSection 12として追加。"
+}

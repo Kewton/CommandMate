@@ -1,0 +1,64 @@
+{
+  "issue_number": 304,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-20",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "R1-001",
+        "status": "applied",
+        "change_summary": "対策1のスクリプトを実際のpackage.jsonの形式に修正: `vitest --project unit` -> `vitest run tests/unit`、全テストスクリプト6種を正確な構文で記載"
+      },
+      {
+        "id": "R1-002",
+        "status": "applied",
+        "change_summary": "変更対象ファイルに全テストスクリプト（test, test:unit, test:integration, test:watch, test:coverage, test:ui）を明記。対策1のコード例にも全6スクリプトを記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "R1-003",
+        "status": "applied",
+        "change_summary": "対策2のdelete対象環境変数を拡充: CM_ROOT_DIR, CM_PORT, CM_BIND, CM_DB_PATH, CM_LOG_LEVEL, CM_LOG_FORMAT, MCBD_ROOT_DIR, DATABASE_PATHを明示的にリストアップ"
+      },
+      {
+        "id": "R1-004",
+        "status": "applied",
+        "change_summary": "根本原因セクションにvitest(Vite)の.envファイル自動注入メカニズムとモジュールスコープでのoriginalEnv評価の因果関係を詳細に明記"
+      },
+      {
+        "id": "R1-005",
+        "status": "applied",
+        "change_summary": "受入条件に`test:integration`の個別条件と、全テストスクリプトが外部NODE_ENVに依存しないことの一般化条件を追加"
+      },
+      {
+        "id": "R1-006",
+        "status": "applied",
+        "change_summary": "対策1にNote追記: package.jsonのスクリプト修正によりCIワークフロー（ci-pr.yml）も自動的にカバーされる旨を明記。影響範囲セクションにもCI環境への影響を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "R1-007",
+        "status": "applied",
+        "change_summary": "代替案セクションを追加: vitest.config.tsのtest.envオプションによるアプローチとpackage.json案のトレードオフを記載。対策1を推奨する理由も明記"
+      },
+      {
+        "id": "R1-008",
+        "status": "skipped",
+        "reason": "プロジェクトがtmux依存でUnix前提であり、Windows互換性は現時点でスコープ外。package.json内の他のスクリプト（start等）も同様のUnix構文を使用しているため、本Issueで言及する必要性は低い"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 7,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/304"
+  }
+}

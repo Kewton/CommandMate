@@ -1,0 +1,124 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-02-20",
+  "issue_number": 304,
+  "review_items": [
+    {
+      "id": "R1-001",
+      "severity": "must_fix",
+      "category": "正確性",
+      "description": "対策1のスクリプト記述が実際のpackage.jsonと不一致。Issue記載では `vitest --project unit` だが、実際は `vitest run tests/unit` である。このまま適用すると意図と異なる動作になる。",
+      "location": "## 対策案 > 対策1",
+      "suggestion": "対策1のスクリプトを実際のpackage.jsonの形式に合わせて修正する: `\"test:unit\": \"NODE_ENV=test vitest run tests/unit\"`, `\"test\": \"NODE_ENV=test vitest\"`",
+      "evidence": "package.json L42: `\"test:unit\": \"vitest run tests/unit\"`, L39: `\"test\": \"vitest\"`。Issue記載の `vitest --project unit` はvitest workspaces機能のオプションであり、本プロジェクトでは使用していない。"
+    },
+    {
+      "id": "R1-002",
+      "severity": "must_fix",
+      "category": "完全性",
+      "description": "変更対象ファイルに `test:integration`、`test:watch`、`test:coverage`、`test:ui` スクリプトが含まれていない。これらも同様にNODE_ENV未指定であり、同じ問題が発生する。",
+      "location": "## 影響範囲 > 変更対象ファイル",
+      "suggestion": "package.jsonの全テスト関連スクリプト（test, test:unit, test:integration, test:watch, test:coverage, test:ui）に `NODE_ENV=test` を追加する旨を明記する。",
+      "evidence": "package.json L39-46: `\"test\": \"vitest\"`, `\"test:integration\": \"vitest run tests/integration\"`, `\"test:watch\": \"vitest --watch\"`, `\"test:coverage\": \"vitest --coverage\"`, `\"test:ui\": \"vitest --ui\"` のいずれにもNODE_ENV指定なし。"
+    },
+    {
+      "id": "R1-003",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "対策2のコード例が具体的にどの環境変数をdeleteすべきか不完全。`.env`ファイルには `CM_ROOT_DIR`, `CM_PORT`, `CM_BIND`, `CM_DB_PATH`, `CM_LOG_LEVEL`, `CM_LOG_FORMAT` の6変数が設定されているが、対策2の例では `CM_ROOT_DIR` と `MCBD_ROOT_DIR` の2変数のみ記載されている。",
+      "location": "## 対策案 > 対策2",
+      "suggestion": "テストで制御が必要な全環境変数（CM_ROOT_DIR, CM_PORT, CM_BIND, CM_DB_PATH, CM_LOG_LEVEL, CM_LOG_FORMAT, DATABASE_PATH, および対応するMCBD_*変数）を明示的にリストアップするか、テスト前に関連する全CM_*/MCBD_*環境変数をdeleteするヘルパー関数の導入を提案する。",
+      "evidence": ".env ファイルに6変数設定済み。env.test.tsの失敗テスト9件はCM_ROOT_DIR, CM_DB_PATH等の残留が原因。"
+    },
+    {
+      "id": "R1-004",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "env.test.tsの `beforeEach` パターン `process.env = { ...originalEnv }` の問題点の説明が不十分。根本原因は `const originalEnv = process.env` がモジュール読み込み時に評価され、その時点で既に.envの値が注入されているため、`{ ...originalEnv }` でコピーしても.envの値が含まれる点にある。Issue本文にはこの因果関係が明示されていない。",
+      "location": "## 根本原因 > 2",
+      "suggestion": "根本原因セクションに「vitest(Vite)がプロジェクトルートの.envファイルをprocess.envに注入し、テストファイルのモジュールスコープで `const originalEnv = process.env` を評価する時点で既に.envの値が含まれている。そのため `beforeEach` で `process.env = { ...originalEnv }` に復元しても.envの値は残り、テストの環境変数分離が不完全になる」と明記する。",
+      "evidence": "env.test.ts L19: `const originalEnv = process.env;` はモジュールスコープ。vitest.config.tsにenvFile設定なし（デフォルトで.envを読み込む）。"
+    },
+    {
+      "id": "R1-005",
+      "severity": "should_fix",
+      "category": "受入条件",
+      "description": "受入条件に `test:integration` 等の他のテストスクリプトに関する条件がない。`test:integration` も同様にNODE_ENV未指定であり、同じ問題が発生し得る。",
+      "location": "## 受入条件",
+      "suggestion": "受入条件に「`NODE_ENV=production` が設定されたシェルで `npm run test:integration` を実行しても全テストがパスすること」を追加する。または「全テストスクリプト（test, test:unit, test:integration, test:watch等）が外部NODE_ENVに依存しないこと」と一般化する。",
+      "evidence": "package.json L43: `\"test:integration\": \"vitest run tests/integration\"` もNODE_ENV未指定。"
+    },
+    {
+      "id": "R1-006",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "CI環境（.github/workflows/ci-pr.yml）でもNODE_ENVが明示的に設定されていない。現在CIではGitHub Actionsのクリーン環境で実行されるため問題は顕在化しにくいが、ビルドジョブと同一ジョブでテストを実行するワークフロー変更時にリスクがある。",
+      "location": "## 影響範囲",
+      "suggestion": "CIワークフロー（ci-pr.yml）のtest-unitジョブのenvセクションに `NODE_ENV: test` を追加することを変更対象ファイルに含めるか、対策1でpackage.jsonのスクリプト自体にNODE_ENVを設定することでCIも同時にカバーされる旨を明記する。",
+      "evidence": ".github/workflows/ci-pr.yml L68-72: test-unitジョブのenvに `CI: 'true'` と `NODE_OPTIONS` のみ。NODE_ENV未設定。"
+    },
+    {
+      "id": "R1-007",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "vitest.config.tsの `env` オプションを利用した代替アプローチへの言及がない。vitest.config.tsで `test.env: { NODE_ENV: 'test' }` を設定する方法は、package.jsonの全スクリプトに個別にNODE_ENVを追加するよりも一元的で漏れにくい。",
+      "location": "## 対策案",
+      "suggestion": "代替アプローチとして vitest.config.ts に `test: { env: { NODE_ENV: 'test' } }` を設定する案も検討・記載する。これによりpackage.jsonスクリプトの個別修正が不要になり、保守性が向上する。ただし、package.jsonのスクリプトによる設定（対策1）はより明示的で分かりやすいため、両方のトレードオフを記載するとよい。",
+      "evidence": "vitest公式ドキュメント: test.envオプションでテスト実行時の環境変数を設定可能。"
+    },
+    {
+      "id": "R1-008",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "Windows環境での互換性への言及がない。`NODE_ENV=test vitest run tests/unit` はUnixシェル構文であり、Windowsのcmd.exeでは動作しない。ただし、本プロジェクトはtmux依存でありWindows対応は現時点でスコープ外と考えられる。",
+      "location": "## 対策案 > 対策1",
+      "suggestion": "Windows互換性が将来的に必要な場合は `cross-env` パッケージの利用を検討する旨を注記として追加する。現時点ではtmux依存のため対応不要である旨も明記するとよい。",
+      "evidence": "package.json L37: `\"start\": \"NODE_ENV=production node dist/server/server.js\"` も同様のUnix構文を使用しており、プロジェクト全体としてUnix前提。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "total": 8
+  },
+  "code_references": [
+    {
+      "file": "package.json",
+      "lines": "39-46",
+      "relevance": "テストスクリプト定義（NODE_ENV未指定の現状確認）"
+    },
+    {
+      "file": "tests/unit/env.test.ts",
+      "lines": "19, 21-29",
+      "relevance": "originalEnvのモジュールスコープ保存とbeforeEachパターン"
+    },
+    {
+      "file": "vitest.config.ts",
+      "lines": "1-32",
+      "relevance": "vitest設定（envFile/env未設定の確認）"
+    },
+    {
+      "file": ".env",
+      "lines": "1-9",
+      "relevance": ".envファイルの環境変数設定（テストに注入される値）"
+    },
+    {
+      "file": ".github/workflows/ci-pr.yml",
+      "lines": "52-72",
+      "relevance": "CIのtest-unitジョブ設定（NODE_ENV未設定の確認）"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "テスト対象のenv関数群"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "開発コマンドとテストスクリプトの記載"
+    }
+  ]
+}

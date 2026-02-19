@@ -1,0 +1,209 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-20",
+  "issue_number": 304,
+  "review_items": [
+    {
+      "id": "R3-001",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "env.test.ts以外にも同一の脆弱なprocess.envパターン（モジュールスコープで `const originalEnv = process.env` を参照代入）を使用しているテストファイルが存在する。worktree-path-validator.test.ts (L11) および db-migration-path.test.ts (L42) が同じパターンを使用しており、.envファイルの値が残留する同一の問題を潜在的に抱えている。Issueの変更対象ファイルにはenv.test.tsしか記載されていないが、これらも対策2の適用対象として検討が必要である。",
+      "location": "## 影響範囲 > 変更対象ファイル",
+      "suggestion": "変更対象ファイルに `tests/unit/lib/worktree-path-validator.test.ts` および `tests/unit/db-migration-path.test.ts` を追加するか、またはこれらが現時点で.env値に依存したテスト失敗を起こしていないか確認し、問題がなければ「現時点では影響なし」と明記する。なお、これらのファイルは `process.env = { ...originalEnv }` でスプレッドコピーしており、env.test.tsと同一パターンであるため、.env注入時に同様のリスクがある。",
+      "evidence": "tests/unit/lib/worktree-path-validator.test.ts L11: `const originalEnv = process.env;`, L15: `process.env = { ...originalEnv };`。tests/unit/db-migration-path.test.ts L42: `const originalEnv = process.env;`, L45: `process.env = { ...originalEnv };`。いずれもenv.test.tsと同一のパターン。"
+    },
+    {
+      "id": "R3-002",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "logger.test.tsとlog-config.test.tsは `const originalEnv = { ...process.env }` とスプレッドコピーで保存しており、env.test.tsの `const originalEnv = process.env`（参照代入）とは異なるパターンを使用している。ただし、スプレッドコピーであっても.envの値を含んだ状態でコピーされるため、テスト内でdelete操作で特定キーを除去しなければ.envの値が残る点は同様である。Issueの影響範囲分析でこのパターンの違いと各ファイルへの影響度を整理すべき。",
+      "location": "## 影響範囲",
+      "suggestion": "process.envを扱うテストファイルのパターンを以下の3種に分類し、それぞれの影響度を記載する：(A) `const originalEnv = process.env`（参照代入、env.test.ts等）-- .envの値が復元時に残留、(B) `const originalEnv = { ...process.env }`（スプレッドコピー、logger.test.ts等）-- .envの値はコピー時に含まれるがbeforeEachでdelete操作している、(C) 単一変数の保存（api-logger.test.ts、version-checker.test.ts等）-- 特定変数のみ操作しており影響は限定的。",
+      "evidence": "logger.test.ts L13: `const originalEnv = { ...process.env };` + L17-18: `delete process.env.CM_LOG_LEVEL; delete process.env.CM_LOG_FORMAT;`。log-config.test.ts L22: `const originalEnv = { ...process.env };` + L27-28: `delete process.env.CM_LOG_DIR; delete process.env.MCBD_LOG_DIR;`。"
+    },
+    {
+      "id": "R3-003",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "app-version-display.test.tsx (L19) でもモジュールスコープの `const originalEnv = { ...process.env }` を使用し、afterEach (L216) で `process.env = { ...originalEnv }` に復元している。このファイルはjsdom環境の@testing-library/reactテストであり、NODE_ENV=productionの影響を最も受けるカテゴリに属する。しかし、このファイルが操作するのは NEXT_PUBLIC_APP_VERSION のみであり、NODE_ENVに関する操作はないため、対策1（package.jsonにNODE_ENV=test追加）で解消される。変更対象ファイルへの追記は不要だが、影響範囲として認識しておくべき。",
+      "location": "## 影響範囲",
+      "suggestion": "影響範囲セクションに、process.envをモジュールスコープで保存するテストファイル一覧（全16ファイル）のうち、対策1で自動的にカバーされるものと対策2の個別対応が必要なものを区分して記載する。",
+      "evidence": "tests/unit/components/app-version-display.test.tsx L19: `const originalEnv = { ...process.env };`, L216: `process.env = { ...originalEnv };`。@testing-library/react使用（jsdom環境）。"
+    },
+    {
+      "id": "R3-004",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "対策1（package.jsonに NODE_ENV=test を追加）は、NODE_ENVに依存するソースコード内のランタイム分岐に影響する可能性がある。具体的には：(1) src/lib/env.ts L160 -- getLogConfig()のデフォルトログレベルがNODE_ENV=productionなら'info'、それ以外なら'debug'。NODE_ENV=testでは'debug'になる（現状のNODE_ENV未設定時と同じ動作）。(2) src/lib/api-logger.ts L86 -- withLogging()はNODE_ENV=developmentでのみログ出力。NODE_ENV=testではログ出力しない（現状と同じ）。(3) src/components/worktree/PromptPanel.tsx L98,117 -- NODE_ENV=productionでなければconsole.error出力。NODE_ENV=testでは出力される（現状と同じ）。いずれも対策1による動作変更はなく、既存テストへの悪影響はない。",
+      "location": "## 影響範囲",
+      "suggestion": "Issueの影響範囲セクションに「NODE_ENVに依存するソースコード分岐への影響なし」の確認結果を簡潔に記載するとよい。これにより、レビュアーが対策1の安全性を迅速に判断できる。",
+      "evidence": "src/lib/env.ts L160: `process.env.NODE_ENV === 'production' ? 'info' : 'debug'`。src/lib/api-logger.ts L86: `process.env.NODE_ENV !== 'development'`。src/components/worktree/PromptPanel.tsx L98: `process.env.NODE_ENV !== 'production'`。いずれもNODE_ENV=testは既存の未設定時と等価の動作。"
+    },
+    {
+      "id": "R3-005",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "CI/CDパイプライン（.github/workflows/ci-pr.yml）への影響は限定的。現在CIのtest-unitジョブ（L68-72）はNODE_ENVを明示設定していないが、GitHub Actionsのクリーン環境ではNODE_ENVが未設定のため問題は顕在化していない。対策1でpackage.jsonのスクリプトにNODE_ENV=testが追加されれば、CIも`npm run test:unit`経由で自動的にカバーされるため、ci-pr.ymlへの個別修正は不要。ただし、この事実をIssueに明記することで、CIへの影響有無の判断が容易になる。",
+      "location": "## 影響範囲",
+      "suggestion": "Issueに「CIワークフロー（ci-pr.yml）はnpm scriptを経由してテストを実行するため、package.jsonのNODE_ENV=test追加で同時にカバーされる。ci-pr.yml側の変更は不要。」と明記する。",
+      "evidence": ".github/workflows/ci-pr.yml L69: `run: npm run test:unit`。スクリプト経由で実行されるためpackage.jsonの設定が適用される。"
+    },
+    {
+      "id": "R3-006",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "description": "Viteが.envファイルを自動読み込みする仕様に関して、対策2（env.test.tsの修正）だけでは根本解決にならない可能性がある。vitest.config.tsには `envPrefix` や `envFile: false` の設定がなく、デフォルトでプロジェクトルートの `.env` ファイルが `process.env` に注入される。これはenv.test.ts以外の全テストファイルにも影響する。env.test.ts以外のprocess.envを扱う全15ファイルが潜在的に.env値の汚染を受けている。特にlogger.test.ts、log-config.test.ts、worktree-path-validator.test.ts、db-migration-path.test.ts等で.env由来の環境変数（CM_ROOT_DIR、CM_DB_PATH等）がテスト結果に影響する可能性がある。Issueの変更対象ファイルとしてvitest.config.tsの設定変更（envPrefix設定や個別テスト内での対策）も検討すべき。",
+      "location": "## 対策案",
+      "suggestion": "対策案に以下の選択肢を追加検討する：(A) vitest.config.tsに `envPrefix: ['VITE_']` を設定して.envからの自動注入をVITE_プレフィックスのみに制限する。これによりCM_*やMCBD_*等のサーバーサイド環境変数がテストに注入されなくなる。(B) テスト用の.env.testファイルを作成し、テスト環境で必要な最小限の環境変数のみを定義する。(C) 現行の.envファイルがテストに注入される前提で、各テストファイルが必要な環境変数を明示的にセットアップするパターンを標準化する。これらの選択肢のトレードオフを影響範囲セクションに記載する。",
+      "evidence": "vitest.config.ts にenvPrefix/envFile設定なし。Viteのデフォルト動作でプロジェクトルートの.envが読み込まれる。.envにはCM_ROOT_DIR=/Users/maenokota/share/work/github_kewton、CM_DB_PATH=/Users/maenokota/.commandmate/data/cm.db等が設定されており、これらがテスト実行時にprocess.envに注入される。"
+    },
+    {
+      "id": "R3-007",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "66ファイルのjsdom環境テスト（@testing-library/react使用）がNODE_ENV=productionでact()エラーにより一括失敗する点は記載されているが、4件の統合テスト（tests/integration/以下）のうち3件もjsdom環境であり同じ影響を受ける。受入条件に `npm run test:integration` の検証が追加されたが、影響範囲セクションの変更対象ファイル一覧には統合テストへの影響が明記されていない。",
+      "location": "## 影響範囲",
+      "suggestion": "影響範囲セクションの記述を「62ファイル/1112テスト（unit）」から「unit: 62ファイル/1112テスト + integration: 3ファイル（jsdom環境の統合テスト）」のように統合テストへの影響も含めた記述に更新する。",
+      "evidence": "tests/integration/worktree-detail-integration.test.tsx、tests/integration/issue-266-acceptance.test.tsx、tests/integration/issue-288-acceptance.test.tsx が @testing-library/react を使用しjsdom環境で実行。tests/integration/issue-265-acceptance.test.ts はnode環境で影響なし。"
+    },
+    {
+      "id": "R3-008",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "CLAUDE.mdの開発コマンドセクションにテストコマンドが `npm test`, `npm run test:unit` 等として記載されているが、NODE_ENV=testの明示に関する注意書きはない。対策1実施後は開発者がスクリプト経由で実行する限り問題ないが、開発者が直接 `vitest run tests/unit` と実行した場合にはNODE_ENV=testが適用されない。",
+      "location": "## 影響範囲",
+      "suggestion": "CLAUDE.mdの開発コマンドセクションに「テストは必ず `npm run test:unit` 等のnpmスクリプト経由で実行すること。直接vitestコマンドを実行するとNODE_ENVが設定されないため、環境依存の問題が発生する可能性がある」旨の注記を追加する。もしくはvitest.config.tsの `test.env` オプションで `NODE_ENV: 'test'` を設定すれば直接実行でも安全になる。",
+      "evidence": "CLAUDE.md L282-290: 開発コマンドセクション。vitest直接実行に関する注意事項なし。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 4,
+    "nice_to_have": 3,
+    "total": 8
+  },
+  "code_references": [
+    {
+      "file": "package.json",
+      "lines": "39-46",
+      "relevance": "テストスクリプト定義（NODE_ENV未指定の現状確認）"
+    },
+    {
+      "file": "tests/unit/env.test.ts",
+      "lines": "19, 99, 125, 151, 190, 253, 318",
+      "relevance": "process.env参照代入パターンの主要対象ファイル"
+    },
+    {
+      "file": "tests/unit/lib/worktree-path-validator.test.ts",
+      "lines": "11, 15, 19",
+      "relevance": "env.test.tsと同一のprocess.envパターン使用"
+    },
+    {
+      "file": "tests/unit/db-migration-path.test.ts",
+      "lines": "42, 45, 50",
+      "relevance": "env.test.tsと同一のprocess.envパターン使用"
+    },
+    {
+      "file": "tests/unit/logger.test.ts",
+      "lines": "13, 29-34",
+      "relevance": "スプレッドコピー+delete+Object.assignパターン"
+    },
+    {
+      "file": "tests/unit/config/log-config.test.ts",
+      "lines": "22, 33-38",
+      "relevance": "スプレッドコピー+delete+Object.assignパターン"
+    },
+    {
+      "file": "tests/unit/api-logger.test.ts",
+      "lines": "41, 48",
+      "relevance": "NODE_ENV単一変数の保存・復元パターン"
+    },
+    {
+      "file": "tests/unit/components/app-version-display.test.tsx",
+      "lines": "19, 216",
+      "relevance": "スプレッドコピーによるprocess.env保存（jsdom環境）"
+    },
+    {
+      "file": "vitest.config.ts",
+      "lines": "1-32",
+      "relevance": "envPrefix/envFile未設定。.env自動読み込みのデフォルト動作"
+    },
+    {
+      "file": ".env",
+      "lines": "1-9",
+      "relevance": ".envファイルの環境変数設定（テストに注入される値）"
+    },
+    {
+      "file": ".github/workflows/ci-pr.yml",
+      "lines": "52-72",
+      "relevance": "CIのtest-unitジョブ設定（NODE_ENV未設定、npm script経由で自動カバー）"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "lines": "160",
+      "relevance": "NODE_ENV依存のログレベルデフォルト設定"
+    },
+    {
+      "file": "src/lib/api-logger.ts",
+      "lines": "86",
+      "relevance": "NODE_ENV依存のログ出力制御"
+    },
+    {
+      "file": "src/components/worktree/PromptPanel.tsx",
+      "lines": "98, 117",
+      "relevance": "NODE_ENV依存のエラーログ出力"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "開発コマンドとテストスクリプトの記載（直接vitest実行への注意事項未記載）"
+    }
+  ],
+  "impact_analysis": {
+    "affected_test_files_by_pattern": {
+      "pattern_A_reference_assignment": {
+        "description": "const originalEnv = process.env（参照代入）-- .envの値が復元時に残留するリスクあり",
+        "files": [
+          "tests/unit/env.test.ts",
+          "tests/unit/lib/worktree-path-validator.test.ts",
+          "tests/unit/db-migration-path.test.ts"
+        ]
+      },
+      "pattern_B_spread_copy": {
+        "description": "const originalEnv = { ...process.env }（スプレッドコピー）-- .envの値はコピー時に含まれるがbeforeEachでdelete操作",
+        "files": [
+          "tests/unit/logger.test.ts",
+          "tests/unit/config/log-config.test.ts",
+          "tests/unit/components/app-version-display.test.tsx"
+        ]
+      },
+      "pattern_C_single_variable": {
+        "description": "単一変数の保存・復元 -- 特定変数のみ操作しており影響は限定的",
+        "files": [
+          "tests/unit/api-logger.test.ts",
+          "tests/unit/lib/version-checker.test.ts",
+          "tests/unit/log-export-sanitizer.test.ts",
+          "tests/unit/lib/clone-manager.test.ts",
+          "tests/unit/cli/utils/security-logger.test.ts"
+        ]
+      }
+    },
+    "jsdom_test_files_count": 67,
+    "integration_jsdom_test_files": [
+      "tests/integration/worktree-detail-integration.test.tsx",
+      "tests/integration/issue-266-acceptance.test.tsx",
+      "tests/integration/issue-288-acceptance.test.tsx"
+    ],
+    "node_env_dependent_source_files": [
+      "src/lib/env.ts (L160)",
+      "src/lib/logger.ts (L141)",
+      "src/lib/api-logger.ts (L86)",
+      "src/components/worktree/PromptPanel.tsx (L98, L117)"
+    ],
+    "breaking_changes": "none",
+    "ci_cd_impact": "npm script経由のため対策1で自動カバー。ci-pr.yml変更不要。"
+  }
+}

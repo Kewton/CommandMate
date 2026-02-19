@@ -1,0 +1,64 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_items": [
+    {
+      "id": "R5-001",
+      "severity": "should_fix",
+      "description": "jsdom環境の統合テストファイル数を3から4に修正。conversation-pair-card.test.tsx を影響テスト一覧に追加",
+      "changes": [
+        "概要セクション: 「3ファイル（integration、jsdom環境）」を「4ファイル（integration、jsdom環境）」に修正",
+        "再現手順セクション: 同上",
+        "実際の動作 > 影響を受けるテスト: Integration一覧に conversation-pair-card.test.tsx を追加、ファイル数を4に修正"
+      ]
+    },
+    {
+      "id": "R5-002",
+      "severity": "should_fix",
+      "description": "unit テストの影響ファイル数を「62ファイル / 1112テスト」から「61ファイル（jsdom + @testing-library/react使用）」に修正。算出根拠を概要に追記",
+      "changes": [
+        "概要セクション: 「62ファイル/1112テスト」を「61ファイル（unit、jsdom + @testing-library/react使用）」に修正",
+        "概要セクション: ファイル数の算出根拠を追記（jsdom全63件のうち@testing-library/react使用61件、残り2件はact()エラー影響なし）",
+        "再現手順セクション: 同上",
+        "実際の動作 > 影響を受けるテスト: Unit欄にjsdom環境63ファイルのうち61ファイルが対象である旨と、除外2ファイルの理由を明記"
+      ]
+    },
+    {
+      "id": "R5-006",
+      "severity": "should_fix",
+      "description": "R5-001と同時対応。Stage 3で漏れていたconversation-pair-card.test.tsxへの言及をすべてのセクションに追加",
+      "changes": [
+        "R5-001の変更に含まれる"
+      ]
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "R5-003",
+      "severity": "nice_to_have",
+      "reason": "Issueの簡潔さを維持。対策2のコード例における全レガシー変数の明示は実装時に対応すれば十分"
+    },
+    {
+      "id": "R5-004",
+      "severity": "nice_to_have",
+      "reason": "Issueの簡潔さを維持。worktree-path-validator.test.ts等の対策2適用候補の扱い明確化は実装段階で判断"
+    },
+    {
+      "id": "R5-005",
+      "severity": "nice_to_have",
+      "reason": "Issueの簡潔さを維持。envPrefixの技術的精緻化は追加検討セクションのスコープであり本Issueの必須対策ではない"
+    }
+  ],
+  "github_updated": true,
+  "github_url": "https://github.com/Kewton/CommandMate/issues/304",
+  "applied_date": "2026-02-20",
+  "verification": {
+    "integration_jsdom_files_actual": 4,
+    "integration_jsdom_files_in_issue": 4,
+    "unit_jsdom_files_total": 63,
+    "unit_jsdom_with_testing_library": 61,
+    "unit_jsdom_without_testing_library": 2,
+    "unit_affected_files_in_issue": 61
+  },
+  "summary": "Stage 5 レビューの should_fix 3件（R5-001, R5-002, R5-006）を反映。統合テストのjsdomファイル数を3から4に修正しconversation-pair-card.test.tsxを追加。unitテストの影響ファイル数を62から61に修正し算出根拠（jsdom全63件のうち@testing-library/react使用61件）を明記。nice_to_have 3件（R5-003, R5-004, R5-005）はスキップ。"
+}

@@ -1,0 +1,180 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_items": [
+    {
+      "id": "DR3-001",
+      "category": "package.jsonスクリプト変更の影響",
+      "severity": "nice_to_have",
+      "title": "getLogConfig()のデフォルトログレベルがNODE_ENV=testで'debug'になる動作確認",
+      "description": "src/lib/env.ts L160の `process.env.NODE_ENV === 'production' ? 'info' : 'debug'` において、NODE_ENV=testの場合はproductionではないため defaultLevel='debug' となる。現状NODE_ENVが未設定の場合はundefinedで同じく'debug'になるため、既存動作との差異はない。ただし、NODE_ENV=productionが残留していたシェル環境では今まで'info'だったものが'test'に変わることで'debug'になる。これはテスト実行時の動作であり、テスト結果への影響は getLogConfig テストで明示的にCM_LOG_LEVELを設定しているため問題ない。設計書に明記するとより丁寧だが、実質的な問題はない。",
+      "affected_file": "src/lib/env.ts",
+      "affected_line": 160,
+      "recommendation": "設計書Section 4.1の補足として、NODE_ENV=testの場合にgetLogConfig()がデフォルトで'debug'を返す（production以外のため）ことを注記すると影響が明確になるが、テスト結果には影響しないため対応は任意。",
+      "risk_level": "low"
+    },
+    {
+      "id": "DR3-002",
+      "category": "package.jsonスクリプト変更の影響",
+      "severity": "info",
+      "title": "api-logger.tsのNODE_ENV !== 'development'チェックとの整合性は問題なし",
+      "description": "src/lib/api-logger.ts L86の `process.env.NODE_ENV !== 'development'` は、NODE_ENV=testの場合にtrueとなりロギングをスキップする。tests/unit/api-logger.test.tsのTest 3（L118）で既に NODE_ENV=test でロギングされないことを確認済み。package.jsonでNODE_ENV=testを設定しても、このテストの期待値と一致するため問題なし。",
+      "affected_file": "src/lib/api-logger.ts",
+      "affected_line": 86,
+      "recommendation": "対応不要。設計書のスコープ外判断は正しい。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-003",
+      "category": "package.jsonスクリプト変更の影響",
+      "severity": "info",
+      "title": "PromptPanel.tsxのNODE_ENV !== 'production'チェックへの影響なし",
+      "description": "src/components/worktree/PromptPanel.tsx L98, L117の `process.env.NODE_ENV !== 'production'` は、NODE_ENV=testの場合にtrueとなりconsole.errorが出力される。これはコンポーネントテスト中のデバッグ出力であり、テスト結果のpass/failには影響しない。",
+      "affected_file": "src/components/worktree/PromptPanel.tsx",
+      "affected_line": 98,
+      "recommendation": "対応不要。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-004",
+      "category": "package.jsonスクリプト変更の影響",
+      "severity": "info",
+      "title": "logger.tsのshouldLogOnClient()への影響なし",
+      "description": "src/lib/logger.ts L141の `process.env.NODE_ENV === 'development'` は、NODE_ENV=testの場合にfalseとなりクライアントサイドログが抑制される。テスト実行時にクライアントサイドログが不要なため、期待通りの動作。",
+      "affected_file": "src/lib/logger.ts",
+      "affected_line": 141,
+      "recommendation": "対応不要。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-005",
+      "category": "CIパイプラインへの影響",
+      "severity": "info",
+      "title": "CI ワークフローのNODE_ENV上書きメカニズムは正しい",
+      "description": ".github/workflows/ci-pr.yml のtest-unitジョブ（L69）は `npm run test:unit` を実行する。package.jsonスクリプトのNODE_ENV=testプレフィックスはUnixシェルのインラインenv設定として子プロセスに渡されるため、CIのenv設定でNODE_ENVが設定されていなくても（実際にL70-72ではCIとNODE_OPTIONSのみ）問題ない。設計書のDR1-005の記述は正確。",
+      "affected_file": ".github/workflows/ci-pr.yml",
+      "affected_line": 69,
+      "recommendation": "対応不要。設計書の記述通り。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-006",
+      "category": "テストファイル修正の影響",
+      "severity": "should_fix",
+      "title": "env.test.tsの'getEnv with fallback'テスト（L164-173）で.env由来のCM_DB_PATHが残留する可能性",
+      "description": "env.test.tsのL164-173のテスト 'should work without warning when new names are used' では、CM_ROOT_DIR/CM_PORT/CM_BINDのみを設定し、CM_DB_PATHは設定していない。getEnv()内部ではCM_DB_PATH -> DATABASE_PATH -> getDefaultDbPath() のフォールバックチェーンが走る（env.ts L205-207）。.envファイルに CM_DB_PATH=/Users/maenokota/.commandmate/data/cm.db が設定されており、process.env = { ...originalEnv } でコピーされるため、この値が残留する。現在のテストではCM_DB_PATHの値をアサートしていないので直ちにfailはしないが、deleteを追加しないと getEnv() の戻り値に.env由来のパスが混入した状態でテストがpassすることになり、テストの意図（モック環境での動作確認）と実態が乖離する。設計書のENV_VARS_TO_CLEANにCM_DB_PATHが含まれているため、設計通り実装すれば問題は解消されるが、このテストケースが本当に意図した動作を検証しているか、実装時に留意すべき。",
+      "affected_file": "tests/unit/env.test.ts",
+      "affected_line": 164,
+      "recommendation": "設計書Section 4.2のENV_VARS_TO_CLEANに全変数が含まれているため、実装通りに進めれば問題は解消される。ただし、設計書に「getEnv with fallbackテストでCM_DB_PATHが未設定時にgetDefaultDbPath()にフォールバックすることを暗黙に依存している」旨を注記すると、実装者の理解が深まる。",
+      "risk_level": "low"
+    },
+    {
+      "id": "DR3-007",
+      "category": "テストファイル修正の影響",
+      "severity": "info",
+      "title": "env.test.tsの既存afterEach復元パターンとの整合性は問題なし",
+      "description": "env.test.tsの全describeブロックでは afterEach で `process.env = originalEnv` として参照を復元している。beforeEachで delete を追加しても、次のテスト前にoriginalEnv（.env値を含むスナップショット）が復元された後にdelete が走るため、テスト間の独立性は保たれる。設計書の方針は正しい。",
+      "affected_file": "tests/unit/env.test.ts",
+      "affected_line": 27,
+      "recommendation": "対応不要。設計書の afterEach 変更不要の判断は正しい。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-008",
+      "category": "テストファイル修正の影響",
+      "severity": "info",
+      "title": "worktree-path-validator.test.tsのvi.resetModules()とdynamic importの整合性",
+      "description": "worktree-path-validator.test.ts L13-14では vi.resetModules() と process.env = { ...originalEnv } を beforeEach で実行し、L66-68の'environment variable configuration'テストで dynamic import を使用してモジュールを再読み込みしている。ALLOWED_WORKTREE_PATHS の delete を beforeEach に追加しても、dynamic import 前に process.env.ALLOWED_WORKTREE_PATHS を設定するテスト（L64）には影響しない。delete は .env ファイルに ALLOWED_WORKTREE_PATHS が設定された場合の防御策であり、現在の .env には含まれていない（確認済み）。したがって、現時点で既存テストを壊すリスクはない。",
+      "affected_file": "tests/unit/lib/worktree-path-validator.test.ts",
+      "affected_line": 13,
+      "recommendation": "対応不要。設計書の方針通りで安全。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-009",
+      "category": "テストファイル修正の影響",
+      "severity": "info",
+      "title": "db-migration-path.test.tsは既にDATABASE_PATH deleteを実施済みで追加変更不要",
+      "description": "db-migration-path.test.ts L46で既に `delete process.env.DATABASE_PATH` を実施している。ソースコード db-migration-path.ts L86 が参照するのは DATABASE_PATH のみであり、CM_DB_PATH/MCBD_DB_PATH への直接参照は存在しない。.env ファイルには DATABASE_PATH が含まれておらず（確認済み）、CM_DB_PATH が含まれているがソースコードが参照しないため影響なし。設計書の「追加変更なし」判断は正しい。",
+      "affected_file": "tests/unit/db-migration-path.test.ts",
+      "affected_line": 46,
+      "recommendation": "対応不要。設計書の判断は正確。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-010",
+      "category": "未変更ファイルへの波及",
+      "severity": "info",
+      "title": "テストファイル間の依存関係はなし",
+      "description": "env.test.ts、worktree-path-validator.test.ts、db-migration-path.test.tsはいずれも他のテストファイルからインポートされていない（grep確認済み）。各テストファイルは独立して実行可能であり、変更が他のテストファイルに波及するリスクはない。",
+      "affected_file": "tests/unit/env.test.ts",
+      "affected_line": null,
+      "recommendation": "対応不要。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-011",
+      "category": "未変更ファイルへの波及",
+      "severity": "info",
+      "title": "tests/setup.tsのグローバル設定への影響なし",
+      "description": "tests/setup.ts はnext-intlモック、Element.scrollToモック、afterEach/afterAllの空クリーンアップのみを行っている。process.env の操作やNODE_ENV の参照は存在しない。package.json の NODE_ENV=test 追加や個別テストファイルのbeforeEach変更は、setup.ts の動作に一切影響しない。",
+      "affected_file": "tests/setup.ts",
+      "affected_line": null,
+      "recommendation": "対応不要。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-012",
+      "category": "未変更ファイルへの波及",
+      "severity": "info",
+      "title": "vitest.config.tsの.env自動読み込みに関する確認",
+      "description": "vitest.config.ts には envPrefix や env 設定が存在せず、dotenv/loadEnv の明示的な呼び出しもない。Vitest はデフォルトで Vite の環境変数読み込み機構を使用し、.env ファイルを自動読み込みする可能性がある（Vite のloadEnv動作）。ただし、Vite のデフォルトでは VITE_ プレフィックス付きの変数のみが import.meta.env に公開され、process.env には直接追加されない。しかし、process.env への注入はNode.jsのdotenvまたはVite固有の動作に依存する。現在の問題は process.env に .env の値が残留することであるため、設計書の対策2（beforeEach での delete）は正しいアプローチである。",
+      "affected_file": "vitest.config.ts",
+      "affected_line": null,
+      "recommendation": "対応不要。設計書がvitest.config.tsのenvPrefix設定をフォローアップIssueとして見送った判断は妥当。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-013",
+      "category": "本番環境への影響",
+      "severity": "info",
+      "title": "ソースコード変更なしのため本番ビルド/実行への影響なし",
+      "description": "設計書の変更対象はpackage.jsonのテストスクリプト（test/test:ui/test:coverage/test:unit/test:integration/test:watch）と3つのテストファイルのみ。start/build/dev/lint スクリプトには変更がなく、src/ 配下のソースコードも一切変更しない。npm run build や npm run start の動作に影響するパスは存在しない。",
+      "affected_file": "package.json",
+      "affected_line": null,
+      "recommendation": "対応不要。設計書のスコープ設定は適切。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-014",
+      "category": "本番環境への影響",
+      "severity": "info",
+      "title": "next.config.jsのenv設定への影響なし",
+      "description": "next.config.js L9-11 で env: { NEXT_PUBLIC_APP_VERSION: packageJson.version } が設定されているが、これはビルド時のNext.js環境変数であり、NODE_ENV=testのテストスクリプト変更とは無関係。npm run build の実行時にはNODE_ENV=testは設定されない（buildスクリプトにはプレフィックスが追加されない）。",
+      "affected_file": "next.config.js",
+      "affected_line": 9,
+      "recommendation": "対応不要。",
+      "risk_level": "none"
+    },
+    {
+      "id": "DR3-015",
+      "category": "package.jsonスクリプト変更の影響",
+      "severity": "should_fix",
+      "title": "api-logger.test.tsのoriginalEnv保存タイミングとNODE_ENV=testプレフィックスの整合性",
+      "description": "tests/unit/api-logger.test.ts L41で `const originalEnv = process.env.NODE_ENV` を実行している。対策1でpackage.jsonにNODE_ENV=testが追加されると、このタイミングでoriginalEnvに'test'が格納される。L48の afterEach で `setNodeEnv(originalEnv ?? 'test')` により復元されるが、originalEnvが'test'なので `setNodeEnv('test')` と等価になる。Test 3（L118-131）ではsetNodeEnv('test')を明示的に呼んでいるため、動作の変化はない。しかし、現状ではNODE_ENVが未設定の環境ではoriginalEnvがundefinedとなり、afterEachで'test'にフォールバックされるという暗黙の動作がある。設計書はこのファイルをスコープ外としているが、対策1の適用により実質的にoriginalEnvが常に'test'になるため、?? 'test'のフォールバックが不要になる副作用がある。これは問題ではないが、設計書のスコープ外判断根拠にこの動作変化を含めるとより精緻になる。",
+      "affected_file": "tests/unit/api-logger.test.ts",
+      "affected_line": 41,
+      "recommendation": "設計書Section 1のスコープ外テーブルのapi-logger.test.tsの行に、「対策1の適用によりoriginalEnvが常に'test'となるため、afterEachのフォールバック(??'test')は実質的に不要となるが、既存のテスト動作に変化はない」旨を補記するとより完全な影響分析となる。ただし、テスト結果への影響はないため対応は推奨レベル。",
+      "risk_level": "low"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 1,
+    "info": 12,
+    "total": 15
+  },
+  "overall_assessment": "設計方針書の変更による影響範囲は極めて限定的であり、本番環境への波及リスクはゼロと判断する。NODE_ENV=testプレフィックスの追加はソースコード内の5箇所のprocess.env.NODE_ENV参照に対して安全であり、全てのケースで既存テストの期待値と一致する。テストファイル間の依存関係はなく、tests/setup.tsやvitest.config.tsへの影響もない。CIパイプラインは設計書DR1-005の通りnpm scriptプレフィックスにより自動カバーされる。should_fix項目は設計書の補足説明に関するものであり、実装の安全性には影響しない。"
+}

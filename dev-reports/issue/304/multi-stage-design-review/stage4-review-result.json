@@ -1,0 +1,95 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "status": "approved",
+  "score": 5,
+  "review_items": [
+    {
+      "id": "DR4-001",
+      "category": "環境変数の扱い",
+      "severity": "info",
+      "title": "process.env操作時の情報漏洩リスクは限定的",
+      "description": "テストコードでのprocess.env操作（スプレッドコピー・delete・復元）はVitest実行プロセス内に閉じており、外部への情報漏洩パスは存在しない。beforeEach/afterEachパターンによる復元も適切に設計されている。",
+      "recommendation": "対応不要。現行設計で十分。",
+      "status": "acceptable"
+    },
+    {
+      "id": "DR4-002",
+      "category": "環境変数の扱い",
+      "severity": "info",
+      "title": ".envファイルの機密情報がテスト出力に露出するリスク",
+      "description": ".envファイルはVitestの標準動作としてプロセスに自動読み込みされる（Vite/Vitestはデフォルトでルートの.envを読み込む）。現在の.envにはCM_ROOT_DIR（ユーザーディレクトリパス）、CM_DB_PATH（DBファイルパス）等のローカルパス情報が含まれるが、パスワード・トークン・APIキー等の高感度情報は含まれていない。テスト出力にこれらのパス値が表示される可能性はあるが、ローカル開発環境限定であり、CIではnpm ciによりクリーンインストールされ.envは存在しない（.gitignoreに登録済み）。",
+      "recommendation": "対応不要。.envは.gitignoreに含まれており、CI環境では存在しない。ローカル開発環境での露出リスクは許容範囲内。",
+      "status": "acceptable"
+    },
+    {
+      "id": "DR4-003",
+      "category": "テスト環境の分離",
+      "severity": "info",
+      "title": "NODE_ENV=testによる本番データベース接続防止",
+      "description": "NODE_ENV=testの設定はReactのact()有効化（テスト用警告制御）が主目的であり、本番データベースへの接続防止を直接的に担うものではない。ただし、本プロジェクトではSQLite（ローカルファイルDB）を使用しており、外部データベースサーバーへの接続自体が存在しない。テスト時のDBパスは各テストのprocess.envモック操作により制御される設計となっている。対策2（beforeEachでのdelete）により、.envのCM_DB_PATHが削除され、テストが意図しないDBファイルに接続するリスクはさらに軽減される。",
+      "recommendation": "対応不要。SQLiteのローカルファイルDB特性と、テスト内のモック設計により、本番DB接続リスクは構造的に存在しない。",
+      "status": "acceptable"
+    },
+    {
+      "id": "DR4-004",
+      "category": "テスト環境の分離",
+      "severity": "info",
+      "title": "テスト実行時の外部サービス接続リスク",
+      "description": "対象テストファイル（env.test.ts、worktree-path-validator.test.ts、db-migration-path.test.ts）はいずれも環境変数処理・パス検証・DBマイグレーションパスロジックのユニットテストであり、HTTP/HTTPS接続、WebSocket接続、外部API呼び出し等の外部サービス通信は一切含まれていない。dotenvの自動読み込みもCLIモジュール（src/cli/）で明示的に呼び出す設計であり、テスト実行時に自動的にdotenvが外部接続を引き起こすことはない。",
+      "recommendation": "対応不要。",
+      "status": "acceptable"
+    },
+    {
+      "id": "DR4-005",
+      "category": "CI/CDセキュリティ",
+      "severity": "info",
+      "title": "package.jsonスクリプト変更によるCIシークレット漏洩リスク",
+      "description": "NODE_ENV=testプレフィックスの追加は、環境変数の値を固定値（'test'）に設定するのみであり、CIシークレット（GITHUB_TOKEN等）へのアクセスパターンを変更しない。変更対象はtest系スクリプト6本のみで、build/start/deploy系スクリプトには影響しない。CIワークフロー（ci-pr.yml）ではnpm run test:unitを実行しており、NODE_ENV=testが子プロセスに渡される動作はUnixシェルの標準仕様である。新たなシークレットの露出経路は生じない。",
+      "recommendation": "対応不要。シークレット漏洩リスクの増減はない。",
+      "status": "acceptable"
+    },
+    {
+      "id": "DR4-006",
+      "category": "OWASP A05:2021 セキュリティの設定ミス",
+      "severity": "info",
+      "title": "テスト専用設定の本番混入リスク",
+      "description": "本修正の変更点は以下の2種類のみ: (1) package.jsonのtestスクリプトへのNODE_ENV=testプレフィックス追加 -- これはnpm run test:*実行時のみ有効であり、npm startやnpm run build等の本番系コマンドには影響しない。(2) テストファイル内のbeforeEachでのprocess.env delete追加 -- テストコード内に閉じた変更であり、src/以下のソースコードには変更がない。テスト専用の設定値やテスト用の条件分岐がソースコードに混入するリスクは存在しない。",
+      "recommendation": "対応不要。ソースコード変更なしの設計方針により、テスト設定の本番混入リスクは構造的に排除されている。",
+      "status": "acceptable"
+    },
+    {
+      "id": "DR4-007",
+      "category": "OWASP A05:2021 セキュリティの設定ミス",
+      "severity": "info",
+      "title": "NODE_ENV=testの本番環境への影響",
+      "description": "NODE_ENV=testの設定はpackage.jsonのテスト系スクリプト（test, test:ui, test:coverage, test:unit, test:integration, test:watch）のみに限定されている。本番起動コマンドのstartスクリプトはNODE_ENV=productionが既に設定されており、今回の変更による干渉は生じない。また、CIのbuildジョブではnpm run buildを使用しており、test系スクリプトのNODE_ENV=testとは独立している。",
+      "recommendation": "対応不要。テスト系と本番系のスクリプトは完全に分離されている。",
+      "status": "acceptable"
+    },
+    {
+      "id": "DR4-008",
+      "category": "環境変数の扱い",
+      "severity": "info",
+      "title": "ENV_VARS_TO_CLEANリストの網羅性とセキュリティ影響",
+      "description": "ENV_VARS_TO_CLEANに含まれる15変数（CM_*7変数、MCBD_*7変数、DATABASE_PATH）は、いずれもファイルパス・ポート番号・バインドアドレス・ログ設定等のインフラ設定値であり、認証情報・暗号鍵・トークン等のセキュリティ機密情報は含まれていない。これらの変数のdelete操作がセキュリティ上の新たなリスクを生じさせることはない。むしろ、.envファイルのCM_DB_PATH残留によるテストの意図しないDB参照を防止する効果があり、テスト環境の分離性向上に寄与する。",
+      "recommendation": "対応不要。テスト品質とセキュリティの両方に正の効果がある。",
+      "status": "acceptable"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 0,
+    "info": 8,
+    "total": 8
+  },
+  "conclusion": "セキュリティ観点で問題なし。本修正はテスト環境設定のみを対象としており、ソースコードの変更を伴わない。OWASP A05:2021（セキュリティの設定ミス）に該当するリスクは構造的に排除されている。承認を推奨する。",
+  "timestamp": "2026-02-20T12:00:00Z"
+}

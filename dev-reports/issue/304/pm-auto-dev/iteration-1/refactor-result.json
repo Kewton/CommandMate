@@ -1,0 +1,41 @@
+{
+  "status": "success",
+  "issue_number": 304,
+  "changes_made": [
+    "Hoisted const originalEnv = process.env to file level (eliminated 7 duplicate declarations)",
+    "Extracted common beforeEach (process.env clone, cleanEnvVars, console.warn mock) to file level",
+    "Extracted common afterEach (process.env restore, vi.restoreAllMocks) to file level",
+    "Simplified 6 of 7 describe blocks to only declare their specific reset calls in nested beforeEach",
+    "Removed beforeEach/afterEach entirely from resetWarnedKeys and ENV_MAPPING describe blocks (no block-specific setup needed)",
+    "Net reduction: 73 lines removed, 18 lines added (-55 lines of duplicated boilerplate)"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0,
+    "typescript_errors": 0,
+    "eslint_errors": 0,
+    "tests_passing": 3618,
+    "env_test_count": 25
+  },
+  "refactorings_applied": [
+    "DRY: Eliminated 7x repeated beforeEach/afterEach boilerplate by hoisting common setup to file level",
+    "SRP: Each describe block now only declares its own responsibility-specific resets"
+  ],
+  "files_changed": [
+    "tests/unit/env.test.ts"
+  ],
+  "files_not_changed_reason": {
+    "package.json": "Script-level NODE_ENV=test prefix is configuration, not refactorable code structure",
+    "tests/unit/lib/worktree-path-validator.test.ts": "Single describe block with minimal setup; no duplication to eliminate"
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "928068f: refactor(#304): hoist common beforeEach/afterEach to file level in env.test.ts"
+  ],
+  "summary": "Refactored tests/unit/env.test.ts to eliminate duplicated test setup/teardown boilerplate. Hoisted the common beforeEach (process.env isolation, cleanEnvVars, console.warn mock) and afterEach (process.env restore, vi.restoreAllMocks) to file level, removing 7 repeated const originalEnv declarations, 7 identical afterEach blocks, and 7 near-identical common setup patterns. Each describe block now only declares its specific reset calls (resetWarnedKeys, resetDatabasePathWarning). Net reduction of 55 lines. All 25 env.test.ts tests pass, including under NODE_ENV=production. All 3618 unit tests pass. TypeScript and ESLint: 0 errors."
+}
