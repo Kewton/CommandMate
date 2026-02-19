@@ -8,220 +8,125 @@
 
 [English](../../README.md) | [日本語](./README.md)
 
-<!-- TODO: 30秒以内のデモGIFを追加すると導入率UP -->
-<!-- 例: ![CommandMate デモ](../../docs/assets/demo.gif) -->
+<p align="center">
+  <img src="../../docs/images/demo-mobile.gif" alt="CommandMate モバイルデモ" width="300">
+</p>
 
-> **入力待ちを見逃さない、開発の相棒。PCに張り付けなくても、どこからでも。**
+> **PC を閉じても Claude Code は止まらない。スマホから確認して、方向を決める。**
 
-- **入力待ち/確認状態をリアルタイム検知** — 見逃しゼロ
-- **スマホ・PCからブラウザで指示送信** — PCの前にいなくてもOK
-- **Git worktree 単位でセッション管理** — 並列開発をスムーズに
+「リモコン」ではなく、**モバイル開発コックピット**。
+
+CommandMate は Claude Code・Codex CLI のセッションを Git worktree 単位で管理し、スマホを含むあらゆるブラウザから操作できる Web UI を提供します。Auto Yes モードでエージェントが自律的に動き続ける間、あなたはスマホから進捗を監視し、コード変更を確認し、指示を編集し、スクリーンショットで方向を伝えられます。
 
 ```bash
-npm install -g commandmate
+npx commandmate
 ```
 
-![PC表示](../../docs/images/screenshot-desktop.png)
+---
 
-## 目次
+## 6本柱の機能
 
-- [これは何か](#これは何か)
-- [こんな人向け](#こんな人向け)
-- [何が独自か](#何が独自か)
-- [Quick Start（3ステップ）](#quick-start3ステップ)
-- [トラブルシューティング](#トラブルシューティング)
-- [仕組み](#仕組み)
-- [主な機能](#主な機能)
-- [ユースケース](#ユースケース)
-- [セキュリティ](#セキュリティ)
-- [CLI コマンド](#cli-コマンド)
-- [開発者向けセットアップ](#開発者向けセットアップ)
-- [FAQ](#faq)
-- [ドキュメント](#ドキュメント)
-- [Contributing](#contributing)
+| 柱 | 機能 | なぜ重要か |
+|----|------|-----------|
+| **Auto Yes モード** | 確認なしでエージェントが動き続ける | 放置しても Claude Code が止まらない |
+| **Git Worktree セッション** | worktree ごとに独立したセッション、並列実行 | 複数タスクが同時に進む |
+| **モバイル Web UI** | あらゆるブラウザからセッションを操作 | スマホから監視・指示が可能 |
+| **ファイルビューワ** | ブラウザからワークツリー内のファイルを閲覧 | PC を開かずにコード変更を確認 |
+| **Markdown エディタ** | ブラウザから Markdown ファイルを編集 | 外出先から AI への指示を更新 |
+| **スクリーンショット指示** | プロンプトに画像を添付 | バグ画面を撮影 →「これ直して」— エージェントが画像を認識 |
 
 ---
 
-## これは何か
-
-Git worktree ごとに Claude Code セッションを管理し、ブラウザから指示を送れる開発コンパニオンツールです。
-
-通勤中・育児中・昼休み――メールに返信する感覚で「次の指示」を出し、個人開発を前に進められます。
-
-## こんな人向け
-
-**おすすめ：**
-- 育児/会議/移動でPC前に張り付けない開発者
-- Claude Code の入力待ちを見逃してフローが止まりがちな方
-- Git worktree で並列開発しているが、tmux操作が面倒な方
-
-**向かないかも：**
-- GUI IDE内で完結したい方（CommandMateはターミナル/CLIベース）
-- マルチユーザSaaSを求めている方（CommandMateはローカル個人利用が基本）
-
-## 何が独自か
-
-CommandMateはターミナルの代替ではありません。Claude Code を**補完**する3つに特化しています：
-
-- **入力待ち検知** — Claude Codeが入力を求めた瞬間に気づける
-- **返信UI** — スマホを含む、あらゆるブラウザから返信
-- **worktree整理** — 複数セッションを一画面で管理
-
-**Claude Code**、**Codex CLI**、**Gemini CLI** に対応。Strategy パターンによる拡張可能な設計で、新しいCLIツールの追加も容易です。
-
----
-
-## Quick Start（3ステップ）
+## Quick Start
 
 **前提条件：** macOS / Linux、Node.js v20+、npm、git、tmux、openssl
 
-> tmux 依存のため Windows は非対応です。WSL2 上での動作は未検証です。
-
 ```bash
-# 1. インストール
+# インストール & 起動をワンコマンドで
+npx commandmate
+
+# またはグローバルインストール
 npm install -g commandmate
-
-# 2. 初期化（依存チェック、環境設定、DB初期化）
 commandmate init
-
-# 3. 起動
 commandmate start --daemon
 ```
 
 ブラウザで http://localhost:3000 にアクセスしてください。
 
-**よく使うコマンド：**
-
-```bash
-commandmate status    # サーバー状態確認
-commandmate stop      # サーバー停止
-```
-
 詳しくは [CLI セットアップガイド](../user-guide/cli-setup-guide.md) を参照してください。
 
 ---
 
-## トラブルシューティング
+## 競合比較
 
-**Claude CLI が見つからない / パスが変わった？**
-Claude CLI の npm 版とスタンドアロン版を切り替えるとパスが変わることがあります。CommandMate は次のセッション起動時に自動検出します。カスタムパスを設定するには `.env` に `CLAUDE_PATH=/path/to/claude` を追加してください。
+| 機能 | CommandMate | Happy Coder | claude-squad | Omnara |
+|------|:-----------:|:-----------:|:------------:|:------:|
+| Auto Yes モード | あり | なし | あり（TUI のみ） | なし |
+| Git Worktree 管理 | あり | なし | あり（TUI のみ） | なし |
+| モバイル Web UI | あり | あり | **なし** | あり |
+| ファイルビューワ | あり | なし | なし | なし |
+| Markdown エディタ | あり | なし | なし | なし |
+| スクリーンショット指示 | あり | なし | 不可能 | なし |
+| 無料 / OSS | あり | 無料+有料 | あり | $20/月 |
+| 完全ローカル実行 | あり | サーバー経由 | あり | クラウドフォールバック |
 
-**ポート競合？**
-```bash
-commandmate start -p 3001
+---
+
+## ワークフロー
+
+```
+1. PC でタスクを開始
+   $ commandmate start --daemon
+   → Claude Code が Auto Yes で自律稼働開始
+
+2. PC を閉じて外出
+
+3. スマホから Web UI で確認
+   → 全セッションの状態を一目で把握
+
+4. コード変更をレビュー
+   → ファイルビューワでモバイルから差分を確認
+
+5. 方向を修正
+   → Markdown の指示ファイルを編集、または新しいプロンプトを入力
+
+6. バグを発見
+   → スクリーンショット指示: 画面を撮影して「これ直して」
+
+7. Claude Code が画像を認識して修正開始
 ```
 
-**セッションが固まっている / 応答がない？**
-tmux セッションを直接確認できます。CommandMate は `mcbd-{ツール名}-{worktree名}` の形式でセッションを管理しています：
+---
 
-```bash
-# CommandMate が管理しているセッション一覧を確認
-tmux list-sessions | grep mcbd
+## セキュリティ
 
-# 特定セッションの出力を確認（アタッチせずに）
-tmux capture-pane -t "mcbd-claude-feature-123" -p
+**100% ローカル実行**。外部サーバーなし、クラウド中継なし、アカウント登録不要。ネットワーク通信は Claude CLI 自体の API 呼び出しのみ。
 
-# セッションにアタッチして確認（detach は Ctrl+b → d）
-tmux attach -t "mcbd-claude-feature-123"
+- フルオープンソース（[MIT License](../../LICENSE)）
+- ローカルデータベース、ローカルセッション
+- リモートアクセスは VPN または認証付きリバースプロキシを推奨
 
-# 壊れたセッションを手動で削除
-tmux kill-session -t "mcbd-claude-feature-123"
-```
-
-> **注意：** アタッチ中にセッション内で直接入力すると、CommandMateのセッション管理と干渉する可能性があります。`Ctrl+b` → `d` でdetachし、CommandMate UIから操作してください。
-
-**Claude Code 内から起動するとセッション開始に失敗する？**
-Claude Code は `CLAUDECODE=1` を設定してネストを防止しています。CommandMate は自動で除去しますが、問題が続く場合は `tmux set-environment -g -u CLAUDECODE` を実行してください。
+詳細は[セキュリティガイド](../security-guide.md)と [Trust & Safety](../TRUST_AND_SAFETY.md) を参照してください。
 
 ---
 
 ## 仕組み
 
-CommandMate は Claude Code（CLI）を"実行セッション"として管理し、状態（処理中/入力待ち/アイドル）をWeb UIで可視化します。
-
 ```mermaid
 flowchart LR
-    A["Browser / Phone"] -->|HTTP| B["CommandMate Server"]
+    A["ブラウザ / スマホ"] -->|HTTP| B["CommandMate Server"]
     B --> C["Session Manager"]
-    C -->|"spawn / attach"| D["tmux sessions<br/>(per worktree)"]
+    C -->|"spawn / attach"| D["tmux sessions\n(worktree ごと)"]
     D --> E["Claude Code CLI"]
-    C <-->|"read / write"| F[("Local DB<br/>& State")]
+    C <-->|"read / write"| F[("Local DB\n& State")]
 ```
 
 Git worktree ごとに専用の tmux セッションが割り当てられるため、複数タスクを干渉なく並列実行できます。
 
 ---
 
-## 主な機能
-
-- **入力待ち/確認検知** — サイドバーでリアルタイムにステータス表示（idle/ready/running/waiting）
-- **ブラウザから指示送信** — スマホ・PCどちらからでもメッセージUIで操作
-- **実行履歴・メモ** — ブランチごとの会話履歴を保持、メモ機能付き
-- **Markdownログビューア** — Claude の詳細出力をMarkdownで閲覧
-- **ファイルビューア** — ワークツリー内のファイルをブラウザから確認、ファイル操作（移動、コピー、削除）
-- **ファイルタイムスタンプ** — ファイルツリーにファイル作成時刻を表示
-- **Auto Yes モード** — 確認ダイアログ付きで自動承認を制御
-- **リポジトリ管理** — 不要になったリポジトリをアプリ管理から解除（実ファイルは削除しません）
-- **クローンURL登録** — HTTPS/SSH URLを指定してリポジトリをクローン・登録
-- **マルチCLI対応** — Claude Code に最適化、Codex CLI / Gemini CLI にも対応
-- **レスポンシブUI** — デスクトップは2カラム、モバイルはタブベースで最適表示
-
 <details>
-<summary>スクリーンショット</summary>
-
-### ワークツリー詳細画面（Message / Console / History）
-
-| PC表示 | スマホ（History） | スマホ（Terminal） |
-|--------|-------------------|-------------------|
-| ![PC - ワークツリー詳細](../../docs/images/screenshot-worktree-desktop.png) | ![スマホ - History](../../docs/images/screenshot-worktree-mobile.png) | ![スマホ - Terminal](../../docs/images/screenshot-worktree-mobile-terminal.png) |
-
-### トップ画面（スマホ）
-
-![スマホ表示](../../docs/images/screenshot-mobile.png)
-
-</details>
-
----
-
-## ユースケース
-
-### 1. 通勤中 — 入力待ちを回収
-
-- **朝：** 出かける前に Claude Code にタスクを投げておく
-- **通勤：** スマホで状況確認 → 追加指示を送る
-- **帰宅：** 成果物をレビューしてマージ
-
-### 2. 育児の合間 — 5分の隙間で前に進める
-
-- worktree をタスクごとに分けて走らせる
-- CommandMate で「今どれが止まっているか」を把握
-- 5分の隙間で次の一手だけ返して流れを継続
-
-### 3. 並列開発 — 全worktreeを一画面で管理
-
-- tmux のペインを手動で切り替える必要なし
-- サイドバーで全 worktree の状態を一覧確認
-- ターミナル管理ではなく、判断に集中
-
----
-
-## セキュリティ
-
-CommandMate は**完全にローカルで動作**します。アプリ本体・データベース・セッションはすべてマシン上で完結します。外部通信は Claude CLI 自体の API 呼び出しのみです。
-
-**推奨構成：**
-- `localhost` または同一LAN内で使用
-- 外出先からのアクセスは VPN または認証付きリバースプロキシ（Basic認証、OIDCなど）を使用
-- `commandmate init` で外部アクセスを有効にすると `CM_BIND=0.0.0.0` が設定され、同一LAN内から `http://<PCのIP>:3000` でアクセス可能
-
-**やってはいけないこと：**
-- 認証なしでインターネットに公開（`0.0.0.0` バインド時はリバースプロキシ必須）
-
-詳細は [セキュリティガイド](../security-guide.md) と [Trust & Safety](../TRUST_AND_SAFETY.md) を参照してください。
-
----
-
-## CLI コマンド
+<summary><strong>CLI コマンド</strong></summary>
 
 ### 基本
 
@@ -278,11 +183,81 @@ Issue/worktree ごとにサーバーを分離起動し、自動ポート割当�
 
 全オプションは `commandmate --help` で確認できます。
 
----
+</details>
 
-## 開発者向けセットアップ
+<details>
+<summary><strong>スクリーンショット</strong></summary>
 
-コントリビューターや開発環境を構築する場合は、git clone を使用してください。
+### デスクトップ
+
+![PC表示](../../docs/images/screenshot-desktop.png)
+
+### ワークツリー詳細画面（Message / Console / History）
+
+| PC表示 | スマホ（History） | スマホ（Terminal） |
+|--------|-------------------|-------------------|
+| ![PC - ワークツリー詳細](../../docs/images/screenshot-worktree-desktop.png) | ![スマホ - History](../../docs/images/screenshot-worktree-mobile.png) | ![スマホ - Terminal](../../docs/images/screenshot-worktree-mobile-terminal.png) |
+
+### トップ画面（スマホ）
+
+![スマホ表示](../../docs/images/screenshot-mobile.png)
+
+</details>
+
+<details>
+<summary><strong>トラブルシューティング & FAQ</strong></summary>
+
+### Claude CLI が見つからない / パスが変わった？
+
+Claude CLI の npm 版とスタンドアロン版を切り替えるとパスが変わることがあります。CommandMate は次のセッション起動時に自動検出します。カスタムパスを設定するには `.env` に `CLAUDE_PATH=/path/to/claude` を追加してください。
+
+### ポート競合？
+
+```bash
+commandmate start -p 3001
+```
+
+### セッションが固まっている / 応答がない？
+
+tmux セッションを直接確認できます。CommandMate は `mcbd-{ツール名}-{worktree名}` の形式でセッションを管理しています：
+
+```bash
+# CommandMate が管理しているセッション一覧を確認
+tmux list-sessions | grep mcbd
+
+# 特定セッションの出力を確認（アタッチせずに）
+tmux capture-pane -t "mcbd-claude-feature-123" -p
+
+# セッションにアタッチして確認（detach は Ctrl+b → d）
+tmux attach -t "mcbd-claude-feature-123"
+
+# 壊れたセッションを手動で削除
+tmux kill-session -t "mcbd-claude-feature-123"
+```
+
+> **注意：** アタッチ中にセッション内で直接入力すると、CommandMate のセッション管理と干渉する可能性があります。`Ctrl+b` → `d` で detach し、CommandMate UI から操作してください。
+
+### Claude Code 内から起動するとセッション開始に失敗する？
+
+Claude Code は `CLAUDECODE=1` を設定してネストを防止しています。CommandMate は自動で除去しますが、問題が続く場合は `tmux set-environment -g -u CLAUDECODE` を実行してください。
+
+### FAQ
+
+**Q: tmux は必須？**
+A: CommandMate は内部で tmux を使用して CLI セッションを管理しています。ユーザーが tmux を直接操作する必要はありません。
+
+**Q: Claude Code の権限はどうなる？**
+A: Claude Code 自体の権限設定がそのまま適用されます。本ツールが権限を拡張することはありません。詳しくは [Trust & Safety](../TRUST_AND_SAFETY.md) を参照してください。
+
+**Q: 複数人で使える？**
+A: 現時点では個人利用を想定しています。複数人での同時利用は未対応です。
+
+</details>
+
+<details>
+<summary><strong>開発者向けセットアップ</strong></summary>
+
+コントリビューターや開発環境を構築する場合：
 
 ```bash
 git clone https://github.com/Kewton/CommandMate.git
@@ -290,8 +265,7 @@ cd CommandMate
 ./scripts/setup.sh  # 依存チェック、環境設定、ビルド、起動まで自動実行
 ```
 
-<details>
-<summary>手動セットアップ（カスタマイズしたい場合）</summary>
+### 手動セットアップ（カスタマイズしたい場合）
 
 ```bash
 git clone https://github.com/Kewton/CommandMate.git
@@ -306,22 +280,7 @@ npm start
 
 > **Note**: `./scripts/*` スクリプトは開発環境でのみ使用可能です。グローバルインストール（`npm install -g`）では `commandmate` CLI を使用してください。
 
-> **Note**: 旧名称の環境変数（`MCBD_*`）も後方互換性のためサポートされていますが、新名称（`CM_*`）の使用を推奨します。
-
 </details>
-
----
-
-## FAQ
-
-**Q: tmux は必須？**
-A: CommandMate は内部で tmux を使用してCLIセッションを管理しています。ユーザーが tmux を直接操作する必要はありません。問題が発生した場合は tmux コマンドでセッションを確認できます（[トラブルシューティング](#トラブルシューティング)を参照）。
-
-**Q: Claude Code の権限はどうなる？**
-A: Claude Code 自体の権限設定がそのまま適用されます。本ツールが権限を拡張することはありません。詳しくは [Trust & Safety](../TRUST_AND_SAFETY.md) を参照してください。
-
-**Q: 複数人で使える？**
-A: 現時点では個人利用を想定しています。複数人での同時利用は未対応です。
 
 ---
 
@@ -331,12 +290,11 @@ A: 現時点では個人利用を想定しています。複数人での同時�
 |-------------|------|
 | [CLI セットアップガイド](../user-guide/cli-setup-guide.md) | インストールと初期設定 |
 | [Webアプリ操作ガイド](../user-guide/webapp-guide.md) | Webアプリの基本操作 |
-| [クイックスタート](../user-guide/quick-start.md) | Claude Codeコマンドの使い方 |
+| [クイックスタート](../user-guide/quick-start.md) | Claude Code コマンドの使い方 |
 | [コンセプト](../concept.md) | ビジョンと解決する課題 |
 | [アーキテクチャ](../architecture.md) | システム設計 |
 | [デプロイガイド](../DEPLOYMENT.md) | 本番環境構築手順 |
-| [移行ガイド](../migration-to-commandmate.md) | MyCodeBranchDesk からの移行手順 |
-| [UI/UXガイド](../UI_UX_GUIDE.md) | UI実装の詳細 |
+| [UI/UXガイド](../UI_UX_GUIDE.md) | UI 実装の詳細 |
 | [Trust & Safety](../TRUST_AND_SAFETY.md) | セキュリティと権限の考え方 |
 
 ## Contributing
