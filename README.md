@@ -18,6 +18,12 @@ Not a "remote control" — a **mobile dev cockpit**.
 
 CommandMate manages Claude Code and Codex CLI sessions per Git worktree and gives you a Web UI you can operate from any browser, including your phone. Auto Yes keeps the agent running autonomously while you monitor progress, review code changes, edit instructions, and send screenshot-based directions — all from your pocket.
 
+Of course, it works great on desktop too — the two-column layout gives you a full overview of all sessions and worktrees at a glance.
+
+<p align="center">
+  <img src="./docs/images/demo-desktop.gif" alt="CommandMate desktop demo" width="600">
+</p>
+
 ```bash
 npx commandmate
 ```
@@ -242,6 +248,15 @@ tmux kill-session -t "mcbd-claude-feature-123"
 Claude Code sets `CLAUDECODE=1` to prevent nesting. CommandMate removes this automatically, but if it persists, run: `tmux set-environment -g -u CLAUDECODE`
 
 ### FAQ
+
+**Q: How do I use CommandMate from my phone?**
+A: CommandMate runs a web server on your PC. To access it from your phone, your phone and PC must be on the same network (Wi-Fi). Run `commandmate init` and enable external access — this sets `CM_BIND=0.0.0.0`. Then open `http://<your-PC-IP>:3000` in your phone's browser.
+
+**Q: Can I access it from outside my home network?**
+A: Yes. Use a tunneling service like [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) to securely expose your local server without opening router ports. Alternatively, a VPN or an authenticated reverse proxy (Basic Auth, OIDC, etc.) also works. **Do not** expose the server directly to the internet without authentication.
+
+**Q: Does it work on iPhone / Android?**
+A: Yes. CommandMate's Web UI is responsive and works on any modern mobile browser (Safari, Chrome, etc.). No app install required.
 
 **Q: Is tmux required?**
 A: CommandMate uses tmux internally to manage CLI sessions. You don't need to operate tmux directly — CommandMate handles it for you.
