@@ -1,0 +1,140 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 308,
+  "review_focus": "セキュリティ",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "D4-001",
+      "severity": "must_fix",
+      "category": "info_disclosure",
+      "location": "Section 5.1 / clone-manager.ts L303-310",
+      "description": "パストラバーサル検証失敗時のエラーメッセージにthis.config.basePathの実際のパス値が含まれている。`Target path must be within ${this.config.basePath}` というメッセージはサーバーの内部ディレクトリ構造（CM_ROOT_DIR値）を攻撃者に漏洩させる。これはAPIレスポンスとしてクライアントに直接返される。",
+      "suggestion": "エラーメッセージからbasePath値を除去し、汎用的なメッセージに変更する。例: `Target path is invalid or outside allowed directory`（既にERROR_DEFINITIONSのINVALID_TARGET_PATHデフォルトメッセージとして定義済み）。具体的には、L307-308のmessageオーバーライドを削除し、ERROR_DEFINITIONS.INVALID_TARGET_PATHのデフォルトメッセージをそのまま使用する。"
+    },
+    {
+      "id": "D4-002",
+      "severity": "must_fix",
+      "category": "injection",
+      "location": "Section 4.2.1 / clone/route.ts L51,75",
+      "description": "targetDirパラメータの型検証が欠落している。clone/route.tsのL51で`const { cloneUrl, targetDir } = body;`としてリクエストボディから取得されるが、cloneUrlにはtypeof === 'string'チェックがある一方、targetDirには型チェックなしにstartCloneJob()の第2引数として渡される。攻撃者がtargetDirにオブジェクトや配列を送信した場合、isPathSafe()やpath.resolve()で予期しない動作が発生する可能性がある。",
+      "suggestion": "clone/route.tsでtargetDirの型検証を追加する。targetDirが提供される場合は`typeof targetDir === 'string'`チェックを行い、文字列でなければ400エラーを返す。例: `if (targetDir !== undefined && typeof targetDir !== 'string') { return NextResponse.json({ success: false, error: ... }, { status: 400 }); }`"
+    },
+    {
+      "id": "D4-003",
+      "severity": "should_fix",
+      "category": "info_disclosure",
+      "location": "Section 4.2.2 / clone-manager.ts L314-321",
+      "description": "ディレクトリ存在チェックのエラーメッセージ（L319）にtargetPathの完全パスが含まれている。`Target directory already exists: ${targetPath}` はサーバーのファイルシステム構造を外部に漏洩させる。このメッセージもAPIレスポンスとしてクライアントに返される。",
+      "suggestion": "targetPathの完全パスをエラーメッセージから除去する。代替として、ディレクトリ名のみ（path.basename(targetPath)）を使用するか、ERROR_DEFINITIONS.DIRECTORY_EXISTSのデフォルトメッセージ('Target directory already exists')をそのまま使用する。"
+    },
+    {
+      "id": "D4-004",
+      "severity": "should_fix",
+      "category": "injection",
+      "location": "Section 5.1 / clone-manager.ts L362 / url-normalizer.ts",
+      "description": "git cloneコマンドのURL引数に対するプロトコル制限が不十分。UrlNormalizer.validate()はhttps://、git@、ssh://のみを受け付けるが、バリデーション通過後にcloneUrl.trim()された値がspawnに渡される。現状のバリデーション正規表現は適切にhttps/ssh/git@のみを許可しているが、設計方針書にはこのセキュリティ判断（file://プロトコルやgit://プロトコルのブロック、--で始まる引数のブロック）が明文化されていない。",
+      "suggestion": "設計方針書のSection 5にコマンドインジェクション防止の設計根拠を追記する。具体的には: (1) UrlNormalizer.validate()がhttps://、git@、ssh://のみをホワイトリストで許可していること、(2) file://やgit://プロトコルが拒否されるため、ローカルファイルアクセスやSSRFが防止されること、(3) spawn()が配列引数を使用しシェルを経由しないためシェルインジェクションが防止されること、を明記する。"
+    },
+    {
+      "id": "D4-005",
+      "severity": "should_fix",
+      "category": "path_traversal",
+      "location": "Section 5.1 / clone-manager.ts L303 / path-validator.ts",
+      "description": "isPathSafe()はpath.resolve()で論理パスを正規化するが、シンボリックリンクの実パス解決（realpath）は行っていない。basePath配下にシンボリックリンクが存在する場合、論理パスではbasePath内に見えるが、実際のファイルシステム上では外部を指している可能性がある。ただし、clone操作ではtargetPathは新規作成されるディレクトリであるため、既存シンボリックリンクを経由した攻撃のリスクは限定的（parentDirにシンボリックリンクが含まれる場合のみ影響）。",
+      "suggestion": "リスクは限定的であるため、設計方針書のSection 5にシンボリックリンクに関するリスク評価を記載し、clone操作ではtargetPathが新規作成されるためリスクが低いこと、file-operations.tsではrealpathSync()による実パス検証を実施していることを対比として記載する。将来的にparentDirのsymlink検証を追加することを検討事項として記録する。"
+    },
+    {
+      "id": "D4-006",
+      "severity": "nice_to_have",
+      "category": "info_disclosure",
+      "location": "Section 3.2 / clone-manager.ts resolveDefaultBasePath()",
+      "description": "非推奨警告メッセージ '[DEPRECATED] WORKTREE_BASE_PATH is deprecated. Set CM_ROOT_DIR in your .env file instead.' はconsole.warnに出力されるのみでAPIレスポンスには含まれないため、情報漏洩リスクは低い。ただし、サーバーログに.envファイルの存在が示唆される点は留意事項。",
+      "suggestion": "現状の設計で問題なし。サーバーログへのアクセス制御が適切に行われていることを運用要件として記載することを検討する。"
+    },
+    {
+      "id": "D4-007",
+      "severity": "nice_to_have",
+      "category": "auth",
+      "location": "Section 4.2.1 / clone/route.ts, [jobId]/route.ts",
+      "description": "clone APIエンドポイント（POST /api/repositories/clone, GET /api/repositories/clone/[jobId]）には認証・認可の仕組みがない。これはIssue #308の変更とは無関係の既存設計であり、本ツールがローカル開発ツール（127.0.0.1バインド）として設計されているため、現時点ではリスクは許容範囲内。設計方針書のSection 5.2で環境変数のバリデーションは記載されているが、APIレベルの認証については言及がない。",
+      "suggestion": "Issue #308のスコープ外であるが、CM_BINDが0.0.0.0に設定された場合のリスクについて、設計方針書のSection 5またはSection 9のスコープ外事項として認識していることを記載する。"
+    },
+    {
+      "id": "D4-008",
+      "severity": "nice_to_have",
+      "category": "ssrf",
+      "location": "clone-manager.ts L362 / url-normalizer.ts validate()",
+      "description": "UrlNormalizer.validate()のHTTPS URLバリデーション正規表現（/^https:\\/\\/[^\\/]+\\/[^\\/]+\\/[^\\/]+(\\.git)?$/）はhttps://localhost/owner/repoやhttps://127.0.0.1/owner/repo、https://169.254.169.254/owner/repoなどの内部ネットワークURLを拒否しない。git cloneコマンドが内部サービスのメタデータエンドポイント等にアクセスする可能性がある。ただし、git cloneプロトコルはHTTP GETリクエストとは異なるため、実際のSSRFリスクは限定的。",
+      "suggestion": "リスクは限定的であるため、設計方針書にSSRFリスク評価として、git cloneプロトコルの特性上メタデータサービスへのアクセスは困難であること、かつ本ツールがローカル開発環境向けであることを記載する。クラウド環境でのデプロイを想定する場合は、プライベートIPアドレス範囲のブロックを将来的に検討する。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "acceptable",
+      "notes": "認証なしだがローカル開発ツールとして127.0.0.1バインドが前提。isPathSafe()によるパストラバーサル防止は適切。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "暗号化処理なし。git clone自体のSSH/HTTPS暗号化はgitコマンドに委譲。"
+    },
+    "A03_injection": {
+      "status": "needs_improvement",
+      "notes": "spawn()配列引数でシェルインジェクション防止済み。ただしtargetDirの型検証欠如（D4-002）が要修正。URLバリデーションはホワイトリスト方式で適切。"
+    },
+    "A04_insecure_design": {
+      "status": "acceptable",
+      "notes": "DI設計によるテスト容易性と関心の分離が適切。basePath決定ロジックの優先順位も明確。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "acceptable",
+      "notes": "getEnv()によるバリデーションとpath.resolve()正規化が設計済み。WORKTREE_BASE_PATHにもpath.resolve()適用が設計済み（D1-007）。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "Issue #308の変更で新たな外部依存は追加されない。"
+    },
+    "A07_auth_failures": {
+      "status": "acceptable",
+      "notes": "ローカル開発ツールとして認証不要の設計。CM_BIND=127.0.0.1が既定。"
+    },
+    "A08_software_data_integrity": {
+      "status": "acceptable",
+      "notes": "git cloneはgitの整合性検証に依存。DBへのtargetPath保存もバリデーション済みの値を使用。"
+    },
+    "A09_logging_monitoring": {
+      "status": "acceptable",
+      "notes": "console.info/warn/errorによるログ出力あり。非推奨警告の重複防止も実装済み。"
+    },
+    "A10_ssrf": {
+      "status": "acceptable",
+      "notes": "URLバリデーションがhttps/ssh/git@のみ許可。file://やgit://プロトコルは拒否される。実質的なSSRFリスクは限定的。"
+    }
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+    "src/lib/clone-manager.ts",
+    "src/lib/path-validator.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "src/app/api/repositories/clone/[jobId]/route.ts",
+    "src/lib/env.ts",
+    "src/lib/url-normalizer.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "src/lib/file-operations.ts",
+    "src/types/clone.ts"
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 3,
+    "nice_to_have": 3,
+    "overall_assessment": "設計方針書のセキュリティ設計は概ね適切である。isPathSafe()によるパストラバーサル防止、getEnv()によるCM_ROOT_DIRのpath.resolve()正規化、WORKTREE_BASE_PATHへのpath.resolve()適用（D1-007）、spawn()の配列引数によるシェルインジェクション防止が設計されている。ただし、Must Fixとして2点の改善が必要: (1) エラーメッセージにbasePath値が含まれる情報漏洩リスク（D4-001）、(2) targetDirパラメータの型検証欠如によるインジェクションリスク（D4-002）。これらを修正すれば、セキュリティ観点で承認可能。"
+  },
+  "timestamp": "2026-02-19T12:00:00Z"
+}

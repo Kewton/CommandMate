@@ -1,0 +1,137 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 308,
+  "review_focus": "影響範囲",
+  "review_date": "2026-02-19",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "impact_scope",
+      "location": "影響範囲 - 変更対象ファイル",
+      "description": "Issue の影響範囲にフロントエンドの RepositoryManager.tsx が記載されていない。repositoryApi.clone() はクローン先パスをUIに表示しないため直接的なコード変更は不要だが、clone 完了後に worktreeApi.getAll() でリフレッシュされるリストのパス表示が変わる（/tmp/repos/xxx から CM_ROOT_DIR/xxx に変わる）。これは既存のクローン済みリポジトリに対しては影響しない（DB上のパスはそのまま）が、修正後にクローンした新規リポジトリとの間でパス表記が混在する可能性がある。影響範囲セクションの「関連コンポーネント」に RepositoryManager.tsx と表示パスの変化についての記載が必要。",
+      "suggestion": "影響範囲の「関連コンポーネント」に以下を追加する:\n- src/components/repository/RepositoryManager.tsx - clone機能のフロントエンド呼び出し元（コード変更不要、ただし clone 先パスが変更になるためUI上の表示パスが変わる）\n- サイドバーのリポジトリ一覧 - 新規 clone リポジトリのパスが CM_ROOT_DIR 配下として表示される"
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "category": "data_integrity",
+      "location": "Issue本文全体 - DB・データ整合性の考慮が欠如",
+      "description": "既存のクローン済みリポジトリについての考慮が Issue に全く記載されていない。repositories テーブルの path カラムには、既に /tmp/repos/xxx (または /private/tmp/repos/xxx) のパスで登録されたレコードが存在しうる。basePath を変更しても既存の DB レコードは自動更新されないため、既存の clone 済みリポジトリについて以下の影響がある:\n1. DB上のパスと実ファイルシステムのパスは一致したまま（/tmp/repos に実体がある）\n2. ただし isPathSafe の検証基準が CM_ROOT_DIR に変わると、既存リポジトリのパス（/tmp/repos/xxx）に対する customTargetPath 検証が CM_ROOT_DIR 基準になり、同じ URL での重複 clone を別パスで試みた場合にパストラバーサル判定が変わりうる\n3. サーバー再起動時の worktree スキャン（server.ts initializeWorktrees）は getRepositoryPaths() が返す CM_ROOT_DIR/WORKTREE_REPOS 配下のみスキャンするため、/tmp/repos にある既存リポジトリはスキャン対象外になり、DB上は残るが worktree の同期更新が行われなくなる\n\nこの「既存クローン済みリポジトリのDBレコードとの整合性」は Issue の影響範囲分析で必ず言及すべき項目である。",
+      "suggestion": "影響範囲セクションに「既存データへの影響」サブセクションを追加し、以下を明記する:\n- 既存の /tmp/repos 配下に clone 済みのリポジトリはパスが DB に登録されており、basePath 変更後も DB レコードはそのまま残る\n- これらのリポジトリは引き続き UI 上に表示されるが、サーバー再起動時の自動 worktree スキャン対象は CM_ROOT_DIR 配下のみであるため、worktree 情報が更新されなくなる可能性がある\n- 既存ユーザー向けに「CM_ROOT_DIR 設定後の移行手順」（既存リポジトリを CM_ROOT_DIR 配下に移動 or 手動で再スキャン）のガイドを検討する\n- このバグ修正は「新規 clone の保存先」を修正するものであり、既存データのマイグレーションは本 Issue のスコープ外とすることを明示する"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "location": "影響範囲 - 関連コンポーネント",
+      "description": "scan API ルート (src/app/api/repositories/scan/route.ts) が getEnv().CM_ROOT_DIR を isPathSafe の基準ディレクトリとして使用している（L26-29）。clone API の basePath も CM_ROOT_DIR に統一されることで、scan と clone の両方が同じ CM_ROOT_DIR を基準としたパス検証を行うことになる。これは整合性の向上であり良い変更だが、Issue の影響範囲には scan API との整合性についての言及がない。scan API は既に CM_ROOT_DIR を使用しているという事実は、本修正の設計判断を支持する根拠として記載する価値がある。",
+      "suggestion": "影響範囲の「関連コンポーネント」に以下を追加する:\n- src/app/api/repositories/scan/route.ts - 既に getEnv().CM_ROOT_DIR を isPathSafe の基準として使用（L26-29）。今回の修正により clone API も同じ基準を使用することになり、整合性が向上する（変更不要）"
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "category": "backward_compatibility",
+      "location": "対策案 / 受入条件 - WORKTREE_BASE_PATH の非推奨化",
+      "description": "WORKTREE_BASE_PATH の非推奨化に関して、deprecation warning の出力タイミングと出力先が未定義。具体的に:\n1. console.warn はサーバーログにのみ出力され、UI 上にはユーザーに通知されない。WORKTREE_BASE_PATH を設定しているユーザーが非推奨であることに気づけない可能性がある\n2. 非推奨警告は CloneManager コンストラクタの中で出力するのか、clone API ルートで出力するのかが未定義\n3. env.ts の既存の getEnvWithFallback() パターン（L57-73）では warnedKeys Set を使用して重複警告を防いでいるが、WORKTREE_BASE_PATH は ENV_MAPPING に含まれないため、同じパターンを使えない。独自の重複防止メカニズムが必要\n\nまた、既存の design policy (issue-76-env-fallback-design-policy.md) で WORKTREE_BASE_PATH は「フォールバック対象外」と記録されているため、今回の非推奨化は ENV_MAPPING に追加するのではなく、CloneManager 固有のロジックとして実装すべきことを明記する必要がある。",
+      "suggestion": "実装タスクの「WORKTREE_BASE_PATH の非推奨化対応」を以下のように具体化する:\n- 警告出力場所: CloneManager コンストラクタ内で process.env.WORKTREE_BASE_PATH が設定されている場合に console.warn を出力\n- 重複防止: モジュールスコープの変数（warnedWorktreeBasePath: boolean）で初回のみ出力\n- ENV_MAPPING には追加しない（issue-76 の設計方針に準拠）\n- UI 通知は本 Issue のスコープ外とし、将来の改善候補として記録"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "location": "影響範囲 - 変更対象ファイル",
+      "description": "server.ts の initializeWorktrees() 内（L83）の警告メッセージ 'Set WORKTREE_REPOS (comma-separated) or MCBD_ROOT_DIR' が古い表現のままである。直接的にはこの Issue のスコープ外だが、CM_ROOT_DIR への統一を行う本修正と密接に関連する。CM_ROOT_DIR を clone の basePath として公式に使用するようになる以上、起動時の警告メッセージも CM_ROOT_DIR を案内すべきである。また、worktrees.ts の getRepositoryPaths() は WORKTREE_REPOS > CM_ROOT_DIR のフォールバックチェーンを持ち、clone の basePath は独立した WORKTREE_BASE_PATH > '/tmp/repos' のチェーンを持っているという、2つの独立した環境変数系統が存在する。この不整合も影響範囲として言及すべきである。",
+      "suggestion": "影響範囲に以下を追加する:\n- server.ts L83: 起動時警告メッセージの MCBD_ROOT_DIR 表記を CM_ROOT_DIR に修正（任意、本 Issue の一環として対応可能）\n- 環境変数系統の不整合: worktree スキャンの CM_ROOT_DIR と clone の WORKTREE_BASE_PATH が別の環境変数を使用している現状を、本修正で解消することを明記"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "test_coverage",
+      "location": "実装タスク - テスト更新",
+      "description": "テスト更新タスクにおいて、以下の重要なテストケースが不足している:\n1. process.cwd() フォールバック時のテスト: process.cwd() は実行環境によって異なるため、テスト内で一貫した結果を得るには vi.spyOn(process, 'cwd') でモックする必要がある。この点がテスト設計上の考慮事項として明記されていない\n2. CI/CD 環境での CM_ROOT_DIR 未設定ケース: 既存のテスト（clone-manager.test.ts）では new CloneManager(db) を引数なしで呼んでおり、環境変数のモックを行っていない。修正後は basePath が process.cwd() になるため、テスト実行ディレクトリに依存する結果となる。テスト内で環境変数とprocess.cwd()を適切にモックする方針を定める必要がある\n3. integration テスト（api-clone.test.ts）では getDbInstance をモックしているが getEnv はモックしていない。clone API ルートで getEnv().CM_ROOT_DIR を呼ぶようになると、テスト時に CM_ROOT_DIR が未設定の場合の挙動が変わる",
+      "suggestion": "テスト更新タスクに以下を追記する:\n- clone-manager.test.ts: process.cwd() のモック方針を明記（vi.spyOn(process, 'cwd').mockReturnValue('/test/base')）\n- api-clone.test.ts: getEnv のモック追加（vi.mock('@/lib/env', () => ({ getEnv: () => ({ CM_ROOT_DIR: '/test/root', ... }) }))）\n- 各テストの beforeEach で process.env.WORKTREE_BASE_PATH をクリアし、テスト間の環境変数リークを防止"
+    },
+    {
+      "id": "S3-007",
+      "severity": "should_fix",
+      "category": "migration",
+      "location": "Issue本文全体 - 移行ガイドの欠如",
+      "description": "CM_ROOT_DIR を既に設定しているユーザーにとって、この修正は「clone が期待通りの場所に行われるようになる」というバグ修正であり、特別な移行手順は不要である。しかし、WORKTREE_BASE_PATH を意図的に設定して使用しているユーザー（少数の可能性あり）にとっては、非推奨化により将来的に動作が変わる。.env.example の更新タスクはあるが、既存ユーザー向けの移行ガイド（WORKTREE_BASE_PATH から CM_ROOT_DIR への切り替え手順）が検討されていない。",
+      "suggestion": "影響範囲セクションまたは関連ドキュメントに以下を追記する:\n- WORKTREE_BASE_PATH のみを使用している既存ユーザー向けの移行手順: .env ファイルで WORKTREE_BASE_PATH を CM_ROOT_DIR に置き換え\n- WORKTREE_BASE_PATH と CM_ROOT_DIR の値が異なる場合の注意点（worktree スキャン先と clone 先が異なるディレクトリになっている状態の解消方法）\n- 本修正のリリースノートに非推奨化の告知を含めることを推奨"
+    },
+    {
+      "id": "S3-008",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "location": "影響範囲 - 関連コンポーネント",
+      "description": "api-client.ts の repositoryApi.clone() は cloneUrl のみを送信し、targetDir は省略可能パラメータとして定義されている。clone API ルートでは targetDir を customTargetPath として CloneManager.startCloneJob に渡す。現在のフロントエンド実装（RepositoryManager.tsx）は targetDir を送信しないため、常に basePath + repoName がクローン先になる。この「フロントエンドが targetDir を送信しない」という事実は、本修正の影響分析において重要（ユーザーがカスタムパスを指定する経路が現在存在しないことの確認）だが、Issue に記載がない。",
+      "suggestion": "影響範囲の補足として以下を追記する:\n- 現在のフロントエンド実装は targetDir（customTargetPath）を送信しないため、clone 先は常に basePath/repoName で決定される。カスタムパス指定のUI は未実装であり、本修正では customTargetPath 経路への影響は限定的"
+    },
+    {
+      "id": "S3-009",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "location": "影響範囲 - 変更対象ファイル",
+      "description": "CloneManager の onCloneSuccess() メソッド（L452-488）では、clone 完了後に createRepository() で DB にレコードを作成し、scanWorktrees() + syncWorktreesToDB() で worktree 情報を同期する。createRepository に渡す path は targetPath（basePath + repoName）であり、basePath の変更が直接 DB に永続化されるパスに影響する。この因果関係の明示は、変更の影響をトレースするために有用である。",
+      "suggestion": "影響範囲の「セキュリティ考慮」セクションまたはその付近に以下を補足する:\n- onCloneSuccess() で createRepository(db, { path: targetPath }) により DB にパスが永続化される。basePath 変更により、新規 clone のリポジトリパスが /tmp/repos/xxx から CM_ROOT_DIR/xxx に変わるため、DB に記録されるパスも変わる"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 5,
+    "nice_to_have": 2,
+    "overall_assessment": "Issue #308 の影響範囲分析について、直接的な変更対象ファイルとセキュリティ考慮は Stage 2 で適切に補完されている。しかし、影響範囲レビューの観点から以下の重要な欠落がある: (1) 既存 clone 済みリポジトリの DB レコードとの整合性が全く考慮されていない（S3-002: must_fix）。basePath 変更後、既存の /tmp/repos 配下のリポジトリはサーバー再起動時の worktree スキャン対象外になる可能性がある。(2) フロントエンドの RepositoryManager.tsx やサイドバーへの表示上の影響が記載されていない（S3-001: must_fix）。(3) WORKTREE_BASE_PATH の非推奨化実装の詳細（警告出力場所、重複防止、ENV_MAPPING との関係）が不明確（S3-004: should_fix）。(4) テスト環境での process.cwd() モックや getEnv モックの方針が未定義（S3-006: should_fix）。(5) 既存ユーザー向けの移行ガイドが検討されていない（S3-007: should_fix）。これらを補完することで、実装時の想定外の副作用を防止し、リリース後のユーザー影響を最小化できる。"
+  },
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/clone-manager.ts",
+      "relevance": "basePath のデフォルト値（L193）、getTargetPath()（L251-252）、パストラバーサル防止（L303）、onCloneSuccess() でのDB永続化（L452-488）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/app/api/repositories/clone/route.ts",
+      "relevance": "CloneManager を basePath なしで初期化している呼び出し元（L71）。getEnv().CM_ROOT_DIR を渡す修正が必要"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/app/api/repositories/scan/route.ts",
+      "relevance": "既に getEnv().CM_ROOT_DIR を isPathSafe の基準として使用（L26-29）。clone API と scan API の整合性の根拠"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/db-repository.ts",
+      "relevance": "createRepository() で path カラムにクローン先パスが永続化される（L132-180）。basePath 変更で DB に記録されるパスが変わる"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/worktrees.ts",
+      "relevance": "getRepositoryPaths() が WORKTREE_REPOS > CM_ROOT_DIR フォールバックを使用（L122-139）。clone の basePath とは別の環境変数系統"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/components/repository/RepositoryManager.tsx",
+      "relevance": "clone 機能のフロントエンド呼び出し元（L144）。targetDir を送信しないため常に basePath/repoName が使用される"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/env.ts",
+      "relevance": "getEnv() による CM_ROOT_DIR 取得とフォールバック（L200, L234）。getEnvWithFallback() の warnedKeys パターン（L57-73）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/server.ts",
+      "relevance": "initializeWorktrees() のサーバー起動時 worktree スキャン（L71-126）。CM_ROOT_DIR 配下のみスキャンするため、/tmp/repos の既存リポジトリは対象外"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/src/lib/api-client.ts",
+      "relevance": "repositoryApi.clone() のフロントエンド API クライアント（L333-338）。cloneUrl のみ送信、targetDir は未使用"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/tests/unit/lib/clone-manager.test.ts",
+      "relevance": "basePath デフォルト値 '/tmp/repos' に依存するテスト（L213）。process.cwd() モック方針の検討が必要"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/tests/integration/api-clone.test.ts",
+      "relevance": "getEnv のモックなし。clone API で getEnv().CM_ROOT_DIR を使用するようになると影響あり"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-308/dev-reports/design/issue-76-env-fallback-design-policy.md",
+      "relevance": "WORKTREE_BASE_PATH がフォールバック対象外（ENV_MAPPING 非対象）と記録された設計方針"
+    }
+  ]
+}

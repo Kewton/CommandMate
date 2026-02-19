@@ -156,7 +156,7 @@ tests/
 | `src/lib/session-cleanup.ts` | セッション/ポーラー停止の一元管理（Facade パターン） |
 | `src/lib/url-normalizer.ts` | Git URL正規化（重複検出用） |
 | `src/lib/url-path-encoder.ts` | ファイルパスのURLエンコード（Issue #300: encodePathForUrl()関数、スラッシュを保護しながら各セグメントを個別にencodeURIComponent、catch-allルートのパス分割を維持） |
-| `src/lib/clone-manager.ts` | クローン処理管理（DBベース排他制御） |
+| `src/lib/clone-manager.ts` | クローン処理管理（DBベース排他制御。**Issue #308: basePath修正** - resolveDefaultBasePath()でCM_ROOT_DIR/WORKTREE_BASE_PATH/process.cwd()優先順位制御、WORKTREE_BASE_PATH非推奨警告（モジュールスコープwarnedWorktreeBasePathフラグで初回のみ出力）、path.resolve()による絶対パス正規化、resetWorktreeBasePathWarning()テスト用エクスポート） |
 | `src/lib/db-repository.ts` | リポジトリDB操作関数群（Issue #190: 除外・復活・パス正規化・バリデーション関数追加、Issue #202: registerAndFilterRepositories統合関数追加） |
 | `src/types/sidebar.ts` | サイドバーステータス判定 |
 | `src/types/clone.ts` | クローン関連型定義（CloneJob, CloneError等） |

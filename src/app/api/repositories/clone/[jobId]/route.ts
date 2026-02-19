@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
+import { getEnv } from '@/lib/env';
 import { CloneManager } from '@/lib/clone-manager';
 import type { CloneJobStatus } from '@/types/clone';
 
@@ -58,7 +59,11 @@ export async function GET(
     }
 
     const db = getDbInstance();
-    const cloneManager = new CloneManager(db);
+    // [D2-003] getCloneJobStatus() does not use basePath, but we pass it for
+    // code consistency and to prevent unnecessary deprecation warnings from
+    // WORKTREE_BASE_PATH when basePath is not provided.
+    const { CM_ROOT_DIR } = getEnv();
+    const cloneManager = new CloneManager(db, { basePath: CM_ROOT_DIR });
 
     const status = cloneManager.getCloneJobStatus(jobId);
 

@@ -170,6 +170,17 @@ const ERROR_DEFINITIONS: Record<string, CloneError> = {
 };
 
 /**
+ * Module-scoped flag to ensure WORKTREE_BASE_PATH deprecation warning
+ * is emitted only once per process lifetime.
+ */
+let warnedWorktreeBasePath = false;
+
+/** @internal テスト専用。本番コードから呼び出さないこと。 */
+export function resetWorktreeBasePathWarning(): void {
+  warnedWorktreeBasePath = false;
+}
+
+/**
  * Clone Manager class
  *
  * Manages the lifecycle of git clone operations:
@@ -190,10 +201,36 @@ export class CloneManager {
     this.db = db;
     this.urlNormalizer = UrlNormalizer.getInstance();
     this.config = {
-      basePath: config.basePath || process.env.WORKTREE_BASE_PATH || '/tmp/repos',
+      basePath: config.basePath || this.resolveDefaultBasePath(),
       timeout: config.timeout || 10 * 60 * 1000, // 10 minutes
     };
     this.activeProcesses = new Map();
+  }
+
+  /**
+   * Resolve the default basePath when not explicitly provided via config.
+   *
+   * Priority:
+   * 1. WORKTREE_BASE_PATH (deprecated, emits console.warn once per process)
+   * 2. process.cwd() (final fallback)
+   *
+   * [D1-007] WORKTREE_BASE_PATH is normalized with path.resolve() to ensure
+   * it is an absolute path, preventing unexpected behavior with relative paths.
+   *
+   * @returns Absolute path to use as the base directory for clone operations
+   */
+  private resolveDefaultBasePath(): string {
+    const worktreeBasePath = process.env.WORKTREE_BASE_PATH;
+    if (worktreeBasePath) {
+      if (!warnedWorktreeBasePath) {
+        console.warn(
+          '[DEPRECATED] WORKTREE_BASE_PATH is deprecated. Set CM_ROOT_DIR in your .env file instead.'
+        );
+        warnedWorktreeBasePath = true;
+      }
+      return path.resolve(worktreeBasePath);
+    }
+    return process.cwd();
   }
 
   /**
@@ -300,25 +337,15 @@ export class CloneManager {
     const targetPath = customTargetPath || this.getTargetPath(repoName);
 
     // 4.1. Validate target path (prevent path traversal)
+    // [D4-001] Use default error message to avoid leaking basePath value
     if (customTargetPath && !isPathSafe(customTargetPath, this.config.basePath!)) {
-      return {
-        success: false,
-        error: {
-          ...ERROR_DEFINITIONS.INVALID_TARGET_PATH,
-          message: `Target path must be within ${this.config.basePath}`,
-        },
-      };
+      return { success: false, error: ERROR_DEFINITIONS.INVALID_TARGET_PATH };
     }
 
     // 5. Check if directory exists
+    // [D4-003] Use default error message to avoid leaking full targetPath
     if (existsSync(targetPath)) {
-      return {
-        success: false,
-        error: {
-          ...ERROR_DEFINITIONS.DIRECTORY_EXISTS,
-          message: `Target directory already exists: ${targetPath}`,
-        },
-      };
+      return { success: false, error: ERROR_DEFINITIONS.DIRECTORY_EXISTS };
     }
 
     // 6. Create clone job

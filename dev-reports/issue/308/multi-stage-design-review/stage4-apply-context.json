@@ -1,0 +1,7 @@
+{
+  "issue_number": 308,
+  "review_result_path": "dev-reports/issue/308/multi-stage-design-review/stage4-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘反映"
+}

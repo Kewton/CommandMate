@@ -1,0 +1,62 @@
+{
+  "issue_number": 308,
+  "status": "success",
+  "phases": {
+    "red": {
+      "status": "completed",
+      "tests_added": [
+        "should use config.basePath when explicitly provided",
+        "should use WORKTREE_BASE_PATH when config.basePath is not provided and emit deprecation warning",
+        "should normalize WORKTREE_BASE_PATH with path.resolve() for relative paths (D1-007)",
+        "should fall back to process.cwd() when neither config.basePath nor WORKTREE_BASE_PATH is set",
+        "should emit deprecation warning only once across multiple instantiations",
+        "should prefer config.basePath (CM_ROOT_DIR) over WORKTREE_BASE_PATH when both are available",
+        "should not include basePath value in path traversal error message (D4-001)",
+        "should not include full targetPath in directory exists error message (D4-003)",
+        "should return 400 when targetDir is not a string (D4-002)"
+      ]
+    },
+    "green": {
+      "status": "completed",
+      "files_modified": [
+        "src/lib/clone-manager.ts",
+        "src/app/api/repositories/clone/route.ts",
+        "src/app/api/repositories/clone/[jobId]/route.ts",
+        ".env.example",
+        "tests/unit/lib/clone-manager.test.ts",
+        "tests/integration/api-clone.test.ts"
+      ]
+    },
+    "refactor": {
+      "status": "completed"
+    }
+  },
+  "test_results": {
+    "unit": {
+      "passed": 47,
+      "failed": 0,
+      "total": 47
+    },
+    "integration": {
+      "passed": 12,
+      "failed": 0,
+      "total": 12
+    }
+  },
+  "quality_checks": {
+    "typescript": "pass",
+    "eslint": "pass"
+  },
+  "files_changed": [
+    "src/lib/clone-manager.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "src/app/api/repositories/clone/[jobId]/route.ts",
+    ".env.example",
+    "tests/unit/lib/clone-manager.test.ts",
+    "tests/integration/api-clone.test.ts"
+  ],
+  "commits": [
+    "37584ad: fix(#308): use CM_ROOT_DIR for clone basePath instead of hardcoded /tmp/repos"
+  ],
+  "message": "TDD implementation complete. All 59 tests pass (47 unit + 12 integration). TypeScript and ESLint checks pass with zero errors."
+}

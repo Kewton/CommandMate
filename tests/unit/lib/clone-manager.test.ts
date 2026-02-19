@@ -6,11 +6,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db-migrations';
-import { CloneManager, CloneManagerError, CloneResult } from '@/lib/clone-manager';
-import { UrlNormalizer } from '@/lib/url-normalizer';
+import { CloneManager, CloneManagerError, resetWorktreeBasePathWarning } from '@/lib/clone-manager';
 import {
   createRepository,
-  getRepositoryByNormalizedUrl,
   getCloneJob,
   createCloneJob,
   updateCloneJob,
@@ -37,9 +35,11 @@ describe('CloneManager', () => {
   let cloneManager: CloneManager;
 
   beforeEach(() => {
+    delete process.env.WORKTREE_BASE_PATH;
+    resetWorktreeBasePathWarning();
     db = new Database(':memory:');
     runMigrations(db);
-    cloneManager = new CloneManager(db);
+    cloneManager = new CloneManager(db, { basePath: '/tmp/repos' });
     vi.clearAllMocks();
   });
 
@@ -345,6 +345,147 @@ describe('CloneManager', () => {
   });
 });
 
+describe('CloneManager - basePath resolution', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    delete process.env.WORKTREE_BASE_PATH;
+    resetWorktreeBasePathWarning();
+    db = new Database(':memory:');
+    runMigrations(db);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    delete process.env.WORKTREE_BASE_PATH;
+    db.close();
+  });
+
+  it('should use config.basePath when explicitly provided', () => {
+    const manager = new CloneManager(db, { basePath: '/custom/clone/root' });
+    const targetPath = manager.getTargetPath('my-repo');
+
+    expect(targetPath).toBe('/custom/clone/root/my-repo');
+  });
+
+  it('should use WORKTREE_BASE_PATH when config.basePath is not provided and emit deprecation warning', () => {
+    process.env.WORKTREE_BASE_PATH = '/legacy/worktree/path';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const manager = new CloneManager(db);
+    const targetPath = manager.getTargetPath('my-repo');
+
+    expect(targetPath).toBe('/legacy/worktree/path/my-repo');
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[DEPRECATED] WORKTREE_BASE_PATH is deprecated. Set CM_ROOT_DIR in your .env file instead.'
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('should normalize WORKTREE_BASE_PATH with path.resolve() for relative paths (D1-007)', () => {
+    process.env.WORKTREE_BASE_PATH = 'relative/path';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const manager = new CloneManager(db);
+    const targetPath = manager.getTargetPath('my-repo');
+
+    // path.resolve('relative/path') produces an absolute path
+    expect(targetPath).toMatch(/^\/.*relative\/path\/my-repo$/);
+
+    warnSpy.mockRestore();
+  });
+
+  it('should fall back to process.cwd() when neither config.basePath nor WORKTREE_BASE_PATH is set', () => {
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/test/cwd/fallback');
+
+    const manager = new CloneManager(db);
+    const targetPath = manager.getTargetPath('my-repo');
+
+    expect(targetPath).toBe('/test/cwd/fallback/my-repo');
+
+    cwdSpy.mockRestore();
+  });
+
+  it('should emit deprecation warning only once across multiple instantiations', () => {
+    process.env.WORKTREE_BASE_PATH = '/legacy/path';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // First instantiation - should warn
+    new CloneManager(db);
+    // Second instantiation - should NOT warn again
+    new CloneManager(db);
+
+    const deprecationWarnings = warnSpy.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('[DEPRECATED]')
+    );
+    expect(deprecationWarnings).toHaveLength(1);
+
+    warnSpy.mockRestore();
+  });
+
+  it('should prefer config.basePath (CM_ROOT_DIR) over WORKTREE_BASE_PATH when both are available', () => {
+    process.env.WORKTREE_BASE_PATH = '/legacy/worktree/path';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const manager = new CloneManager(db, { basePath: '/cm/root/dir' });
+    const targetPath = manager.getTargetPath('my-repo');
+
+    expect(targetPath).toBe('/cm/root/dir/my-repo');
+    // Should not emit deprecation warning because config.basePath takes priority
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+});
+
+describe('CloneManager - security (D4-001)', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    delete process.env.WORKTREE_BASE_PATH;
+    resetWorktreeBasePathWarning();
+    db = new Database(':memory:');
+    runMigrations(db);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('should not include basePath value in path traversal error message', async () => {
+    const secretBasePath = '/secret/internal/path';
+    const manager = new CloneManager(db, { basePath: secretBasePath });
+
+    const result = await manager.startCloneJob(
+      'https://github.com/test/repo.git',
+      '/etc/evil/path'
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INVALID_TARGET_PATH');
+    // The error message must NOT contain the basePath value
+    expect(result.error?.message).not.toContain(secretBasePath);
+  });
+
+  it('should not include full targetPath in directory exists error message', async () => {
+    const { existsSync } = await import('fs');
+    vi.mocked(existsSync).mockReturnValue(true);
+
+    const manager = new CloneManager(db, { basePath: '/test/base' });
+
+    const result = await manager.startCloneJob(
+      'https://github.com/test/newrepo.git'
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('DIRECTORY_EXISTS');
+    // The error message must NOT contain the full internal path
+    expect(result.error?.message).not.toContain('/test/base/newrepo');
+  });
+});
+
 describe('CloneManagerError', () => {
   it('should create error with all properties', () => {
     const error = new CloneManagerError({
@@ -380,9 +521,11 @@ describe('CloneManager - parseGitProgress', () => {
   let cloneManager: CloneManager;
 
   beforeEach(() => {
+    delete process.env.WORKTREE_BASE_PATH;
+    resetWorktreeBasePathWarning();
     db = new Database(':memory:');
     runMigrations(db);
-    cloneManager = new CloneManager(db);
+    cloneManager = new CloneManager(db, { basePath: '/tmp/repos' });
   });
 
   afterEach(() => {
@@ -418,9 +561,11 @@ describe('CloneManager - parseGitError', () => {
   let cloneManager: CloneManager;
 
   beforeEach(() => {
+    delete process.env.WORKTREE_BASE_PATH;
+    resetWorktreeBasePathWarning();
     db = new Database(':memory:');
     runMigrations(db);
-    cloneManager = new CloneManager(db);
+    cloneManager = new CloneManager(db, { basePath: '/tmp/repos' });
   });
 
   afterEach(() => {

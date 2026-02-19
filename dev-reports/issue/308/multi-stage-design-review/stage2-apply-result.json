@@ -1,0 +1,70 @@
+{
+  "stage": 2,
+  "issue_number": 308,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["D2-001", "D2-002", "D2-003", "D2-004", "D2-005", "D2-011"],
+  "skipped_findings": ["D2-006", "D2-007", "D2-008", "D2-009", "D2-010"],
+  "skip_reasons": {
+    "D2-006": "設計書Section 6.2のgetEnvモック方針は既に適切に記載済みであり、追加変更不要",
+    "D2-007": "Section 3.1のDI根拠記載は正確であり変更不要（レビューでも確認済み）",
+    "D2-008": "Section 5.1のパストラバーサル防止記載は正確であり変更不要（レビューでも確認済み）",
+    "D2-009": "pathモジュールimport確認の注意喚起は既に適切であり変更不要（レビューでも確認済み）",
+    "D2-010": ".env.exampleの分類は軽微な問題であり実装に影響しないためスキップ"
+  },
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "D2-001",
+        "item": "Section 4.2.1のAfterコード例にCM_ROOT_DIRがpath.resolve()適用済みであるコメント追加",
+        "sections_updated": ["Section 4.2.1", "Section 10 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "D2-002",
+        "item": "warnedWorktreeBasePathの宣言位置をCloneManagerクラス定義の直前（L183の前）と明記",
+        "sections_updated": ["Section 4.2.2", "Section 10 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "D2-003",
+        "item": "getCloneJobStatus()がthis.config.basePathを参照しない事実を追記",
+        "sections_updated": ["Section 4.2.3", "Section 10 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "D2-004",
+        "item": "server.ts L83修正をIssue #308スコープから除外",
+        "sections_updated": ["Section 9 影響範囲サマリー", "Section 10 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "D2-005",
+        "item": "既存beforeEachへのWORKTREE_BASE_PATHクリア処理の追加を明記",
+        "sections_updated": ["Section 6.1", "Section 10 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "D2-011",
+        "item": "既存テストへの影響分析と修正計画を追記",
+        "sections_updated": ["Section 6.1", "Section 10 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "design_doc_path": "dev-reports/design/issue-308-clone-basepath-fix-design-policy.md",
+  "sections_updated": [
+    "Section 1.1 レビュー履歴",
+    "レビュー指摘事項サマリー（Stage 2）",
+    "Section 4.2.1 clone/route.ts",
+    "Section 4.2.2 clone-manager.ts",
+    "Section 4.2.3 [jobId]/route.ts",
+    "Section 6.1 ユニットテスト",
+    "Section 9 影響範囲サマリー",
+    "Section 10 実装チェックリスト"
+  ],
+  "summary": "Stage 2整合性レビューの全6件の指摘事項（Must Fix 1件、Should Fix 5件）を設計方針書に反映完了。D2-001: Afterコード例にpath.resolve()適用済みコメント追加、D2-002: warnedWorktreeBasePath宣言位置の具体的指定、D2-003: getCloneJobStatus()がbasePathを参照しない事実の明記、D2-004: server.ts修正をスコープ外に移動、D2-005: 既存beforeEachへのWORKTREE_BASE_PATHクリア追加、D2-011: 既存テスト影響分析と修正方針（方針A推奨）の追記。Nice to Have 4件とD2-006は既に適切に記載済みのためスキップ。",
+  "timestamp": "2026-02-19T00:00:00Z"
+}
