@@ -1,0 +1,7 @@
+{
+  "stage": 2,
+  "applied_items": ["DR2-001", "DR2-003", "DR2-004", "DR2-005", "DR2-006", "DR2-007"],
+  "skipped_items": ["DR2-002", "DR2-008"],
+  "design_doc_updated": true,
+  "summary": "Stage 2 整合性レビューの指摘6件を設計方針書に反映。Must Fix: DR2-001 db-migration-path.test.tsの修正方針をソースコード実依存（DATABASE_PATHのみ）に合わせYAGNI原則に基づきCM_DB_PATH等の不要なdelete指示を削除。Should Fix: DR2-003 api-logger.test.tsのパス誤記修正、DR2-004 describeブロック列挙順を実コード出現順に整理、DR2-007 worktree-path-validator.test.tsの修正方針をソースコード実依存（ALLOWED_WORKTREE_PATHSのみ）に合わせ修正。Nice to Have: DR2-005 対策1と対策2の独立性を明示、DR2-006 受入条件に対策2対象3ファイルの個別検証コマンドを追記。Section 8のDRYトレードオフ補足とSection 9の変更ファイル一覧も整合性を維持して更新。DR2-002はENV_VARS_TO_CLEANコメントで設計意図が十分表現されているため見送り、DR2-008は情報記録のみのため対応不要。"
+}

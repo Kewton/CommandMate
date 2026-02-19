@@ -1,0 +1,116 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "review_date": "2026-02-20",
+  "issue_number": 304,
+  "review_items": [
+    {
+      "id": "R5-001",
+      "severity": "should_fix",
+      "previous_addressed": false,
+      "category": "正確性",
+      "description": "影響を受けるjsdom環境の統合テストファイル数が「3ファイル」と記載されているが、実際には4ファイルである。`tests/integration/conversation-pair-card.test.tsx` も `@vitest-environment jsdom` かつ `@testing-library/react` を使用しており、NODE_ENV=productionでact()エラーが発生する。概要、再現手順、実際の動作セクションの全てで「3ファイル」と記載されているが「4ファイル」に修正すべき。",
+      "location": "## 概要、## 再現手順、## 実際の動作 > 影響を受けるテスト",
+      "suggestion": "全箇所で「3ファイル（integration、jsdom環境）」を「4ファイル（integration、jsdom環境）」に修正し、影響を受けるテスト一覧に `conversation-pair-card.test.tsx` を追加する。",
+      "evidence": "tests/integration/conversation-pair-card.test.tsx L5: `@vitest-environment jsdom`, L9: `import { render, screen } from '@testing-library/react';`。grep -rl で@vitest-environment jsdomと@testing-library/reactの両方を持つ統合テストファイルは4件。"
+    },
+    {
+      "id": "R5-002",
+      "severity": "should_fix",
+      "previous_addressed": false,
+      "category": "正確性",
+      "description": "影響を受けるunit テストファイル数が「62ファイル / 1112テスト」と記載されているが、jsdom環境のunit テストファイルは実際には63ファイル存在する。ただし、そのうち2ファイル（z-index.test.ts、locale-cookie.test.ts）は @testing-library/react を使用していないため、act()エラーには直接影響しない可能性がある。@testing-library/react を使用するunit テストファイルは61ファイルである。62ファイルという数値の根拠が不明確であり、正確な数値に修正するか算出根拠を明記すべき。",
+      "location": "## 概要、## 再現手順、## 実際の動作",
+      "suggestion": "以下のいずれかで修正する: (A) jsdom + @testing-library/react使用の61ファイルに修正する、(B) jsdom環境の全63ファイルに修正する（jsdomでReactを間接的にimportするファイルもact()エラーの影響を受ける可能性があるため）。いずれの場合もテスト数（1112）の正確性も再確認する。",
+      "evidence": "grep -rl '@vitest-environment jsdom' tests/unit/ で63ファイル検出。そのうち @testing-library/react を使用するのは61ファイル。残り2ファイル: tests/unit/config/z-index.test.ts、tests/unit/lib/locale-cookie.test.ts。"
+    },
+    {
+      "id": "R5-003",
+      "severity": "nice_to_have",
+      "previous_addressed": false,
+      "category": "完全性",
+      "description": "対策2で env.test.ts に適用するdelete対象変数のリストに CM_LOG_DIR と MCBD_* のレガシー変数（MCBD_PORT, MCBD_BIND, MCBD_DB_PATH, MCBD_LOG_LEVEL, MCBD_LOG_FORMAT, MCBD_LOG_DIR）が網羅されていない。コード例では `delete process.env.MCBD_ROOT_DIR` のみ記載され `// ...` で省略されているが、ENV_MAPPING には7つのレガシー変数が定義されている。実装時の漏れを防ぐため、全変数を明示するかENV_MAPPINGのキーを使ったループ処理を示すとよい。",
+      "location": "## 対策案 > 対策2",
+      "suggestion": "コード例を以下のように修正: (A) 全レガシー変数（MCBD_ROOT_DIR, MCBD_PORT, MCBD_BIND, MCBD_DB_PATH, MCBD_LOG_LEVEL, MCBD_LOG_FORMAT, MCBD_LOG_DIR）を明示的にリストアップする、または (B) Object.keys(ENV_MAPPING).forEach(key => { delete process.env[key]; delete process.env[ENV_MAPPING[key]]; }); のようなヘルパーを提案する。",
+      "evidence": "src/lib/env.ts L24-33: ENV_MAPPING は CM_ROOT_DIR/CM_PORT/CM_BIND/CM_LOG_LEVEL/CM_LOG_FORMAT/CM_LOG_DIR/CM_DB_PATH の7キー。対策2のコード例で明示されているのは CM_ROOT_DIR/CM_PORT/CM_BIND/CM_DB_PATH/CM_LOG_LEVEL/CM_LOG_FORMAT の6つのCM_*変数と MCBD_ROOT_DIR の1レガシー変数のみ。CM_LOG_DIR と MCBD_PORT〜MCBD_LOG_DIR が省略されている。"
+    },
+    {
+      "id": "R5-004",
+      "severity": "nice_to_have",
+      "previous_addressed": false,
+      "category": "明確性",
+      "description": "変更対象ファイル表の worktree-path-validator.test.ts と db-migration-path.test.ts の変更内容が「対策2の適用候補」と曖昧な記述になっている。これらのファイルに対策2を適用するかどうかは本Issue内で決定すべきか、それとも別Issueで扱うかが不明確である。受入条件にもこれら2ファイルに関する検証条件がない。",
+      "location": "## 影響範囲 > 変更対象ファイル",
+      "suggestion": "以下のいずれかで明確化する: (A) 本Issue のスコープ内で対策2を適用する場合、受入条件に「worktree-path-validator.test.ts と db-migration-path.test.ts が .env の値に依存せずパスすること」を追加する。(B) フォローアップで対応する場合、変更対象ファイル表に「フォローアップIssueで対応予定」と明記する。",
+      "evidence": "変更対象ファイル表: 「対策2の適用候補 -- 同一パターンA使用のため、環境変数分離処理の追加を検討」。受入条件には env.test.ts のみ言及。"
+    },
+    {
+      "id": "R5-005",
+      "severity": "nice_to_have",
+      "previous_addressed": false,
+      "category": "技術的妥当性",
+      "description": "「追加検討: .env自動注入の制御」セクションの選択肢(A)で envPrefix: ['VITE_'] を vitest.config.ts に設定する案が記載されているが、Viteの envPrefix はクライアントサイドの import.meta.env への公開プレフィックスを制御するものであり、process.env への注入を直接制御するものではない点が曖昧である。Vitestの動作としては、envPrefix に関わらず .env ファイルの全変数が process.env に読み込まれる場合がある。正確にはvitest.config.tsの envFile: false オプションか、test.env による上書きが確実な方法である。",
+      "location": "## 対策案 > 追加検討 > 選択肢(A)",
+      "suggestion": "選択肢(A)の説明を精緻化する。envPrefix の効果範囲（import.meta.env vs process.env）を明記し、process.env への注入を完全に防ぐには envFile: false の設定がより確実である旨を追記する。あるいは選択肢(A)を envPrefix ではなく envFile: false を使う案に変更する。",
+      "evidence": "Vite公式ドキュメント: envPrefix は import.meta.env に公開する環境変数のプレフィックスを制御する。process.env への注入はNode.js APIの dotenv 処理に依存する。"
+    },
+    {
+      "id": "R5-006",
+      "severity": "should_fix",
+      "previous_addressed": true,
+      "category": "整合性",
+      "description": "R3-003 (stage3) で指摘された conversation-pair-card.test.tsx への言及がStage 4 の反映で漏れている。Stage 3 の R3-007 では「3ファイル（jsdom環境の統合テスト）」と記載されたが、R3-003 で既にapp-version-display.test.tsx等のjsdom環境ファイルの影響を認識していたにもかかわらず、conversation-pair-card.test.tsx はStage 3のintegration_jsdom_test_files配列にも含まれていない。Stage 3のレビュー自体が conversation-pair-card.test.tsx を見落としており、Stage 4の反映でもそのまま引き継がれた。",
+      "location": "## 実際の動作 > 影響を受けるテスト",
+      "suggestion": "影響を受けるテスト一覧に conversation-pair-card.test.tsx を追加し、ファイル数を4に修正する。"
+    }
+  ],
+  "previous_review_coverage": {
+    "R1-001": "対応済み -- 対策1のスクリプトが実際のpackage.jsonの形式（vitest run tests/unit 等）に修正されている",
+    "R1-002": "対応済み -- 変更対象ファイルと対策1に全6テストスクリプト（test, test:unit, test:integration, test:watch, test:coverage, test:ui）が明記されている",
+    "R1-003": "対応済み -- 対策2のdelete対象にCM_ROOT_DIR/CM_PORT/CM_BIND/CM_DB_PATH/CM_LOG_LEVEL/CM_LOG_FORMAT/MCBD_ROOT_DIR/DATABASE_PATHが記載。ただしR5-003で指摘の通り一部レガシー変数が省略されている",
+    "R1-004": "対応済み -- 根本原因セクションにViteの.envファイル自動注入とモジュールスコープでのoriginalEnv評価の因果関係が詳細に記載されている",
+    "R1-005": "対応済み -- 受入条件にtest:integrationの個別条件と全テストスクリプトが外部NODE_ENVに依存しないことの一般化条件が追加されている",
+    "R1-006": "対応済み -- 対策1にNoteとしてCI環境がpackage.jsonのスクリプト経由で自動カバーされる旨が明記されている",
+    "R1-007": "対応済み -- 代替案セクションにvitest.config.tsのtest.envオプションによるアプローチとトレードオフが記載されている",
+    "R1-008": "スキップ（妥当） -- プロジェクトがtmux依存でUnix前提のため、Windows互換性は現時点でスコープ外"
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 3,
+    "total": 6
+  },
+  "code_references": [
+    {
+      "file": "tests/integration/conversation-pair-card.test.tsx",
+      "lines": "5, 9",
+      "relevance": "jsdom環境 + @testing-library/react使用の統合テスト（Issue記載から漏れている）"
+    },
+    {
+      "file": "tests/unit/config/z-index.test.ts",
+      "lines": "7",
+      "relevance": "jsdom環境だが@testing-library/react未使用（ファイル数カウントの不一致要因）"
+    },
+    {
+      "file": "tests/unit/lib/locale-cookie.test.ts",
+      "relevance": "jsdom環境だが@testing-library/react未使用（ファイル数カウントの不一致要因）"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "lines": "24-33",
+      "relevance": "ENV_MAPPINGの7変数定義（対策2のdelete対象の網羅性確認用）"
+    },
+    {
+      "file": "vitest.config.ts",
+      "lines": "1-32",
+      "relevance": "envPrefix/envFile未設定（選択肢Aの技術的妥当性確認用）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "開発コマンドとテストスクリプトの記載"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "issue_number": 304,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘反映",
+  "review_result_path": "dev-reports/issue/304/multi-stage-design-review/stage3-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-304-test-env-isolation-design-policy.md"
+}

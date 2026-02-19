@@ -1,0 +1,27 @@
+{
+  "issue_number": 304,
+  "refactor_targets": [
+    "package.json",
+    "tests/unit/env.test.ts",
+    "tests/unit/lib/worktree-path-validator.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "tests_passing": 3618,
+    "typescript_errors": 0,
+    "eslint_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性確認（ENV_VARS_TO_CLEAN定数、cleanEnvVars()関数の配置が適切か）",
+    "DRY原則の遵守確認（重複コードがないか）",
+    "YAGNI原則の遵守確認（不要な追加がないか）"
+  ],
+  "constraints": [
+    "src/ 以下のソースコードは変更しない",
+    "vitest.config.ts は変更しない",
+    ".github/workflows/ は変更しない",
+    "既存テストのパスを維持すること"
+  ],
+  "tdd_result_path": "dev-reports/issue/304/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_result_path": "dev-reports/issue/304/pm-auto-dev/iteration-1/acceptance-result.json"
+}

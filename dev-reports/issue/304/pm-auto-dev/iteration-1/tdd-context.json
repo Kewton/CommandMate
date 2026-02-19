@@ -1,0 +1,34 @@
+{
+  "issue_number": 304,
+  "title": "fix: テスト実行時にNODE_ENVが明示されず本番ビルドのReactが使用される",
+  "acceptance_criteria": [
+    "NODE_ENV=production が設定されたシェルで npm run test:unit を実行しても全テストがパスすること",
+    "NODE_ENV=production が設定されたシェルで npm run test:integration を実行しても全テストがパスすること",
+    "全テストスクリプト（test, test:unit, test:integration, test:watch, test:coverage, test:ui）が外部の NODE_ENV 設定に依存しないこと",
+    "env.test.ts のテストがシェル環境の .env に依存せずパスすること",
+    "既存テストに影響がないこと"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: package.json の全6テストスクリプトに NODE_ENV=test プレフィックスを追加（test, test:unit, test:integration, test:watch, test:coverage, test:ui）。test:e2e は Playwright/ブラウザ環境のためスコープ外。",
+    "Task 2.1: tests/unit/env.test.ts の7つのdescribeブロック（getEnvWithFallback, getEnvByKey, resetWarnedKeys, getEnv with fallback, getLogConfig with fallback, getDatabasePathWithDeprecationWarning, getEnv with DB path resolution）のbeforeEachに cleanEnvVars() ヘルパー関数を追加。ENV_VARS_TO_CLEAN定数でCM_*/MCBD_*/DATABASE_PATHを削除。",
+    "Task 3.1: tests/unit/lib/worktree-path-validator.test.ts の beforeEach に delete process.env.ALLOWED_WORKTREE_PATHS を追加。ソースコードが参照する環境変数はこれのみ（L47）。",
+    "Task 4.1: tests/unit/db-migration-path.test.ts の確認。getLegacyDbPaths のbeforeEachに既に delete process.env.DATABASE_PATH が存在するため変更不要。"
+  ],
+  "work_plan_path": "dev-reports/issue/304/work-plan.md",
+  "design_policy_path": "dev-reports/design/issue-304-test-env-isolation-design-policy.md",
+  "files_to_modify": [
+    "package.json",
+    "tests/unit/env.test.ts",
+    "tests/unit/lib/worktree-path-validator.test.ts"
+  ],
+  "files_to_confirm_no_change": [
+    "tests/unit/db-migration-path.test.ts"
+  ],
+  "target_coverage": 80,
+  "implementation_notes": {
+    "package_json": "NODE_ENV=test プレフィックスを追加するのみ。test:e2e は除外。",
+    "env_test_ts": "const originalEnv = process.env が参照代入のため、.env由来の値がmodule初期化時にキャプチャされる。cleanEnvVars()で各beforeEachの直後に削除することで分離を保証。ENV_VARS_TO_CLEANにCM_DB_PATHを含めることで getEnv with fallback ブロックのgetDefaultDbPath()への暗黙依存も解消（DR3-006）。",
+    "worktree_path_validator_test_ts": "ソースのworktree-path-validator.tsはALLOWED_WORKTREE_PATHSのみ参照（DR2-007）。最小限の変更で対応。",
+    "db_migration_path_test_ts": "ソースのdb-migration-path.tsはDATABASE_PATHのみ参照（DR2-001）。getLegacyDbPathsのbeforeEachに既にdelete process.env.DATABASE_PATHが存在するため変更不要。"
+  }
+}

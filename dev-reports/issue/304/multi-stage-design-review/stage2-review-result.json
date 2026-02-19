@@ -1,0 +1,69 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_items": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "description": "db-migration-path.test.ts の修正方針で CM_DB_PATH / MCBD_DB_PATH / CM_ROOT_DIR / MCBD_ROOT_DIR の delete を指示しているが、db-migration-path.ts ソースコードは CM_DB_PATH / MCBD_DB_PATH / CM_ROOT_DIR / MCBD_ROOT_DIR を直接参照していない。getLegacyDbPaths() は DATABASE_PATH のみ参照し、それ以外は process.cwd() と homedir() に依存する。CM_DB_PATH / MCBD_DB_PATH / CM_ROOT_DIR / MCBD_ROOT_DIR の delete は db-migration-path.ts のテストには直接的な効果がない。これらの変数が必要になるのは、テストが間接的に env.ts を呼ぶ場合のみだが、現在の db-migration-path.test.ts は env.ts をインポートしていない。",
+      "evidence": "src/lib/db-migration-path.ts の getLegacyDbPaths() は process.env.DATABASE_PATH のみ参照（L86）。CM_DB_PATH / MCBD_DB_PATH / CM_ROOT_DIR / MCBD_ROOT_DIR への参照はファイル内に存在しない。設計書 Section 4.4 では「CM_DB_PATH や MCBD_DB_PATH も追加で削除する」「CM_ROOT_DIR / MCBD_ROOT_DIR も delete」と記載。",
+      "suggestion": "db-migration-path.test.ts で delete する変数を実際のソースコード依存に合わせ、DATABASE_PATH のみとする（現状維持で十分）。CM_DB_PATH / MCBD_DB_PATH / CM_ROOT_DIR / MCBD_ROOT_DIR の追加 delete は防御的措置として記載するならば、その旨を設計書に明記し、「ソースコードが将来これらの変数を参照する可能性に備えた防御的設計」であることを根拠として追記すべき。現時点では不要な delete が4つ追加されることになり、YAGNI原則との矛盾が生じる。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "should_fix",
+      "description": "設計書 Section 4.2 の ENV_VARS_TO_CLEAN に CM_LOG_DIR が含まれているが、.env ファイルおよび .env.example では CM_LOG_DIR は設定されていない。一方、getEnvByKey() で参照可能であり ENV_MAPPING に定義されているため、リストに含めること自体は正当だが、実際の .env 汚染リスクが低いことを設計書に補記すべき。",
+      "evidence": ".env ファイル（L1-10）には CM_LOG_DIR の記載なし。.env.example にも CM_LOG_DIR の記載なし。しかし ENV_MAPPING（src/lib/env.ts L31）には CM_LOG_DIR: 'MCBD_LOG_DIR' が定義されている。",
+      "suggestion": "ENV_VARS_TO_CLEAN のリストは ENV_MAPPING の全キー + レガシー対応 + DATABASE_PATH で正しい。ただし設計書に「CM_LOG_DIR は現在の .env テンプレートには含まれないが、ENV_MAPPING に定義されているため防御的に含める」旨の補足を追記すると、将来のレビューアーの混乱を防げる。軽微な指摘であり、実装上の問題はない。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "should_fix",
+      "description": "設計書でスコープ外としたファイルの記載パスが実際のパスと不一致。設計書は「tests/unit/lib/api-logger.test.ts」と記載しているが、実際のファイルパスは「tests/unit/api-logger.test.ts」（lib/ サブディレクトリではない）。",
+      "evidence": "設計書 Section 1 スコープ外テーブルに「tests/unit/lib/api-logger.test.ts」と記載。実際のファイルは /Users/maenokota/share/work/github_kewton/commandmate-issue-304/tests/unit/api-logger.test.ts に存在し、tests/unit/lib/ 配下には存在しない。",
+      "suggestion": "設計書のファイルパスを「tests/unit/api-logger.test.ts」に修正する。パスの誤りは実装時に混乱を招く可能性がある。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "description": "env.test.ts の describe ブロック数の整合性確認: 設計書は「process.env を操作する7つの describe ブロック」と記載し、7つのブロック名を列挙している。実際の env.test.ts には8つの describe ブロック（getEnvWithFallback, getEnvByKey, resetWarnedKeys, getEnv with fallback, getLogConfig with fallback, ENV_MAPPING, getDatabasePathWithDeprecationWarning, getEnv with DB path resolution (Issue #135)）が存在し、うち ENV_MAPPING は process.env を操作しないため除外で正しく、残り7つが対象。ブロック名の列挙と実コードは一致するが、列挙順と実コードの出現順が異なる。",
+      "evidence": "設計書 Section 4.2 の列挙順: (1)getEnvWithFallback (2)getEnvByKey (3)resetWarnedKeys (4)getEnv with fallback (5)getLogConfig with fallback (6)getDatabasePathWithDeprecationWarning (7)getEnv with DB path resolution。実コードの出現順: (1)getEnvWithFallback (2)getEnvByKey (3)resetWarnedKeys (4)getEnv with fallback (5)getLogConfig with fallback (6)ENV_MAPPING (7)getDatabasePathWithDeprecationWarning (8)getEnv with DB path resolution。",
+      "suggestion": "内容的には正しいが、設計書の列挙順を実コードの出現順に合わせると実装時の照合が容易になる。getDatabasePathWithDeprecationWarning を6番目に記載しているが、実コードでは ENV_MAPPING の後（7番目の describe ブロック）に位置する。軽微な可読性改善であり、必須ではない。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "nice_to_have",
+      "description": "対策1と対策2の相互関係の明示的記述が不足。対策1（NODE_ENV=test プレフィックス）は NODE_ENV 汚染を防ぎ、対策2（beforeEach での delete）は .env 由来の CM_*/MCBD_*/DATABASE_PATH 汚染を防ぐ。両者は異なる問題を解決する独立した対策であり矛盾はないが、設計書でこの独立性を明示すると理解が深まる。",
+      "evidence": "設計書 Section 1 で「NODE_ENV が明示的に設定されず」と「.env ファイルの環境変数がテスト内のモック値を上書きする問題」の2つの問題を記載。対策1は前者、対策2は後者に対応。Section 3 で各対策の技術選定は個別に記載されているが、両対策の関係性（独立/依存）の明示なし。",
+      "suggestion": "Section 3 または Section 8 に「対策1と対策2は異なる問題を解決する独立した対策であり、どちらか一方のみの適用でも各問題は解決される」旨を追記する。これにより、将来のメンテナーが対策間の依存関係を正しく理解できる。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "nice_to_have",
+      "description": "受入条件の検証コマンドと対策2の検証範囲に軽微な不整合。受入条件の検証方法（Section 7）で「対策2の検証: env.test.ts の全テストがパス」と記載しているが、対策2は worktree-path-validator.test.ts と db-migration-path.test.ts にも適用される。これらのファイルの個別検証コマンドが受入条件に明記されていない。",
+      "evidence": "設計書 Section 7 の受入条件検証コマンド: 対策2は 'npm run test:unit -- tests/unit/env.test.ts' のみ記載。worktree-path-validator.test.ts と db-migration-path.test.ts は「既存テストの回帰確認」の 'npm run test:unit' でカバーされるが、対策2の検証として明示されていない。",
+      "suggestion": "受入条件の「対策2の検証」セクションに、worktree-path-validator.test.ts と db-migration-path.test.ts の個別実行コマンドも追記するか、「対策2は3ファイルに適用され、npm run test:unit の回帰確認で全ファイルをカバーする」旨の注記を追加する。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "should_fix",
+      "description": "worktree-path-validator.test.ts の修正方針で CM_ROOT_DIR / MCBD_ROOT_DIR の delete を指示しているが、worktree-path-validator.ts ソースコードは CM_ROOT_DIR / MCBD_ROOT_DIR を直接参照していない。isValidWorktreePath() は ALLOWED_WORKTREE_PATHS のみ参照する。テストの「environment variable configuration」describe ブロックも ALLOWED_WORKTREE_PATHS のみ操作している。",
+      "evidence": "src/lib/worktree-path-validator.ts の getAlllowedBasePaths() は process.env.ALLOWED_WORKTREE_PATHS のみ参照（L47）。CM_ROOT_DIR / MCBD_ROOT_DIR への参照はファイル内に存在しない。設計書 Section 4.3 では beforeEach に delete process.env.CM_ROOT_DIR / delete process.env.MCBD_ROOT_DIR を追加と記載。",
+      "suggestion": "DR2-001 と同様の問題。worktree-path-validator.test.ts で CM_ROOT_DIR / MCBD_ROOT_DIR を delete する根拠が不明確。防御的措置として残すのであれば、設計書にその旨を明記すべき。あるいは、このファイルには ALLOWED_WORKTREE_PATHS を delete する方が本来の目的に沿っている可能性がある（ただし現在のテストでは ALLOWED_WORKTREE_PATHS を各テスト内で明示設定しているため、既存の動作に問題は確認されていない）。"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "nice_to_have",
+      "description": "package.json のテストスクリプト数に関する整合性確認。設計書は「全6テストスクリプト」と記載。現在の package.json には test, test:ui, test:coverage, test:unit, test:integration, test:watch の6スクリプトが存在し、test:e2e は除外。数は正確に一致している。",
+      "evidence": "設計書 Section 4.1 に6スクリプト列挙。package.json（L39-46）に test/test:ui/test:coverage/test:unit/test:integration/test:watch の6スクリプト + test:e2e（除外対象）を確認。",
+      "suggestion": "問題なし。整合性が確認できた。情報として記録。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 4,
+    "nice_to_have": 3,
+    "total": 8
+  }
+}

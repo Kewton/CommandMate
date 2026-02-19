@@ -1,0 +1,61 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 304,
+  "apply_date": "2026-02-20",
+  "applied_items": [
+    {
+      "id": "R3-006",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "対策案セクションに「追加検討: .env自動注入の制御」を新設。選択肢(A) envPrefix設定、(B) .env.test作成、(C) 環境変数明示セットアップ標準化の3案をトレードオフ付きで記載。変更対象ファイルにvitest.config.tsを追加。"
+    },
+    {
+      "id": "R3-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "変更対象ファイルに tests/unit/lib/worktree-path-validator.test.ts と tests/unit/db-migration-path.test.ts を対策2の適用候補として追加。パターンA分類との対応も明記。"
+    },
+    {
+      "id": "R3-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "影響範囲セクションに「process.env パターン分類」を新設。パターンA（参照代入）、パターンB（スプレッドコピー）、パターンC（単一変数保存）の3分類で全11ファイルを影響度付きで整理。"
+    },
+    {
+      "id": "R3-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "概要・再現手順・実際の動作セクションの失敗数記述を「62ファイル/1112テスト（unit）+ 3ファイル（integration、jsdom環境）」に更新。影響を受ける統合テスト3ファイルを明示。"
+    }
+  ],
+  "skipped_items": [
+    {
+      "id": "R3-004",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "NODE_ENV依存ソースコード分岐への影響確認はレビュー結果に記録済み。Issueの簡潔さを維持するためスキップ。"
+    },
+    {
+      "id": "R3-005",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "CI/CDへの影響は対策1のNote内に「CIワークフロー側での個別設定は不要」として既に記載済み。追加の詳述は不要。"
+    },
+    {
+      "id": "R3-008",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "CLAUDE.mdへのvitest直接実行の注意書き追加は本Issueのスコープ外。必要であればフォローアップで対応。"
+    }
+  ],
+  "summary": {
+    "total_findings": 7,
+    "applied": 4,
+    "skipped": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/304"
+  }
+}

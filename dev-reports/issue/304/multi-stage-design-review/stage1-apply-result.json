@@ -1,0 +1,7 @@
+{
+  "stage": 1,
+  "applied_items": ["DR1-004", "DR1-001", "DR1-002", "DR1-005", "DR1-006"],
+  "skipped_items": ["DR1-003", "DR1-007", "DR1-008"],
+  "design_doc_updated": true,
+  "summary": "Stage 1 レビュー指摘事項を設計方針書に反映。Must Fix 1件（DR1-004: スコープ外ファイルの判断根拠明記）、Should Fix 3件（DR1-001: DRYトレードオフ補足、DR1-002: describeブロック記述の正確化と対象ブロック名列挙、DR1-005: CIカバーメカニズム詳細説明）、Nice to Have 1件（DR1-006: ファイルローカルcleanEnvVars()ヘルパー検討追記）を反映。DR1-007のレガシー変数コメントはENV_VARS_TO_CLEANコードブロック内に追記。DR1-003はフォローアップIssue検討が既に記載済みのためスキップ。DR1-008はプラットフォーム制約明記が本Issueスコープ外のためスキップ。"
+}

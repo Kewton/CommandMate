@@ -1,0 +1,7 @@
+{
+  "issue_number": 304,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-304-test-env-isolation-design-policy.md"
+}

@@ -1,0 +1,129 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-20",
+  "issue_number": 304,
+  "review_items": [
+    {
+      "id": "R7-001",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "clone-manager.test.ts の beforeEach/afterEach では WORKTREE_BASE_PATH のみを delete しているが、.env から注入される CM_ROOT_DIR（/Users/maenokota/share/work/github_kewton）が process.env に残留している。resolveDefaultBasePath() は WORKTREE_BASE_PATH のみを参照するため現時点では直接的な影響はないが、将来的に CM_ROOT_DIR を参照するロジックが追加された場合にテスト分離が不完全になるリスクがある。このファイルはパターンC（単一変数の保存・復元）に分類されているが、.env 由来の CM_ROOT_DIR が暗黙的に存在する点をパターン分類表の備考に追記すべきである。",
+      "location": "## 影響範囲 > process.env パターン分類 > パターンC",
+      "suggestion": "パターンC の clone-manager.test.ts の備考に「.env由来のCM_ROOT_DIRが暗黙的に存在するが、resolveDefaultBasePath()はWORKTREE_BASE_PATHのみ参照するため現時点で影響なし」と補足する。または、追加検討セクションの選択肢(A)/(B) の適用で根本解決される旨を記載する。",
+      "evidence": "tests/unit/lib/clone-manager.test.ts L37-38: `delete process.env.WORKTREE_BASE_PATH` のみ。src/lib/clone-manager.ts L222-234: resolveDefaultBasePath() は WORKTREE_BASE_PATH のみ参照。.env L4: CM_ROOT_DIR=/Users/maenokota/share/work/github_kewton がprocess.envに注入される。"
+    },
+    {
+      "id": "R7-002",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "変更対象ファイル表で worktree-path-validator.test.ts と db-migration-path.test.ts が「対策2の適用候補」と記載されているが、これらのファイルへの対策適用判断が受入条件に反映されていない。Stage 5 の R5-004（nice_to_have）で同様の指摘があったがスキップされている。しかし影響範囲レビューの観点では、パターンAファイルの対策適用が本Issueスコープ内かスコープ外かを変更対象ファイル表で明確にしておかないと、実装者が判断に迷う可能性がある。最低限「本Issueスコープ内で対応」または「フォローアップIssueで対応」の明記が必要。",
+      "location": "## 影響範囲 > 変更対象ファイル",
+      "suggestion": "変更対象ファイル表の worktree-path-validator.test.ts と db-migration-path.test.ts の変更内容を「対策2の適用候補」から「本Issueのスコープ内で対策2を適用（env.test.tsと同一のパターンA修正）」または「フォローアップIssueで対応。現時点ではenv.test.tsの9テスト失敗は確認済みだが、これらのファイルの失敗は未確認」のいずれかに更新する。",
+      "evidence": "変更対象ファイル表: 「対策2の適用候補 -- 同一パターンA使用のため、環境変数分離処理の追加を検討」。受入条件にこの2ファイルの検証条件なし。Stage 5 R5-004（nice_to_have）でも同様の指摘あり。"
+    },
+    {
+      "id": "R7-003",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "Stage 5 の R5-005（nice_to_have）で指摘された envPrefix の技術的正確性の問題がスキップされているが、影響範囲の観点から追加検討セクションの選択肢(A)が不正確な技術的前提に基づいている。Vite の envPrefix は import.meta.env への公開プレフィックスを制御するものであり、process.env への .env ファイルからの注入を直接制御するものではない。選択肢(A)をそのまま実装した場合、期待通りに .env の CM_* 変数が除外されない可能性がある。この点は「追加検討」セクションであり本Issueの最小スコープには含まれないため影響は限定的だが、実装者が選択肢(A)を選んだ場合に想定外の動作が発生するリスクがある。",
+      "location": "## 対策案 > 追加検討 > 選択肢(A)",
+      "suggestion": "選択肢(A) の説明に「注: envPrefix は import.meta.env への公開プレフィックスを制御するものであり、process.env への .env 注入を制御するには Vitest v4 の envFile オプション（Vite 5.x 相当）の確認が必要」という注記を追加する。または、選択肢(A) を envFile: false に変更する。",
+      "evidence": "Vite公式ドキュメント: envPrefix はクライアントサイドの import.meta.env に公開する環境変数のプレフィックスを制御。vitest.config.ts には envFile/envPrefix いずれも未設定。Vitest v4.0.16 使用。"
+    },
+    {
+      "id": "R7-004",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "tests/setup.ts（全テスト共通セットアップファイル）には process.env のクリーンアップ処理が含まれていない。対策2では各テストファイル個別にbeforeEach/afterEachで環境変数を管理しているが、tests/setup.ts で .env 由来の変数をグローバルにクリアする方法も検討に値する。これは対策案の選択肢(C)「各テストファイルでの環境変数明示セットアップの標準化」のバリエーションとして、setup.ts で一括クリアする方法である。影響範囲セクションでsetup.tsへの言及がない。",
+      "location": "## 影響範囲 > 変更対象ファイル",
+      "suggestion": "変更対象ファイルにtests/setup.tsを追加するか、追加検討セクションに「選択肢(D): tests/setup.ts のグローバルsetupで.env由来の環境変数を一括クリアする」を記載する。これにより個別ファイルでのdelete処理が不要になり、新規テスト追加時の漏れを防止できる。",
+      "evidence": "tests/setup.ts L25-37: beforeAll/afterEach/afterAll でprocess.envに関する処理なし。vitest.config.ts L10: setupFiles: ['./tests/setup.ts'] で全テストから参照される。"
+    },
+    {
+      "id": "R7-005",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "受入条件に「既存テストに影響がないこと」と記載されているが、この条件は検証方法が曖昧である。対策1（NODE_ENV=test追加）と対策2（env.test.tsの修正）を適用した後、NODE_ENVが未設定のシェルで実行した場合にも全テストがパスすることを保証する必要がある。現在の受入条件は NODE_ENV=production のシナリオのみ明示しており、NODE_ENV 未設定（現在のデフォルト動作）でのリグレッション確認が受入条件として明示されていない。",
+      "location": "## 受入条件",
+      "suggestion": "受入条件に「NODE_ENVが未設定のシェルで npm run test:unit / npm run test:integration を実行しても全テストがパスすること」を追加する。対策1のNODE_ENV=testが正しく機能していれば自明であるが、リグレッション防止のため明示しておくとよい。",
+      "evidence": "受入条件: 「NODE_ENV=productionが設定されたシェルで...」と「全テストスクリプトが外部のNODE_ENV設定に依存しないこと」は記載あり。後者は暗黙的に未設定ケースも含むが、明示的な検証シナリオとしてはNODE_ENV=productionのみ。"
+    }
+  ],
+  "previous_review_coverage": {
+    "R3-001": "対応済み -- 変更対象ファイルに worktree-path-validator.test.ts と db-migration-path.test.ts を「対策2の適用候補」として追加済み。パターンA分類表にも記載あり。ただしスコープ内/外の判断が曖昧な点をR7-002で再指摘。",
+    "R3-002": "対応済み -- process.env パターン分類（A: 参照代入 / B: スプレッドコピー / C: 単一変数）が影響範囲セクションに追記されている。3パターンの違いと各ファイルの影響度が明確に記載されている。",
+    "R3-003": "対応済み -- app-version-display.test.tsx はパターンBに分類され、対策1で自動カバーされるファイルとして整理されている。個別ファイルの追記は「Issueの簡潔さを維持」のためスキップされたが妥当な判断。",
+    "R3-004": "スキップ（妥当） -- 「NODE_ENVに依存するソースコード分岐への影響なし」の確認結果はIssueに記載されていないが、nice_to_have指摘であり簡潔さ優先でスキップは妥当。",
+    "R3-005": "スキップ（妥当） -- CIワークフローへの影響は対策1のNote内で「CI環境がpackage.jsonのスクリプト経由で自動カバーされる」と簡潔に記載されている。nice_to_have指摘のためスキップは妥当。",
+    "R3-006": "対応済み -- 対策案に「追加検討: .env自動注入の制御」セクションが追加され、選択肢(A)/(B)/(C)の3案が記載されている。変更対象ファイルにvitest.config.tsも追加済み。ただし選択肢(A)のenvPrefixの技術的正確性にR7-003で指摘あり。",
+    "R3-007": "対応済み（Stage 5/6で修正） -- 統合テストの影響ファイル数が3から4に修正され、conversation-pair-card.test.tsx が追加されている。概要・再現手順・実際の動作セクション全てで「4ファイル」に統一されている。",
+    "R3-008": "スキップ（妥当） -- CLAUDE.mdへの注記追加はnice_to_haveであり、vitest.config.tsのtest.envオプションで根本解決可能なため、Issueの簡潔さ維持の判断は妥当。"
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 3,
+    "total": 5
+  },
+  "code_references": [
+    {
+      "file": "tests/unit/lib/clone-manager.test.ts",
+      "lines": "37-38, 352, 360",
+      "relevance": "WORKTREE_BASE_PATHのみdelete、CM_ROOT_DIRの.env注入が残留する箇所"
+    },
+    {
+      "file": "tests/unit/lib/worktree-path-validator.test.ts",
+      "lines": "11, 15, 19",
+      "relevance": "パターンAファイル -- スコープ内/外の判断が曖昧"
+    },
+    {
+      "file": "tests/unit/db-migration-path.test.ts",
+      "lines": "42, 45, 50",
+      "relevance": "パターンAファイル -- スコープ内/外の判断が曖昧"
+    },
+    {
+      "file": "tests/setup.ts",
+      "lines": "25-41",
+      "relevance": "グローバルsetupファイル -- process.envクリーンアップ未実装"
+    },
+    {
+      "file": "vitest.config.ts",
+      "lines": "1-32",
+      "relevance": "envPrefix/envFile未設定。選択肢(A)の技術的前提確認用"
+    },
+    {
+      "file": "src/lib/clone-manager.ts",
+      "lines": "222-234",
+      "relevance": "resolveDefaultBasePath() -- WORKTREE_BASE_PATHのみ参照（CM_ROOT_DIR未参照）"
+    },
+    {
+      "file": ".env",
+      "lines": "4",
+      "relevance": "CM_ROOT_DIR=/Users/maenokota/share/work/github_kewton -- テスト実行時にprocess.envに注入される"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "開発コマンドとテストスクリプトの記載"
+    }
+  ],
+  "impact_analysis": {
+    "stage3_coverage": {
+      "fully_addressed": ["R3-002", "R3-003", "R3-005", "R3-007"],
+      "addressed_with_caveats": ["R3-001", "R3-006"],
+      "appropriately_skipped": ["R3-004", "R3-008"]
+    },
+    "new_findings": {
+      "pattern_c_implicit_env_leakage": "clone-manager.test.ts ではWORKTREE_BASE_PATHのみdelete但し.env由来CM_ROOT_DIRが残留",
+      "scope_ambiguity": "パターンAファイル2件のスコープ内/外判断が未確定",
+      "envprefix_accuracy": "選択肢(A)のenvPrefixの効果がprocess.envに及ぶかの技術的正確性",
+      "setup_ts_opportunity": "tests/setup.tsでのグローバル環境変数クリーンアップの可能性",
+      "acceptance_criteria_gap": "NODE_ENV未設定シナリオの検証が暗黙的のみ"
+    },
+    "breaking_changes": "none",
+    "overall_assessment": "Stage 3で指摘された8件のうち、must_fix 1件（R3-006）を含む主要項目は全て対応済み。Stage 5/6での修正も適切に反映されている。残存する問題はいずれもshould_fix以下であり、Issueの品質は実装着手に十分なレベルに達している。"
+  }
+}
