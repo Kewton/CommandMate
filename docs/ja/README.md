@@ -18,6 +18,12 @@
 
 CommandMate は Claude Code・Codex CLI のセッションを Git worktree 単位で管理し、スマホを含むあらゆるブラウザから操作できる Web UI を提供します。Auto Yes モードでエージェントが自律的に動き続ける間、あなたはスマホから進捗を監視し、コード変更を確認し、指示を編集し、スクリーンショットで方向を伝えられます。
 
+もちろんデスクトップでも快適に使えます。2カラムレイアウトで全セッション・全ワークツリーを一望できます。
+
+<p align="center">
+  <img src="../../docs/images/demo-desktop.gif" alt="CommandMate デスクトップデモ" width="600">
+</p>
+
 ```bash
 npx commandmate
 ```
@@ -242,6 +248,15 @@ tmux kill-session -t "mcbd-claude-feature-123"
 Claude Code は `CLAUDECODE=1` を設定してネストを防止しています。CommandMate は自動で除去しますが、問題が続く場合は `tmux set-environment -g -u CLAUDECODE` を実行してください。
 
 ### FAQ
+
+**Q: スマホからどうやってアクセスする？**
+A: CommandMate は PC 上で Web サーバーを起動します。スマホと PC が同じネットワーク（Wi-Fi）にいる状態で、`commandmate init` で外部アクセスを有効にすると `CM_BIND=0.0.0.0` が設定されます。スマホのブラウザで `http://<PCのIPアドレス>:3000` を開いてください。
+
+**Q: 外出先からアクセスできる？**
+A: はい。[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) などのトンネリングサービスを使えば、ルーターのポート開放なしにローカルサーバーを安全に公開できます。VPN や認証付きリバースプロキシ（Basic 認証、OIDC 等）も利用可能です。**認証なしでインターネットに直接公開しないでください。**
+
+**Q: iPhone / Android で使える？**
+A: はい。CommandMate の Web UI はレスポンシブ対応で、Safari・Chrome などのモバイルブラウザで動作します。アプリのインストールは不要です。
 
 **Q: tmux は必須？**
 A: CommandMate は内部で tmux を使用して CLI セッションを管理しています。ユーザーが tmux を直接操作する必要はありません。
