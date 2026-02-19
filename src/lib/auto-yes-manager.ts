@@ -49,6 +49,8 @@ export interface AutoYesPollerState {
   lastServerResponseTimestamp: number | null;
   /** Last answered prompt key for duplicate prevention (Issue #306) */
   lastAnsweredPromptKey: string | null;
+  /** Baseline output length for stop condition delta check (Issue #314 fix) */
+  stopCheckBaselineLength: number;
 }
 
 /** Result of starting a poller */
@@ -496,8 +498,30 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
     // 2.7. Check stop condition (Issue #314)
     // After thinking check, before prompt detection: if terminal output matches
     // the stop pattern, disable auto-yes and stop polling immediately.
-    if (checkStopCondition(worktreeId, cleanOutput)) {
-      return;
+    //
+    // Delta-based check: Only check NEW output since Auto-Yes was enabled.
+    // On the first poll, establish the baseline output length (skip check to
+    // avoid matching pre-existing terminal content like shell prompts or paths).
+    // On subsequent polls, check only the output delta (new content appended).
+    // If the buffer shrank (tmux scrollback shifted), reset baseline and skip
+    // that cycle to avoid false positives from old content.
+    if (pollerState.stopCheckBaselineLength < 0) {
+      // First poll: set baseline, skip stop condition check
+      pollerState.stopCheckBaselineLength = cleanOutput.length;
+    } else {
+      const baseline = pollerState.stopCheckBaselineLength;
+      if (cleanOutput.length > baseline) {
+        // Output grew: check only new content (delta)
+        const newContent = cleanOutput.substring(baseline);
+        pollerState.stopCheckBaselineLength = cleanOutput.length;
+        if (checkStopCondition(worktreeId, newContent)) {
+          return;
+        }
+      } else if (cleanOutput.length < baseline) {
+        // Buffer shrank (old lines dropped from scrollback): reset baseline
+        pollerState.stopCheckBaselineLength = cleanOutput.length;
+      }
+      // If length unchanged: no new content, skip check
     }
 
     // 3. Detect prompt
@@ -633,6 +657,7 @@ export function startAutoYesPolling(
     currentInterval: POLLING_INTERVAL_MS,
     lastServerResponseTimestamp: null,
     lastAnsweredPromptKey: null,  // S2-F003: initialized to null
+    stopCheckBaselineLength: -1,  // Issue #314 fix: -1 = first poll (baseline not set)
   };
   autoYesPollerStates.set(worktreeId, pollerState);
 

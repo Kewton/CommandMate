@@ -1341,8 +1341,41 @@ describe('auto-yes-manager', () => {
     });
   });
 
-  describe('Issue #314: pollAutoYes with checkStopCondition', () => {
-    it('should stop polling when stop condition matches during poll', async () => {
+  describe('Issue #314: pollAutoYes with checkStopCondition (delta-based)', () => {
+    it('should skip stop condition check on first poll (baseline establishment)', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+
+      // Setup: enable auto-yes with stop pattern
+      setAutoYesEnabled('wt-baseline', true, 3600000, 'fatal error');
+      startAutoYesPolling('wt-baseline', 'claude');
+
+      // Mock: output that matches the stop pattern (pre-existing content)
+      vi.mocked(captureSessionOutput).mockResolvedValue('A fatal error has occurred');
+
+      // Advance timer to trigger first pollAutoYes
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: auto-yes is STILL enabled (first poll sets baseline, skips stop check)
+      const state = getAutoYesState('wt-baseline');
+      expect(state?.enabled).toBe(true);
+
+      // Verify: poller is still active
+      expect(getActivePollerCount()).toBe(1);
+
+      // Cleanup
+      stopAutoYesPolling('wt-baseline');
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+    });
+
+    it('should stop polling when NEW output matches stop pattern on second poll', async () => {
       const { captureSessionOutput } = await import('@/lib/cli-session');
       const { sendKeys } = await import('@/lib/tmux');
 
@@ -1356,13 +1389,15 @@ describe('auto-yes-manager', () => {
       setAutoYesEnabled('wt-stop-poll', true, 3600000, 'fatal error');
       startAutoYesPolling('wt-stop-poll', 'claude');
 
-      // Mock: output that matches the stop pattern
-      vi.mocked(captureSessionOutput).mockResolvedValue('A fatal error has occurred');
-
-      // Advance timer to trigger pollAutoYes
+      // First poll: initial output (no match - establishes baseline)
+      vi.mocked(captureSessionOutput).mockResolvedValue('Claude is working...');
       await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
 
-      // Verify: sendKeys was NOT called (stop condition matched, poll stopped)
+      // Second poll: output grew with matching content
+      vi.mocked(captureSessionOutput).mockResolvedValue('Claude is working...\nA fatal error has occurred');
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: sendKeys was NOT called (stop condition matched on delta)
       expect(sendKeys).not.toHaveBeenCalled();
 
       // Verify: auto-yes was disabled with stop_pattern_matched reason
@@ -1374,6 +1409,39 @@ describe('auto-yes-manager', () => {
       expect(getActivePollerCount()).toBe(0);
 
       // Cleanup
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+    });
+
+    it('should not trigger stop on pre-existing content even after multiple polls', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+
+      // Setup: enable auto-yes with stop pattern
+      setAutoYesEnabled('wt-no-false', true, 3600000, 'kewton');
+      startAutoYesPolling('wt-no-false', 'claude');
+
+      // First poll: output contains "kewton" (pre-existing, e.g. shell prompt)
+      vi.mocked(captureSessionOutput).mockResolvedValue('kewton@mac:~/project$ claude');
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Second poll: same output (no new content)
+      vi.mocked(captureSessionOutput).mockResolvedValue('kewton@mac:~/project$ claude');
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: auto-yes is still enabled (no false trigger from pre-existing content)
+      const state = getAutoYesState('wt-no-false');
+      expect(state?.enabled).toBe(true);
+      expect(getActivePollerCount()).toBe(1);
+
+      // Cleanup
+      stopAutoYesPolling('wt-no-false');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
@@ -1408,6 +1476,39 @@ describe('auto-yes-manager', () => {
 
       // Cleanup
       stopAutoYesPolling('wt-no-stop');
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+    });
+
+    it('should reset baseline when buffer shrinks', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      const { sendKeys } = await import('@/lib/tmux');
+
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now());
+
+      vi.mocked(captureSessionOutput).mockReset();
+      vi.mocked(sendKeys).mockReset();
+
+      // Setup: enable auto-yes with stop pattern
+      setAutoYesEnabled('wt-shrink', true, 3600000, 'fatal error');
+      startAutoYesPolling('wt-shrink', 'claude');
+
+      // First poll: long output (baseline)
+      vi.mocked(captureSessionOutput).mockResolvedValue('A'.repeat(1000));
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Second poll: shorter output (buffer shifted) - should not crash or false trigger
+      vi.mocked(captureSessionOutput).mockResolvedValue('Short output');
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+
+      // Verify: auto-yes is still enabled (buffer shrink handled gracefully)
+      const state = getAutoYesState('wt-shrink');
+      expect(state?.enabled).toBe(true);
+      expect(getActivePollerCount()).toBe(1);
+
+      // Cleanup
+      stopAutoYesPolling('wt-shrink');
       vi.mocked(captureSessionOutput).mockReset();
       vi.mocked(sendKeys).mockReset();
     });
