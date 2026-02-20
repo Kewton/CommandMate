@@ -1,0 +1,126 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 321,
+  "review_focus": "影響範囲",
+  "review_date": "2026-02-20",
+  "findings": [
+    {
+      "id": "F101",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "影響範囲テーブルにMemoPane.tsxのimport変更が欠落している",
+      "description": "Issueの影響範囲テーブルにはMemoCard.tsxとMemoCard.test.tsxの2ファイルのみが記載されている。しかし、MemoCard.tsxにlucide-reactのCopy/Checkアイコンimportおよびcopyboard-utils.tsのimportが追加されることで、MemoCardコンポーネント自体のバンドルサイズが微増する。MemoPane.tsx（MemoCardの親コンポーネント）についてはpropsインタフェースの変更がないため影響がないのは正しいが、Issueの影響範囲テーブルには「変更なし」として明記した方が実装者にとって分かりやすい。現在のIssueの記述は正確ではあるが、MemoPane.tsxが影響を受けないことの確認根拠が不明。",
+      "suggestion": "影響範囲テーブルに以下の行を追記することを推奨する。\n\n| src/components/worktree/MemoPane.tsx | 変更なし（MemoCardPropsインタフェース変更なし、propsの伝播変更不要） |"
+    },
+    {
+      "id": "F102",
+      "severity": "should_fix",
+      "category": "testing",
+      "title": "MemoPane.test.tsxへの影響の明記がない",
+      "description": "MemoPane.test.tsxでは、MemoCardのレンダリングをMemoPane経由でテストしている（例: getAllByRole('button', { name: /delete/i })でMemoCard内の削除ボタンを検出している箇所が2箇所ある）。MemoCardにコピーボタンが追加されると、MemoPane.test.tsxの「Delete memo」テスト内でgetAllByRole('button')の結果にコピーボタンが含まれることになる。現在のテストコードはボタンをaria-label名で絞り込んでいるため直接的な破壊は発生しないが、MemoPane.test.tsxが影響範囲に含まれないことの確認根拠をIssueに明記すべきである。",
+      "suggestion": "影響範囲テーブルまたは補足情報に以下を追記する。\n\n「MemoPane.test.tsxはaria-labelベースのボタン取得を使用しているため、MemoCardへのコピーボタン追加による既存テストの破壊は発生しない。」\n\nただし、実装時にはMemoPane.test.tsxの全テストが引き続きパスすることを確認すべきである。"
+    },
+    {
+      "id": "F103",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "WorktreeMemo型定義への影響なしの明記がない",
+      "description": "Issue #321の変更はUIコンポーネントのみの変更であり、WorktreeMemo型（src/types/models.ts）への変更は不要である。コピー対象はWorktreeMemoの既存contentフィールドそのものであり、新しいフィールドの追加やDB変更は発生しない。しかし、Issueにはこの点が明記されていない。",
+      "suggestion": "影響範囲セクションに「型定義・DBスキーマへの変更はなし」と一文追記すると、実装者が安心して着手できる。"
+    },
+    {
+      "id": "F104",
+      "severity": "nice_to_have",
+      "category": "i18n",
+      "title": "i18n翻訳ファイルへの影響なしの整合性確認",
+      "description": "locales/en/ および locales/ja/ の翻訳ファイルにはMemo関連のキーが存在しない。また、既存のFileViewer.tsxのコピーボタン（aria-label='Copy file content'）やConversationPairCard.tsx（aria-label='Copy message'）もハードコードされている。Issue #321の補足情報に「aria-labelはFileViewerの既存パターンに合わせてハードコードとする」と記載されており、この方針は既存パターンと整合している。翻訳ファイルへの変更は不要であることが確認された。",
+      "suggestion": "現状の記載で問題ない。将来i18n一括対応を行うIssueが作成された際に、MemoCardのaria-labelも対象に含める旨を補足情報に1行追記すると更に丁寧である。"
+    },
+    {
+      "id": "F105",
+      "severity": "should_fix",
+      "category": "documentation",
+      "title": "CLAUDE.mdのMemoCard説明に本Issue実装後の更新が必要",
+      "description": "CLAUDE.mdには主要機能モジュールの一覧が詳細に記載されており、FileViewer.tsxの項目には「Issue #162: コピーボタン追加、Copy/Checkアイコン切替、useMemo最適化」のような実装履歴が記載されている。しかし、MemoCard.tsxやMemoPane.tsxはCLAUDE.mdのモジュール一覧に記載されていない。Issue #321の実装後、MemoCardコンポーネントの説明をCLAUDE.mdに追加すべきかの指針がIssueに含まれていない。",
+      "suggestion": "影響範囲テーブルに以下の行を追加することを推奨する。\n\n| CLAUDE.md | MemoCard.tsxのモジュール説明追加（Issue #321: コピーボタン追加、Copy/Checkアイコン切替） |\n\nまたは、CLAUDE.mdへの追記は実装PRのレビュー時に判断する旨を補足情報に明記する。"
+    },
+    {
+      "id": "F106",
+      "severity": "nice_to_have",
+      "category": "accessibility",
+      "title": "aria-label値の設計がIssueに明記されていない",
+      "description": "受け入れ条件では「MemoCardにコピーボタン（Copyアイコン）が表示される」と記載されているが、aria-labelの具体的な値が示されていない。FileViewer.tsxでは'Copy file content'、ConversationPairCard.tsxでは'Copy message'が使用されている。MemoCardのコピーボタンには'Copy memo content'のような値が適切と考えられるが、Issueにはこの詳細が記載されていない。テストコードでaria-labelを使ったボタン取得を行う場合、この値の一貫性が重要になる。",
+      "suggestion": "テスト要件セクションまたは補足情報に、aria-labelの値として例えば 'Copy memo content' を使用する旨を明記すると良い。既存パターンに合わせ 'Copy [対象] content' の命名規則に従うのが望ましい。"
+    },
+    {
+      "id": "F107",
+      "severity": "nice_to_have",
+      "category": "mobile",
+      "title": "モバイルUIへの影響が未考慮",
+      "description": "MemoCard.tsxにはモバイル固有のスタイルやブレークポイントは使用されていない（MOBILE_BREAKPOINT定数の使用なし、レスポンシブクラスなし）。ヘッダー部（タイトル行）は'flex items-center gap-2'のレイアウトで、現在はタイトル入力、Savingインジケーター、削除ボタンの3要素が配置されている。コピーボタンが追加されると4要素になるが、'flex-1'のタイトル入力が伸縮するため、モバイルの狭い画面幅でもレイアウト崩れのリスクは低い。ただし、Issueにはモバイルでの見え方についての考慮が記載されていない。",
+      "suggestion": "モバイル画面での4要素（タイトル入力 + Saving + コピーボタン + 削除ボタン）のレイアウトについて、実装時に動作確認を行う旨を受け入れ条件またはテスト要件の補足として追記することを推奨する。特にタイトル入力の最小幅が十分であることを確認すべきである。"
+    },
+    {
+      "id": "F108",
+      "severity": "should_fix",
+      "category": "testing",
+      "title": "テスト要件にcopyToClipboardのモック方法が未指定",
+      "description": "MemoCard.test.tsxでは既にuseAutoSaveのモックが設定されているが、copyToClipboard()関数のモックは設定されていない。Issue #321の実装ではclipboard-utils.tsのcopyToClipboard()を呼び出すが、テスト環境（jsdom）ではnavigator.clipboard APIが利用できない。テストケースの記載はあるが、具体的なモック方法（vi.mock('@/lib/clipboard-utils')）が示されていないため、実装者がテスト環境の制約に気づくまでの手戻りが発生する可能性がある。",
+      "suggestion": "テスト要件セクションに以下のモック指針を追記すると良い。\n\n「copyToClipboard関数はvi.mock('@/lib/clipboard-utils')でモック化する。FileViewer等の既存テストパターンを参考にすること。」\n\nまたは、テストの実装詳細はPR時に判断する旨を明記する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "total": 8
+  },
+  "overall_assessment": "Issue #321の影響範囲はMemoCard.tsxとMemoCard.test.tsxの2ファイルに限定されており、Stage 2で充実化された後のIssue内容は概ね正確である。MemoCardPropsインタフェースの変更が不要であり、MemoPane.tsxやWorktreeDetailRefactored.tsxへの波及が発生しないことはコード分析により確認された。WorktreeMemo型定義やDBスキーマへの変更も不要であり、破壊的変更のリスクは極めて低い。主な改善点は、(1) MemoPane.tsxやMemoPane.test.tsxが影響を受けないことの根拠を明示すること、(2) CLAUDE.mdへのモジュール説明追記の必要性を記載すること、(3) テスト時のcopyToClipboardモック方法の指針を追記すること、(4) aria-labelの具体的な値を明記すること、の4点である。いずれもmust_fixレベルの問題ではなく、実装にブロッキングな問題はない。",
+  "code_references": [
+    {
+      "file": "src/components/worktree/MemoCard.tsx",
+      "relevance": "主要変更対象。lucide-reactのCopy/Checkアイコンimport追加、useState(copied)追加、handleCopyコールバック追加、ヘッダー部にコピーボタンJSX追加。"
+    },
+    {
+      "file": "src/components/worktree/MemoPane.tsx",
+      "relevance": "MemoCardの親コンポーネント。MemoCardPropsの変更がないため、変更は不要。L207-214でMemoCardを使用。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "MemoPaneの親コンポーネント。L43でMemoPane import、L886-889とL1805-1808でMemoPane使用。MemoCardの変更に影響されない。"
+    },
+    {
+      "file": "src/lib/clipboard-utils.ts",
+      "relevance": "copyToClipboard()関数の提供元。MemoCardから新規importされるが、clipboard-utils.ts自体の変更は不要。"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "WorktreeMemo型定義（L212-227）。変更不要。"
+    },
+    {
+      "file": "tests/unit/components/worktree/MemoCard.test.tsx",
+      "relevance": "コピー機能テスト追加対象。copyToClipboardのvi.mockが必要。"
+    },
+    {
+      "file": "tests/unit/components/worktree/MemoPane.test.tsx",
+      "relevance": "MemoCardを間接的にレンダリング。aria-labelベースのボタン取得を使用しているため破壊なし。"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "relevance": "Copy/Checkアイコン切替パターンの参考実装。L53-75のcopy関連ロジックとL153-167のJSXを踏襲する。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "主要機能モジュール一覧にMemoCardの説明追加が必要になる可能性がある。"
+    }
+  ],
+  "impact_analysis": {
+    "breaking_changes": "なし。MemoCardPropsインタフェースへの変更はなく、新規のpropsも追加されない。コンポーネント内部にCopy/Checkの状態管理（useState）とhandleCopyコールバックを閉じ込めるため、外部インタフェースは維持される。",
+    "dependency_impact": "lucide-reactパッケージのCopy/Checkアイコンを新規import（既にpackage.jsonにインストール済み、FileViewer等で使用実績あり）。clipboard-utils.tsを新規import（変更なし）。新規パッケージ追加は不要。",
+    "test_scope": "MemoCard.test.tsxにコピー機能テスト5件追加。MemoPane.test.tsxの既存テスト21件は影響なし（aria-label名ベースのボタン取得のため）。clipboard-utils.test.tsの既存テストは変更不要。",
+    "migration_considerations": "なし。既存ユーザーの操作フローへの影響はない（UIに新しいボタンが追加されるのみ）。"
+  }
+}

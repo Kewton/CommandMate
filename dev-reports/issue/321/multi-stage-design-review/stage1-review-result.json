@@ -1,0 +1,72 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 321,
+  "review_focus": "設計原則",
+  "status": "approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "nice_to_have",
+      "category": "dry",
+      "title": "Copy/Check toggle pattern duplicated across 3+ components",
+      "description": "The useState(copied) + handleCopy + setTimeout(2000) pattern is already duplicated in FileViewer.tsx and MarkdownEditor.tsx, and this design adds a third instance in MemoCard.tsx. Each instance contains the same state management logic: (1) useState(false), (2) setCopied(true) on success, (3) setTimeout(() => setCopied(false), 2000). While the design correctly identifies DRY compliance by reusing copyToClipboard(), the surrounding state management boilerplate is duplicated.",
+      "suggestion": "Consider extracting a useCopyToClipboard() custom hook in a future Issue to centralize the copied state, handleCopy callback, and 2-second reset timer. This is not a blocker for Issue #321 since the design explicitly follows the established pattern and extracting the hook now would violate YAGNI within this Issue's scope. Example: const { copied, handleCopy } = useCopyToClipboard(content);"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "category": "component",
+      "title": "setTimeout without cleanup on component unmount",
+      "description": "The design's handleCopy implementation uses setTimeout(() => setCopied(false), 2000) without storing the timer ID for cleanup. If MemoCard is unmounted within the 2-second window (e.g., user deletes the memo immediately after copying), setCopied(false) will be called on an unmounted component, causing a React warning: 'Can't perform a React state update on an unmounted component.' This is a pre-existing pattern in FileViewer.tsx (L71) and MarkdownEditor.tsx (L325), but MemoCard is more susceptible because it has a visible delete button in the same header row as the copy button.",
+      "suggestion": "Use useRef to store the timer ID and clear it in a useEffect cleanup: const timerRef = useRef<ReturnType<typeof setTimeout>>(); In handleCopy: timerRef.current = setTimeout(...); Add useEffect(() => () => clearTimeout(timerRef.current), []); This is a minor improvement that prevents the edge case, and the implementation effort is minimal (3 lines of code)."
+    },
+    {
+      "id": "S1-003",
+      "severity": "nice_to_have",
+      "category": "component",
+      "title": "Icon method inconsistency within MemoCard (lucide-react vs inline SVG)",
+      "description": "The design introduces lucide-react Copy/Check icons for the copy button, while the existing delete button uses an inline SVG path. This creates an icon method inconsistency within the same component's header row. The design document explicitly acknowledges this in Section 11 (Design Decisions and Trade-offs) and correctly defers icon unification to a separate Issue.",
+      "suggestion": "No action needed for Issue #321. The decision to accept this inconsistency is well-reasoned: unifying icon methods would expand the scope beyond the Issue's intent. Document a follow-up Issue for icon method standardization across MemoCard if desired."
+    },
+    {
+      "id": "S1-004",
+      "severity": "nice_to_have",
+      "category": "testing",
+      "title": "Test case for rapid double-click is missing",
+      "description": "The 5 test cases cover the core scenarios well, but do not include a test for rapid consecutive clicks on the copy button. If the user clicks copy twice quickly, the first setTimeout may conflict with the second setCopied(true), resulting in the Check icon disappearing too early (after the first timer fires, before the second 2-second window completes).",
+      "suggestion": "Add a test case (#6) that verifies behavior when handleCopy is called twice in rapid succession. The expected behavior should be that the Check icon remains visible for 2 seconds from the last click. This would require the timer cleanup recommended in S1-002. If the timer cleanup is not implemented, document this as a known limitation."
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "category": "testing",
+      "title": "Test for component unmount during copy feedback window",
+      "description": "Related to S1-002, the test design does not include a scenario where the component is unmounted while the Check icon is displayed (e.g., user copies then immediately deletes the memo). This is relevant for MemoCard because the delete button is always visible alongside the copy button.",
+      "suggestion": "Add a test case that renders MemoCard, triggers copy, then unmounts the component before 2 seconds elapse. Verify no console warnings about state updates on unmounted components. This test would validate the cleanup logic recommended in S1-002."
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 4,
+    "total": 5
+  },
+  "overall_assessment": "The design policy for Issue #321 demonstrates excellent adherence to design principles. The decision to contain all changes within MemoCard.tsx (SRP), reuse copyToClipboard() (DRY), follow the established FileViewer pattern (KISS), and explicitly avoid scope creep for Toast/shortcuts/title+content copy (YAGNI) reflects a mature and disciplined design approach. The architecture layering analysis correctly identifies that changes are confined to the presentation layer with zero impact on business logic, data access, or type definitions. The only should_fix item is the setTimeout cleanup, which is a minor but worthwhile improvement given MemoCard's specific UX context (copy and delete buttons in close proximity). The remaining nice_to_have items are forward-looking improvements that do not block this Issue. Overall score: 4/5 - Well-designed with minor improvements recommended.",
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-321-memo-copy-design-policy.md",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/lib/clipboard-utils.ts",
+    "tests/unit/components/worktree/MemoCard.test.tsx"
+  ],
+  "timestamp": "2026-02-20T00:00:00Z"
+}

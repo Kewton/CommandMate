@@ -1,0 +1,28 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [
+    "DRY: Extract buildPromptExtractionResult() helper to eliminate duplicate prompt extraction logic at two call sites (site 1: Claude early prompt detection, site 2: fallback prompt detection)",
+    "JSDoc enrichment: Add detailed parameter documentation, 4-branch decision tree description, design policy references, and stage review cross-references to resolveExtractionStartIndex()",
+    "Readability: Flatten if-else chain in resolveExtractionStartIndex() to early-return style with labeled branch comments (Branch 1-4)",
+    "Test structure: Reorganize flat test list into nested describe blocks aligned with design document branch terminology (Branch 1-4 + edge cases)",
+    "Test DRY: Extract noPromptFound stub constant to reduce duplicate callback definitions across test cases"
+  ],
+  "files_changed": [
+    "src/lib/response-poller.ts",
+    "tests/unit/lib/resolve-extraction-start-index.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "49f9099: refactor(response-poller): improve code quality and documentation"
+  ],
+  "message": "Refactoring complete. Extracted buildPromptExtractionResult() helper to eliminate duplicate prompt extraction logic (DRY). Enhanced JSDoc for resolveExtractionStartIndex() with full parameter documentation and design references. Restructured test file with nested describe blocks aligned to the 4-branch design terminology. All 3647 tests pass, 0 ESLint errors, 0 TypeScript errors."
+}

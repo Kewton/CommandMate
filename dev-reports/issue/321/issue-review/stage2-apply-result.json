@@ -1,0 +1,68 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 321,
+  "apply_date": "2026-02-20",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F001",
+        "status": "applied",
+        "change_summary": "Issue本文を全面記述。概要・背景・課題・提案する解決策・影響範囲・補足情報の全セクションをプレースホルダーから具体的な内容に置換した"
+      },
+      {
+        "id": "F002",
+        "status": "applied",
+        "change_summary": "受け入れ条件セクションを追加。8つのチェックボックス形式の条件（UI表示、コピー動作、アイコン切替、空文字対応、型チェック、lint、テスト）を定義した"
+      },
+      {
+        "id": "F003",
+        "status": "applied",
+        "change_summary": "コピー対象を「content（メモ本文）のみ」と明記し、titleはスコープ外と明示した"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F004",
+        "status": "applied",
+        "change_summary": "FileViewer方式（パターンA: Copy/Checkアイコン切替）を採用する旨を明記し、採用理由（showToast propsが不要、変更範囲最小化）も記載した"
+      },
+      {
+        "id": "F005",
+        "status": "applied",
+        "change_summary": "背景・課題セクションに動機とユースケース例3件（Claude CLIプロンプト、別worktreeへのコピー、外部ツール共有）を追加した"
+      },
+      {
+        "id": "F006",
+        "status": "applied",
+        "change_summary": "「使用する既存基盤」サブセクションを追加し、clipboard-utils.tsのcopyToClipboard()、lucide-reactアイコン、FileViewer.tsxの参考実装を明記した"
+      },
+      {
+        "id": "F007",
+        "status": "applied",
+        "change_summary": "テスト要件サブセクションを追加し、5つの具体的なテストケース（レンダリング、クリック動作、成功フィードバック、タイマー復帰、空コンテンツ）を記載した"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F008",
+        "status": "skipped",
+        "reason": "補足情報セクションにaria-labelはFileViewer既存パターンに合わせてハードコードとする旨を記載済み。i18n一括対応は別Issueとする方針を明記した"
+      },
+      {
+        "id": "F009",
+        "status": "applied",
+        "change_summary": "関連Issue/参考実装サブセクションを追加し、Issue #162（FileViewerコピーボタン）、Issue #211（clipboard-utils導入）、FileViewer.tsxの参考実装を記載した"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 8,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/321"
+  }
+}

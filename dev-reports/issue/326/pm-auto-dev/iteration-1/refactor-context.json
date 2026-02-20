@@ -1,0 +1,25 @@
+{
+  "issue_number": 326,
+  "refactor_targets": [
+    "src/lib/response-poller.ts",
+    "tests/unit/lib/resolve-extraction-start-index.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "tests_passing": 3647,
+    "lint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "JSDocコメントの充実（resolveExtractionStartIndex()の各引数と戻り値）",
+    "コードの可読性向上（変数名の明確化、コメントの整理）",
+    "重複コードの排除確認",
+    "テストの記述がわかりやすいか確認（describe/itの命名）"
+  ],
+  "constraints": [
+    "既存の全テスト（3647件）をパスすること",
+    "ESLintエラー0件を維持",
+    "TypeScriptエラー0件を維持",
+    "動作変更は一切行わない（リファクタリングのみ）"
+  ]
+}

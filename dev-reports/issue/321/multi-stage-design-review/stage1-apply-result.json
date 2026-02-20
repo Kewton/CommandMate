@@ -1,0 +1,62 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー指摘反映",
+  "issue_number": 321,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["S1-002", "S1-001", "S1-004", "S1-005"],
+  "skipped_findings": ["S1-003"],
+  "skip_reasons": {
+    "S1-003": "設計方針書Section 11に別Issueスコープとして既記載済み"
+  },
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S1-002",
+        "item": "setTimeout without cleanup on component unmount",
+        "sections_updated": ["4. 設計パターン", "10. 変更ファイル一覧", "15. 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-001",
+        "item": "Copy/Check toggle pattern duplicated across 3+ components",
+        "sections_updated": ["12. 将来の改善検討事項", "15. 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "S1-004",
+        "item": "Test case for rapid double-click is missing",
+        "sections_updated": ["9. テスト設計", "10. 変更ファイル一覧", "15. 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "S1-005",
+        "item": "Test for component unmount during copy feedback window",
+        "sections_updated": ["9. テスト設計", "10. 変更ファイル一覧", "15. 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [
+    {
+      "id": "S1-003",
+      "item": "Icon method inconsistency within MemoCard (lucide-react vs inline SVG)",
+      "reason": "設計方針書Section 11に別Issueスコープとして既記載済み。追加の変更不要"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-321-memo-copy-design-policy.md",
+  "sections_updated": [
+    "4. 設計パターン（S1-002 setTimeoutクリーンアップのコードパターンと設計根拠追加）",
+    "9. テスト設計（S1-004 テストケース#6、S1-005 テストケース#7追加）",
+    "10. 変更ファイル一覧（useRef/useEffect/テスト件数の記述更新）",
+    "12. 将来の改善検討事項（S1-001 useCopyToClipboardフック抽出案）",
+    "13. レビュー履歴（Stage 1追加）",
+    "14. レビュー指摘事項サマリー（全5件の対応状況一覧）",
+    "15. 実装チェックリスト（S1-002/S1-004/S1-005/S1-001のアクションアイテム）"
+  ],
+  "summary": "setTimeoutクリーンアップの実装方針（useRef+useEffect cleanup+clearTimeout）を設計パターンセクションに追記。テストケース2件（高速ダブルクリック、アンマウント時警告なし）をテスト設計に追加。useCopyToClipboardフック抽出を将来改善事項として記載。実装チェックリストを新設",
+  "timestamp": "2026-02-20T00:00:00Z"
+}

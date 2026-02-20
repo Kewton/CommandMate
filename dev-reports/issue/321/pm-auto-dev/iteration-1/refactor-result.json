@@ -1,0 +1,35 @@
+{
+  "issue_number": 321,
+  "status": "success",
+  "refactored_files": [
+    "src/components/worktree/MemoCard.tsx",
+    "tests/unit/components/worktree/MemoCard.test.tsx"
+  ],
+  "changes": [
+    "Extract COPY_FEEDBACK_DURATION_MS constant to eliminate magic number 2000 (KISS principle)",
+    "Simplify empty content guard: `!content || content.trim().length === 0` to `!content.trim()`",
+    "Improve handleCopy JSDoc with design policy cross-reference (Section 8.3)",
+    "Reduce redundant JSX comment: `[Issue #321] Copy memo content button` to `Copy button`",
+    "Clarify catch block comment: `Silent error: icon stays as Copy to indicate failure`",
+    "Add COPY_FEEDBACK_DURATION_MS constant in test file mirroring component constant",
+    "Extract getCopyButton() test helper function (DRY - eliminates 8 repeated queries)",
+    "Extract hasCheckIcon() test helper function (DRY - eliminates repeated SVG class checks)",
+    "Group timer-based tests into nested describe block with shared beforeEach/afterEach for vi.useFakeTimers/vi.useRealTimers",
+    "Group empty content guard tests into nested describe block for better organization",
+    "Replace `expect(true).toBe(true)` with console.error spy assertion in unmount safety test (S1-005)",
+    "Add review traceability tags (S1-004, S1-005) to timer-based test names",
+    "Expand file-level JSDoc in test file to enumerate copy test coverage areas"
+  ],
+  "quality_checks": {
+    "typescript": "pass",
+    "eslint": "pass",
+    "tests_passed": 25,
+    "tests_total": 25,
+    "memo_pane_tests_passed": 20,
+    "memo_pane_tests_total": 20
+  },
+  "commits": [
+    "107367a: refactor(memo-card): improve code quality and documentation"
+  ],
+  "summary": "MemoCard.tsxとMemoCard.test.tsxのリファクタリング完了。マジックナンバー除去（COPY_FEEDBACK_DURATION_MS定数抽出）、空コンテンツガードの簡素化、テストヘルパー関数抽出（getCopyButton/hasCheckIcon）によるDRY改善、タイマーテストのネスト化によるsetup/teardown共有、アンマウント安全テストのアサーション品質向上を実施。全25テストパス、ESLint/TypeScriptエラー0件、MemoPane.tsxへの影響なし（20テスト全パス）。MemoCardPropsへの変更なし。"
+}

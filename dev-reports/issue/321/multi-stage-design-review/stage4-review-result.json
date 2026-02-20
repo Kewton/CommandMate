@@ -1,0 +1,135 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 321,
+  "review_focus": "セキュリティ",
+  "status": "approved",
+  "score": 5,
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "nice_to_have",
+      "category": "ANSI除去の網羅性",
+      "title": "clipboard-utils.tsのANSI_PATTERNに既知の制限事項がある（SEC-002）",
+      "description": "clipboard-utils.tsのANSI_PATTERNは8-bit CSI (0x9B)、DEC private modes、Character set switching、一部RGB color形式をカバーしていない。ただし、メモのcontent（ユーザーが手動入力するテキスト）にはこれらのシーケンスが混入する可能性は極めて低い。コメントにSEC-002として既にドキュメント化されている。",
+      "recommendation": "現状のまま許容可能。将来的にstrip-ansi npmパッケージの導入を検討（cli-patterns.tsのSEC-002コメントに既記載の方針と一致）。メモ機能に限定すればリスクなし。",
+      "risk_level": "low",
+      "owasp_category": "該当なし"
+    },
+    {
+      "id": "S4-002",
+      "severity": "nice_to_have",
+      "category": "Permissions-Policy",
+      "title": "Permissions-Policyにclipboard-write/clipboard-readが明示されていない",
+      "description": "next.config.jsのPermissions-Policyヘッダーはcamera=(), microphone=(), geolocation=()のみを制限している。clipboard-write/clipboard-readは明示的に許可も拒否もされていない。ブラウザのデフォルト動作ではSecure Context内でnavigator.clipboard.writeText()は許可されるため、動作上の問題はない。",
+      "recommendation": "Permissions-Policyにclipboard-write=(self)を明示的に追加することを検討。ただし、現状のCSPとSecure Context要件で十分に保護されており、本Issue #321のスコープ外として問題なし。",
+      "risk_level": "low",
+      "owasp_category": "A05:2021 Security Misconfiguration"
+    },
+    {
+      "id": "S4-003",
+      "severity": "nice_to_have",
+      "category": "エラーハンドリング",
+      "title": "クリップボードAPI失敗時のサイレントエラーが情報漏洩を起こさないことの確認",
+      "description": "handleCopyのcatchブロックはサイレントエラーとしてエラーを握りつぶす設計。これにより、エラーメッセージがUIに表示されず、環境情報の漏洩リスクがない。設計は適切。",
+      "recommendation": "現状で問題なし。サイレントエラー設計はFileViewerの既存パターンと一貫しており、セキュリティ的にも適切。",
+      "risk_level": "low",
+      "owasp_category": "該当なし"
+    }
+  ],
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "not_applicable",
+      "detail": "コピー機能はクライアントサイドのみ。サーバーへのアクセス制御変更なし。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "detail": "暗号化処理の変更なし。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "detail": "copyToClipboard()はnavigator.clipboard.writeText()にテキストを渡すのみ。HTML/DOMへの挿入は行わず、SQLインジェクション・コマンドインジェクション等のリスクなし。ANSIエスケープコードの除去あり。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "detail": "2段階防御（UI側ガード + ライブラリ側バリデーション）で空コンテンツ対策。サイレントエラーハンドリング。タイマークリーンアップによるメモリリーク防止。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "detail": "CSPヘッダーが適切に設定されており、Clipboard APIの動作を阻害しない。Secure Context要件あり。"
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "detail": "新たな依存関係の追加なし。既存のclipboard-utils.tsとlucide-reactを再利用。"
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "detail": "認証・認可の変更なし。"
+    },
+    "A08_data_integrity": {
+      "status": "pass",
+      "detail": "コピー操作は読み取り専用。DBデータの変更なし。"
+    },
+    "A09_logging_monitoring": {
+      "status": "not_applicable",
+      "detail": "コピー操作のログ記録は不要（プレゼンテーション層のみ）。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "detail": "サーバーサイドリクエストの変更なし。"
+    }
+  },
+  "security_analysis": {
+    "clipboard_api": {
+      "assessment": "適切",
+      "detail": "navigator.clipboard.writeText()はSecure Context（HTTPS/localhost）でのみ動作。CSPヘッダーでdefault-src 'self'が設定済み。Permissions-Policyにclipboard-writeは未記載だがブラウザデフォルトで許可されるため動作に問題なし。"
+    },
+    "ansi_stripping": {
+      "assessment": "十分",
+      "detail": "メモcontent（ユーザー手動入力テキスト）にANSIエスケープコードが含まれる可能性は極めて低い。既存のstripAnsi()で主要なSGR/OSC/CSIシーケンスをカバー。SEC-002既知制限は実際のリスクとならない。"
+    },
+    "input_validation": {
+      "assessment": "適切",
+      "detail": "サーバーサイド: MAX_CONTENT_LENGTH=10000文字バリデーション済み。クライアントサイド: handleCopy内の!contentガード + copyToClipboard()内のtext.trim()バリデーションで2段階防御。"
+    },
+    "xss_prevention": {
+      "assessment": "適切",
+      "detail": "コピー操作はnavigator.clipboard.writeText()（プレーンテキスト書き込み）のみ使用。HTML/DOMへの挿入は一切行わない。ReactのJSXはデフォルトでXSSエスケープされる。"
+    },
+    "data_leakage": {
+      "assessment": "許容可能リスク",
+      "detail": "メモ内容はユーザーが自分で入力したテキストであり、クリップボードへのコピーは意図的なユーザー操作。機密データの自動コピーや非ユーザー起動のコピーは発生しない。"
+    },
+    "csp_impact": {
+      "assessment": "影響なし",
+      "detail": "既存CSP（default-src 'self'）はClipboard APIの動作を阻害しない。Clipboard APIはCSPのdefault-srcとは独立して動作する。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/clipboard-utils.ts",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/HistoryPane.tsx",
+    "src/lib/cli-patterns.ts",
+    "src/lib/__tests__/clipboard-utils.test.ts",
+    "src/app/api/worktrees/[id]/memos/route.ts",
+    "src/app/api/worktrees/[id]/memos/[memoId]/route.ts",
+    "src/types/models.ts",
+    "next.config.js",
+    "dev-reports/design/issue-321-memo-copy-design-policy.md"
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 3,
+    "total": 3
+  },
+  "overall_assessment": "セキュリティ観点で問題なし。本変更はプレゼンテーション層のみに閉じたクライアントサイド操作であり、サーバーサイドの変更がない。Clipboard APIの使用は既存パターン（FileViewer, MarkdownEditor, HistoryPane, LogViewer）の4箇所と一貫しており、Secure Context要件・CSP設定・ANSI除去・空文字バリデーション・サイレントエラーハンドリングの全てが適切に設計されている。OWASP Top 10の全項目で問題なし。",
+  "timestamp": "2026-02-20T12:00:00Z"
+}

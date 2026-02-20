@@ -31,19 +31,15 @@ allowed-tools: Bash(./scripts/*), Bash(git worktree list)
 2. **ブランチ名が未指定の場合**:
    - 現在の作業ディレクトリ（プロジェクトルート）を `TARGET_DIR` とする
 
-### Step 2: サーバー停止
+### Step 2: サーバー停止・ビルド・再起動
+
+停止とビルド・再起動を **1回のBash呼び出し** で実行する（ユーザーへの許可確認を1回に抑えるため）。
 
 ```bash
-cd {TARGET_DIR} && ./scripts/stop.sh
+cd {TARGET_DIR} && ./scripts/stop.sh && ./scripts/build-and-start.sh --daemon
 ```
 
 **注意**: ポート競合が発生した場合は `lsof -i :3000 -t` でプロセスを特定し、killしてから再試行する。
-
-### Step 3: ビルドと再起動
-
-```bash
-cd {TARGET_DIR} && ./scripts/build-and-start.sh --daemon
-```
 
 ## 完了報告形式
 

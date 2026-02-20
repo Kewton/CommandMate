@@ -1,0 +1,23 @@
+{
+  "issue_number": 321,
+  "refactor_targets": [
+    "src/components/worktree/MemoCard.tsx",
+    "tests/unit/components/worktree/MemoCard.test.tsx"
+  ],
+  "quality_metrics": {
+    "test_count": 25,
+    "typescript": "pass",
+    "eslint": "pass"
+  },
+  "improvement_goals": [
+    "コードの可読性向上（コメント・構造の整理）",
+    "既存テストとの一貫性確認",
+    "不要なコードの除去",
+    "設計方針書との整合性確認"
+  ],
+  "constraints": [
+    "MemoCardPropsへの変更禁止",
+    "MemoPane.tsxへの変更禁止",
+    "テストの削除禁止"
+  ]
+}

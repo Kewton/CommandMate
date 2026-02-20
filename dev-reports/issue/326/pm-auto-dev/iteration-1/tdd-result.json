@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/response-poller.ts",
+    "tests/unit/lib/resolve-extraction-start-index.test.ts"
+  ],
+  "commits": [
+    "f88c11b: fix(response-poller): limit prompt response extraction to lastCapturedLine onwards"
+  ],
+  "message": "TDD implementation complete. All 12 tests pass for resolveExtractionStartIndex(). All 181 test files (3647 tests) pass. ESLint 0 errors, TypeScript 0 errors."
+}

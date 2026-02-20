@@ -1,0 +1,36 @@
+{
+  "issue_number": 321,
+  "iteration": 1,
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 25,
+    "passed": 25,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "implemented_files": [
+    "src/components/worktree/MemoCard.tsx",
+    "tests/unit/components/worktree/MemoCard.test.tsx"
+  ],
+  "test_results": {
+    "total": 25,
+    "passed": 25,
+    "failed": 0
+  },
+  "quality_checks": {
+    "typescript": "pass",
+    "eslint": "pass"
+  },
+  "files_changed": [
+    "src/components/worktree/MemoCard.tsx",
+    "tests/unit/components/worktree/MemoCard.test.tsx"
+  ],
+  "commits": [
+    "0613211: feat(memo-card): add copy to clipboard functionality"
+  ],
+  "summary": "Issue #321 memo copy functionality implemented via TDD. Added copy-to-clipboard button to MemoCard header (left of delete button) with Copy/Check icon toggle, 2-second timer feedback, useRef+useEffect cleanup for unmount safety, empty/whitespace content guard, and rapid double-click handling. 8 new test cases added (total 25 pass). TypeScript and ESLint checks pass with 0 errors."
+}

@@ -1,0 +1,43 @@
+{
+  "issue_number": 321,
+  "issue_title": "メモのコピー機能",
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "test_count": 25,
+      "new_tests": 8,
+      "typescript": "pass",
+      "eslint": "pass",
+      "commit": "0613211"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_total": 9,
+      "criteria_passed": 9,
+      "all_unit_tests": 3655
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "COPY_FEEDBACK_DURATION_MS定数の抽出",
+        "空コンテンツガード式の簡略化（!content.trim()）",
+        "getCopyButton/hasCheckIconヘルパー関数の抽出（DRY）",
+        "タイマー系テストをdescribeブロックにグループ化",
+        "アンマウントテストのassertion改善（console.errorスパイ）",
+        "設計レビューIDによるトレーサビリティ追加"
+      ],
+      "commit": "107367a"
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": ["CLAUDE.md"],
+      "changes": "MemoCard.tsx/MemoPane.tsx/MemoAddButton.tsxのモジュール説明を追加"
+    }
+  },
+  "implemented_files": [
+    "src/components/worktree/MemoCard.tsx",
+    "tests/unit/components/worktree/MemoCard.test.tsx",
+    "CLAUDE.md"
+  ]
+}

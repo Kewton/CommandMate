@@ -1,0 +1,76 @@
+{
+  "issue_number": 326,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）- Stage 3影響範囲レビュー",
+  "apply_date": "2026-02-20",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「間接影響」サブセクションを新設し、auto-yes-manager.tsのpollAutoYes()がextractResponse()を経由しないためコード変更は不要だが、DB保存contentの変化によるlastAnsweredPromptKey重複判定への間接影響を確認する必要がある旨を記載"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "修正方針セクションに「テスト戦略」サブセクションを新設。extractResponse()が非exportの内部関数であることを踏まえ、(A)ヘルパー関数抽出、(B)結合テスト、(C)テスト用exportの3つの戦略を記載し、(A)を推奨とした"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "checkForResponse内のpromptDetection再検出セクションに「rawContentへの影響」を追記。detectPromptWithOptionsの入力がlastCapturedLine以降に縮小することで、prompt-detector.tsのtruncateRawContent()が生成するrawContentも縮小する点、Issue #235の設計意図との整合性確認が必要な点を記載"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「影響なし」サブセクションを新設し、assistant-response-saver.tsがcleanClaudeResponse/cleanGeminiResponse（export関数）をimportしているが今回の修正対象（内部関数extractResponse()）とは無関係である旨を明記。加えて他のimporter（session-cleanup.ts, manager.ts, 各route.ts）も影響なしとして列挙"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「テスト影響」テーブルを追加。response-poller.test.ts（既存テスト変更不要/新規テスト追加推奨）、prompt-detector.test.ts（変更不要）、assistant-response-saver.test.ts（変更不要）を記載"
+      },
+      {
+        "id": "NTH-2",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「DB保存データへの影響」サブセクションを追加。promptメッセージのcontent長がバッファ全体からlastCapturedLine以降に縮小するが、これは期待された動作改善でありDBマイグレーション不要である旨を記載"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 6,
+    "skipped": 0
+  },
+  "changes_made": [
+    {
+      "section": "影響範囲",
+      "change": "フラットなリストから「直接影響」「間接影響」「影響なし」「テスト影響」「DB保存データへの影響」の5サブセクションに構造化"
+    },
+    {
+      "section": "修正方針 > テスト戦略",
+      "change": "新規サブセクション追加。非export関数のテスト戦略3案を提示"
+    },
+    {
+      "section": "修正方針 > checkForResponse内のpromptDetection再検出への影響",
+      "change": "rawContentへの影響分析を追記"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "Stage 3影響範囲レビューのエントリを追加（MF-1, SF-1, SF-2, SF-3, NTH-1, NTH-2）"
+    },
+    {
+      "section": "Note（冒頭）",
+      "change": "Stage 3影響範囲レビュー結果反映に更新"
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/326"
+  }
+}

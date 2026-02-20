@@ -1,0 +1,111 @@
+{
+  "issue_number": 326,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-20",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "箇所2（行487-499）のstripAnsi未適用について言及がない",
+        "location": "## 原因 > 箇所2 セクション",
+        "recommendation": "箇所2では `response: fullOutput` と返しており、stripAnsiが適用されていない点をIssueに明記し、修正方針にstripAnsi適用の要否判断を含めるべき",
+        "evidence": "箇所1(行336): `response: stripAnsi(fullOutput)` - stripAnsi適用あり。箇所2(行495): `response: fullOutput` - stripAnsi適用なし。仮説検証レポートでも申し送り事項として指摘済み。修正時にstripAnsi未適用のまま残すとANSIエスケープコードがDBに保存される可能性がある"
+      },
+      {
+        "id": "SF-2",
+        "category": "完全性",
+        "issue": "修正後のcheckForResponse内promptDetection再検出（行605）への影響考慮が不足",
+        "location": "## 修正方針 セクション",
+        "recommendation": "extractResponse()が返すresult.responseの内容がlastCapturedLine以降に限定された場合、行605のdetectPromptWithOptions(result.response, cliToolId)がプロンプトを正しく検出できるかの確認観点を明記すべき。プロンプト検出に必要なコンテキスト（質問文・選択肢）がlastCapturedLine以降に含まれる前提の妥当性を補足する",
+        "evidence": "checkForResponse() L605: `const promptDetection = detectPromptWithOptions(result.response, cliToolId);` - 修正後はresult.responseが部分出力になるため、detectPromptがこの部分出力でも正しく動作することを確認する必要がある。特にlastCapturedLineが質問行の途中にある場合のエッジケース"
+      },
+      {
+        "id": "SF-3",
+        "category": "技術的妥当性",
+        "issue": "修正方針のstartIndex決定ロジックの具体性が不足",
+        "location": "## 修正方針 セクション",
+        "recommendation": "「lastCapturedLine以降の行のみをレスポンスとして返す」という方針は正しいが、通常レスポンス抽出（行360-386）にはbufferReset検出・findRecentUserPromptIndex・lastCapturedLine >= totalLines - 5のバッファスクロール考慮など複数のstartIndex決定分岐がある。プロンプト検出時にもこれらの分岐を適用するのか、単純にlastCapturedLineをそのまま使うのかを明確にすべき",
+        "evidence": "通常レスポンス抽出のstartIndex決定ロジック（行364-386）は4分岐あり: (1)bufferWasReset, (2)codex, (3)lastCapturedLine >= totalLines-5, (4)通常。プロンプト検出時もバッファリセットやスクロールが発生しうるため、同一ロジックの再利用か簡略版かを検討する必要がある"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "受け入れ条件が未定義",
+        "location": "Issue本文（セクション未存在）",
+        "recommendation": "以下のような受け入れ条件を追加: (1) プロンプト検出時のAssistantメッセージにlastCapturedLine以前の会話内容が混入しないこと, (2) プロンプト検出自体の精度が維持されること（検出はバッファ全体で行われること）, (3) 既存テスト（cleanClaudeResponse、rawContent DB save）がパスすること, (4) 箇所1・箇所2の両方が修正されていること"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "テスト計画への言及がない",
+        "location": "Issue本文（セクション未存在）",
+        "recommendation": "extractResponse()は内部関数（非export）のため直接テストが困難だが、テスト戦略として以下を記載推奨: (1) extractResponse内部ロジックのstartIndex決定部分をヘルパー関数に抽出してテスト可能にする, (2) 既存のcleanClaudeResponseテストに加え、プロンプト検出時のcontent切り出しのユニットテストを追加"
+      },
+      {
+        "id": "NTH-3",
+        "category": "明確性",
+        "issue": "行番号の参照が将来的にずれる可能性",
+        "location": "## 原因 セクション全体",
+        "recommendation": "行番号（326-341, 487-499, 360-414）はコードの変更で容易にずれる。コードブロックの引用は維持しつつ、関数名やコメントマーカー（例: 'Early check for Claude permission prompts'）による特定も併記すると、修正時の参照が容易になる"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "326-341",
+      "relevance": "箇所1: Claude早期プロンプト検出 - fullOutputをそのまま返す問題箇所"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "487-499",
+      "relevance": "箇所2: フォールバックプロンプト検出 - fullOutputをstripAnsiなしで返す問題箇所"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "360-386",
+      "relevance": "通常レスポンス抽出のstartIndex決定ロジック - 修正時の参考実装"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "604-627",
+      "relevance": "checkForResponse内のpromptDetection再検出 - 修正後の影響を受ける箇所"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "40-55",
+      "relevance": "PromptDetectionResult型定義 - rawContentフィールドの仕様"
+    },
+    {
+      "file": "src/lib/assistant-response-saver.ts",
+      "relevance": "savePendingAssistantResponseでも同様のバッファ処理を行っている参考実装"
+    },
+    {
+      "file": "tests/unit/lib/response-poller.test.ts",
+      "relevance": "既存テスト - cleanClaudeResponse/rawContent fallbackのテストのみ存在"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "response-poller.tsの記述との整合性確認"
+    }
+  ],
+  "overall_assessment": {
+    "consistency": "PASS - Issue記載のコード引用は実コードと一致（仮説検証で全3仮説Confirmed）",
+    "accuracy": "PASS - 原因分析は正確。2箇所のバグの指摘と通常レスポンスとの比較は技術的に正しい",
+    "clarity": "PASS - 問題の構造（2箇所の問題 + 通常レスポンスとの差異）が明確に記述されている",
+    "completeness": "PARTIAL - 修正方針の方向性は正しいが、具体的な実装考慮点（stripAnsi、startIndex決定、checkForResponse再検出）の記載が不足",
+    "technical_validity": "PASS - 修正方針「検出はバッファ全体、返却はlastCapturedLine以降」は適切なアプローチ"
+  }
+}

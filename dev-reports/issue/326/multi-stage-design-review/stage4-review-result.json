@@ -1,0 +1,101 @@
+{
+  "issue_number": 326,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "箇所2のstripAnsi未適用によるANSIエスケープコードのDB保存とXSSリスク",
+        "description": "現状の箇所2（L487-499）ではstripAnsiが適用されておらず、ANSIエスケープコードがDBにそのまま保存される。MessageList.tsxではhasAnsiCodes()でANSIコードを検出した場合dangerouslySetInnerHTMLで描画するパスが存在する。AnsiToHtmlのescapeXML:trueオプションでXSSは緩和されているが、stripAnsi未適用のまま保存されたデータがhasAnsiCodes()をtrueにし、意図しない描画パス（dangerouslySetInnerHTML）を通る可能性がある。設計書の修正方針（箇所2にstripAnsi追加）は既存バグ修正としてセキュリティ上も必須であり、この修正が確実に実装されることを確認する必要がある。",
+        "severity": "medium",
+        "recommendation": "設計書記載通り、箇所2の修正でstripAnsi()を必ず適用すること。実装時にテストで箇所2のレスポンスにANSIコードが含まれないことを検証すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "lastCapturedLineの負値入力に対する防御的バリデーション",
+        "description": "resolveExtractionStartIndex()のlastCapturedLine引数に対して、現状の設計ではCodex分岐と通常分岐でMath.max(0, lastCapturedLine)が適用されるが、bufferWasReset分岐のfindRecentUserPromptIndex結果が-1の場合のstartIndex=0のみが負値ガードとなっている。sessionState?.lastCapturedLine || 0により呼び出し元では0以上が保証されるが、ヘルパー関数自体がpublicに近い@internal exportであるため、関数入口での防御的バリデーション（Math.max(0, lastCapturedLine)の一律適用）を検討すべき。",
+        "severity": "low",
+        "recommendation": "resolveExtractionStartIndex()の冒頭でlastCapturedLine = Math.max(0, lastCapturedLine)を一律適用することを推奨。テストケースにlastCapturedLine=-1等の負値入力ケースを追加すること。"
+      },
+      {
+        "id": "SF-002",
+        "title": "totalLinesの境界値に対する防御（ゼロ除算相当の安全性）",
+        "description": "totalLines=0の場合、bufferWasResetの計算（lastCapturedLine >= totalLines）は常にtrueとなり、findRecentUserPromptIndex(40)が呼ばれる。この場合lines配列が空であるためfindRecentUserPromptIndexは-1を返し、startIndex=0となる。その後lines.slice(0)は空配列を返すため実害はないが、totalLines=0というエッジケースの動作が設計書に明記されていない。",
+        "severity": "low",
+        "recommendation": "設計書のテストケースにtotalLines=0のケースを追加し、期待動作を文書化すること。"
+      },
+      {
+        "id": "SF-003",
+        "title": "stripAnsiのSEC-002既知制限がDB保存データに影響する可能性の明記",
+        "description": "cli-patterns.tsのstripAnsi()にはSEC-002として8-bit CSI（0x9B）、DEC private modes、character set switchingなどの未対応パターンが記載されている。修正後も箇所1・箇所2の双方でstripAnsi()に依存するため、tmuxバッファにこれらの非対応エスケープシーケンスが含まれた場合、DB保存データに残留する可能性がある。設計書のセキュリティ設計（セクション5）でこの既知制限を参照しておくべき。",
+        "severity": "low",
+        "recommendation": "セクション5-1に「stripAnsi()のSEC-002既知制限により一部のエスケープシーケンスがDB保存データに残留する可能性がある。これは本修正のスコープ外であり、既存リスクの継承である」旨を追記すること。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "@internal exportのセキュリティ影響評価",
+        "description": "resolveExtractionStartIndex()は@internal exportとして設計されている。プロジェクト内で@internal exportは既に10箇所以上で使用されており（auto-yes-manager.ts、claude-session.ts、clone-manager.ts等）、確立されたパターンである。@internal exportはTypeScriptの型システムやモジュールバウンダリを変更しないため、セキュリティ上の追加リスクはない。本関数はstartIndex計算のみを行い、I/O操作やDB操作を含まないため、悪用リスクも極めて低い。",
+        "severity": "none",
+        "recommendation": "現状の@internal exportパターンで問題なし。"
+      },
+      {
+        "id": "C-002",
+        "title": "前の会話内容の混入防止がセキュリティ上も重要であることの確認",
+        "description": "Issue #326の修正本来の目的である「前の会話内容の混入防止」は、機能的品質の問題であると同時に、情報漏洩防止の観点でもセキュリティ上重要である。異なるworktreeやセッション間でコンテキストが混入することは、本アプリケーションがローカルツールであるため外部への情報漏洩リスクは限定的だが、ユーザーが想定しないデータがDB保存・UI表示されることはCWE-200（情報の公開）に相当する。修正方針は正しく、lastCapturedLine以降への限定はこのリスクを軽減する。",
+        "severity": "none",
+        "recommendation": "修正方針は情報漏洩防止の観点でも適切。追加対応は不要。"
+      },
+      {
+        "id": "C-003",
+        "title": "rawContentの縮小とDB保存データ量の変化",
+        "description": "修正後、rawContent（最大200行/5000文字）はlastCapturedLine以降の出力からのみ生成される。これにより保存データ量は減少方向に変化し、不要なデータの蓄積を防ぐ。truncateRawContent()の制限（RAW_CONTENT_MAX_LINES=200, RAW_CONTENT_MAX_CHARS=5000）は引き続き有効であり、過大なデータがDBに保存されるリスクは適切に制御されている。",
+        "severity": "none",
+        "recommendation": "追加対応不要。truncateRawContent()の既存制限で十分。"
+      },
+      {
+        "id": "C-004",
+        "title": "SQLインジェクション防御の確認",
+        "description": "createMessage()はprepared statementを使用しており（db.prepare + stmt.run）、extractResponse()から渡されるresponse文字列がDB操作でSQLインジェクションを引き起こすリスクはない。better-sqlite3のprepared statementはパラメータバインディングを使用するため安全。",
+        "severity": "none",
+        "recommendation": "追加対応不要。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": "N/A - 変更は内部関数のデータフィルタリングのみ。認証・認可には影響なし。",
+    "A02_cryptographic_failures": "N/A - 暗号化処理には関与しない。",
+    "A03_injection": "PASS - DB保存にprepared statement使用。stripAnsi()追加によりANSIエスケープのDB混入を防止。SQLインジェクションリスクなし。",
+    "A04_insecure_design": "PASS - lastCapturedLine以降への制限はデータ最小化原則に合致。前会話混入防止は情報漏洩リスク軽減。",
+    "A05_security_misconfiguration": "N/A - セキュリティ設定の変更なし。",
+    "A06_vulnerable_components": "N/A - 新規依存パッケージの追加なし。",
+    "A07_identification_authentication": "N/A - 認証機能への影響なし。",
+    "A08_data_integrity": "PASS - stripAnsi()適用の統一によりDB保存データの一貫性が向上。rawContentのtruncateRawContent()制限は維持。",
+    "A09_logging_monitoring": "N/A - ログ出力への影響なし。",
+    "A10_server_side_request_forgery": "N/A - 外部リクエストには関与しない。"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-326-prompt-response-extraction-design-policy.md",
+    "src/lib/response-poller.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/clipboard-utils.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/db.ts",
+    "src/components/worktree/MessageList.tsx"
+  ],
+  "timestamp": "2026-02-20T00:00:00Z"
+}

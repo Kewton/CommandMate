@@ -1,0 +1,103 @@
+{
+  "issue_number": 326,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "箇所1の現状コードスニペットにcliToolIdガード条件が欠落",
+        "description": "設計書セクション3-4の箇所1「修正後」コードでは resolveExtractionStartIndex() の第4引数に cliToolId を渡しているが、この箇所は if (cliToolId === 'claude') ブロック内にあるため、cliToolIdは常に'claude'である。一方、resolveExtractionStartIndex()のシグネチャ（セクション3-3）では cliToolId: CLIToolType を汎用型として受け取る設計であり、整合性は保たれている。しかし、実コード行374の else if (cliToolId === 'codex') 分岐は箇所1のコンテキストでは到達不能（dead code）となる。ヘルパー関数が汎用目的である以上、この動作は正しいが、設計書において箇所1固有のコンテキストでCodex分岐が到達不能であることへの言及がない。",
+        "recommendation": "設計書セクション3-4の箇所1の設計根拠に「箇所1は cliToolId==='claude' コンテキスト内で呼び出されるため、resolveExtractionStartIndex内のcodex分岐は到達しないが、関数の汎用性を維持するため引数としてcliToolIdを渡す」旨を補記すること。実装への影響はない。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "4分岐ロジックにおけるCodex分岐のMath.max(0, lastCapturedLine)と設計書テストケース#4の不一致",
+        "description": "実コード行376では startIndex = Math.max(0, lastCapturedLine) としてMath.max(0, ...)ガードが適用されている。しかし設計書セクション6-2のテストケース#4は「lastCapturedLine=50, codex -> startIndex=50」のみを検証しており、Math.max(0, ...)のガード動作（負値入力時）のテストケースが含まれていない。設計書の4分岐テーブル（セクション3-2）でもCodex列は単に「lastCapturedLine」と記載され、Math.max(0, ...)が省略されている。",
+        "recommendation": "セクション3-2の4分岐テーブルのCodex行を「Math.max(0, lastCapturedLine)」に修正し、テストケースにlastCapturedLine=0のCodexケースを追加すること。Stage 1のC-001指摘と同様の問題だが、通常分岐（4番目）にも同じMath.max(0, ...)が実コードに存在するため、テーブル全体で統一的に記載すべき。"
+      },
+      {
+        "id": "SF-002",
+        "title": "箇所2の現状コードスニペットでstripAnsiが未適用であることの記述が不正確",
+        "description": "設計書セクション3-4の箇所2「現状」コードには response: fullOutput と記載されており、stripAnsiが未適用である旨が指摘されている。実コード行494-498を確認すると response: fullOutput（行495）であり、確かにstripAnsiが適用されていない。この点は正確。しかし、箇所1の「現状」コード（設計書）では response: stripAnsi(fullOutput)（行336）と記載されており、実コード行336も stripAnsi(fullOutput) である。箇所1と箇所2の非対称性（片方にはstripAnsiあり、片方にはなし）の指摘は正確であり、修正後に両方でstripAnsiを適用する設計は整合している。問題なし。",
+        "recommendation": "記述は正確であるため修正不要。ただし、設計書セクション3-4の箇所2の「注意」コメントで、この非対称性が既存バグなのか意図的設計だったのかを明記するとより明確になる。"
+      },
+      {
+        "id": "SF-003",
+        "title": "設計書のcheckForResponse行番号参照（行605）が実コードでは行605であることの確認と注記の適用範囲",
+        "description": "セクション4-1でcheckForResponse()行605を参照しているが、セクション3-4冒頭の行番号注記（SF-002対応）はextractResponse()内の行番号のみを対象としている。checkForResponse()内の行番号参照（セクション4-1, 4-2）にはSF-002の注記が適用されていない。実コード行605の promptDetection = detectPromptWithOptions(result.response, cliToolId) は正確に一致しているが、将来のコード変更でずれるリスクは同様に存在する。",
+        "recommendation": "セクション3-4のSF-002注記を「本設計書全体の行番号参照」に拡張するか、セクション4冒頭にも同様の注記を追加すること。"
+      },
+      {
+        "id": "SF-004",
+        "title": "設計書のDRY記載「3か所のstartIndex決定ロジックを1つの関数に統合」と実コードの乖離",
+        "description": "設計書セクション9のDRY欄では「3か所のstartIndex決定ロジックを1つの関数に統合」と記載されている。しかし実コードを確認すると、4分岐startIndexロジックは通常レスポンスパス（行364-386）の1か所のみに存在し、箇所1（行326-340）と箇所2（行487-499）ではstartIndex決定ロジックは存在しない（fullOutputをそのまま返している）。修正後に箇所1と箇所2でもresolveExtractionStartIndex()を呼ぶようになるため「3か所で使用」は正しいが、「統合」という表現は不正確で、正確には「1か所の既存ロジックを抽出し、新たに2か所で再利用」である。",
+        "recommendation": "セクション9のDRY記載を「1か所の既存startIndex決定ロジックを関数に抽出し、既存1か所+新規2か所の計3か所で共有」に修正すること。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "prompt-detector.tsのrawContent生成ロジックとの整合性の深度",
+        "description": "設計書セクション4-2でrawContentへの影響を分析し、「前の会話の混入除去は品質向上」と結論付けている。prompt-detector.ts行583では rawContent: truncateRawContent(output.trim()) として output 引数全体をrawContentに保存している。修正後、detectPromptWithOptions()への入力がextractedLines.join('\\n')（部分出力）となるため、rawContentも部分出力に基づく。この動作変更はセクション4-2の分析と整合しているが、truncateRawContent()の200行/5000文字制限との組み合わせ効果（部分出力がさらにtruncateされるケース）への言及がない。",
+        "recommendation": "実際には部分出力はtruncate制限内に収まることがほとんどであるため実害はないが、設計書の完全性のためセクション4-2にtruncateRawContent()との相互作用に関する簡潔な言及を追加検討する。"
+      },
+      {
+        "id": "C-002",
+        "title": "テストケース#2のbufferResetパラメータの冗長性",
+        "description": "テストケース#2では lastCapturedLine=200, totalLines=80, bufferReset=true を入力としている。resolveExtractionStartIndex()内部で bufferWasReset = lastCapturedLine >= totalLines || bufferReset が計算されるため、lastCapturedLine=200 >= totalLines=80 だけで bufferWasReset=true となり、bufferReset=true は冗長である。テストの意図が「bufferResetフラグが明示的にtrueの場合」を検証したいのか、「lastCapturedLine >= totalLinesの場合」を検証したいのかが不明確。",
+        "recommendation": "テストケース#2はbufferReset=falseとしても同じ期待値になるはず。bufferResetフラグのみでbufferWasReset=trueとなるケース（lastCapturedLine < totalLines かつ bufferReset=true）のテストケースを追加検討すること。"
+      },
+      {
+        "id": "C-003",
+        "title": "影響範囲セクションでの部分レスポンスパス（行501-533）への言及なし",
+        "description": "設計書セクション7では直接変更ファイルとしてresponse-poller.tsの「箇所1/箇所2修正、通常レスポンスパスリファクタリング」を挙げているが、extractResponse()内には行501-533の部分レスポンスパス（incomplete response）にも独自のstartIndex決定ロジック（行504-508）が存在する。このロジックはresolveExtractionStartIndex()の4分岐ロジックとは異なる（partialBufferResetの2分岐）ため統合対象外と推察されるが、設計書で明示的に「対象外」と記載されていない。",
+        "recommendation": "セクション7またはセクション3-5に「部分レスポンスパス（行501-533）のstartIndex決定ロジックは4分岐ロジックとは異なるため、本修正のスコープ外とする」旨を明記検討する。"
+      }
+    ]
+  },
+  "consistency_checklist": {
+    "signature_match": {
+      "status": "pass",
+      "detail": "設計書セクション3-3のresolveExtractionStartIndex()シグネチャ（5引数: lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex）は、実コードの4分岐ロジック（行364-386）が必要とする全入力を網羅している。CLIToolType型はcli-tools/types.tsからのimportで一致。"
+    },
+    "four_branch_logic": {
+      "status": "pass",
+      "detail": "設計書セクション3-2の4分岐テーブルは実コード行368-386の条件分岐と一致。(1)bufferWasReset->findRecentUserPromptIndex(40), (2)codex->lastCapturedLine, (3)lastCapturedLine>=totalLines-5->findRecentUserPromptIndex(50), (4)通常->lastCapturedLine。windowSizeの値(40,50)も一致。ただしMath.max(0,...)の省略あり（SF-001）。"
+    },
+    "test_cases_six": {
+      "status": "pass_with_note",
+      "detail": "6テストケースは4分岐の主要パスを網羅。テストケース#1(通常), #2(bufferReset+prompt有), #3(bufferReset+prompt無), #4(codex), #5(スクロール境界+prompt有), #6(スクロール境界+prompt無)。ただしテストケース#2のbufferReset=trueの冗長性（C-002）とMath.max(0,...)ガードの未テスト（SF-001）に注意。"
+    },
+    "section_cross_references": {
+      "status": "pass",
+      "detail": "セクション間の相互参照は整合。セクション9がセクション3-3-1(MF-001), 3-3-2(SF-001), 9自身(SF-003)を正しく参照。セクション10-1/10-2/10-3がStage 1のMF-001/SF-001/SF-002/SF-003/C-001/C-002/C-003を正しく引用。セクション11の実装チェックリストが各セクションを正しく参照。"
+    },
+    "issue_235_consistency": {
+      "status": "pass",
+      "detail": "設計書セクション4-2のIssue #235との整合性分析は正確。実コード行614-615のrawContent || cleanContentフォールバックパターン、prompt-detector.ts行583のtruncateRawContent(output.trim())、PromptDetectionResult.rawContentフィールド（prompt-detector.ts行54）の全てが設計書の記述と一致。「完全なプロンプト出力」を「現在の会話のプロンプト出力」と再定義する判断は合理的。"
+    },
+    "code_snippet_accuracy": {
+      "status": "pass_with_note",
+      "detail": "設計書の「現状」コードスニペットは実コードと高精度で一致。箇所1（行326-341）: 実コード行328-341と一致。箇所2（行487-499）: 実コード行489-499と一致（行番号は設計書記載+2のオフセットがあるが、コードパターンは完全一致）。通常パス（行364-386）: 実コード行364-386と完全一致。ただし箇所2の行番号が設計書では487-499だが実コードでは487行目がコメント開始、492行目からif文であり、微小な範囲差異がある。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-326-prompt-response-extraction-design-policy.md",
+    "src/lib/response-poller.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-tools/types.ts",
+    "tests/unit/lib/response-poller.test.ts"
+  ],
+  "timestamp": "2026-02-20T14:00:00Z"
+}

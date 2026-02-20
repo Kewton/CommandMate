@@ -1,0 +1,7 @@
+{
+  "issue_number": 321,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘反映",
+  "review_result_path": "dev-reports/issue/321/multi-stage-design-review/stage4-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-321-memo-copy-design-policy.md"
+}

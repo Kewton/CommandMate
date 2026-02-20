@@ -1,0 +1,116 @@
+{
+  "issue_number": 326,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "resolveExtractionStartIndex内のbufferWasReset再計算が設計書に記載なし",
+        "description": "設計書のヘルパー関数シグネチャでは引数として bufferReset (boolean) を受け取るが、extractResponse()行368の bufferWasReset = lastCapturedLine >= totalLines || bufferReset という再計算ロジックがヘルパー関数の内部に移動するのか、呼び出し側で事前計算するのかが明確でない。この曖昧さはSRP違反のリスクを生む。",
+        "recommendation": "bufferWasResetの計算をヘルパー関数内部に含めるかどうかを設計書に明記すること。ヘルパー関数が bufferReset (外部イベント) と lastCapturedLine >= totalLines (バッファ状態比較) の両方を統合する場合、関数名を resolveExtractionStartIndex のまま維持できるが、その内部で bufferWasReset を再計算することを明記する必要がある。",
+        "principle": "SRP / 設計書の完全性"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "findRecentUserPromptIndex をコールバック引数として渡す設計の複雑さ",
+        "description": "設計書ではfindRecentUserPromptIndexクロージャを引数として注入する設計だが、このクロージャはextractResponse内部でlines配列・totalLines・cliToolId・stripAnsiをキャプチャしている。テスト時のモック容易性は確保されるものの、本番コードでは呼び出し側がクロージャを渡す形が間接的で、KISSの観点からやや複雑。",
+        "recommendation": "代替案として、findRecentUserPromptIndexの依存値（lines, totalLines, cliToolId）を直接渡す純粋関数化を検討すること。ただし引数数の増加とのトレードオフがあるため、現設計を維持する場合はJSDocで「なぜコールバック引数を選択したか」のトレードオフを記述すること。",
+        "principle": "KISS"
+      },
+      {
+        "id": "SF-002",
+        "title": "設計書の行番号参照と実コードの不一致",
+        "description": "設計書では「箇所1: 行326-341」「箇所2: 行487-499」「通常パス: 行364-386」と記載しているが、実コードでは箇所1は行326-341（一致）、箇所2は行487-499（一致）、通常パスは行364-386（一致）。現時点では正確だが、今後のコード変更で行番号がずれる。設計書がコード行番号に依存する記述は保守性を損なう。",
+        "recommendation": "行番号の代わりに、コード内のコメントマーカー（例: // EXTRACTION_PATH_1, // EXTRACTION_PATH_2）を設計書から参照する方式を検討する。または行番号はあくまで「設計時点のスナップショット」であることを明記する。",
+        "principle": "保守性"
+      },
+      {
+        "id": "SF-003",
+        "title": "箇所2のstripAnsi追加が付随的修正であることの明示不足",
+        "description": "箇所2への stripAnsi 追加は Issue #326 のスコープを超えた改善（一貫性確保のための付随修正）だが、設計書のYAGNI準拠セクション（セクション9）ではこれに触れていない。YAGNI原則に照らすと、バグ修正に必要な最小限の変更ではないため、意識的な判断であることを設計書上で明示すべき。",
+        "recommendation": "セクション9のYAGNI欄で「箇所2のstripAnsi追加はYAGNIの例外として一貫性確保のために含める」旨を補記する。",
+        "principle": "YAGNI / 設計書の一貫性"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "resolveExtractionStartIndexのCodexブランチにMath.max(0, lastCapturedLine)を含めるか",
+        "description": "設計書のテストケース#4ではcodexの通常ケースで startIndex=50 を期待しているが、実コード行376では Math.max(0, lastCapturedLine) としている。設計書のヘルパー関数内部でも同様の Math.max(0, ...) ガードを含めるかどうかが明記されていない。",
+        "recommendation": "テストケースに lastCapturedLine=0 や lastCapturedLine=-1（理論上は起きないが防御的に）のケースを追加し、ヘルパー関数内で Math.max(0, ...) を一律適用することを明記する。",
+        "principle": "防御的プログラミング"
+      },
+      {
+        "id": "C-002",
+        "title": "checkForResponse内の再検出（行605）の部分出力での動作保証",
+        "description": "設計書セクション4-3で「部分出力にはプロンプトの質問文+選択肢が含まれるため再検出にも成功する」と述べているが、lastCapturedLineが質問文の途中を指していた場合、extractedLinesには選択肢のみが含まれ質問文が欠落する可能性がある。この場合、detectPromptWithOptionsは選択肢だけでも検出できるが、rawContentの品質が低下する。",
+        "recommendation": "このエッジケースを結合テストで検証し、rawContentの品質が許容範囲内であることを確認するテストケースを追加検討する。",
+        "principle": "テスタビリティ / 堅牢性"
+      },
+      {
+        "id": "C-003",
+        "title": "@internal exportの命名規約統一",
+        "description": "既存コードベースでは @internal export に2つのパターンが混在: (1) 機能名そのまま（clearCachedClaudePath, checkStopCondition）、(2) ForTesting接尾辞（resetCacheForTesting）。設計書の resolveExtractionStartIndex は (1) のパターンだが、この関数はテスト専用exportであるため命名規約をどちらに合わせるかの判断根拠があるとよい。",
+        "recommendation": "resolveExtractionStartIndex は本番コードからも呼び出される関数（3箇所で共有）のため、ForTesting接尾辞は不適切であり、現命名が正しい。この判断を設計書に簡潔に記載するとより明確になる。",
+        "principle": "命名規約の一貫性"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-326-prompt-response-extraction-design-policy.md",
+    "src/lib/response-poller.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/cli-tools/types.ts",
+    "tests/unit/lib/response-poller.test.ts"
+  ],
+  "design_principles_checklist": {
+    "SRP": {
+      "status": "pass_with_note",
+      "detail": "resolveExtractionStartIndex は startIndex 決定の単一責務を持つ。ただし bufferWasReset の再計算を内包するかどうかで責務境界が曖昧（MF-001）。"
+    },
+    "OCP": {
+      "status": "pass",
+      "detail": "ヘルパー関数の cliToolId 分岐は既存パターンの移植であり、新しい CLI ツール追加時は分岐追加で対応可能。既存コードのOCP特性を維持。"
+    },
+    "LSP": {
+      "status": "not_applicable",
+      "detail": "継承・サブタイプ関係なし。関数レベルの設計。"
+    },
+    "ISP": {
+      "status": "not_applicable",
+      "detail": "インターフェース分離の対象なし。純粋関数の設計。"
+    },
+    "DIP": {
+      "status": "pass",
+      "detail": "findRecentUserPromptIndex をコールバック引数として注入する設計は DIP に準拠。テスト時にモック可能。"
+    },
+    "DRY": {
+      "status": "pass",
+      "detail": "3箇所の startIndex 決定ロジックを1つの関数に統合。重複排除の妥当性は高い。"
+    },
+    "KISS": {
+      "status": "pass_with_note",
+      "detail": "既存ロジックの再利用で新規概念を導入しない点は KISS 準拠。ただしコールバック引数パターンはやや間接的（SF-001）。"
+    },
+    "YAGNI": {
+      "status": "pass_with_note",
+      "detail": "修正は2箇所+リファクタリング1箇所に留まる。箇所2の stripAnsi 追加は厳密には YAGNI 例外だが合理的判断（SF-003）。"
+    },
+    "testability": {
+      "status": "pass",
+      "detail": "@internal export パターンは既存プロジェクト慣行に沿う。テストケース6件は主要分岐を網羅。"
+    }
+  },
+  "timestamp": "2026-02-20T12:00:00Z"
+}

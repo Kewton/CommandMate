@@ -1,0 +1,26 @@
+{
+  "issue_number": 321,
+  "feature_summary": "MemoCardコンポーネントにコピーボタンを追加し、メモのcontentフィールドをクリップボードにコピーできるようにする",
+  "acceptance_criteria": [
+    "MemoCardにコピーボタン（Copyアイコン）が表示される",
+    "コピーボタンをクリックするとメモのcontentがクリップボードにコピーされる",
+    "クリック後2秒間、アイコンがCopyからCheckに切り替わる",
+    "2秒後にアイコンがCopyに戻る",
+    "contentが空の場合、コピー処理が実行されない",
+    "TypeScript型チェックが通る（npx tsc --noEmit）",
+    "ESLintエラーが0件（npm run lint）",
+    "単体テストが追加されパスする（tests/unit/components/worktree/MemoCard.test.tsx）",
+    "モバイル画面幅でヘッダー部の4要素レイアウトが崩れないこと"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 通常フロー - コピーボタンクリックでcontentがコピーされCheckアイコンに変わり2秒後に戻る",
+    "シナリオ2: 空コンテンツ - contentが空の場合にコピー処理が実行されない",
+    "シナリオ3: 高速連打 - コピーボタンを素早く2回クリックしてもアイコンが正しく動作する",
+    "シナリオ4: アンマウント - コピー後にメモを削除してもReact警告が発生しない",
+    "シナリオ5: MemoPane互換 - 既存のMemoPane.test.tsxのテストが全パスする"
+  ],
+  "implemented_files": [
+    "src/components/worktree/MemoCard.tsx",
+    "tests/unit/components/worktree/MemoCard.test.tsx"
+  ]
+}

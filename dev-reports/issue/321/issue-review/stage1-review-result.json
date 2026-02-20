@@ -1,0 +1,124 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 321,
+  "review_focus": "通常",
+  "review_date": "2026-02-20",
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "Issue本文が未記入（テンプレートのまま）",
+      "description": "Issue本文の全セクション（概要、背景・課題、提案する解決策、代替案、補足情報）がテンプレートのプレースホルダーテキストのまま残されており、機能要件が一切記述されていない。タイトル「メモのコピー機能」のみでは、何をコピーするのか（タイトルのみ、コンテンツのみ、タイトル+コンテンツ）、どのような操作でコピーするのか（ボタンクリック、キーボードショートカット）、コピー先（クリップボード）などが不明確である。",
+      "suggestion": "以下の内容を最低限記載すべきである。\n\n【概要】MemoCardコンポーネントにコピーボタンを追加し、メモのコンテンツをクリップボードにコピーできるようにする。\n\n【背景・課題】現在MemoCardには編集・削除ボタンは存在するがコピーボタンがない。メモの内容を他所に貼り付ける際、手動でテキストを選択してコピーする必要がある。FileViewer、HistoryPane、MarkdownEditor、LogViewerなど他のコンポーネントにはコピー機能が実装済みであり、MemoCardにも同等の機能があるべきである。"
+    },
+    {
+      "id": "F002",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "受け入れ条件（Acceptance Criteria）が未定義",
+      "description": "テスト可能な受け入れ条件が一つも記載されていない。受け入れ条件がないと、実装者が何を満たせば完了とみなせるか判断できず、レビュー時の判定基準も不明確になる。",
+      "suggestion": "以下のような受け入れ条件を追加すべきである。\n\n1. MemoCardにコピーボタンが表示されること\n2. コピーボタンをクリックすると、メモのコンテンツがクリップボードにコピーされること\n3. コピー成功時に視覚的フィードバック（アイコン変化またはToast通知）が表示されること\n4. メモのコンテンツが空の場合、コピーボタンが非活性または非表示であること（clipboard-utils.tsのSF-S4-1準拠）\n5. 単体テストが追加されること"
+    },
+    {
+      "id": "F003",
+      "severity": "must_fix",
+      "category": "clarity",
+      "title": "コピー対象が不明確",
+      "description": "「メモのコピー機能」の「メモ」が何を指すのかが不明確。WorktreeMemoにはtitle（最大100文字）とcontent（最大10000文字）の2フィールドがある。コピー対象がcontentのみなのか、titleとcontentの両方なのか、あるいはメモカード全体のテキスト表現なのかが判断できない。",
+      "suggestion": "コピー対象を明示的に定義すべきである。既存のFileViewer.tsxではファイルコンテンツのみをコピーしており、ConversationPairCard.tsxではメッセージコンテンツのみをコピーしている。この既存パターンに合わせるのであれば、コピー対象はcontent（メモ本文）のみとするのが整合的。ただし、title+contentの両方をコピーする方がユーザーにとって便利なケースもあるため、意図を明記すべきである。"
+    },
+    {
+      "id": "F004",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "UI実装パターンの指定がない",
+      "description": "コピーボタンのUI仕様（配置位置、アイコン、フィードバック方式）が定義されていない。プロジェクト内には2つの異なるコピーUIパターンが存在する。\n\nパターンA（FileViewer方式）: Copy/Checkアイコン切替（lucide-react）、2秒後に元に戻る、サイレントエラーハンドリング。\nパターンB（HistoryPane方式）: Copyアイコン、Toast通知による成功/失敗フィードバック、showToastコールバック。\n\nどちらのパターンを採用するか、あるいはMemoCard独自のパターンを採用するかの指定がないと、実装者の判断に依存してしまう。",
+      "suggestion": "MemoCardの既存UIレイアウトを考慮すると、削除ボタンの隣にコピーボタンを配置し、Copy/Checkアイコン切替（FileViewerパターンA）を採用するのが自然である。理由: MemoCardは現時点でshowToast propsを受け取っていないため、パターンBを採用するとpropsの追加やMemoPane側の変更も必要になる。既に削除ボタンがヘッダー部にあるため、同じ行にコピーボタンを追加する形が整合的。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "背景・動機の記載がない",
+      "description": "なぜこの機能が必要なのか、どのようなユースケースで利用されるのかが記載されていない。機能追加の動機がないと、優先度の判断やスコープの決定が困難になる。",
+      "suggestion": "ユースケース例を記載すべきである。例: 「メモの内容をClaude CLIへのプロンプトに貼り付けたい」「メモの内容を別のworktreeのメモにコピーしたい」「メモの内容を外部ツールに共有したい」など。"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "既存のコピー実装基盤（clipboard-utils.ts）への参照がない",
+      "description": "プロジェクトにはclipboard-utils.tsにcopyToClipboard()関数が既に存在し、FileViewer、HistoryPane、MarkdownEditor、LogViewerの4箇所で利用されている。Issue本文にこの既存基盤への言及がないため、実装者が独自のコピー実装を行うリスクがある。",
+      "suggestion": "「提案する解決策」セクションに、既存のcopyToClipboard()（src/lib/clipboard-utils.ts）を利用する旨を明記すべきである。また、lucide-reactのCopy/Checkアイコンが既にプロジェクトで使用されていることも参照情報として追記すると良い。"
+    },
+    {
+      "id": "F007",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "テスト要件が未記載",
+      "description": "テストに関する記載がない。既存のMemoCard.test.tsxには基本レンダリング、タイトル編集、コンテンツ編集、削除、保存インジケーター、エラー状態のテストがあるが、コピー機能のテストケースが必要になる。",
+      "suggestion": "以下のテストケースを受け入れ条件またはテスト要件として追加すべきである。\n\n1. コピーボタンがレンダリングされること\n2. コピーボタンクリック時にcopyToClipboardが呼ばれること\n3. コピー成功後にフィードバック（Checkアイコン表示）が表示されること\n4. コンテンツが空のメモでのコピーボタンの振る舞い\n5. コピー失敗時のエラーハンドリング"
+    },
+    {
+      "id": "F008",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "i18n対応の考慮が未記載",
+      "description": "プロジェクトはi18n対応（en/ja）をしているが、コピーボタンのaria-label等の国際化について言及がない。ただし、既存のFileViewer.tsxのコピーボタン（aria-label=\"Copy file content\"）もハードコードされており、現時点では既存パターンに合わせてハードコードでも整合性は保たれる。",
+      "suggestion": "現状の既存パターンではaria-labelがハードコードされているため、本Issueでは既存パターン踏襲で問題ない。i18n対応が必要であれば別Issueで一括対応するのが望ましい。"
+    },
+    {
+      "id": "F009",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "関連Issue/PRへの参照がない",
+      "description": "類似機能を実装した過去のIssue（Issue #162: FileViewerコピーボタン追加、Issue #211: clipboard-utils導入）への参照がない。実装の参考になる情報が失われている。",
+      "suggestion": "「補足情報」セクションに関連Issue番号を記載し、実装の参考にできるようにする。\n- Issue #162: FileViewerへのコピーボタン追加\n- Issue #211: clipboard-utils.ts導入\n- 参考実装: src/components/worktree/FileViewer.tsx（Copy/Checkアイコン切替パターン）"
+    }
+  ],
+  "summary": {
+    "must_fix": 3,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "total": 9
+  },
+  "overall_assessment": "Issue #321はタイトル「メモのコピー機能」のみで、本文はテンプレートのプレースホルダーがそのまま残された状態である。機能要件、背景、受け入れ条件、UI仕様のいずれも未定義であり、このままでは実装着手の判断基準を満たさない。ただし、タイトルから推測される機能自体は技術的に実現可能であり、既存のcopyToClipboard()やlucide-reactアイコンを活用すれば小規模な変更で実装できる。Issueの本文を充実させ、最低限(1)コピー対象の明確化、(2)UIパターンの指定、(3)受け入れ条件の定義、を行ったうえで実装に着手すべきである。",
+  "code_references": [
+    {
+      "file": "src/components/worktree/MemoCard.tsx",
+      "relevance": "コピーボタン追加対象のコンポーネント。現在は編集(title/content入力)と削除ボタンのみ。"
+    },
+    {
+      "file": "src/components/worktree/MemoPane.tsx",
+      "relevance": "MemoCardの親コンポーネント。showToast propsの伝播が必要になる可能性がある。"
+    },
+    {
+      "file": "src/lib/clipboard-utils.ts",
+      "relevance": "既存のcopyToClipboard()関数。ANSI除去・空文字バリデーション済み。"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "relevance": "Copy/Checkアイコン切替パターンの参考実装（パターンA）。"
+    },
+    {
+      "file": "src/components/worktree/HistoryPane.tsx",
+      "relevance": "Toast通知によるコピーフィードバックの参考実装（パターンB）。"
+    },
+    {
+      "file": "src/components/worktree/ConversationPairCard.tsx",
+      "relevance": "onCopyコールバックパターンの参考実装。"
+    },
+    {
+      "file": "tests/unit/components/worktree/MemoCard.test.tsx",
+      "relevance": "既存のMemoCardテスト。コピー機能テストの追加が必要。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構造、コーディング規約、テスト方針の参照元。"
+    }
+  ]
+}

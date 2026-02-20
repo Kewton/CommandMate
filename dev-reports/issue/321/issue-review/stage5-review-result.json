@@ -1,0 +1,130 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 321,
+  "review_focus": "通常（2回目）",
+  "review_date": "2026-02-20",
+  "previous_findings_check": {
+    "stage1_findings": {
+      "F001": {
+        "status": "addressed",
+        "detail": "Issue本文は全セクション（概要、背景・課題、提案する解決策、受け入れ条件、影響範囲、補足情報）が充実した内容で記載されている。テンプレートのプレースホルダーテキストは完全に除去済み。"
+      },
+      "F002": {
+        "status": "addressed",
+        "detail": "受け入れ条件が9項目定義されている。UIレンダリング、クリップボードコピー動作、アイコン切替、タイマー復帰、空content時の振る舞い、型チェック、ESLint、テスト追加、モバイルレイアウトの各項目が具体的で検証可能。テスト要件セクションも5つのテストケースとモック指針を含む。"
+      },
+      "F003": {
+        "status": "addressed",
+        "detail": "「コピー対象」セクションでcontent（メモ本文）のみをコピー対象と明記し、title（メモタイトル）はコピー対象外であることを既存パターンとの整合性を根拠に明示している。"
+      },
+      "F004": {
+        "status": "addressed",
+        "detail": "「UI実装パターン」セクションでFileViewer方式（パターンA）を採用することを明記し、採用理由（showToast propsの不在、変更範囲の最小化）も記載されている。Copy/Checkアイコン切替、2秒タイマー、サイレントエラーハンドリングの仕様が具体的に定義されている。"
+      },
+      "F005": {
+        "status": "addressed",
+        "detail": "「背景・課題」セクションに課題の説明と3つのユースケース例（Claude CLIプロンプトへの貼り付け、別worktreeのメモへのコピー、外部ツールへの共有）が記載されている。"
+      },
+      "F006": {
+        "status": "addressed",
+        "detail": "「使用する既存基盤」セクションにclipboard-utils.tsのcopyToClipboard()関数、lucide-reactのCopy/Checkアイコン、FileViewer.tsxの参考実装が明記されている。"
+      },
+      "F007": {
+        "status": "addressed",
+        "detail": "「テスト要件」セクションに5つのテストケースが列挙され、vi.mock('@/lib/clipboard-utils')によるモック指針も記載されている。jsdom環境でのnavigator.clipboard API制約についても言及あり。"
+      },
+      "F008": {
+        "status": "addressed",
+        "detail": "補足情報にaria-labelのハードコード方針を明記。i18n一括対応は別Issueとする旨が記載されている。"
+      },
+      "F009": {
+        "status": "addressed",
+        "detail": "「関連Issue / 参考実装」セクションにIssue #162、Issue #211、FileViewer.tsxの参考実装が記載されている。"
+      }
+    },
+    "stage3_findings": {
+      "F101": {
+        "status": "addressed",
+        "detail": "「変更なしのファイル（確認済み）」テーブルにMemoPane.tsxが「MemoCardPropsインタフェースの変更なし。コピー機能はMemoCard内部に閉じた状態管理（useState）とコールバックで実装されるため、propsの伝播変更は不要。」として明記されている。"
+      },
+      "F102": {
+        "status": "addressed",
+        "detail": "「変更なしのファイル（確認済み）」テーブルにMemoPane.test.tsxが「aria-labelベースのボタン取得を使用しているため、MemoCardへのコピーボタン追加による既存テストの破壊は発生しない」と根拠付きで明記されている。実装時の全テスト確認の指示も含む。"
+      },
+      "F105": {
+        "status": "addressed",
+        "detail": "影響範囲テーブルにCLAUDE.mdの行が追加されている（「MemoCard.tsxのモジュール説明追加（Issue #321: コピーボタン追加、Copy/Checkアイコン切替）」）。補足情報にも「CLAUDE.mdへのMemoCard.tsxモジュール説明追記が必要（実装PRに含めること）」と明記。"
+      },
+      "F108": {
+        "status": "addressed",
+        "detail": "テスト要件セクションにvi.mock('@/lib/clipboard-utils')によるモック指針が追記され、jsdom環境の制約とFileViewer等の既存パターン参照も記載されている。"
+      }
+    }
+  },
+  "findings": [
+    {
+      "id": "F201",
+      "severity": "nice_to_have",
+      "category": "consistency",
+      "title": "削除ボタンのインラインSVGとコピーボタンのlucide-reactアイコンの混在",
+      "description": "現在のMemoCard.tsx（L152-172）の削除ボタンはインラインSVGで実装されているが、Issue #321で追加するコピーボタンはlucide-reactのCopy/Checkアイコンを使用する想定となっている。同一コンポーネント内でアイコンの実装方式が混在する。ContextMenu.tsxではTrash2（lucide-react）を使用しているが、MemoCardの削除ボタンはインラインSVGのままとなり、ヘッダー内でインラインSVGとlucide-reactアイコンが並ぶ状態になる。機能的には問題なく、バンドルサイズへの影響も軽微であるが、コンポーネント内のアイコン実装方式の統一性が崩れる。",
+      "suggestion": "本Issue #321のスコープではコピーボタンの追加のみとし、削除ボタンのlucide-react移行は別途リファクタリングIssueとして対応するのが妥当。ただし、実装者が混在に気づけるよう、補足情報に「削除ボタンはインラインSVGのままとし、lucide-react統一は別Issueとする」旨を1行追記すると丁寧である。"
+    },
+    {
+      "id": "F202",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "copyToClipboard()の戻り値（void）に対するコピー成功判定の明確化",
+      "description": "clipboard-utils.tsのcopyToClipboard()は空文字/空白文字の場合に早期リターン（return）する。この場合、例外は発生せず正常終了するが、実際にはクリップボードへのコピーは行われない。Issue #321の受け入れ条件「contentが空の場合、コピーボタンが無効化（disabled）またはコピー処理が実行されない（clipboard-utils.tsの空文字バリデーション準拠）」と記載されているが、FileViewerのhandleCopy実装（L66-75）では `if (!canCopy || !content?.content) return;` のガードを入れたうえでcopyToClipboard()を呼んでいる。MemoCardでも同様にUI側で空contentをガードするのか、copyToClipboard()の空文字バリデーションに委ねるのか、2段階の防御の詳細が曖昧。ただし、どちらのアプローチでも実装結果は同等であり、既存パターン（FileViewer）のガード+copyToClipboard両方を踏襲すれば問題ない。",
+      "suggestion": "受け入れ条件の記載は実装者が判断可能な水準であり、必須の修正ではない。FileViewerパターンを参考実装として指定済みであるため、2段階ガードが自然に踏襲されることが期待できる。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "total": 2
+  },
+  "overall_assessment": "Issue #321はStage 1の通常レビューで指摘されたMust Fix 3件（F001: 本文未記入、F002: 受け入れ条件未定義、F003: コピー対象不明確）およびShould Fix 4件（F004: UIパターン未指定、F005: 背景未記載、F006: 既存基盤への参照なし、F007: テスト要件未記載）の全てが適切に対応されている。Stage 3の影響範囲レビューで指摘されたShould Fix 4件（F101: MemoPane.tsx影響記載欠落、F102: MemoPane.test.tsx影響明記、F105: CLAUDE.md更新必要性、F108: モック方法未指定）も全て反映済みである。更新後のIssueは、概要・背景・ユースケース・コピー対象・UIパターン・受け入れ条件・テスト要件・影響範囲・変更なしファイルの根拠・i18n方針・aria-label推奨値・関連Issue参照・レビュー履歴まで網羅的に記載されており、実装着手に十分な品質に達している。新たに検出された指摘2件はいずれもNice to Haveレベルであり、実装をブロックする問題はない。Issue #321は実装着手可能な状態と判断する。",
+  "code_references": [
+    {
+      "file": "src/components/worktree/MemoCard.tsx",
+      "relevance": "主要変更対象。L152-172の削除ボタンがインラインSVGで実装されている点を確認（F201の根拠）。"
+    },
+    {
+      "file": "src/lib/clipboard-utils.ts",
+      "relevance": "copyToClipboard()のL28-36で空文字バリデーション（早期リターン）の動作を確認（F202の根拠）。"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "relevance": "L66-75のhandleCopy実装で、canCopyガード+copyToClipboard()の2段階防御パターンを確認。"
+    },
+    {
+      "file": "src/components/worktree/MemoPane.tsx",
+      "relevance": "L207-214でMemoCardを使用。MemoCardPropsの変更がないためMemoPane側の変更不要であることを確認。"
+    },
+    {
+      "file": "tests/unit/components/worktree/MemoCard.test.tsx",
+      "relevance": "既存テスト13件の構造を確認。useAutoSaveのvi.mockが設定済み。copyToClipboardのvi.mock追加が必要。"
+    },
+    {
+      "file": "tests/unit/components/worktree/MemoPane.test.tsx",
+      "relevance": "L215-218でgetAllByRole('button', { name: /delete/i })を使用。aria-labelベースの取得によりコピーボタン追加の影響なしを確認。"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "L212-227のWorktreeMemo型定義を確認。変更不要。"
+    },
+    {
+      "file": "src/components/worktree/ContextMenu.tsx",
+      "relevance": "L19でTrash2（lucide-react）をimportしている点を確認。MemoCardの削除ボタンはインラインSVGであり方式が異なる（F201の補足根拠）。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構造・モジュール一覧の参照元。MemoCard.tsxの説明追加がIssue #321の影響範囲に含まれている。"
+    }
+  ]
+}

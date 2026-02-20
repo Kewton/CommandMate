@@ -1,0 +1,46 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘反映",
+  "issue_number": 321,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["S4-001", "S4-002", "S4-003"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "S4-001",
+        "item": "clipboard-utils.tsのANSI_PATTERNにSEC-002既知制限（8-bit CSI等未対応）。メモ機能での実質リスクなし",
+        "section_updated": "セキュリティ設計（Section 8.1）",
+        "status": "reflected"
+      },
+      {
+        "id": "S4-002",
+        "item": "Permissions-Policyにclipboard-write=(self)が未記載。別Issue対応方針",
+        "section_updated": "セキュリティ設計（Section 8.2）",
+        "status": "reflected"
+      },
+      {
+        "id": "S4-003",
+        "item": "サイレントエラー設計の妥当性確認。情報漏洩防止の設計根拠追記",
+        "section_updated": "セキュリティ設計（Section 8.3）",
+        "status": "reflected"
+      }
+    ]
+  },
+  "design_doc_path": "dev-reports/design/issue-321-memo-copy-design-policy.md",
+  "sections_updated": [
+    "セキュリティ設計（Section 8.1: ANSI除去既知制限）",
+    "セキュリティ設計（Section 8.2: Permissions-Policy補足）",
+    "セキュリティ設計（Section 8.3: サイレントエラー設計根拠）",
+    "セキュリティ設計（Section 8.4: OWASP Top 10チェックリスト）",
+    "レビュー履歴（Section 13: Stage 4追加）",
+    "レビュー指摘事項サマリー（Section 14: Stage 4テーブル追加）",
+    "実装チェックリスト（Section 15: S4-001/S4-002/S4-003追加）"
+  ],
+  "summary": "セキュリティ設計セクションの拡充（ANSI制限明記、Permissions-Policy言及、サイレントエラー根拠追記、OWASPチェックリスト追加）",
+  "timestamp": "2026-02-20T12:00:00Z"
+}

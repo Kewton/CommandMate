@@ -1,0 +1,126 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 321,
+  "review_focus": "影響範囲",
+  "status": "approved",
+  "score": 5,
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "nice_to_have",
+      "category": "mobile_ui_impact",
+      "title": "モバイル狭幅端末でのヘッダー行4要素レイアウト余裕の確認",
+      "description": "MemoCardヘッダー行は flex items-center gap-2 で [Title(flex-1)] [Saving...] [Copy] [Delete] の4要素を配置する。タイトル入力は flex-1 で可変幅のため、Saving表示中でもボタン群は固定幅（p-1 w-4 h-4 = 約24px x2 + gap-2 x3 = 約72px）に収まる。320px幅端末でもタイトル入力領域は約240px確保でき、実用上の問題はないと判断される。ただし、実機での目視確認を推奨する。",
+      "recommendation": "実装後にモバイル実機（320px幅）で、Saving表示中にタイトルが極端に短縮されないことを目視確認する。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-321/src/components/worktree/MemoCard.tsx"
+      ]
+    },
+    {
+      "id": "S3-002",
+      "severity": "nice_to_have",
+      "category": "test_impact",
+      "title": "MemoCard.test.tsxの既存getByRoleクエリにおけるコピーボタン追加の間接影響",
+      "description": "既存のMemoCard.test.tsxでは getByRole('button', { name: /delete/i }) で削除ボタンを特定しており、コピーボタン（aria-label='Copy memo content'）の追加によって曖昧なgetAllByRole('button')呼び出しの結果数は変わるが、name絞り込み付きクエリには影響しない。設計書のSection 9「既存テストへの影響」の分析は正確である。",
+      "recommendation": "実装後にMemoCard.test.tsxの全テストがパスすることを確認するだけで十分。追加対応不要。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-321/tests/unit/components/worktree/MemoCard.test.tsx"
+      ]
+    },
+    {
+      "id": "S3-003",
+      "severity": "nice_to_have",
+      "category": "future_consideration",
+      "title": "FileViewer/MarkdownEditorのtimerRefクリーンアップ未適用との差分",
+      "description": "設計書ではMemoCardにuseRef + useEffect cleanupによるsetTimeoutクリーンアップを追加するが、FileViewer.tsx（L66-74）およびMarkdownEditor.tsx（L321-325）には同様のクリーンアップが実装されていない。これは設計書Section 4の注記で明示されており、将来のS1-001カスタムフック抽出時に一括対応する方針である。影響範囲の観点では、本変更がFileViewer/MarkdownEditorに対して直接的な変更を要求しない設計は適切であり、技術的負債は認識済みである。",
+      "recommendation": "本Issueスコープ外として設計通りに進める。S1-001のフック抽出Issueを将来作成する際に、FileViewer/MarkdownEditorのクリーンアップ改善も含めることを推奨。",
+      "affected_files": [
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-321/src/components/worktree/FileViewer.tsx",
+        "/Users/maenokota/share/work/github_kewton/commandmate-issue-321/src/components/worktree/MarkdownEditor.tsx"
+      ]
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 3,
+    "total": 3
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/components/worktree/MemoCard.tsx",
+        "change_type": "修正",
+        "description": "Copy/Checkアイコンimport、useState(copied)、useRef(timerRef)、useEffect cleanup、handleCopyコールバック、コピーボタンJSX追加",
+        "risk": "Low"
+      },
+      {
+        "file": "tests/unit/components/worktree/MemoCard.test.tsx",
+        "change_type": "修正",
+        "description": "clipboard-utilsモック追加、コピー機能テスト7件追加",
+        "risk": "Low"
+      },
+      {
+        "file": "CLAUDE.md",
+        "change_type": "修正",
+        "description": "MemoCard.tsxモジュール説明追加",
+        "risk": "Low"
+      }
+    ],
+    "indirect_impact": [
+      {
+        "file": "src/components/worktree/MemoPane.tsx",
+        "impact": "影響なし",
+        "reason": "MemoCardPropsに変更がないため、MemoCardの利用箇所であるMemoPane（L208-213）は変更不要。PropsインタフェースはonUpdate/onDelete/memoのみを渡しており、コピー機能はMemoCard内部で完結する。"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact": "影響なし",
+        "reason": "WorktreeDetailRefactoredはMemoCardを直接参照せず、MemoPaneを経由して利用する（Desktop: L1806-1809, Mobile: L884-891）。MemoPaneへのprops変更がないため、間接的影響もゼロ。"
+      },
+      {
+        "file": "tests/unit/components/worktree/MemoPane.test.tsx",
+        "impact": "影響なし",
+        "reason": "MemoPane.test.tsxはgetAllByRole('button', { name: /delete/i })で削除ボタンを特定している（L215, L218, L233）。コピーボタンのaria-labelは'Copy memo content'であり、/delete/iパターンにマッチしない。テスト全件への影響なし。"
+      },
+      {
+        "file": "src/lib/clipboard-utils.ts",
+        "impact": "影響なし",
+        "reason": "既存ユーティリティをそのまま利用。変更不要。"
+      }
+    ],
+    "bundle_size_impact": {
+      "assessment": "無視可能",
+      "details": "lucide-reactは既にpackage.json依存関係に含まれており（v0.554.0）、10以上のコンポーネントで使用中。Copy/Checkアイコンは既にFileViewer.tsxおよびMarkdownEditor.tsxでimport済みのため、MemoCardからの追加importによる新規バンドルチャンクの増加はない。lucide-reactはtree-shakingに対応しており、使用アイコン単位でバンドルされる。"
+    },
+    "performance_impact": {
+      "assessment": "無視可能",
+      "details": "追加されるuseState(1個)、useRef(1個)、useEffect(cleanup用1個)、useCallback(1個)はいずれも軽量なReactフック。MemoCardはReact.memoでラップされており、propsが変わらない限り再レンダリングされない。useCallback内のcopyToClipboardはnavigator.clipboard.writeText()を呼び出すブラウザネイティブAPIであり、パフォーマンスへの影響は無視可能。"
+    },
+    "breaking_changes": {
+      "has_breaking_changes": false,
+      "details": "MemoCardPropsインタフェースに変更なし。WorktreeMemo型に変更なし。APIエンドポイントの追加・変更なし。DB変更なし。全ての変更はMemoCardコンポーネント内部に閉じている。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-321-memo-copy-design-policy.md",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/lib/clipboard-utils.ts",
+    "src/types/models.ts",
+    "tests/unit/components/worktree/MemoCard.test.tsx",
+    "tests/unit/components/worktree/MemoPane.test.tsx",
+    "package.json"
+  ],
+  "timestamp": "2026-02-20T00:00:00Z",
+  "overall_assessment": "設計方針書の影響範囲分析は正確かつ網羅的である。MemoCardPropsに変更を加えない設計判断により、MemoPane、WorktreeDetailRefactoredへの影響は完全に排除されている。既存テスト（MemoCard.test.tsx、MemoPane.test.tsx）へのリグレッション影響もなし。lucide-reactは既存依存であり、バンドルサイズへの追加影響は無視可能。React hookの追加もパフォーマンスに影響しない。破壊的変更はゼロ。変更を安全に進行可能と判断する。"
+}

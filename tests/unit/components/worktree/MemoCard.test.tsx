@@ -1,17 +1,32 @@
 /**
  * Tests for MemoCard component
  *
- * Tests individual memo card display and editing functionality
+ * Tests individual memo card display and editing functionality.
+ * Copy functionality tests (Issue #321) cover:
+ * - Basic copy interaction and clipboard API call
+ * - Copy/Check icon feedback transition
+ * - Empty and whitespace-only content guards
+ * - Rapid double-click timer deduplication (S1-004)
+ * - Unmount safety during copy feedback (S1-005)
+ *
  * @vitest-environment jsdom
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoCard } from '@/components/worktree/MemoCard';
 import type { WorktreeMemo } from '@/types/models';
 
+// Must match COPY_FEEDBACK_DURATION_MS in MemoCard.tsx
+const COPY_FEEDBACK_DURATION_MS = 2000;
+
+// Hoisted mock functions (vi.mock factories are hoisted above imports)
+const { mockSaveNow, mockCopyToClipboard } = vi.hoisted(() => ({
+  mockSaveNow: vi.fn(),
+  mockCopyToClipboard: vi.fn(),
+}));
+
 // Mock useAutoSave hook
-const mockSaveNow = vi.fn();
 vi.mock('@/hooks/useAutoSave', () => ({
   useAutoSave: () => ({
     isSaving: false,
@@ -19,6 +34,22 @@ vi.mock('@/hooks/useAutoSave', () => ({
     saveNow: mockSaveNow,
   }),
 }));
+
+// Mock clipboard-utils
+vi.mock('@/lib/clipboard-utils', () => ({
+  copyToClipboard: mockCopyToClipboard,
+}));
+
+/** Query the copy button by its aria-label */
+function getCopyButton(): HTMLElement {
+  return screen.getByRole('button', { name: /copy memo content/i });
+}
+
+/** Check whether the SVG icon inside a button has the green Check icon class */
+function hasCheckIcon(button: HTMLElement): boolean {
+  const svg = button.querySelector('svg');
+  return svg?.classList.toString().includes('text-green-600') ?? false;
+}
 
 describe('MemoCard', () => {
   const mockMemo: WorktreeMemo = {
@@ -196,6 +227,136 @@ describe('MemoCard', () => {
 
       const card = screen.getByTestId('memo-card');
       expect(card.className).toMatch(/p-\d|space-y-/);
+    });
+  });
+
+  describe('Copy functionality', () => {
+    beforeEach(() => {
+      mockCopyToClipboard.mockResolvedValue(undefined);
+    });
+
+    it('should render copy button with aria-label', () => {
+      render(<MemoCard {...defaultProps} />);
+
+      expect(getCopyButton()).toBeInTheDocument();
+    });
+
+    it('should call copyToClipboard with memo content when clicked', async () => {
+      render(<MemoCard {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(getCopyButton());
+      });
+
+      expect(mockCopyToClipboard).toHaveBeenCalledWith('Test content');
+    });
+
+    it('should show Check icon after successful copy', async () => {
+      render(<MemoCard {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(getCopyButton());
+      });
+
+      expect(hasCheckIcon(getCopyButton())).toBe(true);
+    });
+
+    describe('empty content guard', () => {
+      it('should not call copyToClipboard when content is empty', async () => {
+        render(<MemoCard {...defaultProps} memo={{ ...mockMemo, content: '' }} />);
+
+        await act(async () => {
+          fireEvent.click(getCopyButton());
+        });
+
+        expect(mockCopyToClipboard).not.toHaveBeenCalled();
+      });
+
+      it('should not call copyToClipboard when content is whitespace only', async () => {
+        render(<MemoCard {...defaultProps} memo={{ ...mockMemo, content: '   ' }} />);
+
+        await act(async () => {
+          fireEvent.click(getCopyButton());
+        });
+
+        expect(mockCopyToClipboard).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('timer-based feedback', () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it('should revert to Copy icon after feedback duration', async () => {
+        render(<MemoCard {...defaultProps} />);
+
+        const copyButton = getCopyButton();
+        await act(async () => {
+          fireEvent.click(copyButton);
+        });
+
+        expect(hasCheckIcon(copyButton)).toBe(true);
+
+        await act(async () => {
+          vi.advanceTimersByTime(COPY_FEEDBACK_DURATION_MS);
+        });
+
+        expect(hasCheckIcon(copyButton)).toBe(false);
+      });
+
+      it('should handle rapid double-click correctly (S1-004)', async () => {
+        render(<MemoCard {...defaultProps} />);
+
+        const copyButton = getCopyButton();
+
+        // First click
+        await act(async () => {
+          fireEvent.click(copyButton);
+        });
+
+        // Second click immediately -- previous timer should be cleared
+        await act(async () => {
+          fireEvent.click(copyButton);
+        });
+
+        expect(mockCopyToClipboard).toHaveBeenCalledTimes(2);
+
+        // After feedback duration, icon should revert (single timer, not doubled)
+        await act(async () => {
+          vi.advanceTimersByTime(COPY_FEEDBACK_DURATION_MS);
+        });
+
+        expect(hasCheckIcon(copyButton)).toBe(false);
+      });
+
+      it('should safely handle unmount during copy feedback (S1-005)', async () => {
+        const consoleErrorSpy = vi.spyOn(console, 'error');
+
+        const { unmount } = render(<MemoCard {...defaultProps} />);
+
+        await act(async () => {
+          fireEvent.click(getCopyButton());
+        });
+
+        // Unmount while the feedback timer is still pending
+        unmount();
+
+        // Advancing timers after unmount should not trigger React state-update warnings
+        await act(async () => {
+          vi.advanceTimersByTime(COPY_FEEDBACK_DURATION_MS);
+        });
+
+        // Verify no React "state update on unmounted component" warnings were logged
+        const reactWarnings = consoleErrorSpy.mock.calls.filter(
+          (args) => typeof args[0] === 'string' && args[0].includes('unmounted')
+        );
+        expect(reactWarnings).toHaveLength(0);
+      });
     });
   });
 });

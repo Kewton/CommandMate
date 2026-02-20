@@ -1,0 +1,80 @@
+{
+  "issue_number": 326,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "箇所2のstripAnsi未適用によるANSIエスケープコードのDB保存とXSSリスク",
+        "applied_sections": ["5-1-1", "3-4(箇所2)", "8", "9(YAGNI)", "13-3"],
+        "changes": [
+          "セクション5-1-1を新設: MessageList.tsxのhasAnsiCodes()→dangerouslySetInnerHTMLパス経由のXSSリスクを明記",
+          "セクション3-4(箇所2)にセキュリティ必須修正の注記を追加",
+          "セクション8の設計決定テーブルにXSSリスク軽減を追記",
+          "セクション9のYAGNI欄にStage 4 MF-001でセキュリティ必須修正と判定された旨を追記",
+          "セクション13-3の実装チェックリストに[セキュリティ必須]ラベルとANSIコード非含有検証テスト項目を追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "lastCapturedLineの負値入力に対する防御的バリデーション",
+        "applied_sections": ["3-3-0", "6-2(#9)", "8", "13-1"],
+        "changes": [
+          "セクション3-3-0を新設: 関数冒頭でのlastCapturedLine = Math.max(0, lastCapturedLine)一律適用を推奨",
+          "セクション6-2にテストケース#9(lastCapturedLine=-1、負値入力)を追加",
+          "セクション8の設計決定テーブルに防御的バリデーションのエントリを追加",
+          "セクション13-1の実装チェックリストに防御的バリデーション項目を追加"
+        ]
+      },
+      {
+        "id": "SF-002",
+        "title": "totalLines=0エッジケースのテスト追加",
+        "applied_sections": ["6-2(#10)", "13-5"],
+        "changes": [
+          "セクション6-2にテストケース#10(totalLines=0、空バッファ)を追加",
+          "セクション13-5の実装チェックリストにテストケース#10の検証項目を追加"
+        ]
+      },
+      {
+        "id": "SF-003",
+        "title": "stripAnsi()のSEC-002既知制限への言及",
+        "applied_sections": ["5-1-2"],
+        "changes": [
+          "セクション5-1-2を新設: stripAnsi()の8-bit CSI/DEC private modes/character set switching未対応パターンがDB保存データに残留する可能性を明記。本修正のスコープ外であり既存リスクの継承である旨を記載"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "@internal exportのセキュリティ影響評価",
+        "action": "記録のみ（セクション14-3）"
+      },
+      {
+        "id": "C-002",
+        "title": "前の会話内容の混入防止のセキュリティ上の意義",
+        "action": "記録のみ（セクション14-3）"
+      },
+      {
+        "id": "C-003",
+        "title": "rawContentの縮小とDB保存データ量の変化",
+        "action": "記録のみ（セクション14-3）"
+      },
+      {
+        "id": "C-004",
+        "title": "SQLインジェクション防御の確認",
+        "action": "記録のみ（セクション14-3）"
+      }
+    ]
+  },
+  "updated_files": [
+    "dev-reports/design/issue-326-prompt-response-extraction-design-policy.md"
+  ],
+  "source_code_modified": false,
+  "summary": "Stage 4セキュリティレビューの全指摘事項（MF-001: 1件、SF-001/SF-002/SF-003: 3件、C-001~C-004: 4件）を設計方針書に反映完了。セキュリティ設計セクション(5-1)を大幅に拡充し、XSSリスク(5-1-1)とstripAnsi既知制限(5-1-2)のサブセクションを新設。防御的バリデーション推奨(3-3-0)を追加。テストケースを8件から10件に拡張。OWASPチェックリストとリスク評価をセクション14に記録。",
+  "timestamp": "2026-02-20T00:00:00Z"
+}

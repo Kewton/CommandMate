@@ -1,0 +1,90 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 321,
+  "review_focus": "整合性",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S2-001",
+      "severity": "should_fix",
+      "category": "pattern_consistency",
+      "title": "FileViewerにはtimerRefクリーンアップが未実装であり、設計書が「FileViewerパターン踏襲」と矛盾する",
+      "description": "設計方針書 Section 4 では「FileViewerコピーパターンの踏襲」と明記し、Section 4 のコード例では useRef(timerRef) + useEffect cleanup + clearTimeout を含む実装を示している。しかし実際の FileViewer.tsx（L66-75）には useRef も useEffect cleanup も clearTimeout も存在しない。つまり設計書で提案しているコードは FileViewer のパターンを踏襲しているのではなく、FileViewer のパターンを改善した新パターンである。",
+      "suggestion": "設計書の表現を修正する。「FileViewerパターンの踏襲」ではなく「FileViewerパターンをベースにS1-002で指摘されたタイマークリーンアップを追加した改善パターン」と記載すべき。あるいは、FileViewer/MarkdownEditorにも同じクリーンアップを適用することを明示的にスコープ外として記載する。"
+    },
+    {
+      "id": "S2-002",
+      "severity": "nice_to_have",
+      "category": "pattern_consistency",
+      "title": "ConversationPairCardのコピーパターンがFileViewerパターンと異なるが、設計書のaria-label参考として引用されている",
+      "description": "設計方針書 Section 5 の aria-label 記載で ConversationPairCard の 'Copy message' を参考パターンとして挙げているが、ConversationPairCard のコピー実装はコールバック props (onCopy) による外部委譲パターンであり、FileViewer のようにコンポーネント内部で useState(copied) + copyToClipboard() を呼ぶパターンとは異なる。ConversationPairCard にはコピー成功後の Check アイコン切替もない。この差異は aria-label の参考としては問題ないが、読者が「コピー実装パターン全体の参考」と誤解する可能性がある。",
+      "suggestion": "Section 5 で ConversationPairCard を引用する際に、「aria-label の命名パターンとしての参考」であることを明示する。"
+    },
+    {
+      "id": "S2-003",
+      "severity": "nice_to_have",
+      "category": "design_code_consistency",
+      "title": "設計書のボタンスタイルと既存削除ボタンのスタイルに微差がある",
+      "description": "設計方針書 Section 5 のボタンスタイルに 'p-1 text-gray-400 hover:text-gray-600 transition-colors rounded' と記載されている。一方、実際の MemoCard.tsx の削除ボタン（L156）は 'p-1 text-gray-400 hover:text-red-500 transition-colors rounded' であり hover 色が text-red-500 である。設計書のコピーボタンの hover 色は text-gray-600 と記載されているが、これは削除ボタンとは意図的に異なる色であることが明確に説明されていない。設計意図自体は妥当（コピーは危険操作ではないため gray-600、削除は赤）だが、「既存の削除ボタンのスタイルに合わせる」というコメントが誤解を招く。",
+      "suggestion": "Section 5 のスタイル定義コメントを「削除ボタンのベーススタイルに合わせつつ、hover色はコピー操作に適した gray-600 を使用」に修正する。"
+    },
+    {
+      "id": "S2-004",
+      "severity": "nice_to_have",
+      "category": "design_code_consistency",
+      "title": "設計書のWorktreeMemo型定義にJSDocコメントが欠けている",
+      "description": "設計方針書 Section 6 で示された WorktreeMemo インターフェースの型定義にはフィールドの JSDoc コメントが省略されている（例: '// コピー対象外', '// コピー対象' のみ）。一方、実際の src/types/models.ts（L212-227）では各フィールドに '/** Unique memo ID (UUID) */' 等の詳細な JSDoc コメントがある。これは設計書の簡略化としては許容範囲だが、整合性としてはフィールドコメントの形式が異なる。",
+      "suggestion": "設計書では型定義を引用する際、簡略化している旨を注記するか、実コードと一致する形にする。軽微な差異であり、対応は任意。"
+    },
+    {
+      "id": "S2-005",
+      "severity": "nice_to_have",
+      "category": "test_consistency",
+      "title": "テストケース#5の空コンテンツガード条件と copyToClipboard のバリデーション仕様に微妙な差異がある",
+      "description": "設計方針書 Section 4 のコード例では handleCopy のガード条件が 'if (!content) return;' であり、空文字列 '' は JavaScript の falsy 値のため早期リターンする。一方 clipboard-utils.ts の copyToClipboard() は 'text.trim().length === 0' もチェックする（空白文字のみの入力もブロック）。設計書 Section 5 では「2段階防御: UI側ガード + ライブラリ側バリデーション」と記載しているが、UI側ガード '!content' では空白文字のみの文字列（例: '   '）はスルーする。これは copyToClipboard 側でカバーされるため実害はないが、テストケース#5 では content: '' のみをテストしており、空白文字のみのケースはテストされない。",
+      "suggestion": "テストケース#5 に空白文字のみ（例: '   '）のケースを追加するか、「空白文字のみのケースは copyToClipboard 側のバリデーションに委譲する」旨をテスト設計に明記する。"
+    },
+    {
+      "id": "S2-006",
+      "severity": "nice_to_have",
+      "category": "scope_consistency",
+      "title": "MemoCardがmemoでラップされておりuseCallbackの依存配列にcontentを含む設計の整合性",
+      "description": "MemoCard は React.memo() でラップされている（L54）。設計書の handleCopy は useCallback の依存配列に [content] を含む。content は MemoCard 内部の useState で管理されるため、content の変更ごとに handleCopy が再生成される。これは React.memo と組み合わせても問題ないが、設計書ではこの点（memo化コンポーネント内部での useCallback の依存配列設計）について言及がない。",
+      "suggestion": "技術的に問題はないため対応不要。ただし、将来 useCopyToClipboard フック抽出時にはこの依存関係を考慮する必要がある旨を S1-001 の将来改善検討事項に追記すると良い。"
+    },
+    {
+      "id": "S2-007",
+      "severity": "should_fix",
+      "category": "internal_consistency",
+      "title": "設計書内でFileViewerのコピーパターン行番号参照が正確だが、setTimeoutクリーンアップの有無が整合しない",
+      "description": "設計書 Section 4 では「FileViewer.tsx（L53-75, L153-167）のコピー実装パターンをそのまま踏襲する」と記載しているが、直後のコード例には FileViewer には存在しない useRef(timerRef), useEffect cleanup, handleCopy 内の clearTimeout が含まれている。「そのまま踏襲」という表現と実際に提示されたコードが矛盾している。Section 4 の S1-002 対応コメントで改善箇所は示されているが、冒頭の「そのまま踏襲する」という記述と齟齬がある。",
+      "suggestion": "Section 4 冒頭を「FileViewer.tsx（L53-75, L153-167）のコピー実装パターンをベースに、S1-002 で指摘されたタイマークリーンアップを追加した改善版を実装する」に修正する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 5,
+    "total": 7
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-321-memo-copy-design-policy.md",
+    "src/components/worktree/MemoCard.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/ConversationPairCard.tsx",
+    "src/components/worktree/MemoPane.tsx",
+    "src/lib/clipboard-utils.ts",
+    "src/types/models.ts",
+    "tests/unit/components/worktree/MemoCard.test.tsx"
+  ],
+  "timestamp": "2026-02-20T00:00:00Z",
+  "overall_assessment": "設計方針書は全体として高品質であり、変更範囲の閉じ込め、既存パターンの活用、テスト設計のいずれも適切である。主要な整合性の問題は、FileViewerパターンを「そのまま踏襲」と記載しながら実際には改善版（タイマークリーンアップ追加）を提示している内部矛盾のみである。これは設計書の表現修正で解決可能であり、実装方針自体に問題はない。実装に進んで差し支えないが、設計書の記述を正確にしてから着手することを推奨する。"
+}

@@ -1,0 +1,78 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 321,
+  "apply_date": "2026-02-20",
+  "applied_findings": {
+    "should_fix": [
+      {
+        "id": "F101",
+        "status": "applied",
+        "change_summary": "影響範囲に「変更なしのファイル（確認済み）」テーブルを新設し、MemoPane.tsxを「MemoCardPropsインタフェースの変更なし、propsの伝播変更不要」の根拠付きで明記"
+      },
+      {
+        "id": "F102",
+        "status": "applied",
+        "change_summary": "変更なしテーブルにMemoPane.test.tsxを追加し、aria-labelベースのボタン取得を使用しているため既存テストの破壊は発生しない旨を明記。実装時の全テストパス確認の注意書きも追記"
+      },
+      {
+        "id": "F105",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルにCLAUDE.mdを追加（MemoCard.tsxのモジュール説明追加）。補足情報にも実装PRに含める旨を追記"
+      },
+      {
+        "id": "F108",
+        "status": "applied",
+        "change_summary": "テスト要件セクションに「モック指針」段落を新設し、vi.mock('@/lib/clipboard-utils')によるモック化が必須であること、jsdomでのnavigator.clipboard API制約、FileViewer等の既存パターン参照を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F103",
+        "status": "applied",
+        "change_summary": "変更なしテーブルにsrc/types/models.tsを追加し、WorktreeMemo型定義への変更なし・新規フィールドやDBスキーマの変更は発生しない旨を明記"
+      },
+      {
+        "id": "F104",
+        "status": "applied",
+        "change_summary": "影響範囲セクションに「i18n翻訳ファイルへの影響」サブセクションを新設し、翻訳ファイルへの変更が不要であること、aria-labelハードコード方針を明記"
+      },
+      {
+        "id": "F106",
+        "status": "applied",
+        "change_summary": "補足情報のaria-label項目に推奨値 'Copy memo content' を追記し、既存パターン（FileViewer 'Copy file content'、ConversationPairCard 'Copy message'）との命名規則の整合性を明記"
+      },
+      {
+        "id": "F107",
+        "status": "applied",
+        "change_summary": "受け入れ条件にモバイル画面幅でのヘッダー部4要素レイアウト確認項目を追加（タイトル入力の最小幅確認を含む）"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0,
+    "should_fix_applied": 4,
+    "nice_to_have_applied": 4
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/321"
+  },
+  "changes_overview": {
+    "new_sections_added": [
+      "影響範囲 > 変更なしのファイル（確認済み）テーブル",
+      "影響範囲 > i18n翻訳ファイルへの影響",
+      "テスト要件 > モック指針",
+      "レビュー履歴 > Stage 4"
+    ],
+    "modified_sections": [
+      "影響範囲テーブル（CLAUDE.md追加）",
+      "受け入れ条件（モバイルUI確認項目追加）",
+      "補足情報（aria-label推奨値・CLAUDE.md追記必要性を追加）"
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "issue_number": 326,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-20",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "applied",
+        "change_summary": "テスト影響テーブルにtests/unit/session-cleanup.test.tsとtests/unit/cli-tools/manager-stop-pollers.test.tsを「変更不要」として追加。stopPollingのみをモックしており修正対象（内部関数extractResponse()）とは無関係であることを備考に明記"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "Stage 1/5/7を通じて3回指摘されたが、修正方針・テスト戦略・影響範囲の記述が十分に具体的であり実装者が受け入れ基準を推定可能。レビューアも「著者の意図的な判断と判断し、これ以上エスカレーションしない」と明記しているため、対応不要と判断"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 2,
+    "applied": 1,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/326"
+  },
+  "changes_applied": [
+    {
+      "section": "影響範囲 > テスト影響テーブル",
+      "change": "2行追加: tests/unit/session-cleanup.test.ts（変更不要）、tests/unit/cli-tools/manager-stop-pollers.test.ts（変更不要）"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "「イテレーション 2 (2026-02-20) - Stage 7 影響範囲レビュー」セクションを追加"
+    },
+    {
+      "section": "Note（Issue冒頭）",
+      "change": "「Stage 5レビュー結果」から「Stage 7レビュー結果」に更新"
+    }
+  ]
+}

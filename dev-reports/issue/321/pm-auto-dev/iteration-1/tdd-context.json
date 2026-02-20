@@ -1,0 +1,43 @@
+{
+  "issue_number": 321,
+  "issue_title": "メモのコピー機能",
+  "acceptance_criteria": [
+    "MemoCardにコピーボタン（Copyアイコン）が表示される",
+    "コピーボタンをクリックするとメモのcontentがクリップボードにコピーされる",
+    "クリック後2秒間、アイコンがCopyからCheckに切り替わる",
+    "2秒後にアイコンがCopyに戻る",
+    "contentが空の場合、コピー処理が実行されない（clipboard-utils.tsの空文字バリデーション準拠）",
+    "TypeScript型チェックが通る（npx tsc --noEmit）",
+    "ESLintエラーが0件（npm run lint）",
+    "単体テストが追加されパスする（tests/unit/components/worktree/MemoCard.test.tsx）",
+    "モバイル画面幅でヘッダー部の4要素（タイトル入力 + Saving + コピーボタン + 削除ボタン）のレイアウトが崩れないこと"
+  ],
+  "implementation_tasks": [
+    "src/components/worktree/MemoCard.tsx: lucide-react Copy/Checkアイコンimport追加",
+    "src/components/worktree/MemoCard.tsx: useRef importに追加",
+    "src/components/worktree/MemoCard.tsx: copyToClipboard import追加（@/lib/clipboard-utils）",
+    "src/components/worktree/MemoCard.tsx: useState(copied) 追加",
+    "src/components/worktree/MemoCard.tsx: useRef(timerRef) 追加（タイマークリーンアップ用）",
+    "src/components/worktree/MemoCard.tsx: useEffect cleanup追加（アンマウント時clearTimeout）",
+    "src/components/worktree/MemoCard.tsx: handleCopyコールバック追加（contentガード、copyToClipboard呼び出し、setCopied(true)、timerRef管理）",
+    "src/components/worktree/MemoCard.tsx: ヘッダー部にコピーボタンJSX追加（aria-label='Copy memo content'、Copy/Checkアイコン切替）",
+    "tests/unit/components/worktree/MemoCard.test.tsx: vi.mock('@/lib/clipboard-utils')モック追加",
+    "tests/unit/components/worktree/MemoCard.test.tsx: テストケース7件追加（レンダリング、クリック、Checkアイコン、2秒復帰、空コンテンツ、空白のみ、高速ダブルクリック、アンマウント）"
+  ],
+  "key_files": {
+    "main_component": "src/components/worktree/MemoCard.tsx",
+    "test_file": "tests/unit/components/worktree/MemoCard.test.tsx",
+    "reference_impl": "src/components/worktree/FileViewer.tsx",
+    "clipboard_util": "src/lib/clipboard-utils.ts"
+  },
+  "design_notes": {
+    "pattern": "FileViewerコピーパターンの改善版（useRef + useEffect cleanupによるタイマークリーンアップ追加）",
+    "aria_label": "Copy memo content",
+    "timer_duration_ms": 2000,
+    "error_handling": "サイレント（catchブロックで何もしない）",
+    "props_change": "MemoCardPropsへの変更なし（MemoCardPropsインタフェースを変更しない）",
+    "icon_hover_color": "text-gray-600（削除ボタンのtext-red-500と区別）",
+    "check_icon_color": "text-green-600"
+  },
+  "target_coverage": 80
+}

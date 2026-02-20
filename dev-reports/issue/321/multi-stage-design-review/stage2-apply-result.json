@@ -1,0 +1,33 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘反映",
+  "issue_number": 321,
+  "applied_findings": ["S2-001", "S2-007", "S2-003", "S2-002", "S2-005"],
+  "skipped_findings": ["S2-004", "S2-006"],
+  "skip_reasons": {
+    "S2-004": "軽微な整合性問題で設計の本質に影響なし（設計書の簡略化として許容範囲）",
+    "S2-006": "技術的に問題なく実装で対応可能（memo化コンポーネント内useCallbackの依存配列は正常動作）"
+  },
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-321-memo-copy-design-policy.md",
+  "changes_applied": {
+    "S2-001_S2-007": {
+      "location": "Section 4 見出し・本文",
+      "change": "「FileViewerコピーパターンの踏襲」→「FileViewerコピーパターンの改善版」、「そのまま踏襲する」→「ベースに、S1-002で指摘されたタイマークリーンアップを追加した改善版を実装する」に修正。FileViewer.tsxにはuseRef/cleanupが存在しない旨の注記ブロックを追加。設計根拠テーブルのKISS記述も整合するよう修正。Section 11のトレードオフ表も「改善版」に修正。"
+    },
+    "S2-002": {
+      "location": "Section 5 aria-label",
+      "change": "ConversationPairCard参照に「aria-label命名規則の参考のみ」を明示。onCopyコールバックprops方式との差異を注記として追加。"
+    },
+    "S2-003": {
+      "location": "Section 5 ボタンスタイル",
+      "change": "コメントを「既存の削除ボタンのスタイルに合わせる」から「削除ボタンのベーススタイルに合わせつつ、hover色はコピー操作に適した gray-600 を使用（削除ボタンは hover:text-red-500 で危険操作を示す）」に修正。"
+    },
+    "S2-005": {
+      "location": "Section 9 テストケース、Section 15 実装チェックリスト",
+      "change": "テストケース#5を#5a/#5bに分割。#5bとして空白文字のみ（'   '）のケースを追加。2段階防御のライブラリ層カバレッジ検証を明記。実装チェックリストにS2-005項目を追加。"
+    }
+  },
+  "summary": "FileViewerパターン記述の修正（「そのまま踏襲」→「改善版」）とスタイル仕様の正確化、aria-label参照範囲の明示、空白文字テストケースの追加を設計方針書に反映。S2-004（JSDocコメント差異）とS2-006（useCallback依存配列）は軽微かつ技術的に問題ないためスキップ。",
+  "timestamp": "2026-02-20T00:00:00Z"
+}

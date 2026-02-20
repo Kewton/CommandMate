@@ -1,0 +1,28 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 321,
+  "apply_date": "2026-02-20",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "F301",
+        "status": "applied",
+        "change_summary": "テスト要件のモック参考先を「FileViewer等の既存テストパターン」から「MarkdownEditor等の既存テストパターン（`tests/unit/components/MarkdownEditor.test.tsx`）」に修正"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "summary": {
+    "total_findings": 1,
+    "applied": 1,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/321"
+  }
+}
