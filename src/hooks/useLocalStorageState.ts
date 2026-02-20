@@ -9,7 +9,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 /**
  * Options for useLocalStorageState hook
@@ -104,6 +104,17 @@ export function useLocalStorageState<T>(
     deserialize = JSON.parse,
   } = options;
 
+  // Use refs for callback/object dependencies to prevent infinite re-render loops
+  // when callers pass new object references on every render (e.g., { count: 0 })
+  const defaultValueRef = useRef(defaultValue);
+  const validateRef = useRef(validate);
+  const serializeRef = useRef(serialize);
+  const deserializeRef = useRef(deserialize);
+  defaultValueRef.current = defaultValue;
+  validateRef.current = validate;
+  serializeRef.current = serialize;
+  deserializeRef.current = deserialize;
+
   const [isAvailable, setIsAvailable] = useState(false);
 
   // Initialize with default value (for SSR compatibility)
@@ -114,29 +125,29 @@ export function useLocalStorageState<T>(
    */
   const readFromStorage = useCallback((): T => {
     if (!isLocalStorageAvailable()) {
-      return defaultValue;
+      return defaultValueRef.current;
     }
 
     try {
       const stored = window.localStorage.getItem(key);
       if (stored === null) {
-        return defaultValue;
+        return defaultValueRef.current;
       }
 
-      const parsed = deserialize(stored);
+      const parsed = deserializeRef.current(stored);
 
       // If validation function provided, use it
-      if (validate) {
-        return validate(parsed) ? parsed : defaultValue;
+      if (validateRef.current) {
+        return validateRef.current(parsed) ? parsed : defaultValueRef.current;
       }
 
       // Otherwise, trust the parsed value
       return parsed as T;
     } catch {
       // JSON parse error or other issue
-      return defaultValue;
+      return defaultValueRef.current;
     }
-  }, [key, defaultValue, validate, deserialize]);
+  }, [key]);
 
   /**
    * Write value to localStorage
@@ -148,13 +159,13 @@ export function useLocalStorageState<T>(
       }
 
       try {
-        const serialized = serialize(newValue);
+        const serialized = serializeRef.current(newValue);
         window.localStorage.setItem(key, serialized);
       } catch {
         // localStorage quota exceeded or other error - silently fail
       }
     },
-    [key, serialize]
+    [key]
   );
 
   /**
@@ -182,11 +193,11 @@ export function useLocalStorageState<T>(
         // Ignore errors
       }
     }
-    setValueState(defaultValue);
-  }, [key, defaultValue]);
+    setValueState(defaultValueRef.current);
+  }, [key]);
 
   /**
-   * Initialize state from localStorage on mount
+   * Initialize state from localStorage on mount (and when key changes)
    */
   useEffect(() => {
     setIsAvailable(isLocalStorageAvailable());

@@ -2,15 +2,19 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
+// Ensure NODE_ENV=test regardless of shell environment (Issue #304)
+process.env.NODE_ENV = 'test';
+
 export default defineConfig({
   plugins: [react()],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('test'),
+  },
   test: {
     globals: true,
     environment: 'node',
+    env: { NODE_ENV: 'test' },
     setupFiles: ['./tests/setup.ts'],
-    // CI環境ではメモリ使用量を抑えるため同時実行を制限
-    maxConcurrency: process.env.CI === 'true' ? 1 : 10,
-    fileParallelism: process.env.CI !== 'true',
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
