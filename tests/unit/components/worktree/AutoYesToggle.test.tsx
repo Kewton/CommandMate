@@ -115,7 +115,7 @@ describe('AutoYesToggle', () => {
     });
 
     it('should display H:MM:SS format when 1 hour or more', () => {
-      const expiresAt = Date.now() + 3600001; // Just over 1 hour
+      const expiresAt = Date.now() + 3600000 + 30000; // 1 hour + 30s margin for render timing
       render(
         <AutoYesToggle
           {...defaultProps}
