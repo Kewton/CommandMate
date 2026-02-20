@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-02-20
+
+### Added
+- Auto-Yes stop condition with regex pattern matching (Issue #314)
+  - Custom regex pattern input to auto-stop when output matches
+  - Regex tips tooltip for pattern guidance
+  - Delta-based stop condition check to prevent false triggers
+  - `AutoYesStopReason` moved to shared config
+- Desktop demo GIF, mobile FAQ, and Cloudflare Tunnel guide in README
+
+### Fixed
+- Test environment NODE_ENV isolation (Issue #304)
+  - `NODE_ENV=test` enforced in vitest config and test scripts
+  - Infinite re-render loop fix in `useLocalStorageState`
+  - `process.env` cast to avoid read-only NODE_ENV type error
+
+### Changed
+- README rewritten with "Mobile Dev Cockpit" positioning
+
 ## [0.2.11] - 2026-02-19
 
 ### Added
@@ -477,7 +496,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.11...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.12...HEAD
+[0.2.12]: https://github.com/Kewton/CommandMate/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/Kewton/CommandMate/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/Kewton/CommandMate/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/Kewton/CommandMate/compare/v0.2.8...v0.2.9
