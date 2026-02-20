@@ -90,6 +90,41 @@ function incompleteResult(lineCount: number): ExtractionResult {
 }
 
 /**
+ * Build a complete ExtractionResult for a detected prompt.
+ *
+ * Shared between Claude early prompt detection (section 3-4, site 1) and
+ * fallback prompt detection (section 3-4, site 2) in extractResponse().
+ * Applies resolveExtractionStartIndex() to limit extraction to lastCapturedLine
+ * onwards, then strips ANSI codes for safe DB storage (Stage 4 MF-001).
+ *
+ * @param lines - The trimmed tmux buffer lines array
+ * @param lastCapturedLine - Number of lines previously captured
+ * @param totalLines - Total line count in the buffer
+ * @param bufferReset - External buffer reset flag
+ * @param cliToolId - CLI tool identifier
+ * @param findRecentUserPromptIndex - Callback to locate the most recent user prompt
+ * @returns ExtractionResult with isComplete: true and ANSI-stripped response
+ */
+function buildPromptExtractionResult(
+  lines: string[],
+  lastCapturedLine: number,
+  totalLines: number,
+  bufferReset: boolean,
+  cliToolId: CLIToolType,
+  findRecentUserPromptIndex: (windowSize: number) => number
+): ExtractionResult {
+  const startIndex = resolveExtractionStartIndex(
+    lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+  );
+  const extractedLines = lines.slice(startIndex);
+  return {
+    response: stripAnsi(extractedLines.join('\n')),
+    isComplete: true,
+    lineCount: totalLines,
+  };
+}
+
+/**
  * Active pollers map: "worktreeId:cliToolId" -> NodeJS.Timeout
  */
 const activePollers = new Map<string, NodeJS.Timeout>();
@@ -263,6 +298,76 @@ export function cleanGeminiResponse(response: string): string {
 }
 
 /**
+ * Determine the start index for response extraction based on buffer state.
+ * Shared between normal response extraction and prompt detection paths.
+ *
+ * Implements a 4-branch decision tree for startIndex determination:
+ *   1. bufferWasReset  -> findRecentUserPromptIndex(40) + 1, or 0 if not found
+ *   2. cliToolId === 'codex' -> Math.max(0, lastCapturedLine)
+ *   3. lastCapturedLine >= totalLines - 5 (scroll boundary) ->
+ *        findRecentUserPromptIndex(50) + 1, or totalLines - 40 if not found
+ *   4. Normal case -> Math.max(0, lastCapturedLine)
+ *
+ * `bufferWasReset` is computed internally from `lastCapturedLine`, `totalLines`,
+ * and `bufferReset`. Callers do NOT need to pre-compute `bufferWasReset`.
+ * (Design: MF-001 responsibility boundary)
+ *
+ * Design references:
+ * - Issue #326 design policy section 3-2 (4-branch startIndex table)
+ * - Stage 4 SF-001: Defensive validation (negative lastCapturedLine clamped to 0)
+ * - Stage 1 SF-001: findRecentUserPromptIndex as callback for SRP/testability
+ *
+ * @param lastCapturedLine - Number of lines previously captured from the tmux buffer.
+ *   Negative values are defensively clamped to 0 (Stage 4 SF-001).
+ * @param totalLines - Total number of (non-empty-trailing) lines in the current tmux buffer.
+ * @param bufferReset - External flag indicating the buffer was reset (e.g., session restart).
+ *   Combined with `lastCapturedLine >= totalLines` to derive internal `bufferWasReset`.
+ * @param cliToolId - CLI tool identifier. Affects branch 2 (Codex-specific path).
+ *   Note: When called from the Claude early prompt detection path (section 3-4),
+ *   cliToolId is always 'claude', making the Codex branch unreachable in that context.
+ *   The parameter is retained for the function's generality across all call sites.
+ * @param findRecentUserPromptIndex - Callback that searches the tmux buffer backwards
+ *   for the most recent user prompt line within a given window size.
+ *   Returns the line index (>= 0) if found, or -1 if not found.
+ * @returns The 0-based line index from which response extraction should begin.
+ *
+ * @internal Exported for testing only
+ */
+export function resolveExtractionStartIndex(
+  lastCapturedLine: number,
+  totalLines: number,
+  bufferReset: boolean,
+  cliToolId: CLIToolType,
+  findRecentUserPromptIndex: (windowSize: number) => number
+): number {
+  // Defensive validation: clamp negative values to 0 (Stage 4 SF-001)
+  lastCapturedLine = Math.max(0, lastCapturedLine);
+
+  // Compute bufferWasReset internally (MF-001: responsibility boundary)
+  const bufferWasReset = lastCapturedLine >= totalLines || bufferReset;
+
+  // Branch 1: Buffer was reset - find the most recent user prompt as anchor
+  if (bufferWasReset) {
+    const foundUserPrompt = findRecentUserPromptIndex(40);
+    return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
+  }
+
+  // Branch 2: Codex uses lastCapturedLine directly (Codex-specific TUI behavior)
+  if (cliToolId === 'codex') {
+    return Math.max(0, lastCapturedLine);
+  }
+
+  // Branch 3: Near scroll boundary - buffer may have scrolled, search for user prompt
+  if (lastCapturedLine >= totalLines - 5) {
+    const foundUserPrompt = findRecentUserPromptIndex(50);
+    return foundUserPrompt >= 0 ? foundUserPrompt + 1 : Math.max(0, totalLines - 40);
+  }
+
+  // Branch 4: Normal case - start from lastCapturedLine
+  return Math.max(0, lastCapturedLine);
+}
+
+/**
  * Extract CLI tool response from tmux output
  * Detects when a CLI tool has completed a response by looking for tool-specific patterns
  *
@@ -330,13 +435,10 @@ function extractResponse(
     const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
     if (promptDetection.isPrompt) {
-      // Return the full output as a complete interactive prompt
-      // Use the cleaned output without ANSI codes
-      return {
-        response: stripAnsi(fullOutput),
-        isComplete: true,
-        lineCount: totalLines,
-      };
+      // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
+      return buildPromptExtractionResult(
+        lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+      );
     }
   }
 
@@ -359,31 +461,11 @@ function extractResponse(
     // Extract the response content from lastCapturedLine to the separator (not just last 20 lines)
     const responseLines: string[] = [];
 
-    // Handle tmux buffer scrolling: if lastCapturedLine >= totalLines, the buffer has scrolled
-    // In this case, we need to find the response in the current visible buffer
-    let startIndex: number;
-
-    // For all tools: check if buffer has been reset/cleared (startIndex would be >= totalLines)
-    // This happens when a session is restarted or buffer is cleared
-    const bufferWasReset = lastCapturedLine >= totalLines || bufferReset;
-
-    if (bufferWasReset) {
-      // Buffer was reset - find the most recent user prompt
-      const foundUserPrompt = findRecentUserPromptIndex(40);
-      startIndex = foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
-    } else if (cliToolId === 'codex') {
-      // Normal case for Codex: use lastCapturedLine
-      startIndex = Math.max(0, lastCapturedLine);
-    } else if (lastCapturedLine >= totalLines - 5) {
-      // Buffer may have scrolled - look for the start of the new response
-      // Find the last user input prompt to identify where the response starts
-      const foundUserPrompt = findRecentUserPromptIndex(50);
-      // Start extraction from after the user prompt, or from a safe earlier point
-      startIndex = foundUserPrompt >= 0 ? foundUserPrompt + 1 : Math.max(0, totalLines - 40);
-    } else {
-      // Normal case: start from lastCapturedLine
-      startIndex = Math.max(0, lastCapturedLine);
-    }
+    // Determine start index for response extraction using shared helper
+    // Handles buffer reset, Codex-specific logic, scroll boundary, and normal cases
+    const startIndex = resolveExtractionStartIndex(
+      lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+    );
 
     let endIndex = totalLines;  // Track where extraction actually ended
 
@@ -490,12 +572,11 @@ function extractResponse(
   const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
   if (promptDetection.isPrompt) {
-    // This is an interactive prompt - consider it complete
-    return {
-      response: fullOutput,
-      isComplete: true,
-      lineCount: totalLines,
-    };
+    // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
+    // stripAnsi is applied inside buildPromptExtractionResult (Stage 4 MF-001: XSS risk mitigation)
+    return buildPromptExtractionResult(
+      lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+    );
   }
 
   // Not a prompt, but we may have a partial response in progress (even if Claude shows a spinner)

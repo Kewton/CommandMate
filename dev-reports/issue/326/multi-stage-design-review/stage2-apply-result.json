@@ -1,0 +1,56 @@
+{
+  "issue_number": 326,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "箇所1のcliToolIdガード条件の補記 - cliToolId==='claude'コンテキスト内でcodex分岐が到達不能だが汎用性維持のためcliToolIdを渡す設計は正しい旨を補記",
+        "section_updated": "3-4 (箇所1設計根拠), 12-2 (実装チェックリスト)",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "4分岐テーブルのMath.max(0, ...)ガード追記 - Codex分岐と通常分岐にMath.max(0, lastCapturedLine)を追記、テストケース#7,#8追加",
+        "section_updated": "3-2 (4分岐テーブル), 6-2 (テストケース), 12-1, 12-5 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-002",
+        "item": "箇所2のstripAnsi未適用が既存バグであることの明記",
+        "section_updated": "3-4 (箇所2注意コメント), 12-3 (実装チェックリスト)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-003",
+        "item": "行番号注記をcheckForResponse()内参照にも適用",
+        "section_updated": "4 (冒頭注記追加)",
+        "status": "reflected"
+      },
+      {
+        "id": "SF-004",
+        "item": "DRY記載を「1か所のロジックを抽出し計3か所で共有」に修正",
+        "section_updated": "9 (DRY欄)",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-326-prompt-response-extraction-design-policy.md",
+  "sections_updated": [
+    "3-2 (4分岐テーブル: SF-001 Math.max追記)",
+    "3-4 箇所1 (MF-001 cliToolIdガード条件補記)",
+    "3-4 箇所2 (SF-002 既存バグ明記)",
+    "4 冒頭 (SF-003 行番号注記追加)",
+    "6-2 (SF-001 テストケース#7,#8追加)",
+    "9 (SF-004 DRY記載修正)",
+    "11 (Stage 2レビュー指摘事項サマリー新設)",
+    "12 (実装チェックリスト更新: セクション番号繰り下げ、Stage 2指摘反映)"
+  ],
+  "timestamp": "2026-02-20T15:00:00Z"
+}

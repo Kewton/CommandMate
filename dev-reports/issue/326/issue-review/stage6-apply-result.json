@@ -1,0 +1,55 @@
+{
+  "issue_number": 326,
+  "iteration": 2,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-20",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "auto-yes-manager.tsへの間接影響の説明を正確化。「DB保存contentの変化によるlastAnsweredPromptKey重複判定への間接影響がある可能性がある」という不正確な記述を、「generatePromptKey()はpromptData.type:promptData.question形式でキーを生成しており、DB保存contentとは独立しているため影響しない」という正確な記述に修正"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "受け入れ条件セクションの追加はNice to Haveであり、修正方針・テスト戦略・影響範囲の記述が十分具体的なため実装者が受け入れ基準を推定可能。前回イテレーションでも同理由で対応見送り"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "方針A/Bの具体的なトレードオフ分析はNice to Haveであり、実装時の詳細検討に委ねる方針で妥当"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 1,
+    "skipped": 2
+  },
+  "changes_made": [
+    {
+      "section": "影響範囲 > 間接影響",
+      "before": "ただし、response-pollerがDB保存するpromptメッセージのcontentが変わる（バッファ全体 -> lastCapturedLine以降）ことで、Auto-Yesの lastAnsweredPromptKey（Issue #306）による重複判定ロジックに間接的影響がある可能性がある。DB保存contentの一貫性を確認すること",
+      "after": "また、Auto-Yesの lastAnsweredPromptKey（Issue #306）による重複判定ロジックにも影響しない。generatePromptKey()（prompt-key.ts 行37-38）はpromptData.type:promptData.question形式でキーを生成しており、DB保存されるcontent（rawContent || cleanContent）とは独立している。pollAutoYes()は独自にtmuxバッファ全体をdetectPrompt()に渡すため、promptData.questionはresponse-pollerの修正による影響を受けない"
+    },
+    {
+      "section": "Note ヘッダー",
+      "before": "Stage 3影響範囲レビュー結果を反映して更新",
+      "after": "Stage 5レビュー結果を反映して更新"
+    },
+    {
+      "section": "レビュー履歴",
+      "before": "(イテレーション2未記載)",
+      "after": "イテレーション 2 (2026-02-20) - Stage 5 レビュー: SF-1の適用内容を追記"
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/326"
+  }
+}

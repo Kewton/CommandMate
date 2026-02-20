@@ -1,0 +1,40 @@
+{
+  "issue_number": 326,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_passing": 3647,
+      "new_tests": 12,
+      "lint_errors": 0,
+      "typescript_errors": 0,
+      "commit": "f88c11b"
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_verified": 7,
+      "criteria_total": 7
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "buildPromptExtractionResult()ヘルパー関数抽出（重複コード排除）",
+        "resolveExtractionStartIndex()のJSDoc充実",
+        "早期return形式でコードの可読性向上",
+        "テストをdescribeブロックで分類（5グループ）",
+        "noPromptFound定数抽出でテストDRY化"
+      ],
+      "commit": "49f9099"
+    },
+    "documents": {
+      "status": "updated",
+      "updated_files": ["CLAUDE.md"]
+    }
+  },
+  "changed_files": [
+    "src/lib/response-poller.ts",
+    "tests/unit/lib/resolve-extraction-start-index.test.ts",
+    "CLAUDE.md"
+  ],
+  "summary": "extractResponse()内のインタラクティブプロンプト検出パスでlastCapturedLine以降のみをレスポンスとして返す修正を実施。resolveExtractionStartIndex()ヘルパー関数を抽出・共通化し、既存の通常レスポンスパスもリファクタリング。箇所2にstripAnsi()を追加しXSSリスクを軽減。"
+}

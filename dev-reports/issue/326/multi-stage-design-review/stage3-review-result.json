@@ -1,0 +1,113 @@
+{
+  "issue_number": 326,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "部分レスポンスパス(L501-533)のstartIndex決定ロジックがスコープ外であることの明記不足",
+        "description": "セクション7-3の「影響なし」リストに部分レスポンスパス(L501-533)が記載されていない。このパスは4分岐ロジックとは異なるstartIndex決定ロジック(partialBufferReset判定、windowSize=80)を使用しており、resolveExtractionStartIndex()による置換対象外であることを明記すべき。Stage 2 C-003でも検討事項として言及されているが、影響範囲セクション(7節)での明示的な除外記載が欠けている。影響分析の網羅性のために必須。",
+        "severity": "medium",
+        "location": "設計書セクション7"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "assistant-response-saver.tsへの間接影響の分析が不足",
+        "description": "セクション7-3でassistant-response-saver.tsは「cleanClaudeResponse/cleanGeminiResponseのみimport」として影響なしと記載しているが、同モジュールのsavePendingAssistantResponse()はresponse-pollerのcheckForResponse()と同一のtmuxバッファに対して独立にDB保存を行うため、extractResponse()の返却値変更がsessionState.lastCapturedLineの更新タイミングを介して間接的にsavePendingAssistantResponse()のduplication check(L270: currentLineCount <= lastCapturedLine)に影響する可能性がある。直接のコード変更はないが、タイミング依存の間接影響として記載を推奨。",
+        "severity": "low",
+        "location": "設計書セクション7-3"
+      },
+      {
+        "id": "SF-002",
+        "title": "checkForResponse内のcleanClaudeResponse/cleanGeminiResponseパスへの影響記載追加",
+        "description": "セクション4ではcheckForResponse内のpromptDetection再検出への影響が分析されているが、promptDetection.isPrompt=falseの場合のnormal responseパス(L641-646)ではresult.responseをcleanClaudeResponse()またはcleanGeminiResponse()に渡す。修正後、result.responseがlastCapturedLine以降に限定されるため、cleanClaudeResponse()内の「最後のユーザープロンプト以降を抽出」ロジック(L149-156)の入力が変わる。結果としてcleanedResponseがより正確になる方向の変化だが、この影響パスの明示が望ましい。",
+        "severity": "low",
+        "location": "設計書セクション4"
+      },
+      {
+        "id": "SF-003",
+        "title": "Codex/Gemini completionパス(L357-484)のstartIndex決定ロジックもリファクタリング対象であることの明示",
+        "description": "セクション3-5では通常レスポンス抽出パス(L364-386)のリファクタリングを記載しているが、このstartIndex決定ロジックはisCodexOrGeminiComplete || isClaudeComplete条件ブロック(L357)内に位置する。すなわちCodex/Geminiの完了パスも同一ロジックを使用しており、resolveExtractionStartIndex()への置換がCodex/Gemini両方にも影響する。影響範囲セクション7-1の変更内容欄でCodex/Geminiへの波及を明記すべき。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "auto-yes-manager.tsとの二重プロンプト検出の整合性",
+        "description": "auto-yes-manager.tsのpollAutoYes()はcaptureSessionOutput()で取得したバッファ全体に対してdetectPrompt()を呼び出す(L529)。一方、response-pollerの修正後はextractResponse()内で部分出力に対するdetectPromptWithOptions()、checkForResponse()で再度部分出力に対するdetectPromptWithOptions()を呼ぶ。両者は独立したパスだが、同一tmuxバッファに対して異なるスコープのプロンプト検出が走ることになる。設計書7-3の「影響なし」記載は正しいが、運用上の整合性として認識しておくべき事項。"
+      },
+      {
+        "id": "C-002",
+        "title": "結合テストでのCodex/Geminiプロンプト検出パスのカバレッジ",
+        "description": "テスト設計(セクション6)ではresolveExtractionStartIndex()のユニットテストと推奨の結合テストを記載しているが、Codex/Geminiのフォールバックプロンプト検出パス(箇所2)がresolveExtractionStartIndex()を使用した際の動作確認テストが明示されていない。箇所2はcliToolIdを問わずフォールバックとして到達するため、Codex/Geminiでの結合テストも検討すべき。"
+      },
+      {
+        "id": "C-003",
+        "title": "extractResponse()の返却値lineCountフィールドへの影響",
+        "description": "箇所1・箇所2の修正後もlineCount: totalLinesは変更されない。checkForResponse()ではresult.lineCount(L593, L599, L622, L694)をsessionStateの更新に使用しており、この値が不変であることは正しいが、影響範囲分析としてlineCountが変更されない旨を明記するとより完全になる。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/lib/response-poller.ts",
+        "changes": "resolveExtractionStartIndex()追加、箇所1/箇所2修正、通常レスポンスパスリファクタリング",
+        "risk": "medium",
+        "verified": true
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "src/lib/response-poller.ts (checkForResponse)",
+        "impact": "result.responseの内容変更によりpromptDetection再検出・cleanClaudeResponse/cleanGeminiResponseの入力が変わる",
+        "risk": "low",
+        "documented_in_design": true
+      },
+      {
+        "file": "src/lib/assistant-response-saver.ts",
+        "impact": "sessionState.lastCapturedLine更新タイミングの間接影響。直接のコード変更なし",
+        "risk": "low",
+        "documented_in_design": false
+      }
+    ],
+    "no_impact_confirmed": [
+      "src/lib/auto-yes-manager.ts",
+      "src/lib/session-cleanup.ts",
+      "src/lib/prompt-detector.ts",
+      "src/lib/cli-patterns.ts",
+      "src/lib/cli-tools/manager.ts",
+      "src/app/api/worktrees/[id]/send/route.ts",
+      "src/app/api/worktrees/[id]/respond/route.ts",
+      "src/app/api/worktrees/[id]/start-polling/route.ts",
+      "src/lib/status-detector.ts"
+    ],
+    "external_api_changes": "none",
+    "backward_compatibility": "fully_compatible"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-326-prompt-response-extraction-design-policy.md",
+    "src/lib/response-poller.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/respond/route.ts",
+    "tests/unit/lib/response-poller.test.ts"
+  ],
+  "timestamp": "2026-02-20T12:00:00Z"
+}

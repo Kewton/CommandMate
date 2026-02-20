@@ -1,0 +1,229 @@
+{
+  "issue_number": 326,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "stage": 7,
+  "review_date": "2026-02-20",
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 2
+  },
+  "previous_findings_review": {
+    "stage3_findings": [
+      {
+        "id": "MF-1",
+        "original_issue": "auto-yes-manager.tsのpollAutoYes()が影響範囲に含まれていない",
+        "status": "resolved",
+        "verification": "「間接影響」サブセクションにauto-yes-manager.tsが追記済み。Stage 5のSF-1指摘（lastAnsweredPromptKeyの説明不正確）も反映済み。現在の記述は「pollAutoYes()はtmuxバッファを独自にキャプチャしてdetectPrompt()を直接呼び出しており、extractResponse()を経由しないためコード変更は不要。Auto-Yesのlastansweredpromptkey(Issue #306)による重複判定ロジックにも影響しない。generatePromptKey()(prompt-key.ts 行37-38)はpromptData.type:promptData.question形式でキーを生成しており、DB保存されるcontent(rawContent || cleanContent)とは独立している」と正確に記載されている。実コード（auto-yes-manager.ts L529, L539、prompt-key.ts L37-38）と完全一致"
+      },
+      {
+        "id": "SF-1",
+        "original_issue": "extractResponse()のプロンプト検出パスに対するテストが存在しない",
+        "status": "resolved",
+        "verification": "「テスト戦略」サブセクションで対応済み。(A)ヘルパー関数抽出、(B)結合テスト、(C)テスト用exportの3戦略と(A)推奨が明記。影響範囲の「テスト影響」テーブルでも新規テスト追加推奨が記載されている"
+      },
+      {
+        "id": "SF-2",
+        "original_issue": "checkForResponse()のpromptDetection再検出でのrawContent影響が未分析",
+        "status": "resolved",
+        "verification": "「checkForResponse内のpromptDetection再検出への影響（SF-2）」セクション内に「rawContentへの影響」として詳細に追記済み。prompt-detector.ts行583のtruncateRawContent()の入力がlastCapturedLine以降に縮小する点、Issue #235設計意図との整合性確認要の点が正確に記載されている"
+      },
+      {
+        "id": "SF-3",
+        "original_issue": "assistant-response-saver.tsのimportへの影響が未記載",
+        "status": "resolved",
+        "verification": "「影響なし」サブセクションにassistant-response-saver.tsが明記済み。「cleanClaudeResponse/cleanGeminiResponseをimportしているが、これらはexport関数であり今回の修正対象（内部関数extractResponse()）とは無関係。シグネチャ・動作に変更なし」と正確に記載"
+      },
+      {
+        "id": "NTH-1",
+        "original_issue": "テスト変更が必要なファイル一覧がIssueに未記載",
+        "status": "resolved",
+        "verification": "「テスト影響」テーブルが影響範囲セクションに追加済み。response-poller.test.ts（変更不要/新規テスト追加推奨）、prompt-detector.test.ts（変更不要）、assistant-response-saver.test.ts（変更不要）の3ファイルが記載。ただし、response-pollerをモックしているテストファイル2件（tests/unit/session-cleanup.test.ts、tests/unit/cli-tools/manager-stop-pollers.test.ts）はテーブルに含まれていない。これらはstopPollingのみをモックしており今回の修正対象外のため、変更不要であることは自明だが、NTH-1として記載推奨"
+      },
+      {
+        "id": "NTH-2",
+        "original_issue": "DB保存済みメッセージへの影響が未記載",
+        "status": "resolved",
+        "verification": "「DB保存データへの影響」サブセクションが追加済み。content長の縮小が期待された動作改善であること、DBマイグレーションや移行処理は不要であることが明記されている"
+      }
+    ],
+    "stage5_findings": [
+      {
+        "id": "SF-1",
+        "original_issue": "auto-yes-manager.tsへの間接影響の説明で、lastAnsweredPromptKeyの重複判定ロジックへの影響メカニズムの記述が不正確",
+        "status": "resolved",
+        "verification": "Issue本文の「間接影響」セクションが更新済み。変更前は「DB保存contentの変化によるlastAnsweredPromptKey重複判定への間接影響を確認する必要がある」という不正確な記述だったが、変更後は「generatePromptKey()(prompt-key.ts 行37-38)はpromptData.type:promptData.question形式でキーを生成しており、DB保存されるcontent(rawContent || cleanContent)とは独立している。pollAutoYes()は独自にtmuxバッファ全体をdetectPrompt()に渡すため、promptData.questionはresponse-pollerの修正による影響を受けない」と正確に修正されている。実コードと照合: (1) auto-yes-manager.ts L529: detectPrompt(cleanOutput, promptOptions)でtmuxバッファ全体を入力、(2) auto-yes-manager.ts L539: generatePromptKey(promptDetection.promptData)でpromptData由来のキー生成、(3) prompt-key.ts L38: `${promptData.type}:${promptData.question}`でDB保存contentとは無関係 -- 全て一致"
+      },
+      {
+        "id": "NTH-1",
+        "original_issue": "受け入れ条件セクションがIssue本文に明示されていない",
+        "status": "not_addressed",
+        "verification": "Stage 1/5を通じて継続的にNice to Haveとして指摘されている受け入れ条件の明示的セクションは依然として追加されていない。ただし修正方針・テスト戦略・影響範囲の記述が十分に具体的であり、実装者が受け入れ基準を推定可能。Nice to Haveとして再掲"
+      },
+      {
+        "id": "NTH-2",
+        "original_issue": "方針A/Bの具体的なトレードオフ分析が記載されていない",
+        "status": "not_addressed",
+        "verification": "方針Aと方針Bの選択肢は明記されているが、具体的なトレードオフ分析は追加されていない。実装時の詳細検討に委ねる方針は妥当であり、NTH（Nice to Have）として許容範囲"
+      }
+    ]
+  },
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "テスト影響テーブルにresponse-pollerをモックしているテストファイル2件が含まれていない",
+        "location": "## 影響範囲 > テスト影響 テーブル",
+        "recommendation": "tests/unit/session-cleanup.test.ts と tests/unit/cli-tools/manager-stop-pollers.test.ts は response-poller の stopPolling をモックしている。今回の修正（extractResponse内部の変更）はstopPollingのAPIに影響しないため変更不要だが、テスト影響テーブルに「変更不要」として追記すると網羅性が向上する。ただし、これらはstopPollingのみをモックしておりextractResponseとは無関係であることが自明であるため、優先度は低い"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "受け入れ条件セクションがIssue本文に明示されていない（Stage 1/5からの継続指摘）",
+        "location": "Issue本文（セクション未存在）",
+        "recommendation": "Stage 1（NTH-1）、Stage 5（NTH-1）から継続。修正方針・テスト戦略の記述から受け入れ基準は推定可能であるため、明示的セクションの追加は必須ではない。3回の指摘を経ても追加されていないことから、著者の意図的な判断と判断し、本件はこれ以上エスカレーションしない"
+      }
+    ]
+  },
+  "impact_scope_verification": {
+    "five_category_structure": {
+      "status": "PASS",
+      "detail": "影響範囲セクションが5分類（直接影響・間接影響・影響なし・テスト影響・DB保存データへの影響）で構造化されている。各カテゴリに適切なファイルと根拠が記載されている"
+    },
+    "direct_impact": {
+      "status": "PASS",
+      "detail": "直接影響の4項目（extractResponse箇所1/箇所2、checkForResponse再検出、History画面表示、全インタラクティブプロンプトケース）が正確に記載。extractResponse()の2箇所（行326-341, 行487-499）とcheckForResponse()のpromptDetection再検出（行605付近）が修正対象/影響対象として適切に特定されている",
+      "files": [
+        "src/lib/response-poller.ts (extractResponse L326-341, L487-499)",
+        "src/lib/response-poller.ts (checkForResponse L605)"
+      ]
+    },
+    "indirect_impact": {
+      "status": "PASS",
+      "detail": "間接影響のauto-yes-manager.tsの記述がStage 5のSF-1指摘を正確に反映。「コード変更不要」の結論に加え、lastAnsweredPromptKeyがgeneratePromptKey()によるtype:question形式でありDB保存contentとは独立している点が明記されている。実コードと照合し正確性を確認済み",
+      "files": [
+        "src/lib/auto-yes-manager.ts (pollAutoYes L529, generatePromptKey L539)"
+      ]
+    },
+    "no_impact": {
+      "status": "PASS",
+      "detail": "影響なしファイル10件が列挙されている。各ファイルについて影響なしの理由（export関数のみのimport、API変更なし、response-pollerをimportしていない等）が明記。実際のimportを確認し全て正確。response-pollerの全importers6件（session-cleanup.ts, cli-tools/manager.ts, assistant-response-saver.ts, respond/route.ts, send/route.ts, start-polling/route.ts）が網羅されている",
+      "files": [
+        "src/lib/assistant-response-saver.ts",
+        "src/lib/session-cleanup.ts",
+        "src/lib/cli-tools/manager.ts",
+        "src/app/api/worktrees/[id]/respond/route.ts",
+        "src/app/api/worktrees/[id]/send/route.ts",
+        "src/app/api/worktrees/[id]/start-polling/route.ts",
+        "src/lib/prompt-detector.ts",
+        "src/lib/cli-patterns.ts",
+        "src/lib/status-detector.ts"
+      ]
+    },
+    "test_impact": {
+      "status": "PASS_WITH_NOTE",
+      "detail": "テスト影響テーブルに主要3ファイル（response-poller.test.ts, prompt-detector.test.ts, assistant-response-saver.test.ts）が記載されている。ただしresponse-pollerをモックしているテスト2件（session-cleanup.test.ts, manager-stop-pollers.test.ts）はテーブルに含まれていない。これらはstopPollingのみをモックしており修正対象外のため実質的な影響はないが、NTH-1として記載推奨",
+      "files": [
+        "tests/unit/lib/response-poller.test.ts (テーブル記載あり)",
+        "tests/unit/prompt-detector.test.ts (テーブル記載あり)",
+        "src/lib/__tests__/assistant-response-saver.test.ts (テーブル記載あり)",
+        "tests/unit/session-cleanup.test.ts (テーブル記載なし - NTH-1)",
+        "tests/unit/cli-tools/manager-stop-pollers.test.ts (テーブル記載なし - NTH-1)"
+      ]
+    },
+    "db_impact": {
+      "status": "PASS",
+      "detail": "「DB保存データへの影響」サブセクションが正確に記載。新規promptメッセージのcontent長がバッファ全体からlastCapturedLine以降に縮小すること、既存データとの一貫性変化は期待された動作改善であること、DBマイグレーション不要であることが明記されている"
+    }
+  },
+  "new_content_accuracy_check": {
+    "stage5_sf1_fix_accuracy": {
+      "status": "PASS",
+      "detail": "Stage 5のSF-1で指摘されたauto-yes-manager.tsの間接影響記述が正確に修正されている。以下の3点を実コードと照合して検証: (1) auto-yes-manager.ts L529: detectPrompt(cleanOutput, promptOptions)でtmuxバッファ全体を入力 -- 一致、(2) auto-yes-manager.ts L539: generatePromptKey(promptDetection.promptData) -- 一致、(3) prompt-key.ts L37-38: `${promptData.type}:${promptData.question}` -- 一致。DB保存content(rawContent || cleanContent)との独立性の説明は技術的に正確"
+    },
+    "line_number_accuracy": {
+      "status": "PASS",
+      "detail": "Issue記載の全行番号を実コードと再照合: 箇所1=行326-341(実326-341), 箇所2=行487-499(実487-499), startIndex 4分岐=行364-386(実364-386), checkForResponse再検出=行605(実605), prompt-detector rawContent=行583(実583), auto-yes-manager detectPrompt=行529(実529), generatePromptKey=行539(実539), prompt-key.ts=行37-38(実37-38)。全て一致"
+    },
+    "review_history_accuracy": {
+      "status": "PASS",
+      "detail": "レビュー履歴セクション（イテレーション1 Stage 1, イテレーション1 Stage 3, イテレーション2 Stage 5）が正確に記載されている。各ステージの指摘IDと対応内容が実際のレビュー結果と一致"
+    },
+    "codex_gemini_impact_consistency": {
+      "status": "PASS",
+      "detail": "影響範囲に明示的なCodex/Gemini影響分析は記載されていないが、箇所1がcliToolId === 'claude'条件で限定されていること、箇所2がCLIツール共通であることは修正対象のコードブロックから読み取れる。Codex/Geminiへの影響が軽微（箇所2に到達する前に通常パスで検出される）であることは暗黙的に正しい"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "326-341",
+      "relevance": "箇所1: Claude早期プロンプト検出 - Issue記載と実コード一致"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "487-499",
+      "relevance": "箇所2: フォールバックプロンプト検出 - Issue記載と実コード一致"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "604-627",
+      "relevance": "checkForResponse内のpromptDetection再検出 - Issue記載と実コード一致"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "364-386",
+      "relevance": "通常レスポンスのstartIndex決定ロジック4分岐 - Issue記載と実コード一致"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "529, 539",
+      "relevance": "pollAutoYes()のdetectPrompt呼び出し・generatePromptKey()呼び出し - Stage 5 SF-1修正後の記述と実コード一致"
+    },
+    {
+      "file": "src/lib/prompt-key.ts",
+      "lines": "37-38",
+      "relevance": "generatePromptKey()の実装 - type:question形式でDB保存contentとは無関係"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "583",
+      "relevance": "rawContent生成（truncateRawContent） - Issue記載と実コード一致"
+    },
+    {
+      "file": "src/lib/assistant-response-saver.ts",
+      "lines": "24",
+      "relevance": "cleanClaudeResponse/cleanGeminiResponseのimport - 影響なしとしてIssueに正確に記載"
+    },
+    {
+      "file": "tests/unit/lib/response-poller.test.ts",
+      "relevance": "既存テスト - extractResponse()テスト0件。テスト追加推奨がIssueに記載"
+    },
+    {
+      "file": "tests/unit/session-cleanup.test.ts",
+      "relevance": "response-pollerのstopPollingをモック - テスト影響テーブル未記載だが実質影響なし"
+    },
+    {
+      "file": "tests/unit/cli-tools/manager-stop-pollers.test.ts",
+      "relevance": "response-pollerのstopPollingをモック - テスト影響テーブル未記載だが実質影響なし"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "response-poller.ts, auto-yes-manager.ts, prompt-detector.ts, prompt-key.tsの記述との整合性確認"
+    }
+  ],
+  "overall_assessment": {
+    "stage3_must_fix_resolution": "FULLY_RESOLVED - Stage 3のMF-1（auto-yes-manager.ts記述欠如）はStage 4で影響範囲に追記され、Stage 6でStage 5 SF-1の指摘（lastAnsweredPromptKeyの説明不正確さ）も反映。現在の記述は実コードと完全一致",
+    "five_category_completeness": "PASS - 5分類構造（直接影響・間接影響・影響なし・テスト影響・DB保存データへの影響）が全て存在し、各カテゴリのファイル一覧と根拠が適切。response-pollerの全importers6件が網羅されている",
+    "remaining_should_fix": "NONE - Stage 3/5の全Should Fix指摘（計4件: SF-1テスト戦略、SF-2 rawContent影響、SF-3 assistant-response-saver.ts影響なし記載、Stage 5 SF-1 auto-yes説明修正）が全て解決済み",
+    "remaining_nice_to_have": "2件 - (1) テスト影響テーブルへのモックテスト2件追加、(2) 受け入れ条件セクションの明示的追加。いずれも実質的な影響が低く、Issue品質としては十分",
+    "new_content_accuracy": "PASS - Stage 5/6で追加・修正された全記述を実コードと照合し、不整合・不正確な部分なし。行番号、ロジック説明、影響判定が全て正確",
+    "overall_quality": "HIGH - 影響範囲分析が包括的かつ正確。Must Fix 0件、Should Fix 0件。Issueは実装に必要な情報を十分に提供しており、レビュー完了と判断"
+  }
+}

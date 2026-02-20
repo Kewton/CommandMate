@@ -1,0 +1,28 @@
+{
+  "issue_number": 326,
+  "feature_summary": "インタラクティブプロンプト検出時にtmuxバッファ全体がレスポンスとして保存されるバグを修正。lastCapturedLine以降の行のみをレスポンスとして返すようextractResponse()を修正した。",
+  "acceptance_criteria": [
+    "インタラクティブプロンプト検出時に、AssistantメッセージにはlastCapturedLine以降の行のみが含まれる",
+    "前の会話の内容がAssistantメッセージに混入しない",
+    "箇所1（Claude早期プロンプト検出）と箇所2（フォールバック）の両方で修正が適用される",
+    "箇所2のレスポンスにもstripAnsi()が適用され、ANSIコードがDB保存されない",
+    "resolveExtractionStartIndex()が@internal exportとして実装されている",
+    "既存の通常レスポンス抽出パスの動作が変わらない（全既存テストパス）",
+    "新規テスト（resolve-extraction-start-index）が12件すべてパスしている",
+    "ESLintエラーが0件である",
+    "TypeScriptエラーが0件である"
+  ],
+  "test_scenarios": [
+    "シナリオ1: resolveExtractionStartIndex()が@internal exportとしてsrc/lib/response-poller.tsに存在する",
+    "シナリオ2: 箇所1のコード（if cliToolId === 'claude'ブロック）がlines.slice(startIndex)を使用している",
+    "シナリオ3: 箇所2のコードがlines.slice(startIndex)を使用し、stripAnsi()が適用されている",
+    "シナリオ4: 通常レスポンスパスがresolveExtractionStartIndex()呼び出しにリファクタリングされている",
+    "シナリオ5: tests/unit/lib/resolve-extraction-start-index.test.tsが存在し全テストパス",
+    "シナリオ6: 全既存ユニットテスト（3647件）がパス",
+    "シナリオ7: npm run lintがエラー0件で完了"
+  ],
+  "implementation_files": [
+    "src/lib/response-poller.ts",
+    "tests/unit/lib/resolve-extraction-start-index.test.ts"
+  ]
+}

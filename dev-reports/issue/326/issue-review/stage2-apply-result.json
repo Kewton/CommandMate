@@ -1,0 +1,53 @@
+{
+  "issue_number": 326,
+  "iteration": 1,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-20",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "status": "applied",
+        "change_summary": "箇所2のstripAnsi未適用について補足セクションを追加。箇所1のコメントにも「stripAnsi適用あり」を明記し、箇所2との差異を明確化。修正時にstripAnsi適用の要否判断が必要である旨を記載"
+      },
+      {
+        "id": "SF-2",
+        "status": "applied",
+        "change_summary": "修正方針セクションに「checkForResponse内のpromptDetection再検出への影響」サブセクションを追加。result.responseが部分出力になった場合のdetectPromptWithOptions動作確認観点、lastCapturedLineが質問文途中にあるエッジケース、バッファスクロールによる分断可能性を明記"
+      },
+      {
+        "id": "SF-3",
+        "status": "applied",
+        "change_summary": "修正方針セクションに「startIndex決定ロジックの方針」サブセクションを追加。通常レスポンス抽出の4分岐（bufferWasReset/codex/バッファスクロール/通常）を列挙し、方針A（同一ロジック再利用）と方針B（簡略版）の2案を提示"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "status": "skipped",
+        "reason": "受け入れ条件の追加はStage 1のShould Fix対応を優先し、次回イテレーションで検討"
+      },
+      {
+        "id": "NTH-2",
+        "status": "skipped",
+        "reason": "テスト計画の追加はStage 1のShould Fix対応を優先し、次回イテレーションで検討"
+      },
+      {
+        "id": "NTH-3",
+        "status": "skipped",
+        "reason": "行番号の参照に関数名/コメントマーカーを併記する対応は部分的に実施済み（箇所1/箇所2のコメントマーカーを追記）。完全対応は次回イテレーションで検討"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 3,
+    "skipped": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/326"
+  }
+}

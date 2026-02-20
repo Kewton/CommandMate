@@ -1,0 +1,71 @@
+{
+  "issue_number": 326,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "item": "部分レスポンスパス(L501-533)のstartIndex決定ロジックがスコープ外であることの明記不足",
+        "section_updated": "7-4 (新設: 明示的なスコープ除外)",
+        "status": "reflected",
+        "detail": "セクション7-4を新設し、部分レスポンスパスがresolveExtractionStartIndex()の置換対象外であることを明示。独自のstartIndex決定ロジック(partialBufferReset判定、windowSize=80)との差異を記載。実装チェックリスト13-4および13-6にも確認項目を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "item": "assistant-response-saver.tsへの間接影響の分析不足",
+        "section_updated": "7-3",
+        "status": "reflected",
+        "detail": "セクション7-3のassistant-response-saver.tsエントリに、savePendingAssistantResponse()のduplication checkがlastCapturedLine更新タイミングを介して間接的に影響を受ける可能性を補記。実装チェックリスト13-6に動作確認項目を追加。"
+      },
+      {
+        "id": "SF-002",
+        "item": "checkForResponse内のcleanClaudeResponse/cleanGeminiResponseパスへの影響記載追加",
+        "section_updated": "4-0 (新設)",
+        "status": "reflected",
+        "detail": "セクション4-0を新設し、normal responseパスでresult.responseが部分出力に変わることによるcleanClaudeResponse()/cleanGeminiResponse()への入力変更の影響パスを明記。結果は品質向上方向の変化であることを記載。実装チェックリスト13-6に確認項目を追加。"
+      },
+      {
+        "id": "SF-003",
+        "item": "Codex/Gemini completionパスへの影響明示",
+        "section_updated": "7-1",
+        "status": "reflected",
+        "detail": "セクション7-1の変更内容欄にClaude/Codex/Gemini全completionパスへの影響を明記。セクション7-1直後に注記を追加し、isCodexOrGeminiComplete || isClaudeComplete条件ブロック内に位置する旨を説明。実装チェックリスト13-4に確認項目を追加。"
+      }
+    ]
+  },
+  "skipped": [],
+  "consider_items_recorded": [
+    {
+      "id": "C-001",
+      "item": "auto-yes-manager.tsとの二重プロンプト検出の整合性",
+      "recorded_in": "12-3"
+    },
+    {
+      "id": "C-002",
+      "item": "Codex/Geminiプロンプト検出パスの結合テストカバレッジ",
+      "recorded_in": "12-3, 13-5"
+    },
+    {
+      "id": "C-003",
+      "item": "lineCountフィールドの不変性明記",
+      "recorded_in": "12-3"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-326-prompt-response-extraction-design-policy.md",
+  "sections_updated": [
+    "4-0 (新設: cleanClaudeResponse/cleanGeminiResponseへの入力変更の影響)",
+    "7-1 (変更内容欄更新 + Codex/Gemini影響注記追加)",
+    "7-3 (assistant-response-saver.ts間接影響補記)",
+    "7-4 (新設: 明示的なスコープ除外)",
+    "12 (新設: Stage 3レビュー指摘事項サマリー)",
+    "13-4 (実装チェックリスト: Codex/Gemini影響確認・部分レスポンスパス除外確認追加)",
+    "13-5 (実装チェックリスト: Codex/Gemini結合テスト検討追加)",
+    "13-6 (新設: 影響確認チェックリスト)"
+  ],
+  "timestamp": "2026-02-20T12:00:00Z"
+}

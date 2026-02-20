@@ -1,0 +1,79 @@
+{
+  "issue_number": 326,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘対応",
+  "status": "completed",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "title": "resolveExtractionStartIndex内のbufferWasReset再計算が設計書に記載なし",
+        "applied": true,
+        "applied_sections": ["3-3 (JSDoc更新)", "3-3-1 (新規サブセクション)", "9 (SRP欄更新)", "10-1 (サマリー)", "11-1 (チェックリスト)"],
+        "description": "ヘルパー関数内部でbufferWasReset = lastCapturedLine >= totalLines || bufferResetを計算する責務を明記。呼び出し側はbufferResetのみ渡す設計として明確化。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "title": "findRecentUserPromptIndexをコールバック引数とする設計選択理由の補記",
+        "applied": true,
+        "applied_sections": ["3-3-2 (新規サブセクション)", "9 (KISS欄更新)", "10-2 (サマリー)"],
+        "description": "コールバック引数 vs 依存値直接渡しのトレードオフ比較表を追加。引数数抑制・責務分離・テスト容易性の観点からコールバック引数を選択した理由を記載。"
+      },
+      {
+        "id": "SF-002",
+        "title": "行番号参照に設計時点スナップショット注記追加",
+        "applied": true,
+        "applied_sections": ["3-4冒頭 (注記ブロック追加)", "10-2 (サマリー)"],
+        "description": "セクション3-4冒頭に行番号が設計時点のスナップショットである旨の注記を追加。実装時はコードパターンで特定するよう記載。"
+      },
+      {
+        "id": "SF-003",
+        "title": "箇所2のstripAnsi追加がYAGNI例外であることの補記",
+        "applied": true,
+        "applied_sections": ["9 (YAGNI欄更新)", "10-2 (サマリー)", "11-3 (チェックリスト)"],
+        "description": "YAGNI欄に「箇所2のstripAnsi追加はYAGNI例外として一貫性確保のために意識的に含める」旨を補記。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "C-001",
+        "title": "Math.max(0, lastCapturedLine)ガード",
+        "applied": false,
+        "recorded": true,
+        "note": "セクション10-3に記録。実装チェックリスト11-5に推奨テストケースとして記載。"
+      },
+      {
+        "id": "C-002",
+        "title": "checkForResponse再検出の部分出力での動作保証",
+        "applied": false,
+        "recorded": true,
+        "note": "セクション10-3に記録。実装チェックリスト11-5に推奨結合テストとして記載。"
+      },
+      {
+        "id": "C-003",
+        "title": "@internal exportの命名規約",
+        "applied": false,
+        "recorded": true,
+        "note": "セクション10-3に記録。現命名が適切であることを確認。"
+      }
+    ]
+  },
+  "updated_files": [
+    "dev-reports/design/issue-326-prompt-response-extraction-design-policy.md"
+  ],
+  "new_sections_added": [
+    "3-3-1: bufferWasReset再計算の責務境界（MF-001対応）",
+    "3-3-2: findRecentUserPromptIndexをコールバック引数とする設計選択理由（SF-001対応）",
+    "10: Stage 1 レビュー指摘事項サマリー",
+    "11: 実装チェックリスト"
+  ],
+  "modified_sections": [
+    "3-3: ヘルパー関数抽出（JSDoc更新）",
+    "3-4: 箇所別の修正設計（行番号注記追加）",
+    "9: CLAUDE.md準拠確認（SRP/KISS/YAGNI欄更新）"
+  ],
+  "source_code_modified": false,
+  "timestamp": "2026-02-20T12:30:00Z"
+}

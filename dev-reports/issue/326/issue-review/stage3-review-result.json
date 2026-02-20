@@ -1,0 +1,261 @@
+{
+  "issue_number": 326,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "stage": 3,
+  "review_date": "2026-02-20",
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  },
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "影響ファイル",
+        "issue": "Issueの影響範囲にauto-yes-manager.tsのpollAutoYes()が含まれていない",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "auto-yes-manager.tsのpollAutoYes()（行529付近）はtmuxバッファ全体に対してdetectPrompt()を直接呼び出している。response-poller.tsの修正（extractResponseのレスポンス切り出し）はauto-yes-manager.tsには直接影響しないが、プロンプト検出時のDB保存contentが変わることにより、Auto-Yesが応答したプロンプトのメッセージ内容と、response-pollerが保存するメッセージ内容の整合性を確認する必要がある。影響範囲セクションにauto-yes-manager.tsを追加し、「Auto-YesはextractResponseを経由しないため直接影響なし。ただしDB保存contentの一貫性は確認要」と記載すべき",
+        "evidence": "auto-yes-manager.ts L529: `const promptDetection = detectPrompt(cleanOutput, promptOptions);` - Auto-Yesはresponse-pollerのextractResponse()を使わず、独自にtmuxバッファをキャプチャしてdetectPrompt()を呼ぶ。response-pollerが保存するpromptメッセージのcontentが変わる（バッファ全体 -> lastCapturedLine以降）ことで、Auto-YesがlastAnsweredPromptKey（Issue #306）で重複判定するロジックに間接的影響がある可能性がある"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "テスト範囲",
+        "issue": "extractResponse()のプロンプト検出パスに対するテストが存在しない",
+        "location": "## 影響範囲 セクション（テスト範囲の不在）",
+        "recommendation": "現在のテスト（tests/unit/lib/response-poller.test.ts）はcleanClaudeResponse()とrawContent fallbackロジックのみをカバーしている。修正対象であるextractResponse()のプロンプト検出パス（箇所1: Claude早期プロンプト検出、箇所2: フォールバックプロンプト検出）に対するテストが存在しない。extractResponse()は非exportの内部関数であるため、以下のいずれかのテスト戦略をIssueに記載すべき: (A) startIndex決定ロジックをヘルパー関数として抽出・exportしてユニットテスト、(B) checkForResponse()レベルの結合テスト（モック付き）、(C) extractResponseをテスト用にexportする",
+        "evidence": "tests/unit/lib/response-poller.test.ts: cleanClaudeResponse()テスト3件 + rawContent fallbackテスト2件のみ。extractResponse()テストは0件。extractResponseはfunction宣言（非export）のため直接テスト不可"
+      },
+      {
+        "id": "SF-2",
+        "category": "依存関係",
+        "issue": "checkForResponse()のpromptDetection再検出（行605）でのrawContent影響が未分析",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "checkForResponse()のL605で`detectPromptWithOptions(result.response, cliToolId)`を呼び出し、その結果のrawContentをDB保存（L615: `promptDetection.rawContent || promptDetection.cleanContent`）している。修正後はresult.responseがlastCapturedLine以降の部分出力になるため、detectPromptが返すrawContent（prompt-detector.ts L583: `truncateRawContent(output.trim())`）もlastCapturedLine以降のみとなる。これはIssue #235で意図した「完全なプロンプト出力をDB保存」の設計と整合するか確認が必要。影響範囲に「rawContentの内容がバッファ全体からlastCapturedLine以降に縮小する」点を明記すべき",
+        "evidence": "prompt-detector.ts L583: rawContentはdetectPrompt()に渡されたoutputを元にtruncateRawContent()で生成される。response-poller.ts L605: checkForResponse()はresult.responseを再度detectPromptWithOptions()に渡す。Issue #235の設計意図「complete prompt output」がlastCapturedLine以降に含まれているかの確認が必要"
+      },
+      {
+        "id": "SF-3",
+        "category": "影響ファイル",
+        "issue": "assistant-response-saver.tsのcleanClaudeResponse/cleanGeminiResponse importへの影響が未記載",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "assistant-response-saver.tsはresponse-poller.tsからcleanClaudeResponse, cleanGeminiResponseをimportしている（L24）。今回の修正はextractResponse()内部の変更であり、これらのexport関数のシグネチャ・動作は変更されないため破壊的変更はない。しかし影響範囲セクションに「assistant-response-saver.ts - 影響なし（cleanClaudeResponse/cleanGeminiResponseは変更対象外）」と明記することで、レビュー者の確認工数を削減できる",
+        "evidence": "assistant-response-saver.ts L24: `import { cleanClaudeResponse, cleanGeminiResponse } from './response-poller';` - export関数の依存。extractResponse()は非exportのため直接影響はないが、明示的な除外記載が有用"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "テスト範囲",
+        "issue": "テスト変更が必要なファイル一覧がIssueに未記載",
+        "location": "## 影響範囲 セクション（テスト関連の不在）",
+        "recommendation": "以下のテストファイルへの影響を記載: (1) tests/unit/lib/response-poller.test.ts - extractResponseプロンプト検出パスの新規テスト追加（推奨）、(2) tests/unit/prompt-detector.test.ts - 変更不要（prompt-detector自体に変更なし）、(3) src/lib/__tests__/assistant-response-saver.test.ts - 変更不要（import先のexport関数に変更なし）"
+      },
+      {
+        "id": "NTH-2",
+        "category": "移行考慮",
+        "issue": "DB保存済みメッセージへの影響が未記載",
+        "location": "## 影響範囲 セクション",
+        "recommendation": "修正後、新しく保存されるpromptメッセージのcontent長が短くなる（バッファ全体 -> lastCapturedLine以降）。既にDBに保存されている既存のpromptメッセージ（バッファ全体を含むもの）との表示上の一貫性が変わるが、これは期待された動作改善であり移行処理は不要であることを明記すると良い"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/lib/response-poller.ts",
+        "function": "extractResponse()",
+        "change_type": "modify",
+        "description": "箇所1（Claude早期プロンプト検出、行328-341）と箇所2（フォールバックプロンプト検出、行487-499）のレスポンス返却ロジックをlastCapturedLine以降に限定",
+        "breaking_change": false
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "function": "checkForResponse()",
+        "change_type": "indirect",
+        "description": "extractResponse()の返すresult.responseが変更されるため、L605のdetectPromptWithOptions再検出の入力が変わる。プロンプト検出精度とrawContentの内容に影響",
+        "breaking_change": false
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "src/lib/auto-yes-manager.ts",
+        "function": "pollAutoYes()",
+        "change_type": "none",
+        "description": "extractResponseを使わず独自にtmuxバッファをキャプチャしてdetectPrompt()を呼ぶため、コード変更は不要。ただしDB保存contentの変化によるlastAnsweredPromptKey重複判定への間接影響を確認要",
+        "breaking_change": false
+      },
+      {
+        "file": "src/lib/assistant-response-saver.ts",
+        "function": "cleanCliResponse(), savePendingAssistantResponse()",
+        "change_type": "none",
+        "description": "cleanClaudeResponse/cleanGeminiResponseをimportしているが、これらのexport関数に変更はない",
+        "breaking_change": false
+      },
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "function": "cleanupWorktreeSessions()",
+        "change_type": "none",
+        "description": "stopPollingをimportしているが、startPolling/stopPollingのAPI変更なし",
+        "breaking_change": false
+      },
+      {
+        "file": "src/lib/cli-tools/manager.ts",
+        "function": "stopPollers()",
+        "change_type": "none",
+        "description": "stopPollingをimportしているが、API変更なし",
+        "breaking_change": false
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/respond/route.ts",
+        "change_type": "none",
+        "description": "startPollingをimportしているが、API変更なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/send/route.ts",
+        "change_type": "none",
+        "description": "startPollingをimportしているが、API変更なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/start-polling/route.ts",
+        "change_type": "none",
+        "description": "startPollingをimportしているが、API変更なし"
+      }
+    ],
+    "unaffected_modules": [
+      {
+        "file": "src/lib/prompt-detector.ts",
+        "reason": "prompt-detectorの内部ロジック・インターフェースに変更なし。呼び出し元（response-poller）が渡す入力が変わるのみ"
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "reason": "detectPromptWithOptions, stripAnsi, getCliToolPatternsのAPI/動作に変更なし"
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "reason": "response-pollerをimportしていない。detectPromptを独自に呼び出すが、影響なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "reason": "response-pollerをimportしていない。detectPromptを独自に呼び出すが、影響なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "reason": "response-pollerをimportしていない。detectPromptを独自に呼び出すが、影響なし"
+      }
+    ],
+    "codex_gemini_impact": {
+      "codex": {
+        "affected": true,
+        "description": "箇所2（フォールバックプロンプト検出）はcliToolIdに関係なく実行される。Codex CLIでプロンプト検出パスに到達するケースがある場合、同様にlastCapturedLine以降への切り出しが適用される。ただしCodexは通常、プロンプトパターン（isCodexOrGeminiComplete、行354）で先に検出されるため、箇所2に到達する頻度は低い",
+        "risk": "low"
+      },
+      "gemini": {
+        "affected": true,
+        "description": "箇所2（フォールバックプロンプト検出）はcliToolIdに関係なく実行される。ただしGeminiはone-shot実行モードのため、インタラクティブプロンプトが発生する可能性は極めて低い。また箇所1（Claude早期プロンプト検出）はcliToolId === 'claude'条件で限定されておりGeminiには影響しない",
+        "risk": "negligible"
+      }
+    },
+    "performance_risk": {
+      "risk_level": "negligible",
+      "analysis": "修正は主にレスポンスの切り出し範囲（startIndex決定）の変更であり、計算コストの変化はO(1)程度。lines.slice()のコストはバッファサイズに比例するが、既存の通常レスポンス抽出パスと同等。detectPromptWithOptions()がバッファ全体で呼ばれる箇所は維持されるため（プロンプト検出精度のため）、detectPrompt()の呼び出し回数に変化なし"
+    },
+    "side_effect_risk": {
+      "risk_level": "low",
+      "items": [
+        {
+          "description": "checkForResponse() L605のdetectPromptWithOptions再検出で、部分出力（lastCapturedLine以降）に対してプロンプトが検出できないエッジケース",
+          "mitigation": "プロンプト（質問文 + 選択肢）は通常、応答の末尾に表示されるため、lastCapturedLine以降に含まれる。ただしバッファスクロールで質問文が分断されるケースはゼロリスクではない。extractResponse()内の箇所1・箇所2で既にバッファ全体で検出しているため、checkForResponseでの再検出は二次確認の位置付けであり、影響は限定的",
+          "likelihood": "low"
+        },
+        {
+          "description": "rawContentの内容がバッファ全体からlastCapturedLine以降に縮小し、instructionTextが不完全になる可能性",
+          "mitigation": "rawContentはprompt-detector.ts内でtruncateRawContent()により最大200行/5000文字に制限されている。通常のプロンプト応答では質問文+選択肢は20行以内であるため、lastCapturedLine以降でも十分なコンテキストが含まれる。ただしIssue #235の「完全なプロンプト出力」意図との整合性は確認が必要",
+          "likelihood": "low"
+        }
+      ]
+    }
+  },
+  "test_impact": {
+    "existing_tests": [
+      {
+        "file": "tests/unit/lib/response-poller.test.ts",
+        "status": "変更不要",
+        "reason": "cleanClaudeResponse()とrawContent fallbackのテストのみ。extractResponse()のテストは存在しないため、既存テストは修正の影響を受けない"
+      },
+      {
+        "file": "tests/unit/prompt-detector.test.ts",
+        "status": "変更不要",
+        "reason": "prompt-detector自体に変更がないため影響なし"
+      },
+      {
+        "file": "src/lib/__tests__/assistant-response-saver.test.ts",
+        "status": "変更不要",
+        "reason": "import先のexport関数（cleanClaudeResponse, cleanGeminiResponse）に変更がないため影響なし"
+      }
+    ],
+    "new_tests_recommended": [
+      {
+        "file": "tests/unit/lib/response-poller.test.ts",
+        "description": "extractResponse()のプロンプト検出パスで、lastCapturedLine以降のみがレスポンスとして返されることを検証するテスト。extractResponseが非exportのため、(A) ヘルパー関数抽出 or (B) checkForResponseレベルの結合テスト（DB/tmuxモック付き）が必要"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "328-341",
+      "relevance": "箇所1: Claude早期プロンプト検出 - 修正対象"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "487-499",
+      "relevance": "箇所2: フォールバックプロンプト検出 - 修正対象"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "604-627",
+      "relevance": "checkForResponse内のpromptDetection再検出 - 間接影響"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "360-386",
+      "relevance": "通常レスポンスのstartIndex決定ロジック - 修正時の参考実装"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "529",
+      "relevance": "pollAutoYes()のdetectPrompt呼び出し - extractResponseを経由しない独立パス"
+    },
+    {
+      "file": "src/lib/assistant-response-saver.ts",
+      "lines": "24",
+      "relevance": "cleanClaudeResponse/cleanGeminiResponseのimport - export関数のため影響なし"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "583",
+      "relevance": "rawContent生成ロジック（truncateRawContent）- 入力が変わることでrawContentの内容が変化"
+    },
+    {
+      "file": "tests/unit/lib/response-poller.test.ts",
+      "relevance": "既存テスト - extractResponseテストが存在しない"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "response-poller.ts, auto-yes-manager.ts, prompt-detector.tsの記述との整合性確認"
+    }
+  ],
+  "overall_assessment": {
+    "impact_scope_accuracy": "PARTIAL - 主要な影響ファイル（response-poller.ts内の2箇所 + checkForResponse）は正確だが、auto-yes-manager.tsへの間接影響とassistant-response-saver.tsの影響除外が未記載",
+    "breaking_changes": "NONE - export関数（startPolling, stopPolling, cleanClaudeResponse, cleanGeminiResponse）のシグネチャ・動作に変更なし。内部関数extractResponse()の動作変更のみ",
+    "dependency_analysis": "PARTIAL - response-pollerのimporter6ファイルは特定できたが、auto-yes-managerの間接影響パス（DB保存content変化 -> lastAnsweredPromptKey）が未分析",
+    "test_coverage": "INSUFFICIENT - extractResponseのプロンプト検出パスに対するテストが存在しない。修正の正しさを検証するテスト追加が強く推奨される",
+    "codex_gemini_safety": "PASS - 箇所1はClaude限定、箇所2はCLIツール共通だが通常パスで先に検出されるためCodex/Geminiへの影響は軽微"
+  }
+}
