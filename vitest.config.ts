@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 // Ensure NODE_ENV=test regardless of shell environment (Issue #304)
-process.env.NODE_ENV = 'test';
+(process.env as Record<string, string>).NODE_ENV = 'test';
 
 export default defineConfig({
   plugins: [react()],
