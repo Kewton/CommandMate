@@ -20,6 +20,13 @@ import { copyToClipboard } from '@/lib/clipboard-utils';
 import type { WorktreeMemo } from '@/types/models';
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/** Duration (ms) to show the Check icon after a successful copy */
+const COPY_FEEDBACK_DURATION_MS = 2000;
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -143,20 +150,21 @@ export const MemoCard = memo(function MemoCard({
   }, [memo.id, onDelete]);
 
   /**
-   * [Issue #321] Copy memo content to clipboard.
-   * Icon changes from Copy to Check for 2 seconds on success.
-   * Empty or whitespace-only content is silently ignored.
-   * Failure is silently handled (icon remains unchanged).
+   * Copy memo content to clipboard (Issue #321).
+   * Shows Check icon for COPY_FEEDBACK_DURATION_MS on success.
+   * Empty or whitespace-only content is silently ignored (UI-level guard).
+   * Failure is silently handled -- the icon remains unchanged, which serves
+   * as implicit feedback to the user (see design policy Section 8.3).
    */
   const handleCopy = useCallback(async () => {
-    if (!content || content.trim().length === 0) return;
+    if (!content.trim()) return;
     try {
       await copyToClipboard(content);
       setCopied(true);
       if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), 2000);
+      timerRef.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_DURATION_MS);
     } catch {
-      // Failure is indicated by icon not changing
+      // Silent error: icon stays as Copy to indicate failure
     }
   }, [content]);
 
@@ -183,7 +191,7 @@ export const MemoCard = memo(function MemoCard({
             Saving...
           </span>
         )}
-        {/* [Issue #321] Copy memo content button */}
+        {/* Copy button */}
         <button
           type="button"
           onClick={handleCopy}
