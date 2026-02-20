@@ -263,6 +263,45 @@ export function cleanGeminiResponse(response: string): string {
 }
 
 /**
+ * Determine the start index for response extraction based on buffer state.
+ * Shared between normal response extraction and prompt detection paths.
+ *
+ * bufferWasReset is computed internally from lastCapturedLine, totalLines,
+ * and bufferReset. Callers do NOT need to pre-compute bufferWasReset.
+ *
+ * @internal Exported for testing only
+ */
+export function resolveExtractionStartIndex(
+  lastCapturedLine: number,
+  totalLines: number,
+  bufferReset: boolean,
+  cliToolId: CLIToolType,
+  findRecentUserPromptIndex: (windowSize: number) => number
+): number {
+  // Defensive validation: clamp negative values to 0 (Stage 4 SF-001)
+  lastCapturedLine = Math.max(0, lastCapturedLine);
+
+  // Compute bufferWasReset internally (MF-001: responsibility boundary)
+  const bufferWasReset = lastCapturedLine >= totalLines || bufferReset;
+
+  if (bufferWasReset) {
+    // Buffer was reset - find the most recent user prompt
+    const foundUserPrompt = findRecentUserPromptIndex(40);
+    return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
+  } else if (cliToolId === 'codex') {
+    // Normal case for Codex: use lastCapturedLine
+    return Math.max(0, lastCapturedLine);
+  } else if (lastCapturedLine >= totalLines - 5) {
+    // Buffer may have scrolled - look for the start of the new response
+    const foundUserPrompt = findRecentUserPromptIndex(50);
+    return foundUserPrompt >= 0 ? foundUserPrompt + 1 : Math.max(0, totalLines - 40);
+  } else {
+    // Normal case: start from lastCapturedLine
+    return Math.max(0, lastCapturedLine);
+  }
+}
+
+/**
  * Extract CLI tool response from tmux output
  * Detects when a CLI tool has completed a response by looking for tool-specific patterns
  *
@@ -330,10 +369,13 @@ function extractResponse(
     const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
     if (promptDetection.isPrompt) {
-      // Return the full output as a complete interactive prompt
-      // Use the cleaned output without ANSI codes
+      // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
+      const startIndex = resolveExtractionStartIndex(
+        lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+      );
+      const extractedLines = lines.slice(startIndex);
       return {
-        response: stripAnsi(fullOutput),
+        response: stripAnsi(extractedLines.join('\n')),
         isComplete: true,
         lineCount: totalLines,
       };
@@ -359,31 +401,11 @@ function extractResponse(
     // Extract the response content from lastCapturedLine to the separator (not just last 20 lines)
     const responseLines: string[] = [];
 
-    // Handle tmux buffer scrolling: if lastCapturedLine >= totalLines, the buffer has scrolled
-    // In this case, we need to find the response in the current visible buffer
-    let startIndex: number;
-
-    // For all tools: check if buffer has been reset/cleared (startIndex would be >= totalLines)
-    // This happens when a session is restarted or buffer is cleared
-    const bufferWasReset = lastCapturedLine >= totalLines || bufferReset;
-
-    if (bufferWasReset) {
-      // Buffer was reset - find the most recent user prompt
-      const foundUserPrompt = findRecentUserPromptIndex(40);
-      startIndex = foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
-    } else if (cliToolId === 'codex') {
-      // Normal case for Codex: use lastCapturedLine
-      startIndex = Math.max(0, lastCapturedLine);
-    } else if (lastCapturedLine >= totalLines - 5) {
-      // Buffer may have scrolled - look for the start of the new response
-      // Find the last user input prompt to identify where the response starts
-      const foundUserPrompt = findRecentUserPromptIndex(50);
-      // Start extraction from after the user prompt, or from a safe earlier point
-      startIndex = foundUserPrompt >= 0 ? foundUserPrompt + 1 : Math.max(0, totalLines - 40);
-    } else {
-      // Normal case: start from lastCapturedLine
-      startIndex = Math.max(0, lastCapturedLine);
-    }
+    // Determine start index for response extraction using shared helper
+    // Handles buffer reset, Codex-specific logic, scroll boundary, and normal cases
+    const startIndex = resolveExtractionStartIndex(
+      lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+    );
 
     let endIndex = totalLines;  // Track where extraction actually ended
 
@@ -490,9 +512,13 @@ function extractResponse(
   const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
   if (promptDetection.isPrompt) {
-    // This is an interactive prompt - consider it complete
+    // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
+    const startIndex = resolveExtractionStartIndex(
+      lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+    );
+    const extractedLines = lines.slice(startIndex);
     return {
-      response: fullOutput,
+      response: stripAnsi(extractedLines.join('\n')),  // stripAnsi added for XSS risk mitigation
       isComplete: true,
       lineCount: totalLines,
     };
