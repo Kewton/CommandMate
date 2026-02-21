@@ -94,11 +94,20 @@ const handle = app.getRequestHandler();
 app.prepare().then(() => {
   // Request handler for both HTTP and HTTPS
   const requestHandler = async (req: import('http').IncomingMessage, res: import('http').ServerResponse) => {
+    // Skip WebSocket upgrade requests - they are handled by the server 'upgrade' event.
+    // On Node.js 19+, upgrade requests can trigger the 'request' event even when an
+    // 'upgrade' listener is registered, causing TypeError in Next.js handleRequestImpl
+    // because the response object for an upgrade lacks setHeader (Issue #331).
+    if (req.headers['upgrade']?.toLowerCase() === 'websocket') {
+      return;
+    }
+    const method = req.method ?? 'UNKNOWN';
+    const url = req.url ?? '/';
     try {
-      const parsedUrl = parse(req.url!, true);
+      const parsedUrl = parse(url, true);
       await handle(req, res, parsedUrl);
     } catch (err) {
-      console.error('Error handling request', err);
+      console.error(`[DEBUG] handleRequestImpl failed: ${method} ${url}`, err);
       res.statusCode = 500;
       res.end('Internal Server Error');
     }

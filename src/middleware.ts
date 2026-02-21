@@ -52,6 +52,13 @@ async function verifyTokenEdge(token: string): Promise<boolean> {
  * Checks for valid auth token in cookies before allowing access
  */
 export async function middleware(request: NextRequest) {
+  // Skip WebSocket upgrade requests - they are handled by the server 'upgrade' event.
+  // On Node.js 19+, upgrade requests can trigger middleware even when an upgrade
+  // listener is registered, causing TypeError in handleRequestImpl (Issue #331).
+  if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+    return NextResponse.next();
+  }
+
   // Backward compatibility: skip auth if not enabled
   if (!process.env.CM_AUTH_TOKEN_HASH) {
     return NextResponse.next();
@@ -83,11 +90,14 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization)
+     * - _next/ (all Next.js internal paths: static, image, webpack-hmr, etc.)
      * - favicon.ico (favicon)
      * - public files (images, etc.)
+     *
+     * Note: Excluding all _next/ paths (not just _next/static and _next/image)
+     * prevents TypeError in Next.js handleRequestImpl when WebSocket upgrade
+     * requests reach middleware on Node.js 19+ (Issue #331).
      */
-    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 };

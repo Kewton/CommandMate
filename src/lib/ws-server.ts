@@ -63,8 +63,16 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
   server.on('upgrade', (request, socket, head) => {
     const pathname = request.url || '/';
 
-    // Let Next.js handle its own HMR WebSocket connections
+    // Let Next.js handle its own HMR WebSocket connections in development.
+    // In production there are no /_next/ WebSocket connections (no HMR).
+    // Leaving the socket unhandled in production can trigger the Node.js 'request'
+    // event as a fallback on Node.js 19+, causing TypeError in handleRequestImpl
+    // because the response has no setHeader (Issue #331).
     if (pathname.startsWith('/_next/')) {
+      if (process.env.NODE_ENV !== 'development') {
+        socket.write('HTTP/1.1 426 Upgrade Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+      }
       return;
     }
 
