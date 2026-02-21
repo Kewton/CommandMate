@@ -1,11 +1,14 @@
 /**
  * WebSocket Server for Real-time Communication
  * Manages WebSocket connections and room-based message broadcasting
+ * Issue #331: WebSocket authentication via Cookie header
  */
 
 import { Server as HTTPServer } from 'http';
+import { Server as HTTPSServer } from 'https';
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
+import { isAuthEnabled, parseCookies, AUTH_COOKIE_NAME, verifyToken } from './auth';
 
 interface WebSocketMessage {
   type: 'subscribe' | 'unsubscribe' | 'broadcast';
@@ -24,9 +27,10 @@ const clients = new Map<WebSocket, ClientInfo>();
 const rooms = new Map<string, Set<WebSocket>>();
 
 /**
- * Setup WebSocket server on HTTP server
+ * Setup WebSocket server on HTTP or HTTPS server
+ * Issue #331: Added auth check on WebSocket upgrade
  *
- * @param server - HTTP server instance
+ * @param server - HTTP or HTTPS server instance
  *
  * @example
  * ```typescript
@@ -35,7 +39,7 @@ const rooms = new Map<string, Set<WebSocket>>();
  * server.listen(3000);
  * ```
  */
-export function setupWebSocket(server: HTTPServer): void {
+export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
   wss = new WebSocketServer({ noServer: true });
 
   // Handle upgrade requests - only accept app WebSocket connections, not Next.js HMR
@@ -45,6 +49,19 @@ export function setupWebSocket(server: HTTPServer): void {
     // Let Next.js handle its own HMR WebSocket connections
     if (pathname.startsWith('/_next/')) {
       return;
+    }
+
+    // Issue #331: WebSocket authentication via Cookie header
+    if (isAuthEnabled()) {
+      const cookieHeader = request.headers.cookie || '';
+      const cookies = parseCookies(cookieHeader);
+      const token = cookies[AUTH_COOKIE_NAME];
+
+      if (!token || !verifyToken(token)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
     }
 
     wss!.handleUpgrade(request, socket, head, (ws) => {

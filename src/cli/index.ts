@@ -37,6 +37,7 @@ program
 
 // Start command
 // Issue #136: Add --issue and --auto-port flags for worktree support
+// Issue #331: Add --auth, --auth-expire, --https, --cert, --key, --allow-http flags
 program
   .command('start')
   .description('Start the CommandMate server')
@@ -45,6 +46,12 @@ program
   .option('-p, --port <number>', 'Override port number', parseInt)
   .option('-i, --issue <number>', 'Start server for specific issue worktree', parseInt)
   .option('--auto-port', 'Automatically allocate port for worktree server')
+  .option('--auth', 'Enable token authentication')
+  .option('--auth-expire <duration>', 'Token expiration (e.g., 24h, 7d, 90m)')
+  .option('--https', 'Enable HTTPS')
+  .option('--cert <path>', 'Path to TLS certificate file')
+  .option('--key <path>', 'Path to TLS private key file')
+  .option('--allow-http', 'Suppress HTTPS warning when using --auth without certificates')
   .action(async (options) => {
     await startCommand({
       dev: options.dev,
@@ -52,6 +59,12 @@ program
       port: options.port,
       issue: options.issue,
       autoPort: options.autoPort,
+      auth: options.auth,
+      authExpire: options.authExpire,
+      https: options.https,
+      cert: options.cert,
+      key: options.key,
+      allowHttp: options.allowHttp,
     });
   });
 

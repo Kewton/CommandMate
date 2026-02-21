@@ -29,6 +29,7 @@ export interface InitOptions {
 /**
  * Options for start command
  * Issue #136: Added issue and autoPort for worktree support
+ * Issue #331: Added auth, authExpire, https, cert, key, allowHttp for token auth and HTTPS
  */
 export interface StartOptions {
   /** Start in development mode */
@@ -43,6 +44,18 @@ export interface StartOptions {
   autoPort?: boolean;
   /** Override database path for worktree server (Issue #136) */
   dbPath?: string;
+  /** Enable token authentication (Issue #331) */
+  auth?: boolean;
+  /** Token expiration duration (e.g., "24h", "7d") (Issue #331) */
+  authExpire?: string;
+  /** Enable HTTPS (Issue #331) */
+  https?: boolean;
+  /** Path to TLS certificate file (Issue #331) */
+  cert?: string;
+  /** Path to TLS private key file (Issue #331) */
+  key?: string;
+  /** Suppress HTTPS warning when using --auth without certificates (Issue #331) */
+  allowHttp?: boolean;
 }
 
 /**

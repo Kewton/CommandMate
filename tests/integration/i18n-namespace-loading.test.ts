@@ -13,10 +13,11 @@ import { SUPPORTED_LOCALES } from '@/config/i18n-config';
 const LOCALES_DIR = path.resolve(__dirname, '../../locales');
 
 /**
- * The 5 namespaces referenced by src/i18n.ts getRequestConfig().
+ * The 6 namespaces referenced by src/i18n.ts getRequestConfig().
  * Must stay in sync with the import list there.
+ * Issue #331: Added 'auth' namespace
  */
-const EXPECTED_NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt'] as const;
+const EXPECTED_NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt', 'auth'] as const;
 
 describe('i18n Namespace Loading', () => {
   for (const locale of SUPPORTED_LOCALES) {
@@ -37,7 +38,7 @@ describe('i18n Namespace Loading', () => {
     });
   }
 
-  it('should have exactly 5 namespace files per locale matching src/i18n.ts', () => {
+  it('should have exactly 6 namespace files per locale matching src/i18n.ts', () => {
     for (const locale of SUPPORTED_LOCALES) {
       const localeDir = path.join(LOCALES_DIR, locale);
       const files = fs.readdirSync(localeDir)

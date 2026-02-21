@@ -22,12 +22,13 @@ export default getRequestConfig(async ({ requestLocale }) => {
   }
 
   // Load all namespace files and merge them
-  const [common, worktree, autoYes, error, prompt] = await Promise.all([
+  const [common, worktree, autoYes, error, prompt, auth] = await Promise.all([
     import(`../locales/${locale}/common.json`),
     import(`../locales/${locale}/worktree.json`),
     import(`../locales/${locale}/autoYes.json`),
     import(`../locales/${locale}/error.json`),
     import(`../locales/${locale}/prompt.json`),
+    import(`../locales/${locale}/auth.json`),
   ]);
 
   return {
@@ -38,6 +39,7 @@ export default getRequestConfig(async ({ requestLocale }) => {
       autoYes: autoYes.default,
       error: error.default,
       prompt: prompt.default,
+      auth: auth.default,
     },
   };
 });
