@@ -75,16 +75,26 @@ export class DaemonManager {
       env.CM_DB_PATH = options.dbPath;
     }
 
+    // Issue #331: Forward auth and HTTPS environment variables from parent process to daemon.
+    // These are set by startCommand before calling daemon.start().
+    const authEnvKeys = ['CM_AUTH_TOKEN_HASH', 'CM_AUTH_EXPIRE', 'CM_HTTPS_CERT', 'CM_HTTPS_KEY', 'CM_ALLOW_HTTP'] as const;
+    for (const key of authEnvKeys) {
+      if (process.env[key]) {
+        env[key] = process.env[key];
+      }
+    }
+
     // Issue #179: Security warning for external access - recommend reverse proxy
     const bindAddress = env.CM_BIND || '127.0.0.1';
     const port = env.CM_PORT || '3000';
+    const protocol = env.CM_HTTPS_CERT ? 'https' : 'http';
 
-    if (bindAddress === '0.0.0.0') {
+    if (bindAddress === '0.0.0.0' && !env.CM_AUTH_TOKEN_HASH) {
       console.log(REVERSE_PROXY_WARNING);
     }
 
     // Log startup with accurate settings (Stage 4 review: MF-2)
-    this.logger.info(`Starting server at http://${bindAddress}:${port}`);
+    this.logger.info(`Starting server at ${protocol}://${bindAddress}:${port}`);
 
     // Spawn detached process
     const child = spawn('npm', ['run', npmScript], {
@@ -168,7 +178,9 @@ export class DaemonManager {
     // Get port from environment or default
     const port = parseInt(process.env.CM_PORT || '3000', 10);
     const bind = process.env.CM_BIND || '127.0.0.1';
-    const url = `http://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${port}`;
+    // Issue #331: Use HTTPS protocol if certificate is configured
+    const protocol = process.env.CM_HTTPS_CERT ? 'https' : 'http';
+    const url = `${protocol}://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${port}`;
 
     // Note: Getting accurate uptime would require storing start time
     // For now, we don't track uptime

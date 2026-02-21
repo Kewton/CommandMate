@@ -1,0 +1,158 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "C001",
+      "severity": "must_fix",
+      "category": "設計書-コード整合性",
+      "title": "tsconfig.cli.jsonがsrc/cli/**/*のみincludeのため、start.tsからsrc/lib/auth.tsをimportできない",
+      "description": "設計方針書Section 11.2ではCLIのstart.tsからauth.tsのトークン生成関数を呼ぶ設計だが、現在のtsconfig.cli.jsonのincludeは'src/cli/**/*'のみ。src/lib/auth.tsはCLIビルド対象外のため、TypeScriptコンパイルエラーになる。tsconfig.cli.jsonにsrc/lib/auth.tsを追加するか、トークン生成ロジックをsrc/cli/配下に配置する設計変更が必要。",
+      "location": "Section 11.2 auth.tsのCLIビルド互換性制約",
+      "suggestion": "tsconfig.cli.jsonのincludeに'src/lib/auth.ts'を明示的に追加する。パスエイリアス(@/*)がtsconfig.cli.jsonではpaths:{}で無効化されているため、相対パスimportが必要な点もSection 11.2に明記すべき。"
+    },
+    {
+      "id": "C002",
+      "severity": "must_fix",
+      "category": "設計書-コード整合性",
+      "title": "server.tsの設計コード例でExitCodeを参照しているがserver.tsには現在importされていない",
+      "description": "設計方針書Section 9.1のHTTPS条件分岐コード例で`process.exit(ExitCode.CONFIG_ERROR)`を使用しているが、現在のserver.tsにはExitCode enumのimportがない。server.tsはtsconfig.server.jsonでビルドされ、src/cli/types/index.tsのExitCodeを参照する必要があるが、tsconfig.server.jsonのincludeにsrc/cli/types/**は含まれていない。",
+      "location": "Section 9.1 server.tsの条件分岐",
+      "suggestion": "ExitCodeをsrc/types/(共有型)に移動するか、server.tsではExitCodeの代わりにprocess.exit(2)のように直接数値を使用する設計に変更する。または、tsconfig.server.jsonのincludeにsrc/cli/types/index.tsを追加する。"
+    },
+    {
+      "id": "C003",
+      "severity": "must_fix",
+      "category": "設計書-コード整合性",
+      "title": "新環境変数がENV_MAPPINGおよびEnv interfaceに追加される設計が記載されていない",
+      "description": "設計方針書Section 7で定義されているCM_AUTH_ENABLED、CM_AUTH_EXPIRE、CM_HTTPS_CERT、CM_HTTPS_KEY、CM_HTTPS_ENABLED、CM_AUTH_ALLOW_HTTP、CM_AUTH_TOKEN_HASHの各環境変数について、既存のsrc/lib/env.tsのENV_MAPPINGやEnv interface、getEnvByKey()との統合方針が記載されていない。isAuthEnabled()はprocess.env.CM_AUTH_TOKEN_HASHを直接参照する設計(Section 2.3)だが、これは既存のgetEnvByKey()パターン(ENV_MAPPING経由のフォールバック付き取得)と整合していない。",
+      "location": "Section 7 CLIオプションと環境変数マッピング",
+      "suggestion": "新環境変数を既存パターンに統合するかどうかの設計判断を明記する。(a) AUTH関連変数にはレガシーフォールバックが不要なのでprocess.env直接参照で問題ないと判断するなら、その理由を設計書に記載する。(b) 統合する場合はENV_MAPPINGへの追加方針を記載する。"
+    },
+    {
+      "id": "C004",
+      "severity": "should_fix",
+      "category": "設計書内整合性",
+      "title": "Section 2.3のauth.ts関数一覧とSection 4.1のAuthState interfaceの整合性不足",
+      "description": "Section 2.3のレイヤー構成ではisTokenExpired()がauth.ts内の関数として記載されているが、Section 4.1のAuthState interfaceではexpireAtがtokenHash/enabledと共にメモリ上の状態として管理されると記載されている。しかしSection 6.3では「Cookieにはトークン平文を格納」「毎リクエストでSHA-256ハッシュを計算」としており、有効期限チェックはAuthState.expireAtとDate.now()の比較になるが、誰がAuthStateを初期化するかのフローが設計書に記載されていない。authenticateRequest()はstatelessにCookie検証するのか、AuthStateをモジュールスコープに保持するのかが不明確。",
+      "location": "Section 2.3, Section 4.1, Section 6.3",
+      "suggestion": "AuthStateの初期化フロー(サーバー起動時にprocess.env.CM_AUTH_TOKEN_HASHから読み込み、expireAtの設定方法)を設計書に追記する。CM_AUTH_EXPIREをサーバー側でどう受け取るかも明確にする。"
+    },
+    {
+      "id": "C005",
+      "severity": "should_fix",
+      "category": "設計書内整合性",
+      "title": "i18n.tsのコード例と既存実装のメッセージマージ方法が不一致",
+      "description": "設計方針書Section 10.2のi18n.ts変更例ではスプレッド演算子で全namespaceをフラットにマージしている('...common.default, ...auth.default')。しかし実際のsrc/i18n.tsでは各namespaceをキー付きオブジェクトとしてマージしている('common: common.default, worktree: worktree.default')。設計書のコード例は既存パターンと異なるため、実装時に混乱を招く可能性がある。",
+      "location": "Section 10.2 src/i18n.ts変更",
+      "suggestion": "設計書のコード例を実際のi18n.tsパターン(namespace付きキー形式)に修正する。正しくは 'auth: auth.default' を追加する形式。"
+    },
+    {
+      "id": "C006",
+      "severity": "should_fix",
+      "category": "設計書-コード整合性",
+      "title": "setupWebSocket()の型拡張でHTTPSServer import追加が必要だがwsライブラリの互換性確認が不足",
+      "description": "設計方針書Section 9.2では`setupWebSocket(server: HTTPServer | HTTPSServer)`に型拡張するとし、「既存実装は変更不要（wsのnoServerモードは両方に対応）」と記載している。実際のws-server.tsはnoServer: trueを使用しており、server.on('upgrade', ...)でupgradeイベントを処理している。HTTPSServerもEventEmitterベースなので'upgrade'イベントを発行するため、型拡張自体は正しい。ただし、ws-server.ts内のserver.on('upgrade', ...)のcallback型がHTTPServer用のIncomingMessageのままであり、HTTPSServerの場合もIncomingMessageだが明示的な確認が設計書にない。",
+      "location": "Section 9.2 ws-server.tsの型拡張",
+      "suggestion": "Node.jsのhttps.createServer()のupgradeイベントもhttp.IncomingMessageを使用する点を設計書に明記し、型安全性が保証されることを示す。"
+    },
+    {
+      "id": "C007",
+      "severity": "should_fix",
+      "category": "既存パターン整合性",
+      "title": "ALLOWED_AUTH_DURATIONSの値形式がauto-yes-config.tsのALLOWED_DURATIONSと根本的に異なる",
+      "description": "設計方針書Section 2.3では`ALLOWED_AUTH_DURATIONS = ['1h', '6h', '12h', '24h', '48h', '72h', '7d']`と文字列ベースのホワイトリストを定義している。一方、既存のauto-yes-config.tsのALLOWED_DURATIONSは`[3600000, 10800000, 28800000]`とミリ秒数値ベースである。設計書では「auto-yes-config.ts の ALLOWED_DURATIONS パターンに準拠」(Section 2.3, R005)としているが、実際のデータ型が全く異なる(数値 vs 文字列)。パターンの「概念」(ホワイトリスト方式)は一致しているが、実装形式の整合性は取れていない。",
+      "location": "Section 2.3 parseDuration()のサポート範囲",
+      "suggestion": "「パターンに準拠」の意味を明確化する。ホワイトリスト方式というアプローチの準拠であり、値の形式は用途に応じて異なることを設計書に明記する。CLIは人間が入力する文字列(1h, 7d等)を受け取るため文字列ベースが自然であり、auto-yesのミリ秒数値はAPI内部値として自然であるという理由を記載するとよい。"
+    },
+    {
+      "id": "C008",
+      "severity": "should_fix",
+      "category": "設計書-コード整合性",
+      "title": "DaemonManager.start()への環境変数追加が設計書に具体的に記載されていない",
+      "description": "設計方針書Section 14ではdaemon.tsが変更対象として「環境変数伝達、URL表示」と記載されているが、DaemonManager.start()のenv構築部分にCM_AUTH_TOKEN_HASH、CM_AUTH_ENABLED、CM_AUTH_EXPIRE、CM_HTTPS_CERT、CM_HTTPS_KEY、CM_HTTPS_ENABLED、CM_AUTH_ALLOW_HTTPをどのように追加するかの具体的なコード例やフローがない。現在のdaemon.tsではoptions.portとoptions.dbPathのみをenvにオーバーライドしている。",
+      "location": "Section 12 Phase 4, Section 14 変更対象ファイル一覧",
+      "suggestion": "daemon.tsの環境変数伝達に関する具体的なコード例を追加する。特にCM_AUTH_TOKEN_HASHはセキュリティ上重要なため、spawn時のenv経由でのみ伝達する方式を明示する。"
+    },
+    {
+      "id": "C009",
+      "severity": "should_fix",
+      "category": "設計書内整合性",
+      "title": "Section 7のCM_AUTH_ENABLEDとSection 2.3のisAuthEnabled()の判定基準が矛盾する可能性",
+      "description": "Section 7ではCM_AUTH_ENABLEDを'1'で有効と定義している。一方、Section 2.3のisAuthEnabled()は`!!process.env.CM_AUTH_TOKEN_HASH`で判定するとしている(R012)。つまり、CM_AUTH_ENABLEDフラグではなくCM_AUTH_TOKEN_HASHの有無で認証を判定する。この場合、CM_AUTH_ENABLEDの用途がCLI側のフラグ(--auth指定済みの記録)のみとなるが、サーバー側でCM_AUTH_ENABLEDが何のために使われるのかが不明確。CM_AUTH_TOKEN_HASHが設定されていればCM_AUTH_ENABLEDが未設定でも認証が有効になるのか、両方必要なのかの判定フローが設計書に記載されていない。",
+      "location": "Section 7, Section 2.3 R012",
+      "suggestion": "CM_AUTH_ENABLEDの正確な用途を明確にする。推奨: CM_AUTH_ENABLEDはCLI側の内部フラグとしてのみ使用し、サーバー側の認証判定はCM_AUTH_TOKEN_HASHの有無のみで行う。この場合CM_AUTH_ENABLEDのサーバーへの伝達が不要であることを設計書に明記する。"
+    },
+    {
+      "id": "C010",
+      "severity": "should_fix",
+      "category": "設計書-コード整合性",
+      "title": "rateLimiter.destroy()のgracefulShutdown統合箇所が現在のserver.tsコードと不一致",
+      "description": "設計方針書Section 6.2のコード例では`rateLimiter.destroy()`をserver.tsのgracefulShutdown()内で呼ぶとしているが、rateLimiterはauth.tsのモジュールスコープで作成される設計(Section 4.1)。server.tsからrateLimiterインスタンスにアクセスするには、auth.tsからexportする必要がある。しかし設計書Section 2.3の関数一覧では`createRateLimiter()`はexportされているが、モジュールスコープインスタンスのexportは記載されていない。server.tsがcreateRateLimiter()を呼んでインスタンスを保持するのか、auth.ts内のモジュールスコープ変数を使うのかが不明確。",
+      "location": "Section 6.2 レート制限のリソース管理(R010)",
+      "suggestion": "rateLimiterのライフサイクル管理方針を明確にする。推奨案: auth.tsでモジュールスコープのrateLimiterインスタンスを作成し、destroyRateLimiter()関数をexportする。server.tsのgracefulShutdownからはdestroyRateLimiter()を呼ぶ。"
+    },
+    {
+      "id": "C011",
+      "severity": "should_fix",
+      "category": "設計書-コード整合性",
+      "title": "middleware.tsが新規ファイルだがNext.js App Router配下の配置パスとexport形式が未記載",
+      "description": "設計方針書Section 14ではsrc/middleware.tsを新規ファイルとして記載しているが、Next.js App Routerのmiddlewareはプロジェクトルート(またはsrc/)に配置する必要がある。既存のプロジェクトにはsrc/middleware.tsが存在せず(Glob検索結果で確認)、新規作成する。export形式(named export `middleware`関数とconfig)は Section 5.3/5.4にコード例があるが、`NextRequest`/`NextResponse`のimport元が明記されていない(実装では'next/server'から)。また、Section 11.3でミドルウェアテストのモック方針が言及されているが具体性が不足している。",
+      "location": "Section 5.3, Section 5.4, Section 14",
+      "suggestion": "middleware.tsの完全なファイルスケルトン(import文、export middleware関数、export config)を設計書に追記する。"
+    },
+    {
+      "id": "C012",
+      "severity": "nice_to_have",
+      "category": "設計書内整合性",
+      "title": "Section 4.2のCookie Max-Ageの動的計算とCookie設定タイミングの整合性",
+      "description": "Section 4.2ではCookie Max-Ageを`Math.floor((expireAt - Date.now()) / 1000)`と動的計算する設計だが、ログインAPI(Section 5.2)のレスポンスはSet-Cookie時に計算される。expireAtはAuthStateから取得するが、ログイン時にexpireAtが初めて設定されるのか、サーバー起動時に既に設定されているのかのタイミングが不明確。サーバー起動時にCM_AUTH_EXPIREからexpireAtを計算する場合、ログイン前にexpireAtが経過してしまうケースの考慮が必要。",
+      "location": "Section 4.2, Section 5.2",
+      "suggestion": "expireAtの計算タイミングを明確にする。推奨: トークンの有効期限はサーバー起動時刻からの相対時間ではなく、ログイン成功時刻からの相対時間として計算する。AuthStateのexpireAtはcreateRateLimiter同様、サーバー起動時に設定するのではなく、CLI起動時にCM_AUTH_EXPIREの値をパースしてDate.now()+durationとしてCM_AUTH_TOKEN_EXPIRE_ATを環境変数で渡す方式を検討する。"
+    },
+    {
+      "id": "C013",
+      "severity": "nice_to_have",
+      "category": "設計書内整合性",
+      "title": "Section 9.1のHTTPS分岐とSection 14のファイル変更一覧でstatus.tsのHTTPS URL表示の設計詳細が不足",
+      "description": "Section 14ではstatus.tsの変更内容として「HTTPS URL表示」と記載があるが、設計書内にstatus.tsの具体的な変更方針(http://をhttps://に動的切替する方法、環境変数の参照方法)が記載されていない。現在のDaemonManager.getStatus()はurl: `http://`をハードコードしているため変更が必要。",
+      "location": "Section 14 変更対象ファイル一覧",
+      "suggestion": "status.tsのHTTPS対応の具体的な実装方針を設計書に追記する。CM_HTTPS_CERTとCM_HTTPS_KEYの有無でプロトコルを切り替える方式を記載する。"
+    },
+    {
+      "id": "C014",
+      "severity": "nice_to_have",
+      "category": "テスト整合性",
+      "title": "設計方針書にテスト計画の記載がなくGitHub Issueのテスト計画との照合が不能",
+      "description": "設計方針書にはテスト方針のセクションが存在しない。Section 11.3で「middleware.tsテストではNextRequest/NextResponseのモックが必要」と簡潔に言及されているのみで、auth.tsの各関数(generateToken, hashToken, verifyToken, authenticateRequest, isTokenExpired, parseDuration, parseCookieToken, createRateLimiter)のユニットテスト方針、ws-server.tsのWebSocket認証テスト方針、E2Eテスト(ログインフロー)方針が記載されていない。",
+      "location": "Section 11.3(テスト設定)",
+      "suggestion": "テスト方針セクションを追加し、以下を記載する: (1) auth.ts関数群のユニットテスト一覧、(2) middleware.tsのモック戦略、(3) WebSocket認証の結合テスト方針、(4) ログインフローのE2Eテスト方針。"
+    },
+    {
+      "id": "C015",
+      "severity": "nice_to_have",
+      "category": "既存パターン整合性",
+      "title": "security-messages.tsの既存パターンとの連携方針が不足",
+      "description": "設計方針書Section 14ではsecurity-messages.tsの変更内容として「--auth時メッセージ分岐」と記載しているが、現在のsecurity-messages.tsにはREVERSE_PROXY_WARNINGのみ定義されている。--auth時にこの警告を置き換えるのか、補完するのかの方針が設計書に記載されていない。--authが指定された場合、リバースプロキシ推奨メッセージは不要になるか、HTTPS未使用時の別の警告に置き換わるかの分岐ロジックが必要。",
+      "location": "Section 14 変更対象ファイル一覧",
+      "suggestion": "security-messages.tsの変更方針を具体化する。推奨: AUTH_HTTP_WARNING('--auth without HTTPS: tokens transmitted in plaintext. Use --cert/--key or --allow-http to suppress.')のような新規メッセージ定数を追加し、start.tsで条件分岐する設計を記載する。"
+    },
+    {
+      "id": "C016",
+      "severity": "nice_to_have",
+      "category": "設計書-コード整合性",
+      "title": "Section 6.3のタイポ: 「CookieにはトークンP平文を格納」",
+      "description": "Section 6.3の3行目に「CookieにはトークンP平文を格納」と記載されているが、「P」は不要なタイポと思われる。正しくは「Cookieにはトークン平文を格納」。",
+      "location": "Section 6.3 トークン管理",
+      "suggestion": "「トークンP平文」を「トークン平文」に修正する。"
+    }
+  ],
+  "summary": {
+    "total": 16,
+    "must_fix": 3,
+    "should_fix": 8,
+    "nice_to_have": 5
+  },
+  "overall_assessment": "設計方針書はStage 1のレビュー指摘を反映し、認証アーキテクチャの全体像が明確になっている。しかし、既存コードベースとの整合性に3件の重大な問題が検出された。特にtsconfig.cli.jsonのinclude範囲の制約(C001)、server.tsでのExitCode参照問題(C002)、既存ENV_MAPPINGパターンとの不整合(C003)は実装フェーズでブロッカーとなる。設計書内のセクション間整合性については、isAuthEnabled()の判定基準とCM_AUTH_ENABLEDの用途の矛盾(C009)、i18n.tsのマージパターン不一致(C005)、AuthState初期化フロー不明確(C004)が主要な問題である。これらの修正後、実装フェーズに移行可能と判断する。"
+}

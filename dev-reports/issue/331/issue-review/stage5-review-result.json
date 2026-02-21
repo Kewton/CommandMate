@@ -1,0 +1,347 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_type": "通常（2回目）",
+  "review_date": "2026-02-21",
+  "issue_number": 331,
+  "previous_findings_addressed": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "addressed": true,
+      "comment": "setupWebSocket()の型互換性について設計方針・影響範囲テーブル・実装タスクに明記されている。http.Server | https.Server（または net.Server）への拡張方針が記載されており、TypeScriptの型チェックでの問題発生リスクにも言及がある。適切に対応されている。"
+    },
+    {
+      "id": "F002",
+      "severity": "must_fix",
+      "addressed": true,
+      "comment": "DaemonManager.start()への認証・HTTPSオプション伝達フローが設計方針に追記され、daemon.tsが変更対象ファイルに追加されている。デーモンモード対応セクションが独立タスクとして新設され、対象環境変数（CM_AUTH_TOKEN_HASH, CM_AUTH_EXPIRE, CM_HTTPS_CERT, CM_HTTPS_KEY, CM_ALLOW_HTTP）が明確に列挙されている。適切に対応されている。"
+    },
+    {
+      "id": "F003",
+      "severity": "must_fix",
+      "addressed": true,
+      "comment": "認証の責務境界セクションが新設され、middleware.ts（HTTPリクエスト担当）とws-server.ts（WebSocket担当）の役割分担がテーブル形式で明確化されている。WebSocket upgradeリクエストがNext.jsパイプラインを通らない点も明記されている。適切に対応されている。"
+    },
+    {
+      "id": "F004",
+      "severity": "must_fix",
+      "addressed": true,
+      "comment": "トークンのCLI-サーバー間データフローが5段階のフローとして詳細に記載されている。foreground/daemonモード両方の環境変数伝達経路も明記。ハッシュ値のみを渡すセキュリティ方針と/proc/<pid>/environ漏洩リスク軽減の注記も含まれている。適切に対応されている。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "環境変数名をCM_AUTH_TOKEN_HASHに変更し、旧CM_AUTH_TOKENとの衝突回避が明記。start.tsでの.envファイル読み込み後の旧環境変数検知バリデーションも設計方針に含まれている。"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "daemon.tsが変更対象ファイルテーブルに追加されている。"
+    },
+    {
+      "id": "F007",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "src/cli/index.tsが変更対象ファイルテーブルと実装タスクに追加されている。"
+    },
+    {
+      "id": "F008",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "WebSocket Cookieパースのセキュリティ方針が設計方針に追記。auth.tsにCookieパースユーティリティ関数を追加するタスクも記載。next/headersのcookies()がEdge Runtimeのため使用不可である制約も明記されている。"
+    },
+    {
+      "id": "F009",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "security-messages.tsの更新が変更対象ファイルとセキュリティメッセージ更新タスクに追加されている。認証有効+HTTPS時と認証有効+HTTP時の条件分岐メッセージ方針も記載。"
+    },
+    {
+      "id": "F010",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "locales/en/auth.jsonとlocales/ja/auth.jsonが変更対象に追加。i18n対応セクションが独立タスクとして新設されている。"
+    },
+    {
+      "id": "F011",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "auth-expireのフォーマット仕様（Nh/Nd/Nm、最小1h、最大30d）が設計方針とCLIオプションタスクに明記されている。"
+    },
+    {
+      "id": "F012",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "証明書パスのバリデーション方針が4段階（存在確認、読み取り権限、realpathSync、ファイルサイズ上限）として具体化されている。resolveSecurePath()が不適切である理由も説明されている。"
+    },
+    {
+      "id": "F013",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "テスト計画セクションが5カテゴリで追加されており、テスト戦略（モックベース/CI環境実行可能性）も明記。テストファイル一覧テーブルも追加されている。"
+    },
+    {
+      "id": "F014",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "Env interfaceへのオプショナルフィールド追加方針が明記。ENV_MAPPINGへの旧名フォールバック不要の判断も記載されている。"
+    },
+    {
+      "id": "F015",
+      "severity": "nice_to_have",
+      "addressed": true,
+      "comment": "ログアウトUXフロー（ログインページリダイレクト、サイドバー下部ログアウトボタン配置）が実装タスクに追記されている。"
+    },
+    {
+      "id": "F016",
+      "severity": "nice_to_have",
+      "addressed": false,
+      "comment": "セキュリティリスク増加のため意図的にスキップ。判断として妥当であり、問題なし。"
+    },
+    {
+      "id": "F017",
+      "severity": "nice_to_have",
+      "addressed": true,
+      "comment": "security-guide.mdのMigration from CM_AUTH_TOKENセクション更新がドキュメントタスクに追加されている。"
+    },
+    {
+      "id": "F018",
+      "severity": "nice_to_have",
+      "addressed": true,
+      "comment": "IPアドレス取得方針（req.socket.remoteAddress優先、リバースプロキシ対応は将来課題）がブルートフォース対策に追記されている。"
+    },
+    {
+      "id": "F019",
+      "severity": "nice_to_have",
+      "addressed": true,
+      "comment": "フェーズ分割案（Phase 1/2/3）が参考セクションとして追加されている。Phase間の依存関係注意点も含まれている。"
+    },
+    {
+      "id": "G001",
+      "severity": "must_fix",
+      "addressed": true,
+      "comment": "tsconfig.server.jsonが変更対象ファイルテーブルに追加されている。"
+    },
+    {
+      "id": "G002",
+      "severity": "must_fix",
+      "addressed": true,
+      "comment": "src/i18n.tsが変更対象ファイルに追加され、auth名前空間追加が必須である旨が太字で強調されている。"
+    },
+    {
+      "id": "G003",
+      "severity": "must_fix",
+      "addressed": true,
+      "comment": "status.tsが変更対象ファイルに追加。CM_HTTPS_CERT環境変数の有無によるHTTPS判定方法が設計方針に明記されている。"
+    },
+    {
+      "id": "G004",
+      "severity": "must_fix",
+      "addressed": true,
+      "comment": "middleware.tsの認証無効時の動作保証（CM_AUTH_TOKEN_HASH未設定時に即NextResponse.next()）が設計方針、実装タスク、受入条件の3箇所に明記されている。config.matcherによる静的アセット除外も含まれている。"
+    },
+    {
+      "id": "G005",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "サイドバーコンポーネント（sidebar/mobile配下）が変更対象に追加。認証状態判定方法（/api/auth/statusエンドポイントまたはサーバーコンポーネント判定）もタスクに追記されている。"
+    },
+    {
+      "id": "G006",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "npm依存パッケージ（ms）の追加判断が設計方針に明記。package.jsonが条件付きで変更対象に追加されている。"
+    },
+    {
+      "id": "G007",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "テスト戦略セクションが追加されており、モックベーステスト方針とCI環境での実行可能性が明記されている。"
+    },
+    {
+      "id": "G008",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "server.tsとstart.tsのURL表示HTTPS対応が実装タスクと受入条件に追加されている。"
+    },
+    {
+      "id": "G009",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "旧CM_AUTH_TOKEN検知バリデーションの実装箇所（start.tsの.envファイル読み込み後、サーバー起動前）が設計方針に明記されている。"
+    },
+    {
+      "id": "G010",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "startCommand()のトークン生成フロー（5段階）がタスクに詳細追記されている。"
+    },
+    {
+      "id": "G011",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "セッション固定攻撃対策がセキュリティ対策セクションに追加。ステートレストークン認証方式での原理的安全性が説明されている。"
+    },
+    {
+      "id": "G012",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "ログイン画面のレイアウト構成（RootLayout共有または独自layout.tsx）がタスクに追記。認証済みリダイレクトが受入条件にも追加されている。"
+    },
+    {
+      "id": "G013",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "next.config.jsのCSP変更不要が変更不要セクションに明示的に記載されている。fetch（JSON）方式によるform-actionディレクティブ変更不要も追記されている。"
+    },
+    {
+      "id": "G014",
+      "severity": "should_fix",
+      "addressed": true,
+      "comment": "CLAUDE.mdのモジュール一覧更新がドキュメントタスクと変更対象ファイルに追加されている。"
+    },
+    {
+      "id": "G015",
+      "severity": "nice_to_have",
+      "addressed": true,
+      "comment": "Issue #332との関連性が関連Issueセクションに追記されている。"
+    },
+    {
+      "id": "G016",
+      "severity": "nice_to_have",
+      "addressed": true,
+      "comment": "middleware.tsのmatcher設定による静的アセット除外が設計方針に追記されている。"
+    },
+    {
+      "id": "G017",
+      "severity": "nice_to_have",
+      "addressed": true,
+      "comment": "フェーズ分割案にPhase間の依存関係注意点が追記されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "H001",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "security-guide.mdの「Existing CM_AUTH_TOKEN settings are silently ignored」との矛盾",
+      "description": "現在のsecurity-guide.md（148行目）には「Existing CM_AUTH_TOKEN settings are silently ignored. They do not cause errors but have no effect.」と記載されている。一方、Issue #331では「旧.envにCM_AUTH_TOKENが残っている場合、起動時にバリデーションを行い警告を表示する」と設計している。つまり、Issue #331の実装後はCM_AUTH_TOKENが「silently ignored」ではなく「警告表示」される動作に変更される。security-guide.mdの更新タスクにはMigration from CM_AUTH_TOKENセクションの更新が含まれているが、この具体的な文言の矛盾を明示的に修正対象として記載していない。",
+      "location": "ドキュメントタスク > セキュリティガイド更新",
+      "suggestion": "ドキュメントタスクのsecurity-guide.md更新内容に「Existing CM_AUTH_TOKEN settings are silently ignored の記述を、--auth使用時の警告表示に合わせて更新する」ことを明記する。具体的には、silently ignoredの記載を「CM_AUTH_TOKEN settings will trigger a warning message when --auth is used, recommending the new authentication method」等に修正する旨を追加する。"
+    },
+    {
+      "id": "H002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "HTTPS動作モードテーブルの--httpsフラグに関するCLIオプション定義の不整合",
+      "description": "HTTPS動作モードテーブルでは「commandmate start --https --cert ./cert.pem --key ./key.pem」（認証なしHTTPS）というパターンが定義されている。しかし、実装タスクのCLIオプション追加セクションでは、--httpsフラグの用途が「認証なしHTTPS用」とのみ記載されている。一方、--authと--certの組み合わせでHTTPS起動する場合には--httpsフラグは不要という設計となっている。この暗黙のルール（--authと--certがあれば--httpsは不要、--httpsは認証なしHTTPS専用）が設計方針に明示されておらず、実装者が混乱する可能性がある。また、--auth --https --certのように両方指定された場合の動作（--authが優先？エラー？）が未定義。",
+      "location": "HTTPS動作モード テーブル / 実装タスク > CLIオプション追加",
+      "suggestion": "以下を設計方針に追記する: (1) --authと--cert/--keyの組み合わせが指定された場合、--httpsフラグなしで自動的にHTTPS起動する。(2) --httpsは認証なしでHTTPS起動したい場合にのみ使用する。(3) --auth --https --cert --keyのように両方が指定された場合は--authの認証有効が優先される（--httpsは冗長だが無視）。これらの組み合わせルールを明確にすることで実装の曖昧さを排除できる。"
+    },
+    {
+      "id": "H003",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "daemon.tsのログ出力のHTTPS対応漏れ",
+      "description": "daemon.tsの87行目に「this.logger.info(`Starting server at http://${bindAddress}:${port}`)」というハードコードされたhttp://表示がある。Issue #331のdaemon.ts変更内容には「DaemonManager.start()のenvに認証・HTTPSオプション環境変数追加」「getStatus()のURL生成をHTTPS対応に修正」が記載されているが、start()内のlogger.info出力のHTTPS対応は記載されていない。start()メソッドのログ出力もHTTPS対応が必要。",
+      "location": "影響範囲 > 変更対象ファイル > daemon.ts",
+      "suggestion": "daemon.tsの変更内容に「DaemonManager.start()内のlogger.info()でのURL表示をHTTPS対応に修正（CM_HTTPS_CERT環境変数の有無で条件分岐）」を追加する。"
+    },
+    {
+      "id": "H004",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "/api/auth/statusエンドポイントが実装タスクに明記されていない",
+      "description": "ログアウトボタンの配置タスクで「認証状態の判定: クライアント側で認証の有効/無効を判定するため、/api/auth/statusエンドポイントの追加、またはサーバーコンポーネントでの環境変数判定を実装する」と記載されている。しかし、/api/auth/statusエンドポイントの実装タスクが独立して列挙されておらず、変更対象ファイルにsrc/app/api/auth/status/route.tsも含まれていない。2つの選択肢（APIエンドポイント vs サーバーコンポーネント判定）のどちらを採用するかが未確定のため、どちらの場合でも変更対象ファイルに漏れが生じている。",
+      "location": "実装タスク > ログアウトボタンの配置 / 影響範囲 > 変更対象ファイル",
+      "suggestion": "認証状態の判定方法を確定する。/api/auth/statusエンドポイントを使用する場合は、変更対象ファイルにsrc/app/api/auth/status/route.tsを追加し、実装タスクにも独立した項目として記載する。サーバーコンポーネント判定を使用する場合は、その具体的な実装方法（process.env.CM_AUTH_TOKEN_HASH の有無チェック等）を記載する。"
+    },
+    {
+      "id": "H005",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "Cookieに格納する値の設計が不明確 - トークン平文かハッシュか",
+      "description": "Issue本文には以下の記述が存在する: (1) 認証フローで「成功時にHttpOnly Secure Cookieでセッション管理」、(2) トークンのCLI-サーバー間データフローで「トークン自体（平文）は環境変数に含めず、ハッシュ値のみを渡す」、(3) セッション固定攻撃対策で「Cookie に格納されたトークンを照合する方式」。しかし、Cookieに格納する値が「トークン平文」なのか「何らかのセッショントークン」なのかが明確でない。CLI生成トークン平文をCookieに格納する設計であれば、ブラウザからログインAPI（POST /api/auth/login）にトークン平文を送信し、サーバー側でSHA-256ハッシュを計算してCM_AUTH_TOKEN_HASHと比較する検証フローを想定していると読めるが、ログイン成功後にCookieに何を保存するか（元のトークン平文？サーバー生成のセッションID？）が記載されていない。",
+      "location": "設計方針 / 認証フロー",
+      "suggestion": "ログインAPI（POST /api/auth/login）での認証成功後にCookieに格納する具体的な値を定義する。推奨案: (A) トークン平文をCookieに格納し、以降のリクエストでサーバーがハッシュ計算して検証する方式（シンプルだがリクエストごとにハッシュ計算が必要）、(B) サーバー側でセッショントークンを別途生成してCookieに格納し、サーバーメモリでセッション管理する方式（ステートフル）。現在の設計は(A)を意図していると推測されるが、明示すること。"
+    },
+    {
+      "id": "H006",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "auth-expireの有効期限をサーバー側で管理する仕組みが未定義",
+      "description": "CLIオプション--auth-expire（デフォルト24h）で有効期限を指定し、「Cookieの有効期限はトークンの残り有効期限と一致する」という受入条件がある。しかし、サーバー側でトークンの有効期限をどのように管理するかが不明確。(1) CM_AUTH_EXPIRE環境変数をサーバーに渡すことは記載されている、(2) auth.tsに「有効期限管理（メモリ上）」というタスクがある。しかし、有効期限の基準時刻（サーバー起動時刻）をauth.tsがどのように取得・保持するか、ログイン成功時にCookieのmaxAge/expiresをトークンの「残り」有効期限に設定するロジックの詳細が不足している。例えば、サーバー起動から20時間経過後にログインした場合、24h - 20h = 4hがCookieの有効期限になるべきだが、このロジックが明示されていない。",
+      "location": "実装タスク > トークン認証 > auth.ts / 受入条件 > Cookieの有効期限",
+      "suggestion": "auth.tsのトークン有効期限管理の具体的な実装方針を追記する。推奨: (1) サーバー起動時にDate.now()を基準時刻として記録、(2) CM_AUTH_EXPIREをミリ秒に変換して満了時刻を計算（基準時刻 + duration）、(3) ログイン成功時にCookieのmaxAgeを「満了時刻 - 現在時刻」で計算、(4) トークン検証時にも満了時刻を超過していればexpiredとして拒否。"
+    },
+    {
+      "id": "H007",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "HTMLコメントによるレビュー追跡マーカーが本文に残存",
+      "description": "Issue本文中に<!-- F001 -->, <!-- F003 -->, <!-- G004 -->等のHTMLコメントが多数残っている。これらはレビュー指摘の追跡用マーカーとして追加されたものだが、Issue本文に対する補足情報であり、最終的にはレビュー履歴テーブルで対応関係が把握できるため冗長である。現在36件のIssueに対して20以上のコメントマーカーが埋め込まれており、本文の可読性に影響している。",
+      "location": "Issue本文全体",
+      "suggestion": "レビュー履歴テーブルが充実しており、各指摘IDと対応内容の対応関係が一覧できるため、本文中のHTMLコメントマーカーを削除して可読性を向上させることを検討する。ただし、これは実装に影響しないため優先度は低い。"
+    },
+    {
+      "id": "H008",
+      "severity": "nice_to_have",
+      "category": "設計",
+      "title": "証明書ファイルのホットリロード（再読み込み）方針が未定義",
+      "description": "HTTPS対応でserver.tsにてfs.readFileSyncで証明書を読み込む設計となっているが、証明書更新時のサーバー再起動要否が未記載。Let's Encrypt証明書は90日ごとに自動更新されるため、再起動なしの証明書リロード対応があると運用上便利だが、初回実装のスコープとしては再起動での対応で問題ない。",
+      "location": "実装タスク > HTTPS対応 > server.ts",
+      "suggestion": "初回実装では証明書更新時にサーバー再起動が必要であることを設計方針またはドキュメントタスクに明記する。将来の改善として証明書ホットリロード対応を検討可能とする注記を追加しても良い。"
+    },
+    {
+      "id": "H009",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "ログインAPIのレスポンス形式が未定義",
+      "description": "POST /api/auth/loginのリクエストボディ（トークン文字列をJSONで送信）は記載されているが、レスポンス形式（成功時のJSONボディ、エラー時のJSONボディ）が未定義。フロントエンドのログイン画面がAPIレスポンスを処理する際に、レスポンス形式の仕様が必要。例えば、成功時: { success: true }、認証失敗時: { success: false, error: 'Invalid token' }、レート制限時: { success: false, error: 'Too many attempts', retryAfter: 900 } 等。",
+      "location": "実装タスク > ログインAPI実装",
+      "suggestion": "ログインAPIのレスポンス形式を定義する。特にレート制限時のレスポンスはフロントエンドのロックアウトメッセージ表示に必要なため、retryAfter（秒数）やremainingAttempts（残り試行回数）フィールドを含めるかどうかを設計する。"
+    }
+  ],
+  "summary": {
+    "total": 9,
+    "must_fix": 0,
+    "should_fix": 6,
+    "nice_to_have": 3
+  },
+  "overall_assessment": "Issue #331は4回の反復レビュー（Stage 1通常、Stage 2反映、Stage 3影響範囲、Stage 4反映）を経て大幅に改善されている。Stage 1で指摘した4件のMust Fix（F001-F004）は全て適切に反映されており、Stage 3で指摘した4件のMust Fix（G001-G004）も全て反映済みである。全36件の指摘のうち35件が反映され、1件（F016: トークン再表示）が妥当な理由でスキップされている。現在のIssueは認証フロー、トークンデータフロー、認証責務境界、セキュリティ対策、テスト計画、デーモンモード対応、フェーズ分割案といった包括的な設計を含んでおり、実装に必要な情報が概ね網羅されている。残存する6件のShould Fix指摘はいずれも実装時に判断可能な詳細レベルの問題であり、Issue全体の設計品質を損なうものではない。特にH005（Cookieに格納する値の設計）は実装段階でauth.tsの設計時に確定すべき事項である。本Issueは実装着手に十分な品質に到達していると評価する。",
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/docs/security-guide.md",
+      "relevance": "148行目: 「Existing CM_AUTH_TOKEN settings are silently ignored」の文言がIssue #331の警告表示設計と矛盾（H001）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/cli/utils/daemon.ts",
+      "relevance": "87行目: DaemonManager.start()内のlogger.info()でhttp://がハードコード。HTTPS対応の変更漏れ（H003）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/lib/env.ts",
+      "relevance": "172-184行目: Env interface。認証関連オプショナルフィールド追加方針は設計済み"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/lib/ws-server.ts",
+      "relevance": "6行目/38行目: HTTPServer型のインポートと引数型。型拡張方針は設計済み"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/i18n.ts",
+      "relevance": "25-31行目: 現在5名前空間のimport。auth名前空間追加方針は設計済み"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/cli/config/security-messages.ts",
+      "relevance": "REVERSE_PROXY_WARNING定数。--auth有効時の条件分岐更新方針は設計済み"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/docs/security-guide.md",
+      "relevance": "Migration from CM_AUTH_TOKENセクション（121行目以降）の文言更新が必要（H001）"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 /**
  * Custom Next.js Server with WebSocket Support
  * Integrates WebSocket server for real-time communication
+ * Issue #331: HTTPS support and auth cleanup on shutdown
  */
 
 // IMPORTANT: Register uncaught exception handler FIRST, before any imports
@@ -26,7 +27,10 @@ process.on('uncaughtException', (error: Error & { code?: string }) => {
   process.exit(1);
 });
 
-import { createServer } from 'http';
+import { createServer as createHttpServer } from 'http';
+import { createServer as createHttpsServer } from 'https';
+import { readFileSync, existsSync, accessSync, realpathSync, statSync } from 'fs';
+import { constants as fsConstants } from 'fs';
 import { parse } from 'url';
 import next from 'next';
 import { setupWebSocket, closeWebSocket } from './src/lib/ws-server';
@@ -47,13 +51,49 @@ const dev = process.env.NODE_ENV !== 'production';
 const hostname = getEnvByKey('CM_BIND') || '127.0.0.1';
 const port = parseInt(getEnvByKey('CM_PORT') || '3000', 10);
 
+// Issue #331: HTTPS configuration
+const certPath = process.env.CM_HTTPS_CERT;
+const keyPath = process.env.CM_HTTPS_KEY;
+
+/** Maximum certificate file size: 1MB */
+const MAX_CERT_FILE_SIZE = 1024 * 1024;
+
+/**
+ * Validate certificate file path for security
+ * Issue #331: Certificate path validation
+ */
+function validateCertPath(filePath: string, label: string): string {
+  if (!existsSync(filePath)) {
+    console.error(`[Security] ${label} file not found: ${filePath}`);
+    // ExitCode.CONFIG_ERROR = 2 (direct number, not imported from CLI types)
+    process.exit(2);
+  }
+
+  try {
+    accessSync(filePath, fsConstants.R_OK);
+  } catch {
+    console.error(`[Security] ${label} file not readable: ${filePath}`);
+    process.exit(2);
+  }
+
+  const realPath = realpathSync(filePath);
+  const stats = statSync(realPath);
+
+  if (stats.size > MAX_CERT_FILE_SIZE) {
+    console.error(`[Security] ${label} file too large (${stats.size} bytes, max ${MAX_CERT_FILE_SIZE}): ${filePath}`);
+    process.exit(2);
+  }
+
+  return realPath;
+}
+
 // Create Next.js app
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
-  // Create HTTP server
-  const server = createServer(async (req, res) => {
+  // Request handler for both HTTP and HTTPS
+  const requestHandler = async (req: import('http').IncomingMessage, res: import('http').ServerResponse) => {
     try {
       const parsedUrl = parse(req.url!, true);
       await handle(req, res, parsedUrl);
@@ -62,10 +102,32 @@ app.prepare().then(() => {
       res.statusCode = 500;
       res.end('Internal Server Error');
     }
-  });
+  };
+
+  // Issue #331: Create HTTP or HTTPS server
+  let server: import('http').Server | import('https').Server;
+  let protocol = 'http';
+
+  if (certPath && keyPath) {
+    const validatedCertPath = validateCertPath(certPath, 'Certificate');
+    const validatedKeyPath = validateCertPath(keyPath, 'Key');
+
+    try {
+      const cert = readFileSync(validatedCertPath);
+      const key = readFileSync(validatedKeyPath);
+      server = createHttpsServer({ cert, key }, requestHandler);
+      protocol = 'https';
+      console.log('HTTPS server created with TLS certificates');
+    } catch (error) {
+      console.error('Failed to read TLS certificates:', error);
+      process.exit(2);
+    }
+  } else {
+    server = createHttpServer(requestHandler);
+  }
 
   // Setup WebSocket server
-  setupWebSocket(server);
+  setupWebSocket(server as import('http').Server);
 
   // Scan and sync worktrees on startup
   async function initializeWorktrees() {
@@ -119,7 +181,7 @@ app.prepare().then(() => {
       // Sync to database
       syncWorktreesToDB(db, worktrees);
 
-      console.log(`✓ Total: ${worktrees.length} worktree(s) synced to database`);
+      console.log(`Total: ${worktrees.length} worktree(s) synced to database`);
     } catch (error) {
       console.error('Error initializing worktrees:', error);
     }
@@ -127,7 +189,7 @@ app.prepare().then(() => {
 
   server.listen(port, async (err?: Error) => {
     if (err) throw err;
-    console.log(`> Ready on http://${hostname}:${port}`);
+    console.log(`> Ready on ${protocol}://${hostname}:${port}`);
     console.log(`> WebSocket server ready`);
 
     // Initialize worktrees after server starts

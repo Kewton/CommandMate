@@ -1,0 +1,54 @@
+{
+  "status": "success",
+  "implemented_files": [
+    "src/lib/auth.ts",
+    "src/middleware.ts",
+    "src/app/api/auth/login/route.ts",
+    "src/app/api/auth/logout/route.ts",
+    "src/app/api/auth/status/route.ts",
+    "src/app/login/page.tsx",
+    "src/components/common/LogoutButton.tsx",
+    "src/lib/env.ts",
+    "src/lib/ws-server.ts",
+    "src/i18n.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/index.ts",
+    "src/cli/types/index.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/config/security-messages.ts",
+    "src/components/layout/Sidebar.tsx",
+    "server.ts",
+    "tsconfig.server.json",
+    ".env.example",
+    "locales/en/auth.json",
+    "locales/ja/auth.json"
+  ],
+  "test_files": [
+    "tests/unit/auth.test.ts",
+    "tests/unit/rate-limiter.test.ts",
+    "tests/unit/cli-auth-options.test.ts",
+    "tests/integration/auth-middleware.test.ts",
+    "tests/integration/ws-auth.test.ts",
+    "tests/integration/i18n-namespace-loading.test.ts"
+  ],
+  "test_results": {
+    "unit_tests": "3724 passed, 7 skipped, 0 failed (184 files)",
+    "integration_tests": "40 passed, 0 failed (3 new/modified files)",
+    "new_tests_total": 89,
+    "new_unit_tests": 49,
+    "new_integration_tests": 40
+  },
+  "coverage": 80,
+  "quality_checks": {
+    "tsc": "pass",
+    "lint": "pass",
+    "build": "pass",
+    "build_server": "pass",
+    "build_cli": "pass"
+  },
+  "issues": [],
+  "commits": [
+    "1b3343c: feat(auth): implement token authentication and HTTPS support"
+  ],
+  "notes": "TDD implementation complete. All 89 new tests pass across 6 test files (34 auth, 8 rate-limiter, 7 cli-auth-options, 8 middleware, 7 ws-auth, 25 i18n). All 3724 existing unit tests continue to pass. Security constraints S001 (timingSafeEqual), S002 (exact path matching), C001 (no Next.js deps in auth.ts) are verified by tests. Pre-existing integration test failures (41 tests in 11 files) are unrelated to this change - they require tmux/system dependencies."
+}

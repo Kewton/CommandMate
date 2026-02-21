@@ -1,11 +1,14 @@
 /**
  * WebSocket Server for Real-time Communication
  * Manages WebSocket connections and room-based message broadcasting
+ * Issue #331: WebSocket authentication via Cookie header
  */
 
 import { Server as HTTPServer } from 'http';
+import { Server as HTTPSServer } from 'https';
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
+import { isAuthEnabled, parseCookies, AUTH_COOKIE_NAME, verifyToken } from './auth';
 
 interface WebSocketMessage {
   type: 'subscribe' | 'unsubscribe' | 'broadcast';
@@ -24,9 +27,27 @@ const clients = new Map<WebSocket, ClientInfo>();
 const rooms = new Map<string, Set<WebSocket>>();
 
 /**
- * Setup WebSocket server on HTTP server
+ * Check if a WebSocket error is an expected non-fatal error.
+ * Common causes include mobile browser disconnects sending malformed close frames.
  *
- * @param server - HTTP server instance
+ * @param error - Error with optional code property
+ * @returns true if the error is expected and can be silently handled
+ */
+function isExpectedWebSocketError(error: Error & { code?: string }): boolean {
+  return (
+    error.code === 'WS_ERR_INVALID_CLOSE_CODE' ||
+    error.message?.includes('Invalid WebSocket frame') ||
+    error.message?.includes('write after end') ||
+    error.message?.includes('ECONNRESET') ||
+    error.message?.includes('EPIPE')
+  );
+}
+
+/**
+ * Setup WebSocket server on HTTP or HTTPS server
+ * Issue #331: Added auth check on WebSocket upgrade
+ *
+ * @param server - HTTP or HTTPS server instance
  *
  * @example
  * ```typescript
@@ -35,7 +56,7 @@ const rooms = new Map<string, Set<WebSocket>>();
  * server.listen(3000);
  * ```
  */
-export function setupWebSocket(server: HTTPServer): void {
+export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
   wss = new WebSocketServer({ noServer: true });
 
   // Handle upgrade requests - only accept app WebSocket connections, not Next.js HMR
@@ -45,6 +66,19 @@ export function setupWebSocket(server: HTTPServer): void {
     // Let Next.js handle its own HMR WebSocket connections
     if (pathname.startsWith('/_next/')) {
       return;
+    }
+
+    // Issue #331: WebSocket authentication via Cookie header
+    if (isAuthEnabled()) {
+      const cookieHeader = request.headers.cookie || '';
+      const cookies = parseCookies(cookieHeader);
+      const token = cookies[AUTH_COOKIE_NAME];
+
+      if (!token || !verifyToken(token)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
     }
 
     wss!.handleUpgrade(request, socket, head, (ws) => {
@@ -73,15 +107,7 @@ export function setupWebSocket(server: HTTPServer): void {
     const socket = (ws as unknown as { _socket?: { on: (event: string, handler: (err: Error) => void) => void; destroy?: () => void } })._socket;
     if (socket) {
       socket.on('error', (err: Error & { code?: string }) => {
-        // Suppress common mobile browser disconnect errors
-        const isExpectedError =
-          err.code === 'WS_ERR_INVALID_CLOSE_CODE' ||
-          err.message?.includes('Invalid WebSocket frame') ||
-          err.message?.includes('write after end') ||
-          err.message?.includes('ECONNRESET') ||
-          err.message?.includes('EPIPE');
-
-        if (!isExpectedError) {
+        if (!isExpectedWebSocketError(err)) {
           console.error('[WS Socket] Error:', err.message);
         }
 
@@ -113,13 +139,7 @@ export function setupWebSocket(server: HTTPServer): void {
 
     // Handle errors (including invalid close codes from mobile browsers)
     ws.on('error', (error: Error & { code?: string }) => {
-      // Suppress noisy errors from mobile browser disconnects
-      const isExpectedError =
-        error.code === 'WS_ERR_INVALID_CLOSE_CODE' ||
-        error.message?.includes('Invalid WebSocket frame') ||
-        error.message?.includes('write after end');
-
-      if (!isExpectedError) {
+      if (!isExpectedWebSocketError(error)) {
         console.error('[WS] WebSocket error:', error.message);
       }
 
