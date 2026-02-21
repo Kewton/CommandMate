@@ -129,6 +129,8 @@ tests/
 
 | モジュール | 説明 |
 |-----------|------|
+| `src/lib/auth.ts` | トークン認証コアモジュール（Issue #331: generateToken/hashToken/verifyToken/parseDuration/parseCookies/isAuthEnabled/buildAuthCookieOptions/createRateLimiter、CLIビルド互換性制約: Next.js固有モジュール依存禁止） |
+| `src/middleware.ts` | 認証ミドルウェア（Issue #331: HTTPリクエスト認証、CM_AUTH_TOKEN_HASH未設定時は即NextResponse.next()、AUTH_EXCLUDED_PATHSの完全一致マッチング） |
 | `src/lib/env.ts` | 環境変数取得・フォールバック処理、getDatabasePathWithDeprecationWarning() |
 | `src/lib/db-path-resolver.ts` | DBパス解決（getDefaultDbPath()、validateDbPath()） |
 | `src/lib/db-migration-path.ts` | DBマイグレーション（migrateDbIfNeeded()、getLegacyDbPaths()） |
