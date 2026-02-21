@@ -1,0 +1,207 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "status": "conditionally_approved",
+  "score": 3,
+  "owasp_checklist": [
+    {
+      "id": "A01",
+      "title": "Broken Access Control",
+      "status": "warn",
+      "notes": "AUTH_EXCLUDED_PATHSのstartsWith()マッチングがパストラバーサル的な攻撃パターン（例: /loginXXX）を許容する可能性あり。AUTH_EXCLUDED_PATHSの除外パス設計自体は妥当だが、プレフィックスマッチの曖昧性を要検討。証明書ファイルパスのパストラバーサル防止が「path.resolve + 既存パターンに準拠」と記載されているが具体的実装が不明。"
+    },
+    {
+      "id": "A02",
+      "title": "Cryptographic Failures",
+      "status": "fail",
+      "notes": "SHA-256ハッシュの比較方法が設計書に未記載。verifyToken()でhashToken(input) === CM_AUTH_TOKEN_HASHの単純文字列比較が想定されるが、これはタイミング攻撃に脆弱。crypto.timingSafeEqual()の使用が必須。Cookieにトークン平文を格納する設計はHttpOnly+Secure+SameSite=Strictで保護されているが、トレードオフとして明記済み。"
+    },
+    {
+      "id": "A03",
+      "title": "Injection",
+      "status": "warn",
+      "notes": "CLIオプション（--cert, --key）のパストラバーサル対策は「path.resolve + 既存パターンに準拠」と記載されているが、具体的なバリデーションロジック（シンボリックリンク解決、ディレクトリトラバーサル検出等）が設計書に記述されていない。自前Cookieパーサーのインジェクション耐性も未検証。"
+    },
+    {
+      "id": "A04",
+      "title": "Insecure Design",
+      "status": "pass",
+      "notes": "crypto.randomBytes(32)は256ビットのエントロピーを提供し、トークン生成として十分。SHA-256ハッシュの選択もランダムトークンに対しては適切（bcryptは不要）。全体的な認証アーキテクチャは用途に対して妥当。"
+    },
+    {
+      "id": "A05",
+      "title": "Security Misconfiguration",
+      "status": "warn",
+      "notes": "HTTPS使用時のCookie Secure属性設定は設計済み。HTTP使用時の警告（AUTH_HTTP_WARNING）も設計済み。ただし、--allow-httpオプションでHTTP警告を抑制した場合、Cookie Secure=falseとなりトークンが平文送信される。この動作のリスクが十分にユーザーに伝わるか要検討。CSPヘッダーのunsafe-inline/unsafe-evalは既存設定であり本Issue対象外。"
+    },
+    {
+      "id": "A06",
+      "title": "Vulnerable Components",
+      "status": "pass",
+      "notes": "外部依存なしの設計意図は確認済み。Node.js標準のcryptoモジュールのみ使用。Cookie/期間パースも自前実装。設計書の意図通り。"
+    },
+    {
+      "id": "A07",
+      "title": "Identification and Authentication Failures",
+      "status": "warn",
+      "notes": "ブルートフォース対策（5回/IP、15分ロック）は設計済み。ただし、IP取得方法（remoteAddress vs X-Forwarded-For）の明確な設計が欠如。プロキシ環境でのIP詐称リスクあり。認証成功時のカウントリセットは設計済み。トークン有効期限管理も設計済み。"
+    },
+    {
+      "id": "A08",
+      "title": "Software and Data Integrity Failures",
+      "status": "warn",
+      "notes": "証明書ファイルの整合性チェック（cert/keyのペア一致検証）が設計されていない。readFileSync()でファイルを読み込むが、証明書と秘密鍵のペア整合性はhttps.createServer()のエラーに委ねている。明示的な事前検証が望ましい。"
+    },
+    {
+      "id": "A09",
+      "title": "Security Logging and Monitoring Failures",
+      "status": "warn",
+      "notes": "認証失敗時のログ記録が設計書に明記されていない。レート制限による429応答はあるが、認証失敗イベント・認証成功イベント・ロックアウトイベントのログ記録方針が不足。既存のsecurity-logger.tsとの統合方針も未記載。"
+    },
+    {
+      "id": "A10",
+      "title": "Server-Side Request Forgery (SSRF)",
+      "status": "warn",
+      "notes": "証明書ファイルパスの検証は「path.resolve + 既存パターンに準拠」と記載あるが、具体的な制約（許可ディレクトリ、シンボリックリンク追跡禁止等）が未記載。start.tsでのexistsSync()チェックのみでは不十分な可能性。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "S001",
+      "severity": "must_fix",
+      "category": "暗号化",
+      "owasp_ref": "A02",
+      "title": "タイミング攻撃対策の欠如: verifyToken()でcrypto.timingSafeEqual()が未使用",
+      "description": "設計書のverifyToken()はhashToken(input)とCM_AUTH_TOKEN_HASHの比較を行うが、比較方法が明記されていない。JavaScript/TypeScriptの === 演算子による文字列比較はタイミング攻撃に脆弱であり、攻撃者がレスポンス時間の差異からハッシュ値を1バイトずつ推測できる可能性がある。SHA-256ハッシュは64文字のhex文字列であるため、理論上64回の試行でハッシュ値全体を特定できる。crypto.timingSafeEqual()を使用した定数時間比較が必須。",
+      "location": "Section 2.3 verifyToken()、Section 6.3 トークン管理",
+      "suggestion": "verifyToken()の設計にcrypto.timingSafeEqual(Buffer.from(computedHash), Buffer.from(storedHash))の使用を明記すること。hashToken()の戻り値をBufferに変換してから比較する方式を設計書に追記。"
+    },
+    {
+      "id": "S002",
+      "severity": "must_fix",
+      "category": "OWASP",
+      "owasp_ref": "A01",
+      "title": "AUTH_EXCLUDED_PATHSのプレフィックスマッチによる意図しないパス除外リスク",
+      "description": "middleware.tsのAUTH_EXCLUDED_PATHSチェックにpathname.startsWith(path)を使用しているが、これにより'/login'で始まる任意のパス（例: '/loginCallback', '/login/../admin'）が認証をバイパスする。現在のAUTH_EXCLUDED_PATHSは ['/login', '/api/auth/login', '/api/auth/logout', '/api/auth/status'] であり、特に'/login'はNext.jsのルーティングにより'/loginXXX'が404になるため実害は限定的だが、将来的なルート追加時にリスクが顕在化する。また'/api/auth/login'のプレフィックスマッチにより'/api/auth/loginAdmin'等も除外される。",
+      "location": "Section 5.3 middleware.ts認証除外パス、Section 2.3 AUTH_EXCLUDED_PATHS",
+      "suggestion": "startsWith()の代わりに完全一致（===）またはパスセグメント単位のマッチング（pathname === path || pathname.startsWith(path + '/')）を使用する設計に変更。AUTH_EXCLUDED_PATHSのマッチングルールを設計書に明記すること。"
+    },
+    {
+      "id": "S003",
+      "severity": "must_fix",
+      "category": "入力検証",
+      "owasp_ref": "A03",
+      "title": "証明書ファイルパスのパストラバーサル防止設計が不十分",
+      "description": "Section 9.3で証明書バリデーションとして「パストラバーサル防止（path.resolve + 既存パターンに準拠）」と記載されているが、具体的なバリデーションロジックが設計されていない。CLIオプション--cert/--keyは任意のファイルパスを受け取るため、シンボリックリンク解決（realpath）、許可ディレクトリ制限、パストラバーサル文字列（../）の検出等の具体的な対策が必要。既存のenv-setup.tsのパストラバーサル防止パターンとの一貫性も要検討。",
+      "location": "Section 9.3 証明書バリデーション（start.ts）",
+      "suggestion": "具体的なバリデーションロジックを設計書に追記。(1) path.resolve()による絶対パス正規化、(2) fs.realpathSync()によるシンボリックリンク解決、(3) ファイル拡張子チェック（.pem/.crt/.key等のホワイトリスト）、(4) ファイルサイズ上限チェック。env-setup.tsの既存パストラバーサル防止パターンを参照し、一貫したセキュリティ対策を適用すること。"
+    },
+    {
+      "id": "S004",
+      "severity": "should_fix",
+      "category": "ログ",
+      "owasp_ref": "A09",
+      "title": "認証イベントのセキュリティログ記録方針が未設計",
+      "description": "設計書に認証成功・認証失敗・ロックアウト発生・ロックアウト解除のログ記録方針が記載されていない。既存のsrc/cli/utils/security-logger.tsとの統合方針も未定。セキュリティイベントのログはインシデント検出・フォレンジック・コンプライアンスに不可欠。特にブルートフォース攻撃の検出には認証失敗ログが必須。",
+      "location": "Section 6.2 ブルートフォース対策、Section 6.3 トークン管理",
+      "suggestion": "以下のセキュリティイベントのログ記録方針を設計書に追記。(1) 認証失敗: IPアドレス、タイムスタンプ、試行回数（トークン値はログに含めない）、(2) ロックアウト発生: IPアドレス、ロックアウト期間、(3) 認証成功: IPアドレス、タイムスタンプ（頻度に注意）、(4) トークン期限切れ: タイムスタンプ。ログレベルはwarn（失敗/ロックアウト）、info（成功）を使用。"
+    },
+    {
+      "id": "S005",
+      "severity": "should_fix",
+      "category": "認証",
+      "owasp_ref": "A07",
+      "title": "レート制限のIPアドレス取得方法が未設計",
+      "description": "設計書でIPベースのレート制限（5回/IP、15分ロック）が設計されているが、IPアドレスの取得方法が明記されていない。Next.js middlewareではrequest.ip（X-Forwarded-Forベース）またはrequest.headers.get('x-forwarded-for')が使用可能だが、リバースプロキシ不在時はsocket.remoteAddressが正しいIPとなる。X-Forwarded-Forヘッダーは攻撃者が詐称可能であり、信頼できるプロキシチェーンの外では安全に使用できない。",
+      "location": "Section 6.2 ブルートフォース対策",
+      "suggestion": "IPアドレス取得の優先順位を設計書に明記: (1) Next.js middlewareではrequest.ipを使用（Next.jsがtrusted headersを処理）、(2) ログインAPIではreq.socket.remoteAddressを使用、(3) X-Forwarded-Forは直接参照しない（Next.jsのtrustedプロキシ設定に委ねる）。設計書のトレードオフセクションに「プロキシ背後で同一IP問題」が記載済みだが、具体的な取得ロジックも追記すること。"
+    },
+    {
+      "id": "S006",
+      "severity": "should_fix",
+      "category": "入力検証",
+      "owasp_ref": "A03",
+      "title": "自前Cookieパーサーのセキュリティ検証が不十分",
+      "description": "設計書でCookieパースを「自前実装（split(';')）」としているが、エッジケースへの対応が未設計。具体的には: (1) Cookie値に';'を含む場合の処理、(2) 同名Cookie複数送信時の動作、(3) Cookie値の最大長制限、(4) 不正なUTF-8シーケンスの処理。parseCookieToken()のテストケースに「不正形式のパース検証」が含まれているが、具体的な不正形式パターンが未定義。",
+      "location": "Section 3 技術選定（Cookieパース）、Section 16.1 parseCookieToken()テスト",
+      "suggestion": "parseCookieToken()の設計に以下を追記: (1) Cookie値の最大長チェック（例: 4096バイト制限）、(2) トークン文字列のフォーマット検証（/^[a-f0-9]{64}$/）、(3) 同名Cookie複数存在時は最初のマッチを使用。テストケースにこれらのエッジケースを追加。"
+    },
+    {
+      "id": "S007",
+      "severity": "should_fix",
+      "category": "セッション管理",
+      "owasp_ref": "A05",
+      "title": "--allow-httpオプション使用時のセキュリティリスク警告が不十分",
+      "description": "HTTP上での認証トークン送信は、ネットワーク上の中間者攻撃によりトークンが傍受される重大なリスクがある。--allow-httpはこの警告を抑制するが、ユーザーへの最終確認プロンプト（「本当にHTTPで続行しますか？」等）が設計されていない。CLIの対話型確認により、誤った使用を防ぐべき。",
+      "location": "Section 7 CLIオプション組み合わせルール、Section 12 (C015) security-messages.ts",
+      "suggestion": "--allow-httpオプション使用時にCLI対話型確認プロンプトを追加する設計を検討。例: 「WARNING: Using authentication over HTTP exposes tokens to network interception. Continue? [y/N]」。または、AUTH_HTTP_WARNINGの文言に具体的なリスク説明を追加。"
+    },
+    {
+      "id": "S008",
+      "severity": "should_fix",
+      "category": "暗号化",
+      "owasp_ref": "A08",
+      "title": "証明書・秘密鍵ペアの整合性検証が未設計",
+      "description": "server.tsでreadFileSync()により証明書と秘密鍵を読み込むが、両者のペア整合性（証明書の公開鍵と秘密鍵が対応すること）の事前検証が設計されていない。不一致の場合、https.createServer()がエラーを投げるが、エラーメッセージが暗号的で運用者にとって不明瞭になる可能性がある。",
+      "location": "Section 9.1 server.ts の条件分岐",
+      "suggestion": "証明書読み込み後にcrypto.createPublicKey(cert)とcrypto.createPrivateKey(key)でパース可能性を検証し、ユーザーフレンドリーなエラーメッセージを表示する設計を追加。ただし、KISS原則との兼ね合いで、https.createServer()のエラーをキャッチして分かりやすいメッセージに変換する方式も可。"
+    },
+    {
+      "id": "S009",
+      "severity": "nice_to_have",
+      "category": "認証",
+      "owasp_ref": "A07",
+      "title": "レート制限のMapベース実装のメモリ枯渇攻撃リスク",
+      "description": "Map<string, RateLimitEntry>によるレート制限は、大量の異なるIPからリクエストを送信するDDoS攻撃によりMapのサイズが無制限に増大し、メモリ枯渇を引き起こす可能性がある。1時間ごとのクリーンアップでは、攻撃中の短時間でのメモリ増大を防げない。",
+      "location": "Section 6.2 ブルートフォース対策、Section 8.3 メモリ管理",
+      "suggestion": "Mapのエントリ上限数（例: MAX_RATE_LIMIT_ENTRIES = 10000）を設定し、上限超過時は最も古いエントリを削除するLRU方式を検討。単一プロセスのローカル開発ツールとしてのリスクレベルは低いため、nice_to_haveとする。"
+    },
+    {
+      "id": "S010",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "owasp_ref": "A05",
+      "title": "環境変数CM_AUTH_TOKEN_HASHのプロセス一覧表示リスク",
+      "description": "設計書のトレードオフセクションに「プロセス一覧で見える可能性（ハッシュのみなのでリスク低）」と記載されているが、spawn時のenv経由伝達であればps auxにはコマンドライン引数ではなく環境変数として渡されるため、/proc/<pid>/environで読取可能（Linux）。macOSではps eで表示可能。ハッシュ値のみとはいえ、攻撃者がハッシュを知りえた場合、レインボーテーブル攻撃は不可能（256bit random token）だが、リスク認識は設計書に残すべき。",
+      "location": "Section 6.3 トークン管理、Section 13 設計上の決定事項",
+      "suggestion": "現在の設計（ハッシュのみ伝達）で十分だが、リスク記述をより具体的に更新: 「256ビットランダムトークンのSHA-256ハッシュであるため、ハッシュ値の露出によるトークン復元は計算的に不可能。/proc/<pid>/environ等で読取可能だが実質的リスクは無視可能」"
+    },
+    {
+      "id": "S011",
+      "severity": "nice_to_have",
+      "category": "認証",
+      "owasp_ref": "A07",
+      "title": "トークン有効期限切れ後の再認証フローにおけるレート制限の考慮",
+      "description": "トークン有効期限切れ後、ユーザーはCLIで新トークンを発行してログイン画面で再入力する必要がある。この際、旧トークンでの認証試行がレート制限カウントに加算される可能性がある。正規ユーザーが意図せずロックアウトされるリスクがある。",
+      "location": "Section 6.2 ブルートフォース対策、Section 15 クライアント側トークン期限切れハンドリング",
+      "suggestion": "期限切れトークンによる認証試行はレート制限カウントに加算しない設計を検討。verifyToken()の結果を「無効」と「期限切れ」に分類し、期限切れの場合はカウント加算をスキップする方式。"
+    },
+    {
+      "id": "S012",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "owasp_ref": "A02",
+      "title": "auth-helper.tsとauth.tsの暗号アルゴリズム重複実装による不整合リスク",
+      "description": "C001対応としてauth-helper.ts（CLI側）とauth.ts（サーバー側）に同一の暗号アルゴリズムを重複実装している。将来的にアルゴリズム変更（SHA-256からSHA-3等）が必要になった場合、両ファイルの同期更新が必要であり、片方の更新漏れにより認証不全が発生するリスクがある。テストで互換性を検証する設計は含まれている。",
+      "location": "Section 11.2 auth-helper.ts、Section 16.2 auth-helper.tsテスト",
+      "suggestion": "現在の設計（テストによる互換性検証）で十分だが、auth-helper.tsとauth.tsの両方に「IMPORTANT: This algorithm MUST match auth.ts/auth-helper.ts」コメントを追加し、変更時の同期必須を明示することを推奨。"
+    }
+  ],
+  "summary": {
+    "total": 12,
+    "must_fix": 3,
+    "should_fix": 5,
+    "nice_to_have": 4
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "high",
+    "operational": "low"
+  },
+  "overall_assessment": "設計方針書は認証・HTTPS対応の基本的なセキュリティアーキテクチャを網羅しているが、OWASP A02（暗号化の失敗）に関するタイミング攻撃対策の欠如が最も重大な問題である。crypto.timingSafeEqual()の使用は必須改善項目として対応が必要。AUTH_EXCLUDED_PATHSのプレフィックスマッチによるバイパスリスクと証明書パスのパストラバーサル防止も必須対応が必要。セキュリティログ記録方針、IPアドレス取得方法、Cookieパーサーの堅牢性については推奨改善として設計書の補強を求める。全体として、KISS/YAGNI原則に基づくシンプルな設計は評価できるが、セキュリティに関わる箇所ではシンプルさよりも安全性を優先すべきである。",
+  "reviewed_files": [
+    "dev-reports/design/issue-331-token-auth-design-policy.md"
+  ],
+  "timestamp": "2026-02-21T00:00:00Z"
+}

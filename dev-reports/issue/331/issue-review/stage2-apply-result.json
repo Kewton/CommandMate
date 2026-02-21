@@ -1,0 +1,139 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 331,
+  "apply_date": "2026-02-21",
+  "applied_findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "setupWebSocket()のHTTPS Server型互換性を設計方針・影響範囲テーブル・実装タスクに追記。引数型をhttp.Server | https.Server（またはnet.Server）に拡張する方針を明記"
+    },
+    {
+      "id": "F002",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "DaemonManagerへの認証・HTTPSオプション伝達フローを設計方針に追記。daemon.tsを変更対象ファイルに追加。デーモンモード対応セクションを実装タスクに新設。デーモンモードの受入条件を追加"
+    },
+    {
+      "id": "F003",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "認証の責務境界セクションを新設し、middleware.ts（HTTPリクエスト担当）とws-server.ts（WebSocket担当）の役割分担を明確化。WebSocket upgradeリクエストがNext.jsパイプラインを通らない点を明記"
+    },
+    {
+      "id": "F004",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "トークンのCLI-サーバー間データフローセクションを新設。CLI→環境変数（CM_AUTH_TOKEN_HASH）→server.ts→auth.tsメモリロードの5段階フローを詳細記載。foreground/daemonモード両方の伝達経路を明記"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "環境変数名をCM_AUTH_TOKEN_HASHに変更し、旧CM_AUTH_TOKENとの衝突を回避。旧.envにCM_AUTH_TOKENが残っている場合の警告バリデーションを設計方針・タスク・受入条件に追加"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "src/cli/utils/daemon.tsを変更対象ファイルテーブルに追加。変更内容として認証・HTTPSオプション環境変数伝達、getStatus()のHTTPS URL対応を記載"
+    },
+    {
+      "id": "F007",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "src/cli/index.tsを変更対象ファイルテーブル・実装タスクに追加。startコマンドのcommander option定義追加タスクを明記"
+    },
+    {
+      "id": "F008",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "WebSocket Cookieパースのセキュリティ方針を設計方針に追記。auth.tsにCookieパースユーティリティ関数追加をタスクに記載。next/headersのcookies()がEdge Runtimeのため使用不可である点を明記"
+    },
+    {
+      "id": "F009",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "security-messages.tsの更新を変更対象ファイル・実装タスクに追加。--auth有効時のREVERSE_PROXY_WARNING条件分岐を設計方針に追記"
+    },
+    {
+      "id": "F010",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "locales/en/auth.json, locales/ja/auth.jsonを変更対象ファイルテーブルに追加。i18n対応セクションを実装タスクに新設"
+    },
+    {
+      "id": "F011",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "auth-expireのフォーマット仕様（Nh/Nd/Nm、最小1h・最大30d）を設計方針に明記。CLIオプションタスクにサポートフォーマット・バリデーション要件を追加。受入条件に無効フォーマット時のエラー確認を追加"
+    },
+    {
+      "id": "F012",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "証明書パスのバリデーション方針を具体化。resolveSecurePath()の不適切性を説明し、存在確認・読み取り権限・realpathSync・ファイルサイズ上限の4段階バリデーションを設計方針・タスクに記載"
+    },
+    {
+      "id": "F013",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "テスト計画セクションを実装タスクに新設（5カテゴリ）。テストファイル一覧テーブルを影響範囲に追加。テストの受入条件を追加"
+    },
+    {
+      "id": "F014",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Env interfaceへのフィールド追加方針を設計方針に明記。オプショナルフィールドとして追加する方針、ENV_MAPPINGへの旧名フォールバック不要の判断を記載"
+    },
+    {
+      "id": "F015",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "ログアウトUXフロー（ログアウト後のログインページリダイレクト、サイドバー下部へのログアウトボタン配置）を実装タスクに追記"
+    },
+    {
+      "id": "F016",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "トークン再表示機能は便利だが、トークンをファイルに永続化するとセキュリティリスクが増加する。初回実装では見送り、ユーザーフィードバックに応じて将来対応を検討"
+    },
+    {
+      "id": "F017",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "security-guide.mdのドキュメントタスクにMigration from CM_AUTH_TOKENセクション更新とSecurity Checklist更新を追加。受入条件にもMigrationセクション更新の確認を追加"
+    },
+    {
+      "id": "F018",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "ブルートフォース対策にIPアドレス取得方針（req.socket.remoteAddress優先、リバースプロキシ対応は将来課題）を追記"
+    },
+    {
+      "id": "F019",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "フェーズ分割案（Phase 1: 認証コア、Phase 2: HTTPS、Phase 3: ブルートフォース・テスト・ドキュメント）を参考セクションとして追加"
+    }
+  ],
+  "summary": {
+    "total_findings": 19,
+    "applied": 18,
+    "skipped": 1,
+    "must_fix_applied": 4,
+    "must_fix_total": 4,
+    "should_fix_applied": 10,
+    "should_fix_total": 10,
+    "nice_to_have_applied": 4,
+    "nice_to_have_total": 5
+  },
+  "update_summary": "全19件のレビュー指摘のうち18件を反映。Must Fix 4件は全て反映済み（F001: setupWebSocket型互換性、F002: DaemonManagerオプション伝達、F003: middleware/ws-server認証責務境界、F004: トークンデータフロー）。Should Fix 10件も全て反映済み（F005-F014: 環境変数名衝突回避、変更対象ファイル追加、Cookieパース方針、テスト計画等）。Nice to Have 5件のうち4件を反映、F016（トークン再表示）のみセキュリティリスクのためスキップ。主な追加セクション: トークンのCLI-サーバー間データフロー、認証の責務境界、デーモンモード対応タスク、テスト計画、フェーズ分割案、レビュー履歴。",
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/331"
+  }
+}

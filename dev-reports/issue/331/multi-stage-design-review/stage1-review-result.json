@@ -1,0 +1,149 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "R001",
+      "severity": "should_fix",
+      "category": "SRP",
+      "title": "auth.tsにトークン生成・検証・レート制限・Cookieパースの4責務が集中",
+      "description": "設計方針書ではsrc/lib/auth.tsにgenerateToken()、hashToken()、verifyToken()、isTokenExpired()、parseDuration()、parseCookieToken()、createRateLimiter()の7関数を配置する。トークン生成/検証とレート制限は異なる変更理由を持つ独立した関心事である。レート制限はIPベースのMap管理・クリーンアップ・ロックアウト判定という独自のライフサイクルを持ち、認証トークンの生成/検証とは変更タイミングが異なる。",
+      "location": "Section 2.3 レイヤー構成、Section 6.2 ブルートフォース対策",
+      "suggestion": "createRateLimiter()およびレート制限関連の型定義(RateLimitEntry, RATE_LIMIT_CONFIG)をsrc/lib/auth-rate-limiter.tsに分離することを検討する。auth.tsからはimportして使用する形にすれば、auth.tsの責務は「トークンの生成・検証・Cookie操作」に限定される。ただし、KISS原則との兼ね合いでファイル分割が過剰と判断される場合は、auth.ts内で明確なセクションコメントで区切る程度でも許容できる。"
+    },
+    {
+      "id": "R002",
+      "severity": "must_fix",
+      "category": "OCP",
+      "title": "server.tsへのHTTPS条件分岐追加がOCPに抵触する可能性",
+      "description": "現在のserver.tsはcreateServer()による単一のHTTPサーバー生成に集中している。設計方針書(Section 9.1)ではserver.ts内にif/elseでHTTP/HTTPSを条件分岐する設計となっている。これはserver.tsの既存ロジック(WebSocket初期化、worktree同期、graceful shutdown)と密結合になり、将来的にmTLSやHTTP/2対応等でserver.tsの変更が必要になる。",
+      "location": "Section 9.1 server.tsの条件分岐",
+      "suggestion": "サーバーファクトリ関数（例: createAppServer()）をsrc/lib/server-factory.tsに抽出し、HTTP/HTTPSの条件分岐をカプセル化する。server.tsはファクトリから返されたserverインスタンスを使うだけにする。例: const server = createAppServer({ certPath, keyPath, requestHandler }); これにより、server.tsの既存コードは変更不要になり、OCPに準拠する。ただし、KISS原則との兼ね合いで現時点のスコープではserver.ts内の条件分岐でも許容可能。その場合、設計書にトレードオフとして明記すべき。"
+    },
+    {
+      "id": "R003",
+      "severity": "nice_to_have",
+      "category": "DIP",
+      "title": "middleware.tsとws-server.tsがauth.tsの具象関数に直接依存",
+      "description": "設計方針書では、middleware.tsとws-server.tsの両方がauth.tsのverifyToken()やparseCookieToken()を直接呼び出す設計になっている。現時点ではトークン認証のみなので問題は小さいが、将来的にAPIキー認証やOAuth対応を追加する場合、middleware.tsとws-server.tsの両方を変更する必要がある。",
+      "location": "Section 2.2 認証の責務境界",
+      "suggestion": "現時点ではYAGNI原則に基づき具象関数への直接依存で問題ない。将来の拡張時に認証戦略インターフェースを導入するための設計メモを設計書に残しておくと良い。auth.tsの関数群が単一のverifyRequest(request): AuthResult形式の統合関数を提供すれば、呼び出し側の変更を最小化できる。"
+    },
+    {
+      "id": "R004",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "CLIオプション組み合わせルールの複雑性",
+      "description": "Section 7では--auth、--https、--cert、--key、--allow-httpの5つのオプションがあり、組み合わせルール表が5パターン定義されている。--auth --cert --key指定時に--httpsが暗黙的に有効化される挙動や、--auth --https同時指定で--httpsが冗長として無視される挙動は、ユーザーにとって理解しにくい可能性がある。",
+      "location": "Section 7 CLIオプションと環境変数マッピング",
+      "suggestion": "暗黙的な挙動を減らすために、(1) --auth指定時にcert/keyがあればHTTPS、なければHTTP+警告 という単純なルールに集約するか、(2) --httpsの冗長指定時はサイレント無視ではなく「--httpsは--auth --cert --key指定時は不要です」と明示的にログ出力する。いずれにしても現在の5パターンは実用上問題ないレベルではある。"
+    },
+    {
+      "id": "R005",
+      "severity": "should_fix",
+      "category": "YAGNI",
+      "title": "parseDuration()の汎用性がYAGNIに抵触する可能性",
+      "description": "Section 3の技術選定ではparseDuration()を「'24h'/'48h'の限定的パースのみ」と説明しているが、Section 2.3では汎用的な'24h', '48h' → ms変換と記述されている。--auth-expire <dur>オプションはユーザーが任意の値を入力できるため、実装時に'1h', '12h', '7d'等への対応要求が自然に生まれる。「限定的パース」の範囲を設計書で明確に定義すべき。",
+      "location": "Section 2.3 レイヤー構成、Section 3 技術選定",
+      "suggestion": "parseDuration()がサポートするフォーマットをホワイトリスト方式で明記する（例: ALLOWED_DURATIONS配列として'1h','6h','12h','24h','48h','72h','7d'を定義）。既にauto-yes-config.tsでALLOWED_DURATIONS定数パターンが存在するため、同様のアプローチで一貫性を保てる。"
+    },
+    {
+      "id": "R006",
+      "severity": "must_fix",
+      "category": "DRY",
+      "title": "Cookie名定数の重複リスク",
+      "description": "設計方針書ではCookie名'cm_auth_token'がSection 4.2のCookie仕様テーブル、Section 5.2のlogoutレスポンス例、middleware.tsのランタイムロジック、ws-server.tsのCookieパースの少なくとも4箇所で使用される。定数化が設計書に明記されていないため、実装時にハードコードされた文字列が散在するリスクがある。",
+      "location": "Section 4.2 Cookie仕様、Section 5.2 リクエスト/レスポンス形式",
+      "suggestion": "auth.tsにAUTH_COOKIE_NAME = 'cm_auth_token' as constを定義し、middleware.ts、ws-server.ts、login/logout APIルート全てからこの定数を参照する設計を明記する。同様に、AUTH_EXCLUDED_PATHS配列もauth.ts（またはsrc/config/auth-config.ts）に定義して一元化すべき。"
+    },
+    {
+      "id": "R007",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "Cookieパースロジックの重複リスク（middleware.ts vs ws-server.ts）",
+      "description": "Section 2.2では、middleware.tsはCookieからトークンを取得し、ws-server.tsもheaders.cookieから手動パースしてトークンを取得する。parseCookieToken()がauth.tsに定義されるため関数自体はDRYだが、呼び出しパターン（Cookie取得 → パース → ハッシュ比較 → 期限チェック → 結果判定）がmiddleware.tsとws-server.tsで重複する可能性がある。",
+      "location": "Section 2.2 認証の責務境界",
+      "suggestion": "auth.tsにauthenticateRequest(cookieHeader: string | undefined): AuthResultのような統合認証関数を追加し、Cookie取得→パース→検証→期限チェックの一連のフローを一元化する。middleware.tsはNextRequestからcookieHeaderを抽出して渡すだけ、ws-server.tsはIncomingMessageからcookieHeaderを抽出して渡すだけにする。"
+    },
+    {
+      "id": "R008",
+      "severity": "nice_to_have",
+      "category": "命名",
+      "title": "環境変数CM_AUTH_ENABLED=1の命名がCM_*パターンと一貫しているが、boolean値の表現が不統一",
+      "description": "既存の環境変数（CM_ROOT_DIR, CM_PORT, CM_BIND, CM_DB_PATH等）は全て文字列値だが、CM_AUTH_ENABLED=1とCM_HTTPS_ENABLED=1はboolean的な0/1値を使用する。CM_AUTH_ALLOW_HTTP=1も同様。既存コードベースにboolean型環境変数の前例がないため、値の解釈方法（'1'のみtrue? 'true'もtrue?）を設計書で明記すべき。",
+      "location": "Section 7 CLIオプションと環境変数マッピング",
+      "suggestion": "Section 7にboolean型環境変数の解釈ルールを追記する。例:「値が'1'の場合のみ有効。未設定または他の値は無効として扱う。」これは既存のenv.tsのバリデーションパターンと一貫性を保つ。"
+    },
+    {
+      "id": "R009",
+      "severity": "should_fix",
+      "category": "エラーハンドリング",
+      "title": "証明書ファイル読み込みエラーのハンドリングが不十分",
+      "description": "Section 9.1ではreadFileSync(certPath)とreadFileSync(keyPath)をtry-catchなしで呼び出している。Section 9.3ではstart.tsでファイル存在確認を行うが、server.tsでの読み込み時にファイルが破損・権限不足・シンボリックリンク切れ等の場合のエラーハンドリングが記載されていない。サーバー起動時にuncaught exceptionでクラッシュする可能性がある。",
+      "location": "Section 9.1 server.tsの条件分岐、Section 9.3 証明書バリデーション",
+      "suggestion": "server.tsの証明書読み込み部分にtry-catchを追加し、読み込み失敗時は明確なエラーメッセージを表示してprocess.exit(ExitCode.CONFIG_ERROR)で終了する設計を明記する。エラーメッセージには失敗したファイルパスと原因（権限不足、フォーマット不正等）を含める。"
+    },
+    {
+      "id": "R010",
+      "severity": "should_fix",
+      "category": "エラーハンドリング",
+      "title": "レート制限のgraceful shutdown時のcleanupタイマー解放が不明確",
+      "description": "Section 6.2ではsetInterval(1時間)でレート制限エントリのクリーンアップを行い、gracefulShutdownでclearIntervalすると記載されている。しかし、createRateLimiter()が返すクリーンアップハンドル（clearInterval用のintervalId）をどのようにserver.tsのgracefulShutdown関数に伝達するかの設計が不明確。現在のserver.tsのgracefulShutdown()はstopAllPolling()、stopAllAutoYesPolling()、closeWebSocket()を呼ぶパターンだが、レート制限のクリーンアップはこのパターンに統合されていない。",
+      "location": "Section 6.2 ブルートフォース対策、Section 14 変更対象ファイル一覧（server.ts）",
+      "suggestion": "createRateLimiter()がdestroy()またはstop()メソッドを持つオブジェクトを返す設計にし、server.tsのgracefulShutdown()でrateLimiter.destroy()を呼ぶ。または、auth.tsにstopRateLimitCleanup()エクスポート関数を定義し、既存のstopAllPolling()パターンに合わせる。"
+    },
+    {
+      "id": "R011",
+      "severity": "nice_to_have",
+      "category": "OCP",
+      "title": "i18n namespace追加パターンの拡張性",
+      "description": "Section 10.2ではsrc/i18n.tsに直接authのimportを追加する設計になっている。現在のi18n.tsは5つのnamespace（common, worktree, autoYes, error, prompt）を個別にimportしており、namespace追加のたびにi18n.tsを修正する必要がある。これは既存のパターンに従っているため問題ではないが、namespaceが増え続ける場合の拡張性への懸念がある。",
+      "location": "Section 10.2 src/i18n.ts変更",
+      "suggestion": "現時点では既存パターンに従うのが正しい判断。6つ目のnamespace追加であれば影響は小さい。将来的にnamespace数が10を超える場合は、動的import方式への移行を検討する。"
+    },
+    {
+      "id": "R012",
+      "severity": "must_fix",
+      "category": "DRY",
+      "title": "認証有効/無効判定ロジックの一元化が不十分",
+      "description": "設計方針書では認証有効/無効の判定を3箇所で行う: (1) middleware.tsの冒頭ガードでprocess.env.CM_AUTH_TOKEN_HASHの有無チェック、(2) ws-server.tsのupgradeハンドラーで同様のチェック、(3) auth/status APIで{ authEnabled: boolean }を返す判定。この判定ロジック「CM_AUTH_TOKEN_HASHが設定されているか」が3箇所に分散すると、将来的に判定条件が変わった場合（例: 期限切れで自動無効化）に全箇所の修正が必要になる。",
+      "location": "Section 5.4 認証無効時の動作保証、Section 2.2 認証の責務境界",
+      "suggestion": "auth.tsにisAuthEnabled(): booleanを定義し、全箇所からこの関数を使用する設計を明記する。判定条件の変更がauth.tsだけで完結するようになる。"
+    },
+    {
+      "id": "R013",
+      "severity": "nice_to_have",
+      "category": "命名",
+      "title": "ファイル命名パターンの一貫性確認",
+      "description": "新規ファイルsrc/lib/auth.tsは既存の命名パターン（src/lib/claude-session.ts、src/lib/response-poller.ts、src/lib/auto-yes-manager.ts等のハイフン区切り複合名）と比較して短い。機能名として十分明確だが、将来的にOAuth等の別認証方式が追加された場合にauth.tsとの名前衝突リスクがある。",
+      "location": "Section 2.3 レイヤー構成",
+      "suggestion": "現時点ではauth.tsで問題ない。YAGNI原則に基づき、将来のリネームは必要になった時点で行う。token-auth.tsのような具体的な命名にする選択肢もあるが、過度な先行投資となる。"
+    },
+    {
+      "id": "R014",
+      "severity": "should_fix",
+      "category": "エラーハンドリング",
+      "title": "トークン期限切れ時のクライアント側UX設計が不足",
+      "description": "Section 6.3ではトークン期限切れについて言及しているが、クライアント側でトークンが期限切れになった場合のUXフローが設計書に記載されていない。APIリクエストが401を返した場合に自動的にログイン画面にリダイレクトするのか、エラーメッセージを表示するのか、WebSocket接続が切断された場合の再認証フローはどうなるのか等が不明。",
+      "location": "Section 5.2 リクエスト/レスポンス形式、Section 6.3 トークン管理",
+      "suggestion": "設計方針書にクライアント側の期限切れハンドリングを追記する。例: (1) middleware.tsが401レスポンスを返す際にLocation: /loginヘッダーを付与、(2) APIルートの401レスポンス時にフロントエンドでwindow.location.href = '/login'にリダイレクト、(3) WebSocket切断時は再接続ループ内でauth/statusを確認し、authEnabled=trueかつ401ならログイン画面へ遷移。"
+    },
+    {
+      "id": "R015",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": "tsconfig.server.jsonへのauth.ts追加はtsconfig.cli.jsonとの二重include",
+      "description": "Section 11.2ではauth.tsはCLI側からも参照される（start.tsがgenerateToken()を呼ぶ）と説明されているが、Section 11.1ではtsconfig.server.jsonにもauth.tsを追加する。tsconfig.cli.jsonのincludeパターンに'src/lib/auth.ts'が含まれるのか、それとも'src/cli/**/*'のみなのかが不明確。CLIビルドがsrc/lib/auth.tsを参照する場合、tsconfig.cli.jsonのincludeにも追加が必要になる可能性がある。",
+      "location": "Section 11.1 tsconfig.server.json、Section 11.2 auth.tsのCLIビルド互換性制約",
+      "suggestion": "tsconfig.cli.jsonの現在のincludeパターンを確認し、src/lib/auth.tsがCLIビルドでも解決可能かを設計書に明記する。もしtsconfig.cli.jsonに'src/lib/auth.ts'の追加が必要なら、Section 14の変更対象ファイル一覧にtsconfig.cli.jsonを追加する。"
+    }
+  ],
+  "summary": {
+    "total": 15,
+    "must_fix": 3,
+    "should_fix": 6,
+    "nice_to_have": 6
+  },
+  "overall_assessment": "設計方針書はKISS/YAGNI原則を強く意識しており、JWT・セッションDB・外部認証ライブラリ等の過剰な技術を適切に排除している。後方互換性最優先の方針も明確で、認証無効時（--authなし）の動作保証が設計されている点は評価できる。主要な改善点は3つ: (1) 認証有効/無効判定ロジックの一元化（isAuthEnabled()関数の追加）、(2) Cookie名やAUTH_EXCLUDED_PATHS等の定数の一元化、(3) server.tsへのHTTPS分岐追加のOCP準拠性。これらは実装前に設計書を修正することで、実装時の手戻りを防止できる。全体として設計品質は高く、conditional approvedの評価とする。"
+}

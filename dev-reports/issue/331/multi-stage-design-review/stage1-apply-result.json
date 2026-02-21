@@ -1,0 +1,25 @@
+{
+  "stage": 1,
+  "applied_findings": ["R002", "R006", "R012"],
+  "applied_should_fix": ["R001", "R005", "R007", "R009", "R010", "R014"],
+  "applied_nice_to_have": ["R003", "R004", "R008", "R011", "R013", "R015"],
+  "skipped_findings": [],
+  "update_summary": "Stage 1設計原則レビューの全15件の指摘事項を設計方針書に反映。Must Fix 3件: (R002) server.ts HTTPS条件分岐のOCPトレードオフをSection 9.1/13に明記、(R006) AUTH_COOKIE_NAME/AUTH_EXCLUDED_PATHS定数をauth.tsに一元定義しSection 2.3/5.3を更新、(R012) isAuthEnabled()関数をauth.tsに追加しSection 2.3/5.4を更新。Should Fix 6件: (R001) レート制限分離の将来検討メモ、(R005) ALLOWED_AUTH_DURATIONSホワイトリスト、(R007) authenticateRequest()統合認証関数、(R009) 証明書読み込みエラーハンドリング、(R010) レート制限destroy()メソッド設計、(R014) クライアント側期限切れハンドリングセクション追加。Nice to Have 6件: 設計メモとして記録。実装チェックリストを追加。",
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-331-token-auth-design-policy.md",
+  "sections_updated": [
+    "Section 2.3 レイヤー構成",
+    "Section 3 技術選定",
+    "Section 5.3 middleware.ts認証除外パス",
+    "Section 5.4 認証無効時の動作保証",
+    "Section 6.2 ブルートフォース対策",
+    "Section 7 CLIオプションと環境変数マッピング",
+    "Section 9.1 server.tsの条件分岐",
+    "Section 13 設計上の決定事項とトレードオフ",
+    "Section 15 クライアント側トークン期限切れハンドリング（新規）",
+    "Section 16 レビュー履歴（新規）",
+    "Section 17 レビュー指摘事項サマリー（新規）",
+    "Section 18 実装チェックリスト（新規）"
+  ],
+  "timestamp": "2026-02-21T00:00:00Z"
+}

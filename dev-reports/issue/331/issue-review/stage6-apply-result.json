@@ -1,0 +1,94 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 331,
+  "iteration": 2,
+  "apply_date": "2026-02-21",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "H001",
+        "status": "applied",
+        "change_summary": "ドキュメントタスクのsecurity-guide.md更新内容に「silently ignored」文言の修正を明記。--auth使用時にCM_AUTH_TOKENが検知されてdeprecation warningが出力される旨を追記。受入条件のドキュメントセクションにも反映"
+      },
+      {
+        "id": "H002",
+        "status": "applied",
+        "change_summary": "「CLIオプション組み合わせルール」セクションを新設。--authと--httpsの関係（--authは証明書があればHTTPS暗黙有効化、--httpsは認証なしHTTPS用、両方指定時は--auth優先で--httpsは冗長）をルールと具体例テーブルで明記。受入条件に--auth --https同時指定時の動作確認を追加"
+      },
+      {
+        "id": "H003",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルのdaemon.tsの変更内容に「start()内のlogger.info() URL表示のHTTPS対応」を追記。実装タスクのデーモンモード対応にもlogger.info()のHTTPS条件分岐を追加。受入条件にデーモンモードログ出力のHTTPS対応確認を追加"
+      },
+      {
+        "id": "H004",
+        "status": "applied",
+        "change_summary": "/api/auth/statusエンドポイントを独立した実装タスクとして追加（CM_AUTH_TOKEN_HASH存在確認、レスポンス形式、フロントエンド用途）。変更対象ファイルテーブルにsrc/app/api/auth/status/route.tsを追加。ログアウトボタン配置タスクの認証状態判定を/api/auth/status使用に確定"
+      },
+      {
+        "id": "H005",
+        "status": "applied",
+        "change_summary": "設計方針に「トークン管理とCookie格納値」サブセクションを新設。Cookieに格納する値がトークン平文であること、リクエストごとにSHA-256ハッシュを計算して検証する方式であること、方式の選択理由（ステートフルセッション比較）とセキュリティトレードオフを明記。認証フローのステップ3にも具体的な検証方式を追記"
+      },
+      {
+        "id": "H006",
+        "status": "applied",
+        "change_summary": "設計方針に「auth-expire有効期限管理」サブセクションを新設。expireAt計算方法（Date.now() + parseDuration）、ログイン成功時のCookie maxAge計算（Math.floor((expireAt - Date.now()) / 1000)）、トークン検証時の期限チェックロジックを明記。データフローにステップ5「有効期限の初期化」を追加。実装タスクのauth.tsにexpireAt計算とmaxAge計算の詳細を追記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "H007",
+        "status": "applied",
+        "change_summary": "本文中の全HTMLコメントマーカー（F001-F019, G001-G017等の追跡コメント）を削除し、可読性を向上"
+      },
+      {
+        "id": "H008",
+        "status": "skipped",
+        "reason": "証明書ホットリロード方針は初回実装のスコープ外。証明書更新時はサーバー再起動で対応する。将来課題として扱う"
+      },
+      {
+        "id": "H009",
+        "status": "skipped",
+        "reason": "ログインAPIのレスポンス形式（成功/失敗/レート制限）の詳細定義は実装段階でauth.tsの設計時に確定する。Issue上では概要レベルの記載で十分"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 7,
+    "skipped": 2
+  },
+  "changes_summary": {
+    "new_sections": [
+      "CLIオプション組み合わせルール（--auth/--httpsフラグの組み合わせルール明示化）",
+      "トークン管理とCookie格納値（設計方針サブセクション）",
+      "auth-expire有効期限管理（設計方針サブセクション）",
+      "認証状態確認API（実装タスク）",
+      "Stage 5レビュー履歴テーブル"
+    ],
+    "modified_sections": [
+      "Note（Stage 5反映に更新）",
+      "認証フロー（Cookie格納値とSHA-256検証方式を追記）",
+      "トークンのCLI-サーバー間データフロー（有効期限初期化ステップ追加）",
+      "実装タスク > トークン認証 > auth.ts（expireAt計算・maxAge計算追記）",
+      "実装タスク > トークン認証 > ログインAPI（Cookie値・maxAge計算詳細追記）",
+      "実装タスク > デーモンモード対応（logger.info HTTPS対応追記）",
+      "実装タスク > ドキュメント > security-guide.md（silently ignored文言修正追記）",
+      "受入条件 > HTTPS（--auth --https同時指定の動作確認追加）",
+      "受入条件 > デーモンモード（ログ出力HTTPS対応確認追加）",
+      "受入条件 > ドキュメント（--auth使用時の警告表示記載確認追加）",
+      "影響範囲 > 変更対象ファイル（auth/status/route.ts追加、daemon.ts・auth.ts・login/route.ts・security-guide.md変更内容拡充）",
+      "影響範囲 > テストファイル（auth.test.tsにCookie maxAge計算テスト追加）"
+    ],
+    "removed_elements": [
+      "全てのHTMLコメントマーカー（F001-F019, G001-G017等、約30件）"
+    ]
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/331"
+  }
+}
