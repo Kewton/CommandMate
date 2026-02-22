@@ -1,0 +1,65 @@
+{
+  "issue_number": 332,
+  "issue_title": "アクセス元 IP の制限オプション",
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 100.0,
+      "unit_tests_passed": 47,
+      "unit_tests_total": 47,
+      "integration_tests_passed": 17,
+      "integration_tests_total": 17,
+      "files_changed": 15,
+      "commits": ["4da84bd: feat(#332): add IP address/CIDR restriction for HTTP and WebSocket access"]
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_passed": 15,
+      "scenarios_total": 15,
+      "criteria_verified": 16
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "ip-restriction.ts: モジュールスコープ初期化の順序改善とJSDoc強化（S4-001、S4-002、S4-005、S4-006）",
+        "ws-server.ts: production console.log 8件削除（CLAUDE.md規約準拠）",
+        "daemon.ts: REVERSE_PROXY_WARNING条件に!env.CM_ALLOWED_IPS追加（start.tsとの整合性）"
+      ],
+      "commits": ["2c0a88e: refactor(#332): improve code organization and remove production console.log"]
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": [
+        "CLAUDE.md: ip-restriction.ts エントリ追加、auth-config.ts にIssue #332記述追加",
+        "docs/implementation-history.md: Issue #332 エントリ追加"
+      ]
+    }
+  },
+  "final_metrics": {
+    "typescript_errors": 0,
+    "eslint_errors": 0,
+    "unit_tests_total": 3796,
+    "unit_tests_passed": 3796,
+    "coverage_ip_restriction": 100.0
+  },
+  "files_changed": [
+    "src/lib/ip-restriction.ts (新規作成)",
+    "tests/unit/ip-restriction.test.ts (新規作成)",
+    "server.ts",
+    "src/middleware.ts",
+    "src/lib/ws-server.ts",
+    "src/lib/env.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/types/index.ts",
+    "src/cli/index.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/init.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/config/security-messages.ts",
+    "tests/integration/auth-middleware.test.ts",
+    "tsconfig.server.json",
+    "CLAUDE.md",
+    "docs/implementation-history.md"
+  ]
+}

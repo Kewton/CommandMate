@@ -1,0 +1,85 @@
+{
+  "issue_number": 323,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_date": "2026-02-21",
+  "summary": "設計方針書と既存コード・型定義の整合性を6観点から詳細に検証した。関数シグネチャ・フロー図・型定義はおおむね正確だが、設計書内のコードサンプルとフロー図に既存実装との不一致が5件、テスト設計にヘルパー関数の存在前提問題が1件、コードサンプルの正確性問題が2件見つかった。must_fixは1件（processStopConditionDelta設計書内の内部処理順序が実装と不整合）、should_fixが4件、nice_to_haveが3件。",
+  "findings": [
+    {
+      "id": "IC001",
+      "severity": "must_fix",
+      "category": "コードサンプル",
+      "title": "processStopConditionDelta()がcheckStopCondition()に渡す引数の不整合",
+      "description": "Section 3-3の設計書では processStopConditionDelta(worktreeId, pollerState, cleanOutput) のシグネチャで cleanOutput を受け取り、内部でデルタを抽出して checkStopCondition() に委譲すると記述している。しかし、既存の checkStopCondition(worktreeId, cleanOutput) (L409) は内部で getAutoYesState(worktreeId) を呼び出して stopPattern を取得し、cleanOutput 全体に対してパターンマッチを行う設計になっている。processStopConditionDelta() は newContent（デルタ部分）を checkStopCondition() に渡す想定だが、checkStopCondition() の第2引数名は 'cleanOutput' であり、関数のJSDocにも 'ANSI-stripped terminal output to check' と記載されている。設計書は checkStopCondition() が 'delta content' を受け取る前提で記述しているが、checkStopCondition() 自体はこれを認識しておらず、あくまで渡された文字列全体にパターンマッチする。現行の pollAutoYes() L517 でも実際に delta（newContent）を渡しているため動作上は正しいが、設計書の Section 3-3 の判定ロジック表の 'cleanOutput.length > baseline' 行で 'デルタ抽出 -> checkStopCondition() 委譲' と書いている一方、checkStopCondition() のJSDoc '@param cleanOutput - ANSI-stripped terminal output to check' との間で意味的齟齬がある。processStopConditionDelta() のJSDocに checkStopCondition() にはデルタ部分のみを渡す旨を明記するか、checkStopCondition() のパラメータ名を 'textToCheck' 等に変更して意味的な一貫性を確保すべき。",
+      "suggestion": "設計書 Section 3-3 に「checkStopCondition() の第2引数にはデルタ部分（newContent）のみを渡す。checkStopCondition() は渡された文字列全体に対してパターンマッチを行うため、デルタ抽出は呼び出し側（processStopConditionDelta）の責務である」旨を明記する。また、実装時に checkStopCondition() のパラメータ名を cleanOutput から textToCheck に変更することを検討事項として追記する。",
+      "target": "Section 3-3 processStopConditionDelta() 判定ロジック表および既存checkStopCondition()との関係"
+    },
+    {
+      "id": "IC002",
+      "severity": "should_fix",
+      "category": "シグネチャ",
+      "title": "captureAndCleanOutput()の戻り値が非同期である根拠の明示不足",
+      "description": "Section 3-2 で captureAndCleanOutput() は Promise<string> を返す async 関数として設計されている。これは captureSessionOutput() が async 関数であるため正しいが、設計書では '処理内容' セクションで captureSessionOutput() の呼び出しを記述するのみで、第3引数の 5000 が行数（lines）であることが明示されていない。実際の captureSessionOutput(worktreeId, cliToolId, lines=1000) のデフォルト値は 1000 であり、現行コード L469 では明示的に 5000 を渡している。設計書にはこの 5000 という値の意味（行数制限）と、デフォルト値 1000 からの変更理由を記載すべき。",
+      "suggestion": "Section 3-2 の処理内容ステップ1を 'captureSessionOutput(worktreeId, cliToolId, 5000) を呼び出す（5000 は取得行数。captureSessionOutput のデフォルト 1000 行では不足するため、現行 pollAutoYes() と同じ 5000 を使用）' に修正する。",
+      "target": "Section 3-2 captureAndCleanOutput() 処理内容"
+    },
+    {
+      "id": "IC003",
+      "severity": "should_fix",
+      "category": "コードサンプル",
+      "title": "Section 3-5のpollAutoYes()サンプルコードにおけるscheduleNextPollの呼び出し位置の不整合",
+      "description": "Section 3-5 のリファクタリング後コードでは、detectAndRespondToPrompt() の戻り値が 'responded' の場合のみ COOLDOWN_INTERVAL_MS 付きで scheduleNextPoll() を呼び、それ以外はフォールスルーで最後の scheduleNextPoll(worktreeId, cliToolId) が呼ばれる設計になっている。しかし、現行コード（L527-592）では 'no_prompt' 時（L534）、'duplicate' 時（L541）、'no_answer' 時（L549）それぞれで明示的に scheduleNextPoll() を呼んでから return している。設計書のサンプルコードはフォールスルーパターンで簡潔化しているが、detectAndRespondToPrompt() が 'no_prompt' を返した場合に pollerState.lastAnsweredPromptKey = null のリセットが detectAndRespondToPrompt() 内部で行われる想定であることを考えると、この動作の移譲は正確に文書化されている。ただし、'error' ケースでは detectAndRespondToPrompt() 内部で incrementErrorCount() を呼ぶことになるが、Section 3-5 の catch ブロックでも incrementErrorCount() を呼んでおり、captureAndCleanOutput() の失敗と detectAndRespondToPrompt() 内部のエラーで二重に incrementErrorCount() が呼ばれないか確認が必要。",
+      "suggestion": "Section 3-5 のサンプルコードに対して、detectAndRespondToPrompt() が 'error' を返した場合は内部で incrementErrorCount() 済みであるため、外側の catch ブロックは captureAndCleanOutput() や processStopConditionDelta() のエラーのみを処理する旨をコメントで追記する。あるいは、detectAndRespondToPrompt() 内部で try-catch して 'error' を返す場合は throw しないため、外側 catch には到達しないことを明記する。",
+      "target": "Section 3-5 リファクタリング後の pollAutoYes() サンプルコード"
+    },
+    {
+      "id": "IC004",
+      "severity": "should_fix",
+      "category": "フロー図",
+      "title": "Section 2-3のフロー図にerrorパスが未記載",
+      "description": "Section 2-3 の mermaid フロー図では、pollAutoYes のフローが validatePollingContext -> captureAndCleanOutput -> thinking判定 -> processStopConditionDelta -> detectAndRespondToPrompt -> scheduleNextPoll と直線的に描かれているが、captureAndCleanOutput の失敗（tmuxセッション不存在等）時のエラーパス（catch -> incrementErrorCount -> scheduleNextPoll）が記載されていない。Section 3-5 のサンプルコードには try-catch が存在するため、フロー図と詳細設計の間に不整合がある。",
+      "suggestion": "Section 2-3 の mermaid フロー図に、CACO (captureAndCleanOutput) ノードから ERROR ノードへの分岐パスを追加する。例: CACO -->|error| ERR[incrementErrorCount + scheduleNextPoll]",
+      "target": "Section 2-3 関数間の呼び出しフロー (mermaid図)"
+    },
+    {
+      "id": "IC005",
+      "severity": "should_fix",
+      "category": "テスト設計",
+      "title": "テストヘルパー createTestPollerState() の setAutoYesEnabled() 依存が未文書化",
+      "description": "Section 6-1 の validatePollingContext テストサンプルコードで、'returns valid when context is OK' テストケースでは setAutoYesEnabled('test-wt', true) を事前呼び出ししている。しかし createTestPollerState() はAutoYesPollerStateオブジェクトを作成するのみで、autoYesPollerStates Map への登録は行わない。validatePollingContext() は pollerState を引数として受け取るため Map 登録は不要だが、内部で getAutoYesState(worktreeId) を呼び出して autoYesStates Map を参照する。このため setAutoYesEnabled() の事前呼び出しが必要であり、テストサンプルコードでこの依存関係が正しく示されている。一方、'returns expired when auto-yes is disabled' テストケースでは setAutoYesEnabled() の事前呼び出しがないが、コメントに 'Setup: autoYesState with enabled: false' とあるだけで、具体的なセットアップコードが省略されている。validatePollingContext() 内部で getAutoYesState() が null を返した場合の挙動（'stopped' vs 'expired'）が曖昧になるため、テストサンプルを補完すべき。",
+      "suggestion": "Section 6-2 の validatePollingContext テストの 'returns expired' ケースに、setAutoYesEnabled('test-wt', false) または期限切れ状態をセットアップする具体的コードを追記する。getAutoYesState() が null を返すケース（state未設定）と、disabled state を返すケースは異なる挙動になる可能性があるため、テストの意図を明確化する。",
+      "target": "Section 6-2 validatePollingContext テストサンプル"
+    },
+    {
+      "id": "IC006",
+      "severity": "nice_to_have",
+      "category": "型定義",
+      "title": "AutoYesPollerState.timerId の型が ReturnType<typeof setTimeout> | null だが設計書で言及なし",
+      "description": "設計書 Section 6-3 の createTestPollerState() ヘルパーでは timerId: null としているが、AutoYesPollerState の timerId フィールドの型は ReturnType<typeof setTimeout> | null である。設計書ではこの型について特に言及がなく、テストヘルパーで null 以外の値をセットする必要がある場面（例: scheduleNextPoll のモック検証）での型の扱いが不明確。ただし、リファクタリング対象の関数群では timerId を直接操作しないため、実用上の影響は小さい。",
+      "suggestion": "現状のままでも問題はないが、Section 6-3 の createTestPollerState に対して「timerId は分割関数のテストでは使用しないため null 固定」旨の補足コメントを追加するとより明確になる。",
+      "target": "Section 6-3 テストヘルパー createTestPollerState"
+    },
+    {
+      "id": "IC007",
+      "severity": "nice_to_have",
+      "category": "コードサンプル",
+      "title": "detectAndRespondToPrompt()のステップ5でsessionName取得の中間処理が省略されている",
+      "description": "Section 3-4 のステップ5で 'CLIToolManager.getInstance() -> sendPromptAnswer()' と記述しているが、実際の現行コード（L554-566）では CLIToolManager.getInstance() から getTool(cliToolId) を経由して getSessionName(worktreeId) を呼び出し、得られた sessionName を sendPromptAnswer() のパラメータに渡している。設計書ではこの中間処理が省略されている。sendPromptAnswer() の SendPromptAnswerParams インターフェースでは sessionName が必須パラメータであるため、この取得処理は不可欠。",
+      "suggestion": "Section 3-4 のステップ5を 'CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId) で sessionName を取得 -> sendPromptAnswer({ sessionName, answer, cliToolId, promptData })' に詳細化する。",
+      "target": "Section 3-4 detectAndRespondToPrompt() ステップ5"
+    },
+    {
+      "id": "IC008",
+      "severity": "nice_to_have",
+      "category": "フロー図",
+      "title": "Section 2-3のフロー図で detectAndRespondToPrompt -> scheduleNextPoll の分岐が不足",
+      "description": "フロー図では DARP (detectAndRespondToPrompt) から SNP2 (scheduleNextPoll) への矢印が1本のみだが、Section 3-5 のサンプルコードでは 'responded' 時は COOLDOWN_INTERVAL_MS 付きの scheduleNextPoll、それ以外は通常間隔の scheduleNextPoll と、2種類のスケジューリングパスが存在する。フロー図では DR001 で明確に分離された責務分離パターンが表現されていない。",
+      "suggestion": "DARP ノードからの矢印を2本に分岐させ、'responded' 時は SNP_COOL (scheduleNextPoll with cooldown)、それ以外は SNP_NORM (scheduleNextPoll with normal interval) とする。または、フロー図の粒度として詳細すぎると判断する場合はそのままでよいが、Section 3-5 との対応関係をフロー図下部のノートとして追記する。",
+      "target": "Section 2-3 関数間の呼び出しフロー (mermaid図)"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "overall_assessment": "設計方針書は全体としてよく構成されており、既存コードの構造・型定義・関数シグネチャと高い整合性を保っている。特に、AutoYesPollerState インターフェースの全フィールドが正確に参照されており、processStopConditionDelta() のデルタ判定ロジック3パターンも現行コード L508-525 と正確に一致している。must_fix は1件のみで、processStopConditionDelta() が checkStopCondition() にデルタを渡す際の意味的齟齬に関するもの。should_fix の4件は、フロー図のエラーパス欠落、サンプルコードの二重 incrementErrorCount リスク、テストサンプルの前提条件不備、captureAndCleanOutput の引数説明不足であり、いずれも実装フェーズでの誤解を防ぐための文書補強が主。nice_to_have の3件は、フロー図の詳細度やステップ記述の省略に関するもので、実装への影響は限定的。総合的に、設計方針書は実装の入力ドキュメントとして十分な品質を持ち、上記指摘事項の反映により更に堅牢な設計書となる。"
+}

@@ -1,0 +1,121 @@
+{
+  "stage": 4,
+  "focus_area": "セキュリティ",
+  "status": "conditionally_approved",
+  "score": 4,
+  "review_summary": "設計方針書はOWASP Top 10の主要カテゴリに対して堅実な防御策を設計している。IPスプーフィング防止（CM_TRUST_PROXY=false時のX-Real-IP上書き）、fail-fast入力バリデーション、403レスポンスでの情報漏洩防止は高く評価できる。ただし、X-Forwarded-For解析の安全性、CIDRリスト上限欠如によるDoSリスク、AUTH_EXCLUDED_PATHSへのIP制限不適用リスク、ログ出力でのIP情報取り扱いについて改善が必要。",
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "must_fix",
+      "owasp_category": "A01:2021-Broken Access Control",
+      "title": "X-Forwarded-Forヘッダーの先頭IP抽出に対する信頼チェーン不備",
+      "description": "設計書ではCM_TRUST_PROXY=true時に「X-Forwarded-Forの先頭IPを使用」と記載されているが、getClientIp()の実装仕様として、X-Forwarded-Forヘッダーに複数IPが含まれる場合（例: 'attacker-ip, real-client-ip, proxy-ip'）の解析ロジックが不明確。攻撃者がX-Forwarded-Forヘッダーの先頭に任意のIPを追加（IP Spoofing via header injection）することで、許可IPに偽装してアクセスできる可能性がある。「先頭IP」の選択は、リバースプロキシが最も左にクライアントIPを追記するRFC 7239準拠の場合にのみ正しいが、プロキシの構成によっては「最も右のIPからN番目」（rightmost-Nアプローチ）を使用すべきケースがある。",
+      "suggestion": "getClientIp()の実装仕様において、CM_TRUST_PROXY=true時のX-Forwarded-For解析ロジックを以下のように明確化する: (1) X-Forwarded-Forの先頭IP（leftmost）を使用する旨をJSDocに明記し、リバースプロキシが先頭にクライアントIPを追記する構成を前提とすることを文書化する。(2) CM_TRUST_PROXYのドキュメントに「リバースプロキシがX-Forwarded-Forの先頭にクライアントIPを設定し、既存ヘッダーを上書きする構成が必要」という運用要件を記載する。(3) 将来的にtrusted proxy IPリスト（CM_TRUSTED_PROXIES）を導入し、rightmost非信頼IP方式への拡張を検討事項として記録する。"
+    },
+    {
+      "id": "S4-002",
+      "severity": "must_fix",
+      "owasp_category": "A05:2021-Security Misconfiguration",
+      "title": "CM_ALLOWED_IPSのCIDRエントリ数上限が未定義（DoS攻撃ベクター）",
+      "description": "設計書ではCM_ALLOWED_IPSのバリデーションとしてオクテット範囲チェック（0-255）、プレフィックス長チェック（0-32）、空文字ガードを記載しているが、CIDRエントリの最大数に上限が設定されていない。悪意ある管理者や設定ミスにより、数千件のCIDRエントリがCM_ALLOWED_IPSに設定された場合、parseAllowedIps()でのパース処理と、リクエスト毎のisIpAllowed()でのOR判定ループがDoSを引き起こす可能性がある。モジュール初期化時のパースはサーバー起動を遅延させ、リクエスト毎のマッチングはレスポンスタイムを悪化させる。",
+      "suggestion": "parseAllowedIps()にMAX_ALLOWED_IP_ENTRIES定数（例: 100または256）を導入し、エントリ数が上限を超えた場合はfail-fast（Error throw）する。定数はip-restriction.ts内の未export内部定数として定義する。これにより、設定ミスによるパフォーマンス劣化を防止し、DoS攻撃のベクターを排除する。"
+    },
+    {
+      "id": "S4-003",
+      "severity": "should_fix",
+      "owasp_category": "A01:2021-Broken Access Control",
+      "title": "AUTH_EXCLUDED_PATHSへのIP制限適用順序の明確化",
+      "description": "設計書のmiddleware.tsではIP制限チェック（Step 1）が認証チェック（Step 2以降）より前に配置されている。これにより、AUTH_EXCLUDED_PATHS（/login, /api/auth/login等）へのアクセスもIP制限の対象となる。この動作自体は正しい（IP制限は全リクエストに適用すべき）が、設計書にこの相互作用が明示されていない。運用者がIP制限を認証の代替として使用する場合（CM_AUTH_TOKEN_HASH未設定+CM_ALLOWED_IPS設定）、AUTH_EXCLUDED_PATHSが認証なしでアクセス可能であっても、IP制限によりフィルタリングされることの明文化が必要。",
+      "suggestion": "設計書Section 5「セキュリティ設計」に以下を追記: (1) IP制限は認証チェックより先に評価されるため、AUTH_EXCLUDED_PATHSを含む全HTTPリクエストがIP制限の対象となること。(2) IP制限のみ使用（トークン認証なし）の場合でも、AUTH_EXCLUDED_PATHSの到達にはIP制限を通過する必要があること。これにより、IP制限と認証の相互作用に関する運用上の誤解を防止する。"
+    },
+    {
+      "id": "S4-004",
+      "severity": "should_fix",
+      "owasp_category": "A09:2021-Security Logging and Monitoring Failures",
+      "title": "IP制限拒否ログのクライアントIP出力における正規化の欠如",
+      "description": "設計書のmiddleware.ts IP制限ログは `console.warn('[IP-RESTRICTION] Denied: ${clientIp || \"unknown\"}')` と記載されている。getClientIp()が返すIPアドレスに対してnormalizeIp()が適用されているかが不明確。IPv4-mapped IPv6アドレス（::ffff:192.168.1.1）がログに出力された場合、運用者がログの可読性に問題を感じる可能性がある。また、clientIpが非常に長い文字列（悪意あるヘッダー偽装）の場合、ログインジェクションの可能性がある。",
+      "suggestion": "IP制限拒否ログに出力するclientIpに対して以下の対策を設計書に追記: (1) normalizeIp()を適用済みのIPを出力する（getClientIp内部で正規化するか、ログ出力前に適用する）。(2) ログ出力前にIPアドレスの長さを検証し、IPv4の最大長15文字またはIPv6の最大長45文字を超えるIPは切り詰める（例: ip.substring(0, 45)）。これにより、ログインジェクション攻撃を防止し、ログの一貫性を確保する。"
+    },
+    {
+      "id": "S4-005",
+      "severity": "should_fix",
+      "owasp_category": "A03:2021-Injection",
+      "title": "IPV4_PATTERNおよびIPV4_CIDR_PATTERNのReDoSリスク評価",
+      "description": "設計書で定義されている正規表現パターン IPV4_PATTERN = /^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$/ および IPV4_CIDR_PATTERN = /^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\/(\\d{1,2})$/ は、アンカー（^...$）と固定長の量指定子（{1,3}、{1,2}）を使用しており、バックトラッキングによるReDoSリスクは低い。ただし、parseAllowedIps()で入力文字列をカンマで分割した後、各エントリに正規表現を適用する前に、個々のエントリ長のバリデーションが設計書に記載されていない。非常に長い単一エントリ（例: 1000文字の文字列）は正規表現マッチングの前に弾くべき。",
+      "suggestion": "parseAllowedIps()内で各CIDRエントリに対して、正規表現マッチングの前にエントリ長の上限チェック（例: MAX_CIDR_ENTRY_LENGTH = 18、IPv4 CIDRの最大長 '255.255.255.255/32' = 18文字）を追加する。上限を超えるエントリはfail-fastでエラーとする。これにより、万一の正規表現バイパスや過大入力に対する防御層が追加される。"
+    },
+    {
+      "id": "S4-006",
+      "severity": "should_fix",
+      "owasp_category": "A07:2021-Identification and Authentication Failures",
+      "title": "CM_TRUST_PROXY環境変数のブール値パースの厳密性不足",
+      "description": "設計書のserver.tsでは `process.env.CM_TRUST_PROXY !== 'true'` で条件分岐しているが、CM_TRUST_PROXYに 'TRUE'、'True'、'1'、'yes' 等が設定された場合はfalse扱い（非信頼）となる。これ自体は安全側に倒れる設計（大文字小文字を間違えるとプロキシを信頼しない）だが、運用者の意図と実際の動作が乖離する可能性がある。特に、CM_TRUST_PROXY=TRUE と設定した場合にプロキシ経由のIPが使用されず、IP制限が意図通りに機能しないケースが発生しうる。",
+      "suggestion": "設計書に以下を追記: (1) CM_TRUST_PROXYの有効値は厳密に文字列 'true' のみであることをドキュメント（.env.example、README.md）に明記する。(2) 実装時にCM_TRUST_PROXYの値が設定されているが 'true' でも 'false'/'undefined' でもない場合に、console.warnで警告を出力する（例: '[IP-RESTRICTION] CM_TRUST_PROXY has unexpected value: \"TRUE\". Only \"true\" (lowercase) enables proxy trust.'）。これにより、設定ミスの早期発見を支援する。"
+    },
+    {
+      "id": "S4-007",
+      "severity": "should_fix",
+      "owasp_category": "A01:2021-Broken Access Control",
+      "title": "WebSocket upgradeリクエストにおけるdefense-in-depth二重チェックの潜在的不整合",
+      "description": "設計書[S2-005]によると、WebSocket upgradeリクエストはmiddleware.tsとws-server.tsの両方でIP制限チェックされる。しかし、middleware.tsではgetClientIp(headers)を使用し（X-Real-IP/X-Forwarded-Forベース）、ws-server.tsではrequest.socket.remoteAddressを直接使用する。CM_TRUST_PROXY=true環境でリバースプロキシ経由のWebSocket接続では、middleware.tsのgetClientIp()はX-Forwarded-Forから実クライアントIPを取得するが、ws-server.tsのsocket.remoteAddressはプロキシのIPを返す。同一リクエストに対して2つのレイヤーが異なるIPで判定する可能性がある。",
+      "suggestion": "設計書Section 5.1に以下の注記を追加: (1) CM_TRUST_PROXY=true環境では、WebSocket upgradeに対するmiddleware.tsのIP制限（X-Forwarded-For由来のクライアントIP）とws-server.tsのIP制限（socket.remoteAddress = プロキシIP）が異なるIPで判定される可能性がある。(2) この場合、CM_ALLOWED_IPSにはクライアントIPとプロキシIPの両方を含める必要がある旨をドキュメントに記載する。(3) あるいは、ws-server.tsでもCM_TRUST_PROXY=true時にrequest.headers['x-forwarded-for']を参照する選択肢を将来検討事項として記録する。"
+    },
+    {
+      "id": "S4-008",
+      "severity": "nice_to_have",
+      "owasp_category": "A03:2021-Injection",
+      "title": "CLIの--allowed-ipsオプションに対するシェルインジェクション耐性の確認",
+      "description": "CLIの--allowed-ipsオプションはcommanderライブラリ経由で引数を受け取り、process.env.CM_ALLOWED_IPSに設定する。commanderは引数をそのまま文字列として受け取るため、シェルインジェクションの直接的なリスクは低い（process.envへの代入は文字列操作であり、eval等は使用しない）。ただし、.envファイルへの書き込み処理（init.ts経由）が将来追加される場合、CIDRリスト内に改行やクォート文字が含まれる入力がファイル書き込みインジェクションとなりうる。",
+      "suggestion": "現時点ではprocess.envへの直接設定のみであり、シェルインジェクションのリスクは低い。ただし、将来init.tsでCM_ALLOWED_IPSを.envファイルに書き込む機能を追加する場合は、入力値から改行文字（\\n, \\r）、クォート文字（', \"）、コメント文字（#）を排除するバリデーションを追加すること。"
+    },
+    {
+      "id": "S4-009",
+      "severity": "nice_to_have",
+      "owasp_category": "A05:2021-Security Misconfiguration",
+      "title": "Edge Runtimeにおけるモジュールスコープ変数の共有リスクの明確化",
+      "description": "設計書ではip-restriction.tsのallowedIpsEnvとcachedRangesがモジュールスコープで初期化される。Next.jsのEdge Runtimeでは、サーバーレス環境（Vercel等）でワーカーが複数テナント間で再利用される場合、モジュールスコープ変数が異なるリクエスト間で共有される可能性がある。ただし、CommandMateは自前サーバー（server.ts）で動作するため、マルチテナント環境での使用は想定されていない。",
+      "suggestion": "設計書のセキュリティ設計セクションに、ip-restriction.tsのモジュールスコープキャッシュは自前サーバー（server.ts）での単一テナント運用を前提としている旨を注記する。サーバーレスプラットフォーム（Vercel等）へのデプロイは想定外であり、その場合はモジュールスコープキャッシュの共有によるセキュリティリスクがあることを警告する。"
+    },
+    {
+      "id": "S4-010",
+      "severity": "nice_to_have",
+      "owasp_category": "A09:2021-Security Logging and Monitoring Failures",
+      "title": "403レスポンスのHTTPレスポンスボディ一貫性",
+      "description": "設計書では、HTTPリクエストの403レスポンスは `new NextResponse(null, { status: 403 })` でボディなし、WebSocketの403は `socket.write('HTTP/1.1 403 Forbidden\\r\\n\\r\\n')` でボディなしと記載されている。既存のmiddleware.tsの401レスポンスも `new NextResponse(null, { status: 401 })` でボディなし。一貫性は保たれているが、ステータスコードのみでIP拒否か認証失敗かを区別できるため、攻撃者がIP制限の存在を推測できる。",
+      "suggestion": "現在の設計（403をIP制限拒否、401を認証失敗に使用）は適切であり、ボディなしは情報漏洩を最小化している。将来的に、IP制限と認証を同一のステータスコード（例: 両方403）にまとめることで、攻撃者がどのセキュリティ層で拒否されたかを推測しにくくする選択肢がある。ただし、これは運用デバッグを困難にするトレードオフがあるため、現行設計を維持することを推奨する。"
+    },
+    {
+      "id": "S4-011",
+      "severity": "nice_to_have",
+      "owasp_category": "A01:2021-Broken Access Control",
+      "title": "0.0.0.0/0 CIDRの設定に対する警告メッセージ",
+      "description": "設計書のテスト設計に `/0（全許可）` のテストケースが含まれている。CM_ALLOWED_IPS=0.0.0.0/0 は全IPv4を許可する設定であり、IP制限の実質的な無効化となる。設定ミスや意図的な無効化（テスト目的等）で使用される可能性があるが、運用上のリスクがある。",
+      "suggestion": "parseAllowedIps()内で /0 プレフィックス長のCIDRエントリが含まれる場合に console.warn('[IP-RESTRICTION] Warning: 0.0.0.0/0 allows all IPv4 addresses. IP restriction is effectively disabled.') を出力する。セキュリティ機能が有効に見えるが実質無効な状態を運用者に通知する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 5,
+  "nice_to_have_count": 4,
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "medium"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-332-ip-restriction-design-policy.md",
+    "src/middleware.ts",
+    "src/lib/auth.ts",
+    "src/config/auth-config.ts",
+    "src/lib/ws-server.ts",
+    "src/lib/env.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/config/security-messages.ts",
+    "src/cli/utils/security-logger.ts",
+    "src/app/api/auth/login/route.ts",
+    "server.ts"
+  ],
+  "overall_assessment": "設計方針書は多層防御（defense-in-depth）の原則に忠実に従い、IPスプーフィング防止、fail-fast入力バリデーション、情報漏洩最小化のレスポンス設計など、セキュリティの基盤は堅固である。Must Fixの2件（X-Forwarded-For解析仕様の明確化とCIDRエントリ数上限）は実装前に対処すべきだが、設計全体を根本的に変更するものではなく、設計書への追記と実装時の定数追加で対応可能。Stage 1-3で改善されたS1-001〜S3-006の反映も適切であり、条件付き承認（conditionally_approved）とする。",
+  "timestamp": "2026-02-22T12:00:00Z"
+}

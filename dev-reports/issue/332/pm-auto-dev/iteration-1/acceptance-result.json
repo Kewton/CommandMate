@@ -1,0 +1,154 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "S1: CM_ALLOWED_IPS not set - all IPs allowed (backward compatible)",
+      "result": "passed",
+      "evidence": "isIpRestrictionEnabled() returns false when CM_ALLOWED_IPS is not set; middleware skips IP check when isIpRestrictionEnabled() returns false"
+    },
+    {
+      "scenario": "S2: CM_ALLOWED_IPS='192.168.1.0/24' - 192.168.1.100 allowed, 10.0.0.1 denied",
+      "result": "passed",
+      "evidence": "Unit test 'should return true for IP within CIDR /24 range' PASSED; 'should return false for IP outside CIDR range' PASSED"
+    },
+    {
+      "scenario": "S3: CM_ALLOWED_IPS='192.168.1.1' (single IP /32 equivalent)",
+      "result": "passed",
+      "evidence": "Unit test 'should parse a single IP as /32 CIDR' PASSED; 'should return true for exact IP match (/32)' PASSED; 'should return false for mismatched /32 range' PASSED"
+    },
+    {
+      "scenario": "S4: CM_ALLOWED_IPS='192.168.1.0/24,10.0.0.0/8' - multiple CIDR OR judgment",
+      "result": "passed",
+      "evidence": "Unit test 'should parse multiple comma-separated entries' PASSED; 'should return true for IP matching any CIDR in OR judgment' PASSED"
+    },
+    {
+      "scenario": "S5: IPv4-mapped IPv6 (::ffff:192.168.1.1) normalized correctly",
+      "result": "passed",
+      "evidence": "Unit test 'should handle IPv4-mapped IPv6 address' PASSED; 'should strip ::ffff: prefix from IPv4-mapped IPv6' PASSED; 'should handle uppercase ::FFFF: prefix' PASSED"
+    },
+    {
+      "scenario": "S6: Invalid CIDR (999.0.0.0/24) causes fail-fast (throw at module load)",
+      "result": "passed",
+      "evidence": "Unit test 'should throw on module import when CM_ALLOWED_IPS has invalid CIDR' PASSED; 'should throw on invalid CIDR with octet > 255' PASSED"
+    },
+    {
+      "scenario": "S7: CM_TRUST_PROXY=false - X-Real-IP set from socket.remoteAddress by server.ts",
+      "result": "passed",
+      "evidence": "server.ts line 124-126 confirms overwrite when CM_TRUST_PROXY!='true'; Unit test 'should use X-Real-IP when CM_TRUST_PROXY=false (explicit)' PASSED"
+    },
+    {
+      "scenario": "S8: IP restriction + token auth concurrent operation - IP check is Step 1 in middleware",
+      "result": "passed",
+      "evidence": "middleware.ts lines 67-78: IP restriction check is Step 1, before WebSocket upgrade check and auth checks"
+    },
+    {
+      "scenario": "S9: WebSocket IP restriction applied via ws-server.ts",
+      "result": "passed",
+      "evidence": "ws-server.ts lines 84-94: isIpRestrictionEnabled() + isIpAllowed() check before auth check in upgrade handler, uses request.socket.remoteAddress directly"
+    },
+    {
+      "scenario": "S10: AUTH_EXCLUDED_PATHS (/login) also subject to IP restriction",
+      "result": "passed",
+      "evidence": "middleware.ts line 67-68: IP restriction check (Step 1) is executed BEFORE AUTH_EXCLUDED_PATHS evaluation, with comment [S4-003]"
+    },
+    {
+      "scenario": "S11: CLI --allowed-ips option sets CM_ALLOWED_IPS env var",
+      "result": "passed",
+      "evidence": "src/cli/index.ts line 55: .option('--allowed-ips <cidrs>', ...); src/cli/commands/start.ts lines 309-311: env.CM_ALLOWED_IPS = options.allowedIps"
+    },
+    {
+      "scenario": "S12: daemon mode forwards CM_ALLOWED_IPS/CM_TRUST_PROXY to child process",
+      "result": "passed",
+      "evidence": "src/cli/utils/daemon.ts line 81: authEnvKeys includes 'CM_ALLOWED_IPS', 'CM_TRUST_PROXY'; lines 82-86 forward them to child env"
+    },
+    {
+      "scenario": "S13: Unit tests (ip-restriction.test.ts) all 47 pass",
+      "result": "passed",
+      "evidence": "npx vitest run tests/unit/ip-restriction.test.ts: 47 passed (47 total)"
+    },
+    {
+      "scenario": "S14: Integration tests - all unit test files (185) pass",
+      "result": "passed",
+      "evidence": "npm run test:unit: 185 test files passed, 3796 tests passed, 7 skipped"
+    },
+    {
+      "scenario": "S15: npm run build:server succeeds (tsconfig.server.json includes ip-restriction.ts)",
+      "result": "passed",
+      "evidence": "tsconfig.server.json line 13: 'src/lib/ip-restriction.ts' in include list; npm run build:server completed with exit code 0"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "CM_ALLOWED_IPS can specify IP/CIDR ranges (comma-separated)",
+      "verified": true
+    },
+    {
+      "criterion": "HTTP requests from non-allowed IPs get 403",
+      "verified": true
+    },
+    {
+      "criterion": "WebSocket connections subject to IP restriction (ws-server.ts uses request.socket.remoteAddress)",
+      "verified": true
+    },
+    {
+      "criterion": "CM_ALLOWED_IPS unset means no IP restriction (backward compatible)",
+      "verified": true
+    },
+    {
+      "criterion": "Independent from token auth (CM_AUTH_TOKEN_HASH) - parallel operation",
+      "verified": true
+    },
+    {
+      "criterion": "CM_TRUST_PROXY=true uses X-Forwarded-For",
+      "verified": true
+    },
+    {
+      "criterion": "CM_TRUST_PROXY=false: server.ts injects X-Real-IP from socket.remoteAddress",
+      "verified": true
+    },
+    {
+      "criterion": "IPv4-mapped IPv6 (::ffff:x.x.x.x) handled correctly",
+      "verified": true
+    },
+    {
+      "criterion": "Edge Runtime compatible (no Node.js-specific modules)",
+      "verified": true
+    },
+    {
+      "criterion": "Denial returns 403 Forbidden",
+      "verified": true
+    },
+    {
+      "criterion": "--allowed-ips / --trust-proxy CLI options available",
+      "verified": true
+    },
+    {
+      "criterion": "daemon.ts authEnvKeys includes CM_ALLOWED_IPS/CM_TRUST_PROXY",
+      "verified": true
+    },
+    {
+      "criterion": "Invalid CIDR causes fail-fast (server startup error)",
+      "verified": true
+    },
+    {
+      "criterion": "IP restriction tests pass (unit tests)",
+      "verified": true
+    },
+    {
+      "criterion": "TypeScript 0 errors, ESLint 0 errors",
+      "verified": true
+    },
+    {
+      "criterion": "tsconfig.server.json includes ip-restriction.ts, npm run build:server succeeds",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/ip-restriction.test.ts (47 tests, all passed)",
+    "npx tsc --noEmit: 0 errors",
+    "npm run lint: No ESLint warnings or errors",
+    "npm run build:server: success (exit code 0)",
+    "npm run test:unit: 185 files, 3796 tests passed"
+  ],
+  "message": "All 16 acceptance criteria verified. All 15 test scenarios passed. Implementation is complete and correct."
+}

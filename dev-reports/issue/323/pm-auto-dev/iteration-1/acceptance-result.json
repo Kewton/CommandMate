@@ -1,0 +1,121 @@
+{
+  "issue_number": 323,
+  "status": "passed",
+  "scenarios": [
+    {
+      "id": "scenario-1",
+      "name": "既存テスト全パス確認",
+      "status": "passed",
+      "details": "181 test files passed, 3675 tests passed (7 skipped). All auto-yes-manager tests pass including existing Issue #138, #161, #191, #193, #306, #314 tests."
+    },
+    {
+      "id": "scenario-2",
+      "name": "pollAutoYes()がオーケストレーターになっていること",
+      "status": "passed",
+      "details": "pollAutoYes() is 42 lines (lines 652-693). Functions as an orchestrator delegating to validatePollingContext(), captureAndCleanOutput(), processStopConditionDelta(), and detectAndRespondToPrompt(). Only inline logic is the thinking check (policy decision about window size)."
+    },
+    {
+      "id": "scenario-3",
+      "name": "4つの新規@internal export関数の存在確認",
+      "status": "passed",
+      "details": "All 4 functions found: validatePollingContext (L477), captureAndCleanOutput (L503), processStopConditionDelta (L531), detectAndRespondToPrompt (L576). All marked with @internal JSDoc tag."
+    },
+    {
+      "id": "scenario-4",
+      "name": "getPollerState()の存在と直接get()呼び出し削減確認",
+      "status": "passed",
+      "details": "getPollerState() helper defined at L289. autoYesPollerStates.get() is called only once (inside getPollerState() at L290). All other access points (L320, L331, L343, L356, L654, L706, L780) use getPollerState()."
+    },
+    {
+      "id": "scenario-5",
+      "name": "既存checkStopCondition()が変更されていないこと",
+      "status": "passed",
+      "details": "checkStopCondition() exists at L422 with original signature (worktreeId: string, cleanOutput: string): boolean. Function body unchanged - validates pattern, creates RegExp, calls executeRegexWithTimeout, handles matched/null/error cases."
+    },
+    {
+      "id": "scenario-6",
+      "name": "新規テストがタイマー非依存であること",
+      "status": "passed",
+      "details": "Issue #323 test sections: validatePollingContext (L1376-1431, 5 tests - only 1 uses vi.useFakeTimers for expiration simulation), captureAndCleanOutput (L1436-1476, 3 tests - no fake timers), processStopConditionDelta (L1481-1583, 6 tests - no fake timers), detectAndRespondToPrompt (L1588-1720, 6 tests - no fake timers). All use direct function calls with createTestPollerState() factory."
+    },
+    {
+      "id": "scenario-7",
+      "name": "TypeScript型チェック",
+      "status": "passed",
+      "details": "npx tsc --noEmit exit code: 0. No type errors."
+    },
+    {
+      "id": "scenario-8",
+      "name": "ESLintチェック",
+      "status": "passed",
+      "details": "npm run lint -- --quiet: No ESLint warnings or errors."
+    },
+    {
+      "id": "scenario-9",
+      "name": "CLAUDE.md更新確認",
+      "status": "passed",
+      "details": "CLAUDE.md L149 contains updated auto-yes-manager.ts module description with Issue #323 reference: validatePollingContext/captureAndCleanOutput/processStopConditionDelta/detectAndRespondToPrompt extraction, getPollerState() internal helper."
+    },
+    {
+      "id": "scenario-10",
+      "name": "docs/implementation-history.md更新確認",
+      "status": "passed",
+      "details": "implementation-history.md L9 contains Issue #323 entry: 'pollAutoYes()リファクタリング（関数群方式による責務分割、validatePollingContext/captureAndCleanOutput/processStopConditionDelta/detectAndRespondToPrompt抽出、getPollerState内部ヘルパー追加、機能変更なし）'"
+    }
+  ],
+  "passed_count": 10,
+  "failed_count": 0,
+  "acceptance_criteria_status": [
+    {
+      "criterion": "既存テスト（tests/unit/lib/auto-yes-manager.test.ts）が全てパスすること",
+      "verified": true
+    },
+    {
+      "criterion": "pollAutoYes()が4-5個の単一責務関数に分割されていること",
+      "verified": true
+    },
+    {
+      "criterion": "停止条件チェックロジックが専用関数（processStopConditionDelta）に抽出されていること",
+      "verified": true
+    },
+    {
+      "criterion": "分割関数の命名が既存関数と衝突しないこと（特に既存checkStopCondition()との区別）",
+      "verified": true
+    },
+    {
+      "criterion": "pollerState存在確認の重複が解消されていること（getPollerState()ヘルパー）",
+      "verified": true
+    },
+    {
+      "criterion": "機能変更がないこと（外部インターフェースは維持）",
+      "verified": true
+    },
+    {
+      "criterion": "分割された各関数（validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt）に対する個別テストが追加されていること",
+      "verified": true
+    },
+    {
+      "criterion": "分割関数の個別テストはタイマー非依存（直接関数呼び出し）で記述すること",
+      "verified": true
+    },
+    {
+      "criterion": "分割関数はpollerStateを引数として受け取る設計であること",
+      "verified": true
+    },
+    {
+      "criterion": "CLAUDE.mdのauto-yes-manager.tsモジュール説明が更新されていること",
+      "verified": true
+    },
+    {
+      "criterion": "docs/implementation-history.mdにIssue #323のエントリが追加されていること",
+      "verified": true
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "src/lib/auto-yes-manager.ts",
+    "CLAUDE.md",
+    "docs/implementation-history.md"
+  ],
+  "summary": "全10シナリオ合格、全11受入条件を満たしています。Issue #323のpollAutoYes()リファクタリングは設計通り完了しており、既存テスト3675件が全てパス、新規テスト20件が追加され、TypeScript型チェック・ESLintも問題ありません。"
+}

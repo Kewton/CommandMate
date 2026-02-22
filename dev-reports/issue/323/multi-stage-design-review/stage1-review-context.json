@@ -1,0 +1,8 @@
+{
+  "issue_number": 323,
+  "focus_area": "設計原則",
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "design_doc_path": "dev-reports/design/issue-323-auto-yes-manager-refactoring-design-policy.md",
+  "source_file": "src/lib/auto-yes-manager.ts"
+}

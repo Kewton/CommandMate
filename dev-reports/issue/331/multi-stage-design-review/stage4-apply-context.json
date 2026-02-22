@@ -1,0 +1,7 @@
+{
+  "issue_number": 331,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_result_path": "dev-reports/issue/331/multi-stage-design-review/stage4-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-331-token-auth-design-policy.md"
+}

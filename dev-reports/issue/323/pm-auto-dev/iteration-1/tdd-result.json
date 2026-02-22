@@ -1,0 +1,34 @@
+{
+  "issue_number": 323,
+  "iteration": 1,
+  "status": "success",
+  "implemented_functions": [
+    "validatePollingContext",
+    "captureAndCleanOutput",
+    "processStopConditionDelta",
+    "detectAndRespondToPrompt",
+    "getPollerState"
+  ],
+  "test_results": {
+    "total": 102,
+    "passed": 102,
+    "failed": 0,
+    "new_tests_added": 20
+  },
+  "static_analysis": {
+    "typescript_errors": 0,
+    "eslint_errors": 0
+  },
+  "files_changed": [
+    "src/lib/auto-yes-manager.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "CLAUDE.md",
+    "docs/implementation-history.md",
+    "docs/en/implementation-history.md"
+  ],
+  "commits": [
+    "d0861fb: refactor(auto-yes-manager): decompose pollAutoYes() into focused functions"
+  ],
+  "summary": "pollAutoYes()を4つの@internal export関数(validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt)とgetPollerState()内部ヘルパーに分割。pollAutoYes()は約30行のオーケストレーターに置換。既存82テスト全パス、新規20テスト追加（計102テスト）。TypeScriptエラー0件、ESLintエラー0件。機能変更なし。",
+  "message": "TDD実装完了。全102テストパス。静的解析エラーなし。"
+}

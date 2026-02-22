@@ -1,0 +1,97 @@
+{
+  "issue_number": 331,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 80,
+      "new_tests": 89,
+      "unit_tests_total": 3724,
+      "implemented_files": [
+        "src/lib/auth.ts",
+        "src/middleware.ts",
+        "src/app/api/auth/login/route.ts",
+        "src/app/api/auth/logout/route.ts",
+        "src/app/api/auth/status/route.ts",
+        "src/app/login/page.tsx",
+        "src/components/common/LogoutButton.tsx",
+        "src/lib/ws-server.ts",
+        "server.ts",
+        "src/cli/commands/start.ts",
+        "src/cli/index.ts",
+        "src/cli/types/index.ts",
+        "src/cli/utils/daemon.ts",
+        "src/cli/config/security-messages.ts",
+        "src/lib/env.ts",
+        "src/i18n.ts",
+        "locales/en/auth.json",
+        "locales/ja/auth.json",
+        "tsconfig.server.json",
+        ".env.example"
+      ],
+      "quality_checks": {
+        "tsc": "pass",
+        "lint": "pass",
+        "build": "pass",
+        "build_server": "pass",
+        "build_cli": "pass"
+      }
+    },
+    "acceptance": {
+      "status": "passed",
+      "total_criteria": 37,
+      "passed": 35,
+      "failed": 2,
+      "failed_items": [
+        "AC-36: security-guide.md にmkcertによる証明書生成手順が未記載（ドキュメント更新フェーズで対応済み）",
+        "AC-37: security-guide.md にトークン認証+HTTPSのクイックスタート手順が未記載（ドキュメント更新フェーズで対応済み）"
+      ],
+      "security_checks": {
+        "S001_timing_safe_equal": "passed",
+        "S002_exact_path_match": "passed",
+        "C001_no_nextjs_deps_in_auth": "passed"
+      }
+    },
+    "refactor": {
+      "status": "success",
+      "refactored_files": [
+        "src/lib/auth.ts",
+        "src/app/api/auth/login/route.ts",
+        "src/app/api/auth/logout/route.ts",
+        "src/cli/commands/start.ts",
+        "src/cli/utils/daemon.ts",
+        "src/lib/ws-server.ts"
+      ],
+      "improvements": [
+        "定数抽出: MS_PER_MINUTE/MS_PER_HOUR/MS_PER_DAY/DEFAULT_COOKIE_MAX_AGE_SECONDS",
+        "DRY: buildAuthCookieOptions()でCookie設定ロジックを一元化",
+        "DRY: displayAuthToken()でトークン表示ロジックを統合",
+        "DRY: isExpectedWebSocketError()でWebSocketエラーチェックを共通化",
+        "可読性: parseDuration()をunitMultipliers lookupマップで簡素化",
+        "可読性: クリーンアップ条件をisLockoutExpired/isStaleボリアン変数で明確化"
+      ],
+      "quality_checks": {
+        "tsc": "pass",
+        "lint": "pass",
+        "test_unit": "pass - 3724 tests"
+      }
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": [
+        "docs/security-guide.md",
+        "CLAUDE.md"
+      ],
+      "changes": [
+        "docs/security-guide.md: Quick Start: Built-in Token Authentication + HTTPS セクション追加",
+        "docs/security-guide.md: macOS/Linux両方のmkcert手順追加（LinuxのCA配布手順含む）",
+        "docs/security-guide.md: Security Checklistにビルトイン認証の選択肢追加",
+        "docs/security-guide.md: Migration from CM_AUTH_TOKENセクション更新（--auth使用時のwarning記載）",
+        "CLAUDE.md: src/lib/auth.ts の主要機能モジュール一覧追記",
+        "CLAUDE.md: src/middleware.ts の主要機能モジュール一覧追記"
+      ]
+    }
+  },
+  "all_acceptance_criteria_met": true,
+  "notes": "ドキュメント更新によりAC-36/AC-37も対応済み。全37受入条件が充足された。"
+}

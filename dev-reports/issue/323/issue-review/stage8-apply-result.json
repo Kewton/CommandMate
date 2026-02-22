@@ -1,0 +1,41 @@
+{
+  "issue_number": 323,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目・影響範囲）",
+  "apply_date": "2026-02-21",
+  "applied_findings": [
+    {
+      "id": "S2IF001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "processStopConditionDelta()の引数設計方針として「pollerStateを引数として受け取る」ことをIssue本文に明記。具体的には: (1) processStopConditionDelta()の説明に「引数設計」サブセクションを追加、(2) 主要な変更点セクションに「3. 分割関数の引数設計方針」項目を新設し全4関数がpollerStateを引数として受け取る方針を明記、(3) テスト方針の「分割関数の個別テスト」にpollerState引数受け渡しによるタイマー非依存テスト実現の記述を追加、(4) processStopConditionDelta()テスト設計セクションにpollerState引数の記述を追加、(5) 受入条件に「分割関数はpollerStateを引数として受け取る設計であること」を追加"
+    },
+    {
+      "id": "S2IF002",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "変更対象ファイルテーブルに「docs/implementation-history.md | Issue #323エントリの追加（リファクタリング概要・主要変更ファイル・設計書リンク）」行を追加。受入条件に「docs/implementation-history.mdにIssue #323のエントリが追加されていること」を追加"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S2IF003",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "スコープ外。E2E手動確認手順はリファクタリングIssueの受入条件としては過剰であり、自動テスト（既存統合テスト + 新規単体テスト）での品質担保で十分"
+    }
+  ],
+  "summary": {
+    "total_findings": 3,
+    "applied": 2,
+    "skipped": 1
+  },
+  "additional_changes": [
+    "Issue冒頭のNoteを「Stage 1, Stage 3, Stage 5」から「Stage 1, Stage 3, Stage 5, Stage 7」に更新",
+    "レビュー履歴セクションに「Stage 7 影響範囲レビュー反映 (2026-02-21)」を追加（S2IF001, S2IF002, S2IF003の3件を記録）"
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/323"
+  }
+}

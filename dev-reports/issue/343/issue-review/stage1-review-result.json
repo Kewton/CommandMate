@@ -1,0 +1,159 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_focus": "通常",
+  "review_date": "2026-02-22",
+  "issue_number": 343,
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "should_fix",
+      "category": "accuracy",
+      "title": "command-merger.ts の説明が不正確（MCBD マージの記述）",
+      "description": "Issue の「現状の仕組み」セクションで、command-merger.ts の説明が「Standard + MCBD + Worktree コマンドをマージ」と記載されているが、実際には mergeCommandGroups() 関数は Standard + Worktree の2グループのみをマージする。MCBD コマンドは /api/slash-commands ルートで別途処理されており、command-merger.ts は関与しない。",
+      "location": "現状の仕組み - 3. src/lib/command-merger.ts の説明",
+      "suggestion": "「Standard + Worktree コマンドをマージ（MCBD コマンドは /api/slash-commands ルートで別途処理）」に修正する。",
+      "evidence": "src/lib/command-merger.ts:98-128 - mergeCommandGroups(standardGroups, worktreeGroups) は引数が2つのみ。仮説検証レポートでも Partially Confirmed と判定されている。"
+    },
+    {
+      "id": "F002",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "SlashCommandSource 型への 'skill' 追加が変更候補ファイルに欠如",
+      "description": "現在 SlashCommandSource は 'standard' | 'mcbd' | 'worktree' の3値のみ定義されている。skills を新たなソースとして扱う場合、この型に 'skill' を追加する必要があるが、Issue の変更候補ファイル一覧には src/types/slash-commands.ts の変更内容として SlashCommandSource への追加が明記されていない。CATEGORY_LABELS と SlashCommandCategory への追加のみ言及されている。source フィールドは API レスポンスの sources カウント（route.ts:104-107）でも使用されており、skills のカウントが正しく行われない。",
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル - src/types/slash-commands.ts",
+      "suggestion": "src/types/slash-commands.ts の変更内容に「SlashCommandSource に 'skill' を追加」を追記する。また、worktree 用 API ルート（route.ts）の sources レスポンスに skill カウントを追加するか、既存の worktree カウントに含めるかの方針を明確化する。",
+      "evidence": "src/types/slash-commands.ts:30 - SlashCommandSource = 'standard' | 'mcbd' | 'worktree' に 'skill' が未定義。src/app/api/worktrees/[id]/slash-commands/route.ts:102-107 で source ベースのカウント処理あり。"
+    },
+    {
+      "id": "F003",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "CATEGORY_ORDER への 'skill' 追加が変更候補に不明確",
+      "description": "command-merger.ts の CATEGORY_ORDER 配列はカテゴリの表示順序を制御する唯一の情報源（single source of truth）である。'skill' カテゴリを追加する場合、この配列への追加が必須だが、Issue では command-merger.ts の変更内容が「skills マージロジック（必要に応じて）」と曖昧な記述にとどまっている。CATEGORY_ORDER に追加しないと、groupByCategory() の「残余カテゴリ」フォールバック（command-merger.ts:74-83）で処理されるため表示はされるが、順序が不定になる。",
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル - src/lib/command-merger.ts",
+      "suggestion": "command-merger.ts の変更内容を「CATEGORY_ORDER に 'skill' カテゴリを追加（custom カテゴリと standard カテゴリの間に配置を推奨）」と明確化する。",
+      "evidence": "src/lib/command-merger.ts:25-38 - CATEGORY_ORDER 配列は全10カテゴリを定義。74-83行で CATEGORY_ORDER に含まれないカテゴリはフォールバック処理される。"
+    },
+    {
+      "id": "F004",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "/api/slash-commands/route.ts（MCBD ルート）の変更候補が欠如",
+      "description": "Issue の変更候補ファイルには worktree 用 API ルート（/api/worktrees/[id]/slash-commands/route.ts）のみ記載されているが、MCBD 用の /api/slash-commands/route.ts も同様に skills を読み込む必要がある。このルートは worktreeId が指定されない場合に使用され（useSlashCommands.ts:91-93）、MCBD のプロジェクトルートの .claude/skills/ を読み込むべきである。",
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル",
+      "suggestion": "src/app/api/slash-commands/route.ts を変更候補ファイルに追加し、「skills の取得・マージ追加（MCBD プロジェクトルートの .claude/skills/ 読み込み）」と記載する。",
+      "evidence": "src/app/api/slash-commands/route.ts:21 - getSlashCommandGroups() を呼び出しているが、skills は読み込まれない。src/hooks/useSlashCommands.ts:91-93 - worktreeId がない場合は /api/slash-commands エンドポイントを使用する。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "category": "clarity",
+      "title": "skills の frontmatter フィールドの取り扱い方針が不明確",
+      "description": "Issue では skills の SKILL.md 構造として name, description, disable-model-invocation, argument-hint の4フィールドを例示しているが、実際の SKILL.md ファイルには allowed-tools フィールドも存在する（rebuild/SKILL.md, release/SKILL.md で確認）。また、既存の SlashCommand インターフェースにはこれらに対応するフィールド（disable-model-invocation, argument-hint, allowed-tools）が存在しない。どのフィールドを UI に表示するのか、どのフィールドを SlashCommand インターフェースに追加するのかの方針が不明確である。",
+      "location": "要件 - skills の SKILL.md 構造",
+      "suggestion": "以下を明確化する: (1) SKILL.md の frontmatter から取得するフィールド（name, description のみか、argument-hint も含むか）、(2) SlashCommand インターフェースへの新フィールド追加の要否、(3) argument-hint を description に含めて表示するなどの代替案。",
+      "evidence": "src/types/slash-commands.ts:35-58 - SlashCommand インターフェースには name, description, category, model, filePath, isStandard, source, cliTools のみ定義。.claude/skills/rebuild/SKILL.md には allowed-tools フィールドが存在。.claude/skills/release/SKILL.md には disable-model-invocation, argument-hint, allowed-tools が存在。"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "skills 読み込み時のセキュリティ考慮が不足",
+      "description": "既存の commands 読み込み（slash-commands.ts）は getCommandsDir() で固定ディレクトリのみを参照するシンプルな構造だが、skills は .claude/skills/*/SKILL.md というサブディレクトリ走査が必要になる。worktree パスと組み合わせた場合のパストラバーサルリスク（例: シンボリックリンク経由のディレクトリ脱出）に対するセキュリティ考慮がIssueに記載されていない。既存の worktree-path-validator.ts のバリデーションに加え、skills ディレクトリ走査時の安全性確保が必要である。",
+      "location": "非機能要件",
+      "suggestion": "非機能要件に以下を追加: 「skills ディレクトリ走査時はシンボリックリンクを追跡しない（lstatSync で確認）」「サブディレクトリ名に .. を含むパスを拒否する」",
+      "evidence": "src/lib/slash-commands.ts:66-72 - 既存の commands 読み込みは readdirSync でフラットに .md ファイルのみ列挙。skills はサブディレクトリ走査が必要なため、追加のセキュリティ考慮が必要。src/lib/worktree-path-validator.ts:27 - 既存のパストラバーサル検出は path 引数のみで、ディレクトリ走査内容には適用されない。"
+    },
+    {
+      "id": "F007",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "skills の cliTools フィールドの扱いが未記載",
+      "description": "既存の commands には cliTools フィールド（Issue #4）が定義されており、CLI ツールごとのフィルタリングに使用されている。skills を追加する場合、skills の cliTools をどう扱うか（全ツール共通か、Claude のみか、SKILL.md の frontmatter から読み取るか）が未定義である。",
+      "location": "要件 - 機能要件",
+      "suggestion": "skills の cliTools フィールドの初期方針を記載する。例: 「skills は Claude Code 固有の機能のため、初期実装では cliTools: ['claude'] を固定で設定する。」",
+      "evidence": "src/types/slash-commands.ts:50-57 - cliTools フィールドの定義とコメント。src/lib/command-merger.ts:183-199 - filterCommandsByCliTool() で cliTools undefined は Claude-only として扱われる。"
+    },
+    {
+      "id": "F008",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "テスト計画の記載がない",
+      "description": "Issue にテスト計画やテスト対象の記載がない。既存のテストファイル（tests/unit/slash-commands.test.ts, tests/unit/lib/command-merger.test.ts, tests/integration/api-worktree-slash-commands.test.ts）への追加テストケースが必要だが、具体的なテストシナリオが不明確である。",
+      "location": "Issue 全体",
+      "suggestion": "以下のテストケースを受け入れ条件またはテスト計画として追加: (1) skills ディレクトリが存在する場合の読み込みテスト、(2) skills ディレクトリが存在しない場合のスキップテスト、(3) 不正な SKILL.md（frontmatter なし等）のエラーハンドリングテスト、(4) commands と skills の名前衝突時の振る舞いテスト。",
+      "evidence": "tests/unit/slash-commands.test.ts, tests/unit/lib/command-merger.test.ts, tests/integration/api-worktree-slash-commands.test.ts が既存テストとして存在。"
+    },
+    {
+      "id": "F009",
+      "severity": "should_fix",
+      "category": "clarity",
+      "title": "commands と skills の名前衝突時の優先順位が未定義",
+      "description": "既存の mergeCommandGroups() では worktree commands が standard commands を上書きする優先順位（SF-1）が定義されている。skills を追加した場合、同名の command と skill が存在するケースの優先順位（例: /rebuild が commands にも skills にもある場合）が未定義である。",
+      "location": "要件 - 機能要件",
+      "suggestion": "名前衝突時の優先順位を明記する。例: 「同名の command と skill が存在する場合、command を優先する（skills は command として明示的に定義されていないものの補完的な役割）。」",
+      "evidence": "src/lib/command-merger.ts:98-128 - mergeCommandGroups() は commandMap に後から登録したものが優先される仕組み。skills のマージ順序により結果が変わる。"
+    },
+    {
+      "id": "F010",
+      "severity": "nice_to_have",
+      "category": "consistency",
+      "title": "CLAUDE.md のモジュール一覧への追記方針が未記載",
+      "description": "CLAUDE.md の「主要機能モジュール」セクションには slash-commands.ts, command-merger.ts 等の既存モジュール情報は直接記載されていないが、今回の変更で新たに loadSkills() 関数が追加される場合、ドキュメント更新の要否について言及がない。",
+      "location": "Issue 全体",
+      "suggestion": "実装完了後に CLAUDE.md の更新が必要かどうかを受け入れ条件に含めることを検討する。",
+      "evidence": "CLAUDE.md の「利用可能なスキル」セクションに rebuild と release が記載されているが、skills 読み込み機能に関するモジュール情報は未記載。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "overall_quality": "needs_improvement"
+  },
+  "code_references": [
+    {
+      "file": "src/types/slash-commands.ts",
+      "relevance": "SlashCommandSource 型と SlashCommandCategory 型の変更が必要"
+    },
+    {
+      "file": "src/lib/command-merger.ts",
+      "relevance": "CATEGORY_ORDER 配列への skill カテゴリ追加が必要"
+    },
+    {
+      "file": "src/lib/slash-commands.ts",
+      "relevance": "skills 読み込みロジック（loadSkills()）追加の主要対象"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "relevance": "skills 取得・マージの API ルート変更対象"
+    },
+    {
+      "file": "src/app/api/slash-commands/route.ts",
+      "relevance": "MCBD ルートでの skills 読み込み追加が必要（Issue 未記載）"
+    },
+    {
+      "file": "src/lib/standard-commands.ts",
+      "relevance": "参照のみ。skills は standard commands とは異なるソースとして管理"
+    },
+    {
+      "file": "src/components/worktree/SlashCommandList.tsx",
+      "relevance": "UI 表示の確認。skills カテゴリのラベル表示に影響"
+    },
+    {
+      "file": ".claude/skills/rebuild/SKILL.md",
+      "relevance": "既存 SKILL.md の frontmatter 構造の参照（name, description, allowed-tools）"
+    },
+    {
+      "file": ".claude/skills/release/SKILL.md",
+      "relevance": "既存 SKILL.md の frontmatter 構造の参照（name, description, disable-model-invocation, argument-hint, allowed-tools）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成情報。利用可能なスキルセクションに rebuild, release, release-post が記載"
+    }
+  ]
+}

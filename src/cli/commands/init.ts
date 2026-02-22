@@ -95,6 +95,8 @@ async function promptForConfig(): Promise<EnvConfig> {
     logger.blank();
     logger.success('External access enabled');
     logger.info(`  Bind address: 0.0.0.0`);
+    // Issue #332: Mention IP restriction as an alternative security measure
+    logger.info('  Tip: Use --allowed-ips to restrict access by IP address/CIDR.');
     console.log(REVERSE_PROXY_WARNING);
   }
 

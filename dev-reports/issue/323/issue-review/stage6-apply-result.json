@@ -1,0 +1,39 @@
+{
+  "issue_number": 323,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-21",
+  "applied_findings": [
+    {
+      "id": "S2F001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "テストファイルのimport数を「17個→21-25個程度に増加」から「22個→26-30個程度に増加」に修正。変更対象ファイルテーブルの該当行を更新"
+    },
+    {
+      "id": "S2F002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "detectAndRespondToPrompt()の責務範囲を具体化。プロンプト検出→no-promptリセット→重複チェック→回答解決→tmux送信→タイムスタンプ更新→エラーカウントリセット→promptKey記録→ログ出力→クールダウンスケジューリングの10ステップ（約55行）を明記。20-40行目標超過を凝集度の観点から許容範囲とする旨を追記。Before/AfterセクションのAfter欄にも許容範囲の注記を追加"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S2F003",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "thinkingチェック処理（L492-496）の所属関数は実装時の判断に委ねるためスキップ"
+    }
+  ],
+  "update_summary": "Stage 5レビューで検出された2点のshould_fixを反映。(1) S2F001: テストファイルの現在のimport数を正確な22個に修正し、リファクタリング後の予測値を26-30個に更新。(2) S2F002: detectAndRespondToPrompt()が担う10ステップの処理フロー（約55行）を具体的に列挙し、20-40行目標の超過を凝集度の観点から許容する旨を明記。Before/AfterのAfter欄にも注記を追加。レビュー履歴セクションにStage 5反映の記録を追加。Issue冒頭のNoteにStage 5を追記。nice_to_haveのS2F003は実装時判断に委ねるためスキップ。",
+  "summary": {
+    "total_findings": 3,
+    "applied": 2,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/323"
+  },
+  "success": true
+}

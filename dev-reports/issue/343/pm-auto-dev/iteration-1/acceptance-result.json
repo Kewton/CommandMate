@@ -1,0 +1,128 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "シナリオ1: skills ディレクトリが存在する場合 - loadSkills() が SKILL.md をパースして SlashCommand を返す",
+      "result": "passed",
+      "evidence": "tests/unit/slash-commands.test.ts > loadSkills > should load skills from .claude/skills/*/SKILL.md - PASSED. category='skill', source='skill' を確認"
+    },
+    {
+      "scenario": "シナリオ2: skills ディレクトリが存在しない場合 - loadSkills() が空配列を返し、エラーが発生しない",
+      "result": "passed",
+      "evidence": "tests/unit/slash-commands.test.ts > loadSkills > should return empty array when skills directory does not exist - PASSED"
+    },
+    {
+      "scenario": "シナリオ3: 同名の command と skill がある場合 - deduplicateByName() でコマンドが優先される",
+      "result": "passed",
+      "evidence": "tests/unit/slash-commands.test.ts > deduplicateByName > should register skills first, then override with commands - PASSED. また getSlashCommandGroups > should prioritize commands over skills with same name - PASSED"
+    },
+    {
+      "scenario": "シナリオ4: getSlashCommandGroups() に basePath を指定した場合 - commands と skills が統合される",
+      "result": "passed",
+      "evidence": "tests/unit/slash-commands.test.ts > getSlashCommandGroups > should integrate skills into command groups - PASSED. source='skill', category='skill' のコマンドがグループに含まれることを確認"
+    },
+    {
+      "scenario": "シナリオ5: clearCache() 後 - commandsCache と skillsCache の両方が null になる",
+      "result": "passed",
+      "evidence": "tests/unit/slash-commands.test.ts > clearCache > should clear both commandsCache and skillsCache - PASSED. clearCache() 内で commandsCache = null; skillsCache = null; を確認(src/lib/slash-commands.ts L311-313)"
+    },
+    {
+      "scenario": "シナリオ6: API レスポンスに sources.skill が含まれる",
+      "result": "passed",
+      "evidence": "src/app/api/worktrees/[id]/slash-commands/route.ts L29-37: SlashCommandsResponse.sources に skill: number が定義。L106: filteredSkillCount を算出し sources.skill に設定"
+    },
+    {
+      "scenario": "シナリオ7: CATEGORY_ORDER で 'skill' が 'workflow' の直後にある",
+      "result": "passed",
+      "evidence": "src/lib/command-merger.ts L25-39: CATEGORY_ORDER 配列で 'workflow'(L31) の直後に 'skill'(L32) が配置され、'standard-session'(L34) の前にある"
+    },
+    {
+      "scenario": "シナリオ8: safeParseFrontmatter() が ---js frontmatter でエラーをスローする（RCE防止）",
+      "result": "passed",
+      "evidence": "tests/unit/slash-commands.test.ts > safeParseFrontmatter > should disable JavaScript engine (---js frontmatter) - PASSED. 'JavaScript engine is disabled for security' エラーを確認"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "1. SlashCommandCategory に 'skill' が追加されている",
+      "verified": true,
+      "evidence": "src/types/slash-commands.ts L20: | 'skill' が SlashCommandCategory 型に含まれている"
+    },
+    {
+      "criterion": "2. SlashCommandSource に 'skill' が追加されている",
+      "verified": true,
+      "evidence": "src/types/slash-commands.ts L31: export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill'"
+    },
+    {
+      "criterion": "3. CATEGORY_LABELS に skill: 'Skills' が追加されている",
+      "verified": true,
+      "evidence": "src/types/slash-commands.ts L82: skill: 'Skills'"
+    },
+    {
+      "criterion": "4. CATEGORY_ORDER に 'skill' が 'workflow' と 'standard-session' の間に追加されている",
+      "verified": true,
+      "evidence": "src/lib/command-merger.ts L31-34: 'workflow' -> 'skill' -> 'standard-session' の順序"
+    },
+    {
+      "criterion": "5. loadSkills() 関数が存在する",
+      "verified": true,
+      "evidence": "src/lib/slash-commands.ts L203: export async function loadSkills(basePath?: string): Promise<SlashCommand[]>"
+    },
+    {
+      "criterion": "6. safeParseFrontmatter() 関数が存在し、gray-matter の JavaScript エンジンを無効化している",
+      "verified": true,
+      "evidence": "src/lib/slash-commands.ts L52-73: safeParseFrontmatter() が engines.js.parse と engines.javascript.parse で Error をスローする設定"
+    },
+    {
+      "criterion": "7. deduplicateByName() 関数が存在する",
+      "verified": true,
+      "evidence": "src/lib/slash-commands.ts L250: export function deduplicateByName(skills, commands): SlashCommand[]"
+    },
+    {
+      "criterion": "8. skillsCache 変数が存在し、clearCache() で null に設定される",
+      "verified": true,
+      "evidence": "src/lib/slash-commands.ts L30: let skillsCache: SlashCommand[] | null = null; L312-313: clearCache() 内で commandsCache = null; skillsCache = null;"
+    },
+    {
+      "criterion": "9. getSlashCommandGroups() が skills を統合して返す",
+      "verified": true,
+      "evidence": "src/lib/slash-commands.ts L278-297: basePath 指定時は loadSlashCommands + loadSkills + deduplicateByName を実行。basePath なし時は commandsCache + skillsCache を使用"
+    },
+    {
+      "criterion": "10. API route の sources に skill: number が追加されている",
+      "verified": true,
+      "evidence": "src/app/api/worktrees/[id]/slash-commands/route.ts L35: skill: number; L106: filteredSkillCount 算出; L114: skill: filteredSkillCount"
+    },
+    {
+      "criterion": "11. tests/fixtures/skills/valid-skill/SKILL.md が存在する",
+      "verified": true,
+      "evidence": "tests/fixtures/skills/valid-skill/SKILL.md が存在し、name: test-skill, description: A test skill for unit testing を含む"
+    },
+    {
+      "criterion": "12. npm run test:unit が全テストパス",
+      "verified": true,
+      "evidence": "184 test files passed, 3743 tests passed, 7 skipped, 0 failed"
+    },
+    {
+      "criterion": "13. npx tsc --noEmit でエラー0件",
+      "verified": true,
+      "evidence": "npx tsc --noEmit - 出力なし（エラーゼロ）"
+    },
+    {
+      "criterion": "14. npm run lint でエラー0件",
+      "verified": true,
+      "evidence": "npm run lint - 'No ESLint warnings or errors'"
+    }
+  ],
+  "evidence_files": [
+    "src/types/slash-commands.ts",
+    "src/lib/slash-commands.ts",
+    "src/lib/command-merger.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/app/api/slash-commands/route.ts",
+    "tests/unit/slash-commands.test.ts",
+    "tests/fixtures/skills/valid-skill/SKILL.md",
+    "tests/fixtures/skills/no-frontmatter/SKILL.md"
+  ],
+  "message": "すべての受入条件を満たしています。14項目の受入条件と8つのテストシナリオすべてが検証済みです。TypeScriptコンパイル、ESLint、ユニットテスト（184ファイル/3743テスト）すべてパスしています。"
+}

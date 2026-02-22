@@ -129,6 +129,10 @@ tests/
 
 | モジュール | 説明 |
 |-----------|------|
+| `src/lib/ip-restriction.ts` | IPアドレス/CIDR制限コアモジュール（Issue #332: Edge Runtime互換、parseAllowedIps/getAllowedRanges/isIpAllowed/normalizeIp/isIpRestrictionEnabled/getClientIp、MAX_ALLOWED_IP_ENTRIES=256/MAX_CIDR_ENTRY_LENGTH=18 DoS防御、CM_TRUST_PROXY=true時X-Forwarded-For/false時X-Real-IP使用、モジュールスコープキャッシュ） |
+| `src/config/auth-config.ts` | 認証設定定数（Issue #331: AUTH_COOKIE_NAME、AUTH_EXCLUDED_PATHS、Edge Runtime互換、auth.ts/middleware.ts共通。Issue #332: CM_ALLOWED_IPS、CM_TRUST_PROXY追加） |
+| `src/lib/auth.ts` | トークン認証コアモジュール（Issue #331: generateToken/hashToken/verifyToken/parseDuration/parseCookies/isAuthEnabled/buildAuthCookieOptions/createRateLimiter、CLIビルド互換性制約: Next.js固有モジュール依存禁止） |
+| `src/middleware.ts` | 認証ミドルウェア（Issue #331: HTTPリクエスト認証、CM_AUTH_TOKEN_HASH未設定時は即NextResponse.next()、AUTH_EXCLUDED_PATHSの完全一致マッチング） |
 | `src/lib/env.ts` | 環境変数取得・フォールバック処理、getDatabasePathWithDeprecationWarning() |
 | `src/lib/db-path-resolver.ts` | DBパス解決（getDefaultDbPath()、validateDbPath()） |
 | `src/lib/db-migration-path.ts` | DBマイグレーション（migrateDbIfNeeded()、getLegacyDbPaths()） |
@@ -146,7 +150,7 @@ tests/
 | `src/hooks/useUpdateCheck.ts` | アップデートチェック用カスタムフック（Issue #257: /api/app/update-check呼び出し、loading/error/data状態管理） |
 | `src/components/worktree/VersionSection.tsx` | バージョン表示+通知統合コンポーネント（Issue #257: SF-001 DRY準拠、InfoModal/MobileInfoContent共通化） |
 | `src/components/worktree/UpdateNotificationBanner.tsx` | アップデート通知バナーUI（Issue #257: MF-001 SRP準拠、i18n対応、GitHub Releasesリンク） |
-| `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161）。**Issue #306: 重複応答防止** - AutoYesPollerStateにlastAnsweredPromptKey追加、isDuplicatePrompt()ヘルパー、プロンプト非検出時nullリセット、COOLDOWN_INTERVAL_MS=5000クールダウン、scheduleNextPoll()にoverride_interval下限値ガード付き）。**Issue #314: Stop条件機能追加** - AutoYesStateにstopPattern/stopReason追加、disableAutoYes()専用関数（全フィールド明示設定）、checkStopCondition()独立関数（@internal export、safe-regex2+タイムアウト保護）、executeRegexWithTimeout()タイムアウト保護付き評価、pollAutoYes()にStop条件チェック挿入（thinking後・プロンプト検出前）、AutoYesStopReason型をauto-yes-config.tsに移動） |
+| `src/lib/auto-yes-manager.ts` | Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161）。**Issue #306: 重複応答防止** - AutoYesPollerStateにlastAnsweredPromptKey追加、isDuplicatePrompt()ヘルパー、プロンプト非検出時nullリセット、COOLDOWN_INTERVAL_MS=5000クールダウン、scheduleNextPoll()にoverride_interval下限値ガード付き）。**Issue #314: Stop条件機能追加** - AutoYesStateにstopPattern/stopReason追加、disableAutoYes()専用関数（全フィールド明示設定）、checkStopCondition()独立関数（@internal export、safe-regex2+タイムアウト保護）、executeRegexWithTimeout()タイムアウト保護付き評価、pollAutoYes()にStop条件チェック挿入（thinking後・プロンプト検出前）、AutoYesStopReason型をauto-yes-config.tsに移動）。**Issue #323: pollAutoYes()リファクタリング** - 関数群方式（設計選択肢B）による責務分割。validatePollingContext()/captureAndCleanOutput()/processStopConditionDelta()/detectAndRespondToPrompt()（全て@internal export）、getPollerState()内部ヘルパー追加 |
 | `src/config/auto-yes-config.ts` | Auto-Yes設定定数・共通バリデーション（ALLOWED_DURATIONS、DEFAULT_AUTO_YES_DURATION、isAllowedDuration、formatTimeRemaining）。**Issue #314: Stop条件バリデーション追加** - MAX_STOP_PATTERN_LENGTH=500定数、AutoYesStopReason型（クライアント/サーバー共用）、validateStopPattern()共通バリデーション関数（safe-regex2 ReDoS検出・構文検証・エラーメッセージ固定文字列）） |
 | `src/lib/prompt-key.ts` | promptKeyデduplication共通ユーティリティ（Issue #306: generatePromptKey()でtype:questionキー生成、クライアント/サーバー間DRY原則対応、PromptKeyInput interface） |
 | `src/lib/auto-yes-resolver.ts` | Auto-Yes自動応答判定ロジック |
@@ -212,6 +216,9 @@ tests/
 | `src/components/worktree/FeedbackSection.tsx` | フィードバックリンクセクション（Issue #264: Bug Report/Feature Request/Question/View Issues、noopener noreferrer、i18n対応） |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力コンポーネント（Issue #288: isFreeInputModeフラグ追加、フリー入力モード中のセレクター再表示防止、モバイルボタンガード、経路分析コメント） |
 | `tests/helpers/message-input-test-utils.ts` | MessageInputテスト共通ヘルパー（Issue #288: モック定数、props factory、DOM queries、interaction helpers、DRY原則対応） |
+| `src/lib/slash-commands.ts` | スラッシュコマンドローダー（Issue #343: loadSkills()追加、safeParseFrontmatter()でgray-matter RCE対策[S001]、deduplicateByName()でcommand優先重複排除[D001]、skillsCacheをcommandsCacheと独立管理[D011]、MAX_SKILLS_COUNT=100/MAX_SKILL_FILE_SIZE_BYTES=64KB DoS防御[S002]、getSlashCommandGroups()でskills統合） |
+| `src/types/slash-commands.ts` | スラッシュコマンド型定義（Issue #343: SlashCommandCategoryに'skill'追加、SlashCommandSourceに'skill'追加、CATEGORY_LABELSにskill:'Skills'追加） |
+| `src/lib/command-merger.ts` | コマンドマージロジック（Issue #343: CATEGORY_ORDERに'skill'をworkflowとstandard-sessionの間に追加） |
 
 ### CLIモジュール（Issue #96, #136）
 

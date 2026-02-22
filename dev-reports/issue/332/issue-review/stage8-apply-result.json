@@ -1,0 +1,8 @@
+{
+  "stage": 8,
+  "issue_number": 332,
+  "applied_count": 4,
+  "skipped_count": 1,
+  "update_success": true,
+  "new_body_summary": "IF7-001(WebSocket upgradeではws-server.tsでrequest.socket.remoteAddressを直接使用する方針を明確化)、IF7-002(ip-restriction.tsの純粋関数設計方針を追記)、IF7-003(middleware.tsへのIP制限挿入箇所を擬似コードで示す)、IF7-005(security-messages.tsを影響ファイル一覧に追加)を反映。IF7-004(テストヘルパー)はスキップ(実装フェーズで対応可能)"
+}

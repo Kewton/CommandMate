@@ -1,0 +1,28 @@
+{
+  "issue_number": 323,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "implemented_functions": ["validatePollingContext", "captureAndCleanOutput", "processStopConditionDelta", "detectAndRespondToPrompt", "getPollerState"],
+      "new_tests": 20,
+      "total_tests": 102,
+      "typescript_errors": 0,
+      "eslint_errors": 0
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_passed": 10,
+      "scenarios_total": 10
+    },
+    "refactor": {
+      "status": "success",
+      "changes": ["type assertionの修正（'manual' as 'expired' → 'expired'）"]
+    },
+    "docs": {
+      "status": "updated",
+      "updated_files": ["CLAUDE.md", "docs/implementation-history.md"]
+    }
+  },
+  "summary": "pollAutoYes()の139行・7責務を4つの単一責務関数に分割。全受入条件を充足。機能変更なし。"
+}

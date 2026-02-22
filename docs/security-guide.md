@@ -31,6 +31,99 @@ When `CM_BIND=0.0.0.0` is set, the server becomes accessible from external netwo
 
 ---
 
+## Quick Start: Built-in Token Authentication + HTTPS
+
+CommandMate includes a built-in token authentication system that does not require
+a reverse proxy. This is the simplest option for personal or small-team use.
+
+### Step 1: Generate a TLS Certificate with mkcert
+
+mkcert creates locally-trusted certificates for development and LAN use.
+
+#### macOS
+
+```bash
+brew install mkcert
+mkcert -install
+mkcert localhost 192.168.x.x
+```
+
+Replace `192.168.x.x` with your actual LAN IP address. This generates
+`localhost+1.pem` (certificate) and `localhost+1-key.pem` (private key).
+
+#### Linux
+
+Install mkcert using one of the following methods:
+
+```bash
+# Option A: apt (Debian/Ubuntu, if available in your distro)
+sudo apt install mkcert
+
+# Option B: Go install
+go install filippo.io/mkcert@latest
+
+# Option C: Download binary from GitHub Releases
+curl -L https://github.com/FiloSottile/mkcert/releases/latest/download/mkcert-v1.4.4-linux-amd64 \
+  -o /usr/local/bin/mkcert
+chmod +x /usr/local/bin/mkcert
+```
+
+After installation, set up the local CA and generate a certificate:
+
+```bash
+mkcert -install
+mkcert localhost <サーバーIP>
+```
+
+Replace `<サーバーIP>` with your server's LAN IP (e.g., `192.168.1.10`).
+
+#### Distributing the CA Certificate to Client Devices (Linux)
+
+Clients must trust the mkcert root CA to avoid browser warnings.
+
+1. Find the CA file path on the server:
+
+```bash
+mkcert -CAROOT
+# Example output: /root/.local/share/mkcert
+```
+
+2. Transfer `rootCA.pem` to each client device:
+
+```bash
+# From the server, copy to a client
+scp "$(mkcert -CAROOT)/rootCA.pem" user@client-device:/tmp/commandmate-rootCA.pem
+```
+
+3. Install the CA on the client:
+
+```bash
+# Ubuntu/Debian
+sudo cp /tmp/commandmate-rootCA.pem /usr/local/share/ca-certificates/commandmate-rootCA.crt
+sudo update-ca-certificates
+
+# RHEL/CentOS/Fedora
+sudo cp /tmp/commandmate-rootCA.pem /etc/pki/ca-trust/source/anchors/commandmate-rootCA.pem
+sudo update-ca-trust
+
+# For browsers that use their own trust store (Firefox, Chrome on some distros),
+# import rootCA.pem via the browser's certificate settings.
+```
+
+### Step 2: Start CommandMate with Token Authentication and HTTPS
+
+```bash
+commandmate start --auth --cert ./localhost+1.pem --key ./localhost+1-key.pem
+```
+
+- `--auth` enables the built-in token authentication
+- `--cert` and `--key` specify the TLS certificate and private key
+
+The server will print a one-time token URL to the console on first start.
+Open the URL in your browser to authenticate and receive a session cookie.
+
+---
+
 ## Recommended Authentication Methods
 
 ### Option 1: Nginx + Basic Auth (Recommended for LAN)
@@ -143,10 +236,13 @@ authentication ineffective (security theater).
 
 3. **If exposing externally** (`CM_BIND=0.0.0.0`):
    - Set up one of the authentication methods described above
-   - Nginx + Basic Auth is the simplest option for LAN access
+   - Built-in token authentication (`--auth`) is the simplest option for personal/LAN use
+   - Nginx + Basic Auth is the recommended option when a reverse proxy is already in place
 
-> **Note**: Existing `CM_AUTH_TOKEN` settings are silently ignored.
-> They do not cause errors but have no effect.
+> **Note**: When using `--auth`, if an old `CM_AUTH_TOKEN` (or `NEXT_PUBLIC_CM_AUTH_TOKEN`)
+> variable is detected in the environment or `.env` file, CommandMate will display a
+> **warning** at startup reminding you to remove the obsolete variable.
+> Existing `CM_AUTH_TOKEN` settings otherwise have no effect on the new authentication system.
 
 ---
 
@@ -154,11 +250,15 @@ authentication ineffective (security theater).
 
 Before exposing CommandMate to external networks:
 
-- [ ] Reverse proxy authentication is configured (Nginx/Cloudflare/Tailscale)
-- [ ] HTTPS is enabled (via reverse proxy SSL termination)
+- [ ] Authentication is configured — choose one:
+  - [ ] Built-in token authentication (`commandmate start --auth --cert ... --key ...`)
+  - [ ] Reverse proxy authentication (Nginx/Cloudflare/Tailscale)
+- [ ] HTTPS is enabled — choose one:
+  - [ ] Built-in TLS (`--cert` / `--key` flags with mkcert-generated certificate)
+  - [ ] Reverse proxy SSL termination
 - [ ] Firewall rules are properly configured
-- [ ] WebSocket upgrade headers are configured in proxy
-- [ ] Access logs are enabled on the reverse proxy
+- [ ] WebSocket upgrade headers are configured in proxy (if using reverse proxy)
+- [ ] Access logs are enabled on the reverse proxy (if using reverse proxy)
 - [ ] `CM_ROOT_DIR` points only to intended repositories
 
 ---
@@ -201,4 +301,4 @@ rather than a public issue.
 
 ---
 
-*Last updated: 2026-02-08 (Issue #179)*
+*Last updated: 2026-02-21 (Issue #331: mkcert certificate generation, built-in token auth + HTTPS quick start)*

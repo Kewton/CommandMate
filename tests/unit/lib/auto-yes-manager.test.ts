@@ -15,6 +15,10 @@ import {
   disableAutoYes,
   checkStopCondition,
   executeRegexWithTimeout,
+  validatePollingContext,
+  captureAndCleanOutput,
+  processStopConditionDelta,
+  detectAndRespondToPrompt,
   MAX_CONCURRENT_POLLERS,
   POLLING_INTERVAL_MS,
   MAX_BACKOFF_MS,
@@ -22,6 +26,7 @@ import {
   THINKING_CHECK_LINE_COUNT,
   COOLDOWN_INTERVAL_MS,
   type AutoYesState,
+  type AutoYesPollerState,
 } from '@/lib/auto-yes-manager';
 import { DEFAULT_AUTO_YES_DURATION } from '@/config/auto-yes-config';
 
@@ -1338,6 +1343,379 @@ describe('auto-yes-manager', () => {
       // Verify auto-yes was disabled (invalid pattern detected)
       const state = getAutoYesState('wt-cs4');
       expect(state?.enabled).toBe(false);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #323: Test Helper
+  // ==========================================================================
+
+  /**
+   * Create a test AutoYesPollerState with defaults.
+   * Factory function for creating poller state in unit tests without
+   * needing to go through startAutoYesPolling().
+   */
+  function createTestPollerState(
+    overrides?: Partial<AutoYesPollerState>
+  ): AutoYesPollerState {
+    return {
+      timerId: null,
+      cliToolId: 'claude',
+      consecutiveErrors: 0,
+      currentInterval: POLLING_INTERVAL_MS,
+      lastServerResponseTimestamp: null,
+      lastAnsweredPromptKey: null,
+      stopCheckBaselineLength: -1,
+      ...overrides,
+    };
+  }
+
+  // ==========================================================================
+  // Issue #323: validatePollingContext unit tests (timer-independent)
+  // ==========================================================================
+  describe('Issue #323: validatePollingContext', () => {
+    it('should return stopped when pollerState is undefined', () => {
+      const result = validatePollingContext('test-wt', undefined);
+      expect(result).toBe('stopped');
+    });
+
+    it('should return expired when auto-yes is disabled', () => {
+      // Setup: enable then disable auto-yes to create a disabled state
+      setAutoYesEnabled('test-wt-exp', true);
+      disableAutoYes('test-wt-exp', 'expired');
+      const pollerState = createTestPollerState();
+
+      // Need to register poller state in globalThis for stopAutoYesPolling to work
+      globalThis.__autoYesPollerStates?.set('test-wt-exp', pollerState);
+
+      const result = validatePollingContext('test-wt-exp', pollerState);
+      expect(result).toBe('expired');
+    });
+
+    it('should return expired when auto-yes state does not exist', () => {
+      // No auto-yes state set for this worktree
+      const pollerState = createTestPollerState();
+      globalThis.__autoYesPollerStates?.set('test-wt-none', pollerState);
+
+      const result = validatePollingContext('test-wt-none', pollerState);
+      expect(result).toBe('expired');
+
+      // Cleanup
+      globalThis.__autoYesPollerStates?.delete('test-wt-none');
+    });
+
+    it('should return expired when auto-yes has expired', () => {
+      vi.useFakeTimers();
+      const now = 1700000000000;
+      vi.setSystemTime(now);
+
+      setAutoYesEnabled('test-wt-timeout', true, 3600000);
+
+      // Advance past expiration
+      vi.setSystemTime(now + 3600001);
+
+      const pollerState = createTestPollerState();
+      globalThis.__autoYesPollerStates?.set('test-wt-timeout', pollerState);
+
+      const result = validatePollingContext('test-wt-timeout', pollerState);
+      expect(result).toBe('expired');
+    });
+
+    it('should return valid when context is OK', () => {
+      setAutoYesEnabled('test-wt-ok', true);
+      const pollerState = createTestPollerState();
+
+      const result = validatePollingContext('test-wt-ok', pollerState);
+      expect(result).toBe('valid');
+    });
+  });
+
+  // ==========================================================================
+  // Issue #323: captureAndCleanOutput unit tests (timer-independent)
+  // ==========================================================================
+  describe('Issue #323: captureAndCleanOutput', () => {
+    it('should strip ANSI codes from captured output', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      vi.mocked(captureSessionOutput).mockReset();
+
+      // Mock: return output with ANSI escape codes
+      const ansiOutput = '\x1b[32mHello\x1b[0m \x1b[1mWorld\x1b[0m';
+      vi.mocked(captureSessionOutput).mockResolvedValue(ansiOutput);
+
+      const result = await captureAndCleanOutput('test-wt', 'claude');
+      expect(result).toBe('Hello World');
+
+      // Verify captureSessionOutput was called with 5000 line limit
+      expect(captureSessionOutput).toHaveBeenCalledWith('test-wt', 'claude', 5000);
+
+      vi.mocked(captureSessionOutput).mockReset();
+    });
+
+    it('should propagate errors from captureSessionOutput', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      vi.mocked(captureSessionOutput).mockReset();
+
+      vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux session not found'));
+
+      await expect(captureAndCleanOutput('test-wt', 'claude')).rejects.toThrow('tmux session not found');
+
+      vi.mocked(captureSessionOutput).mockReset();
+    });
+
+    it('should return empty string for empty output', async () => {
+      const { captureSessionOutput } = await import('@/lib/cli-session');
+      vi.mocked(captureSessionOutput).mockReset();
+
+      vi.mocked(captureSessionOutput).mockResolvedValue('');
+
+      const result = await captureAndCleanOutput('test-wt', 'claude');
+      expect(result).toBe('');
+
+      vi.mocked(captureSessionOutput).mockReset();
+    });
+  });
+
+  // ==========================================================================
+  // Issue #323: processStopConditionDelta unit tests (timer-independent)
+  // ==========================================================================
+  describe('Issue #323: processStopConditionDelta', () => {
+    it('should set baseline on first call (stopCheckBaselineLength === -1)', () => {
+      const pollerState = createTestPollerState({ stopCheckBaselineLength: -1 });
+      setAutoYesEnabled('test-wt-delta', true, 3600000, 'error|fatal');
+
+      const result = processStopConditionDelta('test-wt-delta', pollerState, 'output text');
+
+      expect(result).toBe(false);
+      expect(pollerState.stopCheckBaselineLength).toBe('output text'.length);
+    });
+
+    it('should check delta when output grows and pattern does not match', () => {
+      setAutoYesEnabled('test-wt-grow', true, 3600000, 'fatal error');
+
+      const pollerState = createTestPollerState({
+        stopCheckBaselineLength: 'initial output'.length,
+      });
+
+      const result = processStopConditionDelta(
+        'test-wt-grow',
+        pollerState,
+        'initial output plus new safe content'
+      );
+
+      expect(result).toBe(false);
+      expect(pollerState.stopCheckBaselineLength).toBe('initial output plus new safe content'.length);
+    });
+
+    it('should return true when delta matches stop pattern', () => {
+      setAutoYesEnabled('test-wt-match', true, 3600000, 'fatal error');
+      // Also register poller state in globalThis so stopAutoYesPolling works inside checkStopCondition
+      const pollerState = createTestPollerState({
+        stopCheckBaselineLength: 'initial output'.length,
+      });
+      globalThis.__autoYesPollerStates?.set('test-wt-match', pollerState);
+
+      const result = processStopConditionDelta(
+        'test-wt-match',
+        pollerState,
+        'initial output\nA fatal error has occurred'
+      );
+
+      expect(result).toBe(true);
+
+      // Verify auto-yes was disabled
+      const state = getAutoYesState('test-wt-match');
+      expect(state?.enabled).toBe(false);
+      expect(state?.stopReason).toBe('stop_pattern_matched');
+
+      // Cleanup
+      globalThis.__autoYesPollerStates?.delete('test-wt-match');
+    });
+
+    it('should reset baseline when output shrinks', () => {
+      const pollerState = createTestPollerState({
+        stopCheckBaselineLength: 1000,
+      });
+      setAutoYesEnabled('test-wt-shrink', true, 3600000, 'error');
+
+      const result = processStopConditionDelta(
+        'test-wt-shrink',
+        pollerState,
+        'short'
+      );
+
+      expect(result).toBe(false);
+      expect(pollerState.stopCheckBaselineLength).toBe('short'.length);
+    });
+
+    it('should skip check when output length is unchanged', () => {
+      const output = 'same output text';
+      const pollerState = createTestPollerState({
+        stopCheckBaselineLength: output.length,
+      });
+      setAutoYesEnabled('test-wt-same', true, 3600000, 'error');
+
+      const result = processStopConditionDelta(
+        'test-wt-same',
+        pollerState,
+        output
+      );
+
+      expect(result).toBe(false);
+      // Baseline should remain unchanged
+      expect(pollerState.stopCheckBaselineLength).toBe(output.length);
+    });
+
+    it('should return false when no stop pattern is configured', () => {
+      setAutoYesEnabled('test-wt-nopattern', true, 3600000); // no stop pattern
+
+      const pollerState = createTestPollerState({
+        stopCheckBaselineLength: 'initial'.length,
+      });
+
+      const result = processStopConditionDelta(
+        'test-wt-nopattern',
+        pollerState,
+        'initial plus new content with error and fatal'
+      );
+
+      expect(result).toBe(false);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #323: detectAndRespondToPrompt unit tests (timer-independent)
+  // ==========================================================================
+  describe('Issue #323: detectAndRespondToPrompt', () => {
+    it('should return no_prompt when no prompt detected', async () => {
+      const pollerState = createTestPollerState();
+
+      const result = await detectAndRespondToPrompt(
+        'test-wt-noprompt',
+        pollerState,
+        'claude',
+        'Processing...'
+      );
+
+      expect(result).toBe('no_prompt');
+      expect(pollerState.lastAnsweredPromptKey).toBeNull();
+    });
+
+    it('should return duplicate for already-answered prompt', async () => {
+      // The prompt detector extracts the question as 'Do you want to proceed?'
+      // (stripping the '(y/n)' suffix), so the key is 'yes_no:Do you want to proceed?'
+      const pollerState = createTestPollerState({
+        lastAnsweredPromptKey: 'yes_no:Do you want to proceed?',
+      });
+
+      const promptOutput = 'Do you want to proceed? (y/n)';
+
+      const result = await detectAndRespondToPrompt(
+        'test-wt-dup',
+        pollerState,
+        'claude',
+        promptOutput
+      );
+
+      expect(result).toBe('duplicate');
+    });
+
+    it('should return responded after successful yes/no answer', async () => {
+      const { sendKeys } = await import('@/lib/tmux');
+      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+
+      setAutoYesEnabled('test-wt-respond', true);
+      const pollerState = createTestPollerState();
+      // Register poller state for updateLastServerResponseTimestamp/resetErrorCount
+      globalThis.__autoYesPollerStates?.set('test-wt-respond', pollerState);
+
+      const promptOutput = 'Do you want to proceed? (y/n)';
+
+      const result = await detectAndRespondToPrompt(
+        'test-wt-respond',
+        pollerState,
+        'claude',
+        promptOutput
+      );
+
+      expect(result).toBe('responded');
+      // The prompt detector extracts the question as 'Do you want to proceed?'
+      expect(pollerState.lastAnsweredPromptKey).toBe('yes_no:Do you want to proceed?');
+      expect(sendKeys).toHaveBeenCalled();
+
+      // Cleanup
+      globalThis.__autoYesPollerStates?.delete('test-wt-respond');
+      vi.mocked(sendKeys).mockReset();
+    });
+
+    it('should return responded after successful multiple_choice answer', async () => {
+      const { sendSpecialKeys } = await import('@/lib/tmux');
+      vi.mocked(sendSpecialKeys).mockReset();
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+
+      setAutoYesEnabled('test-wt-mc-respond', true);
+      const pollerState = createTestPollerState();
+      globalThis.__autoYesPollerStates?.set('test-wt-mc-respond', pollerState);
+
+      const promptOutput = 'Select an option:\n\u276F 1. Yes\n  2. No';
+
+      const result = await detectAndRespondToPrompt(
+        'test-wt-mc-respond',
+        pollerState,
+        'claude',
+        promptOutput
+      );
+
+      expect(result).toBe('responded');
+      expect(pollerState.lastAnsweredPromptKey).not.toBeNull();
+      expect(sendSpecialKeys).toHaveBeenCalled();
+
+      // Cleanup
+      globalThis.__autoYesPollerStates?.delete('test-wt-mc-respond');
+      vi.mocked(sendSpecialKeys).mockReset();
+    });
+
+    it('should return error and call incrementErrorCount on send failure', async () => {
+      const { sendKeys } = await import('@/lib/tmux');
+      vi.mocked(sendKeys).mockReset();
+      vi.mocked(sendKeys).mockRejectedValue(new Error('tmux send failed'));
+
+      setAutoYesEnabled('test-wt-err', true);
+      const pollerState = createTestPollerState({ consecutiveErrors: 0 });
+      globalThis.__autoYesPollerStates?.set('test-wt-err', pollerState);
+
+      const promptOutput = 'Do you want to proceed? (y/n)';
+
+      const result = await detectAndRespondToPrompt(
+        'test-wt-err',
+        pollerState,
+        'claude',
+        promptOutput
+      );
+
+      expect(result).toBe('error');
+      // incrementErrorCount should have been called, increasing consecutiveErrors
+      expect(pollerState.consecutiveErrors).toBe(1);
+
+      // Cleanup
+      globalThis.__autoYesPollerStates?.delete('test-wt-err');
+      vi.mocked(sendKeys).mockReset();
+    });
+
+    it('should reset lastAnsweredPromptKey to null on no_prompt', async () => {
+      const pollerState = createTestPollerState({
+        lastAnsweredPromptKey: 'yes_no:previous prompt',
+      });
+
+      const result = await detectAndRespondToPrompt(
+        'test-wt-reset',
+        pollerState,
+        'claude',
+        'Just some output with no prompt'
+      );
+
+      expect(result).toBe('no_prompt');
+      expect(pollerState.lastAnsweredPromptKey).toBeNull();
     });
   });
 

@@ -1,0 +1,90 @@
+{
+  "issue_number": 323,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_date": "2026-02-21",
+  "focus_area": "設計原則",
+  "status": "conditionally_approved",
+  "score": 4,
+  "summary": "設計方針書は全体として高品質であり、SRP/DRY/KISS/YAGNIの各原則に概ね準拠している。pollAutoYes()の139行7責務から4関数+オーケストレーター約30行への分割は適切である。関数群方式（選択肢B）の採用判断、thinkingチェックの残留判断、detectAndRespondToPrompt()の55行許容判断はいずれも合理的に根拠が示されている。must_fix指摘は無く、should_fix 3件、nice_to_have 4件の指摘がある。",
+  "findings": [
+    {
+      "id": "DR001",
+      "severity": "should_fix",
+      "category": "SRP",
+      "title": "detectAndRespondToPrompt()の責務にcooldownスケジューリングが混在",
+      "description": "設計方針書 Section 3-4 および Section 3-5 の間に矛盾がある。Section 3-4のステップ説明ではdetectAndRespondToPrompt()がクールダウンスケジューリングまで含むように読めるが（Issue本文にも「クールダウンスケジューリングの一連の処理を担う」と記載）、Section 3-5のリファクタリング後pollAutoYes()コードでは `scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS)` がpollAutoYes()側に書かれている。スケジューリングの制御（通常間隔 vs クールダウン間隔の選択）はオーケストレーターの責務であり、detectAndRespondToPrompt()内に含めるとSRPに反する。",
+      "suggestion": "detectAndRespondToPrompt()の責務範囲からscheduleNextPoll()呼び出しを明示的に除外し、戻り値（'responded'等）に基づいてpollAutoYes()がスケジューリングを制御する設計であることを Section 3-4 に明記する。現在の Section 3-5 のコード例はこの設計になっているため、Section 3-4 の処理ステップ記述とIssue本文の記載を修正すれば整合が取れる。",
+      "target": "設計方針書 Section 3-4 処理ステップ / Issue本文 detectAndRespondToPrompt()説明"
+    },
+    {
+      "id": "DR002",
+      "severity": "should_fix",
+      "category": "関数設計",
+      "title": "validatePollingContext()が副作用（stopAutoYesPolling呼び出し）を持つ設計",
+      "description": "Section 3-1 の判定ロジックで、autoYesStateが無効 or 期限切れの場合に`stopAutoYesPolling()`を呼び出すと記述されている。'validate'という名前は通常、検証のみを行い副作用を持たない関数を暗示する。副作用を持つvalidate関数は、テスト時にstopAutoYesPolling()のモック化が必要になり、テスタビリティの目標に反する。また、現在のpollAutoYes()コード（L462-464）では`getAutoYesState()`が期限切れ時に自動でdisableし、その後`stopAutoYesPolling()`を呼ぶという2段構えになっているため、validatePollingContext()に副作用を含めるとgetAutoYesState()との責務の重複も生じる。",
+      "suggestion": "2つの選択肢を検討する。(A) validatePollingContext()は純粋な判定関数として副作用を持たず、戻り値に基づいてpollAutoYes()側でstopAutoYesPolling()を呼び出す。(B) 関数名をensurePollingContext()等に変更し、副作用を持つことを名前で表現する。テスタビリティの観点からは選択肢(A)を推奨する。",
+      "target": "設計方針書 Section 3-1 判定ロジック"
+    },
+    {
+      "id": "DR003",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "getPollerState()導入の効果が限定的",
+      "description": "Section 4 で導入される getPollerState() は `autoYesPollerStates.get(worktreeId)` の1行ラッパーである。設計方針書では「将来のログ追加・バリデーション追加の変更箇所を1点に集約する」と述べているが、これはYAGNIに抵触する可能性がある。現時点で6箇所の呼び出しを置換しても、コードの意味的な明確さが向上するわけではなく、むしろMap.get()という明確な操作がワンクッション抽象化されることで可読性がわずかに低下する。一方、getAutoYesState()は期限切れ自動無効化というロジックを含むため意味のあるラッパーである。",
+      "suggestion": "getPollerState()の導入が本当にDRYの改善になるか、対費用効果を再評価する。導入する場合は、Section 4 のドキュメントから「将来のログ追加・バリデーション追加」という将来予測を根拠から削除し、「既存のgetAutoYesState()パターンとの一貫性維持」など現時点の価値に焦点を当てた根拠に変更することを推奨する。",
+      "target": "設計方針書 Section 4 pollerState存在確認の共通化"
+    },
+    {
+      "id": "DR004",
+      "severity": "nice_to_have",
+      "category": "関数設計",
+      "title": "processStopConditionDelta()のpollerState mutation設計に関するドキュメント補強",
+      "description": "Section 3-3 のJSDocに `@param pollerState - Current poller state (mutated: stopCheckBaselineLength updated)` とある点は良い。しかし、戻り値の `boolean` と mutation が同時に発生するため、呼び出し側はbooleanの判定だけでなくpollerStateの変更も暗黙に受け入れる必要がある。Section 9 のトレードオフ表で「既存コードと同一パターン維持」と説明されているが、具体的にどの既存関数がこのパターンを使っているかの参照があると設計判断がより明確になる。",
+      "suggestion": "Section 9 のトレードオフ表 or Section 3-3 の設計根拠に、既存のmutationパターンの具体例（例: updateLastServerResponseTimestamp(), resetErrorCount(), incrementErrorCount()がpollerStateを直接変更する）への参照を追加する。",
+      "target": "設計方針書 Section 3-3 / Section 9"
+    },
+    {
+      "id": "DR005",
+      "severity": "nice_to_have",
+      "category": "可読性",
+      "title": "pollAutoYes()内のpollerState!（non-null assertion）の使用",
+      "description": "Section 3-5 のリファクタリング後コードで、`pollerState!` が2箇所（L250, L255）に出現する。validatePollingContext()が'valid'を返した時点でpollerStateがnon-nullであることは論理的に保証されるが、TypeScriptの型システムはこの保証を理解できないため non-null assertion が必要になっている。コードレビューで毎回この安全性を確認する負担が生じる。",
+      "suggestion": "validatePollingContext()の戻り値を `{ status: 'valid', pollerState: AutoYesPollerState } | { status: 'stopped' | 'expired' }` のような判別可能共用体（discriminated union）にすることで、TypeScriptの型ナローイングにより `!` を排除できる。ただし、これは設計の複雑度が増すため、現在の `pollerState!` パターンを許容するのも合理的な判断である。実装時に検討する程度で良い。",
+      "target": "設計方針書 Section 3-5 リファクタリング後コード"
+    },
+    {
+      "id": "DR006",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "detectAndRespondToPrompt()の戻り値リテラル型が5種類と多い",
+      "description": "detectAndRespondToPrompt()は 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error' の5種類を返す。設計根拠として「テスト時に各ケースをassert可能にする」と述べられているが、呼び出し元のpollAutoYes()では 'responded' のみを判定し、他は全て同一パス（通常スケジュール）に流れる。呼び出し元が区別しない戻り値を返すのはKISS観点でやや過剰である。",
+      "suggestion": "呼び出し元での利用を考慮すると 'responded' | 'skipped' の2値でも十分機能する。ただし、テスト時の詳細なassertを優先するという判断も合理的であり、5種類を維持する場合はその旨をSection 3-4の設計根拠に「テスト専用の詳細な区別であり、呼び出し元では'responded'のみを判定する」と明記すると意図が明確になる。",
+      "target": "設計方針書 Section 3-4 戻り値型設計"
+    },
+    {
+      "id": "DR007",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "captureAndCleanOutput()の分割効果が限定的",
+      "description": "Section 3-2 の captureAndCleanOutput() は captureSessionOutput() + stripAnsi() の2行を関数に抽出するものである。約10行（JSDoc含む）の関数となるが、実質的なロジックは2行であり、テスト時もcaptureSessionOutputのモック結果にstripAnsiを適用するだけである。この関数の存在により、pollAutoYes()の行数は約2行削減されるが、関数呼び出しのインダイレクションが1段増える。",
+      "suggestion": "captureAndCleanOutput()の分割は、pollAutoYes()のオーケストレーター化という全体設計目標の一部として意味を持つ。個別に見ると効果は限定的だが、pollAutoYes()の各ステップを名前付き関数にするという一貫性の観点で正当化できる。この点をSection 3-2の設計根拠に明記するとレビューアの疑問を事前に解消できる。",
+      "target": "設計方針書 Section 3-2"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 4,
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-323-auto-yes-manager-refactoring-design-policy.md",
+    "src/lib/auto-yes-manager.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "overall_assessment": "設計方針書はリファクタリングの目的（テスタビリティ向上、責務分離）を明確に達成する高品質な設計である。7つの責務を持つ139行の関数を4つの名前付き関数+30行のオーケストレーターに分割する方針は、SRP/KISSの観点で適切である。関数群方式（選択肢B）の採用、thinkingチェックの残留、detectAndRespondToPrompt()の55行許容といった設計判断はいずれもトレードオフが明示されており、合理的な根拠に基づいている。@internal exportパターンは既存の慣行（checkStopCondition, executeRegexWithTimeout, HealthCheckResult等）と整合している。should_fix 3件は主に設計ドキュメント内の記述の整合性と命名に関するものであり、設計の根幹を覆すものではない。",
+  "timestamp": "2026-02-21T00:00:00Z"
+}

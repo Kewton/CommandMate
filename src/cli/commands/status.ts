@@ -167,6 +167,11 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
       console.log(`URL:     ${status.url}`);
     }
 
+    // Issue #332: Show IP restriction status
+    if (process.env.CM_ALLOWED_IPS) {
+      console.log(`IP ACL:  ${process.env.CM_ALLOWED_IPS}`);
+    }
+
     console.log('');
 
     process.exit(ExitCode.SUCCESS);

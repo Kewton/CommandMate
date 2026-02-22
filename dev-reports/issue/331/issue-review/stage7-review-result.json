@@ -1,0 +1,168 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_type": "影響範囲（2回目）",
+  "review_date": "2026-02-21",
+  "issue_number": 331,
+  "previous_findings_addressed": [
+    {
+      "id": "G001",
+      "addressed": true,
+      "comment": "tsconfig.server.jsonが変更対象ファイル一覧に追加されている。include配列にsrc/lib/auth.tsを追加する旨が明記されている。現在のtsconfig.server.jsonのinclude配列（server.ts, src/lib/env.ts, src/lib/ws-server.ts等）を確認し、auth.tsの追加が必要であることは正しい。適切に対応されている。"
+    },
+    {
+      "id": "G002",
+      "addressed": true,
+      "comment": "src/i18n.tsが変更対象ファイル一覧に追加されている。現在のi18n.tsは5名前空間（common, worktree, autoYes, error, prompt）をPromise.allでインポートしており、auth名前空間の追加が必須であることが太字で強調されている。適切に対応されている。"
+    },
+    {
+      "id": "G003",
+      "addressed": true,
+      "comment": "src/cli/commands/status.tsが変更対象ファイル一覧に追加されている。HTTPS判定方法としてCM_HTTPS_CERT環境変数の有無を使用する方針が設計方針に明記されている。daemon.tsのgetStatus()でhttp://がハードコードされている問題も認識・対応されている。適切に対応されている。"
+    },
+    {
+      "id": "G004",
+      "addressed": true,
+      "comment": "middleware.tsの認証無効時の動作保証がIssue内の設計方針、実装タスク、受入条件の3箇所に明記されている。CM_AUTH_TOKEN_HASH未設定時は即NextResponse.next()を返す設計と、config.matcherで静的アセットを除外する方針が記載されている。適切に対応されている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "I001",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "tsconfig.cli.json への auth.ts 関連のビルド影響が未考慮",
+      "description": "Issue #331では start.ts からトークン生成のために src/lib/auth.ts をインポートする設計となっている。tsconfig.cli.json の include は 'src/cli/**/*' のみであり、src/lib/auth.ts はこのスコープ外にある。ただし、rootDir が './src' であるため、src/cli/ から src/lib/auth.ts への相対パスインポートは TypeScript コンパイラの依存解決によって自動的にコンパイル対象に含まれる（port-allocator.ts -> src/lib/errors.ts の前例あり、Issue #264 C-CONS-002 で文書化済み）。しかし、auth.ts が Node.js の crypto モジュールのみを使用する設計であることが前提であり、auth.ts が Next.js 固有の依存（next/headers 等）を使用すると CLI ビルドが失敗する。この制約が Issue に明記されていない。",
+      "location": "tsconfig.cli.json / 実装タスク > auth.ts",
+      "suggestion": "auth.ts の設計制約として「CLI ビルド（tsconfig.cli.json）からもインポートされるため、Next.js 固有のモジュール（next/headers, next/server 等）への依存を含めてはならない」ことを実装タスクの auth.ts セクションに追記する。WebSocket 用 Cookie パースユーティリティも Node.js 標準の文字列操作で実装する必要がある旨は既に記載されているが、CLI ビルドとの互換性の観点からの制約を明示すると実装者の理解が深まる。"
+    },
+    {
+      "id": "I002",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": ".env.example への認証・HTTPS関連設定例の追記内容が未定義",
+      "description": "変更対象ファイル一覧に .env.example が含まれており「認証・HTTPS関連の設定例追記」と記載されている。しかし、具体的にどのような設定例を追記するかが未定義。現在の .env.example にはセキュリティセクション（## Security）が既にあり、リバースプロキシ推奨の記載がある。認証はCLIオプション（--auth）で有効化する設計であり、.env ファイルで設定する環境変数は CM_AUTH_TOKEN_HASH, CM_AUTH_EXPIRE, CM_HTTPS_CERT, CM_HTTPS_KEY であるが、これらは CLI が自動的に環境変数として設定するため .env に手動設定するケースは想定されていない。.env.example に不適切なコメントが含まれるとユーザーが混乱する可能性がある。",
+      "location": "変更対象ファイル > .env.example",
+      "suggestion": ".env.example に追記する内容を明確にする。推奨: セキュリティセクションに「# Built-in authentication: Use --auth flag when starting the server」「# HTTPS: Use --cert and --key flags when starting the server」「# See: docs/security-guide.md for details」のようなコメントのみを追加し、CM_AUTH_TOKEN_HASH 等の環境変数は .env.example に含めない（CLIが自動設定するため）。これにより、ユーザーが .env に手動でハッシュ値を設定しようとする誤操作を防止できる。"
+    },
+    {
+      "id": "I003",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "server.ts の import 文変更の影響 - createServer の分岐とモジュールインポート",
+      "description": "現在の server.ts は 'http' モジュールの createServer のみをインポートしている（29行目: import { createServer } from 'http'）。HTTPS 対応では 'https' モジュールと 'fs' モジュール（証明書読み込み用）の import 追加が必要。また、server.ts は tsconfig.server.json でビルドされるが、server.ts の新しい import（https, fs）は Node.js 標準モジュールのため tsconfig.server.json の include への追加は不要である。しかし、条件分岐で http.createServer と https.createServer を使い分ける場合、server 変数の型が http.Server | https.Server になるため、setupWebSocket(server) の呼び出しで型の不一致が発生する（ws-server.ts の型拡張が必須の前提条件）。この依存順序（ws-server.ts の型拡張が server.ts の HTTPS 対応の前提条件）が実装タスクの順序に反映されていない。",
+      "location": "server.ts / 実装タスク > HTTPS対応 > server.ts",
+      "suggestion": "実装タスクの HTTPS 対応セクションに、ws-server.ts の setupWebSocket() の型拡張が server.ts の HTTPS 対応の前提条件であることを明記する。フェーズ分割案（Phase 1: 認証コア / Phase 2: HTTPS）で Phase 1 に ws-server.ts の型拡張が含まれているため順序的には問題ないが、1 つの PR で実装する場合のファイル修正順序のガイダンスがあると良い。"
+    },
+    {
+      "id": "I004",
+      "severity": "should_fix",
+      "category": "ビルド/テスト",
+      "title": "vitest.config.ts の test.environment と統合テストの互換性",
+      "description": "現在の vitest.config.ts は test.environment: 'node' に設定されている。統合テスト auth-middleware.test.ts では NextRequest / NextResponse のモックを使用する設計だが、Next.js の middleware.ts は Edge Runtime で動作するコードであるため、テスト環境（node）でのモックに注意が必要。特に、NextRequest のコンストラクタは URL オブジェクトを必要とし、NextResponse.next() / NextResponse.redirect() は Edge Runtime 用のレスポンスオブジェクトを返す。node 環境での NextRequest/NextResponse モックは vi.mock('next/server') で対応可能だが、テストセットアップファイル（tests/setup.ts）への追加が必要になる場合がある。この影響が Issue のテスト計画に考慮されていない。",
+      "location": "テスト計画セクション / vitest.config.ts",
+      "suggestion": "テスト計画に、auth-middleware.test.ts で NextRequest/NextResponse をモックする際の具体的な方法を追記する。vitest.config.ts 自体の変更は不要と考えられるが、テストファイル内で vi.mock('next/server') を使用する必要があることを明記する。または tests/setup.ts にグローバルモックを追加する方針であればその旨を記載する。"
+    },
+    {
+      "id": "I005",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "AppProviders コンポーネントへの認証 Context 追加の可能性が未検討",
+      "description": "現在の AppProviders（src/components/providers/AppProviders.tsx）は SidebarProvider と WorktreeSelectionProvider を提供している。認証機能の追加に伴い、認証状態（authEnabled: boolean）をアプリケーション全体で共有するための AuthContext/AuthProvider が必要になる可能性がある。Issue では /api/auth/status エンドポイントを使用してクライアント側で認証状態を判定する設計だが、サイドバー（デスクトップ/モバイル）の複数コンポーネントが個別に /api/auth/status を呼び出すとリクエストが重複する。AuthContext を AppProviders に追加して認証状態を一元管理する場合、AppProviders.tsx と contexts ディレクトリが変更対象になるが、これらが変更対象ファイル一覧に含まれていない。",
+      "location": "src/components/providers/AppProviders.tsx / src/contexts/",
+      "suggestion": "認証状態のクライアント側管理方針を明確にする。選択肢: (A) 各コンポーネントが /api/auth/status を個別に呼び出す（シンプルだが重複リクエスト）、(B) useAuthStatus() カスタムフックを作成してキャッシュ（SWR/React Query不使用なら独自実装）、(C) AuthContext/AuthProvider を AppProviders に追加して一元管理。(B) または (C) を採用する場合は変更対象ファイルに追加が必要。初回実装では (A) のシンプルな方式で開始し、パフォーマンス問題が出た場合に (B)/(C) に移行する方針でも可。"
+    },
+    {
+      "id": "I006",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "レート制限のメモリ管理がサーバー長期稼働時のメモリリークリスクを含む",
+      "description": "ブルートフォース対策のレート制限は Map によるメモリ管理を設計している。実装タスクに「古いエントリの自動クリーンアップ（メモリリーク防止）」の記載はあるが、クリーンアップのタイミング（定期的なタイマー？リクエストごとのチェック？）とクリーンアップ対象（ロックアウト期間経過後のエントリ）の仕様が未定義。server.ts の gracefulShutdown で stopAllPolling() と stopAllAutoYesPolling() を呼んでいるのと同様に、レート制限のクリーンアップタイマーがある場合は gracefulShutdown でクリアする必要があるが、この影響も未記載。",
+      "location": "実装タスク > ブルートフォース対策 / server.ts の gracefulShutdown",
+      "suggestion": "レート制限のクリーンアップ戦略を設計方針に追記する。推奨: (1) setInterval による定期クリーンアップ（例: 5分ごとに期限切れエントリを削除）、(2) gracefulShutdown でクリーンアップタイマーの clearInterval を追加。server.ts の gracefulShutdown 関数に影響がある場合は変更対象に server.ts を含める（server.ts は既に HTTPS 対応で変更対象に含まれているため、追加の変更点として認識すべき）。"
+    },
+    {
+      "id": "I007",
+      "severity": "should_fix",
+      "category": "後方互換性",
+      "title": "DaemonManager.start() の StartOptions 型変更がデーモンモード呼び出し元に及ぼす影響",
+      "description": "Issue では StartOptions（src/cli/types/index.ts）に auth, authExpire, cert, key, allowHttp フィールドを追加する設計。DaemonManager.start() は StartOptions を引数に取る。現在の start.ts の daemonManager.start() 呼び出し（92-97行目）は dev, port, dbPath のみを渡している。新フィールドは全てオプショナル（?付き）のため、型レベルでの後方互換性は維持されるが、start.ts のデーモンモード分岐で新フィールドを DaemonManager に渡すロジックを追加する必要がある。これは Issue のタスク「startCommand()内のトークン生成フロー」に含まれるが、具体的にどのフィールドを DaemonManager.start() に渡し、daemon.ts の start() でどのフィールドを環境変数に変換するかのマッピングが分散して記載されており、一覧性が低い。",
+      "location": "src/cli/commands/start.ts 92-97行目 / src/cli/utils/daemon.ts 35行目",
+      "suggestion": "StartOptions のフィールドと環境変数のマッピング一覧表を追記する。例: auth -> (トークン生成 -> CM_AUTH_TOKEN_HASH), authExpire -> CM_AUTH_EXPIRE, cert -> CM_HTTPS_CERT, key -> CM_HTTPS_KEY, allowHttp -> CM_ALLOW_HTTP。このマッピングが start.ts と daemon.ts の両方で一貫して実装される必要があることを明示する。"
+    },
+    {
+      "id": "I008",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "ログイン画面（/login）のルーティングに関する middleware.ts の除外パス設定の具体性不足",
+      "description": "Issue の middleware.ts 実装タスクに「/api/auth/* と静的リソースは認証除外」と記載されている。しかし、/login ページ自体も認証除外にしなければ、未認証ユーザーがログイン画面にアクセスできないリダイレクトループが発生する。/login の除外は暗黙的に想定されているかもしれないが、除外パスの完全なリストが明示されていない。",
+      "location": "実装タスク > middleware.ts / 設計方針 > middleware.ts の matcher 設定",
+      "suggestion": "middleware.ts の認証除外パスの完全なリストを実装タスクに明記する。推奨除外パス: /login, /api/auth/*, /_next/static/*, /_next/image/*, /favicon.ico。config.matcher で除外パスを定義するか、middleware 関数内で pathname をチェックして除外するかの方式も明示すること。"
+    },
+    {
+      "id": "I009",
+      "severity": "nice_to_have",
+      "category": "ビルド/テスト",
+      "title": "CLIオプションパーステスト（cli-auth-options.test.ts）の配置がユニットテストだがCLIモジュールのテスト分類が不明確",
+      "description": "テスト計画では cli-auth-options.test.ts を tests/unit/ に配置する設計。しかし、このテストは commander のオプションパースを検証するものであり、src/cli/index.ts の commander 定義と src/cli/commands/start.ts の startCommand の両方に関わる。現在のプロジェクトでは CLI モジュールのテストが tests/unit/ に含まれるため分類としては問題ないが、テスト内容の範囲（commander のオプション定義テスト vs start.ts のバリデーションロジックテスト）を明確にすると良い。",
+      "location": "テスト計画 > tests/unit/cli-auth-options.test.ts",
+      "suggestion": "cli-auth-options.test.ts のテスト内容を具体化する。(1) commander のオプション定義が正しくパースされることのテスト（--auth, --auth-expire 等）と、(2) start.ts 内のバリデーションロジック（無効な auth-expire フォーマット、証明書パス不存在）のテストを分けて記述するか、1つのファイルに含めるかを明記する。"
+    },
+    {
+      "id": "I010",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": ".gitignore での証明書ファイルの扱い",
+      "description": "現在の .gitignore には '*.pem' が既に含まれている（25行目）。HTTPS 対応で証明書ファイル（.pem）をプロジェクトディレクトリに配置する可能性があるが、.gitignore で既に除外されているため、誤ってコミットされるリスクは低い。ドキュメントタスクで「証明書ファイルの管理上の注意（.gitignoreへの追加、パーミッション600推奨）」が記載されているが、.gitignore には既に *.pem が含まれているため追加は不要。この情報を Issue に記載すると実装者の確認工数を削減できる。",
+      "location": ".gitignore / ドキュメントタスク > security-guide.md",
+      "suggestion": "Issue のドキュメントタスクに「.gitignore に *.pem は既に含まれているため追加不要。security-guide.md にはこの事実を記載し、他の証明書フォーマット（.crt, .key ファイル拡張子等）が使用される場合は .gitignore への追加を推奨する」と追記する。"
+    }
+  ],
+  "summary": {
+    "total": 10,
+    "must_fix": 0,
+    "should_fix": 8,
+    "nice_to_have": 2
+  },
+  "overall_assessment": "Issue #331 は 6 回のレビューステージ（Stage 1 通常レビュー、Stage 2 反映、Stage 3 影響範囲レビュー、Stage 4 反映、Stage 5 通常レビュー 2 回目、Stage 6 反映）を経て、影響範囲の網羅性が大幅に向上している。Stage 3 の Must Fix 4 件（G001-G004: tsconfig.server.json、src/i18n.ts、status.ts HTTPS対応、middleware.ts 後方互換性）は全て適切に反映されており、Stage 5/6 で追加された /api/auth/status エンドポイント、CLIオプション組み合わせルール、Cookie格納値の設計、auth-expire有効期限管理も変更対象ファイルと実装タスクに正しく反映されている。今回の影響範囲レビュー 2 回目では Must Fix レベルの指摘は発見されなかった。残る 8 件の Should Fix は、CLI ビルドとの互換性制約（I001）、.env.example の追記内容（I002）、実装順序の依存関係（I003）、テスト環境の互換性（I004）、認証状態のクライアント管理方針（I005）、レート制限のメモリ管理（I006）、StartOptions のマッピング一覧性（I007）、middleware.ts の除外パス完全リスト（I008）であり、いずれも実装段階で対応可能な詳細レベルの改善事項である。変更対象ファイル一覧（約30ファイル）は十分に網羅されており、テストファイル（5ファイル）もカバレッジが適切。全体として、Issue #331 は影響範囲の観点から実装着手に十分な品質に達している。",
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/tsconfig.cli.json",
+      "relevance": "include: 'src/cli/**/*' のみ。start.ts から src/lib/auth.ts をインポートする際の cross-boundary import 制約（I001）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/.env.example",
+      "relevance": "認証・HTTPS関連設定例の追記内容が未定義（I002）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/server.ts",
+      "relevance": "29行目: import { createServer } from 'http'。HTTPS対応で https, fs モジュール追加が必要。setupWebSocket(server) の型依存（I003）。gracefulShutdown のレート制限クリーンアップ（I006）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/vitest.config.ts",
+      "relevance": "test.environment: 'node'。auth-middleware.test.ts での NextRequest/NextResponse モック互換性（I004）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/components/providers/AppProviders.tsx",
+      "relevance": "認証状態の Context 追加の可能性（I005）。現在は SidebarProvider と WorktreeSelectionProvider のみ"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/cli/commands/start.ts",
+      "relevance": "92-97行目: daemonManager.start() 呼び出し。新フィールド（auth, cert, key等）の渡し方（I007）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/cli/types/index.ts",
+      "relevance": "StartOptions 型。auth, authExpire, cert, key, allowHttp フィールド追加の影響（I007）"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/.gitignore",
+      "relevance": "25行目: *.pem が既に含まれている（I010）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/docs/security-guide.md",
+      "relevance": "証明書ファイル管理の注意事項記載先。.gitignore の *.pem 既存設定との整合性確認（I010）"
+    }
+  ]
+}

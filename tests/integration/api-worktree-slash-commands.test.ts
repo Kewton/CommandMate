@@ -89,5 +89,8 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
     expect(Array.isArray(data.groups)).toBe(true);
     // Should include standard commands even if no worktree-specific commands
     expect(data.sources.standard).toBeGreaterThan(0);
+    // Issue #343: sources should include skill property
+    expect(data.sources).toHaveProperty('skill');
+    expect(typeof data.sources.skill).toBe('number');
   });
 });

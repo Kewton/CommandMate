@@ -1,0 +1,9 @@
+{
+  "issue_number": 323,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "design_doc_path": "dev-reports/design/issue-323-auto-yes-manager-refactoring-design-policy.md",
+  "source_file": "src/lib/auto-yes-manager.ts",
+  "test_file": "tests/unit/lib/auto-yes-manager.test.ts"
+}

@@ -181,6 +181,24 @@ export interface Env {
 
   /** Database file path */
   CM_DB_PATH: string;
+
+  /** Issue #331: SHA-256 hash of authentication token (optional) */
+  CM_AUTH_TOKEN_HASH?: string;
+
+  /** Issue #331: Token expiration duration (optional, e.g., "24h") */
+  CM_AUTH_EXPIRE?: string;
+
+  /** Issue #331: Path to TLS certificate file (optional) */
+  CM_HTTPS_CERT?: string;
+
+  /** Issue #331: Path to TLS private key file (optional) */
+  CM_HTTPS_KEY?: string;
+
+  /** Issue #332: Allowed IP addresses/CIDR ranges (comma-separated, optional) */
+  CM_ALLOWED_IPS?: string;
+
+  /** Issue #332: Trust reverse proxy X-Forwarded-For header ('true'/'false', optional) */
+  CM_TRUST_PROXY?: string;
 }
 
 /**

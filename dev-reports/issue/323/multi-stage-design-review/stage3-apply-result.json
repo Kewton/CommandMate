@@ -1,0 +1,13 @@
+{
+  "issue_number": 323,
+  "stage": 3,
+  "applied_findings": ["IA001", "IA002", "IA003"],
+  "skipped_findings": ["IA004", "IA005", "IA006"],
+  "skip_reasons": {
+    "IA004": "nice_to_have",
+    "IA005": "nice_to_have",
+    "IA006": "nice_to_have"
+  },
+  "update_summary": "Stage 3影響分析レビューの should_fix 3件を設計方針書に反映。IA001: Section 10にtests/integration/auto-yes-persistence.test.tsを確認対象として追記。IA002: Section 10にCLAUDE.md更新内容の具体化セクションを追加（追加関数名5つの列挙、設計選択結果の記載方針）。IA003: Section 6-1にsendPromptAnswer()のモック依存チェーン補足と既存テスト修正不要の根拠を追記。Section 12にStage 3レビューサマリーを追加。",
+  "success": true
+}

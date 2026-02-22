@@ -1,0 +1,35 @@
+{
+  "issue_number": 323,
+  "feature_summary": "auto-yes-manager.ts pollAutoYes() リファクタリング - 責務分割によるテスタビリティ向上",
+  "acceptance_criteria": [
+    "既存テスト（tests/unit/lib/auto-yes-manager.test.ts）が全てパスすること",
+    "pollAutoYes()が4-5個の単一責務関数に分割されていること",
+    "停止条件チェックロジックが専用関数（processStopConditionDelta）に抽出されていること",
+    "分割関数の命名が既存関数と衝突しないこと（特に既存checkStopCondition()との区別）",
+    "pollerState存在確認の重複が解消されていること（getPollerState()ヘルパー）",
+    "機能変更がないこと（外部インターフェースは維持）",
+    "分割された各関数（validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt）に対する個別テストが追加されていること",
+    "分割関数の個別テストはタイマー非依存（直接関数呼び出し）で記述すること",
+    "分割関数はpollerStateを引数として受け取る設計であること",
+    "CLAUDE.mdのauto-yes-manager.tsモジュール説明が更新されていること",
+    "docs/implementation-history.mdにIssue #323のエントリが追加されていること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 既存テスト全パス確認（npm run test:unit）",
+    "シナリオ2: pollAutoYes()が~30行のオーケストレーターになっていること（grep/wc確認）",
+    "シナリオ3: 4つの新規@internal export関数（validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt）が存在すること",
+    "シナリオ4: getPollerState()プライベートヘルパーが追加され、autoYesPollerStates.get()の直接呼び出しが減少していること",
+    "シナリオ5: checkStopCondition()（L409）が変更されていないこと",
+    "シナリオ6: 新規テストがタイマー非依存で記述されていること（vi.useFakeTimers使用なし）",
+    "シナリオ7: TypeScript型チェックがパスすること（npx tsc --noEmit）",
+    "シナリオ8: ESLintがパスすること（npm run lint）",
+    "シナリオ9: CLAUDE.mdが更新されていること（Issue #323の記載確認）",
+    "シナリオ10: docs/implementation-history.mdにIssue #323エントリが追加されていること"
+  ],
+  "target_files": [
+    "src/lib/auto-yes-manager.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts",
+    "CLAUDE.md",
+    "docs/implementation-history.md"
+  ]
+}

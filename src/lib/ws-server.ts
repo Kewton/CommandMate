@@ -1,11 +1,15 @@
 /**
  * WebSocket Server for Real-time Communication
  * Manages WebSocket connections and room-based message broadcasting
+ * Issue #331: WebSocket authentication via Cookie header
  */
 
 import { Server as HTTPServer } from 'http';
+import { Server as HTTPSServer } from 'https';
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
+import { isAuthEnabled, parseCookies, AUTH_COOKIE_NAME, verifyToken } from './auth';
+import { getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, normalizeIp } from './ip-restriction';
 
 interface WebSocketMessage {
   type: 'subscribe' | 'unsubscribe' | 'broadcast';
@@ -24,9 +28,27 @@ const clients = new Map<WebSocket, ClientInfo>();
 const rooms = new Map<string, Set<WebSocket>>();
 
 /**
- * Setup WebSocket server on HTTP server
+ * Check if a WebSocket error is an expected non-fatal error.
+ * Common causes include mobile browser disconnects sending malformed close frames.
  *
- * @param server - HTTP server instance
+ * @param error - Error with optional code property
+ * @returns true if the error is expected and can be silently handled
+ */
+function isExpectedWebSocketError(error: Error & { code?: string }): boolean {
+  return (
+    error.code === 'WS_ERR_INVALID_CLOSE_CODE' ||
+    error.message?.includes('Invalid WebSocket frame') ||
+    error.message?.includes('write after end') ||
+    error.message?.includes('ECONNRESET') ||
+    error.message?.includes('EPIPE')
+  );
+}
+
+/**
+ * Setup WebSocket server on HTTP or HTTPS server
+ * Issue #331: Added auth check on WebSocket upgrade
+ *
+ * @param server - HTTP or HTTPS server instance
  *
  * @example
  * ```typescript
@@ -35,16 +57,53 @@ const rooms = new Map<string, Set<WebSocket>>();
  * server.listen(3000);
  * ```
  */
-export function setupWebSocket(server: HTTPServer): void {
+export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
   wss = new WebSocketServer({ noServer: true });
 
   // Handle upgrade requests - only accept app WebSocket connections, not Next.js HMR
   server.on('upgrade', (request, socket, head) => {
     const pathname = request.url || '/';
 
-    // Let Next.js handle its own HMR WebSocket connections
+    // Let Next.js handle its own HMR WebSocket connections in development.
+    // In production there are no /_next/ WebSocket connections (no HMR).
+    // Leaving the socket unhandled in production can trigger the Node.js 'request'
+    // event as a fallback on Node.js 19+, causing TypeError in handleRequestImpl
+    // because the response has no setHeader (Issue #331).
     if (pathname.startsWith('/_next/')) {
+      if (process.env.NODE_ENV !== 'development') {
+        socket.write('HTTP/1.1 426 Upgrade Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+      }
       return;
+    }
+
+    // Issue #332: WebSocket IP restriction
+    // [S2-008] Uses request.socket.remoteAddress directly (not getClientIp()).
+    // getClientIp() is for HTTP headers (X-Real-IP/X-Forwarded-For);
+    // WebSocket upgrade gets IP from the socket connection directly.
+    if (isIpRestrictionEnabled()) {
+      const wsClientIp = normalizeIp(request.socket.remoteAddress || '');
+      if (!isIpAllowed(wsClientIp, getAllowedRanges())) {
+        // [S4-004] Log injection prevention: normalizeIp() + substring(0, 45)
+        const safeIp = wsClientIp.substring(0, 45);
+        console.warn(`[IP-RESTRICTION] WebSocket denied: ${safeIp}`);
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+    }
+
+    // Issue #331: WebSocket authentication via Cookie header
+    if (isAuthEnabled()) {
+      const cookieHeader = request.headers.cookie || '';
+      const cookies = parseCookies(cookieHeader);
+      const token = cookies[AUTH_COOKIE_NAME];
+
+      if (!token || !verifyToken(token)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
     }
 
     wss!.handleUpgrade(request, socket, head, (ws) => {
@@ -73,15 +132,7 @@ export function setupWebSocket(server: HTTPServer): void {
     const socket = (ws as unknown as { _socket?: { on: (event: string, handler: (err: Error) => void) => void; destroy?: () => void } })._socket;
     if (socket) {
       socket.on('error', (err: Error & { code?: string }) => {
-        // Suppress common mobile browser disconnect errors
-        const isExpectedError =
-          err.code === 'WS_ERR_INVALID_CLOSE_CODE' ||
-          err.message?.includes('Invalid WebSocket frame') ||
-          err.message?.includes('write after end') ||
-          err.message?.includes('ECONNRESET') ||
-          err.message?.includes('EPIPE');
-
-        if (!isExpectedError) {
+        if (!isExpectedWebSocketError(err)) {
           console.error('[WS Socket] Error:', err.message);
         }
 
@@ -113,13 +164,7 @@ export function setupWebSocket(server: HTTPServer): void {
 
     // Handle errors (including invalid close codes from mobile browsers)
     ws.on('error', (error: Error & { code?: string }) => {
-      // Suppress noisy errors from mobile browser disconnects
-      const isExpectedError =
-        error.code === 'WS_ERR_INVALID_CLOSE_CODE' ||
-        error.message?.includes('Invalid WebSocket frame') ||
-        error.message?.includes('write after end');
-
-      if (!isExpectedError) {
+      if (!isExpectedWebSocketError(error)) {
         console.error('[WS] WebSocket error:', error.message);
       }
 
@@ -133,7 +178,7 @@ export function setupWebSocket(server: HTTPServer): void {
     });
   });
 
-  console.log('WebSocket server initialized');
+  // WebSocket server initialization complete (no log in production per CLAUDE.md)
 }
 
 /**
@@ -164,7 +209,6 @@ function handleMessage(ws: WebSocket, message: WebSocketMessage): void {
 function handleSubscribe(ws: WebSocket, worktreeId: string): void {
   const clientInfo = clients.get(ws);
   if (!clientInfo) {
-    console.log(`[WS] handleSubscribe: clientInfo not found for worktreeId: ${worktreeId}`);
     return;
   }
 
@@ -178,7 +222,7 @@ function handleSubscribe(ws: WebSocket, worktreeId: string): void {
   const room = rooms.get(worktreeId)!;
   room.add(ws);
 
-  console.log(`Client subscribed to worktree: ${worktreeId}, room size: ${room.size}, ws readyState: ${ws.readyState}`);
+  // Client subscribed (no log in production per CLAUDE.md)
 }
 
 /**
@@ -201,7 +245,7 @@ function handleUnsubscribe(ws: WebSocket, worktreeId: string): void {
     }
   }
 
-  console.log(`Client unsubscribed from worktree: ${worktreeId}`);
+  // Client unsubscribed (no log in production per CLAUDE.md)
 }
 
 /**
@@ -209,13 +253,7 @@ function handleUnsubscribe(ws: WebSocket, worktreeId: string): void {
  */
 function handleBroadcast(worktreeId: string, data: unknown): void {
   const room = rooms.get(worktreeId);
-  console.log(`[WS] handleBroadcast called for ${worktreeId}, room size: ${room?.size || 0}`);
-  if (!room) {
-    console.log(`[WS] No room found for ${worktreeId}`);
-    return;
-  }
-  if (room.size === 0) {
-    console.log(`[WS] Room for ${worktreeId} is empty`);
+  if (!room || room.size === 0) {
     return;
   }
 
@@ -226,22 +264,15 @@ function handleBroadcast(worktreeId: string, data: unknown): void {
       data,
     });
 
-    let successCount = 0;
-    let errorCount = 0;
-
     room.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         try {
           client.send(message);
-          successCount++;
         } catch (sendError) {
-          errorCount++;
           console.error(`Error sending WebSocket message to client:`, sendError);
         }
       }
     });
-
-    console.log(`Broadcast to worktree ${worktreeId}: ${successCount}/${room.size} clients (${errorCount} errors)`);
   } catch (broadcastError) {
     console.error(`Error broadcasting to worktree ${worktreeId}:`, broadcastError);
     // Try to broadcast with sanitized data
@@ -347,7 +378,7 @@ export function cleanupRooms(worktreeIds: string[]): void {
       });
       // Delete the room
       rooms.delete(worktreeId);
-      console.log(`[WS] Cleaned up room for worktree: ${worktreeId}`);
+      // Room cleaned up (no log in production per CLAUDE.md)
     }
   }
 }
@@ -371,6 +402,6 @@ export function closeWebSocket(): void {
     wss.close();
     wss = null;
 
-    console.log('WebSocket server closed');
+    // WebSocket server closed (no log in production per CLAUDE.md)
   }
 }

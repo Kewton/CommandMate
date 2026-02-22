@@ -1,0 +1,233 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_focus": "影響範囲",
+  "review_date": "2026-02-22",
+  "issue_number": 343,
+  "findings": [
+    {
+      "id": "F101",
+      "severity": "must_fix",
+      "category": "compatibility",
+      "title": "CATEGORY_LABELS に 'skill' キーが未定義のため TypeScript コンパイルエラーが発生する",
+      "description": "Issue では SlashCommandCategory に 'skill' を追加すると記載されているが、CATEGORY_LABELS は Record<SlashCommandCategory, string> として定義されている（src/types/slash-commands.ts:75）。TypeScript の Record 型は全キーの存在を要求するため、SlashCommandCategory に 'skill' を追加した時点で CATEGORY_LABELS に 'skill' キーがなければコンパイルエラーとなる。Issue の変更候補では CATEGORY_LABELS 更新が言及されているが、具体的なラベル文字列（例: 'Skills'）が明記されていない。また、groupByCategory() 関数（command-merger.ts:79）では CATEGORY_LABELS[category] || category というフォールバックがあるが、Record 型の制約により 'skill' キーが CATEGORY_LABELS に存在しない場合はコンパイル自体が通らない。",
+      "affected_files": [
+        "src/types/slash-commands.ts",
+        "src/lib/command-merger.ts"
+      ],
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル - src/types/slash-commands.ts",
+      "suggestion": "変更内容に「CATEGORY_LABELS に skill: 'Skills' を追加」と明記する。これは SlashCommandCategory への 'skill' 追加と同時に行わなければコンパイルエラーとなるため、必須の同時変更として記載すべきである。"
+    },
+    {
+      "id": "F102",
+      "severity": "must_fix",
+      "category": "compatibility",
+      "title": "SlashCommandsResponse 型の sources フィールドに skill カウントが未定義（型不整合）",
+      "description": "worktree 用 API ルート（route.ts:29-36）の SlashCommandsResponse インターフェースでは sources を { standard: number; worktree: number; mcbd: number; } と定義している。Issue では「sources レスポンスに skill カウントを追加」と記載されているが、この型定義の変更が明確でない。skills の source カウントを追加する場合、(1) sources インターフェースに skill: number フィールドを追加する、(2) カウント計算ロジック（route.ts:102-107）に cmd.source === 'skill' のフィルタを追加する、の2点の変更が必要。さらに、api-client.ts:384 にも SlashCommandsResponse インターフェース（groups のみ、sources なし）が定義されており、worktree API の sources レスポンス変更がクライアント側の型定義と不整合にならないかの確認が必要。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/slash-commands/route.ts",
+        "src/lib/api-client.ts"
+      ],
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル - route.ts",
+      "suggestion": "以下を変更候補に明記する: (1) route.ts の SlashCommandsResponse.sources に skill: number を追加、(2) route.ts のカウント計算に skill フィルタを追加、(3) api-client.ts の SlashCommandsResponse は groups のみのため変更不要であることを確認として記載。"
+    },
+    {
+      "id": "F103",
+      "severity": "must_fix",
+      "category": "impact",
+      "title": "commandsCache が skills を含まないためキャッシュ不整合が発生する",
+      "description": "slash-commands.ts の commandsCache（L22）は loadSlashCommands() で読み込んだ commands のみをキャッシュし、skills は含まない。getSlashCommandGroups() は basePath 未指定時にキャッシュを使用する（L110: commandsCache || await loadSlashCommands()）。Issue の設計では loadSkills() を別関数として追加する方針だが、skills のキャッシュ管理方針が未定義である。具体的な問題: (1) MCBD ルート（/api/slash-commands）で getSlashCommandGroups() を呼ぶ際、キャッシュに commands のみが入り skills が欠落する可能性がある、(2) clearCache() が commands キャッシュのみクリアし skills キャッシュが残る可能性がある、(3) filterCommands() は commandsCache のみを検索対象とするため skills が検索から除外される。",
+      "affected_files": [
+        "src/lib/slash-commands.ts",
+        "src/app/api/slash-commands/route.ts"
+      ],
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル - src/lib/slash-commands.ts",
+      "suggestion": "skills のキャッシュ戦略を明確化する。推奨案: (A) commandsCache を commands + skills の統合キャッシュに変更する、または (B) skillsCache を別変数として管理し clearCache() で両方クリアする。また filterCommands() への影響も明記する。"
+    },
+    {
+      "id": "F104",
+      "severity": "should_fix",
+      "category": "testing",
+      "title": "既存テスト slash-commands.test.ts の SlashCommandCategory 検証が失敗する可能性",
+      "description": "tests/unit/slash-commands.test.ts:126-129 で、loadSlashCommands() の結果に対して validCategories = ['planning', 'development', 'review', 'documentation', 'workflow'] のみをチェックしている。skills が同じ loadSlashCommands 経路で返される場合、category が 'skill' のコマンドが含まれ、このアサーションが失敗する。ただし、loadSkills() が別関数として分離される設計であればこのテストは影響を受けない。設計によってテスト影響が変わるため、明確化が必要。",
+      "affected_files": [
+        "tests/unit/slash-commands.test.ts"
+      ],
+      "location": "テスト影響範囲",
+      "suggestion": "skills の読み込みパスを明確化し、テスト影響を判断できるようにする。loadSkills() が loadSlashCommands() とは独立した関数であれば、既存テストへの影響は最小限。テスト計画にも「既存 loadSlashCommands テストは変更不要」または「validCategories に 'skill' を追加」のいずれかを明記する。"
+    },
+    {
+      "id": "F105",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "filterCommandsByCliTool() での skills の扱いが未定義",
+      "description": "command-merger.ts:183-199 の filterCommandsByCliTool() は cliTools フィールドに基づいてフィルタリングする。cliTools が undefined の場合は cliToolId === 'claude' の場合のみ表示される（L192-193: Claude-only として扱われる）。skills は Claude Code 固有の機能であるため cliTools undefined のままでも動作上は正しいが、Codex CLI ユーザーがセレクターを開いた際に skills が表示されないことになる。Stage 1 レビュー（F007）で指摘された cliTools フィールドの扱いが skipped のまま残っている。skills を全ツール共通にするか Claude 限定にするかの方針決定は、フィルタリング動作に直接影響する。",
+      "affected_files": [
+        "src/lib/command-merger.ts"
+      ],
+      "location": "要件 - 機能要件",
+      "suggestion": "skills の cliTools 方針を決定し Issue に明記する。推奨: 「skills は .claude/ ディレクトリ配下のため、初期実装では cliTools を undefined（Claude-only）として扱う。将来的に他ツール対応が必要な場合は別 Issue で対応」。"
+    },
+    {
+      "id": "F106",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "MCBD ルート（/api/slash-commands）の skills 読み込みにおける basePath の扱い",
+      "description": "/api/slash-commands/route.ts は getSlashCommandGroups() を basePath なしで呼び出している（L21）。これは process.cwd() をルートとして使用する。MCBD のプロジェクトルートの .claude/skills/ を読み込む場合、同じ process.cwd() ベースで問題ないが、Issue で追加された「MCBD プロジェクトルートの .claude/skills/ 読み込み」の実装方法が不明確。loadSkills() も basePath パラメータを受け取る設計にすべきか、または getSlashCommandGroups() 内で統合的に処理するかの方針が必要。",
+      "affected_files": [
+        "src/app/api/slash-commands/route.ts",
+        "src/lib/slash-commands.ts"
+      ],
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル - /api/slash-commands/route.ts",
+      "suggestion": "loadSkills() 関数の設計において basePath パラメータを loadSlashCommands() と同様のシグネチャで定義し、getSlashCommandGroups() 内で commands と skills の両方を basePath ベースで読み込む構造を推奨する。これにより worktree API と MCBD API の両方で一貫した動作となる。"
+    },
+    {
+      "id": "F107",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "mergeCommandGroups() の名前重複解決ロジックにおける skills の挿入位置が不明確",
+      "description": "Issue では「同名の command と skill が存在する場合、command を優先する」と定義されている（Stage 2 で追加）。しかし、mergeCommandGroups() は commandMap に後から登録したものが上書きする仕組み（Map.set）であるため、skills の登録順序によって結果が変わる。worktree API の処理フロー（route.ts:84-96）では standardGroups と worktreeGroups をマージするが、skills はどのタイミングで追加されるのかが未定義。考えられるパターン: (A) worktreeGroups に skills を含めてからマージ → worktree commands と skills の名前衝突時は後者が優先、(B) mergeCommandGroups 後に skills を追加 → skills が全ての commands を上書き、(C) 3引数の mergeCommandGroups に拡張 → 明示的な優先順位制御。",
+      "affected_files": [
+        "src/lib/command-merger.ts",
+        "src/app/api/worktrees/[id]/slash-commands/route.ts"
+      ],
+      "location": "要件 - 機能要件（名前衝突時の優先順位）",
+      "suggestion": "skills のマージタイミングと方法を明確化する。推奨パターン: skills を先に commandMap に登録し、その後 commands（standard, worktree）で上書きする方式。これにより「command が skill を優先する」要件を満たせる。具体的な実装方針を Issue に追記する。"
+    },
+    {
+      "id": "F108",
+      "severity": "should_fix",
+      "category": "testing",
+      "title": "既存テスト command-merger.test.ts の CATEGORY_ORDER 依存テストへの影響",
+      "description": "command-merger.test.ts の groupByCategory テスト（L127-186）は 'standard-session' と 'planning' カテゴリのみでテストしているため、'skill' カテゴリの追加による直接的な破壊はない。しかし、mergeCommandGroups テスト（L12-123）では standardGroups と worktreeGroups の2グループのみをテストしている。skills を追加する場合、(1) skills グループを含む3グループのマージテスト、(2) skills と commands の名前衝突テスト、(3) CATEGORY_ORDER に 'skill' が含まれることの検証テスト、が追加で必要になる。既存テストは壊れないが、新機能のカバレッジが不足する。",
+      "affected_files": [
+        "tests/unit/lib/command-merger.test.ts"
+      ],
+      "location": "テスト影響範囲",
+      "suggestion": "テスト計画として以下を追加: (1) CATEGORY_ORDER に 'skill' が含まれることの検証、(2) skills を含む mergeCommandGroups の3ウェイマージテスト、(3) command/skill 名前衝突時の優先順位テスト。"
+    },
+    {
+      "id": "F109",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "worktree API の integration テスト（api-worktree-slash-commands.test.ts）への影響",
+      "description": "tests/integration/api-worktree-slash-commands.test.ts:87-92 で data.sources の検証を行っている。現在のアサーションは data.sources.standard が 0 より大きいことのみ検証しているが、skills 追加後は data.sources に skill フィールドが追加される。このテストは sources.skill の存在を検証していないため直接は壊れないが、(1) skills 読み込みの統合テストが存在しない、(2) sources レスポンスの skill カウントの検証がない、という不足がある。また、テストでモックされている getWorktreeById の返り値パス '/Users/test/projects/my-project' は実在しないため、skills ディレクトリの有無による分岐テストが行えない。",
+      "affected_files": [
+        "tests/integration/api-worktree-slash-commands.test.ts"
+      ],
+      "location": "テスト影響範囲",
+      "suggestion": "統合テストとして以下を追加: (1) skills ディレクトリが存在する worktree パスでの skill カウント検証、(2) skills ディレクトリが存在しない場合の skill: 0 検証、(3) sources レスポンスに skill フィールドが含まれることの型検証。"
+    },
+    {
+      "id": "F110",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "parseCommandFile() と skills パースの設計上の差異が未整理",
+      "description": "既存の parseCommandFile()（slash-commands.ts:38-57）は (1) frontmatter から description と model を取得、(2) COMMAND_CATEGORIES マッピングで category を決定（デフォルト 'workflow'）、(3) filePath を process.cwd() からの相対パスとして設定、という処理を行う。skills のパースでは (1) frontmatter から name と description を取得（name はファイル名ではなく frontmatter から）、(2) category は固定で 'skill'、(3) filePath は .claude/skills/{name}/SKILL.md のパス、(4) source は 'skill'、と異なる処理が必要。parseCommandFile() の再利用は適切でなく、parseSkillFile() 等の新関数が必要だが、Issue では loadSkills() 関数のみ言及されておりパース処理の設計が不足している。",
+      "affected_files": [
+        "src/lib/slash-commands.ts"
+      ],
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル - src/lib/slash-commands.ts",
+      "suggestion": "loadSkills() の内部設計として parseSkillFile() 関数の存在を明記する。特に (1) name のソース（frontmatter vs ディレクトリ名）のフォールバック方針、(2) category 固定値 'skill' の設定、(3) source 固定値 'skill' の設定、(4) filePath の形式、を要件に含める。"
+    },
+    {
+      "id": "F111",
+      "severity": "nice_to_have",
+      "category": "impact",
+      "title": "SlashCommandList コンポーネントの UI 表示で skills カテゴリの視覚的区別がない",
+      "description": "SlashCommandList.tsx はカテゴリラベルを表示するが、全カテゴリ同じスタイル（px-3 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50）で表示される。skills カテゴリが追加されても既存の commands カテゴリと同じ見た目になるため、ユーザーが skills と commands を視覚的に区別できない。カテゴリラベル「Skills」の表示のみで十分かもしれないが、将来的にアイコンや色分けが必要になる可能性がある。",
+      "affected_files": [
+        "src/components/worktree/SlashCommandList.tsx"
+      ],
+      "location": "UI 表示への影響",
+      "suggestion": "初期実装ではカテゴリラベル「Skills」で十分と判断し、将来的な視覚的区別の要否を実装後に評価する方針を記載する。"
+    },
+    {
+      "id": "F112",
+      "severity": "nice_to_have",
+      "category": "compatibility",
+      "title": "useSlashCommands フックと api-client.ts の変更は不要であることの確認",
+      "description": "useSlashCommands.ts は API レスポンスの groups フィールドのみを使用し（L105: setGroups(data.groups)）、sources フィールドは使用していない。そのため、API レスポンスに skill カウントが追加されてもフック側の変更は不要。api-client.ts の SlashCommandsResponse も groups: SlashCommandGroup[] のみで sources を含まないため変更不要。ただし、Issue の変更候補ファイルに useSlashCommands.ts が含まれていないため、「変更不要であることの確認」として明記しておくと実装時の混乱を防げる。",
+      "affected_files": [
+        "src/hooks/useSlashCommands.ts",
+        "src/lib/api-client.ts"
+      ],
+      "location": "影響範囲",
+      "suggestion": "影響範囲セクションに「変更不要ファイル」として useSlashCommands.ts、api-client.ts、SlashCommandSelector.tsx、SlashCommandList.tsx を列挙し、変更不要の理由を簡潔に記載する。"
+    },
+    {
+      "id": "F113",
+      "severity": "nice_to_have",
+      "category": "testing",
+      "title": "SKILL.md の frontmatter に name フィールドがない場合のフォールバック動作が未定義",
+      "description": "既存の SKILL.md ファイル（rebuild, release, release-post）はすべて name フィールドを持っているが、外部リポジトリの SKILL.md で name が欠落している可能性がある。既存の parseCommandFile() ではファイル名から name を取得するが、skills ではディレクトリ名（例: rebuild, release）をフォールバック値として使用するかどうかが未定義。",
+      "affected_files": [
+        "src/lib/slash-commands.ts"
+      ],
+      "location": "要件 - skills の SKILL.md 構造",
+      "suggestion": "非機能要件に「SKILL.md の name フィールドが欠落している場合はディレクトリ名をフォールバックとして使用する」を追加する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 3,
+    "should_fix": 7,
+    "nice_to_have": 3,
+    "overall_quality": "needs_improvement"
+  },
+  "code_references": [
+    {
+      "file": "src/types/slash-commands.ts",
+      "relevance": "SlashCommandCategory, SlashCommandSource, CATEGORY_LABELS の変更が必要。Record<SlashCommandCategory, string> の制約により CATEGORY_LABELS の同時更新が必須。"
+    },
+    {
+      "file": "src/lib/command-merger.ts",
+      "relevance": "CATEGORY_ORDER への 'skill' 追加、filterCommandsByCliTool() での skills 扱い、mergeCommandGroups() の名前重複解決ロジック。"
+    },
+    {
+      "file": "src/lib/slash-commands.ts",
+      "relevance": "skills 読み込み（loadSkills()）追加、commandsCache の skills 統合管理、filterCommands() への影響。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "relevance": "SlashCommandsResponse.sources への skill カウント追加、skills マージタイミング。"
+    },
+    {
+      "file": "src/app/api/slash-commands/route.ts",
+      "relevance": "MCBD ルートでの skills 読み込み追加、basePath の扱い。"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "SlashCommandsResponse 型（groups のみ）は変更不要の確認対象。"
+    },
+    {
+      "file": "src/hooks/useSlashCommands.ts",
+      "relevance": "API レスポンスの groups のみ使用のため変更不要の確認対象。"
+    },
+    {
+      "file": "src/components/worktree/SlashCommandList.tsx",
+      "relevance": "skills カテゴリラベル表示。変更不要だが視覚的区別の検討対象。"
+    },
+    {
+      "file": "src/components/worktree/SlashCommandSelector.tsx",
+      "relevance": "変更不要の確認対象。groups を受け取るのみで skills 固有のロジックなし。"
+    },
+    {
+      "file": "tests/unit/slash-commands.test.ts",
+      "relevance": "validCategories アサーションが skills の読み込みパスによって影響を受ける可能性。"
+    },
+    {
+      "file": "tests/unit/lib/command-merger.test.ts",
+      "relevance": "既存テストは壊れないが、skills マージのカバレッジ不足。"
+    },
+    {
+      "file": "tests/integration/api-worktree-slash-commands.test.ts",
+      "relevance": "sources レスポンスに skill カウントの検証が不足。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "利用可能なスキルセクションの更新が実装完了後に必要。"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 100.0,
+    "after_coverage": 100.0
+  },
+  "refactorings_applied": [
+    "ip-restriction.ts: module-scope initialization moved before dependent functions for readability",
+    "ip-restriction.ts: enhanced JSDoc for getClientIp() with S1-004 SRP rationale, S4-001 future extension (CM_TRUSTED_PROXIES / rightmost-non-trusted-IP)",
+    "ip-restriction.ts: enhanced JSDoc for parseAllowedIps() with S4-002 performance rationale and S4-005 regex-preceding validation rationale",
+    "ip-restriction.ts: enhanced S4-006 comment with explicit safe-fallback explanation",
+    "ws-server.ts: removed 8 console.log statements violating CLAUDE.md production rule",
+    "ws-server.ts: simplified handleBroadcast() room-check logic (merged null and empty checks)",
+    "ws-server.ts: removed unnecessary successCount/errorCount tracking variables",
+    "daemon.ts: added CM_ALLOWED_IPS check to REVERSE_PROXY_WARNING condition (consistent with start.ts)"
+  ],
+  "files_changed": [
+    "src/lib/ip-restriction.ts",
+    "src/lib/ws-server.ts",
+    "src/cli/utils/daemon.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "design_policy_compliance": {
+    "S1-001_cache_strategy": "PASS - getAllowedRanges() used in both middleware.ts and ws-server.ts",
+    "S1-002_internal_constants": "PASS - MAX_ALLOWED_IP_ENTRIES=256, MAX_CIDR_ENTRY_LENGTH=18, unexported",
+    "S1-003_module_scope_init": "PASS - allowedIpsEnv captured at module load",
+    "S1-004_getClientIp_JSDoc": "PASS - enhanced with SRP rationale and future split point",
+    "S2-004_fail_fast_comment": "PASS - documented in module header",
+    "S2-005_defense_in_depth": "PASS - comment in middleware.ts Step 1",
+    "S2-008_ws_getClientIp_comment": "PASS - documented in ws-server.ts",
+    "S3-006_cli_constraint": "PASS - documented in module header",
+    "S4-001_xff_warning": "PASS - enhanced JSDoc with future CM_TRUSTED_PROXIES extension",
+    "S4-002_entry_count_limit": "PASS - implemented and documented",
+    "S4-003_auth_excluded_paths": "PASS - Step 1 comment in middleware.ts",
+    "S4-004_log_injection": "PASS - normalizeIp() + substring(0,45) in both middleware.ts and ws-server.ts",
+    "S4-005_entry_length_limit": "PASS - implemented and documented",
+    "S4-006_trust_proxy_validation": "PASS - warning on unexpected values, enhanced comment"
+  },
+  "tests": {
+    "unit_tests_passed": 3796,
+    "unit_test_files": 185,
+    "integration_auth_middleware_passed": 17,
+    "skipped": 7
+  },
+  "commits": [
+    "2c0a88e: refactor(#332): improve code organization and remove production console.log"
+  ],
+  "message": "Refactoring complete. Code reorganization, JSDoc enhancement, console.log removal, and daemon.ts warning condition fix applied. All design policy compliance items verified. All tests pass."
+}

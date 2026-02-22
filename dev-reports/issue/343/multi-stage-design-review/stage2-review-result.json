@@ -1,0 +1,121 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_focus": "整合性",
+  "findings": [
+    {
+      "id": "C001",
+      "severity": "must_fix",
+      "category": "type_consistency",
+      "title": "SlashCommand.source フィールドの型が設計方針書の 'skill' 値を受け入れられない",
+      "description": "設計方針書 3-2 では parseSkillFile() で source: 'skill' as SlashCommandSource を設定しているが、現在の src/types/slash-commands.ts L30 での SlashCommandSource 型は 'standard' | 'mcbd' | 'worktree' の3値のみ。設計方針書 3-1 では SlashCommandSource に 'skill' を追加する変更が記載されている（export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill'）が、この変更なしでは parseSkillFile() の source: 'skill' as SlashCommandSource は型アサーション（as キャスト）で強制的に通しているだけであり、型安全性を損なう。設計方針書側のコードスニペットで as SlashCommandSource を使用している点は型変更と合わせれば不要なキャストになる。型変更が確実に実施されることを前提とすれば整合はしているが、実装順序のミスで型追加漏れが起こるリスクがある。",
+      "location": "設計方針書 3-1 SlashCommandSource 型変更、3-2 parseSkillFile() の source フィールド",
+      "suggestion": "設計方針書のコードスニペットから as SlashCommandSource のキャストを除去し、型定義変更（SlashCommandSource への 'skill' 追加）が先行して実施されることを実装チェックリストの順序で明確にする。これにより型安全性を保証できる。"
+    },
+    {
+      "id": "C002",
+      "severity": "must_fix",
+      "category": "code_consistency",
+      "title": "parseCommandFile() が source フィールドを設定しない問題が getSlashCommandGroups() の新しいデータフローで顕在化する",
+      "description": "現在の parseCommandFile()（src/lib/slash-commands.ts L38-57）は source フィールドを返却オブジェクトに含めていない。既存コードでは mergeCommandGroups() 内の cmd.source || 'worktree' フォールバック（command-merger.ts L120）で補完されていた。しかし設計方針書の getSlashCommandGroups() 変更では、basePath あり（worktree 用）の場合に deduplicateByName(skills, commands) を直接呼び出し、mergeCommandGroups() を経由しない。このため commands の source が undefined のまま deduplicateByName() に渡される。その後 route.ts L103-107 で cmd.source === 'worktree' のカウントを行う際、source が undefined の commands はカウントされず worktreeCount が 0 になる。設計方針書 [D008] でこの問題を認識し「推奨対応」として記載しているが、実装チェックリストでは「本 Issue のスコープ内で対応するかは実装時に判断する」と曖昧。source カウントの正確性に直結するため、対応を明確にすべきである。",
+      "location": "設計方針書 3-2 getSlashCommandGroups()、セクション 8 [D008]、現在の src/lib/slash-commands.ts L46-51",
+      "suggestion": "以下のいずれかを設計方針書に明記する: (A) parseSkillFile() で source: 'skill' を設定するのと同様に、parseCommandFile() でも source: 'worktree' を明示的に設定する（本 Issue スコープに含める）、または (B) deduplicateByName() 内で source 未設定の commands に対して 'worktree' をフォールバック設定するロジックを追加する。route.ts のカウント正確性を保証するために、どちらかの対応が必須である。"
+    },
+    {
+      "id": "C003",
+      "severity": "should_fix",
+      "category": "api_consistency",
+      "title": "route.ts の SlashCommandsResponse 型と api-client.ts の SlashCommandsResponse 型の不整合",
+      "description": "src/app/api/worktrees/[id]/slash-commands/route.ts L29-37 にローカル定義された SlashCommandsResponse は sources: { standard, worktree, mcbd } を含む。設計方針書ではこれに skill: number を追加する。一方、src/lib/api-client.ts L384-386 にも SlashCommandsResponse が定義されているが、こちらは groups のみで sources フィールドを含まない。同名のインターフェースが2箇所に存在し、片方のみ変更する設計であるため、今後のメンテナンスで混乱を招く可能性がある。設計方針書の「変更不要ファイル」セクション（セクション4）で api-client.ts について「sources は未参照」と記載しているが、同名型が2箇所に存在すること自体のリスクは言及されていない。",
+      "location": "設計方針書 3-4 SlashCommandsResponse 型更新、セクション4 変更不要ファイル",
+      "suggestion": "設計方針書に「api-client.ts の SlashCommandsResponse は /api/slash-commands 用であり、route.ts の SlashCommandsResponse は /api/worktrees/[id]/slash-commands 用。同名だが異なるスコープの型である」旨の注記を追加し、将来的な統合の検討を記載する。"
+    },
+    {
+      "id": "C004",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "getSlashCommandGroups() の MCBD 用キャッシュ分岐で commandsCache の更新タイミングが変わる",
+      "description": "現在の getSlashCommandGroups()（src/lib/slash-commands.ts L105-114）の MCBD 用パス（basePath なし）は commandsCache || (await loadSlashCommands()) で処理される。loadSlashCommands() の L91 で commandsCache = commands と直接代入される。設計方針書の新しい MCBD パスでは if (commandsCache === null) { commandsCache = await loadSlashCommands(); } という条件分岐に変更される。loadSlashCommands() 内部で commandsCache がセットされる（L91）ため、外側で代入する必要はないが、設計方針書のコードスニペットでは commandsCache = await loadSlashCommands() と二重代入になっている。動作上は同等だが、loadSlashCommands() の内部でキャッシュをセットし、呼び出し側でも戻り値をキャッシュ変数に代入するという二重管理は混乱を招く。",
+      "location": "設計方針書 3-2 getSlashCommandGroups() の MCBD 用キャッシュロジック",
+      "suggestion": "loadSlashCommands() の内部キャッシュ代入（L91 commandsCache = commands）との関係を設計方針書に注記する。getSlashCommandGroups() 側では await loadSlashCommands() のみ呼び出し、戻り値を commandsCache に代入しないか、または loadSlashCommands() の内部キャッシュ管理を外部に移す方針を明記する。"
+    },
+    {
+      "id": "C005",
+      "severity": "should_fix",
+      "category": "test_consistency",
+      "title": "既存テストの validCategories がカスタムカテゴリのみをチェックしており、standard カテゴリを含まない前提に依存",
+      "description": "設計方針書セクション7では tests/unit/slash-commands.test.ts の validCategories（L126）に 'skill' を追加して5から6に更新すると記載している。しかし現在のテスト（L126）は validCategories = ['planning', 'development', 'review', 'documentation', 'workflow'] であり、standard-* カテゴリを含まない。このテストは loadSlashCommands() の結果（.claude/commands/*.md から読み込まれたコマンド）のみを検証するため、skill カテゴリのコマンドは loadSlashCommands() では読み込まれない（loadSkills() で読み込まれる）。つまり validCategories に 'skill' を追加しても、loadSlashCommands() のテストでは skill カテゴリのコマンドは返されないため、このテストは skill を含まないままでも通る。'skill' の追加は loadSkills() または getSlashCommandGroups() のテストで検証すべきである。",
+      "location": "設計方針書セクション7 「既存テスト修正が必要な箇所」の validCategories (L126)",
+      "suggestion": "validCategories への 'skill' 追加は loadSlashCommands テスト（L121-130）には不適切であるため、テスト計画から除去するか、getSlashCommandGroups() のテストに移す。loadSlashCommands() のテストは変更不要であることを明記する。"
+    },
+    {
+      "id": "C006",
+      "severity": "should_fix",
+      "category": "test_consistency",
+      "title": "SlashCommandCategory テストのカテゴリ数 5 -> 6 更新が不正確",
+      "description": "設計方針書セクション7では tests/unit/slash-commands.test.ts L48-57 の SlashCommandCategory テストで「カテゴリ数を 5 -> 6 に更新」と記載している。しかし実際のテスト（L46-57）は手動で5つのカスタムカテゴリをリテラル配列に列挙して expect(categories).toHaveLength(5) としている。SlashCommandCategory 型には standard-* の5カテゴリも含まれるため実際の全カテゴリ数は 10（現在）-> 11（skill 追加後）である。テストが「カスタムカテゴリのみ」を列挙する意図であるなら、skill 追加で 5 -> 6 は正しいが、配列に 'skill' リテラルを手動追加する必要がある。設計方針書にはその配列変更の詳細が記載されていない。",
+      "location": "設計方針書セクション7 「SlashCommandCategory テスト (L48-57)」",
+      "suggestion": "テスト修正の具体的な内容を明記する: categories 配列に 'skill' を追加し、toHaveLength(6) に変更する旨を記載する。"
+    },
+    {
+      "id": "C007",
+      "severity": "should_fix",
+      "category": "dependency_consistency",
+      "title": "設計方針書のシステム構成図に standard-commands.ts からの依存が不足",
+      "description": "設計方針書セクション2のシステム構成図では Business Logic として SC(slash-commands.ts)、CM(command-merger.ts)、StdCmd(standard-commands.ts) が列挙されている。WtAPI から StdCmd への依存矢印は存在するが、StdCmd から CM への依存（standard-commands.ts L14: import { groupByCategory } from '@/lib/command-merger'）が図に記載されていない。また SC(slash-commands.ts) から CM(command-merger.ts) への依存（slash-commands.ts L17: import { groupByCategory } from '@/lib/command-merger'）も図に明示されていない。",
+      "location": "設計方針書セクション2 システム構成図",
+      "suggestion": "システム構成図に SC --> CM と StdCmd --> CM の依存矢印を追加する。"
+    },
+    {
+      "id": "C008",
+      "severity": "nice_to_have",
+      "category": "code_consistency",
+      "title": "loadSkills() のエラー時に loadSlashCommands() と異なるログレベルを使用",
+      "description": "設計方針書の loadSkills() ではディレクトリ不在時にサイレントに空配列を返すが、loadSlashCommands() の既存実装（src/lib/slash-commands.ts L70）では console.warn() でディレクトリ不在をログ出力している。この差異は意図的であるべきだが、設計方針書に理由が明記されていない。skills ディレクトリは多くのリポジトリで存在しないため warn を出さない判断は妥当だが、設計根拠として記載があると良い。",
+      "location": "設計方針書 3-2 loadSkills() のディレクトリ不在時の処理",
+      "suggestion": "loadSlashCommands() が console.warn() でログ出力する一方、loadSkills() がサイレントに空配列を返す理由（skills ディレクトリは多くのリポジトリでオプショナルであり、warn ログが大量に出力されることを避ける）を設計根拠に追加する。"
+    },
+    {
+      "id": "C009",
+      "severity": "nice_to_have",
+      "category": "code_consistency",
+      "title": "parseSkillFile() と parseCommandFile() の category 決定ロジックの非対称性に関する注記不足",
+      "description": "parseCommandFile() は COMMAND_CATEGORIES マッピングテーブルからカテゴリを決定し、未定義なら 'workflow' にフォールバックする（L44）。一方 parseSkillFile() は常に 'skill' 固定。この設計判断は合理的だが、設計方針書の [D002] で言及されている「差異は (1) name 取得方法、(2) category 決定方法、(3) source フィールドの3点のみ」に加え、frontmatter から取得するフィールドの差異（parseCommandFile は model も取得、parseSkillFile は name/description のみ）も明記すると実装時に見落としが減る。",
+      "location": "設計方針書 5-3 [D002] パースロジック共通化",
+      "suggestion": "[D002] の差異リストに「(4) 取得する frontmatter フィールド（parseCommandFile: name/description/model、parseSkillFile: name/description のみ）」を追加する。"
+    },
+    {
+      "id": "C010",
+      "severity": "nice_to_have",
+      "category": "api_consistency",
+      "title": "route.ts のカウント計算で source === 'skill' のフィルタリングだけでなく source undefined のケースへの考慮が必要",
+      "description": "設計方針書 3-4 のカウント計算では allFilteredCommands.filter(cmd => cmd.source === 'skill').length で skill カウントを算出する。しかし C002 で指摘した通り、parseCommandFile() が source を設定しない場合、mergeCommandGroups() を経由して source が付与されるが、deduplicateByName() で直接結合した commands は source が undefined のまま。route.ts では mergeCommandGroups() 経由で処理されるため source フォールバックが効くが、設計方針書のデータフロー（セクション2 ステップ3-4）での mergeCommandGroups() と deduplicateByName() の責務境界を考えると、カウントの正確性は mergeCommandGroups() のフォールバック動作に暗黙的に依存している。",
+      "location": "設計方針書 3-4 カウント計算",
+      "suggestion": "route.ts のデータフローを明確にし、mergeCommandGroups() が source フォールバックを提供するため route.ts 側では追加のフォールバックは不要であることを注記する。"
+    },
+    {
+      "id": "C011",
+      "severity": "nice_to_have",
+      "category": "test_consistency",
+      "title": "tests/fixtures/skills/ ディレクトリが現在存在しない",
+      "description": "設計方針書セクション7のテスト戦略補足で tests/fixtures/skills/ にテストフィクスチャを配置する方針が記載されているが、現在 tests/fixtures/ ディレクトリ自体が存在しない。新規作成が必要であることは明白だが、フィクスチャの SKILL.md の具体的な frontmatter 内容（例: name、description のサンプル値）が設計方針書に記載されていない。",
+      "location": "設計方針書セクション7 テスト戦略の補足",
+      "suggestion": "テストフィクスチャの SKILL.md ファイルの具体的な frontmatter サンプル内容を追加する。例: ---\\nname: test-skill\\ndescription: A test skill\\n---"
+    },
+    {
+      "id": "C012",
+      "severity": "nice_to_have",
+      "category": "dependency_consistency",
+      "title": "filterCommandsByCliTool() での skills 表示制御の詳細が不足",
+      "description": "設計方針書セクション8の「cliTools の初期方針」で parseSkillFile() が cliTools を undefined に設定する（明示的に設定しない）と記載されている。filterCommandsByCliTool()（command-merger.ts L190-193）では cliTools が undefined の場合 cliToolId === 'claude' のみ true を返すため、skills は Claude ユーザーにのみ表示される。これは設計方針書に「Codex/Gemini ユーザーには skills が表示されない」と記載されており整合している。ただし parseSkillFile() のコードスニペットに cliTools フィールドが含まれていない（明示的に undefined であるべき）ことの確認が設計方針書上で明確でない。",
+      "location": "設計方針書 3-2 parseSkillFile()、セクション8 cliTools の初期方針",
+      "suggestion": "parseSkillFile() のコードスニペットに // cliTools: undefined (Claude-only, see [D009]) のようなコメントを追加して、意図的に省略していることを明示する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 5,
+    "nice_to_have": 5,
+    "overall_quality": "good"
+  }
+}

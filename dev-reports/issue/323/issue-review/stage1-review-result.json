@@ -1,0 +1,77 @@
+{
+  "issue_number": 323,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-02-21",
+  "summary": "Issue #323はauto-yes-manager.tsのpollAutoYes()関数の責務分割リファクタリングを提案する内容。事実関係（行数・責務数・依存数等）は仮説検証で全てConfirmed済みで正確。ただし、既存のcheckStopCondition()ヘルパー関数との命名衝突、StopConditionCheckerクラス導入の設計パターン整合性、受入条件における機能不変保証の不足、validatePollingContext()の責務境界の不明確さ等、実装前に解決すべき課題がある。",
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "提案する関数名 checkStopCondition() が既存のL409 checkStopCondition() と衝突する",
+      "description": "Issue本文の「主要な変更点」セクションで、pollAutoYes()から分割する関数の1つとして「checkStopCondition() - 停止条件のデルタベース判定」を挙げている。しかし、現在のauto-yes-manager.tsのL409には既に同名の `checkStopCondition(worktreeId, cleanOutput)` 関数が存在する（Issue #314で追加済み、@internal exportでテスト公開済み）。既存のcheckStopCondition()は「正規表現パターンマッチング」を担い、Issueが提案するcheckStopCondition()は「デルタ計算（baseline比較によるnewContent抽出）+ 既存checkStopCondition呼び出し」を担う想定。同名では実装が不可能であり、命名を変更するか責務の再定義が必要。",
+      "suggestion": "提案する新関数は「デルタ計算+パターンマッチ呼び出し」の統合であるため、既存checkStopCondition()との区別を明確にする命名が必要。例: checkStopConditionWithDelta(pollerState, worktreeId, cleanOutput) または processStopConditionCheck() など。Issue本文で既存のcheckStopCondition()との関係を明記し、命名戦略を記載すること。"
+    },
+    {
+      "id": "F002",
+      "severity": "should_fix",
+      "category": "実現可能性",
+      "title": "StopConditionCheckerクラスの導入がプロジェクトの設計パターンと不整合",
+      "description": "Issue本文で「StopConditionChecker」クラスの導入を提案しているが、auto-yes-manager.ts全体は関数ベースのモジュール設計（純粋関数+globalThis Map）で構成されている。CLAUDE.mdの主要機能モジュール一覧を見ても、同モジュール内にクラスを導入している例は見当たらない（CLIToolManagerはcli-tools/managerの別モジュール）。auto-yes-manager.ts内にクラスを導入すると、globalThisベースの状態管理との二重管理が生じる可能性がある。",
+      "suggestion": "StopConditionCheckerをクラスではなく、関数群（setBaseline, shouldCheck, getDelta等）として実装し、状態はpollerState内のフィールドとして管理する方式を検討すること。あるいはクラスを導入する場合、pollerStateとの関係（クラスインスタンスをpollerState内に保持するか等）を設計段階で明記すること。"
+    },
+    {
+      "id": "F003",
+      "severity": "should_fix",
+      "category": "実現可能性",
+      "title": "validatePollingContext()とisValidWorktreeId()の責務境界が不明確",
+      "description": "Issue本文で提案されている `validatePollingContext()` は「ポーリング前提条件チェック」と記載されている。一方、既存のstartAutoYesPolling()（L625-671）では既にisValidWorktreeId()（L630）、getAutoYesState()（L635-636）、MAX_CONCURRENT_POLLERS制限（L642-644）のチェックが行われている。pollAutoYes()内でもpollerState存在確認（L457-458）、autoYesState有効性チェック（L461-465）が実行されている。validatePollingContext()がstartAutoYesPolling側の検証とpollAutoYes側の検証のどちらを担うのか、両方を統合するのかが不明。",
+      "suggestion": "validatePollingContext()の具体的な責務範囲を明記すること。以下のいずれかを推奨: (A) pollAutoYes()冒頭のL457-465の「pollerState存在確認+autoYes有効性チェック」のみを抽出、(B) startAutoYesPolling()の前提条件チェックも含めて統合（ただしこの場合startAutoYesPolling()のリファクタリングも必要）。"
+    },
+    {
+      "id": "F004",
+      "severity": "should_fix",
+      "category": "受入条件",
+      "title": "機能不変の保証が「既存テスト全パス」のみでは不十分",
+      "description": "受入条件に「既存テスト（tests/unit/lib/auto-yes-manager.test.ts）が全てパスすること」と「機能変更がないこと（外部インターフェースは維持）」があるが、テストファイルの確認結果、pollAutoYes()のテストは全て結合的テスト（vi.useFakeTimers + advanceTimersByTimeAsync経由）であり、分割後の個別関数（validatePollingContext, captureAndCleanOutput等）の単体テストは存在しない。「機能変更がない」ことの保証としては既存テストのパスだけで概ね十分だが、リファクタリングの目的が「テスタビリティ向上」である以上、分割された関数に対する新規テストの追加も受入条件に含めるべき。",
+      "suggestion": "受入条件に以下を追加: 「分割された各関数（validatePollingContext, captureAndCleanOutput, detectAndRespondToPrompt等）に対する個別テストが追加されていること」。リファクタリングの目的が「テスタビリティ向上」であるため、テストの追加なしではリファクタリング効果を検証できない。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "captureAndCleanOutput()の責務範囲にthinkingウィンドウイングが含まれるか不明確",
+      "description": "Issue本文では分割関数として「captureAndCleanOutput() - tmux出力取得・ANSIクリーニング」を挙げているが、現在のpollAutoYes()ではL469（captureSessionOutput）→ L472（stripAnsi）→ L492（detectThinking用のウィンドウイング：split→slice→join）と3段階の処理がある。captureAndCleanOutput()がウィンドウイング（L492）を含むのか、detectThinking呼び出し（L493-496）まで含むのかが不明。含む場合はdetectThinkingの外部依存も引き継ぐ。含まない場合、「ANSIクリーニング」だけでは新関数の価値が薄い（stripAnsi呼び出し1行のラッパーに過ぎない）。",
+      "suggestion": "captureAndCleanOutput()が返すデータ構造（cleanOutputのみか、recentLinesも含むか）と、thinkingチェックをどの関数が担うかを明記すること。"
+    },
+    {
+      "id": "F006",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "detectAndRespondToPrompt()がpollAutoYes()のL527-582全体をカバーするか確認が必要",
+      "description": "Issue本文では「detectAndRespondToPrompt() - プロンプト検出・自動応答」を提案している。しかしpollAutoYes()のL527-582にはプロンプト検出、重複チェック（isDuplicatePrompt, L540）、resolveAutoAnswer（L546）、sendPromptAnswer（L561）、タイムスタンプ更新（L569）、エラーカウントリセット（L572）、promptKey記録（L575）、クールダウン設定（L581）が含まれる。これら全てを1つのdetectAndRespondToPrompt()に入れると45行以上になり、Issue本文で示される「各関数が単一責務（20-40行）」の目標と矛盾する可能性がある。",
+      "suggestion": "detectAndRespondToPrompt()が内部でさらに分割される可能性（例: detectPromptPhase + sendAnswerPhase）について言及するか、行数目標（20-40行）の柔軟性について記載すること。"
+    },
+    {
+      "id": "F007",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "pollerState存在確認の共通化方針にgetOrReturnパターンの具体案がない",
+      "description": "Issue本文で「pollerState存在確認の重複が解消されていること」を受入条件としているが、具体的な解消方法（ヘルパー関数のシグネチャや戻り値の型）が示されていない。仮説検証でも確認された通り、pollAutoYes/scheduleNextPoll/stopAutoYesPollingの3箇所に加え、updateLastServerResponseTimestamp/resetErrorCount/incrementErrorCountでも同様のパターンがある。これら6箇所以上の共通化は、戻り値の型（AutoYesPollerState | undefined）とearly returnパターンの統一が必要で、設計判断が伴う。",
+      "suggestion": "共通化ヘルパーの具体案を記載すること。例: `function getPollerStateOrReturn(worktreeId: string): AutoYesPollerState | null` を導入し、各関数でnullチェック後にreturn、など。"
+    },
+    {
+      "id": "F008",
+      "severity": "nice_to_have",
+      "category": "受入条件",
+      "title": "「4-5個の単一責務関数に分割」の検証方法が不明確",
+      "description": "受入条件に「pollAutoYes()が4-5個の単一責務関数に分割されていること」とあるが、「単一責務」の判断基準が主観的。例えば、captureAndCleanOutput()がcaptureSessionOutput+stripAnsi+ウィンドウイング+detectThinkingを含む場合、これは「単一責務」か「複数責務」かの判断が分かれる。",
+      "suggestion": "各関数の期待される入出力（引数の型と戻り値の型）を受入条件またはIssue本文で定義しておくと、レビュー時の判断基準が明確になる。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "overall_assessment": "Issue #323は、pollAutoYes()の責務分割によるテスタビリティ向上というリファクタリング目標自体は妥当であり、事実関係の記述も正確である。しかし、最も深刻な問題として、提案するcheckStopCondition()が既存の同名関数と衝突する点がある（F001: must_fix）。また、StopConditionCheckerクラスの設計パターン整合性（F002）、validatePollingContext()の責務境界（F003）、機能不変保証の補強（F004）、captureAndCleanOutput()の責務範囲（F005）についても実装前に明確化すべきである。これらの課題を解決すれば、高品質なリファクタリングIssueとして実装に進められる。"
+}

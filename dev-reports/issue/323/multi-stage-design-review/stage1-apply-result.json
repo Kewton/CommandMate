@@ -1,0 +1,18 @@
+{
+  "issue_number": 323,
+  "stage": 1,
+  "applied_findings": ["DR001", "DR002", "DR003"],
+  "skipped_findings": ["DR004", "DR005", "DR006", "DR007"],
+  "skip_reasons": {
+    "DR004": "nice_to_have - 省略",
+    "DR005": "nice_to_have - 省略",
+    "DR006": "nice_to_have - 省略",
+    "DR007": "nice_to_have - 省略"
+  },
+  "update_summary": "Stage 1 should_fix 3件を設計方針書に反映。DR001: Section 3-4のJSDocからcooldown記述を除去し、クールダウンスケジューリングがpollAutoYes()オーケストレーターの責務である旨を処理ステップ後に明記。DR002: Section 3-1にvalidatePollingContext()の副作用（stopAutoYesPolling()呼び出し）に関するトレードオフ表（純粋関数化/命名変更/現行維持の3選択肢）と採用判断を追記。DR003: Section 4から「将来のログ追加・バリデーション追加」というYAGNI抵触記述を削除し、「既存のgetAutoYesState()パターンとの一貫性」を主たる根拠に変更。Section 9のトレードオフ表も同様に更新。Section 12にレビュー指摘事項サマリーを追加。",
+  "updated_files": [
+    "dev-reports/design/issue-323-auto-yes-manager-refactoring-design-policy.md"
+  ],
+  "success": true,
+  "timestamp": "2026-02-21T00:00:00Z"
+}

@@ -1,0 +1,118 @@
+{
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "status": "conditionally_approved",
+  "score": 4,
+  "review_summary": "設計方針書Section 11の影響範囲サマリーは概ね妥当だが、既存テストへの影響分析・ビルド設定への波及・CLI tsconfig制約に関して補足が必要な箇所が複数発見された。リグレッションリスクについてはCM_ALLOWED_IPS未設定時のフォールバックが適切に設計されており、後方互換性は良好。主要な懸念はip-restriction.tsのモジュールスコープキャッシュとvi.resetModules()パターンの干渉、tsconfig.server.jsonへのip-restriction.ts追加漏れ、そしてdaemon.tsのauthEnvKeysが変数宣言(`as const`)であることによるテストの脆弱性である。",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "テスト影響・モジュールキャッシュ干渉",
+      "title": "ip-restriction.tsのモジュールスコープ初期化とvi.resetModules()の干渉パターンが未文書化",
+      "description": "ip-restriction.tsはauth.tsと同様にモジュールスコープでCM_ALLOWED_IPSをキャプチャし、cachedRangesをパースする設計である。auth-middleware.test.tsはvi.resetModules()パターン（L55, L103, L117等で使用）でモジュールを再初期化してprocess.envの変更を反映させている。ip-restriction.tsを結合テストに追加する際、middleware.tsがip-restriction.tsをimportするため、vi.resetModules()時にip-restriction.tsも再初期化される必要がある。しかし、parseAllowedIps()がfail-fast（throw）設計のため、テスト中に不正なCM_ALLOWED_IPSが設定されたままvi.resetModules()が呼ばれるとモジュール初期化でErrorがスローされ、テストランナーがクラッシュする可能性がある。設計方針書Section 7.2でvi.resetModules()に言及しているが、fail-fastとの相互作用に関する注意事項やテストでの安全なsetup/teardownパターンが示されていない。",
+      "suggestion": "設計方針書のテスト設計（Section 7.2）に以下を追加すべき: (1) 各テストケースのbeforeEachでprocess.envからCM_ALLOWED_IPSを明示的にdeleteするパターンを記載。(2) CM_ALLOWED_IPSに不正値を設定するテストケースでは、vi.resetModules()後のdynamic importをtry-catchで囲むか、そのテストブロック内でのみ値を設定する注意事項を明記。(3) auth-middleware.test.tsの既存テストがfail-fastに巻き込まれないよう、IP制限テストケースを別のdescribeブロックに分離する推奨を追加。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "category": "ビルド設定影響",
+      "title": "tsconfig.server.jsonのincludeリストにip-restriction.tsの追加が必要",
+      "description": "tsconfig.server.jsonはserver.tsとその依存モジュールを明示的にincludeリストで列挙している（server.ts, src/lib/env.ts, src/lib/auth.ts, src/lib/ws-server.ts等）。ws-server.tsはip-restriction.tsをimportする設計であるため、src/lib/ip-restriction.tsをincludeリストに追加しなければnpm run build:server（tsconfig.server.json使用）で型チェックエラーまたはビルドエラーが発生する。設計方針書Section 11の影響範囲サマリーにはtsconfig.server.jsonの変更が含まれていない。",
+      "suggestion": "設計方針書Section 11の影響範囲サマリーにtsconfig.server.jsonを追加し（既存変更+1）、合計を19ファイルに更新する。実装チェックリストに「tsconfig.server.jsonのincludeリストにsrc/lib/ip-restriction.tsを追加」を追加する。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "既存テスト影響",
+      "title": "daemon.test.tsのauthEnvKeys転送テストへの波及影響が未分析",
+      "description": "daemon.tsのstart()メソッドにはauthEnvKeys配列（L80）のprocess.env転送ロジックがあり、IP制限用のCM_ALLOWED_IPSとCM_TRUST_PROXYを追加する設計（S2-003）である。tests/unit/cli/utils/daemon.test.tsのstart関連テスト（L39-100）ではspawn呼び出し時のenvオブジェクトを検証している。authEnvKeysに新しいキーが追加されると、テストでCM_ALLOWED_IPSやCM_TRUST_PROXYがprocess.envに残存している場合にenvオブジェクトへ意図せず含まれる可能性がある。直接的なテスト失敗は起きないが、今後のテスト追加時に留意すべきである。",
+      "suggestion": "daemon.test.tsのbeforeEachにCM_ALLOWED_IPSとCM_TRUST_PROXYのdeleteを追加するか、テスト設計にdaemon.tsの環境変数転送テストケース（CM_ALLOWED_IPS/CM_TRUST_PROXYがspawnのenvに正しく転送されることの確認）を明示する。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "category": "影響範囲サマリー検証",
+      "title": "Section 11の18ファイル合計に対する変更ファイルの具体的な一覧が不足",
+      "description": "設計方針書Section 11では新規2 + 既存変更13 + ドキュメント3 = 18ファイルと記載しているが、具体的なファイル一覧が明示されていない。本レビューで検出した変更対象は以下の通り: [新規] (1) src/lib/ip-restriction.ts, (2) tests/unit/ip-restriction.test.ts。[既存変更] (3) server.ts, (4) src/middleware.ts, (5) src/lib/ws-server.ts, (6) src/lib/env.ts, (7) src/cli/utils/daemon.ts, (8) src/cli/commands/start.ts, (9) src/cli/commands/init.ts(?), (10) src/cli/commands/status.ts(?), (11) src/cli/index.ts, (12) src/cli/types/index.ts, (13) src/cli/config/security-messages.ts, (14) tests/integration/auth-middleware.test.ts, (15) tsconfig.server.json（S3-002で指摘）。status.tsとinit.tsの変更の必要性が不明確（設計方針書Section 4.6ではstart.ts/init.ts/status.ts/index.ts/typesとあるが、init.tsとstatus.tsの具体的変更内容が記載されていない）。",
+      "suggestion": "Section 11にファイル一覧テーブルを追加し、各ファイルの変更内容を1行で記載する。init.tsについてはCM_ALLOWED_IPS/CM_TRUST_PROXYをinit対話フローに追加するかどうかを明確にする（初期バージョンではinit.tsの変更は不要と判断するならスコープ外と明記する）。status.tsも同様にIP制限状態の表示が必要かどうかを明確にする。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "既存機能リグレッション",
+      "title": "server.tsのX-Real-IP注入がWebSocket upgradeのearly returnに対してタイミング上問題なし確認が必要",
+      "description": "設計方針書Section 4.1ではX-Real-IPヘッダー注入コードをL119後（setHeaderガードのreturn後）とL120（upgradeスキップのif文の前）の間に挿入すると記載している。server.tsの実際のコード（L116-123）を確認すると、L116-118がsetHeaderガード（res.setHeaderが関数でなければreturn）、L120-123がupgradeスキップ（req.headers['upgrade']があればreturn）である。X-Real-IP注入はL119後に挿入されるため、WebSocket upgradeリクエスト時にもX-Real-IPが注入されるが、WebSocket upgradeリクエストはrequestHandlerをスキップする（L122のreturn）ため、注入されたX-Real-IPは使用されない。これ自体は無害だが、設計方針書Section 6のデータフロー図と整合させるために「WebSocket upgradeにはX-Real-IP注入が発生するが未使用」というコメントを追加すべきである。",
+      "suggestion": "server.tsのX-Real-IP注入コードの後、upgradeスキップのif文の前に、WebSocket upgradeではこの値が使用されない旨のコメントを追加する。あるいはupgradeスキップのif文をX-Real-IP注入の前に移動して不要な処理を避けることを検討する。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "CLIビルド影響",
+      "title": "tsconfig.cli.jsonのinclude対象にip-restriction.tsが含まれないことの確認",
+      "description": "tsconfig.cli.jsonのincludeはsrc/cli/**/*のみで、src/lib/配下は含まれない。ip-restriction.tsはsrc/lib/に配置される設計であり、CLIモジュール（start.ts/daemon.ts）からはimportされない（環境変数の設定はprocess.envへの代入のみ）。これは正しい設計だが、将来的にCLI側でIP制限のバリデーション（validateStopPatternのようなパターン）を追加する場合はtsconfig.cli.jsonの制約に注意が必要。設計方針書ではこの制約について言及がない。",
+      "suggestion": "設計方針書にCLIビルド互換性に関する注記を追加する: 「ip-restriction.tsはsrc/lib/に配置し、CLIモジュール（src/cli/）からは直接importしない。CLIオプション（--allowed-ips/--trust-proxy）はprocess.envへの代入のみで、サーバー起動時にip-restriction.tsが読み取る。auth.tsのC001制約と同様の分離設計。」"
+    },
+    {
+      "id": "S3-007",
+      "severity": "nice_to_have",
+      "category": "テスト影響",
+      "title": "auth-middleware.test.tsのcreateMockRequestヘルパーにIPアドレス関連ヘッダーのサポートが必要",
+      "description": "現行のcreateMockRequest()ヘルパー（L65-89）は第3引数にheadersを受け付けるが、x-real-ipやx-forwarded-forのテストには対応済み（headers引数で任意のヘッダーを渡せる）。ただし、IP制限テストでは「x-real-ipが設定されていない場合」のデフォルト動作もテストが必要であり、headersのデフォルト値が空オブジェクト（{}）であるため、getClientIp()がnullを返すケースのテストが自然に記述できる。現行のヘルパー設計は問題なく拡張可能。",
+      "suggestion": "特段の変更は不要。auth-middleware.test.tsのIP制限テスト追加時に、createMockRequestの第3引数を活用してx-real-ip/x-forwarded-forヘッダーのテストパターンを網羅する。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "nice_to_have",
+      "category": "環境変数設定影響",
+      "title": "ENV_MAPPINGへのCM_ALLOWED_IPS/CM_TRUST_PROXY追加不要の根拠が設計方針書で明確化されていない",
+      "description": "env.tsのENV_MAPPINGはレガシー名（MCBD_*）からの移行支援用であり、CM_ALLOWED_IPS/CM_TRUST_PROXYは新規追加のため旧名が存在しない。設計方針書Section 4.4（S2-002注記）でgetEnv()戻り値非包含は明記しているが、ENV_MAPPINGに追加しない理由は暗黙的である。env.test.tsのENV_MAPPINGテスト（L214-237）は具体的なキー数（7）とキーの完全一致を検証しているため、ENV_MAPPINGに変更がなければテストは影響を受けない。",
+      "suggestion": "設計方針書Section 4.4にENV_MAPPINGについて一文追加: 「CM_ALLOWED_IPS/CM_TRUST_PROXYはレガシー名が存在しないため、ENV_MAPPINGへの追加は不要。」"
+    },
+    {
+      "id": "S3-009",
+      "severity": "nice_to_have",
+      "category": "login/route.tsスコープ外影響",
+      "title": "login/route.tsのレート制限キー（RATE_LIMIT_KEY='global'）とCM_TRUST_PROXYの関係性",
+      "description": "login/route.ts（L22-35）のコメントで「将来的にCM_TRUST_PROXYオプションでper-IP limitingを有効化可能」と記載されている。Issue #332でCM_TRUST_PROXYが実装されるが、設計方針書はlogin/route.tsをスコープ外としている。これは正しい判断だが、実装時にlogin/route.tsのレート制限ロジックを誤って変更しないよう注意が必要。CM_TRUST_PROXYの追加によりlogin/route.tsのFuture TODOコメントが実装可能になるが、それは別Issueとして扱うべきである。",
+      "suggestion": "設計方針書のSection 9（設計上の決定事項）にlogin/route.tsのレート制限はスコープ外であり、CM_TRUST_PROXYを利用したper-IP rate limitingは別Issueとして追跡すべき旨を明記する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "tests/integration/auth-middleware.test.ts",
+    "src/lib/env.ts",
+    "src/middleware.ts",
+    "server.ts",
+    "src/lib/ws-server.ts",
+    "src/lib/auth.ts",
+    "src/config/auth-config.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/commands/init.ts",
+    "src/cli/commands/status.ts",
+    "src/cli/index.ts",
+    "src/cli/types/index.ts",
+    "src/cli/config/security-messages.ts",
+    "src/cli/utils/env-setup.ts",
+    "src/app/api/auth/login/route.ts",
+    "tests/unit/auth.test.ts",
+    "tests/unit/cli-auth-options.test.ts",
+    "tests/unit/cli/utils/daemon.test.ts",
+    "tests/unit/cli/commands/start.test.ts",
+    "tests/unit/env.test.ts",
+    "tsconfig.json",
+    "tsconfig.cli.json",
+    "tsconfig.server.json",
+    "tsconfig.base.json"
+  ],
+  "overall_assessment": "設計方針書の影響範囲分析は概ね適切で、CM_ALLOWED_IPS未設定時の後方互換性が確保されている。主要な指摘は(1) tsconfig.server.jsonの変更漏れ（S3-002: ビルドエラーに直結）、(2) テストにおけるモジュールキャッシュとfail-fastの干渉パターン（S3-001: テスト不安定化リスク）の2点である。既存の認証機能（auth.ts/middleware.ts/ws-server.ts）への影響は最小限に抑えられており、IP制限がisIpRestrictionEnabled()=falseの場合に完全にスキップされる設計は適切。リグレッションリスクは低いが、実装時にはテスト設計の精緻化が必要。",
+  "timestamp": "2026-02-22T00:00:00Z"
+}

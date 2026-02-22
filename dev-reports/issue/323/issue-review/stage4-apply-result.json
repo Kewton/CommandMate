@@ -1,0 +1,66 @@
+{
+  "issue_number": 323,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目・影響範囲）",
+  "apply_date": "2026-02-21",
+  "applied_findings": [
+    {
+      "id": "IF001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "変更対象ファイルテーブルのテストファイル変更内容を詳細化（importブロック拡張、checkStopCondition/processStopConditionDelta describeブロック整理を明記）"
+    },
+    {
+      "id": "IF002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "停止条件ロジック設計選択肢セクションにAutoYesPollerStateへの影響を追記。設計選択肢(B)採用時のフィールド追加可能性、変更時の波及先（globalThis型宣言、初期化処理、永続性テスト）を明記"
+    },
+    {
+      "id": "IF003",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "受入条件に「分割関数の個別テストはタイマー非依存（直接関数呼び出し）で記述すること」を追加。テスト方針セクションを新設し、既存テスト維持方針と分割関数テスト方針を明記"
+    },
+    {
+      "id": "IF005",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "テスト方針セクションにprocessStopConditionDelta()のテスト設計サブセクションを追加。同一モジュール内モック制約と推奨アプローチ（checkStopConditionをモック化せず入出力を検証する統合的単体テスト）を記載"
+    },
+    {
+      "id": "IF006",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "変更対象ファイルテーブルにCLAUDE.mdを追加（変更内容: auto-yes-manager.tsモジュール説明の更新）。受入条件にCLAUDE.md更新を追加"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "IF004",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "外部API・クライアント側への波及分析は既に「関連コンポーネント（変更なし）」セクションに概ね反映済み。server.tsを関連コンポーネントリストに追加する程度の軽微な変更は反映したが、E2E動作確認手順の追加はIssueのスコープ外（手動テスト手順は別途QA計画で管理）"
+    },
+    {
+      "id": "IF007",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "globalThisベースの状態管理がリファクタリング後も維持される分析は有用だが、Issue本文への追記は冗長になるため省略。pollerStateを引数として渡す設計方針は実装時に自然に採用される見込み"
+    }
+  ],
+  "summary": {
+    "total_findings": 7,
+    "applied": 5,
+    "skipped": 2,
+    "must_fix_applied": 1,
+    "should_fix_applied": 4,
+    "nice_to_have_skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/323"
+  },
+  "update_summary": "Stage 3影響範囲レビューの指摘事項を反映。主な変更: (1) テスト方針セクションを新設し、タイマー非依存テスト方針とprocessStopConditionDelta()のモック制約を記載、(2) 受入条件にタイマー非依存テスト要件とCLAUDE.md更新要件を追加、(3) 変更対象ファイルテーブルにCLAUDE.mdを追加しテストファイルの変更内容を詳細化、(4) AutoYesPollerStateへの影響を設計選択肢セクションに追記、(5) レビュー履歴にStage 3反映内容を追加。IF004/IF007はnice_to_haveのため省略。",
+  "success": true
+}

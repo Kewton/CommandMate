@@ -1,0 +1,75 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 331,
+  "iteration": 2,
+  "apply_date": "2026-02-21",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "I001",
+        "status": "applied",
+        "change_summary": "auth.tsのCLIビルド互換性制約（Next.js固有モジュール依存禁止）を設計方針・実装タスク・影響範囲テーブルの3箇所に追記。tsconfig.cli.jsonのincludeスコープ外でもrootDir設定により依存解決される前例（port-allocator.ts → errors.ts）を根拠として記載"
+      },
+      {
+        "id": "I002",
+        "status": "applied",
+        "change_summary": ".env.exampleの変更内容を具体化。CM_AUTH_TOKEN_HASHはCLIが自動設定するため含めない。CM_HTTPS_CERT/CM_HTTPS_KEYのコメント付きサンプルと、Built-in authentication/HTTPSの使用案内コメントのみを追記する方針を明記"
+      },
+      {
+        "id": "I003",
+        "status": "applied",
+        "change_summary": "実装タスクセクションに「実装順序ガイダンス」を新設。auth.ts→ws-server.ts→server.ts→middleware.tsの順序と、ws-server.tsの型拡張がserver.tsのHTTPS対応の前提条件であることを明記。フェーズ分割との整合性注意点も記載"
+      },
+      {
+        "id": "I004",
+        "status": "applied",
+        "change_summary": "テスト計画セクションに「NextRequest/NextResponseモックの注意事項」を新設。vitest.config.tsのtest.environment: 'node'設定下でのvi.mock('next/server')の使用方法、tests/setup.tsへのグローバルモック追加の選択肢、vitest.config.ts自体の変更は不要との見解を記載"
+      },
+      {
+        "id": "I005",
+        "status": "applied",
+        "change_summary": "設計方針に「認証状態のクライアント側管理」を新設。初回実装では各コンポーネントが個別に/api/auth/statusを呼び出すシンプルな方式で開始し、将来的にAuthContext/AuthProviderをAppProvidersに追加する方式への移行を推奨。追加の変更対象ファイル（AppProviders.tsx, contexts/）も言及"
+      },
+      {
+        "id": "I006",
+        "status": "applied",
+        "change_summary": "ブルートフォース対策セクションに「レート制限のメモリ管理とクリーンアップ」を新設。setIntervalによる定期クリーンアップ（1時間ごと）、server.tsのgracefulShutdownでのclearInterval追加、クリーンアップ関数のexportを設計方針・タスク・影響範囲テーブル（server.ts行）に追記"
+      },
+      {
+        "id": "I007",
+        "status": "applied",
+        "change_summary": "「CLIオプションと環境変数のマッピング」セクションを新設。--auth/CM_AUTH_TOKEN_HASH, --auth-expire/CM_AUTH_EXPIRE, --cert/CM_HTTPS_CERT, --key/CM_HTTPS_KEY, --allow-http/CM_AUTH_ALLOW_HTTP=1の5行のマッピング表を追加。start.tsとdaemon.tsの両方での一貫性確保の注意点も記載"
+      },
+      {
+        "id": "I008",
+        "status": "applied",
+        "change_summary": "設計方針に「middleware.tsの認証除外パス完全リスト」を新設。/login, /api/auth/login, /api/auth/logout, /api/auth/status, /_next/, /favicon.icoの6パスを列挙。/login除外忘れによるリダイレクトループのリスクを注意書きで明記。実装タスクのmiddleware.ts項目も除外パスリストに更新。影響範囲テーブルのmiddleware.ts行にも除外パス情報を追記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "I009",
+        "status": "applied",
+        "change_summary": "テストファイル一覧のcli-auth-options.test.ts行に「commanderオプション定義テストとstart.tsバリデーションロジックテストの両方を含む」とテスト範囲を明記"
+      },
+      {
+        "id": "I010",
+        "status": "applied",
+        "change_summary": "ドキュメントタスクのsecurity-guide.md項目に「.gitignoreには*.pemが既に含まれているため追加不要。.crt, .key等の他の証明書フォーマットを使用する場合は.gitignoreへの追加を推奨」と追記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 10,
+    "applied": 10,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/331"
+  },
+  "update_summary": "Stage 7影響範囲レビュー（2回目）の全10件（Should Fix 8件 + Nice to Have 2件）を反映。主要な追加内容: (1) auth.tsのCLIビルド互換性制約、(2) .env.exampleの追記内容具体化、(3) 実装順序ガイダンス新設、(4) NextRequest/NextResponseモック注意事項、(5) 認証状態のクライアント側管理方針、(6) レート制限メモリ管理・クリーンアップ戦略、(7) CLIオプション-環境変数マッピング表新設、(8) middleware.ts認証除外パス完全リスト。レビュー履歴にStage 7セクションを追加。",
+  "issue_updated": true
+}

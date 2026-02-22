@@ -1,0 +1,8 @@
+{
+  "stage": 2,
+  "issue_number": 332,
+  "applied_count": 11,
+  "skipped_count": 0,
+  "update_success": true,
+  "new_body_summary": "概要・機能要件・環境変数設計・既存認証との関係・セキュリティ考慮事項・Edge Runtime互換性・WebSocket対応・CLIコマンド統合・受け入れ条件・ドキュメント更新計画・関連Issueの各セクションを追加"
+}

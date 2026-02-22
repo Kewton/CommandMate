@@ -1,9 +1,9 @@
 ---
 name: release
-description: Create a new release with version bump, CHANGELOG update, Git tag, and GitHub Release. Use when releasing a new version of the project.
+description: "Create a new release with version bump, CHANGELOG update, Git tag, and GitHub Release. Use when releasing a new version of the project."
 disable-model-invocation: true
-allowed-tools: Bash, Read, Edit, Write
-argument-hint: [version-type] (major|minor|patch) or [version] (e.g., 1.2.3)
+allowed-tools: "Bash, Read, Edit, Write"
+argument-hint: "[version-type] (major|minor|patch) or [version] (e.g., 1.2.3)"
 ---
 
 # リリーススキル

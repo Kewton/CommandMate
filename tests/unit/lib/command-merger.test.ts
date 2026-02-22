@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { mergeCommandGroups, groupByCategory, filterCommandGroups } from '@/lib/command-merger';
+import { mergeCommandGroups, groupByCategory, filterCommandGroups, CATEGORY_ORDER } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 
 describe('mergeCommandGroups', () => {
@@ -182,6 +182,22 @@ describe('groupByCategory', () => {
   it('should handle empty commands array', () => {
     const groups = groupByCategory([]);
     expect(groups).toEqual([]);
+  });
+});
+
+describe('CATEGORY_ORDER', () => {
+  it('should include skill between workflow and standard-session', () => {
+    const workflowIndex = CATEGORY_ORDER.indexOf('workflow');
+    const skillIndex = CATEGORY_ORDER.indexOf('skill');
+    const standardSessionIndex = CATEGORY_ORDER.indexOf('standard-session');
+
+    expect(skillIndex).toBeGreaterThan(-1);
+    expect(skillIndex).toBe(workflowIndex + 1);
+    expect(skillIndex).toBe(standardSessionIndex - 1);
+  });
+
+  it('should contain skill category', () => {
+    expect(CATEGORY_ORDER).toContain('skill');
   });
 });
 

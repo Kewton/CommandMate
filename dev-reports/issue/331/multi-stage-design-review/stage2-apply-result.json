@@ -1,0 +1,152 @@
+{
+  "issue_number": 331,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "C001",
+        "item": "tsconfig.cli.jsonがsrc/cli/**/*のみincludeのため、start.tsからsrc/lib/auth.tsをimportできない",
+        "section_updated": "Section 2.3, Section 11.2, Section 12, Section 14",
+        "status": "reflected",
+        "details": "src/cli/utils/auth-helper.tsを新規作成する方針を追加。tsconfig.cli.jsonのincludeは変更せずビルド分離を維持。代替案比較表、コード例、トレードオフを記載"
+      },
+      {
+        "id": "C002",
+        "item": "server.tsの設計コード例でExitCodeを参照しているがserver.tsには現在importされていない",
+        "section_updated": "Section 9.1, Section 11.1",
+        "status": "reflected",
+        "details": "process.exit(ExitCode.CONFIG_ERROR)をprocess.exit(2)に変更。server.tsはExitCode enumを使用しない方針をSection 11.1に追記"
+      },
+      {
+        "id": "C003",
+        "item": "新環境変数がENV_MAPPINGおよびEnv interfaceに追加される設計が記載されていない",
+        "section_updated": "Section 7",
+        "status": "reflected",
+        "details": "ENV_MAPPING統合方針サブセクションを新設。全認証環境変数のENV_MAPPING非追加理由、process.env直接参照方式、Env interface非拡張の方針を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "C004",
+        "item": "AuthState初期化フローが不明確",
+        "section_updated": "Section 4.1",
+        "status": "reflected",
+        "details": "AuthState初期化フローサブセクションを追加。CM_AUTH_TOKEN_EXPIRE_AT環境変数による伝達、モジュールスコープでの初期化コード例を記載"
+      },
+      {
+        "id": "C005",
+        "item": "i18n.tsのコード例と既存実装のメッセージマージ方法が不一致",
+        "section_updated": "Section 10.2",
+        "status": "reflected",
+        "details": "スプレッド演算子フラットマージをnamespace付きキー形式（auth: auth.default）に修正。C005コメントで既存パターン準拠を明記"
+      },
+      {
+        "id": "C006",
+        "item": "ws-server.tsの型拡張でHTTPSServer互換性確認が不足",
+        "section_updated": "Section 9.2",
+        "status": "reflected",
+        "details": "Node.js https upgradeイベントがhttp.IncomingMessageを使用する点をコメントとして追記"
+      },
+      {
+        "id": "C007",
+        "item": "ALLOWED_AUTH_DURATIONSの値形式がauto-yes-config.tsのALLOWED_DURATIONSと根本的に異なる",
+        "section_updated": "Section 2.3",
+        "status": "reflected",
+        "details": "パターン準拠の定義を明確化。ホワイトリスト方式というアプローチの準拠であり、値の形式は用途別に異なることを詳細に記載"
+      },
+      {
+        "id": "C008",
+        "item": "DaemonManager.start()への環境変数追加が設計書に具体的に記載されていない",
+        "section_updated": "Section 12",
+        "status": "reflected",
+        "details": "Phase 4にdaemon.ts環境変数伝達の具体的コード例を追加。CM_AUTH_TOKEN_HASHのspawn env経由伝達の安全性についても記載"
+      },
+      {
+        "id": "C009",
+        "item": "CM_AUTH_ENABLEDとisAuthEnabled()の判定基準が矛盾する可能性",
+        "section_updated": "Section 7",
+        "status": "reflected",
+        "details": "CM_AUTH_ENABLEDの用途明確化サブセクションを新設。CLI内部フラグとサーバー側判定基準の役割分離を明記"
+      },
+      {
+        "id": "C010",
+        "item": "rateLimiter.destroy()のgracefulShutdown統合箇所が不明確",
+        "section_updated": "Section 2.3, Section 6.2",
+        "status": "reflected",
+        "details": "destroyRateLimiter()関数のexport方式を追記。auth.tsモジュールスコープでインスタンス保持、server.tsはdestroyRateLimiter()経由でクリーンアップ"
+      },
+      {
+        "id": "C011",
+        "item": "middleware.tsの配置パスとexport形式が未記載",
+        "section_updated": "Section 5.3",
+        "status": "reflected",
+        "details": "middleware.ts完全スケルトン（import文、export middleware関数、export config、NextRequest/NextResponseのimport元）を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "C012",
+        "item": "Cookie Max-Ageの動的計算とCookie設定タイミングの整合性",
+        "section_updated": "Section 4.1, Section 4.2",
+        "status": "reflected",
+        "details": "expireAtをCLI側で計算しCM_AUTH_TOKEN_EXPIRE_ATとして伝達する方式を採用。Section 4.2にMax-Age計算タイミングの明確化を追記"
+      },
+      {
+        "id": "C013",
+        "item": "status.tsのHTTPS URL表示の設計詳細が不足",
+        "section_updated": "Section 12",
+        "status": "reflected",
+        "details": "Phase 5にstatus.tsのプロトコル動的切替コード例を追加"
+      },
+      {
+        "id": "C014",
+        "item": "設計方針書にテスト計画の記載がない",
+        "section_updated": "Section 16（新設）",
+        "status": "reflected",
+        "details": "テスト方針セクションを新設。auth.tsユニットテスト、auth-helper.tsユニットテスト、middleware.tsモックテスト、WebSocket結合テスト、E2Eテスト方針を記載"
+      },
+      {
+        "id": "C015",
+        "item": "security-messages.tsの既存パターンとの連携方針が不足",
+        "section_updated": "Section 12",
+        "status": "reflected",
+        "details": "Phase 5にsecurity-messages.tsの変更方針（AUTH_HTTP_WARNING/AUTH_ENABLED_MESSAGE定数）とメッセージ分岐テーブルを追加"
+      },
+      {
+        "id": "C016",
+        "item": "Section 6.3のタイポ「トークンP平文」",
+        "section_updated": "Section 6.3",
+        "status": "reflected",
+        "details": "「トークンP平文」を「トークン平文」に修正"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-331-token-auth-design-policy.md",
+  "sections_updated": [
+    "Section 2.3 レイヤー構成（C001: auth-helper.ts追加、C007: パターン準拠定義明確化、C010: destroyRateLimiter追加）",
+    "Section 4.1 メモリ上の状態管理（C004: AuthState初期化フロー追加）",
+    "Section 4.2 Cookie仕様（C012: Max-Age計算タイミング明確化）",
+    "Section 5.3 middleware.ts認証除外パス（C011: 完全スケルトン追加）",
+    "Section 5.4 認証無効時の動作保証（C011: import元明示）",
+    "Section 6.2 ブルートフォース対策（C010: destroyRateLimiter()方式明記）",
+    "Section 6.3 トークン管理（C016: タイポ修正）",
+    "Section 7 CLIオプションと環境変数マッピング（C003: ENV_MAPPING統合方針、C009: CM_AUTH_ENABLED用途明確化）",
+    "Section 9.1 server.tsの条件分岐（C002: process.exit(2)に変更）",
+    "Section 9.2 ws-server.tsの型拡張（C006: IncomingMessage型安全性明記）",
+    "Section 10.2 src/i18n.ts変更（C005: namespace付きキー形式に修正）",
+    "Section 11.1 tsconfig.server.json（C002: ExitCode制約追記）",
+    "Section 11.2 auth.tsのCLIビルド互換性制約（C001: 全面改訂、解決策と代替案比較表）",
+    "Section 12 実装順序ガイダンス（C001/C008/C013/C015: Phase更新とサブセクション追加）",
+    "Section 13 設計上の決定事項とトレードオフ（C001/C002/C003: 新規エントリ追加）",
+    "Section 14 変更対象ファイル一覧（C001/C011: auth-helper.ts/middleware.ts詳細追記）",
+    "Section 16 テスト方針（C014: 新設）",
+    "Section 17 レビュー履歴（Stage 2追加）",
+    "Section 19 レビュー指摘事項サマリー Stage 2（新設）",
+    "Section 20 実装チェックリスト（Stage 2 Must Fix/Should Fix/Nice to Have追加）"
+  ],
+  "timestamp": "2026-02-21T12:00:00Z"
+}

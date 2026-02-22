@@ -1,0 +1,44 @@
+{
+  "issue_number": 323,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-02-21",
+  "summary": "Stage 1の指摘事項F001-F005は全て適切に対応済み。Stage 3の影響範囲レビュー指摘も適切に反映されている。更新後のIssue本文は、リファクタリング方針・設計選択肢・テスト方針・受入条件が明確に記載されており、実装ガイドとして十分な品質に達している。ただし、新たに2点のshould_fixと1点のnice_to_haveを検出した。テスト方針セクションで言及されているimport数の数値（17個）が実際のコード（22個）と不一致である点、detectAndRespondToPrompt()の責務範囲が依然として定義されていない点、およびthinkingチェック処理（ウィンドウイング+detectThinking）の所属関数が不明確な点が残課題である。",
+  "previous_findings_addressed": {
+    "F001": "addressed",
+    "F002": "addressed",
+    "F003": "addressed",
+    "F004": "addressed",
+    "F005": "addressed"
+  },
+  "findings": [
+    {
+      "id": "S2F001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "テストファイルの現在のimport数が「17個」ではなく22個",
+      "description": "Issue本文の「変更対象ファイル」テーブルにおいて、tests/unit/lib/auto-yes-manager.test.tsの変更内容に「importブロック拡張（新規@internal export関数の追加に伴い、import対象が17個→21-25個程度に増加）」と記載されている。しかし、現在のテストファイル（L2-25）を確認したところ、import対象は15関数 + 6定数 + 1型 = 22個である（getAutoYesState, setAutoYesEnabled, isAutoYesExpired, clearAllAutoYesStates, startAutoYesPolling, stopAutoYesPolling, stopAllAutoYesPolling, getLastServerResponseTimestamp, isValidWorktreeId, calculateBackoffInterval, getActivePollerCount, clearAllPollerStates, disableAutoYes, checkStopCondition, executeRegexWithTimeout, MAX_CONCURRENT_POLLERS, POLLING_INTERVAL_MS, MAX_BACKOFF_MS, MAX_CONSECUTIVE_ERRORS, THINKING_CHECK_LINE_COUNT, COOLDOWN_INTERVAL_MS, type AutoYesState）。「17個」は誤りであり、正しくは「22個→26-30個程度に増加」となるべきである。",
+      "suggestion": "「import対象が17個→21-25個程度に増加」を「import対象が22個→26-30個程度に増加」に修正すること。"
+    },
+    {
+      "id": "S2F002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "detectAndRespondToPrompt()の責務範囲が具体的に定義されていない",
+      "description": "Stage 1のF006（nice_to_have）で指摘されていたdetectAndRespondToPrompt()の責務範囲問題が、更新後のIssue本文でも具体化されていない。主要な変更点セクションでは単に「プロンプト検出・自動応答」と記載されているのみである。現在のpollAutoYes()のL527-582には、プロンプト検出（L528-529）、no-promptリセット（L531-536）、重複チェック（L539-543）、回答解決（L545-551）、tmux送信（L553-566）、タイムスタンプ更新（L569）、エラーカウントリセット（L572）、promptKey記録（L575）、ログ出力（L578）、クールダウンスケジューリング（L581）の10ステップが含まれる。これらを全てdetectAndRespondToPrompt()に入れると55行以上になり、Issue本文で示される「各関数が単一責務（20-40行）」の目標と矛盾する可能性がある。一方、captureAndCleanOutput()（2行程度の実質処理）やvalidatePollingContext()（約9行）と比較して責務の偏りが大きい。",
+      "suggestion": "detectAndRespondToPrompt()が担う具体的なステップ範囲を明記すること。例えば、(A) L527-582全体を1関数とする場合は40行目標の例外として扱う旨を記載、(B) 内部でさらにsendAndRecordResponse()等のサブ関数に分割する場合はその旨を記載、(C) no-promptリセット（L531-536）はpollAutoYes本体に残す設計もあり得る。実装者が設計判断で迷わないレベルの粒度で記載することを推奨。"
+    },
+    {
+      "id": "S2F003",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "thinkingチェック処理（L492-496）の所属関数が不明確",
+      "description": "pollAutoYes()のL492-496には、cleanOutputからのウィンドウイング（split→slice→join）とdetectThinking呼び出しの処理がある。captureAndCleanOutput()の責務はF005対応で「captureSessionOutput + stripAnsiまで」と明確化されたが、thinkingチェック処理がどの関数に所属するかは言及されていない。候補は3つ: (A) pollAutoYes本体に残す、(B) 新関数checkThinkingState()として抽出、(C) captureAndCleanOutput()の責務を拡張して含める。4-5関数に分割する方針の中で、thinkingチェックが独立関数となるか否かで分割数と各関数のバランスが変わる。",
+      "suggestion": "実装の自由度として許容する場合はそのままで良いが、4-5関数のリストにthinkingチェックの扱いを補足すると、分割設計の完全性が向上する。例: 「thinkingチェック（L492-496）はpollAutoYes本体に残すか、独立関数として抽出するかは実装時に判断」等。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 1,
+  "overall_assessment": "Issue #323は4回のレビュー・反映サイクル（Stage 1-4）を経て、大幅に改善されている。Stage 1の全指摘事項（F001-F005）は適切に対応されており、Stage 3の影響範囲レビュー指摘も重要なもの（IF001-IF003, IF005-IF006）が反映済みである。特に以下の点が高く評価できる: (1) processStopConditionDelta()への命名変更と既存checkStopCondition()との関係の明記（F001対応）、(2) 設計選択肢(A)(B)の提示とAutoYesPollerStateへの影響分析（F002+IF002対応）、(3) テスト方針セクションの新設とタイマー非依存テスト方針の明記（F004+IF003対応）、(4) processStopConditionDelta()のモック制約と推奨テストアプローチの記載（IF005対応）。残課題はimport数の数値誤り（S2F001）とdetectAndRespondToPrompt()の責務範囲不明確さ（S2F002）の2点のshould_fixであり、いずれも実装前に修正可能な軽微な問題である。全体として、本Issueは実装に進められる品質に達している。"
+}

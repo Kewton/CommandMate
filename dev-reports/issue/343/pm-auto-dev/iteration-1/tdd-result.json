@@ -1,0 +1,28 @@
+{
+  "status": "success",
+  "coverage": 82.35,
+  "unit_tests": {
+    "total": 53,
+    "passed": 53,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/types/slash-commands.ts",
+    "src/lib/slash-commands.ts",
+    "src/lib/command-merger.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "tests/unit/slash-commands.test.ts",
+    "tests/unit/lib/command-merger.test.ts",
+    "tests/integration/api-worktree-slash-commands.test.ts",
+    "tests/fixtures/skills/valid-skill/SKILL.md",
+    "tests/fixtures/skills/no-frontmatter/SKILL.md"
+  ],
+  "commits": [
+    "ff5ad88: feat(slash-commands): display .claude/skills in slash command selector"
+  ],
+  "message": "TDD implementation complete. All 53 tests pass. Coverage 82.35% (target: 80%). ESLint 0 errors, TypeScript 0 errors. Implemented: skill type additions, loadSkills(), safeParseFrontmatter(), deduplicateByName(), skillsCache, CATEGORY_ORDER update, API response extension."
+}

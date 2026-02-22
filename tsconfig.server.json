@@ -8,7 +8,9 @@
   "include": [
     "server.ts",
     "src/lib/env.ts",
+    "src/lib/auth.ts",
     "src/lib/ws-server.ts",
+    "src/lib/ip-restriction.ts",
     "src/lib/worktrees.ts",
     "src/lib/db.ts",
     "src/lib/db-instance.ts",

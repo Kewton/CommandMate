@@ -1,0 +1,63 @@
+{
+  "issue_number": 323,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-21",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F001",
+        "status": "applied",
+        "change_summary": "checkStopCondition() → processStopConditionDelta() に命名変更。既存L409 checkStopCondition()（Issue #314追加済み）との衝突を回避し、本関数がデルタ計算を担い内部で既存checkStopCondition()を呼び出す上位関数である旨を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F002",
+        "status": "applied",
+        "change_summary": "StopConditionCheckerクラスの代替案として関数群方式を追記。設計選択肢(A)クラス方式と(B)関数群方式を提示し、auto-yes-manager.tsの関数ベース設計パターンとの整合性を考慮して選択するよう記載"
+      },
+      {
+        "id": "F003",
+        "status": "applied",
+        "change_summary": "validatePollingContext()の責務範囲を明確化。pollAutoYes()冒頭のL457-465（pollerState存在確認 + autoYes有効性チェック）のみを抽出する旨を明記。startAutoYesPolling()側のworktreeId検証やMAX_CONCURRENT_POLLERS制限チェックは含まないことを明示"
+      },
+      {
+        "id": "F004",
+        "status": "applied",
+        "change_summary": "受入条件に「分割された各関数（validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt等）に対する個別テストが追加されていること」を追加。テストファイルの変更内容説明も「既存テストの維持 + 分割関数の個別テスト追加」に更新"
+      },
+      {
+        "id": "F005",
+        "status": "applied",
+        "change_summary": "captureAndCleanOutput()の責務範囲を明確化。captureSessionOutput呼び出し + stripAnsiによるANSIエスケープ除去までを担い、thinkingチェック用ウィンドウイング処理やdetectThinking呼び出しは含まない旨を明記。戻り値はcleanOutput文字列"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F006",
+        "status": "skipped",
+        "reason": "ユーザー指示の反映対象（F001-F005）に含まれていないため、今回のスコープ外"
+      },
+      {
+        "id": "F007",
+        "status": "skipped",
+        "reason": "ユーザー指示の反映対象（F001-F005）に含まれていないため、今回のスコープ外"
+      },
+      {
+        "id": "F008",
+        "status": "skipped",
+        "reason": "ユーザー指示の反映対象（F001-F005）に含まれていないため、今回のスコープ外"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 5,
+    "skipped": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/323"
+  }
+}

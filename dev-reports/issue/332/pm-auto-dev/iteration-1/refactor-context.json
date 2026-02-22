@@ -1,0 +1,22 @@
+{
+  "issue_number": 332,
+  "refactor_targets": [
+    "src/lib/ip-restriction.ts",
+    "src/middleware.ts",
+    "src/lib/ws-server.ts",
+    "src/cli/commands/start.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 100.0,
+    "unit_tests_passed": 47,
+    "integration_tests_passed": 17,
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（コメント・JSDocの整理）",
+    "SOLID原則・設計方針書の設計判断が正しく実装に反映されているか確認",
+    "テストの品質確認（エッジケースの網羅度）",
+    "不要なコードの削除・重複の排除"
+  ]
+}

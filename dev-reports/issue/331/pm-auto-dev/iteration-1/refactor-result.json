@@ -1,0 +1,107 @@
+{
+  "status": "success",
+  "refactored_files": [
+    "src/lib/auth.ts",
+    "src/app/api/auth/login/route.ts",
+    "src/app/api/auth/logout/route.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/utils/daemon.ts",
+    "src/lib/ws-server.ts"
+  ],
+  "improvements": [
+    {
+      "file": "src/lib/auth.ts",
+      "type": "dry",
+      "description": "Extracted buildAuthCookieOptions() function to centralize cookie security settings (httpOnly, sameSite, secure, path). Eliminates duplication between login and logout routes."
+    },
+    {
+      "file": "src/lib/auth.ts",
+      "type": "readability",
+      "description": "Extracted MS_PER_MINUTE, MS_PER_HOUR, MS_PER_DAY named constants to replace magic number arithmetic (60*60*1000, 24*60*60*1000, etc.) throughout duration constants and parseDuration()."
+    },
+    {
+      "file": "src/lib/auth.ts",
+      "type": "readability",
+      "description": "Replaced switch-case in parseDuration() with data-driven unitMultipliers lookup map, reducing branching complexity and improving extensibility."
+    },
+    {
+      "file": "src/lib/auth.ts",
+      "type": "readability",
+      "description": "Simplified rate limiter cleanup condition from nested if-blocks with redundant null checks to clear boolean variables (isLockoutExpired, isStale)."
+    },
+    {
+      "file": "src/lib/auth.ts",
+      "type": "dry",
+      "description": "Exported DEFAULT_COOKIE_MAX_AGE_SECONDS constant (24*60*60) to replace magic number 86400 in login route cookie fallback."
+    },
+    {
+      "file": "src/lib/auth.ts",
+      "type": "srp",
+      "description": "Extracted isHttpsEnabled() function to encapsulate CM_HTTPS_CERT environment variable check as a single-responsibility helper."
+    },
+    {
+      "file": "src/lib/auth.ts",
+      "type": "jsdoc",
+      "description": "Added AuthCookieOptions interface with JSDoc documenting C001 constraint (no Next.js dependency). Added JSDoc to buildAuthCookieOptions() and isHttpsEnabled()."
+    },
+    {
+      "file": "src/app/api/auth/login/route.ts",
+      "type": "dry",
+      "description": "Replaced inline cookie options object with buildAuthCookieOptions() call. Replaced magic number 86400 with DEFAULT_COOKIE_MAX_AGE_SECONDS."
+    },
+    {
+      "file": "src/app/api/auth/login/route.ts",
+      "type": "jsdoc",
+      "description": "Added JSDoc with @param/@returns to getClientIp() function. Extracted LOOPBACK_IP named constant."
+    },
+    {
+      "file": "src/app/api/auth/logout/route.ts",
+      "type": "dry",
+      "description": "Replaced inline cookie options object with buildAuthCookieOptions(0) call, ensuring consistent security settings with login route."
+    },
+    {
+      "file": "src/cli/commands/start.ts",
+      "type": "dry",
+      "description": "Extracted displayAuthToken() helper function to eliminate duplicated 4-line token display logic between daemon mode and foreground mode."
+    },
+    {
+      "file": "src/cli/commands/start.ts",
+      "type": "jsdoc",
+      "description": "Added JSDoc to displayAuthToken() documenting that the token is shown once and not persisted."
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "type": "readability",
+      "description": "Removed dead code: empty if-body ('if (options.auth && env.CM_AUTH_TOKEN_HASH) { // Token hash is already set by startCommand }') that served no purpose."
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "type": "type_safety",
+      "description": "Added 'as const' to authEnvKeys array for stricter type narrowing of environment variable key strings."
+    },
+    {
+      "file": "src/lib/ws-server.ts",
+      "type": "dry",
+      "description": "Extracted isExpectedWebSocketError() function to eliminate duplicated error-checking patterns between socket-level and WebSocket-level error handlers."
+    },
+    {
+      "file": "src/lib/ws-server.ts",
+      "type": "jsdoc",
+      "description": "Added JSDoc to isExpectedWebSocketError() explaining the purpose (mobile browser disconnect handling) and error types covered."
+    }
+  ],
+  "quality_checks": {
+    "tsc": "pass",
+    "lint": "pass",
+    "test_unit": "pass - 3724 tests passed (184 test files)"
+  },
+  "security_maintained": {
+    "S001": true,
+    "S002": true,
+    "C001": true
+  },
+  "commits": [
+    "c6334c2: refactor(auth): improve code quality of token auth and HTTPS modules"
+  ],
+  "notes": "Refactoring focused on DRY principle (cookie options, token display, WebSocket error patterns), readability (named constants for magic numbers, data-driven lookup replacing switch-case, simplified boolean conditions), and documentation (JSDoc for public APIs). All changes are behavior-preserving. No new test files were required as existing 3724 tests provide full coverage of the refactored code paths. Security constraints S001 (timingSafeEqual), S002 (exact path matching), and C001 (no Next.js dependency in auth.ts) are verified and maintained."
+}

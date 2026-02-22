@@ -1,0 +1,74 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "applied_findings": ["S001", "S002", "S003", "S007"],
+  "skipped_findings": [],
+  "update_summary": "Stage 4 セキュリティレビューの指摘事項を設計方針書に反映。S001: safeParseFrontmatter() ラッパー関数の導入（gray-matter JS エンジン無効化、RCE 防止）をセクション6に追記し、parseSkillFile() および parseCommandFile() での使用を明記。S002: MAX_SKILLS_COUNT=100 と MAX_SKILL_FILE_SIZE_BYTES=65536 の定数定義および loadSkills()/parseSkillFile() での上限チェックをセクション6・3-2に追記。S003: 既存 loadSlashCommands() のパストラバーサル保護不足を本 Issue スコープ外として注意事項に記録。S007: MAX_SKILL_NAME_LENGTH=100 と MAX_SKILL_DESCRIPTION_LENGTH=500 の制限をセクション6・3-2に追記。実装チェックリストを更新し、S001 を最優先として実装順序の先頭に配置。セキュリティ設計テーブルに OWASP マッピング列を追加。新規セキュリティテストケース7件を追加。",
+  "design_doc_updated": true,
+  "changes_made": [
+    {
+      "section": "6. セキュリティ設計",
+      "changes": [
+        "セキュリティテーブルに OWASP 列を追加し、S001/S002/S007 の対策行を追加",
+        "[S001] safeParseFrontmatter() ラッパー関数の仕様とコードサンプルを追加",
+        "[S002] MAX_SKILLS_COUNT / MAX_SKILL_FILE_SIZE_BYTES の定数定義と動作仕様を追加",
+        "[S007] MAX_SKILL_NAME_LENGTH / MAX_SKILL_DESCRIPTION_LENGTH の定数定義と truncateString() 使用方法を追加",
+        "[S003] 既存 loadSlashCommands() のパストラバーサル保護に関する注意事項を追加",
+        "入力バリデーションセクションを safeParseFrontmatter() 使用に更新し、フィールド長制限を反映"
+      ]
+    },
+    {
+      "section": "3-2. parseSkillFile()",
+      "changes": [
+        "JSDoc に S001/S002/S007 の参照を追加",
+        "fs.statSync() によるファイルサイズ事前チェック (S002) を追加",
+        "matter(content) を safeParseFrontmatter(content) に置き換え (S001)",
+        "name/description に truncateString() による長さ制限を適用 (S007)"
+      ]
+    },
+    {
+      "section": "3-2. loadSkills()",
+      "changes": [
+        "MAX_SKILLS_COUNT による走査上限チェックと console.warn() を追加 (S002)"
+      ]
+    },
+    {
+      "section": "3-2. 設計根拠",
+      "changes": [
+        "セキュリティ多層防御の説明に S001/S002/S007 の対策を追加"
+      ]
+    },
+    {
+      "section": "7. テスト影響と戦略",
+      "changes": [
+        "S001/S002/S007 関連の新規テストケース7件を追加"
+      ]
+    },
+    {
+      "section": "8. 設計決定",
+      "changes": [
+        "セキュリティ行を多層防御に更新し、S001/S002/S007 の具体的対策を記載"
+      ]
+    },
+    {
+      "section": "10. レビュー履歴",
+      "changes": [
+        "Stage 4 セキュリティレビューのエントリを追加"
+      ]
+    },
+    {
+      "section": "11. レビュー指摘事項サマリー",
+      "changes": [
+        "Stage 4 の全指摘事項（Must Fix 2件、Should Fix 5件、Nice to Have 3件）のサマリーテーブルを追加"
+      ]
+    },
+    {
+      "section": "12. 実装チェックリスト",
+      "changes": [
+        "実装順序の先頭に S001 safeParseFrontmatter() を最優先ステップとして追加",
+        "必須対応に S001/S002 を追加",
+        "推奨対応に S003/S007 を追加"
+      ]
+    }
+  ]
+}

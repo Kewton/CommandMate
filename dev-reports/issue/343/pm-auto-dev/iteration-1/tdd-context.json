@@ -1,0 +1,37 @@
+{
+  "issue_number": 343,
+  "acceptance_criteria": [
+    "CommandMate-Marketing の worktree 画面で「/」入力時に skills が表示される",
+    "MyCodeBranchDesk の worktree 画面で既存の commands に加え skills も表示される",
+    "skills を選択すると /{skill-name} がメッセージ入力欄に反映される",
+    "skills ディレクトリが存在しないリポジトリではエラーが発生しない",
+    "既存の commands の表示・動作に変更がない",
+    "SlashCommandSource 型に 'skill' が追加されており、API レスポンスの sources カウントに反映される",
+    "MCBD ルートでも skills が読み込まれる",
+    "同名の command と skill が存在する場合、command が優先される",
+    "CATEGORY_LABELS に skill: 'Skills' が追加され、TypeScript コンパイルエラーが発生しない",
+    "skillsCache が commandsCache とは独立して管理され、clearCache() で両方がクリアされる",
+    "CATEGORY_ORDER に 'skill' が追加され、Skills カテゴリが workflow と standard-session の間に表示される"
+  ],
+  "implementation_tasks": [
+    "SlashCommandCategory に 'skill' を追加 (src/types/slash-commands.ts)",
+    "SlashCommandSource に 'skill' を追加 (src/types/slash-commands.ts)",
+    "CATEGORY_LABELS に skill: 'Skills' を追加 (src/types/slash-commands.ts)",
+    "CATEGORY_ORDER に 'skill' を追加 (workflow と standard-session の間) (src/lib/command-merger.ts)",
+    "safeParseFrontmatter() 実装 (src/lib/slash-commands.ts)",
+    "定数定義: MAX_SKILLS_COUNT, MAX_SKILL_FILE_SIZE_BYTES, MAX_SKILL_NAME_LENGTH, MAX_SKILL_DESCRIPTION_LENGTH (src/lib/slash-commands.ts)",
+    "getSkillsDir() 実装 (src/lib/slash-commands.ts)",
+    "parseSkillFile() 実装 (src/lib/slash-commands.ts)",
+    "loadSkills() 実装 (src/lib/slash-commands.ts)",
+    "deduplicateByName() 実装 (src/lib/slash-commands.ts)",
+    "skillsCache 追加と clearCache() 更新 (src/lib/slash-commands.ts)",
+    "getSlashCommandGroups() 拡張 (src/lib/slash-commands.ts)",
+    "loadSlashCommands() の source フィールド設定 (src/lib/slash-commands.ts)",
+    "SlashCommandsResponse に skill カウント追加 (src/app/api/worktrees/[id]/slash-commands/route.ts)",
+    "テストフィクスチャ作成 (tests/fixtures/skills/)",
+    "既存テスト修正 (tests/unit/slash-commands.test.ts)",
+    "新規テスト追加 (tests/unit/slash-commands.test.ts)",
+    "統合テスト更新 (tests/integration/api-worktree-slash-commands.test.ts)"
+  ],
+  "target_coverage": 80
+}

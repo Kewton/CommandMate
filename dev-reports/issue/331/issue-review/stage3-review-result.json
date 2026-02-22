@@ -1,0 +1,237 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_type": "影響範囲",
+  "review_date": "2026-02-21",
+  "issue_number": 331,
+  "findings": [
+    {
+      "id": "G001",
+      "severity": "must_fix",
+      "category": "影響範囲漏れ",
+      "title": "tsconfig.server.json に auth.ts のインクルードが必要",
+      "description": "server.ts から auth.ts モジュールをインポートして使用する設計だが、tsconfig.server.json の include 配列に src/lib/auth.ts が記載されていない。server.ts のビルド（npm run build:server）時にコンパイルエラーとなる。",
+      "location": "tsconfig.server.json の include 配列",
+      "suggestion": "tsconfig.server.json の include に 'src/lib/auth.ts' を追加する。また、auth.ts 内で使用する追加ユーティリティ（rate-limiter等）も同様に追加が必要。変更対象ファイル一覧に tsconfig.server.json を追加すること。"
+    },
+    {
+      "id": "G002",
+      "severity": "must_fix",
+      "category": "影響範囲漏れ",
+      "title": "src/i18n.ts への auth 名前空間の追加が必要",
+      "description": "Issueでは locales/en/auth.json と locales/ja/auth.json の新規作成は記載されているが、src/i18n.ts の getRequestConfig 内で auth 名前空間を import・merge する変更が記載されていない。現在の src/i18n.ts は common, worktree, autoYes, error, prompt の5名前空間のみを import している。auth 名前空間を追加しないとログイン画面で翻訳が利用できない。",
+      "location": "src/i18n.ts（変更対象ファイル一覧に含まれていない）",
+      "suggestion": "変更対象ファイル一覧に src/i18n.ts を追加し、i18nタスクに『src/i18n.ts の名前空間マージ設定に auth を追加』を明記する。Issueの実装タスク i18n セクションに『src/i18n.ts の名前空間マージ設定にauthを追加（必要に応じて）』という曖昧な記述があるが、これは必須であるため明確化すべき。"
+    },
+    {
+      "id": "G003",
+      "severity": "must_fix",
+      "category": "影響範囲漏れ",
+      "title": "status.ts の URL 表示が HTTPS に対応していない",
+      "description": "src/cli/commands/status.ts の showSingleStatus() は DaemonManager.getStatus() が返す URL をそのまま表示する。Issueでは daemon.ts の getStatus() を HTTPS 対応に修正すると記載しているが、status.ts 自体は変更対象に含まれていない。しかし、getStatus() は現在 process.env から直接ポートを取得しているが、HTTPS状態（CM_HTTPS_CERT/CM_HTTPS_KEY が設定されているか）を判定するためには、環境変数のロードや判定ロジックの追加が必要。daemon.ts の getStatus() だけを修正すれば status.ts 側の変更は不要かもしれないが、デーモンモードでない場合の status コマンド動作が考慮されていない。",
+      "location": "src/cli/commands/status.ts と src/cli/utils/daemon.ts の getStatus()",
+      "suggestion": "daemon.ts の getStatus() で HTTPS 判定を行うため、DaemonManager に HTTPS 状態を保持する方法を明確にする。例えば、環境変数 CM_HTTPS_CERT の有無を判定に使う場合は、start 時に環境変数として渡す必要がある。実装タスクに daemon.ts の getStatus() 修正の具体的な方法（環境変数読み取りか、ファイルベースの状態保存か）を明記すること。"
+    },
+    {
+      "id": "G004",
+      "severity": "must_fix",
+      "category": "後方互換性",
+      "title": "middleware.ts 新規作成による既存ルートへの影響リスク",
+      "description": "Next.js の middleware.ts はプロジェクトルート（src/ ディレクトリ）に配置するとすべてのリクエストに対して実行される。認証が無効（--auth なし）の場合に middleware.ts が存在しても何もしないことを保証する設計が必要。認証無効時の middleware.ts の動作仕様（パススルー/スキップの条件判定方法）が Issue に明記されていない。誤って認証チェックが有効化されると、全 API ルートがブロックされる重大な障害となる。",
+      "location": "src/middleware.ts（新規作成）の認証無効時の動作仕様",
+      "suggestion": "middleware.ts の設計方針に『CM_AUTH_TOKEN_HASH 環境変数が未設定の場合は middleware.ts 内で即座に NextResponse.next() を返し、一切の認証チェックを行わない』という明確なガード条件を追記する。また、middleware.ts の matcher 設定（config.matcher）で認証除外パスを明示的に定義することも推奨。"
+    },
+    {
+      "id": "G005",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "サイドバーコンポーネントへのログアウトボタン配置が変更対象に未記載",
+      "description": "Issueの実装タスクに『サイドバー下部にログアウトリンクを配置（認証有効時のみ表示）』とあるが、変更対象ファイル一覧にサイドバー関連コンポーネント（src/components/sidebar/ 配下）が含まれていない。また、モバイル版のサイドバーにも同様の変更が必要か不明。認証状態をクライアント側で判定するための仕組み（Context や API エンドポイント）も記載されていない。",
+      "location": "src/components/sidebar/ 配下のコンポーネントおよび src/components/mobile/ 配下",
+      "suggestion": "変更対象ファイルにログアウトボタンを配置するサイドバーコンポーネントを追加する。また、クライアント側で認証状態を判定する方法（例: /api/auth/status エンドポイントの追加、またはサーバーコンポーネントでの環境変数判定）を設計に追記すること。"
+    },
+    {
+      "id": "G006",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "新しい npm 依存パッケージの追加要否が未記載",
+      "description": "Issue では auth-expire パースに『ms npm ライブラリの利用、またはシンプルな正規表現パーサーを検討』と記載しているが、どちらを採用するか未決定。ms ライブラリを使う場合は package.json への依存追加が必要。また、HTTPS サーバー作成に使用する Node.js 標準の https モジュールや crypto モジュールは追加不要だが、その旨が明確でない。",
+      "location": "package.json、Issue の '--auth-expire フォーマット仕様' セクション",
+      "suggestion": "auth-expire のパース方法を確定し、外部ライブラリを使用する場合は package.json の変更を変更対象ファイル一覧に追加する。標準ライブラリのみで実装する場合はその旨を明記し、不要な依存追加を避ける設計判断を記録すること。"
+    },
+    {
+      "id": "G007",
+      "severity": "should_fix",
+      "category": "ビルド/テスト",
+      "title": "CI/CD パイプラインへの影響（環境変数・テスト設定）",
+      "description": "認証関連のテスト（auth.test.ts, rate-limiter.test.ts, auth-middleware.test.ts, ws-auth.test.ts）を追加する際、CI 環境でのテスト実行に影響がないか検討が必要。特に、統合テスト（auth-middleware.test.ts, ws-auth.test.ts）は Next.js サーバーの起動や WebSocket 接続が必要となる可能性がある。現在のテスト構成（Vitest unit/integration）の中でどのように実行するかの方針が記載されていない。",
+      "location": "テスト計画セクション全体",
+      "suggestion": "統合テストで Next.js サーバーの実際の起動が必要か、モックベースで実施するかを明記する。特に auth-middleware.test.ts は Next.js の middleware をテストするため、NextRequest/NextResponse のモックが必要。ws-auth.test.ts も WebSocketServer のモックまたは実サーバーが必要。テスト戦略を明確にし、CI での実行可能性を担保すること。"
+    },
+    {
+      "id": "G008",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "server.ts の console.log URL 表示が HTTPS 対応していない",
+      "description": "現在の server.ts の server.listen コールバックで 'http://' 固定の URL を表示している（行130: console.log(`> Ready on http://${hostname}:${port}`)）。HTTPS モードで起動した場合、この表示が 'https://' に変わる必要がある。同様に start.ts の foreground モード（行103: const url = `http://...`）も HTTPS 対応が必要。",
+      "location": "server.ts 行130、src/cli/commands/start.ts 行103",
+      "suggestion": "server.ts と start.ts のURL表示ロジックを HTTPS 対応に修正する必要があることを実装タスクに明記する。server.ts の変更内容に『起動時のURL表示をHTTPS対応に修正』を追加すること。"
+    },
+    {
+      "id": "G009",
+      "severity": "should_fix",
+      "category": "後方互換性",
+      "title": "旧 CM_AUTH_TOKEN 検知バリデーションの実装箇所が不明確",
+      "description": "Issue には『旧CM_AUTH_TOKEN が .env に残っている場合に備え、起動時にバリデーションを行い警告を表示する』とあるが、この検知ロジックをどのモジュールに実装するかが明確でない。start.ts に実装するのか、env.ts に実装するのか、auth.ts に実装するのかで影響範囲が変わる。",
+      "location": "設計方針セクション（F005: 環境変数名の衝突回避）",
+      "suggestion": "旧 CM_AUTH_TOKEN 検知を start.ts の起動処理の早い段階で実施し、console.warn で警告を出す方針を明記する。.env ファイルの内容を読み込んだ後、サーバー起動前のタイミングが適切。"
+    },
+    {
+      "id": "G010",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "DaemonManager の StartOptions 型と start.ts の startCommand 引数の整合性",
+      "description": "Issue では StartOptions（src/cli/types/index.ts）に auth, authExpire, cert, key, allowHttp を追加するとしている。DaemonManager.start() は現在 StartOptions を引数に取っているが、start.ts の startCommand() も StartOptions を受け取る。同一の StartOptions 型を両方で使用する場合、DaemonManager.start() に渡す前にトークン生成やハッシュ計算を行い、環境変数に設定する処理を startCommand() 内に追加する必要がある。この処理フローの詳細が実装タスクの start.ts セクションに十分記載されていない。",
+      "location": "src/cli/commands/start.ts のトークン生成・環境変数設定フロー",
+      "suggestion": "startCommand() 内でのトークン生成→ハッシュ計算→ターミナル表示→環境変数設定の処理順序を実装タスクの start.ts セクションに追記する。特に foreground モードと daemon モードの両方でこの処理が正しく動作する必要がある。"
+    },
+    {
+      "id": "G011",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "Cookieセッション管理のセッション固定攻撃対策が未記載",
+      "description": "ログイン成功時に HttpOnly Cookie を設定する設計だが、セッション固定攻撃（Session Fixation）への対策が記載されていない。攻撃者が事前にセッション Cookie を設定し、被害者にそのCookieを使わせるシナリオ。SameSite=Strict でリスクは低減されるが、ログイン成功時にCookieを再生成する等の対策を明記すべき。",
+      "location": "認証フロー・セキュリティ対策セクション",
+      "suggestion": "ログイン成功時に新しいセッショントークンを生成し、既存の Cookie を上書きする設計を明記する。または、本設計がステートレストークン認証（Cookie にトークンハッシュを含める方式）であれば、セッション固定は原理的に発生しないことをセキュリティ対策セクションに追記する。"
+    },
+    {
+      "id": "G012",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "ログイン画面のレイアウト・ルーティング構成が未定義",
+      "description": "src/app/login/page.tsx を新規作成するが、この画面が既存の layout.tsx（AppProviders、i18n）を共有するのか、独自の layout.tsx を持つのかが未定義。ログイン画面では AppProviders のうち認証を前提とする Context が問題を起こす可能性がある。また、認証済みユーザーがログイン画面にアクセスした場合のリダイレクト処理も未記載。",
+      "location": "src/app/login/page.tsx および src/app/login/layout.tsx（未記載）",
+      "suggestion": "ログイン画面が既存の RootLayout をそのまま使用するか、独自の layout.tsx を持つかを明記する。また、認証済みユーザーが /login にアクセスした場合はメインページにリダイレクトする処理を受け入れ条件に追加すること。"
+    },
+    {
+      "id": "G013",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "next.config.js の CSP ヘッダー更新の可能性",
+      "description": "Issue では next.config.js は変更不要としているが、HTTPS モードでの Cookie（Secure 属性）や追加のセキュリティヘッダーに関連して CSP の更新が必要になる可能性がある。特に、ログイン画面のフォーム送信で fetch/XHR を使用する場合は connect-src が既に 'self' を含んでいるため問題ないが、外部リソースの読み込みがあれば CSP 更新が必要。",
+      "location": "next.config.js の headers() セクション",
+      "suggestion": "CSP の変更は不要であることを明示的に確認・記載するか、必要な場合は変更対象に追加する。特に form-action ディレクティブが未設定のため、ログイン画面のフォーム送信方式（fetch vs form action）を確認すること。"
+    },
+    {
+      "id": "G014",
+      "severity": "should_fix",
+      "category": "影響範囲漏れ",
+      "title": "CLAUDE.md のモジュール一覧への auth.ts 等の追記が必要",
+      "description": "プロジェクトでは CLAUDE.md にモジュール一覧を管理している。auth.ts、middleware.ts 等の新規モジュールが追加された際に CLAUDE.md の更新が必要だが、変更対象ファイル一覧に CLAUDE.md が含まれていない。",
+      "location": "CLAUDE.md の主要機能モジュール一覧",
+      "suggestion": "変更対象ファイル一覧に CLAUDE.md を追加する。または、CLAUDE.md の更新はドキュメント更新タスクの一部として扱うことを明記する。"
+    },
+    {
+      "id": "G015",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": "Issue #332（IP 制限オプション）との機能的関連性",
+      "description": "Issue #332 は『アクセス元 IP の制限オプション』であり、Issue #331 のレート制限（IP ベース）やアクセス制御と機能的に近い。両方が並行実装される場合、IP 取得ロジック（req.socket.remoteAddress）やミドルウェアの構成で競合する可能性がある。Issue #332 は現在概要のみで詳細未定だが、設計段階で連携を意識すべき。",
+      "location": "関連 Issue セクション",
+      "suggestion": "関連 Issue セクションに Issue #332 への言及を追加し、IP ベースのアクセス制御ロジックを将来の Issue #332 で拡張可能な設計とすることを注記する。特に IP 取得ユーティリティの共通化を意識すると良い。"
+    },
+    {
+      "id": "G016",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス",
+      "title": "middleware.ts による全リクエストへのオーバーヘッド",
+      "description": "Next.js の middleware.ts はすべてのリクエストに対して実行される。認証無効時でも middleware.ts が呼び出され、環境変数チェックのオーバーヘッドが発生する。静的アセット等も対象となる可能性がある。",
+      "location": "src/middleware.ts の matcher 設定",
+      "suggestion": "middleware.ts の config.matcher を設定し、静的アセット（/_next/static, /favicon.ico 等）を除外する。また、認証無効時は最初の環境変数チェックのみで即座に return することで、パフォーマンスへの影響を最小化する設計を実装タスクに追記する。"
+    },
+    {
+      "id": "G017",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": "フェーズ分割案の Phase 間での変更対象ファイルの依存関係が不明確",
+      "description": "フェーズ分割案では Phase 1（認証コア）、Phase 2（HTTPS）、Phase 3（ブルートフォース・テスト・ドキュメント）に分割されているが、各 Phase の変更対象ファイルの依存関係が明確でない。例えば、Phase 1 で middleware.ts を作成する際に HTTPS 対応のCookie（Secure属性の条件分岐）も含めるのか、Phase 2 まで待つのかが不明。",
+      "location": "フェーズ分割案セクション",
+      "suggestion": "各 Phase の変更対象ファイルを詳細化し、Phase 間の依存関係を明記する。特に auth.ts の Cookie 設定（Secure 属性の条件分岐）は Phase 1 の時点で実装しておき、Phase 2 の HTTPS 対応で有効化される設計とすると、Phase 間の結合度を下げられる。"
+    }
+  ],
+  "summary": {
+    "total": 17,
+    "must_fix": 4,
+    "should_fix": 10,
+    "nice_to_have": 3
+  },
+  "overall_assessment": "Issue #331 は Stage 1 レビューを経て大幅に改善されており、認証フロー・責務境界・セキュリティ対策が詳細に記載されている。しかし、影響範囲の観点では、変更対象ファイル一覧にいくつかの漏れがある。特に tsconfig.server.json、src/i18n.ts、サイドバーコンポーネントが未記載であり、ビルドエラーや翻訳の欠落につながる。また、middleware.ts の認証無効時の動作保証（後方互換性の核心部分）の設計が十分に明記されていない点は必須対応とすべき。依存パッケージの追加判断、CI/CD への影響、status コマンドの HTTPS 対応など、実装時に判明する問題を事前に防ぐための追記が推奨される。",
+  "code_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/tsconfig.server.json",
+      "relevance": "server.ts ビルド時のインクルード対象。auth.ts の追加が必要"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/i18n.ts",
+      "relevance": "auth 名前空間の追加が必要な i18n 設定ファイル"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/server.ts",
+      "relevance": "HTTP/HTTPS 切替、URL表示の HTTPS 対応が必要"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/lib/ws-server.ts",
+      "relevance": "setupWebSocket() の型拡張、WebSocket 認証の実装先"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/cli/commands/start.ts",
+      "relevance": "CLI オプション追加、トークン生成フロー、URL表示の HTTPS 対応"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/cli/commands/status.ts",
+      "relevance": "HTTPS URL 表示の間接的影響を受ける"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/cli/utils/daemon.ts",
+      "relevance": "認証・HTTPS オプションの子プロセス伝達、getStatus() HTTPS 対応"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/cli/types/index.ts",
+      "relevance": "StartOptions 型への認証・HTTPS フィールド追加"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/lib/env.ts",
+      "relevance": "Env interface へのオプショナルフィールド追加"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/hooks/useWebSocket.ts",
+      "relevance": "wss:// 自動検出は既に対応済みだが、Cookie 送信の動作確認が必要"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/next.config.js",
+      "relevance": "CSP ヘッダーの変更不要確認"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/cli/config/security-messages.ts",
+      "relevance": "認証有効時のセキュリティ警告メッセージ条件分岐"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/src/app/layout.tsx",
+      "relevance": "ログイン画面のレイアウト共有に関する確認"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/package.json",
+      "relevance": "ms ライブラリ等の依存追加の可能性"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/docs/security-guide.md",
+      "relevance": "トークン認証+HTTPS 使用方法の追記対象"
+    },
+    {
+      "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-331/CLAUDE.md",
+      "relevance": "新規モジュール一覧の追記が必要"
+    }
+  ]
+}

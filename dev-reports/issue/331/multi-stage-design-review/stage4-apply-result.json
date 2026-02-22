@@ -1,0 +1,117 @@
+{
+  "issue_number": 331,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "S001",
+        "item": "タイミング攻撃対策: verifyToken()でcrypto.timingSafeEqual()使用を必須化",
+        "sections_updated": ["Section 2.3 (verifyToken()のタイミング攻撃対策サブセクション追加)", "Section 6.3 (トークン管理にS001方針追記)", "Section 16.1 (テスト表にspy確認追加)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S002",
+        "item": "AUTH_EXCLUDED_PATHSの完全一致マッチングに変更",
+        "sections_updated": ["Section 5.3 (middleware.tsスケルトンのstartsWith→===変更、マッチングルールサブセクション追加)", "Section 5.4 (コメント更新)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S003",
+        "item": "証明書ファイルパスの具体的バリデーション手順を5段階で設計",
+        "sections_updated": ["Section 9.3 (証明書バリデーション全面書き換え、validateCertificatePath()関数設計追加)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S004",
+        "item": "認証イベントのセキュリティログ記録方針を設計",
+        "sections_updated": ["Section 6.2 (S004サブセクション追加: 4イベントのログ記録方針)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S005",
+        "item": "レート制限のIPアドレス取得方法を明確化",
+        "sections_updated": ["Section 6.2 (S005サブセクション追加: コンテキスト別IP取得方法)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S006",
+        "item": "自前Cookieパーサーのセキュリティ堅牢化",
+        "sections_updated": ["Section 3 (技術選定テーブル更新)", "Section 16.1 (エッジケーステストサブセクション追加)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S007",
+        "item": "--allow-httpオプションのリスク警告強化",
+        "sections_updated": ["Section 7 (S007サブセクション追加: AUTH_HTTP_WARNING文言強化案)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S008",
+        "item": "証明書・秘密鍵ペアの整合性検証",
+        "sections_updated": ["Section 9.1 (createHttpsServer()にtry-catch追加)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S009",
+        "item": "レート制限Mapのメモリ枯渇攻撃対策",
+        "sections_updated": ["Section 8.3 (S009サブセクション追加)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S010",
+        "item": "環境変数CM_AUTH_TOKEN_HASHのプロセス一覧表示リスク記述の具体化",
+        "sections_updated": ["Section 6.3 (リスク記述更新)", "Section 13 (トレードオフ表更新)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S011",
+        "item": "期限切れトークンのレート制限カウント除外",
+        "sections_updated": ["Section 22 (実装チェックリスト将来検討)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S012",
+        "item": "auth-helper.tsとauth.tsの暗号アルゴリズム同期コメント追加",
+        "sections_updated": ["Section 11.2 (auth-helper.tsコード例にコメント追加)", "Section 13 (トレードオフ表更新)", "Section 22 (実装チェックリスト)"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-331-token-auth-design-policy.md",
+  "sections_updated": [
+    "Section 2.3 レイヤー構成 (verifyToken()タイミング攻撃対策追加)",
+    "Section 3 技術選定 (Cookieパース堅牢化注記)",
+    "Section 5.3 middleware.ts認証除外パス (完全一致マッチング、マッチングルール追加)",
+    "Section 5.4 認証無効時の動作保証 (コメント更新)",
+    "Section 6.2 ブルートフォース対策 (S004ログ方針、S005 IP取得方法追加)",
+    "Section 6.3 トークン管理 (S001/S010方針追記)",
+    "Section 7 CLIオプション (S007 --allow-httpリスク警告強化)",
+    "Section 8.3 メモリ管理 (S009メモリ枯渇対策)",
+    "Section 9.1 server.ts条件分岐 (S008 cert/keyペア検証)",
+    "Section 9.3 証明書バリデーション (S003 5段階バリデーション)",
+    "Section 11.2 auth-helper.ts (S012アルゴリズム同期コメント)",
+    "Section 13 トレードオフ (S010/S012更新)",
+    "Section 16.1 auth.tsテスト (S001 spy検証、S006エッジケース追加)",
+    "Section 17 レビュー履歴 (Stage 4追加)",
+    "Section 21 Stage 4レビュー指摘事項サマリー (新規追加)",
+    "Section 22 実装チェックリスト (Stage 4 Must Fix/Should Fix/Nice to Have追加)"
+  ],
+  "summary": {
+    "total_findings": 12,
+    "must_fix_reflected": 3,
+    "must_fix_total": 3,
+    "should_fix_reflected": 5,
+    "should_fix_total": 5,
+    "nice_to_have_reflected": 4,
+    "nice_to_have_total": 4
+  },
+  "timestamp": "2026-02-21T00:00:00Z"
+}

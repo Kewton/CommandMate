@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { getLocale, getMessages } from 'next-intl/server';
+import { getLocale, getMessages, getTimeZone } from 'next-intl/server';
 import { AppProviders } from '@/components/providers/AppProviders';
 import './globals.css';
 
@@ -15,11 +15,12 @@ export default async function RootLayout({
 }) {
   const locale = await getLocale();
   const messages = await getMessages();
+  const timeZone = await getTimeZone();
 
   return (
     <html lang={locale}>
       <body className="min-h-screen bg-gray-50">
-        <AppProviders locale={locale} messages={messages as Record<string, unknown>}>
+        <AppProviders locale={locale} messages={messages as Record<string, unknown>} timeZone={timeZone} authEnabled={!!process.env.CM_AUTH_TOKEN_HASH}>
           {children}
         </AppProviders>
       </body>

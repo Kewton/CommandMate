@@ -1,0 +1,67 @@
+{
+  "issue_number": 323,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_date": "2026-02-21",
+  "summary": "設計方針書の影響分析レビューを6観点から実施。@internal export追加による外部インターフェースへの影響はなく、既存テストの安定性も確保されている。変更対象ファイル一覧（Section 10）に1件の漏れ（結合テスト）と、CLAUDE.md更新内容の具体性不足を確認。globalThisパターンへの影響はなし。全体として影響範囲は適切に制御されており、条件付き承認とする。",
+  "findings": [
+    {
+      "id": "IA001",
+      "severity": "should_fix",
+      "category": "ファイル漏れ",
+      "title": "Section 10の変更対象に結合テスト（auto-yes-persistence.test.ts）が未記載",
+      "description": "tests/integration/auto-yes-persistence.test.ts は auto-yes-manager.ts から動的importで関数群をインポートしている。新規に4関数が @internal export されることで、このテストファイルのimport文自体は変更不要だが、モジュールリロード後に新規export関数が globalThis 経由の状態を正しく参照できるか（特に validatePollingContext() が getAutoYesState() を呼ぶ際の globalThis 参照チェーン）を検証する結合テストケースの追加を検討すべきである。少なくとも Section 10 の変更対象として「影響確認対象」として記載があると実装時の見落としを防げる。",
+      "suggestion": "Section 10 に tests/integration/auto-yes-persistence.test.ts を「確認対象（変更不要の可能性あり）」として追記する。新規export関数がモジュールリロード後も正しく動作することの確認が望ましい。",
+      "target": "Section 10: 変更対象ファイル一覧"
+    },
+    {
+      "id": "IA002",
+      "severity": "should_fix",
+      "category": "ドキュメント",
+      "title": "CLAUDE.md更新内容の具体的な記述方針が不足",
+      "description": "Section 10 には CLAUDE.md の変更内容として「auto-yes-manager.tsモジュール説明の更新」とのみ記載されている。現在の CLAUDE.md の auto-yes-manager.ts エントリは Issue #306 と Issue #314 の変更を反映した詳細な記述（関数名・定数名・interface名の列挙）になっている。今回のリファクタリングでは新規関数4つ（validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt）と getPollerState() が追加されるが、これらは全て @internal export またはモジュール内private関数であり、外部向け機能変更はない。CLAUDE.md にどの粒度で記載するか（@internal export関数の列挙有無、「関数群方式」採用の記載）の方針が設計書に明記されていない。",
+      "suggestion": "Section 10 の CLAUDE.md 変更内容を具体化する。例: 「Issue #323: pollAutoYes()リファクタリング - 関数群方式による責務分割（validatePollingContext/captureAndCleanOutput/processStopConditionDelta/detectAndRespondToPrompt、全て@internal export）、getPollerState()内部ヘルパー追加」のようなエントリ文案を設計書に記載する。",
+      "target": "Section 10: 変更対象ファイル一覧"
+    },
+    {
+      "id": "IA003",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "既存タイマーベーステストにおけるモック範囲拡大の影響評価が不足",
+      "description": "既存の pollAutoYes 統合テスト（Issue #161, #191, #193, #306, #314）は vi.useFakeTimers() + vi.advanceTimersByTimeAsync() を使用しており、captureSessionOutput/sendKeys/sendSpecialKeys をモジュールレベルでvi.mockしている。分割後、detectAndRespondToPrompt() 内で sendPromptAnswer() を呼ぶが、sendPromptAnswer は prompt-answer-sender.ts に定義されており、既存テストではこのモジュールを直接モックしていない。代わりに sendKeys/sendSpecialKeys が tmux モジュールとしてモックされている。sendPromptAnswer() は内部で sendKeys/sendSpecialKeys を呼ぶため間接的にモックが効くが、この間接的モック依存が分割後も確実に維持されることの確認が Section 6 に明記されていない。",
+      "suggestion": "Section 6-1 の「既存テストの維持」に、sendPromptAnswer() が既存の vi.mock('@/lib/tmux') 経由で間接的にモックされる旨の補足を追加する。また、import文の追加以外に既存テストの修正が本当に不要であることの根拠（sendPromptAnswer は現行 pollAutoYes() で既に使用されている点）を明記する。",
+      "target": "Section 6-1: 既存テストの維持"
+    },
+    {
+      "id": "IA004",
+      "severity": "nice_to_have",
+      "category": "波及範囲",
+      "title": "session-cleanup.ts の stopAutoYesPolling() import に対する影響なし確認",
+      "description": "session-cleanup.ts は auto-yes-manager.ts から stopAutoYesPolling のみをインポートしている。今回のリファクタリングでは stopAutoYesPolling() 自体は変更されず（validatePollingContext の 'expired' パスで内部呼び出しされるのみ）、session-cleanup.ts への波及はない。ただし、設計書 Section 10 でこのファイルを「影響なし」として明示的に除外していない点は改善余地がある。",
+      "suggestion": "Section 10 に「影響なし確認済み」として session-cleanup.ts, current-output/route.ts, auto-yes/route.ts, useAutoYes.ts を列挙すると、レビュアーが波及範囲の網羅性を検証しやすくなる。",
+      "target": "Section 10: 変更対象ファイル一覧"
+    },
+    {
+      "id": "IA005",
+      "severity": "nice_to_have",
+      "category": "外部インターフェース",
+      "title": "AutoYesPollerState の export 型定義への @internal export 関数パラメータの影響",
+      "description": "validatePollingContext(), processStopConditionDelta(), detectAndRespondToPrompt() は全て AutoYesPollerState を引数に受け取る。AutoYesPollerState は既に export interface として公開されている（L39-54）。@internal export 関数が AutoYesPollerState を引数型として使用することで、外部消費者が理論上これらの関数を呼び出せる状態になる。既存の checkStopCondition(), executeRegexWithTimeout() も同様の @internal export パターンであり、プロジェクト慣例として許容されているが、TypeScript の export {} as internal のような言語レベルの保護がないことは認識しておくべきである。",
+      "suggestion": "この点は既存パターン（checkStopCondition 等）と同一であり、変更の必要はない。設計書の Section 5 に「プロジェクト慣例に従い、JSDoc @internal タグによる文書的保護で十分とする」旨の注記がすでにあるため、追加対応不要。",
+      "target": "Section 5: @internal export 方針"
+    },
+    {
+      "id": "IA006",
+      "severity": "nice_to_have",
+      "category": "波及範囲",
+      "title": "getPollerState() 導入による6箇所の変更が自動テストでカバーされるか",
+      "description": "Section 4 で getPollerState() を導入し、updateLastServerResponseTimestamp, resetErrorCount, incrementErrorCount, pollAutoYes, scheduleNextPoll, stopAutoYesPolling の6箇所で autoYesPollerStates.get() を置換する。これらの関数は private（非export）であるため直接テストできないが、既存の統合テスト（pollAutoYes のタイマーベーステスト）が間接的にカバーしている。しかし getPollerState() 置換が純粋な機械的変換（Map.get() のラッパー）であることの確認テストが設計に含まれていない。",
+      "suggestion": "getPollerState() は export しない設計（Section 5）のため、直接テストは不要。既存テストの全パス（受入条件の最初の項目）で十分にカバーされる。念のため、リファクタリング前後でテスト結果が同一であることの確認手順を実装手順に含めると安全性が高まる。",
+      "target": "Section 4: pollerState存在確認の共通化"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_assessment": "設計方針書の影響範囲は全体としてよく制御されている。@internal export の追加は既存の外部インターフェース（API route, session-cleanup, useAutoYes）に影響を与えず、globalThis パターンも維持される。主な指摘は (1) 変更対象ファイル一覧における結合テストの記載漏れ、(2) CLAUDE.md 更新方針の具体化、(3) 既存テストのモック依存チェーンの明文化の3点。いずれも should_fix レベルであり、設計方針書の品質向上に資する改善項目である。条件付き承認（should_fix 3件の対応推奨）とする。"
+}

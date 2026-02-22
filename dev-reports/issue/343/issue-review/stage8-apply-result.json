@@ -1,0 +1,59 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 343,
+  "iteration": 2,
+  "apply_date": "2026-02-22",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "F301",
+        "status": "applied",
+        "change_summary": "src/app/api/slash-commands/route.ts を変更候補テーブルから変更不要テーブルに移動。getSlashCommandGroups() 内部で skills 統合が行われるため呼び出し側のコード変更は不要であることを明記"
+      },
+      {
+        "id": "F302",
+        "status": "applied",
+        "change_summary": "worktree route.ts の変更内容を具体化: filteredSkillCount 変数追加、sources オブジェクトに skill: filteredSkillCount 追加、SlashCommandsResponse 型に skill: number 追加の3段階を明記"
+      },
+      {
+        "id": "F303",
+        "status": "applied",
+        "change_summary": "slash-commands.ts の変更内容にキャッシュ整合性方針を追記: commandsCache または skillsCache のいずれかが null の場合は両方を再ロードする方針を明記"
+      },
+      {
+        "id": "F304",
+        "status": "applied",
+        "change_summary": "影響範囲に「テスト影響」セクションを新設し、slash-commands.test.ts の labelMap と validCategories に 'skill' カテゴリ追加が必要であることを明記"
+      },
+      {
+        "id": "F305",
+        "status": "applied",
+        "change_summary": "受け入れ条件11を追加: CATEGORY_ORDER に 'skill' が追加され、Skills カテゴリが workflow と standard-session の間に表示される"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F306",
+        "status": "skipped",
+        "reason": "テスト計画の詳細は実装フェーズで決定する方針とする。テスト影響セクション（F304）で既存テストの修正箇所は記載済み"
+      },
+      {
+        "id": "F307",
+        "status": "skipped",
+        "reason": "CLAUDE.md の更新は本 Issue の直接スコープ外であり、実装完了後に別途検討する"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 7,
+    "applied": 5,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/343"
+  },
+  "update_summary": "Stage 7 影響範囲レビュー（2回目）の指摘事項5件（全て should_fix）を反映。(1) MCBD ルートを変更候補から変更不要テーブルに移動、(2) source カウント計算の3段階の変更箇所を具体化、(3) キャッシュ整合性方針を追記、(4) テスト影響セクションを新設、(5) 受け入れ条件にCATEGORY_ORDER更新を追加。Nice to have 2件（F306: テスト計画詳細、F307: CLAUDE.md更新）はスコープ外としてスキップ。"
+}

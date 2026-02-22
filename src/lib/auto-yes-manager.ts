@@ -278,6 +278,19 @@ export function clearAllAutoYesStates(): void {
 // =============================================================================
 
 /**
+ * Get poller state for a worktree.
+ * Returns undefined if no poller state exists.
+ *
+ * Issue #323: Introduced for consistency with getAutoYesState() accessor pattern (DR003).
+ *
+ * @param worktreeId - Worktree identifier
+ * @returns Poller state or undefined
+ */
+function getPollerState(worktreeId: string): AutoYesPollerState | undefined {
+  return autoYesPollerStates.get(worktreeId);
+}
+
+/**
  * Get the number of active pollers.
  *
  * @returns Count of currently active polling instances
@@ -304,7 +317,7 @@ export function clearAllPollerStates(): void {
  * @returns Timestamp (Date.now()) of the last server response, or null if none
  */
 export function getLastServerResponseTimestamp(worktreeId: string): number | null {
-  const pollerState = autoYesPollerStates.get(worktreeId);
+  const pollerState = getPollerState(worktreeId);
   return pollerState?.lastServerResponseTimestamp ?? null;
 }
 
@@ -315,7 +328,7 @@ export function getLastServerResponseTimestamp(worktreeId: string): number | nul
  * @param timestamp - Timestamp value (Date.now())
  */
 function updateLastServerResponseTimestamp(worktreeId: string, timestamp: number): void {
-  const pollerState = autoYesPollerStates.get(worktreeId);
+  const pollerState = getPollerState(worktreeId);
   if (pollerState) {
     pollerState.lastServerResponseTimestamp = timestamp;
   }
@@ -327,7 +340,7 @@ function updateLastServerResponseTimestamp(worktreeId: string, timestamp: number
  * @param worktreeId - Worktree identifier
  */
 function resetErrorCount(worktreeId: string): void {
-  const pollerState = autoYesPollerStates.get(worktreeId);
+  const pollerState = getPollerState(worktreeId);
   if (pollerState) {
     pollerState.consecutiveErrors = 0;
     pollerState.currentInterval = POLLING_INTERVAL_MS;
@@ -340,7 +353,7 @@ function resetErrorCount(worktreeId: string): void {
  * @param worktreeId - Worktree identifier
  */
 function incrementErrorCount(worktreeId: string): void {
-  const pollerState = autoYesPollerStates.get(worktreeId);
+  const pollerState = getPollerState(worktreeId);
   if (pollerState) {
     pollerState.consecutiveErrors++;
     pollerState.currentInterval = calculateBackoffInterval(pollerState.consecutiveErrors);
@@ -441,123 +454,159 @@ export function checkStopCondition(worktreeId: string, cleanOutput: string): boo
   return false;
 }
 
-/**
- * Internal polling function that recursively schedules itself via setTimeout.
- * Captures tmux output, detects prompts, and sends auto-responses when appropriate.
- *
- * Includes duplicate prevention (Issue #306): skips prompts that have already
- * been answered (tracked via lastAnsweredPromptKey) and applies a cooldown
- * interval (COOLDOWN_INTERVAL_MS) after successful responses.
- *
- * @param worktreeId - Worktree identifier
- * @param cliToolId - CLI tool type being polled
- */
-async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<void> {
-  // Check if poller was stopped
-  const pollerState = autoYesPollerStates.get(worktreeId);
-  if (!pollerState) return;
+// =============================================================================
+// Extracted Functions for pollAutoYes (Issue #323: SRP decomposition)
+// =============================================================================
 
-  // Check if auto-yes is still enabled
+/**
+ * Validate that polling context is still valid.
+ * Checks pollerState existence and auto-yes enabled state.
+ *
+ * @sideeffect When returning 'expired', calls stopAutoYesPolling() to clean up
+ * the poller state. This side-effect is intentional - separating the check from
+ * the cleanup would risk callers forgetting to call stopAutoYesPolling() (DR002).
+ *
+ * @internal Exported for testing purposes only.
+ * @precondition worktreeId is validated by isValidWorktreeId() in startAutoYesPolling()
+ * gateway before being registered in globalThis Map. This function assumes worktreeId
+ * has already passed that validation.
+ * @param worktreeId - Worktree identifier
+ * @param pollerState - Current poller state (or undefined if not found)
+ * @returns 'valid' | 'stopped' | 'expired'
+ */
+export function validatePollingContext(
+  worktreeId: string,
+  pollerState: AutoYesPollerState | undefined
+): 'valid' | 'stopped' | 'expired' {
+  if (!pollerState) return 'stopped';
+
   const autoYesState = getAutoYesState(worktreeId);
   if (!autoYesState?.enabled || isAutoYesExpired(autoYesState)) {
     stopAutoYesPolling(worktreeId);
-    return;
+    return 'expired';
   }
 
+  return 'valid';
+}
+
+/**
+ * Capture tmux session output and strip ANSI escape codes.
+ *
+ * @internal Exported for testing purposes only.
+ * @precondition worktreeId is validated by isValidWorktreeId() in startAutoYesPolling()
+ * gateway before being registered in globalThis Map. This function assumes worktreeId
+ * has already passed that validation.
+ * @param worktreeId - Worktree identifier
+ * @param cliToolId - CLI tool type being polled
+ * @returns Cleaned output string (ANSI stripped)
+ */
+export async function captureAndCleanOutput(
+  worktreeId: string,
+  cliToolId: CLIToolType
+): Promise<string> {
+  // 5000 lines: matches the existing pollAutoYes() line limit (IC002).
+  // captureSessionOutput() default is 1000 lines, but tmux buffer capture
+  // requires 5000 to avoid truncating long outputs.
+  const output = await captureSessionOutput(worktreeId, cliToolId, 5000);
+  return stripAnsi(output);
+}
+
+/**
+ * Process stop condition check using delta-based approach.
+ * Manages baseline length, extracts new content, and delegates
+ * pattern matching to existing checkStopCondition().
+ *
+ * Note: This is a higher-level function that internally calls
+ * checkStopCondition() (L409, Issue #314) for regex pattern matching.
+ *
+ * @internal Exported for testing purposes only.
+ * @precondition worktreeId is validated by isValidWorktreeId() in startAutoYesPolling()
+ * gateway before being registered in globalThis Map. This function assumes worktreeId
+ * has already passed that validation.
+ * @param worktreeId - Worktree identifier
+ * @param pollerState - Current poller state (mutated: stopCheckBaselineLength updated)
+ * @param cleanOutput - ANSI-stripped terminal output
+ * @returns true if stop condition matched and auto-yes was disabled
+ */
+export function processStopConditionDelta(
+  worktreeId: string,
+  pollerState: AutoYesPollerState,
+  cleanOutput: string
+): boolean {
+  if (pollerState.stopCheckBaselineLength < 0) {
+    // First poll: set baseline, skip stop condition check
+    pollerState.stopCheckBaselineLength = cleanOutput.length;
+    return false;
+  }
+
+  const baseline = pollerState.stopCheckBaselineLength;
+  if (cleanOutput.length > baseline) {
+    // Output grew: check only new content (delta)
+    const newContent = cleanOutput.substring(baseline);
+    pollerState.stopCheckBaselineLength = cleanOutput.length;
+    return checkStopCondition(worktreeId, newContent);
+  } else if (cleanOutput.length < baseline) {
+    // Buffer shrank (old lines dropped from scrollback): reset baseline
+    pollerState.stopCheckBaselineLength = cleanOutput.length;
+  }
+  // If length unchanged: no new content, skip check
+
+  return false;
+}
+
+/**
+ * Detect prompt in terminal output, resolve auto-answer, and send response.
+ * Handles the complete flow: detection -> duplicate check -> answer resolution ->
+ * tmux send -> timestamp/error-count update -> promptKey recording.
+ *
+ * Note: Cooldown scheduling is NOT this function's responsibility.
+ * The caller (pollAutoYes() orchestrator) determines scheduling interval
+ * based on the return value ('responded' -> cooldown, others -> normal interval).
+ *
+ * @internal Exported for testing purposes only.
+ * @precondition worktreeId is validated by isValidWorktreeId() in startAutoYesPolling()
+ * gateway before being registered in globalThis Map. This function assumes worktreeId
+ * has already passed that validation.
+ * @param worktreeId - Worktree identifier
+ * @param pollerState - Current poller state (mutated: lastAnsweredPromptKey updated)
+ * @param cliToolId - CLI tool type
+ * @param cleanOutput - ANSI-stripped terminal output
+ * @returns 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'
+ */
+export async function detectAndRespondToPrompt(
+  worktreeId: string,
+  pollerState: AutoYesPollerState,
+  cliToolId: CLIToolType,
+  cleanOutput: string
+): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   try {
-    // 1. Capture tmux output
-    const output = await captureSessionOutput(worktreeId, cliToolId, 5000);
-
-    // 2. Strip ANSI codes
-    const cleanOutput = stripAnsi(output);
-
-    // 2.5. Skip prompt detection during thinking state (Issue #161, Layer 1)
-    // This prevents false positive detection of numbered lists in CLI output
-    // while Claude is actively processing (thinking/planning).
-    //
-    // Issue #191: Apply windowing to detectThinking() to prevent stale thinking
-    // summary lines (e.g., "· Simmering...") from blocking prompt detection.
-    // Window size matches detectPrompt()'s multiple_choice scan range (50 lines).
-    //
-    // Safety: Claude CLI does not emit prompts during thinking, so narrowing
-    // the window cannot cause false auto-responses (see IA-003 in design doc).
-    //
-    // Processing order: stripAnsi -> split -> slice -> join
-    // stripAnsi is applied BEFORE split to ensure ANSI escape sequences spanning
-    // line boundaries do not affect line counting (IA-002).
-    //
-    // Boundary case: if buffer has fewer than 50 lines, slice(-50) returns the
-    // entire array (Array.prototype.slice specification), which is safe degradation
-    // equivalent to pre-fix behavior (IA-001).
-    const recentLines = cleanOutput.split('\n').slice(-THINKING_CHECK_LINE_COUNT).join('\n');
-    if (detectThinking(cliToolId, recentLines)) {
-      scheduleNextPoll(worktreeId, cliToolId);
-      return;
-    }
-
-    // 2.7. Check stop condition (Issue #314)
-    // After thinking check, before prompt detection: if terminal output matches
-    // the stop pattern, disable auto-yes and stop polling immediately.
-    //
-    // Delta-based check: Only check NEW output since Auto-Yes was enabled.
-    // On the first poll, establish the baseline output length (skip check to
-    // avoid matching pre-existing terminal content like shell prompts or paths).
-    // On subsequent polls, check only the output delta (new content appended).
-    // If the buffer shrank (tmux scrollback shifted), reset baseline and skip
-    // that cycle to avoid false positives from old content.
-    if (pollerState.stopCheckBaselineLength < 0) {
-      // First poll: set baseline, skip stop condition check
-      pollerState.stopCheckBaselineLength = cleanOutput.length;
-    } else {
-      const baseline = pollerState.stopCheckBaselineLength;
-      if (cleanOutput.length > baseline) {
-        // Output grew: check only new content (delta)
-        const newContent = cleanOutput.substring(baseline);
-        pollerState.stopCheckBaselineLength = cleanOutput.length;
-        if (checkStopCondition(worktreeId, newContent)) {
-          return;
-        }
-      } else if (cleanOutput.length < baseline) {
-        // Buffer shrank (old lines dropped from scrollback): reset baseline
-        pollerState.stopCheckBaselineLength = cleanOutput.length;
-      }
-      // If length unchanged: no new content, skip check
-    }
-
-    // 3. Detect prompt
+    // 1. Detect prompt
     const promptOptions = buildDetectPromptOptions(cliToolId);
     const promptDetection = detectPrompt(cleanOutput, promptOptions);
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
       // No prompt detected - reset lastAnsweredPromptKey (Issue #306)
       pollerState.lastAnsweredPromptKey = null;
-      scheduleNextPoll(worktreeId, cliToolId);
-      return;
+      return 'no_prompt';
     }
 
-    // Issue #306: Check for duplicate prompt before responding
+    // 2. Check for duplicate prompt (Issue #306)
     const promptKey = generatePromptKey(promptDetection.promptData);
     if (isDuplicatePrompt(pollerState, promptKey)) {
-      scheduleNextPoll(worktreeId, cliToolId);
-      return;
+      return 'duplicate';
     }
 
-    // 4. Resolve auto answer
+    // 3. Resolve auto answer
     const answer = resolveAutoAnswer(promptDetection.promptData);
     if (answer === null) {
-      // Cannot auto-answer this prompt
-      scheduleNextPoll(worktreeId, cliToolId);
-      return;
+      return 'no_answer';
     }
 
-    // 5. Send answer to tmux
+    // 4. Send answer to tmux
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId);
 
-    // Issue #287 Bug2: Uses shared sendPromptAnswer() to unify logic
-    // with route.ts, including cursor-key navigation for Claude Code
-    // multiple-choice prompts and fallback handling.
     await sendPromptAnswer({
       sessionName,
       answer,
@@ -565,26 +614,77 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<
       promptData: promptDetection.promptData,
     });
 
-    // 6. Update timestamp
+    // 5. Update timestamp and reset error count
     updateLastServerResponseTimestamp(worktreeId, Date.now());
-
-    // 7. Reset error count on success
     resetErrorCount(worktreeId);
 
-    // Issue #306: Record answered prompt key and apply cooldown
+    // 6. Record answered prompt key
     pollerState.lastAnsweredPromptKey = promptKey;
 
     // Log success (without sensitive content)
     console.info(`[Auto-Yes Poller] Sent response for worktree: ${worktreeId}`);
 
-    // Issue #306: Apply cooldown interval after successful response (early return)
-    scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS);
-    return;
+    return 'responded';
   } catch (error) {
-    // Increment error count on failure
+    // IC003: This catch handles errors from prompt detection/sending only.
+    // incrementErrorCount is called here, and this function never throws,
+    // preventing double incrementErrorCount in the outer pollAutoYes() catch.
     incrementErrorCount(worktreeId);
+    console.warn(`[Auto-Yes Poller] Error in detectAndRespondToPrompt for worktree ${worktreeId}: ${getErrorMessage(error)}`);
+    return 'error';
+  }
+}
 
-    // Log error (without sensitive details)
+/**
+ * Internal polling function that recursively schedules itself via setTimeout.
+ * Orchestrates the polling flow by delegating to extracted functions.
+ *
+ * Issue #323: Refactored from ~139 lines to ~30 lines as an orchestrator.
+ * Each responsibility is delegated to a focused function:
+ * - validatePollingContext(): Pre-condition checks
+ * - captureAndCleanOutput(): tmux output capture + ANSI cleanup
+ * - processStopConditionDelta(): Stop condition delta-based check
+ * - detectAndRespondToPrompt(): Prompt detection + auto-response
+ *
+ * @param worktreeId - Worktree identifier
+ * @param cliToolId - CLI tool type being polled
+ */
+async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType): Promise<void> {
+  // 1. Validate context
+  const pollerState = getPollerState(worktreeId);
+  const contextResult = validatePollingContext(worktreeId, pollerState);
+  if (contextResult !== 'valid') return;
+  // pollerState is guaranteed non-null after 'valid' check
+
+  try {
+    // 2. Capture and clean output
+    const cleanOutput = await captureAndCleanOutput(worktreeId, cliToolId);
+
+    // 3. Thinking check (inline - policy decision about window size)
+    // Issue #161 Layer 1 / Issue #191: windowing applied to detectThinking()
+    const recentLines = cleanOutput.split('\n').slice(-THINKING_CHECK_LINE_COUNT).join('\n');
+    if (detectThinking(cliToolId, recentLines)) {
+      scheduleNextPoll(worktreeId, cliToolId);
+      return;
+    }
+
+    // 4. Stop condition delta check (Issue #314)
+    if (processStopConditionDelta(worktreeId, pollerState!, cleanOutput)) {
+      return;
+    }
+
+    // 5. Detect and respond to prompt
+    const result = await detectAndRespondToPrompt(worktreeId, pollerState!, cliToolId, cleanOutput);
+    if (result === 'responded') {
+      // Issue #306: Apply cooldown interval after successful response
+      scheduleNextPoll(worktreeId, cliToolId, COOLDOWN_INTERVAL_MS);
+      return;
+    }
+  } catch (error) {
+    // IC003: This catch handles captureAndCleanOutput() or processStopConditionDelta()
+    // errors only. detectAndRespondToPrompt() catches its own errors and returns
+    // 'error' instead of throwing (preventing double incrementErrorCount).
+    incrementErrorCount(worktreeId);
     console.warn(`[Auto-Yes Poller] Error for worktree ${worktreeId}: ${getErrorMessage(error)}`);
   }
 
@@ -603,7 +703,7 @@ function scheduleNextPoll(
   cliToolId: CLIToolType,
   overrideInterval?: number
 ): void {
-  const pollerState = autoYesPollerStates.get(worktreeId);
+  const pollerState = getPollerState(worktreeId);
   if (!pollerState) return;
 
   // S4-F003: Floor guard - polling interval must not be below POLLING_INTERVAL_MS
@@ -677,7 +777,7 @@ export function startAutoYesPolling(
  * @param worktreeId - Worktree identifier
  */
 export function stopAutoYesPolling(worktreeId: string): void {
-  const pollerState = autoYesPollerStates.get(worktreeId);
+  const pollerState = getPollerState(worktreeId);
   if (!pollerState) return;
 
   // Clear timer

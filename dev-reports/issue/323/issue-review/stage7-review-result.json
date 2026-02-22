@@ -1,0 +1,76 @@
+{
+  "issue_number": 323,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-02-21",
+  "summary": "Stage 3の影響範囲指摘IF001-IF006は全て適切に対応済み。更新後のIssue本文は、影響範囲・テスト方針・CLAUDE.md更新の全てについて具体的かつ正確な記述となっている。新たなmust_fixは検出されなかった。should_fix 1件（processStopConditionDelta()テストでのpollerState生成方法の具体性不足）とnice_to_have 2件（docs/implementation-history.md更新の受入条件化、E2E動作確認手順の不在）を検出した。全体として影響範囲は適切に特定・文書化されており、実装に進められる品質に達している。",
+  "previous_findings_addressed": {
+    "IF001": "addressed",
+    "IF002": "addressed",
+    "IF003": "addressed",
+    "IF005": "addressed",
+    "IF006": "addressed"
+  },
+  "findings": [
+    {
+      "id": "S2IF001",
+      "severity": "should_fix",
+      "category": "テスト実現可能性",
+      "title": "processStopConditionDelta()のタイマー非依存テストにおけるpollerState生成方法が未定義",
+      "description": "テスト方針セクションでprocessStopConditionDelta()のテストを「checkStopCondition()をモック化せず、入出力（pollerState.stopCheckBaselineLengthの変化、autoYesState変更）を検証する統合的な単体テスト」とする推奨アプローチが記載されている。これは実現可能な方針である。しかし、タイマー非依存で直接関数呼び出しする場合、テスト側でpollerStateオブジェクトを生成してprocessStopConditionDelta()に渡す必要がある。現在のauto-yes-manager.tsでは、pollerStateはstartAutoYesPolling()内（L653-661）でのみ生成されてautoYesPollerStates Map経由でアクセスされる設計であり、テスト側から直接pollerStateを注入する手段がない。processStopConditionDelta()の関数シグネチャ設計として、(A) pollerStateを引数として受け取る設計にするか、(B) worktreeIdを渡してMap経由で内部取得する設計にするかで、テスト側の書き方が大きく異なる。方針(A)ならテスト側でpollerStateオブジェクトリテラルを直接生成して渡せるが、方針(B)ならstartAutoYesPolling()経由での状態セットアップが必要になり、タイマー副作用（setTimeout）の処理も伴う。Issue本文のIF007対応（Stage 3 nice_to_have）で「pollerStateは引数として受け取る」方針が推奨されていたが、現在のIssue本文のprocessStopConditionDelta()説明ではこの設計方針が明示されていない。",
+      "suggestion": "processStopConditionDelta()の関数シグネチャ設計方針として「pollerStateを引数として受け取る」ことをIssue本文に明記すること。これにより、テスト側でAutoYesPollerState型のオブジェクトリテラルを直接生成して渡せるため、startAutoYesPolling()やsetTimeout副作用を伴わないタイマー非依存テストが自然に記述可能となる。同様に、validatePollingContext()、captureAndCleanOutput()、detectAndRespondToPrompt()についても引数設計の方針を記載すると、テスト実装者が設計判断で迷わない。"
+    },
+    {
+      "id": "S2IF002",
+      "severity": "nice_to_have",
+      "category": "ドキュメント更新",
+      "title": "docs/implementation-history.mdへのエントリ追加が受入条件に含まれていない",
+      "description": "Stage 3のdoc_referencesで「docs/implementation-history.md - リファクタリング完了後にIssue #323のエントリ追加が必要」と指摘されていた。CLAUDE.mdの更新は受入条件に追加されたが、docs/implementation-history.mdの更新は受入条件に含まれていない。CLAUDE.mdの関連ドキュメントセクションに「実装機能一覧（./docs/implementation-history.md）- Issue別の概要・主要変更ファイル・設計書リンク」と記載されており、各Issueの実装完了後にエントリを追加するプロジェクト慣行がある。",
+      "suggestion": "受入条件に「docs/implementation-history.mdにIssue #323のエントリを追加すること」を追加するか、PRレビュー時のチェック項目として記載すること。あるいはレビュー履歴セクションに「implementation-history.mdの更新はPRマージ時に実施」と明記することで対応可能。"
+    },
+    {
+      "id": "S2IF003",
+      "severity": "nice_to_have",
+      "category": "テスト範囲",
+      "title": "E2E動作確認手順の不在",
+      "description": "Stage 3のIF004（nice_to_have）で「手動でauto-yesを有効化し、プロンプト応答→停止条件マッチ→期限切れの3パターンで正常動作を確認」する手順の記載が推奨されていた。更新後のIssue本文にはこのE2E動作確認手順が含まれていない。リファクタリングは機能変更なしが前提であり、テスト方針セクションで既存テストの維持と個別テストの追加が明記されているため、自動テストでの品質担保は十分である。ただし、pollAutoYes()のタイミング動作（scheduleNextPoll呼び出し順序、エラー時のリカバリ）は実環境でしか検証できない側面があり、手動確認の手順があると実装者の安心材料になる。",
+      "suggestion": "受入条件とは別に「確認方法」や「動作確認手順」セクションを追加し、手動テストの3パターン（プロンプト応答、停止条件マッチ、期限切れ）を記載することを推奨。ただし、これは品質保証の追加措置であり、受入条件としては既存テストのパスと個別テストの追加で十分カバーされている。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 1,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Stage 3の影響範囲レビューで指摘した5件（IF001, IF002, IF003, IF005, IF006）は全て適切に対応されている。具体的には: IF001（テストimport変更の詳細化）は変更対象ファイルテーブルで「import対象が22個→26-30個程度に増加」「checkStopCondition/processStopConditionDelta describeブロック整理」と正確に記載済み。IF002（AutoYesPollerStateへの影響）は停止条件ロジック設計選択肢セクションでglobalThis型宣言、初期化処理、永続性テストへの波及を列挙済み。IF003（タイマーテスト安定性リスク）はテスト方針セクションの新設とタイマー非依存テスト方針の受入条件化で対応済み。IF005（processStopConditionDelta()のテスト方針）は専用サブセクションで同一モジュール内モック制約と推奨アプローチを記載済み。IF006（CLAUDE.md更新）は変更対象ファイルテーブルと受入条件の両方に追加済み。新たに検出した問題はshould_fix 1件のみで、processStopConditionDelta()の引数設計方針（pollerStateを引数として受け取るか否か）の明示が推奨される。これは実装段階で自然に決定される事項ではあるが、テスト方針セクションで「タイマー非依存テスト」を要求しているため、引数受け渡し設計を明示しておく方がテスト実装の見通しが良くなる。全体として、影響範囲の特定・文書化は十分な品質に達しており、実装に進められる状態である。",
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "リファクタリング対象メインファイル（705行、pollAutoYes L455-593 = 139行）"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "relevance": "既存テスト（1516行、import 22個、vi.useFakeTimersベース、タイマー非依存テスト追加予定）"
+    },
+    {
+      "file": "tests/integration/auto-yes-persistence.test.ts",
+      "relevance": "globalThis永続性テスト（185行、AutoYesPollerState変更時の波及がIssue本文で確認済み）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "変更対象ファイルテーブルと受入条件の両方に追加済み"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "Issue #323エントリ追加が必要だが受入条件に未記載"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "auto-yes-manager.tsモジュール説明の更新が受入条件に含まれている"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "Issue #323のエントリ追加がプロジェクト慣行として必要"
+    }
+  ]
+}

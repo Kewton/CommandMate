@@ -1,0 +1,235 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_type": "通常",
+  "review_date": "2026-02-21",
+  "issue_number": 331,
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "category": "設計",
+      "title": "setupWebSocket()のHTTPSサーバー型互換性が未考慮",
+      "description": "ws-server.tsのsetupWebSocket()関数はServer as HTTPServerをhttp moduleからimportしており、引数型がHTTPServerに限定されている。HTTPS対応でhttps.createServer()を使用した場合、返却されるのはhttps.Serverインスタンスであり、型が異なる。ws-server.tsの型定義変更（http.Server | https.Server、またはNode.jsのnet.Server）が影響範囲に記載されていない。",
+      "location": "影響範囲 > 変更対象ファイル",
+      "suggestion": "変更対象ファイルにws-server.tsの型修正を明記するか、設計方針セクションにsetupWebSocket()のサーバー型をhttp.Server | https.Serverに拡張する旨を記載する。実際にはNode.js上でhttps.Serverはhttp.Serverを継承しているため実行時の問題は起きにくいが、TypeScriptの厳密な型チェックで問題が発生する可能性がある。"
+    },
+    {
+      "id": "F002",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "DaemonManager.start()へのauth/HTTPS関連オプション伝播が未設計",
+      "description": "現在のDaemonManager.start()はStartOptionsを受け取り、dev/port/dbPathのみをenvに設定している（daemon.ts:69-76行目）。--auth, --cert, --key, --allow-http, --auth-expire等のCLIオプションがデーモンモード起動時にどのように子プロセスに伝達されるかの設計がIssueに記載されていない。デーモンモードではspawnで子プロセスを起動するため、認証・HTTPS関連のオプションを環境変数経由で子プロセスに渡す仕組みが必要。",
+      "location": "実装タスク > CLIオプション追加",
+      "suggestion": "DaemonManager.start()に認証・HTTPS関連オプションの環境変数伝達を明記する。例: CM_AUTH_ENABLED=true, CM_AUTH_TOKEN=<generated>, CM_AUTH_EXPIRE=24h, CM_HTTPS_CERT=<path>, CM_HTTPS_KEY=<path> を環境変数としてspawnに渡す設計。daemon.tsも変更対象ファイルに追加する。"
+    },
+    {
+      "id": "F003",
+      "severity": "must_fix",
+      "category": "設計",
+      "title": "Next.js middleware.tsの配置場所に関する誤解の可能性",
+      "description": "IssueではNext.js認証ミドルウェアを'src/middleware.ts'に新規作成と記載しているが、Next.js App Router（このプロジェクトで使用中）ではmiddleware.tsはプロジェクトルートまたはsrc/直下に配置する必要がある。現在srcディレクトリにはapp/があるため、'src/middleware.ts'は正しい配置だが、Next.js公式の配置ルールに従い、src/middleware.tsであることを明確にする必要がある。なお、Issueの記載は'src/middleware.ts'であり正しい。ただし、server.tsはカスタムサーバーであり、Next.jsのmiddlewareはnext()のリクエストハンドリングパイプライン内で動作する。カスタムサーバー上のHTTPリクエスト（Next.jsを通さないAPI等がある場合）やWebSocket upgradeリクエストはmiddleware.tsを通らないため、WebSocket認証がmiddlewareに依存しない設計であることの確認が必要。",
+      "location": "実装タスク > Next.js認証ミドルウェアの実装",
+      "suggestion": "Next.js middleware.tsはNext.jsのリクエストハンドリングパイプライン内でのみ動作する点を設計方針に明記し、WebSocket認証はmiddleware.tsとは独立してws-server.tsのupgradeハンドラー内で実装する旨を明確化する。また、server.ts内のcreateServer requestハンドラーはnext()のhandle()を呼ぶため、APIルートへのリクエストはmiddleware.tsを通る（これは正しい）。"
+    },
+    {
+      "id": "F004",
+      "severity": "must_fix",
+      "category": "完全性",
+      "title": "トークンのサーバー内共有メカニズムが未定義",
+      "description": "Issueでは「サーバーのメモリ上にトークンを保持」と記載しているが、トークンの具体的な共有メカニズムが未定義。CLIプロセスがトークンを生成し、server.tsプロセスがそれを検証する必要があるが、(1) foregroundモード: CLIからnpm run startをspawnするため、トークンを環境変数経由で渡す、(2) daemonモード: DaemonManagerがspawnするため同様。しかし、server.ts側でトークンをどこから読み込み、auth.tsのメモリにロードするかのフローが明記されていない。env.tsへの「認証・HTTPS関連の状態管理追加」が変更対象に含まれているが具体性が不足している。",
+      "location": "設計方針 / 実装タスク > トークン生成ユーティリティの実装",
+      "suggestion": "トークン生成からサーバー側での検証までのデータフローを明記する。推奨: CLIでcrypto.randomBytesでトークン生成 -> 環境変数CM_AUTH_TOKENとしてspawnのenvに設定 -> server.tsの起動時にprocess.env.CM_AUTH_TOKENからauth.tsモジュールに読み込み -> auth.tsがメモリ上でトークンを保持し検証関数を提供。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "トークンの環境変数名がIssue #179で削除されたCM_AUTH_TOKENと衝突する可能性",
+      "description": "Issue #179でCM_AUTH_TOKEN/NEXT_PUBLIC_CM_AUTH_TOKENを削除した経緯がある。セキュリティガイド（docs/security-guide.md:122-148行目）にはCM_AUTH_TOKENの削除と移行手順が記載されている。新しいトークン認証で環境変数名CM_AUTH_TOKENを再利用すると、(1) 旧バージョンからの移行ユーザーが混乱する可能性、(2) .envに残っている旧CM_AUTH_TOKENが意図せず使用される可能性がある。",
+      "location": "設計方針 / 関連Issue > Issue #179",
+      "suggestion": "新しいトークン認証の環境変数には異なる名前を使用する（例: CM_AUTH_SESSION_TOKEN, CM_SERVER_AUTH_TOKEN）。または、Issue内でCM_AUTH_TOKENの再利用を明示的に判断し、旧設定との衝突を防ぐバリデーションロジック（NEXT_PUBLIC_*が設定されている場合の警告等）を含める。"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "daemon.tsが変更対象ファイルに含まれていない",
+      "description": "DaemonManager.start()メソッド（daemon.ts:35-114行目）は子プロセス起動時の環境変数設定を担当しているが、変更対象ファイルにdaemon.tsが含まれていない。認証・HTTPSオプションを環境変数として子プロセスに渡すためにはdaemon.tsの修正が必須。また、DaemonManager.getStatus()（daemon.ts:155-182行目）のURL生成もHTTP/HTTPS対応が必要。",
+      "location": "影響範囲 > 変更対象ファイル",
+      "suggestion": "変更対象ファイルに`src/cli/utils/daemon.ts`を追加し、変更内容として「auth/HTTPSオプションの環境変数伝達、getStatus()のURL生成修正（http:// -> https://）」を記載する。"
+    },
+    {
+      "id": "F007",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "CLI index.tsのcommander設定変更が変更対象に含まれていない",
+      "description": "src/cli/index.tsのstartコマンド定義（38-56行目）に新オプション（--auth, --auth-expire, --https, --cert, --key, --allow-http）を追加するcommander設定が必要だが、変更対象ファイルにsrc/cli/index.tsが含まれていない。",
+      "location": "影響範囲 > 変更対象ファイル",
+      "suggestion": "変更対象ファイルに`src/cli/index.ts`を追加し、変更内容として「startコマンドのcommander option定義追加（--auth, --auth-expire, --https, --cert, --key, --allow-http）」を記載する。"
+    },
+    {
+      "id": "F008",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "WebSocket Cookie手動パースのセキュリティ考慮事項が未記載",
+      "description": "wsパッケージはHTTPのCookieヘッダーを自動パースしない。ws-server.tsのupgradeハンドラーでIncomingMessageからCookieを手動パースする必要がある（仮説検証レポートの申し送り事項にも記載）。Cookie文字列のパースにはセキュリティ上の注意が必要（例: Cookie Injection、不正なフォーマット耐性）。パースライブラリの選択（例: Node.js組み込みのURLSearchParamsではなく、cookie npmパッケージ等）についての設計指針がない。",
+      "location": "実装タスク > WebSocket認証チェック追加",
+      "suggestion": "WebSocket認証の実装タスクに「IncomingMessageのCookieヘッダーからのトークン取得方法」を詳細化する。推奨: (1) cookieパース用のユーティリティ関数をauth.tsに追加、(2) パースエラー時は接続拒否、(3) 使用ライブラリの指定（next/headersのcookies()はEdge RuntimeなのでNode.jsでは使えない）。"
+    },
+    {
+      "id": "F009",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "security-messages.tsのREVERSE_PROXY_WARNINGとの整合性",
+      "description": "現在のsecurity-messages.tsにはREVERSE_PROXY_WARNINGが定義されており、CM_BIND=0.0.0.0時にリバースプロキシ推奨メッセージを表示する（start.ts:168-169行目, daemon.ts:82-83行目）。--auth導入後は、認証が有効な場合はこの警告の文言を変更するか、認証が有効である旨を表示する必要がある。この整合性についてIssueに記載がない。",
+      "location": "設計方針 / 実装タスク",
+      "suggestion": "security-messages.tsの更新を変更対象に追加し、--auth有効時の警告メッセージ変更を検討する。例: 認証有効＋HTTPS時は「Server is exposed with token authentication (HTTPS)」、認証有効＋HTTP時は「WARNING: Token authentication without HTTPS...」に変更。"
+    },
+    {
+      "id": "F010",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "i18n名前空間ファイルの追加が変更対象に含まれていない",
+      "description": "ログイン画面のi18n対応が実装タスクに含まれているが、localesディレクトリへの翻訳ファイル追加（例: locales/en/auth.json, locales/ja/auth.json）が変更対象に記載されていない。現在のプロジェクトにはlocales/en/*.jsonとlocales/ja/*.jsonの構造で翻訳ファイルが管理されている。",
+      "location": "影響範囲 > 変更対象ファイル",
+      "suggestion": "変更対象ファイルに`locales/en/auth.json`, `locales/ja/auth.json`（認証関連翻訳キー：ログイン画面タイトル、トークン入力プレースホルダー、エラーメッセージ、ロックアウトメッセージ等）を追加する。また、src/i18n.tsの名前空間マージ設定にauthを追加する必要があるかも確認する。"
+    },
+    {
+      "id": "F011",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "auth-expire期間のパース仕様が未定義",
+      "description": "CLIオプション--auth-expire <duration>のデフォルト24hと48h指定例は記載されているが、durationの文字列パース仕様が不明。対応するフォーマット（例: '24h', '2d', '30m'等）、無効な値の場合のバリデーション、最小/最大有効期限の制約が定義されていない。",
+      "location": "実装タスク > CLIオプション追加 > --auth-expire",
+      "suggestion": "auth-expireのフォーマット仕様を定義する。例: 'Nh'（N時間）、'Nd'（N日）をサポート。最小値（例: 1h）と最大値（例: 30d）を設定。msライブラリの利用も検討。バリデーションエラー時のメッセージも定義する。"
+    },
+    {
+      "id": "F012",
+      "severity": "should_fix",
+      "category": "設計",
+      "title": "証明書パスのパストラバーサル防止策の具体的方法が未定義",
+      "description": "HTTPS対応の実装タスクに「証明書パスのバリデーション（存在確認、パストラバーサル防止）」と記載されているが、具体的な防止策が未定義。既存のresolveSecurePath()（env-setup.ts:116-125行目）を利用するのか、新しいバリデーションを実装するのかが不明。証明書ファイルはプロジェクトディレクトリ外にあることが一般的なため、resolveSecurePath()のallowedBaseDirベースの検証は適さない可能性がある。",
+      "location": "実装タスク > server.tsのHTTPS対応",
+      "suggestion": "証明書パスのバリデーション方針を明確化する。証明書ファイルは任意の場所に配置可能であるため、パストラバーサル防止よりも(1) ファイルの存在確認、(2) 読み取り権限の確認、(3) シンボリックリンクの解決（realpathSync）、(4) ファイルサイズの上限チェックが適切。"
+    },
+    {
+      "id": "F013",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "テスト計画が含まれていない",
+      "description": "Issueにはテストに関する実装タスクが含まれていない。トークン認証、レート制限、HTTPS切替、WebSocket認証、Cookie管理等の機能についてのユニットテスト/統合テストの計画が欠如している。プロジェクトはVitestを使用しており、tests/unit/とtests/integration/にテストを配置する規約がある。",
+      "location": "実装タスク",
+      "suggestion": "テスト計画セクションを追加し、少なくとも以下のテストを含める: (1) auth.tsのトークン生成・検証のユニットテスト、(2) レート制限ロジックのユニットテスト、(3) 認証ミドルウェアの統合テスト、(4) WebSocket認証の統合テスト、(5) CLIオプションパースのテスト。"
+    },
+    {
+      "id": "F014",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "Env interfaceへのHTTPS関連フィールド追加の設計が不明確",
+      "description": "env.tsの変更対象には「認証・HTTPS関連の状態管理追加」と記載されているが、既存のEnv interface（env.ts:172-184行目）にどのフィールドを追加するかが不明確。CM_ROOT_DIR/CM_PORT/CM_BIND/CM_DB_PATHは全て必須フィールドとして定義されているが、認証・HTTPSフィールドはオプショナルであるべき。また、ENV_MAPPING定数（env.ts:24-33行目）にHTTPS関連の旧名フォールバックが必要かも不明。",
+      "location": "実装タスク > 環境変数追加",
+      "suggestion": "env.tsのEnv interfaceに追加するフィールドを明確にする。推奨: 別interfaceとして AuthConfig { enabled: boolean; token?: string; expire?: number; } 等を定義するか、Env interfaceにオプショナルフィールドを追加するかの設計判断を記載する。"
+    },
+    {
+      "id": "F015",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "ログアウト機能のUXフローが未記載",
+      "description": "ログアウトAPI（POST /api/auth/logout）の実装は記載されているが、ログアウト後のリダイレクト先、ログアウトボタンのUI配置場所（ヘッダー、サイドバー等）、ログアウト確認ダイアログの有無など、UX面の設計が未記載。",
+      "location": "実装タスク > ログアウトAPI実装",
+      "suggestion": "ログアウトボタンの配置場所とログアウト後のフロー（ログインページにリダイレクト）を記載する。サイドバー下部またはヘッダーにログアウトリンクを配置するのが一般的。"
+    },
+    {
+      "id": "F016",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "トークンの再表示・コピー機能が未考慮",
+      "description": "トークンはサーバー起動時にターミナルに1回表示されるが、ターミナルのスクロールバックで見失った場合の再表示手段がない。commandmate statusコマンドでトークンを再表示する機能や、クリップボードへのコピー機能があるとユーザビリティが向上する。",
+      "location": "認証フロー > 1. CLI起動時にトークン生成",
+      "suggestion": "commandmate status --show-tokenのようなオプションを検討するか、起動時にトークンをファイル（~/.commandmate/tokens/<issue>.token等、chmod 600）にも保存してcommandmate auth-tokenコマンドで取得できるようにする。ただし、セキュリティとのトレードオフを考慮する。"
+    },
+    {
+      "id": "F017",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "セキュリティガイドの既存構造との整合性",
+      "description": "現在のsecurity-guide.mdは「リバースプロキシ推奨」を前提とした構成で、「Migration from CM_AUTH_TOKEN」セクション（122行目）では旧トークン認証が削除された経緯を説明している。新しいトークン認証の追加により、このセクションの文言修正や、新旧認証の違い（クライアント側環境変数に露出しない改善点）の説明が必要。",
+      "location": "実装タスク > ドキュメント > セキュリティガイド更新",
+      "suggestion": "security-guide.mdの更新タスクに「Migration from CM_AUTH_TOKENセクションの更新（新しいビルトイン認証との違いの説明追加）」「Security Checklistの更新（ビルトイン認証の選択肢追加）」を含める。"
+    },
+    {
+      "id": "F018",
+      "severity": "nice_to_have",
+      "category": "設計",
+      "title": "レート制限のIPアドレス取得方法が未考慮",
+      "description": "ブルートフォース対策でIPアドレスベースのレート制限を実装するが、リバースプロキシ経由のアクセスでは req.socket.remoteAddress がプロキシのIPになる。X-Forwarded-ForやX-Real-IPヘッダーの取得が必要になるが、これらのヘッダーは信頼できるプロキシからのみ参照すべき。カスタムサーバーのためNext.jsのtrust proxy設定は使えない。",
+      "location": "実装タスク > ブルートフォース対策",
+      "suggestion": "IPアドレス取得のフォールバック戦略を定義する。例: X-Forwarded-For > X-Real-IP > req.socket.remoteAddress の優先順位。ただし、ビルトイン認証の主な用途はリバースプロキシなしでの利用（Issue本文の趣旨）であるため、req.socket.remoteAddress優先で初回実装し、プロキシ対応は将来課題としても可。"
+    },
+    {
+      "id": "F019",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "Issueのサイズが非常に大きく分割の検討余地がある",
+      "description": "本Issueはトークン認証、HTTPS対応、ブルートフォース対策、ログイン画面UI、CLI変更、ドキュメント更新と多岐にわたる大規模な変更を含んでいる。新規ファイル6件、変更ファイル7件以上と影響範囲が広い。フェーズ分割（Phase 1: 認証コア、Phase 2: HTTPS、Phase 3: UI/UX改善）を検討すると、レビューとテストの負荷が下がる。",
+      "location": "Issue全体",
+      "suggestion": "Phase 1: トークン認証コア（auth.ts, middleware.ts, login API/UI）、Phase 2: HTTPS対応（server.ts, CLI cert/key options）、Phase 3: ブルートフォース対策・ドキュメント のように分割を検討する。"
+    }
+  ],
+  "summary": {
+    "total": 19,
+    "must_fix": 4,
+    "should_fix": 10,
+    "nice_to_have": 5
+  },
+  "overall_assessment": "Issue #331はCommandMateに軽量なビルトイン認証とHTTPS直接配信を追加する包括的な提案であり、動機・背景・CSRF/ブルートフォース対策の設計は全体として妥当である。仮説検証で全8項目がConfirmedとなっており、現在のコードベースの状態認識は正確。しかし、(1) DaemonManagerへのオプション伝達フロー、(2) トークンのCLI-サーバー間共有メカニズム、(3) ws-server.tsのHTTPS Server型互換性、(4) daemon.ts/cli/index.ts/security-messages.ts/localesの変更対象漏れなど、実装段階で設計判断が必要になる未定義事項が複数ある。これらを実装前に解決しないと、設計の手戻りが発生するリスクがある。テスト計画の追加も強く推奨する。",
+  "code_references": [
+    {
+      "file": "server.ts",
+      "relevance": "HTTPS対応の主要変更対象。現在はhttp.createServerのみ使用（29行目）"
+    },
+    {
+      "file": "src/lib/ws-server.ts",
+      "relevance": "WebSocket認証追加対象。setupWebSocket()の引数型がHTTPServer限定（6, 38行目）"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "DaemonManager.start()のenv伝達（59-76行目）。変更対象として漏れている"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "relevance": "startコマンドのcommander option定義（38-56行目）。変更対象として漏れている"
+    },
+    {
+      "file": "src/cli/types/index.ts",
+      "relevance": "StartOptions interface（33-46行目）。auth/cert/key等のフィールド追加が必要"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "Env interface（172-184行目）、ENV_MAPPING（24-33行目）。認証状態管理の追加先"
+    },
+    {
+      "file": "src/cli/config/security-messages.ts",
+      "relevance": "REVERSE_PROXY_WARNING定数。--auth有効時のメッセージ変更が必要"
+    },
+    {
+      "file": "docs/security-guide.md",
+      "relevance": "既存のリバースプロキシ推奨ガイド。Migration from CM_AUTH_TOKENセクション（122行目）の更新が必要"
+    },
+    {
+      "file": ".env.example",
+      "relevance": "環境変数設定例。認証・HTTPS関連変数の追加先"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトガイドライン。モジュール一覧への新規auth.ts/middleware.ts追加が必要"
+    },
+    {
+      "file": "docs/security-guide.md",
+      "relevance": "セキュリティガイド。トークン認証+HTTPS手順の追加先"
+    }
+  ]
+}

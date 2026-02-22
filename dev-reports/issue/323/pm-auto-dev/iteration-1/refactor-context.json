@@ -1,0 +1,26 @@
+{
+  "issue_number": 323,
+  "refactor_targets": [
+    "src/lib/auto-yes-manager.ts",
+    "tests/unit/lib/auto-yes-manager.test.ts"
+  ],
+  "quality_metrics": {
+    "before_total_lines": 706,
+    "after_total_lines": 806,
+    "new_functions": 4,
+    "new_tests": 20,
+    "pollAutoYes_before": 139,
+    "pollAutoYes_after": 42
+  },
+  "improvement_goals": [
+    "JSDocコメントの品質確認・補強（@internal/@precondition等）",
+    "不要なコメントや重複記述がないか確認",
+    "テストの記述品質確認（describe/itの命名が適切か）",
+    "コードの一貫性確認（既存スタイルとの整合）"
+  ],
+  "constraints": [
+    "機能変更なし",
+    "既存テスト全パスを維持",
+    "外部インターフェース維持"
+  ]
+}

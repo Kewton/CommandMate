@@ -1,0 +1,13 @@
+{
+  "issue_number": 323,
+  "stage": 2,
+  "applied_findings": ["IC001", "IC002", "IC003", "IC004", "IC005"],
+  "skipped_findings": ["IC006", "IC007", "IC008"],
+  "skip_reasons": {
+    "IC006": "nice_to_have",
+    "IC007": "nice_to_have",
+    "IC008": "nice_to_have"
+  },
+  "update_summary": "Stage 2整合性レビューの指摘5件を設計方針書に反映。IC001: Section 3-3にデルタ渡しの設計意図とcheckStopConditionパラメータ名リネーム検討事項を追記。IC002: Section 3-2に5000行指定の理由を注記。IC003: Section 3-4にエラーハンドリング説明を追記し、Section 3-5のcatchブロックにスコープ説明コメントを追加。IC004: Section 2-3のmermaidフロー図にcaptureAndCleanOutputのエラーパスを追加。IC005: Section 6-2のvalidatePollingContextテストに具体的セットアップコードを補完。nice_to_have 3件は省略。",
+  "success": true
+}

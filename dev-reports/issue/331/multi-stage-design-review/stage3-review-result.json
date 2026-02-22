@@ -1,0 +1,158 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "findings": [
+    {
+      "id": "I001",
+      "severity": "must_fix",
+      "category": "テスト影響",
+      "title": "i18n-namespace-loading.test.ts がauth namespace追加で失敗する",
+      "description": "tests/integration/i18n-namespace-loading.test.ts にはハードコードされた EXPECTED_NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt'] と、「各ロケールのnamespaceファイル数がちょうど5であること」を検証するアサーション（'should have exactly 5 namespace files per locale matching src/i18n.ts'）が存在する。locales/en/auth.json と locales/ja/auth.json を追加し src/i18n.ts に auth namespace を追加すると、このテストは即座に失敗する。設計方針書のSection 10,14にはこのテストファイルへの言及が一切ない。",
+      "location": "Section 10（i18n対応）, Section 14（変更対象ファイル一覧）, Section 16（テスト方針）",
+      "suggestion": "EXPECTED_NAMESPACES に 'auth' を追加し、ファイル数検証を 6 に更新する変更を、変更対象ファイル一覧（Section 14）と実装チェックリスト（Section 20）に明記すること。具体的なファイルパス: tests/integration/i18n-namespace-loading.test.ts"
+    },
+    {
+      "id": "I002",
+      "severity": "must_fix",
+      "category": "既存機能影響",
+      "title": "ws-server.ts の setupWebSocket() 型変更が既存テストと呼び出し元に影響する",
+      "description": "設計方針書 Section 9.2 では setupWebSocket(server: HTTPServer | HTTPSServer) への型拡張を指定しているが、現在の実装は setupWebSocket(server: HTTPServer) であり、server.ts の呼び出し（L68）も HTTPServer 型のみを渡している。型を union に変更すること自体は後方互換だが、tests/integration/websocket.test.ts は createServer() (http) で HTTPServer を生成して setupWebSocket() に渡しており、HTTPS テストケースが未定義である。さらに、ws-server.ts の upgrade ハンドラーに認証ロジックを追加した場合、既存の全6テストケースが認証無効状態で正常に通過することの保証が必要。設計方針書 Section 16.4 には WebSocket認証の結合テストがあるが、既存テストへの影響分析が不足している。",
+      "location": "Section 9.2, Section 16.4",
+      "suggestion": "既存の tests/integration/websocket.test.ts が認証追加後も CM_AUTH_TOKEN_HASH 未設定の状態で正常に通過することを、テスト方針セクション（Section 16.4）に明記すること。また、テストのbeforeEachで process.env.CM_AUTH_TOKEN_HASH を明示的に delete するガードを推奨事項として記載すること。"
+    },
+    {
+      "id": "I003",
+      "severity": "must_fix",
+      "category": "既存機能影響",
+      "title": "middleware.ts の matcher が既存APIルートのパフォーマンスとルーティングに影響する可能性",
+      "description": "設計方針書 Section 5.3 の matcher パターン '/((?!_next/static|_next/image|favicon.ico).*)' は、全ての HTTP リクエスト（API routes, pages, 静的ファイル以外）に対して middleware 関数を実行する。現在はプロジェクトに middleware.ts が存在しないため、全APIルートは middleware なしで処理されている。認証無効時（isAuthEnabled() === false）であっても middleware 関数は毎リクエスト実行され、NextResponse.next() を返すまでの関数呼び出しオーバーヘッドが発生する。本番環境の高頻度ポーリング（response-poller, auto-yes-manager のAPI呼び出し）で累積する可能性がある。",
+      "location": "Section 5.3, Section 5.4",
+      "suggestion": "認証無効時のオーバーヘッドが無視可能レベル（isAuthEnabled()はprocess.env参照のみで~0.01ms）であることを設計方針書に明記し、パフォーマンスへの影響が事実上ないことの根拠を記載すること。また、ポーリング系APIルート（/api/worktrees/[id]/auto-yes-poll, /api/worktrees/[id]/check-response）がmatcherに含まれることへの認識を示すこと。"
+    },
+    {
+      "id": "I004",
+      "severity": "should_fix",
+      "category": "既存機能影響",
+      "title": "server.ts の gracefulShutdown() に destroyRateLimiter() 追加時の import 順序リスク",
+      "description": "設計方針書 Section 6.2 / C010 で server.ts の gracefulShutdown() に destroyRateLimiter() 呼び出しを追加する計画だが、server.ts は tsconfig.server.json でビルドされる。Section 11.1 で auth.ts を tsconfig.server.json の include に追加する方針だが、auth.ts がモジュールスコープで rateLimiter インスタンスを作成する設計（setInterval含む）のため、server.ts から auth.ts を import した時点でクリーンアップタイマーが開始される。認証無効時でもタイマーが起動する点の影響と、gracefulShutdown での確実な停止の整合性を設計書で検討すべきである。",
+      "location": "Section 6.2, Section 11.1, C010",
+      "suggestion": "auth.ts の rateLimiter 初期化を遅延初期化（lazy initialization）にするか、isAuthEnabled() を条件としてタイマーを開始するかの方針を明記すること。認証無効時に不要な setInterval が動き続けることは、既存のサーバーパフォーマンスに微小ながら影響する。"
+    },
+    {
+      "id": "I005",
+      "severity": "should_fix",
+      "category": "CLI影響",
+      "title": "start.ts の foreground モードでの認証環境変数の設定漏れ",
+      "description": "設計方針書 Section 12（Phase 4）では daemon.ts の DaemonManager.start() への環境変数追加（C008）を詳細に記載しているが、start.ts の foreground モード（L130-179）での認証環境変数の設定方針が設計書に記載されていない。現在の start.ts foreground モードは env オブジェクトを構築してspawnに渡す設計であり、--auth オプション処理時に CM_AUTH_TOKEN_HASH, CM_AUTH_TOKEN_EXPIRE_AT 等を env に追加する必要がある。daemon.ts のパターンと同様のコードが start.ts にも必要だが、設計書はこの点を明記していない。",
+      "location": "Section 12（Phase 4）, Section 7",
+      "suggestion": "Phase 4 の実装順序に start.ts foreground モードの認証環境変数設定を明記すること。具体的には、start.ts の env 構築部分（L148-163付近）に CM_AUTH_TOKEN_HASH, CM_AUTH_TOKEN_EXPIRE_AT, CM_HTTPS_CERT, CM_HTTPS_KEY 等を追加する方針を記載すること。"
+    },
+    {
+      "id": "I006",
+      "severity": "should_fix",
+      "category": "既存機能影響",
+      "title": "server.ts のログメッセージ（L130）がHTTPS時に不正確になる",
+      "description": "現在の server.ts は server.listen() のコールバック内で console.log(`> Ready on http://${hostname}:${port}`) をハードコードしている（L130）。HTTPS 条件分岐を追加した場合、HTTPS 起動時でも 'http://' と表示されるため、プロトコルの動的切り替えが必要。設計方針書 Section 9.1 のコード例ではこのログメッセージの更新が含まれていない。",
+      "location": "Section 9.1",
+      "suggestion": "Section 9.1 のserver.ts変更箇所にログメッセージのプロトコル動的切替を追加すること。例: const protocol = isHttps ? 'https' : 'http'; console.log(`> Ready on ${protocol}://${hostname}:${port}`);。これは C013（status.tsのHTTPS URL表示）と同様のパターンである。"
+    },
+    {
+      "id": "I007",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "既存のCLIコマンドテストへの StartOptions 型変更の影響",
+      "description": "設計方針書 Section 14 で src/cli/types/index.ts の StartOptions を拡張（auth, authExpire, cert, key, https, allowHttp 等の追加）する計画だが、tests/unit/cli/ 配下に既存のCLIテストが存在する。StartOptions を使用する既存テストがオプションフィールドの追加で動作に影響を受けないことの確認が必要。全て optional フィールドであれば後方互換性は保たれるが、設計書に明記されていない。",
+      "location": "Section 14（変更対象ファイル一覧）, Section 12（Phase 4）",
+      "suggestion": "StartOptions に追加するフィールドが全て optional（?付き）であることを設計書に明記し、既存テストへの後方互換性を保証すること。"
+    },
+    {
+      "id": "I008",
+      "severity": "should_fix",
+      "category": "ビルド影響",
+      "title": "tsconfig.server.json への auth.ts 追加が既存ビルドの依存関係に影響する可能性",
+      "description": "Section 11.1 で tsconfig.server.json の include に 'src/lib/auth.ts' を追加する計画だが、auth.ts は Node.js 標準の crypto モジュールにのみ依存する設計であるものの、実装時に誤って @/ パスエイリアス経由の import（例: @/config/auto-yes-config.ts）を使用した場合、tsconfig.server.json では @/* パスが tsconfig.base.json の paths で解決されるため、意図しないファイルがビルド依存関係に含まれるリスクがある。",
+      "location": "Section 11.1, Section 2.3",
+      "suggestion": "auth.ts が外部依存（@/ パスエイリアス経由の import）を持たないことを実装制約としてSection 11.1に明記すること。auto-yes-config.ts の ALLOWED_DURATIONS パターン参照は設計パターンの参考にとどめ、import は行わないことを確認すること。"
+    },
+    {
+      "id": "I009",
+      "severity": "should_fix",
+      "category": "CLI影響",
+      "title": "commandmate init コマンドへの .env テンプレート更新が未記載",
+      "description": "設計方針書 Section 14 で .env.example の変更（HTTPS関連コメント追加）を計画しているが、commandmate init コマンド（src/cli/commands/init.ts）が生成する .env ファイルのテンプレートへの影響が設計書に記載されていない。init コマンドは env-setup.ts を通じて .env ファイルを生成するため、認証・HTTPS関連の環境変数をコメントとして含めるかどうかの方針が必要。",
+      "location": "Section 14（変更対象ファイル一覧）",
+      "suggestion": "init コマンドの .env テンプレート生成に認証・HTTPS関連のコメント付き環境変数を含めるかどうかを、変更対象ファイル一覧に明記すること。含める場合は src/cli/utils/env-setup.ts と src/cli/commands/init.ts を変更対象に追加すること。"
+    },
+    {
+      "id": "I010",
+      "severity": "should_fix",
+      "category": "既存機能影響",
+      "title": "start.ts foreground モードのセキュリティ警告表示がHTTPS追加で不整合になる",
+      "description": "現在の start.ts（L166-169）は bindAddress === '0.0.0.0' の場合に REVERSE_PROXY_WARNING を表示する。--auth オプション追加後は、auth有効時は AUTH_ENABLED_MESSAGE を、auth有効+HTTP+allowHttpなしの場合は AUTH_HTTP_WARNING を表示する設計（C015）だが、既存の REVERSE_PROXY_WARNING との表示優先順位・共存ルールが設計書に記載されていない。0.0.0.0バインドかつauth有効時に両方表示するのか、authが有効なら REVERSE_PROXY_WARNING を抑制するのかが不明確。",
+      "location": "Section 12（Phase 5, C015）, Section 7",
+      "suggestion": "REVERSE_PROXY_WARNING と AUTH_HTTP_WARNING / AUTH_ENABLED_MESSAGE の共存・優先順位ルールをSection 12またはC015に明記すること。提案: auth有効時は REVERSE_PROXY_WARNING を抑制し AUTH_ENABLED_MESSAGE のみ表示、auth有効+HTTP時は AUTH_HTTP_WARNING のみ表示。"
+    },
+    {
+      "id": "I011",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "middleware.ts テストでの NextRequest/NextResponse モック戦略が既存テスト環境に影響する可能性",
+      "description": "設計方針書 Section 16.3 で vi.mock('next/server') を使用する方針だが、vitest.config.ts の environment は 'node' であり、NextRequest/NextResponse は本来 Edge Runtime 向けの API である。テスト環境で next/server をモックする場合、他のテストファイル（特にAPIルートテスト）が next/server の実体を使用している場合にモック汚染が発生するリスクがある。",
+      "location": "Section 16.3, Section 11.3",
+      "suggestion": "middleware.ts のテストファイルでは vi.mock() のスコープを明確にし、afterEach で vi.restoreAllMocks() を呼び出すことを推奨。または、テストファイル内での局所モック（vi.mock at file level）を使用し、グローバルな vitest.setup.ts には追加しない方針を明記すること。"
+    },
+    {
+      "id": "I012",
+      "severity": "nice_to_have",
+      "category": "既存機能影響",
+      "title": "useWebSocket.ts の再接続ロジックへの認証チェック統合の具体的設計が不足",
+      "description": "設計方針書 Section 15.3 で「既存の useWebSocket.ts の再接続ロジックに認証チェックを統合」と記載されているが、具体的な実装方針（/api/auth/status のポーリング頻度、再接続ループへの挿入箇所、認証失敗時のUI遷移方法）が記載されていない。useWebSocket.ts の現在の再接続ロジック（L137-141）は単純なsetTimeoutベースであり、認証チェックを追加すると非同期処理が複雑化する。Section 14 の変更対象ファイル一覧に useWebSocket.ts が「変更不要」と記載されている点と矛盾する。",
+      "location": "Section 15.3, Section 14",
+      "suggestion": "Section 14 の変更不要ファイルリストから useWebSocket.ts の記載を再検討すること。Section 15.3 の認証チェック統合を実装する場合は useWebSocket.ts が変更対象になる。または、認証チェックは別フックで行い useWebSocket.ts は変更しない方針を明確にすること。"
+    },
+    {
+      "id": "I013",
+      "severity": "nice_to_have",
+      "category": "ビルド影響",
+      "title": "npm run build:all への影響が暗黙的",
+      "description": "設計方針書には npm run build（Next.js）、npm run build:server（tsconfig.server.json）、npm run build:cli（tsconfig.cli.json）の個別影響は分析されているが、npm run build:all（全ビルド一括実行）への影響が明示的に記載されていない。特に、src/middleware.ts は Next.js App Router のファイル規約に従い自動的にビルドに含まれるため、build 時に auth.ts からの import が解決可能であることの確認が必要。",
+      "location": "Section 11",
+      "suggestion": "Section 11 に npm run build:all の影響分析を追記し、middleware.ts が Next.js ビルドで自動的に含まれること、auth.ts が @/lib/auth パスで解決されることを確認する記載を追加すること。"
+    },
+    {
+      "id": "I014",
+      "severity": "nice_to_have",
+      "category": "競合",
+      "title": "並行開発中の Issue との変更対象ファイル重複リスクは低い",
+      "description": "main ブランチの最近のコミット履歴を確認した結果、最新の merge は Issue #321（MemoCard）、Issue #326（response-poller）、Issue #323（auto-yes-manager refactoring）であり、Issue #331 の主要変更対象ファイル（server.ts, ws-server.ts, middleware.ts, auth.ts 等）とは重複しない。ただし、server.ts は全 Issue で共有されるファイルであり、gracefulShutdown への追加は将来的にコンフリクトの可能性がある。",
+      "location": "Section 14",
+      "suggestion": "server.ts の gracefulShutdown() への destroyRateLimiter() 追加は、既存のstopAllPolling() / stopAllAutoYesPolling() の後に追加する方針を、コンフリクト解決時のガイドとして記載しておくこと。"
+    },
+    {
+      "id": "I015",
+      "severity": "nice_to_have",
+      "category": "テスト影響",
+      "title": "E2Eテスト（Playwright）でのHTTPS/認証対応の具体的計画が不足",
+      "description": "設計方針書 Section 16.5 にログインフローのE2Eテスト方針があるが、既存のE2Eテスト（Playwright）がHTTPS環境で動作するための設定変更（自己署名証明書の無視、baseURL変更等）の詳細が記載されていない。ただし、既存E2Eテストは認証なし（--authなし）で起動したサーバーに対して実行すれば影響はないため、実際のリスクは低い。",
+      "location": "Section 16.5",
+      "suggestion": "既存E2Eテストは認証なしモードで実行する方針を明記し、HTTPS/認証対応のE2Eテストは新規テストファイルとして追加する方針を記載すること。"
+    },
+    {
+      "id": "I016",
+      "severity": "nice_to_have",
+      "category": "既存機能影響",
+      "title": "Section 14 の「変更不要」リストに useWebSocket.ts の wss:// 自動検出済みの記載があるが、WebSocket認証Cookie送信の確認が不足",
+      "description": "useWebSocket.ts は wss:// プロトコルの自動検出（L107）が既に実装されているが、ブラウザの WebSocket API では Cookie は自動的に送信される（同一オリジンの場合）。しかし、wss:// への upgrade リクエストで HttpOnly Cookie が確実に送信されることの動作確認が設計書に記載されていない。ブラウザの WebSocket API はハンドシェイク時に Cookie ヘッダーを自動付与するため技術的には問題ないが、設計根拠として明記すべきである。",
+      "location": "Section 14（変更不要）, Section 2.2",
+      "suggestion": "Section 14 の useWebSocket.ts 変更不要の根拠に、「ブラウザ WebSocket API はハンドシェイク時に Cookie ヘッダーを自動送信するため、WebSocket 認証用の Cookie は明示的な追加実装なしに ws-server.ts 側で取得可能」であることを追記すること。"
+    }
+  ],
+  "summary": {
+    "total": 16,
+    "must_fix": 3,
+    "should_fix": 8,
+    "nice_to_have": 5
+  },
+  "overall_assessment": "設計方針書は後方互換性を重視した堅実な設計であり、--authなし起動時の動作保証（isAuthEnabled()ガード）は適切に設計されている。しかし、影響範囲の分析において以下の3つの重要な漏れがある。(1) i18n-namespace-loading.test.ts がauth namespace追加で確実に失敗する点が未記載、(2) ws-server.ts の認証追加が既存WebSocketテストに与える影響の分析が不足、(3) middleware.ts追加が全HTTPリクエストに及ぼす影響の明記が不足。CLIへの影響分析では、foregroundモードでの認証環境変数設定とinit コマンドのテンプレート更新が漏れている。ビルドへの影響は tsconfig 分離方針により適切に管理されているが、auth.ts の依存関係制約の明記が望ましい。並行開発中のIssueとのファイル競合リスクは低い。全体として、設計方針書に数箇所の追記を行えば実装可能な状態であり、Conditionally Approved とする。"
+}

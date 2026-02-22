@@ -1,0 +1,101 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "applied_findings": ["I007", "I012", "I001"],
+  "skipped_findings": [],
+  "update_summary": "Stage 3 影響分析レビューの指摘事項を設計方針書に反映。Must Fix 2件（I007: 統合テストの sources.skill 未検証、I012: loadSlashCommands() source設定による既存テスト影響分析）、Should Fix 1件（I001: labelMap テストの非決定的動作リスク）を中心に、残りの Should Fix 4件（I002, I003, I004, I008）と Nice to Have 5件（I005, I006, I009, I010, I011）も含めた全12件を設計方針書に反映。セクション7（テスト影響と戦略）にテスト修正テーブル行追加・テスト戦略補足・新規テストケース追加、セクション4（変更不要ファイル）にMCBD API注記強化、セクション5-3（将来の拡張）にパフォーマンス・型統合・cliTools拡張パス追記、セクション9（後方互換性）にfilterCommands()注記追加、セクション10（レビュー履歴）・11（指摘事項サマリー）・12（実装チェックリスト）を更新。",
+  "design_doc_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "I007",
+        "title": "統合テスト api-worktree-slash-commands.test.ts の sources アサーションが skill プロパティ未検証",
+        "sections_updated": ["7 既存テスト修正テーブル", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "I012",
+        "title": "loadSlashCommands() への source フィールド設定 [C002] が既存テストのアサーションを破壊する可能性",
+        "sections_updated": ["7 テスト戦略の補足", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "I001",
+        "title": "getSlashCommandGroups テストの labelMap 検証が skill カテゴリ追加後に失敗する",
+        "sections_updated": ["7 テスト戦略の補足", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "I002",
+        "title": "filterCommands() が commandsCache のみ参照するため skills が検索対象外になる",
+        "sections_updated": ["9 後方互換性", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "I003",
+        "title": "API レスポンスの sources フィールドに skill プロパティ追加による既存クライアントへの影響",
+        "sections_updated": ["5-3 将来の拡張に関する設計ノート", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "I004",
+        "title": "worktree パスでのリクエスト毎にキャッシュ無しで skills ディレクトリを走査する",
+        "sections_updated": ["5-3 将来の拡張に関する設計ノート", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "I008",
+        "title": "filterCommandsByCliTool() で cliTools 未定義の skills が Claude 以外で非表示になる影響",
+        "sections_updated": ["5-3 将来の拡張に関する設計ノート", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "I005",
+        "title": "skills が大量に存在する場合の走査パフォーマンスに上限がない",
+        "sections_updated": ["11 指摘事項サマリー"],
+        "status": "recorded"
+      },
+      {
+        "id": "I006",
+        "title": "skills のみのリポジトリでの動作確認テスト不足",
+        "sections_updated": ["7 新規テストケース", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "I009",
+        "title": "MCBD API のレスポンスに暗黙的に skills が含まれる",
+        "sections_updated": ["4 変更不要ファイル", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "I010",
+        "title": "command-merger.test.ts の CATEGORY_ORDER テスト配置場所が不明確",
+        "sections_updated": ["7 新規テストケース", "11 指摘事項サマリー", "12 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "I011",
+        "title": "groupByCategory の fallback ブランチが skill カテゴリを二重表示する可能性",
+        "sections_updated": ["12 実装チェックリスト", "11 指摘事項サマリー"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "design_doc_path": "dev-reports/design/issue-343-skills-loader-design-policy.md",
+  "sections_updated": [
+    "4 変更不要ファイル",
+    "5-3 将来の拡張に関する設計ノート",
+    "7 既存テスト修正が必要な箇所",
+    "7 テスト戦略の補足",
+    "7 新規テストケース",
+    "9 後方互換性",
+    "10 レビュー履歴",
+    "11 レビュー指摘事項サマリー（Stage 3追加）",
+    "12 実装チェックリスト"
+  ],
+  "timestamp": "2026-02-22T00:00:00Z"
+}

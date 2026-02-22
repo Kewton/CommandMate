@@ -1,0 +1,129 @@
+{
+  "issue_number": 323,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-02-21",
+  "summary": "auto-yes-manager.tsのpollAutoYes()責務分割リファクタリングの影響範囲を分析。変更は主にauto-yes-manager.ts内部に閉じる設計であり、外部APIルート・クライアントフック・session-cleanup.tsへの直接的なインターフェース変更は不要。ただし、(1) @internal exportされる新関数がテストコードのimport文に影響する、(2) AutoYesPollerStateインターフェースへのフィールド追加の可能性がありglobalThis宣言の更新が必要になり得る、(3) 既存テストがvi.useFakeTimers+advanceTimersByTimeAsync経由のブラックボックステストであるためリファクタリング後のタイミングずれに脆弱、(4) CLAUDE.mdのモジュール説明が大幅に変更される必要がある、という4つの影響範囲を特定した。",
+  "findings": [
+    {
+      "id": "IF001",
+      "severity": "should_fix",
+      "category": "内部インターフェース",
+      "title": "新規@internal export関数のテストimport変更が必要",
+      "description": "Issue #323で分割される関数（validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt）が@internal exportされる場合、tests/unit/lib/auto-yes-manager.test.tsのimportブロック（L3-25）に新関数を追加する必要がある。現在のimportは既に17個のexport（関数12 + 定数5 + 型1）を取り込んでおり、分割後は21-25個程度に増加する。また、checkStopConditionとprocessStopConditionDelta()の両方がexportされるため、テストコード内での使い分けが必要になる。現在のcheckStopConditionテスト（L1299-1342の4テストケース）は変更不要だが、processStopConditionDelta()の新規テストと混同しないようdescribeブロックの構造化が求められる。",
+      "suggestion": "Issue本文の「影響範囲 > 変更対象ファイル」テーブルで、テストファイルの変更内容を「既存テストの維持 + 分割関数の個別テスト追加」から「既存テストの維持 + 分割関数の個別テスト追加 + importブロック拡張 + checkStopCondition/processStopConditionDelta describeブロック整理」に詳細化することを推奨。"
+    },
+    {
+      "id": "IF002",
+      "severity": "should_fix",
+      "category": "型定義",
+      "title": "設計選択肢(B)の場合AutoYesPollerStateインターフェースへのフィールド追加が発生し得る",
+      "description": "Issue本文の設計選択肢(B)「関数群方式」では、停止条件のBaseline管理をpollerState内のフィールドとして管理する。現在のAutoYesPollerState（L39-54）にはstopCheckBaselineLength: numberが既にあるが、StopConditionの状態を関数群で管理する場合、追加のフィールド（例: stopCheckEnabled: boolean、lastDelta: string等）が必要になる可能性がある。AutoYesPollerStateはexportされたインターフェースであり、変更すると以下に波及する: (1) globalThis.__autoYesPollerStatesの型宣言（L126-130）、(2) startAutoYesPolling()内のpollerState初期化（L653-661）、(3) tests/integration/auto-yes-persistence.test.tsのglobalThis参照テスト。特に設計選択肢(A)「クラス方式」ではpollerState内にクラスインスタンスを保持するため、serializabilityや型の複雑さが増す。",
+      "suggestion": "Issue本文で「AutoYesPollerStateインターフェースの変更が必要になるか」を明記し、変更する場合は新規フィールドの一覧を事前に列挙すること。設計選択肢(B)を採用する場合でも、既存のstopCheckBaselineLengthフィールドの再利用で十分かどうかを検討し、「AutoYesPollerStateの変更は最小限（既存フィールドのリネーム程度）に留める」方針を記載すると影響範囲が明確になる。"
+    },
+    {
+      "id": "IF003",
+      "severity": "must_fix",
+      "category": "テスト",
+      "title": "vi.advanceTimersByTimeAsync依存のタイマーテストがリファクタリング後に不安定化するリスク",
+      "description": "現在のpollAutoYesテスト（L481-1515、約1030行）は全てvi.useFakeTimers + vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100)パターンで間接的にpollAutoYes()を起動している。このアプローチはpollAutoYes()の内部実装（setTimeout再帰、scheduleNextPoll呼び出し、COOLDOWN_INTERVAL_MS待機等）に暗黙的に依存している。リファクタリングでpollAutoYes()の内部構造が変わると、特に以下のシナリオでタイミングずれが発生する可能性がある: (1) 新関数内でawaitが追加された場合、advanceTimersByTimeAsyncの進行とPromise解決の順序が変わる、(2) scheduleNextPollの呼び出しタイミングが変わった場合、100msのバッファが不足する、(3) 停止条件チェックでearly returnするパスが変わった場合、期待するsendKeys呼び出し回数がずれる。実際にIssue #306のcooldownテスト（L1076-1153）やIssue #314のdelta-basedテスト（L1344-1515）はpollAutoYesの内部フロー（baseline設定→デルタ計算→checkStopCondition呼び出し順序）に強く依存している。",
+      "suggestion": "Issue本文の受入条件に「既存のvi.advanceTimersByTimeAsyncベーステストが全てパスすること」に加えて、「分割された各関数の個別テストはタイマー非依存（直接関数呼び出し）で記述すること」を明記すること。これにより、既存の統合的テスト（pollAutoYes全体の動作確認）と新規の単体テスト（各関数の個別動作確認）が補完関係になり、リファクタリング後のテスト安定性が向上する。また、リファクタリング作業中に既存テストが失敗した場合の対処方針（テストの修正は最小限にとどめ、テストの意図は変えない等）を記載することを推奨。"
+    },
+    {
+      "id": "IF004",
+      "severity": "nice_to_have",
+      "category": "外部API",
+      "title": "外部API・クライアント側への直接的な波及はないが、間接的な動作変更リスクがある",
+      "description": "外部インターフェースの分析結果: (1) src/app/api/worktrees/[id]/auto-yes/route.ts - getAutoYesState, setAutoYesEnabled, isValidWorktreeId, startAutoYesPolling, stopAutoYesPollingをimportしており、これらの関数シグネチャは変更不要。(2) src/app/api/worktrees/[id]/current-output/route.ts - getAutoYesState, getLastServerResponseTimestamp, isValidWorktreeIdをimportしており、変更不要。(3) src/hooks/useAutoYes.ts - auto-yes-manager.tsからのimportなし（prompt-keyとauto-yes-resolverを直接使用）、変更不要。(4) src/lib/session-cleanup.ts - stopAutoYesPollingのみimport、変更不要。(5) server.ts - stopAllAutoYesPollingのみimport、変更不要。ただし、pollAutoYes()の内部フロー変更により、ポーリングのタイミング（scheduleNextPollの呼び出しタイミング）や、エラー発生時のリカバリ動作が微妙に変わる可能性があり、本番環境での動作テスト（E2E）が推奨される。",
+      "suggestion": "Issue本文の「関連コンポーネント（変更なし）」セクションは正確である。追加として、server.ts（graceful shutdown時のstopAllAutoYesPolling呼び出し）も「変更なし」リストに含めることを推奨。また、動作確認方法として「手動でauto-yesを有効化し、プロンプト応答→停止条件マッチ→期限切れの3パターンで正常動作を確認」する旨を記載すると、レビュアーの安心材料になる。"
+    },
+    {
+      "id": "IF005",
+      "severity": "should_fix",
+      "category": "内部インターフェース",
+      "title": "checkStopCondition()の@internal exportが維持される前提で、processStopConditionDelta()も@internal exportが必要",
+      "description": "現在のcheckStopCondition()（L409）はJSDocに@internal Exported for testing purposes only.と記載されており、テストコード（L1299-1342）で直接呼び出されている。Issue #323で追加されるprocessStopConditionDelta()も同様に@internal exportが必要（個別テスト追加が受入条件のため）。ただし、processStopConditionDelta()はpollAutoYes()から呼び出される「上位関数」であり、内部でcheckStopCondition()を呼び出す。テスト時にcheckStopCondition()をモック化してprocessStopConditionDelta()を単体テストする場合、同一モジュール内のモック化はVitestのvi.spyOnでは制約がある（ESModulesの場合、named exportのモック化が困難な場合がある）。これにより、processStopConditionDelta()のテストが想定より複雑になる可能性がある。",
+      "suggestion": "processStopConditionDelta()のテスト方針を事前に検討すること。推奨アプローチ: checkStopCondition()をモック化せず、processStopConditionDelta()の入出力（pollerState.stopCheckBaselineLengthの変化、checkStopConditionの副作用としてのautoYesState変更）を検証する統合的な単体テストとする。これにより同一モジュール内モック化の問題を回避できる。"
+    },
+    {
+      "id": "IF006",
+      "severity": "should_fix",
+      "category": "ドキュメント",
+      "title": "CLAUDE.mdのauto-yes-manager.tsモジュール説明の更新が必要",
+      "description": "CLAUDE.mdの主要機能モジュールテーブルにauto-yes-manager.tsの説明が詳細に記載されている。現在の記載内容: 「Auto-Yes状態管理とサーバー側ポーリング（Issue #138）、thinking状態のprompt検出スキップ（Issue #161）。Issue #306: 重複応答防止 - AutoYesPollerStateにlastAnsweredPromptKey追加、isDuplicatePrompt()ヘルパー...（中略）...Issue #314: Stop条件機能追加 - AutoYesStateにstopPattern/stopReason追加、disableAutoYes()専用関数...」。Issue #323のリファクタリング完了後、pollAutoYes()が4-5関数に分割されるため、この説明に分割後の関数名（validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt）と設計選択（クラス方式or関数群方式）を追記する必要がある。また、関数群方式を採用した場合のsetBaseline/shouldCheck/getDelta等のヘルパー関数名も追記が必要。",
+      "suggestion": "Issue本文の影響範囲テーブルにCLAUDE.mdを追加し、変更内容を「auto-yes-manager.tsモジュール説明の更新（分割関数名、設計選択結果の追記）」と記載すること。リファクタリング完了後のPR時にCLAUDE.mdの更新を忘れないよう、受入条件にも含めることを推奨。"
+    },
+    {
+      "id": "IF007",
+      "severity": "nice_to_have",
+      "category": "状態管理",
+      "title": "globalThisベースの状態管理はリファクタリング後も確実に維持される設計になっている",
+      "description": "globalThis依存の分析結果: (1) autoYesStates（Map<string, AutoYesState>）はgetAutoYesState, setAutoYesEnabled, disableAutoYes, clearAllAutoYesStatesから操作される。これらの関数はIssue #323のリファクタリング対象外（pollAutoYes内部の分割のみ）。(2) autoYesPollerStates（Map<string, AutoYesPollerState>）はstartAutoYesPolling, stopAutoYesPolling, pollAutoYes, scheduleNextPoll, updateLastServerResponseTimestamp, resetErrorCount, incrementErrorCountから操作される。リファクタリングで新関数がpollerStateを受け取る場合、globalThisのMapから直接取得するのではなく、呼び出し元のpollAutoYes()から引数として渡す設計にすれば、globalThis依存は増加しない。(3) globalThis宣言（L125-130）とMap初期化（L133-138）はモジュールレベルであり、リファクタリングの影響を受けない。(4) tests/integration/auto-yes-persistence.test.tsのモジュールリロードテスト（5テストケース）はglobalThis.__autoYesStatesと__autoYesPollerStatesの参照を直接テストしており、これらは影響を受けない。",
+      "suggestion": "分割関数の設計時に「pollerStateは引数として受け取り、globalThis Mapへの直接アクセスは最小限に留める」方針を明記すると良い。これにより、テスト時のpollerState注入が容易になり、globalThis依存のテスト（integration/auto-yes-persistence.test.ts）への影響も防げる。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Issue #323のリファクタリングの影響範囲は主にauto-yes-manager.ts内部に閉じており、外部インターフェース（APIルート5ファイル、クライアントフック1ファイル、session-cleanup.ts、server.ts）への直接的な破壊的変更は発生しない。これはリファクタリングの設計として適切である。最も重要な影響範囲は既存テスト（1517行、vi.useFakeTimersベース）の安定性であり、分割後の関数がasync/awaitのタイミングを変える場合にタイマーテストが不安定化するリスクがある（IF003: must_fix）。また、@internal exportの増加によるテストコードのimport変更（IF001）、AutoYesPollerStateの変更可能性（IF002）、同一モジュール内関数のテスト方針（IF005）、CLAUDE.mdの更新（IF006）が影響範囲として特定された。globalThisベースの状態管理はリファクタリングの影響を受けず維持される見込み（IF007）。全体として、Issue本文の影響範囲セクションは概ね正確だが、テスト安定性のリスクとCLAUDE.md更新が明記されていない点を補完すべきである。",
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "リファクタリング対象メインファイル（706行、pollAutoYes L455-593）"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "relevance": "既存テスト（1517行、vi.useFakeTimersベース、import変更必要）"
+    },
+    {
+      "file": "tests/integration/auto-yes-persistence.test.ts",
+      "relevance": "globalThis永続性テスト（185行、AutoYesPollerState変更時に影響）"
+    },
+    {
+      "file": "src/config/auto-yes-config.ts",
+      "relevance": "共有設定（116行、変更不要）"
+    },
+    {
+      "file": "src/hooks/useAutoYes.ts",
+      "relevance": "クライアントフック（109行、auto-yes-manager.tsからの直接importなし、変更不要）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/auto-yes/route.ts",
+      "relevance": "Auto-Yes APIルート（180行、exportされた関数のみ使用、変更不要）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "Current Output APIルート（152行、getAutoYesState等3関数のみ使用、変更不要）"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "セッションクリーンアップ（140行、stopAutoYesPollingのみ使用、変更不要）"
+    },
+    {
+      "file": "server.ts",
+      "relevance": "カスタムサーバー（175行、stopAllAutoYesPollingのみ使用、変更不要）"
+    },
+    {
+      "file": "src/lib/prompt-answer-sender.ts",
+      "relevance": "プロンプト応答送信（109行、pollAutoYesから呼び出されるが外部依存として変更不要）"
+    },
+    {
+      "file": "src/lib/prompt-key.ts",
+      "relevance": "プロンプトキー生成（40行、pollAutoYesから呼び出されるが外部依存として変更不要）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトガイドライン（auto-yes-manager.tsモジュール説明の更新が必要）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "auto-yes-manager.tsのモジュール説明更新が必要"
+    },
+    {
+      "file": "docs/implementation-history.md",
+      "relevance": "リファクタリング完了後にIssue #323のエントリ追加が必要"
+    }
+  ]
+}

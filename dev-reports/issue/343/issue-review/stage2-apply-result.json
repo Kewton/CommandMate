@@ -1,0 +1,73 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 343,
+  "apply_date": "2026-02-22",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F002",
+        "status": "applied",
+        "change_summary": "src/types/slash-commands.ts の変更内容に「SlashCommandSource に 'skill' を追加」を追記。worktree 用 API ルートの変更内容に「sources レスポンスに skill カウントを追加」を追記。受け入れ条件 6 として反映。"
+      },
+      {
+        "id": "F003",
+        "status": "applied",
+        "change_summary": "command-merger.ts の変更内容を「CATEGORY_ORDER に 'skill' カテゴリを追加（custom カテゴリと standard カテゴリの間に配置を推奨）、skills マージロジック追加」に明確化。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F001",
+        "status": "applied",
+        "change_summary": "現状の仕組みセクションの command-merger.ts の説明を「Standard + Worktree コマンドをマージ（MCBD コマンドは /api/slash-commands ルートで別途処理）」に修正。"
+      },
+      {
+        "id": "F004",
+        "status": "applied",
+        "change_summary": "変更候補ファイルテーブルに src/app/api/slash-commands/route.ts を追加し、「skills の取得・マージ追加（MCBD プロジェクトルートの .claude/skills/ 読み込み）」と記載。受け入れ条件 7 として反映。"
+      },
+      {
+        "id": "F005",
+        "status": "applied",
+        "change_summary": "「frontmatter フィールドの取り扱い方針」サブセクションを新設し、取得対象フィールド（name, description のみ）、argument-hint の扱い、スキップ対象（disable-model-invocation, allowed-tools）、SlashCommand インターフェースの方針を明確化。"
+      },
+      {
+        "id": "F009",
+        "status": "applied",
+        "change_summary": "機能要件に「同名の command と skill が存在する場合、command を優先する」を追加。受け入れ条件 8 として反映。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F006",
+        "status": "skipped",
+        "reason": "ユーザーの指示する対応範囲（F001, F002, F003, F004, F005, F009）に含まれていないため。セキュリティ考慮は重要だが、設計・実装フェーズで対応可能。"
+      },
+      {
+        "id": "F007",
+        "status": "skipped",
+        "reason": "ユーザーの指示する対応範囲に含まれていないため。cliTools フィールドの扱いは実装時に判断可能。"
+      },
+      {
+        "id": "F008",
+        "status": "skipped",
+        "reason": "ユーザーの指示する対応範囲に含まれていないため。テスト計画は TDD 実装フェーズで具体化する。"
+      },
+      {
+        "id": "F010",
+        "status": "skipped",
+        "reason": "ユーザーの指示する対応範囲に含まれていないため。CLAUDE.md 更新は実装完了後に対応する。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 10,
+    "applied": 6,
+    "skipped": 4
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/343"
+  }
+}

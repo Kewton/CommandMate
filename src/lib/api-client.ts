@@ -50,15 +50,26 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
       headers,
     });
 
+    // Detect auth redirect: fetch follows 307 to /login, returning HTML with 200.
+    // Check content-type to avoid parsing HTML as JSON.
+    const contentType = response.headers.get('content-type') || '';
+    if (response.redirected && response.url.includes('/login')) {
+      throw new ApiError('Authentication required', 401);
+    }
+
     if (!response.ok) {
-      const errorBody = await response
-        .json()
-        .catch(() => ({})) as { error?: string };
+      const errorBody = contentType.includes('application/json')
+        ? await response.json().catch(() => ({})) as { error?: string }
+        : {} as { error?: string };
       throw new ApiError(
         errorBody.error || `HTTP error ${response.status}`,
         response.status,
         errorBody
       );
+    }
+
+    if (!contentType.includes('application/json')) {
+      throw new ApiError('Unexpected response format', response.status);
     }
 
     return response.json();

@@ -1,0 +1,89 @@
+{
+  "issue_number": 343,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-22",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F101",
+        "status": "applied",
+        "change_summary": "src/types/slash-commands.ts の変更内容に「CATEGORY_LABELS に skill: 'Skills' を追加」を必須の同時変更として明記。受け入れ条件 #9 を追加"
+      },
+      {
+        "id": "F102",
+        "status": "applied",
+        "change_summary": "route.ts の変更内容に「SlashCommandsResponse.sources に skill: number フィールドを追加」「カウント計算に cmd.source === 'skill' フィルタを追加」を明記。変更不要ファイルに api-client.ts を確認済みとして追加"
+      },
+      {
+        "id": "F103",
+        "status": "applied",
+        "change_summary": "slash-commands.ts の変更内容に「skillsCache を commandsCache とは別変数として管理し clearCache() で両方クリアする」方針を追記。filterCommands() は初期実装では commandsCache のみ対象とする旨も追記。受け入れ条件 #10 を追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F105",
+        "status": "applied",
+        "change_summary": "機能要件に「skills の cliTools は初期実装では undefined（Claude-only）として扱う」方針を追加"
+      },
+      {
+        "id": "F107",
+        "status": "applied",
+        "change_summary": "機能要件に「skills を先に commandMap に登録し commands で上書きする方式」を追加。route.ts の変更内容にも同方針を明記"
+      },
+      {
+        "id": "F104",
+        "status": "skipped",
+        "reason": "loadSkills() が loadSlashCommands() とは独立した関数として設計されるため、既存テストへの直接的な影響はない。テスト計画はF103のキャッシュ設計で暗黙的にカバーされる"
+      },
+      {
+        "id": "F106",
+        "status": "skipped",
+        "reason": "F103で loadSkills() が basePath パラメータを受け取る設計として記載済み。MCBD ルートの basePath の扱いは実装時に自然に解決される"
+      },
+      {
+        "id": "F108",
+        "status": "skipped",
+        "reason": "テスト追加は実装時に対応する。既存テストは壊れないことが確認済みのため、Issue の要件定義段階では省略"
+      },
+      {
+        "id": "F109",
+        "status": "skipped",
+        "reason": "統合テストの追加は実装フェーズで対応する。受け入れ条件 #6 で sources.skill の存在は要求済み"
+      },
+      {
+        "id": "F110",
+        "status": "skipped",
+        "reason": "parseSkillFile() の内部設計詳細は実装フェーズで決定する。loadSkills() 関数の存在と basePath パラメータは F103 で記載済み"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F111",
+        "status": "skipped",
+        "reason": "初期実装ではカテゴリラベル 'Skills' の表示で十分。視覚的区別は実装後に評価する"
+      },
+      {
+        "id": "F112",
+        "status": "applied",
+        "change_summary": "影響範囲に「変更不要ファイル（確認済み）」セクションを追加し、useSlashCommands.ts, api-client.ts, SlashCommandSelector.tsx, SlashCommandList.tsx を変更不要の理由と共に列挙"
+      },
+      {
+        "id": "F113",
+        "status": "skipped",
+        "reason": "name フィールドのフォールバック動作は実装時に判断する。Issue の要件定義段階では過度な詳細"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 13,
+    "applied": 6,
+    "skipped": 7
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/343"
+  }
+}

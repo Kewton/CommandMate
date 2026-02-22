@@ -1,0 +1,48 @@
+{
+  "issue_number": 323,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_date": "2026-02-21",
+  "summary": "設計方針書のセキュリティ観点レビューを6項目について実施。WORKTREE_IDバリデーション、ReDoS防止、DoS保護、globalThis状態管理の4項目は現行設計で適切に保護されている。@internal exportのアクセス制御に関する設計書補足が1件（should_fix）、cleanOutputの信頼境界に関する注意喚起が1件（nice_to_have）確認された。must_fixは0件であり、セキュリティ面でのリスクは低い。",
+  "findings": [
+    {
+      "id": "SEC001",
+      "severity": "should_fix",
+      "category": "アクセス制御",
+      "title": "@internal export関数がworktreeIdバリデーションを前提条件として明記していない",
+      "description": "設計方針書Section 8で「WORKTREE_ID_PATTERNバリデーション: startAutoYesPolling()内に維持（分割対象外）」と記載されており、分割後の新規関数（validatePollingContext, captureAndCleanOutput, processStopConditionDelta, detectAndRespondToPrompt）はworktreeIdの形式チェックを行わない設計である。これは正しい（startAutoYesPolling()のゲートウェイでバリデーション済みのworktreeIdのみがglobalThis Mapに登録され、pollAutoYes()はMap経由で取得されたworktreeIdのみを使用するため）。しかし、@internal exportとしてテスト以外からも呼び出し可能な状態であるため、各関数のJSDocに「前提条件: worktreeIdはisValidWorktreeId()検証済みであること」を明記することが望ましい。現状の設計方針書では、この前提条件がSection 8の1行記述のみで、各関数のJSDoc（Section 3-1〜3-4）には記載がない。",
+      "suggestion": "Section 3-1〜3-4の各関数JSDocに @precondition タグまたは備考として「worktreeIdはstartAutoYesPolling()によるisValidWorktreeId()検証済みであることを前提とする」旨を追記する。これにより、@internal exportを直接呼び出すテストコードや将来のメンテナで、未検証のworktreeIdが渡されるリスクを軽減できる。",
+      "target": "設計方針書 Section 3-1〜3-4（各関数のJSDoc）、Section 8（セキュリティ設計）"
+    },
+    {
+      "id": "SEC002",
+      "severity": "nice_to_have",
+      "category": "信頼境界",
+      "title": "cleanOutputパラメータの信頼境界に関する設計書内の明示が不足",
+      "description": "新規関数processStopConditionDelta()とdetectAndRespondToPrompt()はcleanOutputパラメータ（ANSI除去済みのターミナル出力）を受け取る。cleanOutputはtmuxバッファからcapturePane()経由で取得された文字列であり、外部ネットワーク入力ではないが、CLIツール（Claude/Codex/Gemini）の出力内容を含む。これはユーザーの直接制御下にない準信頼データである。現行の設計では、(1) checkStopCondition()が正規表現マッチのみを行い、execやevalには渡さない、(2) detectPrompt()がパターンマッチのみを行う、(3) sendPromptAnswer()に渡るのはresolveAutoAnswer()の結果（固定値セット）であるため、コマンドインジェクションのリスクは実質的にない。stripAnsi()のANSIパターン除去にはSEC-002で記載された既知の制限（8-bit CSI未対応等）があるが、tmux capture-paneの出力においてはリスクは低い。設計方針書にこの信頼境界分析を明記しておくと、将来のレビューアーにとって有用である。",
+      "suggestion": "Section 8（セキュリティ設計）にcleanOutputの信頼境界について1-2行の補足を追記する。例: 「cleanOutputはcaptureSessionOutput()→stripAnsi()経由で取得され、正規表現マッチ（checkStopCondition）およびパターン検出（detectPrompt）にのみ使用される。exec/eval等の動的コード実行には渡されないため、インジェクションリスクはない。」",
+      "target": "設計方針書 Section 8（セキュリティ設計）"
+    },
+    {
+      "id": "SEC003",
+      "severity": "nice_to_have",
+      "category": "状態管理",
+      "title": "validatePollingContext()の副作用（stopAutoYesPolling呼び出し）によるglobalThis Map操作の安全性",
+      "description": "validatePollingContext()は'expired'判定時にstopAutoYesPolling()を呼び出す副作用を持つ（Section 3-1、選択肢C採用）。stopAutoYesPolling()はautoYesPollerStates.delete(worktreeId)を実行する。pollAutoYes()ではvalidatePollingContext()の後にpollerState!（non-null assertion）でpollerStateを参照するが、validatePollingContext()が'expired'を返した場合は即座にreturnするため、削除済みのstateを参照するパスは存在しない（Section 3-5のコードサンプルで確認）。これは安全であるが、Node.jsのシングルスレッド特性に依存している。設計方針書はこの前提を暗黙としており、明示的な記載があるとより堅牢な設計文書となる。",
+      "suggestion": "Section 3-1のDR002トレードオフ表の下に「Node.jsシングルスレッド前提: validatePollingContext()がstopAutoYesPolling()を呼び出してMap.delete()を実行しても、同一worktreeIdのpollAutoYes()はvalidatePollingContext()の戻り値チェック後にreturnするため、削除済みstateの参照は発生しない」旨の1行注記を追加する。",
+      "target": "設計方針書 Section 3-1（validatePollingContext）"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 1,
+  "nice_to_have_count": 2,
+  "overall_assessment": "設計方針書のセキュリティ設計は適切に構成されている。以下の6観点について検証した結果、重大なセキュリティリスクは確認されなかった。(1) WORKTREE_IDバリデーション: startAutoYesPolling()のゲートウェイで維持され、分割関数には検証済みIDのみが到達する設計。(2) ReDoS防止: checkStopCondition()経由のsafe-regex2 + executeRegexWithTimeout()は変更なく維持。processStopConditionDelta()はcheckStopCondition()に委譲するのみで、新たな正規表現実行パスは追加されない。(3) @internal export: 既存パターン（checkStopCondition, executeRegexWithTimeout）と同一の方針で、テスト専用エクスポートとして適切。(4) 信頼境界: cleanOutputは正規表現マッチとパターン検出にのみ使用され、動的コード実行には渡されない。(5) globalThis状態管理: Map操作はNode.jsシングルスレッド前提で安全。(6) DoS保護: MAX_CONCURRENT_POLLERS制限はstartAutoYesPolling()内に維持され、分割対象外。",
+  "security_checklist": {
+    "worktree_id_validation": "PASS - startAutoYesPolling()のゲートウェイで維持、分割関数は検証済みIDのみ受取",
+    "redos_prevention": "PASS - checkStopCondition()のsafe-regex2 + executeRegexWithTimeout()は変更なし",
+    "internal_export_access_control": "CONDITIONAL - JSDocに前提条件の明記を推奨（SEC001）",
+    "trust_boundary": "PASS - cleanOutputは正規表現マッチ・パターン検出のみ、exec/evalには不使用",
+    "globalthis_state_management": "PASS - シングルスレッド前提で安全、validatePollingContext()の副作用パスも問題なし",
+    "dos_protection": "PASS - MAX_CONCURRENT_POLLERS制限はstartAutoYesPolling()内に維持"
+  }
+}

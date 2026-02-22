@@ -29,6 +29,7 @@ export const CATEGORY_ORDER: SlashCommandCategory[] = [
   'review',
   'documentation',
   'workflow',
+  'skill',              // Issue #343: Skills between workflow and standard categories
   // Standard categories
   'standard-session',
   'standard-config',

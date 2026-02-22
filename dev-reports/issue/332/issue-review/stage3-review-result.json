@@ -1,0 +1,276 @@
+{
+  "issue_number": 332,
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-02-22",
+  "review_summary": "Issue #332のIP制限機能は、Stage 1/Stage 2のレビューを経て要件が大幅に補完され、既存認証基盤との関係、Edge Runtime制約、WebSocket対応等が明確に記載されている。影響範囲の分析では、既存ファイル8件の変更、新規ファイル2件の作成、テストファイル4件の追加/変更が必要と判定。後方互換性はCM_ALLOWED_IPS未設定時の既存動作保証により担保されるが、middleware.tsへの変更はEdge Runtime制約下でのCIDR計算ロジック追加という技術的難度が高い箇所であり、実装方針の具体化が必要。また、NextRequest.ipの利用可否、rate limiterとの統合、daemon.tsの環境変数転送リスト拡張等、Issueに未記載の影響箇所がある。",
+  "previous_stage_resolution": {
+    "stage1_must_fix_resolved": true,
+    "stage1_should_fix_resolved": true,
+    "stage1_nice_to_have_resolved": true,
+    "details": "Stage 1で指摘されたMF-001(機能要件欠落)、MF-002(受け入れ条件未定義)、MF-003(既存認証との関係性)は全て解消済み。SF-001～SF-005(環境変数設計、セキュリティ考慮、Edge Runtime互換性、WebSocket、CLI統合)も全て対応済み。NTH-001～NTH-003(ドキュメント、関連Issue、ユースケース)も追記されている。"
+  },
+  "impact_scope": {
+    "files_to_modify": [
+      {
+        "file": "src/middleware.ts",
+        "change_type": "major",
+        "description": "IP制限チェックロジックの追加。AUTH_EXCLUDED_PATHSの後、トークン認証の前にIPチェックを挿入。CM_TRUST_PROXY=true時のX-Forwarded-Forヘッダー解析。WebSocket upgradeリクエストへのIP制限適用。Edge Runtime互換のCIDRマッチング関数の呼び出し。",
+        "risk": "high",
+        "risk_reason": "Edge Runtimeの制約下でCIDRマッチングとIPv4/IPv6正規化を実装する必要がある。既存の認証フローに手を加えるため、リグレッションリスクが高い。"
+      },
+      {
+        "file": "src/config/auth-config.ts",
+        "change_type": "minor",
+        "description": "IP制限関連の設定定数の追加（例: IP_RESTRICTION_ENABLED判定、IPv4-mapped IPv6正規化パターン）。Edge Runtime互換の制約を維持する必要がある。",
+        "risk": "medium",
+        "risk_reason": "Edge Runtime互換モジュールに新しいIP関連ロジックを追加する。既存のparseDuration/computeExpireAt等には影響しないが、モジュールの責務が拡大する。"
+      },
+      {
+        "file": "src/lib/env.ts",
+        "change_type": "moderate",
+        "description": "Envインターフェースに CM_ALLOWED_IPS?: string と CM_TRUST_PROXY?: string を追加。getEnv()での返却は不要（middleware.tsはprocess.envから直接読み取るため）だが、型定義としての一貫性のために追加が望ましい。",
+        "risk": "low",
+        "risk_reason": "オプショナルフィールドの追加のみ。既存のgetEnv()のバリデーションロジックには影響しない。"
+      },
+      {
+        "file": "src/lib/ws-server.ts",
+        "change_type": "moderate",
+        "description": "upgradeイベントハンドラーにIP制限チェックを追加。request.socket.remoteAddressからクライアントIPを取得し、CIDRマッチング関数で検証。既存の認証チェック（isAuthEnabled/verifyToken）の前にIP制限チェックを挿入。",
+        "risk": "medium",
+        "risk_reason": "WebSocket upgradeハンドラーは既に認証ロジックを持っており、IP制限の追加で条件分岐が増える。request.socket.remoteAddressはIPv4-mapped IPv6形式(::ffff:127.0.0.1)を返すため正規化が必要。"
+      },
+      {
+        "file": "src/cli/commands/start.ts",
+        "change_type": "moderate",
+        "description": "--allowed-ipsオプションの処理追加。環境変数CM_ALLOWED_IPSへの設定。CM_TRUST_PROXYオプションの処理。daemon/foregroundの両モードでの環境変数転送。",
+        "risk": "low",
+        "risk_reason": "Issue #331の--authオプション追加パターンと同様の変更で、既存パターンに従った実装が可能。"
+      },
+      {
+        "file": "src/cli/commands/init.ts",
+        "change_type": "minor",
+        "description": "対話形式でのIP制限設定の有無確認、CIDRレンジ入力プロンプトの追加。",
+        "risk": "low",
+        "risk_reason": "既存の対話フローに質問を追加するのみ。"
+      },
+      {
+        "file": "src/cli/commands/status.ts",
+        "change_type": "minor",
+        "description": "IP制限設定の表示追加（CM_ALLOWED_IPS の有無と設定値）。",
+        "risk": "low",
+        "risk_reason": "表示ロジックの追加のみ。"
+      },
+      {
+        "file": "src/cli/utils/daemon.ts",
+        "change_type": "minor",
+        "description": "authEnvKeysリストにCM_ALLOWED_IPSとCM_TRUST_PROXYを追加し、デーモンプロセスへの環境変数転送を有効化。",
+        "risk": "low",
+        "risk_reason": "既存のauthEnvKeysパターンへの追加のみ。"
+      }
+    ],
+    "files_to_create": [
+      {
+        "file": "src/lib/ip-restriction.ts (または src/config/ip-restriction.ts)",
+        "description": "IP制限のコアロジック: CIDRマッチング関数、IPv4/IPv6正規化、CM_ALLOWED_IPSパース、IPアドレス検証。Edge Runtime互換である必要がある（netモジュール使用不可）。middleware.tsとws-server.tsの両方から呼び出される共通モジュール。",
+        "rationale": "CIDRマッチングとIP正規化はMiddlewareとWebSocketの両レイヤーで共有される純粋関数であり、独立したモジュールとして切り出すことでDRY原則とSRP原則を遵守できる。"
+      },
+      {
+        "file": "tests/unit/ip-restriction.test.ts",
+        "description": "IP制限コアロジックの単体テスト: CIDRマッチング（IPv4/IPv6）、IPv4-mapped IPv6正規化(::ffff:x.x.x.x)、CM_ALLOWED_IPSパース（カンマ区切り、空白処理）、エッジケース（空文字、不正CIDR、単一IP）。",
+        "rationale": "セキュリティ機能として網羅的なテストが必須。"
+      }
+    ],
+    "files_to_modify_tests": [
+      {
+        "file": "tests/integration/auth-middleware.test.ts",
+        "description": "IP制限ありの場合のmiddlewareテスト追加: 許可IPからのリクエスト通過、拒否IPからの403レスポンス、CM_ALLOWED_IPS未設定時のスキップ、トークン認証との併用(AND条件)、CM_TRUST_PROXYが有効な場合のX-Forwarded-For利用。",
+        "risk": "medium",
+        "risk_reason": "既存のモック構造(NextRequest/NextResponse)にIP情報のモックを追加する必要がある。NextRequestにはipプロパティがないため、ヘッダーまたはconnection情報からのIP取得モックが必要。"
+      },
+      {
+        "file": "tests/integration/ws-auth.test.ts",
+        "description": "WebSocket接続でのIP制限テスト追加: request.socket.remoteAddressのモック、許可/拒否IPでの接続テスト。",
+        "risk": "low",
+        "risk_reason": "既存テストの拡張で対応可能。"
+      },
+      {
+        "file": "tests/unit/auth.test.ts",
+        "description": "直接的な変更は不要だが、IP制限がauth.tsに追加される場合はテスト追加が必要。Issue設計ではauth.tsへの変更は明示されていないが、createRateLimiterのIPキーがCM_TRUST_PROXYで変わる可能性がある。",
+        "risk": "low",
+        "risk_reason": "auth.ts自体への変更が最小限であれば影響なし。"
+      },
+      {
+        "file": "tests/unit/env.test.ts",
+        "description": "CM_ALLOWED_IPS/CM_TRUST_PROXYがEnvインターフェースに追加される場合のテスト追加。ENV_VARS_TO_CLEANリストへの追加。",
+        "risk": "low",
+        "risk_reason": "オプショナルフィールドの追加テストのみ。"
+      }
+    ],
+    "config_and_doc_changes": [
+      "docs/security-guide.md: IP制限セクション追加、セキュリティチェックリスト更新",
+      "CLAUDE.md: 新規モジュール(ip-restriction.ts)、環境変数(CM_ALLOWED_IPS/CM_TRUST_PROXY)の追記",
+      "docs/en/DEPLOYMENT.md: 環境変数リストにCM_ALLOWED_IPS/CM_TRUST_PROXYを追加",
+      "src/cli/utils/env-setup.ts: createEnvFileでCM_ALLOWED_IPS/CM_TRUST_PROXYの.env出力対応",
+      "src/cli/types/index.ts: StartOptionsにallowedIps/trustProxyを追加",
+      "src/cli/index.ts: startコマンドに--allowed-ips/--trust-proxyオプション追加",
+      "src/cli/config/security-messages.ts: IP制限未設定時の警告メッセージ追加候補"
+    ],
+    "backward_compatibility": "CM_ALLOWED_IPS未設定時は従来通りの動作を保証。既存のトークン認証(CM_AUTH_TOKEN_HASH)との併用はAND条件で問題なし。.envファイルに新しい環境変数が含まれなくても起動に影響しない。既存APIのレスポンス形式やステータスコードに変更なし。"
+  },
+  "findings": [
+    {
+      "id": "IF-001",
+      "severity": "must_fix",
+      "category": "技術的整合性",
+      "title": "NextRequest.ipの利用可否とEdge RuntimeでのクライアントIP取得方法が未明確",
+      "description": "Issueでは「request.ip またはソケットのリモートアドレスを使用」と記載しているが、Next.jsのNextRequestにはipプロパティが標準で存在しない（Vercelのデプロイ環境でのみ利用可能）。Edge RuntimeのmiddlewareではNextRequestオブジェクトからクライアントIPを直接取得する標準的な方法がない。Next.js 14のmiddlewareでは、request.headers.get('x-forwarded-for')またはrequest.ip（Vercel限定）が一般的なアプローチだが、自前サーバー（custom server）ではx-forwarded-forヘッダーがリバースプロキシなしには存在しない。カスタムサーバーの場合、NextRequestへのIP情報の注入方法を検討する必要がある。",
+      "suggestion": "以下の実装方針をIssueに明記すべき:\n- CM_TRUST_PROXY=false(デフォルト): middleware.tsでは接続元IPの取得が困難なため、server.ts/ws-server.tsレベルでのIP制限を検討する。またはNext.jsのserver.tsカスタムサーバーでX-Real-IPヘッダーを注入するアプローチ。\n- CM_TRUST_PROXY=true: request.headers.get('x-forwarded-for')の先頭IPを使用。\n- 代替案: middleware.tsではなくカスタムサーバー（server.ts）のリクエストハンドラーレベルでIP制限を実装し、req.socket.remoteAddressを直接取得する方式も検討。"
+    },
+    {
+      "id": "IF-002",
+      "severity": "must_fix",
+      "category": "依存関係",
+      "title": "daemon.tsの環境変数転送リスト(authEnvKeys)にCM_ALLOWED_IPS/CM_TRUST_PROXYの追加が必要だがIssueに未記載",
+      "description": "src/cli/utils/daemon.tsのL80-85にあるauthEnvKeysリストは、startCommand()でprocess.envに設定された認証関連環境変数をデーモンプロセスに転送する仕組みである。Issue #332ではCLIオプション(--allowed-ips)からCM_ALLOWED_IPSへの設定について記載しているが、daemon.tsの転送リストへの追加について言及がない。これが漏れると、--daemonモードでのIP制限が機能しない。",
+      "suggestion": "以下の対応をIssueの実装詳細に追記すべき:\n- src/cli/utils/daemon.tsのauthEnvKeysリストにCM_ALLOWED_IPSとCM_TRUST_PROXYを追加\n- テストでdaemonモードでのIP制限動作を確認"
+    },
+    {
+      "id": "IF-003",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "Edge Runtime互換のCIDRマッチングロジックに対する網羅的テストケースの定義が不足",
+      "description": "CIDRマッチングは自前実装（またはEdge互換ライブラリ）となるが、IPセキュリティ機能として以下のエッジケースのテストが必須: (1) IPv4のCIDRマッチング(192.168.1.0/24に対する192.168.1.1, 192.168.2.1), (2) IPv6のCIDRマッチング(::1/128, fe80::/10), (3) IPv4-mapped IPv6(::ffff:192.168.1.1 vs 192.168.1.0/24), (4) 単一IPアドレス指定(CIDR表記なし), (5) /0や/32等の境界値, (6) 不正なCIDR形式のバリデーション, (7) 複数CIDR指定時のOR判定。受け入れ条件に「ユニットテスト追加」とはあるが、具体的なテストケースが未定義。",
+      "suggestion": "受け入れ条件を以下のように具体化すべき:\n- [ ] IPv4 CIDRマッチング(例: 192.168.1.0/24)のテスト追加\n- [ ] IPv6 CIDRマッチングのテスト追加\n- [ ] IPv4-mapped IPv6(::ffff:x.x.x.x)の正規化テスト追加\n- [ ] 不正CIDR形式入力時のエラーハンドリングテスト追加\n- [ ] 複数CIDR指定時のOR判定テスト追加"
+    },
+    {
+      "id": "IF-004",
+      "severity": "should_fix",
+      "category": "既存コードとの整合性",
+      "title": "login/route.tsのrate limiterとCM_TRUST_PROXYの連携が未設計",
+      "description": "現在のlogin/route.tsではRATE_LIMIT_KEY='global'を使用しており、L22-33のコメントに「A future CM_TRUST_PROXY option could enable per-IP limiting behind a proxy」と記載されている。Issue #332でCM_TRUST_PROXYを導入する場合、rate limiterのキーをIPベースに変更する機会だが、この連携がIssueに記載されていない。IP制限とrate limiterは別の関心事だが、同じCM_TRUST_PROXY設定を共有するため設計上の連携が必要。",
+      "suggestion": "以下のいずれかを選択してIssueに明記すべき:\n- (A) CM_TRUST_PROXYが有効な場合、rate limiterのキーをX-Forwarded-ForのIPに変更する（login/route.tsのコメントL33の構想を実現）\n- (B) rate limiterの変更はスコープ外とし、別Issueとして分離する\n設計判断を記録することで、将来の実装者への指針となる。"
+    },
+    {
+      "id": "IF-005",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "src/cli/types/index.tsのStartOptions/EnvConfigインターフェース更新が必要だがIssueに未記載",
+      "description": "Issue #332のCLIコマンド統合セクションでは--allowed-ipsオプションの追加を記載しているが、src/cli/types/index.tsのStartOptionsインターフェースへのallowedIps/trustProxyプロパティの追加、およびEnvConfigインターフェースへのCM_ALLOWED_IPS/CM_TRUST_PROXYの追加について言及がない。また、src/cli/index.tsのcommander定義への.option('--allowed-ips <cidrs>')追加も明示されていない。",
+      "suggestion": "影響ファイルリストに以下を追加すべき:\n- src/cli/types/index.ts: StartOptionsにallowedIps?: string、trustProxy?: booleanを追加\n- src/cli/index.ts: startコマンドに--allowed-ips/--trust-proxyオプションを追加\n- src/cli/utils/env-setup.ts: EnvSetup.createEnvFile()でCM_ALLOWED_IPS行の出力対応"
+    },
+    {
+      "id": "IF-006",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "IP制限エラー時のセキュリティログ出力先が不明確",
+      "description": "IssueではIP制限によるアクセス拒否をsrc/cli/utils/security-logger.tsでログ出力すると記載しているが、security-logger.tsはCLIモジュール(src/cli/)内にあり、ファイルベースのログ出力を行う。一方、IP制限の実際のチェックはmiddleware.ts(Edge Runtime)またはws-server.ts(Node.jsランタイム)で行われる。Edge Runtimeからはファイルシステムにアクセスできないため、security-logger.tsをそのまま使用できない。console.warnによるログ出力か、APIルート経由でのログ記録か、方針を明確にする必要がある。",
+      "suggestion": "以下のいずれかの方針をIssueに明記すべき:\n- (A) middleware.ts(Edge Runtime)ではconsole.warn()でログ出力し、ws-server.ts(Node.js)ではsecurity-logger.tsを使用\n- (B) IP制限の拒否ログをAPIルート経由で記録する仕組みを新設\n- (C) 新しいログモジュール(src/lib/ip-restriction-logger.ts)を作成し、ランタイムに応じた出力先を切り替え"
+    },
+    {
+      "id": "IF-007",
+      "severity": "should_fix",
+      "category": "設定ファイル影響",
+      "title": "env-setup.tsのcreateEnvFile()がCM_ALLOWED_IPS/CM_TRUST_PROXYの出力に未対応",
+      "description": "commandmate initで.envファイルを生成するsrc/cli/utils/env-setup.tsのEnvSetup.createEnvFile()メソッドは、現在CM_ROOT_DIR/CM_PORT/CM_BIND/CM_DB_PATH/CM_LOG_LEVEL/CM_LOG_FORMATのみを出力する。IP制限設定を対話形式で入力した場合、CM_ALLOWED_IPSおよびCM_TRUST_PROXYも.envに書き出す必要がある。また、EnvConfigインターフェース(src/cli/types/index.ts)にも対応するフィールドを追加する必要がある。",
+      "suggestion": "実装時にcreateEnvFile()の出力行にCM_ALLOWED_IPSとCM_TRUST_PROXY(コメントアウト状態での雛形出力も含む)を追加し、EnvConfigインターフェースにオプショナルフィールドとして追加すべき。"
+    },
+    {
+      "id": "IF-008",
+      "severity": "nice_to_have",
+      "category": "テスト範囲",
+      "title": "既存のauth-middleware.test.tsのモック構造がIP情報を含まない",
+      "description": "tests/integration/auth-middleware.test.tsのMockNextResponse/MockNextRequest構造には、クライアントIP情報のモック機構が存在しない。IP制限テストを追加する際に、NextRequestへのIP情報注入方法（ヘッダー経由、connection情報モック等）を新規に設計する必要がある。既存テストのモック構造の拡張が必要。",
+      "suggestion": "テスト実装時に、MockNextRequestにheaders.get('x-forwarded-for')のモック機能を追加するか、新しいIPモックユーティリティを作成することを検討。"
+    },
+    {
+      "id": "IF-009",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "title": "CIDRマッチングの実装方針（自前実装 vs 外部ライブラリ）の判断基準が未記載",
+      "description": "Issueでは「CIDRマッチングロジックをEdge Runtime互換で自前実装（または軽量な Edge Runtime 互換ライブラリを採用）」と記載しており、方針が2つ併記されている。IPv4のCIDRマッチングは比較的単純だが、IPv6のCIDRマッチング(128bitアドレスのビットマスク比較)は実装の複雑さが増す。edge-runtime互換のCIDRマッチングライブラリの存在確認と、自前実装する場合のコード量・テスト範囲の見積もりが判断材料として有用。",
+      "suggestion": "以下の判断基準を追記すべき:\n- 自前実装: IPv4のみサポートの場合は比較的単純(50行程度)。IPv6含めると200行超の実装とテストが必要\n- 外部ライブラリ: cidr-matcher、ip-cidr等のEdge Runtime互換性を事前確認\n- 判断: まずIPv4のCIDR自前実装から始め、IPv6はphase 2とする選択肢も検討"
+    },
+    {
+      "id": "IF-010",
+      "severity": "nice_to_have",
+      "category": "後方互換性",
+      "title": "CM_BIND=127.0.0.1(デフォルト)時のIP制限の実用性に関する注記",
+      "description": "CM_BIND=127.0.0.1(デフォルト)の場合、アクセスは全てlocalhostからとなるため、IP制限の実質的な効果がない。IP制限はCM_BIND=0.0.0.0との組み合わせで初めて意味を持つが、この前提条件がIssueに明示されていない。ユーザーがCM_BIND=127.0.0.1のままCM_ALLOWED_IPSを設定しても効果がないことを通知する仕組み（CLIの警告メッセージ等）があると親切。",
+      "suggestion": "commandmate startでCM_BIND=127.0.0.1かつCM_ALLOWED_IPSが設定されている場合にinfoレベルのメッセージ（例:「IP restriction is configured but CM_BIND=127.0.0.1 (localhost only). IP restriction is only effective with CM_BIND=0.0.0.0」）を表示することを検討。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3
+  },
+  "code_references": [
+    {
+      "file": "src/middleware.ts",
+      "lines": "65-106",
+      "relevance": "IP制限の主要実装箇所。middleware()関数にIP制限チェックを追加する必要がある。L66-82のWebSocket upgrade処理、L84-87の認証スキップ、L92-94のAUTH_EXCLUDED_PATHS処理との統合が必要。"
+    },
+    {
+      "file": "src/config/auth-config.ts",
+      "lines": "1-7",
+      "relevance": "Edge Runtime互換制約のコメント。IP制限モジュールも同じ制約に従う必要がある。"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "lines": "172-196",
+      "relevance": "Envインターフェース。CM_ALLOWED_IPSとCM_TRUST_PROXYの追加先。"
+    },
+    {
+      "file": "src/lib/ws-server.ts",
+      "lines": "63-95",
+      "relevance": "upgradeイベントハンドラー。L79-90の認証チェックの前にIP制限チェックを挿入する必要がある。request.socket.remoteAddressからIP取得可能。"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "lines": "78-85",
+      "relevance": "authEnvKeysリスト。CM_ALLOWED_IPSとCM_TRUST_PROXYの追加が必要。"
+    },
+    {
+      "file": "src/app/api/auth/login/route.ts",
+      "lines": "22-35",
+      "relevance": "RATE_LIMIT_KEY='global'とCM_TRUST_PROXYの将来構想コメント。CM_TRUST_PROXY導入時のrate limiter連携を検討する必要がある。"
+    },
+    {
+      "file": "src/cli/types/index.ts",
+      "lines": "34-59",
+      "relevance": "StartOptionsインターフェース。allowedIpsとtrustProxyプロパティの追加が必要。"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "lines": "41-69",
+      "relevance": "startコマンドのcommander定義。--allowed-ips/--trust-proxyオプションの追加が必要。"
+    },
+    {
+      "file": "src/cli/utils/env-setup.ts",
+      "lines": "232-242",
+      "relevance": "createEnvFile()の.env出力行。CM_ALLOWED_IPS/CM_TRUST_PROXYの出力追加が必要。"
+    },
+    {
+      "file": "src/cli/config/security-messages.ts",
+      "lines": "17-34",
+      "relevance": "REVERSE_PROXY_WARNING。IP制限オプションの案内追加候補。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/security-guide.md",
+      "relevance": "IP制限セクション追加先。セキュリティチェックリスト(L249-262)にIP制限項目を追加。"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "主要機能モジュール一覧にip-restriction.tsを追加。環境変数(CM_ALLOWED_IPS/CM_TRUST_PROXY)の記載。"
+    },
+    {
+      "file": "docs/en/DEPLOYMENT.md",
+      "relevance": "環境変数リストにCM_ALLOWED_IPS/CM_TRUST_PROXYを追加。"
+    }
+  ],
+  "overall_assessment": "Issue #332は Stage 1/Stage 2のレビューを経て大幅に改善され、機能要件・セキュリティ考慮事項・受け入れ条件が明確になっている。影響範囲の分析では、既存ファイル8件の変更と新規ファイル2件の作成が必要であり、中規模の実装タスクと判定する。最大のリスクは IF-001（NextRequestからのクライアントIP取得方法）であり、Edge Runtime環境でのIPアドレス取得の技術的実現可能性が実装の成否を左右する。これはmiddleware.tsでの実装が現実的かどうかの根本的な問題であり、カスタムサーバーレベルでの実装に方針転換する可能性もある。IF-002（daemon.tsの環境変数転送）は見落としやすい実装漏れポイントであり、必ず対応が必要。後方互換性はCM_ALLOWED_IPS未設定時の既存動作保証により問題ない。"
+}

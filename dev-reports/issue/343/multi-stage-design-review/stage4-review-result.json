@@ -1,0 +1,174 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_focus": "セキュリティ",
+  "issue_number": 343,
+  "timestamp": "2026-02-22T12:00:00Z",
+  "reviewed_files": [
+    "dev-reports/design/issue-343-skills-loader-design-policy.md",
+    "src/lib/slash-commands.ts",
+    "src/lib/worktree-path-validator.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/types/slash-commands.ts",
+    "src/lib/command-merger.ts",
+    "src/components/worktree/SlashCommandList.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "node_modules/gray-matter/lib/engines.js"
+  ],
+  "findings": [
+    {
+      "id": "S001",
+      "severity": "must_fix",
+      "owasp": "A03",
+      "category": "injection",
+      "title": "gray-matter の JavaScript エンジンによるリモートコード実行 (RCE)",
+      "description": "gray-matter@4.0.3 は frontmatter 区切り文字として `---js` および `---javascript` をサポートしており、内部で `eval()` を使用して JavaScript コードを実行する。悪意ある SKILL.md ファイルが `---js` 区切り文字を使用した場合、`parseSkillFile()` の `matter(content)` 呼び出し時にサーバー上で任意の JavaScript コードが実行される。検証により `require('child_process').execSync('whoami')` 等のコマンド実行が可能であることを確認済み。既存の `parseCommandFile()` にも同一の脆弱性が存在するが、skills ディレクトリは worktree パス経由で外部リポジトリから読み込まれるため攻撃面が拡大する。",
+      "location": "設計方針書 3-2 parseSkillFile() の `const { data: frontmatter } = matter(content);` および 6 セキュリティ設計",
+      "suggestion": "gray-matter の呼び出し時に `engines` オプションで JavaScript エンジンを無効化する: `matter(content, { engines: { js: { parse: () => { throw new Error('JavaScript engine is disabled for security'); }, stringify: () => { throw new Error('JavaScript engine is disabled for security'); } }, javascript: { parse: () => { throw new Error('JavaScript engine is disabled for security'); }, stringify: () => { throw new Error('JavaScript engine is disabled for security'); } } } })` とする。parseSkillFile() だけでなく、既存の parseCommandFile() にも同じ対策を適用すべき。共通の安全な matter ラッパー関数（例: `safeParseFrontmatter(content)`）を作成し、両関数で使用することを推奨する。"
+    },
+    {
+      "id": "S002",
+      "severity": "must_fix",
+      "owasp": "A05",
+      "category": "dos",
+      "title": "skills ディレクトリ走査およびファイル読み込みに上限がない",
+      "description": "設計方針書の `loadSkills()` には、走査するディレクトリ数やファイルサイズの上限が設定されていない。攻撃者が worktree リポジトリの `.claude/skills/` 配下に数千のサブディレクトリを作成した場合、`readdirSync` + 各 SKILL.md の `readFileSync` が同期的に実行され、API リクエストのレスポンスタイムが著しく悪化する。また、巨大な SKILL.md ファイル（例: 100MB）を配置した場合、`readFileSync` でメモリが大量に消費される。Stage 3 の I005 で「YAGNI に基づき現時点では対応不要」と記録されているが、worktree パスは外部リポジトリを指すため、セキュリティ観点からは上限値の設定が必要である。",
+      "location": "設計方針書 3-2 loadSkills() の for ループおよび parseSkillFile() の readFileSync",
+      "suggestion": "以下の上限値を定数として定義し、loadSkills() と parseSkillFile() で適用する: (1) MAX_SKILLS_COUNT = 100 -- skills サブディレクトリ走査の上限数、(2) MAX_SKILL_FILE_SIZE = 64 * 1024 (64KB) -- SKILL.md の最大ファイルサイズ。parseSkillFile() で `fs.statSync(skillPath).size` を事前チェックし、上限超過時は console.warn() でログ出力してスキップする。"
+    },
+    {
+      "id": "S003",
+      "severity": "should_fix",
+      "owasp": "A01",
+      "category": "path_traversal",
+      "title": "loadSlashCommands() のパストラバーサル対策が loadSkills() と非対称",
+      "description": "設計方針書では loadSkills() に 3 層防御（isDirectory()、.. 拒否、startsWith() 検証）を適用しているが、既存の loadSlashCommands() には同等の防御が存在しない。loadSlashCommands() は `readdirSync` で取得したファイル名に対して `path.join(commandsDir, file)` で結合しているだけで、`..` チェックや `startsWith()` 検証を行っていない。skills 対応と同時に既存コードのセキュリティを揃えることを推奨する。",
+      "location": "src/lib/slash-commands.ts L75-84 (既存の loadSlashCommands) および設計方針書 3-2 loadSkills()",
+      "suggestion": "loadSlashCommands() にも loadSkills() と同等のセキュリティチェックを追加する: (1) `file.includes('..')` チェック、(2) `path.resolve(commandsDir, file)` が `path.resolve(commandsDir)` 配下であることの検証。理想的には共通のパス検証ヘルパー関数を抽出し、両関数で使用する。"
+    },
+    {
+      "id": "S004",
+      "severity": "should_fix",
+      "owasp": "A01",
+      "category": "symlink",
+      "title": "SKILL.md ファイル自体がシンボリックリンクである場合の検証不足",
+      "description": "設計方針書の 3 層防御は skills サブディレクトリレベルのシンボリックリンクを `Dirent.isDirectory()` で検出するが、サブディレクトリ内の SKILL.md ファイル自体がシンボリックリンクである場合は検出されない。例えば `.claude/skills/legit-skill/` が実ディレクトリであっても、その中の `SKILL.md` が `/etc/passwd` へのシンボリックリンクである場合、`readFileSync` はリンク先のファイルを読み取る。読み取った内容は frontmatter パース後に name/description として API レスポンスに含まれるため、情報漏洩のリスクがある。",
+      "location": "設計方針書 3-2 parseSkillFile() の `fs.readFileSync(skillPath, 'utf-8')`",
+      "suggestion": "parseSkillFile() 内で SKILL.md の読み取り前に `fs.lstatSync(skillPath).isSymbolicLink()` をチェックし、シンボリックリンクの場合はスキップする。または `fs.realpathSync(skillPath)` で実パスを解決し、skillsDir 配下にあることを `startsWith()` で検証する。"
+    },
+    {
+      "id": "S005",
+      "severity": "should_fix",
+      "owasp": "A04",
+      "category": "dos",
+      "title": "parseSkillFile() の frontmatter パースに対する YAML ボム（Billion Laughs）攻撃の考慮不足",
+      "description": "YAML パーサー（js-yaml 3.14.2 の safeLoad）は YAML ボム（Billion Laughs 攻撃）に対する組み込み保護を持っているが、設計方針書のセキュリティ設計セクション（セクション6）にはこの脅威への言及がない。大きな frontmatter を含む SKILL.md（例: 深くネストされた YAML アンカーとエイリアス）が処理された場合のメモリ消費について、セキュリティ設計で明示的に分析されるべきである。js-yaml 3.x の safeLoad は一定の保護を提供するが、S002 で提案するファイルサイズ上限と組み合わせることで多層防御となる。",
+      "location": "設計方針書 6 セキュリティ設計",
+      "suggestion": "セキュリティ設計セクションに YAML ボム攻撃への対策を明記する。S002 のファイルサイズ上限（64KB）が実質的な緩和策となるため、その旨をドキュメントに記載する。加えて、将来的に js-yaml のバージョンアップ（4.x 系は load() が safe by default）を検討事項として記録する。"
+    },
+    {
+      "id": "S006",
+      "severity": "should_fix",
+      "owasp": "A08",
+      "category": "info_disclosure",
+      "title": "console.error() でのフルパスおよびエラースタック情報の出力",
+      "description": "設計方針書の parseSkillFile() の catch ブロックでは `console.error('Error parsing skill file ${skillPath}:', error)` でフルパスとエラーオブジェクト（スタックトレース含む）をログに出力する。サーバーサイドのログであるためクライアントには直接返されないが、ログ収集システムやログファイルに機密パス情報が保存される。特に worktree パスにはユーザー名を含むホームディレクトリパスが含まれることが多い。既存の `parseCommandFile()` も同様のパターンを使用しているが、本プロジェクトには `log-export-sanitizer.ts` によるサニタイズ機構が存在する。",
+      "location": "設計方針書 3-2 parseSkillFile() の catch ブロック",
+      "suggestion": "ログ出力時のパス情報は相対パス（basePath からの相対）に限定するか、既存の log-export-sanitizer.ts の sanitizeForExport() を活用してパスをマスクする。最低限、error オブジェクトのスタックトレースは出力せず、error.message のみにする: `console.error('Error parsing skill file:', path.relative(skillsDir, skillPath), error instanceof Error ? error.message : String(error))`。"
+    },
+    {
+      "id": "S007",
+      "severity": "should_fix",
+      "owasp": "A06",
+      "category": "other",
+      "title": "frontmatter の name/description フィールドの長さ・文字種制限がない",
+      "description": "設計方針書の parseSkillFile() では frontmatter から取得した name と description をそのまま SlashCommand オブジェクトに格納する。name フィールドがディレクトリ名へのフォールバックを持つものの、frontmatter 由来の name が極端に長い文字列（例: 10,000文字）や制御文字を含む場合の処理が定義されていない。React の JSX レンダリングにより XSS は防御されるが、UIレイアウトの破壊やAPIレスポンスサイズの肥大化につながる可能性がある。",
+      "location": "設計方針書 3-2 parseSkillFile() の return オブジェクト",
+      "suggestion": "name と description に最大長制限を追加する: `name: truncateString(frontmatter.name || skillName, 100)`, `description: truncateString(frontmatter.description || '', 500)`。src/lib/utils.ts の既存の `truncateString()` を使用する。また、制御文字（\\x00-\\x1f）をフィルタリングする処理を追加することを推奨する。"
+    },
+    {
+      "id": "S008",
+      "severity": "nice_to_have",
+      "owasp": "A07",
+      "category": "xss",
+      "title": "XSS リスクの明示的分析と React エスケープへの依存ドキュメント化",
+      "description": "設計方針書のセキュリティ設計セクション（セクション6）には XSS リスクの分析が含まれていない。skills の name/description は SlashCommandList.tsx で `{command.name}` および `{command.description}` として JSX テキストノードに展開されるため、React の自動エスケープにより XSS は防御される。しかし、将来的に dangerouslySetInnerHTML やマークダウンレンダリングに変更された場合のリスクについて、設計書に明示的な分析を記載すべきである。",
+      "location": "設計方針書 6 セキュリティ設計",
+      "suggestion": "セキュリティ設計セクションに「XSS 防御: skills の name/description は React JSX テキストノードとして描画され、自動エスケープにより XSS は防御される。dangerouslySetInnerHTML による描画は禁止する」旨を追記する。"
+    },
+    {
+      "id": "S009",
+      "severity": "nice_to_have",
+      "owasp": "A01",
+      "category": "path_traversal",
+      "title": "filePath フィールドの path.relative() 出力にパストラバーサル文字列が含まれる可能性",
+      "description": "設計方針書の parseSkillFile() では `filePath: path.relative(process.cwd(), skillPath)` で相対パスを生成する。basePath が process.cwd() と異なる場合（worktree パス指定時）、path.relative() は `../../other/path/.claude/skills/...` のような `..` を含むパスを返す。このパスは API レスポンスの filePath フィールドとしてクライアントに返され、worktree のディレクトリ構造に関する情報が間接的に漏洩する可能性がある。",
+      "location": "設計方針書 3-2 parseSkillFile() の `filePath: path.relative(process.cwd(), skillPath)`",
+      "suggestion": "filePath の基準パスを process.cwd() ではなく basePath に統一する: `filePath: path.relative(basePath || process.cwd(), skillPath)`。basePath 指定時は worktree ルートからの相対パスとなり、ディレクトリ構造の漏洩を防止できる。既存の parseCommandFile() も同様の検討を行うべきだが、それは別 Issue とする。"
+    },
+    {
+      "id": "S010",
+      "severity": "nice_to_have",
+      "owasp": "N/A",
+      "category": "other",
+      "title": "セキュリティ設計セクションに OWASP Top 10 マッピングが不足",
+      "description": "設計方針書のセキュリティ設計（セクション6）は具体的な対策を記載しているが、OWASP Top 10 カテゴリへのマッピングが行われていない。各対策がどの OWASP カテゴリに対応するかを明示することで、網羅性の検証が容易になり、見落としを防止できる。特に A03 (Injection)、A01 (Broken Access Control)、A05 (Security Misconfiguration) が本機能に関連する。",
+      "location": "設計方針書 6 セキュリティ設計",
+      "suggestion": "セキュリティ設計テーブルに OWASP カテゴリ列を追加し、各対策の対応カテゴリを明記する。"
+    }
+  ],
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "partial",
+      "notes": "パストラバーサル対策は loadSkills() に 3 層防御があるが、loadSlashCommands() との非対称性あり (S003)。SKILL.md 自体のシンボリックリンク検証不足 (S004)。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "暗号化処理は本機能のスコープ外"
+    },
+    "A03_injection": {
+      "status": "critical",
+      "notes": "gray-matter の JavaScript エンジンによる RCE 脆弱性 (S001) が最も深刻。YAML インジェクションは js-yaml safeLoad により緩和済み。"
+    },
+    "A04_insecure_design": {
+      "status": "partial",
+      "notes": "DoS 対策（ファイル数/サイズ上限）の欠如 (S002)。YAML ボム攻撃の考慮不足 (S005)。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "partial",
+      "notes": "gray-matter のデフォルト設定が JavaScript エンジンを有効にしている (S001)。フィールド長制限の欠如 (S007)。"
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "partial",
+      "notes": "js-yaml 3.14.2 は EOL ではないが、4.x 系への移行を検討すべき。gray-matter 4.0.3 の JavaScript エンジンは既知のリスク。"
+    },
+    "A07_auth_failures": {
+      "status": "acceptable",
+      "notes": "既存の認証ミドルウェア (middleware.ts) と isValidWorktreePath() による認可制御は維持される"
+    },
+    "A08_software_data_integrity": {
+      "status": "acceptable",
+      "notes": "SKILL.md はローカルファイルシステムから読み取るため、リモートからのインテグリティ攻撃は限定的"
+    },
+    "A09_logging_monitoring": {
+      "status": "partial",
+      "notes": "ログ出力にフルパスとスタックトレースを含む (S006)。セキュリティイベント（ブロックされたパストラバーサル等）の明示的ログが不足。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "本機能はローカルファイルシステムのみにアクセスし、外部リクエストは発生しない"
+    }
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "high",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 5,
+    "nice_to_have": 3,
+    "overall_quality": "needs_improvement",
+    "critical_note": "S001 (gray-matter JavaScript エンジン RCE) は CRITICAL レベルの脆弱性であり、実装前に必ず対処が必要。S002 (DoS 上限値) と合わせて対処することで、セキュリティリスクを大幅に低減できる。"
+  }
+}

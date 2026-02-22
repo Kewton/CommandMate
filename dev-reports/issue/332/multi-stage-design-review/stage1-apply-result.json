@@ -1,0 +1,11 @@
+{
+  "stage": 1,
+  "applied_count": 4,
+  "skipped_count": 0,
+  "changes": [
+    "S1-001(Must Fix): getAllowedRanges()関数をip-restriction.tsのAPIシグネチャに追加し、モジュールレベルcachedRangesキャッシュを定義。middleware.ts(Section 4.2)をparseAllowedIps()直接呼び出しからgetAllowedRanges()使用に変更。ws-server.ts(Section 4.3)もparseAllowedIps()毎回呼び出しからgetAllowedRanges()使用に変更。モジュール依存関係図を更新。データフロー図にgetAllowedRanges()参照を追記",
+    "S1-002(Should Fix): Section 3.2 ip-restriction-config.tsを完全に削除。4つの定数(IPV4_MAPPED_IPV6_PREFIX, IPV4_PATTERN, IPV4_CIDR_PATTERN, MAX_IPV4_PREFIX_LENGTH)はip-restriction.ts内の未export内部定数として定義する旨をSection 3.1に記載。影響範囲サマリー(Section 11)の新規作成ファイル数を3から2に変更、合計を19から18に変更。代替案比較表にip-restriction-config.ts分離の不採用理由を追加",
+    "S1-003(Should Fix): isIpRestrictionEnabled()の設計をauth.tsのstoredTokenHashパターンに準拠するよう変更。モジュールスコープでconst allowedIpsEnv = process.env.CM_ALLOWED_IPS?.trim() || ''を定義し、isIpRestrictionEnabled()がallowedIpsEnv.length > 0を返す設計に変更。cachedRangesの初期化もallowedIpsEnvを使用するよう統一",
+    "S1-004(Should Fix): getClientIp()にJSDocコメントを追加。リクエスト解析の責務であること、CIDRマッチング(IP制限判定)とは異なる責務であることを明記。将来的にプロキシ関連設定が増えた場合の分離ポイント(例: request-ip.ts)として注記"
+  ]
+}

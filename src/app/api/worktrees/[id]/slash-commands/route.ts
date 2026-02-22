@@ -25,13 +25,19 @@ import type { SlashCommandGroup } from '@/types/slash-commands';
 
 /**
  * Slash commands API response
+ *
+ * NOTE: This interface is local to the worktree-specific API route.
+ * A separate SlashCommandsResponse exists in api-client.ts for /api/slash-commands (MCBD).
+ * The two types share the same name but have different structures (this one includes sources).
  */
+// TODO: api-client.ts の SlashCommandsResponse との型統合を検討する（sources フィールドの共有）
 interface SlashCommandsResponse {
   groups: ReturnType<typeof getStandardCommandGroups>;
   sources: {
     standard: number;
     worktree: number;
     mcbd: number;
+    skill: number;  // Issue #343: Skills source count
   };
   cliTool: CLIToolType;
 }
@@ -98,13 +104,11 @@ export async function GET(
     // Issue #4: Filter by CLI tool
     const filteredGroups = filterCommandsByCliTool(mergedGroups, cliTool);
 
-    // Calculate source counts (after filtering)
-    const filteredStandardCount = filteredGroups
-      .flatMap(g => g.commands)
-      .filter(cmd => cmd.source === 'standard').length;
-    const filteredWorktreeCount = filteredGroups
-      .flatMap(g => g.commands)
-      .filter(cmd => cmd.source === 'worktree').length;
+    // Calculate source counts (after filtering) - DRY: flatMap once
+    const allFilteredCommands = filteredGroups.flatMap(g => g.commands);
+    const filteredStandardCount = allFilteredCommands.filter(cmd => cmd.source === 'standard').length;
+    const filteredWorktreeCount = allFilteredCommands.filter(cmd => cmd.source === 'worktree').length;
+    const filteredSkillCount = allFilteredCommands.filter(cmd => cmd.source === 'skill').length;
 
     return NextResponse.json({
       groups: filteredGroups,
@@ -112,6 +116,7 @@ export async function GET(
         standard: filteredStandardCount,
         worktree: filteredWorktreeCount,
         mcbd: 0, // MCBD commands are loaded separately via /api/slash-commands
+        skill: filteredSkillCount, // Issue #343: Skills source count
       },
       cliTool,
     });

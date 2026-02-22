@@ -14,11 +14,14 @@ import { type ReactNode } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
+import { AuthProvider } from '@/contexts/AuthContext';
 
 interface AppProvidersProps {
   children: ReactNode;
   locale: string;
   messages: Record<string, unknown>;
+  timeZone?: string;
+  authEnabled?: boolean;
 }
 
 /**
@@ -31,14 +34,16 @@ interface AppProvidersProps {
  * </AppProviders>
  * ```
  */
-export function AppProviders({ children, locale, messages }: AppProvidersProps) {
+export function AppProviders({ children, locale, messages, timeZone, authEnabled = false }: AppProvidersProps) {
   return (
-    <NextIntlClientProvider locale={locale} messages={messages}>
-      <SidebarProvider>
-        <WorktreeSelectionProvider>
-          {children}
-        </WorktreeSelectionProvider>
-      </SidebarProvider>
+    <NextIntlClientProvider locale={locale} messages={messages} timeZone={timeZone}>
+      <AuthProvider authEnabled={authEnabled}>
+        <SidebarProvider>
+          <WorktreeSelectionProvider>
+            {children}
+          </WorktreeSelectionProvider>
+        </SidebarProvider>
+      </AuthProvider>
     </NextIntlClientProvider>
   );
 }

@@ -1,0 +1,27 @@
+{
+  "issue_number": 343,
+  "feature_summary": "スラッシュコマンドセレクターで .claude/skills も表示する",
+  "acceptance_criteria": [
+    "1. CommandMate-Marketing の worktree 画面で「/」入力時に gog-gmail, gog-calendar 等の skills が表示される",
+    "2. MyCodeBranchDesk の worktree 画面で既存の commands に加え rebuild, release 等の skills も表示される",
+    "3. skills を選択すると /{skill-name} がメッセージ入力欄に反映される",
+    "4. skills ディレクトリが存在しないリポジトリではエラーが発生しない",
+    "5. 既存の commands の表示・動作に変更がない",
+    "6. SlashCommandSource 型に 'skill' が追加されており、API レスポンスの sources カウントに反映される",
+    "7. MCBD ルート（/api/slash-commands）でも skills が読み込まれる",
+    "8. 同名の command と skill が存在する場合、command が優先される",
+    "9. CATEGORY_LABELS に skill: 'Skills' が追加され、TypeScript コンパイルエラーが発生しない",
+    "10. skillsCache が commandsCache とは独立して管理され、clearCache() で両方がクリアされる",
+    "11. CATEGORY_ORDER に 'skill' が追加され、Skills カテゴリが workflow と standard-session の間に表示される"
+  ],
+  "test_scenarios": [
+    "シナリオ1: skills ディレクトリが存在する場合 - loadSkills() が SKILL.md をパースして SlashCommand を返す",
+    "シナリオ2: skills ディレクトリが存在しない場合 - loadSkills() が空配列を返し、エラーが発生しない",
+    "シナリオ3: 同名の command と skill がある場合 - deduplicateByName() でコマンドが優先される",
+    "シナリオ4: getSlashCommandGroups() に basePath を指定した場合 - commands と skills が統合される",
+    "シナリオ5: clearCache() 後 - commandsCache と skillsCache の両方が null になる",
+    "シナリオ6: API レスポンスに sources.skill が含まれる",
+    "シナリオ7: CATEGORY_ORDER で 'skill' が 'workflow' の直後にある",
+    "シナリオ8: safeParseFrontmatter() が ---js frontmatter でエラーをスローする（RCE防止）"
+  ]
+}

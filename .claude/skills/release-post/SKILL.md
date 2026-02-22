@@ -1,9 +1,9 @@
 ---
 name: release-post
-description: リリース情報をX（Twitter）投稿用の文面として生成する。「Xに投稿」「リリース告知」「SNS投稿」などの指示で使用する。
+description: "リリース情報をX（Twitter）投稿用の文面として生成する。「Xに投稿」「リリース告知」「SNS投稿」などの指示で使用する。"
 disable-model-invocation: true
-allowed-tools: Bash(git tag*), Bash(git log*), Read
-argument-hint: [from-version] [to-version] (e.g., v0.2.4 v0.2.9)
+allowed-tools: "Bash(git tag*), Bash(git log*), Read"
+argument-hint: "[from-version] [to-version] (e.g., v0.2.4 v0.2.9)"
 ---
 
 # リリース投稿スキル

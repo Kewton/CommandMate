@@ -1,0 +1,186 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_focus": "影響範囲",
+  "findings": [
+    {
+      "id": "I001",
+      "severity": "should_fix",
+      "category": "test_impact",
+      "title": "getSlashCommandGroups テストの labelMap 検証が skill カテゴリ追加後に失敗する",
+      "description": "tests/unit/slash-commands.test.ts L150-165 の 'should have localized labels for categories' テストでは、labelMap に planning/development/review/documentation/workflow の5カテゴリのみを定義し、groups.forEach で group.label が labelMap[group.category] と一致することを検証している。getSlashCommandGroups() が内部で loadSkills() を呼ぶようになり、もし skills が存在する環境でテストが実行された場合、category='skill' のグループが返される。labelMap に 'skill' キーがないため、expect(group.label).toBe(undefined) となりテストが失敗する。設計方針書セクション7では labelMap への skill 追加は明記されているが、このテストが getSlashCommandGroups() を basePath なしで呼び出しており、テスト環境の .claude/skills/ ディレクトリの有無によって挙動が変わる非決定的なテストとなるリスクがある。",
+      "affected_components": [
+        "tests/unit/slash-commands.test.ts"
+      ],
+      "location": "設計方針書 セクション7: 既存テスト修正が必要な箇所",
+      "suggestion": "labelMap テストについて、(1) skill: 'Skills' の追加、(2) テスト実行環境に .claude/skills/ が存在する場合としない場合の両方で正しく動作することの確認を設計方針書に明記する。テストフィクスチャを使って basePath を指定して呼び出す方式に変更することも検討する。"
+    },
+    {
+      "id": "I002",
+      "severity": "should_fix",
+      "category": "functional_impact",
+      "title": "filterCommands() が commandsCache のみ参照するため skills が検索対象外になる",
+      "description": "slash-commands.ts の filterCommands() 関数（L138-152）は commandsCache のみを参照してフィルタリングを行う。設計方針書セクション9で「filterCommands() は commandsCache のみ参照（既存動作維持）」と明記されているが、ユーザー視点では skills がセレクターに表示されるにもかかわらず filterCommands() では検索対象にならないという非直感的な動作となる。ただし、実際の UI フローでは useSlashCommands フックと SlashCommandSelector が filterCommandGroups()（command-merger.ts）を使用してフィルタリングしており、filterCommands() は直接使用されていない。そのため実用上の問題はないが、filterCommands() を直接使うコードが将来追加された場合に混乱を招く可能性がある。",
+      "affected_components": [
+        "src/lib/slash-commands.ts"
+      ],
+      "location": "設計方針書 セクション9: 後方互換性",
+      "suggestion": "filterCommands() の JSDoc に「この関数は commandsCache のみを対象とし skills は含まない。UI のフィルタリングには filterCommandGroups() を使用すること」という注意を追加することを設計方針書に記載する。"
+    },
+    {
+      "id": "I003",
+      "severity": "should_fix",
+      "category": "compatibility_impact",
+      "title": "API レスポンスの sources フィールドに skill プロパティが追加されることによる既存クライアントへの影響",
+      "description": "route.ts の SlashCommandsResponse インターフェースに sources.skill が追加される。現在の useSlashCommands フック（L104-106）は data.groups と data.cliTool のみを使用し、data.sources は参照していない。また api-client.ts の SlashCommandsResponse は groups のみを定義している。JSON レスポンスに新しいプロパティが追加される場合、TypeScript 側では型定義を更新しなければ型安全性が損なわれるが、JavaScript ランタイムでは追加プロパティは無視される。ただし、route.ts の SlashCommandsResponse 型は route.ts 内のローカル型であるため、api-client.ts の同名の型とは独立している。設計方針書 [C003] で注記されているが、将来 api-client.ts 側で sources フィールドを参照するケースへの備えが不足している。",
+      "affected_components": [
+        "src/app/api/worktrees/[id]/slash-commands/route.ts",
+        "src/lib/api-client.ts",
+        "src/hooks/useSlashCommands.ts"
+      ],
+      "location": "設計方針書 セクション3-4, セクション4",
+      "suggestion": "sources.skill プロパティの追加は後方互換であり、既存クライアントは壊れない。ただし、api-client.ts 側の SlashCommandsResponse 型にも sources フィールドを将来追加する際の TODO コメントを route.ts に記載することを検討する。"
+    },
+    {
+      "id": "I004",
+      "severity": "should_fix",
+      "category": "performance_impact",
+      "title": "worktree パスでのリクエスト毎にキャッシュ無しで skills ディレクトリを走査する",
+      "description": "設計方針書の getSlashCommandGroups() では、basePath が指定された場合（worktree 用）は常に loadSlashCommands() と loadSkills() を両方再ロードする（キャッシュ不使用）。既存の loadSlashCommands(basePath) も同様にキャッシュ不使用であるため一貫性はあるが、skills の追加により API リクエスト毎のファイルシステム走査が2倍になる。具体的には、fs.existsSync + fs.readdirSync + N回の fs.readFileSync（N=スキル数）が追加される。通常のリポジトリでは skills 数は少数であり問題ないが、API コールの度に同期 I/O が増えることは認識しておくべき。",
+      "affected_components": [
+        "src/lib/slash-commands.ts",
+        "src/app/api/worktrees/[id]/slash-commands/route.ts"
+      ],
+      "location": "設計方針書 セクション3-2: getSlashCommandGroups の拡張",
+      "suggestion": "現時点では同期 I/O の追加は許容範囲内。パフォーマンス問題が顕在化した場合に備え、将来的な worktree パスのキャッシュ（TTL 付き）導入を検討事項として設計方針書に記載することを推奨する。"
+    },
+    {
+      "id": "I005",
+      "severity": "nice_to_have",
+      "category": "performance_impact",
+      "title": "skills が大量に存在する場合の走査パフォーマンスに上限がない",
+      "description": "loadSkills() は .claude/skills/ 配下の全ディレクトリを走査する。skills 数に上限チェックがないため、理論上は数百のスキルディレクトリがあれば fs.readFileSync が数百回呼ばれる。ただし、実運用上 .claude/skills/ に数百のスキルを配置するユースケースは極めてまれであり、YAGNI 原則に照らして上限チェックの追加は不要と判断できる。",
+      "affected_components": [
+        "src/lib/slash-commands.ts"
+      ],
+      "location": "設計方針書 セクション3-2: loadSkills",
+      "suggestion": "現時点では対応不要。将来的にパフォーマンス問題が報告された場合に、MAX_SKILLS_COUNT のような上限定数と警告ログの追加を検討する旨のコメントを追加する程度でよい。"
+    },
+    {
+      "id": "I006",
+      "severity": "nice_to_have",
+      "category": "functional_impact",
+      "title": "CommandMate-Marketing のような skills のみのリポジトリでの動作確認が不足",
+      "description": "設計方針書では .claude/commands/ が存在しないリポジトリについては loadSlashCommands() が console.warn を出力して空配列を返す既存動作を維持するとしている。一方、.claude/skills/ のみが存在し .claude/commands/ がないリポジトリでは、(1) loadSlashCommands() が warn ログを出力し、(2) loadSkills() が skills を正常に返し、(3) deduplicateByName() で skills のみが結果に含まれる。この動作自体は正しいが、skills のみのリポジトリで skills カテゴリのコマンドが正しく表示されるかの E2E 確認シナリオがテスト戦略に含まれていない。",
+      "affected_components": [
+        "src/lib/slash-commands.ts",
+        "tests/unit/slash-commands.test.ts"
+      ],
+      "location": "設計方針書 セクション7: 新規テストケース",
+      "suggestion": "テストケースに「commands ディレクトリ不在・skills ディレクトリのみ存在する場合に getSlashCommandGroups() が skill カテゴリのグループを正しく返す」ケースを追加することを推奨する。"
+    },
+    {
+      "id": "I007",
+      "severity": "must_fix",
+      "category": "test_impact",
+      "title": "統合テスト api-worktree-slash-commands.test.ts の sources アサーションが skill プロパティ未検証で壊れる可能性",
+      "description": "tests/integration/api-worktree-slash-commands.test.ts L87-91 の 'should return merged command groups for valid worktree' テストでは data.sources の存在を検証し data.sources.standard が 0 より大きいことをチェックしている。設計方針書では SlashCommandsResponse に sources.skill を追加するが、統合テスト側で sources.skill プロパティの存在検証が必要かどうかが設計方針書に明記されていない。TypeScript の型定義上は skill プロパティが必須となるため、レスポンスに skill プロパティがないとテストは直接壊れないが、型の整合性が取れなくなる。また、モック環境では worktree.path が '/Users/test/projects/my-project' であり .claude/skills/ が存在しないため skills=0 となるが、sources.skill の存在自体はレスポンスに含まれるべき。",
+      "affected_components": [
+        "tests/integration/api-worktree-slash-commands.test.ts"
+      ],
+      "location": "設計方針書 セクション7: 新規テストケース（API - sources.skill カウント）",
+      "suggestion": "設計方針書のセクション7の既存テスト修正テーブルに api-worktree-slash-commands.test.ts を追加し、(1) data.sources.skill プロパティの存在検証（expect(data.sources).toHaveProperty('skill')）、(2) sources.skill >= 0 の型検証を追加することを明記する。テストケースの具体的な修正内容を記載すべき。"
+    },
+    {
+      "id": "I008",
+      "severity": "should_fix",
+      "category": "functional_impact",
+      "title": "filterCommandsByCliTool() で cliTools 未定義の skills が Claude 以外で非表示になる影響の明示化",
+      "description": "設計方針書 [D009] で skills の cliTools を undefined（Claude-only）とする方針が記載されている。filterCommandsByCliTool()（command-merger.ts L183-200）では cliTools が undefined の場合は cliToolId === 'claude' のときのみ表示される。これにより Codex/Gemini ユーザーには skills が一切表示されない。設計方針書で意図的な決定として記録されているが、将来的に SKILL.md に cliTools フィールドを追加する拡張パスが検討されていない。また、skills のみのリポジトリを Codex で使用するケースでは空のレスポンスとなる。",
+      "affected_components": [
+        "src/lib/command-merger.ts",
+        "src/lib/slash-commands.ts"
+      ],
+      "location": "設計方針書 セクション8: cliTools の初期方針",
+      "suggestion": "将来的に SKILL.md の frontmatter に cliTools フィールドを追加してパースする拡張パスを設計ノートに記載する。現時点では YAGNI に基づき未実装で問題ないが、拡張可能性を設計方針書に明示しておくことで後続 Issue での対応が容易になる。"
+    },
+    {
+      "id": "I009",
+      "severity": "nice_to_have",
+      "category": "compatibility_impact",
+      "title": "MCBD API（/api/slash-commands）のレスポンスに暗黙的に skills が含まれる",
+      "description": "src/app/api/slash-commands/route.ts は getSlashCommandGroups() を basePath なしで呼び出す。設計方針書の変更後、getSlashCommandGroups() は内部で loadSkills() を呼び出し、MCBD（process.cwd()）の .claude/skills/ を読み込む。MCBD API のレスポンスの groups 配列に skill カテゴリのグループが新たに追加される。これは /api/slash-commands のクライアント（useSlashCommands フック）に影響するが、フックは groups をそのまま表示するだけなので機能的には正しく動作する。ただし、この暗黙的な動作変更が設計方針書セクション4の「変更不要」テーブルで「getSlashCommandGroups() を呼ぶだけ。内部で skills 統合済み」と記載されているものの、MCBD 側のレスポンスが変わること自体の影響分析が薄い。",
+      "affected_components": [
+        "src/app/api/slash-commands/route.ts",
+        "src/hooks/useSlashCommands.ts"
+      ],
+      "location": "設計方針書 セクション4: 変更不要ファイル",
+      "suggestion": "MCBD API のレスポンスに skill カテゴリが追加されることの影響をセクション4の注記に明示的に追加する。現在は「内部で skills 統合済み」とのみ記載されているが、「MCBD API のレスポンスには process.cwd() の .claude/skills/ から読み込まれた skills が groups に含まれる。クライアント側は groups をそのまま表示するため追加対応は不要」と具体的に記載すると明確になる。"
+    },
+    {
+      "id": "I010",
+      "severity": "nice_to_have",
+      "category": "test_impact",
+      "title": "command-merger.test.ts の CATEGORY_ORDER テストが不足",
+      "description": "tests/unit/lib/command-merger.test.ts には CATEGORY_ORDER の検証テストが存在しない。設計方針書セクション7では「CATEGORY_ORDER - skill 配置: workflow と standard-session の間にあることを検証」の新規テストが記載されているが、既存テストとの関係が不明確。groupByCategory テストは commands を入力として与えているため category='skill' のコマンドを含むテストケースを追加すれば CATEGORY_ORDER の順序検証も間接的に行えるが、明示的な CATEGORY_ORDER テストの配置場所（command-merger.test.ts か slash-commands.test.ts か）が設計方針書に記載されていない。",
+      "affected_components": [
+        "tests/unit/lib/command-merger.test.ts"
+      ],
+      "location": "設計方針書 セクション7: 新規テストケース",
+      "suggestion": "CATEGORY_ORDER の skill 配置テストを command-merger.test.ts に追加することを設計方針書に明示する。具体的には CATEGORY_ORDER.indexOf('skill') が CATEGORY_ORDER.indexOf('workflow') + 1 であることを検証する。"
+    },
+    {
+      "id": "I011",
+      "severity": "nice_to_have",
+      "category": "functional_impact",
+      "title": "groupByCategory の fallback ブランチが skill カテゴリを二重表示する可能性",
+      "description": "command-merger.ts の groupByCategory() には CATEGORY_ORDER に含まれないカテゴリの fallback ブランチ（L74-83）がある。CATEGORY_ORDER に 'skill' を追加しない場合、skill カテゴリのコマンドはこの fallback ブランチで処理され、CATEGORY_ORDER の末尾以降に表示される。設計方針書では CATEGORY_ORDER に 'skill' を追加する方針が明記されているため、正しく実装すれば問題ないが、CATEGORY_ORDER への追加を忘れた場合に fallback で処理されてしまうという暗黙的なフェールセーフがある。この動作は意図しない表示順序を招くため、実装時に注意が必要。",
+      "affected_components": [
+        "src/lib/command-merger.ts"
+      ],
+      "location": "設計方針書 セクション3-3: CATEGORY_ORDER 更新",
+      "suggestion": "実装チェックリストのステップ2（CATEGORY_ORDER 更新）が確実に実施されることの重要性を強調する。テストケースでの検証（I010）と合わせて二重防御とする。"
+    },
+    {
+      "id": "I012",
+      "severity": "must_fix",
+      "category": "test_impact",
+      "title": "loadSlashCommands() への source フィールド設定 [C002] が既存テストのアサーションを破壊する可能性",
+      "description": "設計方針書 [C002] では loadSlashCommands() 内で parseCommandFile() の結果に source フィールドを明示的に設定する変更を行う。現在の既存テスト（tests/unit/slash-commands.test.ts）では loadSlashCommands() の結果に対して source フィールドの検証を行っていない（source プロパティの存在自体を assert していない）。しかし、tests/unit/lib/command-merger.test.ts の mergeCommandGroups テストでは source: 'worktree' を明示的に設定したテストデータを使用している。loadSlashCommands() が source を設定するようになると、getSlashCommandGroups() から返される worktreeGroups に source='worktree' が付与された状態で mergeCommandGroups() に渡される。mergeCommandGroups() 内の cmd.source || 'worktree' フォールバックは動作しなくなるが、明示的に設定された source='worktree' と同じ値であるため結果は同一。しかし、loadSlashCommands() を basePath なしで呼んだ場合に source='mcbd' が設定されるため、getCachedCommands() 経由で取得したコマンドの source が undefined から 'mcbd' に変わる。filterCommands() テストでは source を検証していないため直接の破壊はないが、getCachedCommands テストの toEqual 比較で source フィールドの有無が影響する可能性がある。",
+      "affected_components": [
+        "tests/unit/slash-commands.test.ts",
+        "src/lib/slash-commands.ts"
+      ],
+      "location": "設計方針書 セクション8: [D008] source フィールドに関する実装上の注意事項",
+      "suggestion": "getCachedCommands テスト（L169-193）の toEqual 比較が source フィールドの追加によって失敗するかを検証し、必要に応じてテスト修正を設計方針書のセクション7に追記する。具体的には、loadSlashCommands() の結果と getCachedCommands() の結果の toEqual 比較では、両方とも同じ source 値を持つため toEqual は成功するはず。ただし、この点を設計方針書で明確に分析・記載することで実装時の混乱を防ぐ。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 5,
+    "nice_to_have": 5,
+    "overall_quality": "good"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-343-skills-loader-design-policy.md",
+    "src/lib/slash-commands.ts",
+    "src/types/slash-commands.ts",
+    "src/lib/command-merger.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "src/app/api/slash-commands/route.ts",
+    "src/hooks/useSlashCommands.ts",
+    "src/lib/api-client.ts",
+    "src/lib/standard-commands.ts",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/SlashCommandList.tsx",
+    "tests/unit/slash-commands.test.ts",
+    "tests/unit/lib/command-merger.test.ts",
+    "tests/integration/api-worktree-slash-commands.test.ts"
+  ],
+  "timestamp": "2026-02-22T00:00:00Z"
+}
