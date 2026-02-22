@@ -16,7 +16,12 @@
 
 Not a "remote control" — a **mobile dev cockpit**.
 
-CommandMate manages Claude Code and Codex CLI sessions per Git worktree and gives you a Web UI you can operate from any browser, including your phone. Auto Yes keeps the agent running autonomously while you monitor progress, review code changes, edit instructions, and send screenshot-based directions — all from your pocket.
+AI writes code for you. That was supposed to mean freedom.
+Instead, you're watching a terminal, afraid to walk away.
+Your friends are at dinner. Your kid needs a bath. You just want ten minutes on the couch.
+But close the lid and every session dies. So you sit there — babysitting the machine that was supposed to babysit your code.
+
+CommandMate changes that. Auto Yes keeps the agent moving. Sessions survive in the background. And a Web UI on your phone means you can check in, review diffs, edit instructions, and send screenshots — from anywhere.
 
 Of course, it works great on desktop too — the two-column layout gives you a full overview of all sessions and worktrees at a glance.
 
