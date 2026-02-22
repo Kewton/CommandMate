@@ -244,10 +244,11 @@ describe('auth module', () => {
   });
 
   describe('isAuthEnabled', () => {
-    it('should return true when CM_AUTH_TOKEN_HASH is set', async () => {
-      process.env.CM_AUTH_TOKEN_HASH = 'somehash';
+    it('should return true when CM_AUTH_TOKEN_HASH is a valid 64-char hex', async () => {
+      const validHash = 'a'.repeat(64);
+      process.env.CM_AUTH_TOKEN_HASH = validHash;
       vi.resetModules();
-      process.env.CM_AUTH_TOKEN_HASH = 'somehash';
+      process.env.CM_AUTH_TOKEN_HASH = validHash;
       const { isAuthEnabled } = await import('@/lib/auth');
       expect(isAuthEnabled()).toBe(true);
     });
@@ -263,6 +264,14 @@ describe('auth module', () => {
       process.env.CM_AUTH_TOKEN_HASH = '';
       vi.resetModules();
       process.env.CM_AUTH_TOKEN_HASH = '';
+      const { isAuthEnabled } = await import('@/lib/auth');
+      expect(isAuthEnabled()).toBe(false);
+    });
+
+    it('should return false when CM_AUTH_TOKEN_HASH is malformed (not 64-char hex)', async () => {
+      process.env.CM_AUTH_TOKEN_HASH = 'somehash';
+      vi.resetModules();
+      process.env.CM_AUTH_TOKEN_HASH = 'somehash';
       const { isAuthEnabled } = await import('@/lib/auth');
       expect(isAuthEnabled()).toBe(false);
     });

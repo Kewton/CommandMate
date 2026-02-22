@@ -12,8 +12,8 @@
 import crypto from 'crypto';
 
 // Import and re-export shared constants and functions from Edge Runtime-compatible config
-import { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, parseDuration, computeExpireAt, DEFAULT_EXPIRE_DURATION_MS } from '../config/auth-config';
-export { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, parseDuration, computeExpireAt, DEFAULT_EXPIRE_DURATION_MS };
+import { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, parseDuration, computeExpireAt, DEFAULT_EXPIRE_DURATION_MS, isValidTokenHash } from '../config/auth-config';
+export { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, parseDuration, computeExpireAt, DEFAULT_EXPIRE_DURATION_MS, isValidTokenHash };
 
 /** Rate limiting configuration for brute-force protection */
 export const RATE_LIMIT_CONFIG = {
@@ -32,13 +32,13 @@ export const DEFAULT_COOKIE_MAX_AGE_SECONDS = 24 * 60 * 60;
 // Module-level state (initialized from env at import time)
 // ============================================================
 
-/** Valid SHA-256 hex string pattern: exactly 64 hex characters */
-const VALID_TOKEN_HASH_PATTERN = /^[0-9a-f]{64}$/;
-
 /** The stored hash of the authentication token */
 const storedTokenHash: string | undefined = (() => {
   const hash = process.env.CM_AUTH_TOKEN_HASH || undefined;
-  if (hash && !VALID_TOKEN_HASH_PATTERN.test(hash)) {
+  if (!hash) return undefined;
+  // Store validation result to avoid type predicate narrowing to 'never' in else branch
+  const valid: boolean = isValidTokenHash(hash);
+  if (!valid) {
     console.error(`[Security] CM_AUTH_TOKEN_HASH is not a valid 64-character hex string (got ${hash.length} chars). Authentication will be disabled.`);
     return undefined;
   }
@@ -142,11 +142,13 @@ export function parseCookies(cookieHeader: string): Record<string, string> {
 // ============================================================
 
 /**
- * Check if authentication is enabled
- * @returns true if CM_AUTH_TOKEN_HASH is set and non-empty
+ * Check if authentication is enabled.
+ * Returns true only when CM_AUTH_TOKEN_HASH is set AND passes format validation.
+ * This prevents the state where auth appears enabled but login is impossible
+ * (e.g., when the hash value is malformed).
  */
 export function isAuthEnabled(): boolean {
-  return !!process.env.CM_AUTH_TOKEN_HASH;
+  return !!storedTokenHash;
 }
 
 /**

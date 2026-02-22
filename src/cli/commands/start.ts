@@ -128,10 +128,16 @@ export async function startCommand(options: StartOptions): Promise<void> {
       authTokenHash = hashToken(authToken);
     }
 
-    // Issue #331: Determine protocol
+    // Issue #331: Validate --cert/--key must be specified together
+    if ((options.cert && !options.key) || (!options.cert && options.key)) {
+      logger.error('--cert and --key must be specified together');
+      process.exit(ExitCode.CONFIG_ERROR);
+      return;
+    }
+
+    // Issue #331: Determine protocol (matches server.ts: cert+key → always HTTPS)
     const hasCert = !!(options.cert && options.key);
-    const useHttps = hasCert && (options.auth || options.https);
-    const protocol = useHttps ? 'https' : 'http';
+    const protocol = hasCert ? 'https' : 'http';
 
     // Issue #331: HTTPS certificate validation
     if (hasCert) {

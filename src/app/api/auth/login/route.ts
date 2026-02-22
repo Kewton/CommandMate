@@ -24,6 +24,13 @@ const rateLimiter = createRateLimiter();
  * These headers are attacker-controlled when there is no trusted reverse proxy.
  * CommandMate typically serves direct connections, so we use a fixed key
  * to enforce a global rate limit regardless of source IP.
+ *
+ * Trade-off: A global key means an attacker who exhausts the limit locks out all
+ * users for the lockout duration (default 15 min). This is accepted because:
+ * - IP-based limiting is spoofable without a trusted reverse proxy
+ * - CommandMate targets local/trusted networks, not public internet
+ * - The in-memory rate limiter resets on server restart
+ * - A future CM_TRUST_PROXY option could enable per-IP limiting behind a proxy
  */
 const RATE_LIMIT_KEY = 'global';
 

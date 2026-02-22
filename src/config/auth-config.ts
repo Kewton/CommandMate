@@ -9,6 +9,21 @@
 /** Cookie name for authentication token */
 export const AUTH_COOKIE_NAME = 'cm_auth_token' as const;
 
+/** Valid SHA-256 hex string pattern: exactly 64 hex characters */
+const VALID_TOKEN_HASH_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * Validate that a CM_AUTH_TOKEN_HASH value is a well-formed SHA-256 hex string.
+ * Used by both auth.ts and middleware.ts to ensure consistent auth-enabled detection.
+ * Returns a type predicate so callers can narrow the type after checking.
+ *
+ * @param hash - The hash string to validate
+ * @returns true if the hash is a valid 64-character hex string
+ */
+export function isValidTokenHash(hash: string | undefined): hash is string {
+  return !!hash && VALID_TOKEN_HASH_PATTERN.test(hash);
+}
+
 /**
  * Paths excluded from authentication check.
  * S002: Must use === for matching (no startsWith - bypass attack prevention)

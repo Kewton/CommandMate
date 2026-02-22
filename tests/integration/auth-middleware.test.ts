@@ -19,8 +19,8 @@ vi.mock('next/server', () => {
     headers: Map<string, string>;
     private _redirect: string | null;
 
-    constructor() {
-      this.status = 200;
+    constructor(_body?: unknown, init?: { status?: number }) {
+      this.status = init?.status ?? 200;
       this.headers = new Map();
       this._redirect = null;
     }
@@ -62,7 +62,11 @@ describe('Auth Middleware', () => {
     process.env = originalEnv;
   });
 
-  function createMockRequest(pathname: string, cookies: Record<string, string> = {}) {
+  function createMockRequest(
+    pathname: string,
+    cookies: Record<string, string> = {},
+    headers: Record<string, string> = {},
+  ) {
     return {
       nextUrl: {
         pathname,
@@ -77,6 +81,9 @@ describe('Auth Middleware', () => {
           const value = cookies[name];
           return value !== undefined ? { name, value } : undefined;
         },
+      },
+      headers: {
+        get: (name: string) => headers[name.toLowerCase()] ?? null,
       },
     };
   }
@@ -179,5 +186,40 @@ describe('Auth Middleware', () => {
     const req = createMockRequest('/', { cm_auth_token: 'wrong-token' });
     const res = await middleware(req as never);
     expect(res.status).toBe(302);
+  });
+
+  it('should return 401 for unauthenticated WebSocket upgrade', async () => {
+    const { hashToken } = await import('@/lib/auth');
+    const hash = hashToken('test-token');
+    process.env.CM_AUTH_TOKEN_HASH = hash;
+    vi.resetModules();
+    process.env.CM_AUTH_TOKEN_HASH = hash;
+
+    const { middleware } = await import('@/middleware');
+    const req = createMockRequest('/', {}, { upgrade: 'websocket' });
+    const res = await middleware(req as never);
+    expect(res.status).toBe(401);
+  });
+
+  it('should pass through for authenticated WebSocket upgrade', async () => {
+    const { generateToken, hashToken } = await import('@/lib/auth');
+    const token = generateToken();
+    const hash = hashToken(token);
+    process.env.CM_AUTH_TOKEN_HASH = hash;
+    vi.resetModules();
+    process.env.CM_AUTH_TOKEN_HASH = hash;
+
+    const { middleware } = await import('@/middleware');
+    const req = createMockRequest('/', { cm_auth_token: token }, { upgrade: 'websocket' });
+    const res = await middleware(req as never);
+    expect(res.status).toBe(200);
+  });
+
+  it('should pass through WebSocket upgrade when auth is not enabled', async () => {
+    delete process.env.CM_AUTH_TOKEN_HASH;
+    const { middleware } = await import('@/middleware');
+    const req = createMockRequest('/', {}, { upgrade: 'websocket' });
+    const res = await middleware(req as never);
+    expect(res.status).toBe(200);
   });
 });

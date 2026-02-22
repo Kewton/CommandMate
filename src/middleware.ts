@@ -14,7 +14,7 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, computeExpireAt } from './config/auth-config';
+import { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, computeExpireAt, isValidTokenHash } from './config/auth-config';
 
 /** Token expiration timestamp, computed once at module load time */
 const expireAt: number | null = computeExpireAt();
@@ -36,7 +36,7 @@ function isTokenExpired(): boolean {
  */
 async function verifyTokenEdge(token: string): Promise<boolean> {
   const storedHash = process.env.CM_AUTH_TOKEN_HASH;
-  if (!storedHash) return false;
+  if (!isValidTokenHash(storedHash)) return false;
 
   // Check token expiry (C1 fix: middleware must also enforce expiry)
   if (isTokenExpired()) return false;
@@ -69,7 +69,7 @@ export async function middleware(request: NextRequest) {
   // defense-in-depth (H1 fix: prevent Upgrade header from bypassing middleware auth).
   if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
     // Skip auth check if auth is not enabled
-    if (!process.env.CM_AUTH_TOKEN_HASH) {
+    if (!isValidTokenHash(process.env.CM_AUTH_TOKEN_HASH)) {
       return NextResponse.next();
     }
     // Verify the auth cookie before allowing the upgrade to proceed
