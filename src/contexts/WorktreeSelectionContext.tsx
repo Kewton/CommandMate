@@ -19,7 +19,7 @@ import React, {
   type ReactNode,
 } from 'react';
 import type { Worktree } from '@/types/models';
-import { worktreeApi } from '@/lib/api-client';
+import { worktreeApi, ApiError } from '@/lib/api-client';
 
 // ============================================================================
 // Constants
@@ -248,8 +248,12 @@ export function WorktreeSelectionProvider({ children }: WorktreeSelectionProvide
           timeoutId = setTimeout(poll, nextInterval);
         }
       } catch (err) {
+        // Stop polling on auth errors (401) - user needs to log in
+        if (err instanceof ApiError && err.status === 401) {
+          return;
+        }
         console.error('[WorktreeSelectionContext] Polling error:', err);
-        // On error, retry with SESSION_RUNNING interval
+        // On other errors, retry with SESSION_RUNNING interval
         if (isMounted) {
           timeoutId = setTimeout(poll, POLLING_INTERVALS.SESSION_RUNNING);
         }

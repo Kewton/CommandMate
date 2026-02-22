@@ -32,12 +32,16 @@ vi.mock('@/hooks/useIsMobile', () => ({
 }));
 
 // Mock the API client
-vi.mock('@/lib/api-client', () => ({
-  worktreeApi: {
-    getAll: vi.fn().mockResolvedValue({ worktrees: [], repositories: [] }),
-    getById: vi.fn(),
-  },
-}));
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-client')>();
+  return {
+    ...actual,
+    worktreeApi: {
+      getAll: vi.fn().mockResolvedValue({ worktrees: [], repositories: [] }),
+      getById: vi.fn(),
+    },
+  };
+});
 
 import { useIsMobile } from '@/hooks/useIsMobile';
 

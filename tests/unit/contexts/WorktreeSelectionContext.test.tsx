@@ -16,13 +16,17 @@ import {
 import type { Worktree } from '@/types/models';
 
 // Mock the API client
-vi.mock('@/lib/api-client', () => ({
-  worktreeApi: {
-    getAll: vi.fn(),
-    getById: vi.fn(),
-    markAsViewed: vi.fn().mockResolvedValue({ success: true }),
-  },
-}));
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-client')>();
+  return {
+    ...actual,
+    worktreeApi: {
+      getAll: vi.fn(),
+      getById: vi.fn(),
+      markAsViewed: vi.fn().mockResolvedValue({ success: true }),
+    },
+  };
+});
 
 import { worktreeApi } from '@/lib/api-client';
 

@@ -28,12 +28,16 @@ vi.mock('next/navigation', () => ({
 }));
 
 // Mock the API client
-vi.mock('@/lib/api-client', () => ({
-  worktreeApi: {
-    getAll: vi.fn(),
-    getById: vi.fn(),
-  },
-}));
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-client')>();
+  return {
+    ...actual,
+    worktreeApi: {
+      getAll: vi.fn(),
+      getById: vi.fn(),
+    },
+  };
+});
 
 import { worktreeApi } from '@/lib/api-client';
 
