@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-02-20
+
+### Added
+- Memo card copy to clipboard functionality (Issue #321)
+
+### Fixed
+- Prompt response extraction limited to `lastCapturedLine` onwards to prevent stale data (Issue #326)
+
 ## [0.2.12] - 2026-02-20
 
 ### Added
@@ -496,7 +504,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.12...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.13...HEAD
+[0.2.13]: https://github.com/Kewton/CommandMate/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/Kewton/CommandMate/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/Kewton/CommandMate/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/Kewton/CommandMate/compare/v0.2.9...v0.2.10
