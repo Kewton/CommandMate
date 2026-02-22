@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-22
+
+### Added
+- Token authentication and HTTPS support (Issue #331)
+  - `CM_AUTH_TOKEN` for bearer token authentication
+  - HTTPS with self-signed or custom certificate support
+  - Login page UI with token input
+  - AuthContext and middleware for Edge Runtime compatibility
+  - Logout button with server-side auth status
+  - Security documentation for token auth and HTTPS setup
+- IP address/CIDR restriction for HTTP and WebSocket access (Issue #332)
+  - `CM_ALLOWED_IPS` environment variable for IP whitelist
+  - CIDR notation support for subnet ranges
+  - 401 redirect handling in API client with polling stop
+- Skills loader: display `.claude/skills` in slash command selector (Issue #343)
+  - YAML frontmatter parsing with regex fallback
+  - JSDoc documentation and TODO annotations per design policy
+
+### Changed
+- Auto-yes-manager refactored: decomposed `pollAutoYes()` into focused functions (Issue #323)
+  - Removed misleading type assertion in test
+- README rewritten with pain-first narrative elevator pitch
+- vitest updated to 4.0.16
+
+### Fixed
+- SKILL.md YAML frontmatter parse errors with quoted values (Issue #351)
+- Auth redirect handling in API client and polling stop on 401
+- Login page flicker eliminated by using AuthContext instead of async status fetch
+- LogoutButton flicker eliminated by using server-side auth status
+- next-intl v4 SSR timeZone configuration
+- Middleware made Edge Runtime compatible
+- Server TypeError prevention in handleRequestImpl on Node.js 19+
+- Slash command regex fallback for YAML-unfriendly SKILL.md frontmatter
+
 ## [0.2.13] - 2026-02-20
 
 ### Added
@@ -504,7 +538,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.2.13...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Kewton/CommandMate/compare/v0.2.13...v0.3.0
 [0.2.13]: https://github.com/Kewton/CommandMate/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/Kewton/CommandMate/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/Kewton/CommandMate/compare/v0.2.10...v0.2.11
