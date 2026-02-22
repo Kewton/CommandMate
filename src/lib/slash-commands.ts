@@ -139,10 +139,22 @@ function parseSkillFile(skillDirPath: string, skillName: string): SlashCommand |
       return null;
     }
     const content = fs.readFileSync(skillPath, 'utf-8');
-    const { data: frontmatter } = safeParseFrontmatter(content);
+    let name: string = skillName;
+    let description: string = '';
+    try {
+      const { data: frontmatter } = safeParseFrontmatter(content);
+      name = frontmatter.name || skillName;
+      description = frontmatter.description || '';
+    } catch {
+      // Fallback: SKILL.md may contain YAML-unfriendly characters (e.g., unquoted
+      // colons or brackets in argument-hint). Extract only name/description via regex.
+      const fmResult = extractFrontmatterFields(content);
+      name = fmResult.name || skillName;
+      description = fmResult.description || '';
+    }
     return {
-      name: truncateString(frontmatter.name || skillName, MAX_SKILL_NAME_LENGTH),
-      description: truncateString(frontmatter.description || '', MAX_SKILL_DESCRIPTION_LENGTH),
+      name: truncateString(name, MAX_SKILL_NAME_LENGTH),
+      description: truncateString(description, MAX_SKILL_DESCRIPTION_LENGTH),
       category: 'skill',
       source: 'skill',
       filePath: path.relative(process.cwd(), skillPath),
@@ -151,6 +163,29 @@ function parseSkillFile(skillDirPath: string, skillName: string): SlashCommand |
     console.error(`Error parsing skill file ${skillPath}:`, error);
     return null;
   }
+}
+
+/**
+ * Regex-based fallback to extract name and description from frontmatter.
+ *
+ * Used when safeParseFrontmatter() fails due to YAML parse errors (e.g., unquoted
+ * colons in argument-hint fields). Only extracts the two fields needed for the UI.
+ *
+ * @param content - Raw SKILL.md file content
+ * @returns Object with name and description (empty string if not found)
+ */
+export function extractFrontmatterFields(content: string): { name: string; description: string } {
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fmMatch) {
+    return { name: '', description: '' };
+  }
+  const fmBlock = fmMatch[1];
+  const nameMatch = fmBlock.match(/^name:\s*(.+)$/m);
+  const descMatch = fmBlock.match(/^description:\s*(.+)$/m);
+  return {
+    name: nameMatch ? nameMatch[1].trim() : '',
+    description: descMatch ? descMatch[1].trim() : '',
+  };
 }
 
 /**

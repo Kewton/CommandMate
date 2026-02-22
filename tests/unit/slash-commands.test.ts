@@ -532,6 +532,96 @@ describe('loadSkills', () => {
   });
 });
 
+describe('extractFrontmatterFields', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('should extract name and description from valid frontmatter', async () => {
+    const { extractFrontmatterFields } = await import('@/lib/slash-commands');
+    const result = extractFrontmatterFields('---\nname: my-skill\ndescription: A skill\n---\nBody');
+    expect(result.name).toBe('my-skill');
+    expect(result.description).toBe('A skill');
+  });
+
+  it('should extract fields from frontmatter with YAML-unfriendly characters', async () => {
+    const { extractFrontmatterFields } = await import('@/lib/slash-commands');
+    const content =
+      '---\nname: release\ndescription: Create a new release\nargument-hint: [version-type] (major|minor|patch) or [version] (e.g., 1.2.3)\n---\nBody';
+    const result = extractFrontmatterFields(content);
+    expect(result.name).toBe('release');
+    expect(result.description).toBe('Create a new release');
+  });
+
+  it('should return empty strings when no frontmatter is present', async () => {
+    const { extractFrontmatterFields } = await import('@/lib/slash-commands');
+    const result = extractFrontmatterFields('No frontmatter here');
+    expect(result.name).toBe('');
+    expect(result.description).toBe('');
+  });
+
+  it('should return empty strings when fields are missing from frontmatter', async () => {
+    const { extractFrontmatterFields } = await import('@/lib/slash-commands');
+    const result = extractFrontmatterFields('---\nallowed-tools: Bash\n---\nBody');
+    expect(result.name).toBe('');
+    expect(result.description).toBe('');
+  });
+});
+
+describe('loadSkills with YAML-unfriendly frontmatter', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should load skills even when frontmatter contains YAML-unfriendly characters', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-yaml-fallback');
+    const skillDir = path.join(testDir, '.claude', 'skills', 'release');
+    try {
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        '---\nname: release\ndescription: Create a new release\nargument-hint: [version-type] (major|minor|patch) or [version] (e.g., 1.2.3)\n---\nBody'
+      );
+
+      const { loadSkills } = await import('@/lib/slash-commands');
+      const skills = await loadSkills(testDir);
+
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('release');
+      expect(skills[0].description).toBe('Create a new release');
+      expect(skills[0].category).toBe('skill');
+      expect(skills[0].source).toBe('skill');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should fallback to directory name when regex extraction finds no name', async () => {
+    const testDir = path.resolve(__dirname, '../fixtures/test-yaml-fallback-noname');
+    const skillDir = path.join(testDir, '.claude', 'skills', 'my-tool');
+    try {
+      fs.mkdirSync(skillDir, { recursive: true });
+      // Frontmatter with no name field but with YAML-unfriendly content
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        '---\nargument-hint: [a] (e.g., 1.2.3)\n---\nBody'
+      );
+
+      const { loadSkills } = await import('@/lib/slash-commands');
+      const skills = await loadSkills(testDir);
+
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('my-tool');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('safeParseFrontmatter', () => {
   beforeEach(() => {
     vi.resetModules();
