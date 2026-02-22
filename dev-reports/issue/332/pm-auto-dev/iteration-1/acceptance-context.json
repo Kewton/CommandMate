@@ -1,0 +1,40 @@
+{
+  "issue_number": 332,
+  "feature_summary": "アクセス元IPの制限オプション - CM_ALLOWED_IPS環境変数によるIPアドレス/CIDRレンジ制限機能",
+  "acceptance_criteria": [
+    "環境変数 CM_ALLOWED_IPS でIPアドレス/CIDRレンジを指定できる（カンマ区切り複数指定）",
+    "許可リスト外のIPからのHTTPリクエストが403で拒否される",
+    "WebSocket接続にもIP制限が適用される（ws-server.tsでrequest.socket.remoteAddressを直接使用）",
+    "CM_ALLOWED_IPS 未設定時はIP制限なしで動作する（後方互換性）",
+    "既存のトークン認証（CM_AUTH_TOKEN_HASH）と独立して並列動作できる",
+    "CM_TRUST_PROXY=true の場合、X-Forwarded-For のIPを使用する",
+    "CM_TRUST_PROXY=false の場合、server.ts が X-Real-IP として注入し偽ヘッダーを防ぐ",
+    "IPv4-mapped IPv6アドレス（::ffff:x.x.x.x）が正しく処理される",
+    "Edge Runtime環境で動作する（Node.js固有モジュール不使用）",
+    "拒否時に 403 Forbidden を返す",
+    "--allowed-ips / --trust-proxy CLIオプションで設定できる",
+    "daemon.ts の authEnvKeys に CM_ALLOWED_IPS/CM_TRUST_PROXY が追加されdaemonモードで動作する",
+    "不正CIDR設定時にfail-fast（サーバー起動エラー）となる",
+    "IP制限テストがパスしている（単体テスト・結合テスト）",
+    "TypeScript型エラー0件・ESLintエラー0件",
+    "tsconfig.server.json に ip-restriction.ts が追加されており npm run build:server が成功する"
+  ],
+  "test_scenarios": [
+    "シナリオ1: CM_ALLOWED_IPS未設定時 - 全IPからアクセス可能（既存動作変化なし）",
+    "シナリオ2: CM_ALLOWED_IPS='192.168.1.0/24' 設定時 - 192.168.1.100 → 通過、10.0.0.1 → 403",
+    "シナリオ3: CM_ALLOWED_IPS='192.168.1.1' 設定時（/32相当）- 単一IPのみ許可",
+    "シナリオ4: CM_ALLOWED_IPS='192.168.1.0/24,10.0.0.0/8' 設定時 - 複数CIDRのOR判定",
+    "シナリオ5: IPv4-mapped IPv6（::ffff:192.168.1.1）が 192.168.1.1 として判定される",
+    "シナリオ6: 不正CIDR（999.0.0.0/24等）設定時 - サーバー起動エラー（fail-fast）",
+    "シナリオ7: CM_TRUST_PROXY=false - X-Real-IPが常にソケットアドレスで上書きされる",
+    "シナリオ8: IP制限 + トークン認証の併用 - IP制限が先に評価される",
+    "シナリオ9: WebSocket接続 - IP制限が適用される",
+    "シナリオ10: AUTH_EXCLUDED_PATHS（/login）もIP制限の対象となる",
+    "シナリオ11: CLIオプション --allowed-ips 'CIDR' - 環境変数に設定される",
+    "シナリオ12: daemonモード起動時 - CM_ALLOWED_IPS が子プロセスに転送される",
+    "シナリオ13: 単体テスト（ip-restriction.test.ts）45件全パス",
+    "シナリオ14: 結合テスト（auth-middleware.test.ts）IP制限分6件含む全17件パス",
+    "シナリオ15: npm run build:server が成功（tsconfig.server.json更新確認）"
+  ],
+  "tdd_result_path": "dev-reports/issue/332/pm-auto-dev/iteration-1/tdd-result.json"
+}

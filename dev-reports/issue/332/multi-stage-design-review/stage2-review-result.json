@@ -1,0 +1,121 @@
+{
+  "stage": 2,
+  "focus_area": "整合性",
+  "review_summary": "設計方針書と既存コードベースの整合性を7つの対象ファイルについて精査した。全体的に設計方針書は既存コードの構造・パターンを正確に理解した上で書かれているが、行番号の不正確さ、Envインターフェースへの新フィールド追加漏れ、authEnvKeys配列の既存内容の記載不正確さ、WebSocket upgradeスキップの行番号ズレ、middleware.tsのimportパターンとの非対称性など、実装時に混乱を招く可能性のある不整合が複数見つかった。",
+  "findings": [
+    {
+      "id": "S2-001",
+      "severity": "must_fix",
+      "category": "行番号・コード参照の不正確さ",
+      "title": "server.ts: WebSocket upgradeスキップの行番号がL121-123と記載されているが、実際はL120-123",
+      "description": "設計方針書Section 4.1で「L121-123のWebSocket upgradeスキップ」「L121のWebSocket upgradeスキップの前」と記載されているが、実際のserver.tsではL120が`if (req.headers['upgrade'])`、L121が`return;`、L122が`}`となっている。挿入位置の判断に影響するため、正確な行番号参照が必要。また、requestHandler内にX-Real-IPヘッダー注入コードを挿入する場合、L116のsetHeaderガード（`typeof (res as ...).setHeader !== 'function'`のチェック後）とL120のupgradeスキップの間に配置する必要がある。",
+      "suggestion": "L121-123をL120-123に修正し、挿入位置をL119（setHeaderガードのreturnの後）とL120（upgradeスキップのif文の前）の間と明記する。"
+    },
+    {
+      "id": "S2-002",
+      "severity": "must_fix",
+      "category": "Envインターフェース整合性",
+      "title": "src/lib/env.ts: EnvインターフェースにCM_ALLOWED_IPSとCM_TRUST_PROXYが未定義",
+      "description": "設計方針書Section 4.4でEnvインターフェースに`CM_ALLOWED_IPS?: string`と`CM_TRUST_PROXY?: string`を追加すると記載している。現在のEnvインターフェース（env.ts L172-196）にはIssue #331のフィールド（CM_AUTH_TOKEN_HASH, CM_AUTH_EXPIRE, CM_HTTPS_CERT, CM_HTTPS_KEY）が存在するが、CM_ALLOWED_IPSとCM_TRUST_PROXYは存在しない。しかし、重要な点として、現在のgetEnv()関数（L210-251）はEnvインターフェースに定義されたフィールドの一部（CM_AUTH_*やCM_HTTPS_*）をreturn値のオブジェクトに含めていない。これはEnvインターフェースが「宣言のみ」で実際のgetEnv()戻り値と乖離しているパターンを示している。設計方針書はこの既存の不整合パターンに合わせているが、ip-restriction.tsはprocess.envを直接読み取る設計（S1-003）であるため、Envインターフェースへの追加の実質的な必要性を明確にすべき。",
+      "suggestion": "Envインターフェースへの追加は型の完全性のために行うが、getEnv()の戻り値には含めない（既存のCM_AUTH_*パターンと同一）ことを設計方針書に明記する。または、ip-restriction.tsがprocess.envを直接読み取るためEnvインターフェースへの追加は不要と判断し、Section 4.4を削除する。"
+    },
+    {
+      "id": "S2-003",
+      "severity": "must_fix",
+      "category": "既存コード参照の不正確さ",
+      "title": "daemon.ts: authEnvKeysの既存5項目が正確だが、CM_ALLOW_HTTPの存在を設計方針書が前提としていることの確認",
+      "description": "設計方針書Section 4.5で既存のauthEnvKeysを5項目（CM_AUTH_TOKEN_HASH, CM_AUTH_EXPIRE, CM_HTTPS_CERT, CM_HTTPS_KEY, CM_ALLOW_HTTP）と記載し、これにCM_ALLOWED_IPSとCM_TRUST_PROXYを追加するとしている。実際のdaemon.ts L80の配列はまさにこの5項目で正確である。ただし、設計方針書では配列名を`authEnvKeys`としているが、IP制限関連の環境変数を追加した後もこの名前のままでよいか検討が必要。認証（auth）とIP制限（ip-restriction）は異なる機能であり、変数名が実態と乖離する。",
+      "suggestion": "authEnvKeysを`securityEnvKeys`等に改名するか、少なくとも設計方針書にコメントとして命名の意図（IP制限もセキュリティ関連であるためauthEnvKeysに含める）を明記する。ただし既存コードの変更範囲を最小化するためauthEnvKeysのままとする判断も妥当。"
+    },
+    {
+      "id": "S2-004",
+      "severity": "should_fix",
+      "category": "既存パターンとの整合性",
+      "title": "auth.tsのstoredTokenHashパターンとip-restriction.tsのallowedIpsEnvパターンの差異",
+      "description": "設計方針書Section 3.1 [S1-003]でauth.tsのstoredTokenHashパターンに倣うとしている。実際のauth.ts L36-46を確認すると、storedTokenHashはIIFE（即時実行関数式）で初期化され、バリデーション（isValidTokenHash）も含む複雑なロジックになっている。一方、設計方針書のallowedIpsEnvは`process.env.CM_ALLOWED_IPS?.trim() || ''`の単純な代入であり、パースエラーのfail-fast（parseAllowedIps()のthrow）はcachedRangesの初期化時に発生する。パターンとしては類似しているが、storedTokenHashがバリデーション失敗時にundefinedを返して機能を無効化するのに対し、ip-restriction.tsはパースエラー時にthrowしてプロセスを停止させる点が異なる。この差異は設計上意図的であるが、設計方針書でこの差異を明記すべき。",
+      "suggestion": "Section 3.1のS1-003コメントに「auth.tsのstoredTokenHashはバリデーション失敗時にundefinedで機能無効化するのに対し、ip-restriction.tsはセキュリティ機能としてfail-fast（throw）を採用。これはSection 5.4の設計判断に基づく」と差異を明記する。"
+    },
+    {
+      "id": "S2-005",
+      "severity": "should_fix",
+      "category": "middleware.ts処理フロー整合性",
+      "title": "middleware.tsのIP制限挿入位置と既存WebSocket upgradeチェックの順序関係",
+      "description": "設計方針書Section 4.2ではmiddleware.tsの先頭にIP制限チェックを挿入し、「Step 1: IP restriction check（全リクエスト）」と記載している。しかし現在のmiddleware.ts L65-82では、WebSocket upgradeリクエストに対する認証チェックが最初の処理として存在する。設計方針書のStep 1（IP制限）をWebSocket upgradeチェック（L70-82）の前に挿入すると、WebSocket upgradeリクエストもIP制限チェックの対象となる。これは設計意図（全リクエスト対象）と整合するが、WebSocket upgradeリクエストはws-server.tsでも独立にIP制限チェックされる（Section 4.3）ため、二重チェックとなる。defense-in-depthとして許容されるが、設計方針書にこの二重チェックの意図を明記すべき。",
+      "suggestion": "Section 4.2に「Note: WebSocket upgradeリクエストはmiddleware.ts（Edge Runtime）とws-server.ts（Node.js Runtime）の両方でIP制限チェックされる。これはdefense-in-depth（多層防御）として意図的な設計」とコメントを追加する。"
+    },
+    {
+      "id": "S2-006",
+      "severity": "should_fix",
+      "category": "import文パターン整合性",
+      "title": "middleware.tsの既存importパターンとip-restriction.tsからのimportの非対称性",
+      "description": "現在のmiddleware.ts L17では`import { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, computeExpireAt, isValidTokenHash } from './config/auth-config'`とconfig/ディレクトリからimportしている。設計方針書Section 4.2では`import { getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, getClientIp } from '@/lib/ip-restriction'`とlib/ディレクトリからimportする。パスエイリアスの使い方も異なる（既存は相対パス`./config/`、設計方針書は`@/lib/`）。middleware.tsでは相対パス（`../lib/ip-restriction`相当）と`@/`エイリアスの両方が使用可能だが、一貫性のために既存パターンに合わせるべき。",
+      "suggestion": "設計方針書のimport文を`import { getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, getClientIp } from '../lib/ip-restriction'`（相対パス）に統一するか、または既存のimportも`@/config/auth-config`に統一する方針を明記する。middleware.tsはsrc/直下にあるため、`@/lib/ip-restriction`は`./lib/ip-restriction`とも書ける。"
+    },
+    {
+      "id": "S2-007",
+      "severity": "should_fix",
+      "category": "CLIオプション定義の整合性",
+      "title": "StartOptionsインターフェースとcommander定義の--allowed-ips/--trust-proxy追加が既存パターンと整合するか",
+      "description": "設計方針書Section 4.6でStartOptionsに`allowedIps?: string`と`trustProxy?: boolean`を追加し、commanderに`.option('--allowed-ips <cidrs>', ...)`と`.option('--trust-proxy', ...)`を追加するとしている。現在のStartOptions（types/index.ts L34-59）とcommander定義（index.ts L41-69）を確認すると、Issue #331で追加された`auth`, `authExpire`, `cert`, `key`, `allowHttp`が存在する。設計方針書のパターンはこれらと整合しているが、start.tsのforegroundモード（L269-300）でのenv設定コードの追加が設計方針書に明示されていない。daemon.tsのauthEnvKeys拡張はSection 4.5で記載されているが、start.tsのforegroundモードでの`if (options.allowedIps) { env.CM_ALLOWED_IPS = options.allowedIps; }`の追加が抜けている。",
+      "suggestion": "Section 4.6にstart.tsのforegroundモードでの環境変数設定コードの追加を明記する。具体的には「start.ts L286-300のIssue #331環境変数設定ブロックの後に、CM_ALLOWED_IPSとCM_TRUST_PROXYの設定を追加」と記載する。"
+    },
+    {
+      "id": "S2-008",
+      "severity": "should_fix",
+      "category": "WebSocket認証チェックとの整合性",
+      "title": "ws-server.tsのIP制限チェック挿入位置がisAuthEnabled()の前であることの確認",
+      "description": "設計方針書Section 4.3で「upgradeハンドラー内、認証チェックの前に挿入」とし、ws-server.ts L79-90の`if (isAuthEnabled())`ブロックの前にIP制限チェックを挿入するとしている。実際のws-server.ts L63でserver.on('upgrade')のコールバックが開始され、L71-77でHMRパス（/_next/）のフィルタリングが行われ、L79-90で認証チェックが行われる。IP制限チェックの挿入位置はL78（HMRフィルタの後、認証チェックの前）が適切であり、設計方針書の記載と整合する。ただし、設計方針書ではws-server.tsのimportに`normalizeIp`が含まれているが、`getClientIp`は含まれていない。これはWebSocket upgradeでは`request.socket.remoteAddress`を直接使用するため`getClientIp()`は不要という設計判断だが、明示的に言及すべき。",
+      "suggestion": "Section 4.3に「WebSocket upgradeではrequest.socket.remoteAddressを直接使用するため、getClientIp()は不要。getClientIp()はHTTPリクエストヘッダー（X-Real-IP / X-Forwarded-For）からIP取得するための関数であり、WebSocket upgradeリクエストにはserver.tsのrequestHandlerが適用されないため」と注記を追加する。"
+    },
+    {
+      "id": "S2-009",
+      "severity": "nice_to_have",
+      "category": "login/route.tsとの設計整合性",
+      "title": "login/route.tsのL22-33の設計判断参照が実際のコードと整合するが曖昧",
+      "description": "設計方針書Section 4.1で「login/route.ts L22-33の設計判断と整合」と記載している。実際のlogin/route.ts L22-34にはrate limit keyに関する設計判断コメントがあり、「Do NOT trust X-Forwarded-For or X-Real-IP headers for rate limiting」という記述がある。設計方針書の参照は正確だが、参照先との整合ポイントが「X-Real-IPヘッダーの信頼性に関する設計判断」であることを明確にすべき。",
+      "suggestion": "Section 4.1のコメントを「login/route.ts L22-34のRate Limit Key設計判断（CM_TRUST_PROXY未設定時はヘッダーを信頼しない）と整合」に修正する。"
+    },
+    {
+      "id": "S2-010",
+      "severity": "nice_to_have",
+      "category": "security-messages.ts整合性",
+      "title": "Section 4.7のsecurity-messages.ts変更がREVERSE_PROXY_WARNINGの既存テキストとの整合性",
+      "description": "設計方針書Section 4.7でREVERSE_PROXY_WARNINGに`--allowed-ips`オプションの案内を追加するとしている。現在のsecurity-messages.ts L17-34にはRecommended authentication methodsとして`commandmate start --auth`が記載されている。`--allowed-ips`をここに追加する場合、認証方法（authentication methods）のリストにIP制限（access control）を混在させることになる。カテゴリとしては異なる概念であるため、別セクション（例: 'Recommended access controls'）として追加するか、既存セクションの名称を変更する方が適切。",
+      "suggestion": "REVERSE_PROXY_WARNINGの'Recommended authentication methods'セクションの後に'Additional access controls'セクションを追加し、そこに`--allowed-ips`を記載する。または'Recommended security measures'に名称変更する。"
+    },
+    {
+      "id": "S2-011",
+      "severity": "nice_to_have",
+      "category": "daemon.ts警告条件の整合性",
+      "title": "daemon.tsの警告表示条件にCM_ALLOWED_IPSチェック追加の影響確認",
+      "description": "設計方針書Section 4.7で「daemon.ts/start.tsの警告表示条件にCM_ALLOWED_IPSチェックを追加（設定済みなら警告を抑制）」とある。現在のdaemon.ts L92は`if (bindAddress === '0.0.0.0' && !env.CM_AUTH_TOKEN_HASH)`、start.ts L305は`if (bindAddress === '0.0.0.0' && !options.auth)`という条件で警告を表示している。CM_ALLOWED_IPSが設定されている場合に警告を抑制する変更は、「IP制限のみで外部公開する」ユースケースを許容することを意味する。これは妥当な設計判断だが、条件式の変更内容（`&& !env.CM_ALLOWED_IPS`をAND条件に追加）を設計方針書に明記すべき。",
+      "suggestion": "Section 4.7に具体的な条件式の変更を記載する。daemon.ts: `if (bindAddress === '0.0.0.0' && !env.CM_AUTH_TOKEN_HASH && !env.CM_ALLOWED_IPS)`、start.ts: `if (bindAddress === '0.0.0.0' && !options.auth && !options.allowedIps)`"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3,
+  "overall_assessment": "設計方針書は既存コードベースのパターン（auth.tsのモジュールスコープ初期化、daemon.tsの環境変数転送、middleware.tsの処理フロー）を概ね正確に理解しており、高い品質の設計が行われている。ただし、server.tsの行番号の不正確さ（S2-001）、Envインターフェース拡張の実質的必要性の不明確さ（S2-002）、start.tsのforegroundモードでの環境変数設定の記載漏れ（S2-007）は実装時の混乱を招く可能性があるため修正が必要。全体としてconditionally_approved（条件付き承認）とする。",
+  "status": "conditionally_approved",
+  "score": 4,
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/middleware.ts",
+    "src/lib/auth.ts",
+    "src/cli/utils/daemon.ts",
+    "src/cli/commands/start.ts",
+    "src/cli/types/index.ts",
+    "server.ts",
+    "src/lib/ws-server.ts",
+    "src/lib/env.ts",
+    "src/cli/index.ts",
+    "src/cli/config/security-messages.ts",
+    "src/config/auth-config.ts",
+    "src/app/api/auth/login/route.ts"
+  ],
+  "timestamp": "2026-02-22T00:00:00Z"
+}

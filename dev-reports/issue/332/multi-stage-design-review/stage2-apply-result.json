@@ -1,0 +1,15 @@
+{
+  "stage": 2,
+  "applied_count": 8,
+  "skipped_count": 0,
+  "changes": [
+    "S2-001: Section 4.1のWebSocket upgrade行番号をL121-123からL120-123に修正、挿入位置をL119後とL120の間に正確化",
+    "S2-002: Section 4.4にEnvインターフェース追加時のgetEnv()戻り値非包含の注記を追加（既存CM_AUTH_TOKEN_HASHパターン準拠）",
+    "S2-003: Section 4.5にauthEnvKeys名の維持方針（IP制限もセキュリティ機能の一部）の設計判断コメントを追加",
+    "S2-004: Section 3.1のモジュールスコープ初期化コメントにauth.tsのundefined無効化とip-restriction.tsのfail-fast(throw)の差異説明を追加",
+    "S2-005: Section 4.2にWebSocket upgradeリクエストのmiddleware.ts/ws-server.ts二重チェック（defense-in-depth）の意図コメントを追加",
+    "S2-006: Section 4.2のimportパスを'../lib/ip-restriction'（相対パス）に修正、Section 4.3のimportパスを'./ip-restriction'（同一ディレクトリ相対パス）に修正",
+    "S2-007: Section 4.6にstart.tsのforegroundモード環境変数設定ブロックへのCM_ALLOWED_IPS/CM_TRUST_PROXY追加を明記",
+    "S2-008: Section 4.3にws-server.tsでgetClientIp()を使用しない理由（socket.remoteAddress直接使用）の注記を追加"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "stage": 3,
+  "applied_count": 6,
+  "skipped_count": 0,
+  "changes": [
+    "S3-001: Section 7.2にテストsetup/teardownパターンを追加（beforeEach env削除、vi.resetModules()、不正値テストのdynamic importパターン）",
+    "S3-002: Section 11の影響範囲サマリーにtsconfig.server.json追加、ファイル数18->19更新、tsconfig.json確認注記追加",
+    "S3-003: Section 7.2にdaemon.test.tsのauthEnvKeys転送テストへのCM_ALLOWED_IPS/CM_TRUST_PROXYケース追加を記載",
+    "S3-004: Section 11にファイル別変更内容詳細テーブル（19ファイル分）を追加",
+    "S3-005: Section 4.1にserver.tsのWebSocket upgradeスキップによるX-Real-IPヘッダー注入のHTTPリクエスト限定注記を追加",
+    "S3-006: Section 3.1の冒頭コメントにCLIビルド互換性制約を追加（ip-restriction.tsはsrc/cli/から直接importしない）"
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "stage": 1,
+  "focus_area": "設計原則",
+  "review_summary": "Issue #332 IP制限設計方針書は、全体的に既存のauth(Issue #331)パターンに忠実で、SOLID/KISS/YAGNI/DRYの各原則への準拠度は高い。ただし、ws-server.tsにおけるparseAllowedIps()の毎回呼び出し（キャッシュ不整合）、isIpRestrictionEnabled()の環境変数直接参照によるテスタビリティ低下、ip-restriction-config.tsの過度な分離の3点に改善が必要。",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "must_fix",
+      "principle": "DRY",
+      "title": "ws-server.tsでのparseAllowedIps()毎回呼び出しによるキャッシュ戦略の不整合",
+      "description": "設計方針書Section 4.3で、ws-server.tsはupgradeハンドラー内で毎回parseAllowedIps(process.env.CM_ALLOWED_IPS || '')を呼び出す設計になっている。一方、middleware.tsではモジュールレベルキャッシュを使用している（Section 4.2）。同一のIP制限設定に対して2つの異なるパース戦略が存在することは、(1) パフォーマンスの非効率（WebSocket接続ごとにパース処理が走る）、(2) 保守性の低下（パース結果のキャッシュ方針をモジュール間で揃える必要がある）、(3) DRY違反（パース呼び出しパターンの重複）を引き起こす。middleware.tsのexpireAtキャッシュパターンと同様に、ws-server.tsでもモジュールレベルでキャッシュすべき。",
+      "suggestion": "ip-restriction.ts内にgetAllowedRanges()関数を追加し、モジュールレベルでパース結果をキャッシュする。middleware.tsとws-server.tsの両方がこの関数を呼ぶ設計に統一する。Edge Runtimeではモジュールスコープ変数、Node.jsでも同様にモジュールスコープで初期化する。具体例: const cachedRanges = isIpRestrictionEnabled() ? parseAllowedIps(process.env.CM_ALLOWED_IPS || '') : []; export function getAllowedRanges(): CidrRange[] { return cachedRanges; }"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "principle": "YAGNI",
+      "title": "ip-restriction-config.tsの過度なモジュール分離",
+      "description": "設計方針書Section 3.2で、IPV4_MAPPED_IPV6_PREFIX, IPV4_PATTERN, IPV4_CIDR_PATTERN, MAX_IPV4_PREFIX_LENGTHの4定数のみを格納するip-restriction-config.tsを新規作成する設計になっている。既存のauth-config.ts(src/config/)は複数の関数・定数を含み、middleware.tsとauth.tsの間で共有される必要があるため分離に意味がある。一方、ip-restriction-config.tsの定数はip-restriction.tsのみが使用する内部定数であり、外部から参照する必要がない。現時点で分離する理由が不十分であり、YAGNIに反する。",
+      "suggestion": "IPV4_MAPPED_IPV6_PREFIX等の定数はip-restriction.ts内にprivate定数（未export）として定義する。将来的にip-restriction.tsが肥大化した場合やEdge/Node.js間で定数を共有する必要が生じた場合に初めてconfig分離を検討する。auth-config.tsとの対称性は、実際の利用パターンが異なるため必須ではない。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "should_fix",
+      "principle": "SOLID",
+      "title": "isIpRestrictionEnabled()の環境変数直接参照によるDIP違反とテスタビリティ低下",
+      "description": "設計方針書Section 3.1で、isIpRestrictionEnabled()はprocess.env.CM_ALLOWED_IPSを直接参照する設計になっている。既存のauth.tsではstoredTokenHashをモジュール初期化時にキャプチャし、isAuthEnabled()はキャプチャ済みの値を返す設計（DIP準拠）。ip-restriction.tsのisIpRestrictionEnabled()が毎回process.envを参照する場合、テスト時にprocess.envを操作する必要があり、テスタビリティが低下する。また、middleware.tsのモジュールレベルキャッシュ（const allowedRanges = isIpRestrictionEnabled() ? parseAllowedIps(...) : []）との組み合わせで、isIpRestrictionEnabled()がtrueを返してもallowedRangesが空配列のまま（モジュールロード時にfalseだった場合）という不整合が起きる可能性がある。",
+      "suggestion": "auth.tsのstoredTokenHashパターンに倣い、ip-restriction.tsのモジュールスコープで環境変数を一度だけ読み取り、その値をisIpRestrictionEnabled()が返す設計にする。例: const allowedIpsEnv = process.env.CM_ALLOWED_IPS?.trim() || ''; export function isIpRestrictionEnabled(): boolean { return allowedIpsEnv.length > 0; }"
+    },
+    {
+      "id": "S1-004",
+      "severity": "should_fix",
+      "principle": "SOLID",
+      "title": "ip-restriction.tsのSRP観点での責務境界の明確化",
+      "description": "ip-restriction.tsは5つの関数（parseAllowedIps, isIpAllowed, normalizeIp, isIpRestrictionEnabled, getClientIp）を持つ。このうちgetClientIp()はHTTPヘッダーからのIP取得という「リクエスト解析」の責務であり、CIDRマッチングという「IP制限判定」の責務とは異なる。現状のモジュールサイズでは過度な分離は不要だが、getClientIp()はCM_TRUST_PROXYの判定ロジックを含むため、将来的にプロキシ関連の設定が増えた場合に肥大化リスクがある。",
+      "suggestion": "現時点では分離不要だが、JSDocコメントでgetClientIp()がリクエスト解析の責務であることを明記し、将来の分離ポイントとして意識的にマークする。例: /** Request parsing helper - may be extracted to a separate module if proxy config grows. */"
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "principle": "SOLID",
+      "title": "OCP観点: IPv6対応時の拡張性設計の不足",
+      "description": "設計方針書ではIPv6対応を「別Phase」として明示的に除外している（YAGNI準拠）。しかし、CidrRange interfaceのnetwork/maskフィールドが32bit unsigned integer固定であるため、IPv6対応時にはinterfaceの変更が必要になる（OCP違反）。parseAllowedIps()やisIpAllowed()の実装もIPv4前提のビット演算に依存する設計になっており、IPv6追加時の変更範囲が大きい。",
+      "suggestion": "YAGNI原則との兼ね合いから現時点で構造変更は不要。ただし、CidrRange interfaceのJSDocに「IPv4専用。IPv6対応時はCidrRangeV6を追加し、union型で対応する計画」等の設計意図を記録しておくと、将来の実装者にとって有益。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "title": "server.tsとws-server.tsでのIP取得ロジック分散",
+      "description": "設計方針書では、HTTPリクエストではserver.tsがX-Real-IPヘッダーを注入しgetClientIp()で取得、WebSocketではrequest.socket.remoteAddressを直接使用する。この2経路は技術的制約（Edge Runtimeの制約、WebSocket upgradeがrequestHandlerをスキップする点）から必然的に異なるが、IP取得の「意図」は同一であるにもかかわらず、取得メソッドが分散している。",
+      "suggestion": "ws-server.ts用にgetClientIpFromSocket(socket: { remoteAddress?: string }): string | nullのようなヘルパーをip-restriction.tsに追加し、normalizeIp()呼び出しを内包することで、呼び出し側でのnormalizeIp()忘れを防止する。設計方針書のSection 4.3のコードでnormalizeIp()を呼び出し側に委ねているのは、ミスの余地がある。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "title": "middleware.tsのIP制限挿入位置と既存認証フローの複雑性",
+      "description": "設計方針書Section 4.2では、IP制限チェックをmiddleware関数の最初（Step 1）に挿入する。これは正しいアプローチだが、現在のmiddleware.tsは既にWebSocket upgrade判定、認証未設定判定、除外パス判定、認証Cookie検証、リダイレクトという5段階のフローを持つ。IP制限追加で6段階となり、一つの関数の認知的複雑度が増加する。",
+      "suggestion": "現時点では許容範囲内だが、middleware.ts内のフローステップをコメントで明示的に番号付けし（Step 1: IP Restriction, Step 2: WebSocket upgrade, ...）、各ステップの責務と早期リターン条件を明記する。設計方針書では既に「Step 1」「Step 2-6」と記載されているため、実装時もこのコメント体系を維持すること。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "title": "daemon.tsのauthEnvKeys配列にIP制限用変数を追加する際のハードコード重複",
+      "description": "設計方針書Section 4.5で、daemon.tsのauthEnvKeysにCM_ALLOWED_IPSとCM_TRUST_PROXYを追加する設計になっている。しかし、現在のdaemon.ts(L80)ではauthEnvKeysが関数内リテラル配列として定義されており、env.tsのEnvインターフェースとの同期が手動である。環境変数名が増えるたびに両方を更新する必要があり、DRY原則への段階的な逸脱が懸念される。",
+      "suggestion": "Issue #332の範囲では設計方針書通りに追加すれば十分。ただし、将来的にセキュリティ関連環境変数が更に増える場合は、auth-config.tsまたは専用のsecurity-env-keys.tsに転送対象キーリストを定義してdaemon.tsから参照する設計を検討する。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 4,
+  "overall_assessment": "設計方針書は全体として高品質であり、既存のIssue #331認証機能のパターンに忠実に準拠している。KISS（自前CIDRマッチング）、YAGNI（IPv4のみ）、SRP（独立モジュール分離）の判断は適切。最大の問題点はws-server.tsでのparseAllowedIps()毎回呼び出しによるDRY/パフォーマンス問題（S1-001: must_fix）であり、middleware.tsのキャッシュ戦略と統一すべき。ip-restriction-config.tsの過度な分離（S1-002）とisIpRestrictionEnabled()のテスタビリティ（S1-003）も改善推奨。承認条件: S1-001を修正し、S1-002/S1-003を対応方針決定した上でconditionally_approvedとする。"
+}

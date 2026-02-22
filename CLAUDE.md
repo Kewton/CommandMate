@@ -129,7 +129,8 @@ tests/
 
 | モジュール | 説明 |
 |-----------|------|
-| `src/config/auth-config.ts` | 認証設定定数（Issue #331: AUTH_COOKIE_NAME、AUTH_EXCLUDED_PATHS、Edge Runtime互換、auth.ts/middleware.ts共通） |
+| `src/lib/ip-restriction.ts` | IPアドレス/CIDR制限コアモジュール（Issue #332: Edge Runtime互換、parseAllowedIps/getAllowedRanges/isIpAllowed/normalizeIp/isIpRestrictionEnabled/getClientIp、MAX_ALLOWED_IP_ENTRIES=256/MAX_CIDR_ENTRY_LENGTH=18 DoS防御、CM_TRUST_PROXY=true時X-Forwarded-For/false時X-Real-IP使用、モジュールスコープキャッシュ） |
+| `src/config/auth-config.ts` | 認証設定定数（Issue #331: AUTH_COOKIE_NAME、AUTH_EXCLUDED_PATHS、Edge Runtime互換、auth.ts/middleware.ts共通。Issue #332: CM_ALLOWED_IPS、CM_TRUST_PROXY追加） |
 | `src/lib/auth.ts` | トークン認証コアモジュール（Issue #331: generateToken/hashToken/verifyToken/parseDuration/parseCookies/isAuthEnabled/buildAuthCookieOptions/createRateLimiter、CLIビルド互換性制約: Next.js固有モジュール依存禁止） |
 | `src/middleware.ts` | 認証ミドルウェア（Issue #331: HTTPリクエスト認証、CM_AUTH_TOKEN_HASH未設定時は即NextResponse.next()、AUTH_EXCLUDED_PATHSの完全一致マッチング） |
 | `src/lib/env.ts` | 環境変数取得・フォールバック処理、getDatabasePathWithDeprecationWarning() |

@@ -1,0 +1,81 @@
+{
+  "stage": 4,
+  "applied_count": 6,
+  "skipped_count": 0,
+  "changes": [
+    "S4-001: getClientIp()のJSDocにX-Forwarded-For先頭IP使用の警告を追加（leftmost IP挿入リスク、リバースプロキシ上書き構成要件）",
+    "S4-001: Section 8のCM_TRUST_PROXY説明に「リバースプロキシがX-Forwarded-Forを正しく設定しない場合、IP制限バイパスが可能」警告を追加",
+    "S4-002: Section 3.1の内部定数リストにMAX_ALLOWED_IP_ENTRIES=256を追加（DoS防止）",
+    "S4-002: parseAllowedIps()のJSDocにエントリ数上限超過時のfail-fast仕様を追記",
+    "S4-003: Section 4.2に「IP制限はAUTH_EXCLUDED_PATHSの評価よりも前に実行される」注記を追加",
+    "S4-003: Section 5.5として「IP制限と認証の相互作用」セクションを新設",
+    "S4-004: Section 4.2のmiddleware.tsログ出力にnormalizeIp()適用と最大45文字切り詰めを追加",
+    "S4-004: Section 5.3のセキュリティログ説明にログインジェクション防止策を追記",
+    "S4-005: Section 3.1の内部定数リストにMAX_CIDR_ENTRY_LENGTH=18を追加",
+    "S4-005: parseAllowedIps()のJSDocに各エントリ18文字上限のfail-fast仕様を追記",
+    "S4-006: Section 3.1のモジュールスコープ初期化にCM_TRUST_PROXY値検証ロジックを追加",
+    "S4-006: Section 8のCM_TRUST_PROXY説明に有効値='true'のみ、非空非有効値への警告出力の設計を追加",
+    "Section 5.4の入力バリデーションにS4-002/S4-005のエントリ数/長さ上限チェックを追記",
+    "Section 12のレビュー履歴にStage 4を追記",
+    "Section 13にStage 4セキュリティレビュー指摘事項サマリー（11件: Must Fix 2件、Should Fix 5件、Nice to Have 4件）を追加",
+    "Section 14の実装チェックリストにStage 4 Must Fix（4項目）とStage 4 Should Fix（8項目）を追加"
+  ],
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "S4-001",
+        "title": "X-Forwarded-For先頭IP使用の危険性を文書化",
+        "sections_updated": ["3.1 getClientIp() JSDoc", "8 CM_TRUST_PROXY"],
+        "status": "reflected"
+      },
+      {
+        "id": "S4-002",
+        "title": "CIDRエントリ数上限の定義",
+        "sections_updated": ["3.1 内部定数", "3.1 parseAllowedIps() JSDoc", "5.4 入力バリデーション"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S4-003",
+        "title": "AUTH_EXCLUDED_PATHSとIP制限の順序明記",
+        "sections_updated": ["4.2 middleware.ts", "5.5 IP制限と認証の相互作用"],
+        "status": "reflected"
+      },
+      {
+        "id": "S4-004",
+        "title": "ログインジェクション防止",
+        "sections_updated": ["4.2 middleware.ts ログ出力", "5.3 セキュリティログ"],
+        "status": "reflected"
+      },
+      {
+        "id": "S4-005",
+        "title": "CIDRエントリ長上限",
+        "sections_updated": ["3.1 内部定数", "3.1 parseAllowedIps() JSDoc", "5.4 入力バリデーション"],
+        "status": "reflected"
+      },
+      {
+        "id": "S4-006",
+        "title": "CM_TRUST_PROXY値の検証",
+        "sections_updated": ["3.1 モジュールスコープ初期化", "8 CM_TRUST_PROXY"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-332-ip-restriction-design-policy.md",
+  "sections_updated": [
+    "3.1 ip-restriction.ts（内部定数、parseAllowedIps JSDoc、getClientIp JSDoc、モジュールスコープ初期化）",
+    "4.2 middleware.ts（AUTH_EXCLUDED_PATHS注記、ログインジェクション防止）",
+    "5.3 セキュリティログ（ログインジェクション防止策）",
+    "5.4 入力バリデーション（エントリ数/長さ上限チェック）",
+    "5.5 IP制限と認証の相互作用（新設）",
+    "8 CM_TRUST_PROXY（警告追加、値検証設計追加）",
+    "12 レビュー履歴（Stage 4追記）",
+    "13 レビュー指摘事項サマリー（Stage 4追加）",
+    "14 実装チェックリスト（Stage 4 Must Fix/Should Fix追加）"
+  ],
+  "timestamp": "2026-02-22T12:00:00Z"
+}

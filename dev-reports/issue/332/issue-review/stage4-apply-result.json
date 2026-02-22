@@ -1,0 +1,8 @@
+{
+  "stage": 4,
+  "issue_number": 332,
+  "applied_count": 8,
+  "skipped_count": 0,
+  "update_success": true,
+  "new_body_summary": "IF-001(Edge RuntimeのIP取得方法明確化)、IF-002(daemon.tsのauthEnvKeys追加を実装詳細に記載)、IF-003(CIDRテストケース詳細化)、IF-004(rate limiter連携をスコープ外化)、IF-005(CLIのindex.tsと型定義を影響ファイルに追加)、IF-006(セキュリティログ出力先明確化)、IF-007(env-setup.tsを影響ファイルに追加)、IF-010(CM_BIND=127.0.0.1時の注意事項追加)を反映"
+}

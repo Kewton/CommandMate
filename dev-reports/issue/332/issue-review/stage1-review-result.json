@@ -1,0 +1,148 @@
+{
+  "issue_number": 332,
+  "stage": 1,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-02-22",
+  "review_summary": "Issue #332 は「アクセス元 IP の制限オプション」という1行の概要のみで構成されており、機能要件・技術設計・受け入れ条件・セキュリティ考慮事項がすべて欠落している。既存の認証基盤（Issue #331）との関係性や統合方針も不明確であり、実装に着手するには大幅な情報補完が必要。",
+  "findings": [
+    {
+      "id": "MF-001",
+      "severity": "must_fix",
+      "category": "完全性",
+      "title": "Issue本文が概要1行のみで、機能要件が完全に欠落している",
+      "description": "Issue本文は「## 概要\\nアクセス元 IP の制限オプション」の1行のみ。IP制限の具体的な機能要件（CIDR表記対応、単一IP指定、IPv4/IPv6対応、複数IP指定等）が一切記載されていない。開発者がIssueから要件を読み取ることが不可能な状態。",
+      "suggestion": "以下の情報を追記すべき:\n- IP制限の形式（CIDR表記、単一IP、ワイルドカード等）\n- IPv4のみかIPv6もサポートするか\n- 許可リスト方式か拒否リスト方式か（allowlist vs blocklist）\n- 複数IPアドレス/CIDR範囲の指定可否\n- 制限の適用範囲（全リクエスト、API限定、WebSocket含む等）"
+    },
+    {
+      "id": "MF-002",
+      "severity": "must_fix",
+      "category": "完全性",
+      "title": "受け入れ条件が未定義",
+      "description": "受け入れ条件（Acceptance Criteria）のセクションが存在しない。何をもって完了とするのかが不明確であり、実装の完了判定ができない。",
+      "suggestion": "以下のような受け入れ条件を追加すべき:\n- [ ] 環境変数（例: CM_ALLOWED_IPS）でIPアドレス/CIDRを指定できる\n- [ ] 許可リスト外のIPからのリクエストが403で拒否される\n- [ ] WebSocketアップグレードにもIP制限が適用される\n- [ ] CM_BIND=127.0.0.1の場合はIP制限が無効でも安全\n- [ ] 既存の認証（CM_AUTH_TOKEN_HASH）と併用できる\n- [ ] ユニットテスト・結合テストが追加されている\n- [ ] docs/security-guide.mdが更新されている"
+    },
+    {
+      "id": "MF-003",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "既存認証システム（Issue #331）との関係性が未定義",
+      "description": "Issue #331で実装されたトークン認証（CM_AUTH_TOKEN_HASH、middleware.ts、auth.ts）との関係性が記載されていない。IP制限がトークン認証と併用されるのか、代替なのか、どの認証レイヤーで実装されるべきかが不明。現在のmiddleware.tsにはIP取得ロジックが存在せず、login/route.tsのコメント（L22-33）には「X-Forwarded-ForやX-Real-IPヘッダーを信頼しない」という明示的な設計判断がある。IP制限機能はこの設計判断と直接的に矛盾する可能性がある。",
+      "suggestion": "以下を明記すべき:\n- トークン認証（CM_AUTH_TOKEN_HASH）との併用関係（AND/OR/独立）\n- IP制限の実装レイヤー（middleware.ts拡張 vs 独立モジュール）\n- リバースプロキシ背後でのX-Forwarded-For信頼問題への対応方針（CM_TRUST_PROXYオプションとの連携。login/route.tsのL33に「A future CM_TRUST_PROXY option could enable per-IP limiting behind a proxy」という記載あり）\n- レート制限（createRateLimiter）との関係"
+    },
+    {
+      "id": "SF-001",
+      "severity": "should_fix",
+      "category": "技術的妥当性",
+      "title": "環境変数の設計が未記載",
+      "description": "既存の環境変数体系（CM_*プレフィックス、ENV_MAPPINGによるフォールバック、env.tsでのバリデーション）に沿った新しい環境変数の設計が記載されていない。IPアドレスリストの指定方法（カンマ区切り、セミコロン区切り等）も未定義。",
+      "suggestion": "以下の環境変数設計を検討・記載すべき:\n- CM_ALLOWED_IPS: 許可IPリスト（例: '192.168.1.0/24,10.0.0.0/8'）\n- CM_TRUST_PROXY: リバースプロキシの信頼設定（login/route.tsのコメントで言及済み）\n- env.tsのEnvインターフェースへの追加\n- CLIオプション（--allowed-ips等）の設計\n- getEnv()でのバリデーションロジック"
+    },
+    {
+      "id": "SF-002",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "セキュリティ上の考慮事項が未記載",
+      "description": "IP制限機能はセキュリティ機能であるにもかかわらず、セキュリティ上の考慮事項が一切記載されていない。IPスプーフィング、プロキシ経由のアクセス、IPv4/IPv6デュアルスタック環境での動作等の問題がある。",
+      "suggestion": "以下のセキュリティ考慮事項を記載すべき:\n- IPスプーフィング耐性（X-Forwarded-Forの信頼問題）\n- リバースプロキシ背後での正しいクライアントIP取得\n- IPv4-mapped IPv6アドレス（::ffff:192.168.1.1）の扱い\n- localhost（127.0.0.1 / ::1）の特別扱い\n- IP制限エラー時のレスポンス（403 vs 情報漏洩防止のため404等）\n- ログ出力（セキュリティイベントとしての記録）"
+    },
+    {
+      "id": "SF-003",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "Edge Runtime互換性の考慮が未記載",
+      "description": "現在のmiddleware.tsはEdge Runtimeで動作しており（auth-config.tsのコメント「CONSTRAINT: This module must be Edge Runtime compatible」）、Node.js固有のモジュール（net.isIP()、dns等）が使用できない。IP制限をmiddleware.tsに実装する場合、CIDR計算をEdge Runtime互換で実装する必要がある。",
+      "suggestion": "IP制限の実装場所を明確にし、Edge Runtime制約を考慮した設計方針を記載すべき:\n- middleware.ts（Edge Runtime）での実装: CIDRマッチングの自前実装が必要\n- API Route（Node.js Runtime）での実装: netモジュール使用可能\n- 外部ライブラリ（cidr-matcher等）のEdge Runtime互換性確認"
+    },
+    {
+      "id": "SF-004",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "WebSocket接続へのIP制限適用方針が未記載",
+      "description": "ws-server.tsではupgradeイベントハンドラーで認証を行っている。IP制限をHTTPリクエストとWebSocket接続の両方に適用するかどうか、適用する場合の実装方針が未記載。IncomingMessageからのIP取得方法（request.socket.remoteAddress）の扱いも未定義。",
+      "suggestion": "WebSocket接続でのIP制限について以下を明記すべき:\n- upgradeハンドラーでのIP取得方法（request.socket.remoteAddress）\n- middleware.tsでのWebSocket upgradeリクエストのIP制限\n- 両レイヤーでの二重チェック（defense-in-depth）の要否"
+    },
+    {
+      "id": "SF-005",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "CLIコマンドとの統合方針が未記載",
+      "description": "Issue #331では--authオプションがCLI（start.ts）に追加された。IP制限も同様にCLIオプション（例: --allowed-ips）として提供するのか、環境変数のみで設定するのかが未定義。また、commandmate initでのインタラクティブ設定（init.ts）への統合も未検討。",
+      "suggestion": "以下を明記すべき:\n- CLIオプション設計（--allowed-ips 'CIDR1,CIDR2'等）\n- commandmate init での対話的設定\n- .envファイルへの自動書き出し\n- commandmate statusでの表示"
+    },
+    {
+      "id": "NTH-001",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "ドキュメント更新計画が未記載",
+      "description": "IP制限機能の追加に伴い、security-guide.md、DEPLOYMENT.md、CLAUDE.md等のドキュメント更新が必要だが、その計画が記載されていない。",
+      "suggestion": "以下のドキュメント更新を計画に含めるべき:\n- docs/security-guide.md: IP制限の設定方法、セキュリティチェックリストへの追加\n- docs/en/DEPLOYMENT.md: 環境変数リストへの追加\n- CLAUDE.md: Envインターフェースの更新記録"
+    },
+    {
+      "id": "NTH-002",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "関連Issueへの参照が未記載",
+      "description": "直接関連するIssue #331（トークン認証・HTTPS対応）への参照がない。また、login/route.tsで言及されている「将来的なCM_TRUST_PROXYオプション」との関連も記載されていない。",
+      "suggestion": "以下の関連Issueを参照として追加すべき:\n- #331: トークン認証・HTTPS対応（認証基盤の前提となるIssue）\n- login/route.tsのCM_TRUST_PROXYコメント（L33）との関連"
+    },
+    {
+      "id": "NTH-003",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "ユースケース・動機が未記載",
+      "description": "なぜIP制限が必要なのか（動機・ユースケース）が記載されていない。トークン認証（#331）やCM_BIND=127.0.0.1（デフォルト）ではカバーできないシナリオが何であるかが不明確。",
+      "suggestion": "以下のようなユースケースを記載すべき:\n- LAN内の特定端末のみアクセスを許可したい\n- リバースプロキシなしでアクセス元を制限したい\n- トークン認証に加えた多層防御（defense-in-depth）として使用したい"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3
+  },
+  "code_references": [
+    {
+      "file": "src/middleware.ts",
+      "relevance": "IP制限の主要な実装候補。現在Edge Runtime制約あり。"
+    },
+    {
+      "file": "src/lib/auth.ts",
+      "relevance": "既存認証基盤。createRateLimiter()でIPキーを使用するが、現在はグローバルキー固定。"
+    },
+    {
+      "file": "src/config/auth-config.ts",
+      "relevance": "Edge Runtime互換の認証設定。IP制限設定もEdge互換が必要。"
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "環境変数管理。新規IP制限環境変数の追加先。Envインターフェースへの追加が必要。"
+    },
+    {
+      "file": "src/lib/ws-server.ts",
+      "relevance": "WebSocket接続のIP制限実装候補。upgradeハンドラーでIP取得可能。"
+    },
+    {
+      "file": "src/app/api/auth/login/route.ts",
+      "relevance": "L22-33にX-Forwarded-For信頼問題とCM_TRUST_PROXY将来構想の記載あり。"
+    },
+    {
+      "file": "src/cli/commands/start.ts",
+      "relevance": "CLIオプション追加候補（--allowed-ips等）。"
+    },
+    {
+      "file": "src/cli/config/security-messages.ts",
+      "relevance": "セキュリティ警告メッセージ。IP制限未設定時の警告追加候補。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/security-guide.md",
+      "relevance": "セキュリティガイド。IP制限のドキュメント追加先。"
+    },
+    {
+      "file": "dev-reports/design/issue-331-token-auth-design-policy.md",
+      "relevance": "認証基盤の設計方針書。IP制限との統合方針の参考。"
+    }
+  ],
+  "overall_assessment": "Issue #332は概要1行のみで構成されており、実装に着手するには情報が極めて不足している。特に、既存のトークン認証基盤（Issue #331）との統合方針、X-Forwarded-For信頼問題（既にlogin/route.tsで明示的な設計判断済み）との整合性、Edge Runtime制約下でのCIDRマッチング実装方針が重要な検討事項である。Must Fixの3件（機能要件・受け入れ条件・既存認証との関係性）を最低限補完しない限り、開発に着手すべきではない。"
+}

@@ -1,0 +1,116 @@
+{
+  "stage": 7,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_date": "2026-02-22",
+  "review_summary": "Issue #332はStage 1～6の6段階レビューを経て、影響範囲の網羅性が大幅に改善された。Stage 3で指摘したIF-001（Edge RuntimeでのクライアントIP取得方法）とIF-002（daemon.tsのauthEnvKeysリスト拡張）は共にIssue本文に反映済みであり、解消を確認した。IF-003～IF-010の8件もStage 4/6で適切に反映されている。今回の2回目影響範囲レビューでは、実際のソースコードを精査した結果、Must Fixの指摘は0件であった。新規のShould Fix 3件とNice to Have 2件を検出したが、いずれも実装フェーズで対応可能なレベルであり、Issueの完成度としては十分に高い。",
+  "previous_stage_resolution": {
+    "stage3_if001_resolved": true,
+    "stage3_if002_resolved": true,
+    "stage3_if003_resolved": true,
+    "stage3_if004_resolved": true,
+    "stage3_if005_resolved": true,
+    "stage3_if006_resolved": true,
+    "stage3_if007_resolved": true,
+    "stage3_if008_resolved": false,
+    "stage3_if009_resolved": true,
+    "stage3_if010_resolved": true,
+    "stage5_s5f001_resolved": true,
+    "stage5_s5f002_resolved": true,
+    "stage5_s5f003_resolved": true,
+    "details": "IF-001（Edge RuntimeでのIP取得方法）: 解消 - 「Edge Runtime制約とクライアントIP取得方法」セクションが新設され、server.tsでreq.socket.remoteAddressをX-Real-IPヘッダーとして注入するアプローチが明記済み。CM_TRUST_PROXY=trueの場合はX-Forwarded-Forの先頭IPを使用することも記載。IF-002（daemon.tsのauthEnvKeys）: 解消 - 影響ファイル一覧にdaemon.tsが明記され「authEnvKeysリストにCM_ALLOWED_IPS/CM_TRUST_PROXYを追加（必須：漏れるとdaemonモードでIP制限が機能しない）」と警告付きで記載。受け入れ条件にも含まれている。IF-003（CIDRテストケース）: 解消 - 受け入れ条件に具体的なテストケース6項目（IPv4 CIDR、IPv6 CIDR、IPv4-mapped IPv6正規化、不正CIDR fail-fast、複数CIDR OR判定、結合テスト）が追加済み。IF-004（rate limiter連携）: 解消 - 「rate limiterとの関係」セクションで「IPベースrate limiting連携はスコープ外とし、別Issueとして分離する」と明記。IF-005（CLI types/index.ts更新）: 解消 - 影響ファイル一覧にcli/types/index.ts、cli/index.tsが明記済み。IF-006（セキュリティログ出力先）: 解消 - 「セキュリティログ」項目でEdge Runtime: console.warn、Node.js: security-loggerの使い分けが明記済み。IF-007（env-setup.tsのcreateEnvFile）: 解消 - 影響ファイル一覧にenv-setup.tsが明記済み。IF-008（テストモック構造）: 未解消 - auth-middleware.test.tsのモック構造にIP情報のモック方法は依然として未記載だが、これはNice to Have（実装フェーズで解決可能）。IF-009（CIDR実装方針）: 解消 - 「CIDRマッチングライブラリ vs 自前実装」セクションで判断基準が記載済み。IF-010（CM_BIND=127.0.0.1時の注意）: 解消 - 「CM_BIND=127.0.0.1時の注意」セクションが追加済み。S5F-001（server.ts影響ファイル一覧追加）: 解消 - server.tsが影響ファイル一覧に追加済み。S5F-002（middleware.tsのIP制限挿入位置）: 解消 - 「CM_AUTH_TOKEN_HASH未設定時のearly return処理よりも前にIP制限チェックを配置」と明記済み。S5F-003（X-Real-IP偽装防御）: 解消 - 「クライアントから送信された偽のX-Real-IPヘッダーを常に上書き」と明記済み。"
+  },
+  "findings": [
+    {
+      "id": "IF7-001",
+      "severity": "should_fix",
+      "category": "影響範囲・実装整合性",
+      "title": "server.tsのrequestHandlerでのX-Real-IPヘッダー注入がWebSocket upgradeリクエストに適用されない構造上の問題",
+      "description": "現在のserver.ts L112-137のrequestHandler関数はHTTPリクエスト用のハンドラーであり、L121-123でWebSocket upgradeリクエストを明示的にスキップ（early return）している。一方、WebSocket upgradeリクエストはserver.onのupgradeイベント経由でws-server.tsのsetupWebSocket()に直接渡される（L162: setupWebSocket(server as import('http').Server)）。このため、server.tsのrequestHandler内にX-Real-IPヘッダー注入ロジックを追加しても、WebSocket upgradeリクエストには適用されない。Issueでは「middleware.tsではrequest.headers.get('x-real-ip')でIPを取得」と記載しているが、middleware.tsのWebSocket upgrade処理（L66-82）で使用されるリクエストオブジェクトにもX-Real-IPが注入されている必要がある。middleware.tsのWebSocket upgrade処理とHTTP処理で異なるIP取得経路になる可能性がある。WebSocket upgradeリクエストの場合、Next.jsのmiddleware経由で処理されるか、server.tsのupgradeイベントで直接ws-server.tsに渡されるかはNode.jsバージョンやNext.js内部実装に依存する。",
+      "suggestion": "以下の2点をIssueに明記すべき:\n(1) server.tsのrequestHandler内でX-Real-IPを注入する場合、L121-123のWebSocket upgradeスキップ処理の前にヘッダー注入が必要。ただしWebSocket upgradeリクエストはreqオブジェクトが共有されないため、upgradeイベントハンドラーでも個別にX-Real-IPを注入するか、ws-server.tsでrequest.socket.remoteAddressを直接使用する方針を明確化する。\n(2) 推奨方針: HTTPリクエストはserver.ts requestHandlerでX-Real-IP注入 -> middleware.tsでheaders.get('x-real-ip')参照。WebSocket upgradeリクエストはws-server.tsでrequest.socket.remoteAddressを直接使用（middleware.tsのWebSocket処理は既にws-server.tsのdefense-in-depthであるため、IP取得方法が異なっても問題ない）。"
+    },
+    {
+      "id": "IF7-002",
+      "severity": "should_fix",
+      "category": "影響範囲・テスト",
+      "title": "middleware.tsのモジュールレベル変数（expireAt）と同様にCM_ALLOWED_IPSのパース結果をモジュールレベルでキャッシュする場合のテスト影響",
+      "description": "現在のmiddleware.ts L20でexpireAtがモジュールロード時に一度だけ計算されキャッシュされている。同様にCM_ALLOWED_IPSのパース結果（CIDR配列への変換）もモジュールロード時にキャッシュする設計が想定される。しかし、テストファイルauth-middleware.test.tsではvi.resetModules()を使用してモジュールを毎テストケースで再ロードすることでprocess.envの変更を反映させている（L56, L103-104など）。CM_ALLOWED_IPSのパース結果もモジュールレベルキャッシュとする場合、同じvi.resetModules()パターンで対応可能だが、テストケースが大幅に増加する（IP制限あり/なし x 認証あり/なし の組み合わせ）。テスト実行時間への影響を考慮すると、ip-restriction.tsを独立モジュールとして切り出し、middleware.tsからはfunction呼び出しで都度チェックする方が、テスタビリティが高い。",
+      "suggestion": "ip-restriction.tsの設計で以下を考慮すべき:\n- parseAllowedIps(envValue: string): CidrRange[] をpure functionとして公開し、middleware.tsではモジュールレベルでconst allowedRanges = parseAllowedIps(process.env.CM_ALLOWED_IPS || '')のように初期化する\n- isIpAllowed(ip: string, ranges: CidrRange[]): boolean もpure functionとして公開\n- テストではip-restriction.tsのpure functionを直接テストし、middleware.tsの結合テストではvi.resetModules()パターンで環境変数の変更を反映\n- この設計により、テスタビリティ、DRY原則、SRP原則を全て満たせる"
+    },
+    {
+      "id": "IF7-003",
+      "severity": "should_fix",
+      "category": "影響範囲・既存コード整合性",
+      "title": "middleware.tsのWebSocket upgrade処理（L66-82）にIP制限を追加する場合の処理フロー整合性",
+      "description": "現在のmiddleware.ts L65-106の処理フローは、WebSocket upgradeリクエストをL66-82で独立して処理し、認証が必要な場合のみCookieチェックを行ってearly returnする構造になっている。Issueでは「CM_AUTH_TOKEN_HASH未設定時のearly return処理よりも前にIP制限チェックを配置」（L84-87の前）と記載しているが、WebSocket upgradeの処理ブロック（L66-82）もL84-87より前に位置しており、WebSocket upgradeリクエストのIP制限はL66-82の内部で行うのか、L66の前にIP制限チェックを配置してWebSocketを含む全リクエストに先に適用するのか、2通りの解釈が可能である。前者の場合、WebSocket upgrade処理のL70-74の「認証未有効時のNextResponse.next()」の前にもIP制限チェックを挿入する必要がある。後者の場合、処理フローがよりシンプルだが、IP制限で403を返した後にWebSocket upgradeリクエストのクリーンアップが必要かの考慮が必要。",
+      "suggestion": "middleware.tsへの具体的なIP制限挿入箇所を擬似コードで示すとよい:\n```\nexport async function middleware(request: NextRequest) {\n  // Step 1: IP restriction check (ALL requests including WebSocket)\n  if (isIpRestrictionEnabled()) {\n    const clientIp = getClientIp(request); // x-real-ip or x-forwarded-for\n    if (!isIpAllowed(clientIp, allowedRanges)) {\n      return new NextResponse(null, { status: 403 });\n    }\n  }\n\n  // Step 2: WebSocket upgrade (existing L66-82)\n  if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') { ... }\n\n  // Step 3: Auth skip if not enabled (existing L84-87)\n  if (!process.env.CM_AUTH_TOKEN_HASH) { return NextResponse.next(); }\n\n  // Step 4: Excluded paths (existing L92-94)\n  // Step 5: Cookie auth check (existing L97-100)\n  // Step 6: Redirect to login (existing L103-105)\n}\n```"
+    },
+    {
+      "id": "IF7-004",
+      "severity": "nice_to_have",
+      "category": "テスト範囲",
+      "title": "auth-middleware.test.tsのcreateMockRequestにヘッダー注入テスト用のx-real-ipフィールドが必要",
+      "description": "tests/integration/auth-middleware.test.ts L65-89のcreateMockRequest関数は、pathname、cookies、headersの3引数を受け取る。headersはRecord<string, string>型でrequest.headers.get()をモックしている。IP制限テストを追加する場合、headersに'x-real-ip'や'x-forwarded-for'を渡してIP制限の動作を検証する必要がある。現在のモック構造はこれに対応可能（headers引数に任意のキーを渡せる）だが、テストケース設計としてIP制限用のヘルパー関数（例: createMockRequestWithIp(pathname, ip, options?)）を追加するとテストの可読性が向上する。",
+      "suggestion": "テスト実装時に以下のヘルパーを検討:\nfunction createMockRequestWithIp(pathname: string, ip: string, options?: { cookies?: Record<string, string>, trustProxy?: boolean }) {\n  const headers: Record<string, string> = trustProxy ? { 'x-forwarded-for': ip } : { 'x-real-ip': ip };\n  return createMockRequest(pathname, options?.cookies || {}, headers);\n}"
+    },
+    {
+      "id": "IF7-005",
+      "severity": "nice_to_have",
+      "category": "依存関係・ドキュメント",
+      "title": "security-messages.tsのREVERSE_PROXY_WARNINGへのIP制限オプション案内追加が影響ファイル一覧に未記載",
+      "description": "src/cli/config/security-messages.ts L17-34のREVERSE_PROXY_WARNINGは、CM_BIND=0.0.0.0かつ認証未有効時に表示される警告メッセージで、推奨認証方法として「commandmate start --auth」「Nginx + Basic Auth」「Cloudflare Access」「Tailscale」を列挙している。Issue #332で--allowed-ipsオプションが追加された場合、この警告メッセージに「commandmate start --allowed-ips '192.168.1.0/24'」を推奨オプションとして追加することが自然であるが、Issueの影響ファイル一覧にsecurity-messages.tsが含まれていない（Stage 3のcode_referencesでは言及されていたが、影響ファイル一覧としては漏れている）。また、daemon.ts L92の条件式（bindAddress === '0.0.0.0' && !env.CM_AUTH_TOKEN_HASH）にCM_ALLOWED_IPSの存在チェックを追加するかの判断も必要（IP制限設定済みなら警告を抑制すべきか）。",
+      "suggestion": "以下を検討してIssueの影響ファイルまたはドキュメント更新計画に追加:\n- src/cli/config/security-messages.ts: REVERSE_PROXY_WARNINGの推奨認証方法にIP制限を追加\n- src/cli/utils/daemon.ts L92: 条件式を(bindAddress === '0.0.0.0' && !env.CM_AUTH_TOKEN_HASH && !env.CM_ALLOWED_IPS)に変更するか検討\n- src/cli/commands/start.ts L305: 同様に条件式にCM_ALLOWED_IPSチェックを追加するか検討"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 2,
+  "code_references": [
+    {
+      "file": "server.ts",
+      "lines": "112-137",
+      "relevance": "requestHandler関数。L121-123でWebSocket upgradeリクエストをスキップしているため、X-Real-IPヘッダー注入がWebSocketに適用されない構造上の問題（IF7-001）。"
+    },
+    {
+      "file": "src/middleware.ts",
+      "lines": "65-106",
+      "relevance": "IP制限チェック挿入箇所。L66-82のWebSocket upgrade処理ブロック、L84-87のCM_AUTH_TOKEN_HASH未設定early return、L92-94のAUTH_EXCLUDED_PATHSとの処理順序の明確化が必要（IF7-003）。"
+    },
+    {
+      "file": "src/middleware.ts",
+      "lines": "20",
+      "relevance": "expireAtのモジュールレベルキャッシュ。CM_ALLOWED_IPSも同パターンでキャッシュする場合のテスト影響（IF7-002）。"
+    },
+    {
+      "file": "src/lib/ws-server.ts",
+      "lines": "63-95",
+      "relevance": "WebSocket upgradeハンドラー。request.socket.remoteAddressからのIP直接取得が可能。server.tsのX-Real-IP注入とは独立した経路（IF7-001）。"
+    },
+    {
+      "file": "tests/integration/auth-middleware.test.ts",
+      "lines": "65-89",
+      "relevance": "createMockRequest関数。headersパラメータでx-real-ipモックが可能な構造。IP制限テスト用ヘルパー追加の検討（IF7-004）。"
+    },
+    {
+      "file": "src/cli/config/security-messages.ts",
+      "lines": "17-34",
+      "relevance": "REVERSE_PROXY_WARNING。IP制限オプションの案内追加候補。daemon.ts/start.tsの警告表示条件にCM_ALLOWED_IPSチェック追加の検討（IF7-005）。"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "lines": "78-85, 88-93",
+      "relevance": "authEnvKeysリストとREVERSE_PROXY_WARNING表示条件。CM_ALLOWED_IPS/CM_TRUST_PROXYの追加はIssueに記載済み（IF-002解消確認済み）。警告表示条件のIP制限考慮が未記載（IF7-005）。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/security-guide.md",
+      "relevance": "IP制限セクション追加先。Issueのドキュメント更新計画に記載済み。"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "新規モジュール・環境変数の追記先。Issueのドキュメント更新計画に記載済み。"
+    }
+  ],
+  "overall_assessment": "Issue #332は6段階のレビューサイクルを経て、影響範囲の網羅性において極めて高い品質に達している。Stage 3で指摘した10件の指摘事項のうち9件が解消済み（残り1件IF-008はテスト実装フェーズで解決可能なNice to Have）であり、Stage 5で指摘した3件のShould Fixも全て解消済みである。今回の2回目影響範囲レビューではMust Fixの指摘は0件であり、検出した3件のShould Fixは実装フェーズでの設計判断を補助するレベルの指摘である。特にIF7-001（server.tsのWebSocket upgradeとX-Real-IP注入の関係）は実装時に直面する具体的な技術課題であり、事前に方針を決めておくことで手戻りを防げる。IF7-003（middleware.tsへのIP制限挿入擬似コード）は実装者の理解を助ける補助情報として有用。総合的に、このIssueは実装着手に十分な品質と判断する。影響範囲は適切に特定されており、後方互換性も担保されている。"
+}

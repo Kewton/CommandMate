@@ -1,0 +1,8 @@
+{
+  "stage": 6,
+  "issue_number": 332,
+  "applied_count": 5,
+  "skipped_count": 0,
+  "update_success": true,
+  "new_body_summary": "S5F-001(server.tsを影響ファイル一覧に追加)、S5F-002(IP制限チェック挿入位置を修正：CM_AUTH early returnより前)、S5F-003(CM_TRUST_PROXY=false時のX-Real-IP上書き防御を追加)を反映。受け入れ条件にserver.tsの偽ヘッダー防止チェックと不正CIDR時のfail-fast動作を追加"
+}
