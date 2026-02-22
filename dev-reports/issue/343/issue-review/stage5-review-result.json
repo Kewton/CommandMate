@@ -1,0 +1,134 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_focus": "通常",
+  "review_date": "2026-02-22",
+  "issue_number": 343,
+  "previous_findings_resolved": {
+    "F002": true,
+    "F003": true,
+    "F101": true,
+    "F102": true,
+    "F103": true
+  },
+  "previous_findings_resolution_details": {
+    "F002": {
+      "resolved": true,
+      "evidence": "Issue の変更候補テーブル src/types/slash-commands.ts に「SlashCommandSource に 'skill' を追加」が明記されている。受け入れ条件 6 にも「SlashCommandSource 型に 'skill' が追加されており、API レスポンスの sources カウントに反映される」と記載されている。"
+    },
+    "F003": {
+      "resolved": true,
+      "evidence": "Issue の変更候補テーブル src/lib/command-merger.ts に「CATEGORY_ORDER に 'skill' カテゴリを追加（custom カテゴリと standard カテゴリの間に配置を推奨）」と明記されている。"
+    },
+    "F101": {
+      "resolved": true,
+      "evidence": "Issue の変更候補テーブル src/types/slash-commands.ts に「CATEGORY_LABELS に skill: 'Skills' を追加」と明記されており、Record 型の全キー制約による必須同時変更であることも括弧内で説明されている。受け入れ条件 9 にも「CATEGORY_LABELS に skill: 'Skills' が追加され、TypeScript コンパイルエラーが発生しない」と記載されている。"
+    },
+    "F102": {
+      "resolved": true,
+      "evidence": "Issue の変更候補テーブル route.ts に「SlashCommandsResponse.sources に skill: number フィールドを追加」「カウント計算ロジックに cmd.source === 'skill' のフィルタを追加」と明記されている。受け入れ条件 6 でも sources カウントへの反映が確認できる。"
+    },
+    "F103": {
+      "resolved": true,
+      "evidence": "Issue の変更候補テーブル src/lib/slash-commands.ts に「skillsCache を commandsCache とは別変数として管理し、clearCache() で両方をクリアする」「filterCommands() は commandsCache のみを対象とし skills は検索対象外とする（初期実装）」と明記されている。受け入れ条件 10 にも「skillsCache が commandsCache とは独立して管理され、clearCache() で両方がクリアされる」と記載されている。"
+    }
+  },
+  "findings": [
+    {
+      "id": "F201",
+      "severity": "should_fix",
+      "category": "accuracy",
+      "title": "CATEGORY_ORDER の配置推奨「custom カテゴリと standard カテゴリの間」に 'custom' カテゴリが存在しない",
+      "description": "Issue の変更候補テーブルの command-merger.ts 行に「CATEGORY_ORDER に 'skill' カテゴリを追加（custom カテゴリと standard カテゴリの間に配置を推奨）」と記載されているが、SlashCommandCategory 型には 'custom' というカテゴリが定義されておらず、CATEGORY_ORDER 配列にも存在しない。実際の CATEGORY_ORDER は ['planning', 'development', 'review', 'documentation', 'workflow', 'standard-session', 'standard-config', 'standard-monitor', 'standard-git', 'standard-util'] の10カテゴリである。Issue の意図は「worktree カスタムコマンドカテゴリ群（planning 等）と standard コマンドカテゴリ群（standard-session 等）の間」であると推測されるが、「custom カテゴリ」という記述は不正確であり、実装時に混乱を招く。",
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル - src/lib/command-merger.ts",
+      "suggestion": "「custom カテゴリと standard カテゴリの間に配置を推奨」を「workflow カテゴリと standard-session カテゴリの間に配置を推奨（CATEGORY_ORDER の6番目の位置）」に修正する。これにより実装者が正確な挿入位置を把握できる。"
+    },
+    {
+      "id": "F202",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "skills ディレクトリ走査時のセキュリティ考慮が依然として不足",
+      "description": "Stage 1 の F006 で指摘された「skills ディレクトリ走査時のパストラバーサルリスク（シンボリックリンク経由のディレクトリ脱出）」に対するセキュリティ考慮が、更新後の Issue にも記載されていない。既存の commands 読み込み（slash-commands.ts:75）は readdirSync でフラットに .md ファイルを列挙するのみだが、skills は .claude/skills/*/SKILL.md というサブディレクトリ走査が必要であり、シンボリックリンクを含むディレクトリ名が存在した場合にディレクトリ外のファイルを読み込む可能性がある。worktree-path-validator.ts はリクエストパラメータのバリデーションであり、ファイルシステム走査中のパス検証は行わない。",
+      "location": "非機能要件",
+      "suggestion": "非機能要件に以下を追加する: 「skills ディレクトリ走査時はシンボリックリンクを追跡しない（lstatSync で確認、isSymbolicLink() が true の場合はスキップ）」「サブディレクトリ名に '..' を含むエントリを拒否する」「解決後のパスが .claude/skills/ 配下であることを path.resolve + startsWith で検証する」"
+    },
+    {
+      "id": "F203",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "loadSkills() の basePath パラメータ設計に関する明示的な記述が不足",
+      "description": "Issue の変更候補テーブルには「loadSkills() は loadSlashCommands() と同様に basePath パラメータを受け取る設計とする」と記載されているが、getSlashCommandGroups() 内でどのように skills を統合するかのフロー記述が不足している。具体的には、getSlashCommandGroups(basePath) が呼ばれた際に (1) loadSlashCommands(basePath) で commands を取得し、(2) loadSkills(basePath) で skills を取得し、(3) 両方を統合して返す、という処理フローが明示されていない。特に MCBD ルート（basePath なし）での skills 読み込みで process.cwd() がルートとして使われることの確認も重要である。",
+      "location": "影響範囲 - 変更が必要なファイル（候補）テーブル - src/lib/slash-commands.ts",
+      "suggestion": "変更内容に以下の処理フローを追記する: 「getSlashCommandGroups(basePath) を拡張し、(1) commands = loadSlashCommands(basePath)、(2) skills = loadSkills(basePath)、(3) skills + commands を統合した配列を groupByCategory() に渡す。skills を先に配列に入れ commands を後から追加することで、Map.set の後勝ちにより command が skill を優先する要件を満たす」"
+    },
+    {
+      "id": "F204",
+      "severity": "should_fix",
+      "category": "clarity",
+      "title": "skills のマージにおける mergeCommandGroups() の役割が不明確",
+      "description": "Issue の機能要件に「skills のマージ順序: skills を先に commandMap に登録し、その後 commands（standard, worktree）で上書きする方式とする」と記載されている。しかし、現在の API ルート（route.ts:96）では mergeCommandGroups(standardGroups, worktreeGroups) が呼ばれた後にフィルタリングが行われる構造である。skills のマージが (A) loadSkills() の結果を worktreeGroups に含めてから mergeCommandGroups() に渡す方式なのか、(B) mergeCommandGroups() を3引数に拡張する方式なのか、(C) route.ts 内で独自に skills → standard → worktree の順で Map に登録する方式なのかが不明確である。slash-commands.ts の変更候補には「skills マージロジック」の言及があるが、command-merger.ts の変更候補にも「skills マージロジック追加」とあり、責務の分担が曖昧である。",
+      "location": "要件 - 機能要件（マージ順序）および影響範囲テーブル",
+      "suggestion": "以下のいずれかの方式を明確に記載する。推奨: 方式(A) getSlashCommandGroups() 内で commands と skills を統合し、skills が先・commands が後になるよう配列を結合する。mergeCommandGroups() は変更せず、route.ts では standardGroups と worktreeGroups（skills 込み）をマージする。この方式であれば command-merger.ts の変更は CATEGORY_ORDER への 'skill' 追加のみで済み、「skills マージロジック追加」は不要となる。"
+    },
+    {
+      "id": "F205",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "テスト計画が受け入れ条件に未記載のまま",
+      "description": "Stage 1 の F008 で指摘された「テスト計画の記載がない」点は、更新後の Issue でも対応されていない。受け入れ条件は機能的な検証項目として記載されているが、自動テストとして何を追加すべきかの方針が不明確である。既存テスト（slash-commands.test.ts, command-merger.test.ts, api-worktree-slash-commands.test.ts）への追加テストケースの要否を明確にすることで、実装時のテスト漏れを防止できる。",
+      "location": "受け入れ条件の後またはテスト計画セクション",
+      "suggestion": "受け入れ条件の後に「テスト計画」セクションを追加し、最低限 (1) loadSkills() の正常系テスト（skills ディレクトリあり）、(2) loadSkills() のスキップテスト（skills ディレクトリなし）、(3) SKILL.md の frontmatter パースエラー時のフォールバックテスト、(4) command/skill 名前衝突時の優先順位テスト、を列挙する。"
+    },
+    {
+      "id": "F206",
+      "severity": "nice_to_have",
+      "category": "clarity",
+      "title": "argument-hint の表示方針が「実装時に判断」と曖昧",
+      "description": "Issue の frontmatter フィールド取り扱い方針で、argument-hint について「取得し、description の末尾に (引数: {argument-hint}) として付加表示することを検討する（実装時に判断）」と記載されている。実装時の判断に委ねることは許容されるが、この方針が未決定のまま実装に入ると、実装者によって判断が分かれる可能性がある。",
+      "location": "要件 - frontmatter フィールドの取り扱い方針",
+      "suggestion": "「（実装時に判断）」を「（初期実装では取得しない。v2 で対応を検討する）」または「（初期実装で取得し description に付加する）」のいずれかに確定させることを推奨する。ただし、これは nice_to_have であり、実装時判断でも大きな問題にはならない。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/command-merger.ts",
+      "relevance": "CATEGORY_ORDER 配列に 'custom' カテゴリが存在しないことの確認。L25-38 に定義された10カテゴリのいずれにも 'custom' は含まれない。"
+    },
+    {
+      "file": "src/types/slash-commands.ts",
+      "relevance": "SlashCommandCategory 型に 'custom' が含まれないことの確認。L14-25 の union type 定義。"
+    },
+    {
+      "file": "src/lib/slash-commands.ts",
+      "relevance": "loadSlashCommands() / getSlashCommandGroups() / clearCache() の構造確認。skills 統合時の処理フロー設計に関連。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/slash-commands/route.ts",
+      "relevance": "mergeCommandGroups(standardGroups, worktreeGroups) の呼び出し構造。skills のマージ方式に影響。"
+    },
+    {
+      "file": "src/lib/worktree-path-validator.ts",
+      "relevance": "パストラバーサル防止はリクエストパラメータのみが対象。ファイルシステム走査中の検証は対象外であることの確認。"
+    },
+    {
+      "file": ".claude/skills/rebuild/SKILL.md",
+      "relevance": "既存 SKILL.md の構造参照。allowed-tools フィールドの存在を確認。"
+    },
+    {
+      "file": ".claude/skills/release/SKILL.md",
+      "relevance": "既存 SKILL.md の構造参照。disable-model-invocation, argument-hint, allowed-tools の存在を確認。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成情報の参照。skills（rebuild, release, release-post）の一覧が「利用可能なスキル」セクションに記載。"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ export type SlashCommandCategory =
   | 'review'
   | 'documentation'
   | 'workflow'
+  | 'skill'                     // Issue #343: Skills category
   // Standard command categories (Issue #56)
   | 'standard-session'
   | 'standard-config'
@@ -27,7 +28,7 @@ export type SlashCommandCategory =
 /**
  * Command source type (Issue #56)
  */
-export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree';
+export type SlashCommandSource = 'standard' | 'mcbd' | 'worktree' | 'skill';
 
 /**
  * Slash command definition
@@ -78,6 +79,7 @@ export const CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
   review: 'Review',
   documentation: 'Documentation',
   workflow: 'Workflow',
+  skill: 'Skills',              // Issue #343: Skills category label
   // Standard command category labels (Issue #56)
   'standard-session': 'Standard (Session)',
   'standard-config': 'Standard (Config)',

@@ -6,6 +6,7 @@
 
 | Issue | 種別 | 概要 | 主要変更ファイル | 設計書 |
 |-------|------|------|-----------------|--------|
+| #343 | feat | スラッシュコマンドセレクターで .claude/skills も表示（loadSkills()追加、safeParseFrontmatter()でgray-matter RCE対策、deduplicateByName()でcommand優先重複排除、skillsCache独立管理、CATEGORY_ORDER/CATEGORY_LABELS/'skill'追加、sources.skill APIレスポンス） | `slash-commands.ts`, `types/slash-commands.ts`, `command-merger.ts`, `api/worktrees/[id]/slash-commands/route.ts` | [link](../dev-reports/design/issue-343-skills-loader-design-policy.md) |
 | #331 | feat | トークン認証・HTTPS対応（SHA-256ハッシュ認証、Cookie/レート制限、TLS証明書、Edge Runtime互換ミドルウェア、WebSocket認証、ログインUI） | `auth.ts`, `auth-config.ts`, `middleware.ts`, `ws-server.ts`, `server.ts`, `start.ts`, `login/page.tsx`, `login/route.ts`, `logout/route.ts`, `status/route.ts` | [link](../dev-reports/design/issue-331-token-auth-design-policy.md) |
 | #323 | refactor | pollAutoYes()リファクタリング（関数群方式による責務分割、validatePollingContext/captureAndCleanOutput/processStopConditionDelta/detectAndRespondToPrompt抽出、getPollerState内部ヘルパー追加、機能変更なし） | `auto-yes-manager.ts`, `auto-yes-manager.test.ts` | [link](../dev-reports/design/issue-323-auto-yes-manager-refactoring-design-policy.md) |
 | #304 | fix | テスト実行時NODE_ENV分離（package.jsonに NODE_ENV=test プレフィックス追加、env.test.tsにcleanEnvVars()ヘルパー追加でファイルレベルbeforeEach/afterEachに集約、worktree-path-validator.test.tsにALLOWED_WORKTREE_PATHS delete追加） | `package.json`, `tests/unit/env.test.ts`, `tests/unit/lib/worktree-path-validator.test.ts` | [link](../dev-reports/design/issue-304-test-env-isolation-design-policy.md) |

@@ -1,0 +1,20 @@
+{
+  "issue_number": 343,
+  "refactor_targets": [
+    "src/lib/slash-commands.ts",
+    "src/types/slash-commands.ts",
+    "src/lib/command-merger.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts",
+    "tests/unit/slash-commands.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 82.35
+  },
+  "improvement_goals": [
+    "カバレッジを85%以上に向上",
+    "コードの可読性向上（JSDoc コメント補完）",
+    "設計方針書の注意事項に従ったコメント追加",
+    "filterCommands() JSDoc に skills 除外の注記追加",
+    "loadSlashCommands() 内の commandsCache 二重代入コメント追加"
+  ]
+}

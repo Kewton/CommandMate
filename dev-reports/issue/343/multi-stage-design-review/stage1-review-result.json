@@ -1,0 +1,121 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_focus": "設計原則",
+  "findings": [
+    {
+      "id": "D001",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "名前衝突解決が暗黙的な Map.set() 後勝ち特性に依存（OCP リスク）",
+      "description": "設計方針書では `[...skills, ...commands]` の配列順序と `groupByCategory()` 内部の `Map.set()` 後勝ち特性を活用して、同名 command が skill を上書きする仕様としている。しかし、groupByCategory() の現在の実装（command-merger.ts L52-58）は同一カテゴリ内で push しているだけで、同名コマンドの重複排除（Map.set による上書き）は行っていない。groupByCategory() は category でグルーピングするのみであり、name での重複排除は mergeCommandGroups() 内の commandMap.set() で行われている。設計書の記載『groupByCategory() 内部の Map.set() の後勝ち特性を活用』は実装と矛盾しており、同名の skill と command が両方とも表示される可能性がある。",
+      "location": "設計方針書 セクション3-2「設計根拠」項目1、セクション8「名前衝突の解決」",
+      "suggestion": "getSlashCommandGroups() 内で skills と commands を結合する際に、明示的に name ベースの重複排除ロジックを追加する。例: Map<string, SlashCommand> を使い、skills を先に登録してから commands で上書きした後に Array.from(map.values()) を groupByCategory() に渡す。あるいは、mergeCommandGroups() を経由するフローであれば mergeCommandGroups() 内の既存ロジックが使えるが、getSlashCommandGroups() 内で直接結合する設計の場合は独自の重複排除が必要。"
+    },
+    {
+      "id": "D002",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "parseCommandFile と parseSkillFile の責務重複（DRY/SRP）",
+      "description": "parseCommandFile() と設計案の parseSkillFile() は、共にファイルを読み込み gray-matter で frontmatter をパースし SlashCommand を返すという同じパターンを踏襲している。差異は (1) name の取得方法（ファイル名 vs frontmatter.name || ディレクトリ名）、(2) category の決定方法（COMMAND_CATEGORIES lookup vs 固定 'skill'）、(3) source フィールドの有無の3点のみ。共通のパースロジックを抽出すると DRY 原則により適合する。ただし、現時点では関数が小さく差異も少ないため、過度な抽象化のリスクとのバランスを考慮する必要がある。",
+      "location": "設計方針書 セクション3-2 parseSkillFile 関数定義",
+      "suggestion": "現時点では許容範囲だが、将来的にパース対象が増える場合に備え、共通のパースヘルパー（例: parseFrontmatterFile(filePath, defaults)）の抽出を検討する旨をコメントとして残す。初期実装では KISS 原則を優先し、現状の分離を維持してもよい。"
+    },
+    {
+      "id": "D003",
+      "severity": "must_fix",
+      "category": "error_handling",
+      "title": "parseSkillFile のエラーハンドリングがサイレントすぎる",
+      "description": "設計案の parseSkillFile() は catch ブロックで null を返すだけで、ログ出力を行わない。一方、既存の parseCommandFile() は console.error() でエラーを記録している。SKILL.md のパース失敗がサイレントに無視されると、設定ミスや SKILL.md のフォーマット不正を開発者が気づけない。",
+      "location": "設計方針書 セクション3-2 parseSkillFile 関数定義（catch ブロック）",
+      "suggestion": "parseCommandFile() と同様に、catch ブロックで console.error() または console.warn() によるログ出力を追加する。例: `console.error(`Error parsing skill file ${skillPath}:`, error);`"
+    },
+    {
+      "id": "D004",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "loadSkills が async 宣言だが同期処理のみ実行（一貫性の問題）",
+      "description": "設計案の loadSkills() は `async` 関数として宣言されているが、内部では fs.existsSync()、fs.readdirSync()、fs.readFileSync() など同期 API のみを使用している。これは既存の loadSlashCommands() も同じパターンであるため一貫性は保たれているが、将来的にファイル I/O の非同期化を行う際の設計意図を明記すべき。",
+      "location": "設計方針書 セクション3-2 loadSkills 関数シグネチャ",
+      "suggestion": "既存の loadSlashCommands() との一貫性を優先する場合はこのままでよいが、JSDoc コメントに「既存 loadSlashCommands() のシグネチャと統一するため async を付与している」旨を記載する。あるいは、将来の非同期 I/O 移行を見据えた設計判断であることをセクション8の設計決定事項に追記する。"
+    },
+    {
+      "id": "D005",
+      "severity": "nice_to_have",
+      "category": "naming",
+      "title": "parseSkillFile の引数名 skillDir が実際にはスキルのサブディレクトリパス",
+      "description": "parseSkillFile(skillDir, skillName) の第1引数 skillDir は `.claude/skills/{skillName}` のパスを受け取るが、関数内で `path.join(skillDir, 'SKILL.md')` としているため、skillDir は実際には個別スキルのディレクトリパスである。loadSkills() 内の resolvedPath（= 個別スキルディレクトリ）が渡されるため、skillDirPath や skillSubDir の方が意図が明確。",
+      "location": "設計方針書 セクション3-2 parseSkillFile 関数シグネチャ",
+      "suggestion": "引数名を skillDirPath または skillSubDir に変更し、skills ルートディレクトリとの混同を防ぐ。"
+    },
+    {
+      "id": "D006",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "getSlashCommandGroups() の責務増大（SRP 違反の兆候）",
+      "description": "設計方針書セクション8でも「getSlashCommandGroups() の責務がやや増大」というトレードオフが認識されている。変更後の getSlashCommandGroups() は (1) commands のロード、(2) skills のロード、(3) 結合、(4) グルーピング、(5) キャッシュ管理（commandsCache と skillsCache の2変数）の5つの責務を持つ。現時点では関数内のコード量が少ないため許容範囲だが、今後のソース種別追加時に Facade パターンの限界に達する可能性がある。",
+      "location": "設計方針書 セクション3-2 getSlashCommandGroups、セクション8 トレードオフ",
+      "suggestion": "現時点では KISS 原則で許容するが、将来の拡張に備えて「3つ以上のソース種別が追加される場合は loadAllSources() のような統合関数の抽出を検討する」旨の設計ノートを残す。"
+    },
+    {
+      "id": "D007",
+      "severity": "nice_to_have",
+      "category": "testability",
+      "title": "loadSkills のファイルシステム依存がモック困難",
+      "description": "loadSkills() は fs モジュールに直接依存しており、テスト時にはモジュールレベルの vi.mock('fs') が必要。これは既存の loadSlashCommands() と同じアプローチであり一貫性はあるが、テスト設計セクション（セクション7）では具体的なモック戦略が言及されていない。",
+      "location": "設計方針書 セクション7 テスト影響と戦略",
+      "suggestion": "テスト戦略セクションに、実ファイルシステムを使ったテスト（現在の slash-commands.test.ts のアプローチ）と vi.mock('fs') を使ったユニットテストのどちらを採用するかを明記する。実際のテストファイル（tests/unit/slash-commands.test.ts）は実ファイルシステムに依存しているため、テスト用の skills ディレクトリ（テストフィクスチャ）の配置方針も記載するとよい。"
+    },
+    {
+      "id": "D008",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "parseSkillFile で source フィールドを設定しているが parseCommandFile では未設定（非対称性）",
+      "description": "設計案の parseSkillFile() は `source: 'skill' as SlashCommandSource` を設定するが、既存の parseCommandFile() は source フィールドを設定していない。mergeCommandGroups() 内で `cmd.source || 'worktree'` のフォールバックにより worktree として扱われるが、route.ts での source カウント計算において、parseCommandFile で生成されたコマンドが basePath 付きで呼ばれた場合に source が undefined のままとなり、filteredWorktreeCount のカウントでは `cmd.source === 'worktree'` に一致しない。mergeCommandGroups() 通過後は source が付与されるが、getSlashCommandGroups() 内で直接結合する場合は mergeCommandGroups() を経由しないため不整合が生じる。",
+      "location": "設計方針書 セクション3-2 parseSkillFile、既存コード parseCommandFile",
+      "suggestion": "loadSlashCommands() または parseCommandFile() で明示的に source フィールドを設定する。worktree 用途なら `source: 'worktree'`、MCBD 用途なら `source: 'mcbd'` を basePath の有無で判別して設定する。あるいは、getSlashCommandGroups() 内で commands に source を付与するステップを追加する。"
+    },
+    {
+      "id": "D009",
+      "severity": "nice_to_have",
+      "category": "kiss",
+      "title": "cliTools フィールドが skills に対して undefined のままとなる影響の明記不足",
+      "description": "設計案の parseSkillFile() では cliTools フィールドを設定していない（undefined）。filterCommandsByCliTool() では cliTools が undefined の場合 Claude-only として扱う。これは設計セクション8の「cliTools の初期方針: undefined（Claude-only）」と整合しているが、SKILL.md の frontmatter に allowed-tools が含まれているにもかかわらず cliTools マッピングを行わない理由をより明示的に記載すべき。",
+      "location": "設計方針書 セクション3-2 parseSkillFile、セクション8 cliTools の初期方針",
+      "suggestion": "セクション8の設計決定事項に「SKILL.md の allowed-tools は Claude CLI のツール許可設定であり、CommandMate の cliTools（対応 CLI ツール種別）とは意味が異なるため、マッピングは行わない」旨を明記する。"
+    },
+    {
+      "id": "D010",
+      "severity": "nice_to_have",
+      "category": "yagni",
+      "title": "MCBD API (api/slash-commands) 側の skills 対応は暗黙的に含まれる点の明記",
+      "description": "設計方針書セクション4「変更不要ファイル」に api/slash-commands/route.ts が含まれ、getSlashCommandGroups() を呼ぶだけで skills が統合済みとされている。これは正しいが、MCBD API の sources レスポンスに skill カウントが含まれない点（worktree API のみ skill カウントを追加する設計）が明示されていない。MCBD API のクライアント側が sources.skill を期待する場合に齟齬が生じる可能性がある。",
+      "location": "設計方針書 セクション4 変更不要ファイル",
+      "suggestion": "MCBD API（api/slash-commands/route.ts）が sources フィールドを返さないか、返す場合に skill カウントを含むかを明記する。あるいは「MCBD API は groups のみを返すため sources は対象外」と注記する。"
+    },
+    {
+      "id": "D011",
+      "severity": "must_fix",
+      "category": "solid",
+      "title": "キャッシュ再ロード時に commandsCache と skillsCache が片方だけ失敗するケースの考慮不足",
+      "description": "設計案の getSlashCommandGroups() キャッシュロジックでは `commandsCache === null || skillsCache === null` の場合に両方を再ロードする。しかし、loadSlashCommands() が成功して loadSkills() が例外を投げた場合、commandsCache は更新されるが skillsCache は null のままとなる。次回呼び出し時に再度両方がロードされ、commandsCache が不必要に再ロードされる。さらに、loadSkills() が毎回失敗する場合（例: パーミッション問題）、毎回 loadSlashCommands() も再実行される非効率が生じる。",
+      "location": "設計方針書 セクション3-2 getSlashCommandGroups キャッシュロジック",
+      "suggestion": "try-catch で個別にキャッシュを管理するか、loadSkills() が失敗した場合でも skillsCache を空配列 [] に設定して「ロード試行済み」を表現する。例: `skillsCache = await loadSkills().catch(() => []);` とすることで、一度試行した後は再ロードを防ぐ。"
+    },
+    {
+      "id": "D012",
+      "severity": "nice_to_have",
+      "category": "dry",
+      "title": "route.ts の source カウント計算が flatMap + filter の繰り返しパターン",
+      "description": "設計案では route.ts で filteredStandardCount、filteredWorktreeCount、filteredSkillCount を各々 `filteredGroups.flatMap(g => g.commands).filter(cmd => cmd.source === '...')` で計算している。3回の flatMap + filter は DRY 違反の軽微なケース。",
+      "location": "設計方針書 セクション3-4 カウント計算の追加",
+      "suggestion": "flatMap を1回だけ実行して allFilteredCommands に保持し、そこから各 source のカウントを取得する。例: `const allCmds = filteredGroups.flatMap(g => g.commands); const counts = { standard: allCmds.filter(...).length, worktree: ... };` あるいは reduce で1パスで集計する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 5,
+    "overall_quality": "good"
+  }
+}

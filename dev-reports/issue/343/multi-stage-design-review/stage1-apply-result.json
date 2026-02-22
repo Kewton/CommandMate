@@ -1,0 +1,122 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": [
+    {
+      "id": "D001",
+      "severity": "should_fix",
+      "title": "名前衝突解決が暗黙的な Map.set() 後勝ち特性に依存",
+      "section_updated": "2 データフロー, 3-2 deduplicateByName, 設計根拠, 8 設計決定事項",
+      "status": "reflected",
+      "action": "deduplicateByName() ヘルパー関数を追加し、groupByCategory() に渡す前に明示的に名前ベースの重複排除を行う設計に変更"
+    },
+    {
+      "id": "D002",
+      "severity": "should_fix",
+      "title": "parseCommandFile と parseSkillFile の責務重複",
+      "section_updated": "5-3 将来の拡張に関する設計ノート",
+      "status": "reflected",
+      "action": "将来のパース対象増加時にパースヘルパー抽出を検討する旨を設計ノートに追記"
+    },
+    {
+      "id": "D003",
+      "severity": "must_fix",
+      "title": "parseSkillFile のエラーハンドリングがサイレントすぎる",
+      "section_updated": "3-2 parseSkillFile, 設計根拠 5",
+      "status": "reflected",
+      "action": "catch ブロックに console.error() によるエラーログ出力を追加"
+    },
+    {
+      "id": "D004",
+      "severity": "should_fix",
+      "title": "loadSkills が async 宣言だが同期処理のみ",
+      "section_updated": "3-2 loadSkills JSDoc, 8 設計決定事項",
+      "status": "reflected",
+      "action": "loadSlashCommands() との一貫性維持のため async 付与している旨を JSDoc コメントに記載"
+    },
+    {
+      "id": "D005",
+      "severity": "nice_to_have",
+      "title": "引数名 skillDir の明確化",
+      "section_updated": "3-2 parseSkillFile",
+      "status": "reflected",
+      "action": "引数名を skillDir から skillDirPath に変更"
+    },
+    {
+      "id": "D006",
+      "severity": "should_fix",
+      "title": "getSlashCommandGroups() の責務増大",
+      "section_updated": "5-3 将来の拡張に関する設計ノート",
+      "status": "reflected",
+      "action": "3つ以上のソース種別追加時に loadAllSources() 抽出を検討する旨の設計ノートを追記"
+    },
+    {
+      "id": "D007",
+      "severity": "nice_to_have",
+      "title": "テスト戦略の明記",
+      "section_updated": "7 テスト戦略の補足",
+      "status": "reflected",
+      "action": "実ファイルシステムベースと vi.mock('fs') ベースの使い分け方針、テストフィクスチャ配置方針を追記"
+    },
+    {
+      "id": "D008",
+      "severity": "should_fix",
+      "title": "source フィールドの非対称性",
+      "section_updated": "8 設計決定事項, 8 実装上の注意事項",
+      "status": "reflected",
+      "action": "parseSkillFile() での source 明示設定と parseCommandFile() の source 未設定問題の注意事項を追記"
+    },
+    {
+      "id": "D009",
+      "severity": "nice_to_have",
+      "title": "cliTools フィールドの意図明記",
+      "section_updated": "8 設計決定事項（cliTools の初期方針）",
+      "status": "reflected",
+      "action": "SKILL.md の allowed-tools と CommandMate の cliTools の意味の違いを明記"
+    },
+    {
+      "id": "D010",
+      "severity": "nice_to_have",
+      "title": "MCBD API の skills カウント対応",
+      "section_updated": "4 変更不要ファイル",
+      "status": "reflected",
+      "action": "MCBD API は groups のみを返し sources は対象外である旨の注記を追加"
+    },
+    {
+      "id": "D011",
+      "severity": "must_fix",
+      "title": "キャッシュ片方失敗時の非効率な再ロード",
+      "section_updated": "3-2 getSlashCommandGroups, 設計根拠 3",
+      "status": "reflected",
+      "action": "commandsCache と skillsCache を個別にロードし、loadSkills() 失敗時は .catch(() => []) で空配列を設定する設計に変更"
+    },
+    {
+      "id": "D012",
+      "severity": "nice_to_have",
+      "title": "route.ts の source カウント計算 DRY 改善",
+      "section_updated": "3-4 カウント計算",
+      "status": "reflected",
+      "action": "flatMap() を1回に統合し allFilteredCommands から各 source のカウントを取得する設計に変更"
+    }
+  ],
+  "skipped_findings": [],
+  "update_summary": "Stage 1レビューの全12件の指摘事項（Must Fix 2件、Should Fix 5件、Nice to Have 5件）を設計方針書に反映。主要な変更: (1) D001: deduplicateByName() ヘルパー関数による明示的な名前ベース重複排除ロジックの追加、(2) D011: キャッシュの個別管理と loadSkills() 失敗時の空配列フォールバック、(3) D003: parseSkillFile() へのエラーログ出力追加。その他、レビュー履歴・指摘事項サマリー・実装チェックリストの3セクションを新規追加。",
+  "design_doc_path": "dev-reports/design/issue-343-skills-loader-design-policy.md",
+  "sections_updated": [
+    "2 データフロー（名前ベース重複排除ステップ追加）",
+    "3-2 slash-commands.ts（parseSkillFile, loadSkills, deduplicateByName, getSlashCommandGroups 全面改訂）",
+    "3-4 route.ts（カウント計算 DRY 改善）",
+    "4 変更不要ファイル（MCBD API 注記追加）",
+    "5-1 設計パターン（Cache-aside 補足）",
+    "5-3 将来の拡張に関する設計ノート（新規追加）",
+    "7 テスト戦略の補足（新規追加）",
+    "8 設計決定事項とトレードオフ（全面改訂）",
+    "9 CLAUDE.md 原則への準拠（補足追加）",
+    "10 レビュー履歴（新規追加）",
+    "11 レビュー指摘事項サマリー（新規追加）",
+    "12 実装チェックリスト（新規追加）"
+  ],
+  "timestamp": "2026-02-22T00:00:00Z"
+}

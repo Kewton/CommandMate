@@ -1,0 +1,25 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "applied_findings": ["C001", "C002", "C003", "C004", "C005", "C006", "C007", "C008", "C009", "C010", "C011", "C012"],
+  "skipped_findings": [],
+  "update_summary": "Stage 2 整合性レビューの全12件（Must Fix: 2件、Should Fix: 5件、Nice to Have: 5件）を設計方針書に反映。C001: parseSkillFile() コードスニペットから as SlashCommandSource / as SlashCommandCategory の型アサーションを除去し、実装順序で型定義変更を先行させることを明記。C002: [D008] セクションを具体化し、loadSlashCommands() 内で basePath に応じた source 明示設定を本 Issue スコープに含める方針に変更。C003: api-client.ts の SlashCommandsResponse と route.ts の同名型の関係を注記。C004: commandsCache の二重代入に関する注意を設計根拠に追記。C005: validCategories L126 は変更不要であることを明記。C006: SlashCommandCategory テストの具体的修正内容を追記。C007: システム構成図に SC-->CM と StdCmd-->CM の依存矢印を追加。C008: loadSkills() のサイレント動作の設計根拠を追加。C009: [D002] の差異リストに frontmatter フィールド差異を追加。C010: route.ts カウント計算と mergeCommandGroups フォールバックの関係を注記。C011: テストフィクスチャの具体的 frontmatter サンプルを追加。C012: parseSkillFile() に cliTools 省略コメントを追加。",
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-343-skills-loader-design-policy.md",
+  "sections_updated": [
+    "2 アーキテクチャ設計 - システム構成図（C007: 依存矢印追加）",
+    "3-2 slash-commands.ts - parseSkillFile コードスニペット（C001: 型アサーション除去、C012: cliTools コメント追加）",
+    "3-2 slash-commands.ts - 設計根拠（C004: キャッシュ二重代入注記、C008: サイレント動作根拠追加）",
+    "3-4 route.ts - 設計根拠（C010: mergeCommandGroups フォールバック注記追加）",
+    "4 変更不要ファイル（C003: api-client.ts 型名重複注記追加）",
+    "5-3 将来の拡張に関する設計ノート（C009: frontmatter フィールド差異追加）",
+    "7 テスト影響と戦略 - 既存テスト修正（C005: validCategories 変更不要に修正、C006: 具体的修正内容追記）",
+    "7 テスト影響と戦略 - テスト戦略の補足（C011: frontmatter サンプル追加）",
+    "8 設計上の決定事項 - [D008] 実装上の注意事項（C002: 対応方針具体化、C010: 補足追加）",
+    "8 設計上の決定事項 - 採用した設計テーブル（C002: source フィールド行更新）",
+    "10 レビュー履歴（Stage 2 追加）",
+    "11 レビュー指摘事項サマリー（Stage 2 全件追加）",
+    "12 実装チェックリスト（C001: 実装順序制約追加、C002: source 設定タスク追加、Stage 2 全件追加）"
+  ],
+  "timestamp": "2026-02-22"
+}

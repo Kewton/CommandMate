@@ -1,0 +1,28 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 82.35,
+    "after_coverage": 82.35
+  },
+  "refactorings_applied": [
+    "filterCommands() JSDoc: skills 除外の注記追加",
+    "loadSlashCommands() commandsCache 二重代入パターンのコメント追加",
+    "loadSkills() async 宣言の理由（loadSlashCommands() との一貫性）のコメント追加",
+    "parseSkillFile() [D009] cliTools vs allowed-tools の意味の違いのコメント追加",
+    "route.ts SlashCommandsResponse に api-client.ts との型統合 TODO コメント追加"
+  ],
+  "files_changed": [
+    "src/lib/slash-commands.ts",
+    "src/app/api/worktrees/[id]/slash-commands/route.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "256e4b2: refactor(slash-commands): add JSDoc comments and TODO per design policy"
+  ],
+  "message": "リファクタリング完了。設計方針書の指摘に従い、5箇所のJSDoc/コメントを追加。ロジック変更なし。全テスト(3743件)パス、静的解析エラー0件。"
+}

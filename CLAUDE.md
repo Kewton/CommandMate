@@ -215,6 +215,9 @@ tests/
 | `src/components/worktree/FeedbackSection.tsx` | フィードバックリンクセクション（Issue #264: Bug Report/Feature Request/Question/View Issues、noopener noreferrer、i18n対応） |
 | `src/components/worktree/MessageInput.tsx` | メッセージ入力コンポーネント（Issue #288: isFreeInputModeフラグ追加、フリー入力モード中のセレクター再表示防止、モバイルボタンガード、経路分析コメント） |
 | `tests/helpers/message-input-test-utils.ts` | MessageInputテスト共通ヘルパー（Issue #288: モック定数、props factory、DOM queries、interaction helpers、DRY原則対応） |
+| `src/lib/slash-commands.ts` | スラッシュコマンドローダー（Issue #343: loadSkills()追加、safeParseFrontmatter()でgray-matter RCE対策[S001]、deduplicateByName()でcommand優先重複排除[D001]、skillsCacheをcommandsCacheと独立管理[D011]、MAX_SKILLS_COUNT=100/MAX_SKILL_FILE_SIZE_BYTES=64KB DoS防御[S002]、getSlashCommandGroups()でskills統合） |
+| `src/types/slash-commands.ts` | スラッシュコマンド型定義（Issue #343: SlashCommandCategoryに'skill'追加、SlashCommandSourceに'skill'追加、CATEGORY_LABELSにskill:'Skills'追加） |
+| `src/lib/command-merger.ts` | コマンドマージロジック（Issue #343: CATEGORY_ORDERに'skill'をworkflowとstandard-sessionの間に追加） |
 
 ### CLIモジュール（Issue #96, #136）
 
