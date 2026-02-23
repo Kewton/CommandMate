@@ -15,6 +15,11 @@
 import { readFileSync, realpathSync } from 'fs';
 import path from 'path';
 import type { ScheduleEntry, CmateConfig } from '@/types/cmate';
+import {
+  CLAUDE_PERMISSIONS,
+  CODEX_SANDBOXES,
+  DEFAULT_PERMISSIONS,
+} from '@/config/schedule-config';
 
 // =============================================================================
 // Constants
@@ -244,7 +249,7 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       continue;
     }
 
-    const [name, cronExpression, message, cliToolId, enabledStr] = row;
+    const [name, cronExpression, message, cliToolId, enabledStr, permissionStr] = row;
 
     // Validate name
     const sanitizedName = sanitizeMessageContent(name);
@@ -278,12 +283,28 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       enabledStr === '' ||
       enabledStr.toLowerCase() === 'true';
 
+    // Parse permission with validation
+    const resolvedCliToolId = cliToolId?.trim() || 'claude';
+    const defaultPermission = DEFAULT_PERMISSIONS[resolvedCliToolId] ?? '';
+    let permission = permissionStr?.trim() || defaultPermission;
+
+    // Validate permission against allowed values
+    const allowedValues: readonly string[] =
+      resolvedCliToolId === 'codex' ? CODEX_SANDBOXES : CLAUDE_PERMISSIONS;
+    if (permission && !allowedValues.includes(permission)) {
+      console.warn(
+        `[cmate-parser] Invalid permission "${permission}" for ${resolvedCliToolId} in entry "${sanitizedName}", using default "${defaultPermission}"`
+      );
+      permission = defaultPermission;
+    }
+
     entries.push({
       name: sanitizedName,
       cronExpression: cronExpression.trim(),
       message: sanitizedMessage,
-      cliToolId: cliToolId?.trim() || 'claude',
+      cliToolId: resolvedCliToolId,
       enabled,
+      permission,
     });
   }
 

@@ -251,6 +251,51 @@ function recoverRunningLogs(): void {
   }
 }
 
+/**
+ * Disable DB schedules that are no longer present in CMATE.md.
+ * Sets enabled = 0 for schedules belonging to the given worktrees
+ * that are not in the activeScheduleIds set.
+ * Skips records already disabled to avoid unnecessary DB writes.
+ *
+ * @param activeScheduleIds - Set of schedule IDs currently active from CMATE.md
+ * @param worktreeIds - Array of worktree IDs that were scanned
+ */
+function disableStaleSchedules(
+  activeScheduleIds: Set<string>,
+  worktreeIds: string[]
+): void {
+  if (worktreeIds.length === 0) return;
+
+  try {
+    const db = getLazyDbInstance();
+    const now = Date.now();
+    const placeholders = worktreeIds.map(() => '?').join(',');
+
+    // Get enabled schedules for the scanned worktrees
+    const rows = db.prepare(
+      `SELECT id FROM scheduled_executions WHERE worktree_id IN (${placeholders}) AND enabled = 1`
+    ).all(...worktreeIds) as ScheduleIdRow[];
+
+    let disabledCount = 0;
+    const updateStmt = db.prepare(
+      'UPDATE scheduled_executions SET enabled = 0, updated_at = ? WHERE id = ?'
+    );
+
+    for (const row of rows) {
+      if (!activeScheduleIds.has(row.id)) {
+        updateStmt.run(now, row.id);
+        disabledCount++;
+      }
+    }
+
+    if (disabledCount > 0) {
+      console.log(`[schedule-manager] Disabled ${disabledCount} stale DB schedule(s)`);
+    }
+  } catch (error) {
+    console.error('[schedule-manager] Failed to disable stale schedules:', error);
+  }
+}
+
 // =============================================================================
 // Schedule Execution
 // =============================================================================
@@ -282,7 +327,8 @@ async function executeSchedule(state: ScheduleState): Promise<void> {
     const result = await executeClaudeCommand(
       state.entry.message,
       worktree.path,
-      state.entry.cliToolId
+      state.entry.cliToolId,
+      state.entry.permission
     );
 
     updateExecutionLog(logId, result.status, result.output, result.exitCode);
@@ -382,6 +428,10 @@ function syncSchedules(): void {
       console.log(`[schedule-manager] Removed stale schedule ${state.entry.name}`);
     }
   }
+
+  // Disable DB records for schedules no longer in CMATE.md
+  const worktreeIds = worktrees.map(w => w.id);
+  disableStaleSchedules(activeScheduleIds, worktreeIds);
 }
 
 // =============================================================================

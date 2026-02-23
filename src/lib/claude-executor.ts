@@ -70,20 +70,21 @@ export function truncateOutput(output: string): string {
 /**
  * Build CLI arguments for non-interactive execution based on CLI tool type.
  *
- * - claude: -p <message> --output-format text --permission-mode acceptEdits
- * - codex: exec <message> --sandbox workspace-write
+ * - claude: -p <message> --output-format text --permission-mode <permission>
+ * - codex: exec <message> --sandbox <permission>
  * - others: -p <message> (fallback)
  *
  * @param message - Prompt message
  * @param cliToolId - CLI tool identifier
+ * @param permission - Permission mode (claude: --permission-mode, codex: --sandbox)
  * @returns Array of CLI arguments
  */
-export function buildCliArgs(message: string, cliToolId: string): string[] {
+export function buildCliArgs(message: string, cliToolId: string, permission?: string): string[] {
   switch (cliToolId) {
     case 'codex':
-      return ['exec', message, '--sandbox', 'workspace-write'];
+      return ['exec', message, '--sandbox', permission ?? 'workspace-write'];
     case 'claude':
-      return ['-p', message, '--output-format', 'text', '--permission-mode', 'acceptEdits'];
+      return ['-p', message, '--output-format', 'text', '--permission-mode', permission ?? 'acceptEdits'];
     default:
       return ['-p', message];
   }
@@ -95,19 +96,21 @@ export function buildCliArgs(message: string, cliToolId: string): string[] {
  * @param message - Prompt message to send
  * @param cwd - Working directory (worktree path from DB)
  * @param cliToolId - CLI tool to use (default: 'claude')
+ * @param permission - Permission mode (claude: --permission-mode, codex: --sandbox)
  * @returns Execution result with output and status
  */
 export async function executeClaudeCommand(
   message: string,
   cwd: string,
-  cliToolId: string = 'claude'
+  cliToolId: string = 'claude',
+  permission?: string
 ): Promise<ExecutionResult> {
   // Validate message length
   const truncatedMessage = message.length > MAX_MESSAGE_LENGTH
     ? message.substring(0, MAX_MESSAGE_LENGTH)
     : message;
 
-  const args = buildCliArgs(truncatedMessage, cliToolId);
+  const args = buildCliArgs(truncatedMessage, cliToolId, permission);
 
   return new Promise<ExecutionResult>((resolve) => {
     const child = execFile(

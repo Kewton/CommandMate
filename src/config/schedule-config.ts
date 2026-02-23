@@ -23,6 +23,24 @@ export const MAX_SCHEDULE_MESSAGE_LENGTH = 10000;
 export const MAX_SCHEDULE_CRON_LENGTH = 100;
 
 // =============================================================================
+// Permission Constants
+// =============================================================================
+
+/** Allowed permission values for claude CLI (--permission-mode) */
+export const CLAUDE_PERMISSIONS = ['default', 'acceptEdits', 'full'] as const;
+export type ClaudePermission = (typeof CLAUDE_PERMISSIONS)[number];
+
+/** Allowed sandbox values for codex CLI (--sandbox) */
+export const CODEX_SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'] as const;
+export type CodexSandbox = (typeof CODEX_SANDBOXES)[number];
+
+/** Default permission per CLI tool */
+export const DEFAULT_PERMISSIONS: Record<string, string> = {
+  claude: 'acceptEdits',
+  codex: 'workspace-write',
+};
+
+// =============================================================================
 // UUID Validation
 // =============================================================================
 

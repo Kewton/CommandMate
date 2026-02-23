@@ -140,6 +140,7 @@ More text here.
         message: 'Review code changes',
         cliToolId: 'claude',
         enabled: true,
+        permission: 'acceptEdits',
       });
     });
 

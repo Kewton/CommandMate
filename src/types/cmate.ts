@@ -17,6 +17,8 @@ export interface ScheduleEntry {
   cliToolId: string;
   /** Whether the schedule is enabled */
   enabled: boolean;
+  /** Permission mode (claude: --permission-mode, codex: --sandbox) */
+  permission: string;
 }
 
 /**
