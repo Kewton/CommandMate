@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   truncateOutput,
+  buildCliArgs,
   MAX_OUTPUT_SIZE,
   MAX_STORED_OUTPUT_SIZE,
   EXECUTION_TIMEOUT_MS,
@@ -103,6 +104,23 @@ describe('claude-executor', () => {
 
       const processes2 = getActiveProcesses();
       expect(processes2.has(12345)).toBe(true);
+    });
+  });
+
+  describe('buildCliArgs', () => {
+    it('should build claude args with -p, --output-format, --permission-mode', () => {
+      const args = buildCliArgs('hello', 'claude');
+      expect(args).toEqual(['-p', 'hello', '--output-format', 'text', '--permission-mode', 'acceptEdits']);
+    });
+
+    it('should build codex args with exec and --sandbox', () => {
+      const args = buildCliArgs('hello', 'codex');
+      expect(args).toEqual(['exec', 'hello', '--sandbox', 'workspace-write']);
+    });
+
+    it('should build fallback args with -p for unknown tools', () => {
+      const args = buildCliArgs('hello', 'gemini');
+      expect(args).toEqual(['-p', 'hello']);
     });
   });
 

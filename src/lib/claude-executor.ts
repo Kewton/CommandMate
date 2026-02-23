@@ -68,9 +68,31 @@ export function truncateOutput(output: string): string {
 }
 
 /**
- * Execute a claude -p command in a worktree directory.
+ * Build CLI arguments for non-interactive execution based on CLI tool type.
  *
- * @param message - Prompt message to send to claude
+ * - claude: -p <message> --output-format text --permission-mode acceptEdits
+ * - codex: exec <message> --sandbox workspace-write
+ * - others: -p <message> (fallback)
+ *
+ * @param message - Prompt message
+ * @param cliToolId - CLI tool identifier
+ * @returns Array of CLI arguments
+ */
+export function buildCliArgs(message: string, cliToolId: string): string[] {
+  switch (cliToolId) {
+    case 'codex':
+      return ['exec', message, '--sandbox', 'workspace-write'];
+    case 'claude':
+      return ['-p', message, '--output-format', 'text', '--permission-mode', 'acceptEdits'];
+    default:
+      return ['-p', message];
+  }
+}
+
+/**
+ * Execute a CLI command in a worktree directory.
+ *
+ * @param message - Prompt message to send
  * @param cwd - Working directory (worktree path from DB)
  * @param cliToolId - CLI tool to use (default: 'claude')
  * @returns Execution result with output and status
@@ -85,7 +107,7 @@ export async function executeClaudeCommand(
     ? message.substring(0, MAX_MESSAGE_LENGTH)
     : message;
 
-  const args = ['-p', truncatedMessage];
+  const args = buildCliArgs(truncatedMessage, cliToolId);
 
   return new Promise<ExecutionResult>((resolve) => {
     const child = execFile(
@@ -122,6 +144,9 @@ export async function executeClaudeCommand(
         });
       }
     );
+
+    // Close stdin immediately to prevent hanging on yes/no prompts
+    child.stdin?.end();
 
     // Return the child process PID for tracking
     if (child.pid) {
