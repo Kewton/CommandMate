@@ -38,9 +38,10 @@ import { getCliToolPatterns, stripAnsi, buildDetectPromptOptions, PASTED_TEXT_PA
 const POLLING_INTERVAL = 2000;
 
 /**
- * Maximum polling duration in milliseconds (default: 5 minutes)
+ * Maximum polling duration in milliseconds (default: 30 minutes)
+ * Previously 5 minutes, which caused silent polling stops for long-running tasks.
  */
-const MAX_POLLING_DURATION = 5 * 60 * 1000;
+const MAX_POLLING_DURATION = 30 * 60 * 1000;
 
 /**
  * Number of tail lines to check for active thinking indicators in response extraction.

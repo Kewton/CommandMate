@@ -800,7 +800,7 @@ describe('claude-session - Issue #265 improvements', () => {
 
     it('should detect regex error pattern and report session as unhealthy', async () => {
       vi.mocked(hasSession).mockResolvedValue(true);
-      vi.mocked(capturePane).mockResolvedValue('Error: Claude CLI crashed');
+      vi.mocked(capturePane).mockResolvedValue('Error: Claude Code initialization failed');
 
       const result = await isClaudeRunning(TEST_WORKTREE_ID);
       expect(result).toBe(false);
@@ -1008,10 +1008,12 @@ describe('claude-session - Issue #265 improvements', () => {
       expect(CLAUDE_SESSION_ERROR_REGEX_PATTERNS.length).toBeGreaterThan(0);
     });
 
-    it('should have regex pattern that matches Error:.*Claude', () => {
+    it('should have regex pattern that matches ^Error:.*Claude Code', () => {
       const pattern = CLAUDE_SESSION_ERROR_REGEX_PATTERNS[0];
-      expect(pattern.test('Error: Claude CLI crashed')).toBe(true);
+      expect(pattern.test('Error: Claude Code initialization failed')).toBe(true);
       expect(pattern.test('No errors here')).toBe(false);
+      // Should not match mid-line errors (requires ^ anchor)
+      expect(pattern.test('Some prefix Error: Claude Code')).toBe(false);
     });
   });
 
@@ -1485,6 +1487,69 @@ describe('claude-session - Issue #306 improvements', () => {
       const result: HealthCheckResult = await isSessionHealthy(TEST_SESSION_NAME);
       expect(result.healthy).toBe(true);
       expect(result.reason).toBeUndefined();
+    });
+  });
+
+  // ----- Active state priority + tail-only error detection -----
+  describe('isSessionHealthy - active state priority over historical errors', () => {
+    it('should treat session with historical error AND active prompt as healthy', async () => {
+      // Simulates a session that recovered from a nested session error:
+      // Error appears in scrollback, but Claude restarted and is now at prompt
+      const paneOutput = [
+        'Error: Exit code 1',
+        'Error: Claude Code cannot be launched inside another Claude Code session.',
+        'Nested sessions share runtime resources and will crash all active sessions.',
+        'To bypass this check, unset the CLAUDECODE environment variable.',
+        '',
+        'unset CLAUDECODE',
+        '/Users/user/.local/bin/claude',
+        '',
+        'Some Claude output here',
+        '❯ ',
+      ].join('\n');
+      vi.mocked(capturePane).mockResolvedValue(paneOutput);
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+    });
+
+    it('should treat session with historical error AND > prompt as healthy', async () => {
+      const paneOutput = [
+        'Claude Code cannot be launched inside another Claude Code session',
+        '',
+        'Recovery happened...',
+        '> ',
+      ].join('\n');
+      vi.mocked(capturePane).mockResolvedValue(paneOutput);
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
+    });
+
+    it('should detect error when it appears in tail lines without active prompt', async () => {
+      // Error is recent (in tail), no prompt visible → unhealthy
+      const paneOutput = [
+        'Starting Claude...',
+        'Claude Code cannot be launched inside another Claude Code session',
+      ].join('\n');
+      vi.mocked(capturePane).mockResolvedValue(paneOutput);
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(false);
+      expect(result.reason).toContain('error pattern');
+    });
+
+    it('should ignore error that scrolled out of tail window', async () => {
+      // Error is old (beyond tail window), no prompt but long output → healthy
+      const lines = [
+        'Claude Code cannot be launched inside another Claude Code session',
+        ...Array.from({ length: 15 }, (_, i) => `Processing line ${i + 1}...`),
+        'Task completed successfully',
+      ];
+      vi.mocked(capturePane).mockResolvedValue(lines.join('\n'));
+
+      const result = await isSessionHealthy(TEST_SESSION_NAME);
+      expect(result.healthy).toBe(true);
     });
   });
 });
