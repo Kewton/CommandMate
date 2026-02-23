@@ -149,6 +149,18 @@ export const CLAUDE_PROMPT_POLL_INTERVAL = 200;
 const MAX_SHELL_PROMPT_LENGTH = 40;
 
 /**
+ * Number of tail lines used for error pattern detection in isSessionHealthy()
+ *
+ * Error patterns are only searched within the last N lines of pane output,
+ * not the entire buffer. This prevents false negatives where historical
+ * (already recovered) errors in the scrollback trigger unhealthy detection.
+ *
+ * 10 lines provides sufficient window to catch recent errors while ignoring
+ * historical ones that have scrolled up.
+ */
+const HEALTH_CHECK_ERROR_TAIL_LINES = 10;
+
+/**
  * Cached Claude CLI path
  */
 let cachedClaudePath: string | null = null;
@@ -300,22 +312,34 @@ export async function isSessionHealthy(sessionName: string): Promise<HealthCheck
       return { healthy: false, reason: 'empty output' };
     }
 
-    // S2-F010: Error pattern detection (HealthCheckResult format)
+    // Active state detection: check for Claude prompt BEFORE error patterns.
+    // This prevents false negatives where historical (recovered) errors in
+    // the pane scrollback cause a currently-active session to be marked unhealthy.
+    if (CLAUDE_PROMPT_PATTERN.test(trimmed)) {
+      return { healthy: true };
+    }
+
+    // S2-F010: Error pattern detection - limited to tail lines only.
+    // Only the last HEALTH_CHECK_ERROR_TAIL_LINES lines are searched, so
+    // historical errors that have scrolled up do not trigger false negatives.
+    const allLines = trimmed.split('\n').filter(line => line.trim() !== '');
+    const tailLines = allLines.slice(-HEALTH_CHECK_ERROR_TAIL_LINES);
+    const tailText = tailLines.join('\n');
+
     // MF-001: Check error patterns from cli-patterns.ts (SRP - pattern management centralized)
     for (const pattern of CLAUDE_SESSION_ERROR_PATTERNS) {
-      if (trimmed.includes(pattern)) {
+      if (tailText.includes(pattern)) {
         return { healthy: false, reason: `error pattern: ${pattern}` };
       }
     }
     for (const regex of CLAUDE_SESSION_ERROR_REGEX_PATTERNS) {
-      if (regex.test(trimmed)) {
+      if (regex.test(tailText)) {
         return { healthy: false, reason: `error pattern: ${regex.source}` };
       }
     }
 
     // S2-F002: Extract last line after empty line filtering
-    const lines = trimmed.split('\n').filter(line => line.trim() !== '');
-    const lastLine = lines[lines.length - 1]?.trim() ?? '';
+    const lastLine = allLines[allLines.length - 1]?.trim() ?? '';
 
     // F006: Line length check BEFORE SHELL_PROMPT_ENDINGS check (early return)
     if (lastLine.length >= MAX_SHELL_PROMPT_LENGTH) {
@@ -474,7 +498,11 @@ export async function isClaudeRunning(worktreeId: string): Promise<boolean> {
   // MF-S3-001: Verify session health to avoid reporting broken sessions as running
   // S2-F001: await + extract .healthy to maintain boolean return type
   const result = await isSessionHealthy(sessionName);
-  return result.healthy;
+  if (!result.healthy) {
+    console.warn(`[isClaudeRunning] Session ${sessionName} unhealthy: ${result.reason}`);
+    return false;
+  }
+  return true;
 }
 
 /**

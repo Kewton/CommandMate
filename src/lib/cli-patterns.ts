@@ -296,7 +296,7 @@ export const CLAUDE_SESSION_ERROR_PATTERNS: readonly string[] = [
  * SEC-SF-004: See CLAUDE_SESSION_ERROR_PATTERNS JSDoc for pattern maintenance process.
  */
 export const CLAUDE_SESSION_ERROR_REGEX_PATTERNS: readonly RegExp[] = [
-  /Error:.*Claude/,
+  /^Error:.*Claude Code/,
 ] as const;
 
 export function buildDetectPromptOptions(
