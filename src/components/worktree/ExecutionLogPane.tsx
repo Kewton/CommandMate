@@ -11,6 +11,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, memo } from 'react';
+import { useTranslations } from 'next-intl';
 
 // ============================================================================
 // Types
@@ -83,6 +84,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   worktreeId,
   className = '',
 }: ExecutionLogPaneProps) {
+  const t = useTranslations('schedule');
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -173,7 +175,15 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
       <div>
         <h3 className="text-sm font-semibold text-gray-700 mb-2">Schedules ({schedules.length})</h3>
         {schedules.length === 0 ? (
-          <p className="text-sm text-gray-500">No schedules configured. Add a CMATE.md with a Schedules section.</p>
+          <div className="text-center py-8 text-gray-500">
+            <p className="font-medium text-gray-600 mb-3">{t('noSchedulesTitle')}</p>
+            <ol className="text-sm text-left inline-block space-y-1.5 list-decimal list-inside">
+              <li>{t('noSchedulesStep1')}</li>
+              <li>{t('noSchedulesStep2')}</li>
+              <li>{t('noSchedulesStep3')}</li>
+              <li>{t('noSchedulesStep4')}</li>
+            </ol>
+          </div>
         ) : (
           <div className="space-y-2">
             {schedules.map((schedule) => (

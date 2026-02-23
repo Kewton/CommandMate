@@ -2,6 +2,11 @@
   "title": "スケジュール",
   "executionLogs": "実行ログ",
   "noSchedules": "スケジュールが設定されていません。CMATE.mdにSchedulesセクションを追加してください。",
+  "noSchedulesTitle": "スケジュールが設定されていません",
+  "noSchedulesStep1": "Files タブに切り替えてください",
+  "noSchedulesStep2": "ツールバーの CMATE ボタンをクリックして CMATE.md を作成",
+  "noSchedulesStep3": "Schedules テーブルを編集（Name, Cron, Message, CLI Tool, Enabled, Permission）",
+  "noSchedulesStep4": "再度 CMATE をクリックしてバリデーション",
   "noLogs": "実行ログはまだありません。",
   "status": {
     "running": "実行中",
