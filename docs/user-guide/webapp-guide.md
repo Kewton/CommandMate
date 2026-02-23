@@ -330,8 +330,9 @@ Cloudflare Tunnel などのトンネリングサービスを使用すること�
 |------|------|
 | **Terminal** | リアルタイム出力 + メッセージ入力 |
 | **History** | チャット履歴 |
-| **Logs** | Markdownログ一覧 |
-| **Info** | ワークツリー情報 + メモ |
+| **Files** | ファイルツリー表示 |
+| **CMATE** | メモ + 実行ログ |
+| **Info** | ワークツリー情報 |
 
 ![モバイル表示](../images/screenshot-mobile.png)
 *モバイル: トップページ*

@@ -330,8 +330,9 @@ On mobile, a tab bar is displayed at the bottom:
 |-----|---------|
 | **Terminal** | Real-time output + message input |
 | **History** | Chat history |
-| **Logs** | Markdown log list |
-| **Info** | Worktree information + notes |
+| **Files** | File tree view |
+| **CMATE** | Notes + execution logs |
+| **Info** | Worktree information |
 
 ![Mobile view](../../images/screenshot-mobile.png)
 *Mobile: Homepage*
