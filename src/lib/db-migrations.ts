@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 16;
+export const CURRENT_SCHEMA_VERSION = 17;
 
 /**
  * Migration definition
@@ -789,6 +789,109 @@ const migrations: Migration[] = [
 
       console.log('✓ Removed issue_no column from external_apps table');
     }
+  },
+  {
+    version: 17,
+    name: 'add-scheduled-executions-and-execution-logs',
+    up: (db) => {
+      // Issue #294: Schedule execution feature
+
+      // [S3-002] Clean up orphan records BEFORE creating new tables with FK constraints
+      // These records may exist if worktrees/repositories were deleted while FK was disabled
+      db.exec(`
+        DELETE FROM chat_messages WHERE worktree_id NOT IN (SELECT id FROM worktrees);
+      `);
+      db.exec(`
+        DELETE FROM session_states WHERE worktree_id NOT IN (SELECT id FROM worktrees);
+      `);
+      db.exec(`
+        DELETE FROM worktree_memos WHERE worktree_id NOT IN (SELECT id FROM worktrees);
+      `);
+      db.exec(`
+        UPDATE clone_jobs SET repository_id = NULL
+          WHERE repository_id IS NOT NULL AND repository_id NOT IN (SELECT id FROM repositories);
+      `);
+
+      // Create scheduled_executions table
+      db.exec(`
+        CREATE TABLE scheduled_executions (
+          id TEXT PRIMARY KEY,
+          worktree_id TEXT NOT NULL,
+          cli_tool_id TEXT DEFAULT 'claude',
+          name TEXT NOT NULL,
+          message TEXT NOT NULL,
+          cron_expression TEXT,
+          enabled INTEGER DEFAULT 1,
+          last_executed_at INTEGER,
+          next_execute_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(worktree_id, name),
+          FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
+        );
+      `);
+
+      // Create index on worktree_id for scheduled_executions
+      db.exec(`
+        CREATE INDEX idx_scheduled_executions_worktree
+          ON scheduled_executions(worktree_id);
+      `);
+
+      // Create index on enabled for filtering active schedules
+      db.exec(`
+        CREATE INDEX idx_scheduled_executions_enabled
+          ON scheduled_executions(enabled);
+      `);
+
+      // Create execution_logs table
+      db.exec(`
+        CREATE TABLE execution_logs (
+          id TEXT PRIMARY KEY,
+          schedule_id TEXT NOT NULL,
+          worktree_id TEXT NOT NULL,
+          message TEXT NOT NULL,
+          result TEXT,
+          exit_code INTEGER,
+          status TEXT DEFAULT 'running' CHECK(status IN ('running', 'completed', 'failed', 'timeout', 'cancelled')),
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (schedule_id) REFERENCES scheduled_executions(id) ON DELETE CASCADE,
+          FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
+        );
+      `);
+
+      // Create indexes for execution_logs
+      db.exec(`
+        CREATE INDEX idx_execution_logs_schedule
+          ON execution_logs(schedule_id);
+      `);
+
+      db.exec(`
+        CREATE INDEX idx_execution_logs_worktree
+          ON execution_logs(worktree_id);
+      `);
+
+      db.exec(`
+        CREATE INDEX idx_execution_logs_status
+          ON execution_logs(status);
+      `);
+
+      console.log('✓ Cleaned up orphan records');
+      console.log('✓ Created scheduled_executions table');
+      console.log('✓ Created execution_logs table');
+      console.log('✓ Created indexes for schedule tables');
+    },
+    down: (db) => {
+      db.exec('DROP INDEX IF EXISTS idx_execution_logs_status');
+      db.exec('DROP INDEX IF EXISTS idx_execution_logs_worktree');
+      db.exec('DROP INDEX IF EXISTS idx_execution_logs_schedule');
+      db.exec('DROP TABLE IF EXISTS execution_logs');
+      db.exec('DROP INDEX IF EXISTS idx_scheduled_executions_enabled');
+      db.exec('DROP INDEX IF EXISTS idx_scheduled_executions_worktree');
+      db.exec('DROP TABLE IF EXISTS scheduled_executions');
+      console.log('✓ Dropped scheduled_executions and execution_logs tables');
+    }
   }
 ];
 
@@ -1026,7 +1129,7 @@ export function validateSchema(db: Database.Database): boolean {
     `).all() as Array<{ name: string }>;
 
     const tableNames = tables.map(t => t.name);
-    const requiredTables = ['worktrees', 'chat_messages', 'session_states', 'schema_version', 'worktree_memos', 'external_apps', 'repositories', 'clone_jobs'];
+    const requiredTables = ['worktrees', 'chat_messages', 'session_states', 'schema_version', 'worktree_memos', 'external_apps', 'repositories', 'clone_jobs', 'scheduled_executions', 'execution_logs'];
 
     const missingTables = requiredTables.filter(t => !tableNames.includes(t));
 

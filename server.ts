@@ -42,6 +42,7 @@ import {
 import { getDbInstance } from './src/lib/db-instance';
 import { stopAllPolling } from './src/lib/response-poller';
 import { stopAllAutoYesPolling } from './src/lib/auto-yes-manager';
+import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manager';
 import { runMigrations } from './src/lib/db-migrations';
 import { getEnvByKey } from './src/lib/env';
 import { registerAndFilterRepositories, resolveRepositoryPath } from './src/lib/db-repository';
@@ -253,6 +254,9 @@ app.prepare().then(() => {
 
     // Initialize worktrees after server starts
     await initializeWorktrees();
+
+    // [S3-010] Initialize schedule manager AFTER worktrees are ready
+    initScheduleManager();
   });
 
   // Graceful shutdown with timeout
@@ -272,6 +276,9 @@ app.prepare().then(() => {
 
     // Issue #138: Stop all auto-yes pollers
     stopAllAutoYesPolling();
+
+    // Issue #294: Stop all scheduled executions (SIGKILL fire-and-forget)
+    stopAllSchedules();
 
     // Close WebSocket connections immediately (don't wait)
     closeWebSocket();

@@ -9,6 +9,7 @@
 
 import { stopPolling as stopResponsePolling } from './response-poller';
 import { stopAutoYesPolling } from './auto-yes-manager';
+import { stopAllSchedules } from './schedule-manager';
 import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
 
 /**
@@ -103,6 +104,16 @@ export async function cleanupWorktreeSessions(
     const errorMsg = `auto-yes-poller: ${error instanceof Error ? error.message : String(error)}`;
     result.pollerErrors.push(errorMsg);
     console.warn(`${LOG_PREFIX} Failed to stop auto-yes-poller ${worktreeId}:`, error);
+  }
+
+  // 3. Stop schedule-manager (Issue #294)
+  try {
+    stopAllSchedules();
+    result.pollersStopped.push('schedule-manager');
+  } catch (error) {
+    const errorMsg = `schedule-manager: ${error instanceof Error ? error.message : String(error)}`;
+    result.pollerErrors.push(errorMsg);
+    console.warn(`${LOG_PREFIX} Failed to stop schedule-manager:`, error);
   }
 
   return result;

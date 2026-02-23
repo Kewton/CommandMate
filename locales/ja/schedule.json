@@ -1,0 +1,24 @@
+{
+  "title": "スケジュール",
+  "executionLogs": "実行ログ",
+  "noSchedules": "スケジュールが設定されていません。CMATE.mdにSchedulesセクションを追加してください。",
+  "noLogs": "実行ログはまだありません。",
+  "status": {
+    "running": "実行中",
+    "completed": "完了",
+    "failed": "失敗",
+    "timeout": "タイムアウト",
+    "cancelled": "キャンセル"
+  },
+  "enabled": "有効",
+  "disabled": "無効",
+  "lastRun": "最終実行",
+  "cron": "Cron式",
+  "exitCode": "終了コード",
+  "noOutput": "(出力なし)",
+  "retry": "再試行",
+  "loading": "読み込み中...",
+  "notes": "メモ",
+  "logs": "ログ",
+  "notesAndLogs": "メモ & ログ"
+}

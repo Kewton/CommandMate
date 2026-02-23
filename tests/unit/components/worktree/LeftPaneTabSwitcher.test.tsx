@@ -25,7 +25,7 @@ describe('LeftPaneTabSwitcher', () => {
 
       expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /files/i })).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: /memo/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /notes/i })).toBeInTheDocument();
     });
 
     it('should render with tablist role', () => {
@@ -190,7 +190,7 @@ describe('LeftPaneTabSwitcher', () => {
 
       expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /files/i })).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: /memo/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /notes/i })).toBeInTheDocument();
     });
   });
 
@@ -199,7 +199,7 @@ describe('LeftPaneTabSwitcher', () => {
       const onTabChange = vi.fn();
       render(<LeftPaneTabSwitcher activeTab="memo" onTabChange={onTabChange} />);
 
-      const memoTab = screen.getByRole('tab', { name: /memo/i });
+      const memoTab = screen.getByRole('tab', { name: /notes/i });
       expect(memoTab).toHaveAttribute('aria-selected', 'true');
     });
 
@@ -207,7 +207,7 @@ describe('LeftPaneTabSwitcher', () => {
       const onTabChange = vi.fn();
       render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
 
-      const memoTab = screen.getByRole('tab', { name: /memo/i });
+      const memoTab = screen.getByRole('tab', { name: /notes/i });
       fireEvent.click(memoTab);
 
       expect(onTabChange).toHaveBeenCalledWith('memo');
@@ -217,7 +217,7 @@ describe('LeftPaneTabSwitcher', () => {
       const onTabChange = vi.fn();
       render(<LeftPaneTabSwitcher activeTab="history" onTabChange={onTabChange} />);
 
-      const memoTab = screen.getByRole('tab', { name: /memo/i });
+      const memoTab = screen.getByRole('tab', { name: /notes/i });
       expect(memoTab.querySelector('svg')).toBeInTheDocument();
     });
   });

@@ -40,7 +40,7 @@ import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
 import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
 import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
 import { ToastContainer, useToast } from '@/components/common/Toast';
-import { MemoPane } from '@/components/worktree/MemoPane';
+import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
 import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
@@ -883,8 +883,8 @@ const MobileContent = memo(function MobileContent({
       );
     case 'memo':
       return (
-        <ErrorBoundary componentName="MemoPane">
-          <MemoPane
+        <ErrorBoundary componentName="NotesAndLogsPane">
+          <NotesAndLogsPane
             worktreeId={worktreeId}
             className="h-full"
           />
@@ -1802,8 +1802,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                       </ErrorBoundary>
                     )}
                     {leftPaneTab === 'memo' && (
-                      <ErrorBoundary componentName="MemoPane">
-                        <MemoPane
+                      <ErrorBoundary componentName="NotesAndLogsPane">
+                        <NotesAndLogsPane
                           worktreeId={worktreeId}
                           className="h-full"
                         />

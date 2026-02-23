@@ -1,0 +1,24 @@
+{
+  "title": "Schedules",
+  "executionLogs": "Execution Logs",
+  "noSchedules": "No schedules configured. Add a CMATE.md with a Schedules section.",
+  "noLogs": "No execution logs yet.",
+  "status": {
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "timeout": "Timeout",
+    "cancelled": "Cancelled"
+  },
+  "enabled": "Enabled",
+  "disabled": "Disabled",
+  "lastRun": "Last run",
+  "cron": "Cron",
+  "exitCode": "Exit",
+  "noOutput": "(no output)",
+  "retry": "Retry",
+  "loading": "Loading...",
+  "notes": "Notes",
+  "logs": "Logs",
+  "notesAndLogs": "Notes & Logs"
+}

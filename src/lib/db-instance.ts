@@ -43,6 +43,9 @@ export function getDbInstance(): Database.Database {
     }
 
     dbInstance = new Database(dbPath);
+    // Issue #294: Enable foreign key enforcement BEFORE migrations
+    // This ensures ON DELETE CASCADE works correctly for all tables
+    dbInstance.pragma('foreign_keys = ON');
     runMigrations(dbInstance);
   }
 
