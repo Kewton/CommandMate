@@ -11,15 +11,11 @@ import { randomUUID } from 'crypto';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
-
-/** Maximum name length */
-const MAX_NAME_LENGTH = 100;
-
-/** Maximum message length */
-const MAX_MESSAGE_LENGTH = 10000;
-
-/** Maximum cron expression length */
-const MAX_CRON_LENGTH = 100;
+import {
+  MAX_SCHEDULE_NAME_LENGTH,
+  MAX_SCHEDULE_MESSAGE_LENGTH,
+  MAX_SCHEDULE_CRON_LENGTH,
+} from '@/config/schedule-config';
 
 /**
  * GET /api/worktrees/:id/schedules
@@ -86,20 +82,20 @@ export async function POST(
     if (!name || typeof name !== 'string') {
       return NextResponse.json({ error: 'name is required' }, { status: 400 });
     }
-    if (name.length > MAX_NAME_LENGTH) {
-      return NextResponse.json({ error: `name must be ${MAX_NAME_LENGTH} characters or less` }, { status: 400 });
+    if (name.length > MAX_SCHEDULE_NAME_LENGTH) {
+      return NextResponse.json({ error: `name must be ${MAX_SCHEDULE_NAME_LENGTH} characters or less` }, { status: 400 });
     }
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ error: 'message is required' }, { status: 400 });
     }
-    if (message.length > MAX_MESSAGE_LENGTH) {
-      return NextResponse.json({ error: `message must be ${MAX_MESSAGE_LENGTH} characters or less` }, { status: 400 });
+    if (message.length > MAX_SCHEDULE_MESSAGE_LENGTH) {
+      return NextResponse.json({ error: `message must be ${MAX_SCHEDULE_MESSAGE_LENGTH} characters or less` }, { status: 400 });
     }
     if (!cronExpression || typeof cronExpression !== 'string') {
       return NextResponse.json({ error: 'cronExpression is required' }, { status: 400 });
     }
-    if (cronExpression.length > MAX_CRON_LENGTH) {
-      return NextResponse.json({ error: `cronExpression must be ${MAX_CRON_LENGTH} characters or less` }, { status: 400 });
+    if (cronExpression.length > MAX_SCHEDULE_CRON_LENGTH) {
+      return NextResponse.json({ error: `cronExpression must be ${MAX_SCHEDULE_CRON_LENGTH} characters or less` }, { status: 400 });
     }
 
     const now = Date.now();

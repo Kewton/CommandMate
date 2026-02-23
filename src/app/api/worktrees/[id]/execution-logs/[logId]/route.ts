@@ -10,13 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
-
-/** UUID v4 validation pattern [S4-014] */
-const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function isValidUuidV4(id: string): boolean {
-  return UUID_V4_PATTERN.test(id);
-}
+import { isValidUuidV4 } from '@/config/schedule-config';
 
 /**
  * GET /api/worktrees/:id/execution-logs/:logId

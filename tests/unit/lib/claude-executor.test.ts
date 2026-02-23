@@ -67,6 +67,22 @@ describe('claude-executor', () => {
       const exactOutput = 'a'.repeat(MAX_STORED_OUTPUT_SIZE);
       expect(truncateOutput(exactOutput)).toBe(exactOutput);
     });
+
+    it('should handle multi-byte characters correctly', () => {
+      // Japanese characters are 3 bytes each in UTF-8
+      // Create a string that exceeds MAX_STORED_OUTPUT_SIZE in bytes
+      const japaneseChar = '\u3042'; // hiragana 'a' = 3 bytes
+      const charCount = Math.ceil(MAX_STORED_OUTPUT_SIZE / 3) + 100;
+      const multiByteOutput = japaneseChar.repeat(charCount);
+      const result = truncateOutput(multiByteOutput);
+      expect(result).toContain('--- Output truncated');
+    });
+
+    it('should include truncation notice with size limit info', () => {
+      const largeOutput = 'x'.repeat(MAX_STORED_OUTPUT_SIZE + 500);
+      const result = truncateOutput(largeOutput);
+      expect(result).toContain('100KB');
+    });
   });
 
   describe('getActiveProcesses', () => {

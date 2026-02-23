@@ -395,4 +395,102 @@ More text here.
       expect(CMATE_FILENAME).toBe('CMATE.md');
     });
   });
+
+  describe('MAX_CRON_EXPRESSION_LENGTH constant', () => {
+    it('should be 100', () => {
+      expect(MAX_CRON_EXPRESSION_LENGTH).toBe(100);
+    });
+  });
+
+  describe('MAX_SCHEDULE_ENTRIES constant', () => {
+    it('should be 100', () => {
+      expect(MAX_SCHEDULE_ENTRIES).toBe(100);
+    });
+  });
+
+  describe('parseSchedulesSection edge cases', () => {
+    it('should handle enabled=true (explicit string)', () => {
+      const rows = [
+        ['test', '0 9 * * *', 'hello', 'claude', 'true'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries[0].enabled).toBe(true);
+    });
+
+    it('should treat empty enabled string as true (default)', () => {
+      const rows = [
+        ['test', '0 9 * * *', 'hello', 'claude', ''],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries[0].enabled).toBe(true);
+    });
+
+    it('should sanitize control characters from the message', () => {
+      const rows = [
+        ['test', '0 9 * * *', 'hello\x00world'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries[0].message).toBe('helloworld');
+    });
+
+    it('should trim whitespace from cron expression', () => {
+      const rows = [
+        ['test', '  0 9 * * *  ', 'hello'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries[0].cronExpression).toBe('0 9 * * *');
+    });
+
+    it('should use trimmed cliToolId or default to claude', () => {
+      const rows = [
+        ['test1', '0 9 * * *', 'hello', '  codex  '],
+        ['test2', '0 9 * * *', 'hello'],
+      ];
+      const entries = parseSchedulesSection(rows);
+      expect(entries[0].cliToolId).toBe('codex');
+      expect(entries[1].cliToolId).toBe('claude');
+    });
+
+    it('should handle empty rows array', () => {
+      const entries = parseSchedulesSection([]);
+      expect(entries).toHaveLength(0);
+    });
+  });
+
+  describe('parseCmateFile edge cases', () => {
+    it('should handle duplicate section names by appending to same section', () => {
+      const content = `## Schedules
+
+| Name | Cron | Message |
+|------|------|---------|
+| first | 0 9 * * * | hello |
+
+## Schedules
+
+| Name | Cron | Message |
+|------|------|---------|
+| second | 0 10 * * * | world |
+`;
+      const result = parseCmateFile(content);
+      // Second section header re-enters the same section,
+      // resetting header/separator parsing
+      const rows = result.get('Schedules')!;
+      expect(rows).toHaveLength(2);
+    });
+
+    it('should skip lines without pipe character within a section', () => {
+      const content = `## Test
+
+Regular text without pipe
+Another non-table line
+
+| Key | Value |
+|-----|-------|
+| a | b |
+`;
+      const result = parseCmateFile(content);
+      expect(result.get('Test')!).toHaveLength(1);
+      expect(result.get('Test')![0]).toEqual(['a', 'b']);
+    });
+  });
 });

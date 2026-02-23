@@ -16,22 +16,28 @@ import React, { useState, useEffect, useCallback, memo } from 'react';
 // Types
 // ============================================================================
 
+/** Possible execution log status values */
+type ExecutionLogStatus = 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled';
+
+/** Execution log entry from the list API (excludes result for performance) */
 interface ExecutionLog {
   id: string;
   schedule_id: string;
   worktree_id: string;
   message: string;
   exit_code: number | null;
-  status: string;
+  status: ExecutionLogStatus;
   started_at: number;
   completed_at: number | null;
   created_at: number;
 }
 
+/** Execution log detail from the individual API (includes result) */
 interface ExecutionLogDetail extends ExecutionLog {
   result: string | null;
 }
 
+/** Schedule entry from the schedules API */
 interface Schedule {
   id: string;
   worktree_id: string;
@@ -58,14 +64,14 @@ function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleString();
 }
 
-function getStatusColor(status: string): string {
+/** Map execution log status to Tailwind CSS color classes */
+function getStatusColor(status: ExecutionLogStatus): string {
   switch (status) {
     case 'completed': return 'text-green-600 bg-green-50';
     case 'failed': return 'text-red-600 bg-red-50';
     case 'timeout': return 'text-yellow-600 bg-yellow-50';
     case 'running': return 'text-blue-600 bg-blue-50';
     case 'cancelled': return 'text-gray-600 bg-gray-50';
-    default: return 'text-gray-600 bg-gray-50';
   }
 }
 

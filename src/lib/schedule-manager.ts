@@ -58,6 +58,20 @@ interface ManagerState {
   initialized: boolean;
 }
 
+/** DB row shape for worktree queries */
+interface WorktreeRow {
+  id: string;
+  path: string;
+}
+
+/** DB row shape for schedule ID lookup */
+interface ScheduleIdRow {
+  id: string;
+}
+
+/** Execution log status values */
+type ExecutionLogStatus = 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled';
+
 // =============================================================================
 // Global State (hot reload persistence)
 // =============================================================================
@@ -82,19 +96,35 @@ function getManagerState(): ManagerState {
 }
 
 // =============================================================================
+// Lazy DB Accessor
+// =============================================================================
+
+/**
+ * Lazy-load the DB instance to avoid circular import issues.
+ * The db-instance module is loaded at runtime via require() because
+ * schedule-manager.ts is imported early in the server lifecycle.
+ *
+ * @returns The SQLite database instance
+ */
+function getLazyDbInstance(): ReturnType<typeof import('./db-instance').getDbInstance> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getDbInstance } = require('./db-instance') as typeof import('./db-instance');
+  return getDbInstance();
+}
+
+// =============================================================================
 // DB Operations
 // =============================================================================
 
 /**
  * Get all worktrees from the database.
- * Lazy-loads db-instance to avoid circular imports.
+ *
+ * @returns Array of worktree rows with id and path
  */
-function getAllWorktrees(): Array<{ id: string; path: string }> {
+function getAllWorktrees(): WorktreeRow[] {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getDbInstance } = require('./db-instance') as typeof import('./db-instance');
-    const db = getDbInstance();
-    return db.prepare('SELECT id, path FROM worktrees').all() as Array<{ id: string; path: string }>;
+    const db = getLazyDbInstance();
+    return db.prepare('SELECT id, path FROM worktrees').all() as WorktreeRow[];
   } catch (error) {
     console.error('[schedule-manager] Failed to get worktrees:', error);
     return [];
@@ -103,23 +133,26 @@ function getAllWorktrees(): Array<{ id: string; path: string }> {
 
 /**
  * Upsert a schedule entry into the database.
+ * If a schedule with the same worktree_id and name exists, it is updated.
+ * Otherwise, a new schedule is created.
+ *
+ * @param worktreeId - The worktree ID to associate the schedule with
+ * @param entry - The schedule entry from CMATE.md
+ * @returns The schedule ID (existing or newly created)
  */
 function upsertSchedule(
   worktreeId: string,
   entry: ScheduleEntry
 ): string {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getDbInstance } = require('./db-instance') as typeof import('./db-instance');
-  const db = getDbInstance();
+  const db = getLazyDbInstance();
   const now = Date.now();
 
   // Check if schedule already exists
   const existing = db.prepare(
     'SELECT id FROM scheduled_executions WHERE worktree_id = ? AND name = ?'
-  ).get(worktreeId, entry.name) as { id: string } | undefined;
+  ).get(worktreeId, entry.name) as ScheduleIdRow | undefined;
 
   if (existing) {
-    // Update existing
     db.prepare(`
       UPDATE scheduled_executions
       SET message = ?, cron_expression = ?, cli_tool_id = ?, enabled = ?, updated_at = ?
@@ -128,7 +161,6 @@ function upsertSchedule(
     return existing.id;
   }
 
-  // Insert new
   const id = randomUUID();
   db.prepare(`
     INSERT INTO scheduled_executions (id, worktree_id, name, message, cron_expression, cli_tool_id, enabled, created_at, updated_at)
@@ -138,16 +170,19 @@ function upsertSchedule(
 }
 
 /**
- * Create an execution log entry.
+ * Create an execution log entry in 'running' status.
+ *
+ * @param scheduleId - The parent schedule ID
+ * @param worktreeId - The worktree ID
+ * @param message - The execution message/prompt
+ * @returns The new execution log ID
  */
 function createExecutionLog(
   scheduleId: string,
   worktreeId: string,
   message: string
 ): string {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getDbInstance } = require('./db-instance') as typeof import('./db-instance');
-  const db = getDbInstance();
+  const db = getLazyDbInstance();
   const now = Date.now();
   const id = randomUUID();
 
@@ -161,16 +196,19 @@ function createExecutionLog(
 
 /**
  * Update an execution log entry with results.
+ *
+ * @param logId - The execution log ID to update
+ * @param status - The final execution status
+ * @param result - The execution output or error message
+ * @param exitCode - The process exit code, or null if unknown
  */
 function updateExecutionLog(
   logId: string,
-  status: string,
+  status: ExecutionLogStatus,
   result: string | null,
   exitCode: number | null
 ): void {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getDbInstance } = require('./db-instance') as typeof import('./db-instance');
-  const db = getDbInstance();
+  const db = getLazyDbInstance();
   const now = Date.now();
 
   db.prepare(`
@@ -180,11 +218,11 @@ function updateExecutionLog(
 
 /**
  * Update the last_executed_at timestamp for a schedule.
+ *
+ * @param scheduleId - The schedule ID to update
  */
 function updateScheduleLastExecuted(scheduleId: string): void {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getDbInstance } = require('./db-instance') as typeof import('./db-instance');
-  const db = getDbInstance();
+  const db = getLazyDbInstance();
   const now = Date.now();
 
   db.prepare('UPDATE scheduled_executions SET last_executed_at = ?, updated_at = ? WHERE id = ?')
@@ -193,12 +231,12 @@ function updateScheduleLastExecuted(scheduleId: string): void {
 
 /**
  * Recovery: mark all 'running' execution logs as 'failed' on startup.
+ * This handles the case where the server was killed while executions
+ * were still in progress.
  */
 function recoverRunningLogs(): void {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getDbInstance } = require('./db-instance') as typeof import('./db-instance');
-    const db = getDbInstance();
+    const db = getLazyDbInstance();
     const now = Date.now();
 
     const result = db.prepare(
@@ -219,6 +257,9 @@ function recoverRunningLogs(): void {
 
 /**
  * Execute a scheduled task.
+ * Guards against concurrent execution of the same schedule.
+ *
+ * @param state - The schedule state to execute
  */
 async function executeSchedule(state: ScheduleState): Promise<void> {
   if (state.isExecuting) {
@@ -230,11 +271,8 @@ async function executeSchedule(state: ScheduleState): Promise<void> {
   const logId = createExecutionLog(state.scheduleId, state.worktreeId, state.entry.message);
 
   try {
-    // Get worktree path from DB
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getDbInstance } = require('./db-instance') as typeof import('./db-instance');
-    const db = getDbInstance();
-    const worktree = db.prepare('SELECT path FROM worktrees WHERE id = ?').get(state.worktreeId) as { path: string } | undefined;
+    const db = getLazyDbInstance();
+    const worktree = db.prepare('SELECT path FROM worktrees WHERE id = ?').get(state.worktreeId) as Pick<WorktreeRow, 'path'> | undefined;
 
     if (!worktree) {
       updateExecutionLog(logId, 'failed', 'Worktree not found', null);
@@ -266,6 +304,8 @@ async function executeSchedule(state: ScheduleState): Promise<void> {
 
 /**
  * Sync schedules from CMATE.md files for all worktrees.
+ * Reads CMATE.md from each worktree, upserts schedules to DB,
+ * creates/updates cron jobs, and removes stale schedules.
  */
 function syncSchedules(): void {
   const manager = getManagerState();

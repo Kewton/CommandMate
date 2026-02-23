@@ -11,22 +11,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
-
-/** UUID v4 validation pattern [S4-014] */
-const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-/** Maximum name length */
-const MAX_NAME_LENGTH = 100;
-
-/** Maximum message length */
-const MAX_MESSAGE_LENGTH = 10000;
-
-/** Maximum cron expression length */
-const MAX_CRON_LENGTH = 100;
-
-function isValidUuidV4(id: string): boolean {
-  return UUID_V4_PATTERN.test(id);
-}
+import {
+  isValidUuidV4,
+  MAX_SCHEDULE_NAME_LENGTH,
+  MAX_SCHEDULE_MESSAGE_LENGTH,
+  MAX_SCHEDULE_CRON_LENGTH,
+} from '@/config/schedule-config';
 
 /**
  * GET /api/worktrees/:id/schedules/:scheduleId
@@ -98,14 +88,14 @@ export async function PUT(
     const { name, message, cronExpression, cliToolId, enabled } = body;
 
     // Validate optional fields
-    if (name !== undefined && (typeof name !== 'string' || name.length > MAX_NAME_LENGTH)) {
-      return NextResponse.json({ error: `name must be a string of ${MAX_NAME_LENGTH} characters or less` }, { status: 400 });
+    if (name !== undefined && (typeof name !== 'string' || name.length > MAX_SCHEDULE_NAME_LENGTH)) {
+      return NextResponse.json({ error: `name must be a string of ${MAX_SCHEDULE_NAME_LENGTH} characters or less` }, { status: 400 });
     }
-    if (message !== undefined && (typeof message !== 'string' || message.length > MAX_MESSAGE_LENGTH)) {
-      return NextResponse.json({ error: `message must be a string of ${MAX_MESSAGE_LENGTH} characters or less` }, { status: 400 });
+    if (message !== undefined && (typeof message !== 'string' || message.length > MAX_SCHEDULE_MESSAGE_LENGTH)) {
+      return NextResponse.json({ error: `message must be a string of ${MAX_SCHEDULE_MESSAGE_LENGTH} characters or less` }, { status: 400 });
     }
-    if (cronExpression !== undefined && (typeof cronExpression !== 'string' || cronExpression.length > MAX_CRON_LENGTH)) {
-      return NextResponse.json({ error: `cronExpression must be a string of ${MAX_CRON_LENGTH} characters or less` }, { status: 400 });
+    if (cronExpression !== undefined && (typeof cronExpression !== 'string' || cronExpression.length > MAX_SCHEDULE_CRON_LENGTH)) {
+      return NextResponse.json({ error: `cronExpression must be a string of ${MAX_SCHEDULE_CRON_LENGTH} characters or less` }, { status: 400 });
     }
 
     const now = Date.now();
