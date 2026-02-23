@@ -65,7 +65,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
               : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
           }`}
         >
-          Logs
+          Schedules
         </button>
       </div>
 

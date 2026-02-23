@@ -19,8 +19,8 @@
   "retry": "Retry",
   "loading": "Loading...",
   "notes": "Notes",
-  "logs": "Logs",
-  "notesAndLogs": "Notes & Logs",
+  "logs": "Schedules",
+  "notesAndLogs": "CMATE",
   "cmateCreated": "CMATE.md created with template. Edit it to configure schedules.",
   "cmateValidation": {
     "noSchedulesSection": "CMATE.md has no Schedules section.",

@@ -101,7 +101,7 @@ const MemoIcon = memo(function MemoIcon() {
 const TABS: TabConfig[] = [
   { id: 'history', label: 'History', icon: <HistoryIcon /> },
   { id: 'files', label: 'Files', icon: <FilesIcon /> },
-  { id: 'memo', label: 'Notes & Logs', icon: <MemoIcon /> },
+  { id: 'memo', label: 'CMATE', icon: <MemoIcon /> },
 ];
 
 // ============================================================================
