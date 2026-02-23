@@ -1416,6 +1416,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         `/api/worktrees/${worktreeId}/files/CMATE.md`
       );
 
+      let content: string;
+
       if (checkResponse.status === 404) {
         // File does not exist - create with template
         const createResponse = await fetch(
@@ -1431,20 +1433,25 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         }
         showToast(tSchedule('cmateCreated'), 'success');
         setFileTreeRefresh(prev => prev + 1);
-        return;
-      }
-
-      if (!checkResponse.ok) {
+        // Use template content directly for validation
+        content = CMATE_TEMPLATE_CONTENT;
+      } else if (checkResponse.ok) {
+        // File exists - read content for validation
+        const data = await checkResponse.json();
+        if (typeof data.content !== 'string') {
+          showToast(tSchedule('cmateValidation.failed'), 'error');
+          return;
+        }
+        content = data.content;
+      } else {
         throw new Error(`Failed to check CMATE.md: ${checkResponse.status}`);
       }
 
-      // File exists - validate it
-      const data = await checkResponse.json();
-      const content = data.content as string;
+      // Validate content
       const sections = parseCmateContent(content);
       const scheduleRows = sections.get('Schedules');
 
-      if (!scheduleRows) {
+      if (!scheduleRows || scheduleRows.length === 0) {
         showToast(tSchedule('cmateValidation.noSchedulesSection'), 'error');
         return;
       }
@@ -1452,7 +1459,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       const errors = validateSchedulesSection(scheduleRows);
 
       if (errors.length === 0) {
-        showToast(tSchedule('cmateValidation.valid', { count: scheduleRows.length }), 'success');
+        showToast(
+          tSchedule('cmateValidation.valid', { count: String(scheduleRows.length) }),
+          'success'
+        );
       } else {
         const maxDisplay = 3;
         const details = errors
@@ -1462,7 +1472,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         const suffix = errors.length > maxDisplay ? ` (+${errors.length - maxDisplay})` : '';
         showToast(
           tSchedule('cmateValidation.errors', {
-            errorCount: errors.length,
+            errorCount: String(errors.length),
             details: details + suffix,
           }),
           'error'
