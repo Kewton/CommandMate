@@ -259,6 +259,27 @@ describe('cmate-validator', () => {
       expect(errors).toEqual([]);
     });
 
+    it('should detect invalid permission value for claude', () => {
+      const rows = [['valid-name', '0 * * * *', 'msg', 'claude', 'true', 'invalid-perm']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].field).toBe('permission');
+      expect(errors[0].message).toContain('invalid permission');
+    });
+
+    it('should detect invalid permission value for codex', () => {
+      const rows = [['valid-name', '0 * * * *', 'msg', 'codex', 'true', 'acceptEdits']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].field).toBe('permission');
+    });
+
+    it('should accept valid codex permission', () => {
+      const rows = [['valid-name', '0 * * * *', 'msg', 'codex', 'true', 'read-only']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
     it('should accept Japanese names', () => {
       const rows = [['日次レビュー', '0 9 * * *', 'コードをレビュー']];
       const errors = validateSchedulesSection(rows);

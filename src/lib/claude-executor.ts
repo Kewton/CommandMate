@@ -29,6 +29,9 @@ export const EXECUTION_TIMEOUT_MS = 5 * 60 * 1000;
 /** Maximum message length sent to claude -p */
 export const MAX_MESSAGE_LENGTH = 10000;
 
+/** Allowed CLI tool identifiers for scheduled execution */
+export const ALLOWED_CLI_TOOLS = new Set(['claude', 'codex']);
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -105,6 +108,16 @@ export async function executeClaudeCommand(
   cliToolId: string = 'claude',
   permission?: string
 ): Promise<ExecutionResult> {
+  // Validate cliToolId against whitelist [SEC-001]
+  if (!ALLOWED_CLI_TOOLS.has(cliToolId)) {
+    return {
+      output: '',
+      exitCode: null,
+      status: 'failed',
+      error: `Invalid CLI tool: ${cliToolId}`,
+    };
+  }
+
   // Validate message length
   const truncatedMessage = message.length > MAX_MESSAGE_LENGTH
     ? message.substring(0, MAX_MESSAGE_LENGTH)

@@ -10,6 +10,7 @@
 'use client';
 
 import React, { useState, useCallback, memo } from 'react';
+import { useTranslations } from 'next-intl';
 import { MemoPane } from './MemoPane';
 import { ExecutionLogPane } from './ExecutionLogPane';
 
@@ -34,6 +35,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   worktreeId,
   className = '',
 }: NotesAndLogsPaneProps) {
+  const t = useTranslations('schedule');
   // Internal sub-tab state (not leaked to parent)
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('notes');
 
@@ -54,7 +56,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
               : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
           }`}
         >
-          Notes
+          {t('notes')}
         </button>
         <button
           type="button"
@@ -65,7 +67,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
               : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
           }`}
         >
-          Schedules
+          {t('logs')}
         </button>
       </div>
 

@@ -20,43 +20,33 @@ import {
   CODEX_SANDBOXES,
   DEFAULT_PERMISSIONS,
 } from '@/config/schedule-config';
+import {
+  CMATE_FILENAME,
+  CONTROL_CHAR_PATTERN,
+  NAME_PATTERN,
+  MAX_CRON_EXPRESSION_LENGTH,
+  MAX_SCHEDULE_ENTRIES,
+  sanitizeContent,
+  isValidCronExpression,
+} from '@/config/cmate-constants';
 
-// =============================================================================
-// Constants
-// =============================================================================
-
-/** CMATE.md filename */
-export const CMATE_FILENAME = 'CMATE.md';
+// Re-export shared constants for backward compatibility
+export {
+  CMATE_FILENAME,
+  NAME_PATTERN,
+  MAX_CRON_EXPRESSION_LENGTH,
+  MAX_SCHEDULE_ENTRIES,
+  isValidCronExpression,
+};
 
 /**
- * Unicode control character regex for sanitization
- * Matches: C0 control chars (except \t \n \r), C1 control chars,
- * zero-width characters, directional control characters
- *
- * [S4-002] Strips potentially dangerous Unicode control characters
+ * @deprecated Use CONTROL_CHAR_PATTERN from '@/config/cmate-constants' instead.
+ * Kept for backward compatibility with existing tests.
  */
-export const CONTROL_CHAR_REGEX =
-  // eslint-disable-next-line no-control-regex
-  /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F\u200B-\u200F\u2028-\u202F\uFEFF]/g;
-
-/**
- * Name validation pattern
- * Allows: ASCII word chars, Japanese chars (CJK, Hiragana, Katakana, Symbols),
- * spaces, and hyphens. Length: 1-100 characters.
- *
- * [S4-011] Prevents injection through name field
- */
-export const NAME_PATTERN =
-  /^[\w\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uF900-\uFAFF\s-]{1,100}$/;
-
-/** Maximum cron expression length */
-export const MAX_CRON_EXPRESSION_LENGTH = 100;
+export const CONTROL_CHAR_REGEX = new RegExp(CONTROL_CHAR_PATTERN.source, 'g');
 
 /** Minimum cron interval pattern (every minute) */
 export const MIN_CRON_INTERVAL = '* * * * *';
-
-/** Maximum number of schedule entries per worktree */
-export const MAX_SCHEDULE_ENTRIES = 100;
 
 // =============================================================================
 // Sanitization
@@ -70,7 +60,7 @@ export const MAX_SCHEDULE_ENTRIES = 100;
  * @returns Sanitized string with control characters removed
  */
 export function sanitizeMessageContent(content: string): string {
-  return content.replace(CONTROL_CHAR_REGEX, '');
+  return sanitizeContent(content);
 }
 
 // =============================================================================
@@ -101,31 +91,6 @@ export function validateCmatePath(
     throw new Error(
       `Path traversal detected: ${filePath} is not within ${worktreeDir}`
     );
-  }
-
-  return true;
-}
-
-// =============================================================================
-// Cron Validation
-// =============================================================================
-
-/**
- * Validate a cron expression.
- * Checks length and basic format (5 fields separated by spaces).
- *
- * @param expression - Cron expression to validate
- * @returns true if the expression appears valid
- */
-export function isValidCronExpression(expression: string): boolean {
-  if (expression.length > MAX_CRON_EXPRESSION_LENGTH) {
-    return false;
-  }
-
-  // Basic format check: 5 fields separated by spaces
-  const parts = expression.trim().split(/\s+/);
-  if (parts.length < 5 || parts.length > 6) {
-    return false;
   }
 
   return true;

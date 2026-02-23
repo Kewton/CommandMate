@@ -7,10 +7,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   truncateOutput,
   buildCliArgs,
+  executeClaudeCommand,
   MAX_OUTPUT_SIZE,
   MAX_STORED_OUTPUT_SIZE,
   EXECUTION_TIMEOUT_MS,
   MAX_MESSAGE_LENGTH,
+  ALLOWED_CLI_TOOLS,
   getActiveProcesses,
 } from '../../../src/lib/claude-executor';
 import { SENSITIVE_ENV_KEYS } from '../../../src/lib/env-sanitizer';
@@ -121,6 +123,26 @@ describe('claude-executor', () => {
     it('should build fallback args with -p for unknown tools', () => {
       const args = buildCliArgs('hello', 'gemini');
       expect(args).toEqual(['-p', 'hello']);
+    });
+  });
+
+  describe('ALLOWED_CLI_TOOLS', () => {
+    it('should contain claude and codex', () => {
+      expect(ALLOWED_CLI_TOOLS.has('claude')).toBe(true);
+      expect(ALLOWED_CLI_TOOLS.has('codex')).toBe(true);
+    });
+
+    it('should not contain arbitrary tools', () => {
+      expect(ALLOWED_CLI_TOOLS.has('bash')).toBe(false);
+      expect(ALLOWED_CLI_TOOLS.has('sh')).toBe(false);
+    });
+  });
+
+  describe('executeClaudeCommand - cliToolId validation', () => {
+    it('should reject invalid cliToolId without executing', async () => {
+      const result = await executeClaudeCommand('hello', '/tmp', 'bash');
+      expect(result.status).toBe('failed');
+      expect(result.error).toContain('Invalid CLI tool');
     });
   });
 

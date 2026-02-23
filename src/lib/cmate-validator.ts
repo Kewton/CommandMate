@@ -10,28 +10,15 @@
  * silently skipping invalid entries.
  */
 
-// =============================================================================
-// Constants (mirrored from cmate-parser.ts for client-side use)
-// =============================================================================
-
-/**
- * Unicode control character regex for sanitization.
- * Matches: C0 control chars (except \t \n \r), C1 control chars,
- * zero-width characters, directional control characters.
- */
-const CONTROL_CHAR_REGEX =
-  // eslint-disable-next-line no-control-regex
-  /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F\u200B-\u200F\u2028-\u202F\uFEFF]/g;
-
-/**
- * Name validation pattern.
- * Allows: ASCII word chars, Japanese chars, spaces, and hyphens.
- */
-const NAME_PATTERN =
-  /^[\w\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uF900-\uFAFF\s-]{1,100}$/;
-
-/** Maximum cron expression length */
-const MAX_CRON_EXPRESSION_LENGTH = 100;
+import {
+  NAME_PATTERN,
+  sanitizeContent,
+  isValidCronExpression,
+} from '@/config/cmate-constants';
+import {
+  CLAUDE_PERMISSIONS,
+  CODEX_SANDBOXES,
+} from '@/config/schedule-config';
 
 // =============================================================================
 // Types
@@ -133,17 +120,6 @@ export function parseCmateContent(content: string): Map<string, string[][]> {
 // =============================================================================
 
 /**
- * Validate a cron expression (client-side).
- */
-function isValidCronExpression(expression: string): boolean {
-  if (expression.length > MAX_CRON_EXPRESSION_LENGTH) {
-    return false;
-  }
-  const parts = expression.trim().split(/\s+/);
-  return parts.length >= 5 && parts.length <= 6;
-}
-
-/**
  * Validate that the Schedules section header row contains the expected columns.
  *
  * @param content - Raw CMATE.md file content
@@ -237,7 +213,7 @@ export function validateSchedulesSection(
     const [name, cronExpression, message] = row;
 
     // Validate name
-    const sanitizedName = name.replace(CONTROL_CHAR_REGEX, '');
+    const sanitizedName = sanitizeContent(name);
     if (!NAME_PATTERN.test(sanitizedName)) {
       errors.push({
         row: i,
@@ -256,7 +232,7 @@ export function validateSchedulesSection(
     }
 
     // Validate message
-    const sanitizedMessage = message.replace(CONTROL_CHAR_REGEX, '');
+    const sanitizedMessage = sanitizeContent(message);
     if (!sanitizedMessage.trim()) {
       errors.push({
         row: i,
@@ -265,14 +241,29 @@ export function validateSchedulesSection(
       });
     }
 
-    // Validate permission (6th column) - empty check only on client side
+    // Validate permission (6th column)
     const permissionStr = row[5];
-    if (permissionStr !== undefined && permissionStr.trim() === '') {
-      errors.push({
-        row: i,
-        message: `Row ${i + 1}: empty permission`,
-        field: 'permission',
-      });
+    if (permissionStr !== undefined) {
+      const trimmedPermission = permissionStr.trim();
+      if (trimmedPermission === '') {
+        errors.push({
+          row: i,
+          message: `Row ${i + 1}: empty permission`,
+          field: 'permission',
+        });
+      } else {
+        // Validate permission value against allowed values for the CLI tool
+        const cliToolId = row[3]?.trim() || 'claude';
+        const allowedValues: readonly string[] =
+          cliToolId === 'codex' ? CODEX_SANDBOXES : CLAUDE_PERMISSIONS;
+        if (!allowedValues.includes(trimmedPermission)) {
+          errors.push({
+            row: i,
+            message: `Row ${i + 1}: invalid permission "${trimmedPermission}" for ${cliToolId}`,
+            field: 'permission',
+          });
+        }
+      }
     }
   }
 

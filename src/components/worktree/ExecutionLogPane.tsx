@@ -146,7 +146,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
       <div className={`flex items-center justify-center h-full p-4 ${className}`}>
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-4 border-gray-200 border-t-blue-500 rounded-full animate-spin" />
-          <span className="text-sm text-gray-500">Loading...</span>
+          <span className="text-sm text-gray-500">{t('loading')}</span>
         </div>
       </div>
     );
@@ -162,7 +162,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
             onClick={() => void fetchData()}
             className="ml-2 px-3 py-1 text-sm text-white bg-blue-500 rounded hover:bg-blue-600"
           >
-            Retry
+            {t('retry')}
           </button>
         </div>
       </div>
@@ -173,7 +173,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     <div className={`flex flex-col gap-4 p-4 overflow-y-auto ${className}`}>
       {/* Schedules Section */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">Schedules ({schedules.length})</h3>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">{t('title')} ({schedules.length})</h3>
         {schedules.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             <p className="font-medium text-gray-600 mb-3">{t('noSchedulesTitle')}</p>
@@ -191,13 +191,13 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-sm">{schedule.name}</span>
                   <span className={`text-xs px-2 py-0.5 rounded ${schedule.enabled ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-500'}`}>
-                    {schedule.enabled ? 'Enabled' : 'Disabled'}
+                    {schedule.enabled ? t('enabled') : t('disabled')}
                   </span>
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  <span>Cron: {schedule.cron_expression || 'N/A'}</span>
+                  <span>{t('cron')}: {schedule.cron_expression || 'N/A'}</span>
                   {schedule.last_executed_at && (
-                    <span className="ml-3">Last run: {formatTimestamp(schedule.last_executed_at)}</span>
+                    <span className="ml-3">{t('lastRun')}: {formatTimestamp(schedule.last_executed_at)}</span>
                   )}
                 </div>
               </div>
@@ -208,9 +208,9 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
 
       {/* Execution Logs Section */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">Execution Logs ({logs.length})</h3>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">{t('executionLogs')} ({logs.length})</h3>
         {logs.length === 0 ? (
-          <p className="text-sm text-gray-500">No execution logs yet.</p>
+          <p className="text-sm text-gray-500">{t('noLogs')}</p>
         ) : (
           <div className="space-y-2">
             {logs.map((log) => (
@@ -223,19 +223,19 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                   <div className="flex items-center justify-between">
                     <span className="text-sm truncate max-w-[60%]">{log.message}</span>
                     <span className={`text-xs px-2 py-0.5 rounded ${getStatusColor(log.status)}`}>
-                      {log.status}
+                      {t(`status.${log.status}`)}
                     </span>
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
                     {formatTimestamp(log.started_at)}
-                    {log.exit_code !== null && <span className="ml-2">Exit: {log.exit_code}</span>}
+                    {log.exit_code !== null && <span className="ml-2">{t('exitCode')}: {log.exit_code}</span>}
                   </div>
                 </button>
 
                 {expandedLogId === log.id && logDetail && (
                   <div className="border-t border-gray-200 p-3 bg-gray-50">
                     <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700 max-h-60 overflow-y-auto">
-                      {logDetail.result || '(no output)'}
+                      {logDetail.result || t('noOutput')}
                     </pre>
                   </div>
                 )}
