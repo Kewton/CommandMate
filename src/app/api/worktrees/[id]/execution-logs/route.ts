@@ -32,11 +32,15 @@ export async function GET(
     }
 
     // [S1-014] Exclude result column from list API for performance
+    // Return all execution logs with schedule name via LEFT JOIN
+    // (includes logs from renamed/disabled schedules)
     const logs = db.prepare(`
-      SELECT id, schedule_id, worktree_id, message, exit_code, status, started_at, completed_at, created_at
-      FROM execution_logs
-      WHERE worktree_id = ?
-      ORDER BY created_at DESC
+      SELECT el.id, el.schedule_id, el.worktree_id, el.message, el.exit_code, el.status, el.started_at, el.completed_at, el.created_at,
+             se.name AS schedule_name
+      FROM execution_logs el
+      LEFT JOIN scheduled_executions se ON el.schedule_id = se.id
+      WHERE el.worktree_id = ?
+      ORDER BY el.created_at DESC
       LIMIT 100
     `).all(params.id);
 

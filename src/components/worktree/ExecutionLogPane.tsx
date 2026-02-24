@@ -10,7 +10,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { useTranslations } from 'next-intl';
 
 // ============================================================================
@@ -31,6 +31,7 @@ interface ExecutionLog {
   started_at: number;
   completed_at: number | null;
   created_at: number;
+  schedule_name: string | null;
 }
 
 /** Execution log detail from the individual API (includes result) */
@@ -91,14 +92,6 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   const [error, setError] = useState<string | null>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [logDetail, setLogDetail] = useState<ExecutionLogDetail | null>(null);
-
-  const scheduleNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of schedules) {
-      map.set(s.id, s.name);
-    }
-    return map;
-  }, [schedules]);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -229,7 +222,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                   className="w-full text-left p-3 hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm truncate max-w-[60%]">{scheduleNameMap.get(log.schedule_id) || t('unknownSchedule')}</span>
+                    <span className="text-sm truncate max-w-[60%]">{log.schedule_name || t('unknownSchedule')}</span>
                     <span className={`text-xs px-2 py-0.5 rounded ${getStatusColor(log.status)}`}>
                       {t(`status.${log.status}`)}
                     </span>

@@ -39,7 +39,7 @@ export async function GET(
     }
 
     const schedules = db.prepare(
-      'SELECT * FROM scheduled_executions WHERE worktree_id = ? ORDER BY created_at DESC'
+      'SELECT * FROM scheduled_executions WHERE worktree_id = ? AND enabled = 1 ORDER BY created_at DESC'
     ).all(params.id);
 
     return NextResponse.json({ schedules }, { status: 200 });
