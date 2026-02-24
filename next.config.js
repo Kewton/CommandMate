@@ -68,6 +68,16 @@ const nextConfig = {
           },
         ],
       },
+      {
+        // Prevent browser caching of API responses (dynamic data)
+        source: '/api/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-store',
+          },
+        ],
+      },
     ];
   },
 }
