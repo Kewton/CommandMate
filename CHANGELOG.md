@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-02-24
+
+### Added
+- CMATE schedule execution feature (Issue #294)
+  - CMATE.md-based schedule definition with cron syntax
+  - Claude CLI executor with permission support (`--permission-mode`)
+  - Execution log viewer with Message/Response detail and schedule name display
+  - CMATE setup/validate button in FileTreeView toolbar
+  - Step-by-step setup guide for empty schedules state
+  - Environment variable sanitization for secure execution
+  - i18n support (en/ja) for schedule UI
+  - CMATE schedules user guide documentation (ja/en)
+- Mobile tab renamed from "Notes" to "CMATE"
+
+### Fixed
+- CLAUDE_PERMISSIONS corrected to match `claude` CLI `--permission-mode` values
+- Disabled schedules now filtered from active execution
+- Header column validation added to CMATE.md validator
+- Tree API response parsing fixed (object instead of array)
+- Executor hanging prevention with CLI-specific args support
+
 ## [0.3.1] - 2026-02-23
 
 ### Fixed
@@ -544,7 +565,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.1...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Kewton/CommandMate/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Kewton/CommandMate/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Kewton/CommandMate/compare/v0.2.13...v0.3.0
 [0.2.13]: https://github.com/Kewton/CommandMate/compare/v0.2.12...v0.2.13
