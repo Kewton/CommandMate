@@ -66,18 +66,20 @@ Of course, it works great on desktop too — the two-column layout gives you a f
 
 ## Comparison
 
-| Feature | CommandMate | Happy Coder | claude-squad | Omnara |
-|---------|:-----------:|:-----------:|:------------:|:------:|
-| Auto Yes Mode | Yes | No | Yes (TUI only) | No |
-| Git Worktree Management | Yes | No | Yes (TUI only) | No |
-| Mobile Web UI | Yes | Yes | **No** | Yes |
-| File Viewer | Yes | No | No | No |
-| Markdown Editor | Yes | No | No | No |
-| Screenshot Instructions | Yes | No | Not possible | No |
-| Token Authentication | Yes | N/A (app) | No | N/A (cloud) |
-| Scheduled Execution | Yes | No | No | No |
-| Free / OSS | Yes | Free + Paid | Yes | $20/mo |
-| Runs 100% Locally | Yes | Server-routed | Yes | Cloud fallback |
+| Feature | CommandMate | Remote Control (Official) | Happy Coder | claude-squad | Omnara |
+|---------|:-----------:|:------------------------:|:-----------:|:------------:|:------:|
+| Auto Yes Mode | Yes | No | No | Yes (TUI only) | No |
+| Git Worktree Management | Yes | No | No | Yes (TUI only) | No |
+| Parallel Sessions | Yes | **No (1 only)** | Yes | Yes | No |
+| Mobile Web UI | Yes | Yes (claude.ai) | Yes | **No** | Yes |
+| File Viewer | Yes | No | No | No | No |
+| Markdown Editor | Yes | No | No | No | No |
+| Screenshot Instructions | Yes | No | No | Not possible | No |
+| Scheduled Execution | Yes | No | No | No | No |
+| Survives Laptop Close | Yes (daemon) | **No (terminal must stay open)** | Yes | Yes | Yes |
+| Token Authentication | Yes | N/A (Anthropic account) | N/A (app) | No | N/A (cloud) |
+| Free / OSS | Yes | Requires Pro/Max | Free + Paid | Yes | $20/mo |
+| Runs 100% Locally | Yes | Via Anthropic API | Server-routed | Yes | Cloud fallback |
 
 ---
 
