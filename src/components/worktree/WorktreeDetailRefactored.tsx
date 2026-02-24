@@ -40,7 +40,7 @@ import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
 import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
 import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
 import { ToastContainer, useToast } from '@/components/common/Toast';
-import { MemoPane } from '@/components/worktree/MemoPane';
+import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
 import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
@@ -61,6 +61,7 @@ import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
+import { parseCmateContent, validateScheduleHeaders, validateSchedulesSection, CMATE_TEMPLATE_CONTENT } from '@/lib/cmate-validator';
 
 // ============================================================================
 // Types
@@ -798,6 +799,8 @@ interface MobileContentProps {
   fileSearch: UseFileSearchReturn;
   /** [Issue #211] Toast notification callback for copy feedback */
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+  /** [Issue #294] CMATE setup callback */
+  onCmateSetup?: () => void;
 }
 
 /** [Issue #21] Type for file search hook return */
@@ -824,6 +827,7 @@ const MobileContent = memo(function MobileContent({
   refreshTrigger,
   fileSearch,
   showToast,
+  onCmateSetup,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -872,6 +876,7 @@ const MobileContent = memo(function MobileContent({
               onDelete={onDelete}
               onUpload={onUpload}
               onMove={onMove}
+              onCmateSetup={onCmateSetup}
               refreshTrigger={refreshTrigger}
               searchQuery={fileSearch.query}
               searchMode={fileSearch.mode}
@@ -883,8 +888,8 @@ const MobileContent = memo(function MobileContent({
       );
     case 'memo':
       return (
-        <ErrorBoundary componentName="MemoPane">
-          <MemoPane
+        <ErrorBoundary componentName="NotesAndLogsPane">
+          <NotesAndLogsPane
             worktreeId={worktreeId}
             className="h-full"
           />
@@ -926,6 +931,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const tError = useTranslations('error');
   const tCommon = useTranslations('common');
   const tAutoYes = useTranslations('autoYes');
+  const tSchedule = useTranslations('schedule');
 
   // Local state for worktree data and loading status
   const [worktree, setWorktree] = useState<Worktree | null>(null);
@@ -1402,6 +1408,92 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     fileInputRef.current?.click();
   }, []);
 
+  /** [Issue #294] Handle CMATE.md setup/validate button */
+  const handleCmateSetup = useCallback(async () => {
+    try {
+      // Check if CMATE.md exists via tree listing (avoids 404 console noise)
+      const treeResponse = await fetch(`/api/worktrees/${worktreeId}/tree`);
+      if (!treeResponse.ok) {
+        throw new Error(`Failed to list worktree files: ${treeResponse.status}`);
+      }
+      const treeData = await treeResponse.json();
+      const treeItems: { name: string }[] = treeData.items ?? [];
+      const cmateExists = treeItems.some(item => item.name === 'CMATE.md');
+
+      let content: string;
+
+      if (!cmateExists) {
+        // File does not exist - create with template
+        const createResponse = await fetch(
+          `/api/worktrees/${worktreeId}/files/CMATE.md`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'file', content: CMATE_TEMPLATE_CONTENT }),
+          }
+        );
+        if (!createResponse.ok) {
+          throw new Error('Failed to create CMATE.md');
+        }
+        showToast(tSchedule('cmateCreated'), 'success');
+        setFileTreeRefresh(prev => prev + 1);
+        // Use template content directly for validation
+        content = CMATE_TEMPLATE_CONTENT;
+      } else {
+        // File exists - read content for validation
+        const fileResponse = await fetch(
+          `/api/worktrees/${worktreeId}/files/CMATE.md`
+        );
+        if (!fileResponse.ok) {
+          throw new Error(`Failed to read CMATE.md: ${fileResponse.status}`);
+        }
+        const data = await fileResponse.json();
+        if (typeof data.content !== 'string') {
+          showToast(tSchedule('cmateValidation.failed'), 'error');
+          return;
+        }
+        content = data.content;
+      }
+
+      // Validate content
+      const headerErrors = validateScheduleHeaders(content);
+      const sections = parseCmateContent(content);
+      const scheduleRows = sections.get('Schedules');
+
+      if (!scheduleRows || scheduleRows.length === 0) {
+        showToast(tSchedule('cmateValidation.noSchedulesSection'), 'error');
+        return;
+      }
+
+      const rowErrors = validateSchedulesSection(scheduleRows);
+      const errors = [...headerErrors, ...rowErrors];
+
+      if (errors.length === 0) {
+        showToast(
+          tSchedule('cmateValidation.valid', { count: String(scheduleRows.length) }),
+          'success'
+        );
+      } else {
+        const maxDisplay = 3;
+        const details = errors
+          .slice(0, maxDisplay)
+          .map((e) => e.message)
+          .join('; ');
+        const suffix = errors.length > maxDisplay ? ` (+${errors.length - maxDisplay})` : '';
+        showToast(
+          tSchedule('cmateValidation.errors', {
+            errorCount: String(errors.length),
+            details: details + suffix,
+          }),
+          'error'
+        );
+      }
+    } catch (err) {
+      console.error('[WorktreeDetailRefactored] CMATE setup error:', err);
+      showToast(tSchedule('cmateValidation.failed'), 'error');
+    }
+  }, [worktreeId, showToast, tSchedule]);
+
   /** Handle file input change - perform actual upload */
   const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1792,6 +1884,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                             onDelete={handleDelete}
                             onUpload={handleUpload}
                             onMove={handleMove}
+                            onCmateSetup={handleCmateSetup}
                             refreshTrigger={fileTreeRefresh}
                             searchQuery={fileSearch.query}
                             searchMode={fileSearch.mode}
@@ -1802,8 +1895,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                       </ErrorBoundary>
                     )}
                     {leftPaneTab === 'memo' && (
-                      <ErrorBoundary componentName="MemoPane">
-                        <MemoPane
+                      <ErrorBoundary componentName="NotesAndLogsPane">
+                        <NotesAndLogsPane
                           worktreeId={worktreeId}
                           className="h-full"
                         />
@@ -2055,6 +2148,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             refreshTrigger={fileTreeRefresh}
             fileSearch={fileSearch}
             showToast={showToast}
+            onCmateSetup={handleCmateSetup}
           />
         </main>
 

@@ -1,0 +1,39 @@
+{
+  "title": "Schedules",
+  "executionLogs": "Execution Logs",
+  "noSchedules": "No schedules configured. Add a CMATE.md with a Schedules section.",
+  "noSchedulesTitle": "No schedules configured",
+  "noSchedulesStep1": "Switch to the Files tab",
+  "noSchedulesStep2": "Click the CMATE button in the toolbar to create CMATE.md",
+  "noSchedulesStep3": "Edit the Schedules table (Name, Cron, Message, CLI Tool, Enabled, Permission)",
+  "noSchedulesStep4": "Click CMATE again to validate",
+  "noLogs": "No execution logs yet.",
+  "status": {
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "timeout": "Timeout",
+    "cancelled": "Cancelled"
+  },
+  "enabled": "Enabled",
+  "disabled": "Disabled",
+  "lastRun": "Last run",
+  "cron": "Cron",
+  "exitCode": "Exit",
+  "noOutput": "(no output)",
+  "message": "Message",
+  "response": "Response",
+  "unknownSchedule": "(deleted schedule)",
+  "retry": "Retry",
+  "loading": "Loading...",
+  "notes": "Notes",
+  "logs": "Schedules",
+  "notesAndLogs": "CMATE",
+  "cmateCreated": "CMATE.md created with template. Edit it to configure schedules.",
+  "cmateValidation": {
+    "noSchedulesSection": "CMATE.md has no Schedules section.",
+    "valid": "{count} schedule(s) validated successfully.",
+    "errors": "{errorCount} validation error(s) found: {details}",
+    "failed": "Failed to process CMATE.md."
+  }
+}

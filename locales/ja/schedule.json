@@ -1,0 +1,39 @@
+{
+  "title": "スケジュール",
+  "executionLogs": "実行ログ",
+  "noSchedules": "スケジュールが設定されていません。CMATE.mdにSchedulesセクションを追加してください。",
+  "noSchedulesTitle": "スケジュールが設定されていません",
+  "noSchedulesStep1": "Files タブに切り替えてください",
+  "noSchedulesStep2": "ツールバーの CMATE ボタンをクリックして CMATE.md を作成",
+  "noSchedulesStep3": "Schedules テーブルを編集（Name, Cron, Message, CLI Tool, Enabled, Permission）",
+  "noSchedulesStep4": "再度 CMATE をクリックしてバリデーション",
+  "noLogs": "実行ログはまだありません。",
+  "status": {
+    "running": "実行中",
+    "completed": "完了",
+    "failed": "失敗",
+    "timeout": "タイムアウト",
+    "cancelled": "キャンセル"
+  },
+  "enabled": "有効",
+  "disabled": "無効",
+  "lastRun": "最終実行",
+  "cron": "Cron式",
+  "exitCode": "終了コード",
+  "noOutput": "(出力なし)",
+  "message": "メッセージ",
+  "response": "レスポンス",
+  "unknownSchedule": "(削除済みスケジュール)",
+  "retry": "再試行",
+  "loading": "読み込み中...",
+  "notes": "メモ",
+  "logs": "Schedules",
+  "notesAndLogs": "CMATE",
+  "cmateCreated": "CMATE.mdをテンプレートで作成しました。スケジュールを設定してください。",
+  "cmateValidation": {
+    "noSchedulesSection": "CMATE.mdにSchedulesセクションがありません。",
+    "valid": "{count}件のスケジュールが正常に検証されました。",
+    "errors": "{errorCount}件の検証エラー: {details}",
+    "failed": "CMATE.mdの処理に失敗しました。"
+  }
+}

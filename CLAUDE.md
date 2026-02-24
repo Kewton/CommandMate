@@ -158,7 +158,13 @@ tests/
 | `src/lib/prompt-response-body-builder.ts` | プロンプト応答リクエストボディ構築ユーティリティ（Issue #287: buildPromptResponseBody()関数でpromptType/defaultOptionNumberを含むリクエストボディを生成、DRY原則対応、useAutoYes/WorktreeDetailRefactoredから共通化） |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
 | `src/lib/cli-tools/codex.ts` | Codex CLI tmuxセッション管理（Issue #212: 複数行メッセージのPasted text検知+Enter再送、getErrorMessage()ヘルパー抽出） |
-| `src/lib/session-cleanup.ts` | セッション/ポーラー停止の一元管理（Facade パターン） |
+| `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止の一元管理（Facade パターン。**Issue #294: stopScheduleForWorktree()呼び出し追加**） |
+| `src/lib/env-sanitizer.ts` | 環境変数サニタイズユーティリティ（Issue #294: SENSITIVE_ENV_KEYS配列[CLAUDECODE, CM_AUTH_TOKEN_HASH, CM_AUTH_EXPIRE, CM_HTTPS_KEY, CM_HTTPS_CERT, CM_ALLOWED_IPS, CM_TRUST_PROXY, CM_DB_PATH] + sanitizeEnvForChildProcess()関数。S1-001/S4-001: CLAUDECODE除去ロジックの一元管理） |
+| `src/lib/cmate-parser.ts` | CMATE.md汎用パーサー（Issue #294: parseCmateFile()→Map<string,string[][]>、parseSchedulesSection()→ScheduleEntry[]、sanitizeMessageContent()でUnicode制御文字除去[S4-002]、NAME_PATTERN/MAX_NAME_LENGTH でName列バリデーション[S4-011]、validateCmatePath()でパストラバーサル防御、isValidCronExpression()でcron式バリデーション） |
+| `src/types/cmate.ts` | CMATE.md型定義（Issue #294: ScheduleEntry interface、CmateConfig型） |
+| `src/lib/claude-executor.ts` | claude -p プロセス実行エンジン（Issue #294: child_process.execFile使用[SEC-001]、sanitizeEnvForChildProcess()でSENSITIVE_ENV_KEYS除去、MAX_OUTPUT_SIZE=1MB/MAX_STORED_OUTPUT_SIZE=100KB[S1-014]、EXECUTION_TIMEOUT_MS=5分、MAX_MESSAGE_LENGTH=10000、executeClaudeCommand()、truncateOutput()） |
+| `src/lib/schedule-manager.ts` | サーバーサイドスケジューラー（Issue #294: globalThis.__scheduleManagerStates/globalThis.__scheduleActiveProcesses、cronパターンでcron評価[croner]、単一タイマー全worktree巡回[60秒]、同時実行防止、MAX_CONCURRENT_SCHEDULES=100、再起動リカバリ[status=running→failed]、initScheduleManager()はinitializeWorktrees()完了後に呼び出し[S3-010]、stopAllSchedules()でSIGKILL fire-and-forget[S3-001]） |
+| `src/config/schedule-config.ts` | スケジュール関連設定定数の一元管理（Issue #294リファクタリング: UUID_V4_PATTERN、isValidUuidV4()、MAX_NAME_LENGTH、MAX_MESSAGE_LENGTH、MAX_CRON_LENGTH。DRY原則対応） |
 | `src/lib/url-normalizer.ts` | Git URL正規化（重複検出用） |
 | `src/lib/url-path-encoder.ts` | ファイルパスのURLエンコード（Issue #300: encodePathForUrl()関数、スラッシュを保護しながら各セグメントを個別にencodeURIComponent、catch-allルートのパス分割を維持） |
 | `src/lib/clone-manager.ts` | クローン処理管理（DBベース排他制御。**Issue #308: basePath修正** - resolveDefaultBasePath()でCM_ROOT_DIR/WORKTREE_BASE_PATH/process.cwd()優先順位制御、WORKTREE_BASE_PATH非推奨警告（モジュールスコープwarnedWorktreeBasePathフラグで初回のみ出力）、path.resolve()による絶対パス正規化、resetWorktreeBasePathWarning()テスト用エクスポート） |

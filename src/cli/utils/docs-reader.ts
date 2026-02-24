@@ -29,6 +29,7 @@ const SECTION_MAP: Record<string, string> = {
   'workflow-examples': 'docs/user-guide/workflow-examples.md',
   'cli-setup': 'docs/user-guide/cli-setup-guide.md',
   'agents': 'docs/user-guide/agents-guide.md',
+  'cmate-schedules': 'docs/user-guide/cmate-schedules-guide.md',
   'architecture': 'docs/architecture.md',
   'readme': 'README.md',
 };
