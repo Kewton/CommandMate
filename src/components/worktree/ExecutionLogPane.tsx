@@ -10,7 +10,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useTranslations } from 'next-intl';
 
 // ============================================================================
@@ -91,6 +91,14 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   const [error, setError] = useState<string | null>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [logDetail, setLogDetail] = useState<ExecutionLogDetail | null>(null);
+
+  const scheduleNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of schedules) {
+      map.set(s.id, s.name);
+    }
+    return map;
+  }, [schedules]);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -221,7 +229,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                   className="w-full text-left p-3 hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm truncate max-w-[60%]">{log.message}</span>
+                    <span className="text-sm truncate max-w-[60%]">{scheduleNameMap.get(log.schedule_id) || t('unknownSchedule')}</span>
                     <span className={`text-xs px-2 py-0.5 rounded ${getStatusColor(log.status)}`}>
                       {t(`status.${log.status}`)}
                     </span>
@@ -233,10 +241,19 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
                 </button>
 
                 {expandedLogId === log.id && logDetail && (
-                  <div className="border-t border-gray-200 p-3 bg-gray-50">
-                    <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700 max-h-60 overflow-y-auto">
-                      {logDetail.result || t('noOutput')}
-                    </pre>
+                  <div className="border-t border-gray-200 p-3 bg-gray-50 space-y-3">
+                    <div>
+                      <div className="text-xs font-semibold text-gray-600 mb-1">{t('message')}</div>
+                      <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700">
+                        {logDetail.message}
+                      </pre>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-gray-600 mb-1">{t('response')}</div>
+                      <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700 max-h-60 overflow-y-auto">
+                        {logDetail.result || t('noOutput')}
+                      </pre>
+                    </div>
                   </div>
                 )}
               </div>
