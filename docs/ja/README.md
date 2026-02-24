@@ -1,5 +1,6 @@
 # CommandMate
 
+[![GitHub Stars](https://img.shields.io/github/stars/Kewton/CommandMate?style=social)](https://github.com/Kewton/CommandMate)
 ![npm version](https://img.shields.io/npm/v/commandmate)
 ![npm downloads](https://img.shields.io/npm/dm/commandmate)
 ![license](https://img.shields.io/github/license/Kewton/CommandMate)
@@ -16,22 +17,23 @@
 
 「リモコン」ではなく、**モバイル開発コックピット**。
 
-AI がコードを書いてくれる。それは自由を意味するはずだった。
-なのに、ターミナルを見つめている。画面の前から離れられない。
-友達はご飯を食べている。子どもはお風呂を待っている。ソファで10分だけ休みたい。
-でも蓋を閉じたら全セッションが死ぬ。だから座り続ける — コードの面倒を見るはずだったマシンの、面倒を見るために。
+```bash
+npx commandmate
+```
 
-CommandMate がそれを変える。Auto Yes でエージェントは止まらない。セッションはバックグラウンドで生き続ける。スマホの Web UI があれば、進捗確認、差分レビュー、指示の編集、スクリーンショット送信 — どこからでも。
+**インストールからモバイル監視まで 60 秒。** macOS / Linux · Node.js v20+ · npm · git · tmux · openssl
+
+---
+
+AI がコードを書いてくれる — なのに、ターミナルを見つめたまま離れられない。
+蓋を閉じたら全セッションが死ぬ。
+**CommandMate がセッションを生かし続け、操縦桿をスマホに渡す。**
 
 もちろんデスクトップでも快適に使えます。2カラムレイアウトで全セッション・全ワークツリーを一望できます。
 
 <p align="center">
   <img src="../../docs/images/demo-desktop.gif" alt="CommandMate デスクトップデモ" width="600">
 </p>
-
-```bash
-npx commandmate
-```
 
 ---
 
@@ -48,23 +50,15 @@ npx commandmate
 
 ---
 
-## Quick Start
+## ユースケース
 
-**前提条件：** macOS / Linux、Node.js v20+、npm、git、tmux、openssl
-
-```bash
-# インストール & 起動をワンコマンドで
-npx commandmate
-
-# またはグローバルインストール
-npm install -g commandmate
-commandmate init
-commandmate start --daemon
-```
-
-ブラウザで http://localhost:3000 にアクセスしてください。
-
-詳しくは [CLI セットアップガイド](../user-guide/cli-setup-guide.md) を参照してください。
+| シナリオ | CommandMate でできること |
+|----------|------------------------|
+| **ソファで開発** | PC でタスクを開始し、ソファからスマホで監視・指示 |
+| **通勤中レビュー** | 電車の中で AI が生成したコード変更をレビュー |
+| **夜間自律実行** | Claude Code を一晩稼働させ、寝室から進捗確認 |
+| **ビジュアルバグ修正** | スマホで UI バグを撮影 →「これ直して」で送信 |
+| **並列タスク管理** | 複数の worktree セッションを 1 つのダッシュボードで管理 |
 
 ---
 
@@ -83,29 +77,21 @@ commandmate start --daemon
 
 ---
 
-## ワークフロー
+## スクリーンショット
 
-```
-1. PC でタスクを開始
-   $ commandmate start --daemon
-   → Claude Code が Auto Yes で自律稼働開始
+### デスクトップ
 
-2. PC を閉じて外出
+![PC表示](../../docs/images/screenshot-desktop.png)
 
-3. スマホから Web UI で確認
-   → 全セッションの状態を一目で把握
+### モバイル
 
-4. コード変更をレビュー
-   → ファイルビューワでモバイルから差分を確認
+| トップ画面 | ワークツリー（History） | ワークツリー（Terminal） |
+|-----------|----------------------|------------------------|
+| ![スマホ表示](../../docs/images/screenshot-mobile.png) | ![スマホ - History](../../docs/images/screenshot-worktree-mobile.png) | ![スマホ - Terminal](../../docs/images/screenshot-worktree-mobile-terminal.png) |
 
-5. 方向を修正
-   → Markdown の指示ファイルを編集、または新しいプロンプトを入力
+### ワークツリー詳細（デスクトップ）
 
-6. バグを発見
-   → スクリーンショット指示: 画面を撮影して「これ直して」
-
-7. Claude Code が画像を認識して修正開始
-```
+![PC - ワークツリー詳細](../../docs/images/screenshot-worktree-desktop.png)
 
 ---
 
@@ -115,7 +101,7 @@ commandmate start --daemon
 
 - フルオープンソース（[MIT License](../../LICENSE)）
 - ローカルデータベース、ローカルセッション
-- リモートアクセスは VPN または認証付きリバースプロキシを推奨
+- リモートアクセスはトンネリングサービス（[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)、[ngrok](https://ngrok.com/)、[Pinggy](https://pinggy.io/)）、VPN、または認証付きリバースプロキシを推奨
 
 詳細は[セキュリティガイド](../security-guide.md)と [Trust & Safety](../TRUST_AND_SAFETY.md) を参照してください。
 
@@ -135,6 +121,25 @@ flowchart LR
 Git worktree ごとに専用の tmux セッションが割り当てられるため、複数タスクを干渉なく並列実行できます。
 
 ---
+
+<details>
+<summary><strong>Quick Start（詳細）</strong></summary>
+
+```bash
+# インストール & 起動をワンコマンドで
+npx commandmate
+
+# またはグローバルインストール
+npm install -g commandmate
+commandmate init
+commandmate start --daemon
+```
+
+ブラウザで http://localhost:3000 にアクセスしてください。
+
+詳しくは [CLI セットアップガイド](../user-guide/cli-setup-guide.md) を参照してください。
+
+</details>
 
 <details>
 <summary><strong>CLI コマンド</strong></summary>
@@ -197,25 +202,6 @@ Issue/worktree ごとにサーバーを分離起動し、自動ポート割当�
 </details>
 
 <details>
-<summary><strong>スクリーンショット</strong></summary>
-
-### デスクトップ
-
-![PC表示](../../docs/images/screenshot-desktop.png)
-
-### ワークツリー詳細画面（Message / Console / History）
-
-| PC表示 | スマホ（History） | スマホ（Terminal） |
-|--------|-------------------|-------------------|
-| ![PC - ワークツリー詳細](../../docs/images/screenshot-worktree-desktop.png) | ![スマホ - History](../../docs/images/screenshot-worktree-mobile.png) | ![スマホ - Terminal](../../docs/images/screenshot-worktree-mobile-terminal.png) |
-
-### トップ画面（スマホ）
-
-![スマホ表示](../../docs/images/screenshot-mobile.png)
-
-</details>
-
-<details>
 <summary><strong>トラブルシューティング & FAQ</strong></summary>
 
 ### Claude CLI が見つからない / パスが変わった？
@@ -258,7 +244,13 @@ Claude Code は `CLAUDECODE=1` を設定してネストを防止しています�
 A: CommandMate は PC 上で Web サーバーを起動します。スマホと PC が同じネットワーク（Wi-Fi）にいる状態で、`commandmate init` で外部アクセスを有効にすると `CM_BIND=0.0.0.0` が設定されます。スマホのブラウザで `http://<PCのIPアドレス>:3000` を開いてください。
 
 **Q: 外出先からアクセスできる？**
-A: はい。[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) などのトンネリングサービスを使えば、ルーターのポート開放なしにローカルサーバーを安全に公開できます。VPN や認証付きリバースプロキシ（Basic 認証、OIDC 等）も利用可能です。**認証なしでインターネットに直接公開しないでください。**
+A: はい。トンネリングサービスを使えば、ルーターのポート開放なしにローカルサーバーを安全に公開できます：
+
+- [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) — 無料、Cloudflare アカウントが必要
+- [ngrok](https://ngrok.com/) — 無料枠あり、セットアップが簡単
+- [Pinggy](https://pinggy.io/) — サインアップ不要、SSH ベースのシンプルなトンネル
+
+VPN や認証付きリバースプロキシ（Basic 認証、OIDC 等）も利用可能です。**認証なしでインターネットに直接公開しないでください。**
 
 **Q: iPhone / Android で使える？**
 A: はい。CommandMate の Web UI はレスポンシブ対応で、Safari・Chrome などのモバイルブラウザで動作します。アプリのインストールは不要です。
