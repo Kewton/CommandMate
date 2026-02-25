@@ -5,6 +5,7 @@
  */
 
 import type { Worktree } from '@/types/models';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
  * Branch status in sidebar
@@ -57,10 +58,7 @@ export interface SidebarBranchItem {
   /** User description for this branch */
   description?: string;
   /** Per-CLI tool status for sidebar display */
-  cliStatus?: {
-    claude: BranchStatus;
-    codex: BranchStatus;
-  };
+  cliStatus?: Partial<Record<CLIToolType, BranchStatus>>;
 }
 
 /**

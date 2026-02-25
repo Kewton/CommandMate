@@ -11,14 +11,15 @@ describe('CLI_TOOL_IDS constant (T2.1)', () => {
     expect(Array.isArray(CLI_TOOL_IDS)).toBe(true);
   });
 
-  it('should include claude, codex, and gemini', () => {
+  it('should include claude, codex, gemini, and vibe-local', () => {
     expect(CLI_TOOL_IDS).toContain('claude');
     expect(CLI_TOOL_IDS).toContain('codex');
     expect(CLI_TOOL_IDS).toContain('gemini');
+    expect(CLI_TOOL_IDS).toContain('vibe-local');
   });
 
-  it('should have exactly 3 items', () => {
-    expect(CLI_TOOL_IDS).toHaveLength(3);
+  it('should have exactly 4 items', () => {
+    expect(CLI_TOOL_IDS).toHaveLength(4);
   });
 
   it('should be readonly (const assertion)', () => {
@@ -29,7 +30,7 @@ describe('CLI_TOOL_IDS constant (T2.1)', () => {
 
   it('should allow CLIToolType to be derived from CLI_TOOL_IDS', () => {
     // Type check: CLIToolType should be union of CLI_TOOL_IDS values
-    const validTypes: CLIToolType[] = ['claude', 'codex', 'gemini'];
+    const validTypes: CLIToolType[] = ['claude', 'codex', 'gemini', 'vibe-local'];
 
     // Each value from CLI_TOOL_IDS should be assignable to CLIToolType
     for (const id of CLI_TOOL_IDS) {
@@ -41,7 +42,7 @@ describe('CLI_TOOL_IDS constant (T2.1)', () => {
   it('should maintain sync between CLI_TOOL_IDS and CLIToolType', () => {
     // This test ensures CLI_TOOL_IDS and CLIToolType stay in sync
     const cliToolIdsSet = new Set(CLI_TOOL_IDS);
-    const expectedTypes = new Set<CLIToolType>(['claude', 'codex', 'gemini']);
+    const expectedTypes = new Set<CLIToolType>(['claude', 'codex', 'gemini', 'vibe-local']);
 
     expect(cliToolIdsSet.size).toBe(expectedTypes.size);
     for (const id of CLI_TOOL_IDS) {

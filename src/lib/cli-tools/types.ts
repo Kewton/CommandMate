@@ -7,7 +7,7 @@
  * T2.1: Single source of truth for CLI tool IDs
  * CLIToolType is derived from this constant (DRY principle)
  */
-export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini'] as const;
+export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local'] as const;
 
 /**
  * CLIツールタイプ
@@ -73,6 +73,31 @@ export interface ICLITool {
    * @param worktreeId - Worktree ID
    */
   interrupt(worktreeId: string): Promise<void>;
+}
+
+/**
+ * CLI tool display names for UI rendering
+ * Issue #368: Centralized display name mapping
+ *
+ * Usage: UI display (tab headers, message lists, settings).
+ * For internal logs/debug, use tool.name (BaseCLITool.name) instead.
+ */
+export const CLI_TOOL_DISPLAY_NAMES: Record<CLIToolType, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  gemini: 'Gemini',
+  'vibe-local': 'Vibe Local',
+};
+
+/**
+ * Get the display name for a CLI tool ID
+ * Issue #368: Centralized display name function for DRY compliance
+ *
+ * @param id - CLI tool type identifier
+ * @returns Human-readable display name
+ */
+export function getCliToolDisplayName(id: CLIToolType): string {
+  return CLI_TOOL_DISPLAY_NAMES[id] ?? id;
 }
 
 /**

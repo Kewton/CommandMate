@@ -91,8 +91,8 @@ export const BranchListItem = memo(function BranchListItem({
         {/* CLI tool status dots */}
         {branch.cliStatus && (
           <div className="flex items-center gap-1 flex-shrink-0" aria-label="CLI tool status">
-            <CliStatusDot status={branch.cliStatus.claude} label="Claude" />
-            <CliStatusDot status={branch.cliStatus.codex} label="Codex" />
+            <CliStatusDot status={branch.cliStatus?.claude ?? 'idle'} label="Claude" />
+            <CliStatusDot status={branch.cliStatus?.codex ?? 'idle'} label="Codex" />
           </div>
         )}
 

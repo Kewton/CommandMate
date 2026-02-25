@@ -6,19 +6,29 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, getMessages, markPendingPromptsAsAnswered, getInitialBranch } from '@/lib/db';
+import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, updateSelectedAgents, getMessages, markPendingPromptsAsAnswered, getInitialBranch } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectSessionStatus } from '@/lib/status-detector';
 import { getGitStatus } from '@/lib/git-utils';
 import type { GitStatus } from '@/types/models';
+import { isValidWorktreeId } from '@/lib/auto-yes-manager';
+import { validateSelectedAgentsInput } from '@/lib/selected-agents-validator';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    // R4-002: Validate worktree ID format
+    if (!isValidWorktreeId(params.id)) {
+      return NextResponse.json(
+        { error: 'Invalid worktree ID format' },
+        { status: 400 }
+      );
+    }
+
     const db = getDbInstance();
     const worktree = getWorktreeById(db, params.id);
 
@@ -30,14 +40,11 @@ export async function GET(
     }
 
     // Check session status for all CLI tools (consistent with /api/worktrees)
+    // R1-003: Use CLI_TOOL_IDS instead of hardcoded array
     const manager = CLIToolManager.getInstance();
-    const allCliTools: CLIToolType[] = ['claude', 'codex', 'gemini'];
+    const allCliTools: readonly CLIToolType[] = CLI_TOOL_IDS;
 
-    const sessionStatusByCli: {
-      claude?: { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean };
-      codex?: { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean };
-      gemini?: { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean };
-    } = {};
+    const sessionStatusByCli: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>> = {};
 
     let anyRunning = false;
     let anyWaiting = false;
@@ -98,6 +105,7 @@ export async function GET(
       console.error(`[GET /api/worktrees/:id] Failed to get git status:`, gitError);
     }
 
+    // Issue #368: selectedAgents is already included in worktree from getWorktreeById
     return NextResponse.json(
       {
         ...worktree,
@@ -123,6 +131,14 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    // R4-002: Validate worktree ID format
+    if (!isValidWorktreeId(params.id)) {
+      return NextResponse.json(
+        { error: 'Invalid worktree ID format' },
+        { status: 400 }
+      );
+    }
+
     const db = getDbInstance();
 
     // Check if worktree exists
@@ -136,6 +152,9 @@ export async function PATCH(
 
     // Parse request body
     const body = await request.json();
+
+    // Track if cli_tool_id was auto-updated due to selectedAgents change
+    let cliToolIdAutoUpdated = false;
 
     // Update description if provided
     if ('description' in body) {
@@ -161,10 +180,39 @@ export async function PATCH(
     }
 
     // Update CLI tool ID if provided
+    // R2-001: Use CLI_TOOL_IDS for validation (includes vibe-local)
+    // Note: This is a UI cliToolId validation, distinct from ALLOWED_CLI_TOOLS
+    // which is the security whitelist for schedule/auto-yes execution.
     if ('cliToolId' in body) {
-      const validCliTools: CLIToolType[] = ['claude', 'codex', 'gemini'];
+      const validCliTools: readonly CLIToolType[] = CLI_TOOL_IDS;
       if (validCliTools.includes(body.cliToolId)) {
         updateCliToolId(db, params.id, body.cliToolId);
+      }
+    }
+
+    // Update selected agents if provided (Issue #368)
+    if ('selectedAgents' in body) {
+      const validation = validateSelectedAgentsInput(body.selectedAgents);
+      if (!validation.valid) {
+        return NextResponse.json(
+          { error: validation.error, code: 'INVALID_SELECTED_AGENTS' },
+          { status: 400 }
+        );
+      }
+
+      updateSelectedAgents(db, params.id, validation.value!);
+
+      // R1-007: cli_tool_id consistency check
+      // If current cli_tool_id is not in new selectedAgents, auto-update to selectedAgents[0]
+      const currentCliToolId = worktree.cliToolId || 'claude';
+      if (!validation.value!.includes(currentCliToolId)) {
+        const newCliToolId = validation.value![0];
+        console.info(
+          `[PATCH /api/worktrees/:id] Auto-updating cli_tool_id from '${currentCliToolId}' to '${newCliToolId}' ` +
+          `because '${currentCliToolId}' is not in new selectedAgents [${validation.value!.join(', ')}]`
+        );
+        updateCliToolId(db, params.id, newCliToolId);
+        cliToolIdAutoUpdated = true;
       }
     }
 
@@ -175,7 +223,11 @@ export async function PATCH(
     const cliTool = manager.getTool(cliToolId);
     const isRunning = await cliTool.isRunning(params.id);
     return NextResponse.json(
-      { ...updatedWorktree, isSessionRunning: isRunning },
+      {
+        ...updatedWorktree,
+        isSessionRunning: isRunning,
+        ...(cliToolIdAutoUpdated ? { cliToolIdAutoUpdated: true } : {}),
+      },
       { status: 200 }
     );
   } catch (error) {

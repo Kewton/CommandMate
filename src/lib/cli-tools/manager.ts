@@ -7,6 +7,7 @@ import type { CLIToolType, ICLITool, CLIToolInfo } from './types';
 import { ClaudeTool } from './claude';
 import { CodexTool } from './codex';
 import { GeminiTool } from './gemini';
+import { VibeLocalTool } from './vibe-local';
 import { stopPolling as stopResponsePolling } from '../response-poller';
 
 /**
@@ -27,6 +28,7 @@ export class CLIToolManager {
     this.tools.set('claude', new ClaudeTool());
     this.tools.set('codex', new CodexTool());
     this.tools.set('gemini', new GeminiTool());
+    this.tools.set('vibe-local', new VibeLocalTool());
   }
 
   /**

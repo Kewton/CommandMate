@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 17 after Migration #17', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(17);
+    it('should be 18 after Migration #18', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(18);
     });
   });
 
@@ -427,7 +427,7 @@ describe('db-migrations', () => {
   describe('rollbackMigrations', () => {
     it('should rollback Migration #17 and remove schedule tables', () => {
       runMigrations(db);
-      expect(getCurrentVersion(db)).toBe(17);
+      expect(getCurrentVersion(db)).toBe(18);
 
       rollbackMigrations(db, 16);
       expect(getCurrentVersion(db)).toBe(16);
@@ -440,7 +440,7 @@ describe('db-migrations', () => {
 
     it('should rollback Migration #16 and remove issue_no column', () => {
       runMigrations(db);
-      expect(getCurrentVersion(db)).toBe(17);
+      expect(getCurrentVersion(db)).toBe(18);
 
       rollbackMigrations(db, 15);
       expect(getCurrentVersion(db)).toBe(15);

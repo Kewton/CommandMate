@@ -52,11 +52,7 @@ export interface Worktree {
   /** Summary of last message (for list view) - DEPRECATED: use lastUserMessage instead */
   lastMessageSummary?: string;
   /** Latest messages per CLI tool (truncated to 50 chars each) */
-  lastMessagesByCli?: {
-    claude?: string;
-    codex?: string;
-    gemini?: string;
-  };
+  lastMessagesByCli?: Partial<Record<CLIToolType, string>>;
   /** Last updated timestamp */
   updatedAt?: Date;
   /** Timestamp when user last viewed this worktree (for unread tracking) */
@@ -70,11 +66,7 @@ export interface Worktree {
   /** Whether Claude is actively processing a request (last message from user) */
   isProcessing?: boolean;
   /** Session status per CLI tool */
-  sessionStatusByCli?: {
-    claude?: { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean };
-    codex?: { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean };
-    gemini?: { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean };
-  };
+  sessionStatusByCli?: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
   /** Worktree status: todo, doing, done, or null if not set */
@@ -83,6 +75,8 @@ export interface Worktree {
   link?: string;
   /** CLI tool type (claude, codex, gemini) - defaults to 'claude' */
   cliToolId?: CLIToolType;
+  /** Selected agents for UI display (Issue #368) - 2 CLI tool IDs */
+  selectedAgents?: [CLIToolType, CLIToolType];
   /** Git status information (Issue #111) - optional for backward compatibility */
   gitStatus?: GitStatus;
 }

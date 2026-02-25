@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 import type { Worktree, ChatMessage, WorktreeSessionState, WorktreeMemo } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { parseSelectedAgents } from '@/lib/selected-agents-validator';
 
 type ChatMessageRow = {
   id: string;
@@ -116,10 +117,20 @@ export function initDatabase(db: Database.Database): void {
  * Get latest user message per CLI tool for multiple worktrees (batch query)
  * Optimized to avoid N+1 query problem
  */
+/**
+ * Get latest user message per CLI tool for multiple worktrees (batch query)
+ * Optimized to avoid N+1 query problem
+ *
+ * R4-001: SQL IN clause for cli_tool_id removed to eliminate SQLインジェクション risk.
+ * All cli_tool_id values are fetched; filtering happens at application layer.
+ * Tool count is at most 4-5, so the performance impact is negligible.
+ *
+ * R2-002: Return type changed to Partial<Record<CLIToolType, string>>
+ */
 function getLastMessagesByCliBatch(
   db: Database.Database,
   worktreeIds: string[]
-): Map<string, { claude?: string; codex?: string; gemini?: string }> {
+): Map<string, Partial<Record<CLIToolType, string>>> {
   if (worktreeIds.length === 0) {
     return new Map();
   }
@@ -140,7 +151,6 @@ function getLastMessagesByCliBatch(
       FROM chat_messages
       WHERE worktree_id IN (${placeholders})
         AND role = 'user'
-        AND cli_tool_id IN ('claude', 'codex', 'gemini')
     )
     SELECT worktree_id, cli_tool_id, content
     FROM ranked_messages
@@ -154,7 +164,7 @@ function getLastMessagesByCliBatch(
   }>;
 
   // Build result map
-  const result = new Map<string, { claude?: string; codex?: string; gemini?: string }>();
+  const result = new Map<string, Partial<Record<CLIToolType, string>>>();
 
   // Initialize all worktree IDs with empty objects
   for (const id of worktreeIds) {
@@ -186,6 +196,7 @@ export function getWorktrees(
       w.id, w.name, w.path, w.repository_path, w.repository_name, w.description,
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
+      w.selected_agents,
       (SELECT MAX(timestamp) FROM chat_messages
        WHERE worktree_id = w.id AND role = 'assistant') as last_assistant_message_at
     FROM worktrees w
@@ -217,6 +228,7 @@ export function getWorktrees(
     link: string | null;
     cli_tool_id: string | null;
     last_viewed_at: string | null;
+    selected_agents: string | null;
     last_assistant_message_at: number | null;
   }>;
 
@@ -245,6 +257,7 @@ export function getWorktrees(
       status: (row.status as 'todo' | 'doing' | 'done' | null) || null,
       link: row.link || undefined,
       cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
+      selectedAgents: parseSelectedAgents(row.selected_agents),
     };
   });
 }
@@ -294,6 +307,7 @@ export function getWorktreeById(
       w.id, w.name, w.path, w.repository_path, w.repository_name, w.description,
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
+      w.selected_agents,
       (SELECT MAX(timestamp) FROM chat_messages
        WHERE worktree_id = w.id AND role = 'assistant') as last_assistant_message_at
     FROM worktrees w
@@ -316,6 +330,7 @@ export function getWorktreeById(
     link: string | null;
     cli_tool_id: string | null;
     last_viewed_at: string | null;
+    selected_agents: string | null;
     last_assistant_message_at: number | null;
   } | undefined;
 
@@ -340,6 +355,7 @@ export function getWorktreeById(
     status: (row.status as 'todo' | 'doing' | 'done' | null) || null,
     link: row.link || undefined,
     cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
+    selectedAgents: parseSelectedAgents(row.selected_agents),
   };
 }
 
@@ -949,6 +965,28 @@ export function updateCliToolId(
   `);
 
   stmt.run(cliToolId, id);
+}
+
+/**
+ * Update selected_agents for a worktree
+ * Issue #368: Persists the user's choice of 2 display agents
+ *
+ * @param db - Database instance
+ * @param id - Worktree ID
+ * @param selectedAgents - Tuple of 2 CLIToolType values
+ */
+export function updateSelectedAgents(
+  db: Database.Database,
+  id: string,
+  selectedAgents: [CLIToolType, CLIToolType]
+): void {
+  const stmt = db.prepare(`
+    UPDATE worktrees
+    SET selected_agents = ?
+    WHERE id = ?
+  `);
+
+  stmt.run(JSON.stringify(selectedAgents), id);
 }
 
 // ============================================================

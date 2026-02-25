@@ -4,6 +4,7 @@
  */
 
 import type { Worktree, ChatMessage, WorktreeMemo } from '@/types/models';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup } from '@/types/slash-commands';
 
 /**
@@ -146,7 +147,7 @@ export const worktreeApi = {
   /**
    * Update worktree CLI tool
    */
-  async updateCliTool(id: string, cliToolId: 'claude' | 'codex' | 'gemini'): Promise<Worktree> {
+  async updateCliTool(id: string, cliToolId: CLIToolType): Promise<Worktree> {
     return fetchApi<Worktree>(`/api/worktrees/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ cliToolId }),
@@ -166,7 +167,7 @@ export const worktreeApi = {
   /**
    * Get messages for a worktree, optionally filtered by CLI tool
    */
-  async getMessages(id: string, cliTool?: 'claude' | 'codex' | 'gemini'): Promise<ChatMessage[]> {
+  async getMessages(id: string, cliTool?: CLIToolType): Promise<ChatMessage[]> {
     const params = new URLSearchParams();
     if (cliTool) {
       params.append('cliTool', cliTool);
@@ -181,7 +182,7 @@ export const worktreeApi = {
    * @param content - Message content
    * @param cliToolId - Optional CLI tool ID (claude, codex, gemini)
    */
-  async sendMessage(id: string, content: string, cliToolId?: 'claude' | 'codex' | 'gemini'): Promise<{ success: boolean }> {
+  async sendMessage(id: string, content: string, cliToolId?: CLIToolType): Promise<{ success: boolean }> {
     const body: { content: string; cliToolId?: string } = { content };
     if (cliToolId) {
       body.cliToolId = cliToolId;
@@ -221,7 +222,7 @@ export const worktreeApi = {
    * @param id - Worktree ID
    * @param cliToolId - Optional CLI tool ID (claude, codex, gemini). If not specified, uses worktree's default.
    */
-  async killSession(id: string, cliToolId?: 'claude' | 'codex' | 'gemini'): Promise<{ success: boolean; message: string }> {
+  async killSession(id: string, cliToolId?: CLIToolType): Promise<{ success: boolean; message: string }> {
     return fetchApi<{ success: boolean; message: string }>(
       `/api/worktrees/${id}/kill-session`,
       {
