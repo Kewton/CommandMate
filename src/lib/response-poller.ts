@@ -452,7 +452,7 @@ function extractResponse(
 
   // Codex/Gemini completion logic: prompt detected and not thinking (separator optional)
   // - Codex: Interactive TUI, detects › prompt
-  // - Gemini: Non-interactive one-shot, detects shell prompt (%, $)
+  // - Gemini: Interactive REPL, detects > / ❯ prompt
   // Claude: require both prompt and separator
   const isCodexOrGeminiComplete = (cliToolId === 'codex' || cliToolId === 'gemini') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;

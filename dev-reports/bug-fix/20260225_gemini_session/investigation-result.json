@@ -1,0 +1,164 @@
+{
+  "status": "completed",
+  "root_cause": "GeminiTool.sendMessage() uses a non-interactive pipe approach (`echo 'message' | gemini`) which triggers Gemini CLI's non-interactive (headless) mode. In this mode, Gemini processes the prompt and exits immediately, returning control to the shell. The response poller then detects the shell prompt (via GEMINI_PROMPT_PATTERN matching `$` or `%`) and treats it as a completed response, but by this time the Gemini output has already scrolled past and the extraction logic yields empty or garbage content. Additionally, GeminiTool.startSession() only creates a bare tmux session without launching Gemini in interactive mode, unlike ClaudeTool/CodexTool which launch their respective CLIs as persistent interactive processes within tmux.",
+  "severity": "high",
+  "affected_components": [
+    "src/lib/cli-tools/gemini.ts",
+    "src/lib/cli-patterns.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/status-detector.ts"
+  ],
+  "investigation_summary": {
+    "issue_description": "Gemini CLI uses non-interactive pipe mode causing immediate command completion and response poller failure",
+    "error_type": "Design/Architecture bug",
+    "affected_files": [
+      "src/lib/cli-tools/gemini.ts",
+      "src/lib/cli-patterns.ts",
+      "src/lib/response-poller.ts",
+      "src/lib/status-detector.ts"
+    ],
+    "reproduction_confirmed": true
+  },
+  "root_cause_analysis": {
+    "category": "Design bug - wrong execution mode",
+    "primary_cause": "GeminiTool uses `echo 'message' | gemini` (pipe to stdin) which triggers Gemini CLI's non-interactive/headless mode. The gemini command processes the input, prints output, and exits immediately. The tmux session then returns to a bare shell prompt. The response poller's GEMINI_PROMPT_PATTERN (/^(%|$|.*@.*[%$#])\\s*$/m) detects this shell prompt but cannot properly extract the Gemini response because the extraction logic and thinking detection patterns are not aligned with this one-shot execution model.",
+    "secondary_causes": [
+      "GeminiTool.startSession() creates a bare tmux session (shell only) without launching Gemini in interactive REPL mode. Claude and Codex both launch their CLIs as persistent interactive processes.",
+      "GEMINI_PROMPT_PATTERN matches shell prompts ($, %, user@host patterns) rather than Gemini's own interactive prompt. This is a workaround for the pipe approach but is fragile and unreliable.",
+      "Gemini's thinking pattern is set to /(?!)/m (never matches), meaning the poller can never detect a 'thinking/processing' state for Gemini, so any brief delay causes the poller to consider the response complete prematurely.",
+      "cleanGeminiResponse() looks for a '\\u2726' (sparkle) marker as Gemini's response indicator, which only works in interactive mode output - not in pipe mode where raw text is output.",
+      "detectThinking() returns false unconditionally for Gemini (line 149 of cli-patterns.ts: 'Gemini doesn't have a thinking indicator in one-shot mode'), confirming the one-shot design was intentional but flawed."
+    ],
+    "evidence": [
+      "gemini.ts line 102: `await sendKeys(sessionName, \\`echo '${escapedMessage}' | gemini\\`, true)` - pipes message to gemini via echo, triggering non-interactive mode",
+      "gemini.ts line 64-69: startSession() only calls createSession() without launching `gemini` command - creates bare shell session",
+      "Gemini CLI --help output confirms: 'Defaults to interactive mode. Use -p/--prompt for non-interactive (headless) mode.' and has `-i/--prompt-interactive` flag for 'Execute the provided prompt and continue in interactive mode'",
+      "cli-patterns.ts line 130: GEMINI_PROMPT_PATTERN = /^(%|$|.*@.*[%$#])\\s*$/m - matches shell prompts, not Gemini interactive prompt",
+      "cli-patterns.ts line 148-149: detectThinking for gemini returns false (no thinking indicator for one-shot mode)",
+      "cli-patterns.ts line 213: Gemini thinkingPattern = /(?!)/m - never matches, designed for non-interactive mode",
+      "response-poller.ts line 457: isCodexOrGeminiComplete uses `hasPrompt && !isThinking` - with thinking always false, completion is detected as soon as shell prompt appears",
+      "Claude comparison: claude-session.ts line 626 launches `claudePath` (interactive CLI) inside tmux and waits for prompt initialization",
+      "Codex comparison: codex.ts line 89 launches `codex` (interactive CLI) inside tmux"
+    ]
+  },
+  "severity_assessment": {
+    "severity": "high",
+    "impact": "Gemini CLI integration is fundamentally broken. Users cannot send messages to Gemini and receive responses through the CommandMate UI. The terminal shows infinite loading state.",
+    "data_loss_risk": "none - no data corruption, just feature non-functionality"
+  },
+  "gemini_cli_capabilities": {
+    "version": "0.30.0",
+    "path": "/opt/homebrew/bin/gemini",
+    "supports_interactive_mode": true,
+    "interactive_mode_is_default": true,
+    "key_flags": {
+      "-p/--prompt": "Non-interactive (headless) mode",
+      "-i/--prompt-interactive": "Execute provided prompt and continue in interactive mode",
+      "-y/--yolo": "Auto-approve all actions",
+      "-s/--sandbox": "Run in sandbox mode",
+      "--approval-mode": "default | auto_edit | yolo | plan"
+    },
+    "interactive_prompt_pattern": "Gemini CLI shows a `>` or similar input prompt when in interactive REPL mode (needs verification via actual interactive session)",
+    "response_marker": "Gemini uses '\\u2726' (sparkle/four-pointed star) character to mark the start of its responses in interactive mode"
+  },
+  "comparison_with_claude_and_codex": {
+    "claude_approach": {
+      "session_start": "Creates tmux session, sanitizes environment, launches `claude` binary (interactive mode), waits for prompt detection (CLAUDE_PROMPT_PATTERN), handles trust dialog",
+      "send_message": "Verifies prompt state (waitForPrompt), sends message via sendKeys, detects pasted text for multi-line",
+      "patterns": "CLAUDE_PROMPT_PATTERN (/^[>\\u276f](\\s*$|\\s+\\S)/m), CLAUDE_THINKING_PATTERN, CLAUDE_SEPARATOR_PATTERN"
+    },
+    "codex_approach": {
+      "session_start": "Creates tmux session, launches `codex` (interactive mode), handles update notification and model selection dialogs",
+      "send_message": "Sends message via sendKeys (no Enter), then sends C-m separately, detects pasted text",
+      "patterns": "CODEX_PROMPT_PATTERN (/^\\u203a\\s*/m), CODEX_THINKING_PATTERN, CODEX_SEPARATOR_PATTERN"
+    },
+    "gemini_current_broken_approach": {
+      "session_start": "Creates bare tmux session (shell only), does NOT launch gemini interactive mode",
+      "send_message": "Runs `echo 'msg' | gemini` as one-shot command in shell, gemini exits immediately",
+      "patterns": "GEMINI_PROMPT_PATTERN (/^(%|$|.*@.*[%$#])\\s*$/m) matches shell prompts only, no thinking detection"
+    }
+  },
+  "recommended_actions": [
+    {
+      "action_id": "1",
+      "title": "Rewrite GeminiTool to use interactive session mode (like Claude/Codex)",
+      "description": "Rewrite GeminiTool.startSession() to launch `gemini` in interactive mode within the tmux session, similar to how Claude and Codex do it. The Gemini CLI defaults to interactive mode when run without `-p` flag. startSession() should: (1) Create tmux session with createSession(), (2) Launch `gemini` command via sendKeys(), (3) Wait for Gemini's interactive prompt to appear (polling with timeout). Rewrite GeminiTool.sendMessage() to send messages directly to the running interactive Gemini process via sendKeys() instead of piping through echo. This aligns Gemini with the same session management pattern used by Claude and Codex.",
+      "files_to_modify": [
+        "src/lib/cli-tools/gemini.ts"
+      ],
+      "priority": "high",
+      "risk": "medium"
+    },
+    {
+      "action_id": "2",
+      "title": "Update GEMINI_PROMPT_PATTERN to match Gemini's interactive prompt",
+      "description": "Replace the current GEMINI_PROMPT_PATTERN (which matches shell prompts like $, %, user@host) with a pattern that matches Gemini CLI's actual interactive input prompt. Need to verify the exact prompt format by running `gemini` interactively in a terminal. The Gemini CLI likely uses a '>' or similar prompt character. Update the pattern in cli-patterns.ts and ensure getCliToolPatterns() returns appropriate patterns for the interactive mode.",
+      "files_to_modify": [
+        "src/lib/cli-patterns.ts"
+      ],
+      "priority": "high",
+      "risk": "medium"
+    },
+    {
+      "action_id": "3",
+      "title": "Add Gemini thinking/processing detection pattern",
+      "description": "Gemini CLI in interactive mode shows processing indicators (likely spinner characters similar to Claude). The current implementation returns false for all Gemini thinking detection. Update detectThinking() for gemini case and add a proper GEMINI_THINKING_PATTERN. The Gemini CLI uses braille spinner characters (already listed in GEMINI_LOADING_INDICATORS in response-poller.ts: \\u280b, \\u2819, etc.) which should be used to build the thinking pattern. Also update getCliToolPatterns() to return a real thinkingPattern instead of /(?!)/m.",
+      "files_to_modify": [
+        "src/lib/cli-patterns.ts"
+      ],
+      "priority": "high",
+      "risk": "low"
+    },
+    {
+      "action_id": "4",
+      "title": "Update Gemini skip patterns and separator pattern for interactive mode",
+      "description": "The current Gemini skip patterns and separator pattern in getCliToolPatterns() are designed for the pipe-based approach. Update them for interactive mode: (1) Add Gemini-specific UI element patterns to skipPatterns (e.g., prompt lines, status bar elements), (2) Update separatorPattern to match Gemini's response completion indicator rather than the command line pattern, (3) Add the Gemini response marker '\\u2726' (sparkle) as a key pattern for response extraction boundaries.",
+      "files_to_modify": [
+        "src/lib/cli-patterns.ts",
+        "src/lib/response-poller.ts"
+      ],
+      "priority": "medium",
+      "risk": "low"
+    },
+    {
+      "action_id": "5",
+      "title": "Add Gemini prompt initialization detection (like Claude's waitForPrompt)",
+      "description": "Add initialization detection logic in GeminiTool.startSession() to wait for Gemini CLI to fully initialize and show its interactive prompt before returning. This prevents the race condition where sendMessage() is called before Gemini is ready. Model this after Claude's initialization polling loop (claude-session.ts lines 636-664) with appropriate timeout constants (e.g., GEMINI_INIT_TIMEOUT, GEMINI_INIT_POLL_INTERVAL).",
+      "files_to_modify": [
+        "src/lib/cli-tools/gemini.ts"
+      ],
+      "priority": "high",
+      "risk": "low"
+    },
+    {
+      "action_id": "6",
+      "title": "Update cleanGeminiResponse() for interactive mode output format",
+      "description": "The cleanGeminiResponse() function in response-poller.ts already looks for the '\\u2726' (sparkle) marker which is used in Gemini's interactive mode. Verify it works correctly with actual interactive mode output and update skip patterns if needed. The function may need updates to handle interactive-mode-specific artifacts like prompt lines, status bars, and box-drawing characters.",
+      "files_to_modify": [
+        "src/lib/response-poller.ts"
+      ],
+      "priority": "medium",
+      "risk": "low"
+    },
+    {
+      "action_id": "7",
+      "title": "Update unit tests for GeminiTool",
+      "description": "Update tests/unit/cli-tools/gemini.test.ts to cover the new interactive session management behavior. Add tests for: (1) startSession launching gemini in interactive mode, (2) sendMessage sending directly to interactive session, (3) killSession sending Ctrl+C/Ctrl+D to exit gemini before killing tmux. Also add pattern tests for new GEMINI_PROMPT_PATTERN and GEMINI_THINKING_PATTERN.",
+      "files_to_modify": [
+        "tests/unit/cli-tools/gemini.test.ts"
+      ],
+      "priority": "medium",
+      "risk": "low"
+    }
+  ],
+  "analysis_details": "## Detailed Technical Analysis\n\n### Problem Summary\nThe Gemini CLI integration in CommandMate uses a fundamentally different approach from Claude and Codex. While Claude and Codex maintain persistent interactive sessions within tmux (launching the CLI in REPL mode), Gemini uses a one-shot pipe approach (`echo 'message' | gemini`) that causes the gemini process to exit immediately after processing.\n\n### Root Cause Chain\n1. **GeminiTool.startSession()** creates a bare tmux session (just a shell) without launching the `gemini` command. This means the session contains only a shell process.\n2. **GeminiTool.sendMessage()** constructs `echo 'message' | gemini` and sends it to the shell via tmux. When stdin is piped, Gemini CLI interprets this as non-interactive mode, processes the input, outputs the response, and exits.\n3. The response appears briefly in the tmux buffer, but the gemini process exits and the shell prompt reappears almost immediately.\n4. **Response Poller** (response-poller.ts) polls every 2 seconds. By the time it checks, it sees a shell prompt (matched by GEMINI_PROMPT_PATTERN) but the extraction logic may not correctly isolate the response content that appeared between the command and the shell prompt.\n5. Even if the response is captured, the **thinking detection** always returns false for Gemini, so the poller cannot distinguish between 'still processing' and 'completed'.\n\n### Why Claude/Codex Work\n- **Claude**: Starts the `claude` binary in interactive mode inside tmux. The process stays alive, shows a prompt (`>` or `\\u276f`), accepts messages via sendKeys, shows thinking indicators while processing, and shows prompt+separator when done. The poller detects these state transitions.\n- **Codex**: Starts `codex` binary in interactive mode inside tmux. Same pattern - persistent process, interactive prompt (`\\u203a`), thinking indicators, response completion detection.\n\n### Gemini CLI Capabilities (v0.30.0)\nFrom `gemini --help`:\n- **Default mode is interactive** - running `gemini` without flags starts an interactive REPL\n- `-p/--prompt` triggers non-interactive (headless) mode\n- `-i/--prompt-interactive` runs a prompt then continues in interactive mode\n- Supports `--yolo` mode (auto-approve all actions)\n- Supports session resume (`-r/--resume`)\n- The interactive mode uses a TUI similar to Claude CLI\n\n### Solution Approach\nThe fix should align Gemini with the Claude/Codex pattern:\n1. **startSession**: Launch `gemini` (no flags = interactive mode) inside tmux, wait for prompt initialization\n2. **sendMessage**: Send messages directly to the interactive Gemini process via tmux sendKeys (same as Claude/Codex)\n3. **Patterns**: Update GEMINI_PROMPT_PATTERN to match Gemini's interactive prompt, add proper thinking detection\n4. **Response extraction**: Leverage the existing poller infrastructure which already supports Gemini as a case\n\n### Key Design Decisions Needed\n- Determine exact Gemini interactive prompt pattern (needs manual verification)\n- Determine Gemini thinking indicator patterns (needs manual verification)\n- Decide whether to use `-i/--prompt-interactive` flag or bare `gemini` for session start\n- Consider whether Gemini needs a trust dialog handler (like Claude's CLAUDE_TRUST_DIALOG_PATTERN)\n\n### Risk Assessment\n- **Low risk**: Pattern changes are isolated to cli-patterns.ts\n- **Medium risk**: Rewriting GeminiTool session management changes core behavior\n- **No risk to Claude/Codex**: Changes are scoped to Gemini-specific code paths",
+  "next_steps": [
+    "1. Manually run `gemini` in interactive mode in a terminal to observe: (a) exact prompt character/pattern, (b) thinking/processing indicators, (c) response completion markers, (d) any initialization dialogs",
+    "2. Implement Action 1: Rewrite GeminiTool.startSession() and sendMessage() for interactive mode",
+    "3. Implement Action 2+3: Update GEMINI_PROMPT_PATTERN and add GEMINI_THINKING_PATTERN based on observation",
+    "4. Implement Action 5: Add initialization polling in startSession()",
+    "5. Implement Actions 4+6: Update skip/separator patterns and cleanGeminiResponse()",
+    "6. Implement Action 7: Update unit tests",
+    "7. Integration test: verify end-to-end message flow through CommandMate UI"
+  ]
+}

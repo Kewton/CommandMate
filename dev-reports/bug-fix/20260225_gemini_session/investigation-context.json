@@ -1,0 +1,20 @@
+{
+  "issue_description": "Gemini CLIが非インタラクティブモード（echo | gemini）でメッセージ送信しているため、コマンドが即座に完了してシェルプロンプトに戻り、レスポンスポーラーが出力を正しく検出できない。ターミナルUIでGeminiタブがローディング状態のまま停止する。",
+  "error_logs": [],
+  "affected_files": [
+    "src/lib/cli-tools/gemini.ts"
+  ],
+  "reproduction_steps": [
+    "1. Worktree詳細画面でGeminiタブを選択",
+    "2. メッセージを送信",
+    "3. echo 'message' | gemini が実行されるが即座に終了",
+    "4. レスポンスポーラーが出力を検出できずローディングのまま"
+  ],
+  "environment": {
+    "os": "macOS",
+    "gemini_version": "0.30.0",
+    "gemini_path": "/opt/homebrew/bin/gemini"
+  },
+  "severity_hint": "high",
+  "related_issue": 368
+}

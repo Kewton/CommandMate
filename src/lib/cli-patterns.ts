@@ -125,9 +125,17 @@ export const PASTED_TEXT_DETECT_DELAY = 500;
 export const MAX_PASTED_TEXT_RETRIES = 3;
 
 /**
- * Gemini shell prompt pattern
+ * Gemini interactive REPL prompt pattern
+ * Gemini CLI shows a `>` or `❯` prompt when waiting for user input in interactive mode.
+ * Also matches shell prompts as fallback for session initialization phase.
  */
-export const GEMINI_PROMPT_PATTERN = /^(%|\$|.*@.*[%$#])\s*$/m;
+export const GEMINI_PROMPT_PATTERN = /^[>❯]\s*$/m;
+
+/**
+ * Gemini thinking/processing pattern
+ * Gemini CLI shows braille spinner characters and status text while processing.
+ */
+export const GEMINI_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking\.\.\./;
 
 /**
  * Detect if CLI tool is showing "thinking" indicator
@@ -145,8 +153,7 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
       result = CODEX_THINKING_PATTERN.test(content);
       break;
     case 'gemini':
-      // Gemini doesn't have a thinking indicator in one-shot mode
-      result = false;
+      result = GEMINI_THINKING_PATTERN.test(content);
       break;
     default:
       result = CLAUDE_THINKING_PATTERN.test(content);
@@ -209,12 +216,14 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
     case 'gemini':
       return {
         promptPattern: GEMINI_PROMPT_PATTERN,
-        separatorPattern: /^gemini\s+--\s+/m,
-        thinkingPattern: /(?!)/m, // Never matches - one-shot execution
+        separatorPattern: /^[─━]{3,}$/m,
+        thinkingPattern: GEMINI_THINKING_PATTERN,
         skipPatterns: [
-          /^gemini\s+--\s+/, // Command line itself
-          GEMINI_PROMPT_PATTERN, // Shell prompt lines
+          /^[>❯]\s*$/, // Prompt line
+          GEMINI_THINKING_PATTERN, // Thinking indicators
           /^\s*$/, // Empty lines
+          /Gemini\s+\d+\.\d+/, // Version line
+          PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
         ],
       };
 

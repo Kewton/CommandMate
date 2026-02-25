@@ -1,6 +1,11 @@
 /**
  * Gemini CLI tool implementation
- * Provides integration with Google's Gemini CLI
+ * Provides integration with Google's Gemini CLI in interactive mode
+ *
+ * @remarks Issue #368: Rewritten from non-interactive pipe mode to interactive REPL mode.
+ * Previous implementation used `echo 'msg' | gemini` which caused the process to exit
+ * immediately, making response polling impossible. Now launches `gemini` in interactive
+ * mode within tmux (same approach as Claude/Codex).
  */
 
 import { BaseCLITool } from './base';
@@ -13,12 +18,23 @@ import {
 } from '../tmux';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { detectAndResendIfPastedText } from '../pasted-text-helper';
 
 const execAsync = promisify(exec);
 
 /**
+ * Extract error message from unknown error type (DRY)
+ */
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Wait for Gemini CLI to initialize after launch */
+const GEMINI_INIT_WAIT_MS = 3000;
+
+/**
  * Gemini CLI tool implementation
- * Manages Gemini sessions using tmux
+ * Manages Gemini interactive sessions using tmux
  */
 export class GeminiTool extends BaseCLITool {
   readonly id: CLIToolType = 'gemini';
@@ -38,8 +54,7 @@ export class GeminiTool extends BaseCLITool {
 
   /**
    * Start a new Gemini session for a worktree
-   * Note: Gemini uses non-interactive mode, so we just create a tmux session
-   * for running one-shot commands
+   * Launches `gemini` in interactive REPL mode within tmux
    *
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
@@ -61,23 +76,31 @@ export class GeminiTool extends BaseCLITool {
     }
 
     try {
-      // Create tmux session for running Gemini commands
+      // Create tmux session with large history buffer
       await createSession({
         sessionName,
         workingDirectory: worktreePath,
         historyLimit: 50000,
       });
 
+      // Wait a moment for the session to be created
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Start Gemini CLI in interactive mode (no flags = interactive REPL)
+      await sendKeys(sessionName, 'gemini', true);
+
+      // Wait for Gemini to initialize
+      await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));
+
       console.log(`✓ Started Gemini session: ${sessionName}`);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Gemini session: ${errorMessage}`);
     }
   }
 
   /**
-   * Send a message to Gemini session (non-interactive mode)
-   * Executes a one-shot Gemini command and captures the output
+   * Send a message to Gemini interactive session
    *
    * @param worktreeId - Worktree ID
    * @param message - Message to send
@@ -94,16 +117,26 @@ export class GeminiTool extends BaseCLITool {
     }
 
     try {
-      // Escape the message for shell execution
-      const escapedMessage = message.replace(/'/g, "'\\''");
+      // Send message to Gemini (without Enter)
+      await sendKeys(sessionName, message, false);
 
-      // Execute Gemini in non-interactive mode using stdin piping
-      // This approach bypasses the TUI and executes in one-shot mode
-      await sendKeys(sessionName, `echo '${escapedMessage}' | gemini`, true);
+      // Wait a moment for the text to be typed
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Send Enter key separately
+      await execAsync(`tmux send-keys -t "${sessionName}" C-m`);
+
+      // Wait a moment for the message to be processed
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Detect [Pasted text] and resend Enter for multi-line messages
+      if (message.includes('\n')) {
+        await detectAndResendIfPastedText(sessionName);
+      }
 
       console.log(`✓ Sent message to Gemini session: ${sessionName}`);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Gemini: ${errorMessage}`);
     }
   }
@@ -117,13 +150,14 @@ export class GeminiTool extends BaseCLITool {
     const sessionName = this.getSessionName(worktreeId);
 
     try {
-      // Send Ctrl+D to exit Gemini gracefully
       const exists = await hasSession(sessionName);
       if (exists) {
-        // Send Ctrl+D (ASCII 4)
-        await execAsync(`tmux send-keys -t "${sessionName}" C-d`);
+        // Send Ctrl+C to interrupt any running operation
+        await execAsync(`tmux send-keys -t "${sessionName}" C-c`);
+        await new Promise((resolve) => setTimeout(resolve, 300));
 
-        // Wait a moment for Gemini to exit
+        // Send /quit to exit Gemini gracefully
+        await sendKeys(sessionName, '/quit', true);
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
@@ -134,7 +168,7 @@ export class GeminiTool extends BaseCLITool {
         console.log(`✓ Stopped Gemini session: ${sessionName}`);
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       console.error(`Error stopping Gemini session: ${errorMessage}`);
       throw error;
     }
