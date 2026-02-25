@@ -1,6 +1,6 @@
 /**
  * CLI Tool Manager
- * Singleton class to manage multiple CLI tools (Claude, Codex, Gemini)
+ * Singleton class to manage multiple CLI tools (Claude, Codex, Gemini, Vibe Local)
  */
 
 import type { CLIToolType, ICLITool, CLIToolInfo } from './types';
@@ -12,7 +12,7 @@ import { stopPolling as stopResponsePolling } from '../response-poller';
 
 /**
  * CLI Tool Manager (Singleton)
- * Provides centralized access to all CLI tools
+ * Provides centralized access to all CLI tools (Issue #368: includes Vibe Local)
  */
 export class CLIToolManager {
   private static instance: CLIToolManager;

@@ -73,7 +73,7 @@ export interface Worktree {
   status?: 'todo' | 'doing' | 'done' | null;
   /** External link URL (e.g., issue tracker, PR, documentation) */
   link?: string;
-  /** CLI tool type (claude, codex, gemini) - defaults to 'claude' */
+  /** CLI tool type (claude, codex, gemini, vibe-local) - defaults to 'claude' */
   cliToolId?: CLIToolType;
   /** Selected agents for UI display (Issue #368) - 2 CLI tool IDs */
   selectedAgents?: [CLIToolType, CLIToolType];
@@ -195,7 +195,7 @@ export interface ChatMessage {
   messageType: MessageType;
   /** Prompt data (only for prompt messages) */
   promptData?: PromptData;
-  /** CLI tool type (claude, codex, gemini) - defaults to 'claude' */
+  /** CLI tool type (claude, codex, gemini, vibe-local) - defaults to 'claude' */
   cliToolId?: CLIToolType;
 }
 

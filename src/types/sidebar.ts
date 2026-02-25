@@ -6,6 +6,7 @@
 
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 
 /**
  * Branch status in sidebar
@@ -101,6 +102,14 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
   // Use new hasUnread logic based on lastAssistantMessageAt and lastViewedAt
   const hasUnread = calculateHasUnread(worktree);
 
+  // Issue #368: Use selectedAgents to determine which tools to show status for
+  // Falls back to DEFAULT_SELECTED_AGENTS when selectedAgents is not set
+  const agents = worktree.selectedAgents ?? DEFAULT_SELECTED_AGENTS;
+  const cliStatus: Partial<Record<CLIToolType, BranchStatus>> = {};
+  for (const agent of agents) {
+    cliStatus[agent] = deriveCliStatus(worktree.sessionStatusByCli?.[agent]);
+  }
+
   return {
     id: worktree.id,
     name: worktree.name,
@@ -109,9 +118,6 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
     hasUnread,
     lastActivity: worktree.updatedAt,
     description: worktree.description,
-    cliStatus: {
-      claude: deriveCliStatus(worktree.sessionStatusByCli?.claude),
-      codex: deriveCliStatus(worktree.sessionStatusByCli?.codex),
-    },
+    cliStatus,
   };
 }

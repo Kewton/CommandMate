@@ -200,16 +200,17 @@ export async function PATCH(
         );
       }
 
-      updateSelectedAgents(db, params.id, validation.value!);
+      const validatedAgents = validation.value as [CLIToolType, CLIToolType];
+      updateSelectedAgents(db, params.id, validatedAgents);
 
       // R1-007: cli_tool_id consistency check
       // If current cli_tool_id is not in new selectedAgents, auto-update to selectedAgents[0]
       const currentCliToolId = worktree.cliToolId || 'claude';
-      if (!validation.value!.includes(currentCliToolId)) {
-        const newCliToolId = validation.value![0];
+      if (!validatedAgents.includes(currentCliToolId)) {
+        const newCliToolId = validatedAgents[0];
         console.info(
           `[PATCH /api/worktrees/:id] Auto-updating cli_tool_id from '${currentCliToolId}' to '${newCliToolId}' ` +
-          `because '${currentCliToolId}' is not in new selectedAgents [${validation.value!.join(', ')}]`
+          `because '${currentCliToolId}' is not in new selectedAgents [${validatedAgents.join(', ')}]`
         );
         updateCliToolId(db, params.id, newCliToolId);
         cliToolIdAutoUpdated = true;

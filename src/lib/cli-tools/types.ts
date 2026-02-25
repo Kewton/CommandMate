@@ -19,7 +19,7 @@ export type CLIToolType = typeof CLI_TOOL_IDS[number];
  * SWE CLIツールの共通インターフェース
  */
 export interface ICLITool {
-  /** CLIツールの識別子 (claude, codex, gemini) */
+  /** CLIツールの識別子 (claude, codex, gemini, vibe-local) */
   readonly id: CLIToolType;
 
   /** CLIツールの表示名 */

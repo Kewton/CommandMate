@@ -193,6 +193,50 @@ describe('sidebar types', () => {
       expect(result.hasUnread).toBe(true);
     });
 
+    it('should use selectedAgents for cliStatus keys (Issue #368)', () => {
+      const worktree: Worktree = {
+        id: 'feature-test',
+        name: 'feature/test',
+        path: '/path/to/worktree',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'MyRepo',
+        selectedAgents: ['gemini', 'vibe-local'],
+        sessionStatusByCli: {
+          gemini: { isRunning: true, isWaitingForResponse: false, isProcessing: true },
+          'vibe-local': { isRunning: true, isWaitingForResponse: true, isProcessing: false },
+        },
+      };
+
+      const result = toBranchItem(worktree);
+
+      expect(result.cliStatus).toEqual({
+        gemini: 'running',
+        'vibe-local': 'waiting',
+      });
+      // Should NOT include claude or codex since they are not in selectedAgents
+      expect(result.cliStatus?.claude).toBeUndefined();
+      expect(result.cliStatus?.codex).toBeUndefined();
+    });
+
+    it('should fall back to default agents when selectedAgents is not set', () => {
+      const worktree: Worktree = {
+        id: 'feature-test',
+        name: 'feature/test',
+        path: '/path/to/worktree',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'MyRepo',
+        // No selectedAgents set - should use DEFAULT_SELECTED_AGENTS
+      };
+
+      const result = toBranchItem(worktree);
+
+      // DEFAULT_SELECTED_AGENTS is ['claude', 'codex']
+      expect(result.cliStatus).toEqual({
+        claude: 'idle',
+        codex: 'idle',
+      });
+    });
+
     it('should include lastActivity from updatedAt', () => {
       const updateDate = new Date('2024-01-01T12:00:00Z');
 
