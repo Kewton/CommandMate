@@ -21,16 +21,15 @@ interface OllamaModelInfo {
 }
 
 export async function GET() {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
+    timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
 
     const response = await fetch(OLLAMA_API_URL, {
       signal: controller.signal,
       cache: 'no-store',
     });
-
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       return NextResponse.json(
@@ -61,5 +60,9 @@ export async function GET() {
       { models: [], error: `Ollama is not available: ${message}` },
       { status: 200 }
     );
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 }

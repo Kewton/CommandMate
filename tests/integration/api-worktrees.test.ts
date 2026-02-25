@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { GET as getWorktrees } from '@/app/api/worktrees/route';
 import { GET as getWorktreeById } from '@/app/api/worktrees/[id]/route';
+import { PATCH as patchWorktreeById } from '@/app/api/worktrees/[id]/route';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db-migrations';
 import { upsertWorktree, createMessage } from '@/lib/db';
@@ -200,5 +201,88 @@ describe('GET /api/worktrees/:id', () => {
 
     const data = await response.json();
     expect(data).toHaveProperty('error');
+  });
+});
+
+describe('PATCH /api/worktrees/:id', () => {
+  let db: Database.Database;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    runMigrations(db);
+
+    const { setMockDb } = await import('@/lib/db-instance');
+    setMockDb(db);
+
+    upsertWorktree(db, {
+      id: 'feature-foo',
+      name: 'feature/foo',
+      path: '/path/to/feature-foo',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+      cliToolId: 'claude',
+    });
+  });
+
+  afterEach(async () => {
+    const { closeDbInstance } = await import('@/lib/db-instance');
+    closeDbInstance();
+    db.close();
+  });
+
+  it('should return 400 when request body is not a JSON object', async () => {
+    const request = new Request('http://localhost:3000/api/worktrees/feature-foo', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(['not-an-object']),
+    });
+
+    const response = await patchWorktreeById(
+      request as unknown as import('next/server').NextRequest,
+      { params: { id: 'feature-foo' } }
+    );
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toContain('JSON object');
+  });
+
+  it('should return 400 for invalid cliToolId', async () => {
+    const request = new Request('http://localhost:3000/api/worktrees/feature-foo', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cliToolId: 'invalid-tool' }),
+    });
+
+    const response = await patchWorktreeById(
+      request as unknown as import('next/server').NextRequest,
+      { params: { id: 'feature-foo' } }
+    );
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toContain('Invalid cliToolId');
+  });
+
+  it('should enforce selectedAgents consistency against the updated cliToolId', async () => {
+    const request = new Request('http://localhost:3000/api/worktrees/feature-foo', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cliToolId: 'codex',
+        selectedAgents: ['gemini', 'claude'],
+      }),
+    });
+
+    const response = await patchWorktreeById(
+      request as unknown as import('next/server').NextRequest,
+      { params: { id: 'feature-foo' } }
+    );
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.cliToolId).toBe('gemini');
+    expect(data.selectedAgents).toEqual(['gemini', 'claude']);
+    expect(data.cliToolIdAutoUpdated).toBe(true);
   });
 });

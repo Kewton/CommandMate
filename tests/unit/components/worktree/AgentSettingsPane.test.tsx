@@ -57,6 +57,26 @@ describe('AgentSettingsPane', () => {
       expect(geminiCheckbox.checked).toBe(false);
     });
 
+    it('should sync checked state when selectedAgents prop changes', () => {
+      const { rerender } = render(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
+      );
+
+      rerender(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['gemini', 'vibe-local']} />
+      );
+
+      const claudeCheckbox = screen.getByTestId('agent-checkbox-claude') as HTMLInputElement;
+      const codexCheckbox = screen.getByTestId('agent-checkbox-codex') as HTMLInputElement;
+      const geminiCheckbox = screen.getByTestId('agent-checkbox-gemini') as HTMLInputElement;
+      const vibeLocalCheckbox = screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement;
+
+      expect(claudeCheckbox.checked).toBe(false);
+      expect(codexCheckbox.checked).toBe(false);
+      expect(geminiCheckbox.checked).toBe(true);
+      expect(vibeLocalCheckbox.checked).toBe(true);
+    });
+
     it('should disable unchecked items when 2 are already selected', () => {
       render(<AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />);
 

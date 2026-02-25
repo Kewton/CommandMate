@@ -6,11 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, upsertWorktree } from '@/lib/db';
-import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
-
-interface UpdateCliToolRequest {
-  cliToolId: CLIToolType;
-}
+import { CLI_TOOL_IDS, isCliToolType } from '@/lib/cli-tools/types';
 
 export async function PATCH(
   request: NextRequest,
@@ -29,10 +25,16 @@ export async function PATCH(
     }
 
     // Parse request body
-    const body = (await request.json()) as UpdateCliToolRequest;
+    const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json(
+        { error: 'Request body must be a JSON object' },
+        { status: 400 }
+      );
+    }
 
     // Validate cliToolId
-    if (!body.cliToolId) {
+    if (!('cliToolId' in body) || typeof body.cliToolId !== 'string' || body.cliToolId.length === 0) {
       return NextResponse.json(
         { error: 'CLI tool ID is required' },
         { status: 400 }
@@ -40,7 +42,7 @@ export async function PATCH(
     }
 
     // Issue #368: Use CLI_TOOL_IDS instead of hardcoded array (DRY, R2-001)
-    if (!(CLI_TOOL_IDS as readonly string[]).includes(body.cliToolId)) {
+    if (!isCliToolType(body.cliToolId)) {
       return NextResponse.json(
         { error: `Invalid CLI tool ID: ${body.cliToolId}. Valid values are: ${CLI_TOOL_IDS.join(', ')}` },
         { status: 400 }

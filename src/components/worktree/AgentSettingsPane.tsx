@@ -77,6 +77,11 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   const checkedIdsRef = useRef(checkedIds);
   checkedIdsRef.current = checkedIds;
 
+  // Keep local checkbox state in sync with server-backed selectedAgents prop.
+  useEffect(() => {
+    setCheckedIds(new Set(selectedAgents));
+  }, [selectedAgents]);
+
   const isVibeLocalChecked = checkedIds.has('vibe-local');
 
   // Fetch Ollama models when vibe-local is checked

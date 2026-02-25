@@ -152,9 +152,16 @@ export async function PATCH(
 
     // Parse request body
     const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json(
+        { error: 'Request body must be a JSON object' },
+        { status: 400 }
+      );
+    }
 
     // Track if cli_tool_id was auto-updated due to selectedAgents change
     let cliToolIdAutoUpdated = false;
+    let nextCliToolId: CLIToolType = worktree.cliToolId || 'claude';
 
     // Update description if provided
     if ('description' in body) {
@@ -185,9 +192,14 @@ export async function PATCH(
     // which is the security whitelist for schedule/auto-yes execution.
     if ('cliToolId' in body) {
       const validCliTools: readonly CLIToolType[] = CLI_TOOL_IDS;
-      if (validCliTools.includes(body.cliToolId)) {
-        updateCliToolId(db, params.id, body.cliToolId);
+      if (!validCliTools.includes(body.cliToolId)) {
+        return NextResponse.json(
+          { error: `Invalid cliToolId. Valid values are: ${validCliTools.join(', ')}` },
+          { status: 400 }
+        );
       }
+      updateCliToolId(db, params.id, body.cliToolId);
+      nextCliToolId = body.cliToolId;
     }
 
     // Update selected agents if provided (Issue #368)
@@ -205,14 +217,14 @@ export async function PATCH(
 
       // R1-007: cli_tool_id consistency check
       // If current cli_tool_id is not in new selectedAgents, auto-update to selectedAgents[0]
-      const currentCliToolId = worktree.cliToolId || 'claude';
-      if (!validatedAgents.includes(currentCliToolId)) {
+      if (!validatedAgents.includes(nextCliToolId)) {
         const newCliToolId = validatedAgents[0];
         console.info(
-          `[PATCH /api/worktrees/:id] Auto-updating cli_tool_id from '${currentCliToolId}' to '${newCliToolId}' ` +
-          `because '${currentCliToolId}' is not in new selectedAgents [${validatedAgents.join(', ')}]`
+          `[PATCH /api/worktrees/:id] Auto-updating cli_tool_id from '${nextCliToolId}' to '${newCliToolId}' ` +
+          `because '${nextCliToolId}' is not in new selectedAgents [${validatedAgents.join(', ')}]`
         );
         updateCliToolId(db, params.id, newCliToolId);
+        nextCliToolId = newCliToolId;
         cliToolIdAutoUpdated = true;
       }
     }
