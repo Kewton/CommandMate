@@ -34,10 +34,18 @@ export type ClaudePermission = (typeof CLAUDE_PERMISSIONS)[number];
 export const CODEX_SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'] as const;
 export type CodexSandbox = (typeof CODEX_SANDBOXES)[number];
 
+/** Allowed permission values for gemini CLI (no permission flags) */
+export const GEMINI_PERMISSIONS = [] as const;
+
+/** Allowed permission values for vibe-local CLI (no permission flags) */
+export const VIBE_LOCAL_PERMISSIONS = [] as const;
+
 /** Default permission per CLI tool */
 export const DEFAULT_PERMISSIONS: Record<string, string> = {
   claude: 'acceptEdits',
   codex: 'workspace-write',
+  gemini: '',
+  'vibe-local': '',
 };
 
 // =============================================================================

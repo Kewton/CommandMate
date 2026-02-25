@@ -30,11 +30,17 @@ export const EXECUTION_TIMEOUT_MS = 5 * 60 * 1000;
 export const MAX_MESSAGE_LENGTH = 10000;
 
 /** Allowed CLI tool identifiers for scheduled execution */
-export const ALLOWED_CLI_TOOLS = new Set(['claude', 'codex']);
+export const ALLOWED_CLI_TOOLS = new Set(['claude', 'codex', 'gemini', 'vibe-local']);
 
 // =============================================================================
 // Types
 // =============================================================================
+
+/** Options for executeClaudeCommand */
+export interface ExecuteCommandOptions {
+  /** Ollama model name for vibe-local */
+  model?: string;
+}
 
 /** Result of executing a claude -p command */
 export interface ExecutionResult {
@@ -75,17 +81,27 @@ export function truncateOutput(output: string): string {
  *
  * - claude: -p <message> --output-format text --permission-mode <permission>
  * - codex: exec <message> --sandbox <permission>
+ * - gemini: -p <message>
+ * - vibe-local: [-p <message> -y] or [--model <model> -p <message> -y]
  * - others: -p <message> (fallback)
  *
  * @param message - Prompt message
  * @param cliToolId - CLI tool identifier
  * @param permission - Permission mode (claude: --permission-mode, codex: --sandbox)
+ * @param options - Additional options (e.g., model for vibe-local)
  * @returns Array of CLI arguments
  */
-export function buildCliArgs(message: string, cliToolId: string, permission?: string): string[] {
+export function buildCliArgs(message: string, cliToolId: string, permission?: string, options?: ExecuteCommandOptions): string[] {
   switch (cliToolId) {
     case 'codex':
       return ['exec', message, '--sandbox', permission ?? 'workspace-write'];
+    case 'gemini':
+      return ['-p', message];
+    case 'vibe-local':
+      if (options?.model) {
+        return ['--model', options.model, '-p', message, '-y'];
+      }
+      return ['-p', message, '-y'];
     case 'claude':
     default:
       return ['-p', message, '--output-format', 'text', '--permission-mode', permission ?? 'acceptEdits'];
@@ -99,13 +115,15 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
  * @param cwd - Working directory (worktree path from DB)
  * @param cliToolId - CLI tool to use (default: 'claude')
  * @param permission - Permission mode (claude: --permission-mode, codex: --sandbox)
+ * @param options - Additional options (e.g., model for vibe-local)
  * @returns Execution result with output and status
  */
 export async function executeClaudeCommand(
   message: string,
   cwd: string,
   cliToolId: string = 'claude',
-  permission?: string
+  permission?: string,
+  options?: ExecuteCommandOptions
 ): Promise<ExecutionResult> {
   // Validate cliToolId against whitelist [SEC-001]
   if (!ALLOWED_CLI_TOOLS.has(cliToolId)) {
@@ -122,7 +140,7 @@ export async function executeClaudeCommand(
     ? message.substring(0, MAX_MESSAGE_LENGTH)
     : message;
 
-  const args = buildCliArgs(truncatedMessage, cliToolId, permission);
+  const args = buildCliArgs(truncatedMessage, cliToolId, permission, options);
 
   return new Promise<ExecutionResult>((resolve) => {
     const child = execFile(

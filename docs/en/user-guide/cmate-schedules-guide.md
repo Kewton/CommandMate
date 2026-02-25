@@ -8,7 +8,7 @@ A guide to setting up and managing scheduled executions using CMATE.md files.
 
 ## Overview
 
-The CMATE schedule feature allows you to automatically execute `claude -p` (or `codex exec`) commands by defining cron expressions in the Schedules section of a `CMATE.md` file placed in your worktree root.
+The CMATE schedule feature allows you to automatically execute `claude -p` (or `codex exec`, `gemini -p`, `vibe-local -p`) commands by defining cron expressions in the Schedules section of a `CMATE.md` file placed in your worktree root.
 
 **How it works:**
 
@@ -67,7 +67,7 @@ Create a `## Schedules` section in your `CMATE.md` and define entries using Mark
 | **Name** | Yes | Schedule name. 1-100 characters. Alphanumeric, Japanese, hyphens, and spaces allowed | - |
 | **Cron** | Yes | Cron expression (5-6 fields). Defines execution timing | - |
 | **Message** | Yes | Prompt sent to `claude -p`. Max 10,000 characters | - |
-| **CLI Tool** | No | CLI tool to use (`claude` / `codex`) | `claude` |
+| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local`) | `claude` |
 | **Enabled** | No | Enable/disable the schedule (`true` / `false`) | `true` |
 | **Permission** | No | Execution permission level. See Permission Reference below | Tool-specific default |
 
@@ -106,6 +106,16 @@ Cron expressions support 5 fields (minute hour day month weekday) or 6 fields (s
 | `read-only` | Read-only access. Cannot modify files |
 | `workspace-write` | Allows file changes within the workspace (**default**) |
 | `danger-full-access` | Full access to all files |
+
+### gemini
+
+No permission settings. The Permission column is ignored.
+
+### vibe-local
+
+No permission settings. The Permission column is ignored. The `-y` flag is used for auto-approval.
+
+> **Note:** The vibe-local model uses the Ollama model selected in the worktree's Agent settings.
 
 ---
 
@@ -170,7 +180,7 @@ CommandMate automatically validates the contents of CMATE.md.
 | Name | 1-100 characters, alphanumeric/Japanese/hyphens/spaces only |
 | Cron | Valid cron expression with 5-6 fields |
 | Message | Must not be empty. Max 10,000 characters |
-| CLI Tool | Must be `claude` or `codex` |
+| CLI Tool | Must be `claude`, `codex`, `gemini`, or `vibe-local` |
 | Permission | Must match an allowed value for the selected tool |
 
 Invalid entries are skipped with a warning log. Other valid entries are processed normally.
