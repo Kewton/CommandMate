@@ -157,6 +157,9 @@ tests/
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応。**Issue #287: promptType/defaultOptionNumber送信** - prompt-response APIリクエストにpromptType/defaultOptionNumberを含め、promptCheck再検証失敗時のフォールバック対応。**Issue #306: generatePromptKey()使用** - promptKey生成をprompt-key.tsの共通ユーティリティに統一） |
 | `src/lib/prompt-response-body-builder.ts` | プロンプト応答リクエストボディ構築ユーティリティ（Issue #287: buildPromptResponseBody()関数でpromptType/defaultOptionNumberを含むリクエストボディを生成、DRY原則対応、useAutoYes/WorktreeDetailRefactoredから共通化） |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
+| `src/lib/cli-tools/types.ts` | CLIツール型定義（Issue #368: CLI_TOOL_IDS=['claude','codex','gemini','vibe-local']、CLIToolType、CLI_TOOL_DISPLAY_NAMES、getCliToolDisplayName()で表示名共通化） |
+| `src/lib/cli-tools/vibe-local.ts` | Vibe Local CLIツール実装（Issue #368: VibeLocalTool、BaseCLITool継承、tmuxセッション管理） |
+| `src/lib/selected-agents-validator.ts` | エージェント選択バリデーター（Issue #368: validateAgentsPair()共通コア、parseSelectedAgents()DB読取用・フォールバック付き、validateSelectedAgentsInput()API入力用、DEFAULT_SELECTED_AGENTS=['claude','codex']） |
 | `src/lib/cli-tools/codex.ts` | Codex CLI tmuxセッション管理（Issue #212: 複数行メッセージのPasted text検知+Enter再送、getErrorMessage()ヘルパー抽出） |
 | `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止の一元管理（Facade パターン。**Issue #294: stopScheduleForWorktree()呼び出し追加**） |
 | `src/lib/env-sanitizer.ts` | 環境変数サニタイズユーティリティ（Issue #294: SENSITIVE_ENV_KEYS配列[CLAUDECODE, CM_AUTH_TOKEN_HASH, CM_AUTH_EXPIRE, CM_HTTPS_KEY, CM_HTTPS_CERT, CM_ALLOWED_IPS, CM_TRUST_PROXY, CM_DB_PATH] + sanitizeEnvForChildProcess()関数。S1-001/S4-001: CLAUDECODE除去ロジックの一元管理） |

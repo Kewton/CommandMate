@@ -1,0 +1,101 @@
+{
+  "issue_number": 368,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_summary": "CLIToolType型拡張（vibe-local追加）、DB変更（selected_agentsカラム追加）、セッション管理の波及、UIコンポーネントの波及、スケジューラーへの影響の5観点で影響範囲を分析した。型変更の波及は広範囲（40+ファイルがCLIToolTypeを参照）だが、設計方針書は主要箇所を適切にカバーしている。ただし、BranchListItem.tsxのハードコード、LogViewer.tsxのフィルター型、db.tsのSQL IN句、cli_tool_id自動更新時のセッション副作用の未記載など、複数の漏れを発見した。DBマイグレーションのロールバック戦略と、ALLOWED_CLI_TOOLS二重定義の整理方針にも改善が必要。",
+  "findings": [
+    {
+      "id": "R3-001",
+      "severity": "must_fix",
+      "category": "型変更",
+      "title": "BranchListItem.tsxのcliStatusハードコードが変更対象ファイル一覧から漏れている",
+      "description": "src/components/sidebar/BranchListItem.tsx (L94-95) で branch.cliStatus.claude / branch.cliStatus.codex をハードコード参照している。sidebar.tsの型変更（cliStatus?: Partial<Record<CLIToolType, BranchStatus>>）に追従する場合、BranchListItem.tsxでのプロパティアクセスもOptional Chaining（branch.cliStatus?.claude）に変更する必要があるが、変更対象ファイル一覧（セクション14）に含まれていない。型がPartialに変わると、各プロパティがundefinedになる可能性がありTypeScriptコンパイルエラーまたはランタイムエラーが発生する。",
+      "suggestion": "セクション14の変更対象ファイル一覧に src/components/sidebar/BranchListItem.tsx を追加する。selectedAgentsに基づいて表示するCLIツールを動的化するか、既存のclaude/codex固定表示を維持するかの方針を明記する。型変更に伴いOptional Chainingを適用する。"
+    },
+    {
+      "id": "R3-002",
+      "severity": "must_fix",
+      "category": "DB変更",
+      "title": "db.ts getLastMessagesByCliBatch()のSQL IN句がvibe-localを含まない",
+      "description": "src/lib/db.ts L143 のSQL IN句 AND cli_tool_id IN ('claude', 'codex', 'gemini') にvibe-localが含まれていない。設計方針書セクション14ではdb.tsの返値型変更（R2-002対応）は言及しているが、このSQL IN句のハードコードの修正が明示されていない。vibe-localツールでメッセージを送受信した場合、lastMessagesByCliにvibe-localのデータが欠落する。",
+      "suggestion": "セクション14のdb.ts変更内容に「getLastMessagesByCliBatch()のSQL IN句をCLI_TOOL_IDSから動的生成するか、IN句を除去して全cli_tool_idを取得するように変更する」ことを明記する。SQL内にリテラルを埋め込む場合はマイグレーションと同様のCLI_TOOL_IDS非同期リスクの注意事項を追記する。"
+    },
+    {
+      "id": "R3-003",
+      "severity": "should_fix",
+      "category": "セッション管理",
+      "title": "cli_tool_id自動更新時のアクティブセッション・ポーラーへの副作用が未定義",
+      "description": "設計方針書セクション4で、selectedAgentsにcli_tool_idが含まれない場合にcli_tool_idをselectedAgents[0]に自動更新すると記載されている。しかし、cli_tool_idの変更がアクティブセッション（tmuxセッション）、response-poller、auto-yes-pollerに与える副作用が未定義。例えば、cli_tool_id='gemini'のセッションが稼働中にselectedAgentsを['claude','codex']に変更した場合、geminiセッションは孤立し、新しいcli_tool_id='claude'には対応するセッションが存在しない状態になる。",
+      "suggestion": "cli_tool_id自動更新時の動作仕様を以下のいずれかに決定して設計方針書に明記する: (A) セッション稼働中はselectedAgentsの変更を拒否する（400エラー）、(B) 自動更新時にアクティブセッションの停止を行い、ポーラーもクリーンアップする、(C) cli_tool_idの自動更新のみ行い、既存セッションは次回操作時に自然終了させる。推奨は(C)で、クライアント側にcliToolIdAutoUpdated通知を送り、UIからセッション再起動を促す方式。"
+    },
+    {
+      "id": "R3-004",
+      "severity": "should_fix",
+      "category": "型変更",
+      "title": "LogViewer.tsxのcliToolFilterリテラル型がvibe-localを含まない",
+      "description": "src/components/worktree/LogViewer.tsx L36 で cliToolFilter の型が 'all' | 'claude' | 'codex' | 'gemini' とハードコードされている。CLIToolType型拡張に伴い、この型もvibe-localを含める必要があるが、変更対象ファイル一覧（セクション14）にLogViewer.tsxが含まれていない。vibe-localのログファイルがフィルター選択肢に表示されなくなる。",
+      "suggestion": "セクション14の変更対象ファイル一覧にsrc/components/worktree/LogViewer.tsxを追加する。cliToolFilterの型を 'all' | CLIToolType に変更し、CLI_TOOL_IDSからフィルター選択肢を動的生成することを明記する。"
+    },
+    {
+      "id": "R3-005",
+      "severity": "should_fix",
+      "category": "DB変更",
+      "title": "DBマイグレーションv18のロールバック（down関数）戦略が未定義",
+      "description": "設計方針書セクション3にv18マイグレーションのup処理（ALTER TABLE + UPDATE）は記載されているが、down関数の実装方針が記載されていない。既存のマイグレーション（v15等）ではSQLiteのDROP COLUMN制限に対してテーブル再作成パターンを使用しているが、selected_agentsカラム追加のロールバック時にこのパターンが必要かどうか、また既にselected_agentsに依存する処理がある場合のデータ整合性保証について記載がない。",
+      "suggestion": "セクション3にv18マイグレーションのdown関数の方針を追記する。SQLiteではDROP COLUMNが直接サポートされないため、(A) テーブル再作成パターンを使用するか、(B) 「ロールバック非対応」としてdown関数をconsole.logのみにするかを明示する。selected_agentsカラムはNULL許容のTEXTカラムであるため、カラムが残っていても既存処理に影響しない点を考慮し、(B)を推奨。"
+    },
+    {
+      "id": "R3-006",
+      "severity": "should_fix",
+      "category": "スケジューラー",
+      "title": "ALLOWED_CLI_TOOLS二重定義の統一方針が曖昧",
+      "description": "ALLOWED_CLI_TOOLSがclaude-executor.ts（Set(['claude', 'codex'])）とauto-yes/route.ts（['claude', 'codex', 'gemini']）の2箇所で異なる値で定義されている。設計方針書セクション9のR2-001対応でvalidCliToolsとALLOWED_CLI_TOOLSの役割区別は記載されたが、auto-yes/route.tsのALLOWED_CLI_TOOLSがclaude-executor.tsのALLOWED_CLI_TOOLSと値が異なる（gemini含有の有無）ことの説明がない。R1-003対応でも「関係を整理する」と記載するのみで、具体的な統一方針が未定義。",
+      "suggestion": "auto-yes/route.tsのALLOWED_CLI_TOOLSとclaude-executor.tsのALLOWED_CLI_TOOLSの関係を明確化する。(A) auto-yes/route.tsのバリデーションはセッションベース（tmux）のため全ツールを許可し、claude-executor.tsのバリデーションは非インタラクティブ実行のため検証済みツールのみ許可する、という方針を設計方針書に明記する。(B) 命名を区別する（例: INTERACTIVE_ALLOWED_CLI_TOOLS / NON_INTERACTIVE_ALLOWED_CLI_TOOLS）。"
+    },
+    {
+      "id": "R3-007",
+      "severity": "should_fix",
+      "category": "UI",
+      "title": "selectedAgents state変更時のactiveCliTab同期によるレンダリングチェーン",
+      "description": "設計方針書セクション7-3で、selectedAgents変更時にuseEffectでactiveCliTabを同期すると記載されている。WorktreeDetailRefactored.tsxは巨大なコンポーネント（2000行超）であり、selectedAgentsとactiveCliTabの2つのstate変更がuseEffect経由で連鎖すると、1回のselectedAgents変更で2回の再レンダリングが発生する。また、AgentSettingsPaneでselectedAgentsを変更した後、PATCH APIレスポンス受信後にselectedAgents stateが更新されるまでの間、activeCliTabと実際のselectedAgentsに不整合が生じる可能性がある。",
+      "suggestion": "useEffect連鎖による2回レンダリングは許容範囲と考えられるが、(A) activeCliTabの初期値をselectedAgents[0]から導出するuseEffectの依存配列に注意事項を設計方針書に追記する、(B) selectedAgentsのポーリング更新と直接PATCH操作の両方でactiveCliTab同期が正しく動作することのテストケースを追加する。"
+    },
+    {
+      "id": "R3-008",
+      "severity": "should_fix",
+      "category": "型変更",
+      "title": "sessionStatusByCli型変更のAPI利用箇所の波及漏れ（worktrees/route.ts）",
+      "description": "src/app/api/worktrees/route.ts L36-40 でsessionStatusByCliのローカル型定義がclaude/codex/geminiのみをハードコードしている。設計方針書セクション14ではsrc/app/api/worktrees/route.tsの変更を「L31のリテラル配列をCLI_TOOL_IDS参照に変更」と記載しているが、L36-40のsessionStatusByCliローカル型定義の修正が漏れている。src/app/api/worktrees/[id]/route.tsのGETハンドラ（L36-40）は R1-002 で対応済みだが、同構造のworktrees/route.tsのGETハンドラは言及されていない。",
+      "suggestion": "セクション14のsrc/app/api/worktrees/route.tsの変更内容に、L36-40のsessionStatusByCliローカル型定義も Partial<Record<CLIToolType, ...>> に変更することを明記する。worktrees/route.tsとworktrees/[id]/route.tsのGETハンドラは同じパターンのコードを含んでおり、両方を同時に修正する必要がある。"
+    },
+    {
+      "id": "R3-009",
+      "severity": "nice_to_have",
+      "category": "型変更",
+      "title": "session-cleanup.tsのCLI_TOOL_IDS反復がvibe-localセッションを自動的に含む影響",
+      "description": "src/lib/session-cleanup.ts L74 で CLI_TOOL_IDS をfor...ofで反復してセッション停止を実行している。CLI_TOOL_IDSにvibe-localが追加されると、セッションクリーンアップ時に自動的にvibe-localセッションも停止対象になる。VibeLocalToolのkillSession()が正しく実装されていれば問題ないが、技術調査依存の段階でクリーンアップが動作する保証がない。",
+      "suggestion": "VibeLocalToolの実装がstub段階でもkillSession()がエラーなく完了するよう、基底クラスBaseCLIToolのデフォルト実装を確認し、設計方針書のテスト設計にセッションクリーンアップの統合テストケースを追加することを推奨する。"
+    },
+    {
+      "id": "R3-010",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "title": "既存APIクライアント（api-client.ts）への後方互換性影響",
+      "description": "src/lib/api-client.ts のWorktreesResponseはWorktree[]を型として使用しており、WorktreeインターフェースにオプショナルなselectedAgentsフィールドが追加される（R2-005）。これは後方互換であり破壊的変更ではないが、クライアント側のコードがselectedAgentsフィールドの存在を前提とする場合、DBマイグレーション前の既存データ（selectedAgentsがundefined）への対応が必要。",
+      "suggestion": "parseSelectedAgents()がnullに対してデフォルト値を返すフォールバック設計は正しいため、後方互換性は保たれている。ただし、フロントエンドでselectedAgentsを参照する全箇所でオプショナルチェーン(?.)を使用することをコーディングガイドラインとして設計方針書に追記することを推奨する。"
+    },
+    {
+      "id": "R3-011",
+      "severity": "nice_to_have",
+      "category": "型変更",
+      "title": "CLIToolManager Singleton再生成の必要性",
+      "description": "CLIToolManagerはSingletonパターンで実装されており、コンストラクタでclaude/codex/geminiの3ツールのみを登録している（manager.ts L27-29）。設計方針書ではVibeLocalToolの登録（セクション8-3）を記載しているが、Hot Reloadやテスト環境でSingletonインスタンスが再生成されない場合、vibe-localが登録されない可能性がある。",
+      "suggestion": "現在のSingletonパターンではconstructorが1回しか実行されないため、VibeLocalToolの登録はconstructorへの追加で十分。ただし、テストでCLIToolManager.instanceをリセットする場合の影響を考慮し、テスト設計にSingleton再初期化のケースを含めることを推奨する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 6,
+  "nice_to_have_count": 3,
+  "overall_assessment": "影響範囲の分析において、設計方針書は主要な変更対象を網羅しているが、BranchListItem.tsxのハードコード漏れ（R3-001）とdb.tsのSQL IN句のハードコード漏れ（R3-002）の2件のmust_fix項目を検出した。セッション管理におけるcli_tool_id自動更新の副作用定義不足（R3-003）と、ALLOWED_CLI_TOOLS二重定義の統一方針の曖昧さ（R3-006）は実装段階で問題になるリスクがある。型変更の波及は40以上のファイルに及ぶが、CLIToolType派生型（CLI_TOOL_IDSからのas const推論）により、コンパイル時に大部分の不整合が検出可能。DB変更は後方互換性があり、ロールバック戦略の明確化を推奨する程度の影響。全体として、Stage 1/Stage 2のレビュー反映により設計品質は高いが、上記の漏れ対応が必要。"
+}

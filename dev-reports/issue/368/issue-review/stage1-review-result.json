@@ -1,0 +1,110 @@
+{
+  "issue_number": 368,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-02-25",
+  "review_summary": "Issue #368は全体として目的が明確で、変更対象ファイルや行番号の記述は正確である。しかし、(1) 既存cli_tool_idカラムと新規selected_agentsカラムの設計上の関係性が未定義、(2) vibe-localの実装詳細（起動コマンド、CLI引数構造、buildCliArgs対応）が不足、(3) 変更対象ファイルの網羅性に重大な漏れがある（API routes、models.ts、log-manager.ts等の多数のハードコード箇所が未記載）、(4) クラス名のtypo（ViveLocalTool）、(5) ALLOWED_CLI_TOOLSの拡張方針が曖昧、という問題がある。",
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "must_fix",
+      "category": "完全性",
+      "title": "変更対象ファイルの網羅性が大幅に不足",
+      "description": "Issueの「変更対象」セクションでは主に4カテゴリ（CLI_TOOL_IDS追加、CMATEタブ追加、DB永続化、UIの動的レンダリング）のファイルが挙げられているが、CLIToolType型に'vibe-local'を追加した場合に影響を受ける多数のファイルが記載されていない。grepで確認したところ、['claude', 'codex', 'gemini']のハードコード配列が以下14箇所以上に存在する:\n- src/app/api/worktrees/route.ts L31\n- src/app/api/worktrees/[id]/route.ts L34, L165\n- src/app/api/worktrees/[id]/send/route.ts L26\n- src/app/api/worktrees/[id]/current-output/route.ts L17\n- src/app/api/worktrees/[id]/interrupt/route.ts L63\n- src/app/api/worktrees/[id]/auto-yes/route.ts L23\n- src/app/api/worktrees/[id]/cli-tool/route.ts L42\n- src/app/api/worktrees/[id]/start-polling/route.ts L37\n- src/app/api/worktrees/[id]/messages/route.ts L37\n- src/lib/log-manager.ts L187, L221\n- src/types/models.ts L55-77（sessionStatusByCli, lastMessagesByCli）\n- src/app/api/worktrees/[id]/route.ts L36-40（sessionStatusByCli型定義）\nこれらを CLI_TOOL_IDS を参照する形に統一するか、vibe-localを追加する必要がある。",
+      "suggestion": "変更対象ファイルセクションに「CLIToolType/CLI_TOOL_IDSのハードコード箇所の統一」カテゴリを追加し、上記ファイルを全て列挙する。理想的には CLI_TOOL_IDS からの動的生成に統一するリファクタリングを含めるべき。"
+    },
+    {
+      "id": "F002",
+      "severity": "must_fix",
+      "category": "設計整合性",
+      "title": "cli_tool_idカラムとselected_agentsカラムの関係性が未定義",
+      "description": "worktreesテーブルには既に cli_tool_id カラム（単一のCLIツールID、デフォルト'claude'）が存在する（Migration v7で追加）。Issueでは新たに selected_agents カラム（JSON配列、デフォルト '[\"claude\",\"codex\"]'）を追加するとしている。しかし、以下が明確でない:\n1. cli_tool_id の既存の役割は何か（セッション開始時のデフォルトツール選択? スケジュール実行のツール?）\n2. selected_agents はUI表示用の2ツール選択のみか\n3. cli_tool_id と selected_agents の値に整合性は必要か（例: selected_agents に含まれないツールが cli_tool_id に設定されることは許容するか）\n4. 既存のPATCH API（body.cliToolId）との関係\n既存のcliToolId更新API（/api/worktrees/[id]/cli-tool/route.ts）も存在しており、設計上の混乱が生じうる。",
+      "suggestion": "Issueに「cli_tool_idとselected_agentsの設計方針」セクションを追加し、以下を明記する:\n- cli_tool_id: アクティブセッション/スケジュール実行で使用するツール（既存機能）\n- selected_agents: ターミナルヘッダーに表示する2ツール（新規機能）\n- 整合性ルール: cli_tool_idがselected_agentsに含まれない場合の挙動"
+    },
+    {
+      "id": "F003",
+      "severity": "must_fix",
+      "category": "技術的妥当性",
+      "title": "vibe-localのCLIツール実装に必要な技術的詳細が不足",
+      "description": "Issueではvibe-localのtmuxセッション管理が「既存のclaude/codexと同様」と記載されているが、実装に必要な以下の情報が欠落している:\n1. vibe-localの実行コマンド名（pythonスクリプトの場合 'python vibe-local' なのか 'vibe-local' コマンドとしてPATHに存在するのか）\n2. vibe-localの起動引数（インタラクティブモード、非インタラクティブモード）\n3. claude-executor.ts の buildCliArgs() にvibe-local用のcase分岐が必要か（現在は claude/codex の2パターンのみ）\n4. vibe-localのプロンプト検出パターン（response-poller.ts、prompt-detector.ts）\n5. vibe-localのステータス検出パターン（status-detector.ts）\n6. isInstalled()での検証コマンド（BaseCLITool.isInstalled()は 'which <command>' を使用）\n仮説検証レポートでもvibe-localの実装詳細は「Unverifiable」と判定されている。",
+      "suggestion": "以下のいずれかの対応を推奨:\n(A) Issueに「vibe-localの技術調査」フェーズを追加し、実装前にvibe-localの実際のCLI仕様を調査するステップを含める\n(B) vibe-localの追加を別Issueに分離し、本Issueはエージェント選択UI機能とCLI_TOOL_IDSの拡張基盤のみに集中する\n(C) 最低限、commandプロパティ（vibe-localの実行ファイル名）、起動コマンド形式、対話/非対話モードの仕様をIssueに記載する"
+    },
+    {
+      "id": "F004",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "クラス名のtypo: ViveLocalTool",
+      "description": "Issueの変更対象セクションで、新規クラス名が「ViveLocalTool」と記載されている。正しくは「VibeLocalTool」（vibe-localのvibeに対応）であるべき。ファイル名は正しく「vibe-local.ts」と記載されており、IDも「vibe-local」と正しいが、クラス名のみ誤りがある。",
+      "suggestion": "「ViveLocalTool」を「VibeLocalTool」に修正する。"
+    },
+    {
+      "id": "F005",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "ALLOWED_CLI_TOOLS（claude-executor.ts）の拡張方針が曖昧",
+      "description": "Issueでは「ALLOWED_CLI_TOOLS を全ツール対応に拡張」と記載しているが、このSetはスケジュール実行（claude -p コマンド）で許可されるCLIツールのホワイトリストである。「全ツール対応」とは具体的に何を意味するのかが不明確:\n1. geminiとvibe-localもclaude -pのような非インタラクティブ実行モードを持つのか\n2. buildCliArgs()にvibe-local/gemini用のcase分岐を追加するのか\n3. UIの選択状態（selected_agents）とスケジュール実行の許可ツール（ALLOWED_CLI_TOOLS）は連動するのか\nIssueの技術的考慮事項にも「スケジュール実行もselected_agentsに連動させるか要検討」とあるが、結論が記載されていない。",
+      "suggestion": "ALLOWED_CLI_TOOLSの拡張について以下を明記する:\n- 拡張対象ツール（gemini, vibe-localのいずれまたは両方）\n- 各ツールの非インタラクティブ実行コマンド形式\n- UIのselected_agentsとの連動の有無"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "models.ts/sidebar.tsの型定義変更が変更対象に含まれていない",
+      "description": "src/types/models.ts の Worktree interface には sessionStatusByCli と lastMessagesByCli が claude/codex/gemini のみをキーとしてハードコードされている（L55-77）。vibe-localを追加する場合、これらの型定義も更新が必要だが、変更対象に含まれていない。同様に、src/types/sidebar.ts のステータス判定ロジックもCLIToolTypeに依存する可能性がある。",
+      "suggestion": "変更対象に以下を追加:\n- src/types/models.ts: sessionStatusByCli, lastMessagesByCli の型定義をRecord<CLIToolType, ...>に変更\n- src/types/sidebar.ts: 該当箇所の確認と更新"
+    },
+    {
+      "id": "F007",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "i18n翻訳ファイルの変更が変更対象に含まれていない",
+      "description": "CMATEタブに「Agent」サブタブを追加する場合、i18n翻訳ファイル（locales/en/schedule.json, locales/ja/schedule.json）に新しい翻訳キーが必要。現在のNotesAndLogsPaneはuseTranslations('schedule')を使用しており、「notes」「logs」キーは定義済みだが、「agent」キーは未定義。また、AgentSettingsPaneの各UIテキスト（「選択可能なエージェント」「最大2つまで」等）の翻訳も必要。",
+      "suggestion": "変更対象に以下を追加:\n- locales/en/schedule.json: 'agent'キーおよびAgentSettingsPane関連のi18nキー\n- locales/ja/schedule.json: 同上"
+    },
+    {
+      "id": "F008",
+      "severity": "should_fix",
+      "category": "受け入れ条件",
+      "title": "受け入れ条件にテスト関連の項目がない",
+      "description": "受け入れ条件に9項目が列挙されているが、テスト関連の条件が含まれていない。本プロジェクトではVitest（unit/integration）が品質担保の必須チェックに含まれており、以下のテストが必要と想定される:\n- AgentSettingsPane のユニットテスト\n- selected_agents のDB永続化テスト\n- CLIToolManager への VibeLo ocalTool 登録テスト\n- vibe-local セッション管理テスト\n- 選択数上限（2つまで）のバリデーションテスト",
+      "suggestion": "受け入れ条件に以下を追加:\n- [ ] 新規コンポーネント（AgentSettingsPane）のユニットテストが追加されている\n- [ ] DBマイグレーション（selected_agentsカラム追加）のテストが追加されている\n- [ ] 既存テストが全てパスする（npm run test:unit）"
+    },
+    {
+      "id": "F009",
+      "severity": "should_fix",
+      "category": "設計整合性",
+      "title": "CLIToolManager（Singleton）へのvibe-local登録時の考慮事項が不足",
+      "description": "CLIToolManager はSingletonパターンで実装されており、constructorでclaude/codex/geminiの3ツールを初期化している。vibe-localを追加する場合:\n1. CLIToolType型に'vibe-local'を追加するだけでは不十分で、managerのconstructor内でthis.tools.set('vibe-local', new VibeLocalTool())が必要\n2. getAllToolsInfo()、getInstalledTools()は自動的にvibe-localを含むようになるが、セッション状態チェック用の各APIルートの['claude', 'codex', 'gemini']ハードコードは手動更新が必要\n3. stopPollers()もvibe-local対応が必要\nIssueにはmanager.tsへの登録は記載されているが、波及的な影響の記述が不足している。",
+      "suggestion": "変更対象のmanager.ts説明を拡充し、登録だけでなく、getAllToolsInfo()/getInstalledTools()を利用してAPIルート側のハードコード配列を動的に取得するリファクタリング方針を記載する。"
+    },
+    {
+      "id": "F010",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "sessionNameのハイフン付きID対応の明示的確認",
+      "description": "技術的考慮事項に「CLIToolType型に'vibe-local'を追加するため、ハイフン付きの文字列リテラルとなる（既存の命名規則を確認）」と記載がある。validation.tsのSESSION_NAME_PATTERN（/^[a-zA-Z0-9_-]+$/）を確認したところ、ハイフンは許可されているため、セッション名「mcbd-vibe-local-{worktreeId}」は問題なく通過する。この確認結果をIssueに明記しておくと実装時の疑問が減る。",
+      "suggestion": "技術的考慮事項に「SESSION_NAME_PATTERN（/^[a-zA-Z0-9_-]+$/）でハイフンは許容されるため、セッション名の問題はない」と追記する。"
+    },
+    {
+      "id": "F011",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "CLI_TOOL_IDSハードコード箇所の統一リファクタリング提案",
+      "description": "現在、['claude', 'codex', 'gemini']が14箇所以上にハードコードされている。今回vibe-localを追加すると、今後さらにツールが増えるたびに同じ問題が発生する。CLI_TOOL_IDSを唯一の情報源（single source of truth）として、各APIルートやモデル型定義がCLI_TOOL_IDSを参照するようリファクタリングすれば、将来のツール追加が容易になる。",
+      "suggestion": "本Issueまたは事前Issueとして、CLI_TOOL_IDSの一元化リファクタリングを含めることを推奨。例: const allCliTools: CLIToolType[] = [...CLI_TOOL_IDS]; のようなパターンに統一。"
+    },
+    {
+      "id": "F012",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "DBマイグレーションのバージョン番号が未指定",
+      "description": "selected_agentsカラム追加のDBマイグレーションについて、現在のスキーマバージョンは17（CURRENT_SCHEMA_VERSION = 17）であるため、次のマイグレーションはversion 18となる。Issueにバージョン番号を明記しておくと、実装時に迷いが減る。",
+      "suggestion": "変更対象の「DB関連」セクションにマイグレーションバージョン番号（18）を明記する。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 6,
+  "nice_to_have_count": 3,
+  "overall_assessment": "Issue #368は機能要件と目的が明確であり、UIハードコード箇所（L1795, L2081）やCLI_TOOL_IDS定義等の参照情報は正確である。しかし、(1) 変更影響範囲の見積もりが大幅に不足しており、CLIToolType関連のハードコード箇所が14箇所以上あるにもかかわらず4ファイルしか列挙されていない、(2) cli_tool_idとselected_agentsという2つのDB設計の関係性が未定義、(3) vibe-localの実装に必要な技術詳細が不足し実装可能性に懸念がある、という3点のMust Fix事項がある。これらが解消されれば、実装着手可能なIssueとなる。"
+}

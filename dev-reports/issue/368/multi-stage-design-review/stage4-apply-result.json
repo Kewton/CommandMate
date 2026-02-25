@@ -1,0 +1,46 @@
+{
+  "issue_number": 368,
+  "stage": 4,
+  "applied_findings": [
+    {
+      "finding_id": "R4-001",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "セクション14のdb.ts変更内容にIN句除去方式の採用を明記。SQL IN句を除去して全cli_tool_idを取得する方式に確定し、SQLインジェクションリスクを根本的に排除。パフォーマンス影響は無視できる旨を記載。Stage 3のR3-002チェックリスト項目も方針確定に合わせて更新。"
+    },
+    {
+      "finding_id": "R4-002",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "セクション4のPATCH API処理フローにisValidWorktreeId(params.id)チェックをステップ1として追記。他ルート(auto-yes/route.ts, schedules/route.ts)との一貫性とDefense-in-Depth原則に基づく。GETハンドラへの追加推奨も注記として記載。"
+    },
+    {
+      "finding_id": "R4-003",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション8に新規セクション8-5「BaseCLITool.isInstalled()のシェルインジェクション対策」を追加。execAsync('which ...')をexecFile('which', [this.command])に変更する方針を明記。claude-executor.tsとの一貫性向上も根拠として記載。"
+    },
+    {
+      "finding_id": "R4-004",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション8に新規セクション8-6「vibe-local ALLOWED_CLI_TOOLS追加チェックリスト」を追加。サンドボックス設定確認、SENSITIVE_ENV_KEYS適用確認、出力サイズ制限確認、コード実行能力の範囲確認の4項目をチェックリスト化。技術調査フェーズの完了条件として明記。"
+    },
+    {
+      "finding_id": "R4-005",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション5のバリデーション設計に「parseSelectedAgents() console.warn出力のログインジェクション対策」を追加。raw値に対するstripAnsi() + 改行除去 + 出力長制限(100文字)のサニタイズ方針を具体的な実装例付きで記載。"
+    },
+    {
+      "finding_id": "R4-006",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション9のセキュリティ設計に「UIコンポーネントでのXSS防御方針」を追加。dangerouslySetInnerHTML禁止、テキストノード描画の徹底、フォールバック値の安全な取扱いの3方針をテーブル形式で明記。コードレビューチェックポイントとしても機能するよう記載。"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 4セキュリティレビューの全6件（must_fix 2件 + should_fix 4件）を設計方針書に反映完了。R4-001: SQL IN句除去方式の採用をセクション14に明記しR3-002チェックリストも更新。R4-002: PATCH API処理フローにisValidWorktreeId()チェックを追記。R4-003: BaseCLITool.isInstalled()のexecFile変更方針をセクション8-5に追加。R4-004: vibe-local ALLOWED_CLI_TOOLS追加チェックリストをセクション8-6に追加。R4-005: parseSelectedAgents()のログインジェクション対策をセクション5に追加。R4-006: UIコンポーネントXSS防御方針をセクション9に追加。nice_to_have 2件(R4-007, R4-008)はレビューサマリーテーブル(セクション22)に記録済み。レビュー履歴テーブル(セクション15)にStage 4を追加。実装チェックリスト(セクション23)にmust_fix 4項目 + should_fix 5項目を追記。",
+  "timestamp": "2026-02-25T00:00:00Z"
+}

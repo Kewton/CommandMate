@@ -1,0 +1,31 @@
+{
+  "issue_number": 368,
+  "feature_summary": "CMATEタブにAgent設定タブを追加し、表示するコーディングエージェントをWorktree単位で選択可能にする",
+  "acceptance_criteria": [
+    "CMATEタブに「Agent」サブタブが表示される",
+    "Agentタブで利用可能なエージェント一覧（claude, codex, gemini, vibe-local）が表示される",
+    "ユーザーが2つのエージェントを選択できる",
+    "3つ以上の選択はできない（UIで制御）",
+    "選択状態がWorktree単位で永続化される",
+    "ターミナルヘッダーのエージェントタブが選択に応じて動的に切り替わる",
+    "デフォルト値は ['claude', 'codex']（既存動作の維持）",
+    "デスクトップ・モバイル両方で正しく動作する",
+    "vibe-localのtmuxセッション管理が他ツールと同様に機能する"
+  ],
+  "test_scenarios": [
+    "シナリオ1: parseSelectedAgents()が正常なJSON文字列を正しくパースする",
+    "シナリオ2: parseSelectedAgents()が不正値の場合にデフォルト値['claude','codex']にフォールバックする",
+    "シナリオ3: validateSelectedAgentsInput()が3要素以上の配列を拒否する",
+    "シナリオ4: validateSelectedAgentsInput()が重複ツールIDを拒否する",
+    "シナリオ5: getCliToolDisplayName()がvibe-localを'Vibe Local'と表示する",
+    "シナリオ6: DBマイグレーションv18でselected_agentsカラムが追加される",
+    "シナリオ7: DBマイグレーションv18でcli_tool_id='claude'の既存データが['claude','codex']に初期化される",
+    "シナリオ8: DBマイグレーションv18でcli_tool_id='gemini'の既存データが['gemini','claude']に初期化される",
+    "シナリオ9: GET /api/worktrees/:id がselectedAgentsフィールドを返す",
+    "シナリオ10: PATCH /api/worktrees/:id でselectedAgentsを更新できる",
+    "シナリオ11: PATCH /api/worktrees/:id でcli_tool_idがselected_agents外の場合に自動更新される",
+    "シナリオ12: CLI_TOOL_IDSに'vibe-local'が含まれている",
+    "シナリオ13: 既存の全テストがパスする（型変更による破損なし）"
+  ],
+  "tdd_result_path": "dev-reports/issue/368/pm-auto-dev/iteration-1/tdd-result.json"
+}

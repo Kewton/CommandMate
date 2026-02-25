@@ -1,0 +1,70 @@
+{
+  "issue_number": 368,
+  "stage": 3,
+  "applied_findings": [
+    {
+      "finding_id": "R3-001",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "セクション14の変更ファイル一覧（リファクタリング）に src/components/sidebar/BranchListItem.tsx を追加。cliStatus型変更（Partial<Record<CLIToolType, BranchStatus>>）への追従としてOptional Chaining適用方針を明記。selectedAgentsに基づく動的化方針も記載。"
+    },
+    {
+      "finding_id": "R3-002",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "セクション14のdb.ts変更内容を具体化。getLastMessagesByCliBatch() L143のSQL IN句 'AND cli_tool_id IN (claude, codex, gemini)' をCLI_TOOL_IDSから動的生成またはIN句除去に変更する旨を明記。SQL内リテラルのCLI_TOOL_IDS非同期リスク注意事項も追記。"
+    },
+    {
+      "finding_id": "R3-003",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション4に「cli_tool_id自動更新時のセッション・ポーラーへの影響方針（R3-003対応）」を新規追記。方針(C)（cli_tool_idのみ自動更新、既存セッションは自然終了）を採用。代替案(A)(B)の不採用理由、ログ出力の注意事項、クライアント通知フローを明記。"
+    },
+    {
+      "finding_id": "R3-006",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション14のリファクタリングノート（R1-003対応）にR3-006対応を追記。auto-yes/route.tsのALLOWED_CLI_TOOLS（セッションベース自動応答用）とclaude-executor.tsのALLOWED_CLI_TOOLS（非インタラクティブ実行用）の差異の意図的な理由を明確化。INTERACTIVE_ALLOWED_CLI_TOOLS / NON_INTERACTIVE_ALLOWED_CLI_TOOLSへのリネーム推奨方針を記載。"
+    },
+    {
+      "finding_id": "R3-008",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション14のsrc/app/api/worktrees/route.ts変更内容に、L36-40のsessionStatusByCliローカル型定義をPartial<Record<CLIToolType, ...>>に変更する旨を追記。worktrees/[id]/route.tsのGETハンドラと同パターンのコードであり同時修正が必要であることを明記。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "finding_id": "R3-004",
+      "severity": "should_fix",
+      "reason": "セクション14にLogViewer.tsxのcliToolFilter型修正は既に記載済み（L611: src/components/worktree/LogViewer.tsx - cliToolFilter型修正）。追加対応不要。"
+    },
+    {
+      "finding_id": "R3-005",
+      "severity": "should_fix",
+      "reason": "DBマイグレーションv18のロールバック戦略は今後の検討事項として記録。selected_agentsはNULL許容TEXTカラムであり既存処理に影響しないため、down関数はconsole.logのみで許容。Stage 3サマリーテーブルに記載済み。"
+    },
+    {
+      "finding_id": "R3-007",
+      "severity": "should_fix",
+      "reason": "useEffect連鎖による2回レンダリングは許容範囲と判断。今後の検討事項としてStage 3サマリーテーブルに記録済み。"
+    },
+    {
+      "finding_id": "R3-009",
+      "severity": "nice_to_have",
+      "reason": "今後の検討事項として記録。Stage 3サマリーテーブルに記載済み。"
+    },
+    {
+      "finding_id": "R3-010",
+      "severity": "nice_to_have",
+      "reason": "今後の検討事項として記録。parseSelectedAgents()のデフォルト値フォールバック設計により後方互換性は保たれている。Stage 3サマリーテーブルに記載済み。"
+    },
+    {
+      "finding_id": "R3-011",
+      "severity": "nice_to_have",
+      "reason": "今後の検討事項として記録。constructorへの追加で十分であり、テスト設計にSingleton再初期化ケースを含める推奨をStage 3サマリーテーブルに記載済み。"
+    }
+  ],
+  "design_doc_updated": true,
+  "summary": "Stage 3影響分析レビューの5件の指摘を設計方針書に反映完了。Must Fix 2件（R3-001: BranchListItem.tsxの変更対象追加、R3-002: db.ts SQL IN句の動的化明記）、Should Fix 3件（R3-003: cli_tool_id自動更新時のセッション・ポーラー影響方針をセクション4に追記、R3-006: ALLOWED_CLI_TOOLS二重定義の命名区別方針をセクション14に追記、R3-008: worktrees/route.tsのsessionStatusByCli型修正をセクション14に追記）を適用。R3-004は既存記載により対応不要、R3-005/R3-007は今後の検討事項として記録、nice_to_have 3件はStage 3サマリーテーブルに記録。レビュー履歴（セクション15）、指摘事項サマリー（セクション20）、実装チェックリスト（セクション21）を新規追加。"
+}

@@ -1,0 +1,93 @@
+{
+  "issue_number": 368,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "focus_area": "設計原則",
+  "review_summary": "設計方針書は全体として堅実な設計原則の適用が見られる。SRP/DRY/KISSの観点で適切な責務分離とハードコード一元化が計画されている。ただし、いくつかの改善点が見つかった。parseSelectedAgents()のサイレントフォールバック設計にはAPI層との責務境界の曖昧さがあり、models.ts/sidebar.tsの型定義においてDRY原則に反するハードコードが残存する設計となっている。また「2要素固定」制約のYAGNI違反リスク、exhaustive guardの適用漏れについても指摘する。",
+  "findings": [
+    {
+      "id": "R1-001",
+      "severity": "should_fix",
+      "principle": "SRP",
+      "title": "parseSelectedAgents()のサイレントフォールバックとvalidateSelectedAgentsInput()の責務境界が曖昧",
+      "description": "parseSelectedAgents()はDB読み取り用で不正値をデフォルトにサイレントフォールバックする設計であり、validateSelectedAgentsInput()はAPI入力バリデーション用でエラーを明示的に返す設計である。この2関数の責務自体は明確に分離されているが、parseSelectedAgents()がDB側の不正データを無言で修正する振る舞いは、データ不整合のデバッグを困難にする。また、両関数のバリデーションロジック（配列長チェック、CLI_TOOL_IDS包含チェック、重複チェック）が実質的に重複している。",
+      "suggestion": "共通のバリデーションコア関数（例: validateAgentsPair()）を抽出し、parseSelectedAgents()とvalidateSelectedAgentsInput()の両方がこれを利用する構造にする。parseSelectedAgents()でフォールバックした際には、console.warn等で警告ログを出力し、DB内の不正データを検出可能にすることを推奨する。"
+    },
+    {
+      "id": "R1-002",
+      "severity": "must_fix",
+      "principle": "DRY",
+      "title": "models.ts sessionStatusByCliの型定義にハードコードが残存",
+      "description": "設計方針書のセクション7-4でsidebar.tsのcliStatusをPartial<Record<CLIToolType, BranchStatus>>に変更する計画があるが、models.tsのWorktreeインターフェースにおけるsessionStatusByCli型（L73-77）は依然として{ claude?: {...}; codex?: {...}; gemini?: {...} }というハードコードされたキーで定義されている。また、route.tsのGETハンドラ（L36-40）にも同様のハードコード型が存在する。lastMessagesByCli（L55-59）も同じ問題を持つ。これらはsidebar.tsだけ変更してもDRY原則違反が残る。",
+      "suggestion": "models.tsのsessionStatusByCli型をPartial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>>に統一する。lastMessagesByCliもPartial<Record<CLIToolType, string>>に変更する。route.ts内のローカル型定義も同様にCLIToolType参照に置き換える。変更対象ファイル一覧に明示的に追加すべき。"
+    },
+    {
+      "id": "R1-003",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "allCliTools/validCliToolsのハードコードが設計方針書の一元化対象に含まれていない",
+      "description": "route.ts内のallCliTools: CLIToolType[] = ['claude', 'codex', 'gemini']（GET L34、PATCH L165）やworktrees/route.ts L31にハードコードされたリテラル配列が存在する。設計方針書のセクション1でCLI_TOOL_IDS一元化を計画しているが、これらのAPIルート内のローカル配列の置換が変更対象ファイル一覧のリファクタリング項目に含まれていない可能性がある。auto-yes/route.tsのALLOWED_CLI_TOOLS定義（L23）も独立したハードコードである。",
+      "suggestion": "設計方針書のセクション14「変更ファイル（リファクタリング）」にて、route.ts内のallCliTools/validCliToolsをCLI_TOOL_IDSから導出する変更を明示する。auto-yes/route.tsのALLOWED_CLI_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini']もclaude-executor.tsのALLOWED_CLI_TOOLSとの関係を整理すべき。"
+    },
+    {
+      "id": "R1-004",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "title": "「2要素固定」制約は現時点では適切だが将来の拡張性に課題",
+      "description": "selected_agentsを常に2要素固定とする設計は現在のUI要件（2つのターミナルタブ表示）に適合しており、YAGNI原則に従って過剰な汎用化を避けている点は良い。ただし、[CLIToolType, CLIToolType]というタプル型はDBカラムのTEXT(JSON)との型表現に乖離があり、要素数の変更が発生した場合にバリデーション関数・型定義・UIの3箇所を同時に変更する必要がある。",
+      "suggestion": "現時点では2要素固定で問題ないが、要素数を定数化（例: SELECTED_AGENTS_COUNT = 2）しておくことで、将来の変更時の影響箇所を明確にできる。バリデーション関数内のlength !== 2を定数参照にするだけで十分。"
+    },
+    {
+      "id": "R1-005",
+      "severity": "should_fix",
+      "principle": "OCP",
+      "title": "vibe-local追加時のswitch文exhaustive guard導入が不完全",
+      "description": "設計方針書のセクション8-4では5箇所のswitch文にexhaustive guardを導入する計画がある。しかし、buildCliArgs()（claude-executor.ts L85-93）のパラメータ型はcliToolId: stringであり、CLIToolType型ではない。このままではTypeScriptのexhaustive checkが機能しない。また、detectThinking()のdefaultフォールバック（L152）でCLAUDE_THINKING_PATTERNを返す暗黙の動作は、新規ツール追加時にバグの温床になる。",
+      "suggestion": "buildCliArgs()のcliToolId引数をCLIToolType型に変更する。各switch文のdefaultケースにはconst _exhaustive: never = cliToolId; throw new Error(`Unsupported CLI tool: ${_exhaustive}`)パターンを適用し、コンパイル時に未対応ツールを検出できるようにする。"
+    },
+    {
+      "id": "R1-006",
+      "severity": "nice_to_have",
+      "principle": "SRP",
+      "title": "AgentSettingsPaneがAPI呼び出し（DB永続化）責務を直接持つ設計",
+      "description": "設計方針書のセクション7-2では、AgentSettingsPaneが変更時にPATCH APIを呼び出してDB永続化する設計となっている。propsにonSelectedAgentsChangeコールバックがあるにもかかわらず、コンポーネント自身がAPI通信を行うことは、UIレンダリングとデータ永続化の2つの責務を持つことになる。ただし、NotesAndLogsPaneの既存子コンポーネント（MemoPane等）も同様のパターンを採用しているため、プロジェクトの慣習としては一貫している。",
+      "suggestion": "現行のプロジェクト慣習に従う形で問題ないが、onSelectedAgentsChangeコールバックの役割を明確にすべき。API呼び出し成功後にonSelectedAgentsChangeを呼んで親の状態を更新する設計であれば、JSDocコメントでその契約を明記する。"
+    },
+    {
+      "id": "R1-007",
+      "severity": "should_fix",
+      "principle": "KISS",
+      "title": "cli_tool_idとselected_agentsの自動整合性ロジックが暗黙的で複雑",
+      "description": "設計方針書のセクション3で、cli_tool_idがselected_agentsに含まれない場合にcli_tool_idをselected_agents[0]に自動更新するトランザクション処理が計画されている。この暗黙の自動更新はユーザーの意図しないcli_tool_id変更を引き起こす可能性があり、デバッグが困難になる。特にPATCH APIでselectedAgentsのみを更新した場合に、副作用としてcli_tool_idが変わるのは驚き最小の原則に反する。",
+      "suggestion": "自動更新ではなく、バリデーション段階でcli_tool_idが新しいselected_agentsに含まれない場合は400エラーを返す方針を検討する。もしくは、APIレスポンスにcli_tool_idが自動更新された旨を明示的に含める（例: autoUpdatedCliToolId: trueフラグ）ことで、クライアント側で認知できるようにする。"
+    },
+    {
+      "id": "R1-008",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "title": "getCliToolDisplayName()のnull合体演算子フォールバックが型安全性を損なう",
+      "description": "getCliToolDisplayName()の実装でCLI_TOOL_DISPLAY_NAMES[id] ?? idとなっているが、引数の型がCLIToolTypeであればRecord<CLIToolType, string>の参照は常にundefinedにならないため、?? idフォールバックは到達不能コードとなる。これは型定義の信頼性への不信を示唆しており、将来的にCLI_TOOL_IDSとCLI_TOOL_DISPLAY_NAMESの同期が崩れた場合のみ発火する防御的コーディングである。",
+      "suggestion": "Record<CLIToolType, string>型であればnull合体演算子は不要。型安全性を信頼してCLI_TOOL_DISPLAY_NAMES[id]のみとするか、あるいはsatisfies Record<CLIToolType, string>を使ってコンパイル時にキーの網羅性を保証する方が、DRYかつ型安全な設計となる。"
+    },
+    {
+      "id": "R1-009",
+      "severity": "nice_to_have",
+      "principle": "Other",
+      "title": "実装順序のステップ4とステップ5の並列化可能性",
+      "description": "設計方針書のセクション12で、ステップ4（AgentSettingsPane + NotesAndLogsPane拡張）とステップ5（WorktreeDetailRefactored動的レンダリング）はともにステップ3（API拡張）に依存しているが、相互依存はない。これらは並列実装が可能であり、設計書でもその旨を明記すると開発効率が向上する。ステップ6（sidebar.ts型変更）もステップ4-5と独立して実施可能。",
+      "suggestion": "実装順序の表にステップ4, 5, 6が相互独立であり並列可能であることを備考として追記する。"
+    },
+    {
+      "id": "R1-010",
+      "severity": "should_fix",
+      "principle": "TypeSafety",
+      "title": "DBマイグレーションv18のCASE文がCLI_TOOL_IDSと同期していない",
+      "description": "セクション3のマイグレーションSQL内のCASE WHEN cli_tool_id NOT IN ('claude', 'codex')は、SQL文中のリテラル値であるためTypeScriptのCLI_TOOL_IDS定数と同期が保証されない。vibe-localやgeminiが既にcli_tool_idに設定されている既存データに対して、マイグレーション結果が意図通りかの検証が必要。例えば、cli_tool_id='gemini'の場合、json_array('gemini', 'claude')が生成されるが、これが適切なデフォルトかは要件次第。",
+      "suggestion": "マイグレーションSQLのCASE文のロジックを明確にドキュメント化する。特に、geminiが既にcli_tool_idに設定されている場合のselected_agentsデフォルト値（['gemini', 'claude']）が意図通りであることを明記する。また、マイグレーションテストで全CLIToolType値についてテストケースを用意すべき。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 5,
+  "nice_to_have_count": 4,
+  "overall_assessment": "設計方針書はSRP/DRY/KISS/YAGNI/OCPの各原則を意識した堅実な設計となっている。特に、CLI_TOOL_IDSハードコードの一元化（ステップ1）を前提作業として独立させた点、selected_agentsとcli_tool_idの役割分離、JSON文字列によるシンプルなDB設計は評価できる。一方で、models.ts/route.tsの型定義にハードコードが残存する設計はDRY原則に反しており、一元化リファクタリングの対象から漏れている。switch文のexhaustive guard導入に際してbuildCliArgs()の引数型がstringのままである点は、OCP適用の実効性を損なう。これらの指摘を反映すれば、ツール拡張に強い設計となる。"
+}

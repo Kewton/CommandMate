@@ -1,0 +1,104 @@
+{
+  "issue_number": 368,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-02-25",
+  "applied_findings": [
+    {
+      "finding_id": "F001",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "変更対象ファイルの網羅性不足を解消。CLI_TOOL_IDSハードコード箇所14箇所以上を全て列挙した「CLI_TOOL_IDS ハードコード統一」セクションを追加。リファクタリング方針（CLI_TOOL_IDSをsingle source of truthとして参照）を明記し、変更対象ファイル一覧の表にも「CLI_TOOL_IDS ハードコード統一」カテゴリとして全ファイルを記載。"
+    },
+    {
+      "finding_id": "F002",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "cli_tool_idとselected_agentsの設計方針セクションを新設。cli_tool_id（アクティブツール: セッション/スケジュール実行用）とselected_agents（表示ツール: ターミナルヘッダー用）の役割を表形式で明確化。整合性ルール（selected_agents変更時のcli_tool_id自動更新の推奨動作、既存APIの非変更）を記載。"
+    },
+    {
+      "finding_id": "F003",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "vibe-localの技術調査フェーズを追加。実行コマンド名、起動引数、プロンプト検出パターン、ステータス検出パターン、インストール検証、buildCliArgs()対応の6項目を調査項目として表形式で明記。仕様が想定と大きく異なる場合は別Issue分離の判断基準も記載。"
+    },
+    {
+      "finding_id": "F004",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "クラス名のtypoを修正。ViveLocalTool -> VibeLocalTool に全箇所（変更対象セクション、ファイル一覧等）で統一。"
+    },
+    {
+      "finding_id": "F005",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "ALLOWED_CLI_TOOLSの拡張方針セクションを新設。gemini（非インタラクティブ実行モード確認後に追加）、vibe-local（技術調査フェーズの結果に基づき判断）のツール別方針と、selected_agentsとの非連動（セキュリティホワイトリストとUI表示選択は独立管理）を明記。"
+    },
+    {
+      "finding_id": "F006",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "models.ts（sessionStatusByCli, lastMessagesByCliの型定義をRecord<CLIToolType, ...>に変更）とsidebar.ts（CLIToolType依存箇所の確認・更新）を変更対象ファイル一覧に追加。"
+    },
+    {
+      "finding_id": "F007",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "i18n翻訳ファイル（locales/en/schedule.json, locales/ja/schedule.json）を変更対象に追加。CMATEタブの「Agent」サブタブセクション内と、変更対象ファイル一覧のi18nカテゴリの両方に記載。"
+    },
+    {
+      "finding_id": "F008",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "受け入れ基準にテスト関連セクションを新設。AgentSettingsPaneのユニットテスト、DBマイグレーション（selected_agentsカラム追加）のテスト、選択数上限バリデーションテスト、既存テストのパス確認の4項目を追加。"
+    },
+    {
+      "finding_id": "F009",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "CLIToolManager（manager.ts）の変更対象説明を拡充。VibeLocalTool登録に加え、stopPollers対応が必要であることを明記。getAllToolsInfo()/getInstalledTools()が自動的にvibe-localを含むようになる点も注記。"
+    },
+    {
+      "finding_id": "F010",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "技術的考慮事項にSESSION_NAME_PATTERN（/^[a-zA-Z0-9_-]+$/）でハイフンが許容される確認結果を追記。セッション名mcbd-vibe-local-{worktreeId}が問題なく通過することを明記。"
+    },
+    {
+      "finding_id": "F011",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "CLI_TOOL_IDSの一元化リファクタリングを対応方針の「0. 前提作業」として組み込み。vibe-local追加前に実施する前提作業として位置づけ。"
+    },
+    {
+      "finding_id": "F012",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "DBマイグレーションのバージョン番号（18）をDB永続化セクションと技術的考慮事項の両方に明記。現在のCURRENT_SCHEMA_VERSION = 17であることも参考セクションに追加。"
+    }
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "summary": {
+    "total_findings": 12,
+    "applied": 12,
+    "skipped": 0,
+    "must_fix_applied": 3,
+    "should_fix_applied": 6,
+    "nice_to_have_applied": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/368"
+  },
+  "key_changes": [
+    "CLI_TOOL_IDSハードコード箇所（14箇所以上）の一元化リファクタリングを前提作業として追加",
+    "cli_tool_idとselected_agentsの設計方針（役割・整合性ルール）を新設",
+    "vibe-localの技術調査フェーズ（6項目の調査事項）を追加",
+    "クラス名typo修正（ViveLocalTool -> VibeLocalTool）",
+    "ALLOWED_CLI_TOOLSの拡張方針（ツール別方針・selected_agentsとの非連動）を明確化",
+    "変更対象ファイル一覧を網羅的に再構成（6カテゴリ、25ファイル以上）",
+    "受け入れ基準をテスト・コード品質を含む3カテゴリに拡充",
+    "レビュー履歴セクションを追加"
+  ]
+}

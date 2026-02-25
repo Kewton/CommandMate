@@ -1,0 +1,59 @@
+{
+  "issue_number": 368,
+  "iteration": 1,
+  "status": "success",
+  "implemented_files": [
+    "src/lib/selected-agents-validator.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/vibe-local.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/db.ts",
+    "src/lib/api-client.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/types/models.ts",
+    "src/types/sidebar.ts",
+    "src/components/sidebar/BranchListItem.tsx"
+  ],
+  "test_files": [
+    "tests/unit/selected-agents-validator.test.ts",
+    "tests/unit/cli-tools/display-name.test.ts",
+    "tests/unit/cli-tools/manager.test.ts",
+    "tests/unit/cli-tools/types-cli-tool-ids.test.ts",
+    "tests/unit/lib/db-migrations.test.ts",
+    "tests/unit/session-cleanup.test.ts"
+  ],
+  "test_results": {
+    "passed": 3982,
+    "failed": 0,
+    "skipped": 7,
+    "total": 3989,
+    "new_tests_added": 30
+  },
+  "static_analysis": {
+    "typescript_errors": 0,
+    "eslint_errors": 0
+  },
+  "typescript_errors": 0,
+  "lint_errors": 0,
+  "commits": [
+    "c10591f: feat(368): add agent settings core - validator, display names, DB migration, API, vibe-local"
+  ],
+  "summary": "TDD implementation complete for Issue #368 iteration 1. Implemented Priority 1-5 core logic: selected-agents-validator (parseSelectedAgents, validateSelectedAgentsInput, validateAgentsPair), getCliToolDisplayName, DB migration v18 (selected_agents column), API extensions (GET/PATCH with selectedAgents), vibe-local stub tool, CLI_TOOL_IDS hardcode removal, type updates (sessionStatusByCli, lastMessagesByCli, cliStatus to Partial<Record<CLIToolType,...>>). All 3982 tests pass with 30 new tests added. 0 TypeScript errors, 0 ESLint errors.",
+  "remaining_tasks": [
+    "Phase 0 Task 0.2: Remaining API route hardcode removal (send, current-output, interrupt, auto-yes, cli-tool, start-polling, messages routes)",
+    "Phase 0 Task 0.4: log-manager.ts display name unification, standard-commands.ts, LogViewer.tsx, MessageList.tsx, AutoYesToggle.tsx",
+    "Phase 0 Task 0.5: ALLOWED_CLI_TOOLS INTERACTIVE/NON_INTERACTIVE rename",
+    "Phase 3 Task 3.5: switch exhaustive guards (cli-patterns.ts, assistant-response-saver.ts, claude-executor.ts)",
+    "Phase 4 Task 4.1: AgentSettingsPane component",
+    "Phase 4 Task 4.2: NotesAndLogsPane Agent sub-tab",
+    "Phase 4 Task 4.3: WorktreeDetailRefactored dynamic rendering",
+    "Phase 4 Task 4.4: sidebar.ts toBranchItem() selectedAgents support",
+    "Phase 5 Task 5.5: API integration tests for selected_agents",
+    "Phase 6 Task 6.1: CLAUDE.md documentation update",
+    "R4-003: BaseCLITool.isInstalled() execFile migration",
+    "i18n: locales/en/schedule.json and locales/ja/schedule.json agent keys"
+  ],
+  "message": "TDD implementation for iteration 1 complete. All core backend logic implemented and tested. 30 new tests added, all 3982 tests pass. UI components (AgentSettingsPane, dynamic rendering) and remaining refactoring deferred to next iteration."
+}

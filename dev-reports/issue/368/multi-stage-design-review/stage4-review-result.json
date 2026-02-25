@@ -1,0 +1,103 @@
+{
+  "issue_number": 368,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_summary": "Issue #368の設計方針書に対してOWASP Top 10準拠のセキュリティレビューを実施した。全体として設計段階でセキュリティを意識した構造（CLI_TOOL_IDSホワイトリスト、validateSessionName()、ALLOWED_CLI_TOOLSの独立管理等）が取り入れられており、基本的なセキュリティ姿勢は良好である。ただし、SQL IN句の動的生成方法、PATCH APIのworktree IDフォーマット検証の欠如、BaseCLITool.isInstalled()のシェルインジェクションリスク、parseSelectedAgents()のconsole.warn経由のログインジェクション、selected_agents変更時のセキュリティ監査ログ不足の5点について指摘を行う。must_fixは2件、should_fixは4件、nice_to_haveは2件である。",
+  "findings": [
+    {
+      "id": "R4-001",
+      "severity": "must_fix",
+      "owasp_category": "A03",
+      "title": "getLastMessagesByCliBatch() SQL IN句の動的生成方法が未規定",
+      "description": "設計方針書セクション14にて、db.ts L143のSQL IN句 `AND cli_tool_id IN ('claude', 'codex', 'gemini')` を `CLI_TOOL_IDS` から動的生成する方針が記載されているが、具体的な生成方法が規定されていない。現在のworktreeIdsのプレースホルダー生成（L129: `worktreeIds.map(() => '?').join(',')`）と同様にパラメータバインドを使用すべきだが、CLI_TOOL_IDSをSQL文字列として直接連結する実装になるリスクがある。CLI_TOOL_IDSは現在ハードコード定数であり直接的なSQLインジェクションリスクは低いが、将来的にDBやAPIから動的に取得する変更があった場合にリスクが顕在化する。設計書の `IN句を除去して全cli_tool_idを取得する` 代替案を採用する場合はこの問題は解消されるが、どちらの方法を採用するかも未確定である。",
+      "suggestion": "設計方針書に以下の実装方針を明記すること。(1) CLI_TOOL_IDSからのIN句動的生成を採用する場合: `const placeholders = CLI_TOOL_IDS.map(() => '?').join(',')` のパラメータバインド方式を必須とし、文字列テンプレートリテラルでの直接埋め込みを禁止するコードコメントを記載する。(2) IN句除去方式を採用する場合: その旨を明記し、不要なcli_tool_idのレコードがレスポンスに含まれる影響評価を追記する。推奨は(2)のIN句除去方式で、パフォーマンス影響は無視できる（ツール数は高々4-5）。"
+    },
+    {
+      "id": "R4-002",
+      "severity": "must_fix",
+      "owasp_category": "A01",
+      "title": "PATCH /api/worktrees/:id のworktree IDフォーマット検証が欠如",
+      "description": "現在の `worktrees/[id]/route.ts` PATCH ハンドラではworktree IDのフォーマット検証（`isValidWorktreeId()`）が行われていない。auto-yes/route.ts（L91）やschedules/route.ts（L31, L69）では既に `isValidWorktreeId()` による入力検証が実装されているが、selected_agents更新を行うPATCHハンドラにはこの防御層がない。worktree IDは `getWorktreeById()` でパラメータバインドされたSQL文に渡されるため直接的なSQLインジェクションリスクは低いが、不正なフォーマットのIDが `validateSessionName()` を経由するセッション名生成（cli_tool_id自動更新後のisRunning()呼び出し）に到達する可能性がある。また、エラーレスポンスに `params.id` が直接含まれる箇所（L27: `Worktree '${params.id}' not found`）があり、APIレスポンスを信頼するクライアントでの反射型XSSリスク（間接的）がある。",
+      "suggestion": "PATCH ハンドラの冒頭に `isValidWorktreeId(params.id)` チェックを追加する。これは他のAPIルートで既に実装されているパターンとの一貫性を確保するものであり、Defense-in-Depth原則に基づく。エラーレスポンス内の `params.id` 直接埋め込みも、検証済みIDのみが使用されることを保証することで間接的に保護される。GET ハンドラにも同様の検証追加を推奨する。"
+    },
+    {
+      "id": "R4-003",
+      "severity": "should_fix",
+      "owasp_category": "A03",
+      "title": "BaseCLITool.isInstalled()のシェルインジェクションリスク（vibe-localのハイフン含むコマンド名）",
+      "description": "BaseCLITool.isInstalled() では `execAsync(`which ${this.command}`)` でシェルコマンドを実行している（base.ts L29）。現在のツール（claude, codex, gemini）は単純な英字のみだが、vibe-localのcommandプロパティが `'vibe-local'` の場合、ハイフンを含むコマンド名がシェルに渡される。ハイフン自体はシェルインジェクションに直結しないが、`exec()`（`execFile()`ではない）を使用しているためシェル解釈を経由する。将来のツール追加でスペースや特殊文字を含むcommand値が設定された場合、シェルインジェクションが可能になる。commandプロパティは現在ハードコード定数であるためリスクは低いが、Defense-in-Depth原則に反する。",
+      "suggestion": "BaseCLITool.isInstalled() を `execFile('which', [this.command])` に変更し、シェル解釈を回避する。あるいは `command` プロパティにバリデーション（英数字とハイフンのみ許可）を追加する。claude-executor.ts では既に `execFile` が使用されており、このパターンとの一貫性も向上する。"
+    },
+    {
+      "id": "R4-004",
+      "severity": "should_fix",
+      "owasp_category": "A05",
+      "title": "ALLOWED_CLI_TOOLS二重定義のセキュリティ境界が設計書内で不十分",
+      "description": "設計方針書セクション9およびR3-006にて、ALLOWED_CLI_TOOLSの二重定義について言及し、INTERACTIVE/NON_INTERACTIVEのリネーム方針が提案されている。しかし、vibe-localをこれらのホワイトリストに追加する際の判断基準（具体的なセキュリティチェック項目）が規定されていない。vibe-localが外部CLIツールとして実行される場合、以下のセキュリティ懸念がある: (1) vibe-localの `-p` フラグ相当（非インタラクティブモード）のサンドボックス設定が不明、(2) vibe-localが任意のコードを実行する能力の範囲が不明、(3) vibe-localのプロセスに渡される環境変数のサニタイズ対象が十分か不明。これらはOWASP A05（セキュリティの設定ミス）およびA06（脆弱なコンポーネント）に該当する。",
+      "suggestion": "設計方針書に「vibe-localのALLOWED_CLI_TOOLS追加チェックリスト」を追加し、以下の項目を満たすことを追加の前提条件とすること: (1) 非インタラクティブモードでのサンドボックス設定（ファイルシステムアクセス範囲、ネットワークアクセス制限）の確認、(2) env-sanitizer.tsのSENSITIVE_ENV_KEYSがvibe-localプロセスにも適用されることの確認、(3) vibe-localの出力サイズ制限（MAX_OUTPUT_SIZE相当）の確認。技術調査フェーズの完了条件としてこれらを明記する。"
+    },
+    {
+      "id": "R4-005",
+      "severity": "should_fix",
+      "owasp_category": "A09",
+      "title": "selected_agents変更操作のセキュリティ監査ログが未設計",
+      "description": "設計方針書ではcli_tool_id自動更新時の `console.info` ログ出力は記載されているが（セクション4 R1-007対応）、selected_agents変更操作自体のセキュリティ監査ログが設計されていない。selected_agentsの変更はアクティブツール（cli_tool_id）の自動変更を引き起こす可能性があり、これはセッション管理に影響する操作である。OWASP A09（セキュリティログとモニタリングの不足）の観点から、変更前後の値と要求元の記録が必要である。また、parseSelectedAgents()のフォールバック時のconsole.warnに生のDB値（`raw`パラメータ）が出力される設計（セクション5 R1-001対応）について、DBに不正データが挿入された場合のログインジェクション（改行文字やANSIエスケープシーケンスを含むJSON文字列）のリスクがある。",
+      "suggestion": "(1) PATCH APIでselected_agents更新時に、変更前後の値をログ出力する。形式例: `[SECURITY] selected_agents updated: worktreeId=${id}, before=${JSON.stringify(oldAgents)}, after=${JSON.stringify(newAgents)}`。(2) parseSelectedAgents()のconsole.warnに出力する `raw` 値について、stripAnsi()を適用し、改行文字を除去するサニタイズを追加する。例: `raw.replace(/[\\n\\r]/g, ' ').substring(0, 100)` で出力長も制限する。"
+    },
+    {
+      "id": "R4-006",
+      "severity": "should_fix",
+      "owasp_category": "A07",
+      "title": "AgentSettingsPaneでのツールID表示にgetCliToolDisplayName()を経由するが、Reactの自動エスケープへの依存が暗黙的",
+      "description": "設計方針書セクション7-2にて、AgentSettingsPaneは `getCliToolDisplayName()` で表示名を取得し、`CLI_TOOL_IDS` から全エージェント一覧を表示するとされている。Reactの JSX は自動的にXSSエスケープを行うため、通常のテキスト表示では問題ない。しかし、getCliToolDisplayName()のフォールバック値（`CLI_TOOL_DISPLAY_NAMES[id] ?? id`、セクション6）では、未知のIDがそのまま表示名として返却される。CLI_TOOL_IDSはas const定数であるため現時点でのリスクは極めて低いが、将来の拡張でDB由来のカスタムツールIDが導入された場合にXSSベクターとなり得る。また、`dangerouslySetInnerHTML` が使用されないことを設計レベルで保証する記述がない。",
+      "suggestion": "設計方針書のセキュリティ設計セクション（セクション9）に「UIコンポーネントでのXSS防御方針」として以下を追記すること: (1) AgentSettingsPane含む新規コンポーネントでは `dangerouslySetInnerHTML` を使用しない、(2) ツール表示名はReact JSXのテキストノードとして描画し、HTMLとして挿入しない。これはコードレビュー時のチェックポイントとしても機能する。"
+    },
+    {
+      "id": "R4-007",
+      "severity": "nice_to_have",
+      "owasp_category": "A01",
+      "title": "worktree IDのオーナーシップ検証の不在（マルチユーザーシナリオ）",
+      "description": "設計方針書ではworktree IDの存在確認（`getWorktreeById()` による404チェック）は行われるが、リクエスト元ユーザーがそのworktreeの「オーナー」であることの検証は行われない。CommandMateは現在シングルユーザー/ローカル利用が前提であり、認証が有効な場合もトークンベースの単一ユーザー認証であるため、現時点では問題にならない。しかし、将来的にマルチユーザー対応を行う場合、他ユーザーのworktreeのselected_agentsを変更できてしまう認可バイパスリスクがある。",
+      "suggestion": "現時点では対応不要だが、将来のマルチユーザー対応Issue作成時に、全worktree操作APIにオーナーシップ検証レイヤーを追加する設計を検討すること。この点をセクション13のトレードオフテーブルに「シングルユーザー前提による認可省略」として記録しておくことを推奨する。"
+    },
+    {
+      "id": "R4-008",
+      "severity": "nice_to_have",
+      "owasp_category": "A05",
+      "title": "DBマイグレーションv18のCASE文内リテラル値のセキュリティ影響",
+      "description": "マイグレーションv18のSQL（セクション3）では `cli_tool_id NOT IN ('claude', 'codex')` のようにリテラル値を使用している。設計書では既にR1-010としてCLI_TOOL_IDSとの非同期リスクが指摘・反映済みだが、セキュリティ観点からの補足として、マイグレーション済みDBに対して後からCLI_TOOL_IDSが変更された場合、DBに不正な（CLI_TOOL_IDSに含まれない）selected_agents値が残存する可能性がある。parseSelectedAgents()のフォールバック機構がこれを救済するが、DB内の不正データが累積する点は運用上の懸念である。",
+      "suggestion": "設計方針書のテスト設計セクション（セクション11）に、マイグレーション後のDB整合性チェック（selected_agentsの全値がCLI_TOOL_IDSに含まれることの検証）をアプリケーション起動時に実行するヘルスチェックとして追加することを検討する。優先度は低い。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "overall_assessment": "設計方針書はセキュリティの基本原則を適切に考慮しており、CLI_TOOL_IDSホワイトリストによるインジェクション防止、validateSessionName()によるコマンドインジェクション防止、ALLOWED_CLI_TOOLSの独立管理によるスケジュール実行の安全性確保といった多層防御が設計されている。must_fixの2件（SQL IN句の動的生成方法の明確化、PATCH APIのworktree IDフォーマット検証追加）は実装時に対処すべきセキュリティギャップであり、特にworktree IDフォーマット検証は既存の他ルートとの一貫性の問題でもある。should_fixの4件はDefense-in-Depth強化とログ監査強化であり、実装フェーズで対応することを推奨する。全体としてconditionally_approvedとし、must_fix 2件の設計反映をもって承認可能とする。",
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-368-agent-settings-design-policy.md",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/schedules/route.ts",
+    "src/lib/claude-executor.ts",
+    "src/lib/db.ts",
+    "src/lib/env-sanitizer.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/db-migrations.ts",
+    "src/middleware.ts"
+  ],
+  "status": "conditionally_approved",
+  "score": 4,
+  "timestamp": "2026-02-25T00:00:00Z"
+}

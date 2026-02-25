@@ -1,0 +1,133 @@
+{
+  "issue_number": 368,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-25",
+  "review_summary": "Stage 3の影響範囲指摘12件（must_fix: 3, should_fix: 6, nice_to_have: 3）の反映状況を検証した結果、全12件が適切に反映されていることを確認した。Stage 5で追加されたセクション（推奨実装順序、PATCHレスポンス方針、activeCliTabデフォルト値連動等）についても影響範囲の観点から検証し、新たにmust_fix: 0件、should_fix: 3件、nice_to_have: 2件の指摘を特定した。主要な発見は: (1) db.tsのgetLastMessagesByCliBatch()内SQLクエリにcli_tool_id IN ('claude', 'codex', 'gemini')がハードコードされており、vibe-localのメッセージが暗黙的に除外される、(2) api-client.tsの型定義が'claude' | 'codex' | 'gemini'にハードコードされておりCLIToolTypeを使用していない、(3) capitalizeFirst()とformatCliToolName()がvibe-localを'Vibe-local'と表示する問題、(4) LogViewer.tsxのcliToolFilterが'claude' | 'codex' | 'gemini'にハードコード。",
+  "findings": [
+    {
+      "id": "F701",
+      "severity": "should_fix",
+      "category": "影響ファイル",
+      "title": "db.tsのgetLastMessagesByCliBatch()内SQLクエリにcli_tool_id IN句がハードコードされている",
+      "description": "Issue本文ではF503としてgetLastMessagesByCliBatch()の戻り値型（{ claude?: string; codex?: string; gemini?: string }）の変更を変更対象に含めているが、同関数内のSQLクエリ（L143）に `AND cli_tool_id IN ('claude', 'codex', 'gemini')` というハードコードされたIN句が存在する。戻り値型をRecord<CLIToolType, string | undefined>に変更しても、このSQLクエリが更新されなければ、vibe-localのメッセージはクエリ結果から暗黙的に除外され、サイドバーのlastMessagesByCli表示にvibe-localの最新メッセージが反映されない。\n\nこのハードコードは、Issueの「CLI_TOOL_IDS ハードコード統一」テーブルに記載されているdb.tsの変更内容（「getLastMessagesByCliBatch()戻り値型をRecord<CLIToolType, string | undefined>に更新」）だけでは修正されない。SQL文自体の変更が必要である。",
+      "suggestion": "変更対象のdb.tsの説明を拡張し、以下の2点を明記する:\n1. 戻り値型の変更（既に記載済み）\n2. SQL IN句のハードコード解消: `AND cli_tool_id IN ('claude', 'codex', 'gemini')` をCLI_TOOL_IDSベースの動的プレースホルダに変更するか、IN句自体を除去する（cli_tool_id制約はアプリケーション層で十分担保されている）\n\n例:\n```typescript\nconst toolPlaceholders = CLI_TOOL_IDS.map(() => '?').join(',');\n// ...\nAND cli_tool_id IN (${toolPlaceholders})\n// パラメータに [...worktreeIds, ...CLI_TOOL_IDS] を渡す\n```"
+    },
+    {
+      "id": "F702",
+      "severity": "should_fix",
+      "category": "影響ファイル",
+      "title": "api-client.tsの型定義が'claude' | 'codex' | 'gemini'にハードコードされている（4箇所）",
+      "description": "src/lib/api-client.tsの以下4箇所でCLIToolTypeではなく'claude' | 'codex' | 'gemini'リテラル型がハードコードされている:\n\n1. L149: updateCliTool(id: string, cliToolId: 'claude' | 'codex' | 'gemini')\n2. L169: getMessages(id: string, cliTool?: 'claude' | 'codex' | 'gemini')\n3. L184: sendMessage(id: string, content: string, cliToolId?: 'claude' | 'codex' | 'gemini')\n4. L224: killSession(id: string, cliToolId?: 'claude' | 'codex' | 'gemini')\n\nこのファイルはIssueの変更対象ファイル一覧に含まれていない。api-client.tsはクライアントサイドからAPIを呼び出すユーティリティであり、CLIToolTypeをimportして使用すべきである。セクション0の「CLI_TOOL_IDS ハードコード統一」の対象として追加が必要。",
+      "suggestion": "変更対象ファイル一覧の「CLI_TOOL_IDS ハードコード統一（リファクタリング）」テーブルに以下を追加:\n| src/lib/api-client.ts | 4箇所の'claude' | 'codex' | 'gemini'リテラル型をCLIToolType参照に変更 |"
+    },
+    {
+      "id": "F703",
+      "severity": "should_fix",
+      "category": "影響ファイル",
+      "title": "capitalizeFirst()とformatCliToolName()がvibe-localを不正な表示名に変換する",
+      "description": "ツールIDの表示名変換に関して、IssueではMessageList.tsxのgetToolName()のみを対象として記載しているが、以下の2つの表示名変換関数も影響を受ける:\n\n1. WorktreeDetailRefactored.tsx L127 capitalizeFirst(): ターミナルヘッダーのタブ表示名（L1822, L2106）およびセッション終了確認ダイアログ（L1999, L2226）で使用。capitalizeFirst('vibe-local')は'Vibe-local'を返す。\n\n2. AutoYesToggle.tsx L42 formatCliToolName(): Auto-Yes有効時の表示（L131）およびAutoYesConfirmDialogのツール名表示（L153）で使用。formatCliToolName('vibe-local')は'Vibe-local'を返す。\n\nユーザーに表示されるツール名が'Vibe-local'（ハイフン後の小文字）になり、期待される'Vibe Local'と不一致になる。\n\ngetToolName()のswitch文はツールIDから明示的な表示名にマッピングするため、vibe-localケースを追加すれば解決するが、capitalizeFirst()やformatCliToolName()は汎用的な文字列変換関数であるため、ハイフン付きIDに対応できない。",
+      "suggestion": "以下の2つのアプローチから選択:\n\n方針A（推奨）: CLIToolType -> 表示名のマッピング関数を共通ユーティリティとして定義し、getToolName()、capitalizeFirst(tool)、formatCliToolName(name)の全てをこの共通関数に置換する:\n```typescript\n// src/lib/cli-tools/types.ts または新規ユーティリティ\nconst CLI_TOOL_DISPLAY_NAMES: Record<CLIToolType, string> = {\n  claude: 'Claude',\n  codex: 'Codex',\n  gemini: 'Gemini',\n  'vibe-local': 'Vibe Local',\n};\nexport function getCliToolDisplayName(id: CLIToolType): string {\n  return CLI_TOOL_DISPLAY_NAMES[id] ?? id;\n}\n```\n\n方針B: capitalizeFirst()をハイフン対応に拡張する（ただし汎用関数の責務が拡大するため推奨度は低い）\n\n変更対象ファイル一覧にWorktreeDetailRefactored.tsxのcapitalizeFirst()とAutoYesToggle.tsxのformatCliToolName()を明記する。"
+    },
+    {
+      "id": "F704",
+      "severity": "nice_to_have",
+      "category": "影響ファイル",
+      "title": "LogViewer.tsxのcliToolFilterが'claude' | 'codex' | 'gemini'にハードコードされている",
+      "description": "src/components/worktree/LogViewer.tsx L36でcliToolFilterのuseStateが以下のようにハードコードされている:\n```typescript\nconst [cliToolFilter, setCliToolFilter] = useState<'all' | 'claude' | 'codex' | 'gemini'>('all');\n```\n\nこれはログファイルのCLIツールフィルタであり、vibe-localのログファイルをフィルタリングできない。LogViewer.tsxはIssueの変更対象ファイル一覧に含まれていない。\n\nログファイルのフィルタリング（L63-72）はファイル名にcliToolFilterの文字列が含まれるかで判定しており、'vibe-local'がフィルタ選択肢に含まれれば機能するが、UI上のフィルタドロップダウンにvibe-localの選択肢が表示されない。",
+      "suggestion": "変更対象ファイル一覧に以下を追加（優先度低）:\n| src/components/worktree/LogViewer.tsx | cliToolFilter型を 'all' | CLIToolType に変更、フィルタドロップダウンにCLI_TOOL_IDSベースの選択肢を動的生成 |"
+    },
+    {
+      "id": "F705",
+      "severity": "nice_to_have",
+      "category": "影響ファイル",
+      "title": "standard-commands.tsのcliTools型アサーションが'claude' | 'codex' | 'gemini'にハードコード",
+      "description": "src/lib/standard-commands.ts L304でcliToolsフィルタリングに以下の型アサーションが使用されている:\n```typescript\ncmd.cliTools?.includes(toolId as 'claude' | 'codex' | 'gemini')\n```\n\nこの型アサーションはCLIToolTypeと同等であるが、明示的にCLIToolTypeを参照していない。vibe-localが追加されても型アサーションは'claude' | 'codex' | 'gemini'のままとなり、TypeScriptの型チェックでvibe-localが除外される可能性がある（実際にはincludes()のランタイム動作には影響しないが、型の一貫性が損なわれる）。\n\nこれはセクション0のリファクタリングで自然に解消されるべき箇所であるが、変更対象ファイル一覧には含まれていない。",
+      "suggestion": "変更対象ファイル一覧の「CLI_TOOL_IDS ハードコード統一」テーブルに以下を追記を検討:\n| src/lib/standard-commands.ts | L304の型アサーション 'claude' | 'codex' | 'gemini' をCLIToolTypeに変更 |\n\nまたは、セクション0のリファクタリング時にgrepで全ての 'claude' | 'codex' | 'gemini' リテラル型を洗い出す作業手順を追記する。"
+    }
+  ],
+  "previous_findings_verification": {
+    "stage3_findings": {
+      "F301_must_fix": {
+        "status": "resolved",
+        "verification": "「switch文のdefaultフォールバック対応（F301）」セクションが追加され、5箇所の具体的な変更内容が表形式で記載。exhaustive switchガードのコード例も掲載。変更対象ファイル一覧にも専用テーブルが追加されている。"
+      },
+      "F302_must_fix": {
+        "status": "resolved",
+        "verification": "「sidebar.ts 型変更方針（F302）」サブセクションが追加され、Partial<Record<CLIToolType, BranchStatus>>への変更方針が具体的に記載。toBranchItem()にselectedAgents引数を追加する設計変更、呼び出し元APIへの影響も明記。実際のsidebar.ts（L60-63）のcliStatus型定義確認済み。"
+      },
+      "F303_must_fix": {
+        "status": "resolved",
+        "verification": "「selected_agentsのJSONバリデーション（F303）」セクションにparseSelectedAgents()の実装例と6つのバリデーション観点が記載。PATCH API側バリデーションも明記。"
+      },
+      "F304_should_fix": {
+        "status": "resolved",
+        "verification": "「既存テスト更新（F304）」テーブルに4テストファイルが記載。CLI_TOOL_IDS.length参照推奨の注記も追加済み。"
+      },
+      "F305_should_fix": {
+        "status": "resolved",
+        "verification": "「selected_agents更新のAPI設計（F305）」サブセクションで既存PATCH APIへの統合、サーバーサイド整合性チェック、トランザクション処理、セッション非停止方針が明記。F501（PATCHレスポンス方針）とも整合。"
+      },
+      "F306_should_fix": {
+        "status": "resolved",
+        "verification": "「selected_agents変更時のセッション管理（F306）」サブセクションでUI表示のみの影響、既存セッション継続、ポーラー影響範囲が明記。"
+      },
+      "F307_should_fix": {
+        "status": "resolved",
+        "verification": "「vibe-local追加時の追加考慮事項（F307）」として4項目が追記。buildCliArgs()必須、execFile()のコマンド名問題、ScheduleEntry型制約の考慮事項が記載。"
+      },
+      "F308_should_fix": {
+        "status": "resolved",
+        "verification": "「ScheduleEntry.cliToolIdの型安全性（F308）」セクションで本Issueスコープ外として明示。将来リファクタリング候補として記載。"
+      },
+      "F309_should_fix": {
+        "status": "resolved",
+        "verification": "技術的考慮事項に「ハイフン付きキーのアクセス方法（F309）」が追記。ブラケット記法の必要性とイテレーションパターンの推奨が記載。"
+      },
+      "F310_nice_to_have": {
+        "status": "resolved",
+        "verification": "「DBマイグレーション時のデフォルト値（F310）」セクションにcli_tool_idに応じた動的デフォルト値のSQL例が掲載。"
+      },
+      "F311_nice_to_have": {
+        "status": "resolved",
+        "verification": "「ドキュメント（Issue完了後）」テーブルにCLAUDE.mdの更新が記載。"
+      },
+      "F312_nice_to_have": {
+        "status": "resolved",
+        "verification": "MessageList.tsx変更対象に「2箇所、DRY共通化検討」の注記が追加。"
+      }
+    }
+  },
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Issue #368は6回のレビューステージ（Stage 1-6）を経て非常に高品質なIssueに仕上がっている。Stage 3の影響範囲指摘12件は全て適切に反映されている。今回の最終影響範囲チェックで新たに5件（should_fix: 3件、nice_to_have: 2件）を特定した。最も重要な発見はF701（db.tsのSQL IN句ハードコード）とF702（api-client.tsの型ハードコード）であり、これらはセクション0のリファクタリング作業で自然に検出・修正される可能性が高いが、変更対象ファイル一覧に明記しておくことで実装漏れを防げる。F703（表示名変換関数の問題）は、CLIToolType -> 表示名の共通マッピング関数を導入する好機であり、getToolName()のDRY共通化（F312）とも連動する。セキュリティ上の懸念は前回のF303（JSONバリデーション）で適切に対処されており、新たなセキュリティリスクは特定されなかった。全体として、本Issueは実装着手可能な状態にあり、残存する指摘事項は実装時のコードレビューで十分にカバーできるレベルである。",
+  "code_references": [
+    {
+      "file": "src/lib/db.ts",
+      "relevance": "L143のSQL IN句にcli_tool_idが'claude', 'codex', 'gemini'にハードコード（F701）"
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "relevance": "L149, L169, L184, L224の4箇所で'claude' | 'codex' | 'gemini'リテラル型がハードコード（F702）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "L127 capitalizeFirst()がvibe-localを'Vibe-local'に変換する問題（F703）"
+    },
+    {
+      "file": "src/components/worktree/AutoYesToggle.tsx",
+      "relevance": "L42 formatCliToolName()がvibe-localを'Vibe-local'に変換する問題（F703）"
+    },
+    {
+      "file": "src/components/worktree/LogViewer.tsx",
+      "relevance": "L36 cliToolFilter型が'all' | 'claude' | 'codex' | 'gemini'にハードコード（F704）"
+    },
+    {
+      "file": "src/lib/standard-commands.ts",
+      "relevance": "L304 型アサーション 'claude' | 'codex' | 'gemini'がCLIToolTypeを参照していない（F705）"
+    }
+  ],
+  "doc_references": []
+}

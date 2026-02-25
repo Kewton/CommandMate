@@ -1,0 +1,40 @@
+{
+  "issue_number": 368,
+  "status": "success",
+  "refactored_files": [
+    "src/types/sidebar.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/types/models.ts",
+    "tests/unit/types/sidebar.test.ts"
+  ],
+  "improvements": [
+    "Replace hardcoded claude/codex in toBranchItem() with dynamic selectedAgents lookup - sidebar now respects user's agent selection",
+    "Remove non-null assertions (!) in PATCH route by extracting validatedAgents with type assertion - improved type safety",
+    "Update JSDoc comments to include vibe-local in CLI tool enumerations across 3 files - documentation consistency",
+    "Add 2 new sidebar tests for selectedAgents-based cliStatus behavior - improved test coverage"
+  ],
+  "test_results": {
+    "passed": 3984,
+    "failed": 0,
+    "total": 3984
+  },
+  "typescript_errors": 0,
+  "lint_errors": 0,
+  "quality_metrics": {
+    "before_tests": 3982,
+    "after_tests": 3984,
+    "new_tests_added": 2
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "6dc16ec: refactor(368): improve code quality and consistency"
+  ],
+  "summary": "Refactoring focused on 3 areas: (1) Fixed sidebar toBranchItem() to dynamically use worktree.selectedAgents instead of hardcoded claude/codex, ensuring sidebar status indicators respect the user's agent selection from Issue #368. (2) Eliminated non-null assertions in the PATCH API route by extracting a typed variable. (3) Updated JSDoc comments across 3 files to reflect the addition of vibe-local as a 4th CLI tool. Added 2 new unit tests to verify the selectedAgents-driven sidebar behavior. All 3984 tests pass, 0 TypeScript errors, 0 ESLint errors."
+}

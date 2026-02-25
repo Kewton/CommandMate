@@ -1,0 +1,45 @@
+{
+  "issue_number": 368,
+  "stage": 1,
+  "applied_findings": [
+    {
+      "finding_id": "R1-002",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "models.tsのsessionStatusByCli/lastMessagesByCli型をPartial<Record<CLIToolType, ...>>に変更する方針を「変更ファイル（リファクタリング）」セクションに追記。route.tsのGETハンドラ内ローカル型定義のCLIToolType参照化も明記。実装チェックリストに4項目追加。"
+    },
+    {
+      "finding_id": "R1-001",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "バリデーション設計セクションに「バリデーションロジック共通化方針」サブセクションを追加。validateAgentsPair()共通コア関数の設計とparseSelectedAgents()のconsole.warn警告ログ出力方針を記載。実装チェックリストに2項目追加。"
+    },
+    {
+      "finding_id": "R1-003",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "「変更ファイル（リファクタリング）」セクションにR1-003対応の注記を追加。route.ts内allCliToolsのCLI_TOOL_IDS参照化、auto-yes/route.tsのALLOWED_CLI_TOOLS定義とclaude-executor.tsの関係整理を明記。実装チェックリストに3項目追加。"
+    },
+    {
+      "finding_id": "R1-005",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "CLIツール設計セクション8-4のbuildCliArgs()行にR1-005対応として引数型をstringからCLIToolTypeに変更する方針を追記。実装チェックリストに2項目追加。"
+    },
+    {
+      "finding_id": "R1-007",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "API設計セクションに「cli_tool_id 自動更新の動作仕様（R1-007対応）」サブセクションを新設。cliToolIdAutoUpdatedフラグの追加方針、console.infoログ出力、クライアント側の対応方針を記載。実装チェックリストに1項目追加。"
+    },
+    {
+      "finding_id": "R1-010",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "データモデル設計セクションのマイグレーションSQLにR1-010注意事項コメントを追加。全CLIToolType値に対するマイグレーション結果の期待値テーブルを新設。実装チェックリストに2項目追加。"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 1レビューの全6件の指摘事項（must_fix: 1件、should_fix: 5件）を設計方針書に反映完了。R1-002（must_fix）はmodels.ts/route.tsの型定義をPartial<Record<CLIToolType, ...>>に変更する方針を変更ファイル一覧に追記。R1-001はバリデーション共通化方針とwarningログ出力設計を追加。R1-003はAPIルート内ローカル配列のCLI_TOOL_IDS参照化を明記。R1-005はbuildCliArgs()引数型変更方針を追記。R1-007はcli_tool_id自動更新の動作仕様を新セクションとして追加。R1-010はマイグレーションSQL注意事項と全CLIToolType値の期待値テーブルを追加。実装チェックリスト（セクション17）にMust Fix 4項目、Should Fix 10項目を追加。"
+}

@@ -1,0 +1,95 @@
+{
+  "issue_number": 368,
+  "stage": 4,
+  "stage_name": "指摘事項反映（影響範囲レビュー Stage 3）",
+  "apply_date": "2026-02-25",
+  "applied_findings": [
+    {
+      "finding_id": "F301",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "switch文のdefaultフォールバック問題（5箇所）を変更対象に追加。cli-patterns.ts（detectThinking/getCliToolPatterns）、assistant-response-saver.ts（cleanCliResponse）、claude-executor.ts（buildCliArgs）、MessageList.tsx（getToolName 2箇所）の変更対象テーブルを「switch文のdefaultフォールバック対応（F301）」セクションとして新設。exhaustive switchガードパターンの推奨コード例をリファクタリング方針に追記"
+    },
+    {
+      "finding_id": "F302",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "sidebar.tsのcliStatus型変更方針を具体化。「sidebar.ts 型変更方針（F302）」サブセクションを新設し、Partial<Record<CLIToolType, BranchStatus>>方式の採用、toBranchItem()へのselectedAgents引数追加、呼び出し元API（/api/worktrees/route.ts, /api/worktrees/[id]/route.ts）への影響、UI側の動的イテレーション表示を明記。変更対象ファイル一覧のsidebar.tsの変更内容も具体化"
+    },
+    {
+      "finding_id": "F303",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "selected_agentsのJSONバリデーション戦略を追加。「selected_agents のJSONバリデーション（F303）」サブセクションを新設し、parseSelectedAgents()関数の実装例を含む6つのバリデーション観点（不正JSON防止、型チェック、CLIToolType検証、配列長チェック、重複チェック、PATCH API側バリデーション）を記載。受け入れ基準にもJSONバリデーション関連の項目2件を追加"
+    },
+    {
+      "finding_id": "F304",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "既存テスト破損リスクへの対応として、変更対象ファイル一覧に「既存テスト更新（F304）」カテゴリを新設。types-cli-tool-ids.test.ts, types.test.ts, manager.test.ts, session-cleanup.test.tsの4ファイルを具体的な変更内容（固定値アサーション更新）とともに追加。CLI_TOOL_IDS.length参照へのリファクタリング推奨を注記。受け入れ基準のテストセクションにも固定値アサーション更新の項目を追加"
+    },
+    {
+      "finding_id": "F305",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "selected_agents更新のAPI設計を明確化。「selected_agents 更新のAPI設計（F305）」サブセクションを新設し、既存PATCH APIへの統合（新規API不要）、サーバーサイド整合性チェック、同一トランザクション処理によるrace condition防止、セッション非停止方針を明記"
+    },
+    {
+      "finding_id": "F306",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "selected_agents変更時のセッション管理挙動を定義。「selected_agents 変更時のセッション管理（F306）」サブセクションを新設し、UI表示のみの影響範囲、既存tmuxセッションの継続動作、Auto-Yesポーラー/response-pollerへの非影響、cli_tool_id自動更新時の注意点を明記。受け入れ基準にもセッション副作用の項目を追加"
+    },
+    {
+      "finding_id": "F307",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "ALLOWED_CLI_TOOLSのvibe-local対応における追加考慮事項を追記。buildCliArgs()専用case分岐の必須性、非インタラクティブモード不在時の対応、execFile()のコマンド名問題（PATH上の存在要件）、ScheduleEntry.cliToolIdの型制約不足の4点を「vibe-local追加時の追加考慮事項（F307）」として記載"
+    },
+    {
+      "finding_id": "F308",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "ScheduleEntry.cliToolIdの型安全性について明示的なスコープ判断を記載。「ScheduleEntry.cliToolId の型安全性（F308）」サブセクションを新設し、本Issueスコープではランタイムバリデーションで十分とする判断と、将来的なリファクタリング候補（型厳格化対象4件）を明記"
+    },
+    {
+      "finding_id": "F309",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "ハイフン付きキーのアクセス方法を技術的考慮事項に追記。ドット記法不可・ブラケット記法必須の説明、Record<CLIToolType, ...>での変数アクセスパターン、for...of CLI_TOOL_IDSイテレーションによる自動回避を記載。APIレスポンス形式変更の影響（sessionStatusByCli, lastMessagesByCli）も追記"
+    },
+    {
+      "finding_id": "F310",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "DBマイグレーション時のデフォルト値にcli_tool_id連動ロジックを追加。「DBマイグレーション時のデフォルト値（F310）」サブセクションを新設し、cli_tool_idがclaude/codex以外の場合にselected_agentsの初期値を動的設定するSQL例（CASE文）を記載"
+    },
+    {
+      "finding_id": "F311",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "変更対象ファイル一覧に「ドキュメント（Issue完了後）」カテゴリを追加。CLAUDE.mdの主要機能モジュール表へのvibe-local.ts、AgentSettingsPane.tsx追加を記載"
+    },
+    {
+      "finding_id": "F312",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "MessageList.tsxのgetToolName()のDRY共通化検討を変更対象の注記として追記。F301のswitch文対応セクション内に「2箇所に重複定義されている。DRY原則の観点からユーティリティ関数としての共通化を検討する」旨を記載"
+    }
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "summary": {
+    "total_findings": 12,
+    "applied": 12,
+    "skipped": 0,
+    "must_fix_applied": 3,
+    "should_fix_applied": 6,
+    "nice_to_have_applied": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/368"
+  },
+  "changes_summary": "Stage 3（影響範囲）レビューの全12件の指摘事項をIssue #368に反映完了。主な変更点: (1) switch文のdefaultフォールバック問題5箇所を変更対象に追加し、exhaustive switchガードの推奨パターンを記載（F301）、(2) sidebar.tsのcliStatus型をPartial<Record<CLIToolType, BranchStatus>>に変更する方針を具体化（F302）、(3) selected_agentsのJSONバリデーション関数の実装例と6つの検証観点を追加（F303）、(4) 既存テスト4ファイルを変更対象に追加（F304）、(5) selected_agents更新のAPI設計・セッション管理挙動・ALLOWED_CLI_TOOLS考慮事項を詳細化（F305-F309）、(6) DBマイグレーションのcli_tool_id連動デフォルト値・ドキュメント更新・DRY共通化を追記（F310-F312）。受け入れ基準にもJSONバリデーション・セッション副作用・テスト固定値更新の項目を追加。"
+}

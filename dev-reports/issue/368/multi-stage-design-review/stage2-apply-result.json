@@ -1,0 +1,51 @@
+{
+  "issue_number": 368,
+  "stage": 2,
+  "applied_findings": [
+    {
+      "finding_id": "R2-001",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "PATCH APIのvalidCliToolsをCLI_TOOL_IDS参照に変更する方針を追記。セクション4にcliToolIdバリデーション更新の具体的なコード変更例を追加。セクション9にvalidCliToolsとALLOWED_CLI_TOOLSの役割区別テーブルと方針を追加。セクション14の変更ファイル一覧にroute.tsのvalidCliTools変更を明記。セクション19に実装チェックリスト項目を追加。"
+    },
+    {
+      "finding_id": "R2-002",
+      "severity": "must_fix",
+      "applied": true,
+      "description": "セクション14の変更ファイル一覧にて、src/lib/db.tsの変更内容にgetLastMessagesByCliBatch()返値型をPartial<Record<CLIToolType, string>>に変更する旨を明示的に追加。セクション19にrow.cli_tool_idキャストの安全性テスト項目を含む実装チェックリストを追加。"
+    },
+    {
+      "finding_id": "R2-003",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション6のgetCliToolDisplayName()統一対象にlog-manager.ts L91/L101/L137の3箇所を追加。セクション14の変更ファイル一覧にsrc/lib/log-manager.tsのハードコード除去の具体的な対象（表示名三項演算子5箇所、リテラル配列2箇所）を明記。セクション19に実装チェックリスト項目を追加。"
+    },
+    {
+      "finding_id": "R2-004",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション6にtool.name（CLIToolInfo.name、正式名称）とgetCliToolDisplayName()（UI表示用短縮名）の使い分け方針を新規サブセクションとして追加。具体例テーブル（Claude/Vibe Local）と利用ガイドラインを記載。"
+    },
+    {
+      "finding_id": "R2-005",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション3にWorktreeインターフェース拡張方針サブセクションを新設。Worktree型にselectedAgentsオプショナルフィールドを直接追加する方針を明記。db.tsのgetWorktreeById()/getWorktrees()でのparseSelectedAgents()変換処理の追加方針を記載。セクション14のmodels.ts変更内容にselectedAgentsフィールド追加を明記。セクション19に実装チェックリスト項目を追加。"
+    },
+    {
+      "finding_id": "R2-006",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション2のアーキテクチャ図（mermaidグラフ）にVAL（ビジネスロジック層）からCLI（CLIツール層）への型定義参照の依存関係矢印を追加。図の直後にR2-006注記として、既存パターン（db.ts/claude-executor.ts等）との一貫性と型定義のみの参照である旨を説明。"
+    },
+    {
+      "finding_id": "R2-007",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション11の既存テスト影響テーブルを全面改訂。models.test.tsとsidebar.test.tsに「新規作成」（現時点では存在しない）を明記。存在する統合テストファイル（file-upload.test.ts、memos.test.ts）を正確なファイルパスで列挙。worktrees API統合テストが存在しないことのR2-007注記を追加。備考カラムを追加して既存/新規の区別を明確化。セクション19にテストファイル新規作成・更新の実装チェックリスト項目を追加。"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 2整合性レビューの全7件（Must Fix 2件、Should Fix 5件）を設計方針書に反映完了。Must Fix: R2-001（PATCH APIのvalidCliToolsバリデーション更新方針とvalidCliTools/ALLOWED_CLI_TOOLSの役割区別）、R2-002（db.ts getLastMessagesByCliBatch()返値型変更の明示）。Should Fix: R2-003（log-manager.ts表示名ハードコード5箇所の統一対象追加）、R2-004（tool.name vs getCliToolDisplayName()の使い分け方針定義）、R2-005（WorktreeインターフェースへのselectedAgentsフィールド追加方針とdb.ts変換処理の明記）、R2-006（アーキテクチャ図への依存関係矢印追加）、R2-007（既存テスト影響テーブルの正確なファイルパス記載と新規作成明記）。Nice to Have 3件（R2-008/R2-009/R2-010）は今後の検討事項として記録。セクション15レビュー履歴にStage 2を追記、セクション18にStage 2指摘事項サマリー、セクション19にStage 2実装チェックリストを新設。"
+}
