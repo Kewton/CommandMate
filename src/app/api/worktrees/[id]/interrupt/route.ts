@@ -10,7 +10,7 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { createLogger, generateRequestId } from '@/lib/logger';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 
 const logger = createLogger('interrupt');
 
@@ -58,9 +58,10 @@ export async function POST(
     const interrupted: InterruptResult[] = [];
 
     // 3. 指定されたCLIツールまたは全CLIツールに中断を送信
-    const targetToolIds: CLIToolType[] = body.cliToolId
+    // Issue #368: Use CLI_TOOL_IDS instead of hardcoded array (DRY)
+    const targetToolIds: readonly CLIToolType[] = body.cliToolId
       ? [body.cliToolId]
-      : ['claude', 'codex', 'gemini'];
+      : CLI_TOOL_IDS;
 
     for (const cliToolId of targetToolIds) {
       const cliTool = manager.getTool(cliToolId);

@@ -1,5 +1,6 @@
 {
   "confirmationFromClaude": "Claudeからの確認",
+  "confirmationFrom": "{toolName}からの確認",
   "sending": "送信中...",
   "failedToRespond": "応答の送信に失敗しました。もう一度お試しください。",
   "default": "デフォルト",

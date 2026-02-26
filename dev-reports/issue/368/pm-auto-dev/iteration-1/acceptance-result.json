@@ -1,0 +1,146 @@
+{
+  "issue_number": 368,
+  "overall_status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "src/lib/selected-agents-validator.ts exists with parseSelectedAgents, validateSelectedAgentsInput, validateAgentsPair implemented",
+      "status": "passed",
+      "evidence": "File exists at src/lib/selected-agents-validator.ts. Exports: parseSelectedAgents() (line 71, fallback to DEFAULT_SELECTED_AGENTS on invalid input with console.warn), validateSelectedAgentsInput() (line 98, returns structured error for API), validateAgentsPair() (line 44, core 2-element validation with CLI_TOOL_IDS check and duplicate rejection), DEFAULT_SELECTED_AGENTS (line 35, ['claude','codex']). Also includes sanitizeRawForLog() for R4-005 log sanitization."
+    },
+    {
+      "criterion": "CLI_TOOL_IDS contains 'vibe-local'",
+      "status": "passed",
+      "evidence": "src/lib/cli-tools/types.ts line 10: export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local'] as const;"
+    },
+    {
+      "criterion": "getCliToolDisplayName is implemented in src/lib/cli-tools/types.ts",
+      "status": "passed",
+      "evidence": "src/lib/cli-tools/types.ts lines 85-101: CLI_TOOL_DISPLAY_NAMES Record mapping and getCliToolDisplayName() function. vibe-local maps to 'Vibe Local'."
+    },
+    {
+      "criterion": "DB migration v18 (add-selected-agents-column) exists",
+      "status": "passed",
+      "evidence": "src/lib/db-migrations.ts lines 897-931: CURRENT_SCHEMA_VERSION=18, migration version 18 'add-selected-agents-column' adds selected_agents TEXT column and initializes based on cli_tool_id (claude/codex -> [\"claude\",\"codex\"], others -> [cli_tool_id, \"claude\"])."
+    },
+    {
+      "criterion": "GET /api/worktrees/:id returns selectedAgents",
+      "status": "passed",
+      "evidence": "src/app/api/worktrees/[id]/route.ts line 108-118: GET handler returns worktree data with selectedAgents already included from getWorktreeById() which calls parseSelectedAgents() on the DB row's selected_agents field (src/lib/db.ts lines 260, 358)."
+    },
+    {
+      "criterion": "PATCH /api/worktrees/:id supports selectedAgents update with validation",
+      "status": "passed",
+      "evidence": "src/app/api/worktrees/[id]/route.ts lines 194-217: PATCH handler validates selectedAgents via validateSelectedAgentsInput(), returns 400 with INVALID_SELECTED_AGENTS code on failure, calls updateSelectedAgents() on success, and auto-updates cli_tool_id to selectedAgents[0] if current cli_tool_id is not in new selectedAgents (R1-007 consistency check)."
+    },
+    {
+      "criterion": "sessionStatusByCli uses Partial<Record<CLIToolType,...>>",
+      "status": "passed",
+      "evidence": "src/types/models.ts line 69: sessionStatusByCli?: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>>;"
+    },
+    {
+      "criterion": "Worktree type includes selectedAgents field",
+      "status": "passed",
+      "evidence": "src/types/models.ts lines 78-79: selectedAgents?: [CLIToolType, CLIToolType]; with JSDoc comment referencing Issue #368."
+    },
+    {
+      "criterion": "vibe-local tool implementation exists with tmux session management",
+      "status": "passed",
+      "evidence": "src/lib/cli-tools/vibe-local.ts: VibeLocalTool class extends BaseCLITool, implements isRunning/startSession/sendMessage/killSession using tmux primitives (hasSession, createSession, sendKeys, killSession). Registered in manager.ts line 31."
+    },
+    {
+      "criterion": "Test file tests/unit/selected-agents-validator.test.ts exists",
+      "status": "passed",
+      "evidence": "File exists with 3 describe blocks (validateAgentsPair, parseSelectedAgents, validateSelectedAgentsInput) covering valid pairs, invalid lengths, unknown IDs, duplicates, null/empty/JSON parse errors, ANSI sanitization in logs, and vibe-local combinations."
+    },
+    {
+      "criterion": "Test file tests/unit/cli-tools/display-name.test.ts exists",
+      "status": "passed",
+      "evidence": "File exists with 2 describe blocks (CLI_TOOL_DISPLAY_NAMES, getCliToolDisplayName) verifying all tool IDs have entries, correct display names including vibe-local -> 'Vibe Local', and non-empty strings for all IDs."
+    },
+    {
+      "criterion": "Default selected agents is ['claude', 'codex'] (backward compatibility)",
+      "status": "passed",
+      "evidence": "src/lib/selected-agents-validator.ts line 35: DEFAULT_SELECTED_AGENTS = ['claude', 'codex']. parseSelectedAgents returns this for null, empty, or invalid input."
+    }
+  ],
+  "test_execution": {
+    "unit_tests": {
+      "passed": 3982,
+      "failed": 0,
+      "skipped": 7,
+      "total": 3989,
+      "test_files": 193
+    },
+    "typescript_errors": 0,
+    "lint_errors": 0
+  },
+  "test_scenarios": [
+    {
+      "scenario": "parseSelectedAgents() parses valid JSON",
+      "result": "passed",
+      "evidence": "Test in selected-agents-validator.test.ts: parseSelectedAgents('\"claude\",\"codex\"') returns ['claude','codex']"
+    },
+    {
+      "scenario": "parseSelectedAgents() falls back to default on invalid input",
+      "result": "passed",
+      "evidence": "Tests verify fallback for null, empty string, invalid JSON, non-array, wrong length, invalid IDs, and duplicates"
+    },
+    {
+      "scenario": "validateSelectedAgentsInput() rejects 3+ elements",
+      "result": "passed",
+      "evidence": "validateAgentsPair tests verify arrays with length != 2 return {valid: false, error: 'Must be 2 elements'}"
+    },
+    {
+      "scenario": "validateSelectedAgentsInput() rejects duplicates",
+      "result": "passed",
+      "evidence": "Test: validateSelectedAgentsInput(['codex','codex']) returns {valid: false, error: 'Duplicate...'}"
+    },
+    {
+      "scenario": "getCliToolDisplayName() returns 'Vibe Local' for vibe-local",
+      "result": "passed",
+      "evidence": "Test in display-name.test.ts: getCliToolDisplayName('vibe-local') === 'Vibe Local'"
+    },
+    {
+      "scenario": "DB migration v18 adds selected_agents column",
+      "result": "passed",
+      "evidence": "Migration 18 runs ALTER TABLE worktrees ADD COLUMN selected_agents TEXT; confirmed in test output: 'Applying migration 18: add-selected-agents-column...Migration 18 applied successfully'"
+    },
+    {
+      "scenario": "DB migration v18 initializes claude worktrees to ['claude','codex']",
+      "result": "passed",
+      "evidence": "Migration SQL: WHEN cli_tool_id NOT IN ('claude','codex') THEN json_array(cli_tool_id,'claude') ELSE '[\"claude\",\"codex\"]' - claude/codex cli_tool_id gets default ['claude','codex']"
+    },
+    {
+      "scenario": "DB migration v18 initializes gemini worktrees to ['gemini','claude']",
+      "result": "passed",
+      "evidence": "Migration SQL: WHEN cli_tool_id NOT IN ('claude','codex') THEN json_array(cli_tool_id,'claude') - gemini cli_tool_id gets ['gemini','claude']"
+    },
+    {
+      "scenario": "GET /api/worktrees/:id returns selectedAgents",
+      "result": "passed",
+      "evidence": "getWorktreeById calls parseSelectedAgents() on DB row; GET handler spreads worktree data including selectedAgents"
+    },
+    {
+      "scenario": "PATCH /api/worktrees/:id updates selectedAgents",
+      "result": "passed",
+      "evidence": "PATCH handler validates via validateSelectedAgentsInput(), calls updateSelectedAgents() on valid input"
+    },
+    {
+      "scenario": "PATCH auto-updates cli_tool_id when outside selectedAgents",
+      "result": "passed",
+      "evidence": "Route.ts lines 206-216: R1-007 consistency check - if cli_tool_id not in new selectedAgents, auto-updates to selectedAgents[0]"
+    },
+    {
+      "scenario": "CLI_TOOL_IDS contains 'vibe-local'",
+      "result": "passed",
+      "evidence": "types.ts line 10: CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local']"
+    },
+    {
+      "scenario": "All existing tests pass (no type regression)",
+      "result": "passed",
+      "evidence": "193 test files, 3982 tests passed, 0 failed, 7 skipped. TypeScript: 0 errors. ESLint: 0 warnings/errors."
+    }
+  ],
+  "summary": "All 13 acceptance criteria and 13 test scenarios passed. Issue #368 implementation is complete: selected-agents-validator.ts provides robust parsing/validation, CLI_TOOL_IDS includes vibe-local with display name support, DB migration v18 correctly adds and initializes selected_agents column, API route handles GET/PATCH with validation and cli_tool_id consistency, sessionStatusByCli uses Partial<Record<CLIToolType,...>>, and vibe-local has a full tmux session management implementation. All 3982 unit tests pass with 0 TypeScript and 0 ESLint errors.",
+  "recommendations": []
+}

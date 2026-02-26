@@ -411,8 +411,9 @@ export async function ensureSession(
 
 /**
  * Special key type for tmux send-keys
+ * C-m is equivalent to Enter in tmux
  */
-export type SpecialKey = 'Escape' | 'C-c' | 'C-d';
+export type SpecialKey = 'Escape' | 'C-c' | 'C-d' | 'C-m' | 'Enter';
 
 /**
  * Send a special key to a tmux session

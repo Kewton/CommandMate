@@ -1,0 +1,68 @@
+{
+  "issue_number": 368,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-25",
+  "applied_findings": [
+    {
+      "finding_id": "F701",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "db.tsのgetLastMessagesByCliBatch() L143のSQL IN句ハードコードをハードコード箇所一覧に追加。リファクタリング方針にCLI_TOOL_IDSベースの動的プレースホルダへの変更方針とコード例を追記。変更対象ファイル一覧のdb.tsエントリにSQL IN句の解消を追記。受け入れ基準にSQL IN句の解消を追記。"
+    },
+    {
+      "finding_id": "F702",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "api-client.ts（L149, L169, L184, L224の4箇所）をハードコード箇所一覧に追加。CLI_TOOL_IDSハードコード統一テーブルにapi-client.tsのエントリを追加。リファクタリング方針にCLIToolType参照への変更を追記。受け入れ基準のコード品質セクションにapi-client.tsの対応項目を追加。"
+    },
+    {
+      "finding_id": "F703",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "セクション0に「CLIToolType -> 表示名の共通マッピング関数（F703）」サブセクションを新設。CLI_TOOL_DISPLAY_NAMESマッピングとgetCliToolDisplayName()関数のコード例を掲載。MessageList.tsx、WorktreeDetailRefactored.tsx（capitalizeFirst）、AutoYesToggle.tsx（formatCliToolName）の統一箇所を明記。変更対象ファイル一覧に「表示名変換の共通化（F703）」カテゴリを新設し4ファイルを列挙。受け入れ基準のコード品質セクションにgetCliToolDisplayName()導入の項目を追加。F312のDRY共通化注記にF703への参照を追記。"
+    },
+    {
+      "finding_id": "F704",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "LogViewer.tsx L36のcliToolFilterハードコードをハードコード箇所一覧に追加。CLI_TOOL_IDSハードコード統一テーブルにLogViewer.tsxのエントリを追加（cliToolFilter型を'all' | CLIToolTypeに変更、フィルタドロップダウンにCLI_TOOL_IDSベースの選択肢を動的生成）。"
+    },
+    {
+      "finding_id": "F705",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "standard-commands.ts L304の型アサーションハードコードをハードコード箇所一覧に追加。CLI_TOOL_IDSハードコード統一テーブルにstandard-commands.tsのエントリを追加（型アサーションをCLIToolTypeに変更）。"
+    }
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/368"
+  },
+  "summary": "Stage 7の影響範囲レビュー（2回目）で指摘された5件（should_fix: 3件、nice_to_have: 2件）を全てIssue #368に反映した。主な変更点: (1) F701: db.tsのSQL IN句ハードコードをハードコード箇所一覧とリファクタリング方針に追加し、CLI_TOOL_IDSベースの動的プレースホルダへの変更コード例を掲載。(2) F702: api-client.tsの4箇所のリテラル型ハードコードを変更対象ファイル一覧に追加。(3) F703: capitalizeFirst()/formatCliToolName()の表示名問題に対し、getCliToolDisplayName()共通マッピング関数の導入方針をセクション0に追記。変更対象ファイル一覧に「表示名変換の共通化」カテゴリを新設。受け入れ基準にも反映。(4) F704: LogViewer.tsxのcliToolFilterハードコードを統一テーブルに追加。(5) F705: standard-commands.tsの型アサーションを統一テーブルに追加。レビュー履歴にStage 7の全5件を記録。",
+  "changes_summary": {
+    "note_header": "Stage 7（影響範囲レビュー2回目）に更新",
+    "section0_additions": [
+      "ハードコード箇所一覧に4箇所追加（db.ts L143、api-client.ts 4箇所、standard-commands.ts L304、LogViewer.tsx L36）",
+      "リファクタリング方針にdb.ts SQL IN句の動的プレースホルダ変更方針を追記",
+      "リファクタリング方針にapi-client.tsのCLIToolType参照への変更を追記",
+      "「CLIToolType -> 表示名の共通マッピング関数（F703）」サブセクション新設"
+    ],
+    "section1_additions": [
+      "F312注記にF703（getCliToolDisplayName()）への統一推奨を追記"
+    ],
+    "change_target_additions": [
+      "CLI_TOOL_IDSハードコード統一テーブルにapi-client.ts、standard-commands.ts、LogViewer.tsxの3ファイル追加",
+      "db.tsエントリにSQL IN句の解消を追記",
+      "「表示名変換の共通化（F703）」カテゴリ新設（4ファイル）"
+    ],
+    "acceptance_criteria_additions": [
+      "db.tsのSQL IN句解消をF503の受け入れ基準に統合（F701）",
+      "api-client.tsのリテラル型変更を受け入れ基準に追加（F702）",
+      "getCliToolDisplayName()導入と表示名統一を受け入れ基準に追加（F703）"
+    ],
+    "review_history": "Stage 7の5件（F701-F705）をレビュー履歴に追記"
+  }
+}

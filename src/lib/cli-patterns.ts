@@ -125,9 +125,32 @@ export const PASTED_TEXT_DETECT_DELAY = 500;
 export const MAX_PASTED_TEXT_RETRIES = 3;
 
 /**
- * Gemini shell prompt pattern
+ * Gemini interactive REPL prompt pattern
+ * Gemini CLI shows a `>` or `❯` prompt when waiting for user input in interactive mode.
+ * Also matches shell prompts as fallback for session initialization phase.
  */
-export const GEMINI_PROMPT_PATTERN = /^(%|\$|.*@.*[%$#])\s*$/m;
+export const GEMINI_PROMPT_PATTERN = /^[>❯]\s*$/m;
+
+/**
+ * Gemini thinking/processing pattern
+ * Gemini CLI shows braille spinner characters and status text while processing.
+ */
+export const GEMINI_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking\.\.\./;
+
+/**
+ * Vibe Local prompt pattern
+ * vibe-local (vibe-coder) shows `ctx:N% ❯` prompt when waiting for user input.
+ * The prompt line includes a context usage percentage prefix.
+ * Examples: "ctx:9% ❯", "ctx:30% ❯", "ctx:9% ❯ /model"
+ */
+export const VIBE_LOCAL_PROMPT_PATTERN = /ctx:\d+%\s*[>❯]/m;
+
+/**
+ * Vibe Local thinking/processing pattern
+ * vibe-local shows spinner characters and status text while processing.
+ * Matches braille spinners, "Thinking", and tool execution indicators.
+ */
+export const VIBE_LOCAL_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|Running|Executing/;
 
 /**
  * Detect if CLI tool is showing "thinking" indicator
@@ -145,8 +168,10 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
       result = CODEX_THINKING_PATTERN.test(content);
       break;
     case 'gemini':
-      // Gemini doesn't have a thinking indicator in one-shot mode
-      result = false;
+      result = GEMINI_THINKING_PATTERN.test(content);
+      break;
+    case 'vibe-local':
+      result = VIBE_LOCAL_THINKING_PATTERN.test(content);
       break;
     default:
       result = CLAUDE_THINKING_PATTERN.test(content);
@@ -209,12 +234,37 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
     case 'gemini':
       return {
         promptPattern: GEMINI_PROMPT_PATTERN,
-        separatorPattern: /^gemini\s+--\s+/m,
-        thinkingPattern: /(?!)/m, // Never matches - one-shot execution
+        separatorPattern: /^[─━]{3,}$/m,
+        thinkingPattern: GEMINI_THINKING_PATTERN,
         skipPatterns: [
-          /^gemini\s+--\s+/, // Command line itself
-          GEMINI_PROMPT_PATTERN, // Shell prompt lines
+          /^[>❯]\s*$/, // Prompt line
+          GEMINI_THINKING_PATTERN, // Thinking indicators
           /^\s*$/, // Empty lines
+          /Gemini\s+\d+\.\d+/, // Version line
+          PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
+        ],
+      };
+
+    case 'vibe-local':
+      return {
+        promptPattern: VIBE_LOCAL_PROMPT_PATTERN,
+        separatorPattern: /^[·]{10,}$/m, // vibe-local uses middle dot separators
+        thinkingPattern: VIBE_LOCAL_THINKING_PATTERN,
+        skipPatterns: [
+          VIBE_LOCAL_PROMPT_PATTERN, // Prompt line (ctx:N% ❯)
+          VIBE_LOCAL_THINKING_PATTERN, // Thinking indicators
+          /^\s*$/, // Empty lines
+          /vibe-local|vibe-coder/, // Version/banner lines
+          /ctx:\s*\d+%/, // Context usage indicator
+          /Model\s+\w/, // Model info line
+          /Engine\s+\w/, // Engine info line
+          /Mode\s+/, // Mode info line
+          /RAM\s+/, // RAM info line
+          /CWD\s+/, // Working directory line
+          /^[·]{10,}$/, // Middle dot separator lines
+          /✦\s*Ready/, // Status bar "Ready" indicator
+          /ESC:\s*stop/, // Status bar "ESC: stop" hint
+          PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
         ],
       };
 
@@ -247,6 +297,23 @@ const ANSI_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\[[0-9;]*m/g;
 
 export function stripAnsi(str: string): string {
   return str.replace(ANSI_PATTERN, '');
+}
+
+/**
+ * Strip box-drawing border characters from CLI output.
+ * Gemini CLI wraps Action Required prompts in ╭─╮│╰─╯ borders.
+ * Removes │ (U+2502) prefix/suffix and border-only lines (╭╮╰╯─).
+ *
+ * @param str - Input string (typically after stripAnsi())
+ * @returns String with box-drawing borders removed
+ */
+export function stripBoxDrawing(str: string): string {
+  return str.split('\n').map(line => {
+    // Remove border-only lines (╭──╮, ╰──╯, │ only, etc.)
+    if (/^[\u2502\u256D\u256E\u256F\u2570\u2500\s]+$/.test(line)) return '';
+    // Strip leading │ + optional space, trailing space + │
+    return line.replace(/^\u2502\s?/, '').replace(/\s*\u2502$/, '');
+  }).join('\n');
 }
 
 /**

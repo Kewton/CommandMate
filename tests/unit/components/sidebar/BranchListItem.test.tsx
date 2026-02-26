@@ -191,6 +191,32 @@ describe('BranchListItem', () => {
       const claudeDot = screen.getByLabelText(/Claude:/);
       expect(claudeDot.className).toMatch(/animate-spin/);
     });
+
+    it('should render vibe-local status dot dynamically (Issue #368)', () => {
+      render(
+        <BranchListItem
+          branch={{ ...defaultBranch, cliStatus: { claude: 'idle', 'vibe-local': 'ready' } }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      expect(screen.getByLabelText('CLI tool status')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Claude:/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Vibe Local:/)).toBeInTheDocument();
+    });
+
+    it('should not render status dots when cliStatus is empty object', () => {
+      render(
+        <BranchListItem
+          branch={{ ...defaultBranch, cliStatus: {} }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      expect(screen.queryByLabelText('CLI tool status')).not.toBeInTheDocument();
+    });
   });
 
   describe('Unread indicator', () => {

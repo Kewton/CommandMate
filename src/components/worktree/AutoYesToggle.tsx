@@ -14,6 +14,7 @@ import React, { memo, useEffect, useState, useCallback } from 'react';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
 import { formatTimeRemaining } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
+import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
 
 /** Parameters for auto-yes toggle callback (Issue #314) */
 export interface AutoYesToggleParams {
@@ -36,12 +37,6 @@ export interface AutoYesToggleProps {
   cliToolName?: string;
   /** If true, render without outer container styles (for inline embedding) */
   inline?: boolean;
-}
-
-/** Capitalize CLI tool name for display */
-function formatCliToolName(name?: string): string {
-  if (!name) return '';
-  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 export const AutoYesToggle = memo(function AutoYesToggle({
@@ -128,7 +123,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       {/* Active CLI tool indicator */}
       {enabled && cliToolName && (
         <span className="text-xs text-blue-600 font-medium" aria-label="Auto Yes target">
-          ({formatCliToolName(cliToolName)})
+          ({getCliToolDisplayNameSafe(cliToolName, '')})
         </span>
       )}
 
@@ -150,7 +145,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
         isOpen={showConfirmDialog}
         onConfirm={handleConfirm}
         onCancel={handleCancel}
-        cliToolName={formatCliToolName(cliToolName)}
+        cliToolName={getCliToolDisplayNameSafe(cliToolName, '')}
       />
     </div>
   );

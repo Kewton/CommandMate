@@ -120,6 +120,26 @@ describe('claude-executor', () => {
       expect(args).toEqual(['exec', 'hello', '--sandbox', 'workspace-write']);
     });
 
+    it('should build gemini args with -p only', () => {
+      const args = buildCliArgs('hello', 'gemini');
+      expect(args).toEqual(['-p', 'hello']);
+    });
+
+    it('should build vibe-local args with -p and -y', () => {
+      const args = buildCliArgs('hello', 'vibe-local');
+      expect(args).toEqual(['-p', 'hello', '-y']);
+    });
+
+    it('should build vibe-local args with --model when model is specified', () => {
+      const args = buildCliArgs('hello', 'vibe-local', undefined, { model: 'llama3' });
+      expect(args).toEqual(['--model', 'llama3', '-p', 'hello', '-y']);
+    });
+
+    it('should build vibe-local args without --model when model is not specified', () => {
+      const args = buildCliArgs('hello', 'vibe-local', undefined, {});
+      expect(args).toEqual(['-p', 'hello', '-y']);
+    });
+
     it('should default to claude args for unknown tools', () => {
       const args = buildCliArgs('hello', 'unknown');
       expect(args).toEqual(['-p', 'hello', '--output-format', 'text', '--permission-mode', 'acceptEdits']);
@@ -130,6 +150,11 @@ describe('claude-executor', () => {
     it('should contain claude and codex', () => {
       expect(ALLOWED_CLI_TOOLS.has('claude')).toBe(true);
       expect(ALLOWED_CLI_TOOLS.has('codex')).toBe(true);
+    });
+
+    it('should contain gemini and vibe-local', () => {
+      expect(ALLOWED_CLI_TOOLS.has('gemini')).toBe(true);
+      expect(ALLOWED_CLI_TOOLS.has('vibe-local')).toBe(true);
     });
 
     it('should not contain arbitrary tools', () => {

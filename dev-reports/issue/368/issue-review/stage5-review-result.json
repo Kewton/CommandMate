@@ -1,0 +1,174 @@
+{
+  "issue_number": 368,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "review_date": "2026-02-25",
+  "review_summary": "Stage 1の12件およびStage 3の12件の指摘事項について、更新後のIssue本文を精査した。Must Fix事項（F001-F003, F301-F303）は全て適切に反映されており、Should Fix事項もほぼ全件対応済み。Nice to Have事項も大部分が取り込まれている。全体として非常に高品質なIssueに仕上がっている。ただし、2点のshould_fixと3点のnice_to_haveを新たに特定した: (1) PATCH APIレスポンスがselected_agents変更後もsessionStatusByCliを全ツール分返さない設計の矛盾、(2) activeCliTabのデフォルト値がselected_agentsの先頭と連動すべき点の未記載、(3) getLastMessagesByCliBatch()の戻り値型変更の漏れ、(4) NotesAndLogsPaneのSubTab型にagentを追加した場合のTypeScript型修正の明記、(5) 受け入れ基準の実装順序ガイダンスの追加。",
+  "findings": [
+    {
+      "id": "F501",
+      "severity": "should_fix",
+      "category": "設計整合性",
+      "title": "PATCH APIレスポンスがselected_agents変更後にsessionStatusByCliを返さない設計の矛盾",
+      "description": "Issue本文のAPI設計(F305)では、selected_agentsの更新をPATCH /api/worktrees/[id]に統合すると記載されている。しかし、現在のPATCH APIレスポンス(route.ts L171-180)は単一ツールのisSessionRunningのみを返し、sessionStatusByCliオブジェクトを返さない。一方、GET APIレスポンス(L101-111)はsessionStatusByCliを含む。selected_agentsを変更した直後のUIでは、新しいselected_agentsに基づいたcliStatus（sidebar.tsのtoBranchItem()に渡す用）が必要になるが、PATCHレスポンスにsessionStatusByCliが含まれないと、クライアント側で追加のGETリクエストが必要になる。Issueの設計方針ではPATCHレスポンスの拡張について言及されていない。",
+      "suggestion": "Issueの「selected_agents更新のAPI設計（F305）」セクションに、PATCHレスポンスの仕様を追加する。選択肢は2つ: (A) PATCHレスポンスにsessionStatusByCliを含める（GET APIと同様の構造に統一）、(B) PATCHレスポンスは現行のまま維持し、クライアント側でPATCH成功後にGETを再実行してUI更新する（楽観的更新パターン）。推奨は(B)で、WorktreeDetailRefactoredの既存ポーリング機構が数秒以内にGET APIを再呼び出しするため、即座の更新が不要であれば追加のAPI変更は不要。"
+    },
+    {
+      "id": "F502",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "activeCliTabのデフォルト値がselected_agentsの先頭と連動すべき点が未記載",
+      "description": "WorktreeDetailRefactored.tsx L952で activeCliTab は useState<CLIToolType>('claude') でハードコード初期化されている。selected_agentsが['gemini', 'codex']の場合、初期表示では'claude'タブがアクティブになるが、'claude'はselected_agentsに含まれておらず、ターミナルヘッダーに表示されないタブがアクティブになるという矛盾が生じる。Issueの変更対象（WorktreeDetailRefactored.tsx）には「ハードコード配列をselectedAgents stateに置換」と記載されているが、activeCliTabの初期値をselected_agentsの先頭要素に連動させる変更については明示されていない。",
+      "suggestion": "変更対象のWorktreeDetailRefactored.tsxの説明に以下を追加: 「activeCliTabのデフォルト値をselected_agents[0]に連動させる。selected_agentsをpropsまたはAPIレスポンスから取得し、useState<CLIToolType>(selectedAgents[0])で初期化する。」"
+    },
+    {
+      "id": "F503",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "db.tsのgetLastMessagesByCliBatch()の戻り値型がハードコードされている",
+      "description": "src/lib/db.ts L119-122のgetLastMessagesByCliBatch()関数の戻り値型は { claude?: string; codex?: string; gemini?: string } とハードコードされている。models.tsのlastMessagesByCliを Record<CLIToolType, string | undefined> に変更する場合、この関数の戻り値型も同様に更新が必要。変更対象ファイル一覧の「CLI_TOOL_IDS ハードコード統一」セクションではsrc/types/models.tsのみ記載されているが、db.tsのこの関数も影響を受ける。ただし、db.tsのgetLastMessagesByCliBatch()は内部関数であり、CLI_TOOL_IDSベースのイテレーションで自動的に全ツールの最新メッセージを取得する形にリファクタリングすれば、型定義の変更は自然に解消される。",
+      "suggestion": "変更対象の「CLI_TOOL_IDS ハードコード統一」テーブルに db.ts の getLastMessagesByCliBatch() 戻り値型の更新を追記するか、models.ts の型変更に伴う暗黙的な影響として認識しておく。"
+    },
+    {
+      "id": "F504",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "NotesAndLogsPaneのSubTab型変更の実装詳細が不足",
+      "description": "変更対象に「NotesAndLogsPane.tsx - SubTabに'agent'追加」と記載されているが、現在のSubTab型は 'notes' | 'logs' のユニオン型（L21）で定義されている。'agent'を追加すると SubTab = 'notes' | 'logs' | 'agent' となり、handleSubTabChange()の型シグネチャも自動的に拡張される。これ自体は問題ないが、AgentSettingsPaneが新規コンポーネントであるため、Reactの遅延ロード（React.lazy）を使用するか、直接importするかの選択が明示されていない。現在のNotesAndLogsPane はMemoPaneとExecutionLogPaneを直接importしているため、AgentSettingsPaneも同様に直接importすると想定されるが、3タブ化によるバンドルサイズへの影響は軽微であることを確認しておくとよい。",
+      "suggestion": "変更対象のNotesAndLogsPane.tsxの説明に「SubTab型を 'notes' | 'logs' | 'agent' に拡張し、activeSubTab === 'agent'の場合にAgentSettingsPaneを描画する」旨を追記する。"
+    },
+    {
+      "id": "F505",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "受け入れ基準の実装順序ガイダンスが未記載",
+      "description": "受け入れ基準は「機能要件」「コード品質」「テスト」の3カテゴリに分類されているが、実装順序の推奨が記載されていない。対応方針のセクション0で「CLI_TOOL_IDS ハードコード箇所の一元化リファクタリング（前提作業）」と明記されており、これが最初に実施されるべきことは読み取れるが、「セクション1（vibe-local追加）の技術調査フェーズはセクション2-4と並行して実施可能か」「セクション2（UIコンポーネント）とセクション3（DB永続化）のどちらを先に着手すべきか」等の実装順序が明確だと、実装者が迷わず着手できる。"
+    }
+  ],
+  "previous_findings_verification": {
+    "stage1_findings": {
+      "F001_must_fix": {
+        "status": "resolved",
+        "verification": "ハードコード箇所一覧（14箇所）が「対応方針 セクション0」に全て列挙されている。CLI_TOOL_IDSをsingle source of truthとして参照する方針が明記されている。変更対象ファイル一覧の「CLI_TOOL_IDS ハードコード統一」テーブルにも全12ファイルが記載されている。"
+      },
+      "F002_must_fix": {
+        "status": "resolved",
+        "verification": "「cli_tool_idとselected_agentsの設計方針」セクションが追加され、各カラムの役割（アクティブツール vs 表示ツール）、整合性ルール、自動更新の推奨動作が明確に定義されている。"
+      },
+      "F003_must_fix": {
+        "status": "resolved",
+        "verification": "「vibe-local 技術調査フェーズ」が表形式で追加され、6項目の調査項目が定義されている。仕様が想定と異なる場合の別Issue分離の判断基準も記載されている。"
+      },
+      "F004_should_fix": {
+        "status": "resolved",
+        "verification": "クラス名が「VibeLocalTool」に修正されている。変更対象ファイル一覧でも「VibeLocalTool クラス」と正しく記載。"
+      },
+      "F005_should_fix": {
+        "status": "resolved",
+        "verification": "「ALLOWED_CLI_TOOLSの拡張方針」セクションが追加され、ツール別（gemini/vibe-local）の方針とselected_agentsとの非連動が明記されている。"
+      },
+      "F006_should_fix": {
+        "status": "resolved",
+        "verification": "models.ts（sessionStatusByCli, lastMessagesByCli を Record<CLIToolType, ...> に変更）とsidebar.ts（Partial<Record<CLIToolType, BranchStatus>>に変更）が変更対象に追加されている。sidebar.ts型変更方針も具体的に記載。"
+      },
+      "F007_should_fix": {
+        "status": "resolved",
+        "verification": "i18nセクションが変更対象ファイル一覧に追加され、locales/en/schedule.json および locales/ja/schedule.json の変更が記載されている。"
+      },
+      "F008_should_fix": {
+        "status": "resolved",
+        "verification": "受け入れ基準に「テスト」カテゴリが追加され、6項目（ユニットテスト、DBマイグレーションテスト、バリデーションテスト、JSONバリデーションテスト、既存テストパス、固定値アサーション更新）が列挙されている。"
+      },
+      "F009_should_fix": {
+        "status": "resolved",
+        "verification": "manager.tsの変更内容に「stopPollers対応」が追記されている。getAllToolsInfo()/getInstalledTools()は自動的にvibe-localを含むことも明記。"
+      },
+      "F010_nice_to_have": {
+        "status": "resolved",
+        "verification": "技術的考慮事項に「SESSION_NAME_PATTERNでハイフンは許容される」旨が追記されている。"
+      },
+      "F011_nice_to_have": {
+        "status": "resolved",
+        "verification": "対応方針の「セクション0」としてCLI_TOOL_IDSハードコード箇所の一元化リファクタリングが前提作業として組み込まれている。"
+      },
+      "F012_nice_to_have": {
+        "status": "resolved",
+        "verification": "DBマイグレーションのバージョン番号（18）がセクション3およびDB関連の変更対象に明記されている。"
+      }
+    },
+    "stage3_findings": {
+      "F301_must_fix": {
+        "status": "resolved",
+        "verification": "「switch文のdefaultフォールバック対応（F301）」セクションが追加され、5箇所の具体的な変更内容が表形式で記載されている。exhaustive switchガードのコード例も掲載。変更対象ファイル一覧にも専用テーブルが追加されている。"
+      },
+      "F302_must_fix": {
+        "status": "resolved",
+        "verification": "「sidebar.ts 型変更方針（F302）」サブセクションが追加され、Partial<Record<CLIToolType, BranchStatus>>への変更方針が具体的に記載されている。toBranchItem()にselectedAgents引数を追加する設計変更、呼び出し元APIへの影響も明記。"
+      },
+      "F303_must_fix": {
+        "status": "resolved",
+        "verification": "「selected_agentsのJSONバリデーション（F303）」セクションが追加され、parseSelectedAgents()関数のコード例と6つのバリデーション観点が具体的に記載されている。PATCH API側でも同様のバリデーションを実施する旨も明記。"
+      },
+      "F304_should_fix": {
+        "status": "resolved",
+        "verification": "「既存テスト更新（F304）」テーブルが変更対象に追加され、4テストファイルの具体的な変更内容が記載されている。CLI_TOOL_IDS.length参照へのリファクタリング推奨も注記。"
+      },
+      "F305_should_fix": {
+        "status": "resolved",
+        "verification": "「selected_agents更新のAPI設計（F305）」サブセクションが追加され、既存PATCH APIへの統合、サーバーサイド整合性チェック、トランザクション処理、セッション非停止方針が明記されている。"
+      },
+      "F306_should_fix": {
+        "status": "resolved",
+        "verification": "「selected_agents変更時のセッション管理（F306）」サブセクションが追加され、UI表示のみの影響、既存セッション継続、ポーラーへの影響範囲が明記されている。"
+      },
+      "F307_should_fix": {
+        "status": "resolved",
+        "verification": "「vibe-local追加時の追加考慮事項（F307）」として4項目が追記されている。buildCliArgs()必須、execFile()のコマンド名問題、ScheduleEntry型制約の考慮事項が記載されている。"
+      },
+      "F308_should_fix": {
+        "status": "resolved",
+        "verification": "「ScheduleEntry.cliToolIdの型安全性（F308）」セクションが追加され、本Issueスコープ外として明示、将来的なリファクタリング候補として記載されている。"
+      },
+      "F309_should_fix": {
+        "status": "resolved",
+        "verification": "技術的考慮事項に「ハイフン付きキーのアクセス方法（F309）」が追記され、ブラケット記法の必要性とイテレーションパターンの推奨が記載されている。"
+      },
+      "F310_nice_to_have": {
+        "status": "resolved",
+        "verification": "「DBマイグレーション時のデフォルト値（F310）」セクションが追加され、cli_tool_idに応じた動的デフォルト値のSQL例が掲載されている。"
+      },
+      "F311_nice_to_have": {
+        "status": "resolved",
+        "verification": "変更対象ファイル一覧の「ドキュメント（Issue完了後）」テーブルにCLAUDE.mdの更新が記載されている。"
+      },
+      "F312_nice_to_have": {
+        "status": "resolved",
+        "verification": "変更対象のMessageList.tsx説明に「2箇所、DRY共通化検討」と注記が追加されている。"
+      }
+    }
+  },
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 3,
+  "overall_assessment": "Issue #368は4回のレビューステージ（Stage 1通常、Stage 2反映、Stage 3影響範囲、Stage 4反映）を経て、非常に高品質なIssueに仕上がっている。Stage 1の12件（must_fix: 3, should_fix: 6, nice_to_have: 3）およびStage 3の12件（must_fix: 3, should_fix: 6, nice_to_have: 3）の全24件の指摘事項が全て適切に反映されていることを確認した。新たに特定した問題は must_fix: 0件、should_fix: 2件、nice_to_have: 3件であり、いずれも実装を阻害するレベルではない。特にF501（PATCHレスポンスのsessionStatusByCli）とF502（activeCliTabのデフォルト値連動）は実装時に自然に検討される事項であるが、Issueに明記しておくことで実装者の判断コストを下げることができる。全体として、本Issueは実装着手可能な状態にある。",
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "relevance": "PATCH APIレスポンス（L171-180）がsessionStatusByCliを含まない点（F501）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "activeCliTabのデフォルト値（L952）がselected_agentsと連動していない点（F502）"
+    },
+    {
+      "file": "src/lib/db.ts",
+      "relevance": "getLastMessagesByCliBatch()の戻り値型がハードコードされている点（F503）"
+    },
+    {
+      "file": "src/components/worktree/NotesAndLogsPane.tsx",
+      "relevance": "SubTab型の拡張対象（F504）"
+    }
+  ],
+  "doc_references": []
+}

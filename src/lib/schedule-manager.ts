@@ -17,7 +17,7 @@
 import { randomUUID } from 'crypto';
 import { Cron } from 'croner';
 import { readCmateFile, parseSchedulesSection } from './cmate-parser';
-import { executeClaudeCommand, getActiveProcesses } from './claude-executor';
+import { executeClaudeCommand, getActiveProcesses, type ExecuteCommandOptions } from './claude-executor';
 import type { ScheduleEntry } from '@/types/cmate';
 
 // =============================================================================
@@ -317,18 +317,25 @@ async function executeSchedule(state: ScheduleState): Promise<void> {
 
   try {
     const db = getLazyDbInstance();
-    const worktree = db.prepare('SELECT path FROM worktrees WHERE id = ?').get(state.worktreeId) as Pick<WorktreeRow, 'path'> | undefined;
+    const worktree = db.prepare('SELECT path, vibe_local_model FROM worktrees WHERE id = ?').get(state.worktreeId) as { path: string; vibe_local_model: string | null } | undefined;
 
     if (!worktree) {
       updateExecutionLog(logId, 'failed', 'Worktree not found', null);
       return;
     }
 
+    // Build options for vibe-local model
+    const options: ExecuteCommandOptions | undefined =
+      state.entry.cliToolId === 'vibe-local' && worktree.vibe_local_model
+        ? { model: worktree.vibe_local_model }
+        : undefined;
+
     const result = await executeClaudeCommand(
       state.entry.message,
       worktree.path,
       state.entry.cliToolId,
-      state.entry.permission
+      state.entry.permission,
+      options
     );
 
     updateExecutionLog(logId, result.status, result.output, result.exitCode);

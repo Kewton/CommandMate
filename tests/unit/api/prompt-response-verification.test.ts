@@ -59,6 +59,7 @@ vi.mock('@/lib/prompt-detector', () => ({
 // Mock cli-patterns
 vi.mock('@/lib/cli-patterns', () => ({
   stripAnsi: vi.fn((s: string) => s),
+  stripBoxDrawing: vi.fn((s: string) => s),
   buildDetectPromptOptions: vi.fn().mockReturnValue({ requireDefaultIndicator: false }),
 }));
 
@@ -215,6 +216,30 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     const response = await promptResponse(request, { params: { id: 'test-wt' } });
 
     expect(response.status).toBe(400);
+  });
+
+  it('should return 400 for invalid worktree ID format', async () => {
+    const { sendKeys } = await import('@/lib/tmux');
+
+    const request = createRequest('../invalid', '1');
+    const response = await promptResponse(request, { params: { id: '../invalid' } });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toBe('Invalid worktree ID format');
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
+  it('should return 400 for invalid cliTool parameter', async () => {
+    const { sendKeys } = await import('@/lib/tmux');
+
+    const request = createRequest('test-wt', { answer: '1', cliTool: 'malicious-tool' });
+    const response = await promptResponse(request, { params: { id: 'test-wt' } });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toContain('Invalid cliTool');
+    expect(sendKeys).not.toHaveBeenCalled();
   });
 });
 

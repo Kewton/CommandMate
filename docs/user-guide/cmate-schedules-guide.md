@@ -8,7 +8,7 @@ CMATE.mdファイルを使った定期実行スケジュールの設定・管理
 
 ## 概要
 
-CMATEスケジュール機能は、worktreeルートに配置した`CMATE.md`ファイルのSchedulesセクションにcron式を定義することで、`claude -p`（または`codex exec`）を自動実行する機能です。
+CMATEスケジュール機能は、worktreeルートに配置した`CMATE.md`ファイルのSchedulesセクションにcron式を定義することで、`claude -p`（または`codex exec`、`gemini -p`、`vibe-local -p`）を自動実行する機能です。
 
 **動作フロー:**
 
@@ -67,7 +67,7 @@ your-project/          ← worktreeルート
 | **Name** | はい | スケジュール名。1〜100文字。英数字・日本語・ハイフン・スペースが使用可能 | - |
 | **Cron** | はい | cron式（5〜6フィールド）。実行タイミングを指定 | - |
 | **Message** | はい | `claude -p`に送信するプロンプト。最大10,000文字 | - |
-| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex`） | `claude` |
+| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex` / `gemini` / `vibe-local`） | `claude` |
 | **Enabled** | いいえ | スケジュールの有効/無効（`true` / `false`） | `true` |
 | **Permission** | いいえ | 実行時の許可レベル。下記のPermission一覧を参照 | ツール別のデフォルト値 |
 
@@ -106,6 +106,16 @@ cron式は5フィールド（分 時 日 月 曜日）または6フィールド�
 | `read-only` | 読み取りのみ。ファイル変更不可 |
 | `workspace-write` | ワークスペース内のファイル変更を許可（**デフォルト**） |
 | `danger-full-access` | 全てのファイルへのフルアクセス |
+
+### gemini
+
+パーミッション設定なし。Permission列は無視されます。
+
+### vibe-local
+
+パーミッション設定なし。Permission列は無視されます。`-y`フラグで自動承認されます。
+
+> **Note:** vibe-localのモデルは、worktreeのAgent設定で選択したOllamaモデルが使用されます。
 
 ---
 
@@ -170,7 +180,7 @@ CMATE.mdの内容はCommandMateが自動的にバリデーションします。
 | Name | 1〜100文字、英数字・日本語・ハイフン・スペースのみ |
 | Cron | 5〜6フィールドの有効なcron式 |
 | Message | 空でないこと。最大10,000文字 |
-| CLI Tool | `claude` または `codex` |
+| CLI Tool | `claude`、`codex`、`gemini`、`vibe-local` のいずれか |
 | Permission | ツールごとの許可値一覧に一致すること |
 
 無効なエントリは警告ログとともにスキップされます。他の有効なエントリは正常に処理されます。

@@ -1,0 +1,31 @@
+{
+  "issue_number": 368,
+  "iteration": 2,
+  "feature_summary": "CMATEタブにAgent設定タブを追加し、表示するコーディングエージェントをWorktree単位で選択可能にする",
+  "acceptance_criteria": [
+    "CMATEタブに「Agent」サブタブが表示される",
+    "Agentタブで利用可能なエージェント一覧（claude, codex, gemini, vibe-local）が表示される",
+    "ユーザーが2つのエージェントを選択できる",
+    "3つ以上の選択はできない（UIで制御）",
+    "選択状態がWorktree単位で永続化される",
+    "ターミナルヘッダーのエージェントタブが選択に応じて動的に切り替わる",
+    "デフォルト値は ['claude', 'codex']（既存動作の維持）",
+    "デスクトップ・モバイル両方で正しく動作する"
+  ],
+  "test_scenarios": [
+    "シナリオ1: NotesAndLogsPaneにAgentサブタブボタンが存在する",
+    "シナリオ2: Agentタブクリック時にAgentSettingsPaneが表示される",
+    "シナリオ3: AgentSettingsPaneに全CLIツール（claude, codex, gemini, vibe-local）のチェックボックスが表示される",
+    "シナリオ4: 2つ選択済み時、未選択のチェックボックスがdisabledになる",
+    "シナリオ5: チェックボックス変更時にPATCH /api/worktrees/:idが呼ばれる",
+    "シナリオ6: WorktreeDetailRefactoredでselectedAgentsがAPIから取得される",
+    "シナリオ7: デスクトップターミナルヘッダーのタブがselectedAgentsに基づいて動的に表示される",
+    "シナリオ8: モバイルターミナルヘッダーのタブがselectedAgentsに基づいて動的に表示される",
+    "シナリオ9: selectedAgents外のactiveCliTabが変更された場合、selectedAgents[0]にリセットされる",
+    "シナリオ10: 7つのAPIルートファイルでCLI_TOOL_IDSがハードコード配列を置換している",
+    "シナリオ11: getCliToolDisplayName()がMessageList.tsxとAutoYesToggle.tsxで統一使用されている",
+    "シナリオ12: i18nキー（agentTab, agentSettings, selectAgents）がen/ja両方に存在する",
+    "シナリオ13: 全ユニットテストがパスする（4001件）"
+  ],
+  "tdd_result_path": "dev-reports/issue/368/pm-auto-dev/iteration-2/tdd-result.json"
+}

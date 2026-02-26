@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 17;
+export const CURRENT_SCHEMA_VERSION = 19;
 
 /**
  * Migration definition
@@ -891,6 +891,59 @@ const migrations: Migration[] = [
       db.exec('DROP INDEX IF EXISTS idx_scheduled_executions_worktree');
       db.exec('DROP TABLE IF EXISTS scheduled_executions');
       console.log('✓ Dropped scheduled_executions and execution_logs tables');
+    }
+  },
+  {
+    version: 18,
+    name: 'add-selected-agents-column',
+    up: (db) => {
+      // Issue #368: Add selected_agents column for agent selection persistence
+      // NOTE (R1-010): The literal values 'claude', 'codex' in the SQL CASE below
+      // are fixed at migration time and do NOT sync with TypeScript CLI_TOOL_IDS.
+      // Changes to CLI_TOOL_IDS will not retroactively affect already-migrated data.
+      // Migration tests cover all CLIToolType values to catch sync issues.
+
+      // Step 1: Add column
+      db.exec(`
+        ALTER TABLE worktrees ADD COLUMN selected_agents TEXT;
+      `);
+
+      // Step 2: Initialize existing data based on cli_tool_id
+      // - If cli_tool_id is 'claude' or 'codex' -> default ["claude","codex"]
+      // - Otherwise (e.g. 'gemini', 'vibe-local') -> [cli_tool_id, "claude"]
+      db.exec(`
+        UPDATE worktrees SET selected_agents =
+          CASE
+            WHEN cli_tool_id NOT IN ('claude', 'codex')
+            THEN json_array(cli_tool_id, 'claude')
+            ELSE '["claude","codex"]'
+          END;
+      `);
+
+      console.log('✓ Added selected_agents column to worktrees table');
+      console.log('✓ Initialized selected_agents based on cli_tool_id');
+    },
+    down: () => {
+      // selected_agents is a nullable TEXT column; dropping it requires table recreation
+      // which is disproportionate for a rollback. The column is harmless if unused.
+      console.log('No rollback for selected_agents column (SQLite limitation)');
+    }
+  },
+  {
+    version: 19,
+    name: 'add-vibe-local-model-column',
+    up: (db) => {
+      // Issue #368: Add vibe_local_model column for Ollama model selection
+      // NULL means use the default model (vibe-local decides)
+      db.exec(`
+        ALTER TABLE worktrees ADD COLUMN vibe_local_model TEXT DEFAULT NULL;
+      `);
+
+      console.log('✓ Added vibe_local_model column to worktrees table');
+    },
+    down: () => {
+      // vibe_local_model is a nullable TEXT column; harmless if unused
+      console.log('No rollback for vibe_local_model column (SQLite limitation)');
     }
   }
 ];

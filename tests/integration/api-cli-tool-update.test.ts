@@ -179,4 +179,31 @@ describe('PATCH /api/worktrees/:id/cli-tool', () => {
     const data = await response.json();
     expect(data.error).toContain('CLI tool ID is required');
   });
+
+  it('should return 400 when request body is not a JSON object', async () => {
+    const worktree: Worktree = {
+      id: 'test-wt',
+      name: 'Test Worktree',
+      path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+      cliToolId: 'claude',
+    };
+    upsertWorktree(db, worktree);
+
+    const request = new Request('http://localhost:3000/api/worktrees/test-wt/cli-tool', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(['invalid']),
+    });
+
+    const response = await updateCliTool(
+      request as unknown as import('next/server').NextRequest,
+      { params: { id: 'test-wt' } }
+    );
+    expect(response.status).toBe(400);
+
+    const data = await response.json();
+    expect(data.error).toContain('JSON object');
+  });
 });

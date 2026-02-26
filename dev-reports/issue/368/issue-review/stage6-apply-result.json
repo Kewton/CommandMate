@@ -1,0 +1,69 @@
+{
+  "issue_number": 368,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-02-25",
+  "applied_findings": [
+    {
+      "finding_id": "F501",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "PATCHレスポンスのUI更新方針をAPI設計セクション（F305）に追記。方式B（既存ポーリング機構依存、PATCHレスポンスにsessionStatusByCliを追加しない）を明記。技術的考慮事項にも要約を追記。DB・APIの変更対象テーブルにも「レスポンスは現行維持」の注記を追加。"
+    },
+    {
+      "finding_id": "F502",
+      "severity": "should_fix",
+      "applied": true,
+      "description": "activeCliTabのデフォルト値をselected_agents[0]に連動させる変更を3箇所に反映: (1) セクション4のWorktreeDetailRefactored.tsx変更詳細に具体的な実装方針とuseEffect同期パターンの検討を追記、(2) 受け入れ基準の機能要件に「activeCliTabのデフォルト値がselected_agents[0]と連動し、存在しないタブがアクティブにならない」を追加、(3) 技術的考慮事項にactiveCliTabのデフォルト値連動の要約を追記、(4) UIコンポーネントの変更対象テーブルにactiveCliTab連動を追記。"
+    },
+    {
+      "finding_id": "F503",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "db.tsのgetLastMessagesByCliBatch()戻り値型の更新を3箇所に反映: (1) セクション0のリファクタリング方針にdb.tsの戻り値型更新を追記、(2) 受け入れ基準のコード品質に「db.tsのgetLastMessagesByCliBatch()戻り値型がRecord<CLIToolType, string | undefined>に更新されている」を追加、(3) CLI_TOOL_IDSハードコード統一テーブルにdb.tsの行を追加。"
+    },
+    {
+      "finding_id": "F504",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "NotesAndLogsPane.tsxの変更詳細を明確化。セクション2およびUIコンポーネント変更対象テーブルの記載を「SubTab型を 'notes' | 'logs' | 'agent' に拡張し、activeSubTab === 'agent' の場合に AgentSettingsPane を描画する」に更新。"
+    },
+    {
+      "finding_id": "F505",
+      "severity": "nice_to_have",
+      "applied": true,
+      "description": "推奨実装順序テーブルを対応方針セクションの冒頭（セクション0の前）に追加。セクション0（前提作業）→セクション3（DB/API）→セクション2（UIサブタブ）→セクション4（動的レンダリング）→セクション1（vibe-local）の順序を表形式で明記。技術調査フェーズの並行実施可能性についても注記。"
+    }
+  ],
+  "skipped_findings": [],
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/368"
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0,
+    "description": "Stage 5レビューの全5件の指摘事項（should_fix: 2件、nice_to_have: 3件）を全てIssue本文に反映した。主な変更: (1) F501: PATCH APIレスポンスのUI更新方針（方式B: 既存ポーリング依存）をAPI設計セクションに明記、(2) F502: activeCliTabのデフォルト値をselected_agents[0]に連動させる変更を対応方針・受け入れ基準・技術的考慮事項の3セクションに反映、(3) F503: db.tsのgetLastMessagesByCliBatch()を変更対象ファイル一覧と受け入れ基準に追加、(4) F504: NotesAndLogsPaneのSubTab型拡張の実装詳細を明確化、(5) F505: 推奨実装順序テーブルを対応方針の冒頭に追加。レビュー履歴にStage 5のエントリを追加。Issueのトップ注記をStage 5反映済みに更新。"
+  },
+  "changes_summary": {
+    "header_note": "Stage 5（通常レビュー2回目）反映済みに更新",
+    "new_sections": [
+      "推奨実装順序（F505）- 対応方針セクション冒頭",
+      "PATCHレスポンスのUI更新方針（F501）- selected_agents更新のAPI設計（F305）内"
+    ],
+    "modified_sections": [
+      "対応方針 > セクション0 - db.tsのgetLastMessagesByCliBatch()追記（F503）",
+      "対応方針 > セクション2 - NotesAndLogsPane SubTab型拡張詳細（F504）",
+      "対応方針 > セクション4 - activeCliTabデフォルト値連動（F502）",
+      "受け入れ基準 > 機能要件 - activeCliTab連動項目追加（F502）",
+      "受け入れ基準 > コード品質 - getLastMessagesByCliBatch()型更新項目追加（F503）",
+      "技術的考慮事項 - activeCliTab連動・PATCHレスポンス方針追記（F501, F502）",
+      "変更対象ファイル一覧 > CLI_TOOL_IDSハードコード統一 - db.ts追加（F503）",
+      "変更対象ファイル一覧 > UIコンポーネント - NotesAndLogsPane詳細更新（F504）、WorktreeDetailRefactored activeCliTab連動追記（F502）",
+      "変更対象ファイル一覧 > DB・API - PATCHレスポンス現行維持注記（F501）",
+      "レビュー履歴 - Stage 5エントリ追加"
+    ]
+  }
+}

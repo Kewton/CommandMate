@@ -8,16 +8,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/prompt-detector';
-import { stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
+import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/cli-patterns';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import { isValidWorktreeId } from '@/lib/auto-yes-manager';
 import type { PromptType } from '@/types/models';
 
 interface PromptResponseRequest {
   answer: string;
-  cliTool?: CLIToolType;
+  cliTool?: string;
   /** Issue #287: Prompt type from client-side detection (fallback when promptCheck fails) */
   promptType?: PromptType;
   /** Issue #287: Default option number from client-side detection (fallback when promptCheck fails) */
@@ -29,6 +30,13 @@ export async function POST(
   { params }: { params: { id: string } }
 ): Promise<NextResponse> {
   try {
+    if (!isValidWorktreeId(params.id)) {
+      return NextResponse.json(
+        { error: 'Invalid worktree ID format' },
+        { status: 400 }
+      );
+    }
+
     const body: PromptResponseRequest = await req.json();
     const { answer, cliTool: cliToolParam, promptType: bodyPromptType, defaultOptionNumber: bodyDefaultOptionNumber } = body;
 
@@ -36,6 +44,13 @@ export async function POST(
     if (!answer) {
       return NextResponse.json(
         { error: 'answer is required' },
+        { status: 400 }
+      );
+    }
+
+    if (cliToolParam && !isCliToolType(cliToolParam)) {
+      return NextResponse.json(
+        { error: `Invalid cliTool: '${cliToolParam}'` },
         { status: 400 }
       );
     }
@@ -52,7 +67,9 @@ export async function POST(
     }
 
     // Determine CLI tool ID
-    const cliToolId: CLIToolType = cliToolParam || worktree.cliToolId || 'claude';
+    const cliToolId: CLIToolType = (cliToolParam && isCliToolType(cliToolParam))
+      ? cliToolParam
+      : (worktree.cliToolId || 'claude');
 
     // Get CLI tool instance from manager
     const manager = CLIToolManager.getInstance();
@@ -79,7 +96,7 @@ export async function POST(
       const currentOutput = await captureSessionOutput(params.id, cliToolId, 5000);
       const cleanOutput = stripAnsi(currentOutput);
       const promptOptions = buildDetectPromptOptions(cliToolId);
-      promptCheck = detectPrompt(cleanOutput, promptOptions);
+      promptCheck = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
 
       if (!promptCheck.isPrompt) {
         return NextResponse.json({

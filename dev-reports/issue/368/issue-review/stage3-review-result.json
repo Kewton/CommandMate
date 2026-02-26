@@ -1,0 +1,182 @@
+{
+  "issue_number": 368,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-02-25",
+  "review_summary": "Issue #368の影響範囲を6つの観点（型安全性、DB後方互換性、セッション管理、スケジュール実行、テスト、セキュリティ）から分析した。Stage 1レビュー後のIssue更新によりハードコード箇所の網羅性とDB設計方針は大幅に改善されているが、以下の未考慮リスクが特定された: (1) switch文のdefaultフォールバックによるvibe-localの暗黙的なclaude扱い（5箇所）、(2) sidebar.tsのcliStatus型がclaude/codexに限定されておりvibe-local/geminiが表示不可、(3) session-cleanup.tsのテストがCLI_TOOL_IDS.lengthに追従せず固定値3でアサートしている、(4) selected_agentsのJSON解析時のバリデーション戦略が未記載でインジェクションリスクあり、(5) ScheduleEntry.cliToolIdがstring型でCLIToolType制約がないため型安全性が不十分。",
+  "findings": [
+    {
+      "id": "F301",
+      "severity": "must_fix",
+      "category": "型安全性",
+      "title": "switch文のdefaultフォールバックによるvibe-localの暗黙的claude扱い（5箇所）",
+      "description": "CLIToolTypeに'vibe-local'を追加しても、既存のswitch文はdefaultケースでフォールバックするため、TypeScriptコンパイラエラーにはならない。しかし、vibe-localが暗黙的にclaude扱いされる問題が以下5箇所で発生する:\n\n1. src/lib/cli-patterns.ts L140-153 detectThinking(): default -> claude thinkingパターンを使用\n2. src/lib/cli-patterns.ts L168-224 getCliToolPatterns(): default -> claude patternsを返却\n3. src/lib/assistant-response-saver.ts L190-200 cleanCliResponse(): default -> output.trim()のみ（クリーニングなし）\n4. src/lib/claude-executor.ts L86-92 buildCliArgs(): default -> claude引数（-p, --output-format text）を使用\n5. src/components/worktree/MessageList.tsx L69-78, L406-415 getToolName(): default -> 'Assistant'表示\n\nこれらのdefault分岐はnever型ガードではなく単純なフォールバックのため、vibe-local固有のパターン（プロンプト、thinking、引数構造）が適用されず、実行時の不具合を引き起こす。特にbuildCliArgs()のデフォルトがclaude引数を返す点は、vibe-localの実行コマンドが全く異なる場合に致命的なバグとなる。",
+      "suggestion": "Issueの技術調査フェーズの結果を踏まえ、各switch文にvibe-local用のcase分岐を明示的に追加する変更対象としてIssueに記載する。特に以下を追加すべき:\n- src/lib/cli-patterns.ts: detectThinking()、getCliToolPatterns()にvibe-localケース\n- src/lib/assistant-response-saver.ts: cleanCliResponse()にvibe-localケース\n- src/lib/claude-executor.ts: buildCliArgs()にvibe-localケース\n- src/components/worktree/MessageList.tsx: getToolName()に'vibe-local'ケース（表示名: 'Vibe Local'）\n\nさらに、将来のツール追加時に同様の問題を防ぐため、exhaustive switch guardの導入を検討：\n```typescript\ndefault: {\n  const _exhaustive: never = cliToolId;\n  // fallback logic\n}\n```"
+    },
+    {
+      "id": "F302",
+      "severity": "must_fix",
+      "category": "影響ファイル",
+      "title": "sidebar.tsのSidebarBranchItem.cliStatusがclaude/codexに限定されている",
+      "description": "src/types/sidebar.ts L60-63でSidebarBranchItem.cliStatusは以下のハードコード型定義となっている:\n```typescript\ncliStatus?: {\n  claude: BranchStatus;\n  codex: BranchStatus;\n};\n```\ntoBranchItem()関数（L114-117）もworktree.sessionStatusByCli?.claude/codexのみを参照している。\n\nこの型定義は:\n1. geminiのステータスを表示できない（既存の問題だが、今回のリファクタリングで対応すべき）\n2. vibe-localのステータスを表示できない\n3. selected_agentsで選択されたツールに応じて動的にcliStatusを構築する必要があるが、現在の固定型では不可能\n\nIssueの変更対象で「src/types/sidebar.ts: CLIToolType依存箇所の確認・更新」と記載されているが、具体的な変更内容が不明確であり、selected_agentsとの連動方法が定義されていない。",
+      "suggestion": "sidebar.tsの変更方針を具体化する:\n\n方針A（selected_agents連動）:\n```typescript\ncliStatus?: Partial<Record<CLIToolType, BranchStatus>>;\n```\ntoBranchItem()でselected_agentsの2ツールのみステータスを格納する。\n\n方針B（全ツール格納、UI側でフィルタ）:\ncliStatusをRecord<CLIToolType, BranchStatus>にし、UI側でselected_agentsに基づいてフィルタ表示する。\n\nいずれの方針かをIssueに明記すべき。方針Aの場合、toBranchItem()にselected_agents引数を渡す設計変更が必要であり、呼び出し元のAPI（/api/worktrees/route.ts、/api/worktrees/[id]/route.ts）も影響を受ける。"
+    },
+    {
+      "id": "F303",
+      "severity": "must_fix",
+      "category": "セキュリティ",
+      "title": "selected_agentsのJSONパース時のバリデーション戦略が未記載",
+      "description": "selected_agentsカラムはJSON文字列としてSQLiteに保存される。DBからの読み取り時にJSON.parse()を実行することになるが、以下のリスクが存在する:\n\n1. 不正なJSON文字列によるJSON.parseエラー（アプリクラッシュ）\n2. JSON配列ではなくオブジェクトや文字列が格納された場合の型安全性\n3. 配列要素がCLIToolTypeに含まれない不正な値の場合（例: '<script>alert(1)</script>'）\n4. 配列長が2を超える場合の整合性\n5. 同一ツールIDが重複する場合\n\n現在のIssueにはselected_agentsの読み取り時バリデーション（スキーマバリデーション）に関する記載がない。DB値は信頼できない外部入力として扱うべきであり、パース+バリデーション関数の設計が必要。",
+      "suggestion": "Issueの技術的考慮事項またはDB関連セクションに以下を追加:\n\n```typescript\n// selected_agents バリデーション関数（実装例）\nfunction parseSelectedAgents(raw: string | null): [CLIToolType, CLIToolType] {\n  const DEFAULT: [CLIToolType, CLIToolType] = ['claude', 'codex'];\n  if (!raw) return DEFAULT;\n  try {\n    const parsed = JSON.parse(raw);\n    if (!Array.isArray(parsed) || parsed.length !== 2) return DEFAULT;\n    if (!parsed.every(id => CLI_TOOL_IDS.includes(id))) return DEFAULT;\n    if (parsed[0] === parsed[1]) return DEFAULT;\n    return parsed as [CLIToolType, CLIToolType];\n  } catch {\n    return DEFAULT;\n  }\n}\n```\n\nPATCH API側でも同様のバリデーションを実施し、不正値の保存自体を防止する。"
+    },
+    {
+      "id": "F304",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "既存テストの破損リスク: CLI_TOOL_IDS関連テスト8件が固定値アサーション",
+      "description": "CLI_TOOL_IDSに'vibe-local'を追加すると、以下の既存テストが確実に破損する:\n\n1. tests/unit/cli-tools/types-cli-tool-ids.test.ts:\n   - L21: `expect(CLI_TOOL_IDS).toHaveLength(3)` -> 4に変更必要\n   - L32: `const validTypes: CLIToolType[] = ['claude', 'codex', 'gemini']` -> 'vibe-local'追加必要\n   - L44: `const expectedTypes = new Set<CLIToolType>(['claude', 'codex', 'gemini'])` -> 同上\n\n2. tests/unit/cli-tools/types.test.ts:\n   - L10: `const types: CLIToolType[] = ['claude', 'codex', 'gemini']` -> 'vibe-local'追加必要\n   - L18: `const validTypes: CLIToolType[] = ['claude', 'codex', 'gemini']` -> 同上\n\n3. tests/unit/cli-tools/manager.test.ts:\n   - L55: `expect(tools).toHaveLength(3)` -> 4に変更必要\n   - L99: `expect(allInfo).toHaveLength(3)` -> 同上\n\n4. tests/unit/session-cleanup.test.ts:\n   - L35: `expect(killSessionFn).toHaveBeenCalledTimes(3)` -> 4に変更必要\n   - L47: `expect(stopResponsePolling).toHaveBeenCalledTimes(3)` -> 同上\n   - L121: `expect(killSessionFn).toHaveBeenCalledTimes(9)` -> 12（3 worktrees * 4 tools）に変更必要\n\nこれらのテストは `npm run test:unit` の必須チェックに含まれるため、CLI_TOOL_IDS変更と同時に更新が必要。",
+      "suggestion": "変更対象に以下のテストファイルを明示的に追加する:\n- tests/unit/cli-tools/types-cli-tool-ids.test.ts\n- tests/unit/cli-tools/types.test.ts\n- tests/unit/cli-tools/manager.test.ts\n- tests/unit/session-cleanup.test.ts\n\nまた、将来のツール追加に対する堅牢性を高めるため、固定値ではなくCLI_TOOL_IDS.lengthを参照するアサーションへのリファクタリングを推奨:\n```typescript\n// Before:\nexpect(tools).toHaveLength(3);\n// After:\nexpect(tools).toHaveLength(CLI_TOOL_IDS.length);\n```"
+    },
+    {
+      "id": "F305",
+      "severity": "should_fix",
+      "category": "DB後方互換性",
+      "title": "selected_agents変更時のcli_tool_id自動更新ロジックのAPI設計が不明確",
+      "description": "Issueの設計方針では「ユーザーがselected_agentsを変更した際、現在のcli_tool_idが新しいselected_agentsに含まれない場合は、cli_tool_idをselected_agentsの先頭のツールに自動更新する（推奨動作、実装時に検討）」と記載されている。\n\nしかし、この自動更新のAPI設計が不明確:\n1. selected_agents更新は既存のPATCH /api/worktrees/[id] を拡張するのか、新規APIを作るのか\n2. 自動更新はサーバーサイド（API内）で行うのか、クライアントサイドで2つのAPIを呼ぶのか\n3. cli_tool_id自動更新時に既存tmuxセッションの停止・再起動は必要か\n4. cli_tool_idのPATCH API（/api/worktrees/[id]/cli-tool）との競合は考慮されているか（同時更新時のrace condition）\n\ncli_tool_idは既にセッション管理やスケジュール実行に使用されている重要なフィールドであり、自動更新のタイミングと副作用を明確にする必要がある。",
+      "suggestion": "Issueの設計方針セクションに以下を追加:\n- API設計: PATCH /api/worktrees/[id] にselected_agentsフィールドを追加し、サーバーサイドでcli_tool_id整合性チェック+自動更新を実施\n- セッション副作用: cli_tool_idが自動更新された場合、旧ツールのtmuxセッションは自動停止しない（ユーザーが手動で切り替えるまで現行セッションを維持）\n- 競合防止: selected_agents更新とcli_tool更新は同一トランザクション内で処理"
+    },
+    {
+      "id": "F306",
+      "severity": "should_fix",
+      "category": "セッション管理",
+      "title": "selected_agents変更時の既存tmuxセッション・Auto-Yesポーラーへの影響が未定義",
+      "description": "ユーザーがAgentSettingsPaneでselected_agentsを変更した場合（例: ['claude', 'codex'] -> ['claude', 'vibe-local']）、以下の副作用が考えられるが、Issueに記載がない:\n\n1. codexのtmuxセッションが実行中だった場合、ターミナルヘッダーから消えるがセッションは残存する\n2. Auto-Yesポーラーがcodexに対して動作中だった場合の挙動\n3. response-pollerがcodexに対して動作中だった場合の挙動\n4. 新たにselectedされたvibe-localの「セッション開始」がどのタイミングで可能になるか\n5. WorktreeDetailRefactoredのUI状態（タブ選択、チャット履歴表示）のリセット要否\n\nsession-cleanup.ts L74ではCLI_TOOL_IDS（全ツール）に対してクリーンアップを実行するため、selected_agents外のツールのセッションもクリーンアップ対象となるが、日常的なselected_agents変更時にはクリーンアップは不要と思われる。\n\nこの挙動の明確化がないと、ユーザーが予期しないセッション状態に遭遇する可能性がある。",
+      "suggestion": "Issueの技術的考慮事項に以下を追記:\n- selected_agents変更はUI表示のみに影響し、既存tmuxセッションの停止・再起動は行わない\n- selected_agents外のツールのセッションは裏で継続動作し、次回selected_agentsに含まれた際に状態が表示される\n- Auto-Yesポーラー/response-pollerはcli_tool_id（アクティブツール）に基づいて動作するため、selected_agents変更の直接的な影響は受けない\n- ただし、cli_tool_idが自動更新される場合はセッション管理の切り替えが発生しうる点を注記"
+    },
+    {
+      "id": "F307",
+      "severity": "should_fix",
+      "category": "スケジュール実行",
+      "title": "ALLOWED_CLI_TOOLSとbuildCliArgs()のvibe-local対応が実装可能性に依存",
+      "description": "schedule-manager.ts L327でexecuteClaudeCommand()を呼び出しており、その内部でALLOWED_CLI_TOOLSホワイトリストチェック（L111）とbuildCliArgs()（L125）が実行される。\n\nIssueではALLOWED_CLI_TOOLSの拡張について「技術調査フェーズの結果に基づき判断」と記載しているが、以下の具体的リスクが特定される:\n\n1. ALLOWED_CLI_TOOLSにvibe-localを追加しても、buildCliArgs()のdefaultケースがclaude引数（'-p', message, '--output-format', 'text'）を返すため、vibe-localコマンドに不適切な引数が渡される\n2. executeClaudeCommand() L129でexecFile(cliToolId, args, ...)を呼び出すため、cliToolId='vibe-local'の場合、PATH上に'vibe-local'コマンドが存在する必要がある（Pythonスクリプトの場合は'python'コマンド経由が必要かもしれない）\n3. cmate-parser.tsのScheduleEntry.cliToolIdはstring型（CLIToolTypeではない）であるため、CMATE.mdに任意のツールIDを記載できてしまう（ALLOWED_CLI_TOOLSで制限されるが型レベルの保護がない）\n\n技術調査の結果次第ではALLOWED_CLI_TOOLSにvibe-localを追加しない判断もあり得るが、その場合でもbuildCliArgs()のdefaultフォールバック問題は残存する。",
+      "suggestion": "Issueの「ALLOWED_CLI_TOOLSの拡張方針」セクションに以下を追加:\n1. vibe-localをALLOWED_CLI_TOOLSに追加する場合、buildCliArgs()にvibe-local専用のcase分岐が必須\n2. vibe-localが非インタラクティブ実行モードを持たない場合、ALLOWED_CLI_TOOLSには追加しない（スケジュール実行不可）\n3. ScheduleEntry.cliToolIdの型をCLIToolTypeに厳格化するか、ALLOWED_CLI_TOOLSのバリデーションで十分とするかの判断\n4. execFile()の第1引数がcliToolIdであるため、vibe-localのコマンド名が'vibe-local'でない場合（例: 'python'）、executeClaudeCommand()のロジック変更が必要"
+    },
+    {
+      "id": "F308",
+      "severity": "should_fix",
+      "category": "型安全性",
+      "title": "ScheduleEntry.cliToolIdがstring型でCLIToolType制約がなく、型安全性が不十分",
+      "description": "src/types/cmate.ts L17でScheduleEntry.cliToolIdはstring型として定義されている:\n```typescript\ncliToolId: string;\n```\n\n同様に、claude-executor.ts L85のbuildCliArgs()もcliToolIdをstring型で受け取り、L107のexecuteClaudeCommand()もstring型である。\n\n現在はALLOWED_CLI_TOOLS（Set）でランタイムバリデーションを行っているが、CLIToolTypeに'vibe-local'を追加した場合、型レベルでの保護がないため以下のリスクがある:\n1. CMATE.mdパーサーが任意のstring値をcliToolIdとして受け入れ、バリデーションをALLOWED_CLI_TOOLSに委任している\n2. schedule-config.tsのDEFAULT_PERMISSIONSもRecord<string, string>であり、CLI_TOOL_IDSとの同期が保証されない\n\nこのIssueの範囲でCLIToolType統一を行うべきかは判断が必要だが、少なくとも影響範囲として認識すべき。",
+      "suggestion": "本Issueのスコープ外として明示するか、以下の型厳格化をリファクタリング対象に含める:\n- ScheduleEntry.cliToolId: string -> CLIToolType\n- buildCliArgs() cliToolId: string -> CLIToolType\n- executeClaudeCommand() cliToolId: string -> CLIToolType\n- DEFAULT_PERMISSIONS: Record<string, string> -> Partial<Record<CLIToolType, string>>\n\n型厳格化は破壊的変更ではないが、cmate-parser.tsでのパース時にCLIToolTypeへのキャストが必要になる。"
+    },
+    {
+      "id": "F309",
+      "severity": "should_fix",
+      "category": "影響ファイル",
+      "title": "models.tsのlastMessagesByCliとsessionStatusByCliの型変更がAPIレスポンス形式に影響",
+      "description": "Issueではmodels.tsの型定義をRecord<CLIToolType, ...>に変更するとしているが、この変更はAPIレスポンスのJSON構造に直接影響する:\n\n現在のAPIレスポンス（/api/worktrees/[id]）:\n```json\n{\n  \"sessionStatusByCli\": {\n    \"claude\": { \"isRunning\": true, ... },\n    \"codex\": { \"isRunning\": false, ... },\n    \"gemini\": { \"isRunning\": false, ... }\n  }\n}\n```\n\nvibe-local追加後:\n```json\n{\n  \"sessionStatusByCli\": {\n    \"claude\": { ... },\n    \"codex\": { ... },\n    \"gemini\": { ... },\n    \"vibe-local\": { ... }\n  }\n}\n```\n\nこの変更により:\n1. フロントエンド側のsessionStatusByCli参照箇所（WorktreeDetailRefactored.tsx、sidebar toBranchItem()）の更新が必要\n2. ハイフン付きキー'vibe-local'はJavaScriptオブジェクトのドット記法（obj.vibe-local）ではアクセスできず、ブラケット記法（obj['vibe-local']）が必要\n3. 既存のフロントエンドコードがsessionStatusByCli?.claudeのようにドット記法で参照している場合、vibe-localのみブラケット記法にする必要がある\n\nTypeScript型レベルではRecord<CLIToolType, ...>で統一されるため問題ないが、実装時にドット記法アクセスの存在を確認すべき。",
+      "suggestion": "技術的考慮事項に以下を追加:\n- vibe-localキーはハイフンを含むため、obj['vibe-local']形式でのアクセスが必要\n- TypeScriptではRecord<CLIToolType, ...>の場合、obj[tool]（変数アクセス）であれば問題ないが、直接リテラルアクセスの場合はobj['vibe-local']が必要\n- フロントエンドでfor...of CLI_TOOL_IDS等のイテレーションパターンを使用すれば、この問題は自動的に回避される"
+    },
+    {
+      "id": "F310",
+      "severity": "nice_to_have",
+      "category": "移行考慮",
+      "title": "既存ユーザーのDBマイグレーション時のデフォルト値と既存cli_tool_idの整合性",
+      "description": "Migration v18でselected_agentsカラムを追加する際、デフォルト値は'[\"claude\",\"codex\"]'とされている。しかし、既存ユーザーのworktreeでcli_tool_idが'gemini'に設定されている場合:\n- selected_agents = ['claude', 'codex'] (デフォルト)\n- cli_tool_id = 'gemini'\n\nこの状態では、Issueの整合性ルール「cli_tool_idがselected_agentsに含まれない場合はcli_tool_idをselected_agentsの先頭に自動更新」が適用されると、cli_tool_idが'claude'に強制変更される可能性がある。\n\nマイグレーション時にcli_tool_idの値を考慮してselected_agentsの初期値を設定する方が安全（例: cli_tool_idが'gemini'なら['gemini', 'claude']をデフォルトにする）。",
+      "suggestion": "Migration v18のupロジックで、既存worktreeのcli_tool_idを参照してselected_agentsの初期値を動的に設定する:\n```sql\n-- Step 1: カラム追加（デフォルト値なし）\nALTER TABLE worktrees ADD COLUMN selected_agents TEXT;\n\n-- Step 2: cli_tool_idに応じて初期値を設定\nUPDATE worktrees SET selected_agents = \n  CASE \n    WHEN cli_tool_id NOT IN ('claude', 'codex') \n    THEN json_array(cli_tool_id, 'claude')\n    ELSE '[\"claude\",\"codex\"]'\n  END;\n```\nまたは、整合性ルールをマイグレーション時には適用せず、UI操作時のみ適用する方針でもよい。"
+    },
+    {
+      "id": "F311",
+      "severity": "nice_to_have",
+      "category": "ドキュメント更新",
+      "title": "CLAUDE.mdの主要機能モジュール表にvibe-local関連の追加が必要",
+      "description": "CLAUDE.mdには各モジュールの詳細説明が網羅的に記載されているが、Issue #368の実装後は以下の追加・更新が必要:\n- src/lib/cli-tools/vibe-local.ts の追加\n- src/components/worktree/AgentSettingsPane.tsx の追加\n- CLI_TOOL_IDSの説明更新（'vibe-local'追加の旨）\n- 既存モジュール説明のIssue #368参照追加\n\nこれはIssue完了後のドキュメント更新作業であり、Issueの変更対象には含めなくてよいが、認識しておくべき。",
+      "suggestion": "Issueの変更対象ファイル一覧の末尾に「ドキュメント」カテゴリを追加:\n- CLAUDE.md: 主要機能モジュール表にvibe-local.ts、AgentSettingsPane.tsx追加（Issue完了後）"
+    },
+    {
+      "id": "F312",
+      "severity": "nice_to_have",
+      "category": "テスト",
+      "title": "MessageList.tsxのgetToolName()にvibe-local表示名のテストが必要",
+      "description": "MessageList.tsxのgetToolName()関数（L69-78、L406-415に2箇所存在）はclaude/codex/geminiのcase分岐を持つが、vibe-localのcase分岐がないとdefaultの'Assistant'が表示される。MessageListコンポーネントのテストが存在する場合、vibe-localツールからのメッセージの表示名テストが必要。\n\nまた、getToolName()が2箇所に重複定義されている点は、DRY原則の観点からユーティリティ関数として共通化する好機でもある。",
+      "suggestion": "MessageList.tsxのgetToolName()にvibe-localケースを追加し、可能であればユーティリティ関数として共通化する。受け入れ条件のテスト項目にMessageListの表示名テストを含める。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 6,
+  "nice_to_have_count": 3,
+  "overall_assessment": "Issue #368はStage 1レビュー後の更新によりハードコード箇所の網羅性・DB設計方針・テスト受け入れ条件が大幅に改善されている。しかし影響範囲分析の結果、以下の3つのMust Fix事項が特定された: (1) switch文のdefaultフォールバックにより、vibe-localが暗黙的にclaude扱いされる箇所が5箇所存在し、実行時バグの原因となりうる。(2) sidebar.tsのcliStatus型定義がclaude/codexに限定されており、selected_agentsの動的表示要件と矛盾する。(3) selected_agentsのJSON解析時のバリデーション戦略が未記載であり、セキュリティリスクがある。Should Fix事項としては、既存テストの破損リスク（8件以上の固定値アサーション）、cli_tool_id自動更新のAPI設計不明確、セッション管理の副作用未定義、ALLOWED_CLI_TOOLSのvibe-local対応、ScheduleEntryの型安全性不足、APIレスポンス形式変更の影響がある。全体として、vibe-local追加の影響範囲はIssueに記載されている以上に広範であり、特にswitch文のフォールバック問題とsidebar型定義の制限は設計段階での対応が必要。",
+  "code_references": [
+    {
+      "file": "src/lib/cli-tools/types.ts",
+      "relevance": "CLI_TOOL_IDS定義（single source of truth）、CLIToolType派生"
+    },
+    {
+      "file": "src/lib/cli-patterns.ts",
+      "relevance": "detectThinking()、getCliToolPatterns()のswitch文にvibe-localケースが必要"
+    },
+    {
+      "file": "src/lib/assistant-response-saver.ts",
+      "relevance": "cleanCliResponse()のswitch文にvibe-localケースが必要"
+    },
+    {
+      "file": "src/lib/claude-executor.ts",
+      "relevance": "ALLOWED_CLI_TOOLS、buildCliArgs()、executeClaudeCommand()への影響"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "relevance": "getToolName()のswitch文にvibe-localケースが必要（2箇所重複）"
+    },
+    {
+      "file": "src/types/sidebar.ts",
+      "relevance": "SidebarBranchItem.cliStatusの型定義がclaude/codexにハードコード"
+    },
+    {
+      "file": "src/types/models.ts",
+      "relevance": "sessionStatusByCli、lastMessagesByCliの型定義変更がAPIレスポンスに影響"
+    },
+    {
+      "file": "src/types/cmate.ts",
+      "relevance": "ScheduleEntry.cliToolIdがstring型でCLIToolType制約なし"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "relevance": "executeSchedule()がexecuteClaudeCommand()を呼び出し、ALLOWED_CLI_TOOLS制限を受ける"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "CLI_TOOL_IDSを使用した全ツールクリーンアップ、テストの固定値アサーション"
+    },
+    {
+      "file": "tests/unit/cli-tools/types-cli-tool-ids.test.ts",
+      "relevance": "CLI_TOOL_IDS.lengthの固定値アサーション（3）が破損"
+    },
+    {
+      "file": "tests/unit/cli-tools/manager.test.ts",
+      "relevance": "getAllTools().toHaveLength(3)の固定値アサーションが破損"
+    },
+    {
+      "file": "tests/unit/session-cleanup.test.ts",
+      "relevance": "killSessionFn呼び出し回数（3）の固定値アサーションが破損"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "relevance": "Migration v18の追加先、CURRENT_SCHEMA_VERSION更新"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "主要機能モジュール表の更新が必要（vibe-local.ts、AgentSettingsPane.tsx追加）"
+    },
+    {
+      "file": "locales/en/schedule.json",
+      "relevance": "Agentタブ関連のi18nキー追加が必要"
+    },
+    {
+      "file": "locales/ja/schedule.json",
+      "relevance": "同上（日本語翻訳）"
+    }
+  ]
+}

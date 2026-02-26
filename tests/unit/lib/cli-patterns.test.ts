@@ -13,6 +13,7 @@ import {
   getCliToolPatterns,
   detectThinking,
   stripAnsi,
+  stripBoxDrawing,
 } from '@/lib/cli-patterns';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -259,6 +260,60 @@ More text`;
         p => p.test('[Pasted text #1 +46 lines]')
       );
       expect(hasPastedTextPattern).toBe(true);
+    });
+  });
+
+  // Issue #368: stripBoxDrawing - Gemini CLI box-drawing border removal
+  describe('stripBoxDrawing', () => {
+    it('should remove border-only lines (╭──╮, ╰──╯)', () => {
+      const input = [
+        '\u256D\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256E',
+        '\u2502 content \u2502',
+        '\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256F',
+      ].join('\n');
+      const result = stripBoxDrawing(input);
+      const lines = result.split('\n');
+      expect(lines[0]).toBe('');
+      expect(lines[1]).toBe('content');
+      expect(lines[2]).toBe('');
+    });
+
+    it('should strip leading │ and trailing │ from content lines', () => {
+      const input = '\u2502 \u25CF 1. Allow once                \u2502';
+      const result = stripBoxDrawing(input);
+      expect(result).toBe('\u25CF 1. Allow once');
+    });
+
+    it('should pass through lines without box-drawing characters', () => {
+      const input = 'Normal text without borders';
+      expect(stripBoxDrawing(input)).toBe('Normal text without borders');
+    });
+
+    it('should handle full Gemini box-wrapped prompt', () => {
+      const input = [
+        '\u256D\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256E',
+        "\u2502 Allow execution of: 'git, cat'?    \u2502",
+        '\u2502                                     \u2502',
+        '\u2502 \u25CF 1. Allow once                     \u2502',
+        '\u2502   2. Allow for this session         \u2502',
+        '\u2502   3. No, suggest changes (esc)      \u2502',
+        '\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256F',
+      ].join('\n');
+      const result = stripBoxDrawing(input);
+      const lines = result.split('\n').filter(l => l.trim() !== '');
+      expect(lines).toContain("Allow execution of: 'git, cat'?");
+      expect(lines).toContain('\u25CF 1. Allow once');
+      expect(lines).toContain('  2. Allow for this session');
+      expect(lines).toContain('  3. No, suggest changes (esc)');
+    });
+
+    it('should handle │-only lines (vertical border)', () => {
+      const input = '\u2502';
+      expect(stripBoxDrawing(input)).toBe('');
+    });
+
+    it('should handle empty string', () => {
+      expect(stripBoxDrawing('')).toBe('');
     });
   });
 });

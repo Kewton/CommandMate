@@ -50,9 +50,11 @@ Naming / Terminology:
 
 ### 1.3 Implemented Features
 
-- **CLI Tool Support** (Implemented in Issue #4)
-  - Claude Code, Codex CLI support
+- **CLI Tool Support** (Implemented in Issue #4, extended in Issue #368)
+  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama) support
   - Extensible design via Strategy pattern
+  - Select 2 agents per worktree (`selected_agents` column)
+  - Vibe-Local supports Ollama model selection (`vibe_local_model` column)
 
 ---
 
@@ -360,6 +362,9 @@ Message format example:
 
 **Implementation Classes:**
 - `ClaudeTool` - Claude Code CLI
+- `CodexTool` - Codex CLI
+- `GeminiTool` - Gemini CLI (Issue #368)
+- `VibeLocalTool` - Vibe-Local / Ollama (Issue #368)
 
 **Management:**
 - `CLIToolManager` singleton class manages each tool instance
@@ -404,7 +409,9 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - Tables (conceptual):
   - **worktrees**:
     - id, name, path, last_message_summary, updated_at
-    - **cli_tool_id** (added: Issue #4) - CLI tool to use ('claude' | 'codex' | 'gemini')
+    - **cli_tool_id** (added: Issue #4) - CLI tool to use ('claude' | 'codex' | 'gemini' | 'vibe-local')
+    - **selected_agents** (added: Issue #368) - Selected 2 agents (JSON array, e.g., '["claude","vibe-local"]')
+    - **vibe_local_model** (added: Issue #368) - Ollama model name for Vibe-Local (nullable)
     - repository_path, repository_name, description
     - last_user_message, last_user_message_at
     - favorite, status, link

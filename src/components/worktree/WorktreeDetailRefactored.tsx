@@ -55,7 +55,8 @@ import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import type { Worktree, ChatMessage, PromptData, GitStatus } from '@/types/models';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import { deriveCliStatus } from '@/types/sidebar';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
@@ -122,11 +123,6 @@ const APP_VERSION_DISPLAY = process.env.NEXT_PUBLIC_APP_VERSION
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/** Capitalize first character of a string (e.g., 'claude' -> 'Claude') */
-function capitalizeFirst(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
 
 /** Convert worktree data to WorktreeStatus - consistent with sidebar */
 function deriveWorktreeStatus(
@@ -801,6 +797,14 @@ interface MobileContentProps {
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
   /** [Issue #294] CMATE setup callback */
   onCmateSetup?: () => void;
+  /** [Issue #368] Selected agents for Agent tab */
+  selectedAgents: [CLIToolType, CLIToolType];
+  /** [Issue #368] Callback when selected agents change */
+  onSelectedAgentsChange: (agents: [CLIToolType, CLIToolType]) => void;
+  /** [Issue #368] Current vibe-local model selection */
+  vibeLocalModel: string | null;
+  /** [Issue #368] Callback when vibe-local model changes */
+  onVibeLocalModelChange: (model: string | null) => void;
 }
 
 /** [Issue #21] Type for file search hook return */
@@ -828,6 +832,10 @@ const MobileContent = memo(function MobileContent({
   fileSearch,
   showToast,
   onCmateSetup,
+  selectedAgents,
+  onSelectedAgentsChange,
+  vibeLocalModel,
+  onVibeLocalModelChange,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -892,6 +900,10 @@ const MobileContent = memo(function MobileContent({
           <NotesAndLogsPane
             worktreeId={worktreeId}
             className="h-full"
+            selectedAgents={selectedAgents}
+            onSelectedAgentsChange={onSelectedAgentsChange}
+            vibeLocalModel={vibeLocalModel}
+            onVibeLocalModelChange={onVibeLocalModelChange}
           />
         </ErrorBoundary>
       );
@@ -948,8 +960,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const prevAutoYesEnabledRef = useRef<boolean>(false);
   // Issue #314: Pending stop reason toast (deferred until showToast is available)
   const [stopReasonPending, setStopReasonPending] = useState(false);
-  // Issue #4: CLI tool tab state (Claude/Codex)
-  const [activeCliTab, setActiveCliTab] = useState<CLIToolType>('claude');
+  // Issue #368: Selected agents state (initialized from API, drives terminal header tabs)
+  const [selectedAgents, setSelectedAgents] = useState<[CLIToolType, CLIToolType]>(DEFAULT_SELECTED_AGENTS);
+  // Issue #368: Vibe-local Ollama model state (initialized from API)
+  const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
+  // Issue #4: CLI tool tab state - initialized from selectedAgents[0]
+  const [activeCliTab, setActiveCliTab] = useState<CLIToolType>(DEFAULT_SELECTED_AGENTS[0]);
   // Issue #4: Ref to avoid polling callback recreation on tab switch
   const activeCliTabRef = useRef<CLIToolType>(activeCliTab);
   activeCliTabRef.current = activeCliTab;
@@ -993,6 +1009,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       }
       const data: Worktree = await response.json();
       setWorktree(data);
+      // Issue #368: Sync selectedAgents from API response
+      if (data.selectedAgents) {
+        setSelectedAgents(data.selectedAgents);
+      }
+      // Issue #368: Sync vibeLocalModel from API response
+      if ('vibeLocalModel' in data) {
+        setVibeLocalModel(data.vibeLocalModel ?? null);
+      }
       return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -1062,6 +1086,24 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
     }
   }, [worktreeId, actions, state.prompt.visible]);
+
+  // Issue #368: Sync activeCliTab when selectedAgents changes
+  // If current activeCliTab is no longer in selectedAgents, switch to first agent
+  useEffect(() => {
+    if (!selectedAgents.includes(activeCliTab)) {
+      setActiveCliTab(selectedAgents[0]);
+    }
+  }, [selectedAgents, activeCliTab]);
+
+  /** Issue #368: Callback for AgentSettingsPane to update selectedAgents */
+  const handleSelectedAgentsChange = useCallback((agents: [CLIToolType, CLIToolType]) => {
+    setSelectedAgents(agents);
+  }, []);
+
+  /** Issue #368: Callback for AgentSettingsPane to update vibeLocalModel */
+  const handleVibeLocalModelChange = useCallback((model: string | null) => {
+    setVibeLocalModel(model);
+  }, []);
 
   // Issue #4: Immediately refresh data when CLI tab changes (without polling restart)
   const prevCliTabRef = useRef<CLIToolType>(activeCliTab);
@@ -1789,10 +1831,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onMenuClick={toggle}
             hasUpdate={hasUpdate}
           />
-          {/* Issue #4: CLI Tool Tab Switcher (Claude/Codex) */}
+          {/* Issue #4/#368: CLI Tool Tab Switcher (dynamic from selectedAgents) */}
           <div className="px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between">
             <nav className="flex gap-4" aria-label="CLI Tool Selection">
-              {(['claude', 'codex'] as const).map((tool) => {
+              {selectedAgents.map((tool) => {
                 const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
                 const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
                 return (
@@ -1819,7 +1861,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                         aria-label={`${tool} status: ${statusConfig.label}`}
                       />
                     )}
-                    {capitalizeFirst(tool)}
+                    {getCliToolDisplayName(tool)}
                   </button>
                 );
               })}
@@ -1899,6 +1941,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                         <NotesAndLogsPane
                           worktreeId={worktreeId}
                           className="h-full"
+                          selectedAgents={selectedAgents}
+                          onSelectedAgentsChange={handleSelectedAgentsChange}
+                          vibeLocalModel={vibeLocalModel}
+                          onVibeLocalModelChange={handleVibeLocalModelChange}
                         />
                       </ErrorBoundary>
                     )}
@@ -1945,6 +1991,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 answering={state.prompt.answering}
                 onRespond={handlePromptRespond}
                 onDismiss={handlePromptDismiss}
+                cliToolName={getCliToolDisplayName(activeCliTab)}
               />
             </div>
           )}
@@ -1996,7 +2043,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           <Modal
             isOpen={showKillConfirm}
             onClose={handleKillCancel}
-            title={tWorktree('session.confirmEnd', { tool: capitalizeFirst(activeCliTab) })}
+            title={tWorktree('session.confirmEnd', { tool: getCliToolDisplayName(activeCliTab) })}
             size="sm"
             showCloseButton={true}
           >
@@ -2078,7 +2125,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           {/* Right: CLI tool tabs + End button */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <nav className="flex gap-2" aria-label="CLI Tool Selection">
-              {(['claude', 'codex'] as const).map((tool) => {
+              {selectedAgents.map((tool) => {
                 const toolStatus = deriveCliStatus(worktree?.sessionStatusByCli?.[tool]);
                 const statusConfig = SIDEBAR_STATUS_CONFIG[toolStatus];
                 return (
@@ -2103,7 +2150,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                         title={statusConfig.label}
                       />
                     )}
-                    {capitalizeFirst(tool)}
+                    {getCliToolDisplayName(tool)}
                   </button>
                 );
               })}
@@ -2149,6 +2196,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             fileSearch={fileSearch}
             showToast={showToast}
             onCmateSetup={handleCmateSetup}
+            selectedAgents={selectedAgents}
+            onSelectedAgentsChange={handleSelectedAgentsChange}
+            vibeLocalModel={vibeLocalModel}
+            onVibeLocalModelChange={handleVibeLocalModelChange}
           />
         </main>
 
@@ -2180,6 +2231,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             answering={state.prompt.answering}
             onRespond={handlePromptRespond}
             onDismiss={handlePromptDismiss}
+            cliToolName={getCliToolDisplayName(activeCliTab)}
           />
         )}
 
@@ -2223,7 +2275,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         <Modal
           isOpen={showKillConfirm}
           onClose={handleKillCancel}
-          title={tWorktree('session.confirmEnd', { tool: capitalizeFirst(activeCliTab) })}
+          title={tWorktree('session.confirmEnd', { tool: getCliToolDisplayName(activeCliTab) })}
           size="sm"
           showCloseButton={true}
         >

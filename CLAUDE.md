@@ -157,6 +157,9 @@ tests/
 | `src/hooks/useAutoYes.ts` | Auto-Yesクライアント側フック（重複応答防止対応。**Issue #287: promptType/defaultOptionNumber送信** - prompt-response APIリクエストにpromptType/defaultOptionNumberを含め、promptCheck再検証失敗時のフォールバック対応。**Issue #306: generatePromptKey()使用** - promptKey生成をprompt-key.tsの共通ユーティリティに統一） |
 | `src/lib/prompt-response-body-builder.ts` | プロンプト応答リクエストボディ構築ユーティリティ（Issue #287: buildPromptResponseBody()関数でpromptType/defaultOptionNumberを含むリクエストボディを生成、DRY原則対応、useAutoYes/WorktreeDetailRefactoredから共通化） |
 | `src/lib/cli-tools/` | CLIツール抽象化（Strategy パターン） |
+| `src/lib/cli-tools/types.ts` | CLIツール型定義（Issue #368: CLI_TOOL_IDS=['claude','codex','gemini','vibe-local']、CLIToolType、CLI_TOOL_DISPLAY_NAMES、getCliToolDisplayName()で表示名共通化、isCliToolType()型ガード、getCliToolDisplayNameSafe()フォールバック付きラッパー） |
+| `src/lib/cli-tools/vibe-local.ts` | Vibe Local CLIツール実装（Issue #368: VibeLocalTool、BaseCLITool継承、tmuxセッション管理） |
+| `src/lib/selected-agents-validator.ts` | エージェント選択バリデーター（Issue #368: validateAgentsPair()共通コア、parseSelectedAgents()DB読取用・フォールバック付き、validateSelectedAgentsInput()API入力用、DEFAULT_SELECTED_AGENTS=['claude','codex']） |
 | `src/lib/cli-tools/codex.ts` | Codex CLI tmuxセッション管理（Issue #212: 複数行メッセージのPasted text検知+Enter再送、getErrorMessage()ヘルパー抽出） |
 | `src/lib/session-cleanup.ts` | セッション/ポーラー/スケジューラー停止の一元管理（Facade パターン。**Issue #294: stopScheduleForWorktree()呼び出し追加**） |
 | `src/lib/env-sanitizer.ts` | 環境変数サニタイズユーティリティ（Issue #294: SENSITIVE_ENV_KEYS配列[CLAUDECODE, CM_AUTH_TOKEN_HASH, CM_AUTH_EXPIRE, CM_HTTPS_KEY, CM_HTTPS_CERT, CM_ALLOWED_IPS, CM_TRUST_PROXY, CM_DB_PATH] + sanitizeEnvForChildProcess()関数。S1-001/S4-001: CLAUDECODE除去ロジックの一元管理） |
@@ -200,7 +203,9 @@ tests/
 | `src/components/worktree/ContextMenu.tsx` | ファイル/ディレクトリコンテキストメニュー（Issue #162: 「移動」メニュー項目追加、FolderInputアイコン、onMoveコールバック。Issue #299: z-50除去、Z_INDEX.CONTEXT_MENU使用） |
 | `src/components/worktree/FileViewer.tsx` | ファイルビューア（Issue #162: コピーボタン追加、Copy/Checkアイコン切替、useMemo最適化、画像ファイル非表示。**Issue #302: 動画表示分岐追加、canCopyロジック修正（isVideo除外）**） |
 | `src/components/worktree/FileTreeView.tsx` | ファイルツリー表示（Issue #162: birthtime表示、formatRelativeTime()ロケール対応、sm:inline条件表示。Issue #300: 非空状態にツールバー追加、data-testid=file-tree-toolbar/toolbar-new-file-button/toolbar-new-directory-button、onNewFile('')/onNewDirectory('')でルートレベル作成） |
-| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（Issue #162: handleMoveハンドラー追加、MoveDialog統合、useFileOperations呼び出し。Issue #300: handleNewFile/handleNewDirectory/handleRename/handleDelete/handleFileInputChangeの5箇所でencodeURIComponentをencodePathForUrl()に置換） |
+| `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UIコンポーネント（Issue #368: checkbox UIで2ツールまで選択、2選択済み時未選択項目disabled、PATCH APIで永続化、getCliToolDisplayName()使用、MAX_SELECTED_AGENTS=2定数、useRef安定コールバック） |
+| `src/components/worktree/NotesAndLogsPane.tsx` | Notes/Logs/Agentサブタブコンテナ（Issue #368: SubTab型に'agent'追加、AgentSettingsPane描画、SUB_TABS設定配列でDRY化） |
+| `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（Issue #162: handleMoveハンドラー追加、MoveDialog統合、useFileOperations呼び出し。Issue #300: handleNewFile/handleNewDirectory/handleRename/handleDelete/handleFileInputChangeの5箇所でencodeURIComponentをencodePathForUrl()に置換。Issue #368: selectedAgents stateをAPIから取得、デスクトップ/モバイルのハードコード配列を動的置換、activeCliTab sync useEffect） |
 | `src/components/worktree/MemoCard.tsx` | メモカードコンポーネント（インライン編集・自動保存・削除ボタン。**Issue #321: コピーボタン追加**、Copy/Checkアイコン切替（2秒）、useRefタイマークリーンアップ（S1-002）、COPY_FEEDBACK_DURATION_MS定数、サイレントエラーハンドリング） |
 | `src/components/worktree/MemoPane.tsx` | メモ一覧コンテナ（最大5件、GET/POST/DELETE操作、ローディング・エラー状態管理） |
 | `src/components/worktree/MemoAddButton.tsx` | メモ追加ボタン（残件数表示、上限時disabled、ローディングインジケーター） |

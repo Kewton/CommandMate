@@ -16,11 +16,16 @@ import {
   stopAutoYesPolling,
   type AutoYesState,
 } from '@/lib/auto-yes-manager';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration } from '@/config/auto-yes-config';
 
-/** Allowed CLI tool IDs */
-const ALLOWED_CLI_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
+/**
+ * Allowed CLI tool IDs for interactive auto-yes (session-based).
+ * Derived from CLI_TOOL_IDS (Issue #368: DRY).
+ * Note: This differs from claude-executor.ts ALLOWED_CLI_TOOLS which is for
+ * non-interactive (-p flag) schedule execution. See R3-006.
+ */
+const ALLOWED_CLI_TOOLS: readonly CLIToolType[] = CLI_TOOL_IDS;
 
 /** Response shape for auto-yes state */
 interface AutoYesResponse {
@@ -60,7 +65,7 @@ function validateWorktreeExists(worktreeId: string): NextResponse | null {
 /** Validate CLI tool ID */
 function isValidCliTool(cliToolId: string | undefined): cliToolId is CLIToolType {
   if (!cliToolId) return false;
-  return ALLOWED_CLI_TOOLS.includes(cliToolId as CLIToolType);
+  return (ALLOWED_CLI_TOOLS as readonly string[]).includes(cliToolId);
 }
 
 export async function GET(

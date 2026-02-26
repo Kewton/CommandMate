@@ -10,6 +10,7 @@
 import React, { memo } from 'react';
 import type { SidebarBranchItem, BranchStatus } from '@/types/sidebar';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
+import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 
 // ============================================================================
 // Types
@@ -88,11 +89,16 @@ export const BranchListItem = memo(function BranchListItem({
     >
       {/* Main row: CLI status dots, info, unread */}
       <div className="flex items-center gap-3 w-full">
-        {/* CLI tool status dots */}
-        {branch.cliStatus && (
+        {/* CLI tool status dots (Issue #368: dynamic from selectedAgents) */}
+        {branch.cliStatus && Object.keys(branch.cliStatus).length > 0 && (
           <div className="flex items-center gap-1 flex-shrink-0" aria-label="CLI tool status">
-            <CliStatusDot status={branch.cliStatus.claude} label="Claude" />
-            <CliStatusDot status={branch.cliStatus.codex} label="Codex" />
+            {Object.entries(branch.cliStatus).map(([tool, status]) => (
+              <CliStatusDot
+                key={tool}
+                status={status ?? 'idle'}
+                label={getCliToolDisplayName(tool as CLIToolType)}
+              />
+            ))}
           </div>
         )}
 

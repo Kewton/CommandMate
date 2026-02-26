@@ -11,6 +11,7 @@ import { useLocale } from 'next-intl';
 import type { ChatMessage } from '@/types/models';
 import { format } from 'date-fns';
 import { getDateFnsLocale } from '@/lib/date-locale';
+import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
 
 export interface PromptMessageProps {
   message: ChatMessage;
@@ -93,7 +94,7 @@ export function PromptMessage({ message, onRespond }: PromptMessageProps) {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className="text-2xl">⚠️</span>
-            <span className="font-bold text-yellow-800">{t('confirmationFromClaude')}</span>
+            <span className="font-bold text-yellow-800">{t('confirmationFrom', { toolName: getCliToolDisplayNameSafe(message.cliToolId, 'Claude') })}</span>
           </div>
           <span className="text-xs text-yellow-600">{timestamp}</span>
         </div>

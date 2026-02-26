@@ -233,11 +233,12 @@ const TEXT_INPUT_PATTERNS: RegExp[] = [
 ];
 
 /**
- * Pattern for ❯ (U+276F) indicator lines used by Claude CLI to mark the default selection.
+ * Pattern for ❯ (U+276F) / ● (U+25CF) indicator lines used by CLI tools to mark the default selection.
+ * Claude CLI uses ❯, Gemini CLI uses ●.
  * Used in Pass 1 (existence check) and Pass 2 (option collection) of the 2-pass detection.
  * Anchored at both ends -- ReDoS safe (S4-001).
  */
-const DEFAULT_OPTION_PATTERN = /^\s*\u276F\s*(\d+)\.\s*(.+)$/;
+const DEFAULT_OPTION_PATTERN = /^\s*[\u276F\u25CF]\s*(\d+)\.\s*(.+)$/;
 
 /**
  * Pattern for normal option lines (no ❯ indicator, just leading whitespace + number).
@@ -675,7 +676,7 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
     // user input prompt (e.g., "❯ 1", "❯ /command") or idle prompt ("❯").
     // Anything above this line in the scrollback is historical conversation text,
     // not an active prompt. Stop scanning to prevent false positives.
-    if (collectedOptions.length === 0 && line.startsWith('\u276F')) {
+    if (collectedOptions.length === 0 && (line.startsWith('\u276F') || line.startsWith('\u25CF'))) {
       return noPromptResult(output);
     }
 

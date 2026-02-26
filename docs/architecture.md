@@ -52,9 +52,11 @@
 
 ### 1.3 実装済み機能
 
-- **CLI ツールのサポート** (Issue #4で実装完了)
-  - Claude Code, Codex CLI 対応
+- **CLI ツールのサポート** (Issue #4で実装完了、Issue #368で拡張)
+  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama) 対応
   - Strategy パターンによる拡張可能な設計
+  - worktree毎に2エージェントを選択可能（`selected_agents`カラム）
+  - Vibe-LocalはOllamaモデルを指定可能（`vibe_local_model`カラム）
 
 ---
 
@@ -361,6 +363,9 @@ tmux セッション / Claude プロセスが落ちた場合
 
 **実装クラス:**
 - `ClaudeTool` - Claude Code CLI
+- `CodexTool` - Codex CLI
+- `GeminiTool` - Gemini CLI (Issue #368)
+- `VibeLocalTool` - Vibe-Local / Ollama (Issue #368)
 
 **管理:**
 - `CLIToolManager` シングルトンクラスで各ツールインスタンスを管理
@@ -402,7 +407,9 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - テーブル（イメージ）:
 - worktrees:
 - id, name, path, last_message_summary, updated_at
-- **cli_tool_id** (追加: Issue #4) - 使用するCLI tool ('claude' | 'codex' | 'gemini')
+- **cli_tool_id** (追加: Issue #4) - 使用するCLI tool ('claude' | 'codex' | 'gemini' | 'vibe-local')
+- **selected_agents** (追加: Issue #368) - 選択中の2エージェント (JSON配列, 例: '["claude","vibe-local"]')
+- **vibe_local_model** (追加: Issue #368) - Vibe-Local用Ollamaモデル名 (nullable)
 - repository_path, repository_name, description
 - last_user_message, last_user_message_at
 - favorite, status, link

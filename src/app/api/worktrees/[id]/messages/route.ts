@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, getMessages } from '@/lib/db';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 
 export async function GET(
   request: NextRequest,
@@ -31,12 +32,12 @@ export async function GET(
 
     const before = beforeParam ? new Date(beforeParam) : undefined;
     const limit = limitParam ? parseInt(limitParam, 10) : 50;
-    const cliToolId = cliToolParam as 'claude' | 'codex' | 'gemini' | undefined;
+    const cliToolId = cliToolParam as CLIToolType | undefined;
 
-    // Validate CLI tool ID
-    if (cliToolId && !['claude', 'codex', 'gemini'].includes(cliToolId)) {
+    // Issue #368: Use CLI_TOOL_IDS instead of hardcoded array (DRY)
+    if (cliToolId && !(CLI_TOOL_IDS as readonly string[]).includes(cliToolId)) {
       return NextResponse.json(
-        { error: 'Invalid cliTool parameter (must be claude, codex, or gemini)' },
+        { error: `Invalid cliTool parameter (must be one of: ${CLI_TOOL_IDS.join(', ')})` },
         { status: 400 }
       );
     }

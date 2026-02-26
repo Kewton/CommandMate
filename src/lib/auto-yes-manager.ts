@@ -14,7 +14,7 @@ import { detectPrompt } from './prompt-detector';
 import { resolveAutoAnswer } from './auto-yes-resolver';
 import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
-import { stripAnsi, detectThinking, buildDetectPromptOptions } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions } from './cli-patterns';
 import { DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
 import { generatePromptKey } from './prompt-key';
 
@@ -508,7 +508,7 @@ export async function captureAndCleanOutput(
   // captureSessionOutput() default is 1000 lines, but tmux buffer capture
   // requires 5000 to avoid truncating long outputs.
   const output = await captureSessionOutput(worktreeId, cliToolId, 5000);
-  return stripAnsi(output);
+  return stripBoxDrawing(stripAnsi(output));
 }
 
 /**
@@ -582,7 +582,7 @@ export async function detectAndRespondToPrompt(
   try {
     // 1. Detect prompt
     const promptOptions = buildDetectPromptOptions(cliToolId);
-    const promptDetection = detectPrompt(cleanOutput, promptOptions);
+    const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
       // No prompt detected - reset lastAnsweredPromptKey (Issue #306)

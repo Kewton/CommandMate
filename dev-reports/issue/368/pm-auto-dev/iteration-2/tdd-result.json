@@ -1,0 +1,43 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 4001,
+    "passed": 4001,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/components/worktree/MessageList.tsx",
+    "locales/en/schedule.json",
+    "locales/ja/schedule.json",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/cli-tool/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/interrupt/route.ts",
+    "src/app/api/worktrees/[id]/messages/route.ts",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/start-polling/route.ts",
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx",
+    "tests/unit/components/worktree/NotesAndLogsPane.test.tsx"
+  ],
+  "commits": [
+    "f81b038: feat(368): add Agent settings UI, dynamic terminal tabs, and hardcode removal"
+  ],
+  "implemented_tasks": [
+    "Task 4.1: AgentSettingsPane new component with checkbox UI, max 2 selection, PATCH API persistence",
+    "Task 4.2: NotesAndLogsPane extended with 'agent' sub-tab rendering AgentSettingsPane",
+    "Task 4.3: WorktreeDetailRefactored dynamic rendering - selectedAgents state, hardcode removal, activeCliTab sync",
+    "Task 4.2-i18n: i18n keys added (en/ja) for agentTab, agentSettings, selectAgents, etc.",
+    "Task 0.2: Hardcode removal in 7 API routes (send, current-output, interrupt, auto-yes, cli-tool, start-polling, messages)",
+    "Task 0.4 partial: MessageList.tsx getToolName() and AutoYesToggle.tsx formatCliToolName() replaced with getCliToolDisplayName()"
+  ],
+  "message": "Iteration-2 TDD implementation complete. Created AgentSettingsPane component, extended NotesAndLogsPane with Agent tab, made WorktreeDetailRefactored terminal header tabs dynamic from selectedAgents, replaced hardcoded CLI tool arrays in 7 API routes with CLI_TOOL_IDS, and unified display name functions. All 4001 unit tests pass, 0 TypeScript errors, 0 ESLint errors, build succeeds."
+}

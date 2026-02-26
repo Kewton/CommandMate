@@ -1,0 +1,36 @@
+{
+  "issue_number": 368,
+  "title": "CMATEタブにAgent設定タブを追加し、表示するコーディングエージェントを選択可能にする",
+  "design_doc_path": "dev-reports/design/issue-368-agent-settings-design-policy.md",
+  "work_plan_path": "dev-reports/issue/368/work-plan.md",
+  "acceptance_criteria": [
+    "CMATEタブに「Agent」サブタブが表示される",
+    "Agentタブで利用可能なエージェント一覧（claude, codex, gemini, vibe-local）が表示される",
+    "ユーザーが2つのエージェントを選択できる",
+    "3つ以上の選択はできない（UIで制御）",
+    "選択状態がWorktree単位で永続化される",
+    "ターミナルヘッダーのエージェントタブが選択に応じて動的に切り替わる",
+    "デフォルト値は ['claude', 'codex']（既存動作の維持）",
+    "デスクトップ・モバイル両方で正しく動作する",
+    "vibe-localのtmuxセッション管理が他ツールと同様に機能する"
+  ],
+  "implementation_tasks": [
+    "Phase 0: CLI_TOOL_IDSハードコード一元化リファクタリング（getCliToolDisplayName追加、型定義CLIToolType化、APIルートハードコード除去）",
+    "Phase 1: selected-agents-validator.ts新規作成（parseSelectedAgents、validateSelectedAgentsInput、validateAgentsPair）",
+    "Phase 1: DBマイグレーション v18追加（selected_agentsカラム追加）",
+    "Phase 2: GET /api/worktrees/[id] にselectedAgentsフィールド追加",
+    "Phase 2: PATCH /api/worktrees/[id] にselectedAgents更新対応",
+    "Phase 3: vibe-local技術調査・VibeLocalTool実装",
+    "Phase 4: AgentSettingsPane新規作成（エージェント選択UI）",
+    "Phase 4: NotesAndLogsPane拡張（Agentサブタブ追加）",
+    "Phase 4: WorktreeDetailRefactored動的レンダリング（selectedAgents state）",
+    "Phase 4: sidebar.ts toBranchItem()更新（Partial<Record<CLIToolType, BranchStatus>>）"
+  ],
+  "target_coverage": 80,
+  "notes": [
+    "vibe-localはまず技術調査を実施し、調査結果によっては別Issueに分離する可能性あり",
+    "SQL IN句はIN句除去方式を採用（SQLインジェクション防止）",
+    "ALLOWED_CLI_TOOLSはselected_agentsと独立管理（スケジュール実行のホワイトリスト）",
+    "cli_tool_idとselected_agentsは別カラム（アクティブツールと表示ツールを分離）"
+  ]
+}

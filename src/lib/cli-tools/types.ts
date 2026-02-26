@@ -7,7 +7,7 @@
  * T2.1: Single source of truth for CLI tool IDs
  * CLIToolType is derived from this constant (DRY principle)
  */
-export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini'] as const;
+export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local'] as const;
 
 /**
  * CLIツールタイプ
@@ -19,7 +19,7 @@ export type CLIToolType = typeof CLI_TOOL_IDS[number];
  * SWE CLIツールの共通インターフェース
  */
 export interface ICLITool {
-  /** CLIツールの識別子 (claude, codex, gemini) */
+  /** CLIツールの識別子 (claude, codex, gemini, vibe-local) */
   readonly id: CLIToolType;
 
   /** CLIツールの表示名 */
@@ -74,6 +74,68 @@ export interface ICLITool {
    */
   interrupt(worktreeId: string): Promise<void>;
 }
+
+/**
+ * CLI tool display names for UI rendering
+ * Issue #368: Centralized display name mapping
+ *
+ * Usage: UI display (tab headers, message lists, settings).
+ * For internal logs/debug, use tool.name (BaseCLITool.name) instead.
+ */
+export const CLI_TOOL_DISPLAY_NAMES: Record<CLIToolType, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  gemini: 'Gemini',
+  'vibe-local': 'Vibe Local',
+};
+
+/**
+ * Check if a string is a valid CLIToolType
+ * Issue #368: Type guard for safe casting of untrusted CLI tool ID strings
+ *
+ * @param value - String to check
+ * @returns True if value is a valid CLIToolType
+ */
+export function isCliToolType(value: string): value is CLIToolType {
+  return (CLI_TOOL_IDS as readonly string[]).includes(value);
+}
+
+/**
+ * Get the display name for a CLI tool ID
+ * Issue #368: Centralized display name function for DRY compliance
+ *
+ * @param id - CLI tool type identifier
+ * @returns Human-readable display name
+ */
+export function getCliToolDisplayName(id: CLIToolType): string {
+  return CLI_TOOL_DISPLAY_NAMES[id] ?? id;
+}
+
+/**
+ * Get the display name for a CLI tool ID string, with fallback for unknown IDs
+ * Issue #368: Safe wrapper for UI components receiving untyped cliToolId strings
+ *
+ * Unlike getCliToolDisplayName(), this accepts optional/untyped strings and
+ * returns a fallback value ('Assistant') for null, undefined, or unknown IDs.
+ *
+ * @param cliToolId - Optional CLI tool ID string (may be untyped)
+ * @param fallback - Fallback display name for missing/unknown IDs (default: 'Assistant')
+ * @returns Human-readable display name or fallback
+ */
+export function getCliToolDisplayNameSafe(cliToolId?: string, fallback = 'Assistant'): string {
+  if (!cliToolId) return fallback;
+  if (isCliToolType(cliToolId)) return getCliToolDisplayName(cliToolId);
+  return fallback;
+}
+
+/**
+ * Ollama model name validation pattern.
+ * Allows: alphanumeric start, followed by alphanumeric, dots, underscores, colons, slashes, hyphens.
+ * Max 100 characters. Used for defense-in-depth validation at point of use.
+ *
+ * [SEC-001] Shared between API route validation and CLI command construction
+ */
+export const OLLAMA_MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/;
 
 /**
  * CLIツール情報

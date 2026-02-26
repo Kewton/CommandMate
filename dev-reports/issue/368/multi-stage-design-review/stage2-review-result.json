@@ -1,0 +1,93 @@
+{
+  "issue_number": 368,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_summary": "設計方針書とコードベースの整合性を5つの観点（設計-実装整合性、命名一貫性、インターフェース整合性、依存関係整合性、テスト整合性）でレビューした。Must Fix 2件、Should Fix 5件、Nice to Have 3件の指摘を検出。主要な問題は、PATCH APIの既存validCliToolsバリデーションがvibe-local未対応であること、getLastMessagesByCliBatch()の返値型がハードコードされていること、log-manager.tsのハードコードが変更対象から漏れていること、テスト設計で参照している存在しないテストファイルがあること。設計方針書は全体的に高品質で、Stage 1の指摘事項も適切に反映されているが、コードベースとの整合性で複数の不整合が確認された。",
+  "findings": [
+    {
+      "id": "R2-001",
+      "severity": "must_fix",
+      "category": "設計-実装整合性",
+      "title": "PATCH APIのvalidCliToolsにvibe-localが含まれない問題の設計漏れ",
+      "description": "設計書セクション4でPATCH APIにselectedAgents対応を追加する際、既存のcliToolIdバリデーション（route.ts L165: const validCliTools: CLIToolType[] = ['claude', 'codex', 'gemini']）がvibe-localを含んでいない。CLI_TOOL_IDSに'vibe-local'を追加した場合、cliToolIdのPATCHバリデーションも更新が必要だが、設計書のセクション14変更ファイル一覧では'ハードコード除去'としか記載されておらず、このバリデーション配列の更新が明示されていない。さらに、設計書セクション8-5ではALLOWED_CLI_TOOLSを現状維持としているが、validCliToolsとALLOWED_CLI_TOOLSの違い（前者はcliToolId設定のバリデーション、後者はスケジュール実行のホワイトリスト）が設計書内で明確に区別されていない。",
+      "suggestion": "設計書セクション4のPATCH API処理フローにcliToolIdバリデーションの更新手順を明記する。validCliToolsをCLI_TOOL_IDSから導出するか、少なくともvibe-localを含むように更新する旨を記載する。また、validCliTools（UI操作時のcliToolId設定バリデーション）とALLOWED_CLI_TOOLS（スケジュール実行ホワイトリスト）の役割の違いを設計書セクション9に明記する。"
+    },
+    {
+      "id": "R2-002",
+      "severity": "must_fix",
+      "category": "設計-実装整合性",
+      "title": "getLastMessagesByCliBatch()の返値型ハードコードが変更対象から漏れている",
+      "description": "src/lib/db.ts L157のgetLastMessagesByCliBatch()の返値型がMap<string, { claude?: string; codex?: string; gemini?: string }>とハードコードされており、設計書セクション14でR1-002対応としてmodels.tsのlastMessagesByCli型をPartial<Record<CLIToolType, string>>に変更する旨は記載されているが、db.ts内のgetLastMessagesByCliBatch()関数自体の返値型も同様にPartial<Record<CLIToolType, string>>に合わせる必要がある。この関数は変更対象ファイル一覧の'src/lib/db.ts - SQL IN句の動的化'には含まれているが、型変更の具体的な記載がない。",
+      "suggestion": "設計書セクション14の変更ファイル一覧にて、src/lib/db.tsの変更内容に'getLastMessagesByCliBatch()の返値型をPartial<Record<CLIToolType, string>>に変更'を明示的に追加する。また、L167のrow.cli_tool_id as CLIToolTypeキャストがvibe-local含む4つの値に対して安全であることをテストで担保する旨をテスト設計に含める。"
+    },
+    {
+      "id": "R2-003",
+      "severity": "should_fix",
+      "category": "設計-実装整合性",
+      "title": "log-manager.tsの表示名ハードコードが変更対象ファイルから漏れている",
+      "description": "src/lib/log-manager.tsのL91とL101にCLIツール表示名のハードコードがある（toolName = cliToolId === 'claude' ? 'Claude Code' : cliToolId === 'codex' ? 'Codex CLI' : 'Gemini CLI'）。設計書セクション6でgetCliToolDisplayName()による表示名統一を掲げているが、セクション14の変更ファイル一覧ではlog-manager.tsは'ハードコード除去'のみ記載で、表示名の統一対象には含まれていない。また、L187とL221でリテラル配列['claude', 'codex', 'gemini']がハードコードされている。",
+      "suggestion": "設計書セクション6の統一対象にlog-manager.tsのL91/L101/L137の3箇所を追加する。また、セクション14の変更ファイル一覧にsrc/lib/log-manager.tsのハードコード除去の具体的な対象（表示名ハードコード、リテラル配列）を明記する。"
+    },
+    {
+      "id": "R2-004",
+      "severity": "should_fix",
+      "category": "命名一貫性",
+      "title": "VibeLocalToolのname属性が設計書とBaseCLIToolパターンで不統一",
+      "description": "設計書セクション8-1でVibeLocalToolのname属性を'Vibe Local'と定義しているが、既存ツールのname属性パターンは'Claude Code'、'Codex CLI'、'Gemini CLI'と'ツール名 + 種別'のパターンになっている。一方、設計書セクション6のCLI_TOOL_DISPLAY_NAMESでは'vibe-local': 'Vibe Local'と定義している。VibeLocalTool.nameとgetCliToolDisplayName('vibe-local')が同じ'Vibe Local'を返すことは一貫しているが、他のツールではtool.name（例: 'Claude Code'）とgetCliToolDisplayName()の返値（例: 'Claude'）が異なることになる。これは名前の用途が異なるため（nameはツール正式名、displayNameはUI表示名）だが、設計書でこの使い分けが説明されていない。",
+      "suggestion": "設計書セクション6にtool.name（CLIToolInfo.name、正式名称）とgetCliToolDisplayName()（UI表示用短縮名）の使い分け方針を明記する。または、getCliToolDisplayName()のマッピングをtool.nameに合わせるか、用途を明確に分離する。"
+    },
+    {
+      "id": "R2-005",
+      "severity": "should_fix",
+      "category": "インターフェース整合性",
+      "title": "WorktreeインターフェースにselectedAgentsフィールドが未定義",
+      "description": "設計書セクション4でGET APIレスポンスにselectedAgentsフィールドを追加する旨が記載されているが、セクション14の変更ファイル一覧にsrc/types/models.tsへのselectedAgentsフィールド追加が含まれていない。現行のWorktreeインターフェースにselectedAgentsフィールドはなく、GET APIからの返却時にWorktree型と合わせてスプレッド（...worktree, selectedAgents: [...]）する形になるが、型安全性の観点からWorktreeインターフェースにselectedAgents?: [CLIToolType, CLIToolType]を追加するか、APIレスポンス専用型を定義するかの方針が設計書に明記されていない。",
+      "suggestion": "設計書セクション3またはセクション14で、WorktreeインターフェースにselectedAgents?: [CLIToolType, CLIToolType]フィールドを追加するか、GETレスポンスの型定義方針（Worktree型の拡張 or レスポンス専用型）を明記する。またdb.tsのgetWorktreeById()とgetWorktrees()がselected_agentsカラムを取得してparseSelectedAgents()で変換する処理の追加についても明示する。"
+    },
+    {
+      "id": "R2-006",
+      "severity": "should_fix",
+      "category": "依存関係整合性",
+      "title": "selected-agents-validator.tsからcli-tools/types.tsへの依存パスの層構造確認",
+      "description": "設計書セクション5でselected-agents-validator.tsの配置先をsrc/lib/に、依存先をsrc/lib/cli-tools/types.tsとしている。これはビジネスロジック層からCLIツール層への依存となるが、設計書セクション2のレイヤー構成図ではビジネスロジック層とCLIツール層が同列に描かれており、依存方向が明確でない。コードベースの実態としてはsrc/lib/配下のモジュール群からsrc/lib/cli-tools/types.tsへの依存は多数あり（db.ts、claude-executor.ts等）、パターンとしては確立されている。",
+      "suggestion": "現在のコードベースパターンに沿っており実装上の問題はないが、設計書セクション2のレイヤー構成図でビジネスロジック層からCLIツール層のtypes.tsへの依存（型定義のみ）を矢印で明示するとより正確になる。"
+    },
+    {
+      "id": "R2-007",
+      "severity": "should_fix",
+      "category": "テスト整合性",
+      "title": "テスト設計で参照している既存テストファイルの一部が存在しない",
+      "description": "設計書セクション11の既存テスト影響で参照しているtests/unit/models.test.ts、tests/unit/sidebar.test.ts、tests/integration/api/*.test.tsのうち、models.test.tsとsidebar.test.tsは実際にはコードベースに存在しない。存在するのはtests/integration/api/file-upload.test.tsとtests/integration/api/memos.test.tsのみで、worktrees APIの統合テストは現時点では存在しない。これは設計書が想定する既存テスト影響の前提が現実と異なることを意味する。",
+      "suggestion": "設計書セクション11の既存テスト影響を現状のテストファイル構成と照合して修正する。models.test.tsとsidebar.test.tsは'新規作成'として記載するか、影響を受ける既存テストとして正確なファイルパスを列挙する。また、tests/unit/cli-tools/types-cli-tool-ids.test.tsのCLI_TOOL_IDS.lengthアサーション（現在3を期待）の更新が必要であることを明記する。"
+    },
+    {
+      "id": "R2-008",
+      "severity": "nice_to_have",
+      "category": "設計-実装整合性",
+      "title": "sessionStatusByCli型のGETハンドラローカル定義が2箇所で重複",
+      "description": "設計書R1-002でsrc/app/api/worktrees/[id]/route.tsのGETハンドラ内ローカル型をCLIToolType参照に変更する旨が記載されているが、同じハードコード型定義がsrc/app/api/worktrees/route.ts（L36-40）にも全く同じ形で存在する。設計書セクション14の変更ファイル一覧にsrc/app/api/worktrees/route.tsは'ハードコード除去（L31のリテラル配列をCLI_TOOL_IDS参照に変更）'として含まれているが、L36-40のsessionStatusByCli型のハードコード除去は明記されていない。",
+      "suggestion": "設計書セクション14のsrc/app/api/worktrees/route.tsの変更内容に、L36-40のsessionStatusByCli型定義もPartial<Record<CLIToolType, ...>>への変更対象として明記する。理想的にはsessionStatusByCli型を共通型として抽出する方針を検討する。"
+    },
+    {
+      "id": "R2-009",
+      "severity": "nice_to_have",
+      "category": "命名一貫性",
+      "title": "getCliToolDisplayName()のnull合体演算子のフォールバック値の整合性",
+      "description": "設計書セクション6のgetCliToolDisplayName()実装では、CLI_TOOL_DISPLAY_NAMES[id] ?? idとnull合体演算子でidそのものにフォールバックする。一方、MessageList.tsxの既存getToolName()はdefaultケースで'Assistant'を返す。設計書ではMessageList.tsxの統一対象としているが、フォールバック値が変わる（'Assistant' -> id文字列）点について言及がない。これはStage 1のR1-008で検出済みであり、'今後の検討事項として記録'となっているが、実装時にMessageList.tsxの表示が変わりうることの影響が見落とされやすい。",
+      "suggestion": "設計書セクション6の統一対象セクションに、MessageList.tsxのgetToolName()置換時にデフォルトフォールバック値が'Assistant'からid文字列に変わることの影響を注記として追加する。必要であればgetCliToolDisplayName()にfallback引数を追加するか、MessageList.tsx側でフォールバック処理を残す方針を明記する。"
+    },
+    {
+      "id": "R2-010",
+      "severity": "nice_to_have",
+      "category": "インターフェース整合性",
+      "title": "cliToolIdAutoUpdatedフラグの既存PATCHレスポンス型との整合性",
+      "description": "設計書セクション4のR1-007対応でPATCHレスポンスにcliToolIdAutoUpdated?: booleanフラグを追加する方針が記載されているが、現行のPATCH APIレスポンスは{ ...updatedWorktree, isSessionRunning }の形式である。cliToolIdAutoUpdatedフラグをWorktree型に含めるのか、レスポンス専用の拡張として追加するのかが不明確。また、既存のクライアント側（api-client.ts等）がPATCHレスポンスの型をどう解釈しているかの確認が必要。",
+      "suggestion": "PATCHレスポンスの型を明示的に定義する（例: WorktreePatchResponse = Worktree & { isSessionRunning: boolean; cliToolIdAutoUpdated?: boolean }）か、または設計方針として既存パターンの{ ...worktree, extraFields }を維持する旨を明記する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 5,
+  "nice_to_have_count": 3,
+  "overall_assessment": "設計方針書は全体的に高品質で、Stage 1レビューの指摘事項も適切に反映されている。しかし、コードベースとの整合性チェックにおいて、PATCH APIのvalidCliToolsバリデーションの更新漏れ、getLastMessagesByCliBatch()の型ハードコード、log-manager.tsの表示名ハードコード、テストファイルの存在確認、WorktreeインターフェースへのselectedAgentsフィールド追加方針の欠如など、複数の不整合が検出された。これらは実装フェーズで発見されると手戻りが大きくなるため、設計書の段階で解消することを推奨する。"
+}

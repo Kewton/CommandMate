@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectSessionStatus } from '@/lib/status-detector';
 
@@ -28,16 +28,13 @@ export async function GET(request: NextRequest) {
 
     // Check session status and response status for each worktree
     const manager = CLIToolManager.getInstance();
-    const allCliTools: CLIToolType[] = ['claude', 'codex', 'gemini'];
+    // R1-003/R3-008: Use CLI_TOOL_IDS instead of hardcoded array
+    const allCliTools: readonly CLIToolType[] = CLI_TOOL_IDS;
 
     const worktreesWithStatus = await Promise.all(
       worktrees.map(async (worktree) => {
         // Check status for all CLI tools
-        const sessionStatusByCli: {
-          claude?: { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean };
-          codex?: { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean };
-          gemini?: { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean };
-        } = {};
+        const sessionStatusByCli: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>> = {};
 
         let anyRunning = false;
         let anyWaiting = false;

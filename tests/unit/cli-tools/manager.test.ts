@@ -43,6 +43,13 @@ describe('CLIToolManager', () => {
       expect(tool.command).toBe('gemini');
     });
 
+    it('should return VibeLocalTool for vibe-local', () => {
+      const tool = manager.getTool('vibe-local');
+      expect(tool.id).toBe('vibe-local');
+      expect(tool.name).toBe('Vibe Local');
+      expect(tool.command).toBe('vibe-local');
+    });
+
     it('should return the same instance for the same tool type', () => {
       const tool1 = manager.getTool('claude');
       const tool2 = manager.getTool('claude');
@@ -51,14 +58,15 @@ describe('CLIToolManager', () => {
   });
 
   describe('getAllTools', () => {
-    it('should return all three tools', () => {
+    it('should return all four tools', () => {
       const tools = manager.getAllTools();
-      expect(tools).toHaveLength(3);
+      expect(tools).toHaveLength(4);
 
       const ids = tools.map(t => t.id);
       expect(ids).toContain('claude');
       expect(ids).toContain('codex');
       expect(ids).toContain('gemini');
+      expect(ids).toContain('vibe-local');
     });
 
     it('should return tools in consistent order', () => {
@@ -68,6 +76,7 @@ describe('CLIToolManager', () => {
       expect(tools1[0].id).toBe(tools2[0].id);
       expect(tools1[1].id).toBe(tools2[1].id);
       expect(tools1[2].id).toBe(tools2[2].id);
+      expect(tools1[3].id).toBe(tools2[3].id);
     });
   });
 
@@ -96,12 +105,13 @@ describe('CLIToolManager', () => {
     it('should return info for all tools', async () => {
       const allInfo = await manager.getAllToolsInfo();
 
-      expect(allInfo).toHaveLength(3);
+      expect(allInfo).toHaveLength(4);
 
       const ids = allInfo.map(info => info.id);
       expect(ids).toContain('claude');
       expect(ids).toContain('codex');
       expect(ids).toContain('gemini');
+      expect(ids).toContain('vibe-local');
     });
 
     it('should include installation status for each tool', async () => {

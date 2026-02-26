@@ -1,0 +1,18 @@
+{
+  "status": "success",
+  "test_passed": 4011,
+  "test_failed": 0,
+  "typescript_errors": 0,
+  "lint_errors": 0,
+  "improvements": [
+    "Added isCliToolType() type guard to cli-tools/types.ts for safe runtime CLIToolType validation",
+    "Added getCliToolDisplayNameSafe() safe wrapper that handles undefined/unknown strings without unsafe casts",
+    "Removed duplicated getToolName() function from MessageList.tsx (was defined twice in two sub-components)",
+    "Removed formatCliToolName() from AutoYesToggle.tsx, replaced with centralized getCliToolDisplayNameSafe()",
+    "Eliminated unsafe 'as CLIToolType' casts in MessageList.tsx and AutoYesToggle.tsx display name logic",
+    "Refactored AgentSettingsPane handleCheckboxChange to use ref pattern, removing checkedIds from useCallback deps for stable callback identity",
+    "Extracted magic number 2 to MAX_SELECTED_AGENTS constant in AgentSettingsPane",
+    "Refactored NotesAndLogsPane tab buttons from 3 duplicated button blocks into data-driven SUB_TABS array with shared CSS constants",
+    "Added 10 new unit tests for isCliToolType() and getCliToolDisplayNameSafe() covering valid IDs, invalid IDs, edge cases, and custom fallbacks"
+  ]
+}

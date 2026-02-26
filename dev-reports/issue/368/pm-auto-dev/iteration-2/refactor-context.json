@@ -1,0 +1,32 @@
+{
+  "issue_number": 368,
+  "iteration": 2,
+  "refactor_targets": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/MessageList.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "src/app/api/worktrees/[id]/send/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/interrupt/route.ts",
+    "src/app/api/worktrees/[id]/auto-yes/route.ts",
+    "src/app/api/worktrees/[id]/cli-tool/route.ts",
+    "src/app/api/worktrees/[id]/start-polling/route.ts",
+    "src/app/api/worktrees/[id]/messages/route.ts",
+    "locales/en/schedule.json",
+    "locales/ja/schedule.json"
+  ],
+  "quality_metrics": {
+    "test_passed": 4001,
+    "typescript_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "SOLID原則への準拠確認（特にSRP: AgentSettingsPaneの責務分離）",
+    "不要なコメントや重複コードの除去",
+    "型安全性の最終確認（CLIToolType使用箇所）",
+    "既存コードパターンとの一貫性確保",
+    "WorktreeDetailRefactored.tsx の selectedAgents 関連ロジックの整理"
+  ]
+}

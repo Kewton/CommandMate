@@ -1,5 +1,6 @@
 {
   "confirmationFromClaude": "Confirmation from Claude",
+  "confirmationFrom": "Confirmation from {toolName}",
   "sending": "Sending...",
   "failedToRespond": "Failed to send response. Please try again.",
   "default": "Default",

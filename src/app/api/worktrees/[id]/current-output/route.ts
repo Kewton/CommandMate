@@ -8,16 +8,15 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, getSessionState } from '@/lib/db';
 import { detectPrompt } from '@/lib/prompt-detector';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { stripAnsi, buildDetectPromptOptions } from '@/lib/cli-patterns';
+import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/cli-patterns';
 import { detectSessionStatus } from '@/lib/status-detector';
 import { getAutoYesState, getLastServerResponseTimestamp, isValidWorktreeId } from '@/lib/auto-yes-manager';
 
-const SUPPORTED_TOOLS: CLIToolType[] = ['claude', 'codex', 'gemini'];
-
+/** Issue #368: Derive from CLI_TOOL_IDS (DRY) */
 function isCliTool(value: string | null): value is CLIToolType {
-  return !!value && (SUPPORTED_TOOLS as string[]).includes(value);
+  return !!value && (CLI_TOOL_IDS as readonly string[]).includes(value);
 }
 
 export async function GET(
@@ -99,7 +98,7 @@ export async function GET(
     let promptDetection: { isPrompt: boolean; cleanContent: string; promptData?: unknown } = { isPrompt: false, cleanContent: cleanOutput };
     if (!thinking) {
       const promptOptions = buildDetectPromptOptions(cliToolId);
-      promptDetection = detectPrompt(cleanOutput, promptOptions);
+      promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
     }
 
     // SF-004: isPromptWaiting uses statusResult.hasActivePrompt (15-line window) as

@@ -1,0 +1,51 @@
+{
+  "issue_number": 368,
+  "title": "CMATEタブにAgent設定タブを追加し、表示するコーディングエージェントを選択可能にする",
+  "iteration": 2,
+  "previous_iteration_summary": "Iteration-1でコアロジック（validator, DB migration v18, API拡張, 型定義, vibe-local stub）を実装済み。Iteration-2ではUIコンポーネントとハードコード除去を実施する。",
+  "design_doc_path": "dev-reports/design/issue-368-agent-settings-design-policy.md",
+  "work_plan_path": "dev-reports/issue/368/work-plan.md",
+  "acceptance_criteria": [
+    "CMATEタブに「Agent」サブタブが表示される",
+    "Agentタブで利用可能なエージェント一覧（claude, codex, gemini, vibe-local）が表示される",
+    "ユーザーが2つのエージェントを選択できる",
+    "3つ以上の選択はできない（UIで制御）",
+    "選択状態がWorktree単位で永続化される",
+    "ターミナルヘッダーのエージェントタブが選択に応じて動的に切り替わる",
+    "デフォルト値は ['claude', 'codex']（既存動作の維持）",
+    "デスクトップ・モバイル両方で正しく動作する"
+  ],
+  "implementation_tasks": [
+    "Task 4.1: AgentSettingsPane新規作成（src/components/worktree/AgentSettingsPane.tsx）",
+    "Task 4.2: NotesAndLogsPane拡張 - 'agent'サブタブ追加（src/components/worktree/NotesAndLogsPane.tsx）",
+    "Task 4.3: WorktreeDetailRefactored動的レンダリング - selectedAgents stateをAPIから取得してL1795/L2081のハードコード配列を置換",
+    "Task 4.2-i18n: i18nキー追加（locales/en/schedule.json、locales/ja/schedule.json）",
+    "Task 0.2: 残りAPIルートのハードコード除去（send/current-output/interrupt/auto-yes/cli-tool/start-polling/messages routes）",
+    "Task 0.4部分: log-manager.ts, standard-commands.ts, LogViewer.tsx, MessageList.tsx, AutoYesToggle.tsxのハードコード除去",
+    "Task 5.4: DBマイグレーション v18 単体テスト追加",
+    "Task 5.5: API結合テスト追加（selected_agents更新・取得）"
+  ],
+  "already_implemented": [
+    "src/lib/selected-agents-validator.ts（parseSelectedAgents, validateSelectedAgentsInput, validateAgentsPair）",
+    "src/lib/cli-tools/types.ts（CLI_TOOL_IDS含むvibe-local, getCliToolDisplayName）",
+    "src/lib/cli-tools/vibe-local.ts（VibeLocalTool stub）",
+    "src/lib/cli-tools/manager.ts（VibeLocalTool登録済み）",
+    "src/lib/db-migrations.ts（migration v18）",
+    "src/lib/db.ts（selectedAgents対応, updateSelectedAgents）",
+    "src/app/api/worktrees/[id]/route.ts（GET/PATCH selectedAgents対応）",
+    "src/app/api/worktrees/route.ts（CLI_TOOL_IDS使用）",
+    "src/types/models.ts（Partial<Record<CLIToolType,...>>）",
+    "src/types/sidebar.ts（dynamic cliStatus）",
+    "src/components/sidebar/BranchListItem.tsx（Optional Chaining）",
+    "src/lib/api-client.ts（CLIToolType使用）"
+  ],
+  "target_coverage": 80,
+  "notes": [
+    "NotesAndLogsPane.tsxのSubTabに'agent'を追加し、AgentSettingsPaneを描画する",
+    "WorktreeDetailRefactored.tsxでselectedAgents stateを追加し、APIからの取得結果でL1795/L2081のハードコード['claude','codex']を置換する",
+    "AgentSettingsPaneはcheckbox UIで2つまで選択可能、2選択済み時に未選択項目はdisabled",
+    "PATCH APIを呼び出してselectedAgentsを永続化する",
+    "i18nキー: agentSettings, selectAgents, agentTabLabel（en/ja両方）",
+    "残りAPIルートのバリデーション配列をCLI_TOOL_IDS参照に変更するだけ（ロジック変更なし）"
+  ]
+}

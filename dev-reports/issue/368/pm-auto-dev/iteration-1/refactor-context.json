@@ -1,0 +1,26 @@
+{
+  "issue_number": 368,
+  "refactor_targets": [
+    "src/lib/selected-agents-validator.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/vibe-local.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/db.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/types/models.ts",
+    "src/types/sidebar.ts"
+  ],
+  "quality_metrics": {
+    "test_passed": 3982,
+    "typescript_errors": 0,
+    "lint_errors": 0
+  },
+  "improvement_goals": [
+    "SOLID原則への準拠確認",
+    "不要なコメントや重複コードの除去",
+    "型安全性の最終確認",
+    "既存コードパターンとの一貫性確保",
+    "JSDocコメントの追加（公開APIのみ）"
+  ]
+}

@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { startPolling } from '@/lib/response-poller';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 
 interface StartPollingRequest {
   cliToolId: CLIToolType;
@@ -33,11 +33,10 @@ export async function POST(
     // Parse request body
     const body: StartPollingRequest = await request.json();
 
-    // Validate CLI tool ID
-    const validToolIds: CLIToolType[] = ['claude', 'codex', 'gemini'];
-    if (!body.cliToolId || !validToolIds.includes(body.cliToolId)) {
+    // Issue #368: Use CLI_TOOL_IDS instead of hardcoded array (DRY)
+    if (!body.cliToolId || !(CLI_TOOL_IDS as readonly string[]).includes(body.cliToolId)) {
       return NextResponse.json(
-        { error: `Invalid CLI tool ID. Must be one of: ${validToolIds.join(', ')}` },
+        { error: `Invalid CLI tool ID. Must be one of: ${CLI_TOOL_IDS.join(', ')}` },
         { status: 400 }
       );
     }

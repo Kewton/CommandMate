@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { detectPrompt, getAnswerInput } from '@/lib/prompt-detector';
 import type { DetectPromptOptions } from '@/lib/prompt-detector';
+import { stripBoxDrawing } from '@/lib/cli-patterns';
 import { isMultipleChoicePrompt, isYesNoPrompt } from '../helpers/prompt-type-guards';
 
 describe('Prompt Detector', () => {
@@ -2068,6 +2069,114 @@ Are you sure you want to continue? (yes/no)
         expect(result.isPrompt).toBe(true);
         expect(result.promptData?.type).toBe('multiple_choice');
       });
+    });
+  });
+
+  // ==========================================================================
+  // Gemini CLI ● (U+25CF) prompt detection
+  // Tests for detecting Gemini CLI multiple choice prompts that use ● marker
+  // ==========================================================================
+  describe('Gemini CLI ● (U+25CF) prompt detection', () => {
+    it('should detect Gemini CLI multiple choice prompt with ● marker', () => {
+      const output = [
+        'Do you want to allow this action?',
+        '\u25CF 1. Allow once',
+        '  2. Allow for this session',
+        '  3. No, suggest changes (esc)',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options.length).toBe(3);
+        expect(result.promptData.options[0].isDefault).toBe(true);
+        expect(result.promptData.options[0].label).toBe('Allow once');
+        expect(result.promptData.options[1].isDefault).toBe(false);
+        expect(result.promptData.options[1].label).toBe('Allow for this session');
+        expect(result.promptData.options[2].isDefault).toBe(false);
+        expect(result.promptData.options[2].label).toBe('No, suggest changes (esc)');
+      }
+    });
+
+    it('should detect Gemini ● prompt with trailing empty lines (tmux padding)', () => {
+      const output = [
+        'Allow tool_call: read_file?',
+        '\u25CF 1. Allow once',
+        '  2. Allow for this session',
+        '  3. No, suggest changes (esc)',
+        '',
+        '',
+        '',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options.length).toBe(3);
+        expect(result.promptData.options[0].isDefault).toBe(true);
+      }
+    });
+
+    it('should still detect Claude CLI ❯ prompt (regression)', () => {
+      const output = [
+        'Do you want to proceed?',
+        '\u276F 1. Yes',
+        '  2. No',
+        '  3. Cancel',
+      ].join('\n');
+
+      const result = detectPrompt(output);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options[0].isDefault).toBe(true);
+      }
+    });
+
+    it('should use ● as Pass 2 barrier when no options collected yet', () => {
+      // Scenario: Historical numbered list above an idle Gemini ● prompt
+      const output = [
+        '  Select an approach:',
+        '',
+        '  1. Option A',
+        '  2. Option B',
+        '',
+        '\u25CF ',
+      ].join('\n');
+      const result = detectPrompt(output, { requireDefaultIndicator: false });
+      expect(result.isPrompt).toBe(false);
+    });
+
+    it('should detect Gemini prompt after stripBoxDrawing() removes ╭─╮│╰─╯ borders', () => {
+      // Gemini CLI wraps prompts in box-drawing borders.
+      // After stripBoxDrawing(), the │ prefix/suffix is removed and detectPrompt() can match.
+      const boxedOutput = [
+        '\u256D\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256E',
+        "\u2502 Allow execution of: 'git, cat'?    \u2502",
+        '\u2502                                     \u2502',
+        '\u2502 \u25CF 1. Allow once                     \u2502',
+        '\u2502   2. Allow for this session         \u2502',
+        '\u2502   3. No, suggest changes (esc)      \u2502',
+        '\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256F',
+      ].join('\n');
+
+      const stripped = stripBoxDrawing(boxedOutput);
+      const result = detectPrompt(stripped);
+
+      expect(result.isPrompt).toBe(true);
+      expect(result.promptData?.type).toBe('multiple_choice');
+      if (isMultipleChoicePrompt(result.promptData)) {
+        expect(result.promptData.options.length).toBe(3);
+        expect(result.promptData.options[0].isDefault).toBe(true);
+        expect(result.promptData.options[0].label).toBe('Allow once');
+        expect(result.promptData.options[1].label).toBe('Allow for this session');
+        expect(result.promptData.options[2].label).toBe('No, suggest changes (esc)');
+      }
     });
   });
 

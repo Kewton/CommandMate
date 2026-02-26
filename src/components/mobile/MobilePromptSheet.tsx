@@ -44,6 +44,8 @@ export interface MobilePromptSheetProps {
   onRespond: (answer: string) => Promise<void>;
   /** Optional callback to dismiss the sheet */
   onDismiss?: () => void;
+  /** CLI tool display name (e.g., 'Claude', 'Gemini') for header */
+  cliToolName?: string;
 }
 
 /**
@@ -58,6 +60,7 @@ export function MobilePromptSheet({
   answering,
   onRespond,
   onDismiss,
+  cliToolName,
 }: MobilePromptSheetProps) {
   const { shouldRender, animationClass } = usePromptAnimation({
     visible: visible && promptData !== null,
@@ -179,6 +182,7 @@ export function MobilePromptSheet({
             answering={answering}
             onRespond={onRespond}
             labelId={labelId}
+            cliToolName={cliToolName}
           />
         </div>
       </div>
@@ -194,6 +198,7 @@ interface PromptContentProps {
   answering: boolean;
   onRespond: (answer: string) => Promise<void>;
   labelId: string;
+  cliToolName?: string;
 }
 
 /**
@@ -204,6 +209,7 @@ function PromptContent({
   answering,
   onRespond,
   labelId,
+  cliToolName,
 }: PromptContentProps) {
   const t = useTranslations('prompt');
   const [selectedOption, setSelectedOption] = useState<number | null>(() => {
@@ -258,7 +264,7 @@ function PromptContent({
     <div className="space-y-4">
       {/* Header */}
       <h3 id={labelId} className="text-lg font-semibold text-gray-900">
-        {t('confirmationFromClaude')}
+        {cliToolName ? t('confirmationFrom', { toolName: cliToolName }) : t('confirmationFromClaude')}
       </h3>
 
       {/* Instruction Text (context preceding the prompt) */}

@@ -17,13 +17,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { getGitStatus } from '@/lib/git-utils';
 
-/** Supported CLI tool IDs */
-const VALID_CLI_TOOL_IDS: CLIToolType[] = ['claude', 'codex', 'gemini'];
+/** Supported CLI tool IDs - derived from CLI_TOOL_IDS (Issue #368: DRY) */
+const VALID_CLI_TOOL_IDS: readonly CLIToolType[] = CLI_TOOL_IDS;
 
 /** Default CLI tool when not specified */
 const DEFAULT_CLI_TOOL: CLIToolType = 'claude';

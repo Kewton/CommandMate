@@ -46,6 +46,8 @@ export interface PromptPanelProps {
   onRespond: (answer: string) => Promise<void>;
   /** Optional callback to dismiss the panel */
   onDismiss?: () => void;
+  /** CLI tool display name (e.g., 'Claude', 'Gemini') for header */
+  cliToolName?: string;
 }
 
 /** Props for PromptPanelContent component */
@@ -55,6 +57,7 @@ interface PromptPanelContentProps {
   onRespond: (answer: string) => Promise<void>;
   onDismiss?: () => void;
   labelId: string;
+  cliToolName?: string;
 }
 
 /**
@@ -66,6 +69,7 @@ function PromptPanelContent({
   onRespond,
   onDismiss,
   labelId,
+  cliToolName,
 }: PromptPanelContentProps) {
   const t = useTranslations('prompt');
   const [selectedOption, setSelectedOption] = useState<number | null>(() => {
@@ -128,7 +132,7 @@ function PromptPanelContent({
       <div className="flex items-center justify-between">
         <h3 id={labelId} className="text-lg font-semibold text-yellow-800 flex items-center gap-2">
           <span className="text-xl" aria-hidden="true">?</span>
-          {t('confirmationFromClaude')}
+          {cliToolName ? t('confirmationFrom', { toolName: cliToolName }) : t('confirmationFromClaude')}
         </h3>
         {onDismiss && (
           <button
@@ -377,6 +381,7 @@ export function PromptPanel({
   answering,
   onRespond,
   onDismiss,
+  cliToolName,
 }: PromptPanelProps) {
   const { shouldRender, animationClass } = usePromptAnimation({
     visible: visible && promptData !== null,
@@ -406,6 +411,7 @@ export function PromptPanel({
           onRespond={onRespond}
           onDismiss={onDismiss}
           labelId={labelId}
+          cliToolName={cliToolName}
         />
       </div>
     </ErrorBoundary>

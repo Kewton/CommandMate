@@ -20,7 +20,7 @@
  *   - detectPrompt() is lightweight (regex-based, no I/O), so the cost is negligible
  */
 
-import { stripAnsi, detectThinking, getCliToolPatterns, buildDetectPromptOptions } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { CLIToolType } from './cli-tools/types';
 
@@ -139,7 +139,10 @@ export function detectSessionStatus(
   // AskUserQuestion-format prompts (>15 lines with option descriptions) to be
   // missed, preventing MobilePromptSheet from appearing.
   const promptOptions = buildDetectPromptOptions(cliToolId);
-  const promptDetection = detectPrompt(cleanOutput, promptOptions);
+  // Apply stripBoxDrawing() for Gemini CLI compatibility:
+  // Gemini wraps prompts in box-drawing characters (╭╮╰╯│─) which prevent
+  // detectPrompt() from recognizing the prompt content.
+  const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
   if (promptDetection.isPrompt) {
     return {
       status: 'waiting',

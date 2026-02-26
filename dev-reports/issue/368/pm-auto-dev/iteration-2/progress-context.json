@@ -1,0 +1,64 @@
+{
+  "issue_number": 368,
+  "iteration": 2,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "implemented_files": [
+        "src/components/worktree/AgentSettingsPane.tsx (新規)",
+        "tests/unit/components/worktree/AgentSettingsPane.test.tsx (新規)",
+        "tests/unit/components/worktree/NotesAndLogsPane.test.tsx (新規)",
+        "src/components/worktree/NotesAndLogsPane.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/MessageList.tsx",
+        "src/components/worktree/AutoYesToggle.tsx",
+        "locales/en/schedule.json",
+        "locales/ja/schedule.json",
+        "src/app/api/worktrees/[id]/send/route.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/app/api/worktrees/[id]/interrupt/route.ts",
+        "src/app/api/worktrees/[id]/auto-yes/route.ts",
+        "src/app/api/worktrees/[id]/cli-tool/route.ts",
+        "src/app/api/worktrees/[id]/start-polling/route.ts",
+        "src/app/api/worktrees/[id]/messages/route.ts"
+      ],
+      "test_passed": 4001,
+      "test_failed": 0,
+      "typescript_errors": 0,
+      "lint_errors": 0
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 8,
+      "criteria_total": 8,
+      "scenarios_passed": 13,
+      "scenarios_total": 13
+    },
+    "refactor": {
+      "status": "success",
+      "test_passed": 4011,
+      "test_failed": 0,
+      "typescript_errors": 0,
+      "lint_errors": 0,
+      "improvements": [
+        "isCliToolType()型ガード追加（cli-tools/types.ts）",
+        "getCliToolDisplayNameSafe()フォールバック付きラッパー追加",
+        "MessageList.tsxの重複getToolName()関数を除去",
+        "AutoYesToggle.tsxのformatCliToolName()を除去・統一",
+        "AgentSettingsPaneにMAX_SELECTED_AGENTS定数抽出",
+        "NotesAndLogsPaneのタブボタンをSUB_TABS配列でDRY化",
+        "10件の新規テスト追加（isCliToolType/getCliToolDisplayNameSafe）"
+      ]
+    }
+  },
+  "remaining_tasks": [
+    "Task 0.4残り: log-manager.ts, standard-commands.ts, LogViewer.tsx のハードコード除去",
+    "Task 0.5: ALLOWED_CLI_TOOLS整理（interactive/non-interactive分離）",
+    "Task 3.1: vibe-local技術調査（実際のCLI仕様確認）",
+    "Task 3.5: switch文exhaustive guard（cli-patterns.ts, assistant-response-saver.ts, claude-executor.ts）",
+    "Task 5.3: VibeLocalTool単体テスト",
+    "Task 5.4: DBマイグレーション v18 単体テスト",
+    "Task 5.5: API結合テスト（selected_agents更新・取得）",
+    "Task 5.6: 既存テストのCLI_TOOL_IDS.length更新"
+  ]
+}

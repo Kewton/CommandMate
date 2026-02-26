@@ -21,7 +21,8 @@ It's a step-by-step guide for first-time users.
 8. [Status Indicators](#status-indicators)
 9. [Markdown Log Viewer](#markdown-log-viewer)
 10. [Notes Feature](#notes-feature)
-11. [Mobile Access](#mobile-access)
+11. [Agent Settings](#agent-settings)
+12. [Mobile Access](#mobile-access)
 
 ---
 
@@ -288,6 +289,41 @@ Useful for recording work details and TODOs.
 1. Tap the **"Info"** tab in the tab bar at the bottom
 2. Edit in the **"Notes"** section
 3. Content is auto-saved
+
+---
+
+## Agent Settings
+
+Select which CLI agents to use for each worktree.
+
+### How to Configure
+
+1. Select a worktree
+2. Click the **"CMATE"** tab
+3. Click the **"Agent"** sub-tab
+4. Select **2** agents using the checkboxes
+5. Settings are saved automatically
+
+### Available Agents
+
+| Agent | Description |
+|-------|-------------|
+| **Claude** | Claude Code CLI |
+| **Codex** | OpenAI Codex CLI |
+| **Gemini** | Google Gemini CLI |
+| **Vibe-Local** | Ollama local LLM |
+
+- You must always select exactly **2** agents
+- The selected agents appear as tabs in the terminal header
+
+### Ollama Model Selection (Vibe-Local)
+
+When Vibe-Local is selected, you can specify which Ollama model to use.
+
+1. Choose a model from the **"Ollama Model"** selector in the Agent settings
+2. If Ollama is not running, "Ollama is not running" is displayed
+
+> **Note**: The selected model is also used for scheduled executions (CMATE.md).
 
 ---
 

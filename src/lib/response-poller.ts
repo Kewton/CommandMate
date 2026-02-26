@@ -30,7 +30,7 @@ import type { PromptDetectionResult } from './prompt-detector';
 import { recordClaudeConversation } from './conversation-logger';
 import type { CLIToolType } from './cli-tools/types';
 import { parseClaudeOutput } from './claude-output';
-import { getCliToolPatterns, stripAnsi, buildDetectPromptOptions, PASTED_TEXT_PATTERN } from './cli-patterns';
+import { getCliToolPatterns, stripAnsi, stripBoxDrawing, buildDetectPromptOptions, PASTED_TEXT_PATTERN } from './cli-patterns';
 
 /**
  * Polling interval in milliseconds (default: 2 seconds)
@@ -163,7 +163,7 @@ function detectPromptWithOptions(
   cliToolId: CLIToolType
 ): PromptDetectionResult {
   const promptOptions = buildDetectPromptOptions(cliToolId);
-  return detectPrompt(stripAnsi(output), promptOptions);
+  return detectPrompt(stripBoxDrawing(stripAnsi(output)), promptOptions);
 }
 
 /**
@@ -450,11 +450,12 @@ function extractResponse(
   const hasSeparator = separatorPattern.test(cleanOutputToCheck);
   const isThinking = thinkingPattern.test(cleanOutputToCheck);
 
-  // Codex/Gemini completion logic: prompt detected and not thinking (separator optional)
+  // Codex/Gemini/Vibe-Local completion logic: prompt detected and not thinking (separator optional)
   // - Codex: Interactive TUI, detects › prompt
-  // - Gemini: Non-interactive one-shot, detects shell prompt (%, $)
+  // - Gemini: Interactive REPL, detects > / ❯ prompt
+  // - Vibe-Local: Interactive REPL, detects > prompt
   // Claude: require both prompt and separator
-  const isCodexOrGeminiComplete = (cliToolId === 'codex' || cliToolId === 'gemini') && hasPrompt && !isThinking;
+  const isCodexOrGeminiComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
 
   if (isCodexOrGeminiComplete || isClaudeComplete) {
@@ -803,11 +804,17 @@ export function startPolling(worktreeId: string, cliToolId: CLIToolType): void {
   // Record start time
   pollingStartTimes.set(pollerKey, Date.now());
 
-  // Start polling
-  const interval = setInterval(async () => {
-    const startTime = pollingStartTimes.get(pollerKey);
+  // Start polling with setTimeout chain to prevent race conditions
+  scheduleNextResponsePoll(worktreeId, cliToolId);
+}
 
+/** Schedule next checkForResponse() after current one completes (setTimeout chain) */
+function scheduleNextResponsePoll(worktreeId: string, cliToolId: CLIToolType): void {
+  const pollerKey = getPollerKey(worktreeId, cliToolId);
+
+  const timerId = setTimeout(async () => {
     // Check if max duration exceeded
+    const startTime = pollingStartTimes.get(pollerKey);
     if (startTime && Date.now() - startTime > MAX_POLLING_DURATION) {
       stopPolling(worktreeId, cliToolId);
       return;
@@ -819,9 +826,15 @@ export function startPolling(worktreeId: string, cliToolId: CLIToolType): void {
     } catch (error: unknown) {
       console.error(`[Poller] Error:`, error);
     }
+
+    // Schedule next poll ONLY after current one completes
+    // Guard: only if poller is still active (not stopped during checkForResponse)
+    if (activePollers.has(pollerKey)) {
+      scheduleNextResponsePoll(worktreeId, cliToolId);
+    }
   }, POLLING_INTERVAL);
 
-  activePollers.set(pollerKey, interval);
+  activePollers.set(pollerKey, timerId);
 }
 
 /**
@@ -837,10 +850,10 @@ export function startPolling(worktreeId: string, cliToolId: CLIToolType): void {
  */
 export function stopPolling(worktreeId: string, cliToolId: CLIToolType): void {
   const pollerKey = getPollerKey(worktreeId, cliToolId);
-  const interval = activePollers.get(pollerKey);
+  const timerId = activePollers.get(pollerKey);
 
-  if (interval) {
-    clearInterval(interval);
+  if (timerId) {
+    clearTimeout(timerId);
     activePollers.delete(pollerKey);
     pollingStartTimes.delete(pollerKey);
   }

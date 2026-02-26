@@ -15,6 +15,7 @@
 import { readFileSync, realpathSync } from 'fs';
 import path from 'path';
 import type { ScheduleEntry, CmateConfig } from '@/types/cmate';
+import { isCliToolType } from '@/lib/cli-tools/types';
 import {
   CLAUDE_PERMISSIONS,
   CODEX_SANDBOXES,
@@ -248,15 +249,39 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       enabledStr === '' ||
       enabledStr.toLowerCase() === 'true';
 
-    // Parse permission with validation
+    // Parse and validate CLI tool ID [SEC-002]
     const resolvedCliToolId = cliToolId?.trim() || 'claude';
+    if (!isCliToolType(resolvedCliToolId)) {
+      console.warn(
+        `[cmate-parser] Skipping entry "${sanitizedName}" with invalid CLI tool: "${resolvedCliToolId}"`
+      );
+      continue;
+    }
     const defaultPermission = DEFAULT_PERMISSIONS[resolvedCliToolId] ?? '';
     let permission = permissionStr?.trim() || defaultPermission;
 
     // Validate permission against allowed values
-    const allowedValues: readonly string[] =
-      resolvedCliToolId === 'codex' ? CODEX_SANDBOXES : CLAUDE_PERMISSIONS;
-    if (permission && !allowedValues.includes(permission)) {
+    let allowedValues: readonly string[];
+    switch (resolvedCliToolId) {
+      case 'codex':
+        allowedValues = CODEX_SANDBOXES;
+        break;
+      case 'gemini':
+      case 'vibe-local':
+        // No permission flags for gemini/vibe-local; only empty string is valid
+        allowedValues = [];
+        if (permission) {
+          console.warn(
+            `[cmate-parser] Permission "${permission}" ignored for ${resolvedCliToolId} in entry "${sanitizedName}" (no permission flags supported)`
+          );
+          permission = '';
+        }
+        break;
+      default:
+        allowedValues = CLAUDE_PERMISSIONS;
+        break;
+    }
+    if (allowedValues.length > 0 && permission && !allowedValues.includes(permission)) {
       console.warn(
         `[cmate-parser] Invalid permission "${permission}" for ${resolvedCliToolId} in entry "${sanitizedName}", using default "${defaultPermission}"`
       );

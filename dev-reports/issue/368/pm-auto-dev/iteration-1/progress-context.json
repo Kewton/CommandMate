@@ -1,0 +1,55 @@
+{
+  "issue_number": 368,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "implemented_files": [
+        "src/lib/selected-agents-validator.ts (新規)",
+        "src/lib/cli-tools/vibe-local.ts (新規)",
+        "tests/unit/selected-agents-validator.test.ts (新規)",
+        "tests/unit/cli-tools/display-name.test.ts (新規)",
+        "src/lib/cli-tools/types.ts",
+        "src/lib/cli-tools/manager.ts",
+        "src/lib/db-migrations.ts",
+        "src/lib/db.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/app/api/worktrees/route.ts",
+        "src/types/models.ts",
+        "src/types/sidebar.ts",
+        "src/components/sidebar/BranchListItem.tsx",
+        "src/lib/api-client.ts"
+      ],
+      "test_passed": 3982,
+      "test_failed": 0,
+      "typescript_errors": 0,
+      "lint_errors": 0
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 12,
+      "criteria_total": 12
+    },
+    "refactor": {
+      "status": "success",
+      "test_passed": 3984,
+      "test_failed": 0,
+      "typescript_errors": 0,
+      "lint_errors": 0,
+      "improvements": [
+        "sidebar.ts toBranchItem()を動的化（selectedAgentsベースのcliStatus生成）",
+        "route.ts PATCH ハンドラの非nullアサーション除去",
+        "JSDocコメント更新（vibe-local追加を反映）",
+        "CLAUDE.md更新（新規モジュール追加）"
+      ]
+    }
+  },
+  "remaining_tasks": [
+    "Phase 0完全実施: 残りAPIルートのハードコード除去（11ファイル）",
+    "Phase 4: AgentSettingsPane新規作成（UI）",
+    "Phase 4: NotesAndLogsPane拡張（Agentサブタブ）",
+    "Phase 4: WorktreeDetailRefactored動的レンダリング",
+    "Phase 3: vibe-local技術調査（実際のCLI仕様確認）",
+    "i18n対応（locales/en/schedule.json、locales/ja/schedule.json）"
+  ]
+}

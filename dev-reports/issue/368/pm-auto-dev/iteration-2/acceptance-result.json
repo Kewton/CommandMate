@@ -1,0 +1,133 @@
+{
+  "status": "passed",
+  "criteria_passed": 8,
+  "criteria_total": 8,
+  "scenario_results": [
+    {
+      "scenario": "シナリオ1: NotesAndLogsPaneにAgentサブタブボタンが存在する",
+      "status": "passed",
+      "notes": "NotesAndLogsPane.tsx line 82-92: 'agent' sub-tab button exists with t('agentTab') label, SubTab type includes 'agent'"
+    },
+    {
+      "scenario": "シナリオ2: Agentタブクリック時にAgentSettingsPaneが表示される",
+      "status": "passed",
+      "notes": "NotesAndLogsPane.tsx line 103-108: activeSubTab === 'agent' renders AgentSettingsPane with worktreeId, selectedAgents, onSelectedAgentsChange props"
+    },
+    {
+      "scenario": "シナリオ3: AgentSettingsPaneに全CLIツール（claude, codex, gemini, vibe-local）のチェックボックスが表示される",
+      "status": "passed",
+      "notes": "AgentSettingsPane.tsx line 96: CLI_TOOL_IDS.map() iterates all 4 tools; line 112: each renders checkbox with data-testid='agent-checkbox-{toolId}' and aria-label from getCliToolDisplayName()"
+    },
+    {
+      "scenario": "シナリオ4: 2つ選択済み時、未選択のチェックボックスがdisabledになる",
+      "status": "passed",
+      "notes": "AgentSettingsPane.tsx line 84: isMaxSelected = checkedIds.size >= 2; line 98: isDisabled = !isChecked && isMaxSelected; line 116: disabled={isDisabled || saving}"
+    },
+    {
+      "scenario": "シナリオ5: チェックボックス変更時にPATCH /api/worktrees/:idが呼ばれる",
+      "status": "passed",
+      "notes": "AgentSettingsPane.tsx line 58-78: When next.size === 2, calls fetch PATCH /api/worktrees/{worktreeId} with body { selectedAgents: pair }. API route.ts line 194+ validates and persists via validateSelectedAgentsInput()"
+    },
+    {
+      "scenario": "シナリオ6: WorktreeDetailRefactoredでselectedAgentsがAPIから取得される",
+      "status": "passed",
+      "notes": "WorktreeDetailRefactored.tsx line 1002-1004: fetchWorktree() syncs selectedAgents from data.selectedAgents; line 956: state initialized with DEFAULT_SELECTED_AGENTS=['claude','codex']"
+    },
+    {
+      "scenario": "シナリオ7: デスクトップターミナルヘッダーのタブがselectedAgentsに基づいて動的に表示される",
+      "status": "passed",
+      "notes": "WorktreeDetailRefactored.tsx line 1818: selectedAgents.map() renders desktop tab buttons with getCliToolDisplayName(tool)"
+    },
+    {
+      "scenario": "シナリオ8: モバイルターミナルヘッダーのタブがselectedAgentsに基づいて動的に表示される",
+      "status": "passed",
+      "notes": "WorktreeDetailRefactored.tsx line 2106: selectedAgents.map() renders mobile tab buttons; line 2177: MobileContent receives selectedAgents prop"
+    },
+    {
+      "scenario": "シナリオ9: selectedAgents外のactiveCliTabが変更された場合、selectedAgents[0]にリセットされる",
+      "status": "passed",
+      "notes": "WorktreeDetailRefactored.tsx line 1076-1082: useEffect watches [selectedAgents, activeCliTab] and resets to selectedAgents[0] if activeCliTab is not in selectedAgents"
+    },
+    {
+      "scenario": "シナリオ10: 7つのAPIルートファイルでCLI_TOOL_IDSがハードコード配列を置換している",
+      "status": "passed",
+      "notes": "11 API route files import and use CLI_TOOL_IDS: send/route.ts, cli-tool/route.ts, current-output/route.ts, auto-yes/route.ts, messages/route.ts, start-polling/route.ts, interrupt/route.ts, kill-session/route.ts, [id]/route.ts, worktrees/route.ts, slash-commands/route.ts. No hardcoded ['claude','codex','gemini','vibe-local'] arrays found in API routes."
+    },
+    {
+      "scenario": "シナリオ11: getCliToolDisplayName()がMessageList.tsxとAutoYesToggle.tsxで統一使用されている",
+      "status": "passed",
+      "notes": "MessageList.tsx line 21: imports getCliToolDisplayName; line 70-72: getToolName() delegates to getCliToolDisplayName(); line 399-401: same pattern in MessageList function body. AutoYesToggle.tsx line 17: imports getCliToolDisplayName; line 44-47: formatCliToolName() delegates to getCliToolDisplayName()"
+    },
+    {
+      "scenario": "シナリオ12: i18nキー（agentTab, agentSettings, selectAgents）がen/ja両方に存在する",
+      "status": "passed",
+      "notes": "locales/en/schedule.json: agentTab='Agent', agentSettings='Agent Settings', selectAgents='Select 2 agents to display in the terminal header tabs.' locales/ja/schedule.json: agentTab='Agent', agentSettings='エージェント設定', selectAgents='ターミナルヘッダーのタブに表示するエージェントを2つ選択してください。'"
+    },
+    {
+      "scenario": "シナリオ13: 全ユニットテストがパスする（4001件）",
+      "status": "passed",
+      "notes": "npm run test:unit: 195 test files passed, 4001 tests passed, 7 skipped, 0 failed. Duration 6.49s."
+    }
+  ],
+  "test_passed": 4001,
+  "test_failed": 0,
+  "typescript_errors": 0,
+  "lint_errors": 0,
+  "acceptance_criteria_status": [
+    {
+      "criterion": "CMATEタブに「Agent」サブタブが表示される",
+      "verified": true,
+      "evidence": "NotesAndLogsPane.tsx: SubTab type includes 'agent', button with t('agentTab') renders agent sub-tab"
+    },
+    {
+      "criterion": "Agentタブで利用可能なエージェント一覧（claude, codex, gemini, vibe-local）が表示される",
+      "verified": true,
+      "evidence": "AgentSettingsPane.tsx: CLI_TOOL_IDS.map() renders all 4 tools with checkboxes and display names"
+    },
+    {
+      "criterion": "ユーザーが2つのエージェントを選択できる",
+      "verified": true,
+      "evidence": "AgentSettingsPane.tsx: checkedIds state tracks selections, persists when size === 2"
+    },
+    {
+      "criterion": "3つ以上の選択はできない（UIで制御）",
+      "verified": true,
+      "evidence": "AgentSettingsPane.tsx: isMaxSelected = checkedIds.size >= 2 disables unchecked checkboxes"
+    },
+    {
+      "criterion": "選択状態がWorktree単位で永続化される",
+      "verified": true,
+      "evidence": "PATCH /api/worktrees/[id] persists selectedAgents to DB; validateSelectedAgentsInput() validates; parseSelectedAgents() reads from DB with fallback"
+    },
+    {
+      "criterion": "ターミナルヘッダーのエージェントタブが選択に応じて動的に切り替わる",
+      "verified": true,
+      "evidence": "WorktreeDetailRefactored.tsx: selectedAgents.map() generates desktop (line 1818) and mobile (line 2106) tab buttons dynamically"
+    },
+    {
+      "criterion": "デフォルト値は ['claude', 'codex']（既存動作の維持）",
+      "verified": true,
+      "evidence": "selected-agents-validator.ts: DEFAULT_SELECTED_AGENTS = ['claude', 'codex']; WorktreeDetailRefactored.tsx initializes state with DEFAULT_SELECTED_AGENTS"
+    },
+    {
+      "criterion": "デスクトップ・モバイル両方で正しく動作する",
+      "verified": true,
+      "evidence": "Desktop: line 1818 selectedAgents.map(); Mobile: line 2106 selectedAgents.map() + MobileContent receives selectedAgents prop at line 2177"
+    }
+  ],
+  "evidence_files": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/selected-agents-validator.ts",
+    "src/components/worktree/MessageList.tsx",
+    "src/components/worktree/AutoYesToggle.tsx",
+    "locales/en/schedule.json",
+    "locales/ja/schedule.json",
+    "tests/unit/selected-agents-validator.test.ts",
+    "tests/unit/cli-tools/display-name.test.ts",
+    "tests/unit/cli-tools/types-cli-tool-ids.test.ts"
+  ],
+  "message": "すべての受入条件を満たしています。13シナリオ全てPASSED、4001ユニットテスト全パス、TypeScriptエラー0件、ESLintエラー0件。"
+}
