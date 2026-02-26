@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-02-26
+
+### Added
+- Agent settings feature with multi-CLI tool support (Issue #368)
+  - `AgentSettingsPane` component with checkbox UI for selecting up to 2 CLI tools
+  - Gemini CLI support with interactive REPL mode and trust folder auto-handling
+  - vibe-local (Ollama) CLI support with interactive REPL mode and model selection
+  - `selected-agents-validator.ts` for agent selection validation
+  - Dynamic terminal tabs based on selected agents
+  - DB migration #19: `selected_agents` column in worktrees table
+  - PATCH API for persisting agent selection per worktree
+  - Ollama model list API (`/api/ollama/models`)
+  - CMATE schedule execution support for Gemini and vibe-local
+  - `stripBoxDrawing()` for Gemini CLI box-bordered prompt detection
+  - CLI tool display names centralized via `getCliToolDisplayName()`
+
+### Fixed
+- Cache-Control: no-store header added to API routes
+- Worktree patch validation and agent settings sync hardened
+- Gemini CLI box-bordered prompt detection with `stripBoxDrawing()`
+
+### Changed
+- README optimized for GitHub star conversion
+- Feature comparison tables updated with Token Authentication, Scheduled Execution, and Remote Control
+
 ## [0.3.2] - 2026-02-24
 
 ### Added
@@ -565,7 +590,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.2...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/Kewton/CommandMate/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Kewton/CommandMate/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Kewton/CommandMate/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Kewton/CommandMate/compare/v0.2.13...v0.3.0
