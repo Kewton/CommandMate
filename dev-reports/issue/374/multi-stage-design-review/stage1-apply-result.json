@@ -1,0 +1,83 @@
+{
+  "issue_number": 374,
+  "stage": 1,
+  "applied_at": "2026-02-28",
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": [
+    "S1-005",
+    "S1-001",
+    "S1-004",
+    "S1-007",
+    "S1-002",
+    "S1-003",
+    "S1-006",
+    "S1-008"
+  ],
+  "skipped_findings": [],
+  "reflected_items": {
+    "must_fix": [
+      {
+        "item": "S1-005: vibe-local.ts内でのDB直接アクセス（DIP）",
+        "section_updated": "セクション3（データモデル設計）、セクション9（設計上の決定事項とトレードオフ）、代替案テーブル",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "item": "S1-001: バリデーションロジックの重複（DRY）",
+        "section_updated": "セクション4（API設計）、セクション5（セキュリティ設計）、セクション8（テスト設計）、セクション10（変更対象ファイル一覧）",
+        "status": "reflected"
+      },
+      {
+        "item": "S1-004: VIBE_LOCAL_CONTEXT_WINDOW定数のJSDoc追記方針（OCP）",
+        "section_updated": "セクション5（定数定義）、セクション10（変更対象ファイル一覧）",
+        "status": "reflected"
+      },
+      {
+        "item": "S1-007: 下限値128の根拠明記（YAGNI）",
+        "section_updated": "セクション5（定数定義JSDoc）、セクション9（設計上の決定事項テーブル）",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "item": "S1-002: AgentSettingsPaneの責務増加傾向（SRP）",
+        "section_updated": "セクション9（将来的な分割方針）",
+        "status": "reflected"
+      },
+      {
+        "item": "S1-003: SELECT文への新カラム追加が6箇所（DRY）",
+        "section_updated": "セクション3（将来のリファクタリング候補: mapWorktreeRow()）",
+        "status": "reflected"
+      },
+      {
+        "item": "S1-006: Props伝播チェーン（3段階）の複雑さ（KISS）",
+        "section_updated": "セクション6（将来的なProps伝播の改善候補）",
+        "status": "reflected"
+      },
+      {
+        "item": "S1-008: updateVibeLocalContextWindowの個別関数パターン（OCP）",
+        "section_updated": "セクション9（設計上の決定事項テーブル、代替案テーブル）",
+        "status": "reflected"
+      }
+    ]
+  },
+  "update_success": true,
+  "updated_file": "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴（新規追加）",
+    "レビュー指摘事項サマリー（新規追加）",
+    "セクション2: レイヤー構成テーブル更新",
+    "セクション3: データモデル設計（S1-005設計判断、S1-003 mapWorktreeRow将来課題）",
+    "セクション4: API設計（S1-001バリデーション関数使用）",
+    "セクション5: セキュリティ設計（S1-001共有バリデーション関数、S1-004/S1-007 JSDoc更新）",
+    "セクション6: UI設計（S1-006 Props伝播改善候補）",
+    "セクション8: テスト設計（S1-001テスト追加）",
+    "セクション9: 設計上の決定事項（S1-005/S1-007/S1-008/S1-002反映）",
+    "セクション10: 変更対象ファイル一覧（S1-001/S1-004/S1-005注記）",
+    "セクション12: 実装チェックリスト（新規追加）"
+  ],
+  "summary": "Stage 1レビューの全8件の指摘事項（must-fix 1件、should-fix 3件、nice-to-have 4件）を設計方針書に反映。主な変更: (1) S1-005: startSession()内DB直接アクセスの設計判断をセクション3/9に明記し代替案テーブルにも追加、(2) S1-001: isValidVibeLocalContextWindow()共有バリデーション関数をセクション5に定義しAPI/CLIコード例を更新、(3) S1-004: 定数JSDocにvibe-local固有注記と将来切り出し候補を追記、(4) S1-007: 下限128の根拠をセクション9テーブルとJSDocに明記、(5) S1-002/003/006/008: 将来課題として各セクションに認識を記載。新規セクションとしてレビュー履歴、レビュー指摘事項サマリー、実装チェックリストを追加。",
+  "timestamp": "2026-02-28T12:00:00Z"
+}

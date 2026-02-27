@@ -1,0 +1,7 @@
+{
+  "issue_number": 374,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md"
+}

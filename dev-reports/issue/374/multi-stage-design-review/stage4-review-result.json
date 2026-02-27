@@ -1,0 +1,79 @@
+{
+  "issue_number": 374,
+  "stage": 4,
+  "focus_area": "セキュリティ",
+  "review_summary": "Issue #374のセキュリティ設計は、コマンドインジェクション防止の多層防御（API層・DB層・CLI層）、プリペアドステートメントによるSQLインジェクション対策、型ガード関数による数値バリデーション（typeof + Number.isInteger + 範囲チェック）が適切に設計されている。NaN/Infinity/負数は Number.isInteger() および範囲チェックで確実に除外される。上限値2097152はDoS観点で妥当。デフォルト値NULL（--context-windowフラグ省略）は安全。must-fix 0件、should-fix 2件、nice-to-have 2件で、conditional_passと判定する。",
+  "must_fix": [],
+  "should_fix": [
+    {
+      "id": "S4-001",
+      "title": "テンプレートリテラルでのCLI引数構築に関する注意喚起コメント",
+      "description": "vibe-local.tsのstartSession()内で `vibeLocalCommand += ` --context-window ${ctxWindow}`` とテンプレートリテラルで文字列結合し、tmux sendKeysに渡している。sendKeys内部では `exec()` を使用してtmuxコマンドを実行するため、もし数値バリデーションが突破された場合、シェルインジェクションのリスクがある。現設計ではisValidVibeLocalContextWindow()による型ガード（typeof number + Number.isInteger + 範囲チェック）で数値のみが通過するため実害は発生しない。しかし、vibeLocalModelのOLLAMA_MODEL_PATTERNチェック（正規表現によるホワイトリスト）と比べると、contextWindowには「数値であること」以上の明示的なサニタイズ（例: String(Number(ctxWindow)) による強制的な数値文字列化）がない。defense-in-depthの追加レイヤーとして、テンプレートリテラル埋め込み前に Number(ctxWindow) で明示的な数値キャストを推奨する。",
+      "location": "設計方針書 セクション5 (セキュリティ設計) / src/lib/cli-tools/vibe-local.ts startSession()",
+      "suggested_fix": "vibeLocalCommand += ` --context-window ${Number(ctxWindow)}`; のように Number() で明示的にキャストし、万が一の非数値混入を防止する。isValidVibeLocalContextWindow()が通過した値に対する冗長な安全策であるが、exec()経由のコマンド実行という高リスクパスにおける追加防御として妥当。"
+    },
+    {
+      "id": "S4-002",
+      "title": "JSON.parse後のbody.vibeLocalContextWindowに対するプロトタイプ汚染耐性の確認",
+      "description": "API route.tsのPATCHハンドラではrequest.json()でbodyを取得し、'vibeLocalContextWindow' in body で存在チェックを行っている。Next.jsのrequest.json()はJSON.parse()を内部使用するため、__proto__やconstructor等のプロトタイプ汚染キーが含まれるペイロードへの耐性を確認すべきである。ただし、body.vibeLocalContextWindowの値はisValidVibeLocalContextWindow()で typeof === 'number' チェックを経由するため、Object/Function型の値がDB更新関数に到達することはない。リスクは極めて低いが、設計方針書のセキュリティセクションにプロトタイプ汚染への耐性について一文記載することを推奨する。",
+      "location": "設計方針書 セクション4 (API設計) / src/app/api/worktrees/[id]/route.ts PATCH",
+      "suggested_fix": "設計方針書セクション5に以下を追記: 「API層ではJSON.parse後のプロトタイプ汚染キー（__proto__等）がbodyに含まれるリスクがあるが、vibeLocalContextWindowフィールドの値はisValidVibeLocalContextWindow()がtypeof === 'number'を要求するため、非数値型のプロトタイプ汚染ペイロードはバリデーション段階で排除される。」"
+    }
+  ],
+  "nice_to_have": [
+    {
+      "id": "S4-003",
+      "title": "HTML number inputのクライアント側バリデーション回避に対する設計文書上の明示",
+      "description": "UIのinput type=numberにmin=128, step=1を設定しているが、HTMLフォームバリデーションはブラウザDevToolsやAPIリクエスト直接送信で容易にバイパスされる。設計方針書ではAPI層のバリデーションが明記されているため実害はないが、クライアント側バリデーションはUX目的のみであり、セキュリティの信頼ポイントではないことを設計文書に明示すると、将来のメンテナンス時に誤解を防げる。",
+      "location": "設計方針書 セクション6 (UI設計)",
+      "suggested_fix": "セクション6に注記を追加: 「HTMLのtype=number/min/step属性はUX向上のためのクライアント側ヒントであり、セキュリティバリデーションはAPI層のisValidVibeLocalContextWindow()が担う。」"
+    },
+    {
+      "id": "S4-004",
+      "title": "上限値2097152の将来的な見直し基準の明示",
+      "description": "上限値2097152（2M tokens）は現在のOllamaモデルの実用範囲として妥当である。ただし、将来の大規模コンテキストウィンドウモデル（例: 10M+ tokens）の登場時に更新が必要になる可能性がある。DoS防御の観点では、tmux sendKeysに渡される数値は最大7桁（2097152）であり、CLI引数として問題ないサイズである。設計方針書にこの上限値の見直しトリガー条件を記載しておくと、将来的な保守性が向上する。",
+      "location": "設計方針書 セクション5 (セキュリティ設計) VIBE_LOCAL_CONTEXT_WINDOW_MAX",
+      "suggested_fix": "セクション9のトレードオフ表「上限2097152設定」の備考に、見直しトリガー条件（例: Ollamaが2M超のcontext windowをサポートするモデルを公式にリリースした場合）を追記。"
+    }
+  ],
+  "overall_assessment": "conditional_pass",
+  "risk_assessment": {
+    "command_injection": "low - isValidVibeLocalContextWindow()によるtypeof number + Number.isInteger + 範囲チェックにより、文字列やオブジェクト型がCLI引数に混入するリスクは排除されている。テンプレートリテラル埋め込みへの追加キャスト（S4-001）は推奨レベル。",
+    "sql_injection": "negligible - 全DB操作がbetter-sqlite3のプリペアドステートメント（db.prepare + stmt.run）を使用。パラメータバインドにより安全。",
+    "dos_protection": "low - 上限2097152は最大7桁の数値であり、CLI引数やDB格納として問題ないサイズ。Number.MAX_SAFE_INTEGERやInfinityはNumber.isInteger()/範囲チェックで除外される。",
+    "insecure_design": "low - デフォルト値NULL（--context-windowフラグ省略）は安全。NULL時にvibe-local CLIのデフォルト動作に委ねるフォールバックは適切。",
+    "security_misconfiguration": "negligible - 環境変数への影響なし。既存のenv-sanitizer.tsのSENSITIVE_ENV_KEYSに追加は不要。"
+  },
+  "owasp_checklist": {
+    "A03_Injection": "PASS - 数値型バリデーション（typeof + Number.isInteger + 範囲チェック）による防御。テンプレートリテラル埋め込み前の追加キャストは推奨（S4-001）。",
+    "A04_Insecure_Design": "PASS - 多層防御（API層→DB層→CLI層）の設計。isValidVibeLocalContextWindow()をDRY原則で共有。defense-in-depthパターン適用済み。",
+    "A05_Security_Misconfiguration": "PASS - デフォルト値NULLは安全（CLIフラグ省略）。新規環境変数の追加なし。"
+  },
+  "validation_analysis": {
+    "NaN": "Number.isInteger(NaN) === false で排除",
+    "Infinity": "Number.isInteger(Infinity) === false で排除",
+    "negative_numbers": "value >= 128 で排除",
+    "zero": "value >= 128 で排除",
+    "float": "Number.isInteger(128.5) === false で排除",
+    "MAX_SAFE_INTEGER": "value <= 2097152 で排除",
+    "string_type": "typeof value === 'number' で排除",
+    "boolean_type": "typeof value === 'number' で排除",
+    "object_type": "typeof value === 'number' で排除",
+    "null": "別途 ctxWindow !== null チェックで許容（デフォルト動作）",
+    "undefined": "typeof value === 'number' で排除"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md",
+    "src/lib/cli-tools/vibe-local.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/db.ts",
+    "src/lib/tmux.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/types/models.ts",
+    "src/lib/db-migrations.ts",
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/lib/claude-executor.ts",
+    "src/lib/schedule-manager.ts"
+  ],
+  "timestamp": "2026-02-28T12:00:00Z"
+}

@@ -1,0 +1,73 @@
+{
+  "issue_number": 374,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_at": "2026-02-28",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "IR-001",
+        "status": "applied",
+        "change_summary": "データベースセクションに getWorktrees()/getWorktreeById() の SELECT 文・型キャスト・マッピング処理（計6箇所）の同期修正が必要である旨を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IR-002",
+        "status": "applied",
+        "change_summary": "変更対象に WorktreeDetailRefactored.tsx と NotesAndLogsPane.tsx を追加（state管理・props伝播の説明付き）"
+      },
+      {
+        "id": "IR-003",
+        "status": "applied",
+        "change_summary": "セクション4に startSession() 内の defense-in-depth バリデーションコード例（typeof/Number.isInteger/>=128チェック）を追記"
+      },
+      {
+        "id": "IR-004",
+        "status": "applied",
+        "change_summary": "テスト戦略セクションに db-migrations.test.ts の CURRENT_SCHEMA_VERSION 期待値を20に更新する旨を追加"
+      },
+      {
+        "id": "IR-005",
+        "status": "applied",
+        "change_summary": "対応方針3（UI）に i18n キーの具体的なテキスト値を追記（en: Context Window / Default (auto)、ja: コンテキストウィンドウ / デフォルト（自動））"
+      },
+      {
+        "id": "IR-009",
+        "status": "applied",
+        "change_summary": "IR-002 と同一指摘。変更対象ファイルへの追加で対応済み"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IR-006",
+        "status": "applied",
+        "change_summary": "受け入れ基準に「他ツール（Claude/Codex/Gemini）のセッション動作に影響がないこと」を追加"
+      },
+      {
+        "id": "IR-007",
+        "status": "applied",
+        "change_summary": "APIセクションに後方互換性維持の旨を記載（'vibeLocalContextWindow' in body パターンによるオプショナルチェック）"
+      },
+      {
+        "id": "IR-008",
+        "status": "applied",
+        "change_summary": "データベースセクションに upsertWorktree() は修正不要である旨の設計ノートを追加（vibeLocalModel と同様のパターン踏襲）"
+      },
+      {
+        "id": "IR-010",
+        "status": "applied",
+        "change_summary": "CLAUDE.md の変更対象説明に具体的な更新内容3点を明記（vibe-local.ts、AgentSettingsPane.tsx、Worktree interface）"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 10,
+    "applied": 10,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/374"
+  }
+}

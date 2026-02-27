@@ -1,0 +1,51 @@
+{
+  "issue_number": 374,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_at": "2026-02-28",
+  "applied_findings": {
+    "should_fix": [
+      {
+        "id": "IR2-001",
+        "status": "applied",
+        "change_summary": "「スコープの明確化」セクションを対応方針の冒頭に追加。スケジュール実行（claude-executor.ts経由の-pモード）ではcontext-windowオプションは今回のスコープ外とし、対話モード（tmuxセッション）のみに適用する設計判断を明記。スケジュール実行パスへの対応が必要な場合の拡張対象（schedule-manager.ts/claude-executor.ts）も記載"
+      },
+      {
+        "id": "IR2-002",
+        "status": "applied",
+        "change_summary": "テスト戦略セクションに「down()関数の必要性」項目を追加。version 20のdown()関数が未定義の場合にrollbackMigrationsテスト（L427-438）がversion 20→19→18→17の順にdown()を実行し失敗するリスクを明記。version 18, 19と同様のSQLite limitation注記付きconsole.logのみのdown()関数パターンでの対応を指示"
+      },
+      {
+        "id": "IR2-003",
+        "status": "applied",
+        "change_summary": "バリデーション条件を「128以上 2097152（2M tokens）以下の正の整数」に更新。定数VIBE_LOCAL_CONTEXT_WINDOW_MAX=2097152をcli-tools/types.tsに定義しAPIバリデーションとdefense-in-depthの両方で参照する旨を追記。defense-in-depthコード例にvalue<=VIBE_LOCAL_CONTEXT_WINDOW_MAXチェックを追加。受け入れ基準の不正値リストに「2097152超」を追加。インテグレーションテストに上限境界値テストケース（2097152許可/2097153拒否）を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IR2-004",
+        "status": "applied",
+        "change_summary": "変更対象セクションのmodels.ts項に具体的な型定義「vibeLocalContextWindow?: number | null」を追記"
+      },
+      {
+        "id": "IR2-005",
+        "status": "applied",
+        "change_summary": "テスト戦略セクションに「既存コンポーネントテストの更新」項目を追加。AgentSettingsPane.test.tsxとNotesAndLogsPane.test.tsxのprops factoryにvibeLocalContextWindow/onVibeLocalContextWindowChange関連propsの追加が必要な旨を明記"
+      },
+      {
+        "id": "IR2-006",
+        "status": "skipped",
+        "reason": "レビュー結果で対応不要と判断されている。PATCHレスポンスへのvibeLocalContextWindowの自動伝播はgetWorktreeById()のマッピング追加で実現されるため追加修正は不要"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 6,
+    "applied": 5,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/374"
+  }
+}

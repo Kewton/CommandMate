@@ -1,0 +1,38 @@
+{
+  "issue_number": 374,
+  "stage": 4,
+  "applied_items": [
+    {
+      "id": "S4-001",
+      "status": "applied",
+      "changes": "セクション5（セキュリティ設計）のstartSession()コード例2箇所（defense-in-depth例およびC2-008取得コード例）でテンプレートリテラル埋め込み時に Number(ctxWindow) による明示的な数値キャストを追加。S4-001設計根拠セクションを新設し、明示性・将来の変更耐性・既存パターンとの差異を記載。実装チェックリストにS4-001アクション項目を追加。"
+    },
+    {
+      "id": "S4-002",
+      "status": "applied",
+      "changes": "セクション4（API設計）にS4-002プロトタイプ汚染耐性セクションを新設。JSON.parse後の__proto__/constructorキー混入リスクに対し、isValidVibeLocalContextWindow()のtypeof==='number'チェックが防御層として機能することを明記。リスク評価「極めて低い」を記載。実装チェックリストにS4-002アクション項目を追加。"
+    }
+  ],
+  "skipped_items": [],
+  "additional_updates": [
+    {
+      "section": "レビュー履歴",
+      "changes": "Stage 4セキュリティレビューの行を追加（conditional_pass、2026-02-28）"
+    },
+    {
+      "section": "レビュー指摘事項サマリー",
+      "changes": "Stage 4セキュリティレビューの指摘事項テーブル（S4-001〜S4-004）を追加"
+    },
+    {
+      "section": "OWASPセキュリティチェック結果",
+      "changes": "OWASP A03 Injection: PASS、A04 Insecure Design: PASS、A05 Security Misconfiguration: PASSの結果テーブルを追加"
+    },
+    {
+      "section": "フッター",
+      "changes": "Stage 4セキュリティレビュー反映日を追記"
+    }
+  ],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md",
+  "timestamp": "2026-02-28T01:10:00Z"
+}

@@ -1,0 +1,69 @@
+{
+  "issue_number": 374,
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "review_summary": "設計方針書の影響範囲分析を実施した。直接変更対象の11ファイルについてはvibeLocalModelの実装パターンを正確に踏襲しており、影響範囲は明確かつ限定的である。ただし、schedule-manager.tsの直接SQLクエリ（L320）にvibe_local_context_windowカラムが含まれていない点について、設計方針書の「スケジュール実行はスコープ外」という記載が実装上の影響を十分に説明できていない。また、db-migrations.test.tsのバージョン番号テストの実際の行番号と設計方針書の参考行番号にズレがあり、実装時の注意が必要。全体として影響範囲は適切にコントロールされており、conditional_passと判定する。",
+  "must_fix": [
+    {
+      "id": "I3-001",
+      "title": "schedule-manager.ts の直接SQLクエリへの影響が未分析",
+      "description": "schedule-manager.ts L320 に 'SELECT path, vibe_local_model FROM worktrees WHERE id = ?' という直接SQLクエリがある。Issue #374でvibe_local_context_windowカラムが追加されても、このクエリは変更不要（スコープ外のため）だが、設計方針書セクション10の変更対象ファイル一覧にschedule-manager.tsが記載されていない点と、「スケジュール実行はスコープ外」という記載が暗黙的すぎる。将来的にスケジュール実行でcontext-windowをサポートする際、このクエリへのカラム追加とbuildCliArgs()の修正が必要になることを設計方針書に明記すべき。",
+      "location": "設計方針書セクション1（スコープ）およびセクション10（変更対象ファイル一覧）",
+      "suggested_fix": "設計方針書セクション1のスコープに「schedule-manager.ts L320の直接SQLクエリおよびclaude-executor.tsのbuildCliArgs()は修正不要（-pモードでの--context-windowサポートは未確認のため）」と明記する。また、セクション9の設計上の決定事項テーブルの「スケジュール実行はスコープ外」行の理由欄にschedule-manager.tsの具体的なクエリ箇所（L320）とbuildCliArgs()関数への将来的な修正箇所を付記する。"
+    }
+  ],
+  "should_fix": [
+    {
+      "id": "I3-002",
+      "title": "db-migrations.test.ts の実際の行番号とテスト構造の確認",
+      "description": "設計方針書[C2-001]では L37, L430, L443 を修正対象として記載しているが、実際のファイルを確認したところ: L37 の 'expect(CURRENT_SCHEMA_VERSION).toBe(19)' は正確。L430 は 'expect(getCurrentVersion(db)).toBe(19)' であり正確。L443 も 'expect(getCurrentVersion(db)).toBe(19)' であり正確。ただし、設計方針書の参考行番号は「レビュー時点の参考値」と注記されているものの、rollbackMigrationsテストのit文タイトル 'should rollback Migration #17 and remove schedule tables'（L428）にはバージョン番号が含まれていないため、タイトル変更は不要。設計方針書の「it文タイトルにバージョン番号が含まれる場合は」という条件付き記載は妥当。",
+      "location": "設計方針書セクション8 [C2-001]",
+      "suggested_fix": "設計方針書セクション8 [C2-001] の表で、行番号を最新ファイルの実際の行番号（L37, L430, L443）に更新し、「rollbackMigrationsテストのit文タイトルにバージョン番号は現在含まれていない（変更不要）」と明記する。"
+    },
+    {
+      "id": "I3-003",
+      "title": "claude-executor.ts buildCliArgs() への将来的影響の明示",
+      "description": "設計方針書では「スケジュール実行はスコープ外」としているが、仮に将来-pモードで--context-windowを使う場合、buildCliArgs()関数のvibe-localケース（L100-104）にcontextWindowパラメータを追加し、ExecuteCommandOptions interfaceにcontextWindow?フィールドを追加する必要がある。この将来的変更箇所が設計方針書で明示されていない。",
+      "location": "設計方針書セクション9（設計上の決定事項）",
+      "suggested_fix": "セクション9の「スケジュール実行はスコープ外」の行に、将来対応時の修正箇所として「claude-executor.ts: ExecuteCommandOptions.contextWindow?追加、buildCliArgs() vibe-localケースに--context-window引数追加、schedule-manager.ts: SQLクエリにvibe_local_context_window追加」を付記する。"
+    },
+    {
+      "id": "I3-004",
+      "title": "既存テスト claude-executor.test.ts への影響確認",
+      "description": "claude-executor.test.ts にはbuildCliArgs()のvibe-localテストケース（L128-139）が存在する。Issue #374のスコープでは buildCliArgs() を変更しないため直接的なテスト修正は不要だが、isValidVibeLocalContextWindow()のユニットテストを新規追加する際、テストファイルの配置場所と命名規則について設計方針書で明示されていない。",
+      "location": "設計方針書セクション8（テスト設計）",
+      "suggested_fix": "セクション8のユニットテストに isValidVibeLocalContextWindow() のテストファイル名（例: tests/unit/lib/cli-tools/types.test.ts または既存テストファイルへの追加）を明記する。"
+    },
+    {
+      "id": "I3-005",
+      "title": "WorktreeDetailRefactored.tsx の MobileContentProps interface への影響",
+      "description": "WorktreeDetailRefactored.tsx内部のMobileContentPropsインターフェース（L800付近）にはvibeLocalModelとonVibeLocalModelChangeが既に含まれている。Issue #374ではvibeLocalContextWindowとonVibeLocalContextWindowChangeを同様に追加する必要がある。設計方針書では WorktreeDetailRefactored.tsx の修正内容を「state/callback追加」と記載しているが、MobileContentPropsへの追加と、MobileContentコンポーネントのswitch文内のmemoケース（L897-908）でのprops伝播も必要。設計方針書の記載が「state/callback追加」だけでは詳細が不足している。",
+      "location": "設計方針書セクション10（変更対象ファイル一覧）WorktreeDetailRefactored.tsx行",
+      "suggested_fix": "変更対象ファイル一覧のWorktreeDetailRefactored.tsxの変更内容を「useState/useCallback追加、MobileContentPropsにprops追加、MobileContentのmemoケースとデスクトップレイアウトのNotesAndLogsPaneにprops伝播追加、API応答からのvibeLocalContextWindow同期（既存vibeLocalModelパターンと同一）」に詳細化する。"
+    }
+  ],
+  "nice_to_have": [
+    {
+      "id": "I3-006",
+      "title": "CLAUDE.md のモジュール説明更新の具体的内容",
+      "description": "設計方針書セクション10でCLAUDE.mdの修正が「モジュール説明更新」とだけ記載されている。具体的にどのモジュール説明行を更新するか（types.ts, vibe-local.ts, AgentSettingsPane.tsx等）が明示されていない。",
+      "location": "設計方針書セクション10（変更対象ファイル一覧）",
+      "suggested_fix": "CLAUDE.mdの更新対象モジュール説明を具体的に列挙する: 「src/lib/cli-tools/types.ts」行にVIBE_LOCAL_CONTEXT_WINDOW_MIN/MAX/isValidVibeLocalContextWindow()を追記、「src/lib/cli-tools/vibe-local.ts」行に--context-windowサポートを追記、「src/components/worktree/AgentSettingsPane.tsx」行にコンテキストウィンドウ入力UIを追記。"
+    },
+    {
+      "id": "I3-007",
+      "title": "getWorktrees() の戻り値へのvibeLocalContextWindow追加漏れチェック",
+      "description": "getWorktrees()のマッピング（db.ts L240-264）にはvibeLocalContextWindowの追加が必要。この関数の戻り値は/api/worktrees（リスト）APIで使用されるが、リストAPIではvibeLocalContextWindowは参照されないため、追加しなくても即座にはバグにならない。ただし、Worktree interfaceの型整合性のためにSELECTとマッピングの両方への追加は必須。設計方針書のセクション3の表では漏れなく記載されているが、実装時にgetWorktreeById()だけ修正してgetWorktrees()を忘れるリスクがある。",
+      "location": "src/lib/db.ts getWorktrees()関数",
+      "suggested_fix": "実装チェックリストに「getWorktrees()とgetWorktreeById()の両方でSELECT文、型キャスト、マッピングの3箇所を修正すること」を明示的に追加する。"
+    },
+    {
+      "id": "I3-008",
+      "title": "i18nキーのネームスペース配置の確認",
+      "description": "新規i18nキー（vibeLocalContextWindow, vibeLocalContextWindowDefault）はschedule.jsonに配置される計画だが、これはvibeLocalModel/vibeLocalModelDefaultと同じ配置であり一貫性がある。localeディレクトリはenとjaの2つのみであり、更新漏れのリスクは低い。問題なし。",
+      "location": "locales/en/schedule.json, locales/ja/schedule.json",
+      "suggested_fix": "対応不要。既存パターンと一致しており問題なし。"
+    }
+  ],
+  "overall_assessment": "conditional_pass"
+}
