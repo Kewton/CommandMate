@@ -805,6 +805,10 @@ interface MobileContentProps {
   vibeLocalModel: string | null;
   /** [Issue #368] Callback when vibe-local model changes */
   onVibeLocalModelChange: (model: string | null) => void;
+  /** [Issue #374] Current vibe-local context window (null = default) */
+  vibeLocalContextWindow: number | null;
+  /** [Issue #374] Callback when vibe-local context window changes */
+  onVibeLocalContextWindowChange: (value: number | null) => void;
 }
 
 /** [Issue #21] Type for file search hook return */
@@ -836,6 +840,8 @@ const MobileContent = memo(function MobileContent({
   onSelectedAgentsChange,
   vibeLocalModel,
   onVibeLocalModelChange,
+  vibeLocalContextWindow,
+  onVibeLocalContextWindowChange,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -904,6 +910,8 @@ const MobileContent = memo(function MobileContent({
             onSelectedAgentsChange={onSelectedAgentsChange}
             vibeLocalModel={vibeLocalModel}
             onVibeLocalModelChange={onVibeLocalModelChange}
+            vibeLocalContextWindow={vibeLocalContextWindow}
+            onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
           />
         </ErrorBoundary>
       );
@@ -964,6 +972,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [selectedAgents, setSelectedAgents] = useState<[CLIToolType, CLIToolType]>(DEFAULT_SELECTED_AGENTS);
   // Issue #368: Vibe-local Ollama model state (initialized from API)
   const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
+  // Issue #374: Vibe-local context window state (initialized from API)
+  const [vibeLocalContextWindow, setVibeLocalContextWindow] = useState<number | null>(null);
   // Issue #4: CLI tool tab state - initialized from selectedAgents[0]
   const [activeCliTab, setActiveCliTab] = useState<CLIToolType>(DEFAULT_SELECTED_AGENTS[0]);
   // Issue #4: Ref to avoid polling callback recreation on tab switch
@@ -1016,6 +1026,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // Issue #368: Sync vibeLocalModel from API response
       if ('vibeLocalModel' in data) {
         setVibeLocalModel(data.vibeLocalModel ?? null);
+      }
+      // Issue #374: Sync vibeLocalContextWindow from API response
+      if ('vibeLocalContextWindow' in data) {
+        setVibeLocalContextWindow(data.vibeLocalContextWindow ?? null);
       }
       return data;
     } catch (err) {
@@ -1103,6 +1117,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   /** Issue #368: Callback for AgentSettingsPane to update vibeLocalModel */
   const handleVibeLocalModelChange = useCallback((model: string | null) => {
     setVibeLocalModel(model);
+  }, []);
+
+  /** Issue #374: Callback for AgentSettingsPane to update vibeLocalContextWindow */
+  const handleVibeLocalContextWindowChange = useCallback((value: number | null) => {
+    setVibeLocalContextWindow(value);
   }, []);
 
   // Issue #4: Immediately refresh data when CLI tab changes (without polling restart)
@@ -1945,6 +1964,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                           onSelectedAgentsChange={handleSelectedAgentsChange}
                           vibeLocalModel={vibeLocalModel}
                           onVibeLocalModelChange={handleVibeLocalModelChange}
+                          vibeLocalContextWindow={vibeLocalContextWindow}
+                          onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
                         />
                       </ErrorBoundary>
                     )}
@@ -2202,6 +2223,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onSelectedAgentsChange={handleSelectedAgentsChange}
             vibeLocalModel={vibeLocalModel}
             onVibeLocalModelChange={handleVibeLocalModelChange}
+            vibeLocalContextWindow={vibeLocalContextWindow}
+            onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
           />
         </main>
 

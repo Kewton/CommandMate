@@ -196,7 +196,7 @@ export function getWorktrees(
       w.id, w.name, w.path, w.repository_path, w.repository_name, w.description,
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
-      w.selected_agents, w.vibe_local_model,
+      w.selected_agents, w.vibe_local_model, w.vibe_local_context_window,
       (SELECT MAX(timestamp) FROM chat_messages
        WHERE worktree_id = w.id AND role = 'assistant') as last_assistant_message_at
     FROM worktrees w
@@ -230,6 +230,7 @@ export function getWorktrees(
     last_viewed_at: string | null;
     selected_agents: string | null;
     vibe_local_model: string | null;
+    vibe_local_context_window: number | null;
     last_assistant_message_at: number | null;
   }>;
 
@@ -260,6 +261,7 @@ export function getWorktrees(
       cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
       selectedAgents: parseSelectedAgents(row.selected_agents),
       vibeLocalModel: row.vibe_local_model ?? null,
+      vibeLocalContextWindow: row.vibe_local_context_window ?? null,
     };
   });
 }
@@ -309,7 +311,7 @@ export function getWorktreeById(
       w.id, w.name, w.path, w.repository_path, w.repository_name, w.description,
       w.last_user_message, w.last_user_message_at, w.last_message_summary,
       w.updated_at, w.favorite, w.status, w.link, w.cli_tool_id, w.last_viewed_at,
-      w.selected_agents, w.vibe_local_model,
+      w.selected_agents, w.vibe_local_model, w.vibe_local_context_window,
       (SELECT MAX(timestamp) FROM chat_messages
        WHERE worktree_id = w.id AND role = 'assistant') as last_assistant_message_at
     FROM worktrees w
@@ -334,6 +336,7 @@ export function getWorktreeById(
     last_viewed_at: string | null;
     selected_agents: string | null;
     vibe_local_model: string | null;
+    vibe_local_context_window: number | null;
     last_assistant_message_at: number | null;
   } | undefined;
 
@@ -360,6 +363,7 @@ export function getWorktreeById(
     cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
     selectedAgents: parseSelectedAgents(row.selected_agents),
     vibeLocalModel: row.vibe_local_model ?? null,
+    vibeLocalContextWindow: row.vibe_local_context_window ?? null,
   };
 }
 
@@ -1013,6 +1017,28 @@ export function updateVibeLocalModel(
   `);
 
   stmt.run(model, id);
+}
+
+/**
+ * Update vibe_local_context_window for a worktree
+ * Issue #374: Persists the user's Ollama context window size for vibe-local
+ *
+ * @param db - Database instance
+ * @param id - Worktree ID
+ * @param contextWindow - Context window size or null for default
+ */
+export function updateVibeLocalContextWindow(
+  db: Database.Database,
+  id: string,
+  contextWindow: number | null
+): void {
+  const stmt = db.prepare(`
+    UPDATE worktrees
+    SET vibe_local_context_window = ?
+    WHERE id = ?
+  `);
+
+  stmt.run(contextWindow, id);
 }
 
 // ============================================================

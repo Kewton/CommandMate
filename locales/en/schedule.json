@@ -36,6 +36,8 @@
   "agentSaveError": "Failed to save agent settings.",
   "vibeLocalModel": "Ollama Model",
   "vibeLocalModelDefault": "Default",
+  "vibeLocalContextWindow": "Context Window",
+  "vibeLocalContextWindowDefault": "Default (auto)",
   "ollamaNotAvailable": "Ollama is not running. Start Ollama to select a model.",
   "cmateCreated": "CMATE.md created with template. Edit it to configure schedules.",
   "cmateValidation": {

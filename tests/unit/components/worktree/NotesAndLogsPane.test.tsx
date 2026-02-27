@@ -35,6 +35,8 @@ describe('NotesAndLogsPane', () => {
     onSelectedAgentsChange: vi.fn(),
     vibeLocalModel: null as string | null,
     onVibeLocalModelChange: vi.fn(),
+    vibeLocalContextWindow: null as number | null,
+    onVibeLocalContextWindowChange: vi.fn(),
   };
 
   beforeEach(() => {

@@ -43,6 +43,10 @@ export interface NotesAndLogsPaneProps {
   vibeLocalModel: string | null;
   /** Issue #368: Callback when vibe-local model changes */
   onVibeLocalModelChange: (model: string | null) => void;
+  /** Issue #374: Current vibe-local context window (null = default) */
+  vibeLocalContextWindow?: number | null;
+  /** Issue #374: Callback when vibe-local context window changes */
+  onVibeLocalContextWindowChange?: (value: number | null) => void;
 }
 
 // ============================================================================
@@ -72,6 +76,8 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   onSelectedAgentsChange,
   vibeLocalModel,
   onVibeLocalModelChange,
+  vibeLocalContextWindow,
+  onVibeLocalContextWindowChange,
 }: NotesAndLogsPaneProps) {
   const t = useTranslations('schedule');
   // Internal sub-tab state (not leaked to parent)
@@ -114,6 +120,8 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
             onSelectedAgentsChange={onSelectedAgentsChange}
             vibeLocalModel={vibeLocalModel}
             onVibeLocalModelChange={onVibeLocalModelChange}
+            vibeLocalContextWindow={vibeLocalContextWindow}
+            onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
           />
         )}
       </div>
