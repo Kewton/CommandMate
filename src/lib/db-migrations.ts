@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 19;
+export const CURRENT_SCHEMA_VERSION = 20;
 
 /**
  * Migration definition
@@ -944,6 +944,23 @@ const migrations: Migration[] = [
     down: () => {
       // vibe_local_model is a nullable TEXT column; harmless if unused
       console.log('No rollback for vibe_local_model column (SQLite limitation)');
+    }
+  },
+  {
+    version: 20,
+    name: 'add-vibe-local-context-window-column',
+    up: (db) => {
+      // Issue #374: Add vibe_local_context_window column for Ollama context window size
+      // NULL means use the default (vibe-local CLI decides)
+      db.exec(`
+        ALTER TABLE worktrees ADD COLUMN vibe_local_context_window INTEGER DEFAULT NULL;
+      `);
+
+      console.log('✓ Added vibe_local_context_window column to worktrees table');
+    },
+    down: () => {
+      // vibe_local_context_window is a nullable INTEGER column; harmless if unused
+      console.log('No rollback for vibe_local_context_window column (SQLite limitation)');
     }
   }
 ];

@@ -1,0 +1,51 @@
+{
+  "issue_number": 374,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_at": "2026-02-28",
+  "applied_findings": {
+    "should_fix": [
+      {
+        "id": "SF-005",
+        "status": "applied",
+        "change_summary": "テスト戦略セクションのdb-migrations.test.ts項を詳細化: CURRENT_SCHEMA_VERSION期待値更新の具体的行数（L37, L430, L443の3箇所）を明記し、テスト記述（it文タイトル）の修正（例: 'should be 18 after Migration #18' → 'should be 20 after Migration #20'）も追記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-004",
+        "status": "applied",
+        "change_summary": "インテグレーションテストのPATCH API項に具体的テストケースを列挙: 正常値(8192)、null(リセット)、境界値(128=許可, 127=拒否)、非整数(128.5=拒否)、負数(-1=拒否)、文字列('abc'=拒否)"
+      },
+      {
+        "id": "NTH-005",
+        "status": "applied",
+        "change_summary": "UI仕様（セクション3）に空欄保存時のnullリセット操作方法を明記: 「入力欄を空欄にして保存した場合、nullとしてAPIに送信しデフォルト値に戻す（number inputのvalueが空文字列の場合にnullとして扱う）」"
+      },
+      {
+        "id": "NTH-006",
+        "status": "applied",
+        "change_summary": "データベースセクション（セクション1）のupsertWorktree()修正不要の記述に根拠を追記: 「upsertWorktree()はworktreeの新規登録・基本情報更新を担当し、個別設定は専用のupdate関数で管理する既存設計に従う」"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/374"
+  },
+  "update_success": true,
+  "changes_made": [
+    "Noteセクションのステージ表記を「Stage 5: 通常レビュー2回目」に更新",
+    "テスト戦略 > ユニットテスト > db-migrations.test.ts: 具体的行数（L37, L430, L443）とit文タイトル修正の記述を追加（SF-005）",
+    "テスト戦略 > インテグレーションテスト > PATCH API: 6パターンの具体的テストケースを列挙形式に変更（NTH-004）",
+    "対応方針 > 3. UI: 空欄保存時のnullリセット操作方法の説明を追加（NTH-005）",
+    "対応方針 > 1. データベース: upsertWorktree()修正不要の根拠を括弧内に追記（NTH-006）",
+    "レビュー履歴にStage 5セクションを追加（SF-005, NTH-004, NTH-005, NTH-006の4件）"
+  ]
+}

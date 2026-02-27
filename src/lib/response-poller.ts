@@ -77,6 +77,10 @@ interface ExtractionResult {
   response: string;
   isComplete: boolean;
   lineCount: number;
+  /** Prompt detection result carried from extractResponse early check (Issue #372) */
+  promptDetection?: PromptDetectionResult;
+  /** True when tmux buffer shrank (TUI redraw, screen clear, session restart) */
+  bufferReset?: boolean;
 }
 
 /**
@@ -112,7 +116,8 @@ function buildPromptExtractionResult(
   totalLines: number,
   bufferReset: boolean,
   cliToolId: CLIToolType,
-  findRecentUserPromptIndex: (windowSize: number) => number
+  findRecentUserPromptIndex: (windowSize: number) => number,
+  promptDetection?: PromptDetectionResult,
 ): ExtractionResult {
   const startIndex = resolveExtractionStartIndex(
     lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
@@ -122,6 +127,8 @@ function buildPromptExtractionResult(
     response: stripAnsi(extractedLines.join('\n')),
     isComplete: true,
     lineCount: totalLines,
+    promptDetection,
+    bufferReset,
   };
 }
 
@@ -439,9 +446,13 @@ function extractResponse(
     const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
     if (promptDetection.isPrompt) {
-      // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
+      // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards.
+      // Issue #372: Carry promptDetection through ExtractionResult so checkForResponse()
+      // can use it directly, avoiding a second detection on the (potentially truncated)
+      // extracted portion which may miss the › indicator line.
       return buildPromptExtractionResult(
-        lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+        lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
+        promptDetection,
       );
     }
   }
@@ -568,6 +579,7 @@ function extractResponse(
       response,
       isComplete: true,
       lineCount: endIndex,  // Use endIndex instead of totalLines to track where we actually stopped
+      bufferReset,
     };
   }
 
@@ -580,7 +592,8 @@ function extractResponse(
     // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
     // stripAnsi is applied inside buildPromptExtractionResult (Stage 4 MF-001: XSS risk mitigation)
     return buildPromptExtractionResult(
-      lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+      lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
+      promptDetection,
     );
   }
 
@@ -640,6 +653,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // Check if CLI tool session is running
     const running = await isSessionRunning(worktreeId, cliToolId);
     if (!running) {
+      console.log(`[checkForResponse] Session not running for ${worktreeId} (${cliToolId}), stopping poller`);
       stopPolling(worktreeId, cliToolId);
       return false;
     }
@@ -676,19 +690,25 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
 
     // CRITICAL FIX: If lineCount == lastCapturedLine AND there's no in-progress message,
     // this response has already been saved. Skip to prevent duplicates.
-    if (result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
+    // Issue #372: Skip when buffer reset detected (TUI redraw may coincidentally match lineCount).
+    if (!result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
       return false;
     }
 
     // Additional duplicate prevention: check if savePendingAssistantResponse
-    // already saved this content by comparing line counts
-    if (result.lineCount <= lastCapturedLine) {
+    // already saved this content by comparing line counts.
+    // Issue #372: Skip this check when buffer reset is detected (TUI redraw, screen clear).
+    // Codex TUI redraws cause totalLines to shrink, making lineCount < lastCapturedLine.
+    if (!result.bufferReset && result.lineCount <= lastCapturedLine) {
       console.log(`[checkForResponse] Already saved up to line ${lastCapturedLine}, skipping (result: ${result.lineCount})`);
       return false;
     }
 
-    // Response is complete! Check if it's a prompt
-    const promptDetection = detectPromptWithOptions(result.response, cliToolId);
+    // Response is complete! Check if it's a prompt.
+    // Issue #372: Prefer the prompt detection carried from extractResponse() early check,
+    // which uses the full tmux output for accuracy. The extracted portion (result.response)
+    // may be truncated and miss the › indicator line when lastCapturedLine falls just before it.
+    const promptDetection = result.promptDetection ?? detectPromptWithOptions(result.response, cliToolId);
 
     if (promptDetection.isPrompt) {
       // This is a prompt - save as prompt message

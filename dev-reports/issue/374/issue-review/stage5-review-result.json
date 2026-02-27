@@ -1,0 +1,158 @@
+{
+  "issue_number": 374,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_type": "通常",
+  "reviewed_at": "2026-02-28",
+  "previous_findings_addressed": {
+    "SF-001": {
+      "addressed": true,
+      "assessment": "テスト戦略セクションが追加された。ユニットテスト（バリデーション関数、DBマイグレーション、CLIコマンド構築）、インテグレーションテスト（PATCH API正常値・null・境界値・不正値）、db-migrations.test.tsのCURRENT_SCHEMA_VERSION期待値更新（20）が明記されている。受け入れ基準にも「各レイヤーのユニットテスト・インテグレーションテストがパスする」が追加されている。十分に対応済み。"
+    },
+    "SF-002": {
+      "addressed": true,
+      "assessment": "バリデーション範囲が「128以上の正の整数（上限はvibe-local CLI側に委ねる）」に変更された。前回指摘の選択肢(A)が採用され、小規模モデルにも対応可能な下限値と、上限をCLI側に委ねる合理的な設計となった。defense-in-depthの具体的条件（typeof value === 'number' && Number.isInteger(value) && value >= 128）も明記されている。十分に対応済み。"
+    },
+    "SF-003": {
+      "addressed": true,
+      "assessment": "「既存のupdateVibeLocalModelと同様の単独関数updateVibeLocalContextWindowをdb.tsに実装する」と明記された。既存パターンとの一貫性が保たれる設計方針が明確になった。十分に対応済み。"
+    },
+    "SF-004": {
+      "addressed": true,
+      "assessment": "受け入れ基準に「コンテキストウィンドウの変更はセッション再起動後に反映される」が追加された。vibeLocalModelと同じ挙動であることが明示されている。十分に対応済み。"
+    },
+    "NTH-001": {
+      "addressed": true,
+      "assessment": "UI仕様としてtype=\"number\", step=\"1\", min=\"128\"が明記された。i18nキー名（vibeLocalContextWindow, vibeLocalContextWindowDefault）と具体的なテキスト値（en: 'Context Window' / 'Default (auto)', ja: 'コンテキストウィンドウ' / 'デフォルト（自動）'）も記載された。十分に対応済み。"
+    },
+    "NTH-002": {
+      "addressed": true,
+      "assessment": "背景セクションに「Issue #368 で実装されたVibe Local統合を拡張する。」が追加された。十分に対応済み。"
+    },
+    "NTH-003": {
+      "addressed": true,
+      "assessment": "変更対象ファイルにCLAUDE.mdが追加された。十分に対応済み。"
+    },
+    "IR-001": {
+      "addressed": true,
+      "assessment": "「getWorktrees()およびgetWorktreeById()のSELECT文にw.vibe_local_context_windowを追加し、型キャスト・マッピング処理にも追加（計6箇所の同期修正）」が明記された。十分に対応済み。"
+    },
+    "IR-002_IR-009": {
+      "addressed": true,
+      "assessment": "変更対象にWorktreeDetailRefactored.tsx（state管理・props伝播）とNotesAndLogsPane.tsx（props伝播）が追加された。十分に対応済み。"
+    },
+    "IR-003": {
+      "addressed": true,
+      "assessment": "セクション4に具体的なdefense-in-depthバリデーション条件（typeof value === 'number' && Number.isInteger(value) && value >= 128）が記載された。十分に対応済み。"
+    },
+    "IR-004": {
+      "addressed": true,
+      "assessment": "テスト戦略セクションに「db-migrations.test.ts: CURRENT_SCHEMA_VERSION期待値を20に更新」が明記された。十分に対応済み。"
+    },
+    "IR-005": {
+      "addressed": true,
+      "assessment": "i18nキーの具体的なテキスト値（vibeLocalContextWindow: en 'Context Window' / ja 'コンテキストウィンドウ'、vibeLocalContextWindowDefault: en 'Default (auto)' / ja 'デフォルト（自動）'）が記載された。十分に対応済み。"
+    }
+  },
+  "findings": [
+    {
+      "id": "SF-005",
+      "severity": "should-fix",
+      "category": "整合性",
+      "title": "db-migrations.test.ts の既存テスト記述「should be 18 after Migration #18」がバージョン19時点で既に不正確であり、version 20追加時にさらに乖離する",
+      "description": "tests/unit/lib/db-migrations.test.ts のL36に `it('should be 18 after Migration #18', ...)` というテスト記述があるが、アサーションは `expect(CURRENT_SCHEMA_VERSION).toBe(19)` である。この記述とアサーションの不一致は既存の問題だが、Issue #374でversion 20を追加しアサーションを `toBe(20)` に変更する際に、テスト記述も「should be 20 after Migration #20」に修正すべきである。また、L430とL443にも `toBe(19)` のアサーションがあり、合計3箇所の修正が必要だが、Issue本文ではテスト記述の修正には触れていない。",
+      "location": "テスト戦略セクション / db-migrations.test.ts L36, L430, L443",
+      "recommendation": "テスト戦略セクションに「db-migrations.test.ts の CURRENT_SCHEMA_VERSION 期待値を20に更新（L37, L430, L443 の3箇所）」と具体的な行数を追記する。また、テスト記述（it文のタイトル）も合わせて修正することを推奨する。",
+      "evidence": "db-migrations.test.ts L36: `it('should be 18 after Migration #18', () => {` / L37: `expect(CURRENT_SCHEMA_VERSION).toBe(19);` -- 記述とアサーションが既に不一致"
+    },
+    {
+      "id": "NTH-004",
+      "severity": "nice-to-have",
+      "category": "完全性",
+      "title": "APIバリデーションの境界値テストケースが具体的に列挙されていない",
+      "description": "テスト戦略セクションに「インテグレーションテスト: PATCH API（正常値、null、境界値、不正値）」と記載されているが、具体的なテストケースが列挙されていない。バリデーション条件「128以上の正の整数」に対して、境界値テストとして最低限 127（拒否）、128（許可）、128.5（非整数、拒否）、0（拒否）、-1（拒否）、null（許可）が期待される。実装者にとって自明ではあるが、テストケースの網羅性を確認するために記載があると望ましい。",
+      "location": "テスト戦略セクション",
+      "recommendation": "テスト戦略のインテグレーションテスト項に、代表的なテストケースを列挙する。例: 正常値(8192)、null(リセット)、境界値(128=許可, 127=拒否)、非整数(128.5=拒否)、負数(-1=拒否)、文字列('abc'=拒否)。"
+    },
+    {
+      "id": "NTH-005",
+      "severity": "nice-to-have",
+      "category": "明確性",
+      "title": "UIにおけるnullリセットの操作方法が未記載",
+      "description": "APIバリデーションで「null（リセット）」が許可されているが、UI上でユーザーがコンテキストウィンドウ値をnull（デフォルトに戻す）にする操作方法が明記されていない。number inputで値をクリアしてフォーカスを外した場合の動作（空文字列をnullとしてAPIに送信するか、バリデーションエラーとするか）を実装者が判断する必要がある。vibeLocalModel（selectタグ）では空の option value=\"\" でデフォルト選択が可能だが、number inputでは操作方法が異なる。",
+      "location": "対応方針セクション 3. UI",
+      "recommendation": "UI仕様に「入力欄をクリア（空欄にして）保存した場合、nullとしてAPIに送信しデフォルト値に戻す」等の操作方法を記載すると、実装の曖昧さが減る。"
+    },
+    {
+      "id": "NTH-006",
+      "severity": "nice-to-have",
+      "category": "技術的妥当性",
+      "title": "upsertWorktree()が修正不要である根拠が簡潔すぎる",
+      "description": "Issue本文に「upsertWorktree()は修正不要」と記載されているが、その根拠が明記されていない。Stage 3（影響範囲レビュー）のIR-008で、vibeLocalModelもupsertWorktreeに含まれていない既存パターンを踏襲すると確認済みだが、Issue本文にはこの設計判断の根拠が記載されていない。実装者にとっては、src/lib/db.tsのupsertWorktree()（L369-409）を見ればvibeLocalModelが含まれていないことを確認できるが、Issueだけを読んだ場合に疑問が生じる可能性がある。",
+      "location": "対応方針セクション 1. データベース",
+      "recommendation": "「upsertWorktree()は修正不要（vibeLocalModelと同様、個別のupdate関数で管理するため）」のように根拠を一文追記するとわかりやすくなる。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 3,
+    "overall_assessment": "Stage 1（通常レビュー1回目）の4件のShould Fix指摘（SF-001~SF-004）は全て適切に反映されており、Nice to Have 3件（NTH-001~NTH-003）も全て対応済みである。Stage 3（影響範囲レビュー）の主要指摘（IR-001~IR-005, IR-009）も全て反映されている。特に、(1)テスト戦略の追加、(2)バリデーション範囲の明確化（128以上、上限はCLI側に委ねる）、(3)DB更新関数の設計パターン明示、(4)セッション再起動タイミングの受け入れ基準追加、(5)変更対象ファイルの補完（WorktreeDetailRefactored.tsx, NotesAndLogsPane.tsx, CLAUDE.md）、(6)db.tsの修正箇所（計6箇所）の明示、(7)defense-in-depthバリデーションの具体的条件記載、(8)i18nキーと表示テキストの具体値記載 -- いずれも高品質な反映となっている。CURRENT_SCHEMA_VERSIONを20に更新する記載は、db-migrations.tsの現状（version 19）と正しく整合している。残存する指摘はShould Fix 1件（テストファイルの記述修正の詳細化）とNice to Have 3件（テストケース列挙、UIのnullリセット操作、upsertWorktree不要の根拠）のみであり、いずれも実装品質に重大な影響を及ぼすものではない。Issue全体として実装に必要な情報が十分に網羅されており、既存コードとの整合性も確認済みである。実装開始可能な状態と判断する。"
+  },
+  "code_references": [
+    {
+      "file": "tests/unit/lib/db-migrations.test.ts",
+      "lines": "36-37, 430, 443",
+      "relevance": "CURRENT_SCHEMA_VERSION期待値の更新が必要な3箇所（L37, L430, L443）、テスト記述の修正が必要な1箇所（L36）"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "lines": "14",
+      "relevance": "CURRENT_SCHEMA_VERSION = 19（version 20への更新対象）"
+    },
+    {
+      "file": "src/lib/db.ts",
+      "lines": "199, 215-234, 240-264, 312, 319-338, 344-363",
+      "relevance": "getWorktrees()とgetWorktreeById()の計6箇所の同期修正対象（Issue記載と整合確認済み）"
+    },
+    {
+      "file": "src/lib/db.ts",
+      "lines": "1004-1016",
+      "relevance": "updateVibeLocalModel() -- updateVibeLocalContextWindow()の実装パターン参照元"
+    },
+    {
+      "file": "src/lib/cli-tools/vibe-local.ts",
+      "lines": "88-97",
+      "relevance": "startSession()のコマンド構築箇所 -- --context-windowの追加先"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "232-251",
+      "relevance": "vibeLocalModelバリデーションパターン -- vibeLocalContextWindowバリデーションの参照パターン"
+    },
+    {
+      "file": "src/components/worktree/AgentSettingsPane.tsx",
+      "lines": "232-264",
+      "relevance": "Ollama model selector UI -- context-window入力欄の追加先"
+    },
+    {
+      "file": "src/types/models.ts",
+      "lines": "80-81",
+      "relevance": "Worktree interface -- vibeLocalContextWindowフィールド追加先"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "locales/ja/schedule.json",
+      "relevance": "vibeLocalContextWindow / vibeLocalContextWindowDefault i18nキー追加先"
+    },
+    {
+      "file": "locales/en/schedule.json",
+      "relevance": "vibeLocalContextWindow / vibeLocalContextWindowDefault i18nキー追加先"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "vibe-local.tsモジュール説明の更新対象"
+    }
+  ]
+}

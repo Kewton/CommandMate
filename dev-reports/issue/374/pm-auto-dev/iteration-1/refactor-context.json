@@ -1,0 +1,26 @@
+{
+  "issue_number": 374,
+  "refactor_targets": [
+    "src/lib/cli-tools/types.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/db.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/cli-tools/vibe-local.ts",
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "typescript_errors": 0,
+    "eslint_errors": 0,
+    "test_passed": 4057
+  },
+  "improvement_goals": [
+    "既存のvibeLocalModelパターンとの一貫性確認",
+    "不要なコードの除去",
+    "コードの可読性向上",
+    "JSDocコメントの適切性確認",
+    "TypeScript strict mode 準拠の確認"
+  ]
+}

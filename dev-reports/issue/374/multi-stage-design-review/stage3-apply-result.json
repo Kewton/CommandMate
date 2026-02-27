@@ -1,0 +1,49 @@
+{
+  "issue_number": 374,
+  "stage": 3,
+  "applied_items": [
+    {
+      "id": "I3-001",
+      "severity": "must-fix",
+      "status": "applied",
+      "changes": "セクション1（スコープ）に「schedule-manager.ts L320の直接SQLクエリおよびclaude-executor.tsのbuildCliArgs()は修正不要（-pモードでの--context-windowサポートは未確認のため）」を明記。セクション9の設計決定テーブルの「スケジュール実行はスコープ外」行にschedule-manager.ts L320の具体的なクエリ内容とclaude-executor.ts buildCliArgs() L100-104の箇所を付記。実装チェックリスト（Must Fix）にI3-001確認項目を追加。"
+    },
+    {
+      "id": "I3-002",
+      "severity": "should-fix",
+      "status": "applied",
+      "changes": "セクション8 [C2-001] の行番号をStage 3影響分析レビュー時点で実ファイルと照合済みであることを明記（L37, L430, L443は正確）。注意書きを「参考値」から「照合済みの値」に更新。「rollbackMigrationsテストのit文タイトルにバージョン番号は現在含まれていないため変更不要」と明記。実装チェックリストの該当項目を[x]（確認済み・変更不要）に更新。"
+    },
+    {
+      "id": "I3-003",
+      "severity": "should-fix",
+      "status": "applied",
+      "changes": "セクション9に「[I3-003] スケジュール実行での将来対応時の修正箇所」サブセクションを新規追加。claude-executor.ts ExecuteCommandOptions.contextWindow?追加、buildCliArgs() vibe-localケースへの--context-window引数追加、schedule-manager.ts SQLクエリへのvibe_local_context_window追加の3点を表形式で明記。"
+    },
+    {
+      "id": "I3-004",
+      "severity": "should-fix",
+      "status": "applied",
+      "changes": "セクション8のユニットテスト表のisValidVibeLocalContextWindow()行に、テストファイル配置場所として「tests/unit/lib/cli-tools/types.test.ts に新規作成」を明記。既存のclaude-executor.test.tsとの分離理由も記載。実装チェックリスト（Should Fix）にI3-004項目を追加。"
+    },
+    {
+      "id": "I3-005",
+      "severity": "should-fix",
+      "status": "applied",
+      "changes": "セクション10の変更対象ファイル一覧のWorktreeDetailRefactored.tsxの変更内容を「state/callback追加」から詳細な記述に更新: useState/useCallback追加、MobileContentProps interfaceへのprops追加、MobileContentのmemoケースでのprops伝播、デスクトップレイアウトのNotesAndLogsPaneへのprops伝播、API応答からのvibeLocalContextWindow同期。実装チェックリスト（Should Fix）にI3-005項目を追加。"
+    }
+  ],
+  "skipped_items": [],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー（Stage 3追加）",
+    "セクション1（スコープ）",
+    "セクション8（テスト設計）",
+    "セクション9（設計上の決定事項とトレードオフ）",
+    "セクション10（変更対象ファイル一覧）",
+    "セクション12（実装チェックリスト）"
+  ],
+  "timestamp": "2026-02-28T00:00:00Z"
+}

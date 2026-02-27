@@ -9,7 +9,7 @@
  */
 
 import { BaseCLITool } from './base';
-import { OLLAMA_MODEL_PATTERN, type CLIToolType } from './types';
+import { OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, type CLIToolType } from './types';
 import {
   hasSession,
   createSession,
@@ -83,17 +83,26 @@ export class VibeLocalTool extends BaseCLITool {
       // Wait a moment for the session to be created
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Read Ollama model preference from DB
+      // Read Ollama model and context window preferences from DB
       // [SEC-001] Re-validate model name at point of use (defense-in-depth)
+      // [S1-005] DB direct access follows existing vibeLocalModel pattern;
+      // future DIP refactoring should pass these as startSession() arguments.
       let vibeLocalCommand = 'vibe-local -y';
       try {
         const db = getDbInstance();
         const wt = getWorktreeById(db, worktreeId);
         if (wt?.vibeLocalModel && OLLAMA_MODEL_PATTERN.test(wt.vibeLocalModel)) {
-          vibeLocalCommand = `vibe-local -y -m ${wt.vibeLocalModel}`;
+          vibeLocalCommand += ` -m ${wt.vibeLocalModel}`;
+        }
+        // [C2-008] contextWindow from the same wt object (no additional DB call)
+        const ctxWindow = wt?.vibeLocalContextWindow;
+        // [SEC-002] Defense-in-depth: re-validate at point of use
+        // [S4-001] Number() cast for additional safety in template literal
+        if (isValidVibeLocalContextWindow(ctxWindow)) {
+          vibeLocalCommand += ` --context-window ${Number(ctxWindow)}`;
         }
       } catch {
-        // DB read failure is non-fatal; use default model
+        // DB read failure is non-fatal; use defaults
       }
 
       // Start vibe-local in interactive mode with auto-approve (-y)

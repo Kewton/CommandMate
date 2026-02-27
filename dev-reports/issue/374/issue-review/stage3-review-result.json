@@ -1,0 +1,156 @@
+{
+  "issue_number": 374,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_type": "影響範囲",
+  "reviewed_at": "2026-02-28",
+  "findings": [
+    {
+      "id": "IR-001",
+      "severity": "must-fix",
+      "category": "DBスキーマ変更の影響",
+      "title": "getWorktrees() / getWorktreeById() の SELECT 文に vibe_local_context_window カラムの追加が必要",
+      "description": "src/lib/db.ts の getWorktrees()（L194-264）と getWorktreeById()（L303-364）では、SELECT 文でカラムを明示的に列挙している（例: w.selected_agents, w.vibe_local_model）。新カラム vibe_local_context_window を追加する場合、これらの SELECT 文にも追加し、行結果の型キャスト（as 句）にもフィールドを追加し、返却オブジェクトのマッピングにも追加する必要がある。Issue 本文の「変更対象（想定）」に db.ts は含まれているが、SELECT 文の修正箇所が2箇所あることが明示されていない。",
+      "affected_components": [
+        "src/lib/db.ts (getWorktrees, getWorktreeById)",
+        "src/types/models.ts (Worktree interface)"
+      ],
+      "suggestion": "Issue本文の「変更対象」セクションで、db.ts 内の修正箇所として getWorktrees() および getWorktreeById() の SELECT文・型キャスト・マッピング処理の3点を明示的に記載する。"
+    },
+    {
+      "id": "IR-002",
+      "severity": "should-fix",
+      "category": "型定義の伝播",
+      "title": "Worktree interface へのフィールド追加が API レスポンスのシリアライズに自動伝播する",
+      "description": "src/app/api/worktrees/[id]/route.ts の GET ハンドラ（L109）では `...worktree` スプレッドで JSON レスポンスを構築している。同様に src/app/api/worktrees/route.ts でも getWorktrees() の結果をスプレッドしている。Worktree interface に vibeLocalContextWindow を追加し、db.ts のマッピングで返却すれば、API レスポンスには自動的に含まれる。ただし、フロントエンド側で data.vibeLocalContextWindow を受け取るコード（WorktreeDetailRefactored.tsx L1016-1019 付近の vibeLocalModel と同様のパターン）を追加する必要がある。Issue 本文では WorktreeDetailRefactored.tsx が変更対象に含まれていないが、state管理と props伝播の修正が必要。",
+      "affected_components": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/NotesAndLogsPane.tsx",
+        "src/components/worktree/AgentSettingsPane.tsx"
+      ],
+      "suggestion": "変更対象にWorktreeDetailRefactored.tsxとNotesAndLogsPane.tsxを追加する。vibeLocalModel と同じパターンで state/callback/props伝播のコードが必要（useState, useCallback, props drilling: WorktreeDetailRefactored -> MobileContent/NotesAndLogsPane -> AgentSettingsPane）。"
+    },
+    {
+      "id": "IR-003",
+      "severity": "should-fix",
+      "category": "既存機能への影響",
+      "title": "vibe-local.ts の startSession() でのコマンド構築が文字列結合であり、context-window 値のインジェクション防御が必要",
+      "description": "現在の vibe-local.ts（L88-94）では `vibe-local -y -m ${wt.vibeLocalModel}` という文字列テンプレートでコマンドを構築し、tmux sendKeys に渡している。OLLAMA_MODEL_PATTERN による正規表現バリデーションが defense-in-depth として存在する。context-window パラメータは数値であるため、パターンは異なるが、同様の defense-in-depth バリデーション（Number.isInteger かつ >= 128）が必要。Issue 本文では「バリデーション: 正の整数であることを確認（defense-in-depth）」と記載されており方針は正しいが、具体的なバリデーション実装箇所（startSession 内）を明記すべき。",
+      "affected_components": [
+        "src/lib/cli-tools/vibe-local.ts (startSession)"
+      ],
+      "suggestion": "Issue本文のセクション4に、startSession() 内でのバリデーションコードの具体例（例: `typeof value === 'number' && Number.isInteger(value) && value >= 128`）を追記する。文字列結合でのコマンド構築のため、数値以外の値が渡された場合にコマンドインジェクションのリスクがゼロであることを担保するバリデーションが重要。"
+    },
+    {
+      "id": "IR-004",
+      "severity": "should-fix",
+      "category": "テスト範囲",
+      "title": "CURRENT_SCHEMA_VERSION の更新と既存マイグレーションテストへの影響",
+      "description": "db-migrations.ts の CURRENT_SCHEMA_VERSION は現在 19。新しいマイグレーション（version 20）を追加すると、tests/unit/lib/db-migrations.test.ts の L37（`expect(CURRENT_SCHEMA_VERSION).toBe(19)`）と L430（`expect(getCurrentVersion(db)).toBe(19)`）がテスト失敗する。また、rollbackMigrations テスト（L432-438）でバージョン 16 へのロールバックテストが version 20 の down() 関数を経由するため、down() 関数が未定義の場合にエラーとなる。",
+      "affected_components": [
+        "tests/unit/lib/db-migrations.test.ts",
+        "src/lib/db-migrations.ts"
+      ],
+      "suggestion": "既存のマイグレーションテストの CURRENT_SCHEMA_VERSION 期待値を 20 に更新する。新マイグレーションの down() 関数は省略可能だが、省略する場合は rollbackMigrations テストが影響を受けないことを確認する。Issue #368 の version 19 と同様に、SQLite limitation のコメント付き console.log で対応するパターンが推奨。"
+    },
+    {
+      "id": "IR-005",
+      "severity": "should-fix",
+      "category": "i18n / ドキュメント更新",
+      "title": "i18n キーの追加先ファイルとキー名の明確化",
+      "description": "Issue 本文では locales/ja/schedule.json と locales/en/schedule.json に i18n キー `vibeLocalContextWindow` と `vibeLocalContextWindowDefault` を追加する計画。AgentSettingsPane.tsx では `useTranslations('schedule')` を使用しているため、schedule.json への追加は正しい。ただし、キー名は既存パターン（`vibeLocalModel`, `vibeLocalModelDefault`）と整合しており問題ない。`vibeLocalContextWindowDefault` のデフォルト表示テキスト（例: 日本語「デフォルト」/英語「Default」）の具体的な値が Issue に記載されていない。",
+      "affected_components": [
+        "locales/ja/schedule.json",
+        "locales/en/schedule.json"
+      ],
+      "suggestion": "Issue 本文に具体的な i18n テキスト値を記載する。例: vibeLocalContextWindow: 'Context Window' / 'コンテキストウィンドウ'、vibeLocalContextWindowDefault のプレースホルダーテキスト: 'Default (auto)' / 'デフォルト（自動）' など。"
+    },
+    {
+      "id": "IR-006",
+      "severity": "nice-to-have",
+      "category": "他CLIツールへの影響",
+      "title": "Claude/Codex/Gemini の startSession() には影響なし（確認済み）",
+      "description": "vibe_local_context_window カラムは worktrees テーブルに追加されるが、Claude/Codex/Gemini の CLITool 実装ではこのカラムを読み取らない。vibe-local.ts の startSession() のみが getWorktreeById() から vibeLocalContextWindow を読み取り、CLI 引数に変換する。session-cleanup.ts は CLI_TOOL_IDS をイテレートして各ツールの killSession を呼ぶが、セッション起動パラメータには関与しないため影響なし。auto-yes-manager.ts もセッション起動パラメータとは無関係。",
+      "affected_components": [],
+      "suggestion": "他 CLI ツールへの影響がないことを確認済み。Issue の受け入れ基準にも「他ツールへの影響がないこと」を明示的に追加すると、テスト時の確認漏れを防げる。"
+    },
+    {
+      "id": "IR-007",
+      "severity": "nice-to-have",
+      "category": "API互換性",
+      "title": "PATCH API の新フィールド追加は後方互換性を維持する",
+      "description": "PATCH /api/worktrees/[id] は `'vibeLocalContextWindow' in body` パターンで新フィールドの存在をチェックするため、フィールドが送信されない場合は既存動作に影響しない。GET レスポンスに新フィールドが追加されるが、フロントエンドクライアントは未知のフィールドを無視するため後方互換性は維持される。ただし、外部から API を利用している場合（CLI ツール等）、新フィールドの追加により JSON レスポンスのサイズが微増する。",
+      "affected_components": [
+        "src/app/api/worktrees/[id]/route.ts"
+      ],
+      "suggestion": "後方互換性は維持される。特に対応不要。"
+    },
+    {
+      "id": "IR-008",
+      "severity": "should-fix",
+      "category": "テスト範囲",
+      "title": "既存インテグレーションテスト api-worktrees-cli-tool.test.ts のWorktreeオブジェクト構築への影響",
+      "description": "tests/integration/api-worktrees-cli-tool.test.ts では Worktree 型のオブジェクトを構築して upsertWorktree() に渡している（L77-85 等）。Worktree interface に vibeLocalContextWindow フィールドが optional として追加される場合、既存テストは型チェックに影響されないが、getWorktrees() の返却値に vibeLocalContextWindow が含まれるようになるため、既存テストのアサーション（ある場合）には影響しない。ただし、upsertWorktree() は vibe_local_context_window カラムを INSERT/UPDATE しないため、upsertWorktree() の SQL 文も更新が必要か検討が必要。",
+      "affected_components": [
+        "src/lib/db.ts (upsertWorktree)",
+        "tests/integration/api-worktrees-cli-tool.test.ts",
+        "tests/integration/api-worktrees.test.ts"
+      ],
+      "suggestion": "upsertWorktree() は worktree のメタデータ登録用であり、context-window は個別の updateVibeLocalContextWindow() 関数で管理するため、upsertWorktree() の修正は不要と判断。ただし、この判断根拠を設計ノートに残しておくことを推奨する（vibeLocalModel も同様に upsertWorktree には含まれていない既存パターンを踏襲）。"
+    },
+    {
+      "id": "IR-009",
+      "severity": "should-fix",
+      "category": "変更対象の漏れ",
+      "title": "変更対象に WorktreeDetailRefactored.tsx と NotesAndLogsPane.tsx が含まれていない",
+      "description": "Issue 本文の「変更対象（想定）」セクションには AgentSettingsPane.tsx のみ UI コンポーネントとして記載されているが、実際には props を伝播させるために WorktreeDetailRefactored.tsx（state管理、API レスポンスからの値取得、callback 定義）と NotesAndLogsPane.tsx（props 受け渡し）も修正が必要。vibeLocalModel の既存実装パターンを見ると、WorktreeDetailRefactored.tsx に useState/useCallback の追加（約10行）、NotesAndLogsPane.tsx に props 定義と伝播の追加（約5行）が必要。",
+      "affected_components": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/NotesAndLogsPane.tsx"
+      ],
+      "suggestion": "「変更対象（想定）」セクションに以下を追加: src/components/worktree/WorktreeDetailRefactored.tsx, src/components/worktree/NotesAndLogsPane.tsx"
+    },
+    {
+      "id": "IR-010",
+      "severity": "nice-to-have",
+      "category": "ドキュメント更新",
+      "title": "CLAUDE.md のモジュール説明更新",
+      "description": "Issue 本文の変更対象に CLAUDE.md が含まれている。CLAUDE.md にはモジュール毎の説明が詳細に記載されている。vibe-local.ts の説明行（CLAUDE.md 記載済み）にコンテキストウィンドウ対応を追記し、AgentSettingsPane.tsx の説明にもコンテキストウィンドウ入力欄の記述を追加する必要がある。また、models.ts の Worktree interface 説明にもフィールド追加を反映すべき。",
+      "affected_components": [
+        "CLAUDE.md"
+      ],
+      "suggestion": "CLAUDE.md 更新時に以下の記載を更新: (1) vibe-local.ts の説明に context-window オプション対応を追記、(2) AgentSettingsPane.tsx にコンテキストウィンドウ入力欄の記述追加、(3) Worktree interface に vibeLocalContextWindow フィールドの記述追加。"
+    }
+  ],
+  "impact_summary": {
+    "high_impact_areas": [
+      "src/lib/db.ts - getWorktrees() と getWorktreeById() の SELECT 文・型キャスト・マッピング（3箇所の同期修正が必須）",
+      "src/lib/db-migrations.ts - CURRENT_SCHEMA_VERSION 更新と version 20 マイグレーション追加",
+      "src/types/models.ts - Worktree interface へのフィールド追加（型定義の起点）",
+      "src/lib/cli-tools/vibe-local.ts - startSession() のコマンド構築ロジック（セキュリティ上重要）"
+    ],
+    "medium_impact_areas": [
+      "src/app/api/worktrees/[id]/route.ts - PATCH ハンドラへのバリデーション追加",
+      "src/components/worktree/AgentSettingsPane.tsx - コンテキストウィンドウ入力 UI 追加",
+      "src/components/worktree/WorktreeDetailRefactored.tsx - state管理・props伝播の追加",
+      "src/components/worktree/NotesAndLogsPane.tsx - props受け渡しの追加",
+      "locales/ja/schedule.json, locales/en/schedule.json - i18n キー追加",
+      "tests/unit/lib/db-migrations.test.ts - CURRENT_SCHEMA_VERSION 期待値更新"
+    ],
+    "low_impact_areas": [
+      "CLAUDE.md - モジュール説明の更新",
+      "src/lib/session-cleanup.ts - 影響なし（確認済み）",
+      "src/lib/auto-yes-manager.ts - 影響なし（確認済み）",
+      "src/lib/schedule-manager.ts - 影響なし（確認済み）",
+      "Claude/Codex/Gemini CLITool 実装 - 影響なし（確認済み）",
+      "tests/integration/api-worktrees-cli-tool.test.ts - 既存テストの破壊なし（optional フィールドのため）",
+      "tests/integration/api-worktrees.test.ts - 既存テストの破壊なし"
+    ]
+  },
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4,
+    "overall_assessment": "Issue #374 の影響範囲は、Issue #368 の vibeLocalModel 実装パターンを忠実に踏襲するものであり、限定的かつ予測可能である。最も重要な指摘は、db.ts の SELECT 文が 2 箇所（getWorktrees, getWorktreeById）に存在し、型キャストとマッピングを含めると計 6 箇所の同期修正が必要な点である。また、Issue 本文の変更対象リストに WorktreeDetailRefactored.tsx と NotesAndLogsPane.tsx が漏れている（props 伝播のための修正が必要）。セキュリティ面では、vibe-local.ts の startSession() でのコマンド構築における数値バリデーションが defense-in-depth として重要であり、Issue で言及はされているが具体的な実装箇所の明示が望ましい。既存の他 CLI ツール（Claude/Codex/Gemini）、セッション管理（session-cleanup, auto-yes-manager）、スケジュール管理への影響はない。後方互換性も維持される。全体として、実装リスクは低く、vibeLocalModel の既存パターンに沿った安全な拡張である。"
+  }
+}

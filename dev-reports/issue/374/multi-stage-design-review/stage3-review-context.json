@@ -1,0 +1,7 @@
+{
+  "issue_number": 374,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "design_doc_path": "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md"
+}

@@ -1,0 +1,146 @@
+{
+  "issue_number": 374,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_type": "影響範囲",
+  "reviewed_at": "2026-02-28",
+  "previous_findings_addressed": {
+    "IR-001": {
+      "addressed": true,
+      "verification": "Issue本文のデータベースセクションに「getWorktrees()およびgetWorktreeById()のSELECT文・型キャスト・マッピング処理にもフィールド追加（計6箇所の同期修正）」が明記されている。db.tsのgetWorktrees()（L194-264）とgetWorktreeById()（L303-364）のSELECT文（L198,L312）、型キャスト（L215-233,L319-338）、マッピング（L243-263,L344-363）の各2箇所×3=6箇所が対象として適切に特定されている。"
+    },
+    "IR-002": {
+      "addressed": true,
+      "verification": "変更対象にWorktreeDetailRefactored.tsx（state管理・props伝播）とNotesAndLogsPane.tsx（props伝播）が追加されている。vibeLocalModelの既存パターン（WorktreeDetailRefactored.tsx L966でuseState、L1016-1018でAPIからの同期、L1103-1105でuseCallback）と同一の方式で実装可能であることが確認できる。"
+    },
+    "IR-003": {
+      "addressed": true,
+      "verification": "セクション4にdefense-in-depthバリデーションの具体的コード例「typeof value === 'number' && Number.isInteger(value) && value >= 128」が明記されている。文字列結合でのコマンド構築（sendKeysへの渡し）における安全性が確保される。"
+    },
+    "IR-004": {
+      "addressed": true,
+      "verification": "テスト戦略セクションにdb-migrations.test.tsのCURRENT_SCHEMA_VERSION期待値を20に更新する旨が記載されている。具体的な行数（L37, L430, L443の3箇所）も明示されている。現在のdb-migrations.test.tsのL37はexpect(CURRENT_SCHEMA_VERSION).toBe(19)、L430はexpect(getCurrentVersion(db)).toBe(19)、L443はexpect(getCurrentVersion(db)).toBe(19)であり、全て20への更新が必要。"
+    },
+    "IR-005": {
+      "addressed": true,
+      "verification": "Issue本文のUIセクションにi18nキーの具体的テキスト値が記載されている：vibeLocalContextWindow（en: 'Context Window' / ja: 'コンテキストウィンドウ'）、vibeLocalContextWindowDefault（en: 'Default (auto)' / ja: 'デフォルト（自動）'）。既存のvibeLocalModel/vibeLocalModelDefaultパターンと命名規則が一貫している。"
+    },
+    "IR-006": {
+      "addressed": true,
+      "verification": "受け入れ基準に「他ツール（Claude/Codex/Gemini）のセッション動作に影響がないこと」が追加されている。"
+    },
+    "IR-007": {
+      "addressed": true,
+      "verification": "APIセクションに「後方互換性維持（'vibeLocalContextWindow' in body パターン）」が記載されている。"
+    },
+    "IR-008": {
+      "addressed": true,
+      "verification": "データベースセクションに「upsertWorktree()は修正不要（vibeLocalModelと同様に個別のupdate関数で管理する既存設計）」と記載されている。upsertWorktree()のSQL（db.ts L377-394）にはvibe_local_modelカラムも含まれておらず、個別update関数パターンの踏襲が正しい。"
+    },
+    "IR-009": {
+      "addressed": true,
+      "verification": "IR-002と同一指摘。変更対象にWorktreeDetailRefactored.tsxとNotesAndLogsPane.tsxが追加済み。"
+    },
+    "IR-010": {
+      "addressed": true,
+      "verification": "変更対象にCLAUDE.mdが含まれており、更新内容の具体的記述方針が示されている。"
+    }
+  },
+  "findings": [
+    {
+      "id": "IR2-001",
+      "severity": "should-fix",
+      "category": "スケジュール実行への影響範囲の漏れ",
+      "title": "schedule-manager.ts と claude-executor.ts が vibe_local_context_window を考慮していない",
+      "description": "schedule-manager.ts の executeSchedule() 関数（L320）では、直接SQLクエリ 'SELECT path, vibe_local_model FROM worktrees WHERE id = ?' でworktreeデータを取得しており、getWorktreeById() を使用していない。このSQLに vibe_local_context_window カラムが含まれていないため、スケジュール実行時にcontext-windowオプションが渡されない。また、claude-executor.ts の ExecuteCommandOptions interface（L40-43）には model フィールドのみ定義されており contextWindow フィールドが存在しない。buildCliArgs() 関数（L94-109）の vibe-local ケース（L100-104）にも --context-window 引数の構築ロジックがない。対話モード（tmuxセッション）のみでcontext-windowが使われ、非対話モード（スケジュール実行）では無視される非対称が発生する。",
+      "affected_components": [
+        "src/lib/schedule-manager.ts (L320: SELECT文, L328-331: ExecuteCommandOptions構築)",
+        "src/lib/claude-executor.ts (L40-43: ExecuteCommandOptions, L100-104: buildCliArgs vibe-local case)"
+      ],
+      "suggestion": "この非対称が意図的な設計かどうかを Issue 本文に明記すべきである。意図的であれば「スケジュール実行（claude-executor.ts経由の-pモード）ではcontext-windowオプションは適用しない（vibe-local -pモードでの--context-windowサポート状況が不明のため）」と記載する。サポートする場合は、(1) ExecuteCommandOptions に contextWindow?: number を追加、(2) buildCliArgs の vibe-local ケースに --context-window 引数を追加、(3) schedule-manager.ts の SELECT 文に vibe_local_context_window を追加し options 構築ロジックを拡張、の3箇所が追加の変更対象となる。"
+    },
+    {
+      "id": "IR2-002",
+      "severity": "should-fix",
+      "category": "テスト範囲の不足",
+      "title": "rollbackMigrations テストの期待値更新と down() 関数の影響",
+      "description": "db-migrations.test.ts のrollbackMigrationsテスト（L427-438）では、runMigrations(db)後にexpect(getCurrentVersion(db)).toBe(19)（L430）、rollbackMigrations(db, 16)後にexpect(getCurrentVersion(db)).toBe(16)（L433）をアサーションしている。version 20の新マイグレーションを追加する場合、L430のアサーションは20に更新される。rollbackMigrations(db, 16)の呼び出しでは version 20 → 19 → 18 → 17 の順にdown()が実行される。version 20のdown()関数が未定義の場合、rollbackMigrations() はL1105-1109で「no down() function defined」エラーを投げるため、既存テストが失敗する。Issue本文のテスト戦略セクションではCURRENT_SCHEMA_VERSION期待値更新（L37, L430, L443の3箇所）を言及しているが、down()関数の必要性についてはdown()省略時のrollbackテスト失敗リスクが明示されていない。",
+      "affected_components": [
+        "src/lib/db-migrations.ts (新migration version 20のdown関数)",
+        "tests/unit/lib/db-migrations.test.ts (L427-438: rollbackMigrationsテスト)"
+      ],
+      "suggestion": "Issue本文のテスト戦略セクションに、version 20のdown()関数を定義する必要がある旨を明記する。既存パターン（version 18, 19）を踏襲し、console.logでSQLite limitationを示すdown関数を実装する。あるいは、rollbackテストのtargetVersionが16であるため、version 20のdown()を呼ぶことになる点を具体的に記述する。"
+    },
+    {
+      "id": "IR2-003",
+      "severity": "should-fix",
+      "category": "バリデーション上限値の欠如",
+      "title": "context-window の上限値バリデーションがない",
+      "description": "Issue本文のAPIセクションでは「null または 128以上の正の整数」とあり、defense-in-depthバリデーション（セクション4）でも value >= 128 のみチェックしている。しかし上限値が定義されていない。vibe-local CLIで許容されるcontext-windowの上限は明確でないが、極端に大きな値（例: Number.MAX_SAFE_INTEGER = 9007199254740991）を許可すると、(1) SQLite INTEGER は最大 2^63-1 を格納可能だがアプリケーション上は無意味な値、(2) CLI引数として非常に長い数値文字列が渡される可能性がある。OllamaのLLMモデルが物理メモリに依存するため、実用的な上限（例: 1048576 = 1M tokens、または 2097152 = 2M tokens）を設定すべきである。",
+      "affected_components": [
+        "src/app/api/worktrees/[id]/route.ts (PATCH バリデーション)",
+        "src/lib/cli-tools/vibe-local.ts (defense-in-depth バリデーション)"
+      ],
+      "suggestion": "バリデーション条件を「128以上かつ上限値以下の正の整数」に変更する。上限値として 2097152（2M tokens）程度の定数を定義し、APIバリデーションとdefense-in-depthの両方で使用する。定数はcli-tools/types.tsなど共通の場所に定義してDRY原則を維持する。"
+    },
+    {
+      "id": "IR2-004",
+      "severity": "nice-to-have",
+      "category": "Worktree interface の型フィールド追加漏れ確認",
+      "title": "models.ts の Worktree interface に vibeLocalContextWindow フィールドが変更対象として列挙されているが型定義が具体的でない",
+      "description": "Issue本文の変更対象に src/types/models.ts が含まれている。Worktree interface（models.ts L35-84）に vibeLocalContextWindow フィールドを追加する際、型は vibeLocalModel（L81: string | null）と同様に「number | null」とし、optionalにする必要がある。既存の vibeLocalModel? のパターン（L81: `vibeLocalModel?: string | null`）に合わせて `vibeLocalContextWindow?: number | null` とすべきである。Issue本文のデータベースセクションでは INTEGER DEFAULT NULL としているが、TypeScript側の型定義の詳細が明示されていない。",
+      "affected_components": [
+        "src/types/models.ts (Worktree interface)"
+      ],
+      "suggestion": "変更対象セクションに models.ts の具体的な追加フィールド定義「vibeLocalContextWindow?: number | null」を記載すると、実装時の型定義のブレを防げる。"
+    },
+    {
+      "id": "IR2-005",
+      "severity": "nice-to-have",
+      "category": "テストヘルパーへの影響",
+      "title": "既存テストの AgentSettingsPane / NotesAndLogsPane のprops factoryに vibeLocalContextWindow 関連props追加が必要",
+      "description": "tests/unit/components/worktree/AgentSettingsPane.test.tsx（L21）と NotesAndLogsPane.test.tsx（L36）では、propsオブジェクトに vibeLocalModel が含まれている。vibeLocalContextWindow のstate/callbackが AgentSettingsPane.tsx と NotesAndLogsPane.tsx に新しいpropsとして追加される場合、これらのテストファイルのprops factoryにもvibeLocalContextWindow/onVibeLocalContextWindowChange を追加する必要がある。TypeScriptの型チェックで自動検出されるが、テスト修正箇所として認識しておくべきである。",
+      "affected_components": [
+        "tests/unit/components/worktree/AgentSettingsPane.test.tsx",
+        "tests/unit/components/worktree/NotesAndLogsPane.test.tsx"
+      ],
+      "suggestion": "テスト戦略セクションに、既存コンポーネントテストのprops更新が必要な旨を追記するとよい。TypeScript strict modeにより未提供propsはコンパイルエラーとなるため、見落とすリスクは低い。"
+    },
+    {
+      "id": "IR2-006",
+      "severity": "nice-to-have",
+      "category": "PATCH APIレスポンスの整合性",
+      "title": "PATCH /api/worktrees/[id] のレスポンスで updatedWorktree に vibeLocalContextWindow が自動的に含まれる",
+      "description": "PATCH ハンドラのL254で updatedWorktree = getWorktreeById(db, params.id) を取得し、L259-263で ...updatedWorktree としてレスポンスを構築している。getWorktreeById() のマッピングに vibeLocalContextWindow を追加すれば、PATCHレスポンスにも自動的に新フィールドが含まれる。この自動伝播は意図通りであり、追加の修正は不要。Issue本文ではこの動作が暗黙的に前提とされているが、明示的に確認されている方が安心である。",
+      "affected_components": [
+        "src/app/api/worktrees/[id]/route.ts (L254-266: PATCH レスポンス構築)"
+      ],
+      "suggestion": "特に対応不要。APIレスポンスへの自動伝播は getWorktreeById() のマッピング追加で実現される。"
+    }
+  ],
+  "impact_summary": {
+    "newly_identified_impact_areas": [
+      "src/lib/schedule-manager.ts (L320: vibe_local_context_windowカラム未取得、L328-331: ExecuteCommandOptions構築にcontextWindowなし)",
+      "src/lib/claude-executor.ts (L40-43: ExecuteCommandOptions型定義、L100-104: buildCliArgs vibe-localケース)"
+    ],
+    "confirmed_no_impact_areas": [
+      "src/lib/session-cleanup.ts - セッション起動パラメータに関与せず影響なし",
+      "src/lib/auto-yes-manager.ts - セッション起動パラメータに関与せず影響なし",
+      "Claude/Codex/Gemini CLITool実装 - vibeLocalContextWindowを読み取らないため影響なし",
+      "src/app/api/worktrees/route.ts - GET一覧はgetWorktrees()経由で自動伝播、追加修正不要",
+      "tests/integration/api-worktrees.test.ts - optional フィールドのため既存テスト破壊なし",
+      "tests/integration/api-worktrees-cli-tool.test.ts - optional フィールドのため既存テスト破壊なし"
+    ],
+    "test_impact_areas": [
+      "tests/unit/lib/db-migrations.test.ts - L37, L430, L443の期待値更新 + rollbackテストのdown()関数依存",
+      "tests/unit/components/worktree/AgentSettingsPane.test.tsx - props factory更新",
+      "tests/unit/components/worktree/NotesAndLogsPane.test.tsx - props factory更新"
+    ]
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 3,
+    "overall_assessment": "Stage 3の影響範囲指摘（IR-001からIR-010）は全て適切にIssue本文に反映されており、データベース・API・UI・テストの各レイヤーの修正箇所が具体的に特定されている。新たに発見された最も重要な影響範囲の問題は、スケジュール実行パス（schedule-manager.ts + claude-executor.ts）がvibe_local_context_windowを考慮していない点である（IR2-001）。現在のvibeLocalModelの実装では schedule-manager.ts が直接SQLで vibe_local_model を取得し claude-executor.ts 経由で --model オプションとして渡しているが、同様のパスに context-window を追加するかどうかの判断がIssue本文に記載されていない。これは対話モード（tmuxセッション）と非対話モード（-p フラグ）での動作の非対称を生むため、設計判断を明示すべきである。また、context-windowの上限値バリデーション（IR2-003）がないことは、極端な値の入力を許容する潜在的リスクがある。rollbackテストのdown()関数の必要性（IR2-002）も実装時に確認すべき点である。全体として、Stage 3指摘の反映状態は良好であり、残りの指摘は設計判断の明示化と防御的バリデーションの強化に関するものである。"
+  }
+}

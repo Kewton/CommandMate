@@ -1,0 +1,59 @@
+{
+  "issue_number": 374,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_at": "2026-02-28",
+  "applied_findings": {
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "status": "applied",
+        "change_summary": "テスト戦略セクションを新規追加。ユニットテスト（バリデーション関数、DBマイグレーション、CLIコマンド構築）とインテグレーションテスト（PATCH API各パターン）の要件を明記。受け入れ基準にテストパスの項目を追加。"
+      },
+      {
+        "id": "SF-002",
+        "status": "applied",
+        "change_summary": "バリデーション範囲を「128以上の正の整数、上限なし」に変更。上限はvibe-local CLI側に委ねる方針とし、Ollamaのモデル別対応範囲の多様性を根拠として明記。"
+      },
+      {
+        "id": "SF-003",
+        "status": "applied",
+        "change_summary": "データベースセクションにupdateVibeLocalContextWindow単独関数の実装方針を明記。既存のupdateVibeLocalModelパターンとの一貫性を優先し、将来的な汎用化は別途リファクタリングIssueとする旨を記載。"
+      },
+      {
+        "id": "SF-004",
+        "status": "applied",
+        "change_summary": "受け入れ基準に「コンテキストウィンドウの変更はセッション再起動後に反映される（vibeLocalModelと同じ挙動）」を追加。UIセクションにヒント表示の検討を記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "status": "applied",
+        "change_summary": "UIセクションにstep='1'、min='128'のHTML属性、i18nキー名（vibeLocalContextWindow, vibeLocalContextWindowDefault）、空欄時のクリア挙動（フォーカスアウトでnullに戻る）を明記。"
+      },
+      {
+        "id": "NTH-002",
+        "status": "applied",
+        "change_summary": "背景セクションに「Issue #368 で実装されたVibe Local統合を拡張する」のリンクを追加。"
+      },
+      {
+        "id": "NTH-003",
+        "status": "applied",
+        "change_summary": "変更対象ファイルにCLAUDE.mdを追加し、vibe-local.tsモジュール説明にコンテキストウィンドウ対応を追記する旨を記載。"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/374"
+  },
+  "update_success": true,
+  "changes_overview": "Stage 1レビューの全7件（SF-001〜SF-004、NTH-001〜NTH-003）を反映。テスト戦略セクションの新規追加、バリデーション範囲の明確化（128以上・上限なし）、DB更新関数の設計方針明記、セッション再起動時の反映タイミング追加、UI仕様の詳細化、Issue #368への参照追加、CLAUDE.mdの変更対象追加を実施。レビュー履歴セクションを末尾に追加。"
+}

@@ -1,0 +1,20 @@
+{
+  "issue_number": 374,
+  "stage": 2,
+  "applied_at": "2026-02-28",
+  "applied_findings": [
+    "C2-001",
+    "C2-002",
+    "C2-003",
+    "C2-004",
+    "C2-005",
+    "C2-006",
+    "C2-007",
+    "C2-008",
+    "C2-009"
+  ],
+  "skipped_findings": [],
+  "update_success": true,
+  "updated_file": "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md",
+  "summary": "Stage 2整合性レビューの全9件（must-fix 2件、should-fix 4件、nice-to-have 3件）を設計方針書に反映。C2-001: db-migrations.test.tsのバージョン期待値修正箇所を行番号とコンテキスト付きで詳細化。C2-002/C2-006: API層バリデーションにisValidVibeLocalContextWindow()型ガード方針と型安全性保証の説明を追加。C2-003: SELECT文の追加位置（vibe_local_modelの直後）を明記。C2-004: i18nキーの日本語訳差異の意図を説明。C2-005: Worktree interfaceのoptional型パターン注記を追加。C2-007: version 20 down()関数のconsole.logパターンをコード例付きで記載。C2-008: startSession()内のcontextWindow取得コード例を追加。C2-009: NotesAndLogsPaneの全呼び出し箇所へのprops追加を明記。実装チェックリストにStage 2の全指摘事項を追加。"
+}

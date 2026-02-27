@@ -129,6 +129,44 @@ export function getCliToolDisplayNameSafe(cliToolId?: string, fallback = 'Assist
 }
 
 /**
+ * Minimum context window size for vibe-local.
+ * [S1-007] Lower bound rationale: Ollama's actual minimum context window is
+ * typically 2048+, but 128 is set as a permissive lower bound to accommodate
+ * custom models or future models with smaller contexts. Users are recommended
+ * to use practical values (e.g., 2048+).
+ * [S1-004] vibe-local specific constant. If more vibe-local constants are added,
+ * consider extracting to src/lib/cli-tools/vibe-local-config.ts.
+ * [SEC-002] Used to prevent unreasonable values in CLI arguments.
+ */
+export const VIBE_LOCAL_CONTEXT_WINDOW_MIN = 128;
+
+/**
+ * Maximum context window size for vibe-local (2M tokens).
+ * Shared between API validation and defense-in-depth (DRY principle).
+ * [S1-004] vibe-local specific constant. If more vibe-local constants are added,
+ * consider extracting to src/lib/cli-tools/vibe-local-config.ts.
+ * [SEC-002] Used to prevent unreasonable values in CLI arguments.
+ */
+export const VIBE_LOCAL_CONTEXT_WINDOW_MAX = 2097152;
+
+/**
+ * Validate vibe-local context window value.
+ * Shared between API layer and CLI layer (defense-in-depth).
+ * [S1-001] DRY: Single source of truth for context window validation.
+ *
+ * @param value - Value to validate (accepts unknown for type guard usage)
+ * @returns True if value is a valid context window size (integer between MIN and MAX)
+ */
+export function isValidVibeLocalContextWindow(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= VIBE_LOCAL_CONTEXT_WINDOW_MIN &&
+    value <= VIBE_LOCAL_CONTEXT_WINDOW_MAX
+  );
+}
+
+/**
  * Ollama model name validation pattern.
  * Allows: alphanumeric start, followed by alphanumeric, dots, underscores, colons, slashes, hyphens.
  * Max 100 characters. Used for defense-in-depth validation at point of use.

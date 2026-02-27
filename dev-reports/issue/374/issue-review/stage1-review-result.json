@@ -1,0 +1,117 @@
+{
+  "issue_number": 374,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_type": "通常",
+  "reviewed_at": "2026-02-27",
+  "findings": [
+    {
+      "id": "SF-001",
+      "severity": "should-fix",
+      "category": "完全性",
+      "title": "テスト戦略が記載されていない",
+      "description": "Issueにテスト計画が記載されていない。各レイヤー（DBマイグレーション、APIバリデーション、CLIコマンド構築、UIコンポーネント）でどのテストを追加・修正するかが不明確。既存の vibeLocalModel 実装でもテストが書かれていることが想定されるが、それと同等のテストカバレッジが求められるかどうかの判断基準がない。",
+      "suggestion": "受け入れ基準または別セクションに以下のテスト要件を追加すべき:\n- ユニットテスト: バリデーション関数（正の整数、範囲チェック、null許容）、DBマイグレーション（カラム追加・デフォルト値）、CLIコマンド構築（--context-window付与・省略）\n- インテグレーションテスト: PATCH API（正常値、null、境界値、不正値の各パターン）\n- 受け入れ基準に「[ ] 各レイヤーのユニットテスト・インテグレーションテストがパスする」を追加"
+    },
+    {
+      "id": "SF-002",
+      "severity": "should-fix",
+      "category": "明確性",
+      "title": "バリデーション範囲 1024〜131072 の根拠が不明",
+      "description": "Issueでは「正の整数（例: 1024〜131072）」と記載があるが、この範囲が確定値なのか例示なのかが曖昧。vibe-local CLIツール側が受け付けるコンテキストウィンドウサイズの実際の制約（最小値・最大値）が明示されていない。Ollama自体は理論上モデルに応じて様々な値を受け付けるため、このバリデーション範囲がユーザーの利便性を不当に制限する可能性がある。例えばGemma2:2Bは2048が推奨だが、Llama 3.1:405Bは128Kまで対応している。",
+      "suggestion": "以下のいずれかを選択して明記すべき:\n(A) 下限のみ設定（例: 128以上の正の整数）し、上限はvibe-local側に委ねる\n(B) 1024〜131072を確定範囲とする場合、その根拠（代表的モデルの対応範囲等）を記載する\n(C) 下限を小さくする（例: 256以上）ことで、小規模モデルにも対応可能とする"
+    },
+    {
+      "id": "SF-003",
+      "severity": "should-fix",
+      "category": "技術的妥当性",
+      "title": "DB更新関数の実装パターンが未指定",
+      "description": "Issueでは変更対象に db.ts を挙げているが、updateVibeLocalContextWindow を専用関数として実装するか、既存の updateVibeLocalModel と統合した汎用関数にするかの設計方針が記載されていない。既存コードでは updateVibeLocalModel（db.ts:1004行目）が単独関数として実装されており、同パターンであれば一貫性は保たれるが、類似カラムが増えるたびに関数が増える課題がある。",
+      "suggestion": "既存パターンとの一貫性を優先し、updateVibeLocalContextWindow を updateVibeLocalModel と同様の単独関数として実装する方針を明記すべき。将来的な汎用化（例: updateWorktreeField 関数）はリファクタリングIssueとして別途起票することを推奨。"
+    },
+    {
+      "id": "SF-004",
+      "severity": "should-fix",
+      "category": "受け入れ条件",
+      "title": "セッション再起動時の反映タイミングが受け入れ基準にない",
+      "description": "コンテキストウィンドウの値を変更した後、既に起動中のvibe-localセッションに対してどう扱うかが不明確。現在のvibeLocalModel実装では、値を変更してもセッション再起動まで反映されない（startSession時にDB読取）。この挙動が--context-windowでも同様であることの明示と、UIにその旨の注意書きが必要かどうかの検討が必要。",
+      "suggestion": "受け入れ基準に「[ ] コンテキストウィンドウの変更はセッション再起動後に反映される（vibeLocalModelと同じ挙動）」を追加すべき。また、UI上に「変更はセッション再起動後に反映されます」等のヒント表示が必要かどうかも言及すべき。"
+    },
+    {
+      "id": "NTH-001",
+      "severity": "nice-to-have",
+      "category": "完全性",
+      "title": "UIの入力欄仕様がやや粗い",
+      "description": "number型inputのstep属性、min/max属性のHTML仕様レベルでの設定値が記載されていない。また、プレースホルダー「Default」のi18nキー名も未指定。既存のvibeLocalModelDefaultキーと並列で vibeLocalContextWindowDefault 等のキーが必要。",
+      "suggestion": "UI仕様として以下を明記すると実装時の迷いが減る:\n- step=\"1\"（整数のみ）\n- min/max をバリデーション範囲に合わせて設定\n- i18nキー: vibeLocalContextWindow, vibeLocalContextWindowDefault\n- 空欄時のクリア方法（入力値を消去してフォーカスアウトでnullに戻る等）"
+    },
+    {
+      "id": "NTH-002",
+      "severity": "nice-to-have",
+      "category": "完全性",
+      "title": "関連Issue #368へのリンクがない",
+      "description": "本Issueの前提となるVibe Local実装はIssue #368で行われているが、Issue本文にその参照がない。開発者が経緯を辿る際に不便。",
+      "suggestion": "背景セクションに「Issue #368 で実装されたVibe Local統合を拡張する」旨のリンクを追加すべき。"
+    },
+    {
+      "id": "NTH-003",
+      "severity": "nice-to-have",
+      "category": "整合性",
+      "title": "CLAUDE.mdのモジュール説明にvibe-local.tsのコンテキストウィンドウ対応を追記すべき",
+      "description": "CLAUDE.mdの「主要機能モジュール」セクションにある vibe-local.ts の説明は現状「VibeLocalTool、BaseCLITool継承、tmuxセッション管理」のみ。Issue #374完了後にコンテキストウィンドウサポートを追記する必要があるが、Issueの変更対象ファイル一覧にCLAUDE.mdが含まれていない。",
+      "suggestion": "変更対象ファイルにCLAUDE.mdを追加し、vibe-local.tsの説明にコンテキストウィンドウ対応の記述を含める。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "overall_assessment": "Issue #374 は既存の vibeLocalModel 実装パターンを踏襲した堅実な機能追加Issueであり、重大な技術的誤りや整合性の問題は見当たらない。全ての前提条件は仮説検証でConfirmed済みであり、変更対象ファイルの特定も正確。ただし、(1)テスト戦略の欠如、(2)バリデーション範囲の根拠不足、(3)DB更新関数の設計パターン未指定、(4)セッション再起動時の挙動の明確化 の4点は実装前に明確化すべき。これらは実装品質と保守性に直結するため、should-fixとして対応を推奨する。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cli-tools/vibe-local.ts",
+      "lines": "88-97",
+      "relevance": "コマンド構築箇所 - --context-window の追加先"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "lines": "932-948",
+      "relevance": "既存の vibe_local_model マイグレーションパターン（version 19）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "232-251",
+      "relevance": "既存の vibeLocalModel APIバリデーション"
+    },
+    {
+      "file": "src/lib/db.ts",
+      "lines": "1004-1014",
+      "relevance": "既存の updateVibeLocalModel 関数パターン"
+    },
+    {
+      "file": "src/components/worktree/AgentSettingsPane.tsx",
+      "lines": "232-264",
+      "relevance": "既存の Ollama model selector UI - context-window input の追加先"
+    },
+    {
+      "file": "src/types/models.ts",
+      "lines": "80-81",
+      "relevance": "Worktreeインターフェース - vibeLocalContextWindow フィールド追加先"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "locales/ja/schedule.json",
+      "relevance": "i18nラベル追加先（vibeLocalContextWindow関連キー）"
+    },
+    {
+      "file": "locales/en/schedule.json",
+      "relevance": "i18nラベル追加先（vibeLocalContextWindow関連キー）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "vibe-local.tsモジュール説明の更新が必要"
+    }
+  ]
+}

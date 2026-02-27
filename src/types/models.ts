@@ -79,6 +79,8 @@ export interface Worktree {
   selectedAgents?: [CLIToolType, CLIToolType];
   /** Ollama model name for vibe-local (Issue #368) - null means default */
   vibeLocalModel?: string | null;
+  /** Ollama context window size for vibe-local (Issue #374) - null means default */
+  vibeLocalContextWindow?: number | null;
   /** Git status information (Issue #111) - optional for backward compatibility */
   gitStatus?: GitStatus;
 }

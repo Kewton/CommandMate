@@ -1,0 +1,7 @@
+{
+  "issue_number": 374,
+  "stage": 2,
+  "review_result_path": "dev-reports/issue/374/multi-stage-design-review/stage2-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md",
+  "note": "設計方針書のみを更新。ソースコードは変更しない。"
+}

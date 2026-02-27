@@ -36,6 +36,8 @@
   "agentSaveError": "エージェント設定の保存に失敗しました。",
   "vibeLocalModel": "Ollamaモデル",
   "vibeLocalModelDefault": "デフォルト",
+  "vibeLocalContextWindow": "コンテキストウィンドウ",
+  "vibeLocalContextWindowDefault": "デフォルト（自動）",
   "ollamaNotAvailable": "Ollamaが起動していません。モデルを選択するにはOllamaを起動してください。",
   "cmateCreated": "CMATE.mdをテンプレートで作成しました。スケジュールを設定してください。",
   "cmateValidation": {

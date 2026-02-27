@@ -1,0 +1,49 @@
+{
+  "issue_number": 374,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_passed": 4057,
+      "tests_failed": 0,
+      "typescript_errors": 0,
+      "eslint_errors": 0,
+      "changed_files": [
+        "src/lib/cli-tools/types.ts",
+        "src/types/models.ts",
+        "src/lib/db-migrations.ts",
+        "src/lib/db.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/lib/cli-tools/vibe-local.ts",
+        "src/components/worktree/AgentSettingsPane.tsx",
+        "src/components/worktree/NotesAndLogsPane.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "locales/en/schedule.json",
+        "locales/ja/schedule.json",
+        "tests/unit/lib/cli-tools/types.test.ts",
+        "tests/unit/lib/db-migrations.test.ts"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 8,
+      "criteria_failed": 0
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "AgentSettingsPane: VIBE_LOCAL_CONTEXT_WINDOW_MIN/MAX 定数使用（マジックナンバー除去）",
+        "AgentSettingsPane: NaN ガード追加（parseInt が NaN を返す場合に null 変換）",
+        "route.ts: エラーメッセージで定数を使用（DRY原則）",
+        "db-migrations.ts: down() メッセージパターンを v19 と統一",
+        "types.test.ts: 定数不変条件テスト5件追加、OLLAMA_MODEL_PATTERN テスト17件追加"
+      ],
+      "tests_after": 4079,
+      "tests_added": 22
+    },
+    "documentation": {
+      "status": "completed",
+      "updated_files": ["CLAUDE.md"]
+    }
+  }
+}

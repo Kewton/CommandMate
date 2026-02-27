@@ -6,9 +6,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, updateSelectedAgents, updateVibeLocalModel, getMessages, markPendingPromptsAsAnswered, getInitialBranch } from '@/lib/db';
+import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, updateSelectedAgents, updateVibeLocalModel, updateVibeLocalContextWindow, getMessages, markPendingPromptsAsAnswered, getInitialBranch } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, VIBE_LOCAL_CONTEXT_WINDOW_MIN, VIBE_LOCAL_CONTEXT_WINDOW_MAX, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectSessionStatus } from '@/lib/status-detector';
 import { getGitStatus } from '@/lib/git-utils';
@@ -248,6 +248,20 @@ export async function PATCH(
         }
       }
       updateVibeLocalModel(db, params.id, model);
+    }
+
+    // Update vibe-local context window if provided (Issue #374)
+    // [S4-002] isValidVibeLocalContextWindow() includes typeof === 'number' check,
+    // which protects against prototype pollution payloads (Object/Function types).
+    if ('vibeLocalContextWindow' in body) {
+      const ctxWindow = body.vibeLocalContextWindow;
+      if (ctxWindow !== null && !isValidVibeLocalContextWindow(ctxWindow)) {
+        return NextResponse.json(
+          { error: `vibeLocalContextWindow must be null or an integer (${VIBE_LOCAL_CONTEXT_WINDOW_MIN}-${VIBE_LOCAL_CONTEXT_WINDOW_MAX})` },
+          { status: 400 }
+        );
+      }
+      updateVibeLocalContextWindow(db, params.id, ctxWindow);
     }
 
     // Return updated worktree with session status

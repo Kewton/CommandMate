@@ -1,0 +1,61 @@
+{
+  "issue_number": 374,
+  "status": "success",
+  "improvements": [
+    {
+      "file": "src/components/worktree/AgentSettingsPane.tsx",
+      "change": "Replace hardcoded min=\"128\" max=\"2097152\" HTML attributes with VIBE_LOCAL_CONTEXT_WINDOW_MIN/MAX constants",
+      "reason": "DRY principle: magic numbers duplicated values already defined as constants in types.ts"
+    },
+    {
+      "file": "src/components/worktree/AgentSettingsPane.tsx",
+      "change": "Add NaN guard for parseInt result in handleContextWindowChange",
+      "reason": "Defensive programming: parseInt can return NaN for non-numeric input, which would send invalid data to API"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "change": "Use template literal with VIBE_LOCAL_CONTEXT_WINDOW_MIN/MAX constants in error message",
+      "reason": "DRY principle: error message range values should derive from constants to stay in sync"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "change": "Align migration v20 down() log message format with v19 pattern",
+      "reason": "Consistency: migration v19 uses 'No rollback for X column (SQLite limitation)' pattern, v20 used a different format"
+    },
+    {
+      "file": "tests/unit/lib/cli-tools/types.test.ts",
+      "change": "Add constants invariant tests (MIN < MAX, both positive integers) and boundary tests (MIN+1, MAX-1)",
+      "reason": "Test quality: ensure constants maintain expected relationships and boundary acceptance is verified"
+    },
+    {
+      "file": "tests/unit/lib/cli-tools/types.test.ts",
+      "change": "Add OLLAMA_MODEL_PATTERN validation test suite (9 valid + 8 invalid cases)",
+      "reason": "Test coverage: OLLAMA_MODEL_PATTERN used in vibe-local.ts defense-in-depth had zero test coverage"
+    }
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0,
+    "typescript": "pass",
+    "eslint": "pass",
+    "tests_passed": 4079,
+    "tests_before": 4057,
+    "tests_added": 22
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "files_changed": [
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/lib/db-migrations.ts",
+    "tests/unit/lib/cli-tools/types.test.ts"
+  ],
+  "commits": [
+    "01275ad: refactor(#374): improve code quality for vibe-local context window feature"
+  ],
+  "message": "Refactoring completed. DRY violations resolved by replacing hardcoded magic numbers with constants. Client-side NaN guard added. Migration message pattern unified. 22 new tests added for improved coverage."
+}

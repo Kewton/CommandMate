@@ -1,0 +1,40 @@
+{
+  "issue_number": 374,
+  "feature_summary": "Vibe Localにコンテキストウィンドウサイズ(--context-window)の設定を追加",
+  "acceptance_criteria": [
+    "AgentSettingsPaneでVibe Local選択時にコンテキストウィンドウの入力欄が表示される",
+    "入力した値がDBに永続化され、ページリロード後も保持される",
+    "セッション起動時に --context-window {value} が正しくCLI引数として渡される",
+    "未設定（null）の場合はオプションが省略される（vibe-localのデフォルト動作）",
+    "不正な値（負数、非整数、128未満、2097152超）がバリデーションで拒否される",
+    "コンテキストウィンドウの変更はセッション再起動後に反映される",
+    "他ツール（Claude/Codex/Gemini）のセッション動作に影響がないこと",
+    "各レイヤーのユニットテスト・インテグレーションテストがパスする"
+  ],
+  "test_scenarios": [
+    "シナリオ1: Vibe Local選択時にコンテキストウィンドウ入力欄が表示される（他ツール選択時は非表示）",
+    "シナリオ2: 有効値（8192）を設定してAPIに送信 → 200 OK、DBに保存される",
+    "シナリオ3: null（空欄）を設定してAPIに送信 → 200 OK、DBでnullになる",
+    "シナリオ4: 無効値（127、2097153、-1、128.5、'abc'）でAPIに送信 → 400 Bad Request",
+    "シナリオ5: contextWindow=8192 でstartSession() → コマンドに --context-window 8192 が含まれる",
+    "シナリオ6: contextWindow=null でstartSession() → コマンドに --context-window が含まれない",
+    "シナリオ7: TypeScript strict mode でコンパイルエラーなし",
+    "シナリオ8: ESLintエラーなし",
+    "シナリオ9: 全ユニットテストがパス（db-migrations.test.ts の CURRENT_SCHEMA_VERSION=20 含む）"
+  ],
+  "changed_files": [
+    "src/lib/cli-tools/types.ts",
+    "src/types/models.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/db.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/cli-tools/vibe-local.ts",
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "locales/en/schedule.json",
+    "locales/ja/schedule.json",
+    "tests/unit/lib/cli-tools/types.test.ts",
+    "tests/unit/lib/db-migrations.test.ts"
+  ]
+}

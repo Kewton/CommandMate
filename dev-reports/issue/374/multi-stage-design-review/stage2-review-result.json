@@ -1,0 +1,133 @@
+{
+  "issue_number": 374,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "status": "conditionally_approved",
+  "score": 4,
+  "reviewed_at": "2026-02-28",
+  "findings": [
+    {
+      "id": "C2-001",
+      "severity": "must-fix",
+      "category": "テスト整合性",
+      "title": "db-migrations.test.ts のCURRENT_SCHEMA_VERSION期待値の行番号が不正確",
+      "description": "設計方針書セクション8に「CURRENT_SCHEMA_VERSION期待値 19→20（L37, L430, L443）」と記載されているが、実際のテストファイルでは L37 のアサーション「expect(CURRENT_SCHEMA_VERSION).toBe(19)」のみが直接的なバージョン検証である。L430 の「expect(getCurrentVersion(db)).toBe(19)」はrollbackMigrationsテスト内で現在バージョン19からロールバックする文脈であり、これは19→20に変更するのではなく20に変更する必要がある。L443 の「expect(getCurrentVersion(db)).toBe(19)」も同様。設計書の「19→20」という記述は正しいが、行番号が実際のファイルと一致しているか確認が必要。",
+      "evidence": "tests/unit/lib/db-migrations.test.ts L37: expect(CURRENT_SCHEMA_VERSION).toBe(19), L430: expect(getCurrentVersion(db)).toBe(19) (rollbackMigrations内), L443: expect(getCurrentVersion(db)).toBe(19) (rollbackMigrations内)",
+      "suggestion": "設計書のテスト修正箇所を「L37のCURRENT_SCHEMA_VERSION期待値を20に変更」「L430, L443のgetCurrentVersion期待値を20に変更」と正確に記述する。また、rollbackMigrationsテスト内のrollbackMigrations(db, 16)呼び出しも、version 20からのロールバックを正しくテストすることを確認する。"
+    },
+    {
+      "id": "C2-002",
+      "severity": "must-fix",
+      "category": "DB関数シグネチャ整合性",
+      "title": "updateVibeLocalContextWindow()のシグネチャがupdateVibeLocalModel()と不一致",
+      "description": "設計方針書セクション3のDB関数パターンで updateVibeLocalContextWindow(db, id, contextWindow) と定義されているが、既存の updateVibeLocalModel(db, id, model) のシグネチャと比較すると、引数名は異なるものの型パターンは同一（db: Database.Database, id: string, value: T | null）で整合的。ただし、設計書では引数型が number | null と明記されているのに対して、実際のAPI層バリデーションでは isValidVibeLocalContextWindow() で type guard を行っている。関数シグネチャ自体は整合的だが、db.ts内の updateVibeLocalContextWindow() は number | null を受け取る設計なのに、API層で null の場合はバリデーションをスキップする（'vibeLocalContextWindow' in body で分岐後、ctxWindow !== null の場合のみ検証）。null をそのまま渡す場合のDB側での型安全性を確認すべき。",
+      "evidence": "設計書セクション4: if (ctxWindow !== null) { if (!isValidVibeLocalContextWindow(ctxWindow)) {...} } / updateVibeLocalContextWindow(db, params.id, ctxWindow); -- ctxWindow が null の場合も直接渡される",
+      "suggestion": "API層のバリデーションコードで、ctxWindow が null でも number でもない場合（例: string, boolean, undefined）を明示的に拒否するガードを追加する。設計書セクション4のバリデーションブロックに typeof ctxWindow !== 'number' && ctxWindow !== null の場合の 400 レスポンスを追加することを推奨する。"
+    },
+    {
+      "id": "C2-003",
+      "severity": "should-fix",
+      "category": "SELECT文整合性",
+      "title": "getWorktrees()とgetWorktreeById()のSELECT文にvibeLocalContextWindowが未記載だが、vibeLocalModelの既存パターンとは整合的",
+      "description": "設計方針書セクション3のSELECT文修正リストには正しく6箇所（getWorktrees() 3箇所 + getWorktreeById() 3箇所）が列挙されている。既存コードを確認すると、getWorktrees()のSELECT文（L196-202）とgetWorktreeById()のSELECT文（L308-316）において、現在 w.vibe_local_model が選択されている。新たに w.vibe_local_context_window を追加する位置は w.vibe_local_model の直後が自然。型キャストの as 句（L215-233, L319-337）にも vibe_local_context_window: number | null を追加する必要がある。マッピング部（L240-263, L344-363）にも vibeLocalContextWindow: row.vibe_local_context_window ?? null を追加。これらは設計書に正しく記載されている。",
+      "evidence": "db.ts L199: w.vibe_local_model (getWorktrees SELECT), L312: w.vibe_local_model (getWorktreeById SELECT)",
+      "suggestion": "実装時に w.vibe_local_context_window を w.vibe_local_model の直後に配置し、設計書の6箇所修正を正確に反映する。"
+    },
+    {
+      "id": "C2-004",
+      "severity": "should-fix",
+      "category": "i18nパターン整合性",
+      "title": "i18nキー名が設計書と既存パターンで不整合の可能性",
+      "description": "設計方針書セクション6のi18nキーテーブルでは vibeLocalContextWindow と vibeLocalContextWindowDefault を定義している。既存の schedule.json には vibeLocalModel と vibeLocalModelDefault が存在する。命名パターン（vibeLocal + 機能名 + Default）は整合的。ただし、設計書セクション6のUIコード例では t('vibeLocalContextWindow') と t('vibeLocalContextWindowDefault') を使用しているが、これらのキーが schedule 名前空間に追加される旨が明記されていない（セクション10のファイル一覧には locales/ja/schedule.json と locales/en/schedule.json への修正が記載されている）。設計書は整合的だが、i18nキーの日本語翻訳「コンテキストウィンドウ」と「デフォルト（自動）」について、既存の vibeLocalModelDefault の「デフォルト」と vibeLocalContextWindowDefault の「デフォルト（自動）」で表現が異なる点に注意。",
+      "evidence": "設計書セクション6 i18nキー: vibeLocalContextWindowDefault -> ja: 'デフォルト（自動）' vs 既存 vibeLocalModelDefault -> ja: 'デフォルト'",
+      "suggestion": "vibeLocalContextWindowDefault の日本語訳を既存パターンに合わせ「デフォルト」に統一するか、「デフォルト（自動）」にする場合は vibeLocalModelDefault も「デフォルト（自動）」に更新して一貫性を保つことを検討する。"
+    },
+    {
+      "id": "C2-005",
+      "severity": "should-fix",
+      "category": "型定義整合性",
+      "title": "Worktree interfaceのvibeLocalContextWindowフィールドがoptional(?)で定義されているが、DB読み取り時は常に存在する",
+      "description": "設計方針書セクション7で Worktree interface に vibeLocalContextWindow?: number | null と定義されている。既存の vibeLocalModel も vibeLocalModel?: string | null と同じパターンで定義されている（models.ts L81）。ただし、db.ts のマッピングでは vibeLocalModel: row.vibe_local_model ?? null と常に値を設定している（undefined にはならない）。したがって DB から取得した Worktree オブジェクトでは vibeLocalModel は必ず存在する（null または string）が、型定義上は optional なので undefined の可能性がある。vibeLocalContextWindow も同じパターンを踏襲するなら、型上は optional だが実際には常に存在する状態となる。これは既存の技術的負債と同じパターンであり、Issue #374 で新たに発生するものではない。",
+      "evidence": "models.ts L81: vibeLocalModel?: string | null, db.ts L262: vibeLocalModel: row.vibe_local_model ?? null",
+      "suggestion": "Issue #374スコープでは既存パターン踏襲で問題ないが、将来的に Worktree interface の DB由来フィールドを Required にするリファクタリングを検討する。"
+    },
+    {
+      "id": "C2-006",
+      "severity": "should-fix",
+      "category": "API バリデーション整合性",
+      "title": "設計書のAPIバリデーションコードで型ガード関数適用前のnull以外の不正型チェックが不足",
+      "description": "設計方針書セクション4のバリデーションコードでは、ctxWindow !== null の場合のみ isValidVibeLocalContextWindow(ctxWindow) を呼び出す。isValidVibeLocalContextWindow() は value: unknown を受け取り typeof value === 'number' をチェックするので、string や boolean が渡された場合は false を返す。したがって 400 エラーが返る。ただし、null でない場合で isValidVibeLocalContextWindow() が false を返すケースのエラーメッセージ 'vibeLocalContextWindow must be null or an integer (128-2097152)' は適切。一方、既存の vibeLocalModel バリデーション（route.ts L233-249）では null チェック後に typeof model !== 'string' を明示的にチェックしている。vibeLocalContextWindow でも同様に typeof ctxWindow !== 'number' を明示的にチェックする方が、isValidVibeLocalContextWindow() のインターフェース変更に対してより堅牢。",
+      "evidence": "route.ts L233-249: vibeLocalModel バリデーションは typeof model !== 'string' を明示チェック / 設計書セクション4: isValidVibeLocalContextWindow() に型ガードを委譲",
+      "suggestion": "既存 vibeLocalModel パターンとの完全な一貫性のため、API層では typeof ctxWindow !== 'number' の明示チェックを isValidVibeLocalContextWindow() 呼び出しに加えて記述するか、あるいは isValidVibeLocalContextWindow() が型ガード関数として十分であることを設計書に明記する。"
+    },
+    {
+      "id": "C2-007",
+      "severity": "nice-to-have",
+      "category": "マイグレーションパターン整合性",
+      "title": "version 19 (vibe_local_model) のdown()関数パターンとversion 20のdown()の整合性",
+      "description": "設計方針書セクション8に「down()関数: rollbackMigrationsテスト互換」と記載があるが、具体的なdown()関数の実装が設計書に記載されていない。既存の version 19 (add-vibe-local-model-column) の down() は console.log のみで実質ロールバックしないパターンを採用している。version 20 も同じパターン（INTEGER カラムの追加のみなので）を踏襲すべきだが、rollbackMigrations テスト（L428-443）では version 19 から 16 へのロールバックをテストしており、version 20 が追加された場合は version 20 から 16 へのロールバック、または version 20 から 19 へのロールバックのテストケースが必要。",
+      "evidence": "db-migrations.ts L944-947: version 19 down() は console.log のみ / db-migrations.test.ts L428-443: rollbackMigrations テスト",
+      "suggestion": "設計書にversion 20のdown()関数を明示的に記載する（console.log パターン踏襲）。rollbackMigrations テストケースの更新方針（version 20→19 のロールバックテスト追加）も記載する。"
+    },
+    {
+      "id": "C2-008",
+      "severity": "nice-to-have",
+      "category": "vibe-local.ts整合性",
+      "title": "startSession()内のcontextWindow取得パターンの詳細設計が不足",
+      "description": "設計方針書セクション5のCLI層コード例では isValidVibeLocalContextWindow(ctxWindow) で検証後に vibeLocalCommand += ` --context-window ${ctxWindow}` としているが、ctxWindow の取得方法（getDbInstance() + getWorktreeById() → wt.vibeLocalContextWindow）の詳細コードが設計書に記載されていない。既存の vibeLocalModel 取得パターン（vibe-local.ts L89-97）を参照すると、try-catch 内で DB アクセスし、失敗時はデフォルト動作にフォールバックしている。contextWindow も同じ try-catch 内で取得されるべきだが、vibeLocalModel とは独立してバリデーションする必要がある。",
+      "evidence": "vibe-local.ts L89-97: vibeLocalModel の DB 取得パターン（try-catch + OLLAMA_MODEL_PATTERN.test()）",
+      "suggestion": "設計書セクション5またはセクション10のvibe-local.ts修正内容に、contextWindow取得の具体的なコード例を追加する。既存のtry-catch内でvibeLocalModelと同じブロックでcontextWindowを取得し、isValidVibeLocalContextWindow()で検証するコードを明示する。"
+    },
+    {
+      "id": "C2-009",
+      "severity": "nice-to-have",
+      "category": "WorktreeDetailRefactored整合性",
+      "title": "モバイルレイアウトのNotesAndLogsPane呼び出し箇所の確認",
+      "description": "設計方針書ではWortreeDetailRefactored.tsxにstate/callbackを追加する旨が記載されている。実際のコードを確認すると、NotesAndLogsPaneは3箇所で呼び出されている：(1) MobileContentのmemoケース (L900-907)、(2) デスクトップレイアウトのleftPaneTab === 'memo' (L1941-1948)、(3) モバイルレイアウトの追加呼び出し (L2195-2204付近は別コンポーネントへの渡し)。(1) のモバイルケースでは onSelectedAgentsChange と onVibeLocalModelChange がpropsから受け取った値を使用している。vibeLocalContextWindow の state と callback も同様に3箇所すべてに追加が必要であることを設計書に明記すべき。",
+      "evidence": "WorktreeDetailRefactored.tsx L900-907, L1941-1948: NotesAndLogsPane呼び出し箇所",
+      "suggestion": "設計書セクション6のProps伝播パターンに、NotesAndLogsPaneの全呼び出し箇所（モバイル+デスクトップ）への props追加が必要であることを明記する。"
+    }
+  ],
+  "consistency_check": {
+    "db_pattern": "consistent",
+    "api_pattern": "consistent",
+    "ui_pattern": "consistent",
+    "test_pattern": "consistent",
+    "details": {
+      "db_pattern": "updateVibeLocalContextWindow()のシグネチャはupdateVibeLocalModel()と同一パターン。SELECT文修正6箇所の記述も正確。マイグレーションversion 20のALTER TABLE文はversion 19と同一パターン。",
+      "api_pattern": "PATCH /api/worktrees/[id] のvibeLocalContextWindowバリデーションは、vibeLocalModelの既存パターン（'vibeLocalModel' in body → null/型チェック → 個別update関数呼び出し）と整合的。ただしバリデーション方式が共有関数使用（isValidVibeLocalContextWindow）と明示型チェック（typeof !== 'string'）で若干異なる。",
+      "ui_pattern": "AgentSettingsPane への props 追加パターンは vibeLocalModel と同一。WorktreeDetailRefactored での useState + useCallback パターンも既存と一致。NotesAndLogsPane の props 伝播も既存パターン踏襲。",
+      "test_pattern": "db-migrations.test.ts のCURRENT_SCHEMA_VERSION期待値更新、AgentSettingsPane.test.tsx の props factory更新、NotesAndLogsPane.test.tsx の props factory更新は設計書に正しく記載。行番号の正確性に若干の懸念あり。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md",
+    "src/lib/db.ts",
+    "src/lib/db-migrations.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/types/models.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/vibe-local.ts",
+    "locales/ja/schedule.json",
+    "locales/en/schedule.json",
+    "tests/unit/lib/db-migrations.test.ts",
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx",
+    "tests/unit/components/worktree/NotesAndLogsPane.test.tsx"
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 3,
+    "overall_assessment": "設計方針書は既存コードベースのパターンを正確に分析し、一貫性の高い設計を提示している。DB関数パターン、API層バリデーション、UIコンポーネントのprops伝播、i18nキー命名のいずれも既存のvibeLocalModel実装パターンを忠実に踏襲している。must-fixは2件：(1) テスト修正箇所の行番号精度向上、(2) API層でのnull以外の不正型のガード漏れ。全体として実装品質は高く、条件付き承認とする。"
+  },
+  "timestamp": "2026-02-28T12:00:00Z"
+}

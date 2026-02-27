@@ -1,0 +1,37 @@
+{
+  "issue_number": 374,
+  "title": "feat: Vibe Localにコンテキストウィンドウサイズ(--context-window)の設定を追加",
+  "work_plan_path": "dev-reports/issue/374/work-plan.md",
+  "design_doc_path": "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md",
+  "acceptance_criteria": [
+    "AgentSettingsPaneでVibe Local選択時にコンテキストウィンドウの入力欄が表示される",
+    "入力した値がDBに永続化され、ページリロード後も保持される",
+    "セッション起動時に --context-window {value} が正しくCLI引数として渡される",
+    "未設定（null）の場合はオプションが省略される（vibe-localのデフォルト動作）",
+    "不正な値（負数、非整数、128未満、2097152超）がバリデーションで拒否される",
+    "コンテキストウィンドウの変更はセッション再起動後に反映される",
+    "他ツール（Claude/Codex/Gemini）のセッション動作に影響がないこと",
+    "各レイヤーのユニットテスト・インテグレーションテストがパスする"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/lib/cli-tools/types.ts に VIBE_LOCAL_CONTEXT_WINDOW_MIN=128, VIBE_LOCAL_CONTEXT_WINDOW_MAX=2097152 定数と isValidVibeLocalContextWindow(value: unknown): value is number 型ガード関数を追加",
+    "Task 1.2: src/types/models.ts の Worktree interface に vibeLocalContextWindow?: number | null フィールド追加",
+    "Task 1.3: src/lib/db-migrations.ts に version 20 マイグレーション追加（vibe_local_context_window INTEGER DEFAULT NULL, CURRENT_SCHEMA_VERSION=20, down()関数はconsole.logパターン）",
+    "Task 1.4: src/lib/db.ts に updateVibeLocalContextWindow() 関数追加、getWorktrees()/getWorktreeById() の SELECT文・型キャスト・マッピングを各3箇所修正（計6箇所）",
+    "Task 2.1: src/app/api/worktrees/[id]/route.ts の PATCH ハンドラに vibeLocalContextWindow バリデーション追加（isValidVibeLocalContextWindow 使用）",
+    "Task 3.1: src/lib/cli-tools/vibe-local.ts の startSession() で vibeLocalContextWindow を DB から取得し、defense-in-depth バリデーション後に --context-window ${Number(ctxWindow)} を追加",
+    "Task 4.1: locales/en/schedule.json と locales/ja/schedule.json に vibeLocalContextWindow と vibeLocalContextWindowDefault キー追加",
+    "Task 4.2: src/components/worktree/AgentSettingsPane.tsx に vibeLocalContextWindow props と number 入力欄 UI 追加",
+    "Task 4.3: src/components/worktree/NotesAndLogsPane.tsx に vibeLocalContextWindow props 伝播追加",
+    "Task 4.4: src/components/worktree/WorktreeDetailRefactored.tsx に vibeLocalContextWindow state/callback 追加、MobileContentProps と全 NotesAndLogsPane 呼び出し箇所に props 伝播",
+    "Task 5.1: tests/unit/lib/db-migrations.test.ts の CURRENT_SCHEMA_VERSION 期待値を 20 に更新（L37, L430, L443）",
+    "Task 6.1: CLAUDE.md の types.ts・vibe-local.ts・AgentSettingsPane.tsx 説明を更新"
+  ],
+  "target_coverage": 80,
+  "key_patterns": {
+    "vibeLocalModel_pattern": "既存の vibeLocalModel の実装パターンを vibeLocalContextWindow でも踏襲する",
+    "validation": "isValidVibeLocalContextWindow(value: unknown): value is number を types.ts に定義し API と CLI の両方で使用（DRY）",
+    "db_migration": "version 20, CURRENT_SCHEMA_VERSION=20, down()はconsole.logのみ（SQLite制約）",
+    "defense_in_depth": "startSession() 内で Number(ctxWindow) キャストを使用してテンプレートリテラル埋め込み"
+  }
+}

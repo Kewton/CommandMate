@@ -1,0 +1,99 @@
+{
+  "issue_number": 374,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "reviewed_at": "2026-02-28",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should-fix",
+      "principle": "DRY",
+      "title": "バリデーションロジックの重複（API層 / CLI層）",
+      "description": "設計方針書のセクション5では、API層（route.ts）とCLI層（vibe-local.ts）の両方で同一のバリデーション条件（typeof === 'number' && Number.isInteger() && >= 128 && <= 2097152）を記述する方針となっている。これはdefense-in-depthとして合理的だが、バリデーション条件をインラインで書くと、将来MIN/MAX値を変更した際に修正漏れのリスクがある。vibeLocalModelの場合、API層ではOLLAMA_MODEL_PATTERN定数を共有しているが、パターン適用方法がインラインで異なる。contextWindowについても同様のリスクがある。",
+      "suggestion": "バリデーション関数 isValidVibeLocalContextWindow(value: unknown): value is number を types.ts に定義し、API層・CLI層の両方で呼び出す。定数 VIBE_LOCAL_CONTEXT_WINDOW_MIN / MAX は既に共有する設計だが、バリデーションロジック自体も関数として共有することでDRY原則への準拠度を高められる。OLLAMA_MODEL_PATTERNと同様のパターンとなる。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "nice-to-have",
+      "principle": "SRP",
+      "title": "AgentSettingsPaneの責務増加傾向",
+      "description": "AgentSettingsPane.tsx は現在、(1)エージェント選択チェックボックス、(2)Ollamaモデルセレクターの2つのUI領域を管理している。Issue #374でコンテキストウィンドウ入力欄が追加されると3つ目の責務が加わる。現在のコンポーネントサイズ（約270行）は管理可能な範囲だが、vibe-local固有設定が増加する傾向がある。",
+      "suggestion": "現時点では即座の分割は不要（YAGNI）だが、将来vibe-local固有の設定が更に増える場合は、VibeLocalSettingsSection サブコンポーネントとして切り出すことを検討する。設計方針書にこの将来的な分割方針をメモとして記載しておくと良い。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "nice-to-have",
+      "principle": "DRY",
+      "title": "SELECT文への新カラム追加が6箇所に及ぶ",
+      "description": "設計方針書セクション3.3で、getWorktrees()とgetWorktreeById()それぞれのSELECT文・型キャスト・マッピングの計6箇所を修正する必要がある。これは既存のvibeLocalModelカラム追加時と同じパターンだが、カラムが増えるたびに6箇所の修正が発生する構造的な課題がある。db.ts内のgetWorktrees()とgetWorktreeById()のマッピングロジックに重複が存在する。",
+      "suggestion": "既存パターンとの一貫性を優先する方針は妥当。ただし、長期的にはマッピング関数（mapWorktreeRow()）を抽出してgetWorktrees()とgetWorktreeById()で共有することで、新カラム追加時の修正箇所を削減できる。Issue #374のスコープでは既存パターン踏襲で問題ないが、将来のリファクタリング候補として認識しておくべき。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "should-fix",
+      "principle": "OCP",
+      "title": "VIBE_LOCAL_CONTEXT_WINDOW定数の配置場所",
+      "description": "設計方針書ではVIBE_LOCAL_CONTEXT_WINDOW_MIN/MAXをsrc/lib/cli-tools/types.tsに配置する方針となっている。このファイルはCLIToolType、ICLITool interface、OLLAMA_MODEL_PATTERNなど型定義と定数が混在している。context window関連の定数はvibe-local固有のものであり、types.tsの本来の責務（全CLIツール共通の型定義）から外れる。",
+      "suggestion": "OLLAMA_MODEL_PATTERNが既にtypes.tsに配置されている前例があるため、既存パターンとの一貫性の観点では許容範囲。ただし、将来的にvibe-local固有の定数が増える場合は、src/lib/cli-tools/vibe-local-config.ts のような専用ファイルに切り出すことを検討する。現時点では types.ts への配置を維持しつつ、JSDocでvibe-local固有であることを明記することを推奨する。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "must-fix",
+      "principle": "DIP",
+      "title": "vibe-local.ts内でのDB直接アクセス",
+      "description": "設計方針書のセクション5では、vibe-local.tsのstartSession()内でDBから直接contextWindowを読み取り、defense-in-depthバリデーションを行う方針となっている。現状のvibeLocalModel読み取りでも同様のパターン（startSession内でgetDbInstance() + getWorktreeById()を呼び出す）が使われている。しかし、CLI層（ビジネスロジック）がDBアクセス層に直接依存する構造は依存性逆転の原則に反する。startSession()の引数としてcontextWindowを受け取る設計にすれば、テスタビリティも向上する。",
+      "suggestion": "startSession()のシグネチャを拡張し、呼び出し側（API route等）からcontextWindowを引数として渡す設計に変更する。ただし、これはvibeLocalModelの既存パターンと不整合になるため、vibeLocalModelも同時にリファクタリングするか、Issue #374ではコメントでの明記に留めて将来課題とするか、判断が必要。既存パターンとの一貫性を優先する場合は、severity をshould-fixに下げた上で、startSession()内のDB直接アクセスを将来のリファクタリング対象として設計方針書に明記する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "nice-to-have",
+      "principle": "KISS",
+      "title": "Props伝播チェーン（3段階）の複雑さ",
+      "description": "設計方針書セクション6のProps伝播パターンでは、WorktreeDetailRefactored -> NotesAndLogsPane -> AgentSettingsPane と3段階のprops drilling が行われる。vibeLocalContextWindow と onVibeLocalContextWindowChange の2つのpropsが追加されることで、NotesAndLogsPaneのpropsが更に増加する（現在vibeLocalModel関連で既に4props）。",
+      "suggestion": "現在の3段階伝播は既存のvibeLocalModelと同一パターンであり、一貫性の観点で妥当。ただし、NotesAndLogsPaneが「素通し」するpropsが増加し続ける場合は、Context APIの導入やpropsオブジェクトの構造化（vibeLocalSettings: { model, contextWindow, onModelChange, onContextWindowChange } のようにまとめる）を将来的に検討する価値がある。Issue #374のスコープでは現行パターン踏襲で適切。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "should-fix",
+      "principle": "YAGNI",
+      "title": "下限値128の根拠と妥当性",
+      "description": "設計方針書セクション9では下限128の理由を「Ollamaの最小モデル対応」と記載しているが、具体的にどのモデルが128をコンテキストウィンドウサイズとして使用するのかの根拠が不明確。Ollamaのデフォルトコンテキストウィンドウサイズは通常2048以上であり、128という極端に小さい値を許容する実用上の意味が限定的。下限を低く設定しすぎると、ユーザーが誤って極端に小さい値を設定してしまうリスクがある。",
+      "suggestion": "実際のOllamaモデルの最小コンテキストウィンドウサイズを調査し、実用的な下限値を設定する。例えば2048を下限とすることで、誤設定リスクを軽減できる。または、下限128を維持する場合はその根拠をJSDocコメントに明記する。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "nice-to-have",
+      "principle": "OCP",
+      "title": "updateVibeLocalContextWindow の個別関数パターン",
+      "description": "設計方針書セクション3.3およびセクション9で認識されている通り、個別update関数パターン（updateVibeLocalModel, updateVibeLocalContextWindow等）はカラム追加のたびに新関数が必要になる。設計方針書では「汎用updateWorktreeField関数はYAGNI（現時点で2フィールドのみ）」と判断しているが、Issue #374で3フィールド目（contextWindow）が追加されることになる。",
+      "suggestion": "設計方針書のトレードオフ判断は妥当であり、3フィールドの時点ではまだ個別関数パターンで管理可能。ただし、閾値として4フィールド以上になった場合の汎用化リファクタリングを技術的負債として追跡することを推奨する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 4,
+    "overall_assessment": "設計方針書は既存のvibeLocalModelパターンとの一貫性を重視しており、KISS原則に沿ったシンプルな設計になっている。defense-in-depth によるセキュリティ設計も適切。主な改善点として、(1) バリデーションロジックの関数化によるDRY改善（S1-001）、(2) 定数配置場所の整理（S1-004）、(3) DB直接アクセスの将来的なリファクタリング方針の明記（S1-005）を推奨する。must-fix 1件（S1-005）は既存パターンとの整合性を考慮してseverityを緩和できる余地があるが、テスタビリティの観点から検討すべき事項。全体として、スコープが明確で実装リスクの低い設計方針書である。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-374-vibe-local-context-window-design-policy.md",
+    "src/lib/cli-tools/vibe-local.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/types/models.ts",
+    "src/lib/db.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/db-migrations.ts"
+  ],
+  "timestamp": "2026-02-28T12:00:00Z"
+}
