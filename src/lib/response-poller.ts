@@ -77,6 +77,8 @@ interface ExtractionResult {
   response: string;
   isComplete: boolean;
   lineCount: number;
+  /** Prompt detection result carried from extractResponse early check (Issue #372) */
+  promptDetection?: PromptDetectionResult;
 }
 
 /**
@@ -112,7 +114,8 @@ function buildPromptExtractionResult(
   totalLines: number,
   bufferReset: boolean,
   cliToolId: CLIToolType,
-  findRecentUserPromptIndex: (windowSize: number) => number
+  findRecentUserPromptIndex: (windowSize: number) => number,
+  promptDetection?: PromptDetectionResult,
 ): ExtractionResult {
   const startIndex = resolveExtractionStartIndex(
     lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
@@ -122,6 +125,7 @@ function buildPromptExtractionResult(
     response: stripAnsi(extractedLines.join('\n')),
     isComplete: true,
     lineCount: totalLines,
+    promptDetection,
   };
 }
 
@@ -439,9 +443,13 @@ function extractResponse(
     const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
     if (promptDetection.isPrompt) {
-      // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
+      // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards.
+      // Issue #372: Carry promptDetection through ExtractionResult so checkForResponse()
+      // can use it directly, avoiding a second detection on the (potentially truncated)
+      // extracted portion which may miss the › indicator line.
       return buildPromptExtractionResult(
-        lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+        lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
+        promptDetection,
       );
     }
   }
@@ -580,7 +588,8 @@ function extractResponse(
     // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
     // stripAnsi is applied inside buildPromptExtractionResult (Stage 4 MF-001: XSS risk mitigation)
     return buildPromptExtractionResult(
-      lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex
+      lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
+      promptDetection,
     );
   }
 
@@ -687,8 +696,11 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       return false;
     }
 
-    // Response is complete! Check if it's a prompt
-    const promptDetection = detectPromptWithOptions(result.response, cliToolId);
+    // Response is complete! Check if it's a prompt.
+    // Issue #372: Prefer the prompt detection carried from extractResponse() early check,
+    // which uses the full tmux output for accuracy. The extracted portion (result.response)
+    // may be truncated and miss the › indicator line when lastCapturedLine falls just before it.
+    const promptDetection = result.promptDetection ?? detectPromptWithOptions(result.response, cliToolId);
 
     if (promptDetection.isPrompt) {
       // This is a prompt - save as prompt message
