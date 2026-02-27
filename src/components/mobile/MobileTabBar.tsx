@@ -153,6 +153,7 @@ export function MobileTabBar({
         <button
           key={tab.id}
           type="button"
+          data-testid={`mobile-tab-${tab.id}`}
           role="tab"
           aria-selected={activeTab === tab.id}
           aria-label={tab.label}

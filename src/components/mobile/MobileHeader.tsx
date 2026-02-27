@@ -100,7 +100,7 @@ export function MobileHeader({
     <header
       data-testid="mobile-header"
       role="banner"
-      className="fixed top-0 inset-x-0 bg-white border-b border-gray-200 shadow-sm pt-safe z-40"
+      className="sticky top-0 inset-x-0 bg-white border-b border-gray-200 shadow-sm pt-safe z-40"
     >
       <div className="flex items-center justify-between h-14 px-4">
         {/* Left section: Back button or spacer */}
