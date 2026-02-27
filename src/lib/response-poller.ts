@@ -79,6 +79,8 @@ interface ExtractionResult {
   lineCount: number;
   /** Prompt detection result carried from extractResponse early check (Issue #372) */
   promptDetection?: PromptDetectionResult;
+  /** True when tmux buffer shrank (TUI redraw, screen clear, session restart) */
+  bufferReset?: boolean;
 }
 
 /**
@@ -126,6 +128,7 @@ function buildPromptExtractionResult(
     isComplete: true,
     lineCount: totalLines,
     promptDetection,
+    bufferReset,
   };
 }
 
@@ -576,6 +579,7 @@ function extractResponse(
       response,
       isComplete: true,
       lineCount: endIndex,  // Use endIndex instead of totalLines to track where we actually stopped
+      bufferReset,
     };
   }
 
@@ -649,6 +653,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // Check if CLI tool session is running
     const running = await isSessionRunning(worktreeId, cliToolId);
     if (!running) {
+      console.log(`[checkForResponse] Session not running for ${worktreeId} (${cliToolId}), stopping poller`);
       stopPolling(worktreeId, cliToolId);
       return false;
     }
@@ -685,13 +690,16 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
 
     // CRITICAL FIX: If lineCount == lastCapturedLine AND there's no in-progress message,
     // this response has already been saved. Skip to prevent duplicates.
-    if (result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
+    // Issue #372: Skip when buffer reset detected (TUI redraw may coincidentally match lineCount).
+    if (!result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
       return false;
     }
 
     // Additional duplicate prevention: check if savePendingAssistantResponse
-    // already saved this content by comparing line counts
-    if (result.lineCount <= lastCapturedLine) {
+    // already saved this content by comparing line counts.
+    // Issue #372: Skip this check when buffer reset is detected (TUI redraw, screen clear).
+    // Codex TUI redraws cause totalLines to shrink, making lineCount < lastCapturedLine.
+    if (!result.bufferReset && result.lineCount <= lastCapturedLine) {
       console.log(`[checkForResponse] Already saved up to line ${lastCapturedLine}, skipping (result: ${result.lineCount})`);
       return false;
     }

@@ -279,6 +279,14 @@ const SEPARATOR_LINE_PATTERN = /^[-─]+$/;
 const QUESTION_SCAN_RANGE = 3;
 
 /**
+ * Maximum consecutive continuation lines allowed between options and question.
+ * Issue #372: Codex TUI indents all output with 2 spaces, causing isContinuationLine()
+ * to match body text lines indefinitely. Without this limit, the scanner would traverse
+ * through the entire command output, picking up numbered lists as false options.
+ */
+const MAX_CONTINUATION_LINES = 5;
+
+/**
  * Creates a "no prompt detected" result.
  * Centralizes the repeated pattern of returning isPrompt: false with trimmed content.
  *
@@ -648,6 +656,7 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
   // ==========================================================================
   const collectedOptions: Array<{ number: number; label: string; isDefault: boolean }> = [];
   let questionEndIndex = -1;
+  let continuationLineCount = 0;
 
   for (let i = effectiveEnd - 1; i >= scanStart; i--) {
     const line = lines[i].trim();
@@ -658,6 +667,7 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
       const number = parseInt(defaultMatch[1], 10);
       const label = defaultMatch[2].trim();
       collectedOptions.unshift({ number, label, isDefault: true });
+      continuationLineCount = 0;
       continue;
     }
 
@@ -667,6 +677,7 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
       const number = parseInt(normalMatch[1], 10);
       const label = normalMatch[2].trim();
       collectedOptions.unshift({ number, label, isDefault: false });
+      continuationLineCount = 0;
       continue;
     }
 
@@ -701,6 +712,15 @@ function detectMultipleChoicePrompt(output: string, options?: DetectPromptOption
       // or path/filename fragments from terminal width wrapping - Issue #181)
       const rawLine = lines[i]; // Original line with indentation preserved
       if (isContinuationLine(rawLine, line)) {
+        continuationLineCount++;
+        // Issue #372: Codex TUI indents all output with 2 spaces, causing
+        // every line to match isContinuationLine(). Limit the scan distance
+        // to prevent traversing into body text where numbered lists would be
+        // collected as false options.
+        if (continuationLineCount > MAX_CONTINUATION_LINES) {
+          questionEndIndex = i;
+          break;
+        }
         // Skip continuation lines and continue scanning for more options
         continue;
       }
