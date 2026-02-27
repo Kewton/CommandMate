@@ -171,6 +171,131 @@ describe('AgentSettingsPane', () => {
     });
   });
 
+  describe('Context window input (Issue #374)', () => {
+    const vibeLocalProps = {
+      ...defaultProps,
+      selectedAgents: ['claude', 'vibe-local'] as [CLIToolType, CLIToolType],
+      vibeLocalContextWindow: null as number | null,
+      onVibeLocalContextWindowChange: vi.fn(),
+    };
+
+    beforeEach(() => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ models: [] }) })
+        .mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    it('should render context window input when vibe-local is selected', async () => {
+      render(<AgentSettingsPane {...vibeLocalProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('vibe-local-context-window-input')).toBeDefined();
+      });
+    });
+
+    it('should allow free typing without triggering API calls', async () => {
+      render(<AgentSettingsPane {...vibeLocalProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('vibe-local-context-window-input')).toBeDefined();
+      });
+
+      const input = screen.getByTestId('vibe-local-context-window-input') as HTMLInputElement;
+      // Clear previous fetch calls from Ollama models
+      mockFetch.mockClear();
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+
+      // Type partial values - should NOT call API
+      fireEvent.change(input, { target: { value: '8' } });
+      expect(input.value).toBe('8');
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      fireEvent.change(input, { target: { value: '81' } });
+      expect(input.value).toBe('81');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should call API on blur with valid value', async () => {
+      render(<AgentSettingsPane {...vibeLocalProps} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('vibe-local-context-window-input')).toBeDefined();
+      });
+
+      const input = screen.getByTestId('vibe-local-context-window-input') as HTMLInputElement;
+      mockFetch.mockClear();
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+
+      fireEvent.change(input, { target: { value: '8192' } });
+      fireEvent.blur(input);
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          `/api/worktrees/${vibeLocalProps.worktreeId}`,
+          expect.objectContaining({
+            method: 'PATCH',
+            body: JSON.stringify({ vibeLocalContextWindow: 8192 }),
+          })
+        );
+      });
+    });
+
+    it('should send null when input is cleared and blurred', async () => {
+      render(<AgentSettingsPane {...vibeLocalProps} vibeLocalContextWindow={8192} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('vibe-local-context-window-input')).toBeDefined();
+      });
+
+      const input = screen.getByTestId('vibe-local-context-window-input') as HTMLInputElement;
+      mockFetch.mockClear();
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+
+      fireEvent.change(input, { target: { value: '' } });
+      fireEvent.blur(input);
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          `/api/worktrees/${vibeLocalProps.worktreeId}`,
+          expect.objectContaining({
+            body: JSON.stringify({ vibeLocalContextWindow: null }),
+          })
+        );
+      });
+    });
+
+    it('should not call API on blur if value has not changed', async () => {
+      render(<AgentSettingsPane {...vibeLocalProps} vibeLocalContextWindow={null} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('vibe-local-context-window-input')).toBeDefined();
+      });
+
+      const input = screen.getByTestId('vibe-local-context-window-input');
+      mockFetch.mockClear();
+
+      // Blur without changing value
+      fireEvent.blur(input);
+
+      // Wait a tick and verify no API call
+      await new Promise(r => setTimeout(r, 50));
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should revert input on API failure', async () => {
+      render(<AgentSettingsPane {...vibeLocalProps} vibeLocalContextWindow={4096} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('vibe-local-context-window-input')).toBeDefined();
+      });
+
+      const input = screen.getByTestId('vibe-local-context-window-input') as HTMLInputElement;
+      mockFetch.mockClear();
+      mockFetch.mockResolvedValue({ ok: false, status: 400, json: () => Promise.resolve({ error: 'invalid' }) });
+
+      fireEvent.change(input, { target: { value: '50' } });
+      fireEvent.blur(input);
+
+      await waitFor(() => {
+        expect(input.value).toBe('4096');
+      });
+    });
+  });
+
   describe('Loading state', () => {
     it('should show loading indicator during API call', async () => {
       // Make fetch hang to test loading state
