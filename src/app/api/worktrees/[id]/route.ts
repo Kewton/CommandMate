@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, updateSelectedAgents, updateVibeLocalModel, updateVibeLocalContextWindow, getMessages, markPendingPromptsAsAnswered, getInitialBranch } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, VIBE_LOCAL_CONTEXT_WINDOW_MIN, VIBE_LOCAL_CONTEXT_WINDOW_MAX, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectSessionStatus } from '@/lib/status-detector';
 import { getGitStatus } from '@/lib/git-utils';
@@ -257,7 +257,7 @@ export async function PATCH(
       const ctxWindow = body.vibeLocalContextWindow;
       if (ctxWindow !== null && !isValidVibeLocalContextWindow(ctxWindow)) {
         return NextResponse.json(
-          { error: 'vibeLocalContextWindow must be null or an integer (128-2097152)' },
+          { error: `vibeLocalContextWindow must be null or an integer (${VIBE_LOCAL_CONTEXT_WINDOW_MIN}-${VIBE_LOCAL_CONTEXT_WINDOW_MAX})` },
           { status: 400 }
         );
       }

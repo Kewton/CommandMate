@@ -960,7 +960,7 @@ const migrations: Migration[] = [
     },
     down: () => {
       // vibe_local_context_window is a nullable INTEGER column; harmless if unused
-      console.log('SQLite does not support DROP COLUMN. Manual migration required.');
+      console.log('No rollback for vibe_local_context_window column (SQLite limitation)');
     }
   }
 ];

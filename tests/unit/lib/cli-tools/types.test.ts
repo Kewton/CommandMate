@@ -1,6 +1,7 @@
 /**
  * Tests for CLI tools type definitions and validation functions
  * Issue #374: isValidVibeLocalContextWindow() validation tests
+ * Issue #368: OLLAMA_MODEL_PATTERN validation tests
  */
 
 import { describe, it, expect } from 'vitest';
@@ -8,6 +9,7 @@ import {
   isValidVibeLocalContextWindow,
   VIBE_LOCAL_CONTEXT_WINDOW_MIN,
   VIBE_LOCAL_CONTEXT_WINDOW_MAX,
+  OLLAMA_MODEL_PATTERN,
 } from '../../../../src/lib/cli-tools/types';
 
 describe('isValidVibeLocalContextWindow', () => {
@@ -19,11 +21,29 @@ describe('isValidVibeLocalContextWindow', () => {
     it('should have VIBE_LOCAL_CONTEXT_WINDOW_MAX = 2097152', () => {
       expect(VIBE_LOCAL_CONTEXT_WINDOW_MAX).toBe(2097152);
     });
+
+    it('should have MIN less than MAX', () => {
+      expect(VIBE_LOCAL_CONTEXT_WINDOW_MIN).toBeLessThan(VIBE_LOCAL_CONTEXT_WINDOW_MAX);
+    });
+
+    it('should have MIN as a positive integer', () => {
+      expect(VIBE_LOCAL_CONTEXT_WINDOW_MIN).toBeGreaterThan(0);
+      expect(Number.isInteger(VIBE_LOCAL_CONTEXT_WINDOW_MIN)).toBe(true);
+    });
+
+    it('should have MAX as a positive integer', () => {
+      expect(VIBE_LOCAL_CONTEXT_WINDOW_MAX).toBeGreaterThan(0);
+      expect(Number.isInteger(VIBE_LOCAL_CONTEXT_WINDOW_MAX)).toBe(true);
+    });
   });
 
   describe('valid values', () => {
     it('should accept minimum value (128)', () => {
       expect(isValidVibeLocalContextWindow(128)).toBe(true);
+    });
+
+    it('should accept value just above minimum (129)', () => {
+      expect(isValidVibeLocalContextWindow(VIBE_LOCAL_CONTEXT_WINDOW_MIN + 1)).toBe(true);
     });
 
     it('should accept typical value (8192)', () => {
@@ -32,6 +52,10 @@ describe('isValidVibeLocalContextWindow', () => {
 
     it('should accept maximum value (2097152)', () => {
       expect(isValidVibeLocalContextWindow(2097152)).toBe(true);
+    });
+
+    it('should accept value just below maximum', () => {
+      expect(isValidVibeLocalContextWindow(VIBE_LOCAL_CONTEXT_WINDOW_MAX - 1)).toBe(true);
     });
 
     it('should accept mid-range value (131072)', () => {
@@ -107,6 +131,80 @@ describe('isValidVibeLocalContextWindow', () => {
         const result: number = value;
         expect(result).toBe(8192);
       }
+    });
+  });
+});
+
+describe('OLLAMA_MODEL_PATTERN', () => {
+  describe('valid model names', () => {
+    it('should accept simple model name', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('llama3')).toBe(true);
+    });
+
+    it('should accept model with version tag', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('llama3:latest')).toBe(true);
+    });
+
+    it('should accept model with dots', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('llama3.1')).toBe(true);
+    });
+
+    it('should accept model with slashes (namespace)', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('library/llama3')).toBe(true);
+    });
+
+    it('should accept model with hyphens', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('code-llama')).toBe(true);
+    });
+
+    it('should accept model with underscores', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('my_model')).toBe(true);
+    });
+
+    it('should accept complex model name with multiple segments', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('library/codellama:7b-instruct')).toBe(true);
+    });
+
+    it('should accept single character model name', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('a')).toBe(true);
+    });
+
+    it('should accept numeric-starting model name', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('3model')).toBe(true);
+    });
+  });
+
+  describe('invalid model names', () => {
+    it('should reject empty string', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('')).toBe(false);
+    });
+
+    it('should reject string starting with dot', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('.hidden')).toBe(false);
+    });
+
+    it('should reject string starting with hyphen', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('-model')).toBe(false);
+    });
+
+    it('should reject string starting with underscore', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('_model')).toBe(false);
+    });
+
+    it('should reject string starting with colon', () => {
+      expect(OLLAMA_MODEL_PATTERN.test(':tag')).toBe(false);
+    });
+
+    it('should reject string starting with slash', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('/path')).toBe(false);
+    });
+
+    it('should reject string with spaces', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('my model')).toBe(false);
+    });
+
+    it('should reject string with special characters', () => {
+      expect(OLLAMA_MODEL_PATTERN.test('model@name')).toBe(false);
     });
   });
 });

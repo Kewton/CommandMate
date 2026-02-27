@@ -14,7 +14,13 @@
 
 import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import { useTranslations } from 'next-intl';
-import { CLI_TOOL_IDS, getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import {
+  CLI_TOOL_IDS,
+  getCliToolDisplayName,
+  VIBE_LOCAL_CONTEXT_WINDOW_MIN,
+  VIBE_LOCAL_CONTEXT_WINDOW_MAX,
+  type CLIToolType,
+} from '@/lib/cli-tools/types';
 
 // ============================================================================
 // Types
@@ -186,7 +192,8 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   const handleContextWindowChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const raw = e.target.value;
-      const ctxWindow = raw === '' ? null : parseInt(raw, 10);
+      const parsed = parseInt(raw, 10);
+      const ctxWindow = raw === '' ? null : (Number.isNaN(parsed) ? null : parsed);
       setSavingContextWindow(true);
       try {
         const response = await fetch(`/api/worktrees/${worktreeId}`, {
@@ -302,8 +309,8 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
               type="number"
               data-testid="vibe-local-context-window-input"
               step="1"
-              min="128"
-              max="2097152"
+              min={VIBE_LOCAL_CONTEXT_WINDOW_MIN}
+              max={VIBE_LOCAL_CONTEXT_WINDOW_MAX}
               value={vibeLocalContextWindow ?? ''}
               onChange={handleContextWindowChange}
               placeholder={t('vibeLocalContextWindowDefault')}
