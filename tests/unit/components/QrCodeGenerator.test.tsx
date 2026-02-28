@@ -143,7 +143,7 @@ describe('QrCodeGenerator', () => {
     const tokenInput = screen.getByLabelText('auth.login.qr.tokenLabel');
 
     expect(urlInput).toBeInTheDocument();
-    expect(urlInput).toHaveAttribute('type', 'text');
+    expect(urlInput).toHaveAttribute('type', 'url');
     expect(tokenInput).toBeInTheDocument();
     expect(tokenInput).toHaveAttribute('type', 'password');
   });
@@ -197,6 +197,35 @@ describe('QrCodeGenerator', () => {
     expect(qrCode).toHaveAttribute(
       'data-value',
       'https://example.ngrok-free.app/login#token=my%20secret%20token'
+    );
+  });
+
+  it('should not generate a QR code for an invalid URL', () => {
+    render(<QrCodeGenerator />);
+
+    const urlInput = screen.getByLabelText('auth.login.qr.urlLabel');
+    const tokenInput = screen.getByLabelText('auth.login.qr.tokenLabel');
+
+    fireEvent.change(urlInput, { target: { value: 'not-a-url' } });
+    fireEvent.change(tokenInput, { target: { value: 'mytoken' } });
+
+    expect(screen.queryByText('auth.login.qr.showQrButton')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('qr-code')).not.toBeInTheDocument();
+  });
+
+  it('should avoid appending /login twice when the login URL is already provided', () => {
+    render(<QrCodeGenerator />);
+
+    const urlInput = screen.getByLabelText('auth.login.qr.urlLabel');
+    const tokenInput = screen.getByLabelText('auth.login.qr.tokenLabel');
+
+    fireEvent.change(urlInput, { target: { value: 'https://example.ngrok-free.app/login' } });
+    fireEvent.change(tokenInput, { target: { value: 'mytoken' } });
+    fireEvent.click(screen.getByText('auth.login.qr.showQrButton'));
+
+    expect(screen.getByTestId('qr-code')).toHaveAttribute(
+      'data-value',
+      'https://example.ngrok-free.app/login#token=mytoken'
     );
   });
 });

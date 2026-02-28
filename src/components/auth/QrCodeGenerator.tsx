@@ -18,6 +18,38 @@ import QRCode from 'react-qr-code';
 const INPUT_CLASS =
   'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-sm';
 
+function buildQrLoginUrl(rawUrl: string, rawToken: string): string {
+  const trimmedUrl = rawUrl.trim();
+  const trimmedToken = rawToken.trim();
+
+  if (!trimmedUrl || !trimmedToken) {
+    return '';
+  }
+
+  try {
+    const parsedUrl = new URL(trimmedUrl);
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return '';
+    }
+
+    parsedUrl.hash = '';
+    parsedUrl.search = '';
+
+    const normalizedPath = parsedUrl.pathname.replace(/\/+$/, '');
+    if (!normalizedPath || normalizedPath === '/') {
+      parsedUrl.pathname = '/login';
+    } else if (!normalizedPath.endsWith('/login')) {
+      parsedUrl.pathname = `${normalizedPath}/login`;
+    } else {
+      parsedUrl.pathname = normalizedPath;
+    }
+
+    return `${parsedUrl.toString()}#token=${encodeURIComponent(trimmedToken)}`;
+  } catch {
+    return '';
+  }
+}
+
 export function QrCodeGenerator() {
   const t = useTranslations('auth');
   const [url, setUrl] = useState('');
@@ -29,9 +61,8 @@ export function QrCodeGenerator() {
     setQrVisible(false);
   }, [url, token]);
 
-  const normalizedUrl = url.replace(/\/+$/, '');
-  const qrValue = normalizedUrl && token ? `${normalizedUrl}/login#token=${encodeURIComponent(token)}` : '';
-  const isHttp = url.startsWith('http://');
+  const qrValue = buildQrLoginUrl(url, token);
+  const isHttp = url.trim().startsWith('http://');
 
   return (
     <div className="mt-6 p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
@@ -42,7 +73,7 @@ export function QrCodeGenerator() {
       <div className="space-y-3">
         <div>
           <input
-            type="text"
+            type="url"
             placeholder={t('login.qr.urlPlaceholder')}
             value={url}
             onChange={(e) => setUrl(e.target.value)}

@@ -13,14 +13,23 @@ import { useFragmentLogin } from '@/hooks/useFragmentLogin';
 // Store original window.location and history
 const originalLocation = window.location;
 
-function setHash(hash: string) {
+function setLocation({
+  hash,
+  pathname = '/login',
+  search = '',
+}: {
+  hash: string;
+  pathname?: string;
+  search?: string;
+}) {
   Object.defineProperty(window, 'location', {
     writable: true,
     value: {
       ...originalLocation,
       hash,
-      pathname: '/login',
-      href: `http://localhost/login${hash}`,
+      pathname,
+      search,
+      href: `http://localhost${pathname}${search}${hash}`,
     },
   });
 }
@@ -45,7 +54,7 @@ describe('useFragmentLogin', () => {
     replaceStateSpy = vi.spyOn(history, 'replaceState');
 
     // Default: no hash
-    setHash('');
+    setLocation({ hash: '' });
   });
 
   afterEach(() => {
@@ -54,7 +63,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should return null error when no fragment is present', () => {
-    setHash('');
+    setLocation({ hash: '' });
 
     const { result } = renderHook(() => useFragmentLogin(true));
 
@@ -64,7 +73,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should skip processing when authEnabled is false', () => {
-    setHash('#token=mytoken');
+    setLocation({ hash: '#token=mytoken' });
 
     const { result } = renderHook(() => useFragmentLogin(false));
 
@@ -74,7 +83,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should redirect to / on successful login (200)', async () => {
-    setHash('#token=validtoken');
+    setLocation({ hash: '#token=validtoken' });
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -114,7 +123,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should skip when token param is missing from fragment', () => {
-    setHash('#foo=bar');
+    setLocation({ hash: '#foo=bar' });
 
     const { result } = renderHook(() => useFragmentLogin(true));
 
@@ -123,7 +132,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should skip when token is empty after trim', () => {
-    setHash('#token=%20%20');
+    setLocation({ hash: '#token=%20%20' });
 
     const { result } = renderHook(() => useFragmentLogin(true));
 
@@ -133,7 +142,7 @@ describe('useFragmentLogin', () => {
 
   it('should return token_invalid when token exceeds 256 characters', async () => {
     const longToken = 'a'.repeat(257);
-    setHash(`#token=${longToken}`);
+    setLocation({ hash: `#token=${longToken}` });
 
     const { result } = renderHook(() => useFragmentLogin(true));
 
@@ -144,7 +153,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should return token_invalid on 401 response', async () => {
-    setHash('#token=badtoken');
+    setLocation({ hash: '#token=badtoken' });
 
     fetchMock.mockResolvedValueOnce({
       ok: false,
@@ -160,7 +169,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should return rate_limited on 429 response with Retry-After header', async () => {
-    setHash('#token=sometoken');
+    setLocation({ hash: '#token=sometoken' });
 
     fetchMock.mockResolvedValueOnce({
       ok: false,
@@ -177,7 +186,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should return rate_limited on 429 response without Retry-After header', async () => {
-    setHash('#token=sometoken');
+    setLocation({ hash: '#token=sometoken' });
 
     fetchMock.mockResolvedValueOnce({
       ok: false,
@@ -194,7 +203,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should return auto_login_failed on network error', async () => {
-    setHash('#token=sometoken');
+    setLocation({ hash: '#token=sometoken' });
 
     fetchMock.mockRejectedValueOnce(new Error('Network failure'));
 
@@ -206,7 +215,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should return auto_login_failed on unexpected status code', async () => {
-    setHash('#token=sometoken');
+    setLocation({ hash: '#token=sometoken' });
 
     fetchMock.mockResolvedValueOnce({
       ok: false,
@@ -222,7 +231,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should call history.replaceState before API request (S002)', async () => {
-    setHash('#token=securetoken');
+    setLocation({ hash: '#token=securetoken' });
 
     let fetchCalledAfterReplaceState = false;
 
@@ -250,7 +259,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should return token_invalid on decodeURIComponent failure', async () => {
-    setHash('#token=%E0%A4%A');
+    setLocation({ hash: '#token=%E0%A4%A' });
 
     const { result } = renderHook(() => useFragmentLogin(true));
 
@@ -261,7 +270,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should clear error and retryAfterSeconds when clearError is called', async () => {
-    setHash('#token=badtoken');
+    setLocation({ hash: '#token=badtoken' });
 
     fetchMock.mockResolvedValueOnce({
       ok: false,
@@ -285,7 +294,7 @@ describe('useFragmentLogin', () => {
   });
 
   it('should not process twice due to processedRef (React Strict Mode)', async () => {
-    setHash('#token=validtoken');
+    setLocation({ hash: '#token=validtoken' });
 
     fetchMock.mockResolvedValue({
       ok: false,
@@ -309,5 +318,21 @@ describe('useFragmentLogin', () => {
 
     // fetch should only have been called once
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('should preserve search params when clearing the token fragment', async () => {
+    setLocation({ hash: '#token=securetoken', pathname: '/login', search: '?lang=ja' });
+
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      headers: new Headers(),
+    });
+
+    renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(replaceStateSpy).toHaveBeenCalledWith(null, '', '/login?lang=ja');
+    });
   });
 });

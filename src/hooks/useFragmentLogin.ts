@@ -19,6 +19,16 @@ import { useEffect, useRef, useState } from 'react';
 export type FragmentLoginErrorKey = 'token_invalid' | 'rate_limited' | 'auto_login_failed' | null;
 
 const MAX_TOKEN_LENGTH = 256;
+const TOKEN_FRAGMENT_PATTERN = /(?:^|&)token=([^&]*)/;
+
+function getRetryAfterSeconds(retryAfterHeader: string | null): number | null {
+  if (!retryAfterHeader) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(retryAfterHeader, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 export function useFragmentLogin(authEnabled: boolean): {
   autoLoginErrorKey: FragmentLoginErrorKey;
@@ -42,13 +52,16 @@ export function useFragmentLogin(authEnabled: boolean): {
     const hash = window.location.hash;
     if (!hash) return;
 
-    const params = new URLSearchParams(hash.substring(1));
-    const rawToken = params.get('token');
-    if (rawToken === null) return;
+    const fragment = hash.startsWith('#') ? hash.substring(1) : hash;
+    const tokenMatch = fragment.match(TOKEN_FRAGMENT_PATTERN);
+    if (!tokenMatch) return;
+
+    // Remove the token-bearing hash from the address bar before further processing.
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
 
     let token: string;
     try {
-      token = decodeURIComponent(rawToken);
+      token = decodeURIComponent(tokenMatch[1]);
     } catch {
       setAutoLoginErrorKey('token_invalid');
       return;
@@ -61,9 +74,6 @@ export function useFragmentLogin(authEnabled: boolean): {
       setAutoLoginErrorKey('token_invalid');
       return;
     }
-
-    // S002: Remove token from address bar and browser history before API call
-    history.replaceState(null, '', window.location.pathname);
 
     (async () => {
       try {
@@ -78,8 +88,7 @@ export function useFragmentLogin(authEnabled: boolean): {
         } else if (res.status === 401) {
           setAutoLoginErrorKey('token_invalid');
         } else if (res.status === 429) {
-          const retryAfter = res.headers.get('Retry-After');
-          setRetryAfterSeconds(retryAfter ? parseInt(retryAfter, 10) : null);
+          setRetryAfterSeconds(getRetryAfterSeconds(res.headers.get('Retry-After')));
           setAutoLoginErrorKey('rate_limited');
         } else {
           setAutoLoginErrorKey('auto_login_failed');
