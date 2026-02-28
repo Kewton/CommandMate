@@ -31,6 +31,44 @@ vi.mock('@/lib/proxy/logger', () => ({
   logProxyError: vi.fn(),
 }));
 
+/** Create a mock external app for testing */
+function createMockApp(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'test-id',
+    name: 'testapp',
+    displayName: 'Test App',
+    pathPrefix: 'testapp',
+    targetPort: 3001,
+    targetHost: 'localhost',
+    appType: 'nextjs',
+    websocketEnabled: false,
+    enabled: true,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...overrides,
+  };
+}
+
+/** Set up mocks for a standard proxy test: cache returns the given app, proxyHttp returns 200 */
+async function setupProxyMocks(mockApp: ReturnType<typeof createMockApp>) {
+  const { getExternalAppCache } = await import('@/lib/external-apps/cache');
+  const { proxyHttp, isWebSocketUpgrade } = await import('@/lib/proxy/handler');
+  const { logProxyRequest } = await import('@/lib/proxy/logger');
+
+  vi.mocked(getExternalAppCache).mockReturnValue({
+    getByPathPrefix: vi.fn().mockResolvedValue(mockApp),
+    refresh: vi.fn(),
+    getAll: vi.fn(),
+    invalidate: vi.fn(),
+    invalidateByIssueNo: vi.fn(),
+  } as never);
+
+  vi.mocked(isWebSocketUpgrade).mockReturnValue(false);
+  vi.mocked(proxyHttp).mockResolvedValue(new Response('OK', { status: 200 }));
+
+  return { proxyHttp, logProxyRequest };
+}
+
 describe('Proxy Route Handler - pathPrefix preservation', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -42,34 +80,13 @@ describe('Proxy Route Handler - pathPrefix preservation', () => {
   });
 
   it('should preserve pathPrefix when proxying to upstream', async () => {
-    const { getExternalAppCache } = await import('@/lib/external-apps/cache');
-    const { proxyHttp, isWebSocketUpgrade } = await import('@/lib/proxy/handler');
-    const { logProxyRequest } = await import('@/lib/proxy/logger');
-
-    const mockApp = {
-      id: 'test-id',
+    const mockApp = createMockApp({
       name: 'localllmtest',
       displayName: 'Local LLM Test',
       pathPrefix: 'localllmtest',
       targetPort: 3012,
-      targetHost: 'localhost',
-      appType: 'nextjs',
-      websocketEnabled: false,
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    vi.mocked(getExternalAppCache).mockReturnValue({
-      getByPathPrefix: vi.fn().mockResolvedValue(mockApp),
-      refresh: vi.fn(),
-      getAll: vi.fn(),
-      invalidate: vi.fn(),
-      invalidateByIssueNo: vi.fn(),
-    } as never);
-
-    vi.mocked(isWebSocketUpgrade).mockReturnValue(false);
-    vi.mocked(proxyHttp).mockResolvedValue(new Response('OK', { status: 200 }));
+    });
+    const { proxyHttp, logProxyRequest } = await setupProxyMocks(mockApp);
 
     const { GET } = await import('@/app/proxy/[...path]/route');
 
@@ -92,33 +109,12 @@ describe('Proxy Route Handler - pathPrefix preservation', () => {
   });
 
   it('should handle root path with pathPrefix', async () => {
-    const { getExternalAppCache } = await import('@/lib/external-apps/cache');
-    const { proxyHttp, isWebSocketUpgrade } = await import('@/lib/proxy/handler');
-
-    const mockApp = {
-      id: 'test-id',
+    const mockApp = createMockApp({
       name: 'myapp',
       displayName: 'My App',
       pathPrefix: 'myapp',
-      targetPort: 3001,
-      targetHost: 'localhost',
-      appType: 'nextjs',
-      websocketEnabled: false,
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    vi.mocked(getExternalAppCache).mockReturnValue({
-      getByPathPrefix: vi.fn().mockResolvedValue(mockApp),
-      refresh: vi.fn(),
-      getAll: vi.fn(),
-      invalidate: vi.fn(),
-      invalidateByIssueNo: vi.fn(),
-    } as never);
-
-    vi.mocked(isWebSocketUpgrade).mockReturnValue(false);
-    vi.mocked(proxyHttp).mockResolvedValue(new Response('OK', { status: 200 }));
+    });
+    const { proxyHttp } = await setupProxyMocks(mockApp);
 
     const { GET } = await import('@/app/proxy/[...path]/route');
 
@@ -137,34 +133,13 @@ describe('Proxy Route Handler - pathPrefix preservation', () => {
   });
 
   it('should pass correct path to logProxyRequest', async () => {
-    const { getExternalAppCache } = await import('@/lib/external-apps/cache');
-    const { proxyHttp, isWebSocketUpgrade } = await import('@/lib/proxy/handler');
-    const { logProxyRequest } = await import('@/lib/proxy/logger');
-
-    const mockApp = {
-      id: 'test-id',
+    const mockApp = createMockApp({
       name: 'localllmtest',
       displayName: 'Local LLM Test',
       pathPrefix: 'localllmtest',
       targetPort: 3012,
-      targetHost: 'localhost',
-      appType: 'nextjs',
-      websocketEnabled: false,
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    vi.mocked(getExternalAppCache).mockReturnValue({
-      getByPathPrefix: vi.fn().mockResolvedValue(mockApp),
-      refresh: vi.fn(),
-      getAll: vi.fn(),
-      invalidate: vi.fn(),
-      invalidateByIssueNo: vi.fn(),
-    } as never);
-
-    vi.mocked(isWebSocketUpgrade).mockReturnValue(false);
-    vi.mocked(proxyHttp).mockResolvedValue(new Response('OK', { status: 200 }));
+    });
+    const { logProxyRequest } = await setupProxyMocks(mockApp);
 
     const { GET } = await import('@/app/proxy/[...path]/route');
 
@@ -184,33 +159,12 @@ describe('Proxy Route Handler - pathPrefix preservation', () => {
   });
 
   it('should handle deep nested path with pathPrefix', async () => {
-    const { getExternalAppCache } = await import('@/lib/external-apps/cache');
-    const { proxyHttp, isWebSocketUpgrade } = await import('@/lib/proxy/handler');
-
-    const mockApp = {
-      id: 'test-id',
+    const mockApp = createMockApp({
       name: 'app',
       displayName: 'App',
       pathPrefix: 'app',
-      targetPort: 3001,
-      targetHost: 'localhost',
-      appType: 'nextjs',
-      websocketEnabled: false,
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    vi.mocked(getExternalAppCache).mockReturnValue({
-      getByPathPrefix: vi.fn().mockResolvedValue(mockApp),
-      refresh: vi.fn(),
-      getAll: vi.fn(),
-      invalidate: vi.fn(),
-      invalidateByIssueNo: vi.fn(),
-    } as never);
-
-    vi.mocked(isWebSocketUpgrade).mockReturnValue(false);
-    vi.mocked(proxyHttp).mockResolvedValue(new Response('OK', { status: 200 }));
+    });
+    const { proxyHttp } = await setupProxyMocks(mockApp);
 
     const { GET } = await import('@/app/proxy/[...path]/route');
 

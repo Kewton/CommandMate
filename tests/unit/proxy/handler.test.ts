@@ -7,17 +7,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ExternalApp } from '@/types/external-apps';
 
-// Mock http-proxy
-vi.mock('http-proxy', () => ({
-  default: {
-    createProxyServer: vi.fn(() => ({
-      web: vi.fn(),
-      ws: vi.fn(),
-      on: vi.fn(),
-    })),
-  },
-}));
-
 describe('HTTP Proxy Handler', () => {
   const createMockApp = (overrides?: Partial<ExternalApp>): ExternalApp => ({
     id: 'test-app-id',
