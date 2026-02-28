@@ -30,7 +30,7 @@ export const EXECUTION_TIMEOUT_MS = 5 * 60 * 1000;
 export const MAX_MESSAGE_LENGTH = 10000;
 
 /** Allowed CLI tool identifiers for scheduled execution */
-export const ALLOWED_CLI_TOOLS = new Set(['claude', 'codex', 'gemini', 'vibe-local']);
+export const ALLOWED_CLI_TOOLS = new Set(['claude', 'codex', 'gemini', 'vibe-local', 'opencode']);
 
 // =============================================================================
 // Types
@@ -83,6 +83,7 @@ export function truncateOutput(output: string): string {
  * - codex: exec <message> --sandbox <permission>
  * - gemini: -p <message>
  * - vibe-local: [-p <message> -y] or [--model <model> -p <message> -y]
+ * - opencode: [run <message>] or [run -m ollama/<model> <message>]
  * - others: -p <message> (fallback)
  *
  * @param message - Prompt message
@@ -102,6 +103,12 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
         return ['--model', options.model, '-p', message, '-y'];
       }
       return ['-p', message, '-y'];
+    case 'opencode':
+      // [D2-007] When model is not specified, OpenCode uses opencode.json default model
+      if (options?.model) {
+        return ['run', '-m', `ollama/${options.model}`, message];
+      }
+      return ['run', message];
     case 'claude':
     default:
       return ['-p', message, '--output-format', 'text', '--permission-mode', permission ?? 'acceptEdits'];

@@ -138,6 +138,62 @@ export const GEMINI_PROMPT_PATTERN = /^[>❯]\s*$/m;
 export const GEMINI_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking\.\.\./;
 
 /**
+ * OpenCode prompt pattern
+ * OpenCode shows "Ask anything..." when waiting for user input.
+ */
+export const OPENCODE_PROMPT_PATTERN = /Ask anything\.\.\./;
+
+/**
+ * OpenCode prompt pattern after response completion
+ * Shows "tab agents  ctrl+p commands" in the status bar after a response.
+ */
+export const OPENCODE_PROMPT_AFTER_RESPONSE = /tab agents\s+ctrl\+p commands/;
+
+/**
+ * OpenCode thinking/processing pattern
+ * Shows "Thinking:" while the model is generating a response.
+ */
+export const OPENCODE_THINKING_PATTERN = /Thinking:/;
+
+/**
+ * OpenCode loading indicator pattern
+ * Shows a series of filled square characters during loading.
+ */
+export const OPENCODE_LOADING_PATTERN = /\u2B1D{4,}/;
+
+/**
+ * OpenCode response completion pattern
+ * Shows build summary line like: "Build * model * Ns"
+ */
+export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+Build\s+\u00b7\s+.+\s+\u00b7\s+[\d.]+s/;
+
+/**
+ * OpenCode processing indicator pattern
+ * Shows "esc interrupt" during active processing.
+ */
+export const OPENCODE_PROCESSING_INDICATOR = /esc interrupt/;
+
+/**
+ * OpenCode TUI separator pattern
+ * Matches lines composed entirely of box-drawing / TUI decoration characters.
+ */
+export const OPENCODE_SEPARATOR_PATTERN = /^[\u2503\u2579\u25A3\u2580\u2500\u250C\u2510\u2514\u2518\u251C\u2524\u252C\u2534\u253C]+$/;
+
+/**
+ * OpenCode skip patterns for response cleaning
+ * Lines matching these patterns are filtered from extracted responses.
+ */
+export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
+  OPENCODE_SEPARATOR_PATTERN,
+  OPENCODE_LOADING_PATTERN,
+  /^Build\s+/,
+  OPENCODE_PROMPT_AFTER_RESPONSE,
+  OPENCODE_PROCESSING_INDICATOR,
+  OPENCODE_PROMPT_PATTERN,
+  PASTED_TEXT_PATTERN,
+] as const;
+
+/**
  * Vibe Local prompt pattern
  * vibe-local (vibe-coder) shows `ctx:N% ❯` prompt when waiting for user input.
  * The prompt line includes a context usage percentage prefix.
@@ -172,6 +228,9 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
       break;
     case 'vibe-local':
       result = VIBE_LOCAL_THINKING_PATTERN.test(content);
+      break;
+    case 'opencode':
+      result = OPENCODE_THINKING_PATTERN.test(content);
       break;
     default:
       result = CLAUDE_THINKING_PATTERN.test(content);
@@ -268,6 +327,14 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
         ],
       };
 
+    case 'opencode':
+      return {
+        promptPattern: OPENCODE_PROMPT_PATTERN,
+        separatorPattern: OPENCODE_SEPARATOR_PATTERN,
+        thinkingPattern: OPENCODE_THINKING_PATTERN,
+        skipPatterns: [...OPENCODE_SKIP_PATTERNS],
+      };
+
     default:
       // Default to Claude patterns
       return getCliToolPatterns('claude');
@@ -324,9 +391,10 @@ export function stripBoxDrawing(str: string): string {
  * this function lives in cli-patterns.ts which already depends on CLIToolType.
  *
  * [Future extension memo (C-002)]
- * If CLI tool count grows significantly (currently 3), consider migrating
+ * If CLI tool count grows significantly (currently 5), consider migrating
  * to a CLIToolConfig registry pattern where tool-specific settings
  * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
+ * Migration threshold: 6th tool addition triggers registry pattern migration [D1-003].
  *
  * @param cliToolId - CLI tool identifier
  * @returns DetectPromptOptions for the tool, or undefined for default behavior
@@ -370,6 +438,11 @@ export function buildDetectPromptOptions(
   cliToolId: CLIToolType
 ): DetectPromptOptions | undefined {
   if (cliToolId === 'claude') {
+    return { requireDefaultIndicator: false };
+  }
+  // [D2-006] OpenCode prompt "Ask anything..." does not use standard indicators (> / ❯),
+  // so requireDefaultIndicator must be false to avoid missing prompt detection.
+  if (cliToolId === 'opencode') {
     return { requireDefaultIndicator: false };
   }
   return undefined; // Default behavior (requireDefaultIndicator = true)

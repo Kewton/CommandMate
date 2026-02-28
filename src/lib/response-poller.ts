@@ -30,7 +30,17 @@ import type { PromptDetectionResult } from './prompt-detector';
 import { recordClaudeConversation } from './conversation-logger';
 import type { CLIToolType } from './cli-tools/types';
 import { parseClaudeOutput } from './claude-output';
-import { getCliToolPatterns, stripAnsi, stripBoxDrawing, buildDetectPromptOptions, PASTED_TEXT_PATTERN } from './cli-patterns';
+import {
+  getCliToolPatterns,
+  stripAnsi,
+  stripBoxDrawing,
+  buildDetectPromptOptions,
+  PASTED_TEXT_PATTERN,
+  OPENCODE_PROMPT_PATTERN,
+  OPENCODE_PROMPT_AFTER_RESPONSE,
+  OPENCODE_RESPONSE_COMPLETE,
+  OPENCODE_SKIP_PATTERNS,
+} from './cli-patterns';
 
 /**
  * Polling interval in milliseconds (default: 2 seconds)
@@ -306,6 +316,47 @@ export function cleanGeminiResponse(response: string): string {
 }
 
 /**
+ * Check if OpenCode has completed its response.
+ * Detects the Build summary line pattern (e.g., "Build * model * 2.5s").
+ * [D2-002] Independent completion detection for OpenCode
+ *
+ * @param output - Cleaned tmux output to check
+ * @returns True if OpenCode response is complete
+ */
+export function isOpenCodeComplete(output: string): boolean {
+  return OPENCODE_RESPONSE_COMPLETE.test(output);
+}
+
+/**
+ * Clean OpenCode TUI response by removing decoration characters and status lines.
+ * [D2-009] Removes box-drawing characters, Build summary, loading indicators,
+ * prompt patterns, and processing indicators.
+ *
+ * @param response - Raw OpenCode response
+ * @returns Cleaned response
+ */
+export function cleanOpenCodeResponse(response: string): string {
+  const lines = response.split('\n');
+  const cleanedLines: string[] = [];
+
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+
+    // Skip lines matching any OpenCode skip pattern
+    const shouldSkip = OPENCODE_SKIP_PATTERNS.some(pattern => pattern.test(trimmedLine));
+    if (shouldSkip) continue;
+
+    // Skip the Build summary line (completion indicator)
+    if (OPENCODE_RESPONSE_COMPLETE.test(trimmedLine)) continue;
+
+    cleanedLines.push(line);
+  }
+
+  return cleanedLines.join('\n').trim();
+}
+
+/**
  * Determine the start index for response extraction based on buffer state.
  * Shared between normal response extraction and prompt detection paths.
  *
@@ -422,9 +473,15 @@ function extractResponse(
 
   const findRecentUserPromptIndex = (windowSize: number = 60): number => {
     // User prompt pattern: supports legacy '>' and new '❯' for Claude
-    const userPromptPattern = cliToolId === 'codex'
-      ? /^›\s+(?!Implement|Find and fix|Type|Summarize)/
-      : /^[>❯]\s+\S/;
+    // OpenCode uses "Ask anything..." as prompt pattern
+    let userPromptPattern: RegExp;
+    if (cliToolId === 'codex') {
+      userPromptPattern = /^›\s+(?!Implement|Find and fix|Type|Summarize)/;
+    } else if (cliToolId === 'opencode') {
+      userPromptPattern = OPENCODE_PROMPT_PATTERN;
+    } else {
+      userPromptPattern = /^[>❯]\s+\S/;
+    }
 
     for (let i = totalLines - 1; i >= Math.max(0, totalLines - windowSize); i--) {
       const cleanLine = stripAnsi(lines[i]);
@@ -471,8 +528,10 @@ function extractResponse(
   // Claude: require both prompt and separator
   const isCodexOrGeminiComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
+  // [D2-002] OpenCode completion: detected via Build summary line pattern (independent of prompt/separator)
+  const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
 
-  if (isCodexOrGeminiComplete || isClaudeComplete) {
+  if (isCodexOrGeminiComplete || isClaudeComplete || isOpenCodeDone) {
     // CLI tool has completed response
     // Extract the response content from lastCapturedLine to the separator (not just last 20 lines)
     const responseLines: string[] = [];
@@ -499,6 +558,14 @@ function extractResponse(
       if (cliToolId === 'gemini' && /^(%|\$|.*@.*[%$#])\s*$/.test(cleanLine)) {
         endIndex = i;
         break;
+      }
+
+      // [D2-003] For OpenCode: stop at prompt or status bar patterns
+      if (cliToolId === 'opencode') {
+        if (OPENCODE_PROMPT_PATTERN.test(cleanLine) || OPENCODE_PROMPT_AFTER_RESPONSE.test(cleanLine)) {
+          endIndex = i;
+          break;
+        }
       }
 
       // Skip lines matching any skip pattern (check against clean line)
@@ -572,6 +639,22 @@ function extractResponse(
 
       if (!response.includes('✦') && response.length < 10) {
         return incompleteResult(totalLines);
+      }
+    }
+
+    // OpenCode banner defense: initial startup screen should not be treated as a response
+    if (cliToolId === 'opencode') {
+      const cleanResponse = stripAnsi(response);
+      // If the output is very short and contains only TUI elements, treat as startup banner
+      if (cleanResponse.length < 50 || !OPENCODE_RESPONSE_COMPLETE.test(cleanOutputToCheck)) {
+        // Check if there's actual content (not just TUI decoration)
+        const contentLines = cleanResponse.split('\n').filter(line => {
+          const trimmed = line.trim();
+          return trimmed && !OPENCODE_SKIP_PATTERNS.some(p => p.test(trimmed));
+        });
+        if (contentLines.length === 0) {
+          return incompleteResult(totalLines);
+        }
       }
     }
 
@@ -744,11 +827,14 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       : undefined;
 
     // Clean up responses (remove shell prompts, setup commands, and errors)
+    // [D2-009] Each tool has its own clean function for tool-specific artifacts
     let cleanedResponse = result.response;
     if (cliToolId === 'gemini') {
       cleanedResponse = cleanGeminiResponse(result.response);
     } else if (cliToolId === 'claude') {
       cleanedResponse = cleanClaudeResponse(result.response);
+    } else if (cliToolId === 'opencode') {
+      cleanedResponse = cleanOpenCodeResponse(result.response);
     }
 
     // If cleaned response is empty or just "[No content]", skip saving

@@ -140,6 +140,21 @@ describe('claude-executor', () => {
       expect(args).toEqual(['-p', 'hello', '-y']);
     });
 
+    it('should build opencode args with run command', () => {
+      const args = buildCliArgs('hello', 'opencode');
+      expect(args).toEqual(['run', 'hello']);
+    });
+
+    it('should build opencode args with -m when model is specified', () => {
+      const args = buildCliArgs('hello', 'opencode', undefined, { model: 'qwen3:8b' });
+      expect(args).toEqual(['run', '-m', 'ollama/qwen3:8b', 'hello']);
+    });
+
+    it('should build opencode args without -m when model is not specified', () => {
+      const args = buildCliArgs('hello', 'opencode', undefined, {});
+      expect(args).toEqual(['run', 'hello']);
+    });
+
     it('should default to claude args for unknown tools', () => {
       const args = buildCliArgs('hello', 'unknown');
       expect(args).toEqual(['-p', 'hello', '--output-format', 'text', '--permission-mode', 'acceptEdits']);
@@ -155,6 +170,10 @@ describe('claude-executor', () => {
     it('should contain gemini and vibe-local', () => {
       expect(ALLOWED_CLI_TOOLS.has('gemini')).toBe(true);
       expect(ALLOWED_CLI_TOOLS.has('vibe-local')).toBe(true);
+    });
+
+    it('should contain opencode', () => {
+      expect(ALLOWED_CLI_TOOLS.has('opencode')).toBe(true);
     });
 
     it('should not contain arbitrary tools', () => {

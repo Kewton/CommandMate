@@ -10,8 +10,11 @@ import {
   PASTED_TEXT_PATTERN,
   PASTED_TEXT_DETECT_DELAY,
   MAX_PASTED_TEXT_RETRIES,
+  OPENCODE_THINKING_PATTERN,
+  OPENCODE_PROMPT_PATTERN,
   getCliToolPatterns,
   detectThinking,
+  buildDetectPromptOptions,
   stripAnsi,
   stripBoxDrawing,
 } from '@/lib/cli-patterns';
@@ -260,6 +263,78 @@ More text`;
         p => p.test('[Pasted text #1 +46 lines]')
       );
       expect(hasPastedTextPattern).toBe(true);
+    });
+  });
+
+  // Issue #379: OpenCode support
+  describe('detectThinking - opencode (Issue #379)', () => {
+    it('should detect thinking for opencode when "Thinking:" is present', () => {
+      expect(detectThinking('opencode', 'Thinking: analyzing the code')).toBe(true);
+      expect(detectThinking('opencode', 'Thinking:')).toBe(true);
+    });
+
+    it('should not detect thinking for opencode when not thinking', () => {
+      expect(detectThinking('opencode', 'Normal output')).toBe(false);
+      expect(detectThinking('opencode', 'Ask anything...')).toBe(false);
+    });
+  });
+
+  describe('getCliToolPatterns - opencode (Issue #379)', () => {
+    it('should return patterns for opencode', () => {
+      const patterns = getCliToolPatterns('opencode');
+      expect(patterns).toHaveProperty('promptPattern');
+      expect(patterns).toHaveProperty('separatorPattern');
+      expect(patterns).toHaveProperty('thinkingPattern');
+      expect(patterns).toHaveProperty('skipPatterns');
+      expect(Array.isArray(patterns.skipPatterns)).toBe(true);
+    });
+
+    it('should have promptPattern matching "Ask anything..."', () => {
+      const patterns = getCliToolPatterns('opencode');
+      expect(patterns.promptPattern.test('Ask anything...')).toBe(true);
+    });
+
+    it('should have thinkingPattern matching "Thinking:"', () => {
+      const patterns = getCliToolPatterns('opencode');
+      expect(patterns.thinkingPattern.test('Thinking:')).toBe(true);
+    });
+
+    it('should include skip patterns for OpenCode TUI elements', () => {
+      const patterns = getCliToolPatterns('opencode');
+      expect(patterns.skipPatterns.length).toBeGreaterThan(0);
+
+      // Verify prompt patterns are in skip list
+      const hasPromptSkip = patterns.skipPatterns.some(p => p.test('Ask anything...'));
+      expect(hasPromptSkip).toBe(true);
+    });
+  });
+
+  describe('buildDetectPromptOptions - opencode (Issue #379)', () => {
+    it('should return requireDefaultIndicator: false for opencode [D2-006]', () => {
+      const options = buildDetectPromptOptions('opencode');
+      expect(options).toBeDefined();
+      expect(options?.requireDefaultIndicator).toBe(false);
+    });
+
+    it('should return requireDefaultIndicator: false for claude', () => {
+      const options = buildDetectPromptOptions('claude');
+      expect(options).toBeDefined();
+      expect(options?.requireDefaultIndicator).toBe(false);
+    });
+
+    it('should return undefined for codex (default behavior)', () => {
+      const options = buildDetectPromptOptions('codex');
+      expect(options).toBeUndefined();
+    });
+
+    it('should return undefined for gemini (default behavior)', () => {
+      const options = buildDetectPromptOptions('gemini');
+      expect(options).toBeUndefined();
+    });
+
+    it('should return undefined for vibe-local (default behavior)', () => {
+      const options = buildDetectPromptOptions('vibe-local');
+      expect(options).toBeUndefined();
     });
   });
 

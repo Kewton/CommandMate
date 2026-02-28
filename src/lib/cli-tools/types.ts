@@ -7,7 +7,7 @@
  * T2.1: Single source of truth for CLI tool IDs
  * CLIToolType is derived from this constant (DRY principle)
  */
-export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local'] as const;
+export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode'] as const;
 
 /**
  * CLIツールタイプ
@@ -19,7 +19,7 @@ export type CLIToolType = typeof CLI_TOOL_IDS[number];
  * SWE CLIツールの共通インターフェース
  */
 export interface ICLITool {
-  /** CLIツールの識別子 (claude, codex, gemini, vibe-local) */
+  /** CLIツールの識別子 (claude, codex, gemini, vibe-local, opencode) */
   readonly id: CLIToolType;
 
   /** CLIツールの表示名 */
@@ -87,6 +87,7 @@ export const CLI_TOOL_DISPLAY_NAMES: Record<CLIToolType, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   'vibe-local': 'Vibe Local',
+  opencode: 'OpenCode',
 };
 
 /**
