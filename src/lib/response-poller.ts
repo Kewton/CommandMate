@@ -802,7 +802,11 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // already saved this content by comparing line counts.
     // Issue #372: Skip this check when buffer reset is detected (TUI redraw, screen clear).
     // Codex TUI redraws cause totalLines to shrink, making lineCount < lastCapturedLine.
-    if (!result.bufferReset && result.lineCount <= lastCapturedLine) {
+    // Issue #379: Also skip for OpenCode, which uses a full-screen TUI with fixed buffer size.
+    // The tmux pane doesn't grow (no scrollback); each response overwrites the same pane,
+    // so lineCount is always approximately equal to lastCapturedLine.
+    const isFullScreenTui = cliToolId === 'opencode';
+    if (!result.bufferReset && !isFullScreenTui && result.lineCount <= lastCapturedLine) {
       console.log(`[checkForResponse] Already saved up to line ${lastCapturedLine}, skipping (result: ${result.lineCount})`);
       return false;
     }
@@ -879,8 +883,9 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
 
     // Race condition prevention: re-check session state before saving
     // savePendingAssistantResponse may have already saved this content concurrently
+    // Issue #379: Skip for OpenCode full-screen TUI (fixed buffer size, lineCount never advances)
     const currentSessionState = getSessionState(db, worktreeId, cliToolId);
-    if (currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
+    if (!isFullScreenTui && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
       console.log(`[checkForResponse] Race condition detected, skipping save (result: ${result.lineCount}, current: ${currentSessionState.lastCapturedLine})`);
       return false;
     }

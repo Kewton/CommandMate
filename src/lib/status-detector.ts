@@ -20,7 +20,7 @@
  *   - detectPrompt() is lightweight (regex-based, no I/O), so the cost is negligible
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { CLIToolType } from './cli-tools/types';
 
@@ -161,6 +161,33 @@ export function detectSessionStatus(
       reason: 'thinking_indicator',
       hasActivePrompt: false,
     };
+  }
+
+  // 2.5. OpenCode completion detection (Issue #379)
+  // OpenCode TUI shows "▣  {Action} · {model} · {time}" after response completion.
+  // The TUI frame uses box-drawing characters (┃, ╹▀) as padding between content
+  // and the status bar. Strip box-drawing first so padding doesn't consume the
+  // detection window, then check the last N content lines for the completion marker.
+  // Note: OPENCODE_PROMPT_AFTER_RESPONSE ("tab agents  ctrl+p commands") is NOT used
+  // here because it's part of the permanent TUI status bar (always visible).
+  if (cliToolId === 'opencode') {
+    const strippedForOpenCode = stripBoxDrawing(cleanOutput);
+    const openCodeLines = strippedForOpenCode.split('\n');
+    let lastOcIdx = openCodeLines.length - 1;
+    while (lastOcIdx >= 0 && openCodeLines[lastOcIdx].trim() === '') {
+      lastOcIdx--;
+    }
+    const recentOpenCodeContent = openCodeLines
+      .slice(Math.max(0, lastOcIdx - STATUS_CHECK_LINE_COUNT + 1), lastOcIdx + 1)
+      .join('\n');
+    if (OPENCODE_RESPONSE_COMPLETE.test(recentOpenCodeContent)) {
+      return {
+        status: 'ready',
+        confidence: 'high',
+        reason: 'opencode_response_complete',
+        hasActivePrompt: false,
+      };
+    }
   }
 
   // 3. Input prompt detection

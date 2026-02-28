@@ -167,11 +167,12 @@ export const OPENCODE_LOADING_PATTERN = /\u2B1D{4,}/;
 
 /**
  * OpenCode response completion pattern (Issue #379)
- * Matches the Build summary line: "&#x25A3; Build . model . Ns"
- * (U+25A3 square + "Build" + middle dot + model name + middle dot + timing).
+ * Matches the action summary line: "&#x25A3; {Action} . model . Ns"
+ * (U+25A3 square + action word + middle dot + model name + middle dot + timing).
+ * Action can be "Build", "Compaction", or other OpenCode action names.
  * This is the primary completion signal for OpenCode [D2-002].
  */
-export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+Build\s+\u00b7\s+.+\s+\u00b7\s+[\d.]+s/;
+export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+.+\s+\u00b7\s+[\d.]+s/;
 
 /**
  * OpenCode processing indicator pattern (Issue #379)
