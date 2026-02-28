@@ -11,7 +11,7 @@ import path from 'path';
 import { SUPPORTED_LOCALES } from '@/config/i18n-config';
 
 const LOCALES_DIR = path.resolve(__dirname, '../../locales');
-const NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt'] as const;
+const NAMESPACES = ['common', 'worktree', 'autoYes', 'error', 'prompt', 'auth'] as const;
 
 /**
  * Recursively extract all keys from a nested object.
