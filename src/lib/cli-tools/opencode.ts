@@ -40,6 +40,15 @@ function getErrorMessage(error: unknown): string {
 export const OPENCODE_EXIT_COMMAND = '/exit';
 
 /**
+ * OpenCode tmux pane height (rows).
+ * Set to 200 to expand the TUI content area (~190 visible lines),
+ * allowing most responses to be captured in a single tmux capture-pane.
+ * OpenCode runs in alternate screen mode with no scrollback buffer,
+ * so only visible rows are capturable.
+ */
+export const OPENCODE_PANE_HEIGHT = 200;
+
+/**
  * Wait for OpenCode TUI to initialize after launch.
  * Set to 15000ms to accommodate GPU model loading via Ollama.
  */
@@ -101,7 +110,7 @@ export class OpenCodeTool extends BaseCLITool {
 
       // Resize tmux window to 80 columns (hide sidebar for clean capture-pane output)
       try {
-        await execAsync(`tmux resize-window -t "${sessionName}" -x 80 -y 30`);
+        await execAsync(`tmux resize-window -t "${sessionName}" -x 80 -y ${OPENCODE_PANE_HEIGHT}`);
       } catch {
         // Non-fatal: resize may fail in some environments
       }

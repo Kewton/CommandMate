@@ -21,7 +21,7 @@ import {
   updateSessionState,
 } from './db';
 import { broadcastMessage } from './ws-server';
-import { cleanClaudeResponse, cleanGeminiResponse } from './response-poller';
+import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse } from './response-poller';
 import { stripAnsi } from './cli-patterns';
 import type { CLIToolType } from './cli-tools/types';
 import type { ChatMessage } from '@/types/models';
@@ -192,6 +192,8 @@ export function cleanCliResponse(output: string, cliToolId: CLIToolType): string
       return cleanClaudeResponse(output);
     case 'gemini':
       return cleanGeminiResponse(output);
+    case 'opencode':
+      return cleanOpenCodeResponse(output);
     case 'codex':
       // Codex doesn't need special cleaning
       return output.trim();

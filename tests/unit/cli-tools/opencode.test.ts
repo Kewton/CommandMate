@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OpenCodeTool, OPENCODE_EXIT_COMMAND, OPENCODE_INIT_WAIT_MS } from '@/lib/cli-tools/opencode';
+import { OpenCodeTool, OPENCODE_EXIT_COMMAND, OPENCODE_INIT_WAIT_MS, OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 
 // Mock tmux module
 vi.mock('@/lib/tmux', () => ({
@@ -78,6 +78,10 @@ describe('OpenCodeTool', () => {
 
     it('should export OPENCODE_INIT_WAIT_MS as 15000', () => {
       expect(OPENCODE_INIT_WAIT_MS).toBe(15000);
+    });
+
+    it('should export OPENCODE_PANE_HEIGHT as 200', () => {
+      expect(OPENCODE_PANE_HEIGHT).toBe(200);
     });
   });
 
