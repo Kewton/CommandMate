@@ -138,50 +138,60 @@ export const GEMINI_PROMPT_PATTERN = /^[>❯]\s*$/m;
 export const GEMINI_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking\.\.\./;
 
 /**
- * OpenCode prompt pattern
- * OpenCode shows "Ask anything..." when waiting for user input.
+ * OpenCode prompt pattern (Issue #379)
+ * OpenCode TUI shows "Ask anything..." in the input area when waiting for user input.
+ * Unlike Claude/Codex (which use > or ❯), OpenCode uses a text-based prompt indicator.
  */
 export const OPENCODE_PROMPT_PATTERN = /Ask anything\.\.\./;
 
 /**
- * OpenCode prompt pattern after response completion
- * Shows "tab agents  ctrl+p commands" in the status bar after a response.
+ * OpenCode prompt pattern after response completion (Issue #379)
+ * Shows "tab agents  ctrl+p commands" in the TUI status bar after a response finishes.
+ * Used as extraction stop condition in response-poller.ts [D2-003].
  */
 export const OPENCODE_PROMPT_AFTER_RESPONSE = /tab agents\s+ctrl\+p commands/;
 
 /**
- * OpenCode thinking/processing pattern
- * Shows "Thinking:" while the model is generating a response.
+ * OpenCode thinking/processing pattern (Issue #379)
+ * OpenCode TUI shows "Thinking:" prefix while the Ollama model is generating a response.
+ * Used by detectThinking() to determine if the tool is actively processing.
  */
 export const OPENCODE_THINKING_PATTERN = /Thinking:/;
 
 /**
- * OpenCode loading indicator pattern
- * Shows a series of filled square characters during loading.
+ * OpenCode loading indicator pattern (Issue #379)
+ * Shows a series of 4+ filled square characters (U+2B1D) during initial loading/model warm-up.
+ * Filtered from response extraction via OPENCODE_SKIP_PATTERNS.
  */
 export const OPENCODE_LOADING_PATTERN = /\u2B1D{4,}/;
 
 /**
- * OpenCode response completion pattern
- * Shows build summary line like: "Build * model * Ns"
+ * OpenCode response completion pattern (Issue #379)
+ * Matches the Build summary line: "&#x25A3; Build . model . Ns"
+ * (U+25A3 square + "Build" + middle dot + model name + middle dot + timing).
+ * This is the primary completion signal for OpenCode [D2-002].
  */
 export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+Build\s+\u00b7\s+.+\s+\u00b7\s+[\d.]+s/;
 
 /**
- * OpenCode processing indicator pattern
- * Shows "esc interrupt" during active processing.
+ * OpenCode processing indicator pattern (Issue #379)
+ * Shows "esc interrupt" in the TUI status bar during active model processing.
+ * Filtered from response extraction via OPENCODE_SKIP_PATTERNS.
  */
 export const OPENCODE_PROCESSING_INDICATOR = /esc interrupt/;
 
 /**
- * OpenCode TUI separator pattern
+ * OpenCode TUI separator pattern (Issue #379)
  * Matches lines composed entirely of box-drawing / TUI decoration characters.
+ * Covers: vertical lines (U+2503), box corners, horizontal lines, and other TUI elements.
  */
 export const OPENCODE_SEPARATOR_PATTERN = /^[\u2503\u2579\u25A3\u2580\u2500\u250C\u2510\u2514\u2518\u251C\u2524\u252C\u2534\u253C]+$/;
 
 /**
- * OpenCode skip patterns for response cleaning
- * Lines matching these patterns are filtered from extracted responses.
+ * OpenCode skip patterns for response cleaning (Issue #379)
+ * Lines matching any of these patterns are filtered from extracted responses.
+ * Includes: TUI separators, loading indicators, Build summary prefix,
+ * status bar prompts, processing indicators, input prompt, and pasted text markers.
  */
 export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
   OPENCODE_SEPARATOR_PATTERN,
@@ -384,22 +394,6 @@ export function stripBoxDrawing(str: string): string {
 }
 
 /**
- * Build DetectPromptOptions for a given CLI tool.
- * Centralizes cliToolId-to-options mapping logic (DRY - MF-001).
- *
- * prompt-detector.ts remains CLI tool independent (Issue #161 principle);
- * this function lives in cli-patterns.ts which already depends on CLIToolType.
- *
- * [Future extension memo (C-002)]
- * If CLI tool count grows significantly (currently 5), consider migrating
- * to a CLIToolConfig registry pattern where tool-specific settings
- * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
- * Migration threshold: 6th tool addition triggers registry pattern migration [D1-003].
- *
- * @param cliToolId - CLI tool identifier
- * @returns DetectPromptOptions for the tool, or undefined for default behavior
- */
-/**
  * Error patterns that indicate a Claude session failed to start properly
  * Used by isSessionHealthy() to detect broken sessions (MF-001: SRP)
  * Style: readonly + as const for type safety (SF-S2-001: follows response-poller.ts precedent)
@@ -434,6 +428,22 @@ export const CLAUDE_SESSION_ERROR_REGEX_PATTERNS: readonly RegExp[] = [
   /^Error:.*Claude Code/,
 ] as const;
 
+/**
+ * Build DetectPromptOptions for a given CLI tool.
+ * Centralizes cliToolId-to-options mapping logic (DRY - MF-001).
+ *
+ * prompt-detector.ts remains CLI tool independent (Issue #161 principle);
+ * this function lives in cli-patterns.ts which already depends on CLIToolType.
+ *
+ * [Future extension memo (C-002)]
+ * If CLI tool count grows significantly (currently 5), consider migrating
+ * to a CLIToolConfig registry pattern where tool-specific settings
+ * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
+ * Migration threshold: 6th tool addition triggers registry pattern migration [D1-003].
+ *
+ * @param cliToolId - CLI tool identifier
+ * @returns DetectPromptOptions for the tool, or undefined for default behavior
+ */
 export function buildDetectPromptOptions(
   cliToolId: CLIToolType
 ): DetectPromptOptions | undefined {

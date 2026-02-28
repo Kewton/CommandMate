@@ -75,7 +75,7 @@ export class CLIToolManager {
    * ```typescript
    * const manager = CLIToolManager.getInstance();
    * const allTools = manager.getAllTools();
-   * console.log(allTools.map(t => t.name)); // ['Claude Code', 'Codex CLI', 'Gemini CLI']
+   * console.log(allTools.map(t => t.name)); // ['Claude Code', 'Codex CLI', 'Gemini CLI', 'Vibe Local', 'OpenCode']
    * ```
    */
   getAllTools(): ICLITool[] {

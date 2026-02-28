@@ -27,8 +27,10 @@ const execAsync = promisify(exec);
 
 /**
  * Extract error message from unknown error type (DRY)
- * Same pattern as claude-session.ts / codex.ts / gemini.ts / vibe-local.ts
- * [D1-002] Future refactoring candidate: extract to BaseCLITool or utils.ts
+ * Same pattern as claude-session.ts / codex.ts / gemini.ts / vibe-local.ts.
+ * A shared version exists in src/lib/errors.ts (getErrorMessage), but CLI tool
+ * modules use local copies to avoid importing the server-side error module.
+ * [D1-002] Future refactoring candidate: extract to BaseCLITool or a shared util.
  */
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -160,9 +162,14 @@ export class OpenCodeTool extends BaseCLITool {
   }
 
   /**
-   * Kill OpenCode session
-   * Sends /exit command first for graceful shutdown [D1-006],
-   * then falls back to tmux kill-session [D1-007]
+   * Kill OpenCode session with graceful shutdown.
+   *
+   * Shutdown sequence [D1-006, D1-007]:
+   * 1. Check if session exists
+   * 2. If exists: send `/exit` TUI command for graceful shutdown
+   * 3. Wait 2s for OpenCode to process the exit command
+   * 4. Re-check session: if still running, force-kill via tmux kill-session
+   * 5. If session did not exist: attempt kill anyway (cleanup stale sessions)
    *
    * @param worktreeId - Worktree ID
    */
@@ -170,21 +177,22 @@ export class OpenCodeTool extends BaseCLITool {
     const sessionName = this.getSessionName(worktreeId);
 
     try {
+      // Step 1: Check if the tmux session currently exists
       const exists = await hasSession(sessionName);
       if (exists) {
-        // Send /exit command for graceful TUI shutdown
+        // Step 2: Send /exit command for graceful TUI shutdown [D1-006]
         await sendKeys(sessionName, OPENCODE_EXIT_COMMAND, true);
 
-        // Wait for OpenCode to exit
+        // Step 3: Wait for OpenCode to process the exit command
         await new Promise((resolve) => setTimeout(resolve, 2000));
 
-        // Check if session still exists (fallback to kill)
+        // Step 4: Check if session still exists; force-kill if needed [D1-007]
         const stillExists = await hasSession(sessionName);
         if (stillExists) {
           await killSession(sessionName);
         }
       } else {
-        // Session does not exist, attempt kill anyway (cleanup)
+        // Step 5: Session does not exist, attempt kill anyway (cleanup stale tmux sessions)
         await killSession(sessionName);
       }
 

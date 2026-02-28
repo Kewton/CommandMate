@@ -1,6 +1,6 @@
 /**
  * CLI Tool response polling.
- * Periodically checks tmux sessions for CLI tool responses (Claude, Codex, Gemini).
+ * Periodically checks tmux sessions for CLI tool responses (Claude, Codex, Gemini, Vibe Local, OpenCode).
  *
  * Key responsibilities:
  * - Extract completed responses from tmux output (extractResponse)
@@ -12,6 +12,11 @@
  * - DR-004: Tail-line windowing for thinking detection in extractResponse
  * - MF-001 fix: Same windowing applied to checkForResponse thinking check
  * - SF-003: RESPONSE_THINKING_TAIL_LINE_COUNT constant tracks STATUS_THINKING_LINE_COUNT
+ *
+ * Issue #379 additions:
+ * - OpenCode completion detection via Build summary line (isOpenCodeComplete)
+ * - OpenCode response cleaning (cleanOpenCodeResponse)
+ * - OpenCode extraction stop conditions (OPENCODE_PROMPT_PATTERN, OPENCODE_PROMPT_AFTER_RESPONSE)
  */
 
 import { captureSessionOutput, isSessionRunning } from './cli-session';
@@ -317,11 +322,17 @@ export function cleanGeminiResponse(response: string): string {
 
 /**
  * Check if OpenCode has completed its response.
- * Detects the Build summary line pattern (e.g., "Build * model * 2.5s").
- * [D2-002] Independent completion detection for OpenCode
+ * Detects the Build summary line pattern (e.g., "&#x25A3; Build . model . 2.5s").
+ * [D2-002] Independent completion detection for OpenCode.
  *
- * @param output - Cleaned tmux output to check
+ * Unlike Claude (prompt + separator) or Codex/Gemini (prompt + not thinking),
+ * OpenCode signals completion via the Build summary line, which includes
+ * the model name and generation timing.
+ *
+ * @param output - Cleaned tmux output to check (ANSI-stripped)
  * @returns True if OpenCode response is complete
+ *
+ * @internal Exported for unit testing (response-poller-opencode.test.ts)
  */
 export function isOpenCodeComplete(output: string): boolean {
   return OPENCODE_RESPONSE_COMPLETE.test(output);
@@ -332,8 +343,17 @@ export function isOpenCodeComplete(output: string): boolean {
  * [D2-009] Removes box-drawing characters, Build summary, loading indicators,
  * prompt patterns, and processing indicators.
  *
- * @param response - Raw OpenCode response
- * @returns Cleaned response
+ * Cleaning pipeline:
+ * 1. Split response into lines
+ * 2. Skip empty lines
+ * 3. Skip lines matching any OPENCODE_SKIP_PATTERNS (TUI artifacts)
+ * 4. Skip Build summary line (OPENCODE_RESPONSE_COMPLETE, the completion indicator)
+ * 5. Join remaining lines
+ *
+ * @param response - Raw OpenCode response (may contain TUI decoration)
+ * @returns Cleaned response with TUI artifacts removed
+ *
+ * @internal Exported for unit testing (response-poller-opencode.test.ts)
  */
 export function cleanOpenCodeResponse(response: string): string {
   const lines = response.split('\n');

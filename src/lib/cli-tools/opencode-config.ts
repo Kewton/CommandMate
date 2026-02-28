@@ -31,11 +31,17 @@ export const OLLAMA_BASE_URL = 'http://localhost:11434/v1' as const;
 export const MAX_OLLAMA_MODELS = 100;
 
 /**
- * Ollama model name validation pattern.
+ * Ollama model name validation pattern (with length limit).
  * Allows: alphanumeric, dots, underscores, colons, slashes, hyphens.
  * Max 100 characters (length encoded in regex). [D4-003]
  *
- * [SEC-001] Defense-in-depth validation at point of use
+ * [SEC-001] Defense-in-depth validation at point of use.
+ *
+ * Note: This pattern differs from OLLAMA_MODEL_PATTERN in types.ts.
+ * - types.ts: `^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$` (no length limit, requires alphanumeric start)
+ *   Used for API/DB validation where the first character constraint matters.
+ * - This file: `^[a-zA-Z0-9._:/-]{1,100}$` (length-limited, used for Ollama API response validation)
+ *   Length limit provides DoS protection against excessively long model names from Ollama API.
  */
 export const OLLAMA_MODEL_PATTERN = /^[a-zA-Z0-9._:/-]{1,100}$/;
 
@@ -92,13 +98,21 @@ function formatModelDisplayName(model: OllamaModel): string {
 }
 
 /**
- * Validate worktree path for path traversal prevention [D4-004]
+ * Validate worktree path for path traversal prevention [D4-004].
  *
- * Trust chain: API layer -> DB (worktrees.path) -> startSession -> ensureOpencodeConfig
+ * Trust chain: API layer -> DB (worktrees.path) -> startSession -> ensureOpencodeConfig.
+ * Although the DB stores validated paths, this function provides defense-in-depth
+ * by re-validating at the point of filesystem access.
+ *
+ * Steps:
+ * 1. path.resolve() - Normalize path (remove .., ., etc.)
+ * 2. fs.lstatSync() - Verify path exists and is a directory (symlink-aware)
+ * 3. fs.realpathSync() - Resolve symlinks to get the canonical path
  *
  * @param worktreePath - Path to validate
- * @returns Resolved real path
- * @throws Error if path traversal is detected
+ * @returns Resolved real path (after symlink resolution)
+ * @throws Error if path does not exist or is not a directory
+ * @internal
  */
 function validateWorktreePath(worktreePath: string): string {
   // 1. path.resolve() for normalization
@@ -195,7 +209,9 @@ export async function ensureOpencodeConfig(worktreePath: string): Promise<void> 
     return;
   }
 
-  // Generate config using JSON.stringify (not template literals) [D4-005]
+  // [D4-005] Generate config using JSON.stringify (not template literals).
+  // JSON.stringify ensures proper escaping of model names and other values,
+  // preventing JSON injection via maliciously crafted Ollama model metadata.
   const config = {
     $schema: 'https://opencode.ai/config.json',
     provider: {

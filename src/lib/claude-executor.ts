@@ -1,12 +1,16 @@
 /**
- * Claude CLI Executor
- * Issue #294: Executes claude -p commands for scheduled executions
+ * CLI Command Executor (non-interactive mode)
+ * Issue #294: Executes CLI tool commands for scheduled executions
+ * Issue #379: Added OpenCode support (opencode run)
+ *
+ * Supported tools: claude, codex, gemini, vibe-local, opencode
  *
  * Security:
  * - Uses execFile (not exec) to prevent shell injection
  * - Sanitizes environment variables via env-sanitizer.ts
  * - Limits output size to prevent memory exhaustion
  * - Enforces execution timeout
+ * - Validates cliToolId against ALLOWED_CLI_TOOLS whitelist [SEC-001]
  */
 
 import { execFile } from 'child_process';
