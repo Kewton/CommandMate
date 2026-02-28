@@ -3,17 +3,27 @@
 /**
  * Login Page
  * Issue #331: Token authentication login form
+ * Issue #383: QR code login for mobile access via ngrok
  *
  * Features:
  * - Token input form (password type)
  * - Rate limit / lockout message display
  * - Redirect to / when auth is disabled (via AuthContext, no fetch needed)
  * - i18n support (useTranslations('auth'))
+ * - Fragment-based auto-login (#token=xxx) for QR code scanned access
+ * - QR code generator (PC only, hidden md:block) for mobile access
  */
 
 import { useState, useEffect, FormEvent } from 'react';
+import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { useAuthEnabled } from '@/contexts/AuthContext';
+import { useFragmentLogin } from '@/hooks/useFragmentLogin';
+
+const QrCodeGenerator = dynamic(
+  () => import('@/components/auth/QrCodeGenerator').then((m) => ({ default: m.QrCodeGenerator })),
+  { ssr: false }
+);
 
 export default function LoginPage() {
   const t = useTranslations('auth');
@@ -23,12 +33,35 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
 
+  const { autoLoginErrorKey, retryAfterSeconds } = useFragmentLogin(authEnabled);
+
+  // Map autoLoginErrorKey to localized message
+  const autoLoginError = (() => {
+    switch (autoLoginErrorKey) {
+      case 'token_invalid':
+        return t('login.qr.tokenExpiredOrInvalid');
+      case 'rate_limited':
+        return t('login.qr.rateLimited');
+      case 'auto_login_failed':
+        return t('login.qr.autoLoginError');
+      default:
+        return null;
+    }
+  })();
+
   // Redirect to home if auth is not enabled
   useEffect(() => {
     if (!authEnabled) {
       window.location.href = '/';
     }
   }, [authEnabled]);
+
+  // Set retryAfter from fragment login's retryAfterSeconds
+  useEffect(() => {
+    if (retryAfterSeconds !== null) {
+      setRetryAfter(retryAfterSeconds);
+    }
+  }, [retryAfterSeconds]);
 
   // Countdown timer for retry
   useEffect(() => {
@@ -85,6 +118,9 @@ export default function LoginPage() {
 
   if (!authEnabled) return null;
 
+  // Display autoLoginError with priority over manual form error
+  const displayError = autoLoginError || error;
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
       <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md w-full max-w-md">
@@ -113,9 +149,9 @@ export default function LoginPage() {
             />
           </div>
 
-          {error && (
+          {displayError && (
             <div className="text-red-600 dark:text-red-400 text-sm">
-              {error}
+              {displayError}
               {retryAfter !== null && retryAfter > 0 && (
                 <div className="mt-1">
                   {t('error.retryAfter', { minutes: Math.ceil(retryAfter / 60) })}
@@ -132,6 +168,11 @@ export default function LoginPage() {
             {loading ? '...' : t('login.submitButton')}
           </button>
         </form>
+
+        {/* QR Code Generator - PC only (768px+), hidden on mobile */}
+        <div className="hidden md:block">
+          <QrCodeGenerator />
+        </div>
       </div>
     </div>
   );
