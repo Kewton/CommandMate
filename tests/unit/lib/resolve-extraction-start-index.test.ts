@@ -167,6 +167,49 @@ describe('resolveExtractionStartIndex() - Issue #326', () => {
   });
 
   // -------------------------------------------------------------------
+  // Branch 2a: OpenCode alternate screen mode
+  // Always search for user prompt (fixed-size buffer, lastCapturedLine meaningless)
+  // -------------------------------------------------------------------
+  describe('Branch 2a: OpenCode alternate screen', () => {
+    it('returns foundUserPrompt + 1 when prompt found, ignoring lastCapturedLine', () => {
+      const result = resolveExtractionStartIndex(
+        190,   // lastCapturedLine (would be wrong for normal tools)
+        200,   // totalLines (fixed pane height)
+        false, // bufferReset
+        'opencode',
+        () => 5 // user prompt found at index 5
+      );
+      expect(result).toBe(6);
+    });
+
+    it('returns 0 when no user prompt found', () => {
+      const result = resolveExtractionStartIndex(
+        190,   // lastCapturedLine
+        200,   // totalLines
+        false, // bufferReset
+        'opencode',
+        noPromptFound
+      );
+      expect(result).toBe(0);
+    });
+
+    it('passes totalLines as windowSize to search entire buffer', () => {
+      let capturedWindowSize = 0;
+      resolveExtractionStartIndex(
+        190,
+        200,
+        false,
+        'opencode',
+        (windowSize) => {
+          capturedWindowSize = windowSize;
+          return 10;
+        }
+      );
+      expect(capturedWindowSize).toBe(200);
+    });
+  });
+
+  // -------------------------------------------------------------------
   // Edge cases: defensive validation and boundary conditions
   // -------------------------------------------------------------------
   describe('edge cases', () => {

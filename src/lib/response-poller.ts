@@ -545,17 +545,25 @@ export function cleanOpenCodeResponse(response: string): string {
   const cleanedLines: string[] = [];
 
   for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (!trimmedLine) continue;
+    // Strip ANSI escape codes and box-drawing characters before pattern matching.
+    // Without this, embedded ANSI codes break regex matching (e.g., "tab agents"
+    // interspersed with \x1b[...m won't match OPENCODE_PROMPT_AFTER_RESPONSE).
+    // Also strip ┃ (U+2503, heavy vertical) which OpenCode TUI uses as content border.
+    // stripBoxDrawing only handles │ (U+2502, light vertical) for Gemini borders.
+    const cleanLine = stripBoxDrawing(stripAnsi(line))
+      .replace(/^\u2503\s?/, '')
+      .replace(/\s*\u2503$/, '')
+      .trim();
+    if (!cleanLine) continue;
 
     // Skip lines matching any OpenCode skip pattern
-    const shouldSkip = OPENCODE_SKIP_PATTERNS.some(pattern => pattern.test(trimmedLine));
+    const shouldSkip = OPENCODE_SKIP_PATTERNS.some(pattern => pattern.test(cleanLine));
     if (shouldSkip) continue;
 
     // Skip the Build summary line (completion indicator)
-    if (OPENCODE_RESPONSE_COMPLETE.test(trimmedLine)) continue;
+    if (OPENCODE_RESPONSE_COMPLETE.test(cleanLine)) continue;
 
-    cleanedLines.push(line);
+    cleanedLines.push(cleanLine);
   }
 
   return cleanedLines.join('\n').trim();
@@ -565,9 +573,10 @@ export function cleanOpenCodeResponse(response: string): string {
  * Determine the start index for response extraction based on buffer state.
  * Shared between normal response extraction and prompt detection paths.
  *
- * Implements a 4-branch decision tree for startIndex determination:
+ * Implements a 5-branch decision tree for startIndex determination:
  *   1. bufferWasReset  -> findRecentUserPromptIndex(40) + 1, or 0 if not found
- *   2. cliToolId === 'codex' -> Math.max(0, lastCapturedLine)
+ *   2a. cliToolId === 'opencode' -> findRecentUserPromptIndex(totalLines) + 1, or 0
+ *   2b. cliToolId === 'codex' -> Math.max(0, lastCapturedLine)
  *   3. lastCapturedLine >= totalLines - 5 (scroll boundary) ->
  *        findRecentUserPromptIndex(50) + 1, or totalLines - 40 if not found
  *   4. Normal case -> Math.max(0, lastCapturedLine)
@@ -616,7 +625,15 @@ export function resolveExtractionStartIndex(
     return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
   }
 
-  // Branch 2: Codex uses lastCapturedLine directly (Codex-specific TUI behavior)
+  // Branch 2a: OpenCode runs in alternate screen mode (fixed-size buffer, no scrollback).
+  // lastCapturedLine is meaningless because the buffer doesn't grow — it's always ~PANE_HEIGHT lines.
+  // Always search for the user prompt to determine extraction start.
+  if (cliToolId === 'opencode') {
+    const foundUserPrompt = findRecentUserPromptIndex(totalLines);
+    return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
+  }
+
+  // Branch 2b: Codex uses lastCapturedLine directly (Codex-specific TUI behavior)
   if (cliToolId === 'codex') {
     return Math.max(0, lastCapturedLine);
   }

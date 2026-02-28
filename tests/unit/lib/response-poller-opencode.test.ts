@@ -97,6 +97,25 @@ describe('response-poller OpenCode integration', () => {
       const cleaned = cleanOpenCodeResponse(response);
       expect(cleaned).toBe('Actual content');
     });
+
+    it('should strip ANSI escape codes from output', () => {
+      const response = '\x1b[32mGreen text\x1b[0m\nNormal text';
+      const cleaned = cleanOpenCodeResponse(response);
+      expect(cleaned).toBe('Green text\nNormal text');
+    });
+
+    it('should strip ANSI codes before pattern matching (status bar)', () => {
+      // Real-world: status bar has ANSI codes interspersed
+      const response = 'Content\n\x1b[38;2;238;238;238mtab \x1b[38;2;128;128;128magents\x1b[38;2;255;255;255m  \x1b[38;2;238;238;238mctrl+p \x1b[38;2;128;128;128mcommands\x1b[38;2;255;255;255m';
+      const cleaned = cleanOpenCodeResponse(response);
+      expect(cleaned).toBe('Content');
+    });
+
+    it('should strip box-drawing pipe characters from content lines', () => {
+      const response = '\u2502 Content inside border \u2502\n\u2503 More content';
+      const cleaned = cleanOpenCodeResponse(response);
+      expect(cleaned).toBe('Content inside border\nMore content');
+    });
   });
 
   describe('OpenCode pattern constants', () => {
