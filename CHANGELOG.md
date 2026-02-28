@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-02-28
+
+### Added
+- vibe-local `--context-window` setting for Ollama context window size (Issue #374)
+- AGENTS.md for Codex workflow guidance
+- Cache-Control: no-store header to API routes
+
+### Fixed
+- Proxy route pathPrefix preservation for basePath-configured apps (Issue #376)
+- Codex CLI prompt detection support (U+203A `›` indicator) (Issue #373)
+  - Early prompt detection for Codex in response-poller
+  - Prompt detection result carried through ExtractionResult to avoid truncated re-detection
+  - TUI indentation and buffer reset handling
+- Mobile safe-area-inset-top in fixed elements
+- Mobile main content padding-top increased for header visibility
+- Mobile CMATE tab header visibility on worktree page
+
 ## [0.3.3] - 2026-02-26
 
 ### Added
@@ -590,7 +607,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.3...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/Kewton/CommandMate/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/Kewton/CommandMate/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Kewton/CommandMate/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Kewton/CommandMate/compare/v0.3.0...v0.3.1
