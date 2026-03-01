@@ -662,6 +662,28 @@ export function deleteAllMessages(
 }
 
 /**
+ * Delete a single message by its ID
+ * Used to clean up orphaned user messages (e.g., when a user re-sends a message
+ * after the previous one received no response).
+ *
+ * @param db - Database instance
+ * @param messageId - ID of the message to delete
+ * @returns True if a message was deleted, false otherwise
+ */
+export function deleteMessageById(
+  db: Database.Database,
+  messageId: string
+): boolean {
+  const stmt = db.prepare(`
+    DELETE FROM chat_messages
+    WHERE id = ?
+  `);
+
+  const result = stmt.run(messageId);
+  return result.changes > 0;
+}
+
+/**
  * Delete messages for a specific CLI tool in a worktree
  * Issue #4: T4.2 - Individual CLI tool session termination (MF3-001)
  *

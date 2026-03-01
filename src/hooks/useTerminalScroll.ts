@@ -9,13 +9,19 @@
 
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 
 /**
  * Threshold in pixels for detecting if user is "at the bottom"
  * This provides tolerance for small variations
  */
 const BOTTOM_THRESHOLD = 50;
+
+/**
+ * Duration in ms to suppress handleScroll during programmatic scrolls.
+ * Smooth scroll typically completes within 300-500ms.
+ */
+const PROGRAMMATIC_SCROLL_GUARD_MS = 500;
 
 /**
  * Options for useTerminalScroll hook
@@ -39,6 +45,8 @@ export interface UseTerminalScrollReturn {
   setAutoScroll: (enabled: boolean) => void;
   /** Scroll to the bottom of the container */
   scrollToBottom: () => void;
+  /** Scroll to the top of the container */
+  scrollToTop: () => void;
   /** Handle scroll events (call this from onScroll) */
   handleScroll: () => void;
 }
@@ -75,6 +83,20 @@ export function useTerminalScroll(
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScrollState] = useState(initialAutoScroll);
 
+  // Guard flag to suppress handleScroll during programmatic scrolls (scrollToTop/scrollToBottom)
+  const isProgrammaticScrollRef = useRef(false);
+  // Timer ID for programmatic scroll guard cleanup on unmount
+  const scrollGuardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timer on unmount to prevent state updates after unmount
+  useEffect(() => {
+    return () => {
+      if (scrollGuardTimerRef.current) {
+        clearTimeout(scrollGuardTimerRef.current);
+      }
+    };
+  }, []);
+
   /**
    * Set auto-scroll state with callback notification
    */
@@ -104,6 +126,9 @@ export function useTerminalScroll(
    * Disables auto-scroll when user scrolls away from bottom
    */
   const handleScroll = useCallback(() => {
+    // Skip during programmatic scrolls to prevent race conditions
+    if (isProgrammaticScrollRef.current) return;
+
     const atBottom = isAtBottom();
 
     if (atBottom && !autoScroll) {
@@ -123,6 +148,7 @@ export function useTerminalScroll(
     const element = scrollRef.current;
     if (!element) return;
 
+    isProgrammaticScrollRef.current = true;
     element.scrollTo({
       top: element.scrollHeight,
       behavior: 'smooth',
@@ -132,6 +158,35 @@ export function useTerminalScroll(
     if (!autoScroll) {
       setAutoScroll(true);
     }
+
+    scrollGuardTimerRef.current = setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+      scrollGuardTimerRef.current = null;
+    }, PROGRAMMATIC_SCROLL_GUARD_MS);
+  }, [autoScroll, setAutoScroll]);
+
+  /**
+   * Programmatically scroll to the top of the container
+   * Disables auto-scroll so the view stays at the top
+   */
+  const scrollToTop = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+
+    isProgrammaticScrollRef.current = true;
+    element.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+
+    if (autoScroll) {
+      setAutoScroll(false);
+    }
+
+    scrollGuardTimerRef.current = setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+      scrollGuardTimerRef.current = null;
+    }, PROGRAMMATIC_SCROLL_GUARD_MS);
   }, [autoScroll, setAutoScroll]);
 
   return {
@@ -139,6 +194,7 @@ export function useTerminalScroll(
     autoScroll,
     setAutoScroll,
     scrollToBottom,
+    scrollToTop,
     handleScroll,
   };
 }

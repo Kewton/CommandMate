@@ -1,6 +1,6 @@
 /**
  * CLI Tool response polling.
- * Periodically checks tmux sessions for CLI tool responses (Claude, Codex, Gemini).
+ * Periodically checks tmux sessions for CLI tool responses (Claude, Codex, Gemini, Vibe Local, OpenCode).
  *
  * Key responsibilities:
  * - Extract completed responses from tmux output (extractResponse)
@@ -12,6 +12,11 @@
  * - DR-004: Tail-line windowing for thinking detection in extractResponse
  * - MF-001 fix: Same windowing applied to checkForResponse thinking check
  * - SF-003: RESPONSE_THINKING_TAIL_LINE_COUNT constant tracks STATUS_THINKING_LINE_COUNT
+ *
+ * Issue #379 additions:
+ * - OpenCode completion detection via Build summary line (isOpenCodeComplete)
+ * - OpenCode response cleaning (cleanOpenCodeResponse)
+ * - OpenCode extraction stop conditions (OPENCODE_PROMPT_PATTERN, OPENCODE_PROMPT_AFTER_RESPONSE)
  */
 
 import { captureSessionOutput, isSessionRunning } from './cli-session';
@@ -30,7 +35,18 @@ import type { PromptDetectionResult } from './prompt-detector';
 import { recordClaudeConversation } from './conversation-logger';
 import type { CLIToolType } from './cli-tools/types';
 import { parseClaudeOutput } from './claude-output';
-import { getCliToolPatterns, stripAnsi, stripBoxDrawing, buildDetectPromptOptions, PASTED_TEXT_PATTERN } from './cli-patterns';
+import {
+  getCliToolPatterns,
+  stripAnsi,
+  stripBoxDrawing,
+  buildDetectPromptOptions,
+  PASTED_TEXT_PATTERN,
+  OPENCODE_PROMPT_PATTERN,
+  OPENCODE_PROMPT_AFTER_RESPONSE,
+  OPENCODE_RESPONSE_COMPLETE,
+  OPENCODE_PROCESSING_INDICATOR,
+  OPENCODE_SKIP_PATTERNS,
+} from './cli-patterns';
 
 /**
  * Polling interval in milliseconds (default: 2 seconds)
@@ -131,6 +147,202 @@ function buildPromptExtractionResult(
     bufferReset,
   };
 }
+
+// ============================================================================
+// TUI Response Accumulator (Layer 2: Polling Accumulation)
+// ============================================================================
+// OpenCode runs in full-screen TUI (alternate screen mode) where tmux
+// capture-pane only returns visible rows (no scrollback). When a response
+// exceeds the visible pane height, earlier content scrolls away permanently.
+// The accumulator captures content across polling intervals, detects overlap
+// with previously captured lines, and appends only new content.
+// ============================================================================
+
+/**
+ * State for accumulating TUI content across polling intervals.
+ * Each active OpenCode session has one accumulator entry.
+ */
+interface TuiAccumulatorState {
+  /** Accumulated content lines (grows across polls) */
+  lines: string[];
+  /** Last N lines from previous capture, used for overlap detection */
+  lastFingerprint: string[];
+  /** Number of polls accumulated */
+  pollCount: number;
+}
+
+/**
+ * Number of lines from the end of accumulated content to use as
+ * fingerprint for overlap detection with the next capture.
+ */
+const OVERLAP_FINGERPRINT_SIZE = 10;
+
+/**
+ * Per-session TUI response accumulator storage.
+ * Key: pollerKey ("worktreeId:cliToolId")
+ */
+const tuiResponseAccumulator = new Map<string, TuiAccumulatorState>();
+
+/**
+ * Normalize a single OpenCode TUI line by removing ANSI codes and border glyphs.
+ * Returns an empty string when the line has no meaningful content after cleanup.
+ */
+function normalizeOpenCodeLine(line: string): string {
+  return stripBoxDrawing(stripAnsi(line))
+    .replace(/^\u2503\s?/, '')
+    .replace(/\s*\u2503$/, '')
+    .trim();
+}
+
+/**
+ * Extract meaningful content lines from raw TUI output.
+ * Strips ANSI codes, box-drawing characters, and lines matching OPENCODE_SKIP_PATTERNS.
+ *
+ * @param rawOutput - Raw tmux capture-pane output
+ * @returns Array of cleaned, non-empty content lines
+ *
+ * @internal Exported for unit testing
+ */
+export function extractTuiContentLines(rawOutput: string): string[] {
+  const lines = rawOutput.split('\n');
+  const contentLines: string[] = [];
+
+  for (const line of lines) {
+    const cleaned = normalizeOpenCodeLine(line);
+    if (!cleaned) continue;
+
+    const shouldSkip = OPENCODE_SKIP_PATTERNS.some(pattern => pattern.test(cleaned));
+    if (shouldSkip) continue;
+
+    // Also skip the Build summary line (completion indicator)
+    if (OPENCODE_RESPONSE_COMPLETE.test(cleaned)) continue;
+
+    contentLines.push(cleaned);
+  }
+
+  return contentLines;
+}
+
+/**
+ * Find the overlap index between previously accumulated lines and newly captured lines.
+ * Searches for the longest suffix of `previous` that matches a prefix of `current`.
+ *
+ * @param previous - Previously accumulated lines (fingerprint subset)
+ * @param current - Newly captured content lines
+ * @returns Number of overlapping lines (0 if no overlap found)
+ *
+ * @internal Exported for unit testing
+ */
+export function findOverlapIndex(previous: string[], current: string[]): number {
+  if (previous.length === 0 || current.length === 0) return 0;
+
+  // Try decreasing overlap sizes: full fingerprint down to 1 line
+  const maxOverlap = Math.min(previous.length, current.length);
+
+  for (let overlapSize = maxOverlap; overlapSize >= 1; overlapSize--) {
+    // Check if the last `overlapSize` lines of previous match
+    // the first `overlapSize` lines of current
+    const prevSlice = previous.slice(-overlapSize);
+    const currSlice = current.slice(0, overlapSize);
+
+    let matches = true;
+    for (let i = 0; i < overlapSize; i++) {
+      if (prevSlice[i] !== currSlice[i]) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (matches) {
+      return overlapSize;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Initialize the TUI accumulator for a polling session.
+ *
+ * @param pollerKey - Poller key ("worktreeId:cliToolId")
+ *
+ * @internal Exported for unit testing
+ */
+export function initTuiAccumulator(pollerKey: string): void {
+  tuiResponseAccumulator.set(pollerKey, {
+    lines: [],
+    lastFingerprint: [],
+    pollCount: 0,
+  });
+}
+
+/**
+ * Accumulate TUI content from a new capture into the session buffer.
+ * Detects overlap with previous capture and appends only new lines.
+ *
+ * @param pollerKey - Poller key ("worktreeId:cliToolId")
+ * @param rawOutput - Raw tmux capture-pane output
+ *
+ * @internal Exported for unit testing
+ */
+export function accumulateTuiContent(pollerKey: string, rawOutput: string): void {
+  const state = tuiResponseAccumulator.get(pollerKey);
+  if (!state) return;
+
+  const contentLines = extractTuiContentLines(rawOutput);
+  if (contentLines.length === 0) return;
+
+  state.pollCount++;
+
+  if (state.lines.length === 0) {
+    // First capture: seed with all content
+    state.lines = [...contentLines];
+  } else {
+    // Subsequent captures: find overlap and append new lines
+    const overlapCount = findOverlapIndex(state.lastFingerprint, contentLines);
+
+    if (overlapCount > 0) {
+      // Append only lines after the overlap
+      const newLines = contentLines.slice(overlapCount);
+      state.lines.push(...newLines);
+    } else {
+      // No overlap found: append all content (completeness over dedup)
+      state.lines.push(...contentLines);
+    }
+  }
+
+  // Update fingerprint for next poll
+  state.lastFingerprint = contentLines.slice(-OVERLAP_FINGERPRINT_SIZE);
+}
+
+/**
+ * Get the accumulated content as a single string.
+ *
+ * @param pollerKey - Poller key ("worktreeId:cliToolId")
+ * @returns Accumulated content joined by newlines, or empty string if no accumulator
+ *
+ * @internal Exported for unit testing
+ */
+export function getAccumulatedContent(pollerKey: string): string {
+  const state = tuiResponseAccumulator.get(pollerKey);
+  if (!state || state.lines.length === 0) return '';
+  return state.lines.join('\n');
+}
+
+/**
+ * Clear the TUI accumulator for a polling session.
+ *
+ * @param pollerKey - Poller key ("worktreeId:cliToolId")
+ *
+ * @internal Exported for unit testing
+ */
+export function clearTuiAccumulator(pollerKey: string): void {
+  tuiResponseAccumulator.delete(pollerKey);
+}
+
+// ============================================================================
+// Poller State Management
+// ============================================================================
 
 /**
  * Active pollers map: "worktreeId:cliToolId" -> NodeJS.Timeout
@@ -306,12 +518,96 @@ export function cleanGeminiResponse(response: string): string {
 }
 
 /**
+ * Check if OpenCode has completed its response.
+ * Detects the Build summary line pattern (e.g., "&#x25A3; Build . model . 2.5s").
+ * [D2-002] Independent completion detection for OpenCode.
+ *
+ * Unlike Claude (prompt + separator) or Codex/Gemini (prompt + not thinking),
+ * OpenCode signals completion via the Build summary line, which includes
+ * the model name and generation timing.
+ *
+ * @param output - Cleaned tmux output to check (ANSI-stripped)
+ * @returns True if OpenCode response is complete
+ *
+ * @internal Exported for unit testing (response-poller-opencode.test.ts)
+ */
+export function isOpenCodeComplete(output: string): boolean {
+  // Must have a Build completion marker AND must NOT be actively processing.
+  // The "esc interrupt" indicator appears in the TUI footer during model processing.
+  // Without this check, old Build markers from previous Q&As cause false completions.
+  return OPENCODE_RESPONSE_COMPLETE.test(output) && !OPENCODE_PROCESSING_INDICATOR.test(output);
+}
+
+/**
+ * Clean OpenCode TUI response by removing decoration characters and status lines,
+ * and trimming to only the latest response.
+ * [D2-009] Removes box-drawing characters, Build summary, loading indicators,
+ * prompt patterns, and processing indicators.
+ *
+ * Cleaning pipeline:
+ * 1. Split response into lines
+ * 2. Trim to latest response: find Build markers (▣ Build · model · time)
+ *    and discard all content before the second-to-last marker.
+ *    OpenCode TUI accumulates conversation history; each Q&A exchange ends
+ *    with a Build marker. Without this trimming, savePendingAssistantResponse
+ *    and Layer 2 accumulator would include previous Q&As in the response.
+ * 3. Skip empty lines
+ * 4. Skip lines matching any OPENCODE_SKIP_PATTERNS (TUI artifacts)
+ * 5. Skip Build summary line (OPENCODE_RESPONSE_COMPLETE, the completion indicator)
+ * 6. Join remaining lines
+ *
+ * @param response - Raw OpenCode response (may contain TUI decoration)
+ * @returns Cleaned response with TUI artifacts removed
+ *
+ * @internal Exported for unit testing (response-poller-opencode.test.ts)
+ */
+export function cleanOpenCodeResponse(response: string): string {
+  const lines = response.split('\n');
+
+  // Step 2: Trim to latest response by finding Build markers.
+  // Each Q&A exchange ends with "▣ Build · model · time".
+  // If 2+ markers exist, only include content after the second-to-last marker.
+  const buildIndices: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const cleanLine = normalizeOpenCodeLine(lines[i]);
+    if (cleanLine && OPENCODE_RESPONSE_COMPLETE.test(cleanLine)) {
+      buildIndices.push(i);
+    }
+  }
+  let startLine = 0;
+  if (buildIndices.length >= 2) {
+    startLine = buildIndices[buildIndices.length - 2] + 1;
+  }
+
+  const cleanedLines: string[] = [];
+
+  for (let i = startLine; i < lines.length; i++) {
+    // Strip ANSI escape codes and TUI border characters before pattern matching.
+    // Without this, embedded ANSI codes and heavy borders can break regex matches.
+    const cleanLine = normalizeOpenCodeLine(lines[i]);
+    if (!cleanLine) continue;
+
+    // Skip lines matching any OpenCode skip pattern
+    const shouldSkip = OPENCODE_SKIP_PATTERNS.some(pattern => pattern.test(cleanLine));
+    if (shouldSkip) continue;
+
+    // Skip the Build summary line (completion indicator)
+    if (OPENCODE_RESPONSE_COMPLETE.test(cleanLine)) continue;
+
+    cleanedLines.push(cleanLine);
+  }
+
+  return cleanedLines.join('\n').trim();
+}
+
+/**
  * Determine the start index for response extraction based on buffer state.
  * Shared between normal response extraction and prompt detection paths.
  *
- * Implements a 4-branch decision tree for startIndex determination:
+ * Implements a 5-branch decision tree for startIndex determination:
  *   1. bufferWasReset  -> findRecentUserPromptIndex(40) + 1, or 0 if not found
- *   2. cliToolId === 'codex' -> Math.max(0, lastCapturedLine)
+ *   2a. cliToolId === 'opencode' -> findRecentUserPromptIndex(totalLines) + 1, or 0
+ *   2b. cliToolId === 'codex' -> Math.max(0, lastCapturedLine)
  *   3. lastCapturedLine >= totalLines - 5 (scroll boundary) ->
  *        findRecentUserPromptIndex(50) + 1, or totalLines - 40 if not found
  *   4. Normal case -> Math.max(0, lastCapturedLine)
@@ -351,6 +647,16 @@ export function resolveExtractionStartIndex(
   // Defensive validation: clamp negative values to 0 (Stage 4 SF-001)
   lastCapturedLine = Math.max(0, lastCapturedLine);
 
+  // Branch 2a (highest priority for OpenCode): OpenCode runs in alternate screen mode
+  // (fixed-size buffer, no scrollback). lastCapturedLine is meaningless because the buffer
+  // doesn't grow — it's always ~PANE_HEIGHT lines. bufferWasReset is often true because
+  // lastCapturedLine ≈ totalLines. Must execute BEFORE Branch 1 to avoid Branch 1's small
+  // window (40 lines) which fails to find the second-to-last Build marker in a 200-line pane.
+  if (cliToolId === 'opencode') {
+    const foundUserPrompt = findRecentUserPromptIndex(totalLines);
+    return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
+  }
+
   // Compute bufferWasReset internally (MF-001: responsibility boundary)
   const bufferWasReset = lastCapturedLine >= totalLines || bufferReset;
 
@@ -360,7 +666,7 @@ export function resolveExtractionStartIndex(
     return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;
   }
 
-  // Branch 2: Codex uses lastCapturedLine directly (Codex-specific TUI behavior)
+  // Branch 2b: Codex uses lastCapturedLine directly (Codex-specific TUI behavior)
   if (cliToolId === 'codex') {
     return Math.max(0, lastCapturedLine);
   }
@@ -411,20 +717,47 @@ function extractResponse(
     return null;
   }
 
-  // Always check the last 20 lines for completion pattern (more robust than tracking line numbers)
+  // Check recent lines for completion pattern.
+  // OpenCode TUI: content area + many empty padding lines + status bar at bottom.
+  // The trailing-empty-line trim above removes trailing newlines but NOT the internal
+  // padding between content and status bar. For OpenCode, the Build completion marker
+  // can be far above the last 20 lines, so we must check the full buffer.
   const checkLineCount = 20;
   const startLine = Math.max(0, totalLines - checkLineCount);
   const linesToCheck = lines.slice(startLine);
-  const outputToCheck = linesToCheck.join('\n');
+  const outputToCheck = cliToolId === 'opencode'
+    ? stripAnsi(lines.join('\n'))
+    : linesToCheck.join('\n');
 
   // Get tool-specific patterns from shared module
   const { promptPattern, separatorPattern, thinkingPattern, skipPatterns } = getCliToolPatterns(cliToolId);
 
   const findRecentUserPromptIndex = (windowSize: number = 60): number => {
     // User prompt pattern: supports legacy '>' and new '❯' for Claude
-    const userPromptPattern = cliToolId === 'codex'
-      ? /^›\s+(?!Implement|Find and fix|Type|Summarize)/
-      : /^[>❯]\s+\S/;
+    let userPromptPattern: RegExp;
+    if (cliToolId === 'codex') {
+      userPromptPattern = /^›\s+(?!Implement|Find and fix|Type|Summarize)/;
+    } else if (cliToolId === 'opencode') {
+      // OpenCode TUI accumulates conversation history in a single screen.
+      // Each Q&A exchange ends with a "▣ Build · model · time" marker.
+      // "Ask anything..." does NOT appear in tmux capture content area.
+      // Instead, find the SECOND-TO-LAST Build marker (= end of previous exchange)
+      // to use as the extraction boundary. The first Build marker found (searching
+      // backwards) is the current response's completion; the second is the boundary.
+      let buildCount = 0;
+      for (let i = totalLines - 1; i >= Math.max(0, totalLines - windowSize); i--) {
+        const cleanLine = stripAnsi(lines[i]);
+        if (OPENCODE_RESPONSE_COMPLETE.test(cleanLine)) {
+          buildCount++;
+          if (buildCount === 2) {
+            return i;
+          }
+        }
+      }
+      return -1;
+    } else {
+      userPromptPattern = /^[>❯]\s+\S/;
+    }
 
     for (let i = totalLines - 1; i >= Math.max(0, totalLines - windowSize); i--) {
       const cleanLine = stripAnsi(lines[i]);
@@ -471,8 +804,10 @@ function extractResponse(
   // Claude: require both prompt and separator
   const isCodexOrGeminiComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
+  // [D2-002] OpenCode completion: detected via Build summary line pattern (independent of prompt/separator)
+  const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
 
-  if (isCodexOrGeminiComplete || isClaudeComplete) {
+  if (isCodexOrGeminiComplete || isClaudeComplete || isOpenCodeDone) {
     // CLI tool has completed response
     // Extract the response content from lastCapturedLine to the separator (not just last 20 lines)
     const responseLines: string[] = [];
@@ -499,6 +834,14 @@ function extractResponse(
       if (cliToolId === 'gemini' && /^(%|\$|.*@.*[%$#])\s*$/.test(cleanLine)) {
         endIndex = i;
         break;
+      }
+
+      // [D2-003] For OpenCode: stop at prompt or status bar patterns
+      if (cliToolId === 'opencode') {
+        if (OPENCODE_PROMPT_PATTERN.test(cleanLine) || OPENCODE_PROMPT_AFTER_RESPONSE.test(cleanLine)) {
+          endIndex = i;
+          break;
+        }
       }
 
       // Skip lines matching any skip pattern (check against clean line)
@@ -575,6 +918,22 @@ function extractResponse(
       }
     }
 
+    // OpenCode banner defense: initial startup screen should not be treated as a response
+    if (cliToolId === 'opencode') {
+      const cleanResponse = stripAnsi(response);
+      // If the output is very short and contains only TUI elements, treat as startup banner
+      if (cleanResponse.length < 50 || !OPENCODE_RESPONSE_COMPLETE.test(cleanOutputToCheck)) {
+        // Check if there's actual content (not just TUI decoration)
+        const contentLines = cleanResponse.split('\n').filter(line => {
+          const trimmed = line.trim();
+          return trimmed && !OPENCODE_SKIP_PATTERNS.some(p => p.test(trimmed));
+        });
+        if (contentLines.length === 0) {
+          return incompleteResult(totalLines);
+        }
+      }
+    }
+
     return {
       response,
       isComplete: true,
@@ -585,16 +944,22 @@ function extractResponse(
 
   // Check if this is an interactive prompt (yes/no or multiple choice)
   // Interactive prompts don't have the ">" prompt and separator, so we need to detect them separately
-  const fullOutput = lines.join('\n');
-  const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
+  // [Issue #379] Skip general prompt detection for OpenCode when response is incomplete.
+  // OpenCode's "Ask anything..." prompt pattern can cause false positive prompt detection
+  // when combined with user input text visible in the TUI buffer, leading to duplicate
+  // message creation. OpenCode prompts are only relevant when completion is detected above.
+  if (cliToolId !== 'opencode') {
+    const fullOutput = lines.join('\n');
+    const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
-  if (promptDetection.isPrompt) {
-    // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
-    // stripAnsi is applied inside buildPromptExtractionResult (Stage 4 MF-001: XSS risk mitigation)
-    return buildPromptExtractionResult(
-      lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
-      promptDetection,
-    );
+    if (promptDetection.isPrompt) {
+      // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
+      // stripAnsi is applied inside buildPromptExtractionResult (Stage 4 MF-001: XSS risk mitigation)
+      return buildPromptExtractionResult(
+        lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
+        promptDetection,
+      );
+    }
   }
 
   // Not a prompt, but we may have a partial response in progress (even if Claude shows a spinner)
@@ -665,6 +1030,12 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // Capture current output
     const output = await captureSessionOutput(worktreeId, cliToolId, 10000);
 
+    // Layer 2: Accumulate TUI content for OpenCode (for overlap tracking only).
+    if (cliToolId === 'opencode') {
+      const pollerKey = getPollerKey(worktreeId, cliToolId);
+      accumulateTuiContent(pollerKey, output);
+    }
+
     // Extract response
     const result = extractResponse(output, lastCapturedLine, cliToolId);
 
@@ -688,10 +1059,16 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       return false;
     }
 
+    // Issue #379: OpenCode uses a full-screen TUI with fixed buffer size (~200 lines).
+    // The tmux pane doesn't grow (no scrollback); each response overwrites the same pane,
+    // so lineCount is always approximately equal to lastCapturedLine. Skip line-based
+    // duplicate detection entirely for full-screen TUIs.
+    const isFullScreenTui = cliToolId === 'opencode';
+
     // CRITICAL FIX: If lineCount == lastCapturedLine AND there's no in-progress message,
     // this response has already been saved. Skip to prevent duplicates.
     // Issue #372: Skip when buffer reset detected (TUI redraw may coincidentally match lineCount).
-    if (!result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
+    if (!isFullScreenTui && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
       return false;
     }
 
@@ -699,7 +1076,7 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
     // already saved this content by comparing line counts.
     // Issue #372: Skip this check when buffer reset is detected (TUI redraw, screen clear).
     // Codex TUI redraws cause totalLines to shrink, making lineCount < lastCapturedLine.
-    if (!result.bufferReset && result.lineCount <= lastCapturedLine) {
+    if (!result.bufferReset && !isFullScreenTui && result.lineCount <= lastCapturedLine) {
       console.log(`[checkForResponse] Already saved up to line ${lastCapturedLine}, skipping (result: ${result.lineCount})`);
       return false;
     }
@@ -744,11 +1121,20 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       : undefined;
 
     // Clean up responses (remove shell prompts, setup commands, and errors)
+    // [D2-009] Each tool has its own clean function for tool-specific artifacts
     let cleanedResponse = result.response;
     if (cliToolId === 'gemini') {
       cleanedResponse = cleanGeminiResponse(result.response);
     } else if (cliToolId === 'claude') {
       cleanedResponse = cleanClaudeResponse(result.response);
+    } else if (cliToolId === 'opencode') {
+      cleanedResponse = cleanOpenCodeResponse(result.response);
+
+      // Clear accumulator for next response cycle (Layer 2 data not used for final content;
+      // accumulatedContent includes all past Q&A history from the fixed-size TUI, causing
+      // old responses to leak into the saved message even after cleanOpenCodeResponse trimming).
+      const pollerKey = getPollerKey(worktreeId, cliToolId);
+      clearTuiAccumulator(pollerKey);
     }
 
     // If cleaned response is empty or just "[No content]", skip saving
@@ -773,8 +1159,9 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
 
     // Race condition prevention: re-check session state before saving
     // savePendingAssistantResponse may have already saved this content concurrently
+    // Issue #379: Skip for OpenCode full-screen TUI (fixed buffer size, lineCount never advances)
     const currentSessionState = getSessionState(db, worktreeId, cliToolId);
-    if (currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
+    if (!isFullScreenTui && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
       console.log(`[checkForResponse] Race condition detected, skipping save (result: ${result.lineCount}, current: ${currentSessionState.lastCapturedLine})`);
       return false;
     }
@@ -798,6 +1185,13 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
 
     // Update session state
     updateSessionState(db, worktreeId, cliToolId, result.lineCount);
+
+    // For full-screen TUIs (OpenCode), stop polling after saving the response.
+    // Line-count based duplicate prevention doesn't work because the pane size is fixed,
+    // so lineCount never advances. Polling restarts when the user sends the next message.
+    if (isFullScreenTui) {
+      stopPolling(worktreeId, cliToolId);
+    }
 
     return true;
   } catch (error: unknown) {
@@ -826,6 +1220,11 @@ export function startPolling(worktreeId: string, cliToolId: CLIToolType): void {
 
   // Record start time
   pollingStartTimes.set(pollerKey, Date.now());
+
+  // Initialize TUI accumulator for OpenCode (Layer 2 safety net)
+  if (cliToolId === 'opencode') {
+    initTuiAccumulator(pollerKey);
+  }
 
   // Start polling with setTimeout chain to prevent race conditions
   scheduleNextResponsePoll(worktreeId, cliToolId);
@@ -880,6 +1279,9 @@ export function stopPolling(worktreeId: string, cliToolId: CLIToolType): void {
     activePollers.delete(pollerKey);
     pollingStartTimes.delete(pollerKey);
   }
+
+  // Clean up TUI accumulator if present
+  clearTuiAccumulator(pollerKey);
 }
 
 /**

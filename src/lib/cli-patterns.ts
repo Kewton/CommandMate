@@ -138,6 +138,74 @@ export const GEMINI_PROMPT_PATTERN = /^[>❯]\s*$/m;
 export const GEMINI_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking\.\.\./;
 
 /**
+ * OpenCode prompt pattern (Issue #379)
+ * OpenCode TUI shows "Ask anything..." in the input area when waiting for user input.
+ * Unlike Claude/Codex (which use > or ❯), OpenCode uses a text-based prompt indicator.
+ */
+export const OPENCODE_PROMPT_PATTERN = /Ask anything\.\.\./;
+
+/**
+ * OpenCode prompt pattern after response completion (Issue #379)
+ * Shows "tab agents  ctrl+p commands" in the TUI status bar after a response finishes.
+ * Used as extraction stop condition in response-poller.ts [D2-003].
+ */
+export const OPENCODE_PROMPT_AFTER_RESPONSE = /tab agents\s+ctrl\+p commands/;
+
+/**
+ * OpenCode thinking/processing pattern (Issue #379)
+ * OpenCode TUI shows "Thinking:" prefix while the Ollama model is generating a response.
+ * Used by detectThinking() to determine if the tool is actively processing.
+ */
+export const OPENCODE_THINKING_PATTERN = /Thinking:/;
+
+/**
+ * OpenCode loading indicator pattern (Issue #379)
+ * Shows a series of 4+ filled square characters (U+2B1D) during initial loading/model warm-up.
+ * Filtered from response extraction via OPENCODE_SKIP_PATTERNS.
+ */
+export const OPENCODE_LOADING_PATTERN = /\u2B1D{4,}/;
+
+/**
+ * OpenCode response completion pattern (Issue #379)
+ * Matches the action summary line: "&#x25A3; {Action} · model" with optional timing "· Ns".
+ * (U+25A3 square + action word + middle dot + model name [+ middle dot + timing]).
+ * Action can be "Build", "Compaction", or other OpenCode action names.
+ * Short responses may omit the timing portion (e.g., "▣ Build · qwen3.5:27b").
+ * This is the primary completion signal for OpenCode [D2-002].
+ */
+export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+\S+(?:\s+\u00b7\s+(?:[\d]+h\s*)?(?:[\d]+m\s*)?[\d.]+s)?/;
+
+/**
+ * OpenCode processing indicator pattern (Issue #379)
+ * Shows "esc interrupt" in the TUI status bar during active model processing.
+ * Filtered from response extraction via OPENCODE_SKIP_PATTERNS.
+ */
+export const OPENCODE_PROCESSING_INDICATOR = /esc interrupt/;
+
+/**
+ * OpenCode TUI separator pattern (Issue #379)
+ * Matches lines composed entirely of box-drawing / TUI decoration characters.
+ * Covers: vertical lines (U+2503), box corners, horizontal lines, and other TUI elements.
+ */
+export const OPENCODE_SEPARATOR_PATTERN = /^[\u2503\u2579\u25A3\u2580\u2500\u250C\u2510\u2514\u2518\u251C\u2524\u252C\u2534\u253C]+$/;
+
+/**
+ * OpenCode skip patterns for response cleaning (Issue #379)
+ * Lines matching any of these patterns are filtered from extracted responses.
+ * Includes: TUI separators, loading indicators, Build summary prefix,
+ * status bar prompts, processing indicators, input prompt, and pasted text markers.
+ */
+export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
+  OPENCODE_SEPARATOR_PATTERN,
+  OPENCODE_LOADING_PATTERN,
+  /^Build\s+/,
+  OPENCODE_PROMPT_AFTER_RESPONSE,
+  OPENCODE_PROCESSING_INDICATOR,
+  OPENCODE_PROMPT_PATTERN,
+  PASTED_TEXT_PATTERN,
+] as const;
+
+/**
  * Vibe Local prompt pattern
  * vibe-local (vibe-coder) shows `ctx:N% ❯` prompt when waiting for user input.
  * The prompt line includes a context usage percentage prefix.
@@ -172,6 +240,9 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
       break;
     case 'vibe-local':
       result = VIBE_LOCAL_THINKING_PATTERN.test(content);
+      break;
+    case 'opencode':
+      result = OPENCODE_THINKING_PATTERN.test(content);
       break;
     default:
       result = CLAUDE_THINKING_PATTERN.test(content);
@@ -268,6 +339,14 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
         ],
       };
 
+    case 'opencode':
+      return {
+        promptPattern: OPENCODE_PROMPT_PATTERN,
+        separatorPattern: OPENCODE_SEPARATOR_PATTERN,
+        thinkingPattern: OPENCODE_THINKING_PATTERN,
+        skipPatterns: [...OPENCODE_SKIP_PATTERNS],
+      };
+
     default:
       // Default to Claude patterns
       return getCliToolPatterns('claude');
@@ -309,28 +388,16 @@ export function stripAnsi(str: string): string {
  */
 export function stripBoxDrawing(str: string): string {
   return str.split('\n').map(line => {
-    // Remove border-only lines (╭──╮, ╰──╯, │ only, etc.)
-    if (/^[\u2502\u256D\u256E\u256F\u2570\u2500\s]+$/.test(line)) return '';
-    // Strip leading │ + optional space, trailing space + │
-    return line.replace(/^\u2502\s?/, '').replace(/\s*\u2502$/, '');
+    // Remove border-only lines (╭──╮, ╰──╯, │ only, ┃ only, ╹▀▀▀, etc.)
+    // U+2502 │ (light vertical), U+2503 ┃ (heavy vertical - OpenCode TUI)
+    // U+2579 ╹ (heavy up), U+2580 ▀ (upper half block - OpenCode separator)
+    if (/^[\u2502\u2503\u256D\u256E\u256F\u2570\u2500\u2579\u2580\s]+$/.test(line)) return '';
+    // Strip leading whitespace + │/┃ + optional space, trailing space + │/┃
+    // OpenCode TUI adds 2-space padding before ┃ borders (e.g., "  ┃  content")
+    return line.replace(/^\s*[\u2502\u2503]\s?/, '').replace(/\s*[\u2502\u2503]$/, '');
   }).join('\n');
 }
 
-/**
- * Build DetectPromptOptions for a given CLI tool.
- * Centralizes cliToolId-to-options mapping logic (DRY - MF-001).
- *
- * prompt-detector.ts remains CLI tool independent (Issue #161 principle);
- * this function lives in cli-patterns.ts which already depends on CLIToolType.
- *
- * [Future extension memo (C-002)]
- * If CLI tool count grows significantly (currently 3), consider migrating
- * to a CLIToolConfig registry pattern where tool-specific settings
- * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
- *
- * @param cliToolId - CLI tool identifier
- * @returns DetectPromptOptions for the tool, or undefined for default behavior
- */
 /**
  * Error patterns that indicate a Claude session failed to start properly
  * Used by isSessionHealthy() to detect broken sessions (MF-001: SRP)
@@ -366,10 +433,31 @@ export const CLAUDE_SESSION_ERROR_REGEX_PATTERNS: readonly RegExp[] = [
   /^Error:.*Claude Code/,
 ] as const;
 
+/**
+ * Build DetectPromptOptions for a given CLI tool.
+ * Centralizes cliToolId-to-options mapping logic (DRY - MF-001).
+ *
+ * prompt-detector.ts remains CLI tool independent (Issue #161 principle);
+ * this function lives in cli-patterns.ts which already depends on CLIToolType.
+ *
+ * [Future extension memo (C-002)]
+ * If CLI tool count grows significantly (currently 5), consider migrating
+ * to a CLIToolConfig registry pattern where tool-specific settings
+ * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
+ * Migration threshold: 6th tool addition triggers registry pattern migration [D1-003].
+ *
+ * @param cliToolId - CLI tool identifier
+ * @returns DetectPromptOptions for the tool, or undefined for default behavior
+ */
 export function buildDetectPromptOptions(
   cliToolId: CLIToolType
 ): DetectPromptOptions | undefined {
   if (cliToolId === 'claude') {
+    return { requireDefaultIndicator: false };
+  }
+  // [D2-006] OpenCode prompt "Ask anything..." does not use standard indicators (> / ❯),
+  // so requireDefaultIndicator must be false to avoid missing prompt detection.
+  if (cliToolId === 'opencode') {
     return { requireDefaultIndicator: false };
   }
   return undefined; // Default behavior (requireDefaultIndicator = true)

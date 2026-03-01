@@ -17,8 +17,8 @@ import {
 import type { SlashCommandCategory } from '@/types/slash-commands';
 
 describe('STANDARD_COMMANDS', () => {
-  it('should have 26 standard commands (16 Claude + 10 Codex)', () => {
-    expect(STANDARD_COMMANDS.length).toBe(26);
+  it('should have 33 standard commands (14 Claude-only + 3 shared + 9 Codex-only + 7 OpenCode-only)', () => {
+    expect(STANDARD_COMMANDS.length).toBe(33);
   });
 
   it('should have all required properties for each command', () => {
@@ -33,9 +33,8 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   it('should have Claude commands without cliTools field (backward compatible)', () => {
-    const claudeCommands = [
+    const claudeOnlyCommands = [
       'clear',
-      'compact',
       'resume',
       'rewind',
       'config',
@@ -46,21 +45,28 @@ describe('STANDARD_COMMANDS', () => {
       'cost',
       'review',
       'pr-comments',
-      'help',
       'doctor',
       'export',
       'todos',
     ];
-    claudeCommands.forEach((name) => {
+    claudeOnlyCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
       expect(cmd?.cliTools).toBeUndefined();
     });
   });
 
-  it('should have Codex-only commands with cliTools: ["codex"]', () => {
-    const codexCommands = [
-      'new',
+  it('should have commands shared between Claude and OpenCode', () => {
+    const sharedCommands = ['compact', 'help'];
+    sharedCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.cliTools).toEqual(expect.arrayContaining(['claude', 'opencode']));
+    });
+  });
+
+  it('should have Codex commands with cliTools including "codex"', () => {
+    const codexOnlyCommands = [
       'undo',
       'logout',
       'quit',
@@ -71,11 +77,39 @@ describe('STANDARD_COMMANDS', () => {
       'init',
       'feedback',
     ];
-    codexCommands.forEach((name) => {
+    codexOnlyCommands.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
       expect(cmd?.cliTools).toEqual(['codex']);
     });
+    // /new is shared between Codex and OpenCode
+    const newCmd = STANDARD_COMMANDS.find((c) => c.name === 'new');
+    expect(newCmd).toBeDefined();
+    expect(newCmd?.cliTools).toEqual(expect.arrayContaining(['codex', 'opencode']));
+  });
+
+  it('should have OpenCode-only commands with cliTools: ["opencode"]', () => {
+    const opencodeOnlyCommands = [
+      'sessions',
+      'connect',
+      'exit',
+      'models',
+      'agents',
+      'themes',
+      'editor',
+    ];
+    opencodeOnlyCommands.forEach((name) => {
+      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      expect(cmd).toBeDefined();
+      expect(cmd?.cliTools).toEqual(['opencode']);
+    });
+  });
+
+  it('should have 10 commands available for OpenCode', () => {
+    const opencodeCommands = STANDARD_COMMANDS.filter(
+      (cmd) => cmd.cliTools?.includes('opencode')
+    );
+    expect(opencodeCommands.length).toBe(10);
   });
 
   it('should include session management commands', () => {
@@ -135,20 +169,21 @@ describe('FREQUENTLY_USED', () => {
     expect(FREQUENTLY_USED).toBeDefined();
     expect(FREQUENTLY_USED.claude).toBeDefined();
     expect(FREQUENTLY_USED.codex).toBeDefined();
+    expect(FREQUENTLY_USED.opencode).toBeDefined();
   });
 
   it('should contain 5 frequently used commands per tool', () => {
     expect(FREQUENTLY_USED.claude.length).toBe(5);
     expect(FREQUENTLY_USED.codex.length).toBe(5);
+    expect(FREQUENTLY_USED.opencode.length).toBe(5);
   });
 
   it('should only contain names that exist in STANDARD_COMMANDS', () => {
     const standardNames = STANDARD_COMMANDS.map((c) => c.name);
-    FREQUENTLY_USED.claude.forEach((name: string) => {
-      expect(standardNames).toContain(name);
-    });
-    FREQUENTLY_USED.codex.forEach((name: string) => {
-      expect(standardNames).toContain(name);
+    Object.values(FREQUENTLY_USED).forEach((names) => {
+      names.forEach((name: string) => {
+        expect(standardNames).toContain(name);
+      });
     });
   });
 
@@ -160,6 +195,14 @@ describe('FREQUENTLY_USED', () => {
   it('Codex frequently used should include new and undo', () => {
     expect(FREQUENTLY_USED.codex).toContain('new');
     expect(FREQUENTLY_USED.codex).toContain('undo');
+  });
+
+  it('OpenCode frequently used should include models, new, compact, help, exit', () => {
+    expect(FREQUENTLY_USED.opencode).toContain('models');
+    expect(FREQUENTLY_USED.opencode).toContain('new');
+    expect(FREQUENTLY_USED.opencode).toContain('compact');
+    expect(FREQUENTLY_USED.opencode).toContain('help');
+    expect(FREQUENTLY_USED.opencode).toContain('exit');
   });
 });
 
@@ -242,6 +285,26 @@ describe('getFrequentlyUsedCommands', () => {
   it('should not return Claude-only commands for Codex', () => {
     const commands = getFrequentlyUsedCommands('codex');
     // 'clear' is Claude-only (no cliTools), should not be in Codex list
+    expect(commands.some((c) => c.name === 'clear')).toBe(false);
+  });
+
+  it('should return OpenCode commands when cliToolId is opencode', () => {
+    const commands = getFrequentlyUsedCommands('opencode');
+    expect(commands.length).toBe(5);
+    expect(commands.some((c) => c.name === 'models')).toBe(true);
+    expect(commands.some((c) => c.name === 'new')).toBe(true);
+    expect(commands.some((c) => c.name === 'compact')).toBe(true);
+    expect(commands.some((c) => c.name === 'help')).toBe(true);
+    expect(commands.some((c) => c.name === 'exit')).toBe(true);
+    // All returned commands should be available for OpenCode
+    commands.forEach((cmd) => {
+      expect(cmd.cliTools).toContain('opencode');
+    });
+  });
+
+  it('should not return Claude-only commands for OpenCode', () => {
+    const commands = getFrequentlyUsedCommands('opencode');
+    // 'clear' is Claude-only (no cliTools), should not be in OpenCode list
     expect(commands.some((c) => c.name === 'clear')).toBe(false);
   });
 });

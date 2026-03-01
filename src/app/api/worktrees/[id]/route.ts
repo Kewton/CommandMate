@@ -11,6 +11,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, VIBE_LOCAL_CONTEXT_WINDOW_MIN, VIBE_LOCAL_CONTEXT_WINDOW_MAX, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectSessionStatus } from '@/lib/status-detector';
+import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 import { getGitStatus } from '@/lib/git-utils';
 import type { GitStatus } from '@/types/models';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
@@ -61,7 +62,9 @@ export async function GET(
       let isProcessing = false;
       if (isRunning) {
         try {
-          const output = await captureSessionOutput(params.id, cliToolId, 100);
+          // OpenCode TUI uses a 200-line pane; capture full pane to see content area
+          const captureLines = cliToolId === 'opencode' ? OPENCODE_PANE_HEIGHT : 100;
+          const output = await captureSessionOutput(params.id, cliToolId, captureLines);
           const statusResult = detectSessionStatus(output, cliToolId);
           isWaitingForResponse = statusResult.status === 'waiting';
           isProcessing = statusResult.status === 'running';

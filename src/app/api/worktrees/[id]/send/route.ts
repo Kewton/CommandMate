@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch } from '@/lib/db';
+import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch, getMessages, deleteMessageById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/response-poller';
@@ -58,9 +58,10 @@ export async function POST(
 
     // Parse request body
     const body: SendMessageRequest = await request.json();
+    const trimmedContent = typeof body.content === 'string' ? body.content.trim() : '';
 
     // Validate content
-    if (!body.content || typeof body.content !== 'string' || body.content.trim() === '') {
+    if (trimmedContent === '') {
       return NextResponse.json(
         { error: 'Message content is required and must be a non-empty string' },
         { status: 400 }
@@ -136,6 +137,25 @@ export async function POST(
       console.error(`[send] Failed to save pending assistant response:`, error);
     }
 
+    // Clean up orphaned user messages (Issue #379: duplicate message prevention)
+    // If the most recent message for this cliToolId is a user message with the
+    // same content, it means the assistant never responded and the user is retrying.
+    // Remove it to prevent duplicates.
+    let orphanedMessageIdToDelete: string | null = null;
+    try {
+      const recentMessages = getMessages(db, params.id, undefined, 1, cliToolId);
+      if (
+        recentMessages.length > 0 &&
+        recentMessages[0].role === 'user' &&
+        recentMessages[0].content === trimmedContent
+      ) {
+        orphanedMessageIdToDelete = recentMessages[0].id;
+      }
+    } catch (error) {
+      // Log but don't fail - cleanup candidate discovery is best-effort
+      console.error(`[send] Failed to detect orphaned messages:`, error);
+    }
+
     // Send message to CLI tool
     try {
       await cliTool.sendMessage(params.id, body.content);
@@ -157,6 +177,20 @@ export async function POST(
       timestamp: userMessageTimestamp,
       cliToolId,
     });
+
+    // Remove the prior orphan only after the retry message is persisted.
+    // This avoids data loss if send/create fails partway through the request.
+    if (orphanedMessageIdToDelete) {
+      try {
+        const deleted = deleteMessageById(db, orphanedMessageIdToDelete);
+        if (deleted) {
+          console.log(`[send] Cleaned up orphaned user message ${orphanedMessageIdToDelete} for ${params.id} (${cliToolId})`);
+        }
+      } catch (error) {
+        // Log but don't fail - cleanup is best-effort
+        console.error(`[send] Failed to clean up orphaned message ${orphanedMessageIdToDelete}:`, error);
+      }
+    }
 
     // Update last user message for worktree
     updateLastUserMessage(db, params.id, body.content, userMessageTimestamp);
