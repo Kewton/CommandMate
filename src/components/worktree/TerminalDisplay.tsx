@@ -7,7 +7,7 @@
 
 'use client';
 
-import React, { useEffect, useMemo, memo } from 'react';
+import React, { useEffect, useRef, useMemo, memo } from 'react';
 import { sanitizeTerminalOutput } from '@/lib/sanitize';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
 
@@ -25,6 +25,8 @@ export interface TerminalDisplayProps {
   autoScroll?: boolean;
   /** Callback when auto-scroll state changes */
   onScrollChange?: (enabled: boolean) => void;
+  /** Disable auto-follow on new content (for TUI tools like OpenCode) */
+  disableAutoFollow?: boolean;
   /** Additional CSS classes */
   className?: string;
 }
@@ -67,6 +69,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   isThinking = false,
   autoScroll: initialAutoScroll = true,
   onScrollChange,
+  disableAutoFollow = false,
   className = '',
 }: TerminalDisplayProps) {
   const { scrollRef, autoScroll, handleScroll, scrollToBottom, scrollToTop } =
@@ -78,16 +81,38 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   // Sanitize the output for safe rendering
   const sanitizedOutput = sanitizeTerminalOutput(output || '');
 
+  // Issue #379: Track when we need to scroll to top on next content arrival.
+  // When switching to a disableAutoFollow tab (OpenCode), the content is cleared then
+  // reloaded asynchronously. We set this flag so that once the content arrives,
+  // we scroll to top exactly once (allowing the user to scroll freely after).
+  const needsScrollToTopRef = useRef(false);
+
+  useEffect(() => {
+    if (disableAutoFollow) {
+      needsScrollToTopRef.current = true;
+    }
+  }, [disableAutoFollow]);
+
   // Auto-scroll effect when output changes
   // Issue #131: Use 'instant' to prevent scroll animation during worktree switching
+  // Issue #379: Skip for TUI tools (OpenCode) where auto-following hides top menus
   useEffect(() => {
-    if (autoScroll && scrollRef.current) {
+    if (!scrollRef.current) return;
+
+    // Issue #379: Scroll to top once when content first arrives in disableAutoFollow mode
+    if (needsScrollToTopRef.current && disableAutoFollow && sanitizedOutput) {
+      scrollRef.current.scrollTo({ top: 0, behavior: 'instant' });
+      needsScrollToTopRef.current = false;
+      return;
+    }
+
+    if (!disableAutoFollow && autoScroll) {
       scrollRef.current.scrollTo({
         top: scrollRef.current.scrollHeight,
         behavior: 'instant',
       });
     }
-  }, [sanitizedOutput, autoScroll, scrollRef]);
+  }, [sanitizedOutput, autoScroll, disableAutoFollow, scrollRef]);
 
   // Memoized CSS classes for performance
   const containerClasses = useMemo(

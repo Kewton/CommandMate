@@ -18,6 +18,12 @@ import { useRef, useState, useCallback } from 'react';
 const BOTTOM_THRESHOLD = 50;
 
 /**
+ * Duration in ms to suppress handleScroll during programmatic scrolls.
+ * Smooth scroll typically completes within 300-500ms.
+ */
+const PROGRAMMATIC_SCROLL_GUARD_MS = 500;
+
+/**
  * Options for useTerminalScroll hook
  */
 export interface UseTerminalScrollOptions {
@@ -77,6 +83,9 @@ export function useTerminalScroll(
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScrollState] = useState(initialAutoScroll);
 
+  // Guard flag to suppress handleScroll during programmatic scrolls (scrollToTop/scrollToBottom)
+  const isProgrammaticScrollRef = useRef(false);
+
   /**
    * Set auto-scroll state with callback notification
    */
@@ -106,6 +115,9 @@ export function useTerminalScroll(
    * Disables auto-scroll when user scrolls away from bottom
    */
   const handleScroll = useCallback(() => {
+    // Skip during programmatic scrolls to prevent race conditions
+    if (isProgrammaticScrollRef.current) return;
+
     const atBottom = isAtBottom();
 
     if (atBottom && !autoScroll) {
@@ -125,6 +137,7 @@ export function useTerminalScroll(
     const element = scrollRef.current;
     if (!element) return;
 
+    isProgrammaticScrollRef.current = true;
     element.scrollTo({
       top: element.scrollHeight,
       behavior: 'smooth',
@@ -134,6 +147,10 @@ export function useTerminalScroll(
     if (!autoScroll) {
       setAutoScroll(true);
     }
+
+    setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+    }, PROGRAMMATIC_SCROLL_GUARD_MS);
   }, [autoScroll, setAutoScroll]);
 
   /**
@@ -144,6 +161,7 @@ export function useTerminalScroll(
     const element = scrollRef.current;
     if (!element) return;
 
+    isProgrammaticScrollRef.current = true;
     element.scrollTo({
       top: 0,
       behavior: 'smooth',
@@ -152,6 +170,10 @@ export function useTerminalScroll(
     if (autoScroll) {
       setAutoScroll(false);
     }
+
+    setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+    }, PROGRAMMATIC_SCROLL_GUARD_MS);
   }, [autoScroll, setAutoScroll]);
 
   return {

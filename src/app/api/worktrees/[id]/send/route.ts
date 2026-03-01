@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
-import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch } from '@/lib/db';
+import { getWorktreeById, createMessage, updateLastUserMessage, clearInProgressMessageId, saveInitialBranch, getInitialBranch, getMessages, deleteMessageById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/response-poller';
@@ -134,6 +134,21 @@ export async function POST(
     } catch (error) {
       // Log but don't fail - user message should still be saved
       console.error(`[send] Failed to save pending assistant response:`, error);
+    }
+
+    // Clean up orphaned user messages (Issue #379: duplicate message prevention)
+    // If the most recent message for this cliToolId is a user message,
+    // it means the assistant never responded. Remove it to prevent duplicates
+    // when the user retries sending.
+    try {
+      const recentMessages = getMessages(db, params.id, undefined, 1, cliToolId);
+      if (recentMessages.length > 0 && recentMessages[0].role === 'user') {
+        deleteMessageById(db, recentMessages[0].id);
+        console.log(`[send] Cleaned up orphaned user message ${recentMessages[0].id} for ${params.id} (${cliToolId})`);
+      }
+    } catch (error) {
+      // Log but don't fail - cleanup is best-effort
+      console.error(`[send] Failed to clean up orphaned messages:`, error);
     }
 
     // Send message to CLI tool

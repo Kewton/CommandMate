@@ -809,6 +809,12 @@ interface MobileContentProps {
   vibeLocalContextWindow: number | null;
   /** [Issue #374] Callback when vibe-local context window changes */
   onVibeLocalContextWindowChange: (value: number | null) => void;
+  /** [Issue #379] Auto-scroll state for terminal */
+  autoScroll?: boolean;
+  /** [Issue #379] Callback when auto-scroll state changes */
+  onScrollChange?: (enabled: boolean) => void;
+  /** [Issue #379] Disable auto-follow for TUI tools (OpenCode) */
+  disableAutoFollow?: boolean;
 }
 
 /** [Issue #21] Type for file search hook return */
@@ -842,6 +848,9 @@ const MobileContent = memo(function MobileContent({
   onVibeLocalModelChange,
   vibeLocalContextWindow,
   onVibeLocalContextWindowChange,
+  autoScroll,
+  onScrollChange,
+  disableAutoFollow,
 }: MobileContentProps) {
   switch (activeTab) {
     case 'terminal':
@@ -851,6 +860,9 @@ const MobileContent = memo(function MobileContent({
             output={terminalOutput}
             isActive={isTerminalActive}
             isThinking={isThinking}
+            autoScroll={autoScroll}
+            onScrollChange={onScrollChange}
+            disableAutoFollow={disableAutoFollow}
             className="h-full"
           />
         </ErrorBoundary>
@@ -1108,6 +1120,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       setActiveCliTab(selectedAgents[0]);
     }
   }, [selectedAgents, activeCliTab]);
+
+  // Issue #379: Disable auto-follow for OpenCode (full-screen TUI).
+  // OpenCode renders its TUI in a fixed viewport where menus (e.g., /model, /commands)
+  // appear at the top. Auto-following new content to bottom would hide these menus.
+  const disableAutoFollow = activeCliTab === 'opencode';
 
   /** Issue #368: Callback for AgentSettingsPane to update selectedAgents */
   const handleSelectedAgentsChange = useCallback((agents: [CLIToolType, CLIToolType]) => {
@@ -1979,6 +1996,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   isThinking={state.terminal.isThinking}
                   autoScroll={state.terminal.autoScroll}
                   onScrollChange={handleAutoScrollChange}
+                  disableAutoFollow={disableAutoFollow}
                 />
               }
               initialLeftWidth={40}
@@ -2225,6 +2243,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             onVibeLocalModelChange={handleVibeLocalModelChange}
             vibeLocalContextWindow={vibeLocalContextWindow}
             onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
+            autoScroll={state.terminal.autoScroll}
+            onScrollChange={handleAutoScrollChange}
+            disableAutoFollow={disableAutoFollow}
           />
         </main>
 

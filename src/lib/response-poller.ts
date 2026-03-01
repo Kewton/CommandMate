@@ -890,16 +890,22 @@ function extractResponse(
 
   // Check if this is an interactive prompt (yes/no or multiple choice)
   // Interactive prompts don't have the ">" prompt and separator, so we need to detect them separately
-  const fullOutput = lines.join('\n');
-  const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
+  // [Issue #379] Skip general prompt detection for OpenCode when response is incomplete.
+  // OpenCode's "Ask anything..." prompt pattern can cause false positive prompt detection
+  // when combined with user input text visible in the TUI buffer, leading to duplicate
+  // message creation. OpenCode prompts are only relevant when completion is detected above.
+  if (cliToolId !== 'opencode') {
+    const fullOutput = lines.join('\n');
+    const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
-  if (promptDetection.isPrompt) {
-    // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
-    // stripAnsi is applied inside buildPromptExtractionResult (Stage 4 MF-001: XSS risk mitigation)
-    return buildPromptExtractionResult(
-      lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
-      promptDetection,
-    );
+    if (promptDetection.isPrompt) {
+      // Prompt detection uses full buffer for accuracy, but return only lastCapturedLine onwards
+      // stripAnsi is applied inside buildPromptExtractionResult (Stage 4 MF-001: XSS risk mitigation)
+      return buildPromptExtractionResult(
+        lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
+        promptDetection,
+      );
+    }
   }
 
   // Not a prompt, but we may have a partial response in progress (even if Claude shows a spinner)
