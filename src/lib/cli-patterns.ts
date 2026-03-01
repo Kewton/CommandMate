@@ -167,12 +167,13 @@ export const OPENCODE_LOADING_PATTERN = /\u2B1D{4,}/;
 
 /**
  * OpenCode response completion pattern (Issue #379)
- * Matches the action summary line: "&#x25A3; {Action} . model . Ns"
- * (U+25A3 square + action word + middle dot + model name + middle dot + timing).
+ * Matches the action summary line: "&#x25A3; {Action} · model" with optional timing "· Ns".
+ * (U+25A3 square + action word + middle dot + model name [+ middle dot + timing]).
  * Action can be "Build", "Compaction", or other OpenCode action names.
+ * Short responses may omit the timing portion (e.g., "▣ Build · qwen3.5:27b").
  * This is the primary completion signal for OpenCode [D2-002].
  */
-export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+.+\s+\u00b7\s+[\d.]+s/;
+export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+\S+(?:\s+\u00b7\s+(?:[\d]+h\s*)?(?:[\d]+m\s*)?[\d.]+s)?/;
 
 /**
  * OpenCode processing indicator pattern (Issue #379)
@@ -387,10 +388,13 @@ export function stripAnsi(str: string): string {
  */
 export function stripBoxDrawing(str: string): string {
   return str.split('\n').map(line => {
-    // Remove border-only lines (╭──╮, ╰──╯, │ only, etc.)
-    if (/^[\u2502\u256D\u256E\u256F\u2570\u2500\s]+$/.test(line)) return '';
-    // Strip leading │ + optional space, trailing space + │
-    return line.replace(/^\u2502\s?/, '').replace(/\s*\u2502$/, '');
+    // Remove border-only lines (╭──╮, ╰──╯, │ only, ┃ only, ╹▀▀▀, etc.)
+    // U+2502 │ (light vertical), U+2503 ┃ (heavy vertical - OpenCode TUI)
+    // U+2579 ╹ (heavy up), U+2580 ▀ (upper half block - OpenCode separator)
+    if (/^[\u2502\u2503\u256D\u256E\u256F\u2570\u2500\u2579\u2580\s]+$/.test(line)) return '';
+    // Strip leading whitespace + │/┃ + optional space, trailing space + │/┃
+    // OpenCode TUI adds 2-space padding before ┃ borders (e.g., "  ┃  content")
+    return line.replace(/^\s*[\u2502\u2503]\s?/, '').replace(/\s*[\u2502\u2503]$/, '');
   }).join('\n');
 }
 

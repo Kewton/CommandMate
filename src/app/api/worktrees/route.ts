@@ -14,6 +14,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
 import { detectSessionStatus } from '@/lib/status-detector';
+import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 
 export async function GET(request: NextRequest) {
   try {
@@ -51,7 +52,9 @@ export async function GET(request: NextRequest) {
           let isProcessing = false;
           if (isRunning) {
             try {
-              const output = await captureSessionOutput(worktree.id, cliToolId, 100);
+              // OpenCode TUI uses a 200-line pane; capture full pane to see content area
+              const captureLines = cliToolId === 'opencode' ? OPENCODE_PANE_HEIGHT : 100;
+              const output = await captureSessionOutput(worktree.id, cliToolId, captureLines);
               const statusResult = detectSessionStatus(output, cliToolId);
               isWaitingForResponse = statusResult.status === 'waiting';
               isProcessing = statusResult.status === 'running';

@@ -224,6 +224,15 @@ export async function savePendingAssistantResponse(
   userMessageTimestamp: Date
 ): Promise<ChatMessage | null> {
   try {
+    // OpenCode runs in alternate screen mode (fixed-size pane, no scrollback).
+    // Previous conversation history remains visible in the TUI, making it impossible
+    // to distinguish "old" content from "pending new" content. The response poller
+    // handles OpenCode response capture via Build marker count tracking, so
+    // savePendingAssistantResponse would only create duplicate/stale messages.
+    if (cliToolId === 'opencode') {
+      return null;
+    }
+
     // 1. Get session state for last captured position
     const sessionState = getSessionState(db, worktreeId, cliToolId);
     const lastCapturedLine = sessionState?.lastCapturedLine || 0;
