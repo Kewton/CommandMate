@@ -20,10 +20,10 @@ import {
 } from '../tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
 import { ensureOpencodeConfig } from './opencode-config';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Extract error message from unknown error type (DRY)
@@ -109,8 +109,12 @@ export class OpenCodeTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Resize tmux window to 80 columns (hide sidebar for clean capture-pane output)
+      // [SEC-001] Uses execFile (not exec) to prevent shell meta-character injection via sessionName
       try {
-        await execAsync(`tmux resize-window -t "${sessionName}" -x 80 -y ${OPENCODE_PANE_HEIGHT}`);
+        await execFileAsync('tmux', [
+          'resize-window', '-t', sessionName,
+          '-x', '80', '-y', String(OPENCODE_PANE_HEIGHT),
+        ]);
       } catch {
         // Non-fatal: resize may fail in some environments
       }

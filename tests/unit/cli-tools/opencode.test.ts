@@ -25,9 +25,10 @@ vi.mock('@/lib/pasted-text-helper', () => ({
   detectAndResendIfPastedText: vi.fn(),
 }));
 
-// Mock child_process
+// Mock child_process (exec for BaseCLITool.isInstalled(), execFile for OpenCodeTool.startSession())
 vi.mock('child_process', () => ({
   exec: vi.fn(),
+  execFile: vi.fn(),
 }));
 
 vi.mock('util', async (importOriginal) => {

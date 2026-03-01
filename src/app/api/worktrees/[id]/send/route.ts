@@ -137,12 +137,16 @@ export async function POST(
     }
 
     // Clean up orphaned user messages (Issue #379: duplicate message prevention)
-    // If the most recent message for this cliToolId is a user message,
-    // it means the assistant never responded. Remove it to prevent duplicates
-    // when the user retries sending.
+    // If the most recent message for this cliToolId is a user message with the
+    // same content, it means the assistant never responded and the user is retrying.
+    // Remove it to prevent duplicates.
     try {
       const recentMessages = getMessages(db, params.id, undefined, 1, cliToolId);
-      if (recentMessages.length > 0 && recentMessages[0].role === 'user') {
+      if (
+        recentMessages.length > 0 &&
+        recentMessages[0].role === 'user' &&
+        recentMessages[0].content === body.content.trim()
+      ) {
         deleteMessageById(db, recentMessages[0].id);
         console.log(`[send] Cleaned up orphaned user message ${recentMessages[0].id} for ${params.id} (${cliToolId})`);
       }

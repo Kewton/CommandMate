@@ -9,7 +9,7 @@
 
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 
 /**
  * Threshold in pixels for detecting if user is "at the bottom"
@@ -85,6 +85,17 @@ export function useTerminalScroll(
 
   // Guard flag to suppress handleScroll during programmatic scrolls (scrollToTop/scrollToBottom)
   const isProgrammaticScrollRef = useRef(false);
+  // Timer ID for programmatic scroll guard cleanup on unmount
+  const scrollGuardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timer on unmount to prevent state updates after unmount
+  useEffect(() => {
+    return () => {
+      if (scrollGuardTimerRef.current) {
+        clearTimeout(scrollGuardTimerRef.current);
+      }
+    };
+  }, []);
 
   /**
    * Set auto-scroll state with callback notification
@@ -148,8 +159,9 @@ export function useTerminalScroll(
       setAutoScroll(true);
     }
 
-    setTimeout(() => {
+    scrollGuardTimerRef.current = setTimeout(() => {
       isProgrammaticScrollRef.current = false;
+      scrollGuardTimerRef.current = null;
     }, PROGRAMMATIC_SCROLL_GUARD_MS);
   }, [autoScroll, setAutoScroll]);
 
@@ -171,8 +183,9 @@ export function useTerminalScroll(
       setAutoScroll(false);
     }
 
-    setTimeout(() => {
+    scrollGuardTimerRef.current = setTimeout(() => {
       isProgrammaticScrollRef.current = false;
+      scrollGuardTimerRef.current = null;
     }, PROGRAMMATIC_SCROLL_GUARD_MS);
   }, [autoScroll, setAutoScroll]);
 
