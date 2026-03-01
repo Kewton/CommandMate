@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-03-01
+
+### Added
+- OpenCode as 5th CLI tool with ICLITool implementation (Issue #379)
+  - 2-layer TUI response capture for complete output (alternate screen handling)
+  - ANSI/box-drawing stripping and extraction start fix
+  - Slash commands, status detection, and response saving
+  - Scroll to top button for terminal pane
+  - `disableAutoFollow` for TUI-based tools
+- QR code login for mobile access via ngrok (Issue #383)
+  - `QrCodeGenerator` component with URL fragment-based token delivery
+  - `useFragmentLogin` hook for automatic token extraction
+  - Security hardening for QR login flow
+
+### Fixed
+- OpenCode response detection, `┃` stripping, and duplicate prevention
+- OpenCode terminal scroll issues with TUI tools
+- QR code S001 bypass, autoLoginError clearing, and URL trailing slash
+
 ## [0.3.4] - 2026-02-28
 
 ### Added
@@ -607,7 +626,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.4...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/Kewton/CommandMate/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/Kewton/CommandMate/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/Kewton/CommandMate/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Kewton/CommandMate/compare/v0.3.1...v0.3.2
