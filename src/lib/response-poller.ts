@@ -183,6 +183,17 @@ const OVERLAP_FINGERPRINT_SIZE = 10;
 const tuiResponseAccumulator = new Map<string, TuiAccumulatorState>();
 
 /**
+ * Normalize a single OpenCode TUI line by removing ANSI codes and border glyphs.
+ * Returns an empty string when the line has no meaningful content after cleanup.
+ */
+function normalizeOpenCodeLine(line: string): string {
+  return stripBoxDrawing(stripAnsi(line))
+    .replace(/^\u2503\s?/, '')
+    .replace(/\s*\u2503$/, '')
+    .trim();
+}
+
+/**
  * Extract meaningful content lines from raw TUI output.
  * Strips ANSI codes, box-drawing characters, and lines matching OPENCODE_SKIP_PATTERNS.
  *
@@ -196,7 +207,7 @@ export function extractTuiContentLines(rawOutput: string): string[] {
   const contentLines: string[] = [];
 
   for (const line of lines) {
-    const cleaned = stripBoxDrawing(stripAnsi(line)).trim();
+    const cleaned = normalizeOpenCodeLine(line);
     if (!cleaned) continue;
 
     const shouldSkip = OPENCODE_SKIP_PATTERNS.some(pattern => pattern.test(cleaned));
@@ -545,15 +556,9 @@ export function cleanOpenCodeResponse(response: string): string {
   const cleanedLines: string[] = [];
 
   for (const line of lines) {
-    // Strip ANSI escape codes and box-drawing characters before pattern matching.
-    // Without this, embedded ANSI codes break regex matching (e.g., "tab agents"
-    // interspersed with \x1b[...m won't match OPENCODE_PROMPT_AFTER_RESPONSE).
-    // Also strip ┃ (U+2503, heavy vertical) which OpenCode TUI uses as content border.
-    // stripBoxDrawing only handles │ (U+2502, light vertical) for Gemini borders.
-    const cleanLine = stripBoxDrawing(stripAnsi(line))
-      .replace(/^\u2503\s?/, '')
-      .replace(/\s*\u2503$/, '')
-      .trim();
+    // Strip ANSI escape codes and TUI border characters before pattern matching.
+    // Without this, embedded ANSI codes and heavy borders can break regex matches.
+    const cleanLine = normalizeOpenCodeLine(line);
     if (!cleanLine) continue;
 
     // Skip lines matching any OpenCode skip pattern
@@ -1078,8 +1083,9 @@ async function checkForResponse(worktreeId: string, cliToolId: CLIToolType): Pro
       // This recovers content that scrolled past the visible TUI area.
       const pollerKey = getPollerKey(worktreeId, cliToolId);
       const accumulated = getAccumulatedContent(pollerKey);
-      if (accumulated && accumulated.length > cleanedResponse.length) {
-        cleanedResponse = accumulated;
+      const cleanedAccumulated = accumulated ? cleanOpenCodeResponse(accumulated) : '';
+      if (cleanedAccumulated && cleanedAccumulated.length > cleanedResponse.length) {
+        cleanedResponse = cleanedAccumulated;
       }
       // Clear accumulator for next response cycle
       clearTuiAccumulator(pollerKey);

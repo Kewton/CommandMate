@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { POST as sendMessage } from '@/app/api/worktrees/[id]/send/route';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db-migrations';
-import { upsertWorktree } from '@/lib/db';
+import { createMessage, getMessages, upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
 
 // Mock CLI tool modules
@@ -123,7 +123,6 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       expect(startClaudeSession).toHaveBeenCalledWith({
         worktreeId: 'test-worktree',
         worktreePath: '/path/to/test',
-        baseUrl: expect.any(String),
       });
       expect(sendMessageToClaude).toHaveBeenCalledWith('test-worktree', 'Test message');
     });
@@ -242,6 +241,52 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
 
       const data = await response.json();
       expect(data.error).toContain('Invalid CLI tool');
+    });
+
+    it('should preserve an existing user message if resend fails', async () => {
+      const worktree: Worktree = {
+        id: 'test-send-failure',
+        name: 'Test Send Failure',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'codex',
+      };
+      upsertWorktree(db, worktree);
+
+      const originalMessage = createMessage(db, {
+        worktreeId: 'test-send-failure',
+        role: 'user',
+        content: 'Retry me',
+        messageType: 'normal',
+        timestamp: new Date('2026-03-01T00:00:00Z'),
+        cliToolId: 'codex',
+      });
+
+      const { CLIToolManager } = await import('@/lib/cli-tools/manager');
+      const tool = CLIToolManager.getInstance().getTool('codex');
+      vi.spyOn(tool, 'sendMessage').mockRejectedValueOnce(new Error('send failed'));
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-send-failure/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: 'Retry me',
+          cliToolId: 'codex',
+        }),
+      });
+
+      const response = await sendMessage(
+        request as unknown as import('next/server').NextRequest,
+        { params: { id: 'test-send-failure' } }
+      );
+
+      expect(response.status).toBe(500);
+
+      const messages = getMessages(db, 'test-send-failure', undefined, 10, 'codex');
+      expect(messages).toHaveLength(1);
+      expect(messages[0].id).toBe(originalMessage.id);
+      expect(messages[0].content).toBe('Retry me');
     });
   });
 });

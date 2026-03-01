@@ -165,11 +165,11 @@ export async function ensureOpencodeConfig(worktreePath: string): Promise<void> 
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), OLLAMA_API_TIMEOUT_MS);
-
     const response = await fetch(OLLAMA_API_URL, {
       signal: controller.signal,
+    }).finally(() => {
+      clearTimeout(timeoutId);
     });
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       console.warn(`Ollama API returned status ${response.status}, skipping opencode.json generation`);
@@ -225,8 +225,14 @@ export async function ensureOpencodeConfig(worktreePath: string): Promise<void> 
   };
 
   try {
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), {
+      encoding: 'utf-8',
+      flag: 'wx',
+    });
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return;
+    }
     // Non-fatal: write failure should not prevent session start
     console.warn(`Failed to write opencode.json: ${error instanceof Error ? error.message : String(error)}`);
   }

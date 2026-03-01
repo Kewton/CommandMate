@@ -85,6 +85,12 @@ describe('TUI Response Accumulator', () => {
       const result = extractTuiContentLines(raw);
       expect(result).toEqual(['Content inside border']);
     });
+
+    it('should strip OpenCode heavy borders from content lines', () => {
+      const raw = '\u2503 Content inside OpenCode border \u2503';
+      const result = extractTuiContentLines(raw);
+      expect(result).toEqual(['Content inside OpenCode border']);
+    });
   });
 
   describe('findOverlapIndex()', () => {

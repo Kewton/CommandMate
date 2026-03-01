@@ -58,9 +58,10 @@ export async function POST(
 
     // Parse request body
     const body: SendMessageRequest = await request.json();
+    const trimmedContent = typeof body.content === 'string' ? body.content.trim() : '';
 
     // Validate content
-    if (!body.content || typeof body.content !== 'string' || body.content.trim() === '') {
+    if (trimmedContent === '') {
       return NextResponse.json(
         { error: 'Message content is required and must be a non-empty string' },
         { status: 400 }
@@ -140,19 +141,19 @@ export async function POST(
     // If the most recent message for this cliToolId is a user message with the
     // same content, it means the assistant never responded and the user is retrying.
     // Remove it to prevent duplicates.
+    let orphanedMessageIdToDelete: string | null = null;
     try {
       const recentMessages = getMessages(db, params.id, undefined, 1, cliToolId);
       if (
         recentMessages.length > 0 &&
         recentMessages[0].role === 'user' &&
-        recentMessages[0].content === body.content.trim()
+        recentMessages[0].content === trimmedContent
       ) {
-        deleteMessageById(db, recentMessages[0].id);
-        console.log(`[send] Cleaned up orphaned user message ${recentMessages[0].id} for ${params.id} (${cliToolId})`);
+        orphanedMessageIdToDelete = recentMessages[0].id;
       }
     } catch (error) {
-      // Log but don't fail - cleanup is best-effort
-      console.error(`[send] Failed to clean up orphaned messages:`, error);
+      // Log but don't fail - cleanup candidate discovery is best-effort
+      console.error(`[send] Failed to detect orphaned messages:`, error);
     }
 
     // Send message to CLI tool
@@ -176,6 +177,20 @@ export async function POST(
       timestamp: userMessageTimestamp,
       cliToolId,
     });
+
+    // Remove the prior orphan only after the retry message is persisted.
+    // This avoids data loss if send/create fails partway through the request.
+    if (orphanedMessageIdToDelete) {
+      try {
+        const deleted = deleteMessageById(db, orphanedMessageIdToDelete);
+        if (deleted) {
+          console.log(`[send] Cleaned up orphaned user message ${orphanedMessageIdToDelete} for ${params.id} (${cliToolId})`);
+        }
+      } catch (error) {
+        // Log but don't fail - cleanup is best-effort
+        console.error(`[send] Failed to clean up orphaned message ${orphanedMessageIdToDelete}:`, error);
+      }
+    }
 
     // Update last user message for worktree
     updateLastUserMessage(db, params.id, body.content, userMessageTimestamp);

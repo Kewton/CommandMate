@@ -120,8 +120,9 @@ describe('opencode-config', () => {
       );
 
       expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
-      const [filePath, content] = vi.mocked(fs.writeFileSync).mock.calls[0];
+      const [filePath, content, options] = vi.mocked(fs.writeFileSync).mock.calls[0];
       expect(filePath).toBe(path.join('/test/worktree', 'opencode.json'));
+      expect(options).toEqual({ encoding: 'utf-8', flag: 'wx' });
 
       // Verify JSON.stringify was used (valid JSON) [D4-005]
       const config = JSON.parse(content as string);
@@ -257,6 +258,20 @@ describe('opencode-config', () => {
       });
 
       // Should not throw (write failure is non-fatal)
+      await expect(ensureOpencodeConfig('/test/worktree')).resolves.toBeUndefined();
+    });
+
+    it('should treat concurrent file creation as non-fatal', async () => {
+      vi.mocked(fs.writeFileSync).mockImplementation(() => {
+        throw Object.assign(new Error('File exists'), { code: 'EEXIST' });
+      });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({
+          models: [{ name: 'test-model' }],
+        })),
+      });
+
       await expect(ensureOpencodeConfig('/test/worktree')).resolves.toBeUndefined();
     });
 
