@@ -11,6 +11,7 @@
  */
 
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import { groupByCategory } from '@/lib/command-merger';
 
 /**
@@ -40,6 +41,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
+    cliTools: ['claude', 'opencode'],
   },
   {
     name: 'resume',
@@ -136,6 +138,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     isStandard: true,
     source: 'standard',
     filePath: '',
+    cliTools: ['claude', 'opencode'],
   },
   {
     name: 'doctor',
@@ -169,12 +172,12 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
   // Session Management - Codex only
   {
     name: 'new',
-    description: 'Start a new conversation in same session',
+    description: 'Start a new conversation',
     category: 'standard-session',
     isStandard: true,
     source: 'standard',
     filePath: '',
-    cliTools: ['codex'],
+    cliTools: ['codex', 'opencode'],
   },
   {
     name: 'undo',
@@ -263,6 +266,79 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
     filePath: '',
     cliTools: ['codex'],
   },
+
+  // ============================================================================
+  // OPENCODE TUI ONLY COMMANDS (Issue #379)
+  // ============================================================================
+
+  // Session Management - OpenCode only
+  {
+    name: 'sessions',
+    description: 'Browse conversation history',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['opencode'],
+  },
+  {
+    name: 'connect',
+    description: 'Connect to language server',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['opencode'],
+  },
+  {
+    name: 'exit',
+    description: 'Exit OpenCode TUI',
+    category: 'standard-session',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['opencode'],
+  },
+
+  // Configuration - OpenCode only
+  {
+    name: 'models',
+    description: 'Switch AI model',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['opencode'],
+  },
+  {
+    name: 'agents',
+    description: 'Switch agent',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['opencode'],
+  },
+  {
+    name: 'themes',
+    description: 'Change TUI theme',
+    category: 'standard-config',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['opencode'],
+  },
+
+  // Utility - OpenCode only
+  {
+    name: 'editor',
+    description: 'Open editor for long messages',
+    category: 'standard-util',
+    isStandard: true,
+    source: 'standard',
+    filePath: '',
+    cliTools: ['opencode'],
+  },
 ];
 
 /**
@@ -271,6 +347,7 @@ export const STANDARD_COMMANDS: SlashCommand[] = [
 export const FREQUENTLY_USED: Record<string, string[]> = {
   claude: ['clear', 'compact', 'status', 'help', 'review'],
   codex: ['new', 'undo', 'diff', 'approvals', 'mcp'],
+  opencode: ['models', 'new', 'compact', 'help', 'exit'],
 };
 
 /**
@@ -301,6 +378,6 @@ export function getFrequentlyUsedCommands(cliToolId?: string): SlashCommand[] {
       // For Codex: include only commands with 'codex' in cliTools
       (toolId === 'claude'
         ? !cmd.cliTools || cmd.cliTools.includes('claude')
-        : cmd.cliTools?.includes(toolId as 'claude' | 'codex' | 'gemini'))
+        : cmd.cliTools?.includes(toolId as CLIToolType))
   );
 }

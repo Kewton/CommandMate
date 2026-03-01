@@ -7,7 +7,7 @@
  * T2.1: Single source of truth for CLI tool IDs
  * CLIToolType is derived from this constant (DRY principle)
  */
-export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local'] as const;
+export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode'] as const;
 
 /**
  * CLIツールタイプ
@@ -19,7 +19,7 @@ export type CLIToolType = typeof CLI_TOOL_IDS[number];
  * SWE CLIツールの共通インターフェース
  */
 export interface ICLITool {
-  /** CLIツールの識別子 (claude, codex, gemini, vibe-local) */
+  /** CLIツールの識別子 (claude, codex, gemini, vibe-local, opencode) */
   readonly id: CLIToolType;
 
   /** CLIツールの表示名 */
@@ -87,6 +87,7 @@ export const CLI_TOOL_DISPLAY_NAMES: Record<CLIToolType, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   'vibe-local': 'Vibe Local',
+  opencode: 'OpenCode',
 };
 
 /**
@@ -167,11 +168,17 @@ export function isValidVibeLocalContextWindow(value: unknown): value is number {
 }
 
 /**
- * Ollama model name validation pattern.
- * Allows: alphanumeric start, followed by alphanumeric, dots, underscores, colons, slashes, hyphens.
- * Max 100 characters. Used for defense-in-depth validation at point of use.
+ * Ollama model name validation pattern (API/DB layer).
+ * Requires alphanumeric first character, followed by alphanumeric, dots, underscores,
+ * colons, slashes, hyphens. No explicit length limit (DB schema handles storage limits).
  *
- * [SEC-001] Shared between API route validation and CLI command construction
+ * [SEC-001] Shared between API route validation and CLI command construction.
+ *
+ * Note: opencode-config.ts has a separate OLLAMA_MODEL_PATTERN with a 100-character
+ * length limit (`{1,100}`) for DoS protection when parsing Ollama API responses.
+ * The patterns are intentionally different: this one enforces first-character constraints
+ * for user-facing validation, while the opencode-config version adds length limits
+ * for untrusted external API data.
  */
 export const OLLAMA_MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/;
 

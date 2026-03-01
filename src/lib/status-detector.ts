@@ -20,7 +20,7 @@
  *   - detectPrompt() is lightweight (regex-based, no I/O), so the cost is negligible
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions } from './cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR } from './cli-patterns';
 import { detectPrompt } from './prompt-detector';
 import type { CLIToolType } from './cli-tools/types';
 
@@ -161,6 +161,75 @@ export function detectSessionStatus(
       reason: 'thinking_indicator',
       hasActivePrompt: false,
     };
+  }
+
+  // 2.5. OpenCode status detection (Issue #379)
+  // OpenCode TUI layout: content area (top) | empty padding (~150 lines) | footer status bar (~6 lines at bottom).
+  // Standard windowed checks (last N lines) only see footer/padding, never the content area.
+  //
+  // Detection strategy:
+  // A. "esc interrupt" in footer → actively processing (running)
+  // B. Find footer boundary via "ctrl+t" keybinding line, extract content above it, check for thinking → running
+  // C. Same content window, check for ▣ Build completion → ready
+  if (cliToolId === 'opencode') {
+    // A. Check footer for processing indicator ("esc interrupt" replaces "ctrl+t variants..." during processing)
+    if (OPENCODE_PROCESSING_INDICATOR.test(lastLines)) {
+      return {
+        status: 'running',
+        confidence: 'high',
+        reason: 'opencode_processing_indicator',
+        hasActivePrompt: false,
+      };
+    }
+
+    // Extract content area by finding TUI footer boundary dynamically.
+    // Footer structure (bottom-up): keybinding hints ("ctrl+t variants..."),
+    // ╹▀▀ separator, model info bar ("Build GPT-5-mini GitHub Copilot"), ┃ padding.
+    // The keybinding line is the anchor; model bar is 2 lines above it.
+    // ┃ padding above the model bar becomes empty after stripBoxDrawing and is
+    // skipped by the lastNonEmpty search below.
+    const strippedForOpenCode = stripBoxDrawing(cleanOutput);
+    const ocLines = strippedForOpenCode.split('\n');
+    let footerBoundary = Math.max(0, ocLines.length - 7); // fallback: skip 7 lines
+    for (let i = ocLines.length - 1; i >= Math.max(0, ocLines.length - 10); i--) {
+      if (/ctrl\+[tp]/.test(ocLines[i])) {
+        // Exclude keybinding line (i), separator (i-1), and model info bar (i-2)
+        footerBoundary = Math.max(0, i - 2);
+        break;
+      }
+    }
+    const contentCandidates = ocLines.slice(0, footerBoundary);
+    let lastContentIdx = contentCandidates.length - 1;
+    while (lastContentIdx >= 0 && contentCandidates[lastContentIdx].trim() === '') {
+      lastContentIdx--;
+    }
+    if (lastContentIdx >= 0) {
+      // B. Check last few content lines for thinking indicators
+      const contentThinkingWindow = contentCandidates
+        .slice(Math.max(0, lastContentIdx - STATUS_THINKING_LINE_COUNT + 1), lastContentIdx + 1)
+        .join('\n');
+      if (detectThinking('opencode', contentThinkingWindow)) {
+        return {
+          status: 'running',
+          confidence: 'high',
+          reason: 'thinking_indicator',
+          hasActivePrompt: false,
+        };
+      }
+
+      // C. Check last few content lines for completion marker (▣ Build · model · time)
+      const contentCheckWindow = contentCandidates
+        .slice(Math.max(0, lastContentIdx - STATUS_CHECK_LINE_COUNT + 1), lastContentIdx + 1)
+        .join('\n');
+      if (OPENCODE_RESPONSE_COMPLETE.test(contentCheckWindow)) {
+        return {
+          status: 'ready',
+          confidence: 'high',
+          reason: 'opencode_response_complete',
+          hasActivePrompt: false,
+        };
+      }
+    }
   }
 
   // 3. Input prompt detection

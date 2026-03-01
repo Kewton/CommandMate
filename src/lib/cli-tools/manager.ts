@@ -1,6 +1,6 @@
 /**
  * CLI Tool Manager
- * Singleton class to manage multiple CLI tools (Claude, Codex, Gemini, Vibe Local)
+ * Singleton class to manage multiple CLI tools (Claude, Codex, Gemini, Vibe Local, OpenCode)
  */
 
 import type { CLIToolType, ICLITool, CLIToolInfo } from './types';
@@ -8,11 +8,12 @@ import { ClaudeTool } from './claude';
 import { CodexTool } from './codex';
 import { GeminiTool } from './gemini';
 import { VibeLocalTool } from './vibe-local';
+import { OpenCodeTool } from './opencode';
 import { stopPolling as stopResponsePolling } from '../response-poller';
 
 /**
  * CLI Tool Manager (Singleton)
- * Provides centralized access to all CLI tools (Issue #368: includes Vibe Local)
+ * Provides centralized access to all CLI tools (Issue #368: includes Vibe Local, Issue #379: includes OpenCode)
  */
 export class CLIToolManager {
   private static instance: CLIToolManager;
@@ -29,6 +30,7 @@ export class CLIToolManager {
     this.tools.set('codex', new CodexTool());
     this.tools.set('gemini', new GeminiTool());
     this.tools.set('vibe-local', new VibeLocalTool());
+    this.tools.set('opencode', new OpenCodeTool());
   }
 
   /**
@@ -73,7 +75,7 @@ export class CLIToolManager {
    * ```typescript
    * const manager = CLIToolManager.getInstance();
    * const allTools = manager.getAllTools();
-   * console.log(allTools.map(t => t.name)); // ['Claude Code', 'Codex CLI', 'Gemini CLI']
+   * console.log(allTools.map(t => t.name)); // ['Claude Code', 'Codex CLI', 'Gemini CLI', 'Vibe Local', 'OpenCode']
    * ```
    */
   getAllTools(): ICLITool[] {
