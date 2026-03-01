@@ -69,7 +69,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   onScrollChange,
   className = '',
 }: TerminalDisplayProps) {
-  const { scrollRef, autoScroll, handleScroll, scrollToBottom } =
+  const { scrollRef, autoScroll, handleScroll, scrollToBottom, scrollToTop } =
     useTerminalScroll({
       initialAutoScroll,
       onAutoScrollChange: onScrollChange,
@@ -140,8 +140,16 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         {isActive && isThinking && <ThinkingIndicator />}
       </div>
 
-      {/* Scroll to bottom button (shown when auto-scroll is disabled) */}
-      {!autoScroll && (
+      {/* Scroll button: shows "Scroll to top" at bottom, or "Scroll to bottom" when scrolled up */}
+      {autoScroll ? (
+        <button
+          onClick={scrollToTop}
+          className="absolute bottom-4 right-4 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-sm shadow-lg transition-colors"
+          aria-label="Scroll to top"
+        >
+          Scroll to top
+        </button>
+      ) : (
         <button
           onClick={scrollToBottom}
           className="absolute bottom-4 right-4 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-sm shadow-lg transition-colors"

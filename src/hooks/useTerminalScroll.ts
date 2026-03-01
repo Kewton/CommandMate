@@ -39,6 +39,8 @@ export interface UseTerminalScrollReturn {
   setAutoScroll: (enabled: boolean) => void;
   /** Scroll to the bottom of the container */
   scrollToBottom: () => void;
+  /** Scroll to the top of the container */
+  scrollToTop: () => void;
   /** Handle scroll events (call this from onScroll) */
   handleScroll: () => void;
 }
@@ -134,11 +136,30 @@ export function useTerminalScroll(
     }
   }, [autoScroll, setAutoScroll]);
 
+  /**
+   * Programmatically scroll to the top of the container
+   * Disables auto-scroll so the view stays at the top
+   */
+  const scrollToTop = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+
+    element.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+
+    if (autoScroll) {
+      setAutoScroll(false);
+    }
+  }, [autoScroll, setAutoScroll]);
+
   return {
     scrollRef,
     autoScroll,
     setAutoScroll,
     scrollToBottom,
+    scrollToTop,
     handleScroll,
   };
 }
