@@ -1,0 +1,32 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘対応",
+  "applied_count": 3,
+  "skipped_count": 0,
+  "applied_issues": ["D2-001", "D2-002", "D2-003"],
+  "skipped_issues": [],
+  "summary": "Stage 2（整合性レビュー）の全3件の指摘事項を設計方針書に反映完了。D2-001（must_fix）: セクション11の実装チェックリスト3番目の項目で、除去対象クラスを実コードと一致するよう bg-gray-50 border border-gray-200 rounded-md p-4 に修正。D2-002（should_fix）: セクション5-2に padding の管理に関する説明を追加し、.prose pre の p-0 と code 要素の padding: 1rem による padding 委譲設計を明記。D2-003（nice_to_have）: セクション5-1の MessageList realtime output の影響分析に、Tailwind ユーティリティクラス（layer なし）が @layer components より高い詳細度を持つという CSS カスケードの根拠を補足。また、セクション12として Stage 2 レビュー指摘事項サマリーと整合性チェック結果表を追加。",
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-390-code-block-dark-bg-design-policy.md",
+  "changes_applied": [
+    {
+      "id": "D2-001",
+      "severity": "must_fix",
+      "location": "セクション11 実装チェックリスト 3番目の項目",
+      "change": "bg-[#0d1117] text-[#c9d1d9] rounded-md p-4 → bg-gray-50 border border-gray-200 rounded-md p-4"
+    },
+    {
+      "id": "D2-002",
+      "severity": "should_fix",
+      "location": "セクション5-2（設計根拠の直後）",
+      "change": "「padding の管理 (D2-002)」段落を新規追加。.prose pre の p-0 と code 要素の padding: 1rem による padding 委譲設計を説明"
+    },
+    {
+      "id": "D2-003",
+      "severity": "nice_to_have",
+      "location": "セクション5-1 影響コンポーネント最終項目",
+      "change": "MessageList.tsx (realtime output) の説明に CSS カスケード根拠（Tailwind ユーティリティクラス layer なし vs @layer components 詳細度）を補足"
+    }
+  ],
+  "timestamp": "2026-03-02T00:00:00Z"
+}

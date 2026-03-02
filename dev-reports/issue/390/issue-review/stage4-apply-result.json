@@ -1,0 +1,44 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "total_issues": 5,
+  "applied_count": 5,
+  "skipped_count": 0,
+  "applied_issues": [
+    {
+      "id": "ISSUE-301",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルの MessageList 行をアシスタントメッセージとユーザーメッセージ（prose-invert）に分離。prose-invert との競合可能性と対応方針を詳細に記載。受入条件に「MessageList のユーザーメッセージ（prose-invert 付き）でコードブロックが適切に表示されること」を追加"
+    },
+    {
+      "id": "ISSUE-302",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルの FileViewerPage 行に overflow に関する補足を追記。「globals.css の overflow-hidden を追加する場合、カスタム pre の overflow-x-auto がユーティリティクラスとして @layer components 内のルールより優先されるため実害はない」と明記"
+    },
+    {
+      "id": "ISSUE-303",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "受入条件セクションに「手動テスト計画（8パターン）」サブセクションを追加。MarkdownEditor(2パターン)、MessageList アシスタント(2パターン)、MessageList ユーザー(1パターン)、FileViewerPage(1パターン)、全コンポーネントインラインコード(1パターン)、realtime output(1パターン)の計8パターンを優先度付きテーブルで記載。Visual Regression Test の将来検討も明記"
+    },
+    {
+      "id": "ISSUE-304",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルに globals.css の inline code ルール（.prose :not(pre) > code）を独立行として追加。新規 .prose pre code:not(.hljs) ルールはセレクタ構造が異なるため干渉なしと明記"
+    },
+    {
+      "id": "ISSUE-305",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルに MessageList (realtime output) を独立行として追加。ANSI 出力の <pre> は inline クラス（bg-gray-900 等）が globals.css より優先されるため追加修正不要と明記"
+    }
+  ],
+  "skipped_issues": [],
+  "summary": "Stage 3 影響範囲レビューの全5件（should_fix: 3件、nice_to_have: 2件）を Issue #390 に反映完了。主な変更: (1) 影響範囲テーブルを従来の3行から7行に拡張し、MessageList のユーザーメッセージ（prose-invert）、realtime output、globals.css inline code ルールを独立行として追加、(2) FileViewerPage 行に overflow プロパティの優先度に関する補足を追記、(3) 受入条件に prose-invert テスト項目を追加、(4) 8パターンの手動テスト計画を新規セクションとして追加、(5) レビュー履歴セクションにイテレーション1の影響範囲レビュー結果を追記",
+  "github_updated": true,
+  "github_issue_url": "https://github.com/Kewton/CommandMate/issues/390",
+  "apply_date": "2026-03-02"
+}

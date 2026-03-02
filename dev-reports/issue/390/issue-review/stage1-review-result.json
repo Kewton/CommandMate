@@ -1,0 +1,57 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_focus": "通常",
+  "total_issues": 5,
+  "issues": [
+    {
+      "id": "ISSUE-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "MessageList.tsx と FileViewerPage では highlight.js/styles/github-dark.css がインポートされていない",
+      "description": "Issue本文の「根本原因 > 詳細 > 3.」では『highlight.js/styles/github-dark.css が background: #0d1117 + color: #c9d1d9 を設定するため正常表示』と記載しているが、github-dark.css を明示的にインポートしているのは MarkdownEditor.tsx (L34) のみである。MessageList.tsx および FileViewerPage (page.tsx) にはこのインポートが存在しない。Next.js のバンドルで MarkdownEditor.tsx のCSSインポートがグローバルに適用される可能性があるが、MarkdownEditor が使用されないページ（例: FileViewerPage を直接表示した場合）では github-dark.css が読み込まれない可能性がある。修正方針でフォールバックCSSを追加すること自体は妥当だが、根本原因分析の前提が不正確。",
+      "location": "Issue本文 > 根本原因 > 詳細 > 3番",
+      "suggestion": "MessageList.tsx および FileViewerPage (page.tsx) における github-dark.css のインポート状況を根本原因分析に正確に反映する。修正方針として、各コンポーネントでの github-dark.css インポート追加も検討に含めるか、CSSフォールバック方式で十分であることを明記する。"
+    },
+    {
+      "id": "ISSUE-002",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "FileViewerPage の prose-pre:bg-gray-100 クラスと globals.css の修正の干渉に関する考慮が不足",
+      "description": "FileViewerPage (page.tsx L150) のマークダウン描画コンテナには prose-pre:bg-gray-100 および prose-pre:border、prose-pre:border-gray-200 というTailwindのproseモディファイアが指定されている。globals.css の .prose pre を bg-[#0d1117] に変更した場合、このコンポーネント固有の prose-pre:bg-gray-100 との優先順位が問題になる。Tailwind のユーティリティクラス（prose-pre:bg-gray-100）は @layer components 内の .prose pre ルールよりも高い優先度を持つため、FileViewerPage では bg-gray-100 が勝つはずだが、その場合、FileViewerPage のカスタム pre コンポーネント修正（修正方針2）だけでなく、prose-pre:bg-gray-100 も同時に修正する必要がある。この点がIssueの修正方針に明記されていない。",
+      "location": "Issue本文 > 修正方針",
+      "suggestion": "修正方針に「FileViewerPage (page.tsx L150) の prose-pre:bg-gray-100 クラスも prose-pre:bg-[#0d1117] に変更するか、または削除してカスタム pre コンポーネントの修正に統一する」旨を追記する。"
+    },
+    {
+      "id": "ISSUE-003",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "MessageList.tsx の影響範囲の詳細が不足",
+      "description": "Issue本文の影響範囲テーブルでは MessageList.tsx について「メッセージ内マークダウンの .prose pre が同様」と記載しているが、MessageList.tsx (L189) は prose クラスを使用しているものの、globals.css の .prose pre ルールの影響を受けるのは role !== 'user' のメッセージバブル内のみ。ユーザーメッセージでは prose-invert が追加される。また、MessageList.tsx の realtime output 領域 (L596) でも prose クラスが使用されている。修正方針には MessageList.tsx 固有の修正手順が含まれておらず、globals.css の修正のみで対応する暗黙の前提があるが、これを明記すべき。",
+      "location": "Issue本文 > 影響範囲テーブル > MessageList行、修正方針",
+      "suggestion": "修正方針に「MessageList.tsx は globals.css の .prose pre 修正により自動的に対応される。コンポーネント固有の修正は不要」という旨を明記する。"
+    },
+    {
+      "id": "ISSUE-004",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "受入条件にダークモード/テーマ関連の確認が含まれていない",
+      "description": "修正方針ではハードコードされた色値（bg-[#0d1117]、text-[#c9d1d9]）を使用しているが、アプリケーションがダークモードをサポートする場合やユーザーがブラウザのカラースキームを変更した場合の考慮が受入条件に含まれていない。現状のコードベースではダークモードは未実装のため優先度は低いが、将来的な拡張性のためにメモとして残す価値はある。",
+      "location": "Issue本文 > 受入条件",
+      "suggestion": "受入条件または注意事項として「ハードコードされた色値 (#0d1117, #c9d1d9) は github-dark テーマに合わせた固定値である。将来ダークモード対応時にはCSS変数化を検討する」旨を追記。"
+    },
+    {
+      "id": "ISSUE-005",
+      "severity": "nice_to_have",
+      "category": "clarity",
+      "title": "修正方針の globals.css コードサンプルに既存の .prose pre code.hljs ルールとの関係が不明確",
+      "description": "現在の globals.css (L37-40) には既に .prose pre code.hljs ルールが存在し、padding: 1rem と rounded-md が設定されている。修正方針のコードサンプルでも同名のルールが含まれているが、これが既存ルールの置き換えなのか追記なのかが不明確。実際にはL37-40の既存ルールを修正方針のコードで置き換えることが意図されていると推測されるが、明示的に「既存の L33-40 を以下に置き換える」と記載すべき。",
+      "location": "Issue本文 > 修正方針 > 1. globals.css の修正",
+      "suggestion": "修正方針に「既存の .prose pre ブロック (L33-35) および .prose pre code.hljs ブロック (L37-40) を以下に置き換える」と明記する。"
+    }
+  ],
+  "summary": "Issue #390 の根本原因分析と修正方針は概ね正確であり、仮説検証でも全項目がConfirmedとなっている。ただし、(1) github-dark.css のインポート状況に関する記述の正確性、(2) FileViewerPage の prose-pre:bg-gray-100 クラスとの干渉、(3) MessageList.tsx の修正が暗黙的になっている点について補完が必要。致命的な技術的誤りはなく、修正方針自体は実装可能で妥当である。",
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 2
+}

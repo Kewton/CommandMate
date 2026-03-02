@@ -1,0 +1,191 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_focus": "影響範囲",
+  "total_issues": 5,
+  "issues": [
+    {
+      "id": "ISSUE-301",
+      "severity": "should_fix",
+      "category": "波及効果",
+      "title": "MessageList.tsx の prose-invert 使用時、bg-[#0d1117] が暗い背景の上にさらに暗い背景を重ねる",
+      "description": "MessageList.tsx (L189) では、ユーザーメッセージ (isUser === true) に対して prose-invert クラスが付与される。prose-invert は Tailwind Typography のダークモード互換機能で、pre 要素の背景色を明るくし文字色を暗くする。しかし globals.css の .prose pre に bg-[#0d1117] をハードコードすると、prose-invert の pre 背景色設定と競合する。@layer components 内の .prose pre ルールは Tailwind Typography のベーススタイルと同じレイヤーに位置するため、prose-invert が .prose pre の背景色を上書きする可能性がある。一方、ユーザーメッセージのバブルは bg-blue-600 であるため、bg-[#0d1117]（非常に暗い色）が表示されても視覚的にはダーク背景同士で大きな問題にはならないが、prose-invert が意図する「反転テーマ」のスタイルと矛盾する。Issue本文の影響範囲テーブルでは MessageList.tsx の prose-invert の存在を言及していないため、修正後の挙動を確認し、必要に応じて prose-invert 時のスタイルオーバーライドを検討すべき。",
+      "location": "src/components/worktree/MessageList.tsx L189, src/app/globals.css L33-35",
+      "suggestion": "受入条件に「MessageList.tsx のユーザーメッセージ（prose-invert付き）でコードブロックが適切に表示されること」を追加する。また、修正後にprose-invert環境でのコードブロック表示を目視確認し、必要であれば .prose.prose-invert pre { } でスタイルを個別に調整する。"
+    },
+    {
+      "id": "ISSUE-302",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "FileViewerPage のカスタム pre コンポーネントと globals.css の .prose pre ルールが二重に適用される構造",
+      "description": "FileViewerPage (page.tsx L150) は prose-slate バリアントの prose コンテナ内に、カスタム pre コンポーネント (L170-173) を定義している。修正方針2ではカスタム pre コンポーネントの className を bg-[#0d1117] に変更するが、同時に globals.css の .prose pre ルールも bg-[#0d1117] に変更される。ReactMarkdown のカスタム components.pre は HTML の <pre> 要素を完全に置き換えるため、globals.css の .prose pre ルール（p-0, border-0）と、カスタム pre コンポーネントのクラス（p-4, rounded-md）が同時に適用される。Tailwind のユーティリティクラスが @layer components のルールより優先されるため、カスタム pre のクラスが勝つが、globals.css の overflow-hidden が追加されることで、カスタム pre の overflow-x-auto との相互作用が生じる可能性がある。globals.css で .prose pre に overflow-hidden を追加する提案は、FileViewerPage のカスタム pre では overflow-x-auto で上書きされるため実害はないが、スタイルの意図が不明確になる。",
+      "location": "src/app/worktrees/[id]/files/[...path]/page.tsx L150, L170-173, src/app/globals.css L33-35",
+      "suggestion": "globals.css の .prose pre 修正で overflow-hidden を追加する場合、FileViewerPage のカスタム pre コンポーネントでは overflow-x-auto がユーティリティクラスとして優先されるため実害はない。ただしこの点をIssue本文に明記するか、globals.css の .prose pre から overflow-hidden を除外して各コンポーネントに委ねることを検討する。"
+    },
+    {
+      "id": "ISSUE-303",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "テスト範囲が未定義 - 3コンポーネント x 2パターンの組み合わせテストが必要",
+      "description": "Issue本文には受入条件が記載されているが、具体的なテスト手順やテストケースが定義されていない。globals.css の修正は視覚的なスタイル変更であり、単体テスト（Vitest + jsdom）では実際のCSSレンダリングを検証できない。影響を受ける3コンポーネント（MarkdownEditor, MessageList, FileViewerPage）それぞれで「言語指定あり」「言語指定なし」の2パターン、さらに MessageList ではユーザーメッセージ（prose-invert）とアシスタントメッセージの2パターンを組み合わせると、合計8パターンの視覚的な確認が必要になる。既存テスト（tests/unit/components/MarkdownEditor.test.tsx）は機能テストであり、CSSスタイルの検証は含まれていない。E2Eテスト（Playwright）またはスクリーンショットテストでの検証が必要だが、そのテスト戦略がIssueに記載されていない。",
+      "location": "Issue本文 > 受入条件",
+      "suggestion": "受入条件に具体的なテスト方法を追記する。例: (1) MarkdownEditor プレビュー - 言語指定あり/なし、(2) MessageList アシスタントメッセージ - 言語指定あり/なし、(3) MessageList ユーザーメッセージ（prose-invert） - 言語指定あり/なし、(4) FileViewerPage マークダウン表示 - 言語指定あり/なし。視覚的な確認が主体となるため「手動テスト」として明示し、将来的にE2EテストやVisual Regression Testを追加する旨を記載する。"
+    },
+    {
+      "id": "ISSUE-304",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "globals.css の inline code ルール (.prose :not(pre) > code) への波及確認",
+      "description": "globals.css L43-50 には inline code のスタイルルール (.prose :not(pre) > code) が定義されている。修正方針1で .prose pre code:not(.hljs) ルールを追加する際、セレクタの詳細度が .prose :not(pre) > code（詳細度 0,2,1）と .prose pre code:not(.hljs)（詳細度 0,2,2）で異なるため直接の干渉はないが、code 要素に対するスタイルルールが3種類（inline code, .hljs付き code, .hljsなし code）に増えることになる。Issue本文の受入条件に「インラインコードのスタイルに影響がない」が含まれている点は適切だが、影響範囲テーブルにこのルールへの言及がない。",
+      "location": "src/app/globals.css L43-50, Issue本文 > 影響範囲テーブル",
+      "suggestion": "影響範囲テーブルに globals.css の inline code ルール（.prose :not(pre) > code）を追加し、「新規 .prose pre code:not(.hljs) ルールはセレクタ構造が異なるため干渉なし」と明記する。これにより修正者が安心して実装できる。"
+    },
+    {
+      "id": "ISSUE-305",
+      "severity": "nice_to_have",
+      "category": "波及効果",
+      "title": "MessageList.tsx の realtime output 領域 (L596) での prose コンテナ内 pre 要素への影響",
+      "description": "MessageList.tsx L596 の realtime output 領域は prose クラスを使用している。この領域では ANSI コード検出時に直接 <pre> 要素 (L598) を出力し、非ANSI時は <div> 要素 (L608) を出力する。ANSI 時の <pre> は inline スタイル (whitespace-pre-wrap, bg-gray-900 等) を持つため globals.css の .prose pre ルール（bg-[#0d1117]）と競合するが、Tailwind のユーティリティクラスが @layer components より優先されるため bg-gray-900 が勝つ。ただし、globals.css の p-0 が適用されると、<pre> の inline padding (p-3) とのカスケードが発生する。ユーティリティクラス p-3 が @layer components の p-0 に勝つため実害はないが、スタイルの適用順序が複雑になる。この領域では ReactMarkdown を使用していないため code:not(.hljs) ルールは直接関係しないが、将来のメンテナンス時に混乱を招く可能性がある。",
+      "location": "src/components/worktree/MessageList.tsx L596-612",
+      "suggestion": "Issue本文の影響範囲テーブルの MessageList 行に「realtime output 領域 (L596) は inline スタイルが globals.css より優先されるため追加修正不要」と補足する。"
+    }
+  ],
+  "impact_analysis": {
+    "affected_components": [
+      {
+        "component": "MarkdownEditor",
+        "file": "src/components/worktree/MarkdownEditor.tsx",
+        "prose_usage": ["L854", "L871"],
+        "impact_level": "direct",
+        "notes": "globals.css の .prose pre 修正が直接適用される。github-dark.css をインポート済み（L34）のため、.hljs 付きコードブロックは既存の github-dark テーマが適用される。.hljs なしコードブロックには新規 .prose pre code:not(.hljs) ルールが適用される。"
+      },
+      {
+        "component": "MessageList (assistant messages)",
+        "file": "src/components/worktree/MessageList.tsx",
+        "prose_usage": ["L189 (prose-invert なし)"],
+        "impact_level": "direct",
+        "notes": "github-dark.css をインポートしていないが、globals.css のフォールバックルールで対応。アシスタントメッセージは bg-white border 背景のため、.prose pre の bg-[#0d1117] が明確に視認可能。"
+      },
+      {
+        "component": "MessageList (user messages)",
+        "file": "src/components/worktree/MessageList.tsx",
+        "prose_usage": ["L189 (prose-invert あり)"],
+        "impact_level": "indirect",
+        "notes": "prose-invert がダーク背景テーマを反転させるため、globals.css の bg-[#0d1117] との相互作用を確認する必要がある。ユーザーメッセージにコードブロックが含まれる頻度は低いと推測されるが、検証は必要。"
+      },
+      {
+        "component": "MessageList (realtime output)",
+        "file": "src/components/worktree/MessageList.tsx",
+        "prose_usage": ["L596"],
+        "impact_level": "minimal",
+        "notes": "prose コンテナ内だが、ANSI 出力の <pre> は inline クラス（bg-gray-900 等）が globals.css より優先されるため実害なし。非ANSI 出力は <div> のため <pre> ルール影響外。"
+      },
+      {
+        "component": "FileViewerPage",
+        "file": "src/app/worktrees/[id]/files/[...path]/page.tsx",
+        "prose_usage": ["L150 (prose-slate)"],
+        "impact_level": "direct",
+        "notes": "prose-pre:bg-gray-100 ユーティリティが globals.css の .prose pre より優先する。修正方針2（カスタム pre コンポーネント）と修正方針3（prose-pre クラス修正）の両方が必要。カスタム code コンポーネント (L156-168) もあり、inline/block 両パターンに影響。"
+      },
+      {
+        "component": "FileViewer (Modal)",
+        "file": "src/components/worktree/FileViewer.tsx",
+        "prose_usage": [],
+        "impact_level": "none",
+        "notes": "prose クラスを使用していない。<pre> (L185) は prose コンテナ外のため globals.css の .prose pre ルール影響外。"
+      }
+    ],
+    "css_specificity_risks": [
+      {
+        "risk": "globals.css .prose pre (0,1,1 + @layer components) vs prose-pre:bg-gray-100 (Tailwind utility)",
+        "affected": "FileViewerPage L150",
+        "resolution": "Tailwind utility が @layer components より優先されるため、prose-pre:bg-gray-100 を変更または削除する必要がある（Issue本文の修正方針3で対応済み）"
+      },
+      {
+        "risk": "globals.css .prose pre (0,1,1) vs prose-invert の pre 背景色設定",
+        "affected": "MessageList.tsx L189 (user messages)",
+        "resolution": "prose-invert は Tailwind Typography のモディファイアであり、.prose pre の背景色をオーバーライドする可能性がある。@layer components 内のルールと同じレイヤーに位置するため、宣言順序で決まる。要検証"
+      },
+      {
+        "risk": "globals.css .prose pre code:not(.hljs) (0,2,2) vs .prose :not(pre) > code (0,2,1)",
+        "affected": "globals.css 内のルール間",
+        "resolution": "セレクタ構造が異なるため直接干渉なし。.prose pre code:not(.hljs) は <pre> 内の <code> のみ、.prose :not(pre) > code は <pre> 外の直接子 <code> のみに適用"
+      },
+      {
+        "risk": "globals.css .prose pre (overflow-hidden) vs カスタム pre の overflow-x-auto",
+        "affected": "FileViewerPage L170-173",
+        "resolution": "カスタム pre のユーティリティクラスが優先されるため実害なし。ただし globals.css 修正から overflow-hidden を省略する選択肢もある"
+      }
+    ],
+    "test_scope": [
+      {
+        "test_id": "T-001",
+        "component": "MarkdownEditor",
+        "scenario": "言語指定なしコードブロック表示",
+        "type": "visual",
+        "priority": "high",
+        "description": "プレビューモードで言語未指定のコードブロックがダーク背景 (#0d1117) + 明るい文字 (#c9d1d9) で表示されること"
+      },
+      {
+        "test_id": "T-002",
+        "component": "MarkdownEditor",
+        "scenario": "言語指定ありコードブロック表示",
+        "type": "visual",
+        "priority": "high",
+        "description": "プレビューモードで言語指定コードブロックのシンタックスハイライトが正常に表示されること（既存機能のリグレッション確認）"
+      },
+      {
+        "test_id": "T-003",
+        "component": "MessageList",
+        "scenario": "アシスタントメッセージ内の言語未指定コードブロック",
+        "type": "visual",
+        "priority": "high",
+        "description": "アシスタントメッセージ（bg-white背景）内で言語未指定コードブロックがダーク背景で表示されること"
+      },
+      {
+        "test_id": "T-004",
+        "component": "MessageList",
+        "scenario": "ユーザーメッセージ内のコードブロック（prose-invert）",
+        "type": "visual",
+        "priority": "medium",
+        "description": "ユーザーメッセージ（bg-blue-600 + prose-invert）内でコードブロックが読みやすく表示されること"
+      },
+      {
+        "test_id": "T-005",
+        "component": "FileViewerPage",
+        "scenario": "マークダウンファイルの言語未指定コードブロック",
+        "type": "visual",
+        "priority": "high",
+        "description": "カスタム pre コンポーネント修正と prose-pre クラス修正の両方が適用され、ダーク背景で表示されること"
+      },
+      {
+        "test_id": "T-006",
+        "component": "全コンポーネント共通",
+        "scenario": "インラインコードのスタイル確認",
+        "type": "visual",
+        "priority": "high",
+        "description": "全3コンポーネントでインラインコード（`code`）がbg-gray-100のまま変化していないこと"
+      },
+      {
+        "test_id": "T-007",
+        "component": "MessageList",
+        "scenario": "realtime output の ANSI 出力 pre 要素",
+        "type": "visual",
+        "priority": "low",
+        "description": "realtime output 領域の ANSI 出力 <pre> が bg-gray-900 のまま変化していないこと"
+      },
+      {
+        "test_id": "T-008",
+        "component": "FileViewerPage",
+        "scenario": "非マークダウンファイルの表示",
+        "type": "visual",
+        "priority": "medium",
+        "description": "FileViewerPage の非マークダウンファイル表示（L203-208）は prose コンテナ外のため影響を受けないことを確認"
+      }
+    ]
+  },
+  "summary": "globals.css の .prose pre 修正は、prose クラスを使用している全コンポーネント（MarkdownEditor, MessageList, FileViewerPage）に波及する。主な懸念点は3つ: (1) MessageList.tsx の prose-invert 使用時のスタイル競合が未検討である点（ISSUE-301）、(2) FileViewerPage のカスタム pre コンポーネントと globals.css ルールの二重適用に関するoverflow プロパティの相互作用（ISSUE-302）、(3) 8パターンの視覚テストが必要だが具体的なテスト計画が未定義である点（ISSUE-303）。破壊的変更はなく、CSS の特異度ルールにより既存のインラインスタイルやユーティリティクラスが globals.css の @layer components ルールより優先されるため、FileViewer (Modal) や MessageList の realtime output 領域など prose コンテナ外の <pre> 要素には影響しない。修正の影響範囲は Issue 本文で概ね正確に特定されているが、prose-invert との相互作用とテスト戦略の具体化が必要。",
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 2
+}

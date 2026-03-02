@@ -1,0 +1,48 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_focus": "設計原則",
+  "total_issues": 4,
+  "issues": [
+    {
+      "id": "D1-001",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "ハードコード色値 #0d1117/#c9d1d9 が globals.css と page.tsx の2箇所に重複",
+      "description": "globals.css の .prose pre に bg-[#0d1117] を設定し、同時に page.tsx のカスタム pre コンポーネントにも bg-[#0d1117] text-[#c9d1d9] を設定する設計となっている。同じ色値が2つの異なるファイルに散在するため、将来のテーマ変更時に変更漏れが発生するリスクがある。page.tsx のカスタム pre コンポーネントは prose コンテナの内部にあるため、globals.css の .prose pre ルールが適用されるはずだが、カスタム pre コンポーネントが className を直接指定しているため globals.css のルールは上書きされる。設計としては理解できるが、色値の重複は改善の余地がある。",
+      "location": "設計方針書 セクション5-1 (globals.css) と セクション5-2 (page.tsx) の bg-[#0d1117] / text-[#c9d1d9]",
+      "suggestion": "page.tsx のカスタム pre コンポーネントの className から bg-[#0d1117] text-[#c9d1d9] を除去し、globals.css の .prose pre と .prose pre code:not(.hljs) のルールに統一させる案を検討する。ただし、page.tsx の prose-pre:* ユーティリティを削除する設計方針と合わせて、カスタム pre コンポーネントが globals.css の .prose pre ルールを継承する形に整理できれば、色値の一元管理が実現できる。カスタム pre コンポーネントが必要な理由（overflow-x-auto 等）がある場合は、色値だけ globals.css に委ね、レイアウト関連のみカスタム pre に残す方式を検討すること。"
+    },
+    {
+      "id": "D1-002",
+      "severity": "should_fix",
+      "principle": "一貫性",
+      "title": "FileViewerPage のカスタム pre コンポーネントと globals.css の役割分担が不明確",
+      "description": "設計方針書では globals.css で .prose pre にダーク背景を設定しつつ、FileViewerPage のカスタム pre コンポーネントにも同じダーク背景を直接指定している。カスタム pre コンポーネントが className を完全に上書きするため、globals.css の .prose pre ルールは FileViewerPage では事実上無効となる。MarkdownEditor と MessageList は globals.css のルールで自動対応する一方、FileViewerPage だけカスタム pre で独自にスタイルを定義する設計は、修正アプローチの一貫性に欠ける。",
+      "location": "設計方針書 セクション2 (アーキテクチャ設計) と セクション5-2 (page.tsx の変更設計)",
+      "suggestion": "FileViewerPage のカスタム pre コンポーネントが本当に必要かを再検討する。prose-pre:* ユーティリティを削除するのであれば、カスタム pre コンポーネントも削除して globals.css の .prose pre ルールに統一する案が最もシンプル。overflow-x-auto が必要であれば、globals.css の .prose pre に追加するか、prose-pre:overflow-x-auto のみ残す方式も考えられる。どうしてもカスタム pre コンポーネントを維持する場合は、設計方針書にその理由を明記すべき。"
+    },
+    {
+      "id": "D1-003",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "title": "globals.css の .prose pre への overflow-hidden 追加の必要性が不明",
+      "description": "設計方針書セクション5-1で .prose pre に overflow-hidden を追加しているが、セクション9のトレードオフ表で「カスタム pre の overflow-x-auto が優先されるため、FileViewerPage では無効」と記載されている。MarkdownEditor と MessageList においても、pre タグ内のコードが横にはみ出すケースでは overflow-x-auto のほうが適切（スクロール可能にする）であり、overflow-hidden だとコンテンツが切り捨てられる。現状の問題として「コードブロック枠のはみ出し」が報告されていないのであれば、overflow-hidden の追加は YAGNI に反する可能性がある。",
+      "location": "設計方針書 セクション5-1 の @apply bg-[#0d1117] p-0 border-0 rounded-md overflow-hidden",
+      "suggestion": "overflow-hidden を overflow-x-auto に変更するか、現時点では追加しないことを検討する。overflow-hidden はコードブロック内の長い行を切り捨ててしまうため、ユーザー体験を損なう可能性がある。実際にはみ出し問題が確認されてから追加しても遅くない。"
+    },
+    {
+      "id": "D1-004",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "title": "FileViewerPage の非マークダウンコード表示（L204）への影響が設計方針書に未記載",
+      "description": "FileViewerPage には L204 に非マークダウンファイルのコード表示用 pre タグ（<pre className=\"bg-gray-50 border border-gray-200 ...\">）がある。この pre タグは .prose コンテナの外にあるため globals.css の .prose pre ルールの影響は受けないが、設計方針書ではこのコードパスについて言及がない。本 Issue のスコープがマークダウン表示の修正であることを考えると影響はないが、設計方針書の完全性のため、影響がないことを明示しておくと後から確認しやすい。",
+      "location": "現在のソースコード page.tsx L202-208、設計方針書に該当記載なし",
+      "suggestion": "設計方針書のセクション5-2に「非マークダウンファイルのコード表示（L204の pre タグ）は .prose コンテナ外のため影響なし」という一文を追記する。"
+    }
+  ],
+  "summary": "設計方針書は全体として KISS 原則に沿ったシンプルな CSS 修正アプローチを採用しており、技術選定（方式A: CSSフォールバック方式）は適切である。3つの不採用選択肢の根拠も明確で、過剰設計を回避している。主な改善点は (1) ハードコード色値が globals.css と page.tsx に重複している DRY 違反、(2) FileViewerPage のカスタム pre コンポーネントと globals.css の役割分担の一貫性、の2点。いずれも must_fix レベルではなく、設計の意図は正しいが、実装時に色値の一元管理を意識することで保守性を向上できる。フォールバック設計（.prose pre code:not(.hljs)）のアプローチ自体は技術的に正しく、CSS 詳細度の分析も的確。",
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 2
+}

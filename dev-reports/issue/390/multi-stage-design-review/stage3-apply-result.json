@@ -1,0 +1,23 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘対応",
+  "applied_count": 4,
+  "skipped_count": 0,
+  "applied_issues": ["D3-001", "D3-002", "D3-003", "D3-004"],
+  "skipped_issues": [],
+  "summary": "Stage 3 影響分析レビューの全4件（should_fix 2件、nice_to_have 2件）を設計方針書に反映完了。D3-001: MermaidDiagram.tsx エラー表示の pre 要素への影響をセクション2（修正対象レイヤー）、セクション5-1（影響コンポーネント）に追記し、セクション5-3に修正方針を新設。D3-002: テスト計画に T-009（MermaidDiagram エラー表示）と T-010（FileViewerPage 非マークダウンファイル表示）を追加し、テストパターン数を8から10に更新。D3-003: github-dark.css の Next.js ビルド時グローバル CSS 統合メカニズムの前提をセクション5-1に明記。D3-004: FileViewerPage の inline code DRY 違反をスコープ外の将来リファクタリング候補としてセクション5-2に記録。実装チェックリストおよび実装順序も合わせて更新。",
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-390-code-block-dark-bg-design-policy.md",
+  "sections_updated": [
+    "セクション1 修正スコープ",
+    "セクション2 修正対象レイヤー",
+    "セクション5-1 影響コンポーネント",
+    "セクション5-2 スコープ外DRY違反記録",
+    "セクション5-3 MermaidDiagram.tsx修正方針（新設）",
+    "セクション8 テストケーステーブル",
+    "セクション10 実装順序",
+    "セクション11 実装チェックリスト",
+    "セクション13 Stage 3レビュー指摘事項サマリー（新設）"
+  ],
+  "timestamp": "2026-03-02T00:00:00Z"
+}

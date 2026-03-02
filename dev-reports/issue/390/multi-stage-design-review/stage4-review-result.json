@@ -1,0 +1,46 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_focus": "セキュリティ",
+  "total_issues": 3,
+  "issues": [
+    {
+      "id": "D4-001",
+      "severity": "nice_to_have",
+      "owasp": "A07",
+      "title": "FileViewerPage および MessageList に rehype-sanitize が未適用（既存問題・スコープ外）",
+      "description": "MarkdownEditor.tsx では rehype-sanitize による XSS 保護が適用されている（SEC-MF-001）が、FileViewerPage (page.tsx) と MessageList.tsx の ReactMarkdown では rehype-highlight のみが使用されており、rehype-sanitize が適用されていない。本 Issue #390 の CSS 修正自体はこの状況を悪化させないが、設計方針書セクション6の「rehype-sanitize によるXSS保護は既存のまま維持」という記述は MarkdownEditor.tsx にのみ該当し、FileViewerPage と MessageList には当てはまらない点が不正確である。",
+      "location": "設計方針書 セクション6「セキュリティ設計」/ src/app/worktrees/[id]/files/[...path]/page.tsx L151-153 / src/components/worktree/MessageList.tsx L202-208",
+      "suggestion": "設計方針書セクション6の記述を「rehype-sanitize による XSS 保護は MarkdownEditor.tsx で適用されている。FileViewerPage および MessageList は rehype-sanitize を使用していないが、本 CSS 修正はユーザー入力処理ロジックを変更しないため、XSS リスクの増減はない」と修正する。なお、FileViewerPage と MessageList への rehype-sanitize 追加は本 Issue のスコープ外であり、別 Issue として検討すべきである。"
+    },
+    {
+      "id": "D4-002",
+      "severity": "nice_to_have",
+      "owasp": "N/A",
+      "title": "セキュリティ設計セクションに CSS Injection 分析が欠如",
+      "description": "設計方針書セクション6は XSS リスクのみに言及しているが、CSS Injection の観点での分析が記載されていない。本修正で追加されるハードコード色値（#0d1117, #c9d1d9）は globals.css に静的に定義されるため CSS Injection のリスクはないが、設計方針書としてその分析結果を明記すべきである。",
+      "location": "設計方針書 セクション6「セキュリティ設計」",
+      "suggestion": "セクション6に「### CSS Injection リスク」を追加し、「追加される色値（#0d1117, #c9d1d9）は globals.css にハードコードされた静的値であり、ユーザー入力やサーバーサイドの動的値に依存しない。CSS Injection のリスクはない。」と明記する。"
+    },
+    {
+      "id": "D4-003",
+      "severity": "nice_to_have",
+      "owasp": "N/A",
+      "title": "セキュリティ設計セクションの記述が簡潔すぎる",
+      "description": "セクション6は4行の記述のみで構成されており、他のセクション（例: セクション4のCSS詳細度設計、セクション5の変更ファイル設計）と比較して分析の深さが不足している。CSS のみの変更であっても、(1) 変更がどのセキュリティ保護メカニズムに影響しないかの具体的な列挙、(2) カスタム pre コンポーネントの変更が dangerouslySetInnerHTML パターンに波及しないことの確認、(3) MermaidDiagram の dangerouslySetInnerHTML（L169）との関係性の分析、が含まれるべきである。",
+      "location": "設計方針書 セクション6「セキュリティ設計」",
+      "suggestion": "セクション6を以下の構成に拡充する: (1) XSSリスク分析（現行の記述を維持しつつ、rehype-sanitize の適用範囲を正確に記述）、(2) CSS Injection リスク分析（D4-002）、(3) dangerouslySetInnerHTML への影響分析（MermaidDiagram.tsx L169 の SVG 描画、MessageList.tsx L199/L600 の ANSI 変換は .prose pre のスタイル変更の影響を受けるが、HTML 生成ロジック自体は変更されないため安全）、(4) コンテンツ視認性への影響（ダーク背景変更によるテキスト視認性は T-001 から T-010 の手動テストでカバー）。"
+    }
+  ],
+  "owasp_compliance": {
+    "A03_injection": "pass",
+    "A04_insecure_design": "pass",
+    "A05_security_misconfiguration": "pass",
+    "A07_xss": "pass"
+  },
+  "summary": "Issue #390 の設計方針書は CSS のみの変更であり、セキュリティリスクは極めて低い。OWASP Top 10 の主要カテゴリ（A03 Injection、A04 Insecure Design、A05 Security Misconfiguration、A07 XSS）はすべて pass と評価される。ただし、設計方針書セクション6のセキュリティ設計記述には改善の余地がある: (1) rehype-sanitize の適用範囲に関する記述が不正確（FileViewerPage と MessageList には未適用）、(2) CSS Injection 分析が欠如、(3) dangerouslySetInnerHTML パターンへの影響分析が欠如。これらはいずれも nice_to_have レベルであり、セキュリティ上の実質的なリスクを示すものではない。highlight.js 11.11.1 および rehype-highlight 7.0.2 に既知の脆弱性は確認されなかった。npm audit で検出された脆弱性は mermaid の依存関係（lodash-es Prototype Pollution）と Next.js（DoS）であり、本 Issue の修正範囲とは無関係である。",
+  "must_fix_count": 0,
+  "should_fix_count": 0,
+  "nice_to_have_count": 3,
+  "timestamp": "2026-03-02T00:00:00Z"
+}

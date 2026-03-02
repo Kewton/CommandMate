@@ -1,0 +1,80 @@
+{
+  "issue_number": 390,
+  "status": "passed",
+  "acceptance_criteria_results": [
+    {
+      "criteria": "言語未指定コードブロック（``` ```）がダーク背景で表示される",
+      "status": "passed",
+      "evidence": "globals.css L34: .prose pre { @apply bg-[#0d1117] ... } でダーク背景を設定。L43-46: .prose pre code:not(.hljs) { @apply block text-[#c9d1d9]; padding: 1rem; } で言語未指定時のフォールバック（明るい文字色）を追加。"
+    },
+    {
+      "criteria": "言語指定コードブロック（``` ```md ``` 等）の表示に影響がない",
+      "status": "passed",
+      "evidence": "globals.css L37-40: .prose pre code.hljs { @apply rounded-md; padding: 1rem; } が既存ルールとして維持されている。code:not(.hljs) セレクタにより言語指定時（.hljs クラス付与）には新ルールが適用されない。"
+    },
+    {
+      "criteria": "MarkdownEditor、MessageList、FileViewerPage の3コンポーネントで修正が適用される",
+      "status": "passed",
+      "evidence": "MarkdownEditor（L854,871: className='prose prose-sm'）、MessageList（L189: className='prose prose-sm'）、FileViewerPage（L150: className='prose prose-slate'）の全てが prose クラスを使用しており、globals.css の共通ルールが適用される。"
+    },
+    {
+      "criteria": "インラインコード（`code`）のスタイルに影響がない",
+      "status": "passed",
+      "evidence": "globals.css L49-51: .prose :not(pre) > code ルールが bg-gray-100 text-gray-800 のまま変更なし。L53-56: before/after content:none も維持。新ルールは .prose pre code:not(.hljs) のため、pre 外のインラインコードには影響しない。"
+    },
+    {
+      "criteria": "FileViewerPage の prose-pre:bg-gray-100 が修正され、ダーク背景が正しく適用される",
+      "status": "passed",
+      "evidence": "grep 'prose-pre:bg-gray-100' で src/ 配下に一致なし。page.tsx L150 の prose コンテナには prose-pre 系クラスが存在しない。L170-173 のカスタム pre は className='overflow-x-auto' のみ。"
+    },
+    {
+      "criteria": "MessageList のユーザーメッセージ（prose-invert 付き）でコードブロックが適切に表示されること",
+      "status": "passed",
+      "evidence": "MessageList L189: prose-invert が適用される。prose-invert は Tailwind Typography のダークモード反転機能で、globals.css の .prose pre bg-[#0d1117] はダーク背景のため prose-invert でも視覚的に適切。ANSI コード付きメッセージは独自 pre（L197-199: bg-gray-900）で表示される。"
+    }
+  ],
+  "test_results": {
+    "typescript": "pass",
+    "lint": "pass",
+    "unit_tests": "pass"
+  },
+  "test_execution_details": {
+    "typescript": "npx tsc --noEmit: no errors",
+    "lint": "npm run lint: No ESLint warnings or errors",
+    "unit_tests": "npm run test:unit: 203 test files passed, 4251 tests passed, 7 skipped, duration 6.69s"
+  },
+  "test_scenarios": [
+    {
+      "scenario": "シナリオ1: globals.css の .prose pre が bg-[#0d1117] になっている",
+      "result": "passed",
+      "evidence": "globals.css L34: .prose pre { @apply bg-[#0d1117] p-0 border-0 rounded-md overflow-x-auto; }"
+    },
+    {
+      "scenario": "シナリオ2: globals.css に .prose pre code:not(.hljs) フォールバックルールが追加されている",
+      "result": "passed",
+      "evidence": "globals.css L42-46: /* Fallback for code blocks without language specification (.hljs class absent) */ .prose pre code:not(.hljs) { @apply block text-[#c9d1d9]; padding: 1rem; }"
+    },
+    {
+      "scenario": "シナリオ3: page.tsx のカスタム pre コンポーネントが overflow-x-auto のみになっている",
+      "result": "passed",
+      "evidence": "page.tsx L170-173: pre: ({ children }) => (<pre className=\"overflow-x-auto\">{children}</pre>)"
+    },
+    {
+      "scenario": "シナリオ4: page.tsx の prose コンテナから prose-pre:bg-gray-100 等が削除されている",
+      "result": "passed",
+      "evidence": "grep 検索で src/ 配下に prose-pre:bg-gray-100 の一致なし。page.tsx L150 の prose コンテナに prose-pre 系クラスは存在しない。"
+    },
+    {
+      "scenario": "シナリオ5: MermaidDiagram.tsx のエラー表示 pre に bg-red-50 が追加されている",
+      "result": "passed",
+      "evidence": "MermaidDiagram.tsx L156: <pre className=\"text-sm text-red-500 mt-2 whitespace-pre-wrap break-words bg-red-50\">"
+    },
+    {
+      "scenario": "シナリオ6: 既存の unit tests が全てパスする",
+      "result": "passed",
+      "evidence": "npm run test:unit: 203 test files passed, 4251 tests passed, 7 skipped"
+    }
+  ],
+  "overall_status": "passed",
+  "summary": "Issue #390 の全受入条件を満たしています。globals.css で .prose pre にダーク背景(#0d1117)を設定し、.prose pre code:not(.hljs) で言語未指定コードブロック用のフォールバック（文字色 #c9d1d9）を追加。既存の .hljs ルール・インラインコードルールは変更なし。FileViewerPage から prose-pre:bg-gray-100 を除去しカスタム pre を overflow-x-auto のみに簡素化。MermaidDiagram のエラー表示 pre に bg-red-50 を追加。TypeScript 型チェック、ESLint、全 4251 ユニットテストが正常にパスしています。"
+}
