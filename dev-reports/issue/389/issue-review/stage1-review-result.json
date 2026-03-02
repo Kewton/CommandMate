@@ -1,0 +1,167 @@
+{
+  "issue_number": 389,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-02",
+  "findings": [
+    {
+      "id": "S1-001",
+      "priority": "Must Fix",
+      "category": "設計",
+      "title": "saveContent()のisDirtyガードとuseAutoSaveの競合問題がIssueに未記載",
+      "description": "現在のMarkdownEditor.tsxのsaveContent()関数（L245-279）は先頭で`if (!isDirty || isSaving) return;`のガードを持つ。useAutoSaveのsaveFnとしてこの関数をそのまま渡すと、useAutoSaveが内部でinitialValueRefとvalueの比較で保存トリガーを制御しているのとは別に、isDirtyフラグ（content !== originalContent）が保存を阻止するケースがある。具体的には、useAutoSaveのデバウンス完了後にsaveFnが呼ばれた瞬間、MarkdownEditor側のisDirtyが既にfalseになっている場合（他の経路でoriginalContentが更新された場合など）に保存がスキップされる。Issueの実装タスクにはこの設計上の競合についての言及がない。",
+      "suggestion": "実装タスクに「saveContent()のisDirtyガードを分離し、useAutoSave用の保存関数（saveFn）はisDirtyチェックを含まない純粋なAPI呼び出しとして切り出す」旨のタスクを追加する。MemoCardの実装パターン（saveFnがonUpdate APIを直接呼ぶ）を踏襲するのが妥当。"
+    },
+    {
+      "id": "S1-002",
+      "priority": "Must Fix",
+      "category": "設計",
+      "title": "auto-save ON時のbeforeunload抑制ロジックの不十分な記述",
+      "description": "Issueの実装タスクには「beforeunloadハンドラーのauto-saveモード対応（auto-save ON時は未保存警告不要）」とあるが、これは正確ではない。auto-save ONでもsaveFn実行中（isSaving=true）でページ離脱すると保存がキャンセルされてデータが失われる。また、useAutoSaveのデバウンス中（タイマー待機中、まだsaveFnが呼ばれていない状態）の離脱もデータ喪失のリスクがある。「auto-save ON時は未保存警告不要」という単純なルールでは、保存進行中・デバウンス待機中のデータロスを防げない。",
+      "suggestion": "受入条件を修正し、「auto-save ON時は、保存済み（isDirty=false かつ isSaving=false）の場合のみbeforeunload警告を抑制する。デバウンス待機中またはisSaving=trueの場合は警告を表示する」とする。あるいは、離脱時にsaveNow()をトリガーしてフラッシュする方式も検討に値する。"
+    },
+    {
+      "id": "S1-003",
+      "priority": "Should Fix",
+      "category": "完全性",
+      "title": "auto-save ON時のhandleClose（エディタ閉じる）の考慮が実装タスクに未記載",
+      "description": "MarkdownEditor.tsxのhandleClose()（L306-316）は、isDirty時にwindow.confirm()で確認ダイアログを表示する。auto-save ON時にこのダイアログをどう扱うかが実装タスクに含まれていない。beforeunloadだけでなく、Closeボタン押下時のフローもauto-saveモードに合わせた調整が必要。",
+      "suggestion": "実装タスクに「auto-save ON時のhandleClose()挙動の調整：isSaving中の場合はsaveNow()で即座保存を完了してから閉じる、または閉じる前にsaveNow()をawaitする」を追加する。"
+    },
+    {
+      "id": "S1-004",
+      "priority": "Should Fix",
+      "category": "完全性",
+      "title": "auto-save ON時のCtrl+Sキーボードショートカットの挙動が未定義",
+      "description": "Issueでは「auto-save ON時はSaveボタンの代わりに保存状態インジケーターを表示」と記載があるが、Ctrl+S / Cmd+Sキーボードショートカットの挙動について言及がない。auto-save ON時にCtrl+Sを押した場合、即座保存（saveNow()）をトリガーするのか、何もしないのか、仕様が不明確。",
+      "suggestion": "受入条件または実装タスクに「auto-save ON時のCtrl+S操作は、デバウンスをキャンセルしてsaveNow()で即座保存をトリガーする」を明記する。これはユーザーの意図的な保存操作として尊重すべき。"
+    },
+    {
+      "id": "S1-005",
+      "priority": "Should Fix",
+      "category": "整合性",
+      "title": "デバウンス間隔3秒のハードコーディングと定数化の指針が未記載",
+      "description": "Issueでは「テキスト変更後3秒のデバウンスで自動保存」と記載があるが、この3000msを定数として定義するか、あるいはどこに定義するかの指針がない。既存コードでは`PREVIEW_DEBOUNCE_MS = 300`がsrc/types/markdown-editor.tsに定義されており、auto-saveのデバウンスも同様に定数化すべき。実装タスクの「localStorage key定数追加」には触れているが、デバウンス定数については言及がない。",
+      "suggestion": "変更対象ファイルのsrc/types/markdown-editor.tsの変更内容に「AUTO_SAVE_DEBOUNCE_MS定数の追加」を含める。"
+    },
+    {
+      "id": "S1-006",
+      "priority": "Should Fix",
+      "category": "完全性",
+      "title": "useAutoSaveのerror状態のUI表示方針が不十分",
+      "description": "Issueでは保存状態インジケーターとして「Saving.../Saved/Error」を列挙しているが、Error時の具体的なUI・UXが不明確。MemoCardの参考実装ではerror時にテキストエラーを表示しているが、MarkdownEditorでは既にToast通知システム（showToast）が利用可能。エラー時にToastを使うのかインラインで表示するのか、リトライ（useAutoSaveのmaxRetries=3による自動リトライ）終了後のユーザーアクションはどうするのか。",
+      "suggestion": "受入条件に「auto-save失敗時（リトライ上限到達後）は、エラーをToastで通知し、手動保存にフォールバックする（Saveボタンを再表示する、またはretryボタンを提供する）」を追加する。"
+    },
+    {
+      "id": "S1-007",
+      "priority": "Should Fix",
+      "category": "整合性",
+      "title": "i18n対応の考慮が未記載",
+      "description": "プロジェクトではnext-intlによるi18n対応が広く行われている（AgentSettingsPane, NotesAndLogsPane, FeedbackSection等がuseTranslationsを使用）。ただし、現在のMarkdownEditor.tsxはi18nを使用していない（ハードコードされた英語文字列）。auto-saveで追加される「Saving...」「Saved」「Error」「Auto-save」等のUI文字列についても同様にハードコード英語で統一するのか、i18n対応するのかが未記載。",
+      "suggestion": "MarkdownEditor全体がi18n未対応であるため、今回のIssueスコープではi18n対応は不要と明記するか、あるいはauto-save関連文字列も含めてi18n対応をスコープに含めるか判断を記載する。現状のMarkdownEditorとの整合性から、ハードコード英語で統一するのが妥当だが、将来のi18n対応に備えて文字列を定数化しておくと良い。"
+    },
+    {
+      "id": "S1-008",
+      "priority": "Should Fix",
+      "category": "完全性",
+      "title": "useAutoSaveのonSaveCompleteコールバック活用の方針が未記載",
+      "description": "useAutoSaveフックはonSaveCompleteコールバック（保存成功時に呼ばれる）を持つが、Issueではこの活用方針に言及がない。MarkdownEditorでは保存成功時にsetOriginalContent(content)でdirty状態を解除し、onSave(filePath)で親コンポーネントに通知する必要がある。onSaveCompleteを使ってこれらの副作用を実行する設計を明示すべき。",
+      "suggestion": "実装タスクに「useAutoSaveのonSaveCompleteコールバックでsetOriginalContent(content)とonSave?.(filePath)を呼び出し、保存成功時の状態同期を行う」を追加する。"
+    },
+    {
+      "id": "S1-009",
+      "priority": "Should Fix",
+      "category": "設計",
+      "title": "auto-save ON時のToast通知の抑制検討が未記載",
+      "description": "現在のsaveContent()は保存成功時にshowToast('File saved successfully', 'success')を表示する。auto-save ON時は3秒ごとに自動保存されるため、毎回Toastが表示されるとユーザー体験が著しく悪化する。Issueでは「保存状態インジケーター（Saving.../Saved）を表示」と記載があるが、Toast通知の抑制について明示的な言及がない。",
+      "suggestion": "実装タスクに「auto-save ON時はToast通知を抑制し、代わりにヘッダー内のインラインインジケーター（Saving.../Saved）のみで状態を伝える」を追加する。auto-save失敗時のみToast通知を使用する方針が望ましい。"
+    },
+    {
+      "id": "S1-010",
+      "priority": "Nice to Have",
+      "category": "完全性",
+      "title": "アクセシビリティ（a11y）への考慮が未記載",
+      "description": "auto-saveトグルスイッチや保存状態インジケーターについて、スクリーンリーダー向けのaria属性（aria-label, aria-live, role='switch'等）への考慮がIssueに記載されていない。既存のMarkdownEditorではaria-pressed属性などが適切に使用されている。",
+      "suggestion": "実装タスクに「auto-saveトグルにrole='switch'とaria-checked属性を付与し、保存状態インジケーターにaria-live='polite'を設定する」を追加する。"
+    },
+    {
+      "id": "S1-011",
+      "priority": "Nice to Have",
+      "category": "明確性",
+      "title": "「Saved」インジケーターの表示タイミングと消滅タイミングが未定義",
+      "description": "Issueでは「Saving.../Saved」の保存状態インジケーターを表示すると記載があるが、「Saved」表示の持続時間が不明確。保存完了直後に「Saved」を表示し、一定時間後に消すのか、次の編集開始まで表示し続けるのか。",
+      "suggestion": "受入条件に「保存完了後は'Saved'インジケーターを表示し、次のテキスト変更まで維持する」などの具体的なタイミングを明記する。"
+    },
+    {
+      "id": "S1-012",
+      "priority": "Nice to Have",
+      "category": "完全性",
+      "title": "既存テストへの影響・テスト計画の詳細が未記載",
+      "description": "既存のMarkdownEditor.test.tsx（約1128行、包括的なテストスイート）への影響について言及がない。auto-save機能追加により、既存のSave Operations、Unsaved Changes Warning、Keyboard Shortcutsのテストケースに影響が出る可能性がある。また、useAutoSave.test.tsも存在するが、新規テストの具体的なテストケースが未列挙。",
+      "suggestion": "実装タスクの「ユニットテストの追加」を詳細化し、以下のテストケースを列挙する：(1) auto-saveトグルの切り替え、(2) auto-save ON時の3秒デバウンス動作、(3) auto-save ON時のインジケーター表示、(4) auto-save ON/OFF切り替え時の状態遷移、(5) localStorage永続化のテスト、(6) 既存テストケースとの互換性確認。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 7,
+    "nice_to_have": 3,
+    "overall_assessment": "Issue #389の全体的な方向性は適切であり、既存のuseAutoSaveフックとuseLocalStorageStateフックの活用方針は正しい。仮説検証によりコードベースとの整合性も確認済み。ただし、Must Fixとして2点の設計上の問題がある。(1) saveContent()のisDirtyガードとuseAutoSaveの競合問題が未検討であり、MemoCardの実装パターンに倣って純粋なAPI呼び出し関数を切り出す設計が必要。(2) beforeunload抑制の仕様が単純化されすぎており、デバウンス待機中・保存進行中のデータロスシナリオへの対応が必要。Should Fixとして、auto-save ON時のCtrl+S挙動、handleClose()の調整、Toast通知の抑制、onSaveCompleteの活用など、実装時に迷いが生じる可能性のある設計判断が未記載である点を指摘した。"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "245-279",
+      "relevance": "saveContent()関数 - isDirtyガードとuseAutoSaveの競合箇所"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "449-473",
+      "relevance": "beforeunloadハンドラー - auto-saveモード対応が必要な箇所"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "306-316",
+      "relevance": "handleClose() - auto-saveモード対応が必要な箇所"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "363-387",
+      "relevance": "handleKeyDown() - Ctrl+S挙動の調整が必要な箇所"
+    },
+    {
+      "file": "src/hooks/useAutoSave.ts",
+      "lines": "20-33",
+      "relevance": "UseAutoSaveOptions - saveFn, debounceMs, disabled, onSaveCompleteの各オプション"
+    },
+    {
+      "file": "src/hooks/useAutoSave.ts",
+      "lines": "117-155",
+      "relevance": "executeSave() - リトライロジックとonSaveComplete呼び出し"
+    },
+    {
+      "file": "src/components/worktree/MemoCard.tsx",
+      "lines": "89-111",
+      "relevance": "useAutoSaveの参考実装パターン（saveFnがAPI呼び出しを直接ラップ）"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "lines": "182-197",
+      "relevance": "既存のLOCAL_STORAGE_KEY定数群 - AUTO_SAVE関連定数の追加先"
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "relevance": "既存テストスイート - auto-save機能追加による影響範囲"
+    },
+    {
+      "file": "tests/unit/hooks/useAutoSave.test.ts",
+      "relevance": "useAutoSaveの既存テスト - 3000msデバウンスのテスト追加は不要（既にcustom debounce testあり）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトのモジュール構造・コーディング規約の参照"
+    }
+  ]
+}

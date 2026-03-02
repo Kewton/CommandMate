@@ -1,0 +1,201 @@
+{
+  "issue_number": 389,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-02",
+  "impact_analysis": {
+    "direct_impact": [
+      "src/components/worktree/MarkdownEditor.tsx",
+      "src/types/markdown-editor.ts",
+      "tests/unit/components/MarkdownEditor.test.tsx",
+      "tests/e2e/markdown-editor.spec.ts"
+    ],
+    "indirect_impact": [
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "src/components/common/Toast.tsx",
+      "src/hooks/useAutoSave.ts",
+      "src/hooks/useLocalStorageState.ts",
+      "tests/unit/hooks/useAutoSave.test.ts"
+    ],
+    "no_impact_confirmed": [
+      "src/components/worktree/MemoCard.tsx",
+      "src/hooks/useFullscreen.ts",
+      "src/hooks/useIsMobile.ts",
+      "src/hooks/useSwipeGesture.ts",
+      "src/hooks/useVirtualKeyboard.ts",
+      "src/components/worktree/PaneResizer.tsx",
+      "src/components/worktree/MermaidCodeBlock.tsx",
+      "src/lib/clipboard-utils.ts",
+      "src/lib/utils.ts",
+      "src/config/z-index.ts",
+      "src/config/editable-extensions.ts",
+      "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "src/lib/file-operations.ts",
+      "src/hooks/useContextMenu.ts",
+      "tests/unit/components/worktree/MemoCard.test.tsx"
+    ]
+  },
+  "findings": [
+    {
+      "id": "S3-001",
+      "priority": "Must Fix",
+      "category": "テスト影響",
+      "title": "既存MarkdownEditorテストの大規模更新が必要",
+      "description": "tests/unit/components/MarkdownEditor.test.tsxには「Save Operations」セクション(6テスト)と「Unsaved Changes Warning」セクション(3テスト)が存在する。auto-saveモード導入により、saveContentのisDirtyガード除去(純粋API呼び出し分離)、beforeunloadハンドラーのisSaving条件追加、Saveボタンの表示/非表示切替、Ctrl+Sの挙動分岐(auto-save ON時はsaveNow)など、既存テストの前提が複数変更される。Issueの実装タスクには「ユニットテストの追加」のみ記載されているが、既存テストの更新も明示すべきである。",
+      "affected_files": [
+        "tests/unit/components/MarkdownEditor.test.tsx"
+      ],
+      "suggestion": "実装タスクに「既存MarkdownEditorテストのauto-saveモード対応更新（Save Operations: 6テスト、Unsaved Changes Warning: 3テスト、Keyboard Shortcuts: Ctrl+S関連テスト）」を追加する。具体的には、(1) auto-save OFF時は既存テストが引き続きpassすることの確認、(2) auto-save ON時の新テスト追加（Saveボタン非表示、インジケーター表示、beforeunload条件分岐、Ctrl+Sでのデバウンスキャンセル+saveNow）が必要。"
+    },
+    {
+      "id": "S3-002",
+      "priority": "Must Fix",
+      "category": "影響範囲",
+      "title": "saveContent関数の分離がhandleKeyDown・handleClose・Saveボタンの3箇所に波及",
+      "description": "現在のMarkdownEditor.tsxではsaveContentが(1) SaveボタンのonClick (L702)、(2) handleKeyDown内Ctrl+S (L368)、(3) handleClose内の間接参照の3箇所で使用されている。Issueではauto-save用にisDirtyガードを含まない純粋API呼び出し関数を切り出すとしているが、これら3箇所全ての呼び出し元でauto-save ON/OFF分岐が必要になる。特にhandleKeyDownのCtrl+S分岐（auto-save ONならsaveNow、OFFなら従来のsaveContent）とhandleCloseのauto-saveモード対応は、それぞれ個別の考慮が必要であり、Issueの「実装タスク」では粒度が粗い。",
+      "affected_files": [
+        "src/components/worktree/MarkdownEditor.tsx"
+      ],
+      "suggestion": "影響範囲テーブルの「src/components/worktree/MarkdownEditor.tsx」の変更内容を拡充し、具体的な変更箇所を列挙する：(1) saveContent関数の分離→saveToApi(純粋API)とsaveContent(isDirtyガード付き)の2関数化、(2) handleKeyDown内Ctrl+S分岐追加、(3) handleClose内auto-saveモード対応(isSaving中はsaveNow+待機)、(4) Saveボタン表示制御(auto-save ON時は非表示or disabled)、(5) beforeunloadハンドラーの条件拡張。"
+    },
+    {
+      "id": "S3-003",
+      "priority": "Should Fix",
+      "category": "影響範囲",
+      "title": "useAutoSaveのcancelPendingSaveが非公開のためCtrl+S連携に設計考慮が必要",
+      "description": "受入条件「auto-save ON時のCtrl+Sキーは、デバウンスをキャンセルしてsaveNow()で即座保存」と記載されているが、useAutoSaveフックの現在のインターフェース(UseAutoSaveResult)はisSaving/error/saveNowの3つのみを公開している。saveNow()の内部実装ではcancelPendingSave()が先に呼ばれる（L173）ため、saveNow()を呼べば自動的にデバウンスキャンセル+即座保存が実現される。しかしIssue本文では「デバウンスをキャンセルしてsaveNow()」と2ステップのように読める記述であり、実装者がcancelPendingSaveを別途公開する必要があると誤解する可能性がある。",
+      "affected_files": [
+        "src/hooks/useAutoSave.ts"
+      ],
+      "suggestion": "受入条件の文言を「auto-save ON時のCtrl+Sキーは、saveNow()を呼び出し即座保存する（saveNow内部でデバウンスが自動キャンセルされる）」に修正するか、影響範囲テーブルのuseAutoSave.tsの「変更不要」の根拠として「saveNow()が内部でcancelPendingSave()を呼び出すため、Ctrl+S連携に追加APIは不要」と補足する。"
+    },
+    {
+      "id": "S3-004",
+      "priority": "Should Fix",
+      "category": "テスト影響",
+      "title": "E2Eテスト（markdown-editor.spec.ts）への影響が未記載",
+      "description": "tests/e2e/markdown-editor.spec.tsにはMarkdownEditorのE2Eテストが存在し、ファイル選択・エディタ表示・保存操作を検証している。auto-saveトグルUI追加によりヘッダーのレイアウトが変更され、auto-save ON時にSaveボタンが非表示/disabledになるため、E2Eテストのセレクター・アサーションに影響する可能性がある。Issueの影響範囲にE2Eテストが含まれていない。",
+      "affected_files": [
+        "tests/e2e/markdown-editor.spec.ts"
+      ],
+      "suggestion": "影響範囲テーブルまたは関連コンポーネントセクションに「tests/e2e/markdown-editor.spec.ts - auto-saveトグルUI追加に伴うE2Eテスト確認」を追加する。既存E2EテストはデフォルトOFF（手動保存モード）で動作するため破壊的影響は限定的だが、確認は必要。"
+    },
+    {
+      "id": "S3-005",
+      "priority": "Should Fix",
+      "category": "パフォーマンス",
+      "title": "auto-save ON時のAPI呼び出し頻度とサーバー負荷の考慮",
+      "description": "auto-save ON時は3秒デバウンスでPUT /api/worktrees/:id/files/:pathが自動発火する。MarkdownEditorは大きなファイル（最大1MB）を扱う可能性があり（FILE_SIZE_LIMITS.MAX_SIZE = 1024 * 1024）、継続的な編集中は3秒ごとにファイル全体がPUT送信される。MemoCardのauto-save（300msデバウンス）はタイトル/コンテンツの小さなデータだが、MarkdownEditorはファイル全体のため影響が異なる。Issueにはパフォーマンスへの考慮が記載されていない。",
+      "affected_files": [
+        "src/components/worktree/MarkdownEditor.tsx",
+        "src/app/api/worktrees/[id]/files/[...path]/route.ts"
+      ],
+      "suggestion": "以下のいずれかの対策を影響範囲またはタスクに明記する：(1) 3秒デバウンスは十分長いため問題ないと判断した旨を記載、(2) 大きなファイル（例：500KB超）ではauto-save時に警告またはデバウンスを延長する考慮、(3) isDirtyチェックをuseAutoSaveのsaveFn内ではなくvalueの比較で自然に行う（値が変わらなければuseAutoSaveのeffectが発火しないため追加対策不要）旨の明記。"
+    },
+    {
+      "id": "S3-006",
+      "priority": "Should Fix",
+      "category": "影響範囲",
+      "title": "WorktreeDetailRefactoredのhandleEditorSaveコールバックとの整合性",
+      "description": "WorktreeDetailRefactored.tsx (L1205-1207)のhandleEditorSaveはonSaveコールバック経由で呼ばれ、ファイルツリーのrefreshをトリガーする。auto-save ON時はuseAutoSaveのonSaveCompleteから間接的にonSave(filePath)が呼ばれるため、3秒ごとの自動保存のたびにファイルツリーのrefreshが発生する可能性がある。頻繁なrefreshはUIのちらつきやパフォーマンス低下を引き起こす。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/components/worktree/MarkdownEditor.tsx"
+      ],
+      "suggestion": "auto-save成功時のonSave呼び出しについて、以下のいずれかの方針を検討・明記する：(1) auto-save時はonSaveを呼ばない（ファイルツリーrefreshは手動保存時のみ）、(2) onSave呼び出しにデバウンスを追加してrefresh頻度を制限、(3) WorktreeDetailRefactored側でrefreshをデバウンス。現在のIssueでは「onSaveCompleteコールバックでonSave?.(filePath)を呼び出し」と明記されており、頻繁なrefreshが発生する設計となっている。"
+    },
+    {
+      "id": "S3-007",
+      "priority": "Should Fix",
+      "category": "型影響",
+      "title": "LOCAL_STORAGE_KEY_AUTO_SAVE定数の命名規則とインポート先への影響",
+      "description": "Issueではsrc/types/markdown-editor.tsにLOCAL_STORAGE_KEY_AUTO_SAVE定数とAUTO_SAVE_DEBOUNCE_MS定数を追加すると記載されている。現在markdown-editor.tsからはMarkdownEditor.tsx（4つの定数+2つのバリデーション関数）、Toast.tsx（ToastType, ToastItem）、useContextMenu.ts（ContextMenuState）がインポートしている。新定数の追加自体は後方互換性を壊さないが、AUTO_SAVE_DEBOUNCE_MS定数はuseAutoSaveフックに渡すdebounceMs引数であり、markdown-editor.ts（UI型定義モジュール）に配置するのが適切かどうか検討が必要。",
+      "affected_files": [
+        "src/types/markdown-editor.ts",
+        "src/components/worktree/MarkdownEditor.tsx"
+      ],
+      "suggestion": "AUTO_SAVE_DEBOUNCE_MS定数の配置先について明記する。選択肢：(A) markdown-editor.ts（現在のIssue記載通り。MarkdownEditor固有の設定なので妥当）、(B) 新たにsrc/config/auto-save-config.tsを作成（将来の汎用化を見据える場合）。現時点ではMarkdownEditor固有であるため(A)が合理的だが、MemoCardのデバウンス値（300ms）もハードコードされている点を考慮すると、将来的な統一も視野に入る。"
+    },
+    {
+      "id": "S3-008",
+      "priority": "Should Fix",
+      "category": "互換性",
+      "title": "auto-save失敗時のフォールバック設計がuseAutoSaveのerror状態伝播に依存",
+      "description": "受入条件「auto-save失敗時（リトライ上限3回到達後）は、エラーをToastで通知し、手動保存モードにフォールバックする」と記載されている。useAutoSaveフックはerror状態を返すが、「手動保存モードにフォールバック」するためにはMarkdownEditor側でauto-saveをOFFに切り替えるロジックが必要。現在のuseAutoSaveにはauto-save自体を無効化するコールバックが存在しないため、MarkdownEditor側でerrorを監視してuseAutoSaveのdisabledフラグを切り替えるか、auto-save設定state自体をOFFにする制御が必要。この制御フローが実装タスクに明記されていない。",
+      "affected_files": [
+        "src/components/worktree/MarkdownEditor.tsx",
+        "src/hooks/useAutoSave.ts"
+      ],
+      "suggestion": "フォールバックの具体的な実装方針を実装タスクに追加する。推奨案：useAutoSaveのerror状態をuseEffect内で監視し、error !== nullの場合にauto-save設定stateをfalseに切り替える（localStorageも更新）。これによりuseAutoSaveのdisabledがtrueになり、デバウンス保存が停止し、SaveボタンとCtrl+Sの手動保存UIが復活する。Toast通知はerror検出時に1回だけ表示する。"
+    },
+    {
+      "id": "S3-009",
+      "priority": "Nice to Have",
+      "category": "影響範囲",
+      "title": "i18n対応の影響範囲が未記載",
+      "description": "MarkdownEditorは現在next-intl（useTranslations）を使用していないが、プロジェクト全体ではi18n対応が進んでいる（LocaleSwitcher、useLocaleSwitch等）。新たに追加されるUIテキスト（トグルラベル、Saving.../Saved/Error等のインジケーターテキスト）はハードコード文字列として実装されることが想定されるが、既存のMarkdownEditorも同様にハードコード（Loading..., Unsaved, Save, File saved successfully等）であるため、現時点ではi18n対応は不要。ただし将来的な統一を見据えて認識しておくべき。",
+      "affected_files": [
+        "src/components/worktree/MarkdownEditor.tsx"
+      ],
+      "suggestion": "影響範囲テーブルの備考として「MarkdownEditorのUI文字列は現行と同様にハードコードとし、i18n対応は将来Issueとして別途対応する」旨を記載する。"
+    },
+    {
+      "id": "S3-010",
+      "priority": "Nice to Have",
+      "category": "テスト影響",
+      "title": "useAutoSaveテストへの間接的影響確認",
+      "description": "tests/unit/hooks/useAutoSave.test.tsは現在のuseAutoSaveフックの全機能をテストしている（デバウンス、saveNow、isSaving、error、disabled、cleanup）。Issue #389ではuseAutoSave自体は変更不要（debounceMs引数は既に実装済み）としているが、MarkdownEditor統合時にdebounceMs=3000の新しいユースケースが追加される。既存テストはdebounceMs=300とdebounceMs=500をカバーしているが、3000msのテストは存在しない。useAutoSaveの変更が不要であるため既存テストへの影響はないが、統合テストレベルでの確認が望ましい。",
+      "affected_files": [
+        "tests/unit/hooks/useAutoSave.test.ts"
+      ],
+      "suggestion": "useAutoSaveの変更は不要であるため既存テストの更新は不要。MarkdownEditor.test.tsxの新テスト内でdebounceMs=3000のuseAutoSave統合動作を間接的にテストする方針で十分。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 6,
+    "nice_to_have": 2,
+    "overall_assessment": "Issue #389の変更は主にMarkdownEditor.tsxとmarkdown-editor.tsの2ファイルに閉じており、破壊的変更は発生しない。しかし、既存テストの更新範囲（MarkdownEditor.test.tsx: 12テスト以上が影響）が実装タスクに未記載である点と、saveContent関数分離に伴う3箇所の呼び出し元への波及が十分に分析されていない点がMust Fixである。また、WorktreeDetailRefactoredのonSaveコールバック経由でのファイルツリーrefresh頻度、auto-save失敗時のフォールバック制御フロー、useAutoSaveのsaveNow内部でのデバウンスキャンセル動作の明確化がShould Fixとして挙げられる。useAutoSave.ts自体の変更は不要であり、EditorProps型への変更もないため、WorktreeDetailRefactoredの呼び出し側への型レベルの影響はない。全体として変更影響は局所的であり、適切なテスト計画を追加すれば安全に実装可能と評価する。"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "直接変更対象。saveContent(L245-279)のisDirtyガード分離、handleKeyDown(L363-387)のCtrl+S分岐、handleClose(L306-316)のauto-save対応、beforeunloadハンドラー(L449-473)の条件拡張、ヘッダーUI(L606-726)のトグル+インジケーター追加"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "relevance": "直接変更対象。LOCAL_STORAGE_KEY_AUTO_SAVE定数(L182付近)、AUTO_SAVE_DEBOUNCE_MS定数の追加"
+    },
+    {
+      "file": "src/hooks/useAutoSave.ts",
+      "relevance": "変更不要。saveNow()内部でcancelPendingSave()が呼ばれる(L173)ため、Ctrl+S連携に追加API不要。debounceMs引数(L68)で3000ms指定可能"
+    },
+    {
+      "file": "src/hooks/useLocalStorageState.ts",
+      "relevance": "変更不要。既存のvalidate/serialize/deserialize機能でboolean型のauto-save設定永続化が可能"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "間接影響。handleEditorSave(L1205-1207)がauto-save成功時に毎回呼ばれる可能性があり、ファイルツリーrefresh頻度への影響"
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "relevance": "更新必要。Save Operations(6テスト)、Unsaved Changes Warning(3テスト)、Keyboard Shortcuts(Ctrl+S関連)のauto-saveモード対応"
+    },
+    {
+      "file": "tests/e2e/markdown-editor.spec.ts",
+      "relevance": "確認必要。デフォルトOFF設定により既存テストへの影響は限定的だが、UIレイアウト変更の確認が必要"
+    },
+    {
+      "file": "src/components/worktree/MemoCard.tsx",
+      "relevance": "影響なし。useAutoSave参考実装として参照のみ"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト規約（テスト要件、コーディング規約）の参照"
+    }
+  ]
+}

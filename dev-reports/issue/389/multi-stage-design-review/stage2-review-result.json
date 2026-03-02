@@ -1,0 +1,87 @@
+{
+  "issue_number": 389,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_date": "2026-03-02",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "priority": "Must Fix",
+      "category": "API整合性",
+      "title": "onSaveComplete コールバックは引数を受け取らないため、saveFn 内部での setOriginalContent 呼び出しが必須",
+      "description": "設計書 Section 4.3 の DR1-001 対策として、saveToApi 内部で setOriginalContent(valueToSave) を呼ぶ方針に変更されている。しかし設計書 Section 4.3 のコードスニペット（修正前）では依然として onSaveComplete: () => { setOriginalContent(content); } が残っている。useAutoSave.ts の実装を確認すると、onSaveComplete の型は () => void であり（UseAutoSaveOptions.onSaveComplete?: () => void、Line 32）、savedValue を引数として渡さない。executeSave 内の Line 133 で onSaveCompleteRef.current?.() と引数なしで呼び出される。設計書の DR1-001 注記内の「修正後の saveToApi」コードブロック（Line 166-178）は正しいが、Section 4.3 本文のコードが修正前のまま残っているため、実装者が混乱するリスクがある。設計書本文のコードスニペットを DR1-001 修正後の版に統一する必要がある。",
+      "suggestion": "設計書 Section 4.3 の useAutoSave 統合コードブロック内の onSaveComplete を削除するか、onSaveComplete を使わない形に修正する。具体的には、(1) Section 4.2 の saveToApi を DR1-001 注記内の修正版（setOriginalContent(valueToSave) を含む）に差し替え、(2) Section 4.3 の useAutoSave 呼び出しから onSaveComplete プロパティを削除する。コードスニペットが一か所に統一されていないと、実装時に誤ったパターンを採用するリスクがある。"
+    },
+    {
+      "id": "DR2-002",
+      "priority": "Must Fix",
+      "category": "インターフェース整合性",
+      "title": "handleClose が同期関数から非同期関数に変更される影響",
+      "description": "現在の MarkdownEditor.tsx (Line 306) では handleClose は同期関数: const handleClose = useCallback(() => { ... }, [isDirty, onClose]); である。設計書 Section 4.8 では handleClose を async 関数に変更し、await saveNow() を呼んでいる。handleClose は close-button の onClick ハンドラ (Line 718) として使われているため、async に変更しても React の onClick は void を期待するので直接的な問題はない。しかし、saveNow() は useAutoSave 内部で disabled の場合 early return する (Line 171)。auto-save ON 時に saveNow() を呼ぶ設計だが、エラーフォールバック (Section 4.5) が先に発火して isAutoSaveEnabled が false になった場合、saveNow() 内の disabled チェックが disabled=true（=!isAutoSaveEnabled が true に戻る）となり、saveNow() が何もせずに返る可能性がある。設計書の handleClose のフロー図ではこのタイミング問題が考慮されていない。",
+      "suggestion": "handleClose 内の saveNow() 呼び出しにおいて、エラーフォールバックの useEffect が handleClose の await saveNow() より先に isAutoSaveEnabled を false にした場合でも、saveNow() が disabled=true として何もしないケースを設計書に明記する。この場合 autoSaveError は既に設定されているため、confirm ダイアログは表示される。つまり実質的にはフロー上問題ないが、「saveNow() がスキップされるケースがある」という挙動を設計書に補記し、テストケースにこのシナリオを追加すべきである。"
+    },
+    {
+      "id": "DR2-003",
+      "priority": "Should Fix",
+      "category": "パターン整合性",
+      "title": "MemoCard は useAutoSave の disabled パラメータを使用していない",
+      "description": "設計書は「MemoCard の useAutoSave パターンを踏襲」と記載しているが（Section 1, Section 3）、MemoCard.tsx の実装 (Line 94-111) では useAutoSave に disabled パラメータを渡していない。MemoCard は常に auto-save が有効であり、ON/OFF 切り替えの概念がない。一方 MarkdownEditor では disabled: !isAutoSaveEnabled を渡す設計になっている。useAutoSave の disabled パラメータ自体は実装に存在する (Line 69: disabled = false) ため API としては問題ないが、MemoCard が disabled を使っていない以上、disabled パラメータの動的切り替え (true -> false) は MemoCard での実績がなく、「MemoCard で実績あり」という記述は disabled 切り替えには当てはまらない。",
+      "suggestion": "設計書の「MemoCardで実績あり」の記述を「useAutoSave フックの基本パターン（value/saveFn/debounceMs/onSaveComplete）は MemoCard で実績あり。disabled パラメータの動的切り替えは MarkdownEditor 固有の新規利用であり、テストでの網羅的な検証が必要」に修正する。この点は Section 8.3 の initialValueRef エッジケースの議論と密接に関連するため、テストの重要性を明示する。"
+    },
+    {
+      "id": "DR2-004",
+      "priority": "Should Fix",
+      "category": "API整合性",
+      "title": "useAutoSave のデフォルト debounceMs が 300ms だが設計書では 3000ms を指定",
+      "description": "useAutoSave.ts の実装 (Line 68) では debounceMs のデフォルト値は 300ms である。設計書 Section 4.3 では debounceMs: AUTO_SAVE_DEBOUNCE_MS (= 3000ms) を明示的に指定しており、これ自体は正しい。しかし設計書 Section 7.1 に「MemoCardの300msより10倍長い」と記載しつつ、MemoCard の実装 (Line 94-111) では debounceMs を省略してデフォルト値 (300ms) を使用している。設計書の理解は正確だが、MemoCard 側で debounceMs が明示的に 300ms と記載されていないため、将来 useAutoSave のデフォルト値が変更された場合に MemoCard の挙動も変わる。この点は MarkdownEditor の設計に直接影響はないが、比較の前提として注記する価値がある。",
+      "suggestion": "設計書の記述自体に修正は不要。ただし実装時に AUTO_SAVE_DEBOUNCE_MS = 3000 の指定を忘れないよう、コードレビューのチェックリストに「debounceMs: AUTO_SAVE_DEBOUNCE_MS が設定されていること」を明記する。"
+    },
+    {
+      "id": "DR2-005",
+      "priority": "Should Fix",
+      "category": "定数整合性",
+      "title": "LOCAL_STORAGE_KEY_AUTO_SAVE の命名規則は既存パターンと整合するが配置場所の確認が必要",
+      "description": "設計書 Section 4.1 で定義する LOCAL_STORAGE_KEY_AUTO_SAVE = 'commandmate:md-editor-auto-save' は、既存の命名パターン（LOCAL_STORAGE_KEY = 'commandmate:md-editor-view-mode', LOCAL_STORAGE_KEY_SPLIT_RATIO = 'commandmate:md-editor-split-ratio', LOCAL_STORAGE_KEY_MAXIMIZED = 'commandmate:md-editor-maximized'）と完全に整合している。プレフィックス 'commandmate:md-editor-' が統一されており、サフィックス 'auto-save' は機能を明確に表現している。配置場所も src/types/markdown-editor.ts で既存定数と同じファイル内にある。整合性に問題はない。",
+      "suggestion": "修正不要。命名規則と配置場所は完全に整合している。"
+    },
+    {
+      "id": "DR2-006",
+      "priority": "Should Fix",
+      "category": "型整合性",
+      "title": "saveToApi の useCallback 依存配列に setOriginalContent が含まれていない（DR1-001 修正後）",
+      "description": "設計書 DR1-001 注記の修正後 saveToApi コード (Line 166-178) では setOriginalContent(valueToSave) を内部で呼び出すが、useCallback の依存配列は [worktreeId, filePath] のみ。setOriginalContent は useState の setter であるため React が参照の安定性を保証する（re-render しても同一参照）。そのため依存配列に含めなくても正しく動作する。ただし ESLint の react-hooks/exhaustive-deps ルールが警告を出す可能性がある。",
+      "suggestion": "ESLint の exhaustive-deps 警告を避けるため、setOriginalContent を依存配列に含めることを推奨する。React の useState setter は安定しているため実行時の動作に影響はないが、lint 整合性のために [worktreeId, filePath, setOriginalContent] とすべき。これは MemoCard が onUpdate を saveFn 内で使用しつつ依存配列に含めていないパターン（Line 96-99、saveFn のクロージャ）とは異なり、useCallback の外側で定義された setter を参照するケースである。"
+    },
+    {
+      "id": "DR2-007",
+      "priority": "Nice to Have",
+      "category": "インターフェース整合性",
+      "title": "isSaving state の名前衝突に関する整理",
+      "description": "現在の MarkdownEditor.tsx (Line 122) には const [isSaving, setIsSaving] = useState(false); が存在する。設計書 Section 4.3 では useAutoSave から isSaving: isAutoSaving を destructure している。手動保存時の isSaving (既存 state) と isAutoSaving (useAutoSave) が共存する設計は正しいが、既存テスト (Line 186-209) では save-button の disabled 条件として !isDirty || isSaving を検証している。設計書 Section 5.3 で auto-save ON 時に Save ボタンを非表示にする設計のため、テストの前提条件が auto-save OFF 時のテストに限定される必要がある。",
+      "suggestion": "既存テストの Save Operations 系テストに auto-save OFF 前提のコメントを追加し、新規テストでは auto-save ON 時に save-button が非表示であることをテストする。設計書の Section 9.1 で既存テスト更新 6 件と記載されているが、具体的にどのテストが「auto-save OFF 前提」であるかを明記すると、実装者がテスト修正を見落としにくくなる。"
+    },
+    {
+      "id": "DR2-008",
+      "priority": "Nice to Have",
+      "category": "パターン整合性",
+      "title": "useLocalStorageState の validate パラメータに isValidBoolean を使用する設計は既存パターンと一致",
+      "description": "設計書 Section 4.3 で useLocalStorageState に validate: isValidBoolean を渡している。isValidBoolean は src/types/markdown-editor.ts (Line 259-261) に既に存在し、LOCAL_STORAGE_KEY_MAXIMIZED の用途で使用されている (MarkdownEditor.tsx Line 151-155)。完全に既存パターンを踏襲しており、新規の validate 関数を定義する必要がない。",
+      "suggestion": "修正不要。既存パターンとの整合性は完全である。"
+    },
+    {
+      "id": "DR2-009",
+      "priority": "Nice to Have",
+      "category": "API整合性",
+      "title": "saveNow() の戻り値は Promise<void> であり await 可能だが、エラーは reject されない",
+      "description": "設計書 Section 4.7 と Section 4.8 で await saveNow() を使用している。useAutoSave.ts の saveNow (Line 170-175) は async 関数で Promise<void> を返す。内部で executeSave を呼び、executeSave はリトライ後に setError() で error state を設定するが、Promise 自体を reject しない。つまり await saveNow() は常に正常完了する。設計書 Section 4.8 の DR1-006 注記でこの挙動を正確に記述しており、autoSaveError を事後確認する設計になっている。この理解は正確で実装と整合する。",
+      "suggestion": "修正不要。saveNow() が reject しないことの理解は正確であり、autoSaveError による事後チェックは適切な設計である。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 3,
+    "overall_assessment": "設計方針書は実装コードベースとの整合性が全体的に高い。useAutoSave/useLocalStorageState の API パラメータ（value, saveFn, debounceMs, disabled, onSaveComplete, maxRetries）は全て実装に存在し、設計書の使用方法は正しい。localStorage キーの命名規則も既存パターン (commandmate:md-editor-*) に完全に準拠している。Must Fix 2件のうち、DR2-001 は設計書内のコードスニペットの不整合（DR1-001修正前後の混在）であり実装判断に影響する。DR2-002 は handleClose のタイミング問題で、エラーフォールバックの useEffect 発火順序に関する補記が必要。Should Fix 4件は設計書の正確性向上に寄与する。MemoCard パターンの踏襲に関して、disabled 動的切り替えは MemoCard での実績がない点を明記すべき (DR2-003)。全体として設計の方向性は正しく、指摘事項の対処後に実装を進めることが可能である。"
+  }
+}

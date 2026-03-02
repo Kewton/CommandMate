@@ -1,0 +1,95 @@
+{
+  "issue_number": 389,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_date": "2026-03-02",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "priority": "Should Fix",
+      "category": "A07",
+      "title": "auto-save動作中のセッション切れ（認証失効）時のエラーハンドリング不足",
+      "description": "設計書のsaveToApi関数（Section 4.2）では、APIレスポンスの!response.okチェックでエラーをthrowしているが、認証切れ（HTTP 401/リダイレクト）の場合の明示的なハンドリングが設計されていない。CM_AUTH_TOKEN_HASH有効環境では、middleware.tsがトークン検証を行い、認証切れの場合は/loginへリダイレクト（NextResponse.redirect）を返す。fetch APIのデフォルト動作ではリダイレクトに追従し、/loginページのHTMLがレスポンスとして返る。response.json()がHTMLを解析しようとしてエラーとなり、useAutoSaveのリトライが3回実行される。リトライ終了後にエラーフォールバック（Section 4.5）でauto-saveがOFFになるため、データロスは防止される。しかし、ユーザーには'Auto-save failed. Switched to manual save.'というトーストが表示されるのみで、認証切れであることが伝わらない。",
+      "suggestion": "saveToApi内でresponse.statusが401またはresponse.redirectedがtrueの場合を検出し、認証切れ専用のエラーメッセージ（例: 'Session expired. Please re-login.'）を表示することを推奨する。ただし、これはNice to Haveレベルの改善であり、現状でもリトライ上限後にauto-save OFFへフォールバックするため、データロスのリスクは限定的である。Should Fixとしたのは、ユーザー体験改善の観点から。"
+    },
+    {
+      "id": "DR4-002",
+      "priority": "Nice to Have",
+      "category": "A04",
+      "title": "auto-saveデバウンス3秒による最悪ケースAPI呼び出し頻度の明確化",
+      "description": "設計書Section 7.1では最悪ケースとして「1MBファイルの3秒ごとのPUT（継続的編集中）」を記載している。これは1分あたり最大20回のPUT要求に相当する。現行のAPIエンドポイント（PUT /api/worktrees/:id/files/:path）にはレート制限が実装されていないため、理論上はこの頻度でのAPI呼び出しが可能である。ただし、(1) デバウンスにより実際の呼び出し頻度はユーザーの入力停止後のみであること、(2) useAutoSaveのリトライ制限（maxRetries=3、指数バックオフ）により障害時の連続呼び出しが防止されること、(3) 単一ユーザーによるファイル編集操作であること、から実際のDoSリスクは極めて低い。",
+      "suggestion": "現状の設計で問題ない。将来的にマルチユーザー環境やパブリック公開を検討する場合は、APIエンドポイントレベルのレート制限の追加を検討すること。現時点ではYAGNI原則に従い対応不要。"
+    },
+    {
+      "id": "DR4-003",
+      "priority": "Nice to Have",
+      "category": "A05",
+      "title": "auto-saveエラー時のエラーメッセージにスタックトレースが含まれないことの確認",
+      "description": "設計書Section 4.2のsaveToApi関数では、エラー時にdata.error?.message || 'Failed to save file'をthrowしている。APIエンドポイント（route.ts）のcatchブロックではconsole.error('Error updating file:', error)でサーバーサイドにスタックトレースをログし、クライアントには'Failed to update file'という固定文字列を返している（createErrorResponse関数）。Section 4.5のエラーフォールバックではshowToast('Auto-save failed. Switched to manual save.', 'error')で固定文字列を表示しており、スタックトレースやサーバー内部情報がUIに露出するリスクはない。既存のセキュリティ設計が適切に機能している。",
+      "suggestion": "対応不要。既存のエラーハンドリングパターンが正しく適用されている。設計書のerr instanceof Error ? err.message : 'Failed to save file'もフォールバックメッセージを含んでおり適切。"
+    },
+    {
+      "id": "DR4-004",
+      "priority": "Nice to Have",
+      "category": "localStorage",
+      "title": "localStorage保存値のバリデーション関数isValidBooleanの適用確認",
+      "description": "設計書Section 4.3ではuseLocalStorageState呼び出しにvalidate: isValidBooleanを指定しており、これはsrc/types/markdown-editor.tsで定義されたisValidBoolean関数（typeof value === 'boolean'チェック）を使用する。既にMarkdownEditorコンポーネント内でisMaximizedPersisted（Line 151-155）に同一のパターンが使用されている。localStorageに保存されるのはauto-save設定のboolean値のみであり、XSSの攻撃面は存在しない。localStorage値が改ざんされた場合もvalidateによりdefaultValue（false）にフォールバックされるため安全である。",
+      "suggestion": "対応不要。プロジェクト固有のセキュリティ慣行（useLocalStorageStateのvalidate関数の使用）に完全に準拠している。"
+    },
+    {
+      "id": "DR4-005",
+      "priority": "Nice to Have",
+      "category": "A01",
+      "title": "auto-saveによる定期API呼び出しが既存の認証・認可を迂回しないことの確認",
+      "description": "auto-saveはsaveToApi関数経由でPUT /api/worktrees/:id/files/:pathを呼び出す。このAPIエンドポイントは(1) middleware.tsのCM_AUTH_TOKEN_HASHによるトークン認証、(2) IP制限（CM_ALLOWED_IPS）、(3) getWorktreeAndValidatePath関数によるWorktree存在確認+パストラバーサル防止（isPathSafe）、(4) isEditableFileによる拡張子チェック、(5) validateContentによるコンテンツバリデーション（サイズ制限1MB、NULLバイト検出、制御文字警告）を経由する。auto-saveが追加するのはfetch呼び出しの自動化のみであり、これらのセキュリティレイヤーは全て維持される。設計書Section 6.1にも「既存のセキュリティ制約の維持」として明記されている。",
+      "suggestion": "対応不要。認証ミドルウェア、パスバリデーション、コンテンツバリデーションの全てがauto-saveリクエストに対しても同様に適用される。"
+    },
+    {
+      "id": "DR4-006",
+      "priority": "Nice to Have",
+      "category": "A03",
+      "title": "auto-saveで送信されるコンテンツに対する既存サニタイズの適用確認",
+      "description": "auto-saveはsaveToApi内でJSON.stringify({ content: valueToSave })としてコンテンツを送信する。APIエンドポイントのPUTハンドラーではrequest.json()でパース後、validateContent(ext, content)を呼び出し、(1) NULLバイト検出（バイナリデータ拒否）、(2) 制御文字警告、(3) ファイルサイズ制限（1MB）を実施する。updateFileContent関数はwriteFile APIを使用してファイルを書き込む。コンテンツの表示時にはrehype-sanitize（SEC-MF-001）によるXSS防御が適用される。auto-saveが導入しても、これらの入力バリデーションと出力サニタイズのチェーンに変更はない。",
+      "suggestion": "対応不要。インジェクション対策は既存のパイプラインで十分に対応されている。"
+    },
+    {
+      "id": "DR4-007",
+      "priority": "Nice to Have",
+      "category": "A08",
+      "title": "auto-saveの並行保存要求における整合性確認",
+      "description": "useAutoSaveフック内ではデバウンスタイマーが1つのみ管理されており（timerRef.current）、新しい変更が来るとcancelPendingSave()で前回のタイマーをキャンセルしてから新しいタイマーを設定する。executeSave関数は前回の実行完了を待たずに呼ばれる可能性があるが、saveToApi関数はステートレス（各呼び出しで独立したfetchリクエスト）であり、サーバーサイドではwriteFileが最後に書き込まれた値を保持する。同一ファイルに対する複数の書き込みが競合した場合、最後に完了した書き込みが勝つ（Last Write Wins）。この動作は単一ユーザーのauto-saveシナリオでは自然で問題がない。useAutoSaveのexecuteSaveはawaitされるため、デバウンスタイマーが同時に2つのexecuteSaveを発火させることはない（前回のexecuteSaveが完了するまで次のデバウンスタイマーは起動済みだが実行はキューイングされる）。",
+      "suggestion": "対応不要。単一ユーザーの単一エディタインスタンスにおけるauto-save設計として適切。"
+    },
+    {
+      "id": "DR4-008",
+      "priority": "Nice to Have",
+      "category": "A09",
+      "title": "auto-saveエラーのログ記録",
+      "description": "auto-saveエラー発生時の記録箇所は以下の通り: (1) サーバーサイド: route.tsのcatchブロックでconsole.error('Error updating file:', error)、(2) クライアントサイド: useAutoSaveフック内のsetError(lastError)でReact stateに保持、(3) エラーフォールバック時: showToast('Auto-save failed. Switched to manual save.', 'error')でユーザー通知。サーバーサイドのログは本番環境でも記録されるため、監視の観点では問題ない。クライアントサイドのエラーはconsole.errorでブラウザコンソールに出力されないが、useAutoSaveのerror stateとしては保持される。",
+      "suggestion": "現状で十分である。auto-saveエラーがサーバーサイドで適切にログされている。クライアントサイドでも、エラーフォールバックの発火がユーザーに通知されている。"
+    },
+    {
+      "id": "DR4-009",
+      "priority": "Nice to Have",
+      "category": "A02",
+      "title": "localStorageに保存するauto-save設定が機密情報を含まないことの確認",
+      "description": "設計書Section 6.2で明記されている通り、localStorageに保存されるのはauto-save設定のboolean値（true/false）のみである。キー名は'commandmate:md-editor-auto-save'であり、ファイルコンテンツ、パス情報、認証トークン等のセンシティブデータは一切保存されない。これは既存のlocalStorageキー（commandmate:md-editor-view-mode, commandmate:md-editor-split-ratio, commandmate:md-editor-maximized）と同一のパターンであり、暗号化の必要性はない。",
+      "suggestion": "対応不要。設計は暗号化の失敗（A02）のリスクを生じさせない。"
+    },
+    {
+      "id": "DR4-010",
+      "priority": "Nice to Have",
+      "category": "A06",
+      "title": "追加ライブラリ依存の脆弱性リスク",
+      "description": "auto-save機能の実装では新規の外部ライブラリ依存が追加されない。使用されるのは既存のuseAutoSaveフックとuseLocalStorageStateフック（いずれもプロジェクト内部実装）のみである。React本体のuseState/useEffect/useCallback/useRefフック、および標準のfetch APIのみを使用する。サードパーティライブラリの脆弱性リスクは発生しない。",
+      "suggestion": "対応不要。脆弱なコンポーネントのリスクはゼロ。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 9,
+    "overall_assessment": "セキュリティ観点で高品質な設計。auto-save機能は既存のセキュリティインフラストラクチャ（認証ミドルウェア、パスバリデーション、コンテンツバリデーション、XSSサニタイズ）を完全に維持したまま追加される。新たなセキュリティリスクを導入しない設計となっている。Must Fix（必須修正）はゼロ。Should Fix 1件は認証切れ時のユーザー体験改善に関するもので、セキュリティ上の脆弱性ではなく、データロス防止はエラーフォールバック機構で担保されている。localStorageに保存される情報はboolean値のみで機密性なし。APIレート制限は単一ユーザー環境のため現時点で不要。OWASP Top 10の各カテゴリについて確認を完了し、セキュリティ設計は合格と判定する。"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "issue_number": 389,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_date": "2026-03-02",
+  "applied_findings": ["S7-001", "S7-002", "S7-003", "S7-004"],
+  "skipped_findings": ["S7-005", "S7-006"],
+  "skip_reason": {
+    "S7-005": "テストシナリオの詳細化は実装者判断に委ねる",
+    "S7-006": "タイトル変更はIssue開設者の判断に委ねる"
+  },
+  "github_updated": true,
+  "summary": "Stage 7の影響範囲レビューで検出されたShould Fix 4件を全てIssue #389に反映した。S7-001: 実装タスクのテスト更新項目に「既存onClose callbackテスト（3テスト）のauto-saveモード対応更新」を追加し、auto-save ON時にisDirty=trueでsaveNow()が呼ばれてからonClose()が実行されることの確認を明記。S7-002: 影響範囲テーブルのMarkdownEditor.tsx変更箇所(1)および実装タスクに「saveFnのパラメータ（valueToSave）を使用してAPI送信する（クロージャのcontent stateではなく）」の補足を追加。S7-003: 実装タスクのUI追加項目にdata-testid命名（auto-save-toggle、auto-save-indicator）を追加し、影響範囲テーブルの変更箇所(6)にも反映。S7-004: 影響範囲テーブルのMarkdownEditor.tsx変更箇所および実装タスクに「auto-save ON切り替え時にisDirty=trueの場合、initialValueRefによりauto-save対象外となるエッジケースへの対応方針（ON切り替え時にsaveNow()即座呼び出し）」を追加。Nice to Have 2件（S7-005: テストシナリオ詳細化、S7-006: Issueタイトル変更）は実装者/Issue開設者の判断に委ねスキップした。レビュー履歴セクションにStage 7の全4件の反映内容を記録した。"
+}

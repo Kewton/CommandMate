@@ -1,0 +1,48 @@
+{
+  "issue_number": 389,
+  "title": "メモ機能にauto saveモードの追加",
+  "design_policy_path": "dev-reports/design/issue-389-auto-save-design-policy.md",
+  "work_plan_path": "dev-reports/issue/389/work-plan.md",
+  "acceptance_criteria": [
+    "auto-saveトグルでON/OFFを切り替えられること",
+    "auto-save ON時、テキスト変更後3秒で自動保存されること",
+    "auto-save OFF時、現行通りCtrl+S / Saveボタンで手動保存できること",
+    "auto-save設定がリロード後も保持されること（localStorage）",
+    "保存状態（Saving.../Saved）が視覚的に表示されること",
+    "auto-save ON時は、isDirty=false かつ isSaving=false の場合のみbeforeunload警告を抑制する",
+    "auto-save ON時のCtrl+Sキーは、saveNow()を呼び出し即座保存する（その後onSave(filePath)も呼ぶ）",
+    "auto-save失敗時（リトライ上限3回到達後）は、エラーをToastで通知し、手動保存モードにフォールバックすること",
+    "ユニットテストが追加・更新されていること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/types/markdown-editor.ts に LOCAL_STORAGE_KEY_AUTO_SAVE と AUTO_SAVE_DEBOUNCE_MS 定数追加",
+    "Task 2.1: saveToApi 関数の切り出し（saveFnのパラメータ valueToSave を使用。保存成功後 setOriginalContent(valueToSave) を呼ぶ。401/redirected でセッション切れエラー）",
+    "Task 2.2: useAutoSave 統合（useLocalStorageState で isAutoSaveEnabled 永続化、disabled: !isAutoSaveEnabled、debounceMs: AUTO_SAVE_DEBOUNCE_MS）",
+    "Task 2.3: handleAutoSaveToggle 実装（enabled && isDirty の場合は saveNow() 即座呼び出し）",
+    "Task 2.4: エラーフォールバック useEffect（autoSaveError && isAutoSaveEnabled → setAutoSaveEnabled(false) + Toast）",
+    "Task 2.5: beforeunload ハンドラー修正（auto-save ON: isDirty || isAutoSaving、OFF: isDirty のみ）",
+    "Task 2.6: handleKeyDown の Ctrl+S 分岐修正（auto-save ON: await saveNow(); onSave?.(filePath);）",
+    "Task 2.7: handleClose の async 化（auto-save ON + isDirty || isAutoSaving → await saveNow()。autoSaveError があれば confirm ダイアログ）",
+    "Task 2.8: ヘッダー UI（auto-save-toggle、auto-save-indicator、auto-save ON時 Save ボタン非表示、auto-save ON時 Toast 抑制）",
+    "Task 3.1: 既存テストの前提条件明示（auto-save OFF前提コメント追加、handleClose async化対応 waitFor）",
+    "Task 3.2: auto-save ON時の新規テスト追加（beforeunload条件、Save button非表示、Ctrl+S分岐、handleClose分岐）",
+    "Task 3.3: initialValueRefエッジケーステスト（auto-save OFF編集後ONに切り替え → saveNow()確認）"
+  ],
+  "key_files": {
+    "main_implementation": "src/components/worktree/MarkdownEditor.tsx",
+    "types": "src/types/markdown-editor.ts",
+    "test": "tests/unit/components/MarkdownEditor.test.tsx",
+    "reference_hook": "src/hooks/useAutoSave.ts",
+    "reference_hook2": "src/hooks/useLocalStorageState.ts",
+    "reference_pattern": "src/components/worktree/MemoCard.tsx"
+  },
+  "critical_notes": [
+    "saveToApi は async (valueToSave: string) シグネチャ。クロージャの content state ではなく saveFn パラメータを使用",
+    "saveContent は saveToApi を呼ぶが、saveToApi 内で setOriginalContent(valueToSave) を呼ぶため、saveContent 内の setOriginalContent(content) は削除する",
+    "onSaveComplete は使用しない（useAutoSave の onSaveComplete は () => void 型で引数なし）",
+    "auto-save ON時の Ctrl+S: saveNow() 後に onSave?.(filePath) を呼ぶ（手動保存と同様のファイルツリーrefresh）",
+    "disabled の動的切り替え（!isAutoSaveEnabled）は MemoCard での実績なし。Section 8.3 エッジケーステストで検証必須",
+    "handleClose は async 関数に変更。saveNow() は reject しない（エラーは error state に設定）ため、await 後に autoSaveError を確認する"
+  ],
+  "target_coverage": 80
+}
