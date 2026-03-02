@@ -982,11 +982,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [stopReasonPending, setStopReasonPending] = useState(false);
   // Issue #368: Selected agents state (initialized from API, drives terminal header tabs)
   const [selectedAgents, setSelectedAgents] = useState<[CLIToolType, CLIToolType]>(DEFAULT_SELECTED_AGENTS);
-  // Issue #391: Ref to access latest selectedAgents inside fetchWorktree without adding to useCallback deps
+  // Ref to access latest selectedAgents inside fetchWorktree without adding to useCallback deps
   const selectedAgentsRef = useRef(selectedAgents);
-  useEffect(() => {
-    selectedAgentsRef.current = selectedAgents;
-  }, [selectedAgents]);
+  selectedAgentsRef.current = selectedAgents;
   // Issue #368: Vibe-local Ollama model state (initialized from API)
   const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
   // Issue #374: Vibe-local context window state (initialized from API)
@@ -1036,9 +1034,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       }
       const data: Worktree = await response.json();
       setWorktree(data);
-      // Issue #368: Sync selectedAgents from API response
-      // Issue #391: Skip setState when value is unchanged to prevent unnecessary re-renders
-      // and useEffect re-fires in AgentSettingsPane
+      // Skip setState when value is unchanged to prevent unnecessary re-renders
       if (data.selectedAgents) {
         const current = selectedAgentsRef.current;
         const isSame = data.selectedAgents.length === current.length &&

@@ -1,6 +1,5 @@
 /**
  * Tests for AgentSettingsPane component
- * Issue #368: Agent settings UI for selecting 2 CLI tools per worktree
  * @vitest-environment jsdom
  */
 
@@ -59,8 +58,7 @@ describe('AgentSettingsPane', () => {
       expect(geminiCheckbox.checked).toBe(false);
     });
 
-    it('should sync checked state when selectedAgents prop changes (isEditing=false, initial state)', () => {
-      // When not in editing state (default), prop changes should sync to checkedIds
+    it('should sync checked state when selectedAgents prop changes', () => {
       const { rerender } = render(
         <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
       );
@@ -160,8 +158,7 @@ describe('AgentSettingsPane', () => {
       });
     });
 
-    // T1: Issue #391 - isEditing中のprop変更無視
-    it('should not overwrite checkedIds when selectedAgents prop changes during editing (isEditing=true)', async () => {
+    it('should not overwrite local checkbox state when selectedAgents prop changes during editing', async () => {
       const { rerender } = render(
         <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
       );
@@ -185,8 +182,7 @@ describe('AgentSettingsPane', () => {
       expect((screen.getByTestId('agent-checkbox-codex') as HTMLInputElement).checked).toBe(true);
     });
 
-    // T2: Issue #391 - isEditing解除後の同期
-    it('should sync checkedIds with prop after isEditing is released (API success)', async () => {
+    it('should sync checked state with prop after successful API save', async () => {
       mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
 
       const { rerender } = render(
@@ -215,8 +211,7 @@ describe('AgentSettingsPane', () => {
       expect((screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement).checked).toBe(true);
     });
 
-    // T3: Issue #391 - API失敗時のリバート + isEditingリセット
-    it('should revert checkedIds and reset isEditing on API failure (response.ok=false)', async () => {
+    it('should revert checked state on API failure', async () => {
       const { rerender } = render(
         <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
       );
@@ -249,8 +244,7 @@ describe('AgentSettingsPane', () => {
       expect((screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement).checked).toBe(true);
     });
 
-    // T4: Issue #391 - ネットワークエラー時のリバート + isEditingリセット
-    it('should revert checkedIds and reset isEditing on network error (fetch throws)', async () => {
+    it('should revert checked state on network error', async () => {
       const { rerender } = render(
         <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
       );
@@ -283,7 +277,7 @@ describe('AgentSettingsPane', () => {
       expect((screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement).checked).toBe(true);
     });
 
-    it('should not use dangerouslySetInnerHTML (XSS prevention R4-006)', () => {
+    it('should not use dangerouslySetInnerHTML', () => {
       const { container } = render(<AgentSettingsPane {...defaultProps} />);
       // Check that no element has dangerouslySetInnerHTML by looking for __html attribute
       const allElements = container.querySelectorAll('*');
@@ -295,7 +289,7 @@ describe('AgentSettingsPane', () => {
     });
   });
 
-  describe('Context window input (Issue #374)', () => {
+  describe('Context window input', () => {
     const vibeLocalProps = {
       ...defaultProps,
       selectedAgents: ['claude', 'vibe-local'] as [CLIToolType, CLIToolType],

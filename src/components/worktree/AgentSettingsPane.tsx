@@ -1,13 +1,10 @@
 /**
  * AgentSettingsPane Component
- * Issue #368: UI for selecting 2 CLI tools per worktree
  *
+ * UI for selecting 2 CLI tools per worktree.
  * Renders CLI_TOOL_IDS as checkboxes with max 2 selection constraint.
  * When 2 are selected, calls PATCH /api/worktrees/[id] to persist.
- *
  * Also renders Ollama model dropdown when vibe-local is selected.
- *
- * [R4-006] No dangerouslySetInnerHTML - all display names rendered as text nodes.
  */
 
 'use client';
@@ -38,9 +35,9 @@ export interface AgentSettingsPaneProps {
   vibeLocalModel: string | null;
   /** Callback when vibe-local model changes */
   onVibeLocalModelChange: (model: string | null) => void;
-  /** Current vibe-local context window (null = default) - Issue #374 */
+  /** Current vibe-local context window (null = default) */
   vibeLocalContextWindow?: number | null;
-  /** Callback when vibe-local context window changes - Issue #374 */
+  /** Callback when vibe-local context window changes */
   onVibeLocalContextWindowChange?: (value: number | null) => void;
 }
 
@@ -78,9 +75,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
     () => new Set(selectedAgents)
   );
   const [saving, setSaving] = useState(false);
-  // Issue #391: isEditing flag to prevent polling-driven prop sync from overwriting
-  // intermediate checkbox state. Similar Optimistic Sync pattern as contextWindowInput (blur-based).
-  // [S1-001] If 3+ fields adopt this pattern, consider extracting useOptimisticSync hook.
+  // Prevents polling-driven prop sync from overwriting intermediate checkbox state
   const [isEditing, setIsEditing] = useState(false);
 
   // Ollama model state
@@ -88,7 +83,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   const [ollamaError, setOllamaError] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
-  // Issue #374: Context window local input state (decoupled from prop to allow free typing)
+  // Context window local input state (decoupled from prop to allow free typing)
   const [contextWindowInput, setContextWindowInput] = useState<string>(
     vibeLocalContextWindow != null ? String(vibeLocalContextWindow) : ''
   );
@@ -98,8 +93,8 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   const checkedIdsRef = useRef(checkedIds);
   checkedIdsRef.current = checkedIds;
 
-  // Keep local checkbox state in sync with server-backed selectedAgents prop.
-  // Issue #391: Guard with isEditing to prevent polling-driven overwrites during editing.
+  // Keep local checkbox state in sync with server-backed selectedAgents prop,
+  // guarded by isEditing to prevent polling-driven overwrites during editing.
   useEffect(() => {
     if (!isEditing) {
       setCheckedIds(new Set(selectedAgents));
@@ -152,7 +147,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
         next.add(toolId);
       } else {
         next.delete(toolId);
-        setIsEditing(true); // Issue #391: Enter editing state to prevent polling overwrites
+        setIsEditing(true);
       }
       setCheckedIds(next);
 
@@ -167,7 +162,6 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
             body: JSON.stringify({ selectedAgents: pair }),
           });
           if (response.ok) {
-            // [S1-002] Set confirmed value before releasing isEditing
             setCheckedIds(new Set(pair));
             onSelectedAgentsChange(pair);
           } else {
@@ -179,11 +173,10 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
           setCheckedIds(new Set(selectedAgents));
         } finally {
           setSaving(false);
-          setIsEditing(false); // Issue #391: Release editing state (success or failure)
+          setIsEditing(false);
         }
       }
     },
-    // [S1-006] isEditing excluded: setIsEditing is a stable setter reference
     [worktreeId, selectedAgents, onSelectedAgentsChange]
   );
 
@@ -210,7 +203,6 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
     [worktreeId, onVibeLocalModelChange]
   );
 
-  // Issue #374: Handle context window input (local state only, no API call)
   const handleContextWindowInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       setContextWindowInput(e.target.value);
@@ -218,7 +210,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
     []
   );
 
-  // Issue #374: Save context window on blur (when user finishes editing)
+  /** Save context window on blur (when user finishes editing) */
   const handleContextWindowBlur = useCallback(
     async () => {
       const raw = contextWindowInput.trim();
@@ -310,7 +302,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
         </div>
       )}
 
-      {/* Ollama model selector - shown when vibe-local is checked */}
+      {/* Ollama model selector */}
       {isVibeLocalChecked && (
         <div className="mt-4 pt-4 border-t border-gray-200">
           <h4 className="text-sm font-semibold text-gray-700 mb-2">
@@ -343,7 +335,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
             </select>
           )}
 
-          {/* Issue #374: Context window input */}
+          {/* Context window input */}
           <div className="mt-3">
             <h4 className="text-sm font-semibold text-gray-700 mb-2">
               {t('vibeLocalContextWindow')}
