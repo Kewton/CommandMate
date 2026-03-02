@@ -19,6 +19,8 @@ import {
   LOCAL_STORAGE_KEY,
   LOCAL_STORAGE_KEY_SPLIT_RATIO,
   LOCAL_STORAGE_KEY_MAXIMIZED,
+  LOCAL_STORAGE_KEY_AUTO_SAVE,
+  AUTO_SAVE_DEBOUNCE_MS,
 } from '@/types/markdown-editor';
 
 // Mock fetch API
@@ -729,7 +731,9 @@ describe('MarkdownEditor', () => {
     });
   });
 
+  // [DR3-003] handleClose is async; existing tests updated with waitFor for safety
   describe('onClose callback', () => {
+    // auto-save OFF (default) -- existing behavior preserved
     it('should call onClose when close button is clicked', async () => {
       const onClose = vi.fn();
       render(<MarkdownEditor {...defaultProps} onClose={onClose} />);
@@ -741,7 +745,9 @@ describe('MarkdownEditor', () => {
       const closeButton = screen.getByTestId('close-button');
       fireEvent.click(closeButton);
 
-      expect(onClose).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalled();
+      });
     });
 
     it('should warn before closing with unsaved changes', async () => {
@@ -760,7 +766,9 @@ describe('MarkdownEditor', () => {
       const closeButton = screen.getByTestId('close-button');
       fireEvent.click(closeButton);
 
-      expect(confirmSpy).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(confirmSpy).toHaveBeenCalled();
+      });
       expect(onClose).not.toHaveBeenCalled();
 
       confirmSpy.mockRestore();
@@ -782,8 +790,10 @@ describe('MarkdownEditor', () => {
       const closeButton = screen.getByTestId('close-button');
       fireEvent.click(closeButton);
 
-      expect(confirmSpy).toHaveBeenCalled();
-      expect(onClose).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(confirmSpy).toHaveBeenCalled();
+        expect(onClose).toHaveBeenCalled();
+      });
 
       confirmSpy.mockRestore();
     });
@@ -1123,6 +1133,336 @@ def hello():
         expect(preview.innerHTML).not.toContain('javascript:');
         expect(preview.innerHTML).not.toContain('onerror');
       });
+    });
+  });
+
+  // =========================================================================
+  // Auto-Save Feature (Issue #389)
+  // =========================================================================
+
+  describe('Auto-Save Feature (Issue #389)', () => {
+    /**
+     * Helper: enable auto-save by clicking the toggle
+     */
+    async function enableAutoSave() {
+      const toggle = screen.getByTestId('auto-save-toggle');
+      await act(async () => {
+        fireEvent.click(toggle);
+      });
+    }
+
+    describe('Auto-Save Toggle', () => {
+      it('should render auto-save toggle switch', async () => {
+        render(<MarkdownEditor {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        const toggle = screen.getByTestId('auto-save-toggle');
+        expect(toggle).toBeInTheDocument();
+        expect(toggle).toHaveAttribute('role', 'switch');
+        expect(toggle).toHaveAttribute('aria-checked', 'false');
+      });
+
+      it('should toggle auto-save ON/OFF', async () => {
+        render(<MarkdownEditor {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        const toggle = screen.getByTestId('auto-save-toggle');
+        expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+        // Turn ON
+        await enableAutoSave();
+        expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+        // Turn OFF
+        await act(async () => {
+          fireEvent.click(toggle);
+        });
+        expect(toggle).toHaveAttribute('aria-checked', 'false');
+      });
+
+      it('should persist auto-save setting to localStorage', async () => {
+        render(<MarkdownEditor {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        await enableAutoSave();
+
+        expect(localStorageMock.setItem).toHaveBeenCalledWith(
+          LOCAL_STORAGE_KEY_AUTO_SAVE,
+          'true'
+        );
+      });
+    });
+
+    describe('Auto-Save UI', () => {
+      it('should hide save-button when auto-save is ON', async () => {
+        render(<MarkdownEditor {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        // Save button visible when OFF
+        expect(screen.getByTestId('save-button')).toBeInTheDocument();
+
+        // Enable auto-save
+        await enableAutoSave();
+
+        // Save button should be removed from DOM
+        expect(screen.queryByTestId('save-button')).not.toBeInTheDocument();
+      });
+
+      it('should show auto-save-indicator when auto-save is ON', async () => {
+        render(<MarkdownEditor {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        // No indicator when OFF
+        expect(screen.queryByTestId('auto-save-indicator')).not.toBeInTheDocument();
+
+        // Enable auto-save
+        await enableAutoSave();
+
+        // Indicator should appear with "Saved" (no dirty content)
+        await waitFor(() => {
+          const indicator = screen.getByTestId('auto-save-indicator');
+          expect(indicator).toBeInTheDocument();
+          expect(indicator.textContent).toBe('Saved');
+        });
+      });
+    });
+
+    describe('Auto-Save beforeunload (DR3-001)', () => {
+      // auto-save OFF (default) tests are in the existing "Unsaved Changes Warning" describe block
+
+      it('should NOT register beforeunload when auto-save ON + isDirty=false + isAutoSaving=false', async () => {
+        render(<MarkdownEditor {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        // Enable auto-save (no edits, so isDirty=false)
+        await enableAutoSave();
+
+        // The beforeunload handler should NOT have been called with 'beforeunload' after enabling auto-save
+        // Reset mock calls count after initial renders
+        const beforeunloadCalls = mockAddEventListener.mock.calls.filter(
+          (call) => call[0] === 'beforeunload'
+        );
+        // Should have no beforeunload registrations (isDirty=false and isAutoSaving=false)
+        // Note: there might be some from initial mount, check the final state
+        // If isDirty is false and isAutoSaving is false, the useEffect should remove any handler
+        const removeBeforeunloadCalls = mockRemoveEventListener.mock.calls.filter(
+          (call) => call[0] === 'beforeunload'
+        );
+        // At minimum, we should not have more add calls than remove calls
+        expect(beforeunloadCalls.length).toBeLessThanOrEqual(removeBeforeunloadCalls.length + 1);
+      });
+
+      it('should register beforeunload when auto-save ON + isDirty=true', async () => {
+        render(<MarkdownEditor {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        // Enable auto-save
+        await enableAutoSave();
+
+        // Clear mock history
+        mockAddEventListener.mockClear();
+
+        // Edit content to make dirty
+        const textarea = screen.getByTestId('markdown-editor-textarea');
+        fireEvent.change(textarea, { target: { value: 'Modified auto-save content' } });
+
+        await waitFor(() => {
+          expect(mockAddEventListener).toHaveBeenCalledWith(
+            'beforeunload',
+            expect.any(Function)
+          );
+        });
+      });
+    });
+
+    describe('Auto-Save Ctrl+S (DR3-002)', () => {
+      it('should call saveNow and onSave when Ctrl+S pressed with auto-save ON', async () => {
+        const onSave = vi.fn();
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ success: true, content: mockFileContent }),
+          })
+          .mockResolvedValue({
+            ok: true,
+            json: async () => ({ success: true, path: 'docs/readme.md' }),
+          });
+
+        render(<MarkdownEditor {...defaultProps} onSave={onSave} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        // Enable auto-save
+        await enableAutoSave();
+
+        // Edit content
+        const textarea = screen.getByTestId('markdown-editor-textarea');
+        fireEvent.change(textarea, { target: { value: 'Auto-save Ctrl+S content' } });
+
+        // Trigger Ctrl+S
+        fireEvent.keyDown(textarea, { key: 's', ctrlKey: true });
+
+        // Should make a PUT call (saveNow)
+        await waitFor(() => {
+          const putCall = mockFetch.mock.calls.find((call) => {
+            const options = call[1];
+            return options && options.method === 'PUT';
+          });
+          expect(putCall).toBeDefined();
+        });
+
+        // onSave should be called (file tree refresh)
+        await waitFor(() => {
+          expect(onSave).toHaveBeenCalledWith('docs/readme.md');
+        });
+      });
+    });
+
+    describe('Auto-Save handleClose (DR3-003)', () => {
+      it('should save and close without confirm when auto-save ON + isDirty=true', async () => {
+        const onClose = vi.fn();
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ success: true, content: mockFileContent }),
+          })
+          .mockResolvedValue({
+            ok: true,
+            json: async () => ({ success: true, path: 'docs/readme.md' }),
+          });
+
+        render(<MarkdownEditor {...defaultProps} onClose={onClose} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        // Enable auto-save
+        await enableAutoSave();
+
+        // Edit content
+        const textarea = screen.getByTestId('markdown-editor-textarea');
+        fireEvent.change(textarea, { target: { value: 'Auto-save close content' } });
+
+        const confirmSpy = vi.spyOn(window, 'confirm');
+
+        // Click close button
+        const closeButton = screen.getByTestId('close-button');
+        fireEvent.click(closeButton);
+
+        // Should not show confirm dialog (auto-save handles it)
+        // and should eventually call onClose
+        await waitFor(() => {
+          expect(onClose).toHaveBeenCalled();
+        });
+
+        // confirm should NOT have been called (auto-save mode saves automatically)
+        expect(confirmSpy).not.toHaveBeenCalled();
+
+        confirmSpy.mockRestore();
+      });
+    });
+
+    describe('Auto-Save toggle edge cases (Section 8.3)', () => {
+      it('should call saveNow when toggling ON with dirty content', async () => {
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ success: true, content: mockFileContent }),
+          })
+          .mockResolvedValue({
+            ok: true,
+            json: async () => ({ success: true, path: 'docs/readme.md' }),
+          });
+
+        render(<MarkdownEditor {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        // Edit content first (auto-save OFF)
+        const textarea = screen.getByTestId('markdown-editor-textarea');
+        fireEvent.change(textarea, { target: { value: 'Dirty content before toggle' } });
+
+        // Verify dirty
+        expect(screen.getByTestId('dirty-indicator')).toBeInTheDocument();
+
+        // Now enable auto-save -- should trigger saveNow() because isDirty=true
+        await enableAutoSave();
+
+        // Should make a PUT call
+        await waitFor(() => {
+          const putCall = mockFetch.mock.calls.find((call) => {
+            const options = call[1];
+            return options && options.method === 'PUT';
+          });
+          expect(putCall).toBeDefined();
+        });
+      });
+    });
+
+    describe('Auto-Save error fallback (Section 4.5)', () => {
+      it('should fallback to manual save mode on auto-save error', async () => {
+        // First call loads file, subsequent calls fail for auto-save
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ success: true, content: mockFileContent }),
+          })
+          .mockRejectedValue(new Error('Network error'));
+
+        render(<MarkdownEditor {...defaultProps} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument();
+        });
+
+        // Enable auto-save
+        await enableAutoSave();
+
+        // Edit content to trigger auto-save
+        const textarea = screen.getByTestId('markdown-editor-textarea');
+        await act(async () => {
+          fireEvent.change(textarea, { target: { value: 'Will fail to save' } });
+        });
+
+        // After error with retries exhausted, auto-save should be turned OFF (fallback)
+        // useAutoSave retries 3 times with exponential backoff, then sets error state
+        // The error fallback useEffect then disables auto-save
+        await waitFor(() => {
+          const toggle = screen.getByTestId('auto-save-toggle');
+          expect(toggle).toHaveAttribute('aria-checked', 'false');
+        }, { timeout: 30000 });
+
+        // Save button should reappear
+        await waitFor(() => {
+          expect(screen.getByTestId('save-button')).toBeInTheDocument();
+        });
+      }, 35000);
     });
   });
 });

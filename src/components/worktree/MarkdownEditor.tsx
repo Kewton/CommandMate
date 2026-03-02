@@ -5,6 +5,7 @@
  * - Split/Editor-only/Preview-only view modes
  * - Debounced preview updates
  * - Manual save (Ctrl/Cmd+S, save button)
+ * - Auto-save mode with debounce (Issue #389)
  * - Unsaved changes warning (beforeunload)
  * - Large file warning (>500KB)
  * - XSS protection via rehype-sanitize [SEC-MF-001]
@@ -41,6 +42,7 @@ import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { useLocalStorageState } from '@/hooks/useLocalStorageState';
+import { useAutoSave } from '@/hooks/useAutoSave';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import { Z_INDEX } from '@/config/z-index';
@@ -51,6 +53,8 @@ import {
   LOCAL_STORAGE_KEY,
   LOCAL_STORAGE_KEY_SPLIT_RATIO,
   LOCAL_STORAGE_KEY_MAXIMIZED,
+  LOCAL_STORAGE_KEY_AUTO_SAVE,
+  AUTO_SAVE_DEBOUNCE_MS,
   PREVIEW_DEBOUNCE_MS,
   FILE_SIZE_LIMITS,
   DEFAULT_SPLIT_RATIO,
@@ -174,6 +178,13 @@ export function MarkdownEditor({
     validate: isValidSplitRatio,
   });
 
+  // [Issue #389] Auto-save setting with localStorage persistence
+  const { value: isAutoSaveEnabled, setValue: setAutoSaveEnabled } = useLocalStorageState({
+    key: LOCAL_STORAGE_KEY_AUTO_SAVE,
+    defaultValue: false,
+    validate: isValidBoolean,
+  });
+
   // Swipe gesture for exiting maximized mode (mobile)
   const { ref: swipeRef } = useSwipeGesture({
     onSwipeDown: () => {
@@ -240,7 +251,65 @@ export function MarkdownEditor({
   }, [worktreeId, filePath]);
 
   /**
-   * Save file content
+   * [Issue #389] API save function for both manual and auto-save
+   * [DR1-001] Uses saveFn parameter (valueToSave) instead of closure content state
+   * [DR4-001] Session expiry detection (401/redirected)
+   */
+  const saveToApi = useCallback(
+    async (valueToSave: string): Promise<void> => {
+      const response = await fetch(
+        `/api/worktrees/${worktreeId}/files/${filePath}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: valueToSave }),
+        }
+      );
+      // [DR4-001] Session expiry detection before JSON parsing
+      if (response.status === 401 || response.redirected) {
+        throw new Error('Session expired. Please re-login.');
+      }
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error?.message || 'Failed to save file');
+      }
+      // [DR1-001] Update originalContent with the actually saved value
+      setOriginalContent(valueToSave);
+    },
+    [worktreeId, filePath]
+  );
+
+  // [Issue #389] useAutoSave integration
+  // [DR2-001] onSaveComplete is not used; dirty state reset is handled in saveToApi
+  const {
+    isSaving: isAutoSaving,
+    error: autoSaveError,
+    saveNow,
+  } = useAutoSave({
+    value: content,
+    saveFn: saveToApi,
+    debounceMs: AUTO_SAVE_DEBOUNCE_MS,
+    disabled: !isAutoSaveEnabled,
+  });
+
+  /**
+   * [Issue #389] Handle auto-save toggle
+   * [DR1-003] When toggling ON with dirty content, save immediately.
+   * Note: saveNow() cannot be used here because useAutoSave's saveNow checks the
+   * disabled flag from its closure. When setAutoSaveEnabled(true) is called,
+   * disabled still equals true in the current render cycle, so saveNow() would
+   * be a no-op. We call saveToApi(content) directly instead.
+   */
+  const handleAutoSaveToggle = useCallback((enabled: boolean) => {
+    setAutoSaveEnabled(enabled);
+    if (enabled && isDirty) {
+      void saveToApi(content);
+    }
+  }, [setAutoSaveEnabled, isDirty, saveToApi, content]);
+
+  /**
+   * Save file content (manual save - Ctrl+S or Save button)
+   * [DR1-001] saveToApi handles setOriginalContent internally
    */
   const saveContent = useCallback(async () => {
     if (!isDirty || isSaving) return;
@@ -248,23 +317,7 @@ export function MarkdownEditor({
     setIsSaving(true);
 
     try {
-      const response = await fetch(
-        `/api/worktrees/${worktreeId}/files/${filePath}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error?.message || 'Failed to save file');
-      }
-
-      // Update original content to mark as not dirty
-      setOriginalContent(content);
+      await saveToApi(content);
       showToast('File saved successfully', 'success');
 
       if (onSave) {
@@ -276,7 +329,7 @@ export function MarkdownEditor({
     } finally {
       setIsSaving(false);
     }
-  }, [worktreeId, filePath, content, isDirty, isSaving, onSave, showToast]);
+  }, [saveToApi, content, isDirty, isSaving, onSave, filePath, showToast]);
 
   /**
    * Handle content change
@@ -302,18 +355,31 @@ export function MarkdownEditor({
 
   /**
    * Handle close with unsaved changes check
+   * [Issue #389] Async for auto-save support
+   * [DR1-006] saveNow() failure handling with confirm dialog
    */
-  const handleClose = useCallback(() => {
-    if (isDirty) {
-      const confirmed = window.confirm(
-        'You have unsaved changes. Are you sure you want to close?'
-      );
-      if (!confirmed) return;
+  const handleClose = useCallback(async () => {
+    if (isAutoSaveEnabled) {
+      // auto-save ON: save pending changes before closing
+      if (isDirty || isAutoSaving) {
+        await saveNow();
+        // [DR1-006] Check if save failed after saveNow()
+        if (autoSaveError) {
+          const confirmed = window.confirm('Save failed. Close anyway?');
+          if (!confirmed) return;
+        }
+      }
+    } else {
+      // auto-save OFF: traditional confirm dialog
+      if (isDirty) {
+        const confirmed = window.confirm(
+          'You have unsaved changes. Are you sure you want to close?'
+        );
+        if (!confirmed) return;
+      }
     }
-    if (onClose) {
-      onClose();
-    }
-  }, [isDirty, onClose]);
+    onClose?.();
+  }, [isAutoSaveEnabled, isDirty, isAutoSaving, saveNow, autoSaveError, onClose]);
 
   /**
    * [Issue #162] Handle copy content to clipboard
@@ -359,13 +425,22 @@ export function MarkdownEditor({
 
   /**
    * Handle keyboard shortcuts
+   * [Issue #389] Ctrl+S branching for auto-save ON/OFF
    */
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       // Ctrl+S or Cmd+S to save
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        saveContent();
+        if (isAutoSaveEnabled) {
+          // [DR1-009] auto-save ON: saveNow() then onSave for file tree refresh
+          void (async () => {
+            await saveNow();
+            onSave?.(filePath);
+          })();
+        } else {
+          saveContent();
+        }
         return;
       }
 
@@ -383,7 +458,7 @@ export function MarkdownEditor({
         return;
       }
     },
-    [saveContent, toggleFullscreen, exitFullscreen, isMaximized]
+    [saveContent, isAutoSaveEnabled, saveNow, onSave, filePath, toggleFullscreen, exitFullscreen, isMaximized]
   );
 
   // Global ESC key handler for maximized mode
@@ -446,16 +521,22 @@ export function MarkdownEditor({
     loadContent();
   }, [loadContent]);
 
-  // Manage beforeunload handler
+  // [Issue #389] Manage beforeunload handler
+  // auto-save ON: warn if isDirty OR isAutoSaving (debounce pending or save in progress)
+  // auto-save OFF: warn only if isDirty (traditional behavior)
   useEffect(() => {
+    const shouldWarn = isAutoSaveEnabled
+      ? (isDirty || isAutoSaving)
+      : isDirty;
+
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isDirty) {
+      if (shouldWarn) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
 
-    if (isDirty) {
+    if (shouldWarn) {
       beforeUnloadRef.current = handleBeforeUnload;
       window.addEventListener('beforeunload', handleBeforeUnload);
     } else {
@@ -470,7 +551,15 @@ export function MarkdownEditor({
         window.removeEventListener('beforeunload', beforeUnloadRef.current);
       }
     };
-  }, [isDirty]);
+  }, [isDirty, isAutoSaving, isAutoSaveEnabled]);
+
+  // [Issue #389] Auto-save error fallback: disable auto-save and show Toast
+  useEffect(() => {
+    if (autoSaveError && isAutoSaveEnabled) {
+      setAutoSaveEnabled(false);
+      showToast('Auto-save failed. Switched to manual save.', 'error');
+    }
+  }, [autoSaveError, isAutoSaveEnabled, setAutoSaveEnabled, showToast]);
 
   // Calculate container classes for maximized state
   const containerClasses = useMemo(() => {
@@ -696,20 +785,44 @@ export function MarkdownEditor({
             )}
           </button>
 
-          {/* Save button */}
-          <button
-            data-testid="save-button"
-            onClick={saveContent}
-            disabled={!isDirty || isSaving}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              isDirty && !isSaving
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-            }`}
-          >
-            <Save className="h-4 w-4" />
-            {isSaving ? 'Saving...' : 'Save'}
-          </button>
+          {/* [Issue #389] Auto-save toggle */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-gray-500">Auto</span>
+            <button
+              data-testid="auto-save-toggle"
+              role="switch"
+              aria-checked={isAutoSaveEnabled}
+              onClick={() => handleAutoSaveToggle(!isAutoSaveEnabled)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                isAutoSaveEnabled ? 'bg-blue-600' : 'bg-gray-300'
+              }`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                isAutoSaveEnabled ? 'translate-x-4' : 'translate-x-0.5'
+              }`} />
+            </button>
+          </div>
+
+          {/* Save button OR auto-save indicator */}
+          {isAutoSaveEnabled ? (
+            <span data-testid="auto-save-indicator" className="text-sm text-gray-500">
+              {isAutoSaving ? 'Saving...' : isDirty ? '' : 'Saved'}
+            </span>
+          ) : (
+            <button
+              data-testid="save-button"
+              onClick={saveContent}
+              disabled={!isDirty || isSaving}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                isDirty && !isSaving
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              <Save className="h-4 w-4" />
+              {isSaving ? 'Saving...' : 'Save'}
+            </button>
+          )}
 
           {/* Close button */}
           {onClose && (
