@@ -188,7 +188,7 @@ tests/
 | `src/lib/utils.ts` | 汎用ユーティリティ関数（debounce、truncateString、escapeHtml等） |
 | `src/config/editable-extensions.ts` | 編集可能ファイル拡張子設定 |
 | `src/config/file-operations.ts` | 再帰削除の安全設定 |
-| `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義 |
+| `src/types/markdown-editor.ts` | マークダウンエディタ関連型定義（Issue #389: LOCAL_STORAGE_KEY_AUTO_SAVE='commandmate:md-editor-auto-save'、AUTO_SAVE_DEBOUNCE_MS=3000定数追加） |
 | `src/hooks/useContextMenu.ts` | コンテキストメニュー状態管理フック（MouseEvent/TouchEvent対応） |
 | `src/hooks/useFileOperations.ts` | ファイル操作フック（Issue #162: move操作の状態管理、MoveTarget型、UIロジック分離） |
 | `src/hooks/useLongPress.ts` | タッチ長押し検出フック（Issue #123、500ms閾値、10px移動キャンセル） |
@@ -213,6 +213,7 @@ tests/
 | `src/components/worktree/AgentSettingsPane.tsx` | エージェント選択UIコンポーネント（Issue #368: checkbox UIで2ツールまで選択、2選択済み時未選択項目disabled、PATCH APIで永続化、getCliToolDisplayName()使用、MAX_SELECTED_AGENTS=2定数、useRef安定コールバック。**Issue #374: vibeLocalContextWindow props追加、Vibe Local選択時にコンテキストウィンドウ入力欄表示（type=number/min=128/max=2097152/step=1）、VIBE_LOCAL_CONTEXT_WINDOW_MIN/MAX定数使用**。**Issue #391: isEditing stateによるポーリング上書き抑制 - チェック解除中間状態でuseEffectガード（if (!isEditing)）、API完了時finally節でisEditing=false、API成功時setCheckedIds(pair)先行呼び出し**） |
 | `src/components/worktree/NotesAndLogsPane.tsx` | Notes/Logs/Agentサブタブコンテナ（Issue #368: SubTab型に'agent'追加、AgentSettingsPane描画、SUB_TABS設定配列でDRY化） |
 | `src/components/worktree/WorktreeDetailRefactored.tsx` | Worktree詳細画面（Issue #162: handleMoveハンドラー追加、MoveDialog統合、useFileOperations呼び出し。Issue #300: handleNewFile/handleNewDirectory/handleRename/handleDelete/handleFileInputChangeの5箇所でencodeURIComponentをencodePathForUrl()に置換。Issue #368: selectedAgents stateをAPIから取得、デスクトップ/モバイルのハードコード配列を動的置換、activeCliTab sync useEffect。**Issue #391: selectedAgentsRef（useRef+インライン代入）追加、fetchWorktree内でselectedAgents配列同一値チェック（要素順序込み個別比較）、同一値時setSelectedAgentsスキップでポーリング不要発火防止**） |
+| `src/components/worktree/MarkdownEditor.tsx` | マークダウンエディタコンポーネント（**Issue #389: auto-saveモード追加** - auto-save ON/OFFトグル（data-testid="auto-save-toggle"）、useAutoSave統合（debounceMs=3000ms）、saveToApi（純粋API呼び出し、saveFnパラメータを使用）とsaveContent（isDirtyガード付き手動保存）の責務分離、保存状態インジケーター（data-testid="auto-save-indicator"）、auto-save ON時Save非表示、beforeunload条件拡張（isDirty OR isAutoSaving）、Ctrl+S分岐（auto-save ON時はsaveNow()+onSave()）、handleClose async化（saveNow()+autoSaveError確認ダイアログ）、エラーフォールバック（auto-save OFF切り替え+Toast）） |
 | `src/components/worktree/MemoCard.tsx` | メモカードコンポーネント（インライン編集・自動保存・削除ボタン。**Issue #321: コピーボタン追加**、Copy/Checkアイコン切替（2秒）、useRefタイマークリーンアップ（S1-002）、COPY_FEEDBACK_DURATION_MS定数、サイレントエラーハンドリング） |
 | `src/components/worktree/MemoPane.tsx` | メモ一覧コンテナ（最大5件、GET/POST/DELETE操作、ローディング・エラー状態管理） |
 | `src/components/worktree/MemoAddButton.tsx` | メモ追加ボタン（残件数表示、上限時disabled、ローディングインジケーター） |

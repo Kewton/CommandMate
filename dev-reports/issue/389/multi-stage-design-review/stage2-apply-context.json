@@ -1,0 +1,8 @@
+{
+  "issue_number": 389,
+  "review_result_path": "dev-reports/issue/389/multi-stage-design-review/stage2-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-389-auto-save-design-policy.md",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "target": "design_policy_only"
+}

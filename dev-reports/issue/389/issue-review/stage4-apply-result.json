@@ -1,0 +1,56 @@
+{
+  "issue_number": 389,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_date": "2026-03-02",
+  "applied_findings": ["S3-001", "S3-002", "S3-003", "S3-004", "S3-006", "S3-008"],
+  "skipped_findings": ["S3-005", "S3-007", "S3-009", "S3-010"],
+  "skip_reason": {
+    "S3-005": "パフォーマンス考慮は実装者判断に委ねる",
+    "S3-007": "定数配置はmarkdown-editor.tsで問題なし",
+    "S3-009": "i18n対応はスコープ外と明記済み",
+    "S3-010": "useAutoSaveテストへの影響なし"
+  },
+  "applied_details": {
+    "must_fix": [
+      {
+        "id": "S3-001",
+        "status": "applied",
+        "change_summary": "実装タスクの「ユニットテストの追加」を「ユニットテストの追加・更新」に変更し、既存Save Operations(6テスト)、Unsaved Changes Warning(3テスト)、Keyboard Shortcuts Ctrl+S関連テストの更新を明示。auto-save OFF時の既存テスト互換性維持とauto-save ON時の新テスト追加を具体的にサブ項目として記載"
+      },
+      {
+        "id": "S3-002",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルのMarkdownEditor.tsxの変更内容を6項目に拡充: (1) saveToApi/saveContentの2関数化、(2) handleKeyDown Ctrl+S分岐、(3) handleClose auto-save対応、(4) Saveボタン表示制御、(5) beforeunloadハンドラー条件拡張、(6) トグルUI+インジケーター追加。テストファイルも変更対象テーブルに追加"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-003",
+        "status": "applied",
+        "change_summary": "受入条件のCtrl+S記述を「デバウンスをキャンセルしてsaveNow()」から「saveNow()を呼び出し即座保存する（saveNow内部でデバウンスが自動キャンセルされる）」に修正。影響範囲テーブルのuseAutoSave.tsに「saveNow()が内部でcancelPendingSave()を呼び出すため追加API不要」の根拠を補足"
+      },
+      {
+        "id": "S3-004",
+        "status": "applied",
+        "change_summary": "関連コンポーネントセクションに「tests/e2e/markdown-editor.spec.ts - auto-saveトグルUI追加に伴うE2Eテスト確認（デフォルトOFFのため影響は限定的）」を追加"
+      },
+      {
+        "id": "S3-006",
+        "status": "applied",
+        "change_summary": "実装タスクに「auto-save成功時のonSave呼び出し方針：ファイルツリーrefreshの頻度を考慮し、auto-save時のonSave呼び出しはしない（manual saveのみonSaveを呼び出す）」を追加"
+      },
+      {
+        "id": "S3-008",
+        "status": "applied",
+        "change_summary": "実装タスクに「useAutoSaveのerror状態をuseEffect内で監視し、error !== nullの場合にauto-save設定をOFFに切り替え（localStorageも更新）、手動保存UIを復活させる。Toast通知はerror検出時に1回だけ表示する」を追加"
+      }
+    ]
+  },
+  "github_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/389"
+  },
+  "summary": "Stage 3影響範囲レビューの指摘6件（Must Fix 2件、Should Fix 4件）をIssue #389に反映。主な変更: (1) ユニットテストの追加→追加・更新に変更し、既存テスト更新範囲を具体的に明記（S3-001）、(2) 影響範囲テーブルのMarkdownEditor.tsxを6項目の変更箇所に拡充しテストファイルも追加（S3-002）、(3) Ctrl+SのsaveNow()説明を正確な動作記述に修正（S3-003）、(4) E2Eテストを関連コンポーネントに追加（S3-004）、(5) auto-save時のonSave非呼び出し方針を明記（S3-006）、(6) error状態監視によるフォールバック制御フローを実装タスクに追加（S3-008）。スキップ4件はパフォーマンス判断の実装者委任、定数配置の現状維持、i18nスコープ外、useAutoSaveテスト影響なしの理由で適切に除外。"
+}

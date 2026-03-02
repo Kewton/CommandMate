@@ -1,0 +1,198 @@
+{
+  "issue_number": 389,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-02",
+  "previous_findings_check": [
+    {
+      "finding_id": "S1-001",
+      "original_title": "saveContent()のisDirtyガードとuseAutoSaveの競合問題",
+      "status": "resolved",
+      "comment": "実装タスクに「useAutoSave用の保存関数をisDirtyチェックを含まない純粋なAPI呼び出しとして切り出す（MemoCardパターン踏襲）」が追加されている。影響範囲テーブルにも「saveToApi（純粋API呼び出し）とsaveContent（isDirtyガード付き）の2関数化」と明記されており、設計意図が明確に伝わる。"
+    },
+    {
+      "finding_id": "S1-002",
+      "original_title": "beforeunload抑制ロジックの不十分な記述",
+      "status": "resolved",
+      "comment": "受入条件が「auto-save ON時は、isDirty=false かつ isSaving=false（デバウンス・保存進行中でない）の場合のみbeforeunload警告を抑制する。デバウンス待機中またはisSaving=trueの場合は警告を表示する」に修正されている。デバウンス待機中・保存進行中の両方のデータロスシナリオをカバーしている。"
+    },
+    {
+      "finding_id": "S1-003",
+      "original_title": "auto-save ON時のhandleClose()の考慮が未記載",
+      "status": "resolved",
+      "comment": "実装タスクに「auto-save ON時のhandleClose()調整：isSaving中はsaveNow()で即座保存してから閉じる」が追加されている。影響範囲テーブルにも変更箇所(3)として明記。"
+    },
+    {
+      "finding_id": "S1-004",
+      "original_title": "auto-save ON時のCtrl+Sキーボードショートカットの挙動が未定義",
+      "status": "resolved",
+      "comment": "受入条件に「auto-save ON時のCtrl+Sキーは、saveNow()を呼び出し即座保存する（saveNow内部でデバウンスが自動キャンセルされる）」が追加されている。実装者がcancelPendingSaveを別途公開する必要がないことも明記されている。"
+    },
+    {
+      "finding_id": "S1-005",
+      "original_title": "デバウンス間隔3秒のハードコーディングと定数化の指針が未記載",
+      "status": "resolved",
+      "comment": "影響範囲テーブルのsrc/types/markdown-editor.tsに「AUTO_SAVE_DEBOUNCE_MS定数（3000ms）追加」が明記されている。"
+    },
+    {
+      "finding_id": "S1-006",
+      "original_title": "useAutoSaveのerror状態のUI表示方針が不十分",
+      "status": "resolved",
+      "comment": "受入条件に「auto-save失敗時（リトライ上限3回到達後）は、エラーをToastで通知し、手動保存モードにフォールバックすること」が追加されている。実装タスクにはerror状態監視によるOFF切り替えの具体的手順も明記。"
+    },
+    {
+      "finding_id": "S1-008",
+      "original_title": "useAutoSaveのonSaveCompleteコールバック活用の方針が未記載",
+      "status": "resolved",
+      "comment": "実装タスクに「useAutoSaveのonSaveCompleteコールバックでsetOriginalContent(content)とonSave?.(filePath)を呼び出し、保存成功時の状態同期を行う」が追加されている。"
+    },
+    {
+      "finding_id": "S1-009",
+      "original_title": "auto-save ON時のToast通知の抑制検討が未記載",
+      "status": "resolved",
+      "comment": "実装タスクに「auto-save ON時はToast通知を抑制し、ヘッダー内のインラインインジケーターのみで状態を伝える（失敗時のみToast使用）」が追加されている。"
+    },
+    {
+      "finding_id": "S3-001",
+      "original_title": "既存MarkdownEditorテストの大規模更新が必要",
+      "status": "resolved",
+      "comment": "実装タスクの「ユニットテストの追加・更新」に、既存Save Operations(6テスト)、Unsaved Changes Warning(3テスト)、Keyboard Shortcuts Ctrl+S関連テストの更新が具体的にサブ項目として列挙されている。auto-save OFF時の既存テスト互換性維持とauto-save ON時の新テスト追加も明記。"
+    },
+    {
+      "finding_id": "S3-002",
+      "original_title": "saveContent関数分離の波及箇所を影響範囲に明記",
+      "status": "resolved",
+      "comment": "影響範囲テーブルのMarkdownEditor.tsxが6項目（saveToApi/saveContentの2関数化、handleKeyDown Ctrl+S分岐、handleClose auto-save対応、Saveボタン表示制御、beforeunloadハンドラー条件拡張、トグルUI+インジケーター追加）に拡充されている。ただしレビュー履歴セクションでは「5項目」と記載されており、実際のテーブルの6項目と不一致がある（S5-001として後述）。"
+    },
+    {
+      "finding_id": "S3-003",
+      "original_title": "Ctrl+S連携のsaveNow()説明修正",
+      "status": "resolved",
+      "comment": "受入条件の文言が「saveNow()を呼び出し即座保存する（saveNow内部でデバウンスが自動キャンセルされる）」に修正されている。"
+    },
+    {
+      "finding_id": "S3-004",
+      "original_title": "E2Eテストへの影響が未記載",
+      "status": "resolved",
+      "comment": "関連コンポーネントセクションに「tests/e2e/markdown-editor.spec.ts - auto-saveトグルUI追加に伴うE2Eテスト確認（デフォルトOFFのため影響は限定的）」が追加されている。"
+    },
+    {
+      "finding_id": "S3-006",
+      "original_title": "WorktreeDetailRefactoredのhandleEditorSaveコールバックとの整合性",
+      "status": "partially_resolved",
+      "comment": "実装タスクに「auto-save成功時のonSave呼び出し方針：ファイルツリーrefreshの頻度を考慮し、auto-save時のonSave呼び出しはしない（manual saveのみonSaveを呼び出す）」が追加されている。ただし、S1-008で追加された「onSaveCompleteコールバックでsetOriginalContent(content)とonSave?.(filePath)を呼び出し」という記述と矛盾が残っている。詳細はS5-002で後述。"
+    },
+    {
+      "finding_id": "S3-008",
+      "original_title": "auto-save失敗時のフォールバック制御フロー",
+      "status": "resolved",
+      "comment": "実装タスクに「useAutoSaveのerror状態をuseEffect内で監視し、error !== nullの場合にauto-save設定をOFFに切り替え（localStorageも更新）、手動保存UIを復活させる。Toast通知はerror検出時に1回だけ表示する」が追加されている。具体的な制御フローが明確。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "S5-001",
+      "priority": "Should Fix",
+      "category": "整合性",
+      "title": "レビュー履歴セクションのS3-002の記述と影響範囲テーブルの項目数の不一致",
+      "description": "レビュー履歴のStage 3セクションでS3-002の対応として「影響範囲テーブルのMarkdownEditor.tsxを5項目の具体的な変更箇所に拡充」と記載されているが、実際の影響範囲テーブルでは(1)~(6)の6項目が列挙されている。項目(6)「ヘッダーにauto-saveトグルUI+保存インジケーター追加」がカウントに含まれていない。軽微な不一致だが、実装者がレビュー履歴を参照した際に混乱する可能性がある。",
+      "suggestion": "レビュー履歴のS3-002記述を「影響範囲テーブルのMarkdownEditor.tsxを6項目の具体的な変更箇所に拡充」に修正する。"
+    },
+    {
+      "id": "S5-002",
+      "priority": "Must Fix",
+      "category": "整合性",
+      "title": "onSaveCompleteコールバックの実装タスク間で矛盾する記述",
+      "description": "実装タスクの4番目に「useAutoSaveのonSaveCompleteコールバックでsetOriginalContent(content)とonSave?.(filePath)を呼び出し、保存成功時の状態同期を行う」と記載されている一方で、5番目のタスクでは「auto-save成功時のonSave呼び出し方針：ファイルツリーrefreshの頻度を考慮し、auto-save時のonSave呼び出しはしない（manual saveのみonSaveを呼び出す）」と記載されている。前者はonSaveCompleteでonSave?.(filePath)を呼ぶと読めるが、後者はauto-save時のonSave呼び出しはしないと明記しており、矛盾している。実装者はonSaveCompleteコールバック内でsetOriginalContent(content)のみ実行し、onSave(filePath)は呼ばないのが正しい設計意図と推測されるが、明確な記述がない。",
+      "suggestion": "4番目の実装タスクを「useAutoSaveのonSaveCompleteコールバックでsetOriginalContent(content)を呼び出し、dirty状態を解除する（onSave(filePath)はauto-save時には呼ばない。manual save時のみ呼び出す）」に修正する。あるいは、4番目と5番目のタスクを統合して矛盾を解消する。"
+    },
+    {
+      "id": "S5-003",
+      "priority": "Should Fix",
+      "category": "明確性",
+      "title": "beforeunloadハンドラーにおけるデバウンス待機中の検出方法が未明確",
+      "description": "受入条件に「デバウンス待機中またはisSaving=trueの場合は警告を表示する」と記載されているが、useAutoSaveフックの公開APIにはデバウンス待機中を示すフラグが存在しない（公開されているのはisSaving/error/saveNowの3つのみ）。isSavingはexecuteSave()実行中のみtrueになり、デバウンスタイマー待機中（3秒間）はisSaving=falseのまま。isDirty=true かつ isSaving=false の状態でbeforeunload警告を表示する設計であれば、デバウンス待機中もisDirtyがtrueであるため自然にカバーされるが、受入条件の記述から「デバウンス待機中」を別途検知する必要があると読み取れる。実際にはisDirtyチェックで十分であることを明確にすべき。",
+      "suggestion": "受入条件を「auto-save ON時は、isDirty=false かつ isSaving=false の場合のみbeforeunload警告を抑制する。isDirty=true（デバウンス待機中を含む）またはisSaving=trueの場合は警告を表示する」に修正し、デバウンス待機中がisDirtyチェックで自然にカバーされることを括弧内で補足する。あるいは、影響範囲テーブルのbeforeunloadハンドラー条件「isDirty AND isSaving」の記述を「isDirty OR isSaving」に修正する（詳細はS5-004参照）。"
+    },
+    {
+      "id": "S5-004",
+      "priority": "Must Fix",
+      "category": "正確性",
+      "title": "影響範囲テーブルのbeforeunload条件式が論理的に誤り",
+      "description": "影響範囲テーブルのMarkdownEditor.tsx変更箇所(5)に「beforeunloadハンドラーの条件拡張（isDirty AND isSaving）」と記載されている。しかし、受入条件に記載されているロジック「isDirty=false かつ isSaving=false の場合のみ警告を抑制する」の否定は「isDirty=true OR isSaving=true の場合に警告を表示する」であり、「isDirty AND isSaving」ではない。現在のコードのbeforeunloadハンドラー(L451-456)は`if (isDirty)`のみで判定しており、auto-saveモード対応ではこれを`if (isDirty || isSaving)`に拡張するのが正しい。「isDirty AND isSaving」だと、isDirty=true かつ isSaving=false のデバウンス待機中に警告が表示されないことになり、データロスリスクがある。",
+      "suggestion": "影響範囲テーブルの変更箇所(5)を「beforeunloadハンドラーの条件拡張（isDirty OR isSaving）」に修正する。受入条件と整合させる。"
+    },
+    {
+      "id": "S5-005",
+      "priority": "Should Fix",
+      "category": "完全性",
+      "title": "useAutoSaveのinitialValueRef問題がauto-save ON/OFF切り替え時に影響する可能性",
+      "description": "useAutoSaveフック(L88, L182)はinitialValueRefに初期値を記録し、value === initialValueRef.currentの場合はデバウンス保存をスキップする。MarkdownEditorでauto-saveをONにした時点で、useAutoSaveのvalueとしてcontent stateを渡すことになるが、この時点のcontentがinitialValueRefに記録される。問題は、ユーザーが既にcontentを編集済み（isDirty=true）の状態でauto-saveをONに切り替えた場合、その時点のcontentがinitialValueRefとなるため、さらに編集するまでauto-saveが発火しない点である。つまり、auto-save ONに切り替えた時点の未保存変更はauto-saveされず、ユーザーは保存されたと誤解する可能性がある。この実装上のエッジケースが実装タスクに言及されていない。",
+      "suggestion": "実装タスクまたは注意事項として「auto-save ON切り替え時に既に未保存変更がある場合の挙動について：useAutoSaveのinitialValueRefにより切り替え時点の値はauto-save対象外となる。即座にsaveNow()を呼び出して保存するか、useAutoSaveのdisabledフラグをトグルに連動させて再マウント相当の動作にするか、方針を検討すること」を追加する。"
+    },
+    {
+      "id": "S5-006",
+      "priority": "Should Fix",
+      "category": "明確性",
+      "title": "handleClose()のauto-saveモード対応における「isSaving中」以外のケースが未定義",
+      "description": "実装タスクに「auto-save ON時のhandleClose()調整：isSaving中はsaveNow()で即座保存してから閉じる」と記載されているが、auto-save ON かつ isSaving=false かつ isDirty=true（デバウンス待機中）の場合の挙動が未定義。この状態ではデバウンスタイマーがまだ発火前であり、そのまま閉じると未保存の変更が失われる。isSavingの場合だけでなく、isDirtyの場合もsaveNow()を呼び出すべきではないか。",
+      "suggestion": "実装タスクを「auto-save ON時のhandleClose()調整：isDirty=true またはisSaving=true の場合はsaveNow()で即座保存を完了してから閉じる」に修正する。これによりデバウンス待機中の未保存データも確実に保存される。"
+    },
+    {
+      "id": "S5-007",
+      "priority": "Nice to Have",
+      "category": "完全性",
+      "title": "Issueタイトルと実際のスコープの不一致",
+      "description": "Issueタイトルは「メモ機能にauto saveモードの追加」だが、実際の変更対象はMarkdownEditor（ファイル編集エディタ）であり、MemoCard（メモ機能）ではない。MemoCardは参考実装として言及されているだけで、変更対象ではない。タイトルが実装者やレビュアーに誤解を与える可能性がある。",
+      "suggestion": "Issueタイトルを「MarkdownEditorにauto-saveモードの追加」に修正する。"
+    },
+    {
+      "id": "S5-008",
+      "priority": "Nice to Have",
+      "category": "明確性",
+      "title": "auto-save ON/OFF切り替え時のデバウンスタイマー・保存中状態のクリーンアップが未記載",
+      "description": "auto-save ON状態で編集中（デバウンスタイマー待機中またはisSaving=true）にユーザーがauto-saveをOFFに切り替えた場合の挙動が未定義。OFFにした瞬間にデバウンスタイマーをキャンセルし、保存中の操作は完了を待つのか、即座にキャンセルするのか。useAutoSaveのdisabledフラグをtrueにすれば新たなデバウンスは発生しないが、既に実行中のexecuteSave()は中断されない（mountedRef.currentチェックはアンマウント時のみ）。",
+      "suggestion": "このエッジケースは実装者判断で問題ないが、「auto-save OFF切り替え時の進行中保存は完了を待つ（キャンセルしない）」旨を注意事項として記載しておくと実装者の迷いが減る。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "overall_assessment": "Stage 1およびStage 3で指摘された全14件のうち、適用対象の10件が全てIssueに反映されている。前回のMust Fix項目（S1-001: saveContent/saveToApi分離、S1-002: beforeunload条件、S3-001: テスト更新範囲明記、S3-002: 影響範囲の拡充）は全て解決済みである。しかし、2回目のレビューで新たにMust Fix 2件を検出した。(1) S5-002: onSaveCompleteでonSave(filePath)を呼ぶという記述とauto-save時はonSaveを呼ばないという記述の矛盾。(2) S5-004: 影響範囲テーブルのbeforeunload条件式が「isDirty AND isSaving」と記載されているが、受入条件のロジックは「isDirty OR isSaving」であるべき。これらは実装者が条件式を誤って実装するリスクがあるため、修正が必要。Should Fix 4件は、デバウンス待機中の検出方法の明確化、initialValueRefのエッジケース、handleClose()のデバウンス待機中対応、レビュー履歴の項目数不一致である。全体として、Issueの品質は前回レビューから大幅に向上しており、上記のMust Fix 2件を修正すれば実装着手に十分な明確さを持つ。"
+  },
+  "code_references": [
+    {
+      "file": "src/hooks/useAutoSave.ts",
+      "lines": "86-88, 180-184",
+      "relevance": "initialValueRefの初期値保存とデバウンスeffect内のスキップ条件 - S5-005のinitialValueRefエッジケース"
+    },
+    {
+      "file": "src/hooks/useAutoSave.ts",
+      "lines": "35-42",
+      "relevance": "UseAutoSaveResult公開API（isSaving/error/saveNow）- S5-003のデバウンス待機中フラグ非公開の根拠"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "449-473",
+      "relevance": "現在のbeforeunloadハンドラー - S5-004の条件式修正対象"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "306-316",
+      "relevance": "現在のhandleClose() - S5-006のデバウンス待機中対応"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "245-279",
+      "relevance": "現在のsaveContent() - S5-002のonSave呼び出し箇所"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクトのモジュール構造・コーディング規約の参照"
+    }
+  ]
+}

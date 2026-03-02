@@ -1,0 +1,31 @@
+{
+  "issue_number": 389,
+  "feature_summary": "MarkdownEditorにauto-save ON/OFFトグルを追加。auto-save ON時は3秒デバウンスで自動保存、OFF時は手動保存（Ctrl+S/Saveボタン）。設定はlocalStorageで永続化。",
+  "acceptance_criteria": [
+    "auto-saveトグルでON/OFFを切り替えられること",
+    "auto-save ON時、テキスト変更後3秒で自動保存されること",
+    "auto-save OFF時、現行通りCtrl+S / Saveボタンで手動保存できること",
+    "auto-save設定がリロード後も保持されること（localStorage）",
+    "保存状態（Saving.../Saved）が視覚的に表示されること",
+    "auto-save ON時は、isDirty=false かつ isSaving=false の場合のみbeforeunload警告を抑制する",
+    "auto-save ON時のCtrl+Sキーは、saveNow()を呼び出し即座保存する（その後onSave(filePath)も呼ぶ）",
+    "auto-save失敗時（リトライ上限3回到達後）は、エラーをToastで通知し、手動保存モードにフォールバックすること",
+    "ユニットテストが追加・更新されていること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: auto-save OFF デフォルト状態でSaveボタンが表示され、Ctrl+Sで手動保存できる",
+    "シナリオ2: auto-save トグルをONにするとSaveボタンが非表示になりインジケーターが表示される",
+    "シナリオ3: auto-save ON時、テキスト変更後にAPIが自動で呼ばれる（debounce後）",
+    "シナリオ4: auto-save ON時のCtrl+SでsaveNow()とonSave()が呼ばれる",
+    "シナリオ5: auto-save ON時のhandleCloseで未保存データがあれば自動保存してから閉じる",
+    "シナリオ6: auto-save ON時のbeforeunloadがisDirty=false+isAutoSaving=falseの場合は発火しない",
+    "シナリオ7: auto-save 失敗時にエラーToastが表示され手動保存モードにフォールバックする",
+    "シナリオ8: localStorage にauto-save設定が保存される",
+    "シナリオ9: 既存のテスト（Save Operations, Unsaved Changes Warning, onClose callback）が引き続きパスする"
+  ],
+  "implementation_files": [
+    "src/types/markdown-editor.ts",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "tests/unit/components/MarkdownEditor.test.tsx"
+  ]
+}

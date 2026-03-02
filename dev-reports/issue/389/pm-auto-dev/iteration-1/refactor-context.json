@@ -1,0 +1,26 @@
+{
+  "issue_number": 389,
+  "refactor_targets": [
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/types/markdown-editor.ts",
+    "tests/unit/components/MarkdownEditor.test.tsx"
+  ],
+  "quality_metrics": {
+    "before_typescript_errors": 0,
+    "before_eslint_errors": 0,
+    "before_tests_passed": 4266,
+    "before_tests_failed": 0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（コメントの整理）",
+    "不要な重複コードの除去",
+    "SOLID原則への準拠確認",
+    "テストコードの重複排除"
+  ],
+  "constraints": [
+    "機能変更は禁止（リファクタリングのみ）",
+    "全テストが引き続きパスすること",
+    "TypeScript型エラー0件を維持",
+    "ESLintエラー0件を維持"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "issue_number": 389,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "applied_date": "2026-03-02",
+  "applied_findings": ["DR1-001", "DR1-003", "DR1-006", "DR1-009"],
+  "skipped_findings": ["DR1-002", "DR1-004", "DR1-005", "DR1-007", "DR1-008"],
+  "skip_reason": {
+    "DR1-002": "既存パターンの踏襲、即座の変更不要",
+    "DR1-004": "現在2箇所のみ、複雑性増加を避ける",
+    "DR1-005": "実用上の問題なし、テストで確認で十分",
+    "DR1-007": "変更不要、現行設計で十分",
+    "DR1-008": "YAGNI原則に従いboolean型を維持"
+  },
+  "design_doc_updated": true,
+  "summary": "設計方針書に4件のレビュー指摘を反映。DR1-003(Must Fix): Section 8.3にdisabled=trueマウント時のinitialValueRef注意事項と3件のエッジケーステストケースを追加。DR1-001(Should Fix): Section 4.3にonSaveCompleteのcontent参照タイミング問題の注記を追加し、saveToApi内部でsetOriginalContent(valueToSave)を呼ぶ方針に変更。DR1-006(Should Fix): Section 4.8にsaveNow()失敗時の確認ダイアログ設計とフロー図を追加。DR1-009(Should Fix): Section 4.7のhandleKeyDownをsaveNow()成功後にonSave(filePath)を呼び出す設計に更新。Section 11として設計レビュー指摘事項サマリーと実装チェックリストを追加。"
+}

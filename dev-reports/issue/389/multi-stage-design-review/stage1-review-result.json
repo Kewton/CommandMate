@@ -1,0 +1,87 @@
+{
+  "issue_number": 389,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "review_date": "2026-03-02",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "priority": "Should Fix",
+      "category": "SRP",
+      "title": "saveToApi の onSaveComplete 処理で content 参照のタイミング不整合リスク",
+      "description": "設計書 Section 4.3 の onSaveComplete コールバックで setOriginalContent(content) を呼び出している。この content は React の state であり、useAutoSave が非同期で保存完了した時点で、ユーザーが追加入力していた場合に最新の content と実際に保存された valueToSave が不一致になる。MemoCard では onUpdate コールバックに保存処理を委譲しているため同様の問題は起きにくいが、MarkdownEditor では originalContent を直接管理しているため isDirty 判定の不整合が生じ、保存成功直後に isDirty=false になるが実際には未保存のテキスト差分が存在する可能性がある。",
+      "suggestion": "onSaveComplete コールバックで、useAutoSave の saveFn に渡された valueToSave (実際に保存された値) を setOriginalContent に設定すべき。現在の useAutoSave は onSaveComplete に引数を渡さないため、(1) saveToApi 内で保存成功時に setOriginalContent(valueToSave) を呼ぶか、(2) useAutoSave の onSaveComplete を onSaveComplete(savedValue: T) に拡張するかを検討する。設計書の saveToApi は純粋な API 呼び出しとして定義されているため、選択肢 (1) の場合は saveToApi の責務が広がる点に注意が必要。最もシンプルな解決策は、saveToApi 内部で setOriginalContent(valueToSave) を呼ぶこと。"
+    },
+    {
+      "id": "DR1-002",
+      "priority": "Should Fix",
+      "category": "SRP",
+      "title": "saveContent の依存配列が過大であり責務が集中している",
+      "description": "設計書 Section 4.2 の saveContent の useCallback 依存配列が [saveToApi, content, isDirty, isSaving, onSave, filePath, showToast] と 7 つあり、状態管理 (isDirty/isSaving チェック)、API呼び出し (saveToApi)、UI通知 (showToast)、コールバック通知 (onSave)、dirty状態管理 (setOriginalContent) の 5 つの責務を持つ。これは既存コードと同様の構造ではあるが、auto-save 統合に伴い saveToApi と saveContent の役割分担が明示的に分離される設計なので、saveContent 側の責務を見直す好機である。",
+      "suggestion": "現状は既存パターンの踏襲であるため即座の変更は不要だが、将来的には saveContent を (1) ガード (isDirty/isSaving)、(2) 保存実行 (saveToApi)、(3) 成功後処理 (setOriginalContent, showToast, onSave) の 3 段階に分解し、共通のエラーハンドリングは saveToApi 層に統一することを検討する。設計書の現行案で実装を進めても問題はないが、テストの際にモック対象が多くなる点を意識すること。"
+    },
+    {
+      "id": "DR1-003",
+      "priority": "Must Fix",
+      "category": "整合性",
+      "title": "useAutoSave の initialValueRef によるエッジケースの対策が不完全",
+      "description": "設計書 Section 8.3 で initialValueRef のエッジケースを認識しているが、対策として 'ON 切り替え時に saveNow() を呼ぶ' としている。しかし useAutoSave の disabled を false に切り替えた場合、useAutoSave 内部の useEffect (Line 180-197) は value === initialValueRef.current の比較でスキップする。initialValueRef はマウント時の value に固定されるため、disabled=true の期間中にユーザーが編集し再び disabled=false にした場合、value が変わっていても initialValueRef は古いままで、value !== initialValueRef.current が true になりデバウンスタイマーが起動する。ただし、ファイルを新規ロード(loadContent)した場合、content が初期値に戻り initialValueRef.current と一致するケースがあり、その場合 handleAutoSaveToggle の saveNow() だけでは不十分。",
+      "suggestion": "設計書で handleAutoSaveToggle に isDirty チェック + saveNow() を入れている対策は妥当だが、これを『保証された動作』として明記し、テストケースに 'ファイルロード後に auto-save OFF のまま編集 -> auto-save ON に切替' のシナリオを追加すべき。また、useAutoSave のマウント直後に disabled=true で開始する場合、initialValueRef に設定される値がファイルロード前の空文字列になる可能性がある点をテストで確認する必要がある。"
+    },
+    {
+      "id": "DR1-004",
+      "priority": "Nice to Have",
+      "category": "DRY",
+      "title": "handleClose の isDirty + isAutoSaving チェックが beforeunload と重複",
+      "description": "設計書 Section 4.6 (beforeunload) と Section 4.8 (handleClose) で、auto-save ON 時の判定ロジック '(isDirty || isAutoSaving)' が重複している。現状は 2 箇所のみなので許容範囲だが、将来的に同様のガード条件が増える場合 DRY 原則に反する。",
+      "suggestion": "共通の computed value として 'hasUnsavedWork' のような変数を定義し、isDirty || (isAutoSaveEnabled && isAutoSaving) を一元管理することを検討する。例: const hasUnsavedWork = isAutoSaveEnabled ? (isDirty || isAutoSaving) : isDirty; これにより beforeunload と handleClose の両方で利用でき、条件変更時に 1 箇所の修正で済む。"
+    },
+    {
+      "id": "DR1-005",
+      "priority": "Nice to Have",
+      "category": "KISS",
+      "title": "エラーフォールバックの useEffect で autoSaveError 参照の安定性",
+      "description": "設計書 Section 4.5 のエラーフォールバック useEffect は autoSaveError と isAutoSaveEnabled を依存配列に含む。autoSaveError は useAutoSave 内部で new Error() として毎回新しいオブジェクトが生成されるが、既にエラー状態 (autoSaveError !== null) でフォールバック (setAutoSaveEnabled(false)) が実行された後、isAutoSaveEnabled が false になるため再発火はしない。ただし、React のバッチ更新の順序によっては、setAutoSaveEnabled(false) が適用される前に useEffect が再実行される理論的リスクがある。",
+      "suggestion": "現行設計で実用上の問題はないが、より堅牢にするためにはエラーフォールバック処理内で isAutoSaveEnabled の条件チェックを残しつつ、エラー処理済みフラグ (ref) を追加して二重実行を防止する手法がある。ただし KISS 原則に鑑み、テストで二重発火しないことを確認すれば十分。"
+    },
+    {
+      "id": "DR1-006",
+      "priority": "Should Fix",
+      "category": "設計パターン",
+      "title": "auto-save ON 時の handleClose で saveNow() の失敗ハンドリングが未定義",
+      "description": "設計書 Section 4.8 の handleClose で await saveNow() を呼んでいるが、saveNow() が失敗した場合 (ネットワークエラー等) の挙動が設計書に記載されていない。useAutoSave の executeSave はリトライ後にエラーを error state に設定するだけであり、saveNow() 自体は reject しないため await は正常完了する。しかしエラーフォールバック (Section 4.5) により auto-save が OFF になり、その直後に onClose?.() が呼ばれるため、ユーザーは未保存データの喪失リスクに気付かない可能性がある。",
+      "suggestion": "handleClose で saveNow() 後に autoSaveError (または useAutoSave の error state) を確認し、エラーがあった場合は window.confirm で 'Save failed. Close anyway?' のような確認ダイアログを表示する設計を追加すべき。設計書のフロー図にこの分岐を追記することを推奨する。"
+    },
+    {
+      "id": "DR1-007",
+      "priority": "Nice to Have",
+      "category": "YAGNI",
+      "title": "テスト戦略の粒度は適切だが data-testid の過不足を確認",
+      "description": "設計書 Section 9.2 のテストケースで data-testid='auto-save-toggle', 'auto-save-indicator', 'save-button' を活用している。save-button は既存テストでも使用されており整合性がある。auto-save-toggle と auto-save-indicator は新規追加で妥当。追加の data-testid は定義されておらず YAGNI 原則に適合している。",
+      "suggestion": "特段の変更不要。現行のテスト設計で十分なカバレッジが確保できる。"
+    },
+    {
+      "id": "DR1-008",
+      "priority": "Nice to Have",
+      "category": "OCP",
+      "title": "将来の auto-save 設定拡張 (debounce 間隔カスタマイズ等) への拡張性",
+      "description": "設計書では AUTO_SAVE_DEBOUNCE_MS を定数として 3000ms に固定している。現時点では YAGNI に基づき正しい判断だが、将来ユーザーがデバウンス間隔をカスタマイズしたい場合、localStorage にオブジェクト形式で auto-save 設定全体を保存する設計に移行する必要がある。現在の boolean 型 localStorage 値では拡張が制約される。",
+      "suggestion": "現時点では変更不要。将来の拡張が必要になった場合は、LOCAL_STORAGE_KEY_AUTO_SAVE の値を { enabled: boolean, debounceMs?: number } のようなオブジェクト型に移行する。validate 関数もオブジェクト型に対応させる。ただし現段階ではこの拡張は不要であり、YAGNI 原則に従って boolean 型を維持する判断は正しい。"
+    },
+    {
+      "id": "DR1-009",
+      "priority": "Should Fix",
+      "category": "整合性",
+      "title": "auto-save ON 時の Ctrl+S で saveNow() を呼ぶが onSave() (ファイルツリーrefresh) が発火しない",
+      "description": "設計書 Section 4.7 で auto-save ON 時に Ctrl+S が saveNow() を呼ぶ。saveNow() は useAutoSave の executeSave を経由し、onSaveComplete で setOriginalContent(content) を実行するが、onSave() (ファイルツリーrefresh) は呼ばない (Section 7.2)。ユーザーが意図的に Ctrl+S を押した場合はファイルツリーの即座更新を期待する可能性があり、自動デバウンスによる保存とは意味が異なる。",
+      "suggestion": "auto-save ON 時の Ctrl+S は、saveNow() 成功後に onSave(filePath) を呼ぶことを検討する。これにより自動保存 (ファイルツリー更新なし) と手動保存 (ファイルツリー更新あり) の区別が明確になる。ただしこの変更は useAutoSave の onSaveComplete 内ではなく、handleKeyDown 内で saveNow() の完了を await してから onSave を呼ぶ形が適切。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 4,
+    "overall_assessment": "設計方針書は全体として高品質であり、KISS/DRY/YAGNI 原則に適切に従っている。既存の useAutoSave フックと useLocalStorageState フックの再利用判断は優れており、新規コード量を最小限に抑えている。MemoCard のパターン踏襲という方針は実装の確実性を高める。Must Fix は 1 件 (initialValueRef エッジケースのテスト補強) のみであり、全体として設計の方向性は正しい。Should Fix の 3 件 (onSaveComplete の content タイミング問題、handleClose の失敗ハンドリング、Ctrl+S 時の onSave 呼び出し) は実装フェーズで対処可能なレベルである。Nice to Have の 4 件は将来の改善候補として記録にとどめる。"
+  }
+}
