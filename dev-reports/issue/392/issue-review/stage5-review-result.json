@@ -1,0 +1,131 @@
+{
+  "issue_number": 392,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-03-02",
+  "previous_findings_addressed": {
+    "F-001": "addressed",
+    "F-002": "addressed",
+    "F-003": "addressed",
+    "F-004": "addressed",
+    "F-005": "addressed",
+    "F-006": "addressed",
+    "F-007": "addressed",
+    "F-008": "addressed",
+    "IF-001": "addressed",
+    "IF-002": "addressed",
+    "IF-003": "addressed",
+    "IF-004": "addressed",
+    "IF-005": "addressed",
+    "IF-006": "addressed",
+    "IF-007": "addressed",
+    "IF-008": "addressed"
+  },
+  "previous_findings_details": {
+    "F-001": {
+      "status": "addressed",
+      "evidence": "Recommended Direction now presents Option A (validateWorktreePath) as preferred, with concrete before/after code examples showing the replacement of isPathSafe() with validateWorktreePath(customTargetPath, this.config.basePath!)."
+    },
+    "F-002": {
+      "status": "addressed",
+      "evidence": "Impact section now includes 'Directory creation outside CM_ROOT_DIR' bullet detailing executeClone() mkdirSync(parentDir, { recursive: true }) risk at clone-manager.ts:382-385. Affected Code section lists clone-manager.ts:382-385 explicitly."
+    },
+    "F-003": {
+      "status": "addressed",
+      "evidence": "Impact section now includes 'DB persistence of invalid paths' bullet covering onCloneSuccess() at clone-manager.ts:479-515, with explanation of secondary security risk from createRepository() and scanWorktrees(). Affected Code lists clone-manager.ts:479-515."
+    },
+    "F-004": {
+      "status": "addressed",
+      "evidence": "Root Cause section now includes 'Additional input sanitization gap (route.ts:96)' paragraph. Recommended Direction includes 'Additional fix: route.ts input sanitization' subsection with concrete code example (targetDir?.trim() || undefined). Affected Code lists route.ts L49 and L96."
+    },
+    "F-005": {
+      "status": "addressed",
+      "evidence": "New 'Acceptance Criteria (Test Requirements)' section added with 8 numbered test cases covering: relative path resolution, consistent path usage, DB absolute path storage, mkdirSync containment, path traversal rejection, no information leakage, existing absolute path backward compatibility, and existsSync resolved path verification. Additionally, 4 detailed test scenarios (A-D) are provided with concrete path examples."
+    },
+    "F-006": {
+      "status": "addressed",
+      "evidence": "Severity section now includes 'Attack preconditions' with two bullet points covering CM_AUTH_TOKEN_HASH set (insider threat) vs unset (full external attack surface) scenarios."
+    },
+    "F-007": {
+      "status": "addressed",
+      "evidence": "Root Cause Step 1 now contains a parenthetical note: 'Safe path: when customTargetPath is absent, getTargetPath(repoName) returns path.join(this.config.basePath!, repoName) -- an absolute path under basePath. The vulnerability is confined to the customTargetPath branch.' Summary also has a corresponding Note paragraph."
+    },
+    "F-008": {
+      "status": "addressed",
+      "evidence": "Option A code example includes a comment block: 'IMPORTANT (D4-001): Do NOT expose the exception message to the client...' with explanation of rootDir leakage risk. A dedicated 'Security note (D4-001)' paragraph follows the code block."
+    },
+    "IF-001": {
+      "status": "addressed",
+      "evidence": "Acceptance Criteria expanded from 6 to 8 items. New section 'Detailed test scenarios for relative path (IF-001)' added with 4 concrete scenarios (A-D) providing specific path inputs and expected outputs. Criteria #7 (existing absolute path backward compat) and #8 (existsSync resolved path) added."
+    },
+    "IF-002": {
+      "status": "addressed",
+      "evidence": "New 'Error handling note (IF-002)' paragraph added to Option A explaining the exception-vs-boolean pattern mismatch and providing two approaches: minimal-scope try-catch, or a helper function (resolveCustomTargetPath) returning string|null."
+    },
+    "IF-003": {
+      "status": "addressed",
+      "evidence": "Review History notes IF-003 as 'skipped: URL double-decoding design in path-validator.ts noted as future refactoring candidate, out of scope for this Issue.' This is an appropriate disposition for a nice_to_have item outside the Issue's scope."
+    },
+    "IF-004": {
+      "status": "addressed",
+      "evidence": "New 'PR Checklist' section added with explicit item: 'Existing test (clone-manager.test.ts, absolute path customPath test) passes without modification (IF-004 confirmation)'. Acceptance Criteria #7 also addresses this."
+    },
+    "IF-005": {
+      "status": "addressed",
+      "evidence": "Impact section now includes 'No impact on job status/cancel' bullet explaining getCloneJobStatus() and cancelCloneJob() do not reference targetPath. Affected Code lists L594-644 with 'confirmed NO impact' annotation."
+    },
+    "IF-006": {
+      "status": "addressed",
+      "evidence": "Review History notes IF-006 as 'skipped: Frontend api-client.ts does not send targetDir -- noted as informational, no Issue changes needed.' Appropriate disposition."
+    },
+    "IF-007": {
+      "status": "addressed",
+      "evidence": "Review History notes IF-007 as 'skipped: DB schema confirmed unaffected -- no Issue changes needed.' Appropriate disposition."
+    },
+    "IF-008": {
+      "status": "addressed",
+      "evidence": "Review History notes IF-008 as 'skipped: opencode-config.ts local validateWorktreePath() name collision -- informational, no Issue changes needed.' Appropriate disposition."
+    }
+  },
+  "summary": "All 8 findings from Stage 1 (F-001 through F-008) and all 8 findings from Stage 3 (IF-001 through IF-008) have been appropriately addressed in the updated Issue. The Issue is now comprehensive, technically accurate, and implementation-ready. The Review History section provides full traceability of all changes. One minor new observation (N-001) and one nice-to-have suggestion (N-002) were identified, neither of which warrants blocking implementation.",
+  "findings": [
+    {
+      "id": "N-001",
+      "severity": "nice_to_have",
+      "category": "accuracy",
+      "title": "Acceptance Criteria #8 description refers to existsSync but should also mention mkdirSync",
+      "description": "Acceptance Criteria #8 states: 'existsSync uses resolved path: Verify via vi.mocked(existsSync) call argument inspection that the resolved absolute path (not the original relative string) is passed to existsSync()'. This is correct but is a subset of Criteria #2 (consistent path usage). Criteria #2 already requires 'the resolved absolute path is the same value used in existsSync(), job persistence, mkdirSync(), git clone spawn, and DB registration.' Criteria #8 could be considered redundant with #2, but having an explicit existsSync verification criterion is helpful for test specificity, so this is not a problem -- just an observation.",
+      "location": "Issue body, Acceptance Criteria #2 and #8",
+      "recommendation": "No change needed. The redundancy between #2 and #8 is acceptable because #8 specifies the concrete verification mechanism (vi.mocked inspection) while #2 states the general requirement."
+    },
+    {
+      "id": "N-002",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "Validation Notes item #4 (trim whitespace) lacks a concrete test scenario in Acceptance Criteria",
+      "description": "Validation Notes include: '4. targetDir with leading/trailing whitespace is properly trimmed'. However, the Acceptance Criteria (Test Requirements) section does not have a specific test case for the route.ts trim() fix. The 8 numbered criteria and 4 detailed scenarios (A-D) all focus on clone-manager.ts behavior. A trim() test would belong in a route.ts integration test or API-level test rather than in clone-manager.test.ts, which may explain its omission. This is a minor gap since the trim() fix in route.ts is straightforward (single line change) and the PR Checklist already requires `npm run lint` and `npx tsc --noEmit` to pass.",
+      "location": "Issue body, Validation Notes #4 vs Acceptance Criteria section",
+      "recommendation": "Optionally add a note that the route.ts trim() behavior should be verified in an integration or API-level test, or add a 9th acceptance criterion specifically for it. Alternatively, this can be left as-is since the fix is trivial and the Validation Notes section serves as a reminder."
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 0,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Issue #392 has been comprehensively updated across two review iterations and is now in excellent shape for implementation. All 16 findings from the first iteration (5 should_fix + 3 nice_to_have from Stage 1, plus 1 must_fix + 4 should_fix + 3 nice_to_have from Stage 3) have been addressed in the Issue body. The key improvements include: (1) Option A with validateWorktreePath() as the preferred approach with D4-001 security note, (2) full impact analysis covering mkdirSync, DB persistence, and job status/cancel methods, (3) 8 concrete Acceptance Criteria with 4 detailed test scenarios, (4) PR Checklist with backward compatibility confirmation, (5) route.ts input sanitization guidance, and (6) error handling pattern guidance for exception-to-CloneResult conversion. The Issue's technical claims align with the actual codebase (verified against clone-manager.ts, path-validator.ts, route.ts, and clone-manager.test.ts). The Review History section provides full audit trail. No must_fix or should_fix items remain. The Issue is ready for implementation.",
+  "code_verification": {
+    "clone-manager.ts:337": "Confirmed: targetPath = customTargetPath || this.getTargetPath(repoName) -- unresolved customTargetPath used directly",
+    "clone-manager.ts:341": "Confirmed: isPathSafe(customTargetPath, this.config.basePath!) validates but does not resolve",
+    "clone-manager.ts:347": "Confirmed: existsSync(targetPath) uses unresolved path",
+    "clone-manager.ts:352-356": "Confirmed: createCloneJob() receives unresolved targetPath",
+    "clone-manager.ts:382-385": "Confirmed: mkdirSync on parentDir of unresolved targetPath",
+    "clone-manager.ts:389": "Confirmed: spawn('git', ['clone', ..., targetPath]) uses unresolved path",
+    "clone-manager.ts:479-515": "Confirmed: onCloneSuccess() persists unresolved targetPath to DB",
+    "clone-manager.ts:594-614": "Confirmed: getCloneJobStatus() does NOT reference targetPath",
+    "clone-manager.ts:619-644": "Confirmed: cancelCloneJob() does NOT reference targetPath",
+    "path-validator.ts:29-68": "Confirmed: isPathSafe() returns boolean only, does not return resolved path",
+    "path-validator.ts:89-117": "Confirmed: validateWorktreePath() returns resolved absolute path, throws on invalid",
+    "path-validator.ts:102-104": "Confirmed: Error message contains rootDir value (leakage risk noted in D4-001)",
+    "route.ts:96": "Confirmed: targetDir passed without trim() to startCloneJob()",
+    "clone-manager.test.ts:208-225": "Confirmed: Only absolute path customPath test exists, no relative path test"
+  }
+}

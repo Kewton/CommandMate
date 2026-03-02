@@ -1,0 +1,23 @@
+{
+  "issue_number": 392,
+  "feature_summary": "clone target path validation bypass fix - relative customTargetPath is now resolved to absolute path under basePath before use",
+  "acceptance_criteria": [
+    "AC-1: 相対パスの customTargetPath が basePath 内の絶対パスに解決される",
+    "AC-2: 解決済み絶対パスが existsSync/createCloneJob/executeClone/onCloneSuccess で一貫して使用される",
+    "AC-3: DB に保存される targetPath が常に basePath 内の絶対パスである",
+    "AC-4: mkdirSync に渡す parentDir も basePath 内である",
+    "AC-5: パストラバーサル（'../escape'）が INVALID_TARGET_PATH で拒否される",
+    "AC-6: エラーレスポンスに basePath/rootDir が含まれない（D4-001）",
+    "AC-7: 既存の絶対パス customTargetPath テストが引き続きパスする",
+    "AC-8: existsSync に解決済み絶対パスが渡される",
+    "AC-9: route.ts で targetDir が trim() される",
+    "AC-10: targetDir が 1025 文字以上の場合 400 エラーが返る"
+  ],
+  "test_scenarios": [
+    "Scenario A: POST /api/repositories/clone に 'my-repo' (相対パス) を送信 → DB の targetPath が '/tmp/repos/my-repo' になる",
+    "Scenario B: POST /api/repositories/clone に '../escape' を送信 → 400 INVALID_TARGET_PATH",
+    "Scenario C: POST /api/repositories/clone に '/tmp/repos/custom/abs/path' (絶対パス) を送信 → 既存動作と同様に成功",
+    "Scenario D: POST /api/repositories/clone に '  my-repo  ' (空白付き) を送信 → trim されて成功",
+    "Scenario E: POST /api/repositories/clone に 1025 文字の targetDir を送信 → 400 エラー"
+  ]
+}

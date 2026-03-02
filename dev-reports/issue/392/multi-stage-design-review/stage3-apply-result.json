@@ -1,0 +1,107 @@
+{
+  "issue_number": 392,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘反映",
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": [
+    {
+      "id": "S3-001",
+      "severity": "should_fix",
+      "title": "既存テストへの影響根拠の明記",
+      "section_updated": "7-4（新規サブセクション追加）",
+      "status": "reflected",
+      "details": "セクション7-4「既存テストへの影響分析」を新規追加。既存テストが変更不要である理由（path.resolveの絶対パス仕様）を技術的根拠と共に記載"
+    },
+    {
+      "id": "S3-002",
+      "severity": "should_fix",
+      "title": "resolveCustomTargetPath の export がテストインポートに影響",
+      "section_updated": "7-2",
+      "status": "reflected",
+      "details": "セクション7-2にimport文の例を追加: import { CloneManager, CloneManagerError, resetWorktreeBasePathWarning, resolveCustomTargetPath } from '@/lib/clone-manager';"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "title": "integration テスト（api-clone.test.ts）への影響が未分析",
+      "section_updated": "9",
+      "status": "reflected",
+      "details": "セクション9に「[S3-003] 影響あり（テスト追加を検討）」サブセクションを追加。相対パス拒否・trim動作・長さ制限の3テスト追加を検討事項として記載"
+    },
+    {
+      "id": "S3-004",
+      "severity": "nice_to_have",
+      "title": "CLAUDE.md の clone-manager.ts 説明に resolveCustomTargetPath() 追加",
+      "section_updated": "14（実装チェックリスト）",
+      "status": "reflected",
+      "details": "セクション14のStage 3チェックリストに実装完了後のCLAUDE.md更新項目を追加"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "title": "existsSync 引数変化の既存テストへの非影響を補足",
+      "section_updated": "7-1",
+      "status": "reflected",
+      "details": "セクション7-1のT-005以降に[S3-006]補足を追加。既存テストが影響を受けない理由（絶対パス使用、repoNameベース経由）を4項目で記載"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S3-005",
+      "severity": "nice_to_have",
+      "title": "api-client.ts が targetDir を送信しないことの明確化",
+      "reason": "レビュー結果自体が「現状の記載で十分」と評価。セクション9の既存記載で十分カバーされている"
+    },
+    {
+      "id": "S3-007",
+      "severity": "nice_to_have",
+      "title": "executeClone/onCloneSuccess への間接的影響の確認記述が適切",
+      "reason": "レビュー結果自体が「現状の記載で十分」と評価。設計方針書の既存記載が適切であることの確認のみ"
+    }
+  ],
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "item": "S3-001: 既存テストへの影響根拠の明記",
+        "section_updated": "7-4",
+        "status": "reflected"
+      },
+      {
+        "item": "S3-002: resolveCustomTargetPath の export がテストインポートに影響",
+        "section_updated": "7-2",
+        "status": "reflected"
+      },
+      {
+        "item": "S3-003: integration テストへの影響が未分析",
+        "section_updated": "9",
+        "status": "reflected"
+      },
+      {
+        "item": "S3-006: existsSync 引数変化の既存テストへの非影響を補足",
+        "section_updated": "7-1",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "item": "S3-004: CLAUDE.md への追記必要性の記録",
+        "section_updated": "14",
+        "status": "reflected"
+      }
+    ]
+  },
+  "sections_updated": [
+    "7-1（T-005 existsSync非影響の補足追加）",
+    "7-2（import文の明記追加）",
+    "7-4（既存テストへの影響分析 - 新規サブセクション）",
+    "9（integration テスト検討事項追加）",
+    "12（Stage 3 レビュー履歴行追加）",
+    "13（S3-001〜S3-007 指摘事項サマリー追加）",
+    "14（Stage 3 実装チェックリスト追加）"
+  ],
+  "design_doc_path": "dev-reports/design/issue-392-clone-path-validation-fix-design-policy.md",
+  "timestamp": "2026-03-02T00:00:00Z",
+  "summary": "Stage 3 影響分析レビューの指摘事項7件中5件を設計方針書に反映。should_fix 4件（S3-001, S3-002, S3-003, S3-006）は全て反映済み。nice_to_have 3件中1件（S3-004）をチェックリストに反映、2件（S3-005, S3-007）は既存記載で十分としてスキップ。主な変更: セクション7-4（既存テスト影響分析）の新規追加、セクション7-2へのimport文明記、セクション9へのintegrationテスト検討事項追加、セクション7-1のT-005補足追加、セクション14のStage 3チェックリスト追加。"
+}

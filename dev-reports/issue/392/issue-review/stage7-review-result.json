@@ -1,0 +1,93 @@
+{
+  "issue_number": 392,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-03-02",
+  "previous_findings_addressed": {
+    "IF-001": "addressed",
+    "IF-002": "addressed",
+    "IF-004": "addressed",
+    "IF-005": "addressed"
+  },
+  "previous_findings_details": {
+    "IF-001": {
+      "status": "addressed",
+      "original_title": "相対パス customTargetPath に対するテストケースが完全に欠如している",
+      "evidence": "Acceptance Criteria has been expanded from 6 to 9 items. Criteria #1 now explicitly requires relative path resolution verification. Criteria #7 requires existing absolute path tests to remain passing. Criteria #8 requires existsSync call argument inspection via vi.mocked(). 'Detailed test scenarios for relative path (IF-001)' section provides 5 concrete scenarios (A-E) with specific path inputs and expected outputs. Scenario A ('tmp-escape' -> '/tmp/repos/tmp-escape'), Scenario B ('nested/deep/repo' -> '/tmp/repos/nested/deep/repo'), Scenario C ('../escape' -> rejection), Scenario D (DB stores absolute path), and Scenario E (route.ts whitespace trimming). This comprehensively addresses the original must_fix finding."
+    },
+    "IF-002": {
+      "status": "addressed",
+      "original_title": "Option A 採用時のエラー処理パターンが既存コードと異なる",
+      "evidence": "Option A section now includes a dedicated 'Error handling note (IF-002)' paragraph that explicitly describes the exception-vs-boolean pattern mismatch and provides two concrete approaches: (1) minimal-scope try-catch that catches the exception and converts it to the existing CloneResult error object pattern, and (2) a helper function (resolveCustomTargetPath(path, basePath): string | null) that returns the resolved path on success or null on failure. Both approaches align with the existing null-check/boolean pattern used by validateCloneRequest() and checkDuplicateRepository()."
+    },
+    "IF-004": {
+      "status": "addressed",
+      "original_title": "既存テスト L208-225 の customPath アサーションが修正後も通るかの確認が必要",
+      "evidence": "Acceptance Criteria #7 explicitly requires: 'Existing absolute path tests remain passing: The existing test case with absolute path customTargetPath (e.g., \"/tmp/repos/custom/target/path\") MUST continue to pass without modification.' The criterion includes the technical rationale: 'path.resolve() returns an absolute second argument unchanged, so validateWorktreePath(\"/tmp/repos/custom/target/path\", \"/tmp/repos\") returns \"/tmp/repos/custom/target/path\" -- same value as before.' PR Checklist also includes an explicit confirmation item: 'Existing test (clone-manager.test.ts, absolute path customPath test) passes without modification (IF-004 confirmation)'."
+    },
+    "IF-005": {
+      "status": "addressed",
+      "original_title": "getCloneJobStatus() と cancelCloneJob() は targetPath を使用しないため影響なし（確認済み）",
+      "evidence": "Impact section now includes a dedicated bullet: 'No impact on job status/cancel: getCloneJobStatus() (L594-614) and cancelCloneJob() (L619-644) do not reference targetPath -- they operate on jobId and process handles only.' Affected Code section lists 'src/lib/clone-manager.ts:594-644 (getCloneJobStatus() / cancelCloneJob() -- confirmed NO impact, do not reference targetPath)'. This is verified against the actual source code: getCloneJobStatus() (L594-614) returns status/progress/repositoryId/error only; cancelCloneJob() (L619-644) uses activeProcesses Map and job status only."
+    }
+  },
+  "new_findings_check": {
+    "acceptance_criteria_9_impact": {
+      "description": "Acceptance Criteria #9 (route.ts targetDir trim) was added in Stage 6 based on N-002 finding. This criterion requires that targetDir with leading/trailing whitespace is trimmed before being passed to startCloneJob(). The impact scope of this change is minimal: it affects only route.ts:96 where a single-line modification (targetDir?.trim() || undefined) is needed. The trim() call returns the same string type, so no type-level impact exists. The clone-manager.ts startCloneJob() signature (customTargetPath?: string) remains unchanged. No additional files or modules are affected by this criterion.",
+      "impact_assessment": "No new impact scope concerns. The change is confined to route.ts:96."
+    },
+    "scenario_e_impact": {
+      "description": "Scenario E ('  my-repo  ' -> trimmed to 'my-repo') was added as a detailed test scenario. This scenario targets route.ts-level behavior and would require either an integration test or API-level test rather than a clone-manager.test.ts unit test. The Issue correctly notes this is a route.ts concern. No additional impact scope concerns.",
+      "impact_assessment": "No new impact scope concerns. Test location (route.ts test vs clone-manager.test.ts) is appropriately scoped."
+    }
+  },
+  "impact_scope_completeness_check": {
+    "affected_files_accuracy": {
+      "status": "complete",
+      "details": "The Issue's Affected Code section lists all relevant files: (1) route.ts L49/L96 -- input handling, confirmed correct; (2) clone-manager.ts L301/L336/L341/L352/L389 -- startCloneJob flow, confirmed correct against actual code; (3) clone-manager.ts:382-385 -- executeClone mkdirSync, confirmed correct; (4) clone-manager.ts:479-515 -- onCloneSuccess DB persistence, confirmed correct; (5) clone-manager.ts:594-644 -- confirmed NO impact, correct; (6) path-validator.ts:89-117 -- validateWorktreePath, confirmed correct. All line numbers have been verified against the actual source code."
+    },
+    "modification_scope": {
+      "status": "complete",
+      "details": "Files requiring modification: (1) clone-manager.ts -- import change (isPathSafe -> validateWorktreePath), L341 logic replacement (isPathSafe boolean check -> try-catch with validateWorktreePath), L337 targetPath assignment updated to use resolved path; (2) route.ts L96 -- add trim() to targetDir. Files NOT requiring modification: executeClone(), onCloneSuccess(), getCloneJobStatus(), cancelCloneJob() -- all confirmed no code changes needed, only the value flowing through targetPath changes. This scope is accurately described in the Issue."
+    },
+    "dependency_impact": {
+      "status": "complete",
+      "details": "The only dependency change is the import in clone-manager.ts switching from isPathSafe to validateWorktreePath, both from the same module (path-validator.ts). No new external dependencies are introduced. No package.json changes needed."
+    },
+    "breaking_changes": {
+      "status": "none_identified",
+      "details": "The Issue correctly identifies that there are no breaking changes. The API contract for POST /api/repositories/clone remains identical (same request/response schema). The CloneManager.startCloneJob() method signature is unchanged. The only behavioral change is that relative customTargetPath values are now resolved to absolute paths under basePath before use -- this is a security fix that makes the actual behavior match the documented/intended behavior."
+    },
+    "test_scope": {
+      "status": "complete",
+      "details": "The Issue identifies 9 acceptance criteria covering: relative path resolution (AC#1), consistent path usage (AC#2), DB absolute path storage (AC#3), mkdirSync containment (AC#4), path traversal rejection (AC#5), no information leakage (AC#6), existing test backward compatibility (AC#7), existsSync verification (AC#8), route.ts trim (AC#9). 5 detailed scenarios (A-E) provide concrete test implementations. Test file location is correctly identified as clone-manager.test.ts for AC#1-8 and route.ts test for AC#9/Scenario E. The PR Checklist requires npm run test:unit, npm run lint, and npx tsc --noEmit."
+    },
+    "documentation_updates": {
+      "status": "not_required",
+      "details": "No user-facing documentation updates are needed. The fix corrects internal security behavior to match the existing documented behavior (CM_ROOT_DIR containment). CLAUDE.md module descriptions may optionally be updated after implementation, but this is not blocking."
+    }
+  },
+  "summary": "All 4 actionable findings from Stage 3 (1 must_fix IF-001, 3 should_fix IF-002/IF-004/IF-005) have been fully addressed in the updated Issue. IF-001 (relative path test coverage gap) is comprehensively addressed with 9 acceptance criteria and 5 detailed test scenarios including concrete path examples. IF-002 (error handling pattern mismatch) is addressed with explicit guidance for try-catch conversion or helper function approach. IF-004 (existing test backward compatibility) is addressed in both Acceptance Criteria #7 and PR Checklist. IF-005 (no-impact confirmation for getCloneJobStatus/cancelCloneJob) is addressed in both the Impact section and Affected Code annotations. The Stage 6 addition of Acceptance Criteria #9 (N-002) introduces no new impact scope concerns -- it is a single-line change confined to route.ts:96. The overall impact scope is accurately and completely documented: 2 files require modification (clone-manager.ts and route.ts), 0 files require deletion, 0 new files are created, and no breaking changes exist.",
+  "findings": [],
+  "must_fix_count": 0,
+  "should_fix_count": 0,
+  "nice_to_have_count": 0,
+  "overall_assessment": "Issue #392 has reached full maturity from an impact scope perspective. After 3 iterations of review (Stage 3 initial impact review, Stage 5 content review confirming all prior findings, and this Stage 7 second impact review), the Issue now provides a complete and accurate picture of the modification scope, affected files, test requirements, and backward compatibility guarantees. All line number references have been verified against the actual codebase and are accurate. The modification scope is precisely bounded: clone-manager.ts (import change + L337/L341 logic replacement) and route.ts (L96 trim addition). The 9 acceptance criteria with 5 concrete test scenarios provide sufficient coverage for implementation verification. The PR Checklist ensures both unit test pass-through and backward compatibility confirmation. No new impact scope issues were identified. The Issue is ready for implementation.",
+  "code_verification": {
+    "clone-manager.ts:18": "Confirmed: import { isPathSafe } from './path-validator' -- will change to import { validateWorktreePath }",
+    "clone-manager.ts:337": "Confirmed: targetPath = customTargetPath || this.getTargetPath(repoName) -- must be updated to use resolved path from validateWorktreePath",
+    "clone-manager.ts:341": "Confirmed: isPathSafe(customTargetPath, this.config.basePath!) -- will be replaced with validateWorktreePath try-catch",
+    "clone-manager.ts:347": "Confirmed: existsSync(targetPath) -- will receive resolved absolute path after fix (no code change to this line)",
+    "clone-manager.ts:352-356": "Confirmed: createCloneJob({ targetPath }) -- will receive resolved absolute path (no code change)",
+    "clone-manager.ts:382-385": "Confirmed: mkdirSync on parentDir -- will receive resolved absolute parent (no code change to executeClone)",
+    "clone-manager.ts:389": "Confirmed: spawn git clone with targetPath -- will receive resolved absolute path (no code change to executeClone)",
+    "clone-manager.ts:479-515": "Confirmed: onCloneSuccess persists targetPath -- will receive resolved absolute path (no code change)",
+    "clone-manager.ts:594-614": "Confirmed: getCloneJobStatus does NOT reference targetPath -- no impact",
+    "clone-manager.ts:619-644": "Confirmed: cancelCloneJob does NOT reference targetPath -- no impact",
+    "route.ts:96": "Confirmed: targetDir passed without trim() -- single-line fix needed",
+    "path-validator.ts:89-117": "Confirmed: validateWorktreePath returns resolved absolute path via path.resolve(rootDir, decodedPath)",
+    "path-validator.ts:102-104": "Confirmed: Error message contains rootDir value -- D4-001 information leakage risk properly documented",
+    "clone-manager.test.ts:208-225": "Confirmed: Absolute path customPath test -- backward compatible per AC#7 analysis",
+    "clone-manager.test.ts:227-235": "Confirmed: Path traversal rejection test exists -- AC#5 partially covered by existing test"
+  }
+}

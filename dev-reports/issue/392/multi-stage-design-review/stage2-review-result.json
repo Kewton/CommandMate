@@ -1,0 +1,64 @@
+{
+  "issue_number": 392,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_date": "2026-03-02",
+  "focus_area": "整合性",
+  "summary": "設計方針書と実際のコードベースとの整合性を4つの観点（コード記述の正確性、設計書内部の整合性、既存コードとの整合性、CLAUDE.mdとの整合性）で検証した。行番号の参照、Before/Afterコード例、関数シグネチャ、import文の記述はすべて実際のソースコードと一致しており、高い品質を確認した。must_fix指摘はなく、should_fix 2件、nice_to_have 2件を検出した。",
+  "findings": [
+    {
+      "id": "S2-001",
+      "severity": "should_fix",
+      "category": "doc_alignment",
+      "title": "CLAUDE.md の resolveDefaultBasePath() 優先順位記述と実コードの不一致",
+      "description": "CLAUDE.md L180 では clone-manager.ts の resolveDefaultBasePath() の優先順位を 'CM_ROOT_DIR/WORKTREE_BASE_PATH/process.cwd()' と記載しているが、実際の resolveDefaultBasePath() メソッド（clone-manager.ts L222-234）は CM_ROOT_DIR を直接参照せず、WORKTREE_BASE_PATH -> process.cwd() の2段階フォールバックのみを実装している。CM_ROOT_DIR は route.ts L91-92 で getEnv().CM_ROOT_DIR を取得し CloneManager コンストラクタの config.basePath として外部から注入される構造である。設計方針書ではこの構造を正しく理解しており（route.ts 経由の CM_ROOT_DIR -> basePath 注入を前提としている）、設計方針書自体には問題はないが、CLAUDE.md の記述が不正確であり、将来のレビューや実装時に混乱を招く可能性がある。",
+      "location": "CLAUDE.md L180 / clone-manager.ts L222-234",
+      "recommendation": "CLAUDE.md の clone-manager.ts の説明を 'resolveDefaultBasePath()でWORKTREE_BASE_PATH/process.cwd()優先順位制御（CM_ROOT_DIRはroute.tsからconfig.basePathとして注入）' のように修正する。ただし本修正はIssue #392のスコープ外であり、別途対応を推奨する。"
+    },
+    {
+      "id": "S2-002",
+      "severity": "should_fix",
+      "category": "internal_consistency",
+      "title": "セクション4-1のヘルパー関数定義とセクション5-2bの定義に export キーワードの差異",
+      "description": "セクション4-1（L84-96）では resolveCustomTargetPath() を 'function resolveCustomTargetPath(...)' と export なしで定義し、本文中で '@internal export としてテストからアクセス可能にする'（L110）と記載している。一方、セクション5-2b（L174）では 'export function resolveCustomTargetPath(...)' と明示的に export 付きで定義している。セクション4-1は設計パターンの概念説明であり、セクション5-2bが実装の詳細設計であるため、実装時に従うべきはセクション5-2bの export 付き定義である。しかし、同一関数の定義が2箇所で微妙に異なることは実装者に混乱を招きうる。",
+      "location": "設計方針書 セクション4-1 (L84) vs セクション5-2b (L174)",
+      "recommendation": "セクション4-1のコード例にも export キーワードを追加するか、セクション4-1は概念説明であり実装の正式な定義はセクション5-2bに従う旨の注記を追加する。"
+    },
+    {
+      "id": "S2-003",
+      "severity": "nice_to_have",
+      "category": "internal_consistency",
+      "title": "ヘルパー関数配置位置の記述 'L193付近' の精度",
+      "description": "セクション5-2b（L160）では resolveCustomTargetPath() を 'CloneManager クラス定義の直前（L193付近）にモジュールスコープ関数として追加' と記載している。実際のコードでは CloneManager クラスの export class 宣言は L194 にある。L193 はクラスのJSDocコメントの最終行（'*/'）であるため、ヘルパー関数を挿入するならその直前、つまり L183-193 の間（既存の resetWorktreeBasePathWarning 関数の後、クラスのJSDocの前）が適切な位置となる。L193は概ね正確だが、JSDocコメントの存在を考慮すると 'L182付近（resetWorktreeBasePathWarning() の直後）' がより正確な表現である。",
+      "location": "設計方針書 セクション5-2b (L160)",
+      "recommendation": "挿入位置を 'resetWorktreeBasePathWarning() の直後、CloneManager クラスの JSDoc コメントの直前（L182付近）' のように修正する。実装には影響しない軽微な事項である。"
+    },
+    {
+      "id": "S2-004",
+      "severity": "nice_to_have",
+      "category": "code_accuracy",
+      "title": "セクション5-2a の import Before コードに validateWorktreePath の既存 import 有無の確認",
+      "description": "セクション5-2a（L149-153）では import の Before/After を示しており、Before は 'import { isPathSafe } from ./path-validator' のみである。実際のコード（clone-manager.ts L18）でも 'import { isPathSafe } from ./path-validator' のみであり、validateWorktreePath は import されていないことを確認した。この点は正確である。ただし、S1-004 の記述（L156）で 'isPathSafe の直接使用箇所は startCloneJob() の L341 のみであることを確認済み' とあるが、import 文（L18）自体も使用箇所の一つであるため、'L341 での使用' という表現が import を含まない本体コードのみを指していることは文脈から明らかだが、厳密性の観点からは 'L341 での呼び出しのみ' と表現する方が明確である。",
+      "location": "設計方針書 セクション5-2a (L156)",
+      "recommendation": "'isPathSafe() の直接呼び出し箇所は startCloneJob() の L341 のみ' のように表現を微調整する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 2,
+  "overall_assessment": "設計方針書の品質は高い。Before/After コード例は実際のソースコード（clone-manager.ts L336-343、route.ts L96、path-validator.ts の validateWorktreePath シグネチャ）と正確に一致しており、行番号参照も正確である。テストケース設計（T-001〜T-006, H-001〜H-004, R-001〜R-002）は修正方針と整合しており、既存テストファイルの basePath='/tmp/repos' パターンとも一致している。実装チェックリスト（セクション14）は Stage 1 レビュー指摘事項をすべて網羅している。validateWorktreePath() の decodeURIComponent 二重適用リスク（S1-002）も正確に識別されており、スコープ外として適切に記録されている。must_fix 指摘なしの conditionally_approved ステータスとする。",
+  "reviewed_files": [
+    "src/lib/clone-manager.ts",
+    "src/lib/path-validator.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "tests/unit/lib/clone-manager.test.ts",
+    "CLAUDE.md"
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "status": "conditionally_approved",
+  "score": 4
+}

@@ -1,0 +1,42 @@
+{
+  "issue_number": 392,
+  "title": "security: clone target path validation bypass allows repositories outside CM_ROOT_DIR",
+  "acceptance_criteria": [
+    "相対パスの customTargetPath（例: 'my-repo'）が basePath 内の絶対パス（'/tmp/repos/my-repo'）に解決されること",
+    "existsSync/createCloneJob/executeClone/onCloneSuccess で解決済み絶対パスが使用されること",
+    "DB に保存される targetPath が常に basePath 内の絶対パスであること",
+    "mkdirSync に渡す parentDir も basePath 内であること",
+    "パストラバーサル（'../escape'）が INVALID_TARGET_PATH で拒否されること",
+    "エラーレスポンスに basePath/rootDir が含まれないこと（D4-001）",
+    "既存の絶対パス customTargetPath テストが引き続きパスすること",
+    "existsSync に解決済み絶対パスが渡されること（vi.mocked(existsSync) 引数確認）",
+    "route.ts で targetDir が trim() されること（'  my-repo  ' → 'my-repo'）",
+    "targetDir が 1025 文字以上の場合 400 エラーが返ること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: clone-manager.ts の import を isPathSafe → validateWorktreePath に変更",
+    "Task 1.2: resolveCustomTargetPath() ヘルパー関数を clone-manager.ts に追加（export function、console.warn付き）",
+    "Task 1.3: startCloneJob() のパス処理を修正（customTargetPath を resolveCustomTargetPath() 経由で解決済み絶対パスに変換）",
+    "Task 1.4: route.ts の targetDir に trim() と 1024 文字制限を追加（MAX_TARGET_DIR_LENGTH 定数）",
+    "Task 2.1: resolveCustomTargetPath() の単体テスト追加（H-001〜H-004）",
+    "Task 2.2: startCloneJob() の相対パステスト追加（T-001〜T-006）",
+    "Task 2.3: validateWorktreePath() 二重デコード安全性テスト追加（S4-001-T1〜T3）",
+    "Task 2.4: api-clone.test.ts に targetDir trim/長さ制限テスト追加（R-001〜R-003）"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-392-clone-path-validation-fix-design-policy.md",
+  "work_plan_path": "dev-reports/issue/392/work-plan.md",
+  "key_files": [
+    "src/lib/clone-manager.ts",
+    "src/lib/path-validator.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "tests/unit/lib/clone-manager.test.ts",
+    "tests/integration/api-clone.test.ts"
+  ],
+  "security_notes": [
+    "D4-001: resolveCustomTargetPath() の catch で例外メッセージを握り潰し、固定メッセージのみクライアントに返すこと",
+    "S1-001: catch ブロックで console.warn('[CloneManager] Invalid custom target path rejected') を必ず出力すること",
+    "S1-004: isPathSafe の import を明示的に削除すること（validateWorktreePath のみ import）",
+    "S4-001: validateWorktreePath() の二重デコードリスクを S4-001-T1〜T3 で実証的に検証すること"
+  ]
+}

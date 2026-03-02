@@ -1,0 +1,77 @@
+{
+  "issue_number": 392,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_date": "2026-03-02",
+  "focus_area": "影響範囲",
+  "summary": "設計方針書の影響範囲分析は概ね正確であり、直接変更対象ファイル3件（clone-manager.ts, route.ts, clone-manager.test.ts）の特定は適切。後方互換性についても、APIの入出力仕様に破壊的変更がなく、既存の絶対パステスト（T-004）も引き続き動作する設計になっている。ただし、既存テストにおけるモック構造の影響（isPathSafe モックから validateWorktreePath モックへの移行）、integration テストへの波及、および CLAUDE.md の更新漏れに関して指摘事項がある。",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "should_fix",
+      "category": "ripple_effect",
+      "title": "既存テストの path-validator モック構造変更が必要",
+      "description": "clone-manager.test.ts は現在 path-validator を明示的にモックしていないが、fs モジュールをモックしている。設計変更後、import が isPathSafe から validateWorktreePath に変わるため、clone-manager.ts 内部で validateWorktreePath() が呼ばれる。validateWorktreePath() は内部で isPathSafe() を呼び、さらに path.resolve() を実行する。テスト環境で basePath が '/tmp/repos' に設定されている既存テスト（L213: customPath = '/tmp/repos/custom/target/path'）は、validateWorktreePath() が path.resolve('/tmp/repos', '/tmp/repos/custom/target/path') を実行して絶対パスとして正しく処理されるため動作するが、テスト作成者はこの内部動作の変化を認識しておく必要がある。設計方針書のテスト設計セクション（7-1）で既存テストの修正が不要であることを明示的に確認する記述を追加すべきである。",
+      "location": "設計方針書 セクション7 テスト設計",
+      "recommendation": "セクション7に「7-4. 既存テストへの影響」サブセクションを追加し、既存の 'should use custom target path if provided (within basePath)' テストが修正なしで動作する理由（validateWorktreePath が絶対パス入力を受け取った場合、path.resolve(basePath, absolutePath) は absolutePath をそのまま返すため）を記載する。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "should_fix",
+      "category": "ripple_effect",
+      "title": "resolveCustomTargetPath の export がテストインポートに影響",
+      "description": "設計方針書の 5-2b で resolveCustomTargetPath() を @internal export として定義している。これにより clone-manager.test.ts のインポート文を更新する必要がある（import 行 L9 に resolveCustomTargetPath を追加）。設計方針書ではヘルパー関数のユニットテスト（H-001〜H-004）を定義しているが、これらのテストを追加する際のインポート変更について明記されていない。",
+      "location": "設計方針書 セクション5-2b, セクション7-2",
+      "recommendation": "セクション7-2 に resolveCustomTargetPath のインポート方法を明記する。例: import { CloneManager, CloneManagerError, resetWorktreeBasePathWarning, resolveCustomTargetPath } from '@/lib/clone-manager';"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "missing_coverage",
+      "title": "integration テスト（api-clone.test.ts）への影響が未分析",
+      "description": "設計方針書のセクション9「影響範囲の確認」では tests/unit/lib/clone-manager.test.ts のみを変更対象として挙げているが、tests/integration/api-clone.test.ts も CloneManager を間接的に使用している。integration テストでは CM_ROOT_DIR を '/test/clone-root' にモックしているため、route.ts の trim() 追加と長さ制限の変更が正常に動作するか確認が必要。現在の integration テストには targetDir を使うテストケース（D4-002 の型チェックテストのみ）があるが、trim() やパス解決に関するテストはない。integration テストレベルでの相対パス拒否テストの追加を検討すべきである。",
+      "location": "設計方針書 セクション9 影響範囲の確認",
+      "recommendation": "セクション9の「影響あり」リストに tests/integration/api-clone.test.ts を追加し、integration レベルで以下のテスト追加を推奨する: (1) targetDir に相対パスを送信した場合の拒否テスト、(2) targetDir に前後空白を含む値を送信した場合の trim 動作テスト。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "nice_to_have",
+      "category": "missing_coverage",
+      "title": "CLAUDE.md の clone-manager.ts 説明更新が影響範囲に含まれていない",
+      "description": "設計方針書のセクション9 [S2-001] で CLAUDE.md の resolveDefaultBasePath() 記述の不正確さをスコープ外として認識しているが、Issue #392 自体による clone-manager.ts への変更（resolveCustomTargetPath 追加、isPathSafe から validateWorktreePath への import 変更）も CLAUDE.md の clone-manager.ts 説明に反映すべき変更である。CLAUDE.md の当該モジュール説明に resolveCustomTargetPath() 関数の追記が必要になる。",
+      "location": "設計方針書 セクション9 影響範囲の確認",
+      "recommendation": "セクション9の「影響範囲の確認」に CLAUDE.md の更新を nice_to_have として追記する。具体的には clone-manager.ts の説明に 'Issue #392: resolveCustomTargetPath()ヘルパー関数追加、validateWorktreePath()によるパス検証・解決の原子化' を追加する。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "nice_to_have",
+      "category": "backward_compatibility",
+      "title": "api-client.ts が targetDir を送信しないことの明確化",
+      "description": "設計方針書のセクション9で 'フロントエンド: api-client.ts は targetDir を送信していない' と正しく記載されている。実際に api-client.ts L345-349 を確認すると、clone() メソッドは cloneUrl のみを JSON.stringify({ cloneUrl }) で送信しており、targetDir は含まれていない。この事実は正確だが、将来的にフロントエンドから targetDir を送信する機能が追加された場合に本修正の恩恵を受けることを注記しておくと、設計の意図がより明確になる。",
+      "location": "設計方針書 セクション9 影響範囲の確認",
+      "recommendation": "現状の記載で十分だが、将来の targetDir UI 機能追加時に本修正が安全なパス解決を保証する旨を補足すると良い。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "regression_risk",
+      "title": "existsSync の引数変化によるテストへの影響",
+      "description": "設計変更後、customTargetPath が相対パスの場合に existsSync() に渡される引数が変化する。変更前は未解決の相対パス（例: 'my-repo'）が渡されていたが、変更後は解決済み絶対パス（例: '/tmp/repos/my-repo'）が渡される。設計方針書の T-005 テストケースではこの変化を検証しているが、既存テスト 'should reject when target directory already exists'（L197-206）では customTargetPath を使用せず repoName ベースの getTargetPath() 経由なので影響を受けない。ただし、既存テスト 'should use custom target path if provided (within basePath)'（L208-225）では、customPath が既に絶対パスであるため existsSync の mock 引数に変化はない。この分析を設計方針書に明記すべきである。",
+      "location": "設計方針書 セクション7-1 T-005",
+      "recommendation": "セクション7-1 の T-005 テストケースの説明に、既存テストが影響を受けない理由（既存テストは絶対パスを使用しているため、validateWorktreePath の path.resolve は同じ値を返す）を補足する。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "nice_to_have",
+      "category": "ripple_effect",
+      "title": "clone-manager.ts の executeClone/onCloneSuccess への間接的影響の確認記述が適切",
+      "description": "設計方針書のセクション9で 'clone-manager.ts の executeClone(), onCloneSuccess(), getCloneJobStatus(), cancelCloneJob(): コード変更不要（引数値のみ変化）' と記載されている。実際にコードを確認すると、executeClone() は targetPath を git clone のコマンド引数と mkdirSync のパスに使用し（L382-389）、onCloneSuccess() は targetPath を path.basename() と scanWorktrees() に渡している（L488-498）。相対パスが解決済み絶対パスに変わることで、これらの処理がより正確に動作するようになる。特に mkdirSync(path.dirname(targetPath), { recursive: true }) は絶対パスを受け取ることで確実に意図したディレクトリを作成する。この波及効果は正方向のもの（改善）であり、設計方針書の記載は適切である。",
+      "location": "設計方針書 セクション9 影響範囲の確認",
+      "recommendation": "現状の記載で十分。executeClone/onCloneSuccess が絶対パスを受け取ることによる改善効果を補足として記述しても良い。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "overall_assessment": "設計方針書の影響範囲分析は高品質であり、直接変更対象の特定と「影響なし」ファイルの列挙が正確である。APIの入出力仕様に破壊的変更はなく、後方互換性は維持されている。must_fix レベルの問題はないが、integration テストへの波及分析の欠如（S3-003）、既存テストの動作保証記述の不足（S3-001, S3-006）、テストインポートの変更明記（S3-002）の4件の should_fix が検出された。これらは設計方針書の補足で対応可能であり、実装方針自体の変更は不要である。"
+}
