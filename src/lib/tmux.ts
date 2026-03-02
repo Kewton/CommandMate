@@ -213,7 +213,7 @@ export async function sendKeys(
   sendEnter: boolean = true
 ): Promise<void> {
   // execFile() passes arguments directly without shell interpretation,
-  // so no shell-level escaping is needed (D2-003: escape logic removed)
+  // so no shell-level escaping is needed
   const args = sendEnter
     ? ['send-keys', '-t', sessionName, keys, 'C-m']
     : ['send-keys', '-t', sessionName, keys];
@@ -227,8 +227,11 @@ export async function sendKeys(
 }
 
 /**
- * Allowed tmux special key names for sendSpecialKeys().
+ * Allowed tmux special key names for sendSpecialKeys() (multi-key TUI navigation).
+ * Used for cursor-based navigation sequences (e.g., ['Down', 'Down', 'Enter']).
  * Restricts input to prevent command injection via arbitrary tmux key names.
+ *
+ * Separate from ALLOWED_SINGLE_SPECIAL_KEYS which covers control keys for sendSpecialKey().
  */
 const ALLOWED_SPECIAL_KEYS = new Set([
   'Up', 'Down', 'Left', 'Right',
@@ -412,22 +415,24 @@ export async function ensureSession(
 }
 
 /**
- * Allowed values for sendSpecialKey() (single special key).
- * D2-006 (案A): Separate from ALLOWED_SPECIAL_KEYS (used by sendSpecialKeys() for cursor/TUI navigation).
- * This set is for control keys sent individually (Escape, Ctrl combinations, Enter).
- * R2F007 (推奨案1): SpecialKey type is derived from this array to ensure compile-time and runtime sync.
+ * Allowed values for sendSpecialKey() (single control key).
+ * Used for individual control keys (Escape, Ctrl combinations, Enter).
+ * Separate from ALLOWED_SPECIAL_KEYS which covers TUI navigation keys for sendSpecialKeys().
+ *
+ * SpecialKey type is derived from this array to ensure compile-time and runtime sync.
  */
 export const SPECIAL_KEY_VALUES = ['Escape', 'C-c', 'C-d', 'C-m', 'Enter'] as const;
 
 /**
- * Special key type for tmux send-keys
- * Derived from SPECIAL_KEY_VALUES for type safety and sync (R2F007)
- * C-m is equivalent to Enter in tmux
+ * Special key type for tmux send-keys.
+ * Derived from SPECIAL_KEY_VALUES for type safety and runtime sync.
+ * Note: C-m is equivalent to Enter in tmux.
  */
 export type SpecialKey = typeof SPECIAL_KEY_VALUES[number];
 
 /**
- * Runtime whitelist for sendSpecialKey() (defense-in-depth, D2-005/R1F004).
+ * Runtime whitelist for sendSpecialKey() (defense-in-depth).
+ * Derived from SPECIAL_KEY_VALUES to stay in sync.
  * Prevents bypass via `as any` casts or JavaScript callers.
  */
 const ALLOWED_SINGLE_SPECIAL_KEYS = new Set<string>(SPECIAL_KEY_VALUES);
@@ -438,7 +443,7 @@ const ALLOWED_SINGLE_SPECIAL_KEYS = new Set<string>(SPECIAL_KEY_VALUES);
  * @param sessionName - Target session name
  * @param key - Special key to send (Escape, C-c, C-d, C-m, Enter)
  *
- * @throws {Error} If key is not in ALLOWED_SINGLE_SPECIAL_KEYS or command fails
+ * @throws {Error} If key is not in the allowed set or tmux command fails
  *
  * @example
  * ```typescript
@@ -453,7 +458,7 @@ export async function sendSpecialKey(
   sessionName: string,
   key: SpecialKey
 ): Promise<void> {
-  // D2-005: Runtime validation (defense-in-depth against as-any casts)
+  // Runtime validation (defense-in-depth against as-any casts)
   if (!ALLOWED_SINGLE_SPECIAL_KEYS.has(key)) {
     throw new Error(`Invalid special key: ${key}`);
   }

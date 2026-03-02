@@ -25,7 +25,7 @@ export async function POST(
   try {
     const { cliToolId, lines = 1000 } = await req.json();
 
-    // D1-001: cliToolId validation (fixed-string error, R4F006)
+    // Validate cliToolId against known CLI tool types
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
       return NextResponse.json(
         { error: 'Invalid cliToolId parameter' },
@@ -33,16 +33,16 @@ export async function POST(
       );
     }
 
-    // D1-005: lines parameter 4-stage validation (R1F010)
+    // Validate lines parameter: type, integer, range [1, 100000]
     if (typeof lines !== 'number' || !Number.isInteger(lines) || lines < 1 || lines > 100000) {
       return NextResponse.json(
         { error: 'Invalid lines parameter: must be an integer between 1 and 100000' },
         { status: 400 }
       );
     }
-    const safeLines = Math.floor(lines); // defense-in-depth
+    const safeLines = Math.floor(lines); // redundant after isInteger check; kept as defense-in-depth
 
-    // D1-002: worktreeId DB existence check
+    // Verify worktree exists in DB
     const db = getDbInstance();
     const worktree = getWorktreeById(db, params.id);
     if (!worktree) {
@@ -52,12 +52,12 @@ export async function POST(
       );
     }
 
-    // D1-003: CLIToolManager-based session name (validates via BaseCLITool.getSessionName)
+    // Derive session name via CLIToolManager (validates via BaseCLITool.getSessionName)
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(params.id);
 
-    // D1-004: No auto-creation; return 404 if session does not exist (R4F007)
+    // No auto-creation; return 404 if session does not exist
     const sessionExists = await hasSession(sessionName);
     if (!sessionExists) {
       return NextResponse.json(
@@ -71,7 +71,7 @@ export async function POST(
 
     return NextResponse.json({ output });
   } catch (error) {
-    // D1-007: Fixed-string error response (R4F002)
+    // Fixed-string error response (no internal details exposed to client)
     console.error('Capture API error:', error);
     return NextResponse.json(
       { error: 'Failed to capture terminal output' },
