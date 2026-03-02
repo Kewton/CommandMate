@@ -1,0 +1,174 @@
+{
+  "issue_number": 398,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_type": "影響範囲",
+  "review_date": "2026-03-02",
+  "findings": [
+    {
+      "id": "IMP2-001",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "fetchOllamaModels()/fetchLmStudioModels()のexport追加によるモジュール公開APIの拡大",
+      "description": "現在opencode-config.tsからexportされているのはensureOpencodeConfig()と4つの定数（OLLAMA_API_URL, OLLAMA_BASE_URL, MAX_OLLAMA_MODELS, OLLAMA_MODEL_PATTERN）のみ。リファクタリング後はfetchOllamaModels()、fetchLmStudioModels()、および新規LM Studio定数（LM_STUDIO_API_URL, LM_STUDIO_BASE_URL, LM_STUDIO_MODEL_PATTERN, MAX_LM_STUDIO_MODELS等）がexportされる。opencode-config.test.tsではこれらの新規exportのimportが必要になるが、Issue本文のテストセクションは既にこれをカバーしている。opencode.test.tsのmock定義（L19-21でvi.mock('@/lib/cli-tools/opencode-config')）はモジュール全体をmockしているため新規exportの追加自体では壊れないが、IMP-005で注記済み。影響範囲としては問題ない。",
+      "suggestion": "現状の記載で十分。実装時に新規定数のexport/importが漏れないよう注意する程度で良い。",
+      "location": "src/lib/cli-tools/opencode-config.ts 新規export群"
+    },
+    {
+      "id": "IMP2-002",
+      "severity": "nice_to_have",
+      "category": "テスト",
+      "title": "opencode-config.test.tsのconstantsセクションにLM Studio定数テストの追加が必要",
+      "description": "既存テストのconstantsセクション（L50-62）ではOLLAMA_API_URL、OLLAMA_BASE_URL、MAX_OLLAMA_MODELSの3定数をテストしている。LM Studio対応後はLM_STUDIO_API_URL、LM_STUDIO_BASE_URL、MAX_LM_STUDIO_MODELSの定数テストも追加すべき。Issue本文のテストセクションでは「fetchLmStudioModels()のテスト」「ensureOpencodeConfig()の結合テスト」は記載されているが、定数値テストの追加は明示されていない。ただし、fetchLmStudioModels()のテスト実装時に自然に定数をimport・検証することになるため、実質的な漏れにはならない。",
+      "suggestion": "テストセクションに「LM Studio定数値テスト（LM_STUDIO_API_URL, LM_STUDIO_BASE_URL, LM_STUDIO_MODEL_PATTERN, MAX_LM_STUDIO_MODELS）」を明示的に追加するとより親切だが、実装時の自然な流れでカバーされるため必須ではない。",
+      "location": "tests/unit/cli-tools/opencode-config.test.ts L50-62"
+    }
+  ],
+  "previous_findings_verification": [
+    {
+      "id": "IMP-001",
+      "status": "resolved",
+      "comment": "スコープ外ファイルテーブルにschedule-manager.ts（L320-331）が追加済み。スケジュール実行のoptions構築がopencodeケース未対応である点、将来の変更箇所（SQLクエリにopencode用モデル情報取得を追加、options構築にcase 'opencode'を追加）が具体的に明記されている。実際のコード（L327-331）を確認し、vibe-localのみの条件分岐であることと記載が整合している。"
+    },
+    {
+      "id": "IMP-002",
+      "status": "resolved",
+      "comment": "claude-executor.tsがスコープ外ファイルテーブルに追加され、「スコープ外」として明確に決定済み。理由として「OpenCode TUI（opencode.json）でのモデル選択で十分であり、スケジュール実行でのLM Studioモデル指定は将来Issueで対応する」が明記。受入条件にも「LM Studioモデルのスケジュール実行（非インタラクティブモード）はIssue #398のスコープ外とする」が追加済み。実際のbuildCliArgs() L110-115のollama/プレフィックスハードコードと記載が整合。"
+    },
+    {
+      "id": "IMP-003",
+      "status": "resolved",
+      "comment": "テストセクションに「既存テスト移行」タスクが追加済み。「既存のensureOpencodeConfig()テストケースをfetchOllamaModels()/fetchLmStudioModels()の独立関数テストに分割・移行する。ensureOpencodeConfig()の結合テストでは両方のmockFetchを適切にセットアップする（URLベースのmock実装またはmockResolvedValueOnce()の2回呼び出し）」と具体的に記載。実際のテストコード（298行、mockFetchが単一API前提）との整合性を確認済み。"
+    },
+    {
+      "id": "IMP-004",
+      "status": "resolved",
+      "comment": "スコープ外ファイルテーブルにtests/unit/lib/claude-executor.test.tsが追加済み。「IMP-002のスコープ外方針により変更不要。将来的にプレフィックスを動的化する場合はテスト修正が必要」と記載。実際のテスト（L148-150: ollama/qwen3:8bの固定値検証）との整合性を確認済み。"
+    },
+    {
+      "id": "IMP-005",
+      "status": "resolved",
+      "comment": "関連コンポーネントテーブルにtests/unit/cli-tools/opencode.test.tsが追加済み。「ensureOpencodeConfig()シグネチャ不変のため変更不要。新規export追加時はmock定義の更新を確認」と記載。実際のmock定義（L19-21: vi.mock('@/lib/cli-tools/opencode-config', () => ({ ensureOpencodeConfig: vi.fn() }))）との整合性を確認済み。"
+    },
+    {
+      "id": "IMP-006",
+      "status": "resolved",
+      "comment": "実装タスクのドキュメントセクションにCLAUDE.md更新タスクが追加済み。「CLAUDE.mdのopencode-config.tsエントリを更新: fetchOllamaModels()/fetchLmStudioModels()独立関数化、LM Studio定数（LM_STUDIO_API_URL/LM_STUDIO_BASE_URL/LM_STUDIO_MODEL_PATTERN/MAX_LM_STUDIO_MODELS）追加を反映」と具体的に記載。"
+    },
+    {
+      "id": "IMP-007",
+      "status": "resolved",
+      "comment": "関連コンポーネントテーブルにAgentSettingsPane.tsxが追加済み。「モデル選択UI（今回スコープ外）。OpenCode選択時のモデルセレクターUIは今回スコープ外。将来UI対応する場合は/api/lmstudio/models APIエンドポイント新設と本コンポーネントの対応が必要」と記載。実際のコード（L111-141: isVibeLocalCheckedでガードされたOllamaモデル取得ロジック、OpenCode選択時はモデルセレクターなし）との整合性を確認済み。"
+    },
+    {
+      "id": "IMP-008",
+      "status": "resolved",
+      "comment": "関連コンポーネントテーブルにtypes.tsが追加済み。「CLIツール型定義（変更不要）。OLLAMA_MODEL_PATTERNはLM StudioモデルID（パス形式含む）も理論上マッチするため変更不要。DBにLM Studioモデル名を保存する将来機能で再確認推奨」と記載。実際のパターン（L183: /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/）を確認し、.gguf拡張子やスラッシュ区切りパスもマッチすることを検証済み。"
+    }
+  ],
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/lib/cli-tools/opencode-config.ts",
+        "change_type": "major_refactor",
+        "description": "fetchOllamaModels()/fetchLmStudioModels()独立関数化、ensureOpencodeConfig()リファクタリング、LM Studio定数追加、opencode.jsonテンプレートにlmstudioプロバイダー追加",
+        "breaking_change": false,
+        "issue_coverage": "fully_covered"
+      },
+      {
+        "file": "tests/unit/cli-tools/opencode-config.test.ts",
+        "change_type": "major_update",
+        "description": "既存テストの独立関数テストへの分割・移行、LM Studio関連テスト追加、mockFetchの複数API対応、定数テスト追加",
+        "breaking_change": false,
+        "issue_coverage": "fully_covered"
+      }
+    ],
+    "scope_out_files": [
+      {
+        "file": "src/lib/claude-executor.ts",
+        "reason": "buildCliArgs() L110-115のollama/プレフィックスハードコード。スコープ外として明確に決定済み",
+        "issue_coverage": "fully_covered"
+      },
+      {
+        "file": "tests/unit/lib/claude-executor.test.ts",
+        "reason": "IMP-002のスコープ外方針により変更不要",
+        "issue_coverage": "fully_covered"
+      },
+      {
+        "file": "src/lib/schedule-manager.ts",
+        "reason": "L320-331のoptions構築ロジック。将来的影響箇所として明記済み",
+        "issue_coverage": "fully_covered"
+      }
+    ],
+    "related_components": [
+      {
+        "file": "src/lib/cli-tools/opencode.ts",
+        "reason": "ensureOpencodeConfig()シグネチャ不変のため変更不要",
+        "issue_coverage": "fully_covered"
+      },
+      {
+        "file": "src/lib/cli-tools/types.ts",
+        "reason": "OLLAMA_MODEL_PATTERNはLM StudioモデルIDも理論上マッチ。変更不要",
+        "issue_coverage": "fully_covered"
+      },
+      {
+        "file": "src/components/worktree/AgentSettingsPane.tsx",
+        "reason": "OpenCode向けモデルセレクターUIはスコープ外。将来的影響として明記済み",
+        "issue_coverage": "fully_covered"
+      },
+      {
+        "file": "tests/unit/cli-tools/opencode.test.ts",
+        "reason": "ensureOpencodeConfig()シグネチャ不変のため変更不要。新規export追加時のmock確認注記あり",
+        "issue_coverage": "fully_covered"
+      },
+      {
+        "file": "CLAUDE.md",
+        "reason": "opencode-config.tsエントリ更新タスクが実装タスクに含まれている",
+        "issue_coverage": "fully_covered"
+      }
+    ],
+    "unaffected_files": [
+      {
+        "file": "src/lib/response-poller.ts",
+        "reason": "OpenCode TUI出力パターン検出に影響なし（モデル変更でTUI表示パターンは変わらない）"
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "reason": "OpenCodeパターン定数に影響なし"
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "reason": "セッションステータス検出に影響なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "reason": "OLLAMA_MODEL_PATTERNはtypes.tsから参照。opencode-config.tsの変更の影響なし"
+      },
+      {
+        "file": "src/app/api/ollama/models/route.ts",
+        "reason": "Ollama専用APIルート。独自のOLLAMA_API_URL定数を使用しており、opencode-config.tsとは独立"
+      },
+      {
+        "file": "src/lib/cli-tools/vibe-local.ts",
+        "reason": "Vibe Local固有のOllama連携。opencode-config.tsの変更の影響なし"
+      }
+    ]
+  },
+  "f2_findings_impact_verification": {
+    "F2-001": {
+      "status": "no_new_impact",
+      "comment": "LM_STUDIO_MODEL_PATTERNに/^[a-zA-Z0-9._:/-]{1,200}$/の具体パターンが追記された。このパターンはopencode-config.ts内部でのみ使用され（LM Studio APIレスポンスバリデーション用）、外部ファイルへの影響はない。types.tsのOLLAMA_MODEL_PATTERNとは独立しており、影響範囲の変化なし。"
+    },
+    "F2-002": {
+      "status": "no_new_impact",
+      "comment": "fetchOllamaModels()/fetchLmStudioModels()の戻り値型がPromise<Record<string, { name: string }>>として明記された。この型統一により、ensureOpencodeConfig()内でのマージ処理がシンプルになる。全てopencode-config.ts内部の設計であり、外部インターフェース（ensureOpencodeConfig()のシグネチャ: (worktreePath: string) => Promise<void>）に変更はない。影響範囲の変化なし。"
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 0,
+    "nice_to_have_count": 2,
+    "overall_quality": "good",
+    "comment": "前回（Stage 3）の影響範囲レビューで指摘した8件（IMP-001〜IMP-008）は全て適切に対応されている。変更対象ファイル、スコープ外ファイル、関連コンポーネントの区分が明確で、各ファイルの変更理由・不変理由が具体的に記載されている。Stage 5で追加されたF2-001（LM_STUDIO_MODEL_PATTERNパターン具体化）およびF2-002（戻り値型統一）はopencode-config.ts内部の設計改善であり、影響範囲に新たな問題は生じていない。破壊的変更はなく（ensureOpencodeConfig()のシグネチャ不変）、テスト移行計画も十分に記載されている。影響範囲の網羅性は十分であり、実装開始に適した品質と判断する。新規指摘は2件のnice_to_haveのみで、いずれも実装を阻害するものではない。"
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "issue_number": 398,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "S2-001",
+      "severity": "must_fix",
+      "category": "コード整合性",
+      "title": "設計書セクション6-1の行番号参照「L163-210」が既存コードと不一致になる可能性",
+      "description": "設計書セクション6-1の fetchOllamaModels() JSDoc に「既存ロジック抽出（L163-210の内容）」と記載されている。現在のopencode-config.ts（L163-210）は確かにOllama API fetchブロックに対応するが、この行番号はリファクタリング作業中に変動する。fetchOllamaModels() の抽出作業を始めた時点で行番号がずれるため、実装者にとって混乱の原因になる。設計書のコードリファレンスとしては行番号より関数名やコメントタグで参照する方が堅牢である。",
+      "suggestion": "「L163-210の内容」を「ensureOpencodeConfig() 内の // Fetch models from Ollama API コメントから catch ブロック末尾までの既存ロジック」のような記述に変更する。行番号参照は設計書では避けるか、あくまで目安として括弧書きにする。",
+      "location": "設計方針書 セクション6-1 fetchOllamaModels() JSDoc"
+    },
+    {
+      "id": "S2-002",
+      "severity": "must_fix",
+      "category": "コード整合性",
+      "title": "既存コードのOllama失敗時 early return が設計書の fetchOllamaModels() 抽出設計と不整合",
+      "description": "現在のopencode-config.ts L174-177/L181-184/L188-191/L202-210では、Ollama APIが非200応答/サイズ超過/構造不正/例外発生のいずれの場合も `return;` で ensureOpencodeConfig() 自体を終了している。一方、設計書セクション2-2/6-1/6-3ではfetchOllamaModels()を独立関数に抽出し「失敗時は空オブジェクト `{}` を返す」設計としている。この設計変更は正しいが、設計書のセクション2-1「現在のアーキテクチャ」の問題点記述が「Ollama API失敗時にcatchで即returnするため、後続のLM Studio処理に到達不可能」のみに言及しており、catch以外のearly return（非200/サイズ超過/構造不正）も同様にreturnしている点を明記していない。実装者が catch ブロックのみ修正して他のearly returnを見落とすリスクがある。",
+      "suggestion": "セクション2-1の問題点を「Ollama API失敗時（非200応答、サイズ超過、構造不正、例外発生）のいずれのケースでも早期returnするため、後続のLM Studio処理に到達不可能」と修正する。あるいは、セクション6-1の実装ノートに「既存の全てのearly return（L174-177, L181-184, L188-191, L202-210の4箇所）を空オブジェクト返却に変換する」と明記する。",
+      "location": "設計方針書 セクション2-1 現在のアーキテクチャ"
+    },
+    {
+      "id": "S2-003",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "既存コードでは Ollama 0件取得時でも opencode.json が生成されるが、設計書は0件時スキップ",
+      "description": "現在のopencode-config.ts L164-239では、Ollama API成功時にモデルが0件（全てバリデーション不合格等）であっても models = {} のまま config オブジェクトを構築し writeFileSync を実行する。つまり空の models プロパティを持つ opencode.json が生成される。一方、設計書セクション3 D2では「両方0件の場合→opencode.json生成スキップ」、セクション6-3では `if (Object.keys(provider).length === 0) return;` としている。設計書の新しい挙動（0件スキップ）は合理的だが、これは既存動作からの変更であることが設計書に明記されていない。既存テスト（tests/unit/cli-tools/opencode-config.test.ts）には0件時のテストケースが無いため、この動作変更が見過ごされるリスクは低いが、明示的に記載すべきである。",
+      "suggestion": "設計書のセクション2-1またはセクション3 D2に「既存動作では Ollama API成功/モデル0件でも空modelsの opencode.json が生成されるが、新設計ではプロバイダー0件の場合ファイル生成をスキップする（動作変更）」と明記する。テスト設計セクション7-3にもこのケースを明示する（「Ollama API成功だがモデル0件+LM Studio未起動→opencode.json生成なし」）。",
+      "location": "設計方針書 セクション3 D2、セクション7-3"
+    },
+    {
+      "id": "S2-004",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "設計書セクション2-3のモジュール構成図で fetchWithTimeout() が「設計選択A」として残留",
+      "description": "設計書セクション2-3「モジュール構成（変更後）」のHelpers項目に `fetchWithTimeout()（新規、共通HTTPヘルパー）← 設計選択A` と記載されている。しかし、セクション3 D1で選択肢Bが採用され、fetchWithTimeout() は導入しないことが決定済みである。モジュール構成図に不採用の選択肢が残っており、実装者に混乱を与える。",
+      "suggestion": "セクション2-3のHelpers項目から `fetchWithTimeout()（新規、共通HTTPヘルパー）← 設計選択A` を削除する。代わりにProvider Functions項目の各関数説明に「内部にHTTPフェッチロジックを含む（D1: 選択肢B採用）」と注記する。",
+      "location": "設計方針書 セクション2-3 モジュール構成（変更後）"
+    },
+    {
+      "id": "S2-005",
+      "severity": "should_fix",
+      "category": "Issue整合性",
+      "title": "Issue #398の影響範囲テーブルのテストファイルパスが実際のパスと不一致",
+      "description": "Issue #398の本文（original-issue.json）の影響範囲テーブルに `tests/unit/opencode-config.test.ts` と記載されているが、実際のファイルパスは `tests/unit/cli-tools/opencode-config.test.ts` である。設計書自体にはテストファイルパスの明示的な記載はないが、Issue記載のパスが不正確なまま残っていると実装者が混乱する。",
+      "suggestion": "Issue #398のテストファイルパスを `tests/unit/cli-tools/opencode-config.test.ts` に修正する。設計書のセクション7-1にも正しいテストファイルパスを明記しておくとよい。",
+      "location": "Issue #398 影響範囲テーブル"
+    },
+    {
+      "id": "S2-006",
+      "severity": "should_fix",
+      "category": "設計書内部",
+      "title": "設計書セクション4-2の既存定数テーブルに CONFIG_FILE_NAME が export 定数として記載されているが実際は非export",
+      "description": "設計書セクション4-2「既存定数（変更なし）」テーブルに `CONFIG_FILE_NAME` が `opencode.json` として記載されている。実際のコード（opencode-config.ts L55）では `const CONFIG_FILE_NAME = 'opencode.json';` と非exportのモジュールスコープ定数として定義されている。設計書テーブルの他の非export定数（OLLAMA_API_TIMEOUT_MS、MAX_OLLAMA_RESPONSE_SIZE）は export/非export が区別なく同列に並んでおり、実装者がどの定数をexportすべきか判断しにくい。",
+      "suggestion": "セクション4-2のテーブルにexport/非exportの区別を追加する列を設けるか、セクション4-1と同様に「Internal constants (non-export)」を分離して記載する。少なくともCONFIG_FILE_NAMEが非exportであることを明記する。",
+      "location": "設計方針書 セクション4-2 既存定数テーブル"
+    },
+    {
+      "id": "S2-007",
+      "severity": "nice_to_have",
+      "category": "命名規則",
+      "title": "LM_STUDIO_MODEL_PATTERNの文字クラスにOLLAMA_MODEL_PATTERNと異なり@が含まれている",
+      "description": "設計書セクション4-1で定義されている LM_STUDIO_MODEL_PATTERN は `/^[a-zA-Z0-9._:/@-]{1,200}$/` であり、文字クラスに `@` が含まれている。一方、既存の OLLAMA_MODEL_PATTERN（opencode-config.ts L46）は `/^[a-zA-Z0-9._:/-]{1,100}$/` で `@` を含まない。設計書のコメントに「path format support」とあるが、`@` を追加した具体的な理由（例: LM Studioのモデル名にHugging Face形式の`@`が含まれるケース）が記載されていない。",
+      "suggestion": "セクション4-1のLM_STUDIO_MODEL_PATTERNのコメントに、`@` を文字クラスに追加した理由を明記する。例えば「LM Studioのモデル名にはHugging Faceリポジトリ形式（organization/model@revision）が使用されるケースがあるため」等。パターンの差異が意図的であることを設計書に記録する。",
+      "location": "設計方針書 セクション4-1 LM_STUDIO_MODEL_PATTERN"
+    },
+    {
+      "id": "S2-008",
+      "severity": "nice_to_have",
+      "category": "テスト整合性",
+      "title": "設計書のテストケース数と既存テスト数の整合確認",
+      "description": "設計書セクション7-1で fetchOllamaModels() のテストケースを「8件（既存ロジック移行）」としている。既存テスト（tests/unit/cli-tools/opencode-config.test.ts）の ensureOpencodeConfig() describe内のテストケースは12件（skip既存、正常取得、タイムアウト、ネットワーク失敗、非200応答、サイズ超過、構造不正、モデル数上限、名前バリデーション、パストラバーサル、非ディレクトリ、書き込み失敗、EEXIST、表示名フォーマット）である。fetchOllamaModels()に移行されるべきテストは「正常取得、タイムアウト、ネットワーク失敗、非200応答、サイズ超過、構造不正、モデル数上限、名前バリデーション、表示名フォーマット」の9件であり、設計書の8件と1件差がある。",
+      "suggestion": "テストケースのマッピングを設計書セクション7-4に明示する。「既存テスト12件のうち、fetchOllamaModels()に移行する9件」「ensureOpencodeConfig()に残す4件（skip既存、パストラバーサル、非ディレクトリ、書き込み失敗/EEXIST）」「新規追加の結合テスト」のように対応表を追加する。",
+      "location": "設計方針書 セクション7-1、セクション7-4"
+    },
+    {
+      "id": "S2-009",
+      "severity": "nice_to_have",
+      "category": "コード整合性",
+      "title": "設計書の opencode.json provider 構造と既存コードの provider 構造の差異が未記載",
+      "description": "既存コード（opencode-config.ts L217-224）では provider は固定で `{ ollama: { ... } }` と生成されている。設計書セクション6-3では `const provider: Record<string, unknown> = {};` としてから条件付きで追加する動的構成に変更される。この変更により、opencode.json の provider が空オブジェクトになるケース（両プロバイダー0件→スキップ）、ollamaのみ、lmstudioのみ、両方の4パターンが生じる。既存動作では provider.ollama は常に存在した（0件でも）。この動作変更の影響について OpenCode 側の挙動確認が必要かどうか設計書に記載がない。",
+      "suggestion": "OpenCode がproviderキーの不在をどう扱うか（エラーになるか、デフォルトプロバイダーにフォールバックするか）を調査し、設計書に注記する。もし OpenCode が少なくとも1つのプロバイダーを要求する場合、0件スキップ設計に影響する。",
+      "location": "設計方針書 セクション3 D2"
+    },
+    {
+      "id": "S2-010",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "claude-executor.ts の opencode case が ollama/ プレフィックスをハードコードしているが設計書のスコープ外明確化が不完全",
+      "description": "設計書セクション9で claude-executor.ts の ollama/ プレフィックス変更をスコープ外としている。しかし、実際のclaude-executor.ts L110-115では `return ['run', '-m', \\`ollama/${options.model}\\`, message];` と ollama プレフィックスがハードコードされている。LM Studio のモデルをスケジュール実行する場合、このプレフィックスは不適切である。設計書のスコープ外テーブルでは「TUIモードで十分、スケジュール実行は別途」と理由が記載されているが、TUIモード（opencode.json）でのモデル選択とスケジュール実行のモデル指定が異なるプレフィックスを使うことの影響について触れていない。",
+      "suggestion": "セクション9のスコープ外テーブルに、claude-executor.tsの `ollama/` プレフィックスがLM Studioモデルには適用できない旨を明記する。将来Issueとして「opencode のスケジュール実行でプロバイダー識別子（ollama/ vs lmstudio/）を動的に切り替える」を記載する。",
+      "location": "設計方針書 セクション9 スコープ外の明確化"
+    },
+    {
+      "id": "S2-011",
+      "severity": "nice_to_have",
+      "category": "設計書内部",
+      "title": "セクション12レビュー指摘サマリーのS1-005に対応する実装チェックリスト項目がない",
+      "description": "セクション12のレビュー指摘サマリーでS1-005は「Nice to Have」としてスキップされているが、その指摘内容「実装時に各fetch関数の冒頭にTODOコメントを記載する」はセクション13の実装チェックリストのS1-001項目に含まれている。S1-001（Should Fix）とS1-005（Nice to Have）の指摘が同一のTODOコメント記載を提案しており、S1-005がスキップされたにもかかわらずS1-001の対応としてTODOコメントが実装チェックリストに含まれているため矛盾はないが、読者にはS1-005が実質的にS1-001経由で反映済みであることが不明確。",
+      "suggestion": "セクション12のS1-005対応状況を「スキップ（S1-001のチェックリスト項目にTODOコメント記載を包含）」のように補足する。",
+      "location": "設計方針書 セクション12 S1-005"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4,
+    "overall_quality": "good",
+    "comment": "設計方針書は全体として既存コードとの整合性が高く、Issue #398の要件を網羅的にカバーしている。Stage 1のレビュー指摘も適切に反映されている。主要な指摘は、(1) セクション2-1の問題点記述が catch ブロックのみに言及しており他のearly returnパターンへの言及が不足している点（S2-002）、(2) セクション2-3のモジュール構成図に不採用の設計選択肢が残っている点（S2-004）、(3) 0件時の動作変更が明示されていない点（S2-003）である。テスト設計はIssueの受入条件を概ねカバーしているが、既存テストの移行マッピングがやや不明確。定数命名はOllama系とLM Studio系で対称的で一貫性がある。セキュリティ設計（SEC-001/SEC-002/SEC-003/SEC-004）は既存ポリシーと完全に一致している。"
+  }
+}

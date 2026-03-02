@@ -1,0 +1,43 @@
+{
+  "issue_number": 398,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 2,
+  "apply_date": "2026-03-02",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "F2-001",
+        "status": "applied",
+        "change_summary": "LM_STUDIO_MODEL_PATTERNタスクに具体的な正規表現パターン /^[a-zA-Z0-9._:/-]{1,200}$/ と長さ制限200文字の推奨を追記（セキュリティ・防御セクション）"
+      },
+      {
+        "id": "F2-002",
+        "status": "applied",
+        "change_summary": "fetchOllamaModels()とfetchLmStudioModels()の戻り値型をPromise<Record<string, { name: string }>>として明記し、型の一貫性と失敗時の空オブジェクト返却設計をコア実装タスクに追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F2-003",
+        "status": "skipped",
+        "reason": "opencode.json既存ファイルスキップ動作は既存実装の維持であり、影響なし。現行のスキップ動作がそのまま適用されるため補足不要と判断"
+      },
+      {
+        "id": "F2-004",
+        "status": "skipped",
+        "reason": "レビュー履歴は過去の判断の記録であり、最終結果（IMP-006対応済み）が正しく反映されているため修正不要"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 2,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/398"
+  }
+}

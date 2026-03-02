@@ -1,0 +1,8 @@
+{
+  "issue_number": 398,
+  "stage": 4,
+  "applied_findings": ["IMP-001", "IMP-002", "IMP-003", "IMP-004", "IMP-005", "IMP-006", "IMP-007", "IMP-008"],
+  "skipped_findings": [],
+  "status": "completed",
+  "updated_at": "2026-03-02"
+}

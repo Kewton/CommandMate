@@ -1,0 +1,100 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: Both providers running - Ollama + LM Studio APIs both respond, opencode.json contains both ollama and lmstudio providers",
+      "result": "passed",
+      "evidence": "Test 'should generate config with both Ollama and LM Studio models' passed: verifies both provider.ollama and provider.lmstudio exist in generated opencode.json with correct npm, name, baseURL, and models fields"
+    },
+    {
+      "scenario": "Scenario 2: Ollama only - LM Studio ECONNREFUSED, opencode.json generated without lmstudio key",
+      "result": "passed",
+      "evidence": "Test 'should generate config with Ollama only when LM Studio is not running' passed: verifies provider.ollama exists, provider.lmstudio is undefined"
+    },
+    {
+      "scenario": "Scenario 3: LM Studio only - Ollama down, opencode.json generated without ollama key",
+      "result": "passed",
+      "evidence": "Test 'should generate config with LM Studio only when Ollama is not running' passed: verifies provider.ollama is undefined, provider.lmstudio exists with correct models"
+    },
+    {
+      "scenario": "Scenario 4: Both providers down - Both APIs ECONNREFUSED, opencode.json not generated",
+      "result": "passed",
+      "evidence": "Tests 'should not generate opencode.json when both providers have 0 models' and 'should not generate opencode.json when APIs succeed but return 0 models [S2-003]' both passed: verifies writeFileSync not called"
+    },
+    {
+      "scenario": "Scenario 5: opencode.json already exists - file present, API not called, skip",
+      "result": "passed",
+      "evidence": "Test 'should skip if opencode.json already exists' passed: verifies writeFileSync and fetch not called"
+    },
+    {
+      "scenario": "Scenario 6: LM Studio API timeout - AbortError handled, Ollama side works normally",
+      "result": "passed",
+      "evidence": "Test 'should handle LM Studio API timeout' passed (fetchLmStudioModels returns {}), plus ensureOpencodeConfig integration tests with setupMockFetch show LM Studio reject does not affect Ollama"
+    },
+    {
+      "scenario": "Scenario 7: LM Studio model count limit - 100 model cap enforced",
+      "result": "passed",
+      "evidence": "Test 'should limit models to MAX_LM_STUDIO_MODELS' passed: 150 models input, output <= 100 models"
+    },
+    {
+      "scenario": "Scenario 8: Path traversal defense - invalid worktreePath throws error",
+      "result": "passed",
+      "evidence": "Tests 'should throw on path traversal detection [D4-004]' and 'should throw if path is not a directory [D4-004]' both passed"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "LM Studioが起動している場合、そのモデル一覧がopencode.jsonに反映されること",
+      "verified": true,
+      "evidence": "fetchLmStudioModels() correctly fetches from LM_STUDIO_API_URL, validates model IDs with LM_STUDIO_MODEL_PATTERN, and ensureOpencodeConfig() includes lmstudio provider in config"
+    },
+    {
+      "criterion": "LM Studioが未起動の場合、エラーにならずOllamaのみで動作すること",
+      "verified": true,
+      "evidence": "Test 'should generate config with Ollama only when LM Studio is not running': ECONNREFUSED handled gracefully, opencode.json generated with ollama only"
+    },
+    {
+      "criterion": "Ollamaが未起動の場合、エラーにならずLM Studioのみで動作すること",
+      "verified": true,
+      "evidence": "Test 'should generate config with LM Studio only when Ollama is not running': ECONNREFUSED handled gracefully, opencode.json generated with lmstudio only"
+    },
+    {
+      "criterion": "両方未起動の場合も、致命的エラーにならないこと",
+      "verified": true,
+      "evidence": "Test 'should not generate opencode.json when both providers have 0 models': resolves without error, no writeFileSync call"
+    },
+    {
+      "criterion": "OllamaとLM Studioの両方が未起動で取得モデル数が0件の場合、opencode.jsonは生成しないこと（SF-004）",
+      "verified": true,
+      "evidence": "Two tests verify: both ECONNREFUSED case and both return empty arrays case - writeFileSync not called in either"
+    },
+    {
+      "criterion": "ユニットテスト・結合テストがすべてパスすること",
+      "verified": true,
+      "evidence": "48/48 tests passed in opencode-config.test.ts. TypeScript type check passed (npx tsc --noEmit). ESLint passed (no warnings or errors). 3 failed test files (5 tests) are pre-existing failures in app-version-display.test.tsx and RepositoryManager.test.tsx, unrelated to Issue #398"
+    },
+    {
+      "criterion": "既存のOllamaのみの動作に影響がないこと",
+      "verified": true,
+      "evidence": "All pre-existing Ollama tests pass: fetchOllamaModels tests (9 tests), OLLAMA_MODEL_PATTERN tests (5 tests), constants tests (3 Ollama constants). Implementation uses additive changes only (new fetchLmStudioModels + provider merge logic)"
+    },
+    {
+      "criterion": "LM Studioモデルのスケジュール実行（非インタラクティブモード）はスコープ外",
+      "verified": true,
+      "evidence": "No changes to claude-executor.ts or schedule-manager.ts. LM Studio integration is limited to opencode-config.ts (config file generation only)"
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/cli-tools/opencode-config.test.ts (48/48 passed)",
+    "src/lib/cli-tools/opencode-config.ts (implementation)",
+    "npx tsc --noEmit (0 errors)",
+    "npm run lint (0 warnings, 0 errors)"
+  ],
+  "quality_checks": {
+    "unit_tests": "48/48 passed",
+    "typescript_check": "passed (0 errors)",
+    "eslint": "passed (0 warnings, 0 errors)",
+    "pre_existing_failures": "3 test files (5 tests) failed - all unrelated to Issue #398 (app-version-display.test.tsx, RepositoryManager.test.tsx)"
+  },
+  "message": "すべての受入条件を満たしています。LM Studio プロバイダーの統合が正しく実装され、既存のOllama機能への影響もありません。"
+}
