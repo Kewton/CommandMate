@@ -8,6 +8,21 @@ import path from 'path';
 import { realpathSync, existsSync, lstatSync, readlinkSync } from 'fs';
 
 /**
+ * [SEC-394] Check whether resolvedPath is within resolvedRoot.
+ *
+ * A path is considered "within" if it equals the root or starts with root + separator.
+ * This is a pure string comparison helper extracted for DRY compliance.
+ *
+ * @internal Exported for unit testing only.
+ * @param resolvedPath - The fully resolved (realpath) path to check
+ * @param resolvedRoot - The fully resolved (realpath) root directory
+ * @returns true if resolvedPath is within resolvedRoot
+ */
+export function isWithinRoot(resolvedPath: string, resolvedRoot: string): boolean {
+  return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + path.sep);
+}
+
+/**
  * Check if a path is safe (within the allowed root directory)
  *
  * Security features:
@@ -159,9 +174,7 @@ export function resolveAndValidateRealPath(targetPath: string, rootDir: string):
   if (existsSync(fullPath)) {
     try {
       const resolvedTarget = realpathSync(fullPath);
-      const ok =
-        resolvedTarget.startsWith(resolvedRoot + path.sep) ||
-        resolvedTarget === resolvedRoot;
+      const ok = isWithinRoot(resolvedTarget, resolvedRoot);
       if (!ok) {
         console.warn(
           `[SEC-394] symlink traversal rejected: ${targetPath} -> ${resolvedTarget}`
@@ -182,9 +195,7 @@ export function resolveAndValidateRealPath(targetPath: string, rootDir: string):
       try {
         const linkTarget = readlinkSync(fullPath);
         const resolvedLinkTarget = path.resolve(path.dirname(fullPath), linkTarget);
-        const ok =
-          resolvedLinkTarget.startsWith(resolvedRoot + path.sep) ||
-          resolvedLinkTarget === resolvedRoot;
+        const ok = isWithinRoot(resolvedLinkTarget, resolvedRoot);
         if (!ok) {
           console.warn(
             `[SEC-394] dangling symlink traversal rejected: ${targetPath} -> ${resolvedLinkTarget}`
@@ -206,9 +217,7 @@ export function resolveAndValidateRealPath(targetPath: string, rootDir: string):
     if (existsSync(currentPath)) {
       try {
         const resolvedAncestor = realpathSync(currentPath);
-        const ok =
-          resolvedAncestor.startsWith(resolvedRoot + path.sep) ||
-          resolvedAncestor === resolvedRoot;
+        const ok = isWithinRoot(resolvedAncestor, resolvedRoot);
         if (!ok) {
           console.warn(
             `[SEC-394] symlink traversal rejected (ancestor): ${currentPath} -> ${resolvedAncestor}`

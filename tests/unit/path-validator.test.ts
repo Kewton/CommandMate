@@ -8,12 +8,15 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
-import { mkdirSync, rmSync, writeFileSync, symlinkSync } from 'fs';
-import { mkdtempSync } from 'fs';
-import { tmpdir } from 'os';
+import { symlinkSync, mkdirSync } from 'fs';
 
 // Import path validator functions
-import { isPathSafe, validateWorktreePath, resolveAndValidateRealPath } from '@/lib/path-validator';
+import { isPathSafe, validateWorktreePath, resolveAndValidateRealPath, isWithinRoot } from '@/lib/path-validator';
+import {
+  createSymlinkFixture,
+  cleanupSymlinkFixture,
+  SymlinkTestFixture,
+} from '@tests/helpers/symlink-test-fixtures';
 
 describe('Path Validation', () => {
   const rootDir = '/home/user/projects';
@@ -159,26 +162,43 @@ describe('Path Validation', () => {
     });
   });
 
+  describe('isWithinRoot [SEC-394]', () => {
+    it('should return true when path equals root', () => {
+      expect(isWithinRoot('/home/user/projects', '/home/user/projects')).toBe(true);
+    });
+
+    it('should return true when path is a child of root', () => {
+      expect(isWithinRoot('/home/user/projects/repo', '/home/user/projects')).toBe(true);
+    });
+
+    it('should return false when path is outside root', () => {
+      expect(isWithinRoot('/home/user/other', '/home/user/projects')).toBe(false);
+    });
+
+    it('should return false for prefix-matching directory names (no separator)', () => {
+      // /home/user/projects-evil should NOT be within /home/user/projects
+      expect(isWithinRoot('/home/user/projects-evil', '/home/user/projects')).toBe(false);
+    });
+  });
+
   describe('resolveAndValidateRealPath [SEC-394]', () => {
+    let fixture: SymlinkTestFixture;
     let testRoot: string;
     let externalDir: string;
 
     beforeEach(() => {
-      // Create isolated temp directories for symlink tests
-      testRoot = mkdtempSync(path.join(tmpdir(), 'pv-test-root-'));
-      externalDir = mkdtempSync(path.join(tmpdir(), 'pv-test-external-'));
-
-      // Create a file inside the worktree root
-      mkdirSync(path.join(testRoot, 'src'), { recursive: true });
-      writeFileSync(path.join(testRoot, 'src', 'file.ts'), 'content');
-
-      // Create a file outside the worktree root
-      writeFileSync(path.join(externalDir, 'secret.txt'), 'secret');
+      fixture = createSymlinkFixture({
+        rootPrefix: 'pv-test-root-',
+        externalPrefix: 'pv-test-external-',
+        internalFiles: { 'src/file.ts': 'content' },
+        externalFiles: { 'secret.txt': 'secret' },
+      });
+      testRoot = fixture.testRoot;
+      externalDir = fixture.externalDir;
     });
 
     afterEach(() => {
-      rmSync(testRoot, { recursive: true, force: true });
-      rmSync(externalDir, { recursive: true, force: true });
+      cleanupSymlinkFixture(fixture);
     });
 
     it('should reject symlink pointing outside worktree root', () => {

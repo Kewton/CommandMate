@@ -9,14 +9,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
-import {
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-  symlinkSync,
-  mkdtempSync,
-} from 'fs';
-import { tmpdir } from 'os';
+import { symlinkSync } from 'fs';
 
 import {
   readFileContent,
@@ -26,38 +19,42 @@ import {
   renameFileOrDirectory,
   writeBinaryFile,
 } from '@/lib/file-operations';
+import {
+  createSymlinkFixture,
+  cleanupSymlinkFixture,
+  SymlinkTestFixture,
+} from '@tests/helpers/symlink-test-fixtures';
 
 describe('File Operations - Symlink Traversal Protection [SEC-394]', () => {
+  let fixture: SymlinkTestFixture;
   let testRoot: string;
   let externalDir: string;
 
   beforeEach(() => {
-    // Create isolated temp directories
-    testRoot = mkdtempSync(path.join(tmpdir(), 'fo-symlink-root-'));
-    externalDir = mkdtempSync(path.join(tmpdir(), 'fo-symlink-ext-'));
+    fixture = createSymlinkFixture({
+      rootPrefix: 'fo-symlink-root-',
+      externalPrefix: 'fo-symlink-ext-',
+      internalFiles: { 'src/internal.md': '# Internal' },
+      externalFiles: {
+        'secret.txt': 'SECRET DATA',
+        'image.png': 'fake-png-data',
+        'video.mp4': 'fake-mp4-data',
+      },
+      symlinks: {},
+    });
+    testRoot = fixture.testRoot;
+    externalDir = fixture.externalDir;
 
-    // Create internal structure
-    mkdirSync(path.join(testRoot, 'src'), { recursive: true });
-    writeFileSync(path.join(testRoot, 'src', 'internal.md'), '# Internal');
-
-    // Create external file
-    writeFileSync(path.join(externalDir, 'secret.txt'), 'SECRET DATA');
-    writeFileSync(path.join(externalDir, 'image.png'), 'fake-png-data');
-    writeFileSync(path.join(externalDir, 'video.mp4'), 'fake-mp4-data');
-
-    // Create symlink inside testRoot pointing to external file
+    // Create additional symlinks specific to this test suite
     symlinkSync(
       path.join(externalDir, 'secret.txt'),
       path.join(testRoot, 'evil-link.md')
     );
-
-    // Create symlink directory inside testRoot pointing to external dir
     symlinkSync(externalDir, path.join(testRoot, 'evil-dir'));
   });
 
   afterEach(() => {
-    rmSync(testRoot, { recursive: true, force: true });
-    rmSync(externalDir, { recursive: true, force: true });
+    cleanupSymlinkFixture(fixture);
   });
 
   it('should reject readFileContent via external symlink', async () => {
