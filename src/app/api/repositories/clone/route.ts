@@ -93,7 +93,26 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
 
     console.info(`${LOG_PREFIX} Starting clone job for: ${cloneUrl}`);
 
-    const result = await cloneManager.startCloneJob(cloneUrl.trim(), targetDir);
+    // [S4-007] DoS defense: reject excessively long targetDir values.
+    const MAX_TARGET_DIR_LENGTH = 1024;
+    const trimmedTargetDir = targetDir?.trim() || undefined;
+    if (trimmedTargetDir && trimmedTargetDir.length > MAX_TARGET_DIR_LENGTH) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            category: 'validation' as const,
+            code: 'INVALID_TARGET_PATH',
+            message: 'Target directory path is too long',
+            recoverable: true,
+            suggestedAction: 'Use a path within the configured base directory',
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    const result = await cloneManager.startCloneJob(cloneUrl.trim(), trimmedTargetDir);
 
     if (!result.success) {
       // Determine HTTP status based on error type

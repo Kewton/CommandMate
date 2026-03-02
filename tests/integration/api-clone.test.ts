@@ -192,6 +192,63 @@ describe('Clone API', () => {
       expect(data.success).toBe(true);
       expect(data.jobId).toBeDefined();
     });
+
+    it('R-001: trims whitespace from targetDir', async () => {
+      const request = new NextRequest('http://localhost/api/repositories/clone', {
+        method: 'POST',
+        body: JSON.stringify({
+          cloneUrl: 'https://github.com/test/trim-repo.git',
+          targetDir: '  my-repo  ',
+        }),
+      });
+
+      const response = await postClone(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(202);
+      expect(data.success).toBe(true);
+
+      // Verify the job was created with trimmed targetDir resolved under basePath
+      const job = getCloneJob(mockDb, data.jobId);
+      expect(job?.targetPath).toBe('/test/clone-root/my-repo');
+    });
+
+    it('R-002: treats whitespace-only targetDir as undefined', async () => {
+      const request = new NextRequest('http://localhost/api/repositories/clone', {
+        method: 'POST',
+        body: JSON.stringify({
+          cloneUrl: 'https://github.com/test/ws-repo.git',
+          targetDir: '   ',
+        }),
+      });
+
+      const response = await postClone(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(202);
+      expect(data.success).toBe(true);
+
+      // Verify default path was used (basePath + repoName)
+      const job = getCloneJob(mockDb, data.jobId);
+      expect(job?.targetPath).toBe('/test/clone-root/ws-repo');
+    });
+
+    it('R-003: rejects targetDir longer than 1024 characters', async () => {
+      const request = new NextRequest('http://localhost/api/repositories/clone', {
+        method: 'POST',
+        body: JSON.stringify({
+          cloneUrl: 'https://github.com/test/long-repo.git',
+          targetDir: 'a'.repeat(1025),
+        }),
+      });
+
+      const response = await postClone(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.success).toBe(false);
+      expect(data.error.code).toBe('INVALID_TARGET_PATH');
+    });
   });
 
   describe('GET /api/repositories/clone/[jobId]', () => {

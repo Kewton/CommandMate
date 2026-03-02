@@ -15,7 +15,7 @@ import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { UrlNormalizer } from './url-normalizer';
-import { isPathSafe } from './path-validator';
+import { validateWorktreePath } from './path-validator';
 import {
   createCloneJob as dbCreateCloneJob,
   getCloneJob,
@@ -181,6 +181,33 @@ export function resetWorktreeBasePathWarning(): void {
 }
 
 /**
+ * Resolve and validate a custom target path.
+ * Returns the resolved absolute path, or null if the path is invalid.
+ *
+ * [D1-001] Wraps validateWorktreePath() to maintain consistency with
+ * the existing boolean/null error pattern used throughout startCloneJob().
+ * [D4-001] Exception messages from validateWorktreePath() contain rootDir
+ * values and must not be exposed to clients.
+ * [S1-001] Logs rejection for attack detection and debugging using a
+ * fixed message string to avoid leaking rootDir.
+ *
+ * @internal
+ */
+export function resolveCustomTargetPath(
+  customTargetPath: string,
+  basePath: string
+): string | null {
+  try {
+    return validateWorktreePath(customTargetPath, basePath);
+  } catch {
+    // [S1-001] Log rejection for attack detection and debugging.
+    // Use a fixed message string to avoid leaking rootDir from exception messages.
+    console.warn('[CloneManager] Invalid custom target path rejected');
+    return null;
+  }
+}
+
+/**
  * Clone Manager class
  *
  * Manages the lifecycle of git clone operations:
@@ -334,12 +361,18 @@ export class CloneManager {
     }
 
     // 4. Determine target path
-    const targetPath = customTargetPath || this.getTargetPath(repoName);
-
-    // 4.1. Validate target path (prevent path traversal)
-    // [D4-001] Use default error message to avoid leaking basePath value
-    if (customTargetPath && !isPathSafe(customTargetPath, this.config.basePath!)) {
-      return { success: false, error: ERROR_DEFINITIONS.INVALID_TARGET_PATH };
+    // [D1-002] When customTargetPath is provided, validate AND resolve to absolute path
+    // using resolveCustomTargetPath() to prevent relative path bypass (Issue #392).
+    let targetPath: string;
+    if (customTargetPath) {
+      const resolved = resolveCustomTargetPath(customTargetPath, this.config.basePath!);
+      if (!resolved) {
+        // [D4-001] Use default error message to avoid leaking basePath value
+        return { success: false, error: ERROR_DEFINITIONS.INVALID_TARGET_PATH };
+      }
+      targetPath = resolved;
+    } else {
+      targetPath = this.getTargetPath(repoName);
     }
 
     // 5. Check if directory exists
