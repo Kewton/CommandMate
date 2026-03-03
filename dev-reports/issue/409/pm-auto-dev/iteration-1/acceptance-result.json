@@ -1,0 +1,80 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: CURRENT_SCHEMA_VERSION is 21",
+      "result": "passed",
+      "evidence": "CURRENT_SCHEMA_VERSION === 21 confirmed in db-migrations.ts line 14 and verified by db-migrations.test.ts (29/29 passed)"
+    },
+    {
+      "scenario": "Scenario 2: Migration creates idx_scheduled_executions_worktree_enabled index",
+      "result": "passed",
+      "evidence": "Composite index on (worktree_id, enabled) created at version 21. PRAGMA index_info confirms both columns. EXPLAIN QUERY PLAN confirms index usage. Rollback to v20 correctly drops the index."
+    },
+    {
+      "scenario": "Scenario 3: mtime unchanged - batchUpsertSchedules is NOT called",
+      "result": "passed",
+      "evidence": "schedule-manager.test.ts 'mtime cache (syncSchedules behavior)' suite: 4/4 tests passed. When mtime is unchanged between syncs, the syncSchedules function short-circuits via 'continue' at line 469, skipping batchUpsertSchedules call."
+    },
+    {
+      "scenario": "Scenario 4: mtime changed or first sync - batchUpsertSchedules executes normally",
+      "result": "passed",
+      "evidence": "schedule-manager.test.ts 'should process normally on first sync (no cache)' passed. On first sync (no cached mtime) or mtime change, syncSchedules proceeds to readCmateFile and batchUpsertSchedules at line 484."
+    },
+    {
+      "scenario": "Scenario 5: CMATE.md deletion (mtime=null, cache exists) removes cache entry",
+      "result": "passed",
+      "evidence": "schedule-manager.test.ts 'should remove cache entry when CMATE.md is deleted' passed. When getCmateMtime returns null and cachedMtime exists, cmateFileCache.delete() is called at line 456 and schedules are not added to activeScheduleIds."
+    },
+    {
+      "scenario": "Scenario 6: stopAllSchedules clears cmateFileCache",
+      "result": "passed",
+      "evidence": "schedule-manager.test.ts 'should clear cmateFileCache when stopAllSchedules is called' passed. stopAllSchedules() calls manager.cmateFileCache.clear() at line 611."
+    },
+    {
+      "scenario": "Scenario 7: batchUpsertSchedules correctly UPDATEs existing schedules preserving IDs",
+      "result": "passed",
+      "evidence": "schedule-manager.test.ts 'should UPDATE existing schedules and preserve IDs via direct DB test' passed. Existing schedule ID is found via existingByName map and UPDATE is applied, returning the same ID."
+    },
+    {
+      "scenario": "Scenario 8: batchUpsertSchedules correctly INSERTs new schedules with new IDs",
+      "result": "passed",
+      "evidence": "schedule-manager.test.ts 'should INSERT new schedules via direct DB test' passed. New UUIDs are generated for each entry, 2 rows inserted with valid UUID v4 format."
+    },
+    {
+      "scenario": "Scenario 9: All existing unit tests pass",
+      "result": "passed",
+      "evidence": "npm run test:unit: 207 test files passed, 4397 tests passed, 7 skipped, 0 failed. npx tsc --noEmit: no errors. npm run lint: no warnings or errors."
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "scheduled_executions(worktree_id, enabled) index is correctly created",
+      "verified": true,
+      "evidence": "Migration version 21 creates idx_scheduled_executions_worktree_enabled with CREATE INDEX IF NOT EXISTS. PRAGMA index_info confirms (worktree_id, enabled) columns. EXPLAIN QUERY PLAN confirms SQLite uses the index."
+    },
+    {
+      "criterion": "CMATE.md unchanged - upsertSchedule DB queries do not occur",
+      "verified": true,
+      "evidence": "syncSchedules() checks getCmateMtime() against cmateFileCache. When mtime matches cached value, the function skips readCmateFile/batchUpsertSchedules entirely (line 462-469 in schedule-manager.ts). 4 mtime cache tests pass."
+    },
+    {
+      "criterion": "Schedule execution accuracy is unaffected (cron job start/stop unchanged)",
+      "verified": true,
+      "evidence": "All 19 schedule-manager.test.ts tests pass. initScheduleManager, stopAllSchedules, cron lifecycle, recovery, and batchUpsertSchedules all function correctly. The refactoring only changes the DB access pattern (batch vs per-entry), not the cron scheduling logic."
+    },
+    {
+      "criterion": "All existing tests pass",
+      "verified": true,
+      "evidence": "207 test files, 4397 tests passed (7 skipped). TypeScript type check: 0 errors. ESLint: 0 warnings/errors."
+    }
+  ],
+  "evidence_files": [
+    "tests/unit/lib/db-migrations.test.ts (29 tests passed)",
+    "tests/unit/lib/schedule-manager.test.ts (19 tests passed)",
+    "npm run test:unit (207 files, 4397 tests passed)",
+    "npx tsc --noEmit (0 errors)",
+    "npm run lint (0 warnings/errors)"
+  ],
+  "message": "All acceptance criteria are satisfied. The implementation correctly adds the composite DB index (version 21), implements mtime caching to skip unchanged CMATE.md files, and uses batch upsert for efficient DB operations. All existing tests continue to pass without regressions."
+}

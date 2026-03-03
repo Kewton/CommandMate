@@ -1,0 +1,93 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should-fix",
+      "category": "DRY",
+      "location": "設計方針書 Section 6 - getCmateMtime() / cmate-parser.ts readCmateFile()",
+      "issue": "getCmateMtime()内でpath.join(worktreePath, 'CMATE.md')をハードコードしているが、cmate-parser.tsではCMATE_FILENAME定数を使用している。ファイル名が2箇所で定義される形になりDRY原則に違反する。",
+      "suggestion": "getCmateMtime()でもCMATE_FILENAME定数をcmate-constants.tsからimportして使用する。例: const filePath = path.join(worktreePath, CMATE_FILENAME);"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should-fix",
+      "category": "SRP",
+      "location": "設計方針書 Section 7 - batchUpsertSchedules()",
+      "issue": "batchUpsertSchedules()は既存upsertSchedule()を完全に置換する設計だが、upsertSchedule()を削除するか残すかが設計方針書で明言されていない。もし残存した場合、2つの関数が同じscheduled_executionsテーブルのupsert責務を持つことになり、SRP観点でメンテナンス上の混乱を招く。",
+      "suggestion": "設計方針書に「upsertSchedule()はbatchUpsertSchedules()に完全に置き換えられ、削除する」と明記する。syncSchedules()内のupsertSchedule()呼び出しをbatchUpsertSchedules()に一括変更する旨も記載する。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice-to-have",
+      "category": "KISS",
+      "location": "設計方針書 Section 6 - mtime未変更時のscheduleId復元ロジック",
+      "issue": "mtime未変更時にmanager.schedulesを全走査して当該worktreeIdに属するscheduleIdを収集するロジックは、worktree数×schedule数の計算量となる。100 worktree×5 scheduleで最大500回/60秒のMap走査が発生する。現状の規模では問題ないが、scheduleIdをworktreeId別にインデックスしておけば走査不要になり、ロジックもよりシンプルになる。",
+      "suggestion": "ManagerStateにworktreeId -> Set<scheduleId>の逆引きMapを保持するか、現状のschedules Mapの走査で十分であるとする場合はその判断根拠をコメントで残す。KISS優先なら現状の方式にコメントを付けるのが妥当。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "must-fix",
+      "category": "SOLID/OCP",
+      "location": "設計方針書 Section 6 - syncSchedules()処理フロー Step 3c",
+      "issue": "mtime未変更でスキップする場合に既存scheduleIdをactiveScheduleIdsに追加する処理は設計されているが、スキップ後にCronジョブが更新されない。もしCMATE.mdの内容はそのままでcronJobのスケジュールが失効・停止していた場合（例: Cronライブラリの内部エラーやOOMキル後のリカバリ）、mtimeが変わらないためCronジョブが再作成されない。しかし設計方針書のSection 8ではdb.transaction()失敗のみをエラーケースとして扱い、Cronジョブの状態整合性に関するリカバリがカバーされていない。",
+      "suggestion": "設計方針書のエラーハンドリング（Section 8）にCronジョブの状態整合性チェックに関する記述を追加する。具体的には、mtime未変更時でもmanager.schedulesにcronJobが存在しないscheduleIdがあれば、キャッシュを無効化して再パース・再作成するフォールバックを検討する。最低限、この状況が発生しない理由（cronJobはメモリ上にあるため外部要因で失われない）をSection 13の設計決定事項に追記する。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "should-fix",
+      "category": "SOLID/ISP",
+      "location": "設計方針書 Section 5 - ManagerState interface拡張",
+      "issue": "ManagerState interfaceにcmateFileCacheを直接追加する設計は、キャッシュ管理とスケジュール管理が1つのinterfaceに混在する。現状はManagerStateを外部に公開していないため実害は少ないが、今後Issue #407でworktree単位のキャッシュクリーンアップを追加する際に、cmateFileCacheの操作メソッドが必要になる可能性がある。",
+      "suggestion": "現時点では影響が小さいため、ManagerStateへの直接追加で問題ない。ただし、将来的なキャッシュ操作の拡張に備え、clearCmateCache(worktreePath: string)やclearAllCmateCache()のようなヘルパー関数を用意しておくことを推奨する。Issue #407のスコープとして設計方針書に記載する。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice-to-have",
+      "category": "DRY",
+      "location": "設計方針書 Section 4 - idx_scheduled_executions_worktree維持判断",
+      "issue": "既存のidx_scheduled_executions_worktree (worktree_id)とidx_scheduled_executions_enabled (enabled)は、新規の複合インデックスidx_scheduled_executions_worktree_enabled (worktree_id, enabled)によってカバーされる可能性がある。設計方針書では「明示的に残す」としているが、冗長なインデックスはINSERT/UPDATEのオーバーヘッドになる。",
+      "suggestion": "idx_scheduled_executions_worktreeは複合インデックスのプレフィクスでカバーされるため削除が可能。idx_scheduled_executions_enabledはenabledの選択性が低い（大半がenabled=1）ため単独インデックスの効果が薄い。設計方針書に「idx_scheduled_executions_worktreeは冗長だが、既存クエリパターンとの互換性のため残す」等の判断根拠を明記する。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "should-fix",
+      "category": "SOLID/SRP",
+      "location": "設計方針書 Section 7 - batchUpsertSchedules() DB操作",
+      "issue": "batchUpsertSchedules()は (1) 既存レコードの一括SELECT、(2) UPDATE/INSERTのトランザクション実行、(3) scheduleIds配列の構築 の3つの責務を持つ。関数自体は十分小さいため分割する必要はないが、prepared statementの生成がbatchUpsertSchedules()呼び出しのたびに行われる設計になっている。db.prepare()はSQLiteではキャッシュされるが、毎回のprepare呼び出しはコードの意図を不明瞭にする。",
+      "suggestion": "prepared statementをモジュールスコープまたは関数先頭でコメント付きで定義し、再利用の意図を明確にする。ただしgetLazyDbInstance()のlazy loading特性を考慮すると、関数内での定義が適切な場合もあるため、設計方針書にstatement caching方針を明記する。better-sqlite3のprepare()はキャッシュされる旨のコメントを追加する。"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "nice-to-have",
+      "category": "YAGNI",
+      "location": "設計方針書 Section 12 - 依存関係・マージ順序",
+      "issue": "Issue #407のcmateFileCacheクリーンアップ対応について言及しているが、本Issue #409のスコープではcmateFileCacheのworktree単位クリーンアップは不要。stopAllSchedules()でのglobalリセット（schedules.clear()と同様にcmateFileCache.clear()）のみ必要であり、この点が設計方針書に記載されていない。",
+      "suggestion": "stopAllSchedules()でcmateFileCache.clear()を呼び出す処理をSection 6のフローまたは別途ライフサイクルセクションに追記する。これはYAGNI的に本Issue内で必要な最小限の対応。"
+    },
+    {
+      "id": "DR1-009",
+      "severity": "must-fix",
+      "category": "設計の明確性",
+      "location": "設計方針書 Section 6 - syncSchedules() Step 3b CMATE.md削除検知",
+      "issue": "CMATE.md削除時のフローで「キャッシュにエントリあり -> CMATE.md削除とみなす -> キャッシュエントリ除去 -> continue」とあるが、continueした場合、そのworktreeのscheduleIdはactiveScheduleIdsに追加されない。結果としてdisableStaleSchedules()で全scheduleが無効化されるが、manager.schedulesからのcronJob停止・削除は「Clean Up: stale cron jobs」で行われる。このフローは論理的に正しいが、「既にcronJobとして動作中のスケジュールがCMATE.md削除で停止される」という重要な動作が暗黙的であり、設計方針書に明示されていない。",
+      "suggestion": "Section 6のフロー説明に「CMATE.md削除時: activeScheduleIdsにそのworktreeのscheduleIdを追加しないことで、Step 4のClean Upフェーズで当該worktreeのcronJobが停止・削除される」と明記する。動作の意図を設計方針書レベルで追跡可能にする。"
+    },
+    {
+      "id": "DR1-010",
+      "severity": "nice-to-have",
+      "category": "KISS",
+      "location": "設計方針書 Section 11 - パフォーマンス設計",
+      "issue": "「100 worktree x 5 schedule」のシナリオが記載されているが、getAllWorktrees()のSELECT id, path FROM worktreesは毎回実行される設計。mtimeキャッシュと同様に、worktreeリストもキャッシュする余地がある。ただしworktree追加/削除の即時検出が必要なため、現行設計の「毎回実行」は正当な判断。",
+      "suggestion": "現行設計のままで問題ない。Section 13の設計決定事項にgetAllWorktrees()を毎回実行する理由が既に記載されており、この判断は適切。追加アクション不要。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "total": 10
+  }
+}

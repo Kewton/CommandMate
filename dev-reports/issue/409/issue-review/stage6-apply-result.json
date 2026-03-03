@@ -1,0 +1,47 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 409,
+  "iteration": 2,
+  "apply_date": "2026-03-03",
+  "applied_findings": {
+    "should_fix": [
+      {
+        "id": "R5-001",
+        "status": "applied",
+        "change_summary": "依存関係セクションの stopScheduleForWorktree() という具体的な関数名の断定を「worktree 単位の停止・エントリ削除関数」という抽象的な表現に変更し、(R5-001) トレーサビリティタグを付与"
+      },
+      {
+        "id": "R5-002",
+        "status": "applied",
+        "change_summary": "提案する解決策のバッチ化手順を具体化: (1) SELECT id, name FROM scheduled_executions WHERE worktree_id = ? を1回実行しMap<name, id>構築、(2) db.transaction()内でMapルックアップによるUPDATE/INSERT判定。実装タスクにもバルクSELECT→Mapルックアップの手順を追記し、(R5-002) トレーサビリティタグを付与"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "R5-003",
+        "status": "skipped",
+        "reason": "既存の idx_scheduled_executions_enabled（enabled単独）のDROP/維持方針は実装時に判断すればよい程度の項目であり、レビュー自体もそう言及している"
+      },
+      {
+        "id": "R5-004",
+        "status": "skipped",
+        "reason": "概要の表現整理は軽微な改善であり、現状の記述で十分明確"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 2,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/409"
+  },
+  "review_history_updated": true,
+  "review_history_entries_added": [
+    "Stage 5 | 通常レビュー（2回目） | 2026-03-03 | Should Fix: 2, Nice to Have: 2",
+    "Stage 6 | 指摘事項反映（2回目） | 2026-03-03 | 反映: 2件 (R5-001, R5-002), スキップ: 2件 (R5-003, R5-004)"
+  ]
+}

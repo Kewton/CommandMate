@@ -1,0 +1,69 @@
+{
+  "issue_number": 409,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "CR2-001",
+        "item": "CMATE_FILENAMEのimportパスを@/config/cmate-constantsからの直接importと明記（循環依存防止）",
+        "sections_updated": ["Section 6", "Section 10", "Section 15"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CR2-002",
+        "item": "batchUpsertSchedules()でnext_execute_atカラムを扱わないことを設計方針書に明記",
+        "sections_updated": ["Section 7", "Section 13"],
+        "status": "reflected"
+      },
+      {
+        "id": "CR2-003",
+        "item": "ManagerState interfaceにcmateFileCacheフィールド追加を実装チェックリストに明記",
+        "sections_updated": ["Section 15"],
+        "status": "reflected"
+      },
+      {
+        "id": "CR2-004",
+        "item": "getCmateMtime()とreadCmateFile()のエラーハンドリング差異をSection 8に記載",
+        "sections_updated": ["Section 8"],
+        "status": "reflected"
+      },
+      {
+        "id": "CR2-005",
+        "item": "db-migrations.test.tsのrollbackテストのハードコード値更新を追記",
+        "sections_updated": ["Section 9", "Section 15"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [
+    {
+      "id": "CR2-006",
+      "category": "consider",
+      "item": "session-cleanup.tsのstopAllSchedules()呼び出しとcmateFileCache.clear()の関係",
+      "reason": "Issue #407のスコープで対応予定。DR1-008で既にstopAllSchedules()のキャッシュクリアは設計済み"
+    },
+    {
+      "id": "CR2-007",
+      "category": "consider",
+      "item": "idx_scheduled_executions_enabledインデックスの冗長性判断",
+      "reason": "SQLiteインデックスのオーバーヘッドは微小であり、実装時判断を維持"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+  "sections_updated": [
+    "Section 6 (getCmateMtime コード例コメント)",
+    "Section 7 (next_execute_atカラムの扱い追記)",
+    "Section 8 (エラーハンドリング差異サブセクション追加)",
+    "Section 9 (既存テスト影響にrollbackテスト追記)",
+    "Section 10 (CMATE_FILENAMEインポートパス更新)",
+    "Section 13 (next_execute_at設計決定追記)",
+    "Section 15 (DR1-001/CR2-001統合、CR2-003/CR2-005チェックリスト追加)",
+    "Section 16 (Stage 2レビュー指摘事項反映サマリー新設)"
+  ],
+  "timestamp": "2026-03-03T14:30:00Z"
+}

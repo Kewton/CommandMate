@@ -1,0 +1,145 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "R1-001",
+      "severity": "must-fix",
+      "category": "正確性",
+      "location": "背景・課題 S6 - chat_messages(cli_tool_id) の記述",
+      "issue": "「chat_messages(cli_tool_id) の複合インデックスが不足（cli_tool_id単独でのフィルタリング時）」という記述は誤り。既に idx_messages_cli_tool(worktree_id, cli_tool_id, timestamp DESC) が db.ts:99-101 で定義されており、cli_tool_id 単独でフィルタリングするクエリはコードベース内に存在しない。全ての cli_tool_id クエリは worktree_id を先頭条件に含む（db.ts:592, 706, 913）。",
+      "suggestion": "S6セクションから chat_messages(cli_tool_id) に関する記述を削除する。この問題は存在しない。",
+      "evidence": "db.ts:98-101 - CREATE INDEX IF NOT EXISTS idx_messages_cli_tool ON chat_messages(worktree_id, cli_tool_id, timestamp DESC)"
+    },
+    {
+      "id": "R1-002",
+      "severity": "must-fix",
+      "category": "正確性",
+      "location": "背景・課題 S6 - scheduled_executions(worktree_id, name) の記述",
+      "issue": "「scheduled_executions(worktree_id, name) にインデックスがなく」という記述は不正確。db-migrations.ts:829 で UNIQUE(worktree_id, name) 制約が定義されており、SQLiteはUNIQUE制約に対して暗黙的に複合インデックスを自動生成する。upsertSchedule() の WHERE worktree_id = ? AND name = ? クエリ（schedule-manager.ts:151-153）はこの暗黙インデックスで効率的に動作する。",
+      "suggestion": "「インデックスがない」ではなく「UNIQUE制約による暗黙インデックスが存在するが、disableStaleSchedules() の WHERE worktree_id IN (...) AND enabled = 1 クエリに対して (worktree_id, enabled) の複合インデックスが不足」と記述を修正する。現在 idx_scheduled_executions_enabled は enabled 単独カラムのインデックス（db-migrations.ts:842-843）で、worktree_id との複合条件では最適でない。",
+      "evidence": "db-migrations.ts:829 - UNIQUE(worktree_id, name); db-migrations.ts:835-837 - idx_scheduled_executions_worktree ON scheduled_executions(worktree_id); db-migrations.ts:842-843 - idx_scheduled_executions_enabled ON scheduled_executions(enabled)"
+    },
+    {
+      "id": "R1-003",
+      "severity": "must-fix",
+      "category": "正確性",
+      "location": "背景・課題 P3 - クエリ数の見積もり",
+      "issue": "「100 worktree x 5 schedule = 500クエリ/60秒」は過小見積もり。upsertSchedule() は1エントリあたり最低2クエリ（SELECT + UPDATE/INSERT）を発行するため、実際は 100 x 5 x 2 = 1000クエリ以上/60秒。さらに disableStaleSchedules() のSELECT + 個別UPDATEクエリ、および readCmateFile() のファイルI/Oも加算される。",
+      "suggestion": "「100 worktree x 5 schedule x 2 (SELECT + UPDATE/INSERT) = 1000+ クエリ/60秒（disableStaleSchedules分を含めるとさらに増加）」と修正する。",
+      "evidence": "schedule-manager.ts:143-170 - upsertSchedule() は SELECT id (L151-153) + UPDATE or INSERT (L156-160 or L165-168) で2クエリ/エントリ"
+    },
+    {
+      "id": "R1-004",
+      "severity": "must-fix",
+      "category": "正確性",
+      "location": "背景・課題 P3 - SELECT * FROM worktrees の記述",
+      "issue": "「SELECT * FROM worktrees を実行」という記述は不正確。実際のクエリは SELECT id, path FROM worktrees（schedule-manager.ts:127）であり、全カラムを取得していない。問題の本質（LIMIT/フィルタなしの全件取得）は正しいが、クエリ文の引用が誤り。",
+      "suggestion": "「SELECT id, path FROM worktrees を実行（LIMIT/フィルタなし）」に修正する。",
+      "evidence": "schedule-manager.ts:127 - return db.prepare('SELECT id, path FROM worktrees').all() as WorktreeRow[]"
+    },
+    {
+      "id": "R1-005",
+      "severity": "should-fix",
+      "category": "完全性",
+      "location": "提案する解決策 1. インデックス追加",
+      "issue": "「scheduled_executions(worktree_id, name) 複合インデックス」の追加が提案されているが、UNIQUE制約から暗黙インデックスが既に存在するため冗長。代わりに、disableStaleSchedules() や APIエンドポイント（schedules/route.ts:42）で使われる WHERE worktree_id = ? AND enabled = 1 パターンに対する (worktree_id, enabled) 複合インデックスの方が効果的。",
+      "suggestion": "インデックス追加の提案を以下に修正: (1) scheduled_executions(worktree_id, enabled) 複合インデックス追加（disableStaleSchedules() と API GET /schedules のクエリ最適化）。(2) chat_messages関連のインデックス追加は不要と明記。(3) 既存の idx_scheduled_executions_enabled（enabled単独）を廃止して複合インデックスに置換することを検討。",
+      "evidence": "schedule-manager.ts:276 - WHERE worktree_id IN (...) AND enabled = 1; schedules/route.ts:42 - WHERE worktree_id = ? AND enabled = 1"
+    },
+    {
+      "id": "R1-006",
+      "severity": "should-fix",
+      "category": "完全性",
+      "location": "提案する解決策 2. スケジュール同期の差分ベース化",
+      "issue": "mtimeキャッシュの実装方針は述べられているが、キャッシュの無効化戦略が明記されていない。CMATE.mdがファイルシステム外（例: git pull）で変更された場合のmtimeの挙動、サーバー再起動時のキャッシュ初期化、globalThisとの整合性など、実装上の考慮事項が不足。",
+      "suggestion": "以下を明記する: (1) キャッシュはglobalThisに保持（既存のManagerStateに追加）しサーバー再起動時は自動クリア。(2) 初回syncSchedules()はキャッシュ未構築のため全worktree処理。(3) fs.statSync().mtimeMs でmtime取得（readFileSync前にチェック）。(4) CMATE.md削除時のキャッシュエントリ除去方針。",
+      "evidence": "schedule-manager.ts:87-96 - globalThis.__scheduleManagerStatesにManagerState保持。schedule-manager.ts:370-378 - 毎回readCmateFile + parseSchedulesSection"
+    },
+    {
+      "id": "R1-007",
+      "severity": "should-fix",
+      "category": "完全性",
+      "location": "実装タスク",
+      "issue": "「バッチupsertへのリファクタリング（必要に応じて）」の記述が曖昧。SQLiteのINSERT OR REPLACE（またはON CONFLICT DO UPDATE）を使ったバッチ化が具体的にどの処理を対象とするのか不明確。また、better-sqlite3のtransaction()を使った一括処理が既に可能な点への言及がない。",
+      "suggestion": "タスクを具体化する: 「syncSchedules() 内のupsertSchedule()ループをdb.transaction()で囲み、1 worktreeあたりの複数スケジュールをトランザクション単位で処理。個別のSELECT+UPDATE/INSERTパターンを、バルクSELECTで既存レコードをMapに取得した後、トランザクション内でUPDATE/INSERTを実行する形式に変更。」",
+      "evidence": "schedule-manager.ts:143-170 - upsertSchedule() は1エントリずつSELECT+UPDATE/INSERT。better-sqlite3はsynchronousなのでtransaction()バッチ化が有効。"
+    },
+    {
+      "id": "R1-008",
+      "severity": "should-fix",
+      "category": "明確性",
+      "location": "受入条件",
+      "issue": "「CMATE.md未変更時にDBクエリが発生しないこと」は検証可能だが、測定方法が不明確。SQLiteのクエリログやテストでどのように確認するかの基準がない。また、getAllWorktrees() は差分ベースにしても毎回呼ばれる（worktree一覧はDBから取得が必要）ため、「DBクエリが発生しない」は正確ではなく「upsertSchedule()やreadCmateFile()が発生しない」が正しい。",
+      "suggestion": "受入条件を修正: 「CMATE.md未変更時にupsertSchedule() のDBクエリ（SELECT/UPDATE/INSERT on scheduled_executions）が発生しないこと。検証方法: ユニットテストでDB操作をモック/スパイし、mtime未変更時にupsert関連クエリが呼ばれないことを確認。」",
+      "evidence": "schedule-manager.ts:124-132 - getAllWorktrees() は差分ベースでも毎回必要（worktree削除検出のため）"
+    },
+    {
+      "id": "R1-009",
+      "severity": "should-fix",
+      "category": "完全性",
+      "location": "影響範囲テーブル",
+      "issue": "影響範囲にDBマイグレーションとschedule-manager.tsのみが記載されているが、追加で影響を受ける可能性のあるファイルが不足。具体的には、mtimeキャッシュの追加によりManagerState interfaceが変更されるため、既存のschedule-manager.test.tsにもテスト追加が必要。",
+      "suggestion": "影響範囲に以下を追加: (1) tests/unit/lib/schedule-manager.test.ts（mtimeキャッシュのテスト追加）。(2) src/lib/db-migrations.ts（マイグレーションバージョン21の追加）。マイグレーション番号は現在20が最新のため21を使用。",
+      "evidence": "db-migrations.ts:14 - CURRENT_SCHEMA_VERSION = 20; tests/unit/lib/schedule-manager.test.ts が既存"
+    },
+    {
+      "id": "R1-010",
+      "severity": "nice-to-have",
+      "category": "完全性",
+      "location": "背景・課題全体",
+      "issue": "S6（DBインデックス不足）とP3（スケジュールマネージャの非効率なポーリング）は異なる性質の問題だが、一つのIssueにまとめられている。S6は実質的に修正不要（chat_messages）または軽微（scheduled_executions）であるのに対し、P3は実装工数の大きい改善。分離した方がレビュー・実装・テストがしやすい。",
+      "suggestion": "Issue分割を検討: (1) Issue A: scheduled_executions(worktree_id, enabled) 複合インデックス追加（DBマイグレーションのみの小規模変更）。(2) Issue B: スケジュールマネージャのmtimeキャッシュによる差分ベース化（ロジック変更を伴う中規模変更）。ただし、現行のまま1 Issueで進めても問題はない。",
+      "evidence": "N/A"
+    },
+    {
+      "id": "R1-011",
+      "severity": "nice-to-have",
+      "category": "完全性",
+      "location": "提案する解決策 2",
+      "issue": "「CMATE.mdのmtime/ハッシュをキャッシュ」とあるが、mtimeとハッシュのどちらを使うかが未決定。mtimeはfs.statSync()1回で済むため軽量だが、git操作やビルドツールがmtimeをリセットする可能性がある。ハッシュ（SHA256等）は正確だがファイル全体の読み取りが必要。",
+      "suggestion": "実装方針を明記する。推奨: mtimeを第一選択とし（fs.statSync().mtimeMsを使用）、ファイルが小さい（CMATE.mdは通常数KB以下）ため、mtime変更時のみファイル読み取り+パースを行う。ハッシュは不要（mtimeで十分な精度が得られる）。",
+      "evidence": "cmate-parser.ts:311-329 - readCmateFile() はreadFileSync()で全文読み取り。CMATE.mdは小さいファイルのためmtimeチェックで十分。"
+    }
+  ],
+  "summary": {
+    "must_fix": 4,
+    "should_fix": 5,
+    "nice_to_have": 2,
+    "total": 11
+  },
+  "code_references": [
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "relevance": "主要な変更対象。syncSchedules() (L363-442)、getAllWorktrees() (L124-132)、upsertSchedule() (L143-170)、disableStaleSchedules() (L263-297)"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "relevance": "version 17 (L793-894) で scheduled_executions テーブルとインデックスの定義。新規マイグレーション (version 21) の追加対象"
+    },
+    {
+      "file": "src/lib/db.ts",
+      "relevance": "chat_messages インデックス定義 (L98-101)。idx_messages_cli_tool の存在確認"
+    },
+    {
+      "file": "src/lib/cmate-parser.ts",
+      "relevance": "readCmateFile() (L311-329) と parseSchedulesSection() (L200-302)。mtimeキャッシュ導入時の変更候補"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/schedules/route.ts",
+      "relevance": "WHERE worktree_id = ? AND enabled = 1 クエリ (L42) で (worktree_id, enabled) インデックスの恩恵を受ける"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager.test.ts",
+      "relevance": "既存テストファイル。mtimeキャッシュのテスト追加が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "schedule-manager.ts、cmate-parser.ts のモジュール説明参照"
+    }
+  ]
+}

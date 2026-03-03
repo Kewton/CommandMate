@@ -1,0 +1,7 @@
+{
+  "stage": 1,
+  "applied": ["DR1-004", "DR1-009", "DR1-001", "DR1-002", "DR1-005", "DR1-007", "DR1-008"],
+  "skipped": ["DR1-003", "DR1-006", "DR1-010"],
+  "design_policy_updated": true,
+  "summary": "Stage 1レビュー指摘事項7件を設計方針書に反映。Must Fix 2件: DR1-004(Section 8にCronジョブの状態整合性とリカバリのサブセクション追加 - globalThisの永続性とプロセス再起動時の自動再初期化を明記)、DR1-009(Section 6 Step 3bにCMATE.md削除時のクリーンアップ委譲フローを明示的に記述)。Should Fix 4件: DR1-001(getCmateMtime()のパスをCMATE_FILENAME定数使用に修正、Section 10の記述も更新)、DR1-002(Section 7にupsertSchedule()の廃止とbatchUpsertSchedules()への完全置換を明記)、DR1-005(Section 5にclearCmateCache/clearAllCmateCacheヘルパー関数案をIssue #407スコープとして追記)、DR1-007(Section 7のbatchUpsertSchedules()コード例にbetter-sqlite3 prepare()キャッシュのコメント追加)。Nice to Have 1件: DR1-008(Section 6にstopAllSchedules()でのcmateFileCache.clear()ライフサイクル管理を追加)。スキップ3件: DR1-003(KISS優先で実装時判断)、DR1-006(実装時判断)、DR1-010(既にSection 13に記載済み)。Section 15としてレビュー反映サマリーと実装チェックリストを追加。"
+}

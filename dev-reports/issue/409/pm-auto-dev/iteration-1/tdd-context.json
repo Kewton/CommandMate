@@ -1,0 +1,30 @@
+{
+  "issue_number": 409,
+  "acceptance_criteria": [
+    "scheduled_executions(worktree_id, enabled)インデックスが正しく作成されること",
+    "CMATE.md未変更時にupsertSchedule()のDBクエリ（scheduled_executionsテーブルへのSELECT/UPDATE/INSERT）が発生しないこと",
+    "スケジュール実行の正確性に影響がないこと（既存のcronジョブ起動・停止は変更なし）",
+    "既存テストがパスすること"
+  ],
+  "implementation_tasks": [
+    "db-migrations.tsにマイグレーション version 21追加（scheduled_executions(worktree_id, enabled)複合インデックス）、CURRENT_SCHEMA_VERSIONを21に更新",
+    "ManagerStateインターフェースにcmateFileCache: Map<string, number>フィールド追加（mtimeMs保持）、getManagerState()の初期化ブロックに追加",
+    "getCmateMtime(worktreePath: string): number | null ヘルパー関数実装（CMATE_FILENAMEは@/config/cmate-constantsから直接import、ENOENTはnull返却）",
+    "batchUpsertSchedules(worktreeId: string, entries: ScheduleEntry[]): string[]関数実装（既存upsertSchedule()を削除して完全置換、SELECT+db.transaction()でバッチ化）",
+    "syncSchedules()にmtimeキャッシュと差分検出ロジック追加（未変更ならスキップ、削除時はキャッシュ除去）",
+    "stopAllSchedules()にmanager.cmateFileCache.clear()追加",
+    "tests/unit/lib/schedule-manager.test.tsにmtimeキャッシュのテスト追加（キャッシュヒット時スキップ、キャッシュミス時正常動作、CMATE.md削除時のキャッシュ除去）",
+    "tests/unit/lib/db-migrations.test.tsのCURRENT_SCHEMA_VERSIONアサーション値を20から21に更新（L37/L430/L443の3箇所）"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+  "work_plan_path": "dev-reports/issue/409/work-plan.md",
+  "key_files": [
+    "src/lib/schedule-manager.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/cmate-parser.ts",
+    "src/config/cmate-constants.ts",
+    "tests/unit/lib/schedule-manager.test.ts",
+    "tests/unit/lib/db-migrations.test.ts"
+  ]
+}

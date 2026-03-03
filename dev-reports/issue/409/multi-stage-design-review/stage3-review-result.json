@@ -1,0 +1,189 @@
+{
+  "issue_number": 409,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "IR3-001",
+        "category": "影響範囲/テスト",
+        "title": "db-migrations.test.ts の rollbackMigrations テストの expect 値 3箇所が version 21 追加に伴い更新必要",
+        "description": "db-migrations.test.ts L430 の expect(getCurrentVersion(db)).toBe(20) と L443 の expect(getCurrentVersion(db)).toBe(20) は、runMigrations() 実行後のバージョンが 21 になるため toBe(21) に更新が必要。設計方針書 Section 9 では L37 と L430 の 2箇所のみ記載されているが、L443 も同様にハードコードされている。",
+        "affected_files": ["tests/unit/lib/db-migrations.test.ts"],
+        "evidence": "db-migrations.test.ts L37: expect(CURRENT_SCHEMA_VERSION).toBe(20), L430: expect(getCurrentVersion(db)).toBe(20), L443: expect(getCurrentVersion(db)).toBe(20)",
+        "recommendation": "設計方針書の実装チェックリスト CR2-005 に L443 も追加する。実装時に db-migrations.test.ts 内の toBe(20) を全文検索して漏れなく更新すること。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IR3-002",
+        "category": "影響範囲/API",
+        "title": "API routes の scheduled_executions クエリが新規インデックスの恩恵を受ける範囲の確認",
+        "description": "新規インデックス idx_scheduled_executions_worktree_enabled(worktree_id, enabled) は、schedule-manager.ts の disableStaleSchedules() だけでなく、API route GET /api/worktrees/[id]/schedules (route.ts L42) の 'WHERE worktree_id = ? AND enabled = 1' クエリにも効果がある。この API ルートは設計方針書 Section 4 で言及されているが、影響を受けるファイルの変更一覧 (Section 14) には記載されていない。API routes 自体はコード変更不要だが、パフォーマンス恩恵の対象として認識すべき。",
+        "affected_files": [
+          "src/app/api/worktrees/[id]/schedules/route.ts",
+          "src/app/api/worktrees/[id]/schedules/[scheduleId]/route.ts"
+        ],
+        "evidence": "route.ts L42: 'SELECT * FROM scheduled_executions WHERE worktree_id = ? AND enabled = 1 ORDER BY created_at DESC'",
+        "recommendation": "変更一覧 Section 14 に、コード変更なしだがインデックス追加によるパフォーマンス恩恵を受ける間接影響ファイルとして API routes を注記する。"
+      },
+      {
+        "id": "IR3-003",
+        "category": "影響範囲/INSERT性能",
+        "title": "新規インデックス追加による INSERT/UPDATE 性能への影響評価が不足",
+        "description": "新規複合インデックス idx_scheduled_executions_worktree_enabled 追加により、scheduled_executions テーブルへの INSERT/UPDATE 時にインデックス更新コストが増加する。既存の idx_scheduled_executions_worktree (worktree_id) と idx_scheduled_executions_enabled (enabled) に加えて3つ目のインデックスが追加されることになる。scheduled_executions テーブルのデータ量は 100 worktree x 5 schedule = 500 行程度であり実用上無視できるレベルだが、設計方針書 Section 11 のパフォーマンス設計に INSERT/UPDATE 側のオーバーヘッドへの言及がない。",
+        "affected_files": ["src/lib/schedule-manager.ts", "src/app/api/worktrees/[id]/schedules/route.ts"],
+        "evidence": "既存インデックス: UNIQUE(worktree_id, name), idx_scheduled_executions_worktree, idx_scheduled_executions_enabled。新規: idx_scheduled_executions_worktree_enabled。計4つのインデックス。",
+        "recommendation": "Section 11 に「インデックス追加による INSERT/UPDATE オーバーヘッドは、テーブルサイズ(最大500行程度)を考慮すると microsecond 単位であり無視可能」と明記して判断根拠を残す。"
+      },
+      {
+        "id": "IR3-004",
+        "category": "影響範囲/schedule-manager.test.ts",
+        "title": "schedule-manager.test.ts のモックDBスキーマに新規インデックスが反映されない点の認識",
+        "description": "schedule-manager.test.ts L27-63 ではインメモリ DB にモックスキーマを直接作成しており、db-migrations.ts のマイグレーションを経由しない。そのため新規インデックス idx_scheduled_executions_worktree_enabled はモック DB に作成されない。現在のテストはインデックスの存在に依存しないため機能的な問題はないが、batchUpsertSchedules() のパフォーマンステストを追加する場合は注意が必要。",
+        "affected_files": ["tests/unit/lib/schedule-manager.test.ts"],
+        "evidence": "schedule-manager.test.ts L27-63: CREATE TABLE IF NOT EXISTS scheduled_executions にインデックス作成なし",
+        "recommendation": "テスト追加時に、インデックス依存のパフォーマンステストが必要であれば runMigrations() を使用するか、モックスキーマにインデックス定義を追加する。現時点では変更不要。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "IR3-005",
+        "category": "影響範囲/session-cleanup",
+        "title": "session-cleanup.ts の stopAllSchedules() 呼び出しによる cmateFileCache 全消去の副作用（Issue #407 依存）",
+        "description": "session-cleanup.ts L111 の stopAllSchedules() 呼び出しは、worktree 単位のクリーンアップ関数内からグローバルにスケジュール全停止を行う既知の設計問題。Issue #409 で cmateFileCache が ManagerState に追加されると、stopAllSchedules() 実行時に cmateFileCache.clear() も呼ばれ（DR1-008）、全 worktree のキャッシュが消去される。これは Issue #407 で session-cleanup.ts の stopAllSchedules() を worktree 単位停止に修正する際に解消される。",
+        "affected_files": ["src/lib/session-cleanup.ts"],
+        "evidence": "session-cleanup.ts L111: stopAllSchedules() はグローバル操作。repositories route.ts L92 から cleanupMultipleWorktrees() 経由で呼ばれる。",
+        "recommendation": "Issue #409 の設計方針書 Section 12 で既に Issue #407 との依存関係が文書化されている。追加の対応は不要だが、実装時に cmateFileCache.clear() が stopAllSchedules() 内で確実に呼ばれることを確認すること。"
+      },
+      {
+        "id": "IR3-006",
+        "category": "影響範囲/CLAUDE.md",
+        "title": "CLAUDE.md の schedule-manager.ts 説明文の更新",
+        "description": "CLAUDE.md L176 の schedule-manager.ts 説明に cmateFileCache, batchUpsertSchedules(), getCmateMtime() の情報が反映されていない。設計方針書 Section 14 の変更一覧に CLAUDE.md が含まれていない。",
+        "affected_files": ["CLAUDE.md"],
+        "evidence": "CLAUDE.md L176: globalThis.__scheduleManagerStates/globalThis.__scheduleActiveProcesses の記載のみで cmateFileCache 未記載",
+        "recommendation": "実装完了後に CLAUDE.md の schedule-manager.ts モジュール説明を更新し、cmateFileCache, batchUpsertSchedules(), getCmateMtime() を追記する。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "direct_changes": [
+      {
+        "file": "src/lib/schedule-manager.ts",
+        "change_type": "modify",
+        "change_description": "ManagerState interface に cmateFileCache 追加、upsertSchedule() 削除、batchUpsertSchedules() 追加、getCmateMtime() 追加、syncSchedules() 改修、stopAllSchedules() に cmateFileCache.clear() 追加",
+        "risk": "low",
+        "reason": "全て内部関数の変更。export される API (initScheduleManager, stopAllSchedules, getActiveScheduleCount, isScheduleManagerInitialized) のシグネチャは変更なし。"
+      },
+      {
+        "file": "src/lib/db-migrations.ts",
+        "change_type": "modify",
+        "change_description": "CURRENT_SCHEMA_VERSION を 20 から 21 に更新、version 21 マイグレーション追加（CREATE INDEX）",
+        "risk": "low",
+        "reason": "CREATE INDEX IF NOT EXISTS は冪等操作。既存データへの影響なし。"
+      },
+      {
+        "file": "tests/unit/lib/schedule-manager.test.ts",
+        "change_type": "modify",
+        "change_description": "mtimeキャッシュ・batchUpsert テスト追加。既存テストの globalThis リセットで cmateFileCache も自動リセット。",
+        "risk": "low",
+        "reason": "globalThis.__scheduleManagerStates = undefined で全フィールドリセット。追加処理不要。"
+      },
+      {
+        "file": "tests/unit/lib/db-migrations.test.ts",
+        "change_type": "modify",
+        "change_description": "CURRENT_SCHEMA_VERSION アサーション値 20 -> 21、rollbackMigrations テスト内の version ハードコード値更新",
+        "risk": "low",
+        "reason": "定数値の更新のみ。3箇所 (L37, L430, L443) の更新が必要。"
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "server.ts",
+        "impact_description": "initScheduleManager() (L259) と stopAllSchedules() (L281) のインターフェースは変更なし。cmateFileCache はプロセス終了時に自動解放。",
+        "risk": "none",
+        "code_change_required": false
+      },
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "impact_description": "L111 の stopAllSchedules() 呼び出しにより cmateFileCache が全消去される副作用。Issue #407 で修正予定。",
+        "risk": "low",
+        "code_change_required": false
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/schedules/route.ts",
+        "impact_description": "GET クエリ (L42: WHERE worktree_id = ? AND enabled = 1) が新規複合インデックスの恩恵を受ける。コード変更不要。",
+        "risk": "none",
+        "code_change_required": false
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/schedules/[scheduleId]/route.ts",
+        "impact_description": "GET/PUT/DELETE クエリは WHERE id = ? AND worktree_id = ? パターンで、UNIQUE 制約のインデックスを使用。新規インデックスの影響なし。",
+        "risk": "none",
+        "code_change_required": false
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/execution-logs/route.ts",
+        "impact_description": "execution_logs テーブルのクエリのみ。scheduled_executions の新規インデックスの影響なし。",
+        "risk": "none",
+        "code_change_required": false
+      },
+      {
+        "file": "src/app/api/repositories/route.ts",
+        "impact_description": "L92 の cleanupMultipleWorktrees() 経由で stopAllSchedules() が呼ばれる。cmateFileCache 全消去の副作用あり（Issue #407 依存）。",
+        "risk": "low",
+        "code_change_required": false
+      },
+      {
+        "file": "src/config/cmate-constants.ts",
+        "impact_description": "CMATE_FILENAME 定数の新規 import 元。既存エクスポートの変更なし。",
+        "risk": "none",
+        "code_change_required": false
+      },
+      {
+        "file": "src/lib/cmate-parser.ts",
+        "impact_description": "readCmateFile() と parseSchedulesSection() の呼び出しパターンが変更される（mtime チェック後のみ呼び出し）。関数自体の変更なし。",
+        "risk": "none",
+        "code_change_required": false
+      }
+    ],
+    "upsertSchedule_removal_analysis": {
+      "current_callers": [
+        {
+          "file": "src/lib/schedule-manager.ts",
+          "line": 386,
+          "context": "syncSchedules() 内のループで worktree ごとの entry に対して呼び出し"
+        }
+      ],
+      "exported": false,
+      "external_callers": 0,
+      "removal_risk": "low",
+      "note": "upsertSchedule() は非 export の内部関数であり、schedule-manager.ts 内の syncSchedules() L386 からのみ呼び出されている。削除は syncSchedules() 内の呼び出しを batchUpsertSchedules() に置換するだけで完結する。外部モジュールへの影響なし。"
+    }
+  },
+  "reviewed_files": [
+    "src/lib/schedule-manager.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cmate-parser.ts",
+    "src/config/cmate-constants.ts",
+    "src/app/api/worktrees/[id]/schedules/route.ts",
+    "src/app/api/worktrees/[id]/schedules/[scheduleId]/route.ts",
+    "src/app/api/worktrees/[id]/execution-logs/route.ts",
+    "src/app/api/repositories/route.ts",
+    "server.ts",
+    "tests/unit/lib/schedule-manager.test.ts",
+    "tests/unit/lib/db-migrations.test.ts",
+    "CLAUDE.md"
+  ],
+  "timestamp": "2026-03-03T12:00:00Z"
+}

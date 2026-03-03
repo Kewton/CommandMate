@@ -1,0 +1,147 @@
+{
+  "issue_number": 409,
+  "focus_area": "整合性",
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "CR2-001",
+        "category": "整合性/import",
+        "title": "設計方針書のCMATE_FILENAMEインポートパスが不正確",
+        "description": "設計方針書Section 6のgetCmateMtime()コード例で「cmate-constants.tsのCMATE_FILENAME定数を使用（DRY原則）」と記載しているが、実装チェックリストDR1-001では「cmate-constants.tsからimport」と指示している。実際のコードベースではschedule-manager.tsは既にcmate-parser.tsからreadCmateFile/parseSchedulesSectionをimportしている（L19）。cmate-parser.tsはCMATE_FILENAMEをcmate-constants.tsからimportし、re-exportしている（L26,L35）。getCmateMtime()の実装では、新たにcmate-constants.tsから直接importするか、既存のcmate-parser.ts経由でimportするかが不明確。既存パターンに合わせるならcmate-parser.tsからのimportが自然だが、設計書はcmate-constants.tsを明示的に指定している。",
+        "recommendation": "設計方針書のDR1-001チェックリスト項目を修正し、importパスを「@/config/cmate-constants」からの直接import、または既存パターンに合わせて「./cmate-parser」からのre-export利用のどちらかを明確に指定すること。循環依存を避けるため、cmate-constants.tsからの直接importが望ましい。",
+        "file": "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+        "line": "Section 6, Section 15 DR1-001"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "CR2-002",
+        "category": "整合性/DB",
+        "title": "batchUpsertSchedules()のSQLカラムがscheduled_executionsテーブル定義と整合しているが、next_execute_atカラムが未処理",
+        "description": "scheduled_executionsテーブルにはnext_execute_atカラム（INTEGER, nullable）が存在するが（db-migrations.ts L828）、設計方針書のbatchUpsertSchedules()のINSERT文にnext_execute_atが含まれていない。既存のupsertSchedule()でも同様にnext_execute_atを扱っていないため機能的な整合性は保たれているが、このカラムの存在目的（将来用途）が設計書で言及されていない。",
+        "recommendation": "batchUpsertSchedules()の設計では既存upsertSchedule()と同一のカラム操作（next_execute_at未使用）を維持しているため、現時点では問題ない。ただし、next_execute_atカラムの将来的な利用計画がある場合は、設計方針書のSection 4またはSection 13に未使用カラムの扱いを注記すること。",
+        "file": "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+        "line": "Section 7"
+      },
+      {
+        "id": "CR2-003",
+        "category": "整合性/ManagerState",
+        "title": "ManagerState interfaceにcmateFileCacheを追加する際のglobalThis宣言との整合",
+        "description": "現在のschedule-manager.tsでは、ManagerState interface（L52-59）に3フィールドが定義されており、globalThisの型宣言（L79-82）でvar __scheduleManagerStates: ManagerState | undefinedと宣言されている。cmateFileCacheフィールドをManagerStateに追加する場合、getManagerState()の初期化コード（L87-96）も更新が必要。設計方針書Section 5にこの初期化コードが記載されているが、globalThis型宣言の更新への言及がない。",
+        "recommendation": "設計方針書にglobalThis型宣言の更新（declare global内のvar __scheduleManagerStates型）は自動的にManagerState型変更に追従するため、明示的な変更指示は不要であることを注記するか、実装チェックリストに「ManagerState interfaceにcmateFileCacheフィールドを追加」の項目を追加すること。",
+        "file": "src/lib/schedule-manager.ts",
+        "line": "52-59, 79-82"
+      },
+      {
+        "id": "CR2-004",
+        "category": "整合性/エラーハンドリング",
+        "title": "getCmateMtime()のエラーハンドリングパターンがreadCmateFile()と一部異なる",
+        "description": "設計方針書のgetCmateMtime()のENOENTチェックは3段階（instanceof Error, 'code' in error, cast to NodeJS.ErrnoException）で実装されているが、これはcmate-parser.tsのreadCmateFile()（L320-323）と同一のパターンであり整合性がある。しかし、getCmateMtime()では権限エラー等もnull返却する設計であるのに対し、readCmateFile()では権限エラーをthrowする（L327）。この動作差異は意図的（Section 8エラーハンドリング表に記載）だが、同じworktreePathに対してgetCmateMtime()がnullを返しreadCmateFile()がthrowするケースが発生し得る。",
+        "recommendation": "設計方針書Section 8のエラーハンドリング表にこの動作差異の意図を明記すること。getCmateMtime()はstat操作のみで非致命的にnullを返す一方、readCmateFile()はファイル読み取り操作で権限エラーをthrowする設計であることを明記することで、実装者の混乱を防ぐ。ただし、mtimeチェックでnullが返ってスキップされた場合、readCmateFile()は呼ばれないため、実用上のリスクは低い。",
+        "file": "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+        "line": "Section 6, Section 8"
+      },
+      {
+        "id": "CR2-005",
+        "category": "整合性/テスト",
+        "title": "テストファイルのCURRENT_SCHEMA_VERSIONアサーションがハードコード値を使用",
+        "description": "db-migrations.test.tsのL37で「expect(CURRENT_SCHEMA_VERSION).toBe(20)」とハードコードされている。設計方針書Section 9で「toBe(20) -> toBe(21)に更新」と明記されているが、rollbackMigrationsテストのL430でも「expect(getCurrentVersion(db)).toBe(20)」のハードコード値がある。このテスト行の更新は設計書で明記されていない。",
+        "recommendation": "rollbackMigrationsテスト（db-migrations.test.ts L430）の期待値も同様に更新が必要であることを設計方針書に追記すること。具体的には、全テストがrunMigrations後にCURRENT_SCHEMA_VERSIONと一致することを期待しているため、version 21追加に伴い全てのハードコード値を確認する必要がある。",
+        "file": "tests/unit/lib/db-migrations.test.ts",
+        "line": "37, 430"
+      }
+    ],
+    "consider": [
+      {
+        "id": "CR2-006",
+        "category": "整合性/session-cleanup",
+        "title": "session-cleanup.tsのstopAllSchedules()呼び出しとcmateFileCache.clear()の関係",
+        "description": "session-cleanup.tsのcleanupWorktreeSessions()（L109-117）はstopAllSchedules()を呼び出している。設計方針書DR1-008でstopAllSchedules()内にcmateFileCache.clear()を追加する設計だが、session-cleanup.tsは個別worktreeのクリーンアップ時にstopAllSchedules()を呼ぶため、1つのworktreeのクリーンアップで全worktreeのスケジュールとキャッシュが停止される。これは既存の設計問題であり、Issue #407のスコープとして認識されている。",
+        "recommendation": "Issue #407で対応予定のworktree単位のスケジュール停止（stopScheduleForWorktree()）実装時に、cmateFileCacheもworktree単位で削除する設計を検討すること。現時点ではstopAllSchedules()での全キャッシュクリアで問題ない。",
+        "file": "src/lib/session-cleanup.ts",
+        "line": "109-117"
+      },
+      {
+        "id": "CR2-007",
+        "category": "整合性/既存インデックス",
+        "title": "idx_scheduled_executions_enabledインデックスの冗長性判断が「実装時判断」のまま",
+        "description": "設計方針書Section 4の既存インデックス表で、idx_scheduled_executions_enabled（enabledカラム単独インデックス）が新規複合インデックス（worktree_id, enabled）で冗長になる可能性があるとし、「実装時判断」としている。しかし、enabledカラムの選択性が低い（0/1の2値）ため、単独インデックスの有用性は極めて限定的であり、複合インデックスでカバーされるクエリが大多数を占める。",
+        "recommendation": "冗長インデックスの判断を設計段階で確定させることを推奨する。SQLiteのインデックスサイズオーバーヘッドは微小だが、冗長インデックスはWRITE操作の微小な追加コストを発生させる。判断を先送りしても実害は少ないが、明確な方針があると実装がスムーズになる。",
+        "file": "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+        "line": "Section 4"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "consistency_matrix": [
+    {
+      "design_item": "ManagerState interface拡張（cmateFileCache追加）",
+      "design_doc": "Section 5: Map<string, number>型フィールド追加",
+      "implementation": "ManagerState (L52-59): 3フィールドのみ、cmateFileCache未追加（未実装のため正常）",
+      "gap": "なし（これから実装される変更）"
+    },
+    {
+      "design_item": "マイグレーション version 21",
+      "design_doc": "Section 3: version 21でidx_scheduled_executions_worktree_enabledインデックス追加",
+      "implementation": "CURRENT_SCHEMA_VERSION = 20 (L14)、migrations配列の最後はversion 20 (L949-965)",
+      "gap": "なし（バージョン21は空き番号で競合なし）"
+    },
+    {
+      "design_item": "CMATE_FILENAME定数",
+      "design_doc": "Section 6: cmate-constants.tsから使用",
+      "implementation": "CMATE_FILENAME = 'CMATE.md' (cmate-constants.ts L14)、cmate-parser.tsからre-export (L26,L35)",
+      "gap": "importパスの指示が不明確（CR2-001参照）"
+    },
+    {
+      "design_item": "batchUpsertSchedules() SQL",
+      "design_doc": "Section 7: SELECT id,name / UPDATE message,cron_expression,cli_tool_id,enabled,updated_at / INSERT 9カラム",
+      "implementation": "scheduled_executionsテーブル (db-migrations.ts L817-831): 11カラム（next_execute_at含む）",
+      "gap": "next_execute_atカラムが未処理（CR2-002参照。既存upsertSchedule()でも未使用のため整合性あり）"
+    },
+    {
+      "design_item": "getCmateMtime()エラーハンドリング",
+      "design_doc": "Section 6,8: ENOENT→null、権限エラー→warn+null",
+      "implementation": "readCmateFile() (cmate-parser.ts L319-328): ENOENT→null、他→throw",
+      "gap": "意図的な差異あり（CR2-004参照）"
+    },
+    {
+      "design_item": "disableStaleSchedules() クエリ",
+      "design_doc": "Section 4: WHERE worktree_id IN (...) AND enabled = 1",
+      "implementation": "disableStaleSchedules() (schedule-manager.ts L276): 完全一致",
+      "gap": "なし"
+    },
+    {
+      "design_item": "upsertSchedule()の廃止",
+      "design_doc": "Section 7: batchUpsertSchedules()に完全置換",
+      "implementation": "upsertSchedule() (schedule-manager.ts L143-170): 現在存在",
+      "gap": "なし（廃止はこれから実施される）"
+    },
+    {
+      "design_item": "stopAllSchedules()のcmateFileCache.clear()",
+      "design_doc": "Section 6: schedules.clear()に加えてcmateFileCache.clear()追加",
+      "implementation": "stopAllSchedules() (schedule-manager.ts L485-517): schedules.clear()のみ",
+      "gap": "なし（これから実装される変更）"
+    }
+  ],
+  "reviewed_files": [
+    "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+    "src/lib/schedule-manager.ts",
+    "src/lib/db-migrations.ts",
+    "src/lib/cmate-parser.ts",
+    "src/config/cmate-constants.ts",
+    "src/config/schedule-config.ts",
+    "src/types/cmate.ts",
+    "src/lib/session-cleanup.ts",
+    "tests/unit/lib/db-migrations.test.ts",
+    "tests/unit/lib/schedule-manager.test.ts"
+  ],
+  "timestamp": "2026-03-03T14:10:00Z"
+}

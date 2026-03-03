@@ -11,7 +11,7 @@ import { initDatabase } from './db';
  * Current schema version
  * Increment this when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 20;
+export const CURRENT_SCHEMA_VERSION = 21;
 
 /**
  * Migration definition
@@ -961,6 +961,24 @@ const migrations: Migration[] = [
     down: () => {
       // vibe_local_context_window is a nullable INTEGER column; harmless if unused
       console.log('No rollback for vibe_local_context_window column (SQLite limitation)');
+    }
+  },
+  {
+    version: 21,
+    name: 'add-scheduled-executions-worktree-enabled-index',
+    up: (db) => {
+      // Issue #409: Add composite index for schedule sync performance
+      // Used by syncSchedules() to batch-query schedules by worktree_id + enabled
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_scheduled_executions_worktree_enabled
+          ON scheduled_executions(worktree_id, enabled);
+      `);
+
+      console.log('✓ Created composite index idx_scheduled_executions_worktree_enabled');
+    },
+    down: (db) => {
+      db.exec('DROP INDEX IF EXISTS idx_scheduled_executions_worktree_enabled');
+      console.log('✓ Dropped idx_scheduled_executions_worktree_enabled index');
     }
   }
 ];

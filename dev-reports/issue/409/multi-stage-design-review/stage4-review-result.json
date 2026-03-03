@@ -1,0 +1,132 @@
+{
+  "issue_number": 409,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC4-001",
+        "category": "メモリ枯渇 (DoS)",
+        "description": "cmateFileCache (Map<string, number>) にサイズ上限がない。worktreeの数はDB由来だが、worktreeが大量に登録された場合（理論上無制限）、Mapエントリが無制限に増加する。MAX_CONCURRENT_SCHEDULES=100はschedules Mapに対する制限であり、cmateFileCacheには適用されない。MAX_CACHE_ENTRIES定数を追加し、上限超過時に古いエントリを削除するか、worktrees数と同一の自然上限であることを明示的にドキュメント化すべき。",
+        "severity": "medium",
+        "owasp_category": "A05:2021 Security Misconfiguration",
+        "recommendation": "cmateFileCacheのエントリ数がworktrees数と常に1:1であることをコメントで明記し、getAllWorktrees()の結果をキャッシュキーの上限として扱う設計意図を文書化する。worktreesテーブル自体にMAX_WORKTREES制限が存在しない場合は、cmateFileCacheにMAX_CACHE_SIZE定数（例: 1000）を追加して明示的に制限することを推奨する。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-002",
+        "category": "SQLインジェクション (動的プレースホルダー)",
+        "description": "disableStaleSchedules()内の動的プレースホルダー生成 `worktreeIds.map(() => '?').join(',')` はworktreeIds.lengthに基づいて?の数を生成しており、パラメータ自体はprepared statementでバインドされるためSQLインジェクションリスクは低い。しかし、worktreeIdsの配列長に上限がないため、極端に大きな配列でSQLiteのパラメータ上限（SQLITE_MAX_VARIABLE_NUMBER、デフォルト999）を超過する可能性がある。",
+        "severity": "low",
+        "owasp_category": "A03:2021 Injection",
+        "recommendation": "worktreeIds配列をチャンク分割（例: 500件ずつ）してクエリを実行するか、上限チェックを追加する。現実的なworktree数（10-100程度）では問題にならないが、防御的プログラミングとして対処推奨。"
+      },
+      {
+        "id": "SEC4-003",
+        "category": "パストラバーサル防御の一貫性",
+        "description": "getCmateMtime()はpath.join(worktreePath, CMATE_FILENAME)でパスを構築するが、readCmateFile()のようなvalidateCmatePath()呼び出しが含まれていない。worktreePathはDB由来（getAllWorktrees()）であり信頼できるとされているが、readCmateFile()にはvalidateCmatePath()が明示的に存在する。同一のworktreePathに対して防御レベルが異なることは防御の一貫性を損なう。",
+        "severity": "low",
+        "owasp_category": "A01:2021 Broken Access Control",
+        "recommendation": "getCmateMtime()にもvalidateCmatePath()相当のチェックを追加するか、設計書Section 10に記載されている「worktreePathがDB由来のため信頼できる」という前提をコード内コメントとして明記する。defense-in-depthの観点からは前者を推奨。"
+      },
+      {
+        "id": "SEC4-004",
+        "category": "ログへの機密情報漏洩",
+        "description": "getCmateMtime()のcatchブロックでconsole.warnにfilePathをそのまま出力している。worktreePathにはユーザーのホームディレクトリやプロジェクト名が含まれる可能性があり、ログに記録される。既存のreadCmateFile()のvalidateCmatePath()でも同様にパスがエラーメッセージに含まれるため、本Issue特有の問題ではないが、新規コードとして留意が必要。",
+        "severity": "low",
+        "owasp_category": "A09:2021 Security Logging and Monitoring Failures",
+        "recommendation": "運用ログにフルパスを出力することのリスクを認識した上で、必要に応じてlog-export-sanitizer.tsのsanitizeForExport()パターンを適用する。サーバーサイドのconsole.warnは通常のログレベルとして許容範囲内。"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC4-005",
+        "category": "暗号学的UUID安全性",
+        "description": "batchUpsertSchedules()でrandomUUID()（Node.js crypto.randomUUID）を使用している。これはCESPRNG（暗号学的に安全な擬似乱数生成器）に基づいており、RFC 4122 version 4 UUIDを生成する。scheduled_executionsのidは内部識別子であり、認証トークンやセッションIDではないため、暗号学的安全性の要件は低い。現状の実装は十分に安全。",
+        "severity": "info",
+        "owasp_category": "A02:2021 Cryptographic Failures",
+        "recommendation": "問題なし。crypto.randomUUID()はCSPRNGベースであり、ID生成として適切。"
+      },
+      {
+        "id": "SEC4-006",
+        "category": "DoS: mtimeキャッシュ無効化連発",
+        "description": "CMATE.mdファイルが頻繁に変更される場合（例: git操作やファイル監視ツールによる自動編集）、60秒ごとにmtimeキャッシュミスが発生し、毎回ファイル読み取り+パース+DB書き込みが実行される。しかし、これは変更前の動作（毎回無条件で読み取り+パース+upsert）と比較して同等以下の負荷であり、mtimeキャッシュはあくまで最適化であるため、キャッシュ無効化自体がDoSベクターにはならない。",
+        "severity": "info",
+        "owasp_category": "A05:2021 Security Misconfiguration",
+        "recommendation": "問題なし。最悪ケース（全キャッシュミス）でも変更前と同等のコスト。60秒ポーリング間隔がレートリミッターとして機能している。"
+      },
+      {
+        "id": "SEC4-007",
+        "category": "sanitizeMessageContent()のカバレッジ",
+        "description": "ScheduleEntryのmessageフィールドはreadCmateFile()経由でparseSchedulesSection()を通過する際にsanitizeMessageContent()でUnicode制御文字が除去される。batchUpsertSchedules()はparseSchedulesSection()の結果を受け取るため、messageは既にサニタイズ済み。しかし、batchUpsertSchedules()自体にはサニタイズ処理がなく、将来別の経路からbatchUpsertSchedules()が呼ばれた場合にサニタイズが漏れるリスクがある。",
+        "severity": "info",
+        "owasp_category": "A03:2021 Injection",
+        "recommendation": "batchUpsertSchedules()の呼び出し元がsyncSchedules()のみであり、parseSchedulesSection()経由のサニタイズ済みデータのみが渡される現在の設計では問題なし。将来batchUpsertSchedules()を別経路から呼ぶ場合は、入力バリデーション層を追加すること。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass_with_note",
+      "detail": "getCmateMtime()にvalidateCmatePath()がないがDB由来パスのため低リスク (SEC4-003)"
+    },
+    "A02_cryptographic_failures": {
+      "status": "pass",
+      "detail": "crypto.randomUUID()はCSPRNGベース、適切 (SEC4-005)"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "detail": "全SQLクエリがprepared statement使用。動的IN句はプレースホルダーのみ動的生成で値はバインド (SEC4-002)"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "detail": "mtimeキャッシュは最適化目的であり、セキュリティ境界には影響しない"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass_with_note",
+      "detail": "cmateFileCacheのサイズ制限なし (SEC4-001)"
+    },
+    "A06_vulnerable_components": {
+      "status": "pass",
+      "detail": "新規外部依存の追加なし。既存のcroner/better-sqlite3を使用"
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "detail": "認証/認可の変更なし"
+    },
+    "A08_data_integrity": {
+      "status": "pass",
+      "detail": "db.transaction()によるアトミック操作。データ整合性は向上"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass_with_note",
+      "detail": "console.warnにフルパス出力あり (SEC4-004)"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "detail": "外部HTTPリクエストの変更なし"
+    }
+  },
+  "reviewed_files": [
+    "src/lib/schedule-manager.ts",
+    "src/lib/cmate-parser.ts",
+    "src/config/cmate-constants.ts",
+    "src/lib/path-validator.ts",
+    "src/lib/claude-executor.ts",
+    "src/lib/env-sanitizer.ts",
+    "src/lib/db-migrations.ts",
+    "src/config/schedule-config.ts",
+    "src/types/cmate.ts",
+    "src/app/api/worktrees/[id]/schedules/route.ts"
+  ],
+  "timestamp": "2026-03-03T12:00:00Z"
+}

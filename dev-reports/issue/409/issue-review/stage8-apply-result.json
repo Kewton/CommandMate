@@ -1,0 +1,7 @@
+{
+  "stage": 8,
+  "applied": [],
+  "skipped": ["R7-001"],
+  "issue_updated": false,
+  "summary": "Stage 7影響範囲レビュー（2回目）のMust Fix/Should Fixは0件のため、GitHub Issueの更新は不要。Nice to Have 1件（R7-001: db.transaction()のエラーハンドリング動作変更の備考追記）はスキップ（実装上の軽微な点で現在の記述で十分）。"
+}

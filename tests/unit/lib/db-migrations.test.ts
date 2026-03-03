@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 20 after Migration #20', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(20);
+    it('should be 21 after Migration #21', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(21);
     });
   });
 
@@ -328,6 +328,31 @@ describe('db-migrations', () => {
     });
   });
 
+  describe('Migration #21: add-scheduled-executions-worktree-enabled-index', () => {
+    beforeEach(() => {
+      runMigrations(db);
+    });
+
+    it('should create composite index on scheduled_executions(worktree_id, enabled)', () => {
+      const indexes = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='scheduled_executions'"
+      ).all() as Array<{ name: string }>;
+      const indexNames = indexes.map(i => i.name);
+
+      expect(indexNames).toContain('idx_scheduled_executions_worktree_enabled');
+    });
+
+    it('should rollback by dropping the composite index', () => {
+      rollbackMigrations(db, 20);
+      expect(getCurrentVersion(db)).toBe(20);
+
+      const indexes = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_scheduled_executions_worktree_enabled'"
+      ).all();
+      expect(indexes).toHaveLength(0);
+    });
+  });
+
   describe('CASCADE delete tests (with PRAGMA foreign_keys = ON)', () => {
     beforeEach(() => {
       runMigrations(db);
@@ -427,7 +452,7 @@ describe('db-migrations', () => {
   describe('rollbackMigrations', () => {
     it('should rollback Migration #17 and remove schedule tables', () => {
       runMigrations(db);
-      expect(getCurrentVersion(db)).toBe(20);
+      expect(getCurrentVersion(db)).toBe(21);
 
       rollbackMigrations(db, 16);
       expect(getCurrentVersion(db)).toBe(16);
@@ -440,7 +465,7 @@ describe('db-migrations', () => {
 
     it('should rollback Migration #16 and remove issue_no column', () => {
       runMigrations(db);
-      expect(getCurrentVersion(db)).toBe(20);
+      expect(getCurrentVersion(db)).toBe(21);
 
       rollbackMigrations(db, 15);
       expect(getCurrentVersion(db)).toBe(15);

@@ -1,0 +1,65 @@
+{
+  "issue_number": 409,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "SEC4-001",
+        "item": "cmateFileCacheのMap sizeに上限がない - エントリ数がworktree数と1:1対応する構造的保証を文書化",
+        "sections_updated": ["Section 5 ManagerState拡張設計", "Section 10 セキュリティ設計", "Section 15 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-002",
+        "item": "disableStaleSchedules()の動的IN句がplaceholderのみ生成でSQLインジェクション安全であることを明記",
+        "sections_updated": ["Section 7 バッチupsert設計", "Section 10 セキュリティ設計", "Section 15 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC4-003",
+        "item": "getCmateMtime()のworktreePathがDB由来で登録時にvalidateWorktreePath()検証済みであるトラスト境界判断を明記",
+        "sections_updated": ["Section 6 syncSchedules()改修設計", "Section 10 セキュリティ設計", "Section 15 実装チェックリスト"],
+        "status": "reflected"
+      },
+      {
+        "id": "SEC4-004",
+        "item": "sanitizeMessageContent()によるサニタイズチェーンとconsole.warnへのパス出力の判断を文書化",
+        "sections_updated": ["Section 8 エラーハンドリング設計", "Section 10 セキュリティ設計", "Section 15 実装チェックリスト"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [
+    {
+      "id": "SEC4-005",
+      "item": "暗号学的UUID安全性",
+      "reason": "レビュー結果で「問題なし」と判定済み。crypto.randomUUID()はCSPRNGベースでID生成として適切"
+    },
+    {
+      "id": "SEC4-006",
+      "item": "DoS: mtimeキャッシュ無効化連発",
+      "reason": "レビュー結果で「問題なし」と判定済み。最悪ケースでも変更前と同等コスト"
+    },
+    {
+      "id": "SEC4-007",
+      "item": "sanitizeMessageContent()カバレッジ",
+      "reason": "SEC4-004で反映済み。サニタイズチェーンをSection 8に文書化"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+  "sections_updated": [
+    "Section 5 ManagerState拡張設計 (cmateFileCacheのJSDocコメント拡充)",
+    "Section 6 syncSchedules()改修設計 (getCmateMtime()のトラスト境界コメント追加)",
+    "Section 7 バッチupsert設計 (disableStaleSchedules()のSQLインジェクション安全性サブセクション追加)",
+    "Section 8 エラーハンドリング設計 (sanitizeMessageContent()サニタイズチェーンサブセクション追加)",
+    "Section 10 セキュリティ設計 (Stage 4追加事項サブセクション追加)",
+    "Section 15 実装チェックリスト (SEC4-001/002/003/004の4項目追加)",
+    "Section 18 Stage 4レビュー指摘事項反映サマリー (新規追加)"
+  ],
+  "timestamp": "2026-03-03T12:00:00Z"
+}

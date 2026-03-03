@@ -1,0 +1,58 @@
+{
+  "issue_number": 409,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "IR3-001",
+        "item": "db-migrations.test.ts L443のexpect(getCurrentVersion(db)).toBe(20)もtoBe(21)への更新対象として実装チェックリストに追記",
+        "sections_updated": ["Section 9 既存テストへの影響", "Section 15 実装チェックリスト CR2-005/IR3-001"],
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IR3-002",
+        "item": "src/app/api/worktrees/[id]/schedules/route.tsが新規インデックスの恩恵を受けることをSection 14に記載",
+        "sections_updated": ["Section 14 ファイル変更一覧（間接影響ファイルサブセクション追加）"],
+        "status": "reflected"
+      },
+      {
+        "id": "IR3-003",
+        "item": "新規インデックス追加によるINSERT/UPDATEオーバーヘッドの判断根拠をSection 11に追記",
+        "sections_updated": ["Section 11 パフォーマンス設計（INSERT/UPDATEオーバーヘッドサブセクション追加）"],
+        "status": "reflected"
+      },
+      {
+        "id": "IR3-004",
+        "item": "schedule-manager.test.tsのモックDBスキーマに新規インデックスが反映されない点を認識事項として記録",
+        "sections_updated": ["Section 15 実装チェックリスト（IR3-004認識事項追加）"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [
+    {
+      "id": "IR3-005",
+      "item": "session-cleanup.tsのstopAllSchedules()によるcmateFileCache全消去の副作用",
+      "reason": "consider重要度。Section 6のDR1-008およびSection 12で既にIssue #407との依存関係が文書化済み"
+    },
+    {
+      "id": "IR3-006",
+      "item": "CLAUDE.mdのschedule-manager.ts説明文の更新",
+      "reason": "consider重要度。CLAUDE.mdの更新は実装完了後に行う運用であり、設計方針書への事前記載は不要"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+  "sections_updated": [
+    "Section 9 既存テストへの影響（IR3-001: L443追加）",
+    "Section 11 パフォーマンス設計（IR3-003: INSERT/UPDATEオーバーヘッドサブセクション追加）",
+    "Section 14 ファイル変更一覧（IR3-002: 間接影響ファイルサブセクション追加）",
+    "Section 15 実装チェックリスト（IR3-001: CR2-005統合、IR3-004: 認識事項追加）",
+    "Section 17 Stage 3 レビュー指摘事項反映サマリー（新規追加）"
+  ],
+  "timestamp": "2026-03-03T12:30:00Z"
+}
