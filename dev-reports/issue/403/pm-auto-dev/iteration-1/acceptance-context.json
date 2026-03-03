@@ -1,0 +1,28 @@
+{
+  "issue_number": 403,
+  "feature_summary": "scripts/build-and-start.sh にサーバーログローテーション機能を追加",
+  "acceptance_criteria": [
+    "ログファイルが閾値（10MB）を超えた場合に自動でローテーションされること",
+    "指定した世代数（3世代）を超えた古いログが削除されること",
+    "scripts/build-and-start.sh --daemon でのサーバー起動時にログローテーションが実行されること",
+    "ローテーションはサーバー起動前（nohup 実行前）に実行されるため、実行中のサーバープロセスのログ書き込みには影響しないこと",
+    "PRODUCTION_CHECKLIST.md のLog rotation項目が更新されていること",
+    "テスト手順（基本動作・世代管理・エッジケース）が実施され、すべてパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: rotate_logs()関数が build-and-start.sh に存在すること",
+    "シナリオ2: MAX_LOG_SIZE_MB=10, MAX_LOG_GENERATIONS=3 定数が定義されていること",
+    "シナリオ3: rotate_logs() が mkdir -p 後・db:init 前に呼び出されていること",
+    "シナリオ4: 呼び出しが || echo WARNING パターンで失敗時もサーバー起動継続すること",
+    "シナリオ5: シンボリックリンクチェック [S4-006] が実装されていること",
+    "シナリオ6: nohup 後に chmod 640 [S4-005] が実装されていること",
+    "シナリオ7: docs/en/internal/PRODUCTION_CHECKLIST.md が更新されていること",
+    "シナリオ8: docs/internal/PRODUCTION_CHECKLIST.md が更新されていること",
+    "シナリオ9: npm run lint, npx tsc --noEmit, npm run test:unit が全てパスすること"
+  ],
+  "implemented_files": [
+    "scripts/build-and-start.sh",
+    "docs/en/internal/PRODUCTION_CHECKLIST.md",
+    "docs/internal/PRODUCTION_CHECKLIST.md"
+  ]
+}

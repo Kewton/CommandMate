@@ -1,0 +1,25 @@
+{
+  "stage": 3,
+  "issue_number": 403,
+  "applied_findings": [
+    {
+      "severity": "should_fix",
+      "description": "SF-1: rebuild SKILLへの影響未分析 - .claude/skills/rebuild/SKILL.mdがbuild-and-start.sh --daemonを呼び出すため、rebuild実行時にもローテーションが行われるが、設計方針書に記載がなかった",
+      "action": "セクション2の「影響を受けないファイル（確認済み）」テーブルに.claude/skills/rebuild/SKILL.mdを追加。rebuild実行時のローテーションは意図された動作であり実害なし（stop.sh直後のserver.logが閾値超過時にローテーションされる）と明記"
+    },
+    {
+      "severity": "should_fix",
+      "description": "SF-2: logs.shのローテーション後のユーザー体験 - セクション10の将来拡張ポイント4「logs.sh対応」の説明が抽象的で、ローテーション済みファイルへのアクセス手段不足が不明確",
+      "action": "セクション10の拡張ポイント4を具体化。server.log.1/server.log.2/server.log.3の一覧・表示サポート追加が必要であること、現状build-and-start.sh --daemon運用ユーザーにローテーション済み過去ログの参照手段がない点を明記"
+    },
+    {
+      "severity": "should_fix",
+      "description": "SF-3: ローテーション後のserver.log不在期間の明確化 - ローテーション実行（mv）からnohup実行（>> server.log）までの間にserver.logが存在しない期間があるが、設計方針書での記載が不明確",
+      "action": "セクション4-4のローテーション動作フローの「結果」に注記を追加。Step 5完了からnohup実行までの間（db:init、build:all実行中）にserver.logが存在しない期間がある旨、デーモンモードではnohupの>>リダイレクトで自動新規作成、フォアグラウンドモードでは作成されない（stdout出力）旨を明記"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 3（影響分析レビュー）のshould_fix 3件を全て設計方針書に反映。SF-1: rebuild SKILLの影響をセクション2の影響を受けないファイルテーブルに追記。SF-2: セクション10の将来拡張ポイント4のlogs.sh対応をローテーション済みファイル（.1/.2/.3）の具体的な表示サポートに具体化。SF-3: セクション4-4にローテーション後のserver.log不在期間（mv完了からnohup実行まで）の注記を追加。セクション14としてStage 3レビュー指摘事項サマリーを追加。nice_to_have 6件は本Issueでは対応しない旨を記録。",
+  "timestamp": "2026-03-03T20:30:00Z"
+}

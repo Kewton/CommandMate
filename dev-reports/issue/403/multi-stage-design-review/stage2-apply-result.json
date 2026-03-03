@@ -1,0 +1,24 @@
+{
+  "stage": 2,
+  "issue_number": 403,
+  "applied_findings": [
+    {
+      "severity": "should_fix",
+      "description": "SF-1: セクション2のmermaidダイアグラムがデーモンモード経路のみを表示し、フォアグラウンドモード経路が欠落。本文の「両モード共通」記述と矛盾",
+      "action": "mermaidダイアグラムのビルドノード(H)後にdaemon?分岐ノード(J)を追加。Yes経路でnohup npm start >> server.log、No経路でnpm start (stdout)を表示し、実行タイミングのテキスト説明と整合させた"
+    },
+    {
+      "severity": "should_fix",
+      "description": "SF-2: Issue受入条件3が--daemonモードのみ明記しているが、設計方針書では「両モード共通」と記述しており乖離がある",
+      "action": "セクション2の実行タイミング直前に注記を追加。受入条件はデーモンモードの主要ユースケースを記載したものと解釈し、設計方針書の「両モード共通」が正しい仕様であることを明記（セクション1補足への参照付き）"
+    },
+    {
+      "severity": "should_fix",
+      "description": "SF-3: セクション4-2の関数コメント内に「|| true」パターンと記載されているが、実際の呼び出し（セクション4-3）は「|| echo WARNING... >&2」であり不一致",
+      "action": "セクション4-2の関数コメントを「a failure-safe pattern (see section 4-3)」に修正し具体的なパターン表記を抽象化。「|| echo WARNING...」を「|| echo WARNING... >&2」に修正して実際の呼び出しコードと一致させた"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 2整合性レビューのshould_fix 3件を全て設計方針書に反映。(1) mermaidダイアグラムにフォアグラウンド/デーモン分岐を追加、(2) Issue受入条件とのモード記述乖離について注記を追加、(3) 関数コメント内の|| trueを実際の呼び出しパターンと一致するよう修正。nice_to_have 5件はStage 2レビュー指摘事項サマリー（セクション13）に記録し、対応不要と判断。"
+}
