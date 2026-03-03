@@ -1,0 +1,10 @@
+{
+  "issue_number": 402,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目 影響範囲）",
+  "applied_findings": [],
+  "skipped_findings": ["S7-NTH-001", "S7-NTH-002"],
+  "skip_reason": "Stage 7のMust Fix: 0件、Should Fix: 0件。Nice to Have 2件はIssue本文の変更を要しないため、Stage 8の反映はスキップ。",
+  "updated_sections": [],
+  "github_updated": false
+}

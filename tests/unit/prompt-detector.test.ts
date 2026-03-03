@@ -3,13 +3,17 @@
  * Tests for detecting and parsing Claude CLI yes/no prompts
  */
 
-import { describe, it, expect } from 'vitest';
-import { detectPrompt, getAnswerInput } from '@/lib/prompt-detector';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { detectPrompt, getAnswerInput, resetDetectPromptCache } from '@/lib/prompt-detector';
 import type { DetectPromptOptions } from '@/lib/prompt-detector';
 import { stripBoxDrawing } from '@/lib/cli-patterns';
 import { isMultipleChoicePrompt, isYesNoPrompt } from '../helpers/prompt-type-guards';
 
 describe('Prompt Detector', () => {
+  // Issue #402: Reset duplicate log suppression cache for test isolation
+  beforeEach(() => {
+    resetDetectPromptCache();
+  });
   describe('detectPrompt', () => {
     describe('Pattern 1: (y/n) format', () => {
       it('should detect simple yes/no prompt', () => {

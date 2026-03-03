@@ -1,0 +1,16 @@
+{
+  "issue_number": 402,
+  "refactor_targets": [
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector-cache.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（コメントの明確化）",
+    "SRP逸脱のトレードオフコメントをコード内に残す（設計方針書 S1-001対応）",
+    "Hot Reload時のリセットに関する説明コメント追加（設計方針書 S3-002対応）",
+    "実装が設計方針書D1〜D4に準拠していることを確認"
+  ]
+}

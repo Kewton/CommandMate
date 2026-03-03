@@ -13,8 +13,9 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { detectSessionStatus } from '@/lib/status-detector';
+import { resetDetectPromptCache } from '@/lib/prompt-detector';
 
 // Named constants for Unicode characters used in tmux output simulation.
 // These match the actual characters produced by Claude CLI and detected by cli-patterns.ts.
@@ -39,6 +40,11 @@ function activeThinking(activity: string): string {
 }
 
 describe('status-detector', () => {
+  // Issue #402: Reset duplicate log suppression cache for test isolation
+  beforeEach(() => {
+    resetDetectPromptCache();
+  });
+
   describe('Issue #188: thinking + prompt coexistence', () => {
     it('should prioritize input prompt over completed thinking summary in scrollback', () => {
       // Thinking summary "Churned for 41s" is more than 5 lines from end,

@@ -1,0 +1,88 @@
+{
+  "issue_number": 402,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S2-001",
+      "severity": "should_fix",
+      "category": "整合性",
+      "description": "D2コード例のlinesの共有範囲が不正確。設計方針書のD2コメント「lines.slice(-20)等、split()の二重呼び出しを回避 [S1-004]」はdetectPrompt()内のyes/noパターン用lastLinesとキャッシュ判定用tailForDedupのlines共有を指すが、detectMultipleChoicePrompt(output, options)（L183呼び出し、L620内部定義）はoutputを引数として受け取り、内部で独立にoutput.split('\\n')を実行している。D2コード例はこの2回目のsplit()の存在を言及しておらず、「split()の二重呼び出しを回避」というコメントが誤解を招く。detectMultipleChoicePrompt内のsplit()は関数スコープが異なるため共有不可であり、実際にはdetectPrompt内のlinesとdetectMultipleChoicePrompt内のlinesで合計2回のsplit()が発生する。",
+      "suggestion": "D2のS1-004コメントを「detectPrompt()内でoutput.split('\\n')を1回だけ実行し、キャッシュ判定用tailForDedupとyes/noパターン用lastLinesの両方で共有する。なおdetectMultipleChoicePrompt()は独立したスコープで独自にsplit()を実行しており、これは関数カプセル化の範囲内である」に修正する。",
+      "affected_section": "セクション4 D2: detectPrompt()への組み込み",
+      "evidence": "prompt-detector.ts L173: const lines = output.split('\\n'); (detectPrompt内), L620: const lines = output.split('\\n'); (detectMultipleChoicePrompt内) -- 合計2回のsplit()が発生"
+    },
+    {
+      "id": "S2-002",
+      "severity": "should_fix",
+      "category": "整合性",
+      "description": "テストでvi.mock('@/lib/logger')を追加すると既存テストに影響する可能性がある。設計方針書セクション8のテスト方式では「vi.mock('@/lib/logger')でcreateLoggerをモックし、debug/infoメソッドのspy経由で呼び出し回数を検証する」と記載されているが、既存のprompt-detector.test.tsにはvi.mockが一切使用されておらず、beforeEach/afterEachも存在しない。vitestのvi.mock()はファイルトップレベルにホイストされるため、同一ファイル内の全テストに影響する。既存テストはlogger出力を前提としていないが、モック導入後にlogger関連の副作用（例: logger初期化の失敗等）がテスト結果に影響するリスクがある。",
+      "suggestion": "重複ログ抑制テストを別ファイル（例: tests/unit/prompt-detector-cache.test.ts）に分離するか、describe('Duplicate log suppression')ブロック内のみでvi.spyOn()を使用する方式を検討する。vi.mock()ではなくvi.spyOn(logger, 'debug')をdescribeブロック内で使用すれば、他テストへの影響を局所化できる。設計方針書のテスト方式セクションにこの考慮点を追記すべき。",
+      "affected_section": "セクション8: テスト設計",
+      "evidence": "tests/unit/prompt-detector.test.ts L1-L10: vi.mockの使用なし、beforeEach/afterEachなし。vitestのvi.mock()はファイルスコープでホイストされる仕様。"
+    },
+    {
+      "id": "S2-003",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "description": "設計方針書セクション2のシステム構成図（変更前）のPR[prompt-response/route.ts]ノードの頻度表記が「イベント駆動」のみだが、current-output/route.tsの頻度表記「2-5秒間隔」と合わせると、設計方針書が述べる「1ポーリングサイクルで最大6回」の根拠が不明確。実際のdetectPrompt()呼び出し回数は、response-poller経由で最大3回（L779, L953, L1088）、auto-yes-manager経由で1回（L585）、status-detector経由で1回（L145）、current-output/route経由で1回（L101）、prompt-response/route経由で1回（L99）の合計最大7回。「最大6回」ではなく「最大7回」が正確。",
+      "suggestion": "セクション1概要の「最大6回」を「最大7回」に修正するか、response-poller.tsのL1088は条件付き（result.promptDetection ?? detectPromptWithOptions）であり、通常は前段のdetectPromptWithOptionsの結果が使い回されるため、実質的な最大呼び出し回数を正確に記述する。",
+      "affected_section": "セクション1: 概要、セクション2: アーキテクチャ設計",
+      "evidence": "response-poller.ts L779, L953, L1088の3箇所 + auto-yes-manager.ts L585 + status-detector.ts L145 + current-output/route.ts L101 + prompt-response/route.ts L99 = 合計7箇所"
+    },
+    {
+      "id": "S2-004",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "description": "設計方針書D1のモジュールスコープ変数の設計根拠で「モジュールスコープ変数は auto-yes-manager.ts の pollerState 等と同パターン」と記載されているが、auto-yes-manager.tsのpollerStateはglobalThisパターン（L127-138: globalThis.__autoYesPollerStates）を使用しており、純粋なモジュールスコープ変数ではない。Next.jsのHot Reload時にモジュールスコープ変数はリセットされるが、globalThisは保持される。prompt-detector.tsのlastOutputTailはログ抑制のみが目的なので、Hot Reloadでリセットされても機能上の問題はないが、参照パターンとしてauto-yes-manager.tsを挙げるのは正確ではない。",
+      "suggestion": "D1の設計根拠を「モジュールスコープ変数はip-restriction.tsのモジュールスコープキャッシュ（CLAUDE.mdに記載: 'モジュールスコープキャッシュ'）と同パターン」に修正するか、auto-yes-manager.tsのglobalThisパターンとの違い（Hot Reload耐性が不要なため純粋モジュールスコープで十分）を明記する。",
+      "affected_section": "セクション4 D1: モジュールスコープ変数",
+      "evidence": "auto-yes-manager.ts L125-138: globalThis.__autoYesStates / globalThis.__autoYesPollerStates パターンを使用。ip-restriction.ts: CLAUDE.mdに「モジュールスコープキャッシュ」と記載あり。"
+    },
+    {
+      "id": "S2-005",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "description": "設計方針書D2のコード例でlogger.info('detectPrompt:multipleChoice')のログ引数が「{ ... }」と省略されているが、実際のコード（L185-189）では{ isPrompt: true, question: ..., optionsCount: ... }の3フィールドを出力している。実装時にこの省略が曖昧さを生む可能性は低いが、isDuplicateガードの挿入位置を正確に示すために、既存のログ引数を完全に記載した方がコードレビュー時の確認が容易になる。",
+      "suggestion": "D2-004のコード例のlogger.info引数をL185-189の実際の引数に合わせて完全に記載する。",
+      "affected_section": "セクション4 D2: detectPrompt()への組み込み",
+      "evidence": "prompt-detector.ts L185-189: logger.info('detectPrompt:multipleChoice', { isPrompt: true, question: multipleChoiceResult.promptData?.question, optionsCount: multipleChoiceResult.promptData?.options?.length })"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 3,
+    "overall_quality": "good"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/prompt-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/logger.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "CLAUDE.md"
+  ],
+  "consistency_check": {
+    "line_numbers": {
+      "L171_detectPrompt_start": "MATCH - logger.debug('detectPrompt:start') is at line 171",
+      "L185_detectPrompt_multipleChoice": "MATCH - logger.info('detectPrompt:multipleChoice') is at line 185",
+      "L216_detectPrompt_complete": "MATCH - logger.debug('detectPrompt:complete') is at line 216"
+    },
+    "scan_window_50_lines": "MATCH - detectMultipleChoicePrompt() uses Math.max(0, effectiveEnd - 50) at line 631",
+    "internal_export_pattern": "CONSISTENT - @internal pattern is well-established in auto-yes-manager.ts (8+ instances), version-checker.ts, claude-session.ts, path-validator.ts, file-operations.ts",
+    "call_site_count": "MINOR_DISCREPANCY - Design says 6+, actual count is 7 (3 via response-poller + 1 auto-yes-manager + 1 status-detector + 1 current-output/route + 1 prompt-response/route)",
+    "claude_md_update_pattern": "CONSISTENT - Follows established Issue #NNN: description pattern"
+  },
+  "timestamp": "2026-03-03T00:00:00Z"
+}

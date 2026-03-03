@@ -1,0 +1,77 @@
+{
+  "issue_number": 402,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-03",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "status": "applied",
+        "change_summary": "背景・課題セクションの「100ms間隔」を「2秒間隔（POLLING_INTERVAL = 2000ms）」に修正。呼び出し元の内訳を箇条書きで追記。"
+      },
+      {
+        "id": "MF-002",
+        "status": "applied",
+        "change_summary": "概要の「1秒間に30回以上同一内容で出力」を「1回のポーリングサイクル（2秒間隔）で最大6回のdetectPrompt呼び出しにより繰り返し出力され、複数ワークツリー/ブラウザタブの並列稼働時にサーバーログの大部分を占めている」に変更。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "status": "applied",
+        "change_summary": "提案する解決策を「prompt-detector.tsまたはresponse-poller.ts」から「prompt-detector.ts内のdetectPrompt()関数にモジュールスコープの重複抑制キャッシュを実装」に明確化。推奨理由3点を記載。"
+      },
+      {
+        "id": "SF-002",
+        "status": "applied",
+        "change_summary": "実装タスクに「重複抑制がlogger.debug/logger.infoの両方のログレベルで正しく動作することを確認するテストケースの追加」を追記。背景・課題にログレベル依存の注記を追加。"
+      },
+      {
+        "id": "SF-003",
+        "status": "applied",
+        "change_summary": "受入条件を具体的でテスト可能な条件に変更。「同一プロンプト出力に対して2回目以降のログがスキップされること」を主体に。75%削減は「参考目標」として維持し、ログレベル・並列稼働数に依存する旨を追記。"
+      },
+      {
+        "id": "SF-004",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルにauto-yes-manager.ts、status-detector.ts、current-output/route.tsの3ファイルを「detectPrompt呼び出し元（影響確認）」として追加。"
+      },
+      {
+        "id": "SF-005",
+        "status": "applied",
+        "change_summary": "提案する解決策にキャッシュ設計方針セクションを追加。3方式（A:outputハッシュのみ、B:worktreeIdパラメータ追加、C:呼び出し元管理）の比較テーブルと推奨を記載。ログ抑制戦略（完全スキップ vs 集約ログ）のトレードオフも追記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "status": "applied",
+        "change_summary": "背景・課題にstatus-detector.tsのSF-001設計トレードオフによる重複呼び出しの注記を追加。"
+      },
+      {
+        "id": "NTH-002",
+        "status": "applied",
+        "change_summary": "提案する解決策にログ抑制戦略セクションを追加。完全スキップと集約ログのトレードオフ、ログレベル連動戦略を記載。"
+      }
+    ]
+  },
+  "updated_sections": [
+    "概要",
+    "背景・課題",
+    "提案する解決策",
+    "実装タスク",
+    "受入条件",
+    "影響範囲",
+    "レビュー履歴（新規追加）"
+  ],
+  "summary": {
+    "total_findings": 9,
+    "applied": 9,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/402"
+  }
+}

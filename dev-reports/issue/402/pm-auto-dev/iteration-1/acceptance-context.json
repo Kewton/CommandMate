@@ -1,0 +1,26 @@
+{
+  "issue_number": 402,
+  "feature_summary": "detectPromptの重複ログ出力を抑制してI/O負荷を軽減: モジュールスコープキャッシュlastOutputTailで同一output末尾50行の重複ログをスキップ",
+  "acceptance_criteria": [
+    "同一プロンプト出力に対して連続してdetectPromptが呼び出された場合、2回目以降のログ出力がスキップされること",
+    "新しいプロンプト（前回と異なるoutput内容）が検出された場合は通常通りログ出力されること",
+    "プロンプト検出の動作自体（戻り値・副作用）に影響がないこと",
+    "キャッシュヒット時（ログ抑制時）もdetectPrompt()の戻り値は非キャッシュ時と完全に同一であること",
+    "logger.debug/logger.infoの両ログレベルで重複抑制が正しく動作すること",
+    "ログ出力量が大幅に削減されること（参考目標: 75%以上削減）"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 同一output連続呼び出し - 同一outputを3回呼び出した場合、2回目・3回目のlogger.debug/infoが呼び出されないこと",
+    "シナリオ2: 異なるoutput - 異なるoutputを渡した場合、毎回logger.debugが呼び出されること",
+    "シナリオ3: 戻り値不変 - 同一outputをキャッシュヒット状態で渡しても戻り値（isPrompt, promptData等）が同一であること",
+    "シナリオ4: resetDetectPromptCache動作 - resetDetectPromptCache()呼び出し後は次のdetectPrompt()でログが出力されること",
+    "シナリオ5: multipleChoice検出のログ抑制 - multipleChoiceプロンプトに対する同一output連続呼び出しでlogger.infoが抑制されること",
+    "シナリオ6: テスト分離 - beforeEachでresetDetectPromptCache()が呼ばれ、既存テストに影響しないこと"
+  ],
+  "implementation_files": [
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector-cache.test.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/status-detector.test.ts"
+  ]
+}

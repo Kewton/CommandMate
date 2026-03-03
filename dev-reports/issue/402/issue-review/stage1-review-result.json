@@ -1,0 +1,189 @@
+{
+  "issue_number": 402,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_focus": "通常",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "MF-001",
+      "severity": "must_fix",
+      "category": "事実誤り",
+      "description": "Issue内の「100ms間隔で繰り返しログ出力されている」という記述が誤り。実際のポーリング間隔は2000ms（2秒）。コードベース内に100msのポーリング間隔は存在しない。",
+      "suggestion": "「同一プロンプトに対して100ms間隔で繰り返しログ出力されている」を「同一プロンプトに対して2秒間隔（POLLING_INTERVAL = 2000ms）で繰り返しログ出力されている」に修正する。",
+      "affected_section": "背景・課題",
+      "evidence": {
+        "file": "src/lib/response-poller.ts",
+        "line": 54,
+        "code": "const POLLING_INTERVAL = 2000;",
+        "additional": [
+          "src/lib/auto-yes-manager.ts:69 - export const POLLING_INTERVAL_MS = 2000;",
+          "src/components/worktree/WorktreeDetailRefactored.tsx - ACTIVE_POLLING_INTERVAL_MS = 2000; IDLE_POLLING_INTERVAL_MS = 5000;"
+        ]
+      }
+    },
+    {
+      "id": "MF-002",
+      "severity": "must_fix",
+      "category": "正確性・完全性",
+      "description": "Issue内の「1秒間に30回以上同一内容で出力」は誇張または使用条件が未明記。1ポーリングサイクル（2秒）あたりの最大detectPrompt呼び出しは、response-pollerから最大3回 + auto-yes-managerから1回 + current-output APIから2回（detectSessionStatus内1回 + 直接1回）+ prompt-response API（イベント駆動で稀）。30回/秒に到達するには、10以上のActiveワークツリーが同時稼働し、かつ複数ブラウザタブが並列ポーリングしている必要がある。この前提条件が記載されていない。",
+      "suggestion": "概要セクションの「1秒間に30回以上」を、具体的な呼び出しパターンに基づく記述に変更する。例：「1回のポーリングサイクル（2秒間隔）で最大6回のdetectPrompt呼び出しが発生し、複数ワークツリー/ブラウザタブの並列稼働時にログが急増する」",
+      "affected_section": "概要",
+      "evidence": {
+        "call_sites": [
+          "response-poller.ts:779 - extractResponse()内 claude/codex向け早期検出",
+          "response-poller.ts:953 - extractResponse()内 一般プロンプト検出（opencode以外）",
+          "response-poller.ts:1088 - checkForResponse()内 フォールバック検出",
+          "auto-yes-manager.ts:585 - detectAndRespondToPrompt() 2秒毎ポーリング",
+          "status-detector.ts:145 - detectSessionStatus()経由（current-output APIから呼ばれる）",
+          "current-output/route.ts:101 - SF-001重複呼び出し（フロントエンド2-5秒毎ポーリング）"
+        ]
+      }
+    },
+    {
+      "id": "SF-001",
+      "severity": "should_fix",
+      "category": "実装方針の曖昧さ",
+      "description": "重複抑制の実装場所が「prompt-detector.tsまたはresponse-poller.ts」と記載されているが、どちらが適切か方針が定まっていない。prompt-detector.ts内（detectPrompt関数レベルのキャッシュ）で実装する場合、全呼び出し元（response-poller、auto-yes-manager、status-detector、current-output API、prompt-response API）に一括で効果がある。一方、response-poller.ts側で実装する場合、response-pollerの重複呼び出し（L779+L953）のみ解消できるが他の呼び出し元には効果がない。",
+      "suggestion": "実装場所を明確にする。推奨：prompt-detector.ts内のdetectPrompt()関数にモジュールスコープの前回検出キャッシュを持たせる方式。理由：(1) 全呼び出し元に一律で効果がある、(2) 呼び出し側の変更が不要、(3) 既存のlogger.debug/info呼び出し箇所に直接制御を入れられる。ただし、detectPromptは同一プロセス内の複数ワークツリーから呼ばれるため、キャッシュキーにはworktreeIdを含めるか、呼び出し元コンテキストを考慮する必要がある点を記載すべき。",
+      "affected_section": "提案する解決策",
+      "evidence": {
+        "note": "detectPrompt()は現在worktreeIdを引数に取らない（output文字列とoptionsのみ）。キャッシュキーの設計にはこの制約を考慮する必要がある。"
+      }
+    },
+    {
+      "id": "SF-002",
+      "severity": "should_fix",
+      "category": "実装タスクの不足",
+      "description": "実装タスクに「ログレベル別の挙動考慮」が含まれていない。detectPromptのログはlogger.debug（L171, L216）とlogger.info（L185）の2レベルで出力されている。開発環境（NODE_ENV=development）ではdebugがデフォルトで全ログが出力されるが、本番環境（production）ではinfoがデフォルトでdebugログはスキップされる。重複抑制の実装がログレベル設定と独立して正しく動作するか確認するタスクが必要。",
+      "suggestion": "実装タスクに以下を追加：「重複抑制がlogger.debug/logger.infoの両方のログレベルで正しく動作することを確認するテストケースの追加」。また、本番環境ではdebugログが出力されないため、実際のログ削減効果はログレベル設定に依存する点をIssueに注記する。",
+      "affected_section": "実装タスク",
+      "evidence": {
+        "files": {
+          "prompt-detector.ts:171": "logger.debug('detectPrompt:start', { outputLength: output.length });",
+          "prompt-detector.ts:185": "logger.info('detectPrompt:multipleChoice', {...});",
+          "prompt-detector.ts:216": "logger.debug('detectPrompt:complete', { isPrompt: false });",
+          "env.ts:160": "const defaultLevel: LogLevel = process.env.NODE_ENV === 'production' ? 'info' : 'debug';"
+        }
+      }
+    },
+    {
+      "id": "SF-003",
+      "severity": "should_fix",
+      "category": "受入条件の曖昧さ",
+      "description": "受入条件の「ログ出力量が大幅に削減されること（目標: 75%以上削減）」は、測定方法が定義されていない。何を基準に75%削減を測定するのか（特定のシナリオのログ行数比較？特定の時間内のdetectPrompt関連ログ数？）が不明確。また、75%削減はIssue本文内の「サーバーログの75%がdetectPromptログ」から逆算した値と思われるが、検証不可能な実行時データに基づいている。",
+      "suggestion": "受入条件を以下のように具体化する：「同一プロンプト出力に対して連続してdetectPromptが呼び出された場合、2回目以降のログ出力がスキップされること」「新しいプロンプト（前回と異なるoutput内容）が検出された場合は通常通りログ出力されること」。75%削減の数値目標は参考値として残しつつ、テスト可能な条件を主体にする。",
+      "affected_section": "受入条件",
+      "evidence": {
+        "note": "75%という数値は仮説検証結果（Unverifiable）で確認済み。コードのみでは検証できない実行時統計データに基づく。"
+      }
+    },
+    {
+      "id": "SF-004",
+      "severity": "should_fix",
+      "category": "影響範囲の不足",
+      "description": "影響範囲テーブルにauto-yes-manager.ts、status-detector.ts、current-output/route.ts、prompt-response/route.tsが含まれていない。これらのファイルはすべてdetectPromptを直接呼び出しており、重複抑制の恩恵を受ける（prompt-detector.ts側で実装する場合）か、個別に対応が必要（呼び出し側で実装する場合）。少なくとも影響を受けるファイルとして記載すべき。",
+      "suggestion": "影響範囲テーブルを以下のように拡張する：\n| ファイル | 変更内容 |\n|---------|---------|\n| src/lib/prompt-detector.ts | 重複検出抑制ロジック追加 |\n| src/lib/response-poller.ts | ログ出力の呼び出し箇所修正（必要に応じて） |\n| src/lib/auto-yes-manager.ts | detectPrompt呼び出し元（影響確認） |\n| src/lib/status-detector.ts | detectPrompt呼び出し元（影響確認） |\n| src/app/api/worktrees/[id]/current-output/route.ts | detectPrompt呼び出し元（影響確認） |",
+      "affected_section": "影響範囲",
+      "evidence": {
+        "call_sites": [
+          "auto-yes-manager.ts:585",
+          "status-detector.ts:145",
+          "current-output/route.ts:101",
+          "prompt-response/route.ts:99"
+        ]
+      }
+    },
+    {
+      "id": "SF-005",
+      "severity": "should_fix",
+      "category": "技術的考慮の不足",
+      "description": "キャッシュの粒度（ワークツリー単位 vs グローバル）に関する考慮が記載されていない。detectPrompt()は現在worktreeIdを引数に受け取らないため、モジュールスコープでキャッシュする場合、異なるワークツリーのログが相互に抑制される可能性がある。例：ワークツリーAで検出されたプロンプトと同一の内容がワークツリーBで検出された場合、Bのログが誤って抑制される。",
+      "suggestion": "キャッシュ設計に以下のいずれかを明記する：(1) output文字列のハッシュのみでキャッシュする（ワークツリー間で同一出力は抑制される。実害は少ないが正確性が下がる）、(2) detectPrompt()にworktreeIdパラメータを追加してワークツリー単位でキャッシュする（正確だがAPI変更が必要）、(3) 呼び出し元でキャッシュを管理する（API変更不要だが各呼び出し元で対応が必要）。",
+      "affected_section": "提案する解決策",
+      "evidence": {
+        "function_signature": "export function detectPrompt(output: string, options?: DetectPromptOptions): PromptDetectionResult",
+        "note": "worktreeIdパラメータが存在しない。キャッシュキーの設計に影響する。"
+      }
+    },
+    {
+      "id": "NTH-001",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "status-detector.tsのモジュールJSDoc（L15-20）には、detectPrompt()の重複呼び出しがSF-001として意図的な設計トレードオフであることが明記されている。この重複呼び出し自体がログ肥大化の一因であることを関連情報としてIssueに記載すると、将来のメンテナーにとって有用。",
+      "suggestion": "背景・課題セクションに「status-detector.tsのSF-001設計トレードオフにより、current-output APIではdetectPromptが2回呼び出される（ステータス検出用 + promptData取得用）。これもログ重複の一因。」という注記を追加する。",
+      "affected_section": "背景・課題",
+      "evidence": {
+        "file": "src/lib/status-detector.ts",
+        "lines": "15-20",
+        "content": "Architecture note (SF-001 tradeoff): ...detectPrompt() being invoked twice: once inside detectSessionStatus() and once by the caller."
+      }
+    },
+    {
+      "id": "NTH-002",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "集約ログ（「N回検出」形式）の選択肢が括弧書きで記載されているが、どちらを採用するかの判断基準が示されていない。完全スキップと集約ログにはそれぞれトレードオフがある（完全スキップ：ログ削減効果最大だがデバッグ時に情報不足。集約ログ：定期的にカウントを出力するためデバッグ容易だがログ削減効果は限定的）。",
+      "suggestion": "提案する解決策セクションで、完全スキップ方式と集約ログ方式のトレードオフを簡潔に記載し、推奨方式を明示する。開発環境ではdebugレベルで集約ログ、本番環境では完全スキップなど、ログレベルと連動した戦略も検討に値する。",
+      "affected_section": "提案する解決策",
+      "evidence": {
+        "issue_text": "同一プロンプト検出時はログ出力をスキップ（または集約ログとして「N回検出」形式で出力）"
+      }
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 5,
+    "nice_to_have": 2,
+    "total": 9,
+    "overall_quality": "fair"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "relevance": "主要変更対象。detectPrompt()のログ出力箇所（L171, L185, L216）に重複抑制を追加",
+      "lines": [171, 185, 216]
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "detectPromptの最多呼び出し元。extractResponse()内で最大2回（L779, L953）、checkForResponse()で1回（L1088）",
+      "lines": [54, 779, 953, 1088]
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "detectPromptの独立呼び出し元（L585）。2秒間隔ポーリング",
+      "lines": [69, 585]
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "relevance": "detectPromptの間接呼び出し元（L145）。SF-001トレードオフで重複呼び出し",
+      "lines": [145]
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "detectPromptの直接呼び出し元（L101）。フロントエンドから2-5秒間隔でポーリング",
+      "lines": [101]
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "detectPromptの直接呼び出し元（L99）。イベント駆動で低頻度",
+      "lines": [99]
+    },
+    {
+      "file": "src/lib/logger.ts",
+      "relevance": "ログ出力基盤。ログレベルフィルタリング（debug/info/warn/error）",
+      "lines": [198, 206]
+    },
+    {
+      "file": "src/lib/env.ts",
+      "relevance": "ログレベルデフォルト設定。開発=debug、本番=info",
+      "lines": [160]
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "prompt-detector.ts、response-poller.ts、auto-yes-manager.ts、status-detector.tsのモジュール説明"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [],
+  "files_changed": [],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [],
+  "review_findings": {
+    "D1_module_scope_variable": "PASS - lastOutputTail declared at module scope with @internal JSDoc, correct type (string | null), initialized to null. References [S2-004] pattern.",
+    "D2_001_tail_extraction": "PASS - lines split once, tailForDedup from slice(-50).join, isDuplicate comparison. Lines reuse documented [S1-004][S2-001].",
+    "D2_002_start_log_guard": "PASS - logger.debug('detectPrompt:start') wrapped in if (!isDuplicate).",
+    "D2_003_cache_update": "PASS - lastOutputTail = tailForDedup placed before detection logic, after log guard.",
+    "D2_004_multipleChoice_log_guard": "PASS - logger.info('detectPrompt:multipleChoice') wrapped in if (!isDuplicate), return statement unconditional.",
+    "D2_005_complete_log_guard": "PASS - logger.debug('detectPrompt:complete') wrapped in if (!isDuplicate), return statement unconditional.",
+    "D3_reset_function": "PASS - resetDetectPromptCache() exported with @internal JSDoc, sets lastOutputTail to null.",
+    "D4_001_return_value_invariance": "PASS - isDuplicate never gates any return statement. All 4 return paths (multipleChoice, yesNo, approve, noPrompt) are unconditional with respect to isDuplicate.",
+    "D4_002_detection_logic_unaffected": "PASS - isDuplicate is only used in log guard conditions, never in detection logic branches.",
+    "D4_003_single_cache_entry": "PASS - Only one variable (lastOutputTail), no Map/Set/Array growth.",
+    "D4_004_internal_export": "PASS - resetDetectPromptCache marked @internal, JSDoc says 'Intended for test isolation only'.",
+    "S1_001_SRP_tradeoff_comment": "PASS - Lines 193-196 contain explicit SRP tradeoff comment with future extraction guidance.",
+    "S2_004_hot_reload_comment": "PASS - Lines 17-19 in lastOutputTail JSDoc explain Hot Reload reset acceptability for log-only caching.",
+    "S3_001_test_beforeEach_reset": "PASS - prompt-detector.test.ts has resetDetectPromptCache() in root beforeEach.",
+    "S3_009_status_detector_test_reset": "PASS - status-detector.test.ts has resetDetectPromptCache() in beforeEach.",
+    "T1_same_output_suppression": "PASS - Test covers same output duplicate suppression.",
+    "T1b_multipleChoice_suppression": "PASS - Test covers multiple choice log suppression.",
+    "T2_different_output_logs": "PASS - Test verifies different output produces logs.",
+    "T3_return_value_identical": "PASS - Test verifies structural equality between cache miss and hit. T3b covers no-prompt case.",
+    "T4_reset_restores_logging": "PASS - Test verifies resetDetectPromptCache() restores log emission.",
+    "T5_test_isolation": "PASS - Test verifies beforeEach isolation from prior test state."
+  },
+  "message": "Code review complete. Implementation fully conforms to design policy D1-D4, S1-001, S2-004, S3-001/S3-009 requirements. All test categories T1-T5 are covered. No refactoring changes needed -- code is already clean, well-documented, and correctly structured. TypeScript: 0 errors. ESLint: 0 errors. Prompt-detector tests: 181 passed. Status-detector tests: 18 passed."
+}

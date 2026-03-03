@@ -1,0 +1,35 @@
+{
+  "issue_number": 402,
+  "title": "perf: detectPromptの重複ログ出力を抑制してI/O負荷を軽減",
+  "acceptance_criteria": [
+    "同一プロンプト出力に対して連続してdetectPromptが呼び出された場合、2回目以降のログ出力がスキップされること",
+    "新しいプロンプト（前回と異なるoutput内容）が検出された場合は通常通りログ出力されること",
+    "プロンプト検出の動作自体（戻り値・副作用）に影響がないこと",
+    "キャッシュヒット時（ログ抑制時）もdetectPrompt()の戻り値は非キャッシュ時と完全に同一であること",
+    "logger.debug/logger.infoの両ログレベルで重複抑制が正しく動作すること",
+    "ログ出力量が大幅に削減されること（参考目標: 75%以上削減）"
+  ],
+  "implementation_tasks": [
+    "src/lib/prompt-detector.ts: モジュールスコープ変数 'let lastOutputTail: string | null = null' を追加（D1）",
+    "src/lib/prompt-detector.ts: detectPrompt()冒頭でlines = output.split('\\n')を1回実行し、tailForDedup = lines.slice(-50).join('\\n')で末尾50行抽出（D2-001）",
+    "src/lib/prompt-detector.ts: isDuplicate = tailForDedup === lastOutputTail でキャッシュ判定（D2-001）",
+    "src/lib/prompt-detector.ts: if (!isDuplicate) ガードでlogger.debug('detectPrompt:start')を囲む（D2-002）",
+    "src/lib/prompt-detector.ts: lastOutputTail = tailForDedup でキャッシュ更新（D2-003）",
+    "src/lib/prompt-detector.ts: logger.info('detectPrompt:multipleChoice')をif (!isDuplicate)で囲む（D2-004）",
+    "src/lib/prompt-detector.ts: logger.debug('detectPrompt:complete')をif (!isDuplicate)で囲む（D2-005）",
+    "src/lib/prompt-detector.ts: resetDetectPromptCache() @internal export追加（D3）",
+    "tests/unit/prompt-detector.test.ts: resetDetectPromptCacheをインポートし全テストdescribeルートレベルbeforeEachに追加（S3-001）",
+    "tests/unit/prompt-detector-cache.test.ts: 重複抑制テスト新規作成（T1〜T5: 同一output2回目ログスキップ、異なるoutputログ出力、戻り値保証、resetDetectPromptCache動作、テスト分離）",
+    "tests/unit/lib/status-detector.test.ts: resetDetectPromptCacheのインポートとbeforeEachでの呼び出し追加（S3-009推奨）",
+    "CLAUDE.md: prompt-detector.tsのモジュール説明にIssue #402キャッシュ機構の記載を追加"
+  ],
+  "design_policy_path": "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md",
+  "work_plan_path": "dev-reports/issue/402/work-plan.md",
+  "target_coverage": 80,
+  "key_constraints": [
+    "D4-001: detectPrompt()の戻り値はキャッシュ有無に関わらず常に同一であること",
+    "D4-002: ログ抑制はログ出力のみに影響し、プロンプト検出ロジック自体には影響しないこと",
+    "D4-003: キャッシュエントリは1つ（前回値のみ）に限定すること",
+    "D4-004: resetDetectPromptCache()はテスト専用であること"
+  ]
+}

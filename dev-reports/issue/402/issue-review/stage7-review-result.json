@@ -1,0 +1,192 @@
+{
+  "issue_number": 402,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-03",
+  "previous_stage_verification": {
+    "stage3_must_fix": {
+      "IR-005": {
+        "status": "verified",
+        "detail": "受入条件に「キャッシュヒット時（ログ抑制時）もdetectPrompt()の戻り値は非キャッシュ時と完全に同一であること」が追加済み。Stage 4で反映、Stage 5で検証確認済み。"
+      }
+    },
+    "stage3_should_fix": {
+      "IR-001": {
+        "status": "verified",
+        "detail": "影響範囲表にsrc/app/api/worktrees/[id]/prompt-response/route.tsが「detectPrompt呼び出し元（影響確認）」として追加済み。コードベース確認: L99でdetectPrompt()を直接呼び出しており、記載内容と一致。"
+      },
+      "IR-002": {
+        "status": "verified",
+        "detail": "影響範囲表のresponse-poller.ts行が「detectPromptWithOptions()経由で最大3回呼び出し（extractResponse内2回 + checkForResponse内1回）。キャッシュ方式(A)であれば変更不要だが、ログ削減効果の主要対象」に具体化済み。コードベース確認: L779, L953, L1088の3箇所と一致。"
+      },
+      "IR-003": {
+        "status": "verified",
+        "detail": "実装タスクに「既存テストの影響確認（キャッシュ状態のテスト間リセット）」が追加済み。resetDetectPromptCache()の@internalエクスポートとbeforeEach/afterEachでの呼び出し設計が記載されている。"
+      },
+      "IR-006": {
+        "status": "verified",
+        "detail": "影響範囲表にCLAUDE.mdが追加済み。変更内容「prompt-detector.tsのモジュール説明にキャッシュ機構の記載を追加」と記載されている。"
+      },
+      "IR-008": {
+        "status": "verified",
+        "detail": "影響範囲表のstatus-detector.ts行に「SF-001による2重呼び出し分のログがキャッシュにより自然に抑制される（コード変更不要）」が追記済み。コードベース確認: status-detector.ts L145でdetectPrompt()が呼ばれ、current-output/route.ts L101で再度呼ばれる設計と一致。"
+      }
+    },
+    "stage3_nice_to_have_not_applied": {
+      "IR-004": {
+        "status": "acknowledged",
+        "detail": "ハッシュ計算コストの考慮はIssue本文に明示されていないが、Stage 3で「末尾20行に限定する」提案がされており、実装時の判断に委ねられている。キャッシュ設計方針テーブルで方式(A)のデメリットに記載がないが、output全体ではなくdetectPrompt()内で使用するlastLines（末尾20行）をハッシュ対象にすればコストは無視可能であり、実装レベルの詳細として許容範囲。"
+      },
+      "IR-007": {
+        "status": "acknowledged",
+        "detail": "メモリリーク考慮はIssue本文に明示されていないが、方式(A)は前回値1エントリのみ保持する設計のため問題にならない。方式(B)の場合のクリーンアップ考慮は未記載だが、方式選択は実装タスクに含まれており、選択時に考慮すれば十分。"
+      },
+      "IR-009": {
+        "status": "acknowledged",
+        "detail": "テスト方式の技術的制約はIssue本文に記載されていないが、実装タスクに「ユニットテスト追加」と「logger.debug/logger.infoの両方のログレベルで正しく動作するテスト」が含まれており、テスト戦略は実装時に決定可能。"
+      },
+      "IR-010": {
+        "status": "acknowledged",
+        "detail": "抑制対象のログ箇所の優先順位はIssue本文に記載されていないが、実装タスクの「同一プロンプト検出時のログ出力スキップロジック実装」で包括されている。実装時にどのlogger呼び出しを抑制対象とするかは自明（全logger.debug/infoが対象）。"
+      }
+    }
+  },
+  "impact_scope_verification": {
+    "impact_table_completeness": {
+      "status": "complete",
+      "details": "影響範囲表は以下の7ファイルを網羅しており、detectPromptの全呼び出し元をカバーしている。",
+      "files_listed": [
+        "src/lib/prompt-detector.ts",
+        "src/lib/response-poller.ts",
+        "src/lib/auto-yes-manager.ts",
+        "src/lib/status-detector.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "CLAUDE.md"
+      ],
+      "verification": {
+        "all_import_sites": "src内でdetectPromptをimportしているファイルは5つ（response-poller.ts, status-detector.ts, auto-yes-manager.ts, current-output/route.ts, prompt-response/route.ts）。respond/route.tsはgetAnswerInputのみimportしておりdetectPromptは使用していない。cli-patterns.tsはDetectPromptOptions型のみimportしており呼び出しなし。全呼び出し元が影響範囲表に含まれている。",
+        "test_files_affected": "テストファイル6つがdetectPromptを使用: tests/unit/prompt-detector.test.ts, tests/unit/lib/auto-yes-manager.test.ts, tests/unit/api/prompt-response-verification.test.ts, tests/integration/issue-256-acceptance.test.ts, tests/integration/issue-208-acceptance.test.ts, tests/integration/current-output-thinking.test.ts。実装タスクの「既存テストの影響確認（キャッシュ状態のテスト間リセット）」で対応可能。"
+      }
+    },
+    "impact_descriptions_accuracy": {
+      "prompt-detector.ts": "正確。「重複検出抑制ロジック追加（主要変更対象）」は適切。",
+      "response-poller.ts": "正確。「detectPromptWithOptions()経由で最大3回呼び出し（extractResponse内2回 + checkForResponse内1回）。キャッシュ方式(A)であれば変更不要だが、ログ削減効果の主要対象」は、コードベースのL779, L953, L1088の3箇所と一致。",
+      "auto-yes-manager.ts": "正確。「detectPrompt呼び出し元（影響確認）」は適切。L585で呼び出し確認済み。",
+      "status-detector.ts": "正確。「detectPrompt呼び出し元（影響確認）。SF-001による2重呼び出し分のログがキャッシュにより自然に抑制される（コード変更不要）」はL145の呼び出しとSF-001設計と一致。",
+      "current-output/route.ts": "正確。「detectPrompt呼び出し元（影響確認）」は適切。L87（detectSessionStatus経由間接）+ L101（直接、thinkingガード付き）の2箇所。",
+      "prompt-response/route.ts": "正確。「detectPrompt呼び出し元（影響確認）」は適切。L99で呼び出し確認済み。",
+      "CLAUDE.md": "正確。「prompt-detector.tsのモジュール説明にキャッシュ機構の記載を追加」は適切。"
+    }
+  },
+  "cross_section_consistency": {
+    "tasks_vs_impact": {
+      "status": "consistent",
+      "detail": "実装タスクの6項目が影響範囲表の7ファイルと整合。キャッシュ追加はprompt-detector.tsで実装、既存テスト影響確認はテストファイル群に対応、CLAUDE.md更新は影響範囲表に記載済み。"
+    },
+    "acceptance_vs_impact": {
+      "status": "consistent",
+      "detail": "受入条件の6項目が影響範囲の全呼び出し元で戻り値・動作に影響がないことを要求しており、影響範囲表の各呼び出し元ファイルと整合。"
+    },
+    "background_vs_impact": {
+      "status": "consistent",
+      "detail": "背景・課題の呼び出し元内訳（response-poller最大3回、auto-yes-manager 1回、current-output 2回）が影響範囲表のファイル一覧と整合。prompt-response/route.tsは背景で直接的な呼び出し回数として言及されていないが、イベント駆動（低頻度）であり、影響範囲表には記載済み。"
+    },
+    "solution_vs_impact": {
+      "status": "consistent",
+      "detail": "提案する解決策のキャッシュ方式(A)(B)(C)の比較テーブルと影響範囲表が整合。方式(A)ではprompt-detector.tsのみ変更、方式(B)では全呼び出し元修正が必要。影響範囲表の各行の「変更内容」が方式(A)前提の記載（影響確認のみ、コード変更不要）で統一されている。"
+    }
+  },
+  "findings": [
+    {
+      "id": "S7-NTH-001",
+      "severity": "nice_to_have",
+      "category": "テスト影響の網羅性",
+      "description": "実装タスクの「既存テストの影響確認（キャッシュ状態のテスト間リセット）」では、影響を受けるテストファイルが具体的に列挙されていない。コードベース調査の結果、detectPromptを使用するテストファイルは6つ存在する: tests/unit/prompt-detector.test.ts, tests/unit/lib/auto-yes-manager.test.ts, tests/unit/api/prompt-response-verification.test.ts, tests/integration/issue-256-acceptance.test.ts, tests/integration/issue-208-acceptance.test.ts, tests/integration/current-output-thinking.test.ts。このうち、auto-yes-manager.test.tsとprompt-response-verification.test.tsはdetectPromptをモック経由で使用しておりキャッシュの影響を受けにくいが、prompt-detector.test.tsと3つのintegrationテストは実際のdetectPrompt関数を呼び出しているためキャッシュ状態リセットが必要となる可能性が高い。",
+      "suggestion": "実装タスクの記載としては現状で十分である。テストファイル一覧は実装時に確認すればよく、Issue本文に列挙する必要性は低い。ただし、実装時にtests/unit/prompt-detector.test.ts、tests/integration/issue-256-acceptance.test.ts、tests/integration/issue-208-acceptance.test.ts、tests/integration/current-output-thinking.test.tsの4ファイルを優先的に確認することを推奨する。",
+      "affected_section": "実装タスク",
+      "evidence": {
+        "test_files_using_detectPrompt": [
+          "tests/unit/prompt-detector.test.ts (直接呼び出し)",
+          "tests/unit/lib/auto-yes-manager.test.ts (dynamic import)",
+          "tests/unit/api/prompt-response-verification.test.ts (モック経由)",
+          "tests/integration/issue-256-acceptance.test.ts (直接呼び出し)",
+          "tests/integration/issue-208-acceptance.test.ts (直接呼び出し)",
+          "tests/integration/current-output-thinking.test.ts (detectSessionStatus経由間接)"
+        ]
+      }
+    },
+    {
+      "id": "S7-NTH-002",
+      "severity": "nice_to_have",
+      "category": "影響範囲の補足",
+      "description": "影響範囲表にテストファイルが含まれていない。影響範囲表は本番ソースコードに焦点を当てた設計であり、テストファイルは実装タスクの「既存テストの影響確認」で暗黙的にカバーされている。ただし、テストファイルも「変更が影響するファイル」として明示することで、実装者がテスト修正の範囲を把握しやすくなる。",
+      "suggestion": "影響範囲表にテストファイル行を追加するかは任意。現状の実装タスク「既存テストの影響確認（キャッシュ状態のテスト間リセット）。キャッシュリセット関数（例: resetDetectPromptCache()）を @internal エクスポートし、テストのbeforeEach/afterEachで呼び出す設計とする」が十分に具体的であるため、影響範囲表への追加は必須ではない。",
+      "affected_section": "影響範囲",
+      "evidence": {
+        "note": "影響範囲表は7ファイルを記載しており、全て本番ソースコード+ドキュメント。テストファイル6つは実装タスクでカバーされている。"
+      }
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "total": 2,
+    "overall_quality": "good",
+    "assessment": "Stage 3（影響範囲レビュー1回目）の全指摘事項（must_fix 1件、should_fix 5件）がStage 4で適切に反映されていることを確認した。影響範囲表はdetectPromptの全呼び出し元5ファイル + 主要変更対象1ファイル + ドキュメント1ファイルの計7ファイルを網羅しており、コードベース調査（import検索）の結果とも完全に一致する。影響範囲表と実装タスク・受入条件・背景・提案する解決策の各セクション間の整合性も良好。残る2件のnice_to_haveはテストファイルの具体的列挙に関するもので、実装時の参考情報として有用だがIssue本文の修正は不要。7段階のレビュー・反映サイクルを経て、Issue #402の記載品質は十分に高い水準に達している。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "relevance": "主要変更対象。detectPrompt()関数にキャッシュ追加。logger呼び出し3箇所（L171 debug, L185-189 info, L216 debug）が抑制対象。"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "detectPromptWithOptions()経由でL779, L953, L1088の3箇所。最大3回/ポーリングサイクル。方式(A)では変更不要。"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "detectAndRespondToPrompt() L585で直接呼び出し。方式(A)では変更不要。"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "relevance": "detectSessionStatus() L145で呼び出し。SF-001によりcurrent-output APIとの2重呼び出し。方式(A)では変更不要、キャッシュで自然に抑制。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "detectSessionStatus()経由L87 + 直接L101（thinkingガード付き）の最大2箇所。方式(A)では変更不要。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "L99で直接呼び出し。方式(A)では変更不要。"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "prompt-detector.tsモジュール説明にキャッシュ機構の記載追加が必要。"
+    },
+    {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "relevance": "detectPromptの直接テスト。キャッシュ状態リセットが必要になる可能性が最も高い。"
+    },
+    {
+      "file": "tests/integration/issue-256-acceptance.test.ts",
+      "relevance": "detectPromptを直接呼び出す統合テスト。キャッシュ状態リセットが必要になる可能性あり。"
+    },
+    {
+      "file": "tests/integration/issue-208-acceptance.test.ts",
+      "relevance": "detectPromptを直接呼び出す統合テスト。キャッシュ状態リセットが必要になる可能性あり。"
+    },
+    {
+      "file": "tests/integration/current-output-thinking.test.ts",
+      "relevance": "detectSessionStatus経由でdetectPromptを間接呼び出し。キャッシュ状態リセットが必要になる可能性あり。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "prompt-detector.tsモジュール説明の更新対象として影響範囲表に記載済み。"
+    }
+  ]
+}

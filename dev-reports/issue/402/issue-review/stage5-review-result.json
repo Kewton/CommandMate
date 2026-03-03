@@ -1,0 +1,153 @@
+{
+  "issue_number": 402,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_focus": "通常",
+  "review_date": "2026-03-03",
+  "previous_stage_verification": {
+    "stage1_must_fix": {
+      "MF-001": {
+        "status": "verified",
+        "detail": "「100ms間隔」が「2秒間隔（POLLING_INTERVAL = 2000ms）」に修正済み。コードベースのPOLLING_INTERVAL = 2000（response-poller.ts L54）、POLLING_INTERVAL_MS = 2000（auto-yes-manager.ts L69）と整合。"
+      },
+      "MF-002": {
+        "status": "verified",
+        "detail": "「1秒間に30回以上」が「1回のポーリングサイクル（2秒間隔）で最大6回のdetectPrompt呼び出し」に修正済み。呼び出し元の内訳も正確に記載されている。"
+      }
+    },
+    "stage1_should_fix": {
+      "SF-001": {
+        "status": "verified",
+        "detail": "実装場所がprompt-detector.ts内のdetectPrompt()に明確化済み。推奨理由3点が記載されている。"
+      },
+      "SF-002": {
+        "status": "verified",
+        "detail": "実装タスクにlogger.debug/logger.infoの両レベルテスト確認が追加済み。背景にログレベル依存の注記あり。"
+      },
+      "SF-003": {
+        "status": "verified",
+        "detail": "受入条件がテスト可能な形式に改善済み。75%削減は参考目標として維持。"
+      },
+      "SF-004": {
+        "status": "verified",
+        "detail": "影響範囲表にauto-yes-manager.ts、status-detector.ts、current-output/route.ts、prompt-response/route.tsが追加済み。"
+      },
+      "SF-005": {
+        "status": "verified",
+        "detail": "キャッシュ設計方針として3方式（A/B/C）の比較テーブルが追加済み。推奨方式も明記。"
+      }
+    },
+    "stage1_nice_to_have": {
+      "NTH-001": {
+        "status": "verified",
+        "detail": "status-detector.tsのSF-001設計トレードオフの注記が背景・課題に追加済み。"
+      },
+      "NTH-002": {
+        "status": "verified",
+        "detail": "ログ抑制戦略（完全スキップ vs 集約ログ）のトレードオフが追加済み。"
+      }
+    },
+    "stage3_applied": {
+      "IR-001": "verified - prompt-response/route.tsが影響範囲表に追加済み",
+      "IR-002": "verified - response-poller.tsの呼び出し回数が具体化済み",
+      "IR-003": "verified - テスト間キャッシュリセットの設計が実装タスクに追加済み",
+      "IR-005": "verified - キャッシュヒット時の戻り値同一性が受入条件に追加済み",
+      "IR-006": "verified - CLAUDE.mdが影響範囲表に追加済み",
+      "IR-008": "verified - SF-001によるキャッシュ自然抑制が影響範囲表に追記済み"
+    }
+  },
+  "findings": [
+    {
+      "id": "S5-NTH-001",
+      "severity": "nice_to_have",
+      "category": "正確性の補足",
+      "description": "背景・課題セクションの「current-output/route.ts: detectSessionStatus()経由1回 + 直接1回」について、実際のコード（current-output/route.ts L98-102）では、直接呼び出しは `if (!thinking)` ガード内にあり、thinking状態の場合はdetectPrompt()が1回のみ（detectSessionStatus()経由）となる。「直接1回」は条件付きである。",
+      "suggestion": "「detectSessionStatus()経由1回 + 直接1回（thinking状態でない場合）」のように条件を補足する。ただし、ログ量が問題になるのは主にidle/ready状態（thinking=false）の場合であり、thinking状態ではそもそもログ頻度が低いため、実質的な影響は小さい。",
+      "affected_section": "背景・課題",
+      "evidence": {
+        "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+        "lines": "98-102",
+        "code": "if (!thinking) { const promptOptions = buildDetectPromptOptions(cliToolId); promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions); }"
+      }
+    },
+    {
+      "id": "S5-NTH-002",
+      "severity": "nice_to_have",
+      "category": "正確性の補足",
+      "description": "prompt-detector.ts内のlogger呼び出しは3箇所（L171: debug 'detectPrompt:start'、L185-189: info 'detectPrompt:multipleChoice'、L216: debug 'detectPrompt:complete'）だが、yes/noプロンプト検出時（L196-212）およびApproveプロンプト検出時（L208-212）にはlogger.info呼び出しが存在しない。つまりlogger.infoはmultiple_choice検出時のみ出力される。ログ量の大半を占めるのはdebugレベルの'detectPrompt:start'と'detectPrompt:complete'であり、本番環境（NODE_ENV=production、デフォルトinfo）ではこれらは出力されない。Issue本文の注記でこの点は一部カバーされているが、抑制対象の主たるログがdebugレベルであることが明示されるとより正確になる。",
+      "suggestion": "提案する解決策セクションのログ抑制戦略に「ログ量の大半を占めるのはdebugレベルの'detectPrompt:start'/'detectPrompt:complete'であり、logger.info（'detectPrompt:multipleChoice'）は新規プロンプト検出時のみ出力されるため頻度が低い」と補足する。実装時にどのログ箇所を抑制対象とするか判断しやすくなる。",
+      "affected_section": "提案する解決策 - ログ抑制戦略",
+      "evidence": {
+        "file": "src/lib/prompt-detector.ts",
+        "log_calls": {
+          "L171": "logger.debug('detectPrompt:start', { outputLength: output.length }) -- 全呼び出しで出力",
+          "L185-189": "logger.info('detectPrompt:multipleChoice', {...}) -- multiple_choice検出時のみ",
+          "L216": "logger.debug('detectPrompt:complete', { isPrompt: false }) -- プロンプト未検出時のみ"
+        }
+      }
+    },
+    {
+      "id": "S5-NTH-003",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "キャッシュ設計方針の方式(A)の「異なるワークツリーの同一出力が相互に抑制される（実害小）」について、実際にはdetectPrompt()の呼び出し元でstripAnsi()やstripBoxDrawing()が適用されたcleanOutputが渡されるため、2つのワークツリーが全く同一のターミナル出力を持つ場合にのみ発生する。ワークツリーごとにパス表示やセッション名が異なるため、実際に同一outputになる確率は極めて低い。方式(A)の「実害小」の判断は妥当である。",
+      "suggestion": "特段の修正は不要。現在の記載で十分。",
+      "affected_section": "キャッシュ設計方針"
+    }
+  ],
+  "consistency_check": {
+    "sections_cross_reference": {
+      "overview_vs_background": "整合。概要の「最大6回のdetectPrompt呼び出し」が背景の呼び出し元内訳と合致（response-poller 最大3回 + auto-yes-manager 1回 + current-output 2回 = 最大6回）。",
+      "solution_vs_tasks": "整合。提案する解決策のキャッシュ方式3選択肢が、実装タスクの「キャッシュ方式の選定含む」と対応。",
+      "tasks_vs_acceptance": "整合。実装タスクの各項目が受入条件でカバーされている。特にキャッシュリセット関数の設計（実装タスク）と戻り値同一性の保証（受入条件）が対応。",
+      "acceptance_vs_impact": "整合。受入条件のlogger.debug/infoテストが実装タスクに含まれ、影響範囲表のCLAUDE.md更新も受入条件外だが必要作業として記載されている。",
+      "impact_table_completeness": "十分。全detectPrompt呼び出し元（prompt-detector.ts、response-poller.ts、auto-yes-manager.ts、status-detector.ts、current-output/route.ts、prompt-response/route.ts）と、ドキュメント更新（CLAUDE.md）が網羅されている。"
+    },
+    "technical_accuracy": {
+      "polling_intervals": "正確。POLLING_INTERVAL = 2000ms（response-poller.ts L54）、POLLING_INTERVAL_MS = 2000ms（auto-yes-manager.ts L69）と整合。",
+      "call_site_counts": "正確。response-poller.ts L779, L953, L1088の3箇所、auto-yes-manager.ts L585の1箇所、status-detector.ts L145の1箇所、current-output/route.ts L87（間接）+ L101（直接）の2箇所、prompt-response/route.ts L99の1箇所。",
+      "log_levels": "正確。開発環境デフォルト=debug、本番環境デフォルト=info（env.ts L160）。",
+      "detectPrompt_signature": "正確。detectPrompt(output: string, options?: DetectPromptOptions)でworktreeIdパラメータなし。"
+    }
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 3,
+    "total": 3,
+    "overall_quality": "good",
+    "assessment": "4段階のレビュー・反映サイクルを経て、Issue #402の記載品質は十分な水準に達している。Stage 1の全9件の指摘事項（must_fix 2件、should_fix 5件、nice_to_have 2件）が全て反映済み。Stage 3（影響範囲レビュー）の主要6件も反映済み。残る3件のnice_to_haveは補足的な情報であり、実装時に参照されれば十分である。技術的正確性、セクション間の整合性、受入条件のテスト可能性のいずれも良好。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "relevance": "主要変更対象。logger呼び出し3箇所（L171 debug, L185-189 info, L216 debug）。yes/no検出パスにはlogger.infoがない点に注意。"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "detectPromptWithOptions()経由でL779, L953, L1088の3箇所。最大3回/ポーリングサイクル。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "detectSessionStatus()経由L87 + 直接L101（thinkingガード付き）の最大2箇所。"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "detectAndRespondToPrompt() L585で直接呼び出し。2秒間隔ポーリング。"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "relevance": "detectSessionStatus() L145で呼び出し。SF-001トレードオフにより2重呼び出しの一端。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "L99で直接呼び出し。イベント駆動で低頻度。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "prompt-detector.tsモジュール説明の更新対象として影響範囲表に記載済み。"
+    }
+  ]
+}
