@@ -1,0 +1,76 @@
+{
+  "stage": 2,
+  "issue_number": 403,
+  "applied_findings": [
+    {
+      "severity": "must_fix",
+      "id": "MF-1",
+      "description": "実装場所「dist/server/server.js」は不正確。distはビルド成果物であり、ソースファイルを記載すべき。",
+      "action": "dist/server/server.jsへの参照を削除し、実装場所をscripts/build-and-start.shに一本化。実装タスクを全てbuild-and-start.sh内の実装に修正。"
+    },
+    {
+      "severity": "must_fix",
+      "id": "MF-2",
+      "description": "サーバー起動経路が複数存在するが、ローテーション対象がbuild-and-start.sh --daemon起動時のlogs/server.logに限定されることが未記載。",
+      "action": "概要セクションにスコープを追加。build-and-start.sh --daemonのみが対象であること、CLI（commandmate start --daemon）はstdio:'ignore'でlogs/server.logを使用しないこと、CLI対応は別Issueとすることを明記。"
+    },
+    {
+      "severity": "must_fix",
+      "id": "MF-3",
+      "description": "受入条件「ローテーション中のログ書き込みに影響がないこと」が曖昧で検証方法が不明。",
+      "action": "受入条件を「ローテーションはサーバー起動前（nohup実行前）に実行されるため、実行中のサーバープロセスのログ書き込みには影響しないこと」に具体化。設計方針セクションにrename方式が安全である理由を明記。"
+    },
+    {
+      "severity": "should_fix",
+      "id": "SF-1",
+      "description": "「サーバー起動時または日次で」のローテーション実行タイミングが曖昧。日次実行にはcron等の外部メカニズムが必要。",
+      "action": "ローテーション実行タイミングを「サーバー起動時」に一本化。日次ローテーションは将来の拡張として別Issueで検討する旨をblockquoteで明記。"
+    },
+    {
+      "severity": "should_fix",
+      "id": "SF-2",
+      "description": "PRODUCTION_CHECKLIST.mdにLog rotation項目があるが、実装後の更新が必要。",
+      "action": "実装タスクに「docs/en/internal/PRODUCTION_CHECKLIST.md の Log rotation 項目にビルトインローテーションの説明を追加」を追加。受入条件にもPRODUCTION_CHECKLIST.md更新の確認項目を追加。"
+    },
+    {
+      "severity": "should_fix",
+      "id": "SF-3",
+      "description": "2種類のログシステム（logs/server.logとdata/logs/）が存在するが、スコープの境界が暗黙的。",
+      "action": "概要セクションに「data/logs/配下のアプリケーションレベルの会話ログはこのIssueのスコープ外」の注記を追加。"
+    },
+    {
+      "severity": "should_fix",
+      "id": "SF-4",
+      "description": "閾値と世代数が「例: 10MB」「例: 3世代」と未確定。定数の配置方針も不明。",
+      "action": "デフォルト値をMAX_LOG_SIZE_MB=10、MAX_LOG_GENERATIONS=3に確定。scripts/build-and-start.sh内のシェル変数として定義する方針を設計方針セクションに明記。環境変数オーバーライドは将来拡張とする旨も記載。"
+    },
+    {
+      "severity": "should_fix",
+      "id": "SF-5",
+      "description": "実装言語の方針が不明確。bashで実装するかTypeScriptで実装するかが未決定。",
+      "action": "設計方針セクションを新設し、実装方式をbashスクリプト方式に決定（scripts/build-and-start.shにrotate_logs()関数を追加）。スコープがbuild-and-start.shに限定されているためシンプルかつ適合する旨を明記。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "severity": "nice_to_have",
+      "id": "NTH-1",
+      "description": "PRODUCTION_CHECKLIST.mdへのリンクがない。",
+      "reason": "SF-2で実装タスクとしてPRODUCTION_CHECKLIST.md更新を追加済みのため、追加リンクは不要と判断。"
+    },
+    {
+      "severity": "nice_to_have",
+      "id": "NTH-2",
+      "description": ".claude/skills/rebuild/SKILL.mdがlogs/server.logを参照しており、影響範囲として認識しておくと良い。",
+      "reason": "ローテーション後もserver.logのファイル名は変わらないため、スキル側の更新は不要。影響は軽微。"
+    },
+    {
+      "severity": "nice_to_have",
+      "id": "NTH-3",
+      "description": "46MB/182,000行に達した運用期間の情報があると閾値の妥当性判断に役立つ。",
+      "reason": "運用期間の情報は現時点で不明であり、Issue更新者が追記すべき内容。閾値10MBの妥当性は別途設計レビューで判断可能。"
+    }
+  ],
+  "github_issue_updated": true,
+  "summary": "must_fix 3件（MF-1: dist参照削除、MF-2: スコープ明確化、MF-3: 受入条件具体化）およびshould_fix 5件（SF-1: タイミング一本化、SF-2: PRODUCTION_CHECKLIST更新タスク追加、SF-3: スコープ外明記、SF-4: デフォルト値確定、SF-5: bash実装方式決定）を全てIssue本文に反映。nice_to_have 3件はスキップ。設計方針セクションの新設、概要のスコープ明確化、レビュー履歴セクションの追加を実施。"
+}

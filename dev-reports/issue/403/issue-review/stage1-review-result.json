@@ -1,0 +1,153 @@
+{
+  "stage": 1,
+  "review_type": "通常",
+  "issue_number": 403,
+  "review_date": "2026-03-03",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "severity": "must_fix",
+        "category": "正確性",
+        "description": "実装場所「dist/server/server.js」は不正確。dist/server/server.jsはビルド成果物であり、ソースファイルはserver.ts（プロジェクトルート）。Issueに記載すべきはsrc側のファイルパスであり、distディレクトリを直接編集する設計は不適切。",
+        "suggestion": "実装場所を「scripts/build-and-start.sh」に一本化するか、「server.ts」（ソースファイル）を明記する。dist/server/server.jsへの言及は削除すること。",
+        "location": "実装タスク セクション - 「scripts/build-and-start.shまたはdist/server/server.js起動時にローテーション実行」",
+        "evidence": "package.jsonの\"start\"スクリプトは\"NODE_ENV=production node dist/server/server.js\"であり、dist/はtsconfig.server.jsonからのビルド出力先。ソースはserver.ts。"
+      },
+      {
+        "id": "MF-2",
+        "severity": "must_fix",
+        "category": "完全性",
+        "description": "サーバー起動経路が複数存在するが、Issueはbuild-and-start.shのみに言及。CLIの「commandmate start --daemon」（src/cli/utils/daemon.ts）はstdio:'ignore'でログファイルに出力せず、フォアグラウンドモードはstdio:'inherit'で親プロセスの標準出力に出力する。ローテーション対象はbuild-and-start.sh --daemonで起動した場合のlogs/server.logのみであることを明記すべき。",
+        "suggestion": "以下を明記: (1) ローテーション対象はbuild-and-start.sh --daemon起動時のlogs/server.logに限定される。(2) CLI（commandmate start --daemon）経由の起動ではlogs/server.logは使用されない。(3) 将来的にCLI daemon起動でもログファイル出力を検討する場合はスコープ外として別Issueにする。",
+        "location": "概要 セクション / 背景・課題 セクション",
+        "evidence": "src/cli/utils/daemon.ts L106: stdio: 'ignore' - CLIデーモンモードではサーバー出力が破棄される。scripts/build-and-start.sh L107: nohup npm start >> \"$LOG_FILE\" 2>&1 & - このスクリプトのみがlogs/server.logに書き込む。"
+      },
+      {
+        "id": "MF-3",
+        "severity": "must_fix",
+        "category": "完全性",
+        "description": "受入条件「ローテーション中のログ書き込みに影響がないこと」が曖昧で検証方法が不明。nohupプロセスがファイルにリダイレクト中にリネーム操作を行うと、プロセスは元のファイルディスクリプタへ書き続ける（inode追従）。サーバー起動時のみのローテーションであれば書き込み中の問題は発生しないが、日次ローテーションを行う場合は設計上の考慮が必要。",
+        "suggestion": "以下のいずれかに変更: (A) 「ローテーションはサーバー起動時のみ実行し、実行中のサーバープロセスには影響しない」と明記（現在の設計で最も安全）。(B) 日次ローテーションを行う場合は、copytruncate方式（コピー後に元ファイルをtruncate）の採用を明記し、受入条件を「ローテーション中も新規ログが欠損しないこと」に具体化する。",
+        "location": "受入条件 セクション - 「ローテーション中のログ書き込みに影響がないこと」"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "severity": "should_fix",
+        "category": "明確性",
+        "description": "「サーバー起動時または日次で」とあるが、ローテーション実行タイミングの設計判断が曖昧。build-and-start.shはサーバー起動時に実行されるスクリプトであり、日次実行にはcronなどの外部メカニズムが必要。両方を実装するのか、起動時のみかを明確にすべき。",
+        "suggestion": "「サーバー起動時にログファイルサイズをチェックし、閾値超過時にローテーションを実行する」に一本化し、日次ローテーションは「将来の拡張（Nice to Have）」として分離する。あるいは、日次も含める場合はcron設定の手順をタスクに追加する。",
+        "location": "提案する解決策 セクション - 「サーバー起動時または日次で」"
+      },
+      {
+        "id": "SF-2",
+        "severity": "should_fix",
+        "category": "整合性",
+        "description": "PRODUCTION_CHECKLIST.md（docs/en/internal/PRODUCTION_CHECKLIST.md L164）に「Log rotation is configured (optional)」の記載があるが、具体的な設定手順がない。本Issueでログローテーション機能を実装した場合、このチェックリスト項目の更新が必要。",
+        "suggestion": "実装タスクに「PRODUCTION_CHECKLIST.mdのLog rotation項目にビルトインローテーションの説明を追加」を加える。",
+        "location": "実装タスク セクション",
+        "evidence": "docs/en/internal/PRODUCTION_CHECKLIST.md L164: '- [ ] Log rotation is configured (optional)'"
+      },
+      {
+        "id": "SF-3",
+        "severity": "should_fix",
+        "category": "完全性",
+        "description": "2種類のログシステム（logs/server.logとdata/logs/）が存在するが、Issueではスコープの境界が暗黙的。data/logs/（アプリケーションレベルの会話ログ）がスコープ外であることを明記しないと、実装者が混乱する可能性がある。",
+        "suggestion": "背景・課題セクションに「注: data/logs/配下のアプリケーションレベルの会話ログはこのIssueのスコープ外」を追記する。",
+        "location": "背景・課題 セクション",
+        "evidence": "src/config/log-config.tsのgetLogDir()はdata/logs/を返す。scripts/build-and-start.shはlogs/server.logに書き込む。"
+      },
+      {
+        "id": "SF-4",
+        "severity": "should_fix",
+        "category": "技術的妥当性",
+        "description": "閾値と世代数が「例: 10MB」「例: 3世代」と記載されており、設計判断が未確定。これらは環境変数やハードコード定数として設定するかの方針も不明。",
+        "suggestion": "以下を明記: (1) デフォルト値を確定（例: MAX_LOG_SIZE=10MB, MAX_LOG_GENERATIONS=3）。(2) 環境変数でのオーバーライドをサポートするか否か（初期実装はハードコード定数で十分、環境変数対応は将来拡張とする選択肢もある）。(3) 定数の配置場所（例: scripts/build-and-start.sh内のシェル変数、またはsrc/config/log-config.tsに追加）。",
+        "location": "提案する解決策 セクション / 実装タスク セクション"
+      },
+      {
+        "id": "SF-5",
+        "severity": "should_fix",
+        "category": "完全性",
+        "description": "実装言語の方針が不明確。build-and-start.shはbashスクリプトであるため、ローテーション処理をbashで実装するのか、TypeScript（server.tsの起動前処理）で実装するのかによって実装内容が大きく異なる。",
+        "suggestion": "実装方針として以下のいずれかを明記: (A) bashスクリプト方式: build-and-start.shにrotate_logs()関数を追加（シンプル、外部依存なし）。(B) TypeScript方式: server.ts起動前またはsrc/lib/に専用モジュールを追加（テスタビリティが高い）。(C) 両方: build-and-start.sh用のbash実装 + CLI(commandmate start)用の将来TypeScript実装。推奨: スコープがbuild-and-start.shに限定されているなら(A)が最もシンプル。",
+        "location": "実装タスク セクション"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "severity": "nice_to_have",
+        "category": "完全性",
+        "description": "PRODUCTION_CHECKLIST.mdへのリンクがない。ログローテーションが運用チェックリストで言及されており、関連ドキュメントとしてリンクすると有用。",
+        "suggestion": "Issueの末尾に「関連ドキュメント: docs/en/internal/PRODUCTION_CHECKLIST.md」を追加する。",
+        "location": "Issue本文"
+      },
+      {
+        "id": "NTH-2",
+        "severity": "nice_to_have",
+        "category": "完全性",
+        "description": ".claude/skills/rebuild/SKILL.mdがlogs/server.logを参照している。ローテーション後のログファイル名が変わる場合（server.log.1等）、このスキルドキュメントの更新は不要だが、ローテーション動作について把握しておくと良い。",
+        "suggestion": "影響範囲として.claude/skills/rebuild/SKILL.mdを認識しておく旨を記載する。",
+        "location": "Issue本文"
+      },
+      {
+        "id": "NTH-3",
+        "severity": "nice_to_have",
+        "category": "明確性",
+        "description": "「実測で46MB/182,000行に達しており」の数値について、どの程度の運用期間で到達したかの情報があると、ローテーション閾値の妥当性判断に役立つ。",
+        "suggestion": "可能であれば運用期間（例: 「X週間の運用で」）を追記する。",
+        "location": "背景・課題 セクション"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_count": 3,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "overall_quality": "fair",
+    "comment": "課題の背景と目的は明確で、解決すべき問題は実在する。ただし、実装場所の不正確な記載（dist/server/server.js）、複数のサーバー起動経路の未整理、ローテーション実行タイミングの曖昧さ、受入条件の検証困難さなど、実装に入る前に解決すべき問題が複数存在する。特にMF-1（実装場所の誤り）とMF-2（起動経路の整理）は実装方針の根幹に関わるため、優先的に対応すべき。"
+  },
+  "code_references": [
+    {
+      "file": "scripts/build-and-start.sh",
+      "relevance": "ローテーション実装の主要対象ファイル。L17でLOG_FILE定義、L107でnohup追記"
+    },
+    {
+      "file": "server.ts",
+      "relevance": "カスタムNext.jsサーバー。dist/server/server.jsにビルドされる。TypeScript方式の場合の実装候補"
+    },
+    {
+      "file": "src/config/log-config.ts",
+      "relevance": "data/logs/のログ設定。スコープ外だが混同防止のため参照"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "CLIデーモンモード。stdio:'ignore'でlogs/server.logに非出力。起動経路の整理に関連"
+    },
+    {
+      "file": "scripts/stop-server.sh",
+      "relevance": "サーバー停止スクリプト。同じLOG_DIR/PID_FILE構成を使用"
+    },
+    {
+      "file": "package.json",
+      "relevance": "\"start\"スクリプトがdist/server/server.jsを実行。ビルドフロー理解に必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/en/internal/PRODUCTION_CHECKLIST.md",
+      "relevance": "L164にLog rotation項目あり。実装後の更新が必要"
+    },
+    {
+      "file": ".claude/skills/rebuild/SKILL.md",
+      "relevance": "logs/server.logを参照。ローテーション導入の影響範囲"
+    },
+    {
+      "file": "docs/user-guide/cli-setup-guide.md",
+      "relevance": "logs/server.logのtailコマンドを記載。ローテーション導入時の更新候補"
+    }
+  ]
+}

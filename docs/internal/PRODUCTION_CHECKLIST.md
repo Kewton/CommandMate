@@ -161,7 +161,7 @@ commandmate start --daemon
   ```bash
   ./scripts/status.sh
   ```
-- [ ] ログのローテーション設定がされている（オプション）
+- [x] ログのローテーション設定がされている（ビルトイン: `scripts/build-and-start.sh`が起動時に`logs/server.log`のサイズが10MBを超えた場合にローテーション実行、3世代保持）
 
 ### 9. バックアップ
 

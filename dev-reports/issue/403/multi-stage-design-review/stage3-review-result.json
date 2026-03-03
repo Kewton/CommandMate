@@ -1,0 +1,114 @@
+{
+  "stage": 3,
+  "review_type": "影響範囲",
+  "issue_number": 403,
+  "findings": [
+    {
+      "severity": "should_fix",
+      "category": "rebuild SKILL への影響",
+      "description": ".claude/skills/rebuild/SKILL.md は ./scripts/stop.sh && ./scripts/build-and-start.sh --daemon を実行する。build-and-start.sh に rotate_logs() が追加されることで、rebuild 実行時にもログローテーションが行われるが、この副作用について設計方針書に記載がない。rebuild は運用中に頻繁に呼び出されるため、ローテーションが意図通り動作するか（特に stop.sh でサーバー停止後、nohup 前にローテーションが走る点）について影響分析に含めるべきである。",
+      "suggestion": "セクション2「影響を受けるファイル」または「影響を受けないファイル」に .claude/skills/rebuild/SKILL.md を追加し、rebuild SKILL が build-and-start.sh を呼び出すため、rebuild 実行時にもローテーションが行われることを明記する。rebuild の stop.sh -> build-and-start.sh --daemon フローにおいて、stop 直後の server.log が閾値を超過していればローテーションされることを確認済みである旨を記載する。",
+      "location": "セクション2 影響を受けないファイル（確認済み）テーブル",
+      "affected_files": [".claude/skills/rebuild/SKILL.md"]
+    },
+    {
+      "severity": "should_fix",
+      "category": "logs.sh の認知的影響",
+      "description": "設計方針書はセクション2で logs.sh を「PM2/systemd専用、server.log非参照」として影響なしと記載し、セクション10で将来の拡張ポイント4として logs.sh 対応を挙げている。しかし、ローテーション導入後は server.log.1, server.log.2, server.log.3 が logs/ ディレクトリに生成される。logs.sh は現状 PM2/systemd 以外のケースで No logs found と表示するため、build-and-start.sh --daemon で運用するユーザーにとって server.log の確認手段は build-and-start.sh の出力メッセージ (tail -f) に依存している。ローテーション後の過去ログ (server.log.1 等) にユーザーがアクセスする方法についての認知が設計方針書に不足している。",
+      "suggestion": "セクション2の影響を受けないファイルの logs.sh 行に、ローテーション済みファイル (server.log.1 等) の参照手段が現状提供されていない点を認知事項として追記する。または、セクション10 将来の拡張ポイント4の説明を「server.log のローテーション済みファイル (.1, .2, .3) の一覧・参照サポート」に具体化する。",
+      "location": "セクション2 影響を受けないファイル - logs.sh 行、セクション10 拡張ポイント4",
+      "affected_files": ["scripts/logs.sh"]
+    },
+    {
+      "severity": "should_fix",
+      "category": "stop-server.sh のログ参照パターン",
+      "description": "stop-server.sh はサーバー起動失敗時に Check logs: $LOG_FILE というメッセージを表示しない（build-and-start.sh L121 が表示する）。しかし、build-and-start.sh L118 で tail -f $LOG_FILE と案内される。ローテーション実行直後は server.log が存在しない状態（nohup により新規作成されるまで）が一瞬発生する。build-and-start.sh 自体の L118 案内は nohup 実行後なので問題ないが、ローテーション後に server.log が空で新規作成される点について、設計方針書の「server.log は nohup により新規作成される」(セクション4-4結果) のみの記載では、ユーザーが tail -f で監視中に混乱する可能性がある。ただし、ローテーションはサーバー起動前（nohup 前）に実行されるため、実運用上の影響は軽微。",
+      "suggestion": "セクション4-4のローテーション動作フローの「結果」に、server.log はローテーション直後には存在せず、デーモンモードでは nohup 実行時に >> リダイレクトにより自動的に新規作成される旨を明確化する。これは既存の記載とほぼ同内容だが、「存在しない期間がある」点を強調することで、運用者の理解を助ける。",
+      "location": "セクション4-4 ローテーション動作フロー - 結果",
+      "affected_files": ["scripts/build-and-start.sh"]
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "DEPLOYMENT.md への影響",
+      "description": "docs/DEPLOYMENT.md (日本語版) と docs/en/DEPLOYMENT.md (英語版) の両方が build-and-start.sh --daemon を参照している（L81: setup.sh が自動実行するステップ4として）。ローテーション機能追加後も build-and-start.sh の呼び出しインターフェース（引数、終了コード）は変更されないため機能的な影響はないが、DEPLOYMENT.md はログローテーションについて一切触れていない。設計方針書はドキュメント影響として PRODUCTION_CHECKLIST のみを挙げており、DEPLOYMENT.md を言及していない。",
+      "suggestion": "セクション2の影響を受けないファイルに docs/DEPLOYMENT.md と docs/en/DEPLOYMENT.md を追加し、build-and-start.sh を参照しているが呼び出しインターフェースに変更がないため影響なしである旨を記載する。",
+      "location": "セクション2 影響を受けないファイル（確認済み）テーブル",
+      "affected_files": ["docs/DEPLOYMENT.md", "docs/en/DEPLOYMENT.md"]
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "setup.sh / setup-env.sh への間接影響",
+      "description": "scripts/setup.sh (L118) は ./scripts/build-and-start.sh --daemon を直接呼び出す。scripts/setup-env.sh (L356) はログメッセージで build-and-start.sh --daemon の実行を案内する。初回セットアップ時にはまだ server.log が存在しないため、rotate_logs() は空振りするが、2回目以降の setup.sh 実行時にはローテーションが行われる可能性がある。設計方針書の影響を受けないファイルリストにこれらのスクリプトが含まれていない。",
+      "suggestion": "セクション2の影響を受けないファイルに scripts/setup.sh と scripts/setup-env.sh を追加し、setup.sh は build-and-start.sh を呼び出すが、呼び出しインターフェースが変わらないため影響なし（初回セットアップ時は server.log 未存在で空振り、2回目以降はローテーション恩恵を受ける）と記載する。",
+      "location": "セクション2 影響を受けないファイル（確認済み）テーブル",
+      "affected_files": ["scripts/setup.sh", "scripts/setup-env.sh"]
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "CI/CD パイプラインへの影響",
+      "description": ".github/workflows/ci-pr.yml と .github/workflows/publish.yml は build-and-start.sh を呼び出さず、npm run lint / npm run test:unit / npm run build 等を直接実行する。設計方針書ではCI/CDへの影響について言及がないが、Bash スクリプトの変更は CI パイプラインでのシェルスクリプトテスト（shellcheck等）に影響する可能性がある。ただし、現在のCIにはshellcheckは含まれていないため、実影響はない。",
+      "suggestion": "セクション8 テスト方針に、CI/CDパイプライン（ci-pr.yml, publish.yml）は build-and-start.sh を呼び出さないため影響なしである旨を一文追記する。",
+      "location": "セクション8 テスト方針",
+      "affected_files": [".github/workflows/ci-pr.yml", ".github/workflows/publish.yml"]
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "既存テスト（Vitest/E2E）への影響",
+      "description": "設計方針書セクション8はVitest（TypeScript）がシェルスクリプトのテストに不適であることに言及し、手動テストを主としている。既存のVitestテスト（tests/unit/, tests/integration/）およびPlaywright E2Eテストにおいて、build-and-start.sh や server.log を参照するテストケースが存在しないことを確認した。これにより、既存テストへの影響はゼロであるが、設計方針書にはこの確認結果が明示されていない。",
+      "suggestion": "セクション8 テスト方針に「既存のVitest単体テスト・結合テスト、Playwright E2Eテストは build-and-start.sh および server.log を参照していないため、影響なし」と明記する。",
+      "location": "セクション8 テスト方針",
+      "affected_files": []
+    },
+    {
+      "severity": "nice_to_have",
+      "category": ".gitignore の確認",
+      "description": "設計方針書セクション2の影響を受けないファイルで .gitignore に触れており、logs/ が既に除外済みと記載している。.gitignore を確認したところ、L52 に logs/ が存在し、server.log も L46 に個別に記載されている。server.log.1, server.log.2, server.log.3 については logs/ ディレクトリ配下であれば logs/ パターンでカバーされる。また、server.log は L46 でプロジェクトルートレベルでも除外されている。設計方針書の記載は正確である。",
+      "suggestion": "対応不要。設計方針書の記載は正確であることを確認した。",
+      "location": "セクション2 影響を受けないファイル - .gitignore 行",
+      "affected_files": [".gitignore"]
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "restart.sh の影響分析の正確性確認",
+      "description": "Stage 1 で指摘され修正済みの restart.sh の影響分析（SF-3）を再確認した。restart.sh は PM2 存在時は pm2 restart、PM2 非存在時は ./scripts/stop.sh + ./scripts/start.sh を呼び出す。start.sh は PM2 存在時に pm2 start、PM2 非存在時に npm start を直接実行する。いずれの経路も build-and-start.sh を呼び出さないため影響なしという設計方針書の分析は正確である。",
+      "suggestion": "対応不要。設計方針書の記載は正確であることを確認した。",
+      "location": "セクション2 影響を受けないファイル - restart.sh 行",
+      "affected_files": ["scripts/restart.sh"]
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 6,
+    "overall_quality": "good"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "status": "conditionally_approved",
+  "score": 4,
+  "reviewed_files": [
+    "dev-reports/design/issue-403-server-log-rotation-design-policy.md",
+    "scripts/build-and-start.sh",
+    "scripts/stop-server.sh",
+    "scripts/stop.sh",
+    "scripts/start.sh",
+    "scripts/restart.sh",
+    "scripts/logs.sh",
+    "scripts/setup.sh",
+    "scripts/setup-env.sh",
+    ".claude/skills/rebuild/SKILL.md",
+    "src/cli/utils/daemon.ts",
+    "src/config/log-config.ts",
+    ".gitignore",
+    ".github/workflows/ci-pr.yml",
+    ".github/workflows/publish.yml",
+    "docs/DEPLOYMENT.md",
+    "docs/en/DEPLOYMENT.md",
+    "docs/internal/PRODUCTION_CHECKLIST.md",
+    "docs/en/internal/PRODUCTION_CHECKLIST.md"
+  ],
+  "timestamp": "2026-03-03T20:10:00Z"
+}

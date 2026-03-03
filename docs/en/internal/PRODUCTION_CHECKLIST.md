@@ -161,7 +161,7 @@ For contributors or self-building, see the [Deployment Guide](../DEPLOYMENT.md#d
   ```bash
   ./scripts/status.sh
   ```
-- [ ] Log rotation is configured (optional)
+- [x] Log rotation is configured (built-in: `scripts/build-and-start.sh` rotates `logs/server.log` at startup when size exceeds 10MB, keeping 3 generations)
 
 ### 9. Backup
 
