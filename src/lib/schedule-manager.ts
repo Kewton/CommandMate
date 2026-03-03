@@ -1,6 +1,7 @@
 /**
  * Schedule Manager
  * Issue #294: Manages scheduled execution of claude -p commands
+ * Issue #409: Performance optimization with mtime caching and batch upsert
  *
  * Uses a single timer to periodically scan all worktrees for CMATE.md changes
  * and execute scheduled tasks via croner cron expressions.
@@ -9,15 +10,19 @@
  * - globalThis for hot reload persistence (same as auto-yes-manager.ts)
  * - Single timer for all worktrees (60 second polling interval)
  * - SIGKILL fire-and-forget for stopAllSchedules (< 1ms, within 3s graceful shutdown)
+ * - mtime caching to skip unchanged CMATE.md files (Issue #409)
  *
  * [S3-001] stopAllSchedules() uses synchronous process.kill for immediate cleanup
  * [S3-010] initScheduleManager() is called after initializeWorktrees()
  */
 
 import { randomUUID } from 'crypto';
+import { statSync } from 'fs';
+import path from 'path';
 import { Cron } from 'croner';
 import { readCmateFile, parseSchedulesSection } from './cmate-parser';
 import { executeClaudeCommand, getActiveProcesses, type ExecuteCommandOptions } from './claude-executor';
+import { CMATE_FILENAME } from '@/config/cmate-constants';
 import type { ScheduleEntry } from '@/types/cmate';
 
 // =============================================================================
@@ -56,12 +61,20 @@ interface ManagerState {
   schedules: Map<string, ScheduleState>;
   /** Whether the manager is initialized */
   initialized: boolean;
+  /** CMATE.md mtime cache keyed by worktree path, value is mtimeMs */
+  cmateFileCache: Map<string, number>;
 }
 
 /** DB row shape for worktree queries */
 interface WorktreeRow {
   id: string;
   path: string;
+}
+
+/** DB row shape for schedule ID and name lookup */
+interface ScheduleIdNameRow {
+  id: string;
+  name: string;
 }
 
 /** DB row shape for schedule ID lookup */
@@ -90,6 +103,7 @@ function getManagerState(): ManagerState {
       timerId: null,
       schedules: new Map(),
       initialized: false,
+      cmateFileCache: new Map(),
     };
   }
   return globalThis.__scheduleManagerStates;
@@ -113,6 +127,34 @@ function getLazyDbInstance(): ReturnType<typeof import('./db-instance').getDbIns
 }
 
 // =============================================================================
+// CMATE.md mtime Helper
+// =============================================================================
+
+/**
+ * Get the modification time (mtimeMs) of the CMATE.md file in a worktree directory.
+ *
+ * @param worktreePath - Path to the worktree directory
+ * @returns mtimeMs value, or null if the file does not exist or cannot be read
+ */
+function getCmateMtime(worktreePath: string): number | null {
+  try {
+    const filePath = path.join(worktreePath, CMATE_FILENAME);
+    const stats = statSync(filePath);
+    return stats.mtimeMs;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error as NodeJS.ErrnoException).code === 'ENOENT'
+    ) {
+      return null;
+    }
+    console.warn('[schedule-manager] Failed to stat CMATE.md:', error);
+    return null;
+  }
+}
+
+// =============================================================================
 // DB Operations
 // =============================================================================
 
@@ -132,41 +174,71 @@ function getAllWorktrees(): WorktreeRow[] {
 }
 
 /**
- * Upsert a schedule entry into the database.
- * If a schedule with the same worktree_id and name exists, it is updated.
- * Otherwise, a new schedule is created.
+ * Batch upsert schedule entries into the database.
+ * Replaces the previous per-entry upsertSchedule() function.
+ * Uses a single SELECT to fetch existing schedules, then a transaction
+ * for all INSERT/UPDATE operations.
  *
- * @param worktreeId - The worktree ID to associate the schedule with
- * @param entry - The schedule entry from CMATE.md
- * @returns The schedule ID (existing or newly created)
+ * @param worktreeId - The worktree ID to associate schedules with
+ * @param entries - The schedule entries from CMATE.md
+ * @returns Array of schedule IDs (existing or newly created), in the same order as entries
  */
-function upsertSchedule(
+export function batchUpsertSchedules(
   worktreeId: string,
-  entry: ScheduleEntry
-): string {
+  entries: ScheduleEntry[]
+): string[] {
+  if (entries.length === 0) return [];
+
   const db = getLazyDbInstance();
   const now = Date.now();
 
-  // Check if schedule already exists
-  const existing = db.prepare(
-    'SELECT id FROM scheduled_executions WHERE worktree_id = ? AND name = ?'
-  ).get(worktreeId, entry.name) as ScheduleIdRow | undefined;
+  // Bulk fetch existing schedules for this worktree
+  const existingRows = db.prepare(
+    'SELECT id, name FROM scheduled_executions WHERE worktree_id = ?'
+  ).all(worktreeId) as ScheduleIdNameRow[];
 
-  if (existing) {
-    db.prepare(`
-      UPDATE scheduled_executions
-      SET message = ?, cron_expression = ?, cli_tool_id = ?, enabled = ?, updated_at = ?
-      WHERE id = ?
-    `).run(entry.message, entry.cronExpression, entry.cliToolId, entry.enabled ? 1 : 0, now, existing.id);
-    return existing.id;
+  const existingByName = new Map<string, string>();
+  for (const row of existingRows) {
+    existingByName.set(row.name, row.id);
   }
 
-  const id = randomUUID();
-  db.prepare(`
+  const resultIds: string[] = [];
+
+  const updateStmt = db.prepare(`
+    UPDATE scheduled_executions
+    SET message = ?, cron_expression = ?, cli_tool_id = ?, enabled = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const insertStmt = db.prepare(`
     INSERT INTO scheduled_executions (id, worktree_id, name, message, cron_expression, cli_tool_id, enabled, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, worktreeId, entry.name, entry.message, entry.cronExpression, entry.cliToolId, entry.enabled ? 1 : 0, now, now);
-  return id;
+  `);
+
+  const runTransaction = db.transaction(() => {
+    for (const entry of entries) {
+      const existingId = existingByName.get(entry.name);
+
+      if (existingId) {
+        updateStmt.run(
+          entry.message, entry.cronExpression, entry.cliToolId,
+          entry.enabled ? 1 : 0, now, existingId
+        );
+        resultIds.push(existingId);
+      } else {
+        const id = randomUUID();
+        insertStmt.run(
+          id, worktreeId, entry.name, entry.message, entry.cronExpression,
+          entry.cliToolId, entry.enabled ? 1 : 0, now, now
+        );
+        resultIds.push(id);
+      }
+    }
+  });
+
+  runTransaction();
+
+  return resultIds;
 }
 
 /**
@@ -359,6 +431,9 @@ async function executeSchedule(state: ScheduleState): Promise<void> {
  * Sync schedules from CMATE.md files for all worktrees.
  * Reads CMATE.md from each worktree, upserts schedules to DB,
  * creates/updates cron jobs, and removes stale schedules.
+ *
+ * Issue #409: Uses mtime caching to skip unchanged CMATE.md files
+ * and batchUpsertSchedules() for efficient DB operations.
  */
 function syncSchedules(): void {
   const manager = getManagerState();
@@ -369,6 +444,34 @@ function syncSchedules(): void {
 
   for (const worktree of worktrees) {
     try {
+      // Issue #409: Check CMATE.md mtime for change detection
+      const mtime = getCmateMtime(worktree.path);
+      const cachedMtime = manager.cmateFileCache.get(worktree.path);
+
+      if (mtime === null) {
+        // CMATE.md does not exist (or was deleted)
+        if (cachedMtime !== undefined) {
+          // Was previously cached - remove cache entry
+          // Do NOT add to activeScheduleIds so stale schedules are cleaned up
+          manager.cmateFileCache.delete(worktree.path);
+        }
+        continue;
+      }
+
+      // If mtime matches cached value, skip DB operations for this worktree
+      if (cachedMtime !== undefined && cachedMtime === mtime) {
+        // File unchanged - re-add existing schedule IDs to keep them active
+        for (const [scheduleId, state] of manager.schedules) {
+          if (state.worktreeId === worktree.id) {
+            activeScheduleIds.add(scheduleId);
+          }
+        }
+        continue;
+      }
+
+      // Update mtime cache
+      manager.cmateFileCache.set(worktree.path, mtime);
+
       const config = readCmateFile(worktree.path);
       if (!config) continue;
 
@@ -377,13 +480,18 @@ function syncSchedules(): void {
 
       const entries = parseSchedulesSection(scheduleRows);
 
-      for (const entry of entries) {
+      // Issue #409: Batch upsert all entries for this worktree
+      const scheduleIds = batchUpsertSchedules(worktree.id, entries);
+
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const scheduleId = scheduleIds[i];
+
         if (manager.schedules.size >= MAX_CONCURRENT_SCHEDULES) {
           console.warn(`[schedule-manager] MAX_CONCURRENT_SCHEDULES (${MAX_CONCURRENT_SCHEDULES}) reached`);
           return;
         }
 
-        const scheduleId = upsertSchedule(worktree.id, entry);
         activeScheduleIds.add(scheduleId);
 
         // Check if this schedule already has a running cron job
@@ -500,6 +608,7 @@ export function stopAllSchedules(): void {
     }
   }
   manager.schedules.clear();
+  manager.cmateFileCache.clear();
 
   // Kill all active child processes (fire-and-forget SIGKILL)
   const activeProcesses = getActiveProcesses();
