@@ -106,7 +106,7 @@ if [ "$1" = "--daemon" ] || [ "$1" = "-d" ]; then
     # Start server in background with nohup
     nohup npm start >> "$LOG_FILE" 2>&1 &
     SERVER_PID=$!
-    echo $SERVER_PID > "$PID_FILE" && chmod 600 "$PID_FILE"
+    echo $SERVER_PID > "$PID_FILE" && chmod 600 "$PID_FILE"  # [S4-003]
 
     # Wait a moment and check if server started
     sleep 3

@@ -1,0 +1,31 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 0,
+    "after_coverage": 0,
+    "note": "Shell scripts only - no unit test coverage metrics applicable. All 206 test files (4381 tests) pass before and after refactoring."
+  },
+  "refactorings_applied": [
+    "Added [S4-003] design ID comment to build-and-start.sh PID file chmod 600 line for traceability to design policy section 5.4",
+    "Added [C2-003] design ID comment to stop-server.sh Step 3 final check section for traceability to design policy review feedback"
+  ],
+  "files_changed": [
+    "scripts/build-and-start.sh",
+    "scripts/stop-server.sh"
+  ],
+  "static_analysis": {
+    "bash_syntax_errors_before": 0,
+    "bash_syntax_errors_after": 0,
+    "unit_tests_passed_before": 4381,
+    "unit_tests_passed_after": 4381
+  },
+  "analysis_summary": {
+    "design_id_comments": "All design IDs from the design policy (S4-001, D1-002, D1-004, D1-006, S4-003, S4-004, C2-003) are now present in the appropriate script locations. Two missing references were added.",
+    "pid_pipeline_consistency": "All 6 PID pipeline instances across the 3 scripts use the identical pattern: lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true. The || true suffix is consistently present per D1-002.",
+    "port_validation_consistency": "All 3 scripts use identical bash built-in pattern matching for port validation per S4-001, with fixed-string error messages per S4-005.",
+    "stop_server_comments": "Header comment says 'Stops the production server' without hardcoded port number reference. CM_PORT support is correctly implemented.",
+    "no_functional_changes": "Only comment additions were made. No behavioral changes to the scripts."
+  },
+  "commits": [],
+  "message": "Refactoring complete. The implementation quality was high - only two minor design ID comment additions were needed. All design policy checklist items are properly implemented. PID pipeline patterns are fully consistent across all three scripts. No functional changes were required."
+}

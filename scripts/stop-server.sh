@@ -66,7 +66,7 @@ fi
 # Wait a moment and verify
 sleep 1
 
-# Step 3: Final check - make sure port is free
+# Step 3: Final check - make sure port is free [C2-003]
 # At this point SIGTERM->SIGKILL stages already attempted, SIGKILL is justified
 REMAINING=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)
 if [ -n "$REMAINING" ]; then
