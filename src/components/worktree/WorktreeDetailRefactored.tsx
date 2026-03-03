@@ -17,7 +17,9 @@
 'use client';
 
 import React, { useEffect, useCallback, useMemo, useState, memo, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSidebarContext } from '@/contexts/SidebarContext';
@@ -36,8 +38,28 @@ import { SearchBar } from '@/components/worktree/SearchBar';
 import { useFileSearch } from '@/hooks/useFileSearch';
 import { LeftPaneTabSwitcher, type LeftPaneTab } from '@/components/worktree/LeftPaneTabSwitcher';
 import { FileViewer } from '@/components/worktree/FileViewer';
-import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
 import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
+
+/**
+ * Dynamic import of MarkdownEditor with SSR disabled.
+ * highlight.js / rehype-highlight require browser APIs during rendering.
+ * Uses .then() pattern because MarkdownEditor is a named export.
+ */
+const MarkdownEditor = dynamic(
+  () =>
+    import('@/components/worktree/MarkdownEditor').then((mod) => ({
+      default: mod.MarkdownEditor,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full bg-white text-gray-400">
+        <Loader2 className="animate-spin h-6 w-6 mr-2" />
+        <span>Loading editor...</span>
+      </div>
+    ),
+  }
+);
 import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/config/uploadable-extensions';
 import { ToastContainer, useToast } from '@/components/common/Toast';
 import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';

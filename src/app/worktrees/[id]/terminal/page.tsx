@@ -6,9 +6,30 @@
 'use client';
 
 import React, { useState } from 'react';
-import { TerminalComponent } from '@/components/Terminal';
-import { ArrowLeft, Terminal, Monitor, Code } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { ArrowLeft, Terminal, Monitor, Code, Loader2 } from 'lucide-react';
+
+/**
+ * Dynamic import of TerminalComponent with SSR disabled.
+ * xterm.js requires browser APIs (DOM, canvas) that are not available during SSR.
+ * Uses .then() pattern because TerminalComponent is a named export.
+ */
+const TerminalComponent = dynamic(
+  () =>
+    import('@/components/Terminal').then((mod) => ({
+      default: mod.TerminalComponent,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full bg-gray-900 text-gray-400">
+        <Loader2 className="animate-spin h-6 w-6 mr-2" />
+        <span>Loading terminal...</span>
+      </div>
+    ),
+  }
+);
 
 export default function TerminalPage({
   params
