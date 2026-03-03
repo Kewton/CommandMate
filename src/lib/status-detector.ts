@@ -155,16 +155,11 @@ export function detectSessionStatus(
 
   // 1. Interactive prompt detection (highest priority)
   // This includes yes/no prompts, multiple choice, and approval prompts
-  // Issue #235: Pass full cleanOutput instead of 15-line window.
-  // detectPrompt() has its own internal 50-line scan window for multiple_choice
-  // and 20-line window for yes/no patterns. Passing only 15 lines caused
-  // AskUserQuestion-format prompts (>15 lines with option descriptions) to be
-  // missed, preventing MobilePromptSheet from appearing.
   const promptOptions = buildDetectPromptOptions(cliToolId);
   // Apply stripBoxDrawing() for Gemini CLI compatibility:
   // Gemini wraps prompts in box-drawing characters (╭╮╰╯│─) which prevent
   // detectPrompt() from recognizing the prompt content.
-  const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
+  const promptDetection = detectPrompt(stripBoxDrawing(lastLines), promptOptions);
   if (promptDetection.isPrompt) {
     return {
       status: 'waiting',
