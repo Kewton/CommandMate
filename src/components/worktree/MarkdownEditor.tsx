@@ -21,6 +21,7 @@
 'use client';
 
 import React, {
+  memo,
   useState,
   useEffect,
   useCallback,
@@ -107,7 +108,7 @@ function getInitialViewMode(initialViewMode?: ViewMode): ViewMode {
  * />
  * ```
  */
-export function MarkdownEditor({
+export const MarkdownEditor = memo(function MarkdownEditor({
   worktreeId,
   filePath,
   onClose,
@@ -986,4 +987,4 @@ export function MarkdownEditor({
   }
 
   return editorContent;
-}
+});

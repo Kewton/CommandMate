@@ -1,0 +1,69 @@
+{
+  "issue_number": 411,
+  "title": "perf: Reactコンポーネントのmemo化・useCallback最適化で不要な再レンダー防止",
+  "design_policy_path": "dev-reports/design/issue-411-react-memo-optimization-design-policy.md",
+  "work_plan_path": "dev-reports/issue/411/work-plan.md",
+  "acceptance_criteria": [
+    "React DevTools Profilerで以下シナリオの再レンダーが削減されていること（手動確認）: (1) ターミナルポーリング更新時にFileViewer（isOpen=false）が再レンダーされないこと、(2) MessageInputのprops（worktreeId/cliToolId/isSessionRunning）が変化しない場合にMessageInput自体が再レンダーされないこと",
+    "各コンポーネントの既存動作に影響がないこと",
+    "既存テストがパスすること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: FileViewer memo化 - export function FileViewer → export const FileViewer = memo(function FileViewer(...))",
+    "Task 1.2: InterruptButton memo化 - export function InterruptButton → export const InterruptButton = memo(function InterruptButton(...))",
+    "Task 1.3: SlashCommandSelector memo化 - export function SlashCommandSelector → export const SlashCommandSelector = memo(function SlashCommandSelector(...))",
+    "Task 1.4: PromptPanel memo化 - export function PromptPanel → export const PromptPanel = memo(function PromptPanel(...))",
+    "Task 1.5: MobilePromptSheet memo化 - export function MobilePromptSheet → export const MobilePromptSheet = memo(function MobilePromptSheet(...))",
+    "Task 1.6: MarkdownEditor memo化 - export function MarkdownEditor → export const MarkdownEditor = memo(function MarkdownEditor(...))",
+    "Task 2.1: MessageInput useCallback化 - 9ハンドラ（handleCompositionStart[], handleCompositionEnd[], handleCommandSelect[], handleCommandCancel[], handleFreeInput[], handleMessageChange[isFreeInputMode], submitMessage[isComposing,message,sending,worktreeId,cliToolId,onMessageSent], handleSubmit[submitMessage], handleKeyDown[showCommandSelector,isFreeInputMode,isComposing,isMobile,submitMessage]）",
+    "Task 2.2: MessageInput memo化 - export function MessageInput → export const MessageInput = memo(function MessageInput(...))",
+    "Task 3.1: WorktreeDetailRefactored rightPane useMemo化 - 6項目依存配列（state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow）",
+    "Task 3.2: WorktreeDetailRefactored leftPane useMemo化 - 27項目依存配列（leftPaneTab, handleLeftPaneTabChange, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange）"
+  ],
+  "implementation_patterns": {
+    "D1_memo_pattern": "export const ComponentName = memo(function ComponentName({ prop1, prop2 }: Props) { ... });",
+    "D2_useCallback_pattern": "const handler = useCallback(() => { ... }, [deps]);",
+    "D3_rightPane_useMemo": "const rightPaneMemo = useMemo(() => (<TerminalDisplay ... />), [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow]);",
+    "D4_leftPane_useMemo": "const leftPaneMemo = useMemo(() => (<div ...>...</div>), [27 items]);"
+  },
+  "target_files": [
+    "src/components/worktree/FileViewer.tsx",
+    "src/components/worktree/InterruptButton.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/PromptPanel.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "test_files_to_verify": [
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "tests/unit/components/worktree/MessageInput.test.tsx",
+    "tests/unit/components/worktree/SlashCommandSelector.test.tsx",
+    "tests/unit/components/worktree/MarkdownEditor.test.tsx",
+    "tests/unit/components/PromptPanel.test.tsx",
+    "tests/unit/components/mobile/MobilePromptSheet.test.tsx",
+    "tests/integration/issue-266-acceptance.test.tsx",
+    "tests/unit/components/app-version-display.test.tsx"
+  ],
+  "implementation_order": [
+    "FileViewer",
+    "InterruptButton",
+    "SlashCommandSelector",
+    "MessageInput (useCallback first, then memo)",
+    "PromptPanel",
+    "MobilePromptSheet",
+    "MarkdownEditor",
+    "WorktreeDetailRefactored (rightPane then leftPane)"
+  ],
+  "key_notes": [
+    "Named export pattern: export const X = memo(function X(...)) - vi.mock互換性のため必須",
+    "handleCompositionStart/End: 依存配列は[]で十分（setIsComposingはuseStateセッター=安定参照）",
+    "handleFreeInput: 依存配列は[]で十分（setTimeout内のtextareaRef.currentはRef=安定参照）",
+    "submitMessage依存配列のonMessageSentはhandleMessageSent→fetchCurrentOutput([worktreeId,actions,state.prompt.visible])チェーンで安定",
+    "WorktreeDetailRefactored leftPane: fileSearchオブジェクト全体ではなく個別プロパティ(query,mode,isSearching,error,setQuery,setMode,clearSearch,results?.results)を依存配列に展開すること",
+    "カスタム比較関数は全コンポーネントで不要",
+    "新規テストは不要（機能変更なし、既存テストで十分）"
+  ],
+  "target_coverage": 80
+}

@@ -1,0 +1,54 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 411,
+  "apply_date": "2026-03-03",
+  "status": "success",
+  "target_file": "dev-reports/design/issue-411-react-memo-optimization-design-policy.md",
+  "design_policy_updated": true,
+  "applied_findings": [
+    {
+      "finding_id": "R1-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "handleFreeInputのuseCallback空依存配列の安全性根拠をSection 4.1に追記。textareaRefがRefオブジェクト（安定参照）であること、useStateセッターの安定参照保証をドキュメント化",
+      "section_updated": "Section 4.1 MessageInput"
+    },
+    {
+      "finding_id": "R1-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "leftPaneのuseMemo依存配列27項目の安定性根拠一覧表をSection D4に追加。各項目の安定性種別（state値/useCallback/props）と根拠を明記。exhaustive-depsルールでの検証も明記",
+      "section_updated": "Section D4 inline JSX抽出パターン (leftPane)"
+    },
+    {
+      "finding_id": "R1-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "FileViewerのmemo化有効性の分析根拠をSection 4.7に追加。4つのprops(isOpen/filePath/worktreeId/onClose)それぞれのshallow comparison安定性を表形式で明記",
+      "section_updated": "Section 4.7 FileViewer"
+    },
+    {
+      "finding_id": "R1-008",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "submitMessageのonMessageSent参照安定性チェーンをSection 4.1に追加。handleMessageSent -> fetchMessages/fetchCurrentOutput -> useCallback([worktreeId, actions])の依存チェーンを表形式で明記",
+      "section_updated": "Section 4.1 MessageInput"
+    }
+  ],
+  "skipped": [],
+  "sections_updated": [
+    "Section 4.1 MessageInput (R1-001, R1-008 補足追記)",
+    "Section D4 inline JSX抽出パターン leftPane (R1-002 安定性根拠一覧表追加)",
+    "Section 4.7 FileViewer (R1-004 memo化有効性分析追加)",
+    "Section 11 レビュー履歴 (新規追加)",
+    "Section 12 レビュー指摘事項サマリー (新規追加)",
+    "Section 13 実装チェックリスト (新規追加)"
+  ],
+  "statistics": {
+    "applied": 4,
+    "skipped": 0,
+    "total": 4
+  },
+  "timestamp": "2026-03-03T14:30:00Z"
+}

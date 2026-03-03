@@ -1,0 +1,44 @@
+{
+  "issue_number": 411,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 80,
+      "tests_total": 4388,
+      "tests_passed": 4388,
+      "tests_failed": 0,
+      "eslint_errors": 0,
+      "typescript_errors": 0,
+      "commits": ["c648ece: perf(react): add memo/useCallback/useMemo to prevent unnecessary re-renders"],
+      "files_changed": [
+        "src/components/worktree/FileViewer.tsx",
+        "src/components/worktree/InterruptButton.tsx",
+        "src/components/worktree/SlashCommandSelector.tsx",
+        "src/components/worktree/MessageInput.tsx",
+        "src/components/worktree/PromptPanel.tsx",
+        "src/components/mobile/MobilePromptSheet.tsx",
+        "src/components/worktree/MarkdownEditor.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_total": 8,
+      "scenarios_passed": 8,
+      "scenarios_failed": 0
+    },
+    "refactor": {
+      "status": "success",
+      "commits": ["c6c26c5: refactor(memo): add maintenance comments for memo dependency arrays"],
+      "changes": [
+        "WorktreeDetailRefactored.tsx: leftPaneMemoにメンテナンスコメント追加（R3-007）",
+        "MessageInput.tsx: handleFreeInputのuseCallback空依存配列安全性根拠コメント追加（R1-001）"
+      ]
+    },
+    "documentation": {
+      "status": "success",
+      "files_updated": ["CLAUDE.md"]
+    }
+  }
+}

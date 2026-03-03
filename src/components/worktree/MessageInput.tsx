@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { useState, FormEvent, useRef, useEffect } from 'react';
+import React, { memo, useState, useCallback, FormEvent, useRef, useEffect } from 'react';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { SlashCommandSelector } from './SlashCommandSelector';
@@ -29,7 +29,7 @@ export interface MessageInputProps {
  * <MessageInput worktreeId="main" onMessageSent={handleRefresh} cliToolId="claude" />
  * ```
  */
-export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRunning = false }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRunning = false }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +64,7 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
   /**
    * Handle message submission
    */
-  const submitMessage = async () => {
+  const submitMessage = useCallback(async () => {
     if (isComposing || !message.trim() || sending) {
       return;
     }
@@ -82,17 +82,17 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
     } finally {
       setSending(false);
     }
-  };
+  }, [isComposing, message, sending, worktreeId, cliToolId, onMessageSent]);
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     await submitMessage();
-  };
+  }, [submitMessage]);
 
   /**
    * Handle composition start (IME starts)
    */
-  const handleCompositionStart = () => {
+  const handleCompositionStart = useCallback(() => {
     setIsComposing(true);
     justFinishedComposingRef.current = false;
 
@@ -100,12 +100,12 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
     if (compositionTimeoutRef.current) {
       clearTimeout(compositionTimeoutRef.current);
     }
-  };
+  }, []);
 
   /**
    * Handle composition end (IME finishes)
    */
-  const handleCompositionEnd = () => {
+  const handleCompositionEnd = useCallback(() => {
     setIsComposing(false);
     justFinishedComposingRef.current = true;
 
@@ -117,31 +117,37 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
     compositionTimeoutRef.current = setTimeout(() => {
       justFinishedComposingRef.current = false;
     }, 300);
-  };
+  }, []);
 
   /**
    * Handle slash command selection
    */
-  const handleCommandSelect = (command: SlashCommand) => {
+  const handleCommandSelect = useCallback((command: SlashCommand) => {
     setMessage(`/${command.name} `);
     setShowCommandSelector(false);
     textareaRef.current?.focus();
-  };
+  }, []);
 
   /**
    * Handle slash command selector cancel
    */
-  const handleCommandCancel = () => {
+  const handleCommandCancel = useCallback(() => {
     setShowCommandSelector(false);
     setIsFreeInputMode(false);
     textareaRef.current?.focus();
-  };
+  }, []);
 
   /**
    * Handle free input mode (Issue #56, #288)
    * Closes selector and carries over filter text as the custom command prefix
+   *
+   * Empty dependency array rationale (R1-001):
+   * - setState functions (setShowCommandSelector, setIsFreeInputMode, setMessage)
+   *   are stable across renders (React guarantee).
+   * - textareaRef is a React ref (stable reference, never reassigned).
+   * - filterText is received as a callback argument, not captured from closure.
    */
-  const handleFreeInput = (filterText: string) => {
+  const handleFreeInput = useCallback((filterText: string) => {
     setShowCommandSelector(false);
     setIsFreeInputMode(true);
     setMessage(filterText ? `/${filterText}` : '/');
@@ -149,12 +155,12 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
     setTimeout(() => {
       textareaRef.current?.focus();
     }, 50);
-  };
+  }, []);
 
   /**
    * Handle message input change
    */
-  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
     setMessage(newValue);
 
@@ -183,12 +189,12 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
     } else {
       setShowCommandSelector(false);
     }
-  };
+  }, [isFreeInputMode]);
 
   /**
    * Handle keyboard shortcuts
    */
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Check for IME composition using keyCode
     // keyCode 229 indicates IME composition in progress
     const { keyCode } = e.nativeEvent;
@@ -223,7 +229,7 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
         void submitMessage();
       }
     }
-  };
+  }, [showCommandSelector, isFreeInputMode, isComposing, isMobile, submitMessage, handleCommandCancel]);
 
   return (
     <div ref={containerRef} className="space-y-2 relative">
@@ -305,4 +311,4 @@ export function MessageInput({ worktreeId, onMessageSent, cliToolId, isSessionRu
       />
     </div>
   );
-}
+});

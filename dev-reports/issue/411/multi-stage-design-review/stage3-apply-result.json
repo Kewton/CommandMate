@@ -1,0 +1,80 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 411,
+  "apply_date": "2026-03-03",
+  "status": "success",
+  "target_file": "dev-reports/design/issue-411-react-memo-optimization-design-policy.md",
+  "design_policy_updated": true,
+  "applied_findings": [
+    {
+      "id": "R3-001",
+      "severity": "should_fix",
+      "title": "integration test (issue-266-acceptance.test.tsx) が影響範囲として未記載",
+      "sections_updated": ["Section 5: テスト戦略 - 確認対象テストファイル", "Section 12: レビュー指摘事項サマリー", "Section 13: 実装チェックリスト"],
+      "status": "reflected",
+      "description": "tests/integration/issue-266-acceptance.test.tsxとtests/unit/components/app-version-display.test.tsxを確認対象テストファイルテーブルに追加。vi.mockによるモジュール全体置換のためmemo化の影響なしである旨を明記。実装チェックリストにも検証項目を追加"
+    },
+    {
+      "id": "R3-002",
+      "severity": "should_fix",
+      "title": "MobileContentコンポーネントのfileSearch props参照不安定性の設計書での未対応",
+      "sections_updated": ["Section 4.8: WorktreeDetailRefactored", "Section 12: レビュー指摘事項サマリー"],
+      "status": "reflected",
+      "description": "Section 4.8に「スコープ外の既知問題」として詳細記載。MobileContentのfileSearchオブジェクト参照不安定性の問題分析、修正案(A)(B)、スコープ判断（本Issueスコープ外・別Issue対応）を明記"
+    },
+    {
+      "id": "R3-003",
+      "severity": "should_fix",
+      "title": "handlePromptRespondのカスケード影響分析が不足",
+      "sections_updated": ["Section 4.4: PromptPanel", "Section 4.5: MobilePromptSheet", "Section 12: レビュー指摘事項サマリー", "Section 13: 実装チェックリスト"],
+      "status": "reflected",
+      "description": "Section 4.4にhandlePromptRespondのカスケード影響チェーン（state.prompt.data変化 -> handlePromptRespond再生成 -> PromptPanel/MobilePromptSheetのonRespond変化 -> memo無効化）を詳細追記。ポーリングサイクルでは影響なしの結論を明記。Section 4.5にはクロスリファレンスを追加。実装チェックリストにも検証項目を追加"
+    }
+  ],
+  "nice_to_have_recorded": [
+    {
+      "id": "R3-004",
+      "title": "handleAutoYesToggleの依存配列にactiveCliTabが含まれ、タブ切替時に再生成される",
+      "section": "nice_to_have項目の記録"
+    },
+    {
+      "id": "R3-005",
+      "title": "MemoExoticComponentへの型変換による外部参照への影響",
+      "section": "nice_to_have項目の記録"
+    },
+    {
+      "id": "R3-006",
+      "title": "React Strict Modeでのdouble renderとmemo化のテスト確認が未記載",
+      "section": "nice_to_have項目の記録"
+    },
+    {
+      "id": "R3-007",
+      "title": "leftPaneMemoの依存配列27項目の将来的なメンテナンスリスク",
+      "section": "nice_to_have項目の記録"
+    },
+    {
+      "id": "R3-008",
+      "title": "SSR/RSC環境への影響が明記されているが確認根拠の補強余地あり",
+      "section": "nice_to_have項目の記録"
+    }
+  ],
+  "skipped": [],
+  "sections_updated": [
+    "Section 4.4: PromptPanel (R3-003 カスケード影響チェーン追加)",
+    "Section 4.5: MobilePromptSheet (R3-003 クロスリファレンス追加)",
+    "Section 4.8: WorktreeDetailRefactored (R3-002 スコープ外既知問題追加)",
+    "Section 5: テスト戦略 (R3-001 テストファイル2件追加)",
+    "Section 11: レビュー履歴 (Stage 3追加)",
+    "Section 12: レビュー指摘事項サマリー (Stage 3テーブル追加)",
+    "Section 12: nice_to_have項目の記録 (R3-004〜R3-008追加)",
+    "Section 13: 実装チェックリスト (R3-001, R3-003検証項目追加)"
+  ],
+  "statistics": {
+    "applied": 3,
+    "skipped": 0,
+    "nice_to_have_recorded": 5,
+    "total": 8
+  },
+  "timestamp": "2026-03-03T00:00:00Z"
+}

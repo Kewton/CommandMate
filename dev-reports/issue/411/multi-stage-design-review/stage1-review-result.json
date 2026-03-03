@@ -1,0 +1,108 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "issue_number": 411,
+  "review_date": "2026-03-03",
+  "status": "conditionally_approved",
+  "score": 4,
+  "summary": "設計方針書は全体的に高品質であり、KISS/DRY/既存パターン踏襲の3原則を明確に定義し、具体的な実装パターンとコンポーネント別設計を提供している。既存プロジェクトのmemo化パターン（export const X = memo(function X(...))）との一貫性も確保されている。ただし、leftPaneのuseMemo依存配列の巨大さに関する設計判断、handleFreeInputのuseCallback化時のsetTimeoutキャプチャ問題、および一部のuseCallback依存配列記載の正確性に改善の余地がある。",
+  "findings": [
+    {
+      "id": "R1-001",
+      "severity": "should_fix",
+      "category": "react_best_practice",
+      "title": "handleFreeInputのuseCallback化でsetTimeoutのrefキャプチャ問題が発生する可能性",
+      "description": "設計書Section 4.1でhandleFreeInputの依存配列を `[]` と記載しているが、現在の実装ではsetTimeout内でtextareaRef.current?.focus()を呼び出している。useCallback([], [])で包んだ場合、textareaRefはRefオブジェクトなので安定参照であり動作上問題ないが、setTimeoutの50ms遅延パターン自体がuseCallback化の効果を減殺する。この点について設計方針書で明示的に言及すべきである。",
+      "location": "設計方針書 Section 4.1 MessageInput - handleFreeInput行",
+      "suggestion": "handleFreeInputのuseCallback化に関する備考として、setTimeout内のRef参照は安定参照であるため空依存配列で安全であることを明記する。"
+    },
+    {
+      "id": "R1-002",
+      "severity": "should_fix",
+      "category": "kiss",
+      "title": "leftPaneのuseMemo依存配列が27項目と巨大で保守性リスクがある",
+      "description": "設計書Section D4のleftPaneMemoの依存配列が27項目に及ぶ。設計書ではこの大きさを認識しつつ「大半のハンドラはuseCallback済みで安定参照」と記載しているが、依存配列の追加・削除時にバグが発生しやすい。特にfileSearch.results?.resultsのオプショナルチェーン参照は、resultsがnullからオブジェクトに変わるたびに再計算を引き起こし、意図した最適化効果が薄れる可能性がある。",
+      "location": "設計方針書 Section D4 (inline JSX抽出パターン leftPane)",
+      "suggestion": "依存配列の各項目が安定参照であることの一覧表を追加するか、fileSearchの安定化されたプロパティのみを依存配列に含めるよう設計を具体化する。また、eslint-plugin-react-hooksのexhaustive-depsルールで検証することを明記する。"
+    },
+    {
+      "id": "R1-003",
+      "severity": "nice_to_have",
+      "category": "dry",
+      "title": "PromptPanelとMobilePromptSheetの内部コンテンツコンポーネントの重複",
+      "description": "PromptPanel内のPromptPanelContentとMobilePromptSheet内のPromptContentは、ほぼ同一のロジック（selectedOption状態管理、handleYesNoClick、handleMultipleChoiceSubmit）を持っている。本Issue(#411)のスコープではないが、これらのmemo化を進める際に共通化の機会がある。設計書では両コンポーネントのmemo化を個別に記載しているが、共通化の検討について言及がない。",
+      "location": "設計方針書 Section 4.4 PromptPanel、Section 4.5 MobilePromptSheet",
+      "suggestion": "現時点では共通化はスコープ外として明示し、将来のリファクタリング候補として記録することを推奨。memo化自体は現設計のまま進めて問題ない。"
+    },
+    {
+      "id": "R1-004",
+      "severity": "should_fix",
+      "category": "react_best_practice",
+      "title": "FileViewerのmemo化効果に関する分析が不完全",
+      "description": "設計書Section 4.7ではFileViewerのmemo化効果について「isOpen=false時の再レンダースキップが主要効果」と記載している。しかし、実装を確認するとFileViewerのpropsのうちfilePathは`fileViewerPath ?? ''`で渡されており、fileViewerPathがnullの場合は毎回空文字列リテラルが生成される。プリミティブ値の''はshallow comparisonで同一と判定されるため問題ないが、onCloseがuseCallback済みであることの確認が重要。実装を確認するとhandleFileViewerCloseはuseCallback([])で定義済みのため、memo化は有効に機能する。この分析を設計書に含めることを推奨する。",
+      "location": "設計方針書 Section 4.7 FileViewer",
+      "suggestion": "fileViewerPath ?? '' が毎回新リテラルではなくプリミティブ比較で同一判定されること、およびonClose (handleFileViewerClose) がuseCallback済みであることを根拠として明記する。"
+    },
+    {
+      "id": "R1-005",
+      "severity": "nice_to_have",
+      "category": "architecture",
+      "title": "MobilePromptSheetの設計書記載とソースコードの不整合",
+      "description": "設計書Section 4.5では「visibleに関係なくマウントされる」と記載しているが、実装を確認するとMobilePromptSheetは`!autoYesEnabled &&`の条件付きでレンダーされ（L2281-2290）、さらに内部でshouldRender && promptDataのガードにより早期returnする（L133-135）。つまりvisible=falseかつpromptData=nullの場合はnullを返すため、事実上アンマウントに近い挙動となる。memo化の効果はpromptDataが存在しvisible=falseの場合に限定される。",
+      "location": "設計方針書 Section 4.5 MobilePromptSheet 備考",
+      "suggestion": "「visibleに関係なくマウントされる」の記載を「autoYesEnabled=false時は常にマウントされるが、promptData=nullかつvisible=false時は内部でnullを返す」に修正し、memo化の効果範囲をより正確に記述する。"
+    },
+    {
+      "id": "R1-006",
+      "severity": "nice_to_have",
+      "category": "solid",
+      "title": "MessageInputコンポーネントの責務がmemo化設計の効果を制限する可能性",
+      "description": "MessageInputは内部でuseSlashCommands(worktreeId, cliToolId)とuseIsMobile()のフックを呼び出しており、これらが状態更新を引き起こす場合、外部からのprops不変によるmemo化スキップが効かない。memo()はpropsの浅い比較のみで、内部フックの状態変化は制御できない。ただし、useSlashCommandsはworktreeIdとcliToolIdに依存しており、ポーリングによるstate.terminal更新ではこれらは変化しないため、実質的にはmemo化は有効に機能する。設計書ではこの点に触れていない。",
+      "location": "設計方針書 Section 4.1 MessageInput",
+      "suggestion": "MessageInput内部のフック（useSlashCommands、useIsMobile）がポーリングサイクルでは状態変化しないため、memo化が有効に機能する旨を備考に追記する。"
+    },
+    {
+      "id": "R1-007",
+      "severity": "nice_to_have",
+      "category": "yagni",
+      "title": "MarkdownEditorのmemo化は優先度低と認識されているが、効果も限定的",
+      "description": "設計書Section 4.6ではMarkdownEditorの優先度を「低」としており、「条件付き描画のため効果限定的」と適切に記載している。実装を確認すると、MarkdownEditorは`editorFilePath &&`の条件でのみレンダーされるため、エディタが開いていない状態では完全にアンマウントされており、memo化の効果はゼロである。エディタが開いている状態では、内部で21個のuseCallbackが既に使用されているため、追加のmemo化による恩恵はごく限定的。YAGNI原則に基づき、MarkdownEditorのmemo化は省略を検討してもよい。",
+      "location": "設計方針書 Section 4.6 MarkdownEditor",
+      "suggestion": "MarkdownEditorがeditorFilePath条件で完全にアンマウントされる点を明記し、memo化を実装するかどうかの判断根拠をより明確にする。スコープから除外する選択肢も検討に値する。"
+    },
+    {
+      "id": "R1-008",
+      "severity": "should_fix",
+      "category": "react_best_practice",
+      "title": "submitMessageのuseCallback依存配列にonMessageSentが含まれるが安定性が不明確",
+      "description": "設計書Section 4.1のsubmitMessageの依存配列に`onMessageSent`が含まれている。WorktreeDetailRefactoredの実装を確認すると、handleMessageSentはuseCallback([fetchMessages, fetchCurrentOutput])で定義されており、fetchMessages/fetchCurrentOutputはuseCallback([worktreeId, actions])で定義されている。worktreeIdが変化しない限り安定参照となるため問題ないが、設計書ではこのpropsの参照安定性チェーンを明示していない。依存配列の正確な分析は実装時のバグ防止に重要である。",
+      "location": "設計方針書 Section 4.1 submitMessage依存配列",
+      "suggestion": "各ハンドラpropsの参照安定性チェーン（呼び出し元でのuseCallback状況）を設計書に表形式で追記し、依存配列設計の根拠を明確にする。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-411-react-memo-optimization-design-policy.md",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/InterruptButton.tsx",
+    "src/components/worktree/PromptPanel.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useFileSearch.ts"
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "total": 8
+  },
+  "timestamp": "2026-03-03T14:00:00Z"
+}

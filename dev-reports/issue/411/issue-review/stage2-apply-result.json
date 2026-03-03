@@ -1,0 +1,50 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 411,
+  "apply_date": "2026-03-03",
+  "applied_findings": [
+    {
+      "finding_id": "F1-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "受入条件を具体的なシナリオ・期待結果に更新: (1) ターミナルポーリング更新時にFileViewer（isOpen=false）が再レンダーされないこと、(2) MessageInputのprops不変時にMessageInput自体が再レンダーされないこと。手動確認と明記。"
+    },
+    {
+      "finding_id": "F1-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "MessageInputのuseCallbackハンドラ別効果分類を実装タスクに追記（高効果: handleCommandSelect/handleCommandCancel/handleFreeInput/handleCompositionStart、中効果: handleMessageChange/handleKeyDown、低効果: submitMessage/handleSubmit）。handleCompositionEndのsetTimeout内ref更新パターンの注意点も記載。"
+    },
+    {
+      "finding_id": "F1-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "F4セクションに「条件付き描画のためmemo化効果はエディタ表示中の親ポーリング更新時のスキップに限定。既に内部最適化済み。優先度は他タスクより低い」旨の注記を追加。実装タスクにも優先度低の注記を追記。"
+    },
+    {
+      "finding_id": "F1-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "提案する解決策セクションにuseMemo方式(A)とコンポーネント抽出方式(B)の2アプローチを明示。推奨としてrightPane: useMemo方式、leftPane: コンポーネント抽出方式を記載。実装タスクにも推奨方式を反映。"
+    },
+    {
+      "finding_id": "F1-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "影響範囲テーブルにSlashCommandSelector.tsxとInterruptButton.tsxを追加。実装タスクにもmemoラップの項目を追加。F3セクションにも関連する注記を追加。"
+    },
+    {
+      "finding_id": "F1-006",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "FileViewerの実装タスクを「デフォルトのshallow comparison。onCloseは呼び出し元でuseCallback済みのため安定。カスタム比較関数は不要」に修正。"
+    }
+  ],
+  "github_updated": true,
+  "statistics": {
+    "applied": 6,
+    "skipped": 0,
+    "total": 6
+  }
+}

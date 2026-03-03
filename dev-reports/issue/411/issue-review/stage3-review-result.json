@@ -1,0 +1,78 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 411,
+  "review_date": "2026-03-03",
+  "summary": "影響範囲の分析の結果、7件の指摘を特定した。must_fix 2件はPromptPanelの未memo化の見落としと、WorktreeDetailRefactoredのテストファイルでmemo化後のモック整合性リスクに関するもの。should_fix 3件はMobilePromptSheetの未memo化、MessageInputテストのuseCallback化後の振る舞い確認、leftPane抽出時の依存prop数の多さに関する注意。nice_to_have 2件はhandleAutoYesToggleのactiveCliTab依存によるmemo無効化リスクと、SlashCommandListの連鎖memo化について。",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "category": "scope",
+      "title": "PromptPanelが未memo化であり、影響範囲テーブルに記載がない",
+      "description": "PromptPanel（src/components/worktree/PromptPanel.tsx L376）は export function PromptPanel として定義されており、React.memoでラップされていない。WorktreeDetailRefactored内でstate.prompt.visible/state.prompt.data/handlePromptRespondなどのpropsで描画されている（デスクトップ L2035-2043、モバイルはMobilePromptSheet経由）。ターミナルポーリングでstate.terminal.*が変更されるたびにWorktreeDetailRefactoredが再レンダーされ、PromptPanelも再レンダーされる。visible=false時のearly returnがあるとはいえ、関数コンポーネント自体の評価コストは発生する。MessageInput/FileViewerと同等の優先度でmemo化を検討すべき。",
+      "location": "影響範囲テーブル（6行のみ記載）",
+      "suggestion": "影響範囲テーブルにPromptPanel.tsxを追加し、memoラップの実装タスクを追記する。PromptPanelは条件付き描画（visible && promptData）のため効果は限定的だが、FileViewer（isOpen=false時のスキップ）と同様のパターンであり、一貫性の観点からもmemo化が望ましい。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "category": "test",
+      "title": "WorktreeDetailRefactored.test.tsxのモック定義がmemo化後に不整合を起こすリスク",
+      "description": "tests/unit/components/WorktreeDetailRefactored.test.tsx（L72-190）では、MessageInput、FileViewer、SlashCommandSelector等の子コンポーネントをvi.mockでモック化している。現在のモックはexport function形式を前提としている。React.memoでラップされた場合、名前付きexportの型が変わる（React.MemoExoticComponent<...>）。vitest/jestのvi.mockは通常これを透過するため動作は継続するが、テスト内で直接コンポーネント型を参照している箇所（例: vi.mock('@/components/worktree/FileViewer', () => ({ FileViewer: ... }))）が正しく動くかの確認が必要。特にMessageInputのテスト（tests/unit/components/worktree/MessageInput.test.tsx）では、import { MessageInput } from '@/components/worktree/MessageInput' を直接renderしており、memo化後もexport名が維持される設計であることを実装タスクで明示すべき。",
+      "location": "実装タスクの「既存テストの動作確認」項目",
+      "suggestion": "実装タスクの「既存テストの動作確認」を以下のように具体化する：(1) WorktreeDetailRefactored.test.tsx - モック定義がmemo化コンポーネントを正しくモック化できることを確認、(2) MessageInput.test.tsx - memo化後のコンポーネントが直接renderでテスト可能であることを確認、(3) SlashCommandSelector.test.tsx / MarkdownEditor.test.tsx - 同上。memo化時にnamed export形式（export const MessageInput = memo(function MessageInput(...))）を採用し、exportシグネチャの互換性を維持する設計方針を明記する。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "category": "scope",
+      "title": "MobilePromptSheetが未memo化であり、モバイル環境でのポーリング影響が未評価",
+      "description": "MobilePromptSheet（src/components/mobile/MobilePromptSheet.tsx L57）はexport functionとして定義されmemo化されていない。WorktreeDetailRefactoredのモバイルレイアウト（L2282-2290）で描画され、ターミナルポーリングのたびに再レンダー対象となる。MobileHeader/MobileTabBarは既にmemo化済みだが、MobilePromptSheetはmemo化されていない。モバイルではCPU/メモリリソースがデスクトップより限られるため、ポーリング起因の不要な再レンダーの影響がより大きい。",
+      "location": "影響範囲テーブル（モバイルコンポーネントの記載なし）",
+      "suggestion": "影響範囲テーブルに src/components/mobile/MobilePromptSheet.tsx を追加する。PromptPanelと同様のパターン（visible=falseでearly return）であるため、memo化による効果はPromptPanelと同等。優先度はMessageInput/FileViewerより低いが、モバイル環境での一貫性のために含める。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "category": "test",
+      "title": "MessageInputのuseCallback化後、IME関連テストの動作確認に特別な注意が必要",
+      "description": "MessageInput.test.tsx（L179-282）にはIME composition関連のテストが5ケース含まれ、handleCompositionStart/handleCompositionEndの内部動作（compositionTimeoutRef、justFinishedComposingRef）に依存している。Issueでは「handleCompositionEndのsetTimeout内ref更新パターンはuseCallback化時の動作を確認すること」と注意点が記載されているが、具体的にどのテストケースが影響を受ける可能性があるかが不明。特にTC「should allow submit after composition timeout expires」（L254-282）はvi.useFakeTimersでsetTimeoutの300ms遅延をテストしており、useCallback化でクロージャのキャプチャタイミングが変わった場合に影響を受ける可能性がある。",
+      "location": "実装タスクのMessageInput項目「handleCompositionEndのsetTimeout内ref更新パターン」注意点",
+      "suggestion": "Issueの実装タスクにIME関連テストケースの具体的なリスクを追記する：(1) handleCompositionEndのuseCallback化時、setTimeoutコールバック内のjustFinishedComposingRef.currentアクセスはref経由のため問題なし、(2) handleCompositionStartのuseCallback化時、compositionTimeoutRef.currentのclearTimeoutも同様にref経由で問題なし、(3) ただしisComposingをstate依存としてuseCallbackの依存配列に含める必要がある。実装時にはhandleCompositionStart/handleCompositionEndのsetIsComposing呼び出しがuseCallbackの依存配列に正しく含まれていることを確認する。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "category": "risk",
+      "title": "leftPaneのコンポーネント抽出方式でのprops drilling量が過大（推定20個超）",
+      "description": "Issueでは「leftPaneはタブ切り替えにより描画内容が変わるためコンポーネント抽出方式を検討」と記載されている。しかし、leftPane（L1935-1998）にはhistory/files/memoの3タブ分のpropsが必要で、WorktreeDetailRefactoredの既存のMobileContentコンポーネント（L824-941）が類似のパターンを示している。MobileContentは29個のpropsを受け取っており、leftPaneのコンポーネント抽出でも同様のprops数が予想される。props数が多いコンポーネントへのmemo適用はshallow comparisonのコストが増加し、propsオブジェクト/配列の参照安定性の管理も複雑になる。特にfileSearchオブジェクト（useFileSearchの戻り値）は毎レンダーで新オブジェクトが生成される可能性があり、memo化を無効化するリスクがある。",
+      "location": "提案する解決策セクション - 3. inline JSX抽出 - leftPane部分",
+      "suggestion": "leftPaneのコンポーネント抽出方式を採用する場合、以下のリスクを明記する：(1) props数が20個超になる見込みでありshallow comparison負荷が増す、(2) fileSearchオブジェクトの参照安定性を確保するためuseMemoでラップするか、個別プロパティを展開する必要がある、(3) 代替案としてuseMemo方式の方が依存配列の明示管理でオーバーヘッドを制御しやすい可能性がある。MobileContentのpropsパターンを参考に設計すること。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "nice_to_have",
+      "category": "performance",
+      "title": "handleAutoYesToggleのactiveCliTab依存がMessageInputのmemo化効果を間接的に阻害する可能性",
+      "description": "handleAutoYesToggle（L1293-1314）はactiveCliTabを依存配列に含んでいる。activeCliTabが変わるたびにhandleAutoYesToggleの参照が変わり、AutoYesToggleコンポーネントに新しいpropsが渡される。これ自体はAutoYesToggleの問題だが、同じレンダーサイクルで他のuseCallbackの再生成が連鎖する場合（activeCliTabを依存配列に含む他のハンドラがある場合）、MessageInputへのpropも変化する可能性がある。現在のコードではhandleMessageSentはfetchMessages/fetchCurrentOutputに依存しており、これらはworktreeIdとactionsのみに依存しているため直接の影響はない。ただし将来の変更でactiveCliTab依存が追加された場合にmemo化が無効化されるリスクがある。",
+      "location": "実装タスク全般",
+      "suggestion": "handleAutoYesToggleでactiveCliTabをref経由（activeCliTabRef.current）で参照するパターンへの変更を検討する。ただしこれはauto-yes機能の振る舞いに影響するため、本Issue（パフォーマンス最適化）のスコープ外として将来タスクに記載する程度で良い。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "nice_to_have",
+      "category": "scope",
+      "title": "SlashCommandListの連鎖memo化検討",
+      "description": "SlashCommandSelector.tsx内でSlashCommandList（src/components/worktree/SlashCommandList.tsx）をインポートして描画している（L13, L298近辺のJSX）。SlashCommandSelectorをmemo化する場合、SlashCommandListも含めた連鎖的な再レンダー防止が有効。ただしSlashCommandSelectorはisOpen=falseでearly returnしているため（未確認だが一般的なパターン）、selectorが閉じている時の再レンダーコストは低い。Issueではこの点に触れていない。",
+      "location": "影響範囲テーブル - SlashCommandSelector行",
+      "suggestion": "SlashCommandListがmemo化されているか確認し、必要であれば影響範囲テーブルに追記する。ただしSlashCommandSelector自体がisOpen=false時にnullを返す場合、実質的な影響は軽微であるため、優先度は最低で良い。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 2,
+    "should_fix": 3,
+    "nice_to_have": 2,
+    "total": 7
+  }
+}

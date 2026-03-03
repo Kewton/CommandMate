@@ -1,0 +1,113 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "issue_number": 411,
+  "review_date": "2026-03-03",
+  "status": "approved",
+  "score": 5,
+  "summary": "Issue #411はReactコンポーネントのmemo化・useCallback最適化であり、UIパフォーマンス最適化に閉じた変更である。全8対象ファイルのソースコードを検査した結果、セキュリティリスクの導入は確認されなかった。既存のXSS防御（rehype-sanitize、dangerouslySetInnerHTML使用箇所のサニタイズ）、認証/認可（middleware.ts）、入力バリデーション（APIルート側）はいずれもmemo化の影響を受けない。OWASP Top 10の各項目について検証し、must_fix/should_fixの指摘事項はゼロ。nice_to_haveとして3件の確認事項を記録するが、いずれも既存実装に対する注記であり、本Issue起因の新規リスクではない。",
+  "findings": [
+    {
+      "id": "R4-001",
+      "severity": "nice_to_have",
+      "category": "xss",
+      "title": "dangerouslySetInnerHTML使用コンポーネントはmemo化対象外であることの確認",
+      "description": "プロジェクト内でdangerouslySetInnerHTMLを使用するコンポーネントは、TerminalDisplay（sanitizedOutput）、MermaidDiagram（svg）、LogViewer（highlightedContent）、MessageList（convertAnsiToHtml）の4箇所である。これらはいずれもIssue #411のmemo化対象8コンポーネント（MessageInput、SlashCommandSelector、InterruptButton、PromptPanel、MobilePromptSheet、MarkdownEditor、FileViewer、WorktreeDetailRefactored inline JSX）に含まれない。したがって、memo化によるdangerouslySetInnerHTMLのサニタイズバイパスリスクはゼロである。MarkdownEditorは対象に含まれるが、rehype-sanitize [SEC-MF-001]を使用しており、memo()ラップはReactの内部再レンダー最適化であるためサニタイズパイプラインに影響しない。",
+      "location": "設計方針書 Section 6 セキュリティ設計",
+      "suggestion": "現状の記載「セキュリティに関する変更はない」は正確であるが、dangerouslySetInnerHTML使用コンポーネントがmemo化対象外であることを明示的に記載すると、将来のレビュアーへの参考情報として有用である。対応は任意。"
+    },
+    {
+      "id": "R4-002",
+      "severity": "nice_to_have",
+      "category": "closure",
+      "title": "useCallbackクロージャにおける機密データキャプチャの不在確認",
+      "description": "MessageInputで新規useCallback化される9個のハンドラ（handleCompositionStart/End、handleCommandSelect/Cancel、handleFreeInput、handleMessageChange、submitMessage、handleSubmit、handleKeyDown）のクロージャがキャプチャする値を検査した。キャプチャ対象はUIの状態値（message、isComposing、showCommandSelector、isFreeInputMode、sending）、Refオブジェクト（textareaRef、compositionTimeoutRef、justFinishedComposingRef）、useStateセッター関数、props（worktreeId、cliToolId、onMessageSent）のみである。認証トークン、パスワード、APIキー等の機密データはクロージャに含まれていない。worktreeIdはURLパラメータ由来のパブリック識別子であり機密性はない。",
+      "location": "設計方針書 Section 4.1 MessageInput ハンドラ別useCallback設計",
+      "suggestion": "特に対応不要。将来のuseCallback追加時に、クロージャキャプチャ対象に認証トークン等が含まれないことを確認するコーディング慣行を維持すること。"
+    },
+    {
+      "id": "R4-003",
+      "severity": "nice_to_have",
+      "category": "csrf",
+      "title": "MessageInput handleSubmitのCSRF保護状況（既存設計の確認）",
+      "description": "MessageInputのhandleSubmit（フォームsubmitイベント）はe.preventDefault()でデフォルト送信を抑止し、worktreeApi.sendMessage()経由のfetch APIでPOSTリクエストを送信する。このアーキテクチャはブラウザのSame-Originポリシーに依拠している。本プロジェクトにはCSRFトークン機構は実装されていないが、認証はCookieベース（CM_AUTH_TOKEN_HASH）であり、SameSite=Lax（locale-cookie.tsの実装から推測）が設定されている。memo化はhandleSubmitのCSRF保護状況に影響しない（useCallbackでラップしても関数の内部動作は同一）。これは既存設計の特性であり、本Issue起因の新規リスクではない。",
+      "location": "設計方針書 Section 4.1 handleSubmit",
+      "suggestion": "特に対応不要。CSRFトークンの導入はプロジェクト全体のセキュリティ方針として別途検討すべき事項であり、本Issueのスコープ外である。"
+    }
+  ],
+  "owasp_top10_checklist": {
+    "A01_broken_access_control": {
+      "status": "not_applicable",
+      "note": "memo化はアクセス制御に影響しない。認証/認可はmiddleware.tsとAPIルートで処理され、クライアントコンポーネントのmemo化は無関係。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "note": "暗号化処理の変更なし。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "note": "memo化対象コンポーネントにdangerouslySetInnerHTMLの使用なし（MarkdownEditorはrehype-sanitize使用）。MessageInputのtextarea入力値はworktreeApi.sendMessage()経由でサーバーに送信され、サーバー側でバリデーションされる。memo化はこの流れに影響しない。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "note": "設計方針書に明確なセキュリティ設計セクション（Section 6）があり、変更なしを明示。設計決定は適切。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "not_applicable",
+      "note": "設定変更なし。"
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "not_applicable",
+      "note": "新規ライブラリの追加なし。React.memoとuseCallbackはReact標準API。"
+    },
+    "A07_identification_authentication_failures": {
+      "status": "not_applicable",
+      "note": "認証フローの変更なし。"
+    },
+    "A08_software_data_integrity_failures": {
+      "status": "not_applicable",
+      "note": "ビルドパイプライン・CI/CDの変更なし。"
+    },
+    "A09_security_logging_monitoring_failures": {
+      "status": "not_applicable",
+      "note": "ログ出力の変更なし。"
+    },
+    "A10_server_side_request_forgery": {
+      "status": "not_applicable",
+      "note": "サーバーサイドリクエストの変更なし。全変更はクライアントコンポーネントのレンダリング最適化に限定。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "security_specific_assessment": {
+    "xss_risk": "none - memo化対象にdangerouslySetInnerHTML使用なし、MarkdownEditorはrehype-sanitize保護済み",
+    "closure_capture_risk": "none - useCallbackクロージャに機密データ含まず",
+    "event_handler_risk": "none - ハンドラのバリデーションロジックはmemo化で変更されない",
+    "csrf_risk": "none（既存設計と同等、本Issue起因の変更なし）",
+    "dependency_array_security_impact": "none - 依存配列の変更はレンダリング最適化のみに影響し、セキュリティ境界を変更しない",
+    "type_safety_risk": "none - memo()はMemoExoticComponent型を返すがprops型制約は維持される（R3-005で検証済み）"
+  },
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 3,
+    "total": 3
+  },
+  "reviewed_files": [
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/InterruptButton.tsx",
+    "src/components/worktree/PromptPanel.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/middleware.ts",
+    "src/lib/api-client.ts"
+  ],
+  "timestamp": "2026-03-03T23:45:00+09:00"
+}

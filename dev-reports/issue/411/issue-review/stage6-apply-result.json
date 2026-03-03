@@ -1,0 +1,42 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 411,
+  "apply_date": "2026-03-03",
+  "applied_findings": [
+    {
+      "id": "F5-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "IME関連useCallback注記から「isComposingをstateとしてuseCallbackの依存配列に含める必要がある（setIsComposing呼び出しのため）」を削除し、「handleCompositionStart/handleCompositionEndはisComposingの値を読み取らず、setIsComposing（useStateセッター、安定参照）を呼び出すのみであるため、依存配列は空配列[]で十分である」に修正"
+    },
+    {
+      "id": "F5-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "PromptPanelの実装タスク説明を修正。デスクトップパスではstate.prompt.visible && !autoYesEnabledの条件付きレンダーのためvisible=false時はアンマウントされること、FileViewerのisOpen=falseパターンとは異なりmemo化の効果はプロンプト表示中のポーリング起因再レンダースキップにあることを明記。影響範囲テーブルの説明も整合するよう更新"
+    },
+    {
+      "id": "F5-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "PromptPanel/MobilePromptSheetの両実装タスクに「実装前にonRespond（handlePromptRespond）/onDismiss（handlePromptDismiss）が呼び出し元でuseCallbackにより安定化されていることを確認すること。未安定の場合はuseCallback化するか、カスタム比較関数を検討する」を追記"
+    },
+    {
+      "id": "F5-004",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "rightPaneのprops数を「5個程度」から「6個」に修正"
+    }
+  ],
+  "github_updated": true,
+  "statistics": {
+    "applied": 4,
+    "skipped": 0,
+    "total": 4
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/411"
+  }
+}
