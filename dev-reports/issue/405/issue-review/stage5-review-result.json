@@ -1,0 +1,246 @@
+{
+  "issue_number": 405,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-04",
+  "review_items": [
+    {
+      "id": "R5-001",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "worktrees/[id]/route.tsにも同一のN+1パターンが存在するが、影響範囲テーブルの変更内容にlistSessions()結果利用が未記載",
+      "description": "影響範囲テーブルでsrc/app/api/worktrees/[id]/route.tsは「キャッシュ利用候補、listSessions()結果利用」と記載されている。しかし、実際のコード（L54-88）を確認すると、worktrees/[id]/route.tsはworktrees/route.ts（L44-89）と全く同一のN+1パターン（全5ツールに対するisRunning() + captureSessionOutput()ループ）を持っている。\n\nworktrees/route.tsの実装タスクには「DBのworktreeレコードからactive CLI tool情報を事前取得し、isRunning()呼び出し対象を絞り込む」「listSessions()1回呼び出しによるisRunning()判定」と明記されているが、worktrees/[id]/route.tsに対する同等の最適化は実装タスクに独立項目として記載されていない。\n\n個別worktree取得APIは2秒間隔のポーリング対象であるため、worktrees/route.tsと同等の最適化が必要。",
+      "suggestion": "実装タスクに「GET /api/worktrees/[id]: worktrees/route.tsと同等のlistSessions()一括取得・active CLI tool絞り込みを適用」を追加するか、既存の実装タスクの適用範囲にworktrees/[id]/route.tsが含まれることを明記すべき。",
+      "affected_section": "実装タスク / 影響範囲テーブル",
+      "is_new": true,
+      "related_previous": null
+    },
+    {
+      "id": "R5-002",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "キャッシュ無効化フック挿入方式B案の採用理由と、漏れ防止策の記載不足",
+      "description": "実装タスクで「B案（呼び出し元での明示的キャッシュクリア）を採用」と記載され、その理由として「tmux.tsへのキャッシュモジュール依存を避け、循環依存リスクを排除」が挙げられている。これは妥当な判断である。\n\nしかし、B案の最大のリスクである「呼び出し元の修正漏れ」に対する防止策が記載されていない。影響範囲テーブルには7ファイルのキャッシュ無効化フック挿入箇所が列挙されているが、将来新たなCLIツールが追加された場合（例: Issue #379でOpenCodeが追加されたように）、新ツールのsendMessage()/killSession()にもキャッシュクリアを挿入する必要があることが暗黙の前提となっている。",
+      "suggestion": "以下のいずれかの漏れ防止策を記載すべき:\n\n1. BaseCLIToolクラスにキャッシュクリアのテンプレートメソッドを追加し、sendMessage()/killSession()をオーバーライドする全サブクラスで自動的にキャッシュクリアが呼ばれるようにする（B案のリスク軽減）\n2. CLAUDE.mdの新規CLIツール追加時のチェックリスト項目として「tmux captureキャッシュの無効化フック挿入」を追記\n3. 受入テストに「全CLIツールのsendMessage()後にキャッシュが無効化されること」の網羅的テストを追加\n\n少なくとも「新規CLIツール追加時にキャッシュ無効化フックの追加が必要」という注記を実装タスクまたはCLAUDE.md更新項目に含めるべき。",
+      "affected_section": "実装タスク > キャッシュ無効化",
+      "is_new": true,
+      "related_previous": "R3-005"
+    },
+    {
+      "id": "R5-003",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "current-output APIのisRunning()呼び出しがlistSessions()最適化の対象として明記されていない",
+      "description": "current-output/route.ts (L52) では cliTool.isRunning(params.id) を呼び出してセッション存在確認を行い、その後captureSessionOutput()を呼んでいる。captureSessionOutput()はキャッシュ利用候補として記載されているが、isRunning()の最適化（listSessions()一括取得）はworktrees/route.tsとworktrees/[id]/route.tsのみが対象として記載されている。\n\ncurrent-output APIは単一worktree・単一CLIツールへのアクセスのため、listSessions()の恩恵は限定的（1回のhasSession vs 1回のlistSessions）だが、キャッシュヒット時にはhasSession()自体もスキップ可能（captureSessionOutput()のインターフェース方針A案によりキャッシュヒット時はhasSessionスキップ）。この点は既にIssueの設計方針でカバーされているため、大きな問題ではない。",
+      "suggestion": "current-output APIについては「captureSessionOutput()のキャッシュヒット時にisRunning()のhasSession()もスキップされるため、追加のlistSessions()最適化は不要」と明記するか、影響範囲テーブルの注記を追加するとより明確になる。",
+      "affected_section": "影響範囲テーブル > current-output/route.ts",
+      "is_new": true,
+      "related_previous": null
+    },
+    {
+      "id": "R5-004",
+      "severity": "nice_to_have",
+      "category": "correctness",
+      "title": "S3セクションの呼び出し箇所一覧でassistant-response-saverの行数が「SESSION_OUTPUT_BUFFER_SIZE行」のまま具体値未記載",
+      "description": "S3セクションでは各呼び出し箇所のcaptureLines行数を記載しているが、assistant-response-saverについては「assistant-response-saver（保留中レスポンス保存用）」とのみ記載され、SESSION_OUTPUT_BUFFER_SIZE=10,000行という具体値が記載されていない。他の箇所（「10,000行」「5,000行」等）は具体値が明記されているため、一貫性に欠ける。",
+      "suggestion": "assistant-response-saverの記載を「assistant-response-saver（保留中レスポンス保存用、10,000行）」に更新するとS3セクション内の一貫性が向上する。",
+      "affected_section": "背景・課題 > S3",
+      "is_new": true,
+      "related_previous": "R1-001"
+    },
+    {
+      "id": "R5-005",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "キャッシュバイパス時のフレッシュ取得結果のキャッシュ書き戻し方針が未決定",
+      "description": "Stage 3のR3-004で指摘された「prompt-response APIのキャッシュバイパス時にフレッシュ取得した結果をキャッシュに書き戻すかどうか」の設計方針が、現在のIssueには記載されていない。\n\nR3-004自体はshould_fixとして反映対象だったが、Stage 4で「スコープ外」とは明記されずskipped_itemsにも含まれていない。applied_itemsとして処理されたのはR3-001/R3-002/R3-005/R3-006/R3-007/R3-008/R3-009/R3-012の8件であり、R3-003/R3-004はStage 4 applied_items/skipped_itemsのいずれにも含まれていない。\n\nこの書き戻し方針は実装時の判断で十分対応可能だが、Issue上で「検討事項」として残しておくと実装者への情報として有用。",
+      "suggestion": "キャッシュ無効化戦略のprompt-response API項目に「バイパスでフレッシュ取得した結果はキャッシュに書き戻す（他の呼び出し元がフレッシュデータを利用できる）」の一文を追加するか、「実装時に判断」と明記する。",
+      "affected_section": "提案する解決策 > 1. キャッシュ無効化戦略",
+      "is_new": true,
+      "related_previous": null
+    }
+  ],
+  "previous_items_addressed": [
+    {
+      "id": "R1-007",
+      "severity": "must_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。受入条件が2つの定量的基準に具体化されている: (1)「キャッシュTTL（1-2秒）以内の反映遅延」 (2)「コマンド送信後、次回ポーリングでステータス更新（キャッシュ無効化動作検証）」。検証可能な基準になっている。"
+    },
+    {
+      "id": "R1-001",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。S3セクションが4箇所から7箇所に拡充され、GET /api/worktrees/:id、POST /api/worktrees/:id/prompt-response、assistant-response-saverが追加されている。影響範囲テーブルも12行以上に拡充されている。ただし、assistant-response-saverの具体的な行数記載が不足（R5-004として記録）。"
+    },
+    {
+      "id": "R1-002",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。A案（最大行数キャッシュ+slice対応）の採用理由、メモリ見積もり（10worktree x 10,000行 x 100bytes = 約10MB）、ANSIエスケープシーケンスの考慮（Stage 4のR3-009反映含む）が詳細に記載されている。"
+    },
+    {
+      "id": "R1-003",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。実装タスクにisRunning()最適化（A案: route.ts側でlistSessions()1回呼び出し、ICLIToolインターフェース変更不要）が明記されている。S1セクションにhasSession()二重呼び出しの補足も追加済み。"
+    },
+    {
+      "id": "R1-005",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。キャッシュ無効化戦略が4つの無効化ポイント（sendKeys/sendMessage/sendSpecialKeys時、killSession時、prompt-response APIバイパス、auto-yes応答直後）とそれぞれの理由付きで記載されている。try-finallyパターンの擬似コードも追加されている（Stage 4のR3-001反映含む）。"
+    },
+    {
+      "id": "R1-009",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。実装タスクに「CLAUDE.mdのモジュール説明テーブル更新」が記載され、影響範囲テーブルにもCLAUDE.mdが含まれている。globalThisキャッシュ記述を含めることも明記されている。"
+    },
+    {
+      "id": "R1-010",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。タスク記述が「DBのworktreeレコードからactive CLI tool情報を事前取得し、isRunning()呼び出し対象を絞り込む」に具体化され、真のボトルネック（isRunning()全ツール呼び出し）に焦点を当てた記述に変更されている。"
+    },
+    {
+      "id": "R3-001",
+      "severity": "must_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。auto-yes応答後のキャッシュ無効化タイミング詳細設計が追記され、sendPromptAnswer() -> try-finallyキャッシュクリア -> scheduleNextPoll()の順序が擬似コード付きで明記されている。prompt-answer-sender.tsのsendKeys()/sendSpecialKeys()もフック対象に含まれている。"
+    },
+    {
+      "id": "R3-002",
+      "severity": "must_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。captureSessionOutput()のインターフェース非変更方針（A案）が新サブセクションとして追記され、キャッシュヒット時/ミス時の挙動とエラーメッセージ後方互換性が明記されている。受入条件にも「captureSessionOutput()のインターフェースが変更されないこと」が追加されている。"
+    },
+    {
+      "id": "R3-005",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。影響範囲テーブルに7ファイルのキャッシュ無効化フック挿入箇所が追加されている（prompt-answer-sender.ts、claude-session.ts、codex.ts、gemini.ts、opencode.ts、vibe-local.ts、session-cleanup.ts）。B案採用の理由も実装タスクに明記されている。"
+    },
+    {
+      "id": "R3-006",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。ユニットテスト項目に「既存テストが変更なしでパスすること」と「キャッシュモジュールのモック or TTL=0設定によるキャッシュ無効化でテスト分離」が記載されている。"
+    },
+    {
+      "id": "R3-007",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。globalThisパターンの詳細（declare global型定義、初期化パターン、既存同一パターンモジュールの参照）が実装タスクに明記されている。"
+    },
+    {
+      "id": "R3-008",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。影響範囲テーブルにsession-cleanup.tsが「graceful shutdown時のキャッシュクリア追加（Facadeパターンの拡張）」として追加されている。"
+    },
+    {
+      "id": "R3-009",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。ANSIエスケープシーケンス考慮がcaptureLines行数差異への対応方針に追記されている。stripAnsi()後段適用箇所では問題ないこと、current-output APIのfullOutput等ANSI付き返却箇所での検証テスト設置が記載されている。"
+    },
+    {
+      "id": "R3-012",
+      "severity": "should_fix",
+      "status": "addressed",
+      "comment": "適切に反映済み。isRunning()最適化A案（route.ts側でlistSessions()1回呼び、ICLIToolインターフェース変更不要）が実装タスクに明記され、影響範囲テーブルのroute.tsとworktrees/[id]/route.tsの変更内容にもlistSessions()結果利用が追記されている。"
+    }
+  ],
+  "skipped_previous_items": [
+    {
+      "id": "R1-004",
+      "severity": "nice_to_have",
+      "status": "not_applied",
+      "comment": "N+1パターンの数値精緻化。概算としてIssueの記述は方向性が正しく、nice_to_haveのため未反映は許容範囲。"
+    },
+    {
+      "id": "R1-006",
+      "severity": "nice_to_have",
+      "status": "not_applied",
+      "comment": "キャッシュインターフェースの事前定義。R3-002のA案採用（インターフェース非変更）とR3-007のglobalThisパターン明記により、実質的な設計方針は確立されている。詳細インターフェースは実装時に決定で問題なし。"
+    },
+    {
+      "id": "R1-008",
+      "severity": "nice_to_have",
+      "status": "not_applied",
+      "comment": "キャッシュTTLとポーリング間隔の関係の明記。実装時の調整項目として妥当。"
+    },
+    {
+      "id": "R1-011",
+      "severity": "nice_to_have",
+      "status": "not_applied",
+      "comment": "singleflightパターン。実装時の最適化として検討可能。"
+    },
+    {
+      "id": "R3-003",
+      "severity": "should_fix",
+      "status": "not_applied",
+      "comment": "response-pollerのキャッシュ利用が応答抽出の正確性に影響する可能性。Stage 4のapplied_items/skipped_itemsに含まれていないが、キャッシュ無効化戦略（R3-001反映）とcaptureSessionOutput()インターフェース非変更方針（R3-002反映）により、実質的なリスクは軽減されている。"
+    },
+    {
+      "id": "R3-004",
+      "severity": "should_fix",
+      "status": "not_applied",
+      "comment": "prompt-response APIとauto-yesの競合。Stage 4のapplied_items/skipped_itemsに含まれていない。Issueのスコープ外の根本的な排他制御問題であり、キャッシュ設計とは独立。一部はR5-005として新規指摘。"
+    },
+    {
+      "id": "R3-010",
+      "severity": "nice_to_have",
+      "status": "not_applied",
+      "comment": "R3-005/R3-008で実質カバー済みとしてStage 4でスキップ。妥当な判断。"
+    },
+    {
+      "id": "R3-011",
+      "severity": "nice_to_have",
+      "status": "not_applied",
+      "comment": "セキュリティ考慮。実装時のJSDocコメントで対応可能としてStage 4でスキップ。妥当な判断。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 3,
+    "overall_quality": "high",
+    "comments": "Stage 1-4の全てのmust_fix（R1-007、R3-001、R3-002の計3件）が適切に反映されており、Issue品質が大幅に向上している。should_fix項目も大半（Stage 1: 6件中6件、Stage 3: 7件中6件反映、R3-003/R3-004は暗黙的にスコープ外として処理）が反映済みである。\n\n新規指摘は全てshould_fix以下であり、must_fixは0件。最も重要な指摘はR5-001（worktrees/[id]/route.tsの最適化タスクの明示化）とR5-002（B案の漏れ防止策）であるが、いずれも実装時に対応可能な粒度である。\n\nIssueの全体構成は以下の点で優れている:\n- 問題分析（S1/S3/P1/P2）が正確で、実コードの行番号参照付き\n- 解決策の設計方針（A案採用、メモリ見積もり、キャッシュ無効化戦略、try-finallyパターン、ANSIエスケープ考慮）が具体的\n- 影響範囲テーブルが19ファイルにわたり網羅的\n- 受入条件が定量的で検証可能\n- レビュー履歴が適切に記録されている\n\n実装着手可能な品質に達していると判断する。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "L54-88",
+      "relevance": "worktrees/route.tsと同一のN+1パターン。listSessions()最適化の適用対象として実装タスクへの明記が必要（R5-001）"
+    },
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "lines": "L44-89",
+      "relevance": "N+1パターンの主要箇所。listSessions()最適化が記載済み"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "L52, L70",
+      "relevance": "isRunning()とcaptureSessionOutput()の呼び出し。キャッシュヒット時のhasSessionスキップが有効（R5-003）"
+    },
+    {
+      "file": "src/lib/assistant-response-saver.ts",
+      "lines": "L119, L243",
+      "relevance": "SESSION_OUTPUT_BUFFER_SIZE=10000行。S3セクションでの具体値記載が不足（R5-004）"
+    },
+    {
+      "file": "src/lib/prompt-answer-sender.ts",
+      "lines": "L89, L96, L100, L106",
+      "relevance": "sendSpecialKeys()/sendKeys()の呼び出し箇所。キャッシュ無効化フック挿入対象"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール説明テーブル更新が実装タスクに含まれている（反映済み）"
+    }
+  ]
+}

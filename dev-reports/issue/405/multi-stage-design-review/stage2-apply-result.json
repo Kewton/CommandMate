@@ -1,0 +1,99 @@
+{
+  "issue_number": 405,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘反映",
+  "applied_items": [
+    {
+      "review_id": "DC2-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "changes_made": "セクション3.1.1にsliceOutput()関数のインターフェース定義を追加。シグネチャ: export function sliceOutput(fullOutput: string, requestedLines: number): string。JSDocに行ベースsliceロジック（output.split('\\n').slice(-requestedLines).join('\\n')）とrequstedLines >= capturedLines時のそのまま返却を明記。DC2-010の指摘も統合し、getCachedCapture()のJSDocにlazy eviction（TTL切れエントリの自動削除）を追記。"
+    },
+    {
+      "review_id": "DC2-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "changes_made": "セクション3.3に「isSessionHealthy()の@internal export問題への対応方針 [DC2-002]」を新設。選択肢(a)を採用: @internalアノテーションをproduction exportに変更する設計判断を明記。選択肢(b)（ICLIToolインターフェース変更）はスコープ外のため不採用とした根拠も記載。"
+    },
+    {
+      "review_id": "DC2-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.2に「ログ出力方針 [DC2-003]」を新設。キャッシュヒット/ミス/singleflightヒット時のログポイント・レベル・内容を表形式で明記。既存logger.withContext()パターンとの整合性を確保。"
+    },
+    {
+      "review_id": "DC2-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.2に「エラーハンドリング方針 [DC2-004]」を新設。fetchFn内にtry-catchを追加し、capturePane()エラー時に既存形式のエラーメッセージ（'Failed to capture {cliTool.name} output: {errorMessage}'）を維持するコードサンプルを追記。"
+    },
+    {
+      "review_id": "DC2-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.3に「HealthCheck呼び出し頻度の変化に関する影響分析 [DC2-005]」を新設。セッション不在時・存在時の動作が変更前後で同等であることを分析・明記。"
+    },
+    {
+      "review_id": "DC2-006",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション11のcli-session.tsの変更内容を 'captureSessionOutput()にキャッシュ統合 + captureSessionOutputFresh()新規追加' に更新。Phase 5のタスクにもCLAUDE.md更新時のcaptureSessionOutputFresh()記載を含めた。"
+    },
+    {
+      "review_id": "DC2-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.3に「listSessions()一括取得による非実行中CLIツールのcaptureスキップ [DC2-007]」を新設。sessionNames.has()がfalseの場合にcaptureSessionOutput()が呼び出されないことで受入条件を充足する仕組みを説明。DBからのselectedAgents事前フィルタリングが不要である理由も記載。"
+    },
+    {
+      "review_id": "DC2-008",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.4.3のprompt-response/route.ts使用例の後に注記 [DC2-008] を追加。既存isRunning()チェックとcaptureSessionOutputFresh()内hasSession()の重複は許容する根拠（目的の違い、コスト、Phase 3変更後の安全弁維持）を3点で記載。"
+    },
+    {
+      "review_id": "DC2-009",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション10のPhase 2タスクリストを更新。captureSessionOutputFresh()新規関数追加（タスク4）とprompt-response/route.tsの呼び出し変更（タスク5）を明示的に追加。後続Phaseの番号を整合するよう再採番。Phase 3にisSessionHealthy()の@internal除去タスクも追加。"
+    },
+    {
+      "review_id": "DC2-010",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "changes_made": "DC2-001の対応に統合。セクション3.1.1のgetCachedCapture()のJSDocに「TTL切れエントリは呼び出し時に自動削除される（lazy eviction）」を追記。"
+    }
+  ],
+  "skipped_items": [
+    {
+      "review_id": "DC2-011",
+      "severity": "nice_to_have",
+      "reason": "nice_to_haveのため記録のみ。session-cleanup.tsのclearAllCache()呼び出し箇所の詳細化は実装フェーズで判断する。レビュー指摘事項サマリーに記録。"
+    },
+    {
+      "review_id": "DC2-012",
+      "severity": "nice_to_have",
+      "reason": "nice_to_haveのため記録のみ。sliceOutput()の各行数テストケースの追記はテスト実装フェーズで対応する。レビュー指摘事項サマリーに記録。"
+    }
+  ],
+  "summary": {
+    "total_items": 12,
+    "applied_count": 10,
+    "skipped_count": 2,
+    "design_doc_updated": true,
+    "comments": "Must Fix 2件（DC2-001: sliceOutput()関数定義追加、DC2-002: @internal export問題への対応方針追記）およびShould Fix 7件を全て設計方針書に反映済み。nice_to_have 3件のうちDC2-010はDC2-001に統合して反映、DC2-011/DC2-012は実装フェーズで対応するため記録のみ。セクション3.1.1, 3.2, 3.3, 3.4.3, 10, 11, 12, 13, 14を更新。Phase 2のタスクリスト再構成とPhase間の番号再採番も実施。"
+  },
+  "design_doc_path": "dev-reports/design/issue-405-tmux-capture-optimization-design-policy.md",
+  "sections_updated": [
+    "3.1.1 インターフェース設計",
+    "3.2 captureSessionOutput()の変更",
+    "3.3 isRunning()最適化（listSessions一括取得）",
+    "3.4.3 prompt-response APIのキャッシュバイパス",
+    "10. 実装順序",
+    "11. ファイル変更一覧",
+    "12. レビュー履歴",
+    "13. レビュー指摘事項サマリー",
+    "14. 実装チェックリスト"
+  ],
+  "timestamp": "2026-03-04T12:30:00Z"
+}

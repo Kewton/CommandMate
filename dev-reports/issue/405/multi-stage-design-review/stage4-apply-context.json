@@ -1,0 +1,8 @@
+{
+  "issue_number": 405,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘反映",
+  "review_result_path": "dev-reports/issue/405/multi-stage-design-review/stage4-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-405-tmux-capture-optimization-design-policy.md",
+  "update_target": "design_policy_only"
+}

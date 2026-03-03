@@ -1,0 +1,194 @@
+{
+  "issue_number": 405,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-04",
+  "review_items": [
+    {
+      "id": "R7-001",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "capture/route.tsがcapturePane()を直接呼び出しており、キャッシュ層をバイパスする",
+      "description": "GET /api/worktrees/:id/capture/route.ts (L70) は capturePane(sessionName, safeLines) を直接呼び出しており、captureSessionOutput() を経由していない。キャッシュはcaptureSessionOutput()内部に導入予定だが、capture APIはこのキャッシュ層をバイパスする。\n\ncapture APIはターミナルUIのリアルタイム表示に使用されるため、キャッシュバイパスは意図的な設計として許容し得るが、以下の問題がある:\n1. capture APIの呼び出しがキャッシュに書き戻されない場合、同一セッションの他の呼び出し元が古いキャッシュを読む（ただしTTL=2秒以内なので影響は限定的）\n2. capture APIのcapturePaneとキャッシュ内のcapturePaneが同時に実行される可能性（tmuxへの同時アクセス）\n\n影響範囲テーブルにcapture/route.tsが含まれていないが、キャッシュ対象外とする設計判断を明記すべき。",
+      "suggestion": "影響範囲テーブルまたは設計方針に、capture/route.tsはcapturePane()を直接使用しており、キャッシュ対象外とする旨を注記する。理由: ターミナルUI向けの専用API（ユーザーが指定した行数でcapturePaneを直接呼ぶ設計であり、captureSessionOutput()とは異なるユースケース）。",
+      "affected_section": "影響範囲テーブル",
+      "is_new": true,
+      "related_previous": null
+    },
+    {
+      "id": "R7-002",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "terminal/route.tsのsendKeys()呼び出し後にキャッシュ無効化フックが必要",
+      "description": "POST /api/worktrees/:id/terminal/route.ts (L78) は sendKeys(sessionName, command) を直接呼び出してターミナルにコマンドを送信する。このAPIはユーザーがターミナルUIから直接コマンドを入力する際に使用される。\n\nIssueのキャッシュ無効化戦略では「sendKeys()呼び出し時に該当セッションのキャッシュをクリア」とされており、B案（呼び出し元での明示的キャッシュクリア）が採用されている。しかし、影響範囲テーブルにterminal/route.tsが含まれておらず、このsendKeys()呼び出し後のキャッシュ無効化フックが設計から漏れている。\n\nユーザーがターミナルUIからコマンドを送信した直後に、次回ポーリングでステータスが更新されないリスクがある（キャッシュTTL以内は古い出力が返る）。",
+      "suggestion": "影響範囲テーブルに src/app/api/worktrees/[id]/terminal/route.ts を追加し、変更内容として「sendKeys()後のキャッシュクリア」を記載する。terminal/route.tsはtmux.sendKeys()の呼び出し元であり、B案に基づきキャッシュ無効化フックの挿入が必要。",
+      "affected_section": "影響範囲テーブル / キャッシュ無効化戦略",
+      "is_new": true,
+      "related_previous": "R3-005"
+    },
+    {
+      "id": "R7-003",
+      "severity": "nice_to_have",
+      "category": "impact",
+      "title": "session-cleanup.tsのstopAllSchedules()がworktreeごとに呼ばれている点の効率改善余地",
+      "description": "session-cleanup.ts (L109-117) の cleanupWorktreeSessions() 内で stopAllSchedules() が呼ばれている。これはworktreeごとの呼び出しであるため、cleanupMultipleWorktrees() で複数worktreeを処理する場合、stopAllSchedules() が複数回呼ばれる。キャッシュクリアもこの関数内に追加予定だが、キャッシュのclear()は冪等操作のため問題にはならない。\n\nただし、cleanupWorktreeSessions()に追加するキャッシュクリアは「該当worktreeのセッションに対応するキャッシュエントリの削除」とすべきか「全キャッシュのclear()」とすべきかの方針が未定義。",
+      "suggestion": "session-cleanup.tsへのキャッシュクリア追加について、worktree単位の個別削除（cleanupWorktreeSessions内）と全クリア（stopAllSchedules並列）のどちらにするかを実装タスクに注記するか、実装時判断とする。",
+      "affected_section": "影響範囲テーブル > src/lib/session-cleanup.ts",
+      "is_new": true,
+      "related_previous": "R3-008"
+    },
+    {
+      "id": "R7-004",
+      "severity": "nice_to_have",
+      "category": "impact",
+      "title": "BaseCLITool.interrupt()のsendSpecialKey(Escape)もキャッシュ無効化の対象として明示されていない",
+      "description": "BaseCLITool.interrupt() (base.ts L64-67) は sendSpecialKey(sessionName, 'Escape') を呼び出す。Escapeキー送信は処理の中断を意味し、出力状態が変化するため、キャッシュ無効化の対象となり得る。\n\ninterrupt()はUI上の「停止」ボタンやCtrl+C操作に相当し、実行後に直ちにステータスが更新されることをユーザーは期待する。現在の影響範囲テーブルのキャッシュ無効化フック挿入箇所にinterrupt()は含まれていない。\n\nただし、interrupt()の呼び出し頻度は低く、キャッシュTTL=2秒以内にステータスが更新されるため、実質的な影響は小さい。",
+      "suggestion": "影響範囲テーブルにBaseCLITool.interrupt()（またはその呼び出し元API）を追加するか、「interrupt()はキャッシュTTLの範囲内でステータスが反映されるため、明示的なキャッシュ無効化は不要」と設計判断を注記する。",
+      "affected_section": "影響範囲テーブル / キャッシュ無効化戦略",
+      "is_new": true,
+      "related_previous": "R3-005"
+    }
+  ],
+  "previous_items_addressed": [
+    {
+      "id": "R3-001",
+      "status": "addressed",
+      "comment": "適切に反映済み。auto-yes応答後のキャッシュ無効化タイミング詳細設計が追記されている。try-finallyパターンの擬似コード（sendPromptAnswer() -> finally { clearCache(sessionName) } -> scheduleNextPoll()）が明確に記載されており、成功・失敗に関わらずキャッシュクリアが保証される設計になっている。prompt-answer-sender.tsのsendKeys()/sendSpecialKeys()もフック対象に含まれている。detectAndRespondToPrompt()のコードを実際に確認したところ、L610-615のsendPromptAnswer()呼び出しの後にtry-finallyを挿入するポイントが明確であり、実装可能性も高い。"
+    },
+    {
+      "id": "R3-002",
+      "status": "addressed",
+      "comment": "適切に反映済み。captureSessionOutput()のインターフェース非変更方針（A案: キャッシュモジュール側でhasSessionチェック済みフラグ管理）が新サブセクションとして追記されている。実際のcli-session.ts (L38-72) のcaptureSessionOutput()シグネチャ（worktreeId, cliToolId, lines=1000）が維持される設計であり、hasSession() (L51) のスキップロジックをキャッシュ層に委譲する方針が明確。受入条件にも「captureSessionOutput()のインターフェースが変更されないこと（既存テストが変更なしでパスすること）」が追加されている。エラーメッセージ（L54: `${cliTool.name} session ${sessionName} does not exist`）の後方互換性も保証される記載になっている。"
+    },
+    {
+      "id": "R3-005",
+      "status": "addressed",
+      "comment": "適切に反映済み。影響範囲テーブルに7ファイルのキャッシュ無効化フック挿入箇所（prompt-answer-sender.ts、claude-session.ts、codex.ts、gemini.ts、opencode.ts、vibe-local.ts、session-cleanup.ts）が追加されている。B案採用の理由（循環依存リスク排除）も明記。ただし、terminal/route.tsのsendKeys()呼び出しが漏れている点をR7-002として新規指摘。"
+    },
+    {
+      "id": "R3-006",
+      "status": "addressed",
+      "comment": "適切に反映済み。ユニットテスト項目に「既存テストが変更なしでパスすること」と「キャッシュモジュールのモック or TTL=0設定によるキャッシュ無効化でテスト分離」が記載されている。captureSessionOutput()のインターフェース非変更方針に基づく理由も明記されている。"
+    },
+    {
+      "id": "R3-007",
+      "status": "addressed",
+      "comment": "適切に反映済み。globalThisパターンの詳細（declare global { var __tmuxCaptureCache: Map<string, CacheEntry> | undefined; } + globalThis.__tmuxCaptureCache ?? (globalThis.__tmuxCaptureCache = new Map()) 初期化パターン）が実装タスクに明記。既存の同一パターンモジュール（auto-yes-manager/schedule-manager/version-checker）との整合性が確認できる。"
+    },
+    {
+      "id": "R3-008",
+      "status": "addressed",
+      "comment": "適切に反映済み。影響範囲テーブルにsrc/lib/session-cleanup.tsが「graceful shutdown時のキャッシュクリア追加（Facadeパターンの拡張）」として追加されている。"
+    },
+    {
+      "id": "R3-009",
+      "status": "addressed",
+      "comment": "適切に反映済み。ANSIエスケープシーケンス考慮が詳細に記載されている。行ベースslice（output.split('\\n').slice(-requestedLines).join('\\n')）の実装方法、stripAnsi()後段適用箇所では問題ない点、current-output APIのfullOutputフィールド等ANSI付き返却箇所での検証テスト設置の必要性が明記されている。"
+    },
+    {
+      "id": "R3-012",
+      "status": "addressed",
+      "comment": "適切に反映済み。isRunning()最適化A案（route.ts側でlistSessions()を1回呼び、結果のセッション名リストからcliTool.getSessionName(worktreeId)が含まれるかを直接判定、ICLIToolインターフェース変更不要）が実装タスクに明記。適用範囲がworktrees/route.tsおよびworktrees/[id]/route.tsの両方と明記（R5-001反映済み）。tmux.tsの既存listSessions() (L89-116) がTmuxSession[]を返す関数として既に存在しており、session.nameとのマッチングで実装可能であることを確認。"
+    }
+  ],
+  "new_items_from_stage5_reflection": [
+    {
+      "id": "R5-001",
+      "status": "addressed",
+      "comment": "Stage 6で適切に反映済み。実装タスクに「GET /api/worktrees/[id]: worktrees/route.tsと同等のlistSessions()一括取得・active CLI tool絞り込みを適用」が独立項目として追加。影響範囲テーブルのworktrees/[id]/route.tsの変更内容にlistSessions()1回呼び出しによるisRunning()判定が明記。受入条件にも「GET /api/worktrees/[id]にもlistSessions()一括取得が適用されていること」が追加されている。実コード（worktrees/[id]/route.ts L54-99）確認により、worktrees/route.ts L44-89と完全に同一のN+1パターンであることが裏付けられている。"
+    },
+    {
+      "id": "R5-002",
+      "status": "addressed",
+      "comment": "Stage 6で適切に反映済み。B案の漏れ防止策として3つの対策が追加: (1) CLAUDE.mdへの新規CLIツール追加時のキャッシュ無効化フック挿入ガイドライン追記、(2) ユニットテストに全CLIツールのsendMessage()後のキャッシュ無効化網羅的テスト追加、(3) 影響範囲テーブルのCLAUDE.md行にガイドライン追記を明記。"
+    }
+  ],
+  "impact_scope_assessment": {
+    "files_in_issue_impact_table": 19,
+    "files_verified_in_codebase": 14,
+    "missing_files_identified": [
+      {
+        "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+        "reason": "sendKeys()を直接呼び出しており、B案に基づくキャッシュ無効化フックの挿入が必要",
+        "severity": "should_fix"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/capture/route.ts",
+        "reason": "capturePane()を直接呼び出しており、キャッシュ対象外とする設計判断の注記が必要",
+        "severity": "should_fix"
+      }
+    ],
+    "correctly_excluded_files": [
+      {
+        "file": "src/lib/pasted-text-helper.ts",
+        "reason": "capturePane()を直接呼ぶが10行のみの取得で頻度も低く、キャッシュ対象外は妥当"
+      },
+      {
+        "file": "src/lib/schedule-manager.ts",
+        "reason": "tmux captureを直接使用せず、claude-executor経由の非インタラクティブ実行のみ。直接的な影響なし"
+      }
+    ],
+    "adequacy": "影響範囲テーブルは19ファイルにわたり概ね網羅的。terminal/route.tsのsendKeys()呼び出しとcapture/route.tsのcapturePane()直接呼び出しの2点が未記載だが、いずれも重大なリスクではない。"
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2,
+    "overall_quality": "high",
+    "comments": "Stage 3の影響範囲レビュー（1回目）で指摘されたmust_fix 2件（R3-001: auto-yes応答後のキャッシュ無効化タイミング、R3-002: captureSessionOutput()インターフェース互換性）は、Stage 4で適切に反映されている。try-finallyパターンの擬似コード、A案（キャッシュモジュール側でhasSessionチェック済みフラグ管理）の詳細設計、受入条件への追加が確認できる。\n\nShould Fix 6件（R3-005, R3-006, R3-007, R3-008, R3-009, R3-012）も全て反映済み。Stage 5（通常レビュー2回目）のshould_fix 2件（R5-001, R5-002）もStage 6で反映済み。\n\n新規指摘はshould_fix 2件、nice_to_have 2件のみ。最も重要な指摘はR7-002（terminal/route.tsのsendKeys()後のキャッシュ無効化フック漏れ）であるが、これはユーザーのターミナル直接操作後のステータス反映遅延（最大キャッシュTTL=2秒）に限定されるため、実装時に対応可能な粒度である。\n\n影響範囲テーブルは19ファイルにわたり十分に網羅的であり、キャッシュ無効化フックの挿入箇所、listSessions()最適化の適用範囲、globalThisパターン準拠、ANSI考慮、テスト戦略がいずれも具体的に記載されている。Issueは実装着手可能な品質に達している。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "lines": "L78",
+      "relevance": "sendKeys(sessionName, command)の直接呼び出し。キャッシュ無効化フック挿入候補（R7-002）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/capture/route.ts",
+      "lines": "L70",
+      "relevance": "capturePane(sessionName, safeLines)の直接呼び出し。キャッシュ層をバイパスする設計（R7-001）"
+    },
+    {
+      "file": "src/lib/cli-tools/base.ts",
+      "lines": "L64-67",
+      "relevance": "BaseCLITool.interrupt()のsendSpecialKey(Escape)呼び出し。キャッシュ無効化の対象候補（R7-004）"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "L61-120",
+      "relevance": "cleanupWorktreeSessions()内でのキャッシュクリア粒度（R7-003）"
+    },
+    {
+      "file": "src/lib/cli-session.ts",
+      "lines": "L38-72",
+      "relevance": "captureSessionOutput()のインターフェース。キャッシュ導入の主要対象。インターフェース非変更方針が確認済み（R3-002 addressed）"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "L576-636",
+      "relevance": "detectAndRespondToPrompt()内のsendPromptAnswer()呼び出し。try-finallyキャッシュクリアの挿入ポイントが確認済み（R3-001 addressed）"
+    },
+    {
+      "file": "src/lib/tmux.ts",
+      "lines": "L89-116",
+      "relevance": "listSessions()関数。isRunning()最適化A案で使用。TmuxSession[]を返す既存関数（R3-012 addressed）"
+    },
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "lines": "L44-89",
+      "relevance": "N+1パターンの主要箇所。全5ツールへのisRunning() + captureSessionOutput()ループ。listSessions()最適化の適用対象"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "L54-99",
+      "relevance": "worktrees/route.tsと同一のN+1パターン。Stage 6でlistSessions()最適化の適用範囲に明記済み（R5-001 addressed）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール説明テーブル更新、新規CLIツール追加時のキャッシュ無効化フック挿入ガイドライン追記が計画済み"
+    }
+  ]
+}

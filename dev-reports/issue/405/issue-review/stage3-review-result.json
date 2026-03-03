@@ -1,0 +1,185 @@
+{
+  "issue_number": 405,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-04",
+  "review_items": [
+    {
+      "id": "R3-001",
+      "severity": "must_fix",
+      "category": "reliability",
+      "title": "auto-yes-managerのキャッシュ利用がプロンプト検出の二重応答リスクを生む",
+      "description": "auto-yes-manager.ts の captureAndCleanOutput() (L503-512) は captureSessionOutput() を呼んでプロンプト検出を行い、検出されたプロンプトに自動応答する。\n\nキャッシュ導入後、以下の競合シナリオが発生し得る:\n1. auto-yes pollerが t=0 でキャッシュ書き込み（プロンプト検出、応答送信）\n2. t=0.5秒後に current-output API がキャッシュヒット（同じプロンプトが表示される）\n3. UIがプロンプトを表示、ユーザーが手動で応答しようとする\n4. しかし実際にはauto-yesが既に応答済みで、ユーザーの入力がCLIの通常入力として送信される\n\nこれはキャッシュ無効化で部分的に対処されるが、Issueの「auto-yes応答直後: 該当セッションのキャッシュをクリア」だけでは不十分。detectAndRespondToPrompt() (L576-636) 内の sendPromptAnswer() 呼び出し後、キャッシュクリアされる前に他のAPIがキャッシュを読む時間窓が存在する。",
+      "suggestion": "detectAndRespondToPrompt()の sendPromptAnswer() 呼び出しの直前（応答送信前）にキャッシュをクリアするのではなく、直後にクリアする設計を明記すべき。さらに、キャッシュクリアはsendPromptAnswer()の成功・失敗に関わらず実行されるべき（try-finally パターン）。\n\n実装タスクに「auto-yes応答後のキャッシュ無効化タイミングの詳細設計」を追加し、sendPromptAnswer()→キャッシュクリア→scheduleNextPoll()の順序を明記すること。\n\nまた、prompt-answer-sender.ts内のsendKeys()/sendSpecialKeys()呼び出しもキャッシュ無効化のフック対象に含める必要がある（現在のIssueではsendKeys()のみ言及）。",
+      "affected_section": "提案する解決策 > 1. キャッシュ無効化戦略"
+    },
+    {
+      "id": "R3-002",
+      "severity": "must_fix",
+      "category": "compatibility",
+      "title": "captureSessionOutput()内のhasSession()二重呼び出しをキャッシュでスキップする場合のエラーハンドリング変更",
+      "description": "現在の cli-session.ts captureSessionOutput() (L38-72) は、capturePane()の前に hasSession() でセッション存在確認を行い、存在しない場合は明確なエラーメッセージ（`${cliTool.name} session ${sessionName} does not exist`）をthrowする。\n\nIssueの影響範囲テーブルで「src/lib/cli-session.ts: キャッシュ利用時のhasSession()スキップ」と記載されているが、このhasSession()をスキップした場合:\n1. キャッシュヒット時: 問題なし（セッションが存在していた時点のデータが返る）\n2. キャッシュミス時: capturePane()が直接呼ばれ、セッション不在時にtmuxエラー（`Failed to capture pane: ...`）がthrowされる\n\n呼び出し元（auto-yes-manager、response-poller、各API route）はcaptureSessionOutput()のエラーメッセージやエラーパターンに依存している可能性がある。エラーメッセージの変更は呼び出し元のcatchロジックに影響する。",
+      "suggestion": "以下の設計方針を明記すべき:\n\nA案: キャッシュモジュール側でhasSessionチェック済みフラグを管理し、captureSessionOutput()のインターフェースは変更しない（推奨）\nB案: captureSessionOutput()にオプショナルな skipExistenceCheck パラメータを追加\n\nいずれの場合も、セッション不在時のエラーメッセージの後方互換性を保証するテストを受入条件に追加すべき。",
+      "affected_section": "影響範囲テーブル > src/lib/cli-session.ts"
+    },
+    {
+      "id": "R3-003",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "response-pollerのキャッシュ利用が応答抽出の正確性に影響する可能性",
+      "description": "response-poller.ts の checkForResponse() (L1031付近) は captureSessionOutput(worktreeId, cliToolId, 10000) を呼び出し、その結果からレスポンス抽出・プロンプト検出を行う。\n\nresponse-pollerは独自のポーリングループ（setTimeoutベース）を持ち、前回のcapture結果（lastCapturedLine）との差分で新しい出力を検出する。キャッシュを介した場合:\n\n1. t=0: response-pollerがcapture→キャッシュに書き込み（10000行、TTL=2秒）\n2. t=0.3: auto-yes-managerがcapture→キャッシュヒット（5000行要求→10000行の末尾5000行を返却）\n3. t=1.5: auto-yesが応答→キャッシュクリア\n4. t=2: response-pollerがcapture→フレッシュ取得（auto-yesの応答が含まれた新しい出力）\n\n上記フローでは問題ないが、auto-yesの応答後にキャッシュクリアされない場合、response-pollerはt=2のポーリングでまだ古いキャッシュを読み、auto-yesの応答結果を見逃す可能性がある。",
+      "suggestion": "response-pollerに対するキャッシュの影響を実装タスクに明記すべき。特に、response-pollerのextractResponse()がlastCapturedLineとの差分計算に依存している点から、キャッシュヒット時にlastCapturedLineの更新が正しく行われるかの検証が必要。\n\nresponse-pollerは比較的長い間隔（~2秒）でポーリングするため、TTL=2秒のキャッシュでは多くのケースでキャッシュミスが発生する。キャッシュの恩恵は他のAPIとの重複排除に限定される可能性がある。この点を影響範囲分析に記載すべき。",
+      "affected_section": "影響範囲テーブル > src/lib/response-poller.ts"
+    },
+    {
+      "id": "R3-004",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "prompt-response APIのキャッシュバイパスとsendPromptAnswer後の競合",
+      "description": "prompt-response API (POST /api/worktrees/[id]/prompt-response) のL96で captureSessionOutput(params.id, cliToolId, 5000) を呼び出し、プロンプトがまだアクティブかを再検証する。Issueでは「キャッシュバイパスオプション」が提案されている。\n\nしかし、prompt-response APIとauto-yes-managerは同時にプロンプトに応答しようとする可能性がある:\n1. auto-yes pollerがプロンプト検出→sendPromptAnswer()→キャッシュクリア\n2. ほぼ同時にユーザーがUI操作→prompt-response API→キャッシュバイパスでフレッシュ取得→プロンプトがまだ残っている（tmuxの出力はまだ更新されていない）→二重応答\n\nこの問題はキャッシュ有無に関わらず元々存在するが、キャッシュバイパスによりauto-yes応答後の「古い出力」を取得する確率が上がる。",
+      "suggestion": "この競合はキャッシュ設計ではなくauto-yesとprompt-responseの根本的な排他制御の問題であるため、Issue #405のスコープ外として明記するか、軽減策として「prompt-response APIがauto-yesのlastServerResponseTimestampをチェックし、直近N秒以内にauto-yesが応答済みの場合はプロンプト応答をスキップする」ガードの検討を推奨。\n\nIssueの「キャッシュバイパスオプション」について、バイパス時にフレッシュ取得した結果をキャッシュに書き戻すかどうかの設計も明記すべき（書き戻す場合、他の呼び出し元がフレッシュデータを取得できる利点がある）。",
+      "affected_section": "影響範囲テーブル > src/app/api/worktrees/[id]/prompt-response/route.ts"
+    },
+    {
+      "id": "R3-005",
+      "severity": "should_fix",
+      "category": "compatibility",
+      "title": "tmux.ts sendKeys()へのキャッシュ無効化フック挿入がIssue #393のexecFile()移行と整合するか",
+      "description": "Issue #405のキャッシュ無効化戦略では「sendKeys()呼び出し時に該当セッションのキャッシュをクリア」とされている。しかし、tmux.ts のsendKeys() (L210-227) はIssue #393でexecFile()に移行済みであり、関数シグネチャは (sessionName, keys, sendEnter) となっている。\n\nキャッシュ無効化の実装方法として以下が考えられるが、いずれもtmux.tsの責務に影響する:\n\nA案: sendKeys()内部でキャッシュクリアを呼ぶ → tmux.tsがキャッシュモジュールに依存する循環依存リスク\nB案: 呼び出し元（prompt-answer-sender.ts、cli-tools/*.ts）でキャッシュクリアを呼ぶ → 全呼び出し元の修正が必要、漏れリスク\nC案: tmux.tsの上位に薄いラッパー層を設ける → アーキテクチャ変更\n\n同様に killSession() (L371-389) へのフック挿入も同じ問題がある。",
+      "suggestion": "実装タスクに「キャッシュ無効化のフック挿入箇所の設計」を追加すべき。推奨はB案（呼び出し元での明示的キャッシュクリア）で、以下の箇所を網羅的に列挙すること:\n\n1. prompt-answer-sender.ts: sendKeys()/sendSpecialKeys()の後\n2. claude-session.ts: sendMessageToClaude()内のsendKeys()後、stopClaudeSession()内\n3. cli-tools/codex.ts: sendMessage()内\n4. cli-tools/gemini.ts: sendMessage()内\n5. cli-tools/opencode.ts: sendMessage()内、killSession()内\n6. cli-tools/vibe-local.ts: sendMessage()内\n7. session-cleanup.ts: セッション停止時\n\nこれらの修正箇所を影響範囲テーブルに追加すべき。",
+      "affected_section": "影響範囲テーブル / 実装タスク"
+    },
+    {
+      "id": "R3-006",
+      "severity": "should_fix",
+      "category": "test",
+      "title": "既存テストのcaptureSessionOutputモック箇所への影響が大きい",
+      "description": "テストコードでcaptureSessionOutputをモックしている箇所は少なくとも10ファイル存在し、特にauto-yes-manager.test.tsでは90箇所以上のvi.mocked(captureSessionOutput)呼び出しがある。\n\n影響パターン:\n1. captureSessionOutput()のシグネチャが変更された場合（キャッシュオプション追加等）: 全モック定義の更新が必要\n2. キャッシュモジュールが新規追加された場合: テストでキャッシュモジュールのモックが必要になる可能性\n3. captureSessionOutput()がキャッシュを内部で使用する場合: 既存テストでは直接tmuxを呼ぶ前提のモックが設定されているため、キャッシュレイヤーが介在するとモックの挙動が変わる可能性\n\n影響ファイル:\n- tests/unit/lib/auto-yes-manager.test.ts (90+ 箇所)\n- tests/unit/lib/claude-session.test.ts (capturePane直接モック)\n- tests/unit/capture-route.test.ts (capturePane直接モック)\n- tests/unit/api/prompt-response-verification.test.ts\n- tests/integration/trust-dialog-auto-response.test.ts\n- tests/integration/issue-265-acceptance.test.ts\n- tests/integration/api-hooks.test.ts\n- src/lib/__tests__/assistant-response-saver.test.ts",
+      "suggestion": "キャッシュ導入の設計方針として、captureSessionOutput()のインターフェースを変更しない（内部実装のみ変更する）アプローチを推奨。これにより既存テストの修正を最小化できる。\n\n具体的には:\n- captureSessionOutput()は引き続き同じシグネチャで呼び出し可能\n- 内部でキャッシュモジュールを参照し、キャッシュヒット時はtmux呼び出しをスキップ\n- テストではキャッシュモジュールをモックするか、TTL=0に設定してキャッシュを無効化\n\n受入条件に「既存テストが変更なしでパスすること」を追加することを推奨。",
+      "affected_section": "実装タスク > ユニットテスト"
+    },
+    {
+      "id": "R3-007",
+      "severity": "should_fix",
+      "category": "compatibility",
+      "title": "globalThisパターンとの整合性 - キャッシュの宣言と初期化",
+      "description": "プロジェクトでは以下のglobalThisパターンが確立されている:\n\n- auto-yes-manager.ts: globalThis.__autoYesStates, globalThis.__autoYesPollerStates\n- schedule-manager.ts: globalThis.__scheduleManagerStates\n- claude-executor.ts: globalThis.__scheduleActiveProcesses\n- version-checker.ts: globalThis.__versionCheckCache\n\nいずれも `declare global { var __xxxxx: Type | undefined; }` + `const xxx = globalThis.__xxxxx ?? (globalThis.__xxxxx = initialValue)` のパターンを使用。\n\nnew tmux-capture-cache.ts もこのパターンに従う必要があるが、Issueでは globalThis の使用有無について明示的な記載がない。",
+      "suggestion": "実装タスクまたは設計方針に以下を明記すべき:\n\n1. キャッシュはglobalThisパターンを使用する（Next.js hot reload対応）\n2. declare globalの型定義: `var __tmuxCaptureCache: Map<string, CacheEntry> | undefined`\n3. stopAllSchedules()やgraceful shutdown時のキャッシュクリアをsession-cleanup.tsに追加\n\n既存のglobalThisパターンとの整合性を保つため、CLAUDE.mdのモジュール説明にもglobalThisキャッシュの記述を含めること。",
+      "affected_section": "実装タスク > tmux captureキャッシュモジュール作成"
+    },
+    {
+      "id": "R3-008",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "schedule-managerはtmux captureを使用していないが、claude-executor経由の影響がある",
+      "description": "schedule-manager.ts自体はcaptureSessionOutput()やcapturePane()を呼び出していない（executeClaudeCommand()による非インタラクティブ実行のみ）。したがって、tmux captureキャッシュの直接的な影響はない。\n\nしかし、schedule-managerが同じglobalThisパターンを使用しており、サーバー停止時のstopAllSchedules()がstopAllAutoYesPolling()と同じタイミングで呼ばれる（session-cleanup.ts経由）。キャッシュのクリーンアップもこのタイミングに含める必要がある。",
+      "suggestion": "影響範囲テーブルからschedule-managerを除外するか、「直接的な影響なし、graceful shutdownのクリーンアップ対象としてのみ関連」と明記すべき。\n\nまた、session-cleanup.ts（Facadeパターン）にキャッシュクリアを追加する実装タスクを記載すること。現在の影響範囲テーブルにsession-cleanup.tsが含まれていないが、追加が必要。",
+      "affected_section": "影響範囲テーブル"
+    },
+    {
+      "id": "R3-009",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "A案（最大行数キャッシュ+sliceで対応）のslice操作がcaptureSessionOutput()の呼び出し元に透過的でない可能性",
+      "description": "Issue記載のA案では「10,000行でキャッシュし、100行要求時はキャッシュ済み10,000行の末尾100行をsliceで返却」とある。\n\nしかし、captureSessionOutput()は内部でcapturePane(sessionName, { startLine: -lines })を呼び出しており、tmuxの capturePane はstartLine=-100で「最後の100行」を取得する。キャッシュ済み10,000行の末尾100行をsliceで取得した結果は、tmuxのstartLine=-100で取得した結果と内容的に同等だが、以下の差異がある:\n\n1. tmuxのcaptureは-eフラグ付き（ANSI escape sequences preserved）で取得されるため、10,000行の末尾100行には行頭のANSIリセットシーケンスが含まれない可能性がある\n2. capturePane()のstartLine=-100は「現在のカーソル位置から100行前」であり、10,000行キャッシュ時点のカーソル位置と100行取得時点のカーソル位置が異なる可能性（ただしTTL=2秒以内のため実質的影響は小さい）",
+      "suggestion": "A案のslice対応について、行ベースのslice（output.split('\\n').slice(-requestedLines).join('\\n')）で問題がないかの検証を受入条件に追加すべき。\n\n特に、ANSIエスケープシーケンスが行をまたぐ場合（tmux -eフラグによるANSI preserveモード）の挙動を確認するテストが望ましい。実際には、stripAnsi()が後段で呼ばれるためANSIの差異は問題にならない可能性が高いが、current-output APIのfullOutputフィールドなどANSI付きで返却される箇所では影響あり。",
+      "affected_section": "提案する解決策 > 1. > captureLines行数差異への対応方針"
+    },
+    {
+      "id": "R3-010",
+      "severity": "nice_to_have",
+      "category": "impact",
+      "title": "影響範囲テーブルに不足しているファイル",
+      "description": "影響範囲テーブルに以下のファイルが含まれていない:\n\n1. src/lib/session-cleanup.ts: graceful shutdownでのキャッシュクリア追加（Facadeパターンの拡張）\n2. src/lib/prompt-answer-sender.ts: sendKeys()/sendSpecialKeys()後のキャッシュ無効化（B案採用時）\n3. src/lib/claude-session.ts: sendMessageToClaude()/stopClaudeSession()内のsendKeys()/killSession()後のキャッシュ無効化\n4. src/lib/cli-tools/codex.ts, gemini.ts, opencode.ts, vibe-local.ts: sendMessage()/killSession()内のキャッシュ無効化\n5. src/lib/pasted-text-helper.ts: capturePane()を直接呼び出す箇所（L51）がキャッシュ対象になるか",
+      "suggestion": "影響範囲テーブルを以下で補完すべき:\n\n| ファイル | 変更内容 |\n|---------|----------|\n| src/lib/session-cleanup.ts | graceful shutdown時のキャッシュクリア追加 |\n| src/lib/prompt-answer-sender.ts | sendKeys/sendSpecialKeys後のキャッシュクリア（検討） |\n| src/lib/claude-session.ts | sendMessageToClaude/stopClaudeSession後のキャッシュクリア |\n| src/lib/cli-tools/*.ts | 各ツールのsendMessage/killSession後のキャッシュクリア |\n\nなお、pasted-text-helper.tsのcapturePane()は10行のみの取得で頻度も低いため、キャッシュ対象外としてよい。",
+      "affected_section": "影響範囲テーブル"
+    },
+    {
+      "id": "R3-011",
+      "severity": "nice_to_have",
+      "category": "security",
+      "title": "キャッシュ内のセッション出力にセンシティブ情報が含まれる可能性",
+      "description": "tmux captureの出力にはCLIツールが処理するコード・設定ファイル・環境変数などセンシティブな情報が含まれる可能性がある。キャッシュはglobalThisに保持されるため、メモリ上に残留する時間がTTL分だけ延長される。\n\n現行のcaptureSessionOutput()はデータを保持せず即座に返却するため、メモリ上の残留時間は短い。キャッシュ導入によりTTL=2秒間メモリに保持されるが、元々tmuxのscrollbackバッファ自体がメモリ上に存在するため、セキュリティリスクの実質的な増加は限定的。",
+      "suggestion": "セキュリティ影響は軽微だが、キャッシュモジュールのJSDocに以下を記載すべき:\n- キャッシュにはtmuxセッション出力が含まれ、センシティブ情報を含む可能性がある\n- TTL切れ後はMap.delete()で参照を解放し、GC対象とする\n- graceful shutdown時にclear()で全キャッシュを即時解放する",
+      "affected_section": "提案する解決策 > 1. tmux captureキャッシュ導入"
+    },
+    {
+      "id": "R3-012",
+      "severity": "nice_to_have",
+      "category": "impact",
+      "title": "isRunning()最適化（tmux list-sessions一括取得）の影響範囲がCLIToolインターフェースに及ぶ",
+      "description": "Issueの実装タスクに「tmux list-sessionsの一括取得によるN+1解消」が含まれている。現在の全5 CLIツールのisRunning()はそれぞれtmux.hasSession()を個別に呼び出す。これをtmux.listSessions()の一括取得に変更する場合:\n\n1. tmux.tsのlistSessions()は既に存在する（L89-116）ため、新規関数は不要\n2. しかし、各CLIツールのisRunning()はICLITool interfaceで定義されている（types.ts L42）\n3. 一括取得パターンでは、isRunning()の呼び出し元（route.ts）でlistSessions()を1回呼び、結果をCLIツールに渡す設計が必要\n4. これはICLIToolインターフェースの変更（isRunning()にオプショナルなセッションリストを渡す等）を伴う可能性がある",
+      "suggestion": "isRunning()最適化の設計方針として、以下のいずれかを検討：\n\nA案: route.ts側でlistSessions()を1回呼び、結果のセッション名リストからcliTool.getSessionName(worktreeId)が含まれるかを直接判定する（ICLIToolインターフェース変更不要）\nB案: ICLITool interfaceにisRunningBatch()を追加\n\nA案が最もインターフェース変更が少なく推奨。影響範囲テーブルのtmux.tsの記載を「list-sessions一括取得関数の追加検討」から「route.tsでlistSessions()結果を利用する設計」に修正すべき。",
+      "affected_section": "影響範囲テーブル > src/lib/tmux.ts / 実装タスク"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 7,
+    "nice_to_have_count": 3,
+    "overall_quality": "medium",
+    "comments": "Issue #405のStage 2更新により、キャッシュ設計の方針（A案採用、メモリ見積もり、キャッシュ無効化戦略）が大幅に改善された。しかし、影響範囲レビューの観点から、以下の重要な課題が残っている:\n\n1. **auto-yesの二重応答リスク（R3-001: must_fix）**: キャッシュ無効化のタイミングが応答送信の直後に確実に実行される保証がない。sendPromptAnswer()→キャッシュクリアの原子的な実行順序の設計が必要。\n\n2. **captureSessionOutput()のインターフェース互換性（R3-002: must_fix）**: hasSession()スキップによるエラーメッセージの変更が、既存の10ファイル以上のテストモックに影響する。インターフェース非変更の方針を明記すべき。\n\n3. **キャッシュ無効化フックの挿入箇所（R3-005, R3-010）**: sendKeys()呼び出し箇所は tmux.ts 直接だけでなく、prompt-answer-sender.ts、claude-session.ts、各cli-tools/*.tsにも分散しており、影響範囲テーブルへの追記が必要。\n\n4. **既存テストへの影響（R3-006）**: auto-yes-manager.test.tsだけで90箇所以上のモック呼び出しがあり、captureSessionOutput()のインターフェース変更は大きな修正コストを伴う。\n\n全体として、Issueの問題定義と解決策の方向性は妥当だが、キャッシュ無効化の詳細設計と影響範囲の網羅性に改善の余地がある。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "L503-512 (captureAndCleanOutput), L576-636 (detectAndRespondToPrompt)",
+      "relevance": "auto-yes応答後のキャッシュ無効化タイミングが二重応答リスクに直結"
+    },
+    {
+      "file": "src/lib/cli-session.ts",
+      "lines": "L38-72 (captureSessionOutput)",
+      "relevance": "キャッシュ導入の主要インターフェース。hasSession()スキップの影響"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "L1031",
+      "relevance": "10000行captureのキャッシュ利用。lastCapturedLineとの差分計算への影響"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "lines": "L96",
+      "relevance": "キャッシュバイパス対象。auto-yesとの競合シナリオ"
+    },
+    {
+      "file": "src/lib/prompt-answer-sender.ts",
+      "lines": "L9 (import sendKeys/sendSpecialKeys)",
+      "relevance": "キャッシュ無効化フック挿入候補。影響範囲テーブルに未記載"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "graceful shutdown時のキャッシュクリア追加が必要。影響範囲テーブルに未記載"
+    },
+    {
+      "file": "src/lib/tmux.ts",
+      "lines": "L89-116 (listSessions), L210-227 (sendKeys), L371-389 (killSession)",
+      "relevance": "isRunning()最適化でlistSessions()利用、sendKeys/killSessionへのキャッシュ無効化フック"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "relevance": "90+ captureSessionOutputモック箇所。インターフェース変更時に全修正必要"
+    },
+    {
+      "file": "src/lib/assistant-response-saver.ts",
+      "lines": "L243",
+      "relevance": "SESSION_OUTPUT_BUFFER_SIZE=10000行のcapture。キャッシュ利用候補"
+    },
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "lines": "L44-78",
+      "relevance": "N+1パターンの主要箇所。isRunning()一括取得の影響"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "L54-99",
+      "relevance": "個別worktreeのstatus取得。route.tsと同様のN+1パターン"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール説明テーブル更新。新規tmux-capture-cache.ts追加、既存モジュールのIssue #405変更反映"
+    }
+  ]
+}

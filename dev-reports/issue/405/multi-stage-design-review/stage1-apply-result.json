@@ -1,0 +1,64 @@
+{
+  "issue_number": 405,
+  "stage": 1,
+  "stage_name": "通常レビュー指摘反映",
+  "applied_items": [
+    {
+      "review_id": "DR1-005",
+      "severity": "must_fix",
+      "status": "applied",
+      "changes_made": "セクション3.3にClaudeTool HealthCheck統合の具体的な実装擬似コードを追加。listSessions()でセッション存在を確認後、cliToolId === 'claude'の場合のみisSessionHealthy(sessionName)を追加呼び出しする分岐ロジックを明記。HealthCheck失敗時はisRunning=falseとして扱い、ensureHealthySession()は呼ばない（route.tsの責務外）設計根拠も記載。"
+    },
+    {
+      "review_id": "DR1-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.1.5のsingleflightパターン冒頭に、将来的なsingleflight.ts汎用ユーティリティへの分離検討に関するコメントブロックを追記。schedule-manager.ts/version-checker.ts等での再利用を想定し、分離コストの低さと現インターフェースの拡張容易性を明記。"
+    },
+    {
+      "review_id": "DR1-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.4（キャッシュ無効化設計）のセクション3.4.2の前に、sendKeysAndInvalidate()薄いラッパー関数による集約をPhase 4実装時に再評価する旨のコメントブロックを追記。tmux-cache-bridge.tsの例示と、B案のまま/ラッパー方式切替の判断基準を明記。"
+    },
+    {
+      "review_id": "DR1-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.2（captureSessionOutput()の変更）の末尾に、キャッシュモジュールのimportを明確に分離しDI移行の余地を意識する旨の注記ブロックを追記。fetchFnコールバックパターンが既にDI的構造を持つこと、getOrFetchCapture自体を引数として外部注入する拡張の余地を明記。"
+    },
+    {
+      "review_id": "DR1-008",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.4.3にcaptureSessionOutputFresh()の完全な関数設計を明記。B方式（別関数として新設）を採用し、capturePane()直接呼び出し + setCachedCapture()書き戻しの実装擬似コードを追加。A方式（bypassCacheオプション）を不採用とした理由（既存テスト90箇所への影響）も記載。"
+    },
+    {
+      "review_id": "DR1-011",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "セクション3.5にcapture/route.tsのhasSession()コストが問題にならない根拠を追記。N+1パターンとの根本的な違い（個別worktreeのみ）、1リクエスト/ポーリングサイクルの呼び出し頻度、capturePane()コストとの相対比較、将来的なlistSessions()キャッシュ導入の可能性を4点で明記。"
+    }
+  ],
+  "skipped_items": [],
+  "summary": {
+    "total_items": 6,
+    "applied_count": 6,
+    "skipped_count": 0,
+    "design_doc_updated": true,
+    "comments": "must_fix 1件（DR1-005: ClaudeTool HealthCheck統合の擬似コード追加）、should_fix 5件（DR1-001, DR1-002, DR1-004, DR1-008, DR1-011）を全て設計方針書に反映完了。nice_to_have 5件（DR1-003, DR1-006, DR1-007, DR1-009, DR1-010）はレビュー指摘事項サマリーテーブルに記録済み。実装チェックリストにPhase別のアクション項目を追加。ソースコードの変更は行っていない。"
+  },
+  "design_doc_path": "dev-reports/design/issue-405-tmux-capture-optimization-design-policy.md",
+  "sections_updated": [
+    "3.1.5 singleflightパターン（DR1-001: 将来的な分離検討コメント追加）",
+    "3.2 captureSessionOutput()の変更（DR1-004: DI移行の余地に関する注記追加）",
+    "3.3 isRunning()最適化（DR1-005: ClaudeTool HealthCheck統合の実装擬似コード追加）",
+    "3.4 キャッシュ無効化設計（DR1-002: sendKeysAndInvalidate()ラッパー再評価コメント追加）",
+    "3.4.3 prompt-response APIのキャッシュバイパス（DR1-008: captureSessionOutputFresh()関数設計追加）",
+    "3.5 capture/route.tsの設計判断（DR1-011: hasSession()コストの正当性根拠追加）",
+    "12. レビュー履歴（新規セクション）",
+    "13. レビュー指摘事項サマリー（新規セクション）",
+    "14. 実装チェックリスト（新規セクション）"
+  ],
+  "timestamp": "2026-03-04T00:00:00Z"
+}

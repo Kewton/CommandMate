@@ -1,0 +1,147 @@
+{
+  "issue_number": 405,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "status": "conditionally_approved",
+  "score": 4,
+  "review_items": [
+    {
+      "id": "DC2-001",
+      "severity": "must_fix",
+      "category": "design_code",
+      "title": "sliceOutput()関数の定義が設計書に欠落",
+      "description": "設計書セクション3.1.5のgetOrFetchCapture()とセクション3.4.3のcaptureSessionOutputFresh()でsliceOutput()関数を使用しているが、この関数のインターフェース定義（シグネチャ、引数、戻り値、行ベースsliceのロジック）が設計書のどこにも定義されていない。Issue本文の「A案を採用: 最大行数でキャッシュしsliceで対応」に記述はあるが、設計書セクション3.1.1のインターフェース設計にsliceOutput()がexport関数として列挙されていない。",
+      "suggestion": "セクション3.1.1のインターフェース設計にsliceOutput()関数の定義を追加する。例: export function sliceOutput(fullOutput: string, requestedLines: number): string; また、行ベースsliceのロジック（output.split('\\n').slice(-requestedLines).join('\\n')）をJSDocで明記し、requestedLines >= capturedLinesの場合はそのまま返却する旨を記載する。",
+      "affected_section": "3.1.1 インターフェース設計"
+    },
+    {
+      "id": "DC2-002",
+      "severity": "must_fix",
+      "category": "design_code",
+      "title": "HealthCheckResultのプロパティ名不一致: healthy vs. 設計書のhealthResult.healthy",
+      "description": "設計書セクション3.3のDR1-005コードサンプル（L318-319）で 'const healthResult = await isSessionHealthy(sessionName); if (!healthResult.healthy)' と記述している。実際のHealthCheckResult interface（claude-session.ts L284-287）は 'healthy: boolean' プロパティを持つため、プロパティ名自体は一致している。しかし、設計書では 'isSessionHealthy' の import元を '@/lib/claude-session' と明記しているが、この関数は @internal exportであり、route.tsから直接使用することが設計上適切かどうか（@internal の意味合いとの矛盾）が設計書内で言及されていない。",
+      "suggestion": "設計書のDR1-005実装設計において、isSessionHealthy()が現在 @internal export である点を認識し、以下のいずれかを明記する: (a) @internal アノテーションをproduction exportに変更する設計判断を追記する、または (b) route.tsからの直接呼び出しではなく、ClaudeTool.isRunning()の内部実装としてHealthCheckを含める設計に変更する。",
+      "affected_section": "3.3 isRunning()最適化（listSessions一括取得）"
+    },
+    {
+      "id": "DC2-003",
+      "severity": "should_fix",
+      "category": "design_code",
+      "title": "captureSessionOutput()の既存ログ出力との整合性",
+      "description": "現在のcaptureSessionOutput()（cli-session.ts L43-71）はlogger.withContext()を使用してdebugログ（start, sessionNotFound, success, failed）を出力している。設計書セクション3.2の変更後コードサンプルにはlogger呼び出しが含まれていない。キャッシュ統合後もログ出力を維持する必要があるが、キャッシュヒット時のログ（例: 'captureSessionOutput:cacheHit'）とキャッシュミス時のログの設計が記載されていない。",
+      "suggestion": "設計書セクション3.2のcaptureSessionOutput()変更設計に、ログ出力の方針を追記する。少なくとも (1) キャッシュヒット時のdebugログ（sessionName, requestedLines, cacheAge）、(2) キャッシュミス時の既存ログパターン維持、(3) getOrFetchCapture()内部のsingleflightヒット時のdebugログ、を明記する。",
+      "affected_section": "3.2 captureSessionOutput()の変更"
+    },
+    {
+      "id": "DC2-004",
+      "severity": "should_fix",
+      "category": "design_code",
+      "title": "captureSessionOutput()変更後コードでのエラーハンドリング不一致",
+      "description": "現在のcaptureSessionOutput()（cli-session.ts L67-71）はcapturePane()のエラーを 'Failed to capture {cliTool.name} output: {errorMessage}' 形式で再throwする。設計書セクション3.2の変更後コードでは、fetchFn内でエラーが発生した場合のcatchブロックが記載されておらず、getOrFetchCapture()のPromiseが直接rejectする設計になっている。これにより既存のエラーメッセージ形式（'Failed to capture ...'）が失われ、後方互換性が崩れる可能性がある。",
+      "suggestion": "設計書セクション3.2のfetchFn内にtry-catchを追加し、capturePane()エラー時に既存形式のエラーメッセージ（'Failed to capture {cliTool.name} output: {errorMessage}'）を維持するか、getOrFetchCapture()の呼び出し側でエラーメッセージを変換する設計を明記する。",
+      "affected_section": "3.2 captureSessionOutput()の変更"
+    },
+    {
+      "id": "DC2-005",
+      "severity": "should_fix",
+      "category": "design_code",
+      "title": "route.tsのisRunning()がcliTool.isRunning()を呼び出す設計と整合性問題",
+      "description": "設計書セクション3.3では、route.ts側でlistSessions()を呼び出しsessionNames.has()でO(1)判定する設計となっている。しかし、現在のworktrees/route.ts（L46）およびworktrees/[id]/route.ts（L56）ではcliTool.isRunning(worktree.id)を呼び出している。cliTool.isRunning()はICLIToolインターフェースのメソッドであり、各CLIツール実装内部でhasSession()を呼び出す。設計書はICLIToolインターフェース変更不要と明記しているが、route.ts側でcliTool.isRunning()の呼び出しをやめてsessionNames.has()に置き換える場合、ClaudeTool固有のHealthCheckロジック（isClaudeRunning()内のisSessionHealthy()呼び出し）を別途実装する必要がある。この代替パスの具体的な実装コードが設計書DR1-005に記載されているが、HealthCheckの呼び出し頻度が変わる点（現在: isClaudeRunning毎回呼び出し → 変更後: listSessions結果にsessionNameがある場合のみ呼び出し）の影響が分析されていない。",
+      "suggestion": "設計書セクション3.3に、HealthCheck呼び出し頻度の変化に関する影響分析を追記する。現在はisClaudeRunning()内で常にcapturePane()+パターンマッチが実行されているが、変更後はlistSessions()でセッション存在が確認できた場合のみisSessionHealthy()が呼ばれる。セッション不在時のHealthCheckスキップは問題ないが、セッション存在時の動作が同等であることの確認を明記する。",
+      "affected_section": "3.3 isRunning()最適化"
+    },
+    {
+      "id": "DC2-006",
+      "severity": "should_fix",
+      "category": "design_claude_md",
+      "title": "CLAUDE.mdのcli-session.tsモジュール説明にcaptureSessionOutputFresh()の言及がない",
+      "description": "設計書セクション3.4.3でcaptureSessionOutputFresh()をcli-session.tsに新規関数として追加する設計となっている。CLAUDE.mdのモジュール説明テーブルにはcli-session.tsの記載がなく（captureSessionOutput, isSessionRunning, getSessionNameのみ暗黙的）、新関数追加に伴うCLAUDE.md更新の具体的な記載内容が設計書セクション11のファイル変更一覧でも 'captureSessionOutput()にキャッシュ統合' としか記載されていない。captureSessionOutputFresh()の追加が反映されていない。",
+      "suggestion": "設計書セクション11のcli-session.tsの変更内容を 'captureSessionOutput()にキャッシュ統合 + captureSessionOutputFresh()新規追加' に更新する。また、Phase 5のCLAUDE.md更新タスクに、cli-session.tsモジュール説明テーブルへのcaptureSessionOutputFresh()の記載追加を明記する。",
+      "affected_section": "11. ファイル変更一覧"
+    },
+    {
+      "id": "DC2-007",
+      "severity": "should_fix",
+      "category": "traceability",
+      "title": "Issue受入条件「非実行中CLIツールへの不要なtmux操作がスキップされること」の設計カバレッジ不足",
+      "description": "Issue #405の受入条件に「非実行中CLIツールへの不要なtmux操作がスキップされること」があるが、設計書ではlistSessions()一括取得によるisRunning()最適化（セクション3.3）のみ記載されており、「DBのworktreeレコードからactive CLI tool情報を事前取得し、isRunning()呼び出し対象を絞り込む」というIssue本文の実装タスクに対応する設計がセクション3には含まれていない。listSessions()最適化はtmux操作回数の削減であり、「非実行中CLIツールへのスキップ」とは異なるアプローチ。",
+      "suggestion": "設計書に、DBからのselectedAgents情報を使った事前フィルタリング設計を追記するか、listSessions()一括取得によって非実行中CLIツールのcaptureSessionOutput()が自然にスキップされる（sessionNames.has()がfalseになるため）ことで受入条件を充足する旨を明記する。",
+      "affected_section": "3.3 isRunning()最適化"
+    },
+    {
+      "id": "DC2-008",
+      "severity": "should_fix",
+      "category": "design_code",
+      "title": "prompt-response/route.tsのcaptureSessionOutputFresh()使用箇所の設計不足",
+      "description": "設計書セクション3.4.3のcaptureSessionOutputFresh()のユースケースはprompt-response/route.tsでの使用を想定しているが、現在のprompt-response/route.ts（L96）では captureSessionOutput(params.id, cliToolId, 5000) を呼び出している。設計書ではcaptureSessionOutputFresh()のデフォルト引数がlines: number = 5000となっているため行数は一致するが、route.ts側のisRunning()チェック（L79: cliTool.isRunning()）がcaptureSessionOutputFresh()内のhasSession()と重複する点について言及がない。",
+      "suggestion": "設計書セクション3.4.3のprompt-response/route.ts使用例に、既存のisRunning()チェック（L79）との関係を明記する。captureSessionOutputFresh()内でhasSession()を呼ぶため、route.ts側のisRunning()は別目的（ClaudeToolのHealthCheck含む）であることを注記するか、重複呼び出しの許容根拠を記載する。",
+      "affected_section": "3.4.3 prompt-response APIのキャッシュバイパス"
+    },
+    {
+      "id": "DC2-009",
+      "severity": "should_fix",
+      "category": "checklist",
+      "title": "Phase番号とチェックリストの不整合: captureSessionOutputFresh()はPhase 2だがチェックリストの記載位置が曖昧",
+      "description": "設計書セクション10の実装順序ではPhase 2が 'captureSessionOutput()統合' となっているが、セクション14のチェックリストにおけるDR1-008（captureSessionOutputFresh()の追加）は 'Phase 2実装時' と明記されている。一方、prompt-response/route.ts側の変更（DR1-008の2番目のチェック項目）は呼び出し元の変更であり、Phase 4（キャッシュ無効化）のスコープにも見える。Phase間の依存関係が明確でない。",
+      "suggestion": "セクション10の実装順序において、Phase 2のタスクリストに 'captureSessionOutputFresh()新規関数追加' と 'prompt-response/route.tsのcaptureSessionOutputFresh()呼び出し変更' を明示的に含める。Phase番号を含むタスク番号（例: 2-3, 2-4）で管理するとトレーサビリティが向上する。",
+      "affected_section": "10. 実装順序"
+    },
+    {
+      "id": "DC2-010",
+      "severity": "nice_to_have",
+      "category": "design_code",
+      "title": "getCachedCapture()のTTLチェック時にキャッシュエントリを削除する副作用の明記",
+      "description": "設計書セクション7.3のeviction戦略で 'getCachedCapture()時にtimestampチェック、期限切れは削除して返却' と記載されているが、セクション3.1.1のgetCachedCapture()シグネチャ定義ではこの副作用（Map.delete()）が言及されていない。getter関数に副作用があることはSRPの観点から注意が必要。",
+      "suggestion": "セクション3.1.1のgetCachedCapture()のJSDocコメントに「TTL切れエントリは呼び出し時に自動削除される（lazy eviction）」の注記を追加する。",
+      "affected_section": "3.1.1 インターフェース設計"
+    },
+    {
+      "id": "DC2-011",
+      "severity": "nice_to_have",
+      "category": "design_code",
+      "title": "session-cleanup.tsのclearAllCache()追加箇所の設計精度",
+      "description": "設計書セクション11でsession-cleanup.tsに 'graceful shutdown時のclearAllCache()追加' と記載されているが、現在のsession-cleanup.tsにはgraceful shutdown固有のフックがない。cleanupWorktreeSessions()内の各worktreeクリーンアップループに追加するのか、別途shutdown専用関数を新設するのかが不明。",
+      "suggestion": "設計書に、clearAllCache()の呼び出し箇所をより具体的に記載する。例: cleanupMultipleWorktrees()の最後にclearAllCache()を呼ぶ、またはcleanupWorktreeSessions()の各worktree処理後にinvalidateCache()を呼ぶなどの選択肢を明記する。",
+      "affected_section": "11. ファイル変更一覧"
+    },
+    {
+      "id": "DC2-012",
+      "severity": "nice_to_have",
+      "category": "design_code",
+      "title": "CACHE_MAX_CAPTURE_LINESとassistant-response-saverのSESSION_OUTPUT_BUFFER_SIZEの値の一致",
+      "description": "設計書のCACHE_MAX_CAPTURE_LINES=10000は、assistant-response-saver.tsのSESSION_OUTPUT_BUFFER_SIZE=10000、response-poller.tsの10000行、current-output/route.tsの10000行と一致しており、良い設計。ただし、auto-yes-manager.tsは5000行、prompt-response/route.tsは5000行で要求しており、worktrees/route.tsは100行（opencode時200行）で要求する。これらの差異がsliceOutput()で正しく処理されることの確認が設計書のテスト戦略（セクション8）に含まれていない。",
+      "suggestion": "セクション8のテスト戦略に、各呼び出し元の要求行数（100, 200, 5000, 10000行）に対するsliceOutput()の動作テストケースを追記する。",
+      "affected_section": "8. テスト戦略"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 7,
+    "nice_to_have_count": 3,
+    "overall_quality": "high",
+    "comments": "設計方針書は全体として高品質で、既存コードベースとの整合性が概ね保たれている。主要な設計判断（captureSessionOutput()のインターフェース非変更、globalThisパターン、listSessions()一括取得、B案キャッシュ無効化）はすべて実際のコードベースと矛盾しない。ただし、sliceOutput()関数の定義欠落（DC2-001）は実装時に曖昧さを生む重要な欠落であり、isSessionHealthy()の@internal export問題（DC2-002）はroute.tsからの直接呼び出しの正当性に関わるため、いずれもmust_fixとした。Stage 1の指摘事項は設計書に適切に反映されているが、反映に伴って生じた新たな整合性課題（エラーハンドリング、ログ出力、Phase間依存関係）への対応が必要。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-405-tmux-capture-optimization-design-policy.md",
+    "src/lib/cli-session.ts",
+    "src/lib/tmux.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts"
+  ],
+  "timestamp": "2026-03-04T12:00:00Z"
+}

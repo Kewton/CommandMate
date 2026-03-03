@@ -1,0 +1,38 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 4471,
+    "passed": 4471,
+    "failed": 0,
+    "skipped": 7,
+    "new_tests": 46
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/tmux-capture-cache.ts",
+    "src/lib/cli-session.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/cli-tools/gemini.ts",
+    "src/lib/cli-tools/opencode.ts",
+    "src/lib/cli-tools/vibe-local.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "tests/unit/lib/tmux-capture-cache.test.ts",
+    "tests/unit/lib/tmux-capture-invalidation.test.ts",
+    "tests/unit/api/prompt-response-verification.test.ts"
+  ],
+  "commits": [
+    "3df9f8d: perf(tmux): add capture cache with TTL, singleflight, and N+1 elimination"
+  ],
+  "message": "TDD implementation complete. All 4471 tests pass. 46 new tests added (37 cache module + 9 invalidation coverage). TypeScript and ESLint: 0 errors. Phases 1-5 implemented: cache module, captureSessionOutput integration, captureSessionOutputFresh, listSessions N+1 elimination, and 8-point cache invalidation hooks."
+}

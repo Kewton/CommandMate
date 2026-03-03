@@ -1,0 +1,148 @@
+{
+  "issue_number": 405,
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘反映",
+  "status": "completed",
+  "design_doc_path": "dev-reports/design/issue-405-tmux-capture-optimization-design-policy.md",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "DA3-001",
+        "title": "response-poller.tsのlastCapturedLineとキャッシュ保持行数の不整合リスク",
+        "status": "applied",
+        "applied_sections": ["3.1.3"],
+        "description": "sliceOutput()とresponse-poller.tsのlastCapturedLine差分検出ロジックとの整合性検証ガイドラインを追記。末尾改行off-by-one、tmuxバッファ先頭空行トリミング、totalLines算出の一貫性に関する検証項目を明記。"
+      },
+      {
+        "id": "DA3-002",
+        "title": "singleflightパターンにおけるfetchFnエラー時の共有Promiseの振る舞い",
+        "status": "applied",
+        "applied_sections": ["3.1.2", "3.1.5"],
+        "description": "キャッシュキー設計セクションにsessionNameにcliToolIdが含まれる根拠を追記。singleflightセクションに可用性優先のエラー共有設計判断を追記。Node.jsイベントループモデルとの整合性注記も統合。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DA3-003",
+        "title": "isSessionHealthy()のcapturePane()とキャッシュの独立性 / globalThis型拡張の競合リスク",
+        "status": "applied",
+        "applied_sections": ["3.1.4", "3.3"],
+        "description": "isSessionHealthy()がキャッシュバイパスである設計判断の根拠を明記。globalThis型拡張の競合リスク回避方針を追記。"
+      },
+      {
+        "id": "DA3-004",
+        "title": "worktrees/[id]/route.tsのN+1解消パターンの設計根拠",
+        "status": "applied",
+        "applied_sections": ["10 (Phase 3)"],
+        "description": "Phase 3タスクリスト#8にworktrees/[id]/route.tsへのlistSessions()適用理由コメントを追記。"
+      },
+      {
+        "id": "DA3-005",
+        "title": "captureSessionOutputFresh()のTOCTOU問題とキャッシュ書き戻し順序",
+        "status": "applied",
+        "applied_sections": ["3.4.3"],
+        "description": "captureSessionOutputFresh()のコード例を更新。capturePane()成功後にのみキャッシュ書き込み、失敗時はinvalidateCache()で古いキャッシュを明示的に削除するtry-catchパターンを追加。"
+      },
+      {
+        "id": "DA3-006",
+        "title": "auto-yes-managerのinvalidateCache()配置タイミング / listSessions()コスト根拠",
+        "status": "applied",
+        "applied_sections": ["3.3", "3.4.2"],
+        "description": "auto-yes応答後の無効化シーケンスを詳細化し、invalidateCache()の直列配置方針を明記。listSessions()一括取得のコスト根拠（プロセス生成コスト比較）を追記。"
+      },
+      {
+        "id": "DA3-007",
+        "title": "inflight MapのPromiseリーク防止策",
+        "status": "recorded",
+        "applied_sections": [],
+        "description": "Phase 5テスト時にハング時の挙動を確認するテストケースとして記録。実運用上のリスクは極めて低いためnice_to_have扱い。"
+      },
+      {
+        "id": "DA3-008",
+        "title": "current-output APIのisRunning()とキャッシュの設計判断",
+        "status": "applied",
+        "applied_sections": ["3.3"],
+        "description": "current-output APIのisRunning()がlistSessions()最適化対象外である設計判断を明記。単一worktree操作のコスト許容性を記載。"
+      },
+      {
+        "id": "DA3-009",
+        "title": "pasted-text-helper.tsがキャッシュ無効化テーブルに未記載",
+        "status": "applied",
+        "applied_sections": ["3.4.1"],
+        "description": "無効化トリガー一覧テーブルにpasted-text-helper.tsを追加。呼び出し元での一括無効化パターンの方針を明記。"
+      },
+      {
+        "id": "DA3-010",
+        "title": "schedule-manager.tsのcmateFileCacheパターンとの設計一貫性",
+        "status": "applied",
+        "applied_sections": ["9.1"],
+        "description": "globalThisパターンの使い分け基準（構造体フィールドパターン vs 独立Mapパターン）を追記。"
+      },
+      {
+        "id": "DA3-011",
+        "title": "captureSessionOutputFresh()追加に伴うモック更新の必要性",
+        "status": "applied",
+        "applied_sections": ["8.1"],
+        "description": "テスト方針セクションにcaptureSessionOutputFresh()のモック追加確認事項を追記。主要影響対象ファイルを明記。"
+      },
+      {
+        "id": "DA3-012",
+        "title": "Issue #265 ensureHealthySession()内のkillSession()とキャッシュ無効化",
+        "status": "applied",
+        "applied_sections": ["3.4.1"],
+        "description": "無効化トリガー一覧テーブルにensureHealthySession()内のkillSession()を追加。TTL失効による自然な無効化で対応する旨を注記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DA3-013",
+        "title": "キャッシュヒット率の実測検証",
+        "status": "recorded"
+      },
+      {
+        "id": "DA3-014",
+        "title": "session-cleanup.tsへのclearAllCache()挿入位置",
+        "status": "recorded"
+      },
+      {
+        "id": "DA3-015",
+        "title": "Node.jsイベントループとsingleflightの安全性",
+        "status": "applied_as_note",
+        "applied_sections": ["3.1.5"],
+        "description": "DA3-002の反映時にsingleflightセクションへの注記として統合。"
+      },
+      {
+        "id": "DA3-016",
+        "title": "OpenCodeの固定バッファとメモリ見積もり",
+        "status": "recorded"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_applied": 2,
+    "must_fix_total": 2,
+    "should_fix_applied": 10,
+    "should_fix_total": 10,
+    "nice_to_have_applied": 1,
+    "nice_to_have_total": 4,
+    "all_must_fix_resolved": true,
+    "all_should_fix_resolved": true
+  },
+  "updated_sections": [
+    "3.1.2 キャッシュキー設計 - DA3-002キャッシュキー根拠注記追加",
+    "3.1.3 行数差異の解決（A案） - DA3-001 lastCapturedLine整合性注記追加",
+    "3.1.4 globalThisパターン - DA3-003 型拡張競合リスク注記追加",
+    "3.1.5 singleflightパターン - DA3-002エラー共有設計判断+DA3-015 Node.jsイベントループ注記追加",
+    "3.3 isRunning()最適化 - DA3-003 isSessionHealthy()キャッシュバイパス注記、DA3-006 listSessions()コスト根拠、DA3-008 current-output API設計判断追加",
+    "3.4.1 無効化トリガー一覧 - DA3-009 pasted-text-helper.ts追加、DA3-012 ensureHealthySession()追加",
+    "3.4.2 auto-yes応答後の無効化シーケンス - DA3-006 invalidateCache()配置詳細化",
+    "3.4.3 prompt-response APIのキャッシュバイパス - DA3-005 TOCTOU対策コード更新",
+    "8.1 テスト方針 - DA3-011 captureSessionOutputFresh()モック注記追加",
+    "9.1 採用した設計 - DA3-010 globalThisパターン使い分け基準追加",
+    "10 実装順序 Phase 3 - DA3-004 [id]/route.ts設計根拠コメント追加",
+    "12 レビュー履歴 - Stage 3行追加",
+    "13 レビュー指摘事項サマリー - Stage 3テーブル追加",
+    "14 実装チェックリスト - Stage 3 Must Fix/Should Fixチェックリスト追加"
+  ],
+  "date": "2026-03-04"
+}

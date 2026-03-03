@@ -1,0 +1,173 @@
+{
+  "issue_number": 405,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-04",
+  "review_items": [
+    {
+      "id": "R1-001",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "captureSessionOutput呼び出し箇所の網羅性不足",
+      "description": "Issueの「S3: tmux capture結果のキャッシュなし」セクションでは重複取得箇所を4つ列挙しているが、実際にはcaptureSessionOutput()を呼び出している箇所は少なくとも6箇所存在する。\n\n列挙済み:\n1. GET /api/worktrees (route.ts L57)\n2. GET /api/worktrees/:id/current-output (route.ts L70)\n3. auto-yes-manager.ts (L510)\n4. response-poller.ts (L1031)\n\n未列挙:\n5. GET /api/worktrees/[id] (route.ts L67) - 個別worktree取得時にも同様のcaptureSessionOutput呼び出しあり\n6. POST /api/worktrees/[id]/prompt-response (route.ts L96) - プロンプト応答前の再検証でcaptureSessionOutput(5000行)を呼び出し\n7. assistant-response-saver.ts (L243) - 保留中レスポンス保存時にcaptureSessionOutput呼び出し",
+      "suggestion": "影響範囲テーブルに以下を追加すべき:\n- src/app/api/worktrees/[id]/route.ts: キャッシュ利用候補\n- src/app/api/worktrees/[id]/prompt-response/route.ts: キャッシュ利用候補（ただしリアルタイム性要求が高いため要検討）\n- src/lib/assistant-response-saver.ts: キャッシュ利用候補\n\nなお、prompt-responseのcaptureは応答直前の最新出力確認という性質上、キャッシュではなく常にフレッシュな取得が必要な可能性がある。この判断基準を明記すること。",
+      "affected_section": "背景・課題 > S3 / 影響範囲テーブル"
+    },
+    {
+      "id": "R1-002",
+      "severity": "should_fix",
+      "category": "correctness",
+      "title": "captureLines行数の差異がキャッシュ設計に与える影響の未記載",
+      "description": "仮説検証の申し送り事項でも指摘されている通り、captureSessionOutput()の呼び出し箇所ごとにcaptureLines引数が大きく異なる:\n\n- route.ts (worktrees一覧): 100行 (opencode時200行)\n- current-output API: 10,000行\n- auto-yes-manager: 5,000行\n- response-poller: 10,000行\n- prompt-response: 5,000行\n- assistant-response-saver: SESSION_OUTPUT_BUFFER_SIZE行\n\nキャッシュを導入する場合、100行のキャッシュと10,000行のキャッシュは互換性がない。100行でキャッシュした結果を10,000行要求の呼び出しに流用すると情報が不足する。逆に10,000行をキャッシュして100行要求に返す場合はメモリ効率が悪い。",
+      "suggestion": "キャッシュ設計方針として以下のいずれかを明記すべき:\n\nA案: 最大行数でキャッシュし、少ない行数要求にはsliceで対応（シンプルだがメモリ使用量増加）\nB案: 行数別にキャッシュキーを分ける（重複排除効果が限定的）\nC案: 呼び出し箇所をグループ分けし、ステータス検出用（100行）と詳細出力用（10,000行）を別キャッシュとする\n\nA案が最も実装が単純で効果が高いと考えられるが、10worktree × 10,000行のメモリ消費量の見積もりも記載すべき。",
+      "affected_section": "提案する解決策 > 1. tmux captureキャッシュ導入"
+    },
+    {
+      "id": "R1-003",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "isRunning()のtmux I/Oコストがキャッシュ対象として検討されていない",
+      "description": "全5つのCLIツールのisRunning()実装を確認したところ、全てがtmux.hasSession()（tmux has-sessionコマンド）を呼び出しており、外部プロセス起動のI/Oコストが発生する。\n\nroute.ts (worktrees一覧) では、captureSessionOutput()の前にisRunning()を全5ツールに対して呼び出している（L46）。10worktree × 5CLI = 50回のhasSession()呼び出しだけでも相当なコスト。\n\ncaptureSessionOutput()内部（cli-session.ts L51）でも、capture前にhasSession()で存在確認を行っているため、isRunning()→captureSessionOutput()のフローでは同一セッションに対してhasSession()が2回呼ばれている。",
+      "suggestion": "以下の改善策を検討に含めるべき:\n\n1. isRunning()結果のキャッシュ（captureキャッシュと同じTTLで管理可能）\n2. tmux list-sessionsの一括取得（5N回のhas-sessionを1回のlist-sessionsに集約）\n3. captureSessionOutput()内のhasSession()呼び出しをキャッシュ利用時はスキップ\n\n特に「2. tmux list-sessionsの一括取得」は、N+1パターンの本質的解消として実装タスクに追加すべき。",
+      "affected_section": "背景・課題 > S1 / 実装タスク"
+    },
+    {
+      "id": "R1-004",
+      "severity": "nice_to_have",
+      "category": "correctness",
+      "title": "N+1パターンの数値説明の精緻化",
+      "description": "Issueでは「10 worktree × 5 CLI = 50回のtmux操作が1回のAPIコールで発生」と記載されているが、実際のtmux操作回数はより多い:\n\n- isRunning(): 各CLIツールでhasSession() = 50回\n- captureSessionOutput(): 実行中CLIのみだが、内部でhasSession()を再度呼ぶため、最悪ケースで追加50回 + capturePane 50回\n- 最悪ケースの合計: 50 + 50 + 50 = 150回のtmux操作\n\nまた「毎秒10-25回のtmux操作」という記述は、ポーリング間隔2秒で50回/リクエストの場合、毎秒25回という計算は正しいが、上記の追加分を含めると最悪で毎秒75回となる。",
+      "suggestion": "正確な数値に更新するか、「少なくとも50回」「最大150回程度」のように幅を持たせた記述にすることを推奨。概算としてはIssueの記述でも方向性は正しいため、厳密な修正は必須ではない。",
+      "affected_section": "背景・課題 > S1"
+    },
+    {
+      "id": "R1-005",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "キャッシュ無効化戦略の記載なし",
+      "description": "tmux captureキャッシュのTTLは1-2秒と記載されているが、以下のケースでのキャッシュ無効化戦略が記載されていない:\n\n1. sendKeys()やsendMessage()でユーザーがコマンドを送信した直後、古いキャッシュが返される問題\n2. セッション停止（killSession）後にキャッシュが残る問題\n3. auto-yesがプロンプトに応答した直後、キャッシュされた古い出力が返されて二重応答のリスク\n\n特に1は、prompt-response APIでcaptureSessionOutput()を呼ぶ理由がリアルタイム性の確保であるため、キャッシュと相性が悪い。",
+      "suggestion": "以下のケースでの明示的なキャッシュ無効化（invalidation）を実装タスクに追加すべき:\n\n- sendKeys()/sendMessage()呼び出し時: 該当セッションのキャッシュをクリア\n- killSession()呼び出し時: 該当セッションのキャッシュをクリア\n- prompt-response API: キャッシュをバイパスしてフレッシュな取得を行うオプションを提供\n\nTTLだけに依存するのではなく、Write操作時のキャッシュ無効化を組み合わせる設計が望ましい。",
+      "affected_section": "提案する解決策 > 1. tmux captureキャッシュ導入"
+    },
+    {
+      "id": "R1-006",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "キャッシュモジュールの型設計・インターフェースの事前定義",
+      "description": "実装タスクに「tmux captureキャッシュモジュール作成（Map + TTL + 自動eviction）」とあるが、キャッシュのインターフェース（関数シグネチャ、キャッシュキーの構成要素、eviction戦略）が定義されていない。\n\n考慮すべき設計要素:\n- キャッシュキー: sessionName単体 or sessionName + captureLines の組み合わせ\n- globalThisパターンの使用有無（hot reload対応、auto-yes-managerと同じパターン）\n- TTLの設定可能性（呼び出し元によって異なるTTLが必要な可能性）\n- メモリ上限（全worktreeのキャッシュ合計サイズの上限）",
+      "suggestion": "以下のようなインターフェース設計を事前に記載しておくと実装時の迷いが減る:\n\n```typescript\ninterface TmuxCaptureCache {\n  get(sessionName: string, minLines: number): string | null;\n  set(sessionName: string, output: string, capturedLines: number): void;\n  invalidate(sessionName: string): void;\n  clear(): void;\n}\n```\n\nglobalThisパターンの採用、キャッシュサイズ上限の定数化も設計段階で決めておくべき。",
+      "affected_section": "実装タスク"
+    },
+    {
+      "id": "R1-007",
+      "severity": "must_fix",
+      "category": "consistency",
+      "title": "受入条件「UIのステータス更新遅延が体感上許容範囲」が検証不可能",
+      "description": "受入条件の3番目「UIのステータス更新遅延が体感上許容範囲であること」は主観的であり、自動テストでの検証が不可能。パフォーマンス改善Issueにおいて、改善前後の定量的な比較基準がないと、リグレッションの検出も困難。",
+      "suggestion": "以下のいずれかに具体化すべき:\n\nA案（定量的）: 「キャッシュ導入後、セッションステータスの反映遅延がキャッシュTTL（1-2秒）以内に収まること」\nB案（定性的＋条件付き）: 「ユーザーがコマンド送信後、次回ポーリングでステータスが更新されること（キャッシュ無効化が正しく動作すること）」\nC案（測定ベース）: 「10worktree環境でGET /api/worktreesのレスポンスタイムが改善前比50%以上改善されること」\n\n少なくとも、改善前のベースラインレスポンスタイムを計測し、改善後と比較する手順を受入条件に含めるべき。",
+      "affected_section": "受入条件"
+    },
+    {
+      "id": "R1-008",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "ポーリング間隔見直しの具体的な変更値が未決定",
+      "description": "「処理中の最小間隔を2秒→3秒に延長を検討」「auto-yesポーラーのインターバルをcaptureキャッシュTTLに合わせる」と記載されているが、具体的な変更値が決定されていない。\n\nまた、WorktreeSelectionContext.tsx (L29-36) の POLLING_INTERVALS.PROCESSING を変更すると、UIの応答性に直接影響するため、キャッシュTTLとの関係を明確にする必要がある。\n\nキャッシュTTL=2秒、ポーリング間隔=2秒の場合、ほぼ全てのポーリングでキャッシュヒットしない（TTL切れ直後にポーリング発生）可能性がある。",
+      "suggestion": "キャッシュTTLとポーリング間隔の関係を明記すべき:\n\n- キャッシュTTL < ポーリング間隔: ポーリング時にほぼキャッシュミス（サーバー間の重複排除のみ有効）\n- キャッシュTTL >= ポーリング間隔: ポーリング間のキャッシュヒットが期待できる\n\n推奨: キャッシュTTL=2秒、ポーリング間隔=3秒（変更後）とすることで、複数API間のキャッシュ共有効果を最大化しつつ、ポーリング間は必ずフレッシュなデータを取得。",
+      "affected_section": "提案する解決策 > 3. ポーリング間隔の見直し"
+    },
+    {
+      "id": "R1-009",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "影響範囲テーブルとCLAUDE.mdの整合性",
+      "description": "Issue内で変更対象として挙げられているファイルが実装された場合、CLAUDE.mdのモジュール説明テーブルにtmux-capture-cache.tsの新規エントリ追加と、既存モジュール説明の更新（auto-yes-manager.ts、response-poller.ts等）が必要となる。これらのドキュメント更新が実装タスクに含まれていない。",
+      "suggestion": "実装タスクに「CLAUDE.mdのモジュール説明テーブル更新」を追加。少なくとも以下の更新が必要:\n- 新規: src/lib/tmux-capture-cache.ts のエントリ追加\n- 既存モジュールの説明にIssue #405での変更内容を反映",
+      "affected_section": "実装タスク"
+    },
+    {
+      "id": "R1-010",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "実装タスク「GET /api/worktrees: 実行中CLIツールのみcapture」の実装方針が不明確",
+      "description": "現在のroute.tsのコード（L44-78）を確認すると、既にisRunning()がtrueの場合のみcaptureSessionOutput()を呼び出している（L53の条件分岐）。つまり、「実行中CLIツールのみcapture」は既に実装済みである。\n\n実際の問題は、isRunning()の呼び出し自体が全5ツールに対して行われることであり、これがN+1の主因。Issueの記述「DB上のactive CLI toolを先に確認し、それ以外はスキップ」が具体的な改善策だが、DBにactive CLI toolの情報をどのように保持・更新するかの設計が不足している。",
+      "suggestion": "タスクの説明を以下に修正すべき:\n\n現行: 「GET /api/worktrees: 実行中CLIツールのみcapture」\n修正案: 「GET /api/worktrees: DBのworktreeレコードからactive CLI tool情報を事前取得し、isRunning()呼び出し対象を1-2ツールに絞り込む（tmux list-sessionsの一括取得も検討）」\n\nまた、DBにactive CLI toolを記録する仕組み（セッション起動時にDB更新、停止時にDB更新）の実装タスクも必要。",
+      "affected_section": "実装タスク / 提案する解決策 > 2"
+    },
+    {
+      "id": "R1-011",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "スレッドセーフティ・並行アクセスの考慮不足",
+      "description": "Node.jsはシングルスレッドだが、async/awaitによる並行実行があるため、同一セッションに対する同時キャッシュアクセスの考慮が必要。例えば:\n\n- Promise.all内で複数のworktreeが同時にキャッシュにアクセス\n- auto-yesポーラーとcurrent-output APIが同時にキャッシュを読み書き\n\nMap操作自体はアトミックだが、get→miss→fetch→setのシーケンスでは、複数の呼び出し元が同時にキャッシュミスし、それぞれが独立してtmux captureを実行する「stampede」問題が発生する可能性がある。",
+      "suggestion": "キャッシュ実装時に「singleflight」パターン（同一キーに対する同時リクエストを1つにまとめる）の検討を推奨。例:\n\n```typescript\nconst inflight = new Map<string, Promise<string>>();\nasync function cachedCapture(key: string): Promise<string> {\n  if (inflight.has(key)) return inflight.get(key)!;\n  const promise = doCapture(key);\n  inflight.set(key, promise);\n  try { return await promise; } finally { inflight.delete(key); }\n}\n```",
+      "affected_section": "提案する解決策 > 1. tmux captureキャッシュ導入"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 6,
+    "nice_to_have_count": 4,
+    "overall_quality": "medium",
+    "comments": "Issue #405は問題の分析と背景説明が正確であり（全仮説Confirmed）、課題の本質を的確に捉えている。しかし、キャッシュ設計の詳細（行数差異への対応、無効化戦略、singleflightパターン）や、captureSessionOutputの全呼び出し箇所の網羅、isRunning()のI/Oコストの考慮が不足している。受入条件の定量化（R1-007: must_fix）は品質担保の観点から必須対応が望ましい。また、既に実行中CLIのみcaptureする条件分岐が存在する点と、真のボトルネックであるisRunning()の全ツール呼び出しの区別を明確にすべき（R1-010）。全体として、問題定義は優れているが解決策の具体性が改善の余地あり。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "lines": "L44-78",
+      "relevance": "N+1パターンの主要箇所。isRunning()は全5ツールに実行、captureはisRunning=true時のみ"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "L70",
+      "relevance": "captureSessionOutput(10000行)の呼び出し箇所"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "L510",
+      "relevance": "captureSessionOutput(5000行)の呼び出し箇所"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "L1031",
+      "relevance": "captureSessionOutput(10000行)の呼び出し箇所"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "L67",
+      "relevance": "Issueに未記載のcaptureSessionOutput呼び出し箇所"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "lines": "L96",
+      "relevance": "Issueに未記載のcaptureSessionOutput(5000行)呼び出し箇所（リアルタイム性要求高）"
+    },
+    {
+      "file": "src/lib/assistant-response-saver.ts",
+      "lines": "L243",
+      "relevance": "Issueに未記載のcaptureSessionOutput呼び出し箇所"
+    },
+    {
+      "file": "src/lib/cli-session.ts",
+      "lines": "L38-72",
+      "relevance": "captureSessionOutput()の実装。内部でhasSession()を呼ぶため、isRunning()との二重呼び出し"
+    },
+    {
+      "file": "src/lib/tmux.ts",
+      "lines": "L68-76",
+      "relevance": "hasSession()の実装。execFile('tmux', ['has-session', ...])で外部プロセス起動"
+    },
+    {
+      "file": "src/contexts/WorktreeSelectionContext.tsx",
+      "lines": "L29-36",
+      "relevance": "ポーリング間隔の定数定義箇所"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "モジュール説明テーブルの更新が必要"
+    }
+  ]
+}

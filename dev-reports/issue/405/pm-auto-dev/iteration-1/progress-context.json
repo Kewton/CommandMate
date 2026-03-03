@@ -1,0 +1,56 @@
+{
+  "issue_number": 405,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "new_files": [
+        "src/lib/tmux-capture-cache.ts",
+        "tests/unit/lib/tmux-capture-cache.test.ts",
+        "tests/unit/lib/tmux-capture-invalidation.test.ts"
+      ],
+      "modified_files": [
+        "src/lib/cli-session.ts",
+        "src/app/api/worktrees/route.ts",
+        "src/app/api/worktrees/[id]/route.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/app/api/worktrees/[id]/terminal/route.ts",
+        "src/lib/claude-session.ts",
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/cli-tools/gemini.ts",
+        "src/lib/cli-tools/opencode.ts",
+        "src/lib/cli-tools/vibe-local.ts",
+        "src/lib/prompt-answer-sender.ts",
+        "src/lib/auto-yes-manager.ts",
+        "src/lib/session-cleanup.ts",
+        "tests/unit/api/prompt-response-verification.test.ts"
+      ],
+      "tests_passed": 4471,
+      "tests_skipped": 7,
+      "test_files_passed": 211,
+      "new_tests_added": 46
+    },
+    "acceptance": {
+      "status": "passed",
+      "all_criteria_met": true,
+      "scenarios_passed": 10,
+      "scenarios_total": 10
+    },
+    "refactor": {
+      "status": "success",
+      "new_files": ["src/lib/worktree-status-helper.ts"],
+      "lines_reduced": 110,
+      "improvement": "worktrees/route.tsとworktrees/[id]/route.tsの重複セッション状態検出ロジックをworktree-status-helper.tsに抽出"
+    },
+    "documentation": {
+      "status": "updated",
+      "updated_files": ["CLAUDE.md"]
+    },
+    "final_checks": {
+      "typescript": "0 errors",
+      "eslint": "0 errors",
+      "unit_tests": "4471 passed, 7 skipped",
+      "test_files": "211 passed"
+    }
+  }
+}

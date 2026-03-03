@@ -1,0 +1,83 @@
+{
+  "issue_number": 405,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-04",
+  "applied_items": [
+    {
+      "id": "R3-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "auto-yes応答後のキャッシュ無効化タイミング詳細設計を「提案する解決策 > 1. キャッシュ無効化戦略」に追記。sendPromptAnswer() -> try-finallyキャッシュクリア -> scheduleNextPoll()の実行順序を擬似コード付きで明記。prompt-answer-sender.tsのsendKeys()/sendSpecialKeys()もキャッシュ無効化フック対象として追記。キャッシュ無効化戦略のsendKeys行にsendSpecialKeys()も追加。"
+    },
+    {
+      "id": "R3-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "captureSessionOutput()のインターフェース非変更方針（A案: キャッシュモジュール側でhasSessionチェック済みフラグ管理）を「提案する解決策」に新サブセクション「captureSessionOutput()のインターフェース方針（A案採用）」として追記。キャッシュヒット時/ミス時の挙動とエラーメッセージ後方互換性を明記。受入条件に「captureSessionOutput()のインターフェースが変更されないこと（既存テストが変更なしでパスすること）」を追加。"
+    },
+    {
+      "id": "R3-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルにキャッシュ無効化フック挿入箇所7ファイルを追加: src/lib/prompt-answer-sender.ts（sendKeys/sendSpecialKeys後のキャッシュクリア）、src/lib/claude-session.ts（sendMessageToClaude/stopClaudeSession後のキャッシュクリア）、src/lib/cli-tools/codex.ts、gemini.ts、opencode.ts、vibe-local.ts（各sendMessage/killSession後のキャッシュクリア）、src/lib/session-cleanup.ts（graceful shutdown時のキャッシュクリア）。"
+    },
+    {
+      "id": "R3-006",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "実装タスクのユニットテスト項目に「既存テストが変更なしでパスすること」の確認を追加。captureSessionOutput()のインターフェース非変更方針に基づく理由も明記。キャッシュモジュールのモック or TTL=0設定によるテスト分離方法も記載。"
+    },
+    {
+      "id": "R3-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "実装タスクのキャッシュモジュール作成項目にglobalThisパターン準拠の詳細を追記: declare global型定義（var __tmuxCaptureCache: Map<string, CacheEntry> | undefined）、globalThis初期化パターン、Next.js hot reload対応の背景、既存の同一パターン使用モジュール（auto-yes-manager/schedule-manager/version-checker）の参照を記載。"
+    },
+    {
+      "id": "R3-008",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルにsrc/lib/session-cleanup.tsを追加。変更内容は「graceful shutdown時のキャッシュクリア追加（Facadeパターンの拡張）」として記載。"
+    },
+    {
+      "id": "R3-009",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "A案のslice操作に関するANSIエスケープシーケンス考慮を「提案する解決策 > captureLines行数差異への対応方針（A案採用）」に追記。行ベースsliceの実装方法、tmux -eフラグによるANSI preserveモードでの行またぎエスケープシーケンスの影響、stripAnsi()後段適用箇所では問題ないこと、current-output APIのfullOutputフィールドなどANSI付き返却箇所での検証テスト設置を記載。"
+    },
+    {
+      "id": "R3-012",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "isRunning()最適化の設計方針（A案: route.ts側でlistSessions()を1回呼び、結果のセッション名リストからcliTool.getSessionName(worktreeId)が含まれるかを直接判定）を実装タスクに明記。ICLIToolインターフェース変更不要であることも記載。影響範囲テーブルのroute.tsとworktrees/[id]/route.tsの変更内容にlistSessions()結果利用を追記。tmux.tsの変更内容を「list-sessions一括取得の利用（route.ts側から呼び出し）」に修正。"
+    }
+  ],
+  "skipped_items": [],
+  "nice_to_have_skipped": [
+    {
+      "id": "R3-010",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "R3-005/R3-008で同等の内容（影響範囲テーブルへのファイル追加）が既に反映済み。pasted-text-helper.tsのcapturePane()はキャッシュ対象外と判断。"
+    },
+    {
+      "id": "R3-011",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "セキュリティ影響が軽微（TMUXスクロールバックバッファ自体がメモリ上に存在するためリスク増加は限定的）であり、実装時のJSDocコメントで対応可能。Issue本文への記載は不要と判断。"
+    }
+  ],
+  "summary": {
+    "total_items": 9,
+    "applied_count": 8,
+    "skipped_count": 0,
+    "nice_to_have_skipped_count": 2,
+    "github_issue_updated": true,
+    "comments": "Must Fix 2件（R3-001, R3-002）とShould Fix 6件（R3-005, R3-006, R3-007, R3-008, R3-009, R3-012）の全8件を反映完了。Nice to Have 2件（R3-010, R3-011）は反映対象外のためスキップ（R3-010はR3-005/R3-008で実質カバー済み、R3-011は実装時JSDocで対応）。主な変更点: (1) auto-yes応答後のキャッシュ無効化タイミング詳細設計（try-finallyパターン）の追記、(2) captureSessionOutput()インターフェース非変更方針の明記と受入条件追加、(3) 影響範囲テーブルへのキャッシュ無効化フック挿入箇所7ファイル追加、(4) globalThisパターン準拠の実装タスク詳細化、(5) ANSIエスケープシーケンス考慮の追記、(6) isRunning()最適化A案の明記。"
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/405"
+  }
+}

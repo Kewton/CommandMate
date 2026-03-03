@@ -1,0 +1,47 @@
+{
+  "issue_number": 405,
+  "title": "perf: tmux capture最適化 - N+1パターン解消・キャッシュ導入・ポーリング効率改善",
+  "acceptance_criteria": [
+    "同一セッションの重複tmux captureが排除されること",
+    "非実行中CLIツールへの不要なtmux操作がスキップされること",
+    "キャッシュ導入後、セッションステータスの反映遅延がキャッシュTTL（2秒）以内に収まること",
+    "ユーザーがコマンド送信後、次回ポーリングでステータスが更新されること（キャッシュ無効化が正しく動作すること）",
+    "既存のプロンプト検出・auto-yes動作に影響がないこと",
+    "テストがパスすること",
+    "captureSessionOutput()のインターフェースが変更されないこと（既存テストが変更なしでパスすること）",
+    "GET /api/worktrees/[id] にもlistSessions()一括取得・active CLI tool絞り込みが適用されていること"
+  ],
+  "implementation_tasks": [
+    "Phase 1: src/lib/tmux-capture-cache.ts 新規作成（Map + TTL + eviction + singleflight + globalThisパターン）",
+    "Phase 1: tests/unit/lib/tmux-capture-cache.test.ts ユニットテスト作成",
+    "Phase 2: src/lib/cli-session.ts - captureSessionOutput()にキャッシュ統合（getOrFetchCapture()使用）",
+    "Phase 2: src/lib/cli-session.ts - captureSessionOutputFresh()新規関数追加",
+    "Phase 2: src/app/api/worktrees/[id]/prompt-response/route.ts - captureSessionOutputFresh()呼び出しに変更",
+    "Phase 3: src/lib/claude-session.ts - isSessionHealthy()の@internalをproduction exportに変更",
+    "Phase 3: src/app/api/worktrees/route.ts - listSessions()一括取得でN+1解消",
+    "Phase 3: src/app/api/worktrees/[id]/route.ts - 同等の最適化適用",
+    "Phase 4: src/lib/prompt-answer-sender.ts - キャッシュ無効化フック挿入",
+    "Phase 4: src/lib/auto-yes-manager.ts - try-finallyキャッシュ無効化",
+    "Phase 4: src/lib/claude-session.ts - sendMessageToClaude/stopClaudeSession後のキャッシュ無効化",
+    "Phase 4: src/lib/cli-tools/codex.ts - sendMessage後のキャッシュ無効化",
+    "Phase 4: src/lib/cli-tools/gemini.ts - sendMessage後のキャッシュ無効化",
+    "Phase 4: src/lib/cli-tools/opencode.ts - sendMessage/killSession後のキャッシュ無効化",
+    "Phase 4: src/lib/cli-tools/vibe-local.ts - sendMessage後のキャッシュ無効化",
+    "Phase 4: src/app/api/worktrees/[id]/terminal/route.ts - sendKeys()後のキャッシュ無効化",
+    "Phase 4: src/lib/session-cleanup.ts - clearAllCache()追加",
+    "Phase 5: 全CLIツール網羅的キャッシュ無効化テスト",
+    "Phase 5: CLAUDE.mdモジュール説明更新"
+  ],
+  "design_policy_path": "dev-reports/design/issue-405-tmux-capture-optimization-design-policy.md",
+  "work_plan_path": "dev-reports/issue/405/work-plan.md",
+  "target_coverage": 80,
+  "key_constraints": [
+    "captureSessionOutput()のインターフェースは変更禁止（既存テスト影響なし）",
+    "tmux.tsへのキャッシュモジュール依存を追加禁止（循環依存リスク）",
+    "globalThisパターン準拠: declare global { var __tmuxCaptureCache: Map<string, CacheEntry> | undefined; }",
+    "sessionNameはCLIToolManager経由で取得すること（Trust Boundary）",
+    "setCachedCapture()でfull sweep実装（SEC4-002）",
+    "invalidateCache()にdebugログ追加（SEC4-006）",
+    "captureSessionOutputFresh()でfetchFn失敗時にinvalidateCache()を呼ぶ（DA3-005）"
+  ]
+}
