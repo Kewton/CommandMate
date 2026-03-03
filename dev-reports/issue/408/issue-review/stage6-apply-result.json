@@ -1,0 +1,38 @@
+{
+  "issue_number": 408,
+  "iteration": 3,
+  "stage": 6,
+  "stage_name": "指摘事項反映（Stage 5 通常レビュー 2回目）",
+  "apply_date": "2026-03-03",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "F5-001",
+        "status": "applied",
+        "change_summary": "不要import削除リストに `stripAnsi` を追加（計4件）。`const cleanOutput = stripAnsi(output)` 変数宣言の削除を実装タスクに明記。案A実装後はimport文全体が削除可能になる旨を補足。影響範囲テーブルの route.ts 行にも `stripAnsi` と変数宣言削除を追記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F5-002",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルの `src/lib/__tests__/status-detector.test.ts` の変更内容を「既存テストの後方互換性確認（optional フィールド追加のため壊れない見込み。新フィールドの検証テスト追加は tests/unit/lib/status-detector.test.ts に集約）」に明確化。"
+      },
+      {
+        "id": "F5-003",
+        "status": "applied",
+        "change_summary": "設計注記に「Issue #161 Layer 1 との関係」サブセクションを追加。thinking中のfalse multiple_choice検出防止がdetectSessionStatus()の内部優先順序（prompt -> thinking）により暗黙的に維持される旨、`!thinking` ガードによる明示的スキップが不要である旨を補足。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/408"
+  }
+}

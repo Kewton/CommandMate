@@ -1,0 +1,162 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 408,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "prompt-response/route.ts が影響範囲テーブルおよびスコープ外セクションに記載されていない。このファイル（src/app/api/worktrees/[id]/prompt-response/route.ts）は L13-14 で detectPrompt(), PromptDetectionResult, stripAnsi, stripBoxDrawing, buildDetectPromptOptions を全てインポートし、L96-99 で current-output/route.ts と同一パターンの呼び出し（captureSessionOutput -> stripAnsi -> stripBoxDrawing -> detectPrompt）を行っている。今回のIssue #408 の変更自体は prompt-response/route.ts に直接影響しない（detectSessionStatus() を使用していない独立パス）が、2つの理由で明示的に記載すべき。(1) 実装者が「detectPrompt の外部呼び出しを全て削除する」と誤解して prompt-response/route.ts の detectPrompt() 呼び出しまで削除するリスク。prompt-response/route.ts の detectPrompt() は race condition 防止のための re-verification 目的（L90-93 コメント）であり、current-output/route.ts の二重呼び出しとは設計意図が異なる。(2) auto-yes-manager.ts と同じく将来の適用候補として記録する価値がある。",
+      "location": "影響範囲テーブル / スコープ外セクション",
+      "suggestion": "影響範囲テーブルまたはスコープ外セクションに prompt-response/route.ts を追加する。記載例: 「変更不要（detectSessionStatus() を使用していない独立パス。detectPrompt() の呼び出しは race condition 防止のための re-verification 目的であり、current-output/route.ts の二重呼び出しとは設計意図が異なるためスコープ外）」"
+    },
+    {
+      "id": "F7-002",
+      "severity": "nice_to_have",
+      "category": "テスト",
+      "description": "src/lib/__tests__/status-detector.test.ts の L329 に StatusDetectionResult のマッピング検証テスト（status === 'waiting' / 'running' / 'ready' とフラグの対応）があるが、案A 実装後に promptDetection フィールドが追加されても、このテストは status フィールドのみを検証しており新フィールドには触れない。Issue 本文の影響範囲テーブルでは「既存テストの後方互換性確認（optional フィールド追加のため壊れない見込み）」と記載されており正確。しかし、L329 のマッピングテストは route.ts が StatusDetectionResult をどう使うかの契約テストであり、案A 後は route.ts が promptDetection フィールドも利用するようになる。この契約変更（route.ts が statusResult.promptDetection を参照する新パターン）を tests/unit/lib/status-detector.test.ts のテスト (b)(c) でカバーする旨は既に記載済みだが、src/lib/__tests__/status-detector.test.ts のマッピングテスト（L329）に promptDetection フィールドのマッピング検証を追加するか否かの判断が未記載。テスト追加先を tests/unit/ に集約する方針（F3-008 反映済み）に沿えば不要だが、明示的に「L329 のマッピングテストは更新不要（新フィールドの検証は tests/unit/ に集約）」と注記しておくとより明確になる。",
+      "location": "影響範囲テーブル src/lib/__tests__/status-detector.test.ts 行",
+      "suggestion": "既存の記載で実用上は十分。追記する場合は「L329 の StatusDetectionResult マッピング契約テストは status フィールドのみ検証しており、promptDetection の契約テストは tests/unit/lib/status-detector.test.ts に集約」と補足する。"
+    },
+    {
+      "id": "F7-003",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "案A 実装後の detectSessionStatus() 関数内で、promptDetection の結果を全ての return パスに含める必要がある。現在の status-detector.ts には 9 箇所の return 文がある（L147-152: prompt detected, L159-163: thinking, L178-182: opencode processing, L213-217: opencode content thinking, L225-230: opencode response complete, L239-244: input prompt, L252-258: time-based, L263-268: default）。prompt 検出結果は L145 の `promptDetection` 変数に格納されるが、L147 の return 以外の 8 箇所では promptDetection.isPrompt === false が確定しているため、全て `promptDetection: { isPrompt: false, cleanContent: ... }` を含める必要がある。実装タスクの「detectSessionStatus() 内部で detectPrompt() の結果を戻り値に含める」は記載されているが、9 箇所全ての return に追加が必要である点が明示されていない。optional フィールドのため、追加し忘れた return パスがあっても型エラーにはならない（undefined になる）。型安全性の観点からは、promptDetection を required フィールドにするか、全 return パスに追加することを実装タスクの注記として記載するとより堅牢。",
+      "location": "実装タスク「detectSessionStatus() 内部で detectPrompt() の結果を戻り値に含める」",
+      "suggestion": "実装タスクに「detectSessionStatus() 内の全 return パス（9 箇所）に promptDetection フィールドを追加。L145 の detectPrompt() 結果は L146 の条件分岐より前に計算されるため、全 return パスで参照可能。optional フィールドの追加忘れは型エラーにならないため、テスト (b) の「未検出時に isPrompt:false であること」の検証が defense-in-depth として機能する」と補足する。"
+    }
+  ],
+  "previous_findings_check": {
+    "all_addressed": true,
+    "stage3_findings": [
+      {
+        "id": "F3-001",
+        "status": "addressed",
+        "verification": "影響範囲テーブルに tests/unit/lib/status-detector.test.ts が追加されている。変更内容は「promptDetection フィールドの存在検証・hasActivePrompt との一致性テスト追加」と具体的に記載。"
+      },
+      {
+        "id": "F3-002",
+        "status": "addressed",
+        "verification": "影響範囲テーブルに tests/integration/current-output-thinking.test.ts が追加されている。変更内容は「SF-001 コメント更新、promptDetection フィールドの検証追加（任意）」と記載。"
+      },
+      {
+        "id": "F3-003",
+        "status": "addressed",
+        "verification": "提案解決策セクションに循環依存リスク分析が明記。「status-detector.ts は既に prompt-detector.ts から detectPrompt() をインポートしており（L24）、PromptDetectionResult 型の追加インポートは同一方向（status-detector -> prompt-detector）のため新たな循環は発生しない」とコードレベルで説明。"
+      },
+      {
+        "id": "F3-004",
+        "status": "addressed",
+        "verification": "受入条件に「detectSessionStatus() 内部の stripAnsi() + stripBoxDrawing() 前処理と、route.ts が独自に行っていた前処理が同一結果を生成すること」が追加。実装タスクに不要 import 削除（4件: detectPrompt, buildDetectPromptOptions, stripBoxDrawing, stripAnsi）と const cleanOutput 変数宣言削除が明記。import 文全体が削除可能である旨の補足も追加済み。"
+      },
+      {
+        "id": "F3-005",
+        "status": "addressed",
+        "verification": "実装タスク「呼び出し元の戻り値利用を更新」が (a) ローカル変数削除、(b) !thinking ガード不要確認、(c) promptData 参照更新、(d) import 文削除の 4 ステップに詳細化。"
+      },
+      {
+        "id": "F3-006",
+        "status": "addressed",
+        "verification": "受入条件に「thinking 状態時に promptDetection フィールドは {isPrompt: false, cleanContent: ...} を含み、promptData は undefined であること」が追加。設計注記として detectSessionStatus() の優先順序保証（prompt -> thinking -> input prompt -> time -> default）が記載。Issue #161 Layer 1 との関係も F5-003 の反映として補足済み。"
+      },
+      {
+        "id": "F3-007",
+        "status": "addressed",
+        "verification": "影響範囲テーブルに auto-yes-manager.ts が「変更不要（detectSessionStatus() を使用していない独立パス。類似の二重呼び出しパターンあり、将来の適用候補）」として追加。"
+      },
+      {
+        "id": "F3-008",
+        "status": "addressed",
+        "verification": "テスト更新タスクが (a) 後方互換性確認、(b) promptDetection フィールド検証、(c) hasActivePrompt 一致性テスト、(d) テスト追加先推奨（tests/unit/ に集約）の 4 ステップに具体化。"
+      },
+      {
+        "id": "F3-009",
+        "status": "addressed",
+        "verification": "受入条件に「APIレスポンスの JSON 形状（フィールド名・型・値）が変更前後で同一であること」が追加。具体的に promptData, isPromptWaiting, thinking, isGenerating, isComplete の 5 フィールドが列挙。"
+      },
+      {
+        "id": "F3-010",
+        "status": "addressed",
+        "verification": "スコープ外セクションに response-poller.ts が追記。「detectPrompt() を独立して使用し、detectSessionStatus() を使用していないため本 Issue のスコープ外」と記載。"
+      },
+      {
+        "id": "F3-011",
+        "status": "addressed",
+        "verification": "実装タスクに「CLAUDE.md の status-detector.ts モジュール説明の更新（SF-001 解消の反映）」が追加。"
+      }
+    ],
+    "stage5_findings": [
+      {
+        "id": "F5-001",
+        "status": "addressed",
+        "verification": "不要 import 削除リストに stripAnsi が追加され計 4 件。const cleanOutput = stripAnsi(output) 変数宣言の削除が実装タスクに明記。import 文全体が削除可能になる旨の補足も追加済み。影響範囲テーブルの route.ts 行にも反映。"
+      },
+      {
+        "id": "F5-002",
+        "status": "addressed",
+        "verification": "影響範囲テーブルの src/lib/__tests__/status-detector.test.ts の変更内容が「既存テストの後方互換性確認（optional フィールド追加のため壊れない見込み。新フィールドの検証テスト追加は tests/unit/lib/status-detector.test.ts に集約）」に明確化。"
+      },
+      {
+        "id": "F5-003",
+        "status": "addressed",
+        "verification": "設計注記に「Issue #161 Layer 1 との関係」サブセクションが追加。thinking 中の false multiple_choice 検出防止が内部優先順序により暗黙的に維持される旨が補足。"
+      }
+    ],
+    "partially_addressed": [],
+    "not_addressed": []
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2,
+    "overall_quality": "good",
+    "comment": "Stage 3 の影響範囲指摘 11 件（F3-001 から F3-011）および Stage 5 の通常レビュー指摘 3 件（F5-001 から F5-003）の全 14 件が適切に反映されている。影響範囲分析は高い網羅性を持ち、主要な変更ファイル（status-detector.ts, current-output/route.ts）、型互換性確認対象（worktrees/route.ts, worktrees/[id]/route.ts）、テストファイル 3 件、スコープ外モジュール 2 件（auto-yes-manager.ts, response-poller.ts）が全て記載されている。新たに発見された問題は 3 件のみ。(1) should_fix: prompt-response/route.ts が影響範囲にもスコープ外にも記載されていない。このファイルは current-output/route.ts と同一パターン（stripAnsi -> stripBoxDrawing -> detectPrompt）を使用しているが、race condition 防止の re-verification 目的であり設計意図が異なるためスコープ外として明示的に記載すべき。(2)(3) nice_to_have: テストのマッピング契約注記および detectSessionStatus() の 9 箇所の return パスへの追加に関する注記。破壊的変更なし（optional フィールド追加）、循環依存リスクなし、API レスポンス形状保全は受入条件で網羅。Issue は 3 回のレビュー+反映サイクルを経て十分な品質に到達している。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "lines": "13-14, 94-99",
+      "relevance": "detectPrompt + PromptDetectionResult import (L13)、stripAnsi/stripBoxDrawing/buildDetectPromptOptions import (L14)、detectPrompt() 独立呼び出し (L99)。current-output/route.ts と同一パターンだが race condition 防止目的。影響範囲に未記載。"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "114-269",
+      "relevance": "detectSessionStatus() 関数全体。9 箇所の return 文（L147, L159, L178, L213, L225, L239, L252, L263）に promptDetection フィールド追加が必要。"
+    },
+    {
+      "file": "src/lib/__tests__/status-detector.test.ts",
+      "lines": "329-367",
+      "relevance": "StatusDetectionResult マッピング契約テストおよび hasActivePrompt 検証テスト。optional フィールド追加では壊れないが、新フィールドの契約テスト追加先は tests/unit/ に集約。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "9, 13, 81, 87-102, 117-142",
+      "relevance": "主要変更対象。detectPrompt import (L9)、cli-patterns import (L13)、cleanOutput 変数 (L81)、二重呼び出し箇所 (L87-102)、API レスポンス (L117-142)"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "54-69",
+      "relevance": "PromptDetectionResult 型定義。status-detector.ts から import される型。"
+    },
+    {
+      "file": "tests/unit/lib/status-detector.test.ts",
+      "lines": "17-18, 42-358",
+      "relevance": "新フィールド検証テスト追加先（F3-008 反映済み）。resetDetectPromptCache import (L18)、全テストケース (L42-358)"
+    },
+    {
+      "file": "tests/integration/current-output-thinking.test.ts",
+      "lines": "19, 78-80, 98-99",
+      "relevance": "SF-001 コメント参照 (L78, L98)、thinking 派生検証 (L79-80, L99-100)"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "status-detector.ts モジュール説明の SF-001 記載（更新対象として実装タスクに記載済み）"
+    }
+  ]
+}

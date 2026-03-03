@@ -1,0 +1,63 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 408,
+  "focus_area": "整合性",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "Section 4.2 return パス一覧の行番号に3箇所の不一致がある。パス2はL159と記載されているが実際はL158、パス3はL178と記載されているが実際はL177、パス4はL213と記載されているが実際はL212。いずれも1行分のずれ。Section 4.2自体が「行（概算）」と記載しているが、実装チェックリストとして使用される場合に混乱を招く可能性がある。",
+      "location": "設計方針書 Section 4.2 return パス一覧（パス2, 3, 4）",
+      "suggestion": "パス2をL158、パス3をL177、パス4をL212に修正する。あるいは「概算」の注釈を維持する場合はそのままでも許容できるが、正確な値に更新することが望ましい。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "description": "Section 4.3の「変更前」コードスニペットにおいて、L98のpromptDetection変数の型注釈が簡略化されている。実際のコード(route.ts L98)では `let promptDetection: { isPrompt: boolean; cleanContent: string; promptData?: unknown } = { isPrompt: false, cleanContent: cleanOutput };` と明示的な型注釈が付いているが、設計方針書では `let promptDetection = { isPrompt: false, cleanContent: cleanOutput };` と型注釈が省略されている。",
+      "location": "設計方針書 Section 4.3 削除対象コード L98",
+      "suggestion": "設計方針書のコードスニペットに実際の型注釈 `{ isPrompt: boolean; cleanContent: string; promptData?: unknown }` を追記するか、「型注釈省略」と注記する。削除対象のコードであるため影響は軽微。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "description": "Section 4.3の「変更前」コードでは行番号注釈として「L87-102」と記載されているが、L87のdetectSessionStatus呼び出しの直前にはSF-001のコメントブロック（L90-L97）が存在する。設計方針書ではL88のthinking変数定義の直後にSF-001コメントとL98-L102が連続するように見えるが、実際にはL90-L97に8行のコメントが挟まっている。",
+      "location": "設計方針書 Section 4.3 変更前コード（L87-102）",
+      "suggestion": "コメントブロックの存在を明示するか、コードスニペットにSF-001コメントも含める。削除対象の特定には影響しないため低優先度。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "description": "Section 4.4 import削除対象でstripAnsiの削除理由が「L81のcleanOutput変数が不要になるため」と記載されているが、正確にはcleanOutputが不要になる理由は「L98とL101での参照が削除されるため」。L81でcleanOutputを定義してもその後参照箇所がなくなるためcleanOutput自体が未使用になり、結果としてstripAnsiも未使用になる、という因果関係の補足があると分かりやすい。",
+      "location": "設計方針書 Section 4.4 stripAnsi削除理由",
+      "suggestion": "削除理由を「L98-L102の削除によりcleanOutputの参照箇所がなくなり、L81の定義自体が不要となるため」のように因果関係を明確化する。現在の記載でも意図は伝わるため低優先度。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 3,
+    "overall_quality": "good",
+    "comment": "設計方針書とコードベースの整合性は全体的に良好。全7項目の検証結果: (1) StatusDetectionResult型拡張は既存インターフェースと整合、(2) return文数は設計方針書の「全8箇所」と実際のコード8箇所が完全一致、(3) 削除対象の4つのimportは全てcurrent-output/route.tsに存在確認済み、(4) PromptDetectionResult型の4フィールド（isPrompt, promptData?, cleanContent, rawContent?）が設計方針書の記載と一致、(5) Section 4.3の「変更前」コードは実際のL87-L102と概ね一致（型注釈の省略を除く）、(6) 行番号は8箇所中3箇所で1行のずれあり（概算として許容範囲だが修正推奨）、(7) 言及された3つのテストファイルは全て存在確認済み。唯一のshould_fix項目はSection 4.2の行番号の微修正のみ。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/prompt-detector.ts",
+    "src/lib/__tests__/status-detector.test.ts",
+    "tests/unit/lib/status-detector.test.ts",
+    "tests/integration/current-output-thinking.test.ts"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

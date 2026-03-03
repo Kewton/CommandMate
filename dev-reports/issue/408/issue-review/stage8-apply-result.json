@@ -1,0 +1,51 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 408,
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/408",
+  "apply_date": "2026-03-03",
+  "applied_findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "prompt-response/route.ts をスコープ外セクションに追記",
+      "changes": [
+        "「スコープ外の類似パターン」セクションに prompt-response/route.ts の項目を追加。detectSessionStatus() を使用していない独立パスであること、detectPrompt() の呼び出しは race condition 防止のための re-verification 目的であり current-output/route.ts の二重呼び出しとは設計意図が異なることを明記"
+      ]
+    },
+    {
+      "id": "F7-002",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "src/lib/__tests__/status-detector.test.ts のマッピング契約テスト（L329）は更新不要である旨を影響範囲に補足",
+      "changes": [
+        "影響範囲テーブルの src/lib/__tests__/status-detector.test.ts 行の説明を更新。「L329 の StatusDetectionResult マッピング契約テストは status フィールドのみ検証しており、promptDetection の契約テストは tests/unit/lib/status-detector.test.ts に集約」と補足"
+      ]
+    },
+    {
+      "id": "F7-003",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "実装タスクに全9箇所の return 文への追加が必要である旨の実装注記を追加",
+      "changes": [
+        "実装タスク「detectSessionStatus() 内部で detectPrompt() の結果を戻り値に含める」にサブ項目として実装注記を追加。全9箇所の return 文（L147, L159, L178, L213, L225, L239, L252, L263）にpromptDetection フィールドを追加する必要があること、L145 の detectPrompt() 結果は全 return パスで参照可能であること、optional フィールドの追加忘れは型エラーにならないためテスト (b) が defense-in-depth として機能することを記載"
+      ]
+    }
+  ],
+  "skipped_findings": [],
+  "issue_sections_modified": [
+    "Note（レビュー反映ステージ番号を Stage 7 に更新）",
+    "実装タスク（F7-003: 2番目のタスクに実装注記サブ項目を追加）",
+    "スコープ外の類似パターン（F7-001: prompt-response/route.ts を追加）",
+    "影響範囲テーブル（F7-002: src/lib/__tests__/status-detector.test.ts の説明を更新）",
+    "レビュー履歴（イテレーション 4 を追加）"
+  ],
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0,
+    "should_fix_applied": 1,
+    "nice_to_have_applied": 2
+  }
+}

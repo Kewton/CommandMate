@@ -1,0 +1,8 @@
+{
+  "stage": 4,
+  "issue_number": 408,
+  "applied_findings": [],
+  "skipped_findings": [],
+  "update_success": true,
+  "summary": "Stage 4（セキュリティ）は指摘なし（approved）のため設計方針書の更新は不要。"
+}

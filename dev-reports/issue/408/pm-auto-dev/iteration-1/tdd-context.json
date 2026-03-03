@@ -1,0 +1,65 @@
+{
+  "issue_number": 408,
+  "title": "perf: current-output APIのdetectPrompt二重呼び出しを解消",
+  "design_policy_path": "dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md",
+  "work_plan_path": "dev-reports/issue/408/work-plan.md",
+  "acceptance_criteria": [
+    "detectPrompt()が1回のみ呼び出されること（current-output APIリクエストあたり）",
+    "プロンプト検出結果が正しく返されること",
+    "promptDataのレスポンス構造が変更前後で同一であること",
+    "isPromptWaitingの判定結果が変更前後で同一であること",
+    "thinkingフラグの判定結果が変更前後で同一であること",
+    "thinking状態時にpromotDetectionフィールドは{isPrompt: false, cleanContent: ...}を含み、promptDataはundefinedであること",
+    "detectSessionStatus()内部のstripAnsi()+stripBoxDrawing()前処理と、route.tsが独自に行っていた前処理が同一結果を生成すること",
+    "APIレスポンスのJSON形状（フィールド名・型・値）が変更前後で同一であること（promptData, isPromptWaiting, thinking, isGenerating, isCompleteの各フィールド）",
+    "既存のUI動作に影響がないこと"
+  ],
+  "implementation_tasks": [
+    "StatusDetectionResultのpromotDetectionをrequiredフィールドに変更（DR1-001）",
+    "JSDocコメントを更新（required、DR1-001反映）",
+    "全8箇所のreturnパスにpromotDetectionフィールドを追加（DR1-003: 8箇所）",
+    "TypeScriptコンパイラで追加漏れがないことを確認（npx tsc --noEmit）",
+    "L98-L102の二重呼び出しコードブロックを削除（DR1-004）",
+    "statusResult.promptDetection.promptData ?? nullに変更（DR1-006: optional chaining不要）",
+    "不要なimportを削除（detectPrompt, buildDetectPromptOptions, stripBoxDrawing）",
+    "stripAnsi/cleanOutputの削除前にgrepで全参照箇所を確認（DR1-007）",
+    "stripAnsiインポートとcleanOutput変数を削除（grepで安全性確認後）",
+    "status-detector.tsにSF-001 resolvedアーキテクチャノートを追加（DR1-002: 将来ガイドライン含む）",
+    "current-output/route.tsにIssue #408コメントを追加",
+    "tests/integration/current-output-thinking.test.ts L78, L98のSF-001コメントを更新（IA3-006）",
+    "tests/unit/lib/status-detector.test.tsに新テストケースを追加",
+    "既存テストへの変更は不要（IA3-003: 全テストはdirectly呼び出しのためrequiredフィールド追加の影響なし）",
+    "npm run test:unitで全テスト通過を確認",
+    "CLAUDE.mdのstatus-detector.tsモジュール説明を更新"
+  ],
+  "key_files": {
+    "main_change": [
+      "src/lib/status-detector.ts",
+      "src/app/api/worktrees/[id]/current-output/route.ts"
+    ],
+    "test_files": [
+      "tests/unit/lib/status-detector.test.ts",
+      "tests/integration/current-output-thinking.test.ts"
+    ],
+    "doc_files": [
+      "CLAUDE.md"
+    ],
+    "no_change_needed": [
+      "src/app/api/worktrees/route.ts",
+      "src/app/api/worktrees/[id]/route.ts",
+      "src/lib/__tests__/status-detector.test.ts",
+      "src/lib/auto-yes-manager.ts",
+      "src/lib/response-poller.ts",
+      "src/app/api/worktrees/[id]/prompt-response/route.ts"
+    ]
+  },
+  "design_notes": {
+    "return_paths_count": 8,
+    "required_not_optional": true,
+    "no_optional_chaining": true,
+    "sf001_resolved": true,
+    "existing_tests_no_change": true,
+    "issue161_layer1_maintained": true
+  },
+  "target_coverage": 80
+}

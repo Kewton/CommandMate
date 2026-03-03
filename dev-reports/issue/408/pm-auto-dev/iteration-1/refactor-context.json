@@ -1,0 +1,25 @@
+{
+  "issue_number": 408,
+  "refactor_targets": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "tests/unit/lib/status-detector.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 74.11,
+    "current_tests": 4393,
+    "lint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "コードの明瞭性と可読性の確認",
+    "JSDocとコメントの一貫性確認",
+    "テストの命名規約と構造の確認",
+    "不要なコードの残存がないことの確認"
+  ],
+  "constraints": [
+    "既存の動作を変更しない",
+    "追加のスコープ変更は行わない（auto-yes-manager.ts等はスコープ外）",
+    "テストの論理変更は行わない"
+  ]
+}

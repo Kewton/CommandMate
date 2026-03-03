@@ -1,0 +1,47 @@
+{
+  "issue_number": 408,
+  "iteration": 1,
+  "status": "success",
+  "changed_files": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "tests/unit/lib/status-detector.test.ts",
+    "tests/integration/current-output-thinking.test.ts",
+    "CLAUDE.md"
+  ],
+  "test_results": {
+    "total": 4393,
+    "passed": 4393,
+    "failed": 0,
+    "skipped": 7,
+    "new_tests_added": 5
+  },
+  "coverage": {
+    "overall": 74.11,
+    "status_detector": {
+      "statements": 55.31,
+      "branches": 46.15,
+      "functions": 100,
+      "lines": 56.52,
+      "note": "Uncovered lines (200-251) are OpenCode-specific branches, not related to Issue #408 changes"
+    }
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "lint_errors": 0,
+  "typescript_errors": 0,
+  "commits": [
+    "32bd5b2: perf(status-detector): resolve SF-001 by adding promptDetection to StatusDetectionResult"
+  ],
+  "files_changed": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "tests/unit/lib/status-detector.test.ts",
+    "tests/integration/current-output-thinking.test.ts",
+    "CLAUDE.md"
+  ],
+  "summary": "TDD implementation complete for Issue #408 (detectPrompt deduplication). Added required promptDetection field to StatusDetectionResult, removed duplicate detectPrompt() call from current-output/route.ts, added 5 new test cases. All 4393 unit tests pass. 0 ESLint errors, 0 TypeScript errors.",
+  "message": "Issue #408 TDD implementation complete. SF-001 resolved by adding promptDetection: PromptDetectionResult as a required field to StatusDetectionResult (DR1-001). The duplicate detectPrompt() call in current-output/route.ts has been removed. All 8 return paths in detectSessionStatus() now include the promptDetection field. TypeScript compiler enforces completeness for any future return paths. 5 new test cases verify the promptDetection field behavior across all scenarios (prompt detected, prompt not detected, thinking state, and hasActivePrompt consistency guarantee)."
+}

@@ -1,0 +1,36 @@
+{
+  "issue_number": 408,
+  "feature_summary": "perf: current-output APIのdetectPrompt二重呼び出しを解消（SF-001 resolved）",
+  "design_policy_path": "dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md",
+  "tdd_result_path": "dev-reports/issue/408/pm-auto-dev/iteration-1/tdd-result.json",
+  "acceptance_criteria": [
+    "detectPrompt()が1回のみ呼び出されること（current-output APIリクエストあたり）",
+    "プロンプト検出結果が正しく返されること",
+    "promptDataのレスポンス構造が変更前後で同一であること",
+    "isPromptWaitingの判定結果が変更前後で同一であること",
+    "thinkingフラグの判定結果が変更前後で同一であること",
+    "thinking状態時にpromotDetectionフィールドは{isPrompt: false, cleanContent: ...}を含み、promptDataはundefinedであること",
+    "detectSessionStatus()内部のstripAnsi()+stripBoxDrawing()前処理と外部前処理が同一結果を生成すること",
+    "APIレスポンスのJSON形状（promptData, isPromptWaiting, thinking, isGenerating, isCompleteフィールド）が変更前後で同一であること",
+    "既存のUI動作に影響がないこと"
+  ],
+  "test_scenarios": [
+    "シナリオ1: StatusDetectionResultにprompDetectionフィールドが存在すること（requiredフィールドのためTypeScriptコンパイルで確認）",
+    "シナリオ2: prompt検出時にpromotDetection.isPrompt===trueかつhasActivePrompt===trueが一致すること",
+    "シナリオ3: prompt未検出時にpromotDetection.isPrompt===falseかつhasActivePrompt===falseが一致すること",
+    "シナリオ4: thinking状態時にpromotDetection.isPrompt===falseが保証されること（Issue #161 Layer 1防御維持）",
+    "シナリオ5: current-output/route.tsからdetectPrompt, buildDetectPromptOptions, stripBoxDrawing, stripAnsiのimportが削除されていること",
+    "シナリオ6: L98-L102の二重呼び出しコードブロックが削除されていること",
+    "シナリオ7: SF-001コメントがIssue #408 resolved表記に更新されていること",
+    "シナリオ8: 全8箇所のreturnパスでpromotDetectionフィールドが設定されていること",
+    "シナリオ9: 全既存ユニットテスト（4393件）がパスすること",
+    "シナリオ10: TypeScriptコンパイルエラーが0件であること"
+  ],
+  "changed_files": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "tests/unit/lib/status-detector.test.ts",
+    "tests/integration/current-output-thinking.test.ts",
+    "CLAUDE.md"
+  ]
+}
