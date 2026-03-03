@@ -54,7 +54,7 @@ export interface MobilePromptSheetProps {
  * Displays prompts in a mobile-friendly bottom sheet format.
  * Supports swipe to dismiss and overlay click to dismiss.
  */
-export function MobilePromptSheet({
+export const MobilePromptSheet = memo(function MobilePromptSheet({
   promptData,
   visible,
   answering,
@@ -188,7 +188,7 @@ export function MobilePromptSheet({
       </div>
     </ErrorBoundary>
   );
-}
+});
 
 /**
  * Props for PromptContent component

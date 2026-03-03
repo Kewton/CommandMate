@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useCallback, useId, useMemo } from 'react';
+import { memo, useState, useCallback, useId, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { PromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
@@ -373,7 +373,7 @@ function getContainerClasses(animationClass: string): string {
  * />
  * ```
  */
-export function PromptPanel({
+export const PromptPanel = memo(function PromptPanel({
   promptData,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reserved for future use (tracking, analytics)
   messageId,
@@ -416,6 +416,6 @@ export function PromptPanel({
       </div>
     </ErrorBoundary>
   );
-}
+});
 
 export default PromptPanel;

@@ -7,7 +7,7 @@
 
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { memo, useState, useCallback, useRef } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export interface InterruptButtonProps {
@@ -39,7 +39,7 @@ const DEBOUNCE_DELAY_MS = 1000;
  * ```
  */
 
-export function InterruptButton({
+export const InterruptButton = memo(function InterruptButton({
   worktreeId,
   cliToolId,
   disabled = false,
@@ -114,7 +114,7 @@ export function InterruptButton({
       )}
     </button>
   );
-}
+});
 
 /**
  * Stop icon (square with rounded corners)

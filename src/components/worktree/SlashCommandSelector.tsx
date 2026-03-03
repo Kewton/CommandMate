@@ -7,7 +7,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 import { filterCommandGroups } from '@/lib/command-merger';
 import { SlashCommandList } from './SlashCommandList';
@@ -45,7 +45,7 @@ export interface SlashCommandSelectorProps {
  * />
  * ```
  */
-export function SlashCommandSelector({
+export const SlashCommandSelector = memo(function SlashCommandSelector({
   isOpen,
   groups,
   onSelect,
@@ -271,4 +271,4 @@ export function SlashCommandSelector({
       </div>
     </div>
   );
-}
+});

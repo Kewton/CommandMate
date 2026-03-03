@@ -1845,6 +1845,95 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const worktreeName = worktree?.name ?? DEFAULT_WORKTREE_NAME;
 
   // ========================================================================
+  // Memoized Panes (Issue #411: avoid re-render on polling)
+  // ========================================================================
+
+  /** Memoized right pane (terminal) to prevent re-render when left pane state changes */
+  const rightPaneMemo = useMemo(
+    () => (
+      <TerminalDisplay
+        output={state.terminal.output}
+        isActive={state.terminal.isActive}
+        isThinking={state.terminal.isThinking}
+        autoScroll={state.terminal.autoScroll}
+        onScrollChange={handleAutoScrollChange}
+        disableAutoFollow={disableAutoFollow}
+      />
+    ),
+    [state.terminal.output, state.terminal.isActive, state.terminal.isThinking, state.terminal.autoScroll, handleAutoScrollChange, disableAutoFollow]
+  );
+
+  /** Memoized left pane to prevent re-render when terminal state changes */
+  const leftPaneMemo = useMemo(
+    () => (
+      <div className="h-full flex flex-col">
+        <LeftPaneTabSwitcher
+          activeTab={leftPaneTab}
+          onTabChange={handleLeftPaneTabChange}
+        />
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {leftPaneTab === 'history' && (
+            <HistoryPane
+              messages={state.messages}
+              worktreeId={worktreeId}
+              onFilePathClick={handleFilePathClick}
+              className="h-full"
+              showToast={showToast}
+            />
+          )}
+          {leftPaneTab === 'files' && (
+            <ErrorBoundary componentName="FileTreeView">
+              <div className="h-full flex flex-col">
+                {/* [Issue #21] Search Bar */}
+                <SearchBar
+                  query={fileSearch.query}
+                  mode={fileSearch.mode}
+                  isSearching={fileSearch.isSearching}
+                  error={fileSearch.error}
+                  onQueryChange={fileSearch.setQuery}
+                  onModeChange={fileSearch.setMode}
+                  onClear={fileSearch.clearSearch}
+                />
+                <FileTreeView
+                  worktreeId={worktreeId}
+                  onFileSelect={handleFileSelect}
+                  onNewFile={handleNewFile}
+                  onNewDirectory={handleNewDirectory}
+                  onRename={handleRename}
+                  onDelete={handleDelete}
+                  onUpload={handleUpload}
+                  onMove={handleMove}
+                  onCmateSetup={handleCmateSetup}
+                  refreshTrigger={fileTreeRefresh}
+                  searchQuery={fileSearch.query}
+                  searchMode={fileSearch.mode}
+                  searchResults={fileSearch.results?.results}
+                  className="flex-1 min-h-0"
+                />
+              </div>
+            </ErrorBoundary>
+          )}
+          {leftPaneTab === 'memo' && (
+            <ErrorBoundary componentName="NotesAndLogsPane">
+              <NotesAndLogsPane
+                worktreeId={worktreeId}
+                className="h-full"
+                selectedAgents={selectedAgents}
+                onSelectedAgentsChange={handleSelectedAgentsChange}
+                vibeLocalModel={vibeLocalModel}
+                onVibeLocalModelChange={handleVibeLocalModelChange}
+                vibeLocalContextWindow={vibeLocalContextWindow}
+                onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
+              />
+            </ErrorBoundary>
+          )}
+        </div>
+      </div>
+    ),
+    [leftPaneTab, handleLeftPaneTabChange, state.messages, worktreeId, handleFilePathClick, showToast, fileSearch.query, fileSearch.mode, fileSearch.isSearching, fileSearch.error, fileSearch.setQuery, fileSearch.setMode, fileSearch.clearSearch, fileSearch.results?.results, handleFileSelect, handleNewFile, handleNewDirectory, handleRename, handleDelete, handleUpload, handleMove, handleCmateSetup, fileTreeRefresh, selectedAgents, handleSelectedAgentsChange, vibeLocalModel, handleVibeLocalModelChange, vibeLocalContextWindow, handleVibeLocalContextWindowChange]
+  );
+
+  // ========================================================================
   // Render
   // ========================================================================
 
@@ -1932,81 +2021,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           )}
           <div className="flex-1 min-h-0">
             <WorktreeDesktopLayout
-              leftPane={
-                <div className="h-full flex flex-col">
-                  <LeftPaneTabSwitcher
-                    activeTab={leftPaneTab}
-                    onTabChange={handleLeftPaneTabChange}
-                  />
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    {leftPaneTab === 'history' && (
-                      <HistoryPane
-                        messages={state.messages}
-                        worktreeId={worktreeId}
-                        onFilePathClick={handleFilePathClick}
-                        className="h-full"
-                        showToast={showToast}
-                      />
-                    )}
-                    {leftPaneTab === 'files' && (
-                      <ErrorBoundary componentName="FileTreeView">
-                        <div className="h-full flex flex-col">
-                          {/* [Issue #21] Search Bar */}
-                          <SearchBar
-                            query={fileSearch.query}
-                            mode={fileSearch.mode}
-                            isSearching={fileSearch.isSearching}
-                            error={fileSearch.error}
-                            onQueryChange={fileSearch.setQuery}
-                            onModeChange={fileSearch.setMode}
-                            onClear={fileSearch.clearSearch}
-                          />
-                          <FileTreeView
-                            worktreeId={worktreeId}
-                            onFileSelect={handleFileSelect}
-                            onNewFile={handleNewFile}
-                            onNewDirectory={handleNewDirectory}
-                            onRename={handleRename}
-                            onDelete={handleDelete}
-                            onUpload={handleUpload}
-                            onMove={handleMove}
-                            onCmateSetup={handleCmateSetup}
-                            refreshTrigger={fileTreeRefresh}
-                            searchQuery={fileSearch.query}
-                            searchMode={fileSearch.mode}
-                            searchResults={fileSearch.results?.results}
-                            className="flex-1 min-h-0"
-                          />
-                        </div>
-                      </ErrorBoundary>
-                    )}
-                    {leftPaneTab === 'memo' && (
-                      <ErrorBoundary componentName="NotesAndLogsPane">
-                        <NotesAndLogsPane
-                          worktreeId={worktreeId}
-                          className="h-full"
-                          selectedAgents={selectedAgents}
-                          onSelectedAgentsChange={handleSelectedAgentsChange}
-                          vibeLocalModel={vibeLocalModel}
-                          onVibeLocalModelChange={handleVibeLocalModelChange}
-                          vibeLocalContextWindow={vibeLocalContextWindow}
-                          onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
-                        />
-                      </ErrorBoundary>
-                    )}
-                  </div>
-                </div>
-              }
-              rightPane={
-                <TerminalDisplay
-                  output={state.terminal.output}
-                  isActive={state.terminal.isActive}
-                  isThinking={state.terminal.isThinking}
-                  autoScroll={state.terminal.autoScroll}
-                  onScrollChange={handleAutoScrollChange}
-                  disableAutoFollow={disableAutoFollow}
-                />
-              }
+              leftPane={leftPaneMemo}
+              rightPane={rightPaneMemo}
               initialLeftWidth={40}
               minLeftWidth={20}
               maxLeftWidth={60}
