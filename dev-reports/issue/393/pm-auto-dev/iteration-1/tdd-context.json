@@ -1,0 +1,64 @@
+{
+  "issue_number": 393,
+  "title": "security: authenticated RCE and shell injection via /api/worktrees/[id]/terminal",
+  "acceptance_criteria": [
+    "cliToolId が CLI_TOOL_IDS に含まれない場合、400 Bad Request を返す",
+    "worktreeId が DB に存在しない場合、404 Not Found を返す",
+    "command パラメータが 10000 文字を超える場合、400 Bad Request を返す",
+    "セッションが存在しない場合、自動作成せず 404 を返す",
+    "エラーメッセージにユーザー入力値を埋め込まない（固定文字列）",
+    "tmux.ts の全 exec() 呼び出しが execFile() に移行されている",
+    "sendSpecialKey() にランタイムバリデーションが追加されている",
+    "codex.ts / claude-session.ts の直接 exec() が tmux.ts 関数経由に統一されている",
+    "capture/route.ts の lines パラメータが正の整数として検証される"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: tmux.ts 全9関数・11箇所の exec()→execFile() 移行",
+    "Task 1.2: tmux.ts の sendSpecialKey() にランタイムバリデーション追加（ALLOWED_SINGLE_SPECIAL_KEYS）",
+    "Task 2.1: codex.ts の直接exec()呼び出し4箇所を tmux.ts 関数に置き換え",
+    "Task 2.2: claude-session.ts line 783 の直接exec()を tmux.sendSpecialKey() に置き換え",
+    "Task 3.1: terminal/route.ts の入力バリデーション追加・CLIToolManager経由・sendToTmux()廃止・500固定メッセージ",
+    "Task 4.1: capture/route.ts の入力バリデーション追加・lines パラメータ検証・CLIToolManager経由・500固定メッセージ",
+    "Task 5.1: tmux.test.ts のモック exec→execFile 変更・インジェクション防止テスト追加",
+    "Task 5.2: terminal-route.test.ts 新規作成",
+    "Task 5.3: capture-route.test.ts 新規作成",
+    "Task 5.4: claude-session.test.ts のモック更新（sendSpecialKey追加）"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-393-security-rce-shell-injection-design-policy.md",
+  "work_plan_path": "dev-reports/issue/393/work-plan.md",
+  "key_files": {
+    "modify": [
+      "src/lib/tmux.ts",
+      "src/lib/cli-tools/codex.ts",
+      "src/lib/claude-session.ts",
+      "src/app/api/worktrees/[id]/terminal/route.ts",
+      "src/app/api/worktrees/[id]/capture/route.ts"
+    ],
+    "create": [
+      "tests/unit/terminal-route.test.ts",
+      "tests/unit/capture-route.test.ts"
+    ],
+    "modify_tests": [
+      "tests/unit/tmux.test.ts",
+      "tests/unit/lib/claude-session.test.ts"
+    ],
+    "reference": [
+      "src/app/api/worktrees/[id]/respond/route.ts",
+      "src/app/api/worktrees/[id]/kill-session/route.ts",
+      "src/lib/cli-tools/types.ts",
+      "src/lib/cli-tools/base.ts",
+      "src/lib/cli-tools/opencode.ts",
+      "src/lib/cli-tools/validation.ts"
+    ]
+  },
+  "security_notes": {
+    "error_messages": "全てのエラーレスポンスで固定文字列を使用。ユーザー入力値をエラーメッセージに埋め込まない",
+    "execFile_migration": "exec()はシェル経由実行のためインジェクション可能。execFile()は引数配列で渡すためシェル非経由",
+    "maxBuffer": "capturePane()の maxBuffer: 10MB は execFile() 移行後も維持する",
+    "sendKeys_escape": "exec()時のシングルクォートエスケープは execFile() 移行後は不要。keys を引数配列要素として直接渡す",
+    "allowedSingleSpecialKeys": "ALLOWED_SINGLE_SPECIAL_KEYS = new Set(['Escape', 'C-c', 'C-d', 'C-m', 'Enter'])",
+    "max_command_length": "MAX_COMMAND_LENGTH = 10000 (claude-executor.ts の MAX_MESSAGE_LENGTH と一致)",
+    "lines_validation": "typeof/Number.isInteger/境界値(1-100000)/Math.floor の4段階バリデーション"
+  }
+}

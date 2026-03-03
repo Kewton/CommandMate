@@ -1,0 +1,11 @@
+{
+  "issue_number": 389,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_date": "2026-03-02",
+  "applied_findings": ["S1-001", "S1-002", "S1-003", "S1-004", "S1-005", "S1-006", "S1-008", "S1-009"],
+  "skipped_findings": [],
+  "skip_reason": {},
+  "github_updated": true,
+  "summary": "Stage 1レビューのMust Fix 2件・Should Fix 6件の計8件をIssue #389に反映。実装タスクに4項目追加（S1-001: useAutoSave用純粋API呼び出し関数の切り出し、S1-008: onSaveCompleteコールバック活用、S1-009: Toast通知抑制、S1-003: handleClose()のauto-save対応）。受入条件を3項目修正・追加（S1-002: beforeunload抑制条件の厳密化、S1-004: Ctrl+Sによる即座保存、S1-006: 失敗時のToast通知と手動保存フォールバック）。変更対象ファイルの記述を2箇所更新（S1-005: markdown-editor.tsにAUTO_SAVE_DEBOUNCE_MS定数追加を明記、useAutoSave.tsは変更不要に修正）。レビュー履歴セクションを追加。"
+}

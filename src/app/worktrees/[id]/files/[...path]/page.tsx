@@ -147,7 +147,7 @@ export default function FileViewerPage() {
                 />
               ) : isMarkdown ? (
                 // Markdown rendering with GitHub-like styling
-                <div className="prose prose-slate max-w-none prose-headings:font-semibold prose-h1:text-3xl prose-h1:border-b prose-h1:pb-2 prose-h2:text-2xl prose-h2:border-b prose-h2:pb-2 prose-h3:text-xl prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline prose-pre:bg-gray-100 prose-pre:border prose-pre:border-gray-200 prose-code:text-sm prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-img:rounded-lg prose-img:shadow-md">
+                <div className="prose prose-slate max-w-none prose-headings:font-semibold prose-h1:text-3xl prose-h1:border-b prose-h1:pb-2 prose-h2:text-2xl prose-h2:border-b prose-h2:pb-2 prose-h3:text-xl prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline prose-code:text-sm prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-img:rounded-lg prose-img:shadow-md">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeHighlight]}
@@ -168,7 +168,7 @@ export default function FileViewerPage() {
                         );
                       },
                       pre: ({ children }: { children?: React.ReactNode }) => (
-                        <pre className="bg-gray-50 border border-gray-200 rounded-md p-4 overflow-x-auto">
+                        <pre className="overflow-x-auto">
                           {children}
                         </pre>
                       ),

@@ -1,0 +1,152 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: External symlink read via readFileContent() returns INVALID_PATH",
+      "result": "passed",
+      "evidence": "tests/unit/lib/file-operations-symlink.test.ts: 'should reject readFileContent via external symlink' PASSED - console.warn [SEC-394] symlink traversal rejected confirmed"
+    },
+    {
+      "scenario": "Scenario 2: External symlink write via updateFileContent() returns INVALID_PATH",
+      "result": "passed",
+      "evidence": "tests/unit/lib/file-operations-symlink.test.ts: 'should reject updateFileContent via external symlink' PASSED"
+    },
+    {
+      "scenario": "Scenario 3: External symlink delete via deleteFileOrDirectory() returns INVALID_PATH",
+      "result": "passed",
+      "evidence": "tests/unit/lib/file-operations-symlink.test.ts: 'should reject deleteFileOrDirectory via external symlink' PASSED"
+    },
+    {
+      "scenario": "Scenario 4: External symlink rename source via renameFileOrDirectory() returns INVALID_PATH",
+      "result": "passed",
+      "evidence": "tests/unit/lib/file-operations-symlink.test.ts: 'should reject renameFileOrDirectory with external symlink source' PASSED"
+    },
+    {
+      "scenario": "Scenario 5: External symlink directory for createFileOrDirectory() returns INVALID_PATH",
+      "result": "passed",
+      "evidence": "tests/unit/lib/file-operations-symlink.test.ts: 'should reject createFileOrDirectory under external symlink directory' PASSED - ancestor walk detected"
+    },
+    {
+      "scenario": "Scenario 6: External symlink directory for writeBinaryFile() returns INVALID_PATH",
+      "result": "passed",
+      "evidence": "tests/unit/lib/file-operations-symlink.test.ts: 'should reject writeBinaryFile under external symlink directory' PASSED - ancestor walk detected"
+    },
+    {
+      "scenario": "Scenario 7: Internal symlink read via readFileContent() succeeds",
+      "result": "passed",
+      "evidence": "tests/unit/lib/file-operations-symlink.test.ts: 'should allow readFileContent via internal path (regression)' PASSED - content='# Internal'"
+    },
+    {
+      "scenario": "Scenario 8: resolveAndValidateRealPath() correctly validates various symlink scenarios",
+      "result": "passed",
+      "evidence": "tests/unit/path-validator.test.ts: All 10 resolveAndValidateRealPath [SEC-394] tests PASSED (external reject, internal allow, dangling reject, multi-level chain reject, macOS compat, non-existent ancestor, filesystem root, fail-safe rootDir, equals-root, internal symlink dir)"
+    },
+    {
+      "scenario": "Scenario 9: macOS tmpdir compatibility - rootDir with symlink resolves correctly",
+      "result": "passed",
+      "evidence": "tests/unit/path-validator.test.ts: 'should handle macOS tmpdir symlink compatibility (rootDir contains OS symlink)' PASSED - realpathSync applied to rootDir at line 150"
+    },
+    {
+      "scenario": "Scenario 10: Non-existent path ancestor traversal works correctly",
+      "result": "passed",
+      "evidence": "tests/unit/path-validator.test.ts: 'should validate non-existent path via nearest ancestor (create scenario)' PASSED + 'should return false when ancestor walk reaches filesystem root' PASSED"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Symlink rejection: A request with a path resolving through an external symlink is rejected with INVALID_PATH",
+      "verified": true,
+      "evidence": "file-operations-symlink.test.ts: 6 rejection tests (read/write/delete/create/rename/writeBinary) all return INVALID_PATH. path-validator.test.ts: external/dangling/multi-level all return false."
+    },
+    {
+      "criterion": "Normal path preservation: Requests to normal paths continue to function correctly",
+      "verified": true,
+      "evidence": "file-operations-symlink.test.ts: 'should allow readFileContent via internal path (regression)' PASSED. All 4324 existing tests pass."
+    },
+    {
+      "criterion": "Internal symlink preservation: Symlinks pointing within the worktreeRoot remain accessible",
+      "verified": true,
+      "evidence": "path-validator.test.ts: 'should allow symlink pointing within worktree root (internal symlink)' PASSED + 'should allow non-existent path under internal symlink directory' PASSED"
+    },
+    {
+      "criterion": "Image/video GET paths: Direct readFile() code paths for images and videos are protected via getWorktreeAndValidatePath()",
+      "verified": true,
+      "evidence": "getWorktreeAndValidatePath() at files/route.ts:96-130 includes resolveAndValidateRealPath at line 123. Used by GET handler. file-operations-symlink.test.ts: image (.png) and video (.mp4) symlink traversal tests PASSED."
+    },
+    {
+      "criterion": "Rename protection: renameFileOrDirectory() validates source path against symlink traversal",
+      "verified": true,
+      "evidence": "file-operations.ts:validateFileOperation() at line 489 calls resolveAndValidateRealPath. renameFileOrDirectory() uses validateFileOperation() at line 649. file-operations-symlink.test.ts: rename rejection test PASSED."
+    },
+    {
+      "criterion": "Tree API protection: GET /api/worktrees/:id/tree/:path rejects external symlink directories",
+      "verified": true,
+      "evidence": "tree/[...path]/route.ts line 84: resolveAndValidateRealPath(relativePath, worktree.path) check added with AccessDenied error response."
+    },
+    {
+      "criterion": "Upload API protection: POST /api/worktrees/:id/upload/:path rejects external symlink paths",
+      "verified": true,
+      "evidence": "upload/[...path]/route.ts line 122: resolveAndValidateRealPath(normalizedDir, worktree.path) check added. writeBinaryFile() in file-operations.ts also has defense-in-depth check at line 710."
+    },
+    {
+      "criterion": "Create/upload with symlink parent: Creating or uploading through an external symlink parent is rejected",
+      "verified": true,
+      "evidence": "resolveAndValidateRealPath ancestor walk logic (lines 202-224) validates nearest existing ancestor. file-operations-symlink.test.ts: createFileOrDirectory and writeBinaryFile under external symlink directory both return INVALID_PATH."
+    },
+    {
+      "criterion": "macOS tmpdir compatibility: Works when worktreeRoot contains OS-level symlinks (e.g., macOS /var -> /private/var)",
+      "verified": true,
+      "evidence": "resolveAndValidateRealPath applies realpathSync to rootDir at line 150. path-validator.test.ts macOS compatibility test PASSED on this macOS Darwin 25.3.0 system."
+    },
+    {
+      "criterion": "Existing tests pass: All 4324 existing test cases continue to pass",
+      "verified": true,
+      "evidence": "npm run test:unit: 204 test files, 4324 passed, 7 skipped, 0 failed. Duration: 14.02s"
+    },
+    {
+      "criterion": "New test coverage: 10 new cases in path-validator.test.ts + 9 cases in file-operations-symlink.test.ts",
+      "verified": true,
+      "evidence": "path-validator.test.ts: 10 tests in 'resolveAndValidateRealPath [SEC-394]' describe block all PASSED. file-operations-symlink.test.ts: 9 tests in 'File Operations - Symlink Traversal Protection [SEC-394]' describe block all PASSED."
+    }
+  ],
+  "code_review": {
+    "path_validator_ts": {
+      "file": "src/lib/path-validator.ts",
+      "findings": [
+        "resolveAndValidateRealPath correctly applies realpathSync to rootDir (line 150) for macOS compatibility",
+        "Ancestor walk logic (lines 202-224) correctly iterates upward for non-existent paths",
+        "All error paths return false (fail-safe design) - lines 153, 173, 220, 227",
+        "console.warn('[SEC-394]...') logged on symlink rejection - lines 167, 190, 214",
+        "Dangling symlink handling via lstatSync + readlinkSync (lines 178-200)"
+      ]
+    },
+    "file_operations_ts": {
+      "file": "src/lib/file-operations.ts",
+      "findings": [
+        "resolveAndValidateRealPath added to: readFileContent (line 235), updateFileContent (line 277), createFileOrDirectory (line 320), deleteFileOrDirectory (line 401), writeBinaryFile (line 710), validateFileOperation (line 489)",
+        "validateFileOperation resolvedSource remains lexical path (join at line 493, not realpathSync) - explicitly commented at line 488",
+        "All checks follow isPathSafe() as defense-in-depth pattern"
+      ]
+    },
+    "api_routes": {
+      "files": "files/[...path]/route.ts: resolveAndValidateRealPath at line 123 inside getWorktreeAndValidatePath() - protects all 5 HTTP methods",
+      "tree": "tree/[...path]/route.ts: resolveAndValidateRealPath at line 84 - protects directory listing",
+      "upload": "upload/[...path]/route.ts: resolveAndValidateRealPath at line 122 - protects file upload"
+    }
+  },
+  "quality_checks": {
+    "unit_tests": "PASSED - 4324 tests passed, 7 skipped, 0 failed (204 test files)",
+    "typescript": "PASSED - npx tsc --noEmit: 0 errors",
+    "eslint": "PASSED - npm run lint: No ESLint warnings or errors"
+  },
+  "evidence_files": [
+    "tests/unit/path-validator.test.ts (10 new SEC-394 tests)",
+    "tests/unit/lib/file-operations-symlink.test.ts (9 new SEC-394 tests)",
+    "src/lib/path-validator.ts (resolveAndValidateRealPath implementation)",
+    "src/lib/file-operations.ts (7 integration points)",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts (getWorktreeAndValidatePath integration)",
+    "src/app/api/worktrees/[id]/tree/[...path]/route.ts (tree API integration)",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts (upload API integration)"
+  ],
+  "message": "All 11 acceptance criteria verified. All 10 test scenarios passed. 19 new tests (10 + 9) and 4324 existing tests all pass. TypeScript and ESLint checks clean. Security implementation correctly handles external symlinks, internal symlinks, dangling symlinks, multi-level chains, macOS tmpdir compatibility, ancestor traversal for non-existent paths, and fail-safe error handling."
+}

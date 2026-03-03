@@ -1,0 +1,91 @@
+{
+  "issue_number": 395,
+  "overall_status": "passed",
+  "acceptance_criteria_results": [
+    {
+      "criterion": "SENSITIVE_REQUEST_HEADERS and SENSITIVE_RESPONSE_HEADERS constants added to src/lib/proxy/config.ts",
+      "status": "pass",
+      "evidence": "config.ts lines 38-46 define SENSITIVE_REQUEST_HEADERS with 7 headers (cookie, authorization, proxy-authorization, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-real-ip). Lines 63-75 define SENSITIVE_RESPONSE_HEADERS with 11 headers including 6 CORS access-control-* headers."
+    },
+    {
+      "criterion": "proxyHttp() strips sensitive request headers (cookie, authorization, proxy-authorization, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-real-ip) before forwarding to upstream",
+      "status": "pass",
+      "evidence": "handler.ts lines 63-74 iterate over request headers and skip any header whose lowercase name is in SENSITIVE_REQUEST_HEADERS, preventing credential leakage to upstream."
+    },
+    {
+      "criterion": "proxyHttp() strips sensitive response headers (set-cookie, content-security-policy, content-security-policy-report-only, x-frame-options, strict-transport-security, and 6 CORS access-control-* headers) from upstream responses",
+      "status": "pass",
+      "evidence": "handler.ts lines 93-104 iterate over upstream response headers and skip any header whose lowercase name is in SENSITIVE_RESPONSE_HEADERS, preventing upstream from setting cookies or overriding security policies."
+    },
+    {
+      "criterion": "proxyWebSocket() 426 response no longer includes directUrl field and message field does not contain internal URL information",
+      "status": "pass",
+      "evidence": "handler.ts lines 160-172 show proxyWebSocket() returns JSON with only 'error' and 'message' fields. 'message' uses PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED constant ('WebSocket connections are not supported through the proxy Route Handler'). No directUrl field, no host/port/ws:// information."
+    },
+    {
+      "criterion": "route.ts catch block returns fixed-string error message (PROXY_ERROR_MESSAGES.BAD_GATEWAY) instead of (error as Error).message",
+      "status": "pass",
+      "evidence": "route.ts lines 109-113 catch block uses PROXY_ERROR_MESSAGES.BAD_GATEWAY. Grep for '(error as Error).message' in route.ts returns no matches."
+    },
+    {
+      "criterion": "route.ts 404 response does not include pathPrefix information",
+      "status": "pass",
+      "evidence": "route.ts line 53 returns fixed string 'No external app found for the requested path' -- does not interpolate pathPrefix variable into the error response body."
+    },
+    {
+      "criterion": "route.ts 503 response does not include app.displayName information",
+      "status": "pass",
+      "evidence": "route.ts line 61 returns fixed string 'The requested external app is currently disabled' -- does not interpolate app.displayName into the error response body."
+    },
+    {
+      "criterion": "ExternalAppForm.tsx displays a security warning banner about same-origin risks",
+      "status": "pass",
+      "evidence": "ExternalAppForm.tsx lines 203-208 contain an amber-colored warning banner (bg-amber-50, border-amber-200, text-amber-800) with text: 'Proxied apps run under the CommandMate origin and can access CommandMate APIs. Only register trusted applications.'"
+    },
+    {
+      "criterion": "IProxyHandler.proxyWebSocket() JSDoc updated to reflect directUrl removal",
+      "status": "pass",
+      "evidence": "interfaces.ts lines 97-101 JSDoc updated: 'Returns a 426 Upgrade Required response with a fixed error message. Issue #395: Response no longer includes directUrl or internal URL information to prevent leaking upstream host/port details.'"
+    },
+    {
+      "criterion": "Existing tests in tests/unit/proxy/handler.test.ts updated to reflect new stripping behavior",
+      "status": "pass",
+      "evidence": "handler.test.ts line 88 test renamed to 'should forward request headers (safe headers only, stripping sensitive ones)' with assertions verifying authorization is NOT forwarded (line 114) while safe headers ARE forwarded (lines 116-117). WebSocket test at line 207 updated to verify no directUrl and fixed message."
+    },
+    {
+      "criterion": "New tests added for request header stripping, response header stripping, safe header forwarding, and directUrl/message removal verification",
+      "status": "pass",
+      "evidence": "handler.test.ts contains 4 new describe blocks: 'sensitive request header stripping' (lines 309-368, 8 tests including parametrized per-header tests), 'safe request header forwarding (regression)' (lines 370-415, 2 tests), 'sensitive response header stripping' (lines 417-489, 12 tests including parametrized per-header tests), 'proxyWebSocket security (Issue #395)' (lines 491-548, 3 tests)."
+    },
+    {
+      "criterion": "CLAUDE.md handler.ts and config.ts module descriptions updated with Issue #395 security hardening details",
+      "status": "pass",
+      "evidence": "CLAUDE.md line 178 (handler.ts): includes 'Issue #395: security hardening' details about SENSITIVE_REQUEST_HEADERS, SENSITIVE_RESPONSE_HEADERS, proxyWebSocket directUrl removal. Line 180 (config.ts): includes 'Issue #395: SENSITIVE_REQUEST_HEADERS added' (7 headers) and 'SENSITIVE_RESPONSE_HEADERS added' (11 headers)."
+    },
+    {
+      "criterion": "npm run lint passes with 0 errors",
+      "status": "pass",
+      "evidence": "ESLint output: 'No ESLint warnings or errors'"
+    },
+    {
+      "criterion": "npx tsc --noEmit passes with 0 errors",
+      "status": "pass",
+      "evidence": "TypeScript compiler produced no output (0 errors, 0 warnings)"
+    },
+    {
+      "criterion": "npm run test:unit passes with all tests passing",
+      "status": "pass",
+      "evidence": "Test output: 206 test files passed, 4381 tests passed, 7 skipped (pre-existing skips), 0 failures"
+    }
+  ],
+  "test_run_results": {
+    "total": 4388,
+    "passed": 4381,
+    "failed": 0,
+    "skipped": 7
+  },
+  "typescript_check": "pass",
+  "lint_check": "pass",
+  "issues_found": [],
+  "summary": "All 15 acceptance criteria for Issue #395 (security: same-origin trust break and credential leakage through /proxy/* external app proxy) are verified as passing. The implementation correctly adds SENSITIVE_REQUEST_HEADERS (7 headers) and SENSITIVE_RESPONSE_HEADERS (11 headers) to config.ts, strips them in proxyHttp() for both request and response paths, removes directUrl and internal URL information from proxyWebSocket() 426 responses, sanitizes all error responses in route.ts to use fixed strings, adds an amber security warning banner in ExternalAppForm.tsx, updates JSDoc in interfaces.ts, adds comprehensive tests, and updates CLAUDE.md module descriptions. All static analysis checks (TypeScript, ESLint) pass with 0 errors, and all 4381 unit tests pass."
+}

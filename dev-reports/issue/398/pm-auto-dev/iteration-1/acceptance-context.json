@@ -1,0 +1,25 @@
+{
+  "issue_number": 398,
+  "feature_summary": "opencode起動時、LM StudioのモデルもOllamaと並行してopencode.jsonに反映する",
+  "acceptance_criteria": [
+    "LM Studioが起動している場合、そのモデル一覧がopencode.jsonに反映されること",
+    "LM Studioが未起動の場合、エラーにならずOllamaのみで動作すること",
+    "Ollamaが未起動の場合、エラーにならずLM Studioのみで動作すること",
+    "両方未起動の場合も、致命的エラーにならないこと",
+    "OllamaとLM Studioの両方が未起動で取得モデル数が0件の場合、opencode.jsonは生成しないこと（SF-004）",
+    "ユニットテスト・結合テストがすべてパスすること",
+    "既存のOllamaのみの動作に影響がないこと",
+    "LM Studioモデルのスケジュール実行（非インタラクティブモード）はスコープ外"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 両方起動 - Ollama + LM Studio両方のAPIが応答する場合、opencode.jsonにollama/lmstudioプロバイダーが両方含まれること",
+    "シナリオ2: Ollamaのみ起動 - LM Studioが未起動（ECONNREFUSED）でOllamaのみ応答する場合、lmstudioキーなしのopencode.jsonが生成されること",
+    "シナリオ3: LM Studioのみ起動 - Ollamaが未起動でLM Studioのみ応答する場合、ollamaキーなしのopencode.jsonが生成されること",
+    "シナリオ4: 両方未起動 - 両APIがECONNREFUSEDの場合、opencode.jsonが生成されないこと",
+    "シナリオ5: opencode.json既存 - すでにファイルがある場合はAPIを呼ばずスキップされること",
+    "シナリオ6: LM Studio APIタイムアウト - AbortErrorが発生してもOllama側は正常動作すること",
+    "シナリオ7: LM Studioモデル件数制限 - 100件上限でモデル数が制限されること",
+    "シナリオ8: パストラバーサル防御 - 不正なworktreePathでエラーがthrowされること"
+  ],
+  "tdd_result_path": "dev-reports/issue/398/pm-auto-dev/iteration-1/tdd-result.json"
+}

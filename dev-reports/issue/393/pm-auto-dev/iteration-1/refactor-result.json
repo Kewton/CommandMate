@@ -1,0 +1,27 @@
+{
+  "issue_number": 393,
+  "status": "success",
+  "changes_made": [
+    {
+      "file": "src/lib/tmux.ts",
+      "change": "Improved JSDoc for ALLOWED_SPECIAL_KEYS and ALLOWED_SINGLE_SPECIAL_KEYS to clearly distinguish their purposes (multi-key TUI navigation vs single control keys). Removed design-doc reference codes (D2-006, R2F007, D2-005, R1F004, D2-003) from inline comments, replacing with descriptive English comments. Clarified SPECIAL_KEY_VALUES JSDoc and SpecialKey type JSDoc."
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "change": "Replaced design-doc reference codes (D1-001, D1-002, D1-003, D1-004, D1-006, D1-007, R4F002, R4F006, R4F007, R3F003) with descriptive inline comments. Traceability is preserved in the module-level JSDoc header."
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/capture/route.ts",
+      "change": "Replaced design-doc reference codes (D1-001, D1-002, D1-003, D1-004, D1-005, D1-007, R4F002, R4F006, R4F007, R1F010) with descriptive inline comments. Clarified Math.floor(lines) comment to explain it is redundant after isInteger check but kept as defense-in-depth."
+    }
+  ],
+  "test_results": {
+    "unit_tests_passed": true,
+    "typescript_errors": 0,
+    "lint_errors": 0
+  },
+  "summary": "Refactoring focused on comment quality improvement across 3 files. Replaced opaque design-doc reference codes (D1-xxx, R4Fxxx, D2-xxx) with self-descriptive English comments while preserving traceability in module-level JSDoc headers. Clarified the distinct purposes of the two special key whitelists in tmux.ts (ALLOWED_SPECIAL_KEYS for multi-key TUI navigation, ALLOWED_SINGLE_SPECIAL_KEYS for single control keys). No behavioral changes - all 4354 unit tests pass, 0 TypeScript errors, 0 ESLint errors.",
+  "commits": [
+    "e9d4a30: refactor(tmux): improve JSDoc clarity and reduce comment noise for Issue #393"
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー - 指摘対応",
+  "applied_findings": ["R3F002", "R3F008", "R3F003", "R3F007", "R3F010", "R3F001", "R3F006"],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 3影響分析レビューの全7件（Must Fix 2件 + Should Fix 5件）を設計方針書に反映。R3F002: D4-006を新規追加しclaude-session.test.tsのtmuxモックにsendSpecialKey追加方針を明記。R3F008: D2-001にcapturePane()のmaxBuffer=10MBオプションをexecFile()でも維持する方針を追記。R3F003: D1-004のsendToTmux()廃止方針をsendMessage()経由からtmux.sendKeys()直接使用に修正し意味的差異を記録。R3F007: D4-003にシングルクォートエスケープテストの更新方針を追記。R3F010: D4-003にexecFile()移行後のエラーメッセージ互換性確認テスト方針を追記。R3F001: D4-001/D4-002にセッション不在時の404確認テストケースを補強。R3F006: D3-001にsendSpecialKeys()の単一要素配列呼び出しでSPECIAL_KEY_DELAY_MSが発動しない影響分析を追記。セクション6のテスト一覧にclaude-session.test.tsを追加。セクション12のR2F009チェックリストをR3F003の方針変更に合わせて更新。",
+  "changes_made": [
+    {
+      "finding_id": "R3F002",
+      "severity": "must_fix",
+      "change_type": "section_added",
+      "location": "D4-006: claude-session.test.ts のモック更新",
+      "description": "D4-006セクションを新規追加。vi.mock('@/lib/tmux')にsendSpecialKey: vi.fn()を追加する方針とstopClaudeSession()のC-d送信検証テスト追加を明記"
+    },
+    {
+      "finding_id": "R3F008",
+      "severity": "must_fix",
+      "change_type": "section_updated",
+      "location": "D2-001: 移行方針",
+      "description": "capturePane()のmaxBuffer: 10*1024*1024オプションをexecFile()移行時に必ず維持する方針を追記。デフォルトmaxBufferの一致確認も記載"
+    },
+    {
+      "finding_id": "R3F003",
+      "severity": "should_fix",
+      "change_type": "section_updated",
+      "location": "D1-004: セッション自動作成の制限 - sendToTmux()の廃止方針",
+      "description": "sendMessage()経由の方針をtmux.sendKeys()直接使用に修正。セマンティクス差異（約300ms遅延+Pasted text検知）の分析を追記。import * as tmuxの完全削除ではなくsendKeysのみの名前付きインポートに変更"
+    },
+    {
+      "finding_id": "R3F007",
+      "severity": "should_fix",
+      "change_type": "section_updated",
+      "location": "D4-003: tmux.test.ts モック変更",
+      "description": "'should escape single quotes'テストの更新方針を追記。エスケープなしでそのまま引数配列に渡されることを検証するよう更新する方針"
+    },
+    {
+      "finding_id": "R3F010",
+      "severity": "should_fix",
+      "change_type": "section_updated",
+      "location": "D4-003: tmux.test.ts モック変更",
+      "description": "execFile()移行後のエラーメッセージ互換性確認テスト方針を追記。killSession()のパターンマッチとENOENTエラーハンドリングの検証"
+    },
+    {
+      "finding_id": "R3F001",
+      "severity": "should_fix",
+      "change_type": "section_updated",
+      "location": "D4-001/D4-002: terminal/capture-route.ts 新規テスト",
+      "description": "D4-001にセッション不在時404テストケースの補強注記を追加。D4-002にセッション不在時テストケースを新規行として追加し404確認注記を追記"
+    },
+    {
+      "finding_id": "R3F006",
+      "severity": "should_fix",
+      "change_type": "section_updated",
+      "location": "D3-001: codex.ts の修正方針",
+      "description": "sendSpecialKeys()の単一要素配列呼び出しでSPECIAL_KEY_DELAY_MSが発動しない影響分析を追記。動作変更リスクなしの根拠を明記"
+    }
+  ],
+  "additional_updates": [
+    "セクション6テスト追加/修正テーブルにclaude-session.test.tsを追加[R3F002]",
+    "セクション6テスト追加/修正テーブルのtmux.test.ts説明にR3F007/R3F010対応を追記",
+    "セクション6テスト追加/修正テーブルのterminal/capture-route.test.ts説明にR3F001対応を追記",
+    "セクション12のR2F009チェックリストをR3F003の方針変更(sendMessage()→sendKeys()直接使用)に合わせて更新",
+    "セクション13としてStage 3レビュー指摘事項サマリーを追加",
+    "セクション14としてStage 3実装チェックリストを追加",
+    "ドキュメント末尾にStage 3更新履歴を追記"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

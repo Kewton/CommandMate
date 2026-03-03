@@ -1,0 +1,71 @@
+{
+  "issue_number": 391,
+  "stage": 2,
+  "status": "success",
+  "applied_findings": [
+    {
+      "id": "S2-003",
+      "severity": "must_fix",
+      "status": "applied",
+      "description": "根本原因セクション項目2の記述を精度向上。「毎回setSelectedAgents()を呼ぶ」を「if (data.selectedAgents)条件付きで、値の等値チェックなしにsetSelectedAgents()を呼ぶ。参照が毎回新しく生成されるためuseEffectが不要発火する」に修正",
+      "section_updated": "1 (根本原因)"
+    },
+    {
+      "id": "S2-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "handleCheckboxChange修正にBefore（既存コード）を追加し、Before/After対比形式に変更。既存のcheckedIdsRef（L94-95）の注記も追加（S2-002も同時反映）",
+      "section_updated": "3-1 (handleCheckboxChange修正)"
+    },
+    {
+      "id": "S2-002",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "After（修正後）擬似コード冒頭に「既存のcheckedIdsRef（L94-95）を引き続き使用する」注記を追加",
+      "section_updated": "3-1 (handleCheckboxChange修正)"
+    },
+    {
+      "id": "S2-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "T2テストケースの検証内容に「isEditingは内部stateのため直接検査不可。setCheckedIdsの呼び出し順序をuseStateのモック等で外部から間接検証する。rerenderでselectedAgents propを変更した際にcheckedIdsが正しく同期されることを外部振る舞いとして検証する」旨を追記",
+      "section_updated": "4-2 (テストケースT2)"
+    },
+    {
+      "id": "S2-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "実装チェックリスト案Bの「selectedAgents同期用useEffect追加」を「selectedAgents同期用useEffect追加（依存配列: [selectedAgents]）[S2-007]」に修正",
+      "section_updated": "11 (実装チェックリスト 案B)"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S2-004",
+      "severity": "nice_to_have",
+      "reason": "設計品質確認項目。API失敗時リバートフローの冗長発火は副作用なしと確認済み。対応不要"
+    },
+    {
+      "id": "S2-006",
+      "severity": "nice_to_have",
+      "reason": "設計品質確認項目。CLAUDE.md規約との整合性は良好と確認済み。対応不要"
+    },
+    {
+      "id": "S2-008",
+      "severity": "nice_to_have",
+      "reason": "設計品質確認項目。NotesAndLogsPane.tsxはprops中継のみでコード変更不要と確認済み。影響範囲テーブルへの注記追加は見送り"
+    }
+  ],
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-391-agent-checkbox-fix-design-policy.md",
+  "sections_updated": [
+    "1 (根本原因)",
+    "3-1 (handleCheckboxChange修正)",
+    "4-2 (テストケースT2)",
+    "9 (レビュー履歴)",
+    "10 (レビュー指摘事項サマリー)",
+    "11 (実装チェックリスト)"
+  ],
+  "summary": "Stage 2整合性レビューの指摘事項を設計方針書に反映。must_fix 1件（S2-003: 根本原因記述精度向上）、should_fix 3件（S2-001: Before/After対比、S2-005: T2テスト検証方針明確化、S2-007: useEffect依存配列明記）を全て反映。nice_to_have 4件のうちS2-002（checkedIdsRef注記）を反映、残り3件は設計品質確認のため対応不要としてスキップ。",
+  "timestamp": "2026-03-02T00:00:00Z"
+}

@@ -14,6 +14,8 @@ import {
   PROXY_TIMEOUT,
   HOP_BY_HOP_REQUEST_HEADERS,
   HOP_BY_HOP_RESPONSE_HEADERS,
+  SENSITIVE_REQUEST_HEADERS,
+  SENSITIVE_RESPONSE_HEADERS,
   PROXY_STATUS_CODES,
   PROXY_ERROR_MESSAGES,
 } from './config';
@@ -43,6 +45,32 @@ export function buildUpstreamUrl(app: ExternalApp, path: string): string {
 }
 
 /**
+ * Filter headers by removing entries that appear in any of the exclusion lists.
+ * Used to strip hop-by-hop and sensitive headers from both requests and responses.
+ *
+ * @param source - The source Headers to filter
+ * @param exclusionLists - One or more readonly string arrays of header names to exclude
+ * @returns A new Headers object with excluded headers removed
+ * @internal Exported for testing
+ */
+export function filterHeaders(
+  source: Headers,
+  ...exclusionLists: readonly (readonly string[])[]
+): Headers {
+  const filtered = new Headers();
+  source.forEach((value, key) => {
+    const lowerKey = key.toLowerCase();
+    const excluded = exclusionLists.some(
+      (list) => list.includes(lowerKey as never)
+    );
+    if (!excluded) {
+      filtered.set(key, value);
+    }
+  });
+  return filtered;
+}
+
+/**
  * Proxy an HTTP request to the upstream application
  *
  * @param request - The incoming request
@@ -57,15 +85,12 @@ export async function proxyHttp(
 ): Promise<Response> {
   const upstreamUrl = buildUpstreamUrl(app, path);
 
-  // Clone headers, removing hop-by-hop headers
-  const headers = new Headers();
-  request.headers.forEach((value, key) => {
-    const lowerKey = key.toLowerCase();
-    // Skip hop-by-hop headers (connection-specific headers that should not be forwarded)
-    if (!HOP_BY_HOP_REQUEST_HEADERS.includes(lowerKey as typeof HOP_BY_HOP_REQUEST_HEADERS[number])) {
-      headers.set(key, value);
-    }
-  });
+  // Strip hop-by-hop and sensitive headers from the request (Issue #395)
+  const headers = filterHeaders(
+    request.headers,
+    HOP_BY_HOP_REQUEST_HEADERS,
+    SENSITIVE_REQUEST_HEADERS,
+  );
 
   try {
     // Create abort controller for timeout
@@ -83,15 +108,12 @@ export async function proxyHttp(
 
     clearTimeout(timeoutId);
 
-    // Clone response headers, removing hop-by-hop headers
-    const responseHeaders = new Headers();
-    response.headers.forEach((value, key) => {
-      const lowerKey = key.toLowerCase();
-      // Skip hop-by-hop headers (connection-specific headers that should not be forwarded)
-      if (!HOP_BY_HOP_RESPONSE_HEADERS.includes(lowerKey as typeof HOP_BY_HOP_RESPONSE_HEADERS[number])) {
-        responseHeaders.set(key, value);
-      }
-    });
+    // Strip hop-by-hop and sensitive headers from the response (Issue #395)
+    const responseHeaders = filterHeaders(
+      response.headers,
+      HOP_BY_HOP_RESPONSE_HEADERS,
+      SENSITIVE_RESPONSE_HEADERS,
+    );
 
     return new Response(response.body, {
       status: response.status,
@@ -133,27 +155,24 @@ export async function proxyHttp(
  * Handle WebSocket upgrade request
  *
  * Note: Next.js Route Handlers do not support WebSocket upgrades directly.
- * This returns a 426 Upgrade Required response with instructions.
+ * This returns a 426 Upgrade Required response with a fixed error message.
  *
- * @param request - The incoming WebSocket upgrade request
- * @param app - The external app configuration
- * @param path - The full request path including proxy prefix (e.g., /proxy/{pathPrefix}/ws)
+ * Issue #395: Removed directUrl field and internal URL from message to prevent
+ * leaking upstream host/port information to the client.
+ *
+ * @param request - The incoming WebSocket upgrade request (unused after Issue #395)
+ * @param app - The external app configuration (unused, no longer exposed in response)
+ * @param path - The full request path (unused, no longer exposed in response)
  * @returns A 426 response indicating WebSocket is not supported
  */
-export async function proxyWebSocket(
-  request: Request,
-  app: ExternalApp,
-  path: string
-): Promise<Response> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function proxyWebSocket(request: Request, app: ExternalApp, path: string): Promise<Response> {
   // Next.js Route Handlers cannot handle WebSocket upgrades
-  // Return a 426 response with instructions for direct WebSocket connection
-  const directWsUrl = `ws://${app.targetHost}:${app.targetPort}${path}`;
-
+  // Issue #395: Return fixed-string response only; do not expose internal URLs
   return new Response(
     JSON.stringify({
       error: 'Upgrade Required',
-      message: `${PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED}. Configure your WebSocket client to connect directly to ${directWsUrl}`,
-      directUrl: directWsUrl,
+      message: PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED,
     }),
     {
       status: PROXY_STATUS_CODES.UPGRADE_REQUIRED,

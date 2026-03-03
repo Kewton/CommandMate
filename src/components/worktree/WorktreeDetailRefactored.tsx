@@ -982,6 +982,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const [stopReasonPending, setStopReasonPending] = useState(false);
   // Issue #368: Selected agents state (initialized from API, drives terminal header tabs)
   const [selectedAgents, setSelectedAgents] = useState<[CLIToolType, CLIToolType]>(DEFAULT_SELECTED_AGENTS);
+  // Ref to access latest selectedAgents inside fetchWorktree without adding to useCallback deps
+  const selectedAgentsRef = useRef(selectedAgents);
+  selectedAgentsRef.current = selectedAgents;
   // Issue #368: Vibe-local Ollama model state (initialized from API)
   const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
   // Issue #374: Vibe-local context window state (initialized from API)
@@ -1031,9 +1034,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       }
       const data: Worktree = await response.json();
       setWorktree(data);
-      // Issue #368: Sync selectedAgents from API response
+      // Skip setState when value is unchanged to prevent unnecessary re-renders
       if (data.selectedAgents) {
-        setSelectedAgents(data.selectedAgents);
+        const current = selectedAgentsRef.current;
+        const isSame = data.selectedAgents.length === current.length &&
+          data.selectedAgents.every((v: string, i: number) => v === current[i]);
+        if (!isSame) {
+          setSelectedAgents(data.selectedAgents);
+        }
       }
       // Issue #368: Sync vibeLocalModel from API response
       if ('vibeLocalModel' in data) {

@@ -1,0 +1,6 @@
+{
+  "issue_number": 394,
+  "stage": 3,
+  "review_result_path": "dev-reports/issue/394/multi-stage-design-review/stage3-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-394-symlink-traversal-fix-design-policy.md"
+}

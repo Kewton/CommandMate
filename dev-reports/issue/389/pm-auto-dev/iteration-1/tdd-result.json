@@ -1,0 +1,42 @@
+{
+  "issue_number": 389,
+  "iteration": 1,
+  "status": "success",
+  "phases": {
+    "red": {
+      "status": "completed",
+      "tests_added": 11,
+      "details": "Added 11 new auto-save test cases + updated 3 existing onClose tests with waitFor"
+    },
+    "green": {
+      "status": "completed",
+      "files_modified": [
+        "src/types/markdown-editor.ts",
+        "src/components/worktree/MarkdownEditor.tsx",
+        "tests/unit/components/MarkdownEditor.test.tsx"
+      ]
+    },
+    "refactor": {
+      "status": "completed",
+      "changes": [
+        "Extracted saveToApi as shared function for both manual and auto-save paths",
+        "Removed duplicate setOriginalContent call from saveContent (handled in saveToApi)",
+        "Used saveToApi directly in handleAutoSaveToggle to avoid disabled closure issue with saveNow"
+      ]
+    }
+  },
+  "quality_checks": {
+    "typescript": { "status": "pass", "errors": 0 },
+    "eslint": { "status": "pass", "errors": 0 },
+    "tests": { "status": "pass", "passed": 4266, "failed": 0, "total": 4266 }
+  },
+  "files_modified": [
+    "src/types/markdown-editor.ts",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "tests/unit/components/MarkdownEditor.test.tsx"
+  ],
+  "commits": [
+    "732b22d: feat(markdown-editor): add auto-save mode toggle for MarkdownEditor"
+  ],
+  "summary": "TDD implementation complete. Added auto-save toggle to MarkdownEditor with useAutoSave hook integration, localStorage persistence, error fallback, beforeunload handling, Ctrl+S branching, async handleClose, and comprehensive test coverage (11 new tests + 3 updated). All 4266 unit tests pass. TypeScript and ESLint: 0 errors."
+}

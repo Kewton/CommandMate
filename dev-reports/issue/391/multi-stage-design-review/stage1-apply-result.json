@@ -1,0 +1,68 @@
+{
+  "issue_number": 391,
+  "stage": 1,
+  "applied_findings": [
+    {
+      "id": "S1-001",
+      "status": "applied",
+      "description": "3-1節にDRYパターン注記を追加。isEditingガードパターンとcontextWindowInput（blur契機）の類似性を明記し、将来3箇所以上になった場合のuseOptimisticSyncカスタムフック抽出検討を記載"
+    },
+    {
+      "id": "S1-002",
+      "status": "applied",
+      "description": "3-1節のhandleCheckboxChange擬似コードにsetCheckedIds(new Set(pair))をonSelectedAgentsChange前に追加。テストケースT2にisEditing解除タイミングの検証内容を追記"
+    },
+    {
+      "id": "S1-003",
+      "status": "applied",
+      "description": "8節の代替案比較表の後にblockquoteでシングルユーザー前提での二重防御判断根拠を明記"
+    },
+    {
+      "id": "S1-004",
+      "status": "skipped",
+      "description": "設計承認（SRP観点でisEditing状態の責務配置は適切）。対応不要"
+    },
+    {
+      "id": "S1-005",
+      "status": "skipped",
+      "description": "設計承認（OCP準拠確認）。対応不要"
+    },
+    {
+      "id": "S1-006",
+      "status": "applied",
+      "description": "3-1節の設計決定事項表にhandleCheckboxChangeの依存配列にisEditingを含めない理由を追加行として記載"
+    },
+    {
+      "id": "S1-007",
+      "status": "applied",
+      "description": "3-1節に「既知制限」サブセクションを追加。isEditing=true中のサーバー同期停止、ページリロードでの自動解消、YAGNI原則に基づくタイムアウト不追加の判断を文書化"
+    },
+    {
+      "id": "S1-008",
+      "status": "applied",
+      "description": "3-2節にarraysEqual()のsrc/lib/utils.tsへの将来抽出検討コメントを追加"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S1-004",
+      "reason": "レビューでの設計承認（isEditing状態の責務配置はSRP観点で適切と確認済み）。設計方針書への変更不要"
+    },
+    {
+      "id": "S1-005",
+      "reason": "レビューでの設計承認（既存インターフェース変更なしでOCP準拠と確認済み）。設計方針書への変更不要"
+    }
+  ],
+  "design_doc_updated": true,
+  "sections_updated": [
+    "3-1. 案A: isEditingフラグによるuseEffectガード（S1-001, S1-002, S1-006, S1-007）",
+    "3-2. 案B: selectedAgents同一値チェック（S1-008）",
+    "4-2. 追加テストケース（S1-002: T2検証内容拡充）",
+    "8. 代替案との比較（S1-003）",
+    "9. レビュー履歴（新規追加）",
+    "10. レビュー指摘事項サマリー（新規追加）",
+    "11. 実装チェックリスト（新規追加）"
+  ],
+  "summary": "Stage 1レビューの全8件の指摘事項を処理。should_fix 4件（S1-001, S1-002, S1-006, S1-007）を全て設計方針書に反映。nice_to_have 4件のうち2件（S1-003, S1-008）を反映、2件（S1-004, S1-005）は設計承認のため対応不要としてスキップ。レビュー履歴、指摘事項サマリー、実装チェックリストの3セクションを新規追加。",
+  "timestamp": "2026-03-02T10:30:00Z"
+}

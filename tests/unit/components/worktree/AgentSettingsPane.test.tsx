@@ -1,6 +1,5 @@
 /**
  * Tests for AgentSettingsPane component
- * Issue #368: Agent settings UI for selecting 2 CLI tools per worktree
  * @vitest-environment jsdom
  */
 
@@ -159,7 +158,126 @@ describe('AgentSettingsPane', () => {
       });
     });
 
-    it('should not use dangerouslySetInnerHTML (XSS prevention R4-006)', () => {
+    it('should not overwrite local checkbox state when selectedAgents prop changes during editing', async () => {
+      const { rerender } = render(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
+      );
+
+      // Uncheck claude -> enters isEditing=true state (only 1 agent selected, no API call)
+      const claudeCheckbox = screen.getByTestId('agent-checkbox-claude');
+      fireEvent.click(claudeCheckbox);
+
+      // Verify claude is unchecked locally
+      expect((screen.getByTestId('agent-checkbox-claude') as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByTestId('agent-checkbox-codex') as HTMLInputElement).checked).toBe(true);
+
+      // Simulate polling: parent re-renders with server value (same selectedAgents prop)
+      // This should NOT overwrite checkedIds because isEditing=true
+      rerender(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
+      );
+
+      // claude should still be unchecked (editing state preserved)
+      expect((screen.getByTestId('agent-checkbox-claude') as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByTestId('agent-checkbox-codex') as HTMLInputElement).checked).toBe(true);
+    });
+
+    it('should sync checked state with prop after successful API save', async () => {
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+
+      const { rerender } = render(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
+      );
+
+      // Uncheck claude -> isEditing=true
+      fireEvent.click(screen.getByTestId('agent-checkbox-claude'));
+
+      // Check gemini -> triggers API (2 selected), API success -> isEditing=false
+      fireEvent.click(screen.getByTestId('agent-checkbox-gemini'));
+
+      await waitFor(() => {
+        expect(defaultProps.onSelectedAgentsChange).toHaveBeenCalledWith(['codex', 'gemini']);
+      });
+
+      // After API success + isEditing=false, a new prop change should be synced
+      rerender(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'vibe-local']} />
+      );
+
+      // Should now sync with the new prop value since isEditing=false
+      expect((screen.getByTestId('agent-checkbox-claude') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByTestId('agent-checkbox-codex') as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByTestId('agent-checkbox-gemini') as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement).checked).toBe(true);
+    });
+
+    it('should revert checked state on API failure', async () => {
+      const { rerender } = render(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
+      );
+
+      // Uncheck claude -> isEditing=true
+      fireEvent.click(screen.getByTestId('agent-checkbox-claude'));
+
+      // Setup: API will return !ok
+      mockFetch.mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({ error: 'server error' }) });
+
+      // Check gemini -> triggers API (2 selected), API fails
+      fireEvent.click(screen.getByTestId('agent-checkbox-gemini'));
+
+      // Wait for API call to complete and checkedIds to revert
+      await waitFor(() => {
+        // Reverted to original selectedAgents prop value
+        expect((screen.getByTestId('agent-checkbox-claude') as HTMLInputElement).checked).toBe(true);
+        expect((screen.getByTestId('agent-checkbox-codex') as HTMLInputElement).checked).toBe(true);
+        expect((screen.getByTestId('agent-checkbox-gemini') as HTMLInputElement).checked).toBe(false);
+      });
+
+      // Verify isEditing is reset to false: a new prop change should now be synced
+      rerender(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['gemini', 'vibe-local']} />
+      );
+
+      expect((screen.getByTestId('agent-checkbox-claude') as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByTestId('agent-checkbox-codex') as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByTestId('agent-checkbox-gemini') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement).checked).toBe(true);
+    });
+
+    it('should revert checked state on network error', async () => {
+      const { rerender } = render(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
+      );
+
+      // Uncheck claude -> isEditing=true
+      fireEvent.click(screen.getByTestId('agent-checkbox-claude'));
+
+      // Setup: fetch will throw network error
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      // Check gemini -> triggers API (2 selected), fetch throws
+      fireEvent.click(screen.getByTestId('agent-checkbox-gemini'));
+
+      // Wait for error handling to complete and checkedIds to revert
+      await waitFor(() => {
+        // Reverted to original selectedAgents prop value
+        expect((screen.getByTestId('agent-checkbox-claude') as HTMLInputElement).checked).toBe(true);
+        expect((screen.getByTestId('agent-checkbox-codex') as HTMLInputElement).checked).toBe(true);
+        expect((screen.getByTestId('agent-checkbox-gemini') as HTMLInputElement).checked).toBe(false);
+      });
+
+      // Verify isEditing is reset to false: a new prop change should now be synced
+      rerender(
+        <AgentSettingsPane {...defaultProps} selectedAgents={['gemini', 'vibe-local']} />
+      );
+
+      expect((screen.getByTestId('agent-checkbox-claude') as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByTestId('agent-checkbox-codex') as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByTestId('agent-checkbox-gemini') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByTestId('agent-checkbox-vibe-local') as HTMLInputElement).checked).toBe(true);
+    });
+
+    it('should not use dangerouslySetInnerHTML', () => {
       const { container } = render(<AgentSettingsPane {...defaultProps} />);
       // Check that no element has dangerouslySetInnerHTML by looking for __html attribute
       const allElements = container.querySelectorAll('*');
@@ -171,7 +289,7 @@ describe('AgentSettingsPane', () => {
     });
   });
 
-  describe('Context window input (Issue #374)', () => {
+  describe('Context window input', () => {
     const vibeLocalProps = {
       ...defaultProps,
       selectedAgents: ['claude', 'vibe-local'] as [CLIToolType, CLIToolType],

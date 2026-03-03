@@ -1,0 +1,45 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー - 指摘対応",
+  "applied_findings": ["R1F004", "R1F001", "R1F005", "R1F010", "R1F011"],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 1レビューの Must Fix 1件 + Should Fix 4件を設計方針書に反映。R1F004: D2-005として sendSpecialKey() のランタイムバリデーション（ALLOWED_SINGLE_SPECIAL_KEYS Set検証）方針を追記。R1F001: D1-003に getSessionName() の重複箇所3つ（terminal/route.ts, capture/route.ts, BaseCLITool）を具体的に明記。R1F005: D2-006として ALLOWED_SPECIAL_KEYS と SpecialKey 型の不整合解消方針（案A/案B）を追記。R1F010: D1-005に Number.isInteger() と境界値チェックの4段階バリデーション実装例を追記。R1F011: D1-003にDIP準拠として import * as tmux を CLIToolManager 経由に置き換える方針を明記。Section 8の制約条件もレビュー指摘を反映して更新。Section 9にレビュー指摘事項サマリー、Section 10に実装チェックリストを追加。",
+  "changes": [
+    {
+      "finding_id": "R1F004",
+      "severity": "must_fix",
+      "action": "D2-005 新規追加: sendSpecialKey() のランタイムバリデーション方針（ALLOWED_SINGLE_SPECIAL_KEYS Set定義、defense-in-depth強化）",
+      "section": "D2-005"
+    },
+    {
+      "finding_id": "R1F001",
+      "severity": "should_fix",
+      "action": "D1-003 更新: getSessionName() の重複箇所3つを具体的に列挙、統合テスト要件を追記",
+      "section": "D1-003"
+    },
+    {
+      "finding_id": "R1F005",
+      "severity": "should_fix",
+      "action": "D2-006 新規追加: ALLOWED_SPECIAL_KEYS と SpecialKey 型の不整合解消方針（案A推奨/案B代替）",
+      "section": "D2-006"
+    },
+    {
+      "finding_id": "R1F010",
+      "severity": "should_fix",
+      "action": "D1-005 更新: 4段階バリデーション（typeof/Number.isInteger/境界値/Math.floor）の具体的実装例を追記",
+      "section": "D1-005"
+    },
+    {
+      "finding_id": "R1F011",
+      "severity": "should_fix",
+      "action": "D1-003 更新: DIP準拠として import * as tmux 削除、CLIToolManager経由（ICLIToolインターフェース）への統一を明記",
+      "section": "D1-003"
+    }
+  ],
+  "additional_sections_added": [
+    "Section 9: Stage 1 レビュー指摘事項サマリー（Must Fix 1件、Should Fix 4件、Nice to Have 7件の一覧表）",
+    "Section 10: 実装チェックリスト（R1F004/R1F001/R1F005/R1F010/R1F011の各チェック項目）"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

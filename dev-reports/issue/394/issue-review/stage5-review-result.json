@@ -1,0 +1,105 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_type": "通常",
+  "issue_number": 394,
+  "review_date": "2026-03-02",
+  "previous_findings_addressed": {
+    "F1-001": "addressed",
+    "F1-002": "addressed",
+    "F1-003": "addressed",
+    "F1-004": "addressed",
+    "F1-005": "addressed",
+    "F1-006": "not_addressed",
+    "F1-007": "addressed",
+    "F3-001": "addressed",
+    "F3-002": "addressed",
+    "F3-003": "addressed",
+    "F3-004": "addressed",
+    "F3-005": "addressed",
+    "F3-006": "addressed",
+    "F3-007": "addressed",
+    "F3-008": "addressed",
+    "F3-009": "addressed",
+    "F3-010": "addressed",
+    "F3-011": "addressed"
+  },
+  "summary": "Issue #394は2回のレビューイテレーション（通常+影響範囲）を経て大幅に改善されており、セキュリティ脆弱性Issueとして極めて高品質に仕上がっている。Stage 1の7件の指摘のうち6件、Stage 3の11件の指摘のうち11件が正しく反映されている。唯一未対応のF1-006（脅威モデルの前提条件）はnice_to_haveであり、Issue品質への影響は軽微。更新後のIssue本文にはAcceptance Criteriaが10項目の具体的テストシナリオ付きで記載され、Implementation Strategy Optionsで3つの設計選択肢がOption B推奨として明記され、Performance ConsiderationsやCreate/Uploadの特殊戦略も網羅されている。実装者が迷いなく着手できるレベルに到達している。新たな不整合として2点の軽微な改善候補を発見した。",
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "脅威モデルの前提条件（攻撃者がsymlinkを配置できる経路）が依然として未記載",
+      "description": "Stage 1のF1-006で指摘された「攻撃者がworktree内にsymlinkを配置する方法の前提条件」は、Stage 2でskipされており、現在のIssue本文にも反映されていない。Example Exploitセクションでは 'Assume the worktree contains: ln -s /etc external' と記載されているが、これが実際にどのような状況で発生するのか（gitリポジトリにsymlinkがコミットされているケース、サーバーに直接アクセスできるユーザーが作成するケース等）が明示されていない。セキュリティIssueにおいて脅威モデルの前提条件は、修正の優先度判断と実装者の理解を助ける重要な情報である。ただし、根本的な脆弱性の説明と修正方針は明確であるため、これは優先度の低い改善事項。",
+      "location": "## Example Exploit セクション",
+      "suggestion": "Example Exploitセクションに以下のような前提条件の注記を追加する: 'Symlinks can appear in a worktree when: (1) a symlink is committed to the git repository and checked out via git clone or git worktree add, (2) a user with filesystem access to the server creates a symlink manually, or (3) a build tool or dependency creates symlinks during installation.'"
+    },
+    {
+      "id": "F5-002",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "title": "readDirectory()のstat()がsymlinkを自動解決する動作の補足がない",
+      "description": "Issue本文のAffected Codeセクションで file-tree.ts について 'lstat() skips symlink child entries but does not validate that the target directory itself is not a symlink escaping the worktree root' と記載されている。これは正確だが、もう一つの重要な点が言及されていない。readDirectory()のline 154で stat(targetPath) を呼んでいるが、stat()はlstat()と異なりsymlinkを自動解決する。つまり、symlinkディレクトリに対してstat()を呼ぶとsymlink先のディレクトリのstatが返り、isDirectory()がtrueを返すため、readdir()でsymlink先のコンテンツが列挙される。この動作がF3-001で報告されたtree APIの脆弱性の直接的なメカニズムだが、Issue本文ではこの具体的なstat()の動作には言及していない。技術的にはlstat()スキップの記述で暗示されているため、実装者への追加価値は限定的。",
+      "location": "## Affected Code > Directory listing and search modules セクション",
+      "suggestion": "file-tree.tsの説明に 'readDirectory() uses stat() (not lstat()) at line 154 to check if the target is a directory; stat() follows symlinks, so a symlink directory passes the isDirectory() check and its contents are enumerated by readdir()' という補足を追加する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 0,
+  "nice_to_have_count": 2,
+  "overall_quality": "good",
+  "recommendation": "Issue #394は2回のレビューイテレーションを通じて非常に高品質なセキュリティ脆弱性報告に仕上がっている。Stage 1の主要指摘（F1-001〜F1-003、F1-005）とStage 3の全指摘（F3-001〜F3-011）が正確に反映されており、以下の点が特に優れている: (1) Acceptance Criteriaが10項目のテストシナリオ付きチェックリストとして具体化されている、(2) Implementation Strategy Optionsで3つの設計選択肢が比較検討され推奨案が明示されている、(3) Create/Upload時の最寄り祖先ディレクトリ戦略やmacOS tmpdir互換性などのエッジケースが網羅されている、(4) Performance Considerationsでtree/search APIへの影響が分析されている。残る2件のnice_to_haveは軽微であり、Issue全体の品質を損なうものではない。実装に着手して問題ない。",
+  "code_references": [
+    {
+      "file": "src/lib/path-validator.ts",
+      "lines": "29-68",
+      "relevance": "isPathSafe()の実装 - Issue記載のRoot Causeと完全に整合"
+    },
+    {
+      "file": "src/lib/file-operations.ts",
+      "lines": "618-662",
+      "relevance": "renameFileOrDirectory() - F1-002で追加されたソースパスsymlink未検証の指摘が正しく反映されている"
+    },
+    {
+      "file": "src/lib/file-operations.ts",
+      "lines": "544-553",
+      "relevance": "moveFileOrDirectory() SEC-006 - F1-007で指摘されたsource path制限の記述が正しく反映されている"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "153, 200-211",
+      "relevance": "GET handlerの画像・動画直接readFile() - F1-001の指摘が正しく反映されている"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/tree/[...path]/route.ts",
+      "lines": "75, 84",
+      "relevance": "tree API - F3-001で追加された影響範囲。isPathSafe()検証後にreadDirectory()を呼ぶ構造が正しく記載されている"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/search/route.ts",
+      "lines": "139",
+      "relevance": "search API - F3-001で追加された影響範囲。searchWithTimeout()にworktree.pathを渡す構造が正しく記載されている"
+    },
+    {
+      "file": "src/lib/file-tree.ts",
+      "lines": "149, 154, 179-184",
+      "relevance": "readDirectory()のtargetPath計算とlstat()によるsymlinkスキップ - F3-001の記述と整合"
+    },
+    {
+      "file": "src/lib/file-search.ts",
+      "lines": "265, 298, 303-307",
+      "relevance": "searchDirectory()のisPathSafe()チェックとlstat()スキップ - F3-005/F3-007の記述と整合"
+    },
+    {
+      "file": "src/lib/clone-manager.ts",
+      "relevance": "validateWorktreePath()の間接影響 - F3-010の記述が正しく反映されている"
+    },
+    {
+      "file": "src/app/api/repositories/scan/route.ts",
+      "lines": "29",
+      "relevance": "isPathSafe()の間接影響 - F3-006の記述が正しく反映されている"
+    }
+  ],
+  "doc_references": []
+}

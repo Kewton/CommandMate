@@ -1,0 +1,81 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 393,
+  "apply_date": "2026-03-03",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "F008",
+        "status": "applied",
+        "change_summary": "Root Cause セクションに項目6を追加: worktreeId の DB 存在確認（getWorktreeById()）が欠如していることを明記。他ルート（respond/route.ts, kill-session/route.ts）との比較を含む。Recommended Direction にも DB 存在確認の推奨を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "F001",
+        "status": "applied",
+        "change_summary": "Affected Code セクションに src/app/api/worktrees/[id]/capture/route.ts を追加。新規サブセクション 'Additional Affected Endpoint' を追加し、capture/route.ts の同一脆弱性パターン（getSessionName(), cliToolId as CLIToolType, hasSession()）を具体的な行番号とともに記載。"
+      },
+      {
+        "id": "F002",
+        "status": "applied",
+        "change_summary": "行番号参照を正確な値に更新: tmux.ts:153 → tmux.ts:175-176（createSession の exec 呼び出し）、tmux.ts:207 → tmux.ts:220（sendKeys の exec 呼び出し）。各行番号にコンテキスト説明を括弧内に追記。"
+      },
+      {
+        "id": "F006",
+        "status": "applied",
+        "change_summary": "Recommended Direction の exec() → execFile() 移行推奨項目に、workingDirectory パラメータも同様に exec() の文字列補間で使用されており execFile() 移行で同時に保護されることを太字注記として追記。"
+      },
+      {
+        "id": "F010",
+        "status": "applied",
+        "change_summary": "Severity セクションに 'Risk Level by Authentication State' サブセクションを追加。認証無効時（Critical）・認証有効時（High）のリスクレベル表、攻撃前提条件（ネットワークアクセス、認証状態）、Case 1/Case 2 の区別を明記。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F003",
+        "status": "skipped",
+        "reason": "Stage 1 の指示に含まれないため今回はスキップ。cliToolId がJSONボディ由来でルーティング制約が無関係という明確化は次回イテレーションで検討。"
+      },
+      {
+        "id": "F004",
+        "status": "skipped",
+        "reason": "Stage 1 の指示に含まれないため今回はスキップ。tmux.ts の全関数列挙は次回イテレーションで検討。"
+      },
+      {
+        "id": "F005",
+        "status": "skipped",
+        "reason": "Stage 1 の指示に含まれないため今回はスキップ。ただし F001 の反映で安全パターンを使用するルートの具体例を 'Why This Is Different From Other CLI Routes' セクションに追記済み（部分対応）。"
+      },
+      {
+        "id": "F007",
+        "status": "skipped",
+        "reason": "Stage 1 の指示に含まれないため今回はスキップ。historyLimit は number 型固定値のため低リスク。"
+      },
+      {
+        "id": "F009",
+        "status": "skipped",
+        "reason": "Stage 1 の指示に含まれないため今回はスキップ。CSRF 対策の具体策追加は次回イテレーションで検討。"
+      }
+    ]
+  },
+  "skipped_findings": ["F003", "F004", "F005", "F007", "F009"],
+  "skip_reasons": {
+    "F003": "Nice to Have - Stage 1 の指示範囲外",
+    "F004": "Nice to Have - Stage 1 の指示範囲外",
+    "F005": "Nice to Have - Stage 1 の指示範囲外（安全パターンルート例は部分対応済み）",
+    "F007": "Nice to Have - Stage 1 の指示範囲外",
+    "F009": "Nice to Have - Stage 1 の指示範囲外"
+  },
+  "summary": {
+    "total_findings": 10,
+    "applied": 5,
+    "skipped": 5
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/393"
+  }
+}

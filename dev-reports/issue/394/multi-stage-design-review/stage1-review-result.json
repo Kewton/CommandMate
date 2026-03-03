@@ -1,0 +1,106 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "issue_number": 394,
+  "summary": "設計方針書は全体的に優れた品質で、SOLID/KISS/DRY/YAGNI各原則への適合度が高い。Option B（新関数追加）の選択は既存コードへの影響を最小化しつつDRY原則を遵守する適切な判断である。must_fix指摘はないが、validateFileOperation()への統合方針の曖昧さ、API層の画像/動画readFile直接パスの防御漏れリスク、及びrenameFileOrDirectory()のdestinationパスに対するsymlink検証欠落について改善が必要。",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "category": "SOLID",
+      "title": "validateFileOperation()への統合とfile-operations.ts各関数への個別追加が重複指定されている",
+      "description": "設計方針書のセクション5.2では、file-operations.tsの各関数（readFileContent, updateFileContent, createFileOrDirectory, deleteFileOrDirectory, renameFileOrDirectory, writeBinaryFile）に個別にresolveAndValidateRealPath()を追加すると記載しつつ、同時にvalidateFileOperation()にも統合すると記載している。validateFileOperation()は現在renameFileOrDirectoryとmoveFileOrDirectoryでのみ使用されており、readFileContent/updateFileContent/createFileOrDirectory/deleteFileOrDirectory/writeBinaryFileでは使用されていない。両方に追加すると、validateFileOperation()経由の関数では二重チェックが発生する可能性がある。",
+      "location": "セクション5.2 既存関数の修正箇所 - file-operations.ts テーブル",
+      "suggestion": "validateFileOperation()をrealpath検証込みに拡張し、readFileContent/updateFileContent等でもvalidateFileOperation()を使用するようリファクタリングするか、あるいは各関数への個別追加のみに統一する方針を明確化すべき。DRY原則の観点からはvalidateFileOperation()に集約する前者が望ましいが、各関数のシグネチャやエラーハンドリングの差異（readFileContentはfileが存在する前提、createFileOrDirectoryは存在しない前提）を考慮して方針を明記する必要がある。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "API層のgetWorktreeAndValidatePath()とfile-operations.ts各関数の二重パス検証",
+      "description": "現在の実装では、API層のgetWorktreeAndValidatePath()でisPathSafe()チェックを行い、その後file-operations.tsの各関数でも再度isPathSafe()チェックを行っている。設計方針書ではこの既存の二重チェック構造を維持したまま、resolveAndValidateRealPath()を両層に追加するとしている（API層のgetWorktreeAndValidatePath()内とfile-operations.ts各関数内）。これによりrealpath検証も二重に実行されることになる。Defense in depthの原則としては正当化できるが、設計方針書ではどの層が主防御でどの層が補助防御かの責務を明確にすべき。",
+      "location": "セクション5.2 API routes テーブル及びfile-operations.tsテーブル",
+      "suggestion": "主防御ポイントをfile-operations.ts層に集約し（ビジネスロジック層での一元検証）、API層は既存のisPathSafe()のみを維持する方針を推奨する。もしくは、API層のgetWorktreeAndValidatePath()にresolveAndValidateRealPath()を追加し、file-operations.ts各関数には追加しない方針も有効。いずれにせよ、主検証と補助検証の責務分担を設計方針書に明記すべき。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "should_fix",
+      "category": "設計パターン",
+      "title": "renameFileOrDirectory()のdestinationパスに対するsymlink検証が設計に含まれていない",
+      "description": "renameFileOrDirectory()はソースパスのvalidation後にnewRelativePathを構築してisPathSafe()でレキシカルチェックを行うが、設計方針書のセクション5.2ではソースパスへのresolveAndValidateRealPath追加のみが記載されている。リネーム先（newRelativePath）がsymlinkを含むディレクトリ配下になる場合のsymlink検証が考慮されていない。ただし、renameはbasename変更のみで同一ディレクトリ内に留まるため、ソースのシンボリックリンク解決が有効であれば実質的にリスクは低い。",
+      "location": "セクション5.2 file-operations.ts テーブル - renameFileOrDirectory行",
+      "suggestion": "renameFileOrDirectory()ではソースパスが存在するパスへの操作であり、リネーム先は同一親ディレクトリ内のbasename変更のため、ソースパスの検証で十分である旨を設計方針書に明記する。もしくは、リネーム先のフルパス（join(worktreeRoot, newRelativePath)）に対してもresolveAndValidateRealPath()の祖先走査を適用することを検討する。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "should_fix",
+      "category": "エラーハンドリング",
+      "title": "API層の画像/動画readFile()直接呼び出しパスのsymlink防御が設計上不十分",
+      "description": "files/[...path]/route.tsのGETハンドラでは、画像・動画ファイルの場合にgetWorktreeAndValidatePath()通過後、readFile(absolutePath)を直接呼び出している（readFileContent()経由ではない）。設計方針書のセクション5.2 APIルートテーブルでは「画像・動画のreadFile()直接呼び出しパスも保護」と記載しているが、具体的にどの箇所にresolveAndValidateRealPath()を挿入するかが明確でない。getWorktreeAndValidatePath()に追加すれば自動的に保護されるが、その場合のテスト観点が設計されていない。",
+      "location": "セクション5.2 API routes テーブル - files/[...path]/route.ts行",
+      "suggestion": "getWorktreeAndValidatePath()内にresolveAndValidateRealPath()を追加する方針であれば、画像/動画パスは自動的に保護される旨を明記する。あるいは、readFile()呼び出し直前に個別にresolveAndValidateRealPath()チェックを挿入する場合は、その挿入箇所（route.ts 153行目付近、200行目付近）を具体的に示すべき。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "resolveAndValidateRealPath()の戻り値がbooleanのみで解決済みパスを返さない",
+      "description": "セクション5.1でresolveAndValidateRealPath()はboolean返却と定義されている。しかし、呼び出し元ではrealpathSync解決後のパスをfs操作に使用したい場合がある（例: moveFileOrDirectoryのSEC-006では解決済みパスを後続の比較に使用）。booleanのみの返却では、呼び出し元で再度realpathSync()を呼ぶ必要が生じ、DRYに反する可能性がある。ただし、現時点ではリクエスト毎に1-2回のrealpathSync呼び出し追加に留まるため、パフォーマンスへの影響は軽微である。",
+      "location": "セクション5.1 新関数: resolveAndValidateRealPath()",
+      "suggestion": "将来の拡張性を考慮し、{ valid: boolean; resolvedPath?: string }のような構造体を返す設計も検討に値する。ただし、YAGNI原則に基づき現時点ではbooleanで十分と判断できるため、本指摘はnice_to_haveとする。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "祖先走査フォールバックアルゴリズムの終了条件が暗黙的",
+      "description": "セクション5.1のアルゴリズム手順4では「最も近い既存の祖先ディレクトリを特定」とあるが、走査がファイルシステムルート（/）まで到達した場合の終了条件が明示されていない。rootDirの解決済みパスを起点として上方走査の下限とすべきだが、その制約が設計方針書に記載されていない。",
+      "location": "セクション5.1 アルゴリズム 手順4",
+      "suggestion": "祖先走査の下限を「resolvedRoot自体に到達した時点で走査を停止し、resolvedRootのrealpathと比較する」と明記する。ファイルシステムルートまでの走査は不要であり、resolvedRoot以上に遡るケースはisPathSafe()のLayer 1で既に拒否されている前提を明記することで、アルゴリズムの正確性と安全性が向上する。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "API層のERROR_CODE_TO_HTTP_STATUSマッピングがfiles route.tsとupload route.tsで重複している",
+      "description": "これは既存の問題であり本Issue起因ではないが、設計方針書がAPI層の修正を計画している以上、同時改善の機会として指摘する。files/[...path]/route.tsとupload/[...path]/route.tsに同一のERROR_CODE_TO_HTTP_STATUSオブジェクトが定義されており、DRY違反となっている。",
+      "location": "既存コード（設計方針書のスコープ外だが関連）",
+      "suggestion": "本Issueのスコープ外ではあるが、将来のリファクタリングタスクとして、ERROR_CODE_TO_HTTP_STATUSを共通モジュール（例: src/config/api-error-codes.ts）に抽出することを検討する。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "テスト設計のintegration/api-symlink-traversal.test.tsが「オプション」扱い",
+      "description": "セクション8のテストファイル構成でAPIレベルのsymlinkテストが「オプション」と記載されている。セキュリティ脆弱性修正において、APIレベルのE2Eテストは回帰防止の観点から重要であるが、YAGNI原則に基づきオプションとした判断は理解できる。ただし、ユニットテストだけではAPI層の統合漏れ（getWorktreeAndValidatePath()へのresolveAndValidateRealPath()挿入忘れ等）を検出できない。",
+      "location": "セクション8 テストファイル構成",
+      "suggestion": "少なくとも1つのAPIルート（files GET）に対するsymlinkトラバーサル防止の統合テストをオプションではなく必須とすることを推奨する。他のAPIルートは同一の検証関数を使用するため、1エンドポイントのテストで十分な信頼性を確保できる。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 4,
+  "nice_to_have_count": 4,
+  "overall_quality": "good",
+  "recommendation": "設計方針書は高品質であり、Option B選択、Defense in Depth構造、既存パターン（SEC-006）の汎用化、変更対象の限定など、SOLID/KISS/DRY/YAGNI各原則に概ね適合している。主要な改善ポイントは(1)validateFileOperation()統合と各関数個別追加の方針明確化、(2)API層とビジネスロジック層の防御責務分担の明確化、(3)renameFileOrDirectory()のdestination検証に関する設計根拠の明記、(4)画像/動画直接readFile()パスの具体的な保護箇所の明記の4点。これらを反映すれば、実装フェーズでの設計解釈の曖昧さが排除され、安全で一貫性のある実装が実現できる。",
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-394-symlink-traversal-fix-design-policy.md",
+    "src/lib/path-validator.ts",
+    "src/lib/file-operations.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/tree/[...path]/route.ts",
+    "src/lib/file-tree.ts",
+    "src/lib/file-search.ts",
+    "src/lib/url-path-encoder.ts",
+    "src/app/api/repositories/scan/route.ts"
+  ],
+  "status": "conditionally_approved",
+  "score": 4,
+  "timestamp": "2026-03-02T00:00:00Z"
+}

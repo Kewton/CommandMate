@@ -1,0 +1,16 @@
+{
+  "issue_number": 391,
+  "refactor_targets": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（コメント追加など）",
+    "既存パターンとの一貫性確認",
+    "不要なコードの除去"
+  ]
+}

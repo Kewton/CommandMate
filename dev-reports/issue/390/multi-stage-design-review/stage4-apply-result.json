@@ -1,0 +1,10 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘対応",
+  "applied_count": 3,
+  "skipped_count": 0,
+  "applied_issues": ["D4-001", "D4-002", "D4-003"],
+  "skipped_issues": [],
+  "summary": "セキュリティレビュー（Stage 4）の指摘事項 3 件（全て nice_to_have）を設計方針書セクション6に反映。(1) D4-001: rehype-sanitize の適用範囲を MarkdownEditor.tsx のみと正確に記述し、FileViewerPage/MessageList への未適用を明記。(2) D4-002: CSS Injection リスク分析サブセクションを追加し、ハードコード静的値のためリスクなしと明記。(3) D4-003: dangerouslySetInnerHTML への影響分析サブセクションを追加し、MermaidDiagram.tsx (SVG描画) と MessageList.tsx (ANSI変換) への影響を分析。セクション14にStage 4レビュー指摘事項サマリーおよびOWASP準拠チェック結果を追加。",
+  "design_doc_updated": true
+}

@@ -1,0 +1,62 @@
+{
+  "issue_number": 393,
+  "iteration": 1,
+  "status": "success",
+  "implemented_tasks": [
+    "Task 1.1: tmux.ts exec()->execFile() migration (9 functions, 11 call sites)",
+    "Task 1.2: sendSpecialKey() runtime validation with ALLOWED_SINGLE_SPECIAL_KEYS",
+    "Task 2.1: codex.ts direct exec() replaced with tmux.ts functions (4 sites)",
+    "Task 2.2: claude-session.ts direct exec() replaced with sendSpecialKey() (1 site)",
+    "Task 3.1: terminal/route.ts security hardening (validation, CLIToolManager, fixed-string errors)",
+    "Task 4.1: capture/route.ts security hardening (validation, lines 4-stage check, fixed-string errors)",
+    "Task 5.1: tmux.test.ts updated (exec->execFile mocks, injection tests, validation tests)",
+    "Task 5.2: terminal-route.test.ts created (7 test cases)",
+    "Task 5.3: capture-route.test.ts created (10 test cases)",
+    "Task 5.4: claude-session.test.ts updated (sendSpecialKey mock added, C-d verification test)"
+  ],
+  "test_results": {
+    "unit_tests_passed": true,
+    "total_test_files": 206,
+    "total_tests": 4354,
+    "tests_passed": 4354,
+    "tests_failed": 0,
+    "tests_skipped": 7,
+    "typescript_errors": 0,
+    "lint_errors": 0
+  },
+  "coverage": null,
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "modified_files": [
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/claude-session.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/app/api/worktrees/[id]/capture/route.ts",
+    "tests/unit/tmux.test.ts",
+    "tests/unit/terminal-route.test.ts",
+    "tests/unit/capture-route.test.ts",
+    "tests/unit/cli-tools/codex-pasted-text.test.ts",
+    "tests/unit/lib/claude-session.test.ts"
+  ],
+  "commits": [
+    "7fd4a51: fix(security): prevent RCE/shell injection in terminal and capture APIs"
+  ],
+  "summary": "All 10 tasks completed successfully. Migrated tmux.ts from exec() to execFile() across 9 functions (11 call sites), eliminating shell injection vectors. Added ALLOWED_SINGLE_SPECIAL_KEYS runtime validation with SPECIAL_KEY_VALUES const array for compile/runtime sync. Replaced 5 direct exec() calls in codex.ts and claude-session.ts with safe tmux.ts wrapper functions. Rewrote terminal/route.ts and capture/route.ts with isCliToolType validation, DB existence checks, CLIToolManager-based session names, parameter length/type validation, and fixed-string error responses. Created 17 new test cases across terminal-route.test.ts and capture-route.test.ts. All 206 test files pass (4354 tests), 0 TypeScript errors, 0 ESLint errors.",
+  "security_checklist": {
+    "exec_to_execFile_migration": "complete - all 11 exec() calls in tmux.ts migrated to execFile()",
+    "sendSpecialKey_runtime_validation": "complete - ALLOWED_SINGLE_SPECIAL_KEYS Set with defense-in-depth",
+    "cliToolId_validation": "complete - isCliToolType() used in both terminal and capture routes",
+    "worktreeId_db_check": "complete - getWorktreeById() added to both routes",
+    "session_auto_creation_removed": "complete - 404 returned when session does not exist",
+    "fixed_string_errors": "complete - no user input in error messages",
+    "command_length_limit": "complete - MAX_COMMAND_LENGTH=10000 in terminal route",
+    "lines_parameter_validation": "complete - 4-stage validation in capture route",
+    "local_getSessionName_removed": "complete - CLIToolManager.getTool().getSessionName() used",
+    "sendToTmux_removed": "complete - replaced with direct sendKeys() import",
+    "codex_exec_unified": "complete - 4 direct exec() calls replaced with tmux.ts functions",
+    "claude_session_exec_unified": "complete - 1 direct exec() call replaced with sendSpecialKey()"
+  }
+}

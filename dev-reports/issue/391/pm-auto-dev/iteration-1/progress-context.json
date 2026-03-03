@@ -1,0 +1,35 @@
+{
+  "issue_number": 391,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_total": 4255,
+      "tests_passed": 4255,
+      "typescript_errors": 0,
+      "lint_errors": 0,
+      "implemented_files": [
+        "src/components/worktree/AgentSettingsPane.tsx",
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "tests/unit/components/worktree/AgentSettingsPane.test.tsx"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_total": 6,
+      "criteria_passed": 6
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "AgentSettingsPane.tsx: コメントのクリーンアップ（設計IDタグ除去、簡潔化）",
+        "WorktreeDetailRefactored.tsx: selectedAgentsRefをuseEffect同期からインライン代入パターンに統一",
+        "AgentSettingsPane.test.tsx: テスト名の可読性向上"
+      ]
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": ["CLAUDE.md"]
+    }
+  }
+}

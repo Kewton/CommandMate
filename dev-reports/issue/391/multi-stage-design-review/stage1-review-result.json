@@ -1,0 +1,99 @@
+{
+  "issue_number": 391,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "isEditing/useEffectガードパターンがcontextWindowInputと類似",
+      "description": "AgentSettingsPaneには既にcontextWindowInput用に「ローカル状態 + useEffect同期 + blur時API保存」という同様のパターンが存在する。isEditingフラグによるuseEffectガードは本質的にcontextWindowInputの「ローカル入力中はpropを無視し、完了時にAPI保存」と同じ問題を解決している。両者の同期ガードパターンの統一を検討すべき。ただし、チェックボックスは離散的操作（1→2ステップ）、テキスト入力は連続的操作（blur契機）のため、完全な抽象化は過剰になりうる。",
+      "location": "設計方針書 3-1. 案A: isEditingフラグによるuseEffectガード",
+      "suggestion": "現時点では許容可能だが、将来的に同パターンが3箇所以上になった場合はカスタムフック（例: useOptimisticSync）への抽出を検討する旨のコメントを追加することを推奨。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "principle": "React",
+      "title": "useEffect依存配列にisEditingを含めることの妥当性",
+      "description": "設計方針書のuseEffect修正案では依存配列に[selectedAgents, isEditing]を指定している。isEditingがtrueからfalseに変化した時点でuseEffectが再実行され、その時のselectedAgentsの値でsetCheckedIdsが呼ばれる。これは意図通りの動作（API完了後の同期復帰）だが、isEditingがfalseに戻る瞬間のselectedAgentsがまだ古いポーリング値（APIレスポンスの反映前）である可能性がある。具体的には、AgentSettingsPaneのfinally内でsetIsEditing(false)が呼ばれた直後、親のonSelectedAgentsChangeによるsetSelectedAgentsの状態更新がまだ反映されていない場合、useEffectが古いselectedAgentsで発火する懸念がある。",
+      "location": "設計方針書 3-1. useEffect修正（L98-100）",
+      "suggestion": "finally内でsetIsEditing(false)を呼ぶ前に、response.okの場合はsetCheckedIds(new Set(pair))を明示的に呼んでおくことで、isEditing解除時のuseEffectが古い値で上書きするリスクを排除できる。ただし、Reactのバッチ更新によりonSelectedAgentsChange → setSelectedAgents → selectedAgents prop更新は同一レンダリングサイクル内で処理される可能性が高いため、実害は低い。テストケースT2でこのタイミングを検証することを確認すること。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "title": "案A+Bの二重防御の必要性",
+      "description": "設計方針書は案Aと案Bの組み合わせを採用しているが、案Bの同一値チェック単体でもバグは修正される（サーバーと同じ値が返ってきた場合にsetSelectedAgentsがスキップされるため、useEffectが発火しない）。案Aは「ユーザーがチェックを外した中間状態で、別ユーザーがサーバー側で値を変更した場合」の衝突防御として必要とされているが、この製品はシングルユーザー利用が前提（個人開発ツール）であり、その衝突シナリオは現実的に発生しにくい。ただし、防御的プログラミングとしては妥当であり、実装コストも低いため、二重防御の採用判断自体は問題ない。",
+      "location": "設計方針書 8. 代替案との比較",
+      "suggestion": "設計方針書に「シングルユーザー前提では案Bのみで十分だが、防御的プログラミングとして案Aも併用」という判断根拠を明記すると、将来のメンテナーの理解を助ける。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "nice_to_have",
+      "principle": "SRP",
+      "title": "isEditing状態の責務配置は適切",
+      "description": "isEditingフラグをAgentSettingsPane内に配置する設計判断は、SRP観点から適切である。この状態は「チェックボックスUIの中間操作状態」を表現するものであり、AgentSettingsPaneの内部実装の詳細に該当する。親コンポーネント（WorktreeDetailRefactored）がこの中間状態を知る必要はないため、カプセル化として正しい。",
+      "location": "設計方針書 3-1. 案A全体",
+      "suggestion": "特になし。設計決定は適切。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "principle": "OCP",
+      "title": "既存Props/APIインターフェース変更なし - OCP準拠",
+      "description": "AgentSettingsPanePropsインターフェース、PATCH APIエンドポイント、DBスキーマのいずれも変更不要とされており、Open/Closed Principleに準拠している。既存の外部契約を変更せずに内部実装のみで問題を解決している。",
+      "location": "設計方針書 5. 影響範囲 - Props/API変更: なし",
+      "suggestion": "特になし。設計決定は適切。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "should_fix",
+      "principle": "React",
+      "title": "useCallback依存配列へのisEditing除外の明示的説明が不足",
+      "description": "設計方針書のhandleCheckboxChange修正案では、useCallbackの依存配列が[worktreeId, selectedAgents, onSelectedAgentsChange]のままとなっている。setIsEditingはReactのuseStateから得たsetterであるため依存配列に含める必要はないが、この判断根拠が設計方針書に明記されていない。また、isEditingをuseCallback内で参照する場合（例: ガード条件を追加する場合）、依存配列の更新漏れが発生しうる。",
+      "location": "設計方針書 3-1. handleCheckboxChange修正（L141-176）",
+      "suggestion": "設計決定事項の表に「handleCheckboxChangeの依存配列にisEditingを含めない理由: setIsEditingはReact stateのsetterであり安定参照。isEditing値自体はhandleCheckboxChange内で読み取らないため不要」を追記する。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "should_fix",
+      "principle": "YAGNI",
+      "title": "isEditingタイムアウト不要の判断は適切だが、長時間放置シナリオの検討が不足",
+      "description": "設計決定事項でisEditingタイムアウトを「なし」としている。ユーザーが検討中に勝手にリセットされるのは混乱を招くという理由は妥当。しかし、ユーザーがチェックを1つ外した状態でページを閉じずに長時間放置した場合、isEditingがtrueのまま残り、サーバー側の変更（別ブラウザや直接DB変更）が永遠に反映されない。この状態はページリロードでのみ解消される。",
+      "location": "設計方針書 3-1. 設計決定事項 - isEditingタイムアウト",
+      "suggestion": "この制限事項（isEditing=trueの間はサーバー同期が停止する）を設計方針書に明記する。タイムアウトの追加はYAGNI違反となるため不要だが、既知の制限として文書化することで将来の混乱を防ぐ。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "nice_to_have",
+      "principle": "DIP",
+      "title": "fetchWorktree内の値比較ロジックの直接埋め込み",
+      "description": "案BのfetchWorktree内配列比較ロジックは、fetchWorktreeコールバック内に直接埋め込まれている。現時点では問題ないが、同様の配列比較が他の場所（例: vibeLocalModel同期）にも必要になった場合、ユーティリティ関数への抽出が望ましくなる。",
+      "location": "設計方針書 3-2. fetchWorktree修正（L1034-1037）",
+      "suggestion": "将来的に同パターンが繰り返される場合は、arraysEqual()のような汎用比較関数をsrc/lib/utils.tsに抽出することを検討。現時点ではインライン実装で問題ない。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 5,
+  "overall_quality": "high",
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-391-agent-checkbox-fix-design-policy.md",
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx"
+  ],
+  "recommendation": "must_fix指摘なし。should_fix 3件は設計方針書の補足記述に関するものであり、実装品質には影響しない。Stage 2（整合性レビュー）に進むことを推奨する。",
+  "timestamp": "2026-03-02T10:15:00Z"
+}

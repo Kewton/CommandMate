@@ -1,0 +1,27 @@
+{
+  "stage": 3,
+  "issue_number": 394,
+  "status": "success",
+  "applied_findings": ["S3-001", "S3-002", "S3-003", "S3-004"],
+  "skipped_findings": ["S3-005", "S3-006", "S3-007"],
+  "skip_reasons": {
+    "S3-005": "nice_to_have: move操作時の最大8回呼び出しは正確な指摘だが、VFSキャッシュにより実質的な影響は軽微であり、セクション7の既存評価は妥当。対応見送り",
+    "S3-006": "nice_to_have: SEC-006はdestinationDir固有のセマンティクスを持ち、resolveAndValidateRealPath()への置き換えは本Issueスコープ外。将来のリファクタリング候補として認識",
+    "S3-007": "nice_to_have: S3-002の対応に包含。セクション8の既存テスト影響分析にfile-tree.test.tsの分析を含め、セクション5.2の変更しないファイル表にfile-tree.tsエントリを追加した"
+  },
+  "changes_summary": "Stage 3影響分析レビューの指摘4件（must_fix 1件、should_fix 3件）を設計方針書に反映した。(1) S3-001: validateFileOperation()のresolvedSource返却値ポリシーをセクション5.2とセクション9に明記（返却値は変更しない、realpathSync解決済みパスは内部検証のみ使用）。(2) S3-002: セクション8に「既存テストへの影響分析」サブセクションを追加し、tmpdir互換性の自動保持、影響テストファイル一覧、file-tree.tsのsymlinkスキップテストとの整合性を記載。(3) S3-003: セクション5.2のupload APIルート行に二重検証の具体的フローを記載し、セクション9にDefense-in-depth原則に基づく許容を明記。(4) S3-004: セクション5.1にconsole.warn()ログ出力計画を追加し、セクション9にログ出力方針を明記。nice_to_have 3件は対応見送りまたはS3-002に包含とした。",
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-394-symlink-traversal-fix-design-policy.md",
+  "sections_updated": [
+    "セクション5.1 エラーハンドリング（S3-004: symlink拒否時のサーバーログ出力）",
+    "セクション5.2 既存関数の修正箇所 - validateFileOperation()行（S3-001: resolvedSource返却値ポリシー）",
+    "セクション5.2 API routes - upload行（S3-003: 二重検証フロー文書化）",
+    "セクション5.2 変更しないファイル表（S3-007: file-tree.ts追加）",
+    "セクション8 テスト設計 - 既存テストへの影響分析（S3-002: tmpdir使用テスト影響分析）",
+    "セクション9 設計上の決定事項とトレードオフ（S3-001, S3-003, S3-004追加）",
+    "セクション13 レビュー履歴（Stage 3追加）",
+    "セクション14 レビュー指摘事項サマリー（Stage 3テーブル追加）",
+    "セクション14 実装チェックリスト（S3-001〜S3-004のチェック項目追加）"
+  ],
+  "timestamp": "2026-03-02T00:00:00Z"
+}

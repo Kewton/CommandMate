@@ -1,0 +1,137 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 393,
+  "review_focus": "整合性",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "R2F001",
+      "severity": "should_fix",
+      "category": "参照誤り",
+      "title": "D1-002: getWorktreeById() の参照元ファイルが設計方針書で未特定",
+      "description": "設計方針書 D1-002 は getWorktreeById() による DB 存在確認を指定しているが、インポート元を明記していない。設計方針書のアーキテクチャ図では 'db-repository.ts' が暗示されているが、実際には getWorktreeById() は src/lib/db.ts:305 に定義されている（src/lib/db-repository.ts には存在しない）。既存の参照パターン（respond/route.ts:8, kill-session/route.ts:14）も全て '@/lib/db' からインポートしている。実装者が誤ったファイルからインポートしようとするリスクがある。",
+      "suggestion": "設計方針書 D1-002 に「import { getWorktreeById } from '@/lib/db'」を明示的に記載する。respond/route.ts:8 と kill-session/route.ts:14 のインポートパターンを参照例として追記する。"
+    },
+    {
+      "id": "R2F002",
+      "severity": "should_fix",
+      "category": "設計漏れ",
+      "title": "D2-002: tmux.ts の exec() 使用箇所は10箇所ではなく11箇所",
+      "description": "設計方針書 D2-002 の対象関数一覧は「全10関数」と記載し、10箇所の exec() 呼び出しをリストしている。しかし createSession() には2つの exec() 呼び出しがある（new-session と set-option）ため、実際には exec() 呼び出し箇所は合計11箇所（isTmuxAvailable:1, hasSession:1, listSessions:1, createSession:2, sendKeys:1, sendSpecialKeys:1, capturePane:1, killSession:1, sendSpecialKey:1）となる。D2-002 の表では createSession の set-option が別行で記載されているため箇所数は正しく把握されているが、「全10関数」の表現が exec() 呼び出し箇所数と混同される可能性がある。",
+      "suggestion": "「全10関数」を「全9関数（exec()呼び出し11箇所）」に修正するか、関数数と呼び出し箇所数を明確に区別する記載にする。実際の関数数は isTmuxAvailable, hasSession, listSessions, createSession, sendKeys, sendSpecialKeys, capturePane, killSession, sendSpecialKey の9個。"
+    },
+    {
+      "id": "R2F003",
+      "severity": "must_fix",
+      "category": "設計漏れ",
+      "title": "D3-002/非スコープ: claude-session.ts の sanitizeSessionEnvironment() の exec() がスコープ外として不十分に分類",
+      "description": "設計方針書のセクション8（非スコープ）では、claude-session.ts の exec() 呼び出しについて「line 237, 250, 417, 465 は低リスク・別Issue」としている。しかし line 417 の sanitizeSessionEnvironment() は 'tmux set-environment -g -u CLAUDECODE 2>/dev/null || true' という tmux コマンドを exec() でシェル経由実行している。このコマンドにはシェルリダイレクト（2>/dev/null）と OR 演算子（|| true）が含まれるため execFile() に直接移行できないが、tmux コマンドであるため本 Issue のスコープ内として検討すべき。少なくとも、execFile() 移行が不可能な理由（シェル構文依存）を設計方針書に明記し、リスク許容判断の根拠を文書化する必要がある。",
+      "suggestion": "非スコープの理由として「line 417 はシェルリダイレクト(2>/dev/null || true)に依存しているため execFile() への単純移行が不可能。引数は全て固定文字列（CLAUDECODE）でありユーザー入力を含まないため、インジェクションリスクは無い」と明記する。代替案として execFile() + stderr 無視 + try-catch パターンへの移行も検討可能だが、YAGNI として別 Issue 化が妥当。"
+    },
+    {
+      "id": "R2F004",
+      "severity": "nice_to_have",
+      "category": "参照誤り",
+      "title": "D1-002: 参照行番号が実際のコードと微妙にずれている",
+      "description": "設計方針書 D1-002 は respond/route.ts:126-131 と kill-session/route.ts:28-34 を参照パターンとして挙げている。実際のコードを確認すると、respond/route.ts では getWorktreeById の呼び出しは line 126 で一致し、kill-session/route.ts では getWorktreeById の呼び出しは line 28 で一致する。行番号は現時点で正確だが、コードベースの変更で容易にずれるため、関数名による参照が望ましい。",
+      "suggestion": "行番号に加えて関数名ベースの参照を記載する（例: 'respond/route.ts の getWorktreeById(db, params.id) 呼び出し'）。ただし現時点では行番号は正確であり、実装に支障はない。"
+    },
+    {
+      "id": "R2F005",
+      "severity": "nice_to_have",
+      "category": "整合性不一致",
+      "title": "D3-001: codex.ts の修正対象行番号は正確だが関数コンテキストの補足が有用",
+      "description": "設計方針書 D3-001 のマッピング表は行 102, 104, 139, 170 を修正対象としている。実際のコードと照合すると: (1) line 102 `execAsync(tmux send-keys ... Down)` は startSession() 内 - 正確。(2) line 104 `execAsync(tmux send-keys ... Enter)` は startSession() 内 - 正確。(3) line 139 `execAsync(tmux send-keys ... C-m)` は sendMessage() 内 - 正確。(4) line 170 `execAsync(tmux send-keys ... C-d)` は killSession() 内 - 正確。全て正確に一致している。",
+      "suggestion": "行番号は正確。実装者の利便性のため、各行の所属関数名（startSession, sendMessage, killSession）をマッピング表に追記すると可読性が向上する。"
+    },
+    {
+      "id": "R2F006",
+      "severity": "nice_to_have",
+      "category": "整合性不一致",
+      "title": "D3-002: claude-session.ts の修正対象は Line 783 で正確",
+      "description": "設計方針書 D3-002 は claude-session.ts Line 783 を修正対象としている。実際のコードでは line 783 に `await execAsync(tmux send-keys -t \"${sessionName}\" C-d)` が存在し、stopClaudeSession() 関数内に位置する。正確に一致している。",
+      "suggestion": "追加アクション不要。所属関数名（stopClaudeSession）の補足があると更に明確になる。"
+    },
+    {
+      "id": "R2F007",
+      "severity": "should_fix",
+      "category": "設計漏れ",
+      "title": "D2-005: ALLOWED_SINGLE_SPECIAL_KEYS と SpecialKey 型の同期保証メカニズムが未定義",
+      "description": "設計方針書 D2-005 は ALLOWED_SINGLE_SPECIAL_KEYS = new Set(['Escape', 'C-c', 'C-d', 'C-m', 'Enter']) を定義し、D2-006 で SpecialKey 型との同期をテストで検証するとしている。しかし、SpecialKey 型は TypeScript のリテラルユニオン型（'Escape' | 'C-c' | 'C-d' | 'C-m' | 'Enter'）であり、ランタイムでは値の列挙を取得できない。テストで「SpecialKey 型の全値が Set に含まれている」ことを自動検証するには、型の値を配列として別途定義する必要がある（例: const SPECIAL_KEY_VALUES = ['Escape', 'C-c', 'C-d', 'C-m', 'Enter'] as const）。この実装方法が設計方針書に記載されていない。",
+      "suggestion": "D2-006 のテスト検証方法として以下を明記する: (1) SPECIAL_KEY_VALUES 配列を定義し SpecialKey 型を派生させる（CLI_TOOL_IDS と CLIToolType の既存パターンに合わせる）、または (2) テストで ALLOWED_SINGLE_SPECIAL_KEYS の要素を手動列挙してハードコードで検証する（よりシンプルだが同期漏れリスクあり）。案(1) を推奨。"
+    },
+    {
+      "id": "R2F008",
+      "severity": "nice_to_have",
+      "category": "整合性不一致",
+      "title": "D1-003: CLIToolManager.getTool() は CLIToolType 型を要求するが、isCliToolType() 通過後の型ナローイングが設計に未記載",
+      "description": "設計方針書 D1-001 で isCliToolType() バリデーション後、D1-003 で CLIToolManager.getInstance().getTool(cliToolId) を呼ぶ。manager.getTool() のシグネチャは getTool(type: CLIToolType): ICLITool であり CLIToolType 型を要求する。isCliToolType() は型ガード（value is CLIToolType）を返すため、if ブロック内では自動的に型がナローイングされる。このフローは正しく機能するが、設計方針書のコード例には型ナローイングの説明がない。",
+      "suggestion": "設計方針書の D1-001 コード例に、isCliToolType() チェック後に cliToolId が CLIToolType として使用可能になることをコメントで明記すると、実装者の理解が向上する。ただし TypeScript の標準的な型ガードパターンであり、実装に支障はない。"
+    },
+    {
+      "id": "R2F009",
+      "severity": "should_fix",
+      "category": "設計漏れ",
+      "title": "D1-004: terminal/route.ts のセッション自動作成廃止後の sendToTmux() のスコープが未明確",
+      "description": "terminal/route.ts には sendToTmux() というプライベート関数（line 55-58）が tmux.sendKeys() をラップしている。D1-003 で import * as tmux を廃止して CLIToolManager 経由にする方針だが、sendToTmux() を廃止するのか、CLIToolManager 経由のメソッド呼び出しに置き換えるのかが設計方針書に明記されていない。ICLITool インターフェースには sendMessage() はあるが、任意のコマンドを send-keys で送る汎用メソッドは存在しない。terminal/route.ts の POST ハンドラは任意の command を tmux セッションに送信する機能であり、CLIToolManager の sendMessage() とは異なるユースケース。",
+      "suggestion": "D1-003/D1-004 に terminal/route.ts の sendToTmux() の扱いを明記する。選択肢: (A) sendToTmux() を廃止し、CLIToolManager の getTool(cliToolId) 経由で sendMessage() を使用する。ただしセマンティクスが異なる（sendMessage はプロンプト応答用、terminal は任意コマンド送信）。(B) terminal/route.ts のエンドポイント自体の機能を再定義する（セッション名取得のみ CLIToolManager 経由、send-keys は tmux モジュールを直接使用）。(B) の場合は import * as tmux の完全削除が不可能になるため、D1-003 の DIP 方針と矛盾する。"
+    },
+    {
+      "id": "R2F010",
+      "severity": "nice_to_have",
+      "category": "整合性不一致",
+      "title": "D2-002: listSessions() のフォーマット文字列に含まれる特殊文字の execFile() 移行時の挙動確認",
+      "description": "listSessions() は tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}' というフォーマット文字列を使用している。exec() ではシングルクォートでシェルに保護されているが、execFile() では引数配列の要素として渡すためシェル解釈されない。tmux の -F オプションは引数として直接フォーマット文字列を受け取るため、execFile('tmux', ['list-sessions', '-F', '#{session_name}|#{session_windows}|#{session_attached}']) で正しく動作する。設計方針書 D2-002 の表ではこの点を「固定フォーマット文字列」と簡潔に記載している。",
+      "suggestion": "設計上の問題はない。tmux の -F オプションはシェル解釈を必要としないため、execFile() で正しく動作する。現在の記載で十分。"
+    },
+    {
+      "id": "R2F011",
+      "severity": "nice_to_have",
+      "category": "整合性不一致",
+      "title": "D4: テストファイル名が既存テスト構造と整合している",
+      "description": "設計方針書 D4-001/D4-002 は tests/unit/terminal-route.test.ts と tests/unit/capture-route.test.ts の新規作成を計画している。既存の API ルートテストは tests/unit/api/ ディレクトリに配置されている（例: tests/unit/api/prompt-response-verification.test.ts, tests/unit/api/update-check.test.ts）。terminal-route.test.ts と capture-route.test.ts も tests/unit/api/ 配下が適切だが、設計方針書は tests/unit/ 直下に配置する想定になっている。",
+      "suggestion": "テストファイルの配置を tests/unit/api/terminal-route.test.ts, tests/unit/api/capture-route.test.ts とし、既存の API ルートテストの配置パターンに合わせることを検討する。ただし tests/unit/ 直下にも多数のテストがあるため、プロジェクトの規約として厳密ではない。"
+    },
+    {
+      "id": "R2F012",
+      "severity": "should_fix",
+      "category": "設計漏れ",
+      "title": "D3-001: codex.ts の execAsync インポート削除後の影響分析が不十分",
+      "description": "設計方針書 D3-003 は codex.ts から exec/execAsync インポートを削除する方針を示している。codex.ts の現在のインポート（line 14: import { exec } from 'child_process', line 18: const execAsync = promisify(exec)）は D3-001 の4箇所修正後に不要になる。ただし、削除にあたっては tmux モジュールの sendSpecialKeys と sendSpecialKey のインポートを追加する必要がある。現在 codex.ts は hasSession, createSession, sendKeys, killSession を tmux からインポートしているが、sendSpecialKeys と sendSpecialKey はインポートしていない。この追加インポートが設計方針書に明記されていない。",
+      "suggestion": "D3-001 のマッピング表に、codex.ts に追加が必要なインポートを明記する: import { sendSpecialKeys, sendSpecialKey } from '../tmux' を既存の tmux インポートに追加。D3-003 の「インポート削除」セクションを「インポート変更」に拡張し、追加と削除の両方を明確にする。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 5,
+    "nice_to_have_count": 6,
+    "overall_consistency": "高",
+    "comment": "設計方針書と実際のコードベースの整合性は全体として高い水準にある。D1-001 の isCliToolType() 関数の存在と型ガード機能、D1-003 の CLIToolManager 経由パターン、D3-001/D3-002 の行番号参照、D2-005 の ALLOWED_SPECIAL_KEYS 定義は全て実コードと正確に一致している。must_fix は1件（sanitizeSessionEnvironment の exec() のスコープ判断根拠の文書化不足）で、セキュリティリスクではなく文書化の問題。should_fix 5件は主に設計文書の正確性向上と実装時の迷い防止に関するもの。設計方針に従った実装は十分に実行可能であり、条件付き承認とする。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-393-security-rce-shell-injection-design-policy.md",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/claude-session.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/app/api/worktrees/[id]/capture/route.ts",
+    "src/app/api/worktrees/[id]/respond/route.ts",
+    "src/app/api/worktrees/[id]/kill-session/route.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/lib/cli-tools/opencode.ts",
+    "src/lib/db.ts",
+    "tests/unit/tmux.test.ts"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

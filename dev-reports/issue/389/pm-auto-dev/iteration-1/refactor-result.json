@@ -1,0 +1,22 @@
+{
+  "issue_number": 389,
+  "status": "success",
+  "changes": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "type": "comment-cleanup",
+      "description": "Removed redundant issue-number references ([Issue #389], [Issue #162]) and design-review IDs ([DR1-001], [DR2-001], [DR3-001], [DR4-001], [DR1-003], [DR1-006], [DR1-009]) from inline comments. Consolidated verbose JSDoc comments into concise descriptions that explain purpose without redundant implementation details. The component-level JSDoc already documents the feature list."
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "type": "test-duplication-reduction",
+      "description": "Extracted waitForEditorReady() helper function to replace 44 identical occurrences of the waitFor(() => expect(textarea).toBeInTheDocument()) pattern across test cases. Removed redundant [DR3-003] comment from test describe block. Reduces test boilerplate by ~90 lines while preserving all test logic and assertions."
+    }
+  ],
+  "quality_checks": {
+    "typescript": { "status": "pass", "errors": 0 },
+    "eslint": { "status": "pass", "errors": 0 },
+    "tests": { "status": "pass", "passed": 4266, "failed": 0 }
+  },
+  "summary": "Refactoring focused on two areas: (1) Cleaned up MarkdownEditor.tsx comments by removing redundant issue-number and design-review ID references while keeping meaningful descriptions. The component-level JSDoc already provides full feature documentation, so inline issue references were noise. (2) Extracted a waitForEditorReady() test helper in MarkdownEditor.test.tsx to eliminate 44 identical await/waitFor/expect blocks, improving test readability and maintainability. No functional changes were made. All 4266 tests continue to pass with 0 TypeScript and 0 ESLint errors."
+}

@@ -1,0 +1,52 @@
+{
+  "issue_number": 389,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "apply_date": "2026-03-02",
+  "applied": [
+    {
+      "finding_id": "DR2-001",
+      "status": "applied",
+      "changes": "Section 4.2: saveToApiコードブロックをDR1-001修正後の版に統一（setOriginalContent(valueToSave)を内部で呼び出し、依存配列を[worktreeId, filePath, setOriginalContent]に更新）。Section 4.3: useAutoSave呼び出しからonSaveCompleteプロパティを削除し、DR1-001/DR2-001統合注記に更新。Section 2: アーキテクチャ図のonSaveComplete矢印をsaveToApiからsetOriginalContentへの矢印に変更。Section 7.3: saveToApiの依存配列記述を更新。"
+    },
+    {
+      "finding_id": "DR2-002",
+      "status": "applied",
+      "changes": "Section 4.8: DR2-002注記を追加。エラーフォールバックuseEffectがsaveNow()完了前に発火しdisabled=trueになった場合、saveNow()がスキップされるケースを明記。autoSaveErrorによる確認ダイアログ表示で実質的な影響がないことを説明。テストケース追加指示を記載。"
+    },
+    {
+      "finding_id": "DR2-003",
+      "status": "applied",
+      "changes": "Section 1: DRY原則の記述にdisabled動的切り替えがMarkdownEditor固有である旨を追記。Section 3: useAutoSaveの選定理由をMemoCardでの基本パターン実績ありに修正し、disabled動的切り替えが新規利用である注記を追加。Section 4.3: DR2-003注記ブロックを追加し、MemoCardがdisabledパラメータを使用していない事実とテスト網羅的検証の必要性を明記。Section 8.1: 設計決定テーブルのuseAutoSave行にdisabled動的切り替えがMarkdownEditor固有である旨を追記。"
+    },
+    {
+      "finding_id": "DR2-004",
+      "status": "applied",
+      "changes": "Section 12.4実装チェックリスト: debounceMs: AUTO_SAVE_DEBOUNCE_MSが明示的に設定されていることの確認項目を追加。"
+    },
+    {
+      "finding_id": "DR2-006",
+      "status": "applied",
+      "changes": "Section 4.2: saveToApiのuseCallback依存配列を[worktreeId, filePath, setOriginalContent]に更新（DR2-001の反映と同時）。Section 7.3: saveToApiメモ化の依存配列記述にsetOriginalContentを追加。Section 12.4実装チェックリスト: ESLint exhaustive-deps整合性の確認項目を追加。"
+    }
+  ],
+  "skipped": [
+    {
+      "finding_id": "DR2-005",
+      "reason": "レビュー結果で「修正不要。命名規則と配置場所は完全に整合」と判定済み。設計書への変更不要。"
+    },
+    {
+      "finding_id": "DR2-007",
+      "reason": "Nice to Have指定。auto-save ON時のSaveボタン非表示設計により既存テストへの影響は限定的。Section 9.1で既存テスト更新6件を記載済みであり、追加の記述は不要。"
+    },
+    {
+      "finding_id": "DR2-008",
+      "reason": "Nice to Have指定。レビュー結果で「修正不要。既存パターンとの整合性は完全」と判定済み。設計書への変更不要。"
+    },
+    {
+      "finding_id": "DR2-009",
+      "reason": "Nice to Have指定。レビュー結果で「修正不要。設計書の理解は正確」と判定済み。DR1-006注記で既にsaveNow()がrejectしない挙動を網羅しており追加の記述は不要。"
+    }
+  ],
+  "summary": "Stage 2整合性レビューの全9件の指摘事項を処理完了。Must Fix 2件（DR2-001, DR2-002）は全て設計方針書に反映済み。Should Fix 4件のうち3件（DR2-003, DR2-004, DR2-006）を反映、1件（DR2-005）は修正不要と判定。Nice to Have 3件（DR2-007, DR2-008, DR2-009）はスキップ。主な変更点: (1) Section 4.2/4.3のコードスニペットをDR1-001修正後の版に統一しonSaveCompleteを削除、(2) Section 4.8にhandleCloseのタイミング問題の注記を追加、(3) MemoCardパターンとdisabled動的切り替えの差異を設計書全体で明記、(4) 実装チェックリスト6項目をSection 12.4に追加。"
+}

@@ -1,0 +1,56 @@
+{
+  "issue_number": 392,
+  "stage": 2,
+  "stage_name": "整合性レビュー指摘反映",
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["S2-001", "S2-002", "S2-003", "S2-004"],
+  "skipped_findings": [],
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S2-001",
+        "item": "CLAUDE.md の resolveDefaultBasePath() 優先順位記述と実コードの不一致を注記",
+        "section_updated": "9 (影響範囲の確認)",
+        "status": "reflected",
+        "detail": "セクション9に basePath 注入経路と resolveDefaultBasePath() の関係を記述する新サブセクションを追加。CLAUDE.md の記述上の不正確さをスコープ外として記録"
+      },
+      {
+        "id": "S2-002",
+        "item": "セクション4-1と5-2bの export キーワード差異を注記で明示",
+        "section_updated": "4-1 (ヘルパー関数パターン)",
+        "status": "reflected",
+        "detail": "セクション4-1のコード例の直後に [S2-002] 注記を追加し、概念説明用であり実装時はセクション5-2bのexport付き定義に従う旨を明記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S2-003",
+        "item": "ヘルパー関数配置位置の記述精密化",
+        "section_updated": "5-2b (ヘルパー関数追加)",
+        "status": "reflected",
+        "detail": "「L193付近」を「L193以前、resetWorktreeBasePathWarning() の直後かつクラスの JSDoc コメントの前」に変更"
+      },
+      {
+        "id": "S2-004",
+        "item": "「直接使用箇所」を「直接呼び出し箇所」に修正",
+        "section_updated": "5-2a, 8 (D5-001)",
+        "status": "reflected",
+        "detail": "セクション5-2aとセクション8のD5-001の両方で「isPathSafe の直接使用箇所は」を「isPathSafe() の直接呼び出し箇所は」に修正"
+      }
+    ]
+  },
+  "design_doc_path": "dev-reports/design/issue-392-clone-path-validation-fix-design-policy.md",
+  "sections_updated": [
+    "4-1 (ヘルパー関数パターン) - S2-002 export キーワード注記追加",
+    "5-2a (import 追加) - S2-004 表現修正",
+    "5-2b (ヘルパー関数追加) - S2-003 配置位置精密化",
+    "8 (設計上の決定事項とトレードオフ) - S2-004 D5-001 表現修正",
+    "9 (影響範囲の確認) - S2-001 basePath 注入経路注記追加",
+    "12 (レビュー履歴) - Stage 2 行追加",
+    "13 (レビュー指摘事項サマリー) - S2-001〜S2-004 行追加"
+  ],
+  "summary": "Stage 2 整合性レビューの指摘事項4件（should_fix 2件、nice_to_have 2件）を全て設計方針書に反映完了。S2-001: セクション9に basePath 外部注入経路と resolveDefaultBasePath() フォールバック経路の関係、および CLAUDE.md の記述との差異を注記。S2-002: セクション4-1のコード例に export キーワードの差異に関する注記を追加。S2-003: セクション5-2bのヘルパー関数配置位置を JSDoc を考慮した精密な表現に修正。S2-004: セクション5-2aと8のD5-001で「直接使用箇所」を「直接呼び出し箇所」に修正。レビュー履歴テーブルおよび指摘事項サマリーテーブルにも Stage 2 の情報を追加。",
+  "timestamp": "2026-03-02T00:00:00Z"
+}

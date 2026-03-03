@@ -1,0 +1,25 @@
+{
+  "issue_number": 393,
+  "refactor_targets": [
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/claude-session.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/app/api/worktrees/[id]/capture/route.ts",
+    "tests/unit/tmux.test.ts",
+    "tests/unit/terminal-route.test.ts",
+    "tests/unit/capture-route.test.ts"
+  ],
+  "quality_metrics": {
+    "typescript_errors": 0,
+    "lint_errors": 0,
+    "unit_tests_passed": true,
+    "acceptance_tests_passed": true
+  },
+  "improvement_goals": [
+    "DRY原則: terminal/route.ts と capture/route.ts の共通バリデーションパターンを確認",
+    "コードの可読性向上: コメントの適切な追加",
+    "CLAUDE.md のモジュール説明を更新（terminal/route.ts, capture/route.ts の修正内容反映）",
+    "不要なコメントや冗長なコードの除去"
+  ]
+}

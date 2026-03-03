@@ -1,0 +1,77 @@
+{
+  "issue_number": 392,
+  "stage": 4,
+  "status": "success",
+  "design_policy_updated": true,
+  "applied_findings": ["S4-001", "S4-002", "S4-003", "S4-004", "S4-007"],
+  "skipped_findings": ["S4-005", "S4-006"],
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "S4-001",
+        "title": "validateWorktreePath() の二重 decodeURIComponent バイパスの実証的検証テスト追加",
+        "sections_updated": ["7-5", "10-1", "12", "13", "14"],
+        "status": "reflected",
+        "detail": "セクション7-5にS4-001-T1~T3の安全性実証テストケースを追加。セクション10-1に実装前安全性実証の注記を追加。実装チェックリストにS4-001項目を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S4-002",
+        "title": "シンボリックリンク攻撃に対する防御の考慮と記載",
+        "sections_updated": ["6-3", "12", "13", "14"],
+        "status": "reflected",
+        "detail": "セクション6-3の攻撃ベクトル表にシンボリックリンク攻撃パターンを追加。git cloneの動作による暗黙的防御と将来的なrealpath検証の検討を記載。"
+      },
+      {
+        "id": "S4-003",
+        "title": "executeClone() の mkdirSync が basePath 内に限定される根拠の明記",
+        "sections_updated": ["5-2c", "12", "13", "14"],
+        "status": "reflected",
+        "detail": "セクション5-2cの設計根拠にmkdirSyncがvalidateWorktreePath()の解決済みパスを使用するためbasePath内に限定される旨を追記。defense-in-depth としての追加検証は変更スコープ最小化のため実施しない方針を明記。"
+      },
+      {
+        "id": "S4-004",
+        "title": "CM_AUTH_TOKEN_HASH 未設定時の認証境界の明記",
+        "sections_updated": ["6-4", "12", "13", "14"],
+        "status": "reflected",
+        "detail": "新規セクション6-4を追加。CM_AUTH_TOKEN_HASH設定済み/未設定時のセキュリティ境界の差異を表形式で明記。CM_BIND=127.0.0.1によるネットワーク境界防御への依存と0.0.0.0バインド時の推奨事項を記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S4-007",
+        "title": "targetDir 長さ制限（1024）の定数化推奨",
+        "sections_updated": ["5-1", "13", "14"],
+        "status": "reflected",
+        "detail": "セクション5-1にMAX_TARGET_DIR_LENGTH定数としての定義推奨を追記。実装チェックリストに定数化の項目を追加。"
+      }
+    ]
+  },
+  "skipped": [
+    {
+      "id": "S4-005",
+      "title": "console.warn ログに攻撃者の入力値の一部を含めることの検討",
+      "reason": "D4-001の固定メッセージ設計で対応済み。ログサニタイズの追加複雑性に対してリスクが低い。レビュー履歴に記録のみ。"
+    },
+    {
+      "id": "S4-006",
+      "title": "git clone への引数インジェクション防御の確認記述",
+      "reason": "validateWorktreePath()が常に絶対パス（/始まり）を返すため、--オプション解釈は暗黙的に防御済み。spawnによるshell非経由も既に設計書に記載済み。レビュー履歴に記録のみ。"
+    }
+  ],
+  "design_doc_path": "dev-reports/design/issue-392-clone-path-validation-fix-design-policy.md",
+  "sections_updated": [
+    "5-1 (S4-007: MAX_TARGET_DIR_LENGTH定数化推奨追記)",
+    "5-2c (S4-003: mkdirSync basePath限定の根拠追記)",
+    "6-3 (S4-002: シンボリックリンク攻撃パターン追加)",
+    "6-4 (S4-004: 認証状態による攻撃表面サブセクション新規追加)",
+    "7-5 (S4-001: validateWorktreePath()安全性実証テストケース新規追加)",
+    "10-1 (S4-001: 実装前安全性実証の注記追加)",
+    "12 (Stage 4レビュー履歴行追加)",
+    "13 (S4-001~S4-007 全7件のレビュー指摘事項追加)",
+    "14 (Stage 4レビュー反映分チェックリスト追加)"
+  ],
+  "summary": "Stage 4 セキュリティレビューの全7件の指摘事項を設計方針書に反映した。must_fix 1件（S4-001: 二重decodeURIComponentバイパスの実証テスト）はセクション7-5に新規テストケース3件を追加し、セクション10-1に実装前安全性実証の注記を追加。should_fix 3件（S4-002: シンボリックリンク攻撃、S4-003: mkdirSync basePath検証、S4-004: 認証境界）はそれぞれ該当セクションに反映。nice_to_have 1件（S4-007: 定数化推奨）を反映。S4-005/S4-006は既存設計で対応済みのためレビュー履歴に記録のみとしスキップした。",
+  "timestamp": "2026-03-02T00:00:00Z"
+}

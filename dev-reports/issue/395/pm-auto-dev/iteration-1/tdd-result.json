@@ -1,0 +1,59 @@
+{
+  "issue_number": 395,
+  "iteration": 1,
+  "status": "success",
+  "files_modified": [
+    "src/lib/proxy/config.ts",
+    "src/lib/proxy/handler.ts",
+    "src/app/proxy/[...path]/route.ts",
+    "src/components/external-apps/ExternalAppForm.tsx",
+    "src/lib/external-apps/interfaces.ts",
+    "CLAUDE.md"
+  ],
+  "tests_added": [
+    "sensitive request header stripping > should strip all 7 sensitive request headers before forwarding to upstream",
+    "sensitive request header stripping > should strip cookie header individually",
+    "sensitive request header stripping > should strip authorization header individually",
+    "sensitive request header stripping > should strip proxy-authorization header individually",
+    "sensitive request header stripping > should strip x-forwarded-for header individually",
+    "sensitive request header stripping > should strip x-forwarded-host header individually",
+    "sensitive request header stripping > should strip x-forwarded-proto header individually",
+    "sensitive request header stripping > should strip x-real-ip header individually",
+    "safe request header forwarding (regression) > should forward Content-Type, Accept, and User-Agent headers",
+    "safe request header forwarding (regression) > should forward custom X- headers that are not in the sensitive list",
+    "sensitive response header stripping > should strip all 11 sensitive response headers from upstream response",
+    "sensitive response header stripping > should strip set-cookie response header individually",
+    "sensitive response header stripping > should strip content-security-policy response header individually",
+    "sensitive response header stripping > should strip content-security-policy-report-only response header individually",
+    "sensitive response header stripping > should strip x-frame-options response header individually",
+    "sensitive response header stripping > should strip strict-transport-security response header individually",
+    "sensitive response header stripping > should strip access-control-allow-origin response header individually",
+    "sensitive response header stripping > should strip access-control-allow-credentials response header individually",
+    "sensitive response header stripping > should strip access-control-allow-methods response header individually",
+    "sensitive response header stripping > should strip access-control-allow-headers response header individually",
+    "sensitive response header stripping > should strip access-control-expose-headers response header individually",
+    "sensitive response header stripping > should strip access-control-max-age response header individually",
+    "proxyWebSocket security (Issue #395) > should not include directUrl field in 426 response",
+    "proxyWebSocket security (Issue #395) > should use fixed error message without internal URL information",
+    "proxyWebSocket security (Issue #395) > should not leak upstream app details in any field",
+    "config constants (Issue #395) > should define SENSITIVE_REQUEST_HEADERS with all 7 headers",
+    "config constants (Issue #395) > should define SENSITIVE_RESPONSE_HEADERS with all 11 headers"
+  ],
+  "tests_modified": [
+    "proxyHttp > should forward request headers (safe headers only, stripping sensitive ones)",
+    "proxyWebSocket > should include WebSocket upgrade instructions in error response without internal URL"
+  ],
+  "test_results": {
+    "total": 4381,
+    "passed": 4381,
+    "failed": 0,
+    "skipped": 7
+  },
+  "typescript_check": "pass",
+  "lint_check": "pass",
+  "coverage": null,
+  "commits": [
+    "d5bfc04: fix(security): prevent credential leakage and same-origin trust break in proxy"
+  ],
+  "summary": "TDD implementation complete for Issue #395. Added SENSITIVE_REQUEST_HEADERS (7 headers) and SENSITIVE_RESPONSE_HEADERS (11 headers) constants to proxy config. Updated proxyHttp() to strip sensitive headers from both requests and responses. Fixed proxyWebSocket() to remove directUrl field and internal URL from response. Fixed route.ts error responses to use fixed-string messages. Added security warning banner to ExternalAppForm. 27 new tests added, 2 existing tests updated. All 4381 tests pass. TypeScript and ESLint checks clean."
+}

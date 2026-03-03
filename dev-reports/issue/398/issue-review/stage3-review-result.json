@@ -1,0 +1,260 @@
+{
+  "issue_number": 398,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_type": "影響範囲",
+  "review_date": "2026-03-02",
+  "findings": [
+    {
+      "id": "IMP-001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "schedule-manager.ts の executeSchedule() が opencode 向けモデルオプションを構築しない",
+      "description": "schedule-manager.ts L327-331 の options 構築ロジックは cliToolId === 'vibe-local' の場合のみ worktree.vibe_local_model を model オプションとして渡している。cliToolId === 'opencode' の場合は options が undefined になるため、buildCliArgs() の opencode ケースで options.model が常に falsy となり、スケジュール実行時にモデル指定なし（opencode.json のデフォルトモデル依存）でのみ動作する。LM Studio 対応後、スケジュール実行で特定の LM Studio モデルを指定する機能を将来検討する場合、ここが変更箇所となる。現時点では Issue 本文の「影響範囲対応」セクションで claude-executor.ts のみ言及されているが、schedule-manager.ts の options 構築ロジックも影響箇所として認識が必要。",
+      "suggestion": "Issue の影響範囲セクションに schedule-manager.ts L327-331 を「将来的影響箇所」として追記する。現スコープでは opencode の TUI モード（opencode.json 経由）でのモデル選択がメインであり、スケジュール実行（非インタラクティブモード）での LM Studio モデル指定がスコープ外であることを明記すれば十分。ただし、将来対応時には schedule-manager.ts の SQL クエリ（L320: SELECT path, vibe_local_model）に opencode 用モデル情報の取得を追加し、options 構築に case 'opencode' を追加する必要がある。",
+      "location": "src/lib/schedule-manager.ts L320-331"
+    },
+    {
+      "id": "IMP-002",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "claude-executor.ts buildCliArgs() の ollama/ プレフィックス問題の対応方針が不明確",
+      "description": "Issue 本文では MF-004 として claude-executor.ts が影響範囲に追加されたが、実装タスクの記載が「LM Studioモデル対応が必要か検討し対応する（スコープ外とする場合はその旨を明記）」と曖昧なまま。buildCliArgs() L113 では `ollama/${options.model}` がハードコードされており、LM Studio モデルの場合は `lmstudio/${options.model}` とすべき可能性がある。しかし、opencode run -m のプレフィックス仕様（ollama/ や lmstudio/ が有効かどうか）は OpenCode CLI の仕様に依存する。この判断が Issue 内で確定していないため、実装者が混乱する恐れがある。",
+      "suggestion": "以下の2択のいずれかを Issue 内で明確に決定する: (A) スコープ外とする場合: 「スケジュール実行での LM Studio モデル指定は Issue #398 のスコープ外。opencode run -m は現状 ollama/ プレフィックスのみ対応し、LM Studio モデルのスケジュール実行は将来 Issue で対応する」と受入条件に明記する。(B) スコープ内とする場合: ExecuteCommandOptions に provider フィールドを追加し、buildCliArgs() で provider に応じたプレフィックスを動的に設定する設計を実装タスクに追加する。推奨は (A)。TUI モードでは opencode.json に lmstudio プロバイダーが定義されるため、ユーザーは TUI でモデル選択が可能であり、スケジュール実行は後続 Issue で対応しても実用上問題ない。",
+      "location": "src/lib/claude-executor.ts L110-115, Issue本文 > 影響範囲対応セクション"
+    },
+    {
+      "id": "IMP-003",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "既存テスト opencode-config.test.ts の全テストケースが Ollama 単独前提で書かれている",
+      "description": "tests/unit/cli-tools/opencode-config.test.ts（298行）の ensureOpencodeConfig() テストは全て Ollama API の mockFetch を単一 API エンドポイント前提で記述している。リファクタリング後は fetchOllamaModels() と fetchLmStudioModels() が独立関数となるため、既存テストの大半は以下の影響を受ける: (1) mockFetch が 2 回（Ollama + LM Studio）呼ばれるようになり、mockResolvedValue の設定が不十分になる。(2) 「Ollama API timeout (non-fatal)」テスト等で writeFileSync が呼ばれない検証は、LM Studio が成功すれば呼ばれるようになるため、テストが壊れる。(3) config JSON の構造検証で provider.ollama のみを検証しているが、provider.lmstudio の検証も必要になる。Issue 本文ではテスト追加は記載されているが、既存テストの修正必要性が明記されていない。",
+      "suggestion": "Issue の実装タスクのテストセクションに以下を追加: 「既存の ensureOpencodeConfig() テストケースを fetchOllamaModels()/fetchLmStudioModels() の独立関数テストに分割・移行する。ensureOpencodeConfig() の結合テストでは両方の mockFetch を適切にセットアップする」。具体的には、mockFetch.mockResolvedValueOnce() を2回呼ぶか、URL に基づいて異なるレスポンスを返す mock 実装が必要。",
+      "location": "tests/unit/cli-tools/opencode-config.test.ts 全体（298行）"
+    },
+    {
+      "id": "IMP-004",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "claude-executor.test.ts の buildCliArgs opencode テストケースの影響確認",
+      "description": "tests/unit/lib/claude-executor.test.ts L148-155 に opencode 向けの buildCliArgs テストが3件存在する。特に L149-150 のテスト「should build opencode args with -m when model is specified」は `expect(args).toEqual(['run', '-m', 'ollama/qwen3:8b', 'hello'])` と ollama/ プレフィックスの固定値を検証している。IMP-002 の方針次第でこのテストの修正が必要になる。スコープ外とする場合でも、将来的な変更箇所としてテストファイルを影響範囲に記載すべき。",
+      "suggestion": "影響範囲テーブルに tests/unit/lib/claude-executor.test.ts を追加する（変更内容: 「IMP-002の方針次第。スコープ外の場合は変更不要だが、将来的にプレフィックス動的化する場合はテスト修正が必要」）。",
+      "location": "tests/unit/lib/claude-executor.test.ts L143-156"
+    },
+    {
+      "id": "IMP-005",
+      "severity": "should_fix",
+      "category": "未記載依存",
+      "title": "opencode.test.ts の ensureOpencodeConfig モックが関数シグネチャ変更の影響を受ける可能性",
+      "description": "tests/unit/cli-tools/opencode.test.ts L18-21 で opencode-config モジュール全体を mock しており、ensureOpencodeConfig を vi.fn() で置き換えている。ensureOpencodeConfig() の関数シグネチャ自体は変更されない（引数は worktreePath: string のまま）ため、このテストへの直接的な影響は低い。しかし、内部実装のリファクタリングによって export される関数が増える場合（例: fetchOllamaModels, fetchLmStudioModels の export）、mock 定義の更新が必要になる可能性がある。",
+      "suggestion": "影響範囲の「関連コンポーネント」に tests/unit/cli-tools/opencode.test.ts を追加し、「ensureOpencodeConfig() のシグネチャ不変のため変更不要。ただし opencode-config.ts から新規 export が追加される場合は mock 定義の更新を確認する」と注記する。",
+      "location": "tests/unit/cli-tools/opencode.test.ts L18-21"
+    },
+    {
+      "id": "IMP-006",
+      "severity": "should_fix",
+      "category": "ドキュメント",
+      "title": "CLAUDE.md の opencode-config.ts モジュール説明の更新が実装タスクに含まれていない",
+      "description": "Stage 1 レビューの NTH-002 で指摘済みだが、Issue 本文にはまだ反映されていない。CLAUDE.md L165 の opencode-config.ts エントリは「ensureOpencodeConfig()でOllama API/api/tagsからモデル取得→opencode.json生成」のみ記載。LM Studio 対応後は「ensureOpencodeConfig()でOllama API/api/tags + LM Studio OpenAI互換API /v1/models からモデル取得→opencode.json生成」に更新が必要。また、新規追加される定数（LM_STUDIO_API_URL, LM_STUDIO_BASE_URL, LM_STUDIO_MODEL_PATTERN, MAX_LM_STUDIO_MODELS 等）もエントリに追記すべき。",
+      "suggestion": "実装タスクに「CLAUDE.md の opencode-config.ts エントリを更新する」タスクを明示的に追加する。具体的には: fetchOllamaModels()/fetchLmStudioModels() 独立関数化、LM_STUDIO_API_URL/LM_STUDIO_BASE_URL 定数追加、MAX_LM_STUDIO_MODELS/LM_STUDIO_MODEL_PATTERN 定数追加を反映する。",
+      "location": "CLAUDE.md L165（opencode-config.ts エントリ）"
+    },
+    {
+      "id": "IMP-007",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "AgentSettingsPane の Ollama モデルセレクターが LM Studio モデルに対応していない（スコープ確認）",
+      "description": "AgentSettingsPane.tsx L113-141 では vibe-local 選択時に /api/ollama/models から Ollama モデル一覧を取得してドロップダウン表示している。Issue 本文ではこのコンポーネントを「今回スコープ外」としているが、OpenCode がエージェント選択された場合の挙動について確認が必要。現在の AgentSettingsPane は opencode 選択時にモデルセレクターを表示しない（isVibeLocalChecked でガードされている）。つまり、OpenCode のモデル選択は opencode.json に依存しており、UI からの動的選択はできない。これは Issue 本文の「今回スコープ外」と整合するが、将来的に OpenCode 向けモデルセレクター UI を追加する場合、/api/ollama/models に加えて /api/lmstudio/models のような API エンドポイントが必要になる。",
+      "suggestion": "影響範囲の「関連コンポーネント」セクションに AgentSettingsPane.tsx の将来的影響を追記する: 「OpenCode 選択時のモデルセレクター UI は Issue #398 のスコープ外。将来的に UI 対応する場合は /api/lmstudio/models API エンドポイントの新設と AgentSettingsPane の opencode 対応が必要」。",
+      "location": "src/components/worktree/AgentSettingsPane.tsx L111-141, src/app/api/ollama/models/route.ts"
+    },
+    {
+      "id": "IMP-008",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "OLLAMA_MODEL_PATTERN（types.ts）と LM Studio モデルの互換性",
+      "description": "types.ts L183 に定義された OLLAMA_MODEL_PATTERN（/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/）は API/DB 層のバリデーションに使用されている（例: worktrees/[id]/route.ts L246 の vibeLocalModel バリデーション）。LM Studio モデル ID は「lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf」のようなパス形式を含む可能性があり、.gguf 拡張子を含む。現在の OLLAMA_MODEL_PATTERN はドット(.)とスラッシュ(/)を許容するため、LM Studio のモデル ID も理論上はマッチする。ただし、将来的に DB に LM Studio モデルを保存する場合、このパターンが適切かの確認が必要。",
+      "suggestion": "Issue の影響範囲セクションに types.ts の OLLAMA_MODEL_PATTERN を「将来的確認箇所」として追記する: 「LM Studio モデル ID がパス形式（例: lmstudio-community/model-name.gguf）を含む場合、既存の OLLAMA_MODEL_PATTERN で許容されるか確認が必要。Issue #398 のスコープでは DB にモデル名を保存しないため変更不要」。",
+      "location": "src/lib/cli-tools/types.ts L183, src/app/api/worktrees/[id]/route.ts L246"
+    },
+    {
+      "id": "IMP-009",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "opencode.ts startSession() 内の ensureOpencodeConfig() 呼び出しへの間接影響は限定的",
+      "description": "opencode.ts L99 の `await ensureOpencodeConfig(worktreePath)` 呼び出しは、ensureOpencodeConfig() の内部ロジックが変更されても、関数シグネチャ（引数: worktreePath: string, 戻り値: Promise<void>）と非致命的エラーハンドリングの設計は維持されるため、opencode.ts への変更は不要。ただし、ensureOpencodeConfig() の実行時間が増加する可能性がある（Ollama + LM Studio の 2 回の API 呼び出し、各3秒タイムアウト = 最大6秒）。これは OPENCODE_INIT_WAIT_MS（15秒）の待機時間内に収まるため、実用上の問題は低い。",
+      "suggestion": "変更不要の確認として Issue の「関連コンポーネント」セクションの opencode.ts 記述に「最大実行時間が Ollama 3秒 + LM Studio 3秒 = 最大6秒に増加する可能性があるが、OPENCODE_INIT_WAIT_MS（15秒）内に収まるため影響なし」を補足するとより親切。",
+      "location": "src/lib/cli-tools/opencode.ts L97-99"
+    },
+    {
+      "id": "IMP-010",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "response-poller.ts / cli-patterns.ts の OpenCode パターンへの影響なし",
+      "description": "response-poller.ts の isOpenCodeComplete()（Build 行検出: OPENCODE_RESPONSE_COMPLETE パターン）と cleanOpenCodeResponse() は、OpenCode TUI の出力パターンに基づいて動作する。LM Studio モデルが opencode.json に追加されても、OpenCode TUI の表示パターン（Build 行、Thinking 表示、プロンプト表示等）は変わらないため、これらのモジュールへの影響はない。ただし、LM Studio モデル使用時の Build 行パターン（例: 「Build model-name 3.2s」）が Ollama モデルと同一形式であることの確認が推奨される。",
+      "suggestion": "影響範囲に含める必要はないが、実装時の動作確認項目として「LM Studio モデル使用時の OpenCode TUI 出力パターンが既存の検出パターンで正常にマッチすることを確認する」を追加するとよい。",
+      "location": "src/lib/response-poller.ts L534, L564; src/lib/cli-patterns.ts L176"
+    },
+    {
+      "id": "IMP-011",
+      "severity": "nice_to_have",
+      "category": "ドキュメント",
+      "title": "claude-executor.ts の CLAUDE.md エントリも更新対象",
+      "description": "CLAUDE.md L172 の claude-executor.ts エントリに「Issue #379: ALLOWED_CLI_TOOLSに'opencode'追加、buildCliArgs()にcase 'opencode'追加」と記載されている。IMP-002 でスコープ内対応する場合、このエントリに LM Studio プレフィックス対応の記述追加が必要。スコープ外とする場合は変更不要。",
+      "suggestion": "IMP-002 の方針決定後、必要に応じて CLAUDE.md の claude-executor.ts エントリを更新する。",
+      "location": "CLAUDE.md L172（claude-executor.ts エントリ）"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 6,
+    "nice_to_have_count": 3,
+    "overall_quality": "needs_improvement",
+    "comment": "Issue #398 の影響範囲記載は主要な変更対象（opencode-config.ts）と直接の呼び出し元（opencode.ts）を正しくカバーしているが、いくつかの重要な影響箇所が不足している。最も重要な指摘は2点: (1) schedule-manager.ts の executeSchedule() における options 構築ロジックが opencode ケースを考慮していない点（IMP-001）、(2) claude-executor.ts の buildCliArgs() における ollama/ プレフィックス問題の対応方針が「検討し対応する」と曖昧なまま残っている点（IMP-002）。後者は実装者の判断に委ねられる形になっており、スコープイン/アウトの明確な決定が必要。テスト面では、既存の opencode-config.test.ts が Ollama 単独前提で書かれているため、リファクタリング後に大半のテストが影響を受ける点（IMP-003）の認識が重要。types.ts やUI コンポーネント（AgentSettingsPane.tsx）への直接的影響はなく、Issue 本文の記載と整合する。全体として、影響箇所の列挙は概ね正確だが、「将来的影響箇所」と「現スコープでの変更箇所」の区別をより明確にすることで、実装時の判断が容易になる。"
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/lib/cli-tools/opencode-config.ts",
+        "change_type": "major_refactor",
+        "description": "fetchOllamaModels()/fetchLmStudioModels() 独立関数化、ensureOpencodeConfig() リファクタリング、新規定数追加",
+        "breaking_change": false,
+        "issue_coverage": "covered"
+      },
+      {
+        "file": "tests/unit/cli-tools/opencode-config.test.ts",
+        "change_type": "major_update",
+        "description": "既存テストの分割・移行、LM Studio 関連テスト追加、mockFetch の複数 API 対応",
+        "breaking_change": false,
+        "issue_coverage": "partially_covered",
+        "note": "新規テスト追加は記載されているが、既存テストの修正必要性が未記載"
+      }
+    ],
+    "conditionally_affected_files": [
+      {
+        "file": "src/lib/claude-executor.ts",
+        "change_type": "conditional",
+        "description": "buildCliArgs() L113 の ollama/ プレフィックスハードコード。スコープ判断次第で変更の有無が決まる",
+        "breaking_change": false,
+        "issue_coverage": "partially_covered",
+        "note": "影響範囲に追加済みだが対応方針が未確定"
+      },
+      {
+        "file": "tests/unit/lib/claude-executor.test.ts",
+        "change_type": "conditional",
+        "description": "buildCliArgs opencode テスト L148-155 が IMP-002 の方針次第で影響を受ける",
+        "breaking_change": false,
+        "issue_coverage": "not_covered"
+      }
+    ],
+    "future_affected_files": [
+      {
+        "file": "src/lib/schedule-manager.ts",
+        "change_type": "future",
+        "description": "L320 の SQL クエリ及び L327-331 の options 構築ロジック。OpenCode 向けモデル指定を行う場合に変更が必要",
+        "issue_coverage": "not_covered"
+      },
+      {
+        "file": "src/app/api/ollama/models/route.ts",
+        "change_type": "future",
+        "description": "将来的に LM Studio モデルの UI 選択を実装する場合、同等の /api/lmstudio/models API が必要",
+        "issue_coverage": "not_covered"
+      },
+      {
+        "file": "src/components/worktree/AgentSettingsPane.tsx",
+        "change_type": "future",
+        "description": "将来的に OpenCode 向けモデルセレクター UI を追加する場合に変更が必要",
+        "issue_coverage": "covered_as_out_of_scope"
+      }
+    ],
+    "unaffected_files": [
+      {
+        "file": "src/lib/cli-tools/opencode.ts",
+        "reason": "ensureOpencodeConfig() のシグネチャ不変のため変更不要"
+      },
+      {
+        "file": "src/lib/cli-tools/types.ts",
+        "reason": "CLI ツール型定義に変更なし。OLLAMA_MODEL_PATTERN は LM Studio ID も理論上マッチ"
+      },
+      {
+        "file": "src/lib/response-poller.ts",
+        "reason": "OpenCode TUI 出力パターン検出に影響なし"
+      },
+      {
+        "file": "src/lib/cli-patterns.ts",
+        "reason": "OpenCode パターン定数に影響なし"
+      },
+      {
+        "file": "src/lib/status-detector.ts",
+        "reason": "セッションステータス検出に影響なし"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "reason": "worktree PATCH API に変更なし。vibeLocalModel バリデーションは OpenCode とは独立"
+      }
+    ]
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cli-tools/opencode-config.ts",
+      "relevance": "主要変更対象。L152-239 全体がリファクタリング対象",
+      "lines": "L1-239"
+    },
+    {
+      "file": "src/lib/claude-executor.ts",
+      "relevance": "buildCliArgs() L110-115 の ollama/ プレフィックスハードコード",
+      "lines": "L99-120"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "relevance": "executeSchedule() L320-331 の options 構築ロジック。opencode ケース未対応",
+      "lines": "L318-339"
+    },
+    {
+      "file": "tests/unit/cli-tools/opencode-config.test.ts",
+      "relevance": "既存テスト298行。Ollama単独前提のテストがリファクタリングで影響を受ける",
+      "lines": "全体"
+    },
+    {
+      "file": "tests/unit/lib/claude-executor.test.ts",
+      "relevance": "buildCliArgs opencode テスト L143-156。ollama/ プレフィックス検証あり",
+      "lines": "L143-156"
+    },
+    {
+      "file": "tests/unit/cli-tools/opencode.test.ts",
+      "relevance": "ensureOpencodeConfig mock L18-21。シグネチャ不変のため影響軽微",
+      "lines": "L18-21"
+    },
+    {
+      "file": "src/lib/cli-tools/opencode.ts",
+      "relevance": "ensureOpencodeConfig() 呼び出し元 L99。変更不要だが実行時間増加の可能性",
+      "lines": "L97-99"
+    },
+    {
+      "file": "src/lib/cli-tools/types.ts",
+      "relevance": "OLLAMA_MODEL_PATTERN L183。LM Studio モデル ID 互換性の将来的確認箇所",
+      "lines": "L170-183"
+    },
+    {
+      "file": "src/components/worktree/AgentSettingsPane.tsx",
+      "relevance": "OpenCode 向けモデルセレクター UI は現在なし（スコープ外確認済み）",
+      "lines": "L111-141"
+    },
+    {
+      "file": "src/app/api/ollama/models/route.ts",
+      "relevance": "Ollama 専用 API。将来的に LM Studio 対応 API が必要になる可能性",
+      "lines": "全体"
+    },
+    {
+      "file": "CLAUDE.md",
+      "relevance": "opencode-config.ts エントリ L165 の更新が必要",
+      "lines": "L165"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "opencode-config.ts（L165）および claude-executor.ts（L172）のモジュール説明更新が必要"
+    }
+  ]
+}

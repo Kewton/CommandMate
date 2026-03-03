@@ -1,0 +1,170 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 393,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "IF001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "tmux.ts の exec() から execFile() への移行は全 8 関数に影響し、全 CLI ツール実装に波及する",
+      "description": "Issue の推奨方向性「Replace exec() string interpolation in tmux helpers with spawn()/execFile() and argument arrays」は、tmux.ts 内の 8 関数（hasSession, createSession, sendKeys, sendSpecialKeys, sendSpecialKey, capturePane, killSession, ensureSession）に影響する。さらに、codex.ts（4箇所）と claude-session.ts（1箇所）が tmux.ts を経由せず直接 exec() で tmux コマンドを実行しており、これらも修正対象に含まれなければ不整合が生じる。Issue の Affected Code セクションにはこれらの直接 exec() 呼び出し箇所が記載されていない。",
+      "affected_files": [
+        "src/lib/tmux.ts",
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/claude-session.ts"
+      ],
+      "suggestion": "Issue の Affected Code または Recommended Direction に以下を追記: (1) tmux.ts 内の全 8 関数を列挙、(2) codex.ts:102, 104, 139, 170 の直接 execAsync(`tmux ...`) 呼び出し、(3) claude-session.ts:783 の直接 execAsync(`tmux ...`) 呼び出し。これらは tmux.ts の sendSpecialKey() 関数（既に存在する安全なラッパー）の使用に置き換えるか、execFile() に統一すべき。"
+    },
+    {
+      "id": "IF002",
+      "severity": "must_fix",
+      "category": "テスト不足",
+      "title": "terminal/route.ts および capture/route.ts のユニットテストが存在しない",
+      "description": "tests/ 配下を調査した結果、terminal/route.ts と capture/route.ts に対応するテストファイルが存在しない。修正後にリグレッションを防ぐためには、以下のテストが必要: (1) cliToolId のバリデーション（CLI_TOOL_IDS 以外を拒否）、(2) worktreeId の DB 存在確認（未登録 ID で 404 を返す）、(3) セッション名インジェクション防止（shell メタ文字を含む入力でエラーを返す）。現状テストが存在しないため、修正の正しさを検証できない。",
+      "affected_files": [
+        "tests/unit/terminal-route.test.ts (新規作成が必要)",
+        "tests/unit/capture-route.test.ts (新規作成が必要)"
+      ],
+      "suggestion": "以下のテストケースを作成すること: (1) 有効な cliToolId のみ受け入れる、(2) 無効な cliToolId（シェルメタ文字含む）で 400 を返す、(3) DB に存在しない worktreeId で 404 を返す、(4) 正常系: 有効な cliToolId + 存在する worktreeId で CLIToolManager 経由のセッション名を使用する。"
+    },
+    {
+      "id": "IF003",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "tmux.ts の API 変更（exec から execFile）が全ての呼び出し元に影響する",
+      "description": "tmux.ts は以下の 13 ファイルからインポートされている: terminal/route.ts, capture/route.ts, respond/route.ts, kill-session/route.ts, repositories/route.ts, cli-session.ts, claude-session.ts, codex.ts, gemini.ts, vibe-local.ts, opencode.ts, pasted-text-helper.ts, prompt-answer-sender.ts。exec() から execFile() への内部実装変更であれば外部インターフェースは不変だが、エラーメッセージのフォーマットが変わる可能性がある（execFile は exec と異なるエラーオブジェクト形状を返す場合がある）。既存テスト（tests/unit/tmux.test.ts）が exec をモックしているため、execFile への移行後にテスト修正が必要。",
+      "affected_files": [
+        "tests/unit/tmux.test.ts",
+        "src/lib/tmux.ts",
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/cli-tools/gemini.ts",
+        "src/lib/cli-tools/vibe-local.ts",
+        "src/lib/cli-tools/opencode.ts",
+        "src/lib/claude-session.ts",
+        "src/lib/cli-session.ts",
+        "src/lib/pasted-text-helper.ts",
+        "src/lib/prompt-answer-sender.ts",
+        "src/app/api/worktrees/[id]/respond/route.ts",
+        "src/app/api/repositories/route.ts"
+      ],
+      "suggestion": "tmux.ts の公開インターフェース（関数シグネチャ、例外型）を変更しない方針で内部実装のみを exec() から execFile() に移行すること。tests/unit/tmux.test.ts のモック対象を child_process.exec から child_process.execFile に変更する。移行時にエラーハンドリングが同等であることを検証するテストを追加する。"
+    },
+    {
+      "id": "IF004",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "title": "codex.ts の直接 exec() 呼び出しが tmux.ts の安全な関数を迂回している",
+      "description": "codex.ts:102, 104, 139, 170 で execAsync(`tmux send-keys -t \"${sessionName}\" ...`) を直接呼び出しており、tmux.ts の sendKeys() や sendSpecialKey() を使用していない。sessionName は BaseCLITool.getSessionName() 経由で validateSessionName() を通過しているため現時点では安全だが、tmux.ts 全体を execFile() に移行しても codex.ts の直接呼び出しは修正されない。同様に claude-session.ts:783 も直接 exec() を使用している。",
+      "affected_files": [
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/claude-session.ts"
+      ],
+      "suggestion": "codex.ts の直接 exec() 呼び出しを tmux.ts の既存関数に置き換える: (1) codex.ts:102 -> sendSpecialKey(sessionName, 'Down') (ALLOWED_SPECIAL_KEYS に Down は含まれている)、(2) codex.ts:104 -> sendSpecialKey(sessionName, 'Enter') (sendSpecialKey の SpecialKey 型に Enter を追加、または sendSpecialKeys を使用)、(3) codex.ts:139 -> sendSpecialKey(sessionName, 'C-m')、(4) codex.ts:170 -> sendSpecialKey(sessionName, 'C-d')。claude-session.ts:783 も同様に sendSpecialKey を使用する。ただし、sendSpecialKey の SpecialKey 型には 'Down' が含まれないため、sendSpecialKeys() を使用するか SpecialKey 型を拡張する必要がある。"
+    },
+    {
+      "id": "IF005",
+      "severity": "should_fix",
+      "category": "テスト不足",
+      "title": "tmux.ts のセッション名インジェクション防止テストが存在しない",
+      "description": "tests/unit/tmux.test.ts にはセッション名にシェルメタ文字が含まれる場合のテストケースがない。validation.test.ts では validateSessionName() の単体テストが存在するが、tmux.ts の各関数レベルでインジェクション文字列を渡した場合のテストがない。exec() から execFile() に移行した後、移行が正しく機能していることを検証するテストが必要。",
+      "affected_files": [
+        "tests/unit/tmux.test.ts"
+      ],
+      "suggestion": "tmux.test.ts にインジェクション防止テストを追加: (1) hasSession にシェルメタ文字を含む sessionName を渡した場合に安全に処理される、(2) createSession にシェルメタ文字を含む sessionName/workingDirectory を渡した場合に安全に処理される、(3) sendKeys にシェルメタ文字を含む sessionName を渡した場合に安全に処理される。execFile() 移行後は引数配列として渡されるためシェル解釈されないことを検証する。"
+    },
+    {
+      "id": "IF006",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "cli-session.ts の getSessionName() が claude-session.ts の getSessionName() と独立に存在",
+      "description": "cli-session.ts:81-85 に getSessionName() 関数が存在し、CLIToolManager 経由で安全なセッション名を取得する。一方で claude-session.ts:454-456 にも getSessionName() が存在し、こちらは validateSessionName() を通さずに `mcbd-claude-${worktreeId}` を直接返す。terminal/route.ts と capture/route.ts の getSessionName() も同様にバリデーションなし。修正時には全ての getSessionName() パターンを CLIToolManager 経由に統一するか、共通のバリデーション付き関数を使用する必要がある。",
+      "affected_files": [
+        "src/lib/cli-session.ts",
+        "src/lib/claude-session.ts",
+        "src/app/api/worktrees/[id]/terminal/route.ts",
+        "src/app/api/worktrees/[id]/capture/route.ts"
+      ],
+      "suggestion": "全ての getSessionName() パターンを以下のいずれかに統一: (A) CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId) を使用（推奨: 既に 4 つのルートで使用中）、(B) cli-session.ts の getSessionName() に統一し他の独自実装を廃止。claude-session.ts:454-456 のバリデーションなし getSessionName() は ClaudeTool.getSessionName() を使用するようリファクタリングを検討する。"
+    },
+    {
+      "id": "IF007",
+      "severity": "should_fix",
+      "category": "後方互換性",
+      "title": "terminal/route.ts からの session 自動作成の削除は既存の利用者に影響する可能性",
+      "description": "terminal/route.ts:34-37 はセッションが存在しない場合に自動的に新しい tmux セッションを作成する。Issue の推奨方向性「Restrict or remove this endpoint from the web API surface」に従ってこの動作を制限する場合、Terminal.tsx コンポーネント（WebSocket 経由でターミナルに接続）や、外部から terminal API を利用しているケースがあれば破壊的変更となる。ただし、調査の結果 terminal/route.ts を HTTP API として直接呼び出している箇所は src/ 配下に見つからなかった（Terminal.tsx は WebSocket 経由で /terminal/{worktreeId}/{cliToolId} に接続しており、REST API の /api/worktrees/[id]/terminal とは別経路）。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/terminal/route.ts",
+        "src/components/Terminal.tsx"
+      ],
+      "suggestion": "修正前に terminal/route.ts の REST API がどのクライアントから呼ばれているかを確認する。調査の結果、src/ 配下に直接的な呼び出し元は見つからなかったが、外部スクリプトや CLI からの呼び出しがある可能性を考慮し、セッション自動作成を制限する場合は明確なエラーメッセージ（例: 'Session not found. Use /api/worktrees/[id]/send to start a session.'）を返すこと。"
+    },
+    {
+      "id": "IF008",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "opencode.ts は既に execFile() を部分的に使用しており修正のリファレンス実装となる",
+      "description": "opencode.ts:113-117 では tmux resize-window コマンドに execFileAsync を使用しており、SEC-001 コメントで 'Uses execFile (not exec) to prevent shell meta-character injection via sessionName' と明記している。これは Issue #393 で推奨される exec() から execFile() への移行パターンの既存リファレンス実装であり、tmux.ts のリファクタリング時に参考にできる。",
+      "affected_files": [
+        "src/lib/cli-tools/opencode.ts"
+      ],
+      "suggestion": "tmux.ts の exec() から execFile() への移行実装時に、opencode.ts:113-117 のパターン（execFileAsync('tmux', [args...])）をリファレンスとして使用する。"
+    },
+    {
+      "id": "IF009",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "title": "isValidWorktreeId() が auto-yes-manager.ts にローカル定義されており共有化されていない",
+      "description": "auto-yes-manager.ts:151-154 に isValidWorktreeId() が定義されており、prompt-response/route.ts と current-output/route.ts がこれをインポートしている。terminal/route.ts と capture/route.ts の修正で worktreeId バリデーションを追加する際、同じ isValidWorktreeId() を使用すべきだが、これは auto-yes-manager.ts というビジネスロジックモジュールに定義されているため、汎用バリデーションモジュール（例: src/lib/cli-tools/validation.ts）に移動するか、新たに共通バリデーション関数を作成することが望ましい。",
+      "affected_files": [
+        "src/lib/auto-yes-manager.ts",
+        "src/app/api/worktrees/[id]/prompt-response/route.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts",
+        "src/app/api/worktrees/[id]/terminal/route.ts",
+        "src/app/api/worktrees/[id]/capture/route.ts"
+      ],
+      "suggestion": "isValidWorktreeId() を src/lib/cli-tools/validation.ts（SESSION_NAME_PATTERN と同居）またはバリデーション専用モジュールに移動し、auto-yes-manager.ts からは re-export する。terminal/route.ts と capture/route.ts の修正時にこの共通関数を使用する。ただし、既存コードとの互換性維持のため auto-yes-manager.ts からのエクスポートは維持する。"
+    }
+  ],
+  "impact_summary": {
+    "direct_impact_files": [
+      "src/app/api/worktrees/[id]/terminal/route.ts",
+      "src/app/api/worktrees/[id]/capture/route.ts",
+      "src/lib/tmux.ts"
+    ],
+    "indirect_impact_files": [
+      "src/lib/cli-tools/codex.ts",
+      "src/lib/claude-session.ts",
+      "src/lib/cli-tools/base.ts",
+      "src/lib/cli-tools/validation.ts",
+      "src/lib/cli-tools/types.ts",
+      "src/lib/cli-session.ts",
+      "src/lib/cli-tools/gemini.ts",
+      "src/lib/cli-tools/vibe-local.ts",
+      "src/lib/cli-tools/opencode.ts",
+      "src/lib/pasted-text-helper.ts",
+      "src/lib/prompt-answer-sender.ts",
+      "src/app/api/worktrees/[id]/respond/route.ts",
+      "src/app/api/repositories/route.ts",
+      "tests/unit/tmux.test.ts",
+      "tests/unit/cli-tools/validation.test.ts"
+    ],
+    "test_gaps": [
+      "terminal/route.ts のユニットテストが存在しない",
+      "capture/route.ts のユニットテストが存在しない",
+      "tmux.ts にセッション名インジェクション防止テストがない",
+      "codex.ts の直接 exec() 呼び出しに対するテストがない",
+      "claude-session.ts の直接 exec() 呼び出しに対するテストがない",
+      "exec() から execFile() 移行後のエラーハンドリング互換テストがない"
+    ],
+    "breaking_changes_risk": "low",
+    "comment": "影響範囲は Issue が記載する 3 ファイル（terminal/route.ts, capture/route.ts, tmux.ts）にとどまらず、tmux.ts を直接呼び出す 13 ファイルと、tmux.ts を迂回して直接 exec() で tmux コマンドを実行する 2 ファイル（codex.ts, claude-session.ts）に波及する。ただし、修正の中核は (1) terminal/route.ts と capture/route.ts を CLIToolManager 経由に修正する（外部インターフェースへの影響なし）、(2) tmux.ts 内部で exec() を execFile() に置き換える（公開 API 不変、テストのモック変更のみ必要）、(3) codex.ts と claude-session.ts の直接 exec() 呼び出しを tmux.ts の既存関数に統一する、の 3 段階で実施可能。破壊的変更のリスクは低い。terminal/route.ts の REST API はコードベース内に直接の呼び出し元が見つからなかったため、機能制限による影響も限定的と判断する。最大の懸念はテストカバレッジの不足であり、修正の正しさを担保するためにテスト追加が必須である。"
+  },
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 2
+  }
+}

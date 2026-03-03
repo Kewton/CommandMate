@@ -1,0 +1,68 @@
+{
+  "issue_number": 393,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_passed": 4354,
+      "tests_skipped": 7,
+      "typescript_errors": 0,
+      "lint_errors": 0,
+      "modified_files": [
+        "src/lib/tmux.ts",
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/claude-session.ts",
+        "src/app/api/worktrees/[id]/terminal/route.ts",
+        "src/app/api/worktrees/[id]/capture/route.ts"
+      ],
+      "created_files": [
+        "tests/unit/terminal-route.test.ts",
+        "tests/unit/capture-route.test.ts"
+      ],
+      "modified_tests": [
+        "tests/unit/tmux.test.ts",
+        "tests/unit/cli-tools/codex-pasted-text.test.ts",
+        "tests/unit/lib/claude-session.test.ts"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 9,
+      "criteria_total": 9,
+      "all_scenarios_passed": true
+    },
+    "refactor": {
+      "status": "success",
+      "improvements": [
+        "JSDoc improvements on ALLOWED_SPECIAL_KEYS and ALLOWED_SINGLE_SPECIAL_KEYS in tmux.ts",
+        "Replaced inline design-doc reference codes with descriptive comments in terminal/route.ts and capture/route.ts",
+        "Improved comment clarity across all modified files"
+      ]
+    },
+    "doc_update": {
+      "status": "success",
+      "updated_files": [
+        "CLAUDE.md"
+      ],
+      "changes": [
+        "Added src/lib/tmux.ts entry with Issue #393 exec()→execFile() migration details",
+        "Added src/app/api/worktrees/[id]/terminal/route.ts entry with security hardening details",
+        "Added src/app/api/worktrees/[id]/capture/route.ts entry with security hardening details",
+        "Updated src/lib/claude-session.ts entry with Issue #393 direct exec() removal",
+        "Updated src/lib/cli-tools/codex.ts entry with Issue #393 direct exec() removal"
+      ]
+    }
+  },
+  "security_fixes": {
+    "root_cause": "child_process.exec() interprets shell metacharacters, enabling shell injection via cliToolId/command/sessionName parameters",
+    "fix_approach": "execFile() migration (argument arrays, no shell invocation) + defense-in-depth input validation",
+    "owasp_compliance": ["A01: Broken Access Control", "A03: Injection", "A05: Security Misconfiguration"]
+  },
+  "final_metrics": {
+    "typescript_errors": 0,
+    "lint_errors": 0,
+    "unit_tests_passed": 4354,
+    "unit_tests_skipped": 7,
+    "acceptance_criteria_passed": 9
+  }
+}

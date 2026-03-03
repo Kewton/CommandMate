@@ -1,0 +1,9 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）指摘反映",
+  "issue_number": 395,
+  "applied_date": "2026-03-03",
+  "applied_findings": ["DR1-001", "DR1-002", "DR1-006", "DR1-007"],
+  "skipped_findings": ["DR1-003", "DR1-004", "DR1-005"],
+  "update_summary": "must_fix 1件（DR1-006: コメント更新方針追記）とshould_fix 3件（DR1-001: ヘッダフィルタリング重複のKISS原則設計判断、DR1-002: 未使用パラメータのアンダースコアプレフィックス、DR1-007: errorフィールドの既存パターン踏襲明記）を設計方針書に反映。nice_to_have 3件（DR1-003/DR1-004/DR1-005）は本Issueスコープ外または実装時判断としてスキップ。Section 4-2にコメント更新方針とDRY設計判断を追加、Section 4-3のコード例をアンダースコアプレフィックス付きに更新しerror設計判断を追記、Section 10にレビュー反映サマリーと実装チェックリストを新設。"
+}

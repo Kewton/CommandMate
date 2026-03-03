@@ -1,6 +1,7 @@
 /**
  * Unit tests for CodexTool.sendMessage() - Pasted text detection
  * Issue #212: Pasted text detection for Codex CLI
+ * Issue #393: Updated to use sendSpecialKey instead of direct exec()
  *
  * Separate test file to avoid vi.mock affecting existing codex.test.ts
  * tests (SF-S3-002: isRunning test uses real tmux).
@@ -11,29 +12,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock tmux module
+// Issue #393: Added sendSpecialKey and sendSpecialKeys (codex.ts no longer uses child_process directly)
 vi.mock('@/lib/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
   capturePane: vi.fn(),
   killSession: vi.fn(),
-}));
-
-/**
- * Mock child_process for execAsync (used by codex.ts for tmux send-keys C-m).
- * The exec callback can be either the 2nd or 3rd argument depending on
- * whether options are passed.
- */
-vi.mock('child_process', () => ({
-  exec: vi.fn((_cmd: string, optsOrCb: unknown, cb?: unknown) => {
-    const callback = typeof optsOrCb === 'function' ? optsOrCb : cb;
-    if (typeof callback === 'function') {
-      (callback as (err: null, result: { stdout: string; stderr: string }) => void)(
-        null, { stdout: '', stderr: '' }
-      );
-    }
-    return {};
-  }),
+  sendSpecialKey: vi.fn(),
+  sendSpecialKeys: vi.fn(),
 }));
 
 // Mock pasted-text-helper (MF-S2-002: codex.ts only imports the helper)
@@ -47,7 +34,7 @@ vi.mock('@/lib/cli-tools/validation', () => ({
 }));
 
 import { CodexTool } from '@/lib/cli-tools/codex';
-import { hasSession, sendKeys } from '@/lib/tmux';
+import { hasSession, sendKeys, sendSpecialKey } from '@/lib/tmux';
 import { detectAndResendIfPastedText } from '@/lib/pasted-text-helper';
 
 const TEST_WORKTREE_ID = 'test-worktree';
@@ -61,6 +48,7 @@ describe('CodexTool.sendMessage() - Pasted text detection (Issue #212)', () => {
     tool = new CodexTool();
     vi.mocked(hasSession).mockResolvedValue(true);
     vi.mocked(sendKeys).mockResolvedValue();
+    vi.mocked(sendSpecialKey).mockResolvedValue();
   });
 
   afterEach(() => {
@@ -79,29 +67,23 @@ describe('CodexTool.sendMessage() - Pasted text detection (Issue #212)', () => {
   it('should call detectAndResendIfPastedText for multi-line messages', async () => {
     await tool.sendMessage(TEST_WORKTREE_ID, 'line1\nline2');
 
-    // detectAndResendIfPastedText should be called after execAsync(C-m)
+    // detectAndResendIfPastedText should be called after sendSpecialKey(C-m)
     expect(detectAndResendIfPastedText).toHaveBeenCalledWith(TEST_SESSION_NAME);
     expect(detectAndResendIfPastedText).toHaveBeenCalledTimes(1);
   });
 
-  // SF-003: Verify call order - sendKeys(message) -> execAsync(C-m) -> detectAndResendIfPastedText
-  it('should call detectAndResendIfPastedText after execAsync(C-m)', async () => {
+  // SF-003: Verify call order - sendKeys(message) -> sendSpecialKey(C-m) -> detectAndResendIfPastedText
+  // Issue #393: Updated from execAsync(C-m) to sendSpecialKey(C-m)
+  it('should call detectAndResendIfPastedText after sendSpecialKey(C-m)', async () => {
     const callOrder: string[] = [];
 
     vi.mocked(sendKeys).mockImplementation(async () => {
       callOrder.push('sendKeys');
     });
 
-    // Override exec mock to track call order
-    const { exec } = await import('child_process');
-    vi.mocked(exec).mockImplementation(((_cmd: string, optsOrCb: unknown, cb?: unknown) => {
-      callOrder.push('execAsync');
-      const callback = typeof optsOrCb === 'function' ? optsOrCb : cb;
-      if (typeof callback === 'function') {
-        (callback as (err: null, stdout: string, stderr: string) => void)(null, '', '');
-      }
-      return {} as ReturnType<typeof exec>;
-    }) as typeof exec);
+    vi.mocked(sendSpecialKey).mockImplementation(async () => {
+      callOrder.push('sendSpecialKey');
+    });
 
     vi.mocked(detectAndResendIfPastedText).mockImplementation(async () => {
       callOrder.push('detectAndResendIfPastedText');
@@ -109,19 +91,21 @@ describe('CodexTool.sendMessage() - Pasted text detection (Issue #212)', () => {
 
     await tool.sendMessage(TEST_WORKTREE_ID, 'line1\nline2');
 
-    // Verify order: sendKeys (message) -> execAsync (C-m Enter) -> detectAndResendIfPastedText
+    // Verify order: sendKeys (message) -> sendSpecialKey (C-m Enter) -> detectAndResendIfPastedText
     expect(callOrder).toEqual([
       'sendKeys',       // sendKeys(message, false)
-      'execAsync',      // execAsync(tmux send-keys C-m)
+      'sendSpecialKey', // sendSpecialKey(sessionName, 'C-m')
       'detectAndResendIfPastedText',  // Pasted text detection
     ]);
   });
 
   // Verify existing send flow is maintained
-  it('should maintain existing sendKeys + execAsync flow for message delivery', async () => {
+  it('should maintain existing sendKeys + sendSpecialKey flow for message delivery', async () => {
     await tool.sendMessage(TEST_WORKTREE_ID, 'single line');
 
     // sendKeys should be called once for the message
     expect(sendKeys).toHaveBeenCalledWith(TEST_SESSION_NAME, 'single line', false);
+    // sendSpecialKey should be called for C-m (Enter)
+    expect(sendSpecialKey).toHaveBeenCalledWith(TEST_SESSION_NAME, 'C-m');
   });
 });

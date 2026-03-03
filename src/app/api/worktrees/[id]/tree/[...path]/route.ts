@@ -13,7 +13,7 @@ import {
   createWorktreeNotFoundError,
   createAccessDeniedError,
 } from '@/lib/file-tree';
-import { isPathSafe } from '@/lib/path-validator';
+import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
 
 /**
  * Decode a URL-encoded path segment safely
@@ -73,6 +73,15 @@ export async function GET(
 
     // Security: Validate path is within worktree
     if (!isPathSafe(relativePath, worktree.path)) {
+      const errorResponse = createAccessDeniedError('Invalid path');
+      return NextResponse.json(
+        { error: errorResponse.error },
+        { status: errorResponse.status }
+      );
+    }
+
+    // [SEC-394] Symlink traversal validation
+    if (!resolveAndValidateRealPath(relativePath, worktree.path)) {
       const errorResponse = createAccessDeniedError('Invalid path');
       return NextResponse.json(
         { error: errorResponse.error },

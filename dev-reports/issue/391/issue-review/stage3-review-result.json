@@ -1,0 +1,120 @@
+{
+  "issue_number": 391,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-02",
+  "impact_analysis": {
+    "affected_files": [
+      {
+        "file": "src/components/worktree/AgentSettingsPane.tsx",
+        "impact_type": "direct",
+        "description": "修正対象。isEditingフラグ追加、useEffect(L98-100)のガード、handleCheckboxChangeのsetIsEditing制御。propsインターフェース変更なし。"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "impact_type": "direct",
+        "description": "修正対象。fetchWorktree()内(L1035-1036)でselectedAgentsの同一値チェック追加（useRefパターン）。fetchWorktreeのuseCallback依存配列(L1052)は変更不要。"
+      },
+      {
+        "file": "tests/unit/components/worktree/AgentSettingsPane.test.tsx",
+        "impact_type": "direct",
+        "description": "既存テスト更新必須。L62-80の'should sync checked state when selectedAgents prop changes'テストは現行のuseEffectの無条件同期を前提としており、isEditing導入後はテスト前提の変更が必要。"
+      },
+      {
+        "file": "src/components/worktree/NotesAndLogsPane.tsx",
+        "impact_type": "indirect",
+        "description": "AgentSettingsPaneにpropsを透過的に渡すコンテナ。AgentSettingsPanePropsにインターフェース変更がないため影響なし。"
+      },
+      {
+        "file": "tests/unit/components/worktree/NotesAndLogsPane.test.tsx",
+        "impact_type": "indirect",
+        "description": "AgentSettingsPaneをモックしており、内部実装変更の影響を受けない。更新不要。"
+      },
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "impact_type": "indirect",
+        "description": "PATCH/GETエンドポイント。修正はクライアント側のみのため、API側の変更はなし。"
+      },
+      {
+        "file": "src/lib/selected-agents-validator.ts",
+        "impact_type": "indirect",
+        "description": "バリデーションロジック。修正の影響を受けない。"
+      },
+      {
+        "file": "src/types/models.ts",
+        "impact_type": "indirect",
+        "description": "Worktree型にselectedAgents定義(L79)。型変更なし。"
+      },
+      {
+        "file": "src/types/sidebar.ts",
+        "impact_type": "indirect",
+        "description": "toBranchItem()でworktree.selectedAgentsを参照(L107)。サーバーサイドの値を読み取るのみのため影響なし。"
+      },
+      {
+        "file": "tests/integration/api-worktrees.test.ts",
+        "impact_type": "indirect",
+        "description": "PATCH APIのselectedAgents更新テスト(L267-285)。API側に変更がないため影響なし。"
+      },
+      {
+        "file": "tests/unit/types/sidebar.test.ts",
+        "impact_type": "indirect",
+        "description": "selectedAgentsに関するテスト(L196-228)。サーバーサイドのデータ読み取りテストのため影響なし。"
+      }
+    ],
+    "risk_level": "low",
+    "risk_summary": "修正はクライアントサイドの状態管理ロジック（AgentSettingsPane内のuseState/useEffect）と親コンポーネントのポーリングコールバック内の同一値チェックに限定される。AgentSettingsPanePropsインターフェースに変更はなく、APIエンドポイントにも変更がないため、影響範囲は狭い。既存テスト1件の前提変更が必要だが、破壊的変更はない。"
+  },
+  "findings": [
+    {
+      "id": "IF-001",
+      "severity": "should_fix",
+      "category": "impact",
+      "title": "activeCliTab同期useEffect(L1118-1122)の間接的影響の考慮が不足",
+      "description": "WorktreeDetailRefactored L1118-1122のuseEffectは selectedAgents の変更に依存している。案Bの修正によりsetSelectedAgentsの呼び出し頻度が減少するが、実際にサーバー側でselectedAgentsが変更された場合（他タブ/デバイスからの変更）は引き続きsetSelectedAgentsが呼ばれるため、activeCliTabの同期は正しく動作する。ただし、Issueの修正方針セクションでこの間接的影響について明示的に言及されていない。",
+      "location": "## 修正方針 案B",
+      "suggestion": "修正方針セクションに「案Bの同一値チェックはactiveCliTab同期(L1118-1122)に影響しない。サーバー側でselectedAgentsが変更された場合のみsetSelectedAgentsが呼ばれるため、activeCliTabの同期は引き続き正しく動作する」旨の注記を追加するとよい。"
+    },
+    {
+      "id": "IF-002",
+      "severity": "should_fix",
+      "category": "missing",
+      "title": "テスト更新方針にWorktreeDetailRefactored側のテストケース言及がない",
+      "description": "Issue本文のテスト更新方針セクションはAgentSettingsPane.test.tsxの更新と追加テストケースのみ言及している。しかし案Bの修正対象であるWorktreeDetailRefactored.tsx の fetchWorktree() 内の同一値チェックロジックについてもテスト方針を記載すべきである。WorktreeDetailRefactored は大規模コンポーネントでユニットテストが現状存在しないが、fetchWorktree()の同一値チェックロジックをカスタムフックまたはユーティリティ関数として抽出する場合はテスト可能になる。",
+      "location": "## テスト更新方針",
+      "suggestion": "テスト更新方針に「WorktreeDetailRefactored.tsx: fetchWorktree()内のselectedAgents同一値チェックは、配列比較ロジックが正しく動作することをAgentSettingsPane側のE2Eシナリオテスト（isEditing中のprop変更無視テスト）で間接的に検証する」旨を追加する。"
+    },
+    {
+      "id": "IF-003",
+      "severity": "nice_to_have",
+      "category": "impact",
+      "title": "MobileContentコンポーネント経由のprops透過についての影響範囲記載",
+      "description": "WorktreeDetailRefactored内のMobileContent(L824-854)はselectedAgentsをpropsとして受け取り、NotesAndLogsPane経由でAgentSettingsPaneに渡している。デスクトップレイアウト(L1976-1987)でも同様のprop伝播がある。修正はAgentSettingsPane内部とfetchWorktreeコールバック内に閉じるため、これらの中間コンポーネントには影響がないことは自明だが、影響範囲セクションの網羅性としてprop伝播パスを明示するとレビュアーに有用である。",
+      "location": "## 影響範囲",
+      "suggestion": "影響範囲テーブルにNotesAndLogsPane.tsxとMobileContent（WorktreeDetailRefactored内部コンポーネント）の行を追加し、「props透過のみ、変更なし」と記載する。"
+    },
+    {
+      "id": "IF-004",
+      "severity": "nice_to_have",
+      "category": "risk",
+      "title": "案Bの配列比較ロジックにおける順序依存性リスク",
+      "description": "案BのselectedAgents同一値チェックは data.selectedAgents.every((v, i) => v === current[i]) で順序を含めた厳密比較を行う。現在のAPI実装(route.ts L219)ではクライアントから送信した順序でDBに保存されるため問題ないが、将来的にDB側やバリデーション側でソート処理が追加された場合、同一ペアでも順序が異なると不要なsetSelectedAgents呼び出しが発生する可能性がある。ただし、現時点では問題がないため、コメントレベルの注意事項で十分。",
+      "location": "## 修正方針 案B 擬似コード",
+      "suggestion": "擬似コードにコメントで「順序を含む厳密比較。APIはクライアント送信順でDBに保存するため、順序の一致が保証される」と付記するとよい。"
+    },
+    {
+      "id": "IF-005",
+      "severity": "nice_to_have",
+      "category": "impact",
+      "title": "visibilitychange復帰時のfetchWorktree呼び出しへの影響",
+      "description": "WorktreeDetailRefactored L1755ではページ復帰時にfetchWorktree()を呼ぶ。案Bの同一値チェックにより、ページ復帰時もselectedAgentsが変わっていなければsetSelectedAgentsが呼ばれず、isEditing中のローカル状態が保護される。これはIssueの受入条件「別のタブへ移動した場合、タブ戻り時に中間状態は維持される」と整合するが、この整合性について明示的に言及するとよい。",
+      "location": "## 受入条件",
+      "suggestion": "受入条件の5番目に「visibilitychange復帰時のfetchWorktree呼び出しでも中間状態が保護されること」を明示するか、既存の条件5の説明を拡充する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 3,
+  "overall_risk": "low",
+  "recommendation": "影響範囲は狭く、破壊的変更はない。AgentSettingsPanePropsインターフェースに変更がないため、NotesAndLogsPane/MobileContent/WorktreeDetailRefactoredのprops透過部分は影響を受けない。APIエンドポイントにも変更がない。主要なリスクは既存テスト(AgentSettingsPane.test.tsx L62-80)の前提変更であり、テスト更新方針は既にIssueに記載されている。should_fixの2件（activeCliTab同期への影響注記、WorktreeDetailRefactored側のテスト方針追記）を対応した上で、Stage 4（影響範囲レビュー2回目）に進むことを推奨する。"
+}

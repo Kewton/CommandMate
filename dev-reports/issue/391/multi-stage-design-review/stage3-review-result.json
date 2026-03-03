@@ -1,0 +1,152 @@
+{
+  "issue_number": 391,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "timestamp": "2026-03-02T10:30:00Z",
+  "impact_map": {
+    "direct_impacts": [
+      {
+        "file": "src/components/worktree/AgentSettingsPane.tsx",
+        "change_type": "修正",
+        "description": "isEditing state追加、useEffectガード条件追加、handleCheckboxChange修正（setIsEditing true/false制御）",
+        "risk": "low"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change_type": "修正",
+        "description": "selectedAgentsRef追加、fetchWorktree内の配列同一値チェックロジック追加",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/worktree/AgentSettingsPane.test.tsx",
+        "change_type": "修正",
+        "description": "既存テスト更新（isEditing=false前提の明記）、T1-T4新規テストケース追加",
+        "risk": "low"
+      }
+    ],
+    "indirect_impacts": [
+      {
+        "file": "src/components/worktree/NotesAndLogsPane.tsx",
+        "change_type": "影響なし（props中継のみ）",
+        "description": "AgentSettingsPaneへのselectedAgents props中継。インターフェース変更なしのため、コード変更不要",
+        "risk": "none"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx (activeCliTab sync)",
+        "change_type": "間接的改善",
+        "description": "案Bの同一値チェックにより、selectedAgentsが変化しない場合のsetSelectedAgents呼び出しがスキップされ、L1116-1122のactiveCliTab同期useEffectの不要発火が減少する",
+        "risk": "none"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx (CLI tool tabs render)",
+        "change_type": "間接的改善",
+        "description": "デスクトップ（L1873）およびモバイル（L2167）のselectedAgents.map()によるCLIツールタブ描画が、不要な再レンダリングから保護される",
+        "risk": "none"
+      }
+    ],
+    "unaffected": [
+      {
+        "file": "src/app/api/worktrees/[id]/route.ts",
+        "reason": "PATCH APIエンドポイント側のバリデーション・永続化ロジックに変更なし。本修正はクライアントサイドのみ"
+      },
+      {
+        "file": "src/lib/selected-agents-validator.ts",
+        "reason": "バリデーションロジックに変更なし"
+      },
+      {
+        "file": "src/lib/cli-tools/types.ts",
+        "reason": "CLIToolType型定義、CLI_TOOL_IDSに変更なし"
+      },
+      {
+        "file": "src/components/sidebar/BranchListItem.tsx",
+        "reason": "サイドバーのCLI状態ドット表示はcliStatusフィールドを使用。selectedAgentsの直接参照なし"
+      },
+      {
+        "file": "src/types/models.ts",
+        "reason": "Worktree型定義のselectedAgentsフィールドに変更なし"
+      },
+      {
+        "file": "src/lib/db.ts",
+        "reason": "DBスキーマ・クエリに変更なし"
+      },
+      {
+        "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "reason": "WorktreeDetailRefactoredの既存テストはfetch mockベースで動作。selectedAgentsの同一値チェック追加はmockレスポンスに影響しない"
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "should_fix",
+      "category": "state_impact",
+      "title": "vibeLocalContextWindow同期にも案Bの同一値チェックが必要",
+      "description": "設計方針書はselectedAgentsに対する案Bの同一値チェックを記述しているが、fetchWorktree内のvibeLocalContextWindow（L1043-1045）とvibeLocalModel（L1039-1041）も同様に、ポーリングごとに無条件でsetState呼び出しが発生している。特にvibeLocalContextWindowはAgentSettingsPane内でcontextWindowInputのuseEffect同期（L103-107）と連動しており、selectedAgentsと全く同じパターンの問題が潜在的に存在する。contextWindowInputの場合はblur契機のため実際には顕在化しにくいが、整合性の観点から同一値チェックの適用を検討すべき。",
+      "location": "設計方針書 3-2. 案B / WorktreeDetailRefactored fetchWorktree L1039-1045",
+      "suggestion": "vibeLocalModelとvibeLocalContextWindowに対しても同一値チェックを追加するか、スコープ外として明記する。最低限、設計方針書の「影響範囲」セクション（第5章）にvibeLocalModel/vibeLocalContextWindowが同パターンであることを注記し、意図的にスコープ外としている旨を記載する。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "nice_to_have",
+      "category": "test_impact",
+      "title": "WorktreeDetailRefactored案Bの間接テスト戦略の明確化",
+      "description": "設計方針書4-3でWorktreeDetailRefactoredのユニットテストは対象外としているが、案Bの同一値チェックロジック（配列比較＋setSelectedAgentsスキップ）をAgentSettingsPane統合テストでどう間接検証するかの具体的方法が不明確。AgentSettingsPaneテストはpropsのrerenderで検証するため、WorktreeDetailRefactored内のfetchWorktreeロジックは直接テストされない。",
+      "location": "設計方針書 4-3. テスト対象外",
+      "suggestion": "案Bの同一値チェックは純粋なロジックであるため、以下のいずれかを検討: (a) WorktreeDetailRefactored.test.tsxに案B検証テスト追加、(b) 配列比較ロジックをarraysEqual()ユーティリティに抽出してユニットテスト、(c) 現状のスコープ外判断を維持する場合、その根拠（低リスク・3行のインラインロジック）を明記。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "nice_to_have",
+      "category": "component_impact",
+      "title": "モバイルレイアウトのMobileContent経由のselectedAgents props中継の影響確認",
+      "description": "WorktreeDetailRefactored.tsxのモバイルレンダリングパス（L2219-2249）でMobileContentコンポーネントにselectedAgentsが渡されている。MobileContentはさらにNotesAndLogsPaneへ中継する。案Bの同一値チェックによりsetSelectedAgentsの呼び出し頻度が減少し、MobileContentの再レンダリングも抑制されるが、設計方針書の影響範囲セクションにはモバイルパスへの言及がない。",
+      "location": "設計方針書 5. 影響範囲",
+      "suggestion": "影響範囲セクションに「モバイルレイアウト: MobileContent経由でselectedAgentsが中継されるが、案Bの同一値チェックによりモバイルでも不要な再レンダリングが抑制される。コード変更不要。」と注記を追加する。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "nice_to_have",
+      "category": "performance",
+      "title": "memo()ラッパーとの相互作用の確認",
+      "description": "AgentSettingsPaneはReact.memo()でラップされている（L65）。案Bの同一値チェックにより、selectedAgents propの参照が変更されない場合、memo()の浅い比較で再レンダリングが回避される。ただし、selectedAgentsが配列（参照型）であるため、案Bの同一値チェックがなければ、毎回新しい配列参照が生成されてmemo()が無効化される。案Bは単にsetStateをスキップするだけであり、React state identityが維持されるため、memo()と正しく連携する。この動作メカニズムは設計方針書で明示されていない。",
+      "location": "設計方針書 7. パフォーマンス設計",
+      "suggestion": "パフォーマンス設計セクションに「案Bの同一値チェックによりReact stateの参照同一性が維持され、AgentSettingsPane/NotesAndLogsPaneのmemo()による再レンダリングスキップが正しく機能する」旨を追記する。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "state_impact",
+      "title": "isEditing=true中にactiveCliTabが切り替えられた場合のエッジケース",
+      "description": "ユーザーがAgentSettingsPaneでチェックを1つ外し（isEditing=true）、その後デスクトップのCLIツールタブ（L1873-1903）またはモバイルのCLIツールタブ（L2167-2195）で別タブに切り替え、再度Agentサブタブに戻った場合の動作を検証する必要がある。NotesAndLogsPaneはactiveSubTabが'agent'の時のみAgentSettingsPaneを描画する。サブタブ切り替えでアンマウントされるとisEditing stateがリセットされ（useState初期値false）、再マウント時にselectedAgents propから正しく同期される。CLIツールタブの切り替えは別レイヤーの操作であり、selectedAgentsの変更をトリガーしないため問題ない。ただし、この再マウントによるリセット動作はS1-007の既知制限の解消パスとして設計方針書に記載されているが、NotesAndLogsPane内でのサブタブ切り替え（notes/logsタブへの移動と戻り）でも同様にリセットされることが暗黙の前提となっている。",
+      "location": "設計方針書 3-1 [S1-007] 既知制限",
+      "suggestion": "S1-007の記載を拡充し、「ページリロード/再マウント」に加えて「NotesAndLogsPane内でのサブタブ切り替え（notes/logsタブへの移動と戻り）」もisEditingがリセットされる契機であることを明記する。これはユーザーにとって自然な回復操作となるため、既知制限の影響度は設計時の想定より低い。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "nice_to_have",
+      "category": "state_impact",
+      "title": "マルチタブ/マルチウィンドウでのselectedAgents競合シナリオ",
+      "description": "複数のブラウザタブで同一worktreeを開いている場合、タブAでselectedAgentsを変更すると、タブBのポーリングで新しい値が取得される。案Bの同一値チェックにより、タブBではサーバーの値と異なる場合のみsetSelectedAgentsが発火する。案AのisEditingフラグはタブごとに独立のため、タブAの変更がタブBのisEditing中にポーリングされた場合、タブBでは変更が無視される（S1-007の既知制限に該当）。この動作はシングルユーザー前提の設計として妥当だが、設計方針書に明示されていない。",
+      "location": "設計方針書 3-1 [S1-007] 既知制限",
+      "suggestion": "S1-007の既知制限に「マルチタブ/マルチウィンドウシナリオでも同様に、isEditing=true中は他タブからの変更がポーリングで反映されない」旨を補記する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 4,
+  "risk_level": "low",
+  "status": "conditionally_approved",
+  "score": 4,
+  "recommendation": "影響範囲の分析結果として、本修正の影響は3ファイルに限定され、Props/APIインターフェース変更がないため波及リスクは低い。should_fixの2件（S3-001: vibeLocalContextWindowへの同一値チェック適用検討、S3-005: サブタブ切替によるisEditingリセットの明記）は設計方針書の記載充実であり、実装ロジックへの影響はない。Stage 4（セキュリティレビュー）に進むことを推奨する。",
+  "reviewed_files": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/NotesAndLogsPane.tsx",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/selected-agents-validator.ts",
+    "src/components/sidebar/BranchListItem.tsx",
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx"
+  ]
+}

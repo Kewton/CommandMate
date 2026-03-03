@@ -1,0 +1,9 @@
+{
+  "stage": 8,
+  "issue_number": 394,
+  "applied_findings": ["F7-001"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "changes_summary": "Applied F7-001 (nice_to_have): Added stat() symlink-following behavior note to deleteFileOrDirectory() (line 375) in Affected Code section, clarifying that stat() at line 398 returns the symlink target's stat while rm() at line 426 deletes the symlink itself. Added file-operations.ts:398 key reference. Added Stage 7 entry to Review History. Updated Issue header Note to include Stage 7.",
+  "github_updated": true
+}

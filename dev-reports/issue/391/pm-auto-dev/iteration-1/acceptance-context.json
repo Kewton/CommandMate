@@ -1,0 +1,24 @@
+{
+  "issue_number": 391,
+  "feature_summary": "fix: エージェント選択のチェックボックスを外すと自動で再チェックされる",
+  "acceptance_criteria": [
+    "チェックボックスを外した状態が維持される（ポーリングで戻らない）",
+    "別のエージェントを選択して2つになった時にAPIが呼ばれ、正しく保存される",
+    "API失敗時はサーバーの値にリバートされ、isEditingフラグもfalseにリセットされる",
+    "ページリロード時はサーバーの値が正しく反映される",
+    "チェックを外した後、2つ目を選択せずに別のタブへ移動した場合、タブ戻り時に中間状態は維持されるが、次のページリロードでサーバーの値に同期される",
+    "ブラウザタブを切り替えて戻った際（visibilitychange）、isEditing中間状態は維持される"
+  ],
+  "test_scenarios": [
+    "シナリオ1: チェックを外した後ポーリングが発生してもcheckedIdsが維持される（isEditingガード）",
+    "シナリオ2: 2つ選択時にAPI呼び出しが行われ、成功後にisEditingがfalseになりサーバー同期が再開する",
+    "シナリオ3: API失敗時にcheckedIdsがリバートされisEditingがfalseにリセットされる",
+    "シナリオ4: ネットワークエラー時にcheckedIdsがリバートされisEditingがfalseにリセットされる",
+    "シナリオ5: isEditing=falseの初期状態でselectedAgents propの変更が正しくcheckedIdsに反映される"
+  ],
+  "implemented_files": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx"
+  ]
+}

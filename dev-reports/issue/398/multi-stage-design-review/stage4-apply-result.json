@@ -1,0 +1,9 @@
+{
+  "issue_number": 398,
+  "stage": 4,
+  "applied_findings": ["S4-001", "S4-002", "S4-004", "S4-006", "S4-008"],
+  "skipped_findings": ["S4-003", "S4-005", "S4-007", "S4-009"],
+  "skip_reason": "Nice to Have項目",
+  "status": "completed",
+  "updated_at": "2026-03-02"
+}

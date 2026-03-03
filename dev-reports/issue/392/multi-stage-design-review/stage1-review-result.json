@@ -1,0 +1,59 @@
+{
+  "issue_number": 392,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_date": "2026-03-02",
+  "focus_area": "設計原則",
+  "summary": "設計方針書は全体として優れた品質であり、SOLID/KISS/YAGNI/DRY/セキュリティ設計原則に概ね準拠している。resolveCustomTargetPath()ヘルパーの設計は適切であり、validateWorktreePath()の再利用によるDRY原則の遵守、例外→null変換による既存パターンとの整合性確保が評価できる。2件のshould_fix（デバッグ観測性、validateWorktreePath内の二重デコード問題）と3件のnice_to_have（targetDirの長さ制限、isPathSafe未使用importの明示的削除、テストカバレッジ強化）を指摘する。must_fixは0件であり、設計方針書の承認を推奨する。",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "principle": "Security / Defense in Depth",
+      "title": "resolveCustomTargetPath()の例外握り潰しにconsole.warnログを追加すべき",
+      "description": "設計方針書ではD4-001（情報漏洩防止）のためにcatchブロックで例外を握り潰してnullを返す設計となっている。これ自体は正しい判断だが、サーバーサイドのログにも一切記録されないため、攻撃の検知やデバッグが困難になる。設計方針書のセクション8 D4-001で「console.warnで補完可能」と記載されているが、実際の設計コード（セクション4-1）にはconsole.warnが含まれていない。",
+      "location": "設計方針書 セクション4-1 resolveCustomTargetPath()、セクション8 D4-001",
+      "recommendation": "catchブロック内にconsole.warn('[CloneManager] Invalid custom target path rejected')のようなログを追加する。例外のmessageをログに含める場合は、rootDirが含まれるためサニタイズするか、メッセージなしの固定文字列ログとする。攻撃検知のためにcustomTargetPathの値（適切にサニタイズした上で）をログに含めることを検討する。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "principle": "Security / Defense in Depth",
+      "title": "validateWorktreePath()内でisPathSafe()とpath.resolve()の間にdecodeURIComponentが二重適用される",
+      "description": "path-validator.tsのvalidateWorktreePath()は、まずisPathSafe()を呼び出し（内部でdecodeURIComponentを実行）、次に自身でもdecodeURIComponentを実行してからpath.resolve()に渡す。isPathSafe()内のpath.resolve(rootDir, decodedPath)と、validateWorktreePath()内のpath.resolve(rootDir, decodedPath)は同一の結果になるはずだが、もしURL二重エンコードされた入力（例: %252e%252e）の場合、isPathSafe()では1回目のデコードで'%2e%2e'になり安全と判定され、validateWorktreePath()で2回目のデコードにより'..'に変換されるリスクがある。これはvalidateWorktreePath()の既存の問題であり、Issue #392の設計方針書の範囲外だが、この関数を信頼の核として採用する以上、認識しておくべきリスクである。",
+      "location": "src/lib/path-validator.ts validateWorktreePath() L107-116、設計方針書 セクション3 Option A選定理由",
+      "recommendation": "設計方針書に「validateWorktreePath()のdecodeURIComponent二重適用リスクの認識」を注記として追加する。可能であればvalidateWorktreePath()内の独自decodeURIComponentを削除し、isPathSafe()の結果（既にデコード済み）に委譲する形にリファクタリングすることを推奨する。ただし、これはIssue #392のスコープ外として別Issueで対応してもよい。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "nice_to_have",
+      "principle": "Security / Defense in Depth",
+      "title": "route.tsでtargetDirの長さ制限チェックが設計されていない",
+      "description": "設計方針書ではtargetDirに対してtrim()とtypeチェック（既存のD4-002）を行うが、長さ制限がない。非常に長いパス文字列（数万文字など）が渡された場合、path.resolve()やisPathSafe()内のdecodeURIComponent()で不必要なメモリ消費や処理時間が発生する可能性がある。他のモジュール（例: schedule-config.tsのMAX_NAME_LENGTH、cmate-parser.tsのNAME_PATTERN）ではDoS防御のために入力長制限を設けるパターンが確立されている。",
+      "location": "設計方針書 セクション5-1 route.tsの変更",
+      "recommendation": "route.tsのtypeチェック後にtargetDir.length > 1024等の長さ制限チェックを追加することを検討する。本プロジェクトの既存パターンに沿ったDoS防御策として妥当。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "nice_to_have",
+      "principle": "DRY / KISS",
+      "title": "isPathSafe importの削除戦略がESLint任せで曖昧",
+      "description": "設計方針書セクション5-2aで「isPathSafe の import は削除しない。他の箇所で使用されている可能性があるため」と記載し、D5-001で「ESLint unused 検出に委譲」としている。しかし、clone-manager.tsの現在のコードを確認すると、isPathSafe()はstartCloneJob()のL341でのみ使用されている。修正後はisPathSafe()の直接呼び出しがなくなる（validateWorktreePath()内で間接的に呼ばれる）ため、importは確実にunusedとなる。設計方針書でこの点を明示的に「isPathSafe importは削除する」と記載した方がKISS原則に沿う。",
+      "location": "設計方針書 セクション5-2a import追加、セクション8 D5-001",
+      "recommendation": "設計方針書を更新し、isPathSafe importの削除を明示する。「isPathSafe()の直接使用箇所がstartCloneJob()のL341のみであることを確認済み。修正後はvalidateWorktreePath経由での間接使用のみとなるため、isPathSafe importを削除する」と記載する。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "principle": "YAGNI / テスト設計",
+      "title": "resolveCustomTargetPath()のH-003空文字テストの前提確認",
+      "description": "テスト設計H-003で空文字入力のテストが設計されているが、実際のコードフローでは、route.tsでtargetDir?.trim() || undefinedの処理により、空文字や空白のみの入力はundefinedに変換され、startCloneJob()ではcustomTargetPathがfalsyとなりresolveCustomTargetPath()には到達しない。H-003テストはresolveCustomTargetPath()の単体テストとしては有効だが、統合テスト観点では到達不能パスをテストしていることになる。これ自体は防御的テストとして問題ないが、設計方針書にこの点を注記しておくとテスト意図が明確になる。",
+      "location": "設計方針書 セクション7-2 H-003",
+      "recommendation": "H-003テストケースの備考として「route.tsのtrim/undefinedフォールバックにより通常フローでは到達しないが、resolveCustomTargetPath()単体の防御的テストとして設計」と記載する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 3,
+  "overall_assessment": "設計方針書は高品質であり、セキュリティ脆弱性の修正として適切なアプローチを採用している。SOLID原則の観点では、resolveCustomTargetPath()は単一責務（SRP）を満たし、既存のvalidateWorktreePath()を再利用することでDRY原則を遵守している。OCP観点でもclone-manager.tsの変更は局所的であり、executeClone/onCloneSuccess等の下流処理への変更は不要。KISS原則についても、ヘルパー関数は5行のシンプルなラッパーで過剰な設計はない。YAGNI原則も満たしており、必要最小限の3ファイルの変更に収まっている。セキュリティ設計では、Defense in Depthの多層防御（route.tsでのtrim/型チェック、clone-manager.tsでのvalidateWorktreePath、path-validator.tsでのisPathSafe+resolve）が設計されている。主な改善提案は、例外握り潰し時のサーバーサイドログ追加（攻撃検知）と、validateWorktreePath()のdecodeURIComponent二重適用リスクの認識である。全体として、conditionally_approvedとし、S1-001のログ追加対応を推奨する。"
+}

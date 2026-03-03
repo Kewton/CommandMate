@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db-migrations';
-import { CloneManager, CloneManagerError, resetWorktreeBasePathWarning } from '@/lib/clone-manager';
+import { CloneManager, CloneManagerError, resetWorktreeBasePathWarning, resolveCustomTargetPath } from '@/lib/clone-manager';
 import {
   createRepository,
   getCloneJob,
@@ -553,6 +553,124 @@ describe('CloneManager - parseGitProgress', () => {
   it('should return null for empty output', () => {
     const progress = cloneManager.parseGitProgress('');
     expect(progress).toBeNull();
+  });
+});
+
+describe('resolveCustomTargetPath', () => {
+  it('H-001: resolves relative path to absolute path under basePath', () => {
+    const result = resolveCustomTargetPath('my-repo', '/tmp/repos');
+    expect(result).toBe('/tmp/repos/my-repo');
+  });
+
+  it('H-002: returns null for path traversal', () => {
+    const result = resolveCustomTargetPath('../escape', '/tmp/repos');
+    expect(result).toBeNull();
+  });
+
+  // [S1-005] Defensive test: in production, route.ts converts empty/whitespace-only
+  // targetDir to undefined, so resolveCustomTargetPath() is never called with ''.
+  // This test validates the function's own robustness in isolation.
+  it('H-003: returns null for empty string (defensive test - unreachable in normal flow)', () => {
+    const result = resolveCustomTargetPath('', '/tmp/repos');
+    expect(result).toBeNull();
+  });
+
+  it('H-004: returns null for null byte', () => {
+    const result = resolveCustomTargetPath('repo\x00evil', '/tmp/repos');
+    expect(result).toBeNull();
+  });
+});
+
+// S4-001: Verify that validateWorktreePath()'s internal decodeURIComponent
+// does not create a double-decode bypass for path traversal.
+// See design policy section 7-5 for attack scenario details.
+describe('resolveCustomTargetPath - double decoding safety (S4-001)', () => {
+  it('S4-001-T1: double-encoded path traversal stays within basePath (no bypass)', () => {
+    // %252e%252e%252f decodes to %2e%2e%2f, which path.resolve treats as a
+    // literal directory name (not ../), so it remains safely under basePath.
+    // This verifies no double-decode bypass exists.
+    const result = resolveCustomTargetPath('%252e%252e%252fetc', '/tmp/repos');
+    expect(result).toBe('/tmp/repos/%2e%2e%2fetc');
+  });
+
+  it('S4-001-T2: single-encoded path traversal is rejected', () => {
+    expect(resolveCustomTargetPath('..%2fetc', '/tmp/repos')).toBeNull();
+  });
+
+  it('S4-001-T3: normal repo name is resolved correctly', () => {
+    expect(resolveCustomTargetPath('normal-repo', '/tmp/repos')).toBe('/tmp/repos/normal-repo');
+  });
+});
+
+describe('startCloneJob with relative customTargetPath', () => {
+  let db: Database.Database;
+  let cloneManager: CloneManager;
+
+  beforeEach(() => {
+    delete process.env.WORKTREE_BASE_PATH;
+    resetWorktreeBasePathWarning();
+    db = new Database(':memory:');
+    runMigrations(db);
+    cloneManager = new CloneManager(db, { basePath: '/tmp/repos' });
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('T-001: resolves relative path to absolute path under basePath', async () => {
+    const { existsSync } = await import('fs');
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    const result = await cloneManager.startCloneJob('https://github.com/test/repo.git', 'my-repo');
+    expect(result.success).toBe(true);
+
+    const job = getCloneJob(db, result.jobId!);
+    expect(job?.targetPath).toBe('/tmp/repos/my-repo');
+  });
+
+  it('T-002: resolves nested relative path', async () => {
+    const { existsSync } = await import('fs');
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    const result = await cloneManager.startCloneJob('https://github.com/test/nested.git', 'nested/deep/repo');
+    expect(result.success).toBe(true);
+
+    const job = getCloneJob(db, result.jobId!);
+    expect(job?.targetPath).toBe('/tmp/repos/nested/deep/repo');
+  });
+
+  it('T-003: rejects path traversal', async () => {
+    const result = await cloneManager.startCloneJob('https://github.com/test/evil.git', '../escape');
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INVALID_TARGET_PATH');
+  });
+
+  it('T-004: existing absolute path test still passes (backward compatibility)', async () => {
+    const { existsSync } = await import('fs');
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    const customPath = '/tmp/repos/custom/target/path';
+    const result = await cloneManager.startCloneJob('https://github.com/test/abs.git', customPath);
+    expect(result.success).toBe(true);
+
+    const job = getCloneJob(db, result.jobId!);
+    expect(job?.targetPath).toBe(customPath);
+  });
+
+  it('T-005: existsSync is called with resolved absolute path', async () => {
+    const { existsSync } = await import('fs');
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    await cloneManager.startCloneJob('https://github.com/test/pathcheck.git', 'my-repo');
+    expect(vi.mocked(existsSync)).toHaveBeenCalledWith('/tmp/repos/my-repo');
+  });
+
+  it('T-006: error response does not contain basePath (D4-001)', async () => {
+    const result = await cloneManager.startCloneJob('https://github.com/test/evil.git', '../escape');
+    expect(result.success).toBe(false);
+    expect(result.error?.message).not.toContain('/tmp/repos');
   });
 });
 

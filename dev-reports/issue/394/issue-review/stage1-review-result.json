@@ -1,0 +1,116 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_type": "通常",
+  "issue_number": 394,
+  "review_date": "2026-03-02",
+  "summary": "Issue #394はセキュリティ脆弱性として高品質にまとめられている。Root Causeの分析、影響範囲の特定、再現手順の記述はすべてコードベースの実態と整合している。仮説検証により全5項目がConfirmedとなった。ただし、影響コードのリストに一部漏れがあること、renameFileOrDirectory()のソースパスに対するsymlink検証の欠如が未言及であること、修正方針にfile-tree.ts/file-search.tsで既に採用されている「symlink自体のスキップ」アプローチへの言及がないこと、受け入れ基準がやや抽象的であることが改善点として挙げられる。",
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "GETエンドポイントの画像・動画処理におけるreadFile()直接呼び出しが影響コードに未記載",
+      "description": "GET /api/worktrees/:id/files/:pathでは、画像ファイル（route.ts:153行）と動画ファイル（route.ts:200行）に対してreadFile()を直接呼び出している。これらはreadFileContent()を経由しないため、file-operations.tsのisPathSafe()チェックを通らず、route.ts内のgetWorktreeAndValidatePath()のisPathSafe()のみが防御ラインとなる。Issueの「Key references」にはroute.ts:153は記載されているが、この箇所がreadFileContent()とは異なる別の脆弱なコードパスであることが明示されていない。",
+      "location": "Affected Code > Key references セクション",
+      "suggestion": "route.ts:153とroute.ts:200-211の画像・動画処理パスがreadFileContent()を経由しない独立した脆弱コードパスであることを明記する。具体的には「GET handler directly calls readFile() for image/video files at lines 153 and 211, bypassing file-operations.ts entirely」のような注記を追加。"
+    },
+    {
+      "id": "F1-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "renameFileOrDirectory()のソースパスに対するsymlink脆弱性が未言及",
+      "description": "Issueではmove操作についてmoveFileOrDirectory()のSEC-006（destination）のrealpath検証に言及しているが、rename操作のrenameFileOrDirectory()（file-operations.ts:618-662）がソースパスに対してrealpathSync()を呼んでいないことに触れていない。シンボリックリンクで指されたファイルをrename()で別名に変更する場合、リンク先のファイルが操作対象になる可能性がある。",
+      "location": "Affected Code > File operations セクション",
+      "suggestion": "renameFileOrDirectory()もソースパスのsymlink検証が欠如していることを影響範囲に明記する。moveFileOrDirectory()のSEC-006がdestinationのみを対象としsource pathのrealpath検証がないことも補足すべき。"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "category": "修正方針",
+      "title": "既存のsymlink対策パターン（file-tree.ts, file-search.ts）への参照がない",
+      "description": "コードベースには既に複数のsymlink対策が存在する: (1) file-tree.ts:182でlstat()によるisSymbolicLink()チェックでsymlinkをスキップ、(2) file-search.ts:306で同様のsymlinkスキップ、(3) opencode-config.ts:185でlstatSync()によるsymlink検出。Recommended Directionでrealpath()ベースの修正を提案しているが、これら既存パターンとの整合性や選択理由が記述されていない。",
+      "location": "Recommended Direction セクション",
+      "suggestion": "修正方針に既存パターンの参照を追加し、「realpath()による解決パス検証」と「lstat()によるsymlinkエントリ自体の拒否」の2つのアプローチの比較・選定理由を記載する。file-tree.tsがsymlinkをスキップしている（ディレクトリ一覧にsymlinkが表示されない）ことは、ユーザーがUI経由でsymlinkターゲットを選択できないことを意味するが、直接APIを叩く攻撃は防げないため、両方のアプローチの特性を明確にすべき。"
+    },
+    {
+      "id": "F1-004",
+      "severity": "nice_to_have",
+      "category": "修正方針",
+      "title": "修正の集約ポイント（isPathSafe vs 各関数）の設計判断が未記載",
+      "description": "Recommended Directionでは個別の操作ごとにrealpath()チェックを追加する方針を示唆しているが、isPathSafe()自体にrealpath検証を追加するアプローチと、各ファイル操作関数にrealpath検証を追加するアプローチの比較検討が記載されていない。isPathSafe()に統合すれば一箇所の修正で全操作を保護できるが、ファイルが存在しない場合（create/upload）にはrealpathが使えないため、親ディレクトリのrealpath検証が必要になるという設計上の制約がある。",
+      "location": "Recommended Direction セクション",
+      "suggestion": "修正集約ポイントに関する設計判断基準を記載する。特に: (1) isPathSafe()に統合する場合は存在しないパスへの対応（親ディレクトリのrealpath）、(2) 各関数に分散する場合は漏れリスク、(3) moveFileOrDirectory()の既存SEC-006パターンを他の関数に横展開する場合のコード重複、の3点を検討材料として挙げる。"
+    },
+    {
+      "id": "F1-005",
+      "severity": "nice_to_have",
+      "category": "受け入れ基準",
+      "title": "受け入れ基準（Validation Notes）が検証手順のみで合格基準が不明確",
+      "description": "Validation Notesセクションは「動的検証に含めるべきこと」として4項目を挙げているが、これは検証手順の概要であり、合否判定基準（何をもって修正完了とするか）が明示されていない。例えば「symlink経由のアクセスが403/400で拒否されること」「既存のsymlinkなしパスへのアクセスが引き続き正常動作すること」などの具体的な期待結果が必要。",
+      "location": "Validation Notes セクション",
+      "suggestion": "以下のような具体的な受け入れ基準を追加する: (1) worktree外を指すsymlinkを含むパスへのGET/PUT/POST/DELETE/PATCH/Upload要求がINVALID_PATHエラーで拒否される、(2) symlinkを含まない通常パスへのアクセスが引き続き正常動作する、(3) moveFileOrDirectory()の既存SEC-006テストが引き続きパスする、(4) 新規テストケースが追加される。"
+    },
+    {
+      "id": "F1-006",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "脅威モデルの前提条件（攻撃者がsymlinkを配置できる条件）が未記載",
+      "description": "Issueの再現手順は「worktree内にsymlinkが存在する」ことを前提としているが、攻撃者がどのようにしてsymlinkを配置するのかの前提が明示されていない。考えられるシナリオ: (1) POST /api/worktrees/:id/files/:path でtype=directoryの代わりにsymlink作成はできない（mkdir使用のため）、(2) gitリポジトリにsymlinkがコミットされている場合、(3) サーバーに直接アクセスできるユーザーがsymlinkを作成する場合。脅威モデルを明確にすることで修正の優先度判断に役立つ。",
+      "location": "Summary / Example Exploit セクション",
+      "suggestion": "攻撃前提条件として「攻撃者がworktree内にsymlinkを配置できる状況」の具体例を記載する。最も現実的なのは(2)のgitリポジトリ内symlinkで、git cloneまたはgit worktree addで自動的にsymlinkが展開されるケース。"
+    },
+    {
+      "id": "F1-007",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "title": "moveFileOrDirectory()のPATCHエンドポイントにおけるsymlink保護の範囲が不正確",
+      "description": "IssueのImportant Observationセクションで「moveFileOrDirectory()にはdestination directoryのsymlink-aware realpathSync()チェックがある」と記載しているが、これはdestination directoryのみが保護されており、source pathのsymlink解決はMOVE_SAME_PATHチェック（行564-565）でrealpathSync()を使用するものの、ソースがworktree外のsymlink先である場合のバウンダリチェックは実施されていない。この微妙な不完全性について言及するとより正確になる。",
+      "location": "Important Observation セクション",
+      "suggestion": "moveFileOrDirectory()のsymlink検証が「destination directoryのバウンダリチェック」と「source pathのrealpathSync（MOVE_SAME_PATH判定用のみ）」に限定されており、source pathが実際にworktree外を指すsymlinkである場合のバウンダリ逸脱チェックは行われていないことを補足する。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 3,
+  "nice_to_have_count": 4,
+  "overall_quality": "good",
+  "recommendation": "Issue全体の品質は高く、Root Cause分析とコードリファレンスは正確である。主な改善点は3点: (1) 影響コードリストの完全性向上（GETの画像・動画パス、rename関数）、(2) 修正方針における既存symlinkパターンとの整合性検討の追加、(3) 受け入れ基準の具体化。これらを反映することで、実装者が迷いなく修正に着手できるIssueとなる。",
+  "code_references": [
+    {
+      "file": "src/lib/path-validator.ts",
+      "lines": "29-68",
+      "relevance": "isPathSafe()の実装 - レキシカルパス正規化のみ、realpathなし"
+    },
+    {
+      "file": "src/lib/file-operations.ts",
+      "lines": "225-251, 261-287, 298-335, 375-436, 618-662, 674-709",
+      "relevance": "readFileContent/updateFileContent/createFileOrDirectory/deleteFileOrDirectory/renameFileOrDirectory/writeBinaryFile - 全てisPathSafe()のみ使用"
+    },
+    {
+      "file": "src/lib/file-operations.ts",
+      "lines": "544-553, 564-569",
+      "relevance": "moveFileOrDirectory()のSEC-006 realpathSync()検証 - destination directoryのみ"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "96-123, 153, 200-211",
+      "relevance": "getWorktreeAndValidatePath()とGETハンドラの画像・動画直接readFile()呼び出し"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+      "lines": "113-119, 189",
+      "relevance": "アップロードエンドポイントのisPathSafe()検証とwriteBinaryFile()呼び出し"
+    },
+    {
+      "file": "src/lib/file-tree.ts",
+      "lines": "178-184",
+      "relevance": "lstat()によるsymlinkスキップ - 既存のsymlink対策パターン"
+    },
+    {
+      "file": "src/lib/file-search.ts",
+      "lines": "306",
+      "relevance": "isSymbolicLink()によるsymlinkスキップ - 既存のsymlink対策パターン"
+    }
+  ],
+  "doc_references": []
+}

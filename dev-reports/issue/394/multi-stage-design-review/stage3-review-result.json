@@ -1,0 +1,78 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "issue_number": 394,
+  "review_date": "2026-03-02",
+  "summary": "設計方針書の影響分析を6つの観点（既存テスト、パフォーマンス、後方互換性、間接波及、moveFileOrDirectoryとの重複、エラー動作変化）で実施した。must_fixが1件（validateFileOperation既存テストのresolvedSource返却値がmacOSで壊れる可能性）、should_fixが3件（テストの二重パス問題への明記不足、upload APIルートの祖先走査フォールバック漏れ、エラー動作変化のマイグレーションガイド不在）、nice_to_haveが3件を検出した。全体として設計品質は良好だが、既存テストへの影響に関する具体的な対策記述が不足しており、実装時のリスクがある。",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "テスト影響",
+      "title": "validateFileOperation()のresolvedSource返却値がmacOS tmpdirテストで不一致になるリスク",
+      "description": "validateFileOperation()は現在 join(worktreeRoot, sourcePath) を resolvedSource として返却しており、既存テスト（tests/unit/lib/file-operations-validate.test.ts 行36）は expect(result.resolvedSource).toBe(join(testDir, 'test.txt')) と検証している。testDir は os.tmpdir() ベース（macOSでは /var/folders/...）であり、join()結果もこの未解決パスとなる。設計方針書の計画通りvalidateFileOperation()内にresolveAndValidateRealPath()を追加する際、resolvedSourceの返却値をrealpathSync解決済みパスに変更すると、join(testDir, 'test.txt') = '/var/folders/.../test.txt' に対して resolvedSource = '/private/var/folders/.../test.txt' となり、既存テストが失敗する。設計方針書のセクション5.3はrootDirとtargetのrealpath解決について述べているが、validateFileOperation()のresolvedSource返却値への影響については言及していない。",
+      "location": "設計方針書 セクション5.2 validateFileOperation()行、セクション5.3 macOS tmpdir互換性",
+      "suggestion": "設計方針書にvalidateFileOperation()の返却値ポリシーを明記すること。具体的には：(A) resolvedSourceの返却値は変更しない（realpathチェックは内部で行うが、返却値は既存のjoin(worktreeRoot, sourcePath)を維持）、または (B) resolvedSourceをrealpath解決済みパスに変更し、既存テストを fs.realpathSync(join(testDir, 'test.txt')) に更新する旨を明記する。選択肢Aを推奨する（resolveAndValidateRealPath()はboolean返却の検証関数であり、resolvedSourceの返却値を変更する必要がないため）。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "api-file-operations.test.tsがtmpdir使用でrealpath検証追加後に壊れるケースの未検討",
+      "description": "tests/integration/api-file-operations.test.ts（行61）はtestDirをtmpdir()ベースで作成し、worktree.pathに直接設定している。macOSではtmpdir()は/var/folders/...を返し、realpathSync()は/private/var/folders/...を返す。getWorktreeAndValidatePath()にresolveAndValidateRealPath()を追加すると、rootDirはrealpathSync(worktree.path) = /private/var/...に解決されるが、targetPathもrealpathSync()で解決されるため、両方とも/private/var/...接頭辞となり一致する。従って既存テストは壊れないが、設計方針書のテスト設計セクション（セクション8）にはこの分析が記載されていない。テスト環境でのtmpdir使用は他の9テストファイルでも行われており、全ての影響範囲を明示すべき。",
+      "location": "設計方針書 セクション8 テスト設計、セクション5.3 macOS tmpdir互換性",
+      "suggestion": "セクション8に「既存テストへの影響分析」サブセクションを追加し、(1) resolveAndValidateRealPath()はrootDirとtargetの両方にrealpathSync()を適用するため、tmpdir使用の既存テストは自動的に互換性が保たれること、(2) ただしvalidateFileOperation()のresolvedSource返却値については別途検討が必要であること（S3-001参照）、(3) 影響を受ける可能性のあるテストファイル一覧（file-operations.test.ts, file-operations-validate.test.ts, file-operations-move.test.ts, api-file-operations.test.ts等）を列挙すること。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "既存パターン重複",
+      "title": "upload APIルートのwriteBinaryFile()でのcreate用祖先走査フォールバックが二重適用される設計の明確化不足",
+      "description": "設計方針書セクション5.2のAPI routes表では、upload APIルートのPOSTハンドラ内のisPathSafe()直後にresolveAndValidateRealPath()を追加するとしている。この時点ではアップロード先のディレクトリパス（normalizedDir）に対してチェックが行われる。その後writeBinaryFile()が呼ばれ、ここでもresolveAndValidateRealPath()が二次防御として適用される。upload APIルートではnormalizedDirは既存ディレクトリであるため祖先走査は不要だが、writeBinaryFile()内ではrelativePath（normalizedDir + '/' + filename）に対してチェックが行われ、このファイルはまだ存在しないため祖先走査フォールバックが使用される。この場合、祖先走査で見つかる最近接祖先はnormalizedDirであり、API層で既に検証済みのディレクトリである。設計としては正しいが、upload経路での二重検証の具体的なフロー（ディレクトリ検証→ファイルパス祖先走査→同じディレクトリに帰着）が文書化されていない。",
+      "location": "設計方針書 セクション5.2 API routes表 upload行、セクション5.1 アルゴリズム ステップ4",
+      "suggestion": "セクション5.2のupload APIルート行の備考欄に、二重検証の具体的フローを補足すること：「API層ではnormalizedDir（ディレクトリ）に対してresolveAndValidateRealPath()が適用され、writeBinaryFile()内ではrelativePath（ファイルパス）に対して祖先走査フォールバックが適用される。祖先走査はnormalizedDirに帰着するため、結果的に同一ディレクトリの二重検証となる」。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "category": "エラー動作変化",
+      "title": "symlink経由アクセスの既存動作変更に対するマイグレーション考慮の不足",
+      "description": "設計方針書セクション6の脅威モデル表では、修正後にワークツリー外を指すsymlinkが一律INVALID_PATHで拒否されることを示しているが、この動作変更が既存ユーザーに与える影響の評価が不足している。例えば：(1) gitリポジトリ内にコミットされたsymlink（node_modules内のbin/リンク、monorepoのパッケージ間リンク等）が拒否される、(2) ビルドツールが生成するsymlinkディレクトリ（例：Next.jsの.next/static symlink等）へのファイルビューアからのアクセスが拒否される。これらは正当なセキュリティ修正ではあるが、ユーザーが遭遇した際のエラーメッセージ「Invalid path」は原因の特定が困難。",
+      "location": "設計方針書 セクション6 脅威モデル",
+      "suggestion": "以下を検討し設計方針書に追記すること：(1) resolveAndValidateRealPath()がfalseを返した場合のエラーコードを既存のINVALID_PATHとは区別する新しいコード（例：SYMLINK_OUTSIDE_ROOT）にするか、少なくともINVALID_PATHのメッセージを「Path resolves outside worktree boundary via symlink」のように具体化するかを検討（S1-005見送りとの関連あり）、(2) エラーメッセージの変更が困難な場合は、サーバーログ（console.warn）にsymlinkトラバーサルの拒否理由を出力して管理者のデバッグを容易にすること。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス",
+      "title": "Defense-in-depth二重チェックのrealpathSync呼び出し回数の定量評価",
+      "description": "設計方針書セクション4の注記では「1リクエストあたり最大4回（API層2回+ビジネスロジック層2回）」としているが、実際のAPIハンドラを分析すると、一部のリクエストでは呼び出し回数が増える。例えばPATCH move操作では：getWorktreeAndValidatePath()で2回 + moveFileOrDirectory()内のvalidateFileOperation()で2回 + SEC-006のrealpathSync x2 + ステップ8のrealpathSync x2 = 最大8回。ただしVFSキャッシュにより実質的な影響は軽微であるため、パフォーマンス上の問題にはならない。",
+      "location": "設計方針書 セクション4 防御責務の分担方針、セクション7 パフォーマンス設計",
+      "suggestion": "セクション7のI/O影響分析表のfiles PATCH行に「realpathSync x最大8回（move操作時、うち4回は既存のSEC-006/ステップ8）」と記載し、より正確な見積もりを提供すること。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "nice_to_have",
+      "category": "既存パターン重複",
+      "title": "moveFileOrDirectory()のSEC-006と新resolveAndValidateRealPath()の防御範囲の重複整理",
+      "description": "moveFileOrDirectory()はステップ6（SEC-006）で既にdestination directoryに対するrealpathSync検証を実装している。設計方針書の計画では、validateFileOperation()にresolveAndValidateRealPath()を追加してsource pathを検証する。これにより、moveFileOrDirectory()では：(A) sourceパスはvalidateFileOperation()経由でresolveAndValidateRealPath()検証（新規追加）、(B) destinationパスはSEC-006で既存のrealpath検証（変更なし）となる。SEC-006の検証ロジックとresolveAndValidateRealPath()は類似しているが完全に同一ではない（SEC-006はresolvedDest !== resolvedRoot条件を持ち、resolveAndValidateRealPath()はresolvedTarget === resolvedRootを許可する）。この差異はセクション5.1の[S2-006]で説明されているが、moveFileOrDirectory()のSEC-006を将来的にresolveAndValidateRealPath()に置き換えるかどうかの方針が不明。",
+      "location": "設計方針書 セクション5.2 moveFileOrDirectory()行、セクション5.1 [S2-006]",
+      "suggestion": "セクション9の設計上の決定事項テーブルに「moveFileOrDirectory()のSEC-006は既存のままとし、resolveAndValidateRealPath()への置き換えは行わない。理由：SEC-006はdestinationDir固有のセマンティクス（ルートディレクトリへの移動許可条件）を持ち、汎用関数とは目的が異なる。将来のリファクタリング候補として記録する」と追記すること。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "nice_to_have",
+      "category": "テスト影響",
+      "title": "file-tree.test.tsのsymlinkスキップテストとの整合性確認が未記載",
+      "description": "tests/unit/lib/file-tree.test.ts（行359）では既にsymlinkSync()を使用したテストが存在し、ディレクトリツリー内のsymlinkがスキップされることを検証している。tree APIルートにresolveAndValidateRealPath()を追加しても、このテストはルートパスの検証のみであり、子エントリのsymlinkスキップはfile-tree.tsのlstat + isSymbolicLink()で行われるため影響はない。しかし、設計方針書にはこの分析が明記されていない。",
+      "location": "設計方針書 セクション5.2 変更しないファイル表、セクション8 テスト設計",
+      "suggestion": "セクション5.2の「変更しないファイル」表のfile-search.ts行と同様に、file-tree.tsのエントリについても「既存のlstat() + isSymbolicLink()スキップで子エントリを防御。ルートパスのみtree APIルートでresolveAndValidateRealPath()検証」と明記すること。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_quality": "good",
+  "recommendation": "設計品質は良好であり、影響範囲の大部分は正しく把握されている。ただし、must_fix指摘のvalidateFileOperation()のresolvedSource返却値問題は、実装時にmacOSでの既存テスト失敗に直結するため、実装前に返却値ポリシーを確定する必要がある。should_fix指摘のうちS3-004（エラー動作変化のユーザビリティ）は、セキュリティ修正の実用上の品質に関わるため、実装前に検討することを推奨する。"
+}

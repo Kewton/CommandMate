@@ -1,0 +1,68 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 393,
+  "apply_date": "2026-03-03",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "IF001",
+        "status": "applied",
+        "change_summary": "Added 'Direct exec() Call Sites Bypassing tmux.ts' subsection to Affected Code -- documented codex.ts (lines 102, 104, 139, 170) and claude-session.ts (line 783) direct execAsync() calls that bypass tmux.ts helpers"
+      },
+      {
+        "id": "IF002",
+        "status": "applied",
+        "change_summary": "Added unit test requirements for terminal/route.ts and capture/route.ts to Recommended Direction with 4 specific test cases (valid cliToolId, invalid cliToolId returns 400, non-existent worktreeId returns 404, valid inputs use CLIToolManager)"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "IF003",
+        "status": "applied",
+        "change_summary": "Added note about tmux.test.ts mock target migration from child_process.exec to child_process.execFile after tmux.ts migration, with error handling equivalence verification"
+      },
+      {
+        "id": "IF004",
+        "status": "applied",
+        "change_summary": "Added recommendation to replace codex.ts direct exec() calls with tmux.ts safe wrappers (sendSpecialKey/sendSpecialKeys) and claude-session.ts:783 similarly, with specific mapping for each call site"
+      },
+      {
+        "id": "IF005",
+        "status": "applied",
+        "change_summary": "Added session name injection prevention test requirements for tmux.test.ts -- shell metacharacters in sessionName for hasSession/createSession/sendKeys, verifying execFile argument arrays prevent shell interpretation"
+      },
+      {
+        "id": "IF006",
+        "status": "applied",
+        "change_summary": "Added 'getSessionName() Pattern Inconsistency' subsection with comparison table of 4 implementations (cli-session.ts safe vs claude-session.ts/terminal/capture unsafe) and unification recommendation via CLIToolManager"
+      },
+      {
+        "id": "IF007",
+        "status": "applied",
+        "change_summary": "Added backward compatibility note for session auto-creation restriction -- clear error message guidance, external script/CLI consideration, Terminal.tsx uses separate WebSocket path"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "IF008",
+        "status": "applied",
+        "change_summary": "Added reference implementation note for opencode.ts:113-117 execFileAsync pattern to Recommended Direction"
+      },
+      {
+        "id": "IF009",
+        "status": "skipped",
+        "reason": "isValidWorktreeId() shared utility extraction is an implementation detail better addressed during development rather than in the Issue specification"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 9,
+    "applied": 8,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/393"
+  }
+}

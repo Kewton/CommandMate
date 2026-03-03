@@ -1,0 +1,58 @@
+{
+  "issue_number": 391,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-02",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "status": "applied",
+        "change_summary": "案Aの修正方針に設計判断を明記: タイムアウトなしで2つ選択完了まで中間状態維持、コンポーネント再マウント時はuseState初期値falseで自動リセット、finallyブロックでAPI成功/失敗いずれでもsetIsEditing(false)を呼ぶ方針を追加"
+      },
+      {
+        "id": "SF-002",
+        "status": "applied",
+        "change_summary": "案Bに具体的な実装方針を追加: useRefで最新のselectedAgentsを保持し、fetchWorktree内で配列要素の個別比較を行う擬似コードを記載。useCallback依存配列への影響がない点を明記"
+      },
+      {
+        "id": "SF-003",
+        "status": "applied",
+        "change_summary": "受入条件に放置シナリオを追加: 「チェックを外した後、2つ目を選択せずに別のタブへ移動した場合、タブ戻り時に中間状態は維持されるが、次のページリロードでサーバーの値に同期される」"
+      },
+      {
+        "id": "SF-004",
+        "status": "applied",
+        "change_summary": "案Aの擬似コードをfinallyブロック方式に更新: setSaving(false)とsetIsEditing(false)をfinallyブロックに配置し、API成功・失敗いずれの場合も操作完了となるよう修正。catchブロックでのリバート処理も明示"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "status": "applied",
+        "change_summary": "テスト更新方針セクションを新設: 既存テスト(AgentSettingsPane.test.tsx L62-80)の更新方針と、isEditing中のprop変更無視・isEditing解除後の同期・API失敗時リバート・放置シナリオの4つの追加テストケースを記載"
+      },
+      {
+        "id": "NTH-002",
+        "status": "applied",
+        "change_summary": "根本原因セクションの行番号をL1796-1804からL1792-1807に修正し、仮説検証レポートとの整合性を向上"
+      },
+      {
+        "id": "NTH-003",
+        "status": "applied",
+        "change_summary": "Issue本文末尾に「関連Issue」セクションを追加し、#368（Agent設定UI導入）へのリンクを記載"
+      }
+    ]
+  },
+  "skipped_findings": [],
+  "summary": {
+    "total_findings": 7,
+    "applied": 7,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/391"
+  }
+}

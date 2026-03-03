@@ -1,0 +1,150 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 393,
+  "review_focus": "通常",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "capture/route.ts が同一の脆弱性パターンを持つが Affected Code に未記載",
+      "description": "src/app/api/worktrees/[id]/capture/route.ts は terminal/route.ts と全く同じ getSessionName() 関数（バリデーションなし）と cliToolId as CLIToolType のキャストパターンを使用している。capturePane() も exec() 経由でセッション名を文字列補間するため、同じシェルインジェクション脆弱性が存在する。Issue の Affected Code セクションに capture/route.ts が含まれていない。",
+      "suggestion": "Affected Code セクションに src/app/api/worktrees/[id]/capture/route.ts を追加し、capture/route.ts:11-13（getSessionName）、capture/route.ts:29（cliToolId as CLIToolType）、capture/route.ts:32（hasSession 呼び出し）を明記する。同一の修正が必要であることを明確にすべき。",
+      "evidence": "capture/route.ts:11-13 に terminal/route.ts と同一の getSessionName() 関数が存在。capture/route.ts:29 で cliToolId as CLIToolType を使用。capture/route.ts:32 で tmux.hasSession(sessionName) を呼び出し、exec() 経由でセッション名が補間される。"
+    },
+    {
+      "id": "F002",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "Issue 記載の行番号の一部が実コードとずれている",
+      "description": "Issue 本文で参照している行番号の一部が実際のコードとわずかにずれている。route.ts:15 は Issue では暗黙的にエンドポイント定義を指すが、実際の POST 関数定義は route.ts:15 である。route.ts:57 は sendToTmux 内の tmux.sendKeys 呼び出しであり正確。tmux.ts:153 は createSession のオーバーロード実装部分であり、実際のメイン実装は tmux.ts:153 から始まる。これらは概ね正確だが、tmux.ts:153 は正確には createSession の3つ目のオーバーロードシグネチャである。exec() を使用した new-session コマンドは tmux.ts:175-176 にある。",
+      "suggestion": "行番号参照を以下に更新することを推奨: tmux.ts:68 (hasSession), tmux.ts:175-176 (createSession の exec 呼び出し), tmux.ts:216 (sendKeys の exec 呼び出し)。正確な行番号は修正の際に参照しやすくなる。",
+      "evidence": "tmux.ts:153 は export async function createSession() のメインシグネチャ行であり、実際の exec() 呼び出しは tmux.ts:175-176。tmux.ts:207 は sendKeys の関数定義行であり exec() 呼び出しは tmux.ts:220。"
+    },
+    {
+      "id": "F003",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "title": "Case 2 の PoC における cliToolId のルーティング制約に関する曖昧さ",
+      "description": "Issue は Case 2（セッション名インジェクション）の PoC で cliToolId にシェルメタ文字を含む値を送信するシナリオを示しているが、'Exact exploitability depends on routing constraints and how params.id is parsed' と但し書きを付けている。実際には cliToolId は JSON ボディから取得されるため（route.ts:20）、ルーティング制約の影響は受けない。params.id（worktreeId）はURL パスパラメータであり Next.js のルーティングで一部制約を受けるが、cliToolId はボディ由来なので制約なしに任意文字列を送信可能。この但し書きは cliToolId と params.id を混同している可能性がある。",
+      "suggestion": "Case 2 の説明を明確化し、cliToolId は JSON ボディから取得されるためルーティング制約は無関係であることを明記する。params.id（worktreeId）についてもURL エンコーディングの影響を受けるが、デコード後にはシェルメタ文字が含まれうることを補足すると良い。",
+      "evidence": "route.ts:20: const { cliToolId, command } = await req.json(); -- cliToolId は JSON ボディから取得。route.ts:17: { params }: { params: { id: string } } -- params.id は URL パスパラメータ。"
+    },
+    {
+      "id": "F004",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "sendSpecialKeys / sendSpecialKey 関数のセッション名インジェクション脆弱性への言及がない",
+      "description": "tmux.ts の sendSpecialKeys()（tmux.ts:252-278）と sendSpecialKey()（tmux.ts:435-448）も sessionName を exec() 経由で文字列補間する。sendSpecialKeys は keys をホワイトリストで検証しているが、sessionName 自体は検証しない。これらの関数は terminal/route.ts からは直接呼ばれないが、tmux.ts モジュール全体の問題として exec() から execFile() への移行を推奨するなら、これらの関数も対象であることを明記すると修正漏れを防げる。",
+      "suggestion": "Recommended Direction セクションの 'Replace exec() string interpolation in tmux helpers with spawn()/execFile() and argument arrays' に、影響を受ける全関数（hasSession, createSession, sendKeys, sendSpecialKeys, sendSpecialKey, capturePane, killSession）を列挙すると、修正時の漏れを防止できる。",
+      "evidence": "tmux.ts:267: const command = `tmux send-keys -t \"${sessionName}\" ${keys[i]}`; -- sendSpecialKeys。tmux.ts:440-441: await execAsync(`tmux send-keys -t \"${sessionName}\" ${key}`, ...); -- sendSpecialKey。tmux.ts:338-339: capturePane も同様。tmux.ts:368: killSession も同様。"
+    },
+    {
+      "id": "F005",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "他のルートとの比較で kill-session の安全な実装パターンへの言及が簡潔すぎる",
+      "description": "Issue の 'Why This Is Different From Other CLI Routes' セクションでは BaseCLITool.getSessionName() + validateSessionName() の安全パターンを言及しているが、具体的にどのルートが安全パターンを使用しているかの例示がない。実際に respond/route.ts:142、kill-session/route.ts:65、prompt-response/route.ts:88、interrupt/route.ts:71 が CLIToolManager 経由で安全なセッション名を取得している。この対比を明記すると、修正方針（CLIToolManager 経由に統一）の根拠が強化される。",
+      "suggestion": "'Why This Is Different From Other CLI Routes' セクションに安全パターンを使用しているルートの具体例を追加: respond/route.ts, kill-session/route.ts, prompt-response/route.ts, interrupt/route.ts。",
+      "evidence": "respond/route.ts:142: const sessionName = cliTool.getSessionName(params.id); -- CLIToolManager 経由。kill-session/route.ts:65: const sessionName = cliTool.getSessionName(params.id); -- CLIToolManager 経由かつ CLI_TOOL_IDS.includes() でバリデーション済み。"
+    },
+    {
+      "id": "F006",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "workingDirectory パラメータの shell injection リスクへの言及不足",
+      "description": "Issue は sessionName の shell injection に焦点を当てているが、tmux.ts:176 の createSession() は workingDirectory も exec() 経由で文字列補間する: `tmux new-session -d -s \"${sessionName}\" -c \"${workingDirectory}\"` 。terminal/route.ts では process.cwd() を使用しているため現時点では安全だが、createSession() の他の呼び出し元や将来の変更で workingDirectory に攻撃者制御の値が渡される可能性がある。exec() から execFile() への移行推奨と併せて、workingDirectory も injection ベクターであることを記載すべき。",
+      "suggestion": "Root Cause セクションまたは Recommended Direction セクションに、workingDirectory パラメータも同様に exec() の文字列補間で使用されており、execFile() への移行で同時に保護されることを追記する。",
+      "evidence": "tmux.ts:175-176: await execAsync(`tmux new-session -d -s \"${sessionName}\" -c \"${workingDirectory}\"`, { timeout: DEFAULT_TIMEOUT }); -- workingDirectory も文字列補間される。terminal/route.ts:36: process.cwd() を使用しているため現時点では安全。"
+    },
+    {
+      "id": "F007",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "historyLimit パラメータの数値 injection リスクへの言及がない",
+      "description": "tmux.ts:181-183 では historyLimit を exec() で文字列補間している: `tmux set-option -t \"${sessionName}\" history-limit ${historyLimit}` 。historyLimit は number 型で現在は固定値 50000 だが、exec() による文字列補間であることは変わらない。execFile() への包括的な移行推奨の一環として含めると良い。",
+      "suggestion": "これは低優先度だが、exec() から execFile() への包括的移行の際に historyLimit の補間も対象であることを認識しておく程度で十分。",
+      "evidence": "tmux.ts:181-183: await execAsync(`tmux set-option -t \"${sessionName}\" history-limit ${historyLimit}`, { timeout: DEFAULT_TIMEOUT });"
+    },
+    {
+      "id": "F008",
+      "severity": "must_fix",
+      "category": "完全性",
+      "title": "terminal/route.ts に worktreeId の存在確認（DB ルックアップ）がない",
+      "description": "terminal/route.ts は params.id（worktreeId）の DB 存在確認を一切行っていない。他のルート（respond/route.ts:126-131, kill-session/route.ts:28-34）は getWorktreeById() で worktree の存在を確認してから処理を進めるが、terminal/route.ts は任意の worktreeId で tmux セッションを作成・操作できる。これにより、DBに登録されていない任意のセッション名でシェルが起動可能という問題が、セッション名インジェクションとは独立して存在する。Issue の Root Cause に worktreeId の DB 存在確認欠如を追加すべき。",
+      "suggestion": "Root Cause に '5. The endpoint does not verify that the worktreeId (params.id) corresponds to a registered worktree in the database, allowing arbitrary session creation' を追加する。Recommended Direction に 'Verify worktreeId exists in the database before any tmux operation' を追加する。",
+      "evidence": "terminal/route.ts には getWorktreeById, getDbInstance のインポートが存在しない。respond/route.ts:126: const worktree = getWorktreeById(db, params.id); -- 他のルートは DB 確認を実施。kill-session/route.ts:28: const worktree = getWorktreeById(db, params.id); -- 同様。"
+    },
+    {
+      "id": "F009",
+      "severity": "nice_to_have",
+      "category": "提案",
+      "title": "Recommended Direction に CSRF 対策の具体策が不足",
+      "description": "Issue の Security Boundary Broken セクションで CSRF のリスクを言及しているが（'CSRF via same-origin proxy content'）、Recommended Direction には CSRF 対策の具体的な推奨がない。Next.js の API ルートはデフォルトで CSRF 保護を持たないため、Origin/Referer ヘッダー検証やカスタム CSRF トークンの実装を推奨に含めると良い。",
+      "suggestion": "Recommended Direction に 'Consider adding CSRF protection (Origin header validation or CSRF tokens) for state-changing API endpoints' を追加する。ただし、既存の認証ミドルウェア（middleware.ts）がトークン認証を行っているため、CSRF の実際のリスクは認証モードに依存する。",
+      "evidence": "Issue 本文: 'CSRF via same-origin proxy content, or a malicious \"trusted\" user turns this into host compromise'。Recommended Direction セクションに CSRF 対策の具体策なし。"
+    },
+    {
+      "id": "F010",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "Severity 'Critical' の根拠として CVSS スコアまたは具体的なリスク評価基準がない",
+      "description": "Issue は Severity を 'Critical' としているが、その根拠となる CVSS スコアや具体的なリスク評価基準が示されていない。CommandMate はローカル/LAN 内で動作するツールであり、認証が有効な場合は攻撃者が認証トークンを取得する必要がある。認証が無効な場合（デフォルト）はローカルアクセスで RCE が可能だが、これはツールの設計上の想定（tmux セッション管理）に近い。Severity の妥当性を判断するために、攻撃前提条件の明確化が必要。",
+      "suggestion": "Severity セクションに以下を追記: (1) 認証無効時（デフォルト）のリスクレベル、(2) 認証有効時のリスクレベル、(3) 攻撃前提条件（ネットワークアクセス可能性、認証状態）。CommandMate のデプロイコンテキスト（主にローカル/LAN）を考慮した上で、シェルインジェクション（Case 2）は Critical、意図的動作（Case 1）は設計上の制限として High 程度の区別があるとより正確。",
+      "evidence": "Issue 本文の Severity セクションには 'Critical' のみ記載。攻撃前提条件や CVSS スコアの記載なし。middleware.ts を確認すると、CM_AUTH_TOKEN_HASH 未設定時は認証スキップ（line 99-101）。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 5,
+    "overall_quality": "高",
+    "comment": "Issue #393 は技術的に正確で、全 7 仮説がコードベースで確認済みである。Root Cause 分析、PoC、影響範囲の記述は概ね的確。主要な改善点は (1) capture/route.ts の同一脆弱性パターンの Affected Code への追加、(2) worktreeId の DB 存在確認欠如の Root Cause への追加、(3) Severity の根拠明確化、(4) workingDirectory の injection リスクへの言及。推奨方向性（CLIToolManager 経由への統一、exec() から execFile() への移行、cliToolId のバリデーション）は既存の安全モデルと整合しており適切である。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/terminal/route.ts",
+      "relevance": "主要な脆弱性を含むエンドポイント"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/capture/route.ts",
+      "relevance": "同一の脆弱性パターンを持つエンドポイント（Issue 未記載）"
+    },
+    {
+      "file": "src/lib/tmux.ts",
+      "relevance": "exec() による文字列補間を使用する tmux ヘルパーモジュール"
+    },
+    {
+      "file": "src/lib/cli-tools/base.ts",
+      "relevance": "安全なセッション名取得パターン（getSessionName + validateSessionName）"
+    },
+    {
+      "file": "src/lib/cli-tools/validation.ts",
+      "relevance": "SESSION_NAME_PATTERN によるセッション名バリデーション"
+    },
+    {
+      "file": "src/lib/cli-tools/types.ts",
+      "relevance": "CLI_TOOL_IDS 定数と isCliToolType() 型ガード"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/respond/route.ts",
+      "relevance": "CLIToolManager 経由の安全パターン比較用"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/kill-session/route.ts",
+      "relevance": "CLI_TOOL_IDS.includes() バリデーション + CLIToolManager 経由の安全パターン比較用"
+    },
+    {
+      "file": "src/middleware.ts",
+      "relevance": "認証ミドルウェア（攻撃前提条件の評価用）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール定義の整合性確認"
+    }
+  ]
+}

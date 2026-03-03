@@ -1,0 +1,33 @@
+{
+  "stage": 6,
+  "issue_number": 394,
+  "applied_findings": ["F5-001", "F5-002"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "changes_summary": "Applied 2 nice-to-have findings from Stage 5 review: (1) F5-001: Added 'Threat Model Preconditions' subsection to Example Exploit section with three specific scenarios for how symlinks can appear in a worktree (git repository committed symlinks, manual creation by filesystem user, build tools/dependency installation). (2) F5-002: Expanded file-tree.ts description in 'Directory listing and search modules' to explain that readDirectory() uses stat() (not lstat()) at line 154, which follows symlinks and allows symlink directories to pass isDirectory() check, directly enabling the tree API vulnerability. Added file-tree.ts:154 to key references. Updated Review History with Stage 5 entries.",
+  "github_updated": true,
+  "apply_date": "2026-03-02",
+  "applied_details": {
+    "nice_to_have": [
+      {
+        "id": "F5-001",
+        "status": "applied",
+        "change_summary": "Added 'Threat Model Preconditions (F5-001)' subsection to Example Exploit section with 3 scenarios: (1) git repository with committed symlinks deployed via git clone/worktree add, (2) manual creation by user with filesystem access, (3) build tools or dependency installation creating symlinks"
+      },
+      {
+        "id": "F5-002",
+        "status": "applied",
+        "change_summary": "Expanded file-tree.ts description in Affected Code to explain stat() vs lstat() behavior at line 154; added file-tree.ts:154 to key references; noted this is the direct mechanism for tree API vulnerability (F3-001)"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 2,
+    "applied": 2,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/394"
+  }
+}

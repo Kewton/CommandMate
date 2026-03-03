@@ -1,0 +1,10 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 393,
+  "applied_findings": ["S7F001", "S7F002", "S7F003"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "github_update": "success",
+  "summary": "Stage 7 影響範囲レビュー（2回目）の Should Fix 3件を全て Issue #393 に反映。S7F001: tmux.ts:182 の historyLimit パラメータ補間を Affected Code の key references と Recommended Direction の execFile() 移行ガイダンスに追記。S7F002: sendKeys() のシングルクォートエスケープロジックが exec() 前提であり execFile() 移行時に見直しが必要である旨を Recommended Direction に追記。S7F003: sendSpecialKeys()（複数形）のテストが未作成であることを IF005 のテスト要件に追記し、3つの具体的テストケースを定義。また、S7F004（nice_to_have）の claude-session.ts:417 の直接 exec() 呼び出しも Direct exec() Call Sites セクションに追記。"
+}

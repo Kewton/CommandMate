@@ -1,0 +1,45 @@
+{
+  "issue_number": 398,
+  "title": "opencode起動時、lmStudioのモデルも選択可能にしたい",
+  "acceptance_criteria": [
+    "LM Studioが起動している場合、そのモデル一覧がopencode.jsonに反映されること",
+    "LM Studioが未起動の場合、エラーにならずOllamaのみで動作すること",
+    "Ollamaが未起動の場合、エラーにならずLM Studioのみで動作すること",
+    "両方未起動の場合も、致命的エラーにならないこと",
+    "OllamaとLM Studioの両方が未起動で取得モデル数が0件の場合、opencode.jsonは生成しないこと（SF-004）",
+    "ユニットテスト・結合テストがすべてパスすること",
+    "既存のOllamaのみの動作に影響がないこと",
+    "LM Studioモデルのスケジュール実行（非インタラクティブモード）はスコープ外"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: 定数・型定義の追加 - LM_STUDIO_API_URL='http://localhost:1234/v1/models'(export), LM_STUDIO_BASE_URL='http://localhost:1234/v1'(export), MAX_LM_STUDIO_MODELS=100(export), LM_STUDIO_MODEL_PATTERN=/^[a-zA-Z0-9._:/@-]{1,200}$/(export, @含む200文字制限), LM_STUDIO_API_TIMEOUT_MS=3000(非export), MAX_LM_STUDIO_RESPONSE_SIZE=1*1024*1024(非export), type ProviderModels=Record<string,{name:string}>, interface LmStudioModel{id?:unknown}",
+    "Task 1.2: fetchOllamaModels()独立関数の抽出 - 既存ensureOpencodeConfig()内のOllama fetch・parse・validateロジックを抽出。戻り値型はPromise<ProviderModels>。全エラーで空{}を返す（throwしない）。exportする。冒頭にTODOコメント追加（3プロバイダー目追加時の共通化ポイント）",
+    "Task 1.3: fetchLmStudioModels()新関数の実装 - LM Studio OpenAI互換API(LM_STUDIO_API_URL)呼び出し。レスポンス形式{ data: [{ id: string }] }をパース。AbortControllerタイムアウト、レスポンスサイズ制限、LM_STUDIO_MODEL_PATTERNバリデーション、MAX_LM_STUDIO_MODELS上限。モデルIDそのまま表示名使用。全エラーで空{}返却。exportする",
+    "Task 1.4: ensureOpencodeConfig()のリファクタリング - Promise.all([fetchOllamaModels(), fetchLmStudioModels()])で並列取得。動的プロバイダー構成（0件プロバイダーキーは省略）。両方0件の場合はreturn（opencode.json非生成）。lmstudioプロバイダーセクションをopencode.json生成テンプレートに追加",
+    "Task 2.1: 既存テストのfetchOllamaModels()ユニットテストへの移行 - timeout/network failure/non-200/サイズ超過/構造不正/モデル件数制限/無効モデル名フィルタリング/displayName の8テストをfetchOllamaModels()の単体テストに移行",
+    "Task 2.2: fetchLmStudioModels()ユニットテストの追加 - 正常系・未起動・タイムアウト・非200・サイズ超過・構造不正・件数制限・モデルIDバリデーション・@含むモデルID・LM_STUDIO_MODEL_PATTERN定数テスト",
+    "Task 2.3: ensureOpencodeConfig()統合テストの更新・追加 - 既存6テストのmockFetch更新（URL分岐）、新規4テスト追加（Ollamaのみ・LM Studioのみ・両方・両方なし）",
+    "Task 3.1: CLAUDE.mdのopencode-config.tsエントリ更新 - fetchOllamaModels()/fetchLmStudioModels()独立関数化、新規定数（LM_STUDIO_API_URL/LM_STUDIO_BASE_URL/LM_STUDIO_MODEL_PATTERN/MAX_LM_STUDIO_MODELS）、ProviderModels型を追記"
+  ],
+  "target_files": [
+    "src/lib/cli-tools/opencode-config.ts",
+    "tests/unit/cli-tools/opencode-config.test.ts",
+    "CLAUDE.md"
+  ],
+  "out_of_scope_files": [
+    "src/lib/cli-tools/opencode.ts",
+    "src/lib/claude-executor.ts",
+    "src/lib/schedule-manager.ts"
+  ],
+  "design_doc_path": "dev-reports/design/issue-398-lmstudio-opencode-design-policy.md",
+  "work_plan_path": "dev-reports/issue/398/work-plan.md",
+  "target_coverage": 80,
+  "key_design_decisions": {
+    "LM_STUDIO_MODEL_PATTERN": "/^[a-zA-Z0-9._:/@-]{1,200}$/ - @文字を許可（HuggingFace org/model@revision形式）、200文字上限（Ollamaの100文字より長いパス形式モデルIDに対応）",
+    "ProviderModels_type": "type ProviderModels = Record<string, { name: string }> - fetchOllamaModels()とfetchLmStudioModels()の共通戻り値型",
+    "Promise.all_safety": "両関数がcatch内で空{}を返す（throwしない）ため、Promise.allは常に解決される",
+    "dynamic_provider_config": "0件プロバイダーのキーは省略。両方0件の場合はopencode.json非生成（既存動作からの変更）",
+    "mockFetch_pattern": "テストはURLで分岐: if(url===OLLAMA_API_URL)→Ollama mock, if(url===LM_STUDIO_API_URL)→LM Studio mock",
+    "lmstudio_schema": "{npm:'@ai-sdk/openai-compatible', name:'LM Studio (local)', options:{baseURL:LM_STUDIO_BASE_URL}, models:{modelId:{name:modelId}}}"
+  }
+}

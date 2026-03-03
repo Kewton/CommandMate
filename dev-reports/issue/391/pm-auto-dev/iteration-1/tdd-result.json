@@ -1,0 +1,39 @@
+{
+  "status": "success",
+  "issue_number": 391,
+  "iteration": 1,
+  "coverage": 80,
+  "unit_tests": {
+    "total": 4255,
+    "passed": 4255,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "implemented_files": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "test_files": [
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx"
+  ],
+  "files_changed": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx"
+  ],
+  "test_results": {
+    "total": 4255,
+    "passed": 4255,
+    "failed": 0
+  },
+  "typescript_errors": 0,
+  "lint_errors": 0,
+  "commits": [
+    "91bb01d: fix(agent-settings): prevent polling from overwriting checkbox state during editing"
+  ],
+  "summary": "Issue #391 fix implemented. Added isEditing state flag to AgentSettingsPane.tsx to guard useEffect prop sync during intermediate checkbox states. Added selectedAgentsRef + array value comparison in WorktreeDetailRefactored.tsx to skip unnecessary setSelectedAgents when polling returns the same value. Updated existing test with isEditing=false annotation. Added 4 new test cases: T1 (isEditing guards prop overwrites), T2 (sync resumes after API success), T3 (revert + isEditing reset on API failure), T4 (revert + isEditing reset on network error). All 4255 tests pass. 0 TypeScript errors. 0 ESLint errors.",
+  "message": "TDD implementation complete. All acceptance criteria met."
+}

@@ -1,0 +1,191 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 395,
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "proxyHttp()のヘッダストリッピング変更がテストコードと乖離する",
+      "description": "Issue #395の修正でproxyHttp()にCookie/Authorization/X-Forwarded-*等のリクエストヘッダストリッピングを追加する場合、tests/unit/proxy/handler.test.tsの既存テスト「should forward request headers」（L83-105）がAuthorizationヘッダの転送を暗黙的に期待しているため、テストが失敗するか、少なくともテストの意図と矛盾する。新しいストリッピングリスト（SENSITIVE_REQUEST_HEADERSなど）の追加に合わせて、(a)ストリッピングされるヘッダが転送されないことを確認するテスト、(b)安全なヘッダは引き続き転送されることを確認するテストを追加する必要がある。",
+      "location": "tests/unit/proxy/handler.test.ts L83-105, src/lib/proxy/handler.ts L60-68",
+      "suggestion": "Issue本文の「Affected Code」セクションまたは実装計画にテスト修正の必要性を明記する。具体的には、(1) Cookie, Authorization, X-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto, X-Real-IPがストリッピングされることを検証するテスト追加、(2) Content-Type, Accept等の安全なヘッダが転送されることの回帰テスト追加、(3) Set-Cookieレスポンスヘッダのストリッピングテスト追加を記載する。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "config.tsの定数変更がhandler.ts以外のモジュールに波及しないことの確認",
+      "description": "src/lib/proxy/config.tsはhandler.tsからのみインポートされている（Grep確認済み）。HOP_BY_HOP_REQUEST_HEADERSやHOP_BY_HOP_RESPONSE_HEADERSの拡張、または新しい定数（SENSITIVE_REQUEST_HEADERS, SENSITIVE_RESPONSE_HEADERSなど）の追加はhandler.tsのみに影響する。ただし、Issue本文ではconfig.tsの変更方針が明示されていない。ストリッピングリストをconfig.tsに集約するのか、handler.tsにハードコードするのかで保守性が変わるため、設計方針を明記すべき。",
+      "location": "src/lib/proxy/config.ts, Issue本文 ## Recommended Direction",
+      "suggestion": "Recommended Directionに具体的な実装方針として「config.tsにSENSITIVE_REQUEST_HEADERS（Cookie, Authorization, X-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto, X-Real-IP）およびSENSITIVE_RESPONSE_HEADERS（Set-Cookie）定数を追加し、handler.tsのヘッダ転送ループで参照する」という方針を記載する。既存のHOP_BY_HOP_*定数パターンとの一貫性が保たれる。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "proxyWebSocket()のdirectUrlレスポンスにおける内部情報漏洩の修正範囲",
+      "description": "proxyWebSocket()（handler.ts L143-166）は426レスポンスでdirectUrl（ws://{targetHost}:{targetPort}{path}）を返す。Issueでは主にproxyHttp()のヘッダ問題を指摘しているが、Validation Notes item 7でdirectUrlの情報漏洩も検証項目に挙げている。directUrlの除去または制限もこのIssueのスコープに含めるか、別Issueとして分離するかを明確にすべき。修正する場合、tests/unit/proxy/handler.test.tsのproxyWebSocketテスト（L178-211）にも影響する。",
+      "location": "src/lib/proxy/handler.ts L143-166, tests/unit/proxy/handler.test.ts L178-211",
+      "suggestion": "Issueの「## Affected Code」セクションにproxyWebSocket()のdirectUrl問題を含めるかどうかを明示する。含める場合は変更対象としてhandler.ts L150-157を追加し、「directUrlフィールドを除去し、エラーメッセージのみ返す」旨を記載する。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "external-apps/route.ts:48のPOSTエンドポイントに変更は不要だがセキュリティ警告UIの追加を検討すべき",
+      "description": "src/app/api/external-apps/route.ts:48のPOSTエンドポイントは外部アプリの登録処理であり、Issue #395の脆弱性の直接原因ではない。Issueの「Affected Code」にroute.ts:48が含まれているが、ここに必要なのはコード変更ではなく、UIレベルでの安全性警告の追加である。ExternalAppForm.tsx（登録フォーム）に「外部アプリはCommandMateと同一オリジンで動作するため、信頼できるアプリのみ登録してください」という警告を表示すべき。これはIssueのRecommended Directionの最後の項目「clear warnings and stronger access boundaries」に対応する。",
+      "location": "src/app/api/external-apps/route.ts:48, src/components/external-apps/ExternalAppForm.tsx",
+      "suggestion": "Issue本文の「Recommended Direction」最後の項目を具体化し、「ExternalAppForm.tsxの登録/編集フォームにセキュリティ警告バナーを追加する（例: 'Proxied apps run under the CommandMate origin and can access CommandMate APIs. Only register trusted applications.'）」と記載する。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "middleware.tsへの影響確認: /proxy/*パスは認証対象であることの明示",
+      "description": "middleware.ts（L106）ではAUTH_EXCLUDED_PATHSに/proxyは含まれておらず、認証が有効な場合は/proxy/*へのアクセスには認証が必要となる。Stage 1レビュー（S1-002）で指摘されこの情報はIssueに追記済みだが、修正実装時にmiddleware.tsを変更する必要がないことをIssueで明示していない。修正実装者がmiddleware.tsも変更対象と誤解しないよう、「middleware.tsは変更不要（/proxy/*は既に認証対象）」と記載すべき。",
+      "location": "src/middleware.ts, Issue本文 ## Affected Code",
+      "suggestion": "Affected Codeセクションに「middleware.ts: 変更不要。/proxy/*パスはAUTH_EXCLUDED_PATHSに含まれず、認証が有効な場合は認証必須」という補足を追加する。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "validation.tsへの変更は不要だが将来的な拡張ポイントとしての認識",
+      "description": "src/lib/external-apps/validation.tsはアプリ登録時の入力バリデーション（ポート範囲、ホスト制限、パスプレフィックス形式）を提供する。Issue #395の脆弱性はバリデーション不足ではなくヘッダ転送の問題であるため、validation.tsへのコード変更は不要。ただし、将来的にプロキシ設定の追加オプション（例: ヘッダ転送ポリシーの選択、信頼レベルの設定）を導入する場合はvalidation.tsの拡張が必要になる。Issueの「Affected Code」にvalidation.tsが含まれていないので、これは正しい。",
+      "location": "src/lib/external-apps/validation.ts, Issue本文 ## Affected Code",
+      "suggestion": "Issue本文に明示的に「validation.tsへの変更は本Issueのスコープ外」と記載することで、実装者の混乱を防ぐ。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "next.config.jsのCSPヘッダがProxy Route Handlerのレスポンスに適用されるかの検証がIssueの深刻度に直結",
+      "description": "Issueの「Critical unknown」（Validation Notes item 6）として指摘されているが、この検証結果によって必要な修正範囲が大きく変わる。(A) CSPが適用される場合: handler.tsのヘッダストリッピングのみで防御の多層化が実現できる。(B) CSPが適用されない場合: handler.tsのproxyHttp()内でレスポンスヘッダにCSP/X-Frame-Options/X-Content-Type-Optionsを明示的に付与するコードが必要になり、影響範囲が拡大する。Next.js公式ドキュメントによると、next.config.jsのheaders()はRoute Handlersのnew Response()にも適用される（ルートベースのマッチング）が、proxyHttp()がupstreamの全レスポンスヘッダをコピーして新しいResponseを構築する際に、upstreamのContent-Security-Policyヘッダが含まれていれば、next.config.jsの設定を上書きしてしまう可能性がある。",
+      "location": "src/lib/proxy/handler.ts L96-100, next.config.js L23-82",
+      "suggestion": "Recommended Directionに「proxyHttp()のレスポンスヘッダ構築時にContent-Security-PolicyとX-Frame-Optionsをupstreamから継承しないよう明示的にストリッピングし、next.config.jsの設定が確実に適用されるようにする」という方針を追加する。これによりValidation Notes item 6の結果に関わらず安全性が確保される。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "CLAUDE.mdへのproxy/handler.tsモジュール説明の更新が必要",
+      "description": "CLAUDE.mdの「主要機能モジュール」セクションにsrc/lib/proxy/handler.ts、config.ts、logger.tsの説明が記載されている。Issue #395の修正（ヘッダストリッピング追加）後、handler.tsの説明にセキュリティ関連の情報を更新する必要がある。現在の記載は「Issue #376: buildUpstreamUrl()がpathPrefix含むフルパスを転送するよう修正」だけで、ヘッダ処理のセキュリティ対策に関する記述がない。",
+      "location": "CLAUDE.md 主要機能モジュールテーブル内 src/lib/proxy/handler.ts",
+      "suggestion": "修正完了後にCLAUDE.mdのhandler.tsの説明に「Issue #395: SENSITIVE_REQUEST_HEADERS（Cookie/Authorization/X-Forwarded-*）ストリッピング、SENSITIVE_RESPONSE_HEADERS（Set-Cookie/CSP関連）ストリッピング追加」を追記する。この作業もIssueの受け入れ条件に含めることを推奨する。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "security-guide.mdへのProxy機能のセキュリティ注意事項追加",
+      "description": "docs/security-guide.mdにはProxy機能に関するセキュリティ注意事項が記載されていない。Threat Modelセクションのリスク表にはFile read/write、Command execution等が記載されているが、Proxy機能による同一オリジンリスクは含まれていない。Issue #395の修正後、ヘッダストリッピングで一定の緩和が実現しても、同一オリジン実行の本質的リスクは残るため、ユーザー向けのドキュメントに注意事項を追加することが望ましい。",
+      "location": "docs/security-guide.md ## Threat Model",
+      "suggestion": "security-guide.mdのThreat Modelセクションに「External Apps Proxy」サブセクションを追加し、「Proxied external apps execute under the CommandMate origin. Only register trusted applications. Credentials are not forwarded to upstream apps, but inline scripts can still call CommandMate APIs.」等の警告を記載する。"
+    },
+    {
+      "id": "S3-010",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "レスポンスヘッダストリッピング時のContent-Type保護",
+      "description": "Set-Cookieのストリッピングに加え、upstreamが返すContent-Typeヘッダの信頼性も考慮が必要。現在のproxyHttp()はupstreamのContent-Typeをそのまま転送するが、upstreamが意図的にtext/htmlを返した場合にブラウザがHTMLとして解釈しスクリプト実行される（これはIssueの主要な攻撃ベクトル）。ヘッダストリッピングだけでは不十分で、proxyHttp()でContent-Security-Policyレスポンスヘッダを強制的に付与する（sandbox相当のCSP）案もRecommended Directionに含めるべき。",
+      "location": "src/lib/proxy/handler.ts L86-100",
+      "suggestion": "Recommended Directionに「proxyHttp()のレスポンスに対して、restrictiveなCSPヘッダ（例: Content-Security-Policy: default-src 'self'; script-src 'none'）を強制付与することで、upstreamコンテンツ内のスクリプト実行を完全にブロックするオプション」を追加する。これはiframe sandboxingと並ぶ防御層として有効。ただし、外部アプリの正常動作を阻害する可能性があるため、アプリ単位で設定可能にすることを推奨する。"
+    },
+    {
+      "id": "S3-011",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "Worktreeプロキシ（Issue #136）への波及確認",
+      "description": "Issue #136でWorktree単位のexternal app機能が追加されており、createWorktreeExternalApp()経由で登録されたアプリもproxyHttp()を経由する。Issue #395の修正はproxyHttp()に適用されるため、Worktreeプロキシにも自動的に適用される。ただし、Worktreeプロキシはissue_noに紐づくアプリであり、通常のexternal appとは管理経路が異なる。Issueではこの区別に触れていないが、修正がworktreeプロキシにも適用されることを確認的に記載しておくことが望ましい。",
+      "location": "src/lib/external-apps/db.ts createWorktreeExternalApp(), src/app/proxy/[...path]/route.ts",
+      "suggestion": "Affected Surfaceセクションに「Worktree external apps (Issue #136)も同じプロキシ経路を使用するため、修正は自動的に適用される」と補足する。"
+    },
+    {
+      "id": "S3-012",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "テストカバレッジの全体像: proxy関連テストの拡充計画",
+      "description": "現在のproxy関連テストはtests/unit/proxy/handler.test.ts（基本的なプロキシ動作、WebSocket、URL構築）とtests/unit/proxy/route.test.ts（pathPrefix保存）の2ファイルのみ。セキュリティ関連のテスト（ヘッダストリッピング、Set-Cookie除去、CSPヘッダ付与など）は存在しない。Issue #395の修正に合わせて、セキュリティテストファイル（例: tests/unit/proxy/security.test.ts）の新規作成を検討すべき。",
+      "location": "tests/unit/proxy/",
+      "suggestion": "Issue本文にテスト計画として「tests/unit/proxy/security.test.tsを新規作成し、(1) Cookie/Authorizationリクエストヘッダのストリッピング検証、(2) Set-Cookieレスポンスヘッダのストリッピング検証、(3) X-Forwarded-*ヘッダのストリッピング検証、(4) CSP関連レスポンスヘッダの強制付与検証を含む」と記載する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 7,
+    "nice_to_have": 3,
+    "overall_assessment": "Issue #395はproxyHttp()のヘッダ転送における重大なセキュリティ脆弱性を報告しており、影響範囲は比較的限定的かつ明確である。直接的なコード変更対象はsrc/lib/proxy/handler.tsとsrc/lib/proxy/config.tsの2ファイルに集中し、他のモジュール（middleware.ts, validation.ts, external-apps API）への変更は不要。しかし、テストコード（tests/unit/proxy/handler.test.ts）への影響が大きく、既存テストの修正と大幅なセキュリティテストの追加が必要。また、next.config.jsのCSPヘッダがProxyレスポンスに適用されるかの検証結果によっては、handler.ts内でのCSPヘッダ強制付与が追加で必要になり影響範囲が拡大する可能性がある。ドキュメント面ではCLAUDE.mdの更新が必要であり、security-guide.mdへの追記も推奨される。UIレベルではExternalAppForm.tsxへのセキュリティ警告バナーの追加が望ましい。全体としてIssueの分析品質は高いが、実装計画の具体性（変更ファイル一覧、テスト計画、ドキュメント更新計画）の追加がIssueの完成度を高める。"
+  },
+  "impact_analysis": {
+    "directly_affected_files": [
+      {
+        "file": "src/lib/proxy/handler.ts",
+        "change_type": "modify",
+        "description": "proxyHttp()にSENSITIVE_REQUEST_HEADERSストリッピングロジック追加、レスポンスヘッダからSet-Cookie/CSP関連を除去するロジック追加"
+      },
+      {
+        "file": "src/lib/proxy/config.ts",
+        "change_type": "modify",
+        "description": "SENSITIVE_REQUEST_HEADERS, SENSITIVE_RESPONSE_HEADERS定数追加"
+      }
+    ],
+    "test_affected_files": [
+      {
+        "file": "tests/unit/proxy/handler.test.ts",
+        "change_type": "modify",
+        "description": "既存のヘッダ転送テスト修正、セキュリティテスト追加"
+      },
+      {
+        "file": "tests/unit/proxy/security.test.ts",
+        "change_type": "create",
+        "description": "セキュリティ専用テストファイル新規作成（推奨）"
+      }
+    ],
+    "no_change_required": [
+      {
+        "file": "src/middleware.ts",
+        "reason": "/proxy/*は既にAUTH_EXCLUDED_PATHSに含まれず認証対象。変更不要。"
+      },
+      {
+        "file": "src/lib/external-apps/validation.ts",
+        "reason": "バリデーションロジック自体は脆弱性の原因ではない。変更不要。"
+      },
+      {
+        "file": "src/app/api/external-apps/route.ts",
+        "reason": "登録API自体は脆弱性の原因ではない。変更不要。"
+      },
+      {
+        "file": "src/lib/external-apps/db.ts",
+        "reason": "DB操作レイヤーは変更不要。"
+      },
+      {
+        "file": "src/lib/external-apps/cache.ts",
+        "reason": "キャッシュレイヤーは変更不要。"
+      },
+      {
+        "file": "src/app/proxy/[...path]/route.ts",
+        "reason": "ルートハンドラーはhandler.tsに委譲しており、直接的な変更は不要。"
+      }
+    ],
+    "documentation_updates": [
+      {
+        "file": "CLAUDE.md",
+        "description": "handler.tsとconfig.tsのモジュール説明にIssue #395のセキュリティ強化内容を追記"
+      },
+      {
+        "file": "docs/security-guide.md",
+        "description": "External Apps Proxyのセキュリティ注意事項セクション追加（推奨）"
+      }
+    ],
+    "ui_changes": [
+      {
+        "file": "src/components/external-apps/ExternalAppForm.tsx",
+        "description": "登録フォームにセキュリティ警告バナー追加（推奨）"
+      }
+    ],
+    "breaking_changes": "なし。ヘッダストリッピングはプロキシの内部動作の変更であり、外部APIインターフェースに変更はない。ただし、upstreamアプリがCommandMateのCookieやAuthorizationヘッダに依存している場合（設計上は想定外）は動作が変わる。"
+  }
+}

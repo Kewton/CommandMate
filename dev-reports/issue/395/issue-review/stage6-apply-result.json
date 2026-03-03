@@ -1,0 +1,60 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 395,
+  "applied_date": "2026-03-03",
+  "applied_findings": [
+    {
+      "id": "S5-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Recommended Direction の 'Header constants in config.ts (S3-002)' の SENSITIVE_RESPONSE_HEADERS 記述を修正。'Set-Cookie' のみの記載から 'Set-Cookie, Content-Security-Policy, X-Frame-Options' の3エントリに拡張し、Implementation Notes のコード例と一致させた。"
+    },
+    {
+      "id": "S5-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Acceptance Criteria の新規テスト項目を 'New tests added for request header stripping, response header stripping, safe header forwarding, and directUrl/message removal verification' に修正。directUrl フィールドだけでなく message フィールドの内部URL除去テストも含むよう明記。同様に proxyWebSocket() の Acceptance Criteria 項目も 'message field does not contain internal URL information' を追加。"
+    },
+    {
+      "id": "S5-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Recommended Direction の 'Restrictive CSP header injection option (S3-010)' の冒頭に '*Out of scope for this Issue.* Consider in a separate Issue:' を追加し、本 Issue のスコープ外であることを明示。"
+    },
+    {
+      "id": "S5-008",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "3箇所を更新: (1) Affected Code の handler.ts 説明に 'sanitize message field (remove internal URL information)' を追記。(2) Key source references に 'src/lib/proxy/handler.ts:155 (message field containing directWsUrl)' を追加。(3) Recommended Direction の S3-003 を 'proxyWebSocket() directUrl and message sanitization' に改題し、message フィールドの directWsUrl 除去とジェネリックメッセージへの置換を明記。(4) Test modification plan item 5 を 'Add directUrl and message removal test' に修正し、message フィールドの内部URL検証を追加。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S5-003",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "Key source references の route.ts エントリへの注記追加は nice_to_have であり、実装者への影響は軽微。Files requiring NO modification セクションで既にスコープ外であることが明記されている。"
+    },
+    {
+      "id": "S5-004",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "ExternalAppForm.tsx の具体度不均一は nice_to_have。Recommended Direction S3-004 で文言とUIの方向性は示されており、実装に十分な情報がある。"
+    },
+    {
+      "id": "S5-006",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "iframe sandboxing のスコープ明確化は nice_to_have。S5-005 で S3-010 のスコープ外明示を対応したが、iframe sandboxing は Recommended Direction の一般的な提案リスト内に位置しており、Acceptance Criteria に含まれていないことからスコープ外であることは暗黙的に理解可能。"
+    },
+    {
+      "id": "S5-007",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "Key source references の行番号粒度改善は nice_to_have であり微修正。S5-008 対応で handler.ts:155 を個別追加したため、部分的に対応済み。"
+    }
+  ],
+  "update_summary": "Stage 5 レビューの Should Fix 4件を全て GitHub Issue #395 に反映。(1) S5-001: SENSITIVE_RESPONSE_HEADERS の Recommended Direction テキストを3エントリ (Set-Cookie, Content-Security-Policy, X-Frame-Options) に修正しコード例と一致させた。(2) S5-002: Acceptance Criteria に directUrl/message 除去テストを追加。(3) S5-005: S3-010 (Restrictive CSP injection) を本 Issue のスコープ外と明示。(4) S5-008: proxyWebSocket() の message フィールドにも内部URL情報が含まれる問題を Affected Code, Key source references, Recommended Direction, Test modification plan の4箇所に反映。Nice to Have 4件 (S5-003, S5-004, S5-006, S5-007) はスキップ。",
+  "github_update": "success"
+}

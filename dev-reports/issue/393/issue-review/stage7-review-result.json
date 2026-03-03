@@ -1,0 +1,84 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 393,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-03",
+  "previous_findings_resolved": {
+    "IF001": "resolved",
+    "IF002": "resolved",
+    "IF003": "resolved",
+    "IF004": "resolved",
+    "IF005": "resolved",
+    "IF006": "resolved",
+    "IF007": "resolved",
+    "S5F001": "resolved",
+    "S5F002": "resolved"
+  },
+  "findings": [
+    {
+      "id": "S7F001",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "createSession() の historyLimit パラメータが exec() シェルコマンド文字列に直接補間されている件が Issue に未記載",
+      "description": "tmux.ts:182 で `tmux set-option -t \"${sessionName}\" history-limit ${historyLimit}` として historyLimit が exec() のシェルコマンド文字列に直接補間されている。TypeScript の型定義では historyLimit は number (CreateSessionOptions.historyLimit?: number) だが、JavaScript ランタイムでは型強制は行われない。現在の全呼び出し元（codex.ts:82, gemini.ts:87, vibe-local.ts:80, claude-session.ts:616, opencode.ts:105）はリテラル値 50000 を渡しているため安全だが、execFile() への移行時にはこのパラメータも引数配列に含める必要がある。Issue の Root Cause や Recommended Direction では sessionName と workingDirectory の補間リスクに言及しているが、historyLimit の補間については触れていない。execFile() 移行時に漏れる可能性がある。",
+      "affected_files": [
+        "src/lib/tmux.ts"
+      ],
+      "suggestion": "Recommended Direction セクションの execFile() 移行に関する記述に、「Additionally, the historyLimit parameter in createSession() (tmux.ts:182) is interpolated into the set-option command string. While all current callers pass literal number 50000, the execFile() migration should include this parameter as an argument array element to maintain comprehensive injection protection.」を追記する。"
+    },
+    {
+      "id": "S7F002",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "sendKeys() の keys パラメータのシングルクォートエスケープは exec() 前提の防御であり execFile() 移行時に見直しが必要",
+      "description": "tmux.ts:213 で `const escapedKeys = keys.replace(/'/g, \"'\\\\''\");` としてシングルクォートをエスケープし、tmux.ts:216-217 でシングルクォートで囲んだ文字列として exec() に渡している。この防御メカニズムは exec() がシェルを経由する前提で機能している。execFile() に移行した場合、シェルを経由しないため (1) シングルクォートエスケープは不要になる、(2) keys は引数配列の一要素として直接渡せる。ただし、tmux の send-keys コマンドでは引数として渡されたテキストの扱いが exec() 経由時と異なる可能性がある（tmux 自体のクォーティング規則）。Issue の Recommended Direction では sendKeys の移行について具体的な注意事項が記載されていない。",
+      "affected_files": [
+        "src/lib/tmux.ts"
+      ],
+      "suggestion": "Recommended Direction に以下の注記を追加: 「The sendKeys() function (tmux.ts:207-225) currently escapes single quotes and wraps the key text in single quotes for shell-level protection. When migrating to execFile(), this escaping logic should be reviewed: the keys value can be passed directly as an argument array element without shell quoting, but tmux's own argument parsing for send-keys must be verified to ensure equivalent behavior (e.g., tmux interprets certain key names like C-m specially when passed as separate arguments vs. within quoted strings).」"
+    },
+    {
+      "id": "S7F003",
+      "severity": "should_fix",
+      "category": "テスト不足",
+      "title": "sendSpecialKeys() のテストが tmux.test.ts に存在しない",
+      "description": "tmux.test.ts には sendSpecialKey()（単数形）のテストは4件存在する（402-458行）が、sendSpecialKeys()（複数形、配列受け取り）のテストは存在しない。sendSpecialKeys() は ALLOWED_SPECIAL_KEYS による allowlist バリデーションを行っており（tmux.ts:259-263）、execFile() 移行時にはこのバリデーションとキー送信の動作を検証するテストが必要である。Issue の IF005 で「session name injection prevention tests」の追加を推奨しているが、sendSpecialKeys() 自体のテスト不在は言及されていない。",
+      "affected_files": [
+        "tests/unit/tmux.test.ts"
+      ],
+      "suggestion": "IF005 のテスト要件に sendSpecialKeys() のテストを追加: (1) 有効なキー配列（['Down', 'Down', 'Enter']）が正しく送信される、(2) 無効なキー（ALLOWED_SPECIAL_KEYS に含まれない値）で Error がスローされる、(3) 空配列で何も実行されない（早期リターン）。これにより execFile() 移行後のバリデーション動作を検証できる。"
+    },
+    {
+      "id": "S7F004",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "claude-session.ts:417 の直接 exec() 呼び出し（tmux set-environment）が Issue の Direct exec() Call Sites に未記載",
+      "description": "claude-session.ts:417 で `execAsync('tmux set-environment -g -u CLAUDECODE 2>/dev/null || true')` を直接呼び出している。これは固定文字列であり sessionName や worktreeId の補間がないため注入リスクはないが、Issue の「Direct exec() Call Sites Bypassing tmux.ts」セクションでは claude-session.ts:783 のみが記載されており、417行目は言及されていない。execFile() 移行の包括性を考慮すると、固定コマンドも含めて全ての直接 exec() 呼び出し箇所を把握しておくことが望ましい。",
+      "affected_files": [
+        "src/lib/claude-session.ts"
+      ],
+      "suggestion": "Direct exec() Call Sites セクションに注記を追加: 「claude-session.ts:417 also uses exec() for a fixed tmux set-environment command (no user input interpolation, low risk). Consider migrating to execFile() for consistency during the comprehensive migration.」。ただし固定コマンドであり注入リスクはないため nice_to_have レベル。"
+    },
+    {
+      "id": "S7F005",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "capturePane() の startLine/endLine パラメータも exec() シェルコマンド文字列に直接補間されている",
+      "description": "tmux.ts:339 で `tmux capture-pane -t \"${sessionName}\" -p -e -S ${startLine} -E ${endLine}` として startLine と endLine が exec() のシェルコマンド文字列に直接補間されている。S5F002 で capture/route.ts の lines パラメータ（startLine に変換される）の未検証問題は記載済みだが、capturePane() 関数内の CapturePaneOptions パスで endLine も外部から渡される場合がある（claude-session.ts:273 では startLine のみ指定、endLine はデフォルト '-' が使われる）。execFile() 移行時にはこれらのパラメータも引数配列として渡す必要がある。Issue ではこの点は暗黙的にカバーされているが、明示的な言及はない。",
+      "affected_files": [
+        "src/lib/tmux.ts"
+      ],
+      "suggestion": "S5F002 の記述に補足として「The execFile() migration for capturePane() should convert all interpolated parameters (sessionName, startLine, endLine) to argument array elements.」を追加する。現状でも execFile() 移行の一般原則でカバーされるため nice_to_have レベル。"
+    }
+  ],
+  "impact_summary": {
+    "breaking_changes_risk": "low",
+    "comment": "Stage 3 の全 Must Fix (IF001, IF002) および全 Should Fix (IF003-IF007) は Issue 本文に適切に反映されている。Stage 5 の S5F001（tmux.ts 関数数修正）と S5F002（lines パラメータ検証）も反映済みである。更新後の Issue は影響範囲の記述が包括的であり、直接影響ファイル（terminal/route.ts, capture/route.ts, tmux.ts）と間接影響ファイル（codex.ts, claude-session.ts 等の直接 exec() 呼び出し）が明確に区別されている。getSessionName() の不整合パターンも表形式で整理されており、修正方針が明確である。新規の影響範囲指摘として、(1) createSession() の historyLimit 補間、(2) sendKeys() のシングルクォートエスケープロジックの execFile() 移行時の見直し、(3) sendSpecialKeys() のテスト不在を特定した。これらは should_fix レベルであり、execFile() 移行の実装品質を確保するために対応が望ましい。破壊的変更のリスクは引き続き低い。Issue 全体の影響範囲カバレッジは高く、実装に着手可能な水準に達している。"
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2
+  }
+}

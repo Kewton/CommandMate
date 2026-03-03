@@ -1,0 +1,128 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_type": "影響範囲",
+  "issue_number": 394,
+  "review_date": "2026-03-02",
+  "previous_findings_addressed": {
+    "F3-001": "addressed",
+    "F3-002": "addressed",
+    "F3-003": "addressed",
+    "F3-004": "addressed",
+    "F3-005": "addressed",
+    "F3-006": "addressed",
+    "F3-007": "addressed",
+    "F3-008": "addressed",
+    "F3-009": "addressed",
+    "F3-010": "addressed",
+    "F3-011": "addressed"
+  },
+  "summary": "Issue #394のStage 3影響範囲レビューで報告した11件の指摘（F3-001〜F3-011）は全て正しくIssue本文に反映されている。tree API/search APIの影響範囲追加(F3-001)、create/uploadのrealpath適用戦略(F3-002)、worktreeRootのOS固有symlink考慮(F3-003)、Implementation Strategy Options A/B/C(F3-005)、repositories/scanの間接影響(F3-006)、パフォーマンス考慮(F3-007)、内部symlink保持(F3-008)、テストシナリオ10件の具体化(F3-009)、validateWorktreePathの間接影響(F3-010)、ドキュメント更新(F3-011)の全てが網羅されている。また、Stage 5で報告されたF5-001(脅威モデル前提条件)とF5-002(stat()のsymlink解決動作)もStage 6で反映済みである。2回目影響範囲レビューとして、新たな影響範囲の漏れを精査した結果、重大な漏れは発見されなかった。1件のnice_to_haveとして、deleteFileOrDirectory()内のstat()がsymlinkをフォローする動作に関する軽微な補足を発見した。Issue全体の影響範囲カバレッジは非常に高く、実装着手に十分な品質に達している。",
+  "findings": [
+    {
+      "id": "F7-001",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "title": "deleteFileOrDirectory()内のstat()呼び出しがsymlinkをフォローする動作の補足",
+      "description": "file-operations.tsのdeleteFileOrDirectory()のline 398で `const fileStat = await stat(fullPath)` を呼んでいる。stat()はlstat()と異なりsymlinkを自動解決するため、symlinkファイル/ディレクトリに対してstat()を呼ぶと、symlink先の実体のstatが返る。これ自体はdeleteFileOrDirectory()の動作（isDirectory()判定とcountFilesRecursive()の呼び出し）に影響するが、実際のrm()呼び出し(line 426)はsymlink自体を削除する（symlinkを辿って先の実体を削除するわけではない）。Node.jsのrm()はsymlinkに対しては、symlinkのリンク自体を除去する。したがって、deleteFileOrDirectory()のsymlink脆弱性は主にisPathSafe()のバイパスに起因し、stat()の動作は副次的問題である。Issue本文のAffected Codeでは`deleteFileOrDirectory() (line 375)`として言及されており、isPathSafe()バイパスの観点は正しくカバーされている。stat() vs lstat()の動作差異は、readDirectory()(F5-002で補足済み)と同様に実装者への追加情報として有用だが、修正方針に影響を与えるものではない。",
+      "location": "## Affected Code > File operations セクション",
+      "suggestion": "実装時にdeleteFileOrDirectory()のstat()呼び出しがsymlinkをフォローすることを認識しておく程度で十分。Issue本文への追記は不要。"
+    }
+  ],
+  "impact_scope_verification": {
+    "affected_endpoints_completeness": {
+      "status": "complete",
+      "details": "全ての影響を受けるエンドポイントが網羅されている: files API (GET/PUT/POST/DELETE/PATCH), upload API (POST), tree API (GET, F3-001), search API (GET, F3-001), repositories/scan (間接影響, F3-006)。logs APIはlog専用ディレクトリからの読み取りでworktreeファイルパスに依存しないため影響外。slash-commands APIはworktree.path/.claude/commands/から読み取るが、パスはサーバー側で構成されユーザー入力に依存しないため直接的な脆弱性はない。"
+    },
+    "affected_code_completeness": {
+      "status": "complete",
+      "details": "path-validator.ts (isPathSafe, validateWorktreePath)、file-operations.ts (全7関数)、file-tree.ts (readDirectory)、file-search.ts (searchDirectory)、4つのAPIルートファイル、clone-manager.ts (間接影響)、opencode-config.ts (間接影響) の全てが記載済み。"
+    },
+    "implementation_strategy_consistency": {
+      "status": "consistent",
+      "details": "Option A/B/Cが明確に定義され、Option B(新関数)が推奨されている。これはF3-005(file-search.tsのパフォーマンス影響回避)、F3-006(repositories/scan副作用回避)、F3-007(パフォーマンス考慮)と一貫している。Option B採用時、isPathSafe()自体は変更されないため、file-search.tsとrepositories/scanは既存動作を維持し、file API/upload API/tree APIのみが新関数を使用する。"
+    },
+    "acceptance_criteria_coverage": {
+      "status": "comprehensive",
+      "details": "10項目のテストシナリオ付き受け入れ基準が影響範囲を網羅: symlink拒否(テスト1-6)、内部symlink許可(テスト7, F3-008)、dangling symlink(テスト8, F3-009)、多段symlink(テスト9, F3-009)、worktreeRoot symlink互換性(テスト10, F3-003)。各テストシナリオが具体的な操作と期待結果を定義しており、検証可能。"
+    },
+    "breaking_changes": {
+      "status": "properly_documented",
+      "details": "F3-008で指摘した後方互換性の考慮が反映されている。外部symlinkのみが拒否され、内部symlinkは引き続きアクセス可能。INVALID_PATHエラーの新規発生ケースについて、クライアント側はsuccess:falseの汎用ハンドリングで対応済みであり、破壊的変更はない。"
+    },
+    "test_scope": {
+      "status": "adequate",
+      "details": "10テストシナリオが具体的に定義されている。既存テスト(tmpdir使用)との互換性もF3-004で考慮済み。macOS環境でのrealpath差異(F3-003)もテストシナリオ10でカバー。"
+    },
+    "documentation_updates": {
+      "status": "identified",
+      "details": "F3-011で特定されたCLAUDE.md更新項目(path-validator.tsモジュール説明追加、file-operations.ts/file-tree.ts/file-search.ts説明更新)が明記されている。"
+    }
+  },
+  "must_fix_count": 0,
+  "should_fix_count": 0,
+  "nice_to_have_count": 1,
+  "overall_quality": "good",
+  "recommendation": "Issue #394は4回のレビューイテレーション（Stage 1通常→Stage 3影響範囲→Stage 5通常2回目→Stage 7影響範囲2回目）を経て、セキュリティ脆弱性Issueとして極めて高品質に仕上がっている。Stage 3で報告した11件の指摘は全てが正確にIssue本文に反映されており、影響範囲の漏れはない。実装戦略(Option B推奨)、パフォーマンス考慮、受け入れ基準(10テストシナリオ)、ドキュメント更新計画の全てが一貫しており、実装者が迷いなく着手できるレベルに到達している。新たに発見したF7-001はnice_to_haveであり、Issue品質に影響を与えない。実装着手を推奨する。",
+  "code_references": [
+    {
+      "file": "src/lib/path-validator.ts",
+      "lines": "29-68, 89-117",
+      "relevance": "isPathSafe()とvalidateWorktreePath()の実装。Issue記載の全ての影響範囲の起点。"
+    },
+    {
+      "file": "src/lib/file-operations.ts",
+      "lines": "225-251, 261-287, 298-335, 375-436, 501-606, 618-662, 674-709",
+      "relevance": "全7関数がisPathSafe()に依存。moveFileOrDirectory()のSEC-006のみrealpathSync()実装済み。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "lines": "96-123, 153, 200-211",
+      "relevance": "getWorktreeAndValidatePath()でisPathSafe()使用。画像/動画のreadFile()直接呼び出しは別脆弱性経路。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+      "lines": "117",
+      "relevance": "isPathSafe()でtargetDirを検証。writeBinaryFile()内でも二重チェック。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/tree/[...path]/route.ts",
+      "lines": "75, 84",
+      "relevance": "F3-001で追加された影響範囲。isPathSafe()後にreadDirectory()呼び出し。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/search/route.ts",
+      "lines": "139",
+      "relevance": "F3-001で追加された影響範囲。searchWithTimeout()にworktree.path渡し。"
+    },
+    {
+      "file": "src/lib/file-tree.ts",
+      "lines": "149, 154, 179-184",
+      "relevance": "readDirectory()のtargetPath計算、stat()(symlinkフォロー)、lstat()によるsymlinkスキップ。"
+    },
+    {
+      "file": "src/lib/file-search.ts",
+      "lines": "265, 298, 303-307",
+      "relevance": "searchDirectory()のisPathSafe()とlstat()スキップ。Option B採用時は変更不要。"
+    },
+    {
+      "file": "src/app/api/repositories/scan/route.ts",
+      "lines": "29",
+      "relevance": "isPathSafe()間接影響。Option B採用時は変更不要。"
+    },
+    {
+      "file": "src/lib/clone-manager.ts",
+      "relevance": "validateWorktreePath()間接影響。Option B採用時はisPathSafe()非変更のため影響なし。"
+    },
+    {
+      "file": "src/lib/cli-tools/opencode-config.ts",
+      "relevance": "独自のvalidateWorktreePath()(同名別関数)使用。独自realpath検証あり。isPathSafe()非依存。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "path-validator.tsモジュール説明の追加対象。F3-011で特定済み。"
+    }
+  ]
+}

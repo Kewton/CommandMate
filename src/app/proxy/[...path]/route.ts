@@ -11,6 +11,7 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getExternalAppCache } from '@/lib/external-apps/cache';
 import { proxyHttp, proxyWebSocket, isWebSocketUpgrade } from '@/lib/proxy/handler';
 import { logProxyRequest, logProxyError } from '@/lib/proxy/logger';
+import { PROXY_ERROR_MESSAGES } from '@/lib/proxy/config';
 import type { ProxyLogEntry } from '@/lib/proxy/logger';
 
 // Force dynamic rendering
@@ -47,15 +48,17 @@ async function handleProxy(
     const app = await cache.getByPathPrefix(pathPrefix);
 
     if (!app) {
+      // Issue #395: Fixed-string error message; do not expose pathPrefix
       return NextResponse.json(
-        { error: `No external app found for path prefix: ${pathPrefix}` },
+        { error: 'No external app found for the requested path' },
         { status: 404 }
       );
     }
 
     if (!app.enabled) {
+      // Issue #395: Fixed-string error message; do not expose app.displayName
       return NextResponse.json(
-        { error: `External app "${app.displayName}" is currently disabled` },
+        { error: 'The requested external app is currently disabled' },
         { status: 503 }
       );
     }
@@ -103,8 +106,9 @@ async function handleProxy(
   } catch (error) {
     logProxyError(pathPrefix, method, path, error as Error);
 
+    // Issue #395: Fixed-string error message; do not expose internal error details
     return NextResponse.json(
-      { error: 'Proxy error', message: (error as Error).message },
+      { error: 'Proxy error', message: PROXY_ERROR_MESSAGES.BAD_GATEWAY },
       { status: 502 }
     );
   }

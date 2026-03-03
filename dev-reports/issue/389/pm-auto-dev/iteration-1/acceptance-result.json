@@ -1,0 +1,58 @@
+{
+  "issue_number": 389,
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "auto-saveトグルでON/OFFを切り替えられること",
+      "status": "passed",
+      "evidence": "MarkdownEditor.tsx line 791-804: data-testid='auto-save-toggle' with role='switch' and aria-checked. Tests at lines 1155-1202 verify toggle rendering, ON/OFF switching, and localStorage persistence."
+    },
+    {
+      "criterion": "auto-save ON時、テキスト変更後3秒で自動保存されること",
+      "status": "passed",
+      "evidence": "markdown-editor.ts line 244: AUTO_SAVE_DEBOUNCE_MS = 3000. MarkdownEditor.tsx line 291: passed to useAutoSave as debounceMs. useAutoSave.ts line 190-192: setTimeout with debounceMs delay triggers executeSave. useAutoSave.test.ts verifies debounce behavior with custom delay."
+    },
+    {
+      "criterion": "auto-save OFF時、現行通りCtrl+S / Saveボタンで手動保存できること",
+      "status": "passed",
+      "evidence": "MarkdownEditor.tsx line 812-825: Save button rendered when isAutoSaveEnabled is false. Line 440-442: Ctrl+S calls saveContent() when auto-save is OFF. Tests in 'Save Operations' block (lines 187-350) verify save button behavior and Ctrl+S shortcut."
+    },
+    {
+      "criterion": "auto-save設定がリロード後も保持されること（localStorage）",
+      "status": "passed",
+      "evidence": "markdown-editor.ts line 239: LOCAL_STORAGE_KEY_AUTO_SAVE = 'commandmate:md-editor-auto-save'. MarkdownEditor.tsx line 182-186: useLocalStorageState with key=LOCAL_STORAGE_KEY_AUTO_SAVE and validate=isValidBoolean. Test at line 1189-1202 verifies localStorage.setItem is called with the correct key and value 'true'."
+    },
+    {
+      "criterion": "保存状態（Saving.../Saved）が視覚的に表示されること",
+      "status": "passed",
+      "evidence": "MarkdownEditor.tsx line 807-810: auto-save-indicator shows 'Saving...' when isAutoSaving is true, 'Saved' when isDirty is false, empty string when isDirty is true and not saving. Test at line 1223-1242 verifies indicator appears with 'Saved' text."
+    },
+    {
+      "criterion": "auto-save ON時は、isDirty=false かつ isSaving=false の場合のみbeforeunload警告を抑制する",
+      "status": "passed",
+      "evidence": "MarkdownEditor.tsx line 527-554: shouldWarn = isAutoSaveEnabled ? (isDirty || isAutoSaving) : isDirty. When both isDirty=false and isAutoSaving=false, shouldWarn is false, so no beforeunload handler is registered. Tests at lines 1248-1296 verify: (1) no registration when clean and not saving, (2) registration when dirty with auto-save ON."
+    },
+    {
+      "criterion": "auto-save ON時のCtrl+Sキーは、saveNow()を呼び出し即座保存する（その後onSave(filePath)も呼ぶ）",
+      "status": "passed",
+      "evidence": "MarkdownEditor.tsx line 435-440: when isAutoSaveEnabled, Ctrl+S calls async IIFE that awaits saveNow() then calls onSave?.(filePath). Test at line 1299-1341 verifies PUT call is made (saveNow) and onSave is called with 'docs/readme.md'."
+    },
+    {
+      "criterion": "auto-save失敗時（リトライ上限3回到達後）は、エラーをToastで通知し、手動保存モードにフォールバックすること",
+      "status": "passed",
+      "evidence": "useAutoSave.ts line 127-152: retry loop with maxRetries (default 3), exponential backoff; sets error state after exhaustion. MarkdownEditor.tsx line 557-562: useEffect detects autoSaveError, calls setAutoSaveEnabled(false) and showToast('Auto-save failed. Switched to manual save.', 'error'). Test at line 1428-1466 verifies toggle returns to aria-checked='false' and save-button reappears after error."
+    },
+    {
+      "criterion": "ユニットテストが追加・更新されていること",
+      "status": "passed",
+      "evidence": "MarkdownEditor.test.tsx has a dedicated 'Auto-Save Feature (Issue #389)' describe block (lines 1143-1467) with 7 sub-describe blocks covering: Toggle (3 tests), UI (2 tests), beforeunload (2 tests), Ctrl+S (1 test), handleClose (1 test), toggle edge cases (1 test), and error fallback (1 test). Existing tests (Save Operations, Unsaved Changes Warning, onClose callback) all pass unchanged. useAutoSave.test.ts provides 14 additional tests for the hook itself. Total: 64 MarkdownEditor tests pass, 14 useAutoSave tests pass."
+    }
+  ],
+  "quality_checks": {
+    "typescript": { "status": "pass", "errors": 0 },
+    "eslint": { "status": "pass", "errors": 0 },
+    "tests": { "status": "pass", "passed": 4266, "failed": 0 }
+  },
+  "summary": "All 9 acceptance criteria are satisfied. TypeScript type check (0 errors), ESLint (0 warnings/errors), and all 4266 unit tests (including 64 MarkdownEditor tests and 14 useAutoSave hook tests) pass. The implementation correctly adds auto-save toggle UI with localStorage persistence, 3-second debounce auto-save via useAutoSave hook, conditional beforeunload handling, Ctrl+S immediate save with onSave callback, and error fallback to manual save mode with Toast notification. Existing functionality (manual save, unsaved changes warning, onClose callback) is preserved.",
+  "blockers": []
+}

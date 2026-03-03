@@ -1,0 +1,30 @@
+{
+  "issue_number": 394,
+  "feature_summary": "security: symlink traversal in file APIs allows access outside worktree root - Fix via resolveAndValidateRealPath()",
+  "acceptance_criteria": [
+    "Symlink rejection: A request with a path resolving through an external symlink is rejected with INVALID_PATH",
+    "Normal path preservation: Requests to normal paths continue to function correctly",
+    "Internal symlink preservation: Symlinks pointing within the worktreeRoot remain accessible",
+    "Image/video GET paths: Direct readFile() code paths for images and videos are protected via getWorktreeAndValidatePath()",
+    "Rename protection: renameFileOrDirectory() validates source path against symlink traversal",
+    "Tree API protection: GET /api/worktrees/:id/tree/:path rejects external symlink directories",
+    "Upload API protection: POST /api/worktrees/:id/upload/:path rejects external symlink paths",
+    "Create/upload with symlink parent: Creating or uploading through an external symlink parent is rejected",
+    "macOS tmpdir compatibility: Works when worktreeRoot contains OS-level symlinks (e.g., macOS /var -> /private/var)",
+    "Existing tests pass: All 4324 existing test cases continue to pass",
+    "New test coverage: 10 new cases in path-validator.test.ts + 9 cases in file-operations-symlink.test.ts"
+  ],
+  "test_scenarios": [
+    "Scenario 1: External symlink read via readFileContent() returns INVALID_PATH",
+    "Scenario 2: External symlink write via updateFileContent() returns INVALID_PATH",
+    "Scenario 3: External symlink delete via deleteFileOrDirectory() returns INVALID_PATH",
+    "Scenario 4: External symlink rename source via renameFileOrDirectory() returns INVALID_PATH",
+    "Scenario 5: External symlink directory for createFileOrDirectory() returns INVALID_PATH",
+    "Scenario 6: External symlink directory for writeBinaryFile() returns INVALID_PATH",
+    "Scenario 7: Internal symlink read via readFileContent() succeeds",
+    "Scenario 8: resolveAndValidateRealPath() correctly validates various symlink scenarios",
+    "Scenario 9: macOS tmpdir compatibility - rootDir with symlink resolves correctly",
+    "Scenario 10: Non-existent path ancestor traversal works correctly"
+  ],
+  "tdd_result_path": "dev-reports/issue/394/pm-auto-dev/iteration-1/tdd-result.json"
+}

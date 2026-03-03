@@ -1,0 +1,48 @@
+{
+  "issue_number": 391,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "applied_findings": [],
+  "nice_to_have_findings": [
+    {
+      "id": "S4-001",
+      "severity": "nice_to_have",
+      "owasp_category": "A04",
+      "title": "isEditing中間状態のセキュリティ上の影響は限定的であることの明記",
+      "status": "acknowledged_in_design",
+      "note": "Stage 4レビューで指摘されたNice to Haveのため、設計方針書のセクション6「セキュリティ設計」に記載済み。実装時の対応不要"
+    },
+    {
+      "id": "S4-002",
+      "severity": "nice_to_have",
+      "owasp_category": "A03",
+      "title": "クライアントサイドのworktreeIdテンプレートリテラル注入リスクの確認",
+      "status": "acknowledged_in_design",
+      "note": "Stage 4レビューで指摘されたNice to Haveのため、設計方針書のセクション6「セキュリティ設計」のOWASP A03評価に記載済み。実装時の対応不要"
+    },
+    {
+      "id": "S4-003",
+      "severity": "nice_to_have",
+      "owasp_category": "A08",
+      "title": "selectedAgents配列のクライアント-サーバー間整合性担保",
+      "status": "acknowledged_in_design",
+      "note": "Stage 4レビューで指摘されたNice to Haveのため、設計方針書のセクション6「セキュリティ設計」のOWASP A08評価に記載済み。実装時の対応不要"
+    }
+  ],
+  "design_doc_updated": true,
+  "updated_sections": [
+    "6. セキュリティ設計 - OWASP Top 10評価テーブル追加",
+    "9. レビュー履歴 - Stage 4エントリ追加",
+    "10. レビュー指摘事項サマリー - Stage 4サマリー追加",
+    "Footer - Stage 4レビュー反映日時追加"
+  ],
+  "summary": "Stage 4セキュリティレビュー結果（承認）を設計方針書に記録。Must Fix 0件、Should Fix 0件のため、実装時の対応は不要。セキュリティ上の問題は検出されず、既存のサーバーサイド認証・バリデーション層により十分に防御されていることを確認。OWASP Top 10の4項目（A01 Access Control, A03 Injection, A04 Insecure Design, A08 Integrity）で全てPASS判定。",
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "recommendation": "セキュリティ上の問題は検出されなかった。本修正はクライアントサイドの状態管理ロジックのみの変更であり、サーバーサイドのセキュリティ境界には一切影響しない。設計方針書に4段階全レビュー結果を記録し、実装に進む準備が完了した。",
+  "design_policy_file": "dev-reports/design/issue-391-agent-checkbox-fix-design-policy.md",
+  "timestamp": "2026-03-02T00:00:00Z"
+}

@@ -1,0 +1,10 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 395,
+  "applied_date": "2026-03-03",
+  "applied_findings": ["S1-001", "S1-002", "S1-003", "S1-004", "S1-007", "S1-009"],
+  "skipped_findings": ["S1-005", "S1-006", "S1-008"],
+  "update_summary": "Stage 1レビューのMust Fix 1件とShould Fix 5件を全てIssue本文に反映した。主な変更点: (1) S1-009: next.config.jsセキュリティヘッダがproxyレスポンスに適用されるかの検証項目をValidation Notes item 6として追加し、Impact内に「Critical unknown」として記載。(2) S1-001: 新セクション「Existing Security Controls and Their Limitations」をImpact直下に追加し、CSPの存在とその制限範囲（unsafe-inline/unsafe-evalによるインラインスクリプト実行可能性、connect-src selfによるproxy経由データ送出可能性）を明記。Impact 1の本文にもCSP下での攻撃実現性の説明を追加。(3) S1-002: Preconditionsに認証ミドルウェアによるアクセス制御条件を追加。(4) S1-003: Root Cause item 3にX-Forwarded-For/Host/Proto/X-Real-IPを追加し、補足ノートとRecommended Directionにもストリッピング指針を追加。(5) S1-004: Validation Notes items 4-7として4つの検証項目を追加。(6) S1-007: Recommended Directionにiframe sandboxing戦略を追加（完全解決策ではなくヘッダストリッピングとの併用前提を明記）。Nice to Have 3件（S1-005, S1-006, S1-008）は今回スキップ。",
+  "github_update": "success"
+}

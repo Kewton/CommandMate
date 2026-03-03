@@ -1,0 +1,116 @@
+{
+  "issue_number": 398,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "timestamp": "2026-03-02T12:00:00Z",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "should_fix",
+      "category": "直接影響",
+      "title": "schedule-manager.ts の opencode スケジュール実行で model オプションが渡されない",
+      "description": "schedule-manager.ts L318-339 では、cliToolId が 'vibe-local' の場合のみ worktree.vibe_local_model を取得して options.model に渡している。cliToolId が 'opencode' の場合、options は undefined のままとなり、claude-executor.ts の buildCliArgs() は 'run' + message のみを生成する（opencode.json のデフォルトモデルを使用）。設計書セクション9で claude-executor.ts をスコープ外としているが、schedule-manager.ts 側の opencode パスで model 選択ができない現状については言及がない。将来 Issue として「opencode のスケジュール実行でプロバイダー識別子を動的に切り替える」とあるが、schedule-manager.ts の options 構築ロジック自体が opencode を考慮していない点を明記すべき。",
+      "suggestion": "設計書セクション9のスコープ外テーブルに schedule-manager.ts の行を補強する。具体的には「schedule-manager.ts L328-331 の options 構築が vibe-local 専用であり、opencode の場合は model 未指定となる。LM Studio モデルをスケジュール実行で使用するには、DB スキーマ拡張（opencode_model カラム追加など）と options 構築ロジックの拡張が必要」と記載する。",
+      "location": "設計方針書 セクション9 スコープ外の明確化"
+    },
+    {
+      "id": "S3-002",
+      "severity": "should_fix",
+      "category": "間接影響",
+      "title": "既存 opencode.json ユーザーへの影響が設計書に不十分",
+      "description": "ensureOpencodeConfig() は existsSync() で opencode.json の存在をチェックし、存在すれば何もしない（L158-161）。これは設計書セクション6-3でも維持されている。しかし、以下のシナリオへの影響が未記載: (1) Ollama のみで生成された既存 opencode.json を持つユーザーが LM Studio を後から導入した場合、LM Studio モデルは自動的に追加されない。(2) ユーザーが opencode.json を手動削除して再生成する必要がある。設計書セクション3 D2に「existsSync で skip する」動作は記載されているが、ユーザー向けの移行パス（既存ファイルをどうするか）が欠けている。",
+      "suggestion": "設計書に「後方互換性と移行」サブセクションを追加し、以下を明記する: (1) 既存の opencode.json は上書きしない（現行動作維持）、(2) LM Studio モデルを追加するには、ユーザーが opencode.json を削除してセッションを再起動する必要がある、(3) 将来的に opencode.json のマージ更新（既存ファイルにプロバイダーを追記する）機能を検討する旨を将来 Issue として記載する。",
+      "location": "設計方針書 セクション3 D2 および セクション9"
+    },
+    {
+      "id": "S3-003",
+      "severity": "must_fix",
+      "category": "テスト影響",
+      "title": "既存テスト opencode-config.test.ts の mockFetch が大幅な書き換えを必要とする点が設計書で過小評価されている",
+      "description": "既存テスト（opencode-config.test.ts 298行）では mockFetch がグローバルに1つの fetch をモックしており、全テストケースが Ollama API 単独前提で記述されている。リファクタリング後は fetchOllamaModels() と fetchLmStudioModels() が並列呼び出しされるため、mockFetch は URL に基づく分岐ロジックが必要になる。設計書セクション7-4に mockFetch のURL分岐例は示されているが、以下の点が不足: (1) 既存テストの多く（L104-296: 約13テストケース）が ensureOpencodeConfig() の統合テストとして書かれており、fetchOllamaModels()/fetchLmStudioModels() の個別テストへの分割移行が必要、(2) 既存テストの「non-200で opencode.json が生成されない」等のテストは、LM Studio 側が成功する場合に結果が変わる（opencode.json が生成される）ため、テストの期待値自体が変わる。この動作変更によるテスト修正量の見積もりが設計書に欠けている。",
+      "suggestion": "設計書セクション7に「既存テスト移行影響」サブセクションを追加し、以下を明記する: (1) 既存テスト13件のうち、ensureOpencodeConfig() 統合テストとして残すもの、fetchOllamaModels() 個別テストに移行するもの、動作変更により期待値が変わるものを対応表で示す。(2) 特に「Ollama API 失敗時に opencode.json が生成されない」テスト群（L135-181: 5件）は、LM Studio 側の mockFetch も ECONNREFUSED にする必要がある点を明記する。(3) テスト移行の工数見積もり（概算）を追加する。",
+      "location": "設計方針書 セクション7 テスト設計"
+    },
+    {
+      "id": "S3-004",
+      "severity": "nice_to_have",
+      "category": "直接影響",
+      "title": "/api/ollama/models/route.ts の OLLAMA_API_URL 定数との重複は意図的だが注記が有用",
+      "description": "src/app/api/ollama/models/route.ts にも OLLAMA_API_URL = 'http://localhost:11434/api/tags' がローカル定数として定義されている。opencode-config.ts のリファクタリングに合わせてこの重複を解消する機会はあるが、SEC-001 SSRF 防止ポリシーにより各モジュールでのハードコードが望ましいため、意図的な分離として妥当。ただし、将来 LM Studio 用の /api/lmstudio/models エンドポイントを追加する際に同様のパターンを踏襲する必要がある点を記録しておくとよい。",
+      "suggestion": "設計書セクション9のスコープ外テーブルの /api/lmstudio/models 行に「SEC-001 に従い、LM_STUDIO_API_URL はエンドポイント内にハードコードする。opencode-config.ts の定数は import しない」旨を追記する。",
+      "location": "設計方針書 セクション9 スコープ外の明確化"
+    },
+    {
+      "id": "S3-005",
+      "severity": "nice_to_have",
+      "category": "間接影響",
+      "title": "opencode.ts startSession() の実行時間増加の影響が OPENCODE_INIT_WAIT_MS 内に収まることの明示",
+      "description": "ensureOpencodeConfig() が Promise.all で並列呼び出しに変わることで、最悪ケースで max(3秒, 3秒) = 3秒の実行時間増加が発生する。OPENCODE_INIT_WAIT_MS = 15000ms のため十分な余裕がある。設計書セクション8-2で実行時間テーブルが示されているが、startSession() 全体のタイムライン（validatePath + ensureOpencodeConfig + createSession + resize + sendKeys + INIT_WAIT）の中での位置付けが示されていない。",
+      "suggestion": "設計書セクション8-2に startSession() 全体の実行フローとタイムライン概算を追記する。例: 「validatePath(~0ms) + ensureOpencodeConfig(max 3s) + createSession(~100ms) + resize(~100ms) + sendKeys(~0ms) + INIT_WAIT(15s) = 最大約18.2s。ユーザー体感への影響は INIT_WAIT に隠蔽されるため無視できる。」",
+      "location": "設計方針書 セクション8 パフォーマンス設計"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "スコープ",
+      "title": "claude-executor.ts の ollama/ プレフィックスハードコードが LM Studio モデルをスケジュール実行で使用不可にする影響の具体性不足",
+      "description": "設計書セクション9で claude-executor.ts をスコープ外とし、L110-115 の ollama/ プレフィックスハードコードについて言及している。しかし、影響の具体性が不足している。実際のコード（buildCliArgs L113: `ollama/${options.model}`）を確認すると、LM Studio モデル ID（例: 'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF'）に ollama/ プレフィックスが付加されると `ollama/lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF` となり、OpenCode の opencode run -m コマンドで認識されない可能性が高い。この問題の深刻度（スケジュール実行が完全に機能しないか、エラーで失敗するか、サイレントに不正なモデルを使うか）を明記すべき。",
+      "suggestion": "設計書セクション9の claude-executor.ts 行の記述を拡充し、以下を追加: (1) 具体的な失敗シナリオ（LM Studio モデル ID に ollama/ プレフィックスが付加される）、(2) 失敗時の挙動（OpenCode が不明なモデル名としてエラーを返す）、(3) 将来 Issue でのプロバイダー識別子対応の優先度を示す。",
+      "location": "設計方針書 セクション9 スコープ外の明確化"
+    },
+    {
+      "id": "S3-007",
+      "severity": "nice_to_have",
+      "category": "後方互換性",
+      "title": "Ollama API 成功/モデル0件時の動作変更による後方互換性への影響が限定的だが確認事項あり",
+      "description": "設計書セクション3 D2およびセクション7-3で、Ollama API成功/モデル0件の場合に opencode.json が生成されなくなる動作変更が記載されている。既存動作では空 models の opencode.json が生成されていた。この動作変更の影響は限定的（空 models の opencode.json は実質的に無意味）だが、OpenCode TUI が opencode.json の存在有無で動作を変える可能性を確認する必要がある。opencode.json が存在しない場合、OpenCode はデフォルトの設定で起動するため、空 models よりも望ましい動作と考えられる。",
+      "suggestion": "設計書セクション3 D2の動作変更注記に「OpenCode TUI は opencode.json 不在時にデフォルト設定で起動するため、空 models の config が存在する場合よりも望ましい動作となる」旨の補足を追加する。",
+      "location": "設計方針書 セクション3 D2"
+    },
+    {
+      "id": "S3-008",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "opencode.test.ts の ensureOpencodeConfig mock が新規 export 追加に伴い更新確認が必要",
+      "description": "opencode.test.ts L19-21 で vi.mock('@/lib/cli-tools/opencode-config', () => ({ ensureOpencodeConfig: vi.fn() })) としてモジュール全体をモックしている。opencode-config.ts から新規 export（LM_STUDIO_API_URL, LM_STUDIO_BASE_URL, MAX_LM_STUDIO_MODELS, LM_STUDIO_MODEL_PATTERN, fetchOllamaModels, fetchLmStudioModels 等）が追加されるが、opencode.ts はこれらを import していないため、opencode.test.ts の mock 定義は現状のままで問題ない。ただし、設計書にこの確認結果を明記しておくと実装者が安心できる。",
+      "suggestion": "設計書セクション7に「影響がないことの確認」として opencode.test.ts への影響ゼロである根拠を1行追加する。例: 「opencode.test.ts は ensureOpencodeConfig のみを mock しており、新規 export は opencode.ts で import されないため変更不要。」",
+      "location": "設計方針書 セクション7 テスト設計"
+    },
+    {
+      "id": "S3-009",
+      "severity": "nice_to_have",
+      "category": "直接影響",
+      "title": "LM_STUDIO_MODEL_PATTERN の @ 文字許可と LM Studio モデル ID フォーマットの整合性",
+      "description": "設計書セクション4-1で LM_STUDIO_MODEL_PATTERN = /^[a-zA-Z0-9._:/@-]{1,200}$/ と定義されている。Ollama の OLLAMA_MODEL_PATTERN（/^[a-zA-Z0-9._:/-]{1,100}$/）と比較すると @ が追加されており、長さ上限が 200 に拡張されている。LM Studio のモデル ID 形式（例: 'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF'）を考慮すると @ は不要な可能性があるが、HuggingFace のモデル ID 形式（org/model@revision）を想定していると思われる。この判断の根拠を設計書に記載しておくとよい。",
+      "suggestion": "設計書セクション4-1の LM_STUDIO_MODEL_PATTERN の注釈に、@ を許可した理由（HuggingFace リビジョン指定形式への対応）と 200文字上限の根拠（LM Studio モデル ID が path 形式で長くなる傾向があるため）を追記する。",
+      "location": "設計方針書 セクション4-1 新規追加定数"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 4,
+    "overall_quality": "good",
+    "comment": "設計方針書のスコープ設定は適切であり、影響範囲は opencode-config.ts 内部に十分に局所化されている。ensureOpencodeConfig() のシグネチャ不変により外部モジュール（opencode.ts, schedule-manager.ts, claude-executor.ts）への直接的な破壊的変更はない。主な改善点は (1) 既存テスト移行の影響見積もり不足（must_fix）、(2) schedule-manager.ts の opencode モデル選択パスの未考慮、(3) 既存 opencode.json ユーザーへの移行パス記載、(4) claude-executor.ts の ollama/ プレフィックス問題の具体性強化である。全体として影響範囲の分析は適切に行われており、conditional approval で進行可能。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "medium"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-398-lmstudio-opencode-design-policy.md",
+    "src/lib/cli-tools/opencode-config.ts",
+    "src/lib/cli-tools/opencode.ts",
+    "src/lib/claude-executor.ts",
+    "src/lib/schedule-manager.ts",
+    "src/app/api/ollama/models/route.ts",
+    "src/lib/cli-tools/types.ts",
+    "tests/unit/cli-tools/opencode-config.test.ts",
+    "tests/unit/cli-tools/opencode.test.ts",
+    "tests/unit/lib/claude-executor.test.ts"
+  ],
+  "status": "conditionally_approved",
+  "score": 4
+}

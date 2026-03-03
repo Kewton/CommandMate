@@ -1,0 +1,51 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー - 指摘対応",
+  "applied_findings": ["R2F003", "R2F001", "R2F002", "R2F007", "R2F009", "R2F012"],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 2 整合性レビューの Must Fix 1件 + Should Fix 5件を設計方針書に反映。R2F003: セクション8非スコープにclaude-session.ts:417のシェル構文依存理由を詳細文書化。R2F001: D1-002にgetWorktreeByIdのインポート元'@/lib/db'を明記。R2F002: D2-002の「全10関数」を「全9関数、exec()呼び出し11箇所」に修正（スコープ説明・アーキテクチャ図・レイヤー表・ファイル一覧の5箇所）。R2F007: D2-006にSpecialKey型とALLOWED_SINGLE_SPECIAL_KEYSの同期保証テスト方法を具体化（SPECIAL_KEY_VALUES配列からの型派生パターン推奨）。R2F009: D1-004にsendToTmux()関数の廃止方針とCLIToolManager経由sendMessage()への移行を追記。R2F012: D3-001にsendSpecialKeys/sendSpecialKeyの追加インポートを明記、D3-003を「インポート変更（追加と削除）」に拡張。Nice to Have 6件は設計変更不要と判断しスキップ。Stage 2実装チェックリスト（セクション12）を新設。",
+  "changes_made": [
+    {
+      "finding_id": "R2F003",
+      "severity": "must_fix",
+      "section": "8. 制約条件 > 非スコープ",
+      "change": "claude-session.ts:417 sanitizeSessionEnvironment()をline 237,250,465と分離し、シェルリダイレクト(2>/dev/null || true)依存によるexecFile()移行不可の理由と、固定文字列のためインジェクションリスク無しのリスク許容根拠を明記"
+    },
+    {
+      "finding_id": "R2F001",
+      "severity": "should_fix",
+      "section": "3. 設計方針 > D1-002",
+      "change": "インポート元として import { getWorktreeById } from '@/lib/db' を明記。respond/route.ts:8およびkill-session/route.ts:14の既存インポートパターンを参照例として追記"
+    },
+    {
+      "finding_id": "R2F002",
+      "severity": "should_fix",
+      "section": "1. 概要, 2. アーキテクチャ設計, 3. 設計方針 > D2-002, 6. 修正ファイル一覧",
+      "change": "「全10関数」を「全9関数（exec()呼び出し11箇所）」に修正。スコープ説明・mermaid図ラベル・レイヤー構成表・D2-002タイトル・修正ファイル一覧の計5箇所を更新"
+    },
+    {
+      "finding_id": "R2F007",
+      "severity": "should_fix",
+      "section": "3. 設計方針 > D2-006",
+      "change": "テスト検証方法を具体化。推奨案1: SPECIAL_KEY_VALUES as const配列からSpecialKey型を派生させるパターン（CLI_TOOL_IDSとCLIToolTypeの既存パターン準拠）。代替案2: ハードコード列挙（シンプルだが同期漏れリスクあり）"
+    },
+    {
+      "finding_id": "R2F009",
+      "severity": "should_fix",
+      "section": "3. 設計方針 > D1-004",
+      "change": "sendToTmux()プライベート関数の廃止方針を追記。CLIToolManager経由のsendMessage()への移行、import * as tmuxの完全削除によるDIP方針との整合性確保を明記"
+    },
+    {
+      "finding_id": "R2F012",
+      "severity": "should_fix",
+      "section": "3. 設計方針 > D3-001, D3-003",
+      "change": "D3-001にsendSpecialKeys/sendSpecialKeyの追加インポートを明記。D3-003のタイトルを「インポート削除」から「インポート変更（追加と削除）」に変更し、追加（sendSpecialKeys, sendSpecialKey）と削除（exec, execAsync）の両方を記載"
+    }
+  ],
+  "new_sections_added": [
+    "11. Stage 2 レビュー指摘事項サマリー（整合性レビュー）",
+    "12. 実装チェックリスト（Stage 2 レビュー反映）"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

@@ -1,0 +1,170 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_type": "影響範囲",
+  "issue_number": 394,
+  "review_date": "2026-03-02",
+  "summary": "Issue #394の修正は、path-validator.tsへのrealpath()追加を中心に、file-operations.ts、APIルート、file-tree.ts、file-search.tsに波及する。Issueの影響範囲分析は概ね正確だが、(1) tree APIルートとsearch APIルートが影響範囲に含まれていない、(2) createFileOrDirectory/writeBinaryFileで存在しないパスに対するrealpath()の適用戦略が未記載、(3) isPathSafe()のシグネチャ変更がfile-search.tsのパス安全性チェックに影響する可能性が未考慮、(4) macOS /var -> /private/var等のOS固有のsymlinkがworktreeRoot自体に影響するケースの考慮が不足、(5) 既存テストのtmpdir()使用がrealpathとの相互作用を考慮する必要がある、という5点の課題が確認された。",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "category": "影響ファイル",
+      "title": "tree APIルートとsearch APIルートが影響範囲に含まれていない",
+      "description": "Issue本文のAffected Endpointsセクションにはfiles APIとupload APIのみが記載されているが、以下のエンドポイントも同じ脆弱性の影響を受ける可能性がある:\n\n1. GET /api/worktrees/:id/tree/[...path] -- isPathSafe()による検証後にreadDirectory()を呼び出す。readDirectory()内部でlstat()によるシンボリックリンクスキップが行われるが、APIリクエストのパス自体（relativePath）がシンボリックリンクを含むディレクトリを指す場合、readDirectory()はそのディレクトリ内のコンテンツを返す。例: worktree内にsymlink-dirという/etcを指すシンボリックリンクがある場合、GET /api/worktrees/:id/tree/symlink-dir は/etcの内容をリストする。readDirectory()はlstat()でsymlink-dirの子エントリのシンボリックリンクをスキップするが、symlink-dir自体がシンボリックリンクであることは検出しない。\n\n2. GET /api/worktrees/:id/search -- searchWithTimeout()にworktree.pathを渡し、file-search.ts内でisPathSafe()チェックとlstat()によるシンボリックリンクスキップが行われる。こちらはsearchDirectory()内でlstat()チェックがあるためfile-treeと同様の部分的防御がある。ただしisPathSafe()で検証されたパスがsymlinkを含むディレクトリの場合、そのディレクトリ自体への進入は防がれない。",
+      "location": "## Affected Endpoints セクション",
+      "suggestion": "Affected Endpointsに以下を追加:\n- GET /api/worktrees/:id/tree/:path （ディレクトリリスティング）\n- GET /api/worktrees/:id/search （ファイル検索）\n\nまた、file-tree.tsのreadDirectory()のtargetPath計算（line 149）でもsymlink解決後のパスがworktreeRoot内かを検証する必要がある旨を記載する。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "category": "エッジケース",
+      "title": "新規ファイル/ディレクトリ作成時のrealpath()適用戦略が未記載",
+      "description": "Issueの「Recommended Direction」セクションでは「Resolve realpath() on the target path (or the existing parent directory for create/upload)」と記載されているが、具体的なエッジケースの考慮が不足している:\n\n1. createFileOrDirectory() (line 298): パスが存在しない場合、realpath()は ENOENT エラーを返す。親ディレクトリに対してrealpath()を適用する必要があるが、recursive: trueでmkdir()が中間ディレクトリを作成する場合、どの段階でrealpath()検証を行うか不明。例: worktree/existingDir/newSubDir/newFile.md を作成する場合、existingDirまではrealpath()可能だが、newSubDirはまだ存在しない。\n\n2. writeBinaryFile() (line 674): 同様に親ディレクトリが存在しない場合がある。\n\n3. 親ディレクトリ自体がシンボリックリンクの場合: worktree/symlink-to-external/newfile.md を作成する際、symlink-to-externalの親ディレクトリrealpath()は成功するが、実際のファイル作成先はworktree外になる。\n\nこれらのケースで一貫した検証戦略が必要。",
+      "location": "## Recommended Direction セクション",
+      "suggestion": "以下の戦略を明記する:\n- 既存ファイル操作(read/update/delete/rename): 対象パスにrealpath()を適用\n- 新規作成操作(create/upload): 最も近い既存の祖先ディレクトリにrealpath()を適用し、そのresolved pathがworktreeRoot内であることを検証する\n- 実装方針の例: パスを先頭から走査し、存在する最長の祖先パスを見つけてrealpath()検証を行う関数を作成する"
+    },
+    {
+      "id": "F3-003",
+      "severity": "must_fix",
+      "category": "エッジケース",
+      "title": "worktreeRoot自体にOSレベルのsymlinkが含まれるケース（macOS /var -> /private/var）の考慮不足",
+      "description": "macOSでは /var は /private/var へのシンボリックリンクであり、tmpdir() は /var/folders/... を返すが実際のパスは /private/var/folders/... である。\n\n現在のmoveFileOrDirectory()のSEC-006（line 546-547）では、worktreeRootにもrealpathSync()を適用して比較している:\n  const resolvedDest = realpathSync(destFullPath);\n  const resolvedRoot = realpathSync(worktreeRoot);\n\nしかし、isPathSafe()にrealpath()を追加する場合、worktreeRootとtargetPathの両方にrealpath()を適用しないと、macOSのtmpdir()ベースのworktreeで正規のパスが全て拒否される可能性がある。\n\n既存テスト（file-operations.test.ts, file-operations-move.test.ts）はtmpdir()をworktreeRootとして使用しているため、この問題は実テスト環境で顕在化する。DBに保存されたworktree.pathがrealpath解決前のパス（例: /var/folders/...）の場合、全てのファイル操作が失敗するリスクがある。",
+      "location": "## Recommended Direction / Acceptance Criteria セクション",
+      "suggestion": "以下を実装方針に追加:\n- isPathSafe()またはrealpath検証関数内で、rootDir にも realpathSync() を適用してから比較する\n- Acceptance Criteriaに「macOS tmpdir() ベースのworktreeで正常動作すること」を追加\n- DBに保存されたworktree.pathがsymlinkを含む場合でも正常動作することを確認するテストケースを追加"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "既存テストのtmpdir()使用がrealpath導入後に互換性問題を起こす可能性",
+      "description": "以下の既存テストファイルがtmpdir()をworktreeRootとして使用している:\n\n- tests/unit/lib/file-operations.test.ts (line 33)\n- tests/unit/lib/file-operations-move.test.ts (line 18)\n- tests/unit/lib/file-operations-validate.test.ts (line 18)\n- tests/integration/api-file-operations.test.ts (line 61)\n\nmacOSの場合、tmpdir()は/var/folders/...を返すが、realpathSync()は/private/var/folders/...を返す。isPathSafe()にrealpath検証を追加した場合、join(worktreeRoot, relativePath)のrealpathと、worktreeRootのrealpathの比較で不一致が発生する可能性がある。\n\nこれは実装方法次第では全既存テストの失敗を引き起こす。",
+      "location": "## Acceptance Criteria - 既存テストパスの項目",
+      "suggestion": "Acceptance Criteriaの「Existing tests pass」の項目に以下を補足:\n- macOS環境でtmpdir()ベースのテストが引き続きパスすることを確認\n- isPathSafe()の修正時にrootDirにもrealpath()を適用する設計を採用すること\n- 修正後にnpm run test:unit を実行して全テストパスを確認"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "category": "他モジュール影響",
+      "title": "isPathSafe()のシグネチャ変更がfile-search.tsのパス安全性チェックに影響する可能性",
+      "description": "file-search.ts の searchDirectory() (line 265) では isPathSafe(currentPath, basePath) を呼び出している。ここでcurrentPathはjoin()で構成された絶対パスである。\n\nisPathSafe()にrealpath()を追加する場合、以下の影響がある:\n1. searchDirectory()はディレクトリを再帰走査するため、1ディレクトリあたり1回のrealpath()システムコールが追加される\n2. file-search.tsでは既にlstat()でsymlinkをスキップしているため、realpath()の追加は二重チェックになる\n3. ただし、searchDirectory()のisPathSafe()チェック（line 265, 298）はディレクトリ/ファイルの絶対パスを直接検証しているため、isPathSafe()にrealpath()が追加されると、検索対象ディレクトリ内の全エントリに対してrealpath()が呼ばれる\n\nパフォーマンス影響を考慮し、isPathSafe()自体を変更するか、新しいsymlink-aware関数を別途作成するかの設計判断が必要。",
+      "location": "## Affected Code / Recommended Direction セクション",
+      "suggestion": "以下のいずれかの設計方針を明記する:\n- 方針A: isPathSafe()自体にrealpath()を追加（全呼び出し元に影響、パフォーマンスリスクあり）\n- 方針B: isPathSafeWithRealpath()等の新関数を作成し、file API呼び出し元のみで使用（既存のisPathSafe()は変更なし、file-search.ts/repositories/scan等は既存のままで影響なし）\n- 方針C: file-operations.tsの各関数内でrealpath検証を追加（isPathSafe()は変更せず、各操作関数で個別対応）\n\n推奨は方針Bまたは方針C。file-search.tsは既にlstat()でsymlinkスキップしているため、追加のrealpath()は不要。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "category": "一貫性",
+      "title": "repositories/scan APIのisPathSafe()呼び出しへの影響が未考慮",
+      "description": "src/app/api/repositories/scan/route.ts (line 29) でisPathSafe(repositoryPath, CM_ROOT_DIR)が呼び出されている。isPathSafe()にrealpath()を追加する場合、repositoryPathの検証にもrealpath()が適用される。\n\nrepositoryPathはユーザーが入力するリポジトリパスであり、symlinkを含む可能性がある。CM_ROOT_DIRもsymlinkを含む可能性がある。\n\nこのエンドポイントはファイルの読み書きを行わない（worktreeスキャンのみ）ため、symlink traversal脆弱性の直接的な影響はないが、isPathSafe()を変更する場合は副作用として考慮が必要。",
+      "location": "## Affected Code セクション",
+      "suggestion": "Affected Codeセクションに repositories/scan ルートを「間接影響」として追記し、isPathSafe()の修正方針によってはこのエンドポイントにも影響がある旨を注記する。あるいはF3-005の方針B/Cを採用してisPathSafe()自体は変更しないことで影響を回避する。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "should_fix",
+      "category": "パフォーマンス",
+      "title": "realpath()の追加によるI/Oパフォーマンスへの影響分析が未記載",
+      "description": "realpath()はファイルシステムのシステムコールであり、パスの各コンポーネントのsymlink解決のために複数のstat()を内部的に実行する。\n\n影響の大きい箇所:\n1. file-tree.tsのreadDirectory(): 1ディレクトリあたり最大500エントリ（LIMITS.MAX_ITEMS_PER_DIR）に対してrealpath()が追加される場合、ディレクトリリスティングのレイテンシが増加\n2. file-search.tsのsearchDirectory(): 再帰走査で多数のファイルに対してrealpath()が呼ばれる\n3. 個別ファイル操作(read/write/delete/rename): 1リクエストあたり1回のrealpath()追加は軽微\n\n実装方針として、readDirectory()/searchDirectory()ではlstat()によるsymlink検出が既に行われているため、追加のrealpath()は不要とすることでパフォーマンス影響を最小化できる。",
+      "location": "## Recommended Direction セクション",
+      "suggestion": "パフォーマンス考慮事項を追加:\n- 個別ファイル操作API（files, upload）: realpath()追加のオーバーヘッドは軽微（1リクエスト1回）\n- ディレクトリ走査API（tree, search）: 既存のlstat()によるsymlink検出で十分。realpath()追加は不要\n- 実装戦略: ファイルAPI層（file-operations.ts, route.ts）でのみrealpath()検証を適用し、ツリー/検索APIはlstat()ベースの既存防御を維持"
+    },
+    {
+      "id": "F3-008",
+      "severity": "should_fix",
+      "category": "後方互換性",
+      "title": "INVALID_PATHエラーが返される新しいケースがクライアントに影響するか",
+      "description": "symlink traversalの修正により、これまで正常に動作していたパス（worktree内のsymlinkを通じたファイルアクセス）がINVALID_PATHエラーを返すようになる。\n\nクライアント側コード分析:\n- src/components/worktree/WorktreeDetailRefactored.tsx等のクライアントコンポーネントはAPIレスポンスのsuccess:falseを汎用的にハンドリングしており、特定のerror.codeに依存していない\n- src/hooks/useFileOperations.ts等もerror.messageの表示のみ\n\nそのため、INVALID_PATHが返される新しいケースがクライアントのロジックを壊すことはない。ただし、ユーザーが意図的にworktree内にsymlinkを設置している場合（例: 共有ライブラリへのsymlink）、今まで参照できていたファイルが参照不可になるUX変更がある。",
+      "location": "## Acceptance Criteria セクション",
+      "suggestion": "Acceptance Criteriaに以下を追加:\n- worktree内のsymlinkのうち、worktreeRoot内を指すsymlink（内部symlink）は引き続きアクセス可能であること\n- worktreeRoot外を指すsymlink（外部symlink）のみが拒否されること\n\nこれにより、worktree内での正当なsymlink利用（例: サブモジュール的なリンク）を壊さずにセキュリティを確保できる。"
+    },
+    {
+      "id": "F3-009",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "title": "新規テストケースの具体的な網羅性が不足",
+      "description": "Acceptance Criteriaの「New test coverage」は「各操作でsymlink traversalがブロックされることを検証」と記載されているが、具体的なテストシナリオが不足している:\n\n必要なテストシナリオ:\n1. 外部ディレクトリを指すsymlinkを通じた読み取り → INVALID_PATH\n2. 外部ディレクトリを指すsymlinkを通じた書き込み → INVALID_PATH\n3. 外部ディレクトリを指すsymlinkを通じた削除 → INVALID_PATH\n4. 外部ディレクトリを指すsymlinkを通じたリネーム（source） → INVALID_PATH\n5. symlinkディレクトリ内への新規ファイル作成 → INVALID_PATH\n6. symlinkディレクトリへのアップロード → INVALID_PATH\n7. 内部（worktreeRoot内）を指すsymlinkを通じた読み取り → 成功\n8. 壊れたsymlink（dangling symlink）へのアクセス → 適切なエラー\n9. 多段symlink（symlink → symlink → external）のチェーン → INVALID_PATH\n10. worktreeRoot自体がsymlinkの場合（macOS tmpdir等）→ 正常動作",
+      "location": "## Acceptance Criteria - New test coverage",
+      "suggestion": "Acceptance Criteriaのテスト項目を上記10シナリオに具体化する。特にシナリオ7（内部symlink許可）と10（worktreeRoot symlink）は修正の正確性を保証するために重要。"
+    },
+    {
+      "id": "F3-010",
+      "severity": "nice_to_have",
+      "category": "一貫性",
+      "title": "validateWorktreePath()もsymlink未検証だがIssueで言及されていない",
+      "description": "src/lib/path-validator.ts のvalidateWorktreePath()はisPathSafe()を内部的に呼び出して検証しているが、clone-manager.tsとopencode-config.tsで使用されている。\n\nclone-manager.ts (Issue #392で修正済み) ではresolveCustomTargetPath()内でvalidateWorktreePath()を呼び出しており、クローン先パスの検証に使用されている。opencode-config.tsではvalidateWorktreePath()を直接使用しているが、独自のrealpath検証も行っている。\n\nisPathSafe()を修正する場合、validateWorktreePath()も自動的に修正される。ただしIssueではvalidateWorktreePath()の呼び出し元への影響が言及されていない。",
+      "location": "## Affected Code セクション",
+      "suggestion": "Affected Codeセクションに、validateWorktreePath()の呼び出し元（clone-manager.ts, opencode-config.ts）を「間接影響（isPathSafe()修正時に自動的に影響）」として記載する。"
+    },
+    {
+      "id": "F3-011",
+      "severity": "nice_to_have",
+      "category": "ドキュメント更新",
+      "title": "修正後のセキュリティアーキテクチャドキュメント更新が未言及",
+      "description": "CLAUDE.mdのモジュール一覧でpath-validator.tsは明示的にドキュメント化されていない（file-operations.ts内でisPathSafe()の使用が言及されている程度）。また、docs/architecture.md等のドキュメントも更新が必要になる可能性がある。\n\n修正完了後に以下のドキュメント更新が望ましい:\n- CLAUDE.mdのpath-validator.tsモジュール説明の追加\n- file-operations.ts, file-tree.ts, file-search.tsの各モジュール説明でsymlink検証について言及",
+      "location": "Issue本文全体",
+      "suggestion": "Issue本文に「Documentation Updates」セクションを追加し、修正完了後のドキュメント更新項目をリストする。"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 6,
+  "nice_to_have_count": 2,
+  "overall_quality": "needs_improvement",
+  "recommendation": "Issue #394は脆弱性の根本原因分析と影響範囲の特定が高品質であるが、影響範囲レビューの結果、3つのmust_fix課題が確認された。最も重要なのは(1) tree/search APIルートの影響範囲への追加、(2) 新規ファイル作成時のrealpath適用戦略の明確化、(3) macOS等のOS固有symlinkの考慮である。これらはいずれも実装段階で設計判断を誤るリスクを含むため、Issue内で方針を明記すべきである。should_fixの6件は実装品質とテスト網羅性に関するもので、特にisPathSafe()の修正方針（関数自体を変更するか新関数を作成するか）は全体の影響範囲を決定する重要な設計判断であり、早期に方針を確定すべきである。",
+  "code_references": [
+    {
+      "file": "src/lib/path-validator.ts",
+      "relevance": "修正対象のコアバリデーター。isPathSafe()とvalidateWorktreePath()がsymlink未検証。"
+    },
+    {
+      "file": "src/lib/file-operations.ts",
+      "relevance": "修正対象。readFileContent/updateFileContent/createFileOrDirectory/deleteFileOrDirectory/renameFileOrDirectory/writeBinaryFileの全関数が影響。moveFileOrDirectory()は既にSEC-006でrealpath検証済み。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "relevance": "修正対象。GET handler lines 153, 200-211で直接readFile()を呼んでおり、file-operations.tsを経由しない。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+      "relevance": "修正対象。writeBinaryFile()呼び出し前のパス検証にisPathSafe()のみ使用。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/tree/[...path]/route.ts",
+      "relevance": "Issueに未記載の影響範囲。isPathSafe()後にreadDirectory()を呼び出し、symlinkディレクトリの内容をリストする可能性。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/search/route.ts",
+      "relevance": "Issueに未記載の影響範囲。searchWithTimeout()にworktree.pathを渡し、file-search.ts内のisPathSafe()に依存。"
+    },
+    {
+      "file": "src/lib/file-tree.ts",
+      "relevance": "readDirectory()がlstat()でsymlink子エントリをスキップするが、ターゲットディレクトリ自体のsymlink検証は行わない。"
+    },
+    {
+      "file": "src/lib/file-search.ts",
+      "relevance": "searchDirectory()がlstat()でsymlinkをスキップ、isPathSafe()でパス検証。isPathSafe()変更時にパフォーマンス影響あり。"
+    },
+    {
+      "file": "src/app/api/repositories/scan/route.ts",
+      "relevance": "isPathSafe()の間接影響範囲。修正方針によっては副作用が発生。"
+    },
+    {
+      "file": "tests/unit/lib/file-operations.test.ts",
+      "relevance": "tmpdir()をworktreeRootとして使用。macOSでrealpath導入後に不整合の可能性。"
+    },
+    {
+      "file": "tests/unit/lib/file-operations-move.test.ts",
+      "relevance": "symlinkテスト（SEC-006）が既存。新テストの参考になる。"
+    },
+    {
+      "file": "tests/integration/api-file-operations.test.ts",
+      "relevance": "APIレベルのpath traversalテストが既存。symlink traversalテストの追加が必要。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "path-validator.tsモジュール説明が未記載。修正後にモジュール一覧を更新すべき。"
+    }
+  ]
+}

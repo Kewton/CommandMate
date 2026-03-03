@@ -1,0 +1,23 @@
+{
+  "issue_number": 394,
+  "refactor_targets": [
+    "src/lib/path-validator.ts",
+    "src/lib/file-operations.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/tree/[...path]/route.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 100.0,
+    "tests_passed": 4324,
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "SOLID原則準拠確認（特にSRP - resolveAndValidateRealPathの単一責任）",
+    "DRY原則確認（file-operations.tsでの繰り返しパターン最適化）",
+    "エラーハンドリングの一貫性確認",
+    "JSDocコメントの適切性確認",
+    "テストコードの重複排除"
+  ]
+}

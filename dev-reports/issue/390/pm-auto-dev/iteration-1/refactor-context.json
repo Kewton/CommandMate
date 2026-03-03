@@ -1,0 +1,18 @@
+{
+  "issue_number": 390,
+  "refactor_targets": [
+    "src/app/globals.css",
+    "src/app/worktrees/[id]/files/[...path]/page.tsx",
+    "src/components/worktree/MermaidDiagram.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "unit_tests_passed": 4251
+  },
+  "improvement_goals": [
+    "コードの可読性確認",
+    "不要なコメントや重複がないか確認",
+    "CSSルールの命名・コメントが適切か確認"
+  ],
+  "notes": "本修正はCSSのみ。新規テスト追加は不要。リファクタリングはコードの品質確認と軽微な改善のみ。"
+}

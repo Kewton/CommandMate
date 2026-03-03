@@ -1,0 +1,35 @@
+{
+  "issue_number": 394,
+  "acceptance_criteria": [
+    "Symlink rejection: A request to any affected endpoint (GET/PUT/POST/DELETE/PATCH/Upload/Tree) with a path that resolves through a symlink pointing outside the worktree root is rejected with INVALID_PATH",
+    "Normal path preservation: Requests to paths that do not involve symlinks continue to function correctly",
+    "Internal symlink preservation: Symlinks pointing within the worktreeRoot remain accessible",
+    "Image/video GET paths: Direct readFile() code paths for image (line 153) and video (line 200-211) responses are protected",
+    "Rename protection: renameFileOrDirectory() validates source path against symlink traversal",
+    "Tree API protection: GET /api/worktrees/:id/tree/:path rejects symlink directories resolving outside root",
+    "Create/upload with symlink parent: Creating or uploading through an external symlink parent is rejected",
+    "macOS tmpdir compatibility: Works when worktreeRoot contains OS-level symlinks (e.g., macOS /var -> /private/var)",
+    "Existing tests pass: All existing file operation tests continue to pass",
+    "New test coverage: 10 new test cases in path-validator.test.ts and 9 cases in file-operations-symlink.test.ts"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: Add resolveAndValidateRealPath() to src/lib/path-validator.ts - uses realpathSync on both rootDir and targetPath, ancestor traversal fallback for non-existent paths, console.warn [SEC-394] on rejection",
+    "Task 1.2: Integrate resolveAndValidateRealPath() into validateFileOperation() in src/lib/file-operations.ts after isPathSafe() - keep resolvedSource as lexical path",
+    "Task 1.3: Add resolveAndValidateRealPath() individually to 5 functions in src/lib/file-operations.ts: readFileContent, updateFileContent, createFileOrDirectory, deleteFileOrDirectory, writeBinaryFile",
+    "Task 2.1: Patch getWorktreeAndValidatePath() in src/app/api/worktrees/[id]/files/[...path]/route.ts after isPathSafe()",
+    "Task 2.2: Add resolveAndValidateRealPath() after isPathSafe() at line 117 in src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+    "Task 2.3: Add resolveAndValidateRealPath() after isPathSafe() at line 75 in src/app/api/worktrees/[id]/tree/[...path]/route.ts",
+    "Task 3.1: Add 10 symlink test cases to tests/unit/path-validator.test.ts",
+    "Task 3.2: Create tests/unit/lib/file-operations-symlink.test.ts with 9 test cases"
+  ],
+  "design_policy_path": "dev-reports/design/issue-394-symlink-traversal-fix-design-policy.md",
+  "work_plan_path": "dev-reports/issue/394/work-plan.md",
+  "target_coverage": 80,
+  "key_implementation_notes": {
+    "algorithm": "resolveAndValidateRealPath(targetPath, rootDir): 1) realpathSync(rootDir) = resolvedRoot; 2) if path exists: realpathSync(fullPath), check startsWith(resolvedRoot+sep) || === resolvedRoot; 3) if not exists: walk dirname until existsSync, apply realpathSync to ancestor, same check; 4) fail-safe: return false on any error",
+    "return_value_policy": "resolvedSource in validateFileOperation() stays as lexical join(worktreeRoot, sourcePath) - NOT the realpath result [S3-001]",
+    "macos_compat": "Apply realpathSync to BOTH rootDir and targetPath before comparison - matches SEC-006 pattern",
+    "logging": "console.warn('[SEC-394] symlink traversal rejected: ...') on rejection",
+    "reference_pattern": "moveFileOrDirectory SEC-006 at file-operations.ts:544-553"
+  }
+}

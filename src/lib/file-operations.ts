@@ -12,7 +12,7 @@
 import { readFile, writeFile, mkdir, rm, rename, stat, readdir } from 'fs/promises';
 import { existsSync, realpathSync, statSync } from 'fs';
 import { join, extname, dirname, basename, sep, resolve } from 'path';
-import { isPathSafe } from './path-validator';
+import { isPathSafe, resolveAndValidateRealPath } from './path-validator';
 import { isEditableExtension } from '@/config/editable-extensions';
 import { DELETE_SAFETY_CONFIG, isProtectedDirectory } from '@/config/file-operations';
 
@@ -134,6 +134,31 @@ function mapFsError(error: unknown): FileOperationResult {
 }
 
 /**
+ * [SEC-394] Two-layer path safety check: lexical traversal (isPathSafe) + symlink traversal (resolveAndValidateRealPath).
+ *
+ * Returns null when path is safe, or an INVALID_PATH error result when unsafe.
+ * Extracted to eliminate repetition across readFileContent, updateFileContent,
+ * createFileOrDirectory, deleteFileOrDirectory, and writeBinaryFile.
+ *
+ * @internal Exported for unit testing only.
+ * @param relativePath - Relative path to validate
+ * @param worktreeRoot - Root directory of the worktree
+ * @returns null if safe; FileOperationResult with INVALID_PATH if unsafe
+ */
+export function checkPathSafety(
+  relativePath: string,
+  worktreeRoot: string
+): FileOperationResult | null {
+  if (!isPathSafe(relativePath, worktreeRoot)) {
+    return createErrorResult('INVALID_PATH');
+  }
+  if (!resolveAndValidateRealPath(relativePath, worktreeRoot)) {
+    return createErrorResult('INVALID_PATH');
+  }
+  return null;
+}
+
+/**
  * Check if a file is editable based on its extension
  *
  * @param filePath - File path to check
@@ -217,6 +242,7 @@ export function isValidNewName(
 
 /**
  * Read file content
+ * [SEC-394] Includes symlink traversal validation via checkPathSafety
  *
  * @param worktreeRoot - Root directory of the worktree
  * @param relativePath - Relative path to the file
@@ -226,10 +252,9 @@ export async function readFileContent(
   worktreeRoot: string,
   relativePath: string
 ): Promise<FileOperationResult> {
-  // Validate path
-  if (!isPathSafe(relativePath, worktreeRoot)) {
-    return createErrorResult('INVALID_PATH');
-  }
+  // [SEC-394] Two-layer path safety check
+  const pathError = checkPathSafety(relativePath, worktreeRoot);
+  if (pathError) return pathError;
 
   const fullPath = join(worktreeRoot, relativePath);
 
@@ -252,6 +277,7 @@ export async function readFileContent(
 
 /**
  * Update file content
+ * [SEC-394] Includes symlink traversal validation via checkPathSafety
  *
  * @param worktreeRoot - Root directory of the worktree
  * @param relativePath - Relative path to the file
@@ -263,10 +289,9 @@ export async function updateFileContent(
   relativePath: string,
   content: string
 ): Promise<FileOperationResult> {
-  // Validate path
-  if (!isPathSafe(relativePath, worktreeRoot)) {
-    return createErrorResult('INVALID_PATH');
-  }
+  // [SEC-394] Two-layer path safety check
+  const pathError = checkPathSafety(relativePath, worktreeRoot);
+  if (pathError) return pathError;
 
   const fullPath = join(worktreeRoot, relativePath);
 
@@ -288,6 +313,7 @@ export async function updateFileContent(
 
 /**
  * Create a new file or directory
+ * [SEC-394] Includes symlink traversal validation via checkPathSafety
  *
  * @param worktreeRoot - Root directory of the worktree
  * @param relativePath - Relative path for the new file/directory
@@ -301,10 +327,9 @@ export async function createFileOrDirectory(
   type: 'file' | 'directory',
   content?: string
 ): Promise<FileOperationResult> {
-  // Validate path
-  if (!isPathSafe(relativePath, worktreeRoot)) {
-    return createErrorResult('INVALID_PATH');
-  }
+  // [SEC-394] Two-layer path safety check
+  const pathError = checkPathSafety(relativePath, worktreeRoot);
+  if (pathError) return pathError;
 
   const fullPath = join(worktreeRoot, relativePath);
 
@@ -366,6 +391,7 @@ async function countFilesRecursive(dirPath: string, depth: number = 0): Promise<
 /**
  * Delete a file or directory
  * [SEC-SF-004] Protected directory check and delete limit
+ * [SEC-394] Includes symlink traversal validation via checkPathSafety
  *
  * @param worktreeRoot - Root directory of the worktree
  * @param relativePath - Relative path to delete
@@ -377,10 +403,9 @@ export async function deleteFileOrDirectory(
   relativePath: string,
   recursive?: boolean
 ): Promise<FileOperationResult> {
-  // Validate path
-  if (!isPathSafe(relativePath, worktreeRoot)) {
-    return createErrorResult('INVALID_PATH');
-  }
+  // [SEC-394] Two-layer path safety check
+  const pathError = checkPathSafety(relativePath, worktreeRoot);
+  if (pathError) return pathError;
 
   // Check for protected directories
   if (isProtectedDirectory(relativePath)) {
@@ -438,7 +463,8 @@ export async function deleteFileOrDirectory(
 /**
  * Common validation helper for file operations [MF-001]
  *
- * Validates source path safety (via isPathSafe) and existence.
+ * Validates source path safety (via checkPathSafety) and existence.
+ * [SEC-394] Includes symlink traversal validation via checkPathSafety
  * [SF-S2-003] Only validates source path; destination validation is the caller's responsibility.
  *
  * Used by: renameFileOrDirectory, moveFileOrDirectory
@@ -460,9 +486,10 @@ export function validateFileOperation(
   worktreeRoot: string,
   sourcePath: string
 ): { success: true; resolvedSource: string } | { success: false; error: FileOperationResult } {
-  // 1. isPathSafe() for source path safety
-  if (!isPathSafe(sourcePath, worktreeRoot)) {
-    return { success: false, error: createErrorResult('INVALID_PATH') };
+  // 1. [SEC-394] Two-layer path safety check (resolvedSource stays as lexical path)
+  const pathError = checkPathSafety(sourcePath, worktreeRoot);
+  if (pathError) {
+    return { success: false, error: pathError };
   }
 
   const fullPath = join(worktreeRoot, sourcePath);
@@ -665,6 +692,7 @@ export async function renameFileOrDirectory(
  * Write binary file to the filesystem
  * [SOLID-001] Follows the same pattern as createFileOrDirectory()
  * [DRY-002] Includes path validation as defense-in-depth
+ * [SEC-394] Includes symlink traversal validation via checkPathSafety
  *
  * @param worktreeRoot - Root directory of the worktree
  * @param relativePath - Relative path for the new file
@@ -676,10 +704,9 @@ export async function writeBinaryFile(
   relativePath: string,
   buffer: Buffer
 ): Promise<FileOperationResult> {
-  // Validate path (defense-in-depth)
-  if (!isPathSafe(relativePath, worktreeRoot)) {
-    return createErrorResult('INVALID_PATH');
-  }
+  // [SEC-394] Two-layer path safety check (defense-in-depth)
+  const pathError = checkPathSafety(relativePath, worktreeRoot);
+  if (pathError) return pathError;
 
   const fullPath = join(worktreeRoot, relativePath);
 

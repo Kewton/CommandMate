@@ -1,0 +1,61 @@
+{
+  "issue_number": 392,
+  "stage": 1,
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S1-001",
+        "item": "resolveCustomTargetPath()の例外握り潰しにconsole.warnログを追加",
+        "sections_updated": ["4-1", "5-2b", "8 (D4-001)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S1-002",
+        "item": "validateWorktreePath()のdecodeURIComponent二重適用リスクの既知リスク記録",
+        "sections_updated": ["10-1"],
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S1-003",
+        "item": "route.tsでtargetDirの長さ制限（1024文字）チェック追加",
+        "sections_updated": ["5-1"],
+        "status": "reflected"
+      },
+      {
+        "id": "S1-004",
+        "item": "isPathSafe importの明示的削除を設計決定として記録",
+        "sections_updated": ["5-2a", "8 (D5-001)"],
+        "status": "reflected"
+      },
+      {
+        "id": "S1-005",
+        "item": "H-003空文字テストの到達不能パス注記",
+        "sections_updated": ["11"],
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "applied_findings": ["S1-001", "S1-002", "S1-003", "S1-004", "S1-005"],
+  "skipped_findings": [],
+  "design_doc_path": "dev-reports/design/issue-392-clone-path-validation-fix-design-policy.md",
+  "sections_updated": [
+    "4-1 (ヘルパー関数コード例にconsole.warn追加)",
+    "5-1 (targetDir長さ制限追加)",
+    "5-2a (isPathSafe import削除に変更)",
+    "5-2b (ヘルパー関数コード例にconsole.warn追加)",
+    "8 (D4-001 console.warn反映、D5-001 明示的削除に変更)",
+    "10-1 (既知のリスク: decodeURIComponent二重適用)",
+    "11 (テスト設計補足: H-003注記)",
+    "12 (レビュー履歴)",
+    "13 (レビュー指摘事項サマリー)",
+    "14 (実装チェックリスト)"
+  ],
+  "summary": "Stage 1レビュー（設計原則）の全5件（should_fix 2件、nice_to_have 3件）を設計方針書に反映。S1-001: resolveCustomTargetPath()のcatchブロックにconsole.warnログを追加（セクション4-1/5-2bのコード例およびD4-001更新）。S1-002: validateWorktreePath()のdecodeURIComponent二重適用リスクをスコープ外既知リスクとしてセクション10-1に記録。S1-003: route.tsのtargetDir長さ制限（1024文字）をセクション5-1のコード例に追加。S1-004: isPathSafe importの明示的削除をセクション5-2aおよびD5-001に反映。S1-005: H-003テストケースの防御的テスト注記をセクション11に追加。レビュー履歴・指摘事項サマリー・実装チェックリストを新規セクションとして追加。",
+  "timestamp": "2026-03-02T00:00:00Z"
+}

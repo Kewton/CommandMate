@@ -1,0 +1,96 @@
+{
+  "issue_number": 398,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "category": "DRY",
+      "title": "タイムアウト/AbortController/レスポンスサイズチェックの重複コード",
+      "description": "設計書D1で選択肢B（各fetch関数内に独立実装）を採用しているが、fetchOllamaModels()とfetchLmStudioModels()の間で、AbortControllerの生成・setTimeout・レスポンスサイズ制限チェック・AbortErrorハンドリングという4つの同一パターンが完全に重複する。現時点では2プロバイダーのみであり、設計書のYAGNI根拠（3プロバイダー目追加時に共通化検討）は理解できるが、これらはHTTPフェッチの共通基盤であり、APIレスポンス解析ロジックとは明確に分離できる。設計書のモジュール構成図にも fetchWithTimeout() が選択肢Aとして記載されており、検討した形跡がある。",
+      "suggestion": "fetchWithTimeout(url: string, timeoutMs: number, maxResponseSize: number): Promise<string | null> のような最小限のヘルパー（レスポンステキストを返すだけ）を導入すれば、レスポンス解析ロジック（JSON構造・バリデーション）は各関数固有に維持したまま、HTTP通信部分のみDRY化できる。API応答形式の違い（{ models } vs { data }）はヘルパーの外で処理するため、ヘルパーの汎用性維持は不要。ただし、設計書の判断（YAGNI優先）も妥当な範囲内であり、必須ではない。",
+      "location": "設計方針書 セクション3 D1: 関数抽出アプローチ"
+    },
+    {
+      "id": "S1-002",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "定数の対称的重複（OLLAMA系/LM_STUDIO系）",
+      "description": "OLLAMA_API_TIMEOUT_MS=3000とLM_STUDIO_API_TIMEOUT_MS=3000、MAX_OLLAMA_RESPONSE_SIZE=1MBとMAX_LM_STUDIO_RESPONSE_SIZE=1MB、MAX_OLLAMA_MODELS=100とMAX_LM_STUDIO_MODELS=100が全て同一値で定義される。これ自体はSSRF防止のためにURLをハードコードする設計ポリシーとの一貫性があるが、タイムアウトやサイズ制限のような振る舞い定数は共通化しても問題ない。",
+      "suggestion": "LOCAL_API_TIMEOUT_MS、MAX_LOCAL_API_RESPONSE_SIZE、MAX_PROVIDER_MODELS のような共通定数を検討してもよい。ただし、将来プロバイダーごとに異なる値を設定する可能性があるなら、現状維持でも問題はない。SEC-001対象のURL定数はハードコード必須であり、これは正しく設計されている。",
+      "location": "設計方針書 セクション4 定数設計"
+    },
+    {
+      "id": "S1-003",
+      "severity": "must_fix",
+      "category": "SRP",
+      "title": "ensureOpencodeConfig() 内のプロバイダー構成組み立てロジックの肥大化リスク",
+      "description": "設計書セクション6-3のensureOpencodeConfig()は、fetchOllamaModels()とfetchLmStudioModels()の呼び出し後、各プロバイダーのconfigオブジェクト組み立て（npm, name, options, models）をインラインで行っている。現在は2プロバイダーだが、D1-002 OCPで『新プロバイダー追加時に既存関数を変更せず拡張可能』を設計原則として掲げているにもかかわらず、ensureOpencodeConfig()内のif分岐は新プロバイダー追加のたびに増加する。OCPの主張と実装設計が矛盾している。",
+      "suggestion": "プロバイダーの設定をデータとして定義する構造（例: providerDefinitions配列にfetchFunction, providerKey, npm, name, optionsを持たせる）を導入し、ensureOpencodeConfig()はそれをループで処理するだけにすると、OCP準拠が実際に達成される。あるいは、OCPの主張を設計書から取り下げ、「2プロバイダー限定のKISS設計」と正直に記述する。",
+      "location": "設計方針書 セクション2-2 新アーキテクチャ、セクション6-3 ensureOpencodeConfig()"
+    },
+    {
+      "id": "S1-004",
+      "severity": "should_fix",
+      "category": "KISS",
+      "title": "Promise.all並列化は適切だが、エラーハンドリングの記述が不十分",
+      "description": "設計書セクション8-1でPromise.allによる並列化を採用している。各関数が例外を投げず空オブジェクトを返す設計のため、Promise.allが拒否される可能性は実質ゼロであり、Promise.allの採用は適切である。しかし、設計書にはPromise.allが拒否されるケース（予期せぬランタイムエラー等）への対処が記載されていない。セクション6-3のコード例でもtry-catchで囲まれていない。",
+      "suggestion": "ensureOpencodeConfig()内のPromise.all呼び出しをtry-catchで囲むか、設計書に「各fetch関数は内部で全例外を捕捉するため、Promise.allが拒否されることはない」旨を明記する。実装時のレビュアー向けに設計意図を明確にしておくことが重要。",
+      "location": "設計方針書 セクション8-1 API呼び出しの並列化"
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "汎用ヘルパー化の先送りは妥当",
+      "description": "設計書D1で「3プロバイダー目が追加された時点で共通ヘルパーを検討する」というYAGNI判断を行っている。ローカルLLMプロバイダーの状況（Ollama, LM Studio以外にLocalAIなど存在）を考慮しても、現時点で過度な抽象化を避ける判断は適切である。ただし、将来の共通化のためのリファクタリングポイントをコメントで残すべきである。",
+      "suggestion": "実装時に各fetch関数の冒頭にTODOコメント（例: // TODO: If a 3rd provider is added, extract common fetch logic to fetchWithTimeout()）を記載する。設計書にもその旨を記載しておくとよい。",
+      "location": "設計方針書 セクション3 D1: 関数抽出アプローチ"
+    },
+    {
+      "id": "S1-006",
+      "severity": "should_fix",
+      "category": "型設計",
+      "title": "ProviderModels型がRecord<string, { name: string }>と単純すぎる",
+      "description": "設計書セクションD4で定義されたProviderModels型はRecord<string, { name: string }>であり、Ollama固有のdetails情報（parameter_size, quantization_level）がformatModelDisplayName()で処理された後のname文字列に折りたたまれている。これ自体は動作するが、将来LM Studioにもdetails相当の情報が追加された場合や、UIでパラメータサイズを独立表示したい場合に型が不足する。また、既存コードのformatModelDisplayName()はOllamaModel型に依存しており、fetchOllamaModels()の内部でProviderModelsに変換する際にdetails情報が失われる。",
+      "suggestion": "現時点ではnameフィールドのみで十分であり、型を拡張する必要はない（YAGNI）。ただし、設計書にProviderModelsを意図的にミニマル設計とした理由を明記すること。例：「opencode.jsonのmodels構造がRecord<string, { name: string }>であるため、この型で十分。UI層で追加情報が必要な場合は別途API（/api/ollama/models）を使用する」。",
+      "location": "設計方針書 セクション3 D4: 戻り値型の統一"
+    },
+    {
+      "id": "S1-007",
+      "severity": "nice_to_have",
+      "category": "OCP",
+      "title": "LM_STUDIO_MODEL_PATTERNの長さ上限がOLLAMA_MODEL_PATTERNと大きく異なる",
+      "description": "OLLAMA_MODEL_PATTERNは{1,100}（100文字）、LM_STUDIO_MODEL_PATTERNは{1,200}（200文字）と定義されている。LM Studioのモデル名が長い（例: lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF）ことへの対応は理解できるが、この差異の根拠が設計書に記載されていない。",
+      "suggestion": "設計書セクション4-1のLM_STUDIO_MODEL_PATTERNのコメントに「LM Studioモデル名は organization/model-name-details 形式で長くなるため200文字に拡張」と根拠を明記する。",
+      "location": "設計方針書 セクション4-1 新規追加定数"
+    },
+    {
+      "id": "S1-008",
+      "severity": "should_fix",
+      "category": "SRP",
+      "title": "ensureOpencodeConfig()の直列化検討: セクション6-3とセクション8-1の記述不一致",
+      "description": "セクション6-3のensureOpencodeConfig()コード例ではfetchOllamaModels()とfetchLmStudioModels()が直列呼び出し（awaitを個別に記述）になっているが、セクション8-1では明確にPromise.allによる並列化を採用すると記載されている。設計書内の記述に不整合がある。",
+      "suggestion": "セクション6-3のコード例をPromise.all形式に統一するか、「実装時にはセクション8-1のPromise.all方式で実装する」旨の注記をセクション6-3に追加する。設計書内の一貫性を確保すること。",
+      "location": "設計方針書 セクション6-3 vs セクション8-1"
+    },
+    {
+      "id": "S1-009",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "OLLAMA_API_URL/OLLAMA_TIMEOUT定数が/api/ollama/models/route.tsにも重複定義",
+      "description": "既存コードの/api/ollama/models/route.tsにもOLLAMA_API_URL='http://localhost:11434/api/tags'とOLLAMA_TIMEOUT_MS=3000がローカル定数として定義されている。opencode-config.tsのリファクタリングに合わせてこの重複を解消する機会がある。ただし、SEC-001 SSRF防止のためURL定数のハードコードが必須というポリシーを考慮すると、モジュール間の意図的な分離とも解釈できる。",
+      "suggestion": "Issue #398のスコープ外とするのが妥当だが、設計書のセクション9（スコープ外の明確化）に明記しておくとよい。将来的にOllama定数を共通化する際は、SEC-001ポリシーとの整合性を慎重に検討すること。",
+      "location": "設計方針書 セクション4-2、src/app/api/ollama/models/route.ts"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 4,
+    "overall_quality": "good",
+    "comment": "設計方針書全体として高品質。SRP/YAGNI/KISSのバランスが取れており、セキュリティ設計（SEC-001 SSRF防止、SEC-002 DoS防御）も適切。主要な指摘は、OCPを設計原則として掲げながら実装設計がインラインif分岐にとどまっている矛盾（S1-003）と、設計書内のコード例不整合（S1-008）。DRY関連の指摘（S1-001/S1-002）は設計書のYAGNI判断と表裏一体であり、現時点の規模では許容範囲。型設計は実用的で過不足なく、テスト設計も網羅的である。"
+  }
+}

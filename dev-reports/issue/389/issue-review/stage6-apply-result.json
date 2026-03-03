@@ -1,0 +1,43 @@
+{
+  "issue_number": 389,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_date": "2026-03-02",
+  "applied_findings": ["S5-002", "S5-003", "S5-004", "S5-006"],
+  "skipped_findings": ["S5-001", "S5-005", "S5-007", "S5-008"],
+  "skip_reason": {
+    "S5-001": "レビュー履歴の軽微な不一致、実装には影響なし（ただしS3-002の履歴記述は実態に合わせて6項目に修正済み）",
+    "S5-005": "initialValueRefエッジケースは実装者判断に委ねる",
+    "S5-007": "タイトル変更はIssue開設者の判断に委ねる",
+    "S5-008": "OFF切り替え時のクリーンアップは実装者判断"
+  },
+  "github_updated": true,
+  "applied_details": {
+    "S5-002": {
+      "priority": "Must Fix",
+      "status": "applied",
+      "change_summary": "実装タスク4番目を修正: onSaveCompleteコールバックの記述から「onSave?.(filePath)を呼び出し」を削除し、「setOriginalContent(content)を呼び出し、dirty状態を解除する（onSave(filePath)はauto-save時には呼ばない。manual save時のみ呼び出す）」に変更。5番目のタスクとの矛盾を解消。"
+    },
+    "S5-003": {
+      "priority": "Should Fix",
+      "status": "applied",
+      "change_summary": "受入条件のbeforeunload記述を「isDirty=true（デバウンス待機中を含む）またはisSaving=trueの場合は警告を表示する（デバウンス待機中はisDirty=trueで自然にカバーされる）」に修正し、デバウンス待機中の検出がisDirtyチェックで十分であることを括弧内で補足。"
+    },
+    "S5-004": {
+      "priority": "Must Fix",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルのMarkdownEditor.tsx変更箇所(5)を「isDirty AND isSaving」から「isDirty OR isSaving」に修正。影響範囲テーブル(3)のhandleClose記述も「isDirty=trueまたはisSaving=true時はsaveNow()待機後に閉じる」に整合性を確保。"
+    },
+    "S5-006": {
+      "priority": "Should Fix",
+      "status": "applied",
+      "change_summary": "実装タスクのhandleClose()記述を「isSaving中はsaveNow()で即座保存してから閉じる」から「isDirty=true またはisSaving=true の場合はsaveNow()で即座保存を完了してから閉じる（デバウンス待機中の未保存データも保護）」に修正。デバウンス待機中のデータロス防止を明記。"
+    }
+  },
+  "additional_changes": [
+    "レビュー履歴セクションにStage 5エントリ（4件）を追加",
+    "Issue冒頭のNoteをStage 5反映に更新",
+    "S3-002の履歴記述を実態に合わせて「5項目」から「6項目」に修正（S5-001対応の一部）"
+  ],
+  "summary": "Stage 5レビューのMust Fix 2件（S5-002: onSaveCompleteコールバックの矛盾解消、S5-004: beforeunload条件式のAND→OR修正）とShould Fix 2件（S5-003: beforeunload受入条件の明確化、S5-006: handleClose()のデバウンス待機中ケース追加）の計4件をIssue #389に反映した。Nice to Have 2件とShould Fix 2件（S5-001, S5-005）は実装に直接影響しないためスキップした。レビュー履歴セクションにStage 5エントリを追加し、影響範囲テーブル・実装タスク・受入条件の整合性を確保した。"
+}

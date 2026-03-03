@@ -200,6 +200,13 @@ export function ExternalAppForm({
       size="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Issue #395: Security warning about same-origin proxy risks */}
+        <div className="rounded-md bg-amber-50 p-3 mb-4 border border-amber-200">
+          <p className="text-sm text-amber-800">
+            Proxied apps run under the CommandMate origin and can access CommandMate APIs. Only register trusted applications.
+          </p>
+        </div>
+
         {/* Display Name */}
         <div>
           <label

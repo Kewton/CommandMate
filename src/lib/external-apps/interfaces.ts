@@ -93,11 +93,17 @@ export interface IProxyHandler {
   ): Promise<Response>;
 
   /**
-   * Proxy a WebSocket connection to the upstream app
+   * Handle a WebSocket upgrade request
+   *
+   * Note: Next.js Route Handlers do not support WebSocket upgrades directly.
+   * Returns a 426 Upgrade Required response with a fixed error message.
+   * Issue #395: Response no longer includes directUrl or internal URL information
+   * to prevent leaking upstream host/port details.
+   *
    * @param request - Incoming WebSocket upgrade request
    * @param app - Target external app configuration
    * @param path - Request path
-   * @returns WebSocket upgrade response
+   * @returns A 426 response indicating WebSocket is not supported
    */
   proxyWebSocket(
     request: Request,

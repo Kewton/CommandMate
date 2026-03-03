@@ -1,0 +1,44 @@
+{
+  "stage": 2,
+  "issue_number": 394,
+  "apply_date": "2026-03-02",
+  "applied_findings": [
+    {
+      "id": "F1-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Added annotation in Key references and a dedicated note explaining that route.ts:153 (image) and route.ts:200-211 (video) directly call readFile() bypassing file-operations.ts readFileContent()"
+    },
+    {
+      "id": "F1-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Added renameFileOrDirectory() (line 618) to Affected Code with note on missing source path realpathSync() validation; expanded Important Observation to clarify moveFileOrDirectory() source path limitation"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Added 'Existing Symlink Patterns in Codebase' subsection under Recommended Direction comparing lstat()/isSymbolicLink() skip approach (file-tree.ts:182, file-search.ts:306) with realpath() boundary validation approach, including design considerations for fix placement"
+    },
+    {
+      "id": "F1-005",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "Added concrete 'Acceptance Criteria' checklist with 6 pass/fail conditions: symlink rejection, normal path preservation, image/video GET path protection, rename protection, existing test pass, new test coverage"
+    }
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "summary": {
+    "total_findings": 4,
+    "applied": 4,
+    "skipped": 0
+  },
+  "changes_summary": "Applied 4 findings (3 should_fix, 1 nice_to_have) to Issue #394. Key changes: (1) Documented image/video direct readFile() code paths as separate vulnerable paths in Key references, (2) Added renameFileOrDirectory() to affected code list with symlink vulnerability note, (3) Added existing symlink pattern comparison section (lstat skip vs realpath validation), (4) Added concrete acceptance criteria checklist with 6 testable conditions. Also expanded Important Observation section to clarify moveFileOrDirectory() source path protection limitations and added Review History section.",
+  "github_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/394"
+  }
+}

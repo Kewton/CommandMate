@@ -1,0 +1,45 @@
+{
+  "issue_number": 391,
+  "status": "success",
+  "changes_made": [
+    {
+      "file": "src/components/worktree/AgentSettingsPane.tsx",
+      "change": "Removed verbose design-document comments (Issue references, [S1-001]/[S1-002]/[S1-006]/[R4-006] design IDs). Replaced with concise, purpose-focused comments. Removed Issue #374 references from JSDoc props and inline comments."
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "change": "Changed selectedAgentsRef sync from useEffect pattern to direct assignment (selectedAgentsRef.current = selectedAgents) for consistency with activeCliTabRef pattern in the same file. Removed verbose Issue #391 comments."
+    },
+    {
+      "file": "tests/unit/components/worktree/AgentSettingsPane.test.tsx",
+      "change": "Cleaned up test descriptions: removed T1/T2/T3/T4 design IDs, removed Issue references, removed internal implementation details (isEditing=true/false, response.ok=false) from test names. Renamed to behavior-focused descriptions."
+    }
+  ],
+  "test_results": {
+    "total": 4262,
+    "passed": 4255,
+    "failed": 0,
+    "skipped": 7
+  },
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "refactorings_applied": [
+    "Removed verbose design-document artifacts from production code comments",
+    "Improved consistency: selectedAgentsRef uses direct assignment pattern matching activeCliTabRef",
+    "Cleaned test names to focus on behavior rather than internal implementation details"
+  ],
+  "files_changed": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx"
+  ],
+  "summary": "Refactoring focused on three areas: (1) AgentSettingsPane.tsx - removed 11 verbose design-document comments containing Issue references and design IDs ([S1-001], [S1-002], [S1-006], [R4-006]), replacing them with concise purpose-focused comments; (2) WorktreeDetailRefactored.tsx - changed selectedAgentsRef from useEffect-based sync to direct assignment pattern for consistency with the existing activeCliTabRef pattern in the same file; (3) Test file - cleaned up 6 test descriptions by removing design document artifacts (T1-T4 IDs, Issue references) and internal implementation details (isEditing state, response.ok values), replacing with behavior-focused naming. No functional changes were made. All 4255 tests pass, 0 ESLint errors, 0 TypeScript errors."
+}

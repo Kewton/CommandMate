@@ -1,0 +1,97 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "issue_number": 394,
+  "summary": "設計方針書とコードベースの整合性を6つの観点で検証した。全体として設計方針書は実コードの構造を正確に反映しており品質は高い。ただし、upload/tree APIルートがgetWorktreeAndValidatePath()を使用していないという記述上の不整合（S2-001）、validateFileOperation()のJSDoc記述とrealpath統合設計との齟齬（S2-003）、moveFileOrDirectory()のSEC-006パターンと新関数のstartsWith比較式の微妙な差異（S2-006）を指摘する。テスト設計とVitest環境の整合性は良好。実装順序も依存関係を正しく考慮している。",
+  "findings": [
+    {
+      "id": "S2-001",
+      "severity": "must_fix",
+      "category": "API整合性",
+      "title": "upload/tree APIルートはgetWorktreeAndValidatePath()を使用していない",
+      "description": "設計方針書セクション4「防御責務の分担方針」に「API層のgetWorktreeAndValidatePath()は全ファイルAPIエンドポイント（files/upload/tree）の共通入口であり」と記載されているが、実際のコードでは upload/[...path]/route.ts と tree/[...path]/route.ts は getWorktreeAndValidatePath() を使用していない。uploadルートはPOSTハンドラ内で直接isPathSafe(normalizedDir, worktree.path)を呼び出し、treeルートもGETハンドラ内で直接isPathSafe(relativePath, worktree.path)を呼び出している。そのため、設計の「getWorktreeAndValidatePath()にresolveAndValidateRealPath()を追加すれば全エンドポイントが自動保護される」という前提は正しくない。upload/tree各ルートにも個別にresolveAndValidateRealPath()を追加する必要がある。",
+      "location": "設計方針書セクション4「防御責務の分担方針」、セクション5.2「API routes」表、セクション9 [S1-004]行",
+      "suggestion": "設計方針書セクション4の記述を修正し、「getWorktreeAndValidatePath()はfiles APIルートの共通入口」に限定する。upload/tree APIルートについては「個別にresolveAndValidateRealPath()を追加する」と明記する。セクション5.2のAPI routes表に記載されている「upload/[...path]/route.ts: isPathSafe後にresolveAndValidateRealPath追加」は正しい実装指示であるため、この表の内容と矛盾しないよう防御責務分担のセクションを整合させること。"
+    },
+    {
+      "id": "S2-002",
+      "severity": "should_fix",
+      "category": "関数整合性",
+      "title": "resolveAndValidateRealPath()のパラメータ順序が既存関数と逆順",
+      "description": "設計方針書セクション4で定義されたresolveAndValidateRealPath(targetPath, rootDir)のパラメータ順序は、既存のisPathSafe(targetPath, rootDir)と同じtargetPath-first順序である。しかし、file-operations.tsのvalidateFileOperation(worktreeRoot, sourcePath)やreadFileContent(worktreeRoot, relativePath)はrootDir-first順序を採用している。resolveAndValidateRealPath()はpath-validator.tsに配置されるためisPathSafe()と同じ順序で整合性がある一方で、file-operations.ts内から呼び出す際にパラメータ順序が逆になる。混乱を招く可能性がある。",
+      "location": "設計方針書セクション4「新関数の設計」",
+      "suggestion": "設計方針書の関数シグネチャにパラメータ順序の根拠を明記すること。具体的には、「path-validator.tsの既存パターン（isPathSafe(targetPath, rootDir)）に準拠するためtargetPath-first順序を採用する。file-operations.ts内から呼び出す際はパラメータ順序が異なるため注意すること」と注記を追加する。"
+    },
+    {
+      "id": "S2-003",
+      "severity": "should_fix",
+      "category": "関数整合性",
+      "title": "validateFileOperation()のJSDocとrealpath統合設計の不一致",
+      "description": "現行のvalidateFileOperation()のJSDocに「[SF-S2-003] Only validates source path; destination validation is the caller's responsibility.」と記載されている。設計方針書はvalidateFileOperation()にresolveAndValidateRealPath()を統合するとしているが、この統合後もJSDocの責務記述と実態が不一致になる可能性がある。特に、validateFileOperation()の現行の責務は「isPathSafe + 存在チェック」だが、realpath検証を追加すると「isPathSafe + realpath検証 + 存在チェック」に拡張される。この責務拡張をJSDocに反映する計画が設計方針書にない。",
+      "location": "設計方針書セクション5.2「file-operations.ts」表のvalidateFileOperation()行",
+      "suggestion": "実装時にvalidateFileOperation()のJSDocコメントを更新する旨を設計方針書に明記すること。具体的には「isPathSafe後にresolveAndValidateRealPath追加」に加え、「JSDocに[SEC-XXX] symlink traversal prevention (resolveAndValidateRealPath)の追記が必要」と注記する。"
+    },
+    {
+      "id": "S2-004",
+      "severity": "nice_to_have",
+      "category": "テスト整合性",
+      "title": "テスト設計のセットアップ例がbeforeEach/afterEachパターンを示していない",
+      "description": "設計方針書セクション8のテスト環境のセットアップ例はインラインのfs操作のみ記載されており、VitestのbeforeEach/afterEachによるクリーンアップパターンが示されていない。実際のテスト実装では、symlinkやtmpディレクトリの作成・削除はbeforeEach/afterEach内で行う必要がある。特にCI環境でのテスト並列実行時にtmpdir内のディレクトリ名衝突を防ぐためのユニーク名生成（例: crypto.randomUUID()）も考慮が必要。既存のpath-validator.test.tsはsetup/teardownを使用していないが、symlink操作を伴うテストでは必須となる。",
+      "location": "設計方針書セクション8「テスト環境」",
+      "suggestion": "テスト設計にbeforeEach/afterEachのクリーンアップパターンと、ユニークtmpdir生成の例を追加することを推奨する。ただし、テスト設計の詳細は実装時に決定しても問題ないため、nice_to_haveとする。"
+    },
+    {
+      "id": "S2-005",
+      "severity": "nice_to_have",
+      "category": "実装順序",
+      "title": "実装順序ステップ1でのユニットテストの範囲が不明確",
+      "description": "設計方針書セクション10の実装順序ステップ1は「resolveAndValidateRealPath()関数の実装とユニットテスト」としているが、このユニットテストがpath-validator.test.ts内のテスト追加なのか、独立したテストファイルなのかが明確でない。セクション8では「tests/unit/path-validator.test.ts <- resolveAndValidateRealPath()テスト追加」と記載されているため、path-validator.test.tsへの追加と推測されるが、実装順序セクションでも明記すべきである。",
+      "location": "設計方針書セクション10「実装順序」ステップ1",
+      "suggestion": "ステップ1を「resolveAndValidateRealPath()関数の実装（src/lib/path-validator.ts）とユニットテスト追加（tests/unit/path-validator.test.ts）」に具体化する。"
+    },
+    {
+      "id": "S2-006",
+      "severity": "should_fix",
+      "category": "既存パターン整合性",
+      "title": "moveFileOrDirectory()のSEC-006パターンとresolveAndValidateRealPath()のアルゴリズムの差異を明確化すべき",
+      "description": "moveFileOrDirectory()のSEC-006（行546-548）は「resolvedDest.startsWith(resolvedRoot + sep) && resolvedDest !== resolvedRoot」パターンを使用している。設計方針書セクション5.1のアルゴリズムでは「resolvedTarget が resolvedRoot + sep で始まるか、resolvedRoot と等しいか確認」としている。moveFileOrDirectory()のSEC-006は移動先ディレクトリに対する検証であり、destがrootと等しい場合もPASSさせる（ルートディレクトリへの移動は有効操作）。一方、resolveAndValidateRealPath()はファイルパス検証であり、targetがrootと等しい場合のセマンティクスが異なる。設計方針書はこの差異（root自体へのアクセスをPASSさせるかどうか）を明示的に説明すべきである。",
+      "location": "設計方針書セクション5.1「アルゴリズム」ステップ3b、セクション4「KISS」",
+      "suggestion": "resolveAndValidateRealPath()のアルゴリズムステップ3bに「resolvedTarget === resolvedRootの場合もtrueを返す（ルートディレクトリ自体へのアクセスは許可する。これはisPathSafe()でも許可されている操作であり一貫性を保つ）」と明記し、SEC-006との比較条件の等価性を確認する注記を追加する。"
+    },
+    {
+      "id": "S2-007",
+      "severity": "nice_to_have",
+      "category": "API整合性",
+      "title": "tree APIルートのエラーレスポンス形式がfiles APIルートと異なる",
+      "description": "tree/[...path]/route.tsは createAccessDeniedError() / createWorktreeNotFoundError() を使用し、{ error: { ... } } 形式でレスポンスを返している。一方、files/[...path]/route.tsは createErrorResponse() を使用し、{ success: false, error: { code, message } } 形式で返している。resolveAndValidateRealPath()をtreeルートに追加する際、INVALID_PATHエラーのレスポンス形式をどちらに合わせるかが設計方針書に記載されていない。",
+      "location": "設計方針書セクション5.2「API routes」表のtree行",
+      "suggestion": "tree APIルートへのresolveAndValidateRealPath()追加時に、既存のcreateAccessDeniedError()パターンを使用する旨を注記する。本Issue #394のスコープではレスポンス形式の統一は行わず、既存パターンを踏襲するのが安全。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_quality": "good",
+  "recommendation": "設計方針書は全体として正確かつ網羅的であり、既存コードベースの構造を的確に把握している。最も重要な修正はS2-001（upload/tree APIルートがgetWorktreeAndValidatePath()を使用していない事実との不整合）である。この点は設計方針書のセクション5.2のAPI routes表では正しく「個別追加」と記載されているが、セクション4の防御責務分担方針の記述と矛盾しているため、実装者が混乱する可能性がある。should_fix項目は設計の明確化に関するもので、実装品質に直接影響するものではない。S2-001の修正後は実装に進んで問題ない。",
+  "reviewed_files": [
+    "dev-reports/design/issue-394-symlink-traversal-fix-design-policy.md",
+    "src/lib/path-validator.ts",
+    "src/lib/file-operations.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/tree/[...path]/route.ts",
+    "src/lib/file-tree.ts",
+    "src/lib/file-search.ts",
+    "src/lib/url-path-encoder.ts",
+    "src/app/api/repositories/scan/route.ts",
+    "tests/unit/path-validator.test.ts",
+    "vitest.config.ts"
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "timestamp": "2026-03-02T00:00:00Z"
+}

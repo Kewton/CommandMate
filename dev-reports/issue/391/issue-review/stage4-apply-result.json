@@ -1,0 +1,59 @@
+{
+  "issue_number": 391,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-02",
+  "applied_findings": [
+    {
+      "id": "IF-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "修正方針セクションの案Bに「activeCliTab同期への影響」注記を追加。案Bの同一値チェックによりuseEffect（L1117-1122: activeCliTab同期）の発火頻度が適切に減少し、サーバー側でselectedAgentsが実際に変更された場合のみactiveCliTab同期が正しく動作する旨を明記。"
+    },
+    {
+      "id": "IF-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "テスト更新方針セクションに「WorktreeDetailRefactored側のテスト方針」サブセクションを追加。WorktreeDetailRefactoredにはユニットテストが不在のため、案BのuseRefパターン動作はAgentSettingsPane統合テストで間接的に検証する方針を明記。"
+    },
+    {
+      "id": "IF-003",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "影響範囲テーブルにNotesAndLogsPane.tsx行を追加（AgentSettingsPaneを描画するコンテナ、props透過のみ、変更なし、間接影響）。"
+    },
+    {
+      "id": "IF-005",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "受入条件に「ブラウザタブを切り替えて戻った際（visibilitychange）、isEditing中間状態は維持される」を追加。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "IF-004",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "配列比較の順序依存性リスクに関するコメント追加の提案であり、実装時のコードコメントとして対応すべき内容。Issue本文の擬似コードに過度な注釈を加えると可読性が低下するため、実装フェーズで対応する。"
+    }
+  ],
+  "summary": {
+    "total_findings": 5,
+    "applied": 4,
+    "skipped": 1
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/391"
+  },
+  "changes_summary": {
+    "sections_modified": [
+      "影響範囲テーブル（NotesAndLogsPane行追加）",
+      "修正方針 案B（activeCliTab同期への影響注記追加）",
+      "テスト更新方針（WorktreeDetailRefactored側のテスト方針サブセクション追加）",
+      "受入条件（visibilitychange復帰時の条件追加）",
+      "レビュー履歴（Stage 3セクション追加）",
+      "冒頭Note（Stage 3反映に更新）"
+    ]
+  }
+}

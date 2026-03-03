@@ -1,0 +1,143 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 393,
+  "review_focus": "セキュリティ",
+  "status": "conditionally_approved",
+  "score": 4,
+  "owasp_compliance": {
+    "A01_Broken_Access_Control": "partial",
+    "A03_Injection": "compliant",
+    "A05_Security_Misconfiguration": "partial"
+  },
+  "findings": [
+    {
+      "id": "R4F001",
+      "severity": "should_fix",
+      "owasp_category": "A03",
+      "title": "command パラメータの長さ制限が設計方針書に未定義",
+      "description": "terminal/route.ts の POST ハンドラは cliToolId と command を受け取り、command をそのまま tmux.sendKeys() に渡す。設計方針書 SEC-002 では command パラメータ経由の RCE 防御として「エンドポイント機能制限（D1-004）」を挙げているが、command 文字列自体の長さ制限が未定義である。execFile() 移行により OS コマンドインジェクションは防止されるが、巨大な command 文字列（例: 100MB）を送信された場合、tmux の send-keys コマンドが大量のメモリを消費し、DoS に繋がる可能性がある。他のエンドポイントでは MAX_MESSAGE_LENGTH=10000（claude-executor.ts）のような上限が存在しており、プロジェクトのセキュリティ標準として一貫性が必要である。",
+      "suggestion": "terminal/route.ts の command パラメータに MAX_COMMAND_LENGTH 定数（例: 10000 文字、claude-executor.ts の MAX_MESSAGE_LENGTH と同等）を設け、超過時は 400 Bad Request を返すバリデーションを追加する。定数は config ファイルまたはルート内で定義する。"
+    },
+    {
+      "id": "R4F002",
+      "severity": "should_fix",
+      "owasp_category": "A05",
+      "title": "terminal/route.ts の 500 エラーレスポンスで error.message をそのまま返却 - 情報漏洩リスク",
+      "description": "現在の terminal/route.ts（line 44-48）は catch ブロックで (error as Error).message をそのままクライアントに返している: `{ error: (error as Error).message }` (status 500)。同様に capture/route.ts（line 44-48）も同じパターンを使用している。error.message にはファイルパス、DB 接続情報、内部モジュール名など攻撃者に有用な情報が含まれる可能性がある。対照的に、kill-session/route.ts（line 119-124）は固定文字列 `{ error: 'Failed to kill sessions' }` を返しており、こちらがプロジェクトのセキュリティ標準に準拠したパターンである。設計方針書は SEC-003 で「エラーメッセージには修正方法のガイダンスを含める」としているが、サーバー内部エラーの詳細漏洩防止については言及していない。",
+      "suggestion": "terminal/route.ts と capture/route.ts の 500 エラーレスポンスを固定文字列に変更する（例: 'Failed to send command to terminal', 'Failed to capture terminal output'）。詳細エラーは console.error でサーバーログにのみ記録する（現在既にそうしている）。kill-session/route.ts のパターンに合わせる。"
+    },
+    {
+      "id": "R4F003",
+      "severity": "nice_to_have",
+      "owasp_category": "Other",
+      "title": "terminal/route.ts と capture/route.ts にレートリミットが未適用 - DoS 緩和の欠如",
+      "description": "プロジェクトでは /api/auth/login にレートリミッター（createRateLimiter()、5回試行で15分ロックアウト）が適用されている。しかし terminal/route.ts と capture/route.ts にはレートリミットが存在せず、認証無効時（CM_AUTH_TOKEN_HASH 未設定）に無制限の連続リクエストが可能である。terminal エンドポイントは tmux セッションにコマンドを送信するため、高頻度リクエストにより tmux プロセスが過負荷になる可能性がある。ただし、設計方針書セクション8で CSRF 対策を明示的にスコープ外としており、レートリミットも同様にスコープ外と解釈できる。本 Issue のスコープはインジェクション防止が主目的であるため、nice_to_have とする。",
+      "suggestion": "別 Issue でAPI エンドポイント全体のレートリミット戦略を検討することを推奨する。terminal/capture は特にリスクが高いため優先的に対応すべきである。簡易対応として、リクエスト間の最小インターバル（例: 100ms）をチェックする仕組みが考えられる。"
+    },
+    {
+      "id": "R4F004",
+      "severity": "nice_to_have",
+      "owasp_category": "A05",
+      "title": "lines パラメータ上限 100000 の妥当性評価",
+      "description": "設計方針書 D1-005 は capture/route.ts の lines パラメータを 1-100000 範囲に制限する方針である。capturePane() は lines を startLine=-lines として tmux capture-pane -S に渡す。100000行をキャプチャした場合、tmux の scrollback バッファサイズ（historyLimit=50000、createSession で設定）を超過するが、tmux は存在する範囲のみ返すため技術的には安全である。maxBuffer=10MB の制限もあるため、メモリ面でも保護されている。ただし、100000 という上限値は historyLimit=50000 の2倍であり、実効的に意味のある値は 50000+現在の画面行数（約50行）が上限となる。実害はないが、上限を 50100 程度に下げる方が意図が明確になる。",
+      "suggestion": "lines の上限 100000 は技術的に安全であり、maxBuffer=10MB による二重防御もある。変更は必須ではないが、historyLimit との整合性を高めるため 50100 程度に下げることを検討してもよい。現在の 100000 でもセキュリティ上の問題はない。"
+    },
+    {
+      "id": "R4F005",
+      "severity": "nice_to_have",
+      "owasp_category": "A01",
+      "title": "認証無効時（CM_AUTH_TOKEN_HASH 未設定）のアクセス制御が middleware レベルで完全にスキップされる設計",
+      "description": "middleware.ts（line 99-101）は CM_AUTH_TOKEN_HASH が未設定の場合、即座に NextResponse.next() を返し全リクエストを通過させる。これはプロジェクトの設計上意図的な後方互換性対応（認証オプション機能）であり、Issue #393 の脆弱性レポートでも「Critical（認証無効時）/ High（認証有効時）」と重要度が区別されている。設計方針書の修正（execFile 移行 + バリデーション追加）により、認証無効時でもインジェクションは防止される。ただし、認証無効時に worktreeId の DB 存在確認（D1-002）のみがアクセス制御となるため、DB に登録された任意の worktree に対するコマンド送信が可能である点は認識しておくべきである。",
+      "suggestion": "本 Issue のスコープ内では対応不要。認証無効時の最低限のアクセス制御として worktreeId の DB 存在確認が機能しており、execFile() 移行によりインジェクションリスクも解消される。認証有効化の推奨をドキュメントで強調することを検討する。"
+    },
+    {
+      "id": "R4F006",
+      "severity": "must_fix",
+      "owasp_category": "A03",
+      "title": "cliToolId バリデーション後のエラーメッセージに無効な入力値が含まれる - ログインジェクション/XSS リスク",
+      "description": "設計方針書 D1-001 のコード例では、無効な cliToolId に対して `{ error: \\`Invalid cliTool: '${cliToolId}'. Valid values: ${CLI_TOOL_IDS.join(', ')}\\` }` を返す方針となっている。この cliToolId はユーザー入力であり、攻撃者が意図的に制御文字やHTMLタグを含む値を送信できる。(1) サーバーログ出力時のログインジェクション: terminal/route.ts の console.error（line 44）経由で cliToolId がログに書き込まれた場合、ログビューアでの解釈に影響する可能性がある。(2) JSON レスポンスの error フィールドにユーザー入力がそのまま含まれる: フロントエンドが error メッセージを dangerouslySetInnerHTML や innerHTML で表示した場合の XSS リスク。kill-session/route.ts（line 43）も同じパターンを使用しているが、これは既存コードベースの問題であり、新規エンドポイント修正時に改善すべきである。",
+      "suggestion": "エラーレスポンスにユーザー入力値を含める場合は、(1) 文字列長を制限（例: 最初の50文字のみ）し、(2) 制御文字（ASCII 0x00-0x1F）を除去するサニタイズ処理を追加する。具体的には: `const safeCli = String(cliToolId).replace(/[\\x00-\\x1f]/g, '').slice(0, 50);` をバリデーション前に行い、エラーメッセージには safeCli を使用する。あるいは、ユーザー入力値をエラーメッセージに含めず、固定文字列（例: 'Invalid cliToolId parameter'）のみ返す方式がより安全である。"
+    },
+    {
+      "id": "R4F007",
+      "severity": "should_fix",
+      "owasp_category": "A03",
+      "title": "capture/route.ts のセッション不在時レスポンスに cliToolId が未サニタイズのまま含まれる",
+      "description": "現在の capture/route.ts（line 35-37）は、セッション不在時に `Session not running. Starting ${cliToolId} session...` というメッセージを output フィールドで 200 OK として返している。この cliToolId はリクエストボディから取得したユーザー入力であり、isCliToolType() バリデーション前のコードパスで使用されている。設計方針書 D1-001 の修正後はバリデーション済みの値のみがこのパスに到達するが、現在のコードでは未バリデーション値がレスポンスに含まれる。設計方針書は capture/route.ts のセッション不在時を 404 に変更する方針（D4-002 の補足）だが、この変更が確実に行われることをチェックリストで保証すべきである。",
+      "suggestion": "capture/route.ts のセッション不在時レスポンスを 404 に統一し（terminal/route.ts と同様）、固定のエラーメッセージ（例: 'Session not found. Use startSession API to create a session first.'）を返す。ユーザー入力値のレスポンス埋め込みを排除する。"
+    },
+    {
+      "id": "R4F008",
+      "severity": "nice_to_have",
+      "owasp_category": "A01",
+      "title": "worktreeId DB 存在確認のみでは他ユーザーの Worktree へのアクセス制御が不十分（マルチテナント非対応）",
+      "description": "設計方針書 D1-002 の worktreeId DB 存在確認は、getWorktreeById() で DB 上の存在を確認するのみであり、そのワークツリーがリクエスト元ユーザーに帰属するかの所有権チェックは行わない。これは CommandMate が現在シングルユーザー（ローカル開発ツール）として設計されているためであり、既存の全エンドポイント（kill-session/route.ts, respond/route.ts 等）も同じパターンを使用している。マルチテナント化の計画がない限り、この設計は妥当である。ただし、将来のマルチテナント対応時にはアクセス制御モデルの見直しが必要である。",
+      "suggestion": "本 Issue のスコープでは対応不要。既存エンドポイントとの一貫性を維持する。将来マルチテナント対応が必要になった場合に、ユーザーと worktreeId の紐付けによるアクセス制御を追加する追跡 Issue を検討する。"
+    }
+  ],
+  "security_checklist": {
+    "injection_prevention": {
+      "execFile_migration": "compliant - 全11箇所の exec() を execFile() に移行する設計は根本防御として適切。SEC-001 の多層防御（Layer 1-4）も適切に設計されている",
+      "cliToolId_validation": "compliant - isCliToolType() ホワイトリスト検証は CLI_TOOL_IDS 定数ベースであり、5種の有効値のみ許可。kill-session/route.ts の既存パターンと一致",
+      "worktreeId_validation": "compliant - getWorktreeById() による DB 存在確認は respond/route.ts, kill-session/route.ts の既存パターンと一致",
+      "sessionName_validation": "compliant - validateSessionName() の正規表現 /^[a-zA-Z0-9_-]+$/ はインジェクション文字を排除",
+      "command_parameter": "partial - execFile() 移行により OS インジェクションは防止されるが、長さ制限が未定義（R4F001）",
+      "lines_parameter": "compliant - D1-005 の4段階バリデーション（型・整数・範囲・defense-in-depth）は適切",
+      "sendSpecialKey_runtime": "compliant - D2-005 の ALLOWED_SINGLE_SPECIAL_KEYS ランタイムホワイトリストは defense-in-depth として適切"
+    },
+    "authentication": {
+      "middleware_coverage": "compliant - middleware.ts が terminal/capture エンドポイントを含む全パスをカバー（AUTH_EXCLUDED_PATHS に含まれていない）",
+      "auth_disabled_fallback": "acceptable - CM_AUTH_TOKEN_HASH 未設定時のスキップは意図的な後方互換性設計",
+      "ip_restriction": "compliant - middleware.ts で IP 制限が認証チェックより先に実行される（line 70-78）"
+    },
+    "error_handling": {
+      "error_message_leakage": "non_compliant - terminal/route.ts と capture/route.ts が error.message をそのまま返却（R4F002）",
+      "user_input_in_errors": "non_compliant - エラーレスポンスにユーザー入力値がサニタイズなしで含まれる（R4F006, R4F007）"
+    },
+    "dos_protection": {
+      "rate_limiting": "not_applicable - 本 Issue スコープ外（R4F003）",
+      "command_length": "non_compliant - command パラメータの長さ制限が未定義（R4F001）",
+      "lines_range": "compliant - 1-100000 範囲制限と maxBuffer=10MB の二重防御"
+    }
+  },
+  "existing_pattern_compliance": {
+    "SEC_001_pattern": "compliant - execFile() への移行は child_process.execFile を使用し、シェル非経由。opencode.ts の既存 execFileAsync パターンとも一致",
+    "kill_session_pattern": "compliant - D1-001/D1-002 は kill-session/route.ts の isCliToolType + getWorktreeById パターンを正確に再現",
+    "respond_pattern": "compliant - CLIToolManager.getInstance().getTool() 経由の getSessionName() パターンは respond/route.ts と一致",
+    "error_response_pattern": "non_compliant - kill-session/route.ts は固定文字列エラーを返すが、設計方針書の D1-001 コード例はユーザー入力をエラーに含めている"
+  },
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 4,
+    "security_posture": "strong",
+    "comment": "設計方針書のセキュリティ設計は OWASP A03:2021-Injection に対して強固な防御を提供している。exec() から execFile() への全面移行（Layer 4）と、isCliToolType() ホワイトリスト検証（Layer 1）、validateSessionName() 形式検証（Layer 3）、getWorktreeById() DB 確認（Layer 2）による多層防御は、defense-in-depth 原則に忠実である。must_fix は1件（エラーメッセージへのユーザー入力値埋め込みによるログインジェクション/XSS リスク）のみであり、実装上の軽微な改善で対処可能。should_fix 3件は command 長さ制限の追加、500 エラーレスポンスの情報漏洩防止、capture/route.ts のセッション不在レスポンス改善であり、いずれもセキュリティ品質の向上に寄与する。既存プロジェクトのセキュリティパターン（kill-session/route.ts, respond/route.ts）との整合性は高く、SEC-001 パターンにも準拠している。認証無効時のリスク軽減策として execFile() + バリデーションが十分に機能する設計となっている。条件付き承認とし、R4F006 の対応を求める。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-393-security-rce-shell-injection-design-policy.md",
+    "dev-reports/issue/393/multi-stage-design-review/stage1-review-result.json",
+    "dev-reports/issue/393/multi-stage-design-review/stage2-review-result.json",
+    "dev-reports/issue/393/multi-stage-design-review/stage3-review-result.json",
+    "src/middleware.ts",
+    "src/config/auth-config.ts",
+    "src/lib/auth.ts",
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/claude-session.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/app/api/worktrees/[id]/capture/route.ts",
+    "src/app/api/worktrees/[id]/kill-session/route.ts",
+    "src/app/api/worktrees/[id]/respond/route.ts"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

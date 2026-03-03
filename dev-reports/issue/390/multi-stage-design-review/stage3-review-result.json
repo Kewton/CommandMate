@@ -1,0 +1,104 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_focus": "影響範囲",
+  "total_issues": 4,
+  "issues": [
+    {
+      "id": "D3-001",
+      "severity": "should_fix",
+      "category": "波及範囲",
+      "title": "MermaidDiagram エラー表示の pre 要素が .prose pre ルール変更の影響を受ける",
+      "description": "MermaidDiagram.tsx (L156) のエラー表示は <pre className=\"text-sm text-red-500 mt-2 whitespace-pre-wrap break-words\"> を使用しており、MermaidCodeBlock 経由で MarkdownEditor のプレビュー領域（.prose コンテナ内）に描画される。globals.css の .prose pre { bg-[#0d1117] } 変更により、このエラー表示の背景がダーク（#0d1117）になる。エラーメッセージの bg-red-50 は親 div に適用されているが、pre 要素自体には bg-[#0d1117] が適用される可能性がある。ただし、MermaidDiagram のエラー表示の pre は Tailwind ユーティリティクラスを直接持たないため、@layer components 内の .prose pre の bg-[#0d1117] が適用される。赤いエラーテキストがダーク背景上に表示されることになり、視覚的な不整合が生じうる。",
+      "location": "src/components/worktree/MermaidDiagram.tsx L150-159 および設計方針書セクション5-1",
+      "suggestion": "設計方針書の影響コンポーネント一覧に MermaidDiagram.tsx のエラー表示を追加し、影響有無を分析すること。エラー pre に bg-red-50 等の明示的背景色クラスを追加すれば、Tailwind ユーティリティが @layer components より優先されるため、.prose pre の背景を上書きできる。テスト計画にも Mermaid ダイアグラムのエラー表示ケースを追加すべき。"
+    },
+    {
+      "id": "D3-002",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "title": "テスト計画に Mermaid エラー表示ケースと FileViewerPage 非マークダウンファイル確認が不足",
+      "description": "手動テスト8パターン (T-001 -- T-008) に以下のケースが含まれていない: (1) Mermaid ダイアグラムのパースエラー時のエラー pre 表示（.prose コンテナ内）、(2) FileViewerPage の非マークダウンファイル表示（L204付近）が影響を受けないことの確認。設計方針書セクション10の実装順序ステップ5で目視確認を指示しているが、テストケーステーブルには記載がない。",
+      "location": "設計方針書セクション8 テスト戦略テーブル",
+      "suggestion": "テストケースに T-009（MermaidDiagram エラー表示 - .prose 内の非コードブロック pre）と T-010（FileViewerPage 非マークダウンファイル表示 - .prose 外のリグレッション）を追加する。T-009 は中優先度、T-010 は低優先度。"
+    },
+    {
+      "id": "D3-003",
+      "severity": "nice_to_have",
+      "category": "波及範囲",
+      "title": "highlight.js/styles/github-dark.css の import が MarkdownEditor.tsx のみにある点の影響分析",
+      "description": "highlight.js/styles/github-dark.css は MarkdownEditor.tsx (L34) でのみ import されている。MessageList.tsx と FileViewerPage (page.tsx) は rehype-highlight を使用しているが github-dark.css を直接 import していない。Next.js ではクライアントコンポーネントの CSS import はグローバルに適用されるため、MarkdownEditor が同一ページに描画されていれば MessageList にも github-dark.css が適用される。現状の WorktreeDetailRefactored.tsx では MarkdownEditor と MessageList は同一画面に存在するため問題ないが、FileViewerPage (page.tsx) は独立ページであり、MarkdownEditor をレンダリングしない。ただし Next.js はビルド時に CSS を統合するため実際には影響しない可能性が高い。設計方針書にはこの CSS 適用メカニズムの前提が明記されていない。",
+      "location": "src/components/worktree/MarkdownEditor.tsx L34、src/app/worktrees/[id]/files/[...path]/page.tsx",
+      "suggestion": "設計方針書に github-dark.css の適用メカニズム（Next.js ビルド時のグローバル CSS 統合）を前提として明記すると、将来の保守性が向上する。または FileViewerPage にも import 'highlight.js/styles/github-dark.css' を追加して明示的にする。"
+    },
+    {
+      "id": "D3-004",
+      "severity": "nice_to_have",
+      "category": "CSS詳細度",
+      "title": "FileViewerPage の inline code カスタムコンポーネントが globals.css のインラインコードルールと重複",
+      "description": "FileViewerPage (page.tsx L157-162) のカスタム code コンポーネント（inline 時）は className='bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono' を直接指定している。一方 globals.css L43-45 には .prose :not(pre) > code { @apply bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono } が定義されている。両者は同一のスタイルを適用しており、DRY 原則の観点では冗長である。ただし、本 Issue #390 の修正スコープ外であり、機能的な問題はない。",
+      "location": "src/app/worktrees/[id]/files/[...path]/page.tsx L157-162 および src/app/globals.css L43-45",
+      "suggestion": "本 Issue のスコープ外として記録のみ。将来のリファクタリングで、カスタム inline code コンポーネントのスタイルを globals.css に委譲することを検討。"
+    }
+  ],
+  "impact_summary": {
+    "prose_usage_files": [
+      "src/app/globals.css (L33, L37, L43, L47-48)",
+      "src/components/worktree/MarkdownEditor.tsx (L854, L871)",
+      "src/components/worktree/MessageList.tsx (L189, L596)",
+      "src/app/worktrees/[id]/files/[...path]/page.tsx (L150)"
+    ],
+    "covered_in_design": [
+      "src/app/globals.css - 直接変更対象",
+      "src/components/worktree/MarkdownEditor.tsx - 自動適用として記載",
+      "src/components/worktree/MessageList.tsx (assistant) - 自動適用として記載",
+      "src/components/worktree/MessageList.tsx (user/prose-invert) - T-005で記載",
+      "src/components/worktree/MessageList.tsx (realtime output) - D2-003で分析済み",
+      "src/app/worktrees/[id]/files/[...path]/page.tsx - 直接変更対象",
+      "src/app/worktrees/[id]/files/[...path]/page.tsx (非マークダウン L204) - D1-004で影響なし確認"
+    ],
+    "missing_from_design": [
+      "src/components/worktree/MermaidDiagram.tsx (L156) - エラー表示のpre要素が.proseコンテナ内で描画される場合の影響 (D3-001)"
+    ]
+  },
+  "pre_tags_outside_prose": {
+    "description": "以下の pre 要素は .prose コンテナ外にあり、.prose pre ルール変更の影響を受けない",
+    "files": [
+      "src/components/worktree/FileViewer.tsx L185 - Modal内、.proseコンテナ外",
+      "src/components/worktree/ExecutionLogPane.tsx L240, L246 - .proseコンテナ外",
+      "src/components/worktree/LogViewer.tsx L389 - .proseコンテナ外",
+      "src/app/worktrees/[id]/files/[...path]/page.tsx L204 - .proseコンテナ外"
+    ]
+  },
+  "css_specificity_analysis": {
+    "prose_pre": {
+      "selector": ".prose pre",
+      "specificity": "0,1,1",
+      "layer": "@layer components",
+      "impact": "全 .prose 内の pre 要素に適用。bg-transparent → bg-[#0d1117] への変更"
+    },
+    "prose_pre_code_hljs": {
+      "selector": ".prose pre code.hljs",
+      "specificity": "0,2,2",
+      "layer": "@layer components",
+      "impact": "言語指定ありコードブロック。既存と同一で変更なし"
+    },
+    "prose_pre_code_not_hljs": {
+      "selector": ".prose pre code:not(.hljs)",
+      "specificity": "0,2,2",
+      "layer": "@layer components",
+      "impact": "新規追加。言語未指定コードブロックへのフォールバック。:not() は .hljs がない場合のみマッチ"
+    },
+    "tailwind_utility_override": {
+      "description": "bg-gray-900 等の Tailwind ユーティリティクラスは @layer なしで出力されるため、@layer components の .prose pre より高い優先度を持つ。MessageList の realtime output pre (bg-gray-900) は .prose pre の bg-[#0d1117] を上書きする",
+      "risk": "低"
+    },
+    "prose_pre_specificity_note": {
+      "description": "設計方針書のCSS詳細度テーブル（セクション4）では .prose pre code.hljs が 0,2,1 と記載されているが、正確には class(prose) + class(hljs) + type(pre) + type(code) = 0,2,2 である。ただし code.hljs は class(hljs) + type(code) = 0,1,1、prose が 0,1,0 で合計 0,2,1 + type(pre) = 0,2,2。実際にはこの詳細度の違いは動作に影響しないため、nice_to_have としても指摘しない"
+    }
+  },
+  "summary": "影響分析レビューの結果、設計方針書の影響範囲分析は概ね網羅的であるが、1件の見落としが確認された。MermaidDiagram.tsx のエラー表示 pre 要素が .prose コンテナ内で描画される場合、bg-[#0d1117] が適用されて視覚的不整合が生じる可能性がある (D3-001)。テスト計画にもこのケースが不足している (D3-002)。prose クラスの使用箇所は全5ファイル（globals.css含む）で全て設計方針書にカバーされている。.prose 外の pre 要素（FileViewer, ExecutionLogPane, LogViewer, 非マークダウンファイル表示）への影響はない。CSS 詳細度の波及リスクは低く、:not(.hljs) セレクタは既存の .hljs スタイルに干渉しない。must_fix は0件、should_fix は2件、nice_to_have は2件。",
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 2
+}

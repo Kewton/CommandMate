@@ -1,0 +1,10 @@
+{
+  "issue_number": 398,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_findings": [],
+  "skipped_findings": ["IMP2-001", "IMP2-002"],
+  "skip_reason": "Stage 7でMust Fix=0、Should Fix=0。Nice to Have 2件のみのため反映対象なし",
+  "status": "skipped_no_required_changes",
+  "updated_at": "2026-03-02"
+}

@@ -1,0 +1,23 @@
+{
+  "issue_number": 392,
+  "refactor_targets": [
+    "src/lib/clone-manager.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "tests/unit/lib/clone-manager.test.ts",
+    "tests/integration/api-clone.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "unit_tests_passed": 60,
+    "integration_tests_passed": 15,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性・保守性の向上",
+    "コメントやJSDocが設計意図（D1-001, D4-001, S1-001等）を正確に反映しているか確認",
+    "不要なコードや冗長な表現の排除",
+    "テストコードの明確性確認（H-003の防御的テストコメントなど）",
+    "ESLintエラー/TypeScriptエラーがゼロであることの確認"
+  ]
+}

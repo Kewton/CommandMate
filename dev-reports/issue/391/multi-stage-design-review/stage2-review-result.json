@@ -1,0 +1,85 @@
+{
+  "issue_number": 391,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "findings": [
+    {
+      "id": "S2-001",
+      "severity": "should_fix",
+      "category": "code_mismatch",
+      "title": "設計書の handleCheckboxChange 行番号範囲が実際のコードと一致しているが、L152の参照箇所の記載が曖昧",
+      "description": "設計方針書セクション1（根本原因）に「handleCheckboxChange L152: 選択数=2の時のみ」と記載されている。実際のAgentSettingsPane.tsx L152は `if (next.size === MAX_SELECTED_AGENTS) {` であり内容は正しい。ただし、セクション3-1の擬似コード見出しに「handleCheckboxChange修正（L141-176）」と記載されており、これも実際のL141-176と一致する。一方、設計書の擬似コードでは `else` ブロック内で `setIsEditing(true)` を呼ぶが、実際のコードでは `else` ブロックは単に `next.delete(toolId)` のみ（L147）で、`setIsEditing(true)` のような追加行はない。これは「修正後」の擬似コードなので問題ないが、修正前コード（Before）の明示がないため、現行コードとの差分が読み手にとって分かりにくい。",
+      "location": "セクション3-1: handleCheckboxChange修正",
+      "suggestion": "設計書の擬似コードが「After（修正後）」であることは明記されているが、Before（修正前）のコード断片も対比として記載するとレビュアーの理解が容易になる。ただし、useEffectガードについてはBefore/After両方が記載されているため、handleCheckboxChangeでも同様の形式を推奨する。修正必須ではないが改善余地あり。"
+    },
+    {
+      "id": "S2-002",
+      "severity": "nice_to_have",
+      "category": "code_mismatch",
+      "title": "設計書のuseCallback依存配列がコードのcheckedIdsRefパターンと整合",
+      "description": "設計書の擬似コードでは useCallback の依存配列を `[worktreeId, selectedAgents, onSelectedAgentsChange]` としており、実際のコード（AgentSettingsPane.tsx L175）も同一。checkedIdsRef.currentを使ってcheckedIdsを参照する既存パターンとも整合している。ただし、設計書の擬似コード（セクション3-1）では `checkedIdsRef.current` を使用しているが、この ref の宣言（L94-95）についての言及が設計書にない。新規追加コードではないため実装上の問題はないが、レビュアーが擬似コードだけを見ると、checkedIdsRefの存在を知らない可能性がある。",
+      "location": "セクション3-1: handleCheckboxChange修正の擬似コード",
+      "suggestion": "設計書の擬似コード冒頭に「既存のcheckedIdsRef（L94-95）を引き続き使用」などの注記を追加すると、レビュアーの理解が向上する。"
+    },
+    {
+      "id": "S2-003",
+      "severity": "must_fix",
+      "category": "code_mismatch",
+      "title": "設計書の「根本原因」セクションのL1035-1036参照が正確だが説明文に微小な不整合",
+      "description": "設計書セクション1（根本原因）の項目2に「ポーリングでfetchWorktree()が毎回setSelectedAgents()を呼ぶ（L1035-1036）」と記載されている。実際のコードではL1035が `if (data.selectedAgents) {` でL1036が `setSelectedAgents(data.selectedAgents);` である。「毎回」と記載されているが、実際にはif条件（data.selectedAgentsの存在チェック）があるため、data.selectedAgentsがfalsyの場合はスキップされる。これは問題の本質に影響しない（通常APIレスポンスにはselectedAgentsが含まれるため実質毎回呼ばれる）が、根本原因の正確な記述としては「data.selectedAgentsが存在する場合は毎回setSelectedAgents()を呼ぶ」が正確。設計書の根本原因分析は正確性が重要であるため修正を推奨する。",
+      "location": "セクション1: 根本原因 項目2",
+      "suggestion": "「ポーリングでfetchWorktree()が毎回setSelectedAgents()を呼ぶ（L1035-1036）」を「ポーリングでfetchWorktree()がdata.selectedAgentsの存在チェック後にsetSelectedAgents()を無条件で呼ぶ（L1035-1036）」に修正する。'無条件'とは'値の同一性チェックなしに'の意味。"
+    },
+    {
+      "id": "S2-004",
+      "severity": "nice_to_have",
+      "category": "internal_inconsistency",
+      "title": "状態フロー図の「API失敗 -> リバート」遷移とhandleCheckboxChange擬似コードの整合確認",
+      "description": "状態フロー図（セクション2）では「Editing --> Synced: API失敗 -> リバート」と記載されている。擬似コード（セクション3-1）では、API失敗時に `setCheckedIds(new Set(selectedAgents))` でリバートし、finally節で `setIsEditing(false)` を設定している。リバート先がselectedAgents（props）の値であるため、isEditing=falseになった後のuseEffectで再度setCheckedIds(new Set(selectedAgents))が発火する可能性がある。ただし同一のSetオブジェクトが生成されるため実質的な問題はない。状態フロー図と実装の整合は取れている。",
+      "location": "セクション2: 状態フロー図 + セクション3-1: handleCheckboxChange",
+      "suggestion": "API失敗時のリバートフローで、finally節のsetIsEditing(false)後にuseEffectが発火してsetCheckedIdsが再度呼ばれる点について、設計書に「冗長だが副作用なし」と一言注記があるとよい。"
+    },
+    {
+      "id": "S2-005",
+      "severity": "should_fix",
+      "category": "internal_inconsistency",
+      "title": "テストケースT2の検証内容がS1-002の要件を完全にカバーする記述になっているか",
+      "description": "テストケースT2（セクション4-2）の検証内容は「2つ選択完了後、次のselectedAgents prop変更が正しく同期される。[S1-002] isEditing解除タイミングでuseEffectが古いselectedAgentsで発火しないことを検証する（setCheckedIds(new Set(pair))による明示的な確定値設定が機能していること）」と記載されている。これはS1-002の要件を適切に反映しているが、テストの具体的な検証手順（例: rerenderでselectedAgentsを変更する前にisEditing=falseになっていることの確認方法）が記述されていない。ユニットテストでisEditingの内部stateを直接検証することはできないため、外部からの振る舞い検証（チェックボックスの状態確認）で間接的に検証する必要がある。その旨の記載が望ましい。",
+      "location": "セクション4-2: テストケースT2",
+      "suggestion": "T2の検証内容に「isEditingは内部stateのため、rerenderでselectedAgents propを変更した際にcheckedIdsが正しく同期されることを外部振る舞いとして検証する」旨を追記する。"
+    },
+    {
+      "id": "S2-006",
+      "severity": "nice_to_have",
+      "category": "convention",
+      "title": "CLAUDE.mdのコーディング規約（strict: true）との整合性は問題なし",
+      "description": "設計書の擬似コードはTypeScript strictモードに準拠している。新規追加のisEditing state（boolean型）、配列比較ロジック（型注釈あり）ともに型安全である。CLIToolType型アサーション（Array.from(next) as [CLIToolType, CLIToolType]）は既存コードから継続使用であり、新規の型安全性リスクはない。ESLint規則（未使用import禁止、console.log禁止）に抵触する変更もない。",
+      "location": "設計方針書全体",
+      "suggestion": "特になし。CLAUDE.mdの規約との整合性は良好。"
+    },
+    {
+      "id": "S2-007",
+      "severity": "should_fix",
+      "category": "internal_inconsistency",
+      "title": "実装チェックリストにselectedAgentsRef同期用useEffectの依存配列の記載がない",
+      "description": "セクション11（実装チェックリスト）の案Bに「selectedAgents同期用useEffect追加」が含まれているが、擬似コード（セクション3-2）では `useEffect(() => { selectedAgentsRef.current = selectedAgents; }, [selectedAgents]);` と依存配列が明記されている。チェックリスト項目として「依存配列が[selectedAgents]であること」の確認が含まれていない。依存配列の誤りはバグの原因になるため、チェックリストに明記すべき。",
+      "location": "セクション11: 実装チェックリスト 案B",
+      "suggestion": "チェックリストの「selectedAgents同期用useEffect追加」を「selectedAgents同期用useEffect追加（依存配列: [selectedAgents]）」に修正する。"
+    },
+    {
+      "id": "S2-008",
+      "severity": "nice_to_have",
+      "category": "internal_inconsistency",
+      "title": "影響範囲テーブルにNotesAndLogsPane.tsxが含まれていない",
+      "description": "セクション5（影響範囲）のテーブルにはAgentSettingsPane.tsx、WorktreeDetailRefactored.tsx、テストファイルの3つが記載されている。NotesAndLogsPane.tsxはAgentSettingsPaneにpropsを中継するコンポーネントであるが、今回の修正（isEditing state追加、useEffectガード、配列比較ロジック）はNotesAndLogsPaneのコード変更を必要としないため、影響範囲に含めないのは妥当。ただし、propsの中継経路としての言及があると影響分析の完全性が高まる。",
+      "location": "セクション5: 影響範囲",
+      "suggestion": "影響範囲テーブルの下に「NotesAndLogsPane.tsxはselectedAgents propsの中継のみであり、コード変更不要」と注記を追加することを検討。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 4,
+  "overall_quality": "high",
+  "recommendation": "設計方針書は全体として高品質であり、行番号・ファイルパス・擬似コードの大部分が実際のコードと正確に一致している。must_fix 1件（根本原因の記述精度）は設計書の正確性に関わるため修正を推奨する。should_fix 3件は設計書の完全性を向上させるための改善項目。これらを反映した上でStage 3（影響分析）レビューに進むことを推奨する。"
+}

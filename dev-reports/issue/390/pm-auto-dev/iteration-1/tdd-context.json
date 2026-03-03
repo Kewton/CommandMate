@@ -1,0 +1,27 @@
+{
+  "issue_number": 390,
+  "title": "fix: 言語未指定コードブロックの背景が白で文字が読めない",
+  "acceptance_criteria": [
+    "言語未指定コードブロック（` ``` `）がダーク背景で表示される",
+    "言語指定コードブロック（` ```md ` 等）の表示に影響がない",
+    "MarkdownEditor、MessageList、FileViewerPage の3コンポーネントで修正が適用される",
+    "インラインコード（`` `code` ``）のスタイルに影響がない",
+    "FileViewerPage の prose-pre:bg-gray-100 が修正され、ダーク背景が正しく適用される",
+    "MessageList のユーザーメッセージ（prose-invert 付き）でコードブロックが適切に表示されること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/app/globals.css の .prose pre を bg-[#0d1117] に変更、overflow-x-auto 追加、.prose pre code:not(.hljs) フォールバックルール追加",
+    "Task 2.1: src/app/worktrees/[id]/files/[...path]/page.tsx のカスタム pre コンポーネントから bg-gray-50 border border-gray-200 rounded-md p-4 を除去し overflow-x-auto のみ残す。L150 の prose-pre:bg-gray-100 prose-pre:border prose-pre:border-gray-200 を削除",
+    "Task 3.1: src/components/worktree/MermaidDiagram.tsx のエラー表示 <pre> に bg-red-50 を追加"
+  ],
+  "design_policy_path": "dev-reports/design/issue-390-code-block-dark-bg-design-policy.md",
+  "work_plan_path": "dev-reports/issue/390/work-plan.md",
+  "target_files": [
+    "src/app/globals.css",
+    "src/app/worktrees/[id]/files/[...path]/page.tsx",
+    "src/components/worktree/MermaidDiagram.tsx"
+  ],
+  "no_new_tests_required": true,
+  "reason_no_tests": "本修正はCSSスタイル変更のみ。Vitest + jsdom ではCSSレンダリングを検証できないため、既存テストのリグレッション確認のみ必要",
+  "target_coverage": 80
+}

@@ -1,0 +1,135 @@
+{
+  "issue_number": 392,
+  "status": "passed",
+  "acceptance_criteria_results": [
+    {
+      "id": "AC-1",
+      "description": "Relative customTargetPath resolved to absolute path under basePath",
+      "status": "passed",
+      "notes": "resolveCustomTargetPath('my-repo', '/tmp/repos') returns '/tmp/repos/my-repo'. Verified by unit tests H-001 and T-001/T-002."
+    },
+    {
+      "id": "AC-2",
+      "description": "Resolved absolute path used consistently in existsSync/createCloneJob/executeClone/onCloneSuccess",
+      "status": "passed",
+      "notes": "After resolveCustomTargetPath() returns the resolved path, the same targetPath variable flows through existsSync (L380), createCloneJob (L388), executeClone (L392), and onCloneSuccess (L467). Verified by test T-005 (existsSync called with '/tmp/repos/my-repo')."
+    },
+    {
+      "id": "AC-3",
+      "description": "DB targetPath is always an absolute path under basePath",
+      "status": "passed",
+      "notes": "Tests T-001 and T-002 verify getCloneJob(db, jobId).targetPath equals '/tmp/repos/my-repo' and '/tmp/repos/nested/deep/repo' respectively. Integration test R-001 verifies '/test/clone-root/my-repo'."
+    },
+    {
+      "id": "AC-4",
+      "description": "mkdirSync parentDir is within basePath",
+      "status": "passed",
+      "notes": "executeClone() calls path.dirname(targetPath) which is already validated to be under basePath. Since targetPath is always an absolute path under basePath (ensured by resolveCustomTargetPath), parentDir is also under basePath."
+    },
+    {
+      "id": "AC-5",
+      "description": "Path traversal ('../escape') rejected with INVALID_TARGET_PATH",
+      "status": "passed",
+      "notes": "Tests H-002 (resolveCustomTargetPath returns null for '../escape') and T-003 (startCloneJob returns error code INVALID_TARGET_PATH) both pass."
+    },
+    {
+      "id": "AC-6",
+      "description": "Error response does not contain basePath/rootDir (D4-001)",
+      "status": "passed",
+      "notes": "Tests T-006 verifies error message does not contain '/tmp/repos'. Security test 'should not include basePath value in path traversal error message' verifies '/secret/internal/path' is not leaked. resolveCustomTargetPath uses fixed message '[CloneManager] Invalid custom target path rejected' for console.warn."
+    },
+    {
+      "id": "AC-7",
+      "description": "Existing absolute path customTargetPath tests still pass",
+      "status": "passed",
+      "notes": "Test T-004 verifies backward compatibility: startCloneJob with '/tmp/repos/custom/target/path' (absolute) succeeds and DB stores the exact path. Original test 'should use custom target path if provided' also passes."
+    },
+    {
+      "id": "AC-8",
+      "description": "existsSync called with resolved absolute path",
+      "status": "passed",
+      "notes": "Test T-005 explicitly verifies vi.mocked(existsSync).toHaveBeenCalledWith('/tmp/repos/my-repo') after calling startCloneJob with relative path 'my-repo'."
+    },
+    {
+      "id": "AC-9",
+      "description": "route.ts trims targetDir whitespace",
+      "status": "passed",
+      "notes": "route.ts L98: trimmedTargetDir = targetDir?.trim() || undefined. Integration test R-001 sends '  my-repo  ' and verifies job.targetPath equals '/test/clone-root/my-repo'. Test R-002 verifies whitespace-only targetDir treated as undefined."
+    },
+    {
+      "id": "AC-10",
+      "description": "targetDir >= 1025 chars returns 400 error",
+      "status": "passed",
+      "notes": "route.ts L97: MAX_TARGET_DIR_LENGTH = 1024, L99: rejects trimmedTargetDir.length > MAX_TARGET_DIR_LENGTH. Integration test R-003 sends 'a'.repeat(1025) and verifies 400 status with INVALID_TARGET_PATH code."
+    }
+  ],
+  "test_execution_results": {
+    "unit": {
+      "file": "tests/unit/lib/clone-manager.test.ts",
+      "passed": 60,
+      "failed": 0,
+      "total": 60,
+      "duration": "779ms"
+    },
+    "integration": {
+      "file": "tests/integration/api-clone.test.ts",
+      "passed": 15,
+      "failed": 0,
+      "total": 15,
+      "duration": "337ms"
+    }
+  },
+  "security_checks": {
+    "d4_001_no_path_leak": "passed",
+    "d4_001_details": "Error responses use ERROR_DEFINITIONS.INVALID_TARGET_PATH with fixed message 'Target path is invalid or outside allowed directory'. Console.warn uses fixed string '[CloneManager] Invalid custom target path rejected'. Three tests verify: (1) secretBasePath not in error message, (2) full targetPath not in DIRECTORY_EXISTS message, (3) '/tmp/repos' not in path traversal error.",
+    "s1_001_logging": "passed",
+    "s1_001_details": "console.warn('[CloneManager] Invalid custom target path rejected') is called in resolveCustomTargetPath() catch block (clone-manager.ts L205). Uses fixed message to avoid leaking rootDir from exception messages.",
+    "s4_001_double_decode": "passed",
+    "s4_001_details": "S4-001-T1: double-encoded '%252e%252e%252fetc' resolves to '/tmp/repos/%2e%2e%2fetc' (literal directory name, no bypass). S4-001-T2: single-encoded '..%2fetc' is correctly rejected (returns null). S4-001-T3: 'normal-repo' resolves to '/tmp/repos/normal-repo'."
+  },
+  "static_analysis": {
+    "typescript_errors": 0,
+    "eslint_errors": 0
+  },
+  "test_scenarios_results": [
+    {
+      "id": "Scenario A",
+      "description": "POST with relative path 'my-repo' -> DB targetPath is absolute",
+      "status": "passed",
+      "evidence": "Unit test T-001 and integration test R-001 both verify the relative path is resolved to basePath + '/my-repo'."
+    },
+    {
+      "id": "Scenario B",
+      "description": "POST with '../escape' -> 400 INVALID_TARGET_PATH",
+      "status": "passed",
+      "evidence": "Unit test T-003 verifies startCloneJob returns success:false with error code INVALID_TARGET_PATH for path traversal."
+    },
+    {
+      "id": "Scenario C",
+      "description": "POST with absolute path within basePath -> success",
+      "status": "passed",
+      "evidence": "Unit test T-004 verifies backward compatibility with absolute path '/tmp/repos/custom/target/path'."
+    },
+    {
+      "id": "Scenario D",
+      "description": "POST with '  my-repo  ' -> trimmed and succeeds",
+      "status": "passed",
+      "evidence": "Integration test R-001 sends '  my-repo  ' and verifies job.targetPath is '/test/clone-root/my-repo'."
+    },
+    {
+      "id": "Scenario E",
+      "description": "POST with 1025-char targetDir -> 400 error",
+      "status": "passed",
+      "evidence": "Integration test R-003 sends 'a'.repeat(1025) and verifies 400 status with INVALID_TARGET_PATH."
+    }
+  ],
+  "files_verified": [
+    "src/lib/clone-manager.ts",
+    "src/app/api/repositories/clone/route.ts",
+    "src/lib/path-validator.ts",
+    "tests/unit/lib/clone-manager.test.ts",
+    "tests/integration/api-clone.test.ts"
+  ],
+  "summary": "All 10 acceptance criteria (AC-1 through AC-10) are satisfied. All 75 tests pass (60 unit + 15 integration). Zero TypeScript errors and zero ESLint errors. Security checks D4-001 (no path leak in error messages), S1-001 (console.warn logging with fixed message), and S4-001 (double-decode safety) all pass. The implementation correctly resolves relative customTargetPath values to absolute paths under basePath using resolveCustomTargetPath(), which wraps validateWorktreePath(). The route.ts layer adds trim() and 1024-character length limit as defense-in-depth measures.",
+  "message": "All acceptance criteria verified. Issue #392 implementation is complete and correct."
+}

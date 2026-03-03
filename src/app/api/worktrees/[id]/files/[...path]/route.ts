@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { normalize, join } from 'path';
-import { isPathSafe } from '@/lib/path-validator';
+import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
 import {
   readFileContent,
   updateFileContent,
@@ -116,6 +116,13 @@ async function getWorktreeAndValidatePath(
   if (!isPathSafe(normalizedPath, worktree.path)) {
     return {
       error: createErrorResponse('INVALID_PATH', 'Invalid file path'),
+    };
+  }
+
+  // [SEC-394] Symlink traversal validation
+  if (!resolveAndValidateRealPath(normalizedPath, worktree.path)) {
+    return {
+      error: createErrorResponse('INVALID_PATH', 'Invalid path'),
     };
   }
 

@@ -1,0 +1,41 @@
+{
+  "issue_number": 391,
+  "title": "fix: エージェント選択のチェックボックスを外すと自動で再チェックされる",
+  "acceptance_criteria": [
+    "チェックボックスを外した状態が維持される（ポーリングで戻らない）",
+    "別のエージェントを選択して2つになった時にAPIが呼ばれ、正しく保存される",
+    "API失敗時はサーバーの値にリバートされ、isEditingフラグもfalseにリセットされる",
+    "ページリロード時はサーバーの値が正しく反映される",
+    "チェックを外した後、2つ目を選択せずに別のタブへ移動した場合、タブ戻り時に中間状態は維持されるが、次のページリロードでサーバーの値に同期される",
+    "ブラウザタブを切り替えて戻った際（visibilitychange）、isEditing中間状態は維持される"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: AgentSettingsPane.tsxに isEditing state追加（useState(false)）",
+    "Task 1.1: useEffect（L98-100）に if (!isEditing) ガード条件追加（依存配列に isEditing を含める）",
+    "Task 1.1: handleCheckboxChange内 - チェック解除時に setIsEditing(true) 追加",
+    "Task 1.1: handleCheckboxChange内 - API成功時に setCheckedIds(new Set(pair)) を onSelectedAgentsChange 前に呼び出し",
+    "Task 1.1: handleCheckboxChange内 - finally節で setIsEditing(false) 追加",
+    "Task 1.2: WorktreeDetailRefactored.tsx に selectedAgentsRef useRef追加",
+    "Task 1.2: selectedAgents同期用useEffect追加（依存配列: [selectedAgents]）",
+    "Task 1.2: fetchWorktree内 - selectedAgents更新を配列比較後のみ実行（要素順序込み個別比較）",
+    "Task 2.1: 既存テスト（L62-80）の isEditing=false 前提を明示",
+    "Task 2.2: T1 テスト追加（isEditing中のprop変更無視）",
+    "Task 2.2: T2 テスト追加（isEditing解除後の同期）",
+    "Task 2.2: T3 テスト追加（API失敗時のリバート＋isEditingリセット）",
+    "Task 2.2: T4 テスト追加（ネットワークエラー時のリバート＋isEditingリセット）"
+  ],
+  "target_files": [
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/worktree/AgentSettingsPane.test.tsx"
+  ],
+  "design_policy_path": "dev-reports/design/issue-391-agent-checkbox-fix-design-policy.md",
+  "work_plan_path": "dev-reports/issue/391/work-plan.md",
+  "target_coverage": 80,
+  "constraints": [
+    "Props/API/DBスキーマの変更は不要",
+    "AgentSettingsPanePropsインターフェースは変更しない",
+    "useCallback依存配列にisEditingを含めない（setterは安定参照）",
+    "fetchWorktreeのuseCallback依存配列は変更しない（[worktreeId]のまま）"
+  ]
+}

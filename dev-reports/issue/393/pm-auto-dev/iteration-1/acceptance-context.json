@@ -1,0 +1,34 @@
+{
+  "issue_number": 393,
+  "feature_summary": "security: authenticated RCE and shell injection via /api/worktrees/[id]/terminal の修正",
+  "acceptance_criteria": [
+    "cliToolId が CLI_TOOL_IDS に含まれない場合、400 Bad Request を返す",
+    "worktreeId が DB に存在しない場合、404 Not Found を返す",
+    "command パラメータが 10000 文字を超える場合、400 Bad Request を返す",
+    "セッションが存在しない場合、自動作成せず 404 を返す",
+    "エラーメッセージにユーザー入力値を埋め込まない（固定文字列）",
+    "tmux.ts の全 exec() 呼び出しが execFile() に移行されている",
+    "sendSpecialKey() にランタイムバリデーションが追加されている",
+    "codex.ts / claude-session.ts の直接 exec() が tmux.ts 関数経由に統一されている",
+    "capture/route.ts の lines パラメータが正の整数として検証される"
+  ],
+  "test_scenarios": [
+    "シナリオ1: terminal/route.ts - 有効リクエストで200を返す",
+    "シナリオ2: terminal/route.ts - 無効なcliToolIdで400を返す（シェルメタ文字含む）",
+    "シナリオ3: terminal/route.ts - 存在しないworktreeIdで404を返す",
+    "シナリオ4: terminal/route.ts - セッション不在で404を返す",
+    "シナリオ5: terminal/route.ts - 長すぎるcommandで400を返す",
+    "シナリオ6: capture/route.ts - 無効なlinesパラメータで400を返す",
+    "シナリオ7: tmux.ts - execFile()が使用されている（exec()は使用されていない）",
+    "シナリオ8: tmux.ts - sendSpecialKey()が無効キーでエラーを投げる",
+    "シナリオ9: codex.ts - 直接exec()呼び出しがない",
+    "シナリオ10: claude-session.ts - 直接exec()呼び出しがない（line 783付近）"
+  ],
+  "modified_files": [
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/claude-session.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/app/api/worktrees/[id]/capture/route.ts"
+  ]
+}

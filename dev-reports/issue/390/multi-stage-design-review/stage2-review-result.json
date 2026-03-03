@@ -1,0 +1,52 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_focus": "整合性",
+  "total_issues": 3,
+  "issues": [
+    {
+      "id": "D2-001",
+      "severity": "must_fix",
+      "category": "Before記述",
+      "title": "実装チェックリストのカスタムpreコンポーネント除去対象クラスが実コードと不一致",
+      "description": "設計方針書セクション11の実装チェックリストに「page.tsx: カスタム pre コンポーネントから bg-[#0d1117] text-[#c9d1d9] rounded-md p-4 を除去し、overflow-x-auto のみ残す (D1-001)」と記載されているが、実際のpage.tsx L171のカスタムpreコンポーネントには bg-[#0d1117] や text-[#c9d1d9] は存在しない。実際のクラスは「bg-gray-50 border border-gray-200 rounded-md p-4 overflow-x-auto」である。セクション5-2のBefore/After記述は正確だが、セクション11のチェックリストがセクション5-2と矛盾しており、実装時に混乱を招く。",
+      "location": "設計方針書セクション11 実装チェックリスト 3番目の項目 vs 実コード src/app/worktrees/[id]/files/[...path]/page.tsx L171",
+      "suggestion": "セクション11の実装チェックリスト3番目の項目を「page.tsx: カスタム pre コンポーネントから bg-gray-50 border border-gray-200 rounded-md p-4 を除去し、overflow-x-auto のみ残す (D1-001)」に修正する。セクション5-2のBefore/After記述と一致させること。"
+    },
+    {
+      "id": "D2-002",
+      "severity": "should_fix",
+      "category": "設計vs実装",
+      "title": "FileViewerPageのカスタムpreコンポーネントAfterでglobals.cssのp-0との競合が未分析",
+      "description": "設計方針書のAfterでは、globals.cssの.prose preに「p-0」を設定し、カスタムpreコンポーネントには「overflow-x-auto」のみを残す計画である。しかし、globals.cssの.prose pre { p-0 }はpadding: 0を設定するため、現在のカスタムpreのp-4（padding: 1rem）を除去すると、言語指定ありのコードブロックは.prose pre code.hljsの「padding: 1rem」で内部パディングが適用されるが、言語未指定コードブロックは.prose pre code:not(.hljs)の「padding: 1rem」で適用される。pre要素自体にはpadding: 0が適用されるため、コードテキストはpre要素の境界に密着せず、code要素の内部パディングで間隔が確保される設計となる。この動作は意図通りと思われるが、設計方針書にこのpadding委譲の明示的な説明がない。",
+      "location": "設計方針書セクション5-1（globals.css After: p-0）およびセクション5-2（カスタムpre After: overflow-x-autoのみ）",
+      "suggestion": "設計方針書セクション5-2に「paddingの管理: .prose preのp-0により、pre要素自体のpaddingは0に設定される。内部のcode要素（.prose pre code.hljsおよび.prose pre code:not(.hljs)）がそれぞれpadding: 1remを持つことで、適切な内部余白が確保される」旨の説明を追加する。"
+    },
+    {
+      "id": "D2-003",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "MessageList.tsxのrealtime output内のprose preへの影響分析が簡潔すぎる",
+      "description": "設計方針書セクション5-1の影響コンポーネント記述で「MessageList.tsx (realtime output): inline クラス bg-gray-900 が優先されるため影響なし」と記載されている。これは技術的に正確である（Tailwindユーティリティクラスはlayerなしのため@layer componentsより高い詳細度を持つ）。しかし、この優先順位の根拠（@layer components vs layer-less utility class）の説明がないため、レビュアーが検証しにくい。また、L598-599のpreタグはprose div（L596）の内部にあり、.prose preセレクタのマッチ対象であることを明示すると理解しやすい。",
+      "location": "設計方針書セクション5-1 影響コンポーネント最終項目 vs 実コード src/components/worktree/MessageList.tsx L596-606",
+      "suggestion": "「bg-gray-900はTailwindユーティリティクラス（layerなし）であり、@layer components内の.prose pre { bg-[#0d1117] }より高い詳細度を持つため、bg-gray-900が優先される」のように、CSSカスケードの根拠を補足する。"
+    }
+  ],
+  "consistency_check": {
+    "globals_css": "consistent",
+    "page_tsx": "inconsistent",
+    "markdown_editor": "consistent",
+    "message_list": "consistent"
+  },
+  "summary": "整合性レビューの結果、設計方針書の主要なBefore/After記述（セクション4, 5-1, 5-2）は実コードと概ね一致しているが、セクション11の実装チェックリストに内部矛盾が1件発見された。具体的には、page.tsxのカスタムpreコンポーネントから除去すべきクラス名が、セクション5-2の正確なBefore記述（bg-gray-50 border border-gray-200）ではなく、Stage 1レビュー後のAfter設計値（bg-[#0d1117] text-[#c9d1d9]）を誤って記載している。これはD1-001反映時の記述ミスであり、実装者が誤ったクラス名を探して混乱するリスクがあるため、must_fixとした。globals.css、MarkdownEditor.tsx、MessageList.tsxについては設計方針書の記述と実コードの整合性に問題はない。",
+  "must_fix_count": 1,
+  "should_fix_count": 1,
+  "nice_to_have_count": 1,
+  "reviewed_files": [
+    "src/app/globals.css",
+    "src/app/worktrees/[id]/files/[...path]/page.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/MessageList.tsx"
+  ],
+  "timestamp": "2026-03-02T00:00:00Z"
+}

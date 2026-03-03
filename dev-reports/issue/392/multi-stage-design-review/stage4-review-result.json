@@ -1,0 +1,77 @@
+{
+  "issue_number": 392,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_date": "2026-03-02",
+  "focus_area": "セキュリティ",
+  "summary": "Issue #392 の設計方針書に対するセキュリティレビューを OWASP Top 10 準拠の観点から実施した。脆弱性の根本原因（isPathSafe() による検証後に未解決パスで git clone を実行する問題）に対する修正設計は適切であり、validateWorktreePath() による検証とカノニカル化の原子的な実行は正しいアプローチである。ただし、validateWorktreePath() 内部の二重 decodeURIComponent による実際のバイパスリスク（S4-001: must_fix）が存在し、特定の URL 二重エンコードパターンでパストラバーサルが成立する可能性がある。また、認証未設定時の攻撃面の増大（S4-004）、executeClone() における mkdirSync の暗黙的ディレクトリ作成リスク（S4-003）についても指摘する。must_fix 1件、should_fix 3件、nice_to_have 3件を検出した。",
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "must_fix",
+      "owasp": "A01",
+      "title": "validateWorktreePath() の二重 decodeURIComponent によるパストラバーサルバイパスの実証的検証が未実施",
+      "description": "設計方針書の S1-002 で認識されている二重 decodeURIComponent リスクについて、「スコープ外」として記録されているが、Issue #392 の修正が validateWorktreePath() を「信頼の核（single point of validation）」として採用する以上、この関数自体の安全性を確認する責任がある。具体的な攻撃シナリオ: 入力 '%252e%252e%252fetc%252fpasswd' に対し、(1) isPathSafe() 内の decodeURIComponent で '%2e%2e%2fetc%2fpasswd' に展開、(2) isPathSafe() 内の path.resolve(rootDir, '%2e%2e%2fetc%2fpasswd') はリテラル文字列として rootDir 配下に解決されるため isPathSafe() は true を返す、(3) validateWorktreePath() の独自 decodeURIComponent で '../etc/passwd' に展開、(4) path.resolve(rootDir, '../etc/passwd') で rootDir 外にトラバーサル成功。この攻撃パターンが実際に成立するか、実装前にユニットテストで実証的に検証すべきである。成立する場合、validateWorktreePath() 内の独自 decodeURIComponent（L109-113）を削除し、isPathSafe() のデコード結果のみを使用するよう修正する必要がある（別 Issue として対処しても良いが、Issue #392 の修正に先行して対処すべき）。",
+      "location": "設計方針書 セクション10-1 [S1-002]、path-validator.ts L89-117",
+      "recommendation": "実装前に以下のテストを追加して二重デコードバイパスの可否を実証的に検証すること: validateWorktreePath('%252e%252e%252f..%252f..%252fetc', '/home/user') の結果が rootDir 外のパスを返さないことを確認する。バイパスが成立する場合は、Issue #392 のスコープ内で validateWorktreePath() の修正を含めるか、先行して別 Issue で修正を完了させてから Issue #392 の修正を適用すること。"
+    },
+    {
+      "id": "S4-002",
+      "severity": "should_fix",
+      "owasp": "A01",
+      "title": "シンボリックリンク攻撃に対する防御が未考慮",
+      "description": "設計方針書はパストラバーサル攻撃の防御に注力しているが、シンボリックリンクを利用した TOCTOU (Time-of-Check-to-Time-of-Use) 攻撃への対策が未記載。攻撃シナリオ: (1) 攻撃者が CM_ROOT_DIR 内に '/repos/evil-link' というシンボリックリンクを '/etc' を指すよう作成、(2) validateWorktreePath('evil-link', '/repos') はシンボリックリンク先を解決せず '/repos/evil-link' を返す、(3) existsSync('/repos/evil-link') が true を返しディレクトリ存在チェックで拒否される可能性はあるが、(4) シンボリックリンクが存在しない場合でも、clone 実行後に攻撃者がタイミングを合わせてシンボリックリンクを作成する可能性がある。ただし、git clone は targetPath にディレクトリを新規作成するため、既存のシンボリックリンクがある場合は clone 自体が失敗する。リスクは限定的だが、validateWorktreePath() 内での realpath 検証を検討事項として記載すべきである。",
+      "location": "設計方針書 セクション6-3 攻撃ベクトルの遮断",
+      "recommendation": "セクション6-3 の攻撃ベクトル表にシンボリックリンク攻撃パターンを追加し、リスク評価と対策方針（git clone 自体の動作による暗黙的防御の記述、または将来的な realpath 検証の検討）を記載する。"
+    },
+    {
+      "id": "S4-003",
+      "severity": "should_fix",
+      "owasp": "A01",
+      "title": "executeClone() の mkdirSync が resolvedPath の親ディレクトリを暗黙的に作成するリスク",
+      "description": "clone-manager.ts L382-385 の executeClone() は mkdirSync(parentDir, { recursive: true }) を実行して targetPath の親ディレクトリを作成する。Issue #392 の修正後、targetPath は常に basePath 配下の絶対パスになるため、通常は basePath 内のサブディレクトリのみが作成される。しかし、validateWorktreePath() にバイパスが存在した場合（S4-001 の二重デコード問題等）、basePath 外のディレクトリが再帰的に作成される可能性がある。mkdirSync に渡す parentDir が basePath 配下であることの追加検証（defense-in-depth）を検討すべきである。",
+      "location": "設計方針書 セクション2 データフロー、clone-manager.ts L382-385",
+      "recommendation": "executeClone() 内で mkdirSync を呼ぶ前に、parentDir が basePath 配下であることを isPathSafe() で検証する defense-in-depth チェックの追加を検討する。もしくは、Issue #392 の設計方針書にこのリスクを「既知のリスク」として記録し、validateWorktreePath() の信頼性に依存している旨を明記する。"
+    },
+    {
+      "id": "S4-004",
+      "severity": "should_fix",
+      "owasp": "A05",
+      "title": "CM_AUTH_TOKEN_HASH 未設定時の clone API への認証なしアクセスリスクの明記",
+      "description": "middleware.ts L99-101 において、CM_AUTH_TOKEN_HASH が未設定の場合は認証がスキップされ、全リクエストが NextResponse.next() で通過する。これにより、認証未設定環境では clone API への無認証アクセスが可能であり、Issue #392 の脆弱性修正前は CM_ROOT_DIR 外への任意パスクローンが可能だった。修正後もパストラバーサルは防止されるが、認証なし環境では CM_ROOT_DIR 内への任意リポジトリクローンが依然として可能である。設計方針書において、認証設定時と非設定時のセキュリティ境界の差異を明記すべきである。",
+      "location": "設計方針書 セクション6 セキュリティ設計",
+      "recommendation": "セクション6 に「6-4. 認証状態とセキュリティ境界」サブセクションを追加し、CM_AUTH_TOKEN_HASH 未設定時は認証バイパスにより clone API が無認証でアクセス可能であること、CM_BIND=127.0.0.1（デフォルト）によるネットワーク境界での防御に依存していること、0.0.0.0 バインド時は CM_AUTH_TOKEN_HASH の設定を強く推奨する旨を記載する。"
+    },
+    {
+      "id": "S4-005",
+      "severity": "nice_to_have",
+      "owasp": "A09",
+      "title": "resolveCustomTargetPath() の console.warn ログに攻撃者の入力値を含めることの検討",
+      "description": "設計方針書の S1-001 対応で console.warn('[CloneManager] Invalid custom target path rejected') という固定メッセージのみを出力する設計になっている。D4-001（rootDir 漏洩防止）の観点からは正しいが、攻撃検知の観点では、拒否された入力値の一部（先頭 N 文字をサニタイズして出力、制御文字除去、rootDir は含めない）をログに含めると、攻撃パターンの分析に有用である。ただし、ログインジェクション防止のためのサニタイズ処理が必要となるため、複雑性とのトレードオフを考慮すること。",
+      "location": "設計方針書 セクション4-1、セクション5-2b",
+      "recommendation": "ログメッセージを console.warn('[CloneManager] Invalid custom target path rejected:', customTargetPath.replace(/[\\x00-\\x1f]/g, '').substring(0, 50)) のように、制御文字除去と長さ制限を施した入力値を含める形に拡張することを検討する。ただし、入力値にユーザーの機密情報が含まれる可能性は低い（パス文字列のため）ため、リスクは低い。"
+    },
+    {
+      "id": "S4-006",
+      "severity": "nice_to_have",
+      "owasp": "A03",
+      "title": "git clone コマンドへの引数インジェクション防御の確認記述",
+      "description": "executeClone() では spawn('git', ['clone', '--progress', cloneUrl, targetPath]) で git を実行している。spawn() は shell を経由せず引数を直接渡すため、コマンドインジェクションのリスクは低い。しかし、targetPath が '--' で始まる場合に git のオプションとして解釈される可能性がある（例: targetPath = '--upload-pack=...'）。validateWorktreePath() は path.resolve() で絶対パスに変換するため、結果は必ず '/' で始まり、'--' で始まることはない。この暗黙的な防御を設計方針書に明記しておくと、将来のメンテナンス時に安全性の根拠が明確になる。",
+      "location": "設計方針書 セクション6-3 攻撃ベクトルの遮断",
+      "recommendation": "セクション6-3 の攻撃ベクトル表に 'git option injection (--upload-pack 等)' パターンを追加し、validateWorktreePath() が常に絶対パス（/ 始まり）を返すことで暗黙的に防御されている旨を記載する。"
+    },
+    {
+      "id": "S4-007",
+      "severity": "nice_to_have",
+      "owasp": "A05",
+      "title": "route.ts の targetDir 長さ制限（1024文字）定数化の推奨",
+      "description": "設計方針書のセクション5-1 で targetDir の長さ制限を 1024 文字として定義しているが、この値がマジックナンバーとしてインラインで使用される設計になっている。既存プロジェクトの DoS 防御パターン（schedule-config.ts の MAX_NAME_LENGTH 等）に倣い、定数として定義することが望ましい。例えば clone-manager.ts のモジュールスコープまたは専用の config ファイルに MAX_TARGET_DIR_LENGTH = 1024 を定義する。",
+      "location": "設計方針書 セクション5-1",
+      "recommendation": "1024 をインラインリテラルではなく、定数（例: MAX_TARGET_DIR_LENGTH）として route.ts 冒頭またはクローン関連の config ファイルに定義する。テストでも同じ定数を参照することで、値の整合性を保証できる。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_assessment": "Issue #392 の設計方針書は、パストラバーサル脆弱性の根本原因を正確に特定し、validateWorktreePath() による検証とカノニカル化の原子的実行という適切な修正方針を示している。情報漏洩防止（D4-001）、攻撃検知ログ（S1-001）、DoS 防御（S1-003）など、多層防御の考慮も評価できる。しかし、修正設計が依存する validateWorktreePath() 自体に二重 decodeURIComponent によるバイパスリスク（S4-001）が存在し、これが唯一の must_fix 項目である。S4-001 は設計方針書の S1-002 で「スコープ外」として認識されているものの、Issue #392 の修正が当該関数を信頼の核として採用する以上、実証的な安全性検証は必須である。バイパスが成立する場合、先行して validateWorktreePath() の修正が必要となる。should_fix の3件（シンボリックリンク防御、mkdirSync の defense-in-depth、認証境界の明記）はいずれも設計方針書への記述追加で対応可能であり、実装方針自体の変更は不要である。"
+}

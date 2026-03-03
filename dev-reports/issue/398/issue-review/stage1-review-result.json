@@ -1,0 +1,165 @@
+{
+  "issue_number": 398,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_type": "通常",
+  "review_date": "2026-03-02",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "severity": "must_fix",
+        "category": "正確性",
+        "title": "Ollama API失敗時の早期リターンによりLM Studioモデルが無視される設計問題",
+        "description": "現在の ensureOpencodeConfig() は Ollama API の呼び出しが失敗（タイムアウト、接続拒否、非200レスポンス等）した場合、L202-210で catch ブロックに入り return で即座に終了する。この設計のままLM Studio APIを追加すると、Ollamaが未起動の場合にLM Studioのモデル取得処理に到達せず、受入条件「Ollamaが未起動の場合、エラーにならずLM Studioのみで動作すること」を満たせない。関数の制御フローを根本的にリファクタリングし、各プロバイダーのAPI呼び出しを独立して実行し、結果をマージしてから opencode.json を生成する設計にする必要がある。",
+        "suggestion": "ensureOpencodeConfig()を以下のように再設計することを提案: (1) fetchOllamaModels()とfetchLmStudioModels()を独立した関数として実装し、それぞれが失敗しても空のRecord<string, {name: string}>を返す設計にする。(2) 両関数の結果をマージした上でopencode.jsonを生成する。(3) 両方のモデルが0件の場合のみopencode.json生成をスキップする（または空のプロバイダーで生成する）。Issue本文にこの制御フロー変更を明記すべき。",
+        "location": "Issue本文 > 実装タスク セクション、src/lib/cli-tools/opencode-config.ts L152-239",
+        "evidence": "opencode-config.ts L202-209: catch ブロックで return しているため、Ollama失敗後の処理に到達しない"
+      },
+      {
+        "id": "MF-002",
+        "severity": "must_fix",
+        "category": "正確性",
+        "title": "LM Studio API レスポンス形式（OpenAI互換）とOllama API レスポンス形式の違いが未明記",
+        "description": "Issue本文ではLM Studio APIが OpenAI互換（localhost:1234/v1/models）であることは記載されているが、レスポンス形式の違いが明記されていない。Ollama APIは { models: [{ name: string, details: {...} }] } 形式だが、OpenAI互換APIは { data: [{ id: string, object: string, ... }] } 形式である。この違いにより、レスポンスパーサーを別途実装する必要がある。モデル識別子のフィールド名も name ではなく id であり、details フィールド（parameter_size, quantization_level）も存在しない。",
+        "suggestion": "実装タスクに以下を追加: 「fetchLmStudioModels()ではOpenAI互換APIのレスポンス形式 { data: [{ id: string }] } をパースする。Ollamaの { models: [{ name: string }] } とは異なるパーサーが必要。LM Studioモデルでは details（parameter_size, quantization_level）が取得できないため、表示名はモデルIDそのままとする」",
+        "location": "Issue本文 > 実装タスク セクション"
+      },
+      {
+        "id": "MF-003",
+        "severity": "must_fix",
+        "category": "正確性",
+        "title": "opencode.json の lmstudio プロバイダーセクションの正確なスキーマが未定義",
+        "description": "Issue本文では「opencode.json生成テンプレートに lmstudio プロバイダーセクションを追加」とあるが、具体的なスキーマが定義されていない。現在のOllamaプロバイダーは { npm: '@ai-sdk/openai-compatible', name: 'Ollama (local)', options: { baseURL: 'http://localhost:11434/v1' }, models: {...} } の形式。LM Studioのプロバイダーセクションでは baseURL が http://localhost:1234/v1 になるべきだが、npm パッケージ、name、models の形式が不明。OpenCodeのconfigスキーマ（https://opencode.ai/config.json）を参照して正確な定義が必要。",
+        "suggestion": "以下を実装タスクまたは受入条件に追加: 「lmstudioプロバイダーセクションの想定構造: { npm: '@ai-sdk/openai-compatible', name: 'LM Studio (local)', options: { baseURL: 'http://localhost:1234/v1' }, models: { [modelId]: { name: string } } }」。OpenCodeの公式ドキュメントまたは実際の動作確認で正確なスキーマを検証すること。",
+        "location": "Issue本文 > 実装タスク セクション"
+      },
+      {
+        "id": "MF-004",
+        "severity": "must_fix",
+        "category": "整合性",
+        "title": "claude-executor.ts の buildCliArgs() における LM Studio モデルのプレフィックス未考慮",
+        "description": "claude-executor.ts L110-115 では opencode run -m コマンドで ollama/ プレフィックスをハードコードしている（`ollama/${options.model}`）。LM Studioモデルが追加された場合、lmstudio/ プレフィックスでモデルを指定する必要があるが、この変更がIssueの影響範囲に含まれていない。スケジュール実行時にLM Studioモデルを選択できない状態になる。",
+        "suggestion": "影響範囲に claude-executor.ts を追加し、実装タスクに「buildCliArgs()でモデルプロバイダーに応じたプレフィックス（ollama/ または lmstudio/）を動的に設定する」を追加する。あるいは、この変更をスコープ外として明記し、LM StudioモデルはTUIモード（opencode.jsonのモデル選択）でのみ利用可能であることを受入条件で明確にする。",
+        "location": "Issue本文 > 影響範囲 セクション、src/lib/claude-executor.ts L110-115"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "severity": "should_fix",
+        "category": "完全性",
+        "title": "テストファイルパスの誤記",
+        "description": "Issue本文の影響範囲テーブルではテストファイルパスが tests/unit/opencode-config.test.ts と記載されているが、実際のファイルパスは tests/unit/cli-tools/opencode-config.test.ts である。cli-tools/ ディレクトリが欠落している。",
+        "suggestion": "影響範囲テーブルのテストファイルパスを tests/unit/cli-tools/opencode-config.test.ts に修正する。",
+        "location": "Issue本文 > 影響範囲 > 変更対象ファイル テーブル",
+        "evidence": "実際のファイル: /Users/maenokota/share/work/github_kewton/commandmate-issue-398/tests/unit/cli-tools/opencode-config.test.ts"
+      },
+      {
+        "id": "SF-002",
+        "severity": "should_fix",
+        "category": "完全性",
+        "title": "LM Studio API の定数名とSSRF防止ポリシーの具体化",
+        "description": "SEC-001でLM Studio APIのURLをハードコード定数として定義するタスクはあるが、具体的な定数名や値が未定義。Ollamaでは OLLAMA_API_URL（http://localhost:11434/api/tags）と OLLAMA_BASE_URL（http://localhost:11434/v1）の2つの定数がある。LM Studioでも同様にAPIエンドポイント用とopencode.json用の2つの定数が必要。",
+        "suggestion": "以下の定数を定義することを実装タスクに明記: (1) LM_STUDIO_API_URL = 'http://localhost:1234/v1/models' as const（モデル一覧取得用）、(2) LM_STUDIO_BASE_URL = 'http://localhost:1234/v1' as const（opencode.jsonのbaseURL用）。いずれもSEC-001ポリシーに従い環境変数やユーザー入力から導出しないこと。",
+        "location": "Issue本文 > 実装タスク > SEC-001"
+      },
+      {
+        "id": "SF-003",
+        "severity": "should_fix",
+        "category": "完全性",
+        "title": "LM Studio モデル名のバリデーションパターン未定義",
+        "description": "Ollamaモデルでは OLLAMA_MODEL_PATTERN（/^[a-zA-Z0-9._:/-]{1,100}$/）でモデル名をバリデーションしている。LM Studioモデルは OpenAI互換APIの id フィールドを使用するが、このフィールドの形式はOllamaと異なる可能性がある（例: 'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf'）。適切なバリデーションパターンの定義が必要。",
+        "suggestion": "LM Studio モデルID用のバリデーションパターン定数（LM_STUDIO_MODEL_PATTERN）を定義する実装タスクを追加する。パターンは実際のLM Studioモデル名（パス形式を含む可能性）を許容する必要がある。",
+        "location": "Issue本文 > 実装タスク"
+      },
+      {
+        "id": "SF-004",
+        "severity": "should_fix",
+        "category": "明確性",
+        "title": "両プロバイダーのモデルが0件の場合の振る舞いが未定義",
+        "description": "受入条件「両方未起動の場合も、致命的エラーにならないこと」は明記されているが、opencode.jsonを生成するのかスキップするのかが不明。現在のOllama単独実装ではモデルが0件でも空のmodelsオブジェクトでopencode.jsonを生成する（configオブジェクト構築はモデル取得成功パスにあるため実際には到達しないが、理論上は可能）。",
+        "suggestion": "受入条件を追加: 「OllamaとLM Studioの両方が未起動で取得モデル数が0件の場合、opencode.jsonは生成しない（空のプロバイダー設定は無意味であるため）」または「最低限のデフォルト設定でopencode.jsonを生成する」のいずれかを明確にする。",
+        "location": "Issue本文 > 受入条件 セクション"
+      },
+      {
+        "id": "SF-005",
+        "severity": "should_fix",
+        "category": "完全性",
+        "title": "LM Studio API のタイムアウト・レスポンスサイズ制限の定数が未定義",
+        "description": "Ollamaでは OLLAMA_API_TIMEOUT_MS=3000、MAX_OLLAMA_RESPONSE_SIZE=1MB の定数がある。LM Studio用にも同等の定数が必要だが、実装タスクに具体的な値が記載されていない。「既存のOllamaと同等」とのみ記載されている。",
+        "suggestion": "実装タスクに具体的な定数値を明記: LM_STUDIO_API_TIMEOUT_MS=3000、MAX_LM_STUDIO_RESPONSE_SIZE=1MB、MAX_LM_STUDIO_MODELS=100。あるいは、両プロバイダーで共通化できる定数（例: MAX_PROVIDER_RESPONSE_SIZE, MAX_PROVIDER_MODELS）として定義する設計を検討する。",
+        "location": "Issue本文 > 実装タスク > DoS防御"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "severity": "nice_to_have",
+        "category": "完全性",
+        "title": "関連Issue（#379）へのリンクが未記載",
+        "description": "OpenCodeの初期実装であるIssue #379へのリンクが本文に含まれていない。変更対象のopencode-config.tsはIssue #379で作成されたファイルであり、参照を追加すると背景理解が容易になる。",
+        "suggestion": "Issue本文の背景セクションにIssue #379へのリンクを追加する。",
+        "location": "Issue本文 > 背景・課題 セクション"
+      },
+      {
+        "id": "NTH-002",
+        "severity": "nice_to_have",
+        "category": "完全性",
+        "title": "CLAUDE.mdモジュール一覧の更新タスクが未記載",
+        "description": "CLAUDE.mdの opencode-config.ts のモジュール説明は現在「Ollama API/api/tagsからモデル取得」のみを記載している。LM Studio対応後はこの説明の更新が必要。",
+        "suggestion": "実装タスクまたはドキュメント更新として、CLAUDE.mdのopencode-config.tsエントリを更新するタスクを追加する。",
+        "location": "Issue本文 > 影響範囲"
+      },
+      {
+        "id": "NTH-003",
+        "severity": "nice_to_have",
+        "category": "技術的妥当性",
+        "title": "将来的なプロバイダー拡張を見据えた汎用的な設計の提案",
+        "description": "Ollama、LM Studioと個別にモデル取得関数を追加する設計は、今後さらにプロバイダーが増えた場合にスケールしにくい。共通のProviderConfigインターフェース（apiUrl, baseUrl, maxModels, modelPattern, parseResponse等）を定義し、プロバイダー配列をループで処理する汎用設計も検討に値する。",
+        "suggestion": "今回のスコープでは必須ではないが、fetchOllamaModels()とfetchLmStudioModels()で共通化できる部分をヘルパー関数に抽出する設計を検討する旨を記載すると、将来の保守性が向上する。",
+        "location": "Issue本文 > 提案する解決策"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_count": 4,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "overall_quality": "needs_improvement",
+    "comment": "Issueの目的と背景は明確で、受入条件も基本的な網羅性がある。しかし、既存コードの制御フロー（Ollama失敗時の早期リターン）との整合性に重大な設計問題があり、そのままでは受入条件「Ollama未起動時にLM Studioのみで動作」を満たせない。また、LM Studio API（OpenAI互換）のレスポンス形式がOllamaと異なる点、opencode.jsonのlmstudioプロバイダースキーマ、claude-executor.tsへの影響が未考慮である。これらの技術的詳細を実装タスクに反映することで、実装時の手戻りを防止できる。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cli-tools/opencode-config.ts",
+      "relevance": "主要変更対象。Ollama API失敗時の早期リターン（L202-210）が新設計との整合性問題",
+      "lines": "L152-239"
+    },
+    {
+      "file": "src/lib/claude-executor.ts",
+      "relevance": "buildCliArgs()のopencode case（L110-115）でollama/プレフィックスがハードコード。LM Studioモデル対応が必要な可能性",
+      "lines": "L110-115"
+    },
+    {
+      "file": "tests/unit/cli-tools/opencode-config.test.ts",
+      "relevance": "既存テスト298行。LM Studio関連テスト追加が必要。Issue内のパス表記が誤り",
+      "lines": "全体"
+    },
+    {
+      "file": "src/lib/cli-tools/opencode.ts",
+      "relevance": "OpenCodeTool.startSession()からensureOpencodeConfig()を呼び出し。変更不要だが影響確認が必要",
+      "lines": "L99"
+    },
+    {
+      "file": "src/lib/cli-tools/types.ts",
+      "relevance": "CLIツール型定義。変更不要（Issue記載通り）",
+      "lines": "全体"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "opencode-config.tsのモジュール説明更新が必要"
+    }
+  ]
+}

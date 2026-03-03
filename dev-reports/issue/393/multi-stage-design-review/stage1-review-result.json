@@ -1,0 +1,134 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 393,
+  "review_focus": "設計原則",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "R1F001",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "getSessionName() ローカル関数と BaseCLITool.getSessionName() のセッション名フォーマットが重複定義",
+      "description": "terminal/route.ts と capture/route.ts にはローカルの getSessionName() 関数が `mcbd-${cliToolId}-${worktreeId}` フォーマットで定義されている。一方、BaseCLITool.getSessionName() も同じフォーマットを使い、加えて validateSessionName() を呼び出している。設計方針書 D1-003 はこの廃止を明記しているが、CLIToolManager 経由に統一する際に、全ての呼び出し元が確実にカバーされることをテストで担保すべき。",
+      "suggestion": "D1-003 の方針どおり、ローカル getSessionName() を全て廃止し CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId) に統一すること。統合テストで全エンドポイントが CLIToolManager 経由のセッション名を使用していることを検証すること。"
+    },
+    {
+      "id": "R1F002",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "title": "codex.ts / claude-session.ts の getErrorMessage() ヘルパーが重複",
+      "description": "codex.ts:24 と claude-session.ts の両方に同一ロジックの getErrorMessage() 関数が存在する。設計方針書はこの重複の解消を直接スコープとしていないが、D3 で codex.ts を修正する際に合わせて共通化する機会がある。",
+      "suggestion": "将来的に src/lib/error-utils.ts 等に getErrorMessage() を共通化することを検討する。ただし本 Issue のスコープとしては YAGNI 原則で不要。"
+    },
+    {
+      "id": "R1F003",
+      "severity": "nice_to_have",
+      "principle": "SRP",
+      "title": "tmux.ts の責務範囲 - 10関数の全面移行は適切だが、将来的にモジュール分割を検討",
+      "description": "tmux.ts は現在10個の公開関数を持ち、全てが exec() を使用している。execFile() への一括移行は SRP に反するものではなく、むしろ「tmux コマンド実行」という単一責務に沿っている。ただし、sendKeys/sendSpecialKeys/sendSpecialKey の3つのキー送信関数群は将来的にインターフェースが肥大化する可能性がある。",
+      "suggestion": "現時点では分割不要。YAGNI 原則に従い、将来キー送信の種類が増えた際に tmux-keys.ts 等への分割を検討する。"
+    },
+    {
+      "id": "R1F004",
+      "severity": "must_fix",
+      "principle": "Security",
+      "title": "sendSpecialKey() に SpecialKey 型制約があるが execFile() 移行前はシェル経由で実行されている",
+      "description": "sendSpecialKey() は SpecialKey 型 ('Escape' | 'C-c' | 'C-d' | 'C-m' | 'Enter') で TypeScript レベルの制約があるが、実行時にはシェルテンプレートリテラルで直接展開される (`tmux send-keys -t \"${sessionName}\" ${key}`)。TypeScript の型制約はコンパイル時のみであり、ランタイムでの防御にはならない。execFile() 移行が不可欠。",
+      "suggestion": "設計方針書 D2 のとおり execFile() への移行を確実に実施する。加えて、sendSpecialKey() にも sendSpecialKeys() と同様の ALLOWED_SPECIAL_KEYS に相当するランタイムバリデーション（Set ベースのホワイトリスト検証）を追加し、defense-in-depth を確保することを推奨する。SpecialKey 型の値と ALLOWED_SPECIAL_KEYS の値を一致させるか、別途 ALLOWED_SPECIAL_KEY_SET を定義する。"
+    },
+    {
+      "id": "R1F005",
+      "severity": "should_fix",
+      "principle": "DRY",
+      "title": "sendSpecialKeys() の ALLOWED_SPECIAL_KEYS と SpecialKey 型の値セットが不一致",
+      "description": "ALLOWED_SPECIAL_KEYS = Set(['Up', 'Down', 'Left', 'Right', 'Enter', 'Space', 'Tab', 'Escape', 'BSpace', 'DC']) と SpecialKey = 'Escape' | 'C-c' | 'C-d' | 'C-m' | 'Enter' は異なるキーセットを定義している。sendSpecialKeys は ALLOWED_SPECIAL_KEYS でランタイムチェックし、sendSpecialKey は SpecialKey 型でコンパイル時チェックのみ。この二重基準は混乱を招く。",
+      "suggestion": "設計方針書 D2 の移行で sendSpecialKey() も execFile() に移行するため、SpecialKey 型の値も含む統合的なホワイトリストを定義するか、sendSpecialKey() にもランタイムバリデーションを追加して防御層を統一する。例: const ALLOWED_ALL_KEYS = new Set([...ALLOWED_SPECIAL_KEYS, 'C-c', 'C-d', 'C-m']);"
+    },
+    {
+      "id": "R1F006",
+      "severity": "nice_to_have",
+      "principle": "OCP",
+      "title": "tmux.ts の execFile 移行が内部実装変更のみで公開インターフェース不変 - OCP 準拠",
+      "description": "設計方針書 D2-001 は「公開インターフェース（関数シグネチャ、例外型）は変更しない」と明記しており、OCP に完全準拠している。tmux.ts の利用者（cli-session.ts, gemini.ts, vibe-local.ts 等）は変更不要。これは高く評価できる設計判断。",
+      "suggestion": "追加のアクション不要。この設計判断を維持すること。"
+    },
+    {
+      "id": "R1F007",
+      "severity": "should_fix",
+      "principle": "Security",
+      "title": "base.ts の isInstalled() が exec() + シェル展開を使用 - 非スコープだが認識が必要",
+      "description": "BaseCLITool.isInstalled() (base.ts:29) は `which ${this.command}` を exec() で実行しており、this.command が 'claude', 'codex', 'gemini' 等のハードコード値であるため現時点では低リスク。設計方針書は Section 8 で「base.ts:29 の which コマンド（定数値のみ・低リスク）」として非スコープとしている。この判断は YAGNI 原則に合致するが、今後新しい CLI ツールが追加された場合のリスクを認識しておくべき。",
+      "suggestion": "本 Issue では対応不要（設計方針書の判断は妥当）。ただし、将来の CLI ツール追加時に base.ts も execFile() 化するための追跡 Issue を作成することを推奨する。"
+    },
+    {
+      "id": "R1F008",
+      "severity": "nice_to_have",
+      "principle": "KISS",
+      "title": "CLIToolManager 経由の呼び出しチェーンは適切な複雑度",
+      "description": "エンドポイント -> CLIToolManager.getInstance().getTool(cliToolId) -> tool.getSessionName(worktreeId) -> validateSessionName() というチェーンは、4段のインダイレクションを含むが、各段が明確な責務を持っている。(1)ツール取得、(2)セッション名生成、(3)バリデーション、(4)コマンド実行。過度な抽象化ではなく、既存パターン（respond/route.ts, kill-session/route.ts）との一貫性を保つ。",
+      "suggestion": "追加のアクション不要。既存安全パターンとの一貫性が KISS 原則を満たしている。"
+    },
+    {
+      "id": "R1F009",
+      "severity": "nice_to_have",
+      "principle": "YAGNI",
+      "title": "非スコープの明示が YAGNI 原則に正しく準拠",
+      "description": "設計方針書 Section 8 で、CSRF 対策、claude-session.ts の固定文字列 exec() 呼び出し（line 237, 250, 417, 465）、base.ts の which コマンドを明示的に非スコープとしている。これは YAGNI 原則を正しく適用した判断であり、セキュリティ修正のスコープを適切に限定している。",
+      "suggestion": "追加のアクション不要。非スコープ項目については別途 Issue を作成して追跡することが望ましい。"
+    },
+    {
+      "id": "R1F010",
+      "severity": "should_fix",
+      "principle": "Security",
+      "title": "D1-005: capture/route.ts の lines パラメータバリデーションで型安全性を強化すべき",
+      "description": "設計方針書 D1-005 では lines パラメータの正の整数検証（1-100000 範囲）を定義しているが、現在の capture/route.ts では lines パラメータに対する型チェックやサニタイゼーションが全くない。JSON.parse 経由で受け取る値が number であることの保証がないため、Number.isInteger() と範囲チェックの両方が必要。",
+      "suggestion": "設計方針書どおり、typeof lines === 'number' && Number.isInteger(lines) && lines >= 1 && lines <= 100000 のバリデーションを追加する。さらに、capturePane() に渡す前に Math.floor() で整数化する defense-in-depth も検討する。"
+    },
+    {
+      "id": "R1F011",
+      "severity": "should_fix",
+      "principle": "DIP",
+      "title": "terminal/route.ts が tmux モジュールに直接依存 - CLIToolManager 経由への統一で DIP 改善",
+      "description": "現在の terminal/route.ts は `import * as tmux from '@/lib/tmux'` で低レベルモジュールに直接依存し、createSession() や sendKeys() を直接呼び出している。設計方針書 D1-003/D1-004 で CLIToolManager 経由に統一する方針は DIP を改善する正しいアプローチ。高レベルのエンドポイントが ICLITool インターフェース経由で操作することで、依存関係が逆転する。",
+      "suggestion": "D1-003/D1-004 の方針どおり、CLIToolManager 経由に統一する。terminal/route.ts から `import * as tmux` を削除し、CLIToolManager.getInstance().getTool(cliToolId) 経由でのみ tmux 操作を行うようにする。"
+    },
+    {
+      "id": "R1F012",
+      "severity": "nice_to_have",
+      "principle": "DRY",
+      "title": "D4-003: 既存テストのモック変更パターンが明確に文書化されている",
+      "description": "設計方針書 D4-003 でテストの exec -> execFile モック変更パターンを具体例付きで文書化しており、テスト実装者が一貫したパターンで移行できる。DRY 原則に従ったテストパターンの標準化。",
+      "suggestion": "追加のアクション不要。テスト実装時にこのパターンに従うこと。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 7,
+    "overall_quality": "高",
+    "comment": "設計方針書は SOLID/KISS/YAGNI/DRY 原則に全体として高い準拠度を示している。exec() -> execFile() の全面移行という根本防御は Defense in Depth の原則に合致し、公開インターフェース不変の方針は OCP を満たす。既存安全パターン（kill-session/route.ts, respond/route.ts）の再利用は KISS/DRY に準拠。must_fix は sendSpecialKey() のランタイムバリデーション欠如のみで、設計方針書の execFile() 移行と合わせて対処可能。非スコープの明示的な限定は YAGNI 原則の正しい適用。全体として堅実なセキュリティ修正設計であり、条件付き承認とする。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-393-security-rce-shell-injection-design-policy.md",
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/claude-session.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/app/api/worktrees/[id]/capture/route.ts",
+    "src/app/api/worktrees/[id]/kill-session/route.ts",
+    "src/app/api/worktrees/[id]/respond/route.ts",
+    "src/lib/cli-tools/opencode.ts",
+    "tests/unit/tmux.test.ts"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

@@ -1,0 +1,56 @@
+{
+  "issue_number": 389,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "apply_date": "2026-03-02",
+  "applied": [
+    {
+      "finding_id": "DR3-001",
+      "status": "applied",
+      "changes": "Section 9.1: 既存Unsaved Changes Warningテスト3件のdescribeブロックにauto-save OFF前提のコメント追加を明記。Section 9.3.1: auto-save ON時のbeforeunloadテスト3件（isDirty=false+isAutoSaving=false時、isDirty=true時、isAutoSaving=true時）を追加テストケースとして記載。Section 13.4: 実装チェックリスト4項目追加"
+    },
+    {
+      "finding_id": "DR3-002",
+      "status": "applied",
+      "changes": "Section 9.1: Save Operations 6件の更新内容を明確化（既存テストのロジック変更は不要、コメント追加のみ）。Section 9.3.2: save-button非表示テスト、Ctrl+S auto-save ON時のsaveNow()+onSave()テスト、auto-save OFF時の互換性テストの3件を追加テストケースとして記載。Section 13.4: 実装チェックリスト3項目追加"
+    },
+    {
+      "finding_id": "DR3-003",
+      "status": "applied",
+      "changes": "Section 9.1: onClose callbackテストのwaitForラッピング推奨を明記。Section 9.3.3: 既存テストのwaitForラッピング更新指示、auto-save ON+isDirty=true時のhandleCloseテスト、saveNow()失敗時のconfirmダイアログテストの計2件を新規テストケースとして記載。Section 13.4: 実装チェックリスト3項目追加"
+    },
+    {
+      "finding_id": "DR3-004",
+      "status": "applied",
+      "changes": "Section 9.1: DR3-004注記ブロックを追加。auto-save OFFがデフォルトであることにより既存テストの直接的な破綻リスクがないことを明記。間接的な変更（beforeunload依存配列拡大、handleClose async化）の影響とwaitForラッピング推奨を記載"
+    },
+    {
+      "finding_id": "DR3-005",
+      "status": "applied",
+      "changes": "Section 10: DR3-005注記ブロックを追加。直接変更ファイル3件のみであり呼び出し元への変更が不要であることを明記。EditorProps interface変更なし、WorktreeDetailRefactored.tsx変更不要、外部インターフェース変更なしを詳述。変更なしファイルリストにWorktreeDetailRefactored.tsx、Modal.tsxを追加"
+    }
+  ],
+  "skipped": [
+    {
+      "finding_id": "DR3-006",
+      "reason": "レビュー結果で「WorktreeDetailRefactoredへの直接的な変更は不要」と判定済み。Section 7.2で既にonSave不呼出を設計済みであり、追加の設計変更は不要"
+    },
+    {
+      "finding_id": "DR3-007",
+      "reason": "レビュー結果で「設計の方向性は正しく、ユーザー体験への悪影響はない」と判定済み。DR3-001のbeforeunloadテスト追加でユーザー体験の検証はカバーされる"
+    },
+    {
+      "finding_id": "DR3-008",
+      "reason": "Nice to Have。レビュー結果で「修正不要。新規定数の追加は既存のモジュール構造を壊さない」と判定済み"
+    },
+    {
+      "finding_id": "DR3-009",
+      "reason": "Nice to Have。レビュー結果で「衝突リスクなし。対応不要」と判定済み"
+    },
+    {
+      "finding_id": "DR3-010",
+      "reason": "Nice to Have。レビュー結果で「対応不要。useAutoSaveのインスタンス間に共有状態はなく、競合リスクはない」と判定済み"
+    }
+  ],
+  "summary": "Stage 3影響分析レビューの指摘事項10件のうち、Must Fix 3件とShould Fix 2件の計5件を設計方針書に反映した。Must Fix 3件は全てテスト影響に関するもので、(1) beforeunloadテストの前提条件明示と新規テスト3件追加、(2) Save Operationsテストの更新内容明確化と新規テスト3件追加、(3) handleClose async化に伴うwaitForラッピングと新規テスト2件追加を設計方針書のSection 9に追記した。Should Fix 2件として、(4) auto-save OFFデフォルトによる既存テスト互換性の保証を注記ブロックで明記、(5) 影響範囲の限定性（直接変更ファイル3件のみ）をSection 10に追記した。残り5件（Should Fix 2件 + Nice to Have 3件）はレビュー結果で対応不要と判定済みのためスキップした。実装チェックリストに計10項目を追加した。"
+}

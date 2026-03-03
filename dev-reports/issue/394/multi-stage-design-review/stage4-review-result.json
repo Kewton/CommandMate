@@ -1,0 +1,138 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "issue_number": 394,
+  "review_date": "2026-03-03",
+  "summary": "Issue #394 symlink traversal修正の設計方針書に対し、TOCTOU、多段symlink、絶対パスsymlink、Fail-safe、祖先走査の停止条件、OWASP Top 10整合性、残存リスク、ログ・監査の8観点でセキュリティレビューを実施した。設計は全体的に堅牢であり、Defense-in-depth原則に基づく3層防御、realpathSync()による多段symlink完全解決、Fail-safe defaultsの徹底が高く評価できる。must_fixは1件（TOCTOU固有のレースコンディション窓に対する設計上の認識と許容根拠の明記が必要）、should_fixは3件（祖先走査のルート到達時の停止条件の明示的ガード、createFileOrDirectory/writeBinaryFileの親ディレクトリ作成がsymlink検証後に実行されるタイミングの明確化、moveFileOrDirectoryのSEC-006とresolveAndValidateRealPath()の防御重複に伴うログ二重出力の抑制）、nice_to_haveは3件を検出した。",
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "must_fix",
+      "category": "TOCTOU",
+      "title": "realpathSync()検証とファイルI/O操作の間のレースコンディション窓に対する設計上の認識と許容根拠が未記載",
+      "description": "resolveAndValidateRealPath()はrealpathSync()で実パスを検証し、その後にfs.readFile/writeFile/rm等の実際のファイルI/O操作が実行される。この間にsymlinkが作成・変更される可能性がある（TOCTOU: Time-of-Check-to-Time-of-Use）。例えば、(1) resolveAndValidateRealPath()がworktree内ファイルとして検証をパス、(2) 攻撃者がファイルを削除してworktree外を指すsymlinkに置換、(3) readFile()がsymlinkを追跡して外部ファイルを読み取る、というシナリオが理論的に成立する。設計方針書セクション6の脅威モデルにはこのTOCTOUシナリオが列挙されておらず、moveFileOrDirectoryのSEC-009にはTOCTOU防御の言及があるが、resolveAndValidateRealPath()自体のTOCTOUリスクへの設計判断が文書化されていない。なお、この攻撃には同一ホスト上でworktreeディレクトリへの書き込み権限を持つ攻撃者が必要であり、本アプリケーションのローカル開発ツールという性質上、リスクは限定的である。しかし、セキュリティ設計として明示的な認識と許容根拠の記載は必要である。",
+      "location": "設計方針書 セクション6 セキュリティ設計 脅威モデル",
+      "suggestion": "セクション6の脅威モデルテーブルに「TOCTOU: realpathSync検証後のsymlink置換」行を追加し、攻撃の前提条件（同一ホスト上のworktreeディレクトリ書き込み権限）と、以下の理由で許容する旨を記載すること: (1) O_NOFOLLOW付きopen()はNode.js標準APIで利用できない、(2) カーネルレベルのsandbox（chroot/namespace）は導入コストが高い（セクション3で既に不採用判断済み）、(3) 本アプリケーションはローカル開発ツールであり、同一ホスト上の攻撃者がworktreeへの書き込み権限を持つ場合は他の攻撃経路も存在する、(4) Defense-in-depthのLayer 3（lstat+isSymbolicLink）がディレクトリ走査時にはこのリスクを部分的に緩和する。"
+    },
+    {
+      "id": "S4-002",
+      "severity": "should_fix",
+      "category": "祖先走査",
+      "title": "祖先走査アルゴリズムにおけるルートファイルシステム（/）到達時の明示的停止条件が設計方針書に未記載",
+      "description": "設計方針書セクション5.1のアルゴリズムステップ4a-4dでは、fullPathのパスコンポーネントを末尾から走査して最も近い既存の祖先ディレクトリを特定する。しかし、rootDir自体が存在しない異常ケース（例: worktreeが削除された状態でAPIが呼ばれた場合）では、path.dirname()の再帰的呼び出しがルートファイルシステム（/）まで遡る可能性がある。path.dirname('/')は'/'を返すため、停止条件がないと無限ループになる。設計方針書のS1-006（nice_to_haveとして見送り）で「isPathSafe() Layer 1で既に拒否済みの前提で安全」と記載されているが、Layer 1はレキシカルチェックのみであり、rootDirが実際に存在するかを検証しない。セクション5.1のエラーハンドリングで「realpathSync(rootDir)が失敗: falseを返す」とあるため、rootDirが存在しなければステップ1で早期リターンされるが、この暗黙的な保護はアルゴリズムの明示的な設計としては不十分である。",
+      "location": "設計方針書 セクション5.1 アルゴリズム ステップ4a",
+      "suggestion": "セクション5.1のアルゴリズムステップ4に以下の明示的な停止条件を追加すること: (a) 走査中のパスが resolvedRoot と等しくなった場合、そのディレクトリが存在すれば true を返す（ルートディレクトリ直下の新規ファイル作成）、存在しなければ false を返す、(b) path.dirname(currentPath) === currentPath の場合（ルートファイルシステムに到達）、false を返す。実装例: `while (currentPath !== path.dirname(currentPath)) { ... }` のループ条件で停止を保証する。"
+    },
+    {
+      "id": "S4-003",
+      "severity": "should_fix",
+      "category": "TOCTOU",
+      "title": "createFileOrDirectory/writeBinaryFileのmkdir(recursive:true)がsymlink検証後に親ディレクトリを作成するフローでの安全性が未明確",
+      "description": "createFileOrDirectory()およびwriteBinaryFile()では、ファイルが未存在の場合にresolveAndValidateRealPath()の祖先走査フォールバックで最近接祖先の安全性を検証し、その後mkdir(parentDir, { recursive: true })で親ディレクトリを作成する。この間に攻撃者が中間ディレクトリをsymlinkに置換した場合、mkdir()はsymlinkを追跡してworktree外にディレクトリを作成する可能性がある。これはS4-001のTOCTOUと同じ構造的問題だが、ファイル作成操作固有のリスクとしてmkdir()がディレクトリ構造を変更する点が異なる。特にwriteBinaryFile()ではupload操作を通じてリモートから新規ファイルパスを指定できるため、攻撃面がやや広い。設計方針書はこのフローの安全性について個別に言及していない。",
+      "location": "設計方針書 セクション5.2 file-operations.ts writeBinaryFile/createFileOrDirectory",
+      "suggestion": "セクション5.2のcreateFileOrDirectory/writeBinaryFileの修正方法備考に、以下を追記すること: 「mkdir(recursive: true)はsymlink検証後に実行されるため、検証-操作間のTOCTOU窓が存在する。このリスクはS4-001（セクション6脅威モデル）で許容判断した同一カテゴリのリスクであり、追加の対策は不要とする。ただし、mkdir()はwriteFile()と異なりディレクトリ構造を変更するため、仮にTOCTOU攻撃が成功した場合の影響は外部ディレクトリへのディレクトリ作成に限定される（ファイル内容の書き込みは後続のwriteFile()で発生）。」"
+    },
+    {
+      "id": "S4-004",
+      "severity": "should_fix",
+      "category": "ログ",
+      "title": "moveFileOrDirectoryのSEC-006とresolveAndValidateRealPath()の両方がfalse/拒否を返す場合のログ二重出力",
+      "description": "設計方針書S3-004により、resolveAndValidateRealPath()がfalseを返す際にconsole.warn('[SEC-394]')でログを出力する。一方、moveFileOrDirectory()のSEC-006（行544-553）にも既存のsymlink検証があり、validateFileOperation()にresolveAndValidateRealPath()が統合されると、同一リクエストでresolveAndValidateRealPath()のログ（ソースパス検証時）とSEC-006の拒否が両方トリガーされる可能性がある。また、SEC-006自体にはログ出力がないが、resolveAndValidateRealPath()がvalidateFileOperation()に統合された後、moveFileOrDirectory()のステップ6(SEC-006)が冗長になる可能性がある。SEC-006はdestinationDirの検証であり、resolveAndValidateRealPath()はsourcePathの検証であるため完全に冗長ではないが、将来的にdestinationDirにもresolveAndValidateRealPath()を適用する場合にログ二重出力が発生する。",
+      "location": "設計方針書 セクション5.2 moveFileOrDirectory、セクション5.1 S3-004ログ出力",
+      "suggestion": "セクション5.2のmoveFileOrDirectory行に以下の注記を追加すること: 「SEC-006のdestination検証は既存のrealpathSync+startsWith比較であり、resolveAndValidateRealPath()と同等の検証を行っている。本Issueのスコープではdestination側にresolveAndValidateRealPath()を追加しない（SEC-006が同等の機能を提供するため）。将来SEC-006をresolveAndValidateRealPath()に置き換える場合は、S3-004のログ出力との二重出力を回避するよう考慮すること。」"
+    },
+    {
+      "id": "S4-005",
+      "severity": "nice_to_have",
+      "category": "OWASP",
+      "title": "A01 Broken Access Control: worktree.pathの信頼性に依存する設計の前提条件が未明示",
+      "description": "resolveAndValidateRealPath()はrootDir（worktree.path）をrealpathSync()で解決するが、このworktree.pathはDBから取得される値である。DBに格納されたworktree.path自体が改ざんされた場合（例: SQLインジェクション経由）、resolveAndValidateRealPath()のrootDirが攻撃者の制御する値になる可能性がある。設計方針書はworktree.pathの信頼性を暗黙的に前提としているが、この前提条件が明示されていない。ただし、本アプリケーションのDB操作はbetter-sqlite3のパラメータ化クエリを使用しており（src/lib/db.tsのgetWorktreeById等）、SQLインジェクションのリスクは低い。",
+      "location": "設計方針書 セクション4 防御レイヤー設計",
+      "suggestion": "セクション4の防御レイヤー設計に前提条件として「rootDir（worktree.path）はDBから取得される信頼された値であることを前提とする。DB操作はbetter-sqlite3のパラメータ化クエリで保護されている。」を追記することを検討する。"
+    },
+    {
+      "id": "S4-006",
+      "severity": "nice_to_have",
+      "category": "残存リスク",
+      "title": "hardlink経由のworktree境界越えが対処されていない",
+      "description": "resolveAndValidateRealPath()はsymlink解決にrealpathSync()を使用するが、hardlinkはrealpathSync()では検出されない。攻撃者がworktree内にworktree外ファイルへのhardlinkを作成した場合、そのhardlink経由のファイル読み取り・書き込みはresolveAndValidateRealPath()を通過する。ただし、hardlinkの作成にはターゲットファイルへのアクセス権限が必要であり、ディレクトリのhardlinkは多くのOSで禁止されている。また、git経由でhardlinkをコミット・チェックアウトすることはできない（gitはhardlinkをサポートしない）。このリスクは設計方針書セクション6の脅威モデルに「hardlink」として列挙されていない。",
+      "location": "設計方針書 セクション6 セキュリティ設計 脅威モデル",
+      "suggestion": "セクション6の脅威モデルテーブルに「hardlink経由のファイルアクセス」行を追加し、「対処外: hardlinkはrealpathSync()では検出不可。ただし、ディレクトリhardlinkはOSで禁止、ファイルhardlink作成にはターゲットへのアクセス権限が必要、gitはhardlinkをサポートしないため、実質的なリスクは限定的。」と記載することを検討する。"
+    },
+    {
+      "id": "S4-007",
+      "severity": "nice_to_have",
+      "category": "ログ",
+      "title": "symlink拒否ログのフォーマットにリクエストコンテキスト情報が含まれていない",
+      "description": "S3-004で計画されているconsole.warn('[SEC-394] Symlink traversal blocked: ...')ログには、ターゲットパス、解決先パス、ルートパスが含まれるが、HTTPリクエストのコンテキスト（リクエストID、HTTPメソッド、APIエンドポイント、クライアントIP等）が含まれていない。セキュリティ監査の観点からは、どのAPIリクエストがsymlink拒否をトリガーしたかを追跡できることが望ましい。ただし、resolveAndValidateRealPath()はpath-validator.ts（ビジネスロジック層）に配置されるため、HTTPリクエスト情報を直接参照する設計は責務の混在になる。",
+      "location": "設計方針書 セクション5.1 S3-004ログ出力",
+      "suggestion": "現段階ではresolveAndValidateRealPath()のログはパス情報のみで十分とし、将来的にAPIリクエストコンテキスト（メソッド、パス等）を含むログが必要な場合は、API層（getWorktreeAndValidatePath/各ルートハンドラ）でresolveAndValidateRealPath()のfalse戻り値を受けて追加ログを出力する方式を検討する。本Issueのスコープ外とする。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_quality": "good",
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass_with_notes",
+      "notes": "resolveAndValidateRealPath()による3層防御でsymlink経由のパストラバーサルを防止。rootDir(worktree.path)のDB信頼前提は暗黙的（S4-005参照）。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "本Issueは暗号化に関連しない。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "notes": "パストラバーサル（ディレクトリインジェクション）はLayer 1(isPathSafe)+Layer 2(resolveAndValidateRealPath)で防御。realpathSync()はOSカーネルレベルでsymlinkを完全解決し、多段symlinkも対応。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "notes": "Defense-in-depth原則に基づく3層防御設計。Option B（新関数追加）により既存コードへの影響を最小化。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "Fail-safe defaults原則によりrealpathSync()失敗時はアクセス拒否。内部symlinkのみ許可する明確なポリシー。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "fs.realpathSync()はNode.js標準ライブラリ。外部依存の追加なし。"
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "notes": "本Issueは認証に関連しない。認証はmiddleware.tsで別途処理。"
+    },
+    "A08_data_integrity_failures": {
+      "status": "pass",
+      "notes": "symlink解決後のパス比較により、ファイルシステム上の実際のパスがworktree境界内であることを保証。"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass_with_notes",
+      "notes": "S3-004によりsymlink拒否時にconsole.warn()ログを出力。リクエストコンテキスト情報は含まれない（S4-007参照）。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "本Issueはサーバーサイドリクエストフォージェリに関連しない。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-394-symlink-traversal-fix-design-policy.md",
+    "src/lib/path-validator.ts",
+    "src/lib/file-operations.ts",
+    "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/upload/[...path]/route.ts",
+    "src/app/api/worktrees/[id]/tree/[...path]/route.ts",
+    "src/lib/file-tree.ts",
+    "src/lib/file-search.ts"
+  ],
+  "recommendation": "設計方針書は全体的にセキュリティの観点で堅牢であり、symlink traversal脆弱性に対する適切な修正を計画している。must_fix 1件（TOCTOU窓の設計上の認識と許容根拠の明記）は脅威モデルの完全性のために対応すべきである。should_fix 3件は実装品質向上のために推奨する。対応完了後、conditionally_approvedからapprovedに移行可能。",
+  "status": "conditionally_approved",
+  "score": 4,
+  "timestamp": "2026-03-03T00:00:00Z"
+}

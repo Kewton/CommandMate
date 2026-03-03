@@ -1,0 +1,28 @@
+{
+  "stage": 2,
+  "issue_number": 394,
+  "status": "success",
+  "applied_findings": ["S2-001", "S2-002", "S2-003", "S2-005", "S2-006", "S2-007"],
+  "skipped_findings": ["S2-004"],
+  "skip_reasons": {
+    "S2-004": "nice_to_have: テスト実装時に決定可能。beforeEach/afterEachパターンは実装者の判断に委ねる"
+  },
+  "changes_summary": "S2-001(must_fix): セクション4の防御責務分担方針を修正し、getWorktreeAndValidatePath()がfiles APIルートのみの共通入口であることを明確化。upload/tree APIルートはインラインisPathSafe()後に個別にresolveAndValidateRealPath()を追加する方針に修正。セクション5.2のAPI routes表に「現在のパス検証方式」カラムを追加。セクション6のConsistent policy注記を更新。S2-002(should_fix): セクション4の関数シグネチャJSDocにパラメータ順序の根拠（path-validator.tsのisPathSafe準拠）とfile-operations.ts呼び出し時の注意点を追記。S2-003(should_fix): セクション5.2のvalidateFileOperation()行にJSDoc更新指示([SEC-394]タグ、責務拡張の記述)を追加。実装チェックリストにも対応項目を追加。S2-005(nice_to_have): セクション10ステップ1にsrc/lib/path-validator.tsとtests/unit/path-validator.test.tsのファイルパスを明記。S2-006(should_fix): セクション5.1アルゴリズムのステップ3bにresolvedTarget===resolvedRootの許可根拠とSEC-006との差異を注記。S2-007(nice_to_have): tree APIルートのエラーレスポンスはcreateAccessDeniedError()パターン踏襲を実装チェックリストに追記。レビュー履歴セクション(13)を新設。",
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-394-symlink-traversal-fix-design-policy.md",
+  "sections_updated": [
+    "4. 設計パターン - 防御責務の分担方針",
+    "4. 設計パターン - 新関数の設計（関数シグネチャ）",
+    "5.1 新関数 - アルゴリズム",
+    "5.2 既存関数の修正箇所 - API routes表",
+    "5.2 既存関数の修正箇所 - validateFileOperation()行",
+    "5.2 既存関数の修正箇所 - [S1-004]保護方針",
+    "6. セキュリティ設計 - セキュリティ原則",
+    "9. 設計上の決定事項とトレードオフ",
+    "10. 実装順序",
+    "13. レビュー履歴（新設）",
+    "14. レビュー指摘事項サマリー - Stage 2テーブル追加",
+    "14. 実装チェックリスト - S2-001/S2-002/S2-003/S2-006/S2-007項目追加"
+  ],
+  "timestamp": "2026-03-02T00:00:00Z"
+}

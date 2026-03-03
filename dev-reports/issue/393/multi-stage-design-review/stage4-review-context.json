@@ -1,0 +1,12 @@
+{
+  "issue_number": 393,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-393-security-rce-shell-injection-design-policy.md",
+  "previous_stage_results": [
+    "dev-reports/issue/393/multi-stage-design-review/stage1-review-result.json",
+    "dev-reports/issue/393/multi-stage-design-review/stage2-review-result.json",
+    "dev-reports/issue/393/multi-stage-design-review/stage3-review-result.json"
+  ]
+}

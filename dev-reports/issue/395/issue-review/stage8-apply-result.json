@@ -1,0 +1,71 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目 影響範囲）",
+  "issue_number": 395,
+  "applied_date": "2026-03-03",
+  "applied_findings": [
+    {
+      "id": "S7-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Implementation Notes の config.ts design セクションで SENSITIVE_REQUEST_HEADERS と SENSITIVE_RESPONSE_HEADERS を new Set([...]) から as const 配列に変更。Recommended Direction の S3-002 記述も as const 配列 + .includes() パターンに統一。handler.ts での使用方法を .includes() パターンのコード例として明記し、既存の HOP_BY_HOP_* との結合パターンを具体化。"
+    },
+    {
+      "id": "S7-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Test modification plan に item 2 として proxyWebSocket() 既存テスト修正を追加: 'should include WebSocket upgrade instructions in error response' (L194-210) で (a) directUrl プロパティが存在しないこと、(b) message に内部URL情報が含まれないこと、(c) message に PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED テキストが含まれることの検証を明記。Test files サブセクションにも proxyWebSocket() テスト修正要件を追記。Acceptance Criteria の既存テスト項目に '(including proxyWebSocket() test for directUrl/message verification)' を追加。"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S7-003",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "logger.ts の変更不要明示は nice_to_have。handler.ts 内で完結するため実装者への影響は低い。"
+    },
+    {
+      "id": "S7-004",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "route.test.ts の変更不要補足は nice_to_have。関数シグネチャ変更がないことは本 Issue のスコープから推測可能。"
+    },
+    {
+      "id": "S7-005",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "ExternalAppForm.tsx の i18n スコープ判断は nice_to_have。Stage 5 の S5-004 と同様にスキップ済み。"
+    }
+  ],
+  "update_summary": "S7-001: config.ts の SENSITIVE_* 定数定義を new Set() から既存の HOP_BY_HOP_* と同じ as const 配列パターンに統一し、handler.ts での .includes() 使用方法をコード例で明記。S7-002: Test modification plan に proxyWebSocket() 既存テスト修正（directUrl 不在検証・message 内部URL不在検証・PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED 検証）を item 2 として追加し、Test files サブセクションと Acceptance Criteria にも反映。",
+  "github_update": "success",
+  "issue_url": "https://github.com/Kewton/CommandMate/issues/395",
+  "changes_detail": {
+    "sections_modified": [
+      {
+        "section": "Recommended Direction > Header constants in config.ts (S3-002)",
+        "change": "Changed 'sets' to 'as const arrays' and added '.includes()' usage clarification"
+      },
+      {
+        "section": "Implementation Notes > config.ts design (S3-002)",
+        "change": "Replaced new Set([...]) code example with as const array pattern. Added handler.ts .includes() usage code example showing both HOP_BY_HOP_* and SENSITIVE_* checks."
+      },
+      {
+        "section": "Implementation Notes > Test modification plan (S3-001)",
+        "change": "Added item 2: Modify existing WebSocket test with 3 verification points (directUrl absence, message URL absence, PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED presence). Renumbered subsequent items 2-5 to 3-6."
+      },
+      {
+        "section": "Affected Code > Test files",
+        "change": "Added description of proxyWebSocket() test (L194-210) modification requirement alongside existing proxyHttp() test modification."
+      },
+      {
+        "section": "Acceptance Criteria",
+        "change": "Updated existing test item to include '(including proxyWebSocket() test for directUrl/message verification)'"
+      },
+      {
+        "section": "Review history",
+        "change": "Appended 'Stage 7 impact review applied on 2026-03-03 (S7-001, S7-002)'"
+      }
+    ]
+  }
+}

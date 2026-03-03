@@ -1,0 +1,63 @@
+{
+  "issue_number": 391,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "status": "approved",
+  "score": 5,
+  "owasp_compliance": {
+    "A01_access_control": "pass",
+    "A03_injection": "pass",
+    "A04_insecure_design": "pass",
+    "A08_integrity": "pass"
+  },
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "nice_to_have",
+      "owasp_category": "A04",
+      "title": "isEditing中間状態のセキュリティ上の影響は限定的であることの明記",
+      "description": "isEditing=true中はポーリング同期が抑制されるが、この状態はクライアントサイドの表示状態にのみ影響する。サーバーサイドの認証・認可チェック（middleware.ts, PATCH APIのisValidWorktreeId/validateSelectedAgentsInput）は引き続き独立して機能するため、isEditing状態がセキュリティ境界に影響することはない。設計方針書セクション6にこの点が簡潔に記載済みだが、認証ミドルウェアとの独立性を明示するとより明確になる。",
+      "location": "セクション6: セキュリティ設計",
+      "suggestion": "セクション6に「認証ミドルウェア（middleware.ts）はisEditing状態とは独立して動作し、PATCH APIへの全リクエストに対してトークン認証・IP制限を適用する」旨を追記する。ただし現状の記載でも実質的に問題はなく、対応は任意。"
+    },
+    {
+      "id": "S4-002",
+      "severity": "nice_to_have",
+      "owasp_category": "A03",
+      "title": "クライアントサイドのworktreeIdテンプレートリテラル注入リスクの確認",
+      "description": "AgentSettingsPane内でfetch URLが`/api/worktrees/${worktreeId}`のテンプレートリテラルで構築されている。worktreeIdはReact propsとして親コンポーネントから渡されるため、クライアントサイドでの直接的な外部入力ではない。さらに、サーバーサイドのPATCH APIでisValidWorktreeId()（/^[a-zA-Z0-9_-]+$/ パターン）によるバリデーションが実施されるため、パストラバーサルやインジェクションのリスクは排除されている。",
+      "location": "セクション3-1: handleCheckboxChange修正",
+      "suggestion": "現状のサーバーサイドバリデーションで十分に防御されている。追加対応不要。"
+    },
+    {
+      "id": "S4-003",
+      "severity": "nice_to_have",
+      "owasp_category": "A08",
+      "title": "selectedAgents配列のクライアント-サーバー間整合性担保",
+      "description": "Array.from(next)でSet→Arrayに変換した値をJSON.stringifyでPATCH APIに送信し、サーバーサイドでvalidateSelectedAgentsInput()が(1)Array.isArray、(2)length===2、(3)CLI_TOOL_IDSへのincludes、(4)重複チェックを実施する。クライアントサイドでの不正操作（DevTools等）があってもサーバーサイドで完全にバリデーションされるため、整合性の不備によるリスクはない。",
+      "location": "セクション3-1 + src/lib/selected-agents-validator.ts",
+      "suggestion": "追加対応不要。現行のサーバーサイドバリデーション（validateSelectedAgentsInput + validateAgentsPair）が堅牢に設計されている。"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 0,
+  "nice_to_have_count": 3,
+  "security_risk_level": "low",
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-391-agent-checkbox-fix-design-policy.md",
+    "src/components/worktree/AgentSettingsPane.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/selected-agents-validator.ts",
+    "src/middleware.ts",
+    "src/lib/auto-yes-manager.ts"
+  ],
+  "recommendation": "セキュリティ上の問題は検出されなかった。本修正はクライアントサイドの状態管理ロジックのみの変更であり、サーバーサイドのセキュリティ境界（認証ミドルウェア、APIバリデーション、worktreeIDフォーマット検証）には一切影響しない。全OWASP項目でpass判定とし、実装に進むことを推奨する。",
+  "timestamp": "2026-03-02T00:00:00Z"
+}

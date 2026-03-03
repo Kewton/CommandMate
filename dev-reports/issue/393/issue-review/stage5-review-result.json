@@ -1,0 +1,106 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 393,
+  "review_focus": "通常",
+  "review_date": "2026-03-03",
+  "previous_findings_resolved": {
+    "F008": "resolved",
+    "F001": "resolved",
+    "F002": "resolved",
+    "F006": "resolved",
+    "F010": "resolved",
+    "IF001": "resolved",
+    "IF002": "resolved",
+    "IF003": "resolved",
+    "IF004": "resolved",
+    "IF005": "resolved",
+    "IF006": "resolved",
+    "IF007": "resolved"
+  },
+  "findings": [
+    {
+      "id": "S5F001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "tmux.ts の対象関数数「8」は不正確 -- 実際は 10 のエクスポート関数が存在する",
+      "description": "Recommended Direction セクションに「The migration affects all 8 functions in tmux.ts: hasSession, createSession, sendKeys, sendSpecialKeys, sendSpecialKey, capturePane, killSession, ensureSession」と記載されているが、tmux.ts には 10 個のエクスポート関数が存在する: isTmuxAvailable, hasSession, listSessions, createSession, sendKeys, sendSpecialKeys, capturePane, killSession, ensureSession, sendSpecialKey。Issue の列挙から isTmuxAvailable と listSessions が漏れている。isTmuxAvailable は `tmux -V` 固定コマンドのため低リスクだが exec() を使用しており execFile() 移行の対象。listSessions は固定フォーマット文字列を使用しておりユーザー入力を補間しないが、同様に exec() を使用している。包括的な移行を推奨するなら全 10 関数を列挙すべき。",
+      "suggestion": "「all 8 functions」を「all 10 exported functions」に修正し、リストに isTmuxAvailable と listSessions を追加する。あるいは「all functions using exec() with user-controlled input (8 functions)」と限定し、isTmuxAvailable と listSessions は低リスクだが同時移行が望ましい旨を注記する。"
+    },
+    {
+      "id": "S5F002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "capture/route.ts の lines パラメータが未検証のまま capturePane() に渡されている",
+      "description": "capture/route.ts:20 で `const { cliToolId, lines = 1000 } = await req.json()` として JSON ボディから lines を取得し、capture/route.ts:41 で `tmux.capturePane(sessionName, lines)` に直接渡している。lines はデフォルト値 1000 だが、攻撃者は任意の値（非常に大きな数値、負値、文字列等）を送信できる。capturePane() 内部では lines を `-${lines}` として exec() の文字列補間に使用するため（tmux.ts:325: `startLine = -linesOrOptions`）、文字列として渡された場合にシェルコマンドの意味が変わる可能性がある。Issue の Root Cause や Affected Code に lines パラメータの未検証問題が記載されていない。",
+      "suggestion": "Root Cause または Additional Affected Endpoint セクションに、capture/route.ts の lines パラメータが数値バリデーションなしに capturePane() の exec() 文字列補間に渡される問題を追記する。Recommended Direction に「Validate the lines parameter as a positive integer within a reasonable range (e.g., 1-100000) before passing to capturePane()」を追加する。"
+    },
+    {
+      "id": "S5F003",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "title": "Case 2 PoC の但し書き「Exact exploitability depends on routing constraints and how params.id is parsed」が未修正",
+      "description": "Stage 1 の F003（nice_to_have）で指摘した通り、cliToolId は JSON ボディから取得されるためルーティング制約は無関係であるが、PoC セクションの但し書きが依然として残っている。cliToolId のインジェクションに関しては routing constraints は影響しない。params.id についてはURL エンコーディングの影響を受けるが、デコード後にはシェルメタ文字が含まれうる。この但し書きは cliToolId と params.id の区別が曖昧なまま残っている。",
+      "suggestion": "「Exact exploitability depends on routing constraints and how params.id is parsed, but the injection primitive is present in code.」を「The injection primitive is present in code. Note: cliToolId is extracted from the JSON body and is not subject to routing constraints. params.id is a URL path parameter, which may be URL-encoded but will contain the original characters after Next.js decoding.」のように明確化する。"
+    },
+    {
+      "id": "S5F004",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "getSessionName() Pattern Inconsistency テーブルの cli-session.ts 行番号が概算値",
+      "description": "Issue の getSessionName() Pattern Inconsistency セクションで cli-session.ts の行番号が「cli-session.ts:81-85」と記載されているが、実際のコードでは cli-session.ts:81 に関数定義がある（export function getSessionName）。行番号は正確だが、テーブルの Description 列に「CLIToolManager via validateSessionName()」とある一方、実際には cli-session.ts:81-84 の getSessionName() は CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId) を呼び出しており、validateSessionName() を直接呼ばない（validateSessionName は BaseCLITool.getSessionName 内で呼ばれる）。表記は技術的には不正確ではないが、呼び出しチェーンを明示するとより正確。",
+      "suggestion": "テーブルの Validation 列を「CLIToolManager -> BaseCLITool.getSessionName() -> validateSessionName()」のように呼び出しチェーンを示す表記にすると正確性が向上する。軽微な指摘であり、現状のままでも実用上の問題はない。"
+    },
+    {
+      "id": "S5F005",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "Review History セクションで Stage 1 の F003, F004, F005, F007, F009 の扱いが未記載",
+      "description": "Review History の Stage 1 セクションには F008, F001, F002, F006, F010 の反映が記録されているが、F003（nice_to_have: PoC の但し書き曖昧さ）、F004（nice_to_have: sendSpecialKeys/sendSpecialKey の言及）、F005（nice_to_have: 安全パターン具体例）、F007（nice_to_have: historyLimit 補間）、F009（nice_to_have: CSRF 対策不足）が反映されたのか、意図的にスキップされたのかが分からない。F004 と F005 は Issue 本文に反映されている（影響関数の列挙と安全パターンルートの列挙が追加されている）が、Review History に記録がない。",
+      "suggestion": "Review History の Stage 1 セクションに、反映した nice_to_have 項目（F004, F005 等）を追記するか、「Nice to have items (F003, F004, F005, F007, F009) were selectively addressed」のような注記を追加する。完全なトレーサビリティのためには全項目の状態を記録するのが望ましい。"
+    },
+    {
+      "id": "S5F006",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "Stage 3 の IF008, IF009 の Review History への反映記録が不足",
+      "description": "Review History の Stage 3 セクションには IF001-IF007 の反映が記録されているが、IF008（opencode.ts リファレンス実装）と IF009（isValidWorktreeId 共有化）の扱いが記載されていない。IF008 は Issue 本文の Recommended Direction 最終項目に反映されている（「Reference implementation: opencode.ts:113-117 already uses execFileAsync...」）。IF009 は Issue 本文に反映されていない。",
+      "suggestion": "Review History の Stage 3 セクションに IF008 の反映記録を追加する。IF009 については Issue の修正スコープ外として意図的にスキップした場合はその旨を注記する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 4,
+    "overall_quality": "高",
+    "comment": "Stage 1 および Stage 3 の全 Must Fix / Should Fix 指摘事項が適切に反映されている。F008（worktreeId DB存在確認欠如）は Root Cause item 6 として追加され、F001（capture/route.ts）は Additional Affected Endpoint サブセクションとして詳細に記載された。F002（行番号修正）、F006（workingDirectory インジェクションリスク）、F010（Severity 根拠）も的確に反映されている。Stage 3 の IF001（直接 exec() 呼び出し）、IF002（テスト要件）、IF003-IF007 も全て Recommended Direction や新規セクションに反映済み。IF008（opencode.ts リファレンス）も反映されている。新規発見事項として、(1) tmux.ts の関数数「8」は実際には「10」が正確であること、(2) capture/route.ts の lines パラメータ未検証問題がある。これらは should_fix レベルだが、Issue 全体の品質は高く、実装者が作業を開始するのに十分な情報が整っている。Issue は技術的に正確で、Root Cause 分析、PoC、影響範囲、推奨方向性、テスト要件、後方互換性考慮が包括的に記述されている。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/tmux.ts",
+      "relevance": "関数数の検証 -- 10 エクスポート関数（isTmuxAvailable, hasSession, listSessions, createSession, sendKeys, sendSpecialKeys, capturePane, killSession, ensureSession, sendSpecialKey）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/capture/route.ts",
+      "relevance": "lines パラメータ未検証問題の確認（line 20, 41）"
+    },
+    {
+      "file": "src/lib/cli-session.ts",
+      "relevance": "getSessionName() の呼び出しチェーン確認（line 81-84）"
+    },
+    {
+      "file": "src/lib/cli-tools/base.ts",
+      "relevance": "BaseCLITool.getSessionName() の validateSessionName() 呼び出し確認（line 46-49）"
+    },
+    {
+      "file": "src/lib/cli-tools/opencode.ts",
+      "relevance": "execFileAsync リファレンス実装の確認（line 113-117）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト構成・モジュール定義の整合性確認"
+    }
+  ]
+}

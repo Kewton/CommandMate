@@ -1,0 +1,95 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 395,
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "category": "不足情報",
+      "title": "既存CSP設定への言及が欠如",
+      "description": "next.config.js にはContent-Security-Policy ヘッダが設定されており、default-src 'self' によりプロキシ経由で返されたHTMLが外部リソースを読み込むことを制限している。ただし script-src に 'unsafe-inline' 'unsafe-eval' が含まれるため、インラインスクリプト実行は可能。Issue本文ではCSPの存在に全く触れておらず、攻撃シナリオの前提条件として「CSPは 'unsafe-inline' を許可しているためインラインスクリプトは実行可能だが、外部スクリプト読み込みは self に制限される」という点を明記すべき。",
+      "location": "## Impact / ## Example Attack Scenario",
+      "suggestion": "CSPの存在と、その制限範囲（default-src 'self' + script-src 'unsafe-inline' 'unsafe-eval'）を前提条件セクションまたは影響セクションに記載する。具体的には、(a) インラインスクリプトによる /api/* 呼び出しは現在のCSPで可能であること、(b) 外部ドメインへの直接的なデータ送出は connect-src 'self' ws: wss: で制限されるが、proxy経由でアップストリームアプリのバックエンドに送り返すことは self 扱いで可能であること、を明示する。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "category": "不足情報",
+      "title": "認証ミドルウェアによるプロキシアクセス保護の未記載",
+      "description": "middleware.ts は AUTH_EXCLUDED_PATHS に /proxy パスを含まないため、CM_AUTH_TOKEN_HASH が設定されている場合、未認証ユーザーは /proxy/* にアクセスできない。Issueの前提条件（Preconditions）に「ユーザーが認証済みであること（認証が有効な場合）」を追加すべき。認証が有効な環境では、攻撃者は認証済みセッションを持つ正当なユーザーである必要がある。",
+      "location": "## Preconditions",
+      "suggestion": "Preconditions に「When CM_AUTH_TOKEN_HASH is configured, the user must be authenticated to access /proxy/* paths (middleware enforces this)」を追加する。これは脆弱性の深刻度を下げるものではないが（認証済みユーザーのセッションが依然として危険にさらされるため）、正確な前提条件の記述として必要。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "should_fix",
+      "category": "不足情報",
+      "title": "X-Forwarded-* ヘッダの転送による追加リスクの未記載",
+      "description": "proxyHttp() はリクエストヘッダをほぼ全て転送するが、HOP_BY_HOP_REQUEST_HEADERS に含まれない X-Forwarded-For、X-Forwarded-Host、X-Forwarded-Proto、X-Real-IP 等も転送される。アップストリームアプリがこれらを信頼した場合、ホストヘッダインジェクションやIPスプーフィング攻撃が可能になる。Issue本文では Cookie と Authorization のみに焦点を当てており、これらのヘッダのリスクが見落とされている。",
+      "location": "## Root Cause / ## Impact",
+      "suggestion": "Root Causeセクションの sensitive headers リストに X-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto, X-Real-IP を追加する。Recommended Direction にもこれらのストリッピングまたは明示的な制御を含める。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "should_fix",
+      "category": "不足情報",
+      "title": "Validation Notes の検証項目が不十分",
+      "description": "Validation Notes には3項目しかなく、セキュリティIssueとして網羅性が不足している。以下の検証項目が欠如している: (1) Cookie のSet-Cookie injectionにより既存の cm_auth_token が上書き可能か（Path=/ を指定した場合）、(2) CSPの存在下でもインラインスクリプトが実行可能か、(3) proxy経由のレスポンスに X-Frame-Options: DENY が適用されるか（next.config.js で設定済みだがプロキシレスポンスへの適用状況）、(4) WebSocket upgrade拒否レスポンスに含まれる directUrl のinternal情報漏洩。",
+      "location": "## Validation Notes",
+      "suggestion": "以下を追加: 4. Set-Cookie: cm_auth_token=xxx; Path=/; HttpOnly で既存認証cookieの上書き可否、5. CSP (script-src 'unsafe-inline') 下でのインラインJS実行可否、6. proxy レスポンスに next.config.js のセキュリティヘッダが付与されるか、7. proxyWebSocket() の directUrl レスポンスによる内部ネットワーク情報漏洩。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "title": "Authorization ヘッダの実用的リスク説明の過剰",
+      "description": "Issueでは Cookie と Authorization を同列に挙げているが、現在のCommandMateの認証はcookieベース（cm_auth_token）であり、Authorization ヘッダ（Bearerトークン等）は使用していない。Authorization ヘッダの転送がリスクであることは技術的に正確だが、現実の脅威としてはCookieの方が遥かに深刻。Impact セクションの '2. Credential disclosure' で 'bearer tokens if present' と記載されているのは、現在のコードベースでは該当しない。",
+      "location": "## Impact > ### 2. Credential disclosure to upstream apps",
+      "suggestion": "「CommandMateは現在cookie認証を使用しており、Authorization ヘッダは使用していない。ただし将来的な拡張や、ブラウザ拡張機能などが付与するAuthorization ヘッダが転送されるリスクは残る」と補足する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "nice_to_have",
+      "category": "不足情報",
+      "title": "WebSocket upgrade 拒否レスポンスでの内部情報漏洩",
+      "description": "proxyWebSocket() 関数（handler.ts L150-166）は、WebSocket非サポートの426レスポンスで directUrl として ws://{targetHost}:{targetPort}{path} を返す。これは内部ネットワーク構成（ポート番号等）を外部に漏洩する。Issue本文ではこの漏洩について言及していない。",
+      "location": "## Affected Code",
+      "suggestion": "内部情報漏洩のリスクとして追記するか、Recommended Directionに directUrl の除去または制限を含める。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "should_fix",
+      "category": "推奨事項",
+      "title": "Recommended Directionにiframe sandboxing戦略の追加を推奨",
+      "description": "Recommended Direction に6つの対策方向が示されているが、完全なオリジン分離が困難な場合の中間的対策として、iframe sandbox + CSP frame-src によるプロキシコンテンツの隔離が言及されていない。これは同一オリジンプロキシを維持しつつセキュリティを向上させる現実的なアプローチである。",
+      "location": "## Recommended Direction",
+      "suggestion": "以下の選択肢を追加: 「プロキシコンテンツを sandbox 属性付き iframe 内で表示し、iframe からの /api/* 呼び出しを CSP frame-src で制限する」。ただし、これは完全な解決策ではなく、ヘッダストリッピングとの併用が前提であることを明記する。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "コード参照の行番号の正確性",
+      "description": "Issue 内の Affected Code セクションで参照されている行番号（例: handler.ts:61, handler.ts:75, handler.ts:86, route.ts:22, route.ts:83）は、現在のコードベースと概ね一致しているが、一部にズレがある。handler.ts:61 は実際にはヘッダ転送ループの開始位置だが、具体的にはL62が forEach の開始行。route.ts:22 は handleProxy 関数のシグネチャ（実際にも一致）、route.ts:83 は proxyHttp 呼び出し（実際にも一致）。大きなズレはないが、正確性のためL61→L62の修正が望ましい。",
+      "location": "## Affected Code > Key references",
+      "suggestion": "handler.ts:61 を handler.ts:62 に修正。微修正であり優先度は低い。"
+    },
+    {
+      "id": "S1-009",
+      "severity": "must_fix",
+      "category": "不足情報",
+      "title": "next.config.js セキュリティヘッダがプロキシレスポンスに適用されるかの明確化",
+      "description": "next.config.js の headers() で設定されたセキュリティヘッダ（CSP, X-Frame-Options等）は /:path* パターンで設定されている。しかし、proxyHttp() は独自の Response オブジェクトを構築して返すため、Next.js の headers() 設定がこのレスポンスに適用されるかどうかは Next.js の実装に依存する。Route Handler が new Response() を直接返す場合、next.config.js の headers() は適用されない可能性がある。もし適用されない場合、プロキシレスポンスにはCSPもX-Frame-Optionsも付与されず、攻撃の実現可能性が大幅に高まる。IssueにはこのNext.js動作の確認が不可欠。",
+      "location": "## Root Cause / ## Preconditions",
+      "suggestion": "Validation Notes に「next.config.js の security headers がプロキシルートの Response に適用されるかの実機検証」を追加する。適用されない場合はIssueの深刻度がさらに上がり、proxyHttp() 内で明示的にセキュリティヘッダを付与する必要がある。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "overall_assessment": "Issue #395 の根本原因分析、影響評価、攻撃シナリオはコードベースの事実と正確に一致しており、仮説検証でも全6項目がConfirmedとなっている。技術的な記載は高品質である。ただし、既存のセキュリティ対策（CSPヘッダ、認証ミドルウェア）への言及が欠如しており、攻撃の前提条件が不完全である。特にnext.config.js のセキュリティヘッダがプロキシレスポンスに実際に適用されるかの検証は、脆弱性の実質的な深刻度を左右する重要な確認事項であり、must_fix として指摘した。Recommended Direction は妥当だが、中間的対策の選択肢を拡充することでより実用的なIssueになる。"
+  }
+}

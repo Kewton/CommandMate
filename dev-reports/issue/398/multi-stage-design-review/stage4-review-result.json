@@ -1,0 +1,105 @@
+{
+  "issue_number": 398,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "should_fix",
+      "category": "InfoLeak",
+      "owasp": "A09",
+      "title": "console.warn によるモデル名・APIステータスコードの情報漏洩リスク",
+      "description": "fetchLmStudioModels() のセクション6-2で `console.warn(`LM Studio API returned status ${response.status}`)` のようにHTTPステータスコードをサーバーログに出力している。また fetchOllamaModels() も同様のパターンを持つ。サーバーサイドの console.warn はNext.jsのサーバーログに記録されるため、ログファイルへのアクセス権を持つ攻撃者にとって内部インフラ構成（LM Studioの存在有無、起動状態、ポート番号）を推測する手がかりになる。本プロジェクトの既存実装（Issue #379のopencode-config.ts）も同パターンを使用しており一貫性はあるが、設計方針書のセキュリティセクションではログ出力の情報漏洩リスクについて言及がない。",
+      "suggestion": "設計方針書のセクション5に SEC-005（ログ出力の情報制御）として、console.warn の出力内容にAPIステータスコード以上の詳細情報（レスポンスボディ等）を含めないポリシーを明記する。現状の実装パターン（ステータスコードのみ）は許容範囲だが、将来のデバッグ目的でレスポンスボディをログに含める変更を防止する設計ガードが必要。",
+      "location": "セクション5 セキュリティ設計 / セクション6-2 fetchLmStudioModels()"
+    },
+    {
+      "id": "S4-002",
+      "severity": "should_fix",
+      "category": "DoS",
+      "owasp": "A05",
+      "title": "LM_STUDIO_MODEL_PATTERN の文字種が Ollama よりも広い（@ 文字許可）理由と安全性の根拠不足",
+      "description": "設計方針書セクション4-1で LM_STUDIO_MODEL_PATTERN = /^[a-zA-Z0-9._:/@-]{1,200}$/ と定義されている。既存の OLLAMA_MODEL_PATTERN = /^[a-zA-Z0-9._:/-]{1,100}$/ と比較すると、(1) @ 文字が追加、(2) 長さ上限が100から200に倍増している。@ 文字の許可は LM Studio のモデル ID フォーマット（例: 'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF'）に基づくと推測されるが、設計方針書に @ が必要な具体的なモデルID例が記載されていない。Stage 2 レビュー（S2-007）でも指摘されたがNice to Haveとしてスキップされている。セキュリティ観点では、正規表現の文字クラスを必要最小限に保つべきである。また 200文字への拡張についても、LM Studio の実際のモデルID最大長に基づく根拠がない。",
+      "suggestion": "LM Studio の公式ドキュメントまたは実際のAPIレスポンスから、@ 文字を含むモデルIDの実例を確認する。@ が不要であれば OLLAMA_MODEL_PATTERN と同じ文字クラスにする。200文字上限については、実際の最長モデルID（例: 'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF' = 54文字）に安全マージンを加えた値（例: 150文字）を根拠付きで設定する。設計方針書にバリデーションパターンの根拠セクションを追加する。",
+      "location": "セクション4-1 新規追加定数 / LM_STUDIO_MODEL_PATTERN"
+    },
+    {
+      "id": "S4-003",
+      "severity": "nice_to_have",
+      "category": "SSRF",
+      "owasp": "A10",
+      "title": "SEC-001 SSRF防止ポリシーの LM Studio 適用は適切だが、DNS rebinding への言及がない",
+      "description": "設計方針書セクション5 SEC-001 では LM_STUDIO_API_URL / LM_STUDIO_BASE_URL を 'http://localhost:1234/v1/models' にハードコードし、環境変数からの導出を禁止している。これは既存の Ollama 定数と同一のSSRF防止ポリシーであり適切である。ただし、localhost へのHTTPリクエストであっても、DNS rebinding 攻撃により別のホストに誘導される理論的リスクがある。Node.js の fetch は URL 文字列を直接使用するため、localhost が 127.0.0.1 以外に解決される環境（特殊なDNS設定やコンテナ環境）では意図しないホストへの接続が起こりうる。ただし、本ツールはローカル開発環境で使用されることが前提であり、リスクは極めて低い。",
+      "suggestion": "現時点では対応不要。将来的にリモートサーバーデプロイ（Docker/Kubernetes等）をサポートする場合、fetch先をIPアドレス（'http://127.0.0.1:1234'）にすることを検討する。設計方針書のSEC-001に「ローカル開発環境前提」の注記を追加しておくと良い。",
+      "location": "セクション5 SEC-001 SSRF防止"
+    },
+    {
+      "id": "S4-004",
+      "severity": "must_fix",
+      "category": "Injection",
+      "owasp": "A03",
+      "title": "LM Studio モデルIDが opencode.json の provider キーに使用され、JSON構造を操作するリスク",
+      "description": "設計方針書セクション6-2の fetchLmStudioModels() では、LM Studio APIから取得した model.id をそのまま ProviderModels のキーとして使用している（`models[model.id] = { name: model.id }`）。JSON.stringify() による出力時にキー名は適切にエスケープされるため、JSON構造の破壊はない（SEC-003で対策済み）。しかし、LM_STUDIO_MODEL_PATTERN で許可される文字種に `/` が含まれるため、opencode.json のモデルキーに `/` を含む値（例: 'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF'）が設定される。OpenCode がこのキーをどのように処理するか（ファイルパスとして解釈するか等）は設計方針書に記載がない。OpenCode の内部実装によっては、スラッシュを含むモデルキーがパストラバーサルや予期しないファイルアクセスを引き起こす可能性がある。ただし、これは OpenCode 側の責務であり本プロジェクトの直接的な脆弱性ではないが、設計方針書として認識しておくべきリスクである。\n\nより重要な点として、claude-executor.ts の buildCliArgs() で opencode case が `ollama/${options.model}` とハードコードされている（セクション9でスコープ外と明記）。将来 LM Studio モデルをスケジュール実行で使用する際、model パラメータにユーザー入力が含まれる場合、execFile の引数として渡されるモデル名のバリデーションが必要になる。現時点では execFile を使用しているためシェルインジェクションは防止されるが、コマンドライン引数インジェクション（例: `-m` フラグの値に `--` を含めて引数解釈を変更する等）のリスクは将来 Issue で考慮すべきである。",
+      "suggestion": "設計方針書のセクション5に SEC-005（モデルID安全性）として、以下を明記する: (1) JSON.stringify() によるエスケープで JSON 構造破壊は防止済み、(2) モデルIDに含まれる `/` は OpenCode 側で適切に処理されることを前提とする、(3) 将来のスケジュール実行対応時に claude-executor.ts の引数バリデーションを追加する（`--` 文字列の拒否等）。セクション9のスコープ外にセキュリティ観点の注記を追加する。",
+      "location": "セクション5 SEC-003 / セクション6-2 fetchLmStudioModels() / セクション9 スコープ外"
+    },
+    {
+      "id": "S4-005",
+      "severity": "nice_to_have",
+      "category": "DoS",
+      "owasp": "A05",
+      "title": "Promise.all 並列実行時の合計リソース消費量（メモリ）に関する考慮",
+      "description": "設計方針書セクション8-1で fetchOllamaModels() と fetchLmStudioModels() を Promise.all で並列実行する設計となっている。各関数は最大 1MB のレスポンスを受け入れるため、理論上の最大メモリ消費は同時に 2MB + JSONパース分のオーバーヘッドとなる。これは問題ない量だが、設計方針書ではこの点について明示的な言及がない。3プロバイダー目追加時に同じパターンを継続すると 3MB に増加する。現時点では問題ないが、拡張性の観点で MAX_TOTAL_RESPONSE_SIZE のような全体制限を設計に含めておくことが望ましい。",
+      "suggestion": "現時点では対応不要。D1-002（KISS）に従い、2プロバイダーのリソース消費は問題ないレベルであることをセクション8に注記として追加する程度で十分。3プロバイダー目追加時の検討事項として記録しておく。",
+      "location": "セクション8-1 API呼び出しの並列化"
+    },
+    {
+      "id": "S4-006",
+      "severity": "should_fix",
+      "category": "AccessControl",
+      "owasp": "A01",
+      "title": "opencode.json の writeFileSync パーミッション指定がない",
+      "description": "設計方針書セクション6-3で fs.writeFileSync() に flag: 'wx' は指定されているが、mode（ファイルパーミッション）が指定されていない。Node.js のデフォルトは 0o666（umask 適用前）であり、一般的な umask 0o022 の環境では 0o644（owner rw, group r, others r）になる。opencode.json にはプロバイダー設定（API endpoint URL 等）が含まれるが、機密情報（API キー等）は含まれないため、0o644 は許容範囲である。ただし、将来的にプロバイダー設定に認証情報が追加される可能性がある場合（例: LM Studio リモートサーバー対応時の API キー）、mode: 0o600 を明示的に設定すべきである。現在の実装（既存 opencode-config.ts L228）も mode を指定していないため一貫性はあるが、設計方針書のセキュリティセクションで意図的な判断として記録すべきである。",
+      "suggestion": "設計方針書のセクション5に SEC-006（ファイルパーミッション）として、opencode.json は機密情報を含まないため mode 指定は省略する（OS デフォルトに委ねる）旨を明記する。将来的に認証情報を含む場合は mode: 0o600 を設定する方針を注記する。",
+      "location": "セクション5 セキュリティ設計 / セクション6-3 ensureOpencodeConfig()"
+    },
+    {
+      "id": "S4-007",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "owasp": "A05",
+      "title": "LM Studio のデフォルトポート 1234 のポート衝突リスクの注記がない",
+      "description": "LM_STUDIO_API_URL に http://localhost:1234 を使用しているが、ポート 1234 は IANA 未登録（Unassigned）のポートであり、他のアプリケーションが使用する可能性がある。LM Studio が起動していない状態で別のサービスがポート 1234 で稼働している場合、そのサービスに /v1/models リクエストが送信される。レスポンスの構造バリデーション（data 配列のチェック）とモデル名パターン検証があるため、誤ったサービスのレスポンスが opencode.json に反映されるリスクは低いが、意図しないサービスへのリクエスト送信自体がセキュリティ上の懸念となりうる。ただし、このリスクは Ollama（ポート 11434）についても同様であり、既存実装で許容されているパターンである。",
+      "suggestion": "設計方針書のSEC-001に注記を追加する: 「ハードコードされたlocalhost URLは、対象サービスが起動していない場合に別のサービスへのリクエストとなりうるが、レスポンス構造バリデーションにより誤設定のリスクは軽減される」。",
+      "location": "セクション5 SEC-001 / セクション4-1 LM_STUDIO_API_URL"
+    },
+    {
+      "id": "S4-008",
+      "severity": "should_fix",
+      "category": "DoS",
+      "owasp": "A05",
+      "title": "response.text() がレスポンス全体をメモリに読み込んだ後にサイズチェックする設計",
+      "description": "設計方針書セクション6-2の fetchLmStudioModels() では、`const text = await response.text()` でレスポンス全体を文字列として読み込んだ後に `text.length > MAX_LM_STUDIO_RESPONSE_SIZE` でサイズチェックを行っている。これは既存の Ollama 実装（opencode-config.ts L180-184）と同じパターンであり一貫性がある。しかし、この方式では response.text() の時点で1MBを超えるレスポンスがメモリに読み込まれる。Node.js の fetch API では Content-Length ヘッダーによる事前チェックや ReadableStream による段階的読み込みが可能であるが、(1) Content-Length は信頼できないヘッダーであり、(2) ストリーミング実装は複雑性が増すため、現行の text() + length チェック方式は KISS 原則に基づく合理的な選択である。ただし、設計方針書のSEC-002でこの設計判断の根拠を明記すべきである。",
+      "suggestion": "設計方針書のSEC-002に以下の設計判断を追記する: 「response.text() 後のサイズチェックはメモリ使用量の観点で最適ではないが、以下の理由で許容する: (1) Content-Length ヘッダーは改竄可能で信頼できない、(2) ストリーミング実装の複雑性がKISS原則に反する、(3) 1MBのメモリ消費はサーバー環境で許容範囲内、(4) AbortController によるタイムアウトが二次的な保護を提供する」。",
+      "location": "セクション5 SEC-002 DoS防御 / セクション6-2 fetchLmStudioModels()"
+    },
+    {
+      "id": "S4-009",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "owasp": "A05",
+      "title": "LM Studio API接続時のHTTPヘッダー（User-Agent等）が設計されていない",
+      "description": "fetchLmStudioModels() の fetch 呼び出しに User-Agent やその他のHTTPヘッダーが指定されていない。Node.js の fetch はデフォルトで `undici` の User-Agent を送信する。これは機能的な問題ではないが、(1) LM Studio 側のアクセスログに CommandMate からのリクエストであることが識別できない、(2) サーバーフィンガープリンティングの観点でNode.jsバージョン情報が漏洩する可能性がある。ただし、localhost への通信であるため実質的なリスクは極めて低い。",
+      "suggestion": "現時点では対応不要。将来的にリモートサーバー対応を行う場合は、カスタム User-Agent ヘッダーの設定と不要なヘッダーの除去を検討する。",
+      "location": "セクション6-2 fetchLmStudioModels()"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 4,
+    "overall_quality": "good",
+    "comment": "設計方針書のセキュリティ設計は全体として堅実であり、OWASP Top 10 の主要リスクに対する防御策が適切に設計されている。特に SEC-001（SSRF防止: ハードコードURL）、SEC-002（DoS防御: レスポンスサイズ/モデル数/タイムアウト制限）、SEC-003（JSONインジェクション防止: JSON.stringify使用）、SEC-004（パストラバーサル防止: validateWorktreePath継続使用）は既存のOllama実装と一貫したポリシーで設計されている。Must Fix 1件は将来の拡張時のリスクを事前に設計書に記録するものであり、現在の実装が脆弱であることを意味しない。Should Fix 4件は設計書の記述強化（セキュリティ判断の根拠明記）が主であり、実装変更を伴わないものが多い。全体として、セキュリティ面でのリスクは低く、実装段階に進める品質である。"
+  }
+}

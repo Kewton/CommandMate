@@ -1,0 +1,242 @@
+{
+  "issue_number": 389,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-02",
+  "previous_findings_check": [
+    {
+      "finding_id": "S3-001",
+      "original_title": "既存MarkdownEditorテストの大規模更新が必要",
+      "status": "resolved",
+      "comment": "実装タスクの「ユニットテストの追加・更新」セクションが詳細化され、既存Save Operations(6テスト)、Unsaved Changes Warning(3テスト)、Keyboard Shortcuts Ctrl+S関連テストの更新が具体的サブ項目として列挙されている。auto-save OFF時の既存テスト互換性維持とauto-save ON時の新テスト追加（Saveボタン非表示、インジケーター表示、beforeunload条件分岐、Ctrl+SでのsaveNow呼び出し）も明記。テスト影響範囲は十分にカバーされている。"
+    },
+    {
+      "finding_id": "S3-002",
+      "original_title": "saveContent関数分離の波及箇所を影響範囲に明記",
+      "status": "resolved",
+      "comment": "影響範囲テーブルのMarkdownEditor.tsxが6項目に拡充されている: (1) saveToApi/saveContentの2関数化、(2) handleKeyDown Ctrl+S分岐、(3) handleClose auto-save対応（isDirty=true またはisSaving=true時はsaveNow()待機後に閉じる）、(4) Saveボタン表示制御、(5) beforeunloadハンドラー条件拡張（isDirty OR isSaving）、(6) ヘッダーにauto-saveトグルUI+保存インジケーター追加。全ての波及箇所が具体的に記載されている。"
+    },
+    {
+      "finding_id": "S3-003",
+      "original_title": "useAutoSaveのcancelPendingSaveが非公開のためCtrl+S連携に設計考慮が必要",
+      "status": "resolved",
+      "comment": "受入条件が「saveNow()を呼び出し即座保存する（saveNow内部でデバウンスが自動キャンセルされる）」に修正されている。影響範囲テーブルのuseAutoSave.tsも「変更不要（saveNow()が内部でcancelPendingSave()を呼び出すため、Ctrl+S連携に追加APIは不要）」と明記。実装者がcancelPendingSaveを別途公開する必要がないことが明確。"
+    },
+    {
+      "finding_id": "S3-004",
+      "original_title": "E2Eテストへの影響が未記載",
+      "status": "resolved",
+      "comment": "関連コンポーネントセクションに「tests/e2e/markdown-editor.spec.ts - auto-saveトグルUI追加に伴うE2Eテスト確認（デフォルトOFFのため影響は限定的）」が追加されている。E2Eテストのセレクター（data-testid='save-button'等）はデフォルトOFF時に表示されるため、既存テストの破壊リスクは適切に評価されている。"
+    },
+    {
+      "finding_id": "S3-005",
+      "original_title": "auto-save ON時のAPI呼び出し頻度とサーバー負荷の考慮",
+      "status": "not_resolved",
+      "comment": "Stage 3でShould Fixとして指摘されたが、Stage 4の反映時にスキップされた項目。現在のIssueにパフォーマンスへの考慮は記載されていない。ただし、3秒デバウンスは十分な間隔であり、MarkdownEditorのファイルサイズ上限（1MB）を考慮しても実運用上の問題になる可能性は低い。Stage 7では新たな指摘としては挙げない。"
+    },
+    {
+      "finding_id": "S3-006",
+      "original_title": "WorktreeDetailRefactoredのhandleEditorSaveコールバックとの整合性",
+      "status": "resolved",
+      "comment": "実装タスク5番目に「auto-save成功時のonSave呼び出し方針: ファイルツリーrefreshの頻度を考慮し、auto-save時のonSave呼び出しはしない（manual saveのみonSaveを呼び出す）」が明記されている。さらにStage 5/6でonSaveCompleteコールバックの記述も修正され（S5-002反映）、「setOriginalContent(content)を呼び出し、dirty状態を解除する（onSave(filePath)はauto-save時には呼ばない。manual save時のみ呼び出す）」と矛盾なく統一されている。WorktreeDetailRefactored.tsxのhandleEditorSave（L1205-1207）が3秒ごとに呼ばれる問題は解消。"
+    },
+    {
+      "finding_id": "S3-007",
+      "original_title": "LOCAL_STORAGE_KEY_AUTO_SAVE定数の命名規則とインポート先への影響",
+      "status": "not_resolved",
+      "comment": "Stage 3でShould Fixとして指摘され、Stage 4の反映時にスキップされた項目。AUTO_SAVE_DEBOUNCE_MS定数の配置先の明示的な判断はIssueに記載されていないが、影響範囲テーブルで「src/types/markdown-editor.ts: AUTO_SAVE_DEBOUNCE_MS定数（3000ms）追加」と配置先が示されているため、実装上の迷いはない。Stage 7では新たな指摘としては挙げない。"
+    },
+    {
+      "finding_id": "S3-008",
+      "original_title": "auto-save失敗時のフォールバック制御フロー",
+      "status": "resolved",
+      "comment": "実装タスクに「useAutoSaveのerror状態をuseEffect内で監視し、error !== nullの場合にauto-save設定をOFFに切り替え（localStorageも更新）、手動保存UIを復活させる。Toast通知はerror検出時に1回だけ表示する」が追加されている。具体的な制御フローが明確で、実装者はこの記述に基づいて迷わず実装できる。"
+    },
+    {
+      "finding_id": "S3-009",
+      "original_title": "i18n対応の影響範囲が未記載",
+      "status": "not_resolved",
+      "comment": "Stage 3でNice to Haveとして指摘され、Stage 4の反映時にスキップされた項目。MarkdownEditorが全体的にi18n未対応であるため、スキップは妥当。"
+    },
+    {
+      "finding_id": "S3-010",
+      "original_title": "useAutoSaveテストへの間接的影響確認",
+      "status": "not_resolved",
+      "comment": "Stage 3でNice to Haveとして指摘され、Stage 4の反映時にスキップされた項目。useAutoSave自体は変更不要であるため、テストへの影響はなく、スキップは妥当。"
+    },
+    {
+      "finding_id": "S5-002",
+      "original_title": "onSaveCompleteコールバックの実装タスク間で矛盾する記述",
+      "status": "resolved",
+      "comment": "Stage 6で反映済み。実装タスク4番目が「setOriginalContent(content)を呼び出し、dirty状態を解除する（onSave(filePath)はauto-save時には呼ばない。manual save時のみ呼び出す）」に修正され、5番目のタスクとの矛盾が解消されている。"
+    },
+    {
+      "finding_id": "S5-004",
+      "original_title": "影響範囲テーブルのbeforeunload条件式が論理的に誤り",
+      "status": "resolved",
+      "comment": "Stage 6で反映済み。影響範囲テーブルの変更箇所(5)が「isDirty OR isSaving」に修正されている。受入条件の記述とも整合。"
+    },
+    {
+      "finding_id": "S5-003",
+      "original_title": "beforeunloadハンドラーにおけるデバウンス待機中の検出方法が未明確",
+      "status": "resolved",
+      "comment": "Stage 6で反映済み。受入条件に「isDirty=true（デバウンス待機中を含む）またはisSaving=trueの場合は警告を表示する（デバウンス待機中はisDirty=trueで自然にカバーされる）」と括弧付きの補足が追加されている。"
+    },
+    {
+      "finding_id": "S5-006",
+      "original_title": "handleClose()のauto-saveモード対応における「isSaving中」以外のケースが未定義",
+      "status": "resolved",
+      "comment": "Stage 6で反映済み。実装タスクが「isDirty=true またはisSaving=true の場合はsaveNow()で即座保存を完了してから閉じる（デバウンス待機中の未保存データも保護）」に修正されている。影響範囲テーブルの変更箇所(3)も同様に更新。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "S7-001",
+      "priority": "Should Fix",
+      "category": "テスト影響",
+      "title": "onClose callbackテスト（3テスト）のauto-saveモード対応が実装タスクに未記載",
+      "description": "実装タスクのテスト更新項目として「既存Save Operationsテスト（6テスト）」「既存Unsaved Changes Warningテスト（3テスト）」「既存Keyboard Shortcuts Ctrl+S関連テスト」が列挙されているが、「onClose callback」テスト群（3テスト: L733-789）への影響が漏れている。このテスト群にはhandleCloseの確認ダイアログテスト（L747-767: 'should warn before closing with unsaved changes'）が含まれており、auto-save ON時のhandleClose()挙動変更（isDirty=true時にsaveNow()を呼び出してから閉じる）に直接影響する。auto-save OFF時はwindow.confirm()が従来通り表示されるが、auto-save ON時はconfirmダイアログではなくsaveNow()後にonClose()が呼ばれるため、この分岐のテストが必要。",
+      "affected_files": [
+        "tests/unit/components/MarkdownEditor.test.tsx"
+      ],
+      "suggestion": "実装タスクのテスト更新項目に「既存onClose callbackテスト（3テスト）のauto-saveモード対応更新」を追加する。具体的には、auto-save ON時のhandleClose()でisDirty=true時にsaveNow()が呼ばれてからonClose()が実行されることを検証するテストケースが必要。"
+    },
+    {
+      "id": "S7-002",
+      "priority": "Should Fix",
+      "category": "影響範囲",
+      "title": "useAutoSaveのsaveFnにcontent stateのクロージャ依存がある影響範囲が未分析",
+      "description": "Issue本文ではuseAutoSave用の保存関数を「isDirtyチェックを含まない純粋なAPI呼び出し（saveToApi）」として切り出すと記載されている。しかし、useAutoSaveの仕組み上、saveFnはvalueRef.current（フック内部で最新値を保持するref）の値を引数として受け取る（executeSave L118: async (valueToSave: T)）。つまりsaveFnの引数としてcontentが渡される設計であり、saveFn内部でcontent stateを直接参照するクロージャは不要かつ望ましくない。現在のsaveContent関数（L245-279）はクロージャでcontentを参照しており（L256: body: JSON.stringify({ content })）、saveToApiもこの同じパターンになると思われる。実装者がsaveFnの引数（useAutoSave内部でvalueRef.currentとして渡される値）を使うか、クロージャのcontent stateを使うかで、タイミングによる値のずれが生じる可能性がある。影響範囲としてこの設計制約の明記が望ましい。",
+      "affected_files": [
+        "src/components/worktree/MarkdownEditor.tsx",
+        "src/hooks/useAutoSave.ts"
+      ],
+      "suggestion": "影響範囲テーブルのMarkdownEditor.tsx変更箇所(1)に補足として「saveToApiはuseAutoSaveのsaveFn引数として渡されるため、saveFnのパラメータ（valueToSave）を使用してAPI送信する（クロージャのcontent stateではなく）」を追加する。MemoCardの実装パターン（L96-98: saveFn: async (value) => { await onUpdate(memo.id, { title: value }); }）と同様にvalueパラメータを使用する方針を明記。"
+    },
+    {
+      "id": "S7-003",
+      "priority": "Should Fix",
+      "category": "影響範囲",
+      "title": "auto-saveトグルUIの具体的なdata-testid属性が未定義",
+      "description": "実装タスクおよび影響範囲テーブルに「ヘッダーにauto-saveトグルUI+保存インジケーター追加」と記載されているが、新しいUI要素のdata-testid属性名が未定義。テスト更新項目ではauto-save ON/OFFの切り替えやインジケーター表示のテストが計画されているが、セレクターが未定義では実装者とテスト作成者の間で不整合が生じる可能性がある。既存のMarkdownEditorでは全てのインタラクティブ要素にdata-testidが付与されている（save-button, close-button, maximize-button, view-mode-split等）。",
+      "affected_files": [
+        "src/components/worktree/MarkdownEditor.tsx",
+        "tests/unit/components/MarkdownEditor.test.tsx"
+      ],
+      "suggestion": "影響範囲テーブルまたは実装タスクに、新しいUI要素のdata-testid命名規則を追加する。推奨: auto-saveトグル: data-testid='auto-save-toggle'、保存状態インジケーター: data-testid='auto-save-indicator'。これにより既存テストとの命名規則の統一（kebab-case）が保たれる。"
+    },
+    {
+      "id": "S7-004",
+      "priority": "Should Fix",
+      "category": "互換性",
+      "title": "useAutoSaveのinitialValueRef問題とauto-save ON切り替え時のエッジケースが影響範囲に未記載",
+      "description": "Stage 5でS5-005として指摘され、Stage 6では「実装者判断に委ねる」としてスキップされた項目。影響範囲レビューの観点から再分析すると、これはMarkdownEditor.tsx内部のuseAutoSave呼び出しの設計に直接影響する。useAutoSaveのデバウンスeffect（L180-197）はvalue === initialValueRef.currentの場合にスキップする。auto-saveをONに切り替えた時点のcontent値がinitialValueRefに記録されるため、その時点で既にisDirty=trueの場合、さらに編集するまでauto-saveが発火しない。影響範囲としてMarkdownEditor.tsxのuseAutoSave統合部分に「ON切り替え時のsaveNow()呼び出し」または「disabled切り替え時のinitialValueRefリセット」いずれかの対応が必要で、実装の複雑さに影響する。",
+      "affected_files": [
+        "src/components/worktree/MarkdownEditor.tsx",
+        "src/hooks/useAutoSave.ts"
+      ],
+      "suggestion": "影響範囲テーブルのMarkdownEditor.tsxに注意事項として「auto-save ON切り替え時にisDirty=trueの場合、useAutoSaveのinitialValueRefにより切り替え直後のvalueはauto-save対象外となる。対応方針: ON切り替え時にsaveNow()を即座呼び出し、未保存変更を保存する」を追加する。あるいはuseAutoSave.tsの変更が必要な場合は影響範囲テーブルを更新する。"
+    },
+    {
+      "id": "S7-005",
+      "priority": "Nice to Have",
+      "category": "テスト影響",
+      "title": "auto-saveインジケーター状態遷移のテストシナリオが具体化されていない",
+      "description": "実装タスクのテスト追加項目に「インジケーター表示」が含まれているが、Saving -> Saved -> (次の編集) -> Saving のような状態遷移の具体的なテストシナリオが未定義。auto-saveの状態遷移は、useAutoSaveのisSaving/error状態とMarkdownEditor固有のisDirty状態の組み合わせで決まるため、テストの複雑さが増す。現時点ではテスト対象として「インジケーター表示」と記載があるだけで、どの状態遷移をテストするかの優先度が不明。",
+      "affected_files": [
+        "tests/unit/components/MarkdownEditor.test.tsx"
+      ],
+      "suggestion": "テスト追加項目に状態遷移のテストケースを例示する: (1) 編集開始→Saving表示→Saved表示、(2) Saved表示→再編集→Saving表示、(3) エラー発生→Error表示→手動保存モードフォールバック。優先度は実装者判断で良いが、期待する状態遷移が明示されていると実装効率が上がる。"
+    },
+    {
+      "id": "S7-006",
+      "priority": "Nice to Have",
+      "category": "影響範囲",
+      "title": "Issueタイトル「メモ機能にauto saveモードの追加」と影響範囲テーブルの対象の不一致",
+      "description": "Stage 5でS5-007としてNice to Haveで指摘され、Stage 6で「タイトル変更はIssue開設者の判断に委ねる」としてスキップされた項目。影響範囲レビューの観点では、このタイトルがそのままCI/CDのPRタイトルやCHANGELOGに反映される場合、変更対象の誤認（MemoCardへの変更と誤解される）につながる。実質的な影響は限定的だが、影響範囲テーブルの変更対象ファイルは全てMarkdownEditor関連であり、MemoCardは「参考実装」としてのみ言及されている点との乖離がある。"
+    }
+  ],
+  "impact_analysis": {
+    "direct_impact": [
+      "src/components/worktree/MarkdownEditor.tsx",
+      "src/types/markdown-editor.ts",
+      "tests/unit/components/MarkdownEditor.test.tsx"
+    ],
+    "indirect_impact": [
+      "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "src/components/common/Toast.tsx",
+      "src/hooks/useAutoSave.ts",
+      "src/hooks/useLocalStorageState.ts",
+      "tests/e2e/markdown-editor.spec.ts"
+    ],
+    "no_impact_confirmed": [
+      "src/components/worktree/MemoCard.tsx",
+      "src/hooks/useFullscreen.ts",
+      "src/hooks/useIsMobile.ts",
+      "src/hooks/useSwipeGesture.ts",
+      "src/hooks/useVirtualKeyboard.ts",
+      "src/components/worktree/PaneResizer.tsx",
+      "src/components/worktree/MermaidCodeBlock.tsx",
+      "src/lib/clipboard-utils.ts",
+      "src/lib/utils.ts",
+      "src/config/z-index.ts",
+      "src/config/editable-extensions.ts",
+      "src/app/api/worktrees/[id]/files/[...path]/route.ts",
+      "src/lib/file-operations.ts",
+      "src/hooks/useContextMenu.ts",
+      "tests/unit/components/worktree/MemoCard.test.tsx",
+      "tests/unit/hooks/useAutoSave.test.ts"
+    ],
+    "breaking_changes": "なし。auto-saveはデフォルトOFF、EditorProps型の変更なし、既存API変更なし。"
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "overall_assessment": "Stage 3で指摘された影響範囲の問題は、Must Fix 2件（S3-001: テスト更新範囲の明記、S3-002: saveContent分離の波及箇所の詳細化）およびShould Fix 6件のうち適用対象の4件が全て解決済みである。Stage 5/6で追加修正されたMust Fix 2件（S5-002: onSaveCompleteの矛盾解消、S5-004: beforeunload条件式のOR修正）も反映済み。影響範囲テーブルは6項目に具体化され、変更箇所・影響範囲・テスト計画の整合性が取れている。新たなMust Fix項目は検出されなかった。Should Fix 4件は、(1) onClose callbackテスト群への影響漏れ、(2) saveFnのvalueパラメータ利用の明記、(3) 新UI要素のdata-testid命名、(4) auto-save ON切り替え時のinitialValueRefエッジケースの影響範囲記載である。いずれも実装の正確性に直接的な障害とはならないが、記載することで実装効率が向上する。全体として、Issue #389の影響範囲記述は十分な品質に達しており、実装着手に問題ない状態と評価する。"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "245-279",
+      "relevance": "saveContent()関数 - saveToApiへの分離対象。S7-002のクロージャ依存分析の中心箇所"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "306-316",
+      "relevance": "handleClose() - S7-001のonClose callbackテスト影響箇所。auto-save ON時の挙動変更対象"
+    },
+    {
+      "file": "src/hooks/useAutoSave.ts",
+      "lines": "117-155",
+      "relevance": "executeSave() - S7-002のsaveFnパラメータ(valueToSave)がここで渡される"
+    },
+    {
+      "file": "src/hooks/useAutoSave.ts",
+      "lines": "86-88, 180-184",
+      "relevance": "initialValueRefとデバウンスeffect - S7-004のON切り替え時エッジケース"
+    },
+    {
+      "file": "src/components/worktree/MemoCard.tsx",
+      "lines": "94-111",
+      "relevance": "useAutoSaveの参考実装 - saveFnでvalueパラメータを使用するパターン（S7-002の推奨パターン）"
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "lines": "732-789",
+      "relevance": "onClose callbackテスト群（3テスト） - S7-001の影響対象"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "1205-1207",
+      "relevance": "handleEditorSave - S3-006の解決確認。auto-save時はonSave非呼び出しで影響なし"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト規約（テスト要件、コーディング規約）の参照"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "issue_number": 390,
+  "iteration": 1,
+  "status": "success",
+  "implemented_files": [
+    "src/app/globals.css",
+    "src/app/worktrees/[id]/files/[...path]/page.tsx",
+    "src/components/worktree/MermaidDiagram.tsx"
+  ],
+  "test_results": {
+    "typescript": "pass",
+    "lint": "pass",
+    "unit_tests": "pass",
+    "unit_test_count": 4251
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/app/globals.css",
+    "src/app/worktrees/[id]/files/[...path]/page.tsx",
+    "src/components/worktree/MermaidDiagram.tsx"
+  ],
+  "commits": [
+    "8acfdf1: fix(ui): add dark background fallback for unspecified-language code blocks"
+  ],
+  "summary": "Issue #390 CSS-only fix implemented. Changed .prose pre background from transparent to #0d1117 (github-dark theme color), added .prose pre code:not(.hljs) fallback rule for language-unspecified code blocks, removed conflicting prose-pre:* utilities from FileViewerPage, simplified custom pre component to overflow-x-auto only, and added bg-red-50 to MermaidDiagram error pre to prevent dark background conflict. All 4251 unit tests pass, ESLint clean, no TypeScript errors in modified files."
+}

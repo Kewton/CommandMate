@@ -1,0 +1,52 @@
+{
+  "issue_number": 389,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "apply_date": "2026-03-02",
+  "applied": [
+    {
+      "finding_id": "DR4-001",
+      "status": "applied",
+      "changes": "Section 4.2のsaveToApi関数にresponse.status === 401 / response.redirected検出ロジックを追加。認証切れ専用エラーメッセージ'Session expired. Please re-login.'をthrowする設計を追記。response.json()呼び出しの前に検出することでリダイレクト先HTMLのJSON解析エラーを防止。セキュリティ脆弱性ではなくUX改善であることをコメントで明記。Section 14（Stage 4セキュリティレビュー指摘事項サマリー）を新設し、反映内容・OWASP Top 10評価・セキュリティ総合評価・実装チェックリストを追加"
+    }
+  ],
+  "skipped": [
+    {
+      "finding_id": "DR4-002",
+      "reason": "NTH - 単一ユーザー環境でDoSリスクは極めて低い。YAGNI原則に従い対応不要"
+    },
+    {
+      "finding_id": "DR4-003",
+      "reason": "NTH - 既存のエラーハンドリングパターンが正しく適用されている。対応不要"
+    },
+    {
+      "finding_id": "DR4-004",
+      "reason": "NTH - useLocalStorageStateのvalidate関数使用により既存セキュリティ慣行に完全準拠。対応不要"
+    },
+    {
+      "finding_id": "DR4-005",
+      "reason": "NTH - 認証・認可の全レイヤーがauto-saveリクエストに対しても同様に適用。対応不要"
+    },
+    {
+      "finding_id": "DR4-006",
+      "reason": "NTH - インジェクション対策は既存パイプラインで十分に対応。対応不要"
+    },
+    {
+      "finding_id": "DR4-007",
+      "reason": "NTH - 単一ユーザーの単一エディタインスタンスにおけるLast Write Wins設計として適切。対応不要"
+    },
+    {
+      "finding_id": "DR4-008",
+      "reason": "NTH - サーバーサイドで適切にログされており、エラーフォールバックもユーザーに通知済み。対応不要"
+    },
+    {
+      "finding_id": "DR4-009",
+      "reason": "NTH - boolean値のみ保存。暗号化の必要性なし。対応不要"
+    },
+    {
+      "finding_id": "DR4-010",
+      "reason": "NTH - 新規外部ライブラリ依存なし。脆弱なコンポーネントのリスクはゼロ。対応不要"
+    }
+  ],
+  "summary": "Stage 4セキュリティレビューの指摘事項を設計方針書に反映完了。Must Fix 0件、Should Fix 1件（DR4-001: セッション切れ時の認証エラーハンドリング）を反映。Nice to Have 9件はスキップ。Section 4.2にresponse.status===401/response.redirected検出ロジックを追加。Section 14としてStage 4セキュリティレビュー指摘事項サマリーを新設し、OWASP Top 10全カテゴリPASS確認、セキュリティスコア5/5(Approved)、実装チェックリスト3件を追記。セキュリティ総合評価: 新規外部ライブラリ依存なし、既存セキュリティインフラを完全活用、新たな攻撃面なし。"
+}

@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { normalize, extname } from 'path';
-import { isPathSafe } from '@/lib/path-validator';
+import { isPathSafe, resolveAndValidateRealPath } from '@/lib/path-validator';
 import {
   writeBinaryFile,
   isValidNewName,
@@ -116,6 +116,11 @@ export async function POST(
 
     if (!isPathSafe(normalizedDir, worktree.path)) {
       return createUploadErrorResponse('INVALID_PATH', 'Invalid file path');
+    }
+
+    // [SEC-394] Symlink traversal validation
+    if (!resolveAndValidateRealPath(normalizedDir, worktree.path)) {
+      return createUploadErrorResponse('INVALID_PATH', 'Invalid path');
     }
 
     // Parse multipart form data

@@ -1,0 +1,61 @@
+{
+  "issue_number": 392,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_date": "2026-03-02",
+  "applied_findings": {
+    "should_fix": [
+      {
+        "id": "F-001",
+        "status": "applied",
+        "change_summary": "Recommended Direction に validateWorktreePath() を活用する Option A を追加。D4-001 情報漏洩リスクの警告とコード例を含む。Option B として従来の手動 path.resolve() 案も維持"
+      },
+      {
+        "id": "F-002",
+        "status": "applied",
+        "change_summary": "Impact セクションに executeClone() 内 mkdirSync による CM_ROOT_DIR 外ディレクトリ作成リスクを追記。Affected Code に clone-manager.ts:382-385 を追加"
+      },
+      {
+        "id": "F-003",
+        "status": "applied",
+        "change_summary": "Impact セクションに onCloneSuccess() での DB 永続化による二次リスク（後続 API 操作で CM_ROOT_DIR 外が操作対象）を追記。Affected Code に clone-manager.ts:479-515 を追加"
+      },
+      {
+        "id": "F-004",
+        "status": "applied",
+        "change_summary": "Root Cause セクションに route.ts:96 の targetDir trim() 欠如を追記。Recommended Direction に route.ts 入力サニタイズ修正をサブセクションとして追加。Validation Notes に trim テストケースを追加"
+      },
+      {
+        "id": "F-005",
+        "status": "applied",
+        "change_summary": "Acceptance Criteria (Test Requirements) セクションを新設。6つの具体的テストシナリオを定義: 相対パス解決、一貫したパス使用、DB絶対パス保存、mkdirSync containment、パストラバーサル拒否、情報漏洩防止"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F-006",
+        "status": "applied",
+        "change_summary": "Severity セクションに CM_AUTH_TOKEN_HASH 有無による攻撃前提条件を追記"
+      },
+      {
+        "id": "F-007",
+        "status": "applied",
+        "change_summary": "Summary と Root Cause に getTargetPath() 分岐が安全である旨の明記を追加。脆弱性が customTargetPath 分岐に限定されることを明確化"
+      },
+      {
+        "id": "F-008",
+        "status": "applied",
+        "change_summary": "Recommended Direction の Option A に D4-001 セキュリティノートを追加。validateWorktreePath() のエラーメッセージに rootDir 値が含まれる問題と、ERROR_DEFINITIONS.INVALID_TARGET_PATH での置換を明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/392"
+  }
+}

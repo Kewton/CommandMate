@@ -1,0 +1,109 @@
+{
+  "issue_number": 391,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-02",
+  "review_summary": "Issue #391の根本原因分析は正確で、仮説検証レポートでも全仮説がConfirmedされている。修正方針（案A+案B）は概念的に妥当だが、案Aの擬似コードにisEditingフラグのリセット漏れシナリオ（ユーザーがチェックを外した後、何も選択せずに別ページへ遷移して戻るケース等）への対応が不足している。また、受入条件には主要な動作パスがカバーされているが、エッジケースの網羅が不十分。全体として品質は高く、実装に着手可能なレベルだが、Should Fix指摘の対応でより堅牢な実装につながる。",
+  "findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "category": "完全性",
+        "title": "案AのisEditingフラグ解除条件が不完全",
+        "description": "修正方針の案Aでは、isEditingフラグをtrue→falseに戻すのが「next.size === MAX_SELECTED_AGENTS時（API呼び出し後）」のみとなっている。しかし以下のケースでisEditingがtrueのまま残留する可能性がある: (1) ユーザーがチェックを外した後、2つ目を選択せずに別のタブに移動して戻った場合、(2) コンポーネントがアンマウント→再マウントされた場合（useState初期値はselectedAgents propから生成されるが、isEditingは初期値falseなので問題ないが明記すべき）。修正方針にisEditingフラグの安全なリセット戦略（タイムアウトやコンポーネント再マウント時のリセット等）を追記すべき。",
+        "location": "修正方針 > 案A セクション",
+        "recommendation": "isEditingフラグの解除条件を明確化する。具体的には: (1) API呼び出し成功/失敗時にfalseにする（記載済み）、(2) selectedAgents propが変更されかつisEditing=trueの場合にタイムアウト（例: 30秒）でfalseにリセットする安全弁を検討する、(3) コンポーネント再マウント時はuseState初期値falseで自動リセットされる旨を明記する。",
+        "evidence": "擬似コードではsetIsEditing(false)がif (next.size === MAX_SELECTED_AGENTS)ブロック内のみ。チェックを外してそのまま放置した場合のリセットパスが存在しない。"
+      },
+      {
+        "id": "SF-002",
+        "category": "完全性",
+        "title": "案BのsetSelectedAgentsスキップ条件の具体的実装が不明確",
+        "description": "案Bでは「selectedAgentsが変化していない場合はsetSelectedAgents()を呼ばない」と記載されているが、具体的な比較方法が示されていない。ReactのuseStateは参照同一性で再レンダリングを判定するが、APIレスポンスから毎回新しい配列オブジェクトが生成されるため、単純な===比較では常に異なると判定される。JSON.stringify()やshallow array comparisonなど、具体的な比較ロジックを示すべき。",
+        "location": "修正方針 > 案B セクション",
+        "recommendation": "WorktreeDetailRefactored.tsxのfetchWorktree()内で以下のような比較を追加する方針を明記する: `if (data.selectedAgents && JSON.stringify(data.selectedAgents) !== JSON.stringify(selectedAgents)) { setSelectedAgents(data.selectedAgents); }` または、配列要素の個別比較（data.selectedAgents[0] !== selectedAgents[0] || data.selectedAgents[1] !== selectedAgents[1]）。ただし、fetchWorktreeはuseCallbackで[worktreeId]のみを依存配列に持つため、selectedAgentsをクロージャに含めるとコールバック再生成が増える点に留意し、useRefで最新値を参照する方法を推奨する。",
+        "evidence": "WorktreeDetailRefactored.tsx L1026-1052: fetchWorktreeのuseCallback依存配列は[worktreeId]のみ。selectedAgentsを依存配列に追加するとポーリング再設定が頻発するため、useRefパターンが必要。"
+      },
+      {
+        "id": "SF-003",
+        "category": "完全性",
+        "title": "受入条件にisEditingタイムアウト/放置シナリオが不足",
+        "description": "受入条件は主要な正常系をカバーしているが、ユーザーがチェックを外した後に長時間放置するケース（中間状態のまま数分経過する場合）について受入条件が定義されていない。isEditingフラグ方式を採用する場合、このシナリオは受入条件として重要。",
+        "location": "受入条件 セクション",
+        "recommendation": "以下の受入条件を追加: 「チェックを外した後、長時間（例: 30秒以上）別のエージェントを選択しなかった場合、次回ポーリングでサーバーの値に同期される（isEditingタイムアウト）」。これにより中間状態が永続化するリスクを防止する。ただし、タイムアウトなしで「ユーザーが明示的に2つ選択するまで中間状態を維持する」という設計判断もあり得るため、どちらの振る舞いを採用するか明記すべき。"
+      },
+      {
+        "id": "SF-004",
+        "category": "明確性",
+        "title": "案AのAPI失敗時リバート動作の明確化",
+        "description": "Issue本文の案Aの擬似コードでは、API呼び出し後のsetIsEditing(false)がtryブロック内のif (next.size === MAX_SELECTED_AGENTS)の中にしか記載されていない。API失敗（catchブロック）時にもisEditingをfalseに戻す処理が必要だが、擬似コードには含まれていない。現行コード（AgentSettingsPane.tsx L163-169）ではAPI失敗時にsetCheckedIds(new Set(selectedAgents))でリバートしており、このリバート後にisEditingもfalseにする必要がある。",
+        "location": "修正方針 > 案A セクション 擬似コード",
+        "recommendation": "擬似コードのcatch/finallyブロックにsetIsEditing(false)を追加する。具体的にはfinallyブロックでsetIsEditing(false)を呼ぶのが最も安全: `finally { setSaving(false); setIsEditing(false); }`",
+        "evidence": "AgentSettingsPane.tsx L152-176: 現行のhandleCheckboxChangeはtry/catch/finallyパターンでAPI呼び出しを行っているが、擬似コード案AではsetIsEditing(false)がAPI成功時のみ記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "category": "完全性",
+        "title": "既存テストへの影響と追加テスト方針の記載",
+        "description": "AgentSettingsPane.test.tsxには62行目に「should sync checked state when selectedAgents prop changes」テストが存在し、現行のuseEffectの無条件同期動作を前提としている。修正後はこのテストの期待動作が変わるため（isEditing中はprop変更で同期しない）、テスト更新が必要。Issueにテスト更新方針を記載するとスムーズ。",
+        "location": "Issue本文（テスト方針なし）",
+        "recommendation": "以下のテストケースの追加/更新を受入条件またはIssue本文に追記: (1) isEditing中にselectedAgents propが変更されてもcheckedIdsが上書きされないことの検証、(2) isEditing解除後にselectedAgents propの変更が正しく同期されることの検証、(3) 既存テスト「should sync checked state when selectedAgents prop changes」をisEditing=falseの前提条件付きに更新。",
+        "evidence": "tests/unit/components/worktree/AgentSettingsPane.test.tsx L62-80"
+      },
+      {
+        "id": "NTH-002",
+        "category": "整合性",
+        "title": "Issue本文中の行番号の軽微なズレ",
+        "description": "Issue本文では「IDLE: 5秒 / ACTIVE: 2秒、L1796-1804」と記載されているが、仮説検証レポートで確認された実際の行番号はL1792-1807。動作内容は完全一致しているため技術的な問題はないが、正確な行番号に修正すると参照時の混乱を防げる。",
+        "location": "根本原因 セクション",
+        "recommendation": "「L1796-1804」を「L1792-1807」に修正。仮説検証レポートとの整合性も向上する。",
+        "evidence": "hypothesis-verification.md: 「Issue記載の行番号（L1796-1804）は実際のコード（L1792-1807）と若干ズレ」"
+      },
+      {
+        "id": "NTH-003",
+        "category": "完全性",
+        "title": "Issue #368との関連リンク",
+        "description": "本バグはIssue #368で導入されたAgentSettingsPaneの設計に起因する。関連Issueとしてリンクしておくとトレーサビリティが向上する。",
+        "location": "Issue本文",
+        "recommendation": "Issue本文の冒頭または最後に「関連Issue: #368（Agent設定UI導入）」を追記。"
+      }
+    ]
+  },
+  "must_fix_count": 0,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "overall_quality": "high",
+  "recommendation": "Must Fixの指摘はなく、根本原因分析と修正方針は正確で実装可能なレベル。Should Fixの4件は主に修正方針の擬似コード/設計の精緻化に関するもので、実装フェーズで対応可能。特にSF-001（isEditingリセット戦略）とSF-004（API失敗時のisEditingリセット）は実装時に漏れやすいため、Issue本文に反映することを推奨する。Stage 2（影響範囲レビュー）へ進行して問題ない。",
+  "code_references": [
+    {
+      "file": "src/components/worktree/AgentSettingsPane.tsx",
+      "lines": "L98-100, L141-176",
+      "relevance": "バグの直接原因（useEffect無条件上書き）と修正対象（handleCheckboxChange）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "L984, L1026-1052, L1792-1807",
+      "relevance": "selectedAgents state定義、fetchWorktreeポーリング、ポーリング間隔設定"
+    },
+    {
+      "file": "tests/unit/components/worktree/AgentSettingsPane.test.tsx",
+      "lines": "L62-80",
+      "relevance": "修正後に更新が必要な既存テスト"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "L209-230",
+      "relevance": "PATCH APIのselectedAgentsバリデーションとcli_tool_id整合性チェック"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "dev-reports/issue/391/issue-review/hypothesis-verification.md",
+      "relevance": "全仮説Confirmed済み - 根本原因の検証済みレポート"
+    }
+  ]
+}

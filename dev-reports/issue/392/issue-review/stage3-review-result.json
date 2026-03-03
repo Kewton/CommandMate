@@ -1,0 +1,112 @@
+{
+  "issue_number": 392,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-03-02",
+  "summary": "Issue #392 の修正は clone-manager.ts の startCloneJob() 内パス処理の変更が中心であり、影響範囲は明確に限定されている。Option A (validateWorktreePath) 採用時の主要な影響は5箇所: (1) startCloneJob() のパス検証/代入ロジック、(2) executeClone() への targetPath 引数（型は変わらず string で互換）、(3) onCloneSuccess() の DB 永続化パス（正規化パスが保存されるため改善方向）、(4) getCloneJobStatus/cancelCloneJob は targetPath を参照しないため影響なし。既存テストは1件（customPath テスト L208-225）で修正が必要になる可能性がある。route.ts の trim() 追加は安全な変更。DB スキーマ変更は不要。破壊的変更はない。全体として低リスクの局所的修正であるが、テストカバレッジの拡充が必須である。",
+  "impact_areas": [
+    {
+      "area": "CloneManager.startCloneJob() - パス検証・代入ロジック",
+      "description": "isPathSafe() を validateWorktreePath() に置換し、targetPath 変数に解決済み絶対パスを代入する。この変更は startCloneJob() のスコープ内で完結し、後続の existsSync/createCloneJob/executeClone/onCloneSuccess に渡される targetPath が相対パスから絶対パスに変わる。",
+      "severity": "high"
+    },
+    {
+      "area": "CloneManager.executeClone() - mkdirSync と git clone",
+      "description": "targetPath が絶対パスになることで、mkdirSync(parentDir) と spawn('git', ['clone', ..., targetPath]) が正しく basePath 配下で動作するようになる。executeClone() 自体のコード変更は不要。引数の型は string のまま変わらない。",
+      "severity": "medium"
+    },
+    {
+      "area": "CloneManager.onCloneSuccess() - DB 永続化",
+      "description": "createRepository() に渡される path と path.basename(targetPath) による name が、解決済み絶対パスに基づくものになる。これは改善方向の変更であり、DB にはbasePath 配下の絶対パスが格納される。scanWorktrees() も絶対パスを受け取るため安全に動作する。",
+      "severity": "medium"
+    },
+    {
+      "area": "route.ts - targetDir の trim() 追加",
+      "description": "targetDir?.trim() || undefined の追加は入力サニタイズの改善であり、既存の正常系動作に影響しない。フロントエンド api-client.ts は targetDir を送信しないため UI フローへの影響もない。",
+      "severity": "low"
+    },
+    {
+      "area": "既存テスト - clone-manager.test.ts",
+      "description": "L208-225 の customPath テストは絶対パス '/tmp/repos/custom/target/path' を使用しているため、修正後も同じ値が返る（path.resolve で同一パスになる）。ただし、job.targetPath のアサーション値が変わる可能性がある（validateWorktreePath が URL デコードを行うため）。新規テストケース追加が必要。",
+      "severity": "medium"
+    }
+  ],
+  "findings": [
+    {
+      "id": "IF-001",
+      "severity": "must_fix",
+      "category": "test_coverage",
+      "title": "相対パス customTargetPath に対するテストケースが完全に欠如している",
+      "description": "既存テスト clone-manager.test.ts L208-225 では customPath に絶対パス '/tmp/repos/custom/target/path' のみを使用している。Issue #392 の脆弱性の本質は相対パスの customTargetPath が isPathSafe() を通過した後に未解決のまま使用される点にある。修正後、相対パスが basePath 配下の絶対パスに正しく解決されることを検証するテストが存在しない。Acceptance Criteria の6項目のうち、現行テストでカバーされているのは項目5（パストラバーサル拒否）のみであり、項目1-4, 6は未カバーである。",
+      "location": "tests/unit/lib/clone-manager.test.ts (L208-235 付近)",
+      "recommendation": "以下のテストケースを追加する: (1) 相対パス 'my-repo' が '/tmp/repos/my-repo' に解決されて createCloneJob に渡されること、(2) 解決後のパスが existsSync の引数として使用されること（vi.mocked(existsSync) の呼び出し引数を検証）、(3) DB に保存される targetPath が絶対パスであること（getCloneJob で取得して検証）、(4) '../escape' が INVALID_TARGET_PATH で拒否されること（Option A では validateWorktreePath の throw をキャッチして変換）。"
+    },
+    {
+      "id": "IF-002",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "Option A 採用時のエラー処理パターンが既存コードと異なる",
+      "description": "現在の startCloneJob() は isPathSafe() の boolean 返却に基づいて CloneResult（エラーオブジェクト）を返すパターンを採用している。Option A の validateWorktreePath() は例外を throw するため、try-catch によるエラー変換が必要になる。clone-manager.ts の他のメソッド（validateCloneRequest, checkDuplicateRepository 等）はいずれも boolean/null チェックによるエラー分岐パターンを使用しており、例外ベースのパターンは startCloneJob() 内で唯一となる。これはコードの一貫性の観点から留意が必要。",
+      "location": "src/lib/clone-manager.ts L301-367 (startCloneJob)",
+      "recommendation": "Option A を採用する場合、try-catch ブロックのスコープを最小限にし（validateWorktreePath 呼び出しのみを囲む）、catch 節で即座に CloneResult エラーオブジェクトに変換することで、既存の戻り値パターンとの整合性を維持する。代替として、validateWorktreePath() を try-catch でラップしたヘルパー関数（例: resolveCustomTargetPath）を作成し、成功時は解決済みパスを、失敗時は null を返す方式にすると、既存パターンとの一貫性が高まる。"
+    },
+    {
+      "id": "IF-003",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "validateWorktreePath() の二重 URL デコーディングリスク",
+      "description": "validateWorktreePath() (path-validator.ts:107-113) は内部で decodeURIComponent() を実行する。一方、isPathSafe() (path-validator.ts:41-47) も同様に decodeURIComponent() を実行する。validateWorktreePath() は内部で isPathSafe() を呼び出す（L101）ため、isPathSafe() 内で一度デコードされたパスに対して、validateWorktreePath() の L109-113 で再度デコードが試行される。ただし、isPathSafe() はデコード結果を返さない（boolean を返すのみ）ため、validateWorktreePath() の L109 で原文の targetPath を再デコードしている。通常の入力では問題ないが、二重エンコードされた入力（例: '%252e%252e' -> '%2e%2e' -> '..'）において、isPathSafe() では1回デコードの '%2e%2e' が安全と判定され、validateWorktreePath() の path.resolve() でも '%2e%2e' が文字列として扱われるため、実害は発生しない。しかし、このデコーディング設計は紛らわしく、将来の保守時に混乱を招く可能性がある。",
+      "location": "src/lib/path-validator.ts L41-47 (isPathSafe), L107-116 (validateWorktreePath)",
+      "recommendation": "Issue #392 のスコープ外として記録に留めるが、将来的に path-validator.ts のリファクタリング Issue として、(1) デコーディングを validateWorktreePath() の入口で一度だけ実行し、デコード済み文字列を isPathSafe() に渡す、または (2) isPathSafe() のデコーディングを外部に出して明示的にする、のいずれかの改善を検討すべきである。"
+    },
+    {
+      "id": "IF-004",
+      "severity": "should_fix",
+      "category": "backward_compatibility",
+      "title": "既存テスト L208-225 の customPath アサーションが修正後も通るかの確認が必要",
+      "description": "既存テスト（clone-manager.test.ts L208-225）は customPath = '/tmp/repos/custom/target/path' を使用し、job.targetPath が customPath と一致することを検証している（L224: expect(job?.targetPath).toBe(customPath)）。Option A を採用した場合、validateWorktreePath('/tmp/repos/custom/target/path', '/tmp/repos') は path.resolve('/tmp/repos', decodeURIComponent('/tmp/repos/custom/target/path')) を返す。path.resolve() は第2引数が絶対パスの場合そのまま返すため、結果は '/tmp/repos/custom/target/path' となる。したがって既存テストは通る。ただし、basePath が '/tmp/repos' でテストの CloneManager も basePath: '/tmp/repos' で初期化されているため、isPathSafe('/tmp/repos/custom/target/path', '/tmp/repos') は true を返し、validateWorktreePath() も正常に解決する。この分析結果を明文化しておく必要がある。",
+      "location": "tests/unit/lib/clone-manager.test.ts L208-225",
+      "recommendation": "修正実装時に、既存テスト L208-225 が変更なしで通ることを CI で確認する。万が一通らない場合は、テストの customPath と basePath の関係を見直す。この確認を PR の checklist に追加する。"
+    },
+    {
+      "id": "IF-005",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "getCloneJobStatus() と cancelCloneJob() は targetPath を使用しないため影響なし（確認済み）",
+      "description": "getCloneJobStatus() (L594-614) は DB から jobId で取得した CloneJobDB の status/progress/repositoryId/error フィールドのみを返す。targetPath は CloneJobStatusResponse に含まれない。cancelCloneJob() (L619-644) は activeProcesses Map から jobId で検索してプロセスを kill するか、DB status を cancelled に更新するのみ。いずれも targetPath を参照しない。したがって、targetPath が相対パスから絶対パスに変わっても、これらのメソッドの動作に影響はない。",
+      "location": "src/lib/clone-manager.ts L594-644",
+      "recommendation": "影響なしを確認済み。追加対応不要。"
+    },
+    {
+      "id": "IF-006",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "フロントエンド api-client.ts は targetDir を送信しないため UI フローへの影響は皆無",
+      "description": "src/lib/api-client.ts L345-349 の clone() メソッドは { cloneUrl } のみを POST body に含めており、targetDir は送信しない。targetDir は route.ts のコメントで 'P3 feature' と記載されており、将来の拡張向けパラメータである。現在の標準 UI フローからこの脆弱性が悪用されることはなく、直接的な HTTP リクエスト（curl 等）による攻撃のみが対象となる。ただし、API エンドポイントとしてセキュリティ上の修正は必須である。",
+      "location": "src/lib/api-client.ts L345-349, src/app/api/repositories/clone/route.ts L40",
+      "recommendation": "特段の対応不要だが、将来フロントエンドで targetDir を送信する機能を実装する際には、この修正が前提条件となることをコードコメントに記載しておくと良い。"
+    },
+    {
+      "id": "IF-007",
+      "severity": "nice_to_have",
+      "category": "backward_compatibility",
+      "title": "DB スキーマへの影響なし（target_path カラムは TEXT 型で変更不要）",
+      "description": "clone_jobs テーブルの target_path カラムは TEXT NOT NULL 型（db-migrations.ts L604）であり、相対パス・絶対パスのどちらも格納可能。修正後は常に絶対パスが格納されるようになるが、スキーマ変更は不要。同様に repositories テーブルの path カラムも TEXT 型であり、変更不要。既存の DB レコード（修正前に相対パスで格納されたもの）は、修正後の新規レコードと混在する可能性があるが、clone_jobs テーブルは短期間のジョブ管理用途であり、古いレコードが再利用される可能性は低い。",
+      "location": "src/lib/db-migrations.ts L604, src/lib/db-repository.ts L538-568",
+      "recommendation": "スキーマ変更不要を確認済み。既存データのマイグレーションも不要。"
+    },
+    {
+      "id": "IF-008",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "opencode-config.ts のローカル validateWorktreePath() との名前衝突はなし（別スコープ）",
+      "description": "src/lib/cli-tools/opencode-config.ts L179 にも validateWorktreePath という名前の関数が定義されているが、これはモジュール内のローカル関数であり、path-validator.ts の validateWorktreePath() とは異なるスコープに存在する。clone-manager.ts が import するのは path-validator.ts の validateWorktreePath() であるため、名前衝突による混乱は発生しない。ただし、同名関数が2箇所に存在することは保守性の観点から留意すべきである。",
+      "location": "src/lib/cli-tools/opencode-config.ts L179, src/lib/path-validator.ts L89",
+      "recommendation": "将来のリファクタリング候補として記録に留める。Issue #392 のスコープ外。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 4,
+  "nice_to_have_count": 3,
+  "overall_assessment": "Issue #392 の修正の影響範囲は明確に限定されている。主要変更箇所は clone-manager.ts の startCloneJob() 内のパス検証ロジック（isPathSafe -> validateWorktreePath への置換と targetPath への解決済みパス代入）の1箇所のみ。executeClone() と onCloneSuccess() は引数として受け取る targetPath の値が変わるが、型は string のまま変わらず、コード変更は不要。getCloneJobStatus() と cancelCloneJob() は targetPath を参照しないため完全に影響なし。route.ts の trim() 追加は非破壊的な入力サニタイズ改善。DB スキーマ変更は不要。フロントエンドは targetDir を送信しないため UI への影響もない。破壊的変更は一切発生しない。唯一の Must Fix 事項はテストカバレッジの不足であり、Acceptance Criteria に定義された6つのテストシナリオの新規追加が必要である。既存テスト（絶対パス customPath）は修正後も通ることを確認済み。Option A (validateWorktreePath) 採用時のエラー処理パターンの不一致は should_fix として対応推奨するが、局所的な try-catch で解決可能な軽微な問題である。"
+}

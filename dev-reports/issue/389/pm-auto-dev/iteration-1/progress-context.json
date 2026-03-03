@@ -1,0 +1,39 @@
+{
+  "issue_number": 389,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_added": 11,
+      "tests_total": 4266,
+      "typescript_errors": 0,
+      "eslint_errors": 0
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 9,
+      "criteria_total": 9
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "MarkdownEditor.tsx のコメント整理（設計レビューIDと実装コメントの分離）",
+        "MarkdownEditor.test.tsx から waitForEditorReady() ヘルパー抽出（44箇所の重複排除）"
+      ]
+    },
+    "documentation": {
+      "status": "success",
+      "files_updated": [
+        "CLAUDE.md（MarkdownEditor.tsx エントリ追加、types/markdown-editor.ts 更新）",
+        "docs/implementation-history.md（Issue #389 エントリ追加）"
+      ]
+    }
+  },
+  "files_modified": [
+    "src/types/markdown-editor.ts",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "tests/unit/components/MarkdownEditor.test.tsx",
+    "CLAUDE.md",
+    "docs/implementation-history.md"
+  ]
+}

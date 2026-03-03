@@ -10,12 +10,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock tmux module before importing claude-session
+// Issue #393 (R3F002): Added sendSpecialKey for stopClaudeSession() C-d migration
 vi.mock('@/lib/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
   sendKeys: vi.fn(),
   capturePane: vi.fn(),
   killSession: vi.fn(),
+  sendSpecialKey: vi.fn(),
 }));
 
 // Mock pasted-text-helper (Issue #212)
@@ -67,7 +69,7 @@ import {
   CLAUDE_PROMPT_POLL_INTERVAL,
   CLAUDE_SEND_PROMPT_WAIT_TIMEOUT,
 } from '@/lib/claude-session';
-import { hasSession, createSession, sendKeys, capturePane, killSession } from '@/lib/tmux';
+import { hasSession, createSession, sendKeys, capturePane, killSession, sendSpecialKey } from '@/lib/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
   CLAUDE_SEPARATOR_PATTERN,
@@ -1065,6 +1067,7 @@ describe('claude-session - Issue #265 improvements', () => {
     it('should stop session and return true', async () => {
       vi.mocked(hasSession).mockResolvedValue(true);
       vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(sendSpecialKey).mockResolvedValue();
       vi.mocked(killSession).mockResolvedValue(true);
 
       const promise = stopClaudeSession(TEST_WORKTREE_ID);
@@ -1075,6 +1078,20 @@ describe('claude-session - Issue #265 improvements', () => {
       const result = await promise;
       expect(result).toBe(true);
       expect(killSession).toHaveBeenCalledWith(TEST_SESSION_NAME);
+    });
+
+    // Issue #393 (R3F002): Verify sendSpecialKey('C-d') is called for graceful exit
+    it('should send C-d via sendSpecialKey for graceful exit', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(sendKeys).mockResolvedValue();
+      vi.mocked(sendSpecialKey).mockResolvedValue();
+      vi.mocked(killSession).mockResolvedValue(true);
+
+      const promise = stopClaudeSession(TEST_WORKTREE_ID);
+      await vi.advanceTimersByTimeAsync(500);
+      await promise;
+
+      expect(sendSpecialKey).toHaveBeenCalledWith(TEST_SESSION_NAME, 'C-d');
     });
 
     it('should return false when session does not exist and kill fails', async () => {

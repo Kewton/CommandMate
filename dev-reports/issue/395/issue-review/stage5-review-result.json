@@ -1,0 +1,180 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 395,
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "S5-001",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "SENSITIVE_RESPONSE_HEADERSのImplementation NotesコードとRecommended Directionテキストで内容が不一致",
+      "description": "Implementation NotesのSENSITIVE_RESPONSE_HEADERSコード例には 'set-cookie', 'content-security-policy', 'x-frame-options' の3エントリが含まれている。一方、Recommended Directionの 'Header constants in config.ts (S3-002)' セクションでは SENSITIVE_RESPONSE_HEADERS の内容として 'Set-Cookie' のみを記載している（CSP関連ヘッダはS3-007の別項目で言及）。同じ定数について2箇所で異なる内容を記載しているため、実装者が混乱する可能性がある。Implementation Notesのコード例が正（3エントリ含む）であり、S3-002のテキスト説明がそれと一致すべきである。",
+      "location": "Recommended Direction 'Header constants in config.ts (S3-002)' vs Implementation Notes 'config.ts design (S3-002)'",
+      "suggestion": "S3-002のRecommended Directionテキストを修正し、SENSITIVE_RESPONSE_HEADERSに 'Set-Cookie', 'Content-Security-Policy', 'X-Frame-Options' の3つが含まれることを明記する。または、Implementation Notesのコード例が正式定義であることを明確にクロスリファレンスする。"
+    },
+    {
+      "id": "S5-002",
+      "severity": "should_fix",
+      "category": "不足情報",
+      "title": "Acceptance Criteriaに既存テストの修正条件が不足",
+      "description": "Acceptance Criteriaには 'Existing tests in tests/unit/proxy/handler.test.ts updated to reflect new stripping behavior' と 'New tests added for request header stripping, response header stripping, and safe header forwarding' が記載されている。しかし、Implementation NotesのTest modification plan item 5で追加が明記されている 'directUrl removal test'（proxyWebSocket()の426レスポンスにdirectUrlフィールドが含まれないことの検証テスト）がAcceptance Criteriaに明示されていない。Test modification planとAcceptance Criteriaの粒度を揃えるべきである。",
+      "location": "Acceptance Criteria vs Implementation Notes 'Test modification plan (S3-001)'",
+      "suggestion": "Acceptance Criteriaの新規テスト項目を 'New tests added for request header stripping, response header stripping, safe header forwarding, and directUrl removal verification' に修正する。あるいは 'directUrl removal test' を独立したAcceptance Criteria項目として追加する。"
+    },
+    {
+      "id": "S5-003",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "Affected Codeの 'Files requiring NO modification' にroute.tsの記載あるが、Key source referencesにもroute.ts:22, route.ts:83が残存",
+      "description": "Affected CodeのFiles requiring NO modificationサブセクションで 'src/app/proxy/[...path]/route.ts -- Delegates to handler.ts; no direct changes needed.' と明記されている。しかし、Key source referencesセクションには 'src/app/proxy/[...path]/route.ts:22' と 'src/app/proxy/[...path]/route.ts:83' が依然として含まれている。変更不要ファイルへの行番号参照は、実装者に変更が必要と誤解させる余地がある。Key source referencesはroot cause分析の参照として有用だが、「参照のみ（変更不要）」である旨を明記するか、handler.tsの参照に集約すべき。",
+      "location": "Affected Code > Key source references",
+      "suggestion": "Key source referencesの route.ts エントリに '(read-only reference, no changes needed)' 等の注記を追加するか、Files requiring NO modification セクション内に参照行番号をまとめて移動する。"
+    },
+    {
+      "id": "S5-004",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "Affected CodeにExternalAppForm.tsxの変更内容の具体度が他のファイルと不均一",
+      "description": "Files requiring modificationセクションでは handler.ts と config.ts に対して具体的な変更内容（ストリッピングロジック追加、定数追加等）が記載されている。一方、ExternalAppForm.tsxは 'Add security warning banner to the registration/edit form (see Recommended Direction)' という簡潔な記述のみで、バナーの位置（フォーム上部 or 下部）、data-testid、i18n対応の要否などが不明。他のファイルと比較して具体性が低い。",
+      "location": "Affected Code > Files requiring modification > ExternalAppForm.tsx",
+      "suggestion": "ExternalAppForm.tsxの変更内容に「フォーム上部にyellow/amber系の警告バナーを表示し、data-testid='proxy-security-warning' を付与する。テキストはRecommended Direction S3-004に記載の文言を使用する。i18n対応は本Issueのスコープ外とし、英語ハードコードを許容する」など、最低限の実装指針を追加する。"
+    },
+    {
+      "id": "S5-005",
+      "severity": "should_fix",
+      "category": "不足情報",
+      "title": "S3-010 Restrictive CSP header injection optionの実装範囲が本Issueのスコープ内か不明確",
+      "description": "Recommended Directionに 'Restrictive CSP header injection option (S3-010)' が追加されているが、これは 'Consider adding the ability...' という表現であり、本Issueのスコープに含まれるのか、将来の拡張として記載されているのかが曖昧。Acceptance Criteriaにはこの項目に対応する条件が含まれていない。一方、基本的なヘッダストリッピング（SENSITIVE_REQUEST_HEADERS, SENSITIVE_RESPONSE_HEADERS）はAcceptance Criteriaに含まれている。S3-010がout of scopeであるなら、その旨を明記すべき。in scopeであるなら、Acceptance Criteriaに追加すべき。",
+      "location": "Recommended Direction 'Restrictive CSP header injection option (S3-010)' / Acceptance Criteria",
+      "suggestion": "S3-010の記載の冒頭に 'Out of scope for this Issue, but recommended for follow-up:' を追加するか、本Issueのスコープに含める場合はAcceptance Criteriaに 'proxyHttp() optionally injects restrictive CSP header (configurable per-app)' を追加する。前者を推奨する（本Issueは基本的なヘッダストリッピングに集中し、per-app設定は別Issueが適切）。"
+    },
+    {
+      "id": "S5-006",
+      "severity": "nice_to_have",
+      "category": "推奨事項",
+      "title": "iframe sandboxing（S1-007対応）もスコープの内外が不明確",
+      "description": "S5-005と同様に、Recommended Directionの 'iframe sandboxing (intermediate mitigation)' もAcceptance Criteriaに対応する項目がない。これは本Issueのスコープ外（将来の改善方向の提案）として記載されていると推測されるが、明示されていない。本Issueの主要な修正内容（ヘッダストリッピング + directUrl除去 + UI警告バナー + テスト + CLAUDE.md更新）と、将来の検討事項（iframe sandboxing, restrictive CSP injection）を明確に区分することで、実装者のスコープ理解が向上する。",
+      "location": "Recommended Direction 'iframe sandboxing' / Acceptance Criteria",
+      "suggestion": "Recommended Directionセクションを 'This Issue scope' と 'Future considerations' に分割するか、各項目に (this Issue) / (future) のタグを付与する。"
+    },
+    {
+      "id": "S5-007",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "title": "handler.ts:143-166のKey source reference行番号はproxyWebSocket関数の全体範囲であり粒度が粗い",
+      "description": "Key source referencesに 'src/lib/proxy/handler.ts:143-166 (proxyWebSocket directUrl)' が追加されたが、directUrlの構築は実際にはL150の1行であり、directUrlをレスポンスに含めているのはL156。L143-166は関数全体のレンジであり、参照としての精度が低い。一方、同セクションの他の参照（handler.ts:61, handler.ts:75等）は個別行を指定しており粒度が不均一。",
+      "location": "Affected Code > Key source references > handler.ts:143-166",
+      "suggestion": "handler.ts:143-166を handler.ts:150 (directWsUrl construction) および handler.ts:156 (directUrl in response body) に分割する。微修正であり優先度は低い。"
+    },
+    {
+      "id": "S5-008",
+      "severity": "should_fix",
+      "category": "不足情報",
+      "title": "proxyWebSocket()の426レスポンスメッセージにもdirectWsUrlが含まれている件への対応漏れ",
+      "description": "IssueではdirectUrlフィールドの除去を明記しているが、L155のmessageプロパティにも 'Configure your WebSocket client to connect directly to ${directWsUrl}' としてdirectWsUrlの値が文字列結合で含まれている。directUrlフィールドを除去しても、messageフィールドに内部URLが残れば情報漏洩は解消されない。Implementation NotesのTest modification plan item 5も 'Verify proxyWebSocket() 426 response does not contain directUrl field' とフィールド名のみに言及しており、messageフィールドの内容についてはカバーされていない。",
+      "location": "Recommended Direction 'proxyWebSocket() directUrl removal (S3-003)' / src/lib/proxy/handler.ts L155",
+      "suggestion": "S3-003の記載を拡張し、「directUrlフィールドの除去に加え、messageフィールドからもdirectWsUrl情報を除去する。メッセージは 'WebSocket connections are not supported through the proxy Route Handler' のようなgenericな内容に変更する」と明記する。Test modification planにも 'Verify 426 response body does not contain internal URL in any field (directUrl or message)' を追加する。"
+    }
+  ],
+  "previous_findings_verification": {
+    "stage1_applied": {
+      "S1-001": {
+        "status": "verified",
+        "detail": "CSPの存在と制限範囲が 'Existing Security Controls and Their Limitations' セクションとして正しく追加されている。script-src 'unsafe-inline' 'unsafe-eval' による実行可能性、connect-src 'self' ws: wss: によるデータ送出制限とproxy経由バイパスの説明が含まれ、S1-001の指摘内容を正確に反映している。"
+      },
+      "S1-002": {
+        "status": "verified",
+        "detail": "Preconditionsに 'When CM_AUTH_TOKEN_HASH is configured, the user must be authenticated to access /proxy/* paths (middleware enforces this)' が追加されている。認証済みユーザーまたは侵害されたセッションが必要であることも明記されている。"
+      },
+      "S1-003": {
+        "status": "verified",
+        "detail": "Root Cause item 3にX-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto, X-Real-IPが追加されている。補足ノートとRecommended DirectionにもX-Forwarded-*ストリッピング指針が含まれている。SENSITIVE_REQUEST_HEADERSのコード例にも全て含まれている。"
+      },
+      "S1-004": {
+        "status": "verified",
+        "detail": "Validation Notes items 4-7として4つの検証項目（Set-Cookie上書き、CSP下インラインJS実行、proxyレスポンスへのnext.config.jsヘッダ適用、directUrl情報漏洩）が追加されている。"
+      },
+      "S1-007": {
+        "status": "verified",
+        "detail": "Recommended Directionにiframe sandboxing戦略が追加され、完全解決策ではなくヘッダストリッピングとの併用前提であることが明記されている。"
+      },
+      "S1-009": {
+        "status": "verified",
+        "detail": "Validation Notes item 6としてnext.config.jsセキュリティヘッダの適用検証が追加されている。さらにImpact内に 'Critical unknown' として深刻度への影響が明記されている。S3-007の対応によりCSPヘッダストリッピングも追加されており、検証結果に関わらず安全性が確保される設計になっている。"
+      }
+    },
+    "stage1_skipped": {
+      "S1-005": {
+        "status": "acceptable",
+        "detail": "Nice to Haveとしてスキップされたが、現在のIssue本文では 'bearer tokens if present' の記載がそのまま残っている。技術的に不正確ではなく（将来的にAuthorizationヘッダが使われる可能性はある）、スキップは妥当。"
+      },
+      "S1-006": {
+        "status": "resolved_by_stage3",
+        "detail": "Stage 1ではNice to Haveとしてスキップされたが、Stage 3のS3-003で同じdirectUrl情報漏洩の問題がshould_fixとして採用され、Issue本文に反映済み。"
+      },
+      "S1-008": {
+        "status": "acceptable",
+        "detail": "行番号の微修正（L61→L62）のNice to Have。スキップは妥当。"
+      }
+    },
+    "stage3_applied": {
+      "S3-001": {
+        "status": "verified",
+        "detail": "Affected CodeにTest filesサブセクションが追加され、Implementation NotesにTest modification planとして5項目の具体的なテスト修正計画が記載されている。"
+      },
+      "S3-002": {
+        "status": "verified_with_issue",
+        "detail": "config.tsの設計方針がRecommended DirectionとImplementation Notesの両方に記載されている。ただしS5-001で指摘の通り、SENSITIVE_RESPONSE_HEADERSの内容がテキスト説明とコード例で不一致。"
+      },
+      "S3-003": {
+        "status": "verified_with_issue",
+        "detail": "directUrl除去がAffected Code、Recommended Direction、Key source references、Test modification planに反映されている。ただしS5-008で指摘の通り、messageフィールド内のdirectWsUrl残存への対応が漏れている。"
+      },
+      "S3-004": {
+        "status": "verified",
+        "detail": "ExternalAppForm.tsxへのセキュリティ警告バナー追加がAffected Code、Recommended Direction、Acceptance Criteriaに反映されている。"
+      },
+      "S3-005": {
+        "status": "verified",
+        "detail": "Files requiring NO modificationサブセクションにmiddleware.tsが変更不要である旨が理由付きで記載されている。"
+      },
+      "S3-006": {
+        "status": "verified",
+        "detail": "Files requiring NO modificationサブセクションにvalidation.tsがスコープ外である旨が記載されている。将来的な拡張ポイントとしての記載も含まれている。"
+      },
+      "S3-007": {
+        "status": "verified",
+        "detail": "CSPヘッダストリッピングがRecommended DirectionとImplementation Notesのコード例に反映されている。SENSITIVE_RESPONSE_HEADERSにcontent-security-policyとx-frame-optionsが含まれている。"
+      },
+      "S3-008": {
+        "status": "verified",
+        "detail": "Acceptance Criteriaに 'CLAUDE.md handler.ts and config.ts module descriptions updated with Issue #395 security hardening details' が追加されている。"
+      },
+      "S3-010": {
+        "status": "verified_with_issue",
+        "detail": "Recommended Directionに追加されているが、S5-005で指摘の通り本Issueのスコープ内外が不明確。"
+      }
+    },
+    "stage3_skipped": {
+      "S3-009": {
+        "status": "acceptable",
+        "detail": "security-guide.md更新のNice to Have。修正完了後の別途対応で問題ない。"
+      },
+      "S3-011": {
+        "status": "partially_addressed",
+        "detail": "Affected Surfaceセクションに 'Worktree external apps (Issue #136) also use the same proxy path and will automatically receive the fixes applied in this Issue' が追加されており、S3-011で提案された補足が反映されている。Stage 4でskippedとされているが実際には対応済み。"
+      },
+      "S3-012": {
+        "status": "acceptable",
+        "detail": "セキュリティ専用テストファイル新規作成のNice to Have。S3-001のテスト修正計画でカバー済み。"
+      }
+    }
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "overall_assessment": "Stage 1およびStage 3のレビュー指摘は高品質に反映されており、Issueの分析精度・網羅性は大幅に向上している。特に、(1) Existing Security Controls and Their Limitationsセクションの追加、(2) Files requiring NO modificationの明示、(3) Implementation NotesのTest modification planとconfig.ts designの具体的なコード例、(4) Acceptance Criteriaの8項目への拡充は、実装に必要十分な情報を提供している。Must Fixレベルの重大な問題は残っていない。Should Fixとして4件の指摘があるが、これらは主に (a) Recommended Direction内の記載不一致の修正（S5-001）、(b) directUrl除去の網羅性不足（S5-008: messageフィールドへの対応漏れ）、(c) Acceptance CriteriaとImplementation Notesの粒度統一（S5-002）、(d) スコープ内外の明確化（S5-005）であり、いずれもIssue本文の微調整で対応可能である。全体として、本Issueは実装可能な状態にあると評価する。"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "issue_number": 391,
+  "stage": 3,
+  "applied_findings": [
+    {
+      "id": "S3-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "3-2節の設計決定事項テーブルに行を追加。vibeLocalContextWindow/vibeLocalModelは今回のスコープ外であること、blur契機でAPI保存されるため中間状態が短く問題が顕在化しにくいこと、将来的に問題が発生した場合に同一値チェック追加を検討する旨を明記した。",
+      "target_section": "3-2"
+    },
+    {
+      "id": "S3-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "3-1節の[S1-007]既知制限セクションに[S3-005]自然な回復パスを追記。Agentサブタブから他のサブタブ（Notes/Logs）に切り替えた際にAgentSettingsPaneがアンマウントされ、isEditingがuseState初期値falseで自動リセットされることを文書化。NotesAndLogsPane.tsxの条件付きレンダリングによる自然なリセット動作であることを明記した。",
+      "target_section": "3-1"
+    },
+    {
+      "id": "S3-003",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "description": "5節の影響範囲テーブルにsrc/components/mobile/MobileContent.tsxを追加。モバイルレイアウトでAgentSettingsPaneを表示しているがprops透過のみでコード変更不要であること、案Bの同一値チェックによりモバイルでも不要な再レンダリングが抑制されることを記載した。",
+      "target_section": "5"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "id": "S3-002",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "テスト戦略の詳細化は設計品質確認の指摘であり、既に4-3節でスコープ外判断が記載されている。実装時に必要に応じて検討する。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "memo()との相互作用の説明は設計品質確認であり、7節のパフォーマンス設計で既に不要な再レンダリング抑制について言及済み。詳細な動作メカニズムの記載は過剰。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "マルチタブ/マルチウィンドウシナリオはS3-005の反映時に自然な回復パスの記述内で言及済み。独立したセクション追加は不要。"
+    }
+  ],
+  "design_doc_updated": true,
+  "updated_sections": [
+    "3-1 (S1-007既知制限に自然な回復パス追記)",
+    "3-2 (設計決定事項にスコープ限定を追記)",
+    "5 (影響範囲にMobileContent.tsx追加)",
+    "9 (レビュー履歴にStage 3追加)",
+    "10 (レビュー指摘事項サマリーにStage 3追加)",
+    "フッター (Stage 3レビュー反映日追記)"
+  ],
+  "summary": "Stage 3影響分析レビューの指摘事項3件（should_fix 2件 + nice_to_have 1件）を設計方針書に反映した。S3-001ではvibeLocalContextWindow/vibeLocalModelが今回の同一値チェックのスコープ外であることを3-2節に明記。S3-005ではサブタブ切り替えによるisEditingの自然なリセット動作を3-1節に文書化。S3-003ではモバイルレイアウトパス（MobileContent.tsx）を5節の影響範囲に追加。nice_to_have 3件（S3-002, S3-004, S3-006）は既存記載で十分カバーされているためスキップした。",
+  "timestamp": "2026-03-02T11:00:00Z"
+}

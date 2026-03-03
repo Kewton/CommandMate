@@ -1,0 +1,7 @@
+{
+  "issue_number": 394,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "design_doc_path": "dev-reports/design/issue-394-symlink-traversal-fix-design-policy.md"
+}

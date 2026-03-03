@@ -1,0 +1,90 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）- Stage 3影響範囲レビュー",
+  "issue_number": 394,
+  "apply_date": "2026-03-02",
+  "applied_findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "tree API (GET /api/worktrees/:id/tree/:path) と search API (GET /api/worktrees/:id/search) を Affected Endpoints に追加。file-tree.ts と file-search.ts を Affected Code に追加。Example Exploit と Validation Notes にも tree/search の検証項目を追加。Acceptance Criteria に Tree API protection と Search API protection チェック項目を追加。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "Recommended Direction に 'Realpath Strategy for Create/Upload Operations' サブセクションを追加。create/upload 時は最も近い既存の祖先ディレクトリに realpath() を適用する戦略を明記。既存ファイル操作 vs 新規作成操作の分類、実装アプローチ、symlink 親ディレクトリのエッジケースを記載。Acceptance Criteria に 'Create/upload with symlink parent' チェック項目を追加。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "Recommended Direction に 'worktreeRoot Symlink Resolution' サブセクションを追加。macOS /var -> /private/var 問題を明記し、rootDir にも realpathSync() を適用する要件を記載。moveFileOrDirectory() SEC-006 の既存パターンとの一貫性を参照。Acceptance Criteria に 'macOS tmpdir compatibility' チェック項目を追加。テストシナリオ #10 (worktreeRoot symlink) を追加。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Acceptance Criteria の 'Existing tests pass' 項目に macOS tmpdir 環境での互換性確認を追記。テストシナリオ #10 を追加。Implementation Strategy Options で isPathSafe() 変更の全体影響を分析。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Recommended Direction に 'Implementation Strategy Options' サブセクションを追加。Option A (isPathSafe直接変更)、Option B (新関数作成 - 推奨)、Option C (各関数個別対応) の3案を提示。file-search.ts の lstat() 既存防御で十分であることを説明し、Option B を推奨。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Affected Endpoints に 'Indirect Impact' サブセクションを追加。repositories/scan API が isPathSafe() を使用していることと、修正方針次第で副作用が発生する可能性を注記。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Recommended Direction に 'Performance Considerations' サブセクションを追加。個別ファイル操作 (軽微)、ディレクトリ走査 (重大な影響の可能性)、推奨戦略 (API ルートレベルでの検証) の3段階で分析。"
+    },
+    {
+      "id": "F3-008",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "Acceptance Criteria に 'Internal symlink preservation' チェック項目を追加。worktreeRoot 内を指す内部 symlink は引き続きアクセス可能であることを要件化。テストシナリオ #7 (内部 symlink 読み取り成功) を追加。"
+    },
+    {
+      "id": "F3-009",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "テストシナリオ #8 (dangling symlink) と #9 (multi-level symlink chain) を Acceptance Criteria の New test coverage に追加。"
+    },
+    {
+      "id": "F3-010",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "Affected Code に 'Indirect impact via validateWorktreePath()' サブセクションを追加。clone-manager.ts と opencode-config.ts の間接影響を記載。Option B 採用時は追加変更不要であることを注記。"
+    },
+    {
+      "id": "F3-011",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "Issue 本文に 'Documentation Updates' セクションを追加。修正完了後に CLAUDE.md の path-validator.ts, file-operations.ts, file-tree.ts, file-search.ts のモジュール説明を更新する項目をリスト化。"
+    }
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "changes_summary": "Stage 3 影響範囲レビューの全11件の指摘事項 (must_fix: 3, should_fix: 6, nice_to_have: 2) を全てGitHub Issue #394 に反映。主な変更: (1) tree/search API を影響範囲に追加 (F3-001)、(2) create/upload 時の realpath 適用戦略を明記 (F3-002)、(3) worktreeRoot の OS レベル symlink 対応を追記 (F3-003)、(4) 実装戦略オプション A/B/C を提示し Option B を推奨 (F3-004/F3-005)、(5) パフォーマンス考慮事項を追加 (F3-007)、(6) 内部 symlink 保持要件を追加 (F3-008)、(7) テストシナリオを10件に具体化 (F3-009)、(8) 間接影響の記載 (F3-006/F3-010)、(9) ドキュメント更新項目を追加 (F3-011)。Review History に Stage 3 の全反映項目を記録。",
+  "github_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/394"
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 11,
+    "skipped": 0,
+    "must_fix_applied": 3,
+    "should_fix_applied": 6,
+    "nice_to_have_applied": 2
+  }
+}

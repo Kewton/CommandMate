@@ -1,0 +1,95 @@
+{
+  "issue_number": 389,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-02",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "priority": "Must Fix",
+      "category": "テスト影響",
+      "title": "Unsaved Changes Warning テスト (Line 350-413): beforeunload ハンドラーの条件変更による既存テスト破綻リスク",
+      "description": "設計書 Section 4.6 では beforeunload ハンドラーの条件を auto-save ON 時に (isDirty || isAutoSaving) に変更する。現在の MarkdownEditor.tsx (Line 449-473) の useEffect は isDirty のみを依存配列に持ち、isDirty が true のときのみイベントリスナーを登録する。設計変更後、依存配列に isAutoSaving と isAutoSaveEnabled が追加され、登録/解除のタイミングが変化する。既存テスト 'should register beforeunload handler when dirty' (Line 366-382) は isDirty 条件のみを前提としており、テスト自体は auto-save OFF がデフォルトのため直接的には壊れない。しかし、beforeunload useEffect の依存配列変更により、useEffect の再実行タイミングが変わる。具体的には isAutoSaving が変化するたびに handleBeforeUnload が再登録される。既存テスト 'should remove beforeunload handler after save' (Line 384-413) は save 後に dirty-indicator が消えることを確認しているが、auto-save ON 時は isAutoSaving 状態の変化が beforeunload の登録/解除に影響する。テストで auto-save OFF を明示的に前提条件として設定する必要がある。",
+      "suggestion": "既存の Unsaved Changes Warning テスト 3 件 (Line 351-413) の describe ブロック冒頭にコメントを追加し、auto-save OFF (デフォルト) を前提としたテストであることを明記する。さらに、新規テストとして以下を追加する: (1) auto-save ON + isDirty=true 時に beforeunload が登録されること、(2) auto-save ON + isAutoSaving=true 時に beforeunload が登録されること、(3) auto-save ON + isDirty=false かつ isAutoSaving=false 時に beforeunload が登録されないこと。beforeunload useEffect の依存配列が [isDirty, isAutoSaving, isAutoSaveEnabled] に正しく更新されていることをテストで検証すること。"
+    },
+    {
+      "id": "DR3-002",
+      "priority": "Must Fix",
+      "category": "テスト影響",
+      "title": "Save Operations テスト (Line 185-348): Save ボタンの条件付き非表示による既存テスト破綻",
+      "description": "設計書 Section 5.3 では auto-save ON 時に save-button を非表示にし、代わりに auto-save-indicator を表示する。既存テスト 6 件はすべて save-button の存在を前提としている: (1) 'should have save button disabled when no changes' (Line 186) - screen.getByTestId('save-button') で取得、(2) 'should enable save button when content changes' (Line 197)、(3) 'should call API and show success toast on save' (Line 211)、(4) 'should handle Ctrl+S keyboard shortcut' (Line 252)、(5) 'should handle Cmd+S keyboard shortcut on Mac' (Line 285)、(6) 'should show error toast on save failure' (Line 318)。auto-save がデフォルト OFF のため、テストの前提条件は維持されるが、auto-save ON 時のテストを追加する際に save-button が存在しないことを確認するテストが必要。Ctrl+S テスト (Line 252-283, 285-316) は auto-save ON 時の動作が設計書 Section 4.7 で異なる (saveNow() + onSave 呼び出し) ため、新規テストで分岐をカバーする必要がある。",
+      "suggestion": "既存 Save Operations テスト 6 件は auto-save OFF のデフォルト状態で動作するため壊れない。ただし以下の新規テストを追加すべき: (1) auto-save ON 時に save-button が DOM に存在しないこと (queryByTestId('save-button') === null)、(2) auto-save ON 時に auto-save-indicator が表示されること、(3) auto-save ON 時の Ctrl+S で saveNow() が呼ばれること、(4) auto-save ON 時の Ctrl+S 後に onSave コールバックが呼ばれること (DR1-009)。Section 9.1 の 'Save Operations 6件更新' は具体的に何を更新するのか明確にすべき。実際には既存テストは変更不要で、新規テストの追加が中心になる。"
+    },
+    {
+      "id": "DR3-003",
+      "priority": "Must Fix",
+      "category": "テスト影響",
+      "title": "onClose callback テスト (Line 732-789): handleClose の async 化と auto-save ON 時の分岐による既存テスト影響",
+      "description": "設計書 Section 4.8 では handleClose を async 関数に変更し、auto-save ON 時に await saveNow() を呼ぶ。既存テスト 3 件: (1) 'should call onClose when close button is clicked' (Line 733-745) - 変更なし（isDirty=false でクリック）、(2) 'should warn before closing with unsaved changes' (Line 747-767) - window.confirm が呼ばれることを検証。auto-save OFF 時のみ window.confirm が表示されるため、この前提は維持される。(3) 'should close when user confirms unsaved changes' (Line 769-789) - 同様。handleClose が async に変更されると、onClick ハンドラーの戻り値は Promise<void> になる。React の onClick は void を期待するため直接的なエラーにはならないが、テストで fireEvent.click(closeButton) 後の waitFor パターンが必要になる場合がある。特にテスト (1) は現在 expect(onClose).toHaveBeenCalled() を fireEvent.click 直後に実行しているが、async handleClose の場合は await が必要になる可能性がある。",
+      "suggestion": "既存テスト (1) 'should call onClose when close button is clicked' (Line 733-745) は isDirty=false のため handleClose 内の条件分岐を通過し onClose() を直接呼ぶ。handleClose が async になっても、この場合は同期的に onClose() を呼ぶため壊れない可能性が高い。ただし安全のため、fireEvent.click 後に waitFor でラップすることを推奨する。テスト (2)(3) は window.confirm をモックしており、auto-save OFF がデフォルトのため問題ない。新規テストとして、auto-save ON + isDirty=true 時の handleClose で saveNow() が呼ばれることを検証するテストを追加すべき。"
+    },
+    {
+      "id": "DR3-004",
+      "priority": "Should Fix",
+      "category": "パフォーマンス",
+      "title": "auto-save ON 時の API 呼び出し頻度: 3 秒デバウンスによる最大 20 回/分の PUT リクエスト",
+      "description": "設計書 Section 7.1 では AUTO_SAVE_DEBOUNCE_MS = 3000 を設定している。ユーザーが継続的に編集する場合、最大で 60/3 = 20 回/分の PUT リクエストが発生する。現在の手動保存では Ctrl+S 時のみ PUT が発生するため、API 呼び出し頻度が大幅に増加する。PUT /api/worktrees/:id/files/:path (route.ts) は DB アクセス (getWorktreeById) + ファイル I/O (updateFileContent) を伴う。FILE_SIZE_LIMITS.MAX_SIZE = 1MB の場合、最悪ケースでは 20MB/分のファイル書き込みが発生する。これはローカル開発ツールとしては許容範囲だが、以下のリスクがある: (1) ブラウザの同一オリジン同時接続数制限 (Chrome: 6) に影響する可能性、(2) SQLite のロック競合（他の API と同時アクセス時）。",
+      "suggestion": "3 秒デバウンスは IDE の一般的な auto-save 間隔 (VS Code: 1 秒) より長く、保守的な設定である。現時点で問題はないが、設計書に以下を追記することを推奨する: (1) ブラウザの接続制限への影響が軽微であること（auto-save は単一の PUT リクエストであり、並行リクエストは発生しない）、(2) SQLite は WAL モードで読み書きの並行性を確保できること（本プロジェクトで WAL モードが有効か確認が必要）。追加の最適化として、content が前回保存値と同一の場合は API コールをスキップする isDirty ガードが saveToApi 内になくても useAutoSave の initialValueRef チェックでカバーされることを補記する。"
+    },
+    {
+      "id": "DR3-005",
+      "priority": "Should Fix",
+      "category": "テスト影響",
+      "title": "E2E テスト (markdown-editor.spec.ts): save-button の disabled/enabled 検証が auto-save ON 時に不整合",
+      "description": "E2E テスト tests/e2e/markdown-editor.spec.ts の 'Editing and Saving' セクション (Line 199-238) は save-button が初期状態で disabled であり、編集後に enabled になることを検証している (await expect(saveButton).toBeDisabled() / await expect(saveButton).toBeEnabled())。auto-save がデフォルト OFF のため、localStorage をクリアした状態でのテストは正常に動作する。しかし、localStorage に auto-save=true が残っている場合、save-button が DOM に存在しない (Section 5.3 の条件分岐) ため、locator('[data-testid=\"save-button\"]') が要素を見つけられずテストが失敗する。E2E テストは実際のブラウザ環境で動作するため、localStorage のクリーンアップが不十分な場合にこの問題が発生する。",
+      "suggestion": "E2E テストの各テスト前に localStorage をクリアするフックを追加する (page.evaluate(() => localStorage.clear()) を test.beforeEach に配置)。または、auto-save 設定が OFF であることを前提条件として明記する。追加の E2E テストとして、auto-save ON 時のインジケーター表示 ('Saving...' / 'Saved') を検証するテストを追加することを検討する。"
+    },
+    {
+      "id": "DR3-006",
+      "priority": "Should Fix",
+      "category": "API影響",
+      "title": "WorktreeDetailRefactored.tsx の MarkdownEditor 呼び出し: EditorProps に変更なしだが handleEditorSave の呼出頻度が変化",
+      "description": "WorktreeDetailRefactored.tsx (Line 2070-2076, 2309-2315) では MarkdownEditor に onSave={handleEditorSave} を渡している。handleEditorSave (Line 1205-1207) は setFileTreeRefresh(prev => prev + 1) を呼びファイルツリーを更新する。設計書 Section 7.2 では auto-save 成功時に onSave() を呼ばない設計であり、手動保存 (Ctrl+S) 時のみ onSave() を呼ぶ。この設計により handleEditorSave の呼出頻度は現状と変わらない（手動保存時のみ）。EditorProps interface (src/types/markdown-editor.ts Line 75-91) は変更不要であり、WorktreeDetailRefactored.tsx への影響はない。ただし、auto-save ON 時の Ctrl+S (Section 4.7) で onSave() が呼ばれる設計は、saveNow() が非同期であるため、handleEditorSave 内の setFileTreeRefresh が saveNow() 完了後に呼ばれることを確認すべき。",
+      "suggestion": "WorktreeDetailRefactored.tsx への直接的な変更は不要。EditorProps interface も変更不要。ただし、auto-save ON 時の Ctrl+S での onSave 呼出が saveNow() の await 後であることを設計書 Section 4.7 のコードで確認済み (await saveNow(); onSave?.(filePath))。テストで handleEditorSave が auto-save 中に不要に呼ばれないことを検証すべき。"
+    },
+    {
+      "id": "DR3-007",
+      "priority": "Should Fix",
+      "category": "ユーザー体験",
+      "title": "beforeunload 動作の変化: auto-save ON 時のブラウザ警告ダイアログ表示条件の拡大",
+      "description": "現在の MarkdownEditor.tsx (Line 449-473) では isDirty 時のみ beforeunload が登録される。設計書 Section 4.6 では auto-save ON 時に (isDirty || isAutoSaving) の条件に拡大される。これにより、auto-save が実行中 (isAutoSaving=true) にページを離れる場合にもブラウザ警告が表示される。ユーザー体験への影響: (1) auto-save ON + 編集直後 (デバウンス待機中, isDirty=true, isAutoSaving=false) -> 警告あり（適切）、(2) auto-save 実行中 (isAutoSaving=true) -> 警告あり（適切: 保存中のデータロスを防ぐ）、(3) auto-save 完了後 (isDirty=false, isAutoSaving=false) -> 警告なし（適切: データ保存済み）。全ケースでユーザー体験は適切である。ただし、ケース (2) の isAutoSaving=true は通常数百ミリ秒から数秒の短い期間であり、このタイミングでページを離れる確率は低い。",
+      "suggestion": "設計の方向性は正しく、ユーザー体験への悪影響はない。ただし、auto-save ON + 保存完了後 (isDirty=false かつ isAutoSaving=false) にページを安全に離れられることをテストで明示的に検証すべき。この検証は既存テスト 'should remove beforeunload handler after save' のパターンを auto-save ON 版として追加することで対応可能。"
+    },
+    {
+      "id": "DR3-008",
+      "priority": "Nice to Have",
+      "category": "型影響",
+      "title": "src/types/markdown-editor.ts への定数追加: 既存エクスポートへの影響なし",
+      "description": "設計書 Section 4.1 で LOCAL_STORAGE_KEY_AUTO_SAVE と AUTO_SAVE_DEBOUNCE_MS の 2 定数を src/types/markdown-editor.ts に追加する。このファイルは現在 13 のエクスポートを持ち (ViewMode, ViewModeStrategy, VIEW_MODE_STRATEGIES, EditorState, EditorProps, ToastType, ToastItem, FileOperationRequest, FileOperationResponse, ContextMenuItem, ContextMenuState, EditorLayoutState, DEFAULT_LAYOUT_STATE + 9 つの定数/関数)、新規定数の追加は既存エクスポートに影響しない。MarkdownEditor.tsx (Line 49-61) の import ブロックに新規定数を追加する必要があるが、import の追加のみで既存コードに影響はない。他のファイルが src/types/markdown-editor.ts をインポートしている箇所 (src/config/editable-extensions.ts, src/components/ui/Modal.tsx, tests/unit/components/MarkdownEditor.test.tsx) には影響がない。",
+      "suggestion": "修正不要。新規定数の追加は既存のモジュール構造を壊さない。テストファイルでは新規定数 (LOCAL_STORAGE_KEY_AUTO_SAVE, AUTO_SAVE_DEBOUNCE_MS) をインポートして使用する。"
+    },
+    {
+      "id": "DR3-009",
+      "priority": "Nice to Have",
+      "category": "テスト影響",
+      "title": "localStorage キーの衝突リスク: commandmate:md-editor-auto-save は既存キーと衝突なし",
+      "description": "プロジェクト全体の localStorage キー使用状況を確認した。既存キー: (1) 'commandmate:md-editor-view-mode' (src/types/markdown-editor.ts:182)、(2) 'commandmate:md-editor-split-ratio' (src/types/markdown-editor.ts:187)、(3) 'commandmate:md-editor-maximized' (src/types/markdown-editor.ts:192)、(4) SidebarContext.tsx で SIDEBAR_SORT_STORAGE_KEY (コンテキスト内定数)、(5) useSidebar.ts で SIDEBAR_STORAGE_KEY (フック内定数)、(6) useLocaleSwitch.ts で 'locale'。新規キー 'commandmate:md-editor-auto-save' はプレフィックス 'commandmate:md-editor-' パターンに完全に準拠しており、既存キーと衝突しない。サフィックス 'auto-save' は他のキーのサフィックス ('view-mode', 'split-ratio', 'maximized') と異なる。",
+      "suggestion": "衝突リスクなし。対応不要。"
+    },
+    {
+      "id": "DR3-010",
+      "priority": "Nice to Have",
+      "category": "API影響",
+      "title": "useAutoSave の MemoCard / MarkdownEditor 間の独立性: 競合リスクなし",
+      "description": "useAutoSave は MemoCard.tsx (Line 90-111) と MarkdownEditor (設計書) の 2 箇所で使用される。MemoCard では useAutoSave を 2 つインスタンス化 (title, content) し、disabled パラメータなし (常に有効)、debounceMs はデフォルト 300ms。MarkdownEditor では useAutoSave を 1 つインスタンス化 (content)、disabled: !isAutoSaveEnabled、debounceMs: 3000ms。各フックインスタンスは独立した state (isSaving, error) と refs (valueRef, timerRef, mountedRef, initialValueRef) を持つため、コンポーネント間の競合は発生しない。MemoCard と MarkdownEditor は同時に表示されることはあるが（MemoPane と Files タブは異なるサブタブ）、それぞれの useAutoSave インスタンスは完全に独立している。",
+      "suggestion": "対応不要。useAutoSave のインスタンス間に共有状態はなく、競合リスクはない。"
+    }
+  ],
+  "summary": {
+    "must_fix": 3,
+    "should_fix": 4,
+    "nice_to_have": 3,
+    "overall_assessment": "影響分析の結果、auto-save 機能追加による既存コードベースへの影響は限定的かつ制御可能である。EditorProps interface への変更はなく、WorktreeDetailRefactored.tsx や Modal.tsx への直接的なコード変更は不要。localStorage キーの衝突リスクもない。主な影響領域は既存テストであり、Must Fix 3 件はすべてテスト関連: (1) beforeunload テストの前提条件明示と新規テスト追加、(2) Save Operations テストの auto-save ON 分岐カバレッジ追加、(3) handleClose の async 化に伴うテストの waitFor ラッピング。Should Fix 4 件は API 呼出頻度の影響整理、E2E テストの localStorage クリーンアップ、handleEditorSave の呼出頻度確認、beforeunload のユーザー体験検証。設計書 Section 9 のテスト戦略に記載されている既存テスト更新数 (Save Operations: 6件, Unsaved Changes Warning: 3件, Keyboard Shortcuts: 関連, onClose: 3件) は妥当だが、具体的な更新内容（前提条件コメント追加 vs テストロジック変更）をより明確にすべき。全体として、auto-save OFF がデフォルトであることにより既存テストの直接的な破綻リスクは低いが、網羅的なテストカバレッジのためには新規テストの追加が不可欠である。"
+  }
+}

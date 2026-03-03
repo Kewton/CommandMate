@@ -1,0 +1,205 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 393,
+  "review_focus": "影響範囲",
+  "findings": [
+    {
+      "id": "R3F001",
+      "severity": "should_fix",
+      "category": "動作変更リスク",
+      "title": "codex.ts startSession() の Down/Enter が sendSpecialKeys() 経由に変更されると SPECIAL_KEY_DELAY_MS=100ms の遅延が追加される",
+      "description": "現在の codex.ts line 102-104 では、exec() で直接 `tmux send-keys ... Down` と `tmux send-keys ... Enter` を呼び、間に CODEX_MODEL_SELECT_WAIT_MS=200ms の wait を入れている。設計方針書 D3-001 は line 102 を tmux.sendSpecialKeys(sessionName, ['Down']) に、line 104 を tmux.sendSpecialKeys(sessionName, ['Enter']) に変更する方針だが、sendSpecialKeys() は keys 配列の各要素間に SPECIAL_KEY_DELAY_MS=100ms のディレイを挿入する仕様がある（tmux.ts line 270-272）。ただし、変更後は各呼び出しが単一キーの配列（['Down'] と ['Enter']）であるため、ループは1回しか回らず SPECIAL_KEY_DELAY_MS は発動しない（ディレイはループの最終要素ではスキップされる、line 270: `if (i < keys.length - 1)`）。よって実質的な動作変更はない。しかし、設計方針書にこの分析が記載されていないため、実装者が不安を感じる可能性がある。",
+      "affected_files": [
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/tmux.ts"
+      ],
+      "suggestion": "設計方針書 D3-001 に「単一要素配列で sendSpecialKeys() を呼ぶため SPECIAL_KEY_DELAY_MS は発動しない」旨を補足する。あるいは、['Down'] を sendSpecialKeys ではなく sendSpecialKey(sessionName, 'Down' as any) のようにする案もあるが、'Down' は SpecialKey 型に含まれないため不適切。現状の sendSpecialKeys(['Down']) が正しい選択であり、動作変更リスクは無い。"
+    },
+    {
+      "id": "R3F002",
+      "severity": "must_fix",
+      "category": "波及影響",
+      "title": "tmux.test.ts のモック変更が claude-session.test.ts の child_process モックに波及する可能性がある",
+      "description": "claude-session.test.ts (tests/unit/lib/claude-session.test.ts) は vi.mock('child_process') で exec をモックしている（line 34-47）。このモックは claude-session.ts 内部の execAsync（line 237, 250, 783 等の直接 exec() 呼び出し）に使われている。Issue #393 では line 783 の exec() を tmux.sendSpecialKey() に置換するが、line 237 と line 250 の exec()（which claude, test -x）は非スコープとして残存する。よって claude-session.test.ts の child_process モックは引き続き必要であり削除不可。一方、tmux.ts の exec→execFile 移行は tmux.test.ts のモック対象を exec から execFile に変更するが、claude-session.test.ts は tmux モジュール自体を vi.mock('@/lib/tmux') でモックしているため、tmux 内部の exec/execFile 変更には影響されない。ただし、claude-session.test.ts が tmux.sendSpecialKey の呼び出しを検証するテストケースを追加する場合、tmux モックに sendSpecialKey を追加する必要がある（現在は hasSession, createSession, sendKeys, capturePane, killSession のみ）。",
+      "affected_files": [
+        "tests/unit/lib/claude-session.test.ts",
+        "tests/unit/tmux.test.ts"
+      ],
+      "suggestion": "claude-session.test.ts の vi.mock('@/lib/tmux') に sendSpecialKey を追加する: `sendSpecialKey: vi.fn()` を含める。stopClaudeSession() のテストケースで、C-d 送信が tmux.sendSpecialKey(sessionName, 'C-d') として呼ばれることを検証するテストを追加する。これを設計方針書に明記すること。"
+    },
+    {
+      "id": "R3F003",
+      "severity": "should_fix",
+      "category": "波及影響",
+      "title": "terminal/route.ts の sendToTmux() 廃止と sendMessage() 代替の意味的差異によるエッジケース",
+      "description": "設計方針書 D1-004 は terminal/route.ts の sendToTmux() を廃止し、CLIToolManager 経由の sendMessage() で代替する方針。しかし、sendToTmux() は tmux.sendKeys(sessionName, command) を呼び（sendEnter デフォルト true）、一方で各ツールの sendMessage() は追加の前処理・後処理を含む。例えば CodexTool.sendMessage() は (1) sendKeys(message, false) でテキスト送信、(2) 100ms 待機、(3) C-m でEnter送信、(4) 200ms 待機、(5) 複数行ならPasted text検知を行う。GeminiTool.sendMessage() も同様に sendKeys(message, false) + 100ms 待機 + sendSpecialKey('C-m') + Pasted text検知を行う。現在の terminal/route.ts は単純に sendKeys(sessionName, command, true) で即座にコマンド+Enter を送信しており、追加の待機やPasted text検知を行わない。sendMessage() に切り替えると、遅延が追加され（合計約300ms以上）、Pasted text検知による追加の tmux 操作が発生する。terminal エンドポイントは本来「任意のコマンド送信」用途であり、sendMessage() の「プロンプト応答」セマンティクスとは異なる。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/terminal/route.ts",
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/cli-tools/gemini.ts",
+        "src/lib/cli-tools/vibe-local.ts",
+        "src/lib/cli-tools/opencode.ts"
+      ],
+      "suggestion": "terminal/route.ts では sendMessage() の代わりに、tmux.sendKeys() を直接使用する必要性を検討する。DIP を完全に実現するには ICLITool インターフェースに sendRawKeys(sessionName: string, keys: string, sendEnter?: boolean) メソッドを追加するのが理想だが、YAGNI 原則でオーバーエンジニアリングのリスクがある。pragmatic な代替案: CLIToolManager 経由でセッション名取得・バリデーションのみ行い、コマンド送信は tmux.sendKeys() を直接使用する。この場合 import { sendKeys } from '@/lib/tmux' のインポートが1つ残るが、セッション名の安全性は CLIToolManager 経由で担保される。設計方針書の D1-004 の sendToTmux() 廃止方針を、この具体的な代替案で更新すること。"
+    },
+    {
+      "id": "R3F004",
+      "severity": "should_fix",
+      "category": "後方互換性",
+      "title": "terminal/route.ts のセッション自動作成廃止が既存クライアントの動作に影響する",
+      "description": "現在の terminal/route.ts はセッション不在時に自動で createSession() を呼ぶ（line 34-37）。設計方針書 D1-004 はこれを廃止し 404 を返す方針。コードベース内のフロントエンド検索では、terminal REST API を直接呼ぶクライアントコードは見つからなかった（Terminal.tsx は WebSocket を使用）。ただし、capture/route.ts はセッション不在時に `Session not running. Starting ${cliToolId} session...` というメッセージを 200 OK で返している（line 34-37）。この動作もセッション自動作成ではないが、レスポンスの形式変更（200 → 404）がクライアント側の処理に影響を与える可能性がある。capture/route.ts のセッション不在時のレスポンスコードを 404 に変更するかどうかは設計方針書に明記されていない。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/terminal/route.ts",
+        "src/app/api/worktrees/[id]/capture/route.ts"
+      ],
+      "suggestion": "capture/route.ts のセッション不在時レスポンスも 404 に統一すべきか検討し、設計方針書に明記する。また、terminal/route.ts のセッション自動作成廃止後、404 レスポンスには適切なエラーメッセージ（例: 'Session not found. Use startSession API to create a session first.'）を含め、クライアントが適切にハンドリングできるようにする。"
+    },
+    {
+      "id": "R3F005",
+      "severity": "nice_to_have",
+      "category": "テスト影響",
+      "title": "tmux.test.ts の exec→execFile モック変更は他テストファイルに波及しない",
+      "description": "tmux.test.ts は vi.mock('child_process', () => ({ exec: vi.fn() })) でモックしている。execFile への変更時は vi.mock('child_process', () => ({ execFile: vi.fn() })) に変更される。Vitest のモジュールモックはファイルスコープで独立しているため、この変更は tmux.test.ts 内のみに閉じる。他のテストファイル（claude-session.test.ts, base.test.ts 等）は独自の child_process モックまたは tmux モジュールモックを持っており、tmux.test.ts のモック変更による波及はない。",
+      "affected_files": [
+        "tests/unit/tmux.test.ts"
+      ],
+      "suggestion": "追加のアクション不要。Vitest のモジュールモック独立性により安全。"
+    },
+    {
+      "id": "R3F006",
+      "severity": "nice_to_have",
+      "category": "テスト影響",
+      "title": "新規テスト追加（terminal-route.test.ts, capture-route.test.ts）のテスト実行時間への影響は軽微",
+      "description": "現在の unit テストファイルは約100ファイル存在する。新規2ファイル追加は約2%の増加。各テストはモックベースのため実行時間は数百ms程度。バリデーションテスト（D4-001: 5ケース、D4-002: 4ケース）とインジェクション防止テスト（D4-004: 数ケース）を合わせても、テスト全体の実行時間への影響は1秒未満。",
+      "affected_files": [
+        "tests/unit/terminal-route.test.ts",
+        "tests/unit/capture-route.test.ts",
+        "tests/unit/tmux.test.ts"
+      ],
+      "suggestion": "追加のアクション不要。テスト実行時間への影響は無視できるレベル。"
+    },
+    {
+      "id": "R3F007",
+      "severity": "should_fix",
+      "category": "波及影響",
+      "title": "sendKeys() のエスケープロジック除去が既存呼び出し元の挙動を変更する",
+      "description": "tmux.ts の sendKeys() は現在シングルクォートエスケープ処理（line 213: keys.replace(/'/g, \"'\\\\''\"）を行い、シェル経由で `tmux send-keys -t \"name\" 'escaped_keys' C-m` を実行している。execFile() 移行後はエスケープが不要になり、keys がそのまま引数配列に渡される。sendKeys() の呼び出し元は14ファイル中9箇所（tmux直接インポート）。シングルクォートを含むメッセージが送信される場合、exec() 時代はシェルエスケープされていたが、execFile() 移行後はそのまま tmux の send-keys 引数として渡される。tmux の send-keys は引数をそのままキーストロークとして送信するため、シングルクォートを含む文字列もそのまま正しく送信される。実際には、exec() 時代のエスケープはシェル解釈からの保護であり、tmux への入力自体は同一。よって動作変更は無いが、テスト（tmux.test.ts line 224-237 の 'should escape single quotes' テストケース）は変更が必要。",
+      "affected_files": [
+        "src/lib/tmux.ts",
+        "tests/unit/tmux.test.ts",
+        "src/lib/claude-session.ts",
+        "src/lib/cli-tools/codex.ts",
+        "src/lib/cli-tools/gemini.ts",
+        "src/lib/cli-tools/vibe-local.ts",
+        "src/lib/cli-tools/opencode.ts",
+        "src/lib/prompt-answer-sender.ts",
+        "src/lib/pasted-text-helper.ts",
+        "src/app/api/worktrees/[id]/respond/route.ts"
+      ],
+      "suggestion": "tmux.test.ts の 'should escape single quotes' テストケース（line 224-237）を更新する。execFile() 移行後はエスケープ不要のため、テストは `expect(execFile).toHaveBeenCalledWith('tmux', ['send-keys', '-t', 'test-session', \"echo 'hello'\", 'C-m'], ...)` のように、シングルクォートがエスケープされずにそのまま引数として渡されることを検証するよう変更する。この変更は設計方針書 D4-003 に含まれるべきだが、エスケープテストの具体的な更新方針が記載されていない。"
+    },
+    {
+      "id": "R3F008",
+      "severity": "must_fix",
+      "category": "波及影響",
+      "title": "execFile の maxBuffer オプション互換性: capturePane() の 10MB バッファ設定が execFile でも機能することの確認",
+      "description": "capturePane() は現在 exec() に maxBuffer: 10 * 1024 * 1024（10MB）を渡している（line 342）。execFile() も maxBuffer オプションをサポートしているが、exec() と execFile() では stdout のバッファリング挙動が微妙に異なる場合がある。exec() はシェルを経由するため stdout がシェルバッファを通るが、execFile() は直接プロセスの stdout を読む。Node.js のドキュメント上は execFile() も maxBuffer をサポートしているが、大きなバッファサイズ（10MB）での動作を確認する必要がある。また、exec() のデフォルト maxBuffer は 1MB だが、execFile() も同様。capturePane() では明示的に 10MB を指定しているため問題ないが、他の関数（listSessions 等）はデフォルトの maxBuffer に依存しており、execFile() 移行後もデフォルト値が同じ（1MB）であることを確認すべき。",
+      "affected_files": [
+        "src/lib/tmux.ts"
+      ],
+      "suggestion": "実装時に capturePane() の execFile() 呼び出しで maxBuffer: 10 * 1024 * 1024 が正しく動作することを手動確認またはテストで検証する。設計方針書 D2-002 の capturePane() 行に maxBuffer オプションの引き継ぎを明記する。Node.js の execFile() は maxBuffer をサポートしているため技術的には問題ないが、移行時の見落としを防ぐために明記が望ましい。"
+    },
+    {
+      "id": "R3F009",
+      "severity": "nice_to_have",
+      "category": "波及影響",
+      "title": "tmux.ts をインポートする間接影響ファイル（14ファイル）のうち、インターフェース不変で影響を受けないファイルの確認",
+      "description": "tmux.ts をインポートしているファイルは以下の14ファイル: (1) cli-session.ts (hasSession, capturePane), (2) pasted-text-helper.ts (capturePane, sendKeys), (3) prompt-answer-sender.ts (sendKeys, sendSpecialKeys), (4) claude-session.ts (hasSession, createSession, sendKeys, capturePane, killSession), (5) codex.ts (hasSession, createSession, sendKeys, killSession), (6) gemini.ts (hasSession, createSession, sendKeys, sendSpecialKey, killSession, capturePane), (7) vibe-local.ts (hasSession, createSession, sendKeys, sendSpecialKey, killSession), (8) opencode.ts (hasSession, createSession, sendKeys, sendSpecialKey, killSession), (9) base.ts (sendSpecialKey), (10) repositories/route.ts (killSession), (11) respond/route.ts (sendKeys), (12) kill-session/route.ts (killSession), (13) terminal/route.ts (import * as tmux), (14) capture/route.ts (import * as tmux)。設計方針書 SEC-003 のとおり公開インターフェースは不変であるため、(1)-(12) の12ファイルは tmux.ts 内部の exec→execFile 移行による影響を受けない。直接修正対象は (5) codex.ts（D3-001）と (4) claude-session.ts（D3-002）の exec() 直接呼び出し箇所のみ。(13)(14) は D1 でエンドポイントレベルの修正が必要。",
+      "affected_files": [
+        "src/lib/cli-session.ts",
+        "src/lib/pasted-text-helper.ts",
+        "src/lib/prompt-answer-sender.ts",
+        "src/lib/cli-tools/gemini.ts",
+        "src/lib/cli-tools/vibe-local.ts",
+        "src/lib/cli-tools/opencode.ts",
+        "src/lib/cli-tools/base.ts",
+        "src/app/api/repositories/route.ts",
+        "src/app/api/worktrees/[id]/respond/route.ts",
+        "src/app/api/worktrees/[id]/kill-session/route.ts"
+      ],
+      "suggestion": "追加のアクション不要。設計方針書セクション6の「間接的に影響するファイル」リストは正確だが、pasted-text-helper.ts, prompt-answer-sender.ts, repositories/route.ts, respond/route.ts が含まれていない。これらも確認対象として追記すると、レビュー漏れ防止になる。ただし全て公開インターフェース不変で影響は無い。"
+    },
+    {
+      "id": "R3F010",
+      "severity": "should_fix",
+      "category": "動作変更リスク",
+      "title": "exec() と execFile() のエラーオブジェクト形状差異: error.killed, error.code, error.signal フィールドの違い",
+      "description": "exec() のエラーは ExecException 型（code, killed, signal, cmd プロパティ付き）を返すが、execFile() のエラーは ExecFileException 型を返す。tmux.ts の各関数はエラーを catch して error.message のみ使用しているため（例: killSession line 376-377 の errorMessage.includes('no server running')）、基本的にはメッセージ文字列比較のみで影響はない。ただし、execFile() のエラーメッセージフォーマットが exec() と異なる可能性がある。例えば、exec() では `Command failed: tmux has-session -t \"session\"` 形式だが、execFile() では `spawn tmux ENOENT` 形式になる場合がある。killSession() の 'no server running' / \"can't find session\" パターンマッチは tmux プロセスの stderr 出力に基づくため、exec/execFile 間で差異はない（両方とも stderr が error.message に含まれる）。ただし、tmux 自体が見つからない場合（tmux 未インストール）のエラーメッセージは異なる可能性がある。",
+      "affected_files": [
+        "src/lib/tmux.ts"
+      ],
+      "suggestion": "killSession() の error.message パターンマッチ（'no server running', \"can't find session\"）が execFile() でも同様に機能することをテストで検証する。具体的には、tmux.test.ts の既存テスト 'should return false when session does not exist'（line 330-338）と 'should return false when no server running'（line 340-348）が execFile モックでも正しく動作することを確認する。設計方針書 D4-003 にこの検証を明記する。"
+    },
+    {
+      "id": "R3F011",
+      "severity": "nice_to_have",
+      "category": "後方互換性",
+      "title": "terminal/route.ts と capture/route.ts の POST エンドポイントのリクエスト/レスポンス形式は変更されない",
+      "description": "terminal/route.ts の POST リクエストは { cliToolId, command } 形式、レスポンスは { success: true } 形式。capture/route.ts の POST リクエストは { cliToolId, lines } 形式、レスポンスは { output } 形式。これらの公開インターフェースは設計方針書の修正後も変更されない。変更されるのはバリデーションエラー時の追加レスポンス（400, 404）とセッション自動作成の廃止（terminal のみ）。フロントエンドコードでこれらのエンドポイントを REST API 経由で直接呼ぶコードは検索の結果見つからなかった（Terminal.tsx は WebSocket を使用）。外部連携ツールが直接呼ぶ場合のみ破壊的変更になる。",
+      "affected_files": [
+        "src/app/api/worktrees/[id]/terminal/route.ts",
+        "src/app/api/worktrees/[id]/capture/route.ts"
+      ],
+      "suggestion": "追加のアクション不要。内部使用のみのエンドポイントであるため破壊的変更のリスクは低い。"
+    }
+  ],
+  "impact_summary": {
+    "high_risk_changes": [
+      "tmux.test.ts の child_process モック変更（exec→execFile）: 全テストケースのアサーション更新が必要（約20箇所）",
+      "claude-session.test.ts の tmux モックに sendSpecialKey 追加が必要",
+      "terminal/route.ts の sendToTmux() 廃止と sendMessage() 代替の意味的差異",
+      "capturePane() の maxBuffer=10MB が execFile() でも正しく機能するか確認が必要"
+    ],
+    "breaking_changes_risk": "low",
+    "mitigation_required": true
+  },
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 5,
+    "nice_to_have_count": 4,
+    "comment": "影響分析の結果、tmux.ts の exec→execFile 移行は公開インターフェース不変であるため、14ファイルの間接インポート元への波及は無い。高リスクの変更は (1) tmux.test.ts のモック全面更新、(2) claude-session.test.ts へのモック追加、(3) terminal/route.ts の sendToTmux() 廃止による意味的差異、(4) execFile での maxBuffer 互換性確認の4点。破壊的変更リスクは低く、フロントエンドが terminal/capture の REST API を直接呼ぶコードは確認されなかった。codex.ts の sendSpecialKeys 移行による SPECIAL_KEY_DELAY_MS 追加も、単一要素配列であるため実質的影響なし。sendKeys() のエスケープロジック除去は tmux への入力が同一となるため動作変更なし。設計方針書は全体として波及影響を適切に管理できているが、テスト側の具体的な更新手順と terminal/route.ts の sendMessage() 代替の詳細設計に補足が必要。"
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-393-security-rce-shell-injection-design-policy.md",
+    "dev-reports/issue/393/multi-stage-design-review/stage1-review-result.json",
+    "dev-reports/issue/393/multi-stage-design-review/stage2-review-result.json",
+    "src/lib/tmux.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/cli-tools/gemini.ts",
+    "src/lib/cli-tools/vibe-local.ts",
+    "src/lib/cli-tools/opencode.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/manager.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/cli-session.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/pasted-text-helper.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/app/api/worktrees/[id]/capture/route.ts",
+    "src/app/api/worktrees/[id]/respond/route.ts",
+    "src/app/api/worktrees/[id]/kill-session/route.ts",
+    "src/app/api/repositories/route.ts",
+    "tests/unit/tmux.test.ts",
+    "tests/unit/cli-tools/codex.test.ts",
+    "tests/unit/lib/claude-session.test.ts"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

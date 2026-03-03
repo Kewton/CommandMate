@@ -1,0 +1,128 @@
+{
+  "issue_number": 393,
+  "overall_status": "passed",
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "cliToolId が CLI_TOOL_IDS に含まれない場合、400 Bad Request を返す",
+      "status": "passed",
+      "evidence": "terminal/route.ts line 32-37: isCliToolType() validation with 400 response. Tests: terminal-route.test.ts 'should return 400 for invalid cliToolId (shell metacharacters)' and 'should return 400 for missing cliToolId' both pass. capture/route.ts line 29-34: same validation. Test: capture-route.test.ts 'should return 400 for invalid cliToolId' passes."
+    },
+    {
+      "criterion": "worktreeId が DB に存在しない場合、404 Not Found を返す",
+      "status": "passed",
+      "evidence": "terminal/route.ts line 54-60: getWorktreeById() check with 404 response. Test: terminal-route.test.ts 'should return 404 for non-existent worktreeId' passes. capture/route.ts line 45-52: same pattern. Test: capture-route.test.ts 'should return 404 for non-existent worktreeId' passes."
+    },
+    {
+      "criterion": "command パラメータが 10000 文字を超える場合、400 Bad Request を返す",
+      "status": "passed",
+      "evidence": "terminal/route.ts line 22: MAX_COMMAND_LENGTH = 10000. Line 46-51: length check with 400 response. Test: terminal-route.test.ts 'should return 400 when command exceeds MAX_COMMAND_LENGTH' (10001 chars) passes."
+    },
+    {
+      "criterion": "セッションが存在しない場合、自動作成せず 404 を返す",
+      "status": "passed",
+      "evidence": "terminal/route.ts line 68-75: hasSession() check returns 404 'Session not found'. Test: terminal-route.test.ts 'should return 404 when session does not exist (no auto-creation)' passes, verifies sendKeys NOT called. capture/route.ts line 60-67: same pattern. Test: capture-route.test.ts 'should return 404 when session does not exist (no auto-creation)' passes, verifies capturePane NOT called."
+    },
+    {
+      "criterion": "エラーメッセージにユーザー入力値を埋め込まない（固定文字列）",
+      "status": "passed",
+      "evidence": "All error responses use fixed strings: 'Invalid cliToolId parameter', 'Missing command parameter', 'Invalid command parameter', 'Worktree not found', 'Session not found. Use startSession API to create a session first.', 'Failed to send command to terminal', 'Failed to capture terminal output'. Tests verify error messages do not contain user input (e.g., not.toContain('rm -rf'), not.toContain('malicious'), not.toContain('internal tmux failure'))."
+    },
+    {
+      "criterion": "tmux.ts の全 exec() 呼び出しが execFile() に移行されている",
+      "status": "passed",
+      "evidence": "tmux.ts imports only 'execFile' from 'child_process' (line 6). grep for 'execAsync' and 'exec(' returns no matches. All functions (isTmuxAvailable, hasSession, listSessions, createSession, sendKeys, sendSpecialKeys, sendSpecialKey, capturePane, killSession) use execFileAsync. tmux.test.ts (36 tests) verify execFile is called with argument arrays for all operations."
+    },
+    {
+      "criterion": "sendSpecialKey() にランタイムバリデーションが追加されている",
+      "status": "passed",
+      "evidence": "tmux.ts line 233-237: ALLOWED_SPECIAL_KEYS Set for sendSpecialKeys(). Line 420: SPECIAL_KEY_VALUES const. Line 433: ALLOWED_SINGLE_SPECIAL_KEYS Set for sendSpecialKey(). Line 457: Runtime validation 'if (!ALLOWED_SINGLE_SPECIAL_KEYS.has(key))' throws Error. Tests: tmux.test.ts 'should throw error for invalid special key (runtime validation)' passes with 'rm -rf /' as invalid key, verifies execFile NOT called. 'should accept all SPECIAL_KEY_VALUES as valid keys' passes."
+    },
+    {
+      "criterion": "codex.ts / claude-session.ts の直接 exec() が tmux.ts 関数経由に統一されている",
+      "status": "passed",
+      "evidence": "codex.ts: No child_process imports. All tmux operations use imported functions from '../tmux': hasSession, createSession, sendKeys, killSession, sendSpecialKeys, sendSpecialKey. claude-session.ts: tmux session operations (hasSession, createSession, sendKeys, capturePane, killSession, sendSpecialKey) are imported from './tmux'. No direct 'tmux send-keys', 'tmux kill-session', 'tmux has-session', 'tmux new-session', or 'tmux capture-pane' strings found. Line 782-784 (stopClaudeSession) uses sendKeys() and sendSpecialKey() from tmux.ts. Remaining execAsync calls in claude-session.ts are non-tmux-session operations: 'which claude' (path resolution), 'test -x' (file check), 'tmux set-environment' (hardcoded env cleanup, no user input)."
+    },
+    {
+      "criterion": "capture/route.ts の lines パラメータが正の整数として検証される",
+      "status": "passed",
+      "evidence": "capture/route.ts line 37: 4-stage validation: typeof number, Number.isInteger, >= 1, <= 100000. Line 43: Math.floor() defense-in-depth. Tests: capture-route.test.ts validates negative (-1), string ('abc'), exceeding max (100001), and float (10.5) all return 400 with proper error message."
+    }
+  ],
+  "test_cases": [
+    {
+      "scenario": "scenario 1: terminal/route.ts - valid request returns 200",
+      "result": "passed",
+      "evidence": "terminal-route.test.ts: 'should send command successfully with valid cliToolId' - status 200, success:true, sendKeys called correctly"
+    },
+    {
+      "scenario": "scenario 2: terminal/route.ts - invalid cliToolId returns 400 (shell metacharacters)",
+      "result": "passed",
+      "evidence": "terminal-route.test.ts: 'should return 400 for invalid cliToolId (shell metacharacters)' - status 400, fixed error message, no user input leakage"
+    },
+    {
+      "scenario": "scenario 3: terminal/route.ts - non-existent worktreeId returns 404",
+      "result": "passed",
+      "evidence": "terminal-route.test.ts: 'should return 404 for non-existent worktreeId' - status 404, 'Worktree not found'"
+    },
+    {
+      "scenario": "scenario 4: terminal/route.ts - missing session returns 404",
+      "result": "passed",
+      "evidence": "terminal-route.test.ts: 'should return 404 when session does not exist (no auto-creation)' - status 404, sendKeys not called"
+    },
+    {
+      "scenario": "scenario 5: terminal/route.ts - oversized command returns 400",
+      "result": "passed",
+      "evidence": "terminal-route.test.ts: 'should return 400 when command exceeds MAX_COMMAND_LENGTH' - 10001 chars, status 400"
+    },
+    {
+      "scenario": "scenario 6: capture/route.ts - invalid lines parameter returns 400",
+      "result": "passed",
+      "evidence": "capture-route.test.ts: 4 tests (negative, string, exceeding max, float) all return 400 with proper error"
+    },
+    {
+      "scenario": "scenario 7: tmux.ts - execFile() is used (not exec())",
+      "result": "passed",
+      "evidence": "tmux.ts only imports execFile. grep confirms no exec()/execAsync references. tmux.test.ts (36 tests) verify execFile is called with argument arrays"
+    },
+    {
+      "scenario": "scenario 8: tmux.ts - sendSpecialKey() throws on invalid key",
+      "result": "passed",
+      "evidence": "tmux.test.ts: 'should throw error for invalid special key (runtime validation)' with 'rm -rf /' as-any cast, execFile NOT called"
+    },
+    {
+      "scenario": "scenario 9: codex.ts - no direct exec() calls",
+      "result": "passed",
+      "evidence": "grep for exec()/execAsync/import.*exec returns no matches in codex.ts. All operations via tmux.ts imports"
+    },
+    {
+      "scenario": "scenario 10: claude-session.ts - no direct exec() for tmux session operations (line 783 area)",
+      "result": "passed",
+      "evidence": "Line 782: sendKeys(sessionName, '', false). Line 784: sendSpecialKey(sessionName, 'C-d'). Both from tmux.ts. No direct tmux send-keys/kill-session/has-session/capture-pane exec calls"
+    }
+  ],
+  "test_summary": {
+    "unit_tests": "passed",
+    "typescript": "passed",
+    "lint": "passed",
+    "unit_test_detail": "206 test files, 4354 tests passed, 7 skipped",
+    "issue_specific_tests": "3 files (terminal-route.test.ts, tmux.test.ts, capture-route.test.ts), 54 tests passed"
+  },
+  "acceptance_criteria_status": [
+    { "criterion": "cliToolId が CLI_TOOL_IDS に含まれない場合、400 Bad Request を返す", "verified": true },
+    { "criterion": "worktreeId が DB に存在しない場合、404 Not Found を返す", "verified": true },
+    { "criterion": "command パラメータが 10000 文字を超える場合、400 Bad Request を返す", "verified": true },
+    { "criterion": "セッションが存在しない場合、自動作成せず 404 を返す", "verified": true },
+    { "criterion": "エラーメッセージにユーザー入力値を埋め込まない（固定文字列）", "verified": true },
+    { "criterion": "tmux.ts の全 exec() 呼び出しが execFile() に移行されている", "verified": true },
+    { "criterion": "sendSpecialKey() にランタイムバリデーションが追加されている", "verified": true },
+    { "criterion": "codex.ts / claude-session.ts の直接 exec() が tmux.ts 関数経由に統一されている", "verified": true },
+    { "criterion": "capture/route.ts の lines パラメータが正の整数として検証される", "verified": true }
+  ],
+  "evidence_files": [
+    "tests/unit/terminal-route.test.ts",
+    "tests/unit/tmux.test.ts",
+    "tests/unit/capture-route.test.ts"
+  ],
+  "summary": "All 9 acceptance criteria verified and passed. All 54 issue-specific tests pass (terminal-route: 8, tmux: 36, capture-route: 10). Full unit test suite passes (4354 tests). TypeScript compilation succeeds with no errors. ESLint reports no warnings or errors. Key security improvements confirmed: exec() to execFile() migration in tmux.ts, runtime key validation in sendSpecialKey()/sendSpecialKeys(), input validation in terminal/capture API routes, fixed-string error messages, session auto-creation removed."
+}

@@ -1,0 +1,162 @@
+{
+  "issue_number": 398,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_type": "通常",
+  "review_date": "2026-03-02",
+  "findings": [
+    {
+      "id": "F2-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "title": "LM_STUDIO_MODEL_PATTERNの具体的なパターン定義が未記載",
+      "description": "セキュリティ・防御セクションに LM_STUDIO_MODEL_PATTERN の定義タスクは追加されているが、具体的な正規表現パターンが記載されていない。Ollamaでは OLLAMA_MODEL_PATTERN = /^[a-zA-Z0-9._:/-]{1,100}$/ が定義されているが、LM Studioのモデル名はパス形式（例: lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf）を含む可能性があり、OLLAMA_MODEL_PATTERNの許容文字セットでは .gguf 拡張子が含まれるため理論上マッチするものの、長さ制限100文字では不十分な可能性がある。実装タスクの説明文に「LM Studioモデルは lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF/... のようなパス形式を含む可能性がある」と書かれているが、パターン候補値（例: /^[a-zA-Z0-9._:/-]{1,200}$/）が示されていないため、実装者の判断に委ねられている。",
+      "suggestion": "LM_STUDIO_MODEL_PATTERN の候補パターンを記載する。例: /^[a-zA-Z0-9._:/-]{1,200}$/（長さ制限をOllamaの100文字から200文字に拡張）。あるいは、実装時にLM Studio APIの実際のレスポンスを確認してパターンを決定する旨を明記する。",
+      "location": "Issue本文 > 実装タスク > セキュリティ・防御 > LM_STUDIO_MODEL_PATTERN"
+    },
+    {
+      "id": "F2-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "fetchOllamaModels()とfetchLmStudioModels()の戻り値型が未統一で定義されていない",
+      "description": "MF-001の対応として「独立した関数として実装し、それぞれが失敗しても空のRecord<string, {name: string}>を返す」と記載されているが、実装タスクセクションの個別タスク記述では fetchLmStudioModels() のパース対象（{ data: [{ id: string }] }）は書かれているものの、戻り値型の統一的な型定義（例: type ProviderModels = Record<string, { name: string }>）が明示されていない。両関数が同じ型を返すことが設計の前提であることを、実装タスクの関数シグネチャとして明記すると実装の曖昧さが解消される。",
+      "suggestion": "コア実装タスクに戻り値型を追記する。例: 「fetchOllamaModels(): Promise<Record<string, { name: string }>> と fetchLmStudioModels(): Promise<Record<string, { name: string }>> は同一の戻り値型を持つ」。あるいは共通の型エイリアス（例: ProviderModels）を定義するタスクを追加する。",
+      "location": "Issue本文 > 実装タスク > コア実装"
+    },
+    {
+      "id": "F2-003",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "opencode.jsonの既存ファイル存在時のスキップ動作に関するLM Studio観点の補足",
+      "description": "現在のensureOpencodeConfig()はopencode.jsonが既に存在する場合にスキップする（L158-161: 'respect user configuration'）。Issue本文の実装タスクではこの既存動作への言及がない。LM Studio対応後も同じスキップ動作が維持されるべきだが、ユーザーがOllamaのみで生成されたopencode.jsonを持っている場合にLM Studioモデルが自動追加されない点は留意事項として明記すると親切である。既存ファイルの更新・再生成ポリシーが実装者・ユーザー双方にとって明確になる。",
+      "suggestion": "受入条件または補足事項に「opencode.jsonが既に存在する場合は再生成しない（既存動作維持）。ユーザーがLM Studioモデルを追加したい場合は、opencode.jsonを手動で削除してセッションを再起動する」旨を記載する。",
+      "location": "Issue本文 > 受入条件 または 補足事項"
+    },
+    {
+      "id": "F2-004",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "NTH-002（CLAUDE.md更新）がStage 2でスキップされたがStage 4で反映済み",
+      "description": "Stage 1のNTH-002「CLAUDE.mdモジュール一覧の更新タスク」はStage 2では「実装完了後に行うべき」としてスキップされたが、Stage 3のIMP-006として再度指摘され、Stage 4で反映された。結果として、Issue本文の実装タスクにCLAUDE.md更新タスクが含まれており（ドキュメントセクション）、最終的に適切な状態になっている。ただし、レビュー履歴セクションのStage 2の記録では「NTH-002: skipped」のままであり、実質的にはIMP-006として対応済みという経緯が分かりにくい。",
+      "suggestion": "特に修正は不要。レビュー履歴は過去の判断の記録であり、最終結果として正しく反映されていれば問題ない。",
+      "location": "Issue本文 > レビュー履歴"
+    }
+  ],
+  "previous_findings_verification": [
+    {
+      "id": "MF-001",
+      "status": "resolved",
+      "comment": "「設計上の重要な注意点（MF-001）」セクションが追加され、制御フローリファクタリング要件が具体的に記載されている。(1)独立関数化、(2)結果マージ設計、(3)両プロバイダー0件時のスキップが明記されている。実装タスクのコア実装セクションにも独立関数化・マージ設計が反映済み。"
+    },
+    {
+      "id": "MF-002",
+      "status": "resolved",
+      "comment": "「LM Studio APIレスポンス形式（MF-002）」セクションが追加され、Ollama/LM Studioのレスポンス形式比較テーブル（APIエンドポイント、レスポンス形式、モデル識別子フィールド）が明記されている。OpenAI互換APIの { data: [{ id: string }] } パーサーの必要性、detailsフィールド非存在による表示名=モデルIDそのままの方針も明記。"
+    },
+    {
+      "id": "MF-003",
+      "status": "resolved",
+      "comment": "「opencode.json の lmstudio プロバイダースキーマ（MF-003）」セクションが追加され、JSON形式で具体的なスキーマが定義されている。npm('@ai-sdk/openai-compatible')、name('LM Studio (local)')、options({ baseURL: 'http://localhost:1234/v1' })、modelsの構造が明確。"
+    },
+    {
+      "id": "MF-004",
+      "status": "resolved",
+      "comment": "影響範囲の「スコープ外ファイル」テーブルにclaude-executor.tsが追加され、「スコープ外」と明確に決定されている。実装タスクの「影響範囲対応」セクションにもスコープ外の理由（TUIモードでのモデル選択で十分）が明記。受入条件にも「LM Studioモデルのスケジュール実行はスコープ外」が追加済み。"
+    },
+    {
+      "id": "SF-001",
+      "status": "resolved",
+      "comment": "テストファイルパスが tests/unit/cli-tools/opencode-config.test.ts に修正済み。影響範囲テーブルのパスも正しい。"
+    },
+    {
+      "id": "SF-002",
+      "status": "resolved",
+      "comment": "SEC-001タスクにLM_STUDIO_API_URL = 'http://localhost:1234/v1/models' as const、LM_STUDIO_BASE_URL = 'http://localhost:1234/v1' as const が具体的な定数名・値付きで明記済み。"
+    },
+    {
+      "id": "SF-003",
+      "status": "resolved",
+      "comment": "LM_STUDIO_MODEL_PATTERNバリデーションパターン定義タスクが追加済み。ただし具体的なパターン値は未定義（F2-001で新規指摘）。"
+    },
+    {
+      "id": "SF-004",
+      "status": "resolved",
+      "comment": "受入条件に「OllamaとLM Studioの両方が未起動で取得モデル数が0件の場合、opencode.jsonは生成しないこと」が追加済み。実装タスクのコア実装にも「両プロバイダーのモデルが0件の場合はopencode.json生成をスキップ」が明記。"
+    },
+    {
+      "id": "SF-005",
+      "status": "resolved",
+      "comment": "DoS防御定数がLM_STUDIO_API_TIMEOUT_MS=3000、MAX_LM_STUDIO_RESPONSE_SIZE=1MB（1*1024*1024）、MAX_LM_STUDIO_MODELS=100として具体的に定義済み。"
+    },
+    {
+      "id": "IMP-001",
+      "status": "resolved",
+      "comment": "スコープ外ファイルテーブルにschedule-manager.ts（L320-331）が追加され、スケジュール実行のoptions構築がopencodeケース未対応である点、将来の変更箇所（SQLクエリ、case 'opencode'）が明記されている。"
+    },
+    {
+      "id": "IMP-002",
+      "status": "resolved",
+      "comment": "claude-executor.tsのスコープ方針が「スコープ外」として明確に決定済み。受入条件にも「LM Studioモデルのスケジュール実行（非インタラクティブモード）はIssue #398のスコープ外とする」が明記。"
+    },
+    {
+      "id": "IMP-003",
+      "status": "resolved",
+      "comment": "テストセクションに「既存テスト移行」タスクが追加され、既存テストの分割・移行、URLベースのmock実装またはmockResolvedValueOnce()の2回呼び出しが明記。"
+    },
+    {
+      "id": "IMP-004",
+      "status": "resolved",
+      "comment": "スコープ外ファイルテーブルにtests/unit/lib/claude-executor.test.tsが追加され、「IMP-002のスコープ外方針により変更不要。将来的にプレフィックスを動的化する場合はテスト修正が必要」と記載。"
+    },
+    {
+      "id": "IMP-005",
+      "status": "resolved",
+      "comment": "関連コンポーネントテーブルにtests/unit/cli-tools/opencode.test.tsが追加され、「ensureOpencodeConfig()シグネチャ不変のため変更不要。新規export追加時はmock定義の更新を確認」と記載。"
+    },
+    {
+      "id": "IMP-006",
+      "status": "resolved",
+      "comment": "実装タスクのドキュメントセクションにCLAUDE.md更新タスクが追加済み。fetchOllamaModels()/fetchLmStudioModels()独立関数化、LM Studio定数追加の反映が明記。"
+    },
+    {
+      "id": "IMP-007",
+      "status": "resolved",
+      "comment": "関連コンポーネントテーブルにAgentSettingsPane.tsxが追加され、将来的なモデルセレクターUI対応時の/api/lmstudio/models APIエンドポイント新設の必要性が明記。"
+    },
+    {
+      "id": "IMP-008",
+      "status": "resolved",
+      "comment": "関連コンポーネントテーブルにtypes.tsが追加され、OLLAMA_MODEL_PATTERNとLM StudioモデルID（パス形式含む）の理論上のマッチ可能性、DB保存時の将来的確認推奨が明記。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2,
+    "overall_quality": "good",
+    "comment": "前回のStage 1通常レビュー（MF-001〜MF-004、SF-001〜SF-005）およびStage 3影響範囲レビュー（IMP-001〜IMP-008）の全17件の指摘事項が適切に対応されている。Issueの構成は明確で、設計上の重要な注意点、APIレスポンス形式の比較、opencode.jsonスキーマ定義、影響範囲のスコープ内/外の区別、テスト移行計画が十分に記載されている。新規の指摘は2件のshould_fix（LM_STUDIO_MODEL_PATTERNの具体パターン未定義、戻り値型の未統一定義）と2件のnice_to_have（既存ファイルスキップ動作の補足、レビュー履歴の経緯分かりにくさ）であり、いずれも実装を阻害する重大な問題ではない。全体として、実装開始に十分な品質のIssueであると判断する。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cli-tools/opencode-config.ts",
+      "relevance": "主要変更対象。OLLAMA_MODEL_PATTERN（L46）の長さ制限100文字がLM Studioモデル名に対して不十分な可能性（F2-001関連）",
+      "lines": "L46"
+    },
+    {
+      "file": "src/lib/cli-tools/opencode-config.ts",
+      "relevance": "ensureOpencodeConfig()のopencode.json既存チェック（L158-161）。LM Studio対応後もスキップ動作維持の確認（F2-003関連）",
+      "lines": "L158-161"
+    },
+    {
+      "file": "tests/unit/cli-tools/opencode-config.test.ts",
+      "relevance": "既存テスト298行。mockFetchが単一APIエンドポイント前提で記述されている。IMP-003で既存テスト移行タスク追加済み",
+      "lines": "全体"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "opencode-config.tsエントリ更新タスクが実装タスクに含まれている（IMP-006対応済み）"
+    }
+  ]
+}

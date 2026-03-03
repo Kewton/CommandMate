@@ -1,0 +1,35 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー - 指摘対応",
+  "applied_findings": ["R4F006", "R4F001", "R4F002", "R4F007"],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 4 セキュリティレビューの Must Fix 1件 + Should Fix 3件を設計方針書に反映。R4F006: D1-001のコード例をcliToolId埋め込みから固定文字列エラーレスポンスに修正し、ログインジェクション/XSSリスク防止方針を明記。R4F001: D1-006を新規追加し、terminal/route.tsのcommandパラメータにMAX_COMMAND_LENGTH=10000の長さ制限を定義（DoS防止）。R4F002: D1-007を新規追加し、500エラーレスポンスでerror.messageをそのまま返さず固定文字列を使用する情報漏洩防止方針を追記。R4F007: D1-002にcapture/route.tsのセッション不在時レスポンスでcliToolIdを含めず固定文字列404を返す方針を追記。SEC-002攻撃ベクター対策マッピング、SEC-003後方互換性配慮、D4-001/D4-002テストケース、修正ファイル一覧も併せて更新。Stage 4レビュー指摘事項サマリー（セクション15）と実装チェックリスト（セクション16）を追加。",
+  "changes_made": [
+    {
+      "finding_id": "R4F006",
+      "severity": "must_fix",
+      "sections_modified": ["D1-001", "SEC-002", "SEC-003", "D4-001", "D4-002", "Section 15", "Section 16"],
+      "description": "D1-001のバリデーションエラーレスポンスコード例を固定文字列に変更。エラーメッセージへのユーザー入力値埋め込み禁止方針を明記。SEC-002/SEC-003にも対策方針追記。テストケースに固定文字列検証を追加。"
+    },
+    {
+      "finding_id": "R4F001",
+      "severity": "should_fix",
+      "sections_modified": ["D1-006 (新規)", "SEC-002", "D4-001", "Section 6", "Section 15", "Section 16"],
+      "description": "D1-006を新規追加。MAX_COMMAND_LENGTH=10000の長さ制限、バリデーション実装方針、コード例を定義。SEC-002にDoS防御ベクター追加。D4-001にcommand長超過テストケース追加。"
+    },
+    {
+      "finding_id": "R4F002",
+      "severity": "should_fix",
+      "sections_modified": ["D1-007 (新規)", "SEC-002", "SEC-003", "D4-001", "D4-002", "Section 6", "Section 15", "Section 16"],
+      "description": "D1-007を新規追加。500エラーレスポンスの固定文字列方針、Before/Afterコード例を定義。SEC-002に情報漏洩防御ベクター追加。SEC-003に詳細漏洩防止方針追記。テストケースに500エラー検証追加。"
+    },
+    {
+      "finding_id": "R4F007",
+      "severity": "should_fix",
+      "sections_modified": ["D1-002", "SEC-002", "SEC-003", "D4-001", "D4-002", "Section 15", "Section 16"],
+      "description": "D1-002にcapture/route.tsのセッション不在時固定文字列404レスポンス方針を追記。cliToolIdのレスポンス埋め込み排除を明記。SEC-002/SEC-003にも対策追記。テストケースに固定文字列検証追加。"
+    }
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

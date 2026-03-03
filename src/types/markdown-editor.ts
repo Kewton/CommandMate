@@ -234,6 +234,16 @@ export interface EditorLayoutState {
 }
 
 /**
+ * Local storage key for auto-save setting persistence
+ */
+export const LOCAL_STORAGE_KEY_AUTO_SAVE = 'commandmate:md-editor-auto-save';
+
+/**
+ * Auto-save debounce delay (3 seconds)
+ */
+export const AUTO_SAVE_DEBOUNCE_MS = 3000;
+
+/**
  * Default editor layout state
  */
 export const DEFAULT_LAYOUT_STATE: EditorLayoutState = {

@@ -10,12 +10,10 @@ import {
   createSession,
   sendKeys,
   killSession,
+  sendSpecialKeys,
+  sendSpecialKey,
 } from '../tmux';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
-
-const execAsync = promisify(exec);
 
 /**
  * Extract error message from unknown error type (DRY)
@@ -99,9 +97,9 @@ export class CodexTool extends BaseCLITool {
 
       // T2.6: Skip model selection dialog by sending Down arrow + Enter
       // This selects the default model and proceeds to the prompt
-      await execAsync(`tmux send-keys -t "${sessionName}" Down`);
+      await sendSpecialKeys(sessionName, ['Down']);
       await new Promise((resolve) => setTimeout(resolve, CODEX_MODEL_SELECT_WAIT_MS));
-      await execAsync(`tmux send-keys -t "${sessionName}" Enter`);
+      await sendSpecialKeys(sessionName, ['Enter']);
       await new Promise((resolve) => setTimeout(resolve, CODEX_MODEL_SELECT_WAIT_MS));
 
       console.log(`✓ Started Codex session: ${sessionName}`);
@@ -136,7 +134,7 @@ export class CodexTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Send Enter key separately
-      await execAsync(`tmux send-keys -t "${sessionName}" C-m`);
+      await sendSpecialKey(sessionName, 'C-m');
 
       // Wait a moment for the message to be processed
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -167,7 +165,7 @@ export class CodexTool extends BaseCLITool {
       const exists = await hasSession(sessionName);
       if (exists) {
         // Send Ctrl+D (ASCII 4)
-        await execAsync(`tmux send-keys -t "${sessionName}" C-d`);
+        await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for Codex to exit
         await new Promise((resolve) => setTimeout(resolve, 500));

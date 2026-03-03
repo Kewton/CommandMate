@@ -1,0 +1,23 @@
+{
+  "stage": 4,
+  "issue_number": 394,
+  "applied_findings": ["S4-001", "S4-002", "S4-003", "S4-004"],
+  "skipped_findings": ["S4-005", "S4-006", "S4-007"],
+  "skip_reasons": {
+    "S4-005": "nice_to_have: worktree.pathのDB信頼前提の明示は本Issueスコープ外。DB操作はbetter-sqlite3のパラメータ化クエリで保護されている",
+    "S4-006": "nice_to_have: ただしセクション6脅威モデルに対処外根拠を追記済み（must_fix/should_fixではないが有用な情報として反映）",
+    "S4-007": "nice_to_have: resolveAndValidateRealPath()はビジネスロジック層に配置されるためHTTPリクエスト情報の参照は責務の混在になる。本Issueスコープ外"
+  },
+  "changes_summary": "Stage 4セキュリティレビューの指摘事項4件（must_fix: 1件、should_fix: 3件）を設計方針書に反映。(1) S4-001: セクション6脅威モデルにTOCTOUレースコンディションの攻撃シナリオ・前提条件・4つの許容理由を追加。(2) S4-002: セクション5.1アルゴリズムのステップ4aに while (currentPath !== path.dirname(currentPath)) による明示的なルート到達停止条件を追加。(3) S4-003: セクション5.2のcreateFileOrDirectory()およびwriteBinaryFile()の備考にmkdir()のTOCTOU窓とS4-001に基づく許容判断を明記。(4) S4-004: セクション5.2のmoveFileOrDirectory()備考にSEC-006とresolveAndValidateRealPath()のログ二重出力防止方針を記載。また、nice_to_haveのS4-006（hardlink）についてもセクション6脅威モデルに対処外根拠を追記。セクション13レビュー履歴、セクション14レビュー指摘事項サマリー（Stage 4テーブル）、実装チェックリスト（S4-001〜S4-004の5項目）を追加。フッターにStage 4反映日を追記",
+  "design_doc_updated": true,
+  "design_doc_path": "dev-reports/design/issue-394-symlink-traversal-fix-design-policy.md",
+  "sections_modified": [
+    "5.1 新関数: resolveAndValidateRealPath() - アルゴリズム（S4-002: 祖先走査の明示的停止条件追加）",
+    "5.2 既存関数の修正箇所 - file-operations.ts テーブル（S4-003: createFileOrDirectory/writeBinaryFileのTOCTOU注記、S4-004: moveFileOrDirectoryのログ二重出力防止方針）",
+    "6 セキュリティ設計 - 脅威モデル（S4-001: TOCTOU許容根拠、S4-006: hardlink対処外根拠）",
+    "13 レビュー履歴（Stage 4行追加）",
+    "14 レビュー指摘事項サマリー（Stage 4テーブル追加）",
+    "実装チェックリスト（S4-001〜S4-004の5項目追加）"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

@@ -31,12 +31,47 @@ export const HOP_BY_HOP_REQUEST_HEADERS = [
 ] as const;
 
 /**
+ * Issue #395: Sensitive request headers that must not be forwarded to upstream
+ * Prevents credential leakage (cookies, auth tokens) and client identity exposure
+ * through the same-origin proxy
+ */
+export const SENSITIVE_REQUEST_HEADERS = [
+  'cookie',
+  'authorization',
+  'proxy-authorization',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+] as const;
+
+/**
  * HTTP headers that should be stripped from proxied responses
  */
 export const HOP_BY_HOP_RESPONSE_HEADERS = [
   'transfer-encoding',
   'connection',
   'keep-alive',
+] as const;
+
+/**
+ * Issue #395: Sensitive response headers that must not be forwarded from upstream
+ * Prevents upstream apps from setting cookies on the CommandMate origin,
+ * overriding security policies (CSP, HSTS, X-Frame-Options), or
+ * manipulating CORS settings
+ */
+export const SENSITIVE_RESPONSE_HEADERS = [
+  'set-cookie',
+  'content-security-policy',
+  'content-security-policy-report-only',
+  'x-frame-options',
+  'strict-transport-security',
+  'access-control-allow-origin',
+  'access-control-allow-credentials',
+  'access-control-allow-methods',
+  'access-control-allow-headers',
+  'access-control-expose-headers',
+  'access-control-max-age',
 ] as const;
 
 /**
