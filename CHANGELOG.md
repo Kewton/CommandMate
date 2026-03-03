@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-03-03
+
+### Added
+- LM Studio provider support for OpenCode configuration (Issue #398)
+  - Parallel model fetching from Ollama and LM Studio
+  - Dynamic provider configuration with zero-provider skip
+- Auto-save mode toggle for Markdown editor (Issue #389)
+  - 3-second debounce, save state indicator, error fallback
+
+### Fixed
+- Prevent credential leakage and same-origin trust break in proxy (Issue #395)
+  - Sensitive request/response header filtering (cookie, authorization, CORS, CSP, etc.)
+  - Internal URL information removal from WebSocket messages
+- Prevent RCE/shell injection in terminal and capture APIs (Issue #393)
+  - `exec()` → `execFile()` migration in tmux module (all 9 functions, 11 call sites)
+  - Input validation for terminal/capture API endpoints
+  - `sendSpecialKey()` with allowlist-based runtime validation
+- Prevent symlink traversal in file APIs (Issue #394)
+  - `resolveAndValidateRealPath()` with realpathSync-based defense
+  - `checkPathSafety()` DRY helper for dual validation
+- Prevent relative path bypass in clone customTargetPath validation (Issue #392)
+  - `resolveCustomTargetPath()` wrapper with validateWorktreePath integration
+- Polling overwriting checkbox state during agent settings editing (Issue #391)
+  - `isEditing` state guard and `selectedAgentsRef` same-value skip
+- Dark background fallback for unspecified-language code blocks (Issue #390)
+
 ## [0.3.5] - 2026-03-01
 
 ### Added
@@ -626,7 +652,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.5...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/Kewton/CommandMate/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/Kewton/CommandMate/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/Kewton/CommandMate/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/Kewton/CommandMate/compare/v0.3.2...v0.3.3
