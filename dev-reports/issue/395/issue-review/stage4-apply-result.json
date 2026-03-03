@@ -1,0 +1,83 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目 影響範囲）",
+  "issue_number": 395,
+  "applied_date": "2026-03-03",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "S3-001",
+        "status": "applied",
+        "change_summary": "「Affected Code」セクションにTest filesサブセクションを追加し、tests/unit/proxy/handler.test.tsの既存テスト修正必要性を明記。Cookie/Authorization/X-Forwarded-*ストリッピングテスト、Set-Cookieストリッピングテスト、安全なヘッダの回帰テスト、CSP関連ヘッダストリッピングテストの追加計画を記載。Implementation Notesに「Test modification plan」として5項目の具体的なテスト修正計画を追加。"
+      },
+      {
+        "id": "S3-002",
+        "status": "applied",
+        "change_summary": "Recommended Directionに「Header constants in config.ts」としてSENSITIVE_REQUEST_HEADERS（Cookie, Authorization, X-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto, X-Real-IP）およびSENSITIVE_RESPONSE_HEADERS（Set-Cookie）定数をconfig.tsに追加する設計方針を記載。Implementation Notesに「config.ts design」としてコード例付きの具体的な設計を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "S3-003",
+        "status": "applied",
+        "change_summary": "Affected Codeの「Files requiring modification」にhandler.tsのproxyWebSocket() directUrl除去を追加。Recommended Directionに「proxyWebSocket() directUrl removal」としてdirectUrlフィールドの除去方針を明記。Key source referencesにhandler.ts:143-166を追加。Test modification planにdirectUrl除去テストを追加。"
+      },
+      {
+        "id": "S3-004",
+        "status": "applied",
+        "change_summary": "Recommended Directionに「UI security warning」としてExternalAppForm.tsxへのセキュリティ警告バナー追加を具体的な文言付きで明記。Affected Codeの「Files requiring modification」にExternalAppForm.tsxを追加。Acceptance Criteriaに警告バナー表示の条件を追加。"
+      },
+      {
+        "id": "S3-005",
+        "status": "applied",
+        "change_summary": "Affected Codeに「Files requiring NO modification (scope clarification)」サブセクションを新設し、middleware.tsが変更不要であることを明示（/proxy/*がAUTH_EXCLUDED_PATHSに含まれず認証対象である理由付き）。"
+      },
+      {
+        "id": "S3-006",
+        "status": "applied",
+        "change_summary": "「Files requiring NO modification」サブセクションにvalidation.tsを追加し、本Issueのスコープ外であることを明示。将来的な拡張ポイントとしての記載も含む。"
+      },
+      {
+        "id": "S3-007",
+        "status": "applied",
+        "change_summary": "Recommended Directionに「CSP header stripping from upstream responses」としてproxyHttp()でContent-Security-PolicyとX-Frame-Optionsをupstreamから継承しないようストリッピングする方針を追加。SENSITIVE_RESPONSE_HEADERSにcontent-security-policyとx-frame-optionsを含むコード例を記載。"
+      },
+      {
+        "id": "S3-008",
+        "status": "applied",
+        "change_summary": "Acceptance Criteriaに「CLAUDE.md handler.tsおよびconfig.tsのモジュール説明にIssue #395セキュリティ強化内容を更新」を追加。"
+      },
+      {
+        "id": "S3-010",
+        "status": "applied",
+        "change_summary": "Recommended Directionに「Restrictive CSP header injection option」としてproxyHttp()のレスポンスにrestrictiveなCSPヘッダ（default-src 'self'; script-src 'none'等）を強制付与するオプションを追加。アプリ単位での設定可能性（restrictCsp boolean）も記載。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-009",
+        "status": "skipped",
+        "reason": "security-guide.mdへの追記はNice to Haveであり、本Issue修正完了後に別途対応可能"
+      },
+      {
+        "id": "S3-011",
+        "status": "skipped",
+        "reason": "Worktreeプロキシへの波及確認はNice to Haveだが、Affected Surfaceに簡潔な言及を追加済み"
+      },
+      {
+        "id": "S3-012",
+        "status": "skipped",
+        "reason": "セキュリティ専用テストファイル新規作成はNice to Haveであり、S3-001のテスト修正計画でカバー済み"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 12,
+    "applied": 9,
+    "skipped": 3
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/395"
+  }
+}

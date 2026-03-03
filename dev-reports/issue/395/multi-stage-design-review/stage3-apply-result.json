@@ -1,0 +1,9 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー指摘反映",
+  "issue_number": 395,
+  "applied_date": "2026-03-03",
+  "applied_findings": ["DR3-001", "DR3-003", "DR3-005"],
+  "skipped_findings": ["DR3-002", "DR3-004", "DR3-006", "DR3-007", "DR3-008"],
+  "update_summary": "Stage 3影響分析レビューの3件の指摘を設計方針書に反映した。DR3-001(must_fix): Section 6テスト設計の既存テスト修正方針を具体化し、全機密ヘッダをテストリクエストに含めた上で.has()による不在アサーションと安全ヘッダの転送アサーションの両方を明記。DR3-003(should_fix): Section 8変更ファイル一覧にsrc/lib/external-apps/interfaces.tsを追加し、IProxyHandler.proxyWebSocket()のJSDoc更新方針を記載。DR3-005(should_fix): Section 5にnext.config.jsのCSP/X-Frame-Optionsとの相互作用確認方針を追記し、Section 9受け入れ条件にフォールバック実装の条件を追加。スキップした5件(DR3-002,DR3-004,DR3-006,DR3-007,DR3-008)は既存記載から自明またはスコープ外のため対応不要と判断。"
+}

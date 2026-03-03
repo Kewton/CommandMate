@@ -1,0 +1,77 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 395,
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "設計原則 - DRY",
+      "title": "リクエスト/レスポンスのヘッダフィルタリングロジックが重複している",
+      "description": "設計方針書 Section 4-2 のリクエストヘッダフィルタリング（L62-68相当）とレスポンスヘッダフィルタリング（L87-94相当）は、構造的に同一のパターン（forEach + toLowerCase + 2つの配列に対するincludes否定チェック + headers.set）を繰り返している。現在の既存コードでも同じ重複があるが、今回の変更でチェック対象が2配列に増えることで、フィルタリング条件の変更時に2箇所を同期修正する必要性が高まる。",
+      "location": "設計方針書 Section 4-2: handler.ts proxyHttp() リクエスト/レスポンスヘッダフィルタリング",
+      "suggestion": "ヘッダフィルタリングをヘルパー関数に抽出することを検討する。例: filterHeaders(source: Headers, excludeLists: ReadonlyArray<ReadonlyArray<string>>): Headers。ただし既存パターンとの一貫性を重視してインライン維持とする判断も妥当であり、この場合はコメントで両箇所の同期修正が必要であることを明記する。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "category": "設計原則 - YAGNI / SRP",
+      "title": "proxyWebSocket()の未使用パラメータ維持は不要な複雑性",
+      "description": "設計方針書 Section 4-3 では、proxyWebSocket(request, app, path) のシグネチャを「互換性のため維持」としているが、修正後の実装ではrequest、app、pathの全パラメータが使用されない。TypeScript/ESLintでは未使用パラメータに対して警告が発生する可能性がある。また「シグネチャ互換性」の理由が不明確で、proxyWebSocketはhandler.ts内で直接呼び出されるため、外部インターフェース互換性の必要性が低い。",
+      "location": "設計方針書 Section 4-3: handler.ts proxyWebSocket() パラメータ維持の決定",
+      "suggestion": "2つのアプローチを検討する: (A) パラメータを削除し、呼び出し元(route.ts)も合わせて修正する（route.tsは変更不要スコープだが軽微な修正で済む）。(B) パラメータを維持する場合は、TypeScriptの慣習に従いアンダースコアプレフィックス(_request, _app, _path)を使用して未使用であることを明示する。現実的にはroute.tsでの呼び出しシグネチャ変更を避けるために(B)が妥当。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "category": "設計原則 - OCP（開放閉鎖原則）",
+      "title": "ヘッダ除外リストの拡張性に関する型安全性が不十分",
+      "description": "設計方針書のコード例では、.includes()呼び出し時に 'as typeof SENSITIVE_REQUEST_HEADERS[number]' という型アサーションを使用している。これは既存のHOP_BY_HOPヘッダと同じパターンだが、lowerKeyが実際にはstringであるため、型安全性の観点では改善の余地がある。新しいヘッダを配列に追加する際、TypeScriptの型チェックが期待通りに機能しない可能性がある（常にstringをas constリテラル型にキャストしているため）。",
+      "location": "設計方針書 Section 4-2: .includes() の型アサーション",
+      "suggestion": "これは既存パターンの踏襲であるため本Issueでの修正は不要。将来的にリファクタリングする場合は、Set<string>に移行するか、型アサーションを避けるヘルパー関数（例: isExcludedHeader(key: string, list: readonly string[]): boolean）を導入することで型安全性を改善できる。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "category": "設計原則 - KISS",
+      "title": "ExternalAppForm.tsxの警告バナーはi18n非対応の技術的負債を生む",
+      "description": "設計方針書 Section 4-4 では、セキュリティ警告バナーを英語固定文字列でハードコードしている。本プロジェクトはnext-intlによるi18n対応済みであり（src/i18n.ts、useTranslations等）、新規UI文字列をハードコードすることはプロジェクト全体のi18n方針との不整合を生む。設計方針書でもスコープ外と明記されているが、後続の負債管理が必要。",
+      "location": "設計方針書 Section 4-4: ExternalAppForm.tsx セキュリティ警告バナー",
+      "suggestion": "実装時に英語固定文字列を使用すること自体は許容するが、TODOコメントでi18n対応の必要性を明記する（例: // TODO: Issue #XXX - i18n対応が必要）。もしくはメッセージファイルに追加して最初からuseTranslationsを使用する方が、追加コストが低い可能性がある。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "category": "設計原則 - テスト設計",
+      "title": "既存テスト'should forward request headers'の修正方針が不明確",
+      "description": "設計方針書 Section 6 では「既存テスト修正: 『should forward request headers』のAuthorization転送期待を除去」と記載されているが、修正後のテストがどのようなアサーションを行うかが具体的に示されていない。現在のテストコード（tests/unit/proxy/handler.test.ts L83-105）では、Authorizationヘッダが含まれるリクエストを送信し、fetchが呼ばれることだけを確認している。修正後は、Authorizationがストリップされていることを明示的にアサートするのか、テスト自体からAuthorizationを除去するだけかが不明。",
+      "location": "設計方針書 Section 6: テスト設計 - 既存テスト修正",
+      "suggestion": "テスト修正方針を明確化する: (A) 既存テストからAuthorizationヘッダの設定を除去し、安全なヘッダ(X-Custom-Header等)のみの転送を検証する、(B) 既存テストはそのまま維持し、新規テストケースでAuthorizationがストリップされることを検証する。推奨は(B)で、既存テストのテスト意図（安全なヘッダの転送確認）を維持しつつ、新規テストでストリッピングを検証する。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "must_fix",
+      "category": "設計原則 - DRY / 正確性",
+      "title": "設計方針書のコード例でヘッダフィルタリング条件がリクエスト/レスポンスで対称的でない可能性への言及がない",
+      "description": "設計方針書 Section 4-2 のリクエストヘッダフィルタリングでは HOP_BY_HOP_REQUEST_HEADERS と SENSITIVE_REQUEST_HEADERS の2配列を使用し、レスポンスヘッダフィルタリングでは HOP_BY_HOP_RESPONSE_HEADERS と SENSITIVE_RESPONSE_HEADERS の2配列を使用する。しかし、既存コードのhandler.ts L62-68（リクエスト）と L87-94（レスポンス）を見ると、現在のコードのコメントには 'removing hop-by-hop headers' としか記載されていない。修正後は機密ヘッダストリッピングも行うため、コメントの更新が必要である。設計方針書にコメント更新への言及がない。",
+      "location": "設計方針書 Section 4-2: handler.ts proxyHttp() コメント",
+      "suggestion": "handler.ts内の既存コメントを更新する方針を設計方針書に追記する。例: '// Clone headers, removing hop-by-hop and sensitive headers (Issue #395)' のようにコメントを修正し、ストリッピング対象にセキュリティ関連ヘッダが含まれることを明示する。これは実装時の見落とし防止とコードの自己文書化の観点で重要。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "should_fix",
+      "category": "設計原則 - 防御的設計",
+      "title": "PROXY_ERROR_MESSAGES.UPGRADE_REQUIREDの既存メッセージ内容がproxyWebSocket修正と矛盾する可能性",
+      "description": "設計方針書 Section 4-3 では proxyWebSocket() のmessageフィールドを PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED 固定文字列にするとしている。config.ts L62の既存定義は 'WebSocket connections are not supported through the proxy Route Handler' であり、これ自体は情報漏洩にはならない。しかし、レスポンスのJSONに error:'Upgrade Required' と message:PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED の両方が含まれており、error フィールドがハードコードされた文字列 'Upgrade Required' になっている点で、PROXY_ERROR_MESSAGES から取得すべきではないか（DRY原則）。既存のproxyHttp()エラーレスポンスでも error フィールドは 'Gateway Timeout' / 'Bad Gateway' とハードコードされているため既存パターンの踏襲ではあるが、改善の機会。",
+      "location": "設計方針書 Section 4-3: proxyWebSocket() エラーレスポンスの error フィールド",
+      "suggestion": "本Issueのスコープでは既存パターン踏襲でハードコード維持でよい。ただし将来的にはPROXY_ERROR_NAMESのような定数をconfig.tsに追加し、errorフィールドも一元管理することを検討する。設計方針書に「既存パターン踏襲」であることを明記する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 3,
+    "overall_assessment": "設計方針書は全体としてKISS/YAGNI原則に適切に準拠しており、既存パターンの踏襲による一貫性も確保されている。変更スコープが最小限に絞られ、セキュリティ上の脆弱性に対する的確な修正方針が示されている。must_fixは1件（コメント更新方針の明記）のみであり、設計の品質は高い。DRY原則に関してヘッダフィルタリングの重複パターンが指摘されるが、既存コードとの一貫性を考慮すると許容範囲内。proxyWebSocketの未使用パラメータ問題はアンダースコアプレフィックスで対処可能。conditionally_approvedとして、must_fix対応後に実装着手可能。"
+  }
+}

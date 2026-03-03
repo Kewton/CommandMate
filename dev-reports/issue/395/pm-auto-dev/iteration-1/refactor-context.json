@@ -1,0 +1,28 @@
+{
+  "issue_number": 395,
+  "refactor_targets": [
+    "src/lib/proxy/config.ts",
+    "src/lib/proxy/handler.ts",
+    "src/app/proxy/[...path]/route.ts",
+    "src/components/external-apps/ExternalAppForm.tsx",
+    "src/lib/external-apps/interfaces.ts",
+    "tests/unit/proxy/handler.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "コードの可読性・保守性向上（DRY原則、SOLID原則）",
+    "テストコードの品質向上（重複の排除、テストの独立性）",
+    "コメントの適切性確認（不要なコメントの削除、必要なJSDocの追加）",
+    "TypeScript型定義の最適化",
+    "セキュリティコードのコード品質確認"
+  ],
+  "constraints": [
+    "機能を変更しないこと",
+    "セキュリティ要件を弱化しないこと",
+    "テストが引き続きパスすること",
+    "SENSITIVE_REQUEST_HEADERS/SENSITIVE_RESPONSE_HEADERSの7ヘッダ/11ヘッダを変更しないこと"
+  ],
+  "acceptance_result_path": "dev-reports/issue/395/pm-auto-dev/iteration-1/acceptance-result.json"
+}

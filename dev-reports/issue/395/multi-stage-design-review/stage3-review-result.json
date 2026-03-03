@@ -1,0 +1,86 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 395,
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "DR3-001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "handler.test.ts L83-105 既存テスト 'should forward request headers' がストリッピング実装後に偽陽性パスする可能性",
+      "description": "既存テスト (L83-105) は Authorization ヘッダを含むリクエストを作成しているが、アサーションは `expect.any(Headers)` のみで、実際に Authorization が転送されていることを検証していない。Issue #395 の実装後、Authorization はストリップされるが、このテストは構造変更なしでも引き続きパスする。設計方針書 Section 6 で既存テスト修正として「ヘッダ内容確認アサーション追加」を記載しているが、この既存テストが変更しない場合に具体的にどのように回帰が検出されるかが不明確である。特に、このテストがリクエストヘッダに Cookie を含めていないため、Cookie ストリッピングの回帰テストとして機能しない点が漏れている。",
+      "location": "設計方針書 Section 6 テスト設計、および tests/unit/proxy/handler.test.ts L83-105",
+      "suggestion": "設計方針書のテスト設計セクションにおいて、既存テスト 'should forward request headers' の修正方針を具体化する。リクエストに Cookie, Authorization, X-Forwarded-For 等の機密ヘッダを全て含めた上で、(1) 機密ヘッダがストリップされていること、(2) X-Custom-Header 等の安全なヘッダは引き続き転送されていること、の両方をアサートするテストに変更する。fetch に渡された Headers オブジェクトの .has() / .get() を直接検証する手法を明記すること。"
+    },
+    {
+      "id": "DR3-002",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "route.test.ts (route.ts 結合テスト) への影響分析が未記載",
+      "description": "tests/unit/proxy/route.test.ts は handler.ts の proxyHttp / proxyWebSocket をモックして route.ts の統合動作を検証している。handler.ts のシグネチャ変更（proxyWebSocket のパラメータ名にアンダースコア追加）は route.ts からの呼び出しに影響しないが、route.test.ts 内の WebSocket 関連のモック設定 (L23-27 の proxyWebSocket: vi.fn()) が変更後の実装と整合するかの確認が設計方針書に記載されていない。route.ts は設計方針書のコンポーネント図で「変更不要」と明示されているが、そのテストへの影響言及がない。",
+      "location": "設計方針書 Section 2 コンポーネント図、Section 6 テスト設計、Section 8 変更ファイル一覧",
+      "suggestion": "Section 6 のテスト設計に、route.test.ts は handler.ts をモックしており、シグネチャ変更の影響を受けないため変更不要であることを明記する。または Section 8 の変更ファイル一覧に route.test.ts が変更不要である旨を注記する。"
+    },
+    {
+      "id": "DR3-003",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "IProxyHandler インターフェース (interfaces.ts) の JSDoc が proxyWebSocket の動作変更と不整合になる",
+      "description": "src/lib/external-apps/interfaces.ts L81-107 で定義されている IProxyHandler インターフェースの proxyWebSocket メソッドの JSDoc には '@returns WebSocket upgrade response' と記載されている。Issue #395 の実装後、proxyWebSocket は内部 URL 情報を含まない 426 エラーレスポンスを返す仕様に変更されるが、このインターフェースの JSDoc が更新されないまま残る。また、handler.ts L132-141 の関数 JSDoc にも 'with instructions' と記載されており、directUrl 削除後は不正確になる。",
+      "location": "設計方針書 Section 8 変更ファイル一覧、src/lib/external-apps/interfaces.ts L95-106、src/lib/proxy/handler.ts L132-141",
+      "suggestion": "Section 8 の変更ファイル一覧に src/lib/external-apps/interfaces.ts を追加し、IProxyHandler.proxyWebSocket の JSDoc を '@returns A 426 response indicating WebSocket proxy is not supported' に更新する方針を記載する。同様に handler.ts の proxyWebSocket 関数の JSDoc コメント（L136: 'with instructions' 部分）も更新対象に含める。"
+    },
+    {
+      "id": "DR3-004",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "proxy/index.ts の re-export に新規定数の追加漏れ可能性",
+      "description": "src/lib/proxy/index.ts は handler.ts と logger.ts の主要エクスポートを re-export しているが、config.ts からのエクスポートは含まれていない。SENSITIVE_REQUEST_HEADERS / SENSITIVE_RESPONSE_HEADERS は config.ts に追加されるが、handler.ts 内部でのみ使用されるため index.ts への追加は不要である。しかし、将来的にテストや他のモジュールから直接参照する可能性を考慮すると、設計判断として明示的に「index.ts への re-export 追加は不要」と記載すべきである。",
+      "location": "設計方針書 Section 8 変更ファイル一覧、src/lib/proxy/index.ts",
+      "suggestion": "Section 8 に proxy/index.ts が変更不要である理由（SENSITIVE_* 定数は handler.ts 内部でのみ消費されるため）を注記する。テストでの直接参照が必要な場合は config.ts から直接インポートする方針を明記する。"
+    },
+    {
+      "id": "DR3-005",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "next.config.js の CSP/X-Frame-Options 設定との相互作用が未分析",
+      "description": "next.config.js では全ルート (/:path*) に対して Content-Security-Policy と X-Frame-Options レスポンスヘッダが設定されている。Issue #395 では upstream からの CSP / X-Frame-Options レスポンスヘッダをストリップする設計だが、Next.js がプロキシレスポンスに対してもこれらのヘッダを自動付与するかの動作確認が設計方針書に記載されていない。proxyHttp() は fetch レスポンスを新しい Response オブジェクトとして返すため、Next.js の headers() 設定が適用されるかは Route Handler のランタイム動作に依存する。ストリップ後に Next.js が再付与しない場合、CSP / X-Frame-Options が欠落する可能性がある。",
+      "location": "設計方針書 Section 4-1 設計判断（CSP/X-Frame-Options の項目）、next.config.js L23-81",
+      "suggestion": "Section 5 セキュリティ設計に、next.config.js の headers() 設定が proxyHttp() の Route Handler レスポンスにも適用されることの確認方針を追記する。Next.js の Route Handler から返された Response に対して next.config.js headers() が自動的にマージされるかを実装時に検証し、されない場合は upstream の CSP をストリップした後に next.config.js 相当のヘッダを手動で付与するフォールバックを検討する旨を記載する。"
+    },
+    {
+      "id": "DR3-006",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "ExternalAppCard.tsx の 'Open' ボタンによるプロキシアクセスと警告の関連性",
+      "description": "ExternalAppCard.tsx L155 で window.open(proxyUrl, '_blank') によりプロキシ経由のアプリを新しいタブで開く機能がある。設計方針書では ExternalAppForm.tsx にのみ警告バナーを追加する方針だが、ExternalAppCard にもセキュリティリスクの視覚的インジケーターがあると、ユーザーが登録済みアプリを開く際にもリスクを認識しやすい。ただし、本 Issue のスコープは最小限の修正であり、UI 改善は別 Issue で対応すべきである。",
+      "location": "設計方針書 Section 4-4、src/components/external-apps/ExternalAppCard.tsx L155",
+      "suggestion": "本 Issue では対応不要。将来的な改善として、ExternalAppCard の Open ボタン付近に小さな警告アイコンやツールチップを追加することを検討する旨を、設計方針書の残存リスク（Section 5）に追記する。"
+    },
+    {
+      "id": "DR3-007",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "logger.test.ts への影響確認が未記載",
+      "description": "tests/unit/proxy/logger.test.ts は proxy/logger.ts のテストであり、handler.ts や config.ts の変更の直接的影響を受けない。ただし、設計方針書のテスト設計セクションで言及されていないため、確認済みかどうかが不明である。",
+      "location": "設計方針書 Section 6 テスト設計",
+      "suggestion": "Section 6 に logger.test.ts は変更不要であることを一文追記する。変更ファイル一覧に含まれていないことから自明ではあるが、網羅性のために明記するとレビューアにとって確認しやすい。"
+    },
+    {
+      "id": "DR3-008",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "middleware.ts の WebSocket 認証と proxyWebSocket() の 426 レスポンスの関係が未整理",
+      "description": "middleware.ts L84-96 では WebSocket upgrade リクエストに対して認証チェックを行い、認証成功時は NextResponse.next() で通過させる。proxyWebSocket() は常に 426 を返すため、認証済み WebSocket リクエストが Route Handler に到達しても結局拒否される。この動作は Issue #395 の前後で変わらないが、proxyWebSocket() の情報削減により、認証済みユーザーが WebSocket 接続を試みた際のエラーメッセージから直接接続先情報が得られなくなる点は動作変更である。設計方針書ではこの観点が分析されていない。",
+      "location": "設計方針書 Section 5 防御の多層化、src/middleware.ts L84-96",
+      "suggestion": "Section 7 のトレードオフ表の 'directUrl完全削除' 行に、認証済みユーザーも直接接続先情報を取得できなくなる点を追記する。開発者向けドキュメントやログで upstream の接続先情報を提供する代替手段を検討する旨を付記する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 4,
+    "nice_to_have": 3,
+    "overall_assessment": "設計方針書の影響範囲分析は概ね適切であり、変更対象が handler.ts / config.ts / ExternalAppForm.tsx の3ファイルに限定されている点は妥当である。ただし、既存テストの修正方針が不十分であり（DR3-001）、回帰テストとしての信頼性に懸念がある。また、IProxyHandler インターフェースの JSDoc 不整合（DR3-003）と next.config.js の CSP ヘッダとの相互作用（DR3-005）は実装時に問題を引き起こす可能性があるため、設計段階で方針を明確にすべきである。全体として、変更範囲が小さく影響がよく限定されているため、指摘事項を反映すれば実装に進めるレベルである。"
+  }
+}

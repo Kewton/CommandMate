@@ -1,0 +1,95 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 395,
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "DR2-001",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "設計方針書のリクエストヘッダフィルタリング行番号(L62-68)と実コードのコメント行(L64)に不整合",
+      "description": "設計方針書 Section 4-2 では「リクエストヘッダフィルタリング（L62-68）」としており、コード例も L62 の request.headers.forEach から始まる。しかし、実コードの handler.ts L60 は '// Clone headers, removing hop-by-hop headers' コメント行、L61 が 'const headers = new Headers()' であり、設計方針書のコード例は L61 の headers 宣言から始まっている。設計方針書 Section 4-2 のコメント更新節では「handler.ts L60 の既存コメント」と正しく参照しているが、リクエストヘッダフィルタリング節の行番号表記「L62-68」は、フィルタリングループのみを指しているのか、コメント行も含むのかが不明確。コード例では L60-67 の範囲を示すべきだが、実際に表示されたコード例は L60(コメント)-L68(closing brace)の範囲と一致する。行番号表記とコード例の範囲が不整合。",
+      "location": "設計方針書 Section 4-2: リクエストヘッダフィルタリング（L62-68）の見出し",
+      "suggestion": "設計方針書の見出しを「リクエストヘッダフィルタリング（L60-68）」に修正し、コメント行(L60)も変更範囲に含むことを明確にする。同様にレスポンス側も「L86-94」に修正する（現在は「L87-94」だが、L86がコメント行）。"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "must_fix",
+      "category": "整合性",
+      "title": "設計方針書のproxyWebSocket()行番号(L143-166)が実コードと一致しない",
+      "description": "設計方針書 Section 4-3 では「現在のコード（L143-166）」としているが、実際のhandler.ts では L143 が 'export async function proxyWebSocket(' で、L166 が '}' (関数の閉じブレース) である。つまりL143-166は関数全体を含み正確である。ただし、設計方針書ではL143-166を「directUrlフィールドとmessageフィールドに内部URL情報が含まれている」箇所として参照しているが、情報漏洩の核心はL150(directWsUrl構築)、L155(messageフィールド)、L156(directUrlフィールド)の3行にある。行番号自体は正確であり問題ないが、レスポンスヘッダフィルタリング行番号(Section 4-2)の「L87-94」はコメント行L86を含んでいない点が不整合のままである。",
+      "location": "設計方針書 Section 4-2: レスポンスヘッダフィルタリング（L87-94）の見出し",
+      "suggestion": "「L87-94」を「L86-94」に修正する。実コードのL86は '// Clone response headers, removing hop-by-hop headers' コメント行であり、このコメントも更新対象（DR1-006）であるため変更範囲に含めるべき。"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "既存テスト「should forward request headers」の検証内容と設計方針書の修正計画に齟齬",
+      "description": "設計方針書 Section 6 では「既存テスト修正: 『should forward request headers』のAuthorization転送期待を除去」としている。しかし、実際のテストコード(tests/unit/proxy/handler.test.ts L83-105)を確認すると、このテストはAuthorizationヘッダを含むリクエストを送信しているが、fetchに渡されたheadersの中にAuthorizationが含まれていることを明示的にアサートしていない。アサーションは expect(global.fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ headers: expect.any(Headers) })) のみで、Headers オブジェクトの内容を検査していない。つまり「Authorization転送期待を除去」という記述は、テストのインプットからAuthorization設定を除去する意味か、テストのアサーションを変更する意味か、曖昧である。テストの現状では「Authorization転送を期待するアサーション」が存在しないため、除去すべき対象が不明確。",
+      "location": "設計方針書 Section 6: テスト設計 - 既存テスト修正",
+      "suggestion": "設計方針書のテスト修正記述を正確に更新する。例: 「既存テスト 'should forward request headers' のリクエストヘッダからAuthorizationを除去し、安全なヘッダ(X-Custom-Header等)のみで転送を検証する。加えて新規テストケースでAuthorizationがストリップされることを明示的にアサートする」のように、修正対象（テストのインプットか、アサーションか）を明確化する。"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "既存テスト「should include WebSocket upgrade instructions」がdirectUrl存在を前提としている",
+      "description": "テストコード tests/unit/proxy/handler.test.ts L194-210 の 'should include WebSocket upgrade instructions in error response' テストでは、body.message に 'WebSocket' が含まれることのみを検証している。設計方針書の修正により、messageフィールドは PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED 固定文字列になり、directUrlフィールドは削除される。既存テストはdirectUrlの存在を明示的にアサートしていないため、テスト自体は修正後もパスする可能性があるが、設計方針書 Section 6 のテスト修正計画には、この既存テストの更新についての言及がない。proxyWebSocket()の情報除去テストは「新規テスト」として記載されているが、既存テスト 'should include WebSocket upgrade instructions' とのテスト範囲重複・更新の要否が不明確。",
+      "location": "設計方針書 Section 6: テスト設計 - proxyWebSocket()情報除去",
+      "suggestion": "設計方針書のテスト設計に、既存テスト 'should include WebSocket upgrade instructions in error response' の扱いを明記する。既存テストのアサーション body.message.toContain('WebSocket') は修正後もパスするため維持可能だが、テスト名が「instructions」を含む点と実装がインストラクション情報を削除する点が矛盾する。テスト名の更新またはテスト統合を検討する。"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "設計方針書のimport文コード例が既存コードのimport順序と不整合",
+      "description": "設計方針書 Section 4-2 のimport文コード例では、HOP_BY_HOP_REQUEST_HEADERS / HOP_BY_HOP_RESPONSE_HEADERS / SENSITIVE_REQUEST_HEADERS / SENSITIVE_RESPONSE_HEADERS / PROXY_TIMEOUT / PROXY_STATUS_CODES / PROXY_ERROR_MESSAGES の順でimportしている。しかし、実際のhandler.ts L13-19 では PROXY_TIMEOUT / HOP_BY_HOP_REQUEST_HEADERS / HOP_BY_HOP_RESPONSE_HEADERS / PROXY_STATUS_CODES / PROXY_ERROR_MESSAGES の順である。設計方針書のコード例では「既存」と「新規」をコメントで区別する形式で並べ替えているが、実装時にこの順序で記述するとESLintの import ordering ルールやレビューでの差分が大きくなる可能性がある。",
+      "location": "設計方針書 Section 4-2: import文のコード例",
+      "suggestion": "設計方針書のimport文コード例を、既存のhandler.ts のimport順序に合わせて PROXY_TIMEOUT / HOP_BY_HOP_REQUEST_HEADERS / SENSITIVE_REQUEST_HEADERS / HOP_BY_HOP_RESPONSE_HEADERS / SENSITIVE_RESPONSE_HEADERS / PROXY_STATUS_CODES / PROXY_ERROR_MESSAGES とするか、既存順序を維持してSENSITIVE_*を末尾に追加する形式に変更する。「既存」「新規」のコメントは設計説明用であり、実装コードには含めないことを明記する。"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "設計方針書の変更不要ファイル一覧にroute.tsが含まれているが暗黙の動作変更がある",
+      "description": "設計方針書 Section 2 のアーキテクチャ図では route.ts を「変更不要」としている。proxyWebSocket() のパラメータがアンダースコアプレフィックス付きに変更されるが、シグネチャ(引数の数と型)は変わらないため route.ts のコード修正は不要。ただし、proxyWebSocket() の動作が変わる（directUrlフィールドの削除、messageの変更）ため、route.ts を経由したWebSocket upgrade レスポンスの内容が変わる。これは「変更不要」の定義（コード変更不要 vs 動作変更なし）に依存するが、設計方針書としては「コード変更不要だが動作は変わる」ことを明記した方が影響範囲の理解に資する。",
+      "location": "設計方針書 Section 2: 変更対象コンポーネント図の「変更不要」サブグラフ",
+      "suggestion": "アーキテクチャ図またはレイヤー構成テーブルに「route.ts: コード変更不要、proxyWebSocket()のレスポンス変更に伴い暗黙の動作変更あり」の注釈を追加する。"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "設計方針書のhandler.ts L106/L119参照が実コードとずれている",
+      "description": "設計方針書 Section 4-3 末尾のDR1-007設計判断において「handler.ts L106 'Gateway Timeout', L119 'Bad Gateway' 参照」と記載されている。実コードを確認すると、L107 が 'error: \"Gateway Timeout\"' であり、L121が 'error: \"Bad Gateway\"' である。L106はJSON.stringify()の開始行、L119は new Response() の開始行である。完全な不整合ではないが、正確な行番号ではない。",
+      "location": "設計方針書 Section 4-3: DR1-007設計判断のhandler.ts行番号参照",
+      "suggestion": "L106をL107に、L119をL121に修正する。もしくは行番号参照を除去し「proxyHttp()のcatchブロック内エラーレスポンス」のような記述に変更する。行番号は実装変更に伴い容易にずれるため、可能な限り構造的な参照を使用する方が保守性が高い。"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "CLAUDE.md更新計画の具体的な記載内容が設計方針書に示されていない",
+      "description": "設計方針書 Section 8 の変更ファイル一覧では「CLAUDE.md: handler.ts, config.ts モジュール説明更新」とあり、受け入れ条件 #8 でも「CLAUDE.mdの handler.ts / config.ts 説明が更新されている」と記載されている。しかし、更新後の具体的な記載内容（例: config.ts の説明に SENSITIVE_REQUEST_HEADERS / SENSITIVE_RESPONSE_HEADERS を追加、handler.ts の説明に Issue #395 の変更内容を追記）が設計方針書に示されていない。既存のCLAUDE.md の handler.ts 記載は「Issue #42: proxyHttp/proxyWebSocket/buildUpstreamUrl/isWebSocketUpgrade。Issue #376: buildUpstreamUrl()...」であり、config.ts 記載は「PROXY_TIMEOUT/HOP_BY_HOP_REQUEST_HEADERS/HOP_BY_HOP_RESPONSE_HEADERS/PROXY_STATUS_CODES/PROXY_ERROR_MESSAGES」である。",
+      "location": "設計方針書 Section 8: 変更ファイル一覧 - CLAUDE.md行、Section 9: 受け入れ条件 #8",
+      "suggestion": "設計方針書にCLAUDE.md更新後の記載内容を具体的に示す。例: config.ts: 「PROXY_TIMEOUT/HOP_BY_HOP_REQUEST_HEADERS/HOP_BY_HOP_RESPONSE_HEADERS/SENSITIVE_REQUEST_HEADERS/SENSITIVE_RESPONSE_HEADERS/PROXY_STATUS_CODES/PROXY_ERROR_MESSAGES」、handler.ts: 「Issue #395: SENSITIVE_REQUEST_HEADERS/SENSITIVE_RESPONSE_HEADERSによる機密ヘッダストリッピング追加、proxyWebSocket()情報漏洩修正」等。"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "nice_to_have",
+      "category": "整合性",
+      "title": "設計方針書のExternalAppForm.tsx警告バナー挿入位置が未指定",
+      "description": "設計方針書 Section 4-4 ではセキュリティ警告バナーのHTMLコード例を示しているが、ExternalAppForm.tsx 内のどの位置に挿入するかが明記されていない。「フォーム上部」との記載はあるが、ExternalAppForm.tsx のJSXは <Modal> > <form> > 各フィールドの構造であり、<form> 直下の先頭（L202の直後）に挿入するのか、<Modal> の直下に挿入するのかが不明確。また「作成/編集両モードで表示」と明記されているため条件分岐は不要だが、実装時の挿入位置を特定できるコンテキスト（例: 「<form className=\"space-y-4\"> の直後、Display Name フィールドの前」）があると整合性が高まる。",
+      "location": "設計方針書 Section 4-4: ExternalAppForm.tsx セキュリティ警告バナー",
+      "suggestion": "挿入位置を明記する。例: 「<form onSubmit={handleSubmit} className=\"space-y-4\"> の直後、{/* Display Name */} コメントの前に挿入する」。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 3,
+    "nice_to_have": 4,
+    "overall_assessment": "設計方針書は既存コードの構造、変数名、型定義、API呼び出しパターンとおおむね整合しており、実装可能な品質に達している。must_fixは行番号の不正確さ2件であり、実装時の混乱を防ぐため修正が必要。should_fixは既存テストの実際のアサーション内容と設計方針書のテスト修正記述の齟齬、およびimport順序の不整合であり、TDDサイクル中に混乱を招く可能性がある。nice_to_haveはCLAUDE.md更新内容の具体化やコンポーネント挿入位置の明確化など、実装精度を高めるための補足情報。overall: conditionally_approved -- must_fix 2件の行番号修正後に実装着手可能。"
+  }
+}

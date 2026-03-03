@@ -1,0 +1,22 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘反映",
+  "issue_number": 395,
+  "applied_date": "2026-03-03",
+  "applied_findings": ["DR4-001", "DR4-002", "DR4-003", "DR4-004", "DR4-005", "DR4-006", "DR4-007", "DR4-008"],
+  "skipped_findings": ["DR4-009", "DR4-010"],
+  "update_summary": "Stage 4 セキュリティレビューの全 must_fix (2件) および全 should_fix (6件) を設計方針書に反映。(1) DR4-001: route.ts を変更対象に移動し、catch節のエラーレスポンスを PROXY_ERROR_MESSAGES.BAD_GATEWAY 固定文字列に変更する方針を Section 4-5 に新規追加。(2) DR4-002: SENSITIVE_REQUEST_HEADERS に proxy-authorization を追加。(3) DR4-003: route.ts の 404/503 レスポンスから pathPrefix/displayName を除去し固定文字列化する方針を Section 4-5 に追加。(4) DR4-004: SENSITIVE_RESPONSE_HEADERS に strict-transport-security を追加。(5) DR4-005: SENSITIVE_RESPONSE_HEADERS に access-control-* CORS 6ヘッダを追加。(6) DR4-006: Referer/Origin ヘッダのトレードオフを Section 7 に記録（ストリップしない方針）。(7) DR4-007: CSP connect-src ws:/wss: の残存リスクを Section 5 に追記。(8) DR4-008: SENSITIVE_RESPONSE_HEADERS に content-security-policy-report-only を追加。nice_to_have 2件 (DR4-009, DR4-010) は既存設計方針から方針が明確であるためスキップ。",
+  "design_policy_file": "dev-reports/design/issue-395-proxy-security-hardening-design-policy.md",
+  "changes_applied": {
+    "section_2": "コンポーネント図の route.ts を「変更不要」から「変更対象」に移動、レイヤー構成テーブルにルーティング層を追加",
+    "section_4_1": "SENSITIVE_REQUEST_HEADERS に proxy-authorization 追加、SENSITIVE_RESPONSE_HEADERS に strict-transport-security, access-control-* 6ヘッダ, content-security-policy-report-only 追加、設計判断セクション拡充",
+    "section_4_2": "import文コメントに DR4-002/DR4-004/DR4-005/DR4-008 の参照を追加",
+    "section_4_5_new": "route.ts エラーレスポンスの固定文字列化（catch節 DR4-001、404/503 DR4-003）の詳細設計を新規追加",
+    "section_5": "防御層テーブルに L4b（route.ts固定文字列化）追加、残存リスクに CSP connect-src ws:/wss: リスク追記",
+    "section_6": "テストカテゴリのリクエスト/レスポンスヘッダストリッピング項目を拡充",
+    "section_7": "トレードオフ表に Referer/Origin ヘッダの設計判断を追加",
+    "section_8": "変更ファイル一覧に route.ts を追加",
+    "section_9": "受け入れ条件に項目12（catch節固定文字列化）と項目13（404/503固定文字列化）を追加、既存項目2,3を拡充",
+    "section_13_new": "Stage 4 レビュー指摘反映サマリーを新規追加（反映済み8件、スキップ2件、実装チェックリスト10項目）"
+  }
+}

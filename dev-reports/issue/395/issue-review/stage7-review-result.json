@@ -1,0 +1,217 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 395,
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "S7-001",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "handler.tsのSENSITIVE_REQUEST_HEADERS追加時にSet型とArray型の整合性に注意が必要",
+      "description": "Implementation Notesのコード例ではSENSITIVE_REQUEST_HEADERSとSENSITIVE_RESPONSE_HEADERSをnew Set([...])として定義している。一方、既存のHOP_BY_HOP_REQUEST_HEADERSとHOP_BY_HOP_RESPONSE_HEADERSはas const配列として定義されており、handler.tsのヘッダフィルタリングループではArray.includes()を使用している（handler.ts L65, L91）。新しいSENSITIVE_*定数がSetの場合、handler.tsのフィルタリングロジックで.has()を使う必要があり、既存のHOP_BY_HOP_*の.includes()チェックとは異なるAPIパターンになる。これ自体は問題ではないが、Issueの実装計画では「In handler.ts, the header forwarding loop should check both HOP_BY_HOP_* and SENSITIVE_* sets」と記載されており、「sets」という表現が既存のHOP_BY_HOP_*もSetに変更することを示唆しているかどうか曖昧である。実装者が判断に迷う可能性がある。",
+      "location": "Implementation Notes 'config.ts design (S3-002)' / src/lib/proxy/handler.ts L62-68, L88-94",
+      "suggestion": "Implementation Notesに「SENSITIVE_*定数はSetとして定義し.has()で参照する。既存のHOP_BY_HOP_*定数はas const配列のまま維持し、既存の.includes()パターンとの互換性を保つ。handler.tsのヘッダフィルタリングループでは両方のチェックを行う（例: if (!HOP_BY_HOP_REQUEST_HEADERS.includes(...) && !SENSITIVE_REQUEST_HEADERS.has(...))）」と具体的な結合パターンを明記する。"
+    },
+    {
+      "id": "S7-002",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "proxyWebSocket()テスト（handler.test.ts L194-210）がdirectUrl/messageフィールドの存在を期待している",
+      "description": "Stage 3のS3-001で既存テスト修正の必要性は指摘されたが、具体的にはproxyHttp()のヘッダ転送テスト（L83-105）のみが言及されていた。実際にはproxyWebSocket()のテスト「should include WebSocket upgrade instructions in error response」（L194-210）でbody.messageにWebSocket文字列が含まれることを期待している（L209: expect(body.message).toContain('WebSocket')）。S3-003/S5-008の修正でmessageフィールドをジェネリックなメッセージに変更した場合、このテストは成功するかもしれないが（PROXY_ERROR_MESSAGES.UPGRADE_REQUIREDに既に'WebSocket'が含まれている）、directUrlフィールドの除去によってL208のexpect(body).toHaveProperty('error')以外の暗黙的な期待（bodyにdirectUrlが含まれることを前提としたテスト構造）が不整合になる可能性がある。Test modification plan item 5で「directUrl and message removal test」の追加は明記されているが、既存のproxyWebSocket()テストの修正（directUrlプロパティが含まれないことの確認への変更）も明示すべきである。",
+      "location": "tests/unit/proxy/handler.test.ts L194-210, Implementation Notes 'Test modification plan (S3-001)'",
+      "suggestion": "Test modification plan item 5を拡張し、「Existing proxyWebSocket() test 'should include WebSocket upgrade instructions' must be updated: (a) verify response does not contain directUrl property, (b) verify message does not contain internal URL information, (c) verify message contains the generic PROXY_ERROR_MESSAGES.UPGRADE_REQUIRED text」と具体化する。"
+    },
+    {
+      "id": "S7-003",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "logger.tsへの影響は確認済みだが明示的な「変更不要」記載がない",
+      "description": "src/lib/proxy/logger.tsはhandler.tsの呼び出し元（route.ts）から使用されており、proxy機能のログ出力を担当する。Issue #395の修正ではlogger.tsへの変更は不要（ヘッダストリッピングはhandler.ts内で完結し、ログ出力のインターフェースは変わらない）。Affected Codeの「Files requiring NO modification」セクションにはmiddleware.ts、validation.ts、external-apps/route.ts、proxy/[...path]/route.tsが列挙されているが、logger.tsは含まれていない。実装者がlogger.tsの変更要否を判断する際に不明確になる可能性は低いが、同セクションにlogger.tsを追加することでより完全になる。",
+      "location": "Affected Code > Files requiring NO modification",
+      "suggestion": "Files requiring NO modificationに 'src/lib/proxy/logger.ts -- Logging interface is unchanged; header stripping is handled entirely in handler.ts.' を追加する。"
+    },
+    {
+      "id": "S7-004",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "route.test.tsのmockがproxyHttp/proxyWebSocketの引数を検証しており、handler.tsのシグネチャ変更がないことの確認",
+      "description": "tests/unit/proxy/route.test.tsではproxyHttp()とproxyWebSocket()をvi.mock()でモックしている（L23-27）。Issue #395の修正ではこれらの関数シグネチャ（request, app, path）は変更されないため、route.test.tsへの影響はない。ただし、もし将来的にproxyHttp()に追加パラメータ（例: ヘッダストリッピングオプション）を追加する設計変更が発生した場合、route.test.tsのモック定義も更新が必要になる。現在のIssueのスコープではこの問題は発生しないが、「Files requiring NO modification」にroute.test.tsが含まれていない点を補足しておくとより明確になる。",
+      "location": "tests/unit/proxy/route.test.ts L23-27, Affected Code > Test files",
+      "suggestion": "Test filesサブセクションに 'tests/unit/proxy/route.test.ts -- No changes required. proxyHttp()/proxyWebSocket() function signatures remain unchanged.' を補足する。"
+    },
+    {
+      "id": "S7-005",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "ExternalAppForm.tsxのi18n未対応に関する明示的なスコープ判断が有用",
+      "description": "ExternalAppForm.tsxは現在i18nメッセージファイル（messages/*.json）を使用していない。プロジェクト全体でi18n対応（next-intl）が導入されており、多くのコンポーネントでuseTranslations()を使用している。Issue #395でセキュリティ警告バナーを追加する際に、英語ハードコードでよいのか、i18n対応が必要なのかが明示されていない。Stage 5のS5-004（nice_to_have、skipped）でも同様の点が指摘されていたが、スコープ判断としてIssue本文に明記されていない。実装者が判断に迷うため、「i18n対応は本Issueのスコープ外とし、英語ハードコードを許容する」旨を記載することを推奨する。",
+      "location": "Recommended Direction 'UI security warning (S3-004)' / ExternalAppForm.tsx",
+      "suggestion": "S3-004の記載に「i18n対応は本Issueのスコープ外。英語テキストをハードコードする。」の一文を追加する。"
+    }
+  ],
+  "previous_findings_verification": {
+    "stage3_findings_in_current_issue": {
+      "S3-001": {
+        "status": "fully_reflected",
+        "detail": "Test filesサブセクションがAffected Codeに追加され、tests/unit/proxy/handler.test.tsの既存テスト修正と新規テスト追加が明記されている。Implementation NotesにTest modification planとして5項目の具体的な計画が記載されている。Acceptance Criteriaにも対応する項目が含まれている。"
+      },
+      "S3-002": {
+        "status": "fully_reflected",
+        "detail": "config.tsの設計方針がRecommended Direction（S3-002項目）とImplementation Notes（config.ts designセクション）の両方に記載されている。Stage 5のS5-001で指摘されたSENSITIVE_RESPONSE_HEADERSの不一致も、Stage 6で3エントリに統一修正済み。"
+      },
+      "S3-003": {
+        "status": "fully_reflected",
+        "detail": "directUrl除去がAffected Code（handler.ts説明、Key source references）、Recommended Direction（S3-003項目）、Test modification plan（item 5）に反映されている。Stage 5のS5-008で指摘されたmessageフィールドの内部URL残存も、Stage 6で対応済み。S3-003のタイトルも 'proxyWebSocket() directUrl and message sanitization' に改題されている。"
+      },
+      "S3-004": {
+        "status": "fully_reflected",
+        "detail": "ExternalAppForm.tsxへのセキュリティ警告バナー追加がAffected Code（Files requiring modification）、Recommended Direction（S3-004項目）、Acceptance Criteriaに明確に記載されている。"
+      },
+      "S3-005": {
+        "status": "fully_reflected",
+        "detail": "Files requiring NO modificationサブセクションにmiddleware.tsが変更不要である旨が理由付きで記載されている。"
+      },
+      "S3-006": {
+        "status": "fully_reflected",
+        "detail": "Files requiring NO modificationサブセクションにvalidation.tsがスコープ外である旨が記載されている。将来的な拡張可能性にも言及。"
+      },
+      "S3-007": {
+        "status": "fully_reflected",
+        "detail": "CSPヘッダストリッピングがRecommended Direction（独立項目S3-007）とImplementation Notes（SENSITIVE_RESPONSE_HEADERSに 'content-security-policy', 'x-frame-options' 含む）に反映されている。next.config.jsのCSP設定との競合をdefensivelyに防ぐ方針が明確。"
+      },
+      "S3-008": {
+        "status": "fully_reflected",
+        "detail": "Acceptance Criteriaに 'CLAUDE.md handler.ts and config.ts module descriptions updated with Issue #395 security hardening details' が含まれている。"
+      },
+      "S3-010": {
+        "status": "fully_reflected",
+        "detail": "Recommended Directionに追加され、Stage 6で本Issueのスコープ外であることが明示された（'*Out of scope for this Issue.* Consider in a separate Issue:'）。"
+      }
+    },
+    "stage5_findings_in_current_issue": {
+      "S5-001": {
+        "status": "fully_reflected",
+        "detail": "Stage 6で対応済み。Recommended DirectionのS3-002テキストがImplementation Notesのコード例と一致するよう3エントリに修正されている。"
+      },
+      "S5-002": {
+        "status": "fully_reflected",
+        "detail": "Stage 6で対応済み。Acceptance Criteriaの新規テスト項目に 'directUrl/message removal verification' が含まれている。proxyWebSocket()のAcceptance Criteria項目にも 'message field does not contain internal URL information' が追加されている。"
+      },
+      "S5-005": {
+        "status": "fully_reflected",
+        "detail": "Stage 6で対応済み。S3-010にスコープ外の明示が追加されている。"
+      },
+      "S5-008": {
+        "status": "fully_reflected",
+        "detail": "Stage 6で対応済み。handler.tsのAffected Code説明、Key source references（L155追加）、Recommended Direction S3-003、Test modification plan item 5の4箇所が更新されている。"
+      }
+    },
+    "skipped_findings_status": {
+      "S3-009_security_guide": {
+        "status": "acceptable",
+        "detail": "security-guide.md更新はnice_to_haveとしてスキップ済み。修正完了後の別途対応で問題ない。"
+      },
+      "S3-011_worktree_proxy": {
+        "status": "already_addressed",
+        "detail": "Affected Surfaceセクションに 'Worktree external apps (Issue #136) also use the same proxy path and will automatically receive the fixes applied in this Issue' が記載されており、実質的に対応済み。"
+      },
+      "S3-012_security_test_file": {
+        "status": "acceptable",
+        "detail": "テストファイル新規作成の推奨はnice_to_haveとしてスキップ。handler.test.tsへの追加テストでカバー可能。"
+      },
+      "S5-003_key_references_annotation": {
+        "status": "acceptable",
+        "detail": "Key source referencesのroute.ts注記はnice_to_have。Files requiring NO modificationセクションで既にスコープ外であることは明記済み。"
+      },
+      "S5-004_form_detail": {
+        "status": "acceptable",
+        "detail": "ExternalAppForm.tsxの具体度不均一はnice_to_have。Recommended Direction S3-004で文言とUIの方向性は示されている。"
+      },
+      "S5-006_iframe_scope": {
+        "status": "acceptable",
+        "detail": "iframe sandboxingのスコープ明確化はnice_to_have。Acceptance Criteriaに含まれていないことからスコープ外は暗黙的に理解可能。"
+      },
+      "S5-007_line_number_granularity": {
+        "status": "partially_addressed",
+        "detail": "S5-008対応でhandler.ts:155が個別追加されたため、部分的に改善されている。"
+      }
+    }
+  },
+  "impact_completeness_check": {
+    "code_changes": {
+      "handler_ts": {
+        "status": "complete",
+        "detail": "proxyHttp()のリクエストヘッダストリッピング、レスポンスヘッダストリッピング、proxyWebSocket()のdirectUrl/message除去の3つの変更が明確に定義されている。実装に必要十分な情報がある。"
+      },
+      "config_ts": {
+        "status": "complete",
+        "detail": "SENSITIVE_REQUEST_HEADERS（6エントリ）とSENSITIVE_RESPONSE_HEADERS（3エントリ）の定数追加が明確。コード例も提供されている。"
+      },
+      "external_app_form_tsx": {
+        "status": "complete",
+        "detail": "セキュリティ警告バナーの追加が明確。文言もRecommended Direction S3-004に記載済み。"
+      }
+    },
+    "test_changes": {
+      "handler_test_ts": {
+        "status": "mostly_complete",
+        "detail": "既存テスト修正（Authorizationヘッダ転送テスト）と新規テスト追加（5項目）が明記されている。ただしS7-002で指摘の通り、既存のproxyWebSocket()テスト修正の必要性が明示されていない。"
+      }
+    },
+    "documentation_changes": {
+      "claude_md": {
+        "status": "complete",
+        "detail": "Acceptance Criteriaにhandler.tsとconfig.tsのモジュール説明更新が含まれている。"
+      }
+    },
+    "no_change_files": {
+      "status": "mostly_complete",
+      "detail": "middleware.ts、validation.ts、external-apps/route.ts、proxy/[...path]/route.tsが明記されている。logger.tsとroute.test.tsは記載されていないが、影響がないことは文脈から推測可能。"
+    },
+    "breaking_changes": {
+      "status": "complete",
+      "detail": "外部APIインターフェースへの変更はない。upstreamアプリがCommandMateのCookie/Authorizationに依存している場合は動作が変わるが、これは設計上想定外の使い方であり、Issue本文でも言及されている。proxyWebSocket()の426レスポンスからdirectUrlフィールドが削除されるが、これは内部情報漏洩の修正であり正当な変更。"
+    }
+  },
+  "acceptance_criteria_vs_implementation_alignment": {
+    "AC1_sensitive_request_headers_constant": {
+      "implementation_coverage": "complete",
+      "detail": "Implementation NotesにSENSITIVE_REQUEST_HEADERSのコード例あり。6エントリが明確に定義されている。"
+    },
+    "AC2_request_header_stripping": {
+      "implementation_coverage": "complete",
+      "detail": "handler.tsのproxyHttp()内でリクエストヘッダフォワーディングループにSENSITIVE_REQUEST_HEADERSチェック追加。具体的な実装箇所（L62-68）が特定されている。"
+    },
+    "AC3_response_header_stripping": {
+      "implementation_coverage": "complete",
+      "detail": "handler.tsのproxyHttp()内でレスポンスヘッダフォワーディングループにSENSITIVE_RESPONSE_HEADERSチェック追加。具体的な実装箇所（L88-94）が特定されている。"
+    },
+    "AC4_websocket_directurl_message_sanitization": {
+      "implementation_coverage": "complete",
+      "detail": "directUrlフィールド除去とmessageフィールドのジェネリック化が両方明記されている。handler.ts L150-157が変更対象として特定されている。"
+    },
+    "AC5_security_warning_banner": {
+      "implementation_coverage": "complete",
+      "detail": "ExternalAppForm.tsxへのバナー追加がAffected CodeとRecommended Direction S3-004に記載。文言例も提供されている。"
+    },
+    "AC6_existing_test_update": {
+      "implementation_coverage": "complete",
+      "detail": "Test modification plan item 1-2で既存テスト修正方針が明記されている。"
+    },
+    "AC7_new_tests": {
+      "implementation_coverage": "complete",
+      "detail": "Test modification plan item 3-5でリクエストヘッダストリッピング、レスポンスヘッダストリッピング、安全なヘッダ転送、directUrl/message除去の4カテゴリのテスト追加が明記されている。"
+    },
+    "AC8_claude_md_update": {
+      "implementation_coverage": "complete",
+      "detail": "handler.tsとconfig.tsのモジュール説明更新がAcceptance Criteriaに含まれている。"
+    }
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 3,
+    "overall_assessment": "Stage 3およびStage 5の影響範囲指摘は全て適切に反映されており、Issue #395の影響範囲分析は包括的かつ正確である。Must Fixレベルの影響範囲の漏れは存在しない。Should Fixとして2件の指摘がある: (1) S7-001はSet型とArray型の混在に関する実装ガイダンスの明確化であり、実装者が既存のHOP_BY_HOP_*パターンとの統合方法を判断しやすくする改善、(2) S7-002はproxyWebSocket()の既存テスト修正の明示化であり、Test modification planの網羅性向上。Nice to Haveとして3件（logger.tsとroute.test.tsの変更不要明示、ExternalAppForm.tsxのi18nスコープ判断）がある。Acceptance Criteriaと実装計画の整合性は全8項目で確認でき、実装に必要十分な情報が提供されている。全体として、本Issueは実装可能な品質に達しており、影響範囲の分析も十分である。"
+  }
+}

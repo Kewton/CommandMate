@@ -1,0 +1,51 @@
+{
+  "issue_number": 395,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "files_modified": [
+        "src/lib/proxy/config.ts",
+        "src/lib/proxy/handler.ts",
+        "src/app/proxy/[...path]/route.ts",
+        "src/components/external-apps/ExternalAppForm.tsx",
+        "src/lib/external-apps/interfaces.ts",
+        "tests/unit/proxy/handler.test.ts",
+        "CLAUDE.md"
+      ],
+      "tests_added": 27,
+      "tests_modified": 2,
+      "total_tests": 4381,
+      "passed_tests": 4381,
+      "failed_tests": 0
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_total": 15,
+      "criteria_passed": 15,
+      "criteria_failed": 0
+    },
+    "refactor": {
+      "status": "success",
+      "changes_made": true,
+      "improvements": [
+        "handler.tsにfilterHeaders()ヘルパー関数を抽出（DRY原則: リクエスト/レスポンスの重複ヘッダフィルタリングロジックを一元化）",
+        "handler.test.tsにgetForwardedRequestHeaders()テストヘルパーを抽出（重複キャスト式の削除）"
+      ]
+    },
+    "documentation": {
+      "status": "success",
+      "files_updated": ["CLAUDE.md"]
+    }
+  },
+  "static_analysis": {
+    "typescript": "pass",
+    "eslint": "pass"
+  },
+  "security_summary": {
+    "sensitive_request_headers_stripped": 7,
+    "sensitive_response_headers_stripped": 11,
+    "info_leakage_fixed": ["proxyWebSocket directUrl", "route.ts catch message", "route.ts 404 pathPrefix", "route.ts 503 displayName"],
+    "ui_warning_added": true
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 395,
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "DR4-001",
+      "severity": "must_fix",
+      "category": "セキュリティ",
+      "title": "route.ts L107 のエラーレスポンスに内部エラーメッセージが漏洩している (OWASP A05: Security Misconfiguration)",
+      "description": "src/app/proxy/[...path]/route.ts L106-109 の catch ブロックで `(error as Error).message` をクライアントに直接返している。これはプロキシ先のホスト名、ポート番号、内部ネットワーク構成、スタックトレース断片などを攻撃者に漏洩する可能性がある。例えば ECONNREFUSED エラーの場合、'connect ECONNREFUSED 127.0.0.1:5173' のようなメッセージが返され、内部サービスのポート番号が露出する。設計方針書 Section 4-3 で proxyWebSocket() の情報漏洩修正を設計しているにもかかわらず、route.ts の catch ブロック (handler.ts の外側) における同種の問題がスコープから漏れている。proxyHttp() 内部の error ハンドリング (handler.ts L101-129) は PROXY_ERROR_MESSAGES の固定文字列を使用しており適切だが、route.ts 側で proxyHttp()/proxyWebSocket() 自体が throw した場合 (例: 予期しないランタイムエラー) の catch が固定文字列化されていない。",
+      "location": "src/app/proxy/[...path]/route.ts L106-109、設計方針書 Section 2 コンポーネント図 (route.ts を変更不要と位置づけ)、設計方針書 Section 5 セキュリティ設計",
+      "suggestion": "設計方針書の変更対象に route.ts を追加し、L107 の `message: (error as Error).message` を固定文字列 (例: PROXY_ERROR_MESSAGES.BAD_GATEWAY または新規定数) に変更する方針を記載する。内部エラーの詳細はサーバーサイドログ (logProxyError が既に呼ばれている) にのみ記録し、クライアントレスポンスには返さない。最低限、本 Issue のスコープ外とする場合でも、残存リスクとして Section 5 に明記すべきである。"
+    },
+    {
+      "id": "DR4-002",
+      "severity": "must_fix",
+      "category": "セキュリティ",
+      "title": "SENSITIVE_REQUEST_HEADERS に proxy-authorization ヘッダが含まれていない (OWASP A07: Identification and Authentication Failures)",
+      "description": "設計方針書 Section 4-1 の SENSITIVE_REQUEST_HEADERS リストに 'proxy-authorization' が含まれていない。RFC 7235 で定義される Proxy-Authorization ヘッダはプロキシ認証の資格情報を含むものであり、CommandMate のプロキシがアップストリームに転送すると、プロキシ認証資格情報が意図しない相手に漏洩する。現在のプロキシはプロキシ認証を使用していないが、ブラウザがシステムプロキシ設定に基づいて自動的に Proxy-Authorization ヘッダを付与する場合があり、これがアップストリームアプリに転送されるリスクがある。また、HOP_BY_HOP_REQUEST_HEADERS にも含まれていないため、現時点で何のフィルタリングもかかっていない。",
+      "location": "設計方針書 Section 4-1 SENSITIVE_REQUEST_HEADERS 定数定義",
+      "suggestion": "SENSITIVE_REQUEST_HEADERS に 'proxy-authorization' を追加する。これは RFC 7235 Section 4.4 で hop-by-hop ヘッダとしても扱われるべきものであるが、機密情報としての側面が強いため SENSITIVE_REQUEST_HEADERS に含めるのが適切である。"
+    },
+    {
+      "id": "DR4-003",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "route.ts L50-51 の 404 レスポンスで pathPrefix 値がクライアントに漏洩している (OWASP A05: Security Misconfiguration)",
+      "description": "src/app/proxy/[...path]/route.ts L50-51 で `No external app found for path prefix: ${pathPrefix}` というエラーメッセージを返している。pathPrefix 自体はリクエスト元が送信した値であるため直接的な情報漏洩のリスクは低いが、応答の差分 (存在する pathPrefix に対する 503 disabled vs 存在しない pathPrefix に対する 404) によって、登録済みアプリの列挙 (enumeration) が可能になる。同様に L58-59 の 503 レスポンスで `app.displayName` を返しており、内部設定情報が漏洩する。これは設計方針書のスコープ外だが、Issue #395 のセキュリティ強化の文脈で統一的に対応すべき問題である。",
+      "location": "src/app/proxy/[...path]/route.ts L50-51, L58-59、設計方針書 Section 5 セキュリティ設計",
+      "suggestion": "route.ts の 404/503 エラーレスポンスを固定文字列化する (例: 'Not Found', 'Service Unavailable')。アプリの存在有無や名前はクライアントに返さない。本 Issue のスコープ外とする場合、Section 5 の残存リスクに追記する。"
+    },
+    {
+      "id": "DR4-004",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "SENSITIVE_RESPONSE_HEADERS に strict-transport-security が含まれていない (OWASP A05: Security Misconfiguration)",
+      "description": "アップストリームアプリが Strict-Transport-Security (HSTS) レスポンスヘッダを設定した場合、これがプロキシ経由でブラウザに転送されると、CommandMate のオリジン全体に HSTS ポリシーが適用される。CommandMate が HTTP で動作している環境では、アップストリームの HSTS ヘッダにより CommandMate 自体へのアクセスが不可能になる可能性がある (ブラウザが HTTP 接続を拒否する)。SENSITIVE_RESPONSE_HEADERS に 'strict-transport-security' を追加し、アップストリームのセキュリティポリシーが CommandMate のオリジンに影響しないようにすべきである。",
+      "location": "設計方針書 Section 4-1 SENSITIVE_RESPONSE_HEADERS 定数定義",
+      "suggestion": "SENSITIVE_RESPONSE_HEADERS に 'strict-transport-security' を追加する。CommandMate 自身が HSTS を適用する場合は next.config.js の headers() で制御すべきであり、アップストリームのポリシーが CommandMate のオリジンに伝播すべきではない。"
+    },
+    {
+      "id": "DR4-005",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "SENSITIVE_RESPONSE_HEADERS に access-control-* (CORS) ヘッダが含まれていない (OWASP A05: Security Misconfiguration)",
+      "description": "アップストリームアプリが Access-Control-Allow-Origin, Access-Control-Allow-Credentials 等の CORS ヘッダを設定した場合、これらがプロキシ経由でブラウザに転送される。アップストリームが 'Access-Control-Allow-Origin: *' と 'Access-Control-Allow-Credentials: true' を返した場合、CommandMate のオリジン上で外部サイトからの認証付きリクエストが許可される可能性がある。CORS ポリシーは CommandMate 側で制御すべきであり、アップストリームのポリシーがプロキシレスポンスに混入すべきではない。",
+      "location": "設計方針書 Section 4-1 SENSITIVE_RESPONSE_HEADERS 定数定義",
+      "suggestion": "SENSITIVE_RESPONSE_HEADERS に 'access-control-allow-origin', 'access-control-allow-credentials', 'access-control-allow-methods', 'access-control-allow-headers', 'access-control-expose-headers', 'access-control-max-age' を追加する。または、'access-control-' プレフィックスで一括フィルタリングするヘルパーを追加する。一括フィルタリング方式は現在の `.includes()` パターンでは対応できないため、既存パターンとの一貫性を優先し個別列挙を推奨する。"
+    },
+    {
+      "id": "DR4-006",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "Referer / Origin ヘッダのアップストリームへの転送が CommandMate の内部パスを漏洩する可能性がある",
+      "description": "ブラウザはリクエスト時に Referer ヘッダと Origin ヘッダを自動付与する。これらには CommandMate の内部 URL (例: http://localhost:3000/proxy/app-name/page) が含まれる。アップストリームアプリがこれらのヘッダをログに記録・処理する場合、CommandMate の内部パス構造が漏洩する。現在の設計では Referer / Origin はストリップ対象に含まれていない。ただし、Referer をストリップするとアップストリームアプリの正常動作 (CSRF 保護など) に影響する可能性があるため、トレードオフの検討が必要である。",
+      "location": "設計方針書 Section 4-1 SENSITIVE_REQUEST_HEADERS 定数定義、設計方針書 Section 7 設計上の決定事項",
+      "suggestion": "Section 7 のトレードオフ表に Referer/Origin ヘッダの扱いに関する設計判断を追記する。ストリップする場合はアップストリームの CSRF 保護が機能しなくなる可能性がある。ストリップしない場合は内部パス情報が漏洩する。本 Issue ではストリップしない (既存動作維持) とし、リスクを残存リスクとして Section 5 に記載することを推奨する。"
+    },
+    {
+      "id": "DR4-007",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "next.config.js の CSP に connect-src 'self' ws: wss: が設定されており、プロキシ経由アプリからの任意オリジンへの WebSocket 接続が可能 (OWASP A05: Security Misconfiguration)",
+      "description": "next.config.js L65 の CSP 設定で connect-src に 'ws: wss:' が含まれている。これにより、プロキシ経由で提供されるアップストリームアプリの JavaScript コードが、任意の WebSocket サーバーに接続可能である。同一オリジンで実行されるため、CSP の制約が緩和された状態でアップストリームアプリのコードが動作する。Issue #395 のヘッダストリッピング実装後も、この CSP 設定によりアップストリームアプリのインラインスクリプトが CommandMate のオリジンを利用して外部 WebSocket サーバーと通信できる。これは設計方針書 Section 5 の残存リスクに記載されている「同一オリジンプロキシの構造的リスク」の具体例であるが、CSP の connect-src ディレクティブに関する明示的な分析が不足している。",
+      "location": "設計方針書 Section 5 残存リスク、next.config.js L65",
+      "suggestion": "設計方針書 Section 5 の残存リスクに、CSP connect-src の ws:/wss: 許可がプロキシ経由アプリから任意 WebSocket サーバーへの接続を許容している点を具体的に追記する。将来的な CSP 強化 Issue (iframe sandboxing や restrictive CSP 注入) で対応する旨を明記する。本 Issue での CSP 変更はスコープ外であることは妥当だが、リスクの明示化は必要。"
+    },
+    {
+      "id": "DR4-008",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "SENSITIVE_RESPONSE_HEADERS に content-security-policy-report-only が含まれていない",
+      "description": "設計方針書では content-security-policy をストリップ対象としているが、Content-Security-Policy-Report-Only ヘッダは含まれていない。アップストリームアプリが CSP Report-Only ヘッダを設定した場合、ブラウザは report-uri / report-to で指定された外部エンドポイントに CSP 違反レポートを送信する。これにより、(1) CommandMate のオリジンが外部のレポートサーバーに露出する、(2) アップストリームの CSP Report-Only が CommandMate のページ全体のスクリプト実行を追跡する手段になり得る。",
+      "location": "設計方針書 Section 4-1 SENSITIVE_RESPONSE_HEADERS 定数定義",
+      "suggestion": "SENSITIVE_RESPONSE_HEADERS に 'content-security-policy-report-only' を追加する。CSP 関連ヘッダは全て CommandMate 側で制御すべきである。"
+    },
+    {
+      "id": "DR4-009",
+      "severity": "nice_to_have",
+      "category": "セキュリティ",
+      "title": "proxyHttp() のレスポンスヘッダフィルタリングが allowlist 方式ではなく denylist 方式である点のリスク認識",
+      "description": "設計方針書のヘッダストリッピングは denylist (ブロックリスト) 方式を採用しており、既知の危険なヘッダのみを除外する。新たに危険なヘッダが追加された場合や、ブラウザが新しいヘッダをサポートした場合に、自動的には防御されない。allowlist (許可リスト) 方式であれば、既知の安全なヘッダのみを転送するため、未知のヘッダに対してデフォルトで安全になる。ただし、allowlist 方式はアップストリームアプリの正常動作に必要なヘッダを見落とすリスクがあり、保守コストが高いため、現在の denylist 方式は妥当な判断である。",
+      "location": "設計方針書 Section 3 設計パターン、Section 7 設計上の決定事項",
+      "suggestion": "Section 7 のトレードオフ表に denylist vs allowlist の設計判断を追記し、denylist 採用の理由 (アップストリーム互換性の維持、保守コスト) とリスク (未知のヘッダに対する脆弱性) を明示する。将来的に高リスク環境での運用が必要になった場合の allowlist 方式への移行パスを検討事項として記録する。"
+    },
+    {
+      "id": "DR4-010",
+      "severity": "nice_to_have",
+      "category": "セキュリティ",
+      "title": "buildUpstreamUrl() で HTTP スキームがハードコードされており、将来的な HTTPS アップストリーム対応時にプロトコルダウングレード攻撃のリスクがある",
+      "description": "handler.ts L42 で `http://${app.targetHost}:${app.targetPort}${path}` と HTTP がハードコードされている。現在は localhost/127.0.0.1 のみが targetHost として許可されているため問題はないが、将来的に HTTPS アップストリームをサポートする場合、HTTP ハードコードは機密データの平文通信 (プロトコルダウングレード) を引き起こす。本 Issue のスコープ外ではあるが、セキュリティレビューとして記録しておく。",
+      "location": "src/lib/proxy/handler.ts L42、src/lib/external-apps/validation.ts VALID_TARGET_HOSTS",
+      "suggestion": "本 Issue での対応は不要。将来的に targetHost の制約を緩和する場合は、ExternalApp にプロトコル (http/https) フィールドを追加し、buildUpstreamUrl() でスキームを動的に選択する方針を検討する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 6,
+    "nice_to_have": 2,
+    "overall_assessment": "設計方針書のセキュリティ設計は主要な攻撃ベクトル (Cookie/Authorization 漏洩、Set-Cookie 注入、内部 URL 漏洩) に対して適切に対応しているが、いくつかの重要な漏れがある。最も深刻なのは route.ts の catch ブロックにおける内部エラーメッセージのクライアント漏洩 (DR4-001) と、proxy-authorization ヘッダのストリッピング漏れ (DR4-002) である。前者は設計方針書が route.ts を変更不要と位置づけているために見落とされている。また、レスポンスヘッダのストリッピングリストについては HSTS (DR4-004)、CORS (DR4-005)、CSP Report-Only (DR4-008) の追加が推奨される。これらはいずれもアップストリームアプリが CommandMate のオリジンレベルのセキュリティポリシーを上書き・拡張できる問題であり、同一オリジンプロキシの構造的リスクを低減するために対処すべきである。防御の多層化構造 (L1-L5) と KISS 原則に基づく設計方針は妥当であり、must_fix 2件を反映すれば実装に進めるレベルである。"
+  }
+}

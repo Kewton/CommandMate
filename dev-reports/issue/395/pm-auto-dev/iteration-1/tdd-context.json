@@ -1,0 +1,62 @@
+{
+  "issue_number": 395,
+  "title": "security: same-origin trust break and credential leakage through /proxy/* external app proxy",
+  "acceptance_criteria": [
+    "SENSITIVE_REQUEST_HEADERS and SENSITIVE_RESPONSE_HEADERS constants added to src/lib/proxy/config.ts",
+    "proxyHttp() strips sensitive request headers (cookie, authorization, proxy-authorization, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-real-ip) before forwarding to upstream",
+    "proxyHttp() strips sensitive response headers (set-cookie, content-security-policy, content-security-policy-report-only, x-frame-options, strict-transport-security, access-control-allow-origin, access-control-allow-credentials, access-control-allow-methods, access-control-allow-headers, access-control-expose-headers, access-control-max-age) from upstream responses",
+    "proxyWebSocket() 426 response no longer includes directUrl field and message field does not contain internal URL information",
+    "route.ts catch block returns fixed-string error message (PROXY_ERROR_MESSAGES.BAD_GATEWAY) instead of (error as Error).message",
+    "route.ts 404 response does not include pathPrefix information",
+    "route.ts 503 response does not include app.displayName information",
+    "ExternalAppForm.tsx displays a security warning banner about same-origin risks",
+    "IProxyHandler.proxyWebSocket() JSDoc updated to reflect directUrl removal",
+    "Existing tests in tests/unit/proxy/handler.test.ts updated to reflect new stripping behavior",
+    "New tests added for request header stripping (7 headers), response header stripping (11 headers), safe header forwarding, and directUrl/message removal verification",
+    "CLAUDE.md handler.ts and config.ts module descriptions updated with Issue #395 security hardening details"
+  ],
+  "implementation_tasks": [
+    "Task 2.1 (TDD Red): Write failing security tests first - request header stripping (cookie, authorization, proxy-authorization, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-real-ip), safe header forwarding regression, response header stripping (11 headers), proxyWebSocket() directUrl/message removal",
+    "Task 1.1: Add SENSITIVE_REQUEST_HEADERS and SENSITIVE_RESPONSE_HEADERS constants to src/lib/proxy/config.ts as 'as const' arrays following existing HOP_BY_HOP_* pattern",
+    "Task 1.2: Update src/lib/proxy/handler.ts - add imports for new constants, update request header loop (L62-68) to also filter SENSITIVE_REQUEST_HEADERS, update response header loop (L87-94) to also filter SENSITIVE_RESPONSE_HEADERS, fix proxyWebSocket() to remove directUrl field and internal URL from message (rename params to _request, _app, _path)",
+    "Task 1.3: Update src/app/proxy/[...path]/route.ts - fix catch block to use PROXY_ERROR_MESSAGES.BAD_GATEWAY, fix 404 to not include pathPrefix, fix 503 to not include app.displayName",
+    "Task 1.4: Add security warning banner to src/components/external-apps/ExternalAppForm.tsx - amber-colored banner with text about same-origin risks",
+    "Task 1.5: Update JSDoc in src/lib/external-apps/interfaces.ts for IProxyHandler.proxyWebSocket()",
+    "Task 2.2 (TDD Green): Update existing tests - should forward request headers test to assert Authorization is NOT forwarded, should include WebSocket upgrade instructions test to verify no directUrl and fixed message",
+    "Task 3.1: Update CLAUDE.md - update handler.ts description with Issue #395 security hardening details, update config.ts description with SENSITIVE_* constants"
+  ],
+  "files_to_modify": [
+    "src/lib/proxy/config.ts",
+    "src/lib/proxy/handler.ts",
+    "src/app/proxy/[...path]/route.ts",
+    "src/components/external-apps/ExternalAppForm.tsx",
+    "src/lib/external-apps/interfaces.ts",
+    "tests/unit/proxy/handler.test.ts",
+    "CLAUDE.md"
+  ],
+  "design_policy_path": "dev-reports/design/issue-395-proxy-security-hardening-design-policy.md",
+  "work_plan_path": "dev-reports/issue/395/work-plan.md",
+  "target_coverage": 80,
+  "sensitive_request_headers": [
+    "cookie",
+    "authorization",
+    "proxy-authorization",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-real-ip"
+  ],
+  "sensitive_response_headers": [
+    "set-cookie",
+    "content-security-policy",
+    "content-security-policy-report-only",
+    "x-frame-options",
+    "strict-transport-security",
+    "access-control-allow-origin",
+    "access-control-allow-credentials",
+    "access-control-allow-methods",
+    "access-control-allow-headers",
+    "access-control-expose-headers",
+    "access-control-max-age"
+  ]
+}
