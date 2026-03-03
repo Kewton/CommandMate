@@ -129,9 +129,9 @@ const STALE_OUTPUT_THRESHOLD_MS: number = 5000;
  *
  * @param output - Raw tmux output (including ANSI escape codes).
  *                 This function handles ANSI stripping internally.
- * @param cliToolId - CLI tool identifier for pattern selection (CLIToolType: 'claude' | 'codex' | 'gemini').
+ * @param cliToolId - CLI tool identifier for pattern selection (CLIToolType).
  * @param lastOutputTimestamp - Optional timestamp (Date) for time-based heuristic.
- * @returns Detection result with status, confidence, reason, and hasActivePrompt
+ * @returns Detection result with status, confidence, reason, hasActivePrompt, and promptDetection
  */
 export function detectSessionStatus(
   output: string,

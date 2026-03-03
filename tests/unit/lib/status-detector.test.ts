@@ -1,6 +1,7 @@
 /**
  * Unit tests for status-detector.ts
  * Issue #188: Thinking indicator false detection fix
+ * Issue #408: promptDetection field in StatusDetectionResult
  *
  * Tests verify:
  * - Prompt takes priority over thinking (correct priority order)
@@ -9,6 +10,7 @@
  * - Boundary conditions for STATUS_THINKING_LINE_COUNT (5th vs 6th line from end)
  * - Empty line handling in window-based detection
  * - Existing behavior preservation (time-based heuristic, Codex support)
+ * - Issue #408: promptDetection field presence and consistency across all return paths
  *
  * @vitest-environment node
  */
