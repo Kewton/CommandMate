@@ -1,0 +1,43 @@
+{
+  "issue_number": 404,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-04",
+  "applied_findings": [
+    {
+      "id": "F7-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "実装上の注意3を全面修正。誤記「__scheduleActiveProcessesのキーはworktreeId」を「キーはPID（number型）、値はChildProcess。worktreeIdとの関連付けはMap上に存在しない」に修正。worktree単位プロセス停止のための3つの実装アプローチ（(a) Map構造をMap<number, { child: ChildProcess, worktreeId: string }>に拡張、(b) schedule-manager.ts内にローカル対応Map導入、(c) activeProcessesのworktree単位停止を責務外としexitイベント自然回収に委任）を提示。各アプローチの制約事項（executeClaudeCommandのシグネチャ変更要否、PID取得不可の問題、EXECUTION_TIMEOUT_MS=5分の最大待機時間）も記載"
+    },
+    {
+      "id": "F7-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "ユニットテスト項目を1つのチェックボックスから7つの具体的テストシナリオに展開: (1) session-cleanup.test.ts: stopAutoYesPolling->deleteAutoYesState->stopScheduleForWorktreeの呼び出し順序検証、(2) session-cleanup.test.ts: stopAllSchedules非呼び出しの回帰テスト、(3) auto-yes-manager.test.ts: deleteAutoYesStateがautoYesStatesのみ削除しautoYesPollerStatesに影響しない検証、(4)(5) schedule-manager.test.ts: stopScheduleForWorktreeの分離性検証（cronジョブ・cmateFileCache）、(6)(7) resource-cleanup.test.ts: タイマーライフサイクル・孤立エントリDelta検出ロジック"
+    },
+    {
+      "id": "F7-003",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルに server.ts を追加。変更内容として「initResourceCleanup()の呼び出し追加（initScheduleManager()の後）およびgracefulShutdown()内にstopResourceCleanup()追加」を記載"
+    }
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "summary": {
+    "total_findings": 3,
+    "applied": 3,
+    "skipped": 0
+  },
+  "issue_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/404"
+  },
+  "code_verification": {
+    "F7-001_activeProcesses_key": "claude-executor.ts L199: activeProcesses.set(child.pid, child) - キーはchild.pid（number型）であることをコード上で確認。executeClaudeCommand()のシグネチャは(message, cwd, cliToolId, permission?, options?)でworktreeIdパラメータは存在しない。executeSchedule()（schedule-manager.ts L445）はstate.worktreeIdを保持しているがexecuteClaudeCommandには渡していない",
+    "F7-001_stopAllSchedules_reference": "schedule-manager.ts L656-665: stopAllSchedules()はgetActiveProcesses()からPIDキーでイテレーションしprocess.kill(pid, 'SIGKILL')を実行。worktreeId関連のフィルタリングは行っていない"
+  },
+  "summary_text": "Stage 7（影響範囲レビュー2回目）の指摘事項3件（must_fix 1件、should_fix 1件、nice_to_have 1件）を全てIssue #404に反映完了。最も重大なF7-001は、__scheduleActiveProcessesのキーがworktreeIdであるという事実と異なる記述を修正し、実際のMap構造（Map<number, ChildProcess>、キーはPID）を正確に記載した上で、worktree単位プロセス停止のための3つの実装アプローチを提示した。F7-002ではユニットテスト項目を7つの具体的シナリオに展開し、F7-003では影響範囲テーブルにserver.tsを追加した。"
+}

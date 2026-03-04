@@ -1,0 +1,53 @@
+{
+  "issue_number": 404,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 80,
+      "tests_passed": 4459,
+      "tests_total": 4466,
+      "new_tests": 34,
+      "implemented_files": [
+        "src/lib/auto-yes-manager.ts",
+        "src/lib/schedule-manager.ts",
+        "src/lib/session-cleanup.ts",
+        "src/lib/resource-cleanup.ts",
+        "server.ts"
+      ],
+      "test_files": [
+        "tests/unit/auto-yes-manager-cleanup.test.ts",
+        "tests/unit/lib/schedule-manager-cleanup.test.ts",
+        "tests/unit/session-cleanup-issue404.test.ts",
+        "tests/unit/resource-cleanup.test.ts"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_passed": 10,
+      "criteria_total": 10,
+      "scenarios_passed": 9,
+      "scenarios_total": 9
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "DRY: auto-yes-manager.tsのgetErrorMessage()重複をimportに統一",
+        "DRY: session-cleanup.tsの5箇所インラインエラー抽出をgetErrorMessage()に統一",
+        "SRP: schedule-manager.tsにgetScheduleWorktreeIds()追加（内部Map公開をカプセル化）",
+        "SRP: resource-cleanup.tsのglobalThisへの直接アクセスをgetScheduleWorktreeIds()経由に変更"
+      ],
+      "tests_after_refactor": 4462
+    },
+    "documentation": {
+      "status": "success",
+      "updated_files": ["CLAUDE.md"],
+      "changes": [
+        "src/lib/resource-cleanup.tsの新規エントリ追加",
+        "src/lib/auto-yes-manager.tsの説明更新（Issue #404追加）",
+        "src/lib/schedule-manager.tsの説明更新（Issue #404追加）",
+        "src/lib/session-cleanup.tsの説明更新（Issue #404変更内容追記）"
+      ]
+    }
+  }
+}

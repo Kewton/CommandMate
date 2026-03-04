@@ -1,0 +1,9 @@
+{
+  "issue_number": 404,
+  "stage": 2,
+  "applied_findings": ["R2-001", "R2-002", "R2-004", "R2-005"],
+  "skipped_findings": ["R2-003", "R2-006"],
+  "design_doc_updated": true,
+  "source_code_modified": false,
+  "summary": "Stage 2整合性レビューの指摘4件を設計方針書に反映。R2-001: Section 2.2変更対象モジュールテーブルにresponse-poller.tsを追加。R2-002: Section 3.3 activeProcesses方式(c)にIssue本文との用語混乱を解消する注記を追加。R2-004: Section 3.4にCLAUDE.mdのstopScheduleForWorktree()事前記載と未実装コードの矛盾に関する注記を追加。R2-005: Section 0チェックリストR1-001およびSection 3.6の表現を「bash関数を廃止」から「bash関数を追加しない（TypeScript実装に一本化済み）」に修正。R2-003(gracefulShutdownシーケンス図)はスコープ外で修正不要、R2-006(CleanupMapResult拡張注記)は現時点で不要のためスキップ。Section 0にStage 2レビューサマリーテーブルを追加し、全6件の対応状況を記録した。"
+}

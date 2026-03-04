@@ -1,0 +1,110 @@
+{
+  "issue_number": 404,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-04",
+  "review_summary": "Stage 1で指摘した5件の重要指摘（F1-001〜F1-005）は全て適切に対応されている。Issue本文は技術的正確性・整合性・完全性の面で大幅に改善されており、実装者が参照するドキュメントとして十分な品質に達した。ただし、2件のshould_fixと2件のnice_to_haveの新規指摘がある。特にstopScheduleForWorktree()がstopAllSchedules()の機能（グローバルポーリングタイマー停止・activeProcesses全停止）を一部引き継ぐ必要があるかの設計判断の明示と、定期クリーンアップの実装場所の依然不明瞭な点が残っている。",
+  "previous_findings_addressed": [
+    {
+      "id": "F1-001",
+      "status": "resolved",
+      "note": "Issue本文の「背景・課題 > 2. globalThis Mapメモリリーク」セクションで、`__scheduleActiveProcesses` が `claude-executor.ts (L212-226)` に存在すると正しく記載されている。schedule-manager.tsとは分離されて記述されており、誤認リスクは解消された。"
+    },
+    {
+      "id": "F1-002",
+      "status": "resolved",
+      "note": "Issue本文で `schedule-manager.ts (L106-109)` と正しい行番号に修正されている。実際のコードの `declare global` ブロック（L106-108）と `var __scheduleManagerStates` 宣言（L108）に一致する。"
+    },
+    {
+      "id": "F1-003",
+      "status": "resolved",
+      "note": "Issue本文に `syncSchedules()` の60秒ポーリングによる自己クリーンアップ機構が詳細に説明されている。`schedules` MapのキーがscheduleId（worktreeIdではない）であること、`activeScheduleIds` に含まれないスケジュールが自動的に `cronJob.stop()` + `schedules.delete()` される機構（L579-586）、最大60秒間のリーク窓とworktree単位停止関数不在の課題が明確に記述されている。"
+    },
+    {
+      "id": "F1-004",
+      "status": "resolved",
+      "note": "実装タスクに「`schedule-manager.ts` に `stopScheduleForWorktree(worktreeId)` 関数を追加」と「`session-cleanup.ts` の `cleanupWorktreeSessions()` から `stopAllSchedules()` を `stopScheduleForWorktree(worktreeId)` に変更」が明記されている。提案する解決策 > B セクションにも同様の記述が追加されている。"
+    },
+    {
+      "id": "F1-005",
+      "status": "resolved",
+      "note": "Issue本文の背景セクションに `autoYesStates` には `.delete()` 呼び出しが一切存在しないことが明示され、`disableAutoYes()` が `set()` でエントリ更新するのみであること、`autoYesPollerStates` は `stopAutoYesPolling()` で `delete()` されるとの対比が記載されている。実装タスクにも `deleteAutoYesState(worktreeId)` 関数追加が具体的に含まれている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "stopScheduleForWorktree()がstopAllSchedules()のタイマー停止・activeProcesses停止機能を代替しない設計制約の明示不足",
+      "description": "現在の `stopAllSchedules()` は (1) グローバルポーリングタイマー (`clearInterval(manager.timerId)`) の停止、(2) 全cronジョブの停止、(3) `schedules.clear()`、(4) `cmateFileCache.clear()`、(5) 全activeProcessesの `SIGKILL` + `clear()` の5つの責務を担う。Issue本文で提案されている `stopScheduleForWorktree(worktreeId)` はworktree単位のスケジュール停止・エントリ削除であり、(1)のグローバルポーリングタイマーや(5)のactiveProcessesの停止は含まないことが暗黙の前提となっている。しかし、`session-cleanup.ts` から `stopAllSchedules()` を `stopScheduleForWorktree(worktreeId)` に置き換えた場合、元々 `stopAllSchedules()` が担っていた (5) の子プロセス停止が失われる。当該worktreeで実行中のスケジュールの子プロセス（`claude-executor.ts` の `executeClaudeCommand()` で起動されたもの）の停止も `stopScheduleForWorktree()` の責務に含めるべきか、あるいは `cleanupWorktreeSessions()` が別途対処するのか、設計判断を実装タスクに明記すべきである。",
+      "location": "実装タスク > globalThis Mapメモリリーク対策 > `stopScheduleForWorktree(worktreeId)` 関連タスク",
+      "suggested_fix": "実装タスクに以下を追記する:\n- `stopScheduleForWorktree(worktreeId)` の責務範囲を明確にする: (a) 当該worktreeのcronジョブ停止 + schedules Mapエントリ削除、(b) 当該worktreeのcmateFileCacheエントリ削除、(c) 当該worktreeで実行中のactiveProcessesの停止（該当する場合）\n- `stopAllSchedules()` はサーバーシャットダウン時のみ使用するよう整理し、`session-cleanup.ts` からの呼び出しは `stopScheduleForWorktree(worktreeId)` に完全に置き換える"
+    },
+    {
+      "id": "F5-002",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "定期クリーンアップ（24時間）の実装場所・タイマー管理が依然として未定義",
+      "description": "Stage 1のF1-007で指摘した「定期クリーンアップの実装場所・タイマー管理方法が不明」は、Issue本文のStage 2/4更新後も具体化されていない。「提案する解決策 > B」に「24時間ごとにDBに存在しないworktreeのエントリを自動削除（セーフティネット）」と記載されているが、実装タスクでは「定期クリーンアップ関数の実装（既存worktreeIDとMapキーの差分検出）」としか書かれておらず、以下が不明のままである: (a) タイマー管理の場所（新規モジュール or 既存schedule-managerのsyncSchedules()への相乗り or server.ts起動時のsetInterval）、(b) タイマーのライフサイクル（サーバーシャットダウン時のclearInterval）、(c) 24時間の間隔の根拠。実装者が裁量で決める設計判断としてスコープを明示するか、具体的な方針を記載すべきである。",
+      "location": "実装タスク > globalThis Mapメモリリーク対策 > 定期クリーンアップ関数の実装",
+      "suggested_fix": "以下のいずれかを追記する:\n(A) 具体化案: 「schedule-manager.tsのsyncSchedules()（60秒ポーリング）に24時間カウンター（syncCount or lastCleanupTimestamp）を追加し、24時間経過時にglobalThis全Mapの孤立エントリ削除を実行する。既存タイマーに相乗りするため新規setIntervalは不要」\n(B) スコープ委任案: 「定期クリーンアップのタイマー管理方法は実装設計で決定する。設計書でタイマーライフサイクル（開始・停止タイミング）を明示すること」"
+    },
+    {
+      "id": "F5-003",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "title": "受入条件「正常に稼働中のMCPプロセスに影響がないこと」の検証方法が依然として不明確",
+      "description": "Stage 1のF1-009で指摘した点は、Stage 2/4の更新でも具体化されていない。受入条件の2番目は「正常に稼働中のMCPプロセス（現在のセッションに紐づくもの）に影響がないこと」とあるが、孤立プロセスと正常プロセスの区別基準は実装タスクの注記で補足されている（ppid=1 + プロセス名パターンの複合チェック）ものの、受入条件自体には検証方法が明示されていない。ただし、実装タスクのコンテナ環境注記が具体的であるため、実装者の混乱リスクは低い。",
+      "location": "受入条件 > 2番目の項目",
+      "suggested_fix": "受入条件を「ppid=1以外のMCPプロセス（活動中のtmuxセッションの子プロセス）が停止されないこと」のように具体化する。"
+    },
+    {
+      "id": "F5-004",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "stopScheduleForWorktree()のcmateFileCache削除にworktreeId->path変換が必要な点は明記されているが、解法の推奨案が2つ記載されており優先度が不明",
+      "description": "実装タスクの注意2に「DB lookupで取得するか、cleanupWorktreeSessions()の呼び出し元からworktreePathを引数で渡す設計を検討すること」と記載されている。2つの選択肢が併記されているが、どちらを推奨するかの判断材料（例: cleanupWorktreeSessions()の既存シグネチャ変更のインパクト、DB lookupの可用性等）が記載されておらず、実装者が判断に迷う可能性がある。ただし、これは設計書レベルの詳細であり、Issueの粒度としては許容範囲内である。",
+      "location": "実装タスク > globalThis Mapメモリリーク対策 > stopScheduleForWorktree 実装上の注意2",
+      "suggested_fix": "推奨案を一方に絞るか、「設計書で決定する」と明記する。例: 「cleanupWorktreeSessions()のシグネチャ変更を最小限にするため、stopScheduleForWorktree()内でDB lookupする方式を推奨する（DBアクセスが可能な前提）」"
+    }
+  ],
+  "must_fix_count": 0,
+  "should_fix_count": 2,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Stage 1で指摘した5件の重要指摘（must_fix 3件 + should_fix 2件）は全て適切に対応されており、Issue全体の技術的正確性と完全性は大幅に改善された。Stage 3（影響範囲レビュー）の指摘も適切に反映されており、影響範囲テーブルにclaude-executor.ts、response-poller.ts、repositories/route.tsが追加され、実装タスクにはstopScheduleForWorktreeの設計制約、deleteAutoYesStateの順序制約、コンテナ環境の偽陽性リスクが詳細に記載されている。Issue全体としての読みやすさ・一貫性は良好であり、実装者が作業に着手できる品質に達している。残る2件のshould_fixは、stopScheduleForWorktree()がstopAllSchedules()の一部責務（特にactiveProcesses停止）を引き継ぐかの設計明確化と、定期クリーンアップの実装場所の具体化である。これらは設計フェーズで解決可能な範囲であり、Issueの承認を妨げるものではない。",
+  "code_references": [
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "lines": "L56-80, L106-124, L478-591, L634-669",
+      "relevance": "ManagerState型（cmateFileCache含む）、globalThis宣言、syncSchedules()自己クリーンアップ、stopAllSchedules()の5つの責務"
+    },
+    {
+      "file": "src/lib/claude-executor.ts",
+      "lines": "L195-226",
+      "relevance": "__scheduleActiveProcesses MapのPID追跡、exitイベントでのdelete()"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "L125-138, L252-266, L272-274, L779-789",
+      "relevance": "autoYesStates/autoYesPollerStates宣言、disableAutoYes()のset()のみ実装、stopAutoYesPolling()のdelete()実装"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "L61-120",
+      "relevance": "cleanupWorktreeSessions() - stopAllSchedules()呼び出し箇所（L111）、修正対象"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "L184, L339, L1273-1285",
+      "relevance": "tuiResponseAccumulator Map宣言、clearTuiAccumulator()、stopPolling()のクリーンアップ"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "session-cleanup.ts, auto-yes-manager.ts, schedule-manager.ts, claude-executor.ts のモジュール説明"
+    }
+  ]
+}

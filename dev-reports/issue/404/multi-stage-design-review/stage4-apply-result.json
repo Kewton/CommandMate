@@ -1,0 +1,9 @@
+{
+  "issue_number": 404,
+  "stage": 4,
+  "applied_findings": ["R4-001", "R4-002", "R4-003", "R4-004"],
+  "skipped_findings": ["R4-005", "R4-006"],
+  "design_doc_updated": true,
+  "source_code_modified": false,
+  "summary": "Stage 4セキュリティレビューの指摘事項4件を設計方針書に反映。R4-001(must_fix): Section 3.2のdeleteAutoYesState()にisValidWorktreeId()バリデーションガードを追加（SEC-404-001）。R4-002(should_fix): Section 4セキュリティ設計表にps取得→killのTOCTOUリスク行を追加。R4-003(should_fix): Section 3.1に防御的ps出力パーサー実装ガイダンス（PID正値チェック・不正行スキップ・境界マッチ推奨）を追記。R4-004(should_fix): Section 3.1定数にMAX_PS_OUTPUT_BYTES=1MBを追加しexecFileのmaxBuffer制限を明記。nice_to_have 2件（R4-005: ログサニタイズ、R4-006: globalThis型安全性）はスキップ。Section 0にStage 4レビューサマリーテーブルを追加し、実装チェックリストにR4-001〜R4-004の4項目を追加。"
+}

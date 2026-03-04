@@ -1,0 +1,38 @@
+{
+  "issue_number": 404,
+  "feature_summary": "長期運用時のリソースリーク対策（残留MCPプロセス + globalThis Mapメモリリーク）",
+  "acceptance_criteria": [
+    "サーバー起動時に孤立MCPプロセスが検出・停止されること",
+    "正常に稼働中のMCPプロセス（現在のセッションに紐づくもの）に影響がないこと",
+    "クリーンアップ結果がログに記録されること",
+    "worktree削除後にglobalThis Mapから該当エントリが削除されること",
+    "削除されたエントリのタイマーが確実に解放されること",
+    "定期クリーンアップが孤立エントリを検出・削除すること",
+    "正常稼働中のworktreeに影響がないこと"
+  ],
+  "test_scenarios": [
+    "シナリオ1: initResourceCleanup()の呼び出しでMCPプロセスクリーンアップと24時間タイマーが起動すること",
+    "シナリオ2: stopResourceCleanup()でタイマーが正しく停止すること",
+    "シナリオ3: deleteAutoYesState(worktreeId)がautoYesStatesからエントリを削除し、autoYesPollerStatesには影響しないこと",
+    "シナリオ4: stopScheduleForWorktree(worktreeId)が対象worktreeのcronJobのみ停止し、他worktreeに影響しないこと",
+    "シナリオ5: session-cleanup.tsのcleanupWorktreeSessions()がstopAutoYesPolling→deleteAutoYesState→stopScheduleForWorktreeの順で呼ぶこと",
+    "シナリオ6: resource-cleanup.tsがDBに存在しないworktreeのMapエントリを孤立エントリとして削除すること",
+    "シナリオ7: resource-cleanup.tsがDBに存在するworktreeのMapエントリを削除しないこと",
+    "シナリオ8: server.tsの起動シーケンスにinitResourceCleanup()が含まれること",
+    "シナリオ9: server.tsのgracefulShutdown()にstopResourceCleanup()が含まれること"
+  ],
+  "implemented_files": [
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/schedule-manager.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/resource-cleanup.ts",
+    "server.ts"
+  ],
+  "test_files": [
+    "tests/unit/auto-yes-manager-cleanup.test.ts",
+    "tests/unit/lib/schedule-manager-cleanup.test.ts",
+    "tests/unit/session-cleanup-issue404.test.ts",
+    "tests/unit/resource-cleanup.test.ts"
+  ],
+  "tdd_result_path": "dev-reports/issue/404/pm-auto-dev/iteration-1/tdd-result.json"
+}

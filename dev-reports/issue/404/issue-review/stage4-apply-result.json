@@ -1,0 +1,66 @@
+{
+  "issue_number": 404,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目） - Stage 3 影響範囲レビュー",
+  "apply_date": "2026-03-04",
+  "applied_findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルに `src/app/api/repositories/route.ts` を追加。`cleanupMultipleWorktrees()` の呼び出し元であること、個別worktree削除APIが現時点で存在しない旨を明記"
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "`stopScheduleForWorktree(worktreeId)` 実装タスクに2つの実装上の注意を追記: (1) schedules MapのキーがscheduleId（UUID）のためworktreeIdでフィルタするイテレーション走査が必要、(2) cmateFileCacheのキーがworktree pathのためworktreeId->path変換ロジックが必要"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "`deleteAutoYesState(worktreeId)` の実装タスクに順序制約を追記: `stopAutoYesPolling(worktreeId)` でタイマークリア+pollerState削除を完了してから `autoYesStates` を削除する順序が安全（進行中ポーリングとのレース防止）"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "影響範囲テーブルの `response-poller.ts` の変更内容を更新（既存 `stopPolling()` の `clearTuiAccumulator()` 呼び出しで対応済みの確認 + 未カバーケースの補完）。実装タスクも「クリーンアップ確認」に変更し、`stopPolling()` 内のL1284での対応済み確認と未カバーケースの検討を明記"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "孤立MCPプロセス検出タスクにコンテナ環境での偽陽性リスク注記を追加。Docker/systemd環境の具体的リスクを列挙し、ppid=1に加えてプロセス名パターン（codex mcp-server、playwright-mcp）のコマンドライン引数マッチングによる複合チェックを推奨"
+    }
+  ],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "nice_to_have_not_included": [
+    {
+      "id": "F3-006",
+      "reason": "テストシナリオの具体化はユーザーの指示範囲外のため今回の適用対象外。ただしレビュー結果は保持"
+    },
+    {
+      "id": "F3-007",
+      "reason": "定期クリーンアップの実装場所詳細化はユーザーの指示範囲外のため今回の適用対象外"
+    },
+    {
+      "id": "F3-008",
+      "reason": "cleanupMultipleWorktrees()の動作改善補足はユーザーの指示範囲外のため今回の適用対象外"
+    }
+  ],
+  "summary": {
+    "total_findings_in_review": 8,
+    "applied": 5,
+    "skipped": 0,
+    "nice_to_have_not_included": 3,
+    "description": "Stage 3影響範囲レビューのmust_fix 2件、should_fix 3件を全てIssue #404に反映完了。F3-001で影響範囲テーブルにrepositories/route.tsを追加、F3-002でschedules MapキーとcmateFileCacheキーの設計制約を明記、F3-003でdeleteAutoYesStateの実行順序制約を追記、F3-004でresponse-poller.tsのクリーンアップ状況を正確に記述、F3-005で孤立MCPプロセス検出のコンテナ環境偽陽性リスクと対策を追記。nice_to_have 3件（F3-006/F3-007/F3-008）はユーザー指示範囲外のため今回は未適用。"
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/404"
+  },
+  "issue_updated": true
+}

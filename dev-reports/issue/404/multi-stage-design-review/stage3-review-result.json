@@ -1,0 +1,67 @@
+{
+  "issue_number": 404,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_summary": "設計方針書の影響範囲を5つの観点（既存機能・ホットリロード・テスト・並行処理・CMATE干渉）から分析した。must_fix 2件、should_fix 3件、nice_to_have 1件を検出。最も重大な問題は既存テストの破壊リスク（session-cleanup.test.tsがschedule-managerとauto-yes-managerのモックを持たない状態で、これらモジュールへの新規import追加により未モックDBアクセスが発生する）と、stopScheduleForWorktree()内のDB lookupが削除済みworktreeに対してnullを返す場合のcmateFileCache孤立エントリ問題である。",
+  "findings": [
+    {
+      "id": "R3-001",
+      "severity": "must_fix",
+      "category": "テスト",
+      "title": "session-cleanup.test.tsがschedule-managerとauto-yes-managerをモックしておらず、新規import追加で既存テストが破壊される",
+      "description": "現在のsession-cleanup.test.ts（L11-13）はresponse-pollerのみをvi.mock()でモックしている。session-cleanup.tsは既にauto-yes-manager（stopAutoYesPolling）とschedule-manager（stopAllSchedules）をimportしているが、テストではこれらをモックしていない。現行テストが動作しているのは、stopAutoYesPolling()がglobalThisのMapに対する単純な操作で副作用が小さく、stopAllSchedules()もglobalThisベースのため実害が出ていないためと推測される。しかし、設計方針書に従いsession-cleanup.tsに(1) deleteAutoYesState()のimport追加、(2) stopAllSchedules()からstopScheduleForWorktree()への変更を行うと、stopScheduleForWorktree()は内部でDB lookup（getLazyDbInstance() + getWorktreeById()）を実行する。テスト環境ではDBインスタンスが未初期化のため、require('./db-instance')時点で例外が発生し、既存テストケース全てが失敗する可能性が高い。",
+      "location": "設計方針書 Section 5.1 テスト計画: session-cleanup.test.tsの行（呼び出し順序検証、stopAllSchedules()回帰テスト）",
+      "suggested_fix": "テスト計画に以下を明記すること: (1) session-cleanup.test.tsにvi.mock('@/lib/auto-yes-manager')とvi.mock('@/lib/schedule-manager')を追加し、stopAutoYesPolling/deleteAutoYesState/stopScheduleForWorktreeをモック化する。(2) 既存テストケースが全て通過することを確認する回帰テストを最初に実行する。(3) 新規テストケース（呼び出し順序検証等）はモック後に追加する。テスト計画のsession-cleanup.test.tsセクションに『既存モック不足の修正』を前提ステップとして追記すべきである。"
+    },
+    {
+      "id": "R3-002",
+      "severity": "must_fix",
+      "category": "既存機能",
+      "title": "stopScheduleForWorktree()のDB lookupがworktree削除後のタイミングではnullを返し、cmateFileCacheエントリが孤立する",
+      "description": "設計方針書Section 3.3では、stopScheduleForWorktree(worktreeId)が内部でDB lookup（getWorktreeById(worktreeId)）を実行してworktreePath（cmateFileCacheのキー）を解決すると記述されている。しかし、呼び出し元であるcleanupWorktreeSessions()はworktree削除フローの一部として呼ばれる。DELETE /api/repositoriesルート（repositories/route.ts L92）ではcleanupMultipleWorktrees()が呼ばれた後にdeleteWorktreesByIds()でDBからworktreeレコードが削除される。つまりcleanupWorktreeSessions()の時点ではDBにレコードが存在するため問題ない。ただし、これは呼び出し順序に暗黙的に依存しており、設計方針書にはこの前提条件が明記されていない。将来、worktree削除フローのリファクタリングでDB削除が先に実行されるようになった場合、stopScheduleForWorktree()のDB lookupがnullを返し、cmateFileCacheのエントリが永久に残留する。",
+      "location": "設計方針書 Section 3.3 実装上の制約表: cmateFileCacheのキーはworktree path -> 内部でDB lookupを実行",
+      "suggested_fix": "設計方針書Section 3.3に以下を追記すること: (1) 前提条件として『stopScheduleForWorktree()はDBからworktreeレコードが削除される前に呼び出されること』を明記。(2) DB lookupでnullが返った場合のフォールバック処理として、cmateFileCache全体をイテレーションして該当worktreeId由来のエントリを探索するか、またはschedules Mapに保存されたworktreeIdから逆引きでpath情報を取得するロジックを検討する。最低限、DB lookup失敗時にconsole.warnログを出力してデバッグ可能にすること。"
+    },
+    {
+      "id": "R3-003",
+      "severity": "should_fix",
+      "category": "ホットリロード",
+      "title": "initResourceCleanup()の重複タイマー防止ロジックが設計方針書に明示されていない",
+      "description": "設計方針書Section 3.1ではglobalThis.__resourceCleanupTimerIdの宣言とCLEANUP_INTERVAL_MSの定数定義は記載されているが、initResourceCleanup()内で既存タイマーの存在チェックを行うかどうかが明示されていない。schedule-manager.ts（L604-609）のinitScheduleManager()はmanager.initializedフラグで二重初期化を防止している。同様のガードがresource-cleanup.tsにも必要だが、設計方針書のインターフェース定義（Section 3.1）には初期化済みチェックの記述がない。Next.jsのdev mode（hot reload）ではモジュールが再評価されるが、globalThisの値は保持されるため、initResourceCleanup()が複数回呼ばれると24時間タイマーが重複起動するリスクがある。",
+      "location": "設計方針書 Section 3.1 インターフェース: initResourceCleanup()の定義部分",
+      "suggested_fix": "initResourceCleanup()の実装仕様に以下を追記: (1) 関数冒頭でglobalThis.__resourceCleanupTimerIdの存在チェックを行い、既にタイマーが存在する場合はconsole.logで通知してreturnする。(2) あるいはschedule-manager.tsのパターンに倣い、ManagerState相当の構造体にinitializedフラグを持たせる。schedule-manager.tsのL604-609のパターンを参考として明記することを推奨する。"
+    },
+    {
+      "id": "R3-004",
+      "severity": "should_fix",
+      "category": "並行処理",
+      "title": "cleanupOrphanedMapEntries()の24時間ポーリングとworktree削除の同時実行によるレース条件リスク",
+      "description": "設計方針書Section 2.1の定期クリーンアップ（24h）では、DBとMapの差分検出 -> 孤立エントリ削除のフローが記述されている。cleanupOrphanedMapEntries()はDBからworktree一覧を取得し、Mapのキーと比較して孤立エントリを検出する。同時にDELETE /api/repositoriesが実行されると以下のシナリオが発生しうる: (1) cleanupOrphanedMapEntries()がDBから有効worktree一覧を取得（worktree-Aが含まれる）。(2) cleanupWorktreeSessions(worktree-A)が実行され、autoYesStatesからworktree-Aが削除される。(3) cleanupOrphanedMapEntries()がautoYesStatesを走査するが、worktree-Aは既に(2)で削除済み。この場合は実害がない（二重削除はMap.delete()が冪等）。しかし逆のケースも考えられる: (1) cleanupOrphanedMapEntries()がautoYesStatesのキー一覧を取得。(2) 新しいworktreeが追加されautoYesが有効化される。(3) cleanupOrphanedMapEntries()がDB照会時に存在しないworktreeIdとして検出し、新規worktreeのautoYesStateを誤削除する。Node.jsのシングルスレッド特性により、同期コード区間内ではレース条件は発生しないが、DB照会が非同期の場合は注意が必要。",
+      "location": "設計方針書 Section 3.1 cleanupOrphanedMapEntries()の記述全体",
+      "suggested_fix": "設計方針書に以下を補足: (1) cleanupOrphanedMapEntries()の実装はDB照会とMap走査を同一同期区間で実行すること（async/awaitを挟まない）。schedule-manager.tsのgetAllWorktrees()が同期関数（better-sqlite3は同期API）であるため、Map走査とDB照会の間にイベントループの介入がなく、レース条件は発生しないことを設計根拠として明記する。(2) 将来的にDB非同期化が検討される場合のリスクとして注記する。"
+    },
+    {
+      "id": "R3-005",
+      "severity": "should_fix",
+      "category": "既存機能",
+      "title": "cleanupWorktreeSessions()内のstopAllSchedules()からstopScheduleForWorktree()への変更がcleanupMultipleWorktrees()のN回呼び出しに影響する",
+      "description": "現在のsession-cleanup.ts L109-117では、cleanupWorktreeSessions()内でstopAllSchedules()が呼ばれている。これはworktree単位のクリーンアップ関数内でグローバルなスケジュール全停止を行っており、明らかにバグ（過剰停止）である。設計方針書ではこれをstopScheduleForWorktree(worktreeId)に置換する設計で、これは正しい方向性である。ただし、cleanupMultipleWorktrees()（L129-150）はworktreeIds配列をforループで回してcleanupWorktreeSessions()をN回呼ぶ。現行のstopAllSchedules()はN回呼ばれても冪等（2回目以降はschedules Mapが空）だが、新しいstopScheduleForWorktree()は各呼び出しでDB lookupを実行する。N個のworktreeを一括削除する場合、N回のDB lookupが発生する。MAX_CONCURRENT_SCHEDULES=100の上限内なので性能問題はないが、設計方針書にこの呼び出しパターンへの言及がない。",
+      "location": "設計方針書 Section 3.4 session-cleanup.tsの修正: cleanupWorktreeSessions()変更箇所",
+      "suggested_fix": "設計方針書Section 3.4に注記を追加: 『cleanupMultipleWorktrees()からN回呼び出されるパターンにおいて、stopScheduleForWorktree()のDB lookupはN回発生するが、better-sqlite3の同期APIとpreparedステートメントキャッシュにより性能影響は無視できる（MAX_CONCURRENT_SCHEDULES=100の範囲内）。』この注記により、実装時のレビューアーが疑問を持たずに済む。"
+    },
+    {
+      "id": "R3-006",
+      "severity": "nice_to_have",
+      "category": "干渉",
+      "title": "stopScheduleForWorktree()のcmateFileCache削除が次回syncSchedules()のmtimeチェックに与える影響の明記",
+      "description": "設計方針書Section 3.3の責務(b)ではcmateFileCacheエントリの削除が含まれている。schedule-manager.tsのsyncSchedules()（L487-511）はcmateFileCacheを参照してCMATE.md未変更時にDB操作をスキップする最適化を行っている（Issue #409）。stopScheduleForWorktree()でキャッシュを削除すると、次回syncSchedules()実行時にキャッシュミスとなり、当該worktreeのCMATE.mdを再パース・DB upsertする。worktreeが削除された場合はgetAllWorktrees()に含まれないため問題ないが、将来的にstopScheduleForWorktree()がworktree削除以外のコンテキスト（例: スケジュール一時停止）で使われた場合、意図しないキャッシュ無効化と再パースが発生する。現時点ではスコープ外だが、関数のJSDocに副作用として記載する価値がある。",
+      "location": "設計方針書 Section 3.3 責務(b): cmateFileCacheエントリの削除",
+      "suggested_fix": "stopScheduleForWorktree()のJSDocに以下の副作用を記載: 『Side effect: Removes cmateFileCache entry for the target worktree. On the next syncSchedules() cycle, the worktree CMATE.md will be re-parsed even if the file has not changed.』"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 3,
+  "nice_to_have_count": 1,
+  "overall_assessment": "設計方針書は影響範囲の大部分を適切にカバーしており、特にstopAllSchedules()からstopScheduleForWorktree()への変更方針、deleteAutoYesState()の呼び出し順序制約（stopAutoYesPollingの後）、およびactiveProcessesの自然回収方式は合理的である。ただし、2つのmust_fix課題が検出された。第一に、既存テストファイルsession-cleanup.test.tsがschedule-managerとauto-yes-managerのモックを持たないため、実装変更時に既存テストが破壊されるリスクがある。テスト計画にモック追加を前提ステップとして明記する必要がある。第二に、stopScheduleForWorktree()のDB lookupがworktree削除後のタイミングで呼ばれた場合のフォールバック処理が未定義であり、cmateFileCacheの孤立エントリが発生する可能性がある。ホットリロード対策の重複タイマー防止、並行処理の同期保証、N回呼び出しパターンについてはshould_fixとして設計方針書への追記を推奨する。"
+}

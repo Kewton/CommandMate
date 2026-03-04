@@ -1,0 +1,116 @@
+{
+  "issue_number": 404,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-04",
+  "review_summary": "前回影響範囲レビュー（Stage 3）の5件の主要指摘のうち4件が適切に対応済み、1件は部分対応。新たにmust_fix 1件、should_fix 1件、nice_to_have 1件を検出。最も重大な問題は、Issue本文の実装上の注意3が「__scheduleActiveProcessesのキーはworktreeId」と記述しているが、実際のコード（claude-executor.ts L199）ではキーはchild.pid（number型）であり、worktreeIdとの関連付けがMap上に存在しない点。この誤記はstopScheduleForWorktree()の実装を根本的に誤らせるリスクがある。",
+  "previous_findings_addressed": [
+    {
+      "id": "F3-001",
+      "status": "resolved",
+      "note": "影響範囲テーブルにsrc/app/api/repositories/route.tsが追加されている。「cleanupMultipleWorktrees()の呼び出し元。worktree削除はリポジトリ単位削除（DELETE /api/repositories）経由でのみ実行され、個別worktree削除APIは現時点で存在しない」と正確に記載されている。"
+    },
+    {
+      "id": "F3-002",
+      "status": "resolved",
+      "note": "実装タスクの実装上の注意1に「ManagerState.schedules MapのキーはscheduleId（UUID）であり、worktreeIdによる直接ルックアップ（Map.delete(worktreeId)）は不可能。全エントリをイテレーション走査し、ScheduleState.worktreeIdフィールドが一致するものをフィルタリングする」と明記されている。注意2にはcmateFileCacheのキーがworktree pathでありworktreeId -> path変換ロジックが必要な点も記載済み。"
+    },
+    {
+      "id": "F3-003",
+      "status": "resolved",
+      "note": "実装タスクに順序制約セクションが追加されている: 「deleteAutoYesState(worktreeId)は必ずstopAutoYesPolling(worktreeId)の呼び出し後に実行すること」と明確に記載され、理由として進行中のpollAutoYes()との不要な経路発生リスクも説明されている。"
+    },
+    {
+      "id": "F3-004",
+      "status": "resolved",
+      "note": "実装タスクが「stopPolling()内のclearTuiAccumulator(pollerKey)呼び出し（L1284）で既にクリーンアップされる。ただし、ポーリングが開始されていないworktree（activePollers.has()がfalse）ではclearTuiAccumulatorが呼ばれない可能性があるため、念のためtuiResponseAccumulatorの直接削除も検討すること」と更新されており、「確認 + 未カバーケースの補完」という適切なスタンスに修正されている。"
+    },
+    {
+      "id": "F3-005",
+      "status": "partially_resolved",
+      "note": "ppid=1チェックのコンテナ環境での偽陽性リスク注記が実装タスクに追加されている（Docker/systemd環境の説明あり）。ただし、Stage 3で推奨した「Docker環境検出時はppid=1チェックをスキップまたは警告出力のみとする」やCommandMate起動時刻との比較による追加防御は実装タスクに反映されていない。プロセス名パターンの複合チェック推奨のみ記載。実用上は十分であり、これ以上の詳細はIssueの粒度を超えるため、部分対応として許容可能。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F7-001",
+      "severity": "must_fix",
+      "category": "正確性",
+      "title": "__scheduleActiveProcessesのキーがworktreeIdであるという記述が事実と異なる",
+      "description": "Issue本文の実装タスク > stopScheduleForWorktree(worktreeId) > 実装上の注意3に「__scheduleActiveProcessesのキーはworktreeId（executeClaudeCommand()のL212参照）であるため、activeProcesses.get(worktreeId)で直接ルックアップが可能」と記載されている。しかし、実際のclaude-executor.ts（L212-214）の型宣言は `Map<number, import('child_process').ChildProcess>` であり、キーはPID（number型）である。L199の `activeProcesses.set(child.pid, child)` が示すとおり、worktreeIdはこのMapのキーにも値にも含まれていない。executeClaudeCommand()はworktreeId情報をcwd引数として受け取るが、Mapには記録しない。従って、stopScheduleForWorktree(worktreeId)がactiveProcesses.get(worktreeId)で直接ルックアップすることは不可能であり、この記述に基づいた実装は実行時エラーまたは静かなバグ（型不一致によるundefined返却）を引き起こす。",
+      "location": "実装タスク > globalThis Mapメモリリーク対策 > stopScheduleForWorktree(worktreeId) > 実装上の注意3",
+      "suggested_fix": "実装上の注意3を以下のように修正する:\n\n「__scheduleActiveProcessesのキーはPID（number型）であり、値はChildProcessオブジェクトである（claude-executor.ts L199, L214参照）。worktreeIdによる直接ルックアップは不可能。stopScheduleForWorktree()でworktree単位のプロセス停止を実現するには、以下のいずれかの方法を検討すること:\n  (a) executeClaudeCommand()が呼び出し元のscheduleStateからworktreeIdを取得できるよう、activeProcesses MapをMap<number, { child: ChildProcess, worktreeId: string }>に拡張する\n  (b) schedule-manager.tsのexecuteSchedule()内でchild.pidとworktreeIdの対応を別途管理するローカルMapを導入する\n  (c) stopScheduleForWorktree()ではactiveProcessesのworktree単位停止を責務外とし、子プロセスはexit eventによる自然回収に委ねる（cronJob.stop()で新規実行は防止されるため、実行中プロセスの即座の停止が不要であれば許容可能）」"
+    },
+    {
+      "id": "F7-002",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "Stage 5/6で追加されたresource-cleanup.tsとstopScheduleForWorktree()の責務拡大に対応するテストシナリオが未反映",
+      "description": "Stage 5（F5-001, F5-002）で明確化されたstopScheduleForWorktree()の3責務（cronジョブ停止、cmateFileCache削除、activeProcesses停止）と、resource-cleanup.ts新規モジュールのタイマーライフサイクル（setInterval開始、graceful shutdown時clearInterval）が受入条件と実装タスクのユニットテスト項目に反映されていない。現在の実装タスクにはユニットテストとしてのチェックボックスが1つだけ存在するが、以下のシナリオが欠落している:\n  1. stopScheduleForWorktree()のcmateFileCache部分削除テスト（他worktreeのキャッシュエントリに影響しないこと）\n  2. resource-cleanup.tsの24時間タイマー開始・停止のライフサイクルテスト\n  3. resource-cleanup.tsの孤立エントリ検出ロジックテスト（DBに存在しないworktreeIdのautoYesStatesエントリが削除されること）\n  4. session-cleanup.tsのcleanupWorktreeSessions()がstopScheduleForWorktree()とdeleteAutoYesState()を正しい順序で呼び出すことの検証\n\n既存のsession-cleanup.test.ts（L11-13）はauto-yes-managerとschedule-managerのモックが不足しており（response-pollerのみモック）、Issue #404の変更後に追加が必要なモックとアサーションが多い。",
+      "location": "実装タスク > ユニットテスト、受入条件",
+      "suggested_fix": "実装タスクのユニットテスト項目を以下のように具体化する:\n- [ ] session-cleanup.test.ts: cleanupWorktreeSessions()がstopAutoYesPolling() -> deleteAutoYesState() -> stopScheduleForWorktree()の順序で呼び出すことの検証\n- [ ] session-cleanup.test.ts: cleanupWorktreeSessions()がstopAllSchedules()を呼ばないことの検証（回帰テスト）\n- [ ] schedule-manager.test.ts: stopScheduleForWorktree(worktreeId)が当該worktreeのcronジョブのみ停止し、他worktreeのスケジュールに影響しないことの検証\n- [ ] schedule-manager.test.ts: stopScheduleForWorktree(worktreeId)が当該worktreeのcmateFileCacheエントリのみ削除し、他worktreeのキャッシュに影響しないことの検証\n- [ ] auto-yes-manager.test.ts: deleteAutoYesState(worktreeId)がautoYesStatesからエントリを削除し、autoYesPollerStatesには影響しないことの確認\n- [ ] resource-cleanup.test.ts: 24時間タイマーの開始・停止ライフサイクルテスト\n- [ ] resource-cleanup.test.ts: DBに存在しないworktreeIdのautoYesStates/autoYesPollerStatesエントリが検出・削除されることの検証"
+    },
+    {
+      "id": "F7-003",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "resource-cleanup.tsのサーバー起動ライフサイクルへの組み込みについてserver.tsの変更が影響範囲テーブルに未記載",
+      "description": "Issue本文の実装タスクでは「サーバー起動時（initScheduleManager()完了後）にタイマーを開始し、graceful shutdown時にclearIntervalで停止する」と記載されているが、影響範囲テーブルにはserver.tsが含まれていない。server.ts（L259のinitScheduleManager()の直後にinitResourceCleanup()を呼び出し、L275-281のgracefulShutdown()にstopResourceCleanup()を追加する必要がある）。変更自体は軽微（import追加+関数呼び出し2箇所）であるが、影響範囲テーブルの完全性のためserver.tsを追加することが望ましい。",
+      "location": "影響範囲テーブル",
+      "suggested_fix": "影響範囲テーブルに以下を追加する:\n| `server.ts` | `initResourceCleanup()` の呼び出し追加（`initScheduleManager()` の後）および `gracefulShutdown()` 内に `stopResourceCleanup()` 追加 |"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 1,
+  "nice_to_have_count": 1,
+  "overall_assessment": "前回影響範囲レビュー（Stage 3）の指摘事項は5件中4件が完全対応、1件が部分対応であり、Issue全体の影響範囲記述は大幅に改善されている。特にF3-001（repositories/route.ts追加）、F3-002（schedules Mapのキー制約）、F3-003（deleteAutoYesStateの順序制約）、F3-004（response-pollerのstopPolling確認）は全て適切に反映されている。\n\nしかし、新たに検出されたF7-001は重大な事実誤認である。__scheduleActiveProcesses MapのキーがworktreeIdであると記述されているが、実際はPID（number型）がキーであり、worktreeIdとの関連付けがMap上に一切存在しない。この誤記に基づいてstopScheduleForWorktree()を実装すると、activeProcesses.get(worktreeId)がundefinedを返し、当該worktreeの子プロセス停止が無効になる。Map構造の拡張またはworktree単位プロセス停止の責務範囲の見直しが必要である。\n\nStage 5/6で追加されたresource-cleanup.ts新規モジュールとstopScheduleForWorktree()の3責務明確化に対応するテストシナリオの具体化、およびserver.tsの影響範囲テーブルへの追加が推奨される。\n\nF7-001を除けば、Issue全体としての影響範囲分析は十分な品質に達しており、実装着手可能な状態にある。F7-001の修正は実装上の注意3の書き換え（1箇所）で完了するため、迅速に対応可能である。",
+  "code_references": [
+    {
+      "file": "src/lib/claude-executor.ts",
+      "lines": "L196-206, L212-226",
+      "relevance": "__scheduleActiveProcesses Map<number, ChildProcess> - キーはchild.pid（number型）、worktreeIdとの関連付けなし。L199: activeProcesses.set(child.pid, child)。F7-001の根拠。"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "lines": "L24, L421-463, L634-669",
+      "relevance": "executeClaudeCommand/getActiveProcessesのimport（L24）、executeSchedule()内のexecuteClaudeCommand呼び出し（L445）、stopAllSchedules()のactiveProcesses操作（L657-665、PIDキーでイテレーション）"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "L10-12, L61-120",
+      "relevance": "stopAllSchedules import（L12）、cleanupWorktreeSessions()のstopAllSchedules()呼び出し（L111）- Issue #404で変更対象"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "L132-138, L252-266, L272-274, L779-791",
+      "relevance": "autoYesStates/autoYesPollerStates宣言（L132-138）、disableAutoYes()のset()のみ（L264）、clearAllAutoYesStates()（L272-274）、stopAutoYesPolling()のdelete()（L789）"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "L184, L339-341, L350-355, L1273-1285",
+      "relevance": "tuiResponseAccumulator（L184、モジュールスコープ）、clearTuiAccumulator()（L339）、activePollers/pollingStartTimes（L350-355）、stopPolling()内のclearTuiAccumulator呼び出し（L1284）"
+    },
+    {
+      "file": "src/app/api/repositories/route.ts",
+      "lines": "L15, L92-94",
+      "relevance": "cleanupMultipleWorktrees import（L15）、DELETE handler内でのcleanupMultipleWorktrees呼び出し（L92）"
+    },
+    {
+      "file": "server.ts",
+      "lines": "L45, L258-259, L274-281",
+      "relevance": "initScheduleManager/stopAllSchedules import（L45）、initScheduleManager()呼び出し（L259）、gracefulShutdown()内のstopAllSchedules()（L281）- resource-cleanup.tsの統合先"
+    },
+    {
+      "file": "tests/unit/session-cleanup.test.ts",
+      "lines": "L10-13, L23-153",
+      "relevance": "既存テスト - response-pollerのみモック（L11-13）、auto-yes-manager/schedule-managerのモック不在、Issue #404の変更後に大幅な追加が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "session-cleanup.ts、auto-yes-manager.ts、schedule-manager.ts、claude-executor.ts、response-poller.ts、resource-cleanup.ts（新規）の各モジュール概要"
+    }
+  ]
+}
