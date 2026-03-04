@@ -1,0 +1,261 @@
+{
+  "stage": 3,
+  "review_type": "影響範囲",
+  "issue_number": 403,
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "IF-1",
+      "severity": "should_fix",
+      "category": "影響ファイル",
+      "description": "logs.shスクリプトはPM2/systemdのログのみ参照し、build-and-start.shが生成するlogs/server.logに対応していない。ローテーション機能導入後、ローテーション済みのログ（server.log.1, server.log.2等）を確認する手段がlogs.shには存在しない。現状でもlogs.shはbuild-and-start.sh --daemon起動時のログ表示に対応しておらず、既存の不備ではあるが、ローテーション導入はこの課題を顕在化させる。",
+      "suggestion": "Issueの影響範囲として scripts/logs.sh の現状（build-and-start.sh --daemon のログ非対応）を認識事項として記載する。logs.sh への対応は本Issueのスコープ外だが、将来課題として認識しておくべき。",
+      "location": "Issue本文 - 実装タスク セクション",
+      "affected_files": [
+        "scripts/logs.sh"
+      ]
+    },
+    {
+      "id": "IF-2",
+      "severity": "should_fix",
+      "category": "影響ファイル",
+      "description": "restart.shは./scripts/stop.sh + ./scripts/start.shを呼び出すフローであり、build-and-start.shを直接呼ばない。一方、setup.shのStep 4はbuild-and-start.sh --daemonを呼び出す。rebuild SKILLもstop.sh + build-and-start.sh --daemonを使う。ローテーションがbuild-and-start.sh内のrotate_logs()に実装される場合、restart.sh経由の再起動ではローテーションが実行されない。stop-server.sh + build-and-start.sh --daemon経由とrestart.sh経由で動作が異なることをIssueに明記すべき。",
+      "suggestion": "設計方針または影響範囲セクションに、ローテーションはbuild-and-start.sh内に実装するため、restart.sh（stop.sh + start.sh）経由の再起動ではローテーションが実行されない旨を明記する。restart.shはPM2を使用する別の起動パスであり、PM2には独自のログ管理があるため影響は限定的。",
+      "location": "Issue本文 - 設計方針 セクション",
+      "affected_files": [
+        "scripts/restart.sh",
+        "scripts/start.sh",
+        "scripts/setup.sh"
+      ]
+    },
+    {
+      "id": "IF-3",
+      "severity": "should_fix",
+      "category": "テスト範囲",
+      "description": "実装タスクに「テスト追加」と記載されているが、具体的なテスト方針が不明確。bashスクリプトのテストは通常のVitestでは実行できない。テスト方式として (A) bashスクリプト内でのセルフテスト関数、(B) 手動テスト手順の文書化、(C) シェルテストフレームワーク（bats等）の導入 のいずれかを明記すべき。現状プロジェクトにはシェルスクリプト用のテストフレームワークは存在しない。",
+      "suggestion": "テスト方針を以下のように具体化する: (1) rotate_logs()関数の手動テスト手順を受入条件に追記（例: テスト用の大きなログファイルを作成してrotate_logs()を実行し、世代管理を確認）。(2) bashスクリプトのテストはプロジェクトの既存テストインフラ（Vitest）のスコープ外であることを明記。(3) テスト手順をIssueまたはPR内に記載する方針とする。",
+      "location": "Issue本文 - 実装タスク「テスト追加」",
+      "affected_files": []
+    },
+    {
+      "id": "IF-4",
+      "severity": "nice_to_have",
+      "category": "ドキュメント更新",
+      "description": "PRODUCTION_CHECKLIST.mdの更新は実装タスクに含まれているが、日本語版（docs/internal/PRODUCTION_CHECKLIST.md L164）と英語版（docs/en/internal/PRODUCTION_CHECKLIST.md L164）の両方に同じ項目が存在する。Issueの実装タスクでは英語版のみ言及されており、日本語版の更新が漏れる可能性がある。",
+      "suggestion": "実装タスクを「docs/en/internal/PRODUCTION_CHECKLIST.md および docs/internal/PRODUCTION_CHECKLIST.md の Log rotation 項目にビルトインローテーションの説明を追加」に修正し、両言語版を明示する。",
+      "location": "Issue本文 - 実装タスク セクション - 「docs/en/internal/PRODUCTION_CHECKLIST.md の Log rotation 項目にビルトインローテーションの説明を追加」",
+      "affected_files": [
+        "docs/internal/PRODUCTION_CHECKLIST.md",
+        "docs/en/internal/PRODUCTION_CHECKLIST.md"
+      ]
+    },
+    {
+      "id": "IF-5",
+      "severity": "nice_to_have",
+      "category": "ドキュメント更新",
+      "description": "PRODUCTION_CHECKLIST.mdの「Production Monitoring」セクション（英語版L345、日本語版L345相当）に「Monthly - Log cleanup」の項目がある。ローテーション機能の導入により、手動のLog cleanupが不要になるか、または頻度が変わる可能性がある。この項目への影響を認識しておくと良い。",
+      "suggestion": "PRODUCTION_CHECKLIST.md更新時に、MonthlyのLog cleanup項目についてもローテーション機能に言及する（例: 「ログローテーションが有効な場合、自動的に古い世代が削除されます」）。",
+      "location": "Issue本文 - 実装タスク セクション",
+      "affected_files": [
+        "docs/en/internal/PRODUCTION_CHECKLIST.md",
+        "docs/internal/PRODUCTION_CHECKLIST.md"
+      ]
+    },
+    {
+      "id": "IF-6",
+      "severity": "nice_to_have",
+      "category": "依存関係",
+      "description": "build-and-start.shのrotate_logs()関数はシェル組み込みコマンド（mv, rm, stat/du等）のみで実装可能だが、ファイルサイズ取得方法がプラットフォーム間で異なる。macOSのstatコマンド（stat -f%z）とLinuxのstatコマンド（stat -c%s）で構文が異なる。du -bもmacOSには存在しない。build-and-start.shの既存コードにはプラットフォーム固有の処理はないが、rotate_logs()でファイルサイズを取得する際にプラットフォーム互換性の考慮が必要。",
+      "suggestion": "設計方針セクションに、ファイルサイズ取得方法としてwc -c（POSIX準拠、macOS/Linux共通）またはdu -k（1KB単位だがPOSIX準拠）を推奨する旨を記載する。例: LOG_SIZE=$(wc -c < \"$LOG_FILE\") でバイト単位取得、MAX_LOG_SIZE=$((MAX_LOG_SIZE_MB * 1024 * 1024)) で閾値比較。",
+      "location": "Issue本文 - 設計方針 セクション",
+      "affected_files": [
+        "scripts/build-and-start.sh"
+      ]
+    },
+    {
+      "id": "IF-7",
+      "severity": "nice_to_have",
+      "category": "環境変数",
+      "description": "CM_LOG_DIR環境変数はdata/logs/（アプリケーションログ）のパスを制御する。一方、build-and-start.shのLOG_DIR変数は$PROJECT_DIR/logs（サーバーログ）のパスをハードコードしている。2つのログディレクトリは完全に独立しており、CM_LOG_DIRの変更はbuild-and-start.shのLOG_DIRに影響しない。この分離は正しい設計だが、Issueで既にスコープ外と明記されており問題はない。念のため認識事項として記録する。",
+      "suggestion": "追加対応は不要。Issueの概要セクションで既にdata/logs/がスコープ外であることが明記されており、CM_LOG_DIR環境変数との分離は正しく認識されている。",
+      "location": "Issue本文 - 概要 セクション",
+      "affected_files": [
+        "src/config/log-config.ts",
+        "src/lib/env.ts"
+      ]
+    },
+    {
+      "id": "IF-8",
+      "severity": "nice_to_have",
+      "category": "影響ファイル",
+      "description": ".gitignore L52に「logs/」がエントリされており、logs/server.logおよびローテーション後のlogs/server.log.1等はGit管理外。ローテーションファイルが.gitignoreで正しく除外されることの確認は不要（ディレクトリ全体が除外済み）。",
+      "suggestion": "追加対応は不要。.gitignoreの「logs/」エントリがディレクトリ全体をカバーしており、ローテーションファイルも自動的に除外される。",
+      "location": "N/A",
+      "affected_files": [
+        ".gitignore"
+      ]
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 5,
+    "overall_quality": "good",
+    "comment": "Stage 2反映後のIssueは影響範囲の観点で概ね良好。スコープの明確化（build-and-start.sh --daemonのみ、data/logs/はスコープ外）が適切に行われており、CLIモジュール（daemon.ts）との分離も正しく記載されている。主な改善点は3つ: (1) restart.sh経由の再起動でローテーションが実行されない点の明記、(2) logs.shがbuild-and-start.sh --daemonのログ表示に未対応である認識、(3) テスト方針の具体化（bashスクリプトのテスト方法）。環境変数CM_LOG_DIRとの分離、.gitignoreの整合性、PRODUCTION_CHECKLIST.mdの更新については適切に対応されている。破壊的変更は発生しない。"
+  },
+  "impact_analysis": {
+    "directly_modified_files": [
+      {
+        "file": "scripts/build-and-start.sh",
+        "change_type": "modify",
+        "description": "rotate_logs()関数追加、MAX_LOG_SIZE_MB/MAX_LOG_GENERATIONS定数追加、nohup実行前のローテーション呼び出し追加"
+      },
+      {
+        "file": "docs/en/internal/PRODUCTION_CHECKLIST.md",
+        "change_type": "modify",
+        "description": "Log rotation項目にビルトインローテーションの説明追加"
+      },
+      {
+        "file": "docs/internal/PRODUCTION_CHECKLIST.md",
+        "change_type": "modify",
+        "description": "ログのローテーション設定項目にビルトインローテーションの説明追加（日本語版）"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "scripts/stop-server.sh",
+        "impact": "none",
+        "reason": "LOG_DIR/PID_FILE変数を共有するが、ローテーション機能はサーバー起動時のみ実行されるため影響なし。server.logのファイル名は変更されないためパス参照も影響なし"
+      },
+      {
+        "file": "scripts/restart.sh",
+        "impact": "low",
+        "reason": "stop.sh + start.shの経路であり、build-and-start.shを呼ばないためローテーションは実行されない。ただしPM2フローのため影響は限定的"
+      },
+      {
+        "file": "scripts/setup.sh",
+        "impact": "none",
+        "reason": "build-and-start.sh --daemonを呼び出すため、初回セットアップ時にローテーションが実行される。ログファイルが存在しない初回では閾値未満で何も起きない。正常動作"
+      },
+      {
+        "file": "scripts/logs.sh",
+        "impact": "none_but_awareness",
+        "reason": "PM2/systemdのみ対応。build-and-start.sh --daemon起動時のログ表示に未対応（既存の課題）。ローテーション導入による追加影響はないが、改善候補として認識"
+      },
+      {
+        "file": "scripts/status.sh",
+        "impact": "none",
+        "reason": "ポート/プロセス/DBチェックのみ。ログファイルを参照しないため影響なし"
+      },
+      {
+        "file": "scripts/health-check.sh",
+        "impact": "none",
+        "reason": "HTTP/DB/ディスク/メモリチェックのみ。ログファイルを参照しないため影響なし"
+      },
+      {
+        "file": ".claude/skills/rebuild/SKILL.md",
+        "impact": "none",
+        "reason": "logs/server.logを参照するが、ローテーション後もメインのログファイル名は変わらないためtail -fコマンドは引き続き動作する"
+      },
+      {
+        "file": "docs/user-guide/cli-setup-guide.md",
+        "impact": "none",
+        "reason": "tail -f ~/.commandmate/logs/server.logを記載。CLI経由起動のパスであり、build-and-start.shとは異なる経路。ローテーションの影響なし"
+      },
+      {
+        "file": "docs/en/user-guide/cli-setup-guide.md",
+        "impact": "none",
+        "reason": "英語版。上記と同様"
+      },
+      {
+        "file": "src/config/log-config.ts",
+        "impact": "none",
+        "reason": "data/logs/のパス解決。logs/server.logとは完全に独立。Issueで既にスコープ外と明記"
+      },
+      {
+        "file": "src/cli/utils/daemon.ts",
+        "impact": "none",
+        "reason": "stdio:'ignore'でlogs/server.logに書き込まない。Issueで既にスコープ外と明記"
+      },
+      {
+        "file": ".gitignore",
+        "impact": "none",
+        "reason": "logs/ディレクトリ全体が除外済み。ローテーションファイル（server.log.1等）も自動的に除外"
+      }
+    ],
+    "breaking_changes": [],
+    "migration_requirements": []
+  },
+  "code_references": [
+    {
+      "file": "scripts/build-and-start.sh",
+      "relevance": "直接変更対象。L16-18でLOG_DIR/LOG_FILE/PID_FILE定義、L63でmkdir -p、L107でnohup追記。rotate_logs()追加箇所"
+    },
+    {
+      "file": "scripts/stop-server.sh",
+      "relevance": "同じLOG_DIR/PID_FILE構成を共有。影響なしの確認済み"
+    },
+    {
+      "file": "scripts/restart.sh",
+      "relevance": "stop.sh + start.shの経路。build-and-start.shを呼ばないためローテーション非実行"
+    },
+    {
+      "file": "scripts/logs.sh",
+      "relevance": "PM2/systemdのみ対応。build-and-start.sh --daemonログ非対応（既存課題）"
+    },
+    {
+      "file": "scripts/setup.sh",
+      "relevance": "L118でbuild-and-start.sh --daemonを呼び出し。初回セットアップ時にローテーション実行（影響なし）"
+    },
+    {
+      "file": "scripts/status.sh",
+      "relevance": "ログファイル非参照。影響なし"
+    },
+    {
+      "file": "scripts/health-check.sh",
+      "relevance": "ログファイル非参照。影響なし"
+    },
+    {
+      "file": "src/config/log-config.ts",
+      "relevance": "data/logs/のパス解決。スコープ外確認済み"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "CLIデーモンモード。stdio:'ignore'でlogs/server.logに非出力。スコープ外確認済み"
+    },
+    {
+      "file": ".gitignore",
+      "relevance": "L52 logs/ディレクトリ除外。ローテーションファイルも自動除外"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "docs/en/internal/PRODUCTION_CHECKLIST.md",
+      "relevance": "L164 Log rotation項目。実装タスクに更新が含まれている。L345 Monthly Log cleanup項目も影響候補"
+    },
+    {
+      "file": "docs/internal/PRODUCTION_CHECKLIST.md",
+      "relevance": "L164 日本語版Log rotation項目。実装タスクでは英語版のみ言及（IF-4で指摘）"
+    },
+    {
+      "file": ".claude/skills/rebuild/SKILL.md",
+      "relevance": "L54/L57でlogs/server.logを参照。ローテーション後も影響なし"
+    },
+    {
+      "file": "docs/user-guide/cli-setup-guide.md",
+      "relevance": "L335でtail -f ~/.commandmate/logs/server.log。CLI経由パスのため影響なし"
+    },
+    {
+      "file": "docs/en/user-guide/cli-setup-guide.md",
+      "relevance": "L335で英語版同等記載。影響なし"
+    },
+    {
+      "file": "docs/DEPLOYMENT.md",
+      "relevance": "L81でbuild-and-start.sh --daemonを記載。ローテーション追加の記載は不要"
+    },
+    {
+      "file": "docs/en/DEPLOYMENT.md",
+      "relevance": "L81で英語版同等記載。ローテーション追加の記載は不要"
+    }
+  ]
+}

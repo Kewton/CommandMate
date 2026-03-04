@@ -18,7 +18,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { memo, useState, useEffect, useCallback, useMemo } from 'react';
 import { Modal } from '@/components/ui';
 import { FileContent } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
@@ -46,7 +46,7 @@ export interface FileViewerProps {
  * />
  * ```
  */
-export function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewerProps) {
+export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewerProps) {
   const [content, setContent] = useState<FileContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -194,4 +194,4 @@ export function FileViewer({ isOpen, onClose, worktreeId, filePath }: FileViewer
       </div>
     </Modal>
   );
-}
+});

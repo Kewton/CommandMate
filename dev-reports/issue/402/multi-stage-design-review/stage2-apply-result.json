@@ -1,0 +1,68 @@
+{
+  "issue_number": 402,
+  "stage": 2,
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S2-001",
+        "item": "D2コード例のsplit()共有コメントを正確化。detectMultipleChoicePrompt()は独立スコープで独自にsplit()を実行しており、関数カプセル化の範囲内である旨を明記",
+        "section_updated": "セクション4 D2: detectPrompt()への組み込み",
+        "status": "reflected"
+      },
+      {
+        "id": "S2-002",
+        "item": "テスト方式をvi.mock()からvi.spyOn()方式に変更。describe('Duplicate log suppression')ブロック内でvi.spyOnを使用し他テストへの影響を局所化。別ファイル分離オプションも追記",
+        "section_updated": "セクション8: テスト設計",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S2-003",
+        "item": "セクション1概要の「最大6回」を「最大7回」に修正。呼び出し元の内訳（response-poller最大3回+auto-yes-manager 1回+status-detector 1回+current-output/route 1回+prompt-response/route 1回）を明記。セクション3,7,9の関連箇所も整合性を確保",
+        "section_updated": "セクション1,3,4(D4-001),7",
+        "status": "reflected"
+      },
+      {
+        "id": "S2-004",
+        "item": "D1設計根拠のauto-yes-manager.ts参照をip-restriction.tsに変更。auto-yes-manager.tsはglobalThisパターンであり純粋モジュールスコープではない旨、Hot Reload耐性が不要のためglobalThis不要である旨を注記",
+        "section_updated": "セクション4 D1: モジュールスコープ変数",
+        "status": "reflected"
+      },
+      {
+        "id": "S2-005",
+        "item": "D2-004のlogger.info引数の完全記載",
+        "section_updated": "-",
+        "status": "skipped",
+        "skip_reason": "設計方針書ではコード例を簡略表記する方針を維持。実装時にソースコードの実際の引数に合わせて対応する"
+      }
+    ]
+  },
+  "skipped": [
+    {
+      "id": "S2-005",
+      "item": "D2-004のlogger.info引数の完全記載",
+      "reason": "nice_to_have。設計方針書ではコード例を簡略表記する方針を維持。実装時に対応"
+    }
+  ],
+  "applied_findings": ["S2-001", "S2-002", "S2-003", "S2-004"],
+  "skipped_findings": ["S2-005"],
+  "updated_file": "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md",
+  "source_code_modified": false,
+  "design_doc_path": "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md",
+  "sections_updated": [
+    "セクション1: 概要 (S2-003)",
+    "セクション3: 技術選定 (S2-003)",
+    "セクション4 D1: モジュールスコープ変数 (S2-004)",
+    "セクション4 D2: detectPrompt()への組み込み (S2-001)",
+    "セクション4 D4: 設計制約 (S2-003)",
+    "セクション7: パフォーマンス設計 (S2-003)",
+    "セクション8: テスト設計 (S2-002)",
+    "セクション12: レビュー指摘反映サマリー (Stage 2追加)",
+    "実装チェックリスト (S2-001, S2-002, S2-004)"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

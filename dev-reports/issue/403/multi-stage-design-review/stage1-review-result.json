@@ -1,0 +1,69 @@
+{
+  "stage": 1,
+  "review_type": "設計原則",
+  "issue_number": 403,
+  "findings": [
+    {
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "フォアグラウンドモード起動時のログローテーション適用範囲が不明確。設計方針書のシステム構成図とコードでは rotate_logs() が nohup 前に呼ばれるが、実際の build-and-start.sh では daemon モード分岐の前に mkdir -p があり、rotate_logs() の呼び出し位置が daemon モード限定なのか、フォアグラウンド含む全モード共通なのかが設計書のセクション4-3では明示されているものの、セクション1の概要では '--daemon 起動時' と限定している。セクション4-3の呼び出し位置はdaemon分岐前（mkdir直後）であり概要と矛盾する。",
+      "suggestion": "セクション1の概要を修正し、ローテーションが '--daemon 起動時のみ' ではなく 'build-and-start.sh 実行時（フォアグラウンド/デーモン両方）' に適用されることを明確化する。あるいは、フォアグラウンドモードではstdout出力であり server.log への追記は行われないため、daemon モード分岐内に rotate_logs() を配置する設計意図であれば、セクション4-3の呼び出し位置をdaemon分岐内に修正する。",
+      "location": "セクション1「概要」の 'build-and-start.sh --daemon 起動時' とセクション4-3「呼び出し位置」の配置が矛盾"
+    },
+    {
+      "severity": "should_fix",
+      "category": "エラー処理",
+      "description": "rotate_logs() 関数内の mv コマンド失敗時のエラー処理が設計されていない。スクリプトは set -e で実行されるため、mv が失敗した場合（例: ディスク容量不足、権限問題）にスクリプト全体が即座に終了し、サーバーが起動できなくなる。ログローテーションの失敗がサーバー起動を阻害すべきかどうかの設計判断が記載されていない。",
+      "suggestion": "ログローテーション失敗時の振る舞いを設計方針書に明記する。推奨案: rotate_logs() 内で個別コマンドの失敗をトラップし、ローテーション失敗時は警告を出力してスキップし、サーバー起動は継続する（例: mv ... || echo 'WARNING: rotation failed' とするか、関数全体を || true で呼び出す）。set -e との相互作用についてセクション5 または セクション7 に記載すべき。",
+      "location": "セクション4-2「rotate_logs()関数」およびセクション5「セキュリティ設計」"
+    },
+    {
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "restart.sh の影響分析が不正確。設計方針書では 'restart.sh は stop.sh + start.sh 経路でPM2使用、build-and-start.sh 非経由' と記載されているが、実際の restart.sh は PM2 非存在時に ./scripts/stop.sh + ./scripts/start.sh を呼び出す。start.sh は存在せず（Glob確認ではbuild-and-start.shのみ）、restart.sh からbuild-and-start.shが間接的に呼ばれる可能性や、そもそもstart.shが存在しない問題がある。影響分析の根拠が実際のコードベースと一致していない。",
+      "suggestion": "restart.sh の実際の動作を確認し、影響を受けないファイルの理由を正確に記載する。restart.sh は ./scripts/stop.sh + ./scripts/start.sh を呼び出すが start.sh の存在有無と実際の起動経路を調査した上で、影響分析を更新する。",
+      "location": "セクション2「影響を受けないファイル（確認済み）」の restart.sh の説明"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "description": "定数 MAX_LOG_SIZE_MB と MAX_LOG_GENERATIONS がbuild-and-start.sh のスクリプト先頭部に直接定義される設計になっている。現在のスクリプトにはPORT以外の設定定数がなく、将来的に設定項目が増えた場合に管理が分散する可能性がある。ただし、YAGNI原則から現時点では許容範囲であり、セクション10で環境変数オーバーライドを将来の拡張ポイントとして適切に記載している。",
+      "suggestion": "現状の設計は適切。将来的に環境変数オーバーライド（CM_LOG_MAX_SIZE_MB等）を導入する際は、PORT と同様の ${CM_LOG_MAX_SIZE_MB:-10} パターンを使う方針をセクション10に追記すると、将来の実装者にとって分かりやすい。",
+      "location": "セクション4-1「定数定義」およびセクション10「将来の拡張ポイント」"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "wc -c のコスト説明に 'O(1)（ファイルサイズ読取のみ）' とあるが、wc -c は実装によってはファイル全体を読む場合がある（POSIX仕様上は fstat でサイズ取得可能だが保証されていない）。GNU coreutils の wc -c はリダイレクト入力の場合 fstat を使うが、実測46MBのファイルでは実質的に無視できる差であり実用上の問題はない。ただし設計書の記載としては正確性に欠ける。",
+      "suggestion": "'O(1)（ファイルサイズ読取のみ）' を '実質的にO(1)（数ミリ秒以内）' に変更するか、'wc -c < file はリダイレクト経由のためほとんどの実装で fstat 相当の高速処理' と記載を修正する。",
+      "location": "セクション6「パフォーマンス設計」の実行コスト表"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "description": "LOG_FILE 変数は build-and-start.sh と stop-server.sh の両方で同一パターン（$PROJECT_DIR/logs/server.log）で定義されている。rotate_logs() の実装は build-and-start.sh 内に閉じているため DRY 違反ではないが、LOG_FILE のパス定義が複数スクリプトに散在している点は設計方針書で言及されていない。ローテーションにより .1/.2/.3 ファイルが生成されるが、これらを参照する可能性のある他スクリプト（logs.sh 等）への影響考慮が不足している。",
+      "suggestion": "logs.sh がserver.logを参照していない現状（PM2/systemd専用）は設計書に正しく記載されている。ただし、将来 logs.sh がserver.logに対応する際（セクション10の拡張ポイント4）にローテーション済みファイルも対象とすべき点を、セクション10の該当項目に補足として追記すると良い。",
+      "location": "セクション2「影響を受けないファイル」の logs.sh および セクション10「将来の拡張ポイント」の項目4"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "設計原則",
+      "description": "セクション8のテスト方針で '手動テスト（主要）' としているが、Bash関数の自動テストが困難であることの代替策として、具体的な手動テスト手順（dd コマンドでのテストファイル作成例など）が設計方針書に含まれていない。テスト表には期待結果が記載されているが、再現手順の詳細が不足している。",
+      "suggestion": "テスト方針セクションに、各テストケースの具体的な事前準備コマンド例を追記する。例: 'dd if=/dev/zero of=logs/server.log bs=1M count=15' でテスト用ファイルを作成、'touch logs/server.log.{1,2,3}' で世代ファイルを準備、など。これにより手動テストの再現性が向上する。",
+      "location": "セクション8「テスト方針」"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "description": "PRODUCTION_CHECKLIST の更新方針で、チェックボックスを '- [ ]' から '- [x]' に変更する設計になっている。しかし、PRODUCTION_CHECKLIST はデプロイ時にユーザーが確認するチェックリストであり、項目を '- [x]' にするとユーザーが既にチェック済みと誤解する可能性がある。'(optional)' の削除と説明文の追加は適切だが、チェック状態の変更は運用上の混乱を招く可能性がある。",
+      "suggestion": "PRODUCTION_CHECKLIST の更新は '- [ ] Log rotation is configured (built-in: ...)' の形式（チェックボックスは未チェックのまま）とし、ユーザーが自身の環境で確認した上でチェックを入れる運用を維持する。あるいは '(optional)' を除去して説明文のみ追加する形にする。",
+      "location": "セクション9「PRODUCTION_CHECKLIST更新方針」"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 5,
+    "overall_quality": "good"
+  }
+}

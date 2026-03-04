@@ -1,0 +1,150 @@
+{
+  "issue_number": 405,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC4-001",
+        "category": "A03_Injection",
+        "title": "キャッシュキー(sessionName)のバリデーション依存チェーンの明文化",
+        "description": "tmux-capture-cache.tsのgetCachedCapture/setCachedCapture/invalidateCacheはsessionNameをキャッシュキーとして直接使用する。sessionNameのバリデーションはBaseCLITool.getSessionName() -> validateSessionName()チェーンに依存しているが、tmux-capture-cache.ts自体にはバリデーションがない。設計書にはこの信頼チェーンの明示的な記載が不足しており、将来のリファクタリングで別経路からsessionNameが渡される場合にインジェクションリスクが生じる。",
+        "recommendation": "tmux-capture-cache.tsのモジュールJSDocにセキュリティ前提条件として「sessionNameはvalidateSessionName()によりバリデーション済みであること」を明記し、setCachedCapture()にdefense-in-depthとしてSESSION_NAME_PATTERNによるランタイムチェックを追加することを検討する。設計書セクション6にTrust Boundary図を追加すること。",
+        "owasp": "A03:2021 Injection",
+        "severity": "medium"
+      },
+      {
+        "id": "SEC4-002",
+        "category": "A04_Insecure_Design",
+        "title": "キャッシュデータの機密性保護 - TTL=2秒の十分性根拠の補強",
+        "description": "設計書6.1では「TTL=2秒で自動失効」をセンシティブデータ対策として記載しているが、TTL失効はlazy eviction(getCachedCapture()呼び出し時のみ)であり、getCachedCapture()が呼ばれない間はメモリ上にデータが残存する。tmuxセッション出力には認証情報、APIキー、環境変数等の機密情報が含まれる可能性があるが、TTL切れ後もMapエントリが残留するケースの分析が不足している。",
+        "recommendation": "設計書6.1にlazy evictionの制約を明記し、clearAllCache()がgraceful shutdownで確実に呼ばれることの保証メカニズムを記載する。また、setCachedCapture()時に既存の期限切れエントリを能動的に削除するsweep処理の追加（少なくともsetCachedCapture呼び出し時にfull sweep）を設計書に盛り込むこと。",
+        "owasp": "A04:2021 Insecure Design",
+        "severity": "medium"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-003",
+        "category": "A01_Broken_Access_Control",
+        "title": "globalThisキャッシュへのプロセス内アクセス制御の設計根拠",
+        "description": "globalThis.__tmuxCaptureCacheは同一Node.jsプロセス内の全モジュールからアクセス可能である。設計書3.1.4では「export関数経由でアクセスする」方針を記載しているが、globalThisプロパティは直接参照可能であり、意図しないモジュールからの直接操作（キャッシュ汚染）を技術的に防止できない。既存のglobalThisパターン（auto-yes-manager, schedule-manager等）も同様のリスクを持つが、キャッシュデータの機密性が高い（tmux出力を保持）ため、リスクレベルが相対的に高い。",
+        "recommendation": "設計書セクション6に「globalThisアクセスのリスク受容」として、(1) 同一プロセス内のコードは全て信頼されたファーストパーティコードである前提、(2) サードパーティモジュールがglobalThisプロパティにアクセスするリスクはnpmサプライチェーン攻撃に限定される、(3) 既存の他globalThisキャッシュと同等のリスクレベルであることを明記する。",
+        "owasp": "A01:2021 Broken Access Control",
+        "severity": "low"
+      },
+      {
+        "id": "SEC4-004",
+        "category": "A05_Security_Misconfiguration",
+        "title": "CACHE_MAX_ENTRIES=100とCACHE_MAX_CAPTURE_LINES=10000の相乗メモリ制限の明示",
+        "description": "設計書4.2では最大メモリ使用量を約20MB（20エントリ x 1MB）と見積もっているが、CACHE_MAX_ENTRIES=100の場合、理論上の最大メモリは100エントリ x 1MB = 100MBとなる。Node.jsプロセスのヒープメモリに対するこの上限値の妥当性と、DoS攻撃（大量のworktree + CLIツール組み合わせ）に対する耐性の分析が不十分である。",
+        "recommendation": "設計書4.2のメモリ見積もりを「通常想定: 20MB」「理論上限: 100MB（CACHE_MAX_ENTRIES=100時）」の2段階で記載し、100MBがNode.jsデフォルトヒープ（V8: 約1.7GB）に対して約6%であることの妥当性を根拠付ける。また、CACHE_MAX_ENTRIESの値をMAX_WORKTREES(=10) x CLI_TOOL_IDS.length(=5) x 安全係数(=2) = 100として算出根拠を明記すること。",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "severity": "low"
+      },
+      {
+        "id": "SEC4-005",
+        "category": "A04_Insecure_Design",
+        "title": "singleflightパターンにおけるPromise共有のエラー情報漏洩リスク",
+        "description": "getOrFetchCapture()のsingleflightパターンでは、fetchFnが失敗した場合のエラーオブジェクトが全ての待機中呼び出し元に共有される。fetchFn内のエラーメッセージにセッション名やCLIツール名が含まれるが、設計書DA3-002では「cliToolIdがsessionNameに含まれるため不整合は生じない」と記載しており、エラーメッセージ内の情報が呼び出し元のコンテキストに不適切に露出するリスクについて分析している。しかし、エラーメッセージがAPIレスポンスとして外部に返される経路の追跡が不足している。",
+        "recommendation": "captureSessionOutput()のcatchブロックでエラーメッセージを固定文字列に正規化し、内部エラー詳細はconsole.error()にのみ出力する既存パターン（terminal/route.tsのD1-007）を一貫して適用することを設計書に明記する。singleflightエラー共有に起因する情報漏洩が、既存のAPI層エラーハンドリングで十分に緩和されることを確認する。",
+        "owasp": "A04:2021 Insecure Design",
+        "severity": "low"
+      },
+      {
+        "id": "SEC4-006",
+        "category": "A09_Insufficient_Logging",
+        "title": "キャッシュ無効化の監査ログ不足",
+        "description": "設計書3.2のログ出力方針ではキャッシュヒット/ミス/singleflightヒットのdebugログを規定しているが、invalidateCache()の呼び出し（特にsendKeys/killSession後の8箇所）に対するログ出力が規定されていない。キャッシュ無効化はセキュリティイベント（出力データの更新トリガー）であり、B案の分散無効化方式では漏れ検出のためにも監査ログが重要である。",
+        "recommendation": "invalidateCache()関数内にdebugレベルのログ出力（sessionName、呼び出し元情報）を追加する設計を記載する。本番環境ではdebugログは無効だが、トラブルシューティング時にキャッシュ無効化チェーンの追跡を可能にする。",
+        "owasp": "A09:2021 Security Logging and Monitoring Failures",
+        "severity": "low"
+      },
+      {
+        "id": "SEC4-007",
+        "category": "A04_Insecure_Design",
+        "title": "captureSessionOutputFresh()のキャッシュ書き戻しによるキャッシュポイズニング経路",
+        "description": "captureSessionOutputFresh()はキャッシュをバイパスしてフレッシュデータを取得するが、取得後にsetCachedCapture()でキャッシュに書き戻す。prompt-response APIのみが使用するこの関数で、もしcapturePane()が破損データ（tmuxバグ等により一部が欠落/不正）を返した場合、書き戻しにより他の全呼び出し元に破損データが伝播する。DA3-005でTOCTOU対策は記載されているが、capturePane()自体の出力品質に対する検証がない。",
+        "recommendation": "設計書3.4.3にcapturePane()出力の最低限の妥当性チェック（空文字列でないこと、合理的な行数であること）をsetCachedCapture()前に実施する方針を追記する。空文字列の場合はキャッシュ書き戻しをスキップし、invalidateCache()を呼ぶことで他の呼び出し元が次回フレッシュデータを取得できるようにする。",
+        "owasp": "A04:2021 Insecure Design",
+        "severity": "low"
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC4-008",
+        "category": "A02_Cryptographic_Failures",
+        "title": "キャッシュ内データの暗号化/難読化の不要性確認",
+        "description": "メモリ上のキャッシュデータは平文で保持されるが、Node.jsプロセスのヒープダンプを取得できる攻撃者はプロセス内の全データにアクセス可能であるため、キャッシュの暗号化は実効的な防御にならない。tmux scrollbackバッファ自体も平文であり、キャッシュがリスクを増加させない。",
+        "recommendation": "現行設計で問題なし。設計書6.1の記載「tmux scrollbackバッファ自体がメモリ上に存在するため、増加リスクは限定的」は妥当。追加対策は不要。"
+      },
+      {
+        "id": "SEC4-009",
+        "category": "A10_SSRF",
+        "title": "SSRF観点: キャッシュモジュールによるSSRFリスクの不在確認",
+        "description": "tmux-capture-cache.tsは外部ネットワーク通信を行わず、ローカルのtmuxプロセスとのみやり取りする。SSRFリスクは存在しない。",
+        "recommendation": "対策不要。設計は妥当。"
+      },
+      {
+        "id": "SEC4-010",
+        "category": "A06_Vulnerable_Components",
+        "title": "新規サードパーティ依存の不在確認",
+        "description": "tmux-capture-cache.tsは標準ライブラリのMap/Date.now()のみを使用し、新規npm依存を追加しない。脆弱なコンポーネントのリスクは存在しない。",
+        "recommendation": "対策不要。設計は妥当。"
+      },
+      {
+        "id": "SEC4-011",
+        "category": "A07_Authentication",
+        "title": "認証・セッション管理との独立性確認",
+        "description": "キャッシュモジュールは認証チェック後のAPI層から呼ばれるため、middleware.tsの認証が突破されない限りキャッシュにアクセスできない。既存のmiddleware.ts認証（CM_AUTH_TOKEN_HASH、IP制限）がキャッシュアクセスの前提条件として機能する。",
+        "recommendation": "対策不要。既存の認証機構がキャッシュ層のアクセス制御として十分に機能する。"
+      },
+      {
+        "id": "SEC4-012",
+        "category": "A08_Data_Integrity",
+        "title": "キャッシュとtmux出力のデータ整合性",
+        "description": "TTL=2秒のキャッシュにより、最大2秒間の古いデータが返却される可能性がある。prompt-response APIではcaptureSessionOutputFresh()でバイパスすることにより、リアルタイム性を要求する操作でのstale dataリスクを回避している。この設計は適切である。",
+        "recommendation": "現行設計で問題なし。prompt-response APIのバイパス方式は正しいアプローチ。"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "owasp_checklist": {
+    "A01_Broken_Access_Control": "pass_with_notes",
+    "A02_Cryptographic_Failures": "pass",
+    "A03_Injection": "conditional_pass",
+    "A04_Insecure_Design": "conditional_pass",
+    "A05_Security_Misconfiguration": "pass_with_notes",
+    "A06_Vulnerable_Components": "pass",
+    "A07_Authentication": "pass",
+    "A08_Data_Integrity": "pass",
+    "A09_Insufficient_Logging": "pass_with_notes",
+    "A10_SSRF": "pass"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-405-tmux-capture-optimization-design-policy.md",
+    "src/lib/tmux.ts",
+    "src/lib/cli-session.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/env-sanitizer.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/validation.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/middleware.ts"
+  ],
+  "timestamp": "2026-03-04T12:00:00Z"
+}

@@ -1,0 +1,15 @@
+{
+  "stage": 3,
+  "apply_date": "2026-03-03",
+  "issue_number": 401,
+  "design_doc_path": "dev-reports/design/issue-401-stop-script-fix-design-policy.md",
+  "applied_findings": ["I3-001", "I3-002", "I3-003"],
+  "skipped_findings": ["I3-004", "I3-005", "I3-006"],
+  "skip_reasons": {
+    "I3-004": "Nice to have: セクション9で既にスコープ外として明示済み",
+    "I3-005": "Nice to have: リスクなしと評価済み",
+    "I3-006": "Nice to have: 現在の設計で安全性が確保されている"
+  },
+  "design_doc_updated": true,
+  "summary": "Stage 3（影響分析）レビューのShould Fix 3件を設計方針書に反映。I3-001: セクション6.2の互換性テーブルに待機時間影響列を追加、セクション8のトレードオフテーブルに具体的な待機時間（最大5秒）を記載、セクション9にrestart.shのsleep 2短縮をスコープ外として追記。I3-002: セクション7.1のテスト項目にnohup以外の起動方法でのstop-server.sh動作確認（kill -- -$PIDフォールバック検証）を追加。I3-003: セクション4.3にCLIモードとスクリプトモードのPIDファイルパス分断に関する注記を追加し、stop-server.shのポートベース停止がCLIモード起動プロセスもカバーすることを明記。Nice to Have 3件（I3-004/I3-005/I3-006）はスキップ。"
+}

@@ -1,0 +1,118 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 408,
+  "review_focus": "通常",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "should_fix",
+      "category": "正確性",
+      "description": "二重呼び出しは無条件ではなく `!thinking` 条件下でのみ発生する。Issue本文は「同一出力に対してregexパターンマッチングが2回実行される」と記載しているが、実際には `thinking === true` の場合、route.ts L99 の `if (!thinking)` ガードにより2回目の `detectPrompt()` はスキップされる。つまり二重呼び出しは `thinking === false` の場合のみ発生する。Issue本文にこの条件が明記されていないため、修正者が問題の全容を正確に把握できない可能性がある。",
+      "location": "背景・課題 セクション",
+      "suggestion": "「結果として同一出力に対してregexパターンマッチングが2回実行される」を「thinking状態でない場合（通常動作時の大部分）、同一出力に対してregexパターンマッチングが2回実行される。thinking状態の場合は route.ts の `!thinking` ガードにより1回のみ」と修正する。"
+    },
+    {
+      "id": "F1-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "影響範囲テーブルに `detectSessionStatus()` の他の呼び出し元が記載されていない。`worktrees/route.ts` (L58) と `worktrees/[id]/route.ts` (L68) も `detectSessionStatus()` を使用しており、戻り値型 `StatusDetectionResult` を変更する場合はこれらにも影響が及ぶ。現在これらの呼び出し元は `hasActivePrompt` のみを使用しているため新フィールドがオプショナルであれば破壊的変更にはならないが、影響範囲として明記すべきである。",
+      "location": "影響範囲 セクション",
+      "suggestion": "影響範囲テーブルに以下を追加する:\n- `src/app/api/worktrees/route.ts`: `StatusDetectionResult` 型変更の影響確認（promptData不使用のため変更不要だが型互換性を確認）\n- `src/app/api/worktrees/[id]/route.ts`: 同上\n- `tests/unit/lib/status-detector.test.ts`: 戻り値型変更に伴うテスト更新\n- `tests/integration/current-output-thinking.test.ts`: 結合テストの更新確認"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "category": "整合性",
+      "description": "SF-001設計根拠との関係が言及されていない。`status-detector.ts` の冒頭JSDoc (L12-21) に「Architecture note (SF-001 tradeoff)」として、この二重呼び出しが意図的な設計判断（controlled DRY violation）であることが詳細に文書化されている。また `current-output/route.ts` L90-94 にも SF-001 コメントが記載されている。Issue の提案はこの設計判断を覆すものであり、SF-001 トレードオフの再評価として位置づけるべきである。",
+      "location": "背景・課題 / 提案する解決策 セクション",
+      "suggestion": "背景・課題に「現在この二重呼び出しは `status-detector.ts` JSDoc にて SF-001 として意図的な DRY 違反と文書化されている（SRP維持のため）。本Issueはこのトレードオフを再評価し、パフォーマンス改善を優先する方向で解消を提案する」と追記する。実装タスクにも「SF-001 コメントの更新（status-detector.ts JSDoc および current-output/route.ts 内コメント）」を追加する。"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "提案する解決策の SRP（単一責任原則）への影響が考慮されていない。`StatusDetectionResult` に `promptDetection` (PromptDetectionResult) を追加すると、ステータス検出モジュールがプロンプトデータの形状に結合される。これは SF-001 が回避しようとしていた問題そのものである。代替案として、(A) `detectSessionStatus()` の戻り値に含める、(B) `detectSessionStatusWithPromptData()` のような専用関数を新設する、(C) `current-output/route.ts` 内でキャッシュ機構を導入する、等の選択肢を比較検討すべきである。",
+      "location": "提案する解決策 セクション",
+      "suggestion": "解決策を以下のように具体化する:\n- 案A: `StatusDetectionResult` にオプショナルな `promptDetection?: PromptDetectionResult` フィールドを追加（SRP緩和を許容）\n- 案B: `detectSessionStatusWithPromptData()` を新設し、`current-output/route.ts` のみが使用（SRP維持、関数増加）\n- 案C: `detectSessionStatus()` 内で計算済みの `promptDetection` をオプショナル引数で外部に受け渡す（out parameter パターン）\n推奨案と理由を明記する。"
+    },
+    {
+      "id": "F1-005",
+      "severity": "nice_to_have",
+      "category": "正確性",
+      "description": "行番号 L87, L100-101 はコード変更により今後ずれる可能性が高い。仮説検証でも「行番号は若干ずれあり」と指摘されている。",
+      "location": "背景・課題 セクション",
+      "suggestion": "行番号の代わりにコードスニペットやコメントマーカー（SF-001等）で該当箇所を特定する記法にするか、「おおよその行番号」と注記する。"
+    },
+    {
+      "id": "F1-006",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "受け入れ条件に「既存のUI動作に影響がないこと」とあるが、検証方法が不明確。`promptData` は API レスポンスの `promptData` フィールドとしてクライアントに返されており（L133）、クライアント側で `MobilePromptSheet` 等のUI表示に使われている。変更後も同一の `promptData` 構造が返されることを具体的にどう確認するかの記載がない。",
+      "location": "受入条件 セクション",
+      "suggestion": "以下のような具体的な検証条件を追加する:\n- `promptData` のレスポンス構造が変更前後で同一であること（型テストまたはスナップショットテスト）\n- `isPromptWaiting` の判定結果が変更前後で同一であること\n- `thinking` フラグの判定結果が変更前後で同一であること"
+    },
+    {
+      "id": "F1-007",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "パフォーマンス改善の定量的な期待効果が記載されていない。「ホットパス」「2-5秒ごとに呼ばれる」との記載があるが、`detectPrompt()` は regex ベースで I/O なし（status-detector.ts L20: 'detectPrompt() is lightweight (regex-based, no I/O), so the cost is negligible'）と既存コメントに明記されており、実際のパフォーマンスインパクトは小さい可能性がある。",
+      "location": "概要 / 背景・課題 セクション",
+      "suggestion": "パフォーマンス改善の主目的がコードの明瞭性・DRY原則の改善であるならば、その旨を明記する。純粋なパフォーマンス改善としての期待効果（例: regex評価回数の削減による具体的なレイテンシ改善見込み）があるならベンチマーク等の根拠を追記する。"
+    },
+    {
+      "id": "F1-008",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "実装タスクに `auto-yes-manager.ts` の `detectAndRespondToPrompt()` (L585) への影響考慮が記載されていない。この関数も `detectPrompt()` を独立して呼び出しており、同様の二重呼び出しパターンが存在する（`pollAutoYes()` が `detectSessionStatus()` 相当の処理後に `detectPrompt()` を呼ぶ）。今回のスコープ外であっても、関連する類似パターンとして言及があると実装者の理解を助ける。",
+      "location": "実装タスク セクション",
+      "suggestion": "「スコープ外の類似パターン」として `auto-yes-manager.ts` の `detectAndRespondToPrompt()` を注記する。今回の変更パターンが将来的にそちらにも適用可能かの検討材料となる。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 5,
+    "nice_to_have_count": 3,
+    "overall_quality": "fair",
+    "comment": "Issue の本質的な課題認識（detectPrompt() の二重呼び出し）は正確であり、提案方向性も妥当である。しかし、(1) `!thinking` 条件下でのみ二重呼び出しが発生するという重要な詳細が欠落、(2) 既存の SF-001 設計根拠への言及がなく意図的な DRY 違反を覆す文脈が不明瞭、(3) 他の `detectSessionStatus()` 呼び出し元への影響範囲が未記載、(4) SRP への影響を踏まえた解決策の比較検討が不足、という4点が主要な改善点である。これらを補完することで、実装者が設計判断を正確に理解し、適切なアプローチを選択できるIssueとなる。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "87-102",
+      "relevance": "二重呼び出しの発生箇所。L87で detectSessionStatus()、L99-101で条件付き detectPrompt() 呼び出し"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "12-21, 42-60, 114-145",
+      "relevance": "SF-001 設計根拠JSDoc、StatusDetectionResult 型定義、detectSessionStatus() 内部の detectPrompt() 呼び出し"
+    },
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "lines": "58",
+      "relevance": "detectSessionStatus() の呼び出し元（hasActivePrompt のみ使用、promptData 不要）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "68",
+      "relevance": "detectSessionStatus() の呼び出し元（hasActivePrompt のみ使用、promptData 不要）"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "54-69, 184",
+      "relevance": "PromptDetectionResult 型定義、detectPrompt() 関数定義"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "585",
+      "relevance": "類似パターン: detectAndRespondToPrompt() 内の独立した detectPrompt() 呼び出し"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "status-detector.ts / prompt-detector.ts / current-output/route.ts のモジュール説明に SF-001 記載あり"
+    }
+  ]
+}

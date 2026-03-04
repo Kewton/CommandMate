@@ -1,0 +1,145 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-03",
+  "previous_review_addressed": true,
+  "previous_review_summary": {
+    "stage1_findings_total": 11,
+    "stage1_applied": 9,
+    "stage1_skipped": 2,
+    "stage1_skipped_ids": ["R1-010", "R1-011"],
+    "stage3_findings_total": 10,
+    "stage3_applied": 8,
+    "stage3_skipped": 2,
+    "stage3_skipped_ids": ["R3-009", "R3-010"],
+    "all_must_fix_addressed": true,
+    "all_should_fix_addressed": true,
+    "skipped_items_justified": true
+  },
+  "findings": [
+    {
+      "id": "R5-001",
+      "severity": "should-fix",
+      "category": "正確性",
+      "location": "依存関係・並行開発リスク > Issue #407 との依存関係 - stopScheduleForWorktree() の記述",
+      "issue": "Issue本文にて「Issue #407 で stopAllSchedules() の呼び出しを worktree 単位の停止関数（stopScheduleForWorktree()）に置換する予定」と記載されている。しかし Issue #407 の本文には stopScheduleForWorktree() という具体的な関数名は言及されておらず、「session-cleanup.ts にauto-yes/schedule MapのworktreeIdエントリ削除を追加」「エントリ削除用エクスポート関数追加」という抽象的な記述のみ。さらに CLAUDE.md の session-cleanup.ts 説明（L171）には「Issue #294: stopScheduleForWorktree()呼び出し追加」と記載されているが、実際の session-cleanup.ts:111 のコードは stopAllSchedules() を呼び出しており、stopScheduleForWorktree() はコードベースに存在しない。Issue #409 が Issue #407 で実装される予定の関数名を先行で具体化するのは問題ないが、Issue #407 側の記述と齟齬がある点を認識しておくべき。",
+      "suggestion": "「Issue #407 で stopAllSchedules() の呼び出しを worktree 単位の停止・エントリ削除関数に置換する予定」と、具体的な関数名を断定しない表現に変更する。または Issue #407 側にも stopScheduleForWorktree() の命名案を提案する。なお、CLAUDE.md L171 の stopScheduleForWorktree() 記述は実装が存在しないため、Issue #407 の実装完了時に合わせて更新が必要（ただしこれは Issue #409 のスコープ外）。"
+    },
+    {
+      "id": "R5-002",
+      "severity": "should-fix",
+      "category": "完全性",
+      "location": "提案する解決策 > 2. スケジュール同期の差分ベース化 - バッチ化の具体的な手順",
+      "issue": "「バルクSELECT -> トランザクション内UPDATE/INSERT」と記載されているが、バルクSELECTの具体的な実装方法が不明確。現在の upsertSchedule() は1エントリずつ SELECT id FROM scheduled_executions WHERE worktree_id = ? AND name = ? を実行している。バルクSELECTで既存レコードを一括取得するとは、SELECT id, name FROM scheduled_executions WHERE worktree_id = ? を1回実行し、結果をMap<name, id>に変換して、ループ内でMapルックアップに置き換えるという意味と推察されるが、明示されていない。",
+      "suggestion": "バッチ化の手順をより具体的に記載する。例: (1) worktree単位で SELECT id, name FROM scheduled_executions WHERE worktree_id = ? を1回実行し、既存スケジュールのMap<name, id>を構築。(2) db.transaction() 内でentriesをループし、Mapに存在すればUPDATE、なければINSERT。これにより1 worktreeあたりのSELECTが entries.length 回から1回に削減される。"
+    },
+    {
+      "id": "R5-003",
+      "severity": "nice-to-have",
+      "category": "完全性",
+      "location": "提案する解決策 > 1. インデックス追加 - 既存インデックスの扱い",
+      "issue": "Stage 1 の R1-005 で「既存の idx_scheduled_executions_enabled（enabled単独）を廃止して複合インデックスに置換することを検討」と提案されたが、現在のIssue本文には既存の enabled 単独インデックスの処理方針が記載されていない。(worktree_id, enabled) 複合インデックスを追加すると、enabled 単独のインデックスは冗長になる可能性がある（ただし enabled 単独でのフィルタリングがある場合は残す価値がある）。",
+      "suggestion": "マイグレーション version 21 で既存の idx_scheduled_executions_enabled (enabled単独) を DROP するか維持するかの方針を明記する。推奨: enabled 単独でフィルタリングするクエリが現時点で存在しないため DROP して複合インデックスに統合。ただし、実装時に確認して判断すればよい程度の項目。"
+    },
+    {
+      "id": "R5-004",
+      "severity": "nice-to-have",
+      "category": "明確性",
+      "location": "概要セクション",
+      "issue": "概要が「スケジュールマネージャの60秒ポーリングでのmtimeキャッシュなし全件解析を差分ベースに改善し、不足しているDBインデックスを追加する」と記載されており正確だが、「mtimeキャッシュなし全件解析」という表現がやや冗長。また本文で詳述されている db.transaction() によるバッチ化については概要に言及がない。",
+      "suggestion": "概要を簡潔に整理するか、バッチ化も含める。例: 「スケジュールマネージャの60秒ポーリングにmtimeキャッシュとトランザクションバッチ化を導入し、不足しているDBインデックスを追加する。」"
+    }
+  ],
+  "stage1_cross_check": {
+    "R1-001_must_fix": {
+      "status": "resolved",
+      "verification": "S6セクションから chat_messages(cli_tool_id) のインデックス不足記述が削除され、注記として「idx_messages_cli_tool(worktree_id, cli_tool_id, timestamp DESC) が既存のため追加不要」と正しく記載されている。"
+    },
+    "R1-002_must_fix": {
+      "status": "resolved",
+      "verification": "UNIQUE制約による暗黙インデックスの存在が注記され、実際の不足は (worktree_id, enabled) 複合インデックスであると正しく修正されている。"
+    },
+    "R1-003_must_fix": {
+      "status": "resolved",
+      "verification": "クエリ数見積もりが「100 worktree x 5 schedule x 2 クエリ = 1000+ クエリ/60秒」に修正され、upsertSchedule() の2クエリ/エントリが明記されている。"
+    },
+    "R1-004_must_fix": {
+      "status": "resolved",
+      "verification": "「SELECT id, path FROM worktrees」に修正され、実際のコード（schedule-manager.ts:127）と一致している。"
+    },
+    "R1-005_should_fix": {
+      "status": "resolved",
+      "verification": "インデックス提案が (worktree_id, enabled) に変更され、chat_messages および (worktree_id, name) へのインデックス追加は不要と明記されている。"
+    },
+    "R1-006_should_fix": {
+      "status": "resolved",
+      "verification": "globalThis.__scheduleManagerStates内のManagerStateにcmateFileCache: Map<string, number>として保持、fs.statSync().mtimeMsでチェック、CMATE.md削除時のキャッシュエントリ除去方針が明記されている。"
+    },
+    "R1-007_should_fix": {
+      "status": "resolved",
+      "verification": "db.transaction()でラップし、バルクSELECT -> トランザクション内UPDATE/INSERTの方式が明記されている。"
+    },
+    "R1-008_should_fix": {
+      "status": "resolved",
+      "verification": "受入条件が「upsertSchedule() のDBクエリ（scheduled_executionsテーブルへのSELECT/UPDATE/INSERT）が発生しないこと」に精緻化され、検証方法（モック/スパイ確認）も記載されている。"
+    },
+    "R1-009_should_fix": {
+      "status": "resolved",
+      "verification": "影響範囲テーブルに tests/unit/lib/schedule-manager.test.ts と tests/unit/lib/db-migrations.test.ts が追加されている。"
+    },
+    "R1-010_nice_to_have": {
+      "status": "skipped_justified",
+      "verification": "Issue分割提案。レビュー自体が「現行のまま1 Issueで進めても問題ない」と言及しており、スキップは妥当。"
+    },
+    "R1-011_nice_to_have": {
+      "status": "skipped_justified",
+      "verification": "R1-006の反映でmtime(fs.statSync().mtimeMs)が明示されており、実質的に方針が確定済み。スキップは妥当。"
+    }
+  },
+  "consistency_check": {
+    "internal_consistency": "良好。S6セクションとP3セクションの記述が提案する解決策・実装タスク・受入条件・影響範囲と整合している。依存関係セクションが備考セクションと矛盾なく共存している。",
+    "codebase_consistency": "良好。Issue内で引用されているコード箇所（schedule-manager.ts:127のSELECTクエリ、db-migrations.ts:829のUNIQUE制約、db-migrations.ts:842-843のenabledインデックス、session-cleanup.ts:111のstopAllSchedules()呼び出し）がすべて実際のコードベースと一致している。",
+    "cross_issue_consistency": "概ね良好。Issue #407/#406との依存関係が明記されている。R5-001で指摘した stopScheduleForWorktree() の関数名については Issue #407 本文との軽微な齟齬がある。"
+  },
+  "implementability_assessment": {
+    "verdict": "十分に実装可能",
+    "rationale": "以下の理由により、実装者はこのIssueの記述だけで作業を開始・完了できると判断する。(1) 変更対象ファイルと変更内容が影響範囲テーブルで網羅されている。(2) ManagerStateへのcmateFileCacheフィールド追加、syncSchedules()のmtimeチェック、db.transaction()バッチ化という3つの主要変更が具体的に記述されている。(3) ENOENTエラー処理やHot Reloadの挙動など、実装時のエッジケースが備考に記載されている。(4) テストケースが3件（キャッシュヒット/ミス/削除時）具体的に列挙されている。(5) 依存Issue（#406/#407）との推奨マージ順序が明記されている。",
+    "minor_gaps": "R5-002で指摘したバルクSELECTの実装手順の具体化がやや不足しているが、実装者が判断可能な範囲。"
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 2,
+    "total": 4
+  },
+  "code_references": [
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "relevance": "主要変更対象。ManagerState (L52-59), syncSchedules() (L363-442), upsertSchedule() (L143-170), stopAllSchedules() (L485-517)"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "relevance": "CURRENT_SCHEMA_VERSION = 20 (L14)。version 21マイグレーション追加対象。scheduled_executions定義 (L817-831), idx_scheduled_executions_enabled (L841-843)"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "L111でstopAllSchedules()をグローバル呼び出し。Issue #407で修正予定"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager.test.ts",
+      "relevance": "mtimeキャッシュのテスト追加対象。globalThisリセット (L77-78)"
+    },
+    {
+      "file": "tests/unit/lib/db-migrations.test.ts",
+      "relevance": "CURRENT_SCHEMA_VERSION アサーション (L37) の更新対象"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "L171 session-cleanup.ts の説明に stopScheduleForWorktree() が記載されているが実装が存在しない（既存の不整合、Issue #409のスコープ外）"
+    }
+  ],
+  "overall_assessment": "Issue #409 は Stage 1 (通常レビュー1回目) と Stage 3 (影響範囲レビュー1回目) の指摘事項が適切に反映されており、Must Fix レベルの問題は残っていない。Issue本文は技術的に正確で、実装に必要な情報が十分に記載されている。残る4件の指摘はいずれも Should Fix / Nice to Have レベルであり、実装の妨げにはならない。依存関係・並行開発リスクが新設セクションで整理されたことで、Issue #406/#407 との関係が明確になった。全体として実装着手可能な品質に達している。"
+}

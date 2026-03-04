@@ -1,0 +1,147 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "R3-001",
+      "severity": "must-fix",
+      "category": "影響範囲",
+      "location": "session-cleanup.ts L109-117 - stopAllSchedules() の呼び出し",
+      "issue": "session-cleanup.ts の cleanupWorktreeSessions() は worktree 単位のクリーンアップ関数だが、L111 で stopAllSchedules() を呼び出している。これは全worktreeの全スケジュールを停止するグローバル操作であり、1つの worktree を削除しただけで他の全 worktree のスケジュールも停止してしまう。Issue #409 で ManagerState に cmateFileCache を追加すると、このキャッシュも stopAllSchedules() 内の manager.schedules.clear() で全消去される。さらに manager.initialized = false になるため、以降の定期ポーリングが停止する（setInterval も clearInterval される）。つまり Issue #409 の変更とは無関係に既存のバグだが、mtimeキャッシュ追加により影響が拡大する（キャッシュが消えることで次回 initScheduleManager() 呼び出しまで全 worktree が再解析される）。",
+      "suggestion": "Issue #409 の scope 内で対処するかどうかを明示的に判断する必要がある。(1) scope 外とする場合: Issue #407（globalThis Map メモリリーク修正）で session-cleanup.ts の stopAllSchedules() 呼び出しを worktree 単位の停止関数（stopScheduleForWorktree()）に置換する予定であるため、Issue #409 では「Issue #407 の修正が前提」と依存関係を明記する。(2) scope 内とする場合: stopAllSchedules() の代わりに、特定 worktree のスケジュールのみを停止・キャッシュ除去する関数を新設する。",
+      "evidence": "session-cleanup.ts:111 - stopAllSchedules() はグローバル停止。schedule-manager.ts:485-517 - stopAllSchedules() は timerId=null, schedules.clear(), initialized=false を実行"
+    },
+    {
+      "id": "R3-002",
+      "severity": "must-fix",
+      "category": "後方互換性",
+      "location": "db-migrations.ts - マイグレーション version 21 の連番",
+      "issue": "現在 CURRENT_SCHEMA_VERSION = 20 で、Issue #409 は version 21 を使用予定。open Issues を確認したところ、Issue #406-#411 を含む複数の open Issue が存在するが、現時点でマイグレーション version 21 を使用する他の PR/Issue は確認されなかった。ただし、Issue #407 も schedule-manager.ts に変更を加える予定であり、両者が並行開発された場合にマイグレーション番号の競合が発生する可能性がある。Issue #407 自体はマイグレーション不要（globalThis Map の cleanup のみ）だが、他の未確認 Issue が DB 変更を含む可能性は排除できない。",
+      "suggestion": "実装着手前に、他ブランチでマイグレーション version 21 が使用されていないことを再確認する。PR 作成時に CURRENT_SCHEMA_VERSION の衝突がないか CI で検出できるよう、db-migrations.test.ts の expect(CURRENT_SCHEMA_VERSION).toBe(20) が自動的にフェイルセーフとして機能することを確認済み（tests/unit/lib/db-migrations.test.ts:37）。競合時はリベースで番号を繰り上げれば対処可能。"
+    },
+    {
+      "id": "R3-003",
+      "severity": "should-fix",
+      "category": "依存関係",
+      "location": "Issue #406 と Issue #409 の相互依存",
+      "issue": "Issue #406 は cmate-parser.ts の realpathSync() を非同期化し、schedule-manager.ts の呼び出し元を await 対応する提案。Issue #409 は schedule-manager.ts の syncSchedules() に mtime チェックを追加する提案。両方が syncSchedules() を変更するため、マージ順序によってコンフリクトが発生する。特に Issue #406 が先にマージされた場合、readCmateFile() が async になるため、Issue #409 の mtime チェック実装は async 版の readCmateFile を考慮する必要がある。逆に Issue #409 が先なら、Issue #406 は mtime チェック後の readCmateFile 呼び出し箇所を await 化する必要がある。",
+      "suggestion": "Issue #409 の実装タスクまたは備考に、Issue #406 との相互依存を明記する。推奨マージ順序: Issue #409 を先行（syncSchedules 内に mtime チェック追加、readCmateFile は同期のまま）。Issue #406 は後続で async 化を適用。理由: mtime チェックは fs.statSync() で同期的に行え、async 化は後から適用しやすい。"
+    },
+    {
+      "id": "R3-004",
+      "severity": "should-fix",
+      "category": "依存関係",
+      "location": "Issue #407 と Issue #409 の相互依存",
+      "issue": "Issue #407 は schedule-manager.ts にエントリ削除用のエクスポート関数を追加する提案であり、ManagerState の構造変更を含む可能性がある。Issue #409 も ManagerState に cmateFileCache フィールドを追加する。両者が並行して ManagerState を変更するとコンフリクトが発生する。また Issue #407 が stopAllSchedules() の挙動を変更した場合、R3-001 で指摘した session-cleanup.ts の問題に影響する。",
+      "suggestion": "Issue #409 の備考に Issue #407 との並行開発リスクを明記する。推奨: Issue #409 は ManagerState への cmateFileCache 追加を自己完結的に実装し、Issue #407 が後からエントリ削除関数を追加する際にキャッシュのクリーンアップも含めるよう Issue #407 側に注記を残す。"
+    },
+    {
+      "id": "R3-005",
+      "severity": "should-fix",
+      "category": "テスト影響",
+      "location": "tests/unit/lib/db-migrations.test.ts L36-37",
+      "issue": "db-migrations.test.ts の L37 で expect(CURRENT_SCHEMA_VERSION).toBe(20) が明示的にアサートされている。マイグレーション version 21 を追加して CURRENT_SCHEMA_VERSION を 21 に変更すると、このテストがフェイルする。また L63 の expect(history.length).toBe(CURRENT_SCHEMA_VERSION) も migration 数の整合性を検証している。これらは意図されたフェイルセーフだが、Issue の影響範囲テーブルに db-migrations.test.ts が含まれていない。",
+      "suggestion": "Issue の影響範囲テーブルに以下を追加: tests/unit/lib/db-migrations.test.ts（CURRENT_SCHEMA_VERSION のアサーション値を 20 から 21 に更新）。また、新規マイグレーション #21 のインデックス作成テスト（CREATE INDEX IF NOT EXISTS の冪等性確認、インデックス存在確認）を追加することを推奨。"
+    },
+    {
+      "id": "R3-006",
+      "severity": "should-fix",
+      "category": "テスト影響",
+      "location": "tests/unit/lib/schedule-manager.test.ts L26-63 - テストDBスキーマ",
+      "issue": "schedule-manager.test.ts のモックDB（L26-63）は scheduled_executions テーブルを定義しているが、インデックスは定義していない。Issue #409 で (worktree_id, enabled) インデックスを追加しても、テスト内のインメモリDBにはこのインデックスが存在しない。テストの機能的動作には影響しないが、mtime キャッシュのテスト追加時に、テストDB スキーマの更新を検討する必要がある（特にトランザクションバッチ化のテストで実際のインデックスが効いているかを検証する場合）。",
+      "suggestion": "Issue の実装タスクに明記: schedule-manager.test.ts のモックDBスキーマに新規インデックスを追加するかどうかを判断する。推奨: ユニットテストレベルではインデックスの有無は機能に影響しないため、モックDBにインデックスを追加する必要はない。ただし、mtime キャッシュのテストケース追加は必須（キャッシュヒット時の upsertSchedule 呼び出しスキップ確認、キャッシュミス時の正常動作確認、CMATE.md 削除時のキャッシュエントリ除去確認）。"
+    },
+    {
+      "id": "R3-007",
+      "severity": "should-fix",
+      "category": "パフォーマンス影響",
+      "location": "schedule-manager.ts syncSchedules() - fs.statSync() の追加呼び出し",
+      "issue": "Issue で提案されている fs.statSync().mtimeMs による mtime チェックは、全 worktree に対して毎回実行される（60秒ごと）。100 worktree の場合、60秒ごとに 100 回の fs.statSync() が発生する。fs.statSync() は一般的に 0.01-0.1ms 程度だが、NFS やネットワークファイルシステム上では数ms-数十ms かかる可能性がある。ただし、現状の readCmateFile() が readFileSync() でファイル全体を読み込んでいる（cmate-parser.ts:317）のと比較すれば、mtime チェックでスキップできるケースでは明確な改善となる。",
+      "suggestion": "Issue の「提案する解決策」セクションに以下を補足: 「fs.statSync() は CMATE.md が存在しない場合に ENOENT エラーとなるため、try-catch で処理する。ENOENT の場合はキャッシュにエントリがあれば削除済みと判断し、なければスキップする。fs.statSync() のコストは readFileSync() + パース処理と比較して軽微であり、未変更worktreeでのDB操作（1000+クエリ/60秒）を削減する効果の方が大きい。」"
+    },
+    {
+      "id": "R3-008",
+      "severity": "should-fix",
+      "category": "影響範囲",
+      "location": "globalThis キャッシュと Next.js Hot Reload の挙動",
+      "issue": "ManagerState は globalThis.__scheduleManagerStates に保持されており、Next.js の開発モード（Hot Module Replacement）では module が再評価されても globalThis の値は保持される。これは既存の設計（schedule-manager.ts:79-96）に準拠しており、cmateFileCache も同様に globalThis 経由で永続化される。ただし、schedule-manager.ts のモジュールが HMR で再読み込みされた場合、getManagerState() は既存の globalThis オブジェクトを返すため、cmateFileCache は保持されるが、module スコープの関数参照（readCmateFile 等）は新しいものに置き換わる。この動作は既存パターンと同一であり問題ないが、テスト時の globalThis リセット（schedule-manager.test.ts:77-78）で cmateFileCache も確実にリセットされることを確認する必要がある。",
+      "suggestion": "テスト実装時に、beforeEach で globalThis.__scheduleManagerStates = undefined を設定するだけで cmateFileCache もリセットされること（ManagerState 内のフィールドであるため）を確認する。現在のテストコード（schedule-manager.test.ts:77）は既にこのリセットを行っているため、追加のリセット処理は不要。"
+    },
+    {
+      "id": "R3-009",
+      "severity": "nice-to-have",
+      "category": "ドキュメント更新",
+      "location": "CLAUDE.md - schedule-manager.ts のモジュール説明",
+      "issue": "CLAUDE.md の schedule-manager.ts のモジュール説明（L176）には現在の機能（globalThis, cron, MAX_CONCURRENT_SCHEDULES 等）が記載されているが、Issue #409 で追加される mtime キャッシュ、db.transaction() バッチ化、(worktree_id, enabled) インデックスについての記述が必要になる。また db-migrations.ts の CURRENT_SCHEMA_VERSION の記述更新も必要。",
+      "suggestion": "Issue の影響範囲テーブルに CLAUDE.md を追加し、schedule-manager.ts のモジュール説明に「Issue #409: cmateFileCache(mtimeMs)による差分ベース同期、db.transaction()バッチ化」を追記する予定であることを明記する。"
+    },
+    {
+      "id": "R3-010",
+      "severity": "nice-to-have",
+      "category": "影響範囲",
+      "location": "src/app/api/worktrees/[id]/schedules/route.ts L42 と [scheduleId]/route.ts",
+      "issue": "API エンドポイント schedules/route.ts L42 の WHERE worktree_id = ? AND enabled = 1 クエリは、Issue #409 で追加する (worktree_id, enabled) 複合インデックスの恩恵を受ける。このファイル自体にはコード変更は不要だが、Issue の影響範囲テーブルに「インデックス追加によりクエリパフォーマンスが改善される」受益ファイルとして記載があると、変更の効果が明確になる。",
+      "suggestion": "影響範囲テーブルに注記として追加: src/app/api/worktrees/[id]/schedules/route.ts（コード変更なし。(worktree_id, enabled) インデックスにより GET /schedules クエリが最適化される）。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 6,
+    "nice_to_have": 2,
+    "total": 10
+  },
+  "code_references": [
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "relevance": "主要な変更対象。ManagerState への cmateFileCache 追加、syncSchedules() の mtime チェック、db.transaction() バッチ化"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "relevance": "version 21 マイグレーション追加。CURRENT_SCHEMA_VERSION = 20 -> 21"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "stopAllSchedules() を worktree 単位クリーンアップ内で呼び出しており、cmateFileCache の全消去を引き起こす（R3-001）"
+    },
+    {
+      "file": "tests/unit/lib/db-migrations.test.ts",
+      "relevance": "CURRENT_SCHEMA_VERSION アサーション値の更新が必要（R3-005）"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager.test.ts",
+      "relevance": "mtime キャッシュのテスト追加が必要。モックDB スキーマとの整合性確認（R3-006）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/schedules/route.ts",
+      "relevance": "コード変更なし。(worktree_id, enabled) インデックスの受益クエリ（L42）"
+    },
+    {
+      "file": "src/lib/cmate-parser.ts",
+      "relevance": "readCmateFile() は mtime チェック後の呼び出し対象。Issue #406 との並行開発リスク（R3-003）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "schedule-manager.ts モジュール説明の更新が必要（R3-009）"
+    }
+  ],
+  "dependency_analysis": {
+    "upstream_dependencies": [
+      "Issue #407 (globalThis Map メモリリーク修正) - ManagerState 構造変更の競合リスク",
+      "Issue #406 (cmate-parser 非同期化) - syncSchedules() の readCmateFile 呼び出し箇所の競合リスク"
+    ],
+    "downstream_impacts": [
+      "session-cleanup.ts - stopAllSchedules() が cmateFileCache を全消去する副作用",
+      "db-migrations.test.ts - CURRENT_SCHEMA_VERSION アサーション値の更新",
+      "server.ts - initScheduleManager() の呼び出しは変更不要"
+    ],
+    "no_impact_confirmed": [
+      "src/lib/claude-executor.ts - globalThis.__scheduleActiveProcesses は別のグローバル変数であり影響なし",
+      "src/app/api/worktrees/[id]/schedules/[scheduleId]/route.ts - 直接的なコード変更は不要",
+      "server.ts L45,259 - initScheduleManager/stopAllSchedules のインターフェースは変更なし"
+    ]
+  }
+}

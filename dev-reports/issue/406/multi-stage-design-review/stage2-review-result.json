@@ -1,0 +1,122 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 406,
+  "focus_area": "整合性",
+  "status": "conditionally_approved",
+  "score": 4,
+  "review_items": [
+    {
+      "id": "DR2-001",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "Section 4.3: schedule-manager.test.ts のモック方式の記載が現状コードと異なる",
+      "description": "設計方針書 Section 4.3 では schedule-manager.test.ts に対して、ファイルスコープの vi.mock('fs', async (importOriginal) => {...}) で statSync のみをモック化するよう記載しているが、現在の schedule-manager.test.ts (L277-281) は vi.doMock('fs', () => ({...})) をテスト内で使用し、readFileSync と realpathSync も含めてモック化している。設計方針書の「statSync のファイルスコープモック」は提案する After の状態として正しいが、「Before」の現状との差異が明示されておらず、どの既存コードを置き換えるのかが不明瞭。特に、現在の vi.doMock が readFileSync/realpathSync もモック化している理由（現在の readCmateFile が fs を直接使用しているため）と、提案後はそれが不要になる点の明記がない。",
+      "suggestion": "Section 4.3 の schedule-manager.test.ts 部分に、現在の vi.doMock('fs', ...) パターン（L277-281、readFileSync/realpathSync を含む）を Before として明示し、After では cmate-parser モジュールモック導入により readFileSync/realpathSync のモックが不要になることを記載する。また、既存テスト mtime cache (syncSchedules behavior) セクションの各テストケースが async/await 対応を必要とする点も補足する。",
+      "location": "設計方針書 Section 4.3「schedule-manager.test.ts」"
+    },
+    {
+      "id": "DR2-002",
+      "severity": "nice_to_have",
+      "category": "code_consistency",
+      "title": "DJ-002 の try-catch カバレッジの正確性",
+      "description": "設計方針書 DJ-002 では「syncSchedules() 内部のtry-catch L486/L574で全エラー捕捉済み」と記載しているが、syncSchedules() の L579-586（stale schedule cleanup ループ内の state.cronJob.stop()）は for-worktree の try-catch の外にあり、理論的には cronJob.stop() が例外を throw する可能性がある。ただし、croner の Cron.stop() が例外を投げることは極めてまれであり、同様のコードが stopAllSchedules() (L647) では try-catch で保護されているものの、syncSchedules() 内のこの箇所は保護されていない。この点は async 化に関係なく存在する既存の振る舞いであり、本 Issue の変更リスクには影響しない。",
+      "suggestion": "DJ-002 の記述を「syncSchedules() 内部の per-worktree try-catch (L486/L574) で主要なエラーは捕捉される。L579-586 のスタールスケジュールクリーンアップはこの try-catch の外にあるが、cronJob.stop() が throw する可能性は極めて低く、本 Issue の変更スコープ外である」に修正するか、現状の表現を維持してもよい（リスクは無視できるレベル）。",
+      "location": "設計方針書 Section 3 DJ-002"
+    },
+    {
+      "id": "DR2-003",
+      "severity": "nice_to_have",
+      "category": "spec_consistency",
+      "title": "Section 7 影響なしファイルに cmate-validator.ts が記載されているが補足が不正確",
+      "description": "設計方針書 Section 7 の「影響なしの確認済みファイル」で cmate-validator.ts について「cmate-parser.ts からのimportなし」と記載している。実際に cmate-validator.ts は cmate-parser.ts を import しておらず、独立した純粋関数モジュールであることを確認した。この記載は正確である。しかし、cmate-validator.ts は cmate-parser.ts と同等のパース関数（parseCmateContent）を独自に持っており、将来的に readCmateFile() の呼び出し元が増えた場合にこの影響なし判定を見直す注記があるとより丁寧である。",
+      "suggestion": "現状の記載で十分であるが、任意で「cmate-validator.ts は cmate-parser.ts と同等のパースロジックを独立して持つ client-side 専用モジュール（fs 依存なし）」という補足を加えると明瞭度が上がる。",
+      "location": "設計方針書 Section 7「影響なしの確認済みファイル」"
+    },
+    {
+      "id": "DR2-004",
+      "severity": "nice_to_have",
+      "category": "technical_feasibility",
+      "title": "syncSchedules() async 化に伴い L579-586 の stale cleanup ループも await 対象になりうる",
+      "description": "syncSchedules() が async 化されることで、関数内の全コードが async コンテキストで動作する。L579-586 の stale schedule cleanup ループ（cronJob.stop(), manager.schedules.delete()）は同期的操作のみであり、async 化の影響を受けない。この点は設計上正しい判断であるが、将来の保守者が「async 関数内に try-catch なしの同期コードがある」ことに疑問を持つ可能性がある。",
+      "suggestion": "対応不要。async 化は readCmateFile() の await 追加のみに限定されており、他のコードパスには影響しない。この点は設計方針書の現状の記載で十分にカバーされている。",
+      "location": "設計方針書 Section 4.2"
+    },
+    {
+      "id": "DR2-005",
+      "severity": "nice_to_have",
+      "category": "internal_consistency",
+      "title": "設計方針書の validateCmatePath() Before コードスニペットが関数シグネチャの改行を省略",
+      "description": "設計方針書 Section 4.1 の validateCmatePath() の Before コードでは、関数シグネチャが 1 行で記載されている（export function validateCmatePath(filePath: string, worktreeDir: string): boolean {）。実際のコード (L80-83) では 3 行に分割されている（パラメータごとに改行）。これはコードスニペットの簡略表記として妥当であり、ロジック上の差異はない。",
+      "suggestion": "対応不要。設計方針書のコードスニペットは概要を伝えるものであり、フォーマットの差異は許容範囲である。",
+      "location": "設計方針書 Section 4.1「validateCmatePath() 変更」"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "should_fix",
+      "category": "code_consistency",
+      "title": "Section 4.1 import 文変更で readFile の named import が fs/promises の仕様と一致するか確認注記が必要",
+      "description": "設計方針書の import 文変更で import { realpath, readFile } from 'fs/promises' と記載している。Node.js の fs/promises モジュールは realpath と readFile の両方を named export しており、この import 文は技術的に正しい。ただし、現在のコードベースでは他のモジュール（tmux-capture-cache.ts 等）が fs/promises を使用しているか、また fs/promises のインポートパターンがプロジェクト内で一貫しているか（import fs from 'fs'; fs.promises.xxx vs import { xxx } from 'fs/promises'）の確認注記があると実装時の迷いが減る。",
+      "suggestion": "プロジェクト内の fs/promises 使用パターンを確認し、既存パターンと統一する旨を注記する。例えば、他のファイルが import { readFile } from 'fs/promises' パターンを使用している場合はそのまま、import fs from 'fs' + fs.promises.readFile パターンの場合はそちらに合わせる。",
+      "location": "設計方針書 Section 4.1「import文変更」"
+    },
+    {
+      "id": "DR2-007",
+      "severity": "nice_to_have",
+      "category": "internal_consistency",
+      "title": "Section 9 実装チェックリストの順序が Section 4 の記述順序と一致",
+      "description": "Section 9 の実装チェックリストは Section 4 の設計詳細と同じ順序で記載されており、整合性が保たれている。全 12 項目がそれぞれ Section 4 の設計内容と 1:1 で対応しており、漏れがないことを確認した。",
+      "suggestion": "対応不要。肯定的所見として記録する。",
+      "location": "設計方針書 Section 9"
+    },
+    {
+      "id": "DR2-008",
+      "severity": "nice_to_have",
+      "category": "spec_consistency",
+      "title": "Section 2 呼び出しフロー図が実際のコードフローと整合している",
+      "description": "変更前・変更後の Mermaid フロー図を実際のコードと照合した結果、全てのノードと矢印が正しく対応していることを確認した。特に、getCmateMtime が sync 維持であること、parseCmateFile が純粋関数で変更なしであること、initScheduleManager が sync 維持で fire-and-forget であることが正しく表現されている。",
+      "suggestion": "対応不要。肯定的所見として記録する。",
+      "location": "設計方針書 Section 2「呼び出しフロー」"
+    },
+    {
+      "id": "DR2-009",
+      "severity": "nice_to_have",
+      "category": "code_consistency",
+      "title": "全行番号参照が現在のコードベースと一致",
+      "description": "設計方針書内で参照されている全ての行番号を実際のソースコードと照合した。cmate-parser.ts L15, L80-98, L311-329、schedule-manager.ts L159-176, L478-591, L485, L486, L516, L574, L617, L620-622、schedule-manager-cleanup.test.ts L79 -- 全て正確に一致していることを確認した。server.ts L260 の initScheduleManager() 呼び出しも確認済み。",
+      "suggestion": "対応不要。肯定的所見として記録する。",
+      "location": "設計方針書全体"
+    },
+    {
+      "id": "DR2-010",
+      "severity": "nice_to_have",
+      "category": "code_consistency",
+      "title": "readCmateFile() 呼び出し元の網羅的確認結果が正確",
+      "description": "設計方針書 Section 7 の「readCmateFile() の呼び出し元は schedule-manager.ts (L516) のみ」という記載を grep で検証した。src/ 配下で readCmateFile を使用している箇所は schedule-manager.ts の import (L23) と使用箇所 (L516) のみであり、この主張は正確である。validateCmatePath() も readCmateFile() 内部 (L316) からのみ呼び出されている。",
+      "suggestion": "対応不要。肯定的所見として記録する。",
+      "location": "設計方針書 Section 7「呼び出し元の網羅的確認」"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 8,
+    "overall_quality": "good"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-406-async-cmate-parser-design-policy.md",
+    "src/lib/cmate-parser.ts",
+    "src/lib/schedule-manager.ts",
+    "src/lib/cmate-validator.ts",
+    "tests/unit/lib/cmate-parser.test.ts",
+    "tests/unit/lib/schedule-manager.test.ts",
+    "tests/unit/lib/schedule-manager-cleanup.test.ts",
+    "server.ts"
+  ],
+  "timestamp": "2026-03-04T12:30:00Z"
+}

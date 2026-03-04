@@ -1,0 +1,24 @@
+{
+  "status": "success",
+  "coverage": 80,
+  "unit_tests": {
+    "total": 199,
+    "passed": 199,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/prompt-detector.ts",
+    "tests/unit/prompt-detector-cache.test.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/status-detector.test.ts",
+    "CLAUDE.md"
+  ],
+  "commits": [
+    "599a691: perf(prompt-detector): suppress duplicate log output to reduce I/O load"
+  ],
+  "message": "TDD implementation complete. Added duplicate log suppression cache to detectPrompt() with module-scope lastOutputTail variable. All 199 tests pass across 3 test files (prompt-detector.test.ts: 174, prompt-detector-cache.test.ts: 7, status-detector.test.ts: 18). Zero ESLint and TypeScript errors."
+}

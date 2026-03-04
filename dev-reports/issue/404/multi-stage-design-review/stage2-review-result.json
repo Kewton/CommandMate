@@ -1,0 +1,67 @@
+{
+  "issue_number": 404,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "review_summary": "設計方針書の内部整合性は概ね良好であり、Section 0のチェックリストと本文は一貫している。しかし、設計方針書とGitHub Issue本文の間に2点の不整合（影響範囲テーブルの差異、activeProcessesの方式選択の記述不一致）、設計方針書と現行コードベースの間に2点の不整合（CLAUDE.mdの事前記載矛盾、build-and-start.shに廃止対象のbash関数が存在しない）、および設計方針書のgracefulShutdownシーケンス図とserver.tsの実際の呼び出し順序に1点の差異が検出された。いずれも実装時の混乱を招く可能性があるため、must_fix 2件、should_fix 3件、nice_to_have 1件として報告する。",
+  "findings": [
+    {
+      "id": "R2-001",
+      "severity": "must_fix",
+      "category": "Issue整合性",
+      "title": "設計方針書とIssue本文の影響範囲テーブルの不一致（response-poller.ts）",
+      "description": "Issue #404の影響範囲テーブルには `src/lib/response-poller.ts` が含まれているが（tuiResponseAccumulator Mapのworktreeエントリクリーンアップ確認）、設計方針書の Section 2.2 変更対象モジュールテーブルには `response-poller.ts` が含まれていない。Issueの実装タスクにも `response-poller.ts` の `tuiResponseAccumulator` クリーンアップ確認タスクが存在する。設計方針書が影響範囲を網羅していないと、実装者が対応漏れを起こすリスクがある。",
+      "location": "設計方針書 Section 2.2 変更対象モジュールテーブル",
+      "suggested_fix": "Section 2.2の変更対象モジュールテーブルに `src/lib/response-poller.ts` を追加する。変更種別は「確認」、内容は「tuiResponseAccumulator Mapのworktreeエントリクリーンアップが既存の stopPolling() -> clearTuiAccumulator() で対応済みであることの確認」とする。設計方針書がIssue本文の影響範囲テーブルを完全にカバーするようにする。"
+    },
+    {
+      "id": "R2-002",
+      "severity": "must_fix",
+      "category": "Issue整合性",
+      "title": "activeProcessesのworktree単位停止方針がIssue本文と設計方針書で不一致",
+      "description": "Issue #404本文の実装タスク「stopScheduleForWorktree(worktreeId)の責務範囲」では (c) として「当該worktreeで実行中の activeProcesses の停止（__scheduleActiveProcesses 内の該当worktreeのプロセスをSIGKILLし、エントリを削除する）」を明記しており、これが責務の一つとして含まれている。一方、設計方針書 Section 3.3 では「方式(c) - 自然回収委任」を明確に採用し、activeProcessesのworktree単位停止を責務外としている。Issue本文は3つのアプローチ(a)(b)(c)を提示しているが、設計方針書の(c)「自然回収」とIssue本文の(c)「SIGKILLによる即時停止」は同じラベル(c)でありながら全く異なる内容を指しており、混乱を招く。設計方針書は正しい設計判断を行っているが、Issue本文との乖離を解消すべきである。",
+      "location": "設計方針書 Section 3.3「activeProcesses のworktree単位停止方針」およびIssue本文「stopScheduleForWorktree(worktreeId)の責務範囲」",
+      "suggested_fix": "2つの対応が必要: (1) 設計方針書 Section 3.3に「Issue本文の実装タスクでは(c)として即時SIGKILL停止が記載されているが、本設計ではactiveProcessesのworktree単位停止を方式(c)自然回収として採用した」旨の注記を追加する。(2) Issue本文の `stopScheduleForWorktree(worktreeId)` の責務範囲(c)を更新し、設計方針書の決定（自然回収委任）に合わせて「自然回収に委ねる」と記載変更するか、もしくは設計方針書の方式決定を反映済みであることを注記する。"
+    },
+    {
+      "id": "R2-003",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "設計方針書のgracefulShutdownシーケンス図がserver.tsの実際の呼び出し順序と不一致",
+      "description": "設計方針書 Section 2.1 のGraceful Shutdownシーケンス図では `stopAllPolling -> stopAllAutoYesPolling -> stopAllSchedules -> stopResourceCleanup -> closeWebSocket -> server.close` の順序になっている。しかし、設計方針書 Section 3.5 のコード例では `stopAllPolling -> stopAllAutoYesPolling -> stopAllSchedules -> stopResourceCleanup -> closeWebSocket` と記載されている一方、現在の server.ts (L275-284) では `stopAllPolling -> stopAllAutoYesPolling -> stopAllSchedules -> closeWebSocket` の順序であり、`stopResourceCleanup()` は `stopAllSchedules()` と `closeWebSocket()` の間に挿入される計画になっている。しかし、Section 2.1 のシーケンス図では `SRC[stopResourceCleanup] -> WS[closeWebSocket] -> Close[server.close]` となっており、Section 3.5 のコード例と一致するが、シーケンス図の矢印が `SP[stopAllPolling] -> SAY[stopAllAutoYesPolling]` ではなく `Signal -> SP[stopAllPolling]` から始まっており、実際のserver.tsでは `stopAllPolling` の前に重複シャットダウン防止のガード（isShuttingDown）がある点が図に反映されていない。これは軽微な差異ではあるが、図とコード例の精度を一致させるべきである。",
+      "location": "設計方針書 Section 2.1 Graceful Shutdownシーケンス図 および Section 3.5 server.ts修正例",
+      "suggested_fix": "Section 2.1 のGraceful Shutdownシーケンス図は概ね正確であり、`stopResourceCleanup` の挿入位置も Section 3.5 と一致している。server.tsの `isShuttingDown` ガードは図のスコープ外であるため、図の修正は不要と判断してよい。ただし、シーケンス図のノード名をserver.tsの実際の関数名と正確に一致させること（例: `SP[stopAllPolling]` は正しい）。"
+    },
+    {
+      "id": "R2-004",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "CLAUDE.mdにsession-cleanup.tsのstopScheduleForWorktree()追加がIssue #294として事前記載されている矛盾",
+      "description": "CLAUDE.md L172 に `src/lib/session-cleanup.ts` の説明として「Issue #294: stopScheduleForWorktree()呼び出し追加」と記載されているが、実際の `src/lib/session-cleanup.ts` のコード（L109-117）では依然として `stopAllSchedules()` を呼び出している。CLAUDE.mdの記載は将来のIssue #404での変更を先取りして記載したか、もしくはIssue #294の実装時に記載されたが実際には実装されなかった可能性がある。設計方針書 Section 3.4 では「旧: stopAllSchedules() -> 新: stopScheduleForWorktree()」と明記しており、この変更はまだ未実装であることを前提としている。CLAUDE.mdの事前記載が設計方針書の「新規追加」という前提と矛盾するため、実装者が混乱する可能性がある。",
+      "location": "CLAUDE.md L172 および設計方針書 Section 3.4",
+      "suggested_fix": "Issue #404の実装時に以下を確認すること: (1) CLAUDE.mdの記載がIssue #294で誤って追加されたものである場合、実装時にコードとCLAUDE.mdの整合性が取れるため問題ない（Issue #404で実装すればCLAUDE.mdの記載が正しくなる）。(2) 設計方針書 Section 3.4に「注: CLAUDE.mdにはIssue #294時点でstopScheduleForWorktree()の記載が追加済みだが、コードは未実装。本Issueで実装する」旨の注記を追加することを推奨する。"
+    },
+    {
+      "id": "R2-005",
+      "severity": "should_fix",
+      "category": "内部整合性",
+      "title": "R1-001チェックリスト項目が現行コードベースに存在しないbash関数を参照",
+      "description": "設計方針書 Section 0 の実装チェックリスト R1-001 に「build-and-start.sh のbash関数 cleanup_orphaned_mcp_processes() を廃止し」と記載されているが、現在の `scripts/build-and-start.sh` にはこのbash関数は存在しない。Section 3.6 の本文でも「bash関数 cleanup_orphaned_mcp_processes() を廃止する」と記載されている。この関数は設計方針書の旧バージョンに存在していた提案であり、実際にはまだ実装されていない。チェックリスト項目として「廃止」を指示しているが、廃止対象が存在しないため、実装者が混乱する。",
+      "location": "設計方針書 Section 0 実装チェックリスト R1-001 および Section 3.6",
+      "suggested_fix": "R1-001のチェックリスト項目を「build-and-start.sh にMCPクリーンアップのbash関数を追加しないこと。MCPプロセスクリーンアップは initResourceCleanup() 内の cleanupOrphanedMcpProcesses()（TypeScript実装）に一本化する」に修正する。Section 3.6 の説明も「廃止する」ではなく「追加しない（TypeScript実装に一本化する）」に修正する。"
+    },
+    {
+      "id": "R2-006",
+      "severity": "nice_to_have",
+      "category": "内部整合性",
+      "title": "設計方針書のcleanupOrphanedMapEntries()の戻り値型にschedule-manager関連フィールドが欠落",
+      "description": "設計方針書 Section 3.1 の CleanupMapResult 型には `autoYesStatesRemoved` と `autoYesPollerStatesRemoved` の2フィールドのみが定義されている。Issue本文では schedule-manager.ts の schedules Map は syncSchedules() の60秒ポーリングで自動クリーンアップ済みのためスキャン対象外と明記されており、設計方針書 Section 3.1 のセクション区分でも「Section 2: globalThis Mapクリーンアップ」の対象は autoYesStates/autoYesPollerStates のみとなっている。この設計判断は妥当であるが、将来的にクリーンアップ対象のMapが増えた場合（例: schedule-managerのスケジュール関連）に型拡張が必要になることを、設計書のどこかに注記しておくとよい。",
+      "location": "設計方針書 Section 3.1 CleanupMapResult 型定義",
+      "suggested_fix": "CleanupMapResult の定義に JSDoc コメントとして「現時点では autoYesStates/autoYesPollerStates のみを対象。schedule-manager の schedules Map は syncSchedules() の60秒ポーリングで自動回収されるため対象外（Issue #404 Issueの決定事項）」と注記を追加する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 3,
+  "nice_to_have_count": 1,
+  "overall_assessment": "設計方針書は全体として高品質であり、Stage 1レビューの指摘事項（R1-001〜R1-007）が適切に反映されている。Section 0 のチェックリストと本文の整合性、インターフェース定義（3.1〜3.5）と呼び出し元の記述の一致性、R1-003 反映後の stopScheduleForWorktree(worktreeId) 引数統一も設計書全体で一貫している。ただし、Issue本文との間に影響範囲テーブルの差異（response-poller.ts の欠落）と activeProcesses の方式(c)に関するラベル混乱という2つの must_fix 級の不整合がある。また、CLAUDE.md に既に stopScheduleForWorktree() の記載があるにもかかわらず実コードは未実装という矛盾、build-and-start.sh に廃止対象のbash関数が存在しないという事実上の空振りチェックリスト項目が should_fix として検出された。これらを解消すれば実装フェーズに進む準備が整う。"
+}

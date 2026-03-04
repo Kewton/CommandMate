@@ -1,6 +1,7 @@
 /**
  * Unit tests for status-detector.ts
  * Issue #188: Thinking indicator false detection fix
+ * Issue #408: promptDetection field in StatusDetectionResult
  *
  * Tests verify:
  * - Prompt takes priority over thinking (correct priority order)
@@ -9,12 +10,14 @@
  * - Boundary conditions for STATUS_THINKING_LINE_COUNT (5th vs 6th line from end)
  * - Empty line handling in window-based detection
  * - Existing behavior preservation (time-based heuristic, Codex support)
+ * - Issue #408: promptDetection field presence and consistency across all return paths
  *
  * @vitest-environment node
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { detectSessionStatus } from '@/lib/status-detector';
+import { resetDetectPromptCache } from '@/lib/prompt-detector';
 
 // Named constants for Unicode characters used in tmux output simulation.
 // These match the actual characters produced by Claude CLI and detected by cli-patterns.ts.
@@ -39,6 +42,11 @@ function activeThinking(activity: string): string {
 }
 
 describe('status-detector', () => {
+  // Issue #402: Reset duplicate log suppression cache for test isolation
+  beforeEach(() => {
+    resetDetectPromptCache();
+  });
+
   describe('Issue #188: thinking + prompt coexistence', () => {
     it('should prioritize input prompt over completed thinking summary in scrollback', () => {
       // Thinking summary "Churned for 41s" is more than 5 lines from end,
@@ -318,6 +326,85 @@ describe('status-detector', () => {
       expect(result.status).toBe('waiting');
       expect(result.hasActivePrompt).toBe(true);
       expect(result.reason).toBe('prompt_detected');
+    });
+  });
+
+  describe('Issue #408: promptDetection field in StatusDetectionResult', () => {
+    it('should include promptDetection with isPrompt=true and promptData when prompt detected', () => {
+      // Interactive y/n prompt should produce promptDetection.isPrompt === true
+      const output = [
+        'Some previous output',
+        'Do you want to proceed? (y/n)',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+      expect(result.promptDetection).toBeDefined();
+      expect(result.promptDetection.isPrompt).toBe(true);
+      expect(result.promptDetection.promptData).toBeDefined();
+      expect(result.promptDetection.promptData?.type).toBe('yes_no');
+    });
+
+    it('should include promptDetection with isPrompt=true for multiple choice prompt', () => {
+      const output = [
+        'Which option would you prefer?',
+        '\u276F 1. Option A',
+        '  2. Option B',
+        '  3. Option C',
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+      expect(result.promptDetection).toBeDefined();
+      expect(result.promptDetection.isPrompt).toBe(true);
+      expect(result.promptDetection.promptData).toBeDefined();
+      expect(result.promptDetection.promptData?.type).toBe('multiple_choice');
+    });
+
+    it('should include promptDetection with isPrompt=false when no prompt detected', () => {
+      const output = 'Some generic output without any detectable patterns';
+
+      const result = detectSessionStatus(output, 'claude');
+      expect(result.promptDetection).toBeDefined();
+      expect(result.promptDetection.isPrompt).toBe(false);
+    });
+
+    it('should include promptDetection with isPrompt=false during thinking (design guarantee)', () => {
+      // When thinking indicator is active, promptDetection.isPrompt must be false
+      // because prompt detection has higher priority in the internal order.
+      // If prompt were detected, the function would have returned 'waiting' before
+      // reaching the thinking check.
+      const output = [
+        'Some previous output',
+        activeThinking('Planning'),
+      ].join('\n');
+
+      const result = detectSessionStatus(output, 'claude');
+      expect(result.status).toBe('running');
+      expect(result.reason).toBe('thinking_indicator');
+      expect(result.promptDetection).toBeDefined();
+      expect(result.promptDetection.isPrompt).toBe(false);
+    });
+
+    it('should guarantee hasActivePrompt === promptDetection.isPrompt for all return paths', () => {
+      // Case 1: prompt detected (waiting)
+      const withPrompt = detectSessionStatus('Do you want to proceed? (y/n)', 'claude');
+      expect(withPrompt.hasActivePrompt).toBe(withPrompt.promptDetection.isPrompt);
+
+      // Case 2: thinking (running)
+      const withThinking = detectSessionStatus(`\u276F Tell me\n\u2733 Thinking\u2026`, 'claude');
+      expect(withThinking.hasActivePrompt).toBe(withThinking.promptDetection.isPrompt);
+
+      // Case 3: input prompt (ready)
+      const withInputPrompt = detectSessionStatus(`\u2500\u2500\u2500\n\u276F\n`, 'claude');
+      expect(withInputPrompt.hasActivePrompt).toBe(withInputPrompt.promptDetection.isPrompt);
+
+      // Case 4: default (running, low confidence)
+      const defaultCase = detectSessionStatus('Some intermediate output', 'claude');
+      expect(defaultCase.hasActivePrompt).toBe(defaultCase.promptDetection.isPrompt);
+
+      // Case 5: time-based heuristic (ready, low confidence)
+      const oldTimestamp = new Date(Date.now() - 10000);
+      const timeBasedCase = detectSessionStatus('Some output', 'claude', oldTimestamp);
+      expect(timeBasedCase.hasActivePrompt).toBe(timeBasedCase.promptDetection.isPrompt);
     });
   });
 

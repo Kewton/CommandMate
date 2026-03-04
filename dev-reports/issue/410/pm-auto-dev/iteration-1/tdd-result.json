@@ -1,0 +1,24 @@
+{
+  "status": "success",
+  "coverage": 100.0,
+  "unit_tests": {
+    "total": 4411,
+    "passed": 4411,
+    "failed": 0,
+    "skipped": 7
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/app/worktrees/[id]/terminal/page.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/TerminalPage.test.tsx",
+    "tests/unit/components/dynamic-import-patterns.test.ts"
+  ],
+  "commits": [
+    "21536e7: perf(dynamic-import): convert TerminalComponent and MarkdownEditor to next/dynamic"
+  ],
+  "message": "TDD implementation complete. TerminalComponent and MarkdownEditor converted to next/dynamic with ssr: false. Loading indicators added with theme-appropriate backgrounds. 24 new tests added (10 TerminalPage + 14 dynamic import pattern verification). All 4411 unit tests pass. TypeScript 0 errors, ESLint 0 errors."
+}

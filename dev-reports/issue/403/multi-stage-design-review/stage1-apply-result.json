@@ -1,0 +1,24 @@
+{
+  "stage": 1,
+  "issue_number": 403,
+  "applied_findings": [
+    {
+      "severity": "should_fix",
+      "description": "概要（セクション1）の「--daemon起動時」とセクション4-3の呼び出し位置（デーモン分岐前）が矛盾。フォアグラウンドモードでの適用範囲が不明確",
+      "action": "セクション1の概要を「フォアグラウンド/デーモン両モード共通」に修正し、フォアグラウンドモードでのserver.logへの書き込みがないため空振りとなる旨の補足説明を追記。セクション4-3に設計根拠（デーモン分岐前に配置する理由）を追記。セクション2の実行タイミング図をフォアグラウンド/デーモン両モード表記に更新"
+    },
+    {
+      "severity": "should_fix",
+      "description": "set -e環境下でrotate_logs()内のmvコマンド失敗時にスクリプト全体が終了し、サーバーが起動できなくなる。エラー処理方針が未設計",
+      "action": "セクション4-2にエラー処理方針サブセクションを新設。rotate_logs || echo WARNING パターンにより失敗時も起動継続する設計を明記。呼び出し側のコード例を追加。セクション4-3の呼び出しコードにも || パターンを反映。セクション5リスク分析表にローテーション失敗リスクと対策を追加。セクション7トレードオフ表に || WARNINGパターンの設計判断を追加"
+    },
+    {
+      "severity": "should_fix",
+      "description": "restart.shの影響分析が不正確。「stop.sh + start.sh経路でPM2使用」と単純化していたが、実際はPM2非存在時にstop.sh + start.sh経路でstart.shはnpm start直接実行",
+      "action": "セクション2の影響を受けないファイル表のrestart.sh説明を、実際のコード（PM2存在時はpm2 restart、PM2非存在時はstop.sh + start.sh経路、start.shはPM2存在時pm2 start/非存在時npm start直接実行）に基づき正確に修正。いずれの経路もbuild-and-start.shを呼び出さないことを明記"
+    }
+  ],
+  "skipped_findings": [],
+  "design_doc_updated": true,
+  "summary": "Stage 1レビューのshould_fix 3件を全て設計方針書に反映。(1) 概要とセクション4-3の矛盾を解消し、フォアグラウンド/デーモン両モード共通で実行される設計意図と空振り動作の説明を追記。(2) set -e環境下でのエラー処理方針（rotate_logs || WARNING パターン）をセクション4-2に新設し、リスク分析・トレードオフにも反映。(3) restart.shの影響分析を実コードに基づき正確に修正。加えて、セクション11にレビュー指摘サマリー、セクション12に実装チェックリストを追加。"
+}

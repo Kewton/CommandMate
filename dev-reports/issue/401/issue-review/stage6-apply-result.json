@@ -1,0 +1,10 @@
+{
+  "stage": 6,
+  "apply_date": "2026-03-03",
+  "issue_number": 401,
+  "applied_findings": ["F2-001", "F2-002"],
+  "skipped_findings": ["F2-003"],
+  "skip_reasons": {"F2-003": "スコープ外"},
+  "github_updated": true,
+  "summary": "Stage 5レビューの指摘事項2件を反映。F2-001: lsof PIDバリデーション（grep -E）と重複除去（sort -u）の2つの実装タスクを、1つの統合パイプライン `lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u` として1タスクに統合。build-and-start.shは新規追加のポートベース判定への適用である旨を明記。F2-002: stop.shの停止後プロセス確認タスクに、残留プロセスがある場合は `kill -9`（SIGKILL）で強制停止する旨を追記し、stop-server.shの3段構えと同等の信頼性を実現する方針を明確化。F2-003（フォアグラウンドモードのポート競合検知）はIssueの主題がプロセス残留問題でありスコープ外のためスキップ。"
+}

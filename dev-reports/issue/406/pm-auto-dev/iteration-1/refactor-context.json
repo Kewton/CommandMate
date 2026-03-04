@@ -1,0 +1,20 @@
+{
+  "issue_number": 406,
+  "refactor_targets": [
+    "src/lib/cmate-parser.ts",
+    "src/lib/schedule-manager.ts",
+    "tests/unit/lib/cmate-parser.test.ts",
+    "tests/unit/lib/schedule-manager.test.ts",
+    "tests/unit/lib/schedule-manager-cleanup.test.ts"
+  ],
+  "quality_metrics": {
+    "typescript_errors": 0,
+    "eslint_errors": 0,
+    "unit_tests_passed": 1294
+  },
+  "improvement_goals": [
+    "Verify SOLID principles are maintained in async-ified code",
+    "Ensure no unnecessary complexity was introduced",
+    "Verify test code quality and readability"
+  ]
+}

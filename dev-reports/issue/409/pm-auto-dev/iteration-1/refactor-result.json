@@ -1,0 +1,40 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [
+    "SEC4-001: cmateFileCache size upper bound JSDoc (ManagerState interface)",
+    "SEC4-003: getCmateMtime() trust boundary JSDoc and filePath extraction outside try block",
+    "SEC4-004: batchUpsertSchedules() sanitization chain documentation",
+    "SEC4-002: disableStaleSchedules() SQL injection safety inline comment",
+    "DR1-001/CR2-001: CMATE_FILENAME import source annotation in getCmateMtime()",
+    "DR1-002: upsertSchedule() replacement note in batchUpsertSchedules() JSDoc",
+    "DR1-007: better-sqlite3 prepare() caching note in batchUpsertSchedules()",
+    "DR1-008: cmateFileCache.clear() rationale in stopAllSchedules()",
+    "DR1-009: CMATE.md deletion cleanup flow explanation in syncSchedules()",
+    "CR2-002: next_execute_at column handling note in batchUpsertSchedules() JSDoc",
+    "Console.warn in getCmateMtime() now includes full filePath per design policy SEC4-004-note"
+  ],
+  "files_changed": [
+    "src/lib/schedule-manager.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "commits": [
+    "cae8aca: refactor(schedule-manager): enhance JSDoc and inline comments per design policy"
+  ],
+  "test_results": {
+    "total_files": 207,
+    "total_tests": 4397,
+    "passed": 4397,
+    "failed": 0,
+    "skipped": 7
+  },
+  "message": "Refactoring completed. Enhanced JSDoc and inline comments in schedule-manager.ts to align with Issue #409 design policy. All 11 review item references (SEC4-001/002/003/004, DR1-001/002/007/008/009, CR2-001/002) are now documented in the code. No functional changes; all tests pass, zero static analysis errors."
+}

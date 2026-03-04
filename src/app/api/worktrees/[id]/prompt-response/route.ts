@@ -9,7 +9,7 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutput } from '@/lib/cli-session';
+import { captureSessionOutputFresh } from '@/lib/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/cli-patterns';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
@@ -93,7 +93,7 @@ export async function POST(
     // be typed at the Claude user input prompt instead of a tool permission prompt.
     let promptCheck: PromptDetectionResult | null = null;
     try {
-      const currentOutput = await captureSessionOutput(params.id, cliToolId, 5000);
+      const currentOutput = await captureSessionOutputFresh(params.id, cliToolId);
       const cleanOutput = stripAnsi(currentOutput);
       const promptOptions = buildDetectPromptOptions(cliToolId);
       promptCheck = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);

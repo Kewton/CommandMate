@@ -1,0 +1,90 @@
+{
+  "issue_number": 410,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "review_date": "2026-03-04",
+  "status": "approved",
+  "score": 5,
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "nice_to_have",
+      "category": "CSP",
+      "title": "CSP script-src に unsafe-eval が含まれている（既存設定、本Issue起因ではない）",
+      "description": "next.config.js の CSP 設定で script-src に 'unsafe-eval' が含まれている。これは Next.js 開発モードで必要なため設定されているが、本番環境では strict-dynamic や nonce ベースの CSP に移行することが望ましい。ただし、これは Issue #410 の変更とは無関係であり、dynamic import (next/dynamic) は webpack チャンクの通常の script タグ読み込みで動作するため、CSP に追加変更は不要。",
+      "recommendation": "将来的に CSP を強化する際の検討事項として記録。Issue #410 では対応不要。",
+      "files": ["next.config.js"]
+    },
+    {
+      "id": "S4-002",
+      "severity": "nice_to_have",
+      "category": "エラーハンドリング",
+      "title": "dynamic import 失敗時のエラーバウンダリ未設計（設計方針書 S1-008 でスキップ済み）",
+      "description": "next/dynamic でチャンクロードに失敗した場合（ネットワークエラー等）、React のデフォルトエラーが発生する。Stage 1 で S1-008 として指摘されスキップ済みだが、セキュリティ観点ではエラーメッセージにサーバー内部情報が漏洩しないことが重要。Next.js のデフォルト動作ではチャンク URL のみがエラーに含まれるため、サーバー内部パスの露出リスクは極めて低い。",
+      "recommendation": "ErrorBoundary が既に WorktreeDetailRefactored を包んでおり、未処理エラーの情報漏洩は防止されている。追加対応は不要。",
+      "files": ["src/components/worktree/WorktreeDetailRefactored.tsx"]
+    },
+    {
+      "id": "S4-003",
+      "severity": "nice_to_have",
+      "category": "ローディングUI",
+      "title": "ローディングインジケーターの message props に対する入力サニタイズ（共通コンポーネント案採用時のみ）",
+      "description": "設計方針書 Section 4 D2 の共通コンポーネント DynamicLoadingIndicator の message props は string 型であり、React の JSX レンダリングにより自動エスケープされるため XSS リスクはない。ただし、共通コンポーネント案を採用する場合、将来的に dangerouslySetInnerHTML 等が追加されないよう注意が必要。現在のインライン定義パターンではハードコード文字列のみを使用するため、リスクは実質ゼロ。",
+      "recommendation": "現行設計で問題なし。共通コンポーネント化する場合は dangerouslySetInnerHTML を使用しないこと。",
+      "files": []
+    }
+  ],
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "detail": "middleware.ts の認証チェックは全ルートに適用される（matcher 設定で _next/ と静的ファイルのみ除外）。dynamic import により生成されるチャンクファイルは _next/static/chunks/ 配下に配置され、matcher の除外パターンに該当するが、これは JavaScript コードのみで機密データは含まない。MarkdownEditor のデータアクセスは /api/worktrees/[id]/files/ API 経由で行われ、この API は middleware の認証対象範囲内。Terminal の WebSocket 接続も middleware で認証チェック済み。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "detail": "dynamic import のモジュールパスは全てハードコードされたリテラル文字列（'@/components/worktree/MarkdownEditor', '@/components/Terminal'）であり、ユーザー入力がモジュール解決に介入する経路は存在しない。webpack はビルド時にこれらのパスを静的に解析してチャンクを生成するため、ランタイムでのパス操作は不可能。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "detail": "CSP 設定で script-src 'self' が含まれており、dynamic import で生成されるチャンクは同一オリジンの _next/static/chunks/ から読み込まれるため CSP に適合。'unsafe-eval' は既存設定であり本 Issue では変更なし。ssr: false 設定はセキュリティ上の問題を生じない（むしろ xterm.js の SSR エラーを防止する正しい設定）。"
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "pass",
+      "detail": "本変更は next/dynamic（Next.js 組み込み機能）のみを使用し、新規ライブラリの追加はない。rehype-sanitize、xterm.js 等の既存ライブラリのバージョンは変更されない。Loader2（lucide-react）は既に MermaidCodeBlock.tsx で使用されている既存依存。"
+    }
+  },
+  "xss_assessment": {
+    "rehype_sanitize_in_dynamic_chunk": "rehype-sanitize は MarkdownEditor.tsx 内で静的 import されている（L33）。dynamic import によりコンポーネント全体がチャンク分離されるが、rehype-sanitize はチャンク内に含まれ、MarkdownEditor のレンダリング時に必ず適用される。ロード順序の変更（遅延ロード化）は sanitize 処理の実行タイミングを変えるだけで、sanitize 自体が省略されることはない。",
+    "loading_ui_xss_risk": "ローディング中の UI はハードコードされた静的 JSX（Loader2 スピナーと固定テキスト）のみで構成される。ユーザー入力を表示する要素は一切含まれないため、XSS リスクはゼロ。"
+  },
+  "code_injection_assessment": {
+    "module_resolution": "next/dynamic の import() 呼び出しは webpack により静的解析される。モジュールパスはリテラル文字列のみ使用可能で、変数や式による動的パス構築は webpack がサポートしない（ビルドエラーになる）。したがって、コードインジェクションの攻撃面は存在しない。"
+  },
+  "authentication_assessment": {
+    "middleware_coverage": "middleware.ts は /((?!_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*) パターンで全ルートをカバー。/worktrees/[id] および /worktrees/[id]/terminal の両ルートは認証対象。dynamic import はクライアントサイドの JavaScript チャンク読み込みメカニズムであり、認証フローに影響を与えない。",
+    "chunk_file_access": "_next/static/chunks/ 配下のチャンクファイルは middleware の matcher 除外パターンに該当し、認証なしでアクセス可能。これは Next.js の標準動作であり、チャンクには JavaScript コードのみが含まれ機密データは含まれない。データアクセスは認証済み API 経由でのみ行われる。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-410-dynamic-import-design-policy.md",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/worktrees/[id]/terminal/page.tsx",
+    "src/components/Terminal.tsx",
+    "src/middleware.ts",
+    "src/config/auth-config.ts",
+    "src/components/worktree/MermaidCodeBlock.tsx",
+    "src/app/login/page.tsx",
+    "next.config.js"
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 3,
+    "overall_quality": "good"
+  },
+  "timestamp": "2026-03-04T12:00:00Z"
+}

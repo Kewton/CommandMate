@@ -1,0 +1,41 @@
+{
+  "issue_number": 411,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [],
+    "nice_to_have": [
+      {
+        "id": "R4-001",
+        "item": "dangerouslySetInnerHTML使用コンポーネントはmemo化対象外であることの確認",
+        "section_updated": "レビュー指摘事項サマリー / nice_to_have項目の記録",
+        "status": "recorded_no_action_required"
+      },
+      {
+        "id": "R4-002",
+        "item": "useCallbackクロージャにおける機密データキャプチャの不在確認",
+        "section_updated": "レビュー指摘事項サマリー / nice_to_have項目の記録",
+        "status": "recorded_no_action_required"
+      },
+      {
+        "id": "R4-003",
+        "item": "MessageInput handleSubmitのCSRF保護状況（既存設計の確認）",
+        "section_updated": "レビュー指摘事項サマリー / nice_to_have項目の記録",
+        "status": "recorded_no_action_required"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-411-react-memo-optimization-design-policy.md",
+  "sections_updated": [
+    "レビュー履歴",
+    "レビュー指摘事項サマリー（Stage 4追加）",
+    "nice_to_have項目の記録（R4-001, R4-002, R4-003追加）"
+  ],
+  "review_score": "5/5",
+  "review_status": "approved",
+  "timestamp": "2026-03-03T23:50:00+09:00"
+}

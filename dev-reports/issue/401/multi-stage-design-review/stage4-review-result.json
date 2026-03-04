@@ -1,0 +1,165 @@
+{
+  "stage": 4,
+  "focus_area": "セキュリティ",
+  "review_date": "2026-03-03",
+  "issue_number": 401,
+  "design_doc_path": "dev-reports/design/issue-401-stop-script-fix-design-policy.md",
+  "summary": "設計方針書のセキュリティ対策は全体として適切であり、PIDバリデーション（grep -E '^[0-9]+$'）、ポート番号範囲チェック（1-65535）、段階的停止（SIGTERM→SIGKILL）など、シェルスクリプト特有のリスクに対する防御が網羅的に設計されている。ただし、(1) 環境変数PORT値がlsof引数に渡される前のバリデーションにおけるシェルインジェクション経路の残存、(2) lsofとkillの間のTOCTOU競合によるPIDハイジャックリスク、(3) PIDファイルのパーミッション未指定による改竄リスク、(4) エラーメッセージでのポート番号・PID出力による情報漏洩の4点について、改善が必要または推奨される。全体としては中リスクと評価する。",
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "must_fix",
+      "category": "シェルインジェクション",
+      "title": "PORT変数のバリデーションタイミングにおけるシェルメタ文字通過リスク",
+      "description": "設計書セクション5.3のポート番号バリデーション（D1-001）では、`echo \"$PORT\" | grep -qE '^[0-9]+$'` でバリデーションを行う。しかし、`echo \"$PORT\"` の時点で `$PORT` にシェルメタ文字（例: `$(command)` や `;command`）が含まれていた場合、echoの前にシェルがコマンド置換やコマンド連結を評価する。環境変数CM_PORTは外部入力のため、`PORT=${CM_PORT:-...}` の代入時点でシェル展開が発生する。バリデーション自体は正しいが、バリデーション到達前にシェル展開が実行されるタイミング脆弱性がある。",
+      "current_design": "PORT=${CM_PORT:-${MCBD_PORT:-3000}}\nif ! echo \"$PORT\" | grep -qE '^[0-9]+$' || [ \"$PORT\" -lt 1 ] || [ \"$PORT\" -gt 65535 ]; then\n    echo \"ERROR: Invalid port number: $PORT\" >&2\n    exit 1\nfi",
+      "recommendation": "変数代入直後、バリデーション行で `printf '%s' \"$PORT\"` を使用する（echoよりもポータブルかつ安全）。また、バリデーション到達前のシェル展開リスクを軽減するため、環境変数の値を先にサニタイズするか、bashの `[[ $PORT =~ ^[0-9]+$ ]]` パターンマッチング（文字列比較のためコマンド展開なし）を使用する。具体的には:\n\n```bash\nPORT=${CM_PORT:-${MCBD_PORT:-3000}}\nif ! [[ \"$PORT\" =~ ^[0-9]+$ ]] || [ \"$PORT\" -lt 1 ] || [ \"$PORT\" -gt 65535 ]; then\n    echo 'ERROR: Invalid port number' >&2\n    exit 1\nfi\n```\n\nこれにより、(1) grepサブプロセス起動を回避、(2) bashの正規表現マッチングはコマンド展開なし、(3) エラーメッセージにPORT値を含めない（S4-005参照）。",
+      "risk_level": "medium",
+      "attack_vector": "攻撃者がCM_PORT環境変数に悪意のある値を設定できる場合（例: 共有サーバー環境）。ただし、シェルスクリプトはローカル開発環境での使用が前提のため、実際の悪用可能性は限定的。",
+      "owasp_category": "A03:2021-Injection"
+    },
+    {
+      "id": "S4-002",
+      "severity": "should_fix",
+      "category": "TOCTOU競合",
+      "title": "lsofによるPID取得とkillによるシグナル送信の間のTOCTOU競合",
+      "description": "設計書の安全なPIDパイプラインパターン（セクション3.2）では、`lsof -ti:$PORT` でPIDを取得し、その後 `xargs kill` でシグナルを送信する。lsof実行からkill実行までの間に、(a) 対象プロセスが終了し (b) 同じPIDが別のプロセスに再利用される可能性がある（PID再利用攻撃）。特にLinux環境ではPID空間が32768（デフォルト）と比較的小さく、高負荷時のPID再利用サイクルが短い。ただし、stop-server.shのStep 2（PIDファイルベース停止）では `kill -0 \"$PID\"` による存在確認後にkillを行うため、同じTOCTOU問題が存在する。",
+      "current_design": "PIDS=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)\nif [ -n \"$PIDS\" ]; then\n    echo \"$PIDS\" | xargs kill 2>/dev/null\nfi",
+      "recommendation": "シェルスクリプトでのTOCTOU完全解消は困難（カーネルレベルのアトミック操作が必要）。現実的な緩和策として、以下を設計書に明記する:\n\n1. lsof→kill間の遅延を最小化する（現設計は既に直接パイプで実現）\n2. kill対象のプロセスがNode.js/nextサーバーであることをlsof -c オプションで確認するフィルタを追加検討する: `lsof -ti:$PORT -c node` のようにプロセス名フィルタを追加することで、誤killの対象範囲を限定できる\n3. この制約をセクション5（セキュリティ設計）に既知のリスクとして文書化する\n\n注: CLI側のdaemon.tsでは `process.kill(pid, 0)` + `process.kill(pid, signal)` で同じTOCTOU問題が存在するが、PIDファイルベースの管理により対象が限定されている。シェルスクリプト側はlsofでポートベース検索するため、TOCTOU窓が若干広い。",
+      "risk_level": "low",
+      "attack_vector": "ローカル環境での偶発的なPID再利用。意図的な攻撃は、ローカルマシンへのアクセス権を持つ攻撃者がプロセスを高速で生成・終了させる必要があり、現実的な脅威度は低い。",
+      "owasp_category": "A04:2021-Insecure Design"
+    },
+    {
+      "id": "S4-003",
+      "severity": "should_fix",
+      "category": "PIDファイル改竄",
+      "title": "PIDファイルのパーミッションが未指定で他ユーザーから書き換え可能",
+      "description": "build-and-start.sh L88で `echo $SERVER_PID > \"$PID_FILE\"` としてPIDファイルを書き込むが、ファイルパーミッションが指定されていない。デフォルトのumask（通常022）では644（rw-r--r--）となり、同一マシンの他ユーザーは読み取り可能。ただし書き込みはumask 022では不可。一方、CLI側のPidManager.writePid()では `0o600` パーミッション（O_EXCL付き）でアトミックに書き込んでおり、セキュリティ水準に差がある。設計書ではPIDファイルバリデーション（head -1 + grep）は記載されているが、書き込み時のパーミッション設定については言及されていない。",
+      "current_design": "echo $SERVER_PID > \"$PID_FILE\"（パーミッション未指定、umaskデフォルト依存）",
+      "recommendation": "PIDファイル書き込みをCLI側と同等のセキュリティ水準に引き上げる:\n\n```bash\n# PIDファイルを0600パーミッションで書き込み\numask 077 && echo $SERVER_PID > \"$PID_FILE\"\n# または\necho $SERVER_PID > \"$PID_FILE\" && chmod 600 \"$PID_FILE\"\n```\n\nこの対策を設計書セクション5（セキュリティ設計）に「5.4 PIDファイルのパーミッション」として追加し、CLI側のPidManager（0o600 + O_EXCL）との一貫性を明記することを推奨する。",
+      "risk_level": "low",
+      "attack_vector": "共有サーバー環境で他ユーザーがPIDファイルを読み取り、プロセス情報を取得。書き込みはumask 022のデフォルトでは不可だが、umask 000の環境では改竄リスクあり。",
+      "owasp_category": "A01:2021-Broken Access Control"
+    },
+    {
+      "id": "S4-004",
+      "severity": "should_fix",
+      "category": "権限昇格リスク",
+      "title": "プロセスグループkill（kill -- -$PID）のEPERM時のエラーハンドリング不足",
+      "description": "設計書セクション4.2の D1-006 で `kill -- -$PID 2>/dev/null || kill $PID 2>/dev/null` を使用しているが、プロセスグループに他ユーザー所有のプロセスが含まれている場合、EPERMエラーが発生する。`2>/dev/null` でエラー出力は抑制されるが、プロセスグループ内の一部プロセスだけが停止し、一部が残留する部分的停止状態になりうる。また、root所有プロセスに対するkill -9は一般ユーザーからは常にEPERMとなるが、この場合もエラーが黙殺されるため、ユーザーに「停止成功」と誤って報告される可能性がある。",
+      "current_design": "kill -- -$PID 2>/dev/null || kill $PID 2>/dev/null\n...\nif kill -0 \"$PID\" 2>/dev/null; then\n    kill -9 -$PID 2>/dev/null || kill -9 $PID 2>/dev/null\nfi\nstopped=true",
+      "recommendation": "1. `kill -0 \"$PID\"` によるプロセス存在確認はEPERMでも成功として扱われる（プロセスは存在するが権限がない）。この挙動を利用して、killの実行結果を検証する:\n\n```bash\n# kill後のプロセス存在確認で停止の成否を判定\nkill -- -$PID 2>/dev/null || kill $PID 2>/dev/null\nsleep 2\nif kill -0 \"$PID\" 2>/dev/null; then\n    # プロセスがまだ存在する → SIGKILL試行\n    kill -9 -$PID 2>/dev/null || kill -9 $PID 2>/dev/null\n    sleep 1\n    if kill -0 \"$PID\" 2>/dev/null; then\n        echo \"WARNING: Process $PID could not be stopped (permission denied?)\" >&2\n    fi\nfi\n```\n\n2. 設計書のセクション5に「権限不足時の動作」を追記し、EPERMエラー発生時にユーザーに通知する設計を明記する。",
+      "risk_level": "low",
+      "attack_vector": "権限昇格の直接リスクは低い（killは権限のないプロセスへのシグナル送信を拒否する）。リスクは逆方向で、権限不足により停止できないプロセスが残留し、ポート占有が継続する運用上の問題。",
+      "owasp_category": "A04:2021-Insecure Design"
+    },
+    {
+      "id": "S4-005",
+      "severity": "should_fix",
+      "category": "情報漏洩",
+      "title": "エラーメッセージおよびログ出力にPID・ポート番号が含まれる",
+      "description": "設計書のコードサンプルでは、以下の箇所でPIDやポート番号がechoで出力される:\n- `echo \"Stopping process(es) on port $PORT: $(echo $PIDS | tr '\\n' ' ')\"` （セクション4.1、4.2）\n- `echo \"Force killing remaining processes: $(echo $REMAINING | tr '\\n' ' ')\"` （セクション4.1、4.2）\n- `echo \"Port $PORT is already in use by process(es): $(echo $PORT_PIDS | tr '\\n' ' ')\"` （セクション4.3）\n- `echo \"ERROR: Invalid port number: $PORT\" >&2` （セクション5.3）\n\nPIDやポート番号自体は高機密情報ではないが、D1-001のバリデーションエラーメッセージにCM_PORTの生の値を含めることで、攻撃者が注入した悪意のある文字列がそのまま出力に反映されるリスクがある（ログインジェクション）。",
+      "current_design": "echo \"ERROR: Invalid port number: $PORT\" >&2\necho \"Stopping process(es) on port $PORT: $(echo $PIDS | tr '\\n' ' ')\"",
+      "recommendation": "1. バリデーション失敗時のエラーメッセージに未検証の変数値を含めない:\n```bash\n# 修正前\necho \"ERROR: Invalid port number: $PORT\" >&2\n# 修正後\necho 'ERROR: Invalid port number specified in CM_PORT or MCBD_PORT' >&2\n```\n\n2. 正常系のログ出力（PID表示等）はバリデーション通過後のため、ログインジェクションリスクは低い。ただし、PID情報は開発者向けデバッグ情報として有用なので、完全な削除は不要。\n\n3. 設計書セクション5.3のバリデーションエラーメッセージを固定文字列に変更する。",
+      "risk_level": "low",
+      "attack_vector": "ログインジェクション。CM_PORTに改行文字やANSIエスケープシーケンスを含む値が設定された場合、ログ出力が改竄される。実際の悪用にはローカルアクセスが必要。",
+      "owasp_category": "A09:2021-Security Logging and Monitoring Failures"
+    },
+    {
+      "id": "S4-006",
+      "severity": "nice_to_have",
+      "category": "DoS防止",
+      "title": "ポート番号バリデーションにおける予約ポート（1-1023）の考慮",
+      "description": "設計書のD1-001では1-65535の範囲チェックを行うが、1-1023はwell-known portsであり一般ユーザーからのbind/lsofに権限制約がある。stop.shが1-1023のポートを指定された場合、`lsof -ti:$PORT` はroot権限なしでは対象ポートのプロセスを検出できない可能性がある。本プロジェクトのデフォルトポートが3000であること、および開発ツールとしての用途を考慮すると、1024-65535への制限も検討に値する。",
+      "current_design": "ポート範囲チェック: 1-65535",
+      "recommendation": "コメントで1-1023がwell-known portsであることを注記するのみで十分。実用上はCM_PORTに1-1023を指定するユースケースは想定されないが、バリデーション範囲を変更するほどの必要性はない。",
+      "risk_level": "low",
+      "attack_vector": "なし（情報提供目的）。",
+      "owasp_category": "N/A"
+    },
+    {
+      "id": "S4-007",
+      "severity": "nice_to_have",
+      "category": "DoS防止",
+      "title": "xargs kill への大量PID入力に対する制限がない",
+      "description": "lsofの出力が大量のPIDを返した場合（例: ポートフォワーディング等で数百のプロセスが同一ポートを使用）、`echo \"$PIDS\" | xargs kill` が多数のプロセスにシグナルを送信する。xargsはデフォルトでコマンドライン長制限に基づき分割実行するため、システムレベルのDoSリスクは低い。ただし、意図しない大量プロセス停止の可能性をログで把握できるようにすることが望ましい。",
+      "current_design": "echo \"$PIDS\" | xargs kill 2>/dev/null（PID数の上限チェックなし）",
+      "recommendation": "停止対象PID数をカウントし、閾値（例: 10）を超えた場合に警告を出力する:\n```bash\nPID_COUNT=$(echo \"$PIDS\" | wc -l)\nif [ \"$PID_COUNT\" -gt 10 ]; then\n    echo \"WARNING: $PID_COUNT processes found on port $PORT\" >&2\nfi\n```\nこれは防御的ログの追加であり、処理の中断は行わない。",
+      "risk_level": "low",
+      "attack_vector": "偶発的。ポートフォワーディングやDocker環境で同一ポートに多数のプロセスがバインドされている場合。",
+      "owasp_category": "N/A"
+    },
+    {
+      "id": "S4-008",
+      "severity": "nice_to_have",
+      "category": "シェルインジェクション",
+      "title": "PIDファイルパス（PID_FILE変数）のパストラバーサル検証がない",
+      "description": "stop-server.shのPID_FILEは `$LOG_DIR/server.pid` でハードコードされており、外部入力による操作は不可能。しかし、LOG_DIRは `$PROJECT_DIR/logs` に依存し、PROJECT_DIRは `dirname` から導出される。シンボリックリンク攻撃によりSCRIPT_DIRが改竄された場合、PID_FILEが意図しないパスを指す可能性はゼロではないが、スクリプトの呼び出し自体がローカル環境からの直接実行が前提であるため、リスクは極めて低い。",
+      "current_design": "SCRIPT_DIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\nPROJECT_DIR=\"$(dirname \"$SCRIPT_DIR\")\"\nPID_FILE=\"$LOG_DIR/server.pid\"",
+      "recommendation": "現設計で十分。`cd ... && pwd` がシンボリックリンクを解決するため、パストラバーサルリスクは緩和されている。変更不要。",
+      "risk_level": "low",
+      "attack_vector": "シンボリックリンク攻撃。ローカルマシンへの物理アクセスが前提。",
+      "owasp_category": "A01:2021-Broken Access Control"
+    }
+  ],
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 4,
+    "nice_to_have": 3,
+    "total": 8
+  },
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "partial",
+      "notes": "PIDファイルパーミッション未指定（S4-003）。シンボリックリンク攻撃は低リスク（S4-008）。"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "notes": "暗号処理はスコープ外。"
+    },
+    "A03_injection": {
+      "status": "needs_improvement",
+      "notes": "PIDバリデーション（grep -E '^[0-9]+$'）は適切。ポート番号バリデーション（D1-001）のタイミング問題あり（S4-001）。echoでの未検証値出力によるログインジェクションリスクあり（S4-005）。"
+    },
+    "A04_insecure_design": {
+      "status": "acceptable",
+      "notes": "TOCTOU競合は認識済みだが完全解消困難（S4-002）。権限不足時のエラーハンドリング改善推奨（S4-004）。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "notes": "set -eとの相互作用が考慮されている。|| trueの統一が適切。"
+    },
+    "A06_vulnerable_components": {
+      "status": "not_applicable",
+      "notes": "外部ライブラリ依存なし。OS標準コマンド（lsof, kill, xargs）のみ使用。"
+    },
+    "A07_auth_failures": {
+      "status": "not_applicable",
+      "notes": "認証処理はスコープ外。"
+    },
+    "A08_data_integrity": {
+      "status": "pass",
+      "notes": "PIDファイルバリデーション（head -1 + grep）が適切。"
+    },
+    "A09_logging_monitoring": {
+      "status": "needs_improvement",
+      "notes": "エラーメッセージに未検証の変数値を含む箇所あり（S4-005）。"
+    },
+    "A10_ssrf": {
+      "status": "not_applicable",
+      "notes": "ネットワークリクエストはスコープ外。"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "medium",
+    "operational": "low"
+  },
+  "overall_assessment": "中リスク",
+  "approval_status": "conditionally_approved",
+  "conditions": [
+    "S4-001: ポート番号バリデーションをbashのパターンマッチング（[[ =~ ]]）に変更し、エラーメッセージを固定文字列にする",
+    "S4-002からS4-005: 設計書に既知のリスクおよび緩和策を追記する"
+  ]
+}

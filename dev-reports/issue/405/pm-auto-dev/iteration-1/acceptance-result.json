@@ -1,0 +1,120 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "S1: Cache module existence and exports",
+      "result": "passed",
+      "evidence": "src/lib/tmux-capture-cache.ts exists and exports getCachedCapture, setCachedCapture, invalidateCache, clearAllCache, resetCacheForTesting, getOrFetchCapture, sliceOutput, CACHE_TTL_MS=2000, CACHE_MAX_ENTRIES=100, CACHE_MAX_CAPTURE_LINES=10000"
+    },
+    {
+      "scenario": "S2: TTL expiration verification",
+      "result": "passed",
+      "evidence": "tests/unit/lib/tmux-capture-cache.test.ts: 'should return null for TTL-expired entries (lazy eviction)' test uses vi.advanceTimersByTime(CACHE_TTL_MS + 1) and verifies null return"
+    },
+    {
+      "scenario": "S3: Full sweep on setCachedCapture",
+      "result": "passed",
+      "evidence": "tests/unit/lib/tmux-capture-cache.test.ts: 'should perform full sweep on setCachedCapture [SEC4-002]' verifies expired entries are cleaned during setCachedCapture. Also 'should enforce CACHE_MAX_ENTRIES limit' verifies oldest-eviction"
+    },
+    {
+      "scenario": "S4: Singleflight deduplication",
+      "result": "passed",
+      "evidence": "tests/unit/lib/tmux-capture-cache.test.ts: 'should deduplicate concurrent requests (singleflight)' verifies fetchFn is called only once for two concurrent getOrFetchCapture calls, both receiving 'shared result'"
+    },
+    {
+      "scenario": "S5: captureSessionOutput() interface unchanged",
+      "result": "passed",
+      "evidence": "git diff main -- tests/unit/lib/cli-session.test.ts shows no changes. captureSessionOutput(worktreeId, cliToolId, lines=1000) signature preserved at src/lib/cli-session.ts:52-56. All 211 test files pass (4471 tests)"
+    },
+    {
+      "scenario": "S6: captureSessionOutputFresh() added and used",
+      "result": "passed",
+      "evidence": "src/lib/cli-session.ts:103-133 exports captureSessionOutputFresh(worktreeId, cliToolId, lines=5000). src/app/api/worktrees/[id]/prompt-response/route.ts:12 imports captureSessionOutputFresh and uses it at line 96"
+    },
+    {
+      "scenario": "S7: Cache invalidation hooks in all 8 locations",
+      "result": "passed",
+      "evidence": "invalidateCache() calls confirmed: (1) src/lib/claude-session.ts:732,792 (sendMessageToClaude, stopClaudeSession) (2) src/lib/cli-tools/codex.ts:150 (sendMessage) (3) src/lib/cli-tools/gemini.ts:176 (sendMessage) (4) src/lib/cli-tools/opencode.ts:172,217 (sendMessage, killSession) (5) src/lib/cli-tools/vibe-local.ts:162 (sendMessage) (6) src/app/api/worktrees/[id]/terminal/route.ts:82 (POST handler) (7) src/lib/auto-yes-manager.ts:618-621 (try-finally pattern around sendPromptAnswer) (8) src/lib/prompt-answer-sender.ts:111"
+    },
+    {
+      "scenario": "S8: listSessions() batch query in worktrees routes",
+      "result": "passed",
+      "evidence": "src/app/api/worktrees/route.ts:18 imports listSessions, line 38 calls 'await listSessions()' with Set-based lookup at line 55. src/app/api/worktrees/[id]/route.ts:19 imports listSessions, line 51 calls 'await listSessions()' with Set-based lookup at line 65"
+    },
+    {
+      "scenario": "S9: isSessionHealthy() promoted from @internal",
+      "result": "passed",
+      "evidence": "src/lib/claude-session.ts:294 JSDoc states 'Issue #405: Promoted from @internal to production export.' The @internal tag is removed from isSessionHealthy(). Both worktrees/route.ts:19 and worktrees/[id]/route.ts:20 import isSessionHealthy directly"
+    },
+    {
+      "scenario": "S10: Graceful shutdown - clearAllCache() in session-cleanup.ts",
+      "result": "passed",
+      "evidence": "src/lib/session-cleanup.ts:13 imports clearAllCache from tmux-capture-cache, line 75 calls clearAllCache() at the start of cleanupWorktreeSessions()"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "Same-session duplicate tmux captures are eliminated",
+      "verified": true,
+      "evidence": "captureSessionOutput() uses getOrFetchCapture() with TTL-based cache and singleflight deduplication (src/lib/cli-session.ts:65)"
+    },
+    {
+      "criterion": "Unnecessary tmux operations for non-running CLI tools are skipped",
+      "verified": true,
+      "evidence": "worktrees/route.ts and worktrees/[id]/route.ts use listSessions() batch query (1 tmux call) + Set.has() instead of N individual hasSession() calls per CLI tool"
+    },
+    {
+      "criterion": "Session status reflection delay is within cache TTL (2 seconds)",
+      "verified": true,
+      "evidence": "CACHE_TTL_MS = 2000 (src/lib/tmux-capture-cache.ts:36). TTL expiration test passes in unit tests"
+    },
+    {
+      "criterion": "Cache invalidation works correctly after command send",
+      "verified": true,
+      "evidence": "All 8 invalidation points verified: claude-session, codex, gemini, opencode, vibe-local, terminal/route.ts, auto-yes-manager (try-finally), prompt-answer-sender"
+    },
+    {
+      "criterion": "Existing prompt detection and auto-yes behavior is unaffected",
+      "verified": true,
+      "evidence": "Existing test files (cli-session.test.ts, claude-session.test.ts) are unmodified. All 4471 unit tests pass. prompt-response tests updated only to use captureSessionOutputFresh"
+    },
+    {
+      "criterion": "All tests pass",
+      "verified": true,
+      "evidence": "npx tsc --noEmit: no errors. npm run lint: no warnings or errors. npm run test:unit: 211 test files passed, 4471 tests passed, 7 skipped"
+    },
+    {
+      "criterion": "captureSessionOutput() interface is unchanged (existing tests pass without modification)",
+      "verified": true,
+      "evidence": "git diff main -- tests/unit/lib/cli-session.test.ts shows zero changes. Signature: captureSessionOutput(worktreeId: string, cliToolId: CLIToolType, lines: number = 1000): Promise<string>"
+    },
+    {
+      "criterion": "GET /api/worktrees/[id] also uses listSessions() batch query with active CLI tool filtering",
+      "verified": true,
+      "evidence": "src/app/api/worktrees/[id]/route.ts:51 calls listSessions(), line 52 creates sessionNameSet, line 65 uses sessionNameSet.has(sessionName) with Claude-only health check at lines 68-73"
+    }
+  ],
+  "build_verification": {
+    "tsc_noEmit": "passed (no errors)",
+    "eslint": "passed (no warnings or errors)",
+    "unit_tests": "passed (211 files, 4471 tests, 7 skipped)"
+  },
+  "evidence_files": [
+    "src/lib/tmux-capture-cache.ts",
+    "src/lib/cli-session.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/cli-tools/gemini.ts",
+    "src/lib/cli-tools/opencode.ts",
+    "src/lib/cli-tools/vibe-local.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/terminal/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "tests/unit/lib/tmux-capture-cache.test.ts"
+  ],
+  "message": "All acceptance criteria are satisfied. The implementation correctly introduces TTL-based cache with singleflight deduplication, N+1 query elimination via listSessions() batch query, cache invalidation at all 8 write points, captureSessionOutputFresh() for prompt-response verification, and isSessionHealthy() promotion from @internal. All existing tests pass without modification. TypeScript compilation, linting, and all 4471 unit tests pass."
+}

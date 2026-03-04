@@ -1,0 +1,69 @@
+{
+  "issue_number": 404,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "iteration": 3,
+  "apply_date": "2026-03-04",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "F5-001",
+        "status": "applied",
+        "change_summary": "stopScheduleForWorktree(worktreeId) の責務範囲を3点（(a)cronジョブ停止+schedulesエントリ削除、(b)cmateFileCacheエントリ削除、(c)当該worktreeのactiveProcesses停止）に明確化。stopAllSchedules()はサーバーシャットダウン時専用に整理する旨を追記。実装上の注意3として __scheduleActiveProcesses のworktreeId直接ルックアップが可能な点を追記。提案する解決策 > B にも stopAllSchedules() との責務分担を明記。影響範囲テーブルの schedule-manager.ts 説明にactiveProcessesのworktree単位クリーンアップを追記"
+      },
+      {
+        "id": "F5-002",
+        "status": "applied",
+        "change_summary": "定期クリーンアップの実装方針を具体化。提案する解決策 > B に実装場所（src/lib/resource-cleanup.ts 新規モジュール）、タイマー管理（setInterval + graceful shutdown時clearInterval）、スキャン対象（autoYesStates/autoYesPollerStates、schedules Mapは既に自動クリーンアップ済みのため対象外）を明記。実装タスクの定期クリーンアップ項目にも実装場所・タイマー管理・スキャン対象・クリーンアップロジックの4点を追記。影響範囲テーブルに src/lib/resource-cleanup.ts（新規）を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F5-003",
+        "status": "skipped",
+        "reason": "実装タスクのコンテナ環境注記（ppid=1 + プロセス名パターンの複合チェック推奨）で実質カバーされており、実装者の混乱リスクは低い。レビュー結果でも「実装者の混乱リスクは低い」と評価されている"
+      },
+      {
+        "id": "F5-004",
+        "status": "skipped",
+        "reason": "設計書レベルの詳細でありIssueの粒度としては許容範囲内。レビュー結果でも「Issueの粒度としては許容範囲内」と評価されている"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 4,
+    "applied": 2,
+    "skipped": 2
+  },
+  "changes_made": [
+    {
+      "section": "提案する解決策 > B. globalThis Mapクリーンアップ",
+      "change": "stopAllSchedules()との責務分担の説明を追加、24時間定期クリーンアップの実装方針（実装場所・タイマー管理・スキャン対象）を追加"
+    },
+    {
+      "section": "実装タスク > globalThis Mapメモリリーク対策 > stopScheduleForWorktree",
+      "change": "責務範囲を3点に明確化（(a)cronジョブ停止、(b)cmateFileCache削除、(c)activeProcesses停止）、stopAllSchedules()のサーバーシャットダウン専用化を明記、実装上の注意3（__scheduleActiveProcessesのworktreeId直接ルックアップ）を追加"
+    },
+    {
+      "section": "実装タスク > globalThis Mapメモリリーク対策 > 定期クリーンアップ関数",
+      "change": "実装場所・タイマー管理・スキャン対象・クリーンアップロジックの4点を追記"
+    },
+    {
+      "section": "影響範囲テーブル",
+      "change": "src/lib/resource-cleanup.ts（新規モジュール）を追加、schedule-manager.tsの説明にactiveProcessesのworktree単位クリーンアップを追記"
+    },
+    {
+      "section": "レビュー履歴",
+      "change": "イテレーション3（Stage 5通常レビュー2回目）を追加。F5-001/F5-002の適用内容とF5-003/F5-004のスキップ理由を記録"
+    },
+    {
+      "section": "冒頭のNote",
+      "change": "Stage 3レビュー結果からStage 5レビュー結果に更新"
+    }
+  ],
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/404"
+  }
+}

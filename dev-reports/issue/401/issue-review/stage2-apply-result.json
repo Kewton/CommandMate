@@ -1,0 +1,27 @@
+{
+  "stage": 2,
+  "apply_date": "2026-03-03",
+  "issue_number": 401,
+  "applied_findings": [
+    "MF-1",
+    "MF-2",
+    "MF-3",
+    "MF-4",
+    "SF-1",
+    "SF-2",
+    "SF-3",
+    "SF-4",
+    "SF-5",
+    "NTH-1"
+  ],
+  "skipped_findings": [
+    "NTH-2",
+    "NTH-3"
+  ],
+  "skip_reasons": {
+    "NTH-2": "メモリ消費の再現手順詳細はIssue報告者が追記すべき情報であり、レビュー反映段階で追加する情報ではない。316MBの実測値は維持した。",
+    "NTH-3": "lsofの可用性問題は現行スクリプト全体の前提であり、本Issueのスコープを超える。Nice-to-haveとして優先度が低い。"
+  },
+  "github_updated": true,
+  "summary": "Must Fix 4件（MF-1~MF-4）全て反映済み。stop.shがPIDファイルベースという誤った前提を削除し、実際のコードに即したポートベース停止の記述に修正。stop-server.shの存在・役割・機能差分を追記。実装タスクをファイル名・行番号レベルで正確に書き直し。Should Fix 5件も全て反映: 複数PID対応不備（SF-1）、SIGKILL即時使用の懸念（SF-2）、受入条件の具体的検証手順追加（SF-3）、stop-server.shのポートハードコード問題（SF-4）、CLI停止メカニズムとの関係記載（SF-5）。Nice-to-have 1件（NTH-1: restart.shの影響範囲）も受入条件と影響範囲テーブルに追記。NTH-2（再現手順詳細）とNTH-3（lsof可用性）はスコープ外として省略。"
+}

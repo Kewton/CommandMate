@@ -1,0 +1,141 @@
+{
+  "issue_number": 405,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "focus_area": "設計原則",
+  "status": "conditionally_approved",
+  "score": 4,
+  "review_items": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "TmuxCaptureCacheモジュールが複数の責務を持つ（SRP違反の懸念）",
+      "description": "tmux-capture-cache.tsは (1) TTLベースキャッシュ管理、(2) singleflightパターンによるリクエスト集約、(3) eviction戦略の3つの責務を1モジュールに内包する設計である。現時点のコード量では問題にならないが、将来的にeviction戦略の変更やsingleflightの拡張が必要になった場合に変更理由が複数存在する。",
+      "suggestion": "現段階ではモジュールサイズが小さいため許容可能。ただし、getOrFetchCapture()のsingleflight部分は、将来的に別モジュール（例: singleflight.ts汎用ユーティリティ）への分離を検討する旨をコメントで明記することを推奨する。これにより、schedule-manager.tsやversion-checker.ts等他のモジュールでもsingleflightが必要になった場合に対応しやすくなる。",
+      "affected_section": "3.1 tmux captureキャッシュモジュール / 3.1.5 singleflightパターン"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "should_fix",
+      "category": "dry",
+      "title": "B案キャッシュ無効化の漏れリスクがDRY原則に対する構造的弱点",
+      "description": "キャッシュ無効化B案（呼び出し元での明示的クリア）は、sendKeys/sendSpecialKeys/killSessionの呼び出し箇所8箇所以上に個別にinvalidateCache()を挿入する必要がある。新規CLIツール追加時やsendKeys呼び出し箇所追加時に、invalidateCache()の挿入忘れが発生するリスクがある。設計書では「ガイドライン+網羅テスト」で軽減するとしているが、テスト自体がすべての箇所をカバーする保証がない。",
+      "suggestion": "B案の採用自体は循環依存回避のため合理的。追加の安全策として、以下を推奨: (1) invalidateCache()の呼び出し箇所を網羅するチェックリストをCLAUDE.mdに追記する、(2) tmux.tsのsendKeys/killSessionをラップした薄いヘルパー関数（例: sendKeysAndInvalidate()）を作成し、cache層への依存をラッパー側に閉じ込める選択肢をPhase 4の実装時に再評価する。ラッパー案はC案の軽量版であり、8箇所の分散をDRYに集約できる。",
+      "affected_section": "3.4 キャッシュ無効化設計 / 9.1 採用した設計"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "nice_to_have",
+      "category": "yagni",
+      "title": "singleflightパターンの必要性に関する定量的根拠が不足",
+      "description": "singleflightパターン（inflight Map）は同時リクエストのstampede防止のために導入されるが、設計書のキャッシュヒット率見積もり（セクション7.2）ではTTL=2秒のキャッシュ自体が複数呼び出し元の重複を50-75%排除するとしている。Node.jsのシングルスレッド特性上、真の同時リクエストは限定的であり、singleflightがなくても最初のawait capturePane()完了前に別のリクエストがキャッシュミスして同一セッションをcaptureするケースは、非同期I/O待ち中のイベントループ切り替え時にのみ発生する。",
+      "suggestion": "singleflightパターン自体は軽量な実装であり、YAGNI違反とまでは言えない。ただし、実装コスト（10-15行程度）と保守コストが低いことをJSDocに明記し、将来的な不要判断時の削除コストを最小化すべき。Phase 1実装時に、singleflightなしの実装を先に完成させ、ベンチマークで効果を確認してから追加する段階的アプローチも検討に値する。",
+      "affected_section": "3.1.5 singleflightパターン / 7.2 キャッシュヒット率の見積もり"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "captureSessionOutput()内部でのキャッシュ統合はOCPに対する懸念",
+      "description": "captureSessionOutput()の内部実装にキャッシュロジック（getOrFetchCapture呼び出し）を直接埋め込む設計は、既存インターフェース非変更という大きなメリットがある一方、キャッシュ戦略を変更（例: TTL変更、条件付きバイパス）する際にcaptureSessionOutput()自体を修正する必要がある。Open/Closed Principleの観点では、キャッシュ層は外部から注入可能であることが理想的。",
+      "suggestion": "現状の設計は「既存テスト90箇所以上への影響回避」という実務的理由で十分に正当化される。ただし、captureSessionOutput()内部でgetOrFetchCapture()を呼び出す際に、キャッシュモジュールのimportを明確に分離し、将来的にDI（Dependency Injection）パターンへの移行が容易な構造にしておくことを推奨する。具体的には、fetchFnのコールバックパターンが既に採用されているため、getOrFetchCapture自体を引数として渡す設計への拡張余地がある。",
+      "affected_section": "3.2 captureSessionOutput()の変更"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "category": "module",
+      "title": "ClaudeToolのisRunning()HealthCheckとlistSessions()一括判定の整合性が未定義",
+      "description": "設計書セクション3.3で「ClaudeToolのisRunning()はHealthCheck付き（isSessionHealthy()）。listSessions()による存在確認後、Claude Sessionのみ追加のHealthCheckが必要」と注意書きがあるが、この追加HealthCheckの具体的な実装設計が記載されていない。現在のworktrees/route.tsではcliTool.isRunning()を各ツールに対して呼び出しており、ClaudeTool.isRunning()はisClaudeRunning()経由でhasSession()+isSessionHealthy()の2段階チェックを行う。listSessions()一括取得に置き換えた場合、ClaudeセッションについてのみisSessionHealthy()を追加で呼ぶ分岐が必要になるが、その実装パスが明確でない。",
+      "suggestion": "セクション3.3に以下の具体的な実装擬似コードを追加すべき: (1) listSessions()でセッション存在を確認、(2) cliToolId === 'claude'の場合のみisSessionHealthy(sessionName)を追加呼び出し、(3) HealthCheck失敗時のセッション再作成は行わず（route.tsの責務外）、isRunning=falseとして扱う。これにより、listSessions()の一括取得メリット（50回→1回）を維持しつつ、ClaudeToolの安全性を確保できる。",
+      "affected_section": "3.3 isRunning()最適化（listSessions一括取得）"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "category": "pattern",
+      "title": "globalThisパターンの一貫性は良好だが、型宣言の統一化を推奨",
+      "description": "設計書のglobalThisパターン（セクション3.1.4）は、既存のauto-yes-manager.ts（globalThis.__autoYesStates）、schedule-manager.ts（globalThis.__scheduleManagerStates）、version-checker.ts（globalThis.__versionCheckCache）と一貫した方式を採用しており、プロジェクト全体の整合性は高い。ただし、declare globalブロックの配置がモジュールごとにバラバラであり、型の重複宣言リスクがある。",
+      "suggestion": "現状のモジュールごとのdeclare globalで実用上は問題ない。将来的にglobalThisキーの衝突防止のため、全globalThisキーを一覧化したドキュメント（またはsrc/types/global.d.ts）の作成を検討する。Issue #405時点では対応不要だが、globalThisキーが5つ以上になった時点での整理を推奨する。",
+      "affected_section": "3.1.4 globalThisパターン"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "category": "kiss",
+      "title": "CACHE_MAX_CAPTURE_LINES=10000の一律保持は単純で良い設計",
+      "description": "A案（最大行数でキャッシュ+sliceで返却）は、呼び出し元ごとの要求行数の違い（100行〜10,000行）を1つのキャッシュエントリで解決しており、KISS原則に適合した設計。行数ごとの個別キャッシュエントリ（C案検討候補）に比べて、キャッシュ管理の複雑性が大幅に低い。",
+      "suggestion": "特に改善不要。設計判断として優れている。",
+      "affected_section": "3.1.3 行数差異の解決（A案）"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "should_fix",
+      "category": "module",
+      "title": "captureSessionOutputFresh()の設計が未定義",
+      "description": "セクション3.4.3でprompt-response APIのキャッシュバイパスとして「captureSessionOutputFresh()」関数が言及されているが、この関数の定義がインターフェース設計（セクション3.1.1）にもcaptureSessionOutput()の変更セクション（3.2）にも含まれていない。既存のcaptureSessionOutput()にbypassオプションを追加するのか、別関数として新設するのか不明確。",
+      "suggestion": "以下のいずれかの方針を設計書に明記すべき: (A) captureSessionOutput()にoptions引数を追加し{ bypassCache: true }で制御する方式、(B) captureSessionOutputFresh()を別関数として定義する方式。(A)はインターフェース変更が必要で既存テストに影響する可能性があるため、(B)が推奨される。(B)の場合、内部でcapturePane()を直接呼びつつ結果をsetCachedCapture()で書き戻す実装を明記すべき。",
+      "affected_section": "3.4.3 prompt-response APIのキャッシュバイパス"
+    },
+    {
+      "id": "DR1-009",
+      "severity": "nice_to_have",
+      "category": "dry",
+      "title": "session-cleanup.tsのclearAllCache()追加はFacadeパターンとして適切",
+      "description": "graceful shutdown時のclearAllCache()呼び出しをsession-cleanup.ts（Facade）に集約する設計は、既存のstopResponsePolling/stopAutoYesPolling/stopAllSchedulesと同じパターンに従っており、DRY原則およびFacadeパターンに適合している。",
+      "suggestion": "特に改善不要。既存アーキテクチャとの整合性が高い。",
+      "affected_section": "3.4.1 無効化トリガー一覧 / 11. ファイル変更一覧"
+    },
+    {
+      "id": "DR1-010",
+      "severity": "nice_to_have",
+      "category": "solid",
+      "title": "ICLIToolインターフェース変更不要は優れたLSP/ISP適合",
+      "description": "listSessions()一括取得をroute.ts側のロジックとして実装し、ICLIToolインターフェースのisRunning()シグネチャを変更しない設計は、Liskov Substitution Principleの観点で各CLITool実装に影響を与えず、Interface Segregation Principleの観点でICLIToolに不要なメソッド（batchIsRunning等）を追加しない点で優れている。",
+      "suggestion": "特に改善不要。設計判断として優れている。",
+      "affected_section": "3.3 isRunning()最適化 / 9.1 採用した設計"
+    },
+    {
+      "id": "DR1-011",
+      "severity": "should_fix",
+      "category": "module",
+      "title": "capture/route.tsのキャッシュ対象外の正当性とhasSession()の最適化漏れ",
+      "description": "capture/route.ts（ターミナルUI用）はcapturePane()直接呼び出しのためキャッシュ対象外とする判断自体は妥当。しかし、capture/route.tsのhasSession()呼び出し（L61）はlistSessions()一括取得の恩恵を受けず、個別にtmux has-sessionを実行し続ける。このAPIはターミナルUI表示中に高頻度で呼ばれるため、hasSession()のコスト（5ms程度/回）が蓄積する可能性がある。",
+      "suggestion": "capture/route.tsのhasSession()もlistSessions()キャッシュから参照可能にするか、もしくはcapture/route.tsは現状維持で問題ないことの根拠（呼び出し頻度が低い等）を設計書に明記する。セクション3.5の設計判断に「hasSession()のコストは個別API呼び出しのため、N+1問題とは異なり最適化不要」等の一文を追加することで十分。",
+      "affected_section": "3.5 capture/route.tsの設計判断"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 4,
+    "nice_to_have_count": 5,
+    "overall_quality": "high",
+    "comments": "全体として設計品質は高い。KISS原則に基づくA案（最大行数キャッシュ+slice）の採用、ICLIToolインターフェース非変更によるLSP/ISP適合、既存globalThisパターンとの一貫性、Facadeパターンへの統合など、プロジェクトの既存アーキテクチャを尊重した設計となっている。must_fixは1件（ClaudeToolのHealthCheck統合の具体設計の欠如）のみであり、設計方針の方向性自体には問題がない。should_fixの4件はいずれも設計書の補完・明確化レベルであり、実装方針の変更を要求するものではない。"
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-405-tmux-capture-optimization-design-policy.md",
+    "src/lib/tmux.ts",
+    "src/lib/cli-session.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/cli-tools/types.ts",
+    "src/lib/cli-tools/base.ts",
+    "src/lib/cli-tools/claude.ts",
+    "src/lib/cli-tools/codex.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/assistant-response-saver.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/schedule-manager.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/capture/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts"
+  ],
+  "timestamp": "2026-03-04T00:00:00Z"
+}

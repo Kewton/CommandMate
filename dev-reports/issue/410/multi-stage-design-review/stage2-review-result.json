@@ -1,0 +1,81 @@
+{
+  "issue_number": 410,
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "S2-001",
+      "severity": "should_fix",
+      "title": "スコープ外ファイル MessageList.tsx の除外根拠 'barrel export経由のみ' が不正確",
+      "description": "設計方針書 Section 1 スコープ外に「src/components/worktree/MessageList.tsx: barrel export経由のみ、ツリーシェイキングで除外見込み」と記載があるが、実際にはMessageListは現時点でどのコンポーネントからもimportされていない（barrel export src/components/worktree/index.ts に定義はあるが、そのbarrel exportを経由したimportも存在しない）。除外根拠として「barrel export経由のみ」は、あたかもどこかで使用されているかのように読めるが、実際は未使用状態。MessageList.tsx自体がrehype-highlightを直接importしている（L18）ことは事実だが、バンドルへの影響は「使用されていないためツリーシェイキングで除外される」という記述が正確。",
+      "location": "Section 1: スコープ外",
+      "suggested_fix": "「barrel export経由のみ」を「barrel export(index.ts)に定義はあるが、現時点でどのコンポーネントからも使用されていない。ツリーシェイキングでバンドルから除外される見込み」に修正する。"
+    },
+    {
+      "id": "S2-002",
+      "severity": "nice_to_have",
+      "title": "S1-002注記「既存のlucide-react importは無い」は正確だが補足推奨",
+      "description": "設計方針書 Section 5-2 [S1-002] で「WorktreeDetailRefactored.tsxは既に約60個のimport文（L19-L60）を持つ。Loader2はlucide-reactからの新規importとなる（既存のlucide-react importは無い）」と記載。実際にWorktreeDetailRefactored.tsxにlucide-react importが無いことはgrepで確認済み。ただし、import文は実際にはL19-L65で約47個（約60個という記述は概算として許容範囲だが、やや過大）。",
+      "location": "Section 5-2: [S1-002] import追加に関する注記",
+      "suggested_fix": "「約60個のimport文（L19-L60）」を「約47個のimport文（L19-L65）」のように実態に近い値に修正する。もしくは、概算であることを明示して「約50個のimport文」とする。"
+    },
+    {
+      "id": "S2-003",
+      "severity": "nice_to_have",
+      "title": "D3テストモックパターンのコード例が実際のテストファイルと若干異なる",
+      "description": "設計方針書 Section 4 D3 で「tests/unit/components/MermaidCodeBlock.test.tsx L24-35」を参照し、vi.mock('next/dynamic', ...)のコード例を示している。実際のテストファイル（L24-35）のモック実装は設計書の例と構造は同等だが、設計書では型パラメータ(_options)のみ記載し、実際のテストコードではloaderの型パラメータがPromise<{ MermaidDiagram: ... }>と明記されている等、細部が異なる。設計書はあくまで「参考パターン」として記載しているので実害は無いが、正確性の観点から注記がある方が良い。",
+      "location": "Section 4: D3 テストモックパターン",
+      "suggested_fix": "コード例の前に「以下は簡略化した参考例。実際のテストコードは型定義がより厳密になっている」等の注記を追加するか、実際のテストコードに合わせて更新する。"
+    },
+    {
+      "id": "S2-004",
+      "severity": "nice_to_have",
+      "title": "変更後グラフのTerminal.tsx内部import記述が抽象化されている",
+      "description": "設計方針書 Section 2 の変更後mermaidグラフで、Terminal.tsx → xterm.js の矢印が「静的import」とのみ記載されている。変更前グラフでは「静的import L9-12」と行番号が明示されていた。変更後は行番号が除外されているが、Terminal.tsxは変更しないため行番号は変わらず、一貫性のために記載があった方が読みやすい。",
+      "location": "Section 2: コンポーネント依存グラフ（変更後）",
+      "suggested_fix": "変更後グラフのTC-->|...|XT行を「静的import L9-12」に揃える。同様にME-->|...|RH行も「静的import L34-35」に揃える。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 3,
+    "overall_quality": "good"
+  },
+  "consistency_verification": {
+    "file_paths": {
+      "src/app/worktrees/[id]/terminal/page.tsx": "存在確認済み - 設計書記載と一致",
+      "src/components/worktree/WorktreeDetailRefactored.tsx": "存在確認済み - 設計書記載と一致",
+      "src/components/worktree/MermaidCodeBlock.tsx": "存在確認済み - 設計書記載と一致",
+      "src/app/login/page.tsx": "存在確認済み - 設計書記載と一致",
+      "src/components/Terminal.tsx": "存在確認済み - 設計書記載と一致",
+      "src/components/worktree/MarkdownEditor.tsx": "存在確認済み - 設計書記載と一致",
+      "src/components/worktree/MessageList.tsx": "存在確認済み - 設計書記載と一致"
+    },
+    "line_numbers": {
+      "terminal/page.tsx L9 (TerminalComponent import)": "一致 - 実際のL9: import { TerminalComponent } from '@/components/Terminal'",
+      "WorktreeDetailRefactored.tsx L39 (MarkdownEditor import)": "一致 - 実際のL39: import { MarkdownEditor } from '@/components/worktree/MarkdownEditor'",
+      "WorktreeDetailRefactored.tsx L2070-2076 (MarkdownEditor使用箇所1)": "一致 - L2070-2076にMarkdownEditorコンポーネント使用を確認",
+      "WorktreeDetailRefactored.tsx L2309-2314 (MarkdownEditor使用箇所2)": "一致 - L2309-2314(実際はL2315まで)にMarkdownEditor使用を確認",
+      "MermaidCodeBlock.tsx L20-34 (dynamic importパターン)": "一致 - L20-34にMermaidDiagramのdynamic import定義を確認",
+      "login/page.tsx L23-26 (QrCodeGenerator dynamic import)": "一致 - L23-26にQrCodeGeneratorのdynamic import定義を確認",
+      "Terminal.tsx L9-12 (xterm imports)": "一致 - L9-12にxterm.js/addon/CSSのimportを確認",
+      "MarkdownEditor.tsx L34-35 (rehype-highlight + highlight.js CSS)": "一致 - L34: import rehypeHighlight, L35: import highlight.js CSS"
+    },
+    "export_types": {
+      "TerminalComponent": "named export (export function) - 設計書のD1パターン適用が妥当",
+      "MarkdownEditor": "named export (export function) - 設計書のD1パターン適用が妥当",
+      "MermaidDiagram": "named export - MermaidCodeBlock.tsxのdynamic importで.then()パターン使用を確認",
+      "QrCodeGenerator": "named export - login/page.tsxのdynamic importで.then()パターン使用を確認"
+    },
+    "existing_patterns": {
+      "MermaidCodeBlock.tsx dynamic import": "設計書のD1パターンと整合 - ssr:false, .then()パターン, Loader2ローディング",
+      "login/page.tsx dynamic import": "設計書のD1パターンと整合 - ssr:false, .then()パターン, loadingオプションなし"
+    },
+    "test_impact": {
+      "MarkdownEditor.test.tsx": "直接import使用 - dynamic import変更の影響なし（設計書の記載と一致）",
+      "WorktreeDetailRefactored.test.tsx": "MarkdownEditor参照なし（設計書の記載と一致）"
+    }
+  }
+}

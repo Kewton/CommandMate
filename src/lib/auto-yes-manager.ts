@@ -17,6 +17,8 @@ import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions } from './cli-patterns';
 import { DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
 import { generatePromptKey } from './prompt-key';
+import { getErrorMessage } from './errors';
+import { invalidateCache } from './tmux-capture-cache';
 
 // Re-export from shared config for backward compatibility (Issue #314)
 export type { AutoYesStopReason } from '@/config/auto-yes-config';
@@ -93,17 +95,6 @@ export const THINKING_CHECK_LINE_COUNT = 50;
 
 /** Worktree ID validation pattern (security: prevent command injection) */
 const WORKTREE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
-/**
- * Extract error message from unknown error type.
- * Provides consistent error message extraction across the module (DRY).
- *
- * @param error - Unknown error object
- * @returns Error message string, or 'Unknown error' for non-Error values
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unknown error';
-}
 
 // =============================================================================
 // In-memory State (globalThis for hot reload persistence - Issue #153)
@@ -607,12 +598,17 @@ export async function detectAndRespondToPrompt(
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId);
 
-    await sendPromptAnswer({
-      sessionName,
-      answer,
-      cliToolId,
-      promptData: promptDetection.promptData,
-    });
+    try {
+      await sendPromptAnswer({
+        sessionName,
+        answer,
+        cliToolId,
+        promptData: promptDetection.promptData,
+      });
+    } finally {
+      // Issue #405: Ensure cache invalidation even if sendPromptAnswer throws
+      invalidateCache(sessionName);
+    }
 
     // 5. Update timestamp and reset error count
     updateLastServerResponseTimestamp(worktreeId, Date.now());
@@ -802,4 +798,47 @@ export function stopAllAutoYesPolling(): void {
     console.info(`[Auto-Yes Poller] Stopped for worktree: ${worktreeId} (shutdown)`);
   }
   autoYesPollerStates.clear();
+}
+
+// =============================================================================
+// Cleanup Functions (Issue #404: Resource leak prevention)
+// =============================================================================
+
+/**
+ * Delete the auto-yes state for a worktree.
+ * Used during worktree deletion to prevent memory leaks in the autoYesStates Map.
+ *
+ * [SEC-404-001] Validates worktreeId before deletion.
+ *
+ * @param worktreeId - Worktree identifier (must pass isValidWorktreeId)
+ * @returns true if worktreeId was valid (deletion attempted), false if invalid
+ */
+export function deleteAutoYesState(worktreeId: string): boolean {
+  if (!isValidWorktreeId(worktreeId)) {
+    return false;
+  }
+  autoYesStates.delete(worktreeId);
+  return true;
+}
+
+/**
+ * Get all worktree IDs that have auto-yes state entries.
+ * Used by periodic resource cleanup to detect orphaned entries.
+ *
+ * @internal Exported for resource-cleanup and testing purposes.
+ * @returns Array of worktree IDs present in the autoYesStates Map
+ */
+export function getAutoYesStateWorktreeIds(): string[] {
+  return Array.from(autoYesStates.keys());
+}
+
+/**
+ * Get all worktree IDs that have active auto-yes poller entries.
+ * Used by periodic resource cleanup to detect orphaned entries.
+ *
+ * @internal Exported for resource-cleanup and testing purposes.
+ * @returns Array of worktree IDs present in the autoYesPollerStates Map
+ */
+export function getAutoYesPollerWorktreeIds(): string[] {
+  return Array.from(autoYesPollerStates.keys());
 }

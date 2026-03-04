@@ -1,0 +1,37 @@
+{
+  "issue_number": 402,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "tests_passed": 199,
+      "tests_failed": 0,
+      "coverage": 85.0,
+      "files_changed": [
+        "src/lib/prompt-detector.ts",
+        "tests/unit/prompt-detector-cache.test.ts",
+        "tests/unit/prompt-detector.test.ts",
+        "tests/unit/lib/status-detector.test.ts"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "scenarios_passed": 6,
+      "scenarios_failed": 0
+    },
+    "refactor": {
+      "status": "success",
+      "changes_made": 0,
+      "reason": "コードは既にクリーンで設計方針書に準拠。変更不要"
+    },
+    "documentation": {
+      "status": "success",
+      "files_updated": ["CLAUDE.md"]
+    }
+  },
+  "quality_checks": {
+    "typescript": "pass",
+    "eslint": "pass",
+    "unit_tests": "pass"
+  }
+}

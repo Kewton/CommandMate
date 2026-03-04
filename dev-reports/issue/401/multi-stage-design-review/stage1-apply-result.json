@@ -1,0 +1,16 @@
+{
+  "stage": 1,
+  "apply_date": "2026-03-03",
+  "issue_number": 401,
+  "design_doc_path": "dev-reports/design/issue-401-stop-script-fix-design-policy.md",
+  "applied_findings": ["D1-006", "D1-001", "D1-002", "D1-004"],
+  "skipped_findings": ["D1-003", "D1-005", "D1-007", "D1-008"],
+  "skip_reasons": {
+    "D1-003": "Nice to have: PIDバリデーションパイプラインの重複箇所へのコメント追記は実装時に対応可能",
+    "D1-005": "Nice to have: 段階的停止の累積待機時間は許容範囲内の遅延",
+    "D1-007": "Nice to have: スコープ外の明示は現状適切であり指摘なし",
+    "D1-008": "Nice to have: stop.shとstop-server.shの責務分離の文書化は実装時にコメントで対応可能"
+  },
+  "design_doc_updated": true,
+  "summary": "Stage 1レビューの全4件（Must Fix 1件 + Should Fix 3件）を設計方針書に反映。D1-006: セクション4.2にPIDファイルベース停止のプロセスグループ指定（kill -- -$PID）に関する設計判断、SIGTERM/SIGKILLフォールバックの使い分け、nohup起動時の前提条件を明記。D1-001: セクション5.3にCM_PORT環境変数のバリデーションパターン（数値・範囲1-65535チェック）と各スクリプトでの失敗時挙動の設計判断を追加。D1-002: セクション4.1および4.2のREMAINING変数取得パイプラインに || true を統一的に追加し、set -e/pipefail環境下での安全性を確保。D1-004: セクション4.3にPIDファイル削除後のポート残留検知時の状態遷移フローとstop-server.shのポートベース停止による対処可能性を設計根拠として明記。レビュー指摘サマリ（セクション10）と実装チェックリスト（セクション11）を新規追加。"
+}

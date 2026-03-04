@@ -1,0 +1,18 @@
+{
+  "issue_number": 409,
+  "refactor_targets": [
+    "src/lib/schedule-manager.ts",
+    "src/lib/db-migrations.ts",
+    "tests/unit/lib/schedule-manager.test.ts",
+    "tests/unit/lib/db-migrations.test.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（コメント・JSDoc追加）",
+    "SOLID原則準拠確認",
+    "不要なコードの除去",
+    "既存テストパスを維持"
+  ]
+}

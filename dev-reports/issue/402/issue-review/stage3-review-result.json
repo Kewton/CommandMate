@@ -1,0 +1,153 @@
+{
+  "issue_number": 402,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "IR-001",
+      "severity": "should_fix",
+      "category": "未記載の影響範囲",
+      "description": "prompt-response/route.tsがdetectPromptの呼び出し元として影響範囲表に記載されていない。同ファイルのL99でdetectPrompt()を直接呼び出しており、キャッシュ方式(B)（worktreeIdパラメータ追加）を採用した場合、このファイルも修正対象となる。",
+      "suggestion": "影響範囲表にsrc/app/api/worktrees/[id]/prompt-response/route.tsを追加し、変更内容を「detectPrompt呼び出し元（影響確認）」と記載する。",
+      "affected_section": "影響範囲",
+      "evidence": "src/app/api/worktrees/[id]/prompt-response/route.ts L99: promptCheck = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);"
+    },
+    {
+      "id": "IR-002",
+      "severity": "should_fix",
+      "category": "未記載の影響範囲",
+      "description": "response-poller.ts内のdetectPromptWithOptions()ヘルパー関数（L380-386）がdetectPrompt()のラッパーとして機能しており、response-poller.ts内の3箇所（L779, L953, L1088）からdetectPrompt()が間接的に呼び出されている。影響範囲表では「ログ出力の呼び出し箇所修正（必要に応じて）」と記載されているが、呼び出し回数の多さ（1ポーリングサイクルあたり最大3回）がログ量に与えるインパクトの説明が不足している。",
+      "suggestion": "影響範囲表のresponse-poller.ts行の変更内容を「detectPromptWithOptions()経由で最大3回呼び出し（extractResponse内2回 + checkForResponse内1回）。キャッシュ方式(A)であれば変更不要だが、ログ削減効果の主要対象」のように具体化する。",
+      "affected_section": "影響範囲",
+      "evidence": "src/lib/response-poller.ts L779, L953, L1088 の3箇所でdetectPromptWithOptions()が呼び出され、それぞれdetectPrompt()を内部で呼び出している。"
+    },
+    {
+      "id": "IR-003",
+      "severity": "should_fix",
+      "category": "テスト影響",
+      "description": "既存テストファイルとして tests/unit/prompt-detector.test.ts、tests/unit/lib/status-detector.test.ts、tests/unit/lib/auto-yes-manager.test.ts、tests/integration/issue-256-acceptance.test.ts、tests/integration/issue-208-acceptance.test.ts が存在し、detectPromptを直接・間接的にテストしている。キャッシュ追加によりdetectPrompt()の内部状態がテスト間で共有される可能性があり、テスト分離性への影響を考慮する必要がある。実装タスクに「既存テストの影響確認・修正」が記載されていない。",
+      "suggestion": "実装タスクに「既存テストの影響確認（キャッシュ状態のテスト間リセット）」を追加する。具体的には、テストのbeforeEach/afterEachでキャッシュをクリアするヘルパー関数（例: resetDetectPromptCache()）のエクスポートと呼び出しが必要。",
+      "affected_section": "実装タスク",
+      "evidence": "tests/unit/prompt-detector.test.ts, tests/unit/lib/status-detector.test.ts, tests/integration/issue-256-acceptance.test.ts, tests/integration/issue-208-acceptance.test.ts がdetectPromptをimportして使用している。"
+    },
+    {
+      "id": "IR-004",
+      "severity": "should_fix",
+      "category": "パフォーマンス影響",
+      "description": "キャッシュ方式(A)（output文字列ハッシュ）の場合、detectPrompt()が呼ばれるたびにoutput全体のハッシュ計算が発生する。outputは最大10,000行（current-output APIのcaptureSessionOutput第3引数）で、capturePane出力は大きい場合数MB規模になりうる。ハッシュ計算コストがログI/O削減効果を相殺しないか検討が必要。",
+      "suggestion": "キャッシュキーの設計について、ハッシュ対象をoutput全体ではなく、detectPrompt()内で実際にパターンマッチに使用する部分（lastLines: 末尾20行）に限定することを選択肢として明記する。末尾20行のハッシュであれば計算コストは無視できるレベルになる。",
+      "affected_section": "キャッシュ設計方針",
+      "evidence": "src/lib/prompt-detector.ts L173-175: const lines = output.split('\\n'); const lastLines = lines.slice(-20).join('\\n'); -- yes/noパターンは末尾20行のみを検査。multiple_choiceも末尾50行のウィンドウ。"
+    },
+    {
+      "id": "IR-005",
+      "severity": "must_fix",
+      "category": "後方互換性",
+      "description": "detectPrompt()の戻り値（PromptDetectionResult）はキャッシュ有無に関わらず常に同一でなければならないが、この制約が受入条件で「プロンプト検出の動作自体（戻り値・副作用）に影響がないこと」としか記載されていない。特に、キャッシュにより「ログがスキップされた場合でも戻り値は通常通り返す」ことを明示的にテストする必要がある。現在の受入条件では、この区別が曖昧である。",
+      "suggestion": "受入条件に「キャッシュヒット時（ログ抑制時）もdetectPrompt()の戻り値は非キャッシュ時と完全に同一であること」を明示的に追加する。これはログ抑制がdetectPrompt()の振る舞いを一切変えないことを保証する重要な条件である。",
+      "affected_section": "受入条件",
+      "evidence": "detectPrompt()は response-poller.ts, auto-yes-manager.ts, status-detector.ts, current-output/route.ts, prompt-response/route.ts の5モジュールから呼び出されており、戻り値が少しでも変わると全呼び出し元に影響する。"
+    },
+    {
+      "id": "IR-006",
+      "severity": "should_fix",
+      "category": "後方互換性",
+      "description": "CLAUDE.mdのprompt-detector.tsモジュール説明が更新対象として記載されていない。CLAUDE.mdにはモジュールごとの詳細説明があり、prompt-detector.tsにキャッシュ機構を追加した場合、CLAUDE.mdの該当エントリも更新が必要。",
+      "suggestion": "影響範囲表にCLAUDE.mdを追加し、「prompt-detector.tsのモジュール説明にキャッシュ機構の記載を追加」と記載する。",
+      "affected_section": "影響範囲",
+      "evidence": "CLAUDE.mdの「主要機能モジュール」セクションにprompt-detector.tsの詳細説明があり、新機能追加時にはここも更新するのがプロジェクト慣例である。"
+    },
+    {
+      "id": "IR-007",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス影響",
+      "description": "モジュールスコープキャッシュがメモリリークを起こさないための設計考慮が記載されていない。複数ワークツリーを長時間運用する場合、キャッシュエントリが増加し続ける可能性がある（方式(A)でoutputハッシュをキーとする場合は前回値のみ保持で問題ないが、方式(B)でworktreeId単位の場合はworktree削除時のクリーンアップが必要）。",
+      "suggestion": "キャッシュ設計方針セクションに「キャッシュエントリのライフサイクル管理」として、エントリ数の上限またはTTL（例: 最後のアクセスから60秒で自動削除）の方針を追記する。方式(A)で前回値1エントリのみ保持の場合は問題ないことも明記すると設計意図が明確になる。",
+      "affected_section": "キャッシュ設計方針",
+      "evidence": "src/lib/prompt-detector.ts はモジュールスコープ変数を持たない純粋関数的な設計だが、キャッシュ追加により状態を持つモジュールに変わる。類似パターンとしてsrc/lib/auto-yes-manager.tsはglobalThisパターンでhot reload永続化を実現している。"
+    },
+    {
+      "id": "IR-008",
+      "severity": "should_fix",
+      "category": "変更波及範囲",
+      "description": "status-detector.tsのSF-001設計トレードオフ（detectPromptが2回呼ばれる仕様）について、Issueの背景・課題セクションで言及されているが、キャッシュ方式(A)ではstatus-detector.ts内のdetectPrompt()呼び出し（L145）とcurrent-output/route.ts内の呼び出し（L101）が同一outputに対して連続実行されるため、2回目は確実にキャッシュヒットする。この効果を影響範囲表で明記すると、SF-001トレードオフの実質的なコスト（ログ重複）が解消されることが明確になる。",
+      "suggestion": "影響範囲表のstatus-detector.ts行に「SF-001による2重呼び出し分のログがキャッシュにより自然に抑制される（コード変更不要）」と追記する。",
+      "affected_section": "影響範囲",
+      "evidence": "src/app/api/worktrees/[id]/current-output/route.ts L87: detectSessionStatus(output, cliToolId) -> 内部でdetectPrompt()呼び出し。L101: detectPrompt(stripBoxDrawing(cleanOutput), promptOptions) -> 同一リクエスト内で2回目の呼び出し。"
+    },
+    {
+      "id": "IR-009",
+      "severity": "nice_to_have",
+      "category": "テスト影響",
+      "description": "実装タスクに「重複抑制がlogger.debug/logger.infoの両方のログレベルで正しく動作することを確認するテストケースの追加」とあるが、テストでloggerの出力を検証するにはloggerモジュールのモック化が必要。現在のlogger.ts（src/lib/logger.ts）はconsole.log/console.error等を直接呼び出すため、vi.spyOn(console, 'log')等でのキャプチャが必要。この技術的制約を考慮したテスト戦略の記載があるとよい。",
+      "suggestion": "実装タスクのテスト関連項目に、テスト方式の候補（例: vi.spyOnでconsole出力をキャプチャ、またはlogger自体をモック注入可能にする）を補足する。",
+      "affected_section": "実装タスク",
+      "evidence": "src/lib/logger.ts L230-246: loggerは内部でconsole.log/console.error等を直接呼び出している。テストではvi.spyOn(console, 'log')でキャプチャ可能。"
+    },
+    {
+      "id": "IR-010",
+      "severity": "nice_to_have",
+      "category": "変更波及範囲",
+      "description": "detectPrompt()は現在ログ出力箇所が3箇所のみ（L171: debug 'detectPrompt:start'、L185-189: info 'detectPrompt:multipleChoice'、L216: debug 'detectPrompt:complete'）。このうちL171の'detectPrompt:start'ログは全呼び出しで出力され、L216の'detectPrompt:complete'はプロンプト未検出時のみ出力される。ログ量の75%がdetectPromptログであるという課題に対して、最も効果的な抑制箇所はL171とL216の2箇所である。L185のmultipleChoiceログは新しいプロンプト検出時のみ出力されるため抑制対象外とすべき。この優先順位がIssue本文に記載されていない。",
+      "suggestion": "実装タスクまたはキャッシュ設計方針に「抑制対象のログ箇所」として具体的な行番号と優先順位を記載する。特にlogger.info('detectPrompt:multipleChoice')は新規プロンプト検出時のみ出力されるため抑制対象外であることを明記すると実装時の判断が容易になる。",
+      "affected_section": "実装タスク",
+      "evidence": "src/lib/prompt-detector.ts L171, L185-189, L216 の3箇所のlogger呼び出し。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 4,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "relevance": "主要変更対象。logger呼び出しはL171, L185-189, L216の3箇所。キャッシュ追加によりモジュールが状態を持つようになる。"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "relevance": "detectPromptWithOptions()ヘルパー経由でdetectPrompt()を3箇所（L779, L953, L1088）で呼び出し。ポーリングサイクルあたりの主要なログ発生源。"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "relevance": "detectAndRespondToPrompt()（L585）でdetectPrompt()を呼び出し。2秒間隔のポーリングで定期的にログ発生。"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "relevance": "detectSessionStatus()（L145）でdetectPrompt()を呼び出し。SF-001設計によりcurrent-output APIからの呼び出し時に2重実行となる。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "relevance": "detectSessionStatus()経由（L87）+直接（L101）の2箇所でdetectPrompt()が呼び出される。フロントエンド2-5秒毎のポーリング対象。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/prompt-response/route.ts",
+      "relevance": "L99でdetectPrompt()を直接呼び出し。影響範囲表に未記載の呼び出し元。"
+    },
+    {
+      "file": "src/lib/logger.ts",
+      "relevance": "ログレベル制御の基盤。ログ抑制テストの際にモック化が必要。"
+    },
+    {
+      "file": "tests/unit/prompt-detector.test.ts",
+      "relevance": "既存のdetectPromptユニットテスト。キャッシュ追加時にテスト間の状態分離が必要。"
+    },
+    {
+      "file": "tests/unit/lib/status-detector.test.ts",
+      "relevance": "detectSessionStatus()のテスト。内部でdetectPrompt()を呼び出すため、キャッシュの影響を受ける可能性がある。"
+    },
+    {
+      "file": "tests/unit/lib/auto-yes-manager.test.ts",
+      "relevance": "auto-yes-manager.tsのテスト。detectAndRespondToPrompt()内でdetectPrompt()を呼び出すため、キャッシュの影響を受ける可能性がある。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "prompt-detector.tsのモジュール説明の更新が必要。キャッシュ機構の追加を反映すべき。"
+    }
+  ]
+}

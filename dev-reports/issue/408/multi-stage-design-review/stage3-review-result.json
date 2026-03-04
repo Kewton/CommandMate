@@ -1,0 +1,106 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "issue_number": 408,
+  "focus_area": "影響範囲",
+  "findings": [
+    {
+      "id": "IA3-001",
+      "severity": "info",
+      "category": "型変更の波及",
+      "title": "StatusDetectionResult参照ファイルは4箇所のみで影響は限定的",
+      "description": "StatusDetectionResultを参照するファイルは以下の4ファイル: (1) src/lib/status-detector.ts (定義元), (2) src/lib/__tests__/status-detector.test.ts (旧テスト), (3) src/app/api/worktrees/[id]/current-output/route.ts (直接変更対象), (4) tests/integration/current-output-thinking.test.ts (コメント内参照のみ)。worktrees/route.tsとworktrees/[id]/route.tsはdetectSessionStatus()を呼び出すがStatusDetectionResult型を明示的にimportしていない。戻り値のstatusとhasActivePromptのみを参照しており、requiredフィールド追加による影響はゼロ。",
+      "location": "src/lib/status-detector.ts:42",
+      "recommendation": "影響範囲は正確に文書化されている。追加対応不要。"
+    },
+    {
+      "id": "IA3-002",
+      "severity": "info",
+      "category": "呼び出し元への影響",
+      "title": "worktrees/route.ts および worktrees/[id]/route.ts への影響なし",
+      "description": "両ファイルはdetectSessionStatus()の戻り値からstatusResult.status (L59,L60/L69,L70) とstatusResult.hasActivePrompt (L65/L75) のみを参照。promptDetectionフィールドには一切アクセスしない。TypeScript的にもrequiredフィールド追加は戻り値型の拡張であり、既存のプロパティアクセスパターンを破壊しない。型互換性は完全に保たれる。",
+      "location": "src/app/api/worktrees/route.ts:58-65, src/app/api/worktrees/[id]/route.ts:68-75",
+      "recommendation": "設計方針書Section 11.2の後方互換性記載は正確。追加対応不要。"
+    },
+    {
+      "id": "IA3-003",
+      "severity": "should_fix",
+      "category": "テストへの影響",
+      "title": "旧テストファイルのStatusDetectionResultモック構築箇所は存在しない（文書の記載が曖昧）",
+      "description": "設計方針書Section 7.3に「テスト内のモックオブジェクトにpromptDetection追加が必要になる場合がある」と記載されているが、実際のテストファイルを分析した結果、src/lib/__tests__/status-detector.test.tsとtests/unit/lib/status-detector.test.tsの全テストケースはdetectSessionStatus()を直接呼び出しており、StatusDetectionResultオブジェクトを手動構築（モック）していない。つまり、関数の実装がpromptDetectionを返すようになれば、テストは自動的に新しいフィールドを含む戻り値を受け取る。既存のアサーション（status, confidence, reason, hasActivePromptのみを検査）は破壊されない。Section 7.3および12.5の「既存テストのモックオブジェクトにpromptDetectionフィールドを追加（必要に応じて）」は実際には不要である旨を明確化すべき。",
+      "location": "設計方針書 Section 7.3, Section 12.5",
+      "recommendation": "Section 7.3の記述を「既存テストはdetectSessionStatus()を直接呼び出しているため、requiredフィールド追加による影響はない。モックオブジェクトの更新は不要。」に修正する。Section 12.5のチェックリスト項目「既存テストのモックオブジェクトにpromptDetectionフィールドを追加（必要に応じて）」を削除または「確認のみ: 既存テストはモックを使用しておらず更新不要」に書き換える。"
+    },
+    {
+      "id": "IA3-004",
+      "severity": "info",
+      "category": "TypeScript strict mode",
+      "title": "requiredフィールド追加はコンパイルエラーを生じない（テスト側）",
+      "description": "TypeScript strict modeにおいて、StatusDetectionResultにrequired promptDetectionフィールドを追加した場合のコンパイル影響を分析。(1) detectSessionStatus()を呼び出して戻り値を受け取る側: 型推論により自動で新フィールドを含むため影響なし。(2) StatusDetectionResult型のオブジェクトリテラルを手動構築する箇所: grep結果から、テストファイルを含む全ファイルでそのようなパターンは存在しない。(3) status-detector.ts内部の8箇所のreturn文: requiredフィールドのため、追加忘れはコンパイラが検出（設計方針書記載通りのdefense-in-depth機能）。",
+      "location": "src/lib/status-detector.ts:146-268",
+      "recommendation": "追加対応不要。設計方針書DR1-001の判断は正確。"
+    },
+    {
+      "id": "IA3-005",
+      "severity": "info",
+      "category": "integration test",
+      "title": "tests/integration/current-output-thinking.test.tsへの影響は最小（コメント更新のみ）",
+      "description": "integration testファイル(tests/integration/current-output-thinking.test.ts)を分析。StatusDetectionResultはL98のコメント内でのみ言及されており、型として直接importしていない。detectSessionStatus()を直接呼び出し、戻り値のstatus/reason/confidence/hasActivePromptを検査。SF-001関連のコメント（L78-80, L98-100）はIssue #408による変更後に実態と乖離するため更新が必要だが、テストコード自体の修正は不要。",
+      "location": "tests/integration/current-output-thinking.test.ts:78-80, 98-100",
+      "recommendation": "設計方針書Section 7.3に記載済みの「SF-001コメント更新」で対応可能。テストロジックの変更は不要。"
+    },
+    {
+      "id": "IA3-006",
+      "severity": "nice_to_have",
+      "category": "テストへの影響",
+      "title": "integration testのSF-001コメント更新対象行の明記",
+      "description": "設計方針書Section 7.3に「tests/integration/current-output-thinking.test.ts: SF-001コメント更新」とあるが、具体的な更新対象行が明記されていない。実際にSF-001に言及するコメントは以下の3箇所: (1) L78: '// SF-001 (S3): thinking should be false' (2) L98: '// SF-001 (S3): thinking field derivation from StatusDetectionResult' (3) L146: 'const isThinking = result.status === ...' (SF-001コメントなしだがSF-001テストセクション内)。L78とL98のSF-001コメントは「SF-001 resolved (Issue #408)」等に更新するのが適切。",
+      "location": "tests/integration/current-output-thinking.test.ts:78, 98",
+      "recommendation": "実装チェックリスト(Section 12.4)に「tests/integration/current-output-thinking.test.tsのSF-001コメント更新（L78, L98）」を追記する。"
+    },
+    {
+      "id": "IA3-007",
+      "severity": "info",
+      "category": "import削除の安全性",
+      "title": "stripAnsiとcleanOutput変数の削除は安全",
+      "description": "current-output/route.ts内でのstripAnsiの使用箇所を確認。L13でimport、L81でcleanOutput変数定義、L98とL101でのみcleanOutputを参照。Issue #408でL98-L102が削除されるため、cleanOutputの全参照箇所が消滅する。stripAnsiインポートとcleanOutput変数定義の両方を安全に削除可能。設計方針書Section 4.4の分析は正確。",
+      "location": "src/app/api/worktrees/[id]/current-output/route.ts:13, 81, 98, 101",
+      "recommendation": "設計方針書DR1-007の検証手順（grep確認）は十分。追加対応不要。"
+    },
+    {
+      "id": "IA3-008",
+      "severity": "info",
+      "category": "スコープ外モジュールとの境界",
+      "title": "auto-yes-manager.tsのdetectPrompt()使用はスコープ外で正しい",
+      "description": "auto-yes-manager.tsはL585でdetectPrompt()を直接呼び出しているが、detectSessionStatus()を経由せず独自のポーリングコンテキストで使用している。StatusDetectionResult型を参照せず、PromptDetectionResultのみを使用。Issue #408のスコープ外として正しく除外されている。",
+      "location": "src/lib/auto-yes-manager.ts:585",
+      "recommendation": "設計方針書Section 1.2のスコープ除外理由は正確。追加対応不要。"
+    },
+    {
+      "id": "IA3-009",
+      "severity": "should_fix",
+      "category": "設計文書の精度",
+      "title": "Section 4.3のAPIレスポンス構築変更例が不完全 -- promptDetection変数のスコープ変化を明記すべき",
+      "description": "Section 4.3では変更後のAPIレスポンスとして「statusResult.promptDetection.promptData ?? null」を示しているが、L98で定義されていたローカルpromptDetection変数が削除されることで、L133の「promptDetection.promptData」の参照先がstatusResult.promptDetectionに変わる点の全体的な書き換えパターンが不明瞭。具体的には、L133の変更後コードは「statusResult.promptDetection.promptData ?? null」ではなく、isPromptWaitingの条件分岐の左辺（isPromptWaiting ? ... : null）全体で安全性が保証されている点を明示すべき。isPromptWaitingがtrueの場合、statusResult.promptDetection.isPromptもtrue（型の不変条件Section 3.2）であり、promptDataが存在する蓋然性が高い。ただしpromptDataはPromptDetectionResult上でoptional（?:）のため、?? null はdefense-in-depthとして正当。",
+      "location": "設計方針書 Section 4.3",
+      "recommendation": "Section 4.3に以下の補足を追記: 「注: isPromptWaitingがtrueの場合、Section 3.2の型の不変条件によりstatusResult.promptDetection.isPromptも必ずtrue。promptDataはPromptDetectionResult上でoptional型（PromptData | undefined）のため、?? null でnullフォールバックを提供する。」"
+    },
+    {
+      "id": "IA3-010",
+      "severity": "info",
+      "category": "循環依存",
+      "title": "PromptDetectionResult型のimport追加は循環依存を生じない",
+      "description": "設計方針書Section 2.3の依存関係分析を検証。変更後、status-detector.tsはPromptDetectionResult型をprompt-detector.tsからimport（type-only）する。現在の依存: status-detector.ts -> prompt-detector.ts（detectPrompt関数）, status-detector.ts -> cli-patterns.ts。型import追加は同方向のため循環依存リスクなし。prompt-detector.tsはstatus-detector.tsを参照しない。",
+      "location": "src/lib/status-detector.ts:24",
+      "recommendation": "追加対応不要。設計方針書Section 2.3の分析は正確。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 1,
+    "info_count": 7,
+    "overall_quality": "good",
+    "comment": "影響範囲は極めて限定的で、設計方針書の分析は概ね正確。StatusDetectionResult型を直接参照するファイルは4ファイルのみで、うち変更が必要なのは定義元のstatus-detector.tsと直接変更対象のcurrent-output/route.tsの2ファイルのみ。worktrees/route.tsとworktrees/[id]/route.tsはstatusとhasActivePromptのみ参照しており影響ゼロ。全テストファイルがdetectSessionStatus()を直接呼び出すパターンのため、requiredフィールド追加によるテスト破壊は発生しない。設計方針書のSection 7.3「モックオブジェクト更新が必要になる場合がある」は実態と異なり、不要である旨を明確化すべき（IA3-003）。auto-yes-manager.tsのスコープ除外判断も正当。全体として、型変更の波及効果は正確に把握・制御されている。"
+  }
+}

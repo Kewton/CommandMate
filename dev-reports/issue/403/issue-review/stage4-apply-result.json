@@ -1,0 +1,59 @@
+{
+  "stage": 4,
+  "issue_number": 403,
+  "apply_date": "2026-03-03",
+  "applied_findings": [
+    {
+      "severity": "should_fix",
+      "id": "IF-1",
+      "description": "logs.shスクリプトがbuild-and-start.sh --daemon起動時のログ表示に対応していない。ローテーション導入によりローテーション済みログの閲覧手段がlogs.shにない課題が顕在化する",
+      "action": "「影響範囲に関する注記」セクションを新規追加し、scripts/logs.shが現状PM2/systemdのみ対応でありbuild-and-start.sh --daemon起動時のlogs/server.logの表示に未対応であること、ローテーション済みログの閲覧手段がないこと、本Issueのスコープ外であり必要に応じて別Issueで対応する旨を記載"
+    },
+    {
+      "severity": "should_fix",
+      "id": "IF-2",
+      "description": "restart.sh（stop.sh + start.sh経路）ではローテーションが実行されない。build-and-start.sh経由とrestart.sh経由で動作が異なる",
+      "action": "設計方針セクションに「ローテーション実行経路」項目を追加。build-and-start.shを経由する起動（直接実行、setup.sh Step 4、rebuild SKILL）でのみ実行されること、restart.shはPM2を使用する起動パスでありPM2には独自のログ管理があるため影響は限定的である旨を明記"
+    },
+    {
+      "severity": "should_fix",
+      "id": "IF-3",
+      "description": "テスト追加タスクが漠然としており、bashスクリプトのテスト方針が不明確。Vitestではbashスクリプトのテストは実行できない",
+      "action": "実装タスクの「テスト追加」を「手動テスト実施（下記テスト手順参照）」に変更。新規「テスト手順」サブセクションを追加し、基本動作テスト（15MBファイル作成→ローテーション確認）、世代管理テスト（3世代存在時のシフト・最古世代削除確認）、エッジケース3パターン（ファイル未存在/閾値未満/ディレクトリ未存在）を具体的手順として記載。受入条件にも「テスト手順がすべてパスすること」を追加"
+    }
+  ],
+  "skipped_findings": [
+    {
+      "severity": "nice_to_have",
+      "id": "IF-4",
+      "description": "PRODUCTION_CHECKLIST.mdの日本語版（docs/internal/PRODUCTION_CHECKLIST.md）の更新が実装タスクで言及されていない",
+      "reason": "nice_to_have項目のためスキップ。実装時に日本語版も合わせて更新することは自然な対応であり、Issueに明記しなくても対応可能"
+    },
+    {
+      "severity": "nice_to_have",
+      "id": "IF-5",
+      "description": "PRODUCTION_CHECKLIST.mdのMonthly Log cleanup項目へのローテーション機能の影響",
+      "reason": "nice_to_have項目のためスキップ。PRODUCTION_CHECKLIST.md更新タスク実施時に実装者が判断可能"
+    },
+    {
+      "severity": "nice_to_have",
+      "id": "IF-6",
+      "description": "ファイルサイズ取得のプラットフォーム互換性（macOS stat vs Linux stat）",
+      "reason": "nice_to_have項目のためスキップ。実装時の技術的詳細であり、Issueレベルで規定する必要性は低い"
+    },
+    {
+      "severity": "nice_to_have",
+      "id": "IF-7",
+      "description": "CM_LOG_DIR環境変数とbuild-and-start.shのLOG_DIR変数の分離の認識",
+      "reason": "nice_to_have項目のためスキップ。Issueで既にスコープ外と明記されており追加対応不要"
+    },
+    {
+      "severity": "nice_to_have",
+      "id": "IF-8",
+      "description": ".gitignoreのlogs/エントリがローテーションファイルも自動除外することの確認",
+      "reason": "nice_to_have項目のためスキップ。追加対応不要と判断済み"
+    }
+  ],
+  "github_issue_updated": true,
+  "summary": "Stage 3影響範囲レビューのshould_fix 3件をすべてIssue #403に反映。(1) logs.shのbuild-and-start.sh --daemonログ非対応を「影響範囲に関する注記」セクションとして追加、(2) restart.shがローテーション実行経路外であることを設計方針に追記、(3) テストタスクを具体的な手動テスト手順（基本動作・世代管理・エッジケース）に置き換え受入条件にも追加。nice_to_have 5件はスキップ。レビュー履歴にイテレーション2としてStage 3反映内容を記録。"
+}

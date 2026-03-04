@@ -1,0 +1,60 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 411,
+  "review_date": "2026-03-03",
+  "summary": "Stage 3の5件の指摘は全て適切に反映されている。更新後のIssueに対して2件の新規指摘を特定した。should_fix 1件はPromptPanel.test.tsx/MobilePromptSheet.test.tsxがテスト動作確認チェックリストから漏れている点。nice_to_have 1件はMobileContentのmemoがuseFileSearchの新規オブジェクト生成で無効化されている既存問題に関する注記追加の提案。handlePromptRespond/handlePromptDismissのuseCallback状況は確認済みで、依存配列（state.prompt.data含む）は機能的に妥当。全体として、影響範囲の記載は十分に網羅的であり、重大な見落としはない。",
+  "previous_findings_status": [
+    {
+      "finding_id": "F3-001",
+      "status": "resolved",
+      "note": "PromptPanel.tsxが影響範囲テーブルに追加され（memo（プロンプト表示中のポーリング起因再レンダースキップ））、実装タスクにも追記されている。F5-002でデスクトップパスではvisible=false時にアンマウントされる旨も正確に記載された。"
+    },
+    {
+      "finding_id": "F3-002",
+      "status": "resolved",
+      "note": "既存テスト動作確認セクションに4つの具体的テストファイル（WorktreeDetailRefactored.test.tsx、MessageInput.test.tsx、SlashCommandSelector.test.tsx、MarkdownEditor.test.tsx）が明記され、named export形式（export const ComponentName = memo(function ComponentName(...))）の設計方針も記載されている。vi.mockの互換性リスクは十分に説明されている。"
+    },
+    {
+      "finding_id": "F3-003",
+      "status": "resolved",
+      "note": "MobilePromptSheet.tsxが影響範囲テーブルに追加され（memo（モバイル環境のポーリング起因再レンダー防止））、実装タスクにもvisible無関係マウント+モバイルCPU/メモリリソースの観点が記載されている。"
+    },
+    {
+      "finding_id": "F3-004",
+      "status": "resolved",
+      "note": "F5-001でIME関連useCallback注記が修正され、handleCompositionStart/handleCompositionEndがisComposingの値を読み取らず、setIsComposing（useStateセッター、安定参照）のみ呼び出すため依存配列は空配列[]で十分であると明記された。テスト上の懸念も解消。"
+    },
+    {
+      "finding_id": "F3-005",
+      "status": "resolved",
+      "note": "leftPaneコンポーネント抽出方式のリスク注記セクションが「提案する解決策」に追加されている。props数20個超の見込み、fileSearchオブジェクトの参照安定性リスク、useMemo方式との比較が記載されており、MobileContentの29propsパターン参照も含まれている。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "category": "test",
+      "title": "PromptPanel.test.tsxとMobilePromptSheet.test.tsxがテスト動作確認チェックリストに未記載",
+      "description": "Issue本文の「既存テスト動作確認の詳細」セクションには4つのテストファイルが列挙されているが、PromptPanelとMobilePromptSheetのmemo化が実装タスクに含まれているにもかかわらず、tests/unit/components/PromptPanel.test.tsxとtests/unit/components/mobile/MobilePromptSheet.test.tsxがチェックリストに記載されていない。両ファイルはそれぞれimport { PromptPanel } from '@/components/worktree/PromptPanel'とimport { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet'を直接importしてrenderしている。memo化後にexport名の互換性が維持されることの確認対象として含めるべきである。",
+      "location": "実装タスクの「既存テスト動作確認の詳細」セクション（4ファイルのみ記載）",
+      "suggestion": "以下の2行をテスト動作確認チェックリストに追加する：\n- [ ] `tests/unit/components/PromptPanel.test.tsx` - memo化後のコンポーネントが直接renderでテスト可能であることを確認\n- [ ] `tests/unit/components/mobile/MobilePromptSheet.test.tsx` - memo化後のコンポーネントが直接renderでテスト可能であることを確認"
+    },
+    {
+      "id": "F7-002",
+      "severity": "nice_to_have",
+      "category": "scope",
+      "title": "MobileContentのmemoがuseFileSearchの新規オブジェクト生成により無効化されている既存問題の注記",
+      "description": "WorktreeDetailRefactored.tsx L824で定義されたMobileContentは既にmemo()でラップされているが、fileSearch prop（useFileSearchフックの戻り値）がuseFileSearch.ts L243-254で毎レンダー時に新規オブジェクトとして返されるため（useMemoラップなし）、MobileContentのshallow comparisonが常にfalseを返し、memoが事実上無効化されている。これはIssue #411のスコープ外の既存問題だが、leftPaneメモ化の設計判断に影響する。leftPaneのコンポーネント抽出方式を採用する場合も同様にfileSearchの参照安定性問題に直面するため、この既存問題の認知を「leftPaneコンポーネント抽出時のリスク注記」に補足すると実装時の判断がしやすくなる。",
+      "location": "提案する解決策セクション - 3. inline JSX抽出 - leftPaneコンポーネント抽出時のリスク注記",
+      "suggestion": "リスク注記の箇条書きに以下を追加する：「注: MobileContent（L824、既にmemo化済み）も同じfileSearchオブジェクトをpropとして受け取っており、同一の参照安定性問題によりmemoが無効化されている。useFileSearchの戻り値をuseMemoでラップする修正はMobileContentとleftPaneの両方に効果がある」"
+    }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 1,
+    "total": 2
+  }
+}

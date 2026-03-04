@@ -356,8 +356,8 @@ More text here.
   });
 
   describe('validateCmatePath', () => {
-    it('should detect path traversal via logic check', () => {
-      // Test the core validation logic: validateCmatePath compares realpathSync results
+    it('should detect path traversal via logic check', async () => {
+      // Test the core validation logic: validateCmatePath compares realpath results
       // and throws if the file is not within the worktree directory.
       // We test this by creating a temp directory structure.
       const os = require('os');
@@ -374,8 +374,8 @@ More text here.
       const correctFile = path.join(worktreeDir, 'CMATE.md');
       fs.writeFileSync(correctFile, '# Test');
 
-      // Correct path should not throw
-      expect(() => validateCmatePath(correctFile, worktreeDir)).not.toThrow();
+      // Correct path should resolve to true
+      await expect(validateCmatePath(correctFile, worktreeDir)).resolves.toBe(true);
 
       // Create a symlink outside the worktree
       const outsideFile = path.join(outsideDir, 'CMATE.md');
@@ -383,8 +383,8 @@ More text here.
       const symlinkPath = path.join(worktreeDir, 'evil-link.md');
       fs.symlinkSync(outsideFile, symlinkPath);
 
-      // Symlink pointing outside should throw
-      expect(() => validateCmatePath(symlinkPath, worktreeDir)).toThrow('Path traversal detected');
+      // Symlink pointing outside should reject
+      await expect(validateCmatePath(symlinkPath, worktreeDir)).rejects.toThrow('Path traversal detected');
 
       // Cleanup
       fs.rmSync(tmpDir, { recursive: true });

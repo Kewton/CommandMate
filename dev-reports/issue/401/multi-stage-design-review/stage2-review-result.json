@@ -1,0 +1,81 @@
+{
+  "stage": 2,
+  "focus_area": "整合性",
+  "review_date": "2026-03-03",
+  "issue_number": 401,
+  "design_doc_path": "dev-reports/design/issue-401-stop-script-fix-design-policy.md",
+  "summary": "設計方針書と現行コード・Issue要件の整合性を検証した。行番号参照・コードサンプルは全体的に正確であり、Issue #401の受入条件も網羅されている。主な指摘は (1) セクション11の実装チェックリストがStage 1レビュー指摘項目のみで構成されており、セクション4の中核的な修正内容（複数PID対応、段階的停止、CM_PORT統一等）が未記載である点、(2) stop-server.shの修正後コードでPIDS取得パイプラインに || true が付加されておらず、D1-002の統一方針と矛盾する点、(3) stop-server.shのFinal checkセクション（L38-47）の修正コードサンプルが欠落している点の3つである。",
+  "findings": [
+    {
+      "id": "C2-001",
+      "severity": "must_fix",
+      "category": "設計内部整合性",
+      "title": "セクション11の実装チェックリストがセクション4の中核修正を網羅していない",
+      "description": "セクション11（実装チェックリスト）はStage 1レビュー指摘項目（D1-001〜D1-008）のみで構成されている。セクション4で詳述されている以下の中核的な修正タスクがチェックリストに含まれていない: (a) stop.sh: 複数PID対応（kill \"$PID\" → echo \"$PIDS\" | xargs kill）、(b) stop.sh: SIGTERM→SIGKILL残留チェック追加、(c) stop-server.sh: PORT環境変数対応（PORT=3000 → PORT=${CM_PORT:-${MCBD_PORT:-3000}}）、(d) stop-server.sh: PIDバリデーション追加（L18, L28）、(e) stop-server.sh: ポートベース停止のSIGTERM→SIGKILL段階化、(f) build-and-start.sh: CM_PORT環境変数追加、(g) build-and-start.sh: PIDファイルバリデーション、(h) build-and-start.sh: ポートベースalready running判定追加。これらはIssue #401の実装タスクリストにも明記されている中核的な変更であり、チェックリスト漏れは実装漏れのリスクを生む。",
+      "suggestion": "セクション11に「Core Changes」カテゴリを追加し、セクション4の全修正項目をチェックリスト化する。Issue #401の実装タスクリスト10項目と1対1で対応させることを推奨する。例: [ ] stop.sh: kill \"$PID\" を echo \"$PIDS\" | xargs kill 方式に変更し複数PIDに対応する、[ ] stop-server.sh L11: PORT=3000 を PORT=${CM_PORT:-${MCBD_PORT:-3000}} に変更する、等。"
+    },
+    {
+      "id": "C2-002",
+      "severity": "should_fix",
+      "category": "設計内部整合性",
+      "title": "セクション4.2のPIDS取得パイプラインに || true が欠落しD1-002統一方針と矛盾",
+      "description": "セクション4.1（stop.sh）の修正後コードでは PIDS=$(lsof ... || true) と || true が付加されている。一方、セクション4.2（stop-server.sh）の修正後コードでは PIDS=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u) と || true が付加されていない。D1-002の設計判断文書には「PIDSとREMAININGで || true の有無が非対称にならないよう統一する」と明記されているが、スクリプト間（stop.sh vs stop-server.sh）の統一についても同じ原則が適用されるべきである。stop-server.shには set -e がないため実用上の影響は小さいが、設計書内の一貫性の観点から修正が望ましい。",
+      "suggestion": "セクション4.2の修正後コードのPIDS行に || true を追加する: PIDS=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)。これにより3スクリプト全てで || true パターンが統一され、D1-002の方針と完全に整合する。"
+    },
+    {
+      "id": "C2-003",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "stop-server.shのFinal checkセクション（L38-47）の修正後コードサンプルが欠落",
+      "description": "設計方針書セクション4.2はstop-server.shの修正対象として (1) ポートベース停止（L18-24）、(2) PIDファイルベース停止（L27-35）のコードサンプルを詳述しているが、Final checkセクション（L38-47）のコードサンプルが欠落している。現行コードL42は REMAINING=$(lsof -ti:$PORT 2>/dev/null) でPIDバリデーションがない。セクション4.2の表ではL42に「PIDバリデーション追加」と記載があるが、具体的な修正後コードが示されていない。また、L45の echo \"$REMAINING\" | xargs kill -9 2>/dev/null もSIGTERM優先の方針と整合しない（Final checkはSIGKILL最終手段のため現状維持が妥当だが、その設計判断が明記されていない）。",
+      "suggestion": "セクション4.2にFinal checkセクションの修正後コードサンプルを追加する。以下の2点を明記すること: (1) L42のPIDバリデーション追加: REMAINING=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)、(2) L45のkill -9は最終手段として維持する旨の設計判断コメント（「Final checkはSIGTERM→SIGKILL段階を既に経た後の最終確認であり、SIGKILL即座使用が適切」等）。"
+    },
+    {
+      "id": "C2-004",
+      "severity": "should_fix",
+      "category": "コード整合性",
+      "title": "stop-server.shセクション4.2の修正後コードでsleep 1とFinal check間の関係が不明確",
+      "description": "現行のstop-server.shにはL39 sleep 1 の後にFinal check（L42-47）が配置されている。セクション4.2の修正後コードでは、ポートベース停止にsleep 2を追加しSIGKILLフォールバックを導入しているが、その後の既存Final checkセクション（L38-47）との関係・統合方針が記載されていない。修正後はポートベース停止自体にSIGKILL段階を含むため、Final checkの役割が変化する（PIDファイルベース停止後の追加確認に限定される等）。この設計判断が明示されていないと、実装者がFinal checkの必要性やsleep値について迷う可能性がある。",
+      "suggestion": "セクション4.2に「修正後のstop-server.sh全体フロー」を示す擬似コードまたはフロー図を追加し、Step 1（ポートベース停止 + SIGTERM/SIGKILL）→ Step 2（PIDファイルベース停止 + SIGTERM/SIGKILL）→ Step 3（Final check）の各ステップの役割と待機時間を明確にする。"
+    },
+    {
+      "id": "C2-005",
+      "severity": "nice_to_have",
+      "category": "Issue要件整合性",
+      "title": "rebuildスキルのstop.sh呼び出しパターンに関する影響分析が設計書に不足",
+      "description": "Issue #401の影響範囲表で.claude/skills/rebuild/SKILL.mdは「修正なし（テスト対象）」として記載され、&&チェーンへの影響が言及されている。rebuild SKILLは cd {TARGET_DIR} && ./scripts/stop.sh && ./scripts/build-and-start.sh --daemon を実行する。設計方針書セクション6.2はrestart.shとの互換性のみ記載し、rebuildスキルとの互換性を記載していない。stop.shに追加されるsleep 2（SIGTERM待機）+ sleep 1（SIGKILL後待機）により、rebuildスキルの実行時間が最大3秒延長される点は互換性テーブルに含めるべきである。",
+      "suggestion": "セクション6.2の互換性テーブルにrebuild SKILLの行を追加する: | rebuild SKILL | stop.sh && build-and-start.sh --daemon の正常チェーン | 維持（stop.shの実行時間が最大3秒増加するが&&チェーンの動作は変更なし） |"
+    },
+    {
+      "id": "C2-006",
+      "severity": "nice_to_have",
+      "category": "コード整合性",
+      "title": "設計書のアーキテクチャ図でsetup.shの呼び出し先が不完全",
+      "description": "セクション2のスクリプト間依存関係図では setup.sh が build-and-start.sh --daemon を呼び出すことのみ示されている。しかし実際のsetup.sh（L87-118）では preflight-check.sh、npm install、setup-env.sh の後に build-and-start.sh --daemon を呼び出す。本Issue修正に直接影響するのは build-and-start.sh のみであるため、図の正確性としては問題ないが、依存関係の全体像として不完全である。",
+      "suggestion": "Issue修正のスコープに直接関連する依存関係のみ図に含める方針であることをコメントとして明記する。現状の図は修正対象の依存関係に限定しているため大きな問題ではない。"
+    },
+    {
+      "id": "C2-007",
+      "severity": "nice_to_have",
+      "category": "設計内部整合性",
+      "title": "セクション3.2の安全なPIDパイプラインパターンと各セクション4のコードサンプル間でパイプラインの形式が微妙に異なる",
+      "description": "セクション3.2では共通パターンとして PIDS=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u) を提示している（|| true なし）。セクション4.1では || true 付きで記載。セクション4.2ではPIDS行は || true なし、REMAINING行は || true あり。共通パターンとして提示しているものと個別実装が異なるため、読者の混乱を招く可能性がある。",
+      "suggestion": "セクション3.2の共通パターンに「set -e環境下では || true を付加する」旨の注記を追加する。または、共通パターンに || true を含めた上で「set -eがないスクリプトでも安全のため統一的に付加する」と記載する。"
+    },
+    {
+      "id": "C2-008",
+      "severity": "nice_to_have",
+      "category": "Issue要件整合性",
+      "title": "daemon.ts L133-161参照は正確だがwaitForExitの10秒タイムアウトとの対比が未記載",
+      "description": "設計方針書セクション3.3はdaemon.ts L133-161を参考にした段階的停止パターンを記載している。daemon.tsのstop()メソッドはwaitForExit(pid, 10000)で10秒間のポーリング待機を行うが、シェルスクリプト側はsleep 2の固定待機を採用している。この待機時間の差異に関する設計判断（シェルスクリプトでは10秒ポーリングは不要で2秒固定で十分とする理由等）がセクション8の設計判断テーブルに含まれていない。",
+      "suggestion": "セクション8の設計判断テーブルに以下を追加: | SIGTERM後の待機時間を2秒固定 | シェルスクリプトの単純性維持、Next.jsプロセスの通常シャットダウンは2秒以内に完了 | 10秒ポーリング方式より残留リスクが若干高い |"
+    }
+  ],
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 4,
+    "total": 8
+  },
+  "overall_assessment": "要改善"
+}

@@ -1,0 +1,23 @@
+{
+  "issue_number": 410,
+  "feature_summary": "xterm.js・highlight.jsのdynamic import化でバンドルサイズ削減とSSR互換性確保",
+  "acceptance_criteria": [
+    "/worktrees/[id] ページのFirst Load JSがMarkdownEditor動的import化により削減されること（npm run buildの出力で確認）",
+    "/worktrees/[id]/terminal ページでSSRエラーが発生しないこと",
+    "ターミナル表示時に遅延なくxterm.jsがロードされること（ローディングインジケーター後に表示）",
+    "markdownプレビュー表示時にシンタックスハイライトが正常動作すること",
+    "全ユニットテストがパスすること（npm run test:unit）"
+  ],
+  "test_scenarios": [
+    "シナリオ1: src/app/worktrees/[id]/terminal/page.tsx でTerminalComponentがnext/dynamicでimportされていること（ssr: false、.then()パターン）",
+    "シナリオ2: src/components/worktree/WorktreeDetailRefactored.tsx でMarkdownEditorがnext/dynamicでimportされていること（ssr: false、.then()パターン）",
+    "シナリオ3: 各ファイルにローディングインジケーターが実装されていること（Loader2使用、テーマ適切）",
+    "シナリオ4: TerminalComponentの静的importが削除されていること",
+    "シナリオ5: MarkdownEditorの静的importが削除されていること",
+    "シナリオ6: TypeScriptエラーが0件であること",
+    "シナリオ7: ESLintエラーが0件であること",
+    "シナリオ8: 全ユニットテストがパスすること（4411件以上）",
+    "シナリオ9: npm run buildが成功すること"
+  ],
+  "tdd_result_path": "dev-reports/issue/410/pm-auto-dev/iteration-1/tdd-result.json"
+}

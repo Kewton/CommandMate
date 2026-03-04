@@ -1,0 +1,112 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 411,
+  "review_date": "2026-03-03",
+  "summary": "1回目の通常レビュー（Stage 1）および影響範囲レビュー（Stage 3）の指摘事項は概ね適切に反映されている。Must Fix 2件（F1-001, F1-002）は解決済み、Should Fix 4件（F1-003〜F1-006）も解決済み。ただし、反映内容に新たな技術的不正確さが1件（IME useCallback依存配列の誤記）と、PromptPanelのmemo化根拠の記述に不正確な点が1件確認された。全体的な記述の一貫性と品質は大幅に向上しており、Issueとしての完成度は高い。Must Fix 1件、Should Fix 2件、Nice to Have 1件。",
+  "previous_findings_status": [
+    {
+      "finding_id": "F1-001",
+      "status": "resolved",
+      "note": "受入条件が具体的なシナリオ（FileViewer isOpen=false時、MessageInput props不変時）と「手動確認」の明記に改善された。ベースライン定義の曖昧さが解消されている。"
+    },
+    {
+      "finding_id": "F1-002",
+      "status": "resolved",
+      "note": "MessageInputのuseCallbackハンドラが高効果/中効果/低効果に分類され、各ハンドラのstate依存と安定性が明記された。handleCompositionEndのsetTimeoutパターンの注意点も追記されている。ただし、IME関連useCallback注記に新たな技術的不正確さあり（後述F5-001）。"
+    },
+    {
+      "finding_id": "F1-003",
+      "status": "resolved",
+      "note": "F4セクションにMarkdownEditorの条件付き描画による効果限定の注記が追加され、優先度が他タスクより低い旨が明記された。"
+    },
+    {
+      "finding_id": "F1-004",
+      "status": "resolved",
+      "note": "useMemo方式 vs コンポーネント抽出方式の設計方針が明確化された。rightPaneはuseMemo推奨、leftPaneはコンポーネント抽出推奨とし、leftPaneのprops drilling量リスクやfileSearchオブジェクト参照安定性リスクも注記されている。"
+    },
+    {
+      "finding_id": "F1-005",
+      "status": "resolved",
+      "note": "SlashCommandSelector/InterruptButtonが影響範囲テーブルと実装タスクに追加された。"
+    },
+    {
+      "finding_id": "F1-006",
+      "status": "resolved",
+      "note": "FileViewerの記述が「デフォルトのshallow comparison。onCloseは呼び出し元でuseCallback済みのため安定。カスタム比較関数は不要」に修正された。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "must_fix",
+      "category": "correctness",
+      "title": "IME関連useCallback注記のisComposing依存配列に関する記述が技術的に不正確",
+      "description": "Issue本文の「IME関連useCallback注記」に「ただし`isComposing`をstateとしてuseCallbackの依存配列に含める必要がある（setIsComposing呼び出しのため）」と記載されている。しかし、Reactの`useState`が返すセッター関数（`setIsComposing`）は安定した参照であり、依存配列に含める必要がない。実際のソースコード（MessageInput.tsx L95-120）を確認すると、`handleCompositionStart`と`handleCompositionEnd`は`setIsComposing`を呼び出すだけで、`isComposing`の値を読み取っていない。したがって`isComposing`を依存配列に含める必要はない。この誤った記述に従って実装すると、isComposingが変化するたびにuseCallbackが再生成され、これらのハンドラの安定性が不必要に低下する。",
+      "location": "実装タスクセクション - IME関連useCallback注記",
+      "suggestion": "「ただし`isComposing`をstateとしてuseCallbackの依存配列に含める必要がある（setIsComposing呼び出しのため）」を削除するか、「handleCompositionStart/handleCompositionEndの依存配列は空配列`[]`で十分である（setIsComposingはuseStateのセッターであり安定参照、compositionTimeoutRef/justFinishedComposingRefはref経由のため依存不要）」に修正する。"
+    },
+    {
+      "id": "F5-002",
+      "severity": "should_fix",
+      "category": "correctness",
+      "title": "PromptPanelのmemo化根拠「visible=false時のearly returnあり」がデスクトップ描画パスでは不正確",
+      "description": "実装タスクに「PromptPanel: memo() ラップ（visible=false時のearly returnあり、FileViewerのisOpen=falseスキップと同パターン。ポーリング起因の再レンダー一貫防止）」と記載されている。しかし、WorktreeDetailRefactored.tsxのデスクトップ描画パス（L2032）では`{state.prompt.visible && !autoYesEnabled && (<PromptPanel .../>)}`と条件付きレンダーされており、visible=falseの場合PromptPanelはそもそもマウントされない。よってmemoの「visible=false時スキップ」効果はデスクトップパスでは発生しない。一方、MobilePromptSheet（L2281）は`{!autoYesEnabled && (<MobilePromptSheet visible={state.prompt.visible} .../>)}`であり、visibleに関係なくマウントされるため、memo化によるvisible=false時のスキップ効果は正しい。PromptPanelのmemo化の実際の効果は「visible=true（プロンプト表示中）の間に親のポーリング更新で不要な再レンダーを防ぐ」であり、FileViewerのisOpen=falseパターンとは異なる。",
+      "location": "実装タスクセクション - PromptPanel",
+      "suggestion": "PromptPanelの実装タスク説明を「PromptPanel: memo() ラップ（デスクトップパスでは条件付きレンダー（state.prompt.visible && ...）のためvisible=false時はアンマウント。memo化の効果はプロンプト表示中のポーリング起因再レンダー時にprops不変であればスキップする点にある）」に修正する。FileViewerのisOpen=falseパターンとの類似性の記述は削除または修正すること。"
+    },
+    {
+      "id": "F5-003",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "handlePromptRespond/handlePromptDismissのuseCallback状況が未確認で、PromptPanel/MobilePromptSheetのmemo化効果が保証されない",
+      "description": "PromptPanelとMobilePromptSheetをmemo化する場合、propsとして渡されるonRespond（handlePromptRespond）とonDismiss（handlePromptDismiss）が安定参照である必要がある。Issue本文ではこれらのハンドラのuseCallback状況について言及がなく、もし安定していなければmemo化の効果が無効化される。FileViewerのonClose（handleFileViewerClose）については「呼び出し元でuseCallback済み」と明記されているが、PromptPanel/MobilePromptSheetの同等の確認が記載されていない。",
+      "location": "実装タスクセクション - PromptPanel / MobilePromptSheet",
+      "suggestion": "PromptPanel/MobilePromptSheetの実装タスクに「onRespond（handlePromptRespond）/onDismiss（handlePromptDismiss）が呼び出し元でuseCallbackで安定化されていることを確認する。未安定の場合はuseCallback化するか、カスタム比較関数を検討する」旨の注記を追加する。"
+    },
+    {
+      "id": "F5-004",
+      "severity": "nice_to_have",
+      "category": "clarity",
+      "title": "rightPaneのprops数が「5個程度」と記載されているが実際は6個",
+      "description": "inline JSX抽出の設計方針で「rightPaneはprops数が少ない（5個程度）のでuseMemo方式」と記載されているが、実際のrightPane（L2000-2008）のTerminalDisplayへの引数はoutput/isActive/isThinking/autoScroll/onScrollChange/disableAutoFollowの6個である。大きな差ではないが、正確性のために修正するのが望ましい。",
+      "location": "提案する解決策セクション - 3. inline JSX抽出 - 推奨",
+      "suggestion": "「5個程度」を「6個」に修正する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 2,
+    "nice_to_have": 1,
+    "total": 4
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MessageInput.tsx",
+      "lines": "95-120",
+      "relevance": "handleCompositionStart/handleCompositionEndの実装。setIsComposingのみ呼び出し、isComposing値の読み取りなし。F5-001の根拠。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "2032-2044",
+      "relevance": "デスクトップパスのPromptPanel条件付きレンダー。state.prompt.visible && !autoYesEnabled条件でPromptPanel自体がアンマウントされる。F5-002の根拠。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "2281-2289",
+      "relevance": "モバイルパスのMobilePromptSheet。!autoYesEnabled条件のみでマウントされ、visibleはpropとして渡される。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "2000-2008",
+      "relevance": "rightPaneのTerminalDisplay描画。6個のprops（output/isActive/isThinking/autoScroll/onScrollChange/disableAutoFollow）。F5-004の根拠。"
+    },
+    {
+      "file": "src/components/worktree/PromptPanel.tsx",
+      "lines": "386-394",
+      "relevance": "PromptPanelのshouldRender/animationClass使用とearly return。usePromptAnimationフックで制御。"
+    }
+  ],
+  "doc_references": [],
+  "previous_review_reference": "dev-reports/issue/411/issue-review/stage1-review-result.json"
+}

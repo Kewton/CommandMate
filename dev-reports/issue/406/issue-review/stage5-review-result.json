@@ -1,0 +1,112 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 406,
+  "review_date": "2026-03-04",
+  "focus_area": "通常",
+  "iteration": 2,
+  "review_items": [
+    {
+      "id": "R5-001",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "schedule-manager.test.ts の fs モック変更方針が二択のまま未確定",
+      "description": "実装タスクに「schedule-manager.test.ts の vi.doMock('fs', ...) を fs/promises 対応に変更」と記載されているが、Stage 3 レビュー (R3-002) で指摘された通り、対応方針には (1) vi.doMock('fs/promises', ...) に変更する方法と (2) cmate-parser モジュール自体をモック化する方法の2つがある。現在のタスク記載は「fs/promises 対応に変更」とだけ記載されており、方針 (1) を採用する意図と読めるが、明示的ではない。テストファイル (schedule-manager.test.ts L277-281) では vi.doMock('fs', ...) で readFileSync と realpathSync に加え statSync もモックしており、statSync は schedule-manager.ts 内の getCmateMtime() (L163) で引き続き同期的に使用される。方針 (1) を採用する場合、fs モジュールの statSync モックは維持しつつ fs/promises モジュールの readFile/realpath モックを追加する必要がある（2つのモジュールを同時にモック化）。この複雑さを踏まえた具体的な方針の明記があると実装者の迷いを減らせる。",
+      "suggestion": "実装タスクを以下のいずれかに具体化する: (A) 「vi.doMock('fs', ...) の statSync モックは維持し、新たに vi.doMock('fs/promises', ...) で readFile/realpath をモック化する」、または (B) 「cmate-parser モジュール自体を vi.mock() でモック化し、readCmateFile() の戻り値を直接制御する（fs モックへの依存を排除）」。方針 (B) の方がテストの保守性が高く推奨される。",
+      "location": "## 実装タスク - schedule-manager.test.ts 関連タスク"
+    },
+    {
+      "id": "R5-002",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "readCmateFile() の ENOENT エラー処理の受入テストが受入条件に含まれていない",
+      "description": "Stage 3 レビュー (R3-004) で指摘された通り、fs.promises.realpath() が ENOENT エラー時に realpathSync() と同じ NodeJS.ErrnoException (code: 'ENOENT') を返すことの確認が重要である。readCmateFile() (cmate-parser.ts L314-328) の catch ブロックは ENOENT コードでファイル不存在を判定し null を返す。実装タスクの realpathSync 置換タスクに「ENOENT エラー時の動作確認含む」と記載されているが、受入条件にはこの検証が含まれていない。受入条件に「readCmateFile() がファイル不存在時に null を返す動作が維持されること」を追加すると、リグレッションを防止できる。",
+      "suggestion": "受入条件に以下を追加する: 「readCmateFile() がCMATE.md不存在時に null を返す動作が async 化後も維持されること（テストで検証）」。",
+      "location": "## 受入条件"
+    },
+    {
+      "id": "R5-003",
+      "severity": "nice_to_have",
+      "category": "clarity",
+      "title": "initScheduleManager() 内の syncSchedules() 呼び出しの fire-and-forget 設計判断の根拠が未記載",
+      "description": "実装タスクに「initScheduleManager() 内の syncSchedules() 呼び出しを void syncSchedules() に変更（fire-and-forget）」と記載されているが、この設計判断の根拠（なぜ await しないのか）が記載されていない。現在の server.ts (L260) では initScheduleManager() は同期関数として呼ばれており、await されていない。fire-and-forget にすることで initScheduleManager() の同期 API を維持でき、server.ts への変更波及を回避できる。この意図を明示すると、レビュアーや実装者の理解が深まる。",
+      "suggestion": "実装タスクの該当項目に補足を追加する: 「void syncSchedules() に変更（fire-and-forget）-- initScheduleManager() の同期 API を維持し、server.ts への変更波及を回避するため」。",
+      "location": "## 実装タスク - initScheduleManager 関連タスク"
+    },
+    {
+      "id": "R5-004",
+      "severity": "nice_to_have",
+      "category": "clarity",
+      "title": "validateCmatePath() テスト更新の具体的なコード変更パターンが未記載",
+      "description": "実装タスクに「ユニットテスト更新（validateCmatePath テストを async/await 対応に変更、.toThrow() を .rejects.toThrow() に変更）」と記載されている。これは Stage 1 (R1-006) の指摘に対応しており適切だが、validateCmatePath() は async 化後に throw ではなく rejected Promise を返すため、テストの expect パターンが以下のように変わる点を明確にするとよい: (1) expect(() => validateCmatePath(...)).not.toThrow() → expect(validateCmatePath(...)).resolves.toBe(true)、(2) expect(() => validateCmatePath(...)).toThrow() → expect(validateCmatePath(...)).rejects.toThrow()。テストファイル (cmate-parser.test.ts L378, L387) では実際のファイルシステムに対する検証を行っているため、async 化後もファイルシステムの操作（mkdirSync, writeFileSync, symlinkSync 等）はそのまま維持できる。",
+      "suggestion": "実装タスクの該当テスト更新項目に、正常系パターン（.not.toThrow() → .resolves.toBe(true)）も含めて明記する。",
+      "location": "## 実装タスク - テスト更新タスク"
+    }
+  ],
+  "previous_review_verification": {
+    "stage1_items": {
+      "R1-001": { "status": "addressed", "note": "readCmateFile() async化とreadFileSync置換が実装タスクに追加済み" },
+      "R1-002": { "status": "addressed", "note": "syncSchedules() async化、initScheduleManager fire-and-forget、setInterval catch パターンが実装タスクに追加済み" },
+      "R1-003": { "status": "addressed", "note": "受入条件に readCmateFile() を含めた表現に拡充済み" },
+      "R1-004": { "status": "addressed", "note": "背景セクションに getCmateMtime() statSync のスコープ外理由を明記済み" },
+      "R1-005": { "status": "addressed", "note": "行番号を現在のコードに合わせて更新済み" },
+      "R1-006": { "status": "addressed", "note": "テスト更新タスクに .toThrow() → .rejects.toThrow() パターンを明記済み" },
+      "R1-007": { "status": "addressed", "note": "fire-and-forget 設計を明記し、server.ts への波及なしを確定済み" },
+      "R1-008": { "status": "not_addressed", "note": "nice_to_have のため未対応は許容。定量的パフォーマンス見積もりは追記されていない" }
+    },
+    "stage3_items": {
+      "R3-001": { "status": "addressed", "note": "schedule-manager-cleanup.test.ts の mockReturnValue → mockResolvedValue 変更が実装タスクに追加済み" },
+      "R3-002": { "status": "partially_addressed", "note": "schedule-manager.test.ts の fs/promises 対応は記載されたが、具体的な方針（fs/promises モック vs cmate-parser モック）が未確定（R5-001 で再指摘）" },
+      "R3-003": { "status": "addressed", "note": "validateCmatePath() のexport維持と Promise<boolean> 戻り値型を明記済み" },
+      "R3-004": { "status": "partially_addressed", "note": "ENOENT 動作確認はタスクに含まれるが受入条件に未反映（R5-002 で再指摘）" },
+      "R3-005": { "status": "addressed", "note": "CLAUDE.md が影響範囲テーブルに追加済み" },
+      "R3-006": { "status": "addressed", "note": "setInterval の .catch() パターンを実装タスクに明記済み" },
+      "R3-007": { "status": "addressed", "note": "影響範囲テーブルに import文変更を記載済み" },
+      "R3-008": { "status": "not_addressed", "note": "nice_to_have のため未対応は許容。cmate-validator.ts 影響なし注記は追記されていない" }
+    }
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 2,
+    "nice_to_have_count": 2,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cmate-parser.ts",
+      "lines": "L15, L80-98, L311-329",
+      "relevance": "変更対象: import文 (L15)、validateCmatePath() (L80-98) の realpathSync、readCmateFile() (L311-329) の readFileSync と ENOENT エラーハンドリング"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "lines": "L478-591, L603-626",
+      "relevance": "syncSchedules() (L478) の async 化、initScheduleManager() (L617) の fire-and-forget、setInterval (L620-622) の catch パターン"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager.test.ts",
+      "lines": "L273-338",
+      "relevance": "mtime cache テスト: vi.doMock('fs', ...) (L277-281) の fs/promises 対応方針が未確定"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager-cleanup.test.ts",
+      "lines": "L79",
+      "relevance": "readCmateFile モック: mockReturnValue(null) → mockResolvedValue(null) 変更（実装タスク記載済み）"
+    },
+    {
+      "file": "tests/unit/lib/cmate-parser.test.ts",
+      "lines": "L358-391",
+      "relevance": "validateCmatePath テスト: async/await 対応と .rejects.toThrow() + .resolves.toBe(true) パターン"
+    },
+    {
+      "file": "server.ts",
+      "lines": "L260",
+      "relevance": "initScheduleManager() 呼び出し元 - fire-and-forget 設計により変更不要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "cmate-parser.ts と schedule-manager.ts のモジュール説明更新（影響範囲テーブルに記載済み）"
+    }
+  ]
+}

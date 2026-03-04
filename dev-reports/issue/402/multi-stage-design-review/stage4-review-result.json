@@ -1,0 +1,154 @@
+{
+  "issue_number": 402,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "status": "approved",
+  "score": 5,
+  "findings": [
+    {
+      "id": "S4-001",
+      "severity": "nice_to_have",
+      "category": "OWASP A09: Security Logging and Monitoring Failures",
+      "title": "ログ抑制による監視能力への影響は設計上許容範囲内",
+      "description": "OWASP A09 はセキュリティイベントの適切なログ記録を求めるが、detectPrompt() のログ出力は同一出力に対するプロンプト検出ステータス（debug レベル）であり、セキュリティイベントではない。認証失敗、アクセス制御違反、入力バリデーションエラー等のセキュリティログは middleware.ts、auth.ts、ip-restriction.ts で独立して記録されており、本変更の影響範囲外である。logger.ts の sanitize() 関数はログ抑制の有無に関わらず常にログ出力時に適用されるため、ログが出力される際のサニタイズ処理には影響しない。新規 output が到着した際は常にログが出力されるため、プロンプト検出の初回記録は保持される。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts",
+        "src/lib/logger.ts"
+      ],
+      "recommendation": "現状の設計で問題なし。セキュリティ関連ログ（認証、アクセス制御）は別モジュールで管理されており、本変更の影響を受けない。"
+    },
+    {
+      "id": "S4-002",
+      "severity": "nice_to_have",
+      "category": "情報漏洩",
+      "title": "lastOutputTail にキャッシュされる末尾50行のメモリ内保持は情報漏洩リスクなし",
+      "description": "lastOutputTail はモジュールスコープの変数としてプロセスメモリ内にのみ保持される。外部に公開される経路がないことを確認した。(1) APIレスポンスに lastOutputTail は含まれない（detectPrompt() の戻り値に影響しない設計制約 D4-001/D4-002）。(2) エラーメッセージや例外に lastOutputTail の値は含まれない（resetDetectPromptCache() は null を代入するのみ）。(3) logger.ts のサーバー側ログ出力は console.error/warn/log を使用するが、lastOutputTail 自体はログに出力されない（ログに含まれるのは outputLength 等のメタデータのみ）。(4) ブラウザ開発者ツール経由のアクセスは不可能（isServer() ガードにより、lastOutputTail が存在するサーバーサイドのログはクライアントに送信されない）。output にはユーザーの CLI セッション出力が含まれるが、これは既にプロセスメモリ内に存在する情報であり、末尾50行のキャッシュが新たなリスクを追加することはない。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "recommendation": "追加対応不要。設計方針書セクション6の分析通り適切。"
+    },
+    {
+      "id": "S4-003",
+      "severity": "nice_to_have",
+      "category": "OWASP A03: Injection",
+      "title": "ログインジェクションリスクなし -- キャッシュ比較は文字列の等値判定のみ",
+      "description": "lastOutputTail に保存される文字列は output パラメータの末尾50行の join 結果であり、外部入力に由来する（tmux capturePane の出力）。しかし、この文字列はログ出力の判定にのみ使用され（tailForDedup === lastOutputTail の等値比較）、ログメッセージ自体に挿入されることはない。ログに出力されるデータは { outputLength: output.length } や { isPrompt: true, question: ... } 等の構造化データであり、lastOutputTail の値がログ文字列に直接含まれることはない。また、logger.ts の sanitize() 関数はログ出力時に自動適用され、Bearer トークン、パスワード、API キー等の機密パターンをマスクする。仮にキャッシュ比較ロジックが将来変更されてログに含まれるようになったとしても、sanitize() がバックストップとして機能する。JSON.stringify() によるフォーマット出力のため、改行文字やエスケープシーケンスによるログインジェクションも防止される。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts",
+        "src/lib/logger.ts"
+      ],
+      "recommendation": "追加対応不要。既存の logger.ts のサニタイズ機能が多層防御として機能している。"
+    },
+    {
+      "id": "S4-004",
+      "severity": "nice_to_have",
+      "category": "DoS 防御",
+      "title": "50行キャッシュ上限によるメモリ DoS 防御は十分",
+      "description": "キャッシュエントリは常に1つ（前回値のみ、設計制約 D4-003）であり、保持される文字列は末尾50行に制限されている。設計方針書の見積もりでは 50行 x 最大200文字 = 10KB 程度であるが、実際には tmux pane の行長は端末幅（通常80-200カラム）に依存するため、最大でも 50 x 200 = 10,000 バイト程度に収まる。単一エントリの文字列参照であるため、Map/Set のようなコレクション型に比べてメモリリークの経路が存在しない（lastOutputTail = tailForDedup の代入で前の参照は即座に GC 対象となる）。output パラメータ自体は tmux capturePane の出力であり、MAX_BUFFER_SIZE = 10MB（tmux.ts）で上限が設定されているため、入力サイズの上限も間接的に保証されている。文字列比較のコスト（O(n), n = 10KB 程度）は JavaScript エンジンの最適化により数マイクロ秒で完了し、CPU DoS の懸念もない。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "recommendation": "追加対応不要。単一エントリ + 50行制限の組み合わせでメモリ安全性は十分に確保されている。"
+    },
+    {
+      "id": "S4-005",
+      "severity": "nice_to_have",
+      "category": "アクセス制御",
+      "title": "@internal export resetDetectPromptCache() のスコープは既存パターンに準拠",
+      "description": "resetDetectPromptCache() は @internal JSDoc アノテーション付きでエクスポートされ、テスト専用であることが明記されている（設計制約 D4-004）。このパターンはプロジェクト内で広く採用されており、以下の先例がある: (1) version-checker.ts の resetCacheForTesting()、(2) claude-session.ts の clearCachedClaudePath() / HealthCheckResult、(3) auto-yes-manager.ts の clearAllAutoYesStates() / resetAutoYesForTesting() / checkStopCondition() 等。TypeScript の @internal タグはコンパイラレベルの強制力はないが、プロジェクト規約としてテスト以外での呼び出しを禁止する運用が確立されている。resetDetectPromptCache() は lastOutputTail = null を設定するのみであり、セキュリティ上の副作用（認証バイパス、権限昇格等）は一切ない。仮に本番コードから誤って呼び出されたとしても、最悪ケースでは次回の detectPrompt() 呼び出しでログが1回出力されるだけである（変更前の動作と同等）。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "recommendation": "追加対応不要。@internal アノテーションと関数名の接頭辞で十分に意図が伝わる。ESLint の no-restricted-imports ルール等による強制は、このスコープでは YAGNI に該当する。"
+    },
+    {
+      "id": "S4-006",
+      "severity": "nice_to_have",
+      "category": "OWASP A04: Insecure Design",
+      "title": "キャッシュ設計は安全なフォールバック動作を保証",
+      "description": "設計の安全性はフェールセーフ原則に基づいている。(1) キャッシュミス（lastOutputTail === null または不一致）の場合は通常のログ出力が行われ、変更前と同等の動作になる。つまりキャッシュ機構の障害は「ログが出力される」方向にフェールする。(2) キャッシュヒット（一致）の場合はログがスキップされるが、detectPrompt() の戻り値は常に通常通り返却される（D4-001）。(3) 異なる worktree 間でのキャッシュ交互上書きが発生した場合も、最悪ケースで変更前と同等のログ量に留まり、検出精度やプロンプト応答機能に影響しない。(4) resetDetectPromptCache() によるリセットも安全方向（ログ出力再開）にフェールする。このフェールセーフ特性により、キャッシュ機構にバグがあった場合でも、セキュリティやプロンプト検出機能への影響はゼロである。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "recommendation": "追加対応不要。フェールセーフ設計として理想的。"
+    },
+    {
+      "id": "S4-007",
+      "severity": "nice_to_have",
+      "category": "OWASP A01-A10 総合",
+      "title": "OWASP Top 10 該当項目の網羅的チェック完了",
+      "description": "OWASP Top 10 の各項目について本変更の影響を評価した。A01 Broken Access Control: 影響なし（アクセス制御ロジックへの変更なし）。A02 Cryptographic Failures: 影響なし（暗号処理への変更なし、ハッシュ計算不使用は設計意図通り）。A03 Injection: 影響なし（S4-003 で分析済み）。A04 Insecure Design: 影響なし（S4-006 でフェールセーフ設計を確認済み）。A05 Security Misconfiguration: 影響なし（新たな設定パラメータの追加なし）。A06 Vulnerable and Outdated Components: 影響なし（新たな外部依存の追加なし）。A07 Identification and Authentication Failures: 影響なし（認証ロジックへの変更なし）。A08 Software and Data Integrity Failures: 影響なし（シリアライゼーション処理なし）。A09 Security Logging and Monitoring Failures: 影響なし（S4-001 で分析済み）。A10 Server-Side Request Forgery: 影響なし（外部リクエスト発行なし）。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "recommendation": "追加対応不要。全項目で影響なしと判定。"
+    }
+  ],
+  "owasp_checklist": {
+    "A01_broken_access_control": {
+      "status": "not_applicable",
+      "reason": "アクセス制御ロジックへの変更なし"
+    },
+    "A02_cryptographic_failures": {
+      "status": "not_applicable",
+      "reason": "暗号処理への変更なし。文字列比較はハッシュなしの設計意図"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "reason": "キャッシュ値はログメッセージに直接挿入されない。logger.ts sanitize() が多層防御"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "reason": "フェールセーフ設計。キャッシュ障害時は変更前と同等の動作"
+    },
+    "A05_security_misconfiguration": {
+      "status": "not_applicable",
+      "reason": "新たな設定パラメータの追加なし"
+    },
+    "A06_vulnerable_outdated_components": {
+      "status": "not_applicable",
+      "reason": "新たな外部依存の追加なし"
+    },
+    "A07_identification_authentication_failures": {
+      "status": "not_applicable",
+      "reason": "認証ロジックへの変更なし"
+    },
+    "A08_software_data_integrity_failures": {
+      "status": "not_applicable",
+      "reason": "シリアライゼーション処理なし"
+    },
+    "A09_security_logging_monitoring_failures": {
+      "status": "pass",
+      "reason": "セキュリティログは別モジュール管理。プロンプト検出の初回ログは常に出力"
+    },
+    "A10_server_side_request_forgery": {
+      "status": "not_applicable",
+      "reason": "外部リクエスト発行なし"
+    }
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 7,
+    "overall_quality": "excellent",
+    "description": "Issue #402 の設計方針書はセキュリティ観点で極めて安全である。変更対象は prompt-detector.ts のログ出力抑制に限定され、認証・認可・入力バリデーション・暗号処理・外部通信のいずれにも影響しない。OWASP Top 10 の全項目について影響なしまたは適合と判定した。特に評価できる点は、(1) 単一エントリキャッシュによるメモリ安全性、(2) detectPrompt() 戻り値不変の設計制約 D4-001/D4-002 による機能安全性、(3) キャッシュミス時に変更前と同等の動作にフェールするフェールセーフ設計、(4) lastOutputTail がAPIレスポンス・エラーメッセージ・ログ本文のいずれにも露出しない情報隠蔽、(5) logger.ts sanitize() による多層防御の維持である。セキュリティ上の懸念事項は検出されなかった。"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "src/lib/logger.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/ip-restriction.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/version-checker.ts"
+  ],
+  "timestamp": "2026-03-03T18:45:00Z"
+}

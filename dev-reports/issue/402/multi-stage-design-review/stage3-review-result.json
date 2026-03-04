@@ -1,0 +1,140 @@
+{
+  "issue_number": 402,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "status": "approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "should_fix",
+      "category": "テスト分離",
+      "title": "既存テスト prompt-detector.test.ts の beforeEach/afterEach にキャッシュリセット追加が必須",
+      "description": "prompt-detector.test.ts は現在 resetDetectPromptCache() を呼び出していない。モジュールスコープの lastOutputTail が追加されると、テスト実行順序によっては前のテストで設定されたキャッシュ値が次のテストに影響を与える可能性がある。現在のテストはログ出力の検証を含まないため戻り値への影響はないが、将来ログ検証テストが同一ファイルに追加された場合にフレーキーテストの原因になる。設計方針書セクション8のテスト影響表で対応方針は記載済みだが、既存テストファイルへの beforeEach 追加を実装チェックリストに明示すべき。",
+      "affected_files": [
+        "tests/unit/prompt-detector.test.ts"
+      ],
+      "recommendation": "実装チェックリスト（セクション12）に「tests/unit/prompt-detector.test.ts の全テスト describe ルートレベルの beforeEach に resetDetectPromptCache() を追加」を明示的な必須項目として追加する。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "nice_to_have",
+      "category": "Hot Reload",
+      "title": "Hot Reload 時の lastOutputTail リセットの影響は設計通り無害",
+      "description": "Next.js 開発環境で Hot Reload が発生すると、モジュールスコープの lastOutputTail は null にリセットされる。これにより直後の1回の detectPrompt() 呼び出しでログが出力されるが、これは新規output時と同じ動作であり機能上の問題はない。auto-yes-manager.ts が globalThis パターンを使用する理由（ポーリングタイマーの維持、UI状態の一貫性）とは異なり、lastOutputTail はログ抑制のみが目的であるため、リセットされても最悪ケースで変更前と同等のログ量が1回出力されるだけである。設計方針書セクション4 D1で正しく根拠が説明されている。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "recommendation": "現状の設計判断は妥当。追加対応不要。ただし、コードコメントに「Hot Reload時にリセットされるが機能影響なし」の一文があると、将来のメンテナーが globalThis への変更を検討せずに済む。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "should_fix",
+      "category": "マルチプロセス",
+      "title": "マルチworktreeの交互呼び出しによるキャッシュヒット率低下の説明が設計方針書に存在するが、定量的分析が不足",
+      "description": "設計方針書 DC-001 で「異なるworktreeの呼び出しがキャッシュを交互に上書きしキャッシュヒット率が低下するが、最悪ケースでも変更前と同等のログ量に留まり、機能劣化は生じない」と記載されている。この分析は正確である。ただし、Next.jsのサーバー環境では通常単一プロセスで動作し（Pages Router / App Router ともにNode.jsのシングルプロセス）、モジュールスコープはプロセス内で共有される。Vercel等のサーバーレス環境やクラスタモードの場合はプロセス間でキャッシュが共有されないが、CommandMateはローカル開発ツールであり、そのようなデプロイ形態は想定外である。実質的なリスクは、N個のworktreeを同時にアクティブ監視している場合のキャッシュミスのみであり、最悪でも変更前と同等の動作に留まる。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "recommendation": "DC-001の記述に「CommandMateはローカル単一プロセスでの動作を前提としており、サーバーレス/クラスタ環境は対象外」という前提を1文追加すると、将来のレビューアーにとって明確になる。ただし、最悪ケースでも変更前と同等のため、実装上の追加対応は不要。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "nice_to_have",
+      "category": "間接影響",
+      "title": "status-detector.ts の SF-001 二重呼び出しにおけるキャッシュヒットは確実に期待できる",
+      "description": "status-detector.ts の detectSessionStatus() は detectPrompt() を呼び出し、その後 current-output/route.ts が SF-001 のために再度 detectPrompt() を呼び出す。この2回の呼び出しは同一HTTPリクエスト処理内で発生し、同一の cleanOutput が渡されるため、2回目は確実にキャッシュヒットしてログがスキップされる。これは設計方針書セクション7のキャッシュ効率分析と一致している。detectSessionStatus() 内で stripBoxDrawing(cleanOutput) を適用した文字列が detectPrompt() に渡され、current-output/route.ts でも同じ stripBoxDrawing(cleanOutput) が渡されるため、文字列一致が保証される。",
+      "affected_files": [
+        "src/lib/status-detector.ts",
+        "src/app/api/worktrees/[id]/current-output/route.ts"
+      ],
+      "recommendation": "追加対応不要。設計方針書の分析通り。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "nice_to_have",
+      "category": "間接影響",
+      "title": "response-poller.ts の detectPromptWithOptions() 経由の呼び出しは戻り値に影響しない",
+      "description": "response-poller.ts は detectPromptWithOptions() ヘルパーを経由して detectPrompt() を呼び出す。このヘルパーは stripAnsi() + stripBoxDrawing() + buildDetectPromptOptions() + detectPrompt() のパイプラインである。設計制約 D4-001 により、キャッシュ有無に関わらず detectPrompt() の戻り値は常に同一であるため、response-poller.ts のレスポンス抽出、プロンプト検出、DB保存の各処理に影響はない。response-poller.ts は1ポーリングサイクルで最大3回 detectPrompt() を呼び出す（extractResponse() 内で最大2回 + checkForResponse() 内で1回）が、tmuxの出力が同一であれば2回目以降のログが抑制される。これはI/O削減効果として期待通り。",
+      "affected_files": [
+        "src/lib/response-poller.ts"
+      ],
+      "recommendation": "追加対応不要。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "nice_to_have",
+      "category": "間接影響",
+      "title": "auto-yes-manager.ts のポーリング動作への影響なし",
+      "description": "auto-yes-manager.ts の detectAndRespondToPrompt() は detectPrompt() を呼び出し、その戻り値 (promptDetection.isPrompt, promptDetection.promptData) に基づいて自動応答を行う。設計制約 D4-001/D4-002 により戻り値は変化しないため、Auto-Yes の判定ロジック、重複プロンプト検出（isDuplicatePrompt()）、クールダウン処理のすべてに影響はない。autoYesPollerStates は globalThis パターンで管理されており、prompt-detector.ts のモジュールスコープキャッシュとは完全に独立している。",
+      "affected_files": [
+        "src/lib/auto-yes-manager.ts"
+      ],
+      "recommendation": "追加対応不要。"
+    },
+    {
+      "id": "S3-007",
+      "severity": "nice_to_have",
+      "category": "パフォーマンス",
+      "title": "文字列比較のCPU負荷とログI/O削減のトレードオフは適切",
+      "description": "末尾50行のjoin結果（最大10KB程度）の文字列比較は、V8エンジンの文字列比較が内部的にバイト列の比較として最適化されているため、10KBの比較は数マイクロ秒程度で完了する。一方、ログI/Oは1行あたりのJSON.stringify + console出力 + ファイル書き込みで数百マイクロ秒から数ミリ秒のコストがかかる。1ポーリングサイクルで最大14行（7回x2行）のログI/Oが2行に削減されることで、差し引きでCPU負荷は確実に減少する。さらに、output.split('\\n') は既存の detectPrompt() 実装（L173）で既に行われており、設計方針書 D2-001 で lines 変数を共有するため追加の split() コストは発生しない。tailForDedup = lines.slice(-50).join('\\n') のみが新規コストだが、これは無視できるレベルである。",
+      "affected_files": [
+        "src/lib/prompt-detector.ts"
+      ],
+      "recommendation": "追加対応不要。設計方針書の分析通り適切。"
+    },
+    {
+      "id": "S3-008",
+      "severity": "nice_to_have",
+      "category": "統合テスト",
+      "title": "issue-256-acceptance.test.ts および issue-208-acceptance.test.ts への影響は軽微",
+      "description": "issue-256-acceptance.test.ts は detectPrompt() を直接呼び出し、戻り値の isPrompt, promptData, options を検証する。issue-208-acceptance.test.ts も同様に detectPrompt() の戻り値のみを検証する。いずれもログ出力の検証は行っていない。設計制約 D4-001（戻り値不変）により、これらの統合テストの結果は変化しない。ただし、テスト間で lastOutputTail キャッシュが共有されるため、同一outputを使用する複数のテストが連続実行された場合、2つ目以降のテストでログが抑制される。これはテスト結果の正否には影響しないが、テストデバッグ時のログ可視性に影響する可能性がある。vi.mock() を使用せず実モジュールを呼び出す統合テストであるため、resetDetectPromptCache() の beforeEach 追加は検討に値する。",
+      "affected_files": [
+        "tests/integration/issue-256-acceptance.test.ts",
+        "tests/integration/issue-208-acceptance.test.ts"
+      ],
+      "recommendation": "統合テストファイルに resetDetectPromptCache() の beforeEach 追加は必須ではないが、テストデバッグの利便性のために推奨する。セクション8のテスト影響表に統合テストへの対応方針（オプション）を追記するとよい。"
+    },
+    {
+      "id": "S3-009",
+      "severity": "should_fix",
+      "category": "テスト分離",
+      "title": "prompt-response-verification.test.ts は vi.mock() で detectPrompt を差し替えており影響なし、ただし status-detector.test.ts は実モジュールを使用",
+      "description": "prompt-response-verification.test.ts は vi.mock('@/lib/prompt-detector') で detectPrompt をモック化しているため、lastOutputTail キャッシュの影響を受けない。一方、status-detector.test.ts は detectPrompt() をモックせず、detectSessionStatus() 経由で実際の detectPrompt() を呼び出している。status-detector.test.ts のテストは detectSessionStatus() の戻り値（status, confidence, reason, hasActivePrompt）を検証しており、ログ出力は検証していないため、テスト結果への直接的影響はない。しかし、テスト間のキャッシュ状態共有により予期しないログ抑制が発生する。設計方針書セクション8の影響確認対象表に status-detector.test.ts が含まれており、対応方針は「影響確認、必要に応じてリセット追加」となっている。影響は軽微だが、テスト分離のベストプラクティスとして resetDetectPromptCache() の追加を推奨する。",
+      "affected_files": [
+        "tests/unit/lib/status-detector.test.ts"
+      ],
+      "recommendation": "tests/unit/lib/status-detector.test.ts に resetDetectPromptCache() のインポートと beforeEach での呼び出しを追加することを推奨する。設計方針書の実装チェックリストにこの項目を追加する。"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 6,
+    "overall_quality": "good",
+    "description": "設計方針書の影響分析は全体的に正確で網羅的である。変更は prompt-detector.ts のモジュールスコープに閉じており、detectPrompt() の戻り値に影響しない設計制約（D4-001/D4-002）が明確に定義されているため、5モジュール7箇所からの呼び出し元への波及影響は事実上ゼロである。should_fix の3件はいずれもテスト分離に関するもので、実装時にキャッシュリセット関数の適切な配置で解決できる。パフォーマンストレードオフ、Hot Reload 影響、マルチworktree 挙動の分析はすべて妥当であり、最悪ケースでも変更前と同等の動作に留まるフェールセーフ設計が評価できる。"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/response-poller.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/ip-restriction.ts",
+    "src/lib/logger.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "tests/unit/prompt-detector.test.ts",
+    "tests/unit/lib/status-detector.test.ts",
+    "tests/unit/api/prompt-response-verification.test.ts",
+    "tests/integration/issue-256-acceptance.test.ts",
+    "tests/integration/issue-208-acceptance.test.ts"
+  ],
+  "timestamp": "2026-03-03T18:30:00Z"
+}

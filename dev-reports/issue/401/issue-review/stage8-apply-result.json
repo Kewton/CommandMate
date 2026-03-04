@@ -1,0 +1,13 @@
+{
+  "stage": 8,
+  "apply_date": "2026-03-03",
+  "issue_number": 401,
+  "applied_findings": [],
+  "skipped_findings": ["IF7-001", "IF7-002"],
+  "skip_reasons": {
+    "IF7-001": "Nice to Have - 実装時注意事項のみ、Issueへの追記不要",
+    "IF7-002": "Nice to Have - 実装時注意事項のみ、Issueへの追記不要"
+  },
+  "github_updated": false,
+  "summary": "Stage 7の影響範囲レビュー（2回目）ではMust Fix/Should Fixが0件のため、GitHubのIssue更新は不要。2件のNice to Have指摘（PM2パスへの非適用確認、set -eとlsofパイプラインの相互作用）は実装時の注意事項として記録するが、Issueへの追記は行わない。"
+}

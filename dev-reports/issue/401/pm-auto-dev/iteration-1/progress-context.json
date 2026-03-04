@@ -1,0 +1,41 @@
+{
+  "issue_number": 401,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 0,
+      "files_changed": ["scripts/stop.sh", "scripts/stop-server.sh", "scripts/build-and-start.sh"],
+      "commits": ["697846a: fix(scripts): harden process stop logic with PID validation and graceful shutdown"],
+      "notes": "Shell scripts only - no TypeScript unit test coverage. bash -n syntax check passed for all 3 scripts."
+    },
+    "acceptance": {
+      "status": "passed",
+      "total_scenarios": 13,
+      "passed_scenarios": 13,
+      "unit_test_results": "206 files, 4381 passed, 7 skipped, 0 failed",
+      "eslint_errors": 0,
+      "typescript_errors": 0
+    },
+    "refactor": {
+      "status": "success",
+      "commits": ["179ab16: refactor(scripts): add missing design ID comments for traceability"],
+      "notes": "Minor comment additions only - added [S4-003] and [C2-003] design ID references"
+    },
+    "documentation": {
+      "status": "skipped",
+      "reason": "docs/DEPLOYMENT.md update is explicitly out of scope per design policy Section 9"
+    }
+  },
+  "key_improvements": [
+    "stop.sh: 複数PID対応（xargs kill）+ SIGTERM→SIGKILL段階的停止",
+    "stop.sh: ポート番号バリデーション追加（bash [[ =~ ]] 使用）",
+    "stop-server.sh: CM_PORT環境変数対応（PORT=3000からの修正）",
+    "stop-server.sh: PIDファイルバリデーション（head -1 | grep）",
+    "stop-server.sh: 全3ステップでSIGTERM→SIGKILL段階化",
+    "stop-server.sh: プロセスグループ停止（kill -- -$PID）",
+    "build-and-start.sh: CM_PORT対応 + ポートバリデーション",
+    "build-and-start.sh: PIDファイルバリデーション + ポートベースalready running判定",
+    "build-and-start.sh: PIDファイルchmod 600（セキュリティ強化）"
+  ]
+}

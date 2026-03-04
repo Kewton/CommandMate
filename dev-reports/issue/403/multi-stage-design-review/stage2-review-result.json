@@ -1,0 +1,76 @@
+{
+  "stage": 2,
+  "review_type": "整合性",
+  "issue_number": 403,
+  "timestamp": "2026-03-03T12:00:00Z",
+  "findings": [
+    {
+      "severity": "should_fix",
+      "category": "セクション間の整合性",
+      "description": "セクション2のmermaidダイアグラムがデーモンモード経路（nohup npm start >> server.log）のみを表示しており、フォアグラウンドモード経路（npm start）が表現されていない。設計方針書はセクション1の補足およびセクション4-3で「フォアグラウンド/デーモン両モード共通」を強調しており、ダイアグラムと矛盾する。",
+      "suggestion": "mermaidダイアグラムのノードI以降にデーモン/フォアグラウンドの分岐を追加する。例: H --> J{daemon?} --> |Yes| I[nohup npm start >> server.log] / J --> |No| K[npm start (stdout)]。これにより「実行タイミング」テキスト説明欄との整合性が取れる。",
+      "location": "セクション2「アーキテクチャ設計」のmermaidダイアグラム"
+    },
+    {
+      "severity": "should_fix",
+      "category": "Issue本文との整合性",
+      "description": "Issue本文の受入条件 #3 が「scripts/build-and-start.sh --daemon でのサーバー起動時にログローテーションが実行されること」とdaemonモードのみに言及しているが、設計方針書では「フォアグラウンド/デーモン両モード共通」と明記している。実装後にどちらが正しい受入条件なのか混乱する恐れがある。",
+      "suggestion": "設計方針書の立場（両モード共通実行）が正しい場合、Issue本文の受入条件 #3 を「scripts/build-and-start.sh の起動時（フォアグラウンド/デーモン両モード）にログローテーションが実行されること」に更新するよう推奨する。または設計方針書に「Issue受入条件 #3 はdaemonモードのみ記載だが、実装は両モード共通で実行する（セクション1補足参照）」と注記を追加する。",
+      "location": "設計方針書全体 vs Issue #403 受入条件 #3"
+    },
+    {
+      "severity": "should_fix",
+      "category": "定数・変数名の整合性",
+      "description": "セクション4-2の関数コメントに「|| true」パターンと記載されているが、セクション4-3の実際の呼び出しコードは「|| echo WARNING...」パターンを使用している。「|| true」と「|| echo WARNING >&2」は意味が異なる（前者は静かに成功扱い、後者は警告出力して成功扱い）。セクション4-2のコメント文言が実装と乖離している。",
+      "suggestion": "セクション4-2の関数コメント内の 'This function is called with \"|| true\" pattern' を 'This function is called with \"|| echo WARNING...\" pattern' に修正する。あるいはコメントを 'This function is called with a failure-safe pattern (see section 4-3)' と抽象化する。",
+      "location": "セクション4-2「関数実装」コメント行 'Error handling: This function is called with \"|| true\" pattern (see section 4-3).'"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "セクション間の整合性",
+      "description": "セクション6「パフォーマンス設計」で最悪ケースが「wc -c + rm + 3回mv」と記載されているが、MAX_LOG_GENERATIONS=3の場合、世代シフトのmvは2回（i=2: .2->.3, i=1: .1->.2）+ current->.1 の1回 = 合計3回mvである。rmは1回。記載の「3回mv」は世代シフト分の2回+current移動の1回を合計した値として正確だが、読み手に世代シフトだけで3回と誤解されうる。",
+      "suggestion": "内訳を明記する。例: 「rm 1回 + mv 3回（世代シフト2回 + current移動1回）」。",
+      "location": "セクション6「パフォーマンス設計」最悪ケースの記述"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "ファイルパスの整合性",
+      "description": "セクション9のPRODUCTION_CHECKLIST更新方針で「L164付近のLog rotation項目を更新」と記載されている。英語版の実際のL164は '- [ ] Log rotation is configured (optional)' で正確だが、日本語版のL164も '- [ ] ログのローテーション設定がされている（オプション）' で同じく正確。ただし、PRODUCTION_CHECKLISTの内容が将来変更された場合に行番号がずれるリスクがある。",
+      "suggestion": "行番号の代わりに「セクション8（Monitoring and Logs / モニタリングとログ）内の 'Log rotation' 項目」のようにセクション名で参照すると、行番号のずれに強くなる。",
+      "location": "セクション9「PRODUCTION_CHECKLIST更新方針」"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "実装チェックリストの整合性",
+      "description": "セクション12の実装チェックリストに「手動テスト: ディレクトリなし（logs/なしで起動）」が含まれていないが、セクション8のテスト方針にはこのエッジケースが記載されている。",
+      "suggestion": "セクション12のチェックリストに「手動テスト: ディレクトリなし/閾値未満のスキップ動作」を「手動テスト: ディレクトリなし（logs/なしで起動、ディレクトリ作成後正常起動）」と「手動テスト: ファイルなし/閾値未満のスキップ動作」に分割して追加する。",
+      "location": "セクション12「実装チェックリスト」 vs セクション8「テスト方針」"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "Issue本文との整合性",
+      "description": "Issue本文の実装タスクに「PRODUCTION_CHECKLIST.md の Log rotation 項目にビルトインローテーションの説明を追加」として英語版のみ明記されているが、設計方針書のセクション9およびチェックリスト（セクション12）では英語版と日本語版の両方を更新対象としている。Issue本文と設計方針書の対象範囲が一致していない。",
+      "suggestion": "些細な差異だが、Issue本文の実装タスクに日本語版（docs/internal/PRODUCTION_CHECKLIST.md）の更新も追記するか、設計方針書に「Issue本文では英語版のみ記載だが、日本語版も同時に更新する」と注記する。",
+      "location": "設計方針書セクション9/12 vs Issue #403 実装タスク"
+    },
+    {
+      "severity": "nice_to_have",
+      "category": "セクション間の整合性",
+      "description": "セクション4-2の関数実装で成功時にエモジ（チェックマーク記号）を含む 'echo \"\\u2713 Log rotated: ...\"' を出力しているが、build-and-start.sh の既存コード（L114）でも同じ記号を使用しておりスタイル上は一貫している。ただし、失敗時のWARNINGメッセージ（セクション4-3）はプレーンテキストであり、成功/失敗のログフォーマットが非対称である。",
+      "suggestion": "指摘のみ。既存スクリプトのスタイルに合わせているため対応不要。",
+      "location": "セクション4-2 vs セクション4-3"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 5,
+    "overall_quality": "good"
+  },
+  "consistency_matrix": {
+    "design_vs_codebase": "良好。ファイルパス・変数名・行番号参照は実コードと正確に一致。restart.shの影響分析も詳細かつ正確。",
+    "internal_consistency": "概ね良好。mermaidダイアグラムの単一経路表示と本文の両モード共通記述に軽微な乖離あり。|| true vs || echo WARNING のコメント不一致あり。",
+    "design_vs_issue": "概ね良好。受入条件のdaemonモード限定記述と設計方針の両モード共通記述に軽微な乖離あり。PRODUCTION_CHECKLIST更新対象範囲に差異あり。",
+    "checklist_vs_design": "概ね良好。テスト方針のエッジケース（ディレクトリなし）がチェックリストに個別項目として未反映。"
+  }
+}

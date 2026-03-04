@@ -9,6 +9,20 @@ import { createLogger } from './logger';
 const logger = createLogger('prompt-detector');
 
 /**
+ * Last output tail used for duplicate log suppression.
+ * Only the last 50 lines of the output are compared.
+ * This is a performance optimization to reduce log I/O -- it does NOT
+ * affect detectPrompt()'s return value in any way.
+ *
+ * Uses pure module-scope (not globalThis) since Hot Reload reset is
+ * acceptable for log-only caching. Same pattern as ip-restriction.ts
+ * module-scope cache. [S2-004]
+ *
+ * @internal
+ */
+let lastOutputTail: string | null = null;
+
+/**
  * Options for prompt detection behavior customization.
  * Maintains prompt-detector.ts CLI tool independence (Issue #161 principle).
  *
@@ -168,9 +182,25 @@ function yesNoPromptResult(
  * ```
  */
 export function detectPrompt(output: string, options?: DetectPromptOptions): PromptDetectionResult {
-  logger.debug('detectPrompt:start', { outputLength: output.length });
-
+  // D2-001: Extract tail 50 lines for duplicate log suppression.
+  // Reuse `lines` for both dedup check and yes/no pattern matching below.
+  // detectMultipleChoicePrompt() has its own independent split() in its
+  // own scope -- this is intentional function encapsulation [S1-004][S2-001].
   const lines = output.split('\n');
+  const tailForDedup = lines.slice(-50).join('\n');
+  const isDuplicate = tailForDedup === lastOutputTail;
+
+  // D2-002: Only log on new (non-duplicate) output [S1-001 SRP tradeoff:
+  // dedup logic is inlined here because it needs direct access to output.
+  // If log suppression grows complex (e.g., per-worktree cache), extract
+  // to shouldSuppressLog(output): boolean helper.]
+  if (!isDuplicate) {
+    logger.debug('detectPrompt:start', { outputLength: output.length });
+  }
+
+  // D2-003: Update cache (affects logging only, never return values)
+  lastOutputTail = tailForDedup;
+
   // [SF-003] [MF-S2-001] Expanded from 10 to 20 lines for rawContent coverage
   const lastLines = lines.slice(-20).join('\n');
 
@@ -182,11 +212,14 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
   //   3. Cancel
   const multipleChoiceResult = detectMultipleChoicePrompt(output, options);
   if (multipleChoiceResult.isPrompt) {
-    logger.info('detectPrompt:multipleChoice', {
-      isPrompt: true,
-      question: multipleChoiceResult.promptData?.question,
-      optionsCount: multipleChoiceResult.promptData?.options?.length,
-    });
+    // D2-004: Suppress duplicate multipleChoice info log
+    if (!isDuplicate) {
+      logger.info('detectPrompt:multipleChoice', {
+        isPrompt: true,
+        question: multipleChoiceResult.promptData?.question,
+        optionsCount: multipleChoiceResult.promptData?.options?.length,
+      });
+    }
     return multipleChoiceResult;
   }
 
@@ -213,7 +246,10 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
   }
 
   // No prompt detected
-  logger.debug('detectPrompt:complete', { isPrompt: false });
+  // D2-005: Suppress duplicate complete log
+  if (!isDuplicate) {
+    logger.debug('detectPrompt:complete', { isPrompt: false });
+  }
   return {
     isPrompt: false,
     cleanContent: output.trim(),
@@ -819,4 +855,13 @@ export function getAnswerInput(answer: string, promptType: string = 'yes_no'): s
 
   // SEC-003: Fixed error message without user input to prevent log injection
   throw new Error("Invalid answer for yes/no prompt. Expected 'yes', 'no', 'y', or 'n'.");
+}
+
+/**
+ * Reset the duplicate log suppression cache.
+ * Intended for test isolation only.
+ * @internal
+ */
+export function resetDetectPromptCache(): void {
+  lastOutputTail = null;
 }

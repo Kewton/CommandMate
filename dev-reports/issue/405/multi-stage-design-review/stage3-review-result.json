@@ -1,0 +1,159 @@
+{
+  "issue_number": 405,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "review_items": [
+    {
+      "id": "DA3-001",
+      "severity": "must_fix",
+      "category": "existing_feature",
+      "title": "response-poller.tsのlastCapturedLineとキャッシュ保持行数の不整合リスク",
+      "description": "response-poller.tsのextractResponse()はlastCapturedLineを基に差分抽出を行い、totalLines（output.split('\\n').length）とlastCapturedLineの大小関係で重複検出・バッファリセット検出を実施している（L661, L709-710, L1071, L1079）。設計方針書ではキャッシュはCACHE_MAX_CAPTURE_LINES=10000行で保持し、要求行数に応じてslice()で切り出すとしている。response-poller.tsは10000行を要求するためフルキャッシュがそのまま返却される。しかし、captureSessionOutput()の現在の実装（cli-session.ts L58）は capturePane(sessionName, { startLine: -lines }) で呼び出し元が指定した行数分だけ取得している。キャッシュ導入後は常に10000行で取得・保持し、100行要求時はslice(-100)で返却する。この場合、worktrees/route.tsで100行を要求した際に返されるoutputの行数がキャッシュ前後で変化しうる。response-poller.tsでは問題ないが、current-output/route.tsのL71で `const output = await captureSessionOutput(params.id, cliToolId, 10000)` と10000行を要求しており、その後 `const totalLines = lines.length` でtotalLinesを算出してクライアントに返却する。キャッシュのsliceOutput()が末尾から切り出す場合、tmuxバッファの先頭空行がトリムされ、totalLinesがキャッシュ前と微妙に異なる可能性がある。lastCapturedLineとの差分計算にoffsetが生じるリスクがある。",
+      "suggestion": "sliceOutput()のrequestLines >= capturedLinesの場合はそのまま返却する設計は正しい。ただし、capturePane()がstartLine=-10000で取得する出力と、startLine=-requestedLinesで取得する出力の行数が一致するかをテストで検証すること。具体的には、tmuxバッファが10000行未満の場合、startLine=-10000でもstartLine=-5000でも同じ出力が得られるかをユニットテストに含める。また、sliceOutput()がoutput.split('\\n')で分割する際、末尾改行の有無でoff-by-oneが発生しないことを検証するテストケースを追加すること。",
+      "affected_section": "3.1.3 行数差異の解決（A案）, 3.2 captureSessionOutput()の変更"
+    },
+    {
+      "id": "DA3-002",
+      "severity": "must_fix",
+      "category": "concurrency",
+      "title": "singleflightパターンにおけるfetchFnエラー時の共有Promiseの振る舞い",
+      "description": "getOrFetchCapture()のsingleflightパターン（設計書 3.1.5）では、inflight Mapに同一sessionNameのPromiseが格納され、2番目以降の呼び出し元は `await inflight.get(key)!` で同じPromiseを共有する。fetchFn内でエラー（hasSession()=false、capturePane()失敗）が発生した場合、共有Promiseがrejectされ、全ての待機中の呼び出し元に同じエラーが伝播する。これ自体は意図された動作だが、設計書のDC2-004で追加されたtry-catch（captureSessionOutput内のfetchFn内）でエラーメッセージを再throwするため、1番目の呼び出し元には `Failed to capture {cliTool.name} output: {errorMessage}` が返り、2番目以降の呼び出し元にはsliceOutput()呼び出し前にrejectされた同一Promiseの結果として同じエラーが返る。しかし、2番目の呼び出し元のcontextでは異なるcliToolIdやlinesパラメータを持つ可能性があり、エラーメッセージの `{cliTool.name}` が不整合になる場合がある。",
+      "suggestion": "getOrFetchCapture()のinflightキーをsessionNameのみとしているため、同一セッションに対して異なるcliToolId経由でcaptureSessionOutput()が呼ばれることは通常ない（sessionNameにcliToolIdが含まれるため mcbd-{cliToolId}-{worktreeId} 形式）。よって実運用上の不整合リスクは低い。ただし、この前提をJSDocに明示すること。具体的にはgetOrFetchCapture()のキー設計がsessionName（cliToolIdを含む）である根拠を設計書のキャッシュキー設計セクション（3.1.2）に追記すること。",
+      "affected_section": "3.1.5 singleflightパターン, 3.2 captureSessionOutput()の変更"
+    },
+    {
+      "id": "DA3-003",
+      "severity": "should_fix",
+      "category": "existing_feature",
+      "title": "isSessionHealthy()のcapturePane()とキャッシュの独立性に関する明示的な設計判断",
+      "description": "claude-session.tsのisSessionHealthy()（L299）は内部のgetCleanPaneOutput()経由でcapturePane()を直接呼び出している（キャッシュを経由しない）。設計書のDR1-005ではworktrees/route.tsにおいてlistSessions() + isSessionHealthy()を呼ぶとしているが、isSessionHealthy()がキャッシュを経由しない点は設計書に明記されていない。isSessionHealthy()は50行のキャプチャ（getCleanPaneOutput()のデフォルト）を行い、キャッシュの10000行キャプチャとは独立した別のtmux操作を発生させる。これはHealthCheckの鮮度を保つために正しい判断だが、「isSessionHealthy()はキャッシュ対象外」という設計判断を明示的に記載しないと、将来のリファクタリングで誤ってキャッシュ経由に変更されるリスクがある。",
+      "suggestion": "設計書セクション3.3のDR1-005の後に、isSessionHealthy()がcapturePane()を直接呼び出す設計判断の根拠を明記すること。具体的には「isSessionHealthy()は50行のキャプチャで健全性を判定するため、キャッシュ層（10000行保持）を経由せずcapturePane()を直接呼び出す。HealthCheckは常にフレッシュな出力で判定する必要があるため、キャッシュバイパスは意図的な設計判断である」という一文を追加する。",
+      "affected_section": "3.3 isRunning()最適化"
+    },
+    {
+      "id": "DA3-004",
+      "severity": "should_fix",
+      "category": "existing_feature",
+      "title": "worktrees/route.tsとworktrees/[id]/route.tsのN+1解消パターンの構造的重複",
+      "description": "設計書セクション3.3ではworktrees/route.ts（L46）でのcliTool.isRunning()呼び出しをlistSessions()一括取得に置き換えるとしている。worktrees/[id]/route.ts（L56）にも全く同じループ構造が存在し、同様にcliTool.isRunning()を各CLIツールに対して呼び出している。設計書セクション11では[id]/route.tsも修正対象として挙げているが、[id]/route.tsは単一worktreeに対するAPIであり、N+1問題の影響度はworktrees/route.tsと比較して限定的である。にもかかわらず、同一のlistSessions() + Set.has()パターンを適用するのはYAGNIの観点で過剰な可能性がある。一方、[id]/route.tsのGET内のforループ（L54-99）は全CLIツールを巡回してisRunning()を呼ぶため、5回のhasSession()呼び出しが発生する。listSessions()置換により1回に削減できる。",
+      "suggestion": "現在の実装（5つのCLIツール × 1回のhasSession()）のコスト合計は約25ms（5ms × 5）であり、単一worktreeのGETリクエストでは許容範囲内。ただし、CLIツール数の増加（将来的に6+）や、ClaudeToolの追加HealthCheck（50ms）を考慮すると、listSessions()一括取得の導入は合理的。設計書の判断（[id]/route.tsにもlistSessions()適用）は妥当であるが、Phase 3タスクリスト（セクション10 #8）にこの判断の根拠コメントを追記すること。",
+      "affected_section": "3.3 isRunning()最適化, 10 実装順序 Phase 3"
+    },
+    {
+      "id": "DA3-005",
+      "severity": "should_fix",
+      "category": "error_propagation",
+      "title": "captureSessionOutputFresh()のhasSession()エラーとキャッシュ書き戻しの相互作用",
+      "description": "設計書セクション3.4.3のcaptureSessionOutputFresh()では、hasSession()でセッション存在を確認後、capturePane()を直接呼び出し、取得結果をsetCachedCapture()でキャッシュに書き戻す。しかし、hasSession()とcapturePane()の間にセッションが消失するTOCTOU（Time Of Check Time Of Use）ケースがある。この場合capturePane()がエラーをthrowし、setCachedCapture()は実行されない。これ自体は正しい挙動だが、古いキャッシュが残存している場合、hasSession()=true → capturePane()エラー → 古いキャッシュが残存 → 次のcaptureSessionOutput()呼び出しで古いキャッシュがヒットする可能性がある。TTL=2秒で自然に失効するため影響は限定的だが、prompt-response APIのフローでは2秒以内にcurrent-output APIが呼ばれることがあり得る。",
+      "suggestion": "captureSessionOutputFresh()のcapturePane()エラー時に、当該sessionNameのキャッシュをinvalidateCache()で明示的に無効化するcatchブロックを追加すること。具体的には: try { const output = await capturePane(...); setCachedCapture(...); return sliceOutput(...); } catch (error) { invalidateCache(sessionName); throw error; } このパターンにより、セッション消失時に古いキャッシュが残留するリスクを完全に排除できる。",
+      "affected_section": "3.4.3 prompt-response APIのキャッシュバイパス"
+    },
+    {
+      "id": "DA3-006",
+      "severity": "should_fix",
+      "category": "existing_feature",
+      "title": "auto-yes-manager.tsのdetectAndRespondToPrompt()内のsendPromptAnswer()後のキャッシュ無効化タイミング",
+      "description": "設計書セクション3.4.2ではdetectAndRespondToPrompt()内でsendPromptAnswer()後にtry-finallyパターンでinvalidateCache()を実行するとしている。しかし、現在のdetectAndRespondToPrompt()（auto-yes-manager.ts L576-636）では、sendPromptAnswer()（L610）の後にupdateLastServerResponseTimestamp()とresetErrorCount()が呼ばれている（L618-619）。invalidateCache()をsendPromptAnswer()の直後（L615の前）に挿入するか、try-finally内のfinally側に配置するかで、キャッシュ無効化とタイムスタンプ更新の順序が変わる。設計書の3.4.2シーケンス図ではsendPromptAnswer() → invalidateCache() → scheduleNextPoll()の順だが、scheduleNextPoll()はdetectAndRespondToPrompt()の外のpollAutoYes()で呼ばれる（L680）。invalidateCache()の配置場所を正確に指定する必要がある。",
+      "suggestion": "invalidateCache()はsendPromptAnswer()の成功/失敗に関わらず実行すべきである（tmuxにキー入力が送信された時点でキャッシュは無効になるため）。sendPromptAnswer()を呼び出す直前にsessionNameを取得しているため（L608）、L615（sendPromptAnswer直後）に `invalidateCache(sessionName)` を挿入し、try-finallyではなく直列配置とすることを推奨する。理由: sendPromptAnswer()がthrowした場合もsendKeys()が部分的に実行されている可能性があり、キャッシュ無効化が必要。ただし、sendPromptAnswer()内でsendKeys()が実行される前にthrowした場合は無効化は不要だが、防御的に無効化しても害はない（次のfetchで最新データを取得するだけ）。",
+      "affected_section": "3.4.1 無効化トリガー一覧, 3.4.2 auto-yes応答後の無効化シーケンス"
+    },
+    {
+      "id": "DA3-007",
+      "severity": "should_fix",
+      "category": "lifecycle",
+      "title": "inflight MapのPromiseリーク防止策の不足",
+      "description": "getOrFetchCapture()のinflight Map（設計書3.1.5）では、finallyブロックでinflight.delete(key)を実行している。しかし、fetchFnが長時間ハングした場合（例: capturePane()のexecFileがtimeoutで返らない場合）、inflight Mapにエントリが残り続け、後続の呼び出し元が永久に待機するリスクがある。tmux.tsのcapturePane()にはtimeout: DEFAULT_TIMEOUT(5000ms)が設定されているが、execFileのtimeoutはSIGTERMを送るだけで、プロセスが応答しない場合はPromiseが解決しない可能性がある。Node.jsのexecFile()のtimeoutはデフォルトでSIGTERMを送信し、SIGKILLは送信しない。",
+      "suggestion": "実運用上、execFileのtimeoutがPromiseを解決しないケースは極めて稀である（tmuxプロセスは通常SIGTERMで即座に終了する）。ただし、防御的にgetOrFetchCapture()にタイムアウト機構を設けることを検討すること。具体的には、Promise.race([fetchFnPromise, timeoutPromise(7000)])のようなパターンで、fetchFnが7秒以内に完了しない場合にrejectし、finallyでinflight.delete(key)を確実に実行する。これはPhase 1実装時のnice_to_haveとして記録し、Phase 5テスト時にハング時の挙動を確認するテストケースを追加する。",
+      "affected_section": "3.1.5 singleflightパターン"
+    },
+    {
+      "id": "DA3-008",
+      "severity": "should_fix",
+      "category": "performance",
+      "title": "current-output APIのcliTool.isRunning()とキャッシュの重複tmux操作",
+      "description": "current-output/route.ts（L52）では `const running = await cliTool.isRunning(params.id)` を呼び出し、ClaudeToolの場合はhasSession() + isSessionHealthy()の2段階チェックが実行される。その直後（L70）にcaptureSessionOutput()が呼ばれ、キャッシュミスの場合はhasSession() + capturePane()が実行される。結果として、ClaudeToolの場合、hasSession()が2回呼ばれる。設計書ではworktrees/route.tsのisRunning()をlistSessions()に置換する最適化を扱っているが、current-output/route.tsの個別APIについてはisRunning()最適化の対象として明示的に言及していない。current-output APIは個別worktreeのポーリングであり、hasSession()の2回呼び出しコスト（10ms）は許容範囲内だが、Phase 3でworktrees/route.tsにlistSessions()を導入した後、current-output APIだけ旧来のパターンが残ることになる。",
+      "suggestion": "current-output APIは個別worktreeの単一CLIツールに対する操作であり、listSessions()一括取得の恩恵は限定的。設計書のスコープ外とする判断は妥当だが、セクション3.5（capture/route.tsのキャッシュ対象外）と同様に、current-output/route.tsのisRunning()について明示的な設計判断を記載すること。具体的には「current-output APIのcliTool.isRunning()はlistSessions()最適化の対象外とする。単一worktree・単一CLIツールに対する操作であり、hasSession()の個別呼び出しコスト（5ms）は許容範囲内である」という一文を追加する。",
+      "affected_section": "3.3 isRunning()最適化, 5.1 変更対象API一覧"
+    },
+    {
+      "id": "DA3-009",
+      "severity": "should_fix",
+      "category": "existing_feature",
+      "title": "Issue #393（exec()→execFile()移行）との整合性確認 - sendMessageToClaude()内のsendKeys()後のキャッシュ無効化",
+      "description": "claude-session.tsのsendMessageToClaude()（L694-730）では、sendKeys()を2回呼び出している（L720: メッセージ送信、L721: Enter送信）。Issue #393でexec()→execFile()に移行済みであり、sendKeys()自体はexecFile()ベースで安全である。設計書の無効化トリガー一覧（セクション3.4.1）では「claude-session.ts」がsendKeys()呼び出し元として挙げられているが、sendMessageToClaude()はPromise-basedの非同期関数であり、2回のsendKeys()呼び出しの間にinvalidateCache()を挟む必要はない（2回目のsendKeys()後に1回だけ無効化すれば十分）。しかし、sendMessageToClaude()の後にdetectAndResendIfPastedText()が呼ばれ（L726）、この中でも追加のsendKeys()が発生する可能性がある。pasted-text-helper.tsは設計書の無効化トリガー一覧に含まれていない。",
+      "suggestion": "pasted-text-helper.tsのdetectAndResendIfPastedText()（L726で条件付き呼び出し）は内部でsendKeys()を呼び出す。設計書の無効化トリガー一覧（セクション3.4.1）にpasted-text-helper.tsを追加するか、sendMessageToClaude()の末尾（L729の後）にinvalidateCache()を1回だけ挿入する方針を明記すること。推奨は後者（sendMessageToClaude()末尾での一括無効化）であり、pasted-text-helper.tsの内部実装に依存しない設計となる。",
+      "affected_section": "3.4.1 無効化トリガー一覧"
+    },
+    {
+      "id": "DA3-010",
+      "severity": "should_fix",
+      "category": "lifecycle",
+      "title": "schedule-manager.tsのcmateFileCacheパターンとの設計一貫性",
+      "description": "設計書ではglobalThisパターンを採用し、schedule-manager.ts（Issue #409）のcmateFileCacheと同じアプローチをとっている。schedule-manager.tsのcmateFileCacheはManagerState構造体のフィールドとして管理され、stopAllSchedules()でcmateFileCache.clear()が呼ばれる（DR1-008ライフサイクル管理）。一方、tmux-capture-cache.tsのキャッシュはglobalThisに独立したMapとして格納され、clearAllCache()で全クリアされる。この2つのキャッシュは異なるライフサイクル管理パターンを使用している。schedule-manager.tsは「構造体フィールド」パターン、tmux-capture-cache.tsは「独立Map」パターンである。どちらも機能的に問題ないが、新規CLIツール追加時やキャッシュモジュール追加時に、どちらのパターンに従うべきか混乱する可能性がある。",
+      "suggestion": "設計書のセクション9.1（採用した設計）に、globalThisパターンの使い分け基準を追記すること。具体的には「構造体フィールドパターン（schedule-manager.ts）: 単一モジュール内でキャッシュと状態管理が密結合の場合」「独立Mapパターン（tmux-capture-cache.ts）: 複数モジュールから参照されるキャッシュの場合」という基準を明記する。tmux-capture-cacheが独立Mapパターンを採用する理由は、captureSessionOutput(), captureSessionOutputFresh(), invalidateCache()が複数モジュール（cli-session.ts, prompt-answer-sender.ts, claude-session.ts等）から呼ばれるためである。",
+      "affected_section": "3.1.4 globalThisパターン, 9.1 採用した設計"
+    },
+    {
+      "id": "DA3-011",
+      "severity": "should_fix",
+      "category": "test_impact",
+      "title": "既存テストのcaptureSessionOutputモックとキャッシュ統合後の整合性",
+      "description": "設計書では「既存テスト（90箇所以上のモック）に影響なし」としている。実際にGrep結果から、tests/unit/api/prompt-response-verification.test.ts（38箇所）とtests/unit/lib/auto-yes-manager.test.ts（113箇所）にcaptureSessionOutputの参照がある。これらはvi.mock()でcli-session.tsモジュール全体をモックしており、captureSessionOutput()の内部実装（キャッシュ有無）には依存しない。しかし、captureSessionOutputFresh()はcli-session.tsに新規追加される関数であり、prompt-response/route.tsのテストでcaptureSessionOutputをモックしている箇所は、captureSessionOutputFresh()への変更に伴いモック対象の関数名を変更する必要がある。",
+      "suggestion": "Phase 2実装時に以下を確認すること: (1) prompt-response/route.tsのテストファイルで captureSessionOutput のモックを captureSessionOutputFresh に更新する必要があるか確認。(2) cli-session.tsのモジュールモック（vi.mock('./cli-session', ...)）が captureSessionOutputFresh も自動的にモック対象に含むか確認（vi.mock()はモジュール全体をモックするため、通常は自動的に含まれるが、明示的なモック定義がある場合は追加が必要）。設計書のセクション8.1に「captureSessionOutputFresh()のモック追加が必要なテストファイル一覧」を明記すること。",
+      "affected_section": "8.1 テスト方針, 8.2 テスト分離方針"
+    },
+    {
+      "id": "DA3-012",
+      "severity": "should_fix",
+      "category": "existing_feature",
+      "title": "Issue #265（セッションエラーパターン検出）へのキャッシュの影響分析",
+      "description": "Issue #265でclaude-session.tsに導入されたisSessionHealthy()、ensureHealthySession()、clearCachedClaudePath()は、セッションの健全性チェックと自動回復を行う。これらの関数はcapturePane()を直接呼び出しており、キャッシュ層を経由しない（DA3-003で指摘）。worktrees/route.tsのPhase 3最適化でisSessionHealthy()をproduction export化して直接呼び出す設計は、Issue #265の「壊れたセッション検出・再作成」機能を維持する。ただし、ensureHealthySession()内のkillSession()（L383）呼び出し後にキャッシュが無効化されない。killSession()は設計書の無効化トリガー一覧（セクション3.4.1）で「session-cleanup.ts, opencode.ts」が実装箇所として挙げられているが、ensureHealthySession()内のkillSession()は含まれていない。",
+      "suggestion": "ensureHealthySession()は現在claude-session.ts内のprivate関数であり、startClaudeSession()（L602）からのみ呼ばれる。startClaudeSession()はセッション作成フローであり、killSession()後に新しいセッションが作成されるため、古いキャッシュが参照される期間はごく短い（TTL=2秒以内に自然失効）。実害リスクは低いが、設計書のセクション3.4.1の無効化トリガー一覧にensureHealthySession()内のkillSession()を追記し、TTL失効による自然な無効化で対応する旨を注記すること。",
+      "affected_section": "3.4.1 無効化トリガー一覧"
+    },
+    {
+      "id": "DA3-013",
+      "severity": "nice_to_have",
+      "category": "performance",
+      "title": "キャッシュヒット率の見積もりとポーリングタイミングの実測検証",
+      "description": "設計書セクション7.2ではキャッシュヒット率を「複数呼び出し元（3-4個）: ヒット率 50-75%」と見積もっている。実際のポーリングフローでは、WorktreeSelectionContext（2/5/10秒間隔）がGET /api/worktreesを呼び出し、WorktreeDetailRefactored（current-output API）が2秒間隔でポーリングする。また、auto-yes-manager（2秒間隔）とresponse-poller（2秒間隔）がサーバーサイドでポーリングする。これら4つのポーリング元は独立したタイミングで動作しており、TTL=2秒のキャッシュウィンドウ内で複数の呼び出しが重なる確率は、ポーリングの位相差に依存する。ポーリング間隔がすべて2秒の場合、初回ポーリング以降は位相が徐々にずれ、キャッシュヒット率は理論値より低くなる可能性がある。",
+      "suggestion": "Phase 5テスト時にキャッシュヒット率の実測ログを一時的に追加し、理論値との乖離を確認すること。具体的にはgetOrFetchCapture()にcacheHit/cacheMiss/singleflightHitのカウンタをモジュールスコープで保持し、テスト終了時にログ出力する。実測値が30%を下回る場合は、TTLの延長（3秒）やポーリングタイミングの同期化を検討する。",
+      "affected_section": "7.2 キャッシュヒット率の見積もり"
+    },
+    {
+      "id": "DA3-014",
+      "severity": "nice_to_have",
+      "category": "lifecycle",
+      "title": "session-cleanup.tsへのclearAllCache()追加とstopAllSchedules()の呼び出し順序",
+      "description": "設計書セクション3.4.1ではgraceful shutdown時にsession-cleanup.tsでclearAllCache()を追加するとしている。現在のsession-cleanup.ts（L109-117）ではstopAllSchedules()が最後に呼ばれている。clearAllCache()の挿入位置について設計書に明示的な指定がない。キャッシュクリアはセッション停止前と後のどちらでも機能的に問題ないが、cleanupWorktreeSessions()のループ（L74-97）内でkillSessionFn()が呼ばれた後にキャッシュが残存している場合、ループ中の別のworktreeのcaptureがstaleなキャッシュをヒットする可能性がある（ただし、graceful shutdown中にcaptureが呼ばれることは通常ない）。",
+      "suggestion": "clearAllCache()はcleanupWorktreeSessions()の先頭（L73の前）に挿入することを推奨する。理由: shutdown開始時点で全キャッシュを即座に無効化することで、shutdown処理中のあらゆるcaptureSessionOutput()呼び出しがフレッシュなデータを取得する（実際にはshutdown中にcaptureが呼ばれる可能性は低いが、防御的）。代替案として、session-cleanup.tsのclearAllCache()ではなく、stopAllAutoYesPolling()の後に配置することで、ポーラー停止→キャッシュクリアの論理的な順序を維持する。",
+      "affected_section": "3.4.1 無効化トリガー一覧"
+    },
+    {
+      "id": "DA3-015",
+      "severity": "nice_to_have",
+      "category": "concurrency",
+      "title": "Node.jsイベントループとsingleflightの安全性確認",
+      "description": "Node.jsのシングルスレッドイベントループモデルにおいて、getOrFetchCapture()のinflight Map操作（has(), get(), set(), delete()）は全て同期的であり、Map操作間でイベントループが割り込むことはない。したがって、race conditionは原理的に発生しない。ただし、awaitポイント（`await inflight.get(key)!`、`await promise`）ではイベントループに制御が戻るため、fetchFn実行中に別のリクエストがinflight.has(key)をチェックし、trueを得て共有Promiseを取得するフローは正しく動作する。設計書にはNode.jsのイベントループモデルとの整合性に関する明示的な記述がない。",
+      "suggestion": "設計書のセクション3.1.5のDR1-001注記の近くに、Node.jsシングルスレッドモデルとの整合性に関する簡潔な注記を追加すること。例:「Node.jsのシングルスレッドイベントループモデルにより、Map操作の原子性は保証される。inflight Mapの has/get/set/delete は同期操作であり、awaitポイント間のrace conditionは発生しない」。これにより、将来のレビュー時にconcurrencyの安全性が即座に理解できる。",
+      "affected_section": "3.1.5 singleflightパターン"
+    },
+    {
+      "id": "DA3-016",
+      "severity": "nice_to_have",
+      "category": "existing_feature",
+      "title": "OpenCodeのOPENCODE_PANE_HEIGHT(200行)とキャッシュの行数差異",
+      "description": "worktrees/route.tsのL56では `const captureLines = cliToolId === 'opencode' ? OPENCODE_PANE_HEIGHT : 100` としてOpenCode用に200行をキャプチャしている。キャッシュ導入後はCACHE_MAX_CAPTURE_LINES=10000行で保持し、sliceOutput()で200行を切り出す。OpenCodeのTUIは固定サイズバッファ（scrollbackなし）のため、10000行を要求しても実際には約200行しか返らない。キャッシュには200行程度のデータしか格納されないため、メモリ使用量見積もり（セクション4.2）の「1エントリ約1MB」はOpenCodeセッションには当てはまらない。これはメモリ見積もりの過大評価であり、実運用上の問題ではないが、精度の観点で注記があると良い。",
+      "suggestion": "セクション4.2のメモリ使用量見積もりに、OpenCodeセッション（固定バッファ200行）の場合は1エントリ約20KBとなり、平均値は1MBより低くなる旨を注記すること。",
+      "affected_section": "4.2 メモリ使用量見積もり"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 10,
+    "nice_to_have_count": 4,
+    "overall_quality": "high",
+    "comments": "設計方針書のキャッシュアーキテクチャは全体として堅実であり、既存機能への影響を最小限に抑える設計判断（インターフェース非変更、captureSessionOutputFresh()分離、B案無効化）は適切である。主要なリスクは以下の2点に集約される。(1) sliceOutput()の行数計算とresponse-pollerのlastCapturedLineベース差分検出の整合性（DA3-001）。これはoff-by-oneエラーやtmuxバッファの先頭空行トリミングに起因し、テストで検証が必要。(2) singleflightパターンのエラー共有時にエラーメッセージの文脈が不整合になる理論的リスク（DA3-002）。sessionNameにcliToolIdが含まれるため実運用上のリスクは低いが、前提をドキュメントに明記すべき。should_fix指摘の多くは設計書の記述追加（設計判断の明示化）であり、実装自体の変更は限定的。Issue #393、#265、#306との整合性は設計方針書で適切にカバーされている。schedule-manager.tsのcmateFileCacheパターンとの設計一貫性も概ね良好であり、globalThisパターンの使い分け基準の明示化が推奨事項として残る。"
+  }
+}

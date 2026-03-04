@@ -1,0 +1,22 @@
+{
+  "issue_number": 401,
+  "refactor_targets": [
+    "scripts/stop.sh",
+    "scripts/stop-server.sh",
+    "scripts/build-and-start.sh"
+  ],
+  "quality_metrics": {
+    "before_coverage": 0,
+    "note": "Shell scripts only - no unit test coverage metrics applicable"
+  },
+  "improvement_goals": [
+    "コードの可読性向上（コメントの整合性確認）",
+    "設計方針書のチェックリスト項目が全て実装されていることの最終確認",
+    "不要なコードや重複がないことの確認"
+  ],
+  "constraints": [
+    "シェルスクリプトのみの変更（TypeScriptは変更しない）",
+    "設計方針書（dev-reports/design/issue-401-stop-script-fix-design-policy.md）に準拠した実装を維持すること",
+    "受入テストが全項目合格している現在の実装を壊さないこと"
+  ]
+}

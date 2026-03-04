@@ -9,13 +9,12 @@ import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, updateWorktreeDescription, updateWorktreeLink, updateFavorite, updateStatus, updateCliToolId, updateSelectedAgents, updateVibeLocalModel, updateVibeLocalContextWindow, getMessages, markPendingPromptsAsAnswered, getInitialBranch } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, VIBE_LOCAL_CONTEXT_WINDOW_MIN, VIBE_LOCAL_CONTEXT_WINDOW_MAX, type CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutput } from '@/lib/cli-session';
-import { detectSessionStatus } from '@/lib/status-detector';
-import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
 import { getGitStatus } from '@/lib/git-utils';
 import type { GitStatus } from '@/types/models';
 import { isValidWorktreeId } from '@/lib/auto-yes-manager';
 import { validateSelectedAgentsInput } from '@/lib/selected-agents-validator';
+import { listSessions } from '@/lib/tmux';
+import { detectWorktreeSessionStatus } from '@/lib/worktree-status-helper';
 
 export async function GET(
   request: NextRequest,
@@ -40,63 +39,17 @@ export async function GET(
       );
     }
 
-    // Check session status for all CLI tools (consistent with /api/worktrees)
-    // R1-003: Use CLI_TOOL_IDS instead of hardcoded array
-    const manager = CLIToolManager.getInstance();
-    const allCliTools: readonly CLIToolType[] = CLI_TOOL_IDS;
+    // Issue #405: Batch query all tmux sessions once (N+1 elimination)
+    const tmuxSessions = await listSessions();
+    const sessionNameSet = new Set(tmuxSessions.map(s => s.name));
 
-    const sessionStatusByCli: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>> = {};
-
-    let anyRunning = false;
-    let anyWaiting = false;
-    let anyProcessing = false;
-
-    for (const cliToolId of allCliTools) {
-      const cliTool = manager.getTool(cliToolId);
-      const isRunning = await cliTool.isRunning(params.id);
-
-      // Check status based on terminal state
-      // - isWaitingForResponse: Interactive prompt (yes/no, multiple choice)
-      // - isProcessing: Thinking indicator visible
-      let isWaitingForResponse = false;
-      let isProcessing = false;
-      if (isRunning) {
-        try {
-          // OpenCode TUI uses a 200-line pane; capture full pane to see content area
-          const captureLines = cliToolId === 'opencode' ? OPENCODE_PANE_HEIGHT : 100;
-          const output = await captureSessionOutput(params.id, cliToolId, captureLines);
-          const statusResult = detectSessionStatus(output, cliToolId);
-          isWaitingForResponse = statusResult.status === 'waiting';
-          isProcessing = statusResult.status === 'running';
-
-          // Clean up stale pending prompts if no prompt is showing
-          // NOTE: !statusResult.hasActivePrompt is logically equivalent to
-          //       !promptDetection.isPrompt in the previous implementation (C-004)
-          if (!statusResult.hasActivePrompt) {
-            const messages = getMessages(db, params.id, undefined, 10, cliToolId);
-            const hasPendingPrompt = messages.some(
-              msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
-            );
-            if (hasPendingPrompt) {
-              markPendingPromptsAsAnswered(db, params.id, cliToolId);
-            }
-          }
-        } catch {
-          // If capture fails, assume processing
-          isProcessing = true;
-        }
-      }
-
-      sessionStatusByCli[cliToolId] = {
-        isRunning,
-        isWaitingForResponse,
-        isProcessing,
-      };
-
-      if (isRunning) anyRunning = true;
-      if (isWaitingForResponse) anyWaiting = true;
-      if (isProcessing) anyProcessing = true;
-    }
+    const sessionStatus = await detectWorktreeSessionStatus(
+      params.id,
+      sessionNameSet,
+      db,
+      getMessages,
+      markPendingPromptsAsAnswered,
+    );
 
     // Issue #111: Get git status for branch visualization
     let gitStatus: GitStatus | undefined;
@@ -113,10 +66,7 @@ export async function GET(
       {
         ...worktree,
         gitStatus,
-        isSessionRunning: anyRunning,
-        isWaitingForResponse: anyWaiting,
-        isProcessing: anyProcessing,
-        sessionStatusByCli,
+        ...sessionStatus,
       },
       { status: 200 }
     );

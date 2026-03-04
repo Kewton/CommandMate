@@ -1,0 +1,57 @@
+{
+  "issue_number": 405,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "applied_items": [
+    {
+      "review_id": "R1-007",
+      "severity": "must_fix",
+      "status": "applied",
+      "changes_made": "受入条件「UIのステータス更新遅延が体感上許容範囲であること」を2つの定量的基準に置換: (1)「キャッシュ導入後、セッションステータスの反映遅延がキャッシュTTL（1-2秒）以内に収まること」 (2)「ユーザーがコマンド送信後、次回ポーリングでステータスが更新されること（キャッシュ無効化が正しく動作すること）」"
+    },
+    {
+      "review_id": "R1-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "S3セクションのcaptureSessionOutput呼び出し箇所一覧を4箇所から7箇所に拡充（GET /api/worktrees/:id、POST /api/worktrees/:id/prompt-response、assistant-response-saverを追加）。各箇所のcaptureLines行数も併記。影響範囲テーブルにworktrees/[id]/route.ts、prompt-response/route.ts、assistant-response-saver.ts、tmux.ts、cli-session.ts、CLAUDE.mdを追加（計12行に拡充）"
+    },
+    {
+      "review_id": "R1-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "「提案する解決策 > 1.」に「captureLines行数差異への対応方針（A案採用）」サブセクションを追加。A案（最大行数でキャッシュしsliceで対応）の採用理由、メリット、メモリ見積もり（10worktree x 10,000行 x 100bytes = 約10MB）、100行要求時の動作を記載"
+    },
+    {
+      "review_id": "R1-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "実装タスクに「isRunning()最適化: tmux list-sessionsの一括取得によるN+1解消（5N回のhas-sessionを1回のlist-sessionsに集約）」を追加。S1セクションにisRunning()とcaptureSessionOutput()内部でのhasSession()二重呼び出しに関する補足を追加。影響範囲にtmux.ts（list-sessions一括取得関数追加）とcli-session.ts（キャッシュ利用時のhasSession()スキップ）を追加"
+    },
+    {
+      "review_id": "R1-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "「提案する解決策 > 1.」に「キャッシュ無効化戦略」サブセクションを追加。4つの無効化ポイント（sendKeys/sendMessage時、killSession時、prompt-response APIバイパス、auto-yes応答直後）とそれぞれの理由を記載。実装タスクにキャッシュ無効化関連の2タスクを追加"
+    },
+    {
+      "review_id": "R1-009",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "実装タスクに「CLAUDE.mdのモジュール説明テーブル更新（新規: src/lib/tmux-capture-cache.ts、既存モジュールのIssue #405変更内容反映）」を追加。影響範囲テーブルにCLAUDE.mdを追加"
+    },
+    {
+      "review_id": "R1-010",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "実装タスクの「GET /api/worktrees: 実行中CLIツールのみcapture」を「GET /api/worktrees: DBのworktreeレコードからactive CLI tool情報を事前取得し、isRunning()呼び出し対象を絞り込む（tmux list-sessionsの一括取得も検討）」に修正。既にisRunning()=true時のみcaptureする条件分岐は存在するため、真のボトルネックであるisRunning()全ツール呼び出しの削減に焦点を当てた記述に変更"
+    }
+  ],
+  "skipped_items": [],
+  "summary": {
+    "total_items": 7,
+    "applied_count": 7,
+    "skipped_count": 0,
+    "github_issue_updated": true,
+    "comments": "Must Fix 1件（R1-007: 受入条件の定量化）、Should Fix 6件（R1-001/R1-002/R1-003/R1-005/R1-009/R1-010）を全て反映完了。Nice to Have 4件（R1-004/R1-006/R1-008/R1-011）は反映対象外としてスキップ。Issue本文の構造を維持しつつ、S3セクションの呼び出し箇所網羅、キャッシュ設計方針・無効化戦略の追記、実装タスクの精緻化、影響範囲テーブルの拡充、受入条件の定量化、レビュー履歴セクションの追加を実施"
+  }
+}

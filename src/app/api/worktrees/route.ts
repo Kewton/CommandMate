@@ -10,11 +10,8 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered } from '@/lib/db';
-import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutput } from '@/lib/cli-session';
-import { detectSessionStatus } from '@/lib/status-detector';
-import { OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
+import { listSessions } from '@/lib/tmux';
+import { detectWorktreeSessionStatus } from '@/lib/worktree-status-helper';
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,73 +24,23 @@ export async function GET(request: NextRequest) {
     // Get worktrees (with optional filter)
     const worktrees = getWorktrees(db, repositoryFilter || undefined);
 
-    // Check session status and response status for each worktree
-    const manager = CLIToolManager.getInstance();
-    // R1-003/R3-008: Use CLI_TOOL_IDS instead of hardcoded array
-    const allCliTools: readonly CLIToolType[] = CLI_TOOL_IDS;
+    // Issue #405: Batch query all tmux sessions once (N+1 elimination)
+    const tmuxSessions = await listSessions();
+    const sessionNameSet = new Set(tmuxSessions.map(s => s.name));
 
     const worktreesWithStatus = await Promise.all(
       worktrees.map(async (worktree) => {
-        // Check status for all CLI tools
-        const sessionStatusByCli: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean }>> = {};
-
-        let anyRunning = false;
-        let anyWaiting = false;
-        let anyProcessing = false;
-
-        for (const cliToolId of allCliTools) {
-          const cliTool = manager.getTool(cliToolId);
-          const isRunning = await cliTool.isRunning(worktree.id);
-
-          // Check status based on terminal state
-          // - isWaitingForResponse: Interactive prompt (yes/no, multiple choice)
-          // - isProcessing: Thinking indicator visible
-          let isWaitingForResponse = false;
-          let isProcessing = false;
-          if (isRunning) {
-            try {
-              // OpenCode TUI uses a 200-line pane; capture full pane to see content area
-              const captureLines = cliToolId === 'opencode' ? OPENCODE_PANE_HEIGHT : 100;
-              const output = await captureSessionOutput(worktree.id, cliToolId, captureLines);
-              const statusResult = detectSessionStatus(output, cliToolId);
-              isWaitingForResponse = statusResult.status === 'waiting';
-              isProcessing = statusResult.status === 'running';
-
-              // Clean up stale pending prompts if no prompt is showing
-              // NOTE: !statusResult.hasActivePrompt is logically equivalent to
-              //       !promptDetection.isPrompt in the previous implementation (C-004)
-              if (!statusResult.hasActivePrompt) {
-                const messages = getMessages(db, worktree.id, undefined, 10, cliToolId);
-                const hasPendingPrompt = messages.some(
-                  msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
-                );
-                if (hasPendingPrompt) {
-                  markPendingPromptsAsAnswered(db, worktree.id, cliToolId);
-                }
-              }
-            } catch {
-              // If capture fails, assume processing
-              isProcessing = true;
-            }
-          }
-
-          sessionStatusByCli[cliToolId] = {
-            isRunning,
-            isWaitingForResponse,
-            isProcessing,
-          };
-
-          if (isRunning) anyRunning = true;
-          if (isWaitingForResponse) anyWaiting = true;
-          if (isProcessing) anyProcessing = true;
-        }
+        const status = await detectWorktreeSessionStatus(
+          worktree.id,
+          sessionNameSet,
+          db,
+          getMessages,
+          markPendingPromptsAsAnswered,
+        );
 
         return {
           ...worktree,
-          isSessionRunning: anyRunning,
-          isWaitingForResponse: anyWaiting,
-          isProcessing: anyProcessing,
-          sessionStatusByCli,
+          ...status,
         };
       })
     );

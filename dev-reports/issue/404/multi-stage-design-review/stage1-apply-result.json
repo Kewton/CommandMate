@@ -1,0 +1,51 @@
+{
+  "issue_number": 404,
+  "stage": 1,
+  "applied_findings": ["R1-001", "R1-002", "R1-003", "R1-005"],
+  "skipped_findings": ["R1-004", "R1-006", "R1-007"],
+  "design_doc_updated": true,
+  "source_code_modified": false,
+  "summary": "Stage 1レビュー指摘事項を設計方針書に反映。R1-001(must_fix): build-and-start.shのbash関数を廃止しTypeScript実装に一本化するDRY修正をSection 3.6・2.2・6に反映。R1-002(should_fix): resource-cleanup.tsの責務境界をSection 1(MCPプロセス)/Section 2(globalThis Map)として明確化しSection 3.1に反映。R1-003(should_fix): stopScheduleForWorktree()のworktreePath?引数を削除しworktreeIdのみに簡素化、Section 3.3・2.2・6に反映。R1-005(nice_to_have): auto-yes-manager.ts内にクリーンアップ関数を配置する代替案をSection 6に注記。R1-004/R1-006/R1-007は現行設計で許容範囲またはYAGNI原則によりスキップ。レビュー指摘事項サマリーおよび実装チェックリストをSection 0として追加。",
+  "changes_detail": {
+    "R1-001": {
+      "severity": "must_fix",
+      "action": "applied",
+      "sections_updated": ["Section 0", "Section 2.2", "Section 3.6", "Section 6"],
+      "description": "build-and-start.shのbash関数cleanup_orphaned_mcp_processes()を廃止し、initResourceCleanup()内のcleanupOrphanedMcpProcesses()に一本化。DRY原則を遵守。"
+    },
+    "R1-002": {
+      "severity": "should_fix",
+      "action": "applied",
+      "sections_updated": ["Section 0", "Section 3.1", "Section 6"],
+      "description": "resource-cleanup.tsの責務をSection 1(MCPプロセスクリーンアップ)とSection 2(globalThis Mapクリーンアップ)に区分し、initResourceCleanup()をオーケストレーターとして明記。"
+    },
+    "R1-003": {
+      "severity": "should_fix",
+      "action": "applied",
+      "sections_updated": ["Section 0", "Section 2.2", "Section 3.3", "Section 6"],
+      "description": "stopScheduleForWorktree()のシグネチャからworktreePath?引数を削除し(worktreeId: string)に簡素化。cmateFileCacheのpath解決は内部DB lookupに閉じる。"
+    },
+    "R1-004": {
+      "severity": "should_fix",
+      "action": "skipped",
+      "reason": "stopScheduleForWorktree()のO(N*M)計算量はMAX_CONCURRENT_SCHEDULES=100の制約下で実運用上問題にならない。将来の逆引きインデックス追加は必要時に検討。"
+    },
+    "R1-005": {
+      "severity": "nice_to_have",
+      "action": "applied",
+      "sections_updated": ["Section 0", "Section 6"],
+      "description": "auto-yes-manager.ts内にcleanupOrphanedAutoYesEntries()を配置する代替案をSection 6に注記。実装時に再検討。"
+    },
+    "R1-006": {
+      "severity": "nice_to_have",
+      "action": "skipped",
+      "reason": "コンテナ環境検出ロジックは現行設計を維持。CM_SKIP_MCP_CLEANUPオプトアウト機構は必要時に追加。"
+    },
+    "R1-007": {
+      "severity": "nice_to_have",
+      "action": "skipped",
+      "reason": "CleanupTarget interfaceによる抽象化は現時点では過剰設計（YAGNI原則）。クリーンアップ対象が3つ以上になった場合に検討。"
+    }
+  },
+  "timestamp": "2026-03-04T12:15:00Z"
+}

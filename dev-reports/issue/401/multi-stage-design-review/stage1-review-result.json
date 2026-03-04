@@ -1,0 +1,81 @@
+{
+  "stage": 1,
+  "focus_area": "設計原則",
+  "review_date": "2026-03-03",
+  "issue_number": 401,
+  "design_doc_path": "dev-reports/design/issue-401-stop-script-fix-design-policy.md",
+  "summary": "設計方針書は全体として高品質であり、SOLID/KISS/YAGNI/DRYの各原則を適切に考慮している。既存CLIモジュール(daemon.ts/pid-manager.ts)の堅牢な実装を参考にしながらも、シェルスクリプトの特性に合わせた設計判断がなされている。主要な指摘は3件：(1) CM_PORT環境変数のバリデーション不足（防御的プログラミング）、(2) stop.shの || true 記述位置がパイプライン全体をカバーしていない可能性（防御的プログラミング）、(3) build-and-start.shのポートベースチェック追加時の既存PIDファイルクリーンアップ漏れ（SRP/防御的プログラミング）。全体評価は「良好」で、指摘事項の反映により更に堅牢な実装となる。",
+  "findings": [
+    {
+      "id": "D1-001",
+      "severity": "should_fix",
+      "category": "防御的プログラミング",
+      "title": "CM_PORT環境変数のバリデーション不足",
+      "description": "設計方針書セクション5.3で「CM_PORT / MCBD_PORT の値はそのまま使用」「lsofが不正なポート値でエラーを返す場合は 2>/dev/null で抑制」と記載されている。しかし、CM_PORTに不正な値（例: 空文字列、文字列、負数、0、65536超）が設定された場合、lsofのエラー抑制だけでは不十分である。特にkill対象PIDの取得自体が不正ポートにより空になるケースは安全側に倒れるが、build-and-start.shでのポート使用（nohup npm start）は環境変数経由でNext.jsに渡るため、入口でのバリデーションが望ましい。CLI側のdaemon.tsではparseInt()で数値化しており、同等の防御がシェルスクリプト側にも必要。",
+      "suggestion": "設計方針書セクション5.3に以下のバリデーションパターンを追加する：\n\n```bash\n# ポート番号バリデーション（数値・範囲チェック）\nif ! echo \"$PORT\" | grep -qE '^[0-9]+$' || [ \"$PORT\" -lt 1 ] || [ \"$PORT\" -gt 65535 ]; then\n    echo \"ERROR: Invalid port number: $PORT\" >&2\n    exit 1\nfi\n```\n\nただし、stop.shではバリデーション失敗時にexit 1とするか、デフォルト3000にフォールバックするかの設計判断が必要。停止スクリプトの場合、フォールバックよりもエラー通知が適切。build-and-start.shではexit 1が適切。"
+    },
+    {
+      "id": "D1-002",
+      "severity": "should_fix",
+      "category": "防御的プログラミング",
+      "title": "stop.sh修正案の || true がパイプライン末尾に配置されているが、grepが0件マッチ時にパイプラインが失敗する",
+      "description": "設計方針書セクション4.1の修正案で `PIDS=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)` と記載されている。set -eが有効な環境では、パイプラインの各コマンドの終了コードが問題となる。bashのpipefailオプションが設定されている場合、grep -Eのマッチ0件（exit code 1）でパイプライン全体が失敗する。現在のstop.shにはset -eがないため直接の問題にはならないが、将来set -eが追加された場合やsource経由で呼ばれた場合のリスクがある。一方、残留チェックの `REMAINING=$(lsof ... | grep ... | sort -u)` には || true がなく、この非対称性は意図的でないように見える。",
+      "suggestion": "設計方針書セクション4.1で以下の2点を明確化する：\n\n1. stop.shにset -eを追加しない方針であることを明記（または追加する場合はpipefailとの相互作用を考慮）\n2. 残留チェックの `REMAINING=$(...)` にも || true を付加するか、空の場合のハンドリングを統一する\n\n推奨パターン：\n```bash\nREMAINING=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)\n```"
+    },
+    {
+      "id": "D1-003",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "title": "PIDバリデーションパイプラインの重複は許容範囲だが、コメントで意図を明示すべき",
+      "description": "設計方針書セクション8の「採用した設計」で「stop.shとstop-server.shの分離維持」「一部ロジックが重複」と記載されており、代替案「bashの共通関数ファイル化」を不採用（YAGNI）とした判断は妥当。ただし、同一パイプラインパターン `lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u` が修正後のstop.sh内で2回、stop-server.sh内で3回、build-and-start.sh内で1回の計6箇所に出現する。共通関数化はYAGNI違反として不採用で正しいが、各箇所のコメントでパターンの意図（PIDバリデーション+重複除去）を明示することで保守性を向上できる。",
+      "suggestion": "設計方針書セクション3.2「安全なPIDパイプラインパターン」に、各スクリプトでこのパイプラインを使用する箇所にはコメント `# Safe PID pipeline: validate numeric + deduplicate` を付記する方針を追加する。これにより、将来の保守者がパターンの意図を理解しやすくなる。"
+    },
+    {
+      "id": "D1-004",
+      "severity": "should_fix",
+      "category": "SRP",
+      "title": "build-and-start.shのポートベースチェック追加が既存PIDファイルチェックとの責務境界を曖昧にしている",
+      "description": "設計方針書セクション4.3で、既存のPIDファイルチェック（L69-76）の後にポートベースのチェックを追加する方針が示されている。修正案を見ると、PIDファイルチェックで「PIDファイルが不正またはプロセスが終了済み → 削除」した後、ポートベースでプロセス残留を検知した場合はexit 1で終了する。ここで問題は、PIDファイル削除後にポート使用中が検知された場合、ユーザーへのメッセージが「Use ./scripts/stop-server.sh to stop it first」となっているが、PIDファイルは既に削除済みのため、stop-server.shのPIDファイルベース停止は機能せず、ポートベース停止のみが有効となる。この状態遷移が設計方針書で明示されていない。",
+      "suggestion": "設計方針書セクション4.3に以下の補足を追加する：\n\n「PIDファイルが不正/プロセス終了済みでPIDファイルを削除した後、ポートベースでプロセス残留を検知した場合、stop-server.shはポートベース停止（Step 1）で対処可能なため、ユーザーへの案内は正しく機能する。この動作フローを設計根拠として明記する。」\n\nまたは、PIDファイル削除を遅延させ、ポートチェック後に行う方が安全な選択肢として検討する。"
+    },
+    {
+      "id": "D1-005",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "stop-server.shのSIGTERM→SIGKILL変更は段階的停止の待機時間が停止処理全体を遅延させる",
+      "description": "設計方針書セクション4.2で、stop-server.shの現在の `kill -9` をSIGTERM + 2秒待機 + SIGKILLフォールバックに変更する方針が示されている。stop-server.shはL38-47で既に最終確認ステップ（sleep 1 + 残留チェック + kill -9）を持っている。修正により、Step 1のSIGTERM + sleep 2 + SIGKILL、Step 2のPIDファイルベース停止、Step 3のsleep 1 + 残留チェック + kill -9 で、最悪ケースでsleep合計が3秒+αとなる。rebuild SKILLでは `stop.sh && build-and-start.sh --daemon` として呼ばれるが、stop.shにも同様のsleep 2が追加されるため、再起動サイクル全体で追加待機時間が発生する。この影響をトレードオフテーブルで定量的に記載しているのは良い。",
+      "suggestion": "現在のトレードオフ記載「停止に最大2秒追加」は正確だが、restart.shやrebuild SKILLのようなチェーン実行での累積影響（stop.sh 2秒 + build-and-start.sh起動確認 3秒 = 合計5秒+）も言及すると完全性が向上する。ただし、これは現状でも許容範囲内の遅延であり、グレースフルシャットダウンの利点が上回る。"
+    },
+    {
+      "id": "D1-006",
+      "severity": "must_fix",
+      "category": "防御的プログラミング",
+      "title": "stop-server.shのPIDファイルベース停止でkill -9 -$PIDのプロセスグループ指定が未バリデーションのPIDに対して実行される",
+      "description": "設計方針書セクション4.2の修正方針テーブルで、L32の `kill -9 -$PID` をSIGTERM + フォールバックに変更する方針が示されている。しかし、現在のstop-server.shのL28-34ではPIDファイルから読み取ったPIDに対して `kill -9 -$PID`（プロセスグループkill）を実行している。設計方針書ではPIDファイルバリデーション（head -1 + grep -E '^[0-9]+$'）を追加する方針だが、修正後のコードで `kill -$PID`（プロセスグループ指定）を維持するのか、`kill $PID`（単一プロセス）に変更するのかが明示されていない。プロセスグループ停止は子プロセスも含めて停止する意図があるが、SIGTERMでのプロセスグループ指定が設計上適切かの判断が必要。daemon.tsではprocess.kill(pid, signal)で単一プロセスを対象としている。",
+      "suggestion": "設計方針書セクション4.2に以下を明記する：\n\n1. PIDファイルベースの停止で `-$PID`（プロセスグループ）を維持するか `$PID`（単一プロセス）に変更するかの設計判断\n2. 推奨：SIGTERM段階ではプロセスグループ指定 `kill -- -$PID` を使用し、Node.jsの子プロセス（next server等）も含めてグレースフルシャットダウンの機会を与える。ただし、nohup起動時はプロセスグループリーダーとなるため `-$PID` が有効であることを前提条件として明記する\n3. フォールバック段階では `kill -9 -$PID 2>/dev/null || kill -9 $PID 2>/dev/null` の既存パターンを維持する理由（プロセスグループが形成されていないケースへの対応）\n\nこの設計判断が欠落していると、実装時にSIGTERM段階でのプロセスグループ指定の有無が実装者の裁量に委ねられ、意図しない動作差異が生じる可能性がある。"
+    },
+    {
+      "id": "D1-007",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "スコープ外の明示が適切で過剰な機能追加を防止している",
+      "description": "設計方針書セクション9で5項目のスコープ外を明示している点は非常に良い。特に「CLIとシェルスクリプトのPIDファイルパス統合」「bats-coreテストフレームワークの導入」を別Issueとしたのは、YAGNI原則とスコープ管理の両面で適切な判断。代替案との比較テーブル（セクション8）でも「bashの共通関数ファイル化」を不採用（YAGNI）とした根拠が明確。",
+      "suggestion": "指摘なし。現状の設計方針が適切。"
+    },
+    {
+      "id": "D1-008",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "title": "stop.shとstop-server.shの責務分離が明確に文書化されていない",
+      "description": "設計方針書では両スクリプトの分離を維持する方針（セクション8）を示しているが、それぞれの責務の定義が暗黙的である。stop.shはPM2/非PM2のフロントエンド向け汎用停止スクリプト、stop-server.shはdaemonモードで起動されたサーバーの停止（PIDファイル+ポートベースの多段停止）という異なる責務を持つ。この責務の違いが設計方針書で明示されると、両スクリプトの修正方針の差異（stop.shにはPIDファイル操作がない等）の理由が更に明確になる。",
+      "suggestion": "設計方針書セクション2「アーキテクチャ設計」に以下の責務定義テーブルを追加する：\n\n| スクリプト | 主な呼び出し元 | 責務 |\n|-----------|--------------|------|\n| stop.sh | restart.sh, rebuild SKILL | PM2またはポートベースの汎用停止（PIDファイル非管理） |\n| stop-server.sh | ユーザー直接実行 | daemon起動サーバーの停止（PIDファイル+ポート多段停止） |"
+    }
+  ],
+  "statistics": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 4,
+    "total": 8
+  },
+  "overall_assessment": "良好"
+}

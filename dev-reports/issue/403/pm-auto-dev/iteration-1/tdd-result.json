@@ -1,0 +1,60 @@
+{
+  "status": "success",
+  "issue_number": 403,
+  "iteration": 1,
+  "coverage": null,
+  "coverage_note": "Bash script implementation; coverage measured via dedicated shell test suite (11/11 pass), not Vitest",
+  "unit_tests": {
+    "total": 4388,
+    "passed": 4388,
+    "failed": 0,
+    "skipped": 7,
+    "note": "All 207 existing Vitest test files pass. Additionally, 11/11 bash tests pass for rotate_logs()."
+  },
+  "bash_tests": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0,
+    "test_file": "tests/scripts/test-rotate-logs.sh",
+    "test_cases": [
+      "rotate_logs() function exists in build-and-start.sh",
+      "MAX_LOG_SIZE_MB and MAX_LOG_GENERATIONS constants are defined",
+      "rotate_logs is called with || echo WARNING pattern",
+      "chmod 640 for LOG_FILE is present after nohup [S4-005]",
+      "rotate_logs call is positioned before db:init and after chmod 755",
+      "No log file exists -> early return with exit code 0",
+      "Log file under threshold (5MB < 10MB) -> no rotation",
+      "Log file over threshold (15MB > 10MB) -> rotated to .1",
+      "Generation shift: .3 deleted, .2->.3, .1->.2, current->.1",
+      "Symlink guard [S4-006]: LOG_FILE is a symlink -> return 1",
+      "Symlink guard [S4-006]: generation file is a symlink -> return 1"
+    ]
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "scripts/build-and-start.sh",
+    "docs/en/internal/PRODUCTION_CHECKLIST.md",
+    "docs/internal/PRODUCTION_CHECKLIST.md",
+    "tests/scripts/test-rotate-logs.sh"
+  ],
+  "commits": [
+    "40b6d32: feat(log-rotation): add server log rotation to build-and-start.sh"
+  ],
+  "implemented_files": [
+    "scripts/build-and-start.sh",
+    "docs/en/internal/PRODUCTION_CHECKLIST.md",
+    "docs/internal/PRODUCTION_CHECKLIST.md",
+    "tests/scripts/test-rotate-logs.sh"
+  ],
+  "test_results": {
+    "unit_tests": "passed",
+    "lint": "passed",
+    "type_check": "passed",
+    "bash_tests": "passed"
+  },
+  "notes": "TDD implementation complete for Issue #403. Bash script rotate_logs() function added to scripts/build-and-start.sh with: (1) MAX_LOG_SIZE_MB=10 and MAX_LOG_GENERATIONS=3 constants, (2) rotate_logs() function with symlink guards [S4-006] on all rotation targets, (3) POSIX-compliant wc -c size detection, (4) failure-safe || echo WARNING pattern for set -e compatibility, (5) chmod 640 [S4-005] after nohup for log file permissions, (6) PRODUCTION_CHECKLIST updated in both EN and JP versions. A dedicated bash test suite (11 tests) validates structural correctness and functional behavior including generation shift, symlink guards, and edge cases.",
+  "message": "TDD implementation complete. All 11 bash tests pass. All 4388 Vitest unit tests pass. ESLint and TypeScript checks clean."
+}

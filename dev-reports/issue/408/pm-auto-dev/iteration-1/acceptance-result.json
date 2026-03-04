@@ -1,0 +1,109 @@
+{
+  "issue_number": 408,
+  "status": "passed",
+  "acceptance_criteria_results": [
+    {
+      "criterion": "detectPrompt()が1回のみ呼び出されること（current-output APIリクエストあたり）",
+      "status": "passed",
+      "evidence": "current-output/route.tsからdetectPrompt/buildDetectPromptOptions/stripBoxDrawing/stripAnsiのimportが全て削除されている。detectPrompt()の呼び出しはdetectSessionStatus()内部の1箇所のみ（status-detector.ts L162）。route.ts内にdetectPromptの直接呼び出しは存在せず、コメント中の参照のみ（L86）。"
+    },
+    {
+      "criterion": "プロンプト検出結果が正しく返されること",
+      "status": "passed",
+      "evidence": "tests/unit/lib/status-detector.test.tsのIssue #408セクション（5テストケース）が全てパス。yes_noプロンプト、multiple_choiceプロンプト、未検出、thinking時の各パターンでpromptDetection.isPrompt/promptData/typeが正しく返される。"
+    },
+    {
+      "criterion": "promptDataのレスポンス構造が変更前後で同一であること",
+      "status": "passed",
+      "evidence": "route.ts L120: promptData: isPromptWaiting ? statusResult.promptDetection.promptData ?? null : null -- APIレスポンスJSON形状に変更なし。promptDataフィールドの型・構造は維持されている。"
+    },
+    {
+      "criterion": "isPromptWaitingの判定結果が変更前後で同一であること",
+      "status": "passed",
+      "evidence": "status-detector.ts L162でdetectPrompt(stripBoxDrawing(lastLines), promptOptions)が使用されている（cleanOutputではなくlastLines=15行ウィンドウ）。コミット99e2cc2で修正済み。integration test SF-004テスト（17行の出力でy/nプロンプトが1行目にある場合、hasActivePrompt=false）がパス。変更前後で同一の15行ウィンドウが使用されるため判定結果は同一。"
+    },
+    {
+      "criterion": "thinkingフラグの判定結果が変更前後で同一であること",
+      "status": "passed",
+      "evidence": "integration test 12/12テスト全パス。thinkingの検出ロジック（5行ウィンドウ STATUS_THINKING_LINE_COUNT）に変更なし。thinking状態の判定は status === 'running' && reason === 'thinking_indicator' で変更前後同一。"
+    },
+    {
+      "criterion": "thinking状態時にpromptDetectionフィールドは{isPrompt: false, cleanContent: ...}を含み、promptDataはundefinedであること",
+      "status": "passed",
+      "evidence": "unit test 'should include promptDetection with isPrompt=false during thinking (design guarantee)'がパス。status=running, reason=thinking_indicator時にpromptDetection.isPrompt===falseが確認済み。detectSessionStatus()の内部優先順序（prompt -> thinking）により、thinking到達時点でpromptDetection.isPrompt===falseが保証される。"
+    },
+    {
+      "criterion": "detectSessionStatus()内部のstripAnsi()+stripBoxDrawing()前処理と外部前処理が同一結果を生成すること",
+      "status": "passed",
+      "evidence": "status-detector.ts L142: cleanOutput=stripAnsi(output), L152: lastLines=contentLines.slice(-15).join('\\n'), L162: detectPrompt(stripBoxDrawing(lastLines), promptOptions)。旧route.tsの外部前処理（stripAnsi→stripBoxDrawing）と同一パイプライン。lastLinesベースのため15行ウィンドウも維持。"
+    },
+    {
+      "criterion": "APIレスポンスのJSON形状（promptData, isPromptWaiting, thinking, isGenerating, isCompleteフィールド）が変更前後で同一であること",
+      "status": "passed",
+      "evidence": "route.ts L104-129のレスポンス構造は全フィールド維持: isRunning, cliToolId, content, fullOutput, realtimeSnippet, lineCount, lastCapturedLine, isComplete, isGenerating, thinking, thinkingMessage, isPromptWaiting, promptData, autoYes, lastServerResponseTimestamp。JSON形状に変更なし。"
+    },
+    {
+      "criterion": "既存のUI動作に影響がないこと",
+      "status": "passed",
+      "evidence": "クライアント側の変更なし。APIレスポンスJSON形状に変更なし。4393件のユニットテスト全パス。TypeScriptコンパイルエラー0件。ESLintエラー0件。"
+    }
+  ],
+  "test_scenarios_results": [
+    {
+      "scenario": "シナリオ1: StatusDetectionResultにpromptDetectionフィールドが存在すること（requiredフィールドのためTypeScriptコンパイルで確認）",
+      "status": "passed",
+      "details": "TypeScriptコンパイル（npx tsc --noEmit）がエラー0件で完了。promptDetectionはrequiredフィールド（status-detector.ts L81: promptDetection: PromptDetectionResult）として定義されており、全8箇所のreturnパスで設定されている。"
+    },
+    {
+      "scenario": "シナリオ2: prompt検出時にpromptDetection.isPrompt===trueかつhasActivePrompt===trueが一致すること",
+      "status": "passed",
+      "details": "unit test 'should include promptDetection with isPrompt=true and promptData when prompt detected'および'should guarantee hasActivePrompt === promptDetection.isPrompt for all return paths' Case 1がパス。"
+    },
+    {
+      "scenario": "シナリオ3: prompt未検出時にpromptDetection.isPrompt===falseかつhasActivePrompt===falseが一致すること",
+      "status": "passed",
+      "details": "unit test 'should include promptDetection with isPrompt=false when no prompt detected'および'should guarantee hasActivePrompt === promptDetection.isPrompt for all return paths' Case 2-5（thinking/input_prompt/default/time-based）がパス。"
+    },
+    {
+      "scenario": "シナリオ4: thinking状態時にpromptDetection.isPrompt===falseが保証されること（Issue #161 Layer 1防御維持）",
+      "status": "passed",
+      "details": "unit test 'should include promptDetection with isPrompt=false during thinking (design guarantee)'がパス。status=running, reason=thinking_indicator時にpromptDetection.isPrompt===false確認済み。detectSessionStatus()の内部優先順序によりprompt検出がthinking検出より先に評価されるため、thinking到達時にはpromptDetection.isPrompt===falseが保証される。"
+    },
+    {
+      "scenario": "シナリオ5: current-output/route.tsからdetectPrompt, buildDetectPromptOptions, stripBoxDrawing, stripAnsiのimportが削除されていること",
+      "status": "passed",
+      "details": "route.tsのimport文をgrepで全数確認。from '@/lib/prompt-detector'およびfrom '@/lib/cli-patterns'のimportが0件。残存importはnext/server, db-instance, db, cli-tools/manager, cli-tools/types, cli-session, status-detector, auto-yes-managerのみ。"
+    },
+    {
+      "scenario": "シナリオ6: L98-L102の二重呼び出しコードブロックが削除されていること",
+      "status": "passed",
+      "details": "route.ts内にlet promptDetection/if (!thinking)/buildDetectPromptOptions/detectPrompt直接呼び出しが存在しない。L85-89にIssue #408コメント（promptDetection is obtained from detectSessionStatus() return value）が記載済み。"
+    },
+    {
+      "scenario": "シナリオ7: SF-001コメントがIssue #408 resolved表記に更新されていること",
+      "status": "passed",
+      "details": "status-detector.ts L12: 'Architecture note (Issue #408: SF-001 resolved)'。integration test L78: 'Issue #408: SF-001 resolved'、L98: 'Issue #408: SF-001 resolved'。"
+    },
+    {
+      "scenario": "シナリオ8: 全8箇所のreturnパスでpromptDetectionフィールドが設定されていること",
+      "status": "passed",
+      "details": "status-detector.ts内の8箇所のreturn文（L164:prompt_detected, L176:thinking_indicator, L196:opencode_processing_indicator, L232:thinking_indicator(opencode), L246:opencode_response_complete, L261:input_prompt, L275:no_recent_output, L287:default）全てにpromptDetectionフィールドが含まれている。requiredフィールドのためTypeScriptコンパイラが追加漏れを検出可能（defense-in-depth）。"
+    },
+    {
+      "scenario": "シナリオ9: 全既存ユニットテスト（4393件）がパスすること",
+      "status": "passed",
+      "details": "npm run test:unit実行結果: 207 test files passed, 4393 tests passed, 7 skipped。全テストパス。"
+    },
+    {
+      "scenario": "シナリオ10: TypeScriptコンパイルエラーが0件であること",
+      "status": "passed",
+      "details": "npx tsc --noEmit実行結果: エラー0件（出力なし）。"
+    }
+  ],
+  "overall_result": "passed",
+  "summary": "Issue #408の全受入条件および全テストシナリオがパスした。主要な実装内容: (1) StatusDetectionResultにpromptDetection: PromptDetectionResult（requiredフィールド）を追加し全8箇所のreturnパスで設定、(2) current-output/route.tsからdetectPrompt()の二重呼び出しコードブロックを削除し不要なimport（detectPrompt/buildDetectPromptOptions/stripBoxDrawing/stripAnsi）を除去、(3) SF-001 resolvedコメントを更新、(4) detectPrompt()の入力にlastLines（15行ウィンドウ）を使用（cleanOutputではない）。テスト結果: ユニットテスト4393件全パス、統合テスト12件全パス、TypeScriptコンパイルエラー0件、ESLintエラー0件。前回の失敗原因（detectPrompt()の入力がcleanOutputに誤変更されていた問題）はコミット99e2cc2で修正済みであり、SF-004統合テストを含む全テストがパスすることを確認した。",
+  "evidence_files": [
+    "tests/unit/lib/status-detector.test.ts (23 tests passed)",
+    "tests/integration/current-output-thinking.test.ts (12 tests passed)"
+  ]
+}

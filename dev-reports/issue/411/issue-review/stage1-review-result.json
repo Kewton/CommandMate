@@ -1,0 +1,132 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 411,
+  "review_date": "2026-03-03",
+  "summary": "Issue #411の仮説・前提条件は概ね正確であり、技術的方向性に大きな問題はない。ただし、受け入れ条件の測定可能性、MarkdownEditorのmemo化効果の限定性の明示、MessageInputのuseCallback依存関係の複雑性への言及、inline JSX抽出の設計方針の具体化について改善が必要。Must Fix 2件、Should Fix 4件、Nice to Have 2件。",
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "must_fix",
+      "category": "clarity",
+      "title": "受入条件「React DevTools Profilerで不要な再レンダーが削減されていること」が測定不能",
+      "description": "受入条件の1つ目「React DevTools Profilerで不要な再レンダーが削減されていること」は、ベースライン値が定義されておらず、何をもって「削減された」と判断するか不明確。開発者によって判断が異なり、PRレビュー時に合否を客観的に判定できない。また、React DevTools Profilerの確認は手動プロセスであり、CIで自動検証できない。",
+      "location": "受入条件セクション - 1項目目",
+      "suggestion": "具体的なシナリオと期待される結果を明記する。例: 「WorktreeDetailRefactoredの親状態（ポーリングによるterminal.output更新）が変化した際、FileViewer（isOpen=false時）が再レンダーされないこと」「MessageInputのprops（worktreeId, cliToolId, isSessionRunning）が変化しない場合、MessageInput自体が再レンダーされないこと」など。テスト手法も「手動でReact DevTools Profilerを使用して確認」と明記すべき。"
+    },
+    {
+      "id": "F1-002",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "MessageInputのuseCallback化に伴う依存関係の複雑性と副作用への言及が欠如",
+      "description": "MessageInputの9個のハンドラをuseCallbackで包む場合、多くのハンドラが内部state（message, isComposing, sending, showCommandSelector, isFreeInputMode等）に依存しており、依存配列が大きくなる。特にsubmitMessage/handleSubmit/handleKeyDownはstate依存が多く、useCallbackの依存配列が頻繁に変化するため、memo化の恩恵が限定的になる可能性がある。また、handleCompositionEnd内のsetTimeout参照やjustFinishedComposingRef.currentの更新パターンはuseCallback化時に注意が必要。Issueには「全ハンドラuseCallback化」とだけ記載されているが、効果が薄いものと効果的なものの区別、および実装上の注意点を記載すべき。",
+      "location": "実装タスクセクション - MessageInput",
+      "suggestion": "以下の分類を実装タスクに追記する: (1) 高効果: handleCommandSelect, handleCommandCancel, handleFreeInput, handleCompositionStart（state依存が少なく安定）、(2) 中効果: handleMessageChange, handleKeyDown（state依存あるが子コンポーネントへの伝播を抑制）、(3) 低効果: submitMessage, handleSubmit（state依存が多く参照安定性が低い、ただしsubmitMessageはhandleSubmitとhandleKeyDownから呼ばれるため、useCallback化しないと連鎖的に依存配列を不安定にする）。handleCompositionEndのsetTimeout内ref更新パターンの動作確認についても注意事項として記載すること。"
+    },
+    {
+      "id": "F1-003",
+      "severity": "should_fix",
+      "category": "correctness",
+      "title": "MarkdownEditorのmemo化は効果が限定的であるという注意書きが必要",
+      "description": "MarkdownEditorは既に内部で19箇所のuseCallback/useMemoを使用しており、内部最適化は十分に行われている。memo()でラップすることで「親の再レンダー時にMarkdownEditorの再レンダーをスキップする」効果はあるが、実際のレンダリングパスではMarkdownEditorは条件付き描画（editorFilePath && ...）されており、editorFilePathがnullの時はそもそもマウントされていない。editorFilePathがセットされている（エディタが開いている）時のみ存在し、その間の親再レンダーでpropsが変化しないケースは限定的（onClose/onSave/onMaximizedChangeはuseCallbackでラップ済み、worktreeId/filePathは安定）。つまりmemo化の効果は理論的に正しいが、実用的なインパクトは小さい可能性がある。",
+      "location": "背景・課題セクション - F4",
+      "suggestion": "Issue本文のF4セクションに「MarkdownEditorは条件付き描画のため、memo化の効果は主にエディタ表示中の親ポーリング更新時のスキップに限定される。優先度は他タスクより低い」旨の注記を追加する。"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "inline JSX抽出の設計方針（コンポーネント境界・props設計）が不明確",
+      "description": "WorktreeDetailRefactoredのleftPane/rightPaneを「別コンポーネントに抽出してmemo化」と記載されているが、(1) 抽出後のコンポーネント名とファイル配置、(2) 新コンポーネントが受け取るprops、(3) useMemoでJSXをメモ化する方式と別コンポーネント抽出方式のどちらを採用するかの判断基準が記載されていない。特にleftPaneはstate.messages, fileSearch, selectedAgents等多くのpropsに依存しており、別コンポーネントに抽出しても結局多くのpropsが頻繁に変化するため、memo化の実効性に疑問が残る。WorktreeDesktopLayoutは既にmemo化されており、leftPane/rightPaneのReactNode参照が変わらなければ内部の再レンダーはスキップされるが、インラインJSXの場合は毎回新しい参照になるため、useMemoで包むだけでも効果がある可能性がある。",
+      "location": "実装タスクセクション - WorktreeDetailRefactored",
+      "suggestion": "2つのアプローチを明示し、判断基準を記載する: (A) useMemo方式: leftPane/rightPaneのJSXをuseMemoで包み、依存するstate/propsを依存配列に列挙する。シンプルだがstate依存が多い場合は効果薄。(B) コンポーネント抽出方式: LeftPaneContent/RightPaneContentコンポーネントを同一ファイル内に定義しmemo化。propsの変化検知が明確だが、props drilling量が増える。推奨: rightPaneはprops数が少ない（5個）のでuseMemo方式、leftPaneはタブ切り替えにより描画内容が変わるのでコンポーネント抽出方式を検討。"
+    },
+    {
+      "id": "F1-005",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "MessageInputへのmemo適用時、子コンポーネント（SlashCommandSelector, InterruptButton）の未memo化が効果を減殺する点への言及が不足",
+      "description": "MessageInputをmemo()でラップしても、内部で使用しているSlashCommandSelector（L48でexport function、memo未適用）とInterruptButton（L42でexport function、memo未適用）はmemo化されていない。MessageInputの再レンダーがスキップされるシナリオでは問題ないが、MessageInput自体が再レンダーされる場合（stateが変化した場合）、useCallbackで安定化したhandlerを受け取っても、これらの子コンポーネントはmemo化されていないため再レンダーされる。MessageInputの最適化効果を最大化するには、SlashCommandSelectorとInterruptButtonのmemo化も検討すべきである。",
+      "location": "影響範囲セクション",
+      "suggestion": "影響範囲テーブルにSlashCommandSelector.tsxとInterruptButton.tsxを追加するか、「MessageInputのuseCallback化により子コンポーネントのmemo化が効果を発揮する前提条件が整う。将来的にSlashCommandSelector/InterruptButtonのmemo化を検討する」旨の注記を追加する。"
+    },
+    {
+      "id": "F1-006",
+      "severity": "should_fix",
+      "category": "risk",
+      "title": "FileViewerのmemo適用時のカスタム比較関数の必要性が未検討",
+      "description": "Issueでは「isOpen/filePathの変更時のみ再レンダー」と記載しているが、これはReact.memoのデフォルトの浅い比較（shallow comparison）では自動的に実現されない。FileViewerPropsにはonClose（関数参照）が含まれるため、onCloseが毎レンダーで新しい参照になるとmemo化が無効になる。現状、handleFileViewerCloseはuseCallback([], ...)で空の依存配列で定義されており安定しているため、デフォルトのshallow comparisonで問題ないが、Issueの「isOpen/filePathの変更時のみ」という記述はカスタム比較関数（areEqual）の必要性を示唆しており、実際にはデフォルトで十分である点を明確にすべき。",
+      "location": "実装タスクセクション - FileViewer",
+      "suggestion": "「FileViewer: memo() ラップ（isOpen/filePathの変更時のみ再レンダー）」を「FileViewer: memo() ラップ（デフォルトのshallow comparison。onCloseは呼び出し元でuseCallback済みのため安定。カスタム比較関数は不要）」に修正する。"
+    },
+    {
+      "id": "F1-007",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "パフォーマンス改善の定量的な期待効果の記載がない",
+      "description": "Issue本文にはどの程度の改善が期待されるか（例: 特定操作時の再レンダー回数の削減量、ユーザー体感の改善シナリオ）が記載されていない。パフォーマンス最適化のIssueでは、投資対効果を事前に見積もることで優先度判断やレビュー基準が明確になる。",
+      "location": "概要セクション",
+      "suggestion": "「ターミナルポーリング（2秒間隔）による親コンポーネント再レンダー時に、FileViewer（isOpen=false）/MessageInput（props不変時）の不要な再レンダーがスキップされ、レンダリングツリーの評価コストが削減される」など、具体的なシナリオベースの期待効果を追記する。"
+    },
+    {
+      "id": "F1-008",
+      "severity": "nice_to_have",
+      "category": "scope",
+      "title": "MessageInput内のmobileコマンドボタンのインラインonClickハンドラが最適化対象から漏れている",
+      "description": "MessageInput.tsx L241-244にあるmobileコマンドボタンのonClick（() => { if (isFreeInputMode) setIsFreeInputMode(false); setShowCommandSelector(true); }）はインラインの無名関数であり、useCallback化の対象として言及されていない。ただし、このボタンはHTML要素であるため（Reactコンポーネントではないため）、useCallbackで包んでもパフォーマンス上の効果はほぼない。",
+      "location": "背景・課題セクション - F3",
+      "suggestion": "「9個のイベントハンドラ」の数え方に注意。mobileコマンドボタンのインラインハンドラは最適化対象外とする理由（HTML要素のためmemo化の恩恵なし）を補足的に記載するか、コード整理のためuseCallbackで切り出すかを判断事項として記載する。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "total": 8
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MessageInput.tsx",
+      "relevance": "memo化 + useCallback適用対象。308行。9個のハンドラすべてがuseCallbackなし。"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "relevance": "memo化対象。989行。既にuseCallback 15箇所、useMemo 6箇所使用済み。条件付き描画のためmemo効果は限定的。"
+    },
+    {
+      "file": "src/components/worktree/FileViewer.tsx",
+      "relevance": "memo化対象。197行。onCloseは呼び出し元でuseCallback済み。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "relevance": "inline JSX抽出対象。2376行。leftPane(L1935-1998)とrightPane(L2000-2008)がインラインJSX。"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDesktopLayout.tsx",
+      "relevance": "既にmemo化済み。leftPane/rightPaneのReactNode参照が安定すればDesktopLayout/MobileLayoutの再レンダーもスキップされる。"
+    },
+    {
+      "file": "src/components/worktree/SlashCommandSelector.tsx",
+      "relevance": "MessageInputの子コンポーネント。未memo化。MessageInputのuseCallback化と関連。"
+    },
+    {
+      "file": "src/components/worktree/InterruptButton.tsx",
+      "relevance": "MessageInputの子コンポーネント。未memo化。MessageInputのuseCallback化と関連。"
+    }
+  ],
+  "doc_references": [],
+  "test_references": [
+    {
+      "file": "tests/unit/components/worktree/MessageInput.test.tsx",
+      "relevance": "MessageInputの既存テスト。memo化後の動作確認対象。"
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "relevance": "MarkdownEditorの既存テスト。memo化後の動作確認対象。"
+    },
+    {
+      "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "relevance": "WorktreeDetailRefactoredの既存テスト。inline JSX抽出後の動作確認対象。"
+    }
+  ]
+}

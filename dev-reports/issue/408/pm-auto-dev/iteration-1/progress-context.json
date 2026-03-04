@@ -1,0 +1,52 @@
+{
+  "issue_number": 408,
+  "iteration": 1,
+  "phase_results": {
+    "tdd": {
+      "status": "success",
+      "coverage": 74.11,
+      "tests_total": 4393,
+      "tests_passed": 4393,
+      "new_tests_added": 5,
+      "commits": [
+        "32bd5b2: perf(status-detector): resolve SF-001 by adding promptDetection to StatusDetectionResult",
+        "99e2cc2: fix(status-detector): revert unintended windowing change in detectPrompt call",
+        "de8838d: refactor(status-detector): improve JSDoc clarity for detectSessionStatus"
+      ]
+    },
+    "acceptance": {
+      "status": "passed",
+      "criteria_total": 9,
+      "criteria_passed": 9,
+      "scenarios_total": 10,
+      "scenarios_passed": 10
+    },
+    "refactor": {
+      "status": "success",
+      "changes": [
+        "detectSessionStatus() @param cliToolId のJSDocを型名参照に修正（CLITool追加対応）",
+        "@returns にpromotDetectionフィールドを追加",
+        "テストファイルのモジュールヘッダにIssue #408を記録"
+      ]
+    }
+  },
+  "changed_files": [
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "tests/unit/lib/status-detector.test.ts",
+    "tests/integration/current-output-thinking.test.ts",
+    "CLAUDE.md"
+  ],
+  "issues_found_and_resolved": [
+    "TDDエージェントが detectPrompt() の入力を lastLines → cleanOutput に誤変更 → SF-004統合テスト失敗 → lastLines に戻して修正"
+  ],
+  "final_quality_metrics": {
+    "unit_tests_passed": 4393,
+    "integration_tests_passed": 12,
+    "eslint_errors": 0,
+    "typescript_errors": 0,
+    "new_tests": 5,
+    "deleted_code_lines": "約20行（L98-L102のブロック + L81のcleanOutput + 4つのimport文削除）",
+    "sf001_resolved": true
+  }
+}

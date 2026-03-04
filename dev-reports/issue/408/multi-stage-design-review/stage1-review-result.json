@@ -1,0 +1,97 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "issue_number": 408,
+  "focus_area": "設計原則",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "型安全性",
+      "description": "promptDetection フィールドが optional (?) で定義されているため、return 文への追加漏れが TypeScript コンパイラで検出されない。設計方針書 4.1 節でも「optionalフィールドのため追加忘れがTypeScriptの型エラーにならない」と認識されているが、テストのみに依存する防御は不十分。",
+      "location": "src/lib/status-detector.ts - StatusDetectionResult interface",
+      "suggestion": "promptDetection を required フィールド (promptDetection: PromptDetectionResult) として定義する。detectSessionStatus() 内では detectPrompt() の結果が全 return パスで利用可能なスコープ (L145) に位置しているため、required にしてもコスト増はない。これにより、将来の return パス追加時にコンパイラが追加漏れを検出する。現時点で promptDetection を使わない呼び出し元（worktrees/route.ts, worktrees/[id]/route.ts）は単にフィールドを無視するだけで影響なし。"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "SOLID",
+      "description": "SRP 緩和に関するトレードオフ評価は適切。StatusDetectionResult に PromptDetectionResult を含めることで status-detector が prompt-detector の型に依存するが、(1) 依存方向は既に一方向 (status-detector -> prompt-detector)、(2) PromptDetectionResult は安定した型、(3) 他の呼び出し元への影響なし、の3点から受容可能。ただし、JSDoc に「SRP 緩和を受容した根拠」を明記する際、将来の変更ガイドライン（どのような状況でこの決定を見直すべきか）があるとより堅牢。",
+      "location": "dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md - Section 9.1",
+      "suggestion": "SF-001 resolved コメントに、例えば「If PromptDetectionResult gains high-frequency changes or large structural modifications, consider re-evaluating this coupling via a minimal DTO/projection type.」のような将来ガイドラインを追記する。"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "category": "DRY",
+      "description": "設計方針書 4.1 節テキストで「全9箇所のreturn文」と記載されているが、実際の return パスは 8 箇所であり、4.2 節のテーブルも 8 行（パス 1-8）である。設計方針書内の不整合。",
+      "location": "dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md - Section 4.1",
+      "suggestion": "「全9箇所」を「全8箇所」に修正する。"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "description": "current-output/route.ts L98 の promptDetection 変数の型注釈 { isPrompt: boolean; cleanContent: string; promptData?: unknown } は、PromptDetectionResult 型と同等の構造をインラインで再定義している。案A実装後はこの変数自体が削除されるため直接の問題ではないが、削除対象コードの特定を設計方針書に明記しておくと実装時の見落としを防げる。",
+      "location": "src/app/api/worktrees/[id]/current-output/route.ts L98",
+      "suggestion": "設計方針書 4.3 節に、L98 の promptDetection 変数宣言自体が削除対象であることを明示する（現状は暗黙的にしか読み取れない）。"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "description": "設計は必要最小限の変更に留まっており、YAGNI 原則に適合。案B（新関数追加）や案C（アウトパラメータ）を不採用とした判断は適切。optional フィールド1つの追加のみでDRY違反を解消する方針は合理的。",
+      "location": "dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md - Section 8",
+      "suggestion": "指摘なし。良い設計判断として記録。"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "should_fix",
+      "category": "型安全性",
+      "description": "設計方針書 4.3 節の変更後コード例で statusResult.promptDetection?.promptData ?? null としているが、DR1-001 の指摘通り promptDetection を required にした場合は optional chaining が不要になる。また、仮に optional のまま維持する場合でも、promptDetection が undefined の場合の API レスポンスの promptData が null になることの動作保証を明記すべき。",
+      "location": "dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md - Section 4.3",
+      "suggestion": "DR1-001 を採用して required にする場合は statusResult.promptDetection.promptData ?? null に修正。optional のまま維持する場合は、「promptDetection が undefined のケースは設計上発生しないが、defense-in-depth として optional chaining を使用」とコメントで明記する。"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "description": "stripAnsi の削除可能性に関する分析（4.4節）は丁寧だが、cleanOutput 変数が他の箇所で使われていないことの確認が設計方針書の記載のみに依存している。実装時に grep で確認する手順を明記するとより安全。",
+      "location": "dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md - Section 4.4",
+      "suggestion": "実装手順に「cleanOutput の全参照箇所を grep で確認し、削除安全性を検証する」ステップを追加する。"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "description": "auto-yes-manager.ts (L585) も detectPrompt() を直接呼び出しており、同様の二重呼び出しパターンが存在するが、スコープ外と明示されている（Section 1.2）。この判断は妥当（auto-yes-manager は detectSessionStatus() を経由していないため同一パターンではない）。将来的に auto-yes-manager の detectPrompt 呼び出しも統合すべきかの検討メモがあると良い。",
+      "location": "src/lib/auto-yes-manager.ts L585, dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md - Section 1.2",
+      "suggestion": "Section 1.2 の「含まない」欄に、auto-yes-manager.ts が独立した detectPrompt() 呼び出しを持つ理由（独自のポーリングコンテキストで使用、detectSessionStatus を経由しない）を1行追記する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 5,
+    "overall_quality": "good",
+    "comment": "設計方針書は全体的に高品質。DRY 違反の解消方針は合理的で、KISS/YAGNI 原則にも適合。最も重要な指摘は DR1-001（promptDetection を required にすべき）で、これにより型安全性が大幅に向上し、将来の return パス追加時のバグを防止できる。DR1-003 の設計方針書内の数値不整合は軽微だが修正すべき。全体として、SF-001 再評価の根拠は十分に文書化されており、トレードオフ分析も適切。"
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md",
+    "src/lib/status-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/lib/prompt-detector.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/__tests__/status-detector.test.ts"
+  ],
+  "timestamp": "2026-03-03T14:30:00Z"
+}

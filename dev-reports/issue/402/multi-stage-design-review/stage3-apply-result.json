@@ -1,0 +1,70 @@
+{
+  "issue_number": 402,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "S3-001",
+        "item": "tests/unit/prompt-detector.test.ts の全テスト describe ルートレベルの beforeEach に resetDetectPromptCache() を追加",
+        "section_updated": "セクション12 実装チェックリスト",
+        "status": "reflected"
+      },
+      {
+        "id": "S3-003",
+        "item": "DC-001に「CommandMateはローカル単一プロセスでの動作を前提としており、サーバーレス/クラスタ環境は対象外」を追記",
+        "section_updated": "セクション9 DC-001",
+        "status": "reflected"
+      },
+      {
+        "id": "S3-009",
+        "item": "tests/unit/lib/status-detector.test.ts に resetDetectPromptCache() のインポートと beforeEach での呼び出しを推奨項目として追加",
+        "section_updated": "セクション12 実装チェックリスト",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "S3-002",
+        "item": "Hot Reload時のlastOutputTailリセット影響は設計通り無害",
+        "status": "no_action_needed"
+      },
+      {
+        "id": "S3-004",
+        "item": "status-detector.ts SF-001の2重呼び出しキャッシュヒット確認",
+        "status": "no_action_needed"
+      },
+      {
+        "id": "S3-005",
+        "item": "response-poller.ts の detectPromptWithOptions() 経由の戻り値影響なし",
+        "status": "no_action_needed"
+      },
+      {
+        "id": "S3-006",
+        "item": "auto-yes-manager.ts のポーリング動作への影響なし",
+        "status": "no_action_needed"
+      },
+      {
+        "id": "S3-007",
+        "item": "文字列比較CPU負荷とログI/O削減のトレードオフは適切",
+        "status": "no_action_needed"
+      },
+      {
+        "id": "S3-008",
+        "item": "統合テストへの影響は軽微",
+        "status": "no_action_needed"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md",
+  "sections_updated": [
+    "セクション9 DC-001 (マルチプロセス前提条件追記)",
+    "セクション12 実装チェックリスト (テスト分離項目2件追加)",
+    "セクション12 Stage 3 影響分析レビューサマリーテーブル追加"
+  ],
+  "timestamp": "2026-03-03T18:45:00Z"
+}

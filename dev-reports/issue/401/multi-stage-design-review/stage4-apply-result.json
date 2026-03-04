@@ -1,0 +1,15 @@
+{
+  "stage": 4,
+  "apply_date": "2026-03-03",
+  "issue_number": 401,
+  "design_doc_path": "dev-reports/design/issue-401-stop-script-fix-design-policy.md",
+  "applied_findings": ["S4-001", "S4-002", "S4-003", "S4-004", "S4-005"],
+  "skipped_findings": ["S4-006", "S4-007", "S4-008"],
+  "skip_reasons": {
+    "S4-006": "Nice to have: デフォルトポート3000であり開発ツール用途。バリデーション範囲変更の必要性なし",
+    "S4-007": "Nice to have: xargsのデフォルト分割処理により実用上問題なし",
+    "S4-008": "Nice to have: cd && pwdによるシンボリックリンク解決で既に緩和済み。レビュー結果でも変更不要と評価"
+  },
+  "design_doc_updated": true,
+  "summary": "Stage 4セキュリティレビューの指摘5件を設計方針書に反映。S4-001(must_fix): セクション5.3のポート番号バリデーションをbash組み込みパターンマッチング([[ =~ ]])に変更し、エラーメッセージを固定文字列に変更。S4-002(should_fix): セクション5.6を新設し、lsof→kill間のTOCTOU競合リスクを既知のセキュリティ制限事項として文書化、Node.jsプロセスフィルタリング(lsof -c node)の検討を追記。S4-003(should_fix): セクション5.4を新設し、PIDファイルのchmod 600設計方針をCLI側PidManager(0o600+O_EXCL)との整合性とともに追記。S4-004(should_fix): セクション5.5を新設し、SIGKILLフォールバック後のEPERMエラー時に固定文字列警告を出力する設計方針を追記。S4-005(should_fix): S4-001と統合して対応済み。実装チェックリストにStage 4の項目（Must Fix 2件、Should Fix 4件）を追加。Nice to Have 3件(S4-006/S4-007/S4-008)はスキップ。"
+}

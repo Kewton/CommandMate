@@ -1,0 +1,220 @@
+{
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_date": "2026-03-03",
+  "issue_number": 401,
+  "summary": "影響範囲レビューの結果、Issue #401の修正はシェルスクリプト群（stop.sh, stop-server.sh, build-and-start.sh）に限定されており、CLIモジュール（commandmate stop/start）への直接的なコード変更は不要である。ただし、シェルスクリプトとCLIが異なるPIDファイルパスを使用している分断（scripts: logs/server.pid, CLI: ~/.commandmate/.commandmate.pid）が影響範囲分析で未考慮であり、build-and-start.sh経由で起動したサーバーをcommandmate stopで停止できない（逆も同様）という既存の問題が本Issue修正でも解消されない点を明確にすべきである。また、rebuild SKILLがstop.sh + build-and-start.shを連続実行しており、stop.shの修正による挙動変化の影響を受ける。OS互換性についてはxargsのオプション差異（GNU vs BSD）に注意が必要。セキュリティ面ではlsof出力の信頼性とkillコマンドへの値渡しにPIDバリデーションが望ましい。",
+  "impact_areas": [
+    {
+      "area": "scripts/stop.sh",
+      "severity": "high",
+      "description": "直接修正対象。複数PID対応（xargs kill方式への変更）が主な変更。restart.shから呼び出されるため、restart.shの動作に直接影響する。rebuild SKILLからも呼び出される。"
+    },
+    {
+      "area": "scripts/stop-server.sh",
+      "severity": "high",
+      "description": "直接修正対象。CM_PORT対応、PIDファイルバリデーション追加、段階的停止（SIGTERM→SIGKILL）の導入。build-and-start.sh --daemonの対になるスクリプトであり、setup.shのヘルプメッセージでも案内されている。"
+    },
+    {
+      "area": "scripts/build-and-start.sh",
+      "severity": "high",
+      "description": "直接修正対象。PIDファイルバリデーション追加、ポートベースのalready running判定追加。setup.sh Step 4から呼び出されるため、初期セットアップフローにも影響する。"
+    },
+    {
+      "area": "scripts/restart.sh",
+      "severity": "medium",
+      "description": "修正なしだがstop.shを呼び出すため、stop.shの修正（複数PID対応）による挙動変化の影響を受ける。テスト対象として含めるべき。"
+    },
+    {
+      "area": ".claude/skills/rebuild/SKILL.md",
+      "severity": "medium",
+      "description": "stop.sh + build-and-start.sh --daemonを連続実行するスキル。stop.shの修正がrebuildスキルの挙動に影響する。特にstop.shが新たにプロセス停止後の確認処理を追加する場合、スクリプトの実行時間やエラーハンドリングが変わる可能性がある。"
+    },
+    {
+      "area": "scripts/status.sh",
+      "severity": "low",
+      "description": "修正対象外だが、L29の`PID=$(lsof -ti:$PORT)`もstop.shと同様に複数PIDを変数に格納する。表示目的のため動作上の問題は軽微だが、一貫性の観点から同様の改善を検討すべき。"
+    },
+    {
+      "area": "scripts/setup.sh",
+      "severity": "low",
+      "description": "build-and-start.sh --daemonを呼び出す（L118）。build-and-start.shの修正（ポートベースalready running判定追加）により、初回セットアップ時にポートが既に使用されている場合の挙動が変わる。"
+    },
+    {
+      "area": "src/cli/utils/daemon.ts / pid-manager.ts",
+      "severity": "low",
+      "description": "CLIモジュールへの直接的なコード変更は不要。ただし、CLIとシェルスクリプトが異なるPIDファイルパスを使用する分断が存在し、本Issueの修正でも解消されない。この制約をIssueに明記すべき。"
+    },
+    {
+      "area": "docs/DEPLOYMENT.md",
+      "severity": "low",
+      "description": "トラブルシューティングセクションで`lsof -ti:3000 | xargs kill -9`の手動コマンドを案内している。stop-server.shの段階的停止導入後もドキュメントとの整合性を確認すべき。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "IF-001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "シェルスクリプトとCLIのPIDファイルパス分断がIssueで未考慮",
+      "description": "シェルスクリプト群（build-and-start.sh, stop-server.sh）はPIDファイルを`$PROJECT_DIR/logs/server.pid`に保存するのに対し、CLIモジュール（commandmate start/stop）は`~/.commandmate/.commandmate.pid`（グローバルインストール時）または`$configDir/.commandmate.pid`を使用する。この分断により、build-and-start.sh --daemonで起動したサーバーをcommandmate stopで停止できず、逆も同様である。Issue #401のbuild-and-start.sh修正（ポートベースalready running判定の追加）はこの分断を部分的に緩和するが、PIDファイル管理の不整合は残る。Issueの「参考: CLI側の停止メカニズムとの関係」セクションでこの分断を明示し、本Issueのスコープ外であることを明記すべき。",
+      "suggestion": "Issueの「参考: CLI側の停止メカニズムとの関係」セクションに以下を追記: 「シェルスクリプト群はlogs/server.pidを使用し、CLIは~/.commandmate/.commandmate.pidを使用する。両者のPIDファイルパスは異なるため、build-and-start.sh --daemonで起動したサーバーをcommandmate stopで停止することはできない（逆も同様）。本Issueではこの分断の解消はスコープ外とし、シェルスクリプト群内の修正に限定する。」"
+    },
+    {
+      "id": "IF-002",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "rebuild SKILLへの影響がIssueの影響範囲テーブルに未記載",
+      "description": ".claude/skills/rebuild/SKILL.mdでは`./scripts/stop.sh && ./scripts/build-and-start.sh --daemon`を連続実行している。stop.shの修正（複数PID対応、停止後確認処理の追加）はrebuildスキルの実行フローに直接影響する。特にstop.shが新たにプロセス生存チェック（kill -0）を追加する場合、スクリプトの終了コードや実行時間が変わる可能性があり、&&チェーンに影響する。Issueの影響範囲テーブルにこのスキルを追加すべき。",
+      "suggestion": "Issueの「影響範囲」テーブルに以下を追加: `| .claude/skills/rebuild/SKILL.md | 修正なし（stop.sh + build-and-start.sh連続実行のテスト対象） |`"
+    },
+    {
+      "id": "IF-003",
+      "severity": "should_fix",
+      "category": "互換性",
+      "title": "xargsコマンドのGNU/BSD間の動作差異に対する考慮不足",
+      "description": "Issue提案では`echo \"$PID\" | xargs kill`方式への変更を推奨しているが、xargsはGNU（Linux）とBSD（macOS）で空入力時の動作が異なる。GNU xargsはデフォルトで引数なしでもコマンドを実行し、BSD xargsは引数なしでは実行しない。lsofが空を返す場合（プロセスが既に停止済み）の動作を確認すべき。現行のstop-server.shではL20の`if [ -n \"$PIDS\" ]`で空チェック後にxargsを呼び出しているため問題ないが、stop.shの修正時も同様のガードを維持する必要がある。",
+      "suggestion": "実装時にxargs呼び出し前に空文字列チェック（`if [ -n \"$PID\" ]`）を必ず維持すること。Issueの実装タスクに「xargs呼び出し前のPID空チェック維持を確認」を注記として追加することを推奨。また、`xargs kill`ではなく`xargs kill 2>/dev/null`とすることで、PIDが既に停止済みの場合のエラー出力を抑制すべき。"
+    },
+    {
+      "id": "IF-004",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "build-and-start.shのCM_PORT環境変数未対応がポートベースalready running判定に影響",
+      "description": "build-and-start.shは現在CM_PORT環境変数を参照していない（ポート3000をデフォルトとしてnpm startに委譲）。Issue #401でポートベースのalready running判定（lsof -ti:$PORT）を追加する場合、$PORTの値をどこから取得するかが問題となる。.envファイルからCM_PORTを読み取る処理が必要になるが、build-and-start.shにはdotenv読み込みが実装されていない。stop-server.shのCM_PORT対応（環境変数から取得）は比較的単純だが、build-and-start.shではnpm startがポートを決定するため、スクリプト側でのポート確認は環境変数経由に限られる。",
+      "suggestion": "build-and-start.shにポートベース判定を追加する際は、`PORT=${CM_PORT:-${MCBD_PORT:-3000}}`の行をスクリプト冒頭に追加し、他のスクリプト（stop.sh, status.sh, health-check.sh）と統一すべき。この変更をIssueの実装タスクに明示的に含めること。"
+    },
+    {
+      "id": "IF-005",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "並行実行（commandmate start --issue XXX）環境での影響が未分析",
+      "description": "Issue #136のworktree並列開発機能により、commandmate start --issue 135のように複数サーバーが異なるポートで起動できる。シェルスクリプト群はCM_PORT環境変数で対象ポートを制御するが、worktreeサーバーのPIDファイルはCLI側（~/.commandmate/pids/135.pid）で管理されており、シェルスクリプトのPIDファイル（logs/server.pid）とは完全に独立している。stop-server.shのCM_PORT対応により、`CM_PORT=3035 ./scripts/stop-server.sh`でworktreeサーバーを停止できるようになるが、PIDファイルとの不整合が発生する（CLIのPIDファイルが残留する）。この制約をIssueに明記すべき。",
+      "suggestion": "Issueの「参考: CLI側の停止メカニズムとの関係」セクションに以下を追記: 「commandmate start --issue XXXで起動したworktreeサーバーはCLI側のPIDファイル管理（~/.commandmate/pids/XXX.pid）を使用する。シェルスクリプト経由で停止した場合、CLIのPIDファイルが残留する。worktreeサーバーの停止にはcommandmate stop --issue XXXを使用すべき。」"
+    },
+    {
+      "id": "IF-006",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "lsof出力をkillコマンドに渡す際のPIDバリデーション不足",
+      "description": "stop.shおよびstop-server.shでは`lsof -ti:$PORT`の出力を直接killコマンドに渡している。lsofの出力は通常PID（数値）のみだが、防御的プログラミングの観点からは、killに渡す前にPIDが数値であることを検証すべきである。特にstop-server.shのL32では`kill -9 -$PID`（プロセスグループkill）を使用しており、不正な値がPIDに含まれると予期しないプロセスグループが停止される可能性がある。CLI側のpid-manager.tsではtrim() + parseInt()によるバリデーションが実装済みであり、シェルスクリプト側も同様の防御を追加すべき。",
+      "suggestion": "PIDファイルからの読み取り値に対しては`grep -E '^[0-9]+$'`で数値バリデーションを行い、lsof出力に対しては`lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$'`のようにフィルタリングを追加することを推奨。Issueの実装タスクにlsof出力のPIDバリデーション追加を含めること。"
+    },
+    {
+      "id": "IF-007",
+      "severity": "should_fix",
+      "category": "互換性",
+      "title": "lsof -tオプションのLinux/macOS間での出力形式差異",
+      "description": "lsof -tオプションはPIDのみをリストアップするが、Linuxの一部バージョンでは-iオプションと組み合わせた場合の出力にIPv4/IPv6で重複PIDが含まれることがある（同一プロセスが:3000でIPv4とIPv6の両方をリッスンする場合）。この場合、同一PIDに対してkillが2回呼ばれる。killコマンド自体は2回目の呼び出しで「No such process」エラーを出すが、xargsに渡す場合は`sort -u`で重複除去することが望ましい。",
+      "suggestion": "`lsof -ti:$PORT 2>/dev/null | sort -u`のように重複PID除去を追加することを推奨。stop-server.shにも同様の修正を適用すべき。"
+    },
+    {
+      "id": "IF-008",
+      "severity": "should_fix",
+      "category": "運用",
+      "title": "status.shのPID表示も複数PID対応が必要",
+      "description": "scripts/status.sh L29の`PID=$(lsof -ti:$PORT)`もstop.shと同様に複数PIDを変数に格納する。echoで表示する場合は改行が表示されるため動作上の問題は軽微だが、Issueの修正と同時に一貫性のある改善（例: PID一覧の整形表示）を行うことが望ましい。少なくともIssueの影響範囲として言及すべきである。",
+      "suggestion": "Issueの影響範囲テーブルに`| scripts/status.sh | 修正なし（複数PID表示の一貫性確認対象） |`を追加することを推奨。"
+    },
+    {
+      "id": "IF-009",
+      "severity": "nice_to_have",
+      "category": "運用",
+      "title": "setup.shの初回セットアップフローへの影響確認",
+      "description": "scripts/setup.sh L118でbuild-and-start.sh --daemonを呼び出している。build-and-start.shの修正（ポートベースalready running判定追加）により、初回セットアップ時に既に別プロセスがポート3000を使用している場合のエラーメッセージが変わる。従来は正常に起動後にポート競合でエラーになるが、修正後は起動前にポート使用を検知してエラーメッセージを表示する。ユーザー体験の改善であり問題はないが、setup.shの使用シナリオとしてテストに含めるべき。",
+      "suggestion": "受入条件に「setup.sh経由でのbuild-and-start.sh --daemon呼び出しが正常に動作すること」を追加するか、テスト範囲として明示すること。"
+    },
+    {
+      "id": "IF-010",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "docs/DEPLOYMENT.mdのトラブルシューティングとの整合性",
+      "description": "docs/DEPLOYMENT.md L320-321に`lsof -ti:3000 | xargs kill -9`というトラブルシューティングコマンドが記載されている。stop-server.shで段階的停止（SIGTERM→SIGKILL）を導入する場合、ドキュメントの手動コマンドもSIGTERMを先に試す手順に更新することが望ましい。ただし、トラブルシューティングは緊急対応のための手順であり、SIGKILL即時使用が許容される場面でもある。",
+      "suggestion": "本Issueのスコープには含めず、ドキュメント更新の必要性を認識するにとどめる。将来的にstop-server.shの段階的停止が定着した後にドキュメント更新を別Issueで対応してもよい。"
+    },
+    {
+      "id": "IF-011",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "テスト・CI/CDへの影響は限定的",
+      "description": "GitHub Actions CI/CD（ci-pr.yml, publish.yml）ではシェルスクリプト群を直接呼び出していない。既存のテストファイル（tests/unit/cli/commands/stop.test.ts, tests/unit/cli/utils/daemon.test.ts, tests/unit/cli/utils/pid-manager.test.ts）はCLI側のテストであり、シェルスクリプトの修正には直接影響しない。シェルスクリプトの自動テストは存在しないため、手動テスト（受入条件の検証手順）が主な品質担保手段となる。",
+      "suggestion": "既存のCI/CDパイプラインへの影響はないが、将来的にシェルスクリプトのテスト（例: bats-core等）の導入を検討してもよい。本Issueのスコープでは手動テストで十分。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 2,
+    "should_fix": 6,
+    "nice_to_have": 3,
+    "total": 11
+  },
+  "overall_assessment": "中リスク",
+  "code_references": [
+    {
+      "file": "scripts/stop.sh",
+      "relevance": "直接修正対象。L25のkill方式変更が主。restart.sh, rebuild SKILLから呼び出される。"
+    },
+    {
+      "file": "scripts/stop-server.sh",
+      "relevance": "直接修正対象。L11のCM_PORT対応、L28のPIDバリデーション、L22/L32/L45の段階的停止導入。"
+    },
+    {
+      "file": "scripts/build-and-start.sh",
+      "relevance": "直接修正対象。L69-76のalready running判定改善、L70のPIDバリデーション追加。setup.sh L118から呼び出される。"
+    },
+    {
+      "file": "scripts/restart.sh",
+      "relevance": "修正なし。L21でstop.shを呼び出すため影響テスト対象。"
+    },
+    {
+      "file": "scripts/status.sh",
+      "relevance": "修正なし。L29の複数PID表示の一貫性確認対象。"
+    },
+    {
+      "file": "scripts/setup.sh",
+      "relevance": "修正なし。L118でbuild-and-start.sh --daemonを呼び出すため影響テスト対象。"
+    },
+    {
+      "file": ".claude/skills/rebuild/SKILL.md",
+      "relevance": "修正なし。stop.sh + build-and-start.sh --daemon連続実行のため影響テスト対象。"
+    },
+    {
+      "file": "scripts/health-check.sh",
+      "relevance": "修正なし。CM_PORT対応済み（L10）。他スクリプトとの一貫性参照用。"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "修正不要。SIGTERM→waitForExit→SIGKILLの段階的停止を実装済み（L133-161）。シェルスクリプト修正の参考。"
+    },
+    {
+      "file": "src/cli/utils/pid-manager.ts",
+      "relevance": "修正不要。trim() + parseInt()によるPIDバリデーション実装済み（L43-44）。シェルスクリプト修正の参考。"
+    },
+    {
+      "file": "src/cli/utils/env-setup.ts",
+      "relevance": "修正不要。getPidFilePath()はCLI用PIDファイルパス（~/.commandmate/.commandmate.pid）を返す。シェルスクリプトのlogs/server.pidとの分断確認用。"
+    },
+    {
+      "file": "src/cli/utils/port-allocator.ts",
+      "relevance": "修正不要。worktreeサーバーのポート割当（3001-3100）。stop-server.shのCM_PORT対応でworktreeポート停止が可能になる。"
+    },
+    {
+      "file": "docs/DEPLOYMENT.md",
+      "relevance": "修正推奨だが本Issueスコープ外。L320-321のトラブルシューティングコマンドとの整合性確認対象。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト全体のスクリプト構成・コマンド体系の参照ドキュメント"
+    },
+    {
+      "file": "docs/DEPLOYMENT.md",
+      "relevance": "デプロイ手順・トラブルシューティングでlsof+killコマンドを案内"
+    },
+    {
+      "file": ".claude/skills/rebuild/SKILL.md",
+      "relevance": "stop.sh + build-and-start.shの連続実行パターンの定義"
+    }
+  ]
+}

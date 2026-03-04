@@ -1,0 +1,23 @@
+{
+  "status": "success",
+  "coverage": 65.95,
+  "unit_tests": {
+    "total": 48,
+    "passed": 48,
+    "failed": 0
+  },
+  "static_analysis": {
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "files_changed": [
+    "src/lib/db-migrations.ts",
+    "src/lib/schedule-manager.ts",
+    "tests/unit/lib/db-migrations.test.ts",
+    "tests/unit/lib/schedule-manager.test.ts"
+  ],
+  "commits": [
+    "d38ab21: feat(schedule): add mtime caching and batch upsert for schedule sync performance"
+  ],
+  "message": "TDD implementation complete. All 48 tests pass. Migration #21 adds composite index on scheduled_executions(worktree_id, enabled). batchUpsertSchedules() replaces per-entry upsertSchedule() with single SELECT + transaction. CMATE.md mtime caching added to skip unchanged files. Zero ESLint/TypeScript errors."
+}

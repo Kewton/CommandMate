@@ -6,11 +6,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db-instance';
 import { getWorktreeById, getSessionState } from '@/lib/db';
-import { detectPrompt } from '@/lib/prompt-detector';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from '@/lib/cli-session';
-import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/cli-patterns';
 import { detectSessionStatus } from '@/lib/status-detector';
 import { getAutoYesState, getLastServerResponseTimestamp, isValidWorktreeId } from '@/lib/auto-yes-manager';
 
@@ -77,9 +75,6 @@ export async function GET(
     const newLines = lines.slice(Math.max(0, lastCapturedLine));
     const newContent = newLines.join('\n');
 
-    // Strip ANSI codes before state detection for reliable pattern matching
-    const cleanOutput = stripAnsi(output);
-
     // DR-001: Unified priority-based status detection via detectSessionStatus().
     // This replaced the inline thinking/prompt logic that had inconsistent priority
     // ordering (Issue #188 root cause: thinking detected on full output instead of
@@ -87,19 +82,11 @@ export async function GET(
     const statusResult = detectSessionStatus(output, cliToolId);
     const thinking = statusResult.status === 'running' && statusResult.reason === 'thinking_indicator';
 
-    // SF-001: detectPrompt() is called separately to obtain promptData for the API response.
-    // detectSessionStatus() already calls detectPrompt() internally for status determination,
-    // but does not expose promptData in StatusDetectionResult (SRP: status module should not
-    // be coupled to prompt data shape). This second call is intentional and lightweight
-    // (regex-based, no I/O). See status-detector.ts module JSDoc for full rationale.
-    //
-    // Issue #161 Layer 1: Skip prompt detection during active thinking to prevent
-    // numbered lists in in-progress output from triggering false multiple_choice detection.
-    let promptDetection: { isPrompt: boolean; cleanContent: string; promptData?: unknown } = { isPrompt: false, cleanContent: cleanOutput };
-    if (!thinking) {
-      const promptOptions = buildDetectPromptOptions(cliToolId);
-      promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
-    }
+    // Issue #408: promptDetection is obtained from detectSessionStatus() return value.
+    // Previously, detectPrompt() was called separately here (SF-001 tradeoff).
+    // detectSessionStatus() internal priority order (prompt -> thinking) guarantees
+    // that promptDetection.isPrompt === false when thinking is detected.
+    // This implicitly maintains Issue #161 Layer 1 defense.
 
     // SF-004: isPromptWaiting uses statusResult.hasActivePrompt (15-line window) as
     // the single source of truth, ensuring consistency between status and prompt state.
@@ -130,7 +117,7 @@ export async function GET(
       thinkingMessage: thinking ? 'Claude is thinking...' : null,
       // Prompt detection results
       isPromptWaiting,
-      promptData: isPromptWaiting ? promptDetection.promptData : null,
+      promptData: isPromptWaiting ? statusResult.promptDetection.promptData ?? null : null,
       // Auto-yes state (Issue #314: stopReason added for stop condition notification)
       autoYes: {
         enabled: autoYesState?.enabled ?? false,

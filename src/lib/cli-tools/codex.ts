@@ -14,6 +14,7 @@ import {
   sendSpecialKey,
 } from '../tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
+import { invalidateCache } from '../tmux-capture-cache';
 
 /**
  * Extract error message from unknown error type (DRY)
@@ -144,6 +145,9 @@ export class CodexTool extends BaseCLITool {
       if (message.includes('\n')) {
         await detectAndResendIfPastedText(sessionName);
       }
+
+      // Issue #405: Invalidate cache after sending message
+      invalidateCache(sessionName);
 
       console.log(`✓ Sent message to Codex session: ${sessionName}`);
     } catch (error: unknown) {

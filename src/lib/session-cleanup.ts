@@ -2,15 +2,18 @@
  * Session Cleanup Utility (Facade Pattern)
  * Issue #69: Repository delete feature
  * Issue #138: Added auto-yes-poller cleanup
+ * Issue #404: Added deleteAutoYesState and stopScheduleForWorktree
  *
  * Provides a unified interface for cleaning up CLI tool sessions and pollers.
  * Uses response-poller for CLI tool sessions.
  */
 
 import { stopPolling as stopResponsePolling } from './response-poller';
-import { stopAutoYesPolling } from './auto-yes-manager';
-import { stopAllSchedules } from './schedule-manager';
+import { stopAutoYesPolling, deleteAutoYesState } from './auto-yes-manager';
+import { stopScheduleForWorktree } from './schedule-manager';
+import { clearAllCache } from './tmux-capture-cache';
 import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
+import { getErrorMessage } from './errors';
 
 /**
  * Result of cleaning up a single worktree's sessions
@@ -49,8 +52,12 @@ const LOG_PREFIX = '[Session Cleanup]';
  * Clean up all CLI tool sessions and pollers for a single worktree
  *
  * This function:
- * 1. Kills all CLI tool sessions (claude, codex, gemini) using the provided killSessionFn
+ * 1. Kills all CLI tool sessions using the provided killSessionFn
  * 2. Stops response-poller for each CLI tool
+ * 3. Stops auto-yes polling and deletes auto-yes state (Issue #404)
+ * 4. Stops schedules for this worktree (Issue #404)
+ *
+ * Call order (Issue #404): stopAutoYesPolling -> deleteAutoYesState -> stopScheduleForWorktree
  *
  * Errors are collected but do not stop the cleanup process (partial success is allowed).
  *
@@ -70,6 +77,9 @@ export async function cleanupWorktreeSessions(
     pollerErrors: [],
   };
 
+  // Issue #405: Clear all capture cache at shutdown start
+  clearAllCache();
+
   // 1. Kill sessions and stop response-pollers for each CLI tool
   for (const cliToolId of CLI_TOOL_IDS) {
     // Kill session
@@ -80,7 +90,7 @@ export async function cleanupWorktreeSessions(
         console.info(`${LOG_PREFIX} Killed session: ${worktreeId}/${cliToolId}`);
       }
     } catch (error) {
-      const errorMsg = `${cliToolId}: ${error instanceof Error ? error.message : String(error)}`;
+      const errorMsg = `${cliToolId}: ${getErrorMessage(error)}`;
       result.sessionErrors.push(errorMsg);
       console.warn(`${LOG_PREFIX} Failed to kill session ${worktreeId}/${cliToolId}:`, error);
     }
@@ -90,30 +100,41 @@ export async function cleanupWorktreeSessions(
       stopResponsePolling(worktreeId, cliToolId);
       result.pollersStopped.push(`response-poller:${cliToolId}`);
     } catch (error) {
-      const errorMsg = `response-poller:${cliToolId}: ${error instanceof Error ? error.message : String(error)}`;
+      const errorMsg = `response-poller:${cliToolId}: ${getErrorMessage(error)}`;
       result.pollerErrors.push(errorMsg);
       console.warn(`${LOG_PREFIX} Failed to stop response-poller ${worktreeId}/${cliToolId}:`, error);
     }
   }
 
   // 2. Stop auto-yes-poller (Issue #138)
+  // Order: stopAutoYesPolling -> deleteAutoYesState -> stopScheduleForWorktree (Issue #404)
   try {
     stopAutoYesPolling(worktreeId);
     result.pollersStopped.push('auto-yes-poller');
   } catch (error) {
-    const errorMsg = `auto-yes-poller: ${error instanceof Error ? error.message : String(error)}`;
+    const errorMsg = `auto-yes-poller: ${getErrorMessage(error)}`;
     result.pollerErrors.push(errorMsg);
     console.warn(`${LOG_PREFIX} Failed to stop auto-yes-poller ${worktreeId}:`, error);
   }
 
-  // 3. Stop schedule-manager (Issue #294)
+  // 3. Delete auto-yes state (Issue #404: prevent memory leak)
   try {
-    stopAllSchedules();
+    deleteAutoYesState(worktreeId);
+    result.pollersStopped.push('auto-yes-state');
+  } catch (error) {
+    const errorMsg = `auto-yes-state: ${getErrorMessage(error)}`;
+    result.pollerErrors.push(errorMsg);
+    console.warn(`${LOG_PREFIX} Failed to delete auto-yes-state ${worktreeId}:`, error);
+  }
+
+  // 4. Stop schedules for this worktree (Issue #404: replaces stopAllSchedules)
+  try {
+    stopScheduleForWorktree(worktreeId);
     result.pollersStopped.push('schedule-manager');
   } catch (error) {
-    const errorMsg = `schedule-manager: ${error instanceof Error ? error.message : String(error)}`;
+    const errorMsg = `schedule-manager: ${getErrorMessage(error)}`;
     result.pollerErrors.push(errorMsg);
-    console.warn(`${LOG_PREFIX} Failed to stop schedule-manager:`, error);
+    console.warn(`${LOG_PREFIX} Failed to stop schedule-manager for ${worktreeId}:`, error);
   }
 
   return result;

@@ -1,0 +1,6 @@
+{
+  "issue_number": 402,
+  "stage": 1,
+  "review_result_path": "dev-reports/issue/402/multi-stage-design-review/stage1-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md"
+}

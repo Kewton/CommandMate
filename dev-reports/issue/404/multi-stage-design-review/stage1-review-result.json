@@ -1,0 +1,94 @@
+{
+  "issue_number": 404,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "focus_area": "設計原則",
+  "review_summary": "設計方針書は全体として堅実であり、SOLID/KISS/YAGNI原則に対する配慮が随所に見られる。特にactiveProcessesの方式(c)自然回収採用やschedule-managerとの責務分離は妥当な判断である。ただし、SRP観点でresource-cleanup.tsの責務混在、DRY観点でMCPプロセス検出ロジックのshell/TypeScript二重実装、インターフェース設計観点でstopScheduleForWorktreeのworktreePath引数設計に改善の余地がある。必須修正1件、推奨修正3件、検討事項3件を指摘する。",
+  "findings": [
+    {
+      "id": "R1-001",
+      "severity": "must_fix",
+      "category": "DRY",
+      "title": "MCPプロセス検出ロジックのshell/TypeScript二重実装",
+      "description": "設計方針書Section 3.1のcleanupOrphanedMcpProcesses()（TypeScript、execFile('ps', ...)）とSection 3.6のcleanup_orphaned_mcp_processes()（bash、ps -eo pid,ppid,args | awk）が同一のビジネスロジック（ppid=1 + パターンマッチ + kill）を異なる言語で二重実装している。設計方針書Section 6でも「トレードオフ: 重複コード」と自認している。MCP_PROCESS_PATTERNSの追加・変更時に両方の修正を忘れるリスクが高い。server.tsの起動シーケンスでinitResourceCleanup()が呼ばれる時点でNode.jsは起動済みであり、build-and-start.shからもNode.jsスクリプトとして同一ロジックを呼び出せるため、TypeScript実装のみに一本化すべきである。",
+      "location": "設計方針書 Section 3.1 + Section 3.6、Section 6 トレードオフ表",
+      "suggested_fix": "build-and-start.shのbash関数を廃止し、代わりに`node -e \"require('./dist/lib/resource-cleanup').cleanupOrphanedMcpProcesses().then(r => console.log(JSON.stringify(r)))\"` のようにビルド済みTypeScriptモジュールを直接呼び出す。あるいは専用のCLIスクリプト（例: scripts/cleanup-mcp.ts）を作成し、build-and-start.shとserver.tsの両方から利用する。MCP_PROCESS_PATTERNSの定義箇所を単一にすることでDRY原則を達成する。"
+    },
+    {
+      "id": "R1-002",
+      "severity": "should_fix",
+      "category": "SRP",
+      "title": "resource-cleanup.tsの2責務混在の明確な責務分離",
+      "description": "resource-cleanup.tsは「孤立MCPプロセス検出・停止（起動時1回）」と「globalThis Map孤立エントリの定期クリーンアップ（24時間ごと）」の2つの責務を持つ。設計方針書Section 6では「SRP原則、schedule-managerとは異なる責務」と記載されているが、MCPプロセスクリーンアップとMapクリーンアップ自体は異なる関心事である。MCPプロセスは外部プロセスの管理、MapクリーンアップはNode.jsプロセス内のメモリ管理であり、変更理由が異なる。現時点では1ファイル内の2関数として実装する設計だが、将来的にMCPプロセスのパターンが増える、あるいはMap以外のリソース（キャッシュ、一時ファイル等）の定期クリーンアップが追加される場合、このファイルが肥大化するリスクがある。",
+      "location": "設計方針書 Section 3.1 責務の記載",
+      "suggested_fix": "現時点では「リソースクリーンアップ」という上位概念で2責務を束ねる判断は許容範囲だが、ファイル内のコメントやセクション区切りで責務境界を明確にし、将来の分離ポイントを示しておくことを推奨する。具体的には、cleanupOrphanedMcpProcesses()とcleanupOrphanedMapEntries()がそれぞれ独立してテスト可能であることを保証し、initResourceCleanup()はこれらを組み合わせるオーケストレーターとして設計する。"
+    },
+    {
+      "id": "R1-003",
+      "severity": "should_fix",
+      "category": "インターフェース",
+      "title": "stopScheduleForWorktree()のworktreePath?オプション引数の設計改善",
+      "description": "設計方針書Section 3.3でstopScheduleForWorktree(worktreeId: string, worktreePath?: string)と定義されているが、worktreePathが省略された場合にDB lookupでフォールバックする設計は、関数の動作が引数の有無で異なる暗黙的な挙動を持つ。cmateFileCacheのキーがworktree pathであるため、worktreeIdからpathを取得する必要があるが、呼び出し元のsession-cleanup.tsのcleanupWorktreeSessions()はworktreeIdのみを引数に持ち、worktreePathを渡していない（Section 3.4のコード例）。結果として、stopScheduleForWorktree()は常にDB lookupを実行することになり、オプション引数の意味が薄い。",
+      "location": "設計方針書 Section 3.3 インターフェース定義、Section 3.4 呼び出しコード",
+      "suggested_fix": "2つの選択肢を検討すべき。(A) cleanupWorktreeSessions()にworktreePath引数を追加し、上流（API route）からpathを渡す。既にgetWorktreeById()でDB lookupしている箇所が多いため、pathの取得は容易。(B) stopScheduleForWorktree()内でDB lookupを必須とし、worktreePathをオプション引数ではなく内部実装に閉じる（関数シグネチャをstopScheduleForWorktree(worktreeId: string)に簡素化する）。呼び出し元のコードを見る限り、方式(B)がKISS原則に合致する。"
+    },
+    {
+      "id": "R1-004",
+      "severity": "should_fix",
+      "category": "OCP",
+      "title": "session-cleanup.tsの既存stopAllSchedules()呼び出しの不適切な置換",
+      "description": "現在のsession-cleanup.ts（L109-117）ではcleanupWorktreeSessions()内でstopAllSchedules()を呼び出している。これは単一worktree削除時に全worktreeのスケジュールを停止する過剰な動作であり、バグである。設計方針書Section 3.4でstopScheduleForWorktree()への置換を提案しているのは正しいが、この変更はOCPの観点で注意が必要である。cleanupMultipleWorktrees()が複数のworktreeを順次処理するforループ内でcleanupWorktreeSessions()を呼ぶため、各worktreeの削除ごとにstopScheduleForWorktree()が呼ばれる。これ自体は問題ないが、現在の設計では全schedules MapをイテレーションしてworktreeIdでフィルタするため、O(N*M)の計算量になる（N=削除worktree数、M=全スケジュール数）。",
+      "location": "設計方針書 Section 3.3 実装上の制約、Section 3.4 変更箇所",
+      "suggested_fix": "schedules MapのキーがscheduleIdであるため、worktreeId逆引きにO(M)イテレーションが必要な点は設計方針書で正しく認識されている。MAX_CONCURRENT_SCHEDULES=100と小さいため、実運用上の問題にはならない。ただし、将来的にworktreeId -> scheduleIdsの逆引きインデックスを追加することを検討事項として記載しておくことを推奨する。"
+    },
+    {
+      "id": "R1-005",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "title": "getAutoYesStateWorktreeIds()/getAutoYesPollerWorktreeIds()の必要性検証",
+      "description": "これらの関数は定期クリーンアップ（cleanupOrphanedMapEntries()）専用に設計されている。定期クリーンアップが24時間間隔であることを考えると、autoYesStatesとautoYesPollerStatesの内部Mapのキー一覧を取得する関数をpublicにexportする必要性は限定的である。@internal exportとはいえ、モジュールの公開APIを増やすことになる。代替案として、resource-cleanup.tsがauto-yes-manager.tsの内部状態に直接アクセスするのではなく、auto-yes-manager.ts自身にクリーンアップ責務を持たせる（cleanupOrphanedAutoYesEntries(validWorktreeIds: string[])のような関数を追加する）方が、カプセル化の観点で優れている。",
+      "location": "設計方針書 Section 3.2 新規エクスポート関数",
+      "suggested_fix": "auto-yes-manager.tsにcleanupOrphanedEntries(validWorktreeIds: Set<string>): { statesRemoved: number, pollersRemoved: number }のような関数を追加し、内部Mapの走査・削除をモジュール内に閉じる。resource-cleanup.tsはDB照会で有効なworktreeId一覧を取得し、この関数に渡すだけにする。これによりgetAutoYesStateWorktreeIds()/getAutoYesPollerWorktreeIds()のexportが不要になり、ISP原則にも合致する。"
+    },
+    {
+      "id": "R1-006",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "title": "コンテナ環境検出ロジックの簡素化検討",
+      "description": "設計方針書Section 3.1で「/proc/1/cgroup 存在チェック → Docker環境ではスキップ」としているが、/proc/1/cgroupの存在だけではDocker検出として不十分な場合がある（LXC、systemd-nspawnなど他のコンテナランタイムでも存在する）。また、macOS環境では/procが存在しないため常に非コンテナと判定される。コンテナ環境でppid=1のプロセスが偽陽性になるのは、コンテナ内のPID 1がinit/systemdではなくアプリケーションプロセスである場合だが、CommandMateがコンテナ内で動作する一般的なユースケースでは、MCPプロセスも同一コンテナ内で動作するため、クリーンアップ対象にすべきケースもある。",
+      "location": "設計方針書 Section 3.1 孤立MCPプロセス検出ロジック、Section 4 セキュリティ設計",
+      "suggested_fix": "コンテナ環境での動作が実際のユースケースとして想定されるか明確にし、想定されない場合はコンテナ検出ロジックを省略してKISS原則を適用する。想定される場合は、環境変数CM_SKIP_MCP_CLEANUP=trueのような明示的なオプトアウト機構の方がシンプルで確実である。"
+    },
+    {
+      "id": "R1-007",
+      "severity": "nice_to_have",
+      "category": "DIP",
+      "title": "resource-cleanup.tsからauto-yes-manager.ts/schedule-manager.tsへの直接依存",
+      "description": "resource-cleanup.tsは新規モジュールでありながら、auto-yes-manager.tsとschedule-manager.tsの内部状態取得関数に直接依存する設計となっている。これは依存の方向としては上位モジュール（resource-cleanup）が下位モジュール（auto-yes-manager、schedule-manager）に依存する形であり、DIPの観点では問題ないが、今後クリーンアップ対象のglobalThisリソースが増えた場合（例: response-pollerのMap等）、resource-cleanup.tsの依存先が増加する。",
+      "location": "設計方針書 Section 3.1 インターフェース、Section 2.2 変更対象モジュール",
+      "suggested_fix": "現時点では直接依存で問題ない。将来的にクリーンアップ対象が3つ以上になった場合は、CleanupTarget interfaceを定義し、各モジュールがそのinterfaceを実装する形に抽象化することを検討する。現段階では過剰設計（YAGNI違反）になるため、コメントで将来の拡張ポイントを示すにとどめる。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 3,
+  "overall_assessment": "設計方針書は全体として高品質であり、SOLID/KISS/YAGNI/DRY原則への配慮が適切に行われている。特にactiveProcesses管理の方式(c)自然回収採用はYAGNI原則の好例であり、代替案との比較も十分に文書化されている。必須修正はDRY原則違反のMCPプロセス検出ロジック二重実装のみであり、これはTypeScript実装への一本化で解決可能。推奨修正の3件は設計の堅牢性向上に寄与するが、いずれも実装の品質を致命的に損なうものではない。条件付き承認（must_fix 1件の対応を条件とする）を推奨する。",
+  "status": "conditionally_approved",
+  "score": 4,
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-404-resource-leak-cleanup-design-policy.md",
+    "src/lib/session-cleanup.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/schedule-manager.ts",
+    "src/lib/claude-executor.ts",
+    "server.ts",
+    "scripts/build-and-start.sh",
+    "src/app/api/repositories/route.ts"
+  ],
+  "timestamp": "2026-03-04T12:00:00Z"
+}

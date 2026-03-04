@@ -1,0 +1,39 @@
+{
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 406,
+  "applied_items": ["R5-001", "R5-002", "R5-003", "R5-004"],
+  "skipped_items": [],
+  "update_success": true,
+  "summary": "Should Fix 2件 + Nice to Have 2件を反映",
+  "applied_findings": {
+    "should_fix": [
+      {
+        "id": "R5-001",
+        "status": "applied",
+        "change_summary": "schedule-manager.test.ts のテスト方針を方針(B)に具体化: cmate-parser モジュール自体を vi.mock() でモック化し readCmateFile() の戻り値を直接制御する（fs モックへの依存を排除）。実装タスクと影響範囲テーブルの両方を更新"
+      },
+      {
+        "id": "R5-002",
+        "status": "applied",
+        "change_summary": "受入条件に「readCmateFile() がCMATE.md不存在時に null を返す動作が async 化後も維持されること（テストで検証）」を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "R5-003",
+        "status": "applied",
+        "change_summary": "initScheduleManager() fire-and-forget タスクに設計根拠を追記: 「initScheduleManager() の同期 API を維持し、server.ts への変更波及を回避するため」"
+      },
+      {
+        "id": "R5-004",
+        "status": "applied",
+        "change_summary": "validateCmatePath テスト更新タスクに正常系パターン（.not.toThrow() → .resolves.toBe(true)）を追記。影響範囲テーブルの cmate-parser.test.ts 行にも反映"
+      }
+    ]
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/406"
+  }
+}

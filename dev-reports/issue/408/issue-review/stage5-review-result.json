@@ -1,0 +1,167 @@
+{
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "issue_number": 408,
+  "review_focus": "通常",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "F5-001",
+      "severity": "should_fix",
+      "category": "完全性",
+      "description": "不要import削除の記載に `stripAnsi` が含まれていない。route.ts L81 の `const cleanOutput = stripAnsi(output)` は、案A 実装後 `detectPrompt()` 呼び出しと `promptDetection` デフォルト値（L98）の両方が削除されるため、`cleanOutput` 変数自体が不要になる。その結果、`stripAnsi` インポートも不要になる。現在の実装タスクでは不要import として `detectPrompt`, `buildDetectPromptOptions`, `stripBoxDrawing` の3つのみ記載されており、`stripAnsi` が漏れている。import 文 L13 は `import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/cli-patterns'` であり、案A 後はこの import 文全体が削除可能になる。",
+      "location": "実装タスク「route.ts から detectPrompt() 呼び出し削除時に不要になった import」",
+      "suggestion": "不要import のリストに `stripAnsi` を追加し、計4つのインポート削除を明記する: `detectPrompt`, `buildDetectPromptOptions`, `stripBoxDrawing`, `stripAnsi`。あわせて `const cleanOutput = stripAnsi(output)` 変数宣言自体の削除も実装タスクに含める。"
+    },
+    {
+      "id": "F5-002",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "description": "影響範囲テーブルの `src/lib/__tests__/status-detector.test.ts` の変更内容が「戻り値型変更に伴うテスト更新」のみであり、実装タスクの (d) でテスト追加先を `tests/unit/lib/status-detector.test.ts` に集約推奨としている。この2つのテストファイルの役割分担（Issue #54 初期テスト vs Issue #188 追加テスト）と、今回の変更で `src/lib/__tests__/status-detector.test.ts` に対して具体的にどのような更新が必要かが不明確。既存テストは optional フィールド追加のため壊れないが、「戻り値型変更に伴うテスト更新」という記述では新フィールドの検証テスト追加なのか、既存テストの修正なのかが曖昧。",
+      "location": "影響範囲テーブル `src/lib/__tests__/status-detector.test.ts` 行",
+      "suggestion": "変更内容を「既存テストの後方互換性確認（optional フィールド追加のため壊れない見込み。新フィールドの検証テスト追加は tests/unit/lib/status-detector.test.ts に集約）」のように明確化する。"
+    },
+    {
+      "id": "F5-003",
+      "severity": "nice_to_have",
+      "category": "明確性",
+      "description": "実装タスクの (b) に「`!thinking` ガードは不要になることを確認」とあるが、現行 route.ts L96-97 のコメント「Issue #161 Layer 1: Skip prompt detection during active thinking to prevent numbered lists in in-progress output from triggering false multiple_choice detection」に記載された Layer 1 防御の設計意図が案A 後も維持されるかの明示的な確認事項がない。detectSessionStatus() 内部では prompt 検出が thinking 検出より先に実行されるため、thinking 出力中に numbered list が存在しても prompt が先に検出されるケースがあり得る。ただし実際には prompt 検出は strict な条件（Pass 1 の cursor 存在確認等）を持つため、単なる numbered list では isPrompt=false になり、その後 thinking 検出に進むのが通常フロー。設計注記で優先順序は説明されているが、Layer 1 防御との関係が明示されていない。",
+      "location": "実装タスク (b) / 設計上の注記",
+      "suggestion": "設計上の注記に「Issue #161 Layer 1 の防御（thinking 中の false multiple_choice 検出防止）は detectSessionStatus() の内部優先順序（prompt -> thinking）により暗黙的に維持される。thinking に到達した時点で prompt 未検出が確定しているため、!thinking ガードによる明示的スキップは不要」と補足する。"
+    }
+  ],
+  "previous_findings_check": {
+    "all_addressed": true,
+    "stage1_findings": [
+      {
+        "id": "F1-001",
+        "status": "addressed",
+        "verification": "背景・課題セクションに `!thinking` 条件下でのみ二重呼び出しが発生する旨が太字で正確に記載されている。「thinking状態でない場合（通常動作時の大部分）、同一出力に対してregexパターンマッチングが2回実行される。thinking状態の場合は `!thinking` ガードにより1回のみ」"
+      },
+      {
+        "id": "F1-002",
+        "status": "addressed",
+        "verification": "影響範囲テーブルに `worktrees/route.ts`、`worktrees/[id]/route.ts`、`tests/unit/lib/status-detector.test.ts`、`src/lib/__tests__/status-detector.test.ts`、`tests/integration/current-output-thinking.test.ts` が全て追加されている"
+      },
+      {
+        "id": "F1-003",
+        "status": "addressed",
+        "verification": "背景・課題に SF-001 設計根拠との関係が追記されている。実装タスクに「SF-001 コメントの更新（status-detector.ts JSDoc および current-output/route.ts 内コメント）」が追加されている"
+      },
+      {
+        "id": "F1-004",
+        "status": "addressed",
+        "verification": "提案する解決策に3つの代替案（A/B/C）の比較表が追加され、案Aを推奨案として明記。各案のメリット・デメリットが記載されている"
+      },
+      {
+        "id": "F1-005",
+        "status": "addressed",
+        "verification": "「行番号はコード変更により今後ずれる可能性がある。該当箇所は SF-001 コメントマーカーで特定可能」との注記が追加されている"
+      },
+      {
+        "id": "F1-006",
+        "status": "addressed",
+        "verification": "受入条件に promptData 構造、isPromptWaiting、thinking フラグ、isGenerating、isComplete の具体的な検証観点が追加されている"
+      },
+      {
+        "id": "F1-007",
+        "status": "addressed",
+        "verification": "概要セクションに「主目的はコードの明瞭性・DRY原則の改善であり、副次的にregex評価回数の削減によるホットパスの効率化を図る」と明記されている"
+      },
+      {
+        "id": "F1-008",
+        "status": "addressed",
+        "verification": "「スコープ外の類似パターン」セクションが追加され、auto-yes-manager.ts と response-poller.ts への言及がある"
+      }
+    ],
+    "stage3_findings": [
+      {
+        "id": "F3-001",
+        "status": "addressed",
+        "verification": "影響範囲テーブルに `tests/unit/lib/status-detector.test.ts` が追加されている（promptDetection フィールド検証・hasActivePrompt一致性テスト）"
+      },
+      {
+        "id": "F3-002",
+        "status": "addressed",
+        "verification": "影響範囲テーブルに `tests/integration/current-output-thinking.test.ts` が追加されている（SF-001 コメント更新、promptDetection フィールドの検証追加）"
+      },
+      {
+        "id": "F3-003",
+        "status": "addressed",
+        "verification": "提案解決策に循環依存リスク分析が明記されている。依存方向の説明（status-detector -> prompt-detector 一方向）、prompt-detector が status-detector をインポートしていないことの確認あり"
+      },
+      {
+        "id": "F3-004",
+        "status": "addressed",
+        "verification": "受入条件に stripAnsi()/stripBoxDrawing() 前処理の同一性確認が追加されている。実装タスクに不要import削除が追加されている"
+      },
+      {
+        "id": "F3-005",
+        "status": "addressed",
+        "verification": "実装タスク「呼び出し元の戻り値利用を更新」が4ステップ (a)-(d) に詳細化されている"
+      },
+      {
+        "id": "F3-006",
+        "status": "addressed",
+        "verification": "受入条件に thinking 状態時の promptDetection フィールド挙動が追加されている。detectSessionStatus() の優先順序保証が設計注記として追加されている"
+      },
+      {
+        "id": "F3-007",
+        "status": "addressed",
+        "verification": "影響範囲テーブルに auto-yes-manager.ts が「変更不要」として追加されている"
+      },
+      {
+        "id": "F3-008",
+        "status": "addressed",
+        "verification": "テスト更新タスクが4ステップ (a)-(d) に具体化されている。テスト追加先の推奨も明記されている"
+      },
+      {
+        "id": "F3-009",
+        "status": "addressed",
+        "verification": "受入条件に APIレスポンスJSON形状の同一性確認（promptData, isPromptWaiting, thinking, isGenerating, isComplete）が追加されている"
+      },
+      {
+        "id": "F3-010",
+        "status": "addressed",
+        "verification": "スコープ外セクションに response-poller.ts が追記されている"
+      },
+      {
+        "id": "F3-011",
+        "status": "addressed",
+        "verification": "実装タスクに CLAUDE.md のモジュール説明更新が追加されている"
+      }
+    ],
+    "partially_addressed": [],
+    "not_addressed": []
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 1,
+    "nice_to_have_count": 2,
+    "overall_quality": "good",
+    "comment": "Stage 1/3 で指摘された全19件（F1-001〜F1-008の8件、F3-001〜F3-011の11件）が全て適切に反映されている。Issue全体として一貫性があり、実装者が迷わず実装できる水準に達している。新たに発見された問題は軽微なものが3件のみ: (1) should_fix: 不要import削除リストから stripAnsi が漏れている（実装時に気づく可能性は高いが明示すべき）、(2) nice_to_have: テストファイル2件の役割分担の明確化、(3) nice_to_have: Issue #161 Layer 1 防御との関係の補足。概要・背景・課題・解決策・実装タスク・受入条件・影響範囲の各セクションが詳細かつ整合的に記載されており、代替案比較・循環依存リスク分析・設計注記（優先順序保証）も充実している。2回のレビューサイクルを経て高品質なIssueに仕上がっている。"
+  },
+  "code_references": [
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "13, 81, 87-102, 117-142",
+      "relevance": "stripAnsi import (L13)、cleanOutput 変数宣言 (L81)、二重呼び出し箇所 (L87-102)、APIレスポンス (L117-142)"
+    },
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "12-21, 42-60, 114-153",
+      "relevance": "SF-001 JSDoc、StatusDetectionResult 型定義、detectSessionStatus() 内部の detectPrompt() 呼び出し"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "54-69, 184, 253-256",
+      "relevance": "PromptDetectionResult 型定義、detectPrompt() 関数、isPrompt:false 時の cleanContent 返却"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "status-detector.ts モジュール説明（SF-001 記載あり、更新対象）"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db-instance';
 import { hasSession, sendKeys } from '@/lib/tmux';
+import { invalidateCache } from '@/lib/tmux-capture-cache';
 
 /** Maximum command length to prevent DoS via large send-keys payloads (D1-006) */
 const MAX_COMMAND_LENGTH = 10000;
@@ -76,6 +77,9 @@ export async function POST(
 
     // Send command to tmux session via sendKeys (not sendMessage, to avoid prompt detection overhead)
     await sendKeys(sessionName, command);
+
+    // Issue #405: Invalidate cache after sending command
+    invalidateCache(sessionName);
 
     return NextResponse.json({ success: true });
   } catch (error) {

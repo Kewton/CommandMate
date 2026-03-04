@@ -1,0 +1,129 @@
+{
+  "issue_number": 404,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-04",
+  "review_summary": "影響範囲レビューの結果、must_fix 2件、should_fix 4件、nice_to_have 2件の指摘を検出した。最も重大な問題は、(1) worktree個別削除のAPIエンドポイントが存在しないためcleanupWorktreeSessionsの呼び出しパスが限定されている点、および (2) stopAllSchedules()のworktree単位化で新関数stopScheduleForWorktree()がglobalThis ManagerStateのschedules Mapをworktree IDでフィルタリングする必要があるが、schedules MapのキーはscheduleId（UUID）であり、worktreeIdによる直接ルックアップが不可能なためイテレーション走査が必要になる設計上の留意点である。",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "worktree個別削除APIが存在しない -- cleanupWorktreeSessionsの呼び出しパスが不完全",
+      "description": "Issue本文では「worktree削除後にglobalThis Mapから該当エントリが削除されること」を受入条件としているが、実際のコードベースにはworktree個別削除のDELETEエンドポイント（DELETE /api/worktrees/[id]）が存在しない。worktree削除はリポジトリ単位の削除（DELETE /api/repositories）経由でのみ実行され、cleanupMultipleWorktrees()が呼ばれる。このため、Issue本文の「worktree削除後に」という記述はリポジトリ削除時の動作を指すと解釈すべきだが、影響範囲テーブルに記載されていないsrc/app/api/repositories/route.tsも変更対象となる可能性がある。また、将来worktree個別削除APIが追加された場合にcleanupWorktreeSessionsの呼び出しが漏れるリスクがある。",
+      "location": "受入条件セクション: 「worktree削除後にglobalThis Mapから該当エントリが削除されること」、影響範囲テーブル",
+      "suggested_fix": "影響範囲テーブルにsrc/app/api/repositories/route.tsを追加し、worktree削除がリポジトリ単位削除（cleanupMultipleWorktrees経由）でのみ実行される旨を明記する。また、実装タスクにcleanupWorktreeSessions()内でのglobalThis Map削除を確認するための統合テスト（repositories DELETE APIの呼び出しフロー）を追加することを推奨する。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "title": "stopScheduleForWorktree()の実装にschedules MapのキーがscheduleId（UUID）である制約の考慮が必要",
+      "description": "Issue本文では「schedule-manager.tsにstopScheduleForWorktree(worktreeId)関数を追加」としているが、schedule-manager.tsのManagerState.schedules Mapはキーがschedule ID（UUID）であり、値のScheduleState.worktreeIdフィールドでworktreeを特定する構造になっている。stopScheduleForWorktree(worktreeId)を実装する際、全エントリをイテレーションしてworktreeIdが一致するものを探す必要がある。これ自体は技術的に問題ないが（エントリ数はMAX_CONCURRENT_SCHEDULES=100以下）、実装タスクにこの設計制約を明記しないと誤った実装（Map.delete(worktreeId)のような直接キーアクセス）が行われるリスクがある。さらに、cmateFileCacheのキーはworktree pathであり、worktreeIdからpathへの変換にDB参照が必要（または追加のMapを持つ必要がある）という点も未記載である。",
+      "location": "実装タスク: 「schedule-manager.tsにstopScheduleForWorktree(worktreeId)関数を追加」",
+      "suggested_fix": "実装タスクに以下の詳細を追記する: (1) schedules Mapはイテレーション走査でworktreeIdフィルタリングを行う、(2) cmateFileCacheのキーはworktree pathであるため、worktreeId -> path変換が必要（DB lookupまたはcleanupWorktreeSessions呼び出し元からworktreePathを引数で渡す設計を検討）。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "category": "並行処理",
+      "title": "autoYesStates.delete()とactiveなpollAutoYes()のレース条件",
+      "description": "提案されているdeleteAutoYesState(worktreeId)はautoYesStates.delete(worktreeId)を実行するが、この時点でpollAutoYes()が非同期で実行中（awaitポイントの途中）の場合、以下のシーケンスが発生し得る: (1) deleteAutoYesState()でautoYesStates.delete()実行、(2) pollAutoYes()がvalidatePollingContext()でgetAutoYesState()を呼ぶ、(3) stateがnullのため'expired'を返し、stopAutoYesPolling()が呼ばれる。この場合、stopAutoYesPolling()は正常にpollerStateを削除するため実害はないが、session-cleanup.tsのstopAutoYesPolling()呼び出し（L101）の後にdeleteAutoYesState()を呼ぶ順序にすることで、より安全な設計となる。Node.jsはシングルスレッドであるため、非同期関数の同期部分（awaitポイント間）では割り込みが発生しないが、awaitポイントをまたぐ場合のイベントループ上の実行順序には注意が必要。",
+      "location": "実装タスク: 「session-cleanup.tsにdeleteAutoYesState(worktreeId)呼び出しを追加」",
+      "suggested_fix": "Issue本文に実装の順序制約を明記する: session-cleanup.tsのcleanupWorktreeSessions()内で、(1) stopAutoYesPolling(worktreeId)でタイマークリア+pollerState削除、(2) deleteAutoYesState(worktreeId)でautoYesStates削除、の順序で実行する旨を記載する。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "title": "response-poller.tsのtuiResponseAccumulator/activePollers/pollingStartTimesはモジュールスコープ変数であり、globalThisではない",
+      "description": "Issue本文では「globalThis Mapメモリリーク」として一括で扱っているが、response-poller.tsのtuiResponseAccumulator（L184）、activePollers（L350）、pollingStartTimes（L355）はモジュールスコープの通常のMap変数であり、globalThisパターンではない。Next.jsのhot reloadではモジュールが再読み込みされるため、これらのMapはリセットされる。ただし、本番ビルド（next start）では再読み込みされないため、worktree削除後もエントリが残留するリスクは存在する。stopPolling()はactivePollers/pollingStartTimes/tuiResponseAccumulatorの全てを適切に削除しており、session-cleanup.tsからstopPolling()が呼ばれるためこの3つは既にクリーンアップされる。Issue本文の「tuiResponseAccumulator Mapのworktreeエントリクリーンアップ処理追加」は、stopPolling()内のclearTuiAccumulator()呼び出し（L1284）で既に対応済みである可能性が高い。",
+      "location": "実装タスク: 「response-poller.tsのtuiResponseAccumulator Mapからworktreeエントリを削除する処理をsession-cleanup.tsに追加」、影響範囲テーブル: response-poller.ts",
+      "suggested_fix": "stopPolling()の内部実装（L1273-1285）を確認し、clearTuiAccumulator(pollerKey)が呼ばれていることを明記する。追加のクリーンアップが不要であれば、実装タスクから削除するか、「stopPolling()で既にクリーンアップ済みであることを確認」に変更する。ただし、ポーリングが開始されていないworktreeではstopPolling()でactivePollers.has()がfalseとなりclearTuiAccumulatorが呼ばれない可能性があるため、念のためtuiResponseAccumulatorの直接削除も検討する。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "category": "セキュリティ",
+      "title": "孤立MCPプロセスのppid=1チェックはmacOS/Linux環境依存であり、コンテナ環境で偽陽性リスクがある",
+      "description": "Issue本文では「ppid=1のcodex/playwright-mcpプロセス検索」を孤立プロセス検出ロジックとして提案しているが、以下の環境で偽陽性が発生する: (1) Dockerコンテナ内: PID 1はEntrypointプロセスであり、正規の子プロセスもppid=1となる、(2) systemd環境: systemdがプロセスの再親化（reparenting）を行いppid=1以外の値になる場合がある（systemd v234以降のsubreaper機能）、(3) macOS: launchdがPID 1であり、ppid=1は孤立プロセスの一般的な指標だが、launchd直接起動のプロセスも含まれる。Issue本文にはこれらの環境依存性に関する記述がない。",
+      "location": "実装タスク: 「孤立MCPプロセスの検出ロジック実装（ppid=1のcodex/playwright-mcpプロセス検索）」、受入条件: 「正常に稼働中のMCPプロセスに影響がないこと」",
+      "suggested_fix": "孤立MCPプロセス検出ロジックに多段階チェックを追加する記述を推奨: (1) ppid=1チェックに加え、(2) プロセス起動時刻とCommandMate起動時刻の比較（CommandMate起動前に存在したプロセスのみ対象）、(3) プロセスコマンドライン引数のパターンマッチング（codex mcp-server、playwright-mcp等の特定引数）、(4) Docker環境検出時はppid=1チェックをスキップまたは警告出力のみとする。"
+    },
+    {
+      "id": "F3-006",
+      "severity": "should_fix",
+      "category": "テスト",
+      "title": "既存テストへの影響と新規テスト必要箇所の不足",
+      "description": "現行のsession-cleanup.test.tsはstopAutoYesPollingとstopAllSchedulesのモック呼び出しを暗黙的に検証しているが、新たに追加されるdeleteAutoYesState()とstopScheduleForWorktree()の呼び出しを検証するテストケースが必要。また、auto-yes-manager.test.tsにはdeleteAutoYesState()のテストケース（正常削除、存在しないworktreeId、ポーリング中のworktree）が必要。schedule-manager.test.tsにはstopScheduleForWorktree()のテストケース（worktree単位停止、他worktreeへの非影響、cmateFileCacheの部分削除）が必要。Issueの実装タスクには「ユニットテスト」とあるが、具体的なテストシナリオが列挙されていない。",
+      "location": "実装タスク: 「ユニットテスト」",
+      "suggested_fix": "実装タスクのユニットテスト項目を以下のように具体化する:\n- [ ] session-cleanup.test.ts: cleanupWorktreeSessions()がdeleteAutoYesState()/stopScheduleForWorktree()を呼び出すことの検証\n- [ ] auto-yes-manager.test.ts: deleteAutoYesState()の正常系（delete後にgetAutoYesStateがnull返却）\n- [ ] auto-yes-manager.test.ts: deleteAutoYesState()がautoYesPollerStatesには影響しないことの確認\n- [ ] schedule-manager.test.ts: stopScheduleForWorktree()がworktree単位のcronJob.stop()+schedules.delete()を実行することの検証\n- [ ] schedule-manager.test.ts: stopScheduleForWorktree()が他worktreeのスケジュールに影響しないことの検証\n- [ ] 定期クリーンアップ関数のテスト（DB worktree一覧とMapキーの差分検出）"
+    },
+    {
+      "id": "F3-007",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "定期クリーンアップ（24時間ごと）の実装場所と起動タイミングが未定義",
+      "description": "Issue本文には「24時間ごとにDBに存在しないworktreeのエントリを自動削除（セーフティネット）」とあるが、このタイマーをどのモジュールで管理するか、サーバー起動時のどのタイミングで開始するか、graceful shutdown時にどのように停止するかが記載されていない。既存のschedule-manager.tsのinitScheduleManager()パターンに倣うのが自然だが、schedule-managerとは独立した責務であるため新規モジュール（resource-cleaner.ts等）が必要かもしれない。また、syncSchedules()の60秒ポーリングで既にworktreeのDB存在チェックが行われているため、schedule-managerのMapについてはこの定期クリーンアップが冗長である可能性がある。",
+      "location": "提案する解決策B: 「24時間ごとにDBに存在しないworktreeのエントリを自動削除」",
+      "suggested_fix": "定期クリーンアップの実装方針を明確にする: (1) 対象モジュール（新規 or 既存拡張）、(2) スキャン対象のglobalThis Map一覧（autoYesStates, autoYesPollerStates, __scheduleActiveProcesses）、(3) schedule-manager.tsのschedules MapについてはsyncSchedules()で既に自動クリーンアップが行われるため対象外とする旨を明記。"
+    },
+    {
+      "id": "F3-008",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "title": "cleanupMultipleWorktrees()のforループ内でstopAllSchedules()が複数回呼ばれる問題への言及不足",
+      "description": "session-cleanup.tsのcleanupMultipleWorktrees()はforループ内でcleanupWorktreeSessions()を呼び、各呼び出しでstopAllSchedules()が実行される。リポジトリ削除で複数worktreeを処理する場合、1回目のstopAllSchedules()で全スケジュールが停止され、2回目以降は空のMapに対して操作するだけとなる。stopScheduleForWorktree()に変更することでこの非効率は解消されるが、cleanupMultipleWorktrees()のforループ構造自体が各worktreeに対してstopScheduleForWorktree()を個別に呼ぶため、複数worktreeが同一リポジトリに属する場合の最適化は不要（各worktreeのスケジュールを個別に停止するのが正しい動作）。この動作変更の影響を明記すると良い。",
+      "location": "実装タスク: 「session-cleanup.tsのcleanupWorktreeSessions()からstopAllSchedules()をstopScheduleForWorktree(worktreeId)に変更」",
+      "suggested_fix": "Issue本文に、この変更によりcleanupMultipleWorktrees()の動作が「全スケジュール停止の複数回実行」から「worktree単位のスケジュール停止の正確な実行」に改善される旨を補足する。"
+    }
+  ],
+  "must_fix_count": 2,
+  "should_fix_count": 4,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Issue #404の影響範囲は概ね正確に特定されているが、2つの重要な不足がある。第一に、worktree削除のエントリポイントがリポジトリ削除API（repositories/route.ts）であることが影響範囲テーブルに反映されておらず、cleanupWorktreeSessionsの呼び出しパスの全体像が不明確である。第二に、stopScheduleForWorktree()の実装にはschedules MapのキーがscheduleIdである制約とcmateFileCacheのキーがworktree pathである制約の両方を考慮する必要があり、この設計詳細が実装タスクに不足している。response-poller.tsについてはstopPolling()内で既にtuiResponseAccumulatorのクリーンアップが行われているため追加対応が不要な可能性がある。孤立MCPプロセスのppid=1検出はコンテナ環境での偽陽性リスクがあり、追加の防御策が必要。テスト計画は具体的なシナリオの列挙が不足している。",
+  "code_references": [
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "61-120",
+      "relevance": "cleanupWorktreeSessions() - stopAllSchedules()の全スケジュール停止問題（L111）、stopAutoYesPolling()呼び出し（L101）"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "132-138, 252-266, 779-791",
+      "relevance": "autoYesStates Map（L133-134）にdelete()が不在、disableAutoYes()はset()のみ（L264）、stopAutoYesPolling()はpollerStatesのdelete()を持つ（L789）"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "lines": "43-54, 106-124, 478-591, 634-669",
+      "relevance": "ScheduleState.worktreeId（L47）、ManagerState.schedules Map キーはscheduleId（L61）、cmateFileCache キーはworktree path（L79）、syncSchedules()（L478）、stopAllSchedules()（L634）"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "184, 339-341, 350-355, 1273-1285",
+      "relevance": "tuiResponseAccumulator（L184、モジュールスコープ）、clearTuiAccumulator()（L339）、activePollers/pollingStartTimes（L350-355）、stopPolling()内のclearTuiAccumulator呼び出し（L1284）"
+    },
+    {
+      "file": "src/lib/claude-executor.ts",
+      "lines": "196-206, 212-226",
+      "relevance": "__scheduleActiveProcesses Map（L214）、child.on('exit')でdelete()（L201-203）"
+    },
+    {
+      "file": "src/app/api/repositories/route.ts",
+      "lines": "57-167",
+      "relevance": "DELETE /api/repositories - cleanupMultipleWorktrees()呼び出し元（L92）、唯一のworktree削除エントリポイント"
+    },
+    {
+      "file": "tests/unit/session-cleanup.test.ts",
+      "lines": "1-153",
+      "relevance": "既存テスト - stopAutoYesPolling/stopAllSchedulesのモック検証が暗黙的、新規関数の検証追加が必要"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "session-cleanup.ts、auto-yes-manager.ts、schedule-manager.ts、claude-executor.ts、response-poller.tsの各モジュール概要"
+    }
+  ]
+}

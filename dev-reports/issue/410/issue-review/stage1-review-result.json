@@ -1,0 +1,118 @@
+{
+  "issue_number": 410,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "MF-001",
+      "category": "must_fix",
+      "title": "F1の記載が不正確: xterm.jsは/worktrees/[id]の初期ロードに影響しない",
+      "description": "Issueの背景・課題セクションF1で「/worktrees/[id] の初期ロードが291KBに達している」と記載されているが、仮説検証の結果、Terminal.tsxは/worktrees/[id]/terminal/page.tsxにのみimportされており、メインの/worktrees/[id]/page.tsxの初期バンドルには含まれない。Next.jsのルートベースコード分割により、xterm.jsは/worktrees/[id]/terminalページ固有のバンドルとなる。F1とF2が同一ページの問題であるかのように記載されているが、実際にはそれぞれ異なるルートの問題である。",
+      "suggested_fix": "F1の記載を「/worktrees/[id]/terminal ページでxterm.jsがSSR非互換のトップレベルimportされている」と修正し、/worktrees/[id]メインページへの影響ではないことを明確化する。F1とF2が異なるルートの問題であることを明記する。"
+    },
+    {
+      "id": "MF-002",
+      "category": "must_fix",
+      "title": "受入条件「/worktrees/[id] の初期ロードJSが200KB以下」の根拠不明",
+      "description": "受入条件の1つ目「/worktrees/[id] の初期ロードJSが200KB以下に削減されること」について、xterm.js（~500KB）はメインの/worktrees/[id]ページのバンドルに含まれないため、削減効果はrehype-highlight/highlight.js（~100KB+）の遅延ロード化のみに依存する。現在の初期ロードサイズ（291KBと記載）がxterm.jsを含まない場合、100KB削減で200KB以下を達成できるかが不明確。また「291KB」という数値の測定条件（gzip前/後、First Load JS等）が記載されていない。",
+      "suggested_fix": "受入条件を以下のように分離・修正する: (1) /worktrees/[id]ページ: MarkdownEditorのdynamic import化によるFirst Load JS削減量を測定し、具体的な目標値を設定 (2) /worktrees/[id]/terminalページ: SSRエラーが発生しないこと、xterm.jsがクライアントサイドのみでロードされること。また、ビルド後の`npm run build`出力で各ルートのサイズを比較する方法を明記する。"
+    },
+    {
+      "id": "SF-001",
+      "category": "should_fix",
+      "title": "影響範囲にMessageList.tsxとfiles/[...path]/page.tsxが未記載",
+      "description": "rehype-highlightをimportしているファイルはMarkdownEditor.tsx以外にも2つ存在する: (1) src/components/worktree/MessageList.tsx (L18) - 現在のレンダーツリーでは/worktrees/[id]に直接含まれていないが、barrel export (index.ts) 経由で将来的にimportされる可能性がある (2) src/app/worktrees/[id]/files/[...path]/page.tsx (L14) - 別ルートだがrehype-highlightを使用。Issue本文の影響範囲テーブルにはMarkdownEditor.tsxのみ記載されており、プロジェクト全体での一貫したdynamic import化を検討すべき。",
+      "suggested_fix": "影響範囲テーブルにMessageList.tsxとfiles/[...path]/page.tsxを追加し、これらも同様にrehype-highlightの遅延ロード化を検討するか、スコープ外であることを明記する。"
+    },
+    {
+      "id": "SF-002",
+      "category": "should_fix",
+      "title": "実装タスクにMarkdownEditor自体のdynamic import化が含まれていない",
+      "description": "現在の実装タスクは「MarkdownEditor.tsxのrehype-highlight/highlight.js CSS遅延ロード」となっているが、WorktreeDetailRefactored.tsxがMarkdownEditor.tsxを静的importしている以上、rehype-highlight/highlight.js CSSだけでなく、MarkdownEditor.tsx自体をnext/dynamicで動的importすることも有効な選択肢である。MarkdownEditorは条件付きレンダリング（マークダウンファイル選択時のみ表示）であるため、コンポーネント全体のdynamic importがバンドルサイズ削減により効果的な可能性がある。",
+      "suggested_fix": "実装タスクに「WorktreeDetailRefactored.tsxからMarkdownEditorへのimportをnext/dynamic({ssr:false})に変更する」を追加するか、rehype-highlight内部遅延ロードとの比較検討を記載する。プロジェクト内にMermaidCodeBlock.tsxで同様のパターン（next/dynamic + ssr:false + loading）の先例がある。"
+    },
+    {
+      "id": "SF-003",
+      "category": "should_fix",
+      "title": "Terminal.tsxのdynamic import化の目的が不明確",
+      "description": "Terminal.tsxのdynamic import化について、目的が「バンドルサイズ削減」と「SSR問題の回避」のどちらなのかが曖昧。xterm.jsはブラウザ専用API（DOM操作）を使用するためSSR時にエラーが発生する可能性があり、dynamic import化の主目的はSSR互換性確保であるべき。Terminal.tsxが既に'use client'を宣言しているが、Next.jsのApp Routerではuse clientだけではSSR時のモジュール実行を防げないため、ssr:falseが必要な理由を明記すべき。",
+      "suggested_fix": "F1の課題記述を「SSR時にxterm.jsのブラウザ専用APIが実行されエラーとなる」問題として再定義し、dynamic import化の目的をSSR互換性確保として明確化する。バンドルサイズへの影響は副次的な効果として記載する。"
+    },
+    {
+      "id": "SF-004",
+      "category": "should_fix",
+      "title": "テスト計画が実装タスクに含まれていない",
+      "description": "既存テストとして tests/unit/components/MarkdownEditor.test.tsx が存在するが、実装タスクにテスト更新の項目がない。dynamic import化により既存テストが破損する可能性がある（next/dynamicのモック設定が必要になる等）。また、受入条件の「ターミナル表示時に遅延なくxterm.jsがロードされること」「markdownプレビュー表示時にハイライトが正常動作すること」をどのように検証するかが不明。",
+      "suggested_fix": "実装タスクに以下を追加: (1) 既存テスト(MarkdownEditor.test.tsx)の更新・動作確認 (2) ローディングインジケーターの表示テスト (3) 受入条件のバンドルサイズ検証手順（npm run buildの出力確認等）"
+    },
+    {
+      "id": "NTH-001",
+      "category": "nice_to_have",
+      "title": "バンドルサイズの現状値と目標値の測定方法の明記",
+      "description": "Issueでは「~500KB」「~100KB+」「291KB」といった数値が記載されているが、これらの測定方法（gzip前後、npm run build出力のFirst Load JS、Chrome DevToolsのNetwork tab等）が明記されていない。実装完了時の検証を容易にするため、測定方法を統一して記載すべき。",
+      "suggested_fix": "バンドルサイズの測定方法を明記する。例: 「npm run build実行時のRoute (app)セクションのFirst Load JS列で確認」または「@next/bundle-analyzerを使用して各チャンクのサイズを確認」"
+    },
+    {
+      "id": "NTH-002",
+      "category": "nice_to_have",
+      "title": "highlight.js CSSの遅延ロード方法の具体化",
+      "description": "実装タスクに「highlight.js CSS遅延ロード」と記載されているが、CSSの動的importはJSの動的importとは異なるアプローチが必要。next/dynamicでコンポーネント全体を遅延ロードすればCSS importも遅延される（webpack/turbopackがCSS extractionをチャンクに含めるため）が、CSS単体の遅延ロードはReactでは標準的な手法がない。実装方針を明確にすると着手時の迷いが減る。",
+      "suggested_fix": "実装方針として「MarkdownEditorコンポーネント全体をnext/dynamicで遅延ロードすることで、内部のrehype-highlightとhighlight.js CSSも自動的にチャンク分離される」と具体化する。"
+    }
+  ],
+  "summary": {
+    "must_fix": 2,
+    "should_fix": 4,
+    "nice_to_have": 2,
+    "overall_quality": "needs_improvement"
+  },
+  "code_references": [
+    {
+      "file": "src/components/Terminal.tsx",
+      "lines": "L9-12",
+      "relevance": "xterm.jsトップレベルimport（変更対象）"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "L34-35",
+      "relevance": "rehype-highlight/highlight.js CSSトップレベルimport（変更対象）"
+    },
+    {
+      "file": "src/app/worktrees/[id]/terminal/page.tsx",
+      "lines": "L9",
+      "relevance": "Terminal.tsxのimport元（/worktrees/[id]とは別ルート）"
+    },
+    {
+      "file": "src/app/worktrees/[id]/page.tsx",
+      "lines": "L10",
+      "relevance": "WorktreeDetailRefactored.tsxのimport元（メインページ）"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "L39",
+      "relevance": "MarkdownEditorの静的import（バンドルに含まれる原因）"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "lines": "L18",
+      "relevance": "rehype-highlightの追加消費先（Issue未記載）"
+    },
+    {
+      "file": "src/app/worktrees/[id]/files/[...path]/page.tsx",
+      "lines": "L14",
+      "relevance": "rehype-highlightの追加消費先（Issue未記載、別ルート）"
+    },
+    {
+      "file": "src/components/worktree/MermaidCodeBlock.tsx",
+      "lines": "L13-30",
+      "relevance": "next/dynamic + ssr:false の既存先例"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト技術スタック・コーディング規約の参照元"
+    }
+  ]
+}

@@ -1,0 +1,165 @@
+{
+  "issue_number": 404,
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "focus_area": "通常",
+  "review_date": "2026-03-04",
+  "review_summary": "Issue #404は長期運用時のリソースリーク対策として、孤立MCPプロセスとglobalThis Mapメモリリークの2つの問題を統合的に解決する提案である。課題認識と解決方針は概ね妥当だが、背景セクションの技術詳細（行番号・変数名・ファイル所在）に複数の不正確な記載がある。また、session-cleanup.tsの既存の問題点（stopAllSchedules()が全スケジュールを停止する過剰な動作）への言及がなく、実装タスクの粒度・受入条件の定量性にも改善の余地がある。",
+  "findings": [
+    {
+      "id": "F1-001",
+      "severity": "must_fix",
+      "category": "正確性",
+      "title": "__scheduleActiveProcesses はschedule-manager.tsではなくclaude-executor.tsに存在する",
+      "description": "Issue本文の「背景・課題 > 2. globalThis Mapメモリリーク」セクションで、「schedule-manager.ts (L88-95): __scheduleManagerStates、__scheduleActiveProcesses Mapも同様」と記載されているが、__scheduleActiveProcesses はclaude-executor.ts (L212-226) で宣言・管理されており、schedule-manager.tsには存在しない。schedule-manager.ts はgetActiveProcesses()をclaude-executor.tsからimportして使用しているのみである。この誤記は実装者がリーク対策の修正箇所を誤認する直接的リスクがある。",
+      "location": "背景・課題 > 2. globalThis Mapメモリリーク > schedule-manager.ts (L88-95) の記述",
+      "suggested_fix": "以下のように修正する:\n- 「schedule-manager.ts (L106-109): __scheduleManagerStates Mapが削除されたworktreeのスケジュールエントリを保持し続ける」\n- 「claude-executor.ts (L212-226): __scheduleActiveProcesses Mapがプロセス終了後もエントリを保持する可能性がある」\nと2つに分けて正確に記載する。"
+    },
+    {
+      "id": "F1-002",
+      "severity": "must_fix",
+      "category": "正確性",
+      "title": "schedule-manager.tsの行番号L88-95は実際のglobalThis宣言箇所と一致しない",
+      "description": "Issue本文でschedule-manager.ts (L88-95) と記載されているが、L88-95はDB行形状インターフェース定義（ScheduleIdNameRow, ScheduleIdRow）の位置であり、globalThis.__scheduleManagerStatesの宣言はL106-109に存在する。",
+      "location": "背景・課題 > 2. globalThis Mapメモリリーク > schedule-manager.ts (L88-95)",
+      "suggested_fix": "行番号をL106-109に修正する。"
+    },
+    {
+      "id": "F1-003",
+      "severity": "must_fix",
+      "category": "正確性",
+      "title": "schedule-manager.tsのglobalThis Mapの構造誤認: schedules MapのキーはworktreeIdではなくscheduleId",
+      "description": "Issue本文では「削除されたworktreeのエントリを保持し続ける」と記載しているが、__scheduleManagerStates.schedules Mapのキーはschedule IDであり、worktree IDではない。さらに、syncSchedules()の60秒ポーリングサイクルでgetAllWorktrees()から取得したworktree一覧に基づき、activeScheduleIdsに含まれないスケジュールは自動的にcronJob.stop()とschedules.delete()される（L579-586）。つまり、worktreeがDB上で削除されれば次のsyncSchedules()サイクル（最大60秒後）でスケジュールエントリは自動クリーンアップされる。この既存の自己クリーンアップ機構への言及がIssueに欠けている。",
+      "location": "背景・課題 > 2. globalThis Mapメモリリーク > schedule-manager.ts の説明全体",
+      "suggested_fix": "schedule-manager.tsのschedules Mapについて、既存の自己クリーンアップ機構（syncSchedules()による60秒周期の自動削除）を正確に記述した上で、「worktree削除直後の最大60秒間のリーク」と「サーバー全体停止でなくworktree単位のスケジュール停止関数が存在しない点」を明確に課題として記述する。"
+    },
+    {
+      "id": "F1-004",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "session-cleanup.tsの既存問題: stopAllSchedules()が全スケジュールを停止する過剰動作",
+      "description": "現在のsession-cleanup.ts L111ではcleanupWorktreeSessions()内でstopAllSchedules()を呼んでおり、1つのworktreeのクリーンアップ時に全worktreeのスケジュールが停止される。これは明らかに過剰な動作であり、Issue #404で「session-cleanup.tsにMapエントリ削除処理追加」を行う際に同時に修正すべき既存バグに近い挙動である。stopScheduleForWorktree(worktreeId)のような個別停止関数の追加が実装タスクに含まれるべきである。",
+      "location": "実装タスク > globalThis Mapメモリリーク対策 / 影響範囲テーブル",
+      "suggested_fix": "実装タスクに「schedule-manager.tsにstopScheduleForWorktree(worktreeId)関数を追加し、session-cleanup.tsからworktree単位で呼び出すよう修正」を追加する。"
+    },
+    {
+      "id": "F1-005",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "autoYesStatesのdelete()不在が最重要リークであることの明示不足",
+      "description": "仮説検証で確認済みの通り、autoYesStates Mapには.delete()呼び出しが一切存在しない。disableAutoYes()はset()でenabled: falseに更新するのみで、エントリ自体は残留する。一方でautoYesPollerStatesにはstopAutoYesPolling()でdelete()が存在する。Issue本文では両者を同列に記載しているが、autoYesStatesの方がリーク確定度が高く、対処の優先度も明確に高い。この差異を実装タスクで明示すべきである。",
+      "location": "実装タスク > globalThis Mapメモリリーク対策",
+      "suggested_fix": "実装タスクを以下のように具体化する:\n- [ ] auto-yes-manager.tsにdeleteAutoYesState(worktreeId)関数を追加（autoYesStates.delete()実行）\n- [ ] session-cleanup.tsのcleanupWorktreeSessions()からdeleteAutoYesState(worktreeId)を呼び出し"
+    },
+    {
+      "id": "F1-006",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "response-poller.tsのmodule-scope Mapもリーク対象だが影響範囲テーブルに含まれていない",
+      "description": "response-poller.tsのactivePollers Map（L350）、pollingStartTimes Map（L355）、tuiResponseAccumulator Map（L184）はmodule-scope（globalThisではない）だが、同様にworktree削除時のクリーンアップ対象である。session-cleanup.tsはstopResponsePolling()でactivePollers/pollingStartTimesのdelete()を呼ぶため現行でも部分的にカバーされているが、tuiResponseAccumulator Mapのエントリ残留は同様のリーク対象である。影響範囲テーブルへの追記を検討すべきである。",
+      "location": "影響範囲テーブル",
+      "suggested_fix": "影響範囲テーブルにresponse-poller.tsのtuiResponseAccumulator Mapのクリーンアップ確認を追加するか、「スコープ外」として明示的に除外する理由を記載する。"
+    },
+    {
+      "id": "F1-007",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "「24時間ごとの定期クリーンアップ」の実装場所・方法が未記載",
+      "description": "「提案する解決策 > B. globalThis Mapクリーンアップ」で「24時間ごとにDBに存在しないworktreeのエントリを自動削除（セーフティネット）」と記載されているが、この定期クリーンアップの実装場所が明確でない。schedule-manager.tsの既存タイマー（60秒ポーリング）に相乗りするのか、新規にsetInterval()を設けるのか、server.ts起動時に登録するのか。実装タスクにも「定期クリーンアップ関数の実装」としか書かれておらず、呼び出し元・タイマー管理方法が不明である。",
+      "location": "提案する解決策 > B. globalThis Mapクリーンアップ / 実装タスク",
+      "suggested_fix": "以下を明記する:\n1. 定期クリーンアップのタイマー管理場所（新規モジュール or 既存schedule-managerへの相乗り）\n2. 24時間という間隔の根拠\n3. タイマーのライフサイクル（サーバー起動時に開始、シャットダウン時にclearInterval）\n4. 影響範囲テーブルへの該当ファイル追加"
+    },
+    {
+      "id": "F1-008",
+      "severity": "should_fix",
+      "category": "実現可能性",
+      "title": "孤立MCPプロセス検出（ppid=1）のクロスプラットフォーム対応が未考慮",
+      "description": "Issue本文では「ppid=1のcodex/playwright-mcpプロセス検索」と記載しているが、macOSではlaunchdがpid=1であり、ppid=1の検出はLinuxとmacOSで同様に機能するものの、プロセス検索コマンド（ps, pgrep等）の出力形式やオプションはOS間で異なる。scripts/build-and-start.shはbashスクリプトだが、クロスプラットフォーム互換性（Linux/macOS）の考慮が記載されていない。また、コンテナ環境ではppid=1が正常なプロセスである可能性がある。",
+      "location": "提案する解決策 > A. 孤立MCPプロセスのクリーンアップ / 実装タスク",
+      "suggested_fix": "以下を追記する:\n- 対象OS（Linux/macOS）のプロセス検索方法の差異と統一方法\n- コンテナ環境でのppid=1プロセス誤検出防止策\n- プロセス名パターンの厳密な定義（コマンドライン引数まで含めたマッチング条件）"
+    },
+    {
+      "id": "F1-009",
+      "severity": "should_fix",
+      "category": "整合性",
+      "title": "受入条件「正常に稼働中のMCPプロセスに影響がないこと」の検証方法が不明",
+      "description": "受入条件の2番目「正常に稼働中のMCPプロセス（現在のセッションに紐づくもの）に影響がないこと」とあるが、現在のコードベースにはMCPプロセスのPID追跡・セッション紐付けロジックが存在しない。孤立プロセスと正常プロセスを区別する具体的な判定基準（ppid=1のみで十分か、セッション名マッチングも必要か等）が受入条件から読み取れない。",
+      "location": "受入条件 > 2番目の項目",
+      "suggested_fix": "「正常稼働中のプロセス」の判定基準を明示する。例: 「ppid がCommandMateサーバープロセスのPIDであるMCPプロセスは停止対象から除外されること」"
+    },
+    {
+      "id": "F1-010",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "claude-executor.tsの__scheduleActiveProcessesが影響範囲テーブルに含まれていない",
+      "description": "Issue本文ではschedule-manager.tsに__scheduleActiveProcessesがあると誤認しているが、実際にはclaude-executor.ts (L212-226) にglobalThis.__scheduleActiveProcesses Mapが存在する。このMapは子プロセスのexit イベントでdelete()されるため通常運用ではリークしないが、プロセスが異常終了してexitイベントが発火しないケースではエントリが残留する可能性がある。影響範囲テーブルにclaude-executor.tsを追加し、リーク可能性の有無を明示すべきである。",
+      "location": "影響範囲テーブル",
+      "suggested_fix": "影響範囲テーブルにclaude-executor.tsを追加する。変更内容は「__scheduleActiveProcesses Mapの異常終了時リーク対策確認、必要に応じてクリーンアップ処理追加」。"
+    },
+    {
+      "id": "F1-011",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "auto-yes-manager.tsの行番号L133-138は概ね正確だが微修正が望ましい",
+      "description": "Issue本文で「auto-yes-manager.ts (L133-138)」と記載されているが、autoYesStatesの宣言はL133-134、autoYesPollerStatesの宣言はL136-138であり、L135は空行である。範囲指定としてはL133-138で概ね正確だが、globalThis declare部分（L125-130）を含めるとL125-138がより正確な範囲である。",
+      "location": "背景・課題 > 2. globalThis Mapメモリリーク > auto-yes-manager.ts (L133-138)",
+      "suggested_fix": "L125-138（declare global含む）に修正するか、L133-134, L136-138と個別に記載する。"
+    },
+    {
+      "id": "F1-012",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "実装タスクにテスト戦略の具体化が不足",
+      "description": "実装タスクの最後に「ユニットテスト」とあるが、孤立MCPプロセス検出のテスト方針（実プロセスを起動するのか、psコマンドの出力をモックするのか）やglobalThis Mapクリーンアップのテスト方針（globalThisの状態を直接検証するのか）が不明確である。特にMCPプロセス検出は外部コマンド依存であり、テスト容易性の観点で設計指針が欲しい。",
+      "location": "実装タスク > ユニットテスト",
+      "suggested_fix": "テスト戦略を以下のように具体化する:\n- MCPプロセス検出: プロセス検索ロジックをpure functionとして切り出し、パーサーのユニットテスト + 実コマンド部分のインテグレーションテスト\n- globalThis Mapクリーンアップ: globalThisの状態を直接操作する形式のユニットテスト（clearAllAutoYesStates()の既存パターンに倣う）"
+    }
+  ],
+  "must_fix_count": 3,
+  "should_fix_count": 7,
+  "nice_to_have_count": 2,
+  "overall_assessment": "Issue #404は長期運用時のリソースリーク問題を適切に特定しており、課題認識と解決方針の大枠は妥当である。しかし、技術詳細の正確性に3件のmust_fix指摘がある。特に__scheduleActiveProcessesの所在ファイル誤認（schedule-manager.tsではなくclaude-executor.ts）、行番号の不一致、schedule-manager.tsのschedules Mapの既存自己クリーンアップ機構への言及漏れは、実装者の理解を誤誘導するリスクがあり、修正が必須である。また、session-cleanup.tsでのstopAllSchedules()の過剰動作問題、autoYesStatesの明確なdelete()不在の強調、24時間定期クリーンアップの実装場所の明確化など、7件のshould_fixも実装成功に重要な改善点である。",
+  "code_references": [
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "L125-138, L252-266, L272-274, L779-791",
+      "relevance": "autoYesStates / autoYesPollerStates のglobalThis Map宣言、disableAutoYes() / clearAllAutoYesStates() / stopAutoYesPolling() の実装"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "lines": "L56-79, L106-124, L478-591, L634-660",
+      "relevance": "ManagerState型定義、globalThis宣言、syncSchedules()の自己クリーンアップ機構、stopAllSchedules()の実装"
+    },
+    {
+      "file": "src/lib/claude-executor.ts",
+      "lines": "L196-204, L210-226",
+      "relevance": "__scheduleActiveProcesses Mapの宣言・管理（Issue本文がschedule-manager.tsと誤記している箇所）"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "lines": "L61-120",
+      "relevance": "cleanupWorktreeSessions() - 既存のクリーンアップFacade。stopAllSchedules()の過剰呼び出し問題あり"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "L184, L350, L355, L1273-1285",
+      "relevance": "module-scope Maps (tuiResponseAccumulator, activePollers, pollingStartTimes) とstopPolling()のdelete()実装"
+    },
+    {
+      "file": "src/app/api/repositories/route.ts",
+      "lines": "L15, L92",
+      "relevance": "cleanupMultipleWorktrees()の唯一の呼び出し元（リポジトリ削除API）"
+    },
+    {
+      "file": "scripts/build-and-start.sh",
+      "lines": "全体",
+      "relevance": "MCPプロセスクリーンアップの追加先として記載されている既存スクリプト"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "session-cleanup.ts, auto-yes-manager.ts, schedule-manager.ts, claude-executor.ts のモジュール説明"
+    }
+  ]
+}

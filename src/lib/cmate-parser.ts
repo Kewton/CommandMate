@@ -12,7 +12,7 @@
  * - Cron expression validation
  */
 
-import { readFileSync, realpathSync } from 'fs';
+import { realpath, readFile } from 'fs/promises';
 import path from 'path';
 import type { ScheduleEntry, CmateConfig } from '@/types/cmate';
 import { isCliToolType } from '@/lib/cli-tools/types';
@@ -77,12 +77,12 @@ export function sanitizeMessageContent(content: string): string {
  * @returns true if path is valid and within worktree directory
  * @throws Error if path traversal is detected
  */
-export function validateCmatePath(
+export async function validateCmatePath(
   filePath: string,
   worktreeDir: string
-): boolean {
-  const realFilePath = realpathSync(filePath);
-  const realWorktreeDir = realpathSync(worktreeDir);
+): Promise<boolean> {
+  const realFilePath = await realpath(filePath);
+  const realWorktreeDir = await realpath(worktreeDir);
 
   // Ensure the file is within the worktree directory
   if (
@@ -308,13 +308,13 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
  * @returns Parsed CmateConfig, or null if the file doesn't exist
  * @throws Error if path traversal is detected
  */
-export function readCmateFile(worktreeDir: string): CmateConfig | null {
+export async function readCmateFile(worktreeDir: string): Promise<CmateConfig | null> {
   const filePath = path.join(worktreeDir, CMATE_FILENAME);
 
   try {
     // Validate path before reading
-    validateCmatePath(filePath, worktreeDir);
-    const content = readFileSync(filePath, 'utf-8');
+    await validateCmatePath(filePath, worktreeDir);
+    const content = await readFile(filePath, 'utf-8');
     return parseCmateFile(content);
   } catch (error) {
     if (

@@ -1,0 +1,52 @@
+{
+  "issue_number": 406,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DR3-001",
+        "item": "schedule-manager.test.ts の fire-and-forget syncSchedules() 完了待ちパターンが不足",
+        "section_updated": "Section 4.3 テスト変更 (schedule-manager.test.ts)",
+        "status": "reflected",
+        "details": "fire-and-forget 初回 syncSchedules() の完了待ちパターンを具体的なコード例付きで追記。await vi.advanceTimersByTimeAsync(0) による microtask flush パターンを4件全テストに適用する旨を明記。実装チェックリストにも DR3-001 参照を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR3-002",
+        "item": "DJ-002 の unhandled rejection トレードオフが未記載",
+        "section_updated": "Section 3 設計判断 (DJ-002)",
+        "status": "reflected",
+        "details": "DJ-002 に unhandled rejection のトレードオフ行を追加。.catch() 省略により syncSchedules() 内部 try-catch を突破するエラーは unhandled rejection → プロセス終了となること、fail-fast として意図的に許容する根拠、server.ts の uncaughtException ハンドラとの関係を明記。"
+      },
+      {
+        "id": "DR3-003",
+        "item": "cmate-parser.test.ts の実ファイルシステム使用テストの async 化対応注記が不足",
+        "section_updated": "Section 4.3 テスト変更 (cmate-parser.test.ts)",
+        "status": "reflected",
+        "details": "validateCmatePath テスト (L358-391) が実ファイルシステムを使用しており、fs.promises.realpath() でもそのまま動作するためモック変更不要、async/await 構文変更のみが必要である旨の注記を追加。"
+      },
+      {
+        "id": "DR3-004",
+        "item": "initScheduleManager() の fire-and-forget 化による初期化順序安全性の根拠が不足",
+        "section_updated": "Section 7 影響範囲 (影響なしファイル server.ts)",
+        "status": "reflected",
+        "details": "server.ts の影響なし理由を拡充。fire-and-forget 化により initResourceCleanup() が syncSchedules() 完了前に開始されるが、24h 周期 + 空 schedules Map イテレーションにより安全である根拠を追記。"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-406-async-cmate-parser-design-policy.md",
+  "sections_updated": [
+    "Section 3: 設計判断 (DJ-002 unhandled rejection トレードオフ追記)",
+    "Section 4.3: テスト変更 (fire-and-forget await パターン追加、実ファイルシステムテスト注記追加)",
+    "Section 7: 影響範囲 (server.ts 初期化順序安全性根拠追記)",
+    "Section 9: 実装チェックリスト (DR3-001 参照追加)",
+    "Section 10: レビュー履歴 (Stage 3 追加)",
+    "Section 11: レビュー指摘事項サマリー (Stage 3 全9件追加)"
+  ],
+  "timestamp": "2026-03-04T12:30:00Z"
+}

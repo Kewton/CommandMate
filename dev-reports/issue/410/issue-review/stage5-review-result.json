@@ -1,0 +1,94 @@
+{
+  "issue_number": 410,
+  "stage": 5,
+  "stage_name": "通常レビュー（2回目）",
+  "review_date": "2026-03-03",
+  "previous_findings_addressed": {
+    "MF-001": "addressed",
+    "MF-002": "addressed"
+  },
+  "findings": [
+    {
+      "id": "R2-F001",
+      "category": "should_fix",
+      "title": "MessageListのツリーシェイキング前提に関する補足が不十分",
+      "description": "スコープ外セクションでMessageList.tsxについて「barrel export (src/components/worktree/index.ts) 経由のみで参照され、/worktrees/[id] ページのコンポーネントツリーから直接importされていないため、ツリーシェイキングによりバンドルに含まれない見込み」と記載されている。コード調査の結果、MessageListは実際にアプリケーションコード全体でどこからもimportされておらず（barrel exportでre-exportされているのみ）、確かにバンドルに含まれない可能性が高い。しかし、Next.js/webpackのツリーシェイキングは設定やバンドラーの挙動に依存し、barrel exportがside-effect freeとして扱われるかは package.json の sideEffects フィールドや next.config の optimizePackageImports 設定に左右される。「含まれない見込み」ではなく「npm run build で実際に確認する」旨が既に記載されているが、確認結果によっては MessageList も dynamic import 対象になりうることを明記した方がより正確。",
+      "suggested_fix": "スコープ外セクションのMessageList.tsxの記述に「バンドルに含まれることが確認された場合は、MessageList.tsxもWorktreeDetailRefactored.tsxと同様にdynamic import化を追加検討する」という一文を追加する。"
+    },
+    {
+      "id": "R2-F002",
+      "category": "nice_to_have",
+      "title": "ローディングインジケーターの実装パターンが未指定",
+      "description": "実装タスクに「ローディングインジケーター追加（各コンポーネント）」があるが、具体的なUIパターンが指定されていない。プロジェクト内にはMermaidCodeBlock.tsx (L27-31) で Loader2 スピナーを使用した先例が存在する。MarkdownEditorには既にローディング状態のUI（L627-639、スピナー+Loading...テキスト）があるが、next/dynamicのloading propとして使用するには独立したコンポーネントとして切り出す必要がある。Terminal.tsxには既存のローディングUIがないため、新規作成が必要。",
+      "suggested_fix": "実装タスクのローディングインジケーター項目に「MermaidCodeBlock.tsx (L27-31) のLoader2パターンを踏襲」と補足する。MarkdownEditorについては既存のローディングUI（L627-639）と同等のものをnext/dynamic loading propとして指定する方針を記載するとよい。"
+    },
+    {
+      "id": "R2-F003",
+      "category": "nice_to_have",
+      "title": "xterm.jsのバージョン/サイズ根拠の補足",
+      "description": "Issue内で「xterm.js（~500KB）」と記載されているが、この数値の根拠（パッケージサイズ、gzip前後、addon含む/含まない等）が不明。Terminal.tsxではxterm本体に加えxterm-addon-fit、xterm-addon-web-links、xterm/css/xterm.cssもimportしており、合計サイズはxterm本体のみとは異なる。ただし、Issueの主目的はSSR互換性確保であり、バンドルサイズは副次効果として記載されているため、数値の正確性は受入条件に影響しない。",
+      "suggested_fix": "特に対応不要。バンドルサイズの正確な値はnpm run build後に確認する旨が既に受入条件に含まれている。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 1,
+    "nice_to_have": 2,
+    "overall_quality": "good"
+  },
+  "verification_details": {
+    "MF-001_verification": "F1の見出しが「xterm.jsがSSR非互換（/worktrees/[id]/terminal ページ）」に修正されており、メインページとは別ルートであることが明確化されている。「影響範囲: /worktrees/[id]/terminal ページ固有（Next.jsルートベースコード分割により、メインの /worktrees/[id] ページのバンドルには含まれない）」という記述も追加済み。コード確認: terminal/page.tsx (L9) がTerminalComponentを静的importしており、/worktrees/[id]/page.tsx (L10) はWorktreeDetailRefactoredのみをimportしている。Issue記載と一致。",
+    "MF-002_verification": "受入条件が以下のようにルートごとに分離されている: (1)「/worktrees/[id] ページのFirst Load JSがMarkdownEditor動的import化により削減されること（npm run build出力で確認）」(2)「/worktrees/[id]/terminal ページでSSRエラーが発生しないこと」。具体的な数値目標（200KB以下）は削除され、代わりにnpm run build出力での相対的な削減確認に変更されている。これは適切な修正。",
+    "code_consistency_check": {
+      "Terminal_tsx_L20": "export function TerminalComponent - named export確認済み、Issue記載のL20と一致",
+      "MarkdownEditor_tsx_L110": "export function MarkdownEditor - named export確認済み、Issue記載のL110と一致",
+      "MarkdownEditor_tsx_L34_35": "rehypeHighlight/highlight.js CSS import確認済み、Issue記載のL34-35と一致",
+      "Terminal_tsx_L9_12": "xterm/xterm-addon-fit/xterm-addon-web-links import確認済み、Issue記載のL9-12と一致",
+      "WorktreeDetailRefactored_tsx_L39": "MarkdownEditor静的import確認済み、Issue記載のL39と一致",
+      "MessageList_tsx_L18": "rehypeHighlight import確認済み、Issue記載のL18と一致",
+      "files_path_page_tsx_L14": "rehypeHighlight import確認済み、Issue記載のL14と一致",
+      "MermaidCodeBlock_tsx_L20_23": "dynamic importパターン確認済み、Issue記載の参考実装パターンと一致"
+    }
+  },
+  "code_references": [
+    {
+      "file": "src/components/Terminal.tsx",
+      "lines": "L9-12, L20",
+      "relevance": "xterm.jsトップレベルimport、named export確認"
+    },
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "L34-35, L110",
+      "relevance": "rehype-highlight/highlight.js CSSトップレベルimport、named export確認"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "L39",
+      "relevance": "MarkdownEditorの静的import確認"
+    },
+    {
+      "file": "src/components/worktree/MermaidCodeBlock.tsx",
+      "lines": "L20-34",
+      "relevance": "dynamic importパターンの先例確認"
+    },
+    {
+      "file": "src/app/worktrees/[id]/terminal/page.tsx",
+      "lines": "L9",
+      "relevance": "TerminalComponent静的import確認"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "lines": "L18",
+      "relevance": "rehypeHighlight import確認、アプリケーションコードから未参照であることを確認"
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "lines": "L16",
+      "relevance": "MarkdownEditorを直接importしておりdynamic importの影響を受けないことを確認"
+    },
+    {
+      "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "relevance": "MarkdownEditorをimportしていないことを確認"
+    }
+  ]
+}

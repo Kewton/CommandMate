@@ -1,0 +1,21 @@
+{
+  "issue_number": 409,
+  "feature_summary": "perf: DBインデックス追加とスケジュールマネージャのクエリ効率化",
+  "acceptance_criteria": [
+    "scheduled_executions(worktree_id, enabled)インデックスが正しく作成されること",
+    "CMATE.md未変更時にupsertSchedule()のDBクエリ（scheduled_executionsテーブルへのSELECT/UPDATE/INSERT）が発生しないこと",
+    "スケジュール実行の正確性に影響がないこと（既存のcronジョブ起動・停止は変更なし）",
+    "既存テストがパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: db-migrations.tsのCURRENT_SCHEMA_VERSIONが21であること",
+    "シナリオ2: マイグレーション実行後にidx_scheduled_executions_worktree_enabledインデックスが作成されること",
+    "シナリオ3: mtime未変更のworktreeに対してbatchUpsertSchedules()が呼ばれないこと（mtimeキャッシュ効果）",
+    "シナリオ4: mtime変更時（または初回）はbatchUpsertSchedules()が正常に実行されること",
+    "シナリオ5: CMATE.md削除時（mtime=null、キャッシュあり）にキャッシュエントリが除去されactiveScheduleIdsに追加されないこと",
+    "シナリオ6: stopAllSchedules()後にcmateFileCacheが空になること",
+    "シナリオ7: batchUpsertSchedules()が既存スケジュールを正しくUPDATEし同一IDを返すこと",
+    "シナリオ8: batchUpsertSchedules()が新規スケジュールを正しくINSERTし新規IDを返すこと",
+    "シナリオ9: 既存の全ユニットテストがパスすること"
+  ]
+}

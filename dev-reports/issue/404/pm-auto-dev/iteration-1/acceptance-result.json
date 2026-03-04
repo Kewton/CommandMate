@@ -1,0 +1,138 @@
+{
+  "status": "passed",
+  "criteria_results": [
+    {
+      "criterion": "src/lib/resource-cleanup.ts が存在し、initResourceCleanup(), stopResourceCleanup(), cleanupOrphanedMcpProcesses(), cleanupOrphanedMapEntries() が実装されていること",
+      "status": "passed",
+      "evidence": "resource-cleanup.ts (332行) に4関数全てが export されている: initResourceCleanup() (L304), stopResourceCleanup() (L325), cleanupOrphanedMcpProcesses() (L114), cleanupOrphanedMapEntries() (L212)"
+    },
+    {
+      "criterion": "initResourceCleanup() で24時間タイマーが起動し、重複防止の __resourceCleanupTimerId チェックがあること",
+      "status": "passed",
+      "evidence": "initResourceCleanup() (L304-318): globalThis.__resourceCleanupTimerId !== undefined チェックで重複防止、CLEANUP_INTERVAL_MS = 24*60*60*1000 (L32) で setInterval 起動。テスト (resource-cleanup.test.ts L97-106) で重複防止を検証済み"
+    },
+    {
+      "criterion": "src/lib/auto-yes-manager.ts に deleteAutoYesState(worktreeId) が追加され、isValidWorktreeId() バリデーションがあること [SEC-404-001]",
+      "status": "passed",
+      "evidence": "deleteAutoYesState() (L820-826): isValidWorktreeId() チェック後に autoYesStates.delete(worktreeId) 実行。isValidWorktreeId() (L151-153) は WORKTREE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/ でバリデーション。テスト (auto-yes-manager-cleanup.test.ts L71-77) で無効ID拒否を検証"
+    },
+    {
+      "criterion": "src/lib/schedule-manager.ts に stopScheduleForWorktree(worktreeId) が追加されていること",
+      "status": "passed",
+      "evidence": "stopScheduleForWorktree() (L684-712): worktreeId に紐づく cron job のみ stop+delete、cmateFileCache のDB経由クリーンアップ付き。テスト (schedule-manager-cleanup.test.ts L107-153) で対象のみ停止・他影響なしを検証"
+    },
+    {
+      "criterion": "src/lib/session-cleanup.ts の cleanupWorktreeSessions() が stopAutoYesPolling() -> deleteAutoYesState() -> stopScheduleForWorktree() の順で呼ぶこと（stopAllSchedules() を呼ばないこと）",
+      "status": "passed",
+      "evidence": "session-cleanup.ts L106-133: 順序は (2) stopAutoYesPolling -> (3) deleteAutoYesState -> (4) stopScheduleForWorktree。stopAllSchedules は import されておらず、呼び出しも無い（L125のコメントのみ）。テスト (session-cleanup-issue404.test.ts L34-69) で呼び出し順序と stopAllSchedules 非呼び出しを検証"
+    },
+    {
+      "criterion": "server.ts の起動シーケンスに initResourceCleanup() が含まれること",
+      "status": "passed",
+      "evidence": "server.ts L46: import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup'; L263: initResourceCleanup() がサーバー起動後 initScheduleManager() の後に呼ばれている"
+    },
+    {
+      "criterion": "server.ts の gracefulShutdown() に stopResourceCleanup() が含まれること",
+      "status": "passed",
+      "evidence": "server.ts L288: stopResourceCleanup() が gracefulShutdown() 内で stopAllSchedules() の後に呼ばれている"
+    },
+    {
+      "criterion": "npm run test:unit が全パスすること",
+      "status": "passed",
+      "evidence": "213 test files passed, 4459 tests passed (7 skipped), 0 failures. Duration: 13.71s"
+    },
+    {
+      "criterion": "npm run lint がエラー0件であること",
+      "status": "passed",
+      "evidence": "No ESLint warnings or errors"
+    },
+    {
+      "criterion": "npx tsc --noEmit が型エラー0件であること",
+      "status": "passed",
+      "evidence": "tsc --noEmit completed with no output (0 errors)"
+    }
+  ],
+  "test_cases": [
+    {
+      "scenario": "シナリオ1: initResourceCleanup()の呼び出しでMCPプロセスクリーンアップと24時間タイマーが起動すること",
+      "result": "passed",
+      "evidence": "resource-cleanup.test.ts: initResourceCleanup テストスイート (L90-107) で検証。タイマー設定と重複防止を確認。cleanupOrphanedMcpProcesses (L194-278) でMCP検出と SIGTERM 送信を確認"
+    },
+    {
+      "scenario": "シナリオ2: stopResourceCleanup()でタイマーが正しく停止すること",
+      "result": "passed",
+      "evidence": "resource-cleanup.test.ts L109-122: stopResourceCleanup() で __resourceCleanupTimerId が undefined に戻ること、init なしで呼んでもエラーにならないことを検証"
+    },
+    {
+      "scenario": "シナリオ3: deleteAutoYesState(worktreeId)がautoYesStatesからエントリを削除し、autoYesPollerStatesには影響しないこと",
+      "result": "passed",
+      "evidence": "auto-yes-manager-cleanup.test.ts L49-93: deleteAutoYesState で state 削除確認、poller は影響なし (L79-92)、無効ID拒否 (L71-77) を検証"
+    },
+    {
+      "scenario": "シナリオ4: stopScheduleForWorktree(worktreeId)が対象worktreeのcronJobのみ停止し、他worktreeに影響しないこと",
+      "result": "passed",
+      "evidence": "schedule-manager-cleanup.test.ts L107-177: 対象 worktree (wt-target) の cron job のみ stop、他 (wt-other) は影響なしを検証"
+    },
+    {
+      "scenario": "シナリオ5: session-cleanup.tsのcleanupWorktreeSessions()がstopAutoYesPolling->deleteAutoYesState->stopScheduleForWorktreeの順で呼ぶこと",
+      "result": "passed",
+      "evidence": "session-cleanup-issue404.test.ts L34-63: callOrder 配列で実行順序を検証。L65-69: stopAllSchedules が呼ばれないことを検証"
+    },
+    {
+      "scenario": "シナリオ6: resource-cleanup.tsがDBに存在しないworktreeのMapエントリを孤立エントリとして削除すること",
+      "result": "passed",
+      "evidence": "resource-cleanup.test.ts L125-191: DB に存在しない wt-orphan のエントリが削除されること、autoYesStates/autoYesPollerStates/schedules の3種全てで検証"
+    },
+    {
+      "scenario": "シナリオ7: resource-cleanup.tsがDBに存在するworktreeのMapエントリを削除しないこと",
+      "result": "passed",
+      "evidence": "resource-cleanup.test.ts L153-164: DB に存在する wt-valid-1, wt-valid-2 のエントリは deleteAutoYesState/stopAutoYesPolling が呼ばれないことを検証"
+    },
+    {
+      "scenario": "シナリオ8: server.tsの起動シーケンスにinitResourceCleanup()が含まれること",
+      "result": "passed",
+      "evidence": "server.ts L263: initResourceCleanup() が server.listen コールバック内で initScheduleManager() の直後に呼ばれている"
+    },
+    {
+      "scenario": "シナリオ9: server.tsのgracefulShutdown()にstopResourceCleanup()が含まれること",
+      "result": "passed",
+      "evidence": "server.ts L288: stopResourceCleanup() が gracefulShutdown() 内で stopAllSchedules() の後に呼ばれている"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "サーバー起動時に孤立MCPプロセスが検出・停止されること",
+      "verified": true
+    },
+    {
+      "criterion": "正常に稼働中のMCPプロセス（現在のセッションに紐づくもの）に影響がないこと",
+      "verified": true
+    },
+    {
+      "criterion": "クリーンアップ結果がログに記録されること",
+      "verified": true
+    },
+    {
+      "criterion": "worktree削除後にglobalThis Mapから該当エントリが削除されること",
+      "verified": true
+    },
+    {
+      "criterion": "削除されたエントリのタイマーが確実に解放されること",
+      "verified": true
+    },
+    {
+      "criterion": "定期クリーンアップが孤立エントリを検出・削除すること",
+      "verified": true
+    },
+    {
+      "criterion": "正常稼働中のworktreeに影響がないこと",
+      "verified": true
+    }
+  ],
+  "quality_checks": {
+    "unit_tests": "pass",
+    "lint": "pass",
+    "typescript": "pass"
+  },
+  "notes": "全10項目の受入条件および全9シナリオが合格。ユニットテスト213ファイル/4459テスト全パス、ESLintエラー0件、TypeScript型エラー0件。実装は設計通りに resource-cleanup.ts (MCPプロセスクリーンアップ+Map孤立エントリクリーンアップ), auto-yes-manager.ts (deleteAutoYesState+getWorktreeIds), schedule-manager.ts (stopScheduleForWorktree), session-cleanup.ts (呼び出し順序統合), server.ts (ライフサイクル統合) の5ファイルで構成されている。"
+}

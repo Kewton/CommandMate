@@ -19,6 +19,7 @@ import {
   killSession,
 } from '../tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
+import { invalidateCache } from '../tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -167,6 +168,9 @@ export class OpenCodeTool extends BaseCLITool {
         await detectAndResendIfPastedText(sessionName);
       }
 
+      // Issue #405: Invalidate cache after sending message
+      invalidateCache(sessionName);
+
       console.log(`Sent message to OpenCode session: ${sessionName}`);
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
@@ -208,6 +212,9 @@ export class OpenCodeTool extends BaseCLITool {
         // Step 5: Session does not exist, attempt kill anyway (cleanup stale tmux sessions)
         await killSession(sessionName);
       }
+
+      // Issue #405: Invalidate cache after session kill
+      invalidateCache(sessionName);
 
       console.log(`Stopped OpenCode session: ${sessionName}`);
     } catch (error: unknown) {

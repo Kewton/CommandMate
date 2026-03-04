@@ -1,0 +1,16 @@
+{
+  "stage": 2,
+  "apply_date": "2026-03-03",
+  "issue_number": 401,
+  "design_doc_path": "dev-reports/design/issue-401-stop-script-fix-design-policy.md",
+  "applied_findings": ["C2-001", "C2-002", "C2-003", "C2-004"],
+  "skipped_findings": ["C2-005", "C2-006", "C2-007", "C2-008"],
+  "skip_reasons": {
+    "C2-005": "Nice to have",
+    "C2-006": "Nice to have",
+    "C2-007": "Nice to have",
+    "C2-008": "Nice to have"
+  },
+  "design_doc_updated": true,
+  "summary": "Stage 2整合性レビューの指摘4件（Must Fix 1件、Should Fix 3件）を設計方針書に反映した。C2-001: セクション11にCore Changesカテゴリを追加し、セクション4の中核的な修正10項目をチェックリスト化した。C2-002: セクション4.2のPIDS取得パイプラインに || true を追加しD1-002統一方針との整合性を確保した。C2-003: セクション4.2にFinal check（L38-47）の修正後コードサンプルとSIGKILL即座使用の設計判断を追加した。C2-004: セクション4.2に修正後のstop-server.sh全体フロー（Step 1-3の役割と待機時間）を追加した。Nice to Have 4件（C2-005〜C2-008）はスキップした。"
+}

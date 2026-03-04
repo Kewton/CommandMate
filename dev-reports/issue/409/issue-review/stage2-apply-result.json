@@ -1,0 +1,78 @@
+{
+  "issue_number": 409,
+  "iteration": 1,
+  "stage": 2,
+  "apply_date": "2026-03-03",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "R1-001",
+        "status": "applied",
+        "change_summary": "S6セクションからchat_messages(cli_tool_id)のインデックス不足記述を削除し、既存idx_messages_cli_toolで追加不要と注記に変更"
+      },
+      {
+        "id": "R1-002",
+        "status": "applied",
+        "change_summary": "scheduled_executions(worktree_id, name)の「インデックスがない」記述を修正。UNIQUE制約による暗黙インデックス存在を注記し、実際の不足は(worktree_id, enabled)複合インデックスであると明記"
+      },
+      {
+        "id": "R1-003",
+        "status": "applied",
+        "change_summary": "クエリ数見積もりを「500クエリ/60秒」から「1000+クエリ/60秒」に修正。upsertSchedule()が1エントリあたり2クエリ(SELECT+UPDATE/INSERT)である点を明記"
+      },
+      {
+        "id": "R1-004",
+        "status": "applied",
+        "change_summary": "「SELECT * FROM worktrees」を「SELECT id, path FROM worktrees」に修正（実際のクエリに合致）"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "R1-005",
+        "status": "applied",
+        "change_summary": "インデックス追加提案を(worktree_id, enabled)複合インデックスに変更。chat_messagesおよびscheduled_executions(worktree_id, name)へのインデックス追加は不要と明記"
+      },
+      {
+        "id": "R1-006",
+        "status": "applied",
+        "change_summary": "mtimeキャッシュの実装方針を具体化: globalThis.__scheduleManagerStates内のManagerStateにcmateFileCache: Map<string, number>として保持、fs.statSync().mtimeMsでチェック、サーバー再起動時自動クリア、CMATE.md削除時のキャッシュエントリ除去方針を明記"
+      },
+      {
+        "id": "R1-007",
+        "status": "applied",
+        "change_summary": "バッチupsertタスクを具体化: db.transaction()でラップし1 worktreeあたりの複数スケジュールをトランザクション単位で処理（バルクSELECT→トランザクション内UPDATE/INSERT）と明記"
+      },
+      {
+        "id": "R1-008",
+        "status": "applied",
+        "change_summary": "受入条件を「DBクエリが発生しない」から「upsertSchedule()のDBクエリ(scheduled_executionsテーブルへのSELECT/UPDATE/INSERT)が発生しない」に精緻化。検証方法としてユニットテストでのモック/スパイ確認を明記"
+      },
+      {
+        "id": "R1-009",
+        "status": "applied",
+        "change_summary": "影響範囲にtests/unit/lib/schedule-manager.test.ts（mtimeキャッシュのテスト追加）とsrc/lib/db-migrations.ts（マイグレーションversion 21追加）を追記"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "R1-010",
+        "status": "skipped",
+        "reason": "Issue分割提案。現行のまま1 Issueで進めても問題ないとレビュー自体が言及しており、分割の工数対効果が低い"
+      },
+      {
+        "id": "R1-011",
+        "status": "skipped",
+        "reason": "mtime vs ハッシュの方針選択。解決策セクションでmtime(fs.statSync().mtimeMs)を明記しており、R1-006の反映で実質的に方針が確定済み"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 11,
+    "applied": 9,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/409"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "issue_number": 410,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-03",
+  "applied_findings": ["IAF-003", "IAF-001", "IAF-002", "IAF-005", "IAF-006", "IAF-009"],
+  "skipped_findings": ["IAF-004", "IAF-007", "IAF-008"],
+  "skip_reason": "Nice to Have項目のため今回スキップ",
+  "github_updated": true,
+  "summary": "Stage 3のMust Fix 1件、Should Fix 5件を反映"
+}

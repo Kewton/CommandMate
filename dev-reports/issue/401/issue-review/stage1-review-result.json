@@ -1,0 +1,151 @@
+{
+  "stage": 1,
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_date": "2026-03-03",
+  "issue_number": 401,
+  "summary": "Issue #401の記載内容に重大な事実誤認が複数存在する。仮説検証により、stop.shは既にポートベース停止を実装済みであることが判明しており、Issue本文の前提・提案・タスクの大半がコード実態と乖離している。また、stop-server.shの存在がIssueで全く言及されておらず、スクリプト群全体の停止メカニズムの理解が不足している。受入条件は抽象的で検証困難。Issueの大幅な書き直しが必要。",
+  "findings": {
+    "must_fix": [
+      {
+        "id": "MF-1",
+        "category": "正確性",
+        "issue": "「stop.shがPIDファイルベースでのみ停止を試みる」という記述が事実と異なる",
+        "location": "## 背景・課題 セクション",
+        "recommendation": "stop.sh L21-29は既に`lsof -ti:$PORT`によるポートベース停止を実装済み。PIDファイルは一切使用していない。Issue本文を実際のコードに合わせて修正し、正確な問題記述にすべき。実際のstop.shの問題点（複数PIDが返された場合のkill動作、CM_PORT環境変数の正しい伝播等）を記載すること。",
+        "evidence": "scripts/stop.sh L22: `PID=$(lsof -ti:$PORT 2>/dev/null || true)` -- PIDファイルではなくlsofによるポートベース停止を使用"
+      },
+      {
+        "id": "MF-2",
+        "category": "正確性",
+        "issue": "「stop.shにポートベース停止をフォールバックとして追加」という提案が的外れ",
+        "location": "## 提案する解決策 / ### 主要な変更点 セクション",
+        "recommendation": "stop.shは既にポートベースのみで動作している。提案すべきは(1) stop.shの複数PID対応（lsofが複数行を返す場合のxargs kill等）、(2) build-and-start.shのalready running判定の改善、(3) stop-server.shとstop.shの機能重複整理。解決策を実際の問題に即して書き直すべき。",
+        "evidence": "scripts/stop.sh L22-29は全面的にlsofベースで動作。scripts/stop-server.sh L18-24は既にlsof+xargs killを実装済みであり、stop.shがこの方式に追いついていないことが真の問題の一部。"
+      },
+      {
+        "id": "MF-3",
+        "category": "完全性",
+        "issue": "stop-server.shの存在と役割がIssueで全く言及されていない",
+        "location": "Issue全体",
+        "recommendation": "scripts/stop-server.sh は build-and-start.sh --daemon モードの対になる停止スクリプトであり、lsof+xargs kill -9、PIDファイルベース停止、残留プロセス二重チェックの3段構えを実装済み。stop.shとstop-server.shの関係・機能差分を明示し、どちらを修正対象とするか（又は統合するか）をIssueに記載すべき。",
+        "evidence": "scripts/stop-server.sh（全53行）はL18: `lsof -ti:$PORT`、L22: `xargs kill -9`、L27-36: PIDファイルベース停止、L42-47: 残留プロセス再チェックの多層停止を既に実装。build-and-start.sh L73/L98でstop-server.shの使用を案内している。"
+      },
+      {
+        "id": "MF-4",
+        "category": "正確性",
+        "issue": "実装タスクの最初の2項目がstop.shの実態と乖離している",
+        "location": "## 実装タスク セクション",
+        "recommendation": "タスク1「stop.sh: PIDファイル読み取り後のバリデーション追加」とタスク2「stop.sh: PIDベース停止失敗時のポートベースフォールバック追加」は、stop.shがPIDファイルを使用していない事実と矛盾する。実際に修正が必要なのは(1) build-and-start.sh L70のPIDファイル読み取りバリデーション追加、(2) build-and-start.sh L69-76のalready running判定にポート使用チェックを追加、(3) stop.shの複数PID対応（xargs使用）、(4) stop-server.shのPIDファイルバリデーション追加（L28）。タスクをファイル・行番号レベルで正確に記述し直すべき。",
+        "evidence": "stop.sh全31行にPIDファイル参照は存在しない。build-and-start.sh L70: `OLD_PID=$(cat \"$PID_FILE\")` にはバリデーションなし。stop-server.sh L28: `PID=$(cat \"$PID_FILE\")` にもバリデーションなし。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-1",
+        "category": "完全性",
+        "issue": "stop.shの複数PID返却時の問題が指摘されていない",
+        "location": "## 背景・課題 セクション",
+        "recommendation": "stop.sh L22で`lsof -ti:$PORT`が複数PIDを返す場合（next-serverと親npmプロセスが同ポートをリッスン等）、L25の`kill \"$PID\"`は複数行の値を受け取り、bashの動作によってはエラーまたは最初のPIDのみkillとなる可能性がある。stop-server.shのように`echo \"$PIDS\" | xargs kill -9`方式に統一すべき。この問題をIssueに追記すること。",
+        "evidence": "stop.sh L25: `kill \"$PID\"` -- ダブルクォート内なので複数行が1引数になり「invalid signal specification」エラーの可能性。一方、stop-server.sh L22: `echo \"$PIDS\" | xargs kill -9` は複数PIDに正しく対応。"
+      },
+      {
+        "id": "SF-2",
+        "category": "技術的妥当性",
+        "issue": "stop-server.shのkill -9（SIGKILL）の即時使用に対するセキュリティ・安定性の懸念がIssueで議論されていない",
+        "location": "## 提案する解決策 セクション",
+        "recommendation": "stop-server.sh L22/L32/L45ではSIGKILL（kill -9）を即座に使用しており、プロセスにクリーンアップ（DBフラッシュ、一時ファイル削除等）の機会を与えない。まずSIGTERM→タイムアウト後にSIGKILLという段階的停止を採用することを検討すべき。この設計判断をIssueに記載すること。",
+        "evidence": "stop-server.sh L22: `echo \"$PIDS\" | xargs kill -9`、L32: `kill -9 -$PID`、L45: `echo \"$REMAINING\" | xargs kill -9`。すべて即時SIGKILL。"
+      },
+      {
+        "id": "SF-3",
+        "category": "受け入れ条件",
+        "issue": "受入条件が抽象的で検証手順が不明確",
+        "location": "## 受入条件 セクション",
+        "recommendation": "各受入条件に具体的な検証手順を追加すべき。例：(1)「PIDファイルが不正な場合」→ PIDファイルに「12345\\n67890」と書き込んでstop-server.shを実行し、ポートがfreeになることを確認。(2)「再起動後に古いプロセスが残留しない」→ build-and-start.sh --daemon実行後、build-and-start.sh --daemon再実行し、`lsof -ti:3000 | wc -l`が1以下であることを確認。(3)「既存動作に影響がない」→ 正常PIDファイルでの停止・起動・再起動サイクルをテスト。",
+        "evidence": "現在の受入条件3つはいずれも「...できること」という定性的記述のみで、具体的な再現手順・検証コマンドが記載されていない。"
+      },
+      {
+        "id": "SF-4",
+        "category": "完全性",
+        "issue": "stop-server.shのポート番号がハードコード（3000固定）されている問題が言及されていない",
+        "location": "## 実装タスク セクション",
+        "recommendation": "stop-server.sh L11: `PORT=3000` はハードコードされており、CM_PORT環境変数に対応していない。stop.sh（L21: `PORT=${CM_PORT:-${MCBD_PORT:-3000}}`）やstatus.sh（L27: 同様）はCM_PORTに対応済み。stop-server.shもCM_PORT対応を実装タスクに追加すべき。",
+        "evidence": "stop-server.sh L11: `PORT=3000`。stop.sh L21: `PORT=${CM_PORT:-${MCBD_PORT:-3000}}`。status.sh L27: `PORT=${CM_PORT:-${MCBD_PORT:-3000}}`。health-check.sh L10: `PORT=${CM_PORT:-${MCBD_PORT:-3000}}`。stop-server.shのみが環境変数非対応。"
+      },
+      {
+        "id": "SF-5",
+        "category": "整合性",
+        "issue": "CLIの停止メカニズム（commandmate stop）との関係が言及されていない",
+        "location": "Issue全体",
+        "recommendation": "CLI（src/cli/commands/stop.ts + src/cli/utils/daemon.ts + src/cli/utils/pid-manager.ts）は独自のPIDファイル管理とprocess.kill()ベースの停止を実装している。shellスクリプト群（stop.sh、stop-server.sh）との関係・使い分け・一貫性をIssueに記載し、修正範囲にCLI側の影響有無を明示すべき。",
+        "evidence": "src/cli/utils/pid-manager.ts L43: `.trim()`と`parseInt()`でPIDファイルバリデーション実装済み。src/cli/utils/daemon.ts L133-161: SIGTERM/SIGKILL段階的停止を実装済み。これらはshellスクリプトよりも堅牢な実装になっている。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-1",
+        "category": "完全性",
+        "issue": "restart.shのstop.sh呼び出しとの整合性が未考慮",
+        "location": "Issue全体",
+        "recommendation": "restart.sh L21-24ではstop.shを呼び出してからstart.shを実行する。stop.shの修正はrestart.shの動作にも影響するため、テスト範囲として言及すべき。",
+        "evidence": "scripts/restart.sh L21: `./scripts/stop.sh`、L24: `./scripts/start.sh`"
+      },
+      {
+        "id": "NTH-2",
+        "category": "完全性",
+        "issue": "問題の再現条件・メモリ消費の根拠が不足",
+        "location": "## 背景・課題 セクション",
+        "recommendation": "「実測: 316MB」のメモリ消費について、どのような操作手順で再現したか、どのプロセスが残留していたか（ps aux出力等）を記載すると、問題の深刻度と修正の優先度が明確になる。",
+        "evidence": "Issue本文では「実測: 316MB」とだけ記載。再現手順、環境情報、プロセス一覧が欠落している。"
+      },
+      {
+        "id": "NTH-3",
+        "category": "技術的妥当性",
+        "issue": "lsofコマンドの可用性に対する考慮",
+        "location": "## 提案する解決策 セクション",
+        "recommendation": "lsofはmacOSでは標準搭載だが、一部のLinuxディストリビューション（Alpine Linux等）ではデフォルトで入っていない場合がある。フォールバックとして`ss -tlnp`や`fuser`の利用も検討に値する。ただし現行スクリプトが全てlsofを前提としているため、優先度は低い。",
+        "evidence": "stop.sh L22、stop-server.sh L18/L42、status.sh L28、health-check.sh L20はすべてlsofを使用。"
+      }
+    ]
+  },
+  "statistics": {
+    "must_fix": 4,
+    "should_fix": 5,
+    "nice_to_have": 3,
+    "total": 12
+  },
+  "overall_assessment": "要改善",
+  "code_references": [
+    {
+      "file": "scripts/stop.sh",
+      "relevance": "Issue記載と実態が大きく乖離する主要対象ファイル。既にポートベース停止を実装済み。"
+    },
+    {
+      "file": "scripts/build-and-start.sh",
+      "relevance": "L69-76のalready running判定がPIDファイルのみで行われており、実際の修正が必要な箇所。"
+    },
+    {
+      "file": "scripts/stop-server.sh",
+      "relevance": "Issueで全く言及されていないが、多層停止処理を既に実装済みの重要スクリプト。ポートハードコード問題あり。"
+    },
+    {
+      "file": "scripts/restart.sh",
+      "relevance": "stop.shを呼び出しており、stop.shの修正による影響を受ける。"
+    },
+    {
+      "file": "src/cli/utils/pid-manager.ts",
+      "relevance": "CLI側のPIDファイル管理。trim()+parseInt()バリデーション実装済みで、shellスクリプトより堅牢。"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "CLI側の停止処理。SIGTERM→waitForExit→SIGKILL段階的停止を実装済み。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト全体のスクリプト構成・コマンド体系の参照ドキュメント"
+    }
+  ]
+}

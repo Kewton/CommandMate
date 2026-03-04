@@ -1,0 +1,139 @@
+{
+  "issue_number": 410,
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "IAF-001",
+      "category": "should_fix",
+      "title": "MarkdownEditor.test.tsxでのdynamic import対応が未記載",
+      "description": "MarkdownEditor.test.tsx (tests/unit/components/MarkdownEditor.test.tsx) は MarkdownEditor コンポーネントを直接importしてテストしている。WorktreeDetailRefactored.tsx 側で next/dynamic を使って MarkdownEditor を動的importに変更しても、MarkdownEditor.test.tsx 自体は MarkdownEditor を直接importしているため、MarkdownEditor.tsx 内部のコードは変更不要であり、テストへの影響は限定的。しかし、Issueの実装タスクに『既存テスト（MarkdownEditor.test.tsx等）の更新・動作確認』と記載がある一方で、具体的に何を更新するのかが不明確。WorktreeDetailRefactored のテスト (tests/unit/components/WorktreeDetailRefactored.test.tsx) では MarkdownEditor が直接参照されていないため影響は小さいが、integration テストでの動的import挙動の確認方針が未記載。",
+      "suggested_fix": "実装タスクの『既存テスト（MarkdownEditor.test.tsx等）の更新・動作確認』を以下のように具体化する:\n- MarkdownEditor.test.tsx: 変更不要（MarkdownEditor を直接 import しておりdynamic import の影響を受けない）であることを明記\n- WorktreeDetailRefactored.test.tsx: MarkdownEditor を直接参照していないため影響なしと明記\n- 動作確認として `npm run test:unit` の全テストパスを確認するタスクに限定"
+    },
+    {
+      "id": "IAF-002",
+      "category": "should_fix",
+      "title": "MessageList.tsxのrehype-highlight使用がスコープ外の根拠不十分",
+      "description": "Issue本文の『スコープ外（今後の検討）』に MessageList.tsx (L18) を含めている。根拠として『現在は/worktrees/[id]に直接含まれていない』と記載されているが、実際の調査の結果、MessageList は src/components/worktree/index.ts のbarrel exportに含まれているものの、どのページコンポーネントからも直接importされていない（HistoryPaneも使用していない）。barrel exportからのツリーシェイキングが効いていれば、MessageListのrehype-highlightはバンドルに含まれない。ただしNext.jsのビルドでbarrel exportのツリーシェイキングが確実に効くかはバージョンや設定に依存するため、MessageListが本当にバンドルに含まれないかの確認が重要。",
+      "suggested_fix": "スコープ外の根拠を補強する: 『MessageList.tsx は barrel export (src/components/worktree/index.ts) 経由のみで参照され、worktrees/[id] ページのコンポーネントツリーから直接importされていないため、ツリーシェイキングによりバンドルに含まれない見込み。npm run build 後の Route 一覧で /worktrees/[id] のバンドルサイズ変化を確認時に MessageList のrehype-highlight 分が含まれていないことを併せて確認する。』"
+    },
+    {
+      "id": "IAF-003",
+      "category": "must_fix",
+      "title": "MarkdownEditor は named export であり next/dynamic での import 時に .then(mod => ...) が必要",
+      "description": "MarkdownEditor.tsx は `export function MarkdownEditor(...)` という named export である（L110）。default export ではない。next/dynamic のデフォルトの使い方は default export を前提としているため、WorktreeDetailRefactored.tsx で `dynamic(() => import('./MarkdownEditor'))` とすると、default export がない旨のエラーになる。MermaidCodeBlock.tsx (L20-23) やlogin/page.tsx (L23-24) で既に named export を next/dynamic で使用するパターン（`.then((mod) => ({ default: mod.MarkdownEditor }))`）が存在するが、Issue本文にはこの点が記載されていない。実装時に間違える可能性がある。",
+      "suggested_fix": "実装タスクまたは解決策セクションに以下を追記:\n『MarkdownEditor は named export のため、dynamic import 時は既存の MermaidCodeBlock.tsx パターンに倣い `.then((mod) => ({ default: mod.MarkdownEditor }))` を使用する。参考: src/components/worktree/MermaidCodeBlock.tsx L20-23』"
+    },
+    {
+      "id": "IAF-004",
+      "category": "nice_to_have",
+      "title": "Terminal.tsxも named export であることの明記",
+      "description": "Terminal.tsx は `export function TerminalComponent(...)` (L20) という named export である。terminal/page.tsx での dynamic import 化でも MermaidCodeBlock.tsx と同様の `.then()` パターンが必要になる。MarkdownEditor と同じ問題だが、両方とも明記しておくとよい。",
+      "suggested_fix": "IAF-003の修正と併せて、TerminalComponent も named export であるため同様のパターンが必要であることを実装タスクに追記する。"
+    },
+    {
+      "id": "IAF-005",
+      "category": "should_fix",
+      "title": "MarkdownEditorのdynamic import化でEditorProps型の参照が必要になる可能性の未考慮",
+      "description": "WorktreeDetailRefactored.tsx は現在 MarkdownEditor の型情報を直接 import から推論している。dynamic import に変更した場合、next/dynamic が返すコンポーネントの props 型は `ComponentType<EditorProps>` として正しく推論される（dynamic 関数のジェネリクスにより）。ただし、onMaximizedChange などの optional props を使用しているため、型推論が正しく維持されることの確認が必要。実際には、next/dynamic は `.then()` で返されたコンポーネントの props 型を維持するため、型安全性は保たれる。この点は Issue に影響なしと明記することで実装者の不安を軽減できる。",
+      "suggested_fix": "影響範囲テーブルまたは解決策に注記を追加: 『next/dynamic は .then() パターンで返されたコンポーネントの props 型を維持するため、WorktreeDetailRefactored.tsx での MarkdownEditor 使用箇所（L2070-2076, L2309-2314）の props 型チェックは引き続き動作する。EditorProps 型の import 変更は不要。』"
+    },
+    {
+      "id": "IAF-006",
+      "category": "should_fix",
+      "title": "terminal/page.tsxのdynamic import化のApp Router互換性の詳細不足",
+      "description": "terminal/page.tsx は既に 'use client' を宣言しているClient Componentである。この中で next/dynamic + ssr: false を使うことは技術的に正しい。ただし、page.tsx 自体を dynamic にするのではなく、page.tsx 内で TerminalComponent の import を dynamic にする形（Issue の提案通り）が正しいアプローチ。Issue の記載は『`src/app/worktrees/[id]/terminal/page.tsx` でTerminalComponentのdynamic import化』であり方針は正しい。しかし、page.tsx が既に 'use client' であるにもかかわらず xterm.js の SSR エラーが発生しうる理由の説明が不足している。'use client' はクライアントでの実行を示すが、Next.js は SSR/プリレンダリング時にも Client Component をサーバーで一度レンダリングする。このため xterm.js のような DOM 依存ライブラリは dynamic + ssr: false が必要。",
+      "suggested_fix": "背景セクション F1 に以下の補足を追加: 『注: terminal/page.tsx に \"use client\" が宣言されていても、Next.js App Router はプリレンダリング時にサーバー側でも Client Component を実行するため、xterm.js のようなブラウザ専用APIに依存するモジュールはトップレベル import で SSR エラーが発生しうる。そのため dynamic() + ssr: false による完全なクライアントサイド限定読み込みが必要。』"
+    },
+    {
+      "id": "IAF-007",
+      "category": "nice_to_have",
+      "title": "ローディングインジケーターの既存パターンとの整合性確認",
+      "description": "実装タスクに『ローディングインジケーター追加（各コンポーネント）』とあるが、具体的なUIパターンの指定がない。既存の dynamic import パターンとして、MermaidCodeBlock.tsx (L27-32) では Loader2 スピナー + 'Loading diagram...' テキスト、MarkdownEditor.tsx 自身 (L627-638) では animate-spin + 'Loading...' テキストのパターンがある。MarkdownEditor の dynamic import ローディングは、MarkdownEditor 自身のローディング状態（ファイルコンテンツ取得中）と区別する必要がある。",
+      "suggested_fix": "実装タスクのローディングインジケーターについて、以下の具体的な指針を追加:\n- MarkdownEditor の dynamic import loading: 軽量なスピナー（Loader2 + 'Loading editor...'）を使用。MarkdownEditor内部のファイル読み込みローディング（L627-638）とは別のメッセージにする。\n- TerminalComponent の dynamic import loading: スピナー + 'Loading terminal...' を使用。\n- 既存パターン（MermaidCodeBlock.tsx L27-32）に倣う。"
+    },
+    {
+      "id": "IAF-008",
+      "category": "nice_to_have",
+      "title": "highlight.js CSSのグローバル影響に関する注記",
+      "description": "MarkdownEditor.tsx L35 で `import 'highlight.js/styles/github-dark.css'` をグローバルCSSとしてインポートしている。MarkdownEditor を dynamic import にすると、このCSSは MarkdownEditor のチャンクがロードされた時点で適用される。globals.css (L32) に highlight.js との競合修正スタイルがあるため、CSSの適用タイミングが変わることで微妙なスタイルの問題が生じる可能性がある（MarkdownEditor ロード前にコードブロックが表示される場合）。ただし、実際には MarkdownEditor はモーダル内で表示され、ロード完了後にレンダリングされるため、この問題は発生しにくい。",
+      "suggested_fix": "影響範囲テーブルに globals.css を参照ファイルとして追加し、注記: 『globals.css L32 の highlight.js 競合修正スタイルは、MarkdownEditor の dynamic import 化後も問題ない（MarkdownEditor はモーダル内で表示され、highlight.js CSS はコンポーネントロード時に適用されるため）。動作確認時にコードブロックのスタイルが正しいことを確認する。』"
+    },
+    {
+      "id": "IAF-009",
+      "category": "should_fix",
+      "title": "影響範囲テーブルにテストファイルが含まれていない",
+      "description": "影響範囲テーブルには4つのソースファイルのみが記載されているが、テストファイルへの影響が記載されていない。実際にはテストファイルへの影響は限定的だが（MarkdownEditor.test.tsx は直接 import のため変更不要、WorktreeDetailRefactored.test.tsx は MarkdownEditor を参照していないため変更不要）、影響範囲テーブルとしてテストの影響を明示的に記載すべき。",
+      "suggested_fix": "影響範囲テーブルに以下の行を追加:\n| `tests/unit/components/MarkdownEditor.test.tsx` | 変更不要（直接 import のため dynamic import の影響なし） | - |\n| `tests/unit/components/WorktreeDetailRefactored.test.tsx` | 変更不要（MarkdownEditor を参照していない） | - |"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 5,
+    "nice_to_have": 3,
+    "overall_quality": "acceptable"
+  },
+  "code_references": [
+    {
+      "file": "src/components/worktree/MarkdownEditor.tsx",
+      "lines": "L34-35, L110",
+      "relevance": "rehype-highlight/highlight.js CSS import (L34-35), named export (L110)"
+    },
+    {
+      "file": "src/components/Terminal.tsx",
+      "lines": "L9-12, L20",
+      "relevance": "xterm.js top-level imports (L9-12), named export (L20)"
+    },
+    {
+      "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+      "lines": "L39, L2070-2076, L2309-2314",
+      "relevance": "MarkdownEditor static import (L39), usage sites for dynamic import migration"
+    },
+    {
+      "file": "src/app/worktrees/[id]/terminal/page.tsx",
+      "lines": "L6, L9",
+      "relevance": "'use client' directive (L6), TerminalComponent static import (L9)"
+    },
+    {
+      "file": "src/components/worktree/MermaidCodeBlock.tsx",
+      "lines": "L13, L20-34",
+      "relevance": "Existing next/dynamic pattern with named export .then() and loading indicator"
+    },
+    {
+      "file": "src/app/login/page.tsx",
+      "lines": "L18, L23-26",
+      "relevance": "Existing next/dynamic pattern with named export and ssr: false"
+    },
+    {
+      "file": "src/types/markdown-editor.ts",
+      "lines": "L75-91",
+      "relevance": "EditorProps interface - type safety preserved through dynamic import"
+    },
+    {
+      "file": "src/app/globals.css",
+      "lines": "L32",
+      "relevance": "highlight.js conflict fix styles - CSS load timing may change"
+    },
+    {
+      "file": "src/components/worktree/MessageList.tsx",
+      "lines": "L18",
+      "relevance": "rehype-highlight import - scoped out but rationale needs strengthening"
+    },
+    {
+      "file": "tests/unit/components/MarkdownEditor.test.tsx",
+      "lines": "L16",
+      "relevance": "Direct import of MarkdownEditor - unaffected by dynamic import change"
+    },
+    {
+      "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+      "relevance": "Does not reference MarkdownEditor - unaffected"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "Module documentation for MarkdownEditor, Terminal, WorktreeDetailRefactored"
+    }
+  ]
+}

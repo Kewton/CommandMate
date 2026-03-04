@@ -1,0 +1,27 @@
+{
+  "issue_number": 405,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_items": [
+    {
+      "review_id": "R5-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "実装タスクに「GET /api/worktrees/[id]: worktrees/route.tsと同等のlistSessions()一括取得・active CLI tool絞り込みを適用」を独立項目として追加。isRunning()最適化タスクの適用範囲にworktrees/[id]/route.tsを明記（worktrees/route.tsおよびworktrees/[id]/route.tsの両方）。影響範囲テーブルのworktrees/[id]/route.tsの変更内容を「キャッシュ利用候補、listSessions()結果利用」から「キャッシュ利用、listSessions()1回呼び出しによるisRunning()判定（worktrees/route.tsと同等の最適化を適用）」に更新。受入条件に「GET /api/worktrees/[id]にもlistSessions()一括取得・active CLI tool絞り込みが適用されていること」を追加。レビュー履歴にイテレーション2 - Stage 6としてR5-001の反映内容を記録。"
+    },
+    {
+      "review_id": "R5-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "キャッシュ無効化フック挿入方式B案のタスクに「注意（漏れ防止策）」サブセクションを追加し、(1) CLAUDE.mdのCLIツールモジュール説明に新規CLIツール追加時のキャッシュ無効化フック挿入ガイドラインを追記するタスク、(2) 受入テストに全CLIツールのsendMessage()後のキャッシュ無効化網羅的テストを追加するタスクを記載。ユニットテスト項目に「全CLIツールのsendMessage()後にキャッシュが無効化されること」の網羅的テスト（B案の漏れ防止策）を追加。CLAUDE.md更新タスクに「新規CLIツール追加時のキャッシュ無効化フック挿入ガイドライン追記」を追加。影響範囲テーブルのCLAUDE.md行にガイドライン追記を明記。レビュー履歴にイテレーション2 - Stage 6としてR5-002の反映内容を記録。"
+    }
+  ],
+  "skipped_items": [],
+  "summary": {
+    "total_items": 2,
+    "applied_count": 2,
+    "skipped_count": 0,
+    "github_issue_updated": true,
+    "comments": "R5-001（worktrees/[id]/route.tsのN+1最適化タスク明示化）とR5-002（B案キャッシュ無効化フック漏れ防止策）の2件のshould_fix指摘を全てIssue本文に反映完了。R5-001は実装タスク・isRunning()最適化の適用範囲・影響範囲テーブル・受入条件の4箇所に反映。R5-002は実装タスク（キャッシュ無効化タスク・ユニットテスト・CLAUDE.md更新）と影響範囲テーブルの4箇所に反映。Nice to Have（R5-003〜R5-005）は反映対象外としてスキップ。Issue冒頭のNoteをイテレーション2 Stage 6に更新し、レビュー履歴にイテレーション2 - Stage 6セクションを追加。"
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "issue_number": 408,
+  "focus_area": "セキュリティ",
+  "status": "approved",
+  "score": 5,
+  "findings": {
+    "must_fix": [],
+    "should_fix": [],
+    "consider": [
+      {
+        "id": "SEC4-001",
+        "category": "情報露出",
+        "title": "StatusDetectionResult.promptDetection内のcleanContent/rawContentフィールドの呼び出し元への露出",
+        "description": "promptDetectionフィールドにはcleanContent（stripAnsi適用済み出力）とrawContent（最大200行/5000文字のトランケート済み出力）が含まれる。しかし、current-output/route.tsは既にfullOutput（生のtmux出力全体）をAPIレスポンスに含めているため、promptDetection経由で新たに露出する情報はない。他の呼び出し元（worktrees/route.ts、worktrees/[id]/route.ts）はpromptDetectionフィールドを参照しないため、情報露出の追加リスクは存在しない。",
+        "recommendation": "現状で問題なし。将来、新しい呼び出し元がdetectSessionStatus()を使用する場合、promptDetection内のデータをAPIレスポンスに不用意に含めないようコードレビューで確認すること。",
+        "severity": "low",
+        "owasp_category": "A01 Broken Access Control"
+      },
+      {
+        "id": "SEC4-002",
+        "category": "defense-in-depth",
+        "title": "promptDetection.promptData内のinstructionTextフィールドのサニタイズ確認",
+        "description": "PromptDetectionResult.promptData.instructionTextにはtmux出力由来のテキストが含まれる。このフィールドは変更前から既にAPIレスポンスに含まれており（L133: promptData: isPromptWaiting ? promptDetection.promptData : null）、Issue #408で新たに導入されるものではない。クライアント側でReactのJSXエスケープにより自動的にXSSが防止される。",
+        "recommendation": "現状で問題なし。instructionTextのサニタイズは既存のアーキテクチャで適切に処理されている。",
+        "severity": "info",
+        "owasp_category": "A03 Injection"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "security_checklist": {
+    "A01_broken_access_control": {
+      "status": "pass",
+      "detail": "promptDetectionフィールドはStatusDetectionResult内部に保持され、APIレスポンスには既存のpromptDataフィールドのみが選択的に返される。他のdetectSessionStatus()呼び出し元（worktrees/route.ts, worktrees/[id]/route.ts）はpromptDetectionを参照せず、status/hasActivePromptのみを使用。アクセス制御への影響なし。"
+    },
+    "A03_injection": {
+      "status": "pass",
+      "detail": "detectPrompt()内のregexパターンは全てReDoS安全として分析・アノテーション済み（S4-001, SEC-S4-002）。Issue #408ではregexパターンの追加・変更なし。既存のReDoS防御が維持される。"
+    },
+    "A04_insecure_design": {
+      "status": "pass",
+      "detail": "型の不変条件（hasActivePrompt === promptDetection.isPrompt）はdetectSessionStatus()の内部ロジックにより構造的に保証される。promptDetectionはL145で一度だけ計算され、全returnパスで同一のインスタンスが使用される。requiredフィールド（DR1-001）によりTypeScriptコンパイラが全returnパスでの設定を強制する。"
+    },
+    "A05_security_misconfiguration": {
+      "status": "pass",
+      "detail": "設定変更なし。既存のミドルウェア認証・IP制限は影響を受けない。"
+    },
+    "A07_xss": {
+      "status": "pass",
+      "detail": "APIレスポンスのJSON形状に変更なし。promptDataの構造は維持される。クライアント側はReactのJSXエスケープによりXSSが防止される。"
+    },
+    "A08_software_data_integrity": {
+      "status": "pass",
+      "detail": "データ整合性に影響する変更なし。"
+    },
+    "A09_logging_monitoring": {
+      "status": "pass",
+      "detail": "ログ出力の変更なし。既存のdetectPromptログ抑制メカニズム（Issue #402）が維持される。"
+    }
+  },
+  "review_details": {
+    "data_leakage_risk": {
+      "assessment": "リスクなし",
+      "reasoning": "current-output/route.tsは既にfullOutput（生のtmux出力全体）をAPIレスポンスに含めている（L121）。StatusDetectionResult.promptDetection内のcleanContent/rawContentは、このfullOutputのサブセット（stripAnsi適用後 + トランケート済み）に過ぎず、新たな情報露出は発生しない。他の呼び出し元はpromptDetectionフィールドを参照しない。"
+    },
+    "input_validation": {
+      "assessment": "問題なし",
+      "reasoning": "promptDataはdetectPrompt()内部で生成される構造化データであり、外部入力を直接含まない。tmux出力は信頼された内部データソースである。APIレスポンスに含まれるpromptDataの構造（question, options, type等）はPromptData型により型安全に制約されている。"
+    },
+    "preprocessing_identity": {
+      "assessment": "同一性が保証される",
+      "reasoning": "変更前: route.ts L81でstripAnsi(output)→cleanOutput、L101でstripBoxDrawing(cleanOutput)をdetectPrompt()に渡す。変更前: status-detector.ts L120でstripAnsi(output)→cleanOutput、L145でstripBoxDrawing(cleanOutput)をdetectPrompt()に渡す。両者は同一の入力(output)に対して同一の関数チェーン（stripAnsi→stripBoxDrawing）を適用するため、結果は等価。同一のstripAnsi/stripBoxDrawing関数がcli-patterns.tsからインポートされている。"
+    },
+    "invariant_consistency": {
+      "assessment": "構造的に保証",
+      "reasoning": "promptDetection変数はL145で一度だけ計算される。L146のif (promptDetection.isPrompt)分岐で、trueの場合はhasActivePrompt: trueと共に返され、falseの場合は全後続パスでhasActivePrompt: falseと共に返される。この構造により、hasActivePrompt === promptDetection.isPromptの不変条件は演繹的に保証される。"
+    }
+  },
+  "reviewed_files": [
+    "src/lib/status-detector.ts",
+    "src/lib/prompt-detector.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/app/api/worktrees/[id]/prompt-response/route.ts",
+    "src/middleware.ts",
+    "src/types/models.ts",
+    "src/lib/auto-yes-manager.ts"
+  ],
+  "timestamp": "2026-03-03T00:00:00Z"
+}

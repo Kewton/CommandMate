@@ -1,0 +1,30 @@
+{
+  "issue_number": 408,
+  "status": "success",
+  "changes_made": [
+    "Updated @param cliToolId JSDoc to reference CLIToolType instead of hardcoded tool list ('claude' | 'codex' | 'gemini') that goes stale as new tools are added",
+    "Updated @returns JSDoc to include promptDetection field added by Issue #408",
+    "Added Issue #408 reference to test file module-level JSDoc header",
+    "Added Issue #408 promptDetection field coverage description to 'Tests verify' list in test file"
+  ],
+  "test_results": {
+    "total": 4393,
+    "passed": 4393,
+    "failed": 0
+  },
+  "quality_improvement": "JSDoc documentation consistency improved across status-detector.ts and its test file. The @param cliToolId annotation now references CLIToolType rather than an incomplete hardcoded list, preventing documentation staleness as new CLI tools are added. The @returns annotation now accurately reflects the full return type including the promptDetection field. Test file header JSDoc now documents Issue #408 test coverage for traceability.",
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "files_changed": [
+    "src/lib/status-detector.ts",
+    "tests/unit/lib/status-detector.test.ts"
+  ],
+  "commits": [
+    "de8838d: refactor(status-detector): improve JSDoc consistency for Issue #408"
+  ],
+  "summary": "Lightweight JSDoc consistency improvements for Issue #408. No behavioral changes. All 4393 tests pass. Zero static analysis errors."
+}

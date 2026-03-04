@@ -1,0 +1,60 @@
+{
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 411,
+  "apply_date": "2026-03-03",
+  "applied_findings": [
+    {
+      "id": "F3-001",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "PromptPanel.tsxを影響範囲テーブルに追加（memo: visible=false時の再レンダースキップ）、実装タスクにPromptPanel memo()ラップを追記、提案する解決策にPromptPanel/MobilePromptSheetのmemo化対象追加"
+    },
+    {
+      "id": "F3-002",
+      "severity": "must_fix",
+      "status": "applied",
+      "change_summary": "既存テストの動作確認を「既存テスト動作確認の詳細」サブセクションとして具体化。対象テストファイル4件を明記（WorktreeDetailRefactored.test.tsx、MessageInput.test.tsx、SlashCommandSelector.test.tsx、MarkdownEditor.test.tsx）。named export形式（export const ComponentName = memo(function ComponentName(...))）の設計方針を記載"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "MobilePromptSheet.tsxを影響範囲テーブルに追加（memo: モバイル環境のポーリング起因再レンダー防止）、実装タスクにMobilePromptSheet memo()ラップを追記"
+    },
+    {
+      "id": "F3-004",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "MessageInputの実装タスクに「IME関連useCallback注記」を追記。ref経由アクセスは問題なし、ただしisComposingをuseCallback依存配列に含める必要がある旨を明記"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "提案する解決策セクションのinline JSX抽出に「leftPaneコンポーネント抽出時のリスク注記」を追加。props数20個超リスク、fileSearchオブジェクトの参照安定性リスク、useMemo方式が代替として有効な旨を明記"
+    },
+    {
+      "id": "F3-006",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "handleAutoYesToggleのactiveCliTab依存はauto-yes機能の振る舞いに影響するため、本Issue（パフォーマンス最適化）のスコープ外。将来タスクとして別Issue化が望ましい"
+    },
+    {
+      "id": "F3-007",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "SlashCommandListの連鎖memo化はSlashCommandSelectorがisOpen=false時にearly returnする場合に実質影響が軽微。SlashCommandSelectorのmemo化で十分カバーされるため、追加対応不要と判断"
+    }
+  ],
+  "github_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/411"
+  },
+  "statistics": {
+    "applied": 5,
+    "skipped": 2,
+    "total": 7
+  }
+}

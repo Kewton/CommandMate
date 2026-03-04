@@ -75,7 +75,7 @@ describe('Issue #188: current-output thinking integration', () => {
 
       const result = detectSessionStatus(tmuxOutput, 'claude');
 
-      // SF-001 (S3): thinking should be false (summary is outside 5-line window)
+      // Issue #408: SF-001 resolved. thinking should be false (summary is outside 5-line window)
       const isThinking = result.status === 'running' && result.reason === 'thinking_indicator';
       expect(isThinking).toBe(false);
     });
@@ -95,7 +95,7 @@ describe('Issue #188: current-output thinking integration', () => {
       expect(result.confidence).toBe('high');
       expect(result.reason).toBe('thinking_indicator');
 
-      // SF-001 (S3): thinking field derivation from StatusDetectionResult
+      // Issue #408: SF-001 resolved. thinking field derivation from StatusDetectionResult
       const isThinking = result.status === 'running' && result.reason === 'thinking_indicator';
       expect(isThinking).toBe(true);
     });

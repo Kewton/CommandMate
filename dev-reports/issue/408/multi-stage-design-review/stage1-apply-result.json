@@ -1,0 +1,84 @@
+{
+  "issue_number": 408,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "DR1-001",
+        "item": "promptDetection フィールドを optional から required に変更",
+        "section_updated": "Section 3.1, 3.2, 4.1, 7.2, 7.3, 8.1, 10, 11.1, 11.2, 12.1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-003",
+        "item": "「全9箇所のreturn文」を「全8箇所のreturn文」に修正",
+        "section_updated": "Section 4.1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-006",
+        "item": "optional chaining を通常アクセスに修正 (DR1-001 の結果)",
+        "section_updated": "Section 2.2, 4.3",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DR1-002",
+        "item": "SF-001 resolved コメントに将来ガイドラインを追記",
+        "section_updated": "Section 9.1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-004",
+        "item": "削除対象コード（L98-L102）を Section 4.3 に明記",
+        "section_updated": "Section 4.3",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-005",
+        "item": "YAGNI 原則適合（指摘なし、良い設計判断として記録）",
+        "section_updated": "N/A",
+        "status": "no_action_needed"
+      },
+      {
+        "id": "DR1-007",
+        "item": "stripAnsi 削除前の grep 確認手順を追記",
+        "section_updated": "Section 4.4",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-008",
+        "item": "auto-yes-manager.ts スコープ外の理由を補足",
+        "section_updated": "Section 1.2",
+        "status": "reflected"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-408-detect-prompt-dedup-design-policy.md",
+  "sections_updated": [
+    "Section 0: レビュー履歴（新設）",
+    "Section 0: レビュー指摘事項サマリー（新設）",
+    "Section 1.2: スコープ（DR1-008）",
+    "Section 2.2: 変更後の構造（DR1-006）",
+    "Section 3.1: StatusDetectionResult の拡張（DR1-001）",
+    "Section 3.2: 型の不変条件（DR1-001）",
+    "Section 4.1: detectSessionStatus() の変更（DR1-001, DR1-003）",
+    "Section 4.3: current-output/route.ts の変更（DR1-004, DR1-006）",
+    "Section 4.4: 削除対象のimport（DR1-007）",
+    "Section 7.2: テストケース（DR1-001）",
+    "Section 7.3: 既存テストへの影響（DR1-001）",
+    "Section 8.1: 採用した設計（DR1-001）",
+    "Section 9.1: status-detector.ts JSDoc更新（DR1-002）",
+    "Section 10: CLAUDE.md更新方針（DR1-001）",
+    "Section 11.1: CLAUDE.md準拠（DR1-001）",
+    "Section 11.2: 後方互換性（DR1-001）",
+    "Section 12: 実装チェックリスト（新設）"
+  ],
+  "timestamp": "2026-03-03T15:00:00Z"
+}

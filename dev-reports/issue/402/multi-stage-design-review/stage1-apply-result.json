@@ -1,0 +1,8 @@
+{
+  "issue_number": 402,
+  "stage": 1,
+  "applied_findings": ["S1-001", "S1-002", "S1-008", "S1-003", "S1-004"],
+  "skipped_findings": [],
+  "updated_file": "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md",
+  "source_code_modified": false
+}

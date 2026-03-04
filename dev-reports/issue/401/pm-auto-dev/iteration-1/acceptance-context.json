@@ -1,0 +1,32 @@
+{
+  "issue_number": 401,
+  "feature_summary": "stop.sh/stop-server.sh/build-and-start.shのプロセス停止処理の堅牢性向上（複数PID対応、PIDバリデーション、段階的停止、CM_PORT対応）",
+  "acceptance_criteria": [
+    "stop.shでlsof -ti:$PORTが複数PIDを返す場合でも全プロセスが正しく停止されること",
+    "build-and-start.sh --daemonでPIDファイルが存在しないが古いプロセスが残留している場合、正しく検知・停止して新しいサーバーを起動できること",
+    "PIDファイルに不正な内容（複数行、非数値）が含まれる場合でもエラーにならずポートベースで停止できること",
+    "stop-server.shがCM_PORT環境変数を参照して正しいポートのプロセスを停止できること",
+    "正常なPIDファイルがある場合の既存停止・起動・再起動サイクルに影響がないこと",
+    "restart.sh経由での停止・起動が正常に動作すること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: ポートバリデーション - 無効なCM_PORT値（例: 'abc', '0', '65536'）でスクリプトが適切にエラー終了すること",
+    "シナリオ2: stop.sh複数PID対応 - lsof出力パイプラインがgrep -E '^[0-9]+$' | sort -uで複数PIDを正しく処理できる構造になっていること",
+    "シナリオ3: stop.sh SIGTERM→SIGKILL段階化 - kill（SIGTERM）後sleep 2、残留チェック、kill -9のフローが実装されていること",
+    "シナリオ4: stop-server.sh CM_PORT対応 - PORT=${CM_PORT:-${MCBD_PORT:-3000}}が設定されていること",
+    "シナリオ5: stop-server.sh Step2 PIDファイルバリデーション - head -1 | grep -E '^[0-9]+$'でバリデーションされていること",
+    "シナリオ6: stop-server.sh Step2 プロセスグループ停止 - kill -- -$PID（SIGTERM）→ kill -9 -$PID || kill -9 $PID（SIGKILL）のパターンが実装されていること",
+    "シナリオ7: stop-server.sh Step3 Final check PIDバリデーション - REMAINING取得パイプラインにgrep/sort -u || trueが含まれること",
+    "シナリオ8: build-and-start.sh CM_PORT対応 - PORT=${CM_PORT:-${MCBD_PORT:-3000}}が設定されていること",
+    "シナリオ9: build-and-start.sh PIDファイルバリデーション - OLD_PID取得にhead -1 | grep -E '^[0-9]+$'が使われていること",
+    "シナリオ10: build-and-start.sh ポートベースalready running判定 - PIDファイルチェック後にlsofによるポートベース判定が追加されていること",
+    "シナリオ11: build-and-start.sh PIDファイルchmod 600 - PIDファイル書き込み後にchmod 600が実行されること",
+    "シナリオ12: bash シンタックスチェック - 全3スクリプトがbash -nでエラーなく通ること",
+    "シナリオ13: ESLintチェック - TypeScriptファイルに影響がないこと（ESLintエラー0件）"
+  ],
+  "changed_files": [
+    "scripts/stop.sh",
+    "scripts/stop-server.sh",
+    "scripts/build-and-start.sh"
+  ]
+}

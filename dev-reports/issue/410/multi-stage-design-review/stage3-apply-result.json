@@ -1,0 +1,10 @@
+{
+  "issue_number": 410,
+  "stage": 3,
+  "apply_date": "2026-03-04",
+  "applied_findings": ["S3-001", "S3-006"],
+  "skipped_findings": ["S3-002", "S3-003", "S3-004", "S3-005"],
+  "skip_reason": "Nice to Have項目のためスキップ",
+  "design_doc_updated": true,
+  "summary": "Stage 3のShould Fix 2件を設計方針書に反映"
+}

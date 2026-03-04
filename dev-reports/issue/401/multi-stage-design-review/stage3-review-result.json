@@ -1,0 +1,126 @@
+{
+  "stage": 3,
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-03",
+  "issue_number": 401,
+  "design_doc_path": "dev-reports/design/issue-401-stop-script-fix-design-policy.md",
+  "summary": "影響範囲レビューの結果、全体的に低リスクと評価する。stop.shの修正はrestart.shおよびrebuild SKILLとの後方互換性を維持しており、exit codeの変更もない。build-and-start.shの新規ポートベースチェックはset -eとの相互作用が適切に考慮されている。ただし、stop.shにおけるsleep 2の追加がrestart.shの合計待機時間に与える影響、stop-server.shのPIDファイルベースkill -- -$PIDがnohup以外の起動方法でEPERM/ESRCHエラーを生じる可能性、lsof未インストール環境での全面的な失敗リスク、および複数インスタンス起動時のポート番号の一致保証について、合計6件の指摘事項を報告する。Must Fix 0件、Should Fix 3件、Nice to Have 3件。",
+  "findings": [
+    {
+      "id": "I3-001",
+      "severity": "should_fix",
+      "category": "副作用リスク",
+      "title": "stop.shのsleep 2追加によるrestart.sh合計待機時間の増加",
+      "description": "現在のrestart.shはstop.sh呼び出し後にsleep 2を挟んでからstart.shを呼び出している（restart.sh L22-24）。stop.shの修正によりSIGTERM後にsleep 2、さらに残留プロセスがある場合はSIGKILL後にsleep 1が追加される。最悪ケースでは stop.sh内の待機(2+1=3秒) + restart.sh自身のsleep 2 = 合計5秒の待機となり、現在の約2秒から大幅に増加する。rebuild SKILLでも同様にstop.shの実行時間が延びる。この遅延は許容範囲内だが、restart.sh側のsleep 2が冗長になる可能性がある。",
+      "affected_files": [
+        "scripts/restart.sh (L22: sleep 2)",
+        "scripts/stop.sh (修正後: sleep 2 + sleep 1追加)",
+        ".claude/skills/rebuild/SKILL.md (stop.sh && build-and-start.sh --daemon)"
+      ],
+      "recommendation": "restart.shのsleep 2（L22）について、stop.shが修正後に自前で十分な待機処理を含むようになるため、restart.sh側のsleep 2を削除または短縮（sleep 1）することを検討する。ただしこれはIssue #401のスコープ外として明示するか、または併せて修正するかを判断すること。設計書のセクション9「スコープ外の明示」に追記することを推奨する。",
+      "risk_level": "低"
+    },
+    {
+      "id": "I3-002",
+      "severity": "should_fix",
+      "category": "エラー伝播",
+      "title": "stop-server.shのPIDファイルベース停止でプロセスグループリーダーでないPIDに対するkill -- -$PIDの挙動",
+      "description": "設計書セクション4.2 [D1-006]では、nohup起動時にプロセスグループリーダーとなることを前提に kill -- -$PID を使用している。しかし、以下のケースでプロセスグループ指定のkillが失敗する可能性がある: (1) PIDファイルに記録されたプロセスがnohup以外の方法で起動された場合（手動npm start等）、(2) macOS/Linux間でプロセスグループの形成方法が異なる場合。設計書では「kill -- -$PID 2>/dev/null || kill $PID 2>/dev/null」のフォールバックが記載されているが、SIGTERM段階でのみこのフォールバックが適用される。kill -- -$PIDがEPERMエラー（権限なし）を返すケース（プロセスグループリーダーだが他ユーザーの子プロセスが含まれる場合）では、2>/dev/nullで抑制されるため問題ないが、このケースがstoppedフラグに影響しないことの確認が必要。",
+      "affected_files": [
+        "scripts/stop-server.sh (PIDファイルベース停止セクション)",
+        "scripts/build-and-start.sh (nohup起動: L86)"
+      ],
+      "recommendation": "SIGTERM段階のフォールバックパターン「kill -- -$PID 2>/dev/null || kill $PID 2>/dev/null」は適切に設計されている。ただし、kill -0 $PID による残留チェック（SIGKILL段階の条件判定）が、プロセスグループkill成功時にPID自体が既に終了している場合にも正しく動作することを、実装時の手動テストで確認すること。設計書のテスト項目（セクション7.1）に「nohup以外の起動方法でのstop-server.sh動作確認」を追加することを推奨する。",
+      "risk_level": "低"
+    },
+    {
+      "id": "I3-003",
+      "severity": "should_fix",
+      "category": "並行実行の安全性",
+      "title": "CLIモードとスクリプトモードのPIDファイルパス分断による検知漏れリスク",
+      "description": "CLIモード（commandmate start --issue XXX）のPIDファイルは~/.commandmate/pids/{issueNo}.pidに保存される（resource-resolvers.ts PidPathResolver）。一方、スクリプトモード（build-and-start.sh --daemon）のPIDファイルは$PROJECT_DIR/logs/server.pidに保存される。stop-server.shはスクリプトモードのPIDファイル（$PROJECT_DIR/logs/server.pid）のみを参照し、CLIモードのPIDファイルは参照しない。同一ポートで両方のモードが使用された場合、(1) CLI起動 → stop-server.sh実行: PIDファイルは見つからないがポートベース停止（Step 1）で対処可能、(2) スクリプト起動 → commandmate stop: PIDファイルパスが異なるため「not running」と判定される。設計書セクション9で「CLIとシェルスクリプトのPIDファイルパス統合」をスコープ外と明示しているが、ポートベース停止がこのギャップを埋める防御線として機能することが設計上重要である。",
+      "affected_files": [
+        "scripts/stop-server.sh (PID_FILE=$LOG_DIR/server.pid)",
+        "src/cli/utils/resource-resolvers.ts (PidPathResolver: ~/.commandmate/pids/)",
+        "scripts/build-and-start.sh (PID_FILE=$LOG_DIR/server.pid)"
+      ],
+      "recommendation": "現状のスコープ外判定は妥当である。ポートベース停止（Step 1）がCLIモードとスクリプトモードの両方をカバーする防御線として機能するため、今回の修正による影響は限定的。ただし、build-and-start.shの新規ポートベースチェックが、CLIモードで起動されたプロセスも検出することを認識し、エラーメッセージに「Use stop-server.sh or commandmate stop to stop it first」のようにCLIモードへの言及を追加することを検討する。",
+      "risk_level": "低"
+    },
+    {
+      "id": "I3-004",
+      "severity": "nice_to_have",
+      "category": "環境依存性",
+      "title": "lsofがpreflight-check.shの依存チェック対象に含まれていない",
+      "description": "全3スクリプト（stop.sh、stop-server.sh、build-and-start.sh）はlsofコマンドに依存しているが、preflight-check.sh（scripts/preflight-check.sh）の必須依存チェックにlsofが含まれていない。設計書セクション9で「lsof未インストール環境への対応」をスコープ外と明示しているが、修正後のスクリプトではlsofへの依存がさらに増す（build-and-start.shにポートベースチェック追加）。lsofはmacOSにはプリインストールされているが、一部のLinuxミニマルイメージ（Alpine Linux等）ではデフォルトでインストールされていない。",
+      "affected_files": [
+        "scripts/preflight-check.sh (lsofチェックなし)",
+        "scripts/stop.sh (lsof使用)",
+        "scripts/stop-server.sh (lsof使用)",
+        "scripts/build-and-start.sh (lsof使用追加)"
+      ],
+      "recommendation": "将来的にpreflight-check.shにlsofの存在チェックをオプション依存として追加することを検討する。ただしこれはIssue #401のスコープ外であり、別Issueとして起票することを推奨する。",
+      "risk_level": "極低"
+    },
+    {
+      "id": "I3-005",
+      "severity": "nice_to_have",
+      "category": "後方互換性",
+      "title": "CM_PORT/MCBD_PORT未設定時のデフォルト3000の一貫性は維持されている",
+      "description": "stop.shは既にPORT=${CM_PORT:-${MCBD_PORT:-3000}}のパターンを使用しており（L21）、これは修正後も維持される。stop-server.shはPORT=3000のハードコードから${CM_PORT:-${MCBD_PORT:-3000}}に変更される。build-and-start.shにも同じパターンが新規追加される。health-check.sh（L10）とstatus.sh（L27）は既にこのパターンを使用している。全スクリプトでPORT解決パターンが統一されることで、後方互換性は維持される。",
+      "affected_files": [
+        "scripts/stop.sh (既存: L21)",
+        "scripts/stop-server.sh (変更: L11)",
+        "scripts/build-and-start.sh (新規追加)",
+        "scripts/health-check.sh (既存: L10)",
+        "scripts/status.sh (既存: L27)"
+      ],
+      "recommendation": "後方互換性は適切に維持されている。特筆すべきリスクなし。",
+      "risk_level": "極低"
+    },
+    {
+      "id": "I3-006",
+      "severity": "nice_to_have",
+      "category": "副作用リスク",
+      "title": "build-and-start.shのポートベースチェック追加によるset -eとの安全な相互作用",
+      "description": "build-and-start.sh L12のset -eが有効な環境下で、新規追加のポートベースチェック（lsofパイプライン）が失敗した場合にスクリプトが予期せず中断するリスクがある。設計書セクション4.3では|| trueを付加することでこのリスクを回避している。ただし、set -eとパイプラインの相互作用はbashバージョンやpipefail設定により挙動が異なる場合がある。現行のbuild-and-start.shではpipefailが設定されていないため、パイプラインの最後のコマンド（sort -u）の終了コードのみが評価される。|| trueがパイプライン全体の末尾に配置されているため、set -eによる中断は発生しない。",
+      "affected_files": [
+        "scripts/build-and-start.sh (L12: set -e, 新規ポートベースチェック)"
+      ],
+      "recommendation": "現在の設計で安全性は確保されている。pipefailが明示的に設定されていないことを前提条件として設計書に記載することを検討する。将来的にスクリプト冒頭にset -o pipefailを追加する場合は、全パイプラインの|| true付加を再確認する必要がある。",
+      "risk_level": "極低"
+    }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 3,
+    "total": 6
+  },
+  "overall_assessment": "低リスク",
+  "detailed_analysis": {
+    "side_effect_risks": {
+      "restart_sh": "stop.shの修正はexit codeを変更しない（プロセス停止成功時はexit 0を維持）。restart.shのstop.sh呼び出し（L21）は正常に動作する。ただし、stop.sh内のsleep追加によりrestart.shの合計実行時間が約3-5秒増加する（I3-001参照）。",
+      "rebuild_skill": "rebuild SKILLのstop.sh && build-and-start.sh --daemonチェーン（SKILL.md L39）は、stop.shのexit codeが0を維持するため正常に動作する。build-and-start.shのポートベースチェック追加は、stop.shが正常にプロセスを停止した後であればポート解放済みのため影響しない。",
+      "setup_sh": "setup.shはbuild-and-start.sh --daemonを呼び出す（L118）。build-and-start.shの新規ポートベースチェックは、初回セットアップ時にはポートが未使用のため影響しない。"
+    },
+    "backward_compatibility": {
+      "exit_codes": "全3スクリプトのexit codeは変更されない。stop.sh: プロセス停止時は暗黙のexit 0、停止対象なし時も暗黙のexit 0。stop-server.sh: 暗黙のexit 0。build-and-start.sh: ポート競合時exit 1（既存のPIDファイルベース競合検知と同じパターン）。",
+      "env_vars": "CM_PORT/MCBD_PORT未設定環境ではデフォルト3000が使用され、既存動作と同一。ポート番号バリデーション（D1-001）追加により、不正なポート値設定時にexit 1で早期終了するが、これは新規の防御機能であり既存の正常動作を阻害しない。",
+      "pid_file_format": "PIDファイルの書き込みフォーマットは変更されない（build-and-start.sh L88: echo $SERVER_PID > $PID_FILE）。読み取り時のバリデーション追加（head -1 + grep）は、正常なPIDファイルに対して透過的に動作する。"
+    },
+    "error_propagation": {
+      "stop_sh": "修正後のstop.shでは、lsof/kill/xargsの各コマンドエラーは2>/dev/nullで抑制される。スクリプト全体としてはexit codeを明示的に設定していないため、最後に実行されたコマンドの終了コードが返される。PM2パス（L11-17）を含め、正常系・異常系ともにexit 0で終了するパターンは維持される。",
+      "stop_server_sh": "修正後のstop-server.shでは、各ステップのエラーが2>/dev/nullで抑制され、stoppedフラグで成否を管理する既存パターンが維持される。ポート番号バリデーション失敗時のexit 1は新規だが、これは不正入力に対する適切な早期終了である。",
+      "build_and_start_sh": "set -e環境下で|| trueを適切に使用しており、lsofパイプライン失敗によるスクリプト中断は発生しない。ポート競合検知時のexit 1は既存のPIDファイルベース競合検知（L74: exit 1）と同じパターンを踏襲している。"
+    },
+    "concurrent_execution": {
+      "multiple_instances": "commandmate start --issue XXXで複数インスタンスを起動する場合、各インスタンスは異なるポート（--auto-portまたは--port指定）で動作する。スクリプト群のPORT変数はCM_PORT環境変数で制御されるため、適切なCM_PORT設定があればインスタンス間の干渉は発生しない。ただし、CLIモードとスクリプトモードのPIDファイルパス分断（I3-003参照）により、一方のモードで起動したプロセスを他方のモードで正確に停止できない制限は既存の問題であり、本修正で悪化することはない。",
+      "pid_file_race": "build-and-start.shのPIDファイル書き込み（L88: echo $SERVER_PID > $PID_FILE）はアトミック操作ではないが、CLI側のPidManager（O_EXCL使用）とは異なる管理系統のため競合しない。スクリプト同士の同時実行（例: 2つのターミナルから同時にbuild-and-start.sh --daemon）に対しては、新規追加のポートベースチェックが防御線として機能する。"
+    },
+    "environment_dependency": {
+      "macos_linux": "lsof -t、grep -E、sort -u、xargs、kill の各コマンドはmacOS/Linux両環境で標準的に利用可能。macOSのxargsは空入力時にコマンドを実行しない（GNU xargsの-r相当の動作がデフォルト）ため、if [ -n \"$PIDS\" ] ガードと合わせて安全に動作する。kill -- -$PID（プロセスグループ指定）はPOSIX準拠であり、macOS/Linux両環境で同一の挙動となる。",
+      "lsof_availability": "lsofはmacOSにプリインストールされており、主要なLinuxディストリビューション（Ubuntu、CentOS、Debian）でもデフォルトまたは容易にインストール可能。ただし、Alpineなどのミニマルイメージでは追加インストールが必要（I3-004参照）。"
+    }
+  }
+}

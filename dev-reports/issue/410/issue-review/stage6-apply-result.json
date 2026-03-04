@@ -1,0 +1,11 @@
+{
+  "issue_number": 410,
+  "stage": 6,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-03",
+  "applied_findings": ["R2-F001"],
+  "skipped_findings": ["R2-F002", "R2-F003"],
+  "skip_reason": "Nice to Have項目のため今回スキップ",
+  "github_updated": true,
+  "summary": "Stage 5のShould Fix 1件を反映"
+}

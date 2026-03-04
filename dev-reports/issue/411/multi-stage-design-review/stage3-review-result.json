@@ -1,0 +1,189 @@
+{
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "focus_area": "影響範囲",
+  "issue_number": 411,
+  "review_date": "2026-03-03",
+  "status": "conditionally_approved",
+  "score": 4,
+  "summary": "設計方針書は影響範囲の分析が概ね高品質であり、コンポーネント別のprops安定性分析やカスケード影響チェーンの文書化が優れている。ただし、MobileContentコンポーネントへのfileSearchオブジェクト参照問題、integration testの影響範囲の未記載、handlePromptRespondの依存配列にstate.prompt.dataが含まれる点のカスケード影響分析不足など、複数の改善点が確認された。must_fixレベルの指摘はないが、should_fixが3件あり、実装前に設計書への反映が望ましい。",
+  "findings": [
+    {
+      "id": "R3-001",
+      "severity": "should_fix",
+      "category": "test",
+      "title": "integration test (issue-266-acceptance.test.tsx) が影響範囲として未記載",
+      "description": "設計方針書Section 5の確認対象テストファイルは6つのunit testのみを列挙しているが、tests/integration/issue-266-acceptance.test.tsxがMessageInput、FileViewer、PromptPanel、MobilePromptSheetの4コンポーネントをvi.mockしている。memo化後のexport名は維持されるためvi.mockは正常動作するが、このテストではMessageInputのmount/unmount回数をカウントしており（messageInputMountCount変数）、memo化によるレンダリング挙動変化がテスト結果に影響する可能性がある。また、tests/unit/components/app-version-display.test.tsxもFileViewer、PromptPanel、MobilePromptSheetをモックしている。",
+      "location": "設計方針書 Section 5: テスト戦略 - 確認対象テストファイル",
+      "suggestion": "確認対象テストファイルにtests/integration/issue-266-acceptance.test.tsxとtests/unit/components/app-version-display.test.tsxを追加し、memo化後のmount/unmount回数テストの動作確認を明記する。vi.mockがモジュール全体を置換するため実際にはmemo化の影響は受けないが、影響範囲の網羅性として記載すべきである。"
+    },
+    {
+      "id": "R3-002",
+      "severity": "should_fix",
+      "category": "performance",
+      "title": "MobileContentコンポーネントのfileSearch props参照不安定性の設計書での未対応",
+      "description": "MobileContent (line 824, memo済み) はfileSearch propとしてuseFileSearch()の戻り値オブジェクトを直接受け取っている (line 2245: fileSearch={fileSearch})。useFileSearch()はreturn文で毎レンダー新しいオブジェクトリテラルを返す (useFileSearch.ts line 243-254) ため、MobileContentのmemoは毎回無効化される。設計方針書はleftPaneMemoのuseMemo依存配列でfileSearchの個別プロパティを展開する対応を記載しているが、MobileContentに渡されるfileSearchオブジェクト全体の参照不安定性については言及していない。これはモバイル表示時のポーリング最適化に影響する。",
+      "location": "設計方針書 Section 4.8, Section D4",
+      "suggestion": "二つの対応案がある。(A) useFileSearchの戻り値をuseMemoで安定化する。(B) MobileContentのprops型からfileSearchオブジェクトを除去し、個別プロパティ (query, mode, isSearching, error, setQuery, setMode, clearSearch, results) として渡す。設計方針書に本問題と選択した対応を記載すること。なお、MobileContentは既にmemo済みであり本Issue対象外のコンポーネントであるため、修正をスコープ外とする場合はその旨を明記する。"
+    },
+    {
+      "id": "R3-003",
+      "severity": "should_fix",
+      "category": "maintenance",
+      "title": "handlePromptRespondのカスケード影響分析が不足",
+      "description": "handlePromptRespond (line 1233-1258) の依存配列には[worktreeId, actions, fetchCurrentOutput, activeCliTab, state.prompt.data]が含まれる。state.prompt.dataはプロンプト検出時にactionsから更新されるオブジェクトであり、参照が変化するとhandlePromptRespondが再生成される。handlePromptRespondはPromptPanel (line 2039) とMobilePromptSheet (line 2286) に渡されている。state.prompt.data変化 -> handlePromptRespond再生成 -> PromptPanel/MobilePromptSheetのonRespond props変化 -> memo無効化のカスケードが発生するが、これはプロンプト表示状態でのみ起こるためポーリング最適化には影響しない。しかし設計書の[R2-001]ではfetchCurrentOutput -> handleMessageSentのチェーンのみ分析しており、handlePromptRespondのチェーンが欠けている。",
+      "location": "設計方針書 Section 4.1 [R2-001], Section 4.4, Section 4.5",
+      "suggestion": "handlePromptRespondのカスケード影響チェーンを設計方針書に追記する。結論としてポーリングサイクルでは影響なし（state.prompt.dataはプロンプト遷移時のみ変化）だが、分析の網羅性のために記載すべきである。"
+    },
+    {
+      "id": "R3-004",
+      "severity": "nice_to_have",
+      "category": "performance",
+      "title": "handleAutoYesToggleの依存配列にactiveCliTabが含まれ、タブ切替時に再生成される",
+      "description": "handleAutoYesToggle (line 1293-1314) の依存配列は[worktreeId, activeCliTab]であり、CLIタブ切替のたびに再生成される。AutoYesToggleコンポーネントは既にmemo済み (AutoYesToggle.tsx export const = memo(function...)) であるため、handleAutoYesToggleの参照変化でAutoYesToggleのmemo化が無効化される。タブ切替は低頻度のユーザー操作起点であるため実質的な問題は小さいが、activeCliTabの代わりにactiveCliTabRefを使用する案（fetchMessages/fetchCurrentOutputで既にこのパターンを使用）が考えられる。",
+      "location": "設計方針書 Section 4.8 (WorktreeDetailRefactored inline JSX抽出)",
+      "suggestion": "activeCliTabRefパターンの適用を将来の最適化候補として記録する。ポーリング最適化というIssue #411の主目的には影響しないため、nice_to_haveとする。"
+    },
+    {
+      "id": "R3-005",
+      "severity": "nice_to_have",
+      "category": "type",
+      "title": "MemoExoticComponentへの型変換による外部参照への影響",
+      "description": "memo()でラップされたコンポーネントの型はReact.MemoExoticComponentに変化する。named export形式 (export const X = memo(function X(...))) を使用するため、import { X } from '...' の型推論がReact.FunctionComponentからReact.MemoExoticComponentに変わる。テスト内のvi.mockはモジュール全体を置換するため型変化の影響を受けないが、もし外部のユーティリティコードがComponentType<Props>等の型制約を使用している場合に互換性問題が起きうる。現在のコードベースではそのような使用は確認されないが、設計書に注意事項として記載する価値がある。",
+      "location": "設計方針書 Section 10: 制約条件",
+      "suggestion": "Section 10にReact.MemoExoticComponentへの型変更がComponentTypeと互換性があること（MemoExoticComponent extends ExoticComponentでありJSXでの使用に支障なし）を注記する。"
+    },
+    {
+      "id": "R3-006",
+      "severity": "nice_to_have",
+      "category": "test",
+      "title": "React Strict Modeでのdouble renderとmemo化のテスト確認が未記載",
+      "description": "React Strict Mode (開発環境) では関数コンポーネントが2回呼び出される。memo化コンポーネントでは、1回目のレンダーでpropsを保存し、2回目のレンダーでshallow comparisonを行うため、Strict Modeでの動作は正常である（2回とも同一propsであればスキップされる）。ただし、useCallbackやuseMemoの依存配列が不正な場合、Strict Modeの2回目レンダーで副作用が顕在化する可能性がある。設計方針書にStrict Modeでの動作確認を推奨する記載があると安心材料になる。",
+      "location": "設計方針書 Section 5: テスト戦略",
+      "suggestion": "テスト戦略に「開発環境のReact Strict Modeでの動作確認を推奨」の一文を追加する。Vitestのjsdom環境ではStrictModeは自動有効化されないため、開発サーバーでの手動確認が対象。"
+    },
+    {
+      "id": "R3-007",
+      "severity": "nice_to_have",
+      "category": "maintenance",
+      "title": "leftPaneMemoの依存配列27項目の将来的なメンテナンスリスク",
+      "description": "設計方針書Section D4のleftPaneMemoは27項目の依存配列を持つ。eslint-plugin-react-hooksのexhaustive-depsルールで検証可能であるが、leftPaneのJSXに新しいpropsや状態を追加する際、依存配列の更新漏れが発生しやすい。特にuseMemo方式では、コンポーネント抽出方式と異なり、依存配列の過不足がコンパイル時エラーにならない（ESLint警告のみ）。将来の変更で依存配列への追加忘れが起こると、memo化されたJSXが古いクロージャを参照するバグが発生する。",
+      "location": "設計方針書 Section D4: inline JSX抽出パターン (leftPane)",
+      "suggestion": "実装チェックリストに「leftPaneのJSXに新しいprops/stateを追加する場合は必ずleftPaneMemoの依存配列も更新すること」のコメントをコードに残すことを推奨項目として追加する。"
+    },
+    {
+      "id": "R3-008",
+      "severity": "nice_to_have",
+      "category": "performance",
+      "title": "SSR/RSC環境への影響が明記されているが確認根拠の補強余地あり",
+      "description": "設計方針書Section 10で「Server Components非影響: 全対象はuse clientコンポーネント」と記載されている。実際に全8対象ファイルがuse clientディレクティブを持つことを確認済みであり、この記載は正しい。ただし、WorktreeDetailRefactoredはNext.js App Router上のページコンポーネントから呼び出されるため、Server Component境界でのprops受け渡しに影響がないことの確認（serializable props）も注記すると完全性が高まる。",
+      "location": "設計方針書 Section 10: 制約条件",
+      "suggestion": "WorktreeDetailRefactoredProps (worktreeId: string) がServer Component境界を越えるpropsとして問題ないことを簡潔に注記する。memo化はClient Component内の最適化であり、SC/CC境界のシリアライゼーションには影響しない旨を確認的に記載する。"
+    }
+  ],
+  "impact_analysis": {
+    "directly_changed_files": [
+      {
+        "file": "src/components/worktree/MessageInput.tsx",
+        "change": "memo() wrap + 9 handlers useCallback化",
+        "risk": "medium",
+        "note": "最も変更量が多い。submitMessageの依存配列が6項目あり、props変化時のカスケード影響がある"
+      },
+      {
+        "file": "src/components/worktree/SlashCommandSelector.tsx",
+        "change": "memo() wrap",
+        "risk": "low",
+        "note": "既にuseCallback/useMemo済み。変更量最小"
+      },
+      {
+        "file": "src/components/worktree/InterruptButton.tsx",
+        "change": "memo() wrap",
+        "risk": "low",
+        "note": "既にuseCallback使用済み。props単純"
+      },
+      {
+        "file": "src/components/worktree/PromptPanel.tsx",
+        "change": "memo() wrap",
+        "risk": "low",
+        "note": "条件付き描画（visible && !autoYesEnabled）のため効果限定的"
+      },
+      {
+        "file": "src/components/mobile/MobilePromptSheet.tsx",
+        "change": "memo() wrap",
+        "risk": "low",
+        "note": "autoYesEnabled=false時のみマウント"
+      },
+      {
+        "file": "src/components/worktree/MarkdownEditor.tsx",
+        "change": "memo() wrap",
+        "risk": "low",
+        "note": "条件付き描画のため効果限定的。YAGNI候補"
+      },
+      {
+        "file": "src/components/worktree/FileViewer.tsx",
+        "change": "memo() wrap",
+        "risk": "low",
+        "note": "isOpen=false時のスキップが主要効果"
+      },
+      {
+        "file": "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "change": "leftPane/rightPane useMemo化",
+        "risk": "medium",
+        "note": "leftPaneMemoの27項目依存配列の正確性が要"
+      }
+    ],
+    "indirectly_affected_files": [
+      {
+        "file": "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "impact": "vi.mockで6コンポーネントをモック。memo化後もexport名維持のため動作に影響なし",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/worktree/MessageInput.test.tsx",
+        "impact": "直接import + render。memo化後もnamed exportのため影響なし。IME compositionテスト5ケースの動作確認要",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/SlashCommandSelector.test.tsx",
+        "impact": "直接import + render。影響なし",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/PromptPanel.test.tsx",
+        "impact": "直接import + render。影響なし",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/mobile/MobilePromptSheet.test.tsx",
+        "impact": "直接import + render。影響なし",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/MarkdownEditor.test.tsx",
+        "impact": "直接import + render。影響なし",
+        "risk": "low"
+      },
+      {
+        "file": "tests/integration/issue-266-acceptance.test.tsx",
+        "impact": "MessageInput/FileViewer/PromptPanel/MobilePromptSheetをvi.mockでモック。mount回数テストあり。vi.mockがモジュール全体置換のため動作に影響なし",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/components/app-version-display.test.tsx",
+        "impact": "FileViewer/PromptPanel/MobilePromptSheetをvi.mockでモック。影響なし",
+        "risk": "low"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 5,
+    "total": 8
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "issue_number": 410,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-03",
+  "applied_findings": [],
+  "skipped_findings": ["IAF2-001"],
+  "skip_reason": "Stage 7のMust Fix/Should Fix件数が0件のため、Nice to Have項目のみスキップ",
+  "github_updated": false,
+  "summary": "Stage 7のMust Fix/Should Fix 0件。Nice to Have 1件はスキップ。GitHub更新不要。"
+}

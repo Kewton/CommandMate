@@ -1,0 +1,63 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 408,
+  "iteration": 1,
+  "apply_date": "2026-03-03",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "F1-001",
+        "status": "applied",
+        "change_summary": "背景・課題セクションを修正: 二重呼び出しが `!thinking` 条件下でのみ発生する旨を正確に記載"
+      },
+      {
+        "id": "F1-002",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルに `worktrees/route.ts`、`worktrees/[id]/route.ts`、`status-detector.test.ts` を追加"
+      },
+      {
+        "id": "F1-003",
+        "status": "applied",
+        "change_summary": "背景・課題にSF-001設計根拠との関係を追記、実装タスクにSF-001コメント更新を追加"
+      },
+      {
+        "id": "F1-004",
+        "status": "applied",
+        "change_summary": "提案する解決策に3つの代替案（A/B/C）の比較表を追加し、案Aを推奨案として明記"
+      },
+      {
+        "id": "F1-006",
+        "status": "applied",
+        "change_summary": "受入条件にpromptData構造・isPromptWaiting・thinkingフラグの具体的な検証観点を追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "F1-005",
+        "status": "applied",
+        "change_summary": "行番号の注記を追加（SF-001コメントマーカーで特定可能と記載）"
+      },
+      {
+        "id": "F1-007",
+        "status": "applied",
+        "change_summary": "概要セクションに主目的がコードの明瞭性・DRY改善である旨を明記"
+      },
+      {
+        "id": "F1-008",
+        "status": "applied",
+        "change_summary": "スコープ外の類似パターンとして auto-yes-manager.ts の detectAndRespondToPrompt() への言及を追加"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/408"
+  }
+}

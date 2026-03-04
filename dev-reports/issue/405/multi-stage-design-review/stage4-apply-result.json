@@ -1,0 +1,139 @@
+{
+  "issue_number": 405,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー指摘反映",
+  "status": "completed",
+  "design_doc_path": "dev-reports/design/issue-405-tmux-capture-optimization-design-policy.md",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "SEC4-001",
+        "title": "キャッシュキー(sessionName)のバリデーション信頼チェーンの明文化",
+        "status": "applied",
+        "applied_sections": ["3.1.2", "6.2"],
+        "changes": [
+          "セクション3.1.2にTrust Boundaryの信頼チェーン（BaseCLITool.getSessionName() -> validateSessionName()）を明記",
+          "直接文字列構築の禁止ルールを追加",
+          "defense-in-depthとしてSESSION_NAME_PATTERNランタイムチェックの検討事項を記載",
+          "モジュールJSDocへのセキュリティ前提条件記載指示を追加",
+          "セクション6.2にTrust Boundary図を新設"
+        ]
+      },
+      {
+        "id": "SEC4-002",
+        "title": "lazy evictionの制約とsweep処理の設計追記",
+        "status": "applied",
+        "applied_sections": ["3.1.1", "6.1", "7.3"],
+        "changes": [
+          "getCachedCapture()のJSDocにlazy eviction制約の注記を追加",
+          "setCachedCapture()のJSDocにfull sweep処理の設計と擬似コードを追加",
+          "セクション6.1のセンシティブデータ対策テーブルにfull sweepとlazy eviction制約を反映",
+          "セクション7.3のeviction戦略にfull sweep方式を追加"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-003",
+        "title": "globalThisキャッシュへのプロセス内アクセス制御のリスク受容根拠",
+        "status": "applied",
+        "applied_sections": ["3.1.4"],
+        "changes": [
+          "セクション3.1.4にリスク受容の4項目の根拠を追記（ファーストパーティコード前提、サプライチェーン攻撃限定、TTL=2秒短期保持、既存パターンとの一貫性）"
+        ]
+      },
+      {
+        "id": "SEC4-004",
+        "title": "CACHE_MAX_ENTRIES=100時の理論上限メモリ算出根拠",
+        "status": "applied",
+        "applied_sections": ["4.2"],
+        "changes": [
+          "セクション4.2を「通常想定」と「理論上限」の2段階テーブルに拡張",
+          "CACHE_MAX_ENTRIES=100の算出根拠（MAX_WORKTREES x CLI_TOOL_IDS.length x 安全係数2）を明記",
+          "理論上限100MBのV8ヒープ比率（約6.7%）の妥当性根拠を追加"
+        ]
+      },
+      {
+        "id": "SEC4-005",
+        "title": "singleflightエラー共有時のAPIレスポンスへの情報漏洩防止",
+        "status": "applied",
+        "applied_sections": ["3.2"],
+        "changes": [
+          "セクション3.2のcaptureSessionOutput()の実装ポイントにD1-007パターン準拠の実装ガイドラインを追加",
+          "固定文字列メッセージのみをAPIレスポンスに返す方針を明記",
+          "singleflightエラー詳細はconsole.error()の内部ログにのみ記録する方針を追加"
+        ]
+      },
+      {
+        "id": "SEC4-006",
+        "title": "invalidateCache()への監査ログ追加",
+        "status": "applied",
+        "applied_sections": ["3.1.1 (interface)", "6.3"],
+        "changes": [
+          "invalidateCache()のJSDocにdebugレベルログ出力の実装例を追加",
+          "セクション6.3を新設し、キャッシュ無効化の監査ログ方針テーブルを追加"
+        ]
+      },
+      {
+        "id": "SEC4-007",
+        "title": "captureSessionOutputFresh()の空文字列ガード",
+        "status": "applied",
+        "applied_sections": ["3.4.3"],
+        "changes": [
+          "captureSessionOutputFresh()のコード例にcapturePane()結果が空文字列の場合のガード処理を追加",
+          "空文字列時はキャッシュ書き戻しスキップ+invalidateCache()呼び出しのロジックを明記"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC4-008",
+        "status": "no_action_needed",
+        "reason": "対策不要。設計書6.1の記載が妥当。"
+      },
+      {
+        "id": "SEC4-009",
+        "status": "no_action_needed",
+        "reason": "SSRFリスクなし。外部ネットワーク通信なし。"
+      },
+      {
+        "id": "SEC4-010",
+        "status": "no_action_needed",
+        "reason": "新規npm依存なし。"
+      },
+      {
+        "id": "SEC4-011",
+        "status": "no_action_needed",
+        "reason": "既存認証機構が機能。セクション6.4に注記追加。"
+      },
+      {
+        "id": "SEC4-012",
+        "status": "no_action_needed",
+        "reason": "バイパス方式で対応済み。"
+      }
+    ]
+  },
+  "checklist_items_added": {
+    "must_fix": 5,
+    "should_fix": 7
+  },
+  "sections_modified": [
+    "3.1.1 (getCachedCapture JSDoc - SEC4-002 lazy eviction注記)",
+    "3.1.1 (setCachedCapture JSDoc - SEC4-002 full sweep設計)",
+    "3.1.1 (invalidateCache JSDoc - SEC4-006 監査ログ)",
+    "3.1.2 (SEC4-001 Trust Boundary信頼チェーン)",
+    "3.1.4 (SEC4-003 globalThisリスク受容根拠)",
+    "3.2 (SEC4-005 singleflightエラー情報漏洩防止)",
+    "3.4.3 (SEC4-007 空文字列ガード)",
+    "4.2 (SEC4-004 理論上限メモリ算出根拠)",
+    "6.1 (センシティブデータ対策テーブル更新)",
+    "6.2 (SEC4-001 Trust Boundary図 新設)",
+    "6.3 (SEC4-006 監査ログ方針 新設)",
+    "6.4 (既存セキュリティ機構との整合 更新)",
+    "7.3 (eviction戦略 SEC4-002反映)",
+    "12 (レビュー履歴 Stage 4追加)",
+    "13 (レビュー指摘事項サマリー Stage 4追加)",
+    "14 (実装チェックリスト Stage 4追加)"
+  ],
+  "timestamp": "2026-03-04T12:30:00Z"
+}

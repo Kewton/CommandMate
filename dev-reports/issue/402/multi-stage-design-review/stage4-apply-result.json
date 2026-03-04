@@ -1,0 +1,10 @@
+{
+  "issue_number": 402,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "skipped",
+  "reason": "Stage 4 had 0 Must Fix and 0 Should Fix items. No design policy update required.",
+  "must_fix_applied": 0,
+  "should_fix_applied": 0,
+  "timestamp": "2026-03-03T19:00:00Z"
+}

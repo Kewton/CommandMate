@@ -1,0 +1,155 @@
+{
+  "stage": 7,
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_date": "2026-03-03",
+  "issue_number": 401,
+  "previous_findings_addressed": true,
+  "summary": "2回目の影響範囲レビューの結果、Stage 3-4で指摘された全8件のmust_fix/should_fix（IF-001〜IF-008）が正しくIssueに反映されていることを確認した。Stage 5-6で追加されたF2-001（lsofパイプライン統合）およびF2-002（stop.shのSIGKILLフォールバック明確化）も適切に反映済みである。影響範囲テーブルは4行から9行に拡充され、修正対象3ファイル（stop.sh/stop-server.sh/build-and-start.sh）に加え、テスト対象（restart.sh/rebuild SKILL）、確認対象（status.sh/setup.sh）、スコープ外明示（src/cli//docs/DEPLOYMENT.md）が網羅されている。互換性注意事項（xargs GNU/BSD差異、lsof重複PID）も新設セクションで記載済み。残存する影響範囲の問題は発見されなかった。実装時の注意事項として2件（nice_to_have）を提示するが、Issueの修正は不要であり、実装着手可能な状態にある。",
+  "previous_findings_verification": {
+    "stage3_must_fix": {
+      "IF-001": {
+        "status": "verified",
+        "detail": "「参考: CLI側の停止メカニズムとの関係」セクションに「PIDファイルパスの分断について」段落が追加されており、シェルスクリプト（$PROJECT_DIR/logs/server.pid）とCLI（~/.commandmate/.commandmate.pid）のパス分断を明記。スコープ外であることも明示。実際のコード（env-setup.ts L160: join(configDir, '.commandmate.pid')、build-and-start.sh L18: PID_FILE=\"$LOG_DIR/server.pid\"）と完全に一致。"
+      },
+      "IF-002": {
+        "status": "verified",
+        "detail": "影響範囲テーブルに `.claude/skills/rebuild/SKILL.md` が「修正なし（テスト対象）」として追加。SKILL.md L39の `./scripts/stop.sh && ./scripts/build-and-start.sh --daemon` パターンへの影響が記載されている。&&チェーンへの影響可能性の指摘も含まれている。"
+      }
+    },
+    "stage3_should_fix": {
+      "IF-003": {
+        "status": "verified",
+        "detail": "「互換性に関する注意事項」サブセクションが新設され、xargsのGNU/BSD差異についての記載と空文字列チェック維持の必要性が明示されている。実装タスクにも「xargs呼び出し前のPID空チェック（if [ -n \"$PID\" ]）を維持すること」が含まれている。"
+      },
+      "IF-004": {
+        "status": "verified",
+        "detail": "実装タスクに「scripts/build-and-start.sh: PORT=${CM_PORT:-${MCBD_PORT:-3000}} をスクリプト冒頭に追加し、他スクリプト（stop.sh, status.sh, health-check.sh）とポート取得方式を統一」が明示的に含まれている。"
+      },
+      "IF-005": {
+        "status": "verified",
+        "detail": "「参考: CLI側の停止メカニズムとの関係」セクションに「worktree並列起動環境での制約」段落が追加。commandmate start --issue XXXのPIDファイル管理（env-setup.ts L157: join(pidsDir, `${issueNo}.pid`)）との不整合が明記されている。"
+      },
+      "IF-006": {
+        "status": "verified_and_superseded",
+        "detail": "当初「lsof出力のPIDバリデーション追加」として個別タスクだったが、F2-001の指摘によりF2-002で統合パイプライン `lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u` として1タスクに統合された。現在のIssueにはこの統合形式で正しく記載されている。"
+      },
+      "IF-007": {
+        "status": "verified_and_superseded",
+        "detail": "IF-006と同様、F2-001の指摘によりsort -uが統合パイプラインに含まれる形で1タスクに統合済み。互換性注意事項にも「Linuxの一部バージョンではIPv4/IPv6リッスンで同一PIDが重複出力される場合がある。sort -uによる重複除去を推奨」と記載されている。"
+      },
+      "IF-008": {
+        "status": "verified",
+        "detail": "影響範囲テーブルに `scripts/status.sh` が「修正なし（確認対象）」として追加。L29の複数PID表示の一貫性確認対象であることが記載されている。"
+      }
+    },
+    "stage5_should_fix": {
+      "F2-001": {
+        "status": "verified",
+        "detail": "lsof PIDバリデーション（grep -E）と重複除去（sort -u）の2つの実装タスクが、1つの統合パイプラインタスクに統合済み。build-and-start.shは新規追加のポートベース判定への適用である旨も明記されている。"
+      },
+      "F2-002": {
+        "status": "verified",
+        "detail": "stop.shの実装タスク「停止後のプロセス確認（kill -0による生存チェック）を追加」に、「残留プロセスがある場合はkill -9（SIGKILL）で強制停止する。これにより、stop-server.shの3段構え（ポートベースkill→PIDファイルベースkill→残留チェック+SIGKILL）と同等の信頼性を実現する」が追記されている。"
+      }
+    }
+  },
+  "impact_scope_completeness": {
+    "direct_modification_targets": {
+      "scripts/stop.sh": "完全に記載。複数PID対応、停止確認+SIGKILLフォールバック、PIDバリデーション。実装タスク3項目。",
+      "scripts/stop-server.sh": "完全に記載。CM_PORT対応、PIDバリデーション、段階的停止検討。実装タスク3項目。",
+      "scripts/build-and-start.sh": "完全に記載。ポートベース判定、PIDバリデーション、CM_PORT対応。実装タスク3項目。"
+    },
+    "indirect_impact_targets": {
+      "scripts/restart.sh": "テーブルに記載済み。L21でstop.shを呼び出すため影響テスト対象。受入条件にも含まれている。",
+      "scripts/status.sh": "テーブルに記載済み。確認対象として記載。",
+      ".claude/skills/rebuild/SKILL.md": "テーブルに記載済み。テスト対象として記載。",
+      "scripts/setup.sh": "テーブルに記載済み。確認対象として記載。"
+    },
+    "explicitly_out_of_scope": {
+      "src/cli/": "テーブルに記載済み。PIDファイルパス分断がスコープ外であることが明確。",
+      "docs/DEPLOYMENT.md": "テーブルに記載済み。将来対応として記載。"
+    }
+  },
+  "findings": [
+    {
+      "id": "IF7-001",
+      "severity": "nice_to_have",
+      "category": "実装注意事項",
+      "title": "stop.shのSIGKILLフォールバック実装時、PM2パスとの整合性に注意",
+      "description": "stop.sh（L11-17）にはPM2経由の停止パスが存在し、PM2が利用可能な場合はpm2 stopで停止する。Issue #401の実装タスクで追加するSIGKILLフォールバック（kill -0生存チェック+kill -9強制停止）はelse節（L18-29）のlsof/killパスにのみ適用される。PM2パスには影響しないため問題はないが、実装者がstop.sh全体の制御フローを理解した上で修正すべきである。Issueの記載はelse節のみを対象としており正確。",
+      "suggestion": "実装時にPM2パス（L11-17）には変更を加えないことを確認するのみで十分。Issueへの追記は不要。"
+    },
+    {
+      "id": "IF7-002",
+      "severity": "nice_to_have",
+      "category": "実装注意事項",
+      "title": "build-and-start.shのset -eとポートベース判定追加の相互作用",
+      "description": "build-and-start.sh L12で `set -e` が設定されているため、ポートベースalready running判定の追加時に `lsof -ti:$PORT` がプロセス未検出で非ゼロ終了した場合にスクリプト全体が終了するリスクがある。stop.sh L22では `lsof -ti:$PORT 2>/dev/null || true` で対策済みであり、build-and-start.shの新規追加コードにも同様の `|| true` または `2>/dev/null` によるエラー抑制を適用する必要がある。統合パイプライン `lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u` は2>/dev/nullでlsofのエラーを抑制しているが、grepがマッチなしで終了コード1を返す場合にset -eで終了する可能性がある。実装時には `... || true` の付加が必要。",
+      "suggestion": "統合パイプラインを変数代入する際は `PIDS=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)` のように `|| true` を末尾に付けること。Issueへの追記は不要だが、実装時の注意事項として認識すべき。"
+    }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 2,
+    "total": 2
+  },
+  "overall_assessment": "低リスク",
+  "implementation_readiness": {
+    "status": "ready",
+    "rationale": "全ての影響範囲指摘事項（Stage 3: IF-001〜IF-008、Stage 5: F2-001〜F2-002）がIssueに正しく反映されている。影響範囲テーブルは修正対象3ファイル、テスト対象2件、確認対象2件、スコープ外2件の計9行で網羅的。受入条件は6項目で検証可能。互換性注意事項も記載済み。残存するnice_to_have 2件はIssue修正不要の実装時注意事項のみ。実装着手可能。"
+  },
+  "code_references": [
+    {
+      "file": "scripts/stop.sh",
+      "relevance": "直接修正対象。L11-17のPM2パスには変更なし。L18-29のlsof/killパスが修正対象。L22のlsofパイプライン強化、L25のxargs方式変更、生存チェック+SIGKILLフォールバック追加。"
+    },
+    {
+      "file": "scripts/stop-server.sh",
+      "relevance": "直接修正対象。L11のCM_PORT対応、L18のlsofパイプライン強化、L28のPIDバリデーション、段階的停止検討。"
+    },
+    {
+      "file": "scripts/build-and-start.sh",
+      "relevance": "直接修正対象。L12のset -eとの相互作用に注意。CM_PORT対応追加、L70のPIDバリデーション、L69-76へのポートベース判定追加。"
+    },
+    {
+      "file": "scripts/restart.sh",
+      "relevance": "修正なし。L21でstop.shを呼び出す。受入条件のテスト対象。"
+    },
+    {
+      "file": "scripts/status.sh",
+      "relevance": "修正なし。L29の複数PID表示の一貫性確認対象。"
+    },
+    {
+      "file": ".claude/skills/rebuild/SKILL.md",
+      "relevance": "修正なし。L39のstop.sh && build-and-start.sh --daemonパターンのテスト対象。"
+    },
+    {
+      "file": "scripts/setup.sh",
+      "relevance": "修正なし。L118のbuild-and-start.sh --daemon呼び出しの確認対象。"
+    },
+    {
+      "file": "src/cli/utils/env-setup.ts",
+      "relevance": "修正不要。L157/L160のPIDファイルパスがIssueのPIDファイルパス分断記述と一致確認済み。"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "修正不要。L133-161のSIGTERM→waitForExit段階的停止がIssueに正しく参照されている。"
+    },
+    {
+      "file": "src/cli/utils/pid-manager.ts",
+      "relevance": "修正不要。L43-44のtrim()+parseInt()バリデーションがIssueに正しく参照されている。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト全体のスクリプト構成・コマンド体系の参照ドキュメント"
+    },
+    {
+      "file": "docs/DEPLOYMENT.md",
+      "relevance": "L320-321のトラブルシューティングコマンド。Issueに将来対応として記載済み。"
+    }
+  ]
+}

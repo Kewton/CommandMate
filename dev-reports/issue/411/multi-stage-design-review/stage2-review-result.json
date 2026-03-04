@@ -1,0 +1,189 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "focus_area": "整合性",
+  "issue_number": 411,
+  "review_date": "2026-03-03",
+  "status": "conditionally_approved",
+  "score": 4,
+  "summary": "設計方針書はコンポーネントのProps定義、memo化パターン、実装順序について実コードとの高い整合性を維持している。ただし、依存配列の安定性根拠テーブル(Section D4)で複数のハンドラの依存配列記述が実コードと不一致であり、特にhandleDeleteのeditorFilePath依存とfetchCurrentOutputのstate.prompt.visible依存が設計書で言及されていない点は修正が必要。また、FileViewerのisOpen propsの記述が実装と表記上異なる(!!fileViewerPath vs fileViewerPath !== null)点は軽微だが正確性のために修正すべきである。",
+  "findings": [
+    {
+      "id": "R2-001",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "fetchCurrentOutputの依存配列にstate.prompt.visibleが含まれることが設計書に未記載",
+      "description": "設計方針書Section 4.1 [R1-008]のテーブルでは、fetchCurrentOutputの依存配列を[worktreeId, actions]と記述しているが、実際のコード(WorktreeDetailRefactored.tsx L1122)では[worktreeId, actions, state.prompt.visible]である。state.prompt.visibleはプロンプト表示/非表示時に変化するため、fetchCurrentOutputの参照が変わり、それに依存するhandleMessageSent/handlePromptRespondも再生成される。これによりMessageInputのonMessageSent propsが変化し、プロンプト表示/非表示遷移時にmemo化が無効化される可能性がある。ポーリングサイクルでの安定性主張に影響する。",
+      "location": "設計方針書 Section 4.1 [R1-008] テーブル: fetchCurrentOutput行",
+      "suggestion": "fetchCurrentOutputの依存配列を[worktreeId, actions, state.prompt.visible]に修正し、state.prompt.visible変化時のカスケード影響(handleMessageSent -> MessageInput onMessageSent)を安定性根拠テーブルに追記する。プロンプト遷移時のmemo無効化は頻度が低い(ユーザー操作起点)ため実用上の問題は小さいが、設計書の正確性として記載すべき。"
+    },
+    {
+      "id": "R2-002",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "D4テーブルのhandleDeleteが安定参照と記載されているがeditorFilePathに依存",
+      "description": "設計方針書Section D4の依存配列安定性根拠テーブルでhandleDeleteを'useCallback | stable dependencies only'と記載しているが、実際のコード(WorktreeDetailRefactored.tsx L1460)では依存配列が[worktreeId, editorFilePath, tCommon, tError]であり、editorFilePathはユーザーがMarkdownEditorを開閉するたびに変化するstate値である。editorFilePathが変化するとhandleDeleteの参照が変わり、leftPaneMemoのuseMemoが再計算される。",
+      "location": "設計方針書 Section D4 依存配列安定性根拠テーブル: handleDelete行",
+      "suggestion": "handleDeleteの安定性種別を'useCallback'から'useCallback (editorFilePath依存)'に変更し、エディタ開閉時にleftPaneMemoが再計算される旨を注記する。ポーリングサイクルでは影響しないため最適化効果は維持されるが、設計書の正確性として明記すべき。"
+    },
+    {
+      "id": "R2-003",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "D4テーブルのhandleLeftPaneTabChangeが空依存配列と記載されているが実際は[actions]",
+      "description": "設計方針書Section D4テーブルではhandleLeftPaneTabChangeを'useCallback | 空依存配列(安定)'と記載しているが、実際のコード(WorktreeDetailRefactored.tsx L1210-1214)では依存配列が[actions]である。actionsはuseReducerのdispatchでReactが安定参照を保証するため動作上は安定だが、設計書の記述と実装が不一致。",
+      "location": "設計方針書 Section D4 依存配列安定性根拠テーブル: handleLeftPaneTabChange行",
+      "suggestion": "依存配列の記述を'[actions]'に修正し、安定性根拠を'useReducer dispatchはReact保証により安定参照'と記載する。"
+    },
+    {
+      "id": "R2-004",
+      "severity": "nice_to_have",
+      "category": "correctness",
+      "title": "FileViewerのisOpen propsの表記が実装と微妙に異なる",
+      "description": "設計方針書Section 4.7 [R1-004]テーブルではFileViewerのisOpenに渡される値を'!!fileViewerPath'と記載しているが、実際のコード(WorktreeDetailRefactored.tsx L2055, L2294)では'fileViewerPath !== null'を使用している。動作は同等(fileViewerPathはstring | nullのため)だが、設計書の正確性として実装と一致させるべき。",
+      "location": "設計方針書 Section 4.7 [R1-004] テーブル: isOpen行",
+      "suggestion": "'!!fileViewerPath'を'fileViewerPath !== null'に修正する。"
+    },
+    {
+      "id": "R2-005",
+      "severity": "nice_to_have",
+      "category": "consistency",
+      "title": "D4テーブルの複数ハンドラの依存配列が実際より簡略化されている",
+      "description": "設計方針書Section D4テーブルで、handleNewFile/handleNewDirectory/handleRename/handleCmateSetupの安定性種別を全て'useCallback | stable dependencies only'と記載しているが、実際にはそれぞれ[worktreeId, tError]/[worktreeId, tError]/[worktreeId, tError]/[worktreeId, showToast, tSchedule]の依存配列を持つ。worktreeIdは画面遷移しない限り不変、tError/tCommon/tSchedule(useTranslations)とshowToast(useCallback [])も安定であるため結論は正しいが、根拠の詳細を記載する方が正確。",
+      "location": "設計方針書 Section D4 依存配列安定性根拠テーブル: handleNewFile, handleNewDirectory, handleRename, handleCmateSetup行",
+      "suggestion": "各ハンドラの実際の依存配列を根拠欄に明記する(例: handleNewFile: [worktreeId, tError] - worktreeIdはURLパラメータで不変、tErrorはuseTranslationsでロケール変更時のみ変化)。"
+    },
+    {
+      "id": "R2-006",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "disableAutoFollowのuseMemo依存配列における安定性注記の不足",
+      "description": "設計方針書Section D3のrightPaneMemoの依存配列にdisableAutoFollowが含まれている。disableAutoFollowはactiveCliTab === 'opencode'の計算結果で、activeCliTab(CLIタブ)が変更されると値が変わる。これは正しい再計算トリガーだが、D3パターンの説明文ではこの点に言及がない。rightPaneMemoの依存配列6項目のうち、ポーリングで変化するのはstate.terminal.*の4項目であり、handleAutoScrollChangeとdisableAutoFollowはユーザー操作起点でのみ変化する点を明記すると良い。",
+      "location": "設計方針書 Section D3 (rightPaneMemo)",
+      "suggestion": "rightPaneMemoの依存配列6項目について、ポーリング起点で変化する項目(state.terminal.output, isActive, isThinking, autoScroll)とユーザー操作起点で変化する項目(handleAutoScrollChange, disableAutoFollow)を区別して注記する。"
+    },
+    {
+      "id": "R2-007",
+      "severity": "should_fix",
+      "category": "consistency",
+      "title": "MobilePromptSheetのmount条件が設計書Section 4.5と実装で不一致",
+      "description": "設計方針書Section 4.5の備考で'visibleに関係なくマウントされるため、visible=false時のprops不変スキップ効果あり'と記載しているが、実際のコード(WorktreeDetailRefactored.tsx L2281)では{!autoYesEnabled && (<MobilePromptSheet .../>)}の条件ガードで囲まれており、autoYesEnabled=true時は完全にアンマウントされる。R1-005のnice_to_have記録で一部言及されているが、Section 4.5の本文記述自体が不正確なまま残っている。",
+      "location": "設計方針書 Section 4.5 備考欄",
+      "suggestion": "Section 4.5の備考を'autoYesEnabled=false時にマウントされ、visible=false時のprops不変スキップ効果がある。autoYesEnabled=true時は完全にアンマウントされるためmemo化効果はない'に修正する。"
+    },
+    {
+      "id": "R2-008",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "実装チェックリスト(Section 13)にD4テーブル修正反映の検証項目がない",
+      "description": "Section 13の実装チェックリストにはR1-001/R1-002/R1-004/R1-008の検証項目があるが、D4テーブルの依存配列が実コードと一致していることを検証する項目がない。Stage 2レビューで発見されたR2-002(handleDeleteのeditorFilePath依存)やR2-003(handleLeftPaneTabChangeの[actions]依存)の修正が設計書に反映されたことを確認するチェック項目を追加すべき。",
+      "location": "設計方針書 Section 13 実装チェックリスト",
+      "suggestion": "チェックリストに以下を追加: '[ ] [R2-002/R2-003] D4テーブルの全依存配列エントリが実装コードのuseCallback依存配列と一致していることを確認'"
+    }
+  ],
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 4,
+    "nice_to_have": 4,
+    "total": 8
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-411-react-memo-optimization-design-policy.md",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/InterruptButton.tsx",
+    "src/components/worktree/PromptPanel.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/components/worktree/FileViewer.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/hooks/useFileSearch.ts",
+    "src/components/common/Toast.tsx",
+    "src/types/markdown-editor.ts"
+  ],
+  "consistency_matrix": [
+    {
+      "design_section": "Section 4.1 MessageInput",
+      "design_claim": "Props: worktreeId, onMessageSent?, cliToolId?, isSessionRunning?",
+      "actual_implementation": "MessageInputProps: worktreeId:string, onMessageSent?:(cliToolId:CLIToolType)=>void, cliToolId?:CLIToolType, isSessionRunning?:boolean",
+      "match": true,
+      "notes": "完全一致"
+    },
+    {
+      "design_section": "Section 4.1 MessageInput handlers",
+      "design_claim": "9個のハンドラuseCallback化",
+      "actual_implementation": "handleCompositionStart, handleCompositionEnd, handleCommandSelect, handleCommandCancel, handleFreeInput, handleMessageChange, submitMessage, handleSubmit, handleKeyDown の9個",
+      "match": true,
+      "notes": "ハンドラ数は一致"
+    },
+    {
+      "design_section": "Section 4.2 SlashCommandSelector",
+      "design_claim": "Props: isOpen, groups, onSelect, onClose, isMobile?, position?, onFreeInput?",
+      "actual_implementation": "SlashCommandSelectorProps: isOpen:boolean, groups:SlashCommandGroup[], onSelect:(command:SlashCommand)=>void, onClose:()=>void, isMobile?:boolean, position?:{top:number,left:number}, onFreeInput?:(filterText:string)=>void",
+      "match": true,
+      "notes": "完全一致"
+    },
+    {
+      "design_section": "Section 4.3 InterruptButton",
+      "design_claim": "Props: worktreeId, cliToolId, disabled?, onInterrupt?",
+      "actual_implementation": "InterruptButtonProps: worktreeId:string, cliToolId:CLIToolType, disabled?:boolean, onInterrupt?:()=>void",
+      "match": true,
+      "notes": "完全一致"
+    },
+    {
+      "design_section": "Section 4.4 PromptPanel",
+      "design_claim": "Props: promptData, messageId, visible, answering, onRespond, onDismiss?, cliToolName?",
+      "actual_implementation": "PromptPanelProps: promptData:PromptData|null, messageId:string|null, visible:boolean, answering:boolean, onRespond:(answer:string)=>Promise<void>, onDismiss?:()=>void, cliToolName?:string",
+      "match": true,
+      "notes": "完全一致"
+    },
+    {
+      "design_section": "Section 4.5 MobilePromptSheet",
+      "design_claim": "Props: promptData, visible, answering, onRespond, onDismiss?, cliToolName?",
+      "actual_implementation": "MobilePromptSheetProps: promptData:PromptData|null, visible:boolean, answering:boolean, onRespond:(answer:string)=>Promise<void>, onDismiss?:()=>void, cliToolName?:string",
+      "match": true,
+      "notes": "完全一致。messageIdが無い点も正確"
+    },
+    {
+      "design_section": "Section 4.6 MarkdownEditor",
+      "design_claim": "Props: worktreeId, filePath, onClose?, onSave?, initialViewMode?, onMaximizedChange?",
+      "actual_implementation": "EditorProps: worktreeId:string, filePath:string, onClose?:()=>void, onSave?:(filePath:string)=>void, initialViewMode?:ViewMode, onMaximizedChange?:(isMaximized:boolean)=>void",
+      "match": true,
+      "notes": "完全一致"
+    },
+    {
+      "design_section": "Section 4.7 FileViewer",
+      "design_claim": "Props: isOpen, onClose, worktreeId, filePath",
+      "actual_implementation": "FileViewerProps: isOpen:boolean, onClose:()=>void, worktreeId:string, filePath:string",
+      "match": true,
+      "notes": "完全一致"
+    },
+    {
+      "design_section": "Section D3 rightPane",
+      "design_claim": "TerminalDisplay with 6 props in useMemo",
+      "actual_implementation": "output, isActive, isThinking, autoScroll, onScrollChange, disableAutoFollow の6 props",
+      "match": true,
+      "notes": "完全一致"
+    },
+    {
+      "design_section": "Section D4 leftPane依存配列",
+      "design_claim": "27項目の依存配列",
+      "actual_implementation": "leftPaneはまだuseMemo化されていないためinline JSX(設計対象)",
+      "match": true,
+      "notes": "依存配列の項目はinline JSXで参照されている変数と一致するが、一部ハンドラの安定性記述に不正確さあり(R2-002, R2-003, R2-005)"
+    },
+    {
+      "design_section": "Section 4.1 [R1-008] fetchCurrentOutput依存配列",
+      "design_claim": "[worktreeId, actions]",
+      "actual_implementation": "[worktreeId, actions, state.prompt.visible]",
+      "match": false,
+      "notes": "state.prompt.visible漏れ(R2-001)"
+    }
+  ],
+  "timestamp": "2026-03-03T12:00:00Z"
+}

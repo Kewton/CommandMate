@@ -46,9 +46,10 @@ vi.mock('@/lib/tmux', () => ({
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock cli-session (captureSessionOutput)
+// Mock cli-session (captureSessionOutputFresh - Issue #405: prompt-response uses fresh capture)
 vi.mock('@/lib/cli-session', () => ({
   captureSessionOutput: vi.fn().mockResolvedValue(''),
+  captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
 }));
 
 // Mock prompt-detector
@@ -133,12 +134,12 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
   });
 
   it('should send keys when prompt is still active', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux');
 
     // Prompt is still active at the time of re-verification
-    vi.mocked(captureSessionOutput).mockResolvedValue('Do you want to proceed?\n\u276F 1. Yes\n  2. No');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Do you want to proceed?\n\u276F 1. Yes\n  2. No');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -163,12 +164,12 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
   });
 
   it('should NOT send keys when prompt has disappeared (race condition)', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendKeys } = await import('@/lib/tmux');
 
     // Prompt disappeared by the time of re-verification
-    vi.mocked(captureSessionOutput).mockResolvedValue('\u23FA Processing complete.\n\n\u276F ');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('\u23FA Processing complete.\n\n\u276F ');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: false,
       cleanContent: '\u23FA Processing complete.\n\n\u276F ',
@@ -184,11 +185,11 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
   });
 
   it('should proceed with send when capture fails (fallback for manual responses)', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { sendKeys } = await import('@/lib/tmux');
 
     // captureSessionOutput fails (e.g., tmux error)
-    vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux capture failed'));
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
 
     const request = createRequest('test-wt', '1');
     const response = await promptResponse(request, { params: { id: 'test-wt' } });
@@ -267,11 +268,11 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should use cursor-key navigation when promptCheck=null and body.promptType=multiple_choice', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux');
 
     // captureSessionOutput fails -> promptCheck remains null
-    vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux capture failed'));
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
 
     // Request includes promptType and defaultOptionNumber from the UI
     const request = createRequest('test-wt', {
@@ -293,10 +294,10 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should use defaultOptionNumber=1 as fallback when defaultOptionNumber is undefined', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { sendSpecialKeys } = await import('@/lib/tmux');
 
-    vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux capture failed'));
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
 
     // Request with promptType but NO defaultOptionNumber (old UI scenario)
     const request = createRequest('test-wt', {
@@ -316,10 +317,10 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should use text+Enter for yes_no promptType when promptCheck=null', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux');
 
-    vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux capture failed'));
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
 
     const request = createRequest('test-wt', {
       answer: 'y',
@@ -335,10 +336,10 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should use text+Enter when no promptType is provided (backward compatibility)', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux');
 
-    vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux capture failed'));
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
 
     // Old client: no promptType or defaultOptionNumber fields
     const request = createRequest('test-wt', '1');
@@ -352,12 +353,12 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should prefer promptCheck data over body fields when promptCheck succeeds', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux');
 
     // promptCheck succeeds with default on option 2
-    vi.mocked(captureSessionOutput).mockResolvedValue('Choose:\n  1. A\n\u276F 2. B');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Choose:\n  1. A\n\u276F 2. B');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -390,12 +391,12 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should use cursor-key navigation when promptCheck is non-null with type=yes_no but bodyPromptType=multiple_choice (type mismatch fallback)', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux');
 
     // promptCheck succeeds but returns a yes_no type (re-verification detected different prompt type)
-    vi.mocked(captureSessionOutput).mockResolvedValue('Continue? (y/n)');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Continue? (y/n)');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -427,12 +428,12 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should use cursor-key navigation when promptCheck is non-null with promptData=undefined but bodyPromptType=multiple_choice', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux');
 
     // promptCheck succeeds but has no promptData (edge case)
-    vi.mocked(captureSessionOutput).mockResolvedValue('Some prompt output');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Some prompt output');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       cleanContent: 'Some prompt output',
@@ -459,12 +460,12 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should handle promptType/defaultOptionNumber as optional fields (backward compatibility)', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux');
 
     // promptCheck succeeds - works exactly as before regardless of body fields
-    vi.mocked(captureSessionOutput).mockResolvedValue('Q?\n\u276F 1. Yes\n  2. No');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Q?\n\u276F 1. Yes\n  2. No');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -528,12 +529,12 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
   });
 
   it('should return 500 when sendKeys throws an error', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendKeys } = await import('@/lib/tmux');
 
     // Prompt check passes with a yes_no prompt (triggers sendKeys path)
-    vi.mocked(captureSessionOutput).mockResolvedValue('Continue? (y/n)');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Continue? (y/n)');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -558,11 +559,11 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
   });
 
   it('should return 500 when sendSpecialKeys throws an error', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux');
 
-    vi.mocked(captureSessionOutput).mockResolvedValue('Q?\n\u276F 1. Yes\n  2. No');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Q?\n\u276F 1. Yes\n  2. No');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -589,11 +590,11 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
   });
 
   it('should return 500 with generic message for non-Error thrown from sendKeys', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendKeys } = await import('@/lib/tmux');
 
-    vi.mocked(captureSessionOutput).mockResolvedValue('Continue?');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Continue?');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -661,12 +662,12 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
   });
 
   it('should use Space+Down+Enter for multi-select checkbox prompts', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux');
 
     // Multi-select prompt with checkbox-style options
-    vi.mocked(captureSessionOutput).mockResolvedValue('Select tools:\n\u276F [ ] Option A\n  [ ] Option B\n  [ ] Option C');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Select tools:\n\u276F [ ] Option A\n  [ ] Option B\n  [ ] Option C');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -696,12 +697,12 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
   });
 
   it('should navigate Up for multi-select when target is above default', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux');
 
     // Default is option 3, selecting option 1
-    vi.mocked(captureSessionOutput).mockResolvedValue('Select:\n  [x] A\n  [ ] B\n\u276F [ ] C');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Select:\n  [x] A\n  [ ] B\n\u276F [ ] C');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -728,11 +729,11 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
   });
 
   it('should handle selecting the default option in multi-select (offset=0)', async () => {
-    const { captureSessionOutput } = await import('@/lib/cli-session');
+    const { captureSessionOutputFresh } = await import('@/lib/cli-session');
     const { detectPrompt } = await import('@/lib/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux');
 
-    vi.mocked(captureSessionOutput).mockResolvedValue('Pick:\n\u276F [ ] Alpha\n  [ ] Beta');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Pick:\n\u276F [ ] Alpha\n  [ ] Beta');
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {

@@ -1,0 +1,34 @@
+{
+  "issue_number": 403,
+  "title": "feat: サーバーログのローテーション機能を追加",
+  "acceptance_criteria": [
+    "ログファイルが閾値（10MB）を超えた場合に自動でローテーションされること",
+    "指定した世代数（3世代）を超えた古いログが削除されること",
+    "scripts/build-and-start.sh --daemon でのサーバー起動時にログローテーションが実行されること",
+    "ローテーションはサーバー起動前（nohup 実行前）に実行されるため、実行中のサーバープロセスのログ書き込みには影響しないこと",
+    "PRODUCTION_CHECKLIST.md のLog rotation項目が更新されていること",
+    "テスト手順（基本動作・世代管理・エッジケース）が実施され、すべてパスすること"
+  ],
+  "implementation_tasks": [
+    "scripts/build-and-start.sh に MAX_LOG_SIZE_MB=10, MAX_LOG_GENERATIONS=3 定数を追加",
+    "scripts/build-and-start.sh に rotate_logs() 関数を実装（ファイル不在チェック、シンボリックリンクチェック[S4-006]、サイズチェック、世代シフト、完了ログ出力）",
+    "rotate_logs() の呼び出しを mkdir -p 直後・db:init 前に配置（|| echo WARNING パターン）",
+    "nohup 実行直後に chmod 640 を追加（[S4-005]）",
+    "docs/en/internal/PRODUCTION_CHECKLIST.md のLog rotation項目を更新",
+    "docs/internal/PRODUCTION_CHECKLIST.md のLog rotation項目を更新（日本語版）"
+  ],
+  "target_coverage": 80,
+  "design_doc_path": "dev-reports/design/issue-403-server-log-rotation-design-policy.md",
+  "work_plan_path": "dev-reports/issue/403/work-plan.md",
+  "key_files": [
+    "scripts/build-and-start.sh",
+    "docs/en/internal/PRODUCTION_CHECKLIST.md",
+    "docs/internal/PRODUCTION_CHECKLIST.md"
+  ],
+  "notes": [
+    "bash スクリプト実装のため Vitest によるテストはスコープ外。手動テストで検証。",
+    "シンボリックリンクチェック [S4-006]: $LOG_FILE および世代シフト対象ファイルに [ -L ] チェックを追加",
+    "エラー処理: set -e 環境下でも rotate_logs 失敗がサーバー起動を阻害しないよう || echo WARNING パターンを使用",
+    "パーミッション [S4-005]: nohup 後に chmod 640 を追加（既存の server.pid の chmod 600 [S4-003] と整合）"
+  ]
+}

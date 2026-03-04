@@ -1,0 +1,23 @@
+{
+  "issue_number": 405,
+  "refactor_targets": [
+    "src/lib/tmux-capture-cache.ts",
+    "src/lib/cli-session.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/prompt-answer-sender.ts",
+    "src/lib/claude-session.ts",
+    "src/lib/session-cleanup.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（特にgetOrFetchCapture()のsingleflightロジック）",
+    "JSDocコメントの充実（セキュリティ注記、設計判断の記録）",
+    "エラーハンドリングの一貫性確認",
+    "DRY原則の確認（重複パターンがあれば統合）",
+    "型定義の明確化"
+  ]
+}

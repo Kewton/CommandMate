@@ -1,0 +1,212 @@
+{
+  "issue_number": 406,
+  "focus_area": "影響範囲",
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "DR3-001",
+        "category": "impact_completeness",
+        "severity": "must_fix",
+        "title": "schedule-manager.test.ts L274 の vi.doMock('fs') が syncSchedules() の async 化後に正しく動作しない可能性",
+        "description": "schedule-manager.test.ts L277 で vi.doMock('fs', ...) を使用して readFileSync/realpathSync をモック化しているが、syncSchedules() が async 化され readCmateFile() が内部で fs/promises を使用するようになると、このテストは二重の問題を持つ。(1) vi.doMock は static import に効かないため、cmate-parser.ts の import { realpath, readFile } from 'fs/promises' には効果がない。(2) initScheduleManager() の内部で syncSchedules() が fire-and-forget になるため、vi.advanceTimersByTime(POLL_INTERVAL_MS) で次の sync をトリガーしても、初回の syncSchedules() の Promise 完了を待てない。設計方針書 Section 4.3 の After コードスニペットではファイルスコープ vi.mock による cmate-parser モジュールモックを提案しているが、vi.advanceTimersByTimeAsync() の使用タイミングと initScheduleManager() の fire-and-forget 初回呼び出しの完了保証について、具体的な await パターンが不足している。",
+        "suggestion": "設計方針書 Section 4.3 の schedule-manager.test.ts After セクションに、initScheduleManager() 呼び出し後に syncSchedules() の fire-and-forget Promise が解決されるのを待つための具体的なパターンを追記すること。例えば await vi.advanceTimersByTimeAsync(0) や await vi.waitFor() パターン、または syncSchedules() の完了を直接テストする代わに vi.mocked(readCmateFile) の呼び出し回数を検証する方式など。mtime cache テスト4件全てに適用が必要。",
+        "affected_files": [
+          "tests/unit/lib/schedule-manager.test.ts"
+        ]
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR3-002",
+        "category": "error_propagation",
+        "severity": "should_fix",
+        "title": "DJ-002 の fire-and-forget パターンにおける syncSchedules() 初回実行エラーの無視リスクの明記",
+        "description": "initScheduleManager() 内で void syncSchedules() とする DJ-002 の設計判断により、初回 syncSchedules() 実行中に syncSchedules() 内部の try-catch でカバーされない想定外エラー（例: cmate-parser.ts の import 失敗やモジュールロードエラーなど）が発生した場合、unhandled rejection として Node.js のデフォルトハンドラに到達する。server.ts L7-28 の process.on('uncaughtException') ハンドラは WebSocket エラーのみを無視する設計であり、unhandledRejection ハンドラは定義されていない。Node.js v15+ ではデフォルトで unhandled rejection がプロセスを終了させるため、実質的にはサーバーがクラッシュする。DJ-003 と異なり .catch() を付けない判断は文書化されているが、unhandledRejection に到達した場合の挙動（サーバークラッシュ）がトレードオフとして明記されていない。",
+        "suggestion": "Section 3 DJ-002 のトレードオフ説明に「initScheduleManager() での .catch() 省略により、syncSchedules() 内部の try-catch を突破する想定外エラーは unhandled rejection となりサーバーをクラッシュさせる。これは fail-fast として許容する（サーバー起動直後のモジュール読み込みエラーは致命的であるため）」という根拠を追記するか、または DJ-003 と同様に .catch() を付与して一貫性を保つことを検討する。",
+        "affected_files": [
+          "src/lib/schedule-manager.ts"
+        ]
+      },
+      {
+        "id": "DR3-003",
+        "category": "test_coverage",
+        "severity": "should_fix",
+        "title": "cmate-parser.test.ts の validateCmatePath テストが実ファイルシステムを使用しており async 化対応が複雑",
+        "description": "cmate-parser.test.ts L358-391 の validateCmatePath テストは、実際のファイルシステム上に tmpDir/worktree/outsideDir を作成し、realpathSync の実際の動作を通じてパストラバーサル検出を検証している。async 化後は (1) テストコールバックを async に変更、(2) expect().not.toThrow() を await expect().resolves.toBe(true) に変更、(3) expect().toThrow() を await expect().rejects.toThrow() に変更する必要がある。設計方針書 Section 4.3 でこのパターンは記載されているが、この特定のテストが実ファイルシステムを使用していること（モック不要でそのまま動作すること）の確認が明記されていない。fs.promises.realpath() は実ファイルシステムの symlink を正しく解決するため動作するが、テストの前提条件として明記すべき。",
+        "suggestion": "設計方針書 Section 4.3 の cmate-parser.test.ts セクションに、validateCmatePath テスト（L358-391）が実ファイルシステムを使用しており、fs.promises.realpath() でもそのまま動作する旨の注記を追加する。",
+        "affected_files": [
+          "tests/unit/lib/cmate-parser.test.ts"
+        ]
+      },
+      {
+        "id": "DR3-004",
+        "category": "initialization_order",
+        "severity": "should_fix",
+        "title": "initScheduleManager() の fire-and-forget 化による初期化完了順序の変化が server.ts に影響しないことの検証",
+        "description": "現在の server.ts L260 では initScheduleManager() は同期的に完了し、その後 L263 で initResourceCleanup() が呼ばれる。async 化後は initScheduleManager() 内の syncSchedules() が fire-and-forget になるため、initScheduleManager() は syncSchedules() の完了を待たずに返る。これにより initResourceCleanup() は syncSchedules() の初回実行完了前に開始される。initResourceCleanup() は getScheduleWorktreeIds() を使用するが、syncSchedules() 完了前はスケジュールが空であるため、初回の cleanupOrphanedMapEntries() では有効なスケジュールを孤立エントリとして誤検出しない（空の schedules Map をイテレートするだけ）。この安全性は成立するが、設計方針書の Section 7 影響なしファイルの server.ts 欄にこの初期化順序の安全性根拠が含まれていない。",
+        "suggestion": "Section 7 の影響なしファイル server.ts の理由に「initScheduleManager() から戻った時点で syncSchedules() は未完了の可能性があるが、直後に呼ばれる initResourceCleanup() は 24 時間周期であり、初回の runCleanupCycle() も空の schedules Map をイテレートするだけなので安全」という根拠を追記する。",
+        "affected_files": [
+          "server.ts"
+        ]
+      }
+    ],
+    "consider": [
+      {
+        "id": "DR3-005",
+        "category": "impact_completeness",
+        "severity": "nice_to_have",
+        "title": "cmate-validator.ts が cmate-parser.ts を import していないことの確認は正確",
+        "description": "設計方針書 Section 7 で cmate-validator.ts が影響なしとして記載されている。実際のコード確認により、cmate-validator.ts は @/config/cmate-constants と @/config/schedule-config からのみ import しており、cmate-parser.ts からの import は存在しない。parseCmateContent() は独立した client-side 実装である。この判断は正確。",
+        "suggestion": "対応不要。影響なし判定は正確である。",
+        "affected_files": [
+          "src/lib/cmate-validator.ts"
+        ]
+      },
+      {
+        "id": "DR3-006",
+        "category": "cascade_effects",
+        "severity": "nice_to_have",
+        "title": "session-cleanup.ts と resource-cleanup.ts は syncSchedules の async 化の影響を受けない",
+        "description": "session-cleanup.ts は stopScheduleForWorktree() のみを import しており、syncSchedules() は呼び出さない。resource-cleanup.ts は stopScheduleForWorktree() と getScheduleWorktreeIds() を import するが、どちらも同期 API のまま維持される。readCmateFile() を直接呼び出すファイルは schedule-manager.ts のみであり、カスケード効果は schedule-manager.ts の内部で完結する。",
+        "suggestion": "対応不要。カスケード効果の分析は正確である。",
+        "affected_files": [
+          "src/lib/session-cleanup.ts",
+          "src/lib/resource-cleanup.ts"
+        ]
+      },
+      {
+        "id": "DR3-007",
+        "category": "backward_compatibility",
+        "severity": "nice_to_have",
+        "title": "readCmateFile() と validateCmatePath() の export された型変更の後方互換性",
+        "description": "readCmateFile() の戻り値型が CmateConfig | null から Promise<CmateConfig | null> に、validateCmatePath() の戻り値型が boolean から Promise<boolean> に変更される。DJ-001 で外部呼び出し元がないことが確認されており、TypeScript コンパイラが型不一致を検出するため、実行時の後方互換性問題は発生しない。ただし、これらは export された public API であるため、将来の呼び出し元追加時に async 対応が必要になることは認識しておくべきである。",
+        "suggestion": "対応不要。現時点で外部呼び出し元はなく、TypeScript の型チェックにより安全性が担保されている。",
+        "affected_files": [
+          "src/lib/cmate-parser.ts"
+        ]
+      },
+      {
+        "id": "DR3-008",
+        "category": "test_coverage",
+        "severity": "nice_to_have",
+        "title": "tests/unit/session-cleanup-issue404.test.ts と tests/unit/resource-cleanup.test.ts への影響なし確認",
+        "description": "session-cleanup-issue404.test.ts は stopScheduleForWorktree をモック化してテストしており、schedule-manager の内部実装に依存しない。resource-cleanup.test.ts は stopScheduleForWorktree と getScheduleWorktreeIds をモック化している。いずれも syncSchedules() や readCmateFile() を直接使用しておらず、今回の変更の影響を受けない。",
+        "suggestion": "対応不要。これらのテストファイルは変更不要である。",
+        "affected_files": [
+          "tests/unit/session-cleanup-issue404.test.ts",
+          "tests/unit/resource-cleanup.test.ts"
+        ]
+      },
+      {
+        "id": "DR3-009",
+        "category": "impact_completeness",
+        "severity": "nice_to_have",
+        "title": "integration テストへの影響なし確認",
+        "description": "tests/integration ディレクトリ内に readCmateFile、validateCmatePath、syncSchedules、initScheduleManager を参照するファイルは存在しない。統合テストへの影響はない。",
+        "suggestion": "対応不要。",
+        "affected_files": []
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "medium",
+    "security": "low",
+    "operational": "low"
+  },
+  "impact_analysis": {
+    "directly_changed_files": [
+      {
+        "file": "src/lib/cmate-parser.ts",
+        "change": "import変更(fs->fs/promises)、validateCmatePath/readCmateFile async化",
+        "risk": "low"
+      },
+      {
+        "file": "src/lib/schedule-manager.ts",
+        "change": "syncSchedules() async化、initScheduleManager() fire-and-forget化、setInterval .catch()追加",
+        "risk": "medium"
+      },
+      {
+        "file": "tests/unit/lib/cmate-parser.test.ts",
+        "change": "async/await テスト対応(resolves/rejectsマッチャー)",
+        "risk": "low"
+      },
+      {
+        "file": "tests/unit/lib/schedule-manager.test.ts",
+        "change": "vi.mock方式変更(vi.doMock fs -> vi.mock cmate-parser)、async/await対応",
+        "risk": "medium"
+      },
+      {
+        "file": "tests/unit/lib/schedule-manager-cleanup.test.ts",
+        "change": "mockReturnValue(null) -> mockResolvedValue(null)",
+        "risk": "low"
+      },
+      {
+        "file": "CLAUDE.md",
+        "change": "モジュール説明更新",
+        "risk": "low"
+      }
+    ],
+    "indirectly_affected_files": [],
+    "confirmed_no_impact_files": [
+      {
+        "file": "server.ts",
+        "reason": "initScheduleManager()のsync API維持。fire-and-forget化による初期化順序変化はinitResourceCleanup()に安全（24h周期+空Map）"
+      },
+      {
+        "file": "src/lib/session-cleanup.ts",
+        "reason": "stopScheduleForWorktree()のみ使用。sync APIのまま"
+      },
+      {
+        "file": "src/lib/resource-cleanup.ts",
+        "reason": "stopScheduleForWorktree()/getScheduleWorktreeIds()のみ使用。sync APIのまま"
+      },
+      {
+        "file": "src/lib/cmate-validator.ts",
+        "reason": "cmate-parser.tsからのimportなし。@/config/cmate-constantsのみ使用"
+      },
+      {
+        "file": "tests/unit/session-cleanup-issue404.test.ts",
+        "reason": "schedule-managerをモック化しており内部実装に依存しない"
+      },
+      {
+        "file": "tests/unit/resource-cleanup.test.ts",
+        "reason": "schedule-managerをモック化しており内部実装に依存しない"
+      }
+    ],
+    "callers_verified": {
+      "readCmateFile": {
+        "callers": ["src/lib/schedule-manager.ts L516"],
+        "verified": true,
+        "external_callers_exist": false
+      },
+      "validateCmatePath": {
+        "callers": ["src/lib/cmate-parser.ts L316 (readCmateFile内部)"],
+        "verified": true,
+        "external_callers_exist": false
+      },
+      "syncSchedules": {
+        "callers": ["src/lib/schedule-manager.ts L617 (initScheduleManager)", "src/lib/schedule-manager.ts L621 (setInterval)"],
+        "verified": true,
+        "external_callers_exist": false,
+        "note": "module-internal function (not exported)"
+      }
+    }
+  },
+  "reviewed_files": [
+    "src/lib/cmate-parser.ts",
+    "src/lib/schedule-manager.ts",
+    "src/lib/session-cleanup.ts",
+    "src/lib/resource-cleanup.ts",
+    "src/lib/cmate-validator.ts",
+    "server.ts",
+    "tests/unit/lib/cmate-parser.test.ts",
+    "tests/unit/lib/schedule-manager.test.ts",
+    "tests/unit/lib/schedule-manager-cleanup.test.ts",
+    "dev-reports/design/issue-406-async-cmate-parser-design-policy.md"
+  ],
+  "timestamp": "2026-03-04T12:00:00Z"
+}

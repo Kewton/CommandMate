@@ -1,0 +1,36 @@
+{
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "issue_number": 411,
+  "apply_date": "2026-03-03",
+  "applied_findings": [
+    {
+      "id": "F7-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "change_summary": "既存テスト動作確認の詳細セクションにPromptPanel.test.tsx（PromptPanelのmemo化後動作確認）とMobilePromptSheet.test.tsx（MobilePromptSheetのmemo化後動作確認）の2件をチェックリストに追加"
+    },
+    {
+      "id": "F7-002",
+      "severity": "nice_to_have",
+      "status": "applied",
+      "change_summary": "leftPaneコンポーネント抽出時のリスク注記にMobileContent（L824、既にmemo化済み）がfileSearchの参照安定性問題により既にmemoが無効化されている既存問題の情報を追記。useFileSearchの戻り値をuseMemoでラップする修正がMobileContentとleftPaneの両方に効果がある旨を記載"
+    },
+    {
+      "id": "supplementary",
+      "severity": "supplementary",
+      "status": "applied",
+      "change_summary": "handlePromptRespond/handlePromptDismissのuseCallback適用済み確認結果を反映し、PromptPanelとMobilePromptSheetの実装タスク注記を「実装前にonRespond/onDismissのuseCallback安定化確認」から「確認済み：handlePromptRespond/handlePromptDismissはuseCallback適用済み、デフォルトshallow comparisonで十分」に更新"
+    }
+  ],
+  "github_updated": true,
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/411"
+  },
+  "statistics": {
+    "applied": 3,
+    "skipped": 0,
+    "total": 3
+  }
+}

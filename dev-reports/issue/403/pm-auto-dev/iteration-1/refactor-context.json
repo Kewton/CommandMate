@@ -1,0 +1,19 @@
+{
+  "issue_number": 403,
+  "refactor_targets": [
+    "scripts/build-and-start.sh"
+  ],
+  "quality_metrics": {
+    "before_coverage": 100,
+    "test_count": 11,
+    "lint_errors": 0,
+    "type_errors": 0
+  },
+  "improvement_goals": [
+    "rotate_logs()関数のコードの可読性・保守性を確認",
+    "シェルスクリプトのベストプラクティスへの準拠確認",
+    "コメントの充実度確認",
+    "既存スクリプトのスタイルとの整合性確認"
+  ],
+  "notes": "bash スクリプト実装のため TypeScript/JavaScript のリファクタリングパターンは適用不可。シェルスクリプトの観点で品質を評価すること。"
+}

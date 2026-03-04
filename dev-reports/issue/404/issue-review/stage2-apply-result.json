@@ -1,0 +1,9 @@
+{
+  "issue_number": 404,
+  "stage": 2,
+  "applied_findings": ["F1-001", "F1-002", "F1-003", "F1-004", "F1-005", "F1-006", "F1-010"],
+  "skipped_findings": [],
+  "skip_reasons": {},
+  "issue_updated": true,
+  "summary": "7件の指摘事項を全てIssue #404に反映。Must Fix 3件: __scheduleActiveProcessesの所在ファイルをclaude-executor.tsに修正(F1-001)、schedule-manager.tsの行番号をL106-109に修正(F1-002)、syncSchedules()の自動クリーンアップ機構の説明と残課題を追記(F1-003)。Should Fix 4件: stopAllSchedules()をworktree単位のstopScheduleForWorktree()に変更するタスク追加(F1-004)、autoYesStatesのdelete()不在を明示しdeleteAutoYesState()関数追加タスクを追加(F1-005)、影響範囲テーブルにresponse-poller.ts追加(F1-006)、影響範囲テーブルにclaude-executor.ts追加(F1-010)。背景・課題セクションの技術詳細の正確性を改善し、実装タスクの粒度を具体化し、影響範囲テーブルを2ファイル追加で拡充した。"
+}

@@ -1,0 +1,170 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 408,
+  "review_focus": "影響範囲",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "F3-001",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "影響範囲テーブルに `tests/unit/lib/status-detector.test.ts` が記載されていない。このファイルは `detectSessionStatus()` の戻り値の全フィールド（status, confidence, reason, hasActivePrompt）を検証しており、テストケース数は20件以上。`StatusDetectionResult` に `promptDetection?: PromptDetectionResult` フィールドが追加された場合、(1) 既存テストは optional フィールドのため壊れない（後方互換）が、(2) 新フィールドの検証テストを追加する必要がある。特に `promptDetection.isPrompt` と `hasActivePrompt` の一致性を検証するテストが必要。",
+      "location": "影響範囲テーブル",
+      "suggestion": "影響範囲テーブルに `tests/unit/lib/status-detector.test.ts` を追加し、変更内容を「promptDetection フィールドの存在検証・hasActivePrompt との一致性テスト追加」と記載する。"
+    },
+    {
+      "id": "F3-002",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "影響範囲テーブルに `tests/integration/current-output-thinking.test.ts` が記載されていない。このファイルは `detectSessionStatus()` の戻り値から `isThinking` と `hasActivePrompt` を導出するロジックを検証する結合テストであり（L79, L98-99）、SF-001 コメントを直接参照している（L98: `SF-001 (S3): thinking field derivation from StatusDetectionResult`）。戻り値型変更時に SF-001 設計根拠が更新されるため、テスト内のコメントも更新が必要。",
+      "location": "影響範囲テーブル",
+      "suggestion": "影響範囲テーブルに `tests/integration/current-output-thinking.test.ts` を追加し、変更内容を「SF-001 コメント更新、promptDetection フィールドの検証追加（任意）」と記載する。"
+    },
+    {
+      "id": "F3-003",
+      "severity": "should_fix",
+      "category": "依存関係",
+      "description": "循環依存リスクはない。現在の依存方向は一方向: `status-detector.ts` -> `prompt-detector.ts`（L24: `import { detectPrompt } from './prompt-detector'`）。`prompt-detector.ts` は `status-detector.ts` をインポートしていない。案Aの `PromptDetectionResult` 型の追加インポートも同一方向（`status-detector.ts` -> `prompt-detector.ts`）であるため、循環依存は発生しない。ただし、Issue本文にこの分析結果が記載されていないため、実装者が不安を抱く可能性がある。",
+      "location": "提案する解決策セクション",
+      "suggestion": "「循環依存リスク: なし。status-detector.ts は既に prompt-detector.ts から detectPrompt() をインポートしており、PromptDetectionResult 型の追加インポートは同一方向のため新たな循環は発生しない」と明記する。"
+    },
+    {
+      "id": "F3-004",
+      "severity": "must_fix",
+      "category": "影響範囲",
+      "description": "route.ts 内の `detectPrompt()` 呼び出しと `detectSessionStatus()` 内部の `detectPrompt()` 呼び出しの間に、入力前処理の微妙な差異がある。detectSessionStatus() は引数 `output`（raw ANSI含む）を受け取り、内部で `stripAnsi()` した後 `stripBoxDrawing(cleanOutput)` を `detectPrompt()` に渡す（L120, L145）。一方、current-output/route.ts は独自に `stripAnsi(output)` を L81 で実行し、その `cleanOutput` に `stripBoxDrawing()` を適用して `detectPrompt()` に渡す（L101）。現在は同一結果になるが、案A実装時に `detectSessionStatus()` から返された `promptDetection` を route.ts で直接使用する場合、route.ts 側の独自 `stripAnsi()` 処理（L81）を `detectPrompt()` 用に行う必要がなくなる。この前処理統一の確認が受け入れ条件に明記されていない。",
+      "location": "受入条件セクション / 実装タスクセクション",
+      "suggestion": "受け入れ条件に「detectSessionStatus() 内部の stripAnsi() + stripBoxDrawing() 前処理と、route.ts が独自に行っていた前処理が同一結果を生成すること」を追加する。実装タスクに「route.ts から detectPrompt() 呼び出しを削除する際、同時に不要になった import（detectPrompt, buildDetectPromptOptions, stripBoxDrawing）のクリーンアップ」を追加する。"
+    },
+    {
+      "id": "F3-005",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "current-output/route.ts L98 の `promptDetection` 変数は `{ isPrompt: boolean; cleanContent: string; promptData?: unknown }` という明示的な型注釈を持つ。案A実装後は `statusResult.promptDetection` から `PromptDetectionResult` 型の値を取得するため、この変数宣言自体が不要になるか、型注釈の変更が必要になる。また、L133 の `promptData: isPromptWaiting ? promptDetection.promptData : null` は `isPromptWaiting`（statusResult.hasActivePrompt由来）が true の時のみ promptData を返す設計だが、案A後は `statusResult.promptDetection?.promptData` を直接参照できる。`thinking` 状態時の promptData ガード（L99 の `!thinking` 条件）は不要になるのか、それとも detectSessionStatus() 内部で thinking 判定がプロンプト検出より後に実行される（L157）ため既に考慮済みなのかの整理が必要。",
+      "location": "実装タスク「呼び出し元の戻り値利用を更新」",
+      "suggestion": "実装タスクを以下のように詳細化する:\n(a) route.ts L98 の promptDetection ローカル変数を削除し、statusResult.promptDetection を直接参照\n(b) L99 の `!thinking` ガードは不要になることを確認（detectSessionStatus() 内部でプロンプト検出が thinking 検出より先に実行されるため、thinking 時は promptDetection フィールドに有効な結果が設定されない可能性を検証）\n(c) L133 の promptData 参照を statusResult.promptDetection?.promptData に更新\n(d) 不要になった import 文の削除"
+    },
+    {
+      "id": "F3-006",
+      "severity": "must_fix",
+      "category": "破壊的変更",
+      "description": "detectSessionStatus() の内部優先順序において、プロンプト検出（Priority 1, L134-153）は thinking 検出（Priority 2, L155-164）より先に実行される。つまり、プロンプトが検出された場合は thinking チェックに到達せず、即座に `{status: 'waiting', hasActivePrompt: true}` を返す。この場合、案A で `promptDetection` フィールドに結果を含めると `promptDetection.isPrompt === true` かつ `status === 'waiting'` になる。一方、thinking が検出された場合は prompt 検出を通過済みであり `promptDetection.isPrompt === false` が確定しているため、`promptDetection` には `{isPrompt: false, cleanContent: ...}` が設定される。問題は current-output/route.ts L88 の `thinking` 導出ロジック: `const thinking = statusResult.status === 'running' && statusResult.reason === 'thinking_indicator'`。thinking が true の場合、現在のコードは L99 の `if (!thinking)` で detectPrompt() をスキップし、promptDetection を初期値 `{isPrompt: false}` のまま保持する。案A 後は detectSessionStatus() 内部で prompt が先にチェックされるため、thinking 状態時でも `promptDetection` には `{isPrompt: false}` が入る（内部では prompt が不検出のため thinking に進む）。動作結果は同一だが、この「thinking 時に promptDetection が isPrompt:false を含む」という挙動が意図的であることを Issue 本文で明確にすべき。",
+      "location": "受入条件セクション / 実装タスクセクション",
+      "suggestion": "受入条件に「thinking フラグの判定結果が変更前後で同一であること」は記載済みだが、更に「thinking 状態時に promptDetection フィールドは {isPrompt: false, cleanContent: ...} を含み、promptData は undefined であること」を追加する。detectSessionStatus() の優先順序（prompt -> thinking -> input prompt -> time -> default）により、thinking に到達した時点で prompt 未検出が確定している設計上の保証を実装タスクの注記として記載する。"
+    },
+    {
+      "id": "F3-007",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "auto-yes-manager.ts の detectAndRespondToPrompt() は detectPrompt() を独立して呼び出しており（L585）、detectSessionStatus() とは別の呼び出しパス。pollAutoYes() は detectThinking() を直接使用しており（L666）、detectSessionStatus() を使っていない。Issue #408 の変更は auto-yes-manager.ts には直接影響しないが、Issue 本文の影響範囲テーブルの「変更不要」列に auto-yes-manager.ts を明示的に記載し、スコープ外であることを示すべき。将来的に同パターンを適用する場合の参考になる。",
+      "location": "影響範囲テーブル",
+      "suggestion": "影響範囲テーブルに `src/lib/auto-yes-manager.ts` を「変更不要（detectSessionStatus() を使用していない独立パス。類似の二重呼び出しパターンあり、将来の適用候補）」として追加する。"
+    },
+    {
+      "id": "F3-008",
+      "severity": "should_fix",
+      "category": "テスト",
+      "description": "src/lib/__tests__/status-detector.test.ts（20件以上）と tests/unit/lib/status-detector.test.ts（15件以上）の2つのテストファイルが存在する。前者は Issue #54 の初期テスト、後者は Issue #188 の追加テスト。案A 実装後、promptDetection フィールドの検証テストをどちらのファイルに追加するかの方針が示されていない。また、現在のテストは `result.hasActivePrompt`、`result.status`、`result.confidence`、`result.reason` の4フィールドのみを検証しており、新フィールド `result.promptDetection` の内容検証（promptData 構造、isPrompt 値、cleanContent 値）は一切行われていない。",
+      "location": "実装タスク「ユニットテスト・結合テストの更新」",
+      "suggestion": "テスト更新タスクを以下のように具体化する:\n(a) 既存テストケースが壊れないことの確認（optional フィールドのため自動的に後方互換だが明示確認）\n(b) promptDetection フィールドの検証テスト追加: prompt 検出時に promptData が含まれること、未検出時に isPrompt:false であること\n(c) hasActivePrompt と promptDetection.isPrompt の一致性テスト\n(d) テスト追加先: tests/unit/lib/status-detector.test.ts に集約を推奨（Issue #188 以降の新規テストパターンに統一）"
+    },
+    {
+      "id": "F3-009",
+      "severity": "should_fix",
+      "category": "影響範囲",
+      "description": "APIレスポンス形式はクライアント側に直接影響する。current-output/route.ts のレスポンス（L117-142）は `promptData`、`isPromptWaiting`、`thinking` 等のフィールドを含む。案A 実装後、これらのフィールド値の導出ロジックが変更されるが、最終的なレスポンス JSON の形状は変わらない。ただし、Issue 本文の受入条件に「APIレスポンスの JSON 形状が変更前後で同一であること」が明示されていない。`promptData` フィールドの値は `isPromptWaiting ? promptDetection.promptData : null` から `isPromptWaiting ? statusResult.promptDetection?.promptData ?? null : null` のような形に変わるが、値は同一であるべき。",
+      "location": "受入条件セクション",
+      "suggestion": "受入条件に「APIレスポンスの JSON 形状（フィールド名・型・値）が変更前後で同一であること」を追加する。具体的には: (1) promptData のオブジェクト構造、(2) isPromptWaiting の boolean 値、(3) thinking の boolean 値、(4) isGenerating の boolean 値、(5) isComplete の boolean 値。統合テストまたはスナップショットテストによる検証を推奨。"
+    },
+    {
+      "id": "F3-010",
+      "severity": "nice_to_have",
+      "category": "影響範囲",
+      "description": "response-poller.ts は PromptDetectionResult 型を独自に import して使用しており（L34, L97, L383）、detectSessionStatus() を使用していない。今回の変更のスコープ外だが、将来的に response-poller.ts が detectSessionStatus() を使う構成に変更される場合、promptDetection フィールドの再利用が可能になる。Issue 本文でスコープ外モジュールとして言及しておくと、将来の設計判断の参考になる。",
+      "location": "影響範囲テーブル",
+      "suggestion": "影響範囲テーブルの脚注またはスコープ外セクションに「response-poller.ts は detectPrompt() を独立して使用。detectSessionStatus() を使用していないため本 Issue のスコープ外」と付記する。"
+    },
+    {
+      "id": "F3-011",
+      "severity": "nice_to_have",
+      "category": "その他",
+      "description": "CLAUDE.md のモジュール説明に status-detector.ts の記載があるが、SF-001 トレードオフの詳細は含まれていない。案A 実装後、SF-001 JSDoc が更新される（二重呼び出しの解消を反映）ため、CLAUDE.md の status-detector.ts 説明も整合性のため更新が望ましい。",
+      "location": "実装タスク「SF-001 コメントの更新」",
+      "suggestion": "実装タスクに「CLAUDE.md の status-detector.ts モジュール説明の更新（SF-001 解消の反映）」を追加する。"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 7,
+    "nice_to_have_count": 2,
+    "overall_quality": "fair",
+    "comment": "Issue #408 の影響範囲分析において、主要な懸念点は以下の3つ。(1) must_fix: detectSessionStatus() 内部の優先順序（prompt -> thinking）に起因する promptDetection フィールドの挙動が未整理。thinking 到達時点で prompt 未検出が確定している設計保証を明記する必要がある。(2) must_fix: route.ts 側と detectSessionStatus() 内部の stripAnsi()/stripBoxDrawing() 前処理の同一性確認が受入条件に欠落。(3) should_fix: テストファイル（unit 2件 + integration 1件）が影響範囲に未記載で、テスト更新方針が不明確。循環依存リスクはなし（依存方向は一方向: status-detector -> prompt-detector）。worktrees/route.ts と worktrees/[id]/route.ts は optional フィールド追加のため破壊的変更なし。APIレスポンス形式の保全は受入条件で明確化すべき。auto-yes-manager.ts は独立パスのためスコープ外。全体として影響範囲は限定的だが、前処理の同一性と thinking/prompt の優先順序整合性の明確化が必要。"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/status-detector.ts",
+      "lines": "24, 42-60, 114-153",
+      "relevance": "StatusDetectionResult 型定義、detectPrompt() インポート、内部優先順序（prompt -> thinking -> input prompt）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/current-output/route.ts",
+      "lines": "9, 81, 87-102, 117-142",
+      "relevance": "detectPrompt import、独自 stripAnsi()、二重呼び出し箇所、API レスポンス構築"
+    },
+    {
+      "file": "src/app/api/worktrees/route.ts",
+      "lines": "16, 58-65",
+      "relevance": "detectSessionStatus() 呼び出し元、hasActivePrompt のみ使用（promptData 不要）"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/route.ts",
+      "lines": "13, 68-75",
+      "relevance": "detectSessionStatus() 呼び出し元、hasActivePrompt のみ使用（promptData 不要）"
+    },
+    {
+      "file": "src/lib/prompt-detector.ts",
+      "lines": "54-69",
+      "relevance": "PromptDetectionResult 型定義（status-detector.ts からインポートされる型）"
+    },
+    {
+      "file": "tests/unit/lib/status-detector.test.ts",
+      "lines": "17-18, 42-358",
+      "relevance": "detectSessionStatus() ユニットテスト（15件以上、hasActivePrompt 検証含む）"
+    },
+    {
+      "file": "src/lib/__tests__/status-detector.test.ts",
+      "lines": "9, 329",
+      "relevance": "detectSessionStatus() 初期テスト（20件以上、StatusDetectionResult マッピング検証含む）"
+    },
+    {
+      "file": "tests/integration/current-output-thinking.test.ts",
+      "lines": "19, 79, 98",
+      "relevance": "SF-001 コメント参照、thinking/prompt 優先順序の結合テスト"
+    },
+    {
+      "file": "src/lib/auto-yes-manager.ts",
+      "lines": "13, 576-585",
+      "relevance": "独立した detectPrompt() 呼び出し（スコープ外の類似パターン）"
+    },
+    {
+      "file": "src/lib/response-poller.ts",
+      "lines": "33-34, 380-385",
+      "relevance": "PromptDetectionResult 型使用、独立した detectPrompt() パイプライン（スコープ外）"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "status-detector.ts / prompt-detector.ts / current-output/route.ts のモジュール説明。SF-001 解消後の更新候補"
+    },
+    {
+      "file": "dev-reports/design/issue-180-status-display-inconsistency-design-policy.md",
+      "relevance": "StatusDetectionResult の hasActivePrompt 追加時の設計根拠（DR-002: promptDetection を含めない判断）。本 Issue はこの判断を覆すもの"
+    },
+    {
+      "file": "dev-reports/design/issue-188-thinking-indicator-false-detection-design-policy.md",
+      "relevance": "SF-001 トレードオフの設計根拠（Section 14.1: 二重呼び出しの許容理由）"
+    }
+  ]
+}

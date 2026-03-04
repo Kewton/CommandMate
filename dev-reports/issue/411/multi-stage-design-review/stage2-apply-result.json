@@ -1,0 +1,72 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 411,
+  "apply_date": "2026-03-03",
+  "target_file": "dev-reports/design/issue-411-react-memo-optimization-design-policy.md",
+  "applied_findings": [
+    {
+      "finding_id": "R2-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "Section 4.1 [R1-008]テーブルのfetchCurrentOutput依存配列を[worktreeId, actions, state.prompt.visible]に修正。state.prompt.visible変化時のカスケード影響（fetchCurrentOutput -> handleMessageSent -> MessageInput onMessageSent）を新規補足セクション[R2-001]として追記。Section 13チェックリストにR2-001検証項目を追加"
+    },
+    {
+      "finding_id": "R2-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "Section D4テーブルのhandleDelete行の安定性種別を「useCallback (editorFilePath依存)」に変更。依存配列[worktreeId, editorFilePath, tCommon, tError]を明記し、エディタ開閉時のleftPaneMemo再計算への影響を注記。Section 13チェックリストにR2-002検証項目を追加"
+    },
+    {
+      "finding_id": "R2-003",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "Section D4テーブルのhandleLeftPaneTabChange行の依存配列を[actions]に修正。安定性根拠を「useReducer dispatchはReact保証により安定参照。実質的に空依存配列と同等の安定性」と記載。Section 13チェックリストにR2-003検証項目を追加"
+    },
+    {
+      "finding_id": "R2-004",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "description": "nice_to_have項目として記録セクションに追記。FileViewerのisOpen表記（!!fileViewerPath vs fileViewerPath !== null）の差異は動作に影響しないため本文修正はスキップ"
+    },
+    {
+      "finding_id": "R2-005",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "description": "nice_to_have項目として記録セクションに追記。D4テーブルの複数ハンドラ依存配列の詳細化は将来の正確性向上候補として記録"
+    },
+    {
+      "finding_id": "R2-006",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "description": "nice_to_have項目として記録セクションに追記。rightPaneMemoの依存配列のポーリング起点/ユーザー操作起点の区別注記は将来の改善候補として記録"
+    },
+    {
+      "finding_id": "R2-007",
+      "severity": "should_fix",
+      "status": "applied",
+      "description": "Section 4.5の備考欄を修正。「visibleに関係なくマウントされる」から「autoYesEnabled=false時にマウントされ、visible=false時のprops不変スキップ効果がある。autoYesEnabled=true時は完全にアンマウントされるためmemo化効果はない」に変更。Section 13チェックリストにR2-007検証項目を追加。R1-005のnice_to_have記録にR2-007修正済みの注記を追加"
+    },
+    {
+      "finding_id": "R2-008",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "description": "nice_to_have項目として記録セクションに追記。D4テーブル依存配列一致検証の実装チェックリスト追加は将来の改善候補として記録"
+    }
+  ],
+  "statistics": {
+    "applied": 4,
+    "skipped": 4,
+    "total": 8
+  },
+  "sections_updated": [
+    "Section 4.1 [R1-008] テーブル・補足（R2-001）",
+    "Section D4 依存配列安定性根拠テーブル（R2-002, R2-003）",
+    "Section 4.5 MobilePromptSheet 備考（R2-007）",
+    "Section 11 レビュー履歴（Stage 2追加）",
+    "Section 12 レビュー指摘事項サマリー（Stage 2テーブル追加）",
+    "Section 12 nice_to_have項目の記録（R2-004〜R2-008追加）",
+    "Section 13 実装チェックリスト（R2-001〜R2-007追加）"
+  ],
+  "timestamp": "2026-03-03T12:00:00Z"
+}

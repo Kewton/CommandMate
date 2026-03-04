@@ -1,0 +1,48 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [
+    "DRY: Replace local getErrorMessage() in auto-yes-manager.ts with import from errors.ts",
+    "DRY: Replace 5 inline error message extractions in session-cleanup.ts with getErrorMessage() import",
+    "SRP/Encapsulation: Add getScheduleWorktreeIds() to schedule-manager.ts to eliminate direct globalThis access",
+    "SRP/Encapsulation: Remove direct globalThis.__scheduleManagerStates access from resource-cleanup.ts",
+    "Test: Add 3 new tests for getScheduleWorktreeIds() function",
+    "Test: Update resource-cleanup tests to use mock instead of globalThis manipulation"
+  ],
+  "files_changed": [
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/resource-cleanup.ts",
+    "src/lib/schedule-manager.ts",
+    "src/lib/session-cleanup.ts",
+    "tests/unit/lib/schedule-manager-cleanup.test.ts",
+    "tests/unit/resource-cleanup.test.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "quality_checks": {
+    "lint": "pass",
+    "typescript": "pass",
+    "unit_tests": "pass",
+    "build": "pass"
+  },
+  "changes_made": [
+    "Replaced local getErrorMessage() in auto-yes-manager.ts with import from errors.ts (DRY principle)",
+    "Replaced 5 inline 'error instanceof Error ? error.message : String(error)' patterns in session-cleanup.ts with getErrorMessage() (DRY principle)",
+    "Added getScheduleWorktreeIds() to schedule-manager.ts for proper encapsulation of globalThis state (SRP principle)",
+    "Removed direct globalThis.__scheduleManagerStates access from resource-cleanup.ts in favor of the new accessor function",
+    "Added 3 new tests for getScheduleWorktreeIds() covering: unique IDs, empty schedules, uninitialized state",
+    "Updated resource-cleanup test to use vi.mocked(getScheduleWorktreeIds) instead of globalThis manipulation"
+  ],
+  "commits": [
+    "56a71d8: refactor(resource-cleanup): improve code quality and encapsulation (Issue #404)"
+  ],
+  "coverage_after": 80.0,
+  "notes": "All 4462 unit tests pass (3 new tests added). ESLint 0 errors, TypeScript 0 errors, build successful. Key improvements: (1) DRY - eliminated duplicate getErrorMessage implementations across 2 files, (2) SRP/Encapsulation - schedule-manager now exposes worktree IDs through a proper API function instead of requiring consumers to access globalThis directly, improving module encapsulation and testability."
+}

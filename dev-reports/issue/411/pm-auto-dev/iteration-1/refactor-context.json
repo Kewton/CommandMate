@@ -1,0 +1,25 @@
+{
+  "issue_number": 411,
+  "refactor_targets": [
+    "src/components/worktree/FileViewer.tsx",
+    "src/components/worktree/InterruptButton.tsx",
+    "src/components/worktree/SlashCommandSelector.tsx",
+    "src/components/worktree/MessageInput.tsx",
+    "src/components/worktree/PromptPanel.tsx",
+    "src/components/mobile/MobilePromptSheet.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80,
+    "tests_passed": 4388,
+    "eslint_errors": 0,
+    "typescript_errors": 0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（memo化に関するコメント追記）",
+    "依存配列の正確性確認（exhaustive-deps相当のチェック）",
+    "WorktreeDetailRefactoredのleftPaneMemo依存配列にコメントを追加してメンテナンス性向上",
+    "handleFreeInputのuseCallback空依存配列の安全性根拠コメントを確認・追加"
+  ]
+}

@@ -19,6 +19,7 @@ import {
   stripAnsi,
 } from './cli-patterns';
 import { detectAndResendIfPastedText } from './pasted-text-helper';
+import { invalidateCache } from './tmux-capture-cache';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { access, constants } from 'fs/promises';
@@ -290,8 +291,9 @@ export interface HealthCheckResult {
  * Verify that Claude CLI is actually running inside a tmux session
  * Detects broken sessions where tmux exists but Claude failed to start
  *
- * @internal Exported for testing purposes only.
- * Follows clearCachedClaudePath() precedent (L148-156).
+ * Issue #405: Promoted from @internal to production export.
+ * Used by worktrees/route.ts and worktrees/[id]/route.ts for
+ * health-aware session status with listSessions() batch optimization.
  *
  * @param sessionName - tmux session name
  * @returns HealthCheckResult with healthy status and optional reason
@@ -726,6 +728,9 @@ export async function sendMessageToClaude(
     await detectAndResendIfPastedText(sessionName);
   }
 
+  // Issue #405: Invalidate cache after sending message
+  invalidateCache(sessionName);
+
   console.log(`Sent message to Claude session: ${sessionName}`);
 }
 
@@ -782,6 +787,9 @@ export async function stopClaudeSession(worktreeId: string): Promise<boolean> {
       await sendKeys(sessionName, '', false);
       // Send Ctrl+D (ASCII 4)
       await sendSpecialKey(sessionName, 'C-d');
+
+      // Issue #405: Invalidate cache after sending stop signal
+      invalidateCache(sessionName);
 
       // Wait a moment for Claude to exit
       await new Promise((resolve) => setTimeout(resolve, 500));

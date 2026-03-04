@@ -1,0 +1,166 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "issue_number": 406,
+  "review_date": "2026-03-04",
+  "focus_area": "影響範囲",
+  "iteration": 2,
+  "review_items": [
+    {
+      "id": "R7-001",
+      "severity": "should_fix",
+      "category": "testing",
+      "title": "schedule-manager.test.ts の vi.mock パスに '@/lib/cmate-parser' エイリアスを使用すべき",
+      "description": "Issue の実装タスクでは schedule-manager.test.ts の mtime cache テストに対し方針(B)を採用し、cmate-parser モジュール自体を vi.mock() でモック化するとしている。しかし、vi.mock() のモジュールパス指定方法が未記載である。schedule-manager.test.ts は現在 vi.mock('../../../src/lib/db-instance', ...) のように相対パスを使用している一方、schedule-manager-cleanup.test.ts も vi.mock('../../../src/lib/cmate-parser', ...) で相対パスを使用している。一方、schedule-manager.ts の import 文は import { readCmateFile, parseSchedulesSection } from './cmate-parser' であり、Vitest の vi.mock は vitest.config.ts の resolve.alias 設定（'@' -> './src'）を解決するため、'@/lib/cmate-parser' でも '../../../src/lib/cmate-parser' でもどちらでも動作する。ただし、schedule-manager.test.ts ファイル内では vi.mock('../../../src/lib/db-instance', ...) の相対パスパターンが既に使用されており、同一ファイル内のスタイルの一貫性を保つなら '../../../src/lib/cmate-parser' が適切である。実装タスクにパス指定方法を明示するとよい。",
+      "suggestion": "実装タスクの該当項目を「schedule-manager.test.ts の mtime cache テスト: 方針(B)を採用し、cmate-parser モジュール自体を vi.mock('../../../src/lib/cmate-parser', ...) でモック化（ファイル内の既存 vi.mock パス規約に準拠）」と具体化する。",
+      "location": "## 実装タスク - schedule-manager.test.ts 関連タスク"
+    },
+    {
+      "id": "R7-002",
+      "severity": "should_fix",
+      "category": "testing",
+      "title": "schedule-manager.test.ts で vi.mock('cmate-parser') を使用した場合のテスト分離への影響が未考慮",
+      "description": "方針(B)として cmate-parser モジュールを vi.mock() でモック化する場合、vi.mock() はファイルスコープ（モジュールスコープ）で動作するため、schedule-manager.test.ts 内の全テストケースで readCmateFile() がモック化される。現在の schedule-manager.test.ts (L106-128) の initScheduleManager テスト群は readCmateFile() の結果に暗黙的に依存している（CMATE.md ファイルが存在しない前提で getActiveScheduleCount() が 0 であることを検証）。vi.mock() で readCmateFile を mockResolvedValue(null) にすれば、これらのテストは引き続き動作する。ただし、mtime cache テスト (L274) の 'should skip DB queries when mtime is unchanged' テストでは readCmateFile() がパース結果を返す必要がある（現在は vi.doMock('fs', ...) 経由で実際のファイル内容をモック化している）。vi.mock() を使用する場合、このテストでは mockResolvedValueOnce() で特定のテストのみ別の戻り値を設定する必要がある。この具体的なモック戦略を実装タスクまたは注記として記載すると実装者の迷いを減らせる。",
+      "suggestion": "実装タスクに補足を追加する: 「vi.mock() のデフォルトは mockResolvedValue(null) とし、mtime cache テストの 'should skip DB queries when mtime is unchanged' では mockResolvedValueOnce() で CmateConfig を返すようモックを上書きする。vi.doMock('fs', ...) は削除し、statSync のモックは vi.mock('fs', ...) のファイルスコープモックまたは vi.spyOn で対応する」。",
+      "location": "## 実装タスク - schedule-manager.test.ts 関連タスク"
+    },
+    {
+      "id": "R7-003",
+      "severity": "should_fix",
+      "category": "testing",
+      "title": "schedule-manager.test.ts の statSync モック維持方法が未記載",
+      "description": "方針(B)で cmate-parser モジュール自体をモック化すると、vi.doMock('fs', ...) (L277-281) 内の readFileSync/realpathSync モックは不要になるが、statSync モックは引き続き必要である。schedule-manager.ts の getCmateMtime() (L163) は statSync() を直接呼び出しており、cmate-parser のモック化ではカバーされない。現在の vi.doMock('fs', ...) ブロックから readFileSync/realpathSync を削除し statSync のみ残すか、あるいは fs モジュールのファイルスコープ vi.mock() に移行するか、方針を明確にすべきである。vi.doMock() はテスト内のスコープで動作するため、initScheduleManager() の呼び出し前に適用される必要があり、動的 import と組み合わせないと効果がない場合がある。この点の設計注記があると実装時のトラブルを防げる。",
+      "suggestion": "実装タスクに注記を追加する: 「statSync は schedule-manager.ts 内で直接使用しているため、(A) vi.doMock('fs', ...) を statSync のみに縮小するか、(B) ファイルスコープの vi.mock('fs', ...) に切り替えて statSync をモック化する。vi.doMock() を使用する場合は schedule-manager.ts の動的 import が必要になるため、方針(B)のファイルスコープ vi.mock('fs', ...) を推奨する」。",
+      "location": "## 実装タスク - schedule-manager.test.ts 関連タスク"
+    },
+    {
+      "id": "R7-004",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "syncSchedules() の async 化後、initScheduleManager() 内の初回 syncSchedules() が fire-and-forget になることでエラーが見逃されるリスクの注記",
+      "description": "現在の initScheduleManager() (L617) は syncSchedules() を同期的に呼び出しており、初回同期中のエラー（DB アクセス失敗等）はスタックトレースとして即座に表出する。async 化後に void syncSchedules() (fire-and-forget) に変更すると、初回同期中のエラーは console.error (syncSchedules 内の各 try-catch) でログに記録されるが、initScheduleManager() の呼び出し元（server.ts L260）にはエラーが伝播しない。実装タスクの setInterval 側には .catch() パターンが記載されているが、initScheduleManager() 内の初回呼び出しにも同様の .catch() を付与するか（void syncSchedules().catch(...)）、あるいは syncSchedules() 内部の try-catch で十分であるかの設計判断が暗黙のままである。syncSchedules() は L486 と L574 で try-catch を持っているため内部で十分に保護されているが、この設計根拠を注記するとよい。",
+      "suggestion": "実装タスクの initScheduleManager 関連項目に補足を追加する: 「void syncSchedules() は .catch() なしで使用する（syncSchedules() 内部の try-catch で全エラーが捕捉されるため）。ただし、将来的に syncSchedules() 外部に例外が漏れるコード変更があった場合に備え、void syncSchedules().catch(err => console.error(...)) も許容する」。",
+      "location": "## 実装タスク - initScheduleManager 関連タスク"
+    },
+    {
+      "id": "R7-005",
+      "severity": "nice_to_have",
+      "category": "documentation",
+      "title": "影響範囲テーブル内の schedule-manager.test.ts の変更内容記載の具体化",
+      "description": "影響範囲テーブルに schedule-manager.test.ts が追加されているが、変更内容の記載が Stage 6 反映後も「vi.mock('cmate-parser')でモック化」程度であると推測される。具体的に何が変わるかを明記すると、実装者がテスト修正の全体像を把握しやすくなる: (1) vi.doMock('fs', ...) から readFileSync/realpathSync を削除（または全体を vi.mock('fs', ...) に切り替え）、(2) vi.mock() で cmate-parser の readCmateFile を mockResolvedValue(null) に設定、(3) mtime cache テストの 'should skip DB queries' で mockResolvedValueOnce() を使用。",
+      "suggestion": "影響範囲テーブルの schedule-manager.test.ts エントリの変更内容を以下に更新する: 「vi.mock('cmate-parser')でモック化（readCmateFile を mockResolvedValue(null)）、vi.doMock('fs') から readFileSync/realpathSync を削除し statSync のみ維持」。",
+      "location": "## 影響範囲"
+    }
+  ],
+  "previous_review_verification": {
+    "stage3_items": {
+      "R3-001": {
+        "status": "fully_addressed",
+        "note": "schedule-manager-cleanup.test.ts の readCmateFile モックを mockReturnValue(null) から mockResolvedValue(null) に変更する実装タスクが追加済み。影響範囲テーブルにも追記済み。"
+      },
+      "R3-002": {
+        "status": "fully_addressed",
+        "note": "Stage 5 (R5-001) で方針未確定が指摘され、Stage 6 で方針(B)（cmate-parser モジュール自体の vi.mock()）に確定。ただし詳細（パス指定、statSync 維持方法、テスト分離戦略）は R7-001/R7-002/R7-003 で追加指摘。"
+      },
+      "R3-003": {
+        "status": "fully_addressed",
+        "note": "validateCmatePath() の export 維持と Promise<boolean> 戻り値型が提案する解決策セクションと実装タスクに明記済み。"
+      },
+      "R3-004": {
+        "status": "fully_addressed",
+        "note": "ENOENT エラー時の動作確認が実装タスク（realpathSync 置換項目）に含まれ、受入条件にも「readCmateFile() がCMATE.md不存在時に null を返す動作が async 化後も維持されること」が追加済み。"
+      },
+      "R3-005": {
+        "status": "fully_addressed",
+        "note": "CLAUDE.md が影響範囲テーブルに追加済み。モジュール説明更新の記載あり。"
+      },
+      "R3-006": {
+        "status": "fully_addressed",
+        "note": "setInterval 内の呼び出しを void syncSchedules().catch(err => console.error(...)) パターンに具体化済み。"
+      },
+      "R3-007": {
+        "status": "fully_addressed",
+        "note": "影響範囲テーブルの cmate-parser.ts エントリに import文変更を記載済み。"
+      },
+      "R3-008": {
+        "status": "fully_addressed",
+        "note": "影響範囲セクションに cmate-validator.ts と server.ts の除外注記が追加済み。"
+      }
+    }
+  },
+  "new_impact_check": {
+    "checked_files": [
+      {
+        "file": "tests/unit/lib/schedule-manager.test.ts",
+        "check": "vi.mock('cmate-parser') 適用時の全テストケースへの影響",
+        "result": "initScheduleManager テスト群 (L106-128) は readCmateFile(null) で動作するため影響なし。mtime cache テスト (L273-338) のうち L274 のテストのみ mockResolvedValueOnce が必要。他3テストは readCmateFile(null) で動作する。",
+        "action_needed": "R7-002 で指摘済み"
+      },
+      {
+        "file": "tests/unit/lib/schedule-manager.test.ts",
+        "check": "vi.doMock('fs', ...) のスコープと statSync モックの維持",
+        "result": "vi.doMock() は lazy（動的 import 時に適用）であり、トップレベルの static import では効果がない可能性がある。schedule-manager.ts は static import であるため、vi.mock()（ファイルスコープ）への切り替えが推奨される。",
+        "action_needed": "R7-003 で指摘済み"
+      },
+      {
+        "file": "src/lib/cmate-parser.ts",
+        "check": "readCmateFile() 内の validateCmatePath() と readFileSync() 両方の async 化による try-catch 構造への影響",
+        "result": "現在の try-catch (L314-328) は validateCmatePath() と readFileSync() の両方の例外をキャッチしている。async 化後は await validateCmatePath() と await readFile() の両方が同じ try-catch 内で処理されるため、構造は維持される。問題なし。"
+      },
+      {
+        "file": "tests/unit/lib/schedule-manager-cleanup.test.ts",
+        "check": "readCmateFile モック変更 (mockResolvedValue) の影響範囲",
+        "result": "このファイルの vi.mock('cmate-parser') はファイルスコープで適用されており、全テスト (stopScheduleForWorktree, getScheduleWorktreeIds) で readCmateFile は呼ばれない（globalThis.__scheduleManagerStates を直接操作）。mockResolvedValue(null) への変更はテスト動作に実質的影響なし。正確性のための修正として妥当。"
+      },
+      {
+        "file": "src/lib/schedule-manager.ts",
+        "check": "syncSchedules() async 化で影響を受ける内部関数の確認",
+        "result": "syncSchedules() 内で呼ばれる関数: getAllWorktrees() (sync, DB), getCmateMtime() (sync, fs), readCmateFile() (async化), parseSchedulesSection() (sync), batchUpsertSchedules() (sync, DB), disableStaleSchedules() (sync, DB)。readCmateFile() のみ async 化の影響を受ける。他はそのまま。問題なし。"
+      }
+    ]
+  },
+  "summary": {
+    "must_fix_count": 0,
+    "should_fix_count": 3,
+    "nice_to_have_count": 2,
+    "overall_quality": "good"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cmate-parser.ts",
+      "lines": "L15, L80-98, L311-329",
+      "relevance": "変更対象: import文、validateCmatePath()、readCmateFile()。async 化の主要変更箇所。try-catch 構造 (L314-328) は async 化後も維持される。"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "lines": "L159-176, L478-591, L603-626",
+      "relevance": "getCmateMtime() (L163) の statSync は維持。syncSchedules() (L478) の async 化と readCmateFile() 呼び出し (L516) への await 追加。initScheduleManager() (L617) の fire-and-forget。"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager.test.ts",
+      "lines": "L20, L273-338",
+      "relevance": "vi.mock('db-instance') (L20) のパスパターンが cmate-parser モック追加時の規約参考。mtime cache テスト群 (L273-338) の vi.doMock('fs') (L277-281) は方針(B)で大幅改修。"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager-cleanup.test.ts",
+      "lines": "L78-81",
+      "relevance": "readCmateFile モック: mockReturnValue(null) -> mockResolvedValue(null) の変更は確定済み。テスト動作への実質的影響なし。"
+    },
+    {
+      "file": "tests/unit/lib/cmate-parser.test.ts",
+      "lines": "L358-391",
+      "relevance": "validateCmatePath テスト: .not.toThrow() -> .resolves.toBe(true)、.toThrow() -> .rejects.toThrow() パターン更新は確定済み。"
+    },
+    {
+      "file": "vitest.config.ts",
+      "lines": "L33-38",
+      "relevance": "resolve.alias 設定で '@' -> './src' が定義されている。vi.mock() のパス指定で '@/lib/cmate-parser' が利用可能だが、ファイル内規約との一貫性も考慮すべき。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "影響範囲テーブルに追加済み。cmate-parser.ts と schedule-manager.ts のモジュール説明に async 化を反映。"
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "focus_area": "影響範囲",
+  "review_date": "2026-03-03",
+  "previous_review_addressed": true,
+  "previous_review_verification": {
+    "R3-001_must_fix": {
+      "status": "addressed",
+      "verification": "Issue本文に「依存関係・並行開発リスク」セクションが新設され、session-cleanup.ts の stopAllSchedules() がグローバル操作であること、Issue #407 で worktree 単位の停止・エントリ削除関数に置換予定であること（R5-001反映済みで具体的な関数名は断定していない）、Issue #409 では Issue #407 の解決が前提であることが明記されている。cmateFileCache 全消去の影響拡大も記載済み。"
+    },
+    "R3-002_must_fix": {
+      "status": "addressed",
+      "verification": "実装タスクに「実装着手前に他ブランチの version 21 使用を確認すること」の注意事項が追加されている。db-migrations.test.ts の expect(CURRENT_SCHEMA_VERSION).toBe(20) がフェイルセーフとして機能することも併記されている。現時点で open Issues を確認したところ、Issue #406/#407/#408/#410/#411 いずれもDBマイグレーションを含まないため version 21 の競合リスクは低い。"
+    },
+    "R3-003_should_fix": {
+      "status": "addressed",
+      "verification": "「依存関係・並行開発リスク」セクションに Issue #406 との相互依存が記載され、推奨マージ順序（Issue #409 先行）と理由が明記されている。"
+    },
+    "R3-004_should_fix": {
+      "status": "addressed",
+      "verification": "Issue #407 との ManagerState 並行変更リスクが記載されている。cmateFileCache を自己完結的に実装し、Issue #407 側でキャッシュクリーンアップを含めることを推奨する旨が明記されている。"
+    },
+    "R3-005_should_fix": {
+      "status": "addressed",
+      "verification": "影響範囲テーブルに tests/unit/lib/db-migrations.test.ts が追加され、実装タスクに CURRENT_SCHEMA_VERSION のアサーション値更新タスクが含まれている。"
+    },
+    "R3-006_should_fix": {
+      "status": "addressed",
+      "verification": "テストタスクにキャッシュヒット/ミス/削除時の3テストケースが明記されている。モックDBスキーマへのインデックス追加は不要との判断も記載されている。"
+    },
+    "R3-007_should_fix": {
+      "status": "addressed",
+      "verification": "「提案する解決策」セクションに fs.statSync() の ENOENT エラー処理方針が詳細に記載されている（try-catch、キャッシュエントリ有無による判断分岐、コスト比較）。実装タスクにも反映済み。"
+    },
+    "R3-008_should_fix": {
+      "status": "addressed",
+      "verification": "「備考」セクションに Hot Reload 時の挙動が既存パターンと同一であること、globalThis リセットで cmateFileCache も ManagerState 内フィールドとしてリセットされることが記載されている。"
+    },
+    "R3-009_nice_to_have": {
+      "status": "skipped_justified",
+      "verification": "CLAUDE.md の更新は実装完了後に行うためスキップ。正当な判断。"
+    },
+    "R3-010_nice_to_have": {
+      "status": "skipped_justified",
+      "verification": "API受益ファイルの記載は必須ではないためスキップ。正当な判断。"
+    }
+  },
+  "stage5_stage6_changes_verification": {
+    "R5-001_applied": {
+      "status": "no_new_impact",
+      "verification": "stopScheduleForWorktree() の具体的関数名を「worktree 単位の停止・エントリ削除関数」に抽象化する変更。Issue #409 の影響範囲を変えるものではなく、Issue #407 との齟齬を解消する表現修正のみ。新たな影響範囲は生じない。"
+    },
+    "R5-002_applied": {
+      "status": "no_new_impact",
+      "verification": "バルクSELECT実装手順の詳細化（SELECT id, name FROM scheduled_executions WHERE worktree_id = ? を1回実行 -> Map<name, id> 構築 -> Mapルックアップ）。これは既にIssue本文で提案されていた db.transaction() バッチ化の具体的な実装方法を明示したもの。新たな影響ファイルは増えない。実装タスクにも反映済みで、schedule-manager.ts 内の upsertSchedule() 関数の変更に集約される。ただし、worktree単位のバルクSELECTクエリ（SELECT id, name FROM scheduled_executions WHERE worktree_id = ?）が新たに追加されることになるため、(worktree_id, name) のUNIQUE制約による暗黙インデックスがこのクエリにも使われることを確認する価値がある。実際、scheduled_executions テーブルの UNIQUE(worktree_id, name) 制約（db-migrations.ts:829）により worktree_id をプレフィックスとした暗黙インデックスが存在するため、SELECT ... WHERE worktree_id = ? は効率的に実行される。追加インデックスは不要。"
+    },
+    "R5-003_skipped": {
+      "status": "no_new_impact",
+      "verification": "既存 idx_scheduled_executions_enabled（enabled単独）のDROP/維持方針は実装時判断とされた。影響範囲に変化なし。"
+    },
+    "R5-004_skipped": {
+      "status": "no_new_impact",
+      "verification": "概要の表現整理は軽微な改善。影響範囲に変化なし。"
+    }
+  },
+  "new_impact_scope_analysis": {
+    "additional_queries_from_bulk_select": {
+      "finding": "R5-002の反映により、syncSchedules()内でworktree単位のバルクSELECTクエリ（SELECT id, name FROM scheduled_executions WHERE worktree_id = ?）が新たに追加される。これはupsertSchedule()の個別SELECTを置き換えるものだが、クエリのWHERE句が変わるため使用されるインデックスも変わる。現在のupsertSchedule()はWHERE worktree_id = ? AND name = ?でUNIQUEインデックスを使用、新しいバルクSELECTはWHERE worktree_id = ?でUNIQUEインデックスの左プレフィックスを使用。いずれも既存インデックスでカバーされるため問題なし。",
+      "impact": "none",
+      "action_required": false
+    },
+    "transaction_scope_and_error_handling": {
+      "finding": "db.transaction()でupsertScheduleループをラップすることで、1エントリのINSERT/UPDATEが失敗した場合にworktree全体のスケジュール更新がロールバックされる。現在の実装では個別にupsertSchedule()が呼ばれるためエントリ単位で独立している。トランザクション化により、部分成功が許容されなくなる。ただし、schedule-manager.ts内のupsertSchedule()は定数値のINSERT/UPDATEであり失敗する可能性は極めて低い（DBコネクションエラーなどの場合のみ）。また、そのようなエラーは既にtry-catchで捕捉されている（schedule-manager.ts:425-427）。Issueの影響範囲テーブルにこの動作変更についての記載はないが、実装上の軽微な点であり影響は最小限。",
+      "impact": "minimal",
+      "action_required": false
+    },
+    "cleanupMultipleWorktrees_cascade": {
+      "finding": "cleanupMultipleWorktrees()はrepositories API(src/app/api/repositories/route.ts:92)から呼ばれる。内部的にcleanupWorktreeSessions()を各worktreeに対して呼び出し、そこでstopAllSchedules()が実行される。複数worktreeの削除時に、最初のworktreeの処理でstopAllSchedules()が呼ばれてcmateFileCacheが全消去される。2番目以降のworktreeの処理でも同じstopAllSchedules()が呼ばれるが、既にclearされているため実質的にno-op。この動作はIssue #407で修正予定であり、Issue #409の依存関係セクションに記載済み。新たな影響範囲の発見ではない。",
+      "impact": "known_issue_documented",
+      "action_required": false
+    },
+    "server_graceful_shutdown": {
+      "finding": "server.ts:281でstopAllSchedules()がgraceful shutdown時に呼ばれる。cmateFileCacheの追加はstopAllSchedules()内のmanager.schedules.clear()で暗黙的にScheduleStateが解放されるが、cmateFileCache自体はManagerStateのフィールドであり、schedules.clear()では解放されない。ただしstopAllSchedules()の最後でmanager.initialized = falseが設定され、プロセスがシャットダウンされるため、cmateFileCacheがメモリに残ることは問題にならない。ManagerState自体は明示的にリセットされないが、プロセス終了で解放される。",
+      "impact": "none",
+      "action_required": false
+    },
+    "scheduleId_route_index_benefit": {
+      "finding": "src/app/api/worktrees/[id]/schedules/[scheduleId]/route.tsのクエリ（SELECT ... WHERE id = ? AND worktree_id = ?）はPRIMARY KEY(id)で検索されるため、(worktree_id, enabled)複合インデックスの恩恵は受けない。コード変更も不要。Issue本文の影響範囲テーブルに含まれていないのは正しい。",
+      "impact": "none",
+      "action_required": false
+    }
+  },
+  "findings": [
+    {
+      "id": "R7-001",
+      "severity": "nice-to-have",
+      "category": "影響範囲",
+      "location": "提案する解決策 > 2. スケジュール同期の差分ベース化 - db.transaction() のエラーハンドリング動作変更",
+      "issue": "db.transaction()でupsertScheduleループをラップすると、個別エントリ単位の独立したDB操作からworktree単位のアトミック操作に動作が変わる。現状では1エントリのupsertが失敗しても他のエントリは正常にupsertされるが、トランザクション化後は1エントリの失敗でworktree全体のスケジュール更新がロールバックされる。実際にはupsertSchedule()が失敗するケースは極めて稀（DBコネクションエラー程度）だが、動作の変更として認識しておくべき。",
+      "suggestion": "Issue本文の「提案する解決策」セクションまたは備考に、トランザクション化によりworktree単位でアトミックな更新になることを1文追記するとよい。例：「db.transaction()によりworktree単位でアトミックに更新され、途中エラー時はworktree全体がロールバックされる。これは既存のtry-catch（syncSchedules内）で捕捉されるため追加のエラーハンドリングは不要。」ただし、実装上の軽微な点であり、現在の記述でも実装に支障はない。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 1,
+    "total": 1
+  },
+  "code_references": [
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "relevance": "主要変更対象。syncSchedules() (L363-442) のupsertScheduleループをdb.transaction()でラップ予定。ManagerState (L52-59) へのcmateFileCacheフィールド追加予定。"
+    },
+    {
+      "file": "src/lib/db-migrations.ts",
+      "relevance": "CURRENT_SCHEMA_VERSION = 20 (L14)。version 21 マイグレーション追加対象。UNIQUE(worktree_id, name) 制約 (L829) がバルクSELECTに対して暗黙インデックスとして機能。"
+    },
+    {
+      "file": "src/lib/session-cleanup.ts",
+      "relevance": "L111の stopAllSchedules() 呼び出しはIssue #407で修正予定。Issue #409の依存関係セクションに記載済み。"
+    },
+    {
+      "file": "tests/unit/lib/db-migrations.test.ts",
+      "relevance": "L37の CURRENT_SCHEMA_VERSION アサーション値の更新が必要。影響範囲テーブルに記載済み。"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager.test.ts",
+      "relevance": "mtimeキャッシュのテスト追加が必要。L77のglobalThisリセットでcmateFileCacheも自動リセットされる。影響範囲テーブルに記載済み。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/schedules/route.ts",
+      "relevance": "L42のWHERE worktree_id = ? AND enabled = 1クエリが(worktree_id, enabled)複合インデックスの受益対象。コード変更不要。"
+    },
+    {
+      "file": "src/app/api/worktrees/[id]/schedules/[scheduleId]/route.ts",
+      "relevance": "PRIMARY KEY(id)で検索されるクエリのため、新規インデックスの影響なし。コード変更不要。"
+    },
+    {
+      "file": "server.ts",
+      "relevance": "L259のinitScheduleManager()、L281のstopAllSchedules()のインターフェース変更なし。cmateFileCacheはプロセス終了時に自動解放。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "L171のsession-cleanup.ts説明にstopScheduleForWorktree()が記載されているが実装未存在（既存の不整合、Issue #409スコープ外）。schedule-manager.tsのモジュール説明は実装完了後に更新予定。"
+    }
+  ],
+  "overall_assessment": "Stage 3 の影響範囲レビュー（1回目）で指摘した Must Fix 2件、Should Fix 6件は全て適切に対処されている。Nice to Have 2件（R3-009, R3-010）のスキップ判断も正当。Stage 5-6 で反映された修正（R5-001: stopScheduleForWorktree()表現変更、R5-002: バルクSELECT手順詳細化）はいずれも既存の影響範囲テーブル内に収まっており、新たな影響ファイルは発生しない。バルクSELECTクエリ（WHERE worktree_id = ?）はUNIQUE(worktree_id, name)制約の暗黙インデックスでカバーされるため追加インデックスは不要。db.transaction()化によるアトミック性の変更は動作上の軽微な差異だが、実用上の問題はない。Issue本文の影響範囲テーブルは正確であり、見落とされた影響ファイルは確認されなかった。Issue #409 は実装着手可能な品質に達している。"
+}

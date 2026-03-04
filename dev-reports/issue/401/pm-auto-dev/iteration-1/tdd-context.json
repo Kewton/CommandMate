@@ -1,0 +1,43 @@
+{
+  "issue_number": 401,
+  "acceptance_criteria": [
+    "stop.shでlsof -ti:$PORTが複数PIDを返す場合でも全プロセスが正しく停止されること",
+    "build-and-start.sh --daemonでPIDファイルが存在しないが古いプロセスが残留している場合、正しく検知・停止して新しいサーバーを起動できること",
+    "PIDファイルに不正な内容（複数行、非数値）が含まれる場合でもエラーにならずポートベースで停止できること",
+    "stop-server.shがCM_PORT環境変数を参照して正しいポートのプロセスを停止できること",
+    "正常なPIDファイルがある場合の既存停止・起動・再起動サイクルに影響がないこと",
+    "restart.sh経由での停止・起動が正常に動作すること"
+  ],
+  "implementation_tasks": [
+    "scripts/stop.sh: PORT変数解決後にbash組み込みパターンマッチングでポート番号バリデーション追加（[[ \"$PORT\" =~ ^[0-9]+$ ]] && 範囲1-65535チェック）。失敗時は固定文字列エラー + exit 1",
+    "scripts/stop.sh: 変数名をPIDからPIDSに変更し、lsof出力をgrep -E '^[0-9]+$' | sort -uでバリデーション・重複除去するパイプラインに変更",
+    "scripts/stop.sh: kill \"$PID\" を echo \"$PIDS\" | xargs kill 2>/dev/null に変更してSIGTERM送信。SIGTERM後sleep 2 + REMAINING取得（|| true付き）+ SIGKILL強制停止のフォールバック追加",
+    "scripts/stop-server.sh: PORT=3000をPORT=${CM_PORT:-${MCBD_PORT:-3000}}に変更",
+    "scripts/stop-server.sh: PORT変数解決後にポート番号バリデーション追加",
+    "scripts/stop-server.sh Step1: lsof出力パイプラインにgrep -E '^[0-9]+$' | sort -u || trueを追加。kill -9をSIGTERM + sleep 2 + SIGKILL段階化に変更",
+    "scripts/stop-server.sh Step2: PIDファイルバリデーション追加（head -1 | grep -E '^[0-9]+$'）。PIDファイルベース停止をSIGTERM（kill -- -$PID、プロセスグループ）+ sleep 2 + SIGKILL段階化。SIGKILL後残留時の固定文字列警告出力",
+    "scripts/stop-server.sh Final check: REMAINING取得パイプラインにgrep -E '^[0-9]+$' | sort -u || trueを追加",
+    "scripts/build-and-start.sh: PORT=${CM_PORT:-${MCBD_PORT:-3000}}をスクリプト冒頭に追加",
+    "scripts/build-and-start.sh: ポート番号バリデーション追加",
+    "scripts/build-and-start.sh L70: OLD_PID=$(cat \"$PID_FILE\") → OLD_PID=$(cat \"$PID_FILE\" 2>/dev/null | head -1 | grep -E '^[0-9]+$') に変更。PIDが空の場合はrm -f \"$PID_FILE\"で削除して続行",
+    "scripts/build-and-start.sh: PIDファイルチェック後にポートベースalready running判定追加（PORT_PIDSが空でない場合はエラーメッセージ + exit 1）",
+    "scripts/build-and-start.sh: PIDファイル書き込み後にchmod 600 \"$PID_FILE\"を追加"
+  ],
+  "target_files": [
+    "scripts/stop.sh",
+    "scripts/stop-server.sh",
+    "scripts/build-and-start.sh"
+  ],
+  "design_doc_path": "dev-reports/design/issue-401-stop-script-fix-design-policy.md",
+  "work_plan_path": "dev-reports/issue/401/work-plan.md",
+  "target_coverage": 0,
+  "notes": [
+    "このIssueはシェルスクリプトのみの変更。TypeScriptコードは変更しない",
+    "既存のPM2パス（stop.sh L11-17）は変更しない",
+    "set -eが有効なbuild-and-start.shではlsofパイプラインに|| trueを付加",
+    "ポートバリデーションはbash組み込み[[ =~ ]]を使用し、echo | grepは使用しない（S4-001）",
+    "バリデーション失敗時のエラーメッセージには未検証の変数値を含めない（S4-005）",
+    "xargsのGNU/BSD差異: xargs呼び出し前の空文字チェック（if [ -n \"$PIDS\" ]）を維持すること",
+    "lsofの重複PID対策としてsort -uを使用"
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "issue_number": 404,
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "focus_area": "セキュリティ",
+  "review_summary": "Issue #404 設計方針書のセキュリティレビューを実施した。全体として設計はプロジェクトのセキュリティ規約（execFile使用、シェルインジェクション防止）に準拠しており、重大なセキュリティ脆弱性は検出されなかった。ただし、プロセスkill操作における PID 再利用リスクの軽減策、ps 出力パーサーの防御的実装、deleteAutoYesState() の入力バリデーション、OrphanCleanupResult のログ出力における情報制御について改善を推奨する。must_fix 指摘は 1 件（deleteAutoYesState の worktreeId バリデーション欠如）、should_fix は 3 件、nice_to_have は 2 件。",
+  "findings": [
+    {
+      "id": "R4-001",
+      "severity": "must_fix",
+      "category": "globalThis",
+      "title": "deleteAutoYesState() の worktreeId 入力バリデーション欠如",
+      "description": "設計方針書 Section 3.2 の deleteAutoYesState(worktreeId) は Map.delete() を直接呼び出すだけで、worktreeId の入力バリデーションを行っていない。現行の auto-yes-manager.ts では startAutoYesPolling() のゲートウェイで isValidWorktreeId() バリデーションを実施しているが、deleteAutoYesState() は session-cleanup.ts の cleanupWorktreeSessions() から呼び出される設計であり、cleanupWorktreeSessions() 自体にも worktreeId バリデーションが存在しない。repositories/route.ts の DELETE ハンドラからの呼び出しチェーンでは worktreeId は DB 由来（getWorktreeIdsByRepository）であり現時点では安全だが、将来の呼び出し元追加時に防御が効かない。defense-in-depth として入力バリデーションを追加すべきである。",
+      "location": "設計方針書 Section 3.2 deleteAutoYesState() / Section 3.4 cleanupWorktreeSessions()",
+      "suggested_fix": "deleteAutoYesState() の冒頭で isValidWorktreeId(worktreeId) チェックを追加し、不正な worktreeId の場合は false を返却してログ出力する。代替案として cleanupWorktreeSessions() の冒頭に worktreeId バリデーションガードを追加し、全ての下流関数を保護する方式も有効。"
+    },
+    {
+      "id": "R4-002",
+      "severity": "should_fix",
+      "category": "プロセスkill",
+      "title": "PID 再利用によるプロセス誤 kill リスクの軽減策が未記載",
+      "description": "設計方針書 Section 3.1 の cleanupOrphanedMcpProcesses() は ppid=1 とプロセス名パターンの複合チェックでプロセスを特定するが、PID 再利用（PID wrap-around）への対策が設計書に明記されていない。OS は終了したプロセスの PID を再利用するため、ps コマンドの出力取得から process.kill(pid, 'SIGKILL') の実行までの間に、該当 PID が別プロセスに再割り当てされる可能性がある（TOCTOU）。ppid=1 + プロセス名パターンの複合チェックによりリスクは低いが、この TOCTOU ウィンドウの存在を設計書に明記し、SIGTERM を先に送信して応答を待つ段階的シグナル送信の検討を推奨する。",
+      "location": "設計方針書 Section 3.1 孤立MCPプロセス検出ロジック / Section 4 セキュリティ設計",
+      "suggested_fix": "設計方針書の Section 4 セキュリティ設計表に「PID 再利用（TOCTOU）」リスク行を追加し、対策として「ppid=1 + プロセス名パターンの複合チェックによる誤 kill 確率の最小化」を明記する。実装では process.kill(pid, 'SIGTERM') を先に送信し、短いタイムアウト後に残留プロセスにのみ SIGKILL を送信する 2 段階方式を検討する。"
+    },
+    {
+      "id": "R4-003",
+      "severity": "should_fix",
+      "category": "シェルインジェクション",
+      "title": "ps コマンド出力パーサーの防御的実装ガイダンス不足",
+      "description": "設計方針書は execFile('ps', [...]) の使用を明記しておりシェルインジェクション防止は適切だが、ps コマンドの出力パース時の防御的実装ガイダンスが不足している。ps 出力の各行から PID を parseInt() で抽出する際に、不正なフォーマットの行を安全にスキップする処理、PID が有効な正の整数であることの検証（Number.isInteger + 範囲チェック）、プロセス名のパターンマッチが部分文字列マッチではなく適切な境界マッチであることの明記が必要。",
+      "location": "設計方針書 Section 3.1 孤立MCPプロセス検出ロジック",
+      "suggested_fix": "Section 3.1 の孤立MCPプロセス検出ロジックに以下の実装ガイダンスを追加する: (1) PID の parseInt 後に Number.isInteger(pid) && pid > 0 のバリデーションを行い、不正値はスキップ、(2) ps 出力の各行パース時に try-catch で個別行のパースエラーを吸収、(3) MCP_PROCESS_PATTERNS のマッチ方式を明記（line.includes() vs 正規表現の境界マッチ）。"
+    },
+    {
+      "id": "R4-004",
+      "severity": "should_fix",
+      "category": "DoS",
+      "title": "ps コマンド出力サイズの上限未設定",
+      "description": "cleanupOrphanedMcpProcesses() は execFile('ps', [...]) を使用するが、出力バッファサイズの上限（maxBuffer オプション）が設計方針書に明記されていない。通常環境では問題にならないが、異常な数のプロセスが存在するシステムでは ps 出力が肥大化し、メモリ圧迫のリスクがある。既存の tmux.ts capturePane() では maxBuffer: 10MB を明示的に設定する前例がある。",
+      "location": "設計方針書 Section 3.1 cleanupOrphanedMcpProcesses()",
+      "suggested_fix": "execFile('ps', [...]) の呼び出しオプションに maxBuffer を明示的に設定する（例: maxBuffer: 5 * 1024 * 1024）。設計方針書の Section 3.1 または Section 4 にこの制限を追記する。"
+    },
+    {
+      "id": "R4-005",
+      "severity": "nice_to_have",
+      "category": "情報漏洩",
+      "title": "OrphanCleanupResult のログ出力における機密情報制御の明記",
+      "description": "OrphanCleanupResult の errors フィールドにはプロセス情報やエラーメッセージが格納される。console.log/console.warn でこの情報を出力する際に、プロセスのコマンドライン引数（ps の args カラム）に含まれる可能性のある機密情報（API キー、トークン等）がログに記録されるリスクがある。設計方針書にはログ出力のサニタイズ方針が明記されていない。",
+      "location": "設計方針書 Section 3.1 型定義 OrphanCleanupResult",
+      "suggested_fix": "OrphanCleanupResult の errors 配列に格納するエラーメッセージからプロセスのコマンドライン引数を除外し、PID とプロセス名のみを記録する方針を設計書に追記する。例: 'Failed to kill PID 12345 (codex mcp-server)' のような固定文字列フォーマットを使用する。"
+    },
+    {
+      "id": "R4-006",
+      "severity": "nice_to_have",
+      "category": "globalThis",
+      "title": "globalThis.__resourceCleanupTimerId の型安全性強化",
+      "description": "設計方針書では globalThis.__resourceCleanupTimerId を ReturnType<typeof setInterval> | undefined として宣言している。globalThis はグローバルスコープのため、他のモジュールやサードパーティライブラリから意図せず上書きされるリスクが理論的には存在する。ただし、このプロジェクトでは他の globalThis 変数（__autoYesStates, __autoYesPollerStates, __scheduleManagerStates, __scheduleActiveProcesses）で同様のパターンが確立されており、実運用上のリスクは極めて低い。命名規則（__resourceCleanup プレフィックス）による衝突回避は十分である。",
+      "location": "設計方針書 Section 3.1 globalThisタイマー管理",
+      "suggested_fix": "現行の設計で十分。将来的に globalThis 変数が増加した場合は、単一の globalThis.__commandmateState オブジェクトにネームスペース化することを検討する。"
+    }
+  ],
+  "must_fix_count": 1,
+  "should_fix_count": 3,
+  "nice_to_have_count": 2,
+  "overall_assessment": "設計方針書はセキュリティ面で堅実な設計判断がなされている。execFile() 使用によるシェルインジェクション防止（Issue #393 準拠）、ppid=1 + プロセス名パターンの複合チェックによる誤プロセス kill 防止、コンテナ環境検出による偽陽性回避、R3-003 による二重タイマー防止、R3-004 による同期区間でのレース条件回避など、主要なセキュリティリスクに対する対策が設計段階で組み込まれている。DB 操作は全て better-sqlite3 のパラメータバインディング（prepared statements）を使用しており、SQL インジェクションリスクは存在しない。must_fix の 1 件（deleteAutoYesState の入力バリデーション）は defense-in-depth の観点から対応を推奨するが、現時点の呼び出しチェーンでは DB 由来の worktreeId のみが渡されるため、即時の脆弱性ではない。総合的に、セキュリティ観点での設計品質は高い。"
+}

@@ -1,0 +1,20 @@
+{
+  "issue_number": 411,
+  "feature_summary": "Reactコンポーネントのmemo化・useCallback最適化で不要な再レンダー防止",
+  "acceptance_criteria": [
+    "React DevTools Profilerで以下シナリオの再レンダーが削減されていること（手動確認）: (1) ターミナルポーリング更新時にFileViewer（isOpen=false）が再レンダーされないこと、(2) MessageInputのprops（worktreeId/cliToolId/isSessionRunning）が変化しない場合にMessageInput自体が再レンダーされないこと",
+    "各コンポーネントの既存動作に影響がないこと",
+    "既存テストがパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: 8コンポーネント全てにReact.memoが適用されているか（named export pattern確認）",
+    "シナリオ2: MessageInputの9ハンドラにuseCallbackが適用されているか（依存配列確認）",
+    "シナリオ3: WorktreeDetailRefactoredのleftPane/rightPaneがuseMemoでラップされているか",
+    "シナリオ4: leftPaneMemoの依存配列でfileSearchが個別プロパティに展開されているか（オブジェクト参照安定性）",
+    "シナリオ5: 全既存ユニットテストがパスすること（npm run test:unit）",
+    "シナリオ6: TypeScriptコンパイルエラーがないこと（npx tsc --noEmit）",
+    "シナリオ7: ESLintエラーがないこと（npm run lint）",
+    "シナリオ8: named export形式が維持されていること（vi.mockとの互換性）"
+  ],
+  "implementation_result": "dev-reports/issue/411/pm-auto-dev/iteration-1/tdd-result.json"
+}

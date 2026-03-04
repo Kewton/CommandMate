@@ -1,0 +1,63 @@
+{
+  "issue_number": 410,
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "apply_date": "2026-03-03",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "MF-001",
+        "status": "applied",
+        "change_summary": "F1の記載を修正 - xterm.jsは/worktrees/[id]/terminalページ固有であり、メインの/worktrees/[id]ページのバンドルには含まれないことを明確化。F1とF2が異なるルートの問題であることを明記"
+      },
+      {
+        "id": "MF-002",
+        "status": "applied",
+        "change_summary": "受入条件をルートごとに分離 - /worktrees/[id]はFirst Load JS削減（npm run build出力で確認）、/worktrees/[id]/terminalはSSRエラー解消。根拠不明な200KB以下の数値目標を削除"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SF-001",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルにMessageList.tsxとfiles/[...path]/page.tsxをスコープ外として明記。影響ページ列を追加しルートごとの影響を明確化"
+      },
+      {
+        "id": "SF-002",
+        "status": "applied",
+        "change_summary": "実装タスクにWorktreeDetailRefactored.tsxでのMarkdownEditorのdynamic import化（next/dynamic + ssr: false）を追加。解決策セクションもMarkdownEditorコンポーネント全体の動的import方式に更新"
+      },
+      {
+        "id": "SF-003",
+        "status": "applied",
+        "change_summary": "F1の課題をSSR互換性確保として再定義。xterm.jsのブラウザ専用API使用によるSSRエラーリスクを明記。解決策の見出しも「SSR互換性確保」に変更"
+      },
+      {
+        "id": "SF-004",
+        "status": "applied",
+        "change_summary": "実装タスクに既存テスト（MarkdownEditor.test.tsx等）の更新・動作確認と、ビルド後のバンドルサイズ確認手順（npm run buildのRoute一覧）を追加。受入条件に全ユニットテストパスを追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "NTH-001",
+        "status": "skipped",
+        "reason": "Nice to Have項目のため今回スキップ。バンドルサイズの測定方法は受入条件にnpm run build出力での確認を記載済み"
+      },
+      {
+        "id": "NTH-002",
+        "status": "skipped",
+        "reason": "Nice to Have項目のため今回スキップ。ただしSF-002対応でMarkdownEditorコンポーネント全体のdynamic import化を採用したことで、CSS遅延ロード方法の具体化は実質的に解決済み"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 6,
+    "skipped": 2
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/410"
+  }
+}

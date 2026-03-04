@@ -1,0 +1,48 @@
+{
+  "issue_number": 406,
+  "iteration": 2,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "apply_date": "2026-03-04",
+  "applied_findings": {
+    "must_fix": [],
+    "should_fix": [
+      {
+        "id": "R7-001",
+        "status": "applied",
+        "change_summary": "実装タスクの schedule-manager.test.ts 関連項目で vi.mock パス指定を `'../../../src/lib/cmate-parser'` に明示（ファイル内の既存 vi.mock パス規約に準拠）"
+      },
+      {
+        "id": "R7-002",
+        "status": "applied",
+        "change_summary": "実装タスクにテスト分離戦略の補足を追加: デフォルトは mockResolvedValue(null)、mtime cache テストの 'should skip DB queries when mtime is unchanged' では mockResolvedValueOnce() で CmateConfig を返すよう上書き"
+      },
+      {
+        "id": "R7-003",
+        "status": "applied",
+        "change_summary": "実装タスクに statSync モック維持方法の注記を追加: vi.doMock() は static import では効果がないため vi.mock('fs', ...) ファイルスコープ方式を推奨"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "R7-004",
+        "status": "applied",
+        "change_summary": "initScheduleManager() 内の fire-and-forget 実装タスクに .catch() なし設計の根拠を注記追加（syncSchedules() 内部の try-catch (L486, L574) で全エラーが捕捉されるため）"
+      },
+      {
+        "id": "R7-005",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルの schedule-manager.test.ts エントリを具体化: vi.mock パス追加、readFileSync/realpathSync 削除と statSync 維持、mockResolvedValueOnce() による戻り値上書きを明記"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 5,
+    "applied": 5,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/406"
+  }
+}

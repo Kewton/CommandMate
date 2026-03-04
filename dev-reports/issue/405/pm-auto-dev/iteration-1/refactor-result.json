@@ -1,0 +1,33 @@
+{
+  "status": "success",
+  "quality_metrics": {
+    "before_coverage": 80.0,
+    "after_coverage": 80.0
+  },
+  "refactorings_applied": [
+    "DRY: Extracted ~55 lines of duplicated session status detection logic from worktrees/route.ts and worktrees/[id]/route.ts into src/lib/worktree-status-helper.ts (detectWorktreeSessionStatus())",
+    "Simplified redundant truthiness check: output && output.length > 0 to output.length > 0 in tmux-capture-cache.ts and cli-session.ts (output is always string, never null/undefined)",
+    "Removed unused imports from both route files (CLIToolManager, CLI_TOOL_IDS, captureSessionOutput, detectSessionStatus, OPENCODE_PANE_HEIGHT, isSessionHealthy)"
+  ],
+  "files_changed": [
+    "src/lib/worktree-status-helper.ts",
+    "src/app/api/worktrees/route.ts",
+    "src/app/api/worktrees/[id]/route.ts",
+    "src/lib/tmux-capture-cache.ts",
+    "src/lib/cli-session.ts"
+  ],
+  "static_analysis": {
+    "eslint_errors_before": 0,
+    "eslint_errors_after": 0,
+    "typescript_errors_before": 0,
+    "typescript_errors_after": 0
+  },
+  "review_notes": {
+    "tmux_capture_cache_quality": "Code quality is high. JSDoc and security annotations (SEC4-001, SEC4-002, SEC4-006, SEC4-007) are well-documented. Singleflight pattern in getOrFetchCapture() is correctly implemented with proper inflight cleanup in finally block.",
+    "captureSessionOutputFresh_error_handling": "DA3-005 TOCTOU safety is properly implemented: invalidateCache() is called on error to prevent stale cache from masking session failure.",
+    "cache_invalidation_consistency": "Cache invalidation hooks are consistently placed at all mutation points: sendPromptAnswer (prompt-answer-sender.ts line 111), detectAndRespondToPrompt (auto-yes-manager.ts line 620 in finally block), sendMessageToClaude (claude-session.ts line 732), stopClaudeSession (claude-session.ts line 792), and captureSessionOutputFresh error path (cli-session.ts line 128).",
+    "security_annotations": "SEC4-001 (trust boundary), SEC4-002 (lazy/full eviction), SEC4-006 (debug logging) are appropriately documented in tmux-capture-cache.ts module header and function JSDoc."
+  },
+  "commits": [],
+  "message": "Refactoring completed. Primary improvement: extracted duplicated session status detection logic (~55 lines x 2) into shared worktree-status-helper.ts. All 4471 unit tests pass. TypeScript and ESLint: 0 errors."
+}

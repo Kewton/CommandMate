@@ -1,0 +1,147 @@
+{
+  "stage": 5,
+  "focus_area": "通常",
+  "iteration": 2,
+  "review_date": "2026-03-03",
+  "issue_number": 401,
+  "previous_findings_addressed": true,
+  "summary": "Stage 1-4の全指摘事項（must_fix 6件、should_fix 11件のうち適用対象19件）が正しく反映されており、Issue本文はコード実態と整合している。行番号参照は全て正確であり、stop.sh/stop-server.sh/build-and-start.shの問題記述は実際のコードと一致する。ただし、2回目レビューで新たに3件の指摘事項を発見した。(1) 実装タスクにlsof PIDバリデーションとsort -u重複除去が別々のタスクとして記載されているが、実際のパイプラインでは統合すべきであり、タスクの粒度が不整合。(2) stop.shの段階的停止（SIGTERM→SIGKILL）が実装タスクに含まれておらず、stop-server.shのみの検討事項となっているが、一貫性の観点から両方に適用すべきか判断が不明確。(3) build-and-start.shのフォアグラウンドモードでのポート競合検知が未考慮。全体としてIssueの品質は大幅に向上しており、実装可能な状態に達している。",
+  "findings": [
+    {
+      "id": "F2-001",
+      "severity": "should_fix",
+      "category": "明確性",
+      "title": "lsof PIDバリデーションと重複除去の実装タスクが分離されているが、実際のパイプラインでは統合が必要",
+      "description": "実装タスクに「lsof出力のPIDバリデーション追加: lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$'」と「lsof出力の重複PID除去: lsof -ti:$PORT 2>/dev/null | sort -u」が別々のチェックボックスとして記載されている。しかし実際の実装では `lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u` のように1つのパイプラインに統合される。タスクが分かれていると、一方のみ適用して他方を忘れるリスクがある。また、3ファイル共通で適用という記述だが、build-and-start.shのlsof呼び出しは新規追加（ポートベースalready running判定）のため、既存コードの修正とは性質が異なる。",
+      "suggestion": "2つのタスクを統合して「lsof出力のパイプライン強化: `lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u` で数値バリデーションと重複除去を統合（stop.sh, stop-server.sh共通。build-and-start.shは新規追加のポートベース判定に適用）」のように1つのタスクにまとめることを推奨。"
+    },
+    {
+      "id": "F2-002",
+      "severity": "should_fix",
+      "category": "完全性",
+      "title": "stop.shの段階的停止（SIGTERM→SIGKILL）が実装タスクに含まれていない",
+      "description": "Issue本文の「問題5: stop-server.shのSIGKILL即時使用」セクションではstop-server.shの段階的停止を問題として挙げており、実装タスクにも「stop-server.sh: SIGTERM→待機→SIGKILL段階的停止方式の採用を検討」が含まれている。しかし、stop.shの現在の `kill \"$PID\"` はデフォルトでSIGTERMを送信しているため段階的停止の問題はない一方、修正後の `xargs kill` もデフォルトSIGTERMであり、停止失敗時のSIGKILLフォールバックは含まれていない。stop.shの実装タスクに「停止後のプロセス確認（kill -0による生存チェック）を追加」はあるが、生存していた場合にSIGKILLで強制停止するかどうかが不明確。stop-server.shの残留チェック（L42-47）のような二段構えをstop.shにも適用するか否かを明確にすべき。",
+      "suggestion": "stop.shの実装タスク「停止後のプロセス確認（kill -0による生存チェック）を追加」の後に、生存確認後のアクション（「残留プロセスがある場合はSIGKILLで強制停止」等）を明記すること。これにより、stop-server.shの3段構え（ポートベースkill→PIDファイルベースkill→残留チェック）と同等の信頼性がstop.shにも実現される。"
+    },
+    {
+      "id": "F2-003",
+      "severity": "nice_to_have",
+      "category": "完全性",
+      "title": "build-and-start.shフォアグラウンドモード（引数なし）でのポート競合検知が未考慮",
+      "description": "Issue #401の実装タスクではbuild-and-start.shの--daemonモード（L65-103）のalready running判定改善に焦点を当てているが、フォアグラウンドモード（L104-112）にはポート競合チェックが存在しない。フォアグラウンドモードでは `npm start` がポート競合時にエラーを出力するため実害は少ないが、ユーザー体験の一貫性の観点からは、フォアグラウンドモードでも起動前にポート使用チェックを行い、わかりやすいエラーメッセージを表示することが望ましい。ただし、本Issueの主題は「古いプロセスの残留」問題であり、フォアグラウンドモードではプロセスの管理がユーザーに委ねられる（Ctrl+Cで停止）ため、スコープ外としても妥当。",
+      "suggestion": "本Issueのスコープでは対応不要だが、将来的な改善としてフォアグラウンドモードにもポート競合チェックを追加する旨のコメントを実装時にコードに残すか、別Issueとして起票することを検討。"
+    }
+  ],
+  "previous_findings_verification": {
+    "stage1_must_fix": {
+      "MF-1": "反映済み: stop.shがPIDファイルベースという誤記述は完全に修正され、ポートベース停止の正確な記述に置き換えられている",
+      "MF-2": "反映済み: 「ポートベース停止をフォールバックとして追加」という的外れな提案は削除され、複数PID対応・xargs方式への変更が正確に記載されている",
+      "MF-3": "反映済み: stop-server.shの存在・役割・機能差分が「停止スクリプトの構成」テーブルで明確に記載されている",
+      "MF-4": "反映済み: 実装タスクがファイル名・行番号レベルで正確に書き直されている"
+    },
+    "stage1_should_fix": {
+      "SF-1": "反映済み: 複数PID対応不備が「問題1」として明確に記載されている",
+      "SF-2": "反映済み: SIGKILL即時使用の懸念が「問題5」として記載されている",
+      "SF-3": "反映済み: 受入条件に具体的な検証手順が追加されている（6項目）",
+      "SF-4": "反映済み: stop-server.shのポートハードコード問題が「問題4」として記載されている",
+      "SF-5": "反映済み: CLI停止メカニズムとの関係が「参考」セクションで詳細に記載されている"
+    },
+    "stage1_nice_to_have": {
+      "NTH-1": "反映済み: restart.shの影響が受入条件と影響範囲テーブルに追記されている",
+      "NTH-2": "スキップ（妥当）: メモリ消費の再現手順はIssue報告者が追記すべき情報",
+      "NTH-3": "スキップ（妥当）: lsof可用性は現行スクリプト全体の前提であり本Issueスコープ外"
+    },
+    "stage3_must_fix": {
+      "IF-001": "反映済み: PIDファイルパスの分断が「参考」セクションに明記されている",
+      "IF-002": "反映済み: rebuild SKILLが影響範囲テーブルに追加されている"
+    },
+    "stage3_should_fix": {
+      "IF-003": "反映済み: xargsのGNU/BSD差異が「互換性に関する注意事項」サブセクションに記載されている",
+      "IF-004": "反映済み: build-and-start.shのCM_PORT対応が実装タスクに追加されている",
+      "IF-005": "反映済み: worktree並列環境での制約が「参考」セクションに追記されている",
+      "IF-006": "反映済み: lsof出力のPIDバリデーションが実装タスクに追加されている",
+      "IF-007": "反映済み: lsof出力の重複PID除去が実装タスクに追加されている",
+      "IF-008": "反映済み: status.shが影響範囲テーブルに追加されている"
+    },
+    "stage3_nice_to_have": {
+      "IF-009": "スキップ（妥当）: setup.shへの影響は軽微",
+      "IF-010": "スキップ（妥当）: docs更新は本Issueスコープ外",
+      "IF-011": "スキップ（妥当）: CI/CD影響なし"
+    }
+  },
+  "line_number_accuracy": {
+    "stop.sh_L21": "正確: PORT=${CM_PORT:-${MCBD_PORT:-3000}}",
+    "stop.sh_L22": "正確: PID=$(lsof -ti:$PORT 2>/dev/null || true)",
+    "stop.sh_L25": "正確: kill \"$PID\"",
+    "build-and-start.sh_L69-76": "正確: PIDファイルチェックブロック",
+    "build-and-start.sh_L70": "正確: OLD_PID=$(cat \"$PID_FILE\")",
+    "stop-server.sh_L11": "正確: PORT=3000",
+    "stop-server.sh_L18": "正確: PIDS=$(lsof -ti:$PORT 2>/dev/null)",
+    "stop-server.sh_L22": "正確: echo \"$PIDS\" | xargs kill -9 2>/dev/null",
+    "stop-server.sh_L28": "正確: PID=$(cat \"$PID_FILE\")",
+    "stop-server.sh_L32": "正確: kill -9 -$PID 2>/dev/null || kill -9 $PID 2>/dev/null",
+    "stop-server.sh_L42": "正確: REMAINING=$(lsof -ti:$PORT 2>/dev/null)",
+    "stop-server.sh_L45": "正確: echo \"$REMAINING\" | xargs kill -9 2>/dev/null",
+    "status.sh_L27": "正確: PORT=${CM_PORT:-${MCBD_PORT:-3000}}",
+    "status.sh_L29": "正確: PID=$(lsof -ti:$PORT)",
+    "health-check.sh_L10": "正確: PORT=${CM_PORT:-${MCBD_PORT:-3000}}",
+    "daemon.ts_L133-161": "正確: stop()メソッド",
+    "pid-manager.ts_L43": "正確: .trim()",
+    "pid-manager.ts_L44": "正確: parseInt(content, 10)"
+  },
+  "statistics": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 1,
+    "total": 3
+  },
+  "overall_assessment": "良好",
+  "code_references": [
+    {
+      "file": "scripts/stop.sh",
+      "relevance": "全行番号参照が正確。L22, L25の問題記述がコードと一致。"
+    },
+    {
+      "file": "scripts/stop-server.sh",
+      "relevance": "全行番号参照が正確。L11, L18, L22, L28, L32, L42, L45の問題記述がコードと一致。"
+    },
+    {
+      "file": "scripts/build-and-start.sh",
+      "relevance": "全行番号参照が正確。L69-76, L70の問題記述がコードと一致。フォアグラウンドモード（L104-112）のポート競合チェック未考慮。"
+    },
+    {
+      "file": "scripts/restart.sh",
+      "relevance": "L21でstop.shを呼び出す点がIssueに正しく記載されている。"
+    },
+    {
+      "file": "scripts/status.sh",
+      "relevance": "L27, L29の参照が正確。影響範囲テーブルに確認対象として記載済み。"
+    },
+    {
+      "file": "scripts/health-check.sh",
+      "relevance": "L10のCM_PORT対応状況がIssueの比較テーブルと一致。"
+    },
+    {
+      "file": ".claude/skills/rebuild/SKILL.md",
+      "relevance": "stop.sh && build-and-start.sh --daemon のパターンがIssueの影響範囲テーブルに正しく記載されている。"
+    },
+    {
+      "file": "src/cli/utils/daemon.ts",
+      "relevance": "L133-161のSIGTERM→waitForExit→SIGKILL段階的停止がIssueに正しく参照されている。"
+    },
+    {
+      "file": "src/cli/utils/pid-manager.ts",
+      "relevance": "L43-44のtrim()+parseInt()バリデーションがIssueに正しく参照されている。"
+    },
+    {
+      "file": "src/cli/utils/env-setup.ts",
+      "relevance": "L160のPIDファイルパス（~/.commandmate/.commandmate.pid）がIssueのPIDファイルパス分断記述と一致。L157のworktree PIDパスも一致。"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "プロジェクト全体のスクリプト構成・コマンド体系の参照ドキュメント"
+    }
+  ]
+}

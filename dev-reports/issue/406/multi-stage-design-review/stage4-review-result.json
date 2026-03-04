@@ -1,0 +1,116 @@
+{
+  "issue_number": 406,
+  "focus_area": "セキュリティ",
+  "stage": 4,
+  "stage_name": "セキュリティレビュー",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": {
+    "must_fix": [
+      {
+        "id": "SEC4-001",
+        "category": "error_information_disclosure",
+        "title": "SEC-406-003: Error message in validateCmatePath() discloses internal path information",
+        "description": "The error message at cmate-parser.ts L92-94 includes the raw filePath and worktreeDir values: `Path traversal detected: ${filePath} is not within ${worktreeDir}`. While the design policy (SEC-406-003) states this is maintained as-is, this error can propagate up through readCmateFile() when the CMATE.md path is externally manipulated, potentially exposing server-side directory structures. Although the current sole caller (schedule-manager.ts L516) uses DB-derived paths making exploitation unlikely, the function is exported and could be called with user-controllable paths in the future. The design policy should explicitly document this information disclosure risk and recommend sanitizing the error message in readCmateFile()'s catch block before logging or re-throwing.",
+        "severity": "must_fix",
+        "recommendation": "Add a note to SEC-406-003 acknowledging the path disclosure risk. In readCmateFile(), wrap the re-thrown error from validateCmatePath() with a sanitized message that omits internal paths (e.g., 'CMATE.md path validation failed'). Log the full detail at the server side only. This is a pre-existing issue but the design review should acknowledge it rather than state 'maintained as-is' without risk assessment."
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "SEC4-002",
+        "category": "toctou",
+        "title": "SEC-406-002: TOCTOU analysis is accurate but should document the atomicity gap widening",
+        "description": "The design policy correctly states that TOCTOU risk exists in both sync and async versions. However, the async version widens the atomicity gap: between `await validateCmatePath()` and `await readFile()`, the event loop can yield to other operations, increasing the window for symlink replacement. While the sync version's TOCTOU window is at the OS scheduler level (microseconds), the async version's window is at the Node.js event loop level (potentially milliseconds to seconds under load). The design policy should quantify this difference rather than stating 'no practical risk increase'.",
+        "severity": "should_fix",
+        "recommendation": "Update SEC-406-002 to acknowledge that async widens the TOCTOU window from OS-level context switches (~microseconds) to event loop yields (~milliseconds). Document that this is accepted because: (1) CMATE.md paths are DB-derived and server-controlled, (2) the attacker would need filesystem write access to the worktree directory, (3) an attacker with that access level could already modify the CMATE.md content directly. Add a note that O_NOFOLLOW-based read or fstat-after-open patterns are out of scope for this refactoring."
+      },
+      {
+        "id": "SEC4-003",
+        "category": "unhandled_rejection",
+        "title": "DJ-002: initScheduleManager() fire-and-forget without .catch() creates a silent failure path on non-fatal errors",
+        "description": "DJ-002 correctly documents that `void syncSchedules()` without `.catch()` is fail-fast by design. However, there is a gap: errors that bypass the internal try-catch (L486/L574) but are not truly fatal (e.g., a transient EPERM on realpath due to a brief permission change) would crash the server via unhandled rejection. The fail-fast rationale in DR3-002 is specifically about module-load failures, but async I/O introduces new transient error categories (DNS resolution delays for NFS mounts, intermittent permission errors) that would not occur with the sync version. The design should consider whether these non-fatal transient errors justify adding `.catch()` to the initial call as well.",
+        "severity": "should_fix",
+        "recommendation": "Consider adding `.catch()` to the initScheduleManager() fire-and-forget call, matching DJ-003's pattern. The argument that 'syncSchedules internal try-catch covers all errors' is weakened by the async transition since fs.promises can reject with errors that the current try-catch structure may not anticipate. Alternatively, explicitly document in DJ-002 which specific error types can bypass the internal try-catch in the async version and confirm each is truly fatal."
+      },
+      {
+        "id": "SEC4-004",
+        "category": "race_condition",
+        "title": "Concurrent syncSchedules() invocations during 60s polling cycle",
+        "description": "If a syncSchedules() invocation takes longer than 60 seconds (e.g., many worktrees with slow I/O), the setInterval will fire the next invocation while the first is still in progress. With the sync version, this was impossible because syncSchedules() blocked the event loop. With the async version, two concurrent executions can read/modify the same manager.schedules Map and manager.cmateFileCache Map simultaneously, potentially causing inconsistent state (e.g., double cron job creation, incorrect activeScheduleIds). The design policy does not address this concurrency concern.",
+        "severity": "should_fix",
+        "recommendation": "Add a concurrency guard (e.g., an `isSyncing` boolean flag on ManagerState) to prevent overlapping syncSchedules() executions. Check the flag at the beginning of syncSchedules() and skip if already running. This pattern is already used for executeSchedule() (state.isExecuting guard at L422-425) and should be applied consistently."
+      }
+    ],
+    "consider": [
+      {
+        "id": "SEC4-005",
+        "category": "symlink_attack",
+        "title": "fs.promises.realpath() provides identical symlink resolution guarantees",
+        "description": "Verified that fs.promises.realpath() and realpathSync() both call the same underlying libuv function (uv_fs_realpath) and provide identical symlink resolution behavior. The path traversal check logic (startsWith + path.sep + exact match) is unchanged. SEC-406-001 is accurate.",
+        "severity": "nice_to_have",
+        "recommendation": "No action needed. This is a positive finding confirming the security equivalence."
+      },
+      {
+        "id": "SEC4-006",
+        "category": "input_validation",
+        "title": "All input validation measures are maintained during async transition",
+        "description": "Verified that: (1) sanitizeMessageContent() is unchanged (pure function), (2) NAME_PATTERN validation is unchanged, (3) isValidCronExpression() is unchanged, (4) isCliToolType() validation is unchanged, (5) MAX_SCHEDULE_ENTRIES limit is unchanged, (6) CONTROL_CHAR_PATTERN sanitization is unchanged. The async transition only affects I/O operations, not validation logic.",
+        "severity": "nice_to_have",
+        "recommendation": "No action needed. This is a positive finding."
+      },
+      {
+        "id": "SEC4-007",
+        "category": "dos_prevention",
+        "title": "Async I/O does not introduce new DoS vectors beyond existing patterns",
+        "description": "The async transition does not add new endpoints or accept new user input. The file reading is limited to CMATE.md files in DB-registered worktree directories. The existing MAX_SCHEDULE_ENTRIES=100 and MAX_CONCURRENT_SCHEDULES=100 limits are unchanged. The only new concern is the potential for overlapping syncSchedules() invocations (addressed in SEC4-004).",
+        "severity": "nice_to_have",
+        "recommendation": "No action needed beyond addressing SEC4-004."
+      },
+      {
+        "id": "SEC4-008",
+        "category": "nodejs_security",
+        "title": "fs.promises API security equivalence with fs sync API",
+        "description": "The fs.promises API (realpath, readFile) has identical security characteristics to the sync equivalents. Both respect file permissions, follow the same symlink resolution, and throw the same error types (ENOENT, EACCES, etc.). The utf-8 encoding parameter in readFile prevents buffer handling issues. The import pattern (import { realpath, readFile } from 'fs/promises') matches the project convention documented in DR2-006.",
+        "severity": "nice_to_have",
+        "recommendation": "No action needed. This is a positive finding."
+      },
+      {
+        "id": "SEC4-009",
+        "category": "error_handling",
+        "title": "ENOENT error handling is correctly maintained in async version",
+        "description": "The design policy correctly notes that fs.promises.realpath() and fs.promises.readFile() throw the same NodeJS.ErrnoException with code 'ENOENT' as their sync counterparts. The catch block pattern in readCmateFile() (checking instanceof Error + 'code' in error + code === 'ENOENT') works identically for rejected promises caught by try-catch-await.",
+        "severity": "nice_to_have",
+        "recommendation": "No action needed. This is a positive finding."
+      }
+    ]
+  },
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "src/lib/cmate-parser.ts",
+    "src/lib/schedule-manager.ts",
+    "src/lib/path-validator.ts",
+    "src/lib/session-cleanup.ts",
+    "src/config/cmate-constants.ts",
+    "tests/unit/lib/cmate-parser.test.ts",
+    "server.ts",
+    "dev-reports/design/issue-406-async-cmate-parser-design-policy.md"
+  ],
+  "owasp_checklist": {
+    "A01_broken_access_control": "pass - Path traversal prevention maintained via realpath()",
+    "A02_cryptographic_failures": "not_applicable",
+    "A03_injection": "pass - No SQL injection risk (parameterized queries maintained), no command injection",
+    "A04_insecure_design": "pass_with_conditions - TOCTOU gap widened but risk level acceptable given trust boundary",
+    "A05_security_misconfiguration": "pass - No new configuration surfaces introduced",
+    "A06_vulnerable_components": "not_applicable - No new dependencies",
+    "A07_auth_failures": "not_applicable",
+    "A08_data_integrity_failures": "pass - File content validation unchanged",
+    "A09_logging_failures": "pass_with_conditions - Error message in validateCmatePath may disclose paths",
+    "A10_ssrf": "not_applicable"
+  },
+  "timestamp": "2026-03-04T12:00:00Z"
+}

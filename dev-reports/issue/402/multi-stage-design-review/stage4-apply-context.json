@@ -1,0 +1,7 @@
+{
+  "issue_number": 402,
+  "stage": 4,
+  "review_result_path": "dev-reports/issue/402/multi-stage-design-review/stage4-review-result.json",
+  "design_doc_path": "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md",
+  "note": "Stage 4 has 0 Must Fix and 0 Should Fix items. No design policy update needed."
+}

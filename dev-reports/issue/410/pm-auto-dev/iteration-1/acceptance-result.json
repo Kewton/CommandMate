@@ -1,0 +1,97 @@
+{
+  "status": "passed",
+  "test_cases": [
+    {
+      "scenario": "Scenario 1: TerminalComponent uses next/dynamic import in terminal/page.tsx",
+      "result": "passed",
+      "evidence": "terminal/page.tsx contains: import dynamic from 'next/dynamic'; const TerminalComponent = dynamic(() => import('@/components/Terminal').then((mod) => ({ default: mod.TerminalComponent })), { ssr: false, loading: ... })"
+    },
+    {
+      "scenario": "Scenario 2: MarkdownEditor uses next/dynamic import in WorktreeDetailRefactored.tsx",
+      "result": "passed",
+      "evidence": "WorktreeDetailRefactored.tsx contains: import dynamic from 'next/dynamic'; const MarkdownEditor = dynamic(() => import('@/components/worktree/MarkdownEditor').then((mod) => ({ default: mod.MarkdownEditor })), { ssr: false, loading: ... })"
+    },
+    {
+      "scenario": "Scenario 3: Loading indicators implemented with Loader2 and appropriate themes",
+      "result": "passed",
+      "evidence": "terminal/page.tsx: Loader2 imported from lucide-react, loading component with bg-gray-900 theme and 'Loading terminal...' text. WorktreeDetailRefactored.tsx: Loader2 imported from lucide-react, loading component with bg-white theme and 'Loading editor...' text."
+    },
+    {
+      "scenario": "Scenario 4: Static import of TerminalComponent removed",
+      "result": "passed",
+      "evidence": "grep for 'import { TerminalComponent } from' in terminal/page.tsx returned no matches. Git diff confirms removal of: import { TerminalComponent } from '@/components/Terminal'"
+    },
+    {
+      "scenario": "Scenario 5: Static import of MarkdownEditor removed",
+      "result": "passed",
+      "evidence": "grep for 'import { MarkdownEditor } from' in WorktreeDetailRefactored.tsx returned no matches. Git diff confirms removal of: import { MarkdownEditor } from '@/components/worktree/MarkdownEditor'"
+    },
+    {
+      "scenario": "Scenario 6: TypeScript errors are 0",
+      "result": "passed",
+      "evidence": "npx tsc --noEmit completed with exit code 0 and no output (0 errors)"
+    },
+    {
+      "scenario": "Scenario 7: ESLint errors are 0",
+      "result": "passed",
+      "evidence": "npm run lint output: 'No ESLint warnings or errors'"
+    },
+    {
+      "scenario": "Scenario 8: All unit tests pass (4411+ tests)",
+      "result": "passed",
+      "evidence": "npm run test:unit: 209 test files passed, 4411 tests passed, 7 skipped, 0 failed. Duration: 13.78s"
+    },
+    {
+      "scenario": "Scenario 9: npm run build succeeds",
+      "result": "passed",
+      "evidence": "npm run build completed successfully. Build output shows: /worktrees/[id] = 194 kB First Load JS, /worktrees/[id]/terminal = 100 kB First Load JS (TerminalComponent and MarkdownEditor code-split into separate chunks)"
+    }
+  ],
+  "acceptance_criteria_status": [
+    {
+      "criterion": "/worktrees/[id] page First Load JS reduced by MarkdownEditor dynamic import",
+      "verified": true,
+      "evidence": "Build output shows /worktrees/[id] = 194 kB First Load JS. MarkdownEditor (with highlight.js) is now loaded on-demand via dynamic import, not included in the initial bundle."
+    },
+    {
+      "criterion": "/worktrees/[id]/terminal page has no SSR errors",
+      "verified": true,
+      "evidence": "TerminalComponent uses dynamic import with ssr: false, preventing xterm.js browser API access during SSR. Build succeeded without errors. Terminal page First Load JS is only 100 kB."
+    },
+    {
+      "criterion": "Terminal displays loading indicator before xterm.js loads",
+      "verified": true,
+      "evidence": "Loading component renders Loader2 spinner with animate-spin class, bg-gray-900 terminal theme, and 'Loading terminal...' text. Verified by TerminalPage.test.tsx tests."
+    },
+    {
+      "criterion": "Markdown preview syntax highlighting works correctly",
+      "verified": true,
+      "evidence": "MarkdownEditor is dynamically imported with .then() pattern preserving named export. highlight.js/rehype-highlight loaded client-side only. 64 MarkdownEditor unit tests all pass."
+    },
+    {
+      "criterion": "All unit tests pass (npm run test:unit)",
+      "verified": true,
+      "evidence": "4411 tests passed across 209 test files, including new tests: TerminalPage.test.tsx (9 tests), dynamic-import-patterns.test.ts (14 tests)"
+    }
+  ],
+  "build_metrics": {
+    "worktrees_id_first_load_js": "194 kB",
+    "worktrees_id_terminal_first_load_js": "100 kB",
+    "shared_js": "88.9 kB",
+    "total_test_files": 209,
+    "total_tests_passed": 4411,
+    "total_tests_skipped": 7,
+    "total_tests_failed": 0
+  },
+  "new_test_files": [
+    "tests/unit/components/TerminalPage.test.tsx (9 tests)",
+    "tests/unit/components/dynamic-import-patterns.test.ts (14 tests)"
+  ],
+  "evidence_files": [
+    "src/app/worktrees/[id]/terminal/page.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "tests/unit/components/TerminalPage.test.tsx",
+    "tests/unit/components/dynamic-import-patterns.test.ts"
+  ],
+  "message": "All acceptance criteria are satisfied. Both TerminalComponent (xterm.js) and MarkdownEditor (highlight.js) have been converted to next/dynamic imports with ssr: false, loading indicators using Loader2, and the .then() pattern for named exports. Static imports have been removed. TypeScript compilation, ESLint, all 4411 unit tests, and production build all pass successfully."
+}

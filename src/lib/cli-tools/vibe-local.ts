@@ -18,6 +18,7 @@ import {
   killSession,
 } from '../tmux';
 import { detectAndResendIfPastedText } from '../pasted-text-helper';
+import { invalidateCache } from '../tmux-capture-cache';
 import { getDbInstance } from '../db-instance';
 import { getWorktreeById } from '../db';
 
@@ -156,6 +157,9 @@ export class VibeLocalTool extends BaseCLITool {
       if (message.includes('\n')) {
         await detectAndResendIfPastedText(sessionName);
       }
+
+      // Issue #405: Invalidate cache after sending message
+      invalidateCache(sessionName);
 
       console.log(`✓ Sent message to Vibe Local session: ${sessionName}`);
     } catch (error: unknown) {

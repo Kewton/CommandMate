@@ -9,6 +9,7 @@
 import { sendKeys, sendSpecialKeys } from './tmux';
 import type { CLIToolType } from './cli-tools/types';
 import type { PromptData, PromptType } from '@/types/models';
+import { invalidateCache } from './tmux-capture-cache';
 
 /** Regex pattern to detect checkbox-style multi-select options */
 const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
@@ -105,4 +106,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
     // Send Enter
     await sendKeys(sessionName, '', true);
   }
+
+  // Issue #405: Invalidate cache after sending prompt answer
+  invalidateCache(sessionName);
 }

@@ -1,0 +1,110 @@
+{
+  "issue_number": 410,
+  "stage": 3,
+  "stage_name": "影響分析レビュー",
+  "review_date": "2026-03-04",
+  "findings": [
+    {
+      "id": "S3-001",
+      "severity": "should_fix",
+      "category": "ランタイム影響",
+      "title": "MarkdownEditorローディング中のModal高さ崩れリスク",
+      "description": "WorktreeDetailRefactored.tsx L2069の<div className=\"h-[80vh]\">内にMarkdownEditorがdynamic importで遅延ロードされる。ローディングコンポーネントは`h-full`でflex中央配置だが、親のModalが`size=\"full\"`で表示される際、MarkdownEditorがnull→ローディング→実コンポーネントと遷移する間にレイアウトシフトが発生する可能性がある。ローディングコンポーネントのルート要素に`h-[80vh]`または`h-full`と`min-h-[200px]`を組み合わせることで、Modal内の表示領域が確保される設計が望ましい。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "recommendation": "設計方針書Section 4 D2のローディングインジケーター定義に、Modal内での高さ確保に関する注記を追加する。親divが`h-[80vh]`を持つためローディングの`h-full`は適切に機能するはずだが、実装時に確認すべき旨の注記があると安全。"
+    },
+    {
+      "id": "S3-002",
+      "severity": "nice_to_have",
+      "category": "TypeScript型安全性",
+      "title": "next/dynamic の .then() パターンにおける型推論の暗黙的依存",
+      "description": "設計方針書ではnext/dynamicの.then()パターンでEditorProps型が維持されると記載（Section 5-2設計根拠）。実際にnext/dynamicのジェネリクスは、importされたモジュールからdefault exportの型を推論する。.then(mod => ({ default: mod.MarkdownEditor }))パターンでは、mod.MarkdownEditorの型（(props: EditorProps) => JSX.Element）がdefaultとして再マッピングされるため、戻り値のdynamic componentはEditorPropsを受け付ける。EditorPropsはsrc/types/markdown-editor.tsで定義されており、MarkdownEditor.tsx L49でimportされている。dynamic importの変更後もEditorPropsのimportパスは変わらないため、WorktreeDetailRefactored.tsxのL2070-2076, L2309-2314の使用箇所で渡しているprops（worktreeId, filePath, onClose, onSave, onMaximizedChange）の型チェックは引き続き有効。この分析は正確だが、設計方針書に型推論の仕組みの簡潔な説明があるとより明確になる。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx",
+        "src/types/markdown-editor.ts"
+      ],
+      "recommendation": "現在の記載で十分だが、将来の保守性のために、型推論が機能する理由（.then()内のmod.MarkdownEditorの型情報がdefault exportとしてdynamicに伝播する仕組み）を1行程度のコメントで補足すると良い。"
+    },
+    {
+      "id": "S3-003",
+      "severity": "nice_to_have",
+      "category": "テスト影響",
+      "title": "WorktreeDetailRefactored.test.tsxがMarkdownEditorを参照しない確認の補強",
+      "description": "設計方針書Section 9の変更不要ファイルで「WorktreeDetailRefactored.test.tsxはMarkdownEditorを参照していない」と記載。実際にWorktreeDetailRefactored.test.tsx内をgrepした結果、MarkdownEditor/markdown/editorの文字列は一切出現せず、この記載は正確。また、MarkdownEditor.test.tsxはL16で直接importしており、WorktreeDetailRefactored.tsx内のdynamic import変更の影響を受けない。テスト影響の分析は正確だが、将来MarkdownEditorのintegrationテストが追加された場合にnext/dynamicのモックが必要になるリスクがある。",
+      "affected_files": [
+        "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+        "tests/unit/components/MarkdownEditor.test.tsx"
+      ],
+      "recommendation": "Section 4 D3のテストモックパターンが既に将来のモックパターンを記載しているため対応済み。MermaidCodeBlock.test.tsx (L24-35) の既存のnext/dynamicモックパターンが参考先として正確であることも確認済み。追加対応は不要。"
+    },
+    {
+      "id": "S3-004",
+      "severity": "nice_to_have",
+      "category": "ビルド影響",
+      "title": "SSR/SSG互換性およびTurbopack互換性の確認結果",
+      "description": "next.config.jsを確認した結果、Turbopackの明示的な設定（experimental.turbo）は存在しない。ビルドコマンドは`next build`（webpack）。next/dynamicのssr:falseはwebpackビルドで標準的にサポートされており、互換性の問題はない。またpackage.jsonのdevスクリプトは`tsx server.ts`であり、`next dev --turbo`ではないため、開発環境でもTurbopackは使用されていない。SSRに関しては、TerminalComponent（xterm.js）のssr:falseがSSRエラーを防止し、MarkdownEditorもssr:falseでクライアントサイド限定となるが、管理ツールのためSEO影響はなし。",
+      "affected_files": [
+        "next.config.js",
+        "package.json"
+      ],
+      "recommendation": "特段の対応は不要。設計方針書の記載通り、ビルド互換性に問題はない。"
+    },
+    {
+      "id": "S3-005",
+      "severity": "nice_to_have",
+      "category": "間接的依存",
+      "title": "MarkdownEditorの内部依存チェーンのdynamic import化による自動チャンク分離の確認",
+      "description": "MarkdownEditor.tsxはL31-48で以下の内部依存を持つ: react-markdown, remark-gfm, rehype-sanitize, rehype-highlight, highlight.js CSS, lucide-react, debounce, copyToClipboard, Toast, PaneResizer, MermaidCodeBlock, useIsMobile, useFullscreen, useLocalStorageState, useAutoSave, useSwipeGesture, useVirtualKeyboard, Z_INDEX, EditorProps/ViewMode型。これら全てがMarkdownEditorのdynamic importチャンクに含まれる。特にMermaidCodeBlockは自身も内部でnext/dynamicを使用しているが、MarkdownEditorチャンクにはMermaidCodeBlockのコード自体が含まれ、MermaidDiagramはさらに別チャンクとなるネストされた遅延ロード構造になる。この二重遅延ロードが問題を起こすことはないが、設計方針書には明示的に記載されていない。",
+      "affected_files": [
+        "src/components/worktree/MarkdownEditor.tsx",
+        "src/components/worktree/MermaidCodeBlock.tsx"
+      ],
+      "recommendation": "MarkdownEditorチャンク内でMermaidCodeBlockがさらにnext/dynamicでMermaidDiagramを遅延ロードするネスト構造について、設計方針書に1行の注記を追加すると、将来のデバッグ時に有用。ただし動作上の問題はないため優先度は低い。"
+    },
+    {
+      "id": "S3-006",
+      "severity": "should_fix",
+      "category": "ランタイム影響",
+      "title": "editorFilePathの条件付きレンダリングとdynamic importの相互作用の明記",
+      "description": "WorktreeDetailRefactored.tsxのL2061とL2300で`{editorFilePath && ( <Modal>...<MarkdownEditor/>...</Modal> )}`という条件付きレンダリングが行われている。dynamic importコンポーネントは初回マウント時にチャンクをロードするため、ユーザーが.mdファイルをクリックしてeditorFilePathが設定された時点でMarkdownEditorチャンクのフェッチが開始される。これは設計方針書Section 7のシーケンス図と一致しており正しい動作。ただし、editorFilePathが短時間で切り替わった場合（例: .mdファイルを閉じてすぐ別の.mdファイルを開いた場合）、チャンクが既にキャッシュされているためローディングは初回のみで、2回目以降は即座に表示される。この動作特性を設計方針書に明記すべき。",
+      "affected_files": [
+        "src/components/worktree/WorktreeDetailRefactored.tsx"
+      ],
+      "recommendation": "Section 7パフォーマンスリスクの表に「2回目以降のMarkdownEditor表示ではチャンクがブラウザキャッシュ済みのため即時レンダリング」という注記を追加する。これにより初回のみローディングが表示されることが明確になる。"
+    }
+  ],
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 2,
+    "nice_to_have": 4,
+    "overall_quality": "good"
+  },
+  "risk_assessment": {
+    "runtime_impact": "low",
+    "type_safety": "low",
+    "test_impact": "low",
+    "build_impact": "low",
+    "indirect_dependency": "low"
+  },
+  "reviewed_files": [
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/app/worktrees/[id]/terminal/page.tsx",
+    "src/components/worktree/MarkdownEditor.tsx",
+    "src/components/Terminal.tsx",
+    "src/components/worktree/MermaidCodeBlock.tsx",
+    "src/types/markdown-editor.ts",
+    "src/components/ui/Modal.tsx",
+    "src/components/worktree/index.ts",
+    "src/app/login/page.tsx",
+    "next.config.js",
+    "package.json",
+    "tests/unit/components/MarkdownEditor.test.tsx",
+    "tests/unit/components/WorktreeDetailRefactored.test.tsx",
+    "tests/unit/components/MermaidCodeBlock.test.tsx"
+  ],
+  "status": "approved",
+  "score": 4,
+  "timestamp": "2026-03-04T00:00:00Z"
+}

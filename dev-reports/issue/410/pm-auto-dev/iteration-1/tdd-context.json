@@ -1,0 +1,37 @@
+{
+  "issue_number": 410,
+  "title": "perf: xterm.js・highlight.jsのdynamic import化でバンドルサイズ削減",
+  "acceptance_criteria": [
+    "/worktrees/[id] ページのFirst Load JSがMarkdownEditor動的import化により削減されること（npm run buildの出力で確認）",
+    "/worktrees/[id]/terminal ページでSSRエラーが発生しないこと",
+    "ターミナル表示時に遅延なくxterm.jsがロードされること",
+    "markdownプレビュー表示時にシンタックスハイライトが正常動作すること",
+    "全ユニットテストがパスすること（npm run test:unit）"
+  ],
+  "implementation_tasks": [
+    "src/app/worktrees/[id]/terminal/page.tsx でTerminalComponentのdynamic import化（next/dynamic + ssr: false + .then((mod) => ({ default: mod.TerminalComponent }))パターン使用）",
+    "src/components/worktree/WorktreeDetailRefactored.tsx でMarkdownEditorのdynamic import化（next/dynamic + ssr: false + .then((mod) => ({ default: mod.MarkdownEditor }))パターン使用）",
+    "各コンポーネントにローディングインジケーターを追加（Loader2 from lucide-react使用）",
+    "TypeScriptエラー0件確認（npx tsc --noEmit）",
+    "ESLintエラー0件確認（npm run lint）",
+    "全ユニットテストパス確認（npm run test:unit）"
+  ],
+  "key_files": [
+    "src/app/worktrees/[id]/terminal/page.tsx",
+    "src/components/worktree/WorktreeDetailRefactored.tsx",
+    "src/components/worktree/MermaidCodeBlock.tsx",
+    "src/components/Terminal.tsx",
+    "src/components/worktree/MarkdownEditor.tsx"
+  ],
+  "design_policy_path": "dev-reports/design/issue-410-dynamic-import-design-policy.md",
+  "work_plan_path": "dev-reports/issue/410/work-plan.md",
+  "target_coverage": 80,
+  "notes": [
+    "TerminalComponent と MarkdownEditor はどちらも named export なので .then() パターンが必須",
+    "参考実装: src/components/worktree/MermaidCodeBlock.tsx L20-34",
+    "Terminal用ローディング: bg-gray-900テーマ",
+    "Editor用ローディング: bg-whiteテーマ",
+    "MarkdownEditor.test.tsx と WorktreeDetailRefactored.test.tsx は変更不要",
+    "ssr: false は 'use client' があっても必要（App RouterはSSR時にClient Componentも実行するため）"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "stage": 3,
+  "issue_number": 408,
+  "applied_findings": ["IA3-003", "IA3-009", "IA3-006"],
+  "skipped_findings": [],
+  "update_success": true,
+  "summary": "Stage 3（影響分析）指摘3件を設計方針書に反映。IA3-003: Section 7.3のテスト影響記述を実態に合わせて修正（既存テスト変更不要）、IA3-009: APIレスポンス変更例に型不変条件とdefense-in-depth補足を追記、IA3-006: 実装チェックリストSection 12.4にintegration testのコメント更新を追加。"
+}

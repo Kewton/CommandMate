@@ -1,0 +1,78 @@
+{
+  "issue_number": 410,
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "review_date": "2026-03-03",
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "title": "ローディングインジケーターのDRY原則違反",
+      "description": "設計方針書では MarkdownEditor用とTerminalComponent用に酷似したローディングインジケーターをそれぞれインラインで定義している（Section D2）。背景色・テキスト色・メッセージ文字列のみが異なる同一構造のJSXが2箇所に重複している。既存のMermaidCodeBlock.tsxにも類似パターンがある。共通のLoadingSpinnerコンポーネントを抽出し、背景色・テキスト色・メッセージをpropsで受け取る形にすれば、DRY原則に準拠しつつ将来のdynamic import追加時にも再利用できる。",
+      "location": "Section 4 - D2: ローディングインジケーター",
+      "suggested_fix": "src/components/common/DynamicLoadingIndicator.tsx のような共通コンポーネントを作成し、bgColor, textColor, message をpropsで受け取る設計にする。ただし、next/dynamic の loading オプションはステートレスな関数コンポーネントのみ受け付けるため、外部モジュールからimportしたコンポーネントが使用可能であることを事前に確認すること。YAGNI原則との兼ね合いで、現時点では2箇所のみなのでインライン定義を許容し、3箇所目が発生した時点でリファクタリングする判断も妥当。"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "title": "Loader2のimport追加に関する既存import競合の考慮不足",
+      "description": "設計方針書のSection 5-2では WorktreeDetailRefactored.tsx に 'import { Loader2 } from lucide-react' を追加する記述があるが、現在のWorktreeDetailRefactored.tsxにはlucide-reactからのimportが存在しない。これ自体は問題ないが、Loader2はローディングコンポーネントのインラインJSX内でのみ使用される。next/dynamicのloading関数はモジュールのトップレベルで評価されるため、Loader2のimportは静的に解決される必要がある。この点は問題ないが、WorktreeDetailRefactored.tsxは既に約60個のimport文があり（L19-L60）、新たなimport追加が可読性に与える影響を設計書で言及すべきである。",
+      "location": "Section 5-2 - MarkdownEditor dynamic import化",
+      "suggested_fix": "設計書に、WorktreeDetailRefactored.tsxのimport数が既に多い点に触れ、Loader2のimportを追加する位置（lucide-reactの既存importがないため新規行追加）を明示する。または、S1-001の共通コンポーネント案を採用した場合はLoader2のimportは共通コンポーネント側に移動するため、この問題は自然に解消される。"
+    },
+    {
+      "id": "S1-003",
+      "severity": "nice_to_have",
+      "title": "スコープ外ファイルの除外根拠に不正確な記述",
+      "description": "設計方針書のSection 1「スコープ外」でMessageList.tsxについて「barrel export経由のみ、ツリーシェイキングで除外見込み」と記載されている。実際にコードを確認すると、MessageList.tsxは src/components/worktree/index.ts のbarrel exportに含まれており（L12）、このindex.tsはsrc/app/page.tsxからWorktreeListのimportに使用されている。MessageList自体はWorktreeDetailRefactoredからは直接importされておらず、HistoryPane経由でもimportされていない。この除外判断自体は妥当だが、「ツリーシェイキングで除外見込み」という表現はNext.jsのバンドル動作に依存する推測であり、「WorktreeDetailRefactored.tsxのimportチェーンに含まれないため影響なし」という事実ベースの記述が望ましい。",
+      "location": "Section 1 - スコープ外",
+      "suggested_fix": "「barrel export経由のみ、ツリーシェイキングで除外見込み」を「WorktreeDetailRefactored.tsxおよびterminal/page.tsxのimportチェーンに含まれないため、本変更の影響範囲外」に修正する。"
+    },
+    {
+      "id": "S1-004",
+      "severity": "nice_to_have",
+      "title": "files/[...path]/page.tsxのrehype-highlightが考慮対象として言及されていない",
+      "description": "src/app/worktrees/[id]/files/[...path]/page.tsx もrehype-highlightを静的importしている（L14）。設計方針書ではこのファイルを「スコープ外: 別ルート」として除外しているが、同一Issue内でrehype-highlightのdynamic import化を行うのであれば、このファイルも将来的な最適化候補として明示的に記録しておくべきである。このファイルは独立したルートであるため、別チャンクに分割される可能性が高く、現時点で対応不要という判断は妥当。",
+      "location": "Section 1 - スコープ外",
+      "suggested_fix": "スコープ外テーブルにfiles/[...path]/page.tsxのエントリを追加し、「別ルートのため独立チャンク、将来的にdynamic import化を検討可能」と記載する。"
+    },
+    {
+      "id": "S1-005",
+      "severity": "should_fix",
+      "title": "受入条件にバンドルサイズの具体的な閾値が未設定",
+      "description": "Section 10の受入条件では「First Load JS削減」を検証方法として挙げているが、具体的な数値目標が示されていない。「変更前後を比較」とのみ記載されており、何KB以上の削減を達成すれば合格とするかが不明確。設計方針書のSection 7では /worktrees/[id] で ~100KB+、/worktrees/[id]/terminal で ~500KB（SSR時のみ）の削減を推定しているため、これらの推定値をベースにした最低限の閾値を設けるべきである。",
+      "location": "Section 10 - 受入条件と検証方法",
+      "suggested_fix": "受入条件を以下のように修正する: 「/worktrees/[id] のFirst Load JSが変更前より50KB以上削減されること（npm run build出力で確認）」。また、変更前のベースライン値を事前に記録する手順を検証方法に追加する。"
+    },
+    {
+      "id": "S1-006",
+      "severity": "nice_to_have",
+      "title": "ローディング表示のi18n対応が未考慮",
+      "description": "設計方針書のローディングインジケーターでは 'Loading editor...' および 'Loading terminal...' という英語ハードコード文字列を使用している。本プロジェクトはnext-intlによるi18n対応を実施しており、他のUI文字列はuseTranslationsで翻訳されている。ただし、next/dynamicのloading関数はReactフックを使用できない（通常の関数コンポーネントとして扱われるため）可能性があり、技術的制約がある。この制約を設計書で明示すべきである。",
+      "location": "Section 4 - D2: ローディングインジケーター",
+      "suggested_fix": "設計書にi18nの技術的制約（next/dynamicのloading関数内ではuseTranslationsフックが使えない可能性がある）を明記した上で、「ローディング表示は一瞬のため英語固定で許容」というトレードオフ判断を記載する。"
+    },
+    {
+      "id": "S1-007",
+      "severity": "must_fix",
+      "title": "TerminalComponentのdynamic import化の効果説明に不正確さ",
+      "description": "設計方針書のSection 7パフォーマンス設計では、/worktrees/[id]/terminal ルートについて「xterm.js含む（SSR実行）→ 遅延ロード化 → ~500KB（SSR時のみ）削減」と記載している。しかし、terminal/page.tsxは既に 'use client' ディレクティブを持っており、TerminalComponent自体もクライアントコンポーネントである。Next.jsではClient Componentは確かにSSR時にサーバー上で実行されるが、xterm.jsのSSR問題は主にビルド時エラーまたはサーバーサイドレンダリング時のDOM API参照エラーとして顕在化する。設計目的F1「SSR互換性確保」は妥当だが、「~500KB削減」はFirst Load JSの削減量として正確ではない可能性がある。Client Componentのコードはクライアントバンドルに含まれるため、dynamic importにしてもダウンロードされるJS総量は変わらず、初期レンダリング時のチャンク分割による遅延ロードになる。この点を正確に記述すべきである。",
+      "location": "Section 7 - バンドルサイズ影響",
+      "suggested_fix": "バンドルサイズ影響テーブルの /worktrees/[id]/terminal 行を修正: 「変更後（推定）」を「別チャンクに分離（初期ロード時にはダウンロードされない、必要時にロード）」、「削減量」を「初期チャンクから ~500KB 分離（SSRエラー防止が主目的）」に変更し、SSR時のサーバーサイド実行防止が主要な効果であることを明確にする。"
+    },
+    {
+      "id": "S1-008",
+      "severity": "nice_to_have",
+      "title": "エラーハンドリング設計が未記載",
+      "description": "設計方針書にはdynamic importのチャンクロード失敗時の挙動について記載がない。ネットワークエラーやキャッシュ破損などでチャンクのロードに失敗した場合、next/dynamicはデフォルトでReactのエラー境界に委譲する。WorktreeDetailRefactored.tsxには既にErrorBoundaryが導入されている（L32のimport）ため、MarkdownEditorのロード失敗はキャッチされる可能性が高い。terminal/page.tsxにはErrorBoundaryが存在しない。この差異と対策を設計書に記載すべきである。",
+      "location": "Section 5 - 変更詳細設計（全体）",
+      "suggested_fix": "Section 5にエラーハンドリングのサブセクションを追加し、以下を記載する: (1) dynamic importのチャンクロード失敗時はReactのエラー境界でキャッチされること、(2) WorktreeDetailRefactored.tsxは既存ErrorBoundaryでカバーされること、(3) terminal/page.tsxにはErrorBoundaryがないため、必要に応じて追加を検討すること。"
+    }
+  ],
+  "summary": {
+    "must_fix": 1,
+    "should_fix": 3,
+    "nice_to_have": 4,
+    "overall_quality": "good"
+  }
+}

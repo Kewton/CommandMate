@@ -1,0 +1,83 @@
+{
+  "issue_number": 410,
+  "stage": 7,
+  "stage_name": "影響範囲レビュー（2回目）",
+  "review_date": "2026-03-03",
+  "previous_findings_addressed": {
+    "IAF-003": "addressed"
+  },
+  "findings": [
+    {
+      "id": "IAF2-001",
+      "category": "nice_to_have",
+      "severity": "nice_to_have",
+      "title": "影響範囲テーブルにglobals.cssの参照行があるとより安心",
+      "description": "MarkdownEditor.tsx (L35) は `import 'highlight.js/styles/github-dark.css'` をインポートしている。dynamic import化するとこのCSSの適用タイミングがコンポーネントロード時に遅延する。globals.css (L32-46) にhighlight.js CSSとの競合修正スタイル（`.prose pre`、`.prose pre code.hljs`等）が定義されている。MarkdownEditorはモーダル内で表示されロード完了後にレンダリングされるため実質的な問題は起きないが、影響範囲テーブルにglobals.cssを参照ファイルとして記載すると実装者が動作確認時のチェックポイントとして意識できる。Stage 3のIAF-008（Nice to Have）と同様の指摘であり、対応は任意。",
+      "location": "影響範囲テーブル",
+      "suggested_fix": "影響範囲テーブルに `| src/app/globals.css | （参照のみ、変更なし）highlight.js競合修正スタイル - 動作確認時にコードブロックのスタイルが正しいことを確認 | /worktrees/[id] |` を追加",
+      "evidence": {
+        "file": "/Users/maenokota/share/work/github_kewton/commandmate-issue-410/src/app/globals.css",
+        "lines": "L32-46",
+        "detail": "`.prose pre`, `.prose pre code.hljs`, `.prose pre code:not(.hljs)` の highlight.js 依存スタイルが定義されている"
+      }
+    }
+  ],
+  "verification_details": {
+    "IAF-003_verification": {
+      "status": "fully_addressed",
+      "evidence": [
+        "解決策セクション3に '.then((mod) => ({ default: mod.MarkdownEditor }))' パターンが明記されている",
+        "解決策セクション3に '.then((mod) => ({ default: mod.TerminalComponent }))' パターンが明記されている",
+        "実装タスクの両タスクに '.then((mod) => ({ default: mod.XXX }))' パターン使用と記載されている",
+        "参考実装として MermaidCodeBlock.tsx (L20-23) が参照されている",
+        "Stage 3のIAF-004 (Nice to Have) も含めて対応済み"
+      ]
+    },
+    "impact_scope_table_accuracy": {
+      "status": "accurate",
+      "verification": [
+        "WorktreeDetailRefactored.tsx (L39): MarkdownEditor の静的 import あり。dynamic import に変更が必要 - 正確",
+        "terminal/page.tsx (L9): TerminalComponent の静的 import あり。dynamic import に変更が必要 - 正確",
+        "MarkdownEditor.tsx: 参照のみ変更なし - 正確（named export のままでよい）",
+        "Terminal.tsx: 参照のみ変更なし - 正確（named export のままでよい）",
+        "MarkdownEditor.test.tsx: MarkdownEditor を直接 import (L16)。dynamic import は WorktreeDetailRefactored 側の変更のためテストに影響なし - 正確",
+        "WorktreeDetailRefactored.test.tsx: MarkdownEditor を参照していないことを grep で確認 - 正確"
+      ]
+    },
+    "test_impact_accuracy": {
+      "status": "accurate",
+      "verification": [
+        "MarkdownEditor.test.tsx は `import { MarkdownEditor } from '@/components/worktree/MarkdownEditor'` (L16) で直接 import。WorktreeDetailRefactored.tsx 内の dynamic import 変更の影響を受けない - 正確",
+        "WorktreeDetailRefactored.test.tsx は MarkdownEditor を grep 結果 0 件で参照なし - 正確",
+        "npm run test:unit パス確認タスクが記載されている - 適切"
+      ]
+    },
+    "technical_solution_accuracy": {
+      "status": "accurate",
+      "verification": [
+        "next/dynamic + ssr: false は named export の .then() パターンと組み合わせて正しい",
+        "既存の MermaidCodeBlock.tsx (L20-34) と login/page.tsx (L23-26) が同じパターンを使用しており、プロジェクト内で実績あり",
+        "MarkdownEditor は editorFilePath 条件でのみレンダリング (L2061, L2300) されるため、遅延ロードの効果が高い - 正確",
+        "TerminalComponent は terminal/page.tsx でのみ使用 (L9) で、別ルートのため ssr: false が適切 - 正確",
+        "props 型維持の記述は正確（next/dynamic は .then() パターンで型を維持する）"
+      ]
+    },
+    "missing_impact_areas_check": {
+      "status": "no_missing_areas_found",
+      "checked_items": [
+        "MarkdownEditor の import 元は WorktreeDetailRefactored.tsx (L39) と MarkdownEditor.test.tsx (L16) の 2 箇所のみ - 他に影響なし",
+        "TerminalComponent の import 元は terminal/page.tsx (L9) の 1 箇所のみ - 他に影響なし",
+        "TerminalDisplay (WorktreeDetailRefactored L25) は Terminal.tsx/xterm.js とは別のコンポーネントであることを確認 - 混同の懸念なし",
+        "MessageList.tsx は barrel export (index.ts L12) に含まれるが、/worktrees/[id] ページからは使用されていないことを確認。barrel import は src/app/page.tsx (WorktreeList のみ) で使用。スコープ外の判断は妥当",
+        "EditorProps 型は WorktreeDetailRefactored.tsx で import されていないことを確認 - dynamic import 変更で型 import の追加は不要",
+        "globals.css の highlight.js 競合修正スタイルは MarkdownEditor ロード後にのみ関連するためタイミング問題なし"
+      ]
+    }
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 0,
+    "nice_to_have": 1,
+    "overall_quality": "good"
+  }
+}

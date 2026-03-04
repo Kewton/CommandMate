@@ -1,0 +1,30 @@
+{
+  "stage": 4,
+  "apply_date": "2026-03-03",
+  "issue_number": 401,
+  "applied_findings": ["IF-001", "IF-002", "IF-003", "IF-004", "IF-005", "IF-006", "IF-007", "IF-008"],
+  "skipped_findings": ["IF-009", "IF-010", "IF-011"],
+  "skip_reasons": {
+    "IF-009": "Nice to have: setup.shの初回セットアップフローへの影響は軽微であり、ポートベース判定追加はユーザー体験の改善方向。受入条件への追加は過剰",
+    "IF-010": "スコープ外: docs/DEPLOYMENT.mdのトラブルシューティングコマンド更新は本Issueの修正範囲外。影響範囲テーブルに将来対応として記載済み",
+    "IF-011": "CI/CD影響なし: テスト・CI/CDへの影響は限定的であり、シェルスクリプトの自動テスト導入は将来課題。手動テスト（受入条件）で品質担保"
+  },
+  "github_updated": true,
+  "changes_applied": {
+    "IF-001": "「参考: CLI側の停止メカニズムとの関係」セクションに「PIDファイルパスの分断について」段落を追加。シェルスクリプト(logs/server.pid)とCLI(~/.commandmate/.commandmate.pid)のパス分断を明記し、本Issueのスコープ外であることを明示",
+    "IF-002": "影響範囲テーブルに `.claude/skills/rebuild/SKILL.md` を「修正なし（テスト対象）」として追加。stop.sh修正による&&チェーンへの影響可能性を記載",
+    "IF-003": "影響範囲セクションに「互換性に関する注意事項」サブセクションを新設。xargsのGNU/BSD差異について記載し、空文字列チェック維持の必要性を明示。実装タスクのstop.sh項目にxargs前の空チェック維持とエラー出力抑制を追加",
+    "IF-004": "実装タスクにbuild-and-start.shのCM_PORT対応（PORT=${CM_PORT:-${MCBD_PORT:-3000}}をスクリプト冒頭に追加）を明示的なタスクとして追加。他スクリプトとの統一を目的として記載",
+    "IF-005": "「参考: CLI側の停止メカニズムとの関係」セクションに「worktree並列起動環境での制約」段落を追加。commandmate start --issueで起動したworktreeサーバーのPIDファイル管理との不整合を明記",
+    "IF-006": "実装タスクに「lsof出力のPIDバリデーション追加」を新規タスクとして追加。grep -E '^[0-9]+$'によるフィルタリングをstop.sh/stop-server.sh/build-and-start.sh共通で適用",
+    "IF-007": "実装タスクに「lsof出力の重複PID除去」を新規タスクとして追加。sort -uによるIPv4/IPv6重複PID対策をstop.sh/stop-server.sh共通で適用。互換性注意事項にも記載",
+    "IF-008": "影響範囲テーブルに `scripts/status.sh` を「修正なし（確認対象）」として追加。複数PID表示の一貫性確認対象であることを記載"
+  },
+  "sections_modified": [
+    "参考: CLI側の停止メカニズムとの関係（PIDファイルパス分断・worktree並列環境制約を追記）",
+    "実装タスク（4項目追加: xargs空チェック、build-and-start.sh CM_PORT対応、lsof PIDバリデーション、lsof重複PID除去）",
+    "影響範囲テーブル（3列構成に拡張、5行追加: status.sh、rebuild SKILL、setup.sh、src/cli/、docs/DEPLOYMENT.md）",
+    "互換性に関する注意事項（新設: xargs GNU/BSD差異、lsof重複PID）"
+  ],
+  "summary": "Stage 3（影響範囲）レビューの全8件のmust_fix/should_fix指摘事項をGitHub Issueに反映完了。主な変更: (1) CLI側とシェルスクリプトのPIDファイルパス分断の明示化[IF-001]、(2) rebuild SKILLを含む影響範囲テーブルの拡充（4行→9行）[IF-002,IF-008]、(3) xargs GNU/BSD互換性・lsof重複PID対策の注意事項追加[IF-003,IF-007]、(4) build-and-start.shのCM_PORT対応・PIDバリデーション実装タスクの明示化[IF-004,IF-006]、(5) worktree並列環境での制約明記[IF-005]。nice_to_have 3件（IF-009,IF-010,IF-011）は影響が限定的のためスキップ。"
+}

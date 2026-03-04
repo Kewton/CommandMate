@@ -1,0 +1,25 @@
+{
+  "issue_number": 404,
+  "refactor_targets": [
+    "src/lib/resource-cleanup.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/schedule-manager.ts",
+    "src/lib/session-cleanup.ts",
+    "server.ts"
+  ],
+  "quality_metrics": {
+    "before_coverage": 80.0
+  },
+  "improvement_goals": [
+    "コードの可読性向上（型定義の明確化、コメントの適切な追加）",
+    "重複コードの削除",
+    "エラーハンドリングの一貫性確保",
+    "セキュリティ制約の適切な実装確認（SEC-404-001等）"
+  ],
+  "constraints": [
+    "全テストがパスすること（4459テスト）",
+    "ESLintエラー0件",
+    "TypeScriptエラー0件",
+    "ビルド成功"
+  ]
+}

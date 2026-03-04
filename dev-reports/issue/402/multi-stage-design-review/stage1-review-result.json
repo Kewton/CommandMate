@@ -1,0 +1,95 @@
+{
+  "issue_number": 402,
+  "stage": 1,
+  "stage_name": "通常レビュー（設計原則）",
+  "status": "conditionally_approved",
+  "score": 4,
+  "findings": [
+    {
+      "id": "S1-001",
+      "severity": "should_fix",
+      "category": "SRP",
+      "description": "detectPrompt()にログ抑制キャッシュの責務が追加される。detectPrompt()の本来の責務は「プロンプト検出」であり、「ログ出力の重複抑制」は横断的関心事（cross-cutting concern）である。現状の設計ではdetectPrompt()関数の冒頭で末尾50行の抽出・比較・キャッシュ更新を行い、関数内の複数箇所でisDuplicateフラグを参照してログをガードする。これにより、プロンプト検出ロジックとログ制御ロジックが同一関数内で混在する。",
+      "suggestion": "軽微なSRP逸脱であり、現実的にはこのアプローチが最もKISS原則に適う。ただし、将来的にログ抑制ロジックが複雑化した場合（例: worktreeId別キャッシュ、集約カウント等）に備え、キャッシュ判定を独立ヘルパー関数（例: shouldSuppressLog(output): boolean）に抽出することを検討すると良い。現時点では6行程度のインライン実装で十分であり、過度な分離はYAGNIに反する。設計方針書のD2セクションにSRP逸脱のトレードオフ根拠を明記することを推奨する。",
+      "affected_section": "4. 詳細設計 > D2: detectPrompt() への組み込み"
+    },
+    {
+      "id": "S1-002",
+      "severity": "should_fix",
+      "category": "その他",
+      "description": "モジュールスコープ変数 lastOutputTail がグローバルに共有されるため、異なるworktreeからの呼び出しが相互にキャッシュを上書きする。設計方針書DC-001で「実害小：同一outputは事実上発生しない」と記載されているが、status-detector.tsのSF-001パターン（detectSessionStatus()とcurrent-output/route.tsの二重呼び出し）では同一worktreeの同一outputが連続して渡される。一方、auto-yes-managerのポーリングが別worktreeで割り込むと、直前のキャッシュが上書きされ、キャッシュヒット率が想定より低下するケースがある。ただし、これはログ抑制が効かない（=従来通りログが出る）だけであり、機能的な問題は生じない。",
+      "suggestion": "設計方針書のDC-001トレードオフ記述に「複数worktreeが同時にアクティブな場合、キャッシュヒット率は低下するが、最悪ケースでも変更前と同等のログ量に留まり、機能劣化はない」と明記することを推奨する。将来的にworktreeId別キャッシュが必要になった場合は方式(B)への移行を検討するが、現時点ではYAGNIに従い1エントリキャッシュで十分。",
+      "affected_section": "9. 設計上の決定事項とトレードオフ > DC-001"
+    },
+    {
+      "id": "S1-003",
+      "severity": "nice_to_have",
+      "category": "命名",
+      "description": "設計方針書のセクション3タイトルが「方式(A) output文字列末尾ハッシュ」、mermaid図内のラベルが「lastOutputHash」となっているが、実際の実装ではハッシュ計算を行わず文字列比較を採用している（変数名はlastOutputTail）。設計方針書内の用語に「ハッシュ」が残っており、実装との用語不整合がある。",
+      "suggestion": "設計方針書のセクション3タイトルを「方式(A) output末尾文字列比較」に修正し、mermaid図内のlastOutputHashをlastOutputTailに統一する。実装との整合性を保つことで、将来の読者の混乱を防げる。",
+      "affected_section": "3. 技術選定 > 設計方式、2. アーキテクチャ設計 > システム構成図（変更後）"
+    },
+    {
+      "id": "S1-004",
+      "severity": "nice_to_have",
+      "category": "KISS",
+      "description": "detectPrompt()内でoutput.split('\\n')が既に行われている（L173）にもかかわらず、キャッシュ判定用に改めてoutput.split('\\n')を行う設計となっている（D2-001）。設計方針書のコード例ではconst lines = output.split('\\n')がキャッシュ判定用として先頭に配置され、その後L173相当の既存のlines変数と名前が衝突する可能性がある。",
+      "suggestion": "既存のconst lines = output.split('\\n')（L173）を関数冒頭に移動し、キャッシュ判定用のtailForDedupもこのlinesから算出するように設計方針書のコード例を修正する。split()の二重呼び出しを回避でき、DRY原則にも適う。具体的には: const lines = output.split('\\n'); const tailForDedup = lines.slice(-50).join('\\n'); const isDuplicate = tailForDedup === lastOutputTail; ... const lastLines = lines.slice(-20).join('\\n'); とすれば、1回のsplit()で両方の用途に対応できる。",
+      "affected_section": "4. 詳細設計 > D2: detectPrompt() への組み込み"
+    },
+    {
+      "id": "S1-005",
+      "severity": "nice_to_have",
+      "category": "OCP",
+      "description": "設計方針書D4-002で「ログ抑制はログ出力のみに影響し、プロンプト検出ロジック自体には影響しないこと」が制約として明記されており、OCP（既存動作を変更せずに機能追加）は遵守されている。detectPrompt()の戻り値に影響を与えない設計であり、既存の呼び出し元コードの変更も不要。この点は適切に設計されている。",
+      "suggestion": "指摘なし。OCPは良好に遵守されている。",
+      "affected_section": "4. 詳細設計 > D4: 設計制約"
+    },
+    {
+      "id": "S1-006",
+      "severity": "nice_to_have",
+      "category": "DRY",
+      "description": "設計方針書のD2コード例では、if (!isDuplicate)ガードが3箇所（L171相当、L185相当、L216相当）に分散している。現時点ではログ箇所が3つのみであり抽出の必要性は低いが、将来ログ箇所が増えた場合にガードの追加漏れリスクがある。",
+      "suggestion": "現時点では3箇所のインラインガードで十分（KISS優先）。ただし、将来ログ箇所が増える場合はlogger.debug/logger.infoをラップするconditionalLogger（例: const log = isDuplicate ? noopLogger : logger）を検討することで、ガード漏れリスクを軽減できる。設計方針書への記載は不要だが、実装時のコードコメントとして留意事項を残すことを推奨する。",
+      "affected_section": "4. 詳細設計 > D2: detectPrompt() への組み込み"
+    },
+    {
+      "id": "S1-007",
+      "severity": "nice_to_have",
+      "category": "YAGNI",
+      "description": "YAGNI原則の観点では、設計が適切にスコープされている。worktreeIdパラメータ追加（方式B）を不採用とした判断、集約ログ方式を不採用とした判断、1エントリキャッシュに限定した判断はいずれもYAGNI原則に合致している。末尾50行の比較ウィンドウサイズもdetectMultipleChoicePromptのスキャンウィンドウと一致しており合理的。",
+      "suggestion": "指摘なし。YAGNI原則は良好に遵守されている。",
+      "affected_section": "9. 設計上の決定事項とトレードオフ"
+    },
+    {
+      "id": "S1-008",
+      "severity": "should_fix",
+      "category": "その他",
+      "description": "テスト設計（セクション8）で「vi.spyOn(console, 'log')でログ出力をキャプチャ」と記載されているが、実際のloggerはcreateLogger('prompt-detector')で生成された構造化ロガーであり、console.logを直接使用していない。ログ抑制のテストではlogger.debug/logger.infoの呼び出し有無を検証する必要があるが、その具体的なモック方法が設計方針書に記載されていない。",
+      "suggestion": "テスト方式の記述を修正する。具体的には「vi.spyOn(console, 'log')」を「vi.mock('@/lib/logger')でcreateLoggerをモックし、返却されるloggerオブジェクトのdebug/infoメソッドのspy経由で呼び出し回数を検証する」に修正する。または、loggerモジュールの内部実装に依存せず、テスト用のログハンドラを注入する方法も検討できる。",
+      "affected_section": "8. テスト設計 > テスト方式"
+    }
+  ],
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "summary": {
+    "must_fix": 0,
+    "should_fix": 3,
+    "nice_to_have": 5,
+    "overall_quality": "good"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-402-detect-prompt-log-dedup-design-policy.md",
+    "src/lib/prompt-detector.ts",
+    "src/lib/status-detector.ts",
+    "src/lib/auto-yes-manager.ts",
+    "src/lib/logger.ts",
+    "src/lib/response-poller.ts",
+    "src/app/api/worktrees/[id]/current-output/route.ts",
+    "tests/unit/prompt-detector.test.ts"
+  ],
+  "timestamp": "2026-03-03T12:00:00Z"
+}

@@ -1,0 +1,121 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー",
+  "issue_number": 406,
+  "focus_area": "設計原則",
+  "review_items": [
+    {
+      "id": "DR1-001",
+      "severity": "should_fix",
+      "category": "solid",
+      "title": "DJ-002 initScheduleManager() の fire-and-forget における初回同期エラーの silent failure リスクが設計トレードオフに不十分に記述されている",
+      "description": "DJ-002 では initScheduleManager() を sync 維持し、syncSchedules() を fire-and-forget で呼び出す設計を採用している。Section 8 のトレードオフ表にも「初回同期のエラーがserver.tsに伝播しない」と記載がある。しかし、DJ-002 本体の実装セクション (Section 4.2) では `void syncSchedules()` に `.catch()` なしと記載されており、一方で DJ-003 の setInterval 内には `.catch(err => console.error(...))` が付与されている。この非対称性の設計根拠が DJ-002 の「理由」欄に明示されていない。syncSchedules() 内部の try-catch (L486/L574) で全エラーが捕捉される旨は DJ-002 の実装欄に注記があるが、DJ-003 で .catch() を付与している理由との一貫性が不明確である。",
+      "suggestion": "DJ-002 の実装欄に「DJ-003 では想定外エラーに対する多重防御として .catch() を付与するが、initScheduleManager() 内の初回呼び出しは server 起動直後の単発実行であり、syncSchedules() 内部の try-catch がエラーを完全にカバーするため .catch() を省略する」という設計根拠を明記する。あるいは統一性を重視して両方に .catch() を付けることも検討できる。",
+      "location": "Section 3: DJ-002 実装欄 と DJ-003 の非対称性"
+    },
+    {
+      "id": "DR1-002",
+      "severity": "nice_to_have",
+      "category": "solid",
+      "title": "validateCmatePath() の Promise<boolean> 戻り値は成功時 true のみを返す設計であり、boolean を返す意義が薄い",
+      "description": "現在の validateCmatePath() は成功時に true を返し、失敗時は例外を throw する設計である。async 化後も Promise<boolean> として export されるが、false を返すパスが存在しないため、戻り値の boolean に情報量がない。呼び出し元の readCmateFile() も戻り値を使用していない (L316: validateCmatePath() の戻り値は捨てられている)。Promise<void> のほうがインターフェースの意図を正確に表現する。ただし DJ-001 で「public APIとしての一貫性を維持」と判断しており、破壊的変更の範囲を限定する意図は理解できる。",
+      "suggestion": "DJ-001 のトレードオフとして「boolean 戻り値は歴史的経緯で維持するが、意味的には void と同等である」旨を注記するか、この機会に Promise<void> に変更する選択肢を DJ-001 の代替案として記載する。",
+      "location": "Section 3: DJ-001 および Section 4.1 validateCmatePath() 変更"
+    },
+    {
+      "id": "DR1-003",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "schedule-manager-cleanup.test.ts のモック方式変更が設計方針書に記載されていない",
+      "description": "Section 7 の変更ファイル表に schedule-manager-cleanup.test.ts が「mockResolvedValue変更」として記載されているが、Section 4.3 のテスト変更の詳細設計には cmate-parser.test.ts と schedule-manager.test.ts のみが記載されており、schedule-manager-cleanup.test.ts の具体的な変更内容が欠落している。実際の schedule-manager-cleanup.test.ts (L78-81) では既に `vi.mock('../../../src/lib/cmate-parser', ...)` で `readCmateFile: vi.fn().mockReturnValue(null)` を使用しており、これを `mockResolvedValue(null)` に変更する必要がある。",
+      "suggestion": "Section 4.3 に schedule-manager-cleanup.test.ts の変更詳細を追加する。具体的には L79 の `mockReturnValue(null)` を `mockResolvedValue(null)` に変更する旨を記載する。",
+      "location": "Section 4.3 テスト変更 および Section 7 変更ファイル表"
+    },
+    {
+      "id": "DR1-004",
+      "severity": "nice_to_have",
+      "category": "yagni",
+      "title": "DJ-004 の getCmateMtime() statSync スコープ外判断は適切だが、将来の非同期化余地について言及があると良い",
+      "description": "DJ-004 では getCmateMtime() 内の statSync() を同期のまま維持する判断をしており、その理由（メタデータ読み取りのブロッキング時間が <1ms）は妥当である。YAGNI 原則に則り現時点で非同期化しないのは正しい。ただし Section 6 パフォーマンス設計の「注意点」で逐次処理の維持について「将来の最適化候補」と言及しているのに対し、statSync() の将来的な非同期化可能性については全く触れていない。対称性として、DJ-004 にも一言あると設計の一貫性が向上する。",
+      "suggestion": "DJ-004 に「将来 worktree 数が大幅に増加した場合は fs.promises.stat() への移行を検討する」程度の一文を追加する。",
+      "location": "Section 3: DJ-004"
+    },
+    {
+      "id": "DR1-005",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "syncSchedules() の async 化に伴う for...of ループ内の await による逐次実行の設計判断が Section 3 で独立した DJ として記載されていない",
+      "description": "Section 4.2 の syncSchedules() 変更で readCmateFile() に await を追加するが、これは for...of ループ (L485) 内での逐次 await を意味する。Section 6 パフォーマンス設計の「注意点」に逐次処理の維持が記載され、Section 8 のトレードオフ表にも「逐次worktree処理の維持」が含まれるが、Section 3 の設計判断 (DJ-001 ~ DJ-005) には独立した DJ として記載されていない。他の全ての設計判断が DJ 番号付きで管理されている中で、この重要な設計判断だけが Section 6/8 に分散しているのは一貫性に欠ける。",
+      "suggestion": "DJ-006 として「syncSchedules() 内の worktree ループは逐次 await を維持（Promise.all 並列化はスコープ外）」を Section 3 に追加し、Section 6/8 からは DJ-006 を参照する形にする。",
+      "location": "Section 3: 設計判断 (DJ-006 が欠落)"
+    },
+    {
+      "id": "DR1-006",
+      "severity": "nice_to_have",
+      "category": "dry",
+      "title": "Section 4.2 の initScheduleManager() と setInterval の fire-and-forget パターンが類似しているが、共通化の検討がない",
+      "description": "initScheduleManager() 内の `void syncSchedules()` と setInterval 内の `void syncSchedules().catch(...)` は同じ syncSchedules() を fire-and-forget で呼び出すパターンだが、.catch() の有無が異なる。これ自体は DR1-001 で指摘した通り設計根拠があるが、仮に両方とも .catch() を付ける場合、ヘルパー関数への抽出（例: `function triggerSync(): void { void syncSchedules().catch(...); }`）で DRY にできる可能性がある。ただしこの変更は Issue #406 のスコープを超える可能性があり、YAGNI の観点から過剰最適化かもしれない。",
+      "suggestion": "現時点では対応不要。将来的に syncSchedules() の呼び出しパターンが増えた場合にヘルパー関数への抽出を検討する旨を注記するに留める。",
+      "location": "Section 4.2 initScheduleManager() 変更 と setInterval 変更"
+    },
+    {
+      "id": "DR1-007",
+      "severity": "should_fix",
+      "category": "clarity",
+      "title": "Section 4.1 の import 文変更で readFileSync/realpathSync の削除が明示されていない",
+      "description": "Section 4.1 の import 文変更では Before/After のコードが示されているが、readFileSync と realpathSync が完全に不要になり import ごと削除されることの影響について言及がない。特に cmate-parser.ts の他の関数（parseCmateFile, parseSchedulesSection, sanitizeMessageContent 等）が fs モジュールの同期 API を使用していないことの確認が暗黙的になっている。実装者がうっかり import 'fs' を残してしまうリスクを防ぐため、「import { readFileSync, realpathSync } from 'fs' を完全に削除し、import { realpath, readFile } from 'fs/promises' に置き換える」と明記すべきである。",
+      "suggestion": "Section 4.1 の import 文変更セクションに「既存の 'fs' からの import は完全に削除される（parseCmateFile 等の他の関数は fs モジュールに依存しない純粋関数のため影響なし）」という確認事項を追加する。",
+      "location": "Section 4.1 import文変更"
+    },
+    {
+      "id": "DR1-008",
+      "severity": "nice_to_have",
+      "category": "kiss",
+      "title": "全体的な設計方針はシンプルで適切であり、KISS 原則に良く準拠している",
+      "description": "本設計方針書は、同期 I/O を非同期 I/O に置き換えるという明確で限定的な変更に焦点を当てており、不要な複雑性の導入を避けている。具体的には (1) initScheduleManager() の sync API 維持による波及範囲の限定、(2) getCmateMtime() の statSync 維持によるスコープ限定、(3) 逐次処理の維持による既存パターンの保持。いずれも KISS 原則に準拠した妥当な判断である。",
+      "suggestion": "肯定的な所見であり、改善提案は不要。",
+      "location": "設計方針書全体"
+    },
+    {
+      "id": "DR1-009",
+      "severity": "nice_to_have",
+      "category": "solid",
+      "title": "cmate-parser.ts の責務分離（SRP）は維持されている",
+      "description": "async 化後も cmate-parser.ts の責務は「CMATE.md ファイルの読み取りとパース」に限定されており、単一責任原則（SRP）は維持されている。I/O 操作（validateCmatePath, readCmateFile）と純粋関数（parseCmateFile, parseSchedulesSection, sanitizeMessageContent）の境界が明確で、async 化は I/O 関数のみに適用される設計は適切である。",
+      "suggestion": "肯定的な所見であり、改善提案は不要。",
+      "location": "Section 4.1 全体"
+    },
+    {
+      "id": "DR1-010",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "readCmateFile() の async 化に伴い、readCmateFile() の呼び出し元の網羅的確認が不足している",
+      "description": "Section 7 の影響範囲分析では schedule-manager.ts の syncSchedules() 内の readCmateFile() 呼び出し（L516）のみが対象として挙げられている。Grep 結果からも現在の呼び出し元は schedule-manager.ts のみであることが確認できるが、設計方針書には「readCmateFile() の呼び出し元を網羅的に検索し、schedule-manager.ts 以外に呼び出し元がないことを確認済み」という検証結果が明示されていない。DJ-001 で「外部呼び出し元なし」と述べているのは validateCmatePath() についてのみであり、readCmateFile() についても同様の確認を明記すべきである。",
+      "suggestion": "Section 7 の影響範囲分析に「readCmateFile() の呼び出し元は schedule-manager.ts (L516) のみであることを確認済み（grep 結果: src/ 配下で import/require している箇所は schedule-manager.ts のみ）」と追記する。",
+      "location": "Section 7: 影響範囲"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 1,
+    "should_fix_count": 3,
+    "nice_to_have_count": 6,
+    "overall_quality": "good"
+  },
+  "status": "conditionally_approved",
+  "score": 4,
+  "risk_assessment": {
+    "technical": "low",
+    "security": "low",
+    "operational": "low"
+  },
+  "reviewed_files": [
+    "dev-reports/design/issue-406-async-cmate-parser-design-policy.md",
+    "src/lib/cmate-parser.ts",
+    "src/lib/schedule-manager.ts",
+    "server.ts",
+    "tests/unit/lib/cmate-parser.test.ts",
+    "tests/unit/lib/schedule-manager.test.ts",
+    "tests/unit/lib/schedule-manager-cleanup.test.ts"
+  ],
+  "timestamp": "2026-03-04T12:30:00Z"
+}

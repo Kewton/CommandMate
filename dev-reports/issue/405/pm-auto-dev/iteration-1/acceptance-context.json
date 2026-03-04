@@ -1,0 +1,27 @@
+{
+  "issue_number": 405,
+  "feature_summary": "perf: tmux capture最適化 - N+1パターン解消・キャッシュ導入・ポーリング効率改善",
+  "acceptance_criteria": [
+    "同一セッションの重複tmux captureが排除されること",
+    "非実行中CLIツールへの不要なtmux操作がスキップされること",
+    "キャッシュ導入後、セッションステータスの反映遅延がキャッシュTTL（2秒）以内に収まること",
+    "ユーザーがコマンド送信後、次回ポーリングでステータスが更新されること（キャッシュ無効化が正しく動作すること）",
+    "既存のプロンプト検出・auto-yes動作に影響がないこと",
+    "テストがパスすること",
+    "captureSessionOutput()のインターフェースが変更されないこと（既存テストが変更なしでパスすること）",
+    "GET /api/worktrees/[id] にもlistSessions()一括取得・active CLI tool絞り込みが適用されていること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: キャッシュモジュール動作確認 - getCachedCapture/setCachedCapture/invalidateCacheが正しく動作すること",
+    "シナリオ2: TTL失効確認 - 2秒後にキャッシュがミスすること",
+    "シナリオ3: full sweep確認 - setCachedCapture時に期限切れエントリが削除されること",
+    "シナリオ4: singleflight確認 - 同時リクエストで重複captureが発生しないこと",
+    "シナリオ5: captureSessionOutput()インターフェース不変確認 - 既存テストが変更なしでパスすること",
+    "シナリオ6: captureSessionOutputFresh()動作確認 - キャッシュをバイパスしフレッシュデータを取得すること",
+    "シナリオ7: キャッシュ無効化確認 - 全8箇所（claude/codex/gemini/opencode/vibe-local/terminal/auto-yes/prompt-answer-sender）でsendMessage/sendKeys後にキャッシュが無効化されること",
+    "シナリオ8: listSessions()一括取得確認 - worktrees/route.tsとworktrees/[id]/route.tsでN+1が解消されていること",
+    "シナリオ9: isSessionHealthy()export確認 - @internal除去後にroute.tsから正常に呼び出せること",
+    "シナリオ10: graceful shutdown確認 - clearAllCache()がsession-cleanup.tsで呼ばれること"
+  ],
+  "tdd_result_path": "dev-reports/issue/405/pm-auto-dev/iteration-1/tdd-result.json"
+}

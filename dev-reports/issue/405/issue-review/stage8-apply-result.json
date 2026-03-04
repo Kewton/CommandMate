@@ -1,0 +1,42 @@
+{
+  "issue_number": 405,
+  "stage": 8,
+  "stage_name": "指摘事項反映（2回目）",
+  "applied_items": [
+    {
+      "review_id": "R7-001",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "影響範囲テーブルに `src/app/api/worktrees/[id]/capture/route.ts` を追加。capturePane()を直接呼び出しており、captureSessionOutput()を経由しない設計であることを明記。ターミナルUI向け専用APIとしてキャッシュ対象外とする設計判断を注記（キャッシュ層（最大10,000行の固定キャッシュ+sliceパターン）とは異なるユースケース、キャッシュTTL=2秒以内での同時tmuxアクセスは許容する旨を記載）"
+    },
+    {
+      "review_id": "R7-002",
+      "severity": "should_fix",
+      "status": "applied",
+      "changes_made": "影響範囲テーブルに `src/app/api/worktrees/[id]/terminal/route.ts` を追加。sendKeys()後のキャッシュ無効化フック挿入が必要であることを明記（B案に基づく呼び出し元での明示的キャッシュクリア、ユーザーがターミナルUIからコマンド送信した直後に古いキャッシュが返されることを防止）。実装タスクのキャッシュ無効化フック挿入箇所リストにterminal/route.tsを追加"
+    }
+  ],
+  "skipped_items": [
+    {
+      "review_id": "R7-003",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "Nice to Haveのため反映対象外。session-cleanup.tsのキャッシュクリア粒度（worktree単位の個別削除 vs 全クリア）は実装時判断とする"
+    },
+    {
+      "review_id": "R7-004",
+      "severity": "nice_to_have",
+      "status": "skipped",
+      "reason": "Nice to Haveのため反映対象外。BaseCLITool.interrupt()のキャッシュ無効化はキャッシュTTL=2秒以内でステータスが反映されるため、明示的な対応は不要と判断"
+    }
+  ],
+  "summary": {
+    "total_items": 2,
+    "applied_count": 2,
+    "skipped_count": 0,
+    "nice_to_have_skipped": 2,
+    "github_issue_updated": true,
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/405",
+    "comments": "最終反映完了。R7-001（capture/route.tsのキャッシュ対象外設計判断の注記）とR7-002（terminal/route.tsのsendKeys()後キャッシュ無効化フック追加）を影響範囲テーブルおよび実装タスクに反映。影響範囲テーブルは19ファイルから21ファイルに拡充され、全てのtmux操作呼び出し元が網羅された。Nice to Have 2件（R7-003, R7-004）は反映対象外として処理済み。Issueは実装着手可能な品質に達している。"
+  }
+}

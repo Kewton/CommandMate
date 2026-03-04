@@ -1,0 +1,9 @@
+{
+  "issue_number": 404,
+  "stage": 3,
+  "applied_findings": ["R3-001", "R3-002", "R3-003", "R3-004"],
+  "skipped_findings": ["R3-005", "R3-006"],
+  "design_doc_updated": true,
+  "source_code_modified": false,
+  "summary": "Stage 3影響分析レビューの指摘事項4件を設計方針書に反映。R3-001: Section 5.1にsession-cleanup.test.tsのvi.mock前提条件（auto-yes-manager, schedule-manager）と実装時の必須前提ステップを追記。R3-002: Section 3.3の実装上の制約テーブルにDB lookup前提条件（worktreeレコード削除前の呼び出し必須）とフォールバック処理（DB lookup失敗時はcmateFileCache残留を許容しスケジュール・cronJob停止のみ実施）を追記。R3-003: Section 3.1のinitResourceCleanup()インターフェースにglobalThis.__resourceCleanupTimerIdによる二重実行防止コメントとschedule-manager.tsの参考パターンを追記。R3-004: Section 3.1のcleanupOrphanedMapEntries()にbetter-sqlite3同期APIとNode.jsシングルスレッド特性によるレース条件なしの設計根拠と将来のDB非同期化リスク注記を追記。R3-005（N回DB lookupパターン）はMAX_CONCURRENT_SCHEDULES=100範囲内で性能影響が無視できるためスキップ。R3-006（cmateFileCache削除の副作用）は現時点でworktree削除コンテキストのみが呼び出し元であり実害なしのためスキップ。Section 0のレビュー指摘事項サマリーにStage 3テーブルと実装チェックリスト4項目を追加。"
+}
