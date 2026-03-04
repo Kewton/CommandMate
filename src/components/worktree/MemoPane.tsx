@@ -148,8 +148,8 @@ export const MemoPane = memo(function MemoPane({
           data-testid="memo-loading"
           className="flex flex-col items-center gap-3"
         >
-          <div className="w-8 h-8 border-4 border-gray-200 border-t-blue-500 rounded-full animate-spin" />
-          <span className="text-sm text-gray-500">Loading memos...</span>
+          <div className="w-8 h-8 border-4 border-gray-200 dark:border-gray-700 border-t-cyan-500 rounded-full animate-spin" />
+          <span className="text-sm text-gray-500 dark:text-gray-400">Loading memos...</span>
         </div>
       </div>
     );
@@ -176,12 +176,12 @@ export const MemoPane = memo(function MemoPane({
               d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          <span className="text-sm text-red-600">{error}</span>
+          <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
           <button
             type="button"
             onClick={handleRetry}
             aria-label="Retry"
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-white bg-cyan-500 rounded-lg hover:bg-cyan-600 transition-colors"
           >
             Retry
           </button>
@@ -197,7 +197,7 @@ export const MemoPane = memo(function MemoPane({
     >
       {/* Empty state */}
       {memos.length === 0 && !createError && (
-        <div className="text-center py-8 text-gray-500">
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
           <p>No memos yet.</p>
           <p className="text-sm">Click the button below to add one.</p>
         </div>

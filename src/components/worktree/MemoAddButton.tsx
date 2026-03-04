@@ -78,17 +78,17 @@ export const MemoAddButton = memo(function MemoAddButton({
         aria-disabled={isDisabled}
         className={`
           flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-dashed
-          transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500
+          transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500
           ${isDisabled
-            ? 'border-gray-200 text-gray-400 cursor-not-allowed opacity-50'
-            : 'border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50'
+            ? 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50'
+            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-cyan-400 dark:hover:border-cyan-500 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/30'
           }
         `}
       >
         {isLoading ? (
           <span
             data-testid="loading-indicator"
-            className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"
+            className="w-5 h-5 border-2 border-gray-300 dark:border-gray-600 border-t-cyan-500 rounded-full animate-spin"
           />
         ) : (
           <svg
@@ -108,7 +108,7 @@ export const MemoAddButton = memo(function MemoAddButton({
         )}
         <span className="text-sm font-medium">Add Memo</span>
       </button>
-      <span className="text-xs text-gray-500">
+      <span className="text-xs text-gray-500 dark:text-gray-400">
         {remaining} remaining
       </span>
     </div>

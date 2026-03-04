@@ -25,7 +25,7 @@ const BUTTON_BASE_STYLES = `
 `.trim();
 
 /** Primary button styles */
-const BUTTON_PRIMARY_STYLES = 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500';
+const BUTTON_PRIMARY_STYLES = 'bg-cyan-600 text-white hover:bg-cyan-700 focus:ring-cyan-500';
 
 /** Secondary button styles */
 const BUTTON_SECONDARY_STYLES = 'bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 focus:ring-gray-500';
@@ -130,7 +130,7 @@ function PromptPanelContent({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 id={labelId} className="text-lg font-semibold text-yellow-800 flex items-center gap-2">
+        <h3 id={labelId} className="text-lg font-semibold text-yellow-800 dark:text-yellow-300 flex items-center gap-2">
           <span className="text-xl" aria-hidden="true">?</span>
           {cliToolName ? t('confirmationFrom', { toolName: cliToolName }) : t('confirmationFromClaude')}
         </h3>
@@ -139,9 +139,9 @@ function PromptPanelContent({
             type="button"
             onClick={onDismiss}
             aria-label="close"
-            className="p-1 rounded hover:bg-yellow-200 transition-colors"
+            className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-gray-700 transition-colors"
           >
-            <svg className="w-5 h-5 text-yellow-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <svg className="w-5 h-5 text-yellow-700 dark:text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -160,7 +160,7 @@ function PromptPanelContent({
 
       {/* Answering indicator */}
       {isDisabled && (
-        <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-gray-500" role="status" aria-live="polite">
+        <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400" role="status" aria-live="polite">
           <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" aria-hidden="true" />
           <span>{t('sending')}</span>
         </div>
@@ -300,7 +300,7 @@ function MultipleChoicePromptActions({
               <div className="flex-1">
                 <span className="font-medium">{option.number}. {option.label}</span>
                 {option.isDefault && (
-                  <span id={`default-${option.number}`} className="ml-2 text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+                  <span id={`default-${option.number}`} className="ml-2 text-xs text-cyan-600 dark:text-cyan-400 bg-cyan-100 dark:bg-cyan-900/30 px-2 py-0.5 rounded">
                     {t('default')}
                   </span>
                 )}
@@ -343,7 +343,7 @@ function MultipleChoicePromptActions({
  * Generates container class names based on animation state
  */
 function getContainerClasses(animationClass: string): string {
-  const baseClasses = 'bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4 shadow-lg transition-all duration-200 ease-in-out';
+  const baseClasses = 'bg-yellow-50 dark:bg-gray-800 border-2 border-yellow-300 dark:border-yellow-600 rounded-lg p-4 shadow-lg transition-all duration-200 ease-in-out';
 
   let animationStyles = 'opacity-100';
   if (animationClass === 'animate-fade-in') {
