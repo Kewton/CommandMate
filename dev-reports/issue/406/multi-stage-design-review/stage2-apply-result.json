@@ -1,0 +1,76 @@
+{
+  "stage": 2,
+  "stage_name": "整合性レビュー",
+  "issue_number": 406,
+  "status": "completed",
+  "applied_items": [
+    {
+      "id": "DR2-001",
+      "severity": "should_fix",
+      "title": "Section 4.3: schedule-manager.test.ts のモック方式の記載が現状コードと異なる",
+      "action": "Section 4.3 の schedule-manager.test.ts 部分に Before（現状の vi.doMock('fs', ...) パターン、L277-281、readFileSync/realpathSync を含む）を明示的に記載し、After では cmate-parser モジュールモック導入により readFileSync/realpathSync のモックが不要になることを説明。既存テストケース4件の async/await 対応必要性を補足。実装チェックリストにも2項目追加。",
+      "location": "Section 4.3 + Section 9"
+    },
+    {
+      "id": "DR2-006",
+      "severity": "should_fix",
+      "title": "Section 4.1 import文変更で readFile の named import が fs/promises の仕様と一致するか確認注記が必要",
+      "action": "プロジェクト内の fs/promises 使用パターンを調査し、named import パターン（import { xxx } from 'fs/promises'）が5ファイルで標準使用されていることを確認。提案する import { realpath, readFile } from 'fs/promises' がプロジェクト規約に合致する旨の注記を Section 4.1 に追加。log-manager.ts の default import は例外的パターンとして記録。",
+      "location": "Section 4.1"
+    }
+  ],
+  "skipped_items": [],
+  "nice_to_have_items": [
+    {
+      "id": "DR2-002",
+      "title": "DJ-002 の try-catch カバレッジの正確性",
+      "reason": "L579-586の cronJob.stop() 例外リスクは極めて低く、本Issue変更スコープ外"
+    },
+    {
+      "id": "DR2-003",
+      "title": "Section 7 影響なしファイルに cmate-validator.ts の補足が不正確",
+      "reason": "現状の記載は正確であり修正不要"
+    },
+    {
+      "id": "DR2-004",
+      "title": "syncSchedules() async 化に伴い stale cleanup ループも await 対象になりうる",
+      "reason": "async化はreadCmateFile()のawait追加のみに限定"
+    },
+    {
+      "id": "DR2-005",
+      "title": "validateCmatePath() Before コードスニペットが関数シグネチャの改行を省略",
+      "reason": "設計方針書の簡略表記として妥当"
+    },
+    {
+      "id": "DR2-007",
+      "title": "Section 9 実装チェックリストの順序が Section 4 の記述順序と一致",
+      "reason": "肯定的所見"
+    },
+    {
+      "id": "DR2-008",
+      "title": "Section 2 呼び出しフロー図が実際のコードフローと整合",
+      "reason": "肯定的所見"
+    },
+    {
+      "id": "DR2-009",
+      "title": "全行番号参照が現在のコードベースと一致",
+      "reason": "肯定的所見"
+    },
+    {
+      "id": "DR2-010",
+      "title": "readCmateFile() 呼び出し元の網羅的確認結果が正確",
+      "reason": "肯定的所見"
+    }
+  ],
+  "updated_files": [
+    "dev-reports/design/issue-406-async-cmate-parser-design-policy.md"
+  ],
+  "summary": {
+    "total_review_items": 10,
+    "applied_count": 2,
+    "skipped_count": 0,
+    "nice_to_have_count": 8,
+    "design_policy_sections_updated": ["Section 4.1", "Section 4.3", "Section 9", "Section 10", "Section 11"]
+  },
+  "timestamp": "2026-03-04T13:00:00Z"
+}

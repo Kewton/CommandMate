@@ -1,0 +1,23 @@
+{
+  "issue_number": 406,
+  "feature_summary": "cmate-parserの同期I/Oを非同期化してイベントループブロックを解消",
+  "acceptance_criteria": [
+    "validateCmatePath() および readCmateFile() 内に同期ファイルI/Oが残っていないこと",
+    "readCmateFile() が CMATE.md 不存在時に null を返す動作が async 化後も維持されること（テストで検証）",
+    "スケジュールマネージャの CMATE.md 読み込みが正常に動作すること",
+    "syncSchedules() の並行実行が isSyncing ガードで防止されること",
+    "既存テストが全てパスすること"
+  ],
+  "test_scenarios": [
+    "シナリオ1: cmate-parser.ts に realpathSync/readFileSync の呼び出しが残っていないことをgrepで確認",
+    "シナリオ2: validateCmatePath() が async function として定義されており Promise<boolean> を返すことを確認",
+    "シナリオ3: readCmateFile() が async function として定義されており Promise<CmateConfig | null> を返すことを確認",
+    "シナリオ4: schedule-manager.ts の syncSchedules() が async function であることを確認",
+    "シナリオ5: ManagerState に isSyncing: boolean が追加され、syncSchedules() の先頭でガードチェックが行われることを確認",
+    "シナリオ6: initScheduleManager() 内で void syncSchedules() (fire-and-forget) が使用されていることを確認",
+    "シナリオ7: setInterval 内で void syncSchedules().catch(...) が使用されていることを確認",
+    "シナリオ8: npx tsc --noEmit で型エラーが0件であることを確認",
+    "シナリオ9: npm run lint でエラーが0件であることを確認",
+    "シナリオ10: npm run test:unit で全テストがパスすることを確認"
+  ]
+}

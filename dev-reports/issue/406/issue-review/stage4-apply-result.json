@@ -1,0 +1,64 @@
+{
+  "issue_number": 406,
+  "iteration": 1,
+  "stage": 4,
+  "stage_name": "指摘事項反映（1回目）- Stage 3 影響範囲レビュー",
+  "apply_date": "2026-03-04",
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "R3-001",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルに tests/unit/lib/schedule-manager-cleanup.test.ts を追加。実装タスクに「readCmateFile モックを mockReturnValue(null) から mockResolvedValue(null) に変更」を追加。"
+      },
+      {
+        "id": "R3-002",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルに tests/unit/lib/schedule-manager.test.ts を追加（mtime cache テスト内の fs モックを fs/promises 対応に変更）。実装タスクに対応項目を追加。"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "R3-003",
+        "status": "applied",
+        "change_summary": "提案する解決策セクションに「validateCmatePath() は引き続き export する（戻り値型は boolean から Promise<boolean> に変更）」を追記。実装タスクの validateCmatePath() 項目に「export 維持、戻り値型: Promise<boolean>」を明記。"
+      },
+      {
+        "id": "R3-004",
+        "status": "applied",
+        "change_summary": "実装タスクの realpathSync 置換項目に「ENOENT エラー時の動作確認含む」を追記。"
+      },
+      {
+        "id": "R3-005",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルに CLAUDE.md を追加（cmate-parser.ts と schedule-manager.ts のモジュール説明に async 化の変更を反映）。"
+      },
+      {
+        "id": "R3-006",
+        "status": "applied",
+        "change_summary": "実装タスクの setInterval 項目を「void syncSchedules().catch(err => console.error('[schedule-manager] Unexpected sync error:', err))」パターンに具体化。"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "R3-007",
+        "status": "applied",
+        "change_summary": "影響範囲テーブルの cmate-parser.ts エントリに「import 文を fs から fs/promises に変更」を追記。"
+      },
+      {
+        "id": "R3-008",
+        "status": "applied",
+        "change_summary": "影響範囲セクション末尾に「cmate-validator.ts は cmate-parser.ts に依存していないため影響なし」「server.ts は initScheduleManager() が sync のまま維持されるため影響なし」の除外注記を追加。"
+      }
+    ]
+  },
+  "summary": {
+    "total_findings": 8,
+    "applied": 8,
+    "skipped": 0
+  },
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/406"
+  }
+}

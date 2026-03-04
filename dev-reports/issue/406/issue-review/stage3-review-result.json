@@ -1,0 +1,158 @@
+{
+  "stage": 3,
+  "stage_name": "影響範囲レビュー（1回目）",
+  "issue_number": 406,
+  "review_date": "2026-03-04",
+  "focus_area": "影響範囲",
+  "iteration": 1,
+  "review_items": [
+    {
+      "id": "R3-001",
+      "severity": "must_fix",
+      "category": "testing",
+      "title": "schedule-manager-cleanup.test.ts のモックが mockReturnValue を使用しており async 化後に不整合となる",
+      "description": "tests/unit/lib/schedule-manager-cleanup.test.ts L79 で readCmateFile のモックを vi.fn().mockReturnValue(null) としている。readCmateFile() が async 化されると戻り値は Promise<CmateConfig | null> になるため、mockReturnValue(null) ではモックが同期的に null を返し、呼び出し元の await readCmateFile() が null ではなく Promise<null> をアンラップした null を返す。vitest の mockReturnValue は Promise を返さないため、schedule-manager.ts の syncSchedules() 内で const config = await readCmateFile(worktree.path) とした場合、結果的には同じ null が得られるが、これは偶然の互換性である。正しくは mockResolvedValue(null) に変更すべきである。同様に parseSchedulesSection のモックも vi.fn().mockReturnValue([]) だが、こちらは sync 関数のままなので問題ない。",
+      "suggestion": "影響範囲テーブルに tests/unit/lib/schedule-manager-cleanup.test.ts を追加し、実装タスクに「readCmateFile モックを mockReturnValue(null) から mockResolvedValue(null) に変更」を追加する。",
+      "location": "## 影響範囲 / ## 実装タスク"
+    },
+    {
+      "id": "R3-002",
+      "severity": "must_fix",
+      "category": "testing",
+      "title": "schedule-manager.test.ts の mtime cache テスト内の fs モックが readFileSync/realpathSync を使用しており async 化後に不整合となる",
+      "description": "tests/unit/lib/schedule-manager.test.ts L277-281 で vi.doMock('fs', ...) を使用し readFileSync と realpathSync をモック化している。しかし、cmate-parser.ts の async 化後は fs.promises.readFile() と fs.promises.realpath() が使用されるため、このモックは無効になる。syncSchedules() テスト（mtime cache テスト群: L273-338）が正しく動作するには、fs/promises のモック化または cmate-parser モジュール自体のモック化に変更する必要がある。なお、schedule-manager.test.ts は cmate-parser をモック化していない（cleanup テストとは異なり、実際の cmate-parser を経由している）ため、この影響は顕在化する。",
+      "suggestion": "影響範囲テーブルの tests/unit/lib/schedule-manager.test.ts のエントリに、fs モック更新の必要性を記載する。具体的には: (1) vi.doMock('fs', ...) を vi.doMock('fs/promises', ...) に変更、または (2) cmate-parser モジュール自体をモック化する方針に変更する。実装タスクにも対応項目を追加する。",
+      "location": "## 影響範囲 / ## 実装タスク"
+    },
+    {
+      "id": "R3-003",
+      "severity": "should_fix",
+      "category": "type_system",
+      "title": "validateCmatePath() の public export 維持に関する設計判断が未記載",
+      "description": "validateCmatePath() は export されている public API だが、実際には cmate-parser.ts 内の readCmateFile() からしか呼ばれておらず、外部モジュールからの直接呼び出しはない（src/ 内の grep で確認済み）。async 化により戻り値が boolean から Promise<boolean> に変更されると破壊的変更となる。テスト (cmate-parser.test.ts L358-391) でのみ直接呼び出されている。将来の外部呼び出しに備えて export を維持するか、internal に変更してテストアプローチを調整するか、設計判断を明示すべき。",
+      "suggestion": "Issue本文に以下いずれかの設計判断を記載する: (A) validateCmatePath() は引き続き export する。戻り値型は Promise<boolean> に変更。テストは await/.rejects パターンに更新（既に実装タスクに記載済み）。(B) validateCmatePath() を内部関数化（export 削除）し、readCmateFile() 経由でのみテストする。本レビューでは (A) を推奨（既存の Issue タスクと整合するため）。",
+      "location": "## 実装タスク"
+    },
+    {
+      "id": "R3-004",
+      "severity": "should_fix",
+      "category": "error_handling",
+      "title": "validateCmatePath() の同期 throw から非同期 reject への変更がエラーハンドリングに与える影響の明示",
+      "description": "現在の validateCmatePath() はパストラバーサル検出時に同期的に throw する（L92-94）。async 化後は rejected Promise として返される。readCmateFile() 内の try-catch (L314-328) では現在 validateCmatePath() と readFileSync() の両方の例外を同一の try-catch でキャッチしている。async 化後は try-catch 内で await validateCmatePath() とするため、reject は引き続き catch ブロックでキャッチされ、既存のエラーハンドリングロジック（ENOENT チェックと re-throw）は維持される。機能的には変更なしだが、fs.promises.realpath() が ENOENT エラーを返す場合（ファイルが存在しない場合）、現在の realpathSync と同じ ENOENT コードが保持されることを確認する必要がある。",
+      "suggestion": "実装時の注意事項として、以下を確認項目に含める: fs.promises.realpath() は ENOENT エラー時に realpathSync() と同じ NodeJS.ErrnoException (code: 'ENOENT') を throw することを確認する。readCmateFile() の catch ブロックの ENOENT 判定ロジックが async 化後も正しく動作することをテストで検証する。",
+      "location": "## 実装タスク"
+    },
+    {
+      "id": "R3-005",
+      "severity": "should_fix",
+      "category": "documentation",
+      "title": "CLAUDE.md の cmate-parser.ts と schedule-manager.ts のモジュール説明に async 化の変更が未反映",
+      "description": "CLAUDE.md の主要機能モジュールテーブルで cmate-parser.ts のエントリ（L177）に validateCmatePath() と readCmateFile() の説明があるが、async 化は記載されていない。同様に schedule-manager.ts のエントリにも syncSchedules() の async 化に関する記述がない。Issue #406 の実装タスク完了後に CLAUDE.md の更新が必要だが、影響範囲テーブルに CLAUDE.md が含まれていない。",
+      "suggestion": "影響範囲テーブルに以下を追加する: | CLAUDE.md | cmate-parser.ts エントリに async 化（validateCmatePath/readCmateFile）を記載、schedule-manager.ts エントリに syncSchedules の async 化を記載 |",
+      "location": "## 影響範囲"
+    },
+    {
+      "id": "R3-006",
+      "severity": "should_fix",
+      "category": "impact_scope",
+      "title": "syncSchedules() の async 化による setInterval コールバック内の未処理 Promise rejection リスク",
+      "description": "Issue のタスクでは setInterval 内の呼び出しを void syncSchedules() に変更すると記載されている（Stage 2 反映済み）。void キーワードは Promise の結果を明示的に無視するが、syncSchedules() 内部で未処理の例外が発生した場合、UnhandledPromiseRejection となる可能性がある。現在の syncSchedules() は各 worktree のループ内で try-catch (L574-576) を使用しており、個別 worktree のエラーは catch されるが、getAllWorktrees() 自体のエラー（L480）や disableStaleSchedules() のエラー（L589-590）も try-catch で保護されている。ただし、syncSchedules() 関数のトップレベルで予期しない例外が発生した場合（例: getManagerState() の失敗など）の保護は明示されていない。",
+      "suggestion": "syncSchedules() の async 化時に、関数全体を try-catch で囲むか、setInterval 内の呼び出しを void syncSchedules().catch(err => console.error('[schedule-manager] Unexpected sync error:', err)) パターンにすることを検討する。どちらのアプローチを採用するか実装タスクに記載する。",
+      "location": "## 実装タスク"
+    },
+    {
+      "id": "R3-007",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "cmate-parser.ts の import 文変更の明示",
+      "description": "cmate-parser.ts L15 で import { readFileSync, realpathSync } from 'fs' としている。async 化後は import を fs/promises に変更する必要がある（例: import { realpath, readFile } from 'fs/promises'）。影響範囲テーブルの cmate-parser.ts のエントリに関数変更のみ記載されているが、import 文の変更も含まれることを明示するとよい。",
+      "suggestion": "影響範囲テーブルの cmate-parser.ts の変更内容に「import 文を fs から fs/promises に変更」を追記する。",
+      "location": "## 影響範囲"
+    },
+    {
+      "id": "R3-008",
+      "severity": "nice_to_have",
+      "category": "impact_scope",
+      "title": "cmate-validator.ts との整合性確認（影響なし）",
+      "description": "cmate-validator.ts は cmate-parser.ts の parseCmateFile() のクライアントサイド等価物を独自実装しており、cmate-parser.ts からの import はない（@/config/cmate-constants からのみ import）。validateCmatePath()/readCmateFile() の async 化は cmate-validator.ts に影響しない。この確認結果を明示すると、レビュアーの安心材料となる。",
+      "suggestion": "影響範囲セクションに「cmate-validator.ts は cmate-parser.ts に依存していないため影響なし」という除外情報を注記として追加する。",
+      "location": "## 影響範囲"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2,
+    "overall_quality": "needs_improvement"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cmate-parser.ts",
+      "lines": "L15, L80-98, L311-329",
+      "relevance": "変更対象: import 文 (L15)、validateCmatePath() (L80-98)、readCmateFile() (L311-329)"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "lines": "L478-591, L603-626",
+      "relevance": "syncSchedules() の async 化 (L478)、readCmateFile() 呼び出し (L516)、initScheduleManager() の fire-and-forget (L617, L620-622)"
+    },
+    {
+      "file": "tests/unit/lib/cmate-parser.test.ts",
+      "lines": "L358-391",
+      "relevance": "validateCmatePath テスト: async/await + .rejects.toThrow() パターンへの変更（既に Issue タスクに記載済み）"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager.test.ts",
+      "lines": "L273-338",
+      "relevance": "mtime cache テスト: vi.doMock('fs', ...) の readFileSync/realpathSync モックが async 化後に無効になる"
+    },
+    {
+      "file": "tests/unit/lib/schedule-manager-cleanup.test.ts",
+      "lines": "L78-81",
+      "relevance": "readCmateFile モック: mockReturnValue(null) を mockResolvedValue(null) に変更が必要"
+    },
+    {
+      "file": "src/lib/cmate-validator.ts",
+      "lines": "L1-17",
+      "relevance": "cmate-parser.ts に依存していないため影響なし（確認済み）"
+    },
+    {
+      "file": "server.ts",
+      "lines": "L260",
+      "relevance": "initScheduleManager() は sync のまま維持（fire-and-forget 設計判断により波及なし）"
+    },
+    {
+      "file": "CLAUDE.md",
+      "lines": "L177, L180",
+      "relevance": "cmate-parser.ts と schedule-manager.ts のモジュール説明に async 化の変更を反映する必要がある"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "cmate-parser.ts と schedule-manager.ts のモジュール説明に validateCmatePath/readCmateFile の async 化と syncSchedules の async 化を反映する必要がある"
+    }
+  ],
+  "hidden_dependencies_checked": [
+    {
+      "target": "src/lib/cmate-validator.ts",
+      "result": "影響なし - cmate-parser.ts からの import なし",
+      "evidence": "import は @/config/cmate-constants からのみ"
+    },
+    {
+      "target": "server.ts",
+      "result": "影響なし - initScheduleManager() は sync のまま維持",
+      "evidence": "syncSchedules() の初期呼び出しは void (fire-and-forget) とする設計判断済み"
+    },
+    {
+      "target": "src/lib/session-cleanup.ts",
+      "result": "影響なし - cmate-parser.ts に依存していない",
+      "evidence": "schedule-manager.ts の stopAllSchedules/stopScheduleForWorktree のみ呼び出し（sync API）"
+    },
+    {
+      "target": "src/lib/resource-cleanup.ts",
+      "result": "影響なし - cmate-parser.ts に依存していない",
+      "evidence": "schedule-manager.ts の getScheduleWorktreeIds() のみ参照（sync API）"
+    }
+  ]
+}

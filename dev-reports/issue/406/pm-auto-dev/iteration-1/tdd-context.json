@@ -1,0 +1,22 @@
+{
+  "issue_number": 406,
+  "title": "perf: cmate-parserの同期I/Oを非同期化してイベントループブロックを解消",
+  "acceptance_criteria": [
+    "validateCmatePath() および readCmateFile() 内に同期ファイルI/Oが残っていないこと",
+    "readCmateFile() が CMATE.md 不存在時に null を返す動作が async 化後も維持されること（テストで検証）",
+    "スケジュールマネージャの CMATE.md 読み込みが正常に動作すること",
+    "syncSchedules() の並行実行が isSyncing ガードで防止されること",
+    "既存テストが全てパスすること"
+  ],
+  "implementation_tasks": [
+    "Task 1.1: src/lib/cmate-parser.ts の async 化 - import文変更(fs→fs/promises)、validateCmatePath()をasync化(realpathSync→await realpath)、readCmateFile()をasync化(readFileSync→await readFile)",
+    "Task 1.2: src/lib/schedule-manager.ts の async 化 - ManagerStateにisSyncing: boolean追加(初期値false)、syncSchedules()をasync化+isSyncingガード追加(try-finallyでリセット)、await readCmateFile()追加(L516)、initScheduleManager()内をvoid syncSchedules()に変更(.catchなし)、setInterval内をvoid syncSchedules().catch(err => console.error(...))に変更",
+    "Task 2.1: tests/unit/lib/cmate-parser.test.ts の async/await 対応 - テストコールバックをasync化、expect().not.toThrow()→await expect().resolves.toBe(true)、expect().toThrow()→await expect().rejects.toThrow()",
+    "Task 2.2: tests/unit/lib/schedule-manager-cleanup.test.ts のモック更新 - readCmateFile: vi.fn().mockReturnValue(null)→mockResolvedValue(null)",
+    "Task 2.3: tests/unit/lib/schedule-manager.test.ts のモック方式変更 - ファイルスコープvi.mock追加、vi.doMock→vi.mock変更、mtime cacheテスト4件をasync化",
+    "Task 3.1: CLAUDE.md のモジュール説明更新"
+  ],
+  "target_coverage": 80,
+  "design_policy_path": "dev-reports/design/issue-406-async-cmate-parser-design-policy.md",
+  "work_plan_path": "dev-reports/issue/406/work-plan.md"
+}

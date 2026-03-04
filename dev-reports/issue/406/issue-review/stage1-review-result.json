@@ -1,0 +1,115 @@
+{
+  "stage": 1,
+  "stage_name": "通常レビュー（1回目）",
+  "issue_number": 406,
+  "review_date": "2026-03-04",
+  "focus_area": "通常",
+  "iteration": 1,
+  "review_items": [
+    {
+      "id": "R1-001",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "readCmateFile() 内の readFileSync() が実装タスクと影響範囲に含まれていない",
+      "description": "Issue の実装タスクは validateCmatePath() の realpathSync() のみを非同期化対象としているが、validateCmatePath() を async 化すると、その呼び出し元である readCmateFile() (cmate-parser.ts L311-329) も async 化が必須となる。readCmateFile() 内の readFileSync(filePath, 'utf-8') (L317) も同期I/Oであり、非同期化の対象として明示すべきである。validateCmatePath() のみを async 化し readFileSync() を残すと、同一関数内に非同期と同期のI/Oが混在する不整合な実装となる。",
+      "suggestion": "実装タスクに以下を追加する: (1) readCmateFile() を async 関数に変更、(2) readFileSync() を fs.promises.readFile() に置換。影響範囲テーブルの cmate-parser.ts の変更内容を「validateCmatePath() と readCmateFile() を async 化」に更新する。",
+      "location": "## 実装タスク / ## 影響範囲"
+    },
+    {
+      "id": "R1-002",
+      "severity": "must_fix",
+      "category": "completeness",
+      "title": "syncSchedules() の async 化が実装タスクに含まれていない",
+      "description": "readCmateFile() が async になると、その唯一の呼び出し元である syncSchedules() (schedule-manager.ts L478, L516) も async 化が必要になる。syncSchedules() は現在 void 関数として定義されており、setInterval コールバック (L620-622) と initScheduleManager() (L617) から呼ばれている。setInterval 内の呼び出しは void 化が必要 (void syncSchedules()) となり、初期同期 (L617) は await syncSchedules() もしくは void syncSchedules() とする設計判断が生じる。この設計判断を含む実装タスクの明示が必要。",
+      "suggestion": "実装タスクに以下を追加する: (1) syncSchedules() を async 関数に変更、(2) setInterval 内の呼び出しを void syncSchedules() に変更、(3) initScheduleManager() 内の初期同期呼び出しの設計判断を記載（await する場合は initScheduleManager() 自体も async 化が必要）。",
+      "location": "## 実装タスク"
+    },
+    {
+      "id": "R1-003",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "受入条件のスコープが validateCmatePath() のみに限定されている",
+      "description": "現在の受入条件は「validateCmatePath() 内に同期ファイルI/Oが残っていないこと」だが、Issueの目的はスケジュールマネージャのポーリングループでのイベントループブロック解消であり、readCmateFile() の readFileSync() も同じ呼び出しパス上で同期ブロッキングを起こしている。受入条件が目的と整合していない。",
+      "suggestion": "受入条件を以下に拡充する: 「validateCmatePath() および readCmateFile() 内に同期ファイルI/Oが残っていないこと」。もしくは、意図的に readFileSync() をスコープ外とするなら、その理由を明記する。",
+      "location": "## 受入条件"
+    },
+    {
+      "id": "R1-004",
+      "severity": "should_fix",
+      "category": "scope",
+      "title": "getCmateMtime() の statSync() に対するスコープ判断が未記載",
+      "description": "schedule-manager.ts L163 の getCmateMtime() 内の statSync() も同期I/Oだが、Issue #409 の mtime キャッシュにより、2回目以降のポーリングではファイル未変更時にこの呼び出し自体がスキップされるわけではない。getCmateMtime() は毎回のポーリングで全 worktree に対して呼ばれる（L488）。ただし、statSync は realpathSync/readFileSync と比較して高速（メタデータのみ読み取り）であるため、スコープ外とすることは妥当だが、その判断理由を背景セクションに明記すべき。",
+      "suggestion": "「背景・課題」セクションに以下を追記: 「getCmateMtime() の statSync() も同期I/Oだが、メタデータのみの読み取りでありブロッキング時間が極めて短いため、本Issueのスコープ外とする」。将来の改善候補として言及してもよい。",
+      "location": "## 背景・課題"
+    },
+    {
+      "id": "R1-005",
+      "severity": "should_fix",
+      "category": "correctness",
+      "title": "行番号の不一致",
+      "description": "Issueの「背景・課題」セクションで schedule-manager.ts の行番号を L363-442 と記載しているが、現在のコードでは syncSchedules() は L478-591 に位置している。これは Issue #409 の実装後にコードが変更されたことによるズレと考えられるが、レビューや実装時に混乱を招く可能性がある。",
+      "suggestion": "行番号を現在のコードに合わせて更新する（syncSchedules(): L478-591、setInterval: L620-622）。あるいは、行番号への依存を避け関数名のみで記載する。",
+      "location": "## 背景・課題"
+    },
+    {
+      "id": "R1-006",
+      "severity": "should_fix",
+      "category": "completeness",
+      "title": "validateCmatePath() の戻り値型変更の影響が未記載",
+      "description": "validateCmatePath() は現在 boolean を返す同期関数であり、async 化すると Promise<boolean> を返すようになる。readCmateFile() 内で validateCmatePath() の戻り値を直接使用してはいないが（呼び出し後に throw しなければ true）、エクスポートされた public API であるため、外部から直接使用されるケースも考慮が必要。テストでは expect(() => validateCmatePath(...)).not.toThrow() パターンを使用しており (cmate-parser.test.ts L378)、async 化後は expect(async () => validateCmatePath(...)).rejects.toThrow() パターンに変更が必要。",
+      "suggestion": "実装タスクの「ユニットテスト更新」を具体化する: (1) validateCmatePath テストを async/await 対応に変更、(2) .toThrow() を .rejects.toThrow() に変更、(3) readCmateFile 関連のテスト（もしモックなしで呼ぶケースがあれば）の await 対応。",
+      "location": "## 実装タスク"
+    },
+    {
+      "id": "R1-007",
+      "severity": "nice_to_have",
+      "category": "completeness",
+      "title": "initScheduleManager() の async 化による呼び出し元への波及が未検討",
+      "description": "syncSchedules() を async にした場合、initScheduleManager() 内の初期同期 (L617) を await したいケースでは、initScheduleManager() 自体も async にする必要がある。initScheduleManager() は server.ts から呼ばれる（CLAUDE.md に「[S3-010] Called after await initializeWorktrees() in server.ts」と記載）。server.ts 側の変更も影響範囲に含まれる可能性がある。ただし、初期同期を await せず void syncSchedules() とするなら、initScheduleManager() は sync のまま維持できる。",
+      "suggestion": "影響範囲テーブルに server.ts を追加するか、設計判断として「initScheduleManager() は sync のまま維持し、初期同期は fire-and-forget とする」を明記する。",
+      "location": "## 影響範囲"
+    },
+    {
+      "id": "R1-008",
+      "severity": "nice_to_have",
+      "category": "clarity",
+      "title": "パフォーマンス改善の定量的な期待値が未記載",
+      "description": "Issueは「イベントループがブロックされ、他のAPIリクエストのレイテンシが増加」と記載しているが、realpathSync のブロッキング時間がどの程度か（通常1-5ms程度/呼び出し）、worktree数に対する累積ブロッキング時間の見積もりがない。改善の意義を明確にするため、定量的な情報があると実装の優先度判断に役立つ。",
+      "suggestion": "背景セクションに、想定されるworktree数（例: 10-100）での累積ブロッキング時間の概算を追記する。例: 「100 worktree の場合、realpathSync x 2 + readFileSync x 1 で推定 300-500ms のイベントループブロック」。",
+      "location": "## 背景・課題"
+    }
+  ],
+  "summary": {
+    "must_fix_count": 2,
+    "should_fix_count": 4,
+    "nice_to_have_count": 2,
+    "overall_quality": "needs_improvement"
+  },
+  "code_references": [
+    {
+      "file": "src/lib/cmate-parser.ts",
+      "lines": "L15, L80-98, L311-329",
+      "relevance": "変更対象: validateCmatePath() (L80-98) の realpathSync (L84-85)、readCmateFile() (L311-329) の readFileSync (L317)、import文 (L15)"
+    },
+    {
+      "file": "src/lib/schedule-manager.ts",
+      "lines": "L159-176, L478-591, L603-626",
+      "relevance": "呼び出し元: getCmateMtime() (L159-176) の statSync (L163)、syncSchedules() (L478-591) の readCmateFile呼び出し (L516)、initScheduleManager() (L603-626) の syncSchedules呼び出し (L617) と setInterval (L620-622)"
+    },
+    {
+      "file": "tests/unit/lib/cmate-parser.test.ts",
+      "lines": "L358-391",
+      "relevance": "validateCmatePath テスト: async 化に伴うテスト修正が必要 (L378: .not.toThrow() → await/.rejects パターン、L387: .toThrow() → .rejects.toThrow())"
+    }
+  ],
+  "doc_references": [
+    {
+      "file": "CLAUDE.md",
+      "relevance": "cmate-parser.ts と schedule-manager.ts のモジュール説明に変更内容を反映する必要がある"
+    },
+    {
+      "file": "dev-reports/design/issue-409-schedule-perf-design-policy.md",
+      "relevance": "Issue #409 設計方針書に Issue #406 との相互依存が記載されており (L552)、マージ順序の考慮が必要"
+    }
+  ]
+}

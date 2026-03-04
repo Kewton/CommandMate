@@ -1,0 +1,89 @@
+{
+  "issue_number": 406,
+  "stage": 1,
+  "stage_name": "設計原則レビュー",
+  "status": "success",
+  "design_policy_updated": true,
+  "reflected_items": {
+    "must_fix": [
+      {
+        "id": "DR1-005",
+        "item": "syncSchedules() の逐次 await 設計判断を DJ-006 として Section 3 に追加",
+        "section_updated": "Section 3 (DJ-006 追加), Section 6 (DJ-006 参照追加), Section 8 (DJ-006 参照追加)",
+        "status": "reflected"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "DR1-001",
+        "item": "DJ-002 と DJ-003 の .catch() 非対称性の設計根拠を DJ-002 実装欄に明記",
+        "section_updated": "Section 3: DJ-002",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-003",
+        "item": "schedule-manager-cleanup.test.ts の変更詳細を Section 4.3 に追加",
+        "section_updated": "Section 4.3",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-007",
+        "item": "Section 4.1 の import 文変更で 'fs' からの import が完全削除されることを明示",
+        "section_updated": "Section 4.1",
+        "status": "reflected"
+      },
+      {
+        "id": "DR1-010",
+        "item": "readCmateFile() の呼び出し元確認結果を Section 7 に追記",
+        "section_updated": "Section 7",
+        "status": "reflected"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "DR1-002",
+        "item": "validateCmatePath() の Promise<boolean> 戻り値の意義",
+        "status": "skipped",
+        "reason": "nice_to_have - 肯定的所見含む、現状の設計判断は妥当"
+      },
+      {
+        "id": "DR1-004",
+        "item": "getCmateMtime() statSync の将来的な非同期化余地",
+        "status": "skipped",
+        "reason": "nice_to_have - 現状の判断は妥当、YAGNI原則に合致"
+      },
+      {
+        "id": "DR1-006",
+        "item": "fire-and-forget パターンの共通化検討",
+        "status": "skipped",
+        "reason": "nice_to_have - スコープ外、YAGNI原則に合致"
+      },
+      {
+        "id": "DR1-008",
+        "item": "全体設計が KISS 原則に準拠",
+        "status": "skipped",
+        "reason": "nice_to_have - 肯定的所見、改善提案なし"
+      },
+      {
+        "id": "DR1-009",
+        "item": "cmate-parser.ts の SRP 維持",
+        "status": "skipped",
+        "reason": "nice_to_have - 肯定的所見、改善提案なし"
+      }
+    ]
+  },
+  "skipped": [],
+  "design_doc_path": "dev-reports/design/issue-406-async-cmate-parser-design-policy.md",
+  "sections_updated": [
+    "Section 3: 設計判断 (DJ-002 根拠追記, DJ-006 新規追加)",
+    "Section 4.1: import文変更 (確認事項追加)",
+    "Section 4.3: テスト変更 (schedule-manager-cleanup.test.ts 詳細追加)",
+    "Section 6: パフォーマンス設計 (DJ-006 参照追加)",
+    "Section 7: 影響範囲 (呼び出し元の網羅的確認 追加)",
+    "Section 8: 設計上の決定事項とトレードオフ (DJ-006 参照追加)",
+    "Section 9: 実装チェックリスト (新規追加)",
+    "Section 10: レビュー履歴 (新規追加)",
+    "Section 11: レビュー指摘事項サマリー (新規追加)"
+  ],
+  "timestamp": "2026-03-04T13:00:00Z"
+}

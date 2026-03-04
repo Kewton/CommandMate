@@ -1,0 +1,67 @@
+{
+  "stage": 2,
+  "stage_name": "指摘事項反映（1回目）",
+  "issue_number": 406,
+  "apply_date": "2026-03-04",
+  "iteration": 1,
+  "applied_findings": {
+    "must_fix": [
+      {
+        "id": "R1-001",
+        "status": "applied",
+        "change_summary": "readCmateFile() の readFileSync() を実装タスク・影響範囲・概要・提案する解決策に追加。readCmateFile() を async 関数に変更し readFileSync() を fs.promises.readFile() に置換するタスクを明記"
+      },
+      {
+        "id": "R1-002",
+        "status": "applied",
+        "change_summary": "syncSchedules() の async 化を実装タスクに追加。initScheduleManager() 内と setInterval 内の呼び出しを void syncSchedules() に変更する設計判断（fire-and-forget）を明記"
+      }
+    ],
+    "should_fix": [
+      {
+        "id": "R1-003",
+        "status": "applied",
+        "change_summary": "受入条件を「validateCmatePath() および readCmateFile() 内に同期ファイルI/Oが残っていないこと」に拡充"
+      },
+      {
+        "id": "R1-004",
+        "status": "applied",
+        "change_summary": "背景・課題セクションに getCmateMtime() の statSync() がスコープ外である理由を追記（メタデータのみの読み取りでブロッキング時間が極めて短いため）"
+      },
+      {
+        "id": "R1-005",
+        "status": "applied",
+        "change_summary": "syncSchedules() の行番号を L363-442 から L478-591 に修正"
+      },
+      {
+        "id": "R1-006",
+        "status": "applied",
+        "change_summary": "ユニットテスト更新タスクを具体化: validateCmatePath テストを async/await 対応に変更、.toThrow() を .rejects.toThrow() に変更。影響範囲テーブルにテストファイルを追加"
+      }
+    ],
+    "nice_to_have": [
+      {
+        "id": "R1-007",
+        "status": "skipped",
+        "reason": "initScheduleManager() は sync のまま維持し初期同期は fire-and-forget とする設計判断を実装タスクに明記済み（R1-002の対応に含まれる）。server.ts への波及は不要となるため、影響範囲テーブルへの追加は省略"
+      },
+      {
+        "id": "R1-008",
+        "status": "skipped",
+        "reason": "定量的なパフォーマンス見積もりは実測値なしでの推定となるため、誤解を招く可能性がある。実装後のベンチマークで確認するのが適切と判断"
+      }
+    ]
+  },
+  "applied_items": ["R1-001", "R1-002", "R1-003", "R1-004", "R1-005", "R1-006"],
+  "skipped_items": ["R1-007", "R1-008"],
+  "skip_reasons": {
+    "R1-007": "nice_to_have - R1-002の対応でfire-and-forget設計判断を明記済みのため、server.tsへの波及なし",
+    "R1-008": "nice_to_have - 実測値なしの定量見積もりは誤解を招く可能性があるため省略"
+  },
+  "update_success": true,
+  "summary": "Must Fix 2件、Should Fix 4件を反映。Nice to Have 2件はスキップ（R1-007はR1-002対応に包含、R1-008は実測値不在のため）",
+  "github_update": {
+    "status": "success",
+    "issue_url": "https://github.com/Kewton/CommandMate/issues/406"
+  }
+}
