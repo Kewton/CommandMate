@@ -43,6 +43,7 @@ import { getDbInstance } from './src/lib/db-instance';
 import { stopAllPolling } from './src/lib/response-poller';
 import { stopAllAutoYesPolling } from './src/lib/auto-yes-manager';
 import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manager';
+import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
 import { runMigrations } from './src/lib/db-migrations';
 import { getEnvByKey } from './src/lib/env';
 import { registerAndFilterRepositories, resolveRepositoryPath } from './src/lib/db-repository';
@@ -257,6 +258,9 @@ app.prepare().then(() => {
 
     // [S3-010] Initialize schedule manager AFTER worktrees are ready
     initScheduleManager();
+
+    // Issue #404: Initialize resource cleanup AFTER schedule manager
+    initResourceCleanup();
   });
 
   // Graceful shutdown with timeout
@@ -279,6 +283,9 @@ app.prepare().then(() => {
 
     // Issue #294: Stop all scheduled executions (SIGKILL fire-and-forget)
     stopAllSchedules();
+
+    // Issue #404: Stop resource cleanup timer
+    stopResourceCleanup();
 
     // Close WebSocket connections immediately (don't wait)
     closeWebSocket();

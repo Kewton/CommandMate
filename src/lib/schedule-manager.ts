@@ -669,6 +669,49 @@ export function stopAllSchedules(): void {
 }
 
 /**
+ * Stop schedules for a specific worktree.
+ * Issue #404: Used during worktree deletion to prevent resource leaks.
+ *
+ * Iterates the schedules map (O(N), N<=MAX_CONCURRENT_SCHEDULES=100),
+ * stops cron jobs for the target worktree, and removes their entries.
+ * Also removes the cmateFileCache entry for the worktree path (via DB lookup).
+ *
+ * activeProcesses are NOT killed (method (c): natural reclamation).
+ * cronJob.stop() prevents new executions; running processes finish naturally.
+ *
+ * @param worktreeId - The worktree ID whose schedules should be stopped
+ */
+export function stopScheduleForWorktree(worktreeId: string): void {
+  const manager = getManagerState();
+
+  // Stop and remove cron jobs for the target worktree
+  for (const [scheduleId, state] of manager.schedules) {
+    if (state.worktreeId === worktreeId) {
+      try {
+        state.cronJob.stop();
+      } catch {
+        // Ignore errors during cleanup
+      }
+      manager.schedules.delete(scheduleId);
+    }
+  }
+
+  // Remove cmateFileCache entry via DB lookup (worktreeId -> path)
+  try {
+    const db = getLazyDbInstance();
+    const row = db.prepare('SELECT path FROM worktrees WHERE id = ?').get(worktreeId) as { path: string } | undefined;
+    if (row?.path) {
+      manager.cmateFileCache.delete(row.path);
+    }
+  } catch (error) {
+    // DB lookup failed - schedule stop already completed above (fallback)
+    console.warn(`[schedule-manager] Failed to resolve worktree path for cache cleanup (worktreeId: ${worktreeId}):`, error);
+  }
+
+  console.log(`[schedule-manager] Stopped schedules for worktree: ${worktreeId}`);
+}
+
+/**
  * Get the current number of active schedules.
  * Useful for monitoring and testing.
  */

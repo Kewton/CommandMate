@@ -803,3 +803,46 @@ export function stopAllAutoYesPolling(): void {
   }
   autoYesPollerStates.clear();
 }
+
+// =============================================================================
+// Cleanup Functions (Issue #404: Resource leak prevention)
+// =============================================================================
+
+/**
+ * Delete the auto-yes state for a worktree.
+ * Used during worktree deletion to prevent memory leaks in the autoYesStates Map.
+ *
+ * [SEC-404-001] Validates worktreeId before deletion.
+ *
+ * @param worktreeId - Worktree identifier (must pass isValidWorktreeId)
+ * @returns true if worktreeId was valid (deletion attempted), false if invalid
+ */
+export function deleteAutoYesState(worktreeId: string): boolean {
+  if (!isValidWorktreeId(worktreeId)) {
+    return false;
+  }
+  autoYesStates.delete(worktreeId);
+  return true;
+}
+
+/**
+ * Get all worktree IDs that have auto-yes state entries.
+ * Used by periodic resource cleanup to detect orphaned entries.
+ *
+ * @internal Exported for resource-cleanup and testing purposes.
+ * @returns Array of worktree IDs present in the autoYesStates Map
+ */
+export function getAutoYesStateWorktreeIds(): string[] {
+  return Array.from(autoYesStates.keys());
+}
+
+/**
+ * Get all worktree IDs that have active auto-yes poller entries.
+ * Used by periodic resource cleanup to detect orphaned entries.
+ *
+ * @internal Exported for resource-cleanup and testing purposes.
+ * @returns Array of worktree IDs present in the autoYesPollerStates Map
+ */
+export function getAutoYesPollerWorktreeIds(): string[] {
+  return Array.from(autoYesPollerStates.keys());
+}
