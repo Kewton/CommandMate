@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-05
+
+### Added
+- Comprehensive dark mode support (Issue #424)
+  - Dark mode foundation with cyan accent migration
+  - Mobile header, tab bar, detail views, sidebar, editor components
+  - AutoYes toggle/confirm dialog, home, CMATE tabs, slash commands, navigation
+- Resource leak prevention for long-running servers (Issue #404)
+- Tmux capture cache with TTL, singleflight, and N+1 elimination (Issue #405)
+- Schedule sync performance with mtime caching and batch upsert (Issue #409)
+- Server log rotation in build-and-start.sh (Issue #403)
+
+### Changed
+- README repositioned around issue-driven AI development messaging (Issue #433)
+
+### Fixed
+- Process stop logic hardened with PID validation and graceful shutdown (Issue #401)
+- Dark mode text contrast in AutoYes confirm dialog (Issue #424)
+- Dark mode support for MobilePromptSheet
+
+### Performance
+- Async-ify CMATE parser synchronous I/O to unblock event loop (Issue #406)
+- Dynamic import for TerminalComponent and MarkdownEditor (Issue #410)
+- React memo/useCallback/useMemo to prevent unnecessary re-renders (Issue #411)
+- Suppress duplicate prompt-detector log output (Issue #402)
+- Status detector promptDetection caching (Issue #408)
+
 ## [0.3.6] - 2026-03-03
 
 ### Added
@@ -652,7 +679,8 @@ _No changes recorded._
   - `MCBD_DB_PATH` -> `CM_DB_PATH`
 - `NEXT_PUBLIC_MCBD_AUTH_TOKEN` -> `NEXT_PUBLIC_CM_AUTH_TOKEN`
 
-[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.3.6...HEAD
+[unreleased]: https://github.com/Kewton/CommandMate/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Kewton/CommandMate/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/Kewton/CommandMate/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/Kewton/CommandMate/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/Kewton/CommandMate/compare/v0.3.3...v0.3.4
