@@ -25,7 +25,7 @@ const BUTTON_STYLES = {
   /** Primary button styles */
   primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
   /** Secondary button styles */
-  secondary: 'bg-white border-2 border-gray-300 hover:bg-gray-50 text-gray-800 focus:ring-gray-500',
+  secondary: 'bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 focus:ring-gray-500',
   /** Default selected button styles */
   defaultSelected: 'bg-gray-600 text-white hover:bg-gray-700',
 } as const;
@@ -164,13 +164,13 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         style={{ transform: sheetTransform }}
-        className={`fixed bottom-0 inset-x-0 bg-white rounded-t-2xl z-50 pb-safe transform transition-transform duration-300 ${sheetAnimation}`}
+        className={`fixed bottom-0 inset-x-0 bg-white dark:bg-gray-800 rounded-t-2xl z-50 pb-safe transform transition-transform duration-300 ${sheetAnimation}`}
       >
         {/* Drag handle */}
         <div className="flex justify-center pt-3 pb-2">
           <div
             data-testid="drag-handle"
-            className="w-10 h-1 bg-gray-300 rounded-full"
+            className="w-10 h-1 bg-gray-300 dark:bg-gray-600 rounded-full"
             aria-hidden="true"
           />
         </div>
@@ -263,24 +263,24 @@ function PromptContent({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <h3 id={labelId} className="text-lg font-semibold text-gray-900">
+      <h3 id={labelId} className="text-lg font-semibold text-gray-900 dark:text-gray-100">
         {cliToolName ? t('confirmationFrom', { toolName: cliToolName }) : t('confirmationFromClaude')}
       </h3>
 
       {/* Instruction Text (context preceding the prompt) */}
       {promptData.instructionText && (
-        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-gray-600 bg-gray-50 rounded p-2 border border-gray-200">
+        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded p-2 border border-gray-200 dark:border-gray-600">
           {promptData.instructionText}
         </div>
       )}
 
       {/* Question */}
-      <p className="text-gray-700 leading-relaxed">{promptData.question}</p>
+      <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{promptData.question}</p>
 
       {/* Answering indicator */}
       {isDisabled && (
-        <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-gray-500" role="status" aria-live="polite">
-          <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" aria-hidden="true" />
+        <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400" role="status" aria-live="polite">
+          <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 dark:border-gray-600 border-t-blue-600" aria-hidden="true" />
           <span>{t('sending')}</span>
         </div>
       )}
@@ -399,8 +399,8 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
                 key={option.number}
                 className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all ${
                   isSelected
-                    ? 'bg-blue-50 border-2 border-blue-500'
-                    : 'bg-white border-2 border-gray-200 hover:border-gray-300'
+                    ? 'bg-blue-50 dark:bg-blue-900/30 border-2 border-blue-500'
+                    : 'bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
                 } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <input
@@ -413,7 +413,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
                   className="mt-1"
                 />
                 <div className="flex-1">
-                  <span className="font-medium">{option.number}. {option.label}</span>
+                  <span className="font-medium dark:text-gray-200">{option.number}. {option.label}</span>
                   {option.isDefault && (
                     <span className="ml-2 text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
                       {t('default')}
@@ -437,7 +437,7 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
             onChange={(e) => onTextInputChange(e.target.value)}
             disabled={disabled}
             placeholder={t('enterValuePlaceholder')}
-            className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50"
+            className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:border-blue-500 disabled:opacity-50"
           />
         </div>
       )}
