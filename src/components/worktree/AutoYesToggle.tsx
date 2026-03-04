@@ -99,7 +99,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   }, []);
 
   return (
-    <div className={inline ? 'flex items-center gap-2' : 'flex items-center gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200'}>
+    <div className={inline ? 'flex items-center gap-2' : 'flex items-center gap-3 px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700'}>
       {/* Toggle switch */}
       <button
         type="button"
@@ -108,8 +108,8 @@ export const AutoYesToggle = memo(function AutoYesToggle({
         aria-label="Auto Yes mode"
         disabled={toggling}
         onClick={handleToggle}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-          enabled ? 'bg-blue-600' : 'bg-gray-300'
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 ${
+          enabled ? 'bg-cyan-600' : 'bg-gray-300 dark:bg-gray-600'
         } ${toggling ? 'opacity-50' : ''}`}
       >
         <span
@@ -118,25 +118,25 @@ export const AutoYesToggle = memo(function AutoYesToggle({
           }`}
         />
       </button>
-      <span className="text-sm font-medium text-gray-700">Auto Yes</span>
+      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Auto Yes</span>
 
       {/* Active CLI tool indicator */}
       {enabled && cliToolName && (
-        <span className="text-xs text-blue-600 font-medium" aria-label="Auto Yes target">
+        <span className="text-xs text-cyan-600 dark:text-cyan-400 font-medium" aria-label="Auto Yes target">
           ({getCliToolDisplayNameSafe(cliToolName, '')})
         </span>
       )}
 
       {/* Countdown timer */}
       {enabled && timeRemaining && (
-        <span className="text-sm text-gray-500" aria-label="Time remaining">
+        <span className="text-sm text-gray-500 dark:text-gray-400" aria-label="Time remaining">
           {timeRemaining}
         </span>
       )}
 
       {/* Auto-response notification */}
       {notification && (
-        <span className="text-sm text-green-600 animate-pulse">
+        <span className="text-sm text-green-600 dark:text-green-400 animate-pulse">
           {notification}
         </span>
       )}
