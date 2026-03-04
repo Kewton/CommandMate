@@ -101,6 +101,31 @@ describe('Dark Mode Foundation (Issue #424)', () => {
       expect(cssContent).toContain('dark:text-cyan-300');
     });
 
+    it('should have dark: variants for .badge-success', () => {
+      expect(cssContent).toContain('dark:bg-green-900');
+      expect(cssContent).toContain('dark:text-green-300');
+    });
+
+    it('should have dark: variants for .badge-warning', () => {
+      expect(cssContent).toContain('dark:bg-yellow-900');
+      expect(cssContent).toContain('dark:text-yellow-300');
+    });
+
+    it('should have dark: variants for .badge-error', () => {
+      expect(cssContent).toContain('dark:bg-red-900');
+      expect(cssContent).toContain('dark:text-red-300');
+    });
+
+    it('should have dark: variants for .badge-gray', () => {
+      expect(cssContent).toContain('dark:bg-gray-800');
+      expect(cssContent).toContain('dark:text-gray-300');
+    });
+
+    it('should have dark: variants for inline code in .prose', () => {
+      expect(cssContent).toContain('dark:bg-gray-800');
+      expect(cssContent).toContain('dark:text-gray-200');
+    });
+
     it('should have cyan colors for .input focus ring', () => {
       expect(cssContent).toContain('focus:ring-cyan-500');
       expect(cssContent).toContain('focus:border-cyan-500');

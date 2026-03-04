@@ -47,7 +47,7 @@
 
   /* Inline code styling (not in pre blocks) */
   .prose :not(pre) > code {
-    @apply bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono;
+    @apply bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono;
   }
 
   .prose :not(pre) > code::before,
@@ -95,15 +95,15 @@
   }
 
   .badge-success {
-    @apply bg-green-100 text-green-800;
+    @apply bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300;
   }
 
   .badge-warning {
-    @apply bg-yellow-100 text-yellow-800;
+    @apply bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300;
   }
 
   .badge-error {
-    @apply bg-red-100 text-red-800;
+    @apply bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-300;
   }
 
   .badge-info {
@@ -111,7 +111,7 @@
   }
 
   .badge-gray {
-    @apply bg-gray-100 text-gray-800;
+    @apply bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300;
   }
 
   /* Input styles */
