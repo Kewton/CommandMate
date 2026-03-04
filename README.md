@@ -9,31 +9,58 @@
 
 [English](./README.md) | [日本語](./docs/ja/README.md)
 
+<!-- TODO: Upload docs/images/demo-desktop.mp4 via GitHub UI and replace this URL -->
 <p align="center">
-  <img src="./docs/images/demo-mobile.gif" alt="CommandMate mobile demo" width="300">
+  <video src="./docs/images/demo-desktop.mp4" width="600" controls></video>
 </p>
 
-> **Claude Code keeps coding while you're away. Check in from your phone.**
+> **Move issues forward, not terminal tabs.**
 
-Not a "remote control" — a **mobile dev cockpit**.
+CommandMate is an IDE for issue-driven AI development.
 
 ```bash
 npx commandmate
 ```
 
-**From install to mobile monitoring in 60 seconds.** macOS / Linux · Node.js v20+ · npm · git · tmux · openssl
+**From install to your first session in 60 seconds.** macOS / Linux · Node.js v20+ · npm · git · tmux
 
 ---
 
-AI writes code for you — but you're stuck watching a terminal, afraid to walk away.
-Close the lid and every session dies.
-**CommandMate keeps it alive, and puts the controls on your phone.**
+Instead of jumping straight into implementation, you define an issue, refine it with AI, review the direction, generate a plan, and then let your coding agent execute. CommandMate helps you run multiple issues in parallel with Git worktrees, choose the right agent for each issue, and keep work moving even when you leave your desk.
 
-Of course, it works great on desktop too — the two-column layout gives you a full overview of all sessions and worktrees at a glance.
+If your workflow is shifting from "writing code yourself" to "defining issues, reviewing direction, and accepting outcomes," CommandMate can become the center of your development workflow.
 
+<!-- TODO: Upload docs/images/demo-mobile.mp4 via GitHub UI and replace this URL -->
 <p align="center">
-  <img src="./docs/images/demo-desktop.gif" alt="CommandMate desktop demo" width="600">
+  <video src="./docs/images/demo-mobile.mp4" width="300" controls></video>
 </p>
+
+Works on desktop and mobile — monitor and steer sessions from any browser, including your phone.
+
+---
+
+## Issue-Driven Development
+
+CommandMate recommends the following development method. By adopting this process, humans can focus on defining issues and verifying final outputs.
+
+```
+Define Issue → Refine with AI → Review Direction → Generate Plan → Agent Executes
+```
+
+| Step | Command | What happens |
+|------|---------|-------------|
+| Refine the issue | `/issue-enhance` | AI asks clarifying questions and fills in missing details |
+| Review the issue | `/multi-stage-issue-review` | Multi-stage review (consistency, impact scope) with automated fixes |
+| Review the design | `/multi-stage-design-review` | 4-stage review (general → consistency → impact → security) |
+| Plan the work | `/work-plan` | Generates a task breakdown with dependencies |
+| Implement via TDD | `/tdd-impl` | Red-Green-Refactor cycle, automated |
+| Verify acceptance | `/acceptance-test` | Validates all acceptance criteria from the issue |
+| Create the PR | `/create-pr` | Auto-generates title, description, and labels |
+| Dev (full) | `/pm-auto-dev` | TDD implementation → acceptance test → refactoring → progress report |
+| Issue → Dev (full) | `/pm-auto-issue2dev` | Issue review → design review → work plan → TDD → acceptance test → refactoring → progress report |
+| Design → Dev (full) | `/pm-auto-design2dev` | Design review → work plan → TDD → acceptance test → refactoring → progress report |
+
+For details, see the [issues](https://github.com/Kewton/CommandMate/issues), [dev reports](./dev-reports/issue/), and [workflow examples](./docs/en/user-guide/workflow-examples.md) in the CommandMate repository.
 
 ---
 
@@ -41,14 +68,15 @@ Of course, it works great on desktop too — the two-column layout gives you a f
 
 | Feature | What it does | Why it matters |
 |---------|-------------|----------------|
-| **Auto Yes Mode** | Agent runs without stopping for confirmations | No babysitting — Claude Code keeps working while you're away |
-| **Git Worktree Sessions** | One session per worktree, parallel execution | Multiple tasks progress simultaneously |
-| **Mobile Web UI** | Full session control from any browser | Monitor and steer from your phone |
-| **File Viewer** | Browse worktree files from the browser | Review code changes without touching your PC |
-| **Markdown Editor** | Edit Markdown files in the browser | Update AI instructions on the go |
+| **Issue-Driven Commands** | Slash commands that follow the define → plan → execute cycle | Development stays structured around issues, not ad-hoc prompts |
+| **Git Worktree Sessions** | One session per worktree, parallel execution | Multiple issues progress simultaneously without interference |
+| **Multi-Agent Support** | Choose Claude Code, Codex, Gemini, or local models per issue | Pick the right agent for each task |
+| **Auto Yes Mode** | Agent runs without stopping for confirmations | No babysitting — the agent keeps working while you're away |
+| **Web UI (Desktop & Mobile)** | Full session control from any browser | Monitor and steer from your desk or your phone |
+| **File Viewer & Markdown Editor** | Browse and edit worktree files in the browser | Review changes and update AI instructions without opening an IDE |
 | **Screenshot Instructions** | Attach images to your prompts | Snap a bug → "Fix this" — the agent sees the screenshot |
+| **Scheduled Execution** | Cron-based auto-run via CMATE.md | Daily reviews, nightly tests — agents work on a schedule |
 | **Token Authentication** | SHA-256 hashed token + HTTPS + rate limiting | Secure remote access — no credentials leaked, brute-force protected |
-| **Scheduled Execution** | Cron-based auto-run via CMATE.md | Daily reviews, nightly tests — Claude Code works on a schedule |
 
 ---
 
@@ -56,48 +84,20 @@ Of course, it works great on desktop too — the two-column layout gives you a f
 
 | Scenario | How CommandMate helps |
 |----------|----------------------|
-| **Couch coding** | Start a task on your PC, then monitor and steer from the sofa |
-| **Commute review** | Review AI-generated code changes on the train |
-| **Overnight runs** | Let Claude Code work all night — check progress from bed |
+| **Parallel issue development** | Run multiple issues in separate worktrees, each with its own agent session |
+| **Issue refinement** | Define an issue, let AI fill gaps, review before any code is written |
+| **Overnight execution** | Queue issues with scheduled execution — check progress in the morning |
+| **Mobile review** | Review AI-generated changes and steer direction from your phone |
 | **Visual bug fix** | Snap a UI bug on your phone, send it with "Fix this" |
-| **Parallel tasks** | Run multiple worktree sessions, manage them all from one dashboard |
-
----
-
-## Comparison
-
-| Feature | CommandMate | Remote Control (Official) | Happy Coder | claude-squad | Omnara |
-|---------|:-----------:|:------------------------:|:-----------:|:------------:|:------:|
-| Auto Yes Mode | Yes | No | No | Yes (TUI only) | No |
-| Git Worktree Management | Yes | No | No | Yes (TUI only) | No |
-| Parallel Sessions | Yes | **No (1 only)** | Yes | Yes | No |
-| Mobile Web UI | Yes | Yes (claude.ai) | Yes | **No** | Yes |
-| File Viewer | Yes | No | No | No | No |
-| Markdown Editor | Yes | No | No | No | No |
-| Screenshot Instructions | Yes | No | No | Not possible | No |
-| Scheduled Execution | Yes | No | No | No | No |
-| Survives Laptop Close | Yes (daemon) | **No (terminal must stay open)** | Yes | Yes | Yes |
-| Token Authentication | Yes | N/A (Anthropic account) | N/A (app) | No | N/A (cloud) |
-| Free / OSS | Yes | Requires Pro/Max | Free + Paid | Yes | $20/mo |
-| Runs 100% Locally | Yes | Via Anthropic API | Server-routed | Yes | Cloud fallback |
 
 ---
 
 ## Screenshots
 
-### Desktop
-
-![Desktop view](./docs/images/screenshot-desktop.png)
-
-### Mobile
-
-| Top Page | Worktree (History) | Worktree (Terminal) |
-|----------|-------------------|-------------------|
-| ![Mobile view](./docs/images/screenshot-mobile.png) | ![Mobile - History](./docs/images/screenshot-worktree-mobile.png) | ![Mobile - Terminal](./docs/images/screenshot-worktree-mobile-terminal.png) |
-
-### Worktree Detail (Desktop)
-
-![Desktop - Worktree detail](./docs/images/screenshot-worktree-desktop.png)
+<!-- TODO: Upload docs/images/demo-desktop.mp4 via GitHub UI and replace this URL -->
+<p align="center">
+  <video src="./docs/images/demo-desktop.mp4" width="600" controls></video>
+</p>
 
 ---
 
@@ -297,6 +297,28 @@ npm start
 ```
 
 > **Note**: `./scripts/*` scripts are only available in the development environment. For global installs (`npm install -g`), use the `commandmate` CLI.
+
+</details>
+
+---
+
+<details>
+<summary><strong>Comparison</strong></summary>
+
+| Feature | CommandMate | Remote Control (Official) | Happy Coder | claude-squad | Omnara |
+|---------|:-----------:|:------------------------:|:-----------:|:------------:|:------:|
+| Auto Yes Mode | Yes | No | No | Yes (TUI only) | No |
+| Git Worktree Management | Yes | No | No | Yes (TUI only) | No |
+| Parallel Sessions | Yes | **No (1 only)** | Yes | Yes | No |
+| Mobile Web UI | Yes | Yes (claude.ai) | Yes | **No** | Yes |
+| File Viewer | Yes | No | No | No | No |
+| Markdown Editor | Yes | No | No | No | No |
+| Screenshot Instructions | Yes | No | No | Not possible | No |
+| Scheduled Execution | Yes | No | No | No | No |
+| Survives Laptop Close | Yes (daemon) | **No (terminal must stay open)** | Yes | Yes | Yes |
+| Token Authentication | Yes | N/A (Anthropic account) | N/A (app) | No | N/A (cloud) |
+| Free / OSS | Yes | Requires Pro/Max | Free + Paid | Yes | $20/mo |
+| Runs 100% Locally | Yes | Via Anthropic API | Server-routed | Yes | Cloud fallback |
 
 </details>
 

@@ -9,31 +9,58 @@
 
 [English](../../README.md) | [日本語](./README.md)
 
+<!-- TODO: Upload docs/images/demo-desktop.mp4 via GitHub UI and replace this URL -->
 <p align="center">
-  <img src="../../docs/images/demo-mobile.gif" alt="CommandMate モバイルデモ" width="300">
+  <video src="../../docs/images/demo-desktop.mp4" width="600" controls></video>
 </p>
 
-> **PC を閉じても Claude Code は止まらない。スマホから確認して、方向を決める。**
+> **ターミナルをさばくな。Issue を前に進めよう。**
 
-「リモコン」ではなく、**モバイル開発コックピット**。
+CommandMate は、Issue ドリブン AI 開発のための IDE です。
 
 ```bash
 npx commandmate
 ```
 
-**インストールからモバイル監視まで 60 秒。** macOS / Linux · Node.js v20+ · npm · git · tmux · openssl
+**インストールから最初のセッションまで 60 秒。** macOS / Linux · Node.js v20+ · npm · git · tmux · openssl
 
 ---
 
-AI がコードを書いてくれる — なのに、ターミナルを見つめたまま離れられない。
-蓋を閉じたら全セッションが死ぬ。
-**CommandMate がセッションを生かし続け、操縦桿をスマホに渡す。**
+いきなり実装に入るのではなく、Issue を定義し、AI に補強させ、人間が方向性をレビューし、計画を作ってから実装を任せる。CommandMate は、その流れを Git worktree で安全に並列化し、Issue ごとに適切なエージェントを選び、席を離れている間も開発を止めずに進められるようにします。
 
-もちろんデスクトップでも快適に使えます。2カラムレイアウトで全セッション・全ワークツリーを一望できます。
+「自分でコードを書く」より「Issue を定義し、方向を確認し、受け入れる」時間の方が長くなってきたなら、CommandMate は開発の中心になれます。
 
+<!-- TODO: Upload docs/images/demo-mobile.mp4 via GitHub UI and replace this URL -->
 <p align="center">
-  <img src="../../docs/images/demo-desktop.gif" alt="CommandMate デスクトップデモ" width="600">
+  <video src="../../docs/images/demo-mobile.mp4" width="300" controls></video>
 </p>
+
+デスクトップでもモバイルでも使えます。あらゆるブラウザからセッションを監視・操作できます。
+
+---
+
+## イシュードリブン開発
+
+CommandMate では下記の開発メソッドを推奨します。この開発プロセスを導入することで、人間は Issue を考えることと最終アウトプットの検証に専念できるようになります。
+
+```
+Issue 定義 → AI で補強 → 方向性レビュー → 計画生成 → エージェントが実行
+```
+
+| ステップ | コマンド | 実行内容 |
+|---------|---------|---------|
+| Issue を補強 | `/issue-enhance` | AI が不足情報を質問し、Issue を補完 |
+| Issue レビュー | `/multi-stage-issue-review` | 多段階レビュー（整合性・影響範囲）と指摘の自動対応 |
+| 設計レビュー | `/multi-stage-design-review` | 4 段階レビュー（通常 → 整合性 → 影響分析 → セキュリティ） |
+| 作業計画 | `/work-plan` | タスク分割と依存関係を生成 |
+| TDD 実装 | `/tdd-impl` | Red-Green-Refactor サイクルを自動実行 |
+| 受入テスト | `/acceptance-test` | Issue の受入基準を検証 |
+| PR 作成 | `/create-pr` | タイトル・説明・ラベルを自動生成 |
+| 開発（一括） | `/pm-auto-dev` | TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
+| Issue → 実装（一括） | `/pm-auto-issue2dev` | Issue レビュー → 設計レビュー → 作業計画 → TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
+| 設計 → 実装（一括） | `/pm-auto-design2dev` | 設計レビュー → 作業計画 → TDD 実装 → 受入テスト → リファクタリング → 進捗レポート |
+
+詳細は CommandMate リポジトリの [Issues](https://github.com/Kewton/CommandMate/issues)、[開発レポート](../../dev-reports/issue/)、[ワークフロー例](../user-guide/workflow-examples.md) を参照してください。
 
 ---
 
@@ -41,14 +68,15 @@ AI がコードを書いてくれる — なのに、ターミナルを見つめ
 
 | 機能 | できること | なぜ重要か |
 |------|-----------|-----------|
-| **Auto Yes モード** | 確認なしでエージェントが動き続ける | 放置しても Claude Code が止まらない |
-| **Git Worktree セッション** | worktree ごとに独立したセッション、並列実行 | 複数タスクが同時に進む |
-| **モバイル Web UI** | あらゆるブラウザからセッションを操作 | スマホから監視・指示が可能 |
-| **ファイルビューワ** | ブラウザからワークツリー内のファイルを閲覧 | PC を開かずにコード変更を確認 |
-| **Markdown エディタ** | ブラウザから Markdown ファイルを編集 | 外出先から AI への指示を更新 |
+| **Issue ドリブンコマンド** | 定義 → 計画 → 実行のサイクルに沿ったスラッシュコマンド | 場当たり的なプロンプトではなく、Issue を軸に開発が進む |
+| **Git Worktree セッション** | worktree ごとに独立したセッション、並列実行 | 複数の Issue が干渉なく同時に進む |
+| **マルチエージェント対応** | Issue ごとに Claude Code、Codex、Gemini、ローカルモデルを選択 | タスクに最適なエージェントを使い分け |
+| **Auto Yes モード** | 確認なしでエージェントが動き続ける | 放置しても止まらない |
+| **Web UI（デスクトップ & モバイル）** | あらゆるブラウザからセッションを操作 | デスクからでもスマホからでも監視・指示が可能 |
+| **ファイルビューワ & Markdown エディタ** | ブラウザからファイルの閲覧・編集 | IDE を開かずにコード確認や AI への指示更新 |
 | **スクリーンショット指示** | プロンプトに画像を添付 | バグ画面を撮影 →「これ直して」— エージェントが画像を認識 |
+| **スケジュール実行** | CMATE.md に cron 式を定義して自動実行 | 毎朝レビュー、毎晩テスト — エージェントが定期的に働く |
 | **トークン認証** | SHA-256 ハッシュ + HTTPS + レート制限 | 安全なリモートアクセス — 認証情報の漏洩なし、総当たり攻撃を防止 |
-| **スケジュール実行** | CMATE.md に cron 式を定義して自動実行 | 毎朝レビュー、毎晩テスト — Claude Code が定期的に働く |
 
 ---
 
@@ -56,48 +84,20 @@ AI がコードを書いてくれる — なのに、ターミナルを見つめ
 
 | シナリオ | CommandMate でできること |
 |----------|------------------------|
-| **ソファで開発** | PC でタスクを開始し、ソファからスマホで監視・指示 |
-| **通勤中レビュー** | 電車の中で AI が生成したコード変更をレビュー |
-| **夜間自律実行** | Claude Code を一晩稼働させ、寝室から進捗確認 |
+| **Issue 並列開発** | 複数の Issue を別々の worktree で同時に進行、各セッションに専用エージェント |
+| **Issue の精緻化** | Issue を定義し、AI が不足を補い、コードを書く前に方向性を確認 |
+| **夜間自律実行** | スケジュール実行で Issue をキュー — 朝に進捗を確認 |
+| **モバイルレビュー** | AI が生成した変更をスマホから確認・方向修正 |
 | **ビジュアルバグ修正** | スマホで UI バグを撮影 →「これ直して」で送信 |
-| **並列タスク管理** | 複数の worktree セッションを 1 つのダッシュボードで管理 |
-
----
-
-## 競合比較
-
-| 機能 | CommandMate | Remote Control（公式） | Happy Coder | claude-squad | Omnara |
-|------|:-----------:|:---------------------:|:-----------:|:------------:|:------:|
-| Auto Yes モード | あり | なし | なし | あり（TUI のみ） | なし |
-| Git Worktree 管理 | あり | なし | なし | あり（TUI のみ） | なし |
-| 並列セッション | あり | **なし（1つのみ）** | あり | あり | なし |
-| モバイル Web UI | あり | あり（claude.ai） | あり | **なし** | あり |
-| ファイルビューワ | あり | なし | なし | なし | なし |
-| Markdown エディタ | あり | なし | なし | なし | なし |
-| スクリーンショット指示 | あり | なし | なし | 不可能 | なし |
-| スケジュール実行 | あり | なし | なし | なし | なし |
-| PC を閉じても継続 | あり（デーモン） | **なし（ターミナル必須）** | あり | あり | あり |
-| トークン認証 | あり | N/A（Anthropic アカウント） | N/A（アプリ） | なし | N/A（クラウド） |
-| 無料 / OSS | あり | Pro/Max 必須 | 無料+有料 | あり | $20/月 |
-| 完全ローカル実行 | あり | Anthropic API 経由 | サーバー経由 | あり | クラウドフォールバック |
 
 ---
 
 ## スクリーンショット
 
-### デスクトップ
-
-![PC表示](../../docs/images/screenshot-desktop.png)
-
-### モバイル
-
-| トップ画面 | ワークツリー（History） | ワークツリー（Terminal） |
-|-----------|----------------------|------------------------|
-| ![スマホ表示](../../docs/images/screenshot-mobile.png) | ![スマホ - History](../../docs/images/screenshot-worktree-mobile.png) | ![スマホ - Terminal](../../docs/images/screenshot-worktree-mobile-terminal.png) |
-
-### ワークツリー詳細（デスクトップ）
-
-![PC - ワークツリー詳細](../../docs/images/screenshot-worktree-desktop.png)
+<!-- TODO: Upload docs/images/demo-desktop.mp4 via GitHub UI and replace this URL -->
+<p align="center">
+  <video src="../../docs/images/demo-desktop.mp4" width="600" controls></video>
+</p>
 
 ---
 
@@ -297,6 +297,28 @@ npm start
 ```
 
 > **Note**: `./scripts/*` スクリプトは開発環境でのみ使用可能です。グローバルインストール（`npm install -g`）では `commandmate` CLI を使用してください。
+
+</details>
+
+---
+
+<details>
+<summary><strong>競合比較</strong></summary>
+
+| 機能 | CommandMate | Remote Control（公式） | Happy Coder | claude-squad | Omnara |
+|------|:-----------:|:---------------------:|:-----------:|:------------:|:------:|
+| Auto Yes モード | あり | なし | なし | あり（TUI のみ） | なし |
+| Git Worktree 管理 | あり | なし | なし | あり（TUI のみ） | なし |
+| 並列セッション | あり | **なし（1つのみ）** | あり | あり | なし |
+| モバイル Web UI | あり | あり（claude.ai） | あり | **なし** | あり |
+| ファイルビューワ | あり | なし | なし | なし | なし |
+| Markdown エディタ | あり | なし | なし | なし | なし |
+| スクリーンショット指示 | あり | なし | なし | 不可能 | なし |
+| スケジュール実行 | あり | なし | なし | なし | なし |
+| PC を閉じても継続 | あり（デーモン） | **なし（ターミナル必須）** | あり | あり | あり |
+| トークン認証 | あり | N/A（Anthropic アカウント） | N/A（アプリ） | なし | N/A（クラウド） |
+| 無料 / OSS | あり | Pro/Max 必須 | 無料+有料 | あり | $20/月 |
+| 完全ローカル実行 | あり | Anthropic API 経由 | サーバー経由 | あり | クラウドフォールバック |
 
 </details>
 

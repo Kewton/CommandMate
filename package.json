@@ -1,15 +1,16 @@
 {
   "name": "commandmate",
   "version": "0.3.6",
-  "description": "Git worktree management with Claude CLI and tmux sessions",
+  "description": "IDE for issue-driven AI development — define, plan, and let coding agents execute across Git worktrees",
   "keywords": [
     "claude-code",
     "codex-cli",
-    "terminal",
+    "issue-driven-development",
+    "ai-coding",
+    "git-worktree",
+    "coding-agent",
     "session-manager",
     "tmux",
-    "git-worktree",
-    "ai-coding",
     "cli",
     "developer-tools"
   ],
